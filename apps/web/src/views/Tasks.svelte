@@ -2,6 +2,7 @@
   import { api, type RunSummary, type VerdictView } from '../lib/api.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
+  import { PIPELINE_COLUMNS as COLUMNS, stageOf } from '../lib/pipeline.ts'
   import RunLog from '../components/RunLog.svelte'
 
   /**
@@ -27,6 +28,8 @@
     blocked: '受阻',
     cancelled: '已取消',
   }
+
+  $: staged = visible.map((issue) => ({ issue, info: stageOf(issue.id, $runs) }))
 
   const VIEW_KEY = 'alpha-helper.issue-view'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
@@ -211,7 +214,10 @@
   <div class="view-head">
     <div>
       <h2>任务清单</h2>
-      <p>点任意一条看它的执行记录与实时输出。</p>
+      <p>
+        按<strong>实际进行到哪一步</strong>分列——不是按人工维护的状态字段，
+        而是从执行记录推出来的事实。点任意一条看它的执行记录与实时输出。
+      </p>
     </div>
     <div style="display:flex;gap:var(--sp-2)">
       <button type="button" class="ghost" class:active={mode === 'list'} onclick={() => setMode('list')}>
@@ -242,20 +248,35 @@
       {filter ? '换个关键词试试。' : '去「新建任务」建一个，它会立刻派给 agent。'}
     </div>
   {:else if mode === 'board'}
-    <div class="board">
-      {#each STATUSES as status (status)}
-        {@const items = visible.filter((i) => i.status === status)}
+    <div class="board board-3">
+      {#each COLUMNS as col (col.id)}
+        {@const items = staged.filter((x) => x.info.stage === col.id)}
         <div class="column">
-          <h4>{LABELS[status]} <span class="faint">{items.length}</span></h4>
-          {#each items as issue (issue.id)}
+          <h4>
+            <span>{col.title} <span class="faint">{items.length}</span></span>
+            <span class="col-hint">{col.hint}</span>
+          </h4>
+
+          {#if items.length === 0}
+            <p class="col-empty faint small">（空）</p>
+          {/if}
+
+          {#each items as { issue, info } (issue.id)}
             <button type="button" class="card" onclick={() => selectedIssueId.set(issue.id)}>
               <span class="card-title">{issue.title}</span>
-              <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+              <span class="card-meta">
+                <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+                <span class="faint small">{info.detail}</span>
+              </span>
+              {#if info.warning}
+                <span class="card-warning">{info.warning}</span>
+              {/if}
             </button>
           {/each}
         </div>
       {/each}
     </div>
+
   {:else}
     <div class="table-wrap">
       <table>
@@ -278,6 +299,52 @@
 {/if}
 
 <style>
+  /* ── 三列流水线 ── */
+  .board-3 {
+    /* 固定三列（而不是 auto-fit）：三列就是流水线的三个阶段，
+       少一列会让人以为那一阶段不存在 */
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-4);
+  }
+
+  .col-hint {
+    display: block;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    margin-top: 2px;
+  }
+
+  .column h4 {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .col-empty {
+    padding: var(--sp-3) var(--sp-2);
+    margin: 0;
+  }
+
+  .card-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sp-2);
+  }
+
+  /* 需要留意的情况用一条左侧色条，而不是整块变红——
+     整块变红会让"有一处小问题"看起来像"这张卡坏了" */
+  .card-warning {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--warn);
+    border-left: 2px solid var(--warn);
+    padding-left: var(--sp-2);
+    margin-top: var(--sp-1);
+  }
+
   /* ── 看板 ── */
   .board {
     display: grid;
