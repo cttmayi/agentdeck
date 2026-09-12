@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readdir, rename, rmdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Run, SubjectRef } from '@alpha-helper/protocol'
 
@@ -139,36 +140,154 @@ export async function ensureWorkDir(path: string): Promise<void> {
 }
 
 /**
- * 默认的工作区根目录。
+ * 默认的工作区根目录：**家目录下一个可见的 `alpha-helper-workspace/`**。
  *
  * ══════════════════════════════════════════════════════════════════
- * 这条规则改过一次，改的原因是"它会跑到应用外面去"
+ * 这条规则改过两次，两次都是"位置不对"，但不对的方式不同
  * ══════════════════════════════════════════════════════════════════
  *
- * 原来的规则是数据目录的**同级**（`<dataDir>/../work`）。默认数据目录是
- * `~/.alpha-helper/data`，于是得到 `~/.alpha-helper/work`——看起来挺好。
- *
- * 但那个"挺好"完全依赖数据目录**恰好叫 `data`** 这个巧合。换成别的就出事：
+ * 最初是数据目录的**同级**（`<dataDir>/../work`）。默认下得到
+ * `~/.alpha-helper/work`，看着挺好——但那个"挺好"完全依赖数据目录恰好叫
+ * `data` 这个巧合。换成别的就出事：
  *
  *   --data-dir /tmp/x        ⇒ /tmp/work          ← 跑到 /tmp 根上
  *   --data-dir .cache/dev/d  ⇒ .cache/dev/work    ← 跑到缓存目录里
  *
- * 也就是说：**`--data-dir` 一旦不是默认值，产出就会落到应用命名空间之外。**
- * 使用者看到 `.cache/dev/work/issue-…` 会问"这为什么在缓存目录里"——
- * 而答案是"因为我们按你的数据目录的**上一级**去放了"。
+ * 于是第二版改成**数据目录之内**（`<dataDir>/work`）。这修掉了"跑到应用
+ * 命名空间之外"，但代价是工作目录变成了 `<dataDir>/work`，默认下就是
+ * `~/.alpha-helper/data/work/`——**藏在一个点开头的目录里，还埋在 data 下面两层**。
  *
- * 现在改成**数据目录之内**（`<dataDir>/work`）：数据目录成为这个应用
- * **唯一的根**。`--data-dir` 一给出，所有产物的位置就都确定了，不会有一
- * 部分跑到它外面去。默认下就是 `~/.alpha-helper/data/work`——仍然在
- * `.alpha-helper/` 里面。
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么"可见"是硬要求，不是审美问题
+ * ══════════════════════════════════════════════════════════════════
  *
- * 想把它放到别处（比如单独挂一块盘）用 `--work-root` 显式指定。
+ * 数据目录装的是**程序内部状态**（SQLite、锁、blob 日志），没人需要进去看，
+ * 藏起来是对的。但工作目录装的是 **agent 真正的产出**——它写的文件、
+ * 它跑出来的结果。使用者要能直接用 Finder 打开、能在终端里 `cd` 进去、
+ * 能把它拖到编辑器里。
+ *
+ * 一个 `~/.alpha-helper/data/work/issue-01M2…/` 满足不了这三件事：
+ * 点开头 ⇒ Finder 默认不显示；`data/work` 两层 ⇒ 得先知道有这么个约定。
+ * **产出放在一个使用者找不到的地方，等于没有产出。**
+ *
+ * 所以：数据目录继续隐藏，工作目录**固定在家目录下的可见目录**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么不从 `--data-dir` 推导了
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 第二版之所以能从 dataDir 推导，是因为它要求"所有产物都在数据目录里"。
+ * 现在工作目录**按定义就在外面**，推导这个动作本身就没有依据了——硬要推
+ * 只会再推出一个"取决于 dataDir 恰好长什么样"的巧合。
+ *
+ * 于是规则变成：**默认是一个固定路径**，与任何选项都无关；要放别处
+ * （单独挂一块盘、放进某个项目里）用 `--work-root` 显式指定。
+ *
+ * ⚠️ 测试必须显式传 `workRoot`（见 testWorkRoot）——否则跑一次测试就会在
+ *    使用者的家目录里造出一堆工作目录。
  */
-export function defaultWorkRoot(dataDir: string): string {
+export function defaultWorkRoot(): string {
+  return join(homedir(), 'alpha-helper-workspace')
+}
+
+/**
+ * 数据目录之内的 `work/`——**自洽的兜底**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 它和 `defaultWorkRoot()` 是两个层次的东西，不要混
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `defaultWorkRoot()` 回答"**人**运行 alpha-helper 时工作目录在哪"——那是
+ * 一条**面向使用者的产品决定**，所以它在 CLI 那一层。
+ *
+ * 这个函数回答的是"**调用 `startDaemon` 的人没给目录时**用什么"——它必须
+ * 是自洽的：只用调用者自己给的 `dataDir`，**绝不碰家目录**。
+ *
+ * 为什么这个区分很重要：测试用的是一次性的临时数据目录。如果核心的兜底是
+ * 家目录下的固定路径，那么任何一处忘了传 `workRoot` 的测试都会在使用者的
+ * 家目录里造出目录——**测试污染真实环境**，而且只有哪天有人真的去 `ls`
+ * 才会发现。让兜底待在 `dataDir` 之内，这类事故在结构上就不可能发生。
+ */
+export function fallbackWorkRoot(dataDir: string): string {
   return join(dataDir, 'work')
 }
 
-/** 供界面显示：这个 run 的目录是谁选的。 */
-export function describeWorkDirOrigin(run: Pick<Run, 'workDir'>): string {
-  return run.workDir ?? '（尚未分配）'
+/**
+ * 一次性把**旧位置**的工作目录搬到新位置。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要迁移：目录是"算出来"的，不是"记下来"的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 自动目录的路径由 `<workRoot>/<subjectType>-<subjectId>` **推导**而来，
+ * 而不是存在 run 记录里查出来的（这是 D27 刻意的设计：同一个任务的重试
+ * 因此能落回同一个目录，看到上次留下的文件）。
+ *
+ * 好处是重试天然"接着做"；代价是**根目录一改，所有旧任务的目录就都换了地方**——
+ * 重试会得到一个全新的空目录，看起来像"上次的产出丢了"。
+ *
+ * 所以改名这件事必须连带把旧目录搬过去，否则就是一次静默的数据丢失。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 只在**完全安全**的情况下搬
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 三个条件缺一不可，任何一个不满足就原样不动：
+ *
+ *   - 新根不存在，或者是个空目录（**绝不覆盖使用者已经放进去的东西**——
+ *     那可能正是他手动指定的工作区）；
+ *   - 旧根存在且非空（没东西可搬就不搬，也免得白建一个新目录）；
+ *   - `rename` 成功（同盘是原子的；跨盘会 EXDEV，此时只警告、不删源）。
+ *
+ * 用 `rename` 而不是递归复制 + 删除：复制过程中断电会留下一个半成品，
+ * 而 `rename` 要么完成要么没发生。
+ */
+export async function migrateLegacyWorkRoot(input: {
+  legacyRoot: string
+  workRoot: string
+  onInfo?: (message: string) => void
+  onWarn?: (message: string) => void
+}): Promise<'moved' | 'skipped' | 'failed'> {
+  const info = input.onInfo ?? ((): void => {})
+  const warn = input.onWarn ?? ((): void => {})
+  const { legacyRoot, workRoot } = input
+
+  // 同一个目录（或者新根就在旧根里面）就别动——搬了等于把它挪进自己
+  if (legacyRoot === workRoot || workRoot.startsWith(`${legacyRoot}/`)) return 'skipped'
+
+  let legacyEntries: string[]
+  try {
+    legacyEntries = await readdir(legacyRoot)
+  } catch {
+    return 'skipped' // 旧根不存在：全新安装，没什么可搬
+  }
+  if (legacyEntries.length === 0) return 'skipped'
+
+  const targetEntries = await readdir(workRoot).catch(() => null)
+  if (targetEntries !== null && targetEntries.length > 0) {
+    // 新根已经有东西了：那是使用者的地盘，什么都不碰
+    warn(
+      `工作目录已经迁到 ${workRoot}，但旧目录 ${legacyRoot} 里还有 ${legacyEntries.length} 项，` +
+        `因为新目录非空所以没有搬。旧目录里的内容没有丢，需要的话自行合并。`,
+    )
+    return 'skipped'
+  }
+
+  try {
+    await mkdir(workRoot, { recursive: true })
+    // 新根刚才可能是"存在但是空的"，rename 到一个已存在的空目录在 POSIX 下
+    // 会失败（ENOTEMPTY/EEXIST 视实现），所以先把它去掉
+    if (targetEntries !== null) await rmdir(workRoot).catch(() => undefined)
+    await rename(legacyRoot, workRoot)
+  } catch (err) {
+    // ⚠️ 这里只警告、**不删源**：搬不动就维持原样，旧目录仍然可用
+    warn(
+      `工作目录迁移失败（${legacyRoot} → ${workRoot}）：${(err as Error).message}。` +
+        `旧内容原样保留，新任务会使用新位置。`,
+    )
+    return 'failed'
+  }
+
+  info(`工作目录已迁移：${legacyRoot} → ${workRoot}（${legacyEntries.length} 项）`)
+  return 'moved'
 }

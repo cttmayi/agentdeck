@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@alpha-helper/agent-core'
 import { hasContextBlock } from '@alpha-helper/agent-core'
@@ -579,6 +579,119 @@ describe('端到端：SSE 终态补发', () => {
       release()
       await d.close()
       await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
+describe('端到端：自动分配的工作目录落在「给 daemon 的那个根」底下', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这是把"CLI 决定默认值"和"run 真的用上了它"接起来的那一环
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 默认根从 `--data-dir` 推导改成固定路径之后，链路变成了两段：
+   *
+   *   cli.ts  决定 `workRoot = options.workRoot ?? defaultWorkRoot()`
+   *   server.ts 把它交给执行器，执行器用它算出 `<workRoot>/<type>-<id>`
+   *
+   * 两段各自都有测试（`workdir.test.ts` 测默认值，`resolveWorkDir` 是纯函数），
+   * 但**中间那一段没人测**：`workRoot` 如果哪天没被传下去，两边测试照样全绿，
+   * 而使用者会发现产出跑回了 `~/.alpha-helper/data/work/` 里。
+   */
+  test('★ 给了 workRoot ⇒ 自动目录就在它下面，并且受理时已经建好', async () => {
+    const dataDir = await makeTempDir('e2e-wr-data')
+    const workRoot = await makeTempDir('e2e-wr-root')
+    const issueId = ulid()
+    const runId = ulid() as RunId
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: issueId },
+          prompt: '随便做点事',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      const run = (await (await fetch(`${d.url}/api/runs/${runId}`)).json()) as { workDir: string }
+      assert.equal(run.workDir, join(workRoot, `issue-${issueId}`))
+      assert.equal(
+        (await stat(run.workDir)).isDirectory(),
+        true,
+        '★ 受理时就该建好——使用者提交后立刻能看到它要去哪儿',
+      )
+
+      // ⚠️ `seenWorkDir` 只能等 run **真的跑起来**之后再看。
+      //    POST 返回的是"已受理"，`execute()` 是之后异步发生的——原来这里
+      //    紧接着就断言，纯靠时序侥幸通过（另一条用例就挂了）。
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+      assert.equal(b.seenWorkDir, run.workDir, '执行器用的必须是同一个目录')
+    } finally {
+      await d.close()
+      await cleanup(workRoot)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('★ 不给 workRoot ⇒ 兜底待在数据目录里，**绝不碰家目录**', async () => {
+    // 这是"测试不可能污染真实环境"的结构性保证，在**真实代码路径**上验一遍：
+    // 忘了传 workRoot 的调用方（尤其是测试）只会得到数据目录里的一个子目录。
+    const dataDir = await makeTempDir('e2e-wr-fallback')
+    const issueId = ulid()
+    const runId = ulid() as RunId
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      assert.equal(d.workRoot, join(dataDir, 'work'))
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: issueId },
+          prompt: '随便做点事',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      const run = (await (await fetch(`${d.url}/api/runs/${runId}`)).json()) as { workDir: string }
+      assert.ok(
+        run.workDir.startsWith(`${dataDir}/`),
+        `★ 兜底必须待在数据目录内：${run.workDir}`,
+      )
+
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+      assert.equal(b.seenWorkDir, join(dataDir, 'work', `issue-${issueId}`))
+    } finally {
+      await d.close()
       await cleanup(dataDir)
     }
   })

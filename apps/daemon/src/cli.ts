@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { defaultWorkRoot, fallbackWorkRoot, migrateLegacyWorkRoot } from './workdir.ts'
 import type { SandboxMode } from '@alpha-helper/agent-core'
 
 /**
@@ -169,7 +170,7 @@ export const HELP = `alpha-helper —— 本机 AI 工作台
                         明确报错，不会静默退回无沙箱。
       --executable <路径>  覆盖 CLI 可执行文件路径（探测与执行共用同一个值）
       --runtime-key <key>  用哪个 runtime 起服务（默认 claude）
-      --work-root <路径>   工作区根目录（默认 <数据目录>/work）
+      --work-root <路径>   工作区根目录（默认 ~/alpha-helper-workspace）
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
@@ -234,13 +235,37 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   let daemon: DaemonHandle
   try {
+    // ══════════════════════════════════════════════════════════════════
+    // 工作目录放哪 —— 到这里才决定，因为这是**面向使用者的产品决定**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // `startDaemon` 的兜底是数据目录之内的 `work/`（自洽、不碰家目录）。
+    // 但只要是人自己在跑 alpha-helper，缺省就该是一块**看得见**的地方：
+    // 工作目录装的是 agent 真正的产出，使用者要用 Finder 打开、要在终端里
+    // `cd` 进去。藏在 `~/.alpha-helper/data/work/` 里等于找不到。
+    const workRoot = options.workRoot ?? defaultWorkRoot()
+
+    // ★ 只有用默认位置时才迁移旧目录。
+    //
+    //   显式给了 `--work-root` 的人是在指定一块**他自己的**地盘（某个项目、
+    //   某块盘）。往那里搬历史目录是没人要求过的副作用——他指定什么就该是
+    //   什么。
+    if (!options.workRoot) {
+      await migrateLegacyWorkRoot({
+        legacyRoot: fallbackWorkRoot(options.dataDir),
+        workRoot,
+        onInfo: (m) => process.stdout.write(`${m}\n`),
+        onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
+      })
+    }
+
     daemon = await startDaemon({
       dataDir: options.dataDir,
       port: options.port,
       sandboxMode: options.sandboxMode,
       ...(options.executablePath ? { executablePath: options.executablePath } : {}),
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
-      ...(options.workRoot ? { workRoot: options.workRoot } : {}),
+      workRoot,
       onInfo: (m) => process.stdout.write(`${m}\n`),
       onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
     })
@@ -253,7 +278,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     return 1
   }
 
-  process.stdout.write(`\nalpha-helper 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n`)
+  // 工作目录要印出来：它是使用者会真的进去翻的地方，而"它在哪"不是一个
+  // 能靠猜的东西（旧版本藏在 data/work 下面两层）。
+  process.stdout.write(
+    `\nalpha-helper 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n` +
+      `  工作目录：${daemon.workRoot}\n`,
+  )
   // ★ 沙箱状态必须**每次启动都报**，而不是只在开启时报。
   //   "这次跑的东西有没有被沙箱"是个要紧的事实，不该要人去翻命令历史。
   process.stdout.write(

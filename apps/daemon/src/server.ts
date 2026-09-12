@@ -45,7 +45,7 @@ import {
 } from './ingest.ts'
 import { reconcileInterruptedRuns } from './reconcile.ts'
 import { checkEnvironment, renderEnvironmentReport } from './environment.ts'
-import { defaultWorkRoot } from './workdir.ts'
+import { fallbackWorkRoot } from './workdir.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
@@ -110,7 +110,11 @@ export interface DaemonOptions {
   backend?: AgentBackend
   maxConcurrentRuns?: number
   /**
-   * 自动分配的工作目录根（D27）。缺省为数据目录同级的 `work/`。
+   * 自动分配的工作目录根（D27）。
+   *
+   * 缺省是**数据目录之内的 `work/`**（`fallbackWorkRoot`）——一个自洽的兜底，
+   * 不碰家目录。CLI 会显式传 `~/alpha-helper-workspace`（可见的那一个），
+   * 因为"工作目录放哪"是面向使用者的产品决定，属于 CLI 那一层。
    */
   workRoot?: string
   /**
@@ -129,6 +133,8 @@ export interface DaemonHandle {
   url: string
   port: number
   store: Store
+  /** 实际生效的工作目录根——启动横幅要显示它，见 cli.ts。 */
+  workRoot: string
   close(): Promise<void>
 }
 
@@ -171,9 +177,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const backend = options.backend ?? selected.backend
 
   // 工作目录的根（D27）：每个任务自动分配一个独立目录。
-  // 默认放在数据目录的**同级**——数据目录装应用状态（日志/blob/锁），
-  // 工作目录装 agent 的产出，混在一起会让人找东西时先撞上一堆 logs/。
-  const workRoot = options.workRoot ?? defaultWorkRoot(options.dataDir)
+  //
+  // 兜底在数据目录**之内**（绝不碰家目录），可见的那个默认值由 CLI 给出——
+  // 见 `fallbackWorkRoot` 的注释。
+  const workRoot = options.workRoot ?? fallbackWorkRoot(options.dataDir)
 
   const registry = new RunRegistry()
   const locks = new WorkDirLocks()
@@ -1509,6 +1516,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     url,
     port: address.port,
     store,
+    workRoot,
     async close() {
       // 先断开所有连接：`server.close()` 会等现有连接自然结束，而页面的
       // keep-alive 与 SSE 长连接可能挂很久——那会让"停止 daemon"看起来卡住。
