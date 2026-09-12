@@ -32,7 +32,7 @@ import {
   type Workspace,
 } from '@alpha-helper/protocol'
 import { FileStore } from '@alpha-helper/store-file'
-import { loadStatic } from '@alpha-helper/web'
+import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
 import { ActionRunner, type DeriveRunRequest } from './actions.ts'
 import { RunExecutor } from './executor.ts'
 import {
@@ -249,6 +249,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
   const ingestor = new ReportIngestor({ store })
   const workspaceId = await bootstrap(store, info)
+
+  // ★ Web UI 的构建产物不进版本库（gitignore），所以 clone 下来直接起 daemon
+  //   会**没有界面**。这种情况必须说清楚怎么做，而不是发一个空白页让人以为
+  //   是 daemon 坏了。只提示、不阻止启动——API 与 CLI 仍然完全可用。
+  if (!(await isWebBuilt())) {
+    warn(NOT_BUILT_HINT)
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // ★ 先收口上次遗留的 run，**再**起 HTTP 服务（FR-RUNTIME-11）

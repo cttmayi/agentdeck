@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /**
+     * 测试要跑在 **Node** 里（`node:test`），所以需要 node 类型；
+     * 而被测代码用到了 `localStorage`，所以 DOM lib 也得留着。
+     *
+     * 单独一份配置而不是给主配置加 node 类型：主配置是**应用代码**的，
+     * 让它见到 `node:fs` 就等于默许前端代码去读文件——那在浏览器里
+     * 会在运行时才炸。类型系统在这里是一道真实的墙，不该为了方便拆掉。
+     */
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}

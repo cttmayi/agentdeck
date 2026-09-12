@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    /**
+     * ══════════════════════════════════════════════════════════════
+     * 前端需要**另一套**编译选项，不是重复配置
+     * ══════════════════════════════════════════════════════════════
+     *
+     * 根 tsconfig 是给 Node 侧定的：`lib: ES2023`（没有 DOM）、
+     * `moduleResolution: NodeNext`（要求相对导入写 `.js` 后缀）。
+     *
+     * 而前端源码：
+     *   - **当然要用 DOM**（document / window / location / fetch / EventSource）；
+     *   - 由 **Vite** 打包，它按 bundler 规则解析导入，写 `.js` 后缀反而多余。
+     *
+     * 硬把两者塞进一份配置，只能靠"给每处 DOM 访问加 // @ts-ignore"或
+     * "在 Node 侧也开 DOM lib"来将就——前者污染代码，后者让服务端代码
+     * 误以为 `document` 存在。分开是对的。
+     */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+    /**
+     * 前端不需要"可擦除语法"的限制——那是给"Node 直接跑 .ts"用的，
+     * 而这里的东西全部经过 Vite 编译。
+     */
+    "erasableSyntaxOnly": false
+  },
+  // 测试文件有自己的配置（要 node 类型），见 tsconfig.test.json
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
