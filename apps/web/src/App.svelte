@@ -106,7 +106,8 @@
   {#if $openDrawer === 'inbox'}
     <InboxDrawer onclose={closeDrawer} />
   {:else}
-    <SettingsDrawer onclose={closeDrawer} />
+    <!-- 同一个组件，'remote' 只渲染远端那一段（顶栏点「登录」进来的路径） -->
+    <SettingsDrawer onclose={closeDrawer} focus={$openDrawer === 'remote' ? 'remote' : 'all'} />
   {/if}
 {/if}
 

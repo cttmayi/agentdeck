@@ -1,117 +1,89 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type CostReport } from '../lib/api.ts'
+  import { getRemoteUrl, remote, setRemoteUrl } from '../lib/remote.ts'
   import {
-    getRemoteUrl,
-    isLoggedIn,
-    remote,
-    setRemoteUrl,
-    type Catalog,
-    type PluginInfo,
-    type RemoteAccount,
-  } from '../lib/remote.ts'
+    doLogin,
+    doLogout,
+    doRegister,
+    refreshRemote,
+    remoteAccount,
+    remoteCatalog,
+    remoteError,
+    remoteLoggedIn,
+    remotePlugins,
+    remoteUrlValue,
+  } from '../lib/remote-store.ts'
   import { syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
 
-  export let onclose: () => void
-
   /**
-   * 设置抽屉：成本、审计导出、远端账号、目录、插件、同步说明。
+   * 设置抽屉。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 为什么这些放在抽屉里而不是各占一栏
+   * `focus` 让它兼任"登录面板"
    * ══════════════════════════════════════════════════════════════════
    *
-   * 它们都是**低频**的：设一次、看一眼，然后就不管了。占着侧边栏会让
-   * 高频的四项被稀释。抽屉的好处是"随时能开、开完就走"，不改变当前在看的
-   * 东西——这正是设置该有的存在感。
+   * 顶栏点「登录」时，使用者要看到的是登录表单，而不是"成本 → 审计导出 →
+   * 远端能力"这样一路翻下去。所以同一个组件接一个 `focus`：
+   * `'remote'` 就只渲染远端那一段。
+   *
+   * 为什么不干脆做两个组件：那样登录表单要在两处各写一遍，而**两处迟早
+   * 不一致**——改了一处的校验、忘了另一处，是最经典的那类 bug。
    *
    * ══════════════════════════════════════════════════════════════════
    * 远端不可用**不能挡住本机功能**
    * ══════════════════════════════════════════════════════════════════
    *
-   * 所以这一整块是独立加载的：远端挂了只让"远端能力"那一段显示一段提示，
-   * 成本与审计导出照常工作。
+   * 远端那一整块是独立加载的：远端挂了只让那一段显示提示，成本与审计导出
+   * 照常工作。
    */
+  export let onclose: () => void
+  export let focus: 'all' | 'remote' = 'all'
 
-  // ── 成本 ──
   let costs: CostReport | null = null
   let costsError = ''
 
-  // ── 远端 ──
-  let remoteUrl = getRemoteUrl()
-  let loggedIn = isLoggedIn()
-  let account: RemoteAccount | null = null
-  let plugins: PluginInfo[] = []
-  let catalog: Catalog | null = null
-  let remoteError = ''
-  let remoteNote = ''
   let email = ''
   let password = ''
   let settingKey = ''
   let settingValue = ''
+  let remoteNote = ''
 
   onMount(async () => {
-    try {
-      costs = await api<CostReport>('/api/costs')
-    } catch (err) {
-      costsError = err instanceof Error ? err.message : String(err)
+    // 聚焦远端时不必去读成本——那是另一段的事，白读一次还慢
+    if (focus === 'all') {
+      try {
+        costs = await api<CostReport>('/api/costs')
+      } catch (err) {
+        costsError = err instanceof Error ? err.message : String(err)
+      }
     }
     await refreshRemote()
   })
 
-  async function refreshRemote(): Promise<void> {
-    remoteError = ''
+  async function submitLogin(register: boolean): Promise<void> {
     try {
-      catalog = await remote.catalog()
-    } catch (err) {
-      remoteError = err instanceof Error ? err.message : String(err)
-      return
-    }
-    if (!loggedIn) return
-    try {
-      const me = await remote.me()
-      account = me.account
-      plugins = me.plugins
-    } catch (err) {
-      // 401 是"凭证过期了"，不是"远端坏了"——要区别对待，
-      // 否则使用者会去重启服务，而真正该做的是重新登录
-      if (err instanceof Error && 'status' in err && (err as { status: number }).status === 401) {
-        remote.logout()
-        loggedIn = false
-        remoteError = '登录已失效，请重新登录'
-      } else {
-        remoteError = err instanceof Error ? err.message : String(err)
-      }
-    }
-  }
-
-  async function doLogin(register: boolean): Promise<void> {
-    remoteError = ''
-    try {
-      account = register
-        ? await remote.register(email, password)
-        : await remote.login(email, password)
-      loggedIn = true
+      if (register) await doRegister(email, password)
+      else await doLogin(email, password)
       password = ''
-      await refreshRemote()
       showToast(register ? '已注册并登录' : '已登录')
     } catch (err) {
-      remoteError = err instanceof Error ? err.message : String(err)
+      remoteError.set(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function saveRemoteUrl(): Promise<void> {
-    setRemoteUrl(remoteUrl.trim())
+    setRemoteUrl($remoteUrlValue.trim())
     await refreshRemote()
   }
 
-  async function togglePlugin(p: PluginInfo): Promise<void> {
+  async function togglePlugin(name: string, enabled: boolean): Promise<void> {
     try {
-      await remote.setPluginEnabled(p.name, !p.enabled)
+      await remote.setPluginEnabled(name, !enabled)
       await refreshRemote()
     } catch (err) {
-      remoteError = err instanceof Error ? err.message : String(err)
+      remoteError.set(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -124,7 +96,7 @@
   async function installSkill(slug: string): Promise<void> {
     remoteNote = `正在下载 ${slug}…`
     try {
-      const skill = catalog?.skills.find((s) => s.slug === slug)
+      const skill = $remoteCatalog?.skills.find((s) => s.slug === slug)
       if (!skill) {
         remoteNote = `目录里没有 ${slug}`
         return
@@ -161,7 +133,7 @@
     const key = settingKey.trim()
     if (!key) return
     try {
-      // 值按 JSON 解析；解析不了就当字符串——这样 `false` 与 `false`（字符串）
+      // 值按 JSON 解析；解析不了就当字符串——这样 `false` 与 `"false"`
       // 不会悄悄混为一谈
       let value: unknown = settingValue.trim()
       try {
@@ -174,19 +146,20 @@
       settingValue = ''
       showToast('设定已保存，立即生效')
     } catch (err) {
-      remoteError = err instanceof Error ? err.message : String(err)
+      remoteError.set(err instanceof Error ? err.message : String(err))
     }
   }
 </script>
 
 <aside class="drawer">
   <div class="drawer-head">
-    <h2>设置</h2>
+    <h2>{focus === 'remote' ? '远端账号' : '设置'}</h2>
     <button type="button" class="ghost" onclick={onclose}>关闭</button>
   </div>
 
   <div class="drawer-body">
     <!-- ══════════ 成本 ══════════ -->
+    {#if focus === 'all'}
     <section class="drawer-section">
       <h3>成本</h3>
       {#if costsError}
@@ -237,24 +210,25 @@
     </section>
 
     <hr />
+    {/if}
 
     <!-- ══════════ 远端能力 ══════════ -->
     <section class="drawer-section">
       <h3>
         远端能力
-        {#if remoteError}
-          <span class="bad small">{remoteError}</span>
-        {:else if catalog}
+        {#if $remoteError}
+          <span class="bad small">{$remoteError}</span>
+        {:else if $remoteCatalog}
           <span class="faint small">已连接 {getRemoteUrl()}</span>
         {/if}
       </h3>
 
-      {#if !loggedIn}
+      {#if !$remoteLoggedIn}
         <p class="hint">
           远端服务是<strong>另一个进程</strong>，本页面直接访问它（这一跳是跨源的，
           由远端放行回环来源）。daemon 自己不向远端发任何请求。
         </p>
-        <form onsubmit={(e) => { e.preventDefault(); void doLogin(false) }}>
+        <form onsubmit={(e) => { e.preventDefault(); void submitLogin(false) }}>
           <label>
             邮箱
             <input bind:value={email} type="email" required autocomplete="username" />
@@ -265,28 +239,17 @@
           </label>
           <div style="display:flex;gap:var(--sp-2)">
             <button type="submit">登录</button>
-            <button type="button" class="secondary" onclick={() => void doLogin(true)}>注册</button>
+            <button type="button" class="secondary" onclick={() => void submitLogin(true)}>注册</button>
           </div>
         </form>
         <label style="margin-top:var(--sp-3)">
           远端地址
-          <input bind:value={remoteUrl} />
+          <input bind:value={$remoteUrlValue} />
         </label>
         <button type="button" class="secondary" onclick={saveRemoteUrl}>保存地址并重连</button>
       {:else}
-        <p>已登录：<strong>{account?.displayName}</strong> <span class="faint">{account?.email}</span></p>
-        <button
-          type="button"
-          class="secondary"
-          onclick={() => {
-            remote.logout()
-            loggedIn = false
-            account = null
-            plugins = []
-          }}
-        >
-          退出登录
-        </button>
+        <p>已登录：<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
+        <button type="button" class="secondary" onclick={doLogout}>退出登录</button>
 
         <h4>我的设定</h4>
         <form onsubmit={(e) => { e.preventDefault(); void saveSetting() }}>
@@ -306,14 +269,14 @@
         </p>
 
         <h4>插件清单</h4>
-        {#if plugins.length === 0}
+        {#if $remotePlugins.length === 0}
           <p class="faint small">没有加载任何插件。</p>
         {:else}
           <div class="table-wrap">
             <table>
               <thead><tr><th>插件</th><th>能力</th><th>状态</th><th>密钥</th><th></th></tr></thead>
               <tbody>
-                {#each plugins as p (p.name)}
+                {#each $remotePlugins as p (p.name)}
                   <tr>
                     <td><code>{p.name}</code></td>
                     <td class="faint small">{p.capability}</td>
@@ -332,7 +295,7 @@
                     <td class="faint small">{p.secretKeys.join(', ') || '—'}</td>
                     <td>
                       {#if p.loaded}
-                        <button type="button" class="ghost small" onclick={() => togglePlugin(p)}>
+                        <button type="button" class="ghost small" onclick={() => togglePlugin(p.name, p.enabled)}>
                           {p.enabled ? '停用' : '启用'}
                         </button>
                       {/if}
@@ -349,11 +312,11 @@
       {/if}
 
       <h4>公共 SKILL 目录</h4>
-      {#if !catalog}
+      {#if !$remoteCatalog}
         <p class="faint small">远端不可用，目录暂时看不到。</p>
       {:else}
         <ul class="plain">
-          {#each catalog.skills as s (s.slug)}
+          {#each $remoteCatalog.skills as s (s.slug)}
             <li style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-2);padding:var(--sp-2) 0;border-bottom:1px solid var(--line)">
               <span>
                 <code>{s.slug}</code> <span class="faint small">{s.version}</span>

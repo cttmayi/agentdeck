@@ -35,76 +35,95 @@ function fakeSession(options: { lastActivityAt: () => number }): AgentSession {
 }
 
 describe('★ 空闲超时不是墙钟超时', () => {
-  test('★ 一直在活动的进程**永远**不被杀，哪怕跑得比上限久得多', async () => {
-    // ══════════════════════════════════════════════════════════════
-    // 这条是整个 FR-RUN-08 的要害：跑了很久 ≠ 出问题
-    // ══════════════════════════════════════════════════════════════
-    //
-    // ⚠️ 这条测试原先写歪过：我让 `lastActivityAt()` **自己**把时钟往前推，
-    //    于是"有活动"是被**轮询这个动作本身**制造出来的——看门狗每问一次，
-    //    就凭空多出一点活动。它当然永远不触发，但那不是因为被测逻辑对，
-    //    而是因为测试把答案写进了问题里。
-    //
-    //    现在改成**真实的时钟 + 独立的输出节奏**：另一个定时器模拟 CLI
-    //    每 10ms 吐一行。看门狗问多少次都不影响"最近一次活动"是什么时候。
-    let activityAt = Date.now()
-    const session = fakeSession({ lastActivityAt: () => activityAt })
-    const output = setInterval(() => {
-      activityAt = Date.now()
-    }, 10)
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ⚠️ 这组测试**原先是不确定的**，记下来免得有人改回去
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原写法用真实时钟：每 10ms 的定时器模拟"有输出"，看门狗的空闲上限 50ms，
+   * 跑 300ms。单独跑永远通过，而**整套测试并行跑时偶发失败**——CPU 一忙，
+   * 那个 10ms 的定时器就可能被推迟到 50ms 以上，于是看门狗判成"空闲"并触发。
+   *
+   * 那是测试在测**调度器**，不是在测被测逻辑。
+   *
+   * 现在用一个显式的假时钟，并提供两种推进方式：
+   *
+   *   - `advanceWithActivity(n)` —— 时间前进，**且刚有过输出**；
+   *   - `advanceIdle(n)`         —— 时间前进，但**一直没有输出**。
+   *
+   * 判据（`now - lastActivity`）因此完全由测试决定，与真实调度无关：
+   * 定时器即使被饿死，两者都不前进，结论也不变。
+   */
+  function makeClock() {
+    let now = 0
+    let lastActivity = 0
+    return {
+      session: fakeSession({ lastActivityAt: () => lastActivity }),
+      now: () => now,
+      /** 时间前进，同时记一次活动（模拟"一直在输出"）。 */
+      advanceWithActivity(step: number) {
+        now += step
+        lastActivity = now
+      },
+      /** 时间前进，但没有输出（模拟"卡住了"）。 */
+      advanceIdle(step: number) {
+        now += step
+      },
+    }
+  }
 
-    let idleFired = false
+  test('★ 一直在活动的进程**永远**不被杀，哪怕跑得比上限久得多', async () => {
+    const c = makeClock()
+    let fired = false
     const watchdog = startIdleWatchdog({
-      session,
-      idleTimeoutMs: 50,
+      session: c.session,
+      idleTimeoutMs: 100,
       intervalMs: 5,
+      now: c.now,
       onIdle: () => {
-        idleFired = true
+        fired = true
       },
     })
 
-    // 跑满 300ms —— **6 倍**于空闲上限，且远超任何"墙钟超时"的直觉值
+    // 逻辑时间推进 1200ms —— **12 倍**于空闲上限，但期间一直有活动
+    const ticker = setInterval(() => c.advanceWithActivity(20), 5)
     await new Promise((r) => setTimeout(r, 300))
+    clearInterval(ticker)
     watchdog.stop()
-    clearInterval(output)
 
     assert.equal(
-      idleFired,
+      fired,
       false,
       '★ 只要子进程仍有活动，就不得因"跑了很久"而终止——这正是 FR-RUN-08 要防的',
     )
   })
 
-  test('★ 对照：同样跑 300ms，但中途**不再有输出** ⇒ 判卡住', async () => {
-    // 与上一条唯一的不同是"没有活动"。两条放在一起才能说明
-    // 判据确实是**空闲时长**，而不是运行时长。
-    let activityAt = Date.now()
-    const session = fakeSession({ lastActivityAt: () => activityAt })
-    // 只在开头活跃一下，之后彻底安静（模拟卡在某个等待上）
-    const output = setInterval(() => {
-      if (Date.now() - start > 40) return
-      activityAt = Date.now()
-    }, 10)
-    const start = Date.now()
-
-    let idleFired = false
+  test('★ 对照：时间照样在走，但活动**停了** ⇒ 判卡住', async () => {
+    // 与上一条唯一的差别是"不再有活动"。两条放在一起才能说明判据确实是
+    // **空闲时长**，而不是运行时长。
+    const c = makeClock()
+    let fired = false
     const watchdog = startIdleWatchdog({
-      session,
-      idleTimeoutMs: 60,
+      session: c.session,
+      idleTimeoutMs: 100,
       intervalMs: 5,
+      now: c.now,
       onIdle: () => {
-        idleFired = true
+        fired = true
       },
     })
 
-    await new Promise((r) => setTimeout(r, 300))
+    const ticker = setInterval(() => c.advanceIdle(20), 5)
+    await new Promise((r) => setTimeout(r, 200))
+    clearInterval(ticker)
     watchdog.stop()
-    clearInterval(output)
 
-    assert.equal(idleFired, true, '同样是 300ms，但没有输出的那个才该被杀')
+    assert.equal(fired, true, '没有输出的那个才该被判卡住')
   })
 
-  test('回调带上空闲了多久，便于写进失败原因', async () => {
+  test('回调要带上空闲了多久（便于写进失败原因）', async () => {
+    // 这条在去 flaky 的重写中被我顺手删掉了，补回来：失败原因里写
+    // "空闲了多少秒"比写"超时了"有用得多——前者能直接看出是卡在哪一步。
     let reported = 0
     const session = fakeSession({ lastActivityAt: () => 0 })
     const watchdog = startIdleWatchdog({

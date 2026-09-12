@@ -38,8 +38,14 @@ export function go(next: ViewName): void {
 /** 任务详情里选中的任务；null = 显示列表/看板。 */
 export const selectedIssueId = writable<string | null>(null)
 
-/** 抽屉。同时只开一个——两个叠在一起是纯粹的视觉噪音。 */
-export const openDrawer = writable<'inbox' | 'settings' | null>(null)
+/**
+ * 抽屉。同时只开一个——两个叠在一起是纯粹的视觉噪音。
+ *
+ * `'remote'` 与 `'settings'` 用的是同一个抽屉组件，只是**聚焦到远端那一段**：
+ * 顶栏点「登录」时不该让人在成本、审计导出里翻找登录表单在哪。
+ * 分成两个独立组件会在两处各写一遍表单，迟早不一致。
+ */
+export const openDrawer = writable<'inbox' | 'settings' | 'remote' | null>(null)
 
 /** 一闪而过的提示（操作成功/失败的一句话反馈）。 */
 export const toast = writable<string | null>(null)
