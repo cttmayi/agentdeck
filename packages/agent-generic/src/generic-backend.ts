@@ -255,6 +255,9 @@ export class GenericBackend implements AgentBackend {
     })
 
     try {
+      // 如实的**最终**命令行——调用方负责脱敏与记录（脱敏逻辑只能有一份）
+      opts.onCommandLine?.([plan.command, ...plan.args])
+
       const handle = spawnProcessTree({
         command: plan.command,
         args: plan.args,
@@ -263,6 +266,7 @@ export class GenericBackend implements AgentBackend {
         onStdoutLine: (line) => parser.push(line),
         onStderrLine: (line) => {
           stderrTail = `${stderrTail}\n${line}`.slice(-4000)
+          opts.onStderrLine?.(line)
         },
         onActivity: opts.onActivity ?? (() => {}),
       })

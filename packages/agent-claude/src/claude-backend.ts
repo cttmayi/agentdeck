@@ -116,6 +116,9 @@ export class ClaudeBackend implements AgentBackend {
     let stderrTail = ''
     const startedAt = Date.now()
 
+    // 如实的**最终**命令行——含沙箱包装与受管参数。调用方负责脱敏与记录。
+    opts.onCommandLine?.([plan.command, ...plan.args])
+
     const handle = spawnProcessTree({
       command: plan.command,
       args: plan.args,
@@ -123,7 +126,9 @@ export class ClaudeBackend implements AgentBackend {
       env: { ...process.env, ...(opts.env ?? {}) },
       onStdoutLine: (line) => parser.push(line),
       onStderrLine: (line) => {
+        // 两条路都要：尾巴用于失败信息，逐行上报用于日志
         stderrTail = `${stderrTail}\n${line}`.slice(-4000)
+        opts.onStderrLine?.(line)
       },
       onActivity: opts.onActivity ?? (() => {}),
     })

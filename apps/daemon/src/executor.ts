@@ -12,7 +12,13 @@ import {
   type RuntimeDescriptor,
   type SkillBrief,
 } from '@alpha-helper/agent-core'
-import { assertRunTransition, loadChainSteps, type ChainStep, type Store } from '@alpha-helper/domain'
+import {
+  assertRunTransition,
+  loadChainSteps,
+  redactArgv,
+  type ChainStep,
+  type Store,
+} from '@alpha-helper/domain'
 import type { SandboxOptions } from '@alpha-helper/agent-core'
 import {
   ulid,
@@ -134,6 +140,17 @@ const DEFAULT_WORKDIR_WAIT_MS = 10 * 60 * 1000
  * 超时不会强杀——只**如实告警**，避免把"没停下来"伪装成"停下来了"。
  */
 const DEFAULT_SHUTDOWN_GRACE_MS = 5_000
+
+/**
+ * stderr 最多往日志里写多少行。
+ *
+ * 有的 CLI 在 stderr 上很吵（进度条、重试日志）。不设上限的话，一次 run 的
+ * 日志会被噪声淹没，而**淹没的日志等于没有日志**——恰恰违反了"加它是为了
+ * 方便 debug"这个初衷。
+ *
+ * 超限时**明说截断了多少行**：静默截断会让人以为"它只说了这些"。
+ */
+const MAX_STDERR_LOG_LINES = 200
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -530,6 +547,13 @@ export class RunExecutor {
       //   我们答不上来的问题。
       const resume = await this.#resolveResume(req, run, runtime.descriptor)
 
+      // ★ 命令行与 stderr 进日志（方便 debug）。
+      //
+      //   命令行的**脱敏**走 domain 的 `redactArgv` —— 与审计记录用的是
+      //   同一份实现。适配器依赖不到 domain，所以由它上报事实、这里负责
+      //   脱敏：安全逻辑只有一份，不会漂。
+      let stderrLines = 0
+      let stderrTruncated = 0
       const session = await runtime.backend.execute({
         prompt: req.prompt,
         workDir: run.workDir!,
@@ -537,8 +561,30 @@ export class RunExecutor {
         maxTurns: req.limits.maxTurns,
         resumeSessionId: resume.sessionId,
         env: {},
+        onCommandLine: (argv) => {
+          void this.#note(runId, `命令行：${redactArgv(argv).join(' ')}`)
+        },
+        onStderrLine: (line) => {
+          const text = line.trimEnd()
+          if (text === '') return
+          if (stderrLines < MAX_STDERR_LOG_LINES) {
+            stderrLines += 1
+            void this.#note(runId, `stderr: ${text}`)
+          } else {
+            // 静默截断会让人以为"它只说了这些"——所以数着并明说
+            stderrTruncated += 1
+          }
+        },
         ...(this.#deps.sandbox ? { sandbox: this.#deps.sandbox } : {}),
       })
+
+      if (stderrTruncated > 0) {
+        await this.#note(
+          runId,
+          `（stderr 还有 ${stderrTruncated} 行没有写进日志——上限 ${MAX_STDERR_LOG_LINES} 行，` +
+            `完整内容见运行记录里的失败信息或本地重跑）`,
+        )
+      }
 
       this.#running.set(runId, { cancel: () => session.cancel() })
 
@@ -586,6 +632,17 @@ export class RunExecutor {
 
       const result = await session.result
       watchdog?.stop()
+
+      // ★ 退出码也进日志：它是"进程到底怎么结束的"最直接的证据，
+      //   而原来它只在失败时以一句话的形式出现
+      await this.#note(
+        runId,
+        `进程结束：status=${result.status}` +
+          (result.exitCode !== undefined && result.exitCode !== null
+            ? ` exitCode=${result.exitCode}`
+            : '') +
+          ` 耗时 ${Math.round(result.durationMs / 1000)} 秒`,
+      )
       if (result.usage) registry.emit(runId, { t: 'usage', usage: result.usage })
 
       // ★ 「恢复被拒绝」必须与「无法判断」分开报（FR-CLI-06）。

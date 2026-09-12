@@ -24,6 +24,9 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  */
 
 class FakeBackend implements AgentBackend {
+  /** 模拟真后端拼出来的协议参数——用来验证"命令行进日志"。 */
+  readonly #baseArgs = ['-p', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions']
+
   readonly key = 'claude'
   readonly protocol = 'stream-json' as const
   readonly rejectDetectable = true
@@ -48,6 +51,13 @@ class FakeBackend implements AgentBackend {
     this.seenPrompt = opts.prompt
     this.seenWorkDir = opts.workDir
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+
+    // ★ 假后端也要像真后端那样上报命令行。
+    //
+    //   不报的话，测试就测不到"命令行进日志"这条路径——而那正是
+    //   使用者要的 debug 信息。**假后端与真后端的行为不一致，测试就会
+    //   为一条不存在的路径放行。**
+    opts.onCommandLine?.(['claude', ...this.#baseArgs])
 
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'status', content: '会话已启动' })
@@ -400,6 +410,65 @@ describe('端到端：不破坏使用者已有的文件', () => {
   })
 })
 
+/**
+ * 会往 stderr 写东西的假后端。
+ *
+ * 用来验证"跑成功但 CLI 一直在抱怨"这条路——那是最需要 debug、
+ * 而原来完全看不见的一类。
+ */
+class ChattyStderrBackend implements AgentBackend {
+  readonly key = 'claude'
+  readonly protocol = 'stream-json' as const
+  readonly rejectDetectable = true
+
+  async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
+    return { available: true, command: 'claude', cliVersion: '0.0.0-chatty' }
+  }
+
+  async execute(opts: ExecOptions): Promise<AgentSession> {
+    // 后端只上报事实，脱敏与记录由调用方做
+    opts.onCommandLine?.(['claude', '-p', '--api-key', 'sk-secret-should-be-redacted'])
+    opts.onStderrLine?.('deprecation warning: --verbose is deprecated')
+
+    const queue = new AsyncQueue<AgentMessage>()
+    queue.push({ type: 'text', content: '做完了' })
+    queue.close()
+    return {
+      messages: queue,
+      result: Promise.resolve({
+        status: 'completed',
+        output: '做完了',
+        error: null,
+        durationMs: 5,
+        sessionId: 's1',
+        usage: null,
+        exitCode: 0,
+      }),
+      async cancel() {},
+      lastActivityAt: () => Date.now(),
+    }
+  }
+}
+
+/**
+ * 等到日志里出现匹配的行，返回当时**全部**消息的拼接。
+ *
+ * 与 `waitForMessages` 的区别：那个只等"有消息"，而日志是**边跑边写**的——
+ * 开头的行（命令行）与结尾的行（退出码）之间隔着整个执行过程。
+ * 断言结尾的行就必须等到它真的出现。
+ */
+async function waitForText(runId: string, pattern: RegExp): Promise<string> {
+  for (let i = 0; i < 400; i += 1) {
+    const out = (await (
+      await fetch(`${daemon.url}/api/runs/${runId}/messages`)
+    ).json()) as { messages: Array<{ content: string }> }
+    const text = out.messages.map((m) => m.content).join('\n')
+    if (pattern.test(text)) return text
+    await new Promise((r) => setTimeout(r, 25))
+  }
+  throw new Error(`等待日志出现 ${pattern} 超时`)
+}
+
 /** 等到 run 有消息为止（消息是流式写入的，可能晚一拍）。 */
 async function waitForMessages(runId: string): Promise<Array<{ content: string }>> {
   for (let i = 0; i < 200; i += 1) {
@@ -487,5 +556,100 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
     const text = (await waitForMessages(runId)).map((m) => m.content).join('\n')
     assert.match(text, /没有注入任何 skill/)
     assert.match(text, /按它自己的默认行为工作/, '要说清后果是什么')
+  })
+})
+
+describe('★ 日志要够 debug：命令行 / stderr / 退出码', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 原来缺的三样东西
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 1. **命令行**完全不在日志里。它只进审计记录，而审计是**审核收口**时
+   *    才写的——execute run 根本不产生审计。所以想看"当时到底怎么起的进程"
+   *    只能去翻代码。
+   * 2. **stderr 只被攒成尾巴，且只在失败时才出现**（截断到 500 字符）。
+   *    于是"跑成功了但 CLI 一直在抱怨"这种情况完全看不见——而那恰恰是
+   *    最需要 debug 的一类。
+   * 3. **退出码**同样只在失败时出现。
+   */
+  test('★ 日志里有命令行、退出码，且命令行已脱敏', async () => {
+    const runId = ulid() as RunId
+    await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'a1', name: '助手', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: '干活',
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+
+    // ⚠️ 不能用"有消息就返回"——命令行是**开头**写的，退出码是**结尾**写的。
+    //    我第一版就是这么写的，于是断言退出码时 run 还没跑完。
+    //    要等到终态那一行出现。
+    const text = await waitForText(runId, /进程结束：status=/)
+    assert.match(text, /命令行：/, '★ 要能直接看到并复制出当时的命令')
+    assert.match(text, /进程结束：status=completed/, '★ 退出码是"进程怎么结束的"最直接的证据')
+    assert.match(text, /exitCode=/, '退出码要带上')
+  })
+
+  test('★ stderr 会被写进日志 —— 跑成功但 CLI 抱怨的那种情况要看得见', async () => {
+    // 假后端在 execute 时不写 stderr，所以这里直接验证**多行 stderr 的
+    // 上报路径**：用一个会往 stderr 写东西的假后端。
+    const dir = await makeTempDir('stderr-log')
+    const work = await makeTempDir('stderr-work')
+    const backend = new ChattyStderrBackend()
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a1', name: 'x', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i1' },
+          prompt: 'x',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await new Promise((r) => setTimeout(r, 400))
+      const out = (await (
+        await fetch(`${d.url}/api/runs/${runId}/messages`)
+      ).json()) as { messages: Array<{ content: string }> }
+      const text = out.messages.map((m) => m.content).join('\n')
+      assert.match(text, /stderr: .*deprecation warning/, 'stderr 要逐行进日志')
+
+      // ★ 命令行进日志，但**凭据不能进**。
+      //   脱敏走的是 domain 的 redactArgv —— 与审计记录同一份实现。
+      //   适配器依赖不到 domain，所以它只上报事实、由调用方脱敏：
+      //   安全逻辑只有一份，不会漂。
+      assert.match(text, /命令行：/, '要能看到当时的命令')
+      assert.ok(
+        !text.includes('sk-secret-should-be-redacted'),
+        '★ 凭据绝不能出现在日志里 —— 日志是最容易被贴进 issue 的东西',
+      )
+      assert.match(text, /\*\*\*/, '凭据位置应当被替换成掩码')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(work)
+    }
   })
 })
