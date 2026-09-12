@@ -1,0 +1,14 @@
+{
+  "name": "@alpha-helper/store-file",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@alpha-helper/domain": "workspace:*",
+    "@alpha-helper/protocol": "workspace:*"
+  }
+}

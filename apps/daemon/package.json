@@ -1,0 +1,22 @@
+{
+  "name": "@alpha-helper/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "alpha-helper": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@alpha-helper/agent-claude": "workspace:*",
+    "@alpha-helper/agent-core": "workspace:*",
+    "@alpha-helper/agent-generic": "workspace:*",
+    "@alpha-helper/domain": "workspace:*",
+    "@alpha-helper/protocol": "workspace:*",
+    "@alpha-helper/store-file": "workspace:*",
+    "@alpha-helper/web": "workspace:*"
+  }
+}

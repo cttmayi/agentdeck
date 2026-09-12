@@ -1,0 +1,16 @@
+{
+  "name": "@alpha-helper/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "alpha-helper": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@alpha-helper/protocol": "workspace:*"
+  }
+}

@@ -1,0 +1,137 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  apps/cli:
+    dependencies:
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
+  apps/daemon:
+    dependencies:
+      '@alpha-helper/agent-claude':
+        specifier: workspace:*
+        version: link:../../packages/agent-claude
+      '@alpha-helper/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
+      '@alpha-helper/agent-generic':
+        specifier: workspace:*
+        version: link:../../packages/agent-generic
+      '@alpha-helper/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@alpha-helper/store-file':
+        specifier: workspace:*
+        version: link:../../packages/store-file
+      '@alpha-helper/web':
+        specifier: workspace:*
+        version: link:../web
+
+  apps/mcp:
+    dependencies:
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
+  apps/remote:
+    dependencies:
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
+  apps/web: {}
+
+  packages/agent-claude:
+    dependencies:
+      '@alpha-helper/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/agent-core:
+    dependencies:
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
+  packages/agent-generic:
+    dependencies:
+      '@alpha-helper/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/domain:
+    dependencies:
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/protocol:
+    dependencies:
+      zod:
+        specifier: ^4.6.2
+        version: 4.6.2
+
+  packages/store-file:
+    dependencies:
+      '@alpha-helper/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/store-sqlite:
+    dependencies:
+      '@alpha-helper/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@alpha-helper/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+packages:
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
+  zod@4.6.2:
+    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
+
+snapshots:
+
+  typescript@5.9.3: {}
+
+  yaml@2.9.1: {}
+
+  zod@4.6.2: {}

@@ -1,0 +1,24 @@
+{
+  "name": "alpha-helper",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.6.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
+    "test:watch": "node --test --watch \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\"",
+    "check": "pnpm run typecheck && pnpm run test",
+    "daemon": "node apps/daemon/src/cli.ts",
+    "remote": "node apps/remote/src/cli.ts",
+    "mcp": "node apps/mcp/src/cli.ts",
+    "cli": "node apps/cli/src/cli.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

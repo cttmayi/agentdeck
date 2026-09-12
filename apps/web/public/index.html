@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>alpha-helper</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <!-- ══════════════ 顶栏 ══════════════
+         只放"全局的、与当前视图无关"的东西：身份、通知、设置。
+         任何属于某个视图的内容都不该出现在这里——否则切视图时它会显得
+         没跟着变，而使用者会以为是 bug。 -->
+    <header class="topbar">
+      <div class="brand">alpha-helper</div>
+      <div id="identity" class="identity">正在连接本机 daemon…</div>
+      <div class="topbar-actions">
+        <button id="inbox-button" type="button" class="ghost">
+          通知 <span id="inbox-badge" class="badge-count" hidden>0</span>
+        </button>
+        <button id="settings-button" type="button" class="ghost">设置</button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <!-- ══════════════ 左侧边栏 ══════════════ -->
+      <nav class="sidebar">
+        <button type="button" class="nav-item" data-view="new">
+          <span class="nav-title">新建任务</span>
+          <span class="nav-hint">交给 agent 去做</span>
+        </button>
+        <button type="button" class="nav-item" data-view="tasks">
+          <span class="nav-title">任务清单</span>
+          <span class="nav-hint">看板 / 列表 · 执行记录</span>
+        </button>
+        <button type="button" class="nav-item" data-view="agents">
+          <span class="nav-title">智能体</span>
+          <span class="nav-hint">配置 · runtime</span>
+        </button>
+        <button type="button" class="nav-item" data-view="skills">
+          <span class="nav-title">Skills</span>
+          <span class="nav-hint">审核标准 · 动作子集</span>
+        </button>
+
+        <div class="sidebar-foot">
+          <div id="sync-status" class="muted small">尚未同步。</div>
+        </div>
+      </nav>
+
+      <!-- ══════════════ 右侧主区 ══════════════ -->
+      <main id="main" class="main"></main>
+    </div>
+
+    <!-- ══════════════ 通知抽屉 ══════════════ -->
+    <div id="inbox-drawer" class="drawer" hidden>
+      <div class="drawer-head">
+        <h2>通知</h2>
+        <button type="button" class="ghost" data-close="inbox-drawer">关闭</button>
+      </div>
+      <div class="drawer-body">
+        <p class="hint">
+          这里只会有<strong>需要你介入或留意</strong>的事项。通知是稀缺资源——
+          什么都往里塞，它就会变成没人看的信息流。
+        </p>
+        <div id="inbox-list"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════ 设置抽屉 ══════════════ -->
+    <div id="settings-drawer" class="drawer" hidden>
+      <div class="drawer-head">
+        <h2>设置</h2>
+        <button type="button" class="ghost" data-close="settings-drawer">关闭</button>
+      </div>
+      <div class="drawer-body">
+        <!-- ── 成本：它不属于某个具体任务，所以放这里而不是塞进某个视图 ── -->
+        <section class="drawer-section">
+          <h3>成本</h3>
+          <div id="costs" class="muted">正在读取…</div>
+          <button id="audit-export" type="button" class="secondary">导出审计链（JSON）</button>
+          <p class="hint">
+            导出的文件自带校验和，改动任何一个字段都会被查出来。它同时把能力边界写在文件里
+            ——审计链可追溯但<strong>不可复现</strong>（skill 记录不含指纹），argv 已脱敏。
+          </p>
+        </section>
+
+        <hr />
+
+        <!-- ── 远端能力 ── -->
+        <section class="drawer-section">
+          <h3>远端能力 <span id="remote-status" class="muted"></span></h3>
+
+          <div id="remote-login" hidden>
+            <p class="hint">
+              远端服务是<strong>另一个进程</strong>，本页面直接访问它（这一跳是跨源的，
+              由远端放行回环来源）。daemon 自己不向远端发任何请求。
+            </p>
+            <form id="remote-login-form">
+              <input id="remote-email" type="email" placeholder="邮箱" required autocomplete="username" />
+              <input
+                id="remote-password"
+                type="password"
+                placeholder="口令（至少 8 位）"
+                required
+                autocomplete="current-password"
+              />
+              <button type="submit" value="login">登录</button>
+              <button type="submit" value="register" class="secondary">注册</button>
+            </form>
+            <p id="remote-login-error" class="bad"></p>
+            <label>
+              远端地址
+              <input id="remote-url" placeholder="http://127.0.0.1:4518" />
+            </label>
+            <button id="remote-url-save" type="button" class="secondary">保存地址并重连</button>
+          </div>
+
+          <div id="remote-main" hidden>
+            <p>已登录：<span id="remote-account"></span></p>
+            <button id="remote-logout" type="button" class="secondary">退出登录</button>
+
+            <h4>我的设定</h4>
+            <ul id="remote-settings-view" class="plain"></ul>
+            <form id="remote-settings-form">
+              <input id="remote-theme" placeholder="theme = dark" autocomplete="off" />
+              <button type="submit">保存设定</button>
+            </form>
+            <p id="remote-settings-error" class="bad"></p>
+          </div>
+
+          <div id="remote-catalog"></div>
+
+          <h4>同步状态</h4>
+          <ul id="sync-warnings" class="plain muted"></ul>
+          <p class="hint">
+            <strong>上报什么、去哪、算不算证据</strong>：页面定期把<strong>摘要</strong>送到你
+            配置的远端服务——执行的用量与状态、任务的状态变更。<strong>不包含</strong> prompt
+            正文、代码、报告原文。远端那份副本<strong>不具证据效力</strong>，权威记录在本机
+            daemon 里。<br />
+            上报可以用 <code>reportingEnabled: false</code> 关闭；关闭后本机功能完整可用。
+          </p>
+
+          <h4>插件清单</h4>
+          <div id="remote-plugins" class="muted">登录后可见（插件状态属于账号数据）。</div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 抽屉遮罩：点它关闭，符合直觉 -->
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

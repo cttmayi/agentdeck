@@ -1,0 +1,14 @@
+{
+  "name": "@alpha-helper/agent-generic",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@alpha-helper/agent-core": "workspace:*",
+    "@alpha-helper/protocol": "workspace:*"
+  }
+}

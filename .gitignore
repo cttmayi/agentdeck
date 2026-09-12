@@ -1,0 +1,28 @@
+# ── 依赖与缓存 ──
+node_modules/
+.cache/
+*.log
+
+# ── 构建产物 ──
+dist/
+build/
+*.tsbuildinfo
+
+# ── 数据目录（daemon / remote 的运行时状态）──
+data/
+*.sqlite
+*.sqlite-journal
+
+# ── 按使用者要求排除 ──
+ref/
+docs/
+
+# ── 编辑器 / 系统 ──
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── 本地环境 ──
+.env
+.env.local

@@ -1,0 +1,420 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #262b36;
+  --fg: #e6e8ec;
+  --muted: #8b93a1;
+  --accent: #4c8dff;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f85149;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.identity {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.identity .bad,
+.identity .good {
+  font-weight: 600;
+}
+.identity .bad {
+  color: var(--err);
+}
+.identity .good {
+  color: var(--ok);
+}
+
+main {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 16px;
+  padding: 16px 24px 32px;
+  align-items: start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.panel.wide {
+  grid-column: 1 / -1;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+input,
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: #0c0e12;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font: inherit;
+  resize: vertical;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+button {
+  padding: 9px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-weight: 400;
+  padding: 4px 10px;
+}
+
+.hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.item .title {
+  font-weight: 600;
+}
+
+.item .meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.badge.running,
+.badge.dispatched {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge.completed {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.badge.failed,
+.badge.cancelled {
+  border-color: var(--err);
+  color: var(--err);
+}
+.badge.waiting_local_directory,
+.badge.queued {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.log {
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 460px;
+  overflow: auto;
+  background: #0c0e12;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log .row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.log .seq {
+  color: #3d4453;
+  min-width: 3.5em;
+  text-align: right;
+  user-select: none;
+}
+
+.log .text {
+  color: var(--fg);
+}
+.log .thinking {
+  color: var(--muted);
+  font-style: italic;
+}
+.log .tool_use {
+  color: var(--accent);
+}
+.log .tool_result {
+  color: #7d8595;
+}
+.log .error {
+  color: var(--err);
+}
+.log .status {
+  color: var(--warn);
+}
+.log .terminal {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ── 远端能力面板（M3）───────────────────────────────────────── */
+
+/* 列表项里的代码片段；能力目录与设定都用它，统一一下免得两处风格漂移 */
+#remote-catalog ul,
+#remote-settings-view {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5rem 0 1rem;
+}
+
+#remote-catalog li,
+#remote-settings-view li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line, #2a2a2a);
+}
+
+#remote-catalog h3 {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+/* 登录表单排一行：邮箱、口令、两个按钮 */
+#remote-login-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+#remote-login-form input {
+  flex: 1 1 12rem;
+}
+
+.secondary {
+  opacity: 0.85;
+}
+
+.plain {
+  list-style: none;
+  padding-left: 0;
+}
+
+/* ── runtime / 成本表格（M4）────────────────────────────────── */
+
+#runtimes td,
+#costs table td,
+#costs table th {
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #2a2a2a);
+}
+
+#costs table,
+.panel table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+#runtimes td code,
+#costs td code {
+  font-size: 0.9em;
+}
+
+/* 插件清单表格（FR-PLUGIN-10） */
+#remote-plugins table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+#remote-plugins td,
+#remote-plugins th {
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #2a2a2a);
+  font-size: 0.92em;
+}
+
+#remote-plugins .plugin-toggle {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85em;
+}
+
+/* ── 看板视图（FR-ISSUE-04）──────────────────────────────────── */
+
+.view-switch {
+  float: right;
+  font-size: 0.8rem;
+  font-weight: normal;
+}
+
+.view-switch button.active {
+  border-color: var(--accent, #6cf);
+  color: var(--accent, #6cf);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.board .column {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  padding: 0.5rem;
+  min-height: 4rem;
+}
+
+.board .column h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.board .card {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.board .card .title {
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.board .card .meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+
+#agents table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#agents td,
+#agents th {
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #2a2a2a);
+  font-size: 0.88em;
+}
+
+/* 高级选项（D27：工作目录默认自动分配，不再要求填写） */
+.advanced {
+  margin: 0.4rem 0;
+  font-size: 0.9em;
+}
+
+.advanced summary {
+  cursor: pointer;
+  color: var(--muted, #8a8a8a);
+}
+
+.advanced label {
+  display: block;
+  margin-top: 0.4rem;
+}
