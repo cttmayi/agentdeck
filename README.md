@@ -54,10 +54,11 @@ daemon 会**明确报错**，而不是"那就直接跑吧"。静默降级会让�
 
 ## 快速开始
 
-需要 **Node ≥ 22**（推荐 24——`pnpm run daemon` 直接跑 `.ts`，无需构建步骤）。
+需要 **Node ≥ 22**（推荐 24——后端 `pnpm run daemon` 直接跑 `.ts`，无需构建步骤）。
 
 ```bash
 pnpm install
+pnpm run build:web      # ⚠️ 必做一次：Web UI 是 Vite + Svelte 构建产物，不进版本库
 
 # 1) 本机 daemon：托管 Web UI 与本地接口
 pnpm run daemon
@@ -90,10 +91,34 @@ pnpm run cli status
 | `pnpm run daemon` | 起本机 daemon（UI + 接口） |
 | `pnpm run remote` | 起远端服务 |
 | `pnpm run mcp` | 起 MCP server（stdio） |
+| `pnpm run build:web` | **构建 Web UI**（clone 之后必做一次；产物在 `apps/web/dist/`，已 gitignore） |
+| `pnpm run dev:web` | Web UI 开发模式：Vite dev server（5173）把 `/api` 代理到 daemon，改代码即时热更新 |
 | `pnpm run cli <命令>` | 命令行（`status` / `issues` / `reports` / `costs` / `audits-export` …）。默认输出 JSON，退出码 0 成功 / 1 业务失败 / 2 用法错误 / 3 连不上 daemon |
 | `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务 |
 | `pnpm run check` | typecheck + 全量测试 |
 | `pnpm run test` | 只跑测试 |
+
+---
+
+## Web UI 技术栈
+
+| 层 | 选型 | 为什么 |
+|---|---|---|
+| 框架 | **Svelte 5** | 编译成很小的原生 JS（产物 89KB / gzip 34KB），**没有运行时框架要下载**——与"daemon 托管静态文件、断网可用"这条约束最合 |
+| 构建 | **Vite 6** | 产物输出到 `apps/web/dist/`，daemon 只当它是普通静态文件，不知道 Svelte 的存在 |
+| 依赖 | 三个（都在 devDependencies） | 运行时零前端依赖 |
+| 样式 | 手写 CSS + **设计令牌层** | 间距（4 的倍数）、字号层级、语义化颜色集中在一处，改主题只改一段 |
+| 实时 | 原生 `EventSource`（SSE） | 按 seq 补齐，刷新/重连都不丢消息 |
+
+**为什么不是 Next.js / React**：最初设计文档写的是 Next.js。但它需要 Node 运行时来渲染，
+而这里的页面由 daemon 在 `127.0.0.1` 上托管、要能断网工作；一个纯静态产物更贴合。
+UI 一直复杂到"需要组件化与路由"才换的——那次切换只动了 `apps/web/`，后端一行没改。
+
+**开发模式**：`pnpm run dev:web` 起 Vite（5173）并把 `/api` 代理到 daemon 的 4517，
+所以**浏览器看到的仍是同源**——开发与生产的同源假设一致，不会出现"开发能跑、上线 CORS 炸"。
+
+⚠️ 构建产物**不进版本库**。clone 之后直接起 daemon 会没有界面——这时 daemon 会
+明确提示你跑 `pnpm run build:web`，而不是发一个空白页。
 
 ---
 
