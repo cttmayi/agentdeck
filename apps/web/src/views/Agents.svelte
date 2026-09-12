@@ -171,6 +171,11 @@
 {/if}
 {/if}
 
+<!--
+  ⚠️ 这里必须写全可选链：`environment` 是可选字段，而**外层 `{#if}` 里的
+     收窄不会带到内层** —— 模板里的类型流与普通代码不同。svelte-check 会
+     如实报出来，而 tsc 根本看不到这一行。
+-->
 {#if $identity && !$identity.environment?.ok && ($identity.environment?.issues?.length ?? 0) > 0}
   <!--
     环境预检的问题要显示出来。它最常见的形态是"CLI 自己的状态目录写不进去"，
@@ -179,7 +184,7 @@
   -->
   <section style="margin-top:var(--sp-6)">
     <h3 class="warn">环境问题</h3>
-    {#each $identity.environment.issues as issue}
+    {#each $identity.environment?.issues ?? [] as issue}
       <div class="notice warn" style="margin-bottom:var(--sp-2);flex-direction:column;align-items:flex-start">
         <strong>{issue.summary}</strong>
         <span>{issue.action}</span>

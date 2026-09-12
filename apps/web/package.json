@@ -9,11 +9,14 @@
   },
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "check": "svelte-check --tsconfig ./tsconfig.json --threshold error"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "svelte": "^5.19.0",
+    "svelte-check": "^4.1.4",
+    "typescript": "^5.9.3",
     "vite": "^6.0.7"
   }
 }

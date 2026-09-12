@@ -116,9 +116,7 @@
       <select bind:value={agentId}>
         {#each $agents as a (a.id)}
           <option value={a.id}>
-            {a.name}{a.isFallbackReviewer ? '（兜底审核者）' : ''}{a.kindPatterns.includes('*')
-              ? '（认所有类型）'
-              : ''}
+            {a.name}{a.role === 'reviewer' ? '（审核）' : ''}
           </option>
         {/each}
       </select>
@@ -132,8 +130,8 @@
       {:else}
         <span class="warn">这个 agent 还没写指令</span>——它只会拿到任务标题与说明。
       {/if}
-      {#if chosen.skillIds.length === 0}
-        <br /><span class="warn">它没有挂载任何 skill</span>，因此不能承担审核工作。
+      {#if chosen.role === 'executor' && !chosen.reviewerAgentId}
+        <br /><span class="warn">它没配「由谁来审它」</span>，所以这次的产出不会被自动审核。
       {/if}
     </p>
   {/if}

@@ -101,10 +101,13 @@
       <button type="button" class="ghost small" onclick={onclose}>← 返回智能体列表</button>
       <h2 style="margin-top:var(--sp-2)">{agent.name}</h2>
       <p>
-        {#if agent.isFallbackReviewer}<span class="badge in_review">兜底审核者</span>{/if}
-        {#if agent.autoReview}<span class="badge done">执行后自动审核</span>{/if}
-        {#if agent.kindPatterns.length === 0}
-          <span class="badge blocked">谁也接不到</span>
+        <span class="badge {agent.role === 'reviewer' ? 'in_review' : 'in_progress'}">{roleLabel}</span>
+        {#if agent.role === 'reviewer' && agent.skillIds.length === 0}
+          <!-- 审核者没挂 skill 就审不了任何东西 —— 这是配置错误，要说出来 -->
+          <span class="badge blocked">审不了：没挂 skill</span>
+        {/if}
+        {#if agent.role === 'executor' && !agent.reviewerAgentId}
+          <span class="badge backlog">不自动审核</span>
         {/if}
       </p>
     </div>
@@ -265,9 +268,6 @@
     grid-template-columns: 1fr 1fr;
     gap: var(--sp-3);
   }
-
-  .inline { display: flex; align-items: center; gap: var(--sp-2); }
-  .inline input { width: auto; }
 
   .skill-picker {
     display: grid;
