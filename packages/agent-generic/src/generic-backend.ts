@@ -7,6 +7,7 @@ import {
   detectVersion,
   loadRuntimeDescriptor,
   probeCommand,
+  cliStateDir,
   planSandbox,
   spawnProcessTree,
   type AgentBackend,
@@ -249,9 +250,13 @@ export class GenericBackend implements AgentBackend {
       command: executablePath,
       args: argv,
       workDir: opts.workDir,
-      ...(opts.sandbox?.extraWritableDirs
-        ? { extraWritableDirs: opts.sandbox.extraWritableDirs }
-        : {}),
+      // ★ CLI 自己的状态目录**必须**放行，否则沙箱会让它没法工作：
+      //   Claude Code 建不了 ~/.claude/session-env/ 时，Bash 工具全程 EPERM。
+      //   这个故障很难归因——daemon 在沙箱外，环境预检会说"一切正常"。
+      extraWritableDirs: [
+        ...(opts.sandbox?.extraWritableDirs ?? []),
+        ...cliStateDir(this.#descriptor),
+      ],
     })
 
     try {

@@ -1,4 +1,5 @@
 import { access, constants } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 /**
@@ -78,11 +79,41 @@ export interface PlanSandboxInput {
   args: readonly string[]
   /** 允许写入的目录（通常是 run 的工作目录）。 */
   workDir: string
-  /** 允许写入的额外目录（如系统临时目录）。 */
+  /**
+   * 允许写入的额外目录。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 这里**必须**包含 CLI 自己的状态目录，否则沙箱会让它没法工作
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 这是实测踩到的：只放行工作目录时，Claude Code 连自己的
+   * `~/.claude/session-env/` 都建不了，于是 **Bash 工具全程 EPERM**——
+   * 而 Bash 是它的核心工具。也就是说：**开了沙箱，agent 基本就废了**。
+   *
+   * 更麻烦的是这个故障**很难归因**：daemon 在沙箱外，它写 `~/.claude`
+   * 完全没问题，所以环境预检报"一切正常"；而被沙箱包住的子进程写不了。
+   * **预检在它最该起作用的场景下给出了假阴性。**
+   *
+   * 所以状态目录由调用方（后端）从描述表的 `stateDir` 取出来一并传进来。
+   * 代价要说清：**沙箱因此比看上去弱一点**——agent 能写它自己的状态目录。
+   * 但那是它本来就该能写的地方，锁掉只会让它无法工作（而"无法工作"的沙箱
+   * 最后一定会被人关掉，等于零）。
+   */
   extraWritableDirs?: readonly string[]
   platform?: NodeJS.Platform
   /** 探测工具是否存在。测试可注入，免得依赖跑测试的机器上装了什么。 */
   hasTool?: (name: string) => Promise<boolean>
+}
+
+/**
+ * CLI 自己的状态目录的**绝对路径**（没有声明就返回空数组）。
+ *
+ * 给沙箱用：它必须被放行写入，否则 CLI 连自己的会话状态都建不了。
+ * 从描述表的 `stateDir` 取——那是这条事实的**单一来源**，环境预检也用它。
+ */
+export function cliStateDir(descriptor: { stateDir?: string }, homeDir?: string): string[] {
+  if (!descriptor.stateDir) return []
+  return [join(homeDir ?? homedir(), descriptor.stateDir)]
 }
 
 /** 在 PATH 里找一个可执行文件。 */

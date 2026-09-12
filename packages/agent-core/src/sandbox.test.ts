@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   SandboxUnavailableError,
+  cliStateDir,
   planSandbox,
   probeSandbox,
 } from './sandbox.ts'
@@ -163,5 +164,61 @@ describe('沙箱包装的形状', () => {
       )
       assert.match(plan.appliedDescription, /误操作/)
     }
+  })
+})
+
+describe('★ 沙箱必须放行 CLI 自己的状态目录', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试的由来：一个让沙箱变成"开了就没法用"的实测
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 只放行工作目录时，Claude Code 连自己的 `~/.claude/session-env/` 都建不了，
+   * 于是 **Bash 工具全程 EPERM**——而 Bash 是它的核心工具。
+   * 也就是说：**开了沙箱，agent 基本就废了**。
+   *
+   * 更难归因的是：daemon 在沙箱外，写 `~/.claude` 完全没问题，
+   * 所以环境预检报"一切正常"；被包住的子进程却写不了。
+   * **预检在它最该起作用的场景下给出了假阴性。**
+   *
+   * 代价如实说：沙箱因此比看上去弱一点——agent 能写它自己的状态目录。
+   * 但那是它本来就该能写的地方，锁掉只会让它无法工作，而"无法工作的沙箱"
+   * 最后一定会被人关掉，等于零。
+   */
+  test('★ cliStateDir 从描述表的 stateDir 取（单一来源）', () => {
+    assert.deepEqual(cliStateDir({ stateDir: '.claude' }, '/home/u'), ['/home/u/.claude'])
+    assert.deepEqual(cliStateDir({}, '/home/u'), [], '没声明就不加——不是所有 CLI 都有状态目录')
+  })
+
+  test('★ 明确传了状态目录时，它出现在沙箱的允许写入列表里', async () => {
+    const plan = await planSandbox({
+      mode: 'workdir-write',
+      command: 'claude',
+      args: ['-p', 'x'],
+      workDir: '/work/abc',
+      extraWritableDirs: ['/home/u/.claude'],
+      platform: 'darwin',
+      hasTool: always,
+    })
+    const profile = plan.args[1] ?? ''
+    assert.match(profile, /subpath "\/work\/abc"/, '工作目录要放行')
+    assert.match(
+      profile,
+      /subpath "\/home\/u\/\.claude"/,
+      '★ CLI 的状态目录也要放行——否则它会连自己的会话状态都建不了',
+    )
+  })
+
+  test('★ Linux 那条路同样要放行状态目录', async () => {
+    const plan = await planSandbox({
+      mode: 'workdir-write',
+      command: 'agent-cli',
+      args: [],
+      workDir: '/work',
+      extraWritableDirs: ['/home/u/.claude'],
+      platform: 'linux',
+      hasTool: always,
+    })
+    assert.match(plan.args.join(' '), /--bind \/home\/u\/\.claude \/home\/u\/\.claude/)
   })
 })
