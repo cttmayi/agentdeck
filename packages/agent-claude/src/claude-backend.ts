@@ -116,8 +116,11 @@ export class ClaudeBackend implements AgentBackend {
     let stderrTail = ''
     const startedAt = Date.now()
 
-    // 如实的**最终**命令行——含沙箱包装与受管参数。调用方负责脱敏与记录。
-    opts.onCommandLine?.([plan.command, ...plan.args])
+    // 如实的**最终**命令行与**沙箱状态**。调用方负责脱敏与记录。
+    opts.onCommandLine?.({
+      argv: [plan.command, ...plan.args],
+      sandboxDescription: plan.appliedDescription,
+    })
 
     const handle = spawnProcessTree({
       command: plan.command,

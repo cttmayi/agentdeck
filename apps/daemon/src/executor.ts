@@ -586,8 +586,13 @@ export class RunExecutor {
         maxTurns: req.limits.maxTurns,
         resumeSessionId: resume.sessionId,
         env: {},
-        onCommandLine: (argv) => {
+        onCommandLine: ({ argv, sandboxDescription }) => {
           void this.#note(runId, `命令行：${redactArgv(argv).join(' ')}`)
+          // ★ 沙箱状态单独一行，**由后端如实上报**而不是从命令行反推。
+          //
+          //   只报命令的话，日志里一条 `claude -p …` 看过去分不清
+          //   "沙箱没开"还是"沙箱开了但没生效"——两者的排查方向完全不同。
+          void this.#note(runId, `沙箱：${sandboxDescription}`)
         },
         onStderrLine: (line) => {
           const text = line.trimEnd()

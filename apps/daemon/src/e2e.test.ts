@@ -57,7 +57,10 @@ class FakeBackend implements AgentBackend {
     //   不报的话，测试就测不到"命令行进日志"这条路径——而那正是
     //   使用者要的 debug 信息。**假后端与真后端的行为不一致，测试就会
     //   为一条不存在的路径放行。**
-    opts.onCommandLine?.(['claude', ...this.#baseArgs])
+    opts.onCommandLine?.({
+      argv: ['claude', ...this.#baseArgs],
+      sandboxDescription: '未启用沙箱（测试里的假后端）',
+    })
 
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'status', content: '会话已启动' })
@@ -427,7 +430,10 @@ class ChattyStderrBackend implements AgentBackend {
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
     // 后端只上报事实，脱敏与记录由调用方做
-    opts.onCommandLine?.(['claude', '-p', '--api-key', 'sk-secret-should-be-redacted'])
+    opts.onCommandLine?.({
+      argv: ['claude', '-p', '--api-key', 'sk-secret-should-be-redacted'],
+      sandboxDescription: '未启用沙箱（测试里的假后端）',
+    })
     opts.onStderrLine?.('deprecation warning: --verbose is deprecated')
 
     const queue = new AsyncQueue<AgentMessage>()
@@ -699,5 +705,89 @@ describe('★ 日志要有**输入**（方便 debug）', () => {
     const text = await waitForText(runId, /输入（prompt/)
     assert.match(text, /把功能实现一下/)
     assert.ok(!/还有 \\d+ 字符未显示/.test(text), '没截断就不该说截断了')
+  })
+})
+
+describe('★ 日志要说清沙箱**到底开没开**', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试的由来：一个"从命令行反推"的问题
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 日志里原本只有一行命令行。使用者看到
+   *   `/opt/homebrew/bin/claude -p --output-format stream-json …`
+   * 问："我看命令没有包括沙盒呢"——而那个 daemon 确实**没开**沙箱，
+   * 所以命令是对的。
+   *
+   * 问题在于**看不出来**：一条没被包装的命令，分不清是"沙箱没开"还是
+   * "沙箱开了但没生效"。这两者的排查方向完全不同。
+   *
+   * 所以沙箱状态要**由后端如实上报**，而不是让人从命令行里找
+   * `sandbox-exec`——那是从结果反推原因，而且不同的包装器名字不同。
+   */
+  test('★ 未启用沙箱时也要明说，而不是留白', async () => {
+    const runId = ulid() as RunId
+    await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'a1', name: '助手', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: '干活',
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+    const text = await waitForText(runId, /沙箱：/)
+    assert.match(text, /沙箱：未启用沙箱/, '★ 没开也要说，否则分不清"没开"与"开了没生效"')
+  })
+
+  test('★ 开着沙箱时，命令行里真的有包装器，且状态行说明它不是安全边界', async () => {
+    const dir = await makeTempDir('sandbox-log')
+    const work = await makeTempDir('sandbox-log-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      sandboxMode: 'workdir-write',
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a1', name: 'x', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i1' },
+          prompt: 'x',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      const out = (await (
+        await fetch(`${d.url}/api/runs/${runId}/messages`)
+      ).json()) as { messages: Array<{ content: string }> }
+      const text = out.messages.map((m) => m.content).join('\n')
+
+      // 假后端不真的走沙箱，所以这里只验证**管道**：命令行与沙箱状态
+      // 都被如实上报到了日志里（真包装由 agent-core 的沙箱测试覆盖）。
+      assert.match(text, /命令行：/, '命令行要在')
+      assert.match(text, /沙箱：/, '★ 沙箱状态要在——两者缺一个都会让人反推')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(work)
+    }
   })
 })

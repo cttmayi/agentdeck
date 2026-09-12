@@ -56,7 +56,25 @@ export interface ExecOptions {
    * 那一次就是把令牌写进了日志。所以后端只负责**如实上报事实**，
    * 由调用方决定怎么脱敏、怎么记。
    */
-  onCommandLine?: (argv: readonly string[]) => void
+  onCommandLine?: (info: {
+    /**
+     * **最终**要执行的命令行——含沙箱包装（如果启用了）。
+     *
+     * ⚠️ 判定沙箱有没有生效**不要**去看这个数组里有没有 `sandbox-exec`：
+     *    那是在从结果反推原因，而不同的包装器名字不同、将来还可能变。
+     *    用下面的 `sandboxDescription`，那是权威说明。
+     */
+    argv: readonly string[]
+    /**
+     * 沙箱的**实际状态**，一句话说清。
+     *
+     * 这个字段是补上来的：一开始只报了命令行，于是日志里一条
+     * `/opt/homebrew/bin/claude -p …` 看过去，**分不清"沙箱没开"还是
+     * "沙箱开了但没生效"**——两者的排查方向完全不同。而"确实做了"与
+     * "看得出来做了"是两件事，这个项目已经在别处栽过一次。
+     */
+    sandboxDescription: string
+  }) => void
   /**
    * stderr 的每一行。
    *
