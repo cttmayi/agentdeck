@@ -74,6 +74,15 @@ import { WorkDirLocks } from './workdir-locks.ts'
 /** 请求体上限（FR-BRIDGE-16）。 */
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 
+/**
+ * run 的终态。
+ *
+ * 用在 SSE 上：晚订阅（刷新后、或连上时 run 已结束）时**补发一个 terminal
+ * 并结束流**。不补的话页面永远收不到终态——既不刷新，也不关闭连接，
+ * 而 `EventSource` 每次断开都会自动重连，于是刷屏"连接中断，正在重连…"。
+ */
+const TERMINAL_RUN_STATUSES: readonly string[] = ['completed', 'failed', 'cancelled']
+
 export interface DaemonOptions {
   dataDir: string
   port: number
@@ -1356,22 +1365,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       res.write(`data: ${JSON.stringify(event)}\n\n`)
     }
 
-    // ① 先补齐历史（已落盘的消息是权威）
-    const persisted = await store.listRunMessages(runId, since)
-    for (const message of replayMessagesSince(persisted, since)) {
-      write({ t: 'message', seq: message.seq, message })
-    }
-
-    // ② 再挂实时订阅
-    const fromSeq =
-      persisted.length > 0 ? Math.max(since, persisted[persisted.length - 1]!.seq) : since
-    const unsubscribe = registry.subscribe(runId, (event) => {
-      if (event.seq > fromSeq) write(event)
-    })
-
-    // 心跳：防止中间层把长连接当作空闲断开
+    // 心跳与清理要先定义：下面的"已结束"分支会提前用到 cleanup
     const heartbeat = setInterval(() => res.write(': ping\n\n'), 15_000)
     heartbeat.unref?.()
+    let unsubscribed = false
+    let unsubscribe = (): void => {
+      unsubscribed = true
+    }
 
     const cleanup = (): void => {
       clearInterval(heartbeat)
@@ -1379,6 +1379,79 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
     req.on('close', cleanup)
     res.on('close', cleanup)
+
+    // ① 先补齐历史（已落盘的消息是权威）
+    const persisted = await store.listRunMessages(runId, since)
+    for (const message of replayMessagesSince(persisted, since)) {
+      write({ t: 'message', seq: message.seq, message })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ② 已经结束的 run：补发一个 terminal 并**立刻结束流**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 这是实测出来的一个 bug。原来这里只补齐历史消息就挂上订阅——而
+    // **`terminal` 事件从不落库**，它只由 registry 实时发一次。
+    //
+    // 后果是晚订阅的页面（刷新后、或者连上时 run 已经结束）：
+    //
+    //   - **永远收不到终态** ⇒ 既不刷新到最终状态，也不关闭连接；
+    //   - 那条连接就这么挂着，靠心跳维持。
+    //
+    // 而 `EventSource` 在任何一次断开后都会**自动重连**。于是 daemon 一重启
+    //（或者网络抖一下），页面就重连 → 拿不到终态 → 再断 → 再重连……
+    // 日志里就是刷屏的"连接中断，正在重连…"。
+    //
+    // 修法：晚订阅时**补发**一个 terminal，然后主动 `end()`。
+    // 客户端收到终态就会关掉订阅，重连循环自然停下。
+    if (TERMINAL_RUN_STATUSES.includes(run.status)) {
+      write({
+        t: 'terminal',
+        status: run.status,
+        result: null,
+        error: run.failureReason
+          ? { reason: run.failureReason, message: '这条执行已经结束（终态由运行记录给出）' }
+          : null,
+      })
+      res.end()
+      cleanup()
+      return
+    }
+
+    // ③ 再挂实时订阅
+    const fromSeq =
+      persisted.length > 0 ? Math.max(since, persisted[persisted.length - 1]!.seq) : since
+    unsubscribe = registry.subscribe(runId, (event) => {
+      // ══════════════════════════════════════════════════════════════
+      // ★ 收到终态：写出去，然后**主动结束这条流**
+      // ══════════════════════════════════════════════════════════════
+      //
+      // 原来这里只把事件写出去就完事，连接一直挂着。客户端确实会自己
+      // `close()`，但那只是把问题藏起来了：
+      //
+      //   - 客户端没关（旧页面、后台标签页、或者将来别的接入方）时，
+      //     这条连接、它的心跳定时器、以及 registry 里的订阅**永远不释放**；
+      //   - 对使用者来说，日志看着像"还连着"，其实早就跑完了。
+      //
+      // 终态之后再没有任何消息可发，所以此时 `end()` 是明确的：
+      // 流结束 = 这条 run 结束了。客户端据此停掉重连（见 RunLog.svelte）。
+      if (event.t === 'terminal') {
+        write(event)
+        res.end()
+        cleanup()
+        return
+      }
+      if (event.seq > fromSeq) write(event)
+    })
+
+    // ══════════════════════════════════════════════════════════════════
+    // 订阅与请求之间有个 await，使用者可能**在这中间就走了**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 上一步 `await store.listRunMessages(...)` 之前 `cleanup` 就已经挂上了。
+    // 如果在那之后再挂上真实订阅，而 close 早就发生过了，那么这个订阅
+    // 就再也没有人去取消——**一个谁也不认识的订阅者会一直收消息**。
+    if (unsubscribed) unsubscribe()
   }
 
   // ══════════════════════════════════════════════════════════════════

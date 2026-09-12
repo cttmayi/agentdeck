@@ -113,6 +113,19 @@
 
   function connect(id: string, from: number): void {
     close()
+    // ★ 换了一条 run 就**必须重置**这两个状态。
+    //
+    //   这个组件是复用的：在任务详情里点另一条执行，`runId` 变了但组件实例
+    //   没变。之前没重置，于是：
+    //
+    //   - `lastSeq` 还停在上一条 run 的序号上 ⇒ 新 run 的 `seq` 比它小
+    //     ⇒ 被 `apply()` 的去重直接丢掉 ⇒ **日志一片空白**；
+    //   - `live` 可能还停在上一条 run 的 `false` ⇒ 一条已经结束的 run 再也
+    //     不认终态。
+    //
+    //   两者都是"看起来像没数据"的静默失败，所以宁可在这里显式重置。
+    lastSeq = from
+    live = true
     source = new EventSource(`/api/runs/${id}/events?since=${from}`)
     source.onmessage = (event) => {
       let payload: { seq?: number; t?: string; [k: string]: unknown }
@@ -124,24 +137,37 @@
       apply(payload)
     }
     source.onerror = () => {
-      // 浏览器会自动重连；这里只记一行，不打断阅读
-      // ⚠️ 这里不能直接拼对象字面量：会漏掉 tool/input/output 四个字段，
-      //    而类型检查会（也应该）因此报错。`push` 在 `apply()` 里，
-      //    作用域够不到，所以给一个等价的、字段齐全的构造。
+      // ══════════════════════════════════════════════════════════════
+      // ★ 已经结束了就**不要再重连** —— 这是"一直重连"那个 bug 的客户端侧
+      // ══════════════════════════════════════════════════════════════
       //
-      //    这处"漏字段"不是纯理论——它正是被类型检查当场抓出来的。
-      rows = [
-        ...rows,
-        {
-          seq: null,
-          kind: 'status',
-          text: '连接中断，正在重连…',
-          tool: null,
-          input: null,
-          output: null,
-          outputTruncated: false,
-        },
-      ]
+      // `EventSource` 在任何一次断开后都会**自动重连**，我们拦不住它——
+      // 唯一能做的是 `close()`。所以只要已经收到终态，就必须关掉。
+      //
+      // 服务端那边也修了（晚订阅会补发 terminal 并结束流），两边一起
+      // 才能保证：断一次 → 重连 → 拿到终态 → 关闭 → 停。
+      if (!live) {
+        close()
+        return
+      }
+
+      // 没结束就真的断了（daemon 重启、网络抖动）：记录一行，但要**去重**。
+      // 刷屏的"连接中断"会把有用的日志冲掉，而重复的行没有任何信息量。
+      const last = rows[rows.length - 1]
+      if (last?.kind !== 'disconnected') {
+        rows = [
+          ...rows,
+          {
+            seq: null,
+            kind: 'disconnected',
+            text: '连接中断，正在重连…（若一直重连，多半是 daemon 停了）',
+            tool: null,
+            input: null,
+            output: null,
+            outputTruncated: false,
+          },
+        ]
+      }
     }
   }
 
@@ -422,6 +448,8 @@
   .log-text.tool_use { color: var(--accent); }
   .log-text.tool_result { color: var(--text-faint); }
   .log-text.status { color: var(--text-faint); font-style: italic; }
+  /* 断连用 warn 色：它是"需要注意"而不是"出错"——而且重复的那几行已被去重 */
+  .log-text.disconnected { color: var(--warn); }
   .log-text.terminal { color: var(--good); }
   .log-text.error { color: var(--bad); }
 </style>

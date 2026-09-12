@@ -39,8 +39,32 @@ class FakeBackend implements AgentBackend {
 
   readonly #fail: boolean
 
+  /** 卡住执行用的闸门——见 `hold()`。 */
+  #gate: Promise<void> | null = null
+
   constructor(options: { fail?: boolean } = {}) {
     this.#fail = options.fail === true
+  }
+
+  /**
+   * 让这次执行**停在 running 上**，直到调用返回的那个函数。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么需要它：假后端"太快"了，快到测不出中间状态
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 消息是立刻推完的、结果也立刻就有，于是 run 在 `POST /api/runs`
+   * 返回之前就已经结束了。所有"执行中"的断言都会退化成"已结束"的断言——
+   * 包括"执行中不能把流掐断"这条，它会**因为流已经正常结束而通过**。
+   *
+   * 一个总在正确分支上通过的测试，比没有测试更危险。
+   */
+  hold(): () => void {
+    let release!: () => void
+    this.#gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    return release
   }
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
@@ -71,7 +95,8 @@ class FakeBackend implements AgentBackend {
     queue.close()
 
     const fail = this.#fail
-    const result = Promise.resolve({
+    const gate = this.#gate ?? Promise.resolve()
+    const result = gate.then(() => ({
       status: fail ? ('failed' as const) : ('completed' as const),
       output: fail ? '' : '报告：任务已完成。',
       error: fail ? '假装失败了' : null,
@@ -79,7 +104,7 @@ class FakeBackend implements AgentBackend {
       sessionId: 'fake-session-1',
       usage: { inputTokens: 100, outputTokens: 50, costUsdMicros: 1234, costSource: 'provider' as const },
       exitCode: fail ? 1 : 0,
-    })
+    }))
 
     return {
       messages: queue,
@@ -137,6 +162,62 @@ async function readUntilTerminal(
   }
 
   return { events, terminal }
+}
+
+/**
+ * 读完**整个** SSE 流，并回答"流是自己结束的吗"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要它：`readUntilTerminal` 会在收到 terminal 时主动 cancel
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 于是它**测不出"服务端忘了关流"**——客户端自己走了，服务端挂不挂着它不知道。
+ * 而那正是线上那个 bug 的另一半：终态补发了，连接却还留着。
+ *
+ * 这里反过来：一直读到 `done`。`ended=false` 就表示超时被我们掐断，
+ * 也就是"连接一直挂着"。
+ */
+async function readStreamToEnd(
+  url: string,
+  timeoutMs = 5_000,
+): Promise<{ events: RunEvent[]; ended: boolean }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const events: RunEvent[] = []
+  let ended = false
+
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    assert.equal(res.status, 200)
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) {
+        ended = true
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+
+      let index = buffer.indexOf('\n\n')
+      while (index !== -1) {
+        const raw = buffer.slice(0, index)
+        buffer = buffer.slice(index + 2)
+        index = buffer.indexOf('\n\n')
+
+        if (!raw.startsWith('data: ')) continue // 心跳注释
+        events.push(JSON.parse(raw.slice(6)) as RunEvent)
+      }
+    }
+  } catch (err) {
+    if ((err as Error).name !== 'AbortError') throw err
+  } finally {
+    clearTimeout(timer)
+  }
+
+  return { events, ended }
 }
 
 let dir: string
@@ -359,6 +440,146 @@ describe('端到端：失败路径', () => {
       await d.close()
       await cleanup(failDir)
       await cleanup(failData)
+    }
+  })
+})
+
+describe('端到端：SSE 终态补发', () => {
+  /**
+   * ★ 这组测试对应一个**只在使用者面前出现**的 bug。
+   *
+   * 现象：一次执行跑完之后，日志里开始刷屏"连接中断，正在重连…"。
+   *
+   * 根因有两处，缺一不可：
+   *
+   *   1. `terminal` 事件**从不落库**，它只由 registry 实时发一次。所以
+   *      "run 结束之后才连上来"的页面（刷新页面、切到已完成的那条 run）
+   *      **永远收不到终态**；
+   *   2. 收不到终态就不会 `close()`，连接一直挂着；而 `EventSource` 在
+   *      任何一次断开后都会自动重连 ⇒ 断开 → 重连 → 还是没有终态 → 再断……
+   *
+   * 修法：晚订阅时补发一个 terminal 并主动 `end()`。
+   */
+  test('★ 执行结束后才订阅：补发 terminal，并且流自己结束（不能挂着）', async () => {
+    const dataDir = await makeTempDir('e2e-sse-data')
+    const work = await makeTempDir('e2e-sse-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i' },
+          prompt: '跑完之后再来看日志',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      // 先让它真的跑完
+      const first = await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+      assert.equal(first.terminal !== null, true, '第一条订阅应该能拿到终态')
+
+      // 再**新开**一条订阅，模拟"刷新页面"或"切回这条已完成的 run"
+      const { events, ended } = await readStreamToEnd(`${d.url}/api/runs/${runId}/events?since=-1`)
+
+      assert.equal(
+        ended,
+        true,
+        '终态之后服务端必须主动 end()——否则连接一直挂着，EventSource 会无限重连',
+      )
+      assert.equal(
+        events.some((e) => e.t === 'terminal'),
+        true,
+        '晚订阅必须补发 terminal，否则页面永远等不到终态',
+      )
+      assert.equal(
+        events.some((e) => e.t === 'message'),
+        true,
+        '历史消息仍要补齐——补发终态不能顶掉回放',
+      )
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('★ 执行中订阅：流不能提前结束，否则实时日志就断了', async () => {
+    const dataDir = await makeTempDir('e2e-sse-live-data')
+    const work = await makeTempDir('e2e-sse-live-work')
+    const b = new FakeBackend()
+    // ★ 把执行卡在 running 上。不卡住的话 run 会在 POST 返回前就结束，
+    //   这条测试就退化成了上一条——看着通过，其实没测"执行中"。
+    const release = b.hold()
+    const d = await startDaemon({
+      dataDir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i' },
+          prompt: '实时日志',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      let settled = false
+      const reading = readStreamToEnd(`${d.url}/api/runs/${runId}/events`, 8_000).finally(() => {
+        settled = true
+      })
+
+      // 等一小会儿：run 还卡着，流**不该**结束
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      assert.equal(
+        settled,
+        false,
+        'run 还没结束，SSE 流就不能结束——否则实时日志会断在半路',
+      )
+
+      // 放行，这次才该收到终态并结束
+      release()
+      const { events, ended } = await reading
+
+      assert.equal(ended, true, '跑完之后实时订阅要结束')
+      assert.equal(
+        events.some((e) => e.t === 'terminal'),
+        true,
+        '实时订阅必须收到终态',
+      )
+    } finally {
+      release()
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
     }
   })
 })
