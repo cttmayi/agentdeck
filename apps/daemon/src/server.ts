@@ -42,6 +42,7 @@ import {
   type ThirdPartyItem,
 } from './ingest.ts'
 import { reconcileInterruptedRuns } from './reconcile.ts'
+import { checkEnvironment, renderEnvironmentReport } from './environment.ts'
 import { defaultWorkRoot } from './workdir.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
@@ -248,6 +249,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
 
   const ingestor = new ReportIngestor({ store })
+  // 探测一次当前 runtime，用于环境预检（不重复探测别的 runtime——
+  // 没装的 CLI 谈不上"它家目录写不进去"）
+  const probe2 = await backend.probe()
+
   const workspaceId = await bootstrap(store, info)
 
   // ★ Web UI 的构建产物不进版本库（gitignore），所以 clone 下来直接起 daemon
@@ -255,6 +260,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //   是 daemon 坏了。只提示、不阻止启动——API 与 CLI 仍然完全可用。
   if (!(await isWebBuilt())) {
     warn(NOT_BUILT_HINT)
+  }
+
+  // ★ 环境预检：CLI 自己的状态目录能不能写。
+  //
+  //   实测踩到过：agent 的工具输出里冒出 `EPERM ... mkdir '/Users/x/.claude/
+  //   session-env/<uuid>'`，而那个路径**不是工作目录**。它长得像"工作目录
+  //   没建成功"，于是排查会从工作目录开始——那里根本没问题。
+  //
+  //   而且**越是按推荐做法部署（容器 / 专用用户 / 沙箱）越容易撞上它**，
+  //   所以在启动时就说清楚，比让使用者在 agent 输出里猜便宜得多。
+  const envReport = await checkEnvironment(
+    Object.entries(knownRuntimeAdapters()).map(([key, adapter]) => ({
+      descriptor: adapter.descriptor,
+      available: key === descriptor.key ? probe2.available : false,
+    })),
+  )
+  if (!envReport.ok) {
+    warn(renderEnvironmentReport(envReport))
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -608,7 +631,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }),
       )
 
+      // 环境问题也要进身份接口：界面据此在智能体页给出提示，
+      // 而不是等使用者从 agent 输出里读一句 EPERM
+      const env = await checkEnvironment([
+        { descriptor, available: probe.available },
+      ])
+
       sendJson(res, 200, {
+        environment: { ok: env.ok, issues: env.issues },
         protocolVersion: LOCAL_PROTOCOL_VERSION,
         deviceId: device?.id ?? 'unknown',
         deviceName: device?.name ?? 'unknown',
@@ -723,6 +753,153 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       await store.insertAgent(agent)
       sendJson(res, 201, agent)
       return
+    }
+
+    // ── 改 agent（FR-AGENT-19：可点开看细节并编辑）──
+    //
+    // 用 PATCH 语义：**只改传了的字段**。整体替换会让"只想改个名字"的请求
+    // 顺手把没传的字段清空——那是个很容易踩且很难发现的坑（保存之后
+    // 发现指令没了）。
+    const agentMatch = /^\/api\/agents\/([^/]+)$/.exec(path)
+    if (agentMatch) {
+      const agentId = decodeURIComponent(agentMatch[1]!) as Agent['id']
+
+      if (req.method === 'GET') {
+        const agent = await store.getAgent(agentId)
+        if (!agent) {
+          sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+          return
+        }
+        sendJson(res, 200, agent)
+        return
+      }
+
+      if (req.method === 'PATCH' || req.method === 'PUT') {
+        const current = await store.getAgent(agentId)
+        if (!current) {
+          sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+          return
+        }
+        const body = (await readJsonBody(req)) as Record<string, unknown>
+
+        // 只认识这些字段——未知字段**明确拒绝**而不是静默忽略：
+        // 拼错 `instructions` 为 `instruction` 时，静默忽略会让人以为保存成功了
+        const allowed = new Set([
+          'name',
+          'instructions',
+          'model',
+          'workDir',
+          'skillIds',
+          'kindPatterns',
+          'isFallbackReviewer',
+          'autoReview',
+          'maxConcurrentRuns',
+        ])
+        const unknown = Object.keys(body).filter((k) => !allowed.has(k))
+        if (unknown.length > 0) {
+          sendJson(res, 400, {
+            error: `不认识的字段：${unknown.join(', ')}。可改的有：${[...allowed].join(', ')}`,
+          })
+          return
+        }
+
+        const patch: Partial<Agent> = {}
+
+        if (body['name'] !== undefined) {
+          const name = typeof body['name'] === 'string' ? body['name'].trim() : ''
+          if (name === '') {
+            sendJson(res, 400, { error: 'name 不能为空' })
+            return
+          }
+          patch.name = name
+        }
+        if (body['instructions'] !== undefined) {
+          if (typeof body['instructions'] !== 'string') {
+            sendJson(res, 400, { error: 'instructions 必须是字符串' })
+            return
+          }
+          patch.instructions = body['instructions']
+        }
+
+        const stringArray = (key: string): string[] | { error: string } => {
+          const raw = body[key]
+          if (!Array.isArray(raw)) return { error: `${key} 必须是数组` }
+          const bad = raw.find((v) => typeof v !== 'string' || v.trim() === '')
+          if (bad !== undefined) {
+            return { error: `${key} 里每一项都必须是非空字符串（收到 ${JSON.stringify(bad)}）` }
+          }
+          return (raw as string[]).map((v) => v.trim())
+        }
+
+        if (body['skillIds'] !== undefined) {
+          const ids = stringArray('skillIds')
+          if (!Array.isArray(ids)) {
+            sendJson(res, 400, { error: ids.error })
+            return
+          }
+          // 与新建时同样校验：挂不存在的 skill 会在**运行时**才报"没有 skill"，
+          // 而不是"你填错了 id"
+          const skills = await store.listSkills(current.workspaceId)
+          const known = new Set(skills.map((s) => s.id as string))
+          const unknownSkill = ids.find((id) => !known.has(id))
+          if (unknownSkill !== undefined) {
+            sendJson(res, 400, {
+              error: `skill 不存在：${unknownSkill}。可用的：${
+                skills.map((s) => s.slug).join(', ') || '（还没有 skill）'
+              }`,
+            })
+            return
+          }
+          patch.skillIds = ids as Agent['skillIds']
+        }
+
+        if (body['kindPatterns'] !== undefined) {
+          const patterns = stringArray('kindPatterns')
+          if (!Array.isArray(patterns)) {
+            sendJson(res, 400, { error: patterns.error })
+            return
+          }
+          patch.kindPatterns = patterns
+        }
+
+        for (const flag of ['isFallbackReviewer', 'autoReview'] as const) {
+          if (body[flag] !== undefined) {
+            if (typeof body[flag] !== 'boolean') {
+              sendJson(res, 400, { error: `${flag} 必须是布尔值` })
+              return
+            }
+            patch[flag] = body[flag] as boolean
+          }
+        }
+
+        if (body['maxConcurrentRuns'] !== undefined) {
+          const n = body['maxConcurrentRuns']
+          if (!Number.isInteger(n) || (n as number) < 1) {
+            sendJson(res, 400, { error: 'maxConcurrentRuns 必须是正整数' })
+            return
+          }
+          patch.maxConcurrentRuns = n as number
+        }
+
+        if (body['workDir'] !== undefined) {
+          if (body['workDir'] !== null && typeof body['workDir'] !== 'string') {
+            sendJson(res, 400, { error: 'workDir 必须是字符串或 null' })
+            return
+          }
+          const wd = typeof body['workDir'] === 'string' ? body['workDir'].trim() : ''
+          patch.workDir = wd === '' ? null : wd
+        }
+
+        if (body['model'] !== undefined) {
+          const m = typeof body['model'] === 'string' ? body['model'].trim() : ''
+          patch.model = m === '' ? null : m
+        }
+
+        const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
+        await store.insertAgent(updated)
+        sendJson(res, 200, updated)
+        return
+      }
     }
 
     if (req.method === 'GET' && path === '/api/issues') {
@@ -992,7 +1169,37 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: '缺少 runId' })
         return
       }
-      const outcome = await executor.submit(body)
+      // ★ 解析 skill（见 SubmitRunRequest.skills 的说明）。
+      //
+      //   省略 ⇒ 按该 agent 的配置解析；显式给了就用给的。
+      //   显式给空数组而 agent 明明配了 skill ⇒ **警告**，因为那几乎一定是
+      //   调用方漏了，而它的后果是"用裸模型跑审核"——正常完成、结果不对。
+      let skills = body.skills
+      if (skills === undefined || skills.length === 0) {
+        const agent = await store.getAgent(body.agentRef.id as Agent['id'])
+        const configured = agent ? await loadAgentSkills(store, agent) : []
+        if (skills !== undefined && configured.length > 0) {
+          warn(
+            `run ${body.runId} 显式传了空 skills，但 agent ${agent?.name ?? body.agentRef.id} ` +
+              `配了 ${configured.length} 个 skill。如果这不是有意的，检查调用方是否漏了 skills。`,
+          )
+        }
+        if (skills === undefined) {
+          skills = configured.map((s) => ({
+            ref: { id: s.id, slug: s.slug, source: s.source },
+            slug: s.slug,
+            name: s.name,
+            body: s.body,
+            allowedActions: s.allowedActions,
+            files: {},
+          }))
+          if (skills.length > 0) {
+            info(`run ${body.runId} 按 agent 配置解析到 ${skills.length} 个 skill`)
+          }
+        }
+      }
+
+      const outcome = await executor.submit({ ...body, skills })
       if (outcome.kind === 'rejected') {
         // 取不到槽位就不返回 202——让页面稍后重试（FR-RUNTIME-04）
         res.setHeader('retry-after', String(Math.ceil(outcome.retryAfterMs / 1000)))

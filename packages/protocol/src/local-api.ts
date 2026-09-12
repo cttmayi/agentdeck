@@ -49,7 +49,29 @@ export const SubmitRunRequest = z.object({
     name: z.string(),
     instructions: z.string(),
   }),
-  skills: z.array(SkillPayload),
+  /**
+   * 这次 run 要注入哪些 skill。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * **可以省略** —— 省略时由 daemon 按该 agent 的配置解析
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 这条改动的由来是一次真实的静默失效：页面在提交执行 run 时硬编码了
+   * `skills: []`，于是**一个 skill 也没注入**，Claude 用的是它自己的默认
+   * 行为——而"审核标准由 skill 决定"是这个产品的核心，等于整条审核链路
+   * 退回了裸模型。
+   *
+   * 它没有任何报错：run 正常跑完、状态是 completed，只是做的事不是你要的。
+   *
+   * 根因不在那一行 `[]`，而在**"谁来解析 skill"这件事有两个答案**：
+   * 服务端的 `createRunForReviewer` 会调 `loadAgentSkills(agent)`，
+   * 而页面自己拼请求时**没有任何东西提醒它也要这么做**。
+   *
+   * 所以现在把解析权收归 daemon：省略这个字段就按 agent 解析。
+   * 显式传空数组仍然表示"这次确实不要 skill"（那是合法意图），
+   * 但 daemon 会在 agent 明明配了 skill 时发出警告——**不一致要说出来**。
+   */
+  skills: z.array(SkillPayload).optional(),
   subject: SubjectRef,
   prompt: z.string(),
   /**

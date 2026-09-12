@@ -185,6 +185,26 @@ export interface RuntimeDescriptor {
    */
   versions?: SupportedVersions
 
+  /**
+   * 这个 CLI **自己的状态目录**（相对用户主目录），没有就不写。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么要专门声明它
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * CLI 除了工作室目录之外，还会往自己的状态目录里写东西（会话环境、
+   * 缓存、历史）。那个目录**不在我们的工作目录里**，也不受我们的沙箱
+   * 管——而我们恰恰经常把它跑在受限环境里（容器、专用用户、沙箱）。
+   *
+   * 实测踩到过：`EPERM: operation not permitted, mkdir
+   * '/Users/ling/.claude/session-env/<uuid>'`。这个错误从 agent 的工具输出
+   * 里冒出来，**看起来像"工作目录没设成功"**，而实际上工作目录好好的，
+   * 是 CLI 自己的家目录写不进去。错误指向了完全错误的方向。
+   *
+   * 声明它之后就能**在起 run 之前**检查并给出可读的诊断。
+   */
+  stateDir?: string
+
   /** 技能落盘的目录（相对工作目录）。 */
   skillDir: string
   /** 上下文文件名。 */
@@ -264,6 +284,7 @@ export const CLAUDE_DESCRIPTOR: RuntimeDescriptor = {
     verifiedWith: [],
     onMismatch: 'warn',
   },
+  stateDir: '.claude',
   skillDir: '.claude/skills',
   contextFile: 'CLAUDE.md',
   toolConfig: {

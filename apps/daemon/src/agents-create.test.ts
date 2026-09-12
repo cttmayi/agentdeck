@@ -186,3 +186,88 @@ describe('默认值与 runtime', () => {
     })
   })
 })
+
+describe('★ 改 agent：只改传了的字段（PATCH 语义）', () => {
+  test('★ 只改名字不会把指令清空', async () => {
+    // 整体替换会让"只想改个名字"的请求顺手清掉没传的字段——
+    // 那是个很容易踩、而且保存后才发现的坑。
+    await withDaemon(async (url) => {
+      const created = (await create(url, { name: '原名', instructions: '原来的指令' })).body as {
+        id: string
+      }
+      const res = await fetch(`${url}/api/agents/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '新名' }),
+      })
+      assert.equal(res.status, 200)
+      const updated = (await res.json()) as { name: string; instructions: string }
+      assert.equal(updated.name, '新名')
+      assert.equal(updated.instructions, '原来的指令', '★ 没传的字段必须原样保留')
+    })
+  })
+
+  test('★ 拼错的字段名被**拒绝**，而不是静默忽略', async () => {
+    // 静默忽略会让人以为保存成功了
+    await withDaemon(async (url) => {
+      const created = (await create(url, { name: 'x' })).body as { id: string }
+      const res = await fetch(`${url}/api/agents/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ instruction: '少了 s' }),
+      })
+      assert.equal(res.status, 400)
+      assert.match(String(((await res.json()) as { error: string }).error), /不认识的字段/)
+    })
+  })
+
+  test('改 skillIds 时仍然校验存在性', async () => {
+    await withDaemon(async (url) => {
+      const created = (await create(url, { name: 'x' })).body as { id: string }
+      const res = await fetch(`${url}/api/agents/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ skillIds: ['nope'] }),
+      })
+      assert.equal(res.status, 400)
+      assert.match(String(((await res.json()) as { error: string }).error), /skill 不存在/)
+    })
+  })
+
+  test('GET 单个 agent 可取回细节', async () => {
+    await withDaemon(async (url) => {
+      const created = (await create(url, { name: '细节', instructions: '看这里' })).body as {
+        id: string
+      }
+      const got = (await (await fetch(`${url}/api/agents/${created.id}`)).json()) as {
+        name: string
+        instructions: string
+      }
+      assert.equal(got.name, '细节')
+      assert.equal(got.instructions, '看这里')
+    })
+  })
+
+  test('改不存在的 agent ⇒ 404', async () => {
+    await withDaemon(async (url) => {
+      const res = await fetch(`${url}/api/agents/does-not-exist`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'x' }),
+      })
+      assert.equal(res.status, 404)
+    })
+  })
+
+  test('name 不能改成空', async () => {
+    await withDaemon(async (url) => {
+      const created = (await create(url, { name: 'x' })).body as { id: string }
+      const res = await fetch(`${url}/api/agents/${created.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '  ' }),
+      })
+      assert.equal(res.status, 400)
+    })
+  })
+})

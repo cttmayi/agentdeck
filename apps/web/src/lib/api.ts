@@ -92,10 +92,19 @@ export interface RuntimeView {
   }
 }
 
+export interface EnvironmentIssue {
+  subject: string
+  severity: 'error' | 'warning'
+  summary: string
+  action: string
+}
+
 export interface Identity {
   deviceName: string
   currentRuntime?: string
   runtimes: RuntimeView[]
+  /** 运行环境预检结果（例如 CLI 自己的状态目录写不进去）。 */
+  environment?: { ok: boolean; issues: EnvironmentIssue[] }
 }
 
 export interface Issue {

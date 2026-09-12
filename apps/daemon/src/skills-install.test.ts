@@ -187,3 +187,101 @@ describe('★ 同名冲突：确定的优先级 + 明确提示，绝不静默（
     })
   })
 })
+
+describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这次静默失效的由来
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 页面提交执行 run 时硬编码了 `skills: []`，于是**一个 skill 也没注入**，
+   * Claude 用的是它自己的默认行为——而"审核标准由 skill 决定"是这个产品的
+   * 核心，那条路径等于把它关掉了。
+   *
+   * 它**没有任何报错**：run 正常跑完、状态 completed，只是做的事不是你要的。
+   *
+   * 根因不在那一行 `[]`，而在"谁来解析 skill"有两个答案：服务端的
+   * `createRunForReviewer` 会调 `loadAgentSkills`，而页面自己拼请求时
+   * 没有任何东西提醒它也要这么做。
+   *
+   * 现在把解析权收归 daemon：**省略 skills 就按 agent 解析**。
+   */
+
+  async function bootstrap(url: string) {
+    const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
+      agents: Array<{ id: string; name: string; skillIds: string[] }>
+    }).agents
+    const agent = agents.find((a) => a.skillIds.length > 0)
+    assert.ok(agent, 'daemon 首启会播种一个挂着内置审核模板的 agent')
+    return agent!
+  }
+
+  let lastSubmittedRunId = ''
+
+  async function submitRun(url: string, agentId: string, extra: Record<string, unknown>) {
+    const runId = `01M2SKILL${Math.random().toString(36).slice(2, 14).toUpperCase().padEnd(16, '0')}`
+    const res = await fetch(`${url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: agentId, name: 'x', instructions: '' },
+        subject: { type: 'issue', id: 'i-1' },
+        prompt: 'x',
+        limits: { maxTurns: null, timeoutMs: null },
+        ...extra,
+      }),
+    })
+    lastSubmittedRunId = runId
+    return { status: res.status, runId }
+  }
+
+  test('★ 省略 skills ⇒ daemon 按 agent 配置解析，而不是一个都不注入', async () => {
+    await withDaemon(async (url) => {
+      const agent = await bootstrap(url)
+      const { status } = await submitRun(url, agent.id, {})
+      assert.equal(status, 202)
+
+      // 看 run 记录自己的 skillRefs。
+      //
+      // ⚠️ 不能看审计：审计是**审核收口**时才写的（判决、动作、审计一起落库），
+      //    execute run 根本不产生审计记录。我第一版就写错了地方，测试报的是
+      //    "审计里没有 skillRefs"，而真相是"这条 run 没有审计"。
+      const run = (await (
+        await fetch(`${url}/api/runs/${lastSubmittedRunId}`)
+      ).json()) as { skillRefs: unknown[] }
+      assert.ok(
+        run.skillRefs.length > 0,
+        '★ 省略 skills 时必须解析出 agent 配的那些 —— 否则等于用裸模型跑审核',
+      )
+    })
+  })
+
+  test('★ 显式传空数组仍然合法（"这次就是不要 skill"）', async () => {
+    await withDaemon(async (url) => {
+      const agent = await bootstrap(url)
+      const { status } = await submitRun(url, agent.id, { skills: [] })
+      assert.equal(status, 202, '显式空数组是一个合法意图，不该被拒')
+    })
+  })
+
+  test('显式给 skill 时用给的（覆盖 agent 配置）', async () => {
+    await withDaemon(async (url) => {
+      const agent = await bootstrap(url)
+      const { status } = await submitRun(url, agent.id, {
+        skills: [
+          {
+            ref: { id: 'x', slug: 'only-this', source: 'local' },
+            slug: 'only-this',
+            name: 'only-this',
+            body: '标准',
+            allowedActions: ['comment.create'],
+            files: {},
+          },
+        ],
+      })
+      assert.equal(status, 202)
+    })
+  })
+})

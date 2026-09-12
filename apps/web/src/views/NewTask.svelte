@@ -56,7 +56,10 @@
           runId,
           kind: 'execute',
           agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
-          skills: [],
+          // ★ **不传 skills** —— 让 daemon 按这个 agent 的配置解析。
+          //   这里原来硬编码 `skills: []`，后果是一个 skill 也没注入、
+          //   Claude 用回它自己的默认行为，而 run 状态还是 completed。
+          //   "审核标准由 skill 决定"是这个产品的核心，那条路径等于把它关掉了。
           subject: { type: 'issue', id: issue.id },
           prompt: [t, description.trim()].filter(Boolean).join('\n\n'),
           // 只有真的填了才带这个字段：空字符串与"没指定"是两件事

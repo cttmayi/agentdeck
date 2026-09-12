@@ -119,6 +119,24 @@ export async function createAgent(input: {
   return agent
 }
 
+/**
+ * 改一个 agent（PATCH 语义：只改传了的字段）。
+ *
+ * 校验交给服务端（它是权威）；这里只把它的原文带回去，不在客户端重写一遍
+ * ——两处规则迟早不一致，而"客户端放行、服务端拒绝"的体验最糟。
+ */
+export async function updateAgent(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<Agent> {
+  const agent = await api<Agent>(`/api/agents/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+  await loadAgents()
+  return agent
+}
+
 /** 当前数据快照，供同步循环收集摘要用。 */
 export function snapshot(): { issues: Issue[]; runs: RunSummary[] } {
   return { issues: get(issues), runs: get(runs) }

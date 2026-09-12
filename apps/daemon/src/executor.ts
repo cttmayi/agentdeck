@@ -197,7 +197,7 @@ export class RunExecutor {
       trigger: req.kind === 'review' ? 'third_party' : 'assignment',
       derivedFrom: (req.derivedFrom ?? null) as Run['derivedFrom'],
       chainDepth: req.chainDepth ?? 0,
-      skillRefs: req.skills.map((s) => s.ref),
+      skillRefs: (req.skills ?? []).map((s) => s.ref),
       workDir: resolved.path,
       waitReason: null,
       sessionId: null,
@@ -352,7 +352,7 @@ export class RunExecutor {
 
       // ── 注入技能（按 agent 求解的**子集**，D22）──
       const skillsBrief: SkillBrief[] = []
-      for (const skill of req.skills) {
+      for (const skill of req.skills ?? []) {
         // 注入失败要让 run 失败——静默的缺能力比报错糟得多
         await writeSkill(run.workDir!, this.#deps.descriptor.skillDir, {
           slug: skill.slug,
@@ -592,7 +592,7 @@ export class RunExecutor {
     const subjectKey = `${run.subject.type}:${run.subject.id}`
     const invalidAttempts = this.#invalidAttempts.get(subjectKey) ?? 0
 
-    const allowedActions = req.skills.flatMap((s) => s.allowedActions)
+    const allowedActions = (req.skills ?? []).flatMap((s) => s.allowedActions)
 
     // ★ 重建链路（根 → 当前）。动作派生要用它判环与判深度。
     //   失败不能拖垮审核本身——退化成空链路（只剩深度兜底）并告警。
@@ -610,7 +610,7 @@ export class RunExecutor {
       allowedActions,
       invalidAttempts,
       inputBlobRefs: req.review?.inputBlobRef ? [req.review.inputBlobRef] : [],
-      skillRefs: req.skills.map((s) => s.ref),
+      skillRefs: (req.skills ?? []).map((s) => s.ref),
       modelId: null,
       promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
       argv: [this.#deps.descriptor.command, ...this.#deps.descriptor.baseArgs],
