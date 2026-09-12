@@ -399,3 +399,93 @@ describe('端到端：不破坏使用者已有的文件', () => {
     }
   })
 })
+
+/** 等到 run 有消息为止（消息是流式写入的，可能晚一拍）。 */
+async function waitForMessages(runId: string): Promise<Array<{ content: string }>> {
+  for (let i = 0; i < 200; i += 1) {
+    const out = (await (
+      await fetch(`${daemon.url}/api/runs/${runId}/messages`)
+    ).json()) as { messages: Array<{ content: string }> }
+    if (out.messages.length > 0) return out.messages
+    await new Promise((r) => setTimeout(r, 25))
+  }
+  throw new Error('等待 run 消息超时')
+}
+
+describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试的由来：一次"其实做了、但看不出来"的误判
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者看执行日志时报告"还是能看到 Claude Code 原本的 skill"，
+   * 证据是日志里那句「会话已启动（25 个工具可用）」。
+   *
+   * 那句话说的是 **Claude Code 内置工具的数量**，与我们的 skill 无关——
+   * 我们注入的是 `.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md`，它们
+   * **增加**一份标准，并不会去掉 CLI 自带的工具。
+   *
+   * 但"确实注入了"和"看得出来注入了"是两件事：日志里**没有任何地方**
+   * 说我们注入了什么，于是使用者只能靠猜，而他会猜错。
+   *
+   * 所以要有一行明确的记录。
+   */
+  test('★ 日志里有一行说明本次注入了哪些 skill', async () => {
+    const runId = ulid() as RunId
+    const res = await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'agent-with-skill', name: '带技能的执行者', instructions: '' },
+        skills: [
+          {
+            ref: { id: 'sk-1', slug: 'general-review', source: 'local' },
+            slug: 'general-review',
+            name: '通用审核',
+            body: '# 标准\n\n只判断，不提额外要求。',
+            allowedActions: ['comment.create'],
+            files: {},
+          },
+        ],
+        subject: { type: 'issue', id: issueId },
+        prompt: '干活',
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+    assert.equal(res.status, 202)
+
+    const text = (await waitForMessages(runId)).map((m) => m.content).join('\n')
+    assert.match(
+      text,
+      /已注入 1 个 skill：general-review/,
+      '★ 日志里必须说清注入了什么——否则使用者只能靠猜，而他会猜错',
+    )
+    assert.match(text, /CLAUDE\.md|上下文文件/, '也要说清写到哪儿了')
+  })
+
+  test('★ 没挂 skill 时也要明说，而不是留白', async () => {
+    // 留白会被读成"注入了但没显示"，而真相是"这个 agent 没配 skill"
+    const runId = ulid() as RunId
+    await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'bare', name: '没配技能的', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: '干活',
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+
+    const text = (await waitForMessages(runId)).map((m) => m.content).join('\n')
+    assert.match(text, /没有注入任何 skill/)
+    assert.match(text, /按它自己的默认行为工作/, '要说清后果是什么')
+  })
+})

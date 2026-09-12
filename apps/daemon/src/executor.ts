@@ -25,6 +25,7 @@ import {
   type TokenUsage,
 } from '@alpha-helper/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
+import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
 import type { RunRegistry } from './registry.ts'
 import type { ReviewCoordinator } from './review.ts'
@@ -333,6 +334,41 @@ export class RunExecutor {
     }
   }
 
+  /**
+   * 往 run 的消息流里写一行**状态**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么要专门有这么一个方法
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者看得最多的地方是**执行日志**，而不是运行记录里的字段。所以
+   * "这次用了哪些 skill""环境有没有问题"这类事实如果只写进记录、
+   * 不写进日志，使用者就得靠猜——而他会猜错：
+   *
+   *   Claude Code 启动时自己会报一句"会话已启动（25 个工具可用）"，
+   *   那是**它内置工具的数量**，与我们的 skill 无关。使用者看到它，
+   *   很自然会以为"用的还是 Claude 默认的那套"——因为日志里**没有任何
+   *   地方说我们注入了什么**。
+   *
+   * 我们确实注入了（`.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md` 都在
+   * 工作目录里），但"确实做了"和"看得出来做了"是两件事。
+   */
+  async #note(runId: RunId, text: string): Promise<void> {
+    const event = this.#deps.registry.emit(runId, {
+      t: 'message',
+      message: {
+        type: 'status',
+        tool: null,
+        content: text,
+        input: null,
+        output: null,
+        outputTruncated: false,
+        at: this.#now(),
+      },
+    })
+    if (event?.t === 'message') await this.#deps.store.appendRunMessage(runId, event.message)
+  }
+
   async #defaultWorkspaceId(): Promise<Run['workspaceId']> {
     const ids = await this.#deps.store.listWorkspaceIds()
     const first = ids[0]
@@ -407,6 +443,10 @@ export class RunExecutor {
     try {
       await store.transitionRun(runId, 'queued', 'dispatched', { dispatchedAt: this.#now() })
 
+      // 环境预检放在注入之前：如果 CLI 连自己的状态目录都写不了，
+      // 这次 run 的产出是不可信的，越早说越好（而清理注入物的开销也省下了）
+      const envCheck = await checkEnvironment([{ descriptor: runtime.descriptor, available: true }])
+
       // ── 注入技能（按 agent 求解的**子集**，D22）──
       const skillsBrief: SkillBrief[] = []
       for (const skill of req.skills ?? []) {
@@ -418,6 +458,40 @@ export class RunExecutor {
         injectedSlugs.push(skill.slug)
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
       }
+
+      // ★ 环境预检的问题必须出现在**这份日志里**。
+      //
+      //   实测踩到过：daemon 跑在限制家目录写入的环境里（容器 / 专用用户 /
+      //   沙箱），于是 Claude Code 建不了自己的 `~/.claude/session-env/`，
+      //   它的 **Bash 工具全程 EPERM**，agent 还会自己琢磨着绕
+      //   （日志里出现"maybe with dangerouslyDisableSandbox"）。
+      //
+      //   启动时 daemon 已经在警告了、身份接口也报了、智能体页也显示了——
+      //   但使用者在看的是**这一份日志**。只在那儿说，等于没说。
+      if (!envCheck.ok) {
+        await this.#note(
+          runId,
+          `⚠️ 环境有问题：${envCheck.issues.map((i) => i.summary).join('；')}`,
+        )
+        await this.#note(
+          runId,
+          `   影响：CLI 的 Bash 等工具可能全程失败，本次产出不可信。` +
+            `修法：${envCheck.issues[0]?.action ?? ''}`,
+        )
+      }
+
+      // ★ 把注入结果写进日志。
+      //
+      //   不写的话，使用者在日志里只看到 Claude 自己报的"25 个工具可用"，
+      //   而那说的是**它的内置工具**——于是很自然会以为我们的 skill 没生效。
+      //   事实是它生效了，只是**看不出来**。
+      await this.#note(
+        runId,
+        req.skills && req.skills.length > 0
+          ? `已注入 ${req.skills.length} 个 skill：${req.skills.map((s) => s.slug).join('、')}` +
+              `（写入 ${runtime.descriptor.skillDir}/，加上上下文文件 ${runtime.descriptor.contextFile}）`
+          : `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`,
+      )
 
       // ── 注入上下文块 ──
       const contextFile = join(run.workDir!, runtime.descriptor.contextFile)
