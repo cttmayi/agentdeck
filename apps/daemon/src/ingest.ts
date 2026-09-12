@@ -67,10 +67,12 @@ export interface ReportIngestorDeps {
 
 export interface RoutedReport {
   report: Report
-  /** 匹配到的审核 agent（可能多个 ⇒ 并行审核）。 */
+  /** 会来审这份报告的审核 agent（可能多个 ⇒ 并行审核）。 */
   reviewers: Agent[]
-  usedFallback: boolean
-  /** 既没有匹配也没有兜底 —— 调用方必须通知，不得静默丢弃。 */
+  /**
+   * 一个审核者都没有 —— 调用方必须**存下报告并通知**，不得静默丢弃
+   * （FR-AGENT-22）。静默丢弃会让第三方以为处理过了，而实际上什么都没发生。
+   */
   unmatched: boolean
 }
 
@@ -147,7 +149,7 @@ export class ReportIngestor {
       created += 1
 
       // kind 同时是路由键与审核标准选择键（D24）
-      const routing = routeReportToReviewers(item.kind, agents)
+      const routing = routeReportToReviewers(agents)
       routed.push({ report, ...routing })
     }
 

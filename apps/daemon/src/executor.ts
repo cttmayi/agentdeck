@@ -70,6 +70,23 @@ export interface ExecutorDeps {
   store: Store
   /** 自动分配工作目录时的根（D27）。 */
   workRoot: string
+  /**
+   * 按 runtimeKey 解析要用的 backend 与描述符（D28）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 这个槽位存在的理由：agent 的 runtimeKey 原来**根本没被消费**
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 在这之前，执行器用的是 daemon 级的 `backend` 与 `descriptor`——也就是说
+   * 所有 agent 实际上都跑在同一个 CLI 上，而 agent 记录里的 `runtimeKey`
+   * 只是一个**没人读的字段**。界面上能选、审计里会记，行为上不存在。
+   *
+   * 那正是这个项目反复在防的那类东西：**接口接受了，行为上不存在**。
+   * 让人以为配了就生效，比不支持更糟。
+   *
+   * 现在按 run 解析：一个 run 用哪个 CLI，由它所属 agent 的 runtimeKey 决定。
+   */
+  resolveRuntime?: (runtimeKey: string) => { backend: AgentBackend; descriptor: RuntimeDescriptor }
   registry: RunRegistry
   backend: AgentBackend
   descriptor: RuntimeDescriptor
@@ -253,8 +270,9 @@ export class RunExecutor {
   async #resolveResume(
     req: SubmitRunRequest,
     run: Run,
+    descriptor: RuntimeDescriptor,
   ): Promise<{ sessionId: string | null; reason: string }> {
-    const state = this.#deps.descriptor.sessionState
+    const state = descriptor.sessionState
 
     if (!req.resumeFromRunId) {
       return { sessionId: null, reason: '这不是重试，没有可恢复的上文' }
@@ -263,8 +281,8 @@ export class RunExecutor {
     if (state !== 'stateful') {
       const why =
         state === 'stateless'
-          ? `${this.#deps.descriptor.key} 是无状态 CLI，不存在会话可恢复`
-          : `${this.#deps.descriptor.key} 的会话状态**未验证**（sessionState: 'unknown'），` +
+          ? `${descriptor.key} 是无状态 CLI，不存在会话可恢复`
+          : `${descriptor.key} 的会话状态**未验证**（sessionState: 'unknown'），` +
             `因此不尝试恢复——拿未验证的能力去跑，出问题时无从判断`
       this.#deps.onWarn?.(`run ${run.id} 不恢复会话：${why}`)
       return { sessionId: null, reason: why }
@@ -284,6 +302,37 @@ export class RunExecutor {
     return { sessionId: previous.sessionId, reason: `恢复自 run ${previous.id}` }
   }
 
+  /**
+   * 解析这次 run 该用哪个 backend 与描述符。
+   *
+   * 三级回退，每一级的理由不同：
+   *
+   * 1. 没有 `resolveRuntime`（测试或未装配）⇒ 用 daemon 级的那一套；
+   * 2. agent 找不到（例如动作派生时传了个不存在的 id）⇒ 同样回退并告警；
+   * 3. runtimeKey 未知 ⇒ 回退到 daemon 级并**告警**，而不是让 run 直接失败。
+   *
+   * 第 3 条是刻意的：一个配错了 runtime 的 agent 如果让所有任务都跑不起来，
+   * 那是个很难查的故障（错误会出现在"进程启动失败"上）。回退 + 告警
+   * 至少让事情能继续，而告警把"你配错了"说出来。
+   */
+  async #runtimeFor(run: Run): Promise<{ backend: AgentBackend; descriptor: RuntimeDescriptor }> {
+    const fallback = { backend: this.#deps.backend, descriptor: this.#deps.descriptor }
+    if (!this.#deps.resolveRuntime) return fallback
+
+    const agent = await this.#deps.store.getAgent(run.agentId as never)
+    if (!agent) return fallback
+
+    try {
+      return this.#deps.resolveRuntime(agent.runtimeKey)
+    } catch (err) {
+      this.#deps.onWarn?.(
+        `agent ${agent.name} 的 runtimeKey（${agent.runtimeKey}）无法解析，` +
+          `本次回退到 ${this.#deps.descriptor.key}：${err instanceof Error ? err.message : String(err)}`,
+      )
+      return fallback
+    }
+  }
+
   async #defaultWorkspaceId(): Promise<Run['workspaceId']> {
     const ids = await this.#deps.store.listWorkspaceIds()
     const first = ids[0]
@@ -292,6 +341,14 @@ export class RunExecutor {
   }
 
   async #run(req: SubmitRunRequest, run: Run): Promise<void> {
+    // ★ 按这个 run 所属的 runtime 取 backend 与描述符（D28）。
+    //
+    //   解析放在 `#run` 开头而不是 `submit`：`submit` 要保持"先落盘、再返回
+    //   受理"这条快路径尽量短，而解析 backend 可能涉及探测（新装了一个 CLI
+    //   时）。落盘失败要早报，探测慢不该拖住受理。
+    const runtime = await this.#runtimeFor(run)
+
+
     const { store, registry, locks, semaphore } = this.#deps
     const runId = run.id
 
@@ -344,7 +401,7 @@ export class RunExecutor {
       if (cleaned) return
       cleaned = true
       if (restoreContext) await this.#restoreContext(restoreContext)
-      await removeInjectedSkills(run.workDir!, this.#deps.descriptor.skillDir, injectedSlugs)
+      await removeInjectedSkills(run.workDir!, runtime.descriptor.skillDir, injectedSlugs)
     }
 
     try {
@@ -354,7 +411,7 @@ export class RunExecutor {
       const skillsBrief: SkillBrief[] = []
       for (const skill of req.skills ?? []) {
         // 注入失败要让 run 失败——静默的缺能力比报错糟得多
-        await writeSkill(run.workDir!, this.#deps.descriptor.skillDir, {
+        await writeSkill(run.workDir!, runtime.descriptor.skillDir, {
           slug: skill.slug,
           content: skill.body,
         })
@@ -363,7 +420,7 @@ export class RunExecutor {
       }
 
       // ── 注入上下文块 ──
-      const contextFile = join(run.workDir!, this.#deps.descriptor.contextFile)
+      const contextFile = join(run.workDir!, runtime.descriptor.contextFile)
       const body =
         req.kind === 'review' && req.review
           ? renderTaskContext({
@@ -397,9 +454,9 @@ export class RunExecutor {
       //   决定：一个 `'unknown'` 的 runtime（没验证过有没有会话）即便历史里
       //   留了个 sessionId，也不该拿去恢复——那是在替真实 CLI 回答一个
       //   我们答不上来的问题。
-      const resume = await this.#resolveResume(req, run)
+      const resume = await this.#resolveResume(req, run, runtime.descriptor)
 
-      const session = await this.#deps.backend.execute({
+      const session = await runtime.backend.execute({
         prompt: req.prompt,
         workDir: run.workDir!,
         model: null,
@@ -465,7 +522,7 @@ export class RunExecutor {
       if (resume.sessionId !== null) {
         if (result.resumeRejected === true) {
           this.#deps.onWarn?.(
-            `run ${runId} 的会话恢复被 CLI 拒绝（${this.#deps.descriptor.key}）：` +
+            `run ${runId} 的会话恢复被 CLI 拒绝（${runtime.descriptor.key}）：` +
               `这次执行缺少上文，产出可能与预期不符`,
           )
           await store.appendInboxItem({
@@ -485,7 +542,7 @@ export class RunExecutor {
         } else if (result.resumeRejected === undefined) {
           // 表里 rejectDetectable: false ⇒ 这个 undefined 是**不可信的**
           this.#deps.onWarn?.(
-            `run ${runId} 请求了会话恢复，但 ${this.#deps.descriptor.key} 无法判断` +
+            `run ${runId} 请求了会话恢复，但 ${runtime.descriptor.key} 无法判断` +
               `是否被拒绝（rejectDetectable: false）——不能当成"恢复成功"`,
           )
         }
@@ -493,7 +550,7 @@ export class RunExecutor {
 
       // ── review run 的收口：判决、动作、审计 ──
       if (req.kind === 'review' && result.status === 'completed') {
-        await this.#handleReview(req, run, result.output || collected, result.usage)
+        await this.#handleReview(req, run, result.output || collected, result.usage, runtime.descriptor)
       }
 
       // ★ S1：执行完成后自动接一次审核（可选）
@@ -585,6 +642,7 @@ export class RunExecutor {
     run: Run,
     output: string,
     usage: TokenUsage | null | undefined,
+    descriptor: RuntimeDescriptor,
   ): Promise<void> {
     const coordinator = this.#deps.reviewCoordinator
     if (!coordinator) return
@@ -613,7 +671,7 @@ export class RunExecutor {
       skillRefs: (req.skills ?? []).map((s) => s.ref),
       modelId: null,
       promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
-      argv: [this.#deps.descriptor.command, ...this.#deps.descriptor.baseArgs],
+      argv: [descriptor.command, ...descriptor.baseArgs],
       usage,
       chainSteps,
     })

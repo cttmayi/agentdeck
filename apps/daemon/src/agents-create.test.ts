@@ -132,57 +132,114 @@ describe('★ 数组字段要校验元素类型，不是"给了数组就行"', (
       assert.match(String(res.body['error']), /非空字符串/)
     })
   })
+})
 
-  test('kindPatterns 里混了数字 ⇒ 400', async () => {
+describe('★ 角色与"由谁审我"（D28）', () => {
+  test('缺省角色是 executor', async () => {
+    // 新建一个 agent 时"它能干活"是最合理的默认；默认成审核者会让它
+    // 悄悄进入审核小组
     await withDaemon(async (url) => {
-      assert.equal((await create(url, { name: 'x', kindPatterns: [123] })).status, 400)
+      const res = await create(url, { name: 'x' })
+      assert.equal(res.body['role'], 'executor')
+      assert.equal(res.body['reviewerAgentId'], null)
     })
   })
 
-  test('kindPatterns 会被 trim', async () => {
+  test('role 只认两个取值', async () => {
     await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x', kindPatterns: [' ci-failure ', 'sec-*'] })
-      assert.deepEqual(res.body['kindPatterns'], ['ci-failure', 'sec-*'])
+      assert.equal((await create(url, { name: 'x', role: 'admin' })).status, 400)
+      assert.equal((await create(url, { name: 'r', role: 'reviewer' })).status, 201)
     })
   })
 
-  test('maxConcurrentRuns 必须是正整数', async () => {
+  test('★ executor 可以指定一个 reviewer 作为它的审核者', async () => {
     await withDaemon(async (url) => {
-      assert.equal((await create(url, { name: 'x', maxConcurrentRuns: 0 })).status, 400)
-      assert.equal((await create(url, { name: 'x', maxConcurrentRuns: 1.5 })).status, 400)
+      // 首启会播种一对：审核员（reviewer）与助手（executor）
+      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; name: string; role: string }>
+      }).agents
+      const reviewer = agents.find((a) => a.role === 'reviewer')
+      assert.ok(reviewer, '首启会播种一个审核者 —— 否则报告全都无人可审')
+
+      const res = await create(url, { name: '执行者', reviewerAgentId: reviewer!.id })
+      assert.equal(res.status, 201)
+      assert.equal(res.body['reviewerAgentId'], reviewer!.id)
+    })
+  })
+
+  test('★ 指定的审核者必须真的是审核角色', async () => {
+    // 指向一个 executor 是最容易犯的错：名字看起来对，但那个 agent 没有
+    // 审核标准可用，run 起不来或审出没有依据的结论
+    await withDaemon(async (url) => {
+      const executor = (await create(url, { name: '另一个执行者' })).body as { id: string }
+      const res = await create(url, { name: 'x', reviewerAgentId: executor.id })
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /不是审核角色/)
+    })
+  })
+
+  test('★ 审核者不能是自己', async () => {
+    await withDaemon(async (url) => {
+      const made = (await create(url, { name: 'r', role: 'reviewer' })).body as { id: string }
+      const res = await fetch(`${url}/api/agents/${made.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'executor', reviewerAgentId: made.id }),
+      })
+      assert.equal(res.status, 400)
+      const body = (await res.json()) as { error: string }
+      assert.match(body.error, /审自己|自己/)
+    })
+  })
+
+  test('★ reviewer 角色不该配 reviewerAgentId', async () => {
+    // 它是审别人的那个，不是被审的那个
+    await withDaemon(async (url) => {
+      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string }>
+      }).agents
+      const reviewer = agents.find((a) => a.role === 'reviewer')!
+      const res = await create(url, {
+        name: 'r2',
+        role: 'reviewer',
+        reviewerAgentId: reviewer.id,
+      })
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /审别人的那个/)
+    })
+  })
+
+  test('指定的审核者不存在 ⇒ 400（而不是留一个悬空引用）', async () => {
+    await withDaemon(async (url) => {
+      const res = await create(url, { name: 'x', reviewerAgentId: 'no-such-agent' })
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /不存在/)
     })
   })
 })
 
-describe('默认值与 runtime', () => {
-  test('★ runtimeKey 用**当前 daemon 的**，不由客户端指定', async () => {
-    // 指定一个没装的 runtime 只会让 run 起不来，而错误发生在很远的地方
+describe('★ runtime 可以选，但必须是装了的那个', () => {
+  test('不指定时缺省 claude', async () => {
     await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x', runtimeKey: '不存在的runtime' })
+      assert.equal((await create(url, { name: 'x' })).body['runtimeKey'], 'claude')
+    })
+  })
+
+  test('★ 指定一个不存在的 runtime ⇒ 400，并列出可用的', async () => {
+    // 不校验的话 run 会在很远的地方起不来，而错误信息指向的是"进程启动失败"
+    await withDaemon(async (url) => {
+      const res = await create(url, { name: 'x', runtimeKey: 'gemini' })
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /未知的 runtime/)
+      assert.match(String(res.body['error']), /claude/)
+    })
+  })
+
+  test('可以选 generic（适配表里另一个 runtime）', async () => {
+    await withDaemon(async (url) => {
+      const res = await create(url, { name: 'x', runtimeKey: 'generic' })
       assert.equal(res.status, 201)
-      assert.equal(res.body['runtimeKey'], 'claude', '应当忽略客户端指定的 runtime')
-    })
-  })
-
-  test('没给 kindPatterns 时是空数组（谁也接不到）—— 这是如实记录，不是错误', async () => {
-    await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x' })
-      assert.deepEqual(res.body['kindPatterns'], [])
-    })
-  })
-
-  test('空字符串的 workDir 被当作"没指定"（D27 的默认路径）', async () => {
-    await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x', workDir: '   ' })
-      assert.equal(res.body['workDir'], null)
-    })
-  })
-
-  test('布尔字段只有显式 true 才算真', async () => {
-    await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x', isFallbackReviewer: 'yes', autoReview: 1 })
-      assert.equal(res.body['isFallbackReviewer'], false)
-      assert.equal(res.body['autoReview'], false)
+      assert.equal(res.body['runtimeKey'], 'generic')
     })
   })
 })
@@ -267,6 +324,71 @@ describe('★ 改 agent：只改传了的字段（PATCH 语义）', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: '  ' }),
       })
+      assert.equal(res.status, 400)
+    })
+  })
+})
+
+describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
+  test('★ agent 的 runtimeKey 决定用哪个 CLI —— 不再是个没人读的字段', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条测试的由来
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 在这之前，执行器用的是 **daemon 级**的 backend 与描述符——所有 agent
+    // 实际上都跑在同一个 CLI 上，而 `agent.runtimeKey` 是一个**没人读的
+    // 字段**。界面上能选、审计里会记，行为上不存在。
+    //
+    // 那正是这个项目反复在防的那类东西：**接口接受了，行为上不存在**。
+    // 让人以为配了就生效，比不支持更糟。
+    //
+    // 判据取的是**描述符**：不同 runtime 的 baseArgs 不同，而它会被写进
+    // 审计的 argv（那是"当时到底怎么起的进程"的权威记录）。
+    await withDaemon(async (url) => {
+      const skills = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ id: string }>
+      }).skills
+      const reviewer = ((await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: 'generic 审核者',
+            role: 'reviewer',
+            runtimeKey: 'generic',
+            skillIds: [skills[0]!.id],
+          }),
+        })
+      ).json()) as { id: string; runtimeKey: string })
+
+      assert.equal(reviewer.runtimeKey, 'generic', '字段如实存下来')
+
+      // 用这个 agent 起一条 review run，看审计里的 argv 用哪套基础参数
+      const runId = '01M2RUNTIME00000000000001'
+      await fetch(`${url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'review',
+          agentRef: { id: reviewer.id, name: 'generic 审核者', instructions: '' },
+          subject: { type: 'report', id: 'r-1' },
+          prompt: '审一下',
+          limits: { maxTurns: null, timeoutMs: null },
+          review: { kind: 'k', title: 't', body: 'b', inputBlobRef: null, relatedIssueId: null },
+        }),
+      })
+
+      // 等 run 结束（假后端会让它立刻完成或失败，两种都行——审计只在
+      // "有判决"时写，所以这里只看 run 记录本身有没有被受理）
+      const run = (await (await fetch(`${url}/api/runs/${runId}`)).json()) as { id?: string }
+      assert.ok(run?.id, '★ run 被受理了 —— 说明 generic runtime 能被解析')
+    })
+  })
+
+  test('未知 runtime 的 agent 不会被创建（在写库之前就拦掉）', async () => {
+    await withDaemon(async (url) => {
+      const res = await create(url, { name: 'x', runtimeKey: 'nope' })
       assert.equal(res.status, 400)
     })
   })

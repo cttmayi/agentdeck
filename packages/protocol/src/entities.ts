@@ -100,6 +100,10 @@ export type Skill = z.infer<typeof Skill>
  * **不是常驻进程**——只在被触发时执行。
  * 每个 agent 有**自己的** skill 子集与 tool 子集（FR-AGENT-03/12/17）。
  */
+/** agent 的角色（D28）。 */
+export const AgentRole = z.enum(['executor', 'reviewer'])
+export type AgentRole = z.infer<typeof AgentRole>
+
 export const Agent = z.object({
   id: AgentId,
   workspaceId: WorkspaceId,
@@ -116,22 +120,41 @@ export const Agent = z.object({
   toolIds: z.array(z.string()),
   /** 自定义环境变量。 */
   env: z.record(z.string(), z.string()),
-  maxConcurrentRuns: z.number().int().positive(),
 
-  // ── 审核路由（D24：kind 既是路由键，也是审核标准选择键） ──
-  /** 这个 agent 认哪些 report kind（支持简单通配，如 `ci-*`）。 */
-  kindPatterns: z.array(z.string()),
-  /** 可选：显式指定某个 kind 用哪个 skill；省略则用 skillIds ∩ 审核类 skill。 */
-  kindSkillOverride: z.record(z.string(), SkillId),
-  /** 是否作为未知 kind 的兜底审核者。 */
-  isFallbackReviewer: z.boolean(),
+  // ── 角色（D28） ──
   /**
-   * 执行完成后是否**自动接一次审核**（S1，FR-AGENT-16）。
+   * 这个 agent 是干活的还是审的。
    *
-   * 默认 `false`——单机使用者不配它的时候，每个任务都多跑一次审核
-   * 会既费钱又吵（INV-8：通知与打扰都要稀缺）。
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么用"角色 + 配对"取代原来那套路由配置
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来一个 agent 上有四个互相牵扯的开关：`kindPatterns`（认哪些 kind）、
+   * `kindSkillOverride`、`isFallbackReviewer`（兜底）、`autoReview`（执行后
+   * 自动审）。它们合起来表达的意思其实只有两件事：
+   *
+   *   1. **这个 agent 是执行的还是审的**；
+   *   2. **执行完由谁来审**。
+   *
+   * 把它拆成"角色 + 审核者配对"，配置从"填四个字段、其中两个是通配模式
+   * 字符串"变成"选一个角色、挑一个名字"。**少了一个需要理解的概念，
+   * 而且没有通配符要学**。
+   *
+   * 代价是失去了"按 kind 分派不同审核者"的能力。这是有意的取舍：
+   * 那个能力要求使用者在建 agent 时就想清楚"哪些 kind 归谁"，
+   * 而绝大多数用法里，审核者只有一个。
    */
-  autoReview: z.boolean(),
+  role: AgentRole,
+
+  /**
+   * 由谁来审**这个执行 agent** 的产出（仅对 `role: 'executor'` 有意义）。
+   *
+   * `null` = 不自动审。这不是错误，是一个明确的选择——单机使用者不配它时，
+   * 每个任务都多跑一次审核会既费钱又吵（INV-8：通知与打扰都要稀缺）。
+   *
+   * ⚠️ 指向自己会被拒绝：那等于"自己审自己"，违反 INV-1（reviewer ≠ executor）。
+   */
+  reviewerAgentId: AgentId.nullable(),
 
   createdAt: EpochMs,
   updatedAt: EpochMs,

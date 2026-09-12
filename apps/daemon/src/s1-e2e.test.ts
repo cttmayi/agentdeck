@@ -127,32 +127,27 @@ before(async () => {
 
   // 建一个**独立的审核 agent**——INV-1 要求审核者不同于执行者，
   // 所以只有一个 agent 时系统会（正确地）跳过自动审核。
-  // 审核者必须挂载审核 skill —— 没有 skill 就没有审核标准，无法审
-  const skills = ((await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-    skills: Array<{ id: string; slug: string }>
-  }).skills
-  assert.ok(skills.length > 0, 'bootstrap 应当内置了一个审核模板')
-
-  await fetch(`${daemon.url}/api/agents`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      name: '审核员',
-      isFallbackReviewer: true,
-      skillIds: [skills[0]!.id],
-    }),
-  })
-
+  // ══════════════════════════════════════════════════════════════════
+  // D28 之后，自动审核靠"执行者指向审核者"，不再靠 autoReview 开关
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 所以这里不再手工造一个审核者：bootstrap 已经播种了一对，而且
+  // **执行者默认就指着那个审核者**——首启就是一条通的闭环。
   const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-    agents: Array<{ id: string; name: string; autoReview: boolean }>
+    agents: Array<{ id: string; name: string; role: string; reviewerAgentId: string | null }>
   }).agents
-  assert.equal(agents.length, 2)
 
-  // 执行者：bootstrap 建的那个（autoReview 默认为 true）
-  const executor = agents.find((a) => a.name === '助手')
-  assert.notEqual(executor, undefined)
+  const reviewer = agents.find((a) => a.role === 'reviewer')
+  const executor = agents.find((a) => a.role === 'executor')
+  assert.ok(reviewer, '★ bootstrap 必须播种审核者 —— 否则报告与执行产出都无人可审')
+  assert.ok(executor, 'bootstrap 也会播种一个执行者')
+  assert.equal(
+    executor!.reviewerAgentId,
+    reviewer!.id,
+    '★ 执行者默认指向审核者：首启就是一条通的闭环',
+  )
+
   agentId = executor!.id
-  assert.equal(executor!.autoReview, true, 'bootstrap 的 agent 默认开启自动审核')
 })
 
 after(async () => {
@@ -213,31 +208,31 @@ describe('S1：执行完成后自动接审核', () => {
     assert.notEqual(reviewRun!.agentId, executeRun!.agentId, '绝不能自审')
   })
 
-  test('★ 只有一个 agent 时跳过自动审核，而不是自审', async () => {
-    // 再造一个实例、把唯一的 agent 当作执行者：此时没有"别的 agent"可当审核者，
-    // 系统必须**跳过**并留警告，而不是让同一个 agent 自审（那会让闭环变成假的）。
-    const dir = await makeTempDir('s1-solo')
-    const work = await makeTempDir('s1-solowork')
+  test('★ 执行者没指定审核者时不自动审 —— 那是明确的选择，不是错误', async () => {
+    // D28 之后"跳过自动审核"的触发条件从"没有别人可当审核者"变成了
+    // "执行者没指定审核者"。后者是使用者的**明确选择**（reviewerAgentId
+    // 为 null），所以只跳过、不警告——而前者是配置缺失。
+    const dir = await makeTempDir('s1-noreviewer')
+    const work = await makeTempDir('s1-noreviewerwork')
     const b = new TwoPhaseBackend()
-    const d = await startDaemon({ dataDir: dir, port: 0, fsync: false, backend: b, onWarn: () => {}, onInfo: () => {} })
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
 
     try {
-      const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string }>
-      }).agents
-      // 把兜底审核者关掉，且只留一个 agent ⇒ 没有合法审核者
-      await fetch(`${d.url}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '第二个 agent' }),
-      })
-
-      const issueRes = await fetch(`${d.url}/api/issues`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 't' }),
-      })
-      const iid = ((await issueRes.json()) as Issue).id
+      // 造一个不指向任何审核者的执行者
+      const made = ((await (
+        await fetch(`${d.url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '单独的助手', role: 'executor' }),
+        })
+      ).json()) as { id: string })
 
       const runId = ulid() as RunId
       await fetch(`${d.url}/api/runs`, {
@@ -246,30 +241,31 @@ describe('S1：执行完成后自动接审核', () => {
         body: JSON.stringify({
           runId,
           kind: 'execute',
-          agentRef: { id: agents[0]!.id, name: '助手', instructions: '' },
+          agentRef: { id: made.id, name: '单独的助手', instructions: '' },
           skills: [],
-          subject: { type: 'issue', id: iid },
-          prompt: 'x',
+          subject: { type: 'issue', id: issueId },
+          prompt: '干活',
           workDir: work,
           limits: { maxTurns: null, timeoutMs: null },
         }),
       })
 
+      // 等执行跑完
       await waitFor(async () => {
-        const list = ((await (await fetch(`${d.url}/api/runs`)).json()) as {
-          runs: Array<{ kind: string; status: string }>
-        }).runs
-        return list.some((r) => r.kind === 'execute' && r.status === 'completed') ? true : null
+        const r = (await (await fetch(`${d.url}/api/runs/${runId}`)).json()) as { status: string }
+        return ['completed', 'failed', 'cancelled'].includes(r.status) ? true : null
       })
+      // 再等一会儿，确认没有 review run 冒出来
+      await new Promise((r) => setTimeout(r, 300))
 
       const list = ((await (await fetch(`${d.url}/api/runs`)).json()) as {
-        runs: Array<{ kind: string; agentId: string }>
+        runs: Array<{ kind: string }>
       }).runs
-      const exec = list.find((r) => r.kind === 'execute')!
-      const reviews = list.filter((r) => r.kind === 'review')
-      for (const review of reviews) {
-        assert.notEqual(review.agentId, exec.agentId, '任何情况下都不得自审')
-      }
+      assert.equal(
+        list.filter((r) => r.kind === 'review').length,
+        0,
+        '★ 没指定审核者就不该自动审 —— 而不是随便找个人来审',
+      )
     } finally {
       await d.close()
       await cleanup(dir)

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Agent } from '../lib/api.ts'
-  import { skills, updateAgent } from '../lib/stores.ts'
+  import { agents, skills, updateAgent } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
 
   /**
@@ -33,31 +33,22 @@
   let error = ''
 
   // 编辑缓冲：进入编辑时从 agent 拷一份，取消时直接丢弃
-  let draft = {
+  const blankDraft = () => ({
     name: agent.name,
+    role: agent.role,
     instructions: agent.instructions,
     skillIds: [...agent.skillIds],
-    kindPatterns: [...agent.kindPatterns],
-    isFallbackReviewer: agent.isFallbackReviewer,
-    autoReview: agent.autoReview,
-    maxConcurrentRuns: agent.maxConcurrentRuns,
+    reviewerAgentId: agent.reviewerAgentId ?? '',
+    runtimeKey: agent.runtimeKey,
     workDir: agent.workDir ?? '',
     model: agent.model ?? '',
-  }
+  })
+
+  let draft = blankDraft()
 
   function startEdit(): void {
     // 每次进入编辑都重新拷一份——否则上一次取消留下的改动会残留
-    draft = {
-      name: agent.name,
-      instructions: agent.instructions,
-      skillIds: [...agent.skillIds],
-      kindPatterns: [...agent.kindPatterns],
-      isFallbackReviewer: agent.isFallbackReviewer,
-      autoReview: agent.autoReview,
-      maxConcurrentRuns: agent.maxConcurrentRuns,
-      workDir: agent.workDir ?? '',
-      model: agent.model ?? '',
-    }
+    draft = blankDraft()
     editing = true
     error = ''
   }
@@ -67,17 +58,14 @@
     const patch: Record<string, unknown> = {}
     if (draft.name !== agent.name) patch['name'] = draft.name
     if (draft.instructions !== agent.instructions) patch['instructions'] = draft.instructions
-    if (draft.isFallbackReviewer !== agent.isFallbackReviewer)
-      patch['isFallbackReviewer'] = draft.isFallbackReviewer
-    if (draft.autoReview !== agent.autoReview) patch['autoReview'] = draft.autoReview
-    if (draft.maxConcurrentRuns !== agent.maxConcurrentRuns)
-      patch['maxConcurrentRuns'] = draft.maxConcurrentRuns
+    if (draft.role !== agent.role) patch['role'] = draft.role
     if ((draft.workDir || '') !== (agent.workDir ?? '')) patch['workDir'] = draft.workDir
     if ((draft.model || '') !== (agent.model ?? '')) patch['model'] = draft.model
+    if (draft.runtimeKey !== agent.runtimeKey) patch['runtimeKey'] = draft.runtimeKey
     if (draft.skillIds.slice().sort().join() !== agent.skillIds.slice().sort().join())
       patch['skillIds'] = draft.skillIds
-    if (draft.kindPatterns.slice().sort().join() !== agent.kindPatterns.slice().sort().join())
-      patch['kindPatterns'] = draft.kindPatterns
+    if ((draft.reviewerAgentId || null) !== (agent.reviewerAgentId ?? null))
+      patch['reviewerAgentId'] = draft.reviewerAgentId || null
     return patch
   }
 
@@ -102,6 +90,9 @@
   }
 
   $: attached = $skills.filter((s) => agent.skillIds.includes(s.id))
+  $: reviewers = $agents.filter((a) => a.role === 'reviewer' && a.id !== agent.id)
+  $: chosenReviewer = $agents.find((a) => a.id === agent.reviewerAgentId) ?? null
+  $: roleLabel = agent.role === 'reviewer' ? '审核' : '执行'
 </script>
 
 <div class="detail">
@@ -134,51 +125,102 @@
   {#if !editing}
     <!-- ── 只读视图 ── -->
     <dl class="meta-grid">
+      <dt>角色</dt>
+      <dd>
+        <span class="badge {agent.role === 'reviewer' ? 'in_review' : 'in_progress'}">{roleLabel}</span>
+        <span class="faint small">
+          {agent.role === 'reviewer' ? '按标准审别人的产出' : '接到任务后动手干活'}
+        </span>
+      </dd>
+
+      {#if agent.role === 'executor'}
+        <dt>由谁来审它</dt>
+        <dd>
+          {#if chosenReviewer}
+            <strong>{chosenReviewer.name}</strong>
+          {:else if agent.reviewerAgentId}
+            <span class="bad">指定的审核者已不存在（{agent.reviewerAgentId}）</span>
+          {:else}
+            <span class="muted">不自动审核</span>
+            <span class="hint">——执行产出不会被自动审。这是明确的选择，不是错误。</span>
+          {/if}
+        </dd>
+      {/if}
+
       <dt>指令</dt>
       <dd style="white-space:pre-wrap">{agent.instructions || '（未设置）'}</dd>
+
       <dt>挂载的 skill</dt>
       <dd>
         {#if attached.length === 0}
-          <span class="warn">没有挂 skill</span>
-          <span class="hint">——它不能承担审核，审核标准就写在 skill 里。</span>
+          {#if agent.role === 'reviewer'}
+            <span class="bad">没有挂 skill</span>
+            <span class="hint">——它审不了任何东西：审核标准就写在 skill 里。</span>
+          {:else}
+            <span class="muted">没有挂 skill</span>
+            <span class="hint">——执行者可以不挂，产出由审核者按标准来判。</span>
+          {/if}
         {:else}
           {#each attached as s (s.id)}
             <div><code>{s.slug}</code> <span class="faint small">{s.name}</span></div>
           {/each}
         {/if}
       </dd>
-      <dt>认哪些 kind</dt>
-      <dd>
-        {#if agent.kindPatterns.length === 0}
-          <span class="warn">空</span>
-          <span class="hint">——它谁也接不到，报告不会路由给它。</span>
-        {:else}
-          {#each agent.kindPatterns as k}<code style="margin-right:4px">{k}</code>{/each}
-        {/if}
-      </dd>
+
       <dt>runtime</dt>
       <dd><code>{agent.runtimeKey}</code></dd>
       <dt>模型</dt>
       <dd>{agent.model ?? '（用 CLI 默认）'}</dd>
-      <dt>并发上限</dt>
-      <dd>{agent.maxConcurrentRuns}</dd>
       <dt>工作目录</dt>
       <dd class="mono faint small">{agent.workDir ?? '每个任务自动分配（D27）'}</dd>
-      <dt>兜底审核者</dt>
-      <dd>{agent.isFallbackReviewer ? '是' : '否'}</dd>
-      <dt>执行后自动审核</dt>
-      <dd>{agent.autoReview ? '是' : '否'}</dd>
     </dl>
+
   {:else}
     <!-- ── 编辑视图 ── -->
     <label>
       名称
       <input bind:value={draft.name} />
     </label>
+
+    <div class="field">
+      <span class="field-label">它是做什么的</span>
+      <div class="role-picker">
+        <button
+          type="button"
+          class="role-card"
+          class:active={draft.role === 'executor'}
+          onclick={() => (draft.role = 'executor')}
+        >
+          <strong>执行</strong><span>接到任务后动手干活</span>
+        </button>
+        <button
+          type="button"
+          class="role-card"
+          class:active={draft.role === 'reviewer'}
+          onclick={() => (draft.role = 'reviewer')}
+        >
+          <strong>审核</strong><span>按标准审别人的产出，给判决</span>
+        </button>
+      </div>
+    </div>
+
+    {#if draft.role === 'executor'}
+      <label>
+        由谁来审它
+        <select bind:value={draft.reviewerAgentId}>
+          <option value="">不自动审核</option>
+          {#each reviewers as r (r.id)}
+            <option value={r.id}>{r.name}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
+
     <label>
       指令
       <textarea bind:value={draft.instructions} rows="4"></textarea>
     </label>
+
     <label>
       挂载的 skill
       <div class="skill-picker">
@@ -190,29 +232,14 @@
         {/each}
       </div>
     </label>
-    <label>
-      认哪些 kind（逗号分隔）
-      <input
-        value={draft.kindPatterns.join(', ')}
-        oninput={(e) =>
-          (draft.kindPatterns = e.currentTarget.value
-            .split(',')
-            .map((x) => x.trim())
-            .filter(Boolean))}
-      />
-    </label>
-    <div class="row">
-      <label class="inline">
-        <input type="checkbox" bind:checked={draft.isFallbackReviewer} /> 兜底审核者
-      </label>
-      <label class="inline">
-        <input type="checkbox" bind:checked={draft.autoReview} /> 执行后自动审核
-      </label>
-    </div>
+
     <div class="row">
       <label>
-        并发上限
-        <input type="number" min="1" bind:value={draft.maxConcurrentRuns} />
+        用哪个 runtime
+        <select bind:value={draft.runtimeKey}>
+          <option value="claude">claude</option>
+          <option value="generic">generic（未对照真实程序）</option>
+        </select>
       </label>
       <label>
         默认工作目录（留空 = 每任务自动分配）
@@ -254,6 +281,38 @@
     max-height: 12rem;
     overflow-y: auto;
   }
+
+  .field { margin-bottom: var(--sp-3); }
+
+  .field-label {
+    display: block;
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    margin-bottom: var(--sp-1);
+  }
+
+  .role-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
+  }
+
+  .role-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    text-align: left;
+    padding: var(--sp-3);
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    color: var(--text-dim);
+  }
+
+  .role-card strong { color: var(--text); font-size: var(--fs-md); }
+  .role-card span { font-size: var(--fs-xs); color: var(--text-faint); }
+  .role-card.active { border-color: var(--accent); background: var(--surface-2); }
+  .role-card.active strong { color: var(--accent); }
 
   .skill-option { display: flex; align-items: center; gap: var(--sp-2); margin: 0; cursor: pointer; }
   .skill-option input { width: auto; }

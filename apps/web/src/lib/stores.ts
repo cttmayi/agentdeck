@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store'
 import {
   api,
+  type AgentRole,
   type Agent,
   type Identity,
   type InboxItem,
@@ -93,24 +94,22 @@ export async function markInboxRead(id: string): Promise<void> {
  */
 export async function createAgent(input: {
   name: string
+  role: AgentRole
   instructions: string
   skillIds: string[]
-  kindPatterns: string[]
-  isFallbackReviewer: boolean
-  autoReview: boolean
-  maxConcurrentRuns: number
+  reviewerAgentId: string | null
+  runtimeKey: string
   workDir: string
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
     body: JSON.stringify({
       name: input.name,
+      role: input.role,
       instructions: input.instructions,
       skillIds: input.skillIds,
-      kindPatterns: input.kindPatterns,
-      isFallbackReviewer: input.isFallbackReviewer,
-      autoReview: input.autoReview,
-      maxConcurrentRuns: input.maxConcurrentRuns,
+      reviewerAgentId: input.reviewerAgentId,
+      runtimeKey: input.runtimeKey,
       // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
       ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
     }),

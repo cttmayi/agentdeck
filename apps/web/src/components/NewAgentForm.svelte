@@ -1,34 +1,40 @@
 <script lang="ts">
-  import { createAgent, skills } from '../lib/stores.ts'
+  import { createAgent, skills, agents } from '../lib/stores.ts'
+  import type { AgentRole } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
 
   /**
-   * 新建智能体。
+   * 新建智能体（D28）。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 两个字段最容易被填错，所以各给一句解释
+   * 两个字段决定了这个 agent 的"身份"
    * ══════════════════════════════════════════════════════════════════
    *
-   * **指令**是"这个 agent 是谁、怎么干活"，会进它的上下文；
-   * **认哪些 kind** 是路由键——它决定"什么样的报告交给它审"。
-   * 后者尤其容易空着，而空着的后果是"它谁也接不到"，且**没有任何报错**。
+   * **角色**：它是干活的还是审的。这一个选择取代了原来四个互相牵扯的开关
+   * （认哪些 kind、兜底审核者、自动审核、并发上限）——那些合起来表达的
+   * 其实只有两件事，而其中两件是通配模式字符串，需要学。
    *
-   * 兜底审核者是"没人认领的 kind 归它"——只能有一个才有意义，所以界面上
-   * 明说了这一点。
+   * **由谁审我**：只在"执行"角色下出现。选一个审核 agent 的名字即可，
+   * 不需要理解路由规则。
+   *
+   * 其余字段（skill、runtime、工作目录）是"这个 agent 怎么干活"，
+   * 各自独立，不参与身份判断。
    */
   export let oncreated: () => void = () => {}
 
   let open = false
   let name = ''
+  let role: AgentRole = 'executor'
   let instructions = ''
   let selectedSkills: string[] = []
-  let kindPatterns = ''
-  let isFallbackReviewer = false
-  let autoReview = true
-  let maxConcurrentRuns = 1
+  let reviewerAgentId = ''
+  let runtimeKey = 'claude'
   let workDir = ''
   let busy = false
   let error = ''
+
+  // 只有"审核"角色才谈得上"由谁审我"
+  $: reviewers = $agents.filter((a) => a.role === 'reviewer')
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
@@ -37,23 +43,19 @@
     try {
       await createAgent({
         name,
+        role,
         instructions,
         skillIds: selectedSkills,
-        kindPatterns: kindPatterns
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-        isFallbackReviewer,
-        autoReview,
-        maxConcurrentRuns,
+        reviewerAgentId: role === 'executor' && reviewerAgentId ? reviewerAgentId : null,
+        runtimeKey,
         workDir,
       })
       name = ''
       instructions = ''
       selectedSkills = []
-      kindPatterns = ''
-      isFallbackReviewer = false
+      reviewerAgentId = ''
       workDir = ''
+      role = 'executor'
       open = false
       showToast('智能体已创建')
       oncreated()
@@ -76,17 +78,68 @@
       <input bind:value={name} placeholder="例如：安全审核员" required autocomplete="off" />
     </label>
 
+    <!-- 角色：用两个大按钮而不是下拉或单选圆圈——这是一个"选边"的决定，
+         值得占视觉重量；下拉会让人一扫而过 -->
+    <div class="field">
+      <span class="field-label">它是做什么的</span>
+      <div class="role-picker">
+        <button
+          type="button"
+          class="role-card"
+          class:active={role === 'executor'}
+          onclick={() => (role = 'executor')}
+        >
+          <strong>执行</strong>
+          <span>接到任务后动手干活</span>
+        </button>
+        <button
+          type="button"
+          class="role-card"
+          class:active={role === 'reviewer'}
+          onclick={() => (role = 'reviewer')}
+        >
+          <strong>审核</strong>
+          <span>按标准审别人的产出，给判决</span>
+        </button>
+      </div>
+    </div>
+
+    {#if role === 'executor'}
+      <label>
+        由谁来审它
+        {#if reviewers.length === 0}
+          <select disabled><option>（还没有审核角色的智能体）</option></select>
+          <span class="hint">
+            先去建一个「审核」角色的智能体。没有审核者时，执行产出不会被自动审核。
+          </span>
+        {:else}
+          <select bind:value={reviewerAgentId}>
+            <option value="">不自动审核</option>
+            {#each reviewers as r (r.id)}
+              <option value={r.id}>{r.name}</option>
+            {/each}
+          </select>
+          <span class="hint">
+            执行完由它审。选「不自动审核」也是一个明确的选择——不配时每个任务都多跑
+            一次审核会既费钱又吵。
+          </span>
+        {/if}
+      </label>
+    {/if}
+
     <label>
       指令
       <textarea
         bind:value={instructions}
         rows="3"
-        placeholder="描述它是谁、怎么干活。这段会进它的上下文。"
+        placeholder={role === 'reviewer'
+          ? '它按什么态度审：严格还是宽松、拿不准时怎么办'
+          : '它是谁、怎么干活。这段会进它的上下文。'}
       ></textarea>
     </label>
 
     <label>
-      挂载的 skill（决定它用什么<strong>审核标准</strong>）
+      挂载的 skill
       {#if $skills.length === 0}
         <select disabled><option>（还没有 skill）</option></select>
       {:else}
@@ -99,41 +152,23 @@
           {/each}
         </div>
       {/if}
-      <span class="hint">
-        没挂 skill 的 agent <strong>不能承担审核</strong>——审核标准就写在 skill 里。
-      </span>
+      {#if role === 'reviewer'}
+        <span class="hint">
+          <strong>审核者必须挂 skill</strong>——审核标准就写在 skill 里。
+          没挂 skill 的审核者不会被算作审核者。
+        </span>
+      {:else}
+        <span class="hint">执行者可以不挂 skill（它的产出由审核者按标准来判）。</span>
+      {/if}
     </label>
-
-    <label>
-      认哪些 kind（逗号分隔，支持通配）
-      <input bind:value={kindPatterns} placeholder="ci-failure, security-*, *" autocomplete="off" />
-      <span class="hint">
-        这是<strong>路由键</strong>：报告按它的 kind 决定交给谁审。
-        填 <code>*</code> 表示什么都接；<strong>留空则谁也接不到</strong>。
-      </span>
-    </label>
-
-    <div class="row">
-      <label class="inline">
-        <input type="checkbox" bind:checked={isFallbackReviewer} />
-        作为兜底审核者
-      </label>
-      <label class="inline">
-        <input type="checkbox" bind:checked={autoReview} />
-        执行完自动接一次审核
-      </label>
-    </div>
-    {#if isFallbackReviewer}
-      <p class="hint">
-        兜底审核者接住<strong>没有 agent 认领的 kind</strong>。配一个就够——
-        多个兜底者的优先级没有定义，那属于配置错误。
-      </p>
-    {/if}
 
     <div class="row">
       <label>
-        并发上限
-        <input type="number" min="1" bind:value={maxConcurrentRuns} />
+        用哪个 runtime
+        <select bind:value={runtimeKey}>
+          <option value="claude">claude</option>
+          <option value="generic">generic（未对照真实程序）</option>
+        </select>
       </label>
       <label>
         默认工作目录（可选）
@@ -155,8 +190,6 @@
 {/if}
 
 <style>
-  /* 表单直接铺在内容里（而不是弹窗）：建 agent 是个需要边看 skill 列表
-     边填的动作，弹窗会挡住它要参考的东西 */
   .agent-form {
     background: var(--surface);
     border: 1px solid var(--line-strong);
@@ -168,22 +201,45 @@
 
   .agent-form h3 { margin-bottom: var(--sp-4); }
 
-  .row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-3);
+  .field { margin-bottom: var(--sp-3); }
+
+  .field-label {
+    display: block;
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    margin-bottom: var(--sp-1);
   }
 
-  .inline {
-    display: flex;
-    align-items: center;
+  .role-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: var(--sp-2);
   }
 
-  .inline input { width: auto; }
+  .role-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    text-align: left;
+    padding: var(--sp-3);
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    color: var(--text-dim);
+  }
 
-  /* skill 多选做成栅格而不是原生多选框：原生 <select multiple> 在
-     macOS 上要按着 Cmd 点，几乎没人知道 */
+  .role-card strong { color: var(--text); font-size: var(--fs-md); }
+  .role-card span { font-size: var(--fs-xs); color: var(--text-faint); }
+
+  .role-card.active {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+
+  .role-card.active strong { color: var(--accent); }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+
   .skill-picker {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
@@ -197,13 +253,6 @@
     background: var(--bg);
   }
 
-  .skill-option {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    margin: 0;
-    cursor: pointer;
-  }
-
+  .skill-option { display: flex; align-items: center; gap: var(--sp-2); margin: 0; cursor: pointer; }
   .skill-option input { width: auto; }
 </style>

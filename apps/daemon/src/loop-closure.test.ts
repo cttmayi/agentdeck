@@ -306,11 +306,8 @@ describe('动作派生的真实闭环（ActionRunner.deriveRun）', () => {
       skillIds: [],
       toolIds: [],
       env: {},
-      maxConcurrentRuns: 1,
-      kindPatterns: ['*'],
-      kindSkillOverride: {},
-      isFallbackReviewer: false,
-      autoReview: false,
+      role: 'executor',
+      reviewerAgentId: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })

@@ -29,7 +29,9 @@ import {
   type RunMessage,
   type Skill,
   type SubmitRunRequest,
+  type AgentRole,
   type Workspace,
+  type WorkspaceId,
 } from '@alpha-helper/protocol'
 import { FileStore } from '@alpha-helper/store-file'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
@@ -181,6 +183,35 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const executor = new RunExecutor({
     store,
     workRoot,
+    // ★ 按 agent 的 runtimeKey 解析 backend（D28）。
+    //   在此之前 agent.runtimeKey 是个没人读的字段——界面上能选、审计里会记，
+    //   行为上所有 agent 都跑同一个 CLI。那正是"接口接受了、行为上不存在"。
+    resolveRuntime: (key) => {
+      const adapter = knownRuntimeAdapters()[key]
+      if (!adapter) {
+        throw new Error(`未知的 runtime：${key}。可用的：${Object.keys(knownRuntimeAdapters()).join(', ')}`)
+      }
+      // ★ 注入了 backend 时**必须**用它。
+      //
+      //   这是 NFR-T-01 的落点：测试注入一个假后端，就是为了**绝不启动
+      //   使用者真实安装的 CLI**（那会消耗真实额度、还可能让 agent 改文件）。
+      //   如果这里无条件 `adapter.create()`，注入的假后端就被绕过去了——
+      //   测试会开始偷偷跑真 CLI。
+      //
+      //   这个错误当场就被测试抓到了（S2 的用例集体超时 8 秒），因为假后端
+      //   不再被调用、真 CLI 却在等输入。**没有那条测试的话，它只会在使用者
+      //   的账单上体现出来。**
+      if (options.backend && key === selected.descriptor.key) {
+        return { backend: options.backend, descriptor: adapter.descriptor }
+      }
+      return {
+        backend: adapter.create({
+          ...(options.executablePath ? { executablePath: options.executablePath } : {}),
+          onWarn: warn,
+        }),
+        descriptor: adapter.descriptor,
+      }
+    },
     registry,
     backend,
     descriptor,
@@ -209,12 +240,26 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }): Promise<RunId | null> {
     const agents = await store.listAgents(workspaceId)
     const executor = agents.find((a) => (a.id as string) === input.executorAgentId)
-    if (!executor?.autoReview) return null
+    if (!executor) {
+      warn(`找不到执行 agent ${input.executorAgentId}，跳过自动审核`)
+      return null
+    }
 
-    const others = agents.filter((a) => (a.id as string) !== input.executorAgentId)
-    const reviewer = others.find((a) => a.isFallbackReviewer) ?? others[0]
+    // ★ D28：**由这个执行 agent 自己指定**审核者，而不是"从别人里挑一个"。
+    //
+    //   原来是从其他 agent 里找兜底者、再退回第一个——那个规则有个很隐蔽的
+    //   坏处：**换审核者不需要任何人做决定**。你新建一个 agent，它就悄悄
+    //   变成了既有执行者的审核者（如果它排在前面）。而"谁来审我"是一件
+    //   应该被明确指定的事。
+    //
+    //   `reviewerAgentId` 为空 = 明确选择不自动审（不是配置错误）。
+    if (!executor.reviewerAgentId) return null
+
+    const reviewer = agents.find((a) => a.id === executor.reviewerAgentId)
     if (!reviewer) {
-      warn('没有可用于审核的其他 agent（INV-1 要求审核者不同于执行者），跳过自动审核')
+      warn(
+        `agent ${executor.name} 指定的审核者已不存在（${executor.reviewerAgentId}），跳过自动审核`,
+      )
       return null
     }
 
@@ -696,12 +741,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: skillIds.error })
         return
       }
-      const kindPatterns = stringArray('kindPatterns')
-      if (!Array.isArray(kindPatterns)) {
-        sendJson(res, 400, { error: kindPatterns.error })
-        return
-      }
-
       // 挂载的 skill 必须真的存在——写了不存在的 id 会让审核在运行时
       // 才失败，而那时错误信息指向的是"没有 skill"，不是"你填错了 id"
       const existing = await store.listSkills(workspaceId)
@@ -716,12 +755,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      const maxConcurrentRuns = body['maxConcurrentRuns']
-      if (
-        maxConcurrentRuns !== undefined &&
-        (!Number.isInteger(maxConcurrentRuns) || (maxConcurrentRuns as number) < 1)
-      ) {
-        sendJson(res, 400, { error: 'maxConcurrentRuns 必须是正整数' })
+      const roleCheck = await validateRoleAndReviewer(store, {
+        role: body['role'],
+        reviewerAgentId: body['reviewerAgentId'],
+        selfId: null,
+        workspaceId,
+      })
+      if (!roleCheck.ok) {
+        sendJson(res, 400, { error: roleCheck.error })
+        return
+      }
+
+      const runtimeCheck = await resolveRuntimeKey(body['runtimeKey'])
+      if (!runtimeCheck.ok) {
+        sendJson(res, 400, { error: runtimeCheck.error })
         return
       }
 
@@ -732,9 +779,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name,
         instructions: typeof body['instructions'] === 'string' ? body['instructions'] : '',
         model: typeof body['model'] === 'string' && body['model'] !== '' ? body['model'] : null,
-        // runtime 用**当前 daemon 装的那个**，而不是让客户端指定：
-        // 指定一个没装的 runtime 只会让 run 起不来，而错误发生在很远的地方
-        runtimeKey: descriptor.key,
+        // D28：runtime 可由使用者选（它现在真的会被消费，见 executor）
+        runtimeKey: runtimeCheck.runtimeKey,
         workDir:
           typeof body['workDir'] === 'string' && body['workDir'].trim() !== ''
             ? body['workDir'].trim()
@@ -742,11 +788,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         skillIds: skillIds as Agent['skillIds'],
         toolIds: [],
         env: {},
-        maxConcurrentRuns: (maxConcurrentRuns as number | undefined) ?? 1,
-        kindPatterns,
-        kindSkillOverride: {},
-        isFallbackReviewer: body['isFallbackReviewer'] === true,
-        autoReview: body['autoReview'] === true,
+        role: roleCheck.role,
+        reviewerAgentId: roleCheck.reviewerAgentId,
         createdAt: now,
         updatedAt: now,
       }
@@ -790,10 +833,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           'model',
           'workDir',
           'skillIds',
-          'kindPatterns',
-          'isFallbackReviewer',
-          'autoReview',
-          'maxConcurrentRuns',
+          'role',
+          'reviewerAgentId',
+          'runtimeKey',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -853,32 +895,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           patch.skillIds = ids as Agent['skillIds']
         }
 
-        if (body['kindPatterns'] !== undefined) {
-          const patterns = stringArray('kindPatterns')
-          if (!Array.isArray(patterns)) {
-            sendJson(res, 400, { error: patterns.error })
+        // 角色与"由谁审我"必须**一起**校验：把 role 从 reviewer 改成 executor
+        // 时，原来那条 reviewerAgentId 的合法性也要重新过一遍。
+        if (body['role'] !== undefined || body['reviewerAgentId'] !== undefined) {
+          const roleCheck = await validateRoleAndReviewer(store, {
+            role: body['role'] ?? current.role,
+            reviewerAgentId:
+              body['reviewerAgentId'] !== undefined ? body['reviewerAgentId'] : current.reviewerAgentId,
+            selfId: current.id as string,
+            workspaceId: current.workspaceId,
+          })
+          if (!roleCheck.ok) {
+            sendJson(res, 400, { error: roleCheck.error })
             return
           }
-          patch.kindPatterns = patterns
+          patch.role = roleCheck.role
+          patch.reviewerAgentId = roleCheck.reviewerAgentId
         }
 
-        for (const flag of ['isFallbackReviewer', 'autoReview'] as const) {
-          if (body[flag] !== undefined) {
-            if (typeof body[flag] !== 'boolean') {
-              sendJson(res, 400, { error: `${flag} 必须是布尔值` })
-              return
-            }
-            patch[flag] = body[flag] as boolean
-          }
-        }
-
-        if (body['maxConcurrentRuns'] !== undefined) {
-          const n = body['maxConcurrentRuns']
-          if (!Number.isInteger(n) || (n as number) < 1) {
-            sendJson(res, 400, { error: 'maxConcurrentRuns 必须是正整数' })
+        if (body['runtimeKey'] !== undefined) {
+          const runtimeCheck = await resolveRuntimeKey(body['runtimeKey'])
+          if (!runtimeCheck.ok) {
+            sendJson(res, 400, { error: runtimeCheck.error })
             return
           }
-          patch.maxConcurrentRuns = n as number
+          patch.runtimeKey = runtimeCheck.runtimeKey
         }
 
         if (body['workDir'] !== undefined) {
@@ -1430,6 +1471,100 @@ export function isAllowedHost(host: string, address: AddressInfo | null): boolea
 }
 
 /** 首次启动时准备一个可用的 workspace 与默认 agent。 */
+/**
+ * 校验角色与"由谁审我"的配对（D28）。
+ *
+ * 三条规则，每条都对应一种"配置上看起来没问题、行为上很别扭"的情形：
+ *
+ * 1. **角色必须是两者之一**。缺省给 `executor`——新建一个 agent 时，
+ *    "它能干活"是最合理的默认；把它默认成审核者会让它悄悄进入审核小组。
+ * 2. **审核者不能是自己**。那违反 INV-1（reviewer ≠ executor），
+ *    而且它表达的意思等于"我自己审我自己"。
+ * 3. **executor 的 reviewerAgentId 必须指向一个真实存在的 `reviewer`**。
+ *    指向一个 executor 是最容易犯的错：名字看起来对，但那个 agent 没有
+ *    审核标准可用，run 起不来或审出没有依据的结论。
+ *
+ * ⚠️ `robustness`：agent 可能被改名，也可能还不存在（新建时先选审核者、
+ *    审核者后建）——所以引用**按 id**，而且找不到时只跳过自动审核并警告，
+ *    不把它当成致命错误。删 agent 的功能还没有，所以悬空引用只会来自
+ *    手工改数据。
+ */
+async function validateRoleAndReviewer(
+  store: Store,
+  input: {
+    role: unknown
+    reviewerAgentId: unknown
+    selfId: string | null
+    workspaceId: WorkspaceId
+  },
+): Promise<
+  | { ok: true; role: AgentRole; reviewerAgentId: Agent['reviewerAgentId'] }
+  | { ok: false; error: string }
+> {
+  const role = input.role === undefined ? 'executor' : input.role
+  if (role !== 'executor' && role !== 'reviewer') {
+    return { ok: false, error: `role 必须是 'executor' 或 'reviewer'（收到 ${JSON.stringify(input.role)}）` }
+  }
+
+  const raw = input.reviewerAgentId
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, role, reviewerAgentId: null }
+  }
+  if (typeof raw !== 'string') {
+    return { ok: false, error: 'reviewerAgentId 必须是 agent 的 id 或 null' }
+  }
+
+  // 只有 executor 才谈得上"由谁审我"
+  if (role === 'reviewer') {
+    return {
+      ok: false,
+      error:
+        'reviewer 角色的 agent 不该配 reviewerAgentId——它是**审别人的那个**，' +
+        '不是被审的那个。如果你想让两个审核者互相复核，那需要另一套设计，现在没有。',
+    }
+  }
+
+  if (input.selfId !== null && raw === input.selfId) {
+    return { ok: false, error: '不能让一个 agent 审自己（INV-1：审核者必须不同于执行者）' }
+  }
+
+  // 指向的对象**必须真实存在且是审核角色**。
+  //
+  //   指向一个 executor 是最容易犯的错：名字看起来对，但那个 agent 没有
+  //   审核标准可用，run 起不来（或审出没有依据的结论）。
+  const target = await store.getAgent(raw as Agent['id'])
+  if (!target) {
+    return { ok: false, error: `指定的审核者不存在：${raw}` }
+  }
+  if (target.role !== 'reviewer') {
+    return {
+      ok: false,
+      error:
+        `${target.name} 不是审核角色（它是 executor）。审核者必须是 role: 'reviewer' 的 agent —— ` +
+        `否则它没有审核标准可用，run 起不来或审出没有依据的结论。`,
+    }
+  }
+
+  return { ok: true, role, reviewerAgentId: target.id }
+}
+
+/** 校验 runtimeKey：必须是**装了**的那个，否则 run 起不来且错误出现在很远的地方。 */
+async function resolveRuntimeKey(
+  raw: unknown,
+): Promise<{ ok: true; runtimeKey: string } | { ok: false; error: string }> {
+  const adapters = knownRuntimeAdapters()
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, runtimeKey: 'claude' }
+  }
+  if (typeof raw !== 'string' || !(raw in adapters)) {
+    return {
+      ok: false,
+      error: `未知的 runtime：${String(raw)}。可用的：${Object.keys(adapters).join(', ')}`,
+    }
+  }
+  return { ok: true, runtimeKey: raw }
+}
+
 async function bootstrap(store: Store, info: (m: string) => void): Promise<Workspace['id']> {
   const existing = await store.listWorkspaceIds()
   const first = existing[0]
@@ -1483,37 +1618,68 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
   }
   await store.insertSkill(template)
 
+  // ══════════════════════════════════════════════════════════════════
+  // 播种**一对** agent：一个执行的、一个审的（D28）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 为什么不只播种一个执行者：D28 去掉了"兜底审核者"这个概念，报告的路由
+  // 变成"`role: 'reviewer'` 的 agent 都审"。如果首启只有一个执行者，那么
+  // **一个审核者都没有** —— 所有报告都会落进 unmatched（存下来 + 发通知），
+  // 一条也不会被审。
+  //
+  // 那是"按需求实现了"但**开箱即坏**：这个产品的核心闭环就是
+  // 「任务 → 执行 → 审核 → 判决 → 动作」，首启没有审核者等于闭环断了一半，
+  // 而使用者需要先读文档才知道要自己建一个。
+  //
+  // 所以播种一对，并且**把执行者指向审核者**。这个默认是可改的：把
+  // reviewerAgentId 清掉就是不自动审，新建自己的审核者再指过去也行。
+
+  const reviewer: Agent = {
+    id: ulid() as Agent['id'],
+    workspaceId: workspace.id,
+    name: '审核员',
+    instructions:
+      '你是一个严格的审核者。按挂载的审核标准逐条对照，' +
+      '判断依据不足时给出 needs_human 并说清缺什么，不要替对方补上你认为对的要求。',
+    model: null,
+    runtimeKey: 'claude',
+    workDir: null,
+    // 审核标准就在 skill 里——审核者**必须**挂 skill，否则它审不出有依据的结论
+    skillIds: [template.id],
+    toolIds: [],
+    env: {},
+    role: 'reviewer',
+    reviewerAgentId: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await store.insertAgent(reviewer)
+
   const agent: Agent = {
     id: ulid() as Agent['id'],
     workspaceId: workspace.id,
     name: '助手',
     instructions: '你是一个严谨的协作者。先理解任务，再动手；报告要写清楚结论与不确定的地方。',
     model: null,
-    // ⚠️ 这里**刻意写死 claude**，而不是取"当前 daemon 的 runtime"。
-    //
-    //   播种发生在 `bootstrap()` 里，它手上没有 daemon 选项——而把 runtimeKey
-    //   一路传进来会掩盖一个更重要的事实：**agent 记录的 runtimeKey 目前根本
-    //   没被消费**（executor 用的是 daemon 级的 `backend`）。
-    //   写死 claude 让这个不一致保持显式；等"按 agent 选 runtime"真正落地时，
-    //   这里和 executor 必须一起改，而不是现在假装已经支持了。
     runtimeKey: 'claude',
     workDir: null,
-    skillIds: [template.id],
+    // 执行者不需要审核 skill——它的 skill 是"干活时参考什么"，
+    // 而审核标准是审核者的事。两者混在一起会让执行者按审核标准去改自己的产出。
+    skillIds: [],
     toolIds: [],
     env: {},
-    maxConcurrentRuns: 1,
-    // 兜底审核者：任何 kind 都能接（FR-AGENT-22）
-    kindPatterns: ['*'],
-    kindSkillOverride: {},
-    isFallbackReviewer: true,
-    // S1 默认开：执行完成后自动接一次审核（可用 API 关掉）
-    autoReview: true,
+    role: 'executor',
+    // ★ 指向刚播种的审核者：这样首启就是一条**通的闭环**
+    reviewerAgentId: reviewer.id,
     createdAt: now,
     updatedAt: now,
   }
   await store.insertAgent(agent)
 
-  info(`已初始化工作区、默认 agent（${agent.name}）与内置审核模板（${template.slug}）`)
+  info(
+    `已初始化工作区、审核模板（${template.slug}）与两个 agent：` +
+      `${reviewer.name}（审核）、${agent.name}（执行 → 由 ${reviewer.name} 审）`,
+  )
   return workspace.id
 }
 

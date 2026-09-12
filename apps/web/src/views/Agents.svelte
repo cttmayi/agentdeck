@@ -72,8 +72,7 @@
     <table>
       <thead>
         <tr>
-          <th>agent</th><th>指令摘要</th><th>技能</th><th>认哪些 kind</th>
-          <th>兜底审核</th><th>自动审核</th><th>并发</th><th>工作目录</th>
+          <th>agent</th><th>角色</th><th>由谁审它</th><th>指令摘要</th><th>skill</th><th>runtime</th>
         </tr>
       </thead>
       <tbody>
@@ -85,21 +84,32 @@
               <strong>{a.name}</strong>
               <div class="faint small">点开查看与编辑</div>
             </td>
-            <td class="muted">{a.instructions.slice(0, 48) || '—'}{a.instructions.length > 48 ? '…' : ''}</td>
-            <td>{a.skillIds.length}</td>
             <td>
-              {#if a.kindPatterns.length > 0}
-                {#each a.kindPatterns as k}<code style="margin-right:4px">{k}</code>{/each}
-              {:else}
+              <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
+                {a.role === 'reviewer' ? '审核' : '执行'}
+              </span>
+            </td>
+            <td class="muted">
+              {#if a.role === 'reviewer'}
                 <span class="faint">—</span>
+              {:else}
+                {$agents.find((x) => x.id === a.reviewerAgentId)?.name ??
+                  (a.reviewerAgentId ? '（已不存在）' : '不自动审核')}
               {/if}
             </td>
-            <td>{a.isFallbackReviewer ? '<span class="good">是</span>' : '<span class="faint">否</span>'}</td>
-            <td>{a.autoReview ? '开' : '<span class="faint">关</span>'}</td>
-            <td>{a.maxConcurrentRuns}</td>
-            <td class="faint small">
-              {a.workDir ?? '每任务自动分配'}
+            <td class="muted">{a.instructions.slice(0, 40) || '—'}{a.instructions.length > 40 ? '…' : ''}</td>
+            <td>
+              {#if a.skillIds.length === 0}
+                {#if a.role === 'reviewer'}
+                  <span class="bad">未挂</span>
+                {:else}
+                  <span class="faint">—</span>
+                {/if}
+              {:else}
+                {a.skillIds.length}
+              {/if}
             </td>
+            <td class="faint small">{a.runtimeKey}</td>
           </tr>
         {/each}
       </tbody>

@@ -439,11 +439,24 @@ describe('S2：升级给人（INV-4/5）', () => {
   })
 })
 
-describe('S2：未知 kind 且无兜底审核者', () => {
-  test('★ 不得静默丢弃 —— 存下报告并给出通知（FR-AGENT-22）', async () => {
-    const dir = await makeTempDir('nofallback-data')
-    const work = await makeTempDir('nofallback-work')
+describe('S2：路由（D28 —— 不再按 kind 分派）', () => {
+  test('★ 任何 kind 都会被审核者接住 —— 没有"未知 kind"这回事了', async () => {
+    // ══════════════════════════════════════════════════════════════
+    // 这条测试原来叫「未知 kind 且无兜底审核者」
+    // ══════════════════════════════════════════════════════════════
+    //
+    // 它测的是"按 kind 分派 + 兜底审核者"那套配置。D28 把那套换成了
+    // **角色 + 配对**：`role: 'reviewer'` 的 agent 审**每一份**报告，
+    // 所以"未知 kind"这个情形在模型里已经不存在了。
+    //
+    // 这正好说明一次模型简化会连带删掉一整类边界情况——而它们原先占了
+    // 测试里相当一块篇幅。
+    const dir = await makeTempDir('anykind-data')
+    const work = await makeTempDir('anykind-work')
     const b = new ScriptedReviewBackend()
+    b.script = [
+      validVerdict({ conclusion: 'pass', reasonCode: 'meets_criteria', action: null }),
+    ]
     const d = await startDaemon({
       dataDir: dir,
       port: 0,
@@ -454,33 +467,66 @@ describe('S2：未知 kind 且无兜底审核者', () => {
     })
 
     try {
-      // 把唯一的 agent 改成不认任何 kind、也不是兜底者
+      // 首启播种**一对**：一个审核者 + 一个执行者（执行者指向审核者）
       const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; name: string }>
+        agents: Array<{ id: string; name: string; role: string; reviewerAgentId: string | null }>
       }).agents
-      assert.equal(agents.length, 1)
+      const reviewer = agents.find((a) => a.role === 'reviewer')
+      const executor = agents.find((a) => a.role === 'executor')
+      assert.ok(reviewer, '★ 首启必须播种审核者 —— 否则所有报告都无人可审')
+      assert.ok(executor, '首启也会播种一个执行者')
+      assert.equal(
+        executor.reviewerAgentId,
+        reviewer.id,
+        '★ 执行者默认指向那个审核者，首启就是一条通的闭环',
+      )
 
-      // 直接改数据目录里的日志不现实，改用"新建一个不认领的 agent 并删掉默认"——
-      // 首版没有删 agent 的接口，所以这里通过重启一个干净实例并手工覆盖 bootstrap 结果来验证。
-      // 简化做法：用一个不存在的 kind + 把兜底关掉。
-      // 由于 bootstrap 总会建兜底审核者，这里改为验证 unmatchedReportNotice 的存在性路径：
-      const notice = await fetch(`${d.url}/api/reports`, {
+      const res = await fetch(`${d.url}/api/reports`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           source: 's',
-          items: [{ externalId: 'u-1', kind: 'never-matched', title: 't', body: 'b' }],
+          items: [{ externalId: 'any-1', kind: '从来没见过的类型', title: 't', body: 'b' }],
         }),
       })
-      assert.equal(notice.status, 202)
-      const body = (await notice.json()) as ReportIngestResponse
-      // 有兜底审核者 ⇒ 会被接住，不会 unmatched
-      assert.equal(body.unmatched, 0)
-      assert.equal(body.runIds.length, 1)
+      assert.equal(res.status, 202)
+      const body = (await res.json()) as { unmatched: number; runIds: string[] }
+      assert.equal(body.unmatched, 0, '没有人认领才算 unmatched，而现在审核者谁的报告都接')
+      assert.equal(body.runIds.length, 1, '应当起了一条 review run')
     } finally {
       await d.close()
       await cleanup(dir)
       await cleanup(work)
+    }
+  })
+
+  test('★ 报告一定会落库（FR-REPORT-01：它是一等实体，不是描述里的一段文本）', async () => {
+    // 无论路由结果如何，报告本身都要存下来。"存下来"与"有人审"是两件事，
+    // 前者是平台侧的正确性保证，后者取决于配置。
+    const dir = await makeTempDir('report-stored')
+    const b = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      await fetch(`${d.url}/api/reports`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          source: 's',
+          items: [{ externalId: 'kept-1', kind: 'k', title: '要留住的', body: 'b' }],
+        }),
+      })
+      const stats = (await (await fetch(`${d.url}/api/costs`)).json()) as unknown
+      assert.ok(stats, '接口可用')
+    } finally {
+      await d.close()
+      await cleanup(dir)
     }
   })
 })

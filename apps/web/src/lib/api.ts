@@ -118,18 +118,20 @@ export interface Issue {
   createdAt: number
 }
 
+export type AgentRole = 'executor' | 'reviewer'
+
 export interface Agent {
   id: string
   name: string
   instructions: string
   workDir: string | null
   skillIds: string[]
-  kindPatterns: string[]
-  isFallbackReviewer: boolean
-  autoReview: boolean
-  maxConcurrentRuns: number
   model: string | null
   runtimeKey: string
+  /** 干活的还是审的（D28）。 */
+  role: AgentRole
+  /** 由谁来审**这个执行 agent** 的产出（仅 executor 有意义）。 */
+  reviewerAgentId: string | null
 }
 
 export interface Skill {
