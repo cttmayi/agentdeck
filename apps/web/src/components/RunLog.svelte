@@ -20,7 +20,64 @@
    *
    * 重连时浏览器会自动重发请求，我们从 `lastSeq` 继续，因此**既不丢也不重**。
    */
-  let rows: Array<{ seq: number | null; kind: string; text: string }> = []
+  /**
+   * 日志行。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么必须带上 `input` 与 `output`
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 它们**一直在数据里**：解析器抓了、执行器落库了、接口也发了——
+   * 只有界面从来没用过。于是日志里只有一行"调用工具 Bash"，
+   * **看不到它到底跑了什么命令**。而排查时那正是要看的东西。
+   *
+   * 这个缺失很隐蔽：数据链路每一段都是对的，只有最后一段没接上，
+   * 所以任何后端测试都发现不了。
+   */
+  let rows: Array<{
+    seq: number | null
+    kind: string
+    text: string
+    tool: string | null
+    input: Record<string, unknown> | null
+    output: string | null
+    outputTruncated: boolean
+  }> = []
+
+  /** 展开的行（长输入/输出默认折叠）。 */
+  let expanded = new Set<number>()
+
+  function toggleRow(i: number): void {
+    const next = new Set(expanded)
+    if (next.has(i)) next.delete(i)
+    else next.add(i)
+    expanded = next
+  }
+
+  /** 把结构化输入渲染成人能读的样子。 */
+  function formatInput(input: Record<string, unknown> | null): string {
+    if (!input) return ''
+    const keys = Object.keys(input)
+    // 单键且值是短字符串时直接给值——`{"command": "ls"}` 那种包一层反而难读
+    if (keys.length === 1) {
+      const only = input[keys[0]!]
+      if (typeof only === 'string') return only
+    }
+    try {
+      return JSON.stringify(input, null, 2)
+    } catch {
+      return String(input)
+    }
+  }
+
+  /**
+   * 折叠阈值。
+   *
+   * 工具的输入/输出可能是几 KB 的内容（读一个文件、跑一条长命令）。
+   * 全部铺开会把日志冲掉，而**被冲掉的日志等于没有日志**——所以默认折叠、
+   * 只给一行预览，需要时再展开。
+   */
+  const PREVIEW_CHARS = 160
 
   /**
    * 是否显示模型的**思考过程**（`thinking` 消息）。
@@ -68,7 +125,23 @@
     }
     source.onerror = () => {
       // 浏览器会自动重连；这里只记一行，不打断阅读
-      rows = [...rows, { seq: null, kind: 'status', text: '连接中断，正在重连…' }]
+      // ⚠️ 这里不能直接拼对象字面量：会漏掉 tool/input/output 四个字段，
+      //    而类型检查会（也应该）因此报错。`push` 在 `apply()` 里，
+      //    作用域够不到，所以给一个等价的、字段齐全的构造。
+      //
+      //    这处"漏字段"不是纯理论——它正是被类型检查当场抓出来的。
+      rows = [
+        ...rows,
+        {
+          seq: null,
+          kind: 'status',
+          text: '连接中断，正在重连…',
+          tool: null,
+          input: null,
+          output: null,
+          outputTruncated: false,
+        },
+      ]
     }
   }
 
@@ -78,14 +151,40 @@
       if (seq <= lastSeq) return // 去重
       lastSeq = seq
     }
-    const push = (kind: string, text: string): void => {
-      rows = [...rows, { seq, kind, text }]
+    const push = (
+      kind: string,
+      text: string,
+      extra: Partial<{
+        tool: string | null
+        input: Record<string, unknown> | null
+        output: string | null
+        outputTruncated: boolean
+      }> = {},
+    ): void => {
+      rows = [
+        ...rows,
+        {
+          seq,
+          kind,
+          text,
+          tool: extra.tool ?? null,
+          input: extra.input ?? null,
+          output: extra.output ?? null,
+          outputTruncated: extra.outputTruncated ?? false,
+        },
+      ]
     }
 
     switch (event['t']) {
       case 'message': {
         const m = event['message'] as RunMessage
-        push(m.type, m.content)
+        // ★ 把 input / output 一起带上——它们本来就在消息里，只是原来被丢掉了
+        push(m.type, m.content, {
+          tool: m.tool,
+          input: m.input,
+          output: m.output,
+          outputTruncated: m.outputTruncated,
+        })
         break
       }
       case 'status':
@@ -148,12 +247,38 @@
       </div>
     {/if}
     {#each visibleRows as row, i (i)}
+      {@const payload = row.kind === 'tool_use' ? formatInput(row.input) : (row.output ?? '')}
+      {@const isLong = payload.length > PREVIEW_CHARS}
+      {@const open = expanded.has(i)}
       <div class="log-row">
         <span class="log-seq">{row.seq ?? '·'}</span>
-        <span class="log-text {row.kind}">
-          {#if row.kind === 'thinking'}<span class="thinking-tag">思考</span>{/if}
-          {row.text}
-        </span>
+        <div class="log-body">
+          <span class="log-text {row.kind}">
+            {#if row.kind === 'thinking'}<span class="thinking-tag">思考</span>{/if}
+            {row.text}
+            {#if row.kind === 'tool_use' && row.tool}
+              <span class="tool-name">{row.tool}</span>
+            {/if}
+          </span>
+
+          <!--
+            ★ 工具的**输入**与**输出**。
+              它们一直在数据里（解析器抓了、执行器落库了、接口也发了），
+              只有界面从来没用过——于是日志里只有"调用工具 Bash"，
+              看不到它到底跑了什么命令。
+          -->
+          {#if payload.trim()}
+            <pre class="payload">{open || !isLong ? payload : payload.slice(0, PREVIEW_CHARS) + '…'}</pre>
+            {#if isLong}
+              <button type="button" class="ghost tiny" onclick={() => toggleRow(i)}>
+                {open ? '收起' : `展开全部（${payload.length} 字符）`}
+              </button>
+            {/if}
+            {#if row.outputTruncated}
+              <span class="faint small">（这段输出在采集时已被截断，原文更长）</span>
+            {/if}
+          {/if}
+        </div>
       </div>
     {/each}
   </div>
@@ -196,7 +321,7 @@
   .log-row {
     display: flex;
     gap: var(--sp-3);
-    padding: 1px 0;
+    padding: var(--sp-1) 0;
   }
 
   /* 序号用固定宽度并右对齐：运行中它会不断变宽，不定宽会让整列文字
@@ -208,12 +333,59 @@
     user-select: none;
   }
 
-  .log-text {
+  .log-body {
     flex: 1;
     min-width: 0;
+  }
+
+  .log-text {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-dim);
+    display: block;
+  }
+
+  /* 工具名单独一个标签：它与"调用工具 X"那句是重复信息，
+     但重复在这里有用——扫一眼就能定位到用了哪个工具 */
+  .tool-name {
+    display: inline-block;
+    margin-left: var(--sp-2);
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    font-size: 0.9em;
+    user-select: none;
+  }
+
+  /**
+   * 工具输入 / 输出的正文。
+   *
+   * 用 `<pre>` 是因为它们本质上是**结构化数据的原文**（JSON、文件内容、
+   * 命令输出）——按普通文字排版会把缩进和换行吃掉，而那恰恰是排查时
+   * 最需要保留的东西。
+   */
+  .payload {
+    margin: var(--sp-1) 0 0;
+    padding: var(--sp-2);
+    background: var(--bg);
+    border-left: 2px solid var(--line-strong);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-dim);
+    font-size: 0.95em;
+    max-height: 22rem;
+    overflow-y: auto;
+  }
+
+  .log-row + .log-row {
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+  }
+
+  .tiny {
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
   }
 
   /* 用颜色区分消息类型，但**克制**：只有真正需要区分的才上色 */

@@ -168,7 +168,14 @@ export interface RunMessage {
   type: string
   tool: string | null
   content: string
-  input: unknown
+  /**
+   * 工具的**结构化入参**（原文保留）。
+   *
+   * 类型写具体而不是 `unknown`：界面要把它当对象渲染成 JSON。
+   * 写 `unknown` 的话每个使用点都得自己收窄一遍——那是把类型信息
+   * 丢在源头，然后让所有下游去猜。
+   */
+  input: Record<string, unknown> | null
   output: string | null
   outputTruncated: boolean
   at: number

@@ -152,6 +152,15 @@ const DEFAULT_SHUTDOWN_GRACE_MS = 5_000
  */
 const MAX_STDERR_LOG_LINES = 200
 
+/**
+ * prompt 往日志里写多少字符。
+ *
+ * prompt 里可能是一整份报告正文（上万字）。全部铺开会把日志冲掉，
+ * 而**被冲掉的日志等于没有日志**——那恰恰违反"加它是为了方便 debug"。
+ * 截断时**明说还剩多少**，不让人误以为它就收到这些。
+ */
+const PROMPT_LOG_CHARS = 2_000
+
 export class RunExecutor {
   readonly #deps: ExecutorDeps
   readonly #now: () => number
@@ -496,6 +505,22 @@ export class RunExecutor {
             `修法：${envCheck.issues[0]?.action ?? ''}`,
         )
       }
+
+      // ★ 把**输入**也写进日志。
+      //
+      //   排查时最先要回答的两个问题是"给了它什么"与"它做了什么"。
+      //   后者原本只有工具名（没有参数，见界面那边的修复），而**前者
+      //   完全不在日志里**——prompt 只存在于内存与上下文块里。
+      //
+      //   长 prompt（报告正文可能上万字）要截断，并**明说截断了**——
+      //   静默截断会让人以为"它就收到这些"。
+      await this.#note(runId, `输入（prompt，${req.prompt.length} 字符）：`)
+      await this.#note(
+        runId,
+        req.prompt.length > PROMPT_LOG_CHARS
+          ? `${req.prompt.slice(0, PROMPT_LOG_CHARS)}\n…（还有 ${req.prompt.length - PROMPT_LOG_CHARS} 字符未显示）`
+          : req.prompt,
+      )
 
       // ★ 把注入结果写进日志。
       //

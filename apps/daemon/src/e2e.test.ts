@@ -653,3 +653,51 @@ describe('★ 日志要够 debug：命令行 / stderr / 退出码', () => {
     }
   })
 })
+
+describe('★ 日志要有**输入**（方便 debug）', () => {
+  test('★ prompt 出现在日志里，且长 prompt 截断时说明还剩多少', async () => {
+    // 排查时最先要回答的两个问题是"给了它什么"与"它做了什么"。
+    // 后者原本只有工具名没有参数，前者**完全不在日志里**。
+    const runId = ulid() as RunId
+    const longPrompt = '甲'.repeat(3000)
+    await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'a1', name: '助手', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: longPrompt,
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+
+    const text = await waitForText(runId, /输入（prompt/)
+    assert.match(text, /输入（prompt，3000 字符）/, '要说明这次给了它多少')
+    assert.match(text, /还有 1000 字符未显示/, '★ 截断必须明说剩多少——静默截断会让人以为它就收到这些')
+  })
+
+  test('短 prompt 完整显示，不加"还有 N 字符"', async () => {
+    const runId = ulid() as RunId
+    await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'a1', name: '助手', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: '把功能实现一下',
+        workDir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+    const text = await waitForText(runId, /输入（prompt/)
+    assert.match(text, /把功能实现一下/)
+    assert.ok(!/还有 \\d+ 字符未显示/.test(text), '没截断就不该说截断了')
+  })
+})
