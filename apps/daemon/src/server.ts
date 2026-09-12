@@ -623,25 +623,100 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sendJson(res, 200, { agents: await store.listAgents(workspaceId) })
       return
     }
+    // ── 新建 / 更新 agent ──
+    //
+    // ══════════════════════════════════════════════════════════════════
+    // 这里需要校验，而**不是**"缺什么给个默认值"
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来每个字段都 `?? 默认值`。对 `instructions` 这类"空着也行"的字段
+    // 没问题，但对 `name` 不行：它会造出一个叫"新 agent"的家伙，而使用者
+    // 明明填了名字——只是字段名写错了。**静默兜底会把一个拼写错误变成一条
+    // 脏数据**，而且看起来像成功了。
+    //
+    // 另外 `skillIds` 与 `kindPatterns` 必须校验**元素类型**：它们是数组，
+    // 但客户端完全可能传 `[""]` 或 `[123]`，那会让后续的技能求解与 kind 路由
+    // 在很远的地方以莫名其妙的方式失败。
     if (req.method === 'POST' && path === '/api/agents') {
-      const body = (await readJsonBody(req)) as Partial<Agent>
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+
+      const name = typeof body['name'] === 'string' ? body['name'].trim() : ''
+      if (name === '') {
+        sendJson(res, 400, { error: 'agent 需要 name（非空字符串）' })
+        return
+      }
+      if (name.length > 100) {
+        sendJson(res, 400, { error: 'name 太长了（上限 100 字符）' })
+        return
+      }
+
+      const stringArray = (key: string): string[] | { error: string } => {
+        const raw = body[key]
+        if (raw === undefined || raw === null) return []
+        if (!Array.isArray(raw)) return { error: `${key} 必须是数组` }
+        const bad = raw.find((v) => typeof v !== 'string' || v.trim() === '')
+        if (bad !== undefined) {
+          return { error: `${key} 里每一项都必须是非空字符串（收到 ${JSON.stringify(bad)}）` }
+        }
+        return (raw as string[]).map((v) => v.trim())
+      }
+
+      const skillIds = stringArray('skillIds')
+      if (!Array.isArray(skillIds)) {
+        sendJson(res, 400, { error: skillIds.error })
+        return
+      }
+      const kindPatterns = stringArray('kindPatterns')
+      if (!Array.isArray(kindPatterns)) {
+        sendJson(res, 400, { error: kindPatterns.error })
+        return
+      }
+
+      // 挂载的 skill 必须真的存在——写了不存在的 id 会让审核在运行时
+      // 才失败，而那时错误信息指向的是"没有 skill"，不是"你填错了 id"
+      const existing = await store.listSkills(workspaceId)
+      const knownSkills = new Set(existing.map((s) => s.id as string))
+      const unknownSkill = skillIds.find((id) => !knownSkills.has(id))
+      if (unknownSkill !== undefined) {
+        sendJson(res, 400, {
+          error: `skill 不存在：${unknownSkill}。可用的：${
+            existing.map((s) => s.slug).join(', ') || '（还没有 skill）'
+          }`,
+        })
+        return
+      }
+
+      const maxConcurrentRuns = body['maxConcurrentRuns']
+      if (
+        maxConcurrentRuns !== undefined &&
+        (!Number.isInteger(maxConcurrentRuns) || (maxConcurrentRuns as number) < 1)
+      ) {
+        sendJson(res, 400, { error: 'maxConcurrentRuns 必须是正整数' })
+        return
+      }
+
       const now = Date.now()
       const agent: Agent = {
-        id: (body.id ?? (ulid() as Agent['id'])) as Agent['id'],
+        id: ulid() as Agent['id'],
         workspaceId,
-        name: body.name ?? '新 agent',
-        instructions: body.instructions ?? '',
-        model: body.model ?? null,
+        name,
+        instructions: typeof body['instructions'] === 'string' ? body['instructions'] : '',
+        model: typeof body['model'] === 'string' && body['model'] !== '' ? body['model'] : null,
+        // runtime 用**当前 daemon 装的那个**，而不是让客户端指定：
+        // 指定一个没装的 runtime 只会让 run 起不来，而错误发生在很远的地方
         runtimeKey: descriptor.key,
-        workDir: body.workDir ?? null,
-        skillIds: body.skillIds ?? [],
+        workDir:
+          typeof body['workDir'] === 'string' && body['workDir'].trim() !== ''
+            ? body['workDir'].trim()
+            : null,
+        skillIds: skillIds as Agent['skillIds'],
         toolIds: [],
         env: {},
-        maxConcurrentRuns: body.maxConcurrentRuns ?? 1,
-        kindPatterns: body.kindPatterns ?? [],
+        maxConcurrentRuns: (maxConcurrentRuns as number | undefined) ?? 1,
+        kindPatterns,
         kindSkillOverride: {},
-        isFallbackReviewer: body.isFallbackReviewer ?? false,
-        autoReview: body.autoReview ?? false,
+        isFallbackReviewer: body['isFallbackReviewer'] === true,
+        autoReview: body['autoReview'] === true,
         createdAt: now,
         updatedAt: now,
       }
@@ -937,10 +1012,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           kind: run.kind,
           status: run.status,
           agentId: run.agentId,
+          /**
+           * ★ `subject` 必须带上——页面靠它把 run 归到具体的任务上。
+           *
+           * 少了它，任务详情里永远显示"这个任务还没有执行过"，而实时日志
+           * 也就永远出不来：不是日志坏了，是**页面根本不知道该显示哪些 run**。
+           * 这类"接口少给一个字段"的缺陷不会报错，只会让功能静默地不工作。
+           */
+          subject: run.subject,
           workDir: run.workDir,
           lastSeq: await store.lastRunMessageSeq(run.id),
           queuedAt: run.queuedAt,
           finishedAt: run.finishedAt,
+          failureReason: run.failureReason,
+          chainDepth: run.chainDepth,
         })),
       )
       sendJson(res, 200, { runs })

@@ -215,3 +215,42 @@ describe('★ D27：工作目录不再必填', () => {
     })
   })
 })
+
+describe('★ 执行列表必须带 subject —— 否则任务详情永远看不到日志', () => {
+  test('★ GET /api/runs 的每一项都要有 subject', async () => {
+    // 少了它，页面无法把 run 归到任务上：任务详情会永远显示"还没有执行过"，
+    // 而实时日志也就永远出不来。不是日志坏了，是**页面不知道该显示哪些 run**。
+    // 这类"接口少给一个字段"不会报错，只会让功能静默地不工作。
+    await withDaemon(async (url) => {
+      const issue = (await (
+        await fetch(`${url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '归属测试' }),
+        })
+      ).json()) as { id: string }
+
+      await fetch(`${url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: '01M2SUBJAAAAAAAAAAAAAAAAA1',
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'a', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: issue.id },
+          prompt: 'x',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      const { runs } = (await (await fetch(`${url}/api/runs`)).json()) as {
+        runs: Array<{ subject?: { type: string; id: string }; lastSeq: number }>
+      }
+      const mine = runs.find((r) => r.subject?.id === issue.id)
+      assert.ok(mine, '★ 必须能按 subject 找到这条 run')
+      assert.equal(mine?.subject?.type, 'issue')
+      assert.equal(typeof mine?.lastSeq, 'number', 'lastSeq 也要给，页面据此续接消息')
+    })
+  })
+})

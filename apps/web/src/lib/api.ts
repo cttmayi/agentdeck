@@ -140,17 +140,17 @@ export interface RunSummary {
   kind: string
   status: string
   agentId: string
+  /** run 处理的对象。页面靠它把 run 归到具体任务上。 */
+  subject: { type: string; id: string }
   workDir: string | null
   lastSeq: number
   queuedAt: number
   finishedAt: number | null
-}
-
-export interface RunDetail extends RunSummary {
   failureReason: string | null
   chainDepth: number
-  subject: { type: string; id: string }
 }
+
+export type RunDetail = RunSummary
 
 export interface RunMessage {
   seq: number

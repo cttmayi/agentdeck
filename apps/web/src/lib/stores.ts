@@ -84,6 +84,41 @@ export async function markInboxRead(id: string): Promise<void> {
   await loadInbox()
 }
 
+/**
+ * 新建一个 agent。
+ *
+ * 校验交给**服务端**（它是权威），这里只负责把服务端给的原文带回去——
+ * 在客户端重写一遍校验规则，两处迟早不一致，而"客户端放行、服务端拒绝"
+ * 的体验最糟：表单里什么错都没显示，提交却失败。
+ */
+export async function createAgent(input: {
+  name: string
+  instructions: string
+  skillIds: string[]
+  kindPatterns: string[]
+  isFallbackReviewer: boolean
+  autoReview: boolean
+  maxConcurrentRuns: number
+  workDir: string
+}): Promise<Agent> {
+  const agent = await api<Agent>('/api/agents', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: input.name,
+      instructions: input.instructions,
+      skillIds: input.skillIds,
+      kindPatterns: input.kindPatterns,
+      isFallbackReviewer: input.isFallbackReviewer,
+      autoReview: input.autoReview,
+      maxConcurrentRuns: input.maxConcurrentRuns,
+      // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
+      ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
+    }),
+  })
+  await loadAgents()
+  return agent
+}
+
 /** 当前数据快照，供同步循环收集摘要用。 */
 export function snapshot(): { issues: Issue[]; runs: RunSummary[] } {
   return { issues: get(issues), runs: get(runs) }

@@ -32,7 +32,7 @@
     if (!t) return
     const agent = chosen
     if (!agent) {
-      error = '还没有可用的 agent。'
+      error = '还没有可用的智能体。先去「智能体」建一个。'
       return
     }
 
@@ -99,19 +99,40 @@
     <textarea bind:value={description} rows="4" placeholder="背景、约束、你希望看到什么"></textarea>
   </label>
 
-  {#if $agents.length > 1}
-    <label>
-      交给哪个 agent
+  <!--
+    ★ 选择器**始终显示**，哪怕只有一个 agent。
+      原来是"多于一个才显示"，理由是"只有一个时没得选"。但那个理由站不住：
+      使用者需要**看见**这件事会交给谁——只显示一句"将由 X 执行"时，
+      他没法确认这个 X 是不是自己想要的那个，尤其在他刚建过一个 agent 之后。
+  -->
+  <label>
+    交给哪个智能体
+    {#if $agents.length === 0}
+      <select disabled><option>（还没有 agent）</option></select>
+    {:else}
       <select bind:value={agentId}>
         {#each $agents as a (a.id)}
           <option value={a.id}>
-            {a.name}{a.isFallbackReviewer ? '（兜底审核者）' : ''}
+            {a.name}{a.isFallbackReviewer ? '（兜底审核者）' : ''}{a.kindPatterns.includes('*')
+              ? '（认所有类型）'
+              : ''}
           </option>
         {/each}
       </select>
-    </label>
-  {:else if chosen}
-    <p class="hint">将由 <strong>{chosen.name}</strong> 执行。</p>
+    {/if}
+  </label>
+
+  {#if chosen}
+    <p class="hint" style="margin-top:calc(-1 * var(--sp-2))">
+      {#if chosen.instructions.trim()}
+        它会按这个指令干活：{chosen.instructions.slice(0, 80)}{chosen.instructions.length > 80 ? '…' : ''}
+      {:else}
+        <span class="warn">这个 agent 还没写指令</span>——它只会拿到任务标题与说明。
+      {/if}
+      {#if chosen.skillIds.length === 0}
+        <br /><span class="warn">它没有挂载任何 skill</span>，因此不能承担审核工作。
+      {/if}
+    </p>
   {/if}
 
   <details style="margin:var(--sp-4) 0">
@@ -131,7 +152,7 @@
     <div class="notice bad" style="margin-bottom:var(--sp-3)">{error}</div>
   {/if}
 
-  <button type="submit" disabled={busy || !title.trim()}>
+  <button type="submit" disabled={busy || !title.trim() || !chosen}>
     {busy ? '正在创建…' : '创建并派发'}
   </button>
 </form>

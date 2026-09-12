@@ -1,5 +1,6 @@
 <script lang="ts">
   import { agents, identity, loadAgents, loadIdentity, loading, loadError } from '../lib/stores.ts'
+  import NewAgentForm from '../components/NewAgentForm.svelte'
 
   /**
    * 智能体视图 = agent 配置 + runtime 状态。
@@ -37,13 +38,16 @@
       也是<strong>审核标准的选择键</strong>，所以换审核 agent 就等于换审核标准。
     </p>
   </div>
-  <button
-    type="button"
-    class="secondary"
-    onclick={() => Promise.all([loadAgents(), loadIdentity()])}
-  >
-    刷新
-  </button>
+  <div style="display:flex;gap:var(--sp-2)">
+    <NewAgentForm oncreated={() => void loadAgents()} />
+    <button
+      type="button"
+      class="secondary"
+      onclick={() => Promise.all([loadAgents(), loadIdentity()])}
+    >
+      刷新
+    </button>
+  </div>
 </div>
 
 {#if $loading['agents'] && $agents.length === 0}
