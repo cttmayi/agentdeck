@@ -41,6 +41,14 @@ interface CliOptions {
   executablePath: string | null
   /** 用哪个 runtime 起服务（缺省 claude）。 */
   runtimeKey: string | null
+  /**
+   * 工作区根目录的显式覆盖（D27）。
+   *
+   * 缺省是**数据目录之内的 `work/`**——数据目录是这个应用唯一的根，
+   * 所以 `--data-dir` 一给出，所有产物的位置都确定了。
+   * 想把它单独放到一块盘上时用这个。
+   */
+  workRoot: string | null
 }
 
 const SANDBOX_MODES: readonly SandboxMode[] = ['none', 'workdir-write']
@@ -72,6 +80,7 @@ export const CLI_OPTIONS = {
   'verify-runtime': { type: 'string' },
   executable: { type: 'string' },
   'runtime-key': { type: 'string' },
+  'work-root': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
@@ -139,6 +148,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     verifyRuntime: typeof verifyRaw === 'string' ? verifyRaw : null,
     executablePath: typeof values['executable'] === 'string' ? values['executable'] : null,
     runtimeKey: typeof values['runtime-key'] === 'string' ? values['runtime-key'] : null,
+    workRoot: typeof values['work-root'] === 'string' ? values['work-root'] : null,
   }
 }
 
@@ -159,6 +169,7 @@ export const HELP = `alpha-helper —— 本机 AI 工作台
                         明确报错，不会静默退回无沙箱。
       --executable <路径>  覆盖 CLI 可执行文件路径（探测与执行共用同一个值）
       --runtime-key <key>  用哪个 runtime 起服务（默认 claude）
+      --work-root <路径>   工作区根目录（默认 <数据目录>/work）
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
@@ -229,6 +240,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       sandboxMode: options.sandboxMode,
       ...(options.executablePath ? { executablePath: options.executablePath } : {}),
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
+      ...(options.workRoot ? { workRoot: options.workRoot } : {}),
       onInfo: (m) => process.stdout.write(`${m}\n`),
       onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
     })

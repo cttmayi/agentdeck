@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensureWorkDir, resolveWorkDir, sanitizeIdPart } from './workdir.ts'
+import { defaultWorkRoot, ensureWorkDir, resolveWorkDir, sanitizeIdPart } from './workdir.ts'
 
 /**
  * 工作目录的解析（D27）。
@@ -166,5 +166,32 @@ describe('ensureWorkDir', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('★ 默认工作区根目录必须待在数据目录里', () => {
+  test('★ 不能跑到数据目录外面 —— 旧规则在自定义 data-dir 时会', () => {
+    // 旧规则是 `<dataDir>/../work`，它只在数据目录恰好叫 `data` 时看起来对：
+    //   --data-dir /tmp/x       ⇒ /tmp/work       （跑到 /tmp 根上）
+    //   --data-dir .cache/dev/d ⇒ .cache/dev/work （跑到缓存目录里）
+    // 也就是说"`--data-dir` 一给出，产出就可能落到应用命名空间之外"。
+    for (const dataDir of ['/tmp/x', '/home/u/.alpha-helper/data', '.cache/dev/daemon-data']) {
+      const root = defaultWorkRoot(dataDir)
+      assert.ok(
+        root.startsWith(`${dataDir}/`),
+        `★ 工作区根必须在数据目录之内：${dataDir} ⇒ ${root}`,
+      )
+    }
+  })
+
+  test('默认数据目录下的结果仍然在 .alpha-helper 里', () => {
+    const root = defaultWorkRoot('/home/u/.alpha-helper/data')
+    assert.equal(root, '/home/u/.alpha-helper/data/work')
+    assert.match(root, /\.alpha-helper\//, '使用者要能一眼认出这是本应用的地方')
+  })
+
+  test('dataDir 以斜杠结尾时不会拼出双斜杠', () => {
+    const root = defaultWorkRoot('/home/u/.alpha-helper/data/')
+    assert.ok(!root.includes('//'), root)
   })
 })

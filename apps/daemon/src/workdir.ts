@@ -141,14 +141,31 @@ export async function ensureWorkDir(path: string): Promise<void> {
 /**
  * 默认的工作区根目录。
  *
- * 刻意放在**数据目录之外**。数据目录装的是应用自己的状态（日志、blob、锁），
- * 而工作目录装的是 agent 的产出——把两者混在一起，使用者想在文件管理器里
- * 找 agent 做出来的东西时，会先撞上一堆 `logs/` 与 `blobs/`。
+ * ══════════════════════════════════════════════════════════════════
+ * 这条规则改过一次，改的原因是"它会跑到应用外面去"
+ * ══════════════════════════════════════════════════════════════════
  *
- * 默认取数据目录的**同级**，这样"数据在哪、产出在哪"仍然是相邻、可预期的。
+ * 原来的规则是数据目录的**同级**（`<dataDir>/../work`）。默认数据目录是
+ * `~/.alpha-helper/data`，于是得到 `~/.alpha-helper/work`——看起来挺好。
+ *
+ * 但那个"挺好"完全依赖数据目录**恰好叫 `data`** 这个巧合。换成别的就出事：
+ *
+ *   --data-dir /tmp/x        ⇒ /tmp/work          ← 跑到 /tmp 根上
+ *   --data-dir .cache/dev/d  ⇒ .cache/dev/work    ← 跑到缓存目录里
+ *
+ * 也就是说：**`--data-dir` 一旦不是默认值，产出就会落到应用命名空间之外。**
+ * 使用者看到 `.cache/dev/work/issue-…` 会问"这为什么在缓存目录里"——
+ * 而答案是"因为我们按你的数据目录的**上一级**去放了"。
+ *
+ * 现在改成**数据目录之内**（`<dataDir>/work`）：数据目录成为这个应用
+ * **唯一的根**。`--data-dir` 一给出，所有产物的位置就都确定了，不会有一
+ * 部分跑到它外面去。默认下就是 `~/.alpha-helper/data/work`——仍然在
+ * `.alpha-helper/` 里面。
+ *
+ * 想把它放到别处（比如单独挂一块盘）用 `--work-root` 显式指定。
  */
 export function defaultWorkRoot(dataDir: string): string {
-  return join(dataDir, '..', 'work')
+  return join(dataDir, 'work')
 }
 
 /** 供界面显示：这个 run 的目录是谁选的。 */
