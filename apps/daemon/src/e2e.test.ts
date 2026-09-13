@@ -36,6 +36,9 @@ class FakeBackend implements AgentBackend {
   seenPrompt: string | null = null
   seenWorkDir: string | null = null
   seenArgs: string[] | null = null
+  /** 执行时收到的模型与自定义环境变量——用来验证"agent 上填的东西真的传下去了"。 */
+  seenModel: string | null = null
+  seenEnv: Record<string, string> = {}
 
   /**
    * 执行那一刻，工作目录里 `.claude/skills/` 下的文件（相对技能目录的路径 → 内容）。
@@ -85,6 +88,8 @@ class FakeBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     this.seenPrompt = opts.prompt
     this.seenWorkDir = opts.workDir
+    this.seenModel = opts.model ?? null
+    this.seenEnv = opts.env ?? {}
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
@@ -634,6 +639,85 @@ describe('端到端：SSE 终态补发', () => {
       )
     } finally {
       release()
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
+describe('★ agent 上填的模型与环境变量必须真的传到 CLI', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这两条对应一组"界面能选、行为上不存在"的缺陷
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `Agent.model` 在界面上是可填的（AgentDetail 的「模型」输入框），填完存进库、
+   * 界面上也会显示出来——**但执行时被执行器写死成 `model: null` 丢掉了**：
+   *
+   *     const session = await runtime.backend.execute({ …, model: null, …, env: {} })
+   *
+   * `argv.ts` 里 `--model` 的拼装、后端里的透传**全都实现好了**，只差把值取出来。
+   * 后果是：使用者以为换了模型，其实跑的还是 CLI 的默认模型，而且**不会报错**。
+   * `Agent.env` 同样（连界面都没有，只有接口）。
+   *
+   * 测试只能盯"后端收到了什么"——那是这条链上最后一个我们能观测的点；
+   * 再往后是真实 CLI 的行为，不在单测范围（NFR-T-01）。
+   */
+  test('★ agent 的 model 与 env 会传给后端', async () => {
+    const dataDir = await makeTempDir('e2e-agent-cfg-data')
+    const work = await makeTempDir('e2e-agent-cfg-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      // 建一个配了模型与环境变量的 agent
+      const created = (await (
+        await fetch(`${d.url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: '带模型的执行者',
+            instructions: '干活',
+            role: 'executor',
+            model: 'some-model-v9',
+            env: { MY_FLAG: 'on' },
+          }),
+        })
+      ).json()) as { id: string; model?: string | null }
+
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: created.id, name: '带模型的执行者', instructions: '干活' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-model' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      assert.equal(
+        b.seenModel,
+        'some-model-v9',
+        '★ agent 上填的模型必须传下去 —— 写死 null 会让"换模型"变成一个不生效的动作',
+      )
+      assert.equal(b.seenEnv['MY_FLAG'], 'on', '★ agent 的自定义环境变量同样要传下去')
+    } finally {
       await d.close()
       await cleanup(work)
       await cleanup(dataDir)

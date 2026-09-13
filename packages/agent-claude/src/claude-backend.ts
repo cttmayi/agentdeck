@@ -169,6 +169,7 @@ export class ClaudeBackend implements AgentBackend {
           durationMs,
           sessionId: parser.sessionId,
           usage: parser.usage,
+          model: parser.model,
           exitCode: exit.code,
         }
       }
@@ -183,6 +184,7 @@ export class ClaudeBackend implements AgentBackend {
         durationMs,
         sessionId: parser.sessionId,
         usage: parser.usage,
+        model: parser.model,
         resumeRejected:
           opts.resumeSessionId !== null && opts.resumeSessionId !== undefined
             ? detectResumeRejection(combined)

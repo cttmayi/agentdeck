@@ -125,6 +125,15 @@ export interface AgentResult {
   resumeRejected?: boolean | undefined
   /** 退出码（便于诊断）。 */
   exitCode?: number | null
+  /**
+   * **CLI 自己报告的**模型标识。
+   *
+   * ★ 与 `ExecOptions.model`（我们**要求**它用的那个）是两件事，两个都要留：
+   *   请求的那个说明使用者的意图，CLI 报告的这个说明**实际跑的是什么**——
+   *   而审计要的是后者。CLI 不报告时（比如某个 runtime 的输出里没有它）
+   *   这里是 null，绝不拿请求值去顶替：那会让审计记录看起来比事实更确定。
+   */
+  model?: string | null
 }
 
 export interface AgentSession {

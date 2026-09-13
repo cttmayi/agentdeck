@@ -368,6 +368,7 @@ export class GenericBackend implements AgentBackend {
       durationMs,
       sessionId: parser.sessionId,
       usage: parser.usage,
+        model: parser.model,
       exitCode: exit.code,
       resumeRejected: this.#resumeRejected(parser, stderrTail, opts),
     }

@@ -420,6 +420,39 @@ function parseInstallSource(
 }
 
 /**
+ * 校验 agent 的自定义环境变量（FR-AGENT-06）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么逐项校验，而不是直接收下
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这些值会被**原样传给子进程**（后端做 `{...process.env, ...opts.env}`）。
+ * 一个对象或数组传下去只会变成 `"[object Object]"` 这种看不出问题的字符串——
+ * 使用者以为设上了，CLI 拿到的是垃圾。所以类型不对就当场报错。
+ *
+ * ⚠️ 这里**不做白名单**：能否覆盖 `PATH`、`CLAUDE_CONFIG_DIR` 之类由使用者决定，
+ *    毕竟这是他自己机器上的 agent 配置。但正因为如此，"设了什么"必须是确定的，
+ *    不能靠猜。
+ */
+function parseEnvMap(
+  raw: unknown,
+): { ok: true; value: Record<string, string> } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: {} }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'env 必须是「键 → 字符串」的对象' }
+  }
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (key.trim() === '') return { ok: false, error: 'env 的键不能为空' }
+    if (typeof value !== 'string') {
+      return { ok: false, error: `env['${key}'] 必须是字符串（会原样传给子进程）` }
+    }
+    out[key] = value
+  }
+  return { ok: true, value: out }
+}
+
+/**
  * 校验动作子集。
  *
  * ⚠️ 这里**不能容错**：动作表是闭合的（INV-9），一个不在表里的动作会让
@@ -1078,6 +1111,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // 自定义环境变量。原来这里写死 `env: {}`，而 PATCH 的白名单里也没有它
+      // ⇒ 这个字段**既写不进也读不到**，是纯装饰。现在两端都通了，
+      // 执行器也会把它传给 CLI（见 executor）。
+      const envCheck = parseEnvMap(body['env'])
+      if (!envCheck.ok) {
+        sendJson(res, 400, { error: envCheck.error })
+        return
+      }
+
       const now = Date.now()
       const agent: Agent = {
         id: ulid() as Agent['id'],
@@ -1093,7 +1135,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             : null,
         skillIds: skillIds as Agent['skillIds'],
         toolIds: [],
-        env: {},
+        env: envCheck.value,
         role: roleCheck.role,
         reviewerAgentId: roleCheck.reviewerAgentId,
         createdAt: now,
@@ -1142,6 +1184,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           'role',
           'reviewerAgentId',
           'runtimeKey',
+          // FR-AGENT-06：自定义环境变量。它原来不在白名单里 —— 于是"支持为
+          // agent 配置环境变量"只存在于协议与实体里，任何入口都改不动它。
+          'env',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -1240,6 +1285,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         if (body['model'] !== undefined) {
           const m = typeof body['model'] === 'string' ? body['model'].trim() : ''
           patch.model = m === '' ? null : m
+        }
+
+        if (body['env'] !== undefined) {
+          const envCheck = parseEnvMap(body['env'])
+          if (!envCheck.ok) {
+            sendJson(res, 400, { error: envCheck.error })
+            return
+          }
+          patch.env = envCheck.value
         }
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }

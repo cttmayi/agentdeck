@@ -583,13 +583,35 @@ export class RunExecutor {
       //   脱敏：安全逻辑只有一份，不会漂。
       let stderrLines = 0
       let stderrTruncated = 0
+      // ══════════════════════════════════════════════════════════════════
+      // ★ agent 的**模型**与**环境变量**：在这里解析，不在各个调用点传
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 这两个值原来被写死成 `model: null` 与 `env: {}`。而 agent 上明明有
+      // 这两个字段，界面上「模型」还是可填的（AgentDetail）：
+      //
+      //   - 使用者填了模型 → 存进库 → 界面上显示出它 → **执行时被丢掉**，
+      //     CLI 永远用它自己的默认模型。填 `claude-opus-4` 跑的还是默认那个，
+      //     而且**不会报错**；
+      //   - `argv.ts` 里 `--model` 的拼装、后端里的透传**全都实现好了**，
+      //     只差这里把值取出来。
+      //
+      // 解析放在执行器里而不是各调用点，理由与工作目录同源（见 `submit` 里
+      // 那段）：提交 run 的路径有五条（页面建任务、动作派生、自动串接审核、
+      // 重试、报告摄取），任意一处忘了带就会被静默丢掉——**而这正是已经发生的事**。
+      const agentConfig = await this.#deps.store.getAgent(run.agentId as never)
+
       const session = await runtime.backend.execute({
         prompt: req.prompt,
         workDir: run.workDir!,
-        model: null,
+        // 使用者在这个 agent 上选的模型。留空 = 用 CLI 自己的默认（CLI 支持
+        // "不给这个参数"这个语义，所以 null 是**如实**表达，不是兜底）
+        model: agentConfig?.model ?? null,
         maxTurns: req.limits.maxTurns,
         resumeSessionId: resume.sessionId,
-        env: {},
+        // agent 的自定义环境变量。后端是 `{...process.env, ...opts.env}`，
+        // **合并**而不是替换——所以给 `{}` 与不给都不影响 CLI 拿到 PATH
+        env: agentConfig?.env ?? {},
         onCommandLine: ({ argv, sandboxDescription }) => {
           void this.#note(runId, `命令行：${redactArgv(argv).join(' ')}`)
           // ★ 沙箱状态单独一行，**由后端如实上报**而不是从命令行反推。
@@ -715,7 +737,16 @@ export class RunExecutor {
 
       // ── review run 的收口：判决、动作、审计 ──
       if (req.kind === 'review' && result.status === 'completed') {
-        await this.#handleReview(req, run, result.output || collected, result.usage, runtime.descriptor)
+        await this.#handleReview(
+          req,
+          run,
+          result.output || collected,
+          result.usage,
+          runtime.descriptor,
+          // ★ 审计要记 CLI **实际报告**的模型。传 null 也比传"我们请求的那个"诚实：
+          //   请求值只说明意图，而审计回答的是"这次到底用了什么"。
+          result.model ?? null,
+        )
       }
 
       // ★ S1：执行完成后自动接一次审核（可选）
@@ -808,6 +839,8 @@ export class RunExecutor {
     output: string,
     usage: TokenUsage | null | undefined,
     descriptor: RuntimeDescriptor,
+    /** CLI 自己报告的模型标识；它不报告时为 null。 */
+    modelId: string | null,
   ): Promise<void> {
     const coordinator = this.#deps.reviewCoordinator
     if (!coordinator) return
@@ -834,7 +867,11 @@ export class RunExecutor {
       invalidAttempts,
       inputBlobRefs: req.review?.inputBlobRef ? [req.review.inputBlobRef] : [],
       skillRefs: (req.skills ?? []).map((s) => s.ref),
-      modelId: null,
+      // ★ 审计里的"模型"要记 **CLI 自己报告的那个**，而不是我们请求的那个。
+      //   这里原来是写死的 `null`——于是"判决固化了模型标识"（FR-REVIEW-06）
+      //   在数据上一直是空的。CLI 不报告时仍是 null：**宁可空着，也不要
+      //   拿请求值去顶替**，那会让审计看起来比事实更确定。
+      modelId,
       promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
       argv: [descriptor.command, ...descriptor.baseArgs],
       usage,
