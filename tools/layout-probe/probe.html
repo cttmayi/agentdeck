@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>alpha-helper layout probe</title>
+    <style>
+      html, body { margin: 0; background: #111; color: #eee; font: 12px/1.5 monospace; }
+      iframe { width: 1280px; height: 880px; border: 0; display: block; }
+      pre { margin: 0; padding: 8px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <!--
+      ══════════════════════════════════════════════════════════════════
+      界面布局探针：它为什么存在
+      ══════════════════════════════════════════════════════════════════
+
+      `tsc`/`svelte-check` 看不见布局：类名写对了、模板结构合法，但
+      "两栏有没有并排"、"窄屏返回按钮有没有出现"、"`.main:has(> .split-layout)`
+      有没有真的生效"这些只有**浏览器量得出来**。改布局时靠"我看着像对"
+      是不够的——这个项目里已经有过两次"接口都在、就是没接线"的缺陷。
+
+      于是：把**真应用**放进同源 iframe，用**真实点击**驱动它，把
+      `getComputedStyle` 的结果写进自己的 DOM，再由 `run.mjs` 用
+      `chrome --dump-dom` 抓回去断言。探针只上报**事实**，期望值全在
+      `run.mjs` 里——"量"和"判"分开，改了期望不必动这里。
+
+      ⚠️ 它**不造 run**：造 run 就会去调真的 CLI（NFR-T-01 的底线）。
+        所以它只验布局与结构，不验"跑起来之后长什么样"。
+    -->
+    <iframe id="f" src="/#/agents"></iframe>
+    <pre id="out">pending</pre>
+    <script>
+      const f = document.getElementById('f')
+      const facts = {}
+      const errors = []
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+      const d = () => f.contentDocument
+      const cs = (el) => f.contentWindow.getComputedStyle(el)
+      const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : null)
+
+      function publish(done) {
+        document.getElementById('out').textContent = JSON.stringify({ errors, facts, done }, null, 1)
+      }
+
+      /** 轮询等待条件成立；拿不到就返回 false（调用方自己记一条 error）。 */
+      async function until(fn, tries = 100) {
+        for (let i = 0; i < tries; i++) {
+          try {
+            if (fn()) return true
+          } catch {}
+          await wait(150)
+        }
+        return false
+      }
+
+      function click(el) {
+        el.dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: f.contentWindow }),
+        )
+      }
+
+      function need(name, fn) {
+        try {
+          const v = fn()
+          if (v === undefined) errors.push(`${name}：拿不到值`)
+          return v
+        } catch (e) {
+          errors.push(`${name}：${e && e.message ? e.message : e}`)
+          return null
+        }
+      }
+
+      async function main() {
+        await new Promise((r) => f.addEventListener('load', r, { once: true }))
+
+        // ══════════════ 智能体：主从布局 ══════════════
+        // 首启会播种一对 agent（一个执行、一个审核），所以这里等得到卡片；
+        // 等不到就说明界面或接口坏了——那本身就是要报出来的事。
+        const gotCards = await until(() => d().querySelectorAll('.agent-item').length > 0)
+        const cards = () => [...d().querySelectorAll('.agent-item')]
+        facts['agents.gotData'] = gotCards
+        if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .agent-item（数据没到或列表没渲染）')
+
+        facts['agents.cardCount'] = cards().length
+        // 每张卡都要有：名字、角色徽章、两行说明（指令摘要 + 关系/技能/runtime）
+        facts['agents.everyCardWellFormed'] =
+          cards().length > 0 &&
+          cards().every(
+            (c) =>
+              !!c.querySelector('strong') &&
+              !!c.querySelector('.badge') &&
+              c.querySelectorAll('.agent-note').length === 2,
+          )
+        facts['agents.executorShowsReviewer'] = need('执行者卡片上的审核者', () => {
+          const exec = cards().find((c) => c.textContent.includes('执行'))
+          return exec ? text(exec.querySelectorAll('.agent-note')[1]) : null
+        })
+
+        const layout = () => d().querySelector('.split-layout')
+        const main = () => d().querySelector('main.main')
+
+        facts['agents.initialClass'] = need('初始 class', () => layout()?.className)
+        facts['agents.initialListDisplay'] = need('初始左栏', () =>
+          cs(d().querySelector('.list-pane')).display,
+        )
+        facts['agents.initialDetailDisplay'] = need('初始右栏', () =>
+          cs(d().querySelector('.detail-pane')).display,
+        )
+        // `:has(> .split-layout)` 那条规则若失效，整页会变成"外层滚动"而不是
+        // 两栏各自滚动——类型检查完全看不出来，所以这里量出来。
+        facts['agents.mainOverflowY'] = need('main overflow-y', () => cs(main()).overflowY)
+        facts['agents.mainPaddingTop'] = need('main padding-top', () => cs(main()).paddingTop)
+        facts['agents.layoutHeightDelta'] = need('布局高度 vs main 高度差', () =>
+          Math.round(layout().getBoundingClientRect().height - main().clientHeight),
+        )
+
+        // ── 真点击第一条 ──
+        click(cards()[0])
+        const entered = await until(() => layout()?.className.includes('with-detail'))
+        if (!entered) errors.push('点了第一条 agent 之后 .split-layout 没有带上 with-detail')
+        facts['agents.afterClickClass'] = need('点击后 class', () => layout()?.className)
+        facts['agents.tracks'] = need('两栏宽度', () => cs(layout()).gridTemplateColumns.split(' '))
+        facts['agents.activeCardClass'] = need('选中态', () =>
+          d().querySelector('.agent-item.active')?.className.replace(/ svelte-\w+/, ''),
+        )
+        facts['agents.detailRendered'] = need('右栏是否渲染出详情', () =>
+          !!d().querySelector('.detail-pane .detail'),
+        )
+        facts['agents.detailHeading'] = need('右栏标题', () =>
+          text(d().querySelector('.detail-pane h2')),
+        )
+        const back = d().querySelector('.detail-pane .back')
+        // 宽屏下列表就在左边，返回按钮不该出现（它只在窄屏整页显示详情时有意义）
+        facts['agents.wideBackDisplay'] = need('宽屏返回按钮', () =>
+          back ? cs(back).display : 'MISSING',
+        )
+        facts['agents.wideListDisplay'] = need('宽屏左栏', () =>
+          cs(d().querySelector('.list-pane')).display,
+        )
+
+        // ── 收窄：应当只剩一栏 + 返回按钮出现 ──
+        f.style.width = '900px'
+        await wait(400)
+        facts['agents.narrowListDisplay'] = need('窄屏左栏', () =>
+          cs(d().querySelector('.list-pane')).display,
+        )
+        facts['agents.narrowDetailDisplay'] = need('窄屏右栏（选中态）', () =>
+          cs(d().querySelector('.detail-pane')).display,
+        )
+        facts['agents.narrowBackDisplay'] = need('窄屏返回按钮', () => cs(back).display)
+
+        // ── 点返回：回到列表，右栏在窄屏下应当消失 ──
+        click(back)
+        await wait(300)
+        facts['agents.afterBackClass'] = need('返回后 class', () => layout()?.className)
+        facts['agents.afterBackListDisplay'] = need('返回后左栏', () =>
+          cs(d().querySelector('.list-pane')).display,
+        )
+        facts['agents.afterBackDetailDisplay'] = need('返回后右栏（窄屏）', () =>
+          cs(d().querySelector('.detail-pane')).display,
+        )
+        f.style.width = '1280px'
+        await wait(300)
+
+        // ── Runtime 概览（原来六列表格，现在是竖排卡片）──
+        const rc = () => [...d().querySelectorAll('.runtime-card')]
+        facts['agents.runtimeCardCount'] = rc().length
+        facts['agents.runtimeCardsWellFormed'] =
+          rc().length > 0 && rc().every((c) => c.querySelectorAll('.runtime-line').length >= 2)
+
+        // ══════════════ 任务清单：同样的主从 + 去重字样 ══════════════
+        f.contentWindow.location.hash = '#/tasks'
+        await until(() => d().querySelector('.view-head, .pane-head'))
+        // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
+        // 下面那条"重复字样"的检查会**空过**——所以这里必须如实报出来。
+        const gotRows = await until(() => d().querySelectorAll('.list-pane table tbody tr').length > 0)
+        facts['tasks.gotRows'] = gotRows
+        if (!gotRows) errors.push('任务清单里一行都没等到（夹具任务没造上或列表没渲染）')
+
+        const rows = [...d().querySelectorAll('.list-pane table tbody tr')]
+        facts['tasks.rowCount'] = rows.length
+        // 从没跑过的任务：标签「执行中」+ 额外信息「还没开始执行」。
+        // 这一格同时钉住了"标签之外的信息该不该显示"这条规则。
+        facts['tasks.firstRowStageCell'] = need('第一行阶段格', () => {
+          const cell = rows[0]?.querySelectorAll('td')[1]
+          return cell ? text(cell) : null
+        })
+        facts['tasks.layoutPresent'] = need('任务页主从布局', () =>
+          !!d().querySelector('.split-layout .list-pane') &&
+          !!d().querySelector('.split-layout .detail-pane'),
+        )
+        facts['tasks.mainOverflowY'] = need('任务页 main overflow-y', () => cs(main()).overflowY)
+        // 使用者点名要去掉的那句「等待审核」：整份渲染结果里一次都不该出现。
+        // 任何视图里重新长出这句话，这里就会红。
+        facts['tasks.duplicateStageTextCount'] = need('「等待审核」出现次数', () =>
+          (d().documentElement.innerHTML.match(/等待审核/g) ?? []).length,
+        )
+
+        // ══════════════ Skills：安装面板在抽屉里 ══════════════
+        f.contentWindow.location.hash = '#/skills'
+        await until(() => d().querySelector('.view-head h2')?.textContent.trim() === 'Skills')
+        await wait(500)
+        facts['skills.title'] = need('Skills 标题', () =>
+          text(d().querySelector('.view-head h2')),
+        )
+        // 老结构（正文里展开的面板）不该再存在
+        facts['skills.oldInlinePanel'] = need('正文里还有 .install-panel 吗', () =>
+          !!d().querySelector('.install-panel'),
+        )
+        const skillRows = () => d().querySelectorAll('.main table tbody tr').length
+        facts['skills.tableRows'] = skillRows()
+
+        const openBtn = [...d().querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '安装 skill',
+        )
+        facts['skills.openButtonFound'] = !!openBtn
+        if (!openBtn) {
+          errors.push('找不到「安装 skill」按钮')
+        } else {
+          click(openBtn)
+          const opened = await until(() => d().querySelector('.drawer'))
+          if (!opened) errors.push('点了「安装 skill」之后没有出现 .drawer')
+        }
+
+        const drawer = d().querySelector('.drawer')
+        if (drawer) {
+          facts['skills.drawerClass'] = drawer.className.replace(/ svelte-\w+/, '')
+          facts['skills.drawerWidth'] = Math.round(drawer.getBoundingClientRect().width)
+          facts['skills.backdropPresent'] = !!d().querySelector('.drawer-backdrop')
+          facts['skills.footButtonText'] = need('底部按钮', () =>
+            text(d().querySelector('.drawer-foot button')),
+          )
+          // 主操作要贴着底部常驻（`.drawer-foot`），而不是随正文滚走
+          facts['skills.footBottomDelta'] = need('底部按钮距视口底部', () => {
+            const r = d().querySelector('.drawer-foot').getBoundingClientRect()
+            return Math.round(Math.abs(r.bottom - f.contentWindow.innerHeight))
+          })
+          facts['skills.tabCount'] = d().querySelectorAll('.drawer .tab').length
+          // 页签条里那个和抽屉头重复的「关闭」应当已经删掉
+          facts['skills.duplicateCloseInTabs'] = !!d().querySelector('.drawer .tabs .close')
+          facts['skills.rowsBehindDrawer'] = skillRows()
+
+          // Esc 关闭（这个抽屉是视图自己渲染的，不在 App 的 $openDrawer 里）
+          f.contentWindow.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+          )
+          await wait(300)
+          facts['skills.drawerGoneAfterEsc'] = !d().querySelector('.drawer')
+        }
+
+        // ══════════════ 新建任务：至少不崩 ══════════════
+        f.contentWindow.location.hash = '#/new'
+        await wait(600)
+        facts['new.hasContent'] = need('新建页有内容', () => main().textContent.trim().length > 0)
+
+        publish(true)
+      }
+
+      main().catch((e) => {
+        errors.push('探针自身异常：' + (e && e.stack ? e.stack : String(e)))
+        publish(true)
+      })
+    </script>
+  </body>
+</html>

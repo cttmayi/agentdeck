@@ -18,7 +18,8 @@
     "mcp": "node apps/mcp/src/cli.ts",
     "cli": "node apps/cli/src/cli.ts",
     "build:web": "pnpm --filter @alpha-helper/web run build",
-    "dev:web": "pnpm --filter @alpha-helper/web run dev"
+    "dev:web": "pnpm --filter @alpha-helper/web run dev",
+    "probe:layout": "node tools/layout-probe/run.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

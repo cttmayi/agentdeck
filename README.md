@@ -104,6 +104,7 @@ SQLite、锁、blob 日志，所以它是隐藏的。
 | `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务 |
 | `pnpm run check` | typecheck + 全量测试 |
 | `pnpm run test` | 只跑测试 |
+| `pnpm run probe:layout` | **界面布局检查**：用真浏览器量布局并断言（改过 Web 布局时跑；需要先 `build:web`，也不在 `check` 里——见 `tools/layout-probe/README.md`） |
 
 ---
 
