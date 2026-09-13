@@ -284,6 +284,27 @@
           /\d{1,2}:\d{2}/.test(text(d().querySelector('.detail-pane .detail-sub')) ?? ''),
         )
 
+        // ── 看板：四档状态，且"待人工"排在"已审查"之前 ──
+        //
+        //   使用者反馈过「审查的结论是 needs_human，被标为已审查，不合理」——
+        //   修法是把它单独列一档。这条守住：列本身在，且顺序是"从左往右越来越
+        //   接近结束"（待人工还没结束，所以它在已审查前面）。
+        //
+        //   ⚠️ 放在本视图**最后**：切看板会让列表重新渲染，前面那些"抓住元素
+        //      再点"的断言会拿到已脱离文档的旧节点而失败（实测踩到过）。
+        const toBoard = [...d().querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '看板',
+        )
+        facts['tasks.boardButtonFound'] = !!toBoard
+        if (toBoard) {
+          click(toBoard)
+          await until(() => d().querySelectorAll('.column').length > 0)
+          facts['tasks.boardColumnCount'] = d().querySelectorAll('.column').length
+          facts['tasks.boardColumns'] = [...d().querySelectorAll('.column h4')].map((h) =>
+            (h.textContent ?? '').trim().split('\n')[0].trim(),
+          )
+        }
+
         // ══════════════ Skills：安装面板在抽屉里 ══════════════
         f.contentWindow.location.hash = '#/skills'
         await until(() => d().querySelector('.view-head h2')?.textContent.trim() === 'Skills')

@@ -207,6 +207,30 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v >= 240,
     show: (v) => `${v}px`,
   },
+  {
+    view: '任务清单',
+    key: 'tasks.boardButtonFound',
+    label: '看板/列表可以切换（下面两条要在看板里量）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.boardColumnCount',
+    label: '★ 看板是**四档**状态（执行中 / 待审查 / 待人工 / 已审查）',
+    ok: (v) => v === 4,
+    show: (v) => `${v} 列`,
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.boardColumns',
+    label: '★ 「待人工」排在「已审查」之前——从左往右越来越接近结束',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.some((t) => t.includes('等待人处理')) &&
+      v.findIndex((t) => t.includes('等待人处理')) <
+        v.findIndex((t) => t.includes('已完成审查')),
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
   { view: '任务清单', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
   {
     view: '任务清单',

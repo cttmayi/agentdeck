@@ -447,7 +447,7 @@
       {filter ? '换个关键词试试。' : '去「新建任务」建一个，它会立刻派给 agent。'}
     </div>
   {:else if mode === 'board'}
-    <div class="board board-3">
+    <div class="board board-4">
       {#each COLUMNS as col (col.id)}
         {@const items = staged.filter((x) => x.info.stage === col.id)}
         <div class="column">
@@ -485,7 +485,8 @@
         <div class="list-head">
           需要注意（{byAttention.attention.length}）
           <span class="faint small">
-            —— 执行失败/被取消（不会有审核结果），或者根本没派审核
+            —— 执行失败/被取消（不会有审核结果）、根本没派审核，或者
+            **判决要求人介入**
           </span>
         </div>
         {#each byAttention.attention as { issue, info } (issue.id)}
@@ -854,6 +855,8 @@
   .stage-tag.executing { border-color: var(--status-active); color: var(--status-active); }
   .stage-tag.awaiting_review { border-color: var(--status-review); color: var(--status-review); }
   .stage-tag.reviewed { border-color: var(--status-done); color: var(--status-done); }
+  /* "待人工"用告警色：它是**卡在你手里**那一档——不是进行中，也不是完成 */
+  .stage-tag.needs_human { border-color: var(--warn); color: var(--warn); }
 
   /* 跑完之后：左边结论、右边产出文件 */
   .result-grid {
@@ -1036,12 +1039,19 @@
     margin-top: var(--sp-2);
   }
 
-  /* ── 三列流水线 ── */
-  .board-3 {
-    /* 固定三列（而不是 auto-fit）：三列就是流水线的三个阶段，
-       少一列会让人以为那一阶段不存在 */
-    grid-template-columns: repeat(3, 1fr);
+  /* ── 四列流水线 ──
+     加上「等待人处理」之后是四档。固定列数（而不是 auto-fit）：这几列就是
+     流水线的几个状态，少一列会让人以为那个状态不存在。 */
+  .board-4 {
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--sp-4);
+  }
+
+  /* 中等宽度放 4 列会把每列压到 200px 出头，读不了 ⇒ 改成 2×2 */
+  @media (max-width: 78rem) {
+    .board-4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   .col-hint {

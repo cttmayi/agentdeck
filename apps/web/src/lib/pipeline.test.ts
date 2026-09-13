@@ -34,6 +34,7 @@ function run(over: Partial<RunSummary> & { runId: string; kind: string }): RunSu
     finishedAt: 2000,
     failureReason: null,
     chainDepth: 0,
+    verdict: null,
     ...over,
   }
 }
@@ -91,6 +92,76 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
     ])
     assert.equal(info.stage, 'reviewed')
     assert.equal(info.reviewRun?.runId, 'r1')
+  })
+
+  test('★ 判决是 needs_human ⇒ **不是**「已审查」，而是「待人工」', () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 使用者：「审查的结论是 needs_human，被标为『已审查』，不合理」
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // `needs_human` 的意思是**判决自己说了"这事得人来定"**——它没在等人审，
+    // 它在等**你**。归进「已审查」等于把待办显示成做完了。
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: {
+          status: 'validated',
+          conclusion: 'needs_human',
+          escalateReason: '证据不足，需要人确认这份产出的适用范围',
+        },
+      }),
+    ])
+    assert.equal(info.stage, 'needs_human')
+    assert.equal(info.note, null, '标签"待人工"已经说了，不要再重复')
+    assert.match(String(info.warning), /判决要求人介入/, '要进「需要注意」那一拨')
+    assert.match(String(info.warning), /证据不足/, '★ 把原因带上——那才是可操作的部分')
+  })
+
+  test('★ 判决状态 escalated（重试也修不好的不合规）同样算「待人工」', () => {
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: { status: 'escalated', conclusion: 'fail', escalateReason: null },
+      }),
+    ])
+    assert.equal(info.stage, 'needs_human')
+    assert.match(String(info.warning), /判决要求人介入/)
+  })
+
+  test('decided 的判决（pass/fail）仍然是「已审查」——别把正常的判成待人工', () => {
+    for (const [conclusion, status] of [
+      ['pass', 'advisory'],
+      ['fail', 'dispatched_to_action'],
+    ] as const) {
+      const info = stageOf(ISSUE, [
+        run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+        run({
+          runId: 'r1',
+          kind: 'review',
+          status: 'completed',
+          subject: { type: 'run', id: 'e1' },
+          verdict: { status, conclusion, escalateReason: null },
+        }),
+      ])
+      assert.equal(info.stage, 'reviewed', `${conclusion} 是已决定的判决`)
+      assert.equal(info.warning, null)
+    }
+  })
+
+  test('审核还没跑完 ⇒ 仍是「待审查」，不是「待人工」', () => {
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
+    ])
+    assert.equal(info.stage, 'awaiting_review')
   })
 })
 
@@ -178,14 +249,16 @@ describe('★ 失败的执行要说明，不能静静躺在"待审查"里', () =
 })
 
 describe('三列的定义', () => {
-  test('顺序就是流水线方向', () => {
+  test('★ 顺序就是流水线方向：待人工在「已审查」**之前**', () => {
+    // "待人工"是**卡在你手里**那一档——还没结束，所以它在"已完成审查"前面。
+    // 从左往右读 = 越来越接近结束。
     assert.deepEqual(
       PIPELINE_COLUMNS.map((c) => c.id),
-      ['executing', 'awaiting_review', 'reviewed'],
+      ['executing', 'awaiting_review', 'needs_human', 'reviewed'],
     )
   })
 
-  test('三列各有标题与说明', () => {
+  test('每列各有标题与说明', () => {
     for (const col of PIPELINE_COLUMNS) {
       assert.ok(col.title.length > 0)
       assert.ok(col.hint.length > 0)

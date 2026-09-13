@@ -308,6 +308,33 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.equal(verdicts[0]?.status, 'dispatched_to_action', '应当已派发到动作')
   })
 
+  test('★ /api/runs 要带上审核 run 的判决结论（阶段推导靠它）', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条是为一个真实反馈加的
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 使用者：「审查的结论是 needs_human，被标为『已审查』，不合理」。
+    //
+    // 页面之所以标错，是因为 `runs` 列表里**只有"审核 run 完成了没有"**，
+    // 没有判决结论——于是无论判成什么，都只能显示成"已审查"。
+    // 现在把结论并进列表响应，这条用例守住这个字段真的在。
+    const { runs } = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+      runs: Array<{
+        runId: string
+        kind: string
+        verdict: { status: string; conclusion: string; escalateReason: string | null } | null
+      }>
+    }
+    const review = runs.find((r) => r.kind === 'review')
+    assert.ok(review, '应当有一条审核 run')
+    assert.ok(review.verdict, '★ 审核 run 必须带上判决——否则页面只能把 needs_human 显示成"已审查"')
+    assert.equal(review.verdict.conclusion, 'fail')
+    assert.equal(review.verdict.status, 'dispatched_to_action')
+    // 执行 run 上没有判决（它是被审的对象，不是判决的产出者）
+    const execute = runs.find((r) => r.kind === 'execute')
+    assert.equal(execute?.verdict ?? null, null, '执行 run 不该有判决字段')
+  })
+
   test('★ 判决里的动作被执行，且落进了审计链', async () => {
     const runs = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
       runs: Array<{ runId: string; kind: string }>

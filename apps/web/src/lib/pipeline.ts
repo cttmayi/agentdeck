@@ -33,7 +33,22 @@ import type { RunSummary } from './api.ts'
  * 手点界面来验证，而那些边界情况恰恰最难手动复现。
  */
 
-export type Stage = 'executing' | 'awaiting_review' | 'reviewed'
+/**
+ * 一个任务"走到哪一步了"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ `needs_human` 是独立的一档，不是"已审查"的一种
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者的反馈：「审查的结论是 `needs_human`，被标为『已审查』，不合理」。
+ *
+ * 确实不合理：`needs_human` 的意思是**判决自己说了"这事得人来定"**——
+ * 它没在等人审，它在等**你**。把它归进「已审查」，等于把待办显示成做完了
+ * （而且那一栏的语义是"判决已产出、流程走完了"）。
+ *
+ * 所以它单独一档：看板上单独一列，列表里单独一个标签（`待人工`）。
+ */
+export type Stage = 'executing' | 'awaiting_review' | 'needs_human' | 'reviewed'
 
 /** run 的终态。不在其中的都算"还在进行"。 */
 export const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -198,6 +213,30 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
 
   const finished = reviews.find((r) => r.status === 'completed')
   if (finished) {
+    // ★ 判决说"需要人"时**不是**完成态。
+    //   判据取两个：结论是 `needs_human`，或者判决状态是 `escalated`
+    //   （后者还覆盖"判决不合规且无法重试 ⇒ 交给人"那条路）。
+    //   两者都是"卡在人这儿"，而界面上原来一律显示成"已审查"。
+    const verdict = finished.verdict
+    const needsHuman =
+      verdict !== null &&
+      verdict !== undefined &&
+      (verdict.conclusion === 'needs_human' || verdict.status === 'escalated')
+    if (needsHuman) {
+      // 判决自己说了"得人来看"，所以它同时进「需要注意」那一拨（INV-8：
+      // 通知只留给"需要你介入"的事）。**把原因带上**——那才是可操作的部分。
+      const reason = verdict.escalateReason?.trim()
+      return {
+        stage: 'needs_human',
+        executeRun: latest,
+        reviewRun: finished,
+        // 标签"待人工"已经说了这件事；缺什么在 warning 里（那是要给你看的）
+        note: null,
+        warning: reason
+          ? `判决要求人介入：${reason.length > 80 ? `${reason.slice(0, 80)}…` : reason}`
+          : '判决要求人介入（详见这条审核的判决）',
+      }
+    }
     return {
       stage: 'reviewed',
       executeRun: latest,
@@ -250,6 +289,7 @@ function coverageWarning(reviewCount: number): string | null {
 export const STAGE_SHORT: Record<Stage, string> = {
   executing: '执行中',
   awaiting_review: '待审查',
+  needs_human: '待人工',
   reviewed: '已审查',
 }
 
@@ -274,9 +314,12 @@ export interface StagedIssue<T> {
  *   - 执行失败/被取消 —— 它**不会**有审核结果（没有产出可审），干等是白等；
  *   - 执行成功但没派审核 —— 配置问题（那个 agent 没配「由谁来审它」）。
  *
- * ⚠️ 还差一类：「判决要人决定」（`needs_human`）。它现在拿不到——判决结论不在
- *    `runs` 列表里，要按 run 单独去查。等把它并进列表响应之后再加进来，
- *    **在那之前不要在这里假装覆盖了它**（界面上会写清这一拨到底指什么）。
+ * 第三类：「**判决要求人介入**」（`needs_human`，或判决状态 `escalated`）。
+ *
+ * ⚠️ 这类原来**进不来**，因为判决结论不在 `runs` 列表里（要按 run 单独查）。
+ *    当时的注释写着"等把它并进列表响应之后再加进来，在那之前不要在这里假装
+ *    覆盖了它"——现在判决已经并进列表响应（`RunSummary.verdict`），所以补上。
+ *    它正落在 INV-8 对"通知"的定义上：**需要你介入**。
  */
 export function splitByAttention<T>(
   staged: ReadonlyArray<StagedIssue<T>>,
@@ -295,5 +338,8 @@ export const PIPELINE_COLUMNS: ReadonlyArray<{
 }> = [
   { id: 'executing', title: '正在执行', hint: 'agent 正在干活' },
   { id: 'awaiting_review', title: '已完成执行 · 待审查', hint: '等审核给出判决' },
+  // ★ 这一列在"待审查"之后、"已审查"之前：从左往右是"越来越接近结束"，
+  //   而"待人工"是**卡在你手里**那一档——还没结束，所以它在"已审查"前面。
+  { id: 'needs_human', title: '等待人处理', hint: '判决要求人介入，卡在你这里' },
   { id: 'reviewed', title: '已完成审查', hint: '判决已经产出' },
 ]

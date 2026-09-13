@@ -1809,6 +1809,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           finishedAt: run.finishedAt,
           failureReason: run.failureReason,
           chainDepth: run.chainDepth,
+          /**
+           * ★ 审核 run 的**判决结论**要带上——阶段推导需要它。
+           *
+           *   页面原来只能看到"审核 run 完成了没有"，于是无论判决是
+           *   `needs_human` 还是 `pass`，都显示成「已审查」。而
+           *   `needs_human` 的意思是**卡在人这儿**：把它显示成"已完成"，
+           *   等于把待办说成做完了（使用者的原话：「审查的结论是 needs_human，
+           *   被标为已审查，不合理」）。
+           *
+           *   只给最新的那一份（一次审核一条判决；重试会落在新的 run 上）。
+           */
+          verdict:
+            run.kind === 'review'
+              ? await store.listVerdictsByRun(run.id).then((vs) => {
+                  const v = vs[vs.length - 1]
+                  return v
+                    ? {
+                        status: v.status,
+                        conclusion: v.conclusion,
+                        // 结论之外的"为什么"——人要看的就是这一句
+                        escalateReason: v.escalateReason,
+                      }
+                    : null
+                })
+              : null,
         })),
       )
       sendJson(res, 200, { runs })

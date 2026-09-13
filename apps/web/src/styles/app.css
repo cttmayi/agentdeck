@@ -427,7 +427,7 @@ hr {
 }
 
 @media (max-width: 60rem) {
-  .board-3 {
+  .board-4 {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 

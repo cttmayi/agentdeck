@@ -165,6 +165,17 @@ export interface RunSummary {
   finishedAt: number | null
   failureReason: string | null
   chainDepth: number
+  /**
+   * 审核 run 的判决（只对 `kind === 'review'` 有值；还没判时为 `null`）。
+   *
+   * ★ 阶段推导要用它：`needs_human` 的意思是**卡在人这儿**，把它显示成
+   *   「已审查」等于把待办说成做完了。
+   */
+  verdict: {
+    status: string
+    conclusion: string
+    escalateReason: string | null
+  } | null
 }
 
 export type RunDetail = RunSummary
