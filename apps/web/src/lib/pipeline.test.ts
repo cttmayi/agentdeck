@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { PIPELINE_COLUMNS, stageOf } from './pipeline.ts'
+import { PIPELINE_COLUMNS, runsForIssue, stageOf } from './pipeline.ts'
 import type { RunSummary } from './api.ts'
 
 /**
@@ -23,7 +23,6 @@ function run(over: Partial<RunSummary> & { runId: string; kind: string }): RunSu
     agentId: 'a1',
     subject: { type: 'issue', id: 'i1' },
     workDir: '/w',
-    lastSeq: 0,
     queuedAt: 1000,
     finishedAt: 2000,
     failureReason: null,
@@ -183,5 +182,84 @@ describe('三列的定义', () => {
       assert.ok(col.title.length > 0)
       assert.ok(col.hint.length > 0)
     }
+  })
+})
+
+describe('★ 任务名下的 run：执行 + 审它的 review（审查结论才读得到）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试对应的真实投诉
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * "我是从『已完成审查』那一列点进去的……框里只有『结束：completed』，
+   *  但我想看执行的输出结论。"
+   *
+   * 看板知道这个任务审查完了（`stageOf` 顺着链找到了 review run），可任务
+   * 详情原来只按 `subject.id === issue.id` 过滤 —— 而 review run 的 subject
+   * 是那条**执行 run 的 id**，不是 issue。于是：
+   *
+   *   - 审查 run 一条都不显示（没有它的标签页）；
+   *   - 判决是挂在 review run 上的，所以也读不出来
+   *     （`/api/runs/<执行run>/verdicts` 返回 0 条）。
+   *
+   * 结果就是"那一列说审查完成，点进去看不到任何审查结论"。
+   */
+  test('★ review run 也要算在这个任务名下（它挂在执行 run 上）', () => {
+    const list = runsForIssue(ISSUE, [
+      run({ runId: 'e1', kind: 'execute' }),
+      run({ runId: 'r1', kind: 'review', subject: { type: 'run', id: 'e1' } }),
+    ])
+    assert.deepEqual(list.map((r) => r.runId), ['e1', 'r1'])
+  })
+
+  test('★ 执行在前、新的在前（默认显示最新那次执行）', () => {
+    // 从看板点进来，使用者想看的是"这次执行干出了什么"，所以默认标签页
+    // 必须是执行 run；审查结论在它旁边。
+    const list = runsForIssue(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', queuedAt: 1000 }),
+      run({ runId: 'e2', kind: 'execute', queuedAt: 3000 }),
+      run({ runId: 'r1', kind: 'review', queuedAt: 2000, subject: { type: 'run', id: 'e1' } }),
+      run({ runId: 'r2', kind: 'review', queuedAt: 4000, subject: { type: 'run', id: 'e2' } }),
+    ])
+    assert.deepEqual(
+      list.map((r) => r.runId),
+      ['e2', 'e1', 'r2', 'r1'],
+    )
+  })
+
+  test('审**别条**执行的 review 不算这个任务的', () => {
+    const list = runsForIssue(ISSUE, [
+      run({ runId: 'e1', kind: 'execute' }),
+      run({ runId: 'r9', kind: 'review', subject: { type: 'run', id: 'e99' } }),
+    ])
+    assert.deepEqual(list.map((r) => r.runId), ['e1'])
+  })
+
+  test('别的 issue 的执行 run 不参与', () => {
+    const list = runsForIssue(ISSUE, [
+      run({ runId: 'e1', kind: 'execute' }),
+      run({ runId: 'other', kind: 'execute', subject: { type: 'issue', id: 'i2' } }),
+    ])
+    assert.deepEqual(list.map((r) => r.runId), ['e1'])
+  })
+
+  test('没有任何 run ⇒ 空数组（详情里显示"还没有执行过"）', () => {
+    assert.deepEqual(runsForIssue(ISSUE, []), [])
+  })
+
+  test('★ 归属规则与看板一致：同一个任务，两处看到的是同一批 run', () => {
+    // 这条是防"两条路各写一遍"：看板说"已审查"，任务详情就必须能看到
+    // 那条审查 run。只要两边共用 `runsForIssue`，就不可能不一致。
+    const all = [
+      run({ runId: 'e1', kind: 'execute', queuedAt: 1000 }),
+      run({ runId: 'r1', kind: 'review', queuedAt: 2000, subject: { type: 'run', id: 'e1' } }),
+    ]
+    const info = stageOf(ISSUE, all)
+    assert.equal(info.stage, 'reviewed')
+    assert.equal(info.reviewRun?.runId, 'r1')
+    assert.ok(
+      runsForIssue(ISSUE, all).some((r) => r.runId === info.reviewRun?.runId),
+      '★ 看板认定的那条审查 run，任务详情里也必须能找到',
+    )
   })
 })

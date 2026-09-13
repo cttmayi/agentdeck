@@ -2,7 +2,7 @@
   import { api, type RunSummary, type VerdictView } from '../lib/api.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
-  import { PIPELINE_COLUMNS as COLUMNS, stageOf } from '../lib/pipeline.ts'
+  import { PIPELINE_COLUMNS as COLUMNS, runsForIssue, stageOf } from '../lib/pipeline.ts'
   import RunLog from '../components/RunLog.svelte'
 
   /**
@@ -48,7 +48,11 @@
   })
 
   $: selected = $issues.find((i) => i.id === $selectedIssueId) ?? null
-  $: issueRuns = selected ? $runs.filter((r) => r.subject?.id === selected.id) : []
+  // ⚠️ 不能只按 `subject.id === issue.id` 过滤：**review run 的 subject 是那条
+  //   执行 run 的 id**，不是 issue。那样过滤会漏掉所有审查 run ——
+  //   表现就是"看板说已审查完成，点进来却看不到审查结论"。
+  //   归属规则与看板共用同一个纯函数（见 lib/pipeline.ts）。
+  $: issueRuns = selected ? runsForIssue(selected.id, $runs) : []
 
   function agentName(id: string | null): string {
     if (!id) return '未指派'

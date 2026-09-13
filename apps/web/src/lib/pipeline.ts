@@ -55,6 +55,48 @@ export interface StageInfo {
   warning: string | null
 }
 
+/**
+ * 一个任务**名下的全部 run**：执行 run + 审它们的 review run。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 任务详情原来只按 issue 过滤，于是审查 run 一条都看不到
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 它写的是 `runs.filter(r => r.subject.id === issueId)`。而 **review run 的
+ * subject 是那条 execute run 的 id**（`{type:'run'}`），不是 issue——所以：
+ *
+ *   - 看板知道这个任务"审查完成了"（`stageOf` 顺着链条找到了 review run），
+ *     卡片出现在「已完成审查」那一列；
+ *   - 点进任务详情，却**只有一条执行 run**：没有 review run 的标签页，
+ *     于是它的判决也读不出来（判决是挂在 review run 上的），
+ *     `/api/runs/<执行run>/verdicts` 返回 0 条。
+ *
+ * 表现就是"那一列说审查完了，点进去看不到任何审查结论"。
+ *
+ * `stageOf` 的文件头早就写明了这条链（"直接按 issue 找 review run 会一条也
+ * 找不到——那个 bug 我犯过一次"），但任务详情这条路没照它做。所以把它提成
+ * 一个纯函数，两条路共用同一套"归属"规则，不再各写一遍。
+ *
+ * 排序：**执行 run 在前（新的在前），然后它们的 review run（新的在前）**。
+ * 这样默认显示的那一条就是最新的执行——使用者从看板点进来，想看的是
+ * "这次执行干出了什么"。审查结论在它旁边的标签页里。
+ */
+export function runsForIssue(
+  issueId: string,
+  allRuns: readonly RunSummary[],
+): RunSummary[] {
+  const executes = allRuns.filter(
+    (r) => r.kind === 'execute' && r.subject?.type === 'issue' && r.subject.id === issueId,
+  )
+  const executeIds = new Set(executes.map((r) => r.runId))
+  const reviews = allRuns.filter(
+    (r) => r.kind === 'review' && r.subject?.type === 'run' && executeIds.has(r.subject.id),
+  )
+
+  const newestFirst = (a: RunSummary, b: RunSummary): number => b.queuedAt - a.queuedAt
+  return [...executes.sort(newestFirst), ...reviews.sort(newestFirst)]
+}
+
 export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageInfo {
   const executes = allRuns
     .filter(
