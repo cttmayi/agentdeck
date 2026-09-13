@@ -2,13 +2,14 @@
   import {
     api,
     newRunId,
-    groupWorkDirFiles,
     type RunMessage,
     type RunSummary,
     type VerdictView,
+    type WorkDirFile,
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { flattenWorkDir, humanSize } from '../lib/workdir-view.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
   import {
@@ -100,9 +101,16 @@
   /** 这次执行的最后一段产出（最后一条 text 消息）。 */
   let finalOutput = ''
   let finalOutputFor: string | null = null
-  let listing: WorkDirListing | null = null
-  let listingFor: string | null = null
-  /** 取文件列表失败的原因——必须显示出来，见 loadResult 里的说明。 */
+  // ══════════ 工作目录那一栏：默认只列第一级，目录点开才取下一层 ══════════
+  let wdRoot: WorkDirFile[] = []
+  /** 已经取回来的子层：目录路径 → 它的直接子项。 */
+  let wdChildren: ReadonlyMap<string, WorkDirFile[]> = new Map()
+  let wdExpanded: ReadonlySet<string> = new Set()
+  /** 正在取哪几层（键是目录路径，'' = 顶层）。 */
+  let wdLoading: ReadonlySet<string> = new Set()
+  let wdTruncated = false
+  let wdLoadedFor: string | null = null
+  /** 取目录失败的原因——必须**显示出来**，不能静默留空。 */
   let listingError = ''
   let showRawLog = false
 
@@ -121,19 +129,61 @@
     }
     finalOutputFor = run.runId
 
+    await loadWorkDir(run.runId, '')
+  }
+
+  /**
+   * 取某一层目录（`dir` 为空串 = 顶层）。
+   *
+   * 一次只取一层：递归列整棵树时，一个技能目录就能带出
+   * `.claude/skills/algorithmic-art/templates/viewer.html` 这种一长串路径，
+   * 把真正的产出淹掉十几行里。
+   */
+  async function loadWorkDir(runId: string, dir: string): Promise<void> {
+    const mark = (set: ReadonlySet<string>, path: string, on: boolean): Set<string> => {
+      const next = new Set(set)
+      if (on) next.add(path)
+      else next.delete(path)
+      return next
+    }
+    wdLoading = mark(wdLoading, dir, true)
     try {
-      listing = await api<WorkDirListing>(`/api/runs/${run.runId}/files`)
+      const suffix = dir === '' ? '' : `?dir=${encodeURIComponent(dir)}`
+      const out = await api<WorkDirListing>(`/api/runs/${runId}/files${suffix}`)
+      if (dir === '') {
+        wdRoot = out.entries
+        wdTruncated = out.truncated
+        wdLoadedFor = runId
+      } else {
+        const next = new Map(wdChildren)
+        next.set(dir, out.entries)
+        wdChildren = next
+      }
       listingError = ''
     } catch (err) {
       // ★ 失败必须**说出来**。第一版这里是 `catch { listing = null }`，而界面把
       //   null 渲染成骨架屏 —— 于是"接口取不到"和"还在加载"长得一模一样，
       //   使用者看到的就是"这一栏什么都没有"（实测撞到过一次：daemon 还是旧
       //   代码，`/files` 返回 404，而那一栏只是安静地空着）。
-      listing = null
       listingError = err instanceof Error ? err.message : String(err)
+    } finally {
+      wdLoading = mark(wdLoading, dir, false)
     }
-    listingFor = run.runId
   }
+
+  /** 展开/收起一个目录。展开时如果还没取过它的子项，就去取一层。 */
+  function toggleDir(entry: WorkDirFile): void {
+    const next = new Set(wdExpanded)
+    if (next.has(entry.path)) {
+      next.delete(entry.path)
+    } else {
+      next.add(entry.path)
+      if (!wdChildren.has(entry.path) && activeRun) void loadWorkDir(activeRun.runId, entry.path)
+    }
+    wdExpanded = next
+  }
+
+  $: wdRows = flattenWorkDir(wdRoot, wdChildren, wdExpanded)
 
   /** 工作目录里的相对路径 → 能取的地址（Markdown 里的图片靠它显示）。 */
   function resolveAsset(href: string, runId: string): string | null {
@@ -145,12 +195,6 @@
     activeRun && finalOutputFor === activeRun.runId && finalOutput !== ''
       ? renderMarkdown(finalOutput, { resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
       : ''
-
-  function humanSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  }
 
   let verdicts: VerdictView[] = []
   let verdictsFor: string | null = null
@@ -201,8 +245,11 @@
     showRawLog = false
     finalOutput = ''
     finalOutputFor = null
-    listing = null
-    listingFor = null
+    wdRoot = []
+    wdChildren = new Map()
+    wdExpanded = new Set()
+    wdLoading = new Set()
+    wdLoadedFor = null
     listingError = ''
     await Promise.all([
       loadVerdicts(run.runId),
@@ -535,60 +582,7 @@
 
           <aside class="result-files">
             <h4>工作目录的文件</h4>
-            {#if listingFor === activeRun.runId && listing}
-              {@const grouped = groupWorkDirFiles(listing.entries)}
-              <p class="faint small mono" style="word-break:break-all">
-                {listing.workDir ?? '—'}
-              </p>
-              {#if grouped.isEmpty}
-                <p class="hint">这个目录还是空的。</p>
-              {:else}
-                <ul>
-                  {#each grouped.outputs as entry (entry.path)}
-                    <li class={entry.kind === 'dir' ? 'is-dir' : ''}>
-                      {#if entry.kind === 'file'}
-                        <a
-                          href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >{entry.path}</a>
-                        <span class="faint small">{humanSize(entry.sizeBytes)}</span>
-                      {:else}
-                        <span class="mono">{entry.path}/</span>
-                      {/if}
-                    </li>
-                  {/each}
-                </ul>
-                {#if grouped.injected.length > 0}
-                  <!-- 平台写进去的东西（技能、上下文文件）也**列出来**，只是排在
-                       后面并标一下。藏起来是不对的：使用者要能看见它们、
-                       点开看，那正是他要求保留它们的原因。 -->
-                  <h4 style="margin-top:var(--sp-3)">平台注入（{grouped.injected.length}）</h4>
-                  <p class="faint small">
-                    这次任务在什么标准、什么上下文下跑的——不是 agent 的产出。
-                  </p>
-                  <ul>
-                    {#each grouped.injected as entry (entry.path)}
-                      <li class={entry.kind === 'dir' ? 'is-dir' : ''}>
-                        {#if entry.kind === 'file'}
-                          <a
-                            href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
-                            target="_blank"
-                            rel="noreferrer noopener"
-                          >{entry.path}</a>
-                          <span class="faint small">{humanSize(entry.sizeBytes)}</span>
-                        {:else}
-                          <span class="mono">{entry.path}/</span>
-                        {/if}
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-                {#if listing.truncated}
-                  <p class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</p>
-                {/if}
-              {/if}
-            {:else if listingError}
+            {#if listingError}
               <div class="notice bad">
                 取不到工作目录的文件
                 <p class="faint small" style="margin:var(--sp-2) 0 0">{listingError}</p>
@@ -596,8 +590,52 @@
                   （如果 daemon 刚更新过，重启它再试——新接口要重启才生效）
                 </p>
               </div>
-            {:else}
+            {:else if wdLoadedFor !== activeRun.runId}
               <div class="skeleton" style="width:70%"></div>
+            {:else if wdRows.length === 0}
+              <p class="hint">这个目录还是空的。</p>
+            {:else}
+              <!--
+                默认只列**第一级**，目录点一下才取它的下一层。
+                不显示整串路径（层级靠缩进，路径在悬停提示里）；不写"平台注入"
+                那种说明文字（弱化显示就够了）。
+              -->
+              <ul class="wd">
+                {#each wdRows as { entry, depth } (entry.path)}
+                  <li style="padding-left:{depth * 0.9}rem">
+                    {#if entry.kind === 'dir'}
+                      <button
+                        type="button"
+                        class="wd-dir"
+                        class:managed={entry.managed}
+                        title={entry.path}
+                        onclick={() => toggleDir(entry)}
+                      >
+                        <span class="wd-twisty">
+                          {entry.hasChildren ? (wdExpanded.has(entry.path) ? '▾' : '▸') : '·'}
+                        </span>
+                        <span class="mono">{entry.name}</span>
+                      </button>
+                      {#if wdLoading.has(entry.path)}
+                        <span class="faint small">正在读…</span>
+                      {/if}
+                    {:else}
+                      <a
+                        class="wd-file"
+                        class:managed={entry.managed}
+                        title={entry.path}
+                        href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >{entry.name}</a>
+                      <span class="faint small">{humanSize(entry.sizeBytes)}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+              {#if wdTruncated}
+                <p class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</p>
+              {/if}
             {/if}
           </aside>
         </div>
@@ -834,23 +872,64 @@
     margin: 0 0 var(--sp-2);
   }
 
-  .result-files ul {
+  .wd {
     list-style: none;
     margin: 0;
     padding: 0;
   }
 
-  .result-files li {
+  .wd li {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
     gap: var(--sp-2);
-    padding: var(--sp-1) 0;
+    padding: 2px 0;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
-    word-break: break-all;
+    min-width: 0;
   }
 
-  .result-files li.is-dir { color: var(--text-faint); }
+  .wd-dir {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--text-dim);
+    font: inherit;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wd-dir:hover { color: var(--text); }
+
+  /* 展开箭头定宽：不定宽时，目录名会随着 ▸/▾ 的宽度差左右抖 */
+  .wd-twisty {
+    width: 0.75rem;
+    flex-shrink: 0;
+    color: var(--text-faint);
+  }
+
+  .wd-file {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 平台注入的（技能、上下文文件）：弱化显示就够了，不再用一段文字去解释 */
+  .wd-dir.managed,
+  .wd-file.managed {
+    color: var(--text-faint);
+  }
+
+  .result-files ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
 
   /* 常驻底栏里的它**不再自带边框与内边距**：外层 .pane-foot 已经有分隔线了，
      再套一层框会显得像页面里的一个孤岛 */

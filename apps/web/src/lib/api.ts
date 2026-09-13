@@ -246,55 +246,25 @@ export function newRunId(): string {
   return timePart + randPart
 }
 
-/** `GET /api/runs/:id/files` —— 工作目录里的文件列表。 */
+/** `GET /api/runs/:id/files` —— 工作目录里**一个目录**的直接子项。 */
 export interface WorkDirFile {
+  /** 相对工作目录的路径（`/` 分隔）。 */
   path: string
+  /** 文件名/目录名——界面显示它，层级靠缩进（不显示整串路径）。 */
+  name: string
   kind: 'file' | 'dir'
   sizeBytes: number
   modifiedAt: number
+  /** 目录里还有没有东西——界面据此决定画不画展开箭头。 */
+  hasChildren: boolean
   /** 平台注入的东西（`.claude/**`、`CLAUDE.md`），不是 agent 的产出。 */
   managed: boolean
 }
 
 export interface WorkDirListing {
-  workDir: string | null
+  workDir: string
+  /** 这是哪个子目录（空串 = 顶层）。 */
+  dir: string
   entries: WorkDirFile[]
   truncated: boolean
-}
-
-/**
- * 工作目录列表的**显示归类**。
- *
- * ══════════════════════════════════════════════════════════════════
- * 为什么单独一个函数：这里有一个"看起来像空目录"的坑
- * ══════════════════════════════════════════════════════════════════
- *
- * 第一版界面是这么写的：判断 `entries.length === 0` 显示"这个目录还是空的"，
- * 但**渲染时**又 `filter(e => !e.managed)` 把平台注入的东西滤掉了。于是当目录里
- * **只有**平台注入的文件（技能、上下文文件）时：
- *
- *   - `entries.length === 0` 为假 ⇒ 不显示"空目录"的提示；
- *   - 过滤后没有可渲染的项 ⇒ 列表也是空的。
- *
- * 结果是一栏**什么都没有、也没有任何说明**——而使用者刚确认过里面确实有文件。
- *
- * 现在把所有条目都显示出来（他要能看见那些文件，这正是他要求保留它们的原因），
- * 只是把平台注入的排在后面并标注一下。归类逻辑放这里，纯函数、可测。
- */
-export function groupWorkDirFiles(entries: WorkDirFile[]): {
-  /** agent 真正的产出。 */
-  outputs: WorkDirFile[]
-  /** 平台注入的（技能、上下文文件）——说明"这次任务在什么标准下跑"。 */
-  injected: WorkDirFile[]
-  isEmpty: boolean
-} {
-  const outputs: WorkDirFile[] = []
-  const injected: WorkDirFile[] = []
-  for (const entry of entries) (entry.managed ? injected : outputs).push(entry)
-
-  const byPath = (a: WorkDirFile, b: WorkDirFile): number => a.path.localeCompare(b.path)
-  outputs.sort(byPath)
-  injected.sort(byPath)
-
-  return { outputs, injected, isEmpty: entries.length === 0 }
 }

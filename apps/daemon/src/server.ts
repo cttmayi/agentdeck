@@ -1819,7 +1819,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           sendJson(res, 200, { workDir: null, entries: [], truncated: false })
           return
         }
-        sendJson(res, 200, await listWorkDir(run.workDir))
+        // ?dir= 列子目录（一次一层）。界面点开一个目录时才请求下一层，
+        // 而不是一次把整棵树拉回来 —— 那样一长串嵌套路径会把真正的产出淹掉。
+        const dir = url.searchParams.get('dir') ?? ''
+        try {
+          sendJson(res, 200, await listWorkDir(run.workDir, dir))
+        } catch (err) {
+          if (err instanceof UnsafePathError) {
+            sendJson(res, 400, { error: err.message })
+            return
+          }
+          throw err
+        }
         return
       }
 

@@ -29,32 +29,41 @@ import { join, relative, resolve, sep } from 'node:path'
  * 这样即使被当作文档打开，它也只是"一张静态图/一段静态文本"。
  */
 
-/** 列出文件的上限——不能让一个装满 node_modules 的工作目录把内存和页面拖垮。 */
+/** 单次列目录的上限——一个目录里塞几千个文件时别把页面拖垮。 */
 export const MAX_ENTRIES = 500
-/** 递归深度上限。 */
-export const MAX_DEPTH = 4
 /** 单个文件的读取上限（图片/文本够用；更大的请去磁盘上看）。 */
 export const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 export interface WorkDirEntry {
   /** 相对工作目录的路径，POSIX 风格（`/` 分隔）。 */
   path: string
+  /** 目录名/文件名（不含路径）——界面显示它，层级靠缩进。 */
+  name: string
   kind: 'file' | 'dir'
   sizeBytes: number
   modifiedAt: number
   /**
+   * 目录里还有没有东西——界面据此决定要不要画那个展开箭头。
+   *
+   * 不画"点了才知道是空"的箭头：那是一次白点的交互。
+   */
+  hasChildren: boolean
+  /**
    * 是不是**平台注入**的东西（`.claude/**`、`CLAUDE.md`）。
    *
-   * 界面据此把它们弱化显示：它们是"这个任务在什么标准下跑的"，不是 agent 的产出。
-   * 这两类混在一起列，使用者会分不清哪个是"它做出来的"。
+   * 界面据此弱化显示：它们是"这个任务在什么标准下跑的"，不是 agent 的产出。
+   * 注意这里**不用一段文字去说明**——弱化 + 悬停提示就够，正文里少一行字。
    */
   managed: boolean
 }
 
 export interface WorkDirListing {
   workDir: string
+  /** 这次列的是哪个子目录（相对工作目录；空串 = 顶层）。 */
+  dir: string
+  /** **直接子项**，不是整棵树。 */
   entries: WorkDirEntry[]
-  /** 因为条数/深度上限而没列全——**要说出来**，否则界面看起来像"就这些"。 */
+  /** 因为条数上限而没列全。 */
   truncated: boolean
 }
 
@@ -64,82 +73,81 @@ function isManaged(relPath: string): boolean {
 }
 
 /**
- * 列目录。
+ * 列**一个目录的直接子项**。
  *
- * 目录也列出来（`kind: 'dir'`）：使用者找东西时，"这里有三个子目录"本身是信息。
- * 但**不**下钻到 `.git`：那是版本库内部结构，列出来只会淹掉真正的产出。
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么改成"一层一层列"而不是一次递归整棵树
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 第一版递归整棵树（深度 4，最多 500 项）。实测的问题不是性能，是**读不了**：
+ * 一个技能目录就能带出 `.claude/skills/algorithmic-art/templates/viewer.html`
+ * 这种一长串路径，把真正的产出（`bubble-sort.js` 之类）淹掉十几行里。
+ * 使用者的原话是"格式不好，建议还是默认第一级文件和目录，目录可以点击展开"。
+ *
+ * 所以：默认只给第一级；要往下看就点那个目录（`dir` 参数），一次一层。
+ * 顺带把 `hasChildren` 算出来，让界面只在真有空子目录时才画箭头。
  */
-export async function listWorkDir(workDir: string): Promise<WorkDirListing> {
+export async function listWorkDir(workDir: string, dir = ''): Promise<WorkDirListing> {
+  const root = await realpath(workDir).catch(() => resolve(workDir))
+  const target = dir === '' ? root : await resolveWorkFilePath(workDir, dir)
+
+  const info = await stat(target).catch(() => null)
+  if (info === null) {
+    // 顶层目录不存在（工作目录被清理掉了、或还没建）⇒ 给一个空列表而不是报错：
+    // 界面那一栏显示"这个目录还是空的"，比弹一个错更贴合事实
+    if (dir === '') return { workDir, dir, entries: [], truncated: false }
+    throw new UnsafePathError(`目录不存在：${dir}`)
+  }
+  if (!info.isDirectory()) throw new UnsafePathError(`不是一个目录：${dir}`)
+
+  let items
+  try {
+    items = await readdir(target, { withFileTypes: true })
+  } catch {
+    // 读不了就当成空目录：列文件失败不该让整个视图报错
+    return { workDir, dir, entries: [], truncated: false }
+  }
+
   const entries: WorkDirEntry[] = []
   let truncated = false
 
-  const walk = async (dir: string, depth: number): Promise<void> => {
+  for (const item of items) {
     if (entries.length >= MAX_ENTRIES) {
       truncated = true
-      return
+      break
     }
-    let items
-    try {
-      items = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return // 读不了就跳过：列文件失败不该让整个视图报错
+    if (item.name === '.git') continue // 版本库内部结构只会淹掉真正的产出
+    if (item.name === '.DS_Store') continue // macOS 的目录元数据，不是产出
+
+    const full = join(target, item.name)
+    const rel = dir === '' ? item.name : `${dir}/${item.name}`
+
+    // 软链：不跟随（可能指到目录外面去，也可能成环），当成普通条目列出
+    const statInfo = await stat(full).catch(() => null)
+    if (!statInfo) continue
+
+    const isDir = item.isDirectory() || (item.isSymbolicLink() && statInfo.isDirectory())
+    let hasChildren = false
+    if (isDir) {
+      hasChildren = await readdir(full).then((kids) => kids.length > 0).catch(() => false)
     }
 
-    for (const item of items) {
-      if (entries.length >= MAX_ENTRIES) {
-        truncated = true
-        return
-      }
-      const full = join(dir, item.name)
-      const rel = relative(workDir, full).split(sep).join('/')
-      if (item.name === '.git') continue
-
-      // 软链：不跟随（可能指到目录外面去，也可能成环）。当成一个普通条目列出。
-      if (item.isSymbolicLink()) {
-        const info = await stat(full).catch(() => null)
-        entries.push({
-          path: rel,
-          kind: info?.isDirectory() ? 'dir' : 'file',
-          sizeBytes: info?.size ?? 0,
-          modifiedAt: info?.mtimeMs ?? 0,
-          managed: isManaged(rel),
-        })
-        continue
-      }
-
-      const info = await stat(full).catch(() => null)
-      if (!info) continue
-
-      if (item.isDirectory()) {
-        entries.push({
-          path: rel,
-          kind: 'dir',
-          sizeBytes: 0,
-          modifiedAt: info.mtimeMs,
-          managed: isManaged(rel),
-        })
-        if (depth + 1 <= MAX_DEPTH) await walk(full, depth + 1)
-        else truncated = true
-        continue
-      }
-
-      if (!item.isFile()) continue // 管道/设备之类：不是"产出"
-      entries.push({
-        path: rel,
-        kind: 'file',
-        sizeBytes: info.size,
-        modifiedAt: info.mtimeMs,
-        managed: isManaged(rel),
-      })
-    }
+    entries.push({
+      path: rel,
+      name: item.name,
+      kind: isDir ? 'dir' : 'file',
+      sizeBytes: isDir ? 0 : statInfo.size,
+      modifiedAt: statInfo.mtimeMs,
+      hasChildren,
+      managed: isManaged(rel),
+    })
   }
 
-  await walk(workDir, 0)
-  // 目录在前、再按路径排序：使用者找产出时先看结构
+  // 目录在前、再按名字：找产出时先看结构
   entries.sort((a, b) =>
-    a.kind === b.kind ? a.path.localeCompare(b.path) : a.kind === 'dir' ? -1 : 1,
+    a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1,
   )
-  return { workDir, entries, truncated }
+  return { workDir, dir, entries, truncated }
 }
 
 /** 路径不安全时的原因——直接给使用者看。 */

@@ -148,37 +148,60 @@ describe('★ 路径不许跑出工作目录', () => {
   })
 })
 
-describe('列出工作目录', () => {
-  test('文件与目录都列出，并标出哪些是平台注入的', async () => {
+describe('列目录：**一次一层**', () => {
+  test('★ 只列直接子项，不递归（递归会把真正的产出淹掉）', async () => {
     const dir = await makeWorkDir()
     try {
       await writeFile(join(dir, 'report.md'), '# 报告', 'utf8')
       await mkdir(join(dir, '.claude', 'skills', 'x'), { recursive: true })
       await writeFile(join(dir, '.claude', 'skills', 'x', 'SKILL.md'), '# 技能', 'utf8')
-      await writeFile(join(dir, 'CLAUDE.md'), '# 上下文', 'utf8')
 
-      const { entries } = await listWorkDir(dir)
-      const byPath = new Map(entries.map((e) => [e.path, e]))
-
-      assert.equal(byPath.get('report.md')?.managed, false, 'agent 的产出不算平台注入')
-      assert.equal(byPath.get('CLAUDE.md')?.managed, true)
-      assert.equal(byPath.get('.claude/skills/x/SKILL.md')?.managed, true)
-      assert.equal(byPath.get('report.md')?.sizeBytes, Buffer.byteLength('# 报告'))
-      assert.ok((byPath.get('report.md')?.modifiedAt ?? 0) > 0, '要有修改时间')
+      const listing = await listWorkDir(dir)
+      assert.deepEqual(
+        listing.entries.map((e) => e.path).sort(),
+        ['.claude', 'report.md'],
+        '★ 第一层只该有这两项',
+      )
+      const claude = listing.entries.find((e) => e.path === '.claude')
+      assert.equal(claude?.kind, 'dir')
+      assert.equal(claude?.managed, true, '平台注入的要标出来')
+      assert.equal(claude?.hasChildren, true, '里面有东西 ⇒ 界面才画展开箭头')
+      assert.equal(listing.dir, '', '顶层时 dir 是空串')
     } finally {
       await cleanup(dir)
     }
   })
 
-  test('.git 不列（版本库内部结构只会淹掉真正的产出）', async () => {
+  test('★ 给 dir 就列那一层（界面点开目录时用）', async () => {
     const dir = await makeWorkDir()
     try {
-      await mkdir(join(dir, '.git'), { recursive: true })
-      await writeFile(join(dir, '.git', 'HEAD'), 'ref: x', 'utf8')
-      await writeFile(join(dir, 'real.txt'), 'x', 'utf8')
-      const { entries } = await listWorkDir(dir)
-      assert.equal(entries.some((e) => e.path.startsWith('.git')), false)
-      assert.equal(entries.some((e) => e.path === 'real.txt'), true)
+      await mkdir(join(dir, '.claude', 'skills', 'algorithmic-art', 'templates'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'algorithmic-art', 'SKILL.md'), '# 技能', 'utf8')
+      await writeFile(join(dir, '.claude', 'skills', 'algorithmic-art', 'templates', 'v.html'), 'x', 'utf8')
+
+      const l1 = await listWorkDir(dir, '.claude/skills')
+      assert.equal(l1.dir, '.claude/skills')
+      assert.deepEqual(l1.entries.map((e) => e.path), ['.claude/skills/algorithmic-art'])
+      assert.equal(l1.entries[0]?.name, 'algorithmic-art', '条目带 name，界面显示它、层级靠缩进')
+      assert.equal(l1.entries[0]?.hasChildren, true)
+
+      const l2 = await listWorkDir(dir, '.claude/skills/algorithmic-art')
+      assert.deepEqual(
+        l2.entries.map((e) => e.name),
+        ['templates', 'SKILL.md'],
+        '目录在前、再按名字',
+      )
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('空目录 ⇒ hasChildren 为 false（不画一个点了没反应的箭头）', async () => {
+    const dir = await makeWorkDir()
+    try {
+      await mkdir(join(dir, 'empty'), { recursive: true })
+      const listing = await listWorkDir(dir)
+      assert.equal(listing.entries[0]?.hasChildren, false)
     } finally {
       await cleanup(dir)
     }
@@ -187,10 +210,36 @@ describe('列出工作目录', () => {
   test('目录排在文件前面（先看结构）', async () => {
     const dir = await makeWorkDir()
     try {
-      await writeFile(join(dir, 'z.txt'), 'x', 'utf8')
+      await writeFile(join(dir, 'a.txt'), 'x', 'utf8')
       await mkdir(join(dir, 'assets'), { recursive: true })
       const { entries } = await listWorkDir(dir)
       assert.equal(entries[0]?.kind, 'dir')
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ `.git` 与 `.DS_Store` 不列（一个是我们自己的状态，一个是 macOS 的元数据）', async () => {
+    const dir = await makeWorkDir()
+    try {
+      await mkdir(join(dir, '.git'), { recursive: true })
+      await writeFile(join(dir, '.git', 'HEAD'), 'ref: x', 'utf8')
+      await writeFile(join(dir, '.DS_Store'), 'junk', 'utf8')
+      await writeFile(join(dir, 'real.txt'), 'x', 'utf8')
+      const { entries } = await listWorkDir(dir)
+      assert.deepEqual(entries.map((e) => e.name), ['real.txt'])
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ dir 参数同样不许跑出工作目录', async () => {
+    const dir = await makeWorkDir()
+    try {
+      await assert.rejects(
+        () => listWorkDir(dir, '../..'),
+        (err: unknown) => err instanceof UnsafePathError,
+      )
     } finally {
       await cleanup(dir)
     }
