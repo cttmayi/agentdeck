@@ -4,10 +4,9 @@ import { dirname, join } from 'node:path'
 import {
   injectContextBlock,
   removeContextBlock,
-  removeInjectedSkills,
   renderContextBlock,
   renderTaskContext,
-  writeSkill,
+  syncInjectedSkills,
   type AgentBackend,
   type RuntimeDescriptor,
   type SkillBrief,
@@ -448,22 +447,24 @@ export class RunExecutor {
      * `try` 内部声明的变量在 `finally` 里看不到。
      */
     let watchdog: IdleWatchdog | null = null
-    let injectedSlugs: string[] = []
     let cleaned = false
 
     /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
      *
-     * ⚠️ 调用时机很关键：必须在**发出 terminal 事件之前**完成。
-     * 否则页面收到"跑完了"时，我们注入的技能与上下文块还躺在使用者的
-     * 目录里——页面据此显示的状态与磁盘不一致，而使用者可能正好在那时
-     * 打开文件看结果。
+     * ⚠️ 调用时机很关键：必须在**发出 terminal 事件之前**完成，否则页面收到
+     * "跑完了"时磁盘上还留着我们的东西，而使用者可能正好那时打开文件看结果。
+     *
+     * ★ 现在只还原**上下文块**（CLAUDE.md 是使用者自己的文件，必须逐字节复原）。
+     *   **技能不再删**：工作目录是这个任务的产物之一，使用者会进去看"它是在
+     *   什么标准下干活的"。技能的去留由 `syncInjectedSkills` 按**落盘的归属
+     *   清单**对账（摘掉的会消失、崩溃残渣会自愈、使用者的同名技能绝不覆盖），
+     *   见那个函数的说明。
      */
     const cleanup = async (): Promise<void> => {
       if (cleaned) return
       cleaned = true
       if (restoreContext) await this.#restoreContext(restoreContext)
-      await removeInjectedSkills(run.workDir!, runtime.descriptor.skillDir, injectedSlugs)
     }
 
     try {
@@ -475,18 +476,34 @@ export class RunExecutor {
 
       // ── 注入技能（按 agent 求解的**子集**，D22）──
       const skillsBrief: SkillBrief[] = []
-      for (const skill of req.skills ?? []) {
-        // 注入失败要让 run 失败——静默的缺能力比报错糟得多
-        await writeSkill(run.workDir!, runtime.descriptor.skillDir, {
+      // ⚠️ 注入失败要让 run 失败——静默的缺能力比报错糟得多。
+      //    同名撞上使用者自己的技能也会在这里抛（`SkillCollisionError`）：
+      //    覆盖它等于改写使用者的文件，所以宁可这次 run 失败并说清楚。
+      const skillSync = await syncInjectedSkills(
+        run.workDir!,
+        runtime.descriptor.skillDir,
+        (req.skills ?? []).map((skill) => ({
           slug: skill.slug,
           content: skill.body,
           // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
           // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
           // 从日志上看不出为什么（CLI 只会说找不到文件）。
           ...(skill.files && Object.keys(skill.files).length > 0 ? { files: skill.files } : {}),
-        })
-        injectedSlugs.push(skill.slug)
+        })),
+      )
+      for (const skill of req.skills ?? []) {
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
+      }
+      // 对账结果要进日志：被摘掉的技能消失了、以及规范化改了什么，
+      // 都是使用者需要知道的事（FR-CLI-40：写下去了 ≠ 被读了，至少要看得见）
+      if (skillSync.pruned.length > 0) {
+        await this.#note(
+          runId,
+          `已从工作目录移除不再挂载的 skill：${skillSync.pruned.join('、')}`,
+        )
+      }
+      for (const { slug, note } of skillSync.notes) {
+        await this.#note(runId, `skill ${slug}：${note}`)
       }
 
       // ★ 环境预检的问题必须出现在**这份日志里**。

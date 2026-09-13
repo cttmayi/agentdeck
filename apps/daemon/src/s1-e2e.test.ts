@@ -273,9 +273,39 @@ describe('S1：执行完成后自动接审核', () => {
     }
   })
 
-  test('★ 工作目录被清理干净（失败路径与成功路径都不留痕）', async () => {
-    const { readdir } = await import('node:fs/promises')
+  test('★ 上下文块被逐字节还原；技能**保留**（使用者的决定：要能看见它在什么标准下干活）', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条测试的期望被改过一次，改的是**哪一个**该被清掉
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来断言工作目录"一个条目都不剩"。那时技能也是跑完就删的。
+    //
+    // 但那样有两个坏结果：① 任务跑完你进工作目录看，**看不出它是在什么标准下
+    // 干活的**（技能已经没了）；② 删除的依据是**进程内的数组**，daemon 崩溃
+    // 或被 kill 之后就没了记忆，残留的技能文件会被以后的 run **继续发现**——
+    // "你摘掉的技能还在生效"。
+    //
+    // 现在的规矩分得很清：
+    //   - **CLAUDE.md 必须逐字节还原**（它是使用者的文件，我们只是临时借用）；
+    //   - **技能保留**（那是这个任务上下文的一部分），去留由落盘的归属清单对账。
+    const { readFile, readdir } = await import('node:fs/promises')
     const entries = await readdir(workDir).catch(() => [] as string[])
-    assert.deepEqual(entries, [])
+
+    // 上下文块：文件要么不存在，要么不含我们的受管块
+    const claudeMd = await readFile(join(workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+    if (claudeMd !== null) {
+      assert.equal(
+        /alpha-helper/i.test(claudeMd),
+        false,
+        '★ CLAUDE.md 里不能残留我们的受管块——那是使用者的文件',
+      )
+    }
+
+    // 技能：应当还在，并且有归属清单
+    assert.ok(entries.includes('.claude'), '技能现在保留在工作目录里')
+    const skillsDir = join(workDir, '.claude', 'skills')
+    const manifest = await readFile(join(skillsDir, '.alpha-helper-managed.json'), 'utf8')
+    const parsed = JSON.parse(manifest) as { slugs: string[] }
+    assert.ok(Array.isArray(parsed.slugs), '★ 归属清单必须落盘（否则崩溃后残留无从识别）')
   })
 })

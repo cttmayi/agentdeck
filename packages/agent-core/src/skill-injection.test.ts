@@ -1,12 +1,27 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { parse as parseYaml } from 'yaml'
+
+/** 临时目录沿用工作区内 `.cache/test-tmp` 的约定（不用系统 tmp：受限沙箱里可能不可写）。 */
+const TEST_TMP_ROOT = join(process.cwd(), '.cache', 'test-tmp')
+async function makeTempDir(prefix: string): Promise<string> {
+  await mkdir(TEST_TMP_ROOT, { recursive: true })
+  return mkdtemp(join(TEST_TMP_ROOT, `${prefix}-`))
+}
+async function cleanup(dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true })
+}
 import {
   MAX_SKILL_BYTES,
   SkillTooLargeError,
   normalizeSkillFrontmatter,
   skillPath,
   splitFrontmatter,
+  SkillCollisionError,
+  listManagedSkills,
+  syncInjectedSkills,
 } from './skill-injection.ts'
 
 function frontmatterOf(content: string): Record<string, unknown> {
@@ -139,5 +154,116 @@ function countKeys(content: string, key: string): number {
 describe('技能路径', () => {
   test('落在 CLI 原生目录下（靠摆对目录被发现，不靠喂提示词）', () => {
     assert.equal(skillPath('.claude/skills', 'sec-vuln'), '.claude/skills/sec-vuln/SKILL.md')
+  })
+})
+
+describe('★ 技能在工作目录里的去留：保留 + 按归属清单对账', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么是"同步"而不是"跑完就删"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来 run 结束就把技能删掉。两个坏结果：
+   *
+   *   ① **跑完就看不见了**：任务的工作目录是产物之一，使用者会进去看
+   *      "它是在什么标准下干活的"——而那时候技能已经没了；
+   *   ② **删除的依据是进程内的数组**：daemon 崩溃/被 kill 之后那份记忆就没了，
+   *      残留的技能文件**会被以后的 run 继续发现**——你把它从 agent 上摘掉了，
+   *      它却还在生效。实测在 `~/.alpha-helper-workspace/run-01M2SANDBOX…`
+   *      里就躺着这么一个残留的 `general-review`。
+   *
+   * 现在保留 + 落盘归属清单：清单里有、这次不要的 ⇒ 删（自愈）；
+   * 不在清单里的同名目录 ⇒ **报错，绝不覆盖**（那是使用者自己放的）。
+   */
+  async function tmp(): Promise<string> {
+    const dir = await makeTempDir('skill-sync')
+    return dir
+  }
+
+  test('★ 同名的使用者技能**绝不被覆盖**，而是明确报错', async () => {
+    const dir = await tmp()
+    try {
+      // 使用者自己放了一个技能（不在清单里）
+      await mkdir(join(dir, '.claude', 'skills', 'mine'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), '我的标准', 'utf8')
+
+      await assert.rejects(
+        () =>
+          syncInjectedSkills(dir, '.claude/skills', [
+            { slug: 'mine', content: '# 平台的标准' },
+          ]),
+        (err: unknown) => err instanceof SkillCollisionError,
+        '★ 覆盖使用者的文件比 run 失败糟得多',
+      )
+      // 他的内容一个字都没变
+      assert.equal(
+        await readFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), 'utf8'),
+        '我的标准',
+      )
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 摘掉的技能会从工作目录消失（按清单自愈）', async () => {
+    const dir = await tmp()
+    try {
+      await syncInjectedSkills(dir, '.claude/skills', [
+        { slug: 'a', content: '# A' },
+        { slug: 'b', content: '# B' },
+      ])
+      assert.deepEqual(await listManagedSkills(dir, '.claude/skills'), ['a', 'b'])
+
+      // 下一次这个 agent 只挂 a 了（b 被摘下）
+      const result = await syncInjectedSkills(dir, '.claude/skills', [{ slug: 'a', content: '# A2' }])
+      assert.deepEqual(result.pruned, ['b'], '★ 摘掉的必须消失，否则它会被 CLI 继续发现并使用')
+      assert.deepEqual(await listManagedSkills(dir, '.claude/skills'), ['a'])
+
+      const entries = await readdir(join(dir, '.claude', 'skills'))
+      assert.equal(entries.includes('b'), false)
+      assert.equal(entries.includes('a'), true, '仍然挂着的要留着')
+      // 内容被更新了（`writeSkill` 会补上 frontmatter，所以看正文即可）
+      assert.match(
+        await readFile(join(dir, '.claude', 'skills', 'a', 'SKILL.md'), 'utf8'),
+        /# A2/,
+      )
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 崩溃残渣能自愈：清单里的 slug 下次仍然会被清理', async () => {
+    // 模拟"上一次跑完没来得及收拾"：文件在、清单也在
+    const dir = await tmp()
+    try {
+      await syncInjectedSkills(dir, '.claude/skills', [
+        { slug: 'leftover', content: '# 残留' },
+      ])
+      // 这次一个技能都不挂了
+      const result = await syncInjectedSkills(dir, '.claude/skills', [])
+      assert.deepEqual(result.pruned, ['leftover'])
+      assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['.alpha-helper-managed.json'])
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('清单读不懂时**宁可少删**（当作我们什么都没放过）', async () => {
+    const dir = await tmp()
+    try {
+      await mkdir(join(dir, '.claude', 'skills'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', '.alpha-helper-managed.json'), '{坏掉的 json', 'utf8')
+      await mkdir(join(dir, '.claude', 'skills', 'theirs'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), '别人的', 'utf8')
+
+      const result = await syncInjectedSkills(dir, '.claude/skills', [])
+      assert.deepEqual(result.pruned, [], '★ 读不懂清单不能成为删东西的理由')
+      assert.equal(
+        await readFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), 'utf8'),
+        '别人的',
+      )
+    } finally {
+      await cleanup(dir)
+    }
   })
 })

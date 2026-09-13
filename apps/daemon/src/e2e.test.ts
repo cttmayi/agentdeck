@@ -39,6 +39,8 @@ class FakeBackend implements AgentBackend {
   /** 执行时收到的模型与自定义环境变量——用来验证"agent 上填的东西真的传下去了"。 */
   seenModel: string | null = null
   seenEnv: Record<string, string> = {}
+  /** 这次执行要求恢复哪个会话（`--resume` 的入参）——"接着上次说"靠它。 */
+  seenResumeSessionId: string | null = null
 
   /**
    * 执行那一刻，工作目录里 `.claude/skills/` 下的文件（相对技能目录的路径 → 内容）。
@@ -90,6 +92,7 @@ class FakeBackend implements AgentBackend {
     this.seenWorkDir = opts.workDir
     this.seenModel = opts.model ?? null
     this.seenEnv = opts.env ?? {}
+    this.seenResumeSessionId = opts.resumeSessionId ?? null
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
@@ -639,6 +642,100 @@ describe('端到端：SSE 终态补发', () => {
       )
     } finally {
       release()
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
+describe('★ 接着沟通：同一任务上再起一条 run，并恢复上一次的会话', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 使用者的原话
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * "在任务完成后，我可能不满意结果，我需要可以在任务细节页面上直接再进行
+   *  沟通，以进一步完成任务。"
+   *
+   * 实现是"同一任务上再起一条 execute run + `resumeFromRunId` 指向上一次"，
+   * 而不是"给已有 run 追加消息"：一次 run 的产出是不可变快照，往里塞新输入会
+   * 让"它当时收到了什么"不可回答，审计链也就断了。
+   *
+   * 这条测试钉住两件缺一不可的事：
+   *   1. **工作目录不变**（按任务分配，D27）⇒ agent 上次留下的文件还在；
+   *   2. **会话被恢复**（FR-CLI-06）⇒ 它是"接着上次说"，不是"从头再来"。
+   */
+  test('★ 后续 run 会带上上一次的 sessionId，且落在同一个工作目录', async () => {
+    const dataDir = await makeTempDir('followup-data')
+    const work = await makeTempDir('followup-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const agent = { id: 'agent-followup', name: '接着干', instructions: '干活' }
+      const issueId = ulid()
+      const firstRunId = ulid() as RunId
+
+      // 第一次执行
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: firstRunId,
+          kind: 'execute',
+          agentRef: agent,
+          skills: [],
+          subject: { type: 'issue', id: issueId },
+          prompt: '先做一版',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${firstRunId}/events`)
+      assert.equal(b.seenResumeSessionId, null, '第一次没有上文可恢复')
+
+      // 接着说一句（界面上就是那个「发送并继续」按钮）
+      const secondRunId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: secondRunId,
+          kind: 'execute',
+          agentRef: agent,
+          subject: { type: 'issue', id: issueId },
+          prompt: '配色改成浅色系',
+          resumeFromRunId: firstRunId,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${secondRunId}/events`)
+
+      assert.equal(
+        b.seenResumeSessionId,
+        'fake-session-1',
+        '★ 必须把上一次的 sessionId 交给 CLI 恢复 —— 否则"接着沟通"会变成"从头再来"',
+      )
+
+      const runs = ((await (await fetch(`${d.url}/api/runs`)).json()) as {
+        runs: Array<{ runId: string; workDir: string | null }>
+      }).runs
+      const first = runs.find((r) => r.runId === firstRunId)
+      const second = runs.find((r) => r.runId === secondRunId)
+      assert.equal(
+        second?.workDir,
+        first?.workDir,
+        '★ 同一个任务的工作目录必须相同 —— agent 上次留下的文件要还在',
+      )
+    } finally {
       await d.close()
       await cleanup(work)
       await cleanup(dataDir)

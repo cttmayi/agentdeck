@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type RunSummary, type VerdictView } from '../lib/api.ts'
+  import { api, newRunId, type RunSummary, type VerdictView } from '../lib/api.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
   import { PIPELINE_COLUMNS as COLUMNS, runsForIssue, stageOf } from '../lib/pipeline.ts'
@@ -89,6 +89,75 @@
     await loadVerdicts(run.runId)
   }
 
+  // ── 接着沟通（在同一任务上继续）──
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么这是"再起一条 run"，而不是"给已有 run 追加消息"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 一次 run 的产出是**不可变快照**（连消息流都按 seq 单调追加）。往里塞新
+   * 输入会让"这条 run 当时到底收到了什么"变得不可回答，审计链也就断了。
+   *
+   * 所以"接着说"= 同一任务上**新起一条 execute run**，并用 `resumeFromRunId`
+   * 指向上一次：
+   *
+   *   - **工作目录**按任务分配（D27），所以两条 run 落在同一个目录里——
+   *     agent 上次留下的文件还在；
+   *   - **会话**由 daemon 去取上一次的 sessionId 并交给 CLI 恢复（FR-CLI-06），
+   *     于是它是"接着上次说"，而不是"从头再来一遍"。
+   *
+   * 恢复是**尽力而为**：CLI 可能拒绝（换了版本、会话过期），那时它会在日志里
+   * 说明"恢复被拒、本次将没有上文"，而不是假装恢复成功。
+   */
+  let followUp = ''
+  let sending = false
+  let sendError = ''
+
+  /** 这个任务上**最新的一次执行**——接着沟通就是接在它后面。 */
+  $: lastExecuteRun = issueRuns.find((r) => r.kind === 'execute') ?? null
+  $: canFollowUp =
+    lastExecuteRun !== null && ['completed', 'failed', 'cancelled'].includes(lastExecuteRun.status)
+
+  async function sendFollowUp(): Promise<void> {
+    const message = followUp.trim()
+    if (message === '' || !selected || !lastExecuteRun) return
+
+    const agent = $agents.find((a) => a.id === lastExecuteRun!.agentId)
+    if (!agent) {
+      sendError = '这条执行用的 agent 已经不在了，无法继续。请新建任务并指定一个 agent。'
+      return
+    }
+
+    sending = true
+    sendError = ''
+    try {
+      const runId = newRunId()
+      await api('/api/runs', {
+        method: 'POST',
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
+          // 不传 skills：由 daemon 按这个 agent 的配置解析（同 NewTask）
+          subject: { type: 'issue', id: selected.id },
+          prompt: message,
+          // ★ 指向上一次执行 ⇒ daemon 会取它的 sessionId 交给 CLI 恢复
+          resumeFromRunId: lastExecuteRun.runId,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      followUp = ''
+      await refresh()
+      // 立刻切到新那条 run：使用者刚说了话，想看的是它的实时输出
+      const created = $runs.find((r) => r.runId === runId)
+      if (created) await selectRun(created)
+    } catch (err) {
+      sendError = err instanceof Error ? err.message : String(err)
+    } finally {
+      sending = false
+    }
+  }
+
   async function refresh(): Promise<void> {
     await Promise.all([loadIssues(), loadRuns()])
     if (activeRun) await loadVerdicts(activeRun.runId)
@@ -166,6 +235,35 @@
            已经跑完的任务时全部历史都被跳过 —— 日志空的，agent 的最后产出看不到。
            订阅游标现在由 RunLog 自己持有，父组件没有机会传错。 -->
       <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
+
+      <!-- ══════════ 接着沟通 ══════════ -->
+      {#if canFollowUp && lastExecuteRun}
+        <section class="follow-up">
+          <h4>继续沟通</h4>
+          <p class="hint">
+            不满意这次的产出？直接说下一步要它做什么。会**接着上一次的会话**继续
+            （复用同一个工作目录 <code class="mono">{lastExecuteRun.workDir ?? '（自动分配）'}</code>，
+            并让 CLI 恢复上次的上下文）；恢复被拒时日志里会说明，不会假装接上了。
+          </p>
+          <textarea
+            bind:value={followUp}
+            rows="3"
+            placeholder="例如：把流程图的配色改成浅色系，并把结论写在文件开头"
+            disabled={sending}
+          ></textarea>
+          <div class="follow-actions">
+            <button type="button" disabled={sending || followUp.trim() === ''} onclick={sendFollowUp}>
+              {sending ? '正在派发…' : '发送并继续'}
+            </button>
+            <span class="faint small">
+              跑完仍会按这个 agent 的配置自动派审核
+            </span>
+          </div>
+          {#if sendError}
+            <div class="notice bad" style="margin-top:var(--sp-2)">{sendError}</div>
+          {/if}
+        </section>
+      {/if}
 
       <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-2)">
         <button
@@ -303,6 +401,37 @@
 {/if}
 
 <style>
+  .follow-up {
+    margin-top: var(--sp-4);
+    padding: var(--sp-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  .follow-up h4 {
+    margin: 0 0 var(--sp-2);
+  }
+
+  .follow-up textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: var(--fs-sm);
+    padding: var(--sp-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    resize: vertical;
+  }
+
+  .follow-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+  }
+
   /* ── 三列流水线 ── */
   .board-3 {
     /* 固定三列（而不是 auto-fit）：三列就是流水线的三个阶段，
