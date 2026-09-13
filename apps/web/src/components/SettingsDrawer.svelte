@@ -114,6 +114,14 @@
               name: skill.slug,
               body: skill.content ?? '',
               source: 'remote',
+              // ★ 版本必须一起带上。
+              //
+              //   这里原来没有 `version`，而 Skills 视图那条路（走
+              //   `/api/skills/install`）**带了** —— 于是从同一份远端目录下载
+              //   同一个 skill：一条路装完显示「已安装」，另一条路永远显示
+              //   「替换本地同名」（因为本地这条的 version 是 null，界面没法比）。
+              //   两条路行为不一致，而且都没有报错。
+              version: skill.version,
               sourceRef: `remote:${skill.slug}@${skill.version}`,
             },
           ],

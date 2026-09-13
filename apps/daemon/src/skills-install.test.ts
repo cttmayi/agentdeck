@@ -835,3 +835,78 @@ describe('★ 内置模板是一份"会被回填判据比对"的内容，改动�
     }
   })
 })
+
+describe('★ 两条安装路径必须过同一关', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试对应一处真实的不一致
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * "从路径 / GitHub 安装"这条路过 `resolvePayloadEntry`，于是：
+   *   - 没有 SKILL.md 的内容 ⇒ 拒绝；
+   *   - 超过限额 ⇒ 拒绝；
+   *   - 版本号落库（界面据此显示「已安装 / 更新」）。
+   *
+   * 而**批量接口**（设置抽屉里那个「安装」）直接收下条目：
+   *   - `body: ''` 会被原样写进库 —— 装进去的技能永远不会生效，
+   *     而界面显示"已安装"；
+   *   - `version` 不传，于是本地这条的 version 是 null，
+   *     同一个远端技能从这条路装完，界面**永远**显示「替换本地同名」。
+   *
+   * 两条路都是"从远端目录装同一个技能"，行为不该不同。
+   */
+  test('★ 批量接口也要拒绝没有 SKILL.md 内容的条目', async () => {
+    await withDaemon(async (url) => {
+      const res = await install(url, {
+        batchId: 'b-empty',
+        skills: [{ slug: 'empty-body', name: '空的', body: '' }],
+      })
+      assert.equal((res.body['installed'] as unknown[]).length, 0, '★ 空正文不能入库')
+      const skipped = res.body['skipped'] as Array<{ reason: string }>
+      assert.match(skipped[0]?.reason ?? '', /SKILL\.md/, '要说清缺的是 SKILL.md 的内容')
+
+      const listed = await listSkills(url)
+      assert.equal(listed.some((s) => s.slug === 'empty-body'), false)
+    })
+  })
+
+  test('★ 批量接口也要把版本号落库（否则界面永远显示"替换本地同名"）', async () => {
+    await withDaemon(async (url) => {
+      await install(url, {
+        batchId: 'b-version',
+        skills: [
+          {
+            slug: 'from-drawer',
+            name: 'from-drawer',
+            body: '# 正文',
+            source: 'remote',
+            version: '3.1.4',
+            sourceRef: 'remote:from-drawer@3.1.4',
+          },
+        ],
+      })
+      const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string; version?: string | null }>
+      }).skills.find((s) => s.slug === 'from-drawer')
+      assert.equal(
+        listed?.version,
+        '3.1.4',
+        '★ 两条下载路径落库的版本必须一样，否则同一次下载在界面上有两种说法',
+      )
+    })
+  })
+
+  test('★ 超限的条目在批量接口上同样被拒（限额只有一份）', async () => {
+    await withDaemon(async (url) => {
+      const res = await install(url, {
+        batchId: 'b-big',
+        skills: [{ slug: 'too-big', name: 'big', body: 'x'.repeat(300 * 1024) }],
+      })
+      assert.equal((res.body['installed'] as unknown[]).length, 0)
+      assert.match(
+        String((res.body['skipped'] as Array<{ reason: string }>)[0]?.reason),
+        /超过上限/,
+      )
+    })
+  })
+})

@@ -56,6 +56,7 @@ import { WorkDirLocks } from './workdir-locks.ts'
 import {
   SkillSourceError,
   describeSource,
+  resolvePayloadEntry,
   resolveSkillSource,
   type ResolvedSkillSource,
   type SkillSourceSpec,
@@ -303,6 +304,35 @@ async function installSkillPayloads(input: {
       skipped.push({ slug: '(空)', reason: 'slug 是 skill 的权威标识，不能为空', existingSource: '' })
       continue
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 在这里过一遍"这确实是一个技能"——两个接口**同一关**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 这条校验原来只在"从路径/GitHub 安装"那条路上（`resolvePayloadEntry`），
+    // 而批量接口（设置抽屉里那个「安装」）**直接收下**：一个 `body: ''` 的条目
+    // 会被原样写进库——装进去的技能永远不会生效，而界面显示"已安装"。
+    //
+    // 抽到内核里做，是因为"从哪装"不该改变"装成什么"：批量那条路同样要满足
+    // 「有 SKILL.md 的内容」「限额之内」。README 上那句"两条路都要过同一关"
+    // 在此之前**只对其中一条成立**。
+    let validated
+    try {
+      validated = resolvePayloadEntry({
+        slug,
+        body: typeof payload.body === 'string' ? payload.body : '',
+        files: payload.files ?? null,
+        sourceRef: payload.sourceRef ?? `remote:${slug}`,
+      })
+    } catch (err) {
+      skipped.push({
+        slug,
+        existingSource: '',
+        reason: err instanceof Error ? err.message : String(err),
+      })
+      continue
+    }
+
     const clash = bySlug.get(slug)
     if (clash && !overwrite) {
       skipped.push({
@@ -323,12 +353,12 @@ async function installSkillPayloads(input: {
       slug,
       name: payload.name ?? slug,
       description: payload.description ?? null,
-      body: payload.body ?? '',
+      // 用**校验过的**正文与支持文件，而不是原始入参：规范化（比如 frontmatter
+      // 里的 name 与 slug 对齐）在 `resolvePayloadEntry` 那边已经做过了
+      body: validated.body,
       // 支持文件要落库，否则"装进来了但注入时只有 SKILL.md"——
       // 那种技能是坏的，而且坏得很安静
-      ...(payload.files && Object.keys(payload.files).length > 0
-        ? { files: payload.files }
-        : {}),
+      ...(Object.keys(validated.files).length > 0 ? { files: validated.files } : {}),
       verdictSchemaVersion: 1,
       allowedActions: payload.allowedActions ?? ['comment.create'],
       // ★ 缺省是 `remote`：批量这条路本来就是"页面从远端目录下载好交过来"。
