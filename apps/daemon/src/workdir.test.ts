@@ -72,6 +72,59 @@ describe('★ 目录解析的优先级', () => {
     assert.equal(r.origin, 'requested')
   })
 
+  test('★ 审核继承被审 run 的目录 —— 而且**压过** agent 默认目录', () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条规则来自一个真实缺陷
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 审核 run 的 subject 是 `{type:'run', id}`，于是自动分配会按 run 的 id
+    // 建目录（`run-<被审的runId>`），而执行者用的是 `issue-<任务id>`——
+    // 审核者落进一间**空屋子**：产出文件一个也看不见，却照样给判决。
+    //
+    // 为什么它优先于 agent 默认目录：审核的前提是看得见被审的东西。若一个
+    // agent 配了默认目录就把它钉在那儿，那条配置会把审核变成"读一份转述"。
+    // 冲突不会静默——执行器会往 run 日志里写一句说明。
+    const r = resolveWorkDir({
+      inheritFrom: '/work/issue-A',
+      agentDefault: '/agent/dir',
+      workRoot: '/work',
+      subject: { type: 'run', id: '01M2RUN' },
+      fallbackId: 'x',
+    })
+    assert.equal(r.path, '/work/issue-A')
+    assert.equal(r.origin, 'inherited')
+    assert.match(r.explanation, /看得见/)
+  })
+
+  test('显式指定仍然压过继承（使用者说要哪个就是哪个）', () => {
+    const r = resolveWorkDir({
+      requested: '/my/repo',
+      inheritFrom: '/work/issue-A',
+      workRoot: '/work',
+      subject: { type: 'run', id: '01M2RUN' },
+      fallbackId: 'x',
+    })
+    assert.equal(r.path, '/my/repo')
+    assert.equal(r.origin, 'requested')
+  })
+
+  test('继承值是空白 / 没有可继承的 ⇒ 退回原来的优先级（不留下一个空目录名）', () => {
+    const blank = resolveWorkDir({
+      inheritFrom: '   ',
+      workRoot: '/work',
+      subject: { type: 'run', id: '01M2RUN' },
+      fallbackId: 'x',
+    })
+    assert.equal(blank.origin, 'auto')
+
+    const none = resolveWorkDir({
+      workRoot: '/work',
+      subject: { type: 'run', id: '01M2RUN' },
+      fallbackId: 'x',
+    })
+    assert.equal(none.origin, 'auto')
+  })
+
   test('★ agent 配置的默认目录仍然有效 —— 那是**显式选择**，不是兜底', () => {
     const r = resolveWorkDir({
       agentDefault: '/agent/dir',

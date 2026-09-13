@@ -141,7 +141,42 @@ const CHECKS = [
     view: '任务清单',
     key: 'tasks.firstRowStageCell',
     label: '从没跑过的那行：标签「执行中」+ 额外信息「还没开始执行」',
-    ok: (v) => /^执行中\s*还没开始执行$/.test(String(v)),
+    ok: (v) => /^执行中\s+还没开始执行/.test(String(v)),
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.heightSpread',
+    label: '★ 行高与标题长度**无关**：长标题与短标题的行一样高（差 ≤ 2px）',
+    ok: (v) => typeof v === 'number' && v <= 2,
+    show: (v) => `差 ${v}px`,
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.maxRowHeight',
+    label: '行高还有个上限（两条都是矮的，也别是"两个都很高"）',
+    ok: (v) => typeof v === 'number' && v <= 120,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.titleClipped',
+    label: '长标题确实被截断了（否则"行高无关"是空过的）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.detailTitleAfterClick',
+    label: '点一行会打开它的详情，且标题是**完整**的（列表里那份是截断的）',
+    ok: (v, facts) =>
+      typeof v === 'string' && v.length > 0 && v === facts['tasks.clickedRowTitle'],
+    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 18)}…"`),
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.titleWidth',
+    label: '标题独占一行：宽度接近整个列表栏（≥ 240px）',
+    ok: (v) => typeof v === 'number' && v >= 240,
+    show: (v) => `${v}px`,
   },
   { view: '任务清单', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
   {
@@ -384,14 +419,25 @@ try {
   // ★ 只 POST /api/issues，**不建 run**：建 run 就会去调真的 CLI
   //   （NFR-T-01 的底线）。这条路由只 `insertIssue`，不派发执行——所以
   //   它是安全的，而"不派 assignee"是第二道保险。
-  const seedTitle = '探针用的任务（别动它）'
+  // ★ 标题**故意很长**：任务清单是表格，标题是使用者输入的任意文本。
+  //   这条夹具用来量"一行能被拉多高"——原先没有上限，一个长标题就能把
+  //   整行撑成好几行，列表的节奏全乱。
+  const seedTitle =
+    '探针用的任务（别动它）：这个标题故意写得非常长，长到足以在列表里换行很多次，' +
+    '因为使用者的标题可以是任意长度的一段话，而列表的行高不该由它决定。'
+  //
+  // ★ 造**两条**：一条长标题、一条短标题。行高"与标题长度无关"这条性质，
+  //   只能靠两者对比来断言——写一个魔法阈值（"不超过 64px"）既容易被无关的
+  //   间距调整弄红，又挡不住"两个都是 100px"这种真问题。
   try {
-    const res = await fetch(`${base}/api/issues`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: seedTitle, description: '由 tools/layout-probe 造的夹具。' }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
+    for (const title of [seedTitle, '短标题']) {
+      const res = await fetch(`${base}/api/issues`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, description: '由 tools/layout-probe 造的夹具。' }),
+      })
+      if (!res.ok) log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
+    }
   } catch (err) {
     log(yellow(`⚠ 造夹具任务时出错：${err}`))
   }
@@ -447,7 +493,8 @@ try {
         failures.push({ view: c.view, label: `${c.label} —— 没量到这个值（选择器可能改了）`, got: null })
         continue
       }
-      if (!c.ok(v)) failures.push({ view: c.view, label: c.label, got: c.show ? c.show(v) : JSON.stringify(v) })
+      if (!c.ok(v, facts))
+        failures.push({ view: c.view, label: c.label, got: c.show ? c.show(v) : JSON.stringify(v) })
     }
 
     let lastView = ''

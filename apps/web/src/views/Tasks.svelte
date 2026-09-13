@@ -343,23 +343,52 @@
   info: ReturnType<typeof stageOf>,
   needsAttention: boolean,
 )}
-  <tr
+  <!--
+    ★ 为什么从"四列的表格"改成"两行的列表"
+
+      使用者的原话：「任务清单列表模式下，任务可能很长，当前显示布局会拉很高」。
+
+      先量了再说（tools/layout-probe）：一个 90 字的标题让**一行**变成 191px。
+      而量出来的列宽是 任务 157 / 阶段 61 / 指派给 62 / 更新于 88——左栏只有
+      26rem，四列加起来就把标题挤到 157px：标题一长就换行，一换行整行就高。
+
+      把标题限成两行只能降到 106px，因为**别的列也在换行**（61px 的阶段格里
+      要放下"待审查"+"还没开始执行"两个东西）。四列在这点宽度里放不下这些
+      信息——这是算出来的，不是感觉。
+
+      所以改成两行：标题独占一行（宽度从 157px 变成整个栏宽，两行封顶），
+      阶段/指派给/更新于 收进第二行的元信息里。行高不再由标题长度决定，
+      而**信息一个没少**。与「智能体」那一栏的列表也是同一个形状。
+  -->
+  <button
+    type="button"
+    class="task-row"
+    class:attention={needsAttention}
+    class:active={$selectedIssueId === issue.id}
     onclick={() => selectedIssueId.set(issue.id)}
-    style="cursor:pointer"
-    class:attention-row={needsAttention}
   >
-    <td><strong>{issue.title}</strong></td>
-    <td>
+    <!--
+      ★ 标题**单行 + 省略号**，不是"最多两行"。
+
+        先量了才定的（tools/layout-probe 里有一条"长短标题的行高差"）：
+        两行截断能把 191px 压到 80px，但**短标题那行仍然是 61px**——
+        也就是说行高还在跟着标题长度变（差 19px）。列表的节奏要的是**每行一样高**，
+        所以这里单行截断：短标题、长标题占的都是那一行。
+
+        完整标题在 `title`（悬停可见）和右栏详情里；列表是用来扫的。
+    -->
+    <span class="task-title" title={issue.title}>{issue.title}</span>
+    <span class="task-meta">
       <span class="stage-tag {info.stage}">{STAGE_SHORT[info.stage]}</span>
       <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
            「等待审核」是重复，使用者点名要去掉的就是它。 -->
       {#if info.note}
         <span class="faint small">{info.note}</span>
       {/if}
-    </td>
-    <td class="muted">{agentName(issue.assignee?.id ?? null)}</td>
-    <td class="faint small">{new Date(issue.updatedAt).toLocaleString()}</td>
-  </tr>
+      <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+      <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
+    </span>
+  </button>
 {/snippet}
 
 <div
@@ -439,43 +468,22 @@
     </div>
 
   {:else}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>任务</th>
-            <!-- ★ 阶段列：这一列原来**只有看板有**，于是列表里看不出
-                 "它是卡在 agent 手上、还是审完了"。而 `stageOf` 早就算好了，
-                 只是在列表里没用。
-                 （原来还有一列「状态」，去掉了：那是 issue 上一个人工维护的
-                  字段，而界面上没有入口能改它、判决也改不到它 —— 实测你库里
-                   6 个任务全是「待做」，一个都没变过。放一列恒定的信息在旁边，
-                   只会和"算出来的阶段"混起来。见提交说明。） -->
-            <th>阶段</th><th>指派给</th><th>更新于</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if byAttention.attention.length > 0}
-            <tr class="attention-head">
-              <td colspan="4">
-                需要注意（{byAttention.attention.length}）
-                <span class="faint small">
-                  —— 执行失败/被取消（不会有审核结果），或者根本没派审核
-                </span>
-              </td>
-            </tr>
-            {#each byAttention.attention as { issue, info } (issue.id)}
-              {@render row(issue, info, true)}
-            {/each}
-            <tr class="attention-head">
-              <td colspan="4">其余任务（{byAttention.rest.length}）</td>
-            </tr>
-          {/if}
-          {#each byAttention.rest as { issue, info } (issue.id)}
-            {@render row(issue, info, false)}
-          {/each}
-        </tbody>
-      </table>
+    <div class="task-list">
+      {#if byAttention.attention.length > 0}
+        <div class="list-head">
+          需要注意（{byAttention.attention.length}）
+          <span class="faint small">
+            —— 执行失败/被取消（不会有审核结果），或者根本没派审核
+          </span>
+        </div>
+        {#each byAttention.attention as { issue, info } (issue.id)}
+          {@render row(issue, info, true)}
+        {/each}
+        <div class="list-head">其余任务（{byAttention.rest.length}）</div>
+      {/if}
+      {#each byAttention.rest as { issue, info } (issue.id)}
+        {@render row(issue, info, false)}
+      {/each}
     </div>
   {/if}
     </div>
@@ -743,16 +751,69 @@
 </div>
 
 <style>
+  /* ══════════════ 列表：两行的行（标题 + 元信息）══════════════ */
+
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   /* 「需要注意」那一拨：左边一条醒目色条，不靠颜色变字体 */
-  .attention-head td {
-    padding-top: var(--sp-3);
+  .list-head {
+    padding: var(--sp-3) 0 var(--sp-1);
     font-size: var(--fs-sm);
     color: var(--text-dim);
     border-bottom: 1px solid var(--line);
   }
 
-  .attention-row td:first-child {
+  .task-row {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    text-align: left;
+    padding: var(--sp-2) var(--sp-3);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .task-row:hover {
+    background: var(--surface-2);
+  }
+
+  .task-row.active {
+    background: var(--surface-2);
+    border-color: var(--accent);
+  }
+
+  .task-row.attention {
     border-left: 2px solid var(--warn);
+  }
+
+  .task-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+    /* 元信息这一行就算换行也只占一行的高度：里面的东西都是短词 */
+    min-height: 1.2em;
+  }
+
+  /*
+    单行 + 省略号：行高因此与标题长度**无关**（每行一样高）。
+    `display:block` 是必需的——行内元素上 `text-overflow` 不生效。
+  */
+  .task-title {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 600;
   }
 
   .stage-tag {

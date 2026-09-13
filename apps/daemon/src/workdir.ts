@@ -68,6 +68,20 @@ export function sanitizeIdPart(id: string): string {
 export interface ResolveWorkDirInput {
   /** 请求里显式给的目录（优先级最高）。 */
   requested?: string | null
+  /**
+   * **审核 run 继承的目录**：被审那条 run 实际用的工作目录。
+   *
+   * ★ 为什么它排在"agent 默认目录"**前面**
+   *
+   *   审核的前提是**能看到被审的东西**。执行者把产出写在自己的工作目录里，
+   *   审核者若落在另一个目录，它拿到手的就只有报告正文那一段文字——
+   *   产出文件、中间结果、它自己那次执行的痕迹，一概看不见。
+   *   那就不叫"审核"，叫"读一份转述"。
+   *
+   *   所以当两者冲突时，**继承赢**，而冲突本身要在日志里说出来（静默地
+   *   忽略掉操作者配的目录是不可接受的）。
+   */
+  inheritFrom?: string | null
   /** 该 agent 配置的默认目录（操作者的显式选择）。 */
   agentDefault?: string | null
   /** 自动分配时的根目录。 */
@@ -81,7 +95,7 @@ export interface ResolveWorkDirInput {
 export interface ResolvedWorkDir {
   path: string
   /** 这个路径是怎么来的——要显示给人看，也要写进审计。 */
-  origin: 'requested' | 'agent-default' | 'auto'
+  origin: 'requested' | 'inherited' | 'agent-default' | 'auto'
   /** 一句可直接展示的说明。 */
   explanation: string
 }
@@ -91,8 +105,14 @@ export interface ResolvedWorkDir {
  *
  * 优先级：
  *   1. 请求里显式给的（使用者就是要用这个目录）
- *   2. 该 agent 配置的默认目录（操作者明确表达过"这个 agent 总在这里干活"）
- *   3. **自动分配**：`<workRoot>/<subjectType>-<subjectId>`（默认路径）
+ *   2. **审核继承被审 run 的目录**（`inheritFrom`）——审核必须看得见产出
+ *   3. 该 agent 配置的默认目录（操作者明确表达过"这个 agent 总在这里干活"）
+ *   4. **自动分配**：`<workRoot>/<subjectType>-<subjectId>`（默认路径）
+ *
+ * ★ 第 2 条是补上来的一个**真实缺陷**：审核 run 的 subject 是
+ *   `{type:'run', id}`，于是自动分配会按 run 的 id 建一个目录
+ *   （`run-<被审的runId>`），而执行者用的是 `issue-<任务id>`——两个目录。
+ *   结果审核者在**一间空屋子**里审一份转述，产出文件一个也看不到。
  *
  * 注意第 2 条仍然保留而不是被砍掉：它是一种**显式配置**，不是"没填时的兜底"。
  * 一个被钉在某个仓库上的 agent（比如"只在这个项目里干活的 agent"）正是
@@ -106,6 +126,15 @@ export function resolveWorkDir(input: ResolveWorkDirInput): ResolvedWorkDir {
       path: requested,
       origin: 'requested',
       explanation: '使用显式指定的工作目录',
+    }
+  }
+
+  const inherited = input.inheritFrom?.trim()
+  if (inherited) {
+    return {
+      path: inherited,
+      origin: 'inherited',
+      explanation: '继承被审 run 的工作目录（审核必须看得见执行留下的文件）',
     }
   }
 

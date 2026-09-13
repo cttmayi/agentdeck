@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AsyncQueue,
@@ -28,6 +28,9 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *   - **INV-14**：链路深度有上限，不会无限派生。
  */
 
+/** 执行者在工作目录里留下的产出文件名（审核者要能看见它）。 */
+const EXECUTOR_ARTIFACT = '产出.txt'
+
 class TwoPhaseBackend implements AgentBackend {
   readonly key = 'claude'
   readonly protocol = 'stream-json' as const
@@ -35,6 +38,15 @@ class TwoPhaseBackend implements AgentBackend {
 
   /** 记录每次调用的角色，用于断言"确实发生了两个阶段"。 */
   readonly phases: string[] = []
+
+  /**
+   * ★ 审核那一刻，它**在自己拿到的工作目录里**能不能看见执行者留下的产出。
+   *
+   * 这正是"执行与审核必须在同一个工作目录"这条要求的实质：过程隔离，
+   * 但审核必须看得见产出。断言"两个 run 的 workDir 字符串相等"是在测实现，
+   * 而这条是在测**使用者真正关心的事**——审核者眼里有没有东西可审。
+   */
+  sawExecutorArtifact: boolean | null = null
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
@@ -47,6 +59,16 @@ class TwoPhaseBackend implements AgentBackend {
 
     // 从受管上下文里读关联 issue —— 模型也是这么做的
     const relatedIssue = /- 关联 issue：`([^`]+)`/.exec(context)?.[1] ?? 'missing'
+
+    if (isReview) {
+      this.sawExecutorArtifact = await readFile(join(opts.workDir, EXECUTOR_ARTIFACT), 'utf8').then(
+        () => true,
+        () => false,
+      )
+    } else {
+      // 执行者把产出写在自己的工作目录里（真实场景就是 agent 写下的那些文件）
+      await writeFile(join(opts.workDir, EXECUTOR_ARTIFACT), '执行者写下的产出\n', 'utf8')
+    }
 
     const text = isReview
       ? [
@@ -206,6 +228,25 @@ describe('S1：执行完成后自动接审核', () => {
     assert.notEqual(executeRun, undefined)
     assert.notEqual(reviewRun, undefined)
     assert.notEqual(reviewRun!.agentId, executeRun!.agentId, '绝不能自审')
+  })
+
+  test('★ 审核者必须能看见执行者留下的产出（过程隔离，但同一间屋子）', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条测试是为一个**真实缺陷**写的
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 审核 run 的 subject 是 `{type:'run', id: 被审的runId}`，而工作目录是按
+    // subject 自动分配的——于是审核者拿到 `run-<被审的runId>`，执行者用的是
+    // `issue-<任务id>`。**两个目录**。
+    //
+    // 后果不是报错，而是审核变得没有依据：审核者手里只有报告正文那一段转述，
+    // 产出文件、中间结果一个都看不到，却照样会给出一个看起来很像样的判决。
+    // 这类"静默地少了依据"的错，只有断言"它到底看见了什么"才抓得住。
+    assert.equal(
+      backend.sawExecutorArtifact,
+      true,
+      '★ 审核 run 必须在被审那条 run 的工作目录里跑，否则它看不见产出文件',
+    )
   })
 
   test('★ 执行者没指定审核者时不自动审 —— 那是明确的选择，不是错误', async () => {

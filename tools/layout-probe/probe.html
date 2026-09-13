@@ -174,17 +174,43 @@
         await until(() => d().querySelector('.view-head, .pane-head'))
         // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
         // 下面那条"重复字样"的检查会**空过**——所以这里必须如实报出来。
-        const gotRows = await until(() => d().querySelectorAll('.list-pane table tbody tr').length > 0)
+        const gotRows = await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
         facts['tasks.gotRows'] = gotRows
         if (!gotRows) errors.push('任务清单里一行都没等到（夹具任务没造上或列表没渲染）')
 
-        const rows = [...d().querySelectorAll('.list-pane table tbody tr')]
+        const rows = [...d().querySelectorAll('.list-pane .task-row')]
         facts['tasks.rowCount'] = rows.length
         // 从没跑过的任务：标签「执行中」+ 额外信息「还没开始执行」。
-        // 这一格同时钉住了"标签之外的信息该不该显示"这条规则。
-        facts['tasks.firstRowStageCell'] = need('第一行阶段格', () => {
-          const cell = rows[0]?.querySelectorAll('td')[1]
-          return cell ? text(cell) : null
+        // 这一行同时钉住了"标签之外的信息该不该显示"这条规则。
+        facts['tasks.firstRowStageCell'] = need('第一行元信息', () =>
+          text(rows[0]?.querySelector('.task-meta')),
+        )
+        // ── 行高：长标题不许把一行撑高 ──
+        facts['tasks.rowHeights'] = need('各行高度', () =>
+          rows.map((r) => Math.round(r.getBoundingClientRect().height)),
+        )
+        facts['tasks.maxRowHeight'] = need('最高的一行', () =>
+          Math.max(...rows.map((r) => Math.round(r.getBoundingClientRect().height))),
+        )
+        // ★ 行高与标题长度无关：拿"长标题那行"和"短标题那行"对比。
+        facts['tasks.heightSpread'] = need('长短标题的行高差', () => {
+          const heights = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+          return heights.length >= 2 ? Math.max(...heights) - Math.min(...heights) : 'ROWS-TOO-FEW'
+        })
+        // 被裁掉了吗（scrollHeight > clientHeight 说明内容被截断了，而不是被挤宽）
+        facts['tasks.titleClipped'] = need('长标题是否被截断显示', () => {
+          const longRow = rows.find((r) =>
+            (r.querySelector('.task-title')?.textContent ?? '').startsWith('探针用的任务'),
+          )
+          const t = longRow?.querySelector('.task-title')
+          if (!t) return 'NO-LONG-TITLE-ROW'
+          // 单行省略：内容比可见宽度长，就是被截断了
+          return t.scrollWidth > t.clientWidth + 1
+        })
+        // 标题那一格的实际宽度（它现在独占一行，应当接近整栏宽）
+        facts['tasks.titleWidth'] = need('标题宽度', () => {
+          const t = rows[0]?.querySelector('.task-title')
+          return t ? Math.round(t.getBoundingClientRect().width) : null
         })
         facts['tasks.layoutPresent'] = need('任务页主从布局', () =>
           !!d().querySelector('.split-layout .list-pane') &&
@@ -195,6 +221,18 @@
         // 任何视图里重新长出这句话，这里就会红。
         facts['tasks.duplicateStageTextCount'] = need('「等待审核」出现次数', () =>
           (d().documentElement.innerHTML.match(/等待审核/g) ?? []).length,
+        )
+
+        // ── 点一行 → 右栏显示**完整**的标题 ──
+        // 列表把标题截断了，所以"完整标题还能不能看到"必须另有地方证明：
+        // 详情栏就是那个地方。顺带守住"改写列表标记之后点选还通不通"。
+        facts['tasks.clickedRowTitle'] = need('被点那一行的标题', () =>
+          text(rows[0]?.querySelector('.task-title')),
+        )
+        click(rows[0])
+        await until(() => d().querySelector('.detail-pane .detail-head h2'))
+        facts['tasks.detailTitleAfterClick'] = need('点之后右栏的标题', () =>
+          text(d().querySelector('.detail-pane .detail-head h2')),
         )
 
         // ══════════════ Skills：安装面板在抽屉里 ══════════════

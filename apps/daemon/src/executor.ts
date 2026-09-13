@@ -208,6 +208,13 @@ export class RunExecutor {
     //   "所有任务挤在同一个目录里"，而且没有任何报错。
     const resolved = resolveWorkDir({
       requested: req.workDir ?? null,
+      // ★ 审核 run 用**被审那条 run 的**工作目录（见 workdir.ts 里的说明）。
+      //
+      //   解析放在这里、而不是在"自动串接审核"那个调用点补一个 workDir：
+      //   提交 review 的路径不止一条（自动串接、报告摄取、判决不合规的重试），
+      //   任意一处忘了就会让审核者落进一间空屋子——而那种错**不会报任何错**，
+      //   只会让审核结论变得没有依据。
+      inheritFrom: await this.#inheritWorkDir(req),
       agentDefault: req.agentDefaultWorkDir ?? null,
       workRoot: this.#deps.workRoot,
       subject: req.subject,
@@ -263,6 +270,19 @@ export class RunExecutor {
       workDir: resolved.path,
       startedAt: now,
     })
+
+    // ★ 继承与"agent 默认目录"冲突时，**明说**。
+    //
+    //   静默忽略操作者配过的目录是不可接受的：他会以为自己那个设置生效了，
+    //   而实际上审核跑在别的目录里。所以冲突进日志（也就是进界面）。
+    const agentDefaultDir = req.agentDefaultWorkDir?.trim()
+    if (resolved.origin === 'inherited' && agentDefaultDir && agentDefaultDir !== resolved.path) {
+      await this.#note(
+        req.runId,
+        `该 agent 配了默认工作目录 ${agentDefaultDir}，但审核必须在**被审那条 run 的**` +
+          `目录里进行（否则看不到它留下的产出），所以本次用的是 ${resolved.path}`,
+      )
+    }
 
     // ★ 留住这次执行的生命周期，让 `shutdown()` 有东西可等。
     const task = this.#run(req, run)
@@ -392,6 +412,32 @@ export class RunExecutor {
       },
     })
     if (event?.t === 'message') await this.#deps.store.appendRunMessage(runId, event.message)
+  }
+
+  /**
+   * 审核 run 要继承哪个目录（没有可继承的就返回 null）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么是"继承"而不是"按 subject 重新算一个"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 按 subject 重新算会得到一个**不同的**目录：审核 run 的 subject 是
+   * `{type:'run', id: 被审的runId}`（D28 那条链就是这么接的），于是自动
+   * 分配给出 `run-<被审的runId>`，而执行者用的是 `issue-<任务id>`。
+   *
+   * 而执行者的工作目录**不一定**等于按 subject 算出来的那个：需求里给了
+   * 显式目录、或者 agent 配了默认目录时，它会是别的路径。所以只有"读那条
+   * run 上真实记着的 workDir"才是对的——重算等于在猜。
+   *
+   * report 类型的 subject **不继承**：那条路径的产出是第三方送来的报告
+   * （`Report` 里除 `meta` 外没有指回我们任何 run/id 的字段），没有"同一间
+   * 屋子"可言，给它一个自己的目录反而干净。
+   */
+  async #inheritWorkDir(req: SubmitRunRequest): Promise<string | null> {
+    if (req.kind !== 'review') return null
+    if (req.subject?.type !== 'run') return null
+    const reviewed = await this.#deps.store.getRun(req.subject.id as RunId)
+    return reviewed?.workDir ?? null
   }
 
   async #defaultWorkspaceId(): Promise<Run['workspaceId']> {
