@@ -35,6 +35,15 @@
   let sourceInput = ''
   let slugInput = ''
   let actions: string[] = [...DEFAULT_ACTIONS]
+  /**
+   * 允许替换同名 skill。
+   *
+   * ★ 这个勾选框不是可选项，是**必要的逃生口**：daemon 对同名一律拒绝写入
+   *   （避免"下载顺手覆盖了你自己的东西"），而它要求"确实要替换请显式传
+   *   overwrite: true"。界面若不提供这个开关，同名冲突在浏览器里就是一条**死路**——
+   *   使用者看到的是一句"请显式传 overwrite: true"，而他根本没有地方传。
+   */
+  let overwrite = false
   let busy = false
   let errorMessage = ''
   let errorHint = ''
@@ -95,6 +104,7 @@
         value,
         ...(slugInput.trim() ? { slug: slugInput.trim() } : {}),
         allowedActions: actions,
+        ...(overwrite ? { overwrite: true } : {}),
       }),
     )
   }
@@ -112,6 +122,7 @@
         body: entry.content ?? '',
         sourceRef: `remote:${entry.slug}@${entry.version}`,
         allowedActions: actions,
+        ...(overwrite ? { overwrite: true } : {}),
       }),
     )
   }
@@ -258,6 +269,17 @@
         会改状态的技能，请在这里显式勾上。
       </p>
     </fieldset>
+
+    <div class="field">
+      <label class="action-chip">
+        <input type="checkbox" bind:checked={overwrite} />
+        允许替换同名的 skill（会**覆盖**已有那个的内容）
+      </label>
+      <p class="faint small">
+        默认不勾：同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"。
+        确实要用新版本顶掉旧的（比如替换内置的 <code>general-review</code>）才勾上。
+      </p>
+    </div>
 
     {#if tab === 'path'}
       <button type="button" disabled={busy} onclick={submitPath}>
