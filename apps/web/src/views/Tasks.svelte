@@ -15,6 +15,7 @@
   import {
     PIPELINE_COLUMNS as COLUMNS,
     STAGE_SHORT,
+    formatRunStamp,
     runsForIssue,
     splitByAttention,
     stageOf,
@@ -201,8 +202,14 @@
   //
   // 这个 bug 是"量尺寸"量出来的：打桩渲染后测到结果区高度只有 73px、
   // 文件列表 0 项 —— 肉眼扫一眼截图很可能看不出来（骨架屏也是灰条）。
+  // ★ `issueRuns` 现在是**时间线（最早的在前）**，所以"最新的那一条"是最后一个。
+  //   原来取 `[0]` 是对的（那时数组是倒序），顺序改成升序之后必须跟着改——
+  //   否则点开任务会默认停在**最早**那次执行上。
+  const newestRun = (list: RunSummary[]): RunSummary | null => list[list.length - 1] ?? null
+
   $: if (issueRuns.length > 0 && (!activeRun || !issueRuns.some((r) => r.runId === activeRun!.runId))) {
-    void selectRun(issueRuns[0]!)
+    const target = newestRun(issueRuns)
+    if (target) void selectRun(target)
   }
 
   async function loadVerdicts(runId: string): Promise<void> {
@@ -276,8 +283,13 @@
   let sending = false
   let sendError = ''
 
-  /** 这个任务上**最新的一次执行**——接着沟通就是接在它后面。 */
-  $: lastExecuteRun = issueRuns.find((r) => r.kind === 'execute') ?? null
+  /**
+   * 这个任务上**最新的一次执行**——接着沟通就是接在它后面。
+   *
+   * ⚠️ 时间线是升序的，所以最新的在**末尾**（原来 `find` 能拿到是因为当时
+   *    数组倒序——顺序一改，`find` 就变成"最早那次"，接着沟通会接错）。
+   */
+  $: lastExecuteRun = issueRuns.filter((r) => r.kind === 'execute').at(-1) ?? null
   $: canFollowUp =
     lastExecuteRun !== null && ['completed', 'failed', 'cancelled'].includes(lastExecuteRun.status)
 
@@ -542,7 +554,12 @@
             onclick={() => selectRun(run)}
           >
             <span class="badge {run.status}">{run.status}</span>
-            <span class="mono faint small">{run.runId.slice(-8)}</span>
+            <!-- ★ 类型与时间必须显示：只给状态和 runId 的话，使用者**看不出
+                 哪个先哪个后**——他只能凭感觉，于是会觉得"顺序不对"。 -->
+            <span class="small">{run.kind === 'review' ? '审核' : '执行'}</span>
+            <span class="mono faint small" title={new Date(run.queuedAt).toLocaleString()}>
+              {formatRunStamp(run.queuedAt)}
+            </span>
           </button>
         {/each}
       </div>

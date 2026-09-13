@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 import {
   PIPELINE_COLUMNS,
   STAGE_SHORT,
+  formatRunStamp,
   runsForIssue,
   splitByAttention,
   stageOf,
@@ -219,9 +220,16 @@ describe('★ 任务名下的 run：执行 + 审它的 review（审查结论才�
     assert.deepEqual(list.map((r) => r.runId), ['e1', 'r1'])
   })
 
-  test('★ 执行在前、新的在前（默认显示最新那次执行）', () => {
-    // 从看板点进来，使用者想看的是"这次执行干出了什么"，所以默认标签页
-    // 必须是执行 run；审查结论在它旁边。
+  test('★ 时间线：按发生先后排（最早的在前），执行与审核混在一起', () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条断言改过一次——改的是"按什么排"
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来是"执行一组（新的在前）+ 审核一组（新的在前）"，于是
+    // "执行 → 审核 → 又执行 → 又审核"排成 `e2, e1, r2, r1`：
+    // **后一次审核排在第一次审核前面**，而 e1 还出现在 e2 之后。
+    // 使用者就是这么发现问题的：「任务的记录貌似不是按时间顺序排列的，
+    // 发现审查了 2 次，后面的审查在前面」。
     const list = runsForIssue(ISSUE, [
       run({ runId: 'e1', kind: 'execute', queuedAt: 1000 }),
       run({ runId: 'e2', kind: 'execute', queuedAt: 3000 }),
@@ -230,8 +238,27 @@ describe('★ 任务名下的 run：执行 + 审它的 review（审查结论才�
     ])
     assert.deepEqual(
       list.map((r) => r.runId),
-      ['e2', 'e1', 'r2', 'r1'],
+      ['e1', 'r1', 'e2', 'r2'],
+      '★ 从左往右就是发生顺序；"审了两次"的先后要一眼看得出来',
     )
+  })
+
+  test('★ 排序是稳定的：同一毫秒入队的两条也有确定次序', () => {
+    // 不稳定排序会让每次渲染顺序都可能变，看起来像"记录自己在跳"。
+    const rows = [
+      run({ runId: 'b', kind: 'execute', queuedAt: 1000 }),
+      run({ runId: 'a', kind: 'execute', queuedAt: 1000 }),
+    ]
+    const once = runsForIssue(ISSUE, rows).map((r) => r.runId)
+    const twice = runsForIssue(ISSUE, [...rows].reverse()).map((r) => r.runId)
+    assert.deepEqual(once, ['a', 'b'])
+    assert.deepEqual(twice, ['a', 'b'], '输入顺序不同也必须得到同一个结果')
+  })
+
+  test('formatRunStamp：今天只写时分秒，跨天带上月日', () => {
+    const at = new Date(2026, 4, 20, 14, 3, 9).getTime()
+    assert.equal(formatRunStamp(at, new Date(2026, 4, 20, 23, 0, 0).getTime()), '14:03:09')
+    assert.equal(formatRunStamp(at, new Date(2026, 4, 21, 1, 0, 0).getTime()), '5/20 14:03')
   })
 
   test('审**别条**执行的 review 不算这个任务的', () => {

@@ -98,9 +98,25 @@ export interface StageInfo {
  * 找不到——那个 bug 我犯过一次"），但任务详情这条路没照它做。所以把它提成
  * 一个纯函数，两条路共用同一套"归属"规则，不再各写一遍。
  *
- * 排序：**执行 run 在前（新的在前），然后它们的 review run（新的在前）**。
- * 这样默认显示的那一条就是最新的执行——使用者从看板点进来，想看的是
- * "这次执行干出了什么"。审查结论在它旁边的标签页里。
+ * 排序：**按时间先后（最早的在前）**——这一列是任务的**时间线**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 这条规则被改过一次，改的是"按什么排"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原来是"**执行 run 一组（新的在前）+ 它们的 review run 一组（新的在前）**"。
+ * 那个顺序在脑子里想得通（"先看执行、审查在旁边"），但**读出来是乱的**：
+ *
+ *   一次 执行 → 审核 → 又执行 → 又审核 的任务，标签页排成
+ *   `e2, e1, r2, r1`——**后一次审核排在第一次审核前面**，而且 e1 出现在
+ *   e2 之后。使用者的反馈是：「任务的记录貌似不是按时间顺序排列的，发现审查了
+ *   2 次，后面的审查在前面」。
+ *
+ * 现在按 `queuedAt` **升序**排：`e1, r1, e2, r2`。从左往右读就是发生顺序，
+ * "审了两次"变成一眼可见的先后关系。
+ *
+ * ⚠️ 因此**默认选中哪一条是调用方的事**：时间线的最早那条在数组开头，
+ *    而"点进去想看最新的结果"要靠取最后一条来满足（见 Tasks.svelte）。
  */
 export function runsForIssue(
   issueId: string,
@@ -114,8 +130,34 @@ export function runsForIssue(
     (r) => r.kind === 'review' && r.subject?.type === 'run' && executeIds.has(r.subject.id),
   )
 
-  const newestFirst = (a: RunSummary, b: RunSummary): number => b.queuedAt - a.queuedAt
-  return [...executes.sort(newestFirst), ...reviews.sort(newestFirst)]
+  // 同刻的两条（同一毫秒内入队是可能的）用 runId 兜底：排序必须**稳定**，
+  // 否则每次渲染顺序都可能变，看起来像"记录在跳"。
+  const byTime = (a: RunSummary, b: RunSummary): number =>
+    a.queuedAt - b.queuedAt || a.runId.localeCompare(b.runId)
+  return [...executes, ...reviews].sort(byTime)
+}
+
+/**
+ * 标签页上的时间戳。
+ *
+ * ★ 它是这次改动的一半：光把顺序排对**还不够**——原来那排标签只显示
+ *   `[状态] [runId 后 8 位]`，既没有类型也没有时间，使用者根本看不出
+ *   "哪个先哪个后"，只能凭感觉猜（于是他猜"顺序不对"）。
+ *   把时间显示出来，顺序才是**可核对**的。
+ *
+ * 今天的只写时分秒（同一任务的时间线通常就在一天内）；跨天的带上月日。
+ */
+export function formatRunStamp(queuedAt: number, now = Date.now()): string {
+  const at = new Date(queuedAt)
+  const today = new Date(now)
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate()
+  const hh = String(at.getHours()).padStart(2, '0')
+  const mm = String(at.getMinutes()).padStart(2, '0')
+  const ss = String(at.getSeconds()).padStart(2, '0')
+  return sameDay ? `${hh}:${mm}:${ss}` : `${at.getMonth() + 1}/${at.getDate()} ${hh}:${mm}`
 }
 
 export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageInfo {
