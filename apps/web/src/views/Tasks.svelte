@@ -2,6 +2,7 @@
   import {
     api,
     newRunId,
+    groupWorkDirFiles,
     type RunMessage,
     type RunSummary,
     type VerdictView,
@@ -87,6 +88,8 @@
   let finalOutputFor: string | null = null
   let listing: WorkDirListing | null = null
   let listingFor: string | null = null
+  /** 取文件列表失败的原因——必须显示出来，见 loadResult 里的说明。 */
+  let listingError = ''
   let showRawLog = false
 
   $: activeIsTerminal =
@@ -106,8 +109,14 @@
 
     try {
       listing = await api<WorkDirListing>(`/api/runs/${run.runId}/files`)
-    } catch {
+      listingError = ''
+    } catch (err) {
+      // ★ 失败必须**说出来**。第一版这里是 `catch { listing = null }`，而界面把
+      //   null 渲染成骨架屏 —— 于是"接口取不到"和"还在加载"长得一模一样，
+      //   使用者看到的就是"这一栏什么都没有"（实测撞到过一次：daemon 还是旧
+      //   代码，`/files` 返回 404，而那一栏只是安静地空着）。
       listing = null
+      listingError = err instanceof Error ? err.message : String(err)
     }
     listingFor = run.runId
   }
@@ -158,6 +167,7 @@
     finalOutputFor = null
     listing = null
     listingFor = null
+    listingError = ''
     await Promise.all([
       loadVerdicts(run.runId),
       // 跑完的才去取结果；还在跑的时候右边是实时日志，没必要多拉一次
@@ -349,14 +359,15 @@
           <aside class="result-files">
             <h4>工作目录的文件</h4>
             {#if listingFor === activeRun.runId && listing}
+              {@const grouped = groupWorkDirFiles(listing.entries)}
               <p class="faint small mono" style="word-break:break-all">
                 {listing.workDir ?? '—'}
               </p>
-              {#if listing.entries.length === 0}
+              {#if grouped.isEmpty}
                 <p class="hint">这个目录还是空的。</p>
               {:else}
                 <ul>
-                  {#each listing.entries.filter((e) => !e.managed) as entry (entry.path)}
+                  {#each grouped.outputs as entry (entry.path)}
                     <li class={entry.kind === 'dir' ? 'is-dir' : ''}>
                       {#if entry.kind === 'file'}
                         <a
@@ -370,20 +381,44 @@
                       {/if}
                     </li>
                   {/each}
-                  {#if listing.entries.some((e) => e.managed)}
-                    <!-- 平台自己写进去的东西（技能、上下文块）单独收起来：
-                         它们说明"这次是在什么标准下跑的"，不是 agent 的产出，
-                         混在一起会让人分不清哪个是它做出来的 -->
-                    <li class="managed-note faint small">
-                      另有 {listing.entries.filter((e) => e.managed).length} 项是平台注入的
-                      （<code>.claude/</code>、<code>CLAUDE.md</code>），不在这里列出
-                    </li>
-                  {/if}
-                  {#if listing.truncated}
-                    <li class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</li>
-                  {/if}
                 </ul>
+                {#if grouped.injected.length > 0}
+                  <!-- 平台写进去的东西（技能、上下文文件）也**列出来**，只是排在
+                       后面并标一下。藏起来是不对的：使用者要能看见它们、
+                       点开看，那正是他要求保留它们的原因。 -->
+                  <h4 style="margin-top:var(--sp-3)">平台注入（{grouped.injected.length}）</h4>
+                  <p class="faint small">
+                    这次任务在什么标准、什么上下文下跑的——不是 agent 的产出。
+                  </p>
+                  <ul>
+                    {#each grouped.injected as entry (entry.path)}
+                      <li class={entry.kind === 'dir' ? 'is-dir' : ''}>
+                        {#if entry.kind === 'file'}
+                          <a
+                            href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >{entry.path}</a>
+                          <span class="faint small">{humanSize(entry.sizeBytes)}</span>
+                        {:else}
+                          <span class="mono">{entry.path}/</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#if listing.truncated}
+                  <p class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</p>
+                {/if}
               {/if}
+            {:else if listingError}
+              <div class="notice bad">
+                取不到工作目录的文件
+                <p class="faint small" style="margin:var(--sp-2) 0 0">{listingError}</p>
+                <p class="faint small" style="margin:var(--sp-2) 0 0">
+                  （如果 daemon 刚更新过，重启它再试——新接口要重启才生效）
+                </p>
+              </div>
             {:else}
               <div class="skeleton" style="width:70%"></div>
             {/if}
@@ -680,13 +715,6 @@
   }
 
   .result-files li.is-dir { color: var(--text-faint); }
-
-  .result-files .managed-note {
-    font-family: inherit;
-    margin-top: var(--sp-2);
-    border-top: 1px solid var(--line);
-    padding-top: var(--sp-2);
-  }
 
   .follow-up {
     margin-top: var(--sp-4);

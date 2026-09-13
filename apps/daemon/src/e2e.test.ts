@@ -340,10 +340,22 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
     assert.match(backend.seenContext!, /写一份关于依赖漏洞的报告/, '受管块里应含任务内容')
   })
 
-  test('★ 执行结束后上下文块被清理，工作目录恢复原状', async () => {
+  test('★ 我们自己造的上下文文件**保留**；使用者自己的那份逐字节还原', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条期望被改过一次，改的是"哪一份该留"
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来断言"跑完这个文件被删掉"（这个目录本来没有 CLAUDE.md）。
+    // 使用者的要求是**保留**：任务的工作目录是产物之一，他要能进去看
+    // "这次任务被交代了什么"；接着沟通时上下文也还在。
+    //
+    // 而"不改写别人的文件"这条底线没有变：**使用者自己写的** CLAUDE.md
+    // 仍然逐字节还原 —— 判据是 `removeContextBlock` 的结构检查
+    //（"通篇只有我们的块" = 我们造的），不依赖任何记忆。
+    // 那条保证在同文件另一条用例里钉着（"已有 CLAUDE.md ⇒ 逐字节复原"）。
     const after = await readFile(join(workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-    // 这个目录原本没有 CLAUDE.md ⇒ 清理后应当被删除，而不是留一个空文件或残留块
-    assert.equal(after, null, '本来不存在的文件应当被删掉，而不是留下空文件')
+    assert.notEqual(after, null, '★ 我们自己造的上下文文件要留着')
+    assert.equal(hasContextBlock(after!), true, '留着的那份里应当有受管块（说明这次任务被交代了什么）')
   })
 
   test('prompt 与工作目录被正确透传', () => {
@@ -475,9 +487,11 @@ describe('端到端：失败路径', () => {
       assert.equal(run.status, 'failed')
       assert.notEqual(run.failureReason, null, '失败必须带机器可读的原因码')
 
-      // 上下文块同样要被清理——失败路径也不能留下痕迹
+      // 失败路径与成功路径**同一条规矩**：我们自己造的那份保留
+      //（使用者的原文件仍然逐字节还原，见"不破坏使用者已有的文件"那组用例）
       const leftover = await readFile(join(failDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-      assert.equal(leftover, null, '失败后也不得留下残留块')
+      assert.notEqual(leftover, null, '失败也不删我们自己造的上下文文件')
+      assert.equal(hasContextBlock(leftover!), true)
     } finally {
       await d.close()
       await cleanup(failDir)

@@ -291,18 +291,13 @@ describe('S1：执行完成后自动接审核', () => {
     const { readFile, readdir } = await import('node:fs/promises')
     const entries = await readdir(workDir).catch(() => [] as string[])
 
-    // 上下文块：文件要么不存在，要么不含我们的受管块
+    // 上下文文件：**我们自己造的**那份留着（使用者的原文件另有一套用例保证逐字节还原）
     const claudeMd = await readFile(join(workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-    if (claudeMd !== null) {
-      assert.equal(
-        /alpha-helper/i.test(claudeMd),
-        false,
-        '★ CLAUDE.md 里不能残留我们的受管块——那是使用者的文件',
-      )
-    }
+    assert.notEqual(claudeMd, null, '★ 我们自己造的上下文文件要留在工作目录里')
 
     // 技能：应当还在，并且有归属清单
     assert.ok(entries.includes('.claude'), '技能现在保留在工作目录里')
+    assert.ok(entries.includes('CLAUDE.md'), '上下文文件也保留')
     const skillsDir = join(workDir, '.claude', 'skills')
     const manifest = await readFile(join(skillsDir, '.alpha-helper-managed.json'), 'utf8')
     const parsed = JSON.parse(manifest) as { slugs: string[] }

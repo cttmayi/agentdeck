@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import {
@@ -576,7 +576,12 @@ export class RunExecutor {
               skills: skillsBrief,
             })
 
-      restoreContext = await this.#injectContext(contextFile, body)
+      restoreContext = await this.#injectContext(
+        contextFile,
+        body,
+        runId,
+        runtime.descriptor.contextFile,
+      )
 
       await store.transitionRun(runId, 'dispatched', 'running', { startedAt: this.#now() })
       registry.emit(runId, { t: 'status', status: 'running', at: this.#now() })
@@ -907,7 +912,13 @@ export class RunExecutor {
    *
    * @param body 受管块的**内容**（渲染由调用方完成）
    */
-  async #injectContext(contextFile: string, body: string): Promise<() => Promise<void>> {
+  async #injectContext(
+    contextFile: string,
+    body: string,
+    runId: RunId,
+    /** 只为了在日志里说清"保留的是哪个文件名"。 */
+    contextFileName: string,
+  ): Promise<() => Promise<void>> {
     let original: string | null
     try {
       original = await readFile(contextFile, 'utf8')
@@ -924,9 +935,31 @@ export class RunExecutor {
       const current = await readFile(contextFile, 'utf8').catch(() => null)
       if (current === null) return
       const removed = removeContextBlock(current)
+
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 这份文件是**我们自己造的** ⇒ 留着；是**使用者的** ⇒ 逐字节还原
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // `deleteFile` 就是"通篇只有我们的块"这个判断（结构判据，不依赖任何记忆
+      // ——见 context-block.ts）。两种情形分开处置：
+      //
+      //   ① 我们造的那份（原本不存在）：**不再删掉**。任务的工作目录是这个任务的
+      //      产物之一，使用者会进去看"它是在什么上下文下跑的"；而且接着沟通时
+      //      它还在，上下文是连续的。原来的做法是跑完就删，于是那个目录里
+      //      什么都不剩，看不出这次任务被交代了什么；
+      //   ② **使用者的文件**（他自己的 CLAUDE.md，或他把任务指向了自己的仓库）：
+      //      仍然逐字节还原，把他原有的内容一字不差地还回去。**不改写别人的文件**
+      //      这条底线没有变，变的只是"我们自己那份不再抹掉"。
       if (removed.deleteFile) {
-        await rm(contextFile, { force: true })
-      } else if (removed.content !== current) {
+        // 保留这件事要说一声：否则使用者会以为跑完目录是干净的
+        await this.#note(
+          runId,
+          `上下文文件保留在工作目录里（${contextFileName}）——` +
+            `它是这次任务被交代的上下文，跑完不删，方便回看与接着沟通。`,
+        )
+        return
+      }
+      if (removed.content !== current) {
         await writeFile(contextFile, removed.content, 'utf8')
       }
     }
