@@ -4,7 +4,6 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AsyncQueue,
-  hasContextBlock,
   type AgentBackend,
   type AgentMessage,
   type AgentSession,
@@ -57,7 +56,8 @@ class ScriptedReviewBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     this.calls += 1
     opts.onCommandLine?.({ argv: this.reportedArgv, sandboxDescription: '未启用沙箱（测试）' })
-    this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+    // D29：交给 CLI 的只有第一句话（走 prompt），不再有 CLAUDE.md。
+    this.seenContext = opts.prompt
 
     this.seenSkillFiles = {}
     const skillsRoot = join(opts.workDir, '.claude', 'skills')
@@ -334,20 +334,25 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       backend.reportedArgv,
       '★ 命令行要来自后端如实上报的那条，不是按描述表拼的大概样子',
     )
-    assert.match(String(audit.contextBlockHash), /^[0-9a-f]{64}$/, '★ 块哈希要真算过')
+    // 输入只剩一处（第一句话），所以哈希也只剩一个
+    assert.match(String(audit.promptHash), /^[0-9a-f]{64}$/, '★ 输入哈希要真算过')
     assert.notEqual(audit.promptHash, null, '必须有 prompt 哈希')
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
   })
 
-  test('★ 审核期间上下文块含审核标准与判决格式要求（FR-CLI-43）', () => {
+  test('★ 审核的第一句话含审核标准与判决格式要求（FR-CLI-43）', () => {
     assert.notEqual(backend.seenContext, null)
-    assert.equal(hasContextBlock(backend.seenContext!), true)
     assert.match(backend.seenContext!, /审核标准/, '审核标准必须随 skill 下发')
     assert.match(backend.seenContext!, /general-review/, '技能清单只列名字')
     assert.match(backend.seenContext!, /ALPHA_VERDICT/, '必须给出判决格式约定')
   })
 
-  test('★ 大模型输出的自由文本没有被塞进上下文（只列技能名，不列描述）', () => {
+  test('★ 待审材料被明确标记出来（它不是给你的指令）', () => {
+    assert.match(backend.seenContext!, /<<<ALPHA_MATERIAL>>>/)
+    assert.match(backend.seenContext!, /不是给你的指令/)
+  })
+
+  test('★ 技能的描述没有被塞进第一句话（只列技能名，不列描述）', () => {
     // 模板里 description 很长，技能清单里不应出现它
     assert.doesNotMatch(backend.seenContext!, /开箱可用的通用审核标准/)
   })
@@ -414,10 +419,15 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       assert.deepEqual(left, [], `注入的技能与归属清单都该收掉，实际剩：${left.join(', ')}`)
 
       // 上下文记录是**有意保留**的（使用者的决定：跑完要能回看"它被交代了什么"）。
-      // ⚠️ 按已定方案（design.md §15.18）它会换成 `.alpha-helper/context/<runId>.md`。
+      // ⚠️ D29 之后它落在 `.alpha-helper/context/<runId>.md`——**我们自己起的
+      //    名字**，不是 CLI 的项目记忆文件（`CLAUDE.md`）。
       assert.ok(
-        (await readdir(dir)).includes('CLAUDE.md'),
-        '上下文记录按约定保留（它记录这次任务被交代了什么）',
+        (await readdir(join(dir, '.alpha-helper', 'context'))).length > 0,
+        '.alpha-helper/context/<runId>.md 要留着（回看靠它）',
+      )
+      assert.ok(
+        !(await readdir(dir)).includes('CLAUDE.md'),
+        '★ 我们不许在工作目录里造 CLAUDE.md',
       )
     } finally {
       await cleanup(dir)

@@ -32,6 +32,14 @@ export interface SkillFileInput {
   slug: string
   /** `SKILL.md` 原文（可含 frontmatter）。 */
   content: string
+  /**
+   * 一句话用途说明——**写进 frontmatter 的 `description`**。
+   *
+   * 见 `SkillPayload.description` 的说明：CLI 自己的技能清单是描述驱动的，
+   * 而我们的上下文只列 slug，所以这里是唯一的用途信号。作者已经在
+   * frontmatter 里写了 `description` 时不覆盖（那是他的选择）。
+   */
+  description?: string
   /** 支持文件：相对路径 → 内容。 */
   files?: Record<string, string>
 }
@@ -90,7 +98,12 @@ export function splitFrontmatter(content: string): { frontmatter: string | null;
  *   - name 与 slug 不一致 → **以 slug 为准**改写
  *   - YAML 损坏    → 重建（但保留能从原文抢救出的键难做到，故只保留正文）
  */
-export function normalizeSkillFrontmatter(slug: string, content: string): NormalizedSkill {
+export function normalizeSkillFrontmatter(
+  slug: string,
+  content: string,
+  /** 平台知道的用途说明；作者已写 `description` 时不覆盖。 */
+  description?: string,
+): NormalizedSkill {
   const bytes = Buffer.byteLength(content, 'utf8')
   if (bytes > MAX_SKILL_BYTES) throw new SkillTooLargeError(slug, bytes)
 
@@ -98,9 +111,13 @@ export function normalizeSkillFrontmatter(slug: string, content: string): Normal
   const { frontmatter, body } = splitFrontmatter(content)
 
   if (frontmatter === null) {
-    // 没有 frontmatter：注入一个最小的
-    const rebuilt = buildFrontmatter({ name: slug }, body)
-    notes.push('原文没有 frontmatter，已注入最小元数据')
+    // 没有 frontmatter：注入一个最小的（带上描述——那是 CLI 清单里唯一的
+    // 用途信号，缺了它技能基本不会被主动选用）
+    const rebuilt = buildFrontmatter(withDescription({ name: slug }, description), body)
+    notes.push(
+      '原文没有 frontmatter，已注入最小元数据' +
+        (description ? '（含 description）' : '（**没有 description**：CLI 的清单里它没有用途说明）'),
+    )
     return { slug, content: rebuilt, notes }
   }
 
@@ -121,6 +138,16 @@ export function normalizeSkillFrontmatter(slug: string, content: string): Normal
   const meta = { ...(parsed as Record<string, unknown>) }
   const authorName = meta['name']
 
+  // 作者没写 description 时补上平台知道的那句（写了就不动——那是他的表达）
+  if ((meta['description'] === undefined || String(meta['description']).trim() === '') && description) {
+    meta['description'] = description
+    notes.push('frontmatter 缺少 description，已补上平台登记的用途说明')
+  }
+  // ⚠️ 这里**不**为"两边都没有 description"记 note：那会在每一次 run 上、
+  //    对每一个没写描述的技能都刷一条——而它是**技能作者**的问题，不是这次
+  //    运行的异常。日志里的信号要稀缺，不然真正需要注意的行会被淹掉。
+  //    （缺描述的正确处置面是技能库/界面，见 `SkillPayload.description` 的说明。）
+
   if (authorName === undefined || authorName === null || String(authorName).trim() === '') {
     meta['name'] = slug
     notes.push(`缺少 name，已注入 slug（${slug}）`)
@@ -131,6 +158,14 @@ export function normalizeSkillFrontmatter(slug: string, content: string): Normal
   }
 
   return { slug, content: buildFrontmatter(meta, body), notes }
+}
+
+function withDescription(
+  meta: Record<string, unknown>,
+  description?: string,
+): Record<string, unknown> {
+  const text = description?.trim()
+  return text ? { ...meta, description: text } : meta
 }
 
 function buildFrontmatter(meta: Record<string, unknown>, body: string): string {
@@ -149,7 +184,7 @@ export async function writeSkill(
   skillDir: string,
   skill: SkillFileInput,
 ): Promise<NormalizedSkill> {
-  const normalized = normalizeSkillFrontmatter(skill.slug, skill.content)
+  const normalized = normalizeSkillFrontmatter(skill.slug, skill.content, skill.description)
   const targetDir = join(workDir, skillDir, normalized.slug)
 
   await mkdir(targetDir, { recursive: true })

@@ -53,8 +53,10 @@ class TwoPhaseBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    const context = (await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => '')) ?? ''
-    const isReview = context.includes('审核任务')
+    // D29：判定"这是审核还是执行"只能看**第一句话**（CLAUDE.md 已经不写了）。
+    // 第一句话的开头就是 `# 任务` 或 `# 审核任务`。
+    const context = opts.prompt
+    const isReview = context.includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
 
     // 从受管上下文里读关联 issue —— 模型也是这么做的

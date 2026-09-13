@@ -185,22 +185,21 @@ describe('列目录：**一次一层**', () => {
     try {
       // 两个 runtime 的注入物同时躺在目录里（现实里不会，但这样最能说明问题）
       await mkdir(join(dir, '.claude', 'skills'), { recursive: true })
-      await mkdir(join(dir, '.agent', 'skills'), { recursive: true })
-      await writeFile(join(dir, 'CLAUDE.md'), 'x', 'utf8')
-      await writeFile(join(dir, 'AGENT.md'), 'x', 'utf8')
+      await mkdir(join(dir, '.alpha-helper', 'context'), { recursive: true })
 
       const claude = await listWorkDir(dir, '', managedPathsFor(getRuntimeDescriptor('claude')))
       const claudeManaged = claude.entries.filter((e) => e.managed).map((e) => e.path).sort()
-      assert.deepEqual(claudeManaged, ['.claude', 'CLAUDE.md'])
+      // claude 的技能目录 + 我们自己的上下文副本，两样都算平台注入
+      assert.deepEqual(claudeManaged, ['.alpha-helper', '.claude'])
 
       const generic = await listWorkDir(dir, '', managedPathsFor(getRuntimeDescriptor('generic')))
       const genericManaged = generic.entries.filter((e) => e.managed).map((e) => e.path).sort()
-      // generic 声明"没有技能发现机制" ⇒ 只有它的上下文文件算注入物；
-      // `.claude/**` 对它只是**别人的东西**，不该被标成平台注入
-      assert.deepEqual(genericManaged, ['AGENT.md'])
+      // generic 声明"没有技能发现机制" ⇒ 它没有技能目录算注入物；
+      // 而 `.claude/**` 对它只是**别人的东西**（那是 claude 的约定）
+      assert.deepEqual(genericManaged, ['.alpha-helper'])
       assert.ok(
         !genericManaged.includes('.claude'),
-        '★ 写死 .claude 的版本会在这里把 claude 的注入物标成 generic 的',
+        '★ 写死 .claude 的版本会在这里把 claude 的技能目录标成 generic 的',
       )
     } finally {
       await cleanup(dir)

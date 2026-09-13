@@ -2,13 +2,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import {
-  CONTEXT_BLOCK_BEGIN,
-  CONTEXT_BLOCK_END,
-  injectContextBlock,
-  removeContextBlock,
-  renderContextBlock,
   removeInjectedSkills,
-  renderTaskContext,
+  renderFirstSentence,
+  SkillCollisionError,
+  SkillTooLargeError,
   syncInjectedSkills,
   type AgentBackend,
   type RuntimeDescriptor,
@@ -197,24 +194,6 @@ const DEFAULT_SHUTDOWN_GRACE_MS = 5_000
  * 超限时**明说截断了多少行**：静默截断会让人以为"它只说了这些"。
  */
 const MAX_STDERR_LOG_LINES = 200
-
-/**
- * prompt 往日志里写多少字符。
- *
- * prompt 里可能是一整份报告正文（上万字）。全部铺开会把日志冲掉，
- * 而**被冲掉的日志等于没有日志**——那恰恰违反"加它是为了方便 debug"。
- * 截断时**明说还剩多少**，不让人误以为它就收到这些。
- */
-const PROMPT_LOG_CHARS = 2_000
-
-/**
- * 上下文块进日志的上限。
- *
- * 比 prompt 那 2000 宽松得多：块里是**这一整次执行的全部交代**（身份、任务、
- * 技能清单、护栏；审核那次还有待审材料与标准全文）。几百到几千字的块
- * 应当**完整**印出来——"日志不完整"正是使用者提的那条。
- */
-const CONTEXT_LOG_CHARS = 8_000
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -486,41 +465,6 @@ export class RunExecutor {
    * 我们确实注入了（`.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md` 都在
    * 工作目录里），但"确实做了"和"看得出来做了"是两件事。
    */
-  /**
-   * 把一份**可能很长**的文本写进日志。
-   *
-   * ══════════════════════════════════════════════════════════════════
-   * ★ 规矩：能放下就全文，放不下就**明确说清还差多少、去哪儿看全文**
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 使用者的投诉是「日志打印不完整，导致我不知道**第一句话**到底是什么」。
-   * 原来那行只印了 prompt 的前 2000 字（超出时补一句"还有 N 字符未显示"），
-   * 而**上下文块的内容一个字都没印**——CLI 读的是两样东西，日志只给了一样，
-   * 于是"它到底被交代了什么"这个问题在日志里回答不了。
-   *
-   * 所以：默认把全文写进去（几百到几千字的块都放得下），只有确实很长时才截断，
-   * 且截断这件事必须**带着去处**说出来，否则等于让人自己去猜。
-   */
-  async #noteText(
-    runId: RunId,
-    /** 括号前的标签，例如「第一句话（stdin 的一行 stream-json user 消息」。 */
-    label: string,
-    text: string,
-    options: { cap: number; where: string },
-  ): Promise<void> {
-    const { cap, where } = options
-    if (text.length <= cap) {
-      await this.#note(runId, `${label}，${text.length} 字符）：`)
-      await this.#note(runId, text)
-      return
-    }
-    await this.#note(runId, `${label}，${text.length} 字符，下面只显示前 ${cap} 字）：`)
-    await this.#note(
-      runId,
-      `${text.slice(0, cap)}\n…（还有 ${text.length - cap} 字符未显示，完整内容见 ${where}）`,
-    )
-  }
-
   async #note(runId: RunId, text: string): Promise<void> {
     const event = this.#deps.registry.emit(runId, {
       t: 'message',
@@ -619,7 +563,6 @@ export class RunExecutor {
       )
     }
 
-    let restoreContext: (() => Promise<void>) | null = null
     /**
      * 空闲看门狗。
      *
@@ -655,13 +598,6 @@ export class RunExecutor {
     let actualArgv: readonly string[] = []
 
     /**
-     * 注入的上下文块哈希——审计字段 `contextBlockHash` 的真值。
-     *
-     * 它也一直是写死的 `null`。空着不是"没有"，而是"我们没记"。
-     */
-    let contextBlockHash: string | null = null
-
-    /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
      *
      * ⚠️ 调用时机很关键：必须在**发出 terminal 事件之前**完成，否则页面收到
@@ -676,8 +612,6 @@ export class RunExecutor {
     const cleanup = async (): Promise<void> => {
       if (cleaned) return
       cleaned = true
-      if (restoreContext) await this.#restoreContext(restoreContext)
-
       // ★ 技能收掉（使用者放弃了"保留技能"那条要求）。
       //
       //   原来的规矩是"保留"，理由是"跑完进工作目录看，要能看出它是在什么标准
@@ -756,6 +690,9 @@ export class RunExecutor {
           mountedSkills.map((skill) => ({
             slug: skill.slug,
             content: skill.body,
+            // ★ 描述必须一起写进 frontmatter：CLI 自己的技能清单是描述驱动的，
+            //   而我们的第一句话只列 slug——描述是唯一的用途信号。
+            ...(skill.description ? { description: skill.description } : {}),
             // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
             // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
             // 从日志上看不出为什么（CLI 只会说找不到文件）。
@@ -811,18 +748,6 @@ export class RunExecutor {
       //
       //   长 prompt（报告正文可能上万字）要截断，并**明说截断了**——
       //   静默截断会让人以为"它就收到这些"。
-      // ★ 说清**它是怎么送到 CLI 手里的**，而不只是"给了这么一段文字"。
-      //   两者不是一回事：这段文字是作为 stdin 上的一行 stream-json `user`
-      //   消息投递的（见 `buildClaudeInput`），而 CLI 另外还会读工作目录里的
-      //   上下文块（下面紧接着记）。不写清投递方式，使用者就无法判断
-      //   "我看到的这段 = 模型看到的那个吗"。
-      await this.#noteText(
-        runId,
-        '第一句话（stdin 的一行 stream-json user 消息',
-        req.prompt,
-        { cap: PROMPT_LOG_CHARS, where: '本次 run 的记录与工作目录里的上下文文件' },
-      )
-
       // ★ 把注入结果写进日志。
       //
       //   不写的话，使用者在日志里只看到 Claude 自己报的"25 个工具可用"，
@@ -834,55 +759,75 @@ export class RunExecutor {
           ? `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`
           : skillDelivery.kind === 'directory'
             ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.slug).join('、')}` +
-              `（写入 ${skillDelivery.dir}/，加上上下文文件 ${runtime.descriptor.contextFile}）`
+              `（写入 ${skillDelivery.dir}/，CLI 会自己扫这个目录）`
             : `⚠️ 挂了 ${mountedSkills.length} 个 skill 但**一个都没写下去**：` +
               `runtime \`${runtime.descriptor.key}\` 没有技能发现机制（原因见上一行）——` +
               `本次它们只作为「审核标准 / 参考」出现在上下文里`,
       )
 
-      // ── 注入上下文块 ──
-      const contextFile = join(run.workDir!, runtime.descriptor.contextFile)
-      const body =
+      // ══════════════════════════════════════════════════════════════════
+      // ── 组装「第一句话」，并留一份副本（D29）──
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // ★ 这是这次 run 交给 CLI 的**唯一**一段文本：身份、材料、技能清单、
+      //   护栏、判决契约全在里面（顺序见 `first-sentence.ts` 的说明）。
+      //
+      //   以前是两处：stdin 上一句 + 写进使用者 `CLAUDE.md` 的受管块。那个
+      //   设计让**硬契约**（判决 schema 与围栏）走在唯一没被验证过的通道上
+      //   （FR-CLI-40 至今空着），还要为"写别人的文件"付出一整类风险
+      //   （截断事故、逐字节还原、共享目录里摘掉别人正在用的块）。
+      // ★ agent 的配置（模型 / 环境变量 / **指令**）在这里取一次。
+      //
+      //   取在这里而不是等下面拼命令行时再取，是因为「指令」现在要进第一句话
+      //   ——而它此前**从来没被送达过**（`ExecOptions` 里没有这个通道）：
+      //   界面上能填、能存、能显示，运行时被丢掉。
+      const agentConfig = await this.#deps.store.getAgent(run.agentId as never)
+
+      const firstSentence =
         req.kind === 'review' && req.review
-          ? renderTaskContext({
+          ? renderFirstSentence({
               kind: 'review',
               runId,
               subject: req.subject,
               report: { kind: req.review.kind, title: req.review.title, body: req.review.body },
               skills: skillsBrief,
               relatedIssueId: req.review.relatedIssueId ?? null,
+              previousContextPath: await this.#previousContextPath(req),
+              instructions: agentConfig?.instructions ?? null,
             })
-          : renderTaskContext({
+          : renderFirstSentence({
               kind: 'execute',
               runId,
               subject: req.subject,
               prompt: req.prompt,
               skills: skillsBrief,
+              instructions: agentConfig?.instructions ?? null,
             })
 
-      const injected = await this.#injectContext(
-        contextFile,
-        body,
-        runId,
-        runtime.descriptor.contextFile,
-      )
-      restoreContext = injected.restore
-      contextBlockHash = injected.hash
-
-      // ★ 上下文块的内容也要印出来。
+      // 副本：**我们自己的文件**，谁都不覆盖谁，也不删。
+      //   - agent 需要回顾时可以自己再读（上下文被压缩之后尤其有用，而这条
+      //     不依赖任何未验证的 CLI 内部行为）；
+      //   - 你随时能看"这次它被交代了什么"；
+      //   - 路径进日志，所以它不是个隐藏文件。
       //
-      //   CLI 读的是**两样**东西：stdin 的第一句话，以及工作目录里的这个块
-      //   （它被当作"项目记忆"）。原来日志里只有前者，于是"它到底被交代了
-      //   什么"这个问题回答不了——块里还带着 run/对象标识、技能清单与护栏。
-      await this.#noteText(
+      // ⚠️ **不写 `CLAUDE.md`**（也不写别的 CLI 认识的项目记忆文件名）：
+      //    那会让它重新变成"由 CLI 隐式读取"，等于又回到双投递与猜文件名。
+      const contextPath = join(run.workDir!, '.alpha-helper', 'context', `${runId}.md`)
+      await mkdir(dirname(contextPath), { recursive: true })
+      await writeFile(contextPath, firstSentence, 'utf8')
+
+      // ★ 全文进日志，**不截断**。
+      //
+      //   使用者投诉过「日志打印不完整，导致我不知道第一句话到底是什么」。
+      //   这是那次 run 的输入本身——唯一不可变的事实；截断它等于把
+      //   "它被交代了什么"变成要去别处拼的东西。
+      await this.#note(
         runId,
-        `上下文文件（${runtime.descriptor.contextFile} 的受管块，CLI 会当项目记忆读`,
-        body,
-        {
-          cap: CONTEXT_LOG_CHARS,
-          where: `工作目录里的 ${runtime.descriptor.contextFile}`,
-        },
+        `第一句话（stdin 的一行 stream-json user 消息，${firstSentence.length} 字符，` +
+          `以下就是交给 CLI 的全部内容）：`,
       )
+      await this.#note(runId, firstSentence)
+      await this.#note(runId, `（同一份文本的副本：${contextPath}——需要回顾时可以再读）`)
 
       await store.transitionRun(runId, 'dispatched', 'running', { startedAt: this.#now() })
       registry.emit(runId, { t: 'status', status: 'running', at: this.#now() })
@@ -928,10 +873,10 @@ export class RunExecutor {
       // 解析放在执行器里而不是各调用点，理由与工作目录同源（见 `submit` 里
       // 那段）：提交 run 的路径有五条（页面建任务、动作派生、自动串接审核、
       // 重试、报告摄取），任意一处忘了带就会被静默丢掉——**而这正是已经发生的事**。
-      const agentConfig = await this.#deps.store.getAgent(run.agentId as never)
-
       const session = await runtime.backend.execute({
-        prompt: req.prompt,
+        // ★ 发的是**组装好的第一句话**，不是原始的 req.prompt：身份、材料、
+        //   技能清单、护栏、判决契约都在里面（见 `first-sentence.ts`）。
+        prompt: firstSentence,
         workDir: run.workDir!,
         // 使用者在这个 agent 上选的模型。留空 = 用 CLI 自己的默认（CLI 支持
         // "不给这个参数"这个语义，所以 null 是**如实**表达，不是兜底）
@@ -1093,7 +1038,6 @@ export class RunExecutor {
           await this.#cliVersion(runtime.descriptor, runtime.backend),
           // 实际跑的那条命令行（含沙箱包装）——不再是"按描述表拼出来的大概样子"
           actualArgv,
-          contextBlockHash,
         )
       }
 
@@ -1140,7 +1084,15 @@ export class RunExecutor {
       const cancelledByUser = registry.get(runId)?.cancellationRequested === true
       if (cancelledByUser) {
         await cleanup()
-        await this.#finish(runId, 'cancelled', null, null)
+        // ⚠️ 这里原来传的是 `null`：**原因码没被写下去**，于是
+        //    `cancelled_by_user` 这个枚举成员在生产代码里从来没有出现过，
+        //    而紧挨着的注释却写着"原因 `cancelled_by_user`"——注释与实现对不上。
+        //    状态 `cancelled` 已经表达了大部分意思，但原因码是给程序看的
+        //    （分级、统计），空着等于让下游去猜。
+        await this.#finish(runId, 'cancelled', null, {
+          reason: 'cancelled_by_user',
+          message: '使用者取消了这次执行',
+        })
         return
       }
 
@@ -1175,8 +1127,14 @@ export class RunExecutor {
         })
       }
     } catch (err) {
+      // ⚠️ 这里原来**一律**记 `infra_error`。而"注入失败"（同名技能撞车、
+      //    技能超过大小上限）是**使用者自己就能修好**的问题：改个目录名、
+    //    换个小点的技能。把它记成"环境/基础设施问题"，会把人往查 CLI 与
+      //    权限的方向带——`injection_failed` 这个枚举成员因此从没被写过。
+      const isInjection =
+        err instanceof SkillCollisionError || err instanceof SkillTooLargeError
       await this.#finish(runId, 'failed', null, {
-        reason: 'infra_error',
+        reason: isInjection ? 'injection_failed' : 'infra_error',
         message: err instanceof Error ? err.message : String(err),
       })
     } finally {
@@ -1204,8 +1162,6 @@ export class RunExecutor {
     cliVersion: string | null,
     /** 实际执行的命令行（原始，脱敏由 domain 的 `buildAuditRecord` 做）。 */
     argv: readonly string[],
-    /** 注入的上下文块哈希；没有注入时为 null。 */
-    contextBlockHash: string | null,
   ): Promise<void> {
     const coordinator = this.#deps.reviewCoordinator
     if (!coordinator) return
@@ -1240,7 +1196,8 @@ export class RunExecutor {
       promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
       // ══════════════════════════════════════════════════════════════════
       // 审计的这四项原来是**写死的**（`runtimeDescriptorKey: 'claude'`、
-      // `cliVersion: null`、`contextBlockHash: null`，argv 是按描述表拼的）
+      // `cliVersion: null`、argv 是按描述表拼的。`contextBlockHash` 曾恒为 null——那个
+      // 字段随受管块机制一起删掉了：输入只剩一处，哈希也就只剩一个）
       // ══════════════════════════════════════════════════════════════════
       //
       // 审计回答的是"这次到底怎么跑的"。写死的值不是"空着"，而是**说错了**：
@@ -1249,7 +1206,6 @@ export class RunExecutor {
       runtimeDescriptorKey: descriptor.key,
       cliVersion,
       argv,
-      contextBlockHash,
       usage,
       chainSteps,
     })
@@ -1264,8 +1220,7 @@ export class RunExecutor {
       run.id,
       `审计：已记录（id ${handling.audit.id}，runtime ${handling.audit.runtimeDescriptorKey}，` +
         `CLI 版本 ${handling.audit.cliVersion ?? '读不到'}，` +
-        `promptHash ${shortHash(handling.audit.promptHash)}，` +
-        `块哈希 ${shortHash(handling.audit.contextBlockHash)}）`,
+        `输入哈希 ${shortHash(handling.audit.promptHash)}）`,
     )
 
     if (handling.decision.kind === 'retry') {
@@ -1276,106 +1231,18 @@ export class RunExecutor {
   }
 
   /**
-   * 注入上下文块。
+   * 「接着沟通」时给一行上一次的上下文副本路径。
    *
-   * @param body 受管块的**内容**（渲染由调用方完成）
-   * @returns `restore` 是还原函数——无论成功失败都必须调用它；
-   *          `hash` 是**写下去的那个块**的 sha256，进审计（`contextBlockHash`）。
+   * ★ 会话恢复是**尽力而为**：CLI 可能拒绝（换版本、会话过期），代码里明确
+   *   处理过那种情况并会记"恢复被拒、本次没有上文"。而那时 agent 手里就只剩
+   *   这句追问——原任务正文既不在 prompt 里也不再别处。给一行路径，它至少能
+   *   自己把那次的上下文读回来。
    */
-  async #injectContext(
-    contextFile: string,
-    body: string,
-    runId: RunId,
-    /** 只为了在日志里说清"保留的是哪个文件名"。 */
-    contextFileName: string,
-  ): Promise<{ restore: () => Promise<void>; hash: string }> {
-    let original: string | null
-    try {
-      original = await readFile(contextFile, 'utf8')
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') original = null
-      else throw err
-    }
-
-    const block = renderContextBlock(body)
-    const injected = injectContextBlock(original, block)
-    await mkdir(dirname(contextFile), { recursive: true })
-    await writeFile(contextFile, injected.content, 'utf8')
-
-    const hash = createHash('sha256').update(block, 'utf8').digest('hex')
-
-    const restore = async (): Promise<void> => {
-      const current = await readFile(contextFile, 'utf8').catch(() => null)
-      if (current === null) return
-
-      // ══════════════════════════════════════════════════════════════════
-      // ★ 先认身份：文件里那个块**是不是本次 run 写的**
-      // ══════════════════════════════════════════════════════════════════
-      //
-      // `removeContextBlock` 摘的是"当前内容里找到的第一个块"。在**审核与执行
-      // 共用同一个工作目录**之后（见 workdir.ts 的 inheritFrom），这就可能不是
-      // 我们写的那个块了：
-      //
-      //   执行 run 跑完 → 自动串接审核（审核 run 立刻开始）→ 审核 run 把块
-      //   **原地替换**成它自己的 → 这时执行 run 才走到 cleanup()，一摘就把
-      //   **审核 run 的上下文摘掉了**。它手里于是没了审核标准与判决 schema。
-      //
-      // 判据用块里的 `- run：` 那一行，而不是整块字节相等：使用者在块内改了
-      // 一笔也仍然是"我们的块"（那属于受管区域，该摘）；只有**另一个 run**
-      // 写的块才不是我们的，那种情况要原样留着。
-      const begin = current.indexOf(CONTEXT_BLOCK_BEGIN)
-      if (begin !== -1) {
-        const end = current.indexOf(CONTEXT_BLOCK_END, begin + CONTEXT_BLOCK_BEGIN.length)
-        const blockText = current.slice(begin, end === -1 ? current.length : end)
-        if (!blockText.includes(`- run：\`${runId}\``)) {
-          await this.#note(
-            runId,
-            '工作目录里的上下文块已经属于**另一次 run**（同一个工作目录被两次 run 依次用过），' +
-              '本次不动它——摘掉别人正在用的上下文会让那次 run 失去依据。',
-          )
-          return
-        }
-      }
-
-      const removed = removeContextBlock(current)
-
-      // ══════════════════════════════════════════════════════════════════
-      // ★ 这份文件是**我们自己造的** ⇒ 留着；是**使用者的** ⇒ 逐字节还原
-      // ══════════════════════════════════════════════════════════════════
-      //
-      // `deleteFile` 就是"通篇只有我们的块"这个判断（结构判据，不依赖任何记忆
-      // ——见 context-block.ts）。两种情形分开处置：
-      //
-      //   ① 我们造的那份（原本不存在）：**不再删掉**。任务的工作目录是这个任务的
-      //      产物之一，使用者会进去看"它是在什么上下文下跑的"；而且接着沟通时
-      //      它还在，上下文是连续的。原来的做法是跑完就删，于是那个目录里
-      //      什么都不剩，看不出这次任务被交代了什么；
-      //   ② **使用者的文件**（他自己的 CLAUDE.md，或他把任务指向了自己的仓库）：
-      //      仍然逐字节还原，把他原有的内容一字不差地还回去。**不改写别人的文件**
-      //      这条底线没有变，变的只是"我们自己那份不再抹掉"。
-      if (removed.deleteFile) {
-        // 保留这件事要说一声：否则使用者会以为跑完目录是干净的
-        await this.#note(
-          runId,
-          `上下文文件保留在工作目录里（${contextFileName}）——` +
-            `它是这次任务被交代的上下文，跑完不删，方便回看与接着沟通。`,
-        )
-        return
-      }
-      if (removed.content !== current) {
-        await writeFile(contextFile, removed.content, 'utf8')
-      }
-    }
-
-    return { restore, hash }
-  }
-
-  async #restoreContext(restore: () => Promise<void>): Promise<void> {
-    try {
-      await restore()
-    } catch (err) {
-      this.#deps.onWarn?.(`上下文块还原失败：${String(err)}`)
-    }
+  async #previousContextPath(req: SubmitRunRequest): Promise<string | null> {
+    if (!req.resumeFromRunId) return null
+    const previous = await this.#deps.store.getRun(req.resumeFromRunId as RunId)
+    if (!previous?.workDir) return null
+    return join(previous.workDir, '.alpha-helper', 'context', `${previous.id}.md`)
   }
 
   async #finish(

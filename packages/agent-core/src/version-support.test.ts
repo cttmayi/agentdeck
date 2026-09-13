@@ -35,7 +35,6 @@ function descriptorWith(versions?: RuntimeDescriptor['versions']): RuntimeDescri
     evidence: 'provisional',
     sessionState: 'unknown',
     skills: { kind: 'directory', dir: '.x/skills' },
-    contextFile: 'X.md',
     managedFlags: { model: '--model', maxTurns: '--max-turns', resume: '--resume' },
     toolConfig: { enabled: false, reason: 'r' },
     disableSwitch: { enabled: false, reason: 'r' },

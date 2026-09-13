@@ -245,8 +245,10 @@ export interface RuntimeDescriptor {
    * 这与 `toolConfig` / `disableSwitch` 是同一个形状（`enabled: false` + 原因）。
    */
   skills: SkillDelivery
-  /** 上下文文件名。 */
-  contextFile: string
+  // ⚠️ 这里原来还有 `contextFile`（'CLAUDE.md'）。**随 D29 删掉了**：
+  //    我们不再往 CLI 认识的项目记忆文件里写东西，所以"上下文文件名"
+  //    不再是描述表需要回答的问题。它同时也带走了"每个 runtime 猜文件名"
+  //    这件事——那是双投递时代的问题。
 
   /** 工具配置注入位。首版不启用。 */
   toolConfig: InjectionSlot
@@ -340,7 +342,6 @@ export const CLAUDE_DESCRIPTOR: RuntimeDescriptor = {
   },
   stateDir: '.claude',
   skills: { kind: 'directory', dir: '.claude/skills' },
-  contextFile: 'CLAUDE.md',
   toolConfig: {
     enabled: false,
     reason: '首版不做 MCP 工具配置（范围决策）；启用时需追加受管参数并生成受管配置文件',
@@ -457,7 +458,7 @@ export const GENERIC_DESCRIPTOR: RuntimeDescriptor = {
       '在真实 CLI 上确认"把目录摆对就会被发现"之前不写文件——写进一个没人读的目录' +
       '等于假装支持（FR-CLI-40）。',
   },
-  contextFile: 'AGENT.md',
+
   toolConfig: {
     enabled: false,
     reason:

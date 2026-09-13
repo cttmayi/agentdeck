@@ -33,7 +33,6 @@ describe('第二个 runtime 的描述符（FR-CLI-47 的填空作业）', () => 
     assert.equal(typeof d.command, 'string')
     assert.ok(d.command.length > 0)
     assert.ok(d.skills, '技能怎么投递（这个 CLI 声明为"没有"）')
-    assert.equal(typeof d.contextFile, 'string')
     assert.ok(d.protocol)
     assert.ok(d.family)
     assert.ok(d.resume.flag)

@@ -21,7 +21,6 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
       // 一个新 runtime 要回答的问题永远同样几个
       assert.ok(d.skills, '技能怎么投递：目录，或者明确"没有这个机制"')
       assert.ok(d.managedFlags?.model && d.managedFlags.maxTurns, '受管旗标必须逐条声明')
-      assert.equal(typeof d.contextFile, 'string')
       assert.ok(d.toolConfig)
       assert.ok(d.disableSwitch)
       assert.ok(d.resume.flag)
@@ -35,7 +34,6 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
   test('★ 两个 runtime 的答案不得处处相同（否则等于没填）', () => {
     const claude = RUNTIMES['claude']!
     const other = RUNTIMES['generic']!
-    assert.notEqual(other.contextFile, claude.contextFile)
     assert.notEqual(other.skills.kind, claude.skills.kind)
     assert.notEqual(other.family, claude.family)
     assert.notEqual(other.resume.flag, claude.resume.flag)

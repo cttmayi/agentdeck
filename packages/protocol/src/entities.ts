@@ -470,7 +470,6 @@ export const AuditRecord = z.object({
   promptHash: z.string().nullable(),
   /** 已脱敏的实际命令行：令牌类参数替换为 `***`。 */
   argvRedacted: z.array(z.string()),
-  contextBlockHash: z.string().nullable(),
   verdictId: VerdictId.nullable(),
   actionIds: z.array(ActionId),
   queuedAt: EpochMs,

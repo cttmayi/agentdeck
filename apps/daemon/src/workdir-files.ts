@@ -95,13 +95,18 @@ export interface ManagedPaths {
 export function managedPathsFor(descriptor: {
   skills: { kind: 'directory'; dir: string } | { kind: 'none'; reason: string }
   stateDir?: string
-  contextFile: string
 }): ManagedPaths {
   const dirs: string[] = []
   if (descriptor.skills.kind === 'directory') dirs.push(descriptor.skills.dir)
   if (descriptor.stateDir) dirs.push(descriptor.stateDir)
-  return { dirs: [...new Set(dirs)], files: [descriptor.contextFile] }
+  // 我们自己的上下文副本（每次 run 一份，见 D29）。
+  // ⚠️ 它**不是** CLI 的项目记忆文件——名字是我们自己起的，CLI 不认识它。
+  dirs.push(CONTEXT_DIR)
+  return { dirs: [...new Set(dirs)], files: [] }
 }
+
+/** 我们自己放上下文副本的地方（相对工作目录）。 */
+export const CONTEXT_DIR = '.alpha-helper'
 
 function isManaged(relPath: string, managed: ManagedPaths): boolean {
   if (managed.files.includes(relPath)) return true

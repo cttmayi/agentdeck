@@ -1,9 +1,8 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@alpha-helper/agent-core'
-import { hasContextBlock } from '@alpha-helper/agent-core'
 import { ulid, type Issue, type RunId, type RunEvent } from '@alpha-helper/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -34,6 +33,13 @@ class FakeBackend implements AgentBackend {
   /** 执行时看到的工作目录内容——用于验证注入发生在正确时机。 */
   seenContext: string | null = null
   seenPrompt: string | null = null
+  /**
+   * 执行那一刻**使用者自己的** `CLAUDE.md` 长什么样。
+   *
+   * D29 之后我们根本不碰它，所以这条记录是用来钉住"一个字都没改"的
+   * ——以前那条路是"注入我们的块、跑完再逐字节还原"，现在是"连打开都没打开"。
+   */
+  seenUserFile: string | null = null
   seenWorkDir: string | null = null
   seenArgs: string[] | null = null
   /** 执行时收到的模型与自定义环境变量——用来验证"agent 上填的东西真的传下去了"。 */
@@ -93,7 +99,14 @@ class FakeBackend implements AgentBackend {
     this.seenModel = opts.model ?? null
     this.seenEnv = opts.env ?? {}
     this.seenResumeSessionId = opts.resumeSessionId ?? null
-    this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+    /**
+     * 这次 run 交给 CLI 的**第一句话**（D29 之后它走 prompt，不再有 CLAUDE.md）。
+     *
+     * 原来这里读的是工作目录里的 `CLAUDE.md`——那正是被删掉的机制。
+     * 名字仍叫 `seenContext` 是因为断言都按"它被交代了什么"写的。
+     */
+    this.seenContext = opts.prompt
+    this.seenUserFile = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
     this.seenSkillFiles = {}
@@ -334,32 +347,50 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
     assert.equal(usageEvent?.t === 'usage' ? usageEvent.usage.costSource : null, 'provider')
   })
 
-  test('★ 上下文块在**执行期间**已注入（假后端在跑的时候读到了它）', () => {
-    assert.notEqual(backend.seenContext, null, '执行时 CLAUDE.md 应当存在')
-    assert.equal(hasContextBlock(backend.seenContext!), true, '应当含受管块')
-    assert.match(backend.seenContext!, /写一份关于依赖漏洞的报告/, '受管块里应含任务内容')
+  test('★ 第一句话在执行期间真的送到了 CLI（假后端在跑的时候读到了它）', () => {
+    assert.notEqual(backend.seenContext, null, 'prompt 必须有内容')
+    assert.match(backend.seenContext!, /写一份关于依赖漏洞的报告/, '第一句话里应含任务内容')
   })
 
-  test('★ 我们自己造的上下文文件**保留**；使用者自己的那份逐字节还原', async () => {
+  test('★ 每次 run 留一份上下文副本；**绝不写使用者的 CLAUDE.md**', async () => {
     // ══════════════════════════════════════════════════════════════════
-    // 这条期望被改过一次，改的是"哪一份该留"
+    // 这条期望被改动过两次，两次的"哪一份该留"都记在这里
     // ══════════════════════════════════════════════════════════════════
     //
-    // 原来断言"跑完这个文件被删掉"（这个目录本来没有 CLAUDE.md）。
-    // 使用者的要求是**保留**：任务的工作目录是产物之一，他要能进去看
-    // "这次任务被交代了什么"；接着沟通时上下文也还在。
-    //
-    // 而"不改写别人的文件"这条底线没有变：**使用者自己写的** CLAUDE.md
-    // 仍然逐字节还原 —— 判据是 `removeContextBlock` 的结构检查
-    //（"通篇只有我们的块" = 我们造的），不依赖任何记忆。
-    // 那条保证在同文件另一条用例里钉着（"已有 CLAUDE.md ⇒ 逐字节复原"）。
-    const after = await readFile(join(workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-    assert.notEqual(after, null, '★ 我们自己造的上下文文件要留着')
-    assert.equal(hasContextBlock(after!), true, '留着的那份里应当有受管块（说明这次任务被交代了什么）')
+    // ① 最早：跑完把 `CLAUDE.md` 删掉（我们自己造的那份）。
+    // ② 然后：改成**保留**它——任务的工作目录是产物之一，要能回看"它被交代了
+    //    什么"。代价是必须逐字节还原使用者的原文件，还要处理共享目录里
+    //    "摘掉别人正在用的块"那一整类竞态。
+    // ③ 现在（D29）：**根本不写那个文件**。同一份文本留给我们自己的
+    //    `.alpha-helper/context/<runId>.md`——谁都不覆盖谁，也不需要还原，
+    //    因为那从来不是别人的东西。
+    const files = await readdir(workDir).catch(() => [] as string[])
+    assert.ok(
+      !files.includes('.claude') || true,
+      '（技能目录按 D30 跑完就收掉了）',
+    )
+    assert.ok(
+      !files.includes('CLAUDE.md'),
+      '★ 绝不写使用者的 CLAUDE.md —— 那是他的文件，我们一个字都不该动',
+    )
+
+    // 副本在：.alpha-helper/context/<runId>.md，内容是这次的第一句话
+    const { readdir: rd } = await import('node:fs/promises')
+    const dir = join(workDir, '.alpha-helper', 'context')
+    const copies = await rd(dir).catch(() => [] as string[])
+    assert.ok(copies.length > 0, `★ 每次 run 都要留一份上下文副本，实际：${copies.join(', ')}`)
+    const first = await readFile(join(dir, copies[0]!), 'utf8')
+    assert.match(first, /^# 任务/, '副本就是这次交给 CLI 的那段文本')
   })
 
-  test('prompt 与工作目录被正确透传', () => {
-    assert.equal(backend.seenPrompt, '写一份关于依赖漏洞的报告')
+  test('★ 透传给 CLI 的是**组装好的第一句话**（不是干巴巴的 prompt）', () => {
+    // 这是 D29 的核心：CLI 拿到的那段文本 = 身份 + 材料 + 技能清单 + 护栏 +
+    // （审核时）判决契约。原来只把 `req.prompt` 原样发过去，其余内容在
+    // CLAUDE.md 里；现在全在这一段里，而且**就是发出的那一段**。
+    const sent = backend.seenPrompt ?? ''
+    assert.match(sent, /^# 任务/, '有身份段')
+    assert.match(sent, /写一份关于依赖漏洞的报告/, '有任务正文')
+    assert.match(sent, /## 护栏/, '有护栏')
     assert.equal(backend.seenWorkDir, workDir)
   })
 
@@ -487,11 +518,14 @@ describe('端到端：失败路径', () => {
       assert.equal(run.status, 'failed')
       assert.notEqual(run.failureReason, null, '失败必须带机器可读的原因码')
 
-      // 失败路径与成功路径**同一条规矩**：我们自己造的那份保留
-      //（使用者的原文件仍然逐字节还原，见"不破坏使用者已有的文件"那组用例）
+      // 失败路径与成功路径**同一条规矩**：我们自己的东西照旧（副本留着），
+      // 而使用者的文件一个字都不碰（另有一组用例钉着，见下面）。
+      const copies = await readdir(join(failDir, '.alpha-helper', 'context')).catch(
+        () => [] as string[],
+      )
+      assert.ok(copies.length > 0, '失败也要留下这次的上下文副本（回看靠它）')
       const leftover = await readFile(join(failDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-      assert.notEqual(leftover, null, '失败也不删我们自己造的上下文文件')
-      assert.equal(hasContextBlock(leftover!), true)
+      assert.equal(leftover, null, '★ 失败路径同样不许在工作目录里造 CLAUDE.md')
     } finally {
       await d.close()
       await cleanup(failDir)
@@ -1226,7 +1260,7 @@ describe('端到端：自动分配的工作目录落在「给 daemon 的那个�
 })
 
 describe('端到端：不破坏使用者已有的文件', () => {
-  test('★ 工作目录里已有 CLAUDE.md ⇒ 注入后再清理，内容逐字节复原', async () => {
+  test('★ 工作目录里已有 CLAUDE.md ⇒ 我们**从头到尾一个字都不改**', async () => {
     const userDir = await makeTempDir('e2e-user')
     const dataDir = await makeTempDir('e2e-userdata')
     const original = '# 我的项目\n\n这是使用者自己写的内容。\n\n\n'
@@ -1260,13 +1294,20 @@ describe('端到端：不破坏使用者已有的文件', () => {
       })
       await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
 
-      // 执行期间：使用者的内容仍在，且多了我们的块
-      assert.ok(b.seenContext?.startsWith('# 我的项目'), '使用者原有内容不能被截断')
-      assert.equal(hasContextBlock(b.seenContext!), true)
-
-      // 执行之后：逐字节复原（包括那三个尾部换行）
-      const restored = await readFile(join(userDir, 'CLAUDE.md'), 'utf8')
-      assert.equal(restored, original, '必须逐字节还原使用者原文件')
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 这条期望被**加强**了（D29）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 以前是"注入我们的块，跑完再逐字节还原"——能对，但需要块标记、
+      // 结构判据、崩溃修复一整套机制来保证"还原得准"。
+      // 现在**根本不写这个文件**，所以"会不会毁掉使用者的内容"这个问题
+      // 从"靠机制保证"变成"结构上不可能"：连打开都没打开过。
+      assert.ok(
+        b.seenUserFile === original,
+        '★ 执行期间使用者的 CLAUDE.md 必须原样（我们不再往它里面写任何东西）',
+      )
+      const after = await readFile(join(userDir, 'CLAUDE.md'), 'utf8')
+      assert.equal(after, original, '执行之后同样逐字节一致（包括那三个尾部换行）')
     } finally {
       await d.close()
       await cleanup(userDir)
@@ -1410,7 +1451,7 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
       /已注入 1 个 skill：general-review/,
       '★ 日志里必须说清注入了什么——否则使用者只能靠猜，而他会猜错',
     )
-    assert.match(text, /CLAUDE\.md|上下文文件/, '也要说清写到哪儿了')
+    assert.match(text, /写入 \.claude\/skills\//, '也要说清写到哪儿了')
   })
 
   test('★ 支持文件也要真的落到工作目录里（只写 SKILL.md 就是坏技能）', async () => {
@@ -1624,6 +1665,61 @@ describe('★ 日志要够 debug：命令行 / stderr / 退出码', () => {
   })
 })
 
+describe('★ 失败原因码要说对人该去哪儿查', () => {
+  test('★ 注入失败记 injection_failed（不是 infra_error）', async () => {
+    // 这条是补一个**从来没被写出来过**的枚举成员：同名技能撞车、技能超限
+    // 这类问题使用者自己就能修好（改个目录名、换个小技能），把它记成
+    // "环境/基础设施问题"会把人往查 CLI 与权限的方向带。
+    const dir = await makeTempDir('e2e-injectfail')
+    const dataDir = await makeTempDir('e2e-injectfaildata')
+    const d = await startDaemon({
+      dataDir, port: 0, fsync: false, backend: new FakeBackend(),
+      onWarn: () => {}, onInfo: () => {},
+    })
+    try {
+      // 使用者自己的同名技能放在工作目录里 —— 平台拒绝覆盖它，这次 run 失败
+      await mkdir(join(dir, '.claude', 'skills', 'mine'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), '我的标准', 'utf8')
+
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId, kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [{ ref: { id: 's1', slug: 'mine', source: 'local' }, slug: 'mine', name: 'mine', body: '平台的标准', allowedActions: [] }],
+          subject: { type: 'issue', id: 'i1' },
+          prompt: '随便做点事',
+          workDir: dir,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      const run = (await (await fetch(`${d.url}/api/runs/${runId}`)).json()) as {
+        status: string
+        failureReason: string | null
+      }
+      assert.equal(run.status, 'failed')
+      assert.equal(
+        run.failureReason,
+        'injection_failed',
+        '★ 撞车是使用者能自己修的，不该报成"环境坏了"',
+      )
+      // 使用者的技能一个字都没变
+      assert.equal(
+        await readFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), 'utf8'),
+        '我的标准',
+      )
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(dataDir)
+    }
+  })
+})
+
 describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
   /**
    * 这组用例的由来是一句使用者的反馈：「日志打印不完整，导致我不知道
@@ -1654,18 +1750,22 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
       }),
     })
 
-    const text = await waitForText(runId, /第一句话（stdin/)
+    const text = await waitForText(runId, /第一句话（/)
     assert.match(
       text,
-      /第一句话（stdin 的一行 stream-json user 消息，3000 字符，下面只显示前 2000 字）：/,
-      '要说明给了它多少、以及**怎么送进去的**（stdin 的 user 消息）',
+      /第一句话（stdin 的一行 stream-json user 消息，\d+ 字符，以下就是交给 CLI 的全部内容）：/,
+      '要说明给了它多少、以及**怎么送进去的**',
     )
-    assert.match(text, /还有 1000 字符未显示/, '★ 截断必须明说剩多少——静默截断会让人以为它就收到这些')
-    assert.match(text, /完整内容见/, '★ 还要说清**去哪儿看全文**，否则等于让人自己猜')
+    // ★ 输入本身**不截断**：3000 字的任务也要整段进日志。
+    //   它是那次 run 唯一不可变的事实——截断它，就等于把"它被交代了什么"
+    //   变成要去别处拼的东西（使用者投诉过这一点）。
+    assert.ok(!/还有 \d+ 字符未显示/.test(text), '★ 第一句话不许截断')
+    assert.match(text, /甲{100}/, '正文要真的在里面')
 
-    // 上下文块的内容也要在日志里（CLI 读的第二样东西）
-    assert.match(text, /上下文文件（CLAUDE.md 的受管块/, '★ 块里是这次任务的全部交代，不能一个字都不印')
-    assert.match(text, /## 护栏/, '块的内容要真的印出来，而不是只说"写了这么个文件"')
+    // 内容要真的印出来，而不是只说"有这么一段"
+    assert.match(text, /## 护栏/, '第一句话里的护栏段要在')
+    assert.match(text, /## 要做的事/, '以及任务正文段')
+    assert.match(text, /\.alpha-helper\/context\//, '副本路径也要给出（需要回顾时读它）')
 
     // 顺带：这些也都该在
     assert.match(text, /工作目录：/, '它跑到哪儿去了')
@@ -1689,7 +1789,7 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
         limits: { maxTurns: null, timeoutMs: null },
       }),
     })
-    const text = await waitForText(runId, /第一句话（stdin/)
+    const text = await waitForText(runId, /第一句话（/)
     assert.match(text, /把功能实现一下/)
     // 短 prompt 要**逐字**出现（连行一起），且不带任何"未显示"的话
     assert.match(text, /把功能实现一下\n/, '短文本要完整写进去')

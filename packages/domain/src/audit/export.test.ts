@@ -34,7 +34,6 @@ function makeAudit(over: Record<string, unknown> = {}): AuditRecord {
     modelId: null,
     promptHash: null,
     argvRedacted: ['claude', '-p', '***'],
-    contextBlockHash: null,
     verdictId: null,
     actionIds: [],
     queuedAt: 1000,

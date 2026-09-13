@@ -520,7 +520,6 @@ describe('审计链（FR-AUDIT-01）', () => {
         modelId: 'claude-sonnet-4-5',
         promptHash: 'abc',
         argvRedacted: ['claude', '-p', '--output-format', 'stream-json'],
-        contextBlockHash: 'def',
         verdictId: null,
         actionIds: [],
         queuedAt: 1,

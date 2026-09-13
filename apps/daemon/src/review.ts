@@ -73,8 +73,6 @@ export interface ReviewHandlingInput {
   runtimeDescriptorKey: string
   /** 探测到的 CLI 版本；读不到时 null。 */
   cliVersion: string | null
-  /** 注入的上下文块哈希；没有注入时 null。 */
-  contextBlockHash: string | null
   usage: TokenUsage | null | undefined
   /**
    * 判决所属的链路（根 → 当前 run）。
@@ -245,7 +243,6 @@ export class ReviewCoordinator {
       modelId: input.modelId,
       promptHash: input.promptHash,
       argv: input.argv,
-      contextBlockHash: input.contextBlockHash,
       verdictId,
       actionIds: [...actionIds] as AuditRecord['actionIds'],
       queuedAt: input.run.queuedAt,

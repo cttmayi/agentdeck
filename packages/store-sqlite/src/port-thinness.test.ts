@@ -542,7 +542,6 @@ async function scenario(store: Store): Promise<unknown[]> {
     modelId: null,
     promptHash: null,
     argvRedacted: ['claude'],
-    contextBlockHash: null,
     verdictId: null,
     actionIds: [],
     queuedAt,

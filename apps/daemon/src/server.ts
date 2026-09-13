@@ -780,6 +780,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         slug: s.slug,
         name: s.name,
         body: s.body,
+        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
+        ...(s.description ? { description: s.description } : {}),
         allowedActions: s.allowedActions,
         // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
@@ -869,6 +871,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         slug: s.slug,
         name: s.name,
         body: s.body,
+        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
+        ...(s.description ? { description: s.description } : {}),
         allowedActions: s.allowedActions,
         // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
@@ -961,6 +965,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         slug: s.slug,
         name: s.name,
         body: s.body,
+        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
+        ...(s.description ? { description: s.description } : {}),
         allowedActions: s.allowedActions,
         // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
@@ -1754,6 +1760,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             slug: s.slug,
             name: s.name,
             body: s.body,
+        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
+        ...(s.description ? { description: s.description } : {}),
             allowedActions: s.allowedActions,
             // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},

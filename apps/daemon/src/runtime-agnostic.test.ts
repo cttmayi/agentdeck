@@ -33,7 +33,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * 投递方式、受管旗标全都从描述表取）。但皮上有四处 claude 形状，而且**都不报错**：
  *
  *   1. 审计里的 `runtimeDescriptorKey` 写死 `'claude'`（外加 `cliVersion` 与
- *      `contextBlockHash` 恒为 `null`），argv 还是按描述表拼的**大概样子**；
+ *      `cliVersion` 恒为 `null`），argv 还是按描述表拼的**大概样子**；
  *   2. 技能投递能力表达不出"这个 CLI 没有技能发现机制"，只能填一个"它不读"的目录；
  *   3. 界面的 runtime 选项写死两项、"未验证"提示按 `=== 'generic'` 判；
  *   4. 文件清单的 `isManaged` 只认 `CLAUDE.md` / `.claude/**`。
@@ -200,11 +200,11 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
       backend.argv,
       '★ 审计记的必须是实际执行的那条命令行',
     )
-    // ④ 上下文块哈希是真算出来的
+    // ④ 输入哈希是真算出来的（受管块删掉之后，输入只剩一处，哈希也只剩一个）
     assert.match(
-      String(audit.contextBlockHash),
+      String(audit.promptHash),
       /^[0-9a-f]{64}$/,
-      '★ 块哈希要么是真算的，要么是 null；以前恒为 null 等于"我们没记"',
+      '★ 输入哈希要么是真算的，要么是 null；以前 `contextBlockHash` 恒为 null 等于"我们没记"',
     )
   })
 

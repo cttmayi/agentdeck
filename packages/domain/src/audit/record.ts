@@ -93,7 +93,6 @@ export interface BuildAuditInput {
   promptHash: string | null
   /** 实际启动的命令行——**本函数负责脱敏**。 */
   argv: readonly string[]
-  contextBlockHash: string | null
   verdictId: AuditRecord['verdictId']
   actionIds: readonly AuditRecord['actionIds'][number][]
   queuedAt: number
@@ -116,7 +115,6 @@ export function buildAuditRecord(input: BuildAuditInput): AuditRecord {
     modelId: input.modelId,
     promptHash: input.promptHash,
     argvRedacted: redactArgv(input.argv),
-    contextBlockHash: input.contextBlockHash,
     verdictId: input.verdictId,
     actionIds: [...input.actionIds],
     queuedAt: input.queuedAt,

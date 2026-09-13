@@ -83,7 +83,6 @@ export function unverifiedFields(): string[] {
     'resume.flag', // --resume-session
     'promptDelivery', // argv 还是 stdin，未验证
     'skills', // 该 CLI 到底有没有技能发现机制（现在如实声明为 'none'）
-    'contextFile', // AGENT.md 是否被自动加载
     'stream-parser:事件名', // text / thinking / tool_use / tool_result / usage / result / error
     'stream-parser:字段名', // session_id / message / result / usage.input_tokens
     'GENERIC_CLI_FACTS', // 凭据与 base URL 的环境变量名
