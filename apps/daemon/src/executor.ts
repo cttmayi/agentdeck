@@ -19,6 +19,7 @@ import {
   loadChainSteps,
   redactArgv,
   type ChainStep,
+  type ReviewDecision,
   type Store,
 } from '@alpha-helper/domain'
 import type { SandboxOptions } from '@alpha-helper/agent-core'
@@ -116,15 +117,58 @@ export interface ExecutorDeps {
    * 执行完成后自动接一次审核（S1）。
    *
    * 由调用方实现——它知道有哪些 agent、谁该当审核者、以及回路边界怎么算。
-   * 返回 null 表示"不接"。
+   *
+   * ★ `runId: null` **必须带一句 `note` 说明为什么没接**。
+   *
+   *   只返回 null 的那一版让日志只能说"没有串接审核"，说不出**为什么**——
+   *   而"为什么没审"恰恰是使用者最需要知道的（是没配审核者？审核者被删了？
+   *   还是链路深度超了？）。三种情况的处置完全不同。
    */
   autoChainReview?: (input: {
     executeRun: Run
     executorAgentId: string
     output: string
-  }) => Promise<RunId | null>
+  }) => Promise<{ runId: RunId | null; note: string }>
   now?: () => number
   onWarn?: (message: string) => void
+}
+
+/**
+ * 把判决结果写成一句人话。
+ *
+ * 六种走法都要有话说——**降级与不合规是最需要被看见的两种**（它们意味着
+ * "模型给的东西没法直接用"），而在此之前它们和"一切正常"在日志里长得一样。
+ */
+function describeDecision(handling: {
+  decision: ReviewDecision
+  actionIds: readonly string[]
+  spawnedRunId: string | null
+  derivationBlocked: { reason: string; message: string } | null
+}): string {
+  const d = handling.decision
+  const summary = (v: { conclusion: string; reasonCode: string; confidence: number }): string =>
+    `${v.conclusion}（${v.reasonCode}，置信度 ${v.confidence}）`
+  switch (d.kind) {
+    case 'act':
+      return `${summary(d.verdict)} → 已派发 ${handling.actionIds.length} 个动作`
+    case 'advisory':
+      return `${summary(d.verdict)} → 没有动作，只记录`
+    case 'escalate':
+      return `${summary(d.verdict)} → 需要人介入：${d.escalateReason}（已发通知）`
+    case 'retry':
+      return `不合规（${d.issues.length} 个问题）→ 重试一次，理由见上面的注入记录`
+    case 'downgrade':
+      return `不合规且重试次数已用尽 → 降级为建议（已发通知），本次不执行任何动作`
+    case 'invalid':
+      return `不合规且**重试无意义**（${d.issues.length} 个结构性问题）→ 已通知人处理`
+    default:
+      return '（未知的判决结果）'
+  }
+}
+
+/** 哈希只显示前 12 位：够用来对照，又不至于把一行撑爆。 */
+function shortHash(hash: string | null): string {
+  return hash === null ? '无' : `${hash.slice(0, 12)}…`
 }
 
 export interface RunExecutorOptions {
@@ -162,6 +206,15 @@ const MAX_STDERR_LOG_LINES = 200
  * 截断时**明说还剩多少**，不让人误以为它就收到这些。
  */
 const PROMPT_LOG_CHARS = 2_000
+
+/**
+ * 上下文块进日志的上限。
+ *
+ * 比 prompt 那 2000 宽松得多：块里是**这一整次执行的全部交代**（身份、任务、
+ * 技能清单、护栏；审核那次还有待审材料与标准全文）。几百到几千字的块
+ * 应当**完整**印出来——"日志不完整"正是使用者提的那条。
+ */
+const CONTEXT_LOG_CHARS = 8_000
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -273,6 +326,13 @@ export class RunExecutor {
       workDir: resolved.path,
       startedAt: now,
     })
+
+    // ★ 工作目录进日志——**正常路径也要进**。
+    //
+    //   原来只有"继承与 agent 默认目录冲突"时才有话，正常路径上一个字都没有。
+    //   而"它这次跑在哪个目录、为什么是那个目录"是使用者去找产出时问的第一个
+    //   问题（`resolveWorkDir` 早就算出了 `origin` 与一句人话解释，只是一直没被用）。
+    await this.#note(req.runId, `工作目录：${resolved.path}（${resolved.explanation}）`)
 
     // ★ 继承与"agent 默认目录"冲突时，**明说**。
     //
@@ -426,6 +486,41 @@ export class RunExecutor {
    * 我们确实注入了（`.claude/skills/<slug>/SKILL.md` 与 `CLAUDE.md` 都在
    * 工作目录里），但"确实做了"和"看得出来做了"是两件事。
    */
+  /**
+   * 把一份**可能很长**的文本写进日志。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 规矩：能放下就全文，放不下就**明确说清还差多少、去哪儿看全文**
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者的投诉是「日志打印不完整，导致我不知道**第一句话**到底是什么」。
+   * 原来那行只印了 prompt 的前 2000 字（超出时补一句"还有 N 字符未显示"），
+   * 而**上下文块的内容一个字都没印**——CLI 读的是两样东西，日志只给了一样，
+   * 于是"它到底被交代了什么"这个问题在日志里回答不了。
+   *
+   * 所以：默认把全文写进去（几百到几千字的块都放得下），只有确实很长时才截断，
+   * 且截断这件事必须**带着去处**说出来，否则等于让人自己去猜。
+   */
+  async #noteText(
+    runId: RunId,
+    /** 括号前的标签，例如「第一句话（stdin 的一行 stream-json user 消息」。 */
+    label: string,
+    text: string,
+    options: { cap: number; where: string },
+  ): Promise<void> {
+    const { cap, where } = options
+    if (text.length <= cap) {
+      await this.#note(runId, `${label}，${text.length} 字符）：`)
+      await this.#note(runId, text)
+      return
+    }
+    await this.#note(runId, `${label}，${text.length} 字符，下面只显示前 ${cap} 字）：`)
+    await this.#note(
+      runId,
+      `${text.slice(0, cap)}\n…（还有 ${text.length - cap} 字符未显示，完整内容见 ${where}）`,
+    )
+  }
+
   async #note(runId: RunId, text: string): Promise<void> {
     const event = this.#deps.registry.emit(runId, {
       t: 'message',
@@ -488,7 +583,14 @@ export class RunExecutor {
     const runId = run.id
 
     const lock = locks.acquire(run.workDir!, runId)
+    const waitedFrom = this.#now()
     if (!lock.acquired) {
+      // ★ 排队也要说一声。原来这条路径**完全静默**（只有状态变了）：
+      //   使用者看到 run 卡在那儿不动，日志里却一句话都没有。
+      await this.#note(
+        runId,
+        `工作目录被占用，排队等待（最多 ${Math.round(this.#workDirWaitMs / 1000)} 秒）：${run.workDir}`,
+      )
       await store.transitionRun(runId, 'queued', 'dispatched', { dispatchedAt: this.#now() })
       await store.transitionRun(runId, 'dispatched', 'waiting_local_directory', {
         waitReason: run.workDir,
@@ -511,6 +613,10 @@ export class RunExecutor {
         return
       }
       await store.transitionRun(runId, 'waiting_local_directory', 'queued')
+      await this.#note(
+        runId,
+        `已拿到工作目录，开始执行（排队 ${Math.round((this.#now() - waitedFrom) / 1000)} 秒）`,
+      )
     }
 
     let restoreContext: (() => Promise<void>) | null = null
@@ -705,12 +811,16 @@ export class RunExecutor {
       //
       //   长 prompt（报告正文可能上万字）要截断，并**明说截断了**——
       //   静默截断会让人以为"它就收到这些"。
-      await this.#note(runId, `输入（prompt，${req.prompt.length} 字符）：`)
-      await this.#note(
+      // ★ 说清**它是怎么送到 CLI 手里的**，而不只是"给了这么一段文字"。
+      //   两者不是一回事：这段文字是作为 stdin 上的一行 stream-json `user`
+      //   消息投递的（见 `buildClaudeInput`），而 CLI 另外还会读工作目录里的
+      //   上下文块（下面紧接着记）。不写清投递方式，使用者就无法判断
+      //   "我看到的这段 = 模型看到的那个吗"。
+      await this.#noteText(
         runId,
-        req.prompt.length > PROMPT_LOG_CHARS
-          ? `${req.prompt.slice(0, PROMPT_LOG_CHARS)}\n…（还有 ${req.prompt.length - PROMPT_LOG_CHARS} 字符未显示）`
-          : req.prompt,
+        '第一句话（stdin 的一行 stream-json user 消息',
+        req.prompt,
+        { cap: PROMPT_LOG_CHARS, where: '本次 run 的记录与工作目录里的上下文文件' },
       )
 
       // ★ 把注入结果写进日志。
@@ -759,6 +869,21 @@ export class RunExecutor {
       restoreContext = injected.restore
       contextBlockHash = injected.hash
 
+      // ★ 上下文块的内容也要印出来。
+      //
+      //   CLI 读的是**两样**东西：stdin 的第一句话，以及工作目录里的这个块
+      //   （它被当作"项目记忆"）。原来日志里只有前者，于是"它到底被交代了
+      //   什么"这个问题回答不了——块里还带着 run/对象标识、技能清单与护栏。
+      await this.#noteText(
+        runId,
+        `上下文文件（${runtime.descriptor.contextFile} 的受管块，CLI 会当项目记忆读`,
+        body,
+        {
+          cap: CONTEXT_LOG_CHARS,
+          where: `工作目录里的 ${runtime.descriptor.contextFile}`,
+        },
+      )
+
       await store.transitionRun(runId, 'dispatched', 'running', { startedAt: this.#now() })
       registry.emit(runId, { t: 'status', status: 'running', at: this.#now() })
 
@@ -773,6 +898,12 @@ export class RunExecutor {
       //   留了个 sessionId，也不该拿去恢复——那是在替真实 CLI 回答一个
       //   我们答不上来的问题。
       const resume = await this.#resolveResume(req, run, runtime.descriptor)
+      // ★ 会话是"接着上次说"还是"从头开始"，是理解产出的一等事实。
+      //   原来只有**被拒/无法判断**时才有话，正常路径上完全看不出来。
+      await this.#note(
+        runId,
+        `会话：${resume.sessionId ? `恢复 ${resume.sessionId}` : '全新开始'}——${resume.reason}`,
+      )
 
       // ★ 命令行与 stderr 进日志（方便 debug）。
       //
@@ -900,6 +1031,20 @@ export class RunExecutor {
       )
       if (result.usage) registry.emit(runId, { t: 'usage', usage: result.usage })
 
+      // ★ 用量与成本进日志。
+      //
+      //   界面里有，但"这次花了多少"是要和产出一起被回看的——日志是那条时间线。
+      //   CLI 不报告时说一句"没有报告"，因为**空着与没报告不是一回事**：
+      //   前者让人以为是平台没记，后者是上游就没给。
+      await this.#note(
+        runId,
+        result.usage
+          ? `用量：输入 ${result.usage.inputTokens} / 输出 ${result.usage.outputTokens} token，` +
+              `成本 $${(result.usage.costUsdMicros / 1_000_000).toFixed(4)}` +
+              `（${result.usage.costSource === 'provider' ? 'CLI 上报' : '本地估算'}）`
+          : '用量：CLI 没有报告（界面上的用量会是空的，那不是平台漏记）',
+      )
+
       // ★ 「恢复被拒绝」必须与「无法判断」分开报（FR-CLI-06）。
       //
       //   `resumeRejected === undefined` 的含义是**测不出来**，不是"没被拒"。
@@ -964,11 +1109,17 @@ export class RunExecutor {
       let chainedRunId: RunId | null = null
       if (req.kind === 'execute' && result.status === 'completed') {
         try {
-          chainedRunId = (await this.#deps.autoChainReview?.({
+          // 串接的**结果**（包括"没串上"和原因）都进日志：否则"这次为什么
+          // 没有审核"在日志里查不到，只能去界面上猜。
+          const chained = await this.#deps.autoChainReview?.({
             executeRun: run,
             executorAgentId: req.agentRef.id,
             output: result.output || collected,
-          })) ?? null
+          })
+          if (chained) {
+            chainedRunId = chained.runId
+            await this.#note(runId, chained.note)
+          }
         } catch (err) {
           // 串接失败不能让执行本身变成失败——但必须可见
           this.#deps.onWarn?.(`自动审核串接失败：${String(err)}`)
@@ -1102,6 +1253,20 @@ export class RunExecutor {
       usage,
       chainSteps,
     })
+
+    // ★ 判决与审计进日志。
+    //
+    //   在此之前，审完之后日志里**什么都没有**：结论、理由码、动作、是否降级、
+    //   审计记录的存在——全都要去界面上另找。而日志是那条时间线，
+    //   "它最后判了什么"是这条时间线的终点。
+    await this.#note(run.id, `判决：${describeDecision(handling)}`)
+    await this.#note(
+      run.id,
+      `审计：已记录（id ${handling.audit.id}，runtime ${handling.audit.runtimeDescriptorKey}，` +
+        `CLI 版本 ${handling.audit.cliVersion ?? '读不到'}，` +
+        `promptHash ${shortHash(handling.audit.promptHash)}，` +
+        `块哈希 ${shortHash(handling.audit.contextBlockHash)}）`,
+    )
 
     if (handling.decision.kind === 'retry') {
       this.#invalidAttempts.set(subjectKey, invalidAttempts + 1)

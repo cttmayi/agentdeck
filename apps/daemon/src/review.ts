@@ -95,6 +95,14 @@ export interface ReviewHandlingResult {
   spawnedRunId: string | null
   /** 派生被回路边界拦下时的原因（指派本身可能已经成功）。 */
   derivationBlocked: { reason: 'cycle' | 'depth'; message: string } | null
+  /**
+   * 刚写下去的审计记录。
+   *
+   * ★ 回传它是为了让 run 日志能说一句"审计已记录（runtime…，promptHash…）"。
+   *   审计是事后核对的依据，而使用者在此之前**完全不知道它存在**——
+   *   界面里也没有入口。日志里报一句，至少让人知道去哪儿找证据。
+   */
+  audit: AuditRecord
 }
 
 export class ReviewCoordinator {
@@ -247,7 +255,7 @@ export class ReviewCoordinator {
     })
     await this.#store.appendAudit(audit)
 
-    return { decision, verdictId, actionIds, spawnedRunId, derivationBlocked }
+    return { decision, verdictId, actionIds, spawnedRunId, derivationBlocked, audit }
   }
 
   #recordFrom(

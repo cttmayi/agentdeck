@@ -1624,8 +1624,17 @@ describe('★ 日志要够 debug：命令行 / stderr / 退出码', () => {
   })
 })
 
-describe('★ 日志要有**输入**（方便 debug）', () => {
-  test('★ prompt 出现在日志里，且长 prompt 截断时说明还剩多少', async () => {
+describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
+  /**
+   * 这组用例的由来是一句使用者的反馈：「日志打印不完整，导致我不知道
+   * **第一句话**到底是什么」。
+   *
+   * 原来只印了 prompt（前 2000 字），而 CLI 实际读的是**两样**东西：
+   * stdin 上的那行 stream-json user 消息，以及工作目录里的上下文块
+   * （它被当项目记忆读）。所以"它被交代了什么"在日志里答不全。
+   * 现在两样都印，并且**说清各自是怎么送进去的**。
+   */
+  test('★ 第一句话与上下文块都进日志；长文本截断时说明还剩多少、去哪儿看全文', async () => {
     // 排查时最先要回答的两个问题是"给了它什么"与"它做了什么"。
     // 后者原本只有工具名没有参数，前者**完全不在日志里**。
     const runId = ulid() as RunId
@@ -1645,9 +1654,23 @@ describe('★ 日志要有**输入**（方便 debug）', () => {
       }),
     })
 
-    const text = await waitForText(runId, /输入（prompt/)
-    assert.match(text, /输入（prompt，3000 字符）/, '要说明这次给了它多少')
+    const text = await waitForText(runId, /第一句话（stdin/)
+    assert.match(
+      text,
+      /第一句话（stdin 的一行 stream-json user 消息，3000 字符，下面只显示前 2000 字）：/,
+      '要说明给了它多少、以及**怎么送进去的**（stdin 的 user 消息）',
+    )
     assert.match(text, /还有 1000 字符未显示/, '★ 截断必须明说剩多少——静默截断会让人以为它就收到这些')
+    assert.match(text, /完整内容见/, '★ 还要说清**去哪儿看全文**，否则等于让人自己猜')
+
+    // 上下文块的内容也要在日志里（CLI 读的第二样东西）
+    assert.match(text, /上下文文件（CLAUDE.md 的受管块/, '★ 块里是这次任务的全部交代，不能一个字都不印')
+    assert.match(text, /## 护栏/, '块的内容要真的印出来，而不是只说"写了这么个文件"')
+
+    // 顺带：这些也都该在
+    assert.match(text, /工作目录：/, '它跑到哪儿去了')
+    assert.match(text, /会话：/, '接着上次说还是从头开始')
+    assert.match(text, /用量：输入/, '花了多少')
   })
 
   test('短 prompt 完整显示，不加"还有 N 字符"', async () => {
@@ -1666,9 +1689,49 @@ describe('★ 日志要有**输入**（方便 debug）', () => {
         limits: { maxTurns: null, timeoutMs: null },
       }),
     })
-    const text = await waitForText(runId, /输入（prompt/)
+    const text = await waitForText(runId, /第一句话（stdin/)
     assert.match(text, /把功能实现一下/)
+    // 短 prompt 要**逐字**出现（连行一起），且不带任何"未显示"的话
+    assert.match(text, /把功能实现一下\n/, '短文本要完整写进去')
     assert.ok(!/还有 \\d+ 字符未显示/.test(text), '没截断就不该说截断了')
+  })
+
+  test('★ 没配审核者时，日志要说清"为什么没有审核"', async () => {
+    // 这条是"日志要能回答为什么"的落点：原来只返回 null，日志里连一句
+    // "没有串接审核"都没有，使用者只能去界面上猜（或以为系统坏了）。
+    const runId = ulid() as RunId
+    const dir = await makeTempDir('e2e-noreviewer')
+    try {
+      const agent = ((await (
+        await fetch(`${daemon.url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '不指定审核者的执行者', role: 'executor' }),
+        })
+      ).json()) as { id: string }).id
+
+      await fetch(`${daemon.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: agent, name: '不指定审核者的执行者', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: issueId },
+          prompt: '跑一下就好',
+          workDir: dir,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      const text = await waitForText(runId, /没有串接审核/)
+      assert.match(text, /没有串接审核：agent/, '要说清是哪个 agent')
+      assert.match(text, /「由谁审它」是空的/, '还要说清**去哪儿改**')
+      assert.match(text, /不是配置错误/, '以及这不是故障——D28 里"不自动审"是明确选择')
+    } finally {
+      await cleanup(dir)
+    }
   })
 })
 

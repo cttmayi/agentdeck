@@ -605,12 +605,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     executeRun: Run
     executorAgentId: string
     output: string
-  }): Promise<RunId | null> {
+  }): Promise<{ runId: RunId | null; note: string }> {
     const agents = await store.listAgents(workspaceId)
     const executor = agents.find((a) => (a.id as string) === input.executorAgentId)
     if (!executor) {
       warn(`找不到执行 agent ${input.executorAgentId}，跳过自动审核`)
-      return null
+      return { runId: null, note: '没有串接审核：找不到这次执行用的 agent（它可能已被删除）' }
     }
 
     // ★ D28：**由这个执行 agent 自己指定**审核者，而不是"从别人里挑一个"。
@@ -621,14 +621,26 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   应该被明确指定的事。
     //
     //   `reviewerAgentId` 为空 = 明确选择不自动审（不是配置错误）。
-    if (!executor.reviewerAgentId) return null
+    if (!executor.reviewerAgentId) {
+      return {
+        runId: null,
+        note:
+          `没有串接审核：agent「${executor.name}」没有指定审核者（「由谁审它」是空的）。` +
+          `这是**明确的选择**，不是配置错误；要自动审就在智能体页给它选一个审核者。`,
+      }
+    }
 
     const reviewer = agents.find((a) => a.id === executor.reviewerAgentId)
     if (!reviewer) {
       warn(
         `agent ${executor.name} 指定的审核者已不存在（${executor.reviewerAgentId}），跳过自动审核`,
       )
-      return null
+      return {
+        runId: null,
+        note:
+          `没有串接审核：agent「${executor.name}」指定的审核者已经不存在了` +
+          `（id ${executor.reviewerAgentId}）。请在智能体页重新指定一个。`,
+      }
     }
 
     const depth = input.executeRun.chainDepth + 1
@@ -645,10 +657,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         read: false,
         createdAt: Date.now(),
       })
-      return null
+      return {
+        runId: null,
+        note:
+          `没有串接审核：这条链路已经派生 ${depth} 次，超过上限 ${DEFAULT_MAX_CHAIN_DEPTH}，` +
+          `停止继续派生以避免"改 → 审 → 再改 → 再审"烧 token（已发通知）。`,
+      }
     }
 
-    return createRunForReviewer({
+    const chainedRunId = await createRunForReviewer({
       reviewer,
       kind: 'run-output',
       title: `审核执行产出（run ${input.executeRun.id.slice(-8)}）`,
@@ -659,6 +676,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       relatedIssueId: issueIdOfSubject(input.executeRun),
       prompt: '请审核上面这次执行的产出，并按审核标准给出判决。',
     })
+    return {
+      runId: chainedRunId,
+      note: chainedRunId
+        ? `已串接审核：run ${chainedRunId}（审核者「${reviewer.name}」）。它继承本次的工作目录，` +
+          `所以看得见这里留下的产出。`
+        : `没有串接审核：审核者「${reviewer.name}」一个 skill 都没挂，` +
+          `而审核标准就在 skill 里——没有标准的审核不算审核。`,
+    }
   }
 
   const ingestor = new ReportIngestor({ store })
