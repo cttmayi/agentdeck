@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createAgent, skills, agents } from '../lib/stores.ts'
+  import { agents, createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
 
@@ -28,6 +28,13 @@
   let instructions = ''
   let selectedSkills: string[] = []
   let reviewerAgentId = ''
+  /**
+   * 可选的 runtime —— 从**身份接口**来，不写死两项。
+   *
+   * 写死的话，新加一个 runtime 之后这个表单里根本选不到它（只有直接调接口
+   * 才行）。初始化取第一个可用项，而不是硬编码 'claude'。
+   */
+  $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
   let runtimeKey = 'claude'
   let workDir = ''
   let busy = false
@@ -166,8 +173,15 @@
       <label>
         用哪个 runtime
         <select bind:value={runtimeKey}>
-          <option value="claude">claude</option>
-          <option value="generic">generic（未对照真实程序）</option>
+          {#each runtimeOptions as key (key)}
+            {@const r = $identity?.runtimes.find((x) => x.key === key)}
+            <option value={key}>
+              {key}{r && r.evidence !== 'verified' ? '（未对照真实程序）' : ''}
+            </option>
+          {/each}
+          {#if !runtimeOptions.includes(runtimeKey)}
+            <option value={runtimeKey}>{runtimeKey}（当前）</option>
+          {/if}
         </select>
       </label>
       <label>

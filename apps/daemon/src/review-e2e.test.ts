@@ -51,8 +51,12 @@ class ScriptedReviewBackend implements AgentBackend {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
   }
 
+  /** 假后端也要**如实上报**命令行——审计记的是这条（见下面那条断言）。 */
+  readonly reportedArgv = ['/usr/local/bin/claude', '-p', '--output-format', 'stream-json']
+
   async execute(opts: ExecOptions): Promise<AgentSession> {
     this.calls += 1
+    opts.onCommandLine?.({ argv: this.reportedArgv, sandboxDescription: '未启用沙箱（测试）' })
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     this.seenSkillFiles = {}
@@ -317,10 +321,22 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
 
     assert.equal(audits.length, 1)
     const audit = audits[0]!
-    assert.equal(audit.runtimeDescriptorKey, 'claude')
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 这四项原来是**写死的**（'claude' / null / null / 按描述表拼的 argv）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 审计是事后唯一的依据，写死的值不是"空着"而是**说错话**：换一个 runtime，
+    // 审计仍然声称用的是 claude。所以这里逐项钉住"它来自事实"。
+    assert.equal(audit.runtimeDescriptorKey, 'claude', '这条 run 跑的就是 claude')
+    assert.equal(audit.cliVersion, '0.0.0-fake', '★ 版本要来自探测，不是写死的 null')
+    assert.deepEqual(
+      audit.argvRedacted,
+      backend.reportedArgv,
+      '★ 命令行要来自后端如实上报的那条，不是按描述表拼的大概样子',
+    )
+    assert.match(String(audit.contextBlockHash), /^[0-9a-f]{64}$/, '★ 块哈希要真算过')
     assert.notEqual(audit.promptHash, null, '必须有 prompt 哈希')
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
-    assert.ok(audit.argvRedacted.length > 0, '必须记录脱敏后的命令行')
   })
 
   test('★ 审核期间上下文块含审核标准与判决格式要求（FR-CLI-43）', () => {

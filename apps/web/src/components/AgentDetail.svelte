@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Agent } from '../lib/api.ts'
-  import { agents, skills, updateAgent } from '../lib/stores.ts'
+  import { agents, identity, skills, updateAgent } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
 
   /**
@@ -58,6 +58,30 @@
   })
 
   let draft = blankDraft()
+
+  /**
+   * 可选的 runtime —— **从身份接口来，不写死**。
+   *
+   * ★ 原来是两个写死的 `<option value="claude">` / `"generic"`。那意味着
+   *   加一个 runtime（描述表一行 + 适配器包 + 装配表一行）之后，**界面上
+   *   根本选不到它**——只有直接调接口才行。而"接口支持、界面没有入口"
+   *   是这个仓库里最常见的那类缺陷。
+   */
+  $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
+
+  /**
+   * 该 runtime 的"未验证"提示；已验证 / 还不知道时返回 null。
+   *
+   * ★ 判据是描述表里的 `evidence`，不是 `runtimeKey === 'generic'`。
+   *   写死 runtime 名的那种判断，在加入第三个 runtime 时会**静默失效**：
+   *   一个未验证的 CLI 会被显示得像验证过一样——而那正是 `evidence`
+   *   这个字段存在的理由。
+   */
+  function evidenceWarning(key: string): string | null {
+    const runtime = $identity?.runtimes.find((r) => r.key === key)
+    if (!runtime || runtime.evidence === 'verified') return null
+    return runtime.evidenceNote ?? '未对照真实程序（字段名是按公开形状推导的）'
+  }
 
   function startEdit(): void {
     // 每次进入编辑都重新拷一份——否则上一次取消留下的改动会残留
@@ -340,12 +364,19 @@
           <label for="agent-runtime">runtime</label>
           <div>
             <select id="agent-runtime" bind:value={draft.runtimeKey}>
-              <option value="claude">claude</option>
-              <option value="generic">generic</option>
+              {#each runtimeOptions as key (key)}
+                <option value={key}>{key}</option>
+              {/each}
+              {#if !runtimeOptions.includes(draft.runtimeKey)}
+                <!-- 身份还没到（或这个 runtime 已被摘掉）：把当前值显示出来。
+                     少了这一支，select 会静默落到第一项 —— 那等于偷偷改了
+                     这个 agent 的 runtime。 -->
+                <option value={draft.runtimeKey}>{draft.runtimeKey}（当前）</option>
+              {/if}
             </select>
-            <p class="row-hint">
-              <code>generic</code> 适配器的字段名**没有对照过真实程序**，是按公开形状推导的。
-            </p>
+            {#if evidenceWarning(draft.runtimeKey)}
+              <p class="row-hint warn">{evidenceWarning(draft.runtimeKey)}</p>
+            {/if}
           </div>
         </div>
 
@@ -371,8 +402,8 @@
           <span class="row-label">runtime</span>
           <div>
             <code>{agent.runtimeKey}</code>
-            {#if agent.runtimeKey === 'generic'}
-              <span class="warn small">未对照真实程序（字段名是按公开形状推导的）</span>
+            {#if evidenceWarning(agent.runtimeKey)}
+              <span class="warn small">{evidenceWarning(agent.runtimeKey)}</span>
             {/if}
           </div>
         </div>

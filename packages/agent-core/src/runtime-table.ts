@@ -72,7 +72,13 @@ export interface ManagedFlags {
   resume: string
 }
 
-/** claude 的默认受管旗标——`argv.ts` 在表未提供时用它，保持首版行为不变。 */
+/**
+ * claude 用的受管旗标。
+ *
+ * ⚠️ 它**不再是缺省值**（`managedFlags` 已改成必填，见 `RuntimeDescriptor`）。
+ *    留着这个导出的原因只有一个：claude 那一行显式地引用它，好让"这是谁的选择"
+ *    看得见。新加 runtime 时**必须自己写全**这三个旗标。
+ */
 export const DEFAULT_MANAGED_FLAGS: ManagedFlags = {
   model: '--model',
   maxTurns: '--max-turns',
@@ -87,6 +93,18 @@ export const DEFAULT_MANAGED_FLAGS: ManagedFlags = {
  * 所以它是一条数据，由各适配器自己解释。
  */
 export type PromptDelivery = 'stdin-ndjson' | 'argv'
+
+/**
+ * 技能投递能力。
+ *
+ * `directory`：这个 CLI 会自己扫某个目录、把里面的 `<dir>/<slug>/SKILL.md`
+ * 当成技能（claude 就是 `.claude/skills`）。
+ * `none`：它没有这个机制（或者我们**没验证过**它有，那在效果上等同——
+ * 见 `RuntimeDescriptor.skills` 的说明）。这时一个文件都不写。
+ */
+export type SkillDelivery =
+  | { kind: 'directory'; dir: string }
+  | { kind: 'none'; reason: string }
 
 /** 会话状态三态——见 `RuntimeDescriptor.sessionState` 的说明。 */
 export type SessionState = 'stateful' | 'stateless' | 'unknown'
@@ -205,8 +223,28 @@ export interface RuntimeDescriptor {
    */
   stateDir?: string
 
-  /** 技能落盘的目录（相对工作目录）。 */
-  skillDir: string
+  /**
+   * 技能怎么投递给这个 CLI（相对工作目录的目录名，或者"没有这个机制"）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 为什么是一个**能力**，而不是一个目录名
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来这里是 `skillDir: string`（必填）。那等于假设**每个 CLI 都有**
+   * "把目录摆对就会被发现"这个机制——而那是 claude 一家的约定。
+   *
+   * 遇到没有这个机制的 CLI，那份必填字段只留下一条路：填一个"它其实不读"的
+   * 目录名。后果是最坏的那种——技能**写下去了、永远不生效、而且不报错**
+   *（FR-CLI-40 那一类"写成功 ≠ 被读取"）。使用者会去查 prompt、查 skill 内容，
+   * 而真正的问题是"这个 CLI 根本没有技能发现"。
+   *
+   * 所以允许显式声明"没有"：`{ kind: 'none' }`。执行器遇到它时**一个文件都不写**，
+   * 并在 run 日志里说清"这个 runtime 没有技能发现机制"——连带把"该 agent 挂了
+   * 技能但注入不了"这件事说出来。**宁可不支持，也不要假装支持。**
+   *
+   * 这与 `toolConfig` / `disableSwitch` 是同一个形状（`enabled: false` + 原因）。
+   */
+  skills: SkillDelivery
   /** 上下文文件名。 */
   contextFile: string
 
@@ -226,8 +264,24 @@ export interface RuntimeDescriptor {
   /** 禁改参数表。 */
   blockedArgs: Readonly<Record<string, BlockedArgMode>>
 
-  /** 受管参数的旗标名。缺省 = claude 的拼写。 */
-  managedFlags?: ManagedFlags
+  /**
+   * 受管参数的旗标名。**必填**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 这里原来允许缺省，而缺省值是 claude 的拼写
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 那时候"首版行为逐字节不变"是个好理由。但后果是：**新加一个 runtime 时
+   * 忘了声明这三个旗标，就会按 claude 的拼写去拼**（`--model` / `--max-turns`
+   * / `--resume`）——若那个 CLI 不认这些旗标，最好情况是起不来（大声），
+   * 最坏情况是它**忽略未知旗标**、于是静默用了自己的默认模型与默认轮数，
+   * 而审计与日志看起来一切正常。
+   *
+   * 缺省的方向必须是**安全的那一侧**：宁可加载描述表时就报错，也不要替一个
+   * 没声明过的 CLI 猜旗标。所以它是必填，`loadRuntimeDescriptor` 还会在
+   * 运行时再验一次（描述表可能来自仓库之外的对象）。
+   */
+  managedFlags: ManagedFlags
 }
 
 /**
@@ -285,7 +339,7 @@ export const CLAUDE_DESCRIPTOR: RuntimeDescriptor = {
     onMismatch: 'warn',
   },
   stateDir: '.claude',
-  skillDir: '.claude/skills',
+  skills: { kind: 'directory', dir: '.claude/skills' },
   contextFile: 'CLAUDE.md',
   toolConfig: {
     enabled: false,
@@ -384,7 +438,25 @@ export const GENERIC_DESCRIPTOR: RuntimeDescriptor = {
     '未对照真实 CLI 验证：命令名 agent-cli、旗标拼写（-m / --max-steps / --resume-session / ' +
     '--no-color）、NDJSON 事件名与字段名、凭据环境变量名均为按公开形状推导。' +
     '测试用假可执行文件覆盖了整条链路（NFR-T-01），但"字段名对得上"必须首次接入真实 CLI 时逐条核对。',
-  skillDir: '.agent/skills',
+  /**
+   * ★ `'none'` 而不是 `.agent/skills`。
+   *
+   *   这个目录名是按公开形状**猜的**：谁也没验证过该 CLI 会不会扫它。
+   *   按新规矩（`RuntimeDescriptor.skills` 的说明），"猜它支持"与"确认它不支持"
+   *   在效果上一样糟——都会把技能写进一个可能没人读的目录，然后静默地不生效。
+   *   所以这里如实声明"没有"，等真的接上那个 CLI、逐条核对之后再改成
+   *   `{ kind: 'directory', dir: … }`。
+   *
+   *   收益不只是诚实：这条分支因此在**生产表**里被真的走到，不会腐烂成
+   *   只在测试里存在的能力。
+   */
+  skills: {
+    kind: 'none',
+    reason:
+      '未对照真实 CLI 验证过任何技能发现机制：`.agent/skills` 是按公开形状猜的目录名。' +
+      '在真实 CLI 上确认"把目录摆对就会被发现"之前不写文件——写进一个没人读的目录' +
+      '等于假装支持（FR-CLI-40）。',
+  },
   contextFile: 'AGENT.md',
   toolConfig: {
     enabled: false,
@@ -441,12 +513,11 @@ export const RUNTIMES: Readonly<Record<string, RuntimeDescriptor>> = {
 }
 
 /**
- * 补齐可选字段，返回**可直接消费**的描述符。
+ * 返回**可直接消费**的描述符：校验必填项、并对齐两个视图。
  *
- * 存在的理由有两个，都来自第二个适配器的实操：
- *
- * 1. `managedFlags` 是可选的（否则首版 claude 那一行要被迫改写）；
- *    调用方不该自己 `?? []` 一遍，那会把缺省值复制到每个调用点。
+ * 1. `managedFlags` 是必填。缺了就**抛**，而不是回落到 claude 的拼写——
+ *    替一个没声明过的 CLI 猜旗标，正是"看起来能用、实际用错了"的来源。
+ *    类型上它已经必填，这里再验一次是因为描述符也可能是仓库之外传进来的对象。
  * 2. `managedFlags.resume` 与 `resume.flag` 是同一件事的两个视图。
  *    在这里**强制对齐**，就不会出现"表里写 A、拼参数用 B"的静默不一致。
  */
@@ -455,12 +526,21 @@ export function loadRuntimeDescriptor(keyOrDescriptor: string | RuntimeDescripto
     typeof keyOrDescriptor === 'string' ? getRuntimeDescriptor(keyOrDescriptor) : keyOrDescriptor
   const resumeFlag = desc.resume.flag
   const flags = desc.managedFlags
+  if (!flags || !flags.model || !flags.maxTurns) {
+    throw new Error(
+      `runtime ${desc.key} 的描述符缺少 managedFlags（model / maxTurns / resume）。` +
+        `它们是必填的：**这里不能替它猜**——按另一个 CLI 的旗标拼参数，` +
+        `轻则起不来，重则静默用了默认值而日志看起来一切正常。` +
+        `请在该 runtime 的表行里写明实际的旗标名。`,
+    )
+  }
   return {
     ...desc,
     managedFlags: {
-      model: flags?.model ?? DEFAULT_MANAGED_FLAGS.model,
-      maxTurns: flags?.maxTurns ?? DEFAULT_MANAGED_FLAGS.maxTurns,
-      resume: resumeFlag || flags?.resume || DEFAULT_MANAGED_FLAGS.resume,
+      model: flags.model,
+      maxTurns: flags.maxTurns,
+      // 与 `resume.flag` 对齐：两者是同一件事的两个视图
+      resume: resumeFlag || flags.resume,
     },
   }
 }

@@ -83,6 +83,8 @@ export interface RuntimeView {
   cliVersion: string | null
   /** `verified` = 对照过真实程序；`provisional` = 按公开形状推导。 */
   evidence: string
+  /** 未验证时：**缺什么证据**（给人看的一句话），已验证时为 null。 */
+  evidenceNote: string | null
   sessionState: string
   versionSupport?: {
     status: string

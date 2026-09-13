@@ -3,14 +3,19 @@ import { describe, test } from 'node:test'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { getRuntimeDescriptor } from '@alpha-helper/agent-core'
 import {
   MAX_FILE_BYTES,
   UnsafePathError,
   contentTypeFor,
   listWorkDir,
+  managedPathsFor,
   readWorkFile,
   resolveWorkFilePath,
 } from './workdir-files.ts'
+
+/** claude 的注入物规则——大多数用例只关心"是不是被标出来"。 */
+const CLAUDE_MANAGED = managedPathsFor(getRuntimeDescriptor('claude'))
 
 /**
  * 工作目录的文件浏览。
@@ -156,7 +161,10 @@ describe('列目录：**一次一层**', () => {
       await mkdir(join(dir, '.claude', 'skills', 'x'), { recursive: true })
       await writeFile(join(dir, '.claude', 'skills', 'x', 'SKILL.md'), '# 技能', 'utf8')
 
-      const listing = await listWorkDir(dir)
+      // ★ 规则要**传进去**（按这个 run 的 runtime 算）——这正是这次改动：
+      //   原来 `listWorkDir` 内部写死 `.claude/**`，换 CLI 就会把注入物
+      //   当成 agent 的产出显示。
+      const listing = await listWorkDir(dir, '', CLAUDE_MANAGED)
       assert.deepEqual(
         listing.entries.map((e) => e.path).sort(),
         ['.claude', 'report.md'],
@@ -167,6 +175,33 @@ describe('列目录：**一次一层**', () => {
       assert.equal(claude?.managed, true, '平台注入的要标出来')
       assert.equal(claude?.hasChildren, true, '里面有东西 ⇒ 界面才画展开箭头')
       assert.equal(listing.dir, '', '顶层时 dir 是空串')
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ "哪些是平台注入的"由 runtime 描述表决定，不是写死 .claude', async () => {
+    const dir = await makeWorkDir()
+    try {
+      // 两个 runtime 的注入物同时躺在目录里（现实里不会，但这样最能说明问题）
+      await mkdir(join(dir, '.claude', 'skills'), { recursive: true })
+      await mkdir(join(dir, '.agent', 'skills'), { recursive: true })
+      await writeFile(join(dir, 'CLAUDE.md'), 'x', 'utf8')
+      await writeFile(join(dir, 'AGENT.md'), 'x', 'utf8')
+
+      const claude = await listWorkDir(dir, '', managedPathsFor(getRuntimeDescriptor('claude')))
+      const claudeManaged = claude.entries.filter((e) => e.managed).map((e) => e.path).sort()
+      assert.deepEqual(claudeManaged, ['.claude', 'CLAUDE.md'])
+
+      const generic = await listWorkDir(dir, '', managedPathsFor(getRuntimeDescriptor('generic')))
+      const genericManaged = generic.entries.filter((e) => e.managed).map((e) => e.path).sort()
+      // generic 声明"没有技能发现机制" ⇒ 只有它的上下文文件算注入物；
+      // `.claude/**` 对它只是**别人的东西**，不该被标成平台注入
+      assert.deepEqual(genericManaged, ['AGENT.md'])
+      assert.ok(
+        !genericManaged.includes('.claude'),
+        '★ 写死 .claude 的版本会在这里把 claude 的注入物标成 generic 的',
+      )
     } finally {
       await cleanup(dir)
     }

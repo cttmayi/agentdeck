@@ -57,9 +57,9 @@ export const GENERIC_CLI_FACTS: GenericCliFacts = {
   sessionIdField: 'session_id',
 }
 
-/** 第二个 runtime 的描述符，已补齐可选字段（`managedFlags` 等）。 */
+/** 第二个 runtime 的描述符（`managedFlags` 现在是必填，不再需要补齐）。 */
 export function genericDescriptor(): RuntimeDescriptor {
-  return { ...GENERIC_DESCRIPTOR, managedFlags: { ...GENERIC_DESCRIPTOR.managedFlags! } }
+  return { ...GENERIC_DESCRIPTOR, managedFlags: { ...GENERIC_DESCRIPTOR.managedFlags } }
 }
 
 /**
@@ -82,7 +82,7 @@ export function unverifiedFields(): string[] {
     'managedFlags.maxTurns', // --max-steps
     'resume.flag', // --resume-session
     'promptDelivery', // argv 还是 stdin，未验证
-    'skillDir', // .agent/skills 是否被该 CLI 原生发现
+    'skills', // 该 CLI 到底有没有技能发现机制（现在如实声明为 'none'）
     'contextFile', // AGENT.md 是否被自动加载
     'stream-parser:事件名', // text / thinking / tool_use / tool_result / usage / result / error
     'stream-parser:字段名', // session_id / message / result / usage.input_tokens

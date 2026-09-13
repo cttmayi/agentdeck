@@ -49,10 +49,14 @@ export interface WorkDirEntry {
    */
   hasChildren: boolean
   /**
-   * 是不是**平台注入**的东西（`.claude/**`、`CLAUDE.md`）。
+   * 是不是**平台注入**的东西（技能目录、CLI 的状态目录、上下文文件）。
    *
    * 界面据此弱化显示：它们是"这个任务在什么标准下跑的"，不是 agent 的产出。
    * 注意这里**不用一段文字去说明**——弱化 + 悬停提示就够，正文里少一行字。
+   *
+   * ★ 判据来自**该 run 的 runtime 描述表**，不是写死的 `.claude/`：
+   *   换一个 CLI，注入物落在别的目录里（`.agent/skills`、`AGENT.md`…），
+   *   写死的规则会把它们当成 agent 的产出显示出来。
    */
   managed: boolean
 }
@@ -67,9 +71,41 @@ export interface WorkDirListing {
   truncated: boolean
 }
 
-/** 平台自己写进去的路径（不删除技能之后，这些会一直在）。 */
-function isManaged(relPath: string): boolean {
-  return relPath === 'CLAUDE.md' || relPath === '.claude' || relPath.startsWith('.claude/')
+/**
+ * 平台会往工作目录里写哪些路径——**从描述表算**，不是写死。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么值得抽出来
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原来这里是 `isManaged()`：一个写死 `CLAUDE.md` 与 `.claude/**` 的函数。
+ * 对 claude 正确，对任何别的 CLI 都是错的——而错的方式是**静默的**：
+ * 界面会把平台注入物当成 agent 的产出显示，使用者据此判断"它做了什么"。
+ *
+ * 这三处正是描述表里已有的字段（技能投递目录、CLI 状态目录、上下文文件名），
+ * 所以这里不需要新数据，只需要**别写死**。
+ */
+export interface ManagedPaths {
+  /** 平台注入的目录（相对工作目录，不带尾部斜杠）。 */
+  dirs: readonly string[]
+  /** 平台注入的文件（相对工作目录）。 */
+  files: readonly string[]
+}
+
+export function managedPathsFor(descriptor: {
+  skills: { kind: 'directory'; dir: string } | { kind: 'none'; reason: string }
+  stateDir?: string
+  contextFile: string
+}): ManagedPaths {
+  const dirs: string[] = []
+  if (descriptor.skills.kind === 'directory') dirs.push(descriptor.skills.dir)
+  if (descriptor.stateDir) dirs.push(descriptor.stateDir)
+  return { dirs: [...new Set(dirs)], files: [descriptor.contextFile] }
+}
+
+function isManaged(relPath: string, managed: ManagedPaths): boolean {
+  if (managed.files.includes(relPath)) return true
+  return managed.dirs.some((dir) => relPath === dir || relPath.startsWith(`${dir}/`))
 }
 
 /**
@@ -87,7 +123,15 @@ function isManaged(relPath: string): boolean {
  * 所以：默认只给第一级；要往下看就点那个目录（`dir` 参数），一次一层。
  * 顺带把 `hasChildren` 算出来，让界面只在真有空子目录时才画箭头。
  */
-export async function listWorkDir(workDir: string, dir = ''): Promise<WorkDirListing> {
+export async function listWorkDir(
+  workDir: string,
+  dir = '',
+  /**
+   * 平台注入的路径——由调用方按**这个 run 的 runtime** 算好传进来
+   * （`managedPathsFor`）。默认空：不确定的时候**不要**猜。
+   */
+  managed: ManagedPaths = { dirs: [], files: [] },
+): Promise<WorkDirListing> {
   const root = await realpath(workDir).catch(() => resolve(workDir))
   const target = dir === '' ? root : await resolveWorkFilePath(workDir, dir)
 
@@ -139,7 +183,7 @@ export async function listWorkDir(workDir: string, dir = ''): Promise<WorkDirLis
       sizeBytes: isDir ? 0 : statInfo.size,
       modifiedAt: statInfo.mtimeMs,
       hasChildren,
-      managed: isManaged(rel),
+      managed: isManaged(rel, managed),
     })
   }
 

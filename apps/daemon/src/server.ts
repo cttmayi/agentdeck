@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   checkVersionSupport,
+  getRuntimeDescriptor,
   shouldRefuseToRun,
   type AgentBackend,
   type SandboxMode,
@@ -53,6 +54,7 @@ import {
   WORK_FILE_HEADERS,
   contentTypeFor,
   listWorkDir,
+  managedPathsFor,
   readWorkFile,
 } from './workdir-files.ts'
 import { ReviewCoordinator } from './review.ts'
@@ -1039,6 +1041,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             available: live.available,
             cliVersion: live.cliVersion,
             evidence: desc.evidence,
+            // 未验证的 runtime 要能说清**缺什么证据**：只标"未验证"会让人
+            // 以为"再等等就好"，而实际上需要一次真实 CLI 的逐条核对。
+            evidenceNote: desc.evidenceNote ?? null,
             // 会话状态：`unknown` 必须与 `stateless` 区分开，
             // 因为前者要人去核对真实 CLI，后者什么都不用做。
             sessionState: desc.sessionState,
@@ -1823,7 +1828,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // 而不是一次把整棵树拉回来 —— 那样一长串嵌套路径会把真正的产出淹掉。
         const dir = url.searchParams.get('dir') ?? ''
         try {
-          sendJson(res, 200, await listWorkDir(run.workDir, dir))
+          // ★ "哪些是平台注入的"按**这个 run 用的 runtime** 算。
+          //   写死 `.claude/` 的版本对别的 CLI 会把注入物当成 agent 的产出显示。
+          const owner = await store.getAgent(run.agentId as never)
+          const managed = managedPathsFor(
+            getRuntimeDescriptor(owner?.runtimeKey ?? 'claude'),
+          )
+          sendJson(res, 200, await listWorkDir(run.workDir, dir, managed))
         } catch (err) {
           if (err instanceof UnsafePathError) {
             sendJson(res, 400, { error: err.message })

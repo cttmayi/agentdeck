@@ -130,6 +130,51 @@
         facts['agents.detailHeading'] = need('右栏标题', () =>
           text(d().querySelector('.detail-pane h2')),
         )
+        // ── runtime 选择器：选项必须来自身份接口，不是写死两项 ──
+        //
+        //   加一个 runtime = 描述表一行 + 适配器包 + 装配表一行。若界面写死
+        //   选项，那个 runtime 就**只有直接调接口才选得到**——"接口支持、界面
+        //   没有入口"是这个仓库最常见的那类缺陷。
+        const editBtn = [...d().querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '编辑',
+        )
+        facts['agents.editButtonFound'] = !!editBtn
+        if (editBtn) {
+          click(editBtn)
+          await until(() => d().querySelector('select#agent-runtime'))
+          const sel = d().querySelector('select#agent-runtime')
+          facts['agents.runtimeOptions'] = sel ? [...sel.options].map((o) => o.value).sort() : null
+          try {
+            const identity = await fetch(`${location.origin}/api/identity`).then((r) => r.json())
+            facts['agents.identityRuntimeKeys'] = (identity.runtimes ?? [])
+              .map((r) => r.key)
+              .sort()
+          } catch {
+            facts['agents.identityRuntimeKeys'] = null
+          }
+          // ── 选一个**未验证**的 runtime，警告必须出现 ──
+          //
+          //   判据是描述表里的 `evidence`。改成"选到它时该不该有提示"这件事
+          //   以前**在编辑态根本没有**（提示只在只读态、而且还写死了
+          //   `runtimeKey === 'generic'`）。所以这条不只是防写死。
+          const provisional = (facts['agents.identityRuntimeKeys'] ?? []).find((k) => k !== 'claude')
+          if (sel && provisional) {
+            sel.value = provisional
+            sel.dispatchEvent(new Event('change', { bubbles: true }))
+            const warned = await until(() => !!d().querySelector('.field-row .row-hint.warn'))
+            facts['agents.provisionalWarningInEdit'] = warned
+              ? text(d().querySelector('.field-row .row-hint.warn'))
+              : null
+          }
+
+          // 别把状态留在编辑态：后面的断言按只读态写的
+          const cancel = [...d().querySelectorAll('button')].find(
+            (b) => b.textContent.trim() === '取消',
+          )
+          if (cancel) click(cancel)
+          await wait(200)
+        }
+
         const back = d().querySelector('.detail-pane .back')
         // 宽屏下列表就在左边，返回按钮不该出现（它只在窄屏整页显示详情时有意义）
         facts['agents.wideBackDisplay'] = need('宽屏返回按钮', () =>

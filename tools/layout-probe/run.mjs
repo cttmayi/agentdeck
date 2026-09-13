@@ -123,6 +123,29 @@ const CHECKS = [
   { view: '智能体', key: 'agents.afterBackDetailDisplay', label: '窄屏下返回后详情栏消失', ok: (v) => v === 'none' },
   {
     view: '智能体',
+    key: 'agents.editButtonFound',
+    label: '详情里有「编辑」（下面那条要在编辑态里量）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.runtimeOptions',
+    label: 'runtime 选择器的选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
+    ok: (v, facts) =>
+      Array.isArray(v) &&
+      v.length > 0 &&
+      JSON.stringify(v) === JSON.stringify(facts['agents.identityRuntimeKeys']),
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
+  {
+    view: '智能体',
+    key: 'agents.provisionalWarningInEdit',
+    label: '★ 编辑态里选到**未验证**的 runtime 会给提示（以前编辑态没有任何提示）',
+    ok: (v) => typeof v === 'string' && v.length > 10,
+    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 22)}…"`),
+  },
+  {
+    view: '智能体',
     key: 'agents.runtimeCardCount',
     label: 'Runtime 概览渲染成卡片',
     ok: (v) => v >= 1,

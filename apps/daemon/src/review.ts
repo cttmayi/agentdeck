@@ -67,7 +67,14 @@ export interface ReviewHandlingInput {
   skillRefs: readonly SkillRef[]
   modelId: string | null
   promptHash: string | null
+  /** 实际执行的命令行（原始；脱敏在 `buildAuditRecord` 里做）。 */
   argv: readonly string[]
+  /** runtime 描述表的键——**由调用方给**，不在这里写死。 */
+  runtimeDescriptorKey: string
+  /** 探测到的 CLI 版本；读不到时 null。 */
+  cliVersion: string | null
+  /** 注入的上下文块哈希；没有注入时 null。 */
+  contextBlockHash: string | null
   usage: TokenUsage | null | undefined
   /**
    * 判决所属的链路（根 → 当前 run）。
@@ -222,12 +229,15 @@ export class ReviewCoordinator {
       subject: input.run.subject,
       inputBlobRefs: input.inputBlobRefs,
       skillRefs: input.skillRefs,
-      runtimeDescriptorKey: 'claude',
-      cliVersion: null,
+      // ⚠️ 这四项原来全是写死的常量（`'claude'` / `null` / `null`）。
+      //    审计是事后唯一的依据，那里写死的值等于**说错话**：
+      //    换一个 runtime，审计仍然声称用的是 claude。
+      runtimeDescriptorKey: input.runtimeDescriptorKey,
+      cliVersion: input.cliVersion,
       modelId: input.modelId,
       promptHash: input.promptHash,
       argv: input.argv,
-      contextBlockHash: null,
+      contextBlockHash: input.contextBlockHash,
       verdictId,
       actionIds: [...actionIds] as AuditRecord['actionIds'],
       queuedAt: input.run.queuedAt,

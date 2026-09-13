@@ -63,12 +63,21 @@ describe('runtime 装配表（FR-CLI-47 的第 2 段）', () => {
   test('缺省路径仍然是 claude（首版行为不变）', () => {
     assert.equal(createRuntimeBackend('claude').descriptor.key, 'claude')
     assert.equal(createRuntimeBackend('claude').descriptor.contextFile, 'CLAUDE.md')
-    assert.deepEqual(createRuntimeBackend('claude').descriptor.skillDir, '.claude/skills')
+    assert.deepEqual(createRuntimeBackend('claude').descriptor.skills, {
+      kind: 'directory',
+      dir: '.claude/skills',
+    })
   })
 
-  test('第二个 runtime 的技能目录与上下文文件与 claude 不同（不是复制粘贴）', () => {
+  test('第二个 runtime 不假装自己有技能机制（未验证 ⇒ 声明没有）', () => {
     const generic = createRuntimeBackend('generic').descriptor
     assert.notEqual(generic.contextFile, 'CLAUDE.md')
-    assert.notEqual(generic.skillDir, '.claude/skills')
+    // ⚠️ 这条**改过**：原来是 `assert.notEqual(generic.skillDir, '.claude/skills')`
+    //    ——那等于"只要目录名跟 claude 不一样就算填好了"。可 `.agent/skills`
+    //    只是**猜的**：谁也没验证过那个 CLI 会不会扫它。按新规矩（见
+    //    `RuntimeDescriptor.skills`），猜它支持与确认它不支持在效果上一样糟，
+    //    都会把技能写进一个可能没人读的目录然后静默地不生效。
+    assert.equal(generic.skills.kind, 'none', '未验证就该如实声明"没有"')
+    assert.ok(generic.skills.kind === 'none' && generic.skills.reason.length > 20, '要说清缺什么证据')
   })
 })

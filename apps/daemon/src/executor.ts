@@ -364,6 +364,31 @@ export class RunExecutor {
    * 那是个很难查的故障（错误会出现在"进程启动失败"上）。回退 + 告警
    * 至少让事情能继续，而告警把"你配错了"说出来。
    */
+  /**
+   * 探测到的 CLI 版本——每个 runtime 只探一次。
+   *
+   * 为什么在这里缓存：审计每次都要一个版本号，而 `probe()` 会起一个进程
+   * （`claude --version`）。探针本身有缓存，但"版本"是探测的第 2 步，
+   * 再记一层能保证**每个 runtime 一生只起一次**。
+   *
+   * 读不到就如实记 `null`：**不要**用描述表里声明的范围去顶替——
+   * 那是"我们希望它是什么版本"，不是"它是什么版本"。
+   */
+  readonly #cliVersions = new Map<string, string | null>()
+
+  async #cliVersion(descriptor: RuntimeDescriptor, backend: AgentBackend): Promise<string | null> {
+    const known = this.#cliVersions.get(descriptor.key)
+    if (known !== undefined) return known
+    let version: string | null = null
+    try {
+      version = (await backend.probe()).cliVersion
+    } catch (err) {
+      this.#deps.onWarn?.(`探测 ${descriptor.key} 的 CLI 版本失败：${String(err)}`)
+    }
+    this.#cliVersions.set(descriptor.key, version)
+    return version
+  }
+
   async #runtimeFor(run: Run): Promise<{ backend: AgentBackend; descriptor: RuntimeDescriptor }> {
     const fallback = { backend: this.#deps.backend, descriptor: this.#deps.descriptor }
     if (!this.#deps.resolveRuntime) return fallback
@@ -499,6 +524,38 @@ export class RunExecutor {
     let cleaned = false
 
     /**
+     * 这次 run 注入过哪些技能——给 `cleanup()` 收尾用。
+     *
+     * ⚠️ 两个要点：
+     *   1. 它只是"要收哪几个"的**候选**；能不能删由**落盘清单**决定
+     *      （见 `removeInjectedSkills`），所以这个数组错了也删不到使用者的东西；
+     *   2. 它声明在 `try` **外面**：`cleanup()` 是闭包，而 `try` 里面再声明
+     *      一个同名变量会**遮蔽**这一个——于是收尾拿到的是空数组，
+     *      **技能静默地不会被收掉**（这个错我在改这份代码时刚犯过一次）。
+     */
+    let injectedSkills: string[] = []
+
+    /**
+     * 这次 run **实际**执行的命令行（含沙箱包装）——由后端如实上报。
+     *
+     * ★ 审计原来记的是 `[descriptor.command, ...descriptor.baseArgs]`：那**不是**
+     *   实际跑的那条（没有 `--model`、没有 `--resume`、也没有沙箱包装）。
+     *   审计回答的问题应该是"到底执行了什么"，记一条拼出来的大概样子，
+     *   比空着更糟——它看起来像事实。
+     *
+     * 这里存**原始** argv，脱敏交给 `buildAuditRecord`（`redactArgv` 只有一份，
+     * 在 domain 里）；日志那一行用同一份实现脱敏后显示。
+     */
+    let actualArgv: readonly string[] = []
+
+    /**
+     * 注入的上下文块哈希——审计字段 `contextBlockHash` 的真值。
+     *
+     * 它也一直是写死的 `null`。空着不是"没有"，而是"我们没记"。
+     */
+    let contextBlockHash: string | null = null
+
+    /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
      *
      * ⚠️ 调用时机很关键：必须在**发出 terminal 事件之前**完成，否则页面收到
@@ -533,11 +590,14 @@ export class RunExecutor {
         //   "注入了东西"时才收尾，会在一个没挂技能的 run 之后留下一份空清单
         //   （`.claude/skills/.alpha-helper-managed.json`）——工作目录里于是
         //   多出一个不是产出的东西，正是这次改动要清掉的那类残留。
-        const swept = await removeInjectedSkills(
-          run.workDir!,
-          runtime.descriptor.skillDir,
-          injectedSkills,
-        )
+        const swept =
+          runtime.descriptor.skills.kind === 'directory'
+            ? await removeInjectedSkills(
+                run.workDir!,
+                runtime.descriptor.skills.dir,
+                injectedSkills,
+              )
+            : { removed: [] as string[], kept: [] as string[] }
         if (swept.removed.length > 0) {
           await this.#note(
             runId,
@@ -550,14 +610,6 @@ export class RunExecutor {
       }
     }
 
-    /**
-     * 这次 run 注入过哪些技能——给 `cleanup()` 收尾用。
-     *
-     * ⚠️ 它只是"要收哪几个"的候选；**能不能删由落盘清单决定**（见
-     *    `removeInjectedSkills`）。所以这个数组错了也不会删到使用者的东西。
-     */
-    let injectedSkills: string[] = []
-
     try {
       await store.transitionRun(runId, 'queued', 'dispatched', { dispatchedAt: this.#now() })
 
@@ -566,36 +618,62 @@ export class RunExecutor {
       const envCheck = await checkEnvironment([{ descriptor: runtime.descriptor, available: true }])
 
       // ── 注入技能（按 agent 求解的**子集**，D22）──
+      //
+      // ★ 先问**这个 runtime 有没有技能发现机制**。
+      //
+      //   描述表允许声明 `{ kind: 'none' }`（见 `RuntimeDescriptor.skills`）。
+      //   遇到它时我们**一个文件都不写**：写进一个"CLI 不读"的目录，等于把
+      //   "这个 runtime 不支持技能"伪装成"技能已经到位了"——使用者会去查
+      //   prompt、查 skill 内容，而问题根本不在那儿（FR-CLI-40 那一类）。
+      //   所以这里改成**明说**。
+      const skillDelivery = runtime.descriptor.skills
+      const mountedSkills = req.skills ?? []
       const skillsBrief: SkillBrief[] = []
-      // ⚠️ 注入失败要让 run 失败——静默的缺能力比报错糟得多。
-      //    同名撞上使用者自己的技能也会在这里抛（`SkillCollisionError`）：
-      //    覆盖它等于改写使用者的文件，所以宁可这次 run 失败并说清楚。
-      const skillSync = await syncInjectedSkills(
-        run.workDir!,
-        runtime.descriptor.skillDir,
-        (req.skills ?? []).map((skill) => ({
-          slug: skill.slug,
-          content: skill.body,
-          // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
-          // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
-          // 从日志上看不出为什么（CLI 只会说找不到文件）。
-          ...(skill.files && Object.keys(skill.files).length > 0 ? { files: skill.files } : {}),
-        })),
-      )
-      for (const skill of req.skills ?? []) {
-        skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
-      }
-      injectedSkills = skillSync.written
-      // 对账结果要进日志：被摘掉的技能消失了、以及规范化改了什么，
-      // 都是使用者需要知道的事（FR-CLI-40：写下去了 ≠ 被读了，至少要看得见）
-      if (skillSync.pruned.length > 0) {
+
+      if (skillDelivery.kind === 'none') {
         await this.#note(
           runId,
-          `已从工作目录移除不再挂载的 skill：${skillSync.pruned.join('、')}`,
+          (mountedSkills.length > 0
+            ? `⚠️ 本次**没有**注入技能：这个 agent 挂了 ${mountedSkills.length} 个 skill` +
+              `（${mountedSkills.map((s) => s.slug).join('、')}），`
+            : '本次没有注入技能：') +
+            `但 runtime \`${runtime.descriptor.key}\` 没有技能发现机制。` +
+            `原因：${skillDelivery.reason}`,
         )
+      } else {
+        // ⚠️ 注入失败要让 run 失败——静默的缺能力比报错糟得多。
+        //    同名撞上使用者自己的技能也会在这里抛（`SkillCollisionError`）：
+        //    覆盖它等于改写使用者的文件，所以宁可这次 run 失败并说清楚。
+        const skillSync = await syncInjectedSkills(
+          run.workDir!,
+          skillDelivery.dir,
+          mountedSkills.map((skill) => ({
+            slug: skill.slug,
+            content: skill.body,
+            // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
+            // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
+            // 从日志上看不出为什么（CLI 只会说找不到文件）。
+            ...(skill.files && Object.keys(skill.files).length > 0 ? { files: skill.files } : {}),
+          })),
+        )
+        injectedSkills = skillSync.written
+        // 对账结果要进日志：被摘掉的技能消失了、以及规范化改了什么，
+        // 都是使用者需要知道的事（FR-CLI-40：写下去了 ≠ 被读了，至少要看得见）
+        if (skillSync.pruned.length > 0) {
+          await this.#note(
+            runId,
+            `已从工作目录移除不再挂载的 skill：${skillSync.pruned.join('、')}`,
+          )
+        }
+        for (const { slug, note } of skillSync.notes) {
+          await this.#note(runId, `skill ${slug}：${note}`)
+        }
       }
-      for (const { slug, note } of skillSync.notes) {
-        await this.#note(runId, `skill ${slug}：${note}`)
+
+      // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
+      // 那一份**清单，即使这个 runtime 不扫目录也要告诉模型"有哪些标准可用"。
+      for (const skill of mountedSkills) {
+        skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
       }
 
       // ★ 环境预检的问题必须出现在**这份日志里**。
@@ -642,10 +720,14 @@ export class RunExecutor {
       //   事实是它生效了，只是**看不出来**。
       await this.#note(
         runId,
-        req.skills && req.skills.length > 0
-          ? `已注入 ${req.skills.length} 个 skill：${req.skills.map((s) => s.slug).join('、')}` +
-              `（写入 ${runtime.descriptor.skillDir}/，加上上下文文件 ${runtime.descriptor.contextFile}）`
-          : `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`,
+        mountedSkills.length === 0
+          ? `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`
+          : skillDelivery.kind === 'directory'
+            ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.slug).join('、')}` +
+              `（写入 ${skillDelivery.dir}/，加上上下文文件 ${runtime.descriptor.contextFile}）`
+            : `⚠️ 挂了 ${mountedSkills.length} 个 skill 但**一个都没写下去**：` +
+              `runtime \`${runtime.descriptor.key}\` 没有技能发现机制（原因见上一行）——` +
+              `本次它们只作为「审核标准 / 参考」出现在上下文里`,
       )
 
       // ── 注入上下文块 ──
@@ -668,12 +750,14 @@ export class RunExecutor {
               skills: skillsBrief,
             })
 
-      restoreContext = await this.#injectContext(
+      const injected = await this.#injectContext(
         contextFile,
         body,
         runId,
         runtime.descriptor.contextFile,
       )
+      restoreContext = injected.restore
+      contextBlockHash = injected.hash
 
       await store.transitionRun(runId, 'dispatched', 'running', { startedAt: this.#now() })
       registry.emit(runId, { t: 'status', status: 'running', at: this.#now() })
@@ -727,6 +811,7 @@ export class RunExecutor {
         // **合并**而不是替换——所以给 `{}` 与不给都不影响 CLI 拿到 PATH
         env: agentConfig?.env ?? {},
         onCommandLine: ({ argv, sandboxDescription }) => {
+          actualArgv = argv
           void this.#note(runId, `命令行：${redactArgv(argv).join(' ')}`)
           // ★ 沙箱状态单独一行，**由后端如实上报**而不是从命令行反推。
           //
@@ -860,6 +945,10 @@ export class RunExecutor {
           // ★ 审计要记 CLI **实际报告**的模型。传 null 也比传"我们请求的那个"诚实：
           //   请求值只说明意图，而审计回答的是"这次到底用了什么"。
           result.model ?? null,
+          await this.#cliVersion(runtime.descriptor, runtime.backend),
+          // 实际跑的那条命令行（含沙箱包装）——不再是"按描述表拼出来的大概样子"
+          actualArgv,
+          contextBlockHash,
         )
       }
 
@@ -960,6 +1049,12 @@ export class RunExecutor {
     descriptor: RuntimeDescriptor,
     /** CLI 自己报告的模型标识；它不报告时为 null。 */
     modelId: string | null,
+    /** 探测到的 CLI 版本；读不到时为 null（**不要**拿"我们期望的版本"顶替）。 */
+    cliVersion: string | null,
+    /** 实际执行的命令行（原始，脱敏由 domain 的 `buildAuditRecord` 做）。 */
+    argv: readonly string[],
+    /** 注入的上下文块哈希；没有注入时为 null。 */
+    contextBlockHash: string | null,
   ): Promise<void> {
     const coordinator = this.#deps.reviewCoordinator
     if (!coordinator) return
@@ -992,7 +1087,18 @@ export class RunExecutor {
       //   拿请求值去顶替**，那会让审计看起来比事实更确定。
       modelId,
       promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
-      argv: [descriptor.command, ...descriptor.baseArgs],
+      // ══════════════════════════════════════════════════════════════════
+      // 审计的这四项原来是**写死的**（`runtimeDescriptorKey: 'claude'`、
+      // `cliVersion: null`、`contextBlockHash: null`，argv 是按描述表拼的）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 审计回答的是"这次到底怎么跑的"。写死的值不是"空着"，而是**说错了**：
+      // 换成任何一个别的 runtime，审计都会声称用的是 claude——而审计是最不
+      // 该出错的地方（它是事后唯一的依据）。
+      runtimeDescriptorKey: descriptor.key,
+      cliVersion,
+      argv,
+      contextBlockHash,
       usage,
       chainSteps,
     })
@@ -1005,9 +1111,11 @@ export class RunExecutor {
   }
 
   /**
-   * 注入上下文块。返回"还原函数"——无论成功失败都必须调用它。
+   * 注入上下文块。
    *
    * @param body 受管块的**内容**（渲染由调用方完成）
+   * @returns `restore` 是还原函数——无论成功失败都必须调用它；
+   *          `hash` 是**写下去的那个块**的 sha256，进审计（`contextBlockHash`）。
    */
   async #injectContext(
     contextFile: string,
@@ -1015,7 +1123,7 @@ export class RunExecutor {
     runId: RunId,
     /** 只为了在日志里说清"保留的是哪个文件名"。 */
     contextFileName: string,
-  ): Promise<() => Promise<void>> {
+  ): Promise<{ restore: () => Promise<void>; hash: string }> {
     let original: string | null
     try {
       original = await readFile(contextFile, 'utf8')
@@ -1024,11 +1132,14 @@ export class RunExecutor {
       else throw err
     }
 
-    const injected = injectContextBlock(original, renderContextBlock(body))
+    const block = renderContextBlock(body)
+    const injected = injectContextBlock(original, block)
     await mkdir(dirname(contextFile), { recursive: true })
     await writeFile(contextFile, injected.content, 'utf8')
 
-    return async () => {
+    const hash = createHash('sha256').update(block, 'utf8').digest('hex')
+
+    const restore = async (): Promise<void> => {
       const current = await readFile(contextFile, 'utf8').catch(() => null)
       if (current === null) return
 
@@ -1090,6 +1201,8 @@ export class RunExecutor {
         await writeFile(contextFile, removed.content, 'utf8')
       }
     }
+
+    return { restore, hash }
   }
 
   async #restoreContext(restore: () => Promise<void>): Promise<void> {

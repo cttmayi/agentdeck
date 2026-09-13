@@ -50,7 +50,9 @@ export interface BuildArgvResult {
 
 export function buildArgv(input: BuildArgvInput): BuildArgvResult {
   const runtime = loadRuntimeDescriptor(input.runtime)
-  const flags = runtime.managedFlags!
+  // `managedFlags` 是必填字段：类型上必填，`loadRuntimeDescriptor` 上一行
+  // 还会在运行时再验一次（描述符可能是仓库之外传进来的对象）。
+  const flags = runtime.managedFlags
   const argv: string[] = []
 
   // 1. 平台基础参数
