@@ -43,14 +43,15 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   test('一条执行 run 都没有 ⇒ 第一列（还没开始）', () => {
     const info = stageOf(ISSUE, [])
     assert.equal(info.stage, 'executing')
-    assert.equal(info.detail, '还没开始执行')
+    assert.equal(info.note, '还没开始执行')
     assert.equal(info.executeRun, null)
   })
 
   test('执行中 ⇒ 第一列', () => {
     const info = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'running' })])
     assert.equal(info.stage, 'executing')
-    assert.equal(info.detail, '执行中')
+    // 标签就写着"执行中"，note 必须为空——否则就是使用者点掉的那种重复
+    assert.equal(info.note, null)
   })
 
   test('★ 等目录释放时说清楚，而不是含糊的"进行中"', () => {
@@ -58,8 +59,8 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
     const info = stageOf(ISSUE, [
       run({ runId: 'e1', kind: 'execute', status: 'waiting_local_directory' }),
     ])
-    assert.match(info.detail, /排队中/)
-    assert.match(info.detail, /目录被占用/)
+    assert.match(String(info.note), /排队中/)
+    assert.match(String(info.note), /目录被占用/)
   })
 
   test('★ 执行完成、审核未跑 ⇒ 第二列，并指出"没有派审核"', () => {
@@ -67,7 +68,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
     // 只显示"等待审核"会让人一直等一个不会来的东西。
     const info = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
     assert.equal(info.stage, 'awaiting_review')
-    assert.equal(info.detail, '等待审核')
+    assert.equal(info.note, null, '★ 标签已经是"待审查"，不能再写一遍"等待审核"')
     assert.match(String(info.warning), /没有派审核/)
     assert.match(String(info.warning), /由谁来审它/, '要指出去哪里改')
   })
@@ -78,7 +79,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
       run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
     ])
     assert.equal(info.stage, 'awaiting_review')
-    assert.equal(info.detail, '审核中')
+    assert.equal(info.note, '审核中', '标签"待审查"之外，说清它正在被审')
     assert.equal(info.warning, null)
   })
 
@@ -366,5 +367,75 @@ describe('★ 「需要注意」单独一拨（不是重排全部）', () => {
       assert.equal(typeof STAGE_SHORT[col.id], 'string')
       assert.ok(STAGE_SHORT[col.id].length <= 5, `短标签别太长：${STAGE_SHORT[col.id]}`)
     }
+  })
+})
+
+describe('★ note：只给标签之外的信息（去掉重复字样）', () => {
+  /**
+   * 使用者的反馈：「阶段里面去掉『待审查』下面『等待审核』的字样，重复了」。
+   * 所以这里逐种情况钉住"该说什么、不该说什么"。
+   */
+  test('★ 待审查 + 还没开始审 / 审核在排队 ⇒ note 为空（标签已经说了）', () => {
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({ runId: 'r1', kind: 'review', status: 'queued', subject: { type: 'run', id: 'e1' } }),
+    ])
+    assert.equal(info.stage, 'awaiting_review')
+    assert.equal(info.note, null, '★ 不能在「待审查」后面再写「等待审核」')
+  })
+
+  test('★ 待审查 + 审核正在跑 ⇒ note 说「审核中」（这是额外信息）', () => {
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
+    ])
+    assert.equal(info.note, '审核中')
+  })
+
+  test('★ 执行中（真的在跑）⇒ note 为空；排队中 ⇒ 说清是排队', () => {
+    const running = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'running' })])
+    assert.equal(running.stage, 'executing')
+    assert.equal(running.note, null, '★ 不能在「执行中」后面再写「执行中」')
+
+    const queued = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'waiting_local_directory' }),
+    ])
+    assert.match(queued.note ?? '', /排队中/, '排队是标签之外的信息，要留着')
+  })
+
+  test('★ 一次都没跑过 ⇒ note 说「还没开始执行」（否则标签会说谎）', () => {
+    const info = stageOf(ISSUE, [])
+    assert.equal(info.stage, 'executing')
+    assert.equal(info.note, '还没开始执行')
+  })
+
+  test('★ 已审查 ⇒ note 为空', () => {
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({ runId: 'r1', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e1' } }),
+    ])
+    assert.equal(info.note, null)
+  })
+
+  test('★ 没有 `detail` 这个字段：同一句话只准有一个出处', () => {
+    // 使用者说「『待审查』下面『等待审核』重复了」。把界面上那句撤掉之后
+    // 才发现 `detail` 在前端**一个消费者都没有**（看板列头用的是列定义里的
+    // 静态 `col.hint`，卡片读的是 `note`）。它剩下唯一的作用，就是把刚被
+    // 点掉的那句话继续养在数据层，等着哪次改动顺手渲染出来、重复原样长回来。
+    //
+    // 所以这里断言它**不存在**——这条断言就是防复发的闸门。（与
+    // `RunSummary.lastSeq` 被删掉时留下的那两条断言同一个思路。）
+    const info = stageOf(ISSUE, [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+    ])
+    assert.equal(
+      Object.hasOwn(info, 'detail'),
+      false,
+      '阶段说明只留 `note`；再加一个同义字段就等于把重复放回来',
+    )
+    assert.deepEqual(
+      Object.keys(info).sort(),
+      ['executeRun', 'note', 'reviewRun', 'stage', 'warning'],
+    )
   })
 })

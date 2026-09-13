@@ -44,13 +44,34 @@ export interface StageInfo {
   executeRun: RunSummary | null
   /** 正在进行或已完成的审核 run。 */
   reviewRun: RunSummary | null
-  /** 一句话说明当前卡在哪儿——直接显示在卡片上。 */
-  detail: string
+  /**
+   * 标签**之外**还值得说一句的东西；没有就是 `null`。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 这里原来还有一个 `detail`，已经删掉了
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者的反馈：「阶段里面去掉『待审查』下面『等待审核』的字样，重复了」。
+   *
+   * 第一刀是把重复的那句从界面上撤掉（列表/看板改读 `note`）。但撤完一看，
+   * `detail` 在整个前端**一个消费者都没有**：它当初的理由是"给看板列头写
+   * 的"，可看板列头用的是列定义里的静态 `col.hint`，卡片用的是 `note`。
+   *
+   * 于是 `detail` 只剩一个作用：**把刚被点掉的那句话继续养在数据层**，
+   * 任何后来的改动只要顺手渲染一下它，重复就原样长回来。删掉它，
+   * "同一句话只准有一个出处"就成了类型层面的事实——`note` 之外没有别处。
+   *
+   * 删掉**没有丢失任何使用者可见的信息**：
+   *   - '还没开始执行' / '排队中（工作目录被占用）' → 原来就等于 `note`；
+   *   - '执行中' / '审核中' → 就是标签本身，`note` 只在审核真在跑时说；
+   *   - '等待审核' / '审核已完成' → 与标签"待审查"/"已审查"同义，无信息。
+   */
+  note: string | null
   /**
    * 需要留意的情况。
    *
-   * 单独一个字段而不是拼进 `detail`：界面要用不同的视觉处理它
-   *（色条），而"需要留意"与"当前状态"是两种信息。
+   * 与 `note` 分开：界面要用不同的视觉处理它（色条），而"需要留意"
+   * 与"当前状态"是两种信息。
    */
   warning: string | null
 }
@@ -110,7 +131,8 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
       stage: 'executing',
       executeRun: null,
       reviewRun: null,
-      detail: '还没开始执行',
+      // 标签是"执行中"，可它其实一次都没跑过 ⇒ 这句是额外信息，要留着
+      note: '还没开始执行',
       warning: null,
     }
   }
@@ -120,10 +142,8 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
       stage: 'executing',
       executeRun: latest,
       reviewRun: null,
-      detail:
-        latest.status === 'waiting_local_directory'
-          ? '排队中（工作目录被占用）'
-          : '执行中',
+      // "排队中（工作目录被占用）"是标签之外的信息；单纯"执行中"与标签重复，不要
+      note: latest.status === 'waiting_local_directory' ? '排队中（工作目录被占用）' : null,
       warning: null,
     }
   }
@@ -140,7 +160,7 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
       stage: 'reviewed',
       executeRun: latest,
       reviewRun: finished,
-      detail: '审核已完成',
+      note: null, // 标签已经是"已审查"，再说一遍就是重复
       warning: null,
     }
   }
@@ -150,7 +170,10 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
     stage: 'awaiting_review',
     executeRun: latest,
     reviewRun: active ?? null,
-    detail: active ? '审核中' : '等待审核',
+    // ★ 只有审核**真的在跑**才说「审核中」：那与标签"待审查"是两件事。
+    //   排队中的审核（queued/dispatched）不说——"审核中"对它不成立，
+    //   而"等待审核"又与标签重复（使用者点名要去掉的正是它）。
+    note: active?.status === 'running' ? '审核中' : null,
     warning: executionWarning(latest) ?? coverageWarning(reviews.length),
   }
 }

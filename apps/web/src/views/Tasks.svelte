@@ -351,8 +351,10 @@
     <td><strong>{issue.title}</strong></td>
     <td>
       <span class="stage-tag {info.stage}">{STAGE_SHORT[info.stage]}</span>
-      {#if info.detail && info.detail !== '审核已完成'}
-        <span class="faint small">{info.detail}</span>
+      <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
+           「等待审核」是重复，使用者点名要去掉的就是它。 -->
+      {#if info.note}
+        <span class="faint small">{info.note}</span>
       {/if}
     </td>
     <td class="muted">{agentName(issue.assignee?.id ?? null)}</td>
@@ -424,7 +426,7 @@
                 <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
               </span>
               <span class="card-meta">
-                <span class="faint small">{info.detail}</span>
+                {#if info.note}<span class="faint small">{info.note}</span>{/if}
                 <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
               </span>
               {#if info.warning}
