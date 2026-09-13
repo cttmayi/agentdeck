@@ -9,9 +9,8 @@ import {
 import { FileStore } from '@alpha-helper/store-file'
 import { makeIssue, makeReport, wsId } from '@alpha-helper/domain/testing'
 import { ulid, type Report, type Run } from '@alpha-helper/protocol'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
  * 放在 daemon 而不是 domain 包里：这是**跨适配器**的集成测试，
@@ -44,8 +43,8 @@ let storeB: FileStore
 const WS = wsId('ws_snap')
 
 before(async () => {
-  dirA = await mkdtemp(join(tmpdir(), 'alpha-snap-a-'))
-  dirB = await mkdtemp(join(tmpdir(), 'alpha-snap-b-'))
+  dirA = await makeTempDir('alpha-snap-a')
+  dirB = await makeTempDir('alpha-snap-b')
   storeA = await FileStore.open({ dataDir: dirA, fsync: false })
   storeB = await FileStore.open({ dataDir: dirB, fsync: false })
 
@@ -82,8 +81,8 @@ before(async () => {
 after(async () => {
   await storeA.close()
   await storeB.close()
-  await rm(dirA, { recursive: true, force: true })
-  await rm(dirB, { recursive: true, force: true })
+  await cleanup(dirA)
+  await cleanup(dirB)
 })
 
 describe('数据快照：导出', () => {
@@ -127,7 +126,7 @@ describe('数据快照：导出', () => {
 
   test('★ 分页要翻到底 —— 只导第一页是最容易犯的错', async () => {
     // 造 250 条 issue（超过任何一页的 limit）
-    const many = await mkdtemp(join(tmpdir(), 'alpha-snap-many-'))
+    const many = await makeTempDir('alpha-snap-many')
     const store = await FileStore.open({ dataDir: many, fsync: false })
     const W = wsId('ws_many')
     await store.insertWorkspace({ id: W, name: 'w', createdAt: 1, updatedAt: 1 })
@@ -141,7 +140,7 @@ describe('数据快照：导出', () => {
       '端口全是分页的；导出必须一直翻到 nextCursor 为 null，否则数据会静默少掉',
     )
     await store.close()
-    await rm(many, { recursive: true, force: true })
+    await cleanup(many)
   })
 })
 
@@ -176,7 +175,7 @@ describe('★ 数据快照：导入（只增不改）', () => {
   })
 
   test('★ 导入**不覆盖**已有数据 —— 覆盖是不可逆的', async () => {
-    const target = await mkdtemp(join(tmpdir(), 'alpha-snap-merge-'))
+    const target = await makeTempDir('alpha-snap-merge')
     const store = await FileStore.open({ dataDir: target, fsync: false })
     await store.insertWorkspace({ id: WS, name: '目标库', createdAt: 1, updatedAt: 1 })
     // 目标库里已有一条同 id 但内容不同的 issue
@@ -195,7 +194,7 @@ describe('★ 数据快照：导入（只增不改）', () => {
     assert.equal(result.imported['issues'], 1, '另一条（i-2）应当被导进来')
 
     await store.close()
-    await rm(target, { recursive: true, force: true })
+    await cleanup(target)
   })
 
   test('★ 损坏的快照被拒绝导入，且错误里说明哪里不对', async () => {
@@ -240,8 +239,8 @@ describe('★ 数据快照：导入（只增不改）', () => {
 
 describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
   test('★ blob 不在快照里 ⇒ 导入后要明确报出有多少引用落空', async () => {
-    const source = await mkdtemp(join(tmpdir(), 'alpha-snap-blob-'))
-    const target = await mkdtemp(join(tmpdir(), 'alpha-snap-blob2-'))
+    const source = await makeTempDir('alpha-snap-blob')
+    const target = await makeTempDir('alpha-snap-blob2')
     const s1 = await FileStore.open({ dataDir: source, fsync: false })
     const s2 = await FileStore.open({ dataDir: target, fsync: false })
 
@@ -269,12 +268,12 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
 
     await s1.close()
     await s2.close()
-    await rm(source, { recursive: true, force: true })
-    await rm(target, { recursive: true, force: true })
+    await cleanup(source)
+    await cleanup(target)
   })
 
   test('blob 也在目标库里时，不报悬空', async () => {
-    const store = await FileStore.open({ dataDir: await mkdtemp(join(tmpdir(), 'alpha-snap-ok-')) })
+    const store = await FileStore.open({ dataDir: await makeTempDir('alpha-snap-ok') })
     const W = wsId('ws_ok')
     await store.insertWorkspace({ id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     const ref = await store.putBlob(new TextEncoder().encode('x'))
@@ -290,7 +289,7 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
 
 describe('run 谱系也要一起搬过去', () => {
   test('★ run / verdict / action / audit 顺着关系被取全', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'alpha-snap-graph-'))
+    const dir = await makeTempDir('alpha-snap-graph')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
     const W = wsId('ws_graph')
     await store.insertWorkspace({ id: W, name: 'w', createdAt: 1, updatedAt: 1 })
@@ -324,6 +323,6 @@ describe('run 谱系也要一起搬过去', () => {
     assert.equal(snap.data.runs.length, 1, 'run 没有"列出全部"的口子但能翻页取全')
 
     await store.close()
-    await rm(dir, { recursive: true, force: true })
+    await cleanup(dir)
   })
 })

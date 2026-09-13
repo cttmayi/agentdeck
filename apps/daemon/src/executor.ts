@@ -480,6 +480,10 @@ export class RunExecutor {
         await writeSkill(run.workDir!, runtime.descriptor.skillDir, {
           slug: skill.slug,
           content: skill.body,
+          // 支持文件也要一起写下去。只写 SKILL.md 的话，技能里引用的脚本/
+          // 参考文档在运行时根本不存在——技能"装上了"却干不了活，而且
+          // 从日志上看不出为什么（CLI 只会说找不到文件）。
+          ...(skill.files && Object.keys(skill.files).length > 0 ? { files: skill.files } : {}),
         })
         injectedSlugs.push(skill.slug)
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })

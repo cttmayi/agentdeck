@@ -38,6 +38,13 @@ class ScriptedReviewBackend implements AgentBackend {
   rawOverride: string | null = null
   seenContext: string | null = null
   calls = 0
+  /**
+   * 执行那一刻 `.claude/skills/` 下的文件（`slug/相对路径` → 内容）。
+   *
+   * ★ 必须在执行时抓：注入是**临时**的，run 结束后会被清掉
+   *   （FR-CLI-16：只清自己造的东西）。跑完再去看永远是空的。
+   */
+  seenSkillFiles: Record<string, string> = {}
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
@@ -46,6 +53,22 @@ class ScriptedReviewBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     this.calls += 1
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+
+    this.seenSkillFiles = {}
+    const skillsRoot = join(opts.workDir, '.claude', 'skills')
+    const walk = async (dir: string, slug: string, prefix: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const full = join(dir, entry.name)
+        const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+        // ★ 必须递归：支持文件常常放在子目录里（`scripts/check.sh`），
+        //   只看一层会让"嵌套文件没写下去"这种问题漏过去。
+        if (entry.isDirectory()) await walk(full, slug, rel)
+        else this.seenSkillFiles[`${slug}/${rel}`] = await readFile(full, 'utf8').catch(() => '')
+      }
+    }
+    for (const slug of await readdir(skillsRoot).catch(() => [] as string[])) {
+      await walk(join(skillsRoot, slug), slug, '')
+    }
 
     const verdict = this.script.shift()
     const text =
@@ -212,6 +235,35 @@ async function awaitRunsSettled(timeoutMs = 8000): Promise<void> {
   }
 }
 
+/**
+ * 等到**至少出现一条 run，并且全部结束**。
+ *
+ * ⚠️ 两处都容易错，两处都踩过：
+ *
+ *    1. **不能直接用 `awaitRunsSettled()`**：`[].every(...)` 是 `true`，所以
+ *    列表还空着时它会**立刻返回**。报告摄取的 run 是异步起的——
+ *    `POST /api/reports` 的响应里已经有 runId，但那一刻 `GET /api/runs`
+ *      列表还空着时它会**立刻返回**；
+ *    2. **必须显式传 url**：本文件既有共享的 `daemon`，也有各用例自建的
+ *       `d`。helper 内部图省事用模块级的那个，就会去轮询**另一个 daemon**——
+ *       那里恰好有别的用例留下的已结束 run，于是又是"立刻返回"。
+ *
+ *    两种错误的症状一模一样：断言在运行还没开始时就执行，报出来的是
+ *    "支持文件没写下去"，而真正的原因是我们**看早了**。
+ */
+async function awaitRunFinished(url: string, timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const res = await fetch(`${url}/api/runs`)
+    const { runs } = (await res.json()) as { runs: Array<{ status: string }> }
+    if (runs.length > 0 && runs.every((r) => TERMINAL_RUN_STATUSES.has(r.status))) return
+    if (Date.now() > deadline) {
+      throw new Error(`等待 run 出现并结束超时，当前 ${runs.length} 条`)
+    }
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
+
 async function fetchVerdicts(runId: string): Promise<VerdictRecord[]> {
   const res = await fetch(`${daemon.url}/api/runs/${runId}/verdicts`)
   return ((await res.json()) as { verdicts: VerdictRecord[] }).verdicts
@@ -286,6 +338,110 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
   test('★ 结束后工作目录里不残留注入物', async () => {
     const entries = await readdir(workDir).catch(() => [] as string[])
     assert.deepEqual(entries, [], `工作目录应当被清理干净，实际有：${entries.join(', ')}`)
+  })
+})
+
+describe('★ 派生出来的 review run 也要带上 skill 的支持文件', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条补的是"提交路径"之外的那几条路
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 页面直接提交 run 时，`skills` 是从请求体里原样过来的，所以支持文件
+   * 天然带得上。但 daemon **自己派生**的 run 不是这样：
+   *
+   *   - 报告触发审核（这条）
+   *   - 判决派生的自动串接审核
+   *   - 重试
+   *
+   * 这三条路上，skill 是从库里 `loadAgentSkills()` 读出来再拼进请求的，
+   * 而拼的时候曾经把 `files` **写死成 `{}`**——装进来的支持文件在这一路上
+   * 全被丢掉了。表现是：同一个技能，手动跑没问题，审核跑就找不到它引用的
+   * 脚本，而且没有任何报错。
+   */
+  test('★ 审核 run 的工作目录里有技能的支持文件', async () => {
+    const dir = await makeTempDir('derived-files-data')
+    const work = await makeTempDir('derived-files-work')
+    const b = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      // ① 装一个**带支持文件**的技能（走批量入口，它就是页面交内容的那条路）
+      const installRes = await fetch(`${d.url}/api/skills`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          batchId: 'derived-1',
+          skills: [
+            {
+              slug: 'with-support-files',
+              name: '带支持文件的标准',
+              body: '# 标准\n\n先看 reference.md 再判断。',
+              files: { 'reference.md': '判断依据在这里', 'scripts/check.sh': 'echo ok' },
+              source: 'local',
+              allowedActions: ['comment.create'],
+            },
+          ],
+        }),
+      })
+      const installed = ((await installRes.json()) as {
+        installed: Array<{ id: string; slug: string }>
+      }).installed
+      assert.equal(installed.length, 1, '技能要先装上')
+      const skillId = installed[0]!.id
+
+      // ② 把它挂到审核者身上（审核者才是这条链路里真正跑的人）
+      const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; name: string; role: string; skillIds: string[] }>
+      }).agents
+      const reviewer = agents.find((a) => a.role === 'reviewer')
+      assert.ok(reviewer, '首启会播种审核者')
+      const patch = await fetch(`${d.url}/api/agents/${reviewer.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ skillIds: [skillId] }),
+      })
+      assert.equal(patch.status, 200)
+
+      // ③ 报告进来 ⇒ 派生一条 review run
+      b.script = [validVerdict({ conclusion: 'pass', reasonCode: 'meets_criteria', action: null })]
+      // ⚠️ 这里**不能**用上面的 `postReport()`：它写死了共享的 `daemon.url`，
+      //    于是报告会进到**另一个 daemon**里——那边有它自己的后端与工作目录，
+      //    而这条用例的 `d` 什么都不会发生。症状是"报告说有 runId，但按 id
+      //    查是 404、后端一次都没被调用"，看起来像 run 没落库。
+      const ingestRes = await fetch(`${d.url}/api/reports`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          source: 'src-derived',
+          items: [{ externalId: 'derived-1', kind: 'vuln', title: 't', body: 'b' }],
+        }),
+      })
+      assert.equal(ingestRes.status, 202)
+      const ingest = (await ingestRes.json()) as { runIds: string[]; unmatched: number }
+      assert.equal(ingest.unmatched, 0)
+      assert.equal(ingest.runIds.length, 1, '报告应当派生出一条 review run')
+      await awaitRunFinished(d.url)
+
+      // ④ 审核者执行的那一刻，支持文件必须在工作目录里
+      assert.equal(
+        b.seenSkillFiles['with-support-files/reference.md'],
+        '判断依据在这里',
+        '★ 派生 run 也要把支持文件带上 —— 写死成 files: {} 就会在这一路上丢光',
+      )
+      assert.equal(b.seenSkillFiles['with-support-files/scripts/check.sh'], 'echo ok')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(work)
+    }
   })
 })
 

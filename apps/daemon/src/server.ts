@@ -17,6 +17,7 @@ import {
 } from '@alpha-helper/domain'
 import {
   LOCAL_PROTOCOL_VERSION,
+  ActionType,
   Capability,
   parseVerdict,
   ulid,
@@ -51,6 +52,13 @@ import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
 import { Semaphore } from './semaphore.ts'
 import { WorkDirLocks } from './workdir-locks.ts'
+import {
+  SkillSourceError,
+  describeSource,
+  resolveSkillSource,
+  type ResolvedSkillSource,
+  type SkillSourceSpec,
+} from './skill-source.ts'
 
 /**
  * 本地 daemon 服务。
@@ -125,6 +133,16 @@ export interface DaemonOptions {
    *    而不是静默降级——静默降级会让人在以为自己被保护着的情况下裸奔。
    */
   sandboxMode?: SandboxMode
+  /**
+   * 注入 fetch，供"从 GitHub 安装 skill"使用。
+   *
+   * ★ 存在的理由是 **NFR-T-01**：测试**绝不能联网**。不注入的话，任何一条
+   *   覆盖 GitHub 安装路径的测试都会真的去打 GitHub——既不可重复、又会被
+   *   匿名限额卡住、还会在没网的机器上失败。
+   */
+  fetchImpl?: typeof fetch
+  /** GitHub 令牌（可选）。缺省读环境变量 ALPHA_HELPER_GITHUB_TOKEN。 */
+  githubToken?: string | null
   onWarn?: (message: string) => void
   onInfo?: (message: string) => void
 }
@@ -158,6 +176,170 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
   if (size === 0) return {}
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+}
+
+/**
+ * 安装内核：**两个接口共用这一份**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么必须抽出来，而不是在两处各写一遍
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * "同名怎么办"是一条**安全规则**：同名一律拒绝写入，避免"下载顺手覆盖了
+ * 你自己的东西"；要替换必须显式说。抽出来之前只有批量那个接口有这条规则，
+ * 新加的"从路径安装"如果各写一份，两边迟早会不一致——而那种不一致的表现是
+ * "从远端装会被拒、从 GitHub 装会静默覆盖"，属于最难发现的一类。
+ */
+async function installSkillPayloads(input: {
+  store: Store
+  workspaceId: WorkspaceId
+  payloads: Array<Partial<Skill> & { slug?: string }>
+  overwrite: boolean
+  now: number
+}): Promise<{
+  installed: Skill[]
+  skipped: Array<{ slug: string; reason: string; existingSource: string }>
+}> {
+  const { store, workspaceId, payloads, overwrite, now } = input
+  const existing = await store.listSkills(workspaceId)
+  const bySlug = new Map(existing.map((s) => [s.slug, s]))
+  const installed: Skill[] = []
+  const skipped: Array<{ slug: string; reason: string; existingSource: string }> = []
+
+  for (const payload of payloads) {
+    const slug = typeof payload.slug === 'string' ? payload.slug : ''
+    if (slug === '') {
+      skipped.push({ slug: '(空)', reason: 'slug 是 skill 的权威标识，不能为空', existingSource: '' })
+      continue
+    }
+    const clash = bySlug.get(slug)
+    if (clash && !overwrite) {
+      skipped.push({
+        slug,
+        existingSource: clash.source,
+        reason:
+          `已有同名 skill（来源：${clash.source}）。` +
+          `同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"；` +
+          `确实要替换请显式传 overwrite: true。`,
+      })
+      continue
+    }
+
+    const skill: Skill = {
+      // 同名替换时**复用原 id**：否则会留下一条永远没人引用的孤儿记录
+      id: (clash?.id ?? payload.id ?? (ulid() as Skill['id'])) as Skill['id'],
+      workspaceId,
+      slug,
+      name: payload.name ?? slug,
+      description: payload.description ?? null,
+      body: payload.body ?? '',
+      // 支持文件要落库，否则"装进来了但注入时只有 SKILL.md"——
+      // 那种技能是坏的，而且坏得很安静
+      ...(payload.files && Object.keys(payload.files).length > 0
+        ? { files: payload.files }
+        : {}),
+      verdictSchemaVersion: 1,
+      allowedActions: payload.allowedActions ?? ['comment.create'],
+      // ★ 缺省是 `remote`：批量这条路本来就是"页面从远端目录下载好交过来"。
+      //   把默认值反过来会让"下载来的"默认冒充"使用者自有的"，而 FR-AGENT-10
+      //   正是靠这个字段判断"本地内容会不会因远端变化而改变"。
+      //   显式声明 `local` 的调用方（从本地路径/GitHub 装的）不受影响。
+      source: payload.source === 'local' ? 'local' : 'remote',
+      sourceRef: payload.sourceRef ?? null,
+      createdAt: clash?.createdAt ?? now,
+      updatedAt: now,
+    }
+    await store.insertSkill(skill)
+    bySlug.set(slug, skill)
+    installed.push(skill)
+  }
+
+  return { installed, skipped }
+}
+
+/**
+ * 校验安装来源。**逐字段**校验，因为这是运行时的任意 JSON。
+ *
+ * 返回 `{ok:false}` 而不是抛异常：来源不对是**使用者输入问题**（400），
+ * 不是服务出错（500），两者的处置完全不同。
+ */
+function parseInstallSource(
+  raw: unknown,
+): { ok: true; spec: SkillSourceSpec } | { ok: false; error: string } {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: '需要 source（对象）' }
+  }
+  const obj = raw as Record<string, unknown>
+  const kind = obj['kind']
+
+  if (kind === 'path') {
+    const value = obj['path']
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { ok: false, error: 'source.kind=path 需要非空的 path（绝对路径）' }
+    }
+    return { ok: true, spec: { kind: 'path', path: value.trim() } }
+  }
+
+  if (kind === 'url') {
+    const value = obj['url']
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { ok: false, error: 'source.kind=url 需要非空的 url' }
+    }
+    return { ok: true, spec: { kind: 'url', url: value.trim() } }
+  }
+
+  if (kind === 'payload') {
+    const slug = obj['slug']
+    const body = obj['body']
+    if (typeof slug !== 'string' || slug.trim() === '') {
+      return { ok: false, error: 'source.kind=payload 需要非空的 slug' }
+    }
+    if (typeof body !== 'string') {
+      return { ok: false, error: 'source.kind=payload 需要 body（字符串）' }
+    }
+    const files = obj['files']
+    if (files !== undefined && files !== null) {
+      if (typeof files !== 'object' || Array.isArray(files)) {
+        return { ok: false, error: 'source.files 必须是 相对路径→内容 的对象' }
+      }
+      for (const [k, v] of Object.entries(files as Record<string, unknown>)) {
+        if (typeof v !== 'string') return { ok: false, error: `source.files['${k}'] 必须是字符串` }
+      }
+    }
+    const sourceRef = obj['sourceRef']
+    return {
+      ok: true,
+      spec: {
+        kind: 'payload',
+        slug: slug.trim(),
+        body,
+        ...(files ? { files: files as Record<string, string> } : {}),
+        sourceRef: typeof sourceRef === 'string' && sourceRef ? sourceRef : `remote:${slug.trim()}`,
+      },
+    }
+  }
+
+  return { ok: false, error: 'source.kind 必须是 path / url / payload 之一' }
+}
+
+/**
+ * 校验动作子集。
+ *
+ * ⚠️ 这里**不能容错**：动作表是闭合的（INV-9），一个不在表里的动作会让
+ * 使用这条 skill 的**每一次判决**都判为不合规。装的时候放过去，等于给使用者
+ * 埋一个"审核永远失败"的坑，而且原因看起来跟我们无关。
+ */
+function parseAllowedActions(raw: readonly unknown[]): Skill['allowedActions'] {
+  const valid = new Set<string>(ActionType.options)
+  const bad = raw.filter((a) => typeof a !== 'string' || !valid.has(a))
+  if (bad.length > 0) {
+    throw new SkillSourceError(
+      'bad_input',
+      `不认识的动作：${bad.map((b) => String(b)).join('、')}`,
+      `动作表是闭合的，可用：${[...valid].join('、')}。`,
+    )
+  }
+  return raw as Skill['allowedActions']
 }
 
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
@@ -396,7 +578,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name: s.name,
         body: s.body,
         allowedActions: s.allowedActions,
-        files: {},
+        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
+        files: s.files ?? {},
       })),
       subject: input.subject,
       prompt: input.prompt,
@@ -484,7 +667,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name: s.name,
         body: s.body,
         allowedActions: s.allowedActions,
-        files: {},
+        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
+        files: s.files ?? {},
       })),
       subject: previous.subject,
       prompt:
@@ -575,7 +759,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name: s.name,
         body: s.body,
         allowedActions: s.allowedActions,
-        files: {},
+        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
+        files: s.files ?? {},
       })),
       subject: { type: 'issue', id: issue.id },
       prompt:
@@ -1079,56 +1264,118 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: '需要 skills（数组）' })
         return
       }
-      const overwrite = raw.overwrite === true
-      const now = Date.now()
-      const existing = await store.listSkills(workspaceId)
-      const bySlug = new Map(existing.map((s) => [s.slug, s]))
-      const installed: Skill[] = []
-      const skipped: Array<{ slug: string; reason: string; existingSource: string }> = []
+      const outcome = await installSkillPayloads({
+        store,
+        workspaceId,
+        payloads: raw.skills.map((entry) => entry as Partial<Skill> & { slug?: string }),
+        overwrite: raw.overwrite === true,
+        now: Date.now(),
+      })
+      sendJson(res, 201, outcome)
+      return
+    }
 
-      for (const entry of raw.skills) {
-        const payload = entry as Partial<Skill> & { slug?: string }
-        const slug = typeof payload.slug === 'string' ? payload.slug : ''
-        if (slug === '') {
-          skipped.push({ slug: '(空)', reason: 'slug 是 skill 的权威标识，不能为空', existingSource: '' })
-          continue
-        }
-        const clash = bySlug.get(slug)
-        if (clash && !overwrite) {
-          skipped.push({
-            slug,
-            existingSource: clash.source,
-            reason:
-              `已有同名 skill（来源：${clash.source}）。` +
-              `同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"；` +
-              `确实要替换请显式传 overwrite: true。`,
-          })
-          continue
-        }
-
-        const skill: Skill = {
-          // 同名替换时**复用原 id**：否则会留下一条永远没人引用的孤儿记录
-          id: (clash?.id ?? payload.id ?? (ulid() as Skill['id'])) as Skill['id'],
-          workspaceId,
-          slug,
-          name: payload.name ?? slug,
-          description: payload.description ?? null,
-          body: payload.body ?? '',
-          verdictSchemaVersion: 1,
-          allowedActions: payload.allowedActions ?? ['comment.create'],
-          // ★ 来源如实记录：默认 `remote`（这条路本来就是"页面下载好交过来"），
-          //   调用方可以显式声明是本地自建。
-          source: payload.source === 'local' ? 'local' : 'remote',
-          sourceRef: payload.sourceRef ?? null,
-          createdAt: clash?.createdAt ?? now,
-          updatedAt: now,
-        }
-        await store.insertSkill(skill)
-        bySlug.set(slug, skill)
-        installed.push(skill)
+    // ── 从「路径 / GitHub 链接」安装 skill（FR-AGENT-09/11）──
+    //
+    // ══════════════════════════════════════════════════════════════════
+    // 为什么这个接口由 daemon 自己去取内容
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 别的接口都遵守"daemon 不发对外请求、页面是唯一通道"（D19/D20）。
+    // 这条路是**刻意的例外**，理由有两条：
+    //
+    //   1. **本地目录路径只有 daemon 读得到。** 使用者在自己机器上开发技能，
+    //      要装的就是 `/Users/me/dev/my-skill`。页面读不了磁盘；
+    //   2. "下载到本地"这件事本来就发生在 daemon 这台机器上。
+    //
+    // 例外被严格限制在 `skill-source.ts` 里：只允许 GitHub 的三个主机、
+    // 只允许 https、每跳都校验主机、限大小/文件数/超时。它**不涉及
+    // alpha-helper 的远端服务**，D20 那条规则仍然原样成立。
+    if (req.method === 'POST' && path === '/api/skills/install') {
+      const raw = (await readJsonBody(req)) as {
+        source?: unknown
+        slug?: unknown
+        overwrite?: unknown
+        allowedActions?: unknown
       }
 
-      sendJson(res, 201, { installed, skipped })
+      // ★ 来源要逐字段校验，而不是信任类型声明——这里是运行时的任意 JSON
+      const source = parseInstallSource(raw.source)
+      if (!source.ok) {
+        sendJson(res, 400, { error: source.error })
+        return
+      }
+
+      let slugOverride: string | null = null
+      if (raw.slug !== undefined && raw.slug !== null && raw.slug !== '') {
+        if (typeof raw.slug !== 'string') {
+          sendJson(res, 400, { error: 'slug 必须是字符串' })
+          return
+        }
+        slugOverride = raw.slug.trim()
+      }
+
+      // ★ 整段（解析 + 参数校验 + 入库）都归同一个 catch 管。
+      //
+      //   一开始只想给 `resolveSkillSource` 挂 catch，结果"动作表里有不认识的动作"
+      //   是**参数不对**（该 400），却因为抛在 catch 外面而以 500 + 内部错误原文
+      //   返回——那会让使用者以为服务坏了，而其实是他自己填错了。
+      let resolved: ResolvedSkillSource
+      let outcome: Awaited<ReturnType<typeof installSkillPayloads>>
+      try {
+        resolved = await resolveSkillSource(
+          source.spec,
+          { slug: slugOverride },
+          {
+            ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+            githubToken: options.githubToken ?? process.env['ALPHA_HELPER_GITHUB_TOKEN'] ?? null,
+          },
+        )
+
+        outcome = await installSkillPayloads({
+          store,
+          workspaceId,
+          payloads: [
+            {
+              slug: resolved.slug,
+              name: resolved.slug,
+              body: resolved.body,
+              files: resolved.files,
+              source: source.spec.kind === 'payload' ? 'remote' : 'local',
+              sourceRef: resolved.sourceRef,
+              ...(Array.isArray(raw.allowedActions)
+                ? { allowedActions: parseAllowedActions(raw.allowedActions) }
+                : {}),
+            } as Partial<Skill> & { slug: string },
+          ],
+          overwrite: raw.overwrite === true,
+          now: Date.now(),
+        })
+      } catch (err) {
+        if (err instanceof SkillSourceError) {
+          // 400 而不是 500：这是"输入不对"，不是"服务坏了"。
+          // code 一并返回，界面可以据此做不同的提示（比如引导去用本地路径）。
+          sendJson(res, 400, {
+            error: err.message,
+            code: err.code,
+            detail: err.detail,
+            source: describeSource(source.spec),
+          })
+          return
+        }
+        throw err
+      }
+
+      sendJson(res, outcome.installed.length > 0 ? 201 : 200, {
+        ...outcome,
+        // 来源解析的**过程与结果**要如实回报：使用者得知道
+        // ① 到底从哪儿读的 ② SKILL.md 在哪 ③ 还有什么没装进来
+        source: describeSource(source.spec),
+        resolvedFrom: resolved.resolvedFrom,
+        sourceRef: resolved.sourceRef,
+        included: resolved.included,
+        ignored: resolved.ignored,
+      })
       return
     }
 
@@ -1248,7 +1495,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             name: s.name,
             body: s.body,
             allowedActions: s.allowedActions,
-            files: {},
+            // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
+        files: s.files ?? {},
           }))
           if (skills.length > 0) {
             info(`run ${body.runId} 按 agent 配置解析到 ${skills.length} 个 skill`)

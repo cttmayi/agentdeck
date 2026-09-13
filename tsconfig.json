@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
   // apps/web 有自己的 tsconfig（DOM lib + bundler 解析），见 apps/web/tsconfig.json
-  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
+  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["apps/web/src/**"]
 }

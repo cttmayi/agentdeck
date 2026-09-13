@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@alpha-helper/agent-core'
 import { hasContextBlock } from '@alpha-helper/agent-core'
@@ -36,6 +36,17 @@ class FakeBackend implements AgentBackend {
   seenPrompt: string | null = null
   seenWorkDir: string | null = null
   seenArgs: string[] | null = null
+
+  /**
+   * 执行那一刻，工作目录里 `.claude/skills/` 下的文件（相对技能目录的路径 → 内容）。
+   *
+   * ★ 为什么必须**在执行时**抓，而不是等 run 结束后去磁盘上看：
+   *   注入是临时的——run 结束后 `removeInjectedSkills` 会把我们写进去的
+   *   技能目录删掉（FR-CLI-16：清理只删自己造的东西）。跑完再去看，
+   *   看到的永远是"不存在"，于是这条断言会以"文件没写下去"的假象失败，
+   *   而真正的原因是我们看错了时间点。
+   */
+  seenSkillFiles: Record<string, string> = {}
 
   readonly #fail: boolean
 
@@ -75,6 +86,21 @@ class FakeBackend implements AgentBackend {
     this.seenPrompt = opts.prompt
     this.seenWorkDir = opts.workDir
     this.seenContext = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
+
+    // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
+    this.seenSkillFiles = {}
+    const skillsRoot = join(opts.workDir, '.claude', 'skills')
+    for (const slug of await readdir(skillsRoot).catch(() => [] as string[])) {
+      const walk = async (dir: string, prefix: string): Promise<void> => {
+        for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+          const full = join(dir, entry.name)
+          const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+          if (entry.isDirectory()) await walk(full, rel)
+          else this.seenSkillFiles[`${slug}/${rel}`] = await readFile(full, 'utf8').catch(() => '')
+        }
+      }
+      await walk(join(skillsRoot, slug), '')
+    }
 
     // ★ 假后端也要像真后端那样上报命令行。
     //
@@ -809,7 +835,13 @@ async function waitForText(runId: string, pattern: RegExp): Promise<string> {
   throw new Error(`等待日志出现 ${pattern} 超时`)
 }
 
-/** 等到 run 有消息为止（消息是流式写入的，可能晚一拍）。 */
+/**
+ * 等到 run **有消息**为止（消息是流式写入的，可能晚一拍）。
+ *
+ * ⚠️ 只保证"来了第一条"，**不保证你要的那一句已经写下来了**。
+ *    断言具体日志内容时请用 `waitForText(runId, /那句话/)`——否则在负载高的
+ *    时候会在那句话写入之前就断言，报出来的是"日志里没有 XX"的假失败。
+ */
 async function waitForMessages(runId: string): Promise<Array<{ content: string }>> {
   for (let i = 0; i < 200; i += 1) {
     const out = (await (
@@ -866,13 +898,73 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
     })
     assert.equal(res.status, 202)
 
-    const text = (await waitForMessages(runId)).map((m) => m.content).join('\n')
+    // ★ 必须等**那句话**，不能等"随便来一条消息"。
+    //   `waitForMessages()` 一有消息就返回，而日志是流式写入的——注入说明
+    //   排在"会话已启动"之后。用它在负载高的时候会在说明写下来之前就断言，
+    //   于是报出一个"日志里没有注入说明"的假失败（实测偶发）。
+    const text = await waitForText(runId, /已注入 1 个 skill/)
     assert.match(
       text,
       /已注入 1 个 skill：general-review/,
       '★ 日志里必须说清注入了什么——否则使用者只能靠猜，而他会猜错',
     )
     assert.match(text, /CLAUDE\.md|上下文文件/, '也要说清写到哪儿了')
+  })
+
+  test('★ 支持文件也要真的落到工作目录里（只写 SKILL.md 就是坏技能）', async () => {
+    /**
+     * ══════════════════════════════════════════════════════════════════
+     * 这条测试补的是"装进来了"与"用上了"之间那一环
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 一个技能可以带支持文件（脚本、参考文档）。如果注入时只写 SKILL.md，
+     * 技能里引用的 `scripts/check.sh` 在运行时**根本不存在**——技能装上了、
+     * 日志上看着也注入了，但 agent 一用它就找不到文件。
+     *
+     * 而且它很可能不报错：模型只会说"我找不到那个脚本"，然后自己换个做法。
+     * 从使用者的角度来看就是"这个技能好像不太灵"。
+     */
+    const dir = await makeTempDir('e2e-skill-files')
+    const runId = ulid() as RunId
+    const res = await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: 'agent-with-files', name: '带支持文件的执行者', instructions: '' },
+        skills: [
+          {
+            ref: { id: 'sk-files', slug: 'with-support', source: 'local' },
+            slug: 'with-support',
+            name: '带支持文件',
+            body: '# 标准\n\n看 scripts/check.sh。',
+            allowedActions: ['comment.create'],
+            files: { 'scripts/check.sh': '#!/bin/sh\necho ok\n', 'reference.md': '参考资料' },
+          },
+        ],
+        subject: { type: 'issue', id: issueId },
+        prompt: '干活',
+        workDir: dir,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+    assert.equal(res.status, 202)
+    await waitForMessages(runId)
+
+    const files = backend.seenSkillFiles
+    assert.match(
+      files['with-support/SKILL.md'] ?? '',
+      /看 scripts\/check\.sh/,
+      'SKILL.md 应当在执行那一刻就在工作目录里',
+    )
+    assert.equal(
+      files['with-support/scripts/check.sh'],
+      '#!/bin/sh\necho ok\n',
+      '★ 支持文件必须一起写下去 —— 少了它技能就是坏的，而且坏得很安静',
+    )
+    assert.equal(files['with-support/reference.md'], '参考资料')
+    await cleanup(dir)
   })
 
   test('★ 没挂 skill 时也要明说，而不是留白', async () => {
@@ -893,8 +985,8 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
       }),
     })
 
-    const text = (await waitForMessages(runId)).map((m) => m.content).join('\n')
-    assert.match(text, /没有注入任何 skill/)
+    // 同上：等那句话本身，而不是"有消息了"
+    const text = await waitForText(runId, /没有注入任何 skill/)
     assert.match(text, /按它自己的默认行为工作/, '要说清后果是什么')
   })
 })

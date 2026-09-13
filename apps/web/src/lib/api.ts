@@ -139,7 +139,10 @@ export interface Skill {
   slug: string
   name: string
   description: string | null
+  /** SKILL.md 的正文。 */
   body: string
+  /** 支持文件：相对路径 → 内容。缺失表示只有 SKILL.md。 */
+  files?: Record<string, string>
   allowedActions: string[]
   source: 'local' | 'remote'
   sourceRef: string | null

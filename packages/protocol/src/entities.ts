@@ -80,8 +80,25 @@ export const Skill = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/, 'slug must be kebab-case'),
   name: z.string().min(1).max(200),
   description: z.string().max(2000).nullable(),
-  /** 审核标准（人可读的正文）。 */
+  /** SKILL.md 的正文（人可读的审核标准）。 */
   body: z.string(),
+  /**
+   * 支持文件：相对路径 → 内容（**UTF-8 文本**）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么是可选字段，而不是一个新版本
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 整条记录是以 JSON 存的（`skill.json` 列），读回来是
+   * `JSON.parse(...) as Skill`——**读取路径上没有 zod 校验**。所以加一个
+   * 可选字段对老数据是完全安全的：老行没有这个键，取出来是 `undefined`，
+   * 落到用它的地方按 `?? {}` 处理即可，不需要数据迁移、也不需要动存储格式版本。
+   *
+   * 只支持文本：二进制（图片、字体、压缩包）会在**安装时就被拒绝并列出**，
+   * 而不是装进来再在某个环节悄悄写坏。缺了支持文件的技能是坏的技能，
+   * 所以宁可当场说清楚。
+   */
+  files: z.record(z.string(), z.string()).optional(),
   verdictSchemaVersion: z.number().int().positive(),
   /** 允许这个 skill 触发的动作子集。 */
   allowedActions: z.array(ActionType),

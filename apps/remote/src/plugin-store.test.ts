@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { PluginStore } from './plugin-store.ts'
 
 /**
@@ -25,11 +25,11 @@ import { PluginStore } from './plugin-store.ts'
 let dir: string
 
 before(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'alpha-pluginstore-'))
+  dir = await makeTempDir('alpha-pluginstore')
 })
 
 after(async () => {
-  await rm(dir, { recursive: true, force: true })
+  await cleanup(dir)
 })
 
 describe('插件启停状态（FR-PLUGIN-09）', () => {

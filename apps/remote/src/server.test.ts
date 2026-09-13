@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { test } from 'node:test'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { RemoteService, isLoopbackOrigin } from './server.ts'
 import { loadPlugins } from './plugins.ts'
 
@@ -33,7 +32,7 @@ async function call(
 
 describe('远端服务（M3）', () => {
   before(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'alpha-remote-'))
+    dir = await makeTempDir('alpha-remote')
     service = new RemoteService({ port: 0, dataDir: dir })
     service.loadPluginManifests([
       {
@@ -78,7 +77,7 @@ describe('远端服务（M3）', () => {
 
   after(async () => {
     await service.close()
-    await rm(dir, { recursive: true, force: true })
+    await cleanup(dir)
   })
 
   it('健康检查不需要登录', async () => {

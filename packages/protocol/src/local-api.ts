@@ -7,9 +7,26 @@ import { EpochMs, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
  * 本地接口契约（daemon ↔ 同源页面）。
  *
  * 关键约束（FR-BRIDGE-08、D19）：
- * - daemon **不发起**对远端的请求；取 run、下载 skill、查第三方、上报记录
- *   全部由页面代为发起；
+ * - daemon **不向 alpha-helper 的远端服务**发请求；取 run、查第三方、上报记录、
+ *   拉远端 skill 目录全部由页面代为发起；
  * - 页面与本地接口**同源**，因此不需要跨源协商。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 有一处例外，是刻意加的：从**路径 / GitHub** 安装 skill
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `POST /api/skills/install` 由 **daemon 自己去读**本地路径或 GitHub 链接
+ * （见 apps/daemon/src/skill-source.ts）。原因有两条，都不是"图省事"：
+ *
+ *   1. **本地目录路径只有 daemon 读得到。** 使用者在自己机器上开发技能，
+ *      要装的就是 `/Users/me/dev/my-skill` 这种路径——页面读不了磁盘；
+ *   2. GitHub 的跨源与私有仓库凭证在页面侧很难处理，而"下载到本地"这件事
+ *      本来就发生在 daemon 所在的这台机器上。
+ *
+ * 这条例外**不涉及 alpha-helper 的远端服务**（D20 那条规则仍然成立），
+ * 但它是 daemon 第一次具备对外请求能力，所以边界写死在
+ * `skill-source.ts` 里：**只允许 GitHub 的三个主机、只允许 https、
+ * 限大小、限文件数、限超时**。要扩到任意 URL 得单独做，不能顺手放开。
  */
 
 /** skill 内容由**页面**取好并内联——daemon 不访问网络。 */
@@ -26,7 +43,7 @@ export const SkillPayload = z.object({
    * 就能去改状态、建 issue（FR-ACTION-01、INV-9）。
    */
   allowedActions: z.array(ActionType),
-  /** 支持文件的相对路径 → 内容（base64）。首版可为空。 */
+  /** 支持文件的相对路径 → 内容（UTF-8 文本）。可为空——只支持文本，见 `Skill.files`。 */
   files: z.record(z.string(), z.string()),
 })
 export type SkillPayload = z.infer<typeof SkillPayload>

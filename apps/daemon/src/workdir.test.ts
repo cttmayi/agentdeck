@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { basename, dirname } from 'node:path'
@@ -157,25 +156,28 @@ describe('★ id 会拼进文件系统，所以必须防御', () => {
 })
 
 describe('ensureWorkDir', () => {
+  // ★ 临时目录一律用 makeTempDir（仓库内的 .cache/test-tmp），**不用 os.tmpdir()**：
+  //   系统临时目录在沙箱环境下可能写不进去，而且它离"被误删"只差一步。
+  //   这条纪律由 tests/test-safety.test.ts 机器检查。
   test('目录不存在时创建（含中间层）', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'alpha-workdir-'))
+    const dir = await makeTempDir('ensure-workdir')
     try {
       const target = join(dir, 'a', 'b', 'c')
       await ensureWorkDir(target)
       assert.equal((await stat(target)).isDirectory(), true)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await cleanup(dir)
     }
   })
 
   test('目录已存在时不报错（重试会走到这里）', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'alpha-workdir2-'))
+    const dir = await makeTempDir('ensure-workdir-twice')
     try {
       await ensureWorkDir(dir)
       await ensureWorkDir(dir)
       assert.equal((await stat(dir)).isDirectory(), true)
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await cleanup(dir)
     }
   })
 })

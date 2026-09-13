@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -25,12 +27,18 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *    "悄悄多出一条"，而加载时只会取到其中一条。两种结果都不对，且都没有提示。
  */
 
-async function withDaemon<T>(fn: (url: string) => Promise<T>): Promise<T> {
+async function withDaemon<T>(
+  fn: (url: string) => Promise<T>,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<T> {
   const dir = await makeTempDir('skills-install')
   const d = await startDaemon({
     dataDir: dir,
     port: 0,
     fsync: false,
+    // 工作目录也要显式给：兜底虽然不会碰家目录，但显式给更清楚
+    workRoot: join(dir, 'work'),
+    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     backend: {
       key: 'claude',
       protocol: 'stream-json',
@@ -282,6 +290,241 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
         ],
       })
       assert.equal(status, 202)
+    })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// 从「路径 / GitHub 链接」安装
+// ─────────────────────────────────────────────────────────────
+
+async function installFromSource(url: string, body: unknown) {
+  const res = await fetch(`${url}/api/skills/install`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+}
+
+/** 建一个技能目录。 */
+async function makeSkillDir(files: Record<string, string>): Promise<string> {
+  const dir = await makeTempDir('install-src')
+  for (const [rel, content] of Object.entries(files)) {
+    await mkdir(join(dir, rel, '..'), { recursive: true })
+    await writeFile(join(dir, rel), content, 'utf8')
+  }
+  return dir
+}
+
+/** 假 GitHub：只有一条技能，`d/SKILL.md` 与 `d/extra.md`。 */
+function fakeGithub(files: Record<string, string>): typeof fetch {
+  return (async (input: string | URL | Request): Promise<Response> => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const contents = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/contents\/(.*?)(?:\?|$)/.exec(url)
+    if (contents) {
+      const dir = contents[1] ?? ''
+      const entries = Object.keys(files)
+        .filter((p) => (dir === '' ? true : p.startsWith(`${dir}/`)))
+        .filter((p) => !(dir === '' ? p : p.slice(dir.length + 1)).includes('/'))
+        .map((p) => ({
+          name: p.split('/').pop(),
+          path: p,
+          type: 'file',
+          size: Buffer.byteLength(files[p]!, 'utf8'),
+          download_url: `https://raw.githubusercontent.com/o/r/main/${p}`,
+        }))
+      return new Response(JSON.stringify(entries), { status: 200 })
+    }
+    const raw = /^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.*)$/.exec(url)
+    if (raw) {
+      const content = files[raw[1]!]
+      return content === undefined
+        ? new Response('no', { status: 404 })
+        : new Response(content, { status: 200 })
+    }
+    return new Response('unexpected', { status: 500 })
+  }) as typeof fetch
+}
+
+describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
+  test('★ 有 SKILL.md ⇒ 装上，支持文件也落库；来源记成 local', async () => {
+    const src = await makeSkillDir({
+      'SKILL.md': '# 我的标准',
+      'extra.md': '补充材料',
+    })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, { source: { kind: 'path', path: src } })
+        assert.equal(res.status, 201)
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed.length, 1)
+        assert.equal(installed[0]?.['body'], '# 我的标准')
+        assert.deepEqual(installed[0]?.['files'], { 'extra.md': '补充材料' })
+        assert.equal(
+          installed[0]?.['source'],
+          'local',
+          '★ 从本机目录装的是本地内容，不能记成 remote',
+        )
+        // 界面要能看到"从哪儿装的、装了什么、什么没装"
+        assert.equal(typeof res.body['resolvedFrom'], 'string')
+        assert.equal((res.body['included'] as unknown[]).length, 2)
+
+        // 真的进了库
+        const listed = await listSkills(url)
+        assert.equal(listed.some((s) => s.slug === installed[0]?.['slug']), true)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 没有 SKILL.md ⇒ 400，并且告诉使用者"这个目录里其实有什么"', async () => {
+    const src = await makeSkillDir({ 'readme.md': '我不是技能' })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, { source: { kind: 'path', path: src } })
+        assert.equal(res.status, 400, '来源不对是使用者输入问题，不该是 500')
+        assert.equal(res.body['code'], 'missing_skill_md')
+        assert.match(String(res.body['detail']), /readme\.md/)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 非 GitHub 的链接被拒绝，并引导去用本地路径', async () => {
+    await withDaemon(async (url) => {
+      const res = await installFromSource(url, {
+        source: { kind: 'url', url: 'https://example.com/skill' },
+      })
+      assert.equal(res.status, 400)
+      assert.equal(res.body['code'], 'blocked_host')
+    })
+  })
+
+  test('★ 与已有同名 skill 冲突 ⇒ 拒绝写入，并说清冲突对方是哪来的', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 想顶掉内置的' })
+    try {
+      await withDaemon(async (url) => {
+        // daemon 首启播种了 general-review；把它所在的目录名对齐到那个 slug
+        const res = await installFromSource(url, {
+          source: { kind: 'path', path: src },
+          slug: 'general-review',
+        })
+        // 201 只在装上时返回；这里应当是"没装上 + 明确原因"
+        assert.equal(res.body['installed'] ? (res.body['installed'] as unknown[]).length : 0, 0)
+        const skipped = res.body['skipped'] as Array<{ slug: string; existingSource: string; reason: string }>
+        assert.equal(skipped[0]?.slug, 'general-review')
+        assert.equal(skipped[0]?.existingSource, 'local')
+        assert.match(skipped[0]?.reason ?? '', /overwrite/)
+
+        // 内置那条**一字未动**
+        const listed = await listSkills(url)
+        assert.equal(listed.filter((s) => s.slug === 'general-review').length, 1)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 显式 overwrite 才替换', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 换掉内置的' })
+    try {
+      await withDaemon(async (url) => {
+        const before = (await listSkills(url)).find((s) => s.slug === 'general-review')
+        const res = await installFromSource(url, {
+          source: { kind: 'path', path: src },
+          slug: 'general-review',
+          overwrite: true,
+        })
+        assert.equal((res.body['installed'] as unknown[]).length, 1)
+        const after = (await listSkills(url)).find((s) => s.slug === 'general-review')
+        assert.equal(after?.id, before?.id, '复用原 id，不留孤儿')
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 不认识的动作被拒绝（动作表是闭合的，放过去会让每次都判不合规）', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 标准' })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, {
+          source: { kind: 'path', path: src },
+          allowedActions: ['comment.create', 'rm -rf everything'],
+        })
+        assert.equal(res.status, 400)
+        assert.match(String(res.body['error']), /不认识的动作/)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 只允许白名单里的动作被写进库', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 标准' })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, {
+          source: { kind: 'path', path: src },
+          allowedActions: ['issue.add_label'],
+        })
+        const installed = res.body['installed'] as Array<{ allowedActions: string[] }>
+        assert.deepEqual(installed[0]?.allowedActions, ['issue.add_label'])
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('source 形状不对 ⇒ 400 且指出是哪个字段', async () => {
+    await withDaemon(async (url) => {
+      assert.equal((await installFromSource(url, {})).status, 400)
+      assert.equal((await installFromSource(url, { source: { kind: 'path' } })).status, 400)
+      assert.equal((await installFromSource(url, { source: { kind: '???' } })).status, 400)
+      assert.match(
+        String((await installFromSource(url, { source: { kind: 'path' } })).body['error']),
+        /path/,
+      )
+    })
+  })
+
+  test('★ 从 GitHub 链接安装（注入假 fetch，不联网）', async () => {
+    const gh = fakeGithub({
+      'skills/foo/SKILL.md': '# 远端技能',
+      'skills/foo/extra.md': '远端的补充',
+    })
+    await withDaemon(
+      async (url) => {
+        const res = await installFromSource(url, {
+          source: { kind: 'url', url: 'https://github.com/o/r/tree/main/skills/foo' },
+        })
+        assert.equal(res.status, 201)
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed[0]?.['slug'], 'foo')
+        assert.equal(installed[0]?.['body'], '# 远端技能')
+        assert.deepEqual(installed[0]?.['files'], { 'extra.md': '远端的补充' })
+        assert.equal(
+          installed[0]?.['source'],
+          'local',
+          '从 GitHub 装进来的是**本地内容**（下载到本地了），不是远端目录那条路',
+        )
+        assert.match(String(installed[0]?.['sourceRef']), /github:o\/r@main/)
+      },
+      { fetchImpl: gh },
+    )
+  })
+
+  test('★ 路径不存在 ⇒ 400 而不是 500', async () => {
+    await withDaemon(async (url) => {
+      const res = await installFromSource(url, {
+        source: { kind: 'path', path: '/definitely/not/here/xyz' },
+      })
+      assert.equal(res.status, 400)
+      assert.equal(res.body['code'], 'not_found')
     })
   })
 })

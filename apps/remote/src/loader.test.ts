@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { loadPluginDirectory, resolveInPluginDir } from './loader.ts'
 
 /**
@@ -44,11 +44,11 @@ const baseManifest = {
 }
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'alpha-plugin-'))
+  root = await makeTempDir('alpha-plugin')
 })
 
 after(async () => {
-  await rm(root, { recursive: true, force: true })
+  await cleanup(root)
 })
 
 describe('★ 插件的代码真的会被加载执行（P1）', () => {
