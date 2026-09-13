@@ -176,6 +176,52 @@ function coverageWarning(reviewCount: number): string | null {
   return '没有派审核 —— 检查这个 agent 的「由谁来审它」'
 }
 
+/**
+ * 表格与卡片里用的**短标签**。
+ *
+ * 三列的标题（"已完成执行 · 待审查"）是给看板当列头用的，塞进表格单元格太长
+ * （会把那一列撑开、把标题挤没）。
+ */
+export const STAGE_SHORT: Record<Stage, string> = {
+  executing: '执行中',
+  awaiting_review: '待审查',
+  reviewed: '已审查',
+}
+
+/** 一个任务 + 它的阶段推导——列表与看板都用它。 */
+export interface StagedIssue<T> {
+  issue: T
+  info: StageInfo
+}
+
+/**
+ * 把任务分成「**需要注意**」与其余两拨。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么单独一拨，而不是换个排序
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 单独一拨而不是"按优先级重排全部"：重排会让**其余任务的顺序也变**，而使用者的
+ * 心理模型是"列表大致按时间"，突然整体重排会让人找不到刚才那条。
+ * 置顶一拨 + 其余保持原序，两边都成立。
+ *
+ * 判据只用 `StageInfo.warning`，它现在覆盖两类**真的要人看一眼**的情况：
+ *   - 执行失败/被取消 —— 它**不会**有审核结果（没有产出可审），干等是白等；
+ *   - 执行成功但没派审核 —— 配置问题（那个 agent 没配「由谁来审它」）。
+ *
+ * ⚠️ 还差一类：「判决要人决定」（`needs_human`）。它现在拿不到——判决结论不在
+ *    `runs` 列表里，要按 run 单独去查。等把它并进列表响应之后再加进来，
+ *    **在那之前不要在这里假装覆盖了它**（界面上会写清这一拨到底指什么）。
+ */
+export function splitByAttention<T>(
+  staged: ReadonlyArray<StagedIssue<T>>,
+): { attention: Array<StagedIssue<T>>; rest: Array<StagedIssue<T>> } {
+  const attention: Array<StagedIssue<T>> = []
+  const rest: Array<StagedIssue<T>> = []
+  for (const item of staged) (item.info.warning ? attention : rest).push(item)
+  return { attention, rest }
+}
+
 /** 三列的定义。顺序就是流水线方向，不能乱。 */
 export const PIPELINE_COLUMNS: ReadonlyArray<{
   id: Stage

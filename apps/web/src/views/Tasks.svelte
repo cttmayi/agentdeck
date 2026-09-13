@@ -11,7 +11,13 @@
   import { renderMarkdown } from '../lib/markdown.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
-  import { PIPELINE_COLUMNS as COLUMNS, runsForIssue, stageOf } from '../lib/pipeline.ts'
+  import {
+    PIPELINE_COLUMNS as COLUMNS,
+    STAGE_SHORT,
+    runsForIssue,
+    splitByAttention,
+    stageOf,
+  } from '../lib/pipeline.ts'
   import RunLog from '../components/RunLog.svelte'
 
   /**
@@ -50,6 +56,14 @@
   }
 
   $: staged = visible.map((issue) => ({ issue, info: stageOf(issue.id, $runs) }))
+
+  /**
+   * 「需要注意」单独一拨置顶。
+   *
+   * 不重排全部：使用者的心理模型是"列表大致按时间"，整体重排会让人找不到
+   * 刚才那条。置顶一拨 + 其余保持原序，两边都成立。
+   */
+  $: byAttention = splitByAttention(staged)
 
   const VIEW_KEY = 'alpha-helper.issue-view'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
@@ -141,8 +155,18 @@
   let verdicts: VerdictView[] = []
   let verdictsFor: string | null = null
 
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 打开详情时必须走 `selectRun()`，而不是只赋一个 `activeRun`
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 原来这里只写 `activeRun = issueRuns[0]`。于是从列表点开一个任务时，
+  // **没有人去取它的结果与文件**——那些是在 `selectRun()` 里做的。表现是
+  // 右边结果区一直停在骨架屏，直到你手点一下 run 标签或按刷新。
+  //
+  // 这个 bug 是"量尺寸"量出来的：打桩渲染后测到结果区高度只有 73px、
+  // 文件列表 0 项 —— 肉眼扫一眼截图很可能看不出来（骨架屏也是灰条）。
   $: if (issueRuns.length > 0 && (!activeRun || !issueRuns.some((r) => r.runId === activeRun!.runId))) {
-    activeRun = issueRuns[0]!
+    void selectRun(issueRuns[0]!)
   }
 
   async function loadVerdicts(runId: string): Promise<void> {
@@ -158,6 +182,18 @@
   async function cancel(runId: string): Promise<void> {
     await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
     await loadRuns()
+  }
+
+  /**
+   * 从看板点开一个任务。
+   *
+   * 看板是**全宽**的（三列挤在半个屏幕里没法看），所以详情不能并排显示；
+   * 这里切回列表模式再选中——于是使用者落进"列表 + 详情"的主从布局里，
+   * 而不是丢进一个没有列表的孤立页面。
+   */
+  function selectFromBoard(issueId: string): void {
+    setMode('list')
+    selectedIssueId.set(issueId)
   }
 
   async function selectRun(run: RunSummary): Promise<void> {
@@ -263,28 +299,169 @@
   }
 </script>
 
-{#if selected}
-  <!-- ══════════ 任务详情 ══════════ -->
-  <div class="view-head">
-    <div>
-      <button type="button" class="ghost small" onclick={() => selectedIssueId.set(null)}>
-        ← 返回任务清单
-      </button>
-      <h2 style="margin-top:var(--sp-2)">{selected.title}</h2>
-      <p>
-        <span class="badge {selected.status}">{LABELS[selected.status] ?? selected.status}</span>
-        <span style="margin-left:var(--sp-2)">{agentName(selected.assignee?.id ?? null)}</span>
-      </p>
-    </div>
-    <button type="button" class="secondary" onclick={refresh}>刷新</button>
-  </div>
+{#snippet row(
+  issue: (typeof visible)[number],
+  info: ReturnType<typeof stageOf>,
+  needsAttention: boolean,
+)}
+  <tr
+    onclick={() => selectedIssueId.set(issue.id)}
+    style="cursor:pointer"
+    class:attention-row={needsAttention}
+  >
+    <td><strong>{issue.title}</strong></td>
+    <td><span class="badge {issue.status}">{LABELS[issue.status] ?? issue.status}</span></td>
+    <td>
+      <span class="stage-tag {info.stage}">{STAGE_SHORT[info.stage]}</span>
+      {#if info.detail && info.detail !== '审核已完成'}
+        <span class="faint small">{info.detail}</span>
+      {/if}
+    </td>
+    <td class="muted">{agentName(issue.assignee?.id ?? null)}</td>
+    <td class="faint small">{new Date(issue.updatedAt).toLocaleString()}</td>
+  </tr>
+{/snippet}
 
-  {#if selected.description}
-    <section class="drawer-section">
-      <h3>说明</h3>
-      <p class="hint" style="white-space:pre-wrap">{selected.description}</p>
-    </section>
+<div
+  class="split-layout"
+  class:board={mode === 'board'}
+  class:with-detail={mode === 'list' && selected !== null}
+>
+  <!-- ══════════════════ 中栏：清单 / 看板 ══════════════════ -->
+  <section class="pane list-pane">
+    <header class="pane-head">
+      <div>
+        <h2>{mode === 'board' ? '任务看板' : '任务清单'}</h2>
+        <p class="hint">
+          {#if mode === 'board'}
+            按<strong>实际进行到哪一步</strong>分列——不是按人工维护的状态字段，而是从执行记录推出来的事实。
+          {:else}
+            点一条看它的执行记录与产出；需要看整体堆在哪一步时切到看板。
+          {/if}
+        </p>
+      </div>
+      <div class="pane-actions">
+        <button type="button" class="ghost small" class:active={mode === 'list'} onclick={() => setMode('list')}>列表</button>
+        <button type="button" class="ghost small" class:active={mode === 'board'} onclick={() => setMode('board')}>看板</button>
+        <button type="button" class="secondary small" onclick={refresh}>刷新</button>
+      </div>
+    </header>
+
+    <div class="pane-body">
+      <input
+        bind:value={filter}
+        placeholder="搜索标题或说明…"
+        style="max-width:22rem;margin-bottom:var(--sp-4)"
+        autocomplete="off"
+      />
+
+  {#if $loading['issues'] && $issues.length === 0}
+    <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
+    <div class="skeleton" style="width:70%"></div>
+  {:else if $loadError['issues']}
+    <div class="notice bad">{$loadError['issues']}</div>
+  {:else if visible.length === 0}
+    <div class="empty">
+      <strong>{filter ? '没有匹配的任务' : '还没有任务'}</strong>
+      {filter ? '换个关键词试试。' : '去「新建任务」建一个，它会立刻派给 agent。'}
+    </div>
+  {:else if mode === 'board'}
+    <div class="board board-3">
+      {#each COLUMNS as col (col.id)}
+        {@const items = staged.filter((x) => x.info.stage === col.id)}
+        <div class="column">
+          <h4>
+            <span>{col.title} <span class="faint">{items.length}</span></span>
+            <span class="col-hint">{col.hint}</span>
+          </h4>
+
+          {#if items.length === 0}
+            <p class="col-empty faint small">（空）</p>
+          {/if}
+
+          {#each items as { issue, info } (issue.id)}
+            <button type="button" class="card" onclick={() => selectFromBoard(issue.id)}>
+              <span class="card-title">{issue.title}</span>
+              <span class="card-meta">
+                <span class="badge {issue.status}">{LABELS[issue.status] ?? issue.status}</span>
+                <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+              </span>
+              <span class="card-meta">
+                <span class="faint small">{info.detail}</span>
+                <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
+              </span>
+              {#if info.warning}
+                <span class="card-warning">{info.warning}</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/each}
+    </div>
+
+  {:else}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>任务</th><th>状态</th>
+            <!-- ★ 阶段列：这一列原来**只有看板有**，于是列表里看不出
+                 "它是卡在 agent 手上、还是审完了"。而 `stageOf` 早就算好了，
+                 只是在列表里没用。 -->
+            <th>阶段</th><th>指派给</th><th>更新于</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#if byAttention.attention.length > 0}
+            <tr class="attention-head">
+              <td colspan="5">
+                需要注意（{byAttention.attention.length}）
+                <span class="faint small">
+                  —— 执行失败/被取消（不会有审核结果），或者根本没派审核
+                </span>
+              </td>
+            </tr>
+            {#each byAttention.attention as { issue, info } (issue.id)}
+              {@render row(issue, info, true)}
+            {/each}
+            <tr class="attention-head">
+              <td colspan="5">其余任务（{byAttention.rest.length}）</td>
+            </tr>
+          {/if}
+          {#each byAttention.rest as { issue, info } (issue.id)}
+            {@render row(issue, info, false)}
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
+    </div>
+  </section>
+
+  <!-- ══════════════════ 右栏：任务详情（宽屏并排 / 窄屏整页）══════════════════ -->
+  {#if mode === 'list'}
+    <section class="pane detail-pane">
+      {#if selected}
+        <div class="pane-body detail-scroll">
+          <header class="detail-head">
+            <button
+              type="button"
+              class="ghost small back-to-list"
+              onclick={() => selectedIssueId.set(null)}
+            >← 返回任务清单</button>
+            <h2>{selected.title}</h2>
+            <p class="detail-sub">
+              <span class="badge {selected.status}">{LABELS[selected.status] ?? selected.status}</span>
+              <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
+            </p>
+          </header>
+
+    {#if selected.description}
+      <section class="drawer-section">
+        <h3>说明</h3>
+        <p class="hint" style="white-space:pre-wrap">{selected.description}</p>
+      </section>
+    {/if}
 
   <section class="drawer-section">
     <h3>执行记录 <span class="faint small">（{issueRuns.length}）</span></h3>
@@ -432,35 +609,6 @@
         <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
       {/if}
 
-      <!-- ══════════ 接着沟通 ══════════ -->
-      {#if canFollowUp && lastExecuteRun}
-        <section class="follow-up">
-          <h4>继续沟通</h4>
-          <p class="hint">
-            不满意这次的产出？直接说下一步要它做什么。会**接着上一次的会话**继续
-            （复用同一个工作目录 <code class="mono">{lastExecuteRun.workDir ?? '（自动分配）'}</code>，
-            并让 CLI 恢复上次的上下文）；恢复被拒时日志里会说明，不会假装接上了。
-          </p>
-          <textarea
-            bind:value={followUp}
-            rows="3"
-            placeholder="例如：把流程图的配色改成浅色系，并把结论写在文件开头"
-            disabled={sending}
-          ></textarea>
-          <div class="follow-actions">
-            <button type="button" disabled={sending || followUp.trim() === ''} onclick={sendFollowUp}>
-              {sending ? '正在派发…' : '发送并继续'}
-            </button>
-            <span class="faint small">
-              跑完仍会按这个 agent 的配置自动派审核
-            </span>
-          </div>
-          {#if sendError}
-            <div class="notice bad" style="margin-top:var(--sp-2)">{sendError}</div>
-          {/if}
-        </section>
-      {/if}
-
       <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-2)">
         <button
           type="button"
@@ -507,96 +655,84 @@
     </section>
   {/if}
 
-{:else}
-  <!-- ══════════ 清单 / 看板 ══════════ -->
-  <div class="view-head">
-    <div>
-      <h2>任务清单</h2>
-      <p>
-        按<strong>实际进行到哪一步</strong>分列——不是按人工维护的状态字段，
-        而是从执行记录推出来的事实。点任意一条看它的执行记录与实时输出。
-      </p>
-    </div>
-    <div style="display:flex;gap:var(--sp-2)">
-      <button type="button" class="ghost" class:active={mode === 'list'} onclick={() => setMode('list')}>
-        列表
-      </button>
-      <button type="button" class="ghost" class:active={mode === 'board'} onclick={() => setMode('board')}>
-        看板
-      </button>
-      <button type="button" class="secondary" onclick={refresh}>刷新</button>
-    </div>
-  </div>
-
-  <input
-    bind:value={filter}
-    placeholder="搜索标题或说明…"
-    style="max-width:22rem;margin-bottom:var(--sp-4)"
-    autocomplete="off"
-  />
-
-  {#if $loading['issues'] && $issues.length === 0}
-    <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-    <div class="skeleton" style="width:70%"></div>
-  {:else if $loadError['issues']}
-    <div class="notice bad">{$loadError['issues']}</div>
-  {:else if visible.length === 0}
-    <div class="empty">
-      <strong>{filter ? '没有匹配的任务' : '还没有任务'}</strong>
-      {filter ? '换个关键词试试。' : '去「新建任务」建一个，它会立刻派给 agent。'}
-    </div>
-  {:else if mode === 'board'}
-    <div class="board board-3">
-      {#each COLUMNS as col (col.id)}
-        {@const items = staged.filter((x) => x.info.stage === col.id)}
-        <div class="column">
-          <h4>
-            <span>{col.title} <span class="faint">{items.length}</span></span>
-            <span class="col-hint">{col.hint}</span>
-          </h4>
-
-          {#if items.length === 0}
-            <p class="col-empty faint small">（空）</p>
-          {/if}
-
-          {#each items as { issue, info } (issue.id)}
-            <button type="button" class="card" onclick={() => selectedIssueId.set(issue.id)}>
-              <span class="card-title">{issue.title}</span>
-              <span class="card-meta">
-                <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
-                <span class="faint small">{info.detail}</span>
-              </span>
-              {#if info.warning}
-                <span class="card-warning">{info.warning}</span>
-              {/if}
-            </button>
-          {/each}
         </div>
-      {/each}
-    </div>
 
-  {:else}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>任务</th><th>状态</th><th>指派给</th><th>更新于</th></tr>
-        </thead>
-        <tbody>
-          {#each visible as issue (issue.id)}
-            <tr onclick={() => selectedIssueId.set(issue.id)} style="cursor:pointer">
-              <td><strong>{issue.title}</strong></td>
-              <td><span class="badge {issue.status}">{LABELS[issue.status] ?? issue.status}</span></td>
-              <td class="muted">{agentName(issue.assignee?.id ?? null)}</td>
-              <td class="faint small">{new Date(issue.updatedAt).toLocaleString()}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+        {#if canFollowUp && lastExecuteRun}
+          <!-- ══════════ 常驻底栏：继续沟通 ══════════
+               它原来是滚到底才看得到的最后一段，而"接着干"是这个产品最核心的
+               交互之一 —— 放在底栏，随时能说下一句。 -->
+          <footer class="pane-foot">
+      <!--
+        ⚠️ 这一段要**短**。它原来是一整段说明加三行输入框，实测占了详情栏
+        284px —— 一个 748px 高的栏位里，常驻底栏吃掉 38%，正文就没地方了。
+        详细说明挪进 title（鼠标悬停可见），正文只留一句。
+      -->
+      <section
+        class="follow-up"
+        title="会复用同一个工作目录（{lastExecuteRun.workDir ?? '（自动分配）'}），
+并让 CLI 恢复上一次的会话；恢复被拒时日志里会说明，不会假装接上了。"
+      >
+        <textarea
+          bind:value={followUp}
+          rows="2"
+          placeholder="接着说下一步要它做什么…"
+          disabled={sending}
+          onkeydown={(e) => {
+            // Ctrl/Cmd+Enter 发送：「接着干」是高频动作，不该逼人去够鼠标
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendFollowUp()
+          }}
+        ></textarea>
+        <div class="follow-actions">
+          <button type="button" disabled={sending || followUp.trim() === ''} onclick={sendFollowUp}>
+            {sending ? '正在派发…' : '发送并继续'}
+          </button>
+          <span class="faint small">接着上次的会话与工作目录 · ⌘↵ 发送</span>
+        </div>
+        {#if sendError}
+          <div class="notice bad" style="margin-top:var(--sp-2)">{sendError}</div>
+        {/if}
+      </section>
+          </footer>
+        {/if}
+      {:else}
+        <div class="pane-body">
+          <div class="empty">
+            <strong>选一个任务看它的执行与产出</strong>
+            右边的这一栏会显示"它做成了什么"、工作目录里的文件、以及判决。
+          </div>
+        </div>
+      {/if}
+    </section>
   {/if}
-{/if}
+</div>
 
 <style>
+  /* 「需要注意」那一拨：左边一条醒目色条，不靠颜色变字体 */
+  .attention-head td {
+    padding-top: var(--sp-3);
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .attention-row td:first-child {
+    border-left: 2px solid var(--warn);
+  }
+
+  .stage-tag {
+    display: inline-block;
+    padding: 0 var(--sp-1);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line-strong);
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+  }
+
+  /* 阶段色与看板的列色一致：同一件事在两个视图里该是同一个颜色 */
+  .stage-tag.executing { border-color: var(--status-active); color: var(--status-active); }
+  .stage-tag.awaiting_review { border-color: var(--status-review); color: var(--status-review); }
+  .stage-tag.reviewed { border-color: var(--status-done); color: var(--status-done); }
+
   /* 跑完之后：左边结论、右边产出文件 */
   .result-grid {
     display: grid;
@@ -716,18 +852,8 @@
 
   .result-files li.is-dir { color: var(--text-faint); }
 
-  .follow-up {
-    margin-top: var(--sp-4);
-    padding: var(--sp-3);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-  }
-
-  .follow-up h4 {
-    margin: 0 0 var(--sp-2);
-  }
-
+  /* 常驻底栏里的它**不再自带边框与内边距**：外层 .pane-foot 已经有分隔线了，
+     再套一层框会显得像页面里的一个孤岛 */
   .follow-up textarea {
     width: 100%;
     font-family: inherit;

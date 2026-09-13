@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { PIPELINE_COLUMNS, runsForIssue, stageOf } from './pipeline.ts'
+import {
+  PIPELINE_COLUMNS,
+  STAGE_SHORT,
+  runsForIssue,
+  splitByAttention,
+  stageOf,
+} from './pipeline.ts'
 import type { RunSummary } from './api.ts'
 
 /**
@@ -261,5 +267,104 @@ describe('★ 任务名下的 run：执行 + 审它的 review（审查结论才�
       runsForIssue(ISSUE, all).some((r) => r.runId === info.reviewRun?.runId),
       '★ 看板认定的那条审查 run，任务详情里也必须能找到',
     )
+  })
+})
+
+describe('★ 「需要注意」单独一拨（不是重排全部）', () => {
+  /**
+   * 使用者的心理模型是"列表大致按时间"。整体重排会让人找不到刚才那条，
+   * 所以只把**真的要人看一眼**的置顶，其余保持原序。
+   */
+  function staged(
+    id: string,
+    runs: Array<Partial<RunSummary> & { runId: string; kind: string }>,
+  ) {
+    // ⚠️ 夹具要自己把 subject 接对：`stageOf` 是按 `subject.id === issueId`
+    //    找执行 run 的。第一版直接用 `run()` 的默认 subject（`i1`），于是
+    //    每条都"找不到执行 run" ⇒ 全被判成"还没开始执行"，测试红得莫名其妙。
+    const list = runs.map((r) =>
+      run({
+        ...r,
+        subject:
+          r.kind === 'execute'
+            ? { type: 'issue', id }
+            : (r.subject ?? { type: 'run', id: 'unknown' }),
+      }),
+    )
+    return { issue: { id }, info: stageOf(id, list) }
+  }
+
+  test('★ 执行失败的任务进「需要注意」，并带原因', () => {
+    const list = [
+      staged('ok', [
+        { runId: 'e-ok', kind: 'execute', status: 'completed' },
+        { runId: 'r-ok', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e-ok' } },
+      ]),
+      staged('bad', [
+        { runId: 'e-bad', kind: 'execute', status: 'failed', failureReason: 'agent_error' },
+      ]),
+    ]
+    const { attention, rest } = splitByAttention(list)
+    assert.deepEqual(attention.map((x) => x.issue.id), ['bad'])
+    assert.deepEqual(rest.map((x) => x.issue.id), ['ok'])
+    assert.match(attention[0]!.info.warning ?? '', /执行失败/)
+  })
+
+  test('★ 没派审核（配置问题）也进「需要注意」', () => {
+    const list = [staged('noreviewer', [{ runId: 'e1', kind: 'execute', status: 'completed' }])]
+    const { attention } = splitByAttention(list)
+    assert.equal(attention.length, 1)
+    assert.match(attention[0]!.info.warning ?? '', /没有派审核/)
+  })
+
+  test('被取消的执行同样进「需要注意」（它也不会有审核结果）', () => {
+    const list = [staged('c', [{ runId: 'e1', kind: 'execute', status: 'cancelled' }])]
+    const { attention } = splitByAttention(list)
+    assert.equal(attention.length, 1)
+    assert.match(attention[0]!.info.warning ?? '', /被取消/)
+  })
+
+  test('正在跑 / 待审查 / 已审查都**不算**需要注意（那是正常流转）', () => {
+    const list = [
+      staged('running', [{ runId: 'e1', kind: 'execute', status: 'running' }]),
+      staged('awaiting', [
+        { runId: 'e2', kind: 'execute', status: 'completed' },
+        { runId: 'r2', kind: 'review', status: 'running', subject: { type: 'run', id: 'e2' } },
+      ]),
+      staged('done', [
+        { runId: 'e3', kind: 'execute', status: 'completed' },
+        { runId: 'r3', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e3' } },
+      ]),
+    ]
+    const { attention, rest } = splitByAttention(list)
+    assert.deepEqual(attention, [])
+    assert.deepEqual(
+      rest.map((x) => x.issue.id),
+      ['running', 'awaiting', 'done'],
+      '其余保持原序',
+    )
+  })
+
+  test('都有警告时全部进 attention，rest 为空', () => {
+    const list = [
+      staged('a', [{ runId: 'e1', kind: 'execute', status: 'failed' }]),
+      staged('b', [{ runId: 'e2', kind: 'execute', status: 'cancelled' }]),
+    ]
+    const { attention, rest } = splitByAttention(list)
+    assert.equal(attention.length, 2)
+    assert.equal(rest.length, 0)
+  })
+
+  test('一个任务都没有时不炸', () => {
+    const { attention, rest } = splitByAttention([])
+    assert.deepEqual(attention, [])
+    assert.deepEqual(rest, [])
+  })
+
+  test('短标签覆盖三个阶段，且够短（表格里要显示它）', () => {
+    for (const col of PIPELINE_COLUMNS) {
+      assert.equal(typeof STAGE_SHORT[col.id], 'string')
+      assert.ok(STAGE_SHORT[col.id].length <= 5, `短标签别太长：${STAGE_SHORT[col.id]}`)
+    }
   })
 })

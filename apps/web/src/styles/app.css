@@ -258,11 +258,189 @@ hr {
   border-top: 1px solid var(--line);
 }
 
+/* 侧栏底部的环境状态：一眼看出"这台机器的运行环境有没有问题" */
+.env {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.env:hover {
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+
+.env-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+/* 有问题时变红：常驻的小红点比一行文字更容易被注意到 */
+.env-dot.bad {
+  background: var(--bad);
+}
+
+.env-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.env-line {
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ══════════════ 主区 ══════════════ */
 
 .main {
   overflow-y: auto;
   padding: var(--sp-5) var(--sp-6);
+}
+
+/**
+ * 有主从布局的视图（任务），**主区不再自己滚动与留白**：它内部是两栏，
+ * 各自滚动、各自留白。否则会出现两条滚动条，而且底部常驻的那一条
+ *（「继续沟通」）会跟着外层一起滚走。
+ *
+ * 用 `:has()` 而不是给 `.main` 加一个 class：加 class 意味着"哪个视图在用
+ * 主从布局"这件事要在 App.svelte 里再写一遍，两处迟早不同步。
+ */
+.main:has(> .split-layout) {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* ══════════════ 主从布局（列表 | 详情）══════════════
+   任务与智能体两个视图共用；类名不带视图名，免得第二个视图去复制一套。 */
+
+.split-layout {
+  height: 100%;
+  display: grid;
+  /* 清单那一栏固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
+     固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。 */
+  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+}
+
+/* 看板是"扫"的视图：三列挤在半个屏幕里没法看，所以它占满整宽、不带详情栏 */
+.split-layout.board {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* grid/flex 子项默认不许缩，不写这句内部滚动会失效 */
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--line);
+}
+
+.pane-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-head h2 {
+  font-size: var(--fs-lg);
+}
+
+.pane-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+}
+
+/* 底部常驻（「继续沟通」）——不随内容滚走 */
+.pane-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+.detail-head h2 {
+  margin-bottom: var(--sp-1);
+}
+
+.detail-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+/* 返回按钮只在窄屏（详情整页显示时）需要——宽屏列表就在左边。
+   智能体详情里的那个返回按钮同理（它自带 .back 类）。 */
+.back-to-list,
+.split-layout.with-detail .detail-pane .back {
+  display: none;
+  margin-bottom: var(--sp-2);
+}
+
+/* ══════════════ 断点 ══════════════
+   两档：
+     72rem —— 主从布局退化成"一次只显示一栏"（详情占满，返回按钮出现）
+     60rem —— 看板三列改成纵向堆叠（三等分在窄屏挤得没法读） */
+
+@media (max-width: 72rem) {
+  .split-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .split-layout.with-detail .list-pane {
+    display: none;
+  }
+
+  .split-layout:not(.with-detail) .detail-pane {
+    display: none;
+  }
+
+  .back-to-list,
+  .split-layout.with-detail .detail-pane .back {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 60rem) {
+  .board-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .main {
+    padding: var(--sp-4);
+  }
+
+  .pane-head,
+  .pane-body,
+  .pane-foot {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
 }
 
 .view-head {
