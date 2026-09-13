@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import {
+  CONTEXT_BLOCK_BEGIN,
+  CONTEXT_BLOCK_END,
   injectContextBlock,
   removeContextBlock,
   renderContextBlock,
@@ -817,6 +819,14 @@ export class RunExecutor {
         )
       }
 
+      // ★ 先清理自己的痕迹，**再**去串接审核。
+      //
+      //   反过来（先串接、后清理）会开一个真实的窗口：审核 run 是**并发**开始的
+      //   （`submit` 受理后立刻跑，不等人），它会把同一个目录里的上下文块换成
+      //   自己那份——而这时执行 run 才走到清理，就可能把审核的块摘掉。
+      //   顺序调过来之后，审核 run 拿到的是一间已经收拾干净的工作目录。
+      await cleanup()
+
       // ★ S1：执行完成后自动接一次审核（可选）
       let chainedRunId: RunId | null = null
       if (req.kind === 'execute' && result.status === 'completed') {
@@ -831,9 +841,6 @@ export class RunExecutor {
           this.#deps.onWarn?.(`自动审核串接失败：${String(err)}`)
         }
       }
-
-      // ★ 先清理、再报终态
-      await cleanup()
 
       // ══════════════════════════════════════════════════════════════
       // ★ 被使用者取消的 run 不能记成 infra_error
@@ -980,6 +987,36 @@ export class RunExecutor {
     return async () => {
       const current = await readFile(contextFile, 'utf8').catch(() => null)
       if (current === null) return
+
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 先认身份：文件里那个块**是不是本次 run 写的**
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // `removeContextBlock` 摘的是"当前内容里找到的第一个块"。在**审核与执行
+      // 共用同一个工作目录**之后（见 workdir.ts 的 inheritFrom），这就可能不是
+      // 我们写的那个块了：
+      //
+      //   执行 run 跑完 → 自动串接审核（审核 run 立刻开始）→ 审核 run 把块
+      //   **原地替换**成它自己的 → 这时执行 run 才走到 cleanup()，一摘就把
+      //   **审核 run 的上下文摘掉了**。它手里于是没了审核标准与判决 schema。
+      //
+      // 判据用块里的 `- run：` 那一行，而不是整块字节相等：使用者在块内改了
+      // 一笔也仍然是"我们的块"（那属于受管区域，该摘）；只有**另一个 run**
+      // 写的块才不是我们的，那种情况要原样留着。
+      const begin = current.indexOf(CONTEXT_BLOCK_BEGIN)
+      if (begin !== -1) {
+        const end = current.indexOf(CONTEXT_BLOCK_END, begin + CONTEXT_BLOCK_BEGIN.length)
+        const blockText = current.slice(begin, end === -1 ? current.length : end)
+        if (!blockText.includes(`- run：\`${runId}\``)) {
+          await this.#note(
+            runId,
+            '工作目录里的上下文块已经属于**另一次 run**（同一个工作目录被两次 run 依次用过），' +
+              '本次不动它——摘掉别人正在用的上下文会让那次 run 失去依据。',
+          )
+          return
+        }
+      }
+
       const removed = removeContextBlock(current)
 
       // ══════════════════════════════════════════════════════════════════
