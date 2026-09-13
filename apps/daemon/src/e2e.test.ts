@@ -649,6 +649,141 @@ describe('端到端：SSE 终态补发', () => {
   })
 })
 
+describe('★ 工作目录文件接口（任务详情右边那一栏）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这两个接口读的是**使用者工作目录里的文件**，路径来自查询参数
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 所以这里不只测"能列、能取"，还要钉住两件安全相关的事：
+   *
+   *   1. **不许跑出工作目录**（`..`、绝对路径、软链）——单元测试在
+   *      `workdir-files.test.ts` 里穷举过，这里从 HTTP 这一层再验一次；
+   *   2. **响应必须带 sandbox 的 CSP**：这些文件是 agent 写的，而页面由 daemon
+   *      托管 ⇒ 与接口同源。一个带脚本的 html/svg 被当文档打开，就能拿到这个源
+   *      直接调 `/api/*`。`sandbox` 让脚本一律不执行。
+   */
+  test('★ 列出工作目录、取回文件、并挡住路径逃逸', async () => {
+    const dataDir = await makeTempDir('files-data')
+    const work = await makeTempDir('files-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      // 假装 agent 在跑的时候画了张图、写了一份报告
+      await writeFile(join(work, 'report.md'), '# 报告\n\n做完了。', 'utf8')
+      await writeFile(join(work, 'chart.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>', 'utf8')
+
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-files' },
+          prompt: '画个图',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      // ── 列表 ──
+      const listing = (await (await fetch(`${d.url}/api/runs/${runId}/files`)).json()) as {
+        workDir: string
+        entries: Array<{ path: string; kind: string; sizeBytes: number; managed: boolean }>
+        truncated: boolean
+      }
+      assert.equal(listing.workDir, work)
+      assert.ok(listing.entries.some((e) => e.path === 'report.md'))
+      assert.ok(listing.entries.some((e) => e.path === 'chart.svg'))
+      assert.equal(
+        listing.entries.find((e) => e.path === 'report.md')?.managed,
+        false,
+        'agent 的产出不算平台注入',
+      )
+
+      // ── 取文件 ──
+      const fileRes = await fetch(
+        `${d.url}/api/runs/${runId}/file?path=${encodeURIComponent('report.md')}`,
+      )
+      assert.equal(fileRes.status, 200)
+      assert.equal(await fileRes.text(), '# 报告\n\n做完了。')
+      assert.match(fileRes.headers.get('content-type') ?? '', /text\/plain/)
+      // ★ 同源 + agent 写的文件 ⇒ 必须带 sandbox 的 CSP
+      assert.match(
+        fileRes.headers.get('content-security-policy') ?? '',
+        /sandbox/,
+        '★ 少了它，一个带脚本的 svg/html 被打开就等于给了对方 daemon 的调用能力',
+      )
+      assert.equal(fileRes.headers.get('x-content-type-options'), 'nosniff')
+
+      // ── 路径逃逸 ──
+      for (const bad of ['../secret.txt', '/etc/passwd', '../../../../etc/passwd']) {
+        const res = await fetch(
+          `${d.url}/api/runs/${runId}/file?path=${encodeURIComponent(bad)}`,
+        )
+        assert.equal(res.status, 400, `★ 必须拒绝：${bad}`)
+      }
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('没有工作目录时列表返回空，不报错', async () => {
+    const dataDir = await makeTempDir('files-none-data')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-none' },
+          prompt: 'x',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      const res = await fetch(`${d.url}/api/runs/${runId}/files`)
+      assert.equal(res.status, 200)
+      const body = (await res.json()) as { entries: unknown[] }
+      assert.ok(Array.isArray(body.entries), '空目录也要给一个可用的形状，而不是 500')
+    } finally {
+      await d.close()
+      await cleanup(dataDir)
+    }
+  })
+})
+
 describe('★ 接着沟通：同一任务上再起一条 run，并恢复上一次的会话', () => {
   /**
    * ══════════════════════════════════════════════════════════════════

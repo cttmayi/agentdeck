@@ -245,3 +245,19 @@ export function newRunId(): string {
   }
   return timePart + randPart
 }
+
+/** `GET /api/runs/:id/files` —— 工作目录里的文件列表。 */
+export interface WorkDirFile {
+  path: string
+  kind: 'file' | 'dir'
+  sizeBytes: number
+  modifiedAt: number
+  /** 平台注入的东西（`.claude/**`、`CLAUDE.md`），不是 agent 的产出。 */
+  managed: boolean
+}
+
+export interface WorkDirListing {
+  workDir: string | null
+  entries: WorkDirFile[]
+  truncated: boolean
+}

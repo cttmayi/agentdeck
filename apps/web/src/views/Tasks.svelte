@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { api, newRunId, type RunSummary, type VerdictView } from '../lib/api.ts'
+  import {
+    api,
+    newRunId,
+    type RunMessage,
+    type RunSummary,
+    type VerdictView,
+    type WorkDirListing,
+  } from '../lib/api.ts'
+  import { renderMarkdown } from '../lib/markdown.ts'
   import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
   import { selectedIssueId } from '../lib/view.ts'
   import { PIPELINE_COLUMNS as COLUMNS, runsForIssue, stageOf } from '../lib/pipeline.ts'
@@ -7,6 +15,17 @@
 
   /**
    * 任务清单 + 任务详情。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 跑完之后是「最后结果」，不是「实时输出」
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 执行中要的是"它现在在干什么"（原始日志、按 seq 追加）；跑完之后要的是
+   * "它做成了什么"——那是**结论**，不是流水。同一块地方在两种状态下显示同一种
+   * 东西，等于让使用者自己从几十条工具调用里翻出最后那段话。
+   *
+   * 所以跑完切成左右两栏：左边是最后那段产出（按 Markdown 渲染，图也显示出来），
+   * 右边是工作目录里的文件（产出就在那儿，可以直接点开）。原始日志仍然可翻。
    *
    * ══════════════════════════════════════════════════════════════════
    * 两种视图各有各的用途，都要有（FR-ISSUE-04）
@@ -62,6 +81,54 @@
   // ── 任务详情 ──
 
   let activeRun: RunSummary | null = null
+  // ── 最后结果（跑完之后）──
+  /** 这次执行的最后一段产出（最后一条 text 消息）。 */
+  let finalOutput = ''
+  let finalOutputFor: string | null = null
+  let listing: WorkDirListing | null = null
+  let listingFor: string | null = null
+  let showRawLog = false
+
+  $: activeIsTerminal =
+    activeRun !== null && ['completed', 'failed', 'cancelled'].includes(activeRun.status)
+
+  async function loadResult(run: RunSummary): Promise<void> {
+    // 最后一段 text 就是"产出"。取最后一条而不是拼接：中间那些
+    // "我先看一下目录" 之类的过程话不属于结论。
+    try {
+      const out = await api<{ messages: RunMessage[] }>(`/api/runs/${run.runId}/messages`)
+      const texts = (out.messages ?? []).filter((m) => m.type === 'text' && m.content.trim() !== '')
+      finalOutput = texts.length > 0 ? texts[texts.length - 1]!.content : ''
+    } catch {
+      finalOutput = ''
+    }
+    finalOutputFor = run.runId
+
+    try {
+      listing = await api<WorkDirListing>(`/api/runs/${run.runId}/files`)
+    } catch {
+      listing = null
+    }
+    listingFor = run.runId
+  }
+
+  /** 工作目录里的相对路径 → 能取的地址（Markdown 里的图片靠它显示）。 */
+  function resolveAsset(href: string, runId: string): string | null {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return href // 外部绝对地址
+    return `/api/runs/${runId}/file?path=${encodeURIComponent(href)}`
+  }
+
+  $: renderedResult =
+    activeRun && finalOutputFor === activeRun.runId && finalOutput !== ''
+      ? renderMarkdown(finalOutput, { resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
+      : ''
+
+  function humanSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  }
+
   let verdicts: VerdictView[] = []
   let verdictsFor: string | null = null
 
@@ -86,7 +153,18 @@
 
   async function selectRun(run: RunSummary): Promise<void> {
     activeRun = run
-    await loadVerdicts(run.runId)
+    showRawLog = false
+    finalOutput = ''
+    finalOutputFor = null
+    listing = null
+    listingFor = null
+    await Promise.all([
+      loadVerdicts(run.runId),
+      // 跑完的才去取结果；还在跑的时候右边是实时日志，没必要多拉一次
+      ['completed', 'failed', 'cancelled'].includes(run.status)
+        ? loadResult(run)
+        : Promise.resolve(),
+    ])
   }
 
   // ── 接着沟通（在同一任务上继续）──
@@ -160,7 +238,18 @@
 
   async function refresh(): Promise<void> {
     await Promise.all([loadIssues(), loadRuns()])
-    if (activeRun) await loadVerdicts(activeRun.runId)
+    if (!activeRun) return
+    // 刷新后 activeRun 可能是**旧对象**（`$runs` 换了引用，但这个变量还指着
+    // 上一份），状态可能已经从"进行中"变成"跑完了" —— 所以按 runId 取最新的
+    // 那一份，否则"跑完切到结果视图"这个切换永远不会发生。
+    const fresh = $runs.find((r) => r.runId === activeRun!.runId) ?? activeRun
+    activeRun = fresh
+    await Promise.all([
+      loadVerdicts(fresh.runId),
+      ['completed', 'failed', 'cancelled'].includes(fresh.status)
+        ? loadResult(fresh)
+        : Promise.resolve(),
+    ])
   }
 </script>
 
@@ -215,8 +304,19 @@
   {#if activeRun}
     <section class="drawer-section">
       <h3>
-        实时输出
+        {activeIsTerminal && !showRawLog ? '最后结果' : '实时输出'}
         <span class="faint small mono">run {activeRun.runId.slice(-8)}</span>
+        {#if activeIsTerminal}
+          <!-- 跑完之后默认给结论；原始流水仍然一条不少，按需翻 -->
+          <button
+            type="button"
+            class="ghost small"
+            style="margin-left:var(--sp-3)"
+            onclick={() => (showRawLog = !showRawLog)}
+          >
+            {showRawLog ? '看最后结果' : '看完整日志'}
+          </button>
+        {/if}
       </h3>
 
       <dl class="meta-grid">
@@ -230,11 +330,72 @@
         {/if}
       </dl>
 
-      <!-- ⚠️ 这里曾经传 `since={activeRun.lastSeq}`，而那个字段是"库里已有的最后
-           一条消息的序号"。`since` 的语义是"跳过它及之前的一切"，于是打开一条
-           已经跑完的任务时全部历史都被跳过 —— 日志空的，agent 的最后产出看不到。
-           订阅游标现在由 RunLog 自己持有，父组件没有机会传错。 -->
-      <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
+      {#if activeIsTerminal && !showRawLog}
+        <!-- ══════════ 最后结果：左结论 / 右产出文件 ══════════ -->
+        <div class="result-grid">
+          <div class="result-main">
+            {#if renderedResult}
+              <article class="markdown">{@html renderedResult}</article>
+            {:else if finalOutputFor === activeRun.runId && finalOutput === ''}
+              <div class="empty">
+                <strong>这次执行没有留下文字产出</strong>
+                它可能只改了文件、或者中途失败了。完整过程在「看完整日志」里。
+              </div>
+            {:else}
+              <div class="skeleton"></div>
+            {/if}
+          </div>
+
+          <aside class="result-files">
+            <h4>工作目录的文件</h4>
+            {#if listingFor === activeRun.runId && listing}
+              <p class="faint small mono" style="word-break:break-all">
+                {listing.workDir ?? '—'}
+              </p>
+              {#if listing.entries.length === 0}
+                <p class="hint">这个目录还是空的。</p>
+              {:else}
+                <ul>
+                  {#each listing.entries.filter((e) => !e.managed) as entry (entry.path)}
+                    <li class={entry.kind === 'dir' ? 'is-dir' : ''}>
+                      {#if entry.kind === 'file'}
+                        <a
+                          href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >{entry.path}</a>
+                        <span class="faint small">{humanSize(entry.sizeBytes)}</span>
+                      {:else}
+                        <span class="mono">{entry.path}/</span>
+                      {/if}
+                    </li>
+                  {/each}
+                  {#if listing.entries.some((e) => e.managed)}
+                    <!-- 平台自己写进去的东西（技能、上下文块）单独收起来：
+                         它们说明"这次是在什么标准下跑的"，不是 agent 的产出，
+                         混在一起会让人分不清哪个是它做出来的 -->
+                    <li class="managed-note faint small">
+                      另有 {listing.entries.filter((e) => e.managed).length} 项是平台注入的
+                      （<code>.claude/</code>、<code>CLAUDE.md</code>），不在这里列出
+                    </li>
+                  {/if}
+                  {#if listing.truncated}
+                    <li class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</li>
+                  {/if}
+                </ul>
+              {/if}
+            {:else}
+              <div class="skeleton" style="width:70%"></div>
+            {/if}
+          </aside>
+        </div>
+      {:else}
+        <!-- ⚠️ 这里曾经传 `since={activeRun.lastSeq}`，而那个字段是"库里已有的最后
+             一条消息的序号"。`since` 的语义是"跳过它及之前的一切"，于是打开一条
+             已经跑完的任务时全部历史都被跳过 —— 日志空的，agent 的最后产出看不到。
+             订阅游标现在由 RunLog 自己持有，父组件没有机会传错。 -->
+        <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
+      {/if}
 
       <!-- ══════════ 接着沟通 ══════════ -->
       {#if canFollowUp && lastExecuteRun}
@@ -401,6 +562,132 @@
 {/if}
 
 <style>
+  /* 跑完之后：左边结论、右边产出文件 */
+  .result-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
+    gap: var(--sp-4);
+    align-items: start;
+  }
+
+  @media (max-width: 60rem) {
+    /* 窄屏堆起来：两栏挤在 800px 里两边都不能读 */
+    .result-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .markdown {
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    word-break: break-word;
+  }
+
+  .markdown :global(h1),
+  .markdown :global(h2),
+  .markdown :global(h3),
+  .markdown :global(h4) {
+    margin: var(--sp-4) 0 var(--sp-2);
+    line-height: 1.3;
+  }
+
+  .markdown :global(h1) { font-size: 1.4em; }
+  .markdown :global(h2) { font-size: 1.2em; }
+  .markdown :global(h3) { font-size: 1.05em; }
+
+  .markdown :global(p) { margin: 0 0 var(--sp-3); }
+
+  .markdown :global(ul),
+  .markdown :global(ol) {
+    margin: 0 0 var(--sp-3);
+    padding-left: 1.4em;
+  }
+
+  .markdown :global(li) { margin-bottom: var(--sp-1); }
+
+  .markdown :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 0.3em;
+  }
+
+  .markdown :global(pre) {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-3);
+    overflow-x: auto;
+  }
+
+  .markdown :global(pre code) {
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  .markdown :global(blockquote) {
+    margin: 0 0 var(--sp-3);
+    padding-left: var(--sp-3);
+    border-left: 3px solid var(--line);
+    color: var(--text-faint);
+  }
+
+  .markdown :global(table) {
+    border-collapse: collapse;
+    margin: 0 0 var(--sp-3);
+    width: 100%;
+  }
+
+  .markdown :global(th),
+  .markdown :global(td) {
+    border: 1px solid var(--line);
+    padding: var(--sp-1) var(--sp-2);
+    text-align: left;
+  }
+
+  .markdown :global(img) {
+    max-width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+
+  .result-files {
+    border-left: 1px solid var(--line);
+    padding-left: var(--sp-4);
+  }
+
+  .result-files h4 {
+    margin: 0 0 var(--sp-2);
+  }
+
+  .result-files ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .result-files li {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: var(--sp-1) 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    word-break: break-all;
+  }
+
+  .result-files li.is-dir { color: var(--text-faint); }
+
+  .result-files .managed-note {
+    font-family: inherit;
+    margin-top: var(--sp-2);
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-2);
+  }
+
   .follow-up {
     margin-top: var(--sp-4);
     padding: var(--sp-3);

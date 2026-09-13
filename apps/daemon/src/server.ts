@@ -48,6 +48,13 @@ import {
 import { reconcileInterruptedRuns } from './reconcile.ts'
 import { checkEnvironment, renderEnvironmentReport } from './environment.ts'
 import { fallbackWorkRoot } from './workdir.ts'
+import {
+  UnsafePathError,
+  WORK_FILE_HEADERS,
+  contentTypeFor,
+  listWorkDir,
+  readWorkFile,
+} from './workdir-files.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
@@ -1770,7 +1777,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
-    const runMatch = /^\/api\/runs\/([^/]+)(?:\/(events|cancel|artifacts|messages))?$/.exec(path)
+    const runMatch =
+      /^\/api\/runs\/([^/]+)(?:\/(events|cancel|artifacts|messages|files|file))?$/.exec(path)
     if (runMatch) {
       const runId = runMatch[1] as RunId
       const sub = runMatch[2]
@@ -1796,6 +1804,47 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (req.method === 'POST' && sub === 'cancel') {
         const ok = await executor.cancel(runId)
         sendJson(res, ok ? 200 : 409, { cancelled: ok })
+        return
+      }
+
+      // ── 工作目录的文件（任务详情右边那一栏）──
+      //
+      // 被读的是**使用者工作目录里的文件**，而路径来自查询参数 ⇒ 见
+      // workdir-files.ts 里那两道检查（`..`/绝对路径 + 软链），以及为什么
+      // 每个响应都要带 sandbox 的 CSP。
+      if (req.method === 'GET' && sub === 'files') {
+        const run = await store.getRun(runId)
+        if (!run) return sendJson(res, 404, { error: 'run 不存在' })
+        if (!run.workDir) {
+          sendJson(res, 200, { workDir: null, entries: [], truncated: false })
+          return
+        }
+        sendJson(res, 200, await listWorkDir(run.workDir))
+        return
+      }
+
+      if (req.method === 'GET' && sub === 'file') {
+        const run = await store.getRun(runId)
+        if (!run) return sendJson(res, 404, { error: 'run 不存在' })
+        if (!run.workDir) return sendJson(res, 404, { error: '这条 run 没有工作目录' })
+
+        const relPath = url.searchParams.get('path') ?? ''
+        try {
+          const body = await readWorkFile(run.workDir, relPath)
+          res.writeHead(200, {
+            'content-type': contentTypeFor(relPath),
+            'content-length': body.length,
+            ...WORK_FILE_HEADERS,
+          })
+          res.end(body)
+        } catch (err) {
+          // 路径不合法是**使用者输入问题**（400），不是服务坏了
+          if (err instanceof UnsafePathError) {
+            sendJson(res, 400, { error: err.message })
+            return
+          }
+          throw err
+        }
         return
       }
 
