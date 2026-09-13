@@ -314,34 +314,107 @@ describe('S1：执行完成后自动接审核', () => {
     }
   })
 
-  test('★ 上下文块被逐字节还原；技能**保留**（使用者的决定：要能看见它在什么标准下干活）', async () => {
+  test('★ 跑完把注入的技能收掉；使用者自己的技能一个都不许动', async () => {
     // ══════════════════════════════════════════════════════════════════
-    // 这条测试的期望被改过一次，改的是**哪一个**该被清掉
+    // 这条测试的期望改过两次，两次都是使用者的决定，记下来
     // ══════════════════════════════════════════════════════════════════
     //
-    // 原来断言工作目录"一个条目都不剩"。那时技能也是跑完就删的。
+    // ① 最早：跑完把技能删掉。问题是**删除的依据是进程内的数组**——daemon 崩溃
+    //    或被 kill 之后记忆就没了，残留的文件会被以后的 run 继续发现，
+    //    于是"你从 agent 上摘掉的技能还在生效"。
+    // ② 然后：改成保留，靠**落盘的归属清单**对账。上面那个问题解决了，但工作
+    //    目录里长期留着一堆不是 agent 产出的东西；而且审核与执行共用一个目录
+    //    之后，两边的技能会互相摘。
+    // ③ 现在：**还是收掉**（使用者的决定：跑完的工作目录只该是 agent 的产出），
+    //    但删除的依据仍然是**那份落盘的清单**，不是内存里的数组——当初让"跑完
+    //    删"变危险的那一条已经被清单解决了。
     //
-    // 但那样有两个坏结果：① 任务跑完你进工作目录看，**看不出它是在什么标准下
-    // 干活的**（技能已经没了）；② 删除的依据是**进程内的数组**，daemon 崩溃
-    // 或被 kill 之后就没了记忆，残留的技能文件会被以后的 run **继续发现**——
-    // "你摘掉的技能还在生效"。
+    // 所以这条测试要同时钉住两件相反的事：**我们注入的要消失**，
+    // 而**使用者自己放在同一个目录里的东西必须原样在**。
+    const { readFile, readdir, mkdir, writeFile, rm } = await import('node:fs/promises')
+    // ★ 这条用例用**自己的工作目录**。
     //
-    // 现在的规矩分得很清：
-    //   - **CLAUDE.md 必须逐字节还原**（它是使用者的文件，我们只是临时借用）；
-    //   - **技能保留**（那是这个任务上下文的一部分），去留由落盘的归属清单对账。
-    const { readFile, readdir } = await import('node:fs/promises')
-    const entries = await readdir(workDir).catch(() => [] as string[])
+    //   第一版用的是共享的 `workDir`，而共享意味着"另一个用例留下的 run /
+    //   自动串接出来的 review run 可能还在跑"——单独跑时通过，全量跑时失败
+    //   （断言时机与并发 run 撞上了）。测试要盯的是"一次 run 收尾后的状态"，
+    //   那就必须让这段时间里**只有这一个 run 在动**。
+    const own = await makeTempDir('s1-sweep')
+    const skillsDir = join(own, '.claude', 'skills')
 
-    // 上下文文件：**我们自己造的**那份留着（使用者的原文件另有一套用例保证逐字节还原）
-    const claudeMd = await readFile(join(workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
-    assert.notEqual(claudeMd, null, '★ 我们自己造的上下文文件要留在工作目录里')
+    // 先放一份"使用者自己的技能"进去（不在我们的归属清单里）
+    const usersOwn = join(skillsDir, 'my-own-skill')
+    await mkdir(usersOwn, { recursive: true })
+    await writeFile(join(usersOwn, 'SKILL.md'), '# 我自己的\n', 'utf8')
 
-    // 技能：应当还在，并且有归属清单
-    assert.ok(entries.includes('.claude'), '技能现在保留在工作目录里')
-    assert.ok(entries.includes('CLAUDE.md'), '上下文文件也保留')
-    const skillsDir = join(workDir, '.claude', 'skills')
-    const manifest = await readFile(join(skillsDir, '.alpha-helper-managed.json'), 'utf8')
-    const parsed = JSON.parse(manifest) as { slugs: string[] }
-    assert.ok(Array.isArray(parsed.slugs), '★ 归属清单必须落盘（否则崩溃后残留无从识别）')
+    try {
+      // 再跑一次执行（这次挂一个技能，让它真的注入点什么）
+      const runId = ulid() as RunId
+      const res = await fetch(`${daemon.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: agentId, name: '助手', instructions: '' },
+          skills: [
+            {
+              ref: { id: 'sk1', slug: 'probe-skill', source: 'local' },
+              slug: 'probe-skill',
+              name: '探针技能',
+              body: '# 探针\n\n随便写点什么。',
+              allowedActions: [],
+            },
+          ],
+          subject: { type: 'issue', id: issueId },
+          prompt: '再跑一次',
+          workDir: own,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      // 等**这次执行**结束，再等它自动串接出来的**审核**也结束：
+      // 审核 run 会继承同一个目录、也会注入并收掉自己的技能，还在跑的时候
+      // 断言目录状态就是在跟它赛跑。
+      const settled = ['queued', 'dispatched', 'running']
+      await waitFor(async () => {
+        const list = ((await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; status: string }>
+        }).runs
+        const r = list.find((x) => x.runId === runId)
+        return r && !settled.includes(r.status) ? r : null
+      })
+      await waitFor(async () => {
+        const list = ((await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; status: string; agentId: string }>
+        }).runs
+        const busy = list.filter((r) => settled.includes(r.status))
+        return busy.length === 0 ? { ok: true } : null
+      })
+
+      const left = await readdir(skillsDir).catch(() => [] as string[])
+
+      // ① 我们注入的没了
+      assert.ok(!left.includes('probe-skill'), '★ 跑完不许留下我们注入的技能')
+      // ② 归属清单也收掉了（空了就没有意义）
+      assert.ok(
+        !left.includes('.alpha-helper-managed.json'),
+        '★ 什么都没留下时，归属清单本身也该收掉',
+      )
+      // ③ 使用者自己的那份**一个字都没动**
+      const mine = await readFile(join(usersOwn, 'SKILL.md'), 'utf8')
+      assert.equal(mine, '# 我自己的\n', '★ 使用者自己放的技能绝不能被删或被改写')
+
+      // 日志里要说清收到了什么（"默默清掉"会让人以为技能没生效过）
+      const messages = ((await (
+        await fetch(`${daemon.url}/api/runs/${runId}/messages?since=-1`)
+      ).json()) as { messages: Array<{ content: string }> }).messages
+      assert.ok(
+        messages.some((m) => (m.content ?? '').includes('已移除本次注入的 skill')),
+        '★ 收掉了什么要写进日志',
+      )
+    } finally {
+      await cleanup(own)
+    }
   })
 })

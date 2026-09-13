@@ -7,6 +7,7 @@ import {
   injectContextBlock,
   removeContextBlock,
   renderContextBlock,
+  removeInjectedSkills,
   renderTaskContext,
   syncInjectedSkills,
   type AgentBackend,
@@ -513,7 +514,49 @@ export class RunExecutor {
       if (cleaned) return
       cleaned = true
       if (restoreContext) await this.#restoreContext(restoreContext)
+
+      // ★ 技能收掉（使用者放弃了"保留技能"那条要求）。
+      //
+      //   原来的规矩是"保留"，理由是"跑完进工作目录看，要能看出它是在什么标准
+      //   下干活的"；而那条要求已经被放弃，改由**每次 run 的上下文记录**承担
+      //   （带着技能清单；审核那次还带着标准全文）。工作目录于是回到"只装
+      //   agent 的产出"。
+      //
+      //   ⚠️ 删除的依据仍然是**落盘的归属清单而不是这个数组**——
+      //      `removeInjectedSkills` 只删清单里记着的，所以这里即使传错也删不到
+      //      使用者的东西。而这正是当初"跑完就删"危险的原因（删除依据在内存里，
+      //      daemon 一崩就永久留残渣），那一半已经由清单解决了。
+      try {
+        // ★ 即使这次一个技能都没注入也要走一遍。
+        //
+        //   同步那一步**总会**写一份归属清单（哪怕内容是空的），所以只在
+        //   "注入了东西"时才收尾，会在一个没挂技能的 run 之后留下一份空清单
+        //   （`.claude/skills/.alpha-helper-managed.json`）——工作目录里于是
+        //   多出一个不是产出的东西，正是这次改动要清掉的那类残留。
+        const swept = await removeInjectedSkills(
+          run.workDir!,
+          runtime.descriptor.skillDir,
+          injectedSkills,
+        )
+        if (swept.removed.length > 0) {
+          await this.#note(
+            runId,
+            `已移除本次注入的 skill：${swept.removed.join('、')}` +
+              `（工作目录里只留 agent 的产出；本次用了什么标准见上面的注入记录）`,
+          )
+        }
+      } catch (err) {
+        this.#deps.onWarn?.(`移除注入的技能失败：${String(err)}`)
+      }
     }
+
+    /**
+     * 这次 run 注入过哪些技能——给 `cleanup()` 收尾用。
+     *
+     * ⚠️ 它只是"要收哪几个"的候选；**能不能删由落盘清单决定**（见
+     *    `removeInjectedSkills`）。所以这个数组错了也不会删到使用者的东西。
+     */
+    let injectedSkills: string[] = []
 
     try {
       await store.transitionRun(runId, 'queued', 'dispatched', { dispatchedAt: this.#now() })
@@ -542,6 +585,7 @@ export class RunExecutor {
       for (const skill of req.skills ?? []) {
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
       }
+      injectedSkills = skillSync.written
       // 对账结果要进日志：被摘掉的技能消失了、以及规范化改了什么，
       // 都是使用者需要知道的事（FR-CLI-40：写下去了 ≠ 被读了，至少要看得见）
       if (skillSync.pruned.length > 0) {

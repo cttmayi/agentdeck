@@ -17,6 +17,7 @@ import {
   MAX_SKILL_BYTES,
   SkillTooLargeError,
   normalizeSkillFrontmatter,
+  removeInjectedSkills,
   skillPath,
   splitFrontmatter,
   SkillCollisionError,
@@ -157,23 +158,23 @@ describe('技能路径', () => {
   })
 })
 
-describe('★ 技能在工作目录里的去留：保留 + 按归属清单对账', () => {
+describe('★ 技能在工作目录里的去留：按落盘的归属清单对账', () => {
   /**
    * ══════════════════════════════════════════════════════════════════
-   * 为什么是"同步"而不是"跑完就删"
+   * 三版规则，这里是每一版都要守住的那条底线
    * ══════════════════════════════════════════════════════════════════
    *
-   * 原来 run 结束就把技能删掉。两个坏结果：
+   * ① 最早：run 结束就把技能删掉。坏在**删除的依据是进程内的数组**——
+   *    daemon 崩溃/被 kill 之后那份记忆就没了，残留的技能文件**会被以后的
+   *    run 继续发现**（实测在 `~/.alpha-helper-workspace/run-01M2SANDBOX…`
+   *    里就躺着这么一个残留的 `general-review`）。
+   * ② 中间：改成保留（使用者的要求）。
+   * ③ 现在：**还是收掉**（使用者放弃了保留那条要求），但删除的依据是**落盘
+   *    的归属清单**，不是内存——①里危险的那一半已经被清单解决了。
    *
-   *   ① **跑完就看不见了**：任务的工作目录是产物之一，使用者会进去看
-   *      "它是在什么标准下干活的"——而那时候技能已经没了；
-   *   ② **删除的依据是进程内的数组**：daemon 崩溃/被 kill 之后那份记忆就没了，
-   *      残留的技能文件**会被以后的 run 继续发现**——你把它从 agent 上摘掉了，
-   *      它却还在生效。实测在 `~/.alpha-helper-workspace/run-01M2SANDBOX…`
-   *      里就躺着这么一个残留的 `general-review`。
-   *
-   * 现在保留 + 落盘归属清单：清单里有、这次不要的 ⇒ 删（自愈）；
-   * 不在清单里的同名目录 ⇒ **报错，绝不覆盖**（那是使用者自己放的）。
+   * 无论哪一版，这里的两条底线不变：
+   *   - 清单里记着的、这次不要的 ⇒ 删（自愈崩溃残渣）；
+   *   - **不在清单里的同名目录 ⇒ 报错/不碰**（那是使用者自己放的）。
    */
   async function tmp(): Promise<string> {
     const dir = await makeTempDir('skill-sync')
@@ -243,6 +244,66 @@ describe('★ 技能在工作目录里的去留：保留 + 按归属清单对账
       const result = await syncInjectedSkills(dir, '.claude/skills', [])
       assert.deepEqual(result.pruned, ['leftover'])
       assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['.alpha-helper-managed.json'])
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 收尾只收清单里记着的：点名一个别人的目录也不会删', async () => {
+    const dir = await tmp()
+    try {
+      await syncInjectedSkills(dir, '.claude/skills', [{ slug: 'ours', content: '# 我们的' }])
+      // 使用者自己的（不在清单里）
+      await mkdir(join(dir, '.claude', 'skills', 'theirs'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), '别人的', 'utf8')
+
+      // ⚠️ 故意把别人的名字也点进去：调用方给错名单**不该**造成破坏
+      const swept = await removeInjectedSkills(dir, '.claude/skills', ['ours', 'theirs', '../逃逸'])
+
+      assert.deepEqual(swept.removed, ['ours'])
+      assert.deepEqual(swept.kept, [])
+      assert.equal(
+        await readFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), 'utf8'),
+        '别人的',
+        '★ 能不能删由**落盘清单**决定，不由调用方给的名单决定',
+      )
+      // 我们那份收干净了，清单也跟着收掉（空了就没有意义）
+      assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['theirs'])
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('收尾只删点名的那些：清单里还有别的就留着并更新清单', async () => {
+    const dir = await tmp()
+    try {
+      await syncInjectedSkills(dir, '.claude/skills', [
+        { slug: 'a', content: '# A' },
+        { slug: 'b', content: '# B' },
+      ])
+      const swept = await removeInjectedSkills(dir, '.claude/skills', ['a'])
+      assert.deepEqual(swept.removed, ['a'])
+      assert.deepEqual(swept.kept, ['b'])
+
+      const left = await readdir(join(dir, '.claude', 'skills'))
+      assert.ok(left.includes('b') && !left.includes('a'))
+      const manifest = JSON.parse(
+        await readFile(join(dir, '.claude', 'skills', '.alpha-helper-managed.json'), 'utf8'),
+      ) as { slugs: string[] }
+      assert.deepEqual(manifest.slugs, ['b'], '★ 清单要跟着更新，否则残留无从识别')
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('没有清单时收尾什么都不做（宁可少删）', async () => {
+    const dir = await tmp()
+    try {
+      await mkdir(join(dir, '.claude', 'skills', 'theirs'), { recursive: true })
+      await writeFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), '别人的', 'utf8')
+      const swept = await removeInjectedSkills(dir, '.claude/skills', ['theirs'])
+      assert.deepEqual(swept.removed, [], '★ 没有清单 = 我们什么都没放过 = 一个都不删')
+      assert.equal(await readFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), 'utf8'), '别人的')
     } finally {
       await cleanup(dir)
     }

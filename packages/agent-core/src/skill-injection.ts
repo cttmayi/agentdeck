@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, rmdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
@@ -168,22 +168,15 @@ export async function writeSkill(
   return normalized
 }
 
-/**
- * 清理**指定**技能目录。
+/*
+ * ⚠️ 这里原来有一个"点名删技能"的 `removeInjectedSkills`（FR-CLI-16 那条的
+ *    落点），返回 void、只按调用方给的名单删。它属于"run 前写、run 后删"那一版，
+ *    在"保留技能"那一版里就没有调用方了，一直挂着。
  *
- * 只删我们点名的那几个（FR-CLI-16：清理只删自己造的东西）。
- * 使用者自己放在 `.claude/skills` 里的技能**不能动**——那是他的环境。
+ *    现在合并成一个：**同一个名字**，实现换成"以落盘清单为准"的那份
+ *    （在 `syncInjectedSkills` 之后），因为按名单删意味着调用方给错名字就会
+ *    删到使用者的东西。少一个函数，也少一条会漂的路径。
  */
-export async function removeInjectedSkills(
-  workDir: string,
-  skillDir: string,
-  slugs: readonly string[],
-): Promise<void> {
-  for (const slug of slugs) {
-    if (slug.includes('/') || slug.includes('..')) continue // 防御：不接受路径
-    await rm(join(workDir, skillDir, slug), { recursive: true, force: true })
-  }
-}
 
 /**
  * 归属清单：我们往这个工作目录里放过哪些技能。
@@ -253,27 +246,39 @@ export interface SyncSkillsResult {
 }
 
 /**
- * 让工作目录里的技能与这次要用的集合**一致**。
+ * 让工作目录里的技能与这次要用的集合**一致**——run **开始前**那一步。
  *
  * ══════════════════════════════════════════════════════════════════
- * 为什么是"同步"而不是"跑完就删"
+ * 这条规则改过三次，每次都记下来，因为理由比结论重要
  * ══════════════════════════════════════════════════════════════════
  *
- * 原来的做法是：run 前写、run 后**删掉**。两个后果都是坏的：
+ * **第一版：run 前写、run 后删。** 两个后果都是坏的：
  *
- *   1. **跑完就看不见了。** 任务的工作目录是这个任务的产物之一，使用者会进去
- *      看"它是在什么标准下干活的"——而那时候技能已经没了；
- *   2. **删的依据是进程内的数组。** daemon 崩溃/被 kill 之后那份记忆就没了，
+ *   1. **删的依据是进程内的数组。** daemon 崩溃/被 kill 之后那份记忆就没了，
  *      残留的技能文件永久留在那里，而且**会被以后的 run 继续发现**：
- *      你把这个技能从 agent 上摘掉了，它却还在生效。
+ *      你把这个技能从 agent 上摘掉了，它却还在生效；
+ *   2. 看不见了（当时使用者在意的正是这条）。
  *
- * 现在改成：**保留**，并靠落盘的归属清单做对账——
+ * **第二版：保留**，靠落盘的归属清单做对账。修掉了上面第 1 条，代价是工作
+ * 目录里长期留着一堆不是 agent 产出的东西；而且审核与执行**共用一个目录**
+ * 之后，两边的技能会互相摘（执行者下一次 run 的 prune 会删掉审核者的标准）。
+ *
+ * **第三版（现在）：跑完就删，但**删除的依据仍然是那份**落盘的**归属清单**，
+ * 不是内存里的数组。** 当初让"跑完删"变危险的是第 1 条，而它已经由清单解决了：
+ * 崩溃留下的残渣会被下一次 run 的同步（本函数）摘掉。所以现在可以既干净、
+ * 又不留隐患。
+ *
+ * 使用者放弃"保留技能"那条要求的直接原因就是这个：**跑完的工作目录应该是
+ * agent 的产出，不是平台的东西**。而"它是在什么标准下干活的"这件事改由别处
+ * 负责（每次 run 的上下文记录里带着技能清单；审核那次还带着标准的全文）。
+ *
+ * 不变的三条：
  *   - 这次要的 ⇒ 写下去（覆盖我们自己上次放的）；
- *   - 清单里有、这次不要的 ⇒ 删掉（它已经不该在了）；
+ *   - 清单里有、这次不要的 ⇒ 删掉（崩溃残渣、或者上次跑没清干净）；
  *   - **不在清单里的同名目录 ⇒ 报错，绝不覆盖**（那是使用者自己放的）。
  *
  * 最后一条是刻意的：`writeSkill` 原来是 `mkdir -p` + `writeFile`，会**静默
- * 改写**使用者的同名技能，跑完还会把它删掉。宁可让这次 run 失败并说清楚。
+ * 改写**使用者的同名技能。宁可让这次 run 失败并说清楚。
  */
 export async function syncInjectedSkills(
   workDir: string,
@@ -306,17 +311,74 @@ export async function syncInjectedSkills(
     if (existing.has(slug) && !owned.has(slug)) throw new SkillCollisionError(slug)
   }
 
-  // ③ 写下去
+  // ③ 先记归属，再写文件。
+  //
+  //   ★ 顺序不能反。这两步之间崩掉时，两种残留的方向完全不同：
+  //     - **先写清单**：残留是"清单里有、盘上没有" ⇒ 下一次同步 rm -rf 一个
+  //       不存在的目录（force 下无害），自愈；
+  //     - 先写文件：残留是"盘上有、清单里没有" ⇒ 下一次同步会把它当成
+  //       **使用者的东西**，于是抛 SkillCollisionError 让 run 失败，而且
+  //       永久如此（没人会去手动清一个看起来像自己放的目录）。
+  await writeManifest(dir, [...new Set(wanted)].sort())
+
+  // ④ 写下去
   for (const skill of skills) {
     const normalized = await writeSkill(workDir, skillDir, skill)
     written.push(normalized.slug)
     for (const note of normalized.notes) notes.push({ slug: normalized.slug, note })
   }
 
-  // ④ 记下归属：写下去的就是我们现在拥有的全部（被 prune 的已经不在 wanted 里）
-  await writeManifest(dir, [...new Set(wanted)].sort())
-
   return { written, pruned, notes }
+}
+
+export interface RemoveSkillsResult {
+  /** 这次真的删掉的。 */
+  removed: string[]
+  /** 清单里留下来没动的（不是这次要删的）。 */
+  kept: string[]
+}
+
+/**
+ * run **结束后**那一步：把这次注入的技能收掉。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 只删清单里记着的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 传进来的 `slugs` 只用来**收窄**范围，真正决定"能不能删"的是那份落盘的
+ * 归属清单：不在清单里的目录一律不碰。所以即使调用方给错了名字（内存里的
+ * 数组错了、run 记录串了），**也删不到使用者的东西**——这是这条路径上最重要
+ * 的一条性质，比"删得干净"重要得多。
+ *
+ * 清单空了就连它一起收掉（它只在"我们放过东西"时才有意义），
+ * 目录空了再顺手收掉；里面还有别人的东西时 `rmdir` 会失败，那正是我们要的。
+ */
+export async function removeInjectedSkills(
+  workDir: string,
+  skillDir: string,
+  slugs: readonly string[],
+): Promise<RemoveSkillsResult> {
+  const dir = join(workDir, skillDir)
+  const owned = await readManifest(dir)
+  const target = new Set(slugs.filter((slug) => owned.includes(slug)))
+
+  const removed: string[] = []
+  for (const slug of target) {
+    // 与同步那边同一道防线：这是要拼进文件系统的字符串
+    if (slug.includes('/') || slug.includes('..')) continue
+    await rm(join(dir, slug), { recursive: true, force: true })
+    removed.push(slug)
+  }
+
+  const kept = owned.filter((slug) => !target.has(slug))
+  if (kept.length === 0) {
+    await rm(join(dir, MANAGED_MANIFEST), { force: true })
+    await rmdir(dir).catch(() => {})
+  } else {
+    await writeManifest(dir, kept)
+  }
+
+  return { removed, kept }
 }
 
 /** 读到我们在某个工作目录里放过的技能 slug（诊断与测试用）。 */
