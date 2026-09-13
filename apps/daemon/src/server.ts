@@ -1639,7 +1639,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
            */
           subject: run.subject,
           workDir: run.workDir,
-          lastSeq: await store.lastRunMessageSeq(run.id),
+          // ★ 这里曾经返回 `lastSeq: await store.lastRunMessageSeq(run.id)`，
+          //   而页面把它当成了 `?since=` 参数——"跳过 N 及之前的一切"，
+          //   于是打开已跑完的任务时日志全空。服务端事实 ≠ 客户端游标，
+          //   这个数字没有正当用途，所以不再提供（详见协议里的说明）。
           queuedAt: run.queuedAt,
           finishedAt: run.finishedAt,
           failureReason: run.failureReason,

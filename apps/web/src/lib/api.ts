@@ -159,7 +159,6 @@ export interface RunSummary {
   /** run 处理的对象。页面靠它把 run 归到具体任务上。 */
   subject: { type: string; id: string }
   workDir: string | null
-  lastSeq: number
   queuedAt: number
   finishedAt: number | null
   failureReason: string | null

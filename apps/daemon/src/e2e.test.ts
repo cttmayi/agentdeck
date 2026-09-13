@@ -345,12 +345,20 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
 
   test('消息已落盘，且 daemon 是权威（可用 since 补齐）', async () => {
     const listRes = await fetch(`${daemon.url}/api/runs`)
-    const list = (await listRes.json()) as { runs: Array<{ runId: string; lastSeq: number; status: string }> }
+    const list = (await listRes.json()) as { runs: Array<{ runId: string; status: string }> }
     assert.equal(list.runs.length, 1)
     assert.equal(list.runs[0]?.status, 'completed')
-    assert.ok((list.runs[0]?.lastSeq ?? -1) >= 3, '应当记录了多条消息')
 
     const runId = list.runs[0]!.runId
+    // ★ "有没有消息"要看 `/messages`，**不要**去看 runs 列表里的某个序号字段。
+    //   这里原来断言 `list.runs[0].lastSeq >= 3`，而那个字段已经被删掉了：
+    //   它的语义（库里已有的最大序号）被界面误当成订阅参数（跳过 N 及之前），
+    //   导致打开已跑完的任务时日志全空。见 local-api.ts 里的说明。
+    assert.equal(
+      'lastSeq' in (list.runs[0] as Record<string, unknown>),
+      false,
+      '★ runs 列表不该再给 lastSeq —— 它被当成订阅游标用过，而且用反了',
+    )
     const all = (await (await fetch(`${daemon.url}/api/runs/${runId}/messages`)).json()) as {
       messages: Array<{ seq: number }>
     }
@@ -538,6 +546,29 @@ describe('端到端：SSE 终态补发', () => {
         true,
         '历史消息仍要补齐——补发终态不能顶掉回放',
       )
+
+      // ══════════════════════════════════════════════════════════════
+      // ★ 补发的历史必须是**全部**，一条都不能少
+      // ══════════════════════════════════════════════════════════════
+      //
+      // 这条断言对应界面上的一个真实 bug：任务详情把 `runs` 接口给的
+      // `lastSeq`（= 库里已有的最后一条消息的序号）当成订阅参数传了下来，
+      // 而 `since=N` 的语义是"跳过 N 及之前的一切"——于是打开一条**跑完的**
+      // 任务时，0~N 全被跳过，只收到一个终态事件，**日志是空的**，
+      // 而 agent 的最后产出明明就在库里。
+      //
+      // 所以这里钉住的是"晚订阅者拿到的是完整日志"这个契约：
+      // 回放出来的消息必须和 store 里的条数、序号**完全一致**。
+      const persisted = ((await (
+        await fetch(`${d.url}/api/runs/${runId}/messages`)
+      ).json()) as { messages: Array<{ seq: number }> }).messages
+      const replayed = events.filter((e) => e.t === 'message')
+      assert.deepEqual(
+        replayed.map((e) => e.seq),
+        persisted.map((m) => m.seq),
+        '★ 晚订阅必须补齐**全部**历史消息，而不是只补一条终态',
+      )
+      assert.ok(persisted.length > 0, '先确认这条 run 确实有历史消息')
     } finally {
       await d.close()
       await cleanup(work)

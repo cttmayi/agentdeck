@@ -157,11 +157,11 @@
         {/if}
       </dl>
 
-      <RunLog
-        runId={activeRun.runId}
-        since={activeRun.lastSeq}
-        onterminal={() => void refresh()}
-      />
+      <!-- ⚠️ 这里曾经传 `since={activeRun.lastSeq}`，而那个字段是"库里已有的最后
+           一条消息的序号"。`since` 的语义是"跳过它及之前的一切"，于是打开一条
+           已经跑完的任务时全部历史都被跳过 —— 日志空的，agent 的最后产出看不到。
+           订阅游标现在由 RunLog 自己持有，父组件没有机会传错。 -->
+      <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
 
       <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-2)">
         <button

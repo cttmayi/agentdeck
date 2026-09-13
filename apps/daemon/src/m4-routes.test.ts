@@ -245,12 +245,27 @@ describe('★ 执行列表必须带 subject —— 否则任务详情永远看�
       })
 
       const { runs } = (await (await fetch(`${url}/api/runs`)).json()) as {
-        runs: Array<{ subject?: { type: string; id: string }; lastSeq: number }>
+        runs: Array<Record<string, unknown> & { subject?: { type: string; id: string } }>
       }
       const mine = runs.find((r) => r.subject?.id === issue.id)
       assert.ok(mine, '★ 必须能按 subject 找到这条 run')
       assert.equal(mine?.subject?.type, 'issue')
-      assert.equal(typeof mine?.lastSeq, 'number', 'lastSeq 也要给，页面据此续接消息')
+
+      // ══════════════════════════════════════════════════════════════
+      // ★ 这里原来断言"lastSeq 也要给，**页面据此续接消息**" —— 那条断言
+      //   把错误的设计钉住了，而且界面照它实现出来就是一个真 bug：
+      //   打开**已跑完**的任务时，`?since=<库里最大序号>` 把历史全部跳过，
+      //   日志是空的（agent 的最后产出明明在库里）。
+      //
+      //   服务端事实（这个 run 产生到第几号）与客户端事实（这个页面消费到
+      //   第几号）是两件事。字段没有正当用途，所以删掉——并在这里**反过来
+      //   钉住它的缺席**，免得有人再把它加回来。
+      // ══════════════════════════════════════════════════════════════
+      assert.equal(
+        'lastSeq' in (mine ?? {}),
+        false,
+        '★ runs 列表不再提供 lastSeq：它会诱导调用方把"服务端的进度"当成"客户端的游标"',
+      )
     })
   })
 })

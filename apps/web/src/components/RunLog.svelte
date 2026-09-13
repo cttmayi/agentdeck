@@ -1,24 +1,38 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte'
+  import { afterUpdate, onDestroy } from 'svelte'
   import type { RunMessage } from '../lib/api.ts'
 
   export let runId: string
-  /** 已订阅到的最大 seq；重连时用它补齐错过的消息（FR-BRIDGE-04）。 */
-  export let since = -1
   export let onterminal: (status: string) => void = () => {}
 
   /**
    * 实时日志。
    *
    * ══════════════════════════════════════════════════════════════════
-   * seq 驱动，不靠时间戳
+   * seq 驱动，不靠时间戳（FR-BRIDGE-18）
    * ══════════════════════════════════════════════════════════════════
    *
-   * `since` 传的是**序号**而不是时间。时间戳做不到"补齐错过的消息"：
-   * 同一毫秒可能有多条，本地时钟还可能回拨。序号单调，`since=N` 就是
-   * "把 N 之后的都给我"（FR-BRIDGE-18）。
+   * 补历史用**序号**而不是时间：时间戳做不到"补齐错过的消息"——同一毫秒
+   * 可能有多条，本地时钟还可能回拨。序号单调，`since=N` 就是"把 N 之后的
+   * 都给我"。
    *
-   * 重连时浏览器会自动重发请求，我们从 `lastSeq` 继续，因此**既不丢也不重**。
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 订阅游标由**组件自己**持有，不接受外部传入
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 这里原来有一个 `since` 属性，而父组件传的是 `runs` 接口给的那条 run 的
+   * `lastSeq`。那个字段的语义是"**库里已有的最后一条消息的序号**"，
+   * 而 `since=N` 的语义是"**跳过 N 及之前的一切**"——两者刚好相反。
+   *
+   * 后果：打开一条**已经跑完**的任务，订阅变成 `?since=69`，服务端把 0~69
+   * 全部跳过，只补发一个终态事件。**日志是空的**，而 agent 的最后产出
+   *（那条 `text` 消息）明明就在库里。
+   *
+   * 它看起来"能用"，是因为任务正在跑的时候 `lastSeq` 还小、后面新产生的
+   * 消息照样会流进来——只有"事后回看"才什么都看不到，而那正是最常见的用法。
+   *
+   * 所以：**起点永远是 -1（从头发）**，游标只用于重连时接着上次的地方要，
+   * 而且只有组件自己知道这个游标是什么。父组件再也没机会传错。
    */
   /**
    * 日志行。
@@ -97,6 +111,10 @@
    *（一次 run 里占掉大半篇幅），把它和真正的产出混排会把产出淹掉。
    * 要排查时打开即可，选择记在本地。
    */
+  /** 断线重连的退避：从 0.5s 起翻倍，封顶 10s。 */
+  const INITIAL_RETRY_MS = 500
+  const MAX_RETRY_MS = 10_000
+
   const THINKING_KEY = 'alpha-helper.show-thinking'
   let showThinking = localStorage.getItem(THINKING_KEY) === '1'
 
@@ -107,26 +125,50 @@
 
   $: thinkingCount = rows.filter((r) => r.kind === 'thinking').length
   $: visibleRows = showThinking ? rows : rows.filter((r) => r.kind !== 'thinking')
-  let source: EventSource | null = null
-  let lastSeq = since
-  let live = true
+  /**
+   * 日志容器。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么必须自动滚到底
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来**一点滚动都没有**：容器是 `max-height: 26rem; overflow-y: auto`，
+   * 而打开一条已经跑完的任务时它是从**顶部**开始显示的。
+   *
+   * 于是一次 69 条消息的执行，使用者看到的是开头那几行，而**最后的产出**
+   * （agent 那段正式的 `text`）在很下面——「任务执行完了，点进去看不到结果」
+   * 有一半原因是这个（另一半是订阅参数用错，见文件头的说明）。
+   *
+   * 所以：新内容到达时自动贴底。
+   */
+  let logEl: HTMLDivElement
+  /**
+   * 使用者是不是"还在跟着看"。
+   *
+   * ★ 不能无条件贴底：他往上翻着读的时候，每来一条新输出就把他拽回去，
+   *   等于**没法读**。所以只有他本来就在底部附近时才跟随。
+   */
+  let stick = true
 
-  function connect(id: string, from: number): void {
+  function onScroll(): void {
+    if (!logEl) return
+    const gap = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight
+    stick = gap < 40
+  }
+
+  let source: EventSource | null = null
+  /** 已经收到的最大 seq。**只用于重连时接着要**，不用于决定"从哪开始"。 */
+  let lastSeq = -1
+  let live = true
+  let retryMs = INITIAL_RETRY_MS
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  /** 当前连的是哪条 run——用来判断"换了目标要整个重来"。 */
+  let connectedRunId: string | null = null
+
+  function connect(id: string): void {
     close()
-    // ★ 换了一条 run 就**必须重置**这两个状态。
-    //
-    //   这个组件是复用的：在任务详情里点另一条执行，`runId` 变了但组件实例
-    //   没变。之前没重置，于是：
-    //
-    //   - `lastSeq` 还停在上一条 run 的序号上 ⇒ 新 run 的 `seq` 比它小
-    //     ⇒ 被 `apply()` 的去重直接丢掉 ⇒ **日志一片空白**；
-    //   - `live` 可能还停在上一条 run 的 `false` ⇒ 一条已经结束的 run 再也
-    //     不认终态。
-    //
-    //   两者都是"看起来像没数据"的静默失败，所以宁可在这里显式重置。
-    lastSeq = from
-    live = true
-    source = new EventSource(`/api/runs/${id}/events?since=${from}`)
+    // 从组件自己的游标接着要。首次是 -1 ⇒ 服务端补发全部历史（FR-BRIDGE-04）。
+    source = new EventSource(`/api/runs/${id}/events?since=${lastSeq}`)
     source.onmessage = (event) => {
       let payload: { seq?: number; t?: string; [k: string]: unknown }
       try {
@@ -134,6 +176,7 @@
       } catch {
         return
       }
+      retryMs = INITIAL_RETRY_MS // 收到东西了 ⇒ 退避复位
       apply(payload)
     }
     source.onerror = () => {
@@ -168,6 +211,11 @@
           },
         ]
       }
+
+      // ★ 自己接管重连：`close()` 之后浏览器就**不会**再自动重连了，
+      //   于是重连的时机、间隔、以及从哪个序号接着要，全在我们手里。
+      close()
+      scheduleReconnect()
     }
   }
 
@@ -246,9 +294,64 @@
     source = null
   }
 
-  $: if (runId) connect(runId, since)
+  function cancelRetry(): void {
+    if (retryTimer !== null) clearTimeout(retryTimer)
+    retryTimer = null
+  }
 
-  onDestroy(close)
+  /**
+   * 断线后台重连。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么自己重连，而不是让 `EventSource` 自动重连
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 浏览器的自动重连**只会重发同一个 URL**，而那个 URL 里的 `since` 是第一次
+   * 连接时的值。跑得久了以后，重连会把整段日志**再replay一遍**（客户端靠
+   * 去重挡住，但流量白费）。而且它的退避策略我们看不见、也拦不住——
+   * 之前那个"日志刷屏『连接中断，正在重连…』"就是这么来的。
+   *
+   * 自己重连可以做对两件事：**带自己的游标**（不重复拉），以及**退避**
+   *（daemon 没起来时不打空转）。
+   */
+  function scheduleReconnect(): void {
+    if (!live) return
+    cancelRetry()
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (live) connect(runId)
+    }, retryMs)
+    retryMs = Math.min(retryMs * 2, MAX_RETRY_MS)
+  }
+
+  // ★ 换了一条 run 就**整个重来**：清空已显示的行、把游标归零、重新从头发。
+  //
+  //   这个组件是复用的（在任务详情里点另一条执行，`runId` 变了但组件实例
+  //   没变）。不重置的话会有两种静默错误：上一条 run 的行留在屏幕上，
+  //   而且游标停在上一条的序号上——新 run 的 `seq` 比它小，会被去重直接
+  //   丢掉，于是**日志一片空白**。
+  $: if (runId && runId !== connectedRunId) {
+    connectedRunId = runId
+    rows = []
+    expanded = new Set()
+    lastSeq = -1
+    live = true
+    retryMs = INITIAL_RETRY_MS
+    stick = true // 新的一条 run：从底部开始跟
+    cancelRetry()
+    connect(runId)
+  }
+
+  // 每次渲染后：如果使用者还在跟着看，就贴到底部。
+  // 首次渲染（打开一条已完成的任务）也走这里 —— 正是"要看到最后结果"的那一次。
+  afterUpdate(() => {
+    if (stick && logEl) logEl.scrollTop = logEl.scrollHeight
+  })
+
+  onDestroy(() => {
+    cancelRetry()
+    close()
+  })
 </script>
 
 <div class="log-wrap">
@@ -263,7 +366,7 @@
     </div>
   {/if}
 
-  <div class="log">
+  <div class="log" bind:this={logEl} onscroll={onScroll}>
     {#if visibleRows.length === 0}
       <div class="log-row">
         <span class="log-seq">·</span>
