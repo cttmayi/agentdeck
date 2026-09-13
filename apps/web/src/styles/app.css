@@ -674,17 +674,39 @@ tbody tr:last-child td { border-bottom: 0; }
   flex-direction: column;
 }
 
+/* 内容宽的抽屉（比如「安装 skill」里那张远端目录表）。
+   34rem 是给"读一段设置"定的宽度，塞一张五列表格就只剩横向滚动条了。 */
+.drawer.wide {
+  width: min(46rem, 94vw);
+}
+
 .drawer-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
 }
 
 .drawer-body {
+  flex: 1;
+  min-height: 0; /* 与 .pane-body 同一个理由：不写这句内部滚动会失效 */
   padding: var(--sp-5);
   overflow-y: auto;
+}
+
+/* 主操作常驻底部：安装面板里的按钮原来在正文末尾，正文一长就得先滚到底
+   才能按——而"装它"正是这个抽屉唯一的动作。 */
+.drawer-foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-5);
 }
 
 .drawer-section { margin-bottom: var(--sp-5); }

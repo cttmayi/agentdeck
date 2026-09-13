@@ -142,7 +142,25 @@
     // 打开时顺手拉一次目录：远端可能没起、或者刚登录，看到的应当是当下的状态
     if (!isLoggedIn() || $remoteCatalog === null) void refreshRemote()
   }
+
+  function closePanel(): void {
+    panelOpen = false
+  }
+
+  /**
+   * Esc 关抽屉。
+   *
+   * ★ 这个抽屉由本视图自己渲染（状态就住在这儿），所以它**不在**
+   *   `App.svelte` 那个 `$openDrawer` 的 Esc 处理里——不写这一条，
+   *   Esc 对它就没反应，而顶栏那两个抽屉都能 Esc 关掉，同一页里两种
+   *   手感是说不通的。
+   */
+  function onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && panelOpen) closePanel()
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="view-head">
   <div>
@@ -160,7 +178,25 @@
 </div>
 
 {#if panelOpen}
-  <section class="install-panel">
+  <!-- 点背景关掉：抽屉遮住列表时，"我怎么回去"必须有答案 -->
+  <div class="drawer-backdrop" onclick={closePanel} role="presentation"></div>
+
+  <!--
+    ★ 安装面板做成抽屉，而不是正文里一块展开的方块。
+
+      原来它插在页头和列表之间：打开一次，下面的 skill 列表就被推到看不见
+      的地方——而使用者装完 skill 第一件想做的事，正是看它有没有出现在列表里。
+      抽屉浮在列表上面，装完关掉就还在原地。
+
+      `wide`：里面那张远端目录表有五列，34rem 会只剩横向滚动条。
+  -->
+  <div class="drawer wide" role="dialog" aria-modal="true" aria-label="安装 skill">
+    <div class="drawer-head">
+      <h2>安装 skill</h2>
+      <button type="button" class="ghost" onclick={closePanel}>关闭</button>
+    </div>
+
+    <div class="drawer-body">
     <div class="tabs">
       <button
         type="button"
@@ -183,7 +219,6 @@
       >
         从远端目录安装
       </button>
-      <button type="button" class="ghost small close" onclick={() => (panelOpen = false)}>关闭</button>
     </div>
 
     {#if tab === 'path'}
@@ -304,11 +339,9 @@
     </div>
 
     {#if tab === 'path'}
-      <button type="button" disabled={busy} onclick={submitPath}>
-        {busy ? '正在检查并安装…' : '检查并安装'}
-      </button>
+      <p class="faint small" style="margin:0">填好上面的来源，点右下角「检查并安装」。</p>
     {:else}
-      <p class="faint small">选一个条目，用上面勾选的动作装它。</p>
+      <p class="faint small" style="margin:0">选一个条目，用当前勾选的动作装它。</p>
     {/if}
 
     {#if errorMessage}
@@ -343,7 +376,22 @@
         {/if}
       </div>
     {/if}
-  </section>
+    </div>
+
+    <!-- 主操作常驻底部（`.drawer-foot`）：正文一长就不该让使用者先滚到底才能按。
+         反馈（上面那两个 notice）正好落在按钮正上方，按下就能看见。 -->
+    <div class="drawer-foot">
+      {#if tab === 'path'}
+        <button type="button" disabled={busy} onclick={submitPath}>
+          {busy ? '正在检查并安装…' : '检查并安装'}
+        </button>
+      {:else}
+        <span class="faint small">
+          上面每一条右侧的按钮就是安装入口，用的是当前勾选的动作白名单。
+        </span>
+      {/if}
+    </div>
+  </div>
 {/if}
 
 {#if $loading['skills'] && $skills.length === 0}
@@ -418,14 +466,9 @@
 {/if}
 
 <style>
-  .install-panel {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-4);
-    margin-bottom: var(--sp-4);
-    background: var(--surface);
-  }
-
+  /* 安装面板的容器样式由全局的 `.drawer` 提供（见 app.css）——这里只管
+     抽屉**内部**那几块。原来那个 `.install-panel`（带边框的正文方块）
+     随抽屉改版一起删掉了：抽屉自己就是容器，再套一层边框是多余的。 */
   .tabs {
     display: flex;
     gap: var(--sp-1);
@@ -448,10 +491,6 @@
   .tab.active {
     color: var(--text);
     border-bottom-color: var(--accent);
-  }
-
-  .close {
-    margin-left: auto;
   }
 
   .field {
