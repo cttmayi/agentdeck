@@ -597,6 +597,7 @@ tbody tr:last-child td { border-bottom: 0; }
   background: currentColor;
 }
 
+/* ⚠️ `todo` 现在只被「本机自建」那个徽章用（Skills 视图），不再是任务状态 */
 .badge.todo, .badge.backlog { color: var(--status-todo); }
 .badge.in_progress { color: var(--status-active); }
 .badge.in_review { color: var(--status-review); }

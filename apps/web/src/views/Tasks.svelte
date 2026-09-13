@@ -45,18 +45,10 @@
    * 执行记录与实时日志放在**任务详情**里，而不是单独一栏——执行属于某个
    * 任务，"我在看哪个任务的执行"这个问题本来就不该由使用者自己拼。
    */
-  const STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled']
-  const LABELS: Record<string, string> = {
-    backlog: '待办池',
-    todo: '待做',
-    in_progress: '进行中',
-    in_review: '待审核',
-    done: '已完成',
-    blocked: '受阻',
-    cancelled: '已取消',
-  }
-
   $: staged = visible.map((issue) => ({ issue, info: stageOf(issue.id, $runs) }))
+
+  /** 当前打开那个任务的阶段——详情头要显示它（不该在模板里算两遍）。 */
+  $: selectedStage = selected ? stageOf(selected.id, $runs) : null
 
   /**
    * 「需要注意」单独一拨置顶。
@@ -357,7 +349,6 @@
     class:attention-row={needsAttention}
   >
     <td><strong>{issue.title}</strong></td>
-    <td><span class="badge {issue.status}">{LABELS[issue.status] ?? issue.status}</span></td>
     <td>
       <span class="stage-tag {info.stage}">{STAGE_SHORT[info.stage]}</span>
       {#if info.detail && info.detail !== '审核已完成'}
@@ -430,7 +421,6 @@
             <button type="button" class="card" onclick={() => selectFromBoard(issue.id)}>
               <span class="card-title">{issue.title}</span>
               <span class="card-meta">
-                <span class="badge {issue.status}">{LABELS[issue.status] ?? issue.status}</span>
                 <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
               </span>
               <span class="card-meta">
@@ -451,17 +441,21 @@
       <table>
         <thead>
           <tr>
-            <th>任务</th><th>状态</th>
+            <th>任务</th>
             <!-- ★ 阶段列：这一列原来**只有看板有**，于是列表里看不出
                  "它是卡在 agent 手上、还是审完了"。而 `stageOf` 早就算好了，
-                 只是在列表里没用。 -->
+                 只是在列表里没用。
+                 （原来还有一列「状态」，去掉了：那是 issue 上一个人工维护的
+                  字段，而界面上没有入口能改它、判决也改不到它 —— 实测你库里
+                   6 个任务全是「待做」，一个都没变过。放一列恒定的信息在旁边，
+                   只会和"算出来的阶段"混起来。见提交说明。） -->
             <th>阶段</th><th>指派给</th><th>更新于</th>
           </tr>
         </thead>
         <tbody>
           {#if byAttention.attention.length > 0}
             <tr class="attention-head">
-              <td colspan="5">
+              <td colspan="4">
                 需要注意（{byAttention.attention.length}）
                 <span class="faint small">
                   —— 执行失败/被取消（不会有审核结果），或者根本没派审核
@@ -472,7 +466,7 @@
               {@render row(issue, info, true)}
             {/each}
             <tr class="attention-head">
-              <td colspan="5">其余任务（{byAttention.rest.length}）</td>
+              <td colspan="4">其余任务（{byAttention.rest.length}）</td>
             </tr>
           {/if}
           {#each byAttention.rest as { issue, info } (issue.id)}
@@ -498,7 +492,9 @@
             >← 返回任务清单</button>
             <h2>{selected.title}</h2>
             <p class="detail-sub">
-              <span class="badge {selected.status}">{LABELS[selected.status] ?? selected.status}</span>
+              {#if selectedStage}
+                <span class="stage-tag {selectedStage.stage}">{STAGE_SHORT[selectedStage.stage]}</span>
+              {/if}
               <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
             </p>
           </header>
