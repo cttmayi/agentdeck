@@ -117,6 +117,8 @@ export function installRemoteEntry(input: {
   slug: string
   /** SKILL.md 的内容（远端目录的 `content`）。 */
   body: string
+  /** 目录给的版本——落库后界面才能判断"已安装 / 可更新"。 */
+  version: string
   sourceRef: string
   allowedActions?: string[]
   overwrite?: boolean
@@ -126,6 +128,7 @@ export function installRemoteEntry(input: {
       kind: 'payload',
       slug: input.slug,
       body: input.body,
+      version: input.version,
       sourceRef: input.sourceRef,
     },
     ...(input.allowedActions ? { allowedActions: input.allowedActions } : {}),

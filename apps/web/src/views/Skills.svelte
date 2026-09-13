@@ -2,6 +2,7 @@
   import { loadSkills, loadError, loading, skills } from '../lib/stores.ts'
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
+  import { catalogEntryState } from '../lib/skill-catalog.ts'
   import {
     ACTION_TYPES,
     DEFAULT_ACTIONS,
@@ -115,14 +116,22 @@
       errorMessage = `远端目录里没有 ${slug}`
       return
     }
+    // ★ 状态由 `catalogEntryState` 统一判定：它是纯函数、有测试。
+    //   界面**不自己**拼"要不要 overwrite"——那正是"更新/替换"这类动作
+    //   容易写错的地方（漏了 overwrite 会被拒，多加了会覆盖不该覆盖的东西）。
+    const state = catalogEntryState(
+      $skills.find((s) => s.slug === entry.slug),
+      { slug: entry.slug, version: entry.version },
+    )
     void runInstall(() =>
       installRemoteEntry({
         slug: entry.slug,
         // 远端目录给的是 SKILL.md 的正文；空的话服务端会拒绝并说清楚
         body: entry.content ?? '',
+        version: entry.version,
         sourceRef: `remote:${entry.slug}@${entry.version}`,
         allowedActions: actions,
-        ...(overwrite ? { overwrite: true } : {}),
+        ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
   }
@@ -221,24 +230,37 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>slug</th><th>版本</th><th>说明</th><th></th></tr>
+                <tr><th>slug</th><th>版本</th><th>说明</th><th>本地</th><th></th></tr>
               </thead>
               <tbody>
                 {#each $remoteCatalog.skills as s (s.slug)}
+                  {@const local = $skills.find((x) => x.slug === s.slug)}
+                  {@const state = catalogEntryState(local, { slug: s.slug, version: s.version })}
                   <tr>
                     <td><code>{s.slug}</code></td>
                     <td class="faint small">{s.version}</td>
                     <td class="faint small">{s.summary}</td>
+                    <td class="faint small">
+                      {#if local}
+                        {local.version ? `已装 ${local.version}` : '已装（无版本）'}
+                      {:else}
+                        —
+                      {/if}
+                    </td>
                     <td>
                       <button
                         type="button"
-                        class="secondary small"
-                        disabled={busy}
+                        class={state.action === 'update' ? 'small' : 'secondary small'}
+                        disabled={busy || state.disabled}
+                        title={state.hint}
                         onclick={() => installFromCatalog(s.slug)}
                       >
-                        安装
+                        {state.label}
                       </button>
                     </td>
+                  </tr>
+                  <tr>
+                    <td colspan="5" class="faint small" style="padding-top:0">{state.hint}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -347,6 +369,10 @@
               <span class="badge {s.source === 'local' ? 'todo' : 'in_review'}">
                 {s.source === 'local' ? '本机自建' : '远端下载'}
               </span>
+              {#if s.version}
+                <!-- 版本要显示：远端目录那条能不能点「更新」，全靠它比 -->
+                <div class="faint small">v{s.version}</div>
+              {/if}
               {#if s.sourceRef}
                 <!-- 来源标识要能看见：出问题时第一件事就是"它到底从哪儿来的" -->
                 <div class="faint small" title={s.sourceRef}>{s.sourceRef}</div>

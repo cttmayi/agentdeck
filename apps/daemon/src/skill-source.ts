@@ -914,6 +914,8 @@ export type SkillSourceSpec =
       body: string
       files?: Record<string, string> | null
       sourceRef: string
+      /** 远端目录给的版本——不参与"能不能装"，只用于界面判断"是否已装/可更新"。 */
+      version?: string | null
     }
 
 /** 解析任意一种来源。`slug` 给使用者一个纠偏的机会。 */

@@ -923,48 +923,84 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
      *
      * 而且它很可能不报错：模型只会说"我找不到那个脚本"，然后自己换个做法。
      * 从使用者的角度来看就是"这个技能好像不太灵"。
+     *
+     * ══════════════════════════════════════════════════════════════════
+     * ★ 它用**自己的** daemon 与假后端，不共用本文件那两个
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 第一版用的是共享的 `daemon` / `backend`，于是它偶发失败（约 1/5~1/8）：
+     * `seenSkillFiles` 是**共享假后端上的一个可变字段**，文件里别的用例如果有
+     * 还没跑完的 run，那次 `execute()` 会把快照**整个重置**再填上它自己那个
+     * 工作目录的内容——于是这条用例读到的是一份别人的快照。
+     *
+     * 报出来的错极具误导性：`SKILL.md 应当在执行那一刻就在工作目录里`
+     *（实际值是空串，因为 walk 先 readdir 到了名字、readFile 时文件已经随
+     *  清理消失了），看起来像"注入没写下去"，而真凶是**测试之间抢同一个字段**。
+     *
+     * 这与 review-e2e.test.ts 里那段"下一个用例偷走上一个用例的 script"
+     * 是同一类问题：共享的假后端 + 异步派生的 run。
      */
+    const ownDir = await makeTempDir('e2e-skill-files-data')
     const dir = await makeTempDir('e2e-skill-files')
-    const runId = ulid() as RunId
-    const res = await fetch(`${daemon.url}/api/runs`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        runId,
-        kind: 'execute',
-        agentRef: { id: 'agent-with-files', name: '带支持文件的执行者', instructions: '' },
-        skills: [
-          {
-            ref: { id: 'sk-files', slug: 'with-support', source: 'local' },
-            slug: 'with-support',
-            name: '带支持文件',
-            body: '# 标准\n\n看 scripts/check.sh。',
-            allowedActions: ['comment.create'],
-            files: { 'scripts/check.sh': '#!/bin/sh\necho ok\n', 'reference.md': '参考资料' },
-          },
-        ],
-        subject: { type: 'issue', id: issueId },
-        prompt: '干活',
-        workDir: dir,
-        limits: { maxTurns: null, timeoutMs: null },
-      }),
+    const ownBackend = new FakeBackend()
+    const own = await startDaemon({
+      dataDir: ownDir,
+      workRoot: join(ownDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: ownBackend,
+      onWarn: () => {},
+      onInfo: () => {},
     })
-    assert.equal(res.status, 202)
-    await waitForMessages(runId)
 
-    const files = backend.seenSkillFiles
-    assert.match(
-      files['with-support/SKILL.md'] ?? '',
-      /看 scripts\/check\.sh/,
-      'SKILL.md 应当在执行那一刻就在工作目录里',
-    )
-    assert.equal(
-      files['with-support/scripts/check.sh'],
-      '#!/bin/sh\necho ok\n',
-      '★ 支持文件必须一起写下去 —— 少了它技能就是坏的，而且坏得很安静',
-    )
-    assert.equal(files['with-support/reference.md'], '参考资料')
-    await cleanup(dir)
+    try {
+      const runId = ulid() as RunId
+      const res = await fetch(`${own.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'agent-with-files', name: '带支持文件的执行者', instructions: '' },
+          skills: [
+            {
+              ref: { id: 'sk-files', slug: 'with-support', source: 'local' },
+              slug: 'with-support',
+              name: '带支持文件',
+              body: '# 标准\n\n看 scripts/check.sh。',
+              allowedActions: ['comment.create'],
+              files: { 'scripts/check.sh': '#!/bin/sh\necho ok\n', 'reference.md': '参考资料' },
+            },
+          ],
+          subject: { type: 'issue', id: issueId },
+          prompt: '干活',
+          workDir: dir,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      // 等 run 真的结束，而不是"有消息了"——快照是在 execute() 那一刻抓的，
+      // 但 run 结束才意味着后面不会再有人动这个目录
+      await readUntilTerminal(`${own.url}/api/runs/${runId}/events`)
+
+      const files = ownBackend.seenSkillFiles
+      assert.match(
+        files['with-support/SKILL.md'] ?? '',
+        /看 scripts\/check\.sh/,
+        'SKILL.md 应当在执行那一刻就在工作目录里',
+      )
+      assert.equal(
+        files['with-support/scripts/check.sh'],
+        '#!/bin/sh\necho ok\n',
+        '★ 支持文件必须一起写下去 —— 少了它技能就是坏的，而且坏得很安静',
+      )
+      assert.equal(files['with-support/reference.md'], '参考资料')
+    } finally {
+      await own.close()
+      await cleanup(dir)
+      await cleanup(ownDir)
+    }
   })
 
   test('★ 没挂 skill 时也要明说，而不是留白', async () => {

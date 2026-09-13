@@ -518,6 +518,114 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
     )
   })
 
+  test('★ 从远端目录装进来的会记下版本（界面据此判断"已安装/可更新"）', async () => {
+    await withDaemon(async (url) => {
+      const res = await installFromSource(url, {
+        source: {
+          kind: 'payload',
+          slug: 'remote-thing',
+          body: '# 远端的标准',
+          version: '2.3.4',
+          sourceRef: 'remote:remote-thing@2.3.4',
+        },
+      })
+      assert.equal(res.status, 201)
+      const installed = res.body['installed'] as Array<Record<string, unknown>>
+      assert.equal(installed[0]?.['version'], '2.3.4', '★ 版本必须落库，否则界面无从比较')
+      assert.equal(installed[0]?.['source'], 'remote')
+
+      // 再查一次，确认不是只在响应里带了一下
+      const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string; version?: string | null }>
+      }).skills
+      assert.equal(listed.find((s) => s.slug === 'remote-thing')?.version, '2.3.4')
+    })
+  })
+
+  test('★ 更新：同名新版本 + 显式 overwrite ⇒ 版本真的被换掉', async () => {
+    // 界面把「更新」实现成"带 overwrite 的同名安装"。所以这条路径必须真的
+    // 换掉版本号——否则按钮点了、界面说"已安装"，而库里还是旧的。
+    await withDaemon(async (url) => {
+      const first = await installFromSource(url, {
+        source: {
+          kind: 'payload',
+          slug: 'updatable',
+          body: '# 第一版',
+          version: '1.0.0',
+          sourceRef: 'remote:updatable@1.0.0',
+        },
+      })
+      assert.equal(first.status, 201)
+
+      // 不显式确认 ⇒ 拒绝（这条规则不能被"更新"这个说法绕过）
+      const refused = await installFromSource(url, {
+        source: {
+          kind: 'payload',
+          slug: 'updatable',
+          body: '# 第二版',
+          version: '1.1.0',
+          sourceRef: 'remote:updatable@1.1.0',
+        },
+      })
+      assert.equal((refused.body['installed'] as unknown[]).length, 0)
+      assert.match(
+        String((refused.body['skipped'] as Array<{ reason: string }>)[0]?.reason),
+        /overwrite/,
+      )
+
+      const updated = await installFromSource(url, {
+        source: {
+          kind: 'payload',
+          slug: 'updatable',
+          body: '# 第二版',
+          version: '1.1.0',
+          sourceRef: 'remote:updatable@1.1.0',
+        },
+        overwrite: true,
+      })
+      assert.equal((updated.body['installed'] as unknown[]).length, 1)
+
+      const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string; version?: string | null; body: string }>
+      }).skills.find((x) => x.slug === 'updatable')
+      assert.equal(listed?.version, '1.1.0', '★ 版本必须真的被换掉')
+      assert.equal(listed?.body, '# 第二版')
+      // 只剩一条，不能"悄悄多出一条同名"
+      const all = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string }>
+      }).skills.filter((x) => x.slug === 'updatable')
+      assert.equal(all.length, 1)
+    })
+  })
+
+  test('★ 内置播种的那条也有版本（否则界面只能把它当成"来源不明的同名"）', async () => {
+    await withDaemon(async (url) => {
+      const listed = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string; version?: string | null }>
+      }).skills
+      assert.equal(
+        listed.find((s) => s.slug === 'general-review')?.version,
+        '1.0.0',
+        '★ 内置的那份是公共目录 general-review 1.0.0 的本地副本，版本要写下来',
+      )
+    })
+  })
+
+  test('★ 不带版本时记成 null，而不是空字符串', async () => {
+    // 空字符串会参与比较（"" !== "1.0.0"），于是界面永远显示"可以更新"。
+    // null 才是"没有版本"这个事实。
+    const src = await makeSkillDir({ 'SKILL.md': '# 本地标准' })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, { source: { kind: 'path', path: src } })
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed[0]?.['version'], null)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
   test('★ 路径不存在 ⇒ 400 而不是 500', async () => {
     await withDaemon(async (url) => {
       const res = await installFromSource(url, {
@@ -526,5 +634,204 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       assert.equal(res.status, 400)
       assert.equal(res.body['code'], 'not_found')
     })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────
+// 老数据回填：内置那条的版本号
+// ─────────────────────────────────────────────────────────────
+
+describe('★ 给老数据里的内置 skill 补版本号', () => {
+  /**
+   * `version` 是后加的字段。使用者已有的数据目录里，那条内置
+   * `general-review` 是**加字段之前**播种的，所以没有版本。
+   *
+   * 而界面的规则是"有版本才能比较"——不回填的话，它会显示
+   * 「替换本地同名」，恰好把使用者最想看到的那句（"已经装了、版本一致"）
+   * 挡掉了：他装的就是同一份东西。
+   */
+  test('★ 内容原样时补上 1.0.0，并且**只补版本、不动正文**', async () => {
+    const dir = await makeTempDir('backfill-data')
+    const backend = {
+      key: 'claude',
+      protocol: 'stream-json',
+      rejectDetectable: true,
+      async probe() {
+        return { available: false, command: 'claude', cliVersion: null }
+      },
+      async execute() {
+        throw new Error('不该执行 run')
+      },
+    } as never
+
+    // 第一次启动：正常播种（这时已经带版本了）
+    const first = await startDaemon({
+      dataDir: dir,
+      workRoot: join(dir, 'work'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    const seeded = ((await (await fetch(`${first.url}/api/skills`)).json()) as {
+      skills: Array<Record<string, unknown>>
+    }).skills.find((s) => s.slug === 'general-review')
+    assert.ok(seeded)
+    const body = seeded['body'] as string
+
+    // 手动把它退回"没有版本"的样子（模拟加字段之前播种的老数据）
+    const { version: _drop, ...withoutVersion } = seeded
+    await first.store.insertSkill(withoutVersion as never)
+    await first.close()
+
+    // 再启动一次：回填应当发生
+    const notes: string[] = []
+    const second = await startDaemon({
+      dataDir: dir,
+      workRoot: join(dir, 'work'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: (m) => notes.push(m),
+    })
+    try {
+      const after = ((await (await fetch(`${second.url}/api/skills`)).json()) as {
+        skills: Array<Record<string, unknown>>
+      }).skills.find((s) => s.slug === 'general-review')
+      assert.equal(after?.['version'], '1.0.0', '★ 应当补上版本')
+      assert.equal(after?.['body'], body, '★ 只补版本，正文逐字节不变')
+      assert.equal(
+        notes.some((n) => n.includes('补上版本')),
+        true,
+        '回填要**说出来**：它改了使用者的数据，静默改是不可接受的',
+      )
+    } finally {
+      await second.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 内容被改过 ⇒ 不回填（不回填错的那一个）', async () => {
+    // 判据里"正文逐字节相同"这一条是关键：不检查内容就回填，等于替一份
+    // **可能是别的东西**的文件背书——使用者看到"已安装"就不再装了。
+    const dir = await makeTempDir('backfill-skip')
+    const backend = {
+      key: 'claude',
+      protocol: 'stream-json',
+      rejectDetectable: true,
+      async probe() {
+        return { available: false, command: 'claude', cliVersion: null }
+      },
+      async execute() {
+        throw new Error('不该执行 run')
+      },
+    } as never
+
+    const first = await startDaemon({
+      dataDir: dir,
+      workRoot: join(dir, 'work'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    const seeded = ((await (await fetch(`${first.url}/api/skills`)).json()) as {
+      skills: Array<Record<string, unknown>>
+    }).skills.find((s) => s.slug === 'general-review')
+    assert.ok(seeded)
+    const { version: _drop, ...rest } = seeded
+    await first.store.insertSkill({ ...rest, body: '# 我自己改过的标准' } as never)
+    await first.close()
+
+    const second = await startDaemon({
+      dataDir: dir,
+      workRoot: join(dir, 'work'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const after = ((await (await fetch(`${second.url}/api/skills`)).json()) as {
+        skills: Array<Record<string, unknown>>
+      }).skills.find((s) => s.slug === 'general-review')
+      assert.equal(after?.['version'], undefined, '★ 内容不同就不能认它是那一版')
+      assert.equal(after?.['body'], '# 我自己改过的标准', '更不能顺手把正文改回去')
+    } finally {
+      await second.close()
+      await cleanup(dir)
+    }
+  })
+})
+
+describe('★ 内置模板是一份"会被回填判据比对"的内容，改动必须是有意的', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试是一次**静默失效**的产物
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 回填版本号的判据之一是"正文与内置模板**逐字节**相同"（不检查内容就回填，
+   * 等于替一份可能是别的东西的文件背书）。而我在把那份正文提成常量时，
+   * 顺手把一句里的"只有"两个字丢了——于是判据永远不成立，**回填静默地什么都没做**。
+   *
+   * 表现：使用者的库里那条内置 skill 一直没有版本，界面永远显示
+   * 「替换本地同名」，而他装的就是同一份东西。没有任何报错。
+   *
+   * 所以这里钉一个内容指纹。它不是"防止有人改文案"，而是**强制一次有意识的决定**：
+   * 改动这份正文时，同时要想清楚
+   *
+   *   1. 老数据里的副本还认不认得出（回填判据靠逐字节相等）；
+   *   2. 公共目录那份（`apps/remote/src/server.ts`）要不要一起改——
+   *      两边不一致时，"版本一致 ⇒ 已安装"这句话就不成立了。
+   */
+  test('★ 内置模板正文的指纹（改动它＝同时在改上面两件事）', async () => {
+    const { createHash } = await import('node:crypto')
+    const dir = await makeTempDir('builtin-fingerprint')
+    const d = await startDaemon({
+      dataDir: dir,
+      workRoot: join(dir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('不该执行 run')
+        },
+      } as never,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const seeded = ((await (await fetch(`${d.url}/api/skills`)).json()) as {
+        skills: Array<{ slug: string; body: string; version?: string | null }>
+      }).skills.find((x) => x.slug === 'general-review')
+      assert.ok(seeded)
+
+      const fingerprint = createHash('sha256').update(seeded.body, 'utf8').digest('hex').slice(0, 16)
+      assert.equal(
+        fingerprint,
+        '82f9d5ba1a6be257',
+        `★ 内置模板正文变了（指纹 ${fingerprint}）。\n` +
+          `这不一定是错的，但要一起确认两件事：\n` +
+          `  1. 老数据里的副本还认得出吗（回填判据是逐字节相等）——认不出就补不上版本，\n` +
+          `     界面会永远显示「替换本地同名」；\n` +
+          `  2. apps/remote/src/server.ts 的目录里那份要不要同步改？\n` +
+          `     两边不一致时，"版本一致 ⇒ 已安装"就不成立了。\n` +
+          `确认无误后把指纹改成新的。`,
+      )
+      assert.equal(seeded.version, '1.0.0')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
   })
 })

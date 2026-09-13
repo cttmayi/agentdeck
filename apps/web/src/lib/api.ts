@@ -146,6 +146,8 @@ export interface Skill {
   allowedActions: string[]
   source: 'local' | 'remote'
   sourceRef: string | null
+  /** 这份内容的版本（远端目录给的）。没有版本时缺失/null。 */
+  version?: string | null
   updatedAt: number
 }
 

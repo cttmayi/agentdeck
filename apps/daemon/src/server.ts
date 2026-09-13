@@ -179,6 +179,96 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
+ * 内置的通用审核模板（FR-AGENT-08/09）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么提成模块级常量
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 它现在有**两个**用处：首启播种、以及给老数据回填版本（见下一个函数）。
+ * 回填要靠"正文逐字节相同"来判断"这条就是当年那份原样的内置模板"，
+ * 所以两处必须用**同一个字符串**——各写一份的话，改了一处忘了另一处，
+ * 回填就会静默失效（表现为版本一直是空，界面永远显示"替换本地同名"）。
+ */
+const BUILTIN_REVIEW_SKILL: Omit<
+  Skill,
+  'id' | 'workspaceId' | 'createdAt' | 'updatedAt'
+> = {
+  slug: 'general-review',
+  name: '通用审核',
+  description: '开箱可用的通用审核标准：能通过就通过，不行就给出可执行的动作，拿不准就交给人。',
+  body: [
+    '# 通用审核',
+    '',
+    '## 判断标准',
+    '',
+    '1. **能明确判断**时给出 `pass` 或 `fail`，并把证据指回原文。',
+    '2. **判断依据不足**时给出 `needs_human`，写清楚缺什么。',
+    '3. 不要引入这份标准之外的要求——那是越权，不是严谨。',
+    '',
+    '## 动作约定',
+    '',
+    '- `fail` 时用一个动作表达"接下来做什么"，而不是只描述问题。',
+    '- 只有确实需要改动时才 `issue.update_status`；纯提示用 `comment.create`。',
+  ].join('\n'),
+  verdictSchemaVersion: 1,
+  // ★ 动作子集：这个模板只允许发表评论与打标签，不允许建 issue 或指派 agent
+  allowedActions: ['comment.create', 'issue.add_label'],
+  source: 'local',
+  sourceRef: null,
+  /**
+   * 内置的这份就是公共目录里 `general-review` 的 1.0.0（正文一致，
+   * 见 `apps/remote/src/server.ts` 的目录）。
+   *
+   * 带上版本，界面才能对着目录说"已经装了、版本一致"，而不是把同名一律
+   * 当成冲突——那样使用者每次点「安装」都只会看到一条像出错的提示。
+   */
+  version: '1.0.0',
+}
+
+/**
+ * 给**老数据**里的内置模板补上版本号。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要它：`version` 是后加的字段
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 在使用者已有的数据目录里，那条内置 `general-review` 是**加字段之前**
+ * 播种的，所以没有版本。界面的判断规则是"有版本才能比较"，于是它会显示
+ * 「替换本地同名」——而这恰好把使用者最想看到的那句话（"已经装了、版本一致"）
+ * 挡掉了：他明明装的就是同一份东西。
+ *
+ * 回填的判据**刻意很严**（四个条件全满足才动）：
+ *
+ *   - slug 相同；
+ *   - `source === 'local'` 且 `sourceRef === null`（是内置播种的形态）；
+ *   - 还没有版本；
+ *   - **正文与内置模板逐字节相同** —— 内容被改过就不认，宁可继续显示"来源不明的同名"。
+ *
+ * 最后一条是关键：不去检查内容就回填，等于替一份**可能是别的东西**的文件
+ * 背书（使用者会看到"已安装"然后不再去装）。宁可少回填，不可错回填。
+ */
+async function backfillBuiltinSkillVersion(
+  store: Store,
+  workspaceId: WorkspaceId,
+  info: (message: string) => void,
+): Promise<void> {
+  for (const skill of await store.listSkills(workspaceId)) {
+    if (skill.slug !== BUILTIN_REVIEW_SKILL.slug) continue
+    if (skill.source !== 'local' || skill.sourceRef !== null) continue
+    if (skill.version) continue
+    if (skill.body !== BUILTIN_REVIEW_SKILL.body) continue
+
+    // 只补版本，**不动正文**：这是一次登记，不是一次覆盖
+    await store.insertSkill({ ...skill, version: BUILTIN_REVIEW_SKILL.version })
+    info(
+      `已给内置 skill ${skill.slug} 补上版本 ${BUILTIN_REVIEW_SKILL.version}` +
+        `（它是公共目录那一份的本地副本；补上之后界面才能判断"已安装/可更新"）`,
+    )
+  }
+}
+
+/**
  * 安装内核：**两个接口共用这一份**。
  *
  * ══════════════════════════════════════════════════════════════════
@@ -246,6 +336,8 @@ async function installSkillPayloads(input: {
       //   显式声明 `local` 的调用方（从本地路径/GitHub 装的）不受影响。
       source: payload.source === 'local' ? 'local' : 'remote',
       sourceRef: payload.sourceRef ?? null,
+      // 版本如实落库：界面靠它判断"已安装 / 可更新"
+      version: payload.version ?? null,
       createdAt: clash?.createdAt ?? now,
       updatedAt: now,
     }
@@ -307,6 +399,10 @@ function parseInstallSource(
       }
     }
     const sourceRef = obj['sourceRef']
+    const version = obj['version']
+    if (version !== undefined && version !== null && typeof version !== 'string') {
+      return { ok: false, error: 'source.version 必须是字符串或 null' }
+    }
     return {
       ok: true,
       spec: {
@@ -315,6 +411,7 @@ function parseInstallSource(
         body,
         ...(files ? { files: files as Record<string, string> } : {}),
         sourceRef: typeof sourceRef === 'string' && sourceRef ? sourceRef : `remote:${slug.trim()}`,
+        version: typeof version === 'string' ? version : null,
       },
     }
   }
@@ -545,6 +642,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   } catch (err) {
     // 收口失败不该阻止 daemon 启动，但必须可见：留着会导致"永远在途"的假象
     warn(`收口遗留 run 失败（可能留下显示为"进行中"的陈旧记录）：${String(err)}`)
+  }
+
+  // 老数据里的内置技能没有版本号（字段是后加的），补上。
+  // 失败同样不阻止启动：它只影响界面上显示"已安装"还是"替换同名"。
+  try {
+    await backfillBuiltinSkillVersion(store, workspaceId, info)
+  } catch (err) {
+    warn(`回填内置 skill 版本失败（界面可能显示成"来源不明的同名"）：${String(err)}`)
   }
 
   /** 起一个 review run（report 与 run 产出两条来源共用）。 */
@@ -1343,6 +1448,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
               files: resolved.files,
               source: source.spec.kind === 'payload' ? 'remote' : 'local',
               sourceRef: resolved.sourceRef,
+              version: source.spec.kind === 'payload' ? source.spec.version : null,
               ...(Array.isArray(raw.allowedActions)
                 ? { allowedActions: parseAllowedActions(raw.allowedActions) }
                 : {}),
@@ -1918,30 +2024,9 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
   // S2 在没有任何模板时是**空的**：使用者得先从零写一个 skill 才能用上。
   // 所以内置一个最小可用的通用审核标准，作为兜底审核者的默认凭据。
   const template: Skill = {
+    ...BUILTIN_REVIEW_SKILL,
     id: ulid() as Skill['id'],
     workspaceId: workspace.id,
-    slug: 'general-review',
-    name: '通用审核',
-    description: '开箱可用的通用审核标准：能通过就通过，不行就给出可执行的动作，拿不准就交给人。',
-    body: [
-      '# 通用审核',
-      '',
-      '## 判断标准',
-      '',
-      '1. **能明确判断**时给出 `pass` 或 `fail`，并把证据指回原文。',
-      '2. **判断依据不足**时给出 `needs_human`，写清楚缺什么。',
-      '3. 不要引入这份标准之外的要求——那是越权，不是严谨。',
-      '',
-      '## 动作约定',
-      '',
-      '- `fail` 时用一个动作表达"接下来做什么"，而不是只描述问题。',
-      '- 只有确实需要改动时才 `issue.update_status`；纯提示用 `comment.create`。',
-    ].join('\n'),
-    verdictSchemaVersion: 1,
-    // ★ 动作子集：这个模板只允许发表评论与打标签，不允许建 issue 或指派 agent
-    allowedActions: ['comment.create', 'issue.add_label'],
-    source: 'local',
-    sourceRef: null,
     createdAt: now,
     updatedAt: now,
   }
