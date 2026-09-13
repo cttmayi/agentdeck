@@ -646,6 +646,140 @@ describe('端到端：SSE 终态补发', () => {
   })
 })
 
+describe('★ INV-1：reviewer ≠ executor 必须在**写入之前**拦住', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条不变量实现好了，但调用点从来没接上
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `packages/domain/src/review/distinct.ts` 里写着"校验放在 **run 创建时**
+   *（写入之前），而不是执行时。让它跑起来再失败，使用者已经付出了时间和
+   * token 成本，还可能误以为产出被审过了。"
+   *
+   * 而 `assertReviewerDistinct` 全仓只有它自己的测试在引用——**生产代码零调用**。
+   *
+   * 自动串接那条路因为角色单一而结构上安全，所以一直没暴露；但 `POST /api/runs`
+   * 是公开接口：构造一条 `kind:'review'` + `subject:{type:'run'}`、并且 agentRef
+   * 就是那条执行 run 的 agent，就能拿到一次"自己审自己"。INV-1 一破，S1 的整个
+   * 闭环就是假的——审核退化成自我确认，而那正是这个产品的定位所在。
+   */
+  test('★ 让执行者审自己 ⇒ 400，而且**不入库**', async () => {
+    const dataDir = await makeTempDir('inv1-data')
+    const work = await makeTempDir('inv1-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const execAgent = { id: 'agent-self', name: '自己干自己审', instructions: '' }
+      const executeRunId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: executeRunId,
+          kind: 'execute',
+          agentRef: execAgent,
+          skills: [],
+          subject: { type: 'issue', id: 'i-inv1' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${executeRunId}/events`)
+
+      const reviewRunId = ulid() as RunId
+      const res = await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: reviewRunId,
+          kind: 'review',
+          // ★ 同一个 agent —— 这就是"自己审自己"
+          agentRef: execAgent,
+          skills: [],
+          subject: { type: 'run', id: executeRunId },
+          prompt: '审一下你自己',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      assert.equal(res.status, 400, '★ 必须在受理之前拒绝，而不是跑起来之后才失败')
+      const body = (await res.json()) as { code?: string }
+      assert.equal(body.code, 'reviewer_must_differ')
+
+      // ★ 拒绝必须是"真的没发生"：那条 review run 不能留在库里
+      const after = await fetch(`${d.url}/api/runs/${reviewRunId}`)
+      assert.equal(after.status, 404, '★ 被拒的 run 不该入库——否则列表里会多一条幽灵')
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('换个 agent 来审 ⇒ 正常受理', async () => {
+    const dataDir = await makeTempDir('inv1-ok-data')
+    const work = await makeTempDir('inv1-ok-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const executeRunId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: executeRunId,
+          kind: 'execute',
+          agentRef: { id: 'agent-a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-inv1b' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${executeRunId}/events`)
+
+      const res = await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: ulid() as RunId,
+          kind: 'review',
+          agentRef: { id: 'agent-b', name: 'B', instructions: '' },
+          skills: [],
+          subject: { type: 'run', id: executeRunId },
+          prompt: '审一下',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202, '不同的 agent 审核必须照常放行')
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
 describe('★ agent 上填的模型与环境变量必须真的传到 CLI', () => {
   /**
    * ══════════════════════════════════════════════════════════════════

@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_MAX_CHAIN_DEPTH,
   aggregateCost,
+  assertReviewerDistinct,
   depthFromChain,
   exportAudit,
   type Store,
@@ -1632,6 +1633,38 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (typeof body?.runId !== 'string' || body.runId === '') {
         sendJson(res, 400, { error: '缺少 runId' })
         return
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // ★ INV-1（reviewer ≠ executor）**在写入之前**强制校验
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 这条不变量在 `packages/domain/src/review/distinct.ts` 里实现好了，
+      // 那个文件的注释还专门写明"校验放在 **run 创建时**（写入之前），而不是
+      // 执行时"——**但那个调用点从来没被接上**：`assertReviewerDistinct` 在全仓
+      // 只有它自己的测试在引用。
+      //
+      // 自动串接那条路（执行者指向审核者）因为角色单一而**结构上**安全，
+      // 所以这个洞一直没暴露；但 `POST /api/runs` 是公开接口，直接构造一条
+      // `kind:'review'` + `subject:{type:'run'}` 并且 agentRef 就是那条执行 run
+      // 的 agent，就能拿到一次"自己审自己"。而 INV-1 一旦破了，S1 的整个闭环
+      // 就是假的——审核退化成自我确认。
+      //
+      // 复用 domain 里那个函数而不是在这里重写一遍比较：**不变量只有一份**，
+      // 两边各写一遍迟早会分叉（而分叉的表现是"某一条路能绕过校验"）。
+      if (body.kind === 'review' && body.subject?.type === 'run') {
+        const target = await store.getRun(body.subject.id as RunId)
+        if (target) {
+          try {
+            assertReviewerDistinct(body.agentRef.id as Agent['id'], { type: 'run', run: target })
+          } catch (err) {
+            sendJson(res, 400, {
+              error: err instanceof Error ? err.message : String(err),
+              code: 'reviewer_must_differ',
+            })
+            return
+          }
+        }
       }
       // ★ 解析 skill（见 SubmitRunRequest.skills 的说明）。
       //
