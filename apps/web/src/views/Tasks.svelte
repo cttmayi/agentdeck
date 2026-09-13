@@ -506,6 +506,14 @@
                 <span class="stage-tag {selectedStage.stage}">{STAGE_SHORT[selectedStage.stage]}</span>
               {/if}
               <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
+              <!--
+                ★ 完整时间戳放在这里，因为列表里只剩日期了。
+
+                  列表那一列的宽度要留给标题（见行模板上的说明），所以元信息里
+                  用的是 `toLocaleDateString`。但"更新于几点几分"原来只有那一列
+                  有——只留日期就等于**悄悄丢了一条信息**。详情栏有地方，放这儿。
+              -->
+              <span class="faint">更新于 {new Date(selected.updatedAt).toLocaleString()}</span>
             </p>
           </header>
 

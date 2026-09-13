@@ -173,6 +173,12 @@ const CHECKS = [
   },
   {
     view: '任务清单',
+    key: 'tasks.detailHasTimestamp',
+    label: '列表只留了日期，完整时间戳（含时分）在详情里还看得见',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务清单',
     key: 'tasks.titleWidth',
     label: '标题独占一行：宽度接近整个列表栏（≥ 240px）',
     ok: (v) => typeof v === 'number' && v >= 240,

@@ -234,6 +234,10 @@
         facts['tasks.detailTitleAfterClick'] = need('点之后右栏的标题', () =>
           text(d().querySelector('.detail-pane .detail-head h2')),
         )
+        // 列表里只剩日期 ⇒ 完整时间戳必须在别处还看得见（否则是悄悄丢信息）
+        facts['tasks.detailHasTimestamp'] = need('右栏有没有完整时间戳', () =>
+          /\d{1,2}:\d{2}/.test(text(d().querySelector('.detail-pane .detail-sub')) ?? ''),
+        )
 
         // ══════════════ Skills：安装面板在抽屉里 ══════════════
         f.contentWindow.location.hash = '#/skills'
