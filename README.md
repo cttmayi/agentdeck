@@ -186,9 +186,18 @@ Markdown 渲染器是**自己写的**（`apps/web/src/lib/markdown.ts`）——�
 页面又与 daemon **同源**，所以"先转义、再拼我们自己的标签"是硬规则：原始 HTML 一律不认、
 链接只允许 `http(s)`/`mailto`、图片地址必须经调用方映射。
 
-同样因为同源：工作目录里的文件是 agent 写的，所以文件响应一律带
-`Content-Security-Policy: sandbox`（脚本不执行）——否则一个带脚本的 `svg`/`html`
-被打开就等于把它变成了操作本机 daemon 的入口。
+同样因为同源：工作目录里的文件是 **agent 写的**，而页面由 daemon 托管 ⇒ 一个
+agent 写出来的 `html`/`svg` 被打开时**默认**就拿到了这个源（能读所有 run 日志、
+能装 skill、能提交任务）。所以文件响应一律带
+`Content-Security-Policy: sandbox allow-scripts`——**允许脚本、但不允许同源**：
+
+- 脚本能跑 ⇒ 产出里的画布页（p5 之类）能真的画出来（实测有任务的交付物就是一个
+  39KB 的 p5 页面，禁脚本之后点开是一片空白）；
+- 没有 `allow-same-origin` ⇒ 文档落在**不透明源**里，`fetch('/api/…')` 变成跨源请求，
+  而 daemon 不发 CORS 头 ⇒ **响应读不到**，cookie/localStorage 也拿不到。
+
+⚠️ **绝不要加 `allow-same-origin`** —— 加上它就等于把上面那条断掉的路接回去。
+测试里专门钉着这一条。
 
 ### 不满意就接着说
 

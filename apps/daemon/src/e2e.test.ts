@@ -736,10 +736,17 @@ describe('★ 工作目录文件接口（任务详情右边那一栏）', () => 
       assert.equal(await fileRes.text(), '# 报告\n\n做完了。')
       assert.match(fileRes.headers.get('content-type') ?? '', /text\/plain/)
       // ★ 同源 + agent 写的文件 ⇒ 必须带 sandbox 的 CSP
+      const csp = fileRes.headers.get('content-security-policy') ?? ''
       assert.match(
-        fileRes.headers.get('content-security-policy') ?? '',
+        csp,
         /sandbox/,
         '★ 少了它，一个带脚本的 svg/html 被打开就等于给了对方 daemon 的调用能力',
+      )
+      assert.match(csp, /allow-scripts/, '产出常常是画布页（p5 之类），禁脚本等于把交付物废了')
+      assert.equal(
+        /allow-same-origin/.test(csp),
+        false,
+        '★ 绝不能加 allow-same-origin —— 加了就把"agent 写的页面反过来操作 daemon"那条路接回去了',
       )
       assert.equal(fileRes.headers.get('x-content-type-options'), 'nosniff')
 

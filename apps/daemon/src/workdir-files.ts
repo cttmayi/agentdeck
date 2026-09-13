@@ -235,12 +235,45 @@ export function contentTypeFor(name: string): string {
 /**
  * 每个工作目录文件响应都要带上的头。
  *
- * `Content-Security-Policy: sandbox` 是这里的重点：它让浏览器把这个响应当成
- * **独立沙箱**里的文档，脚本一律不执行、也没有同源身份。于是"agent 写了一个
- * 带脚本的 html/svg，使用者点开它就获得了对本机 daemon 的调用能力"这条路被堵死。
+ * ══════════════════════════════════════════════════════════════════
+ * 关键在 `sandbox` **允许脚本、但不允许同源**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这些文件是 **agent 写的**，而页面由 daemon 托管 ⇒ 与接口**同源**。所以一个
+ * agent 写出来的 `html`/`svg` 被当文档打开时，**默认**就拿到了这个源：能读所有
+ * run 日志、能装 skill、能提交任务。这是需要堵住的东西。
+ *
+ * 第一版把脚本一律禁掉（`sandbox; default-src 'none'`），安全但**把产出也废了**：
+ * 实测有任务产出的是一个 p5.js 画布页（`bubble-sort-art.html`，39KB、两个
+ * `<script>`、从 CDN 载 p5），禁掉脚本之后点开是**一片空白**——使用者会以为
+ * 又坏了，而那是他真正想看的交付物。
+ *
+ * 现在的取舍：
+ *
+ *   - **`sandbox allow-scripts`**（**没有** `allow-same-origin`）⇒ 文档落在
+ *     一个**不透明源**里。脚本能跑，页面能画出来；但它读不到这个源的任何东西：
+ *     `fetch('/api/…')` 变成跨源请求，而 daemon 不发任何 CORS 头 ⇒ **响应不可读**；
+ *     cookie 与 localStorage 也拿不到。于是"agent 写的页面反过来操作 daemon"
+ *     这条路仍然是断的；
+ *   - ⚠️ **绝不要加 `allow-same-origin`**：加上它就等于把上面那条断掉的路接回去。
+ *     测试里专门钉了这一条。
+ *   - 资源指令放宽到 `'unsafe-inline'` 与 `https:`：离线单文件页面里的样式与
+ *     内联脚本是常态，而它们在这个隔离里已经拿不到我们的数据。
+ *
+ * 残留的能力（已知且接受）：不透明源里的脚本**仍能发出请求**（只是读不到响应）。
+ * 这对本机 daemon 不是新增威胁——任何网站都能这么干（回环地址 + 无 CSRF 令牌），
+ * 而这个页面至少是你自己机器上、你自己让它跑出来的东西写的。
  */
 export const WORK_FILE_HEADERS: Record<string, string> = {
-  'content-security-policy': "sandbox; default-src 'none'; img-src data: blob:",
+  'content-security-policy': [
+    'sandbox allow-scripts',
+    "default-src 'none'",
+    "script-src 'unsafe-inline' https:",
+    "style-src 'unsafe-inline' https: data:",
+    'img-src data: blob: https:',
+    'font-src data: https:',
+    'connect-src https:',
+  ].join('; '),
   'x-content-type-options': 'nosniff',
   'cache-control': 'no-store',
 }
