@@ -11,6 +11,7 @@ import {
   type ExecOptions,
 } from '@alpha-helper/agent-core'
 import {
+  ulid,
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
   type AuditRecord,
@@ -335,9 +336,76 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.doesNotMatch(backend.seenContext!, /开箱可用的通用审核标准/)
   })
 
-  test('★ 结束后工作目录里不残留注入物', async () => {
-    const entries = await readdir(workDir).catch(() => [] as string[])
-    assert.deepEqual(entries, [], `工作目录应当被清理干净，实际有：${entries.join(', ')}`)
+  test('★ 结束后不残留注入的技能（上下文记录按约定保留）', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 这条原来是**空过**的
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 它断言 `readdir(workDir)` 为空——而这个 `workDir` **从来没有被任何 run 用过**：
+    // 这一节里的 run 都来自报告摄取，而报告类的审核各自落在自动分配的
+    // `report-<id>` 目录里。也就是说它断言的是"一个空目录还是空的"，
+    // 抓不到任何残留（技能残留、清单残留都抓不到）。
+    //
+    // 现在真的在这个目录里跑一次：建一条不指向审核者的执行者（⇒ 不自动串接，
+    // 这条用例只有一个写入者，断言不会跟另一条 run 赛跑），挂一个技能，
+    // 跑完检查目录里还剩什么。
+    const dir = await makeTempDir('review-sweep')
+    try {
+      const issue = ((await (
+        await fetch(`${daemon.url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '清场用例' }),
+        })
+      ).json()) as { id: string }).id
+
+      const agent = ((await (
+        await fetch(`${daemon.url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '清场用的执行者', role: 'executor' }),
+        })
+      ).json()) as { id: string }).id
+
+      const runId = ulid()
+      const res = await fetch(`${daemon.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: agent, name: '清场用的执行者', instructions: '' },
+          skills: [
+            {
+              ref: { id: 'sk-sweep', slug: 'sweep-probe', source: 'local' },
+              slug: 'sweep-probe',
+              name: '清场探针',
+              body: '# 探针\n',
+              allowedActions: [],
+            },
+          ],
+          subject: { type: 'issue', id: issue },
+          prompt: '随便做点什么',
+          workDir: dir,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      await waitFor(async () => ((await fetchRun(runId)).status === 'completed' ? true : null))
+
+      const left = await readdir(join(dir, '.claude', 'skills')).catch(() => [] as string[])
+      assert.deepEqual(left, [], `注入的技能与归属清单都该收掉，实际剩：${left.join(', ')}`)
+
+      // 上下文记录是**有意保留**的（使用者的决定：跑完要能回看"它被交代了什么"）。
+      // ⚠️ 按已定方案（design.md §15.18）它会换成 `.alpha-helper/context/<runId>.md`。
+      assert.ok(
+        (await readdir(dir)).includes('CLAUDE.md'),
+        '上下文记录按约定保留（它记录这次任务被交代了什么）',
+      )
+    } finally {
+      await cleanup(dir)
+    }
   })
 })
 

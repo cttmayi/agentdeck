@@ -373,23 +373,38 @@ describe('S1：执行完成后自动接审核', () => {
       })
       assert.equal(res.status, 202)
 
-      // 等**这次执行**结束，再等它自动串接出来的**审核**也结束：
-      // 审核 run 会继承同一个目录、也会注入并收掉自己的技能，还在跑的时候
-      // 断言目录状态就是在跟它赛跑。
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 等的是"那一条**具体的**审核 run"，不是"没有忙着的 run"
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 第一版等的是后者，于是它**会空过**：审核 run 是在执行结束**之后**
+      // 才被创建出来的，中间存在一个"当前没有任何 run 在跑"的真实瞬间——
+      // 断言在那个瞬间通过，而审核 run 紧接着就把自己的技能与归属清单写进
+      // **同一个目录**，那条"清单也该收掉"的断言于是随机失败。
+      // 症状：单独跑这条用例过、全量跑时偶尔红（复现过两次）。
       const settled = ['queued', 'dispatched', 'running']
+      type RunsPage = {
+        runs: Array<{ runId: string; kind: string; status: string; subject?: { type: string; id: string } }>
+      }
+      const listRuns = async (): Promise<RunsPage['runs']> =>
+        ((await (await fetch(`${daemon.url}/api/runs`)).json()) as RunsPage).runs
+
       await waitFor(async () => {
-        const list = ((await (await fetch(`${daemon.url}/api/runs`)).json()) as {
-          runs: Array<{ runId: string; status: string }>
-        }).runs
-        const r = list.find((x) => x.runId === runId)
+        const r = (await listRuns()).find((x) => x.runId === runId)
         return r && !settled.includes(r.status) ? r : null
       })
+
+      // 执行者播种时就指着一个审核者（D28），所以它跑完必然串出审核；
+      // 等不到就是"自动串接没发生"，那本身就是要报出来的事。
+      const reviewRunId = await waitFor(async () => {
+        const review = (await listRuns()).find(
+          (r) => r.kind === 'review' && r.subject?.type === 'run' && r.subject.id === runId,
+        )
+        return review ? review.runId : null
+      })
       await waitFor(async () => {
-        const list = ((await (await fetch(`${daemon.url}/api/runs`)).json()) as {
-          runs: Array<{ runId: string; status: string; agentId: string }>
-        }).runs
-        const busy = list.filter((r) => settled.includes(r.status))
-        return busy.length === 0 ? { ok: true } : null
+        const r = (await listRuns()).find((x) => x.runId === reviewRunId)
+        return r && !settled.includes(r.status) ? r : null
       })
 
       const left = await readdir(skillsDir).catch(() => [] as string[])

@@ -104,7 +104,6 @@ describe('★ 上下文块清理：只摘自己写的那个块', () => {
   let backend: ForeignBlockBackend
   let issueId: Issue['id']
   let agentId: string
-  let reviewerId: string
 
   before(async () => {
     dataDir = await makeTempDir('ctxclean-data')
@@ -126,12 +125,23 @@ describe('★ 上下文块清理：只摘自己写的那个块', () => {
     })
     issueId = ((await res.json()) as Issue).id
 
-    const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-      agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
-    }).agents
-    agentId = agents.find((a) => a.role === 'executor')!.id
-    reviewerId = agents.find((a) => a.role === 'reviewer')!.id
-    assert.ok(agentId && reviewerId)
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 用一个**不指向任何审核者**的执行 agent
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 播种出来的那个执行者默认指着审核者（D28），于是这条 run 跑完会**自动串出
+    // 一次审核**——而审核 run 继承同一个工作目录，会把 `CLAUDE.md` 里的块**原地
+    // 换成它自己的**。这条用例要断言"别人的块没被摘掉"，可等审核一跑，那个"别人的块"
+    // 是会被合法替换掉的，断言就变成随机结果（实测：六次全量里红一次）。
+    //
+    // 所以这里显式建一个没有审核者的执行 agent：**这条用例只需要一个写入者**。
+    const created = await fetch(`${daemon.url}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '不串审核的执行者', role: 'executor' }),
+    })
+    agentId = ((await created.json()) as { id: string }).id
+    assert.ok(agentId, '夹具 agent 要建得出来')
   })
 
   after(async () => {
