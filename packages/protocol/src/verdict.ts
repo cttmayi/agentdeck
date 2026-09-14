@@ -121,6 +121,15 @@ export interface VerdictIssue {
   /** 出错字段路径，如 `['escalateReason']`。 */
   path: string[]
   message: string
+  /**
+   * zod 的 issue code（`invalid_type` / `invalid_value` / `unrecognized_keys`…）。
+   *
+   * ★ 留着它是为了把失败原因翻成**人话**：`message` 是 zod 生成的英文
+   *   （"Invalid option: expected one of …"），而这段文字会一路进到使用者
+   *   看到的地方——判决的 `escalateReason` 与通知标题。真实出现过的一次：
+   *   使用者看到的"需要人工的原因"是一屏 zod 英文，完全不知道该怎么办。
+   */
+  code?: string
 }
 
 export type VerdictParseResult =
@@ -142,14 +151,60 @@ export function parseVerdict(input: unknown): VerdictParseResult {
     issues: result.error.issues.map((i) => ({
       path: i.path.map(String),
       message: i.message,
+      code: i.code,
     })),
   }
 }
 
-/** 把校验错误整理成一段人能读懂的话，用于 UI 与通知。 */
+/**
+ * 把校验错误整理成**人话**，用于判决的 `escalateReason` 与通知标题。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么不能直接用 zod 的 `message`
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这段文字会出现在使用者眼前（"为什么需要人工"），而 zod 的原文是英文、
+ * 而且一次能刷出十几条。真实发生过：一次审核的失败原因是一屏
+ * `Invalid option: expected one of "meets_criteria"|…；findings.0.evidence:
+ * Too big: expected string to have <=20 characters…`——使用者只能看到
+ * "出错了"，看不出**该改什么**。
+ *
+ * 所以按 zod 的 issue code 翻成中文，并**限量**（超出的只说还有多少处）。
+ * 原文并没有丢：它仍在日志与判决详情里（那条链路是给排查用的）。
+ */
 export function formatVerdictIssues(issues: readonly VerdictIssue[]): string {
   if (issues.length === 0) return '判决不符合 schema'
-  return issues.map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message)).join('；')
+  const MAX = 6
+  const parts = issues.slice(0, MAX).map((issue) => {
+    const where = issue.path.length ? issue.path.join('.') : '顶层'
+    return `${where}：${humanizeIssue(issue)}`
+  })
+  const rest = issues.length > MAX ? `（另有 ${issues.length - MAX} 处同类问题）` : ''
+  return parts.join('；') + rest
+}
+
+/** 一条 zod issue → 一句中文（认不出来时保留原文，不要编）。 */
+function humanizeIssue(issue: VerdictIssue): string {
+  switch (issue.code) {
+    case 'invalid_type':
+      // zod 把"缺字段"也报成 invalid_type（received undefined）
+      return issue.message.includes('undefined')
+        ? '这个字段是必填的，但判决里没有'
+        : '类型不对'
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return '取值不在允许范围内（可用的取值见任务说明里的字段规则）'
+    case 'unrecognized_keys':
+      return '多出了不允许的字段（判决是闭合的，只能有规则里列出的那些）'
+    case 'too_big':
+      return '太长了'
+    case 'too_small':
+      return '为空或太短'
+    case 'invalid_format':
+      return '格式不对'
+    default:
+      return issue.message
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -198,15 +253,74 @@ export function extractVerdictJson(text: string): string | null {
 
 /** 让模型照此格式输出（供 skill 与上下文块生成使用）。 */
 export function renderVerdictInstruction(): string {
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 枚举与示例都**从 schema 本体生成**，不手写
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 这条指令以前只给一个**空骨架**：
+  //
+  //     { "schemaVersion": 1, "conclusion": "...", "reasonCode": "...",
+  //       "findings": [], "action": null, "escalateReason": null }
+  //     约束：reasonCode 必须是协议里的枚举值
+  //
+  // 于是模型**无从知道**枚举有哪些取值、`findings[]` 里该放什么。真实后果
+  // （一次真实任务的两次审核，两个都失败）：
+  //
+  //   - 第一次：模型在工具调用里反复说 "The enum isn't defined anywhere
+  //     accessible"，翻遍了工作目录与别处的文件去找 reasonCode 的取值，
+  //     最后没能给出判决块（判 `invalid`）；
+  //   - 第二次：它猜了 `reasonCode: "ok"`，并把 findings 写成自己发明的形状
+  //     （`{kind, target, evidence: 长字符串}`）⇒ schema 拒绝 ⇒ 降级，
+  //     而且失败原因是一大段 zod 英文。
+  //
+  // **那是我们的缺陷，不是模型不够聪明**：我们要一个严格闭合的对象，
+  // 却只画了个轮廓。现在把枚举、字段规则、以及一个**能通过校验的完整示例**
+  // 都写进去——示例由测试守着"必须 parseVerdict 通过"，所以它不会漂。
+  const list = (values: readonly string[]): string => values.join(' | ')
+  const example: Verdict = {
+    schemaVersion: VERDICT_SCHEMA_VERSION,
+    conclusion: 'fail',
+    reasonCode: 'missing_tests',
+    confidence: 0.8,
+    findings: [
+      {
+        severity: 'high',
+        summary: '产出里没有测试文件',
+        evidence: [{ blobRef: null, locator: '报告第 3 段', excerpt: '我忘了写测试' }],
+        detail: { suggestion: '补一个最小的测试文件' },
+      },
+    ],
+    action: {
+      type: 'comment.create',
+      params: { issueId: '<关联 issue 的 id>', body: '缺少测试，请补上' },
+    },
+    escalateReason: null,
+  }
+
   return [
-    `把最终判决写成**一个** JSON 对象，放在下面这对标记之间，标记之外不要重复：`,
+    '把最终判决写成**一个** JSON 对象，放在下面这对标记之间。',
+    '围栏之外可以写解释，但**判决本体只能有一份**，且必须在这一对标记之间：',
     '',
     VERDICT_FENCE_BEGIN,
-    '{ "schemaVersion": 1, "conclusion": "...", "reasonCode": "...", "confidence": 0.0,',
-    '  "findings": [], "action": null, "escalateReason": null }',
+    JSON.stringify(example, null, 2),
     VERDICT_FENCE_END,
     '',
-    '约束：conclusion ∈ pass|fail|needs_human；reasonCode 必须是协议里的枚举值；',
-    'needs_human 必须给出 escalateReason；fail 必须给出 action。',
+    '字段规则（判决是**闭合**的：多一个字段、少一个必填字段都会整条不合规）：',
+    '',
+    `- \`conclusion\`：${list(VerdictConclusion.options)}`,
+    `- \`reasonCode\`：**必须**是其中之一 —— ${list(ReasonCode.options)}`,
+    `- \`confidence\`：0 到 1 之间的小数`,
+    `- \`findings[]\`：每项都要有 \`severity\`（${list(Severity.options)}）、`,
+    '  \`summary\`（一句话，必填）；可选 \`evidence\` 与 \`detail\`',
+    '- \`evidence\` 是**数组**，每项是一个对象 \`{ "blobRef": null, "locator": "…", "excerpt": "…" }\`',
+    '  （最多 20 项；\`excerpt\` 不超过 1000 字）——**不要**把证据写成一整段字符串',
+    '- \`detail\` 是**唯一**可以自由发挥的字段（一个对象）；其余字段名一个都不能多',
+    `- \`action\`：\`fail\` 必须给出，形如 \`{ "type": "…", "params": { … } }\`，`,
+    `  \`type\` 取：${list(ActionType.options)}`,
+    '- \`escalateReason\`：\`needs_human\` 必须给出（一句话说清缺什么）',
+    '- \`schemaVersion\` 固定为 1',
+    '',
+    '⭐ 拿不准取值时**宁可选 `needs_human`**，也不要去编一个字段名或枚举值：',
+    '   编出来的东西会被判为"格式不合规"，整条判决作废——而你本来想说的结论也一起丢了。',
   ].join('\n')
 }

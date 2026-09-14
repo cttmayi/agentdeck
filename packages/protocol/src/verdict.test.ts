@@ -6,7 +6,9 @@ import {
   extractVerdictJson,
   formatVerdictIssues,
   parseVerdict,
+  renderVerdictInstruction,
 } from './verdict.ts'
+import { ActionType, ReasonCode, Severity } from './enums.ts'
 
 /** 一份最小的合法判决。 */
 const validPass = {
@@ -214,5 +216,93 @@ describe('判决提取 —— 约定围栏 + 确定性切片（FR-CLI-44/45）',
     assert.notEqual(sliced, null)
     const parsed = parseVerdict(JSON.parse(sliced!))
     assert.equal(parsed.ok, false)
+  })
+})
+
+describe('★ 给模型看的判决指令（一次真实失败换来的）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这组用例的由来：一次真实任务"画一只小猫"，两次审核都失败了
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来那条指令只给一个**空骨架**（`"findings": []`）+ 一句"reasonCode 必须是
+   * 协议里的枚举值"。模型因此：
+   *
+   *   - 在工具调用里反复说"The enum isn't defined anywhere accessible"，
+   *     翻遍工作目录去找 reasonCode 的合法取值；
+   *   - 最后猜了 `reasonCode: "ok"`，并把 findings 写成自己发明的形状
+   *     （`{kind, target, evidence: 一个长字符串}`）⇒ schema 拒绝 ⇒ 降级。
+   *
+   * 那是**我们的缺陷**：要一个严格闭合的对象，却只画了个轮廓。
+   */
+  test('★ 指令里的示例**必须能通过校验**（否则就是在教模型一个错的形状）', () => {
+    const instruction = renderVerdictInstruction()
+    const json = extractVerdictJson(instruction)
+    assert.notEqual(json, null, '示例要被围栏包起来，且能被提取出来')
+    const parsed = parseVerdict(JSON.parse(json!))
+    assert.equal(
+      parsed.ok,
+      true,
+      `★ 示例自己都不合法的话，模型照着抄也会被判不合规：${
+        parsed.ok ? '' : formatVerdictIssues(parsed.issues)
+      }`,
+    )
+  })
+
+  test('★ 每个枚举的**全部取值**都要列出来（包括 reasonCode 与 severity）', () => {
+    const instruction = renderVerdictInstruction()
+    for (const value of ReasonCode.options) {
+      assert.ok(instruction.includes(value), `reasonCode 的取值 ${value} 必须写给模型看`)
+    }
+    for (const value of Severity.options) {
+      assert.ok(instruction.includes(value), `severity 的取值 ${value} 必须写给模型看`)
+    }
+    for (const value of ActionType.options) {
+      assert.ok(instruction.includes(value), `action.type 的取值 ${value} 必须写给模型看`)
+    }
+  })
+
+  test('★ 要点明 findings/evidence 的形状：数组、对象、不能写成一整段字符串', () => {
+    const instruction = renderVerdictInstruction()
+    assert.match(instruction, /evidence.*数组/s, 'evidence 是数组这件事要说清')
+    assert.match(instruction, /excerpt/, '证据项里该有什么字段')
+    assert.match(instruction, /闭合/, '要说清"多一个字段就整条不合规"')
+    assert.match(instruction, /不要.*字符串/, '明确禁止把证据写成一整段字符串')
+  })
+
+  test('★ 枚举与示例都是从 schema 生成的：改 schema 不会让指令漂', () => {
+    // 这条守护"单一来源"：指令里的取值来自 `z.enum(...).options`，
+    // 而不是抄一遍。往枚举里加一个值，指令自动跟着变。
+    const instruction = renderVerdictInstruction()
+    assert.ok(ReasonCode.options.length > 10, '前提：reasonCode 是个长枚举')
+    const missing = ReasonCode.options.filter((v) => !instruction.includes(v))
+    assert.deepEqual(missing, [])
+  })
+})
+
+describe('★ 校验失败要说人话（它会被使用者看到）', () => {
+  test('★ 英文的 zod 文案要翻成能指导下一步的中文', () => {
+    const text = formatVerdictIssues([
+      { path: ['reasonCode'], message: 'Invalid option: expected one of "a"|"b"', code: 'invalid_value' },
+      { path: ['findings', '0', 'summary'], message: 'Invalid input: expected string, received undefined', code: 'invalid_type' },
+      { path: ['findings', '0'], message: 'Unrecognized keys: "kind"', code: 'unrecognized_keys' },
+      { path: ['findings', '0', 'evidence'], message: 'Too big: expected string to have <=20 characters', code: 'too_big' },
+    ])
+    assert.match(text, /reasonCode：取值不在允许范围内/)
+    assert.match(text, /findings\.0\.summary：这个字段是必填的/)
+    assert.match(text, /多出了不允许的字段/)
+    assert.match(text, /太长了/)
+    assert.doesNotMatch(text, /Invalid option|Unrecognized keys/, '不许把 zod 英文原样丢给使用者')
+  })
+
+  test('★ 问题很多时只列前几条，并说清还有多少（不要刷屏）', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      path: ['findings', String(i)],
+      message: 'x',
+      code: 'invalid_type',
+    }))
+    const text = formatVerdictIssues(many)
+    assert.match(text, /另有 14 处/, '超出部分要有交代，不能静默丢掉')
+    assert.ok(text.length < 400, '不能变成一屏都读不完的墙')
   })
 })

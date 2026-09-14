@@ -878,9 +878,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         files: s.files ?? {},
       })),
       subject: previous.subject,
+      // ⚠️ 措辞原来说"按**审核标准**里的围栏格式输出"——而围栏约定不在
+      //    审核标准（skill）里，它在**本次任务的说明**里（第一句话的「输出要求」）。
+      //    指错地方会让模型去 skill 正文里找一个根本不存在的格式。
       prompt:
-        `上一次你的输出没能通过格式校验。请**重新**给出判决，` +
-        `严格按审核标准里的围栏格式输出，不要添加围栏之外的判决内容。`,
+        `上一次你的输出没能通过格式校验。请**重新**给出判决：**只**输出一个 JSON 对象，` +
+        `放在任务说明里那对围栏标记之间，字段名与取值严格照里面的规则，不要额外字段。`,
       // 重试沿用上一次的目录：D27 下目录按**任务**分，重试本来就该在原地继续
       workDir: previous.workDir ?? undefined,
       limits: { maxTurns: null, timeoutMs: null },
