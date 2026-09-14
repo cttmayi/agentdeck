@@ -25,12 +25,24 @@ import { BlobRef } from './ids.ts'
  * zod 默认会静默剥离多余字段——那等于"看似闭合、实则放任"。
  */
 export const EvidenceRef = z.strictObject({
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 这三个字段：**缺省 ≡ null**
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 它们原来是 `.nullable()`——"可以空，但**必须出现**"。那是 JSON 里的反直觉
+  // 要求：模型的自然习惯是"没有就不写这个键"。实测被咬过不止一次，而且每次
+  // 代价都是一整条判决作废 + 一次重试 + 可能还要人介入。
+  //
+  // 而"缺省"与"null"在这三个字段上**语义完全相同**，没有任何安全价值：
+  // 真正承载判断的是 conclusion / reasonCode / 证据能不能指回原文（那是
+  // 内容要求，不是 JSON 键的在场要求）。所以按"必填只留给真正承载判断的字段"
+  // 这条原则，改成缺省即 null。
   /** 指向输入快照（report 或上游 run 的产出）。 */
-  blobRef: BlobRef.nullable(),
+  blobRef: BlobRef.nullish().transform((v) => v ?? null),
   /** 在快照内的定位（行号、章节、条目 id 等）。 */
-  locator: z.string().max(200).nullable(),
+  locator: z.string().max(200).nullish().transform((v) => v ?? null),
   /** 摘录。限长，防止把整份文档塞进 verdict。 */
-  excerpt: z.string().max(1000).nullable(),
+  excerpt: z.string().max(1000).nullish().transform((v) => v ?? null),
 })
 export type EvidenceRef = z.infer<typeof EvidenceRef>
 
@@ -43,8 +55,12 @@ export type EvidenceRef = z.infer<typeof EvidenceRef>
  */
 export const ActionRef = z.strictObject({
   type: ActionType,
-  /** 载荷按 action type 二次校验（那属于注册表的职责，不在这里）。 */
-  params: z.record(z.string(), z.unknown()),
+  /**
+   * 载荷按 action type 二次校验（那属于注册表的职责，不在这里）。
+   *
+   * 缺省即空对象：有的动作没有参数，"不写"与"写 {}"是同一件事。
+   */
+  params: z.record(z.string(), z.unknown()).default({}),
 })
 export type ActionRef = z.infer<typeof ActionRef>
 
@@ -78,9 +94,19 @@ export const Verdict = z
     conclusion: VerdictConclusion,
     reasonCode: ReasonCode,
     confidence: z.number().min(0).max(1),
-    findings: z.array(Finding).max(100),
-    action: ActionRef.nullable(),
-    escalateReason: z.string().max(500).nullable(),
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 这三个同样"缺省即 null / 空数组"
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 真实踩过：一份 `pass` 判决把整个 `action` 键省掉了（因为指令只说
+    // "fail 必须给出 action"，模型合理地认为 pass 不需要它），于是
+    // 「action：这个字段是必填的，但判决里没有」——整条判决作废。
+    //
+    // **安全性一点没丢**：下面 `superRefine` 里那两条出口规则看的是
+    // "action 是不是 null"，不是"这个键在不在"。省略与 null 等价。
+    findings: z.array(Finding).max(100).default([]),
+    action: ActionRef.nullish().transform((v) => v ?? null),
+    escalateReason: z.string().max(500).nullish().transform((v) => v ?? null),
   })
   .superRefine((v, ctx) => {
     // 升级必须带结构化原因（INV-5）——不允许只给一段自然语言。
@@ -333,7 +359,12 @@ export function renderVerdictInstruction(): string {
     JSON.stringify(example, null, 2),
     VERDICT_FENCE_END,
     '',
-    '字段规则（判决是**闭合**的：多一个字段、少一个必填字段都会整条不合规）：',
+    '字段规则（判决是**闭合**的：**多**一个字段名会整条不合规）：',
+    '',
+    '⭐ 上面这份示例是 `fail`（所以有 `action`）。**`action` / `findings` / `escalateReason`',
+    '   都可以省略**——省略与写 `null` 等价，不会因此被判不合规。最小的一份合法判决长这样：',
+    '   `{ "schemaVersion": 1, "conclusion": "pass", "reasonCode": "meets_criteria", "confidence": 0.9 }`',
+    '   （`pass` 不需要 action 或 escalateReason；`fail` 必须给 action；`needs_human` 必须给 escalateReason）',
     '',
     `- \`conclusion\`：${list(VerdictConclusion.options)}`,
     `- \`reasonCode\`：**必须**是其中之一 —— ${list(ReasonCode.options)}`,
@@ -343,7 +374,7 @@ export function renderVerdictInstruction(): string {
     '- \`evidence\` 是**数组**，每项是一个对象 \`{ "blobRef": null, "locator": "…", "excerpt": "…" }\`',
     '  （最多 20 项；\`excerpt\` 不超过 1000 字）——**不要**把证据写成一整段字符串',
     '- \`detail\` 是**唯一**可以自由发挥的字段（一个对象）；其余字段名一个都不能多',
-    `- \`action\`：\`fail\` 必须给出，形如 \`{ "type": "…", "params": { … } }\`，`,
+    `- \`action\`：\`fail\` **必须**给出（其余结论可以不写），形如 \`{ "type": "…", "params": { … } }\`，`,
     `  \`type\` 取：${list(ActionType.options)}`,
     '- \`escalateReason\`：\`needs_human\` 必须给出（一句话说清缺什么）',
     '- \`schemaVersion\` 固定为 1',

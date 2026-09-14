@@ -344,3 +344,107 @@ describe('★ 围栏提取：结尾标记被抄成开头时也要认（真实踩
     assert.match(instruction, /END_/, '并提醒结尾那个带 END_ 前缀')
   })
 })
+
+describe('★ 缺省 ≡ null（"必填"只留给真正承载判断的字段）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 又一轮真实失败换来的
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 一份 `pass` 判决把**整个 `action` 键省掉了**——因为指令只说"fail 必须给出
+   * action"，模型合理地认为 pass 不需要它。而 schema 里 `action` 是 `.nullable()`
+   * ——"可以空，但**必须出现**"。于是：
+   *
+   *     「需要你判断：action：这个字段是必填的，但判决里没有」
+   *
+   * 那是 JSON 里的反直觉要求（模型的习惯是"没有就不写这个键"），而这些字段
+   * 省略与 null **语义完全相同**，没有任何安全价值——真正承载判断的出口规则
+   * （fail 要有 action、needs_human 要有 escalateReason）看的是"值是不是 null"，
+   * 不是"键在不在"。
+   */
+  test('★ pass 判决可以完全省略 action / escalateReason / findings', () => {
+    const r = parseVerdict({
+      schemaVersion: 1,
+      conclusion: 'pass',
+      reasonCode: 'meets_criteria',
+      confidence: 0.9,
+    })
+    assert.equal(r.ok, true, r.ok ? '' : formatVerdictIssues(r.issues))
+    if (r.ok) {
+      assert.equal(r.verdict.action, null, '省略要规范化成 null（下游不必处理 undefined）')
+      assert.equal(r.verdict.escalateReason, null)
+      assert.deepEqual(r.verdict.findings, [])
+    }
+  })
+
+  test('★ 证据项里省略那三个字段同样可以（缺省即 null）', () => {
+    const r = parseVerdict({
+      schemaVersion: 1,
+      conclusion: 'pass',
+      reasonCode: 'meets_criteria',
+      confidence: 0.5,
+      findings: [{ severity: 'info', summary: '看过一眼', evidence: [{}] }],
+    })
+    assert.equal(r.ok, true, r.ok ? '' : formatVerdictIssues(r.issues))
+    if (r.ok) {
+      assert.deepEqual(r.verdict.findings[0]?.evidence[0], {
+        blobRef: null,
+        locator: null,
+        excerpt: null,
+      })
+    }
+  })
+
+  test('★ 动作可以省略 params（有的动作没有参数）', () => {
+    const r = parseVerdict({
+      schemaVersion: 1,
+      conclusion: 'fail',
+      reasonCode: 'missing_tests',
+      confidence: 0.5,
+      action: { type: 'notify.emit' },
+    })
+    assert.equal(r.ok, true, r.ok ? '' : formatVerdictIssues(r.issues))
+    if (r.ok) assert.deepEqual(r.verdict.action?.params, {})
+  })
+
+  test('★ 但承载判断的出口规则一点没松：fail 没有 action 仍然拒', () => {
+    const r = parseVerdict({
+      schemaVersion: 1,
+      conclusion: 'fail',
+      reasonCode: 'missing_tests',
+      confidence: 0.5,
+      action: null,
+    })
+    assert.equal(r.ok, false, 'INV-4：fail 必须可执行')
+  })
+
+  test('★ needs_human 没有 escalateReason 仍然拒（INV-5）', () => {
+    const r = parseVerdict({
+      schemaVersion: 1,
+      conclusion: 'needs_human',
+      reasonCode: 'insufficient_context',
+      confidence: 0.5,
+    })
+    assert.equal(r.ok, false, 'INV-5：升级必须带结构化原因')
+  })
+
+  test('★ 判别性字段仍然必填：少 conclusion / reasonCode / confidence 要拒', () => {
+    for (const missing of ['conclusion', 'reasonCode', 'confidence', 'schemaVersion']) {
+      const obj: Record<string, unknown> = {
+        schemaVersion: 1,
+        conclusion: 'pass',
+        reasonCode: 'meets_criteria',
+        confidence: 0.5,
+      }
+      delete obj[missing]
+      assert.equal(parseVerdict(obj).ok, false, `${missing} 必须必填`)
+    }
+  })
+
+  test('指令要把"可以省略"讲明白，并给一份最小的合法判决', () => {
+    const instruction = renderVerdictInstruction()
+    assert.match(instruction, /都可以省略/, '要明说这几个字段可省略')
+    assert.match(instruction, /省略与写 `null` 等价/)
+    assert.match(instruction, /"conclusion": "pass"/, '给一份最小的 pass 判决')
+  })
+})
