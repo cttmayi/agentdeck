@@ -439,6 +439,37 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v > 550,
     show: (v) => `${v}px`,
   },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.tplFieldHeightEmptyPx',
+    label: '★ 空的模版也有一个像样的高度下限（别只给 8 行）',
+    ok: (v) => typeof v === 'number' && v >= 300,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.tplFieldHeightExecPx',
+    label: '执行那份填进去之后也不低于下限',
+    ok: (v) => typeof v === 'number' && v >= 300,
+    show: (v, facts) => `${v}px（${facts['settings.execFilledLines']} 行）`,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.reviewFilledLines',
+    label: '审核那份填进去的是那几十行默认模版（否则下面那条高度断言会空过）',
+    ok: (v) => typeof v === 'number' && v >= 20,
+    show: (v) => `${v} 行`,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.tplFieldHeightReviewPx',
+    label: '★ 输入框跟着内容长高（使用者点名"填写框太小，不利用看内容"）',
+    ok: (v, facts) =>
+      typeof v === 'number' &&
+      v > 500 &&
+      v > (facts['settings.tplFieldHeightEmptyPx'] ?? 0),
+    show: (v, facts) => `${v}px（空框 ${facts['settings.tplFieldHeightEmptyPx']}px）`,
+  },
   { view: '新建表单 / 设置', key: 'settings.badgeBefore', label: '没设过时状态是「平台默认」', ok: (v) => v === '平台默认' },
   { view: '新建表单 / 设置', key: 'settings.fillButtonFound', label: '有「填入默认模版」', ok: (v) => v === true },
   {
@@ -790,7 +821,7 @@ try {
         continue
       }
       if (!c.ok(v, facts))
-        failures.push({ view: c.view, label: c.label, got: c.show ? c.show(v) : JSON.stringify(v) })
+        failures.push({ view: c.view, label: c.label, got: c.show ? c.show(v, facts) : JSON.stringify(v) })
     }
 
     let lastView = ''
@@ -802,7 +833,10 @@ try {
         log(c.view)
         lastView = c.view
       }
-      const shown = v === undefined ? dim('—') : dim(c.show ? c.show(v) : JSON.stringify(v))
+      // ⚠️ `show` 与 `ok` 一样收得到 `facts`：写"实测 736px / 栏宽 416px"这种
+      //    对照说明时要用另一个事实。只给值的话就得把两个数拼进同一个 key。
+      const shown =
+        v === undefined ? dim('—') : dim(c.show ? c.show(v, facts) : JSON.stringify(v))
       log(`  ${bad ? red('✗') : green('✓')} ${c.label} ${shown}`)
     }
 

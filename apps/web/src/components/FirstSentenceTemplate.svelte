@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { afterUpdate, onMount } from 'svelte'
   import { templateKit, loadTemplateKit, previewFirstSentence } from '../lib/stores.ts'
   import type { FirstSentenceKind } from '../lib/api.ts'
 
@@ -8,6 +9,12 @@
    * ══════════════════════════════════════════════════════════════════
    * 三个决定，都是为了让人**看得见自己写了什么**
    * ══════════════════════════════════════════════════════════════════
+   *
+   * **⓪ 输入框要够大，而且**跟着内容长**。**
+   *    这是使用者点名要的："第一句话的填写框太小了，不利用看内容"。默认模版
+   *    本身就有 30 行上下（审核那份还要长），一个 8 行的框等于逼人用滚动条读
+   *    自己写的字。现在：最小 20rem、随内容自动长、上限 70vh（再长就在框内滚，
+   *    不会把底部的按钮顶出视口）。
    *
    * **① 变量对照表从接口来，不在这里抄一份。**
    *    变量表、必需与否、说明文字都在 `packages/agent-core` 里（服务端那份
@@ -60,6 +67,36 @@
    */
   const varToken = (name: string): string => `{{${name}}}`
 
+  /**
+   * 输入框跟着内容长高（最小 20rem / 最大 70vh）。
+   *
+   * ⚠️ 两个细节：
+   *   - 先 `height = 'auto'` 再读 `scrollHeight`：不这么做的话，删掉几行之后
+   *     它只会**长**不会**缩**（滚动高度的下限是当前高度）；
+   *   - 上限按**视口**算（70vh）而不是写死像素：这个抽屉在笔记本上和小屏上
+   *     都要能用，而"框比视口还高"会让底部的按钮永远够不着；
+   *   - `afterUpdate` 里跑（而不是只在 input 上）：切页签会重建这个组件、
+   *     「填入默认模版」是父组件改的值、预览/变量清单的展开会改变可用宽度——
+   *     这三种情况都要重算。
+   */
+  const MIN_HEIGHT_PX = 320
+  const MAX_HEIGHT_RATIO = 0.7
+
+  let textareaEl: HTMLTextAreaElement | null = null
+
+  function autosize(): void {
+    const el = textareaEl
+    if (!el) return
+    const max = Math.round(window.innerHeight * MAX_HEIGHT_RATIO)
+    el.style.height = 'auto'
+    // `+2` 是上下边框：高度用 border-box 算，而 scrollHeight 不含边框
+    const next = Math.min(Math.max(el.scrollHeight + 2, MIN_HEIGHT_PX), max)
+    el.style.height = `${next}px`
+  }
+
+  onMount(autosize)
+  afterUpdate(autosize)
+
   async function runPreview(): Promise<void> {
     busy = true
     previewError = ''
@@ -93,9 +130,11 @@
     「完成后给出一份报告」那类护栏也一并没了，需要自己写进去。
   </p>
 
+  <!-- `rows` 只是没有脚本时的兜底；实际高度由 `autosize()` 按内容算 -->
   <textarea
     class="tpl-text"
-    rows="8"
+    rows="16"
+    bind:this={textareaEl}
     spellcheck="false"
     placeholder="留空 = 用平台默认模版。点下面的「填入默认模版」可以从默认那段改起。"
     value={value}
@@ -212,8 +251,16 @@
     line-height: 1.6;
   }
 
+  /**
+   * ⚠️ 不要给这个 textarea 写 `rows` 之外的高度限制：高度由 `autosize()` 按内容
+   *    设置。`resize: vertical` 也关掉——手动拖过之后，下一次输入就会被自动高度
+   *    覆盖回去，那种"拖了没用"比不能拖更让人困惑。
+   */
   .tpl-text {
     width: 100%;
+    min-height: 20rem;
+    box-sizing: border-box;
+    resize: none;
     font-family: var(--font-mono);
     font-size: var(--fs-sm);
     line-height: 1.6;
@@ -271,7 +318,8 @@
   .preview pre {
     margin: 0;
     padding: var(--sp-3);
-    max-height: 26rem;
+    /* 预览同样是"看内容"的地方：给足高度，再长就在里面滚 */
+    max-height: 38rem;
     overflow: auto;
     font-size: var(--fs-xs);
     line-height: 1.6;

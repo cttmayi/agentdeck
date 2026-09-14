@@ -484,6 +484,11 @@
           // 抽屉够宽：模版输入框应当明显宽于原来那个 416px 的左栏
           const ta = panel && panel.querySelector('.tpl-text')
           facts['settings.tplFieldWidthPx'] = ta ? Math.round(ta.getBoundingClientRect().width) : null
+          // ★ 输入框高度：使用者点名"太小了，不利用看内容"。空的模版也必须有
+          //   一个像样的下限；填入默认那段之后要**跟着内容长高**。
+          facts['settings.tplFieldHeightEmptyPx'] = ta
+            ? Math.round(ta.getBoundingClientRect().height)
+            : null
 
           const fillBtn = findIn(panel, '填入默认模版')
           facts['settings.fillButtonFound'] = !!fillBtn
@@ -494,6 +499,12 @@
             facts['settings.filledBadge'] = need('填完后的状态徽章', () =>
               text(panel.querySelector('.tpl-state .badge')),
             )
+            // 执行那份只有十几行，可能还够不到最小高度——真正能证明"跟着内容长"
+            // 的是下面审核那份（几十行）。两个都量，断言分别写。
+            facts['settings.tplFieldHeightExecPx'] = ta
+              ? Math.round(ta.getBoundingClientRect().height)
+              : null
+            facts['settings.execFilledLines'] = ta ? ta.value.split('\n').length : null
           }
 
           // 切到审核页签：**另一份是独立的**
@@ -508,10 +519,14 @@
             const fill2 = findIn(d().querySelector('.drawer'), '填入默认模版')
             if (fill2) {
               click(fill2)
-              await wait(150)
+              await wait(200)
               const ta2 = d().querySelector('.drawer .tpl-text')
               facts['settings.reviewFilledHasMaterial'] = ta2
                 ? ta2.value.includes('{{material}}')
+                : null
+              facts['settings.reviewFilledLines'] = ta2 ? ta2.value.split('\n').length : null
+              facts['settings.tplFieldHeightReviewPx'] = ta2
+                ? Math.round(ta2.getBoundingClientRect().height)
                 : null
             }
           }
