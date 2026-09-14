@@ -21,9 +21,23 @@
    * 其余字段（skill、runtime、工作目录）是"这个 agent 怎么干活"，
    * 各自独立，不参与身份判断。
    */
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 受控组件：**开关由父组件拿着**
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来这个组件自己 `{#if !open}<button>新建智能体</button>{:else}<form>`，
+   * 于是"按钮"和"表单"必然在同一个容器里——而那个容器是左栏的 `pane-head`
+   * （一个 416px 宽的头部行）。结果：736px 宽的表单横着盖住右栏，头部从
+   * 167px 涨到 1070px，agent 清单被顶出视口。
+   *
+   * 现在按钮归视图头部（位置不变、改名「新建」），表单归正文——
+   * 这个组件只负责画表单。
+   */
+  export let open = false
+  export let onclose: () => void = () => {}
   export let oncreated: () => void = () => {}
 
-  let open = false
   let name = ''
   let role: AgentRole = 'executor'
   let instructions = ''
@@ -84,8 +98,8 @@
       reviewerAgentId = ''
       workDir = ''
       role = 'executor'
-      open = false
       showToast('智能体已创建')
+      // 关不关由父组件决定（它是"正在新建"这个状态的持有者）
       oncreated()
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
@@ -95,9 +109,7 @@
   }
 </script>
 
-{#if !open}
-  <button type="button" onclick={() => (open = true)}>新建智能体</button>
-{:else}
+{#if open}
   <form onsubmit={submit} class="agent-form">
     <h3>新建智能体</h3>
 
@@ -225,19 +237,26 @@
       <button type="submit" disabled={busy || !name.trim()}>
         {busy ? '创建中…' : '创建'}
       </button>
-      <button type="button" class="secondary" onclick={() => (open = false)}>取消</button>
+      <button type="button" class="secondary" onclick={onclose}>取消</button>
     </div>
   </form>
 {/if}
 
 <style>
+  /**
+   * ⚠️ 原来这里是 `max-width: 46rem`（736px）。它在一个 416px 宽、而且是
+   *    **flex 行**的容器里不会收缩——表单于是按 736px 画出来，横着盖住右栏。
+   *    宽度交给容器（`width: 100%` + `min-width: 0`），这里不再写死。
+   */
   .agent-form {
     background: var(--surface);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     padding: var(--sp-4);
-    margin-bottom: var(--sp-5);
-    max-width: 46rem;
+    margin-bottom: var(--sp-3);
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .agent-form h3 { margin-bottom: var(--sp-4); }
@@ -279,7 +298,15 @@
 
   .role-card.active strong { color: var(--accent); }
 
-  .row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+  /**
+   * 窄栏里自动变一列：`auto-fit` + `minmax` 比媒体查询稳——它按**容器**宽度
+   * 决定，而不是按视口宽度。这个表单就住在 416px 的主从栏里，视口再宽它也窄。
+   */
+  .row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: var(--sp-3);
+  }
 
   .skill-picker {
     display: grid;

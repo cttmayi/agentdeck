@@ -146,23 +146,23 @@
           写法是 <code>{varToken('name')}</code>，插值发生在每次 run：同一个模版，
           模型拿到的是这一次的值。
         </p>
-        <table>
-          <thead>
-            <tr><th>变量</th><th>装什么</th></tr>
-          </thead>
-          <tbody>
-            {#each variables as v (v.name)}
-              <tr>
-                <td>
-                  <code>{varToken(v.name)}</code>
-                  {#if v.requiredFor.includes(kind)}<span class="req">必需</span>{/if}
-                  <span class="faint small">{v.block ? '整段' : '单值'}</span>
-                </td>
-                <td class="faint small">{v.label}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <!--
+          ⚠️ 这里原来是一张两列表格（变量 | 说明）。这一栏住在 416px 宽的主从
+             栏里，两列在那种宽度下会把说明挤成一条窄缝。改成一变量一段：
+             变量名一行、说明一行——宽度再窄也读得下去。
+        -->
+        <ul class="var-list">
+          {#each variables as v (v.name)}
+            <li>
+              <span class="var-line">
+                <code>{varToken(v.name)}</code>
+                {#if v.requiredFor.includes(kind)}<span class="req">必需</span>{/if}
+                <span class="faint small">{v.block ? '整段' : '单值'}</span>
+              </span>
+              <span class="var-label faint small">{v.label}</span>
+            </li>
+          {/each}
+        </ul>
       {/if}
     </div>
   {/if}
@@ -228,27 +228,28 @@
 
   .tpl-error { white-space: pre-line; margin-top: var(--sp-2); }
 
-  .var-table { margin-top: var(--sp-2); }
-  .var-table table { width: 100%; border-collapse: collapse; }
-  .var-table th {
-    text-align: left;
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    font-weight: 500;
-    padding: 2px 6px;
-    border-bottom: 1px solid var(--line);
+  .var-list {
+    list-style: none;
+    margin: var(--sp-2) 0 0;
+    padding: 0;
+    border-top: 1px solid var(--line);
   }
-  .var-table td {
-    padding: 3px 6px;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-  .var-table tr:last-child td { border-bottom: none; }
 
-  .var-table .req {
+  .var-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: var(--sp-2) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .var-line { display: flex; align-items: center; gap: var(--sp-2); }
+
+  .var-label { line-height: 1.5; }
+
+  .req {
     font-size: var(--fs-xs);
-    color: var(--warn, var(--accent));
-    margin: 0 4px;
+    color: var(--warn);
   }
 
   .preview {

@@ -283,7 +283,75 @@ const CHECKS = [
   // 这一栏最容易变成"接口在、界面没有入口"（这个仓库里的老毛病），所以量的是
   // **看得见的结果**：默认模版真的填进了框、变量表真的列了变量、预览真的渲染出
   // 了文字。三条里少一条，功能就等于没做。
-  { view: '第一句话模版', key: 'template.openButtonFound', label: '智能体页有「新建智能体」入口', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.openButtonFound', label: '智能体页有「新建」入口', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.openButtonLabel', label: '按钮文案就是「新建」', ok: (v) => v === '新建' },
+
+  // ── ★ 新建表单的**容纳关系**（一次真实的"整垮布局"换来的）──
+  //
+  // 这一组量的是"东西在不在它该在的容器里、有没有溢出"，而不是外观。
+  // 起因：表单曾渲染在左栏 `pane-head` 里，栏宽 416px 而表单 736px——
+  // 横着盖住右栏、头部从 167px 涨到 1070px、清单被顶出视口，
+  // 而当时已有的检查**一条都没红**（它们没人问容纳关系）。
+  {
+    view: '第一句话模版',
+    key: 'template.formInsideHead',
+    label: '★ 新建表单不在栏头里（曾经它在，于是整垮了主从布局）',
+    ok: (v) => v === false,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.formFitsPane',
+    label: '★ 表单宽度不超过左栏（不横着盖住右栏）',
+    ok: (v) => v === true,
+    show: (v) => (v === true ? '在栏宽之内' : '超宽了'),
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.formWidthPx',
+    label: '表单实际宽度（对照下面的栏宽看，超了就是会盖住右栏的那种坏法）',
+    ok: (v) => typeof v === 'number' && v > 100,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.paneWidthPx',
+    label: '左栏宽度（表单必须 ≤ 它）',
+    ok: (v) => typeof v === 'number' && v > 100,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.formOverflowX',
+    label: '表单内部没有横向溢出',
+    ok: (v) => v === 0,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.headGrowthPx',
+    label: '★ 打开表单后栏头高度不变（头部不该被表单撑大）',
+    ok: (v) => v === 0,
+    show: (v) => `涨了 ${v}px`,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.varListFitsPane',
+    label: '变量清单在栏宽之内（窄栏里不能是两列表格）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.previewFitsPane',
+    label: '预览块在栏宽之内（长行要换行，不是撑宽）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.previewOverflowX',
+    label: '预览块内部没有横向溢出',
+    ok: (v) => v === 0,
+    show: (v) => `${v}px`,
+  },
   { view: '第一句话模版', key: 'template.formOpened', label: '点开后出现新建表单', ok: (v) => v === true },
   { view: '第一句话模版', key: 'template.fieldPresent', label: '表单里有「第一句话模版」输入框', ok: (v) => v === true },
   { view: '第一句话模版', key: 'template.badgeDefault', label: '没写时状态是「平台默认」', ok: (v) => v === '平台默认' },
@@ -306,11 +374,11 @@ const CHECKS = [
   {
     view: '第一句话模版',
     key: 'template.varRowCount',
-    label: '变量表真的列出了变量（不是空表）',
+    label: '变量清单真的列出了变量（不是空表）',
     ok: (v) => typeof v === 'number' && v >= 5,
     show: (v) => `${v} 行`,
   },
-  { view: '第一句话模版', key: 'template.varHasPrompt', label: '变量表里有 {{prompt}}', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.varHasPrompt', label: '变量清单里有 {{prompt}}', ok: (v) => v === true },
   { view: '第一句话模版', key: 'template.varMarksRequired', label: '必需的变量上标了「必需」', ok: (v) => v === true },
   { view: '第一句话模版', key: 'template.previewButtonFound', label: '有「预览」按钮', ok: (v) => v === true },
   { view: '第一句话模版', key: 'template.previewRendered', label: '预览真的渲染出了文字', ok: (v) => v === true },
@@ -343,6 +411,25 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
+  { view: '第一句话模版', key: 'template.cancelButtonFound', label: '表单上有「取消」', ok: (v) => v === true },
+  {
+    view: '第一句话模版',
+    key: 'template.formGoneAfterCancel',
+    label: '★ 取消真的能关掉表单（受控组件的开关别丢）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.listBackAfterCancel',
+    label: '关掉之后列表还在（表单没有把列表吃掉）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.openButtonEnabledAgain',
+    label: '关掉之后「新建」可以再点',
+    ok: (v) => v === true,
+  },
   {
     view: '第一句话模版',
     key: 'template.editButtonFound',

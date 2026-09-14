@@ -42,6 +42,23 @@
   $: selected = $agents.find((a) => a.id === selectedId) ?? null
 
   /**
+   * 正在新建（D32 修）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 这个状态为什么要提到视图这一层
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 原来「新建智能体」那个按钮**自己**管着"开不开"，表单就渲染在它旁边——
+   * 而它在左栏的 `pane-head` 里。于是表单被塞进一个 416px 宽的头部行：
+   * 实测表单是 736px（横着盖住右栏）、头部从 167px 涨到 1070px、agent 清单
+   * 被顶到视口外。**"新建"这个动作把一个主从布局整垮了。**
+   *
+   * 现在按钮在头部（位置不变），表单在它下面的正文里（`pane-body`）。
+   * 两处联动 ⇒ 状态放在这里，两边都只是渲染。
+   */
+  let creating = false
+
+  /**
    * 环境预检的问题。
    *
    * ⚠️ 这里必须写全可选链：`environment` 是可选字段，而模板里的类型流
@@ -74,12 +91,39 @@
         </p>
       </div>
       <div class="pane-actions">
-        <NewAgentForm oncreated={() => void loadAgents()} />
+        <!--
+          ⚠️ 这里**只放按钮**：表单本身在下面的 `.pane-body` 里。
+             放进 `pane-actions`（一个 flex 行）会让表单按它的 max-width 撑开，
+             横向盖住右栏——见 `creating` 那段注释里的实测数字。
+        -->
+        <button
+          type="button"
+          disabled={creating}
+          onclick={() => {
+            creating = true
+            selectedId = null
+          }}
+        >
+          新建
+        </button>
         <button type="button" class="secondary small" onclick={refresh}>刷新</button>
       </div>
     </header>
 
     <div class="pane-body">
+      <!--
+        新建表单：出现在「新建」按钮**正下方**的正文流里（不是浮层，也不是
+        另一个页面）。它在正文里就是一块普通面板，宽度被栏宽约束，不会溢出。
+      -->
+      <NewAgentForm
+        open={creating}
+        onclose={() => (creating = false)}
+        oncreated={() => {
+          creating = false
+          void loadAgents()
+        }}
+      />
+
       {#if envIssues.length > 0}
         <!--
           环境预检的问题要显示出来。它最常见的形态是"CLI 自己的状态目录写不进去"，

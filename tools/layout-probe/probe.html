@@ -367,16 +367,54 @@
         await wait(400)
 
         const newAgentBtn = [...d().querySelectorAll('button')].find(
-          (b) => b.textContent.trim() === '新建智能体',
+          (b) => b.textContent.trim() === '新建',
         )
         facts['template.openButtonFound'] = !!newAgentBtn
+        facts['template.openButtonLabel'] = newAgentBtn ? newAgentBtn.textContent.trim() : null
+
+        // ══════════════════════════════════════════════════════════════
+        // ★ 这几条是为一次真实的"整垮布局"加的
+        // ══════════════════════════════════════════════════════════════
+        //
+        // 起因：新建表单原来渲染在左栏的 `pane-head` 里（按钮自己管着开不开，
+        // 表单就画在按钮旁边）。实测：栏宽 416px、表单 736px（横着盖住右栏）、
+        // 头部从 167px 涨到 1070px、agent 清单被顶出视口。
+        //
+        // 已有的那些检查**一条都没红**：它们量的是两栏排版、卡片内容、抽屉……
+        // 没有一条问"这块东西在不在它该在的容器里、有没有溢出"。
+        // 所以补的这一组量的是**容纳关系**，不是外观。
+        const paneEl = d().querySelector('.pane')
+        const headEl = d().querySelector('.pane-head')
+        const box = (el) => {
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { x: r.x, y: r.y, w: r.width, h: r.height }
+        }
+        const paneBox = box(paneEl)
+        const headBox = box(headEl)
+        facts['template.paneWidthPx'] = paneBox ? Math.round(paneBox.w) : null
+        facts['template.headHeightBefore'] = headBox ? Math.round(headBox.h) : null
+
         if (!newAgentBtn) {
-          errors.push('找不到「新建智能体」按钮')
+          errors.push('找不到「新建」按钮')
         } else {
           click(newAgentBtn)
           // ⚠️ `until` 返回的是布尔，不是元素——它只回答"条件成立了没"
           facts['template.formOpened'] = await until(() => !!d().querySelector('.agent-form'))
           const form = d().querySelector('.agent-form')
+          const formBox = box(form)
+          facts['template.formInsideHead'] = !!(headEl && form && headEl.contains(form))
+          facts['template.formWidthPx'] = formBox ? Math.round(formBox.w) : null
+          facts['template.headHeightAfter'] = headEl
+            ? Math.round(headEl.getBoundingClientRect().height)
+            : null
+          facts['template.headGrowthPx'] =
+            facts['template.headHeightAfter'] !== null && facts['template.headHeightBefore'] !== null
+              ? facts['template.headHeightAfter'] - facts['template.headHeightBefore']
+              : null
+          facts['template.formFitsPane'] =
+            !!(formBox && paneBox && formBox.w <= paneBox.w + 1 && formBox.x >= paneBox.x - 1)
+          facts['template.formOverflowX'] = form ? form.scrollWidth - form.clientWidth : null
           facts['template.fieldPresent'] = !!(form && form.querySelector('.tpl-text'))
           facts['template.badgeDefault'] = need('模版状态徽章', () => {
             const box = form.querySelector('.tpl')
@@ -409,8 +447,14 @@
           if (varBtn) {
             click(varBtn)
             await until(() => !!form.querySelector('.var-table table tbody tr'))
-            const rows = [...form.querySelectorAll('.var-table table tbody tr')]
+            const rows = [...form.querySelectorAll('.var-list li')]
             facts['template.varRowCount'] = rows.length
+            const varBox = box(form.querySelector('.var-list'))
+            facts['template.varListFitsPane'] = !!(
+              varBox &&
+              paneBox &&
+              varBox.w <= paneBox.w + 1
+            )
             facts['template.varHasPrompt'] = rows.some((r) =>
               (r.textContent ?? '').includes('{{prompt}}'),
             )
@@ -429,6 +473,10 @@
             await until(() => !!form.querySelector('.preview pre'))
             const pre = form.querySelector('.preview pre')
             const rendered = pre ? pre.textContent ?? '' : ''
+            const preBox = box(pre)
+            // 预览是整段第一句话（可能很长、有长行），必须**换行**而不是撑宽栏
+            facts['template.previewFitsPane'] = !!(preBox && paneBox && preBox.w <= paneBox.w + 1)
+            facts['template.previewOverflowX'] = pre ? pre.scrollWidth - pre.clientWidth : null
             facts['template.previewRendered'] = rendered.length > 0
             facts['template.previewHasHeader'] = rendered.includes('# 任务')
             facts['template.previewHasSampleTask'] = rendered.includes('冒泡排序')
@@ -446,6 +494,22 @@
             facts['template.afterClearBadge'] = need('清空后的状态徽章', () =>
               text(form.querySelector('.tpl-state .badge')),
             )
+          }
+
+          // ⑤ 取消要能关掉它（表单是受控的：开关在视图那一层）
+          const cancelBtn = find('取消')
+          facts['template.cancelButtonFound'] = !!cancelBtn
+          if (cancelBtn) {
+            click(cancelBtn)
+            await wait(300)
+            facts['template.formGoneAfterCancel'] = !d().querySelector('.agent-form')
+            facts['template.listBackAfterCancel'] = !!d().querySelector('.agent-item')
+            facts['template.openButtonEnabledAgain'] = need('取消后「新建」是否可再点', () => {
+              const b = [...d().querySelectorAll('.pane-actions button')].find(
+                (x) => x.textContent.trim() === '新建',
+              )
+              return b ? !b.disabled : null
+            })
           }
         }
 
