@@ -357,6 +357,129 @@
           facts['skills.drawerGoneAfterEsc'] = !d().querySelector('.drawer')
         }
 
+        // ══════════════ 第一句话模版（D32）══════════════
+        //
+        // 这一栏是"写进去的东西"，光有接口不算数：变量表要从服务端来、
+        // 「填入默认模版」要真的填进去、「预览」要真的渲染出文字。
+        // 三条都量"看得见的结果"，不量实现。
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await wait(400)
+
+        const newAgentBtn = [...d().querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === '新建智能体',
+        )
+        facts['template.openButtonFound'] = !!newAgentBtn
+        if (!newAgentBtn) {
+          errors.push('找不到「新建智能体」按钮')
+        } else {
+          click(newAgentBtn)
+          // ⚠️ `until` 返回的是布尔，不是元素——它只回答"条件成立了没"
+          facts['template.formOpened'] = await until(() => !!d().querySelector('.agent-form'))
+          const form = d().querySelector('.agent-form')
+          facts['template.fieldPresent'] = !!(form && form.querySelector('.tpl-text'))
+          facts['template.badgeDefault'] = need('模版状态徽章', () => {
+            const box = form.querySelector('.tpl')
+            return box ? text(box.querySelector('.tpl-state .badge')) : null
+          })
+
+          const find = (label) =>
+            [...(form?.querySelectorAll('button') ?? [])].find(
+              (b) => b.textContent.trim() === label,
+            )
+
+          // ① 填入默认模版：默认那段是**模版**，所以里面有变量
+          const fillBtn = find('填入默认模版')
+          facts['template.fillButtonFound'] = !!fillBtn
+          if (fillBtn) {
+            click(fillBtn)
+            await wait(150)
+            const ta = form.querySelector('.tpl-text')
+            facts['template.filledHasPrompt'] = ta ? ta.value.includes('{{prompt}}') : null
+            facts['template.filledBadge'] = need('填完之后的状态徽章', () =>
+              text(form.querySelector('.tpl-state .badge')),
+            )
+            // textarea 的 value 是**可见事实**：默认模版真的写进了框里
+            facts['template.filledLength'] = ta ? ta.value.length : 0
+          }
+
+          // ② 可用的变量：表从服务端来（不是前端抄的），必需项要标出来
+          const varBtn = find('可用的变量')
+          facts['template.varButtonFound'] = !!varBtn
+          if (varBtn) {
+            click(varBtn)
+            await until(() => !!form.querySelector('.var-table table tbody tr'))
+            const rows = [...form.querySelectorAll('.var-table table tbody tr')]
+            facts['template.varRowCount'] = rows.length
+            facts['template.varHasPrompt'] = rows.some((r) =>
+              (r.textContent ?? '').includes('{{prompt}}'),
+            )
+            facts['template.varMarksRequired'] = rows.some(
+              (r) =>
+                (r.textContent ?? '').includes('{{prompt}}') &&
+                (r.textContent ?? '').includes('必需'),
+            )
+          }
+
+          // ③ 预览：走服务端的真渲染器，出来的必须是"渲染结果"而不是模版原文
+          const pvBtn = find('预览')
+          facts['template.previewButtonFound'] = !!pvBtn
+          if (pvBtn) {
+            click(pvBtn)
+            await until(() => !!form.querySelector('.preview pre'))
+            const pre = form.querySelector('.preview pre')
+            const rendered = pre ? pre.textContent ?? '' : ''
+            facts['template.previewRendered'] = rendered.length > 0
+            facts['template.previewHasHeader'] = rendered.includes('# 任务')
+            facts['template.previewHasSampleTask'] = rendered.includes('冒泡排序')
+            facts['template.previewHasNoRawVar'] = !rendered.includes('{{')
+          }
+
+          // ④ 清空 = 回到平台默认
+          const clearBtn = find('清空（回到平台默认）')
+          facts['template.clearButtonFound'] = !!clearBtn
+          if (clearBtn) {
+            click(clearBtn)
+            await wait(150)
+            const ta = form.querySelector('.tpl-text')
+            facts['template.afterClearLength'] = ta ? ta.value.length : -1
+            facts['template.afterClearBadge'] = need('清空后的状态徽章', () =>
+              text(form.querySelector('.tpl-state .badge')),
+            )
+          }
+        }
+
+        // ══════════════ 详情页：模版那一行 ══════════════
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await wait(300)
+        click(cards()[0])
+        await until(() => d().querySelector('.detail'))
+        await wait(300)
+        facts['template.detailRowLabel'] = need('详情页的模版行', () =>
+          [...d().querySelectorAll('.field-row')]
+            .map((r) => text(r.querySelector('.row-label')))
+            .find((t) => t === '第一句话模版'),
+        )
+        facts['template.detailHasSource'] = !!d().querySelector('.detail details summary')
+
+        // 编辑态：新建能填，编辑也得能改（"只在新建里有入口"是这个仓库的老毛病）
+        // ⚠️ 变量名别与上面 agents 段里的重名（内联脚本是同一个作用域，
+        //    `const` 重复声明会让**整段脚本**语法错误——表现是探针永远 pending）
+        const detailEditBtn = [...d().querySelectorAll('.detail button')].find(
+          (b) => b.textContent.trim() === '编辑',
+        )
+        facts['template.editButtonFound'] = !!detailEditBtn
+        if (detailEditBtn) {
+          click(detailEditBtn)
+          facts['template.editFieldPresent'] = await until(
+            () => !!d().querySelector('.detail .tpl-text'),
+          )
+          facts['template.editLabelCount'] = [
+            ...d().querySelectorAll('.detail .row-label, .detail .tpl-label'),
+          ].filter((el) => text(el) === '第一句话模版').length
+        }
+
         // ══════════════ 新建任务：至少不崩 ══════════════
         f.contentWindow.location.hash = '#/new'
         await wait(600)

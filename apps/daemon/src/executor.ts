@@ -796,6 +796,9 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
               prompt: req.prompt,
+              // 审核者自己的模版（D32）。空 = 平台默认；写入口已经校验过，
+              // 这里拿到的要么是空、要么是一条合法模版。
+              template: agentConfig?.reviewTemplate ?? null,
             })
           : renderFirstSentence({
               kind: 'execute',
@@ -804,6 +807,8 @@ export class RunExecutor {
               prompt: req.prompt,
               skills: skillsBrief,
               instructions: agentConfig?.instructions ?? null,
+              // 执行者自己的模版（D32）。空 = 平台默认。
+              template: agentConfig?.executeTemplate ?? null,
             })
 
       // 副本：**我们自己的文件**，谁都不覆盖谁，也不删。

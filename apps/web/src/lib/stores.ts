@@ -3,11 +3,13 @@ import {
   api,
   type AgentRole,
   type Agent,
+  type FirstSentenceKind,
   type Identity,
   type InboxItem,
   type Issue,
   type RunSummary,
   type Skill,
+  type TemplateKit,
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
 
@@ -37,6 +39,16 @@ export const loading = writable<Record<string, boolean>>({})
 export const loadError = writable<Record<string, string>>({})
 
 export const syncStatus = writable<SyncStatus | null>(null)
+
+/**
+ * 第一句话模版的变量表与默认模版（D32）。
+ *
+ * 它**不是**使用者的数据，而是一份"服务端怎么渲染"的说明书，所以：
+ *   - 只读，不参与同步循环；
+ *   - 界面上照着它显示变量名与必需与否——**不在前端抄一份**。
+ *     抄一份的后果是"照界面写的却被服务端拒"，而两处的规则迟早会分叉。
+ */
+export const templateKit = writable<TemplateKit | null>(null)
 
 /** 未读通知数——顶栏徽标用它。 */
 export const unreadCount = derived(inbox, ($inbox) => $inbox.length)
@@ -85,6 +97,27 @@ export async function markInboxRead(id: string): Promise<void> {
   await loadInbox()
 }
 
+export const loadTemplateKit = (): Promise<void> =>
+  load('templateKit', () => api<TemplateKit>('/api/first-sentence/templates'), templateKit)
+
+/**
+ * 预览一段模版会渲染成什么。
+ *
+ * ★ 走**服务端**的渲染器：前端自己拼一段"看起来差不多"的文字，迟早与真实
+ *   投递的东西走偏——而"预览里好好的"正是这个功能最该防的错觉。
+ *   服务端同时会过一遍校验，所以这里抛出的错误与保存时是**同一句**。
+ */
+export async function previewFirstSentence(
+  kind: FirstSentenceKind,
+  template: string,
+): Promise<string> {
+  const { text } = await api<{ text: string }>('/api/first-sentence/preview', {
+    method: 'POST',
+    body: JSON.stringify({ kind, template }),
+  })
+  return text
+}
+
 /**
  * 新建一个 agent。
  *
@@ -100,6 +133,9 @@ export async function createAgent(input: {
   reviewerAgentId: string | null
   runtimeKey: string
   workDir: string
+  /** 第一句话的模版（D32）。空串 = 平台默认；校验在服务端。 */
+  executeTemplate?: string
+  reviewTemplate?: string
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
@@ -110,6 +146,8 @@ export async function createAgent(input: {
       skillIds: input.skillIds,
       reviewerAgentId: input.reviewerAgentId,
       runtimeKey: input.runtimeKey,
+      executeTemplate: input.executeTemplate ?? '',
+      reviewTemplate: input.reviewTemplate ?? '',
       // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
       ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
     }),

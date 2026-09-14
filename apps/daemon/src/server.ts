@@ -4,10 +4,16 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   checkVersionSupport,
+  DEFAULT_TEMPLATES,
   getRuntimeDescriptor,
   MATERIAL_MARKERS,
+  renderFirstSentence,
+  SAMPLE_FIRST_SENTENCE_INPUTS,
   shouldRefuseToRun,
+  TEMPLATE_VARIABLES,
+  validateTemplate,
   type AgentBackend,
+  type FirstSentenceKind,
   type SandboxMode,
 } from '@alpha-helper/agent-core'
 import {
@@ -458,6 +464,51 @@ function parseInstallSource(
   }
 
   return { ok: false, error: 'source.kind 必须是 path / url / payload 之一' }
+}
+
+/**
+ * 补上 D32 那两个模版字段的默认值。
+ *
+ * ★ 为什么要在**接口边界**补：store 是"存什么读什么"（不做 schema 迁移），
+ *   所以加字段之前建的 agent 读回来时那个键**根本不存在**。类型上写着
+ *   `string`，运行时是 `undefined`——这种"类型在骗人"的状态迟早会在某个
+ *   `??` 漏掉的地方变成界面上的空白或渲染时的怪结果。
+ *
+ *   在这里补成空串，语义正好：空 = 平台默认模版 = 与加这个功能之前完全一样。
+ */
+function withAgentTemplateDefaults(agent: Agent): Agent {
+  return {
+    ...agent,
+    executeTemplate: agent.executeTemplate ?? '',
+    reviewTemplate: agent.reviewTemplate ?? '',
+  }
+}
+
+/**
+ * 解析并校验一个「第一句话模版」字段（D32）。
+ *
+ * 返回 `value: undefined` 表示**这次没传**（PATCH 语义：别动它）。三种"清空"
+ * 都算回到平台默认：不传、传 null、传空串。
+ *
+ * ⚠️ 校验放在这里，而不是渲染的时候：一条坏模版进了库，要等那次 run 真跑起来
+ *    才以"模型乱答"的形式暴露，排查方向会指向模型，而不是那个拼错的变量名。
+ *    界面的「新建 / 编辑」两个入口都过这一关。
+ */
+function parseTemplateField(
+  key: 'executeTemplate' | 'reviewTemplate',
+  raw: unknown,
+): { ok: true; value: string | undefined } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: undefined }
+  if (raw === null) return { ok: true, value: '' }
+  if (typeof raw !== 'string') {
+    return { ok: false, error: `${key} 必须是字符串（空字符串 = 用平台默认模版）` }
+  }
+  const text = raw.trim()
+  if (text === '') return { ok: true, value: '' }
+  const kind: FirstSentenceKind = key === 'executeTemplate' ? 'execute' : 'review'
+  const check = validateTemplate(kind, text)
+  if (!check.ok) return { ok: false, error: check.error }
+  return { ok: true, value: text }
 }
 
 /**
@@ -1167,7 +1218,53 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     // ── agents / issues（M0 看板需要的最小 CRUD）──
     if (req.method === 'GET' && path === '/api/agents') {
-      sendJson(res, 200, { agents: await store.listAgents(workspaceId) })
+      const agents = await store.listAgents(workspaceId)
+      sendJson(res, 200, { agents: agents.map(withAgentTemplateDefaults) })
+      return
+    }
+
+    // ── 第一句话的模版（D32）──
+    //
+    // 界面上的那一栏要三样东西：两个默认模版（"填入默认模版"用）、变量对照表
+    // （写模版时照着填）、以及一个**真的走渲染器**的预览。
+    //
+    // ★ 预览不放在前端拼：那样迟早与真实投递的东西走偏，而"预览里好好的"
+    //   恰恰是模版功能最该防的那种错觉。这里用的是渲染器 + 同一份示例值
+    //   （`SAMPLE_FIRST_SENTENCE_INPUTS`，文档里逐字贴的也是它）。
+    if (req.method === 'GET' && path === '/api/first-sentence/templates') {
+      sendJson(res, 200, {
+        defaults: DEFAULT_TEMPLATES,
+        variables: TEMPLATE_VARIABLES,
+      })
+      return
+    }
+
+    if (req.method === 'POST' && path === '/api/first-sentence/preview') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const kindRaw = body['kind']
+      if (kindRaw !== 'execute' && kindRaw !== 'review') {
+        sendJson(res, 400, { error: 'kind 必须是 execute 或 review' })
+        return
+      }
+      const kind: FirstSentenceKind = kindRaw
+      const raw = body['template']
+      if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+        sendJson(res, 400, { error: 'template 必须是字符串（留空 = 用平台默认模版）' })
+        return
+      }
+      const text = typeof raw === 'string' ? raw.trim() : ''
+      // 与保存时同一道关：预览里能过，保存就能过（反之也一样）
+      if (text !== '') {
+        const check = validateTemplate(kind, text)
+        if (!check.ok) {
+          sendJson(res, 400, { error: check.error })
+          return
+        }
+      }
+      const sample = SAMPLE_FIRST_SENTENCE_INPUTS[kind]
+      sendJson(res, 200, {
+        text: renderFirstSentence({ ...sample, template: text === '' ? null : text } as never),
+      })
       return
     }
     // ── 新建 / 更新 agent ──
@@ -1253,6 +1350,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // 第一句话的模版（D32）：**在写入口校验**。
+      // 一条坏模版进了库，要等到那次 run 真的跑起来才以"模型乱答"的形式
+      // 暴露——排查方向会指向模型，而不是那个拼错的变量名。
+      const executeTemplate = parseTemplateField('executeTemplate', body['executeTemplate'])
+      if (!executeTemplate.ok) {
+        sendJson(res, 400, { error: executeTemplate.error })
+        return
+      }
+      const reviewTemplate = parseTemplateField('reviewTemplate', body['reviewTemplate'])
+      if (!reviewTemplate.ok) {
+        sendJson(res, 400, { error: reviewTemplate.error })
+        return
+      }
+
       const now = Date.now()
       const agent: Agent = {
         id: ulid() as Agent['id'],
@@ -1271,11 +1382,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         env: envCheck.value,
         role: roleCheck.role,
         reviewerAgentId: roleCheck.reviewerAgentId,
+        // 空 = 平台默认模版（D32）
+        executeTemplate: executeTemplate.value ?? '',
+        reviewTemplate: reviewTemplate.value ?? '',
         createdAt: now,
         updatedAt: now,
       }
       await store.insertAgent(agent)
-      sendJson(res, 201, agent)
+      sendJson(res, 201, withAgentTemplateDefaults(agent))
       return
     }
 
@@ -1294,7 +1408,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
         }
-        sendJson(res, 200, agent)
+        sendJson(res, 200, withAgentTemplateDefaults(agent))
         return
       }
 
@@ -1320,6 +1434,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           // FR-AGENT-06：自定义环境变量。它原来不在白名单里 —— 于是"支持为
           // agent 配置环境变量"只存在于协议与实体里，任何入口都改不动它。
           'env',
+          // D32：第一句话的模版（两条链路各一份）
+          'executeTemplate',
+          'reviewTemplate',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -1429,9 +1546,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           patch.env = envCheck.value
         }
 
+        // 第一句话的模版（D32）。与新建时同一道关——**PATCH 才是最容易绕过去的
+        // 那条路**：界面上的"编辑"走的就是它。
+        for (const key of ['executeTemplate', 'reviewTemplate'] as const) {
+          if (body[key] === undefined) continue
+          const parsed = parseTemplateField(key, body[key])
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error })
+            return
+          }
+          // 走到这里 value 一定不是 undefined（上面那行已经挡掉了"没传"）
+          patch[key] = parsed.value ?? ''
+        }
+
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
         await store.insertAgent(updated)
-        sendJson(res, 200, updated)
+        sendJson(res, 200, withAgentTemplateDefaults(updated))
         return
       }
     }
@@ -2372,6 +2502,9 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     env: {},
     role: 'reviewer',
     reviewerAgentId: null,
+    // 空 = 平台默认模版（D32）：改模版是**使用者的事**，不是首启脚本的事
+    executeTemplate: '',
+    reviewTemplate: '',
     createdAt: now,
     updatedAt: now,
   }
@@ -2393,6 +2526,8 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     role: 'executor',
     // ★ 指向刚播种的审核者：这样首启就是一条**通的闭环**
     reviewerAgentId: reviewer.id,
+    executeTemplate: '',
+    reviewTemplate: '',
     createdAt: now,
     updatedAt: now,
   }

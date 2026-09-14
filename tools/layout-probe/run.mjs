@@ -278,6 +278,91 @@ const CHECKS = [
   },
   { view: 'Skills', key: 'skills.drawerGoneAfterEsc', label: 'Esc 能关掉抽屉', ok: (v) => v === true },
 
+  // ── 第一句话模版（D32）──
+  //
+  // 这一栏最容易变成"接口在、界面没有入口"（这个仓库里的老毛病），所以量的是
+  // **看得见的结果**：默认模版真的填进了框、变量表真的列了变量、预览真的渲染出
+  // 了文字。三条里少一条，功能就等于没做。
+  { view: '第一句话模版', key: 'template.openButtonFound', label: '智能体页有「新建智能体」入口', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.formOpened', label: '点开后出现新建表单', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.fieldPresent', label: '表单里有「第一句话模版」输入框', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.badgeDefault', label: '没写时状态是「平台默认」', ok: (v) => v === '平台默认' },
+  { view: '第一句话模版', key: 'template.fillButtonFound', label: '有「填入默认模版」按钮', ok: (v) => v === true },
+  {
+    view: '第一句话模版',
+    key: 'template.filledHasPrompt',
+    label: '填入默认模版后，框里真的有变量 {{prompt}}（默认那段本身就是模版）',
+    ok: (v) => v === true,
+  },
+  { view: '第一句话模版', key: 'template.filledBadge', label: '填完之后状态变成「自定义」', ok: (v) => v === '自定义' },
+  {
+    view: '第一句话模版',
+    key: 'template.filledLength',
+    label: '填入的不是空字符串',
+    ok: (v) => typeof v === 'number' && v > 50,
+    show: (v) => `${v} 字符`,
+  },
+  { view: '第一句话模版', key: 'template.varButtonFound', label: '有「可用的变量」按钮', ok: (v) => v === true },
+  {
+    view: '第一句话模版',
+    key: 'template.varRowCount',
+    label: '变量表真的列出了变量（不是空表）',
+    ok: (v) => typeof v === 'number' && v >= 5,
+    show: (v) => `${v} 行`,
+  },
+  { view: '第一句话模版', key: 'template.varHasPrompt', label: '变量表里有 {{prompt}}', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.varMarksRequired', label: '必需的变量上标了「必需」', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.previewButtonFound', label: '有「预览」按钮', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.previewRendered', label: '预览真的渲染出了文字', ok: (v) => v === true },
+  {
+    view: '第一句话模版',
+    key: 'template.previewHasHeader',
+    label: '预览里有渲染出来的身份段（# 任务）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.previewHasSampleTask',
+    label: '预览用的是示例任务正文（明说了不是你的任务）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.previewHasNoRawVar',
+    label: '预览里没有没展开的变量（说明真的过了渲染器）',
+    ok: (v) => v === true,
+  },
+  { view: '第一句话模版', key: 'template.clearButtonFound', label: '有「清空（回到平台默认）」按钮', ok: (v) => v === true },
+  { view: '第一句话模版', key: 'template.afterClearLength', label: '清空之后框是空的', ok: (v) => v === 0 },
+  { view: '第一句话模版', key: 'template.afterClearBadge', label: '清空之后状态回到「平台默认」', ok: (v) => v === '平台默认' },
+  { view: '第一句话模版', key: 'template.detailRowLabel', label: '详情页里有「第一句话模版」这一行', ok: (v) => v === '第一句话模版' },
+  {
+    view: '第一句话模版',
+    key: 'template.detailHasSource',
+    label: '详情页能展开看模版原文（默认或自定义）',
+    ok: (v) => v === true,
+  },
+
+  {
+    view: '第一句话模版',
+    key: 'template.editButtonFound',
+    label: '详情页有「编辑」入口',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.editFieldPresent',
+    label: '编辑态里也能改模版（不是只在新建时能填）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '第一句话模版',
+    key: 'template.editLabelCount',
+    label: '模版那一行的标签只出现一次（不是父组件与组件各画一遍）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 次`,
+  },
+
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '新建任务页渲染出来了（没白屏）', ok: (v) => v === true },
 ]

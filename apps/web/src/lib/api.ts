@@ -134,6 +134,34 @@ export interface Agent {
   role: AgentRole
   /** 由谁来审**这个执行 agent** 的产出（仅 executor 有意义）。 */
   reviewerAgentId: string | null
+  /**
+   * 第一句话的模版（D32）：空串 = 平台默认。
+   *
+   * 两条链路各一份。它们在**服务端**校验（缺必需变量、写错变量名都会被拒），
+   * 所以这里只管把原文收发回去，不在前端重写一遍规则。
+   */
+  executeTemplate: string
+  reviewTemplate: string
+}
+
+/** 第一句话模版的两个角色（D32）。 */
+export type FirstSentenceKind = 'execute' | 'review'
+
+/** `GET /api/first-sentence/templates`：变量对照表 + 两个默认模版。 */
+export interface TemplateVariable {
+  name: string
+  /** 哪些 run 能用（执行模版里写 `material` 是填错了）。 */
+  kinds: FirstSentenceKind[]
+  /** 整段（自带标题）还是单个值。 */
+  block: boolean
+  /** 缺了会坏掉的那些——保存时就会拒。 */
+  requiredFor: FirstSentenceKind[]
+  label: string
+}
+
+export interface TemplateKit {
+  defaults: Record<FirstSentenceKind, string>
+  variables: TemplateVariable[]
 }
 
 export interface Skill {

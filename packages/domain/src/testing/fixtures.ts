@@ -42,6 +42,9 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
     createdAt: T0,
     role: 'executor',
     reviewerAgentId: null,
+    // 空 = 平台默认模版（D32）。要测模版就 over 里给。
+    executeTemplate: '',
+    reviewTemplate: '',
     updatedAt: T0,
     ...over,
     id: agentId(over.id),

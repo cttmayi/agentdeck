@@ -1,7 +1,8 @@
 <script lang="ts">
   import { agents, createAgent, identity, skills } from '../lib/stores.ts'
-  import type { AgentRole } from '../lib/api.ts'
+  import type { AgentRole, FirstSentenceKind } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
+  import FirstSentenceTemplate from './FirstSentenceTemplate.svelte'
 
   /**
    * 新建智能体（D28）。
@@ -26,6 +27,14 @@
   let name = ''
   let role: AgentRole = 'executor'
   let instructions = ''
+  /**
+   * 第一句话的模版（D32）——**两份都留着**。
+   *
+   * 角色是互斥的（一个 agent 要么执行要么审核），但表单里选错了再改回来
+   * 是很常见的事；只留当前角色那一份的话，切一下角色刚写的模版就没了。
+   */
+  let executeTemplate = ''
+  let reviewTemplate = ''
   let selectedSkills: string[] = []
   let reviewerAgentId = ''
   /**
@@ -43,6 +52,14 @@
   // 只有"审核"角色才谈得上"由谁审我"
   $: reviewers = $agents.filter((a) => a.role === 'reviewer')
 
+  // 表单里选的角色 → 这个 agent 会用到的那份模版（两条链路各一份）
+  $: templateKind = (role === 'reviewer' ? 'review' : 'execute') as FirstSentenceKind
+  $: currentTemplate = templateKind === 'review' ? reviewTemplate : executeTemplate
+  function setTemplate(next: string): void {
+    if (templateKind === 'review') reviewTemplate = next
+    else executeTemplate = next
+  }
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
     error = ''
@@ -56,9 +73,13 @@
         reviewerAgentId: role === 'executor' && reviewerAgentId ? reviewerAgentId : null,
         runtimeKey,
         workDir,
+        executeTemplate,
+        reviewTemplate,
       })
       name = ''
       instructions = ''
+      executeTemplate = ''
+      reviewTemplate = ''
       selectedSkills = []
       reviewerAgentId = ''
       workDir = ''
@@ -143,7 +164,13 @@
           ? '它按什么态度审：严格还是宽松、拿不准时怎么办'
           : '它是谁、怎么干活。这段会进它的上下文。'}
       ></textarea>
+      <span class="hint">
+        这一段会填进第一句话的「你的角色」。留空也行——那就只有任务本身。
+      </span>
     </label>
+
+    <!-- 第一句话模版（D32）：两条链路各一份 -->
+    <FirstSentenceTemplate kind={templateKind} value={currentTemplate} onchange={setTemplate} />
 
     <label>
       挂载的 skill

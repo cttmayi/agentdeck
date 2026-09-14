@@ -41,12 +41,17 @@ pnpm run probe:layout -- --keep
 3. **只写仓库内**：数据、工作目录、Chrome profile、抓回来的 DOM 全在
    `.cache/layout-probe/` 下（跑完留 `report.json` 与 `dump.html` 供排查）。
 
-## 两个坑
+## 三个坑
 
 - headless Chrome 打完 `--dump-dom` **不会退出**，所以这里是"后台跑 → 轮询输出文件 →
   再杀"，不是"等它结束"。超时可调：`PROBE_TIMEOUT_MS=180000 pnpm run probe:layout`；
 - 杀 Chrome 只按**本次专用的 user-data-dir** 匹配。早先用 `pkill -f "Google Chrome"`
-  把使用者本人的浏览器一起杀掉过，是个事故——不要写宽匹配。
+  把使用者本人的浏览器一起杀掉过，是个事故——不要写宽匹配；
+- **探针里的 `const` 不能重名**。整个内联脚本是一个作用域，重复声明会让**整段脚本**
+  语法错误——而症状看起来完完全全是"Chrome 超时"：`dump.html` 里 `#out` 还是
+  `pending`，一条 error 都没有（`main()` 里的 catch 根本没机会跑，因为脚本没被解析）。
+  加检查时用 `node --check` 过一遍提取出来的脚本，比读 dump 快得多：
+  `python3 -c "import re;s=open('tools/layout-probe/probe.html').read();open('/tmp/p.js','w').write(re.search(r'<script>(.*?)</script>',s,re.S).group(1))" && node --check /tmp/p.js`
 
 ## 加一条检查
 
