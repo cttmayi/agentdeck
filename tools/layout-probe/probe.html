@@ -357,13 +357,12 @@
           facts['skills.drawerGoneAfterEsc'] = !d().querySelector('.drawer')
         }
 
-        // ══════════════ 新建表单 + 第一句话设置（D32）══════════════
+        // ══════════════ 新建表单 / 设置：右侧抽屉（D32）══════════════
         //
-        // 两条都是"写进去的东西"，光有接口不算数。这里量的是**看得见的结果**
-        // 与**容纳关系**（这块东西在不在它该在的容器里、有没有溢出）——
-        // 后者是为一次真实的"整垮布局"加的：表单曾渲染在左栏 `pane-head` 里，
-        // 栏宽 416px 而表单 736px，横着盖住右栏、栏头涨到 1070px。
-        // 当时已有的检查**一条都没红**：没人问容纳关系。
+        // 这两个面板在左栏里待过两版都不行（一版溢出去盖住右栏，一版不溢出但
+        // 太窄），现在是**右侧抽屉**。这里量的是"它们在不在该在的地方"：
+        // 有遮罩、够宽、不在主从两栏里、Esc 能关、栏头不会被撑大。
+        // 上一版正是**量外观的检查全绿而布局已经垮了**，所以这一组量容纳关系。
         f.contentWindow.location.hash = '#/agents'
         await until(() => d().querySelectorAll('.agent-item').length > 0)
         await wait(400)
@@ -379,141 +378,149 @@
         const headBox = box(headEl)
         facts['template.paneWidthPx'] = paneBox ? Math.round(paneBox.w) : null
         facts['template.headHeightBefore'] = headBox ? Math.round(headBox.h) : null
+        facts['template.viewportWidth'] = f.contentWindow.innerWidth
 
         const paneBtn = (label) =>
           [...d().querySelectorAll('.pane-actions button')].find(
             (b) => b.textContent.trim() === label,
           )
+        const findIn = (root, label) =>
+          [...(root?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === label)
 
         const newAgentBtn = paneBtn('新建')
+        const settingsBtn = paneBtn('设置')
         facts['template.openButtonFound'] = !!newAgentBtn
         facts['template.openButtonLabel'] = newAgentBtn ? newAgentBtn.textContent.trim() : null
-        facts['template.settingsButtonFound'] = !!paneBtn('第一句话设置')
-        facts['template.settingsButtonIsSecondary'] = (() => {
-          const b = paneBtn('第一句话设置')
-          return b ? b.className.includes('secondary') : null
-        })()
+        facts['template.settingsButtonFound'] = !!settingsBtn
+        facts['template.settingsButtonLabel'] = settingsBtn ? settingsBtn.textContent.trim() : null
+        facts['template.settingsButtonIsSecondary'] = settingsBtn
+          ? settingsBtn.className.includes('secondary')
+          : null
+        facts['template.oldSettingsLabelGone'] = ![...d().querySelectorAll('button')].some(
+          (b) => b.textContent.trim() === '第一句话设置',
+        )
+
+        const headNow = () => Math.round((headEl?.getBoundingClientRect().height ?? 0))
 
         if (!newAgentBtn) {
           errors.push('找不到「新建」按钮')
         } else {
           click(newAgentBtn)
-          facts['template.formOpened'] = await until(() => !!d().querySelector('.agent-form'))
-          const form = d().querySelector('.agent-form')
-          const formBox = box(form)
-          facts['template.formInsideHead'] = !!(headEl && form && headEl.contains(form))
-          facts['template.formWidthPx'] = formBox ? Math.round(formBox.w) : null
-          facts['template.headHeightAfter'] = headEl
-            ? Math.round(headEl.getBoundingClientRect().height)
-            : null
-          facts['template.headGrowthPx'] =
-            facts['template.headHeightAfter'] !== null && facts['template.headBefore2'] !== undefined
-              ? facts['template.headHeightAfter'] - facts['template.headHeightBefore']
-              : facts['template.headHeightAfter'] !== null && facts['template.headHeightBefore'] !== null
-                ? facts['template.headHeightAfter'] - facts['template.headHeightBefore']
-                : null
-          facts['template.formFitsPane'] = !!(
-            formBox &&
-            paneBox &&
-            formBox.w <= paneBox.w + 1 &&
-            formBox.x >= paneBox.x - 1
+          facts['template.formOpened'] = await until(() => !!d().querySelector('.drawer'))
+          const drawer = d().querySelector('.drawer')
+          const drawerBox = box(drawer)
+          facts['template.formDrawerTitle'] = need('抽屉标题', () =>
+            text(drawer.querySelector('.drawer-head h2')),
           )
-          facts['template.formOverflowX'] = form ? form.scrollWidth - form.clientWidth : null
-          // ★ 模版已经不是每个 agent 一份了：新建表单里**不该**再有那一栏
-          facts['template.formHasNoTemplateField'] = !(form && form.querySelector('.tpl-text'))
+          facts['template.formHasBackdrop'] = !!d().querySelector('.drawer-backdrop')
+          facts['template.formWidthPx'] = drawerBox ? Math.round(drawerBox.w) : null
+          // ★ 抽屉必须在**右边**（贴着视口右缘），而且是浮层
+          facts['template.formAtRight'] = !!(
+            drawerBox && Math.abs(drawerBox.x + drawerBox.w - f.contentWindow.innerWidth) <= 1
+          )
+          facts['template.formInsidePane'] = !!(paneEl && drawer && paneEl.contains(drawer))
+          facts['template.formInsideHead'] = !!(headEl && drawer && headEl.contains(drawer))
+          facts['template.headGrowthPx'] = headNow() - (facts['template.headHeightBefore'] ?? 0)
+          facts['template.formOverflowX'] = drawer ? drawer.scrollWidth - drawer.clientWidth : null
+          facts['template.formHasNoTemplateField'] = !(
+            drawer && drawer.querySelector('.agent-form .tpl-text')
+          )
+          facts['template.footVisible'] = (() => {
+            const foot = drawer && drawer.querySelector('.drawer-foot button')
+            if (!foot) return false
+            const r = foot.getBoundingClientRect()
+            return r.top >= 0 && r.bottom <= f.contentWindow.innerHeight + 1
+          })()
+          facts['template.footPrimaryLabel'] = need('底部主操作', () =>
+            text(drawer.querySelector('.drawer-foot button')),
+          )
 
-          const cancelBtn = [...(form?.querySelectorAll('button') ?? [])].find(
-            (b) => b.textContent.trim() === '取消',
-          )
-          facts['template.cancelButtonFound'] = !!cancelBtn
-          if (cancelBtn) {
-            click(cancelBtn)
-            await wait(300)
-            facts['template.formGoneAfterCancel'] = !d().querySelector('.agent-form')
-            facts['template.listBackAfterCancel'] = !!d().querySelector('.agent-item')
-            facts['template.openButtonEnabledAgain'] = (() => {
-              const b = paneBtn('新建')
-              return b ? !b.disabled : null
-            })()
-          }
+          // Esc 关掉（Esc 在 Drawer 组件里统一处理）
+          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          facts['template.formGoneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
+          facts['template.listBackAfterEsc'] = !!d().querySelector('.agent-item')
         }
 
-        // ══════════════ 第一句话设置（全局配置）══════════════
-        const settingsBtn = paneBtn('第一句话设置')
-        if (!settingsBtn) {
-          errors.push('找不到「第一句话设置」按钮')
+        // ══════════════ 设置抽屉 ══════════════
+        const settingsBtn2 = paneBtn('设置')
+        if (!settingsBtn2) {
+          errors.push('找不到「设置」按钮')
         } else {
-          click(settingsBtn)
-          facts['settings.panelOpened'] = await until(() => !!d().querySelector('.tpl-panel'))
-          const panel = d().querySelector('.tpl-panel')
+          click(settingsBtn2)
+          facts['settings.panelOpened'] = await until(() => !!d().querySelector('.drawer'))
+          const panel = d().querySelector('.drawer')
           const panelBox = box(panel)
-          facts['settings.panelInsideHead'] = !!(headEl && panel && headEl.contains(panel))
-          facts['settings.panelFitsPane'] = !!(
-            panelBox &&
-            paneBox &&
-            panelBox.w <= paneBox.w + 1 &&
-            panelBox.x >= paneBox.x - 1
+          facts['settings.drawerTitle'] = need('设置抽屉标题', () =>
+            text(panel.querySelector('.drawer-head h2')),
           )
+          facts['settings.hasBackdrop'] = !!d().querySelector('.drawer-backdrop')
+          facts['settings.isWide'] = !!(panel && panel.className.includes('wide'))
+          facts['settings.panelWidthPx'] = panelBox ? Math.round(panelBox.w) : null
+          facts['settings.panelAtRight'] = !!(
+            panelBox && Math.abs(panelBox.x + panelBox.w - f.contentWindow.innerWidth) <= 1
+          )
+          facts['settings.panelInsidePane'] = !!(paneEl && panel && paneEl.contains(panel))
+          facts['settings.headGrowthPx'] = headNow() - (facts['template.headHeightBefore'] ?? 0)
           facts['settings.panelOverflowX'] = panel ? panel.scrollWidth - panel.clientWidth : null
-          facts['settings.headGrowthPx'] = headEl
-            ? Math.round(headEl.getBoundingClientRect().height) - (facts['template.headHeightBefore'] ?? 0)
-            : null
+          // 它是"装设置的容器"：底部有一个共用的保存，正文里是分段的
+          facts['settings.sectionCount'] = panel.querySelectorAll('.drawer-section').length
+          facts['settings.sectionTitles'] = [...panel.querySelectorAll('.drawer-section h3')].map(
+            (h) => text(h),
+          )
+          facts['settings.footSaveLabel'] = need('设置抽屉底部主操作', () =>
+            text(panel.querySelector('.drawer-foot button')),
+          )
 
           const tabs = [...(panel?.querySelectorAll('.tabs .tab') ?? [])]
           facts['settings.tabCount'] = tabs.length
           facts['settings.tabLabels'] = tabs.map((t) => text(t).replace('●', '').trim())
-          facts['settings.activeTab'] = tabs.length > 0 ? text(tabs.find((t) => t.className.includes('active'))) .replace('●', '').trim() : null
+          facts['settings.activeTab'] = need('当前页签', () =>
+            text(tabs.find((t) => t.className.includes('active'))).replace('●', '').trim(),
+          )
           facts['settings.badgeBefore'] = need('模版状态徽章', () =>
             text(panel.querySelector('.tpl-state .badge')),
           )
           facts['settings.tplFieldPresent'] = !!(panel && panel.querySelector('.tpl-text'))
+          // 抽屉够宽：模版输入框应当明显宽于原来那个 416px 的左栏
+          const ta = panel && panel.querySelector('.tpl-text')
+          facts['settings.tplFieldWidthPx'] = ta ? Math.round(ta.getBoundingClientRect().width) : null
 
-          const findIn = (root, label) =>
-            [...(root?.querySelectorAll('button') ?? [])].find(
-              (b) => b.textContent.trim() === label,
-            )
-
-          // ① 填入默认模版 → 框里是**模版**（带变量），状态变「自定义」
           const fillBtn = findIn(panel, '填入默认模版')
           facts['settings.fillButtonFound'] = !!fillBtn
           if (fillBtn) {
             click(fillBtn)
             await wait(150)
-            const ta = panel.querySelector('.tpl-text')
             facts['settings.filledHasPrompt'] = ta ? ta.value.includes('{{prompt}}') : null
             facts['settings.filledBadge'] = need('填完后的状态徽章', () =>
               text(panel.querySelector('.tpl-state .badge')),
             )
           }
 
-          // ② 切到审核页签：**另一份是独立的**（不该跟着变成自定义）
+          // 切到审核页签：**另一份是独立的**
           const reviewTab = tabs.find((t) => text(t).includes('审核'))
           facts['settings.reviewTabFound'] = !!reviewTab
           if (reviewTab) {
             click(reviewTab)
             await wait(250)
             facts['settings.reviewBadgeWhileExecuteCustom'] = need('审核页签的徽章', () =>
-              text(d().querySelector('.tpl-panel .tpl-state .badge')),
+              text(d().querySelector('.drawer .tpl-state .badge')),
             )
+            const fill2 = findIn(d().querySelector('.drawer'), '填入默认模版')
+            if (fill2) {
+              click(fill2)
+              await wait(150)
+              const ta2 = d().querySelector('.drawer .tpl-text')
+              facts['settings.reviewFilledHasMaterial'] = ta2
+                ? ta2.value.includes('{{material}}')
+                : null
+            }
           }
 
-          // ③ 审核那份也能填默认（证明两份各自独立、都可编辑）
-          const fillBtn2 = findIn(d().querySelector('.tpl-panel'), '填入默认模版')
-          if (fillBtn2) {
-            click(fillBtn2)
-            await wait(150)
-            facts['settings.reviewFilledHasMaterial'] = (() => {
-              const ta = d().querySelector('.tpl-panel .tpl-text')
-              return ta ? ta.value.includes('{{material}}') : null
-            })()
-          }
-
-          // ④ 变量清单 + 预览（都在栏宽之内）
-          const varBtn = findIn(d().querySelector('.tpl-panel'), '可用的变量')
+          const varBtn = findIn(d().querySelector('.drawer'), '可用的变量')
           if (varBtn) {
             click(varBtn)
-            await until(() => !!d().querySelector('.tpl-panel .var-list li'))
-            const rows = [...d().querySelectorAll('.tpl-panel .var-list li')]
+            await until(() => !!d().querySelector('.drawer .var-list li'))
+            const rows = [...d().querySelectorAll('.drawer .var-list li')]
             facts['settings.varRowCount'] = rows.length
             facts['settings.varHasPrompt'] = rows.some((r) =>
               (r.textContent ?? '').includes('{{prompt}}'),
@@ -523,49 +530,50 @@
                 (r.textContent ?? '').includes('{{prompt}}') &&
                 (r.textContent ?? '').includes('必需'),
             )
-            const varBox = box(d().querySelector('.tpl-panel .var-list'))
-            facts['settings.varListFitsPane'] = !!(varBox && paneBox && varBox.w <= paneBox.w + 1)
           }
 
-          const pvBtn = findIn(d().querySelector('.tpl-panel'), '预览')
+          const pvBtn = findIn(d().querySelector('.drawer'), '预览')
           if (pvBtn) {
             click(pvBtn)
-            await until(() => !!d().querySelector('.tpl-panel .preview pre'))
-            const pre = d().querySelector('.tpl-panel .preview pre')
+            await until(() => !!d().querySelector('.drawer .preview pre'))
+            const pre = d().querySelector('.drawer .preview pre')
             const rendered = pre ? pre.textContent ?? '' : ''
             facts['settings.previewHasHeader'] = rendered.includes('# 审核任务')
             facts['settings.previewHasSampleMaterial'] = rendered.includes('审核执行产出')
             facts['settings.previewHasNoRawVar'] = !rendered.includes('{{')
-            const preBox = box(pre)
-            facts['settings.previewFitsPane'] = !!(preBox && paneBox && preBox.w <= paneBox.w + 1)
             facts['settings.previewOverflowX'] = pre ? pre.scrollWidth - pre.clientWidth : null
           }
 
-          // ⑤ 保存 → 真的落库（直接问接口），而且重开时看得到
-          const saveBtn = findIn(d().querySelector('.tpl-panel'), '保存')
+          const saveBtn = findIn(d().querySelector('.drawer'), '保存')
           facts['settings.saveButtonFound'] = !!saveBtn
           if (saveBtn) {
             click(saveBtn)
-            await wait(600)
-            facts['settings.panelClosedAfterSave'] = !d().querySelector('.tpl-panel')
+            // ⚠️ 等"真的关了"再断言，不要用固定 sleep：`--virtual-time-budget`
+            //    会把 setTimeout 快进，而网络请求是真的——那样会**看早**，
+            //    报出来的是"保存后抽屉没关"（上一版就踩了这个）。
+            facts['settings.panelClosedAfterSave'] = await until(
+              () => !d().querySelector('.drawer'),
+              60,
+            )
             const api = await f.contentWindow
               .fetch('/api/first-sentence/templates')
               .then((r) => r.json())
               .catch(() => null)
             facts['settings.savedExecute'] = api ? api.current.executeTemplate.length > 0 : null
             facts['settings.savedReview'] = api ? api.current.reviewTemplate.length > 0 : null
-            // 重开：显示的就是刚存下来的那份
-            const again = paneBtn('第一句话设置')
+            const again = paneBtn('设置')
             if (again) {
               click(again)
-              await until(() => !!d().querySelector('.tpl-panel'))
-              await wait(300)
+              await until(() => !!d().querySelector('.drawer'))
+              await until(() => !!d().querySelector('.drawer .tpl-state .badge'))
               facts['settings.reopenedBadge'] = need('重开后的徽章', () =>
-                text(d().querySelector('.tpl-panel .tpl-state .badge')),
+                text(d().querySelector('.drawer .tpl-state .badge')),
               )
-              const closeBtn = findIn(d().querySelector('.tpl-panel'), '取消')
-              if (closeBtn) click(closeBtn)
-              await wait(200)
+              // Esc 关（抽屉组件里的统一处理）
+              f.contentWindow.dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+              )
+              facts['settings.goneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
             }
           }
         }

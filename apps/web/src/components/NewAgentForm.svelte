@@ -2,6 +2,7 @@
   import { agents, createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
+  import Drawer from './Drawer.svelte'
 
   /**
    * 新建智能体（D28）。
@@ -22,16 +23,19 @@
    */
   /**
    * ══════════════════════════════════════════════════════════════════
-   * 受控组件：**开关由父组件拿着**
+   * 受控组件 + **右侧抽屉**：开关由父组件拿着，内容画在抽屉里
    * ══════════════════════════════════════════════════════════════════
    *
-   * 原来这个组件自己 `{#if !open}<button>新建智能体</button>{:else}<form>`，
-   * 于是"按钮"和"表单"必然在同一个容器里——而那个容器是左栏的 `pane-head`
-   * （一个 416px 宽的头部行）。结果：736px 宽的表单横着盖住右栏，头部从
-   * 167px 涨到 1070px，agent 清单被顶出视口。
+   * 这个表单在左栏里待过两版，都不行：
    *
-   * 现在按钮归视图头部（位置不变、改名「新建」），表单归正文——
-   * 这个组件只负责画表单。
+   *   1. 挂在按钮旁边（组件自己管开关）⇒ 它俩必然在同一个容器里，而那个容器
+   *      是 416px 宽的头部行；表单按 `max-width: 46rem` 画成 736px，横着盖住
+   *      右栏、头部涨到 1070px、清单被顶出视口；
+   *   2. 放进左栏正文 ⇒ 不溢出了，但**太窄**：技能多选、runtime、工作目录挤在
+   *      358px 里，读起来憋。
+   *
+   * 现在它是右侧抽屉（46rem = 736px，与「安装 skill」同宽）：浮在主从布局
+   * 上面、不动清单，关掉就回到原地。字段宽度交给抽屉，不写死。
    */
   export let open = false
   export let onclose: () => void = () => {}
@@ -90,8 +94,14 @@
 </script>
 
 {#if open}
-  <form onsubmit={submit} class="agent-form">
-    <h3>新建智能体</h3>
+  <Drawer
+    {open}
+    wide
+    title="新建智能体"
+    subtitle="建好之后它就会按「设置」里那份第一句话模版接活；换 agent 只换「你的角色」那一段。"
+    {onclose}
+  >
+  <form onsubmit={submit} class="agent-form" id="new-agent-form">
 
     <label>
       名称
@@ -206,37 +216,32 @@
       </label>
     </div>
 
-    {#if error}
-      <div class="notice bad" style="margin-bottom:var(--sp-3)">{error}</div>
-    {/if}
+  </form>
 
-    <div style="display:flex;gap:var(--sp-2)">
-      <button type="submit" disabled={busy || !name.trim()}>
+    <!-- 主操作常驻底部：表单很长，正文一长就不该让人先滚到底才能按 -->
+    <svelte:fragment slot="foot">
+      <button type="submit" form="new-agent-form" disabled={busy || !name.trim()}>
         {busy ? '创建中…' : '创建'}
       </button>
-      <button type="button" class="secondary" onclick={onclose}>取消</button>
-    </div>
-  </form>
+      <button type="button" class="secondary" onclick={onclose} disabled={busy}>取消</button>
+      {#if error}
+        <span class="bad small">{error}</span>
+      {/if}
+    </svelte:fragment>
+  </Drawer>
 {/if}
 
 <style>
   /**
-   * ⚠️ 原来这里是 `max-width: 46rem`（736px）。它在一个 416px 宽、而且是
-   *    **flex 行**的容器里不会收缩——表单于是按 736px 画出来，横着盖住右栏。
-   *    宽度交给容器（`width: 100%` + `min-width: 0`），这里不再写死。
+   * ⚠️ 这里曾经有一个 `max-width: 46rem`：它在 416px 宽的 flex 行里不会收缩，
+   *    于是把表单画成 736px、横着盖住右栏。现在**宽度由抽屉决定**，
+   *    这里只管排版（外面有 `.drawer-body` 的 padding）。
    */
   .agent-form {
-    background: var(--surface);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius);
-    padding: var(--sp-4);
-    margin-bottom: var(--sp-3);
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
   }
-
-  .agent-form h3 { margin-bottom: var(--sp-4); }
 
   .field { margin-bottom: var(--sp-3); }
 
@@ -280,8 +285,9 @@
   .role-card.active strong { color: var(--accent); }
 
   /**
-   * 窄栏里自动变一列：`auto-fit` + `minmax` 比媒体查询稳——它按**容器**宽度
-   * 决定，而不是按视口宽度。这个表单就住在 416px 的主从栏里，视口再宽它也窄。
+   * 两列字段（runtime / 工作目录）按**容器**宽度决定列数：宽了并排、窄了一列。
+   * 用 `auto-fit` + `minmax` 而不是媒体查询——这个表单待在抽屉里，抽屉宽度
+   * 与视口宽度不是一回事。
    */
   .row {
     display: grid;
