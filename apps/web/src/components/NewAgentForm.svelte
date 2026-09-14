@@ -270,9 +270,13 @@
     margin-bottom: var(--sp-1);
   }
 
+  /**
+   * 两张角色卡在 416px 的栏里并排只剩 ~150px 一张（说明文字会挤成几行），
+   * 所以按容器宽度自动决定：宽了并排、窄了竖着——同一个 `auto-fit` 套路。
+   */
   .role-picker {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     gap: var(--sp-2);
   }
 

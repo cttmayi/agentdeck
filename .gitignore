@@ -1,6 +1,8 @@
 # ── 依赖与缓存 ──
 node_modules/
 .cache/
+# DSH 视觉工具的产物目录：它能被 `git add -A` 顺手收进库（踩过一次）
+.dsh-vision-router/
 *.log
 
 # ── 构建产物 ──
