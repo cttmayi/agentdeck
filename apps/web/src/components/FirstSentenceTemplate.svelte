@@ -88,7 +88,7 @@
   </div>
 
   <p class="tpl-hint">
-    这个 agent 被交代的**全部内容**就是这一段文字（一次 run 只有这一条通道）。
+    一次 run 交代给模型的<strong>全部内容</strong>就是这一段文字（只有这一条通道）。
     留空 = 用平台默认那段；自己写 = <strong>整段取代默认</strong>，默认里的
     「完成后给出一份报告」那类护栏也一并没了，需要自己写进去。
   </p>
@@ -172,7 +172,7 @@
       <div class="preview-head">
         <strong>渲染出来是这样</strong>
         <span class="faint small">
-          —— 用的是**示例值**（一个假任务 / 一份假报告），不是你的真实任务；
+          —— 用的是<strong>示例值</strong>（一个假任务 / 一份假报告），不是你的真实任务；
           但渲染器与真的那次是同一个。
         </span>
         <button type="button" class="ghost small" onclick={() => (showText = false)}>收起</button>

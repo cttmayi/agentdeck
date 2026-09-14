@@ -37,8 +37,7 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('loop-closure')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({
-    id: WS,
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS,
     name: '闭环测试',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -306,8 +305,6 @@ describe('动作派生的真实闭环（ActionRunner.deriveRun）', () => {
       skillIds: [],
       toolIds: [],
       env: {},
-      executeTemplate: '',
-      reviewTemplate: '',
       role: 'executor',
       reviewerAgentId: null,
       createdAt: Date.now(),

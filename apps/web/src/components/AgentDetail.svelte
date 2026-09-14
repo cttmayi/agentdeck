@@ -1,8 +1,7 @@
 <script lang="ts">
-  import type { Agent, FirstSentenceKind } from '../lib/api.ts'
-  import { agents, identity, skills, loadTemplateKit, templateKit, updateAgent } from '../lib/stores.ts'
+  import type { Agent } from '../lib/api.ts'
+  import { agents, identity, skills, updateAgent } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
-  import FirstSentenceTemplate from './FirstSentenceTemplate.svelte'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -56,9 +55,6 @@
     runtimeKey: agent.runtimeKey,
     workDir: agent.workDir ?? '',
     model: agent.model ?? '',
-    // 第一句话的模版（D32）：两份都留着，切角色时不会把刚写的那份弄丢
-    executeTemplate: agent.executeTemplate ?? '',
-    reviewTemplate: agent.reviewTemplate ?? '',
   })
 
   let draft = blankDraft()
@@ -112,12 +108,6 @@
       patch['skillIds'] = draft.skillIds
     if ((draft.reviewerAgentId || null) !== (agent.reviewerAgentId ?? null))
       patch['reviewerAgentId'] = draft.reviewerAgentId || null
-    // 模版只提交**改动过**的那一份：两份都发的话，每一次保存都会顺手把
-    // 另一条链路的模版也写一遍（它可能正被别处改着）
-    if (draft.executeTemplate !== (agent.executeTemplate ?? ''))
-      patch['executeTemplate'] = draft.executeTemplate
-    if (draft.reviewTemplate !== (agent.reviewTemplate ?? ''))
-      patch['reviewTemplate'] = draft.reviewTemplate
     return patch
   }
 
@@ -149,16 +139,6 @@
   $: chosenReviewer = $agents.find((a) => a.id === agent.reviewerAgentId) ?? null
   $: isReviewer = agent.role === 'reviewer'
 
-  /**
-   * 这个 agent 实际会用到的那份模版（D32）。
-   *
-   * ★ 按**角色**取，而不是“两份拼一起显示”：一个 agent 只会走一条链路
-   *   （`role` 是互斥的），显示另一份只会让人以为它也生效。
-   */
-  $: activeTemplate = (isReviewer ? agent.reviewTemplate : agent.executeTemplate) ?? ''
-  $: templateKind = (isReviewer ? 'review' : 'execute') as FirstSentenceKind
-  $: defaultTemplate = (($templateKit?.defaults ?? {}) as Record<string, string>)[templateKind] ?? ''
-  $: if ($templateKit === null) void loadTemplateKit()
 
   /**
    * 哪些执行者指向了这个审核者。
@@ -260,20 +240,6 @@
             <p class="row-hint">这段填进第一句话的「你的角色」。</p>
           </div>
         </div>
-
-        <div class="field-row">
-          <span class="row-label">第一句话模版</span>
-          <FirstSentenceTemplate
-            kind={draft.role === 'reviewer' ? 'review' : 'execute'}
-            value={draft.role === 'reviewer' ? draft.reviewTemplate : draft.executeTemplate}
-            showLabel={false}
-            onchange={(next) => {
-              if (draft.role === 'reviewer') draft.reviewTemplate = next
-              else draft.executeTemplate = next
-              draft = { ...draft }
-            }}
-          />
-        </div>
       {:else}
         <div class="field-row">
           <span class="row-label">指令</span>
@@ -282,36 +248,6 @@
           {:else}
             <p class="empty-value">没有写指令 —— 它只会拿到任务的标题与说明。</p>
           {/if}
-        </div>
-
-        <!-- 第一句话模版（D32）：只读时也要看得见"它到底被交代了什么" -->
-        <div class="field-row">
-          <span class="row-label">第一句话模版</span>
-          <div>
-            {#if activeTemplate.trim()}
-              <span class="badge custom-badge">自定义</span>
-              <p class="row-hint">
-                这个 agent 用的是自定义模版（{activeTemplate.length} 字符）——它
-                <strong>整段取代</strong>平台默认那段。点「编辑」可以改。
-              </p>
-              <details>
-                <summary>看模版原文</summary>
-                <pre class="tpl-text">{activeTemplate}</pre>
-              </details>
-            {:else}
-              <span class="badge">平台默认</span>
-              <p class="row-hint">
-                没有自定义 —— 用的是平台默认那段（身份 + 角色 + {isReviewer
-                  ? '要你做什么 + 材料 + 标准 + 护栏 + 判决契约'
-                  : '任务正文 + 技能清单 + 护栏'}）。
-                点「编辑」可以改成自己写的。
-              </p>
-              <details>
-                <summary>看默认模版原文</summary>
-                <pre class="tpl-text">{defaultTemplate}</pre>
-              </details>
-            {/if}
-          </div>
         </div>
       {/if}
     </section>
@@ -383,7 +319,7 @@
           <div class="field-row">
             <span class="row-label">由谁来审它</span>
             <p class="empty-value">
-              不适用 —— 它是**审别人的那个**。反过来，在执行角色的智能体上指定它即可。
+              不适用 —— 它是<strong>审别人的那个</strong>。反过来，在执行角色的智能体上指定它即可。
             </p>
           </div>
         {/if}
@@ -729,30 +665,5 @@
 
   .role-card.active strong {
     color: var(--accent);
-  }
-
-  /* 第一句话模版（D32）：自研/默认的标记 + 模版原文 */
-  .custom-badge { color: var(--accent); margin-right: var(--sp-2); }
-
-  .tpl-text {
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 24rem;
-    overflow: auto;
-    margin: var(--sp-2) 0 0;
-    padding: var(--sp-2);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-
-  details > summary {
-    cursor: pointer;
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    margin-top: var(--sp-2);
   }
 </style>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { agents, identity, loadAgents, loadIdentity, loading, loadError } from '../lib/stores.ts'
   import NewAgentForm from '../components/NewAgentForm.svelte'
+  import FirstSentenceSettings from '../components/FirstSentenceSettings.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
 
   /**
@@ -59,6 +60,15 @@
   let creating = false
 
   /**
+   * 正在改**全局**的第一句话模版（D32）。
+   *
+   * ★ 它是通用配置（一次设定、所有 agent 生效），所以入口放在这一页的
+   *   「新建」旁边——按使用者的说法："智能体的设置…应该在'新建'附近"。
+   *   两个面板共用正文顶部那一个位置：同时只会开一个。
+   */
+  let editingTemplates = false
+
+  /**
    * 环境预检的问题。
    *
    * ⚠️ 这里必须写全可选链：`environment` 是可选字段，而模板里的类型流
@@ -101,10 +111,24 @@
           disabled={creating}
           onclick={() => {
             creating = true
+            editingTemplates = false
             selectedId = null
           }}
         >
           新建
+        </button>
+        <button
+          type="button"
+          class="secondary small"
+          disabled={editingTemplates}
+          title="第一句话模版是通用配置：设一次，所有智能体生效"
+          onclick={() => {
+            editingTemplates = true
+            creating = false
+            selectedId = null
+          }}
+        >
+          第一句话设置
         </button>
         <button type="button" class="secondary small" onclick={refresh}>刷新</button>
       </div>
@@ -123,6 +147,12 @@
           void loadAgents()
         }}
       />
+
+      <!--
+        全局的第一句话模版（D32）：与"新建"同一个位置、互斥。
+        它一次设定对所有 agent 生效，所以它**不属于**某个 agent 的详情页。
+      -->
+      <FirstSentenceSettings open={editingTemplates} onclose={() => (editingTemplates = false)} />
 
       {#if envIssues.length > 0}
         <!--

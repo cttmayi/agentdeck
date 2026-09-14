@@ -45,6 +45,31 @@ export const EpochMs = z.number().int().nonnegative()
 export const Workspace = z.object({
   id: WorkspaceId,
   name: z.string().min(1).max(100),
+
+  // ── 第一句话的模版（D32）──
+  /**
+   * ★ 「第一句话」的模版——**全局配置，一次设定对所有 agent 生效**。
+   *
+   * 它**不是**每个 agent 一份：那段文字是"平台怎么把一次 run 交代给模型"的
+   * 骨架，跟"这个 agent 是谁"是两件事。后者由 `Agent.instructions` 承担，
+   * 而它会被插进模版里的 `{{role}}`。
+   *
+   * 空字符串 = 用平台默认模版（`DEFAULT_TEMPLATES[kind]`，见
+   * `packages/agent-core/src/first-sentence.ts`）。两者是**同一台渲染器**，
+   * 所以"什么都不改"与"填入默认模版"渲染出来逐字节相同。
+   *
+   * 执行与审核各一份：审核那份多了材料、审核标准与判决契约，混在一起会让
+   * 两条链路互相牵制。
+   *
+   * ⚠️ 写法与校验见 `validateTemplate()`：变量是 `{{name}}`，缺必需变量、
+   *    写了不认识的变量、或用了另一条链路才有的变量，**保存时就被拒**。
+   *    这里存的是原文（未展开），展开发生在执行器里——模型拿到的永远是
+   *    "这一次"的值。
+   */
+  executeTemplate: z.string().default(''),
+  /** 同上，审核那次用的。 */
+  reviewTemplate: z.string().default(''),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })
@@ -192,28 +217,6 @@ export const Agent = z.object({
    * ⚠️ 指向自己会被拒绝：那等于"自己审自己"，违反 INV-1（reviewer ≠ executor）。
    */
   reviewerAgentId: AgentId.nullable(),
-
-  // ── 第一句话的模版（D32） ──
-  /**
-   * ★ 这个 agent 拿到任务时交代给它的那段文字——**两条链路各一份**。
-   *
-   * 空字符串 = 用平台默认模版（`DEFAULT_TEMPLATES[kind]`，见
-   * `packages/agent-core/src/first-sentence.ts`）。两者是**同一台渲染器**，
-   * 所以"什么都不改"与"填入默认模版"渲染出来逐字节相同。
-   *
-   * 为什么分两份而不是一份：`role` 互斥（一个 agent 要么执行要么审核），
-   * 但两个字段都留着——把角色从执行改成审核时那份模版不会丢；而且模版是
-   * 按**角色**校验的（审核模版必须带 `{{material}}` 与 `{{verdict}}`），
-   * 跟当前角色无关。
-   *
-   * ⚠️ 写法与校验见 `validateTemplate()`：变量是 `{{name}}`，缺必需变量、
-   *    写了不认识的变量、或用了另一个角色才有的变量，**保存时就被拒**。
-   *    这里存的是原文（未展开），展开发生在执行器里——模型拿到的永远是
-   *    "这一次"的值。
-   */
-  executeTemplate: z.string().default(''),
-  /** 同上，审核那次用的（`role: 'reviewer'` 才有意义）。 */
-  reviewTemplate: z.string().default(''),
 
   createdAt: EpochMs,
   updatedAt: EpochMs,

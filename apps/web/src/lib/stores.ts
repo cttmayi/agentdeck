@@ -125,6 +125,23 @@ export async function previewFirstSentence(
  * 在客户端重写一遍校验规则，两处迟早不一致，而"客户端放行、服务端拒绝"
  * 的体验最糟：表单里什么错都没显示，提交却失败。
  */
+/**
+ * 保存**全局**的第一句话模版（D32）。
+ *
+ * ★ 只改传了的那些键（PATCH 语义）：空串 = 回到平台默认。
+ *   校验在服务端（同一个 `validateTemplate`），这里只把它的原文带回去。
+ */
+export async function saveFirstSentenceTemplates(patch: {
+  executeTemplate?: string
+  reviewTemplate?: string
+}): Promise<void> {
+  await api('/api/first-sentence/templates', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  await loadTemplateKit()
+}
+
 export async function createAgent(input: {
   name: string
   role: AgentRole
@@ -133,9 +150,6 @@ export async function createAgent(input: {
   reviewerAgentId: string | null
   runtimeKey: string
   workDir: string
-  /** 第一句话的模版（D32）。空串 = 平台默认；校验在服务端。 */
-  executeTemplate?: string
-  reviewTemplate?: string
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
@@ -146,8 +160,6 @@ export async function createAgent(input: {
       skillIds: input.skillIds,
       reviewerAgentId: input.reviewerAgentId,
       runtimeKey: input.runtimeKey,
-      executeTemplate: input.executeTemplate ?? '',
-      reviewTemplate: input.reviewTemplate ?? '',
       // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
       ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
     }),

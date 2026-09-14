@@ -29,7 +29,7 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('reconcile')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 })
 
 after(async () => {
@@ -125,7 +125,7 @@ describe('★ 收口上次遗留的非终态 run', () => {
     const d = await makeTempDir('reconcile-notice')
     const s = await FileStore.open({ dataDir: d, fsync: false })
     const W = 'ws_notice' as Run['workspaceId']
-    await s.insertWorkspace({ id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
 
     for (let i = 0; i < 5; i += 1) {
       const id = ulid() as Run['id']
@@ -171,7 +171,7 @@ describe('★ 收口上次遗留的非终态 run', () => {
   test('没有遗留 run 时什么都不做，也不发通知', async () => {
     const d = await makeTempDir('reconcile-empty')
     const s = await FileStore.open({ dataDir: d, fsync: false })
-    await s.insertWorkspace({ id: 'ws_empty_r' as Run['workspaceId'], name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: 'ws_empty_r' as Run['workspaceId'], name: 'w', createdAt: 1, updatedAt: 1 })
 
     const result = await reconcileInterruptedRuns({ store: s })
     assert.deepEqual(result.interrupted, [])
@@ -185,7 +185,7 @@ describe('★ 收口上次遗留的非终态 run', () => {
     const d = await makeTempDir('reconcile-twice')
     const s = await FileStore.open({ dataDir: d, fsync: false })
     const W = 'ws_twice' as Run['workspaceId']
-    await s.insertWorkspace({ id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     await s.insertRun({
       id: ulid() as Run['id'],
       workspaceId: W,

@@ -783,6 +783,19 @@ export class RunExecutor {
       //   界面上能填、能存、能显示，运行时被丢掉。
       const agentConfig = await this.#deps.store.getAgent(run.agentId as never)
 
+      // ★ 第一句话的模版是**全局配置**（D32），挂在 workspace 上：一次设定，
+      //   所有 agent 都按它来。空 = 平台默认。
+      //
+      //   store 不做 schema 迁移，加字段之前建的 workspace 读回来没有这两个键，
+      //   所以在 `?? ''` 这一层补齐——**与界面上显示的那份走同一段代码**
+      //   （`readFirstSentenceTemplates` 也这么读），否则"界面显示的"与
+      //   "真的投递的"会分叉。
+      const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
+      const templates = {
+        executeTemplate: workspace?.executeTemplate ?? '',
+        reviewTemplate: workspace?.reviewTemplate ?? '',
+      }
+
       const firstSentence =
         req.kind === 'review' && req.review
           ? renderFirstSentence({
@@ -796,9 +809,9 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
               prompt: req.prompt,
-              // 审核者自己的模版（D32）。空 = 平台默认；写入口已经校验过，
-              // 这里拿到的要么是空、要么是一条合法模版。
-              template: agentConfig?.reviewTemplate ?? null,
+              // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
+              // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
+              template: templates.reviewTemplate,
             })
           : renderFirstSentence({
               kind: 'execute',
@@ -807,8 +820,7 @@ export class RunExecutor {
               prompt: req.prompt,
               skills: skillsBrief,
               instructions: agentConfig?.instructions ?? null,
-              // 执行者自己的模版（D32）。空 = 平台默认。
-              template: agentConfig?.executeTemplate ?? null,
+              template: templates.executeTemplate,
             })
 
       // 副本：**我们自己的文件**，谁都不覆盖谁，也不删。

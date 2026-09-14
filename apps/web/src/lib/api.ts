@@ -134,14 +134,6 @@ export interface Agent {
   role: AgentRole
   /** 由谁来审**这个执行 agent** 的产出（仅 executor 有意义）。 */
   reviewerAgentId: string | null
-  /**
-   * 第一句话的模版（D32）：空串 = 平台默认。
-   *
-   * 两条链路各一份。它们在**服务端**校验（缺必需变量、写错变量名都会被拒），
-   * 所以这里只管把原文收发回去，不在前端重写一遍规则。
-   */
-  executeTemplate: string
-  reviewTemplate: string
 }
 
 /** 第一句话模版的两个角色（D32）。 */
@@ -162,6 +154,13 @@ export interface TemplateVariable {
 export interface TemplateKit {
   defaults: Record<FirstSentenceKind, string>
   variables: TemplateVariable[]
+  /**
+   * 当前生效的那两份（空 = 平台默认）。
+   *
+   * ★ 这是**全局配置**（D32）：一次设定，所有 agent 都按它来。
+   *   所以它挂在这里，而不是挂在某个 agent 上。
+   */
+  current: { executeTemplate: string; reviewTemplate: string }
 }
 
 export interface Skill {
