@@ -853,8 +853,48 @@ describe('★ 重试与会话恢复（FR-CLI-06）—— 这段此前从未被�
       after.length > before,
       '★ 必须真的多出一条 run —— 这正是此前从未发生过的事',
     )
-    const retryRun = after.find((r) => r.runId !== firstRunId && r.kind === 'review')
-    assert.ok(retryRun, '应当有一条新的 review run 作为重试')
+    // ⚠️ 必须按 **subject** 精确定位：同一个 daemon 里前面用例留下的 review run
+    //    还躺在列表里，只按"kind === review 且不是第一条"去找会匹配到**别人的**
+    //    审核（实测：断言拿到的材料是上一条用例的报告）。
+    const firstSubject = (
+      (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+        runs: Array<{ runId: string; subject?: { type: string; id: string } }>
+      }
+    ).runs.find((r) => r.runId === firstRunId)?.subject
+    const retryRun = after.find(
+      (r) =>
+        r.runId !== firstRunId &&
+        r.kind === 'review' &&
+        (r as { subject?: { id: string } }).subject?.id === firstSubject?.id,
+    )
+    assert.ok(retryRun, '应当有一条新的 review run 作为重试（同一条报告的第二次审核）')
+
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 重试必须带**材料**，不能是空壳（真实踩过一次）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来 `createRetryRun` 传的是 `body: ''`，而紧挨着的注释写着"上一次的输出
+    // 会作为审核对象的正文带进来"。真实后果：一次任务的重试审核里，模型的
+    // 原话是「材料区只有标题，不含任何正文/产物/结论，缺少可审核的实际内容」
+    // —— 它是对的，于是判 needs_human，而那次 CLI 的钱白花了。
+    //
+    // 材料从上次审核自己的上下文副本里按标记切出来（见 server.ts 的
+    // `previousMaterial`）。这条断言钉住"重试真的拿到了材料"。
+    const retryMessages = ((await (
+      await fetch(`${daemon.url}/api/runs/${retryRun!.runId}/messages?since=-1`)
+    ).json()) as { messages: Array<{ content: string }> }).messages
+    const retrySentence = retryMessages.map((m) => m.content ?? '').join('\n')
+    // ⚠️ 断言必须落在**标记之间**的内容上：光匹配"内容"两个字是空过的——
+    //    「## 待审核的内容」这个标题本身就含"内容"，空材料的重试也能通过。
+    const material = (() => {
+      const begin = retrySentence.indexOf('<<<ALPHA_MATERIAL>>>')
+      if (begin === -1) return ''
+      const from = begin + '<<<ALPHA_MATERIAL>>>'.length
+      const end = retrySentence.lastIndexOf('<<<END_ALPHA_MATERIAL>>>')
+      return end < from ? '' : retrySentence.slice(from, end).trim()
+    })()
+    assert.ok(material.length > 0, '★ 重试的材料不能是空的（空的话模型只能判 needs_human）')
+    assert.match(material, /内容/, '★ 而且要是**上次那份**材料')
 
     // ★ 必须等**整条链**静默再返回。
     //   不等的话，这条重试 run 会在下一个用例执行期间继续跑，把那个用例

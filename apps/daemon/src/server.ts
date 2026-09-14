@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   checkVersionSupport,
   getRuntimeDescriptor,
+  MATERIAL_MARKERS,
   shouldRefuseToRun,
   type AgentBackend,
   type SandboxMode,
@@ -844,6 +845,47 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   （比如失败得很早）就当新会话跑。重试的价值在于"换一次机会"，
    *   而不在于"必须有上文"。
    */
+  /**
+   * 上一次审核的**材料**——从它自己的上下文副本里按材料标记切出来。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 重试原来带的是**空材料**（`body: ''`）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 紧挨着的注释写着"上一次的输出会作为审核对象的正文带进来"，而代码传的是空串。
+   * 真实后果（一次任务的两条审核，模型的原话）：
+   *
+   *   「材料区只有标题『重试审核（原 run …）』，不含任何正文/产物/结论，
+   *     且与声明的对象不符，缺少可审核的实际内容」→ 判 needs_human。
+   *
+   * 模型是对的：**没有材料就不该审**。而它连那点材料都没有，还要花一次 CLI 的钱。
+   *
+   * 材料从哪儿来：每次 run 都会把自己的「第一句话」原样留一份在
+   * `<workdir>/.alpha-helper/context/<runId>.md`，而里面的待审内容是**用标记
+   * 包起来的**（`<<<ALPHA_MATERIAL>>>`）。按标记切一刀就是原样的材料——
+   * 确定性切片，不需要另存一份、也不会随格式漂。
+   */
+  async function previousMaterial(
+    previous: Run,
+  ): Promise<{ body: string; from: string | null }> {
+    const path = join(
+      previous.workDir ?? '',
+      '.alpha-helper',
+      'context',
+      `${previous.id}.md`,
+    )
+    const text = await readFile(path, 'utf8').catch(() => null)
+    if (text === null) return { body: '', from: null }
+    const begin = text.indexOf(MATERIAL_MARKERS.begin)
+    if (begin === -1) return { body: '', from: null }
+    const bodyStart = begin + MATERIAL_MARKERS.begin.length
+    // ★ 取**最后一个**结束标记：材料本身可能又是一份上下文副本（里面同样有
+    //   这对标记，比如"重试的重试"）。取第一个会把材料提前截断。
+    const end = text.lastIndexOf(MATERIAL_MARKERS.end)
+    if (end < bodyStart) return { body: '', from: null }
+    return { body: text.slice(bodyStart, end).trim(), from: path }
+  }
+
   async function createRetryRun(previous: Run): Promise<string | null> {
     // 重试的审核者是谁？——同一次审核的重试，应当由**同一个审核者**做。
     // 换人会引入"不同标准"这个额外变量，让"重试有没有变好"变成无法解释的问题。
@@ -859,9 +901,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return null
     }
 
+    // ★ 材料必须**真的**带过来；带不来就不要起这次重试。
+    //
+    //   返回 null ⇒ 走既有的"拿不到重试机会 ⇒ 降级为建议"那条路：那是诚实的
+    //   降级，比"花一次 CLI 的钱审一份空材料、然后判 needs_human"强得多。
+    const material = await previousMaterial(previous)
+    if (material.body === '') {
+      warn(
+        `无法为重试拿到上次审核的材料（找不到 ${previous.id.slice(-8)} 的上下文副本），` +
+          `这次不重试，直接按降级处理`,
+      )
+      return null
+    }
+
     const runId = ulid() as RunId
     // 重试的 prompt 与上次相同——变的是"再给一次机会"，不是任务本身。
-    // 上一次的输出会作为审核对象的正文带进来（subject 不变）。
+    // 材料与 subject 都不变（subject 相同 ⇒ 还是审同一条执行产出）。
     const outcome = await executor.submit({
       runId,
       kind: 'review',
@@ -891,9 +946,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // ★ 会话恢复：指向上一次，由执行器按 sessionState 决定要不要真的用
       resumeFromRunId: previous.id,
       review: {
-        kind: typeof previous.subject === 'object' ? 'run-output' : 'run-output',
+        kind: 'run-output',
         title: `重试审核（原 run ${previous.id.slice(-8)}）`,
-        body: '',
+        // ★ 原样的材料（从上次的上下文副本里按标记切出来的），不是空串
+        body: material.body,
         inputBlobRef: null,
         relatedIssueId: issueIdOfSubject(previous),
       },

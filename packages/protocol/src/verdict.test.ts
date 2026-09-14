@@ -306,3 +306,41 @@ describe('★ 校验失败要说人话（它会被使用者看到）', () => {
     assert.ok(text.length < 400, '不能变成一屏都读不完的墙')
   })
 })
+
+describe('★ 围栏提取：结尾标记被抄成开头时也要认（真实踩过两次）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条是为一次真实失败加的
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 一次任务的两条审核，模型给的判决**内容完全合法**，但结尾写成了
+   * `<<<ALPHA_VERDICT>>>` 而不是 `<<<END_ALPHA_VERDICT>>>`——于是被判
+   * "有 BEGIN 无 END"，整条判决作废，最后落到 needs_human 要人去处理。
+   *
+   * 这个围栏是**我们自己的约定**，不是模型世界的格式；因为抄错一个结尾标记
+   * 就丢掉一份做得很好的审核，代价不对等。所以把"又一个开头标记"也当作结尾。
+   */
+  test('★ 结尾写成开头 ⇒ 仍然能切出判决', () => {
+    const json = '{"schemaVersion":1}'
+    const text = `前面的话\n${VERDICT_FENCE_BEGIN}\n${json}\n${VERDICT_FENCE_BEGIN}\n后面的话`
+    assert.equal(extractVerdictJson(text), json)
+  })
+
+  test('★ 结尾正确时行为不变（取最后一个完整的块）', () => {
+    const text = [
+      `说明书里写了 ${VERDICT_FENCE_BEGIN} 与 ${VERDICT_FENCE_END} 这对标记`,
+      `${VERDICT_FENCE_BEGIN}\n{"real":true}\n${VERDICT_FENCE_END}`,
+    ].join('\n')
+    assert.equal(extractVerdictJson(text), '{"real":true}')
+  })
+
+  test('两个标记都没有 ⇒ 仍然是 null（不要瞎猜）', () => {
+    assert.equal(extractVerdictJson('我审完了，结论是 pass。'), null)
+  })
+
+  test('★ 指令要**明说**结尾标记带 END_ 前缀（别让模型猜）', () => {
+    const instruction = renderVerdictInstruction()
+    assert.match(instruction, /结尾标记/, '要把两个标记分别写清楚')
+    assert.match(instruction, /END_/, '并提醒结尾那个带 END_ 前缀')
+  })
+})

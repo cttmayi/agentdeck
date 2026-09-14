@@ -242,10 +242,35 @@ export function extractVerdictJson(text: string): string | null {
     const begin = text.indexOf(VERDICT_FENCE_BEGIN, searchFrom)
     if (begin === -1) break
     const bodyStart = begin + VERDICT_FENCE_BEGIN.length
-    const end = text.indexOf(VERDICT_FENCE_END, bodyStart)
-    if (end === -1) break // 有 BEGIN 无 END：半个块，不作为有效判决
+
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 把"结尾又写成了开头"当作结尾
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 真实发生过**两次**（同一批任务的两条审核）：模型给出的判决内容完全合法，
+    // 但结尾写的是 `<<<ALPHA_VERDICT>>>` 而不是 `<<<END_ALPHA_VERDICT>>>`
+    // ——于是这里判"有 BEGIN 无 END"，整条判决作废，人还得去处理。
+    //
+    // 这个围栏是**我们自己的约定**（不是模型世界的格式），因为抄错一个结尾标记
+    // 就丢掉一份做得很好的审核，代价明显不对等。所以：块的结束取**下面两者中
+    // 更早出现的那个**——
+    //   - 正确的结尾标记；或
+    //   - 又一个开头标记（模型显然是想收尾，只是抄错了）。
+    //
+    // 这仍然是**确定性切片**（不是"在自由文本里捞 JSON"）：只认这两个标记，
+    // 顺序与位置都是确定的。
+    const endCorrect = text.indexOf(VERDICT_FENCE_END, bodyStart)
+    const endRepeated = text.indexOf(VERDICT_FENCE_BEGIN, bodyStart)
+    const end =
+      endCorrect === -1
+        ? endRepeated
+        : endRepeated === -1
+          ? endCorrect
+          : Math.min(endCorrect, endRepeated)
+    if (end === -1) break // 两个都没有：半个块，不作为有效判决
+
     found = text.slice(bodyStart, end).trim()
-    searchFrom = end + VERDICT_FENCE_END.length
+    searchFrom = end + (end === endCorrect ? VERDICT_FENCE_END.length : VERDICT_FENCE_BEGIN.length)
   }
 
   return found
@@ -300,6 +325,9 @@ export function renderVerdictInstruction(): string {
   return [
     '把最终判决写成**一个** JSON 对象，放在下面这对标记之间。',
     '围栏之外可以写解释，但**判决本体只能有一份**，且必须在这一对标记之间：',
+    `- 开头标记：\`${VERDICT_FENCE_BEGIN}\``,
+    `- 结尾标记：\`${VERDICT_FENCE_END}\` —— ⚠️ 注意结尾那个**带 \`END_\` 前缀**，`,
+    '  不要把它也写成开头标记（这个错会让整条判决作废，你前面的工作就白做了）',
     '',
     VERDICT_FENCE_BEGIN,
     JSON.stringify(example, null, 2),
