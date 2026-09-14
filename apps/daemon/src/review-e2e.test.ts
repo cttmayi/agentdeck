@@ -1,5 +1,6 @@
 import { after, before, beforeEach, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -363,6 +364,25 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     )
     // 输入只剩一处（第一句话），所以哈希也只剩一个
     assert.match(String(audit.promptHash), /^[0-9a-f]{64}$/, '★ 输入哈希要真算过')
+
+    // ★ 而且必须是**投递出去那段文本**的哈希，不是 `req.prompt`。
+    //   改版前哈希的是 `req.prompt`——审核 run 的那句"请审核…"甚至没被送出去，
+    //   于是哈希与输入对不上，"可追溯"就成了空话。
+    const sentence = await (async () => {
+      const msgs = (
+        ((await (await fetch(`${daemon.url}/api/runs/${reviewRun!.runId}/messages?since=-1`)).json()) as {
+          messages: Array<{ content: string }>
+        }).messages
+      ).map((m) => m.content ?? '')
+      const at = msgs.findIndex((c) => c.startsWith('第一句话（'))
+      return at === -1 ? null : (msgs[at + 1] ?? null)
+    })()
+    assert.notEqual(sentence, null, '日志里应当能找到投递出去的第一句话')
+    assert.equal(
+      audit.promptHash,
+      createHash('sha256').update(sentence!, 'utf8').digest('hex'),
+      '★ 输入哈希要等于**真正投递的那段文本**的 sha256',
+    )
     assert.notEqual(audit.promptHash, null, '必须有 prompt 哈希')
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
   })
@@ -372,6 +392,32 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.match(backend.seenContext!, /审核标准/, '审核标准必须随 skill 下发')
     assert.match(backend.seenContext!, /general-review/, '技能清单只列名字')
     assert.match(backend.seenContext!, /ALPHA_VERDICT/, '必须给出判决格式约定')
+  })
+
+  test('★ 审核的第一句话必须带上「这次要你做什么」（调用方的指令）', async () => {
+    // ══════════════════════════════════════════════════════════════════
+    // 这条是为一个**改版漏掉的接线**加的
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // D29 把上下文搬进「第一句话」时，审核那条路**只搬了材料，丢了指令**：
+    // `renderFirstSentence({kind:'review'})` 根本没有 `prompt` 这个入参，
+    // 于是"请审核上面这次执行的产出…"（以及重试那句"上一次你的输出没能通过
+    // 格式校验…"）从来没被送出去。表现是：重试 run 与首次**长得一模一样**，
+    // 模型只能自己猜为什么又来一次。
+    const { runs } = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+      runs: Array<{ runId: string; kind: string; subject?: { type: string; id: string } }>
+    }
+    const review = runs.find((r) => r.kind === 'review')
+    assert.ok(review, '应当有一条审核 run')
+
+    const text = ((await (
+      await fetch(`${daemon.url}/api/runs/${review!.runId}/messages?since=-1`)
+    ).json()) as { messages: Array<{ content: string }> }).messages
+      .map((m) => m.content ?? '')
+      .join('\n')
+
+    assert.match(text, /## 这次要你做什么/, '★ 要有"要你做什么"这一段')
+    assert.match(text, /请审核|审核这条/, '★ 段里要有调用方给的指令原文')
   })
 
   test('★ 待审材料被明确标记出来（它不是给你的指令）', () => {

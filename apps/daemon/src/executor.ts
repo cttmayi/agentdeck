@@ -794,6 +794,8 @@ export class RunExecutor {
               relatedIssueId: req.review.relatedIssueId ?? null,
               previousContextPath: await this.#previousContextPath(req),
               instructions: agentConfig?.instructions ?? null,
+              // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
+              prompt: req.prompt,
             })
           : renderFirstSentence({
               kind: 'execute',
@@ -821,6 +823,12 @@ export class RunExecutor {
       //   使用者投诉过「日志打印不完整，导致我不知道第一句话到底是什么」。
       //   这是那次 run 的输入本身——唯一不可变的事实；截断它等于把
       //   "它被交代了什么"变成要去别处拼的东西。
+      // ★ 审计里的"输入哈希"要哈希**真正投递出去的那段文本**（就是这一段），
+      //   而不是 `req.prompt`。改版前哈希的是 `req.prompt`——对审核 run 来说
+      //   那甚至是**没被送出去**的那句指令，于是哈希与输入对不上，
+      //   "可追溯"就成了空话。
+      const deliveredHash = createHash('sha256').update(firstSentence, 'utf8').digest('hex')
+
       await this.#note(
         runId,
         `第一句话（stdin 的一行 stream-json user 消息，${firstSentence.length} 字符，` +
@@ -1038,6 +1046,7 @@ export class RunExecutor {
           await this.#cliVersion(runtime.descriptor, runtime.backend),
           // 实际跑的那条命令行（含沙箱包装）——不再是"按描述表拼出来的大概样子"
           actualArgv,
+          deliveredHash,
         )
       }
 
@@ -1162,6 +1171,8 @@ export class RunExecutor {
     cliVersion: string | null,
     /** 实际执行的命令行（原始，脱敏由 domain 的 `buildAuditRecord` 做）。 */
     argv: readonly string[],
+    /** 投递出去的「第一句话」的 sha256——审计里的 `promptHash`。 */
+    deliveredHash: string,
   ): Promise<void> {
     const coordinator = this.#deps.reviewCoordinator
     if (!coordinator) return
@@ -1193,7 +1204,8 @@ export class RunExecutor {
       //   在数据上一直是空的。CLI 不报告时仍是 null：**宁可空着，也不要
       //   拿请求值去顶替**，那会让审计看起来比事实更确定。
       modelId,
-      promptHash: createHash('sha256').update(req.prompt, 'utf8').digest('hex'),
+      // 哈希的是**投递出去的那段文本**（由调用方传进来），不是 `req.prompt`
+      promptHash: deliveredHash,
       // ══════════════════════════════════════════════════════════════════
       // 审计的这四项原来是**写死的**（`runtimeDescriptorKey: 'claude'`、
       // `cliVersion: null`、argv 是按描述表拼的。`contextBlockHash` 曾恒为 null——那个

@@ -65,6 +65,19 @@ export interface ReviewFirstSentenceInput {
   subject: { type: string; id: string }
   /** 这个 agent 自己的指令（对审核者来说就是它的角色与倾向）。 */
   instructions?: string | null
+  /**
+   * 这次要它做什么——**必须送**。
+   *
+   * ⚠️ D29 改版时这里漏了：审核的第一句话只有身份/角色/材料/标准/护栏/契约，
+   *    而调用方给的 prompt（`请审核上面这次执行的产出…`，或重试那句
+   *    `上一次你的输出没能通过格式校验…`）**从来没被送出去**。后果：
+   *
+   *      - 重试 run 看起来和首次一模一样，模型只能自己猜"为什么又来一次"；
+   *      - 报告类审核的那句"审核这条 X 类型的报告：<标题>"也丢了。
+   *
+   *    审核的**材料**在下面，但"要它干什么"是另一件事，两者都要在。
+   */
+  prompt: string
   /** 审核对象的内容。 */
   report: { kind: string; title: string; body: string }
   /** 这个 agent 挂载的审核标准。 */
@@ -160,6 +173,12 @@ function renderReview(input: ReviewFirstSentenceInput): string {
   const lines = [
     ...renderHeader(input),
     ...renderRole(input.instructions),
+    // ★ 「要你做什么」放在材料**之前**：先说要干什么，再给材料。
+    //   重试那句解释也走这里（它是这次审核与上次唯一的不同）。
+    '## 这次要你做什么',
+    '',
+    input.prompt,
+    '',
     '## 待审核的内容',
     '',
     // ★ 一句声明：材料来自第三方，不能让它看起来像给你的指令。
