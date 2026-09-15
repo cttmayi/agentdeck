@@ -75,6 +75,7 @@
  * 去掉了 `## 审核标准` 那个大标题（由模版写）。
  */
 
+import Mustache from 'mustache'
 import { renderVerdictInstruction } from '@alpha-helper/protocol'
 
 export interface SkillBrief {
@@ -160,6 +161,29 @@ const MATERIAL_NOTICE =
 
 /** 写一对字面大括号的办法（`{{{{` → `{{`）。 */
 const ESCAPE = /\{\{\{\{/g
+
+/**
+ * ⚠️ **渲染时一定要关掉 HTML 转义**（D34）。
+ *
+ * mustache 默认会转义（`&` → `&amp;`、`"` → `&quot;`、`<` → `&lt;`）——那是给
+ * HTML 页面用的。我们这段文字是**纯文本 prompt**，转义就是**腐蚀内容**：模型会
+ * 看到 `&amp;`，而任务正文、产出里真有的 `&`/`<` 全被改写。
+ *
+ * 关法是**每次渲染单独传**（`{ escape: v => v }`），不动 `Mustache.escape` 那个
+ * 全局设置——少一个全局状态，就少一个"别处被影响"的可能。有测试钉它。
+ */
+const NO_ESCAPE = { escape: (v: string): string => v }
+
+/**
+ * 渲染与**校验**共用同一道预处理（`{{{{` → 一个字面 `{{`）。
+ *
+ * ⚠️ 必须共用：mustache 的解析器不认识 `{{{{`（它会一路找到结尾报
+ *    `Unclosed tag`）。只在一处做，就会出现"能渲染但保存时被拒"这种自相矛盾的
+ *    行为——实测踩过，被转义那条用例抓出来。
+ */
+function preprocess(text: string): string {
+  return text.replace(ESCAPE, '\u0000')
+}
 
 /**
  * 一条连续的空白被收敛成一个空行、首尾空白去掉。
@@ -371,77 +395,153 @@ const MISSING_REASON: Record<string, string> = {
     '它装的是**判决契约的全文**（字段与取值枚举 + 一个能通过校验的示例 + 围栏标记）。少了它，模型只能猜字段名与取值——实测两轮真实审核都因此整条作废（模型在工具输出里明说"The enum isn\'t defined anywhere accessible"）',
 }
 
-/** 扫描一个模版：抽出变量名，并报告写法上的问题。 */
-function scanTemplate(text: string): { names: string[]; problems: string[] } {
-  const names: string[] = []
-  const problems: string[] = []
-  // 转义先摘出去，免得 `{{{{` 被当成一个变量
-  const rest = text.replace(ESCAPE, '\u0000').replace(/\{\{([^}]*)\}\}/g, (_m, raw: string) => {
-    const name = String(raw).trim()
-    if (name === '') {
-      problems.push('有一个 `{{}}` 里没有变量名')
-      return ''
+/** mustache 的 token：[类型, 名字/文本, 起点, 终点, 子 token?, …]。 */
+type MustacheToken = [string, string, number, number, MustacheToken[]?, ...unknown[]]
+
+/**
+ * 解析模版，并把**我们用不了的东西**当场拒掉（D34）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么校验走 mustache 自己的解析器，而不是手写正则
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原来那套正则扫描器能用，但三件事一直是短板：
+ *
+ *   1. **报不出位置**——`{{` 没写完只能说"有一处没闭合"，而模版是几十行文本；
+ *   2. **认不出我们不支持的语法**——`{{> x}}`（partial）、`{{=<% %>=}}`（改分隔符）
+ *      在 mustache 里是**合法**的：正则放行、渲染时静默变成空或换一套语法，
+ *      而"静默"正是这个项目反复在防的坏法；
+ *   3. **嵌套段没法配对**（`{{#a}}…{{#b}}…{{/b}}…{{/a}}`）。
+ *
+ * `parse()` 给的是一棵 token 树（`name` / `#` / `^` / `/` / `!` / `>` / `=`），
+ * 三件事一起解决。
+ */
+function parseTemplate(text: string): { tokens: MustacheToken[] } | { error: string } {
+  try {
+    return { tokens: Mustache.parse(preprocess(text)) as unknown as MustacheToken[] }
+  } catch (err) {
+    // mustache 的原文是英文（`Unclosed tag at 22`）：**位置照用**，话说成中文，
+    // 并补上我们自己的提示（字面大括号怎么写）。
+    const message = err instanceof Error ? err.message : String(err)
+    const at = /at (\d+)/.exec(message)?.[1]
+    const where = at === undefined ? '' : `（第 ${Number(at) + 1} 个字符附近）`
+    return {
+      error: `模版解析失败${where}：${message}。要写一对**字面**大括号请用 \`{{{{\``,
     }
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
-      problems.push(`\`{{${name}}}\` 不是合法的变量名（只能是字母、数字、下划线，且以字母开头）`)
-      return ''
-    }
-    names.push(name)
-    return ''
-  })
-  if (rest.includes('{{')) {
-    problems.push('有一处 `{{` 没有对应的 `}}`。要写一对**字面**的大括号请用 `{{{{`')
   }
-  return { names, problems }
 }
 
 /**
- * 检查一个模版能不能用。**保存时就过这一关**（daemon 的两个写入口），
- * 所以一条坏模版进不了库，也就不会在跑起来之后才以"模型乱答"的形式暴露。
+ * 走一遍 token 树。`depth > 0` 表示这个名字落在某个段（`{{#x}}` / `{{^x}}`）**里面**
+ * ——这件事对"必需变量"很要紧：段里的变量是**有条件渲染**的。
+ */
+function walkTokens(
+  tokens: readonly MustacheToken[],
+  visit: (token: MustacheToken, depth: number) => void,
+  depth = 0,
+): void {
+  for (const token of tokens) {
+    visit(token, depth)
+    const children = token[4]
+    if (Array.isArray(children)) walkTokens(children, visit, depth + 1)
+  }
+}
+
+function kindName(kind: FirstSentenceKind): string {
+  return kind === 'review' ? '审核' : '执行'
+}
+
+/**
+ * 检查一个模版能不能用。**保存时就过这一关**（daemon 的写入口），所以一条坏模版
+ * 进不了库，也就不会在跑起来之后才以"模型乱答"的形式暴露。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 三条规则，每条都有具体的坏结果撑着
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   1. **名字必须在白名单里**：写错一个字母（`{{promt}}`）时 mustache 会**静默
+ *      渲染成空**——那次 run 少一整段话，而日志里看不出来。顺带挡住
+ *      `{{constructor}}` 这类原型链上的名字（实测渲染成 `[object Object]`、
+ *      不抛错，最难发现的那种）；
+ *   2. **必需变量必须在任何段之外出现过**：`{{#x}}{{prompt}}{{/x}}` 里的
+ *      `{{prompt}}` 是**有条件**的——x 为空时它不渲染，而"这次要它做什么"没了，
+ *      这次 run 就没有任务；
+ *   3. **不支持的东西当场拒**：`{{> x}}`（partial）与 `{{=<% %>=}}`（改分隔符）。
+ *      它们合法、能跑，但放行的结果是"静默按另一套语义渲染"。
  */
 export function validateTemplate(kind: FirstSentenceKind, text: string): TemplateCheck {
   const problems: string[] = []
-  const { names, problems: syntax } = scanTemplate(text)
-  problems.push(...syntax)
+  const parsed = parseTemplate(text)
+  if ('error' in parsed) return { ok: false, error: `${kindName(kind)}模版：${parsed.error}` }
 
   const allowed = templateVariablesFor(kind)
   const allowedNames = allowed.map((v) => v.name)
+  const usedNames = new Set<string>()
+  /** 段**外**出现过的名字——必需变量看这个。 */
+  const usedOutsideSections = new Set<string>()
 
-  for (const name of new Set(names)) {
-    if (allowedNames.includes(name)) continue
-    // 分清两种"不认识"：另一种角色的变量（写得出来，但这里没用）与纯拼错
-    const otherKind = kind === 'execute' ? 'review' : 'execute'
-    const belongsToOther = TEMPLATE_VARIABLES.some(
-      (v) => v.name === name && v.kinds.includes(otherKind),
-    )
-    if (belongsToOther) {
-      const onlyOther = TEMPLATE_VARIABLES.some(
-        (v) => v.name === name && v.kinds.length === 1 && v.kinds[0] === otherKind,
+  walkTokens(parsed.tokens, (token, depth) => {
+    const type = token[0]
+    const value = token[1]
+    if (type === 'text' || type === '!') return
+    if (type === '>') {
+      problems.push(
+        `不支持 \`{{> ${value}}}\`（partial）：我们没有"可复用的模版片段"这个概念，` +
+          `而它渲染出来是**空**——静默少一段比报错糟`,
       )
-      if (onlyOther) {
-        problems.push(
-          `\`{{${name}}}\` 只属于${
-            otherKind === 'review' ? '审核' : '执行'
-          }模版——${kind === 'execute' ? '执行 run 没有待审核的内容与判决契约' : '这里没有它的值'}`,
+      return
+    }
+    if (type === '=') {
+      problems.push(
+        `不支持 \`{{=${value}=}}\`（改分隔符）：换一套分隔符之后这份模版读起来像另一种` +
+          `语言，而排查的人只会看到"模版没生效"`,
+      )
+      return
+    }
+    if (type === 'name') {
+      usedNames.add(value)
+      if (depth === 0) usedOutsideSections.add(value)
+      if (!allowedNames.includes(value)) {
+        const otherKind = kind === 'execute' ? 'review' : 'execute'
+        const onlyOther = TEMPLATE_VARIABLES.some(
+          (v) => v.name === value && v.kinds.length === 1 && v.kinds[0] === otherKind,
         )
-        continue
+        if (onlyOther) {
+          problems.push(
+            `\`{{${value}}}\` 只属于${otherKind === 'review' ? '审核' : '执行'}模版——` +
+              `${kind === 'execute' ? '执行 run 没有待审核的内容与判决契约' : '这里没有它的值'}`,
+          )
+        } else {
+          problems.push(
+            `不认识 \`{{${value}}}\`（可用的：${allowedNames.map((n) => `{{${n}}}`).join('、')}）`,
+          )
+        }
+      }
+      return
+    }
+    // '#' / '^' 是条件段的开头：段名同样走白名单
+    if (type === '#' || type === '^') {
+      usedNames.add(value)
+      if (!allowedNames.includes(value)) {
+        problems.push(`不认识 \`{{${type} ${value}}}\` 这个条件段（段名同样只能是上表里的变量）`)
       }
     }
-    problems.push(`不认识 \`{{${name}}}\`（可用的：${allowedNames.map((n) => `{{${n}}}`).join('、')}）`)
-  }
+  })
 
   for (const v of allowed) {
     if (!v.requiredFor.includes(kind)) continue
-    if (names.includes(v.name)) continue
-    problems.push(`必须有 \`{{${v.name}}}\`——${MISSING_REASON[v.name] ?? v.label}`)
+    if (usedOutsideSections.has(v.name)) continue
+    problems.push(
+      usedNames.has(v.name)
+        ? `\`{{${v.name}}}\` 只出现在**条件段里面**——段不成立时它就不渲染，` +
+            `${MISSING_REASON[v.name] ?? v.label}。请把它放到段外至少出现一次`
+        : `必须有 \`{{${v.name}}}\`——${MISSING_REASON[v.name] ?? v.label}`,
+    )
   }
 
   if (problems.length === 0) return { ok: true }
   const numbered = problems.map((p, i) => `${i + 1}. ${p}`).join('；')
-  return {
-    ok: false,
-    error: `${kind === 'review' ? '审核' : '执行'}模版有 ${problems.length} 处问题：${numbered}`,
-  }
+  return { ok: false, error: `${kindName(kind)}模版有 ${problems.length} 处问题：${numbered}` }
 }
 
 /** 模版坏了（不该发生：写入口已经拒过）时的错误类型——宁可让 run 明确失败。 */
@@ -565,19 +665,20 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
 }
 
 /**
- * 一次替换（**不重扫插进去的值**）。
+ * 渲染：**一次替换，插进去的值不被重扫**。
  *
- * 这一点是安全性质，不是实现细节：材料来自第三方，里面完全可以写一句
- * `{{verdict}}`。重扫的话那句话会被换成整份判决契约——攻击者于是能决定
- * 契约出现在哪里（比如塞进一个"忽略上面的规则"的段落里）。用
- * `String.replace` 配一个函数只扫一遍原模版，插进去的文本原样落地。
+ * 这是安全性质，不是实现细节：材料来自第三方，里面完全可以写一句
+ * `{{verdict}}`。重扫的话那句话会被换成整份判决契约——攻击者于是能决定契约
+ * 出现在哪里（比如塞进一个"忽略上面的规则"的段落里）。
+ *
+ * ★ 用 mustache 渲染时这条性质**依然成立**，但理由变了：mustache 先把模版解析
+ *   成 token 树，再遍历这棵树、把值**追加**到输出上——值本身不过解析器。
+ *   实测（`.cache/tpl/probe-mustache.mjs` ③）：材料里写 `{{verdict}}` 原样落地。
+ *   有测试钉着它：把渲染换成"先拼字符串再解析"就会红。
  */
-function substitute(template: string, values: Record<string, string>): string {
-  const out = template.replace(ESCAPE, '\u0000').replace(/\{\{([^}]*)\}\}/g, (match, raw: string) => {
-    const name = String(raw).trim()
-    if (!(name in values)) return match
-    return values[name] ?? ''
-  })
+function renderTemplate(template: string, values: Record<string, string>): string {
+  // 预处理只作用于模版，不作用于值（见上面的 `preprocess`）
+  const out = Mustache.render(preprocess(template), values, {}, NO_ESCAPE)
   return out.replace(/\u0000/g, '{{')
 }
 
@@ -591,13 +692,12 @@ export function renderFirstSentence(input: FirstSentenceInput): string {
   const template = custom && custom !== '' ? custom : DEFAULT_TEMPLATES[input.kind]
   if (custom && custom !== '') {
     // ★ 走到了这里说明库里存着一条**没通过校验**的模版（正常路径下不可能：
-    //   新建与 PATCH 都过 `validateTemplate`）。这种情况宁可让 run 明确失败
-    //   并说清原因，也不要渲染出半截文本——那会表现成"模型乱答"，而
-    //   排查方向会指向模型。
+    //   设置页保存时过 `validateTemplate`）。这种情况宁可让 run 明确失败并说清
+    //   原因，也不要渲染出半截文本——那会表现成"模型乱答"，排查方向会指向模型。
     const check = validateTemplate(input.kind, template)
     if (!check.ok) throw new TemplateInvalidError(input.kind, check.error)
   }
-  return normalizeBlankLines(substitute(template, templateValues(input)))
+  return normalizeBlankLines(renderTemplate(template, templateValues(input)))
 }
 
 /** 材料标记——给测试与诊断用（"这段是材料"这件事要能被程序识别）。 */

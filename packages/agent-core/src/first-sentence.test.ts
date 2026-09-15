@@ -260,6 +260,50 @@ describe('第一句话：模版变量（D32）', () => {
     assert.ok(!standards.startsWith('## '), '这一段应当直接从 `### slug` 开始')
   })
 
+  test('★ D34：条件段 `{{#x}}…{{/x}}`——有内容才出现（标题能跟着一起消失）', () => {
+    // 这正是换 mustache 的理由：D33 把标题交给模版之后，"可选段要不要标题"
+    // 没有别的办法表达。
+    const template = [
+      '{{#instructions}}## 你的角色',
+      '',
+      '{{instructions}}',
+      '',
+      '{{/instructions}}## 要做的事',
+      '',
+      '{{prompt}}',
+    ].join('\n')
+
+    const withRole = renderFirstSentence({ ...SAMPLE_EXECUTE_INPUT, template })
+    assert.match(withRole, /^## 你的角色/, '有指令时标题在')
+    assert.match(withRole, /你是一个严谨的协作者/)
+
+    const without = renderFirstSentence({ ...SAMPLE_EXECUTE_INPUT, template, instructions: null })
+    assert.doesNotMatch(without, /你的角色/, '没指令时**连标题一起消失**')
+    assert.doesNotMatch(without, /\n{3,}/, '而且不留一串空行')
+    assert.match(without, /^## 要做的事/, '剩下的部分照常')
+
+    // 反向段也给（mustache 的规范语法）
+    const inverted = renderFirstSentence({
+      ...SAMPLE_EXECUTE_INPUT,
+      instructions: null,
+      template: '{{^instructions}}（它没有指令）{{/instructions}}{{prompt}}',
+    })
+    assert.match(inverted, /（它没有指令）/)
+  })
+
+  test('★ D34：HTML 转义必须关掉——否则 `&`/`<`/`"` 会变成 `&amp;` 之类', () => {
+    // mustache 默认是给 HTML 页面用的；我们这段是纯文本 prompt，转义就是腐蚀内容
+    const text = renderFirstSentence({
+      ...SAMPLE_EXECUTE_INPUT,
+      prompt: '比较 a & b、判断 x < y、以及 "引号"',
+      instructions: null,
+    })
+    assert.match(text, /a & b/, '`&` 要原样')
+    assert.match(text, /x < y/, '`<` 要原样')
+    assert.match(text, /"引号"/, '引号要原样')
+    assert.doesNotMatch(text, /&amp;|&lt;|&quot;/, '一个都不许被转义')
+  })
+
   test('`{{{{` 写出一对字面大括号（模版里要描述标记时用得上）', () => {
     const text = renderFirstSentence({
       ...SAMPLE_REVIEW_INPUT,
@@ -308,10 +352,16 @@ describe('第一句话：模版校验（D32 —— 坏模版进不了库）', ()
     assert.equal(back.ok, true, '审核模版用执行也有的变量不算错')
   })
 
-  test('`{{` 没写完 / `{{}}` 空名 都被拒（静默留着字面量比报错糟）', () => {
-    assert.match(err('execute', '{{prompt}}\n这里有个 {{ 没收尾'), /没有对应/)
-    assert.match(err('execute', '{{}}\n{{prompt}}'), /没有变量名/)
-    assert.match(err('execute', '{{prompt}}\n{{ prompt-2 }}'), /不是合法的变量名/)
+  test('`{{` 没写完 会被拒，而且**报得出位置**（D34：改用 mustache 的解析器）', () => {
+    const message = err('execute', '{{prompt}}\n这里有个 {{ 没收尾')
+    assert.match(message, /解析失败/)
+    assert.match(message, /第 \d+ 个字符附近/, '位置是这次换解析器的主要收益之一')
+    assert.match(message, /\{\{\{\{/, '顺带给出"要写字面大括号怎么办"')
+  })
+
+  test('段不配对 / 段名不认识 都被拒', () => {
+    assert.match(err('execute', '{{#prompt}}x'), /解析失败/)
+    assert.match(err('execute', '{{#nope}}x{{/nope}}\n{{prompt}}'), /不认识/)
   })
 
   test('合法的自定义模版通过（含全部变量、转义、以及不含任何变量）', () => {
@@ -321,6 +371,34 @@ describe('第一句话：模版校验（D32 —— 坏模版进不了库）', ()
       true,
     )
     assert.equal(validateTemplate('execute', '{{{{ 是字面量\n{{prompt}}').ok, true)
+  })
+
+  test('★ D34：必需变量不能只出现在条件段里（段不成立时它会消失）', () => {
+    // `{{#x}}{{prompt}}{{/x}}` 看起来没问题，但 x 为空时"这次要它做什么"整段
+    // 就没了——而归属于"必须送达"的变量都是这类。
+    const message = err('execute', '{{#instructions}}{{prompt}}{{/instructions}}')
+    assert.match(message, /只出现在.*条件段/)
+    assert.match(message, /段外/, '要说清怎么改')
+
+    // 段外出现过一次就够了，段里再用一次没关系
+    assert.equal(
+      validateTemplate('execute', '{{prompt}}\n{{#instructions}}{{prompt}}{{/instructions}}').ok,
+      true,
+    )
+  })
+
+  test('★ D34：我们不支持的语法当场拒（静默按另一套语义渲染比报错糟）', () => {
+    assert.match(err('execute', '{{prompt}}\n{{> 片段}}'), /不支持/)
+    assert.match(err('execute', '{{prompt}}\n{{> 片段}}'), /partial/)
+    assert.match(err('execute', '{{=<% %>=}}\n<%prompt%>'), /不支持/)
+    assert.match(err('execute', '{{=<% %>=}}\n<%prompt%>'), /分隔符/)
+  })
+
+  test('★ D34：原型链上的名字挡在白名单外（实测渲染成 `[object Object]`、不报错）', () => {
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      const message = err('execute', `{{prompt}}\n{{${name}}}`)
+      assert.match(message, /不认识/)
+    }
   })
 
   test('变量表与实施一致：声明的都渲染得出来，没声明的用不了', () => {

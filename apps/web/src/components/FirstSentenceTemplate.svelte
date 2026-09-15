@@ -185,6 +185,12 @@
           写法是 <code>{varToken('name')}</code>，插值发生在每次 run：同一个模版，
           模型拿到的是这一次的值。
         </p>
+        <p class="row-hint">
+          <strong>可选的东西用条件段</strong>：<code>{'{{#instructions}}…{{/instructions}}'}</code>
+          ——里面那个变量为空时，<strong>整段连标题一起不出现</strong>（所以"没写指令就
+          别留一个空标题"这件事不用你操心）。反向写法是 <code>{'{{^instructions}}…{{/instructions}}'}</code>。
+          ⚠️ 必需的那几个变量得在段<strong>外面</strong>至少出现一次。
+        </p>
         <!--
           ⚠️ 这里原来是一张两列表格（变量 | 说明）。这一栏住在 416px 宽的主从
              栏里，两列在那种宽度下会把说明挤成一条窄缝。改成一变量一段：
