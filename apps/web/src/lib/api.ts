@@ -144,8 +144,13 @@ export interface TemplateVariable {
   name: string
   /** 哪些 run 能用（执行模版里写 `material` 是填错了）。 */
   kinds: FirstSentenceKind[]
-  /** 整段（自带标题）还是单个值。 */
-  block: boolean
+  /**
+   * 是不是多行的内容（界面上标「多行 / 单值」）。
+   *
+   * ⚠️ 它不代表"整段提示词"：D35 之后**所有变量都只给内容**，标题、标签、
+   *    材料标记都由模版写。
+   */
+  multiline: boolean
   /** 缺了会坏掉的那些——保存时就会拒。 */
   requiredFor: FirstSentenceKind[]
   label: string

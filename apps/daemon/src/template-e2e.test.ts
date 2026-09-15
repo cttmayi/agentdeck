@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   AsyncQueue,
   DEFAULT_TEMPLATES,
+  MATERIAL_MARKERS,
   renderFirstSentence,
   SAMPLE_EXECUTE_INPUT,
   type AgentBackend,
@@ -226,10 +227,17 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
   })
 
   test('★ 预览走的是真渲染器：空模版就等于直接渲染默认那段', async () => {
-    const custom = '{{header}}\n\n## 干活\n\n{{prompt}}\n\n（这是自定义模版）'
+    // D35：连身份段也归模版了，所以这里自己写标题与身份行
+    const custom =
+      '# 干活单\n\n- run：`{{runId}}`\n\n## 干活\n\n{{prompt}}\n\n（这是自定义模版）'
     const preview = await postJson('/api/first-sentence/preview', { kind: 'execute', template: custom })
     assert.equal(preview.status, 200)
     assert.match((preview.body as { text: string }).text, /这是自定义模版/)
+    assert.match(
+      (preview.body as { text: string }).text,
+      /# 干活单/,
+      '★ 模版里写的标题要真的出现（D35：标题归模版）',
+    )
     assert.match((preview.body as { text: string }).text, /冒泡排序/, '示例任务正文要插进去')
 
     const asDefault = await postJson('/api/first-sentence/preview', { kind: 'execute', template: '' })
@@ -276,7 +284,7 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     await setTemplates({ executeTemplate: '{{promt}}\n{{prompt}}' })
     assert.deepEqual((await getTemplates()).body.current, before, '被拒的写法不该落库')
 
-    const ok = await setTemplates({ executeTemplate: '{{header}}\n\n{{prompt}}\n\n（全局模版）' })
+    const ok = await setTemplates({ executeTemplate: '{{prompt}}\n\n（全局模版）' })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
     assert.match((await getTemplates()).body.current['executeTemplate']!, /全局模版/)
 
@@ -307,8 +315,12 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
 
 describe('D32：全局模版真的被投递（所有 agent 都按它来）', () => {
   test('★ 两个**不同**的 agent 走同一条执行链路，用的是同一份模版', async () => {
+    // D35：身份段由模版自己写（`{{header}}` 那个变量已经取消）
     const template = [
-      '{{header}}',
+      '# 任务',
+      '',
+      '- run：`{{runId}}`',
+      '- 对象：{{subjectType}} `{{subjectId}}`',
       '',
       '## 你的角色',
       '',
@@ -393,7 +405,10 @@ describe('D32：全局模版真的被投递（所有 agent 都按它来）', () 
     // ★ 全局：只设一次，执行与审核两份各一份
     const set = await setTemplates({
       reviewTemplate:
-        '{{header}}\n\n（全局审核模版生效了）\n\n## 这次要你做什么\n\n{{prompt}}\n\n{{material}}\n\n{{standards}}\n\n{{verdict}}',
+        '# 审核任务\n\n- run：`{{runId}}`\n\n（全局审核模版生效了）\n\n' +
+        '## 这次要你做什么\n\n{{prompt}}\n\n' +
+        `## 待审材料\n\n${MATERIAL_MARKERS.begin}\n{{material}}\n${MATERIAL_MARKERS.end}\n\n` +
+        '{{standards}}\n\n{{verdict}}',
     })
     assert.equal(set.status, 200, JSON.stringify(set.body))
 

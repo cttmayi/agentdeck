@@ -126,6 +126,8 @@
 
   <p class="tpl-hint">
     一次 run 交代给模型的<strong>全部内容</strong>就是这一段文字（只有这一条通道）。
+    <strong>变量只给内容</strong>——标题、标签、材料标记、说明那句话都写在模版里，
+    所以这一段"长什么样"你说了算。
     留空 = 用平台默认那段；自己写 = <strong>整段取代默认</strong>，默认里的
     「完成后给出一份报告」那类护栏也一并没了，需要自己写进去。
   </p>
@@ -202,7 +204,7 @@
               <span class="var-line">
                 <code>{varToken(v.name)}</code>
                 {#if v.requiredFor.includes(kind)}<span class="req">必需</span>{/if}
-                <span class="faint small">{v.block ? '整段' : '单值'}</span>
+                <span class="faint small">{v.multiline ? '多行' : '单值'}</span>
               </span>
               <span class="var-label faint small">{v.label}</span>
             </li>
