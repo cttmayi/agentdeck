@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { agents, identity, loadAgents, loadIdentity, loading, loadError } from '../lib/stores.ts'
+  import {
+    agents,
+    defaultAgentId,
+    identity,
+    loadAgents,
+    loadIdentity,
+    loading,
+    loadError,
+    setDefaultAgent,
+  } from '../lib/stores.ts'
   import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
@@ -177,7 +186,12 @@
                   ? '不自动审核'
                   : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ?? '（已不存在）')}
             <!-- 整条可点：只在名字上加链接的话命中区域太小，而且其余字段看起来像"不可点" -->
-            <li>
+            <!--
+              ⚠️ 「设为默认」是**兄弟节点**，不能放进 `.agent-item` 里面：
+                 那个按钮本身就是一条整行可点的 `<button>`，按钮里套按钮是
+                 非法结构，浏览器会把里层那个拆出去（点起来就是坏的）。
+            -->
+            <li class="agent-row">
               <button
                 type="button"
                 class="agent-item"
@@ -193,6 +207,10 @@
                     <!-- 审核者不挂 skill 就审不了任何东西，这件事必须在列表上就看得见 -->
                     <span class="bad small">未挂 skill</span>
                   {/if}
+                  {#if a.id === $defaultAgentId}
+                    <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
+                    <span class="badge default-badge">默认</span>
+                  {/if}
                 </span>
                 <span class="agent-note faint small">
                   {a.instructions.trim()
@@ -203,6 +221,27 @@
                   {reviewer} · {a.skillIds.length} 个 skill · <code>{a.runtimeKey}</code>
                 </span>
               </button>
+
+              <!--
+                ★ 每个 agent 一个「默认」开关（D36）：设过之后，「新建任务」的
+                  智能体选择器默认就是它。只对执行者给出这个动作——审核者不接
+                  任务（服务端也会拒，这里只是别让人白点一次）。
+              -->
+              {#if a.role === 'executor'}
+                <button
+                  type="button"
+                  class="ghost small default-toggle"
+                  title={a.id === $defaultAgentId
+                    ? '取消默认：新建任务不再默认选它'
+                    : '设为默认：新建任务默认交给它'}
+                  onclick={(e) => {
+                    e.stopPropagation()
+                    void setDefaultAgent(a.id === $defaultAgentId ? null : a.id)
+                  }}
+                >
+                  {a.id === $defaultAgentId ? '取消默认' : '设为默认'}
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -309,6 +348,20 @@
     flex-direction: column;
     gap: var(--sp-1);
   }
+
+  /* 卡片 + 它的「设为默认」开关并排（开关不能嵌进卡片那个 button 里） */
+  .agent-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-1);
+  }
+
+  .default-toggle {
+    flex-shrink: 0;
+    margin-top: var(--sp-1);
+  }
+
+  .default-badge { color: var(--accent); }
 
   .agent-item {
     width: 100%;

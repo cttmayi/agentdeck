@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, newRunId, type Issue } from '../lib/api.ts'
-  import { agents, issues, loadIssues, loadRuns } from '../lib/stores.ts'
+  import { agents, defaultAgentId, issues, loadIssues, loadRuns } from '../lib/stores.ts'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
 
   /**
@@ -21,9 +21,25 @@
   let busy = false
   let error = ''
 
-  // agent 列表到了之后默认选第一个（通常是兜底那个"助手"）
-  $: if (!agentId && $agents.length > 0) agentId = $agents[0]!.id
-  $: chosen = $agents.find((a) => a.id === agentId) ?? null
+  /**
+   * 能接任务的智能体：**只有执行者**。
+   *
+   * ⚠️ 这里是 D36 顺手补上的一个洞：原来选择器列的是**所有** agent，而预选是
+   *    "列表里的第一个"——首启播种的列表里第一个恰恰是**审核员**，也就是说
+   *   默认选项是一个不接任务的 agent。审核者是被动的那一方（它由执行者的
+   *    `reviewerAgentId` 指过去），把任务交给它执行只会跑出一轮莫名其妙的结果。
+   */
+  $: executorAgents = $agents.filter((a) => a.role === 'executor')
+
+  /**
+   * 预选谁（D36）。
+   *
+   * 顺序是：**设过默认就用默认**，没设过才退回第一个执行者。
+   * ⚠️ 只在"还没选过"时生效（`!agentId`）：使用者手动改过之后，列表或默认值的
+   *    任何刷新都不该把他的选择覆盖掉。
+   */
+  $: if (!agentId && executorAgents.length > 0) agentId = $defaultAgentId ?? executorAgents[0]!.id
+  $: chosen = executorAgents.find((a) => a.id === agentId) ?? null
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
@@ -110,16 +126,24 @@
   -->
   <label>
     交给哪个智能体
-    {#if $agents.length === 0}
-      <select disabled><option>（还没有 agent）</option></select>
+    {#if executorAgents.length === 0}
+      <!-- 只有审核者时要说清楚为什么没人可选，而不是给一个空下拉 -->
+      <select disabled><option>（还没有「执行」角色的智能体）</option></select>
+      <span class="hint">
+        去「智能体」页建一个<strong>执行</strong>角色的——审核者是别人产出交给它的那一方，
+        不接任务。
+      </span>
     {:else}
       <select bind:value={agentId}>
-        {#each $agents as a (a.id)}
+        {#each executorAgents as a (a.id)}
           <option value={a.id}>
-            {a.name}{a.role === 'reviewer' ? '（审核）' : ''}
+            {a.name}{a.id === $defaultAgentId ? '（默认）' : ''}
           </option>
         {/each}
       </select>
+      <span class="hint">
+        默认选的是智能体页上标了「默认」的那个（在那里可以改）。
+      </span>
     {/if}
   </label>
 

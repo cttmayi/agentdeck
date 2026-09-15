@@ -564,6 +564,68 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
+  // ── 默认智能体（D36）──
+  //
+  // 端到端那一组：点按钮 → 卡片上出现「默认」→ 新建任务页预选它。
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.seededOnBoot',
+    label: '首启就有一个默认智能体（播种的执行者），不用先想"交给谁"',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.setButtonCount',
+    label: '★ 每个执行者的卡片上都有「设为默认」',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.noButtonOnReviewer',
+    label: '审核者的卡片上没有这个按钮（任务不会交给它）',
+    ok: (v) => v === true,
+  },
+  { view: '默认智能体', key: 'defaultAgent.setButtonFound', label: '找得到一个「设为默认」按钮', ok: (v) => v === true },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.badgeAppears',
+    label: '★ 点完之后那张卡片上出现「默认」徽章',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.badgeRowName',
+    label: '★ 徽章长在**刚点的那个** agent 上（不是别人）',
+    ok: (v, facts) =>
+      typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.buttonFlippedToCancel',
+    label: '按钮变成「取消默认」（同一个按钮管取消）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.optionMarked',
+    label: '★ 新建任务页的选择器里，那一项标着「（默认）」',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.selectListsOnlyExecutors',
+    label: '★ 选择器里**只有执行者**（原来默认选中的甚至是个审核员）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.preselected',
+    label: '★★ 新建任务页**预选**的就是设过的那个 agent（这条就是使用者要的效果）',
+    ok: (v, facts) =>
+      typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
+  },
+
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '新建任务页渲染出来了（没白屏）', ok: (v) => v === true },
 ]

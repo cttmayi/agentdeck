@@ -31,8 +31,8 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('reporting')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS_A, name: 'A', createdAt: 1, updatedAt: 1 })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS_B, name: 'B', createdAt: 2, updatedAt: 2 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS_A, name: 'A', createdAt: 1, updatedAt: 1 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS_B, name: 'B', createdAt: 2, updatedAt: 2 })
 })
 
 after(async () => {

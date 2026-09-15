@@ -156,6 +156,13 @@ export interface TemplateVariable {
   label: string
 }
 
+/** `GET /api/agents`：列表 + 「新建任务的默认智能体」（D36）。 */
+export interface AgentsPayload {
+  agents: Agent[]
+  /** null = 没设过（新建任务页退回列表里的第一个）。 */
+  defaultAgentId: string | null
+}
+
 export interface TemplateKit {
   defaults: Record<FirstSentenceKind, string>
   variables: TemplateVariable[]

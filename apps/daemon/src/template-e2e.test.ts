@@ -222,8 +222,10 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
       assert.ok(Array.isArray(v.kinds) && v.kinds.length > 0)
     }
 
-    // 一开始没人设过 ⇒ 两份都是空（= 平台默认）
-    assert.deepEqual(payload.current, { executeTemplate: '', reviewTemplate: '' })
+    // 一开始没人设过模版 ⇒ 两份都是空（= 平台默认）
+    // （defaultAgentId 是 D36 的，首启会把它设成播种的执行者——这里只断言前两项）
+    assert.equal(payload.current['executeTemplate'], '')
+    assert.equal(payload.current['reviewTemplate'], '')
   })
 
   test('★ 预览走的是真渲染器：空模版就等于直接渲染默认那段', async () => {
@@ -302,14 +304,15 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     const stripped = { ...legacy } as Record<string, unknown>
     delete stripped['executeTemplate']
     delete stripped['reviewTemplate']
+    // D36 那个字段也是同一类：加它之前建的 workspace 里根本没有这个键
+    delete stripped['defaultAgentId']
     await daemon.store.insertWorkspace(stripped as never)
 
     const { body } = await getTemplates()
-    assert.deepEqual(
-      (body as { current: Record<string, string> }).current,
-      { executeTemplate: '', reviewTemplate: '' },
-      '缺键要补成空串（空 = 平台默认 = 与加这个功能之前一样）',
-    )
+    const current = (body as { current: Record<string, string | null> }).current
+    assert.equal(current['executeTemplate'], '', '缺键要补成空串（空 = 平台默认）')
+    assert.equal(current['reviewTemplate'], '')
+    assert.equal(current['defaultAgentId'], null, 'D36 那个缺键要补成 null（= 没设过）')
   })
 })
 

@@ -393,3 +393,85 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
     })
   })
 })
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * 「新建任务的默认智能体」（D36）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 它是 workspace 上的一个**全局单值**——"默认交给谁"本来就是一个选择。
+ * 界面上的入口是每个 agent 卡片上的一个按钮，所以这个接口要能：
+ * 设、取消、拒绝不存在 / 拒绝审核者；而列表接口要把它一起给出来（界面
+ * 靠它标「默认」、新建任务页靠它预选）。
+ */
+describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
+  test('★ 设上之后，列表接口把它带出来；取消之后回到 null', async () => {
+    await withDaemon(async (url) => {
+      const created = await create(url, { name: '默认候选', role: 'executor' })
+      const id = created.body['id'] as string
+
+      const before = (await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string }>
+        defaultAgentId: string | null
+      }
+      // 首启会把播种的执行者设为默认；这里先显式清掉，才能测"设"这个动作
+      await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: null }),
+      })
+
+      const cleared = (await (await fetch(`${url}/api/agents`)).json()) as {
+        defaultAgentId: string | null
+      }
+      assert.equal(cleared.defaultAgentId, null, '取消之后是 null')
+      assert.ok(before.agents.length >= 3, '播种的 + 新建的都在')
+
+      const set = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: id }),
+      })
+      assert.equal(set.status, 200, JSON.stringify(await set.clone().json()))
+
+      const after = (await (await fetch(`${url}/api/agents`)).json()) as {
+        defaultAgentId: string | null
+      }
+      assert.equal(after.defaultAgentId, id, '列表接口要把它一起给出来')
+    })
+  })
+
+  test('★ 审核者不能当默认（任务不会交给被动的那一方）', async () => {
+    await withDaemon(async (url) => {
+      const reviewer = await create(url, { name: '一个审核者', role: 'reviewer' })
+      const res = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: reviewer.body['id'] }),
+      })
+      assert.equal(res.status, 400)
+      const body = (await res.json()) as { error: string }
+      assert.match(body.error, /只有「执行」角色/)
+      assert.match(body.error, /审核者/, '要说清为什么——否则人会以为是 bug')
+    })
+  })
+
+  test('不存在的 agent / 类型不对 ⇒ 400（不静默记下一条悬空值）', async () => {
+    await withDaemon(async (url) => {
+      const missing = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: 'not-an-agent' }),
+      })
+      assert.equal(missing.status, 400)
+      assert.match(((await missing.json()) as { error: string }).error, /不存在/)
+
+      const wrongType = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: 42 }),
+      })
+      assert.equal(wrongType.status, 400)
+    })
+  })
+})

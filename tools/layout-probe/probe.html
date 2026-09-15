@@ -600,6 +600,74 @@
           }
         }
 
+        // ══════════════ 默认智能体（D36）══════════════
+        //
+        // 使用者要的是"每个智能体上一个默认按钮，设过之后新建任务默认选它"。
+        // 这条要**端到端**量：点按钮 → 卡片上出现「默认」→ 新建任务页的
+        // 选择器预选的就是它。中间任何一环断了，量出来都是"没生效"。
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await wait(400)
+
+        // 先取消默认，保证下面「设为默认」那一下是真的起作用
+        const clearBtn = [...d().querySelectorAll('.agent-row button')].find(
+          (b) => b.textContent.trim() === '取消默认',
+        )
+        facts['defaultAgent.seededOnBoot'] = !!clearBtn
+        if (clearBtn) click(clearBtn)
+        await until(
+          () => ![...d().querySelectorAll('.agent-row button')].some((b) => b.textContent.trim() === '取消默认'),
+        )
+
+        const setButtons = () =>
+          [...d().querySelectorAll('.agent-row button')].filter(
+            (b) => b.textContent.trim() === '设为默认',
+          )
+        facts['defaultAgent.setButtonCount'] = setButtons().length
+        // 只有执行者才有这个按钮（审核者不接任务）
+        facts['defaultAgent.noButtonOnReviewer'] = !(
+          d().querySelector('.agent-row .badge.in_review') &&
+          d()
+            .querySelector('.agent-row .badge.in_review')
+            .closest('.agent-row')
+            ?.querySelector('button.default-toggle')
+        )
+
+        const target = setButtons()[0]
+        facts['defaultAgent.setButtonFound'] = !!target
+        if (target) {
+          const targetName = text(target.closest('.agent-row').querySelector('.agent-item strong'))
+          facts['defaultAgent.targetName'] = targetName
+          click(target)
+          const marked = await until(() => !!d().querySelector('.default-badge'))
+          facts['defaultAgent.badgeAppears'] = marked
+          facts['defaultAgent.badgeRowName'] = need('带「默认」徽章的那张卡', () => {
+            const badge = d().querySelector('.default-badge')
+            return text(badge.closest('.agent-row').querySelector('.agent-item strong'))
+          })
+          facts['defaultAgent.buttonFlippedToCancel'] = [...d().querySelectorAll('.agent-row button')].some(
+            (b) => b.textContent.trim() === '取消默认',
+          )
+
+          // ★ 端到端：新建任务页预选的就是它
+          f.contentWindow.location.hash = '#/new'
+          await until(() => !!d().querySelector('select'))
+          await wait(500)
+          const select = [...d().querySelectorAll('select')].find((sel) =>
+            [...sel.options].some((o) => (o.textContent ?? '').includes('（默认）')),
+          )
+          facts['defaultAgent.optionMarked'] = !!select
+          facts['defaultAgent.selectListsOnlyExecutors'] = need('选择器里的选项', () => {
+            const sel = select ?? d().querySelector('select')
+            return [...sel.options].every((o) => !(o.textContent ?? '').includes('（审核）'))
+          })
+          facts['defaultAgent.preselected'] = need('新建任务页预选的 agent', () => {
+            const sel = select ?? d().querySelector('select')
+            const chosen = sel.options[sel.selectedIndex]
+            return chosen ? (chosen.textContent ?? '').replace('（默认）', '').trim() : null
+          })
+        }
+
         // ══════════════ 新建任务：至少不崩 ══════════════
         f.contentWindow.location.hash = '#/new'
         await wait(600)

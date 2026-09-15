@@ -467,7 +467,7 @@ function parseInstallSource(
 }
 
 /**
- * 当前生效的两份第一句话模版（D32）。
+ * 当前生效的 workspace 级设置（D32 的模版 + D36 的默认智能体）。
  *
  * ★ store 是"存什么读什么"，不做 schema 迁移——加字段之前建的 workspace 读回来
  *   那两个键**根本不存在**。类型上写着 `string`、运行时是 `undefined`，这种
@@ -477,14 +477,15 @@ function parseInstallSource(
  * 执行器读的是**同一个函数**——"界面上显示的那份"与"真的投递出去的那份"
  * 必须是同一份，否则这个功能最该防的错觉（看到的不是生效的）就成立了。
  */
-async function readFirstSentenceTemplates(
+async function readWorkspaceSettings(
   store: Store,
   workspaceId: WorkspaceId,
-): Promise<{ executeTemplate: string; reviewTemplate: string }> {
+): Promise<{ executeTemplate: string; reviewTemplate: string; defaultAgentId: string | null }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
     executeTemplate: workspace?.executeTemplate ?? '',
     reviewTemplate: workspace?.reviewTemplate ?? '',
+    defaultAgentId: workspace?.defaultAgentId ?? null,
   }
 }
 
@@ -1225,7 +1226,61 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     // ── agents / issues（M0 看板需要的最小 CRUD）──
     if (req.method === 'GET' && path === '/api/agents') {
-      sendJson(res, 200, { agents: await store.listAgents(workspaceId) })
+      const [agents, settings] = await Promise.all([
+        store.listAgents(workspaceId),
+        readWorkspaceSettings(store, workspaceId),
+      ])
+      // ★ 默认智能体跟着列表一起给：界面要在卡片上标「默认」，新建任务页要用它
+      //   当预选项——两处都拿同一份，不各自猜。
+      sendJson(res, 200, { agents, defaultAgentId: settings.defaultAgentId })
+      return
+    }
+
+    // ── 指定 / 取消「新建任务的默认智能体」（D36）──
+    //
+    // 它是**全局单值**（"默认交给谁"就是一个选择），所以入口不是一个新实体，
+    // 而是 workspace 上的一个字段 + 这一个接口。
+    if (req.method === 'PUT' && path === '/api/agents/default') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['agentId']
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+
+      if (raw === null) {
+        // 取消：显式回到"没设过"
+        await store.insertWorkspace({ ...workspace, defaultAgentId: null, updatedAt: Date.now() })
+        sendJson(res, 200, { defaultAgentId: null })
+        return
+      }
+
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        sendJson(res, 400, { error: 'agentId 必须是 agent 的 id，或 null（= 取消默认）' })
+        return
+      }
+      const agent = await store.getAgent(raw as Agent['id'])
+      if (!agent) {
+        sendJson(res, 400, { error: `agent 不存在：${raw}` })
+        return
+      }
+      // ★ 只有执行者能当默认：审核者是被动的一方（它由执行者的 reviewerAgentId
+      //   指过去），把任务交给它执行是配置错误——这种错误在"任务已经派出去"
+      //   之后才发现，而那时它已经跑了一轮。
+      if (agent.role !== 'executor') {
+        sendJson(res, 400, {
+          error: `只有「执行」角色的智能体能当默认——「${agent.name}」是审核者。` +
+            `审核者是别人产出交给它的那一方，不会接任务。`,
+        })
+        return
+      }
+      await store.insertWorkspace({
+        ...workspace,
+        defaultAgentId: agent.id,
+        updatedAt: Date.now(),
+      })
+      sendJson(res, 200, { defaultAgentId: agent.id })
       return
     }
 
@@ -1238,7 +1293,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   恰恰是模版功能最该防的那种错觉。这里用的是渲染器 + 同一份示例值
     //   （`SAMPLE_FIRST_SENTENCE_INPUTS`，文档里逐字贴的也是它）。
     if (req.method === 'GET' && path === '/api/first-sentence/templates') {
-      const current = await readFirstSentenceTemplates(store, workspaceId)
+      const current = await readWorkspaceSettings(store, workspaceId)
       sendJson(res, 200, {
         defaults: DEFAULT_TEMPLATES,
         variables: TEMPLATE_VARIABLES,
@@ -1273,7 +1328,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (Object.keys(patch).length > 0) {
         await store.insertWorkspace({ ...workspace, ...patch, updatedAt: Date.now() })
       }
-      sendJson(res, 200, await readFirstSentenceTemplates(store, workspaceId))
+      sendJson(res, 200, await readWorkspaceSettings(store, workspaceId))
       return
     }
 
@@ -2457,6 +2512,9 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // 第一句话模版（D32）：空 = 平台默认。首启不替使用者写模版。
     executeTemplate: '',
     reviewTemplate: '',
+    // 默认智能体（D36）：首启那一对 agent 就在这里建，顺手把执行者设为默认——
+    // "建完就派"的那个流程于是有确定的行为，而不是依赖"列表里第一个是谁"。
+    defaultAgentId: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -2542,6 +2600,11 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     updatedAt: now,
   }
   await store.insertAgent(agent)
+
+  // ★ 首启就把刚播下的执行者设为「新建任务的默认智能体」（D36）：使用者建完
+  //   第一件事就是"新建任务"，而那一步不该让他先想"交给谁"。这个默认随时可改
+  //   （智能体卡片上的按钮）。
+  await store.insertWorkspace({ ...workspace, defaultAgentId: agent.id, updatedAt: Date.now() })
 
   info(
     `已初始化工作区、审核模板（${template.slug}）与两个 agent：` +

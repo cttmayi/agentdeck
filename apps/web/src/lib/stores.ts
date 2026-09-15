@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store'
 import {
   api,
   type AgentRole,
+  type AgentsPayload,
   type Agent,
   type FirstSentenceKind,
   type Identity,
@@ -30,6 +31,14 @@ import type { SyncStatus } from './sync.ts'
 export const identity = writable<Identity | null>(null)
 export const issues = writable<Issue[]>([])
 export const agents = writable<Agent[]>([])
+
+/**
+ * 「新建任务的默认智能体」（D36）。
+ *
+ * 它是**全局单值**，跟着 agent 列表一起从接口回来（`GET /api/agents`）——
+ * 智能体页要用它标「默认」，新建任务页要用它当预选项，两处拿的是同一份。
+ */
+export const defaultAgentId = writable<string | null>(null)
 export const skills = writable<Skill[]>([])
 export const runs = writable<RunSummary[]>([])
 export const inbox = writable<InboxItem[]>([])
@@ -77,7 +86,31 @@ export const loadIssues = (): Promise<void> =>
   load('issues', async () => (await api<{ items: Issue[] }>('/api/issues?limit=200')).items ?? [], issues)
 
 export const loadAgents = (): Promise<void> =>
-  load('agents', async () => (await api<{ agents: Agent[] }>('/api/agents')).agents ?? [], agents)
+  load(
+    'agents',
+    async () => {
+      const payload = await api<AgentsPayload>('/api/agents')
+      // ★ 悬空值（默认那个 agent 被删了）在这里落回 null：界面上"等于没设"，
+      //   而不是让新建任务页去猜。
+      const ids = new Set((payload.agents ?? []).map((a) => a.id))
+      defaultAgentId.set(payload.defaultAgentId && ids.has(payload.defaultAgentId) ? payload.defaultAgentId : null)
+      return payload.agents ?? []
+    },
+    agents,
+  )
+
+/**
+ * 指定 / 取消「新建任务的默认智能体」（D36）。
+ *
+ * 校验在服务端（角色、存在性），这里只把它的原文带回去——与其它写入口一致。
+ */
+export async function setDefaultAgent(agentId: string | null): Promise<void> {
+  await api('/api/agents/default', {
+    method: 'PUT',
+    body: JSON.stringify({ agentId }),
+  })
+  await loadAgents()
+}
 
 export const loadSkills = (): Promise<void> =>
   load('skills', async () => (await api<{ skills: Skill[] }>('/api/skills')).skills ?? [], skills)

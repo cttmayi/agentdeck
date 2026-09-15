@@ -70,6 +70,21 @@ export const Workspace = z.object({
   /** 同上，审核那次用的。 */
   reviewTemplate: z.string().default(''),
 
+  /**
+   * ★ 「新建任务」默认交给哪个智能体（D36）。
+   *
+   * 它是**全局单值**——"默认交给谁"本来就是一个选择，不是每个任务一份配置。
+   * `null` = 没设过（新建任务页退回"列表里的第一个"）。
+   *
+   * ⚠️ 只能是 `role: 'executor'` 的 agent：审核者是被动的那一方，任务不会交给
+   *    它执行。这条在写入口校验（`PUT /api/agents/default`）。
+   *
+   * ⚠️ 指向的 agent 被删掉之后，这个值会悬空。读的时候不清理（那要写库，
+   *    而"读"这条路上不该有副作用），**用的时候按"等于没设"处理**——
+   *    新建任务页于是退回第一个 agent，行为与没设过一样。
+   */
+  defaultAgentId: AgentId.nullable().default(null),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })

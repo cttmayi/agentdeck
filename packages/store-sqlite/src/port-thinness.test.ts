@@ -174,8 +174,8 @@ async function scenario(store: Store): Promise<unknown[]> {
   await rec('formatVersion', () => store.formatVersion())
 
   // ── Workspace / Device ──
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS_A, name: 'A', createdAt: 10, updatedAt: 10 })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: WS_B, name: 'B', createdAt: 20, updatedAt: 20 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS_A, name: 'A', createdAt: 10, updatedAt: 10 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS_B, name: 'B', createdAt: 20, updatedAt: 20 })
   await rec('listWorkspaceIds', () => store.listWorkspaceIds())
   await rec('getWorkspace', () => store.getWorkspace(WS_A))
   await rec('getWorkspace.missing', () => store.getWorkspace(wsId('nope')))
@@ -771,7 +771,7 @@ describe('适配器自身的卫生', () => {
     const dir = await makeTempDir('layout')
     try {
       const store = await SqliteStore.open({ dataDir: dir, fsync: false })
-      await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', id: 'ws-x' as WorkspaceId,
+      await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: 'ws-x' as WorkspaceId,
         name: 'x',
         createdAt: 1,
         updatedAt: 1,
