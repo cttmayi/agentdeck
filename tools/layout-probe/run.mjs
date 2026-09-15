@@ -253,6 +253,12 @@ const CHECKS = [
   { view: 'Skills', key: 'skills.openButtonFound', label: '找得到「安装 skill」按钮', ok: (v) => v === true },
   {
     view: 'Skills',
+    key: 'skills.uninstallButtonFound',
+    label: '★ 每行有「卸载」（D38 补齐：原来"装了要删只有改库"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: 'Skills',
     key: 'skills.drawerClass',
     label: '打开的是抽屉且用了宽版',
     ok: (v) => String(v).includes('drawer') && String(v).includes('wide'),
@@ -953,6 +959,21 @@ try {
     }
   } catch (err) {
     log(yellow(`⚠ 造夹具任务时出错：${err}`))
+  }
+
+  // ★ 造一条 **skill** 当夹具（D38 之后首启不再播种 skill，技能库是空的）：
+  //   探针的 Skills 那一段要量列表、抽屉与卸载按钮，没有内容就只能量到空态。
+  try {
+    const res = await fetch(`${base}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [{ slug: 'probe-skill', name: '探针技能', body: '# 探针\n\n夹具。', source: 'local' }],
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
+  } catch (err) {
+    log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
   }
 
   // ★ 再造**一个执行者**（不造 run）：探针要测"换默认智能体"，而首启播种的

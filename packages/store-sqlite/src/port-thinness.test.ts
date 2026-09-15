@@ -11,6 +11,7 @@ import {
   makeRun,
   makeSkill,
   runId,
+  skillId,
   wsId,
 } from '@alpha-helper/domain/testing'
 import type {
@@ -197,6 +198,16 @@ async function scenario(store: Store): Promise<unknown[]> {
   await store.insertSkill(makeSkill({ id: 's2', workspaceId: WS_A, slug: 'style' }))
   await store.insertSkill(makeSkill({ id: 's3', workspaceId: WS_B, slug: 'other' }))
   await rec('listSkills.A', async () => (await store.listSkills(WS_A)).map((s) => s.slug))
+  // ★ 卸载（D38）：删得掉、幂等、删完取不到、别的 workspace 不受影响
+  await rec('deleteSkill.ok', () => store.deleteSkill(skillId('s1')))
+  await rec('deleteSkill.again', () => store.deleteSkill(skillId('s1')))
+  await rec('getSkill.afterDelete', () => store.getSkill(skillId('s1')))
+  await rec('listSkills.A.afterDelete', async () =>
+    (await store.listSkills(WS_A)).map((s) => s.slug),
+  )
+  await rec('listSkills.B.untouched', async () =>
+    (await store.listSkills(WS_B)).map((s) => s.slug),
+  )
   await rec('listSkillsByIds', async () =>
     (await store.listSkillsByIds(['s2', 's3', 's1'] as never)).map((s) => s.id),
   )
@@ -678,6 +689,8 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
       'messages.duplicateSeq',
       'messages.unknownRun',
       'blob.put.idempotent',
+      'deleteSkill.ok',
+      'deleteSkill.again',
       'inbox.markRead',
       'listWorkspaceIds',
       'issueCas.ok',

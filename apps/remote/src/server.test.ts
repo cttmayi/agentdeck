@@ -151,10 +151,10 @@ describe('远端服务（M3）', () => {
       tools: { name: string }[]
       loginMethods: { name: string }[]
     }
-    assert.deepEqual(
-      b.skills.map((s) => s.slug),
-      ['general-review'],
-    )
+    // ★ D38：公共目录里**不再有** `general-review`——那是一份"审核标准"，
+    //   而标准内联在每个审核者身上（daemon 侧的东西）。目录**可以为空**，
+    //   界面要有对应的空态："目录里什么都没有"是一句真话。
+    assert.deepEqual(b.skills, [], '审核标准不该出现在公共目录里')
     assert.ok(b.tools.some((t) => t.name === 'report.get'))
 
     const names = b.loginMethods.map((m) => m.name)

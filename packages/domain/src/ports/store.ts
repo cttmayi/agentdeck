@@ -160,6 +160,16 @@ export interface Store {
   /** 按 id 批量取（一个 run 的技能集合按 agent 求解，D22）。 */
   listSkillsByIds(ids: readonly SkillId[]): Promise<Skill[]>
   insertSkill(skill: Skill): Promise<void>
+  /**
+   * 卸载一条 skill（D38）。
+   *
+   * @returns 真的删到了返回 true；本来就没有返回 false（**不是错误**——
+   *          "它已经不在了"与"删失败"是两件事，调用方要分得清）。
+   *
+   * ⚠️ 调用方负责**引用检查**（还有哪些 agent 挂着它）。存储层不该替上层
+   *    猜"能不能删"——那条规则属于业务，而且它的报错要说清是谁还挂着。
+   */
+  deleteSkill(id: SkillId): Promise<boolean>
 
   // ── Issue 与 Comment ──
 

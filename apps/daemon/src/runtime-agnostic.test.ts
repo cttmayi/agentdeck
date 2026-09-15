@@ -211,9 +211,17 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
   test('★ 声明"没有技能发现机制"⇒ 一个文件都不写，并在日志里明说', async () => {
     const dir = await makeTempDir('agnostic-run')
     try {
-      const { skills } = await api<{ skills: Array<{ id: string; slug: string }> }>('/api/skills')
-      const skill = skills[0]
-      assert.ok(skill, '播种应当有一个内置审核模板')
+      // ⚠️ 夹具自己装一条 skill：D38 之后首启**不再播种** skill（技能库是空的），
+      //    而这条用例要测的正是"挂了 skill 但那个 runtime 没有技能发现机制"。
+      const installed = await api<{ installed: Array<{ id: string; slug: string }> }>('/api/skills', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          skills: [{ slug: 'agnostic-skill', name: '夹具技能', body: '# 夹具', source: 'local' }],
+        }),
+      })
+      const skill = installed.installed[0]
+      assert.ok(skill, '夹具 skill 要装得上')
 
       // 不指向审核者的执行者：这条用例只要一个写入者
       const agent = await api<{ id: string }>('/api/agents', {

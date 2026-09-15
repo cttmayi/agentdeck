@@ -38,6 +38,7 @@ import {
   type RunId,
   type RunMessage,
   type Skill,
+  type ReviewStandard,
   type SubmitRunRequest,
   type AgentRole,
   type Workspace,
@@ -209,13 +210,8 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
  * 所以两处必须用**同一个字符串**——各写一份的话，改了一处忘了另一处，
  * 回填就会静默失效（表现为版本一直是空，界面永远显示"替换本地同名"）。
  */
-const BUILTIN_REVIEW_SKILL: Omit<
-  Skill,
-  'id' | 'workspaceId' | 'createdAt' | 'updatedAt'
-> = {
-  slug: 'general-review',
+const BUILTIN_REVIEW_STANDARD: ReviewStandard = {
   name: '通用审核',
-  description: '开箱可用的通用审核标准：能通过就通过，不行就给出可执行的动作，拿不准就交给人。',
   body: [
     '# 通用审核',
     '',
@@ -230,61 +226,8 @@ const BUILTIN_REVIEW_SKILL: Omit<
     '- `fail` 时用一个动作表达"接下来做什么"，而不是只描述问题。',
     '- 只有确实需要改动时才 `issue.update_status`；纯提示用 `comment.create`。',
   ].join('\n'),
-  verdictSchemaVersion: 1,
-  // ★ 动作子集：这个模板只允许发表评论与打标签，不允许建 issue 或指派 agent
+  // ★ 动作子集：这份标准只允许发表评论与打标签，不允许建 issue 或指派 agent
   allowedActions: ['comment.create', 'issue.add_label'],
-  source: 'local',
-  sourceRef: null,
-  /**
-   * 内置的这份就是公共目录里 `general-review` 的 1.0.0（正文一致，
-   * 见 `apps/remote/src/server.ts` 的目录）。
-   *
-   * 带上版本，界面才能对着目录说"已经装了、版本一致"，而不是把同名一律
-   * 当成冲突——那样使用者每次点「安装」都只会看到一条像出错的提示。
-   */
-  version: '1.0.0',
-}
-
-/**
- * 给**老数据**里的内置模板补上版本号。
- *
- * ══════════════════════════════════════════════════════════════════
- * 为什么需要它：`version` 是后加的字段
- * ══════════════════════════════════════════════════════════════════
- *
- * 在使用者已有的数据目录里，那条内置 `general-review` 是**加字段之前**
- * 播种的，所以没有版本。界面的判断规则是"有版本才能比较"，于是它会显示
- * 「替换本地同名」——而这恰好把使用者最想看到的那句话（"已经装了、版本一致"）
- * 挡掉了：他明明装的就是同一份东西。
- *
- * 回填的判据**刻意很严**（四个条件全满足才动）：
- *
- *   - slug 相同；
- *   - `source === 'local'` 且 `sourceRef === null`（是内置播种的形态）；
- *   - 还没有版本；
- *   - **正文与内置模板逐字节相同** —— 内容被改过就不认，宁可继续显示"来源不明的同名"。
- *
- * 最后一条是关键：不去检查内容就回填，等于替一份**可能是别的东西**的文件
- * 背书（使用者会看到"已安装"然后不再去装）。宁可少回填，不可错回填。
- */
-async function backfillBuiltinSkillVersion(
-  store: Store,
-  workspaceId: WorkspaceId,
-  info: (message: string) => void,
-): Promise<void> {
-  for (const skill of await store.listSkills(workspaceId)) {
-    if (skill.slug !== BUILTIN_REVIEW_SKILL.slug) continue
-    if (skill.source !== 'local' || skill.sourceRef !== null) continue
-    if (skill.version) continue
-    if (skill.body !== BUILTIN_REVIEW_SKILL.body) continue
-
-    // 只补版本，**不动正文**：这是一次登记，不是一次覆盖
-    await store.insertSkill({ ...skill, version: BUILTIN_REVIEW_SKILL.version })
-    info(
-      `已给内置 skill ${skill.slug} 补上版本 ${BUILTIN_REVIEW_SKILL.version}` +
-        `（它是公共目录那一份的本地副本；补上之后界面才能判断"已安装/可更新"）`,
-    )
-  }
 }
 
 /**
@@ -861,14 +804,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   } catch (err) {
     // 收口失败不该阻止 daemon 启动，但必须可见：留着会导致"永远在途"的假象
     warn(`收口遗留 run 失败（可能留下显示为"进行中"的陈旧记录）：${String(err)}`)
-  }
-
-  // 老数据里的内置技能没有版本号（字段是后加的），补上。
-  // 失败同样不阻止启动：它只影响界面上显示"已安装"还是"替换同名"。
-  try {
-    await backfillBuiltinSkillVersion(store, workspaceId, info)
-  } catch (err) {
-    warn(`回填内置 skill 版本失败（界面可能显示成"来源不明的同名"）：${String(err)}`)
   }
 
   /** 起一个 review run（report 与 run 产出两条来源共用）。 */
@@ -1860,6 +1795,39 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 例外被严格限制在 `skill-source.ts` 里：只允许 GitHub 的三个主机、
     // 只允许 https、每跳都校验主机、限大小/文件数/超时。它**不涉及
     // alpha-helper 的远端服务**，D20 那条规则仍然原样成立。
+    // ── 卸载一个 skill（D38）──
+    //
+    // 这是 README 里挂着的那个已知缺口（"装了要删只有改库"）。D38 之后它更有必要：
+    // 老数据里可能还留着当年播种的 `general-review`，而使用者要把它清掉。
+    //
+    // ⚠️ **还挂着它的 agent 会让删除被拒**，并把它们列出来。理由：静默删掉一条
+    //    还被引用的东西，症状是"某个 agent 的 skill 突然没了"——那要在很久以后
+    //    才被发现（而且看起来像技能求解的 bug）。宁可让使用者先摘掉引用。
+    const skillMatch = /^\/api\/skills\/([^/]+)$/.exec(path)
+    if (skillMatch && req.method === 'DELETE') {
+      const skillId = decodeURIComponent(skillMatch[1]!) as Skill['id']
+      const skill = await store.getSkill(skillId)
+      if (!skill) {
+        sendJson(res, 404, { error: `skill 不存在：${skillId}` })
+        return
+      }
+      const agents = await store.listAgents(workspaceId)
+      const holders = agents.filter((a) => a.skillIds.includes(skillId))
+      if (holders.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `还有 ${holders.length} 个智能体挂着「${skill.slug}」：` +
+            `${holders.map((a) => a.name).join('、')}。` +
+            `先在它们的配置里把它摘掉，再卸载——静默删掉一条还被引用的东西，` +
+            `症状会在很久以后才出现（而且看起来像技能求解坏了）。`,
+        })
+        return
+      }
+      const removed = await store.deleteSkill(skillId)
+      sendJson(res, 200, { removed, slug: skill.slug })
+      return
+    }
+
     if (req.method === 'POST' && path === '/api/skills/install') {
       const raw = (await readJsonBody(req)) as {
         source?: unknown
@@ -2616,18 +2584,6 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     })
   }
 
-  // ── 内置审核模板（FR-AGENT-08/09）──
-  // S2 在没有任何模板时是**空的**：使用者得先从零写一个 skill 才能用上。
-  // 所以内置一个最小可用的通用审核标准，作为兜底审核者的默认凭据。
-  const template: Skill = {
-    ...BUILTIN_REVIEW_SKILL,
-    id: ulid() as Skill['id'],
-    workspaceId: workspace.id,
-    createdAt: now,
-    updatedAt: now,
-  }
-  await store.insertSkill(template)
-
   // ══════════════════════════════════════════════════════════════════
   // 播种**一对** agent：一个执行的、一个审的（D28）
   // ══════════════════════════════════════════════════════════════════
@@ -2660,14 +2616,10 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     env: {},
     role: 'reviewer',
     reviewerAgentId: null,
-    // ★ D37：标准内联在审核者身上。它**不再挂载那份 skill**——skill 对审核者
-    //   退成"可选的参考/支持文件"，而标准是它的一个字段。内置的 general-review
-    //   仍留在技能库里（它是远端目录里可安装的一份）。
-    reviewStandard: {
-      name: BUILTIN_REVIEW_SKILL.name,
-      body: BUILTIN_REVIEW_SKILL.body,
-      allowedActions: [...BUILTIN_REVIEW_SKILL.allowedActions],
-    },
+    // ★ 首启的那条标准：内联在审核者身上，**不再播种成一份 skill**（D38）。
+    //   技能库里因此是空的——skill 是"执行者干活时参考什么 / 可安装的资料包"，
+    //   审核标准不从那来。
+    reviewStandard: BUILTIN_REVIEW_STANDARD,
     createdAt: now,
     updatedAt: now,
   }
@@ -2701,9 +2653,12 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
   //   （智能体卡片上的按钮）。
   await store.insertWorkspace({ ...workspace, defaultAgentId: agent.id, updatedAt: Date.now() })
 
+  // ★ 顺便说清"技能库是空的"：使用者打开 Skills 页看到空列表时，不该以为是坏了
+  //   （D38：审核标准内联在审核者身上，不再播种成 skill）。
   info(
-    `已初始化工作区、审核模板（${template.slug}）与两个 agent：` +
-      `${reviewer.name}（审核）、${agent.name}（执行 → 由 ${reviewer.name} 审）`,
+    `已初始化工作区与两个 agent：${reviewer.name}（审核，自带「${BUILTIN_REVIEW_STANDARD.name}」标准）、` +
+      `${agent.name}（执行 → 由 ${reviewer.name} 审）。技能库是空的——` +
+      `审核标准不放在 skill 里，要装 skill 请去「Skills」页。`,
   )
   return workspace.id
 }

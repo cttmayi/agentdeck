@@ -92,28 +92,46 @@ describe('★ 新建 agent：缺 name 要报错，不能造出"新 agent"', () =
 })
 
 describe('★ 挂载不存在的 skill 要在**创建时**就报错', () => {
+  /** 造一条 skill 当夹具（D38 之后首启**不再播种** skill，技能库是空的）。 */
+  async function installOne(url: string): Promise<{ id: string; slug: string }> {
+    const res = await fetch(`${url}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [{ slug: 'fixture-skill', name: '夹具技能', body: '# 夹具', source: 'local' }],
+      }),
+    })
+    const body = (await res.json()) as { installed: Array<{ id: string; slug: string }> }
+    return body.installed[0]!
+  }
+
   test('★ skill id 不存在 ⇒ 400 并列出可用项', async () => {
     // 不校验的话，错误会在运行时才发作：报的是"没有 skill"，
     // 而不是"你填错了 id"——排查方向完全跑偏。
     await withDaemon(async (url) => {
+      const one = await installOne(url)
       const res = await create(url, { name: 'x', skillIds: ['not-a-real-skill'] })
       assert.equal(res.status, 400)
       assert.match(String(res.body['error']), /skill 不存在/)
       // 要给出可用的，否则使用者只能去翻接口
-      assert.match(String(res.body['error']), /general-review/)
+      assert.match(String(res.body['error']), new RegExp(one.slug))
+    })
+  })
+
+  test('技能库为空时也说清"还没有 skill"，而不是给一句空列表', async () => {
+    await withDaemon(async (url) => {
+      const res = await create(url, { name: 'x', skillIds: ['not-a-real-skill'] })
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /还没有 skill/)
     })
   })
 
   test('用真实存在的 skill id 可以创建', async () => {
     await withDaemon(async (url) => {
-      const skills = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ id: string; slug: string }>
-      }).skills
-      const real = skills[0]
-      assert.ok(real, 'daemon 首启会播种一个内置审核模板')
-      const res = await create(url, { name: '审核者', skillIds: [real!.id] })
+      const real = await installOne(url)
+      const res = await create(url, { name: '执行者', skillIds: [real.id] })
       assert.equal(res.status, 201)
-      assert.deepEqual(res.body['skillIds'], [real!.id])
+      assert.deepEqual(res.body['skillIds'], [real.id])
     })
   })
 })
@@ -345,9 +363,6 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
     // 判据取的是**描述符**：不同 runtime 的 baseArgs 不同，而它会被写进
     // 审计的 argv（那是"当时到底怎么起的进程"的权威记录）。
     await withDaemon(async (url) => {
-      const skills = ((await (await fetch(`${url}/api/skills`)).json()) as {
-        skills: Array<{ id: string }>
-      }).skills
       const reviewer = ((await (
         await fetch(`${url}/api/agents`, {
           method: 'POST',
@@ -356,7 +371,12 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
             name: 'generic 审核者',
             role: 'reviewer',
             runtimeKey: 'generic',
-            skillIds: [skills[0]!.id],
+            // D37/D38：审核者靠**自己带的标准**审，不再靠挂 skill
+            reviewStandard: {
+              name: '夹具标准',
+              body: '# 夹具\n\n只看一件事。',
+              allowedActions: ['comment.create'],
+            },
           }),
         })
       ).json()) as { id: string; runtimeKey: string })

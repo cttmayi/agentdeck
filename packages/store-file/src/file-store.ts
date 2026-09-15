@@ -422,6 +422,17 @@ export class FileStore implements Store {
     await ws.mutex.run(() => ws.skill().put(skill))
   }
 
+  async deleteSkill(id: SkillId): Promise<boolean> {
+    // skill 没有 workspaceId 参数 ⇒ 只能逐个 workspace 找（当前只有一个，
+    // 但**别假设这一点**：找不删的代价只是多几次读）
+    for (const wsId of await this.listWorkspaceIds()) {
+      const ws = await this.#ws(wsId)
+      if (!ws.skill().has(id)) continue
+      return ws.mutex.run(() => ws.skill().del(id))
+    }
+    return false
+  }
+
   // ── Issue 与 Comment ──
 
   async getIssue(id: IssueId): Promise<Issue | null> {

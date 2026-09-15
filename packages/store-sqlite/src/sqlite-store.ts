@@ -540,6 +540,11 @@ function derivedSql(): Record<string, string> {
     out[`put:${t}`] = `INSERT INTO ${t}(id, workspace_id, json) VALUES(?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, json = excluded.json`
   }
+  for (const t of GENERAL_PUT_TABLES) {
+    // 与 put 对称的一条：删掉就真的删掉（sqlite 是就地更新的，不像文件适配器
+    // 那样要追加一条 del 记录再等 compact）——D38 加，用于卸载 skill。
+    out[`del:${t}`] = `DELETE FROM ${t} WHERE id = ?`
+  }
   for (const t of WORKSPACE_LIST_TABLES) {
     out[`listByWorkspace:${t}`] = `SELECT json FROM ${t} WHERE workspace_id = ? ORDER BY rowid`
   }
@@ -837,6 +842,12 @@ export class SqliteStore implements Store {
 
   async insertSkill(skill: Skill): Promise<void> {
     this.#putEntity('skill', skill.id as string, skill.workspaceId, skill)
+  }
+
+  async deleteSkill(id: SkillId): Promise<boolean> {
+    const res = this.#stmt('del:skill').run(id as string)
+    // `changes` 是 sqlite 给的"真的删到了几行"——它比"先查再删"少一次竞态
+    return Number(res.changes) > 0
   }
 
   // ── Issue 与 Comment ──

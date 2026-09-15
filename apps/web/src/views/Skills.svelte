@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { loadSkills, loadError, loading, skills } from '../lib/stores.ts'
+  import { loadSkills, loadError, loading, skills, uninstallSkill } from '../lib/stores.ts'
+  import { showToast } from '../lib/view.ts'
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
   import { catalogEntryState } from '../lib/skill-catalog.ts'
@@ -35,6 +36,8 @@
   let tab: 'path' | 'remote' = 'path'
   let sourceInput = ''
   let slugInput = ''
+  /** 正在卸载哪一条（按钮转圈用）；null = 没有在卸。 */
+  let removing: string | null = null
   let actions: string[] = [...DEFAULT_ACTIONS]
   /**
    * 允许替换同名 skill。
@@ -134,6 +137,26 @@
         ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
+  }
+
+  /**
+   * 卸载一条 skill（D38）。
+   *
+   * 服务端会拒掉"还有 agent 挂着它"，并把它们列出来——那条错误原文要**带回来**
+   * 显示，不在前端改写。
+   */
+  async function uninstall(id: string, slug: string): Promise<void> {
+    if (!confirm(`卸载「${slug}」？工作目录里的技能副本会在下一次 run 开始时同步掉。`)) return
+    removing = id
+    errorMessage = ''
+    try {
+      await uninstallSkill(id)
+      showToast(`已卸载 ${slug}`)
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err)
+    } finally {
+      removing = null
+    }
   }
 
   function openPanel(): void {
@@ -334,7 +357,7 @@
       </label>
       <p class="faint small">
         默认不勾：同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"。
-        确实要用新版本顶掉旧的（比如替换内置的 <code>general-review</code>）才勾上。
+        确实要用新版本顶掉旧的（比如你自己改过一版、现在想换回目录里那一版）才勾上。
       </p>
     </div>
 
@@ -400,7 +423,11 @@
 {:else if $loadError['skills']}
   <div class="notice bad">{$loadError['skills']}</div>
 {:else if $skills.length === 0}
-  <div class="empty"><strong>还没有 skill</strong>daemon 首次启动会播种一个内置审核模板。</div>
+  <div class="empty">
+    <strong>还没有 skill</strong>
+    技能是执行者干活时参考的资料包（可安装、带版本、可带支持文件）。
+    <strong>审核标准不在这里</strong>——它写在审核者自己身上（智能体页 → 点开审核者）。
+  </div>
 {:else}
   <div class="table-wrap">
     <table>
@@ -433,13 +460,23 @@
               {#each s.allowedActions as a (a)}<code style="margin-right:4px">{a}</code>{/each}
             </td>
             <td class="faint small">{new Date(s.updatedAt).toLocaleString()}</td>
-            <td>
+            <td class="row-actions">
               <button
                 type="button"
                 class="ghost small"
                 onclick={() => (expanded = expanded === s.id ? null : s.id)}
               >
                 {expanded === s.id ? '收起标准' : '看标准'}
+              </button>
+              <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上 -->
+              <button
+                type="button"
+                class="ghost small danger"
+                disabled={removing === s.id}
+                title="卸载：还有智能体挂着它时会被拒（会告诉你还挂着的是谁）"
+                onclick={() => void uninstall(s.id, s.slug)}
+              >
+                {removing === s.id ? '卸载中…' : '卸载'}
               </button>
             </td>
           </tr>
@@ -528,6 +565,9 @@
     font-size: var(--fs-xs);
     cursor: pointer;
   }
+
+  .row-actions { display: flex; gap: var(--sp-1); }
+  .row-actions .danger { color: var(--bad); }
 
   .skill-body {
     margin: 0;

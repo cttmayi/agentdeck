@@ -22,7 +22,8 @@ export interface LogEntry {
   /** 日志内单调递增的序号。 */
   seq: number
   at: number
-  op: 'put' | 'patch'
+  /** `del` 是 D38 加的（卸载 skill）；老日志里不会有它。 */
+  op: 'put' | 'patch' | 'del'
   id: string
   /** op = put 时的完整实体。 */
   value?: unknown
@@ -100,6 +101,11 @@ export class JsonlLog<T extends { id: string }> {
       this.#index.set(entry.id, entry.value as T)
       return
     }
+    if (entry.op === 'del') {
+      // 删一个不存在的东西是**幂等**的（重复回放同一段日志不该报错）
+      this.#index.delete(entry.id)
+      return
+    }
     const current = this.#index.get(entry.id)
     if (!current) return // patch 先于 put 出现：忽略
     this.#index.set(entry.id, { ...current, ...(entry.patch ?? {}) })
@@ -135,6 +141,21 @@ export class JsonlLog<T extends { id: string }> {
   async patch(id: string, patch: Record<string, unknown>): Promise<boolean> {
     if (!this.#index.has(id)) return false
     await this.#append({ op: 'patch', id, patch })
+    return true
+  }
+
+  /**
+   * 删除一条记录（D38）。
+   *
+   * 追加一条 `del` 而不是去改文件：这个日志是**只追加**的（崩溃时最多丢最后
+   * 一条，前面的都完好），就地改会把这个性质弄丢。真正腾出空间由 `compact()`
+   * 负责——它把当前状态物化成快照再丢弃日志。
+   *
+   * @returns 本来就没有 ⇒ false（不是错误）
+   */
+  async del(id: string): Promise<boolean> {
+    if (!this.#index.has(id)) return false
+    await this.#append({ op: 'del', id })
     return true
   }
 

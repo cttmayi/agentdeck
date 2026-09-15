@@ -320,6 +320,10 @@
         )
         const skillRows = () => d().querySelectorAll('.main table tbody tr').length
         facts['skills.tableRows'] = skillRows()
+        // 卸载入口：README 里"没有卸载"那个缺口补上了
+        facts['skills.uninstallButtonFound'] = [...d().querySelectorAll('.main table tbody button')].some(
+          (b) => b.textContent.trim() === '卸载',
+        )
 
         const openBtn = [...d().querySelectorAll('button')].find(
           (b) => b.textContent.trim() === '安装 skill',

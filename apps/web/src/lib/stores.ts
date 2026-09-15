@@ -131,6 +131,17 @@ export async function setDefaultAgent(agentId: string): Promise<void> {
   await loadAgents()
 }
 
+/**
+ * 卸载一条 skill（D38）。
+ *
+ * 服务端会拒掉"还有 agent 挂着它"的情况（并把它们列出来）——这里只把它的原文
+ * 带回去，与其它写入口一致。
+ */
+export async function uninstallSkill(id: string): Promise<void> {
+  await api(`/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  await Promise.all([loadSkills(), loadAgents()])
+}
+
 export const loadSkills = (): Promise<void> =>
   load('skills', async () => (await api<{ skills: Skill[] }>('/api/skills')).skills ?? [], skills)
 
