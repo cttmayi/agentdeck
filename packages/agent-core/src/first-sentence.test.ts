@@ -140,6 +140,22 @@ ${contract}`
     }
   })
 
+  test('★ 默认模版里的段标签一律**独立成行**（行内写法读起来像粘在一起的）', () => {
+    // 使用者看过一版行内写法（`{{#skills}}能用到的技能：{{skills}}` 后面直接接
+    // `{{/skills}}## 护栏`），评价是"不换行的表达不好看"。这条把它钉住：
+    // 段标签必须单独占一行，模版读起来才是一行一件事。
+    for (const kind of ['execute', 'review'] as const) {
+      for (const line of DEFAULT_TEMPLATES[kind].split('\n')) {
+        if (!/\{\{[#^/!]/.test(line)) continue
+        assert.match(
+          line,
+          /^\{\{[#^/!][^{}]*\}\}$/,
+          `${kind} 模版里这一行不是独立成行的段标签：${JSON.stringify(line)}`,
+        )
+      }
+    }
+  })
+
   test('★ 两个默认模版自己必须通过校验（否则「填入默认模版」会立刻被拒）', () => {
     for (const kind of ['execute', 'review'] as const) {
       const check = validateTemplate(kind, DEFAULT_TEMPLATES[kind])
