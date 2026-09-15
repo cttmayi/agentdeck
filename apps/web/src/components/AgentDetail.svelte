@@ -237,7 +237,7 @@
           <label for="agent-instructions">指令</label>
           <div>
             <textarea id="agent-instructions" bind:value={draft.instructions} rows="4"></textarea>
-            <p class="row-hint">这段填进第一句话的「你的角色」。</p>
+            <p class="row-hint">这段填进第一句话模版的 <code>{'{{instructions}}'}</code>。</p>
           </div>
         </div>
       {:else}

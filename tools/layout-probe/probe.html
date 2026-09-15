@@ -545,6 +545,13 @@
                 (r.textContent ?? '').includes('{{prompt}}') &&
                 (r.textContent ?? '').includes('必需'),
             )
+            // ★ D33：`{{role}}` 这个名字取消了（它自带标题，与 {{instructions}} 重名同事）
+            facts['settings.varListHasNoRoleVar'] = !rows.some((r) =>
+              /\{\{role\}\}/.test(r.textContent ?? ''),
+            )
+            facts['settings.varHasInstructions'] = rows.some((r) =>
+              (r.textContent ?? '').includes('{{instructions}}'),
+            )
           }
 
           const pvBtn = findIn(d().querySelector('.drawer'), '预览')

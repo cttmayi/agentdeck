@@ -98,7 +98,8 @@
     {open}
     wide
     title="新建智能体"
-    subtitle="建好之后它就会按「设置」里那份第一句话模版接活；换 agent 只换「你的角色」那一段。"
+    subtitle={'建好之后它就会按「设置」里那份第一句话模版接活；' +
+      '这一段会作为 {{instructions}} 插进模版。'}
     {onclose}
   >
   <form onsubmit={submit} class="agent-form" id="new-agent-form">
@@ -167,7 +168,7 @@
           : '它是谁、怎么干活。这段会进它的上下文。'}
       ></textarea>
       <span class="hint">
-        这一段会填进第一句话的「你的角色」。留空也行——那就只有任务本身。
+        这一段会填进第一句话模版的 <code>{'{{instructions}}'}</code>。留空也行——那就只有任务本身。
       </span>
     </label>
 

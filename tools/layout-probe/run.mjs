@@ -499,6 +499,18 @@ const CHECKS = [
     show: (v) => `${v} 行`,
   },
   { view: '新建表单 / 设置', key: 'settings.varHasPrompt', label: '变量清单里有 {{prompt}}', ok: (v) => v === true },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.varListHasNoRoleVar',
+    label: '★ 变量清单里没有 {{role}}（D33：它自带标题、与 {{instructions}} 重名同事，已取消）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.varHasInstructions',
+    label: '变量清单里有 {{instructions}}（内容那个）',
+    ok: (v) => v === true,
+  },
   { view: '新建表单 / 设置', key: 'settings.varMarksRequired', label: '必需的变量上标了「必需」', ok: (v) => v === true },
   {
     view: '新建表单 / 设置',

@@ -36,8 +36,6 @@ describe('第一句话：默认模版（D32）', () => {
 - run：\`01M2EXEC000000000000000001\`
 - 对象：issue \`01M2ISSUE00000000000000001\`
 
-## 你的角色
-
 你是一个严谨的协作者。先理解任务，再动手。
 
 ## 要做的事
@@ -65,8 +63,6 @@ describe('第一句话：默认模版（D32）', () => {
 - 对象：run \`01M2EXEC000000000000000001\`
 - 类型：\`run-output\`
 - 关联 issue：\`01M2ISSUE00000000000000001\`
-
-## 你的角色
 
 你是一个严格的审核者。判断依据不足时给出 needs_human。
 
@@ -140,9 +136,10 @@ ${contract}`
 
 describe('第一句话：模版变量（D32）', () => {
   test('空段整段消失，而且不会留下一串空行', () => {
-    // 没写指令、没挂 skill ⇒ 「你的角色」与「你能用的技能」都不该出现
+    // 没写指令、没挂 skill ⇒ 那条指令与技能行都不该出现（D33：标题归模版，
+    // 所以这里根本没有「你的角色」这个标题可留）
     const text = renderFirstSentence({ ...SAMPLE_EXECUTE_INPUT, instructions: null })
-    assert.doesNotMatch(text, /你的角色/, '空段不该出现标题')
+    assert.doesNotMatch(text, /你的角色/, '默认模版里没有那个标题')
     assert.doesNotMatch(text, /你能用的技能/)
     assert.doesNotMatch(text, /\n{3,}/, '连续空行要被收敛成一个——否则模版一改就是大片空白')
     assert.match(text, /## 要做的事\n\n冒泡排序/)
@@ -157,8 +154,6 @@ describe('第一句话：模版变量（D32）', () => {
         'runId={{runId}} subjectType={{subjectType}} subjectId={{subjectId}}',
         'prompt={{prompt}}',
         'instructions={{instructions}}',
-        'role={{role}}',
-        'slugs={{skillSlugs}}',
         'skills={{skills}}',
         'reportKind={{reportKind}} issueId={{issueId}} prev={{previousContext}}',
         '{{material}}',
@@ -168,7 +163,7 @@ describe('第一句话：模版变量（D32）', () => {
     })
     assert.doesNotMatch(review, /\{\{/, '不该有变量残留')
     assert.match(review, /runId=01M2REVIEW00000000000000001 subjectType=run subjectId=01M2EXEC/)
-    assert.match(review, /slugs=general-review/)
+    assert.match(review, /skills=能用到的技能：`general-review`/)
     assert.match(review, /reportKind=run-output issueId=01M2ISSUE00000000000000001/)
     assert.match(review, /prev=\/work\/\.alpha-helper\/context\/x\.md/)
     assert.match(review, /你是一个严格的审核者/)
@@ -176,7 +171,7 @@ describe('第一句话：模版变量（D32）', () => {
 
     const execute = renderFirstSentence({
       ...SAMPLE_EXECUTE_INPUT,
-      template: '{{header}}\n\n{{prompt}}\n\n{{instructions}}\n\n{{skillSlugs}}',
+      template: '{{header}}\n\n{{prompt}}\n\n{{instructions}}\n\n{{skills}}',
     })
     assert.doesNotMatch(execute, /\{\{/)
     assert.match(execute, /冒泡排序/)
@@ -237,6 +232,34 @@ describe('第一句话：模版变量（D32）', () => {
     assert.match(text, /\{\{prompt\}\}/, '任务正文里的花括号是内容，不是变量')
   })
 
+  test('★ D33：单值变量渲染出来**就是那个值**，不带任何标题', () => {
+    // 这条钉的是一个具体的设计决定（使用者的反馈："{{role}} 的定义包括
+    // ## 你的角色，感觉不合理"）：**变量给内容，标题归模版**。
+    const text = renderFirstSentence({
+      ...SAMPLE_EXECUTE_INPUT,
+      template: '{{prompt}}\n@@@\n{{instructions}}\n@@@\n{{skills}}',
+      skills: [{ slug: 'alpha', name: 'A', body: 'x' }],
+    })
+    const [, role, skills] = text.split('\n@@@\n')
+    assert.equal(role, '你是一个严谨的协作者。先理解任务，再动手。', '{{instructions}} 就是原文')
+    assert.doesNotMatch(role!, /#/, '它不该自带任何标题')
+    assert.equal(skills, '能用到的技能：`alpha`', '{{skills}} 是一行提示 + 清单')
+    assert.doesNotMatch(text, /## 你的角色/, '「你的角色」这个标题已经归模版了')
+  })
+
+  test('★ D33：`{{standards}}` 不再自带 `## 审核标准` 那个大标题', () => {
+    const text = renderFirstSentence({
+      ...SAMPLE_REVIEW_INPUT,
+      template: '{{prompt}}\n@@@\n{{standards}}\n@@@\n{{material}}\n@@@\n{{verdict}}',
+    })
+    const standards = text.split('\n@@@\n')[1]!
+    assert.match(standards, /^### general-review（通用审核）/, '每个 skill 一小段，靠 ### 分开')
+    // ⚠️ 只查**我们**那个大标题在不在：skill 正文自己带 `# 通用审核`、`## 判断标准`
+    //    之类的标记，那些是内容，不该被这条断言管
+    assert.doesNotMatch(standards, /^## 审核标准/m, '大标题由模版写')
+    assert.ok(!standards.startsWith('## '), '这一段应当直接从 `### slug` 开始')
+  })
+
   test('`{{{{` 写出一对字面大括号（模版里要描述标记时用得上）', () => {
     const text = renderFirstSentence({
       ...SAMPLE_REVIEW_INPUT,
@@ -281,7 +304,7 @@ describe('第一句话：模版校验（D32 —— 坏模版进不了库）', ()
     assert.match(message, /只属于审核模版/)
     assert.match(message, /执行 run 没有待审核的内容/)
 
-    const back = validateTemplate('review', '{{prompt}}\n{{material}}\n{{verdict}}\n{{skillSlugs}}')
+    const back = validateTemplate('review', '{{prompt}}\n{{material}}\n{{verdict}}\n{{instructions}}')
     assert.equal(back.ok, true, '审核模版用执行也有的变量不算错')
   })
 

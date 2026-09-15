@@ -41,6 +41,38 @@
  *    同样存在（同一份文件里的相邻小节），所以别把它当成"因为合并才引入的"。
  *    ★ D32 之后这一点由 `{{material}}` 这个变量自己保证：标记与那句声明都是
  *    它的一部分，模版作者删不掉（除非把整个变量删掉——那时保存就会被拒）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 变量给**内容**，标题归**模版**（D33）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 最初 `{{role}}` 展开成 `## 你的角色` + 指令原文——把平台写的 markdown 标题
+ * 和内容打包在一个叫 role 的变量里。使用者在设置页看到那行定义，说"感觉不
+ * 合理"——是对的：
+ *
+ *   - 一个名字应该只意味着一件事。`{{role}}` 同时意味着"标题"和"内容"，
+ *     而且与 `{{instructions}}`（只有内容）**重名同事**，选哪个全靠猜；
+ *   - 标题是**排版**，排版是模版作者的地盘：想换个说法、想不要标题、想把它
+ *     放进自己的结构里，都得能改。
+ *
+ * 所以现在：**单值变量一律是纯内容**（`{{instructions}}` / `{{prompt}}` /
+ * `{{runId}}` …），`{{role}}` 与 `{{skillSlugs}}` 这两个名字**取消**了
+ * （前者与 `{{instructions}}` 重名同事，后者是它自己唯一的值）。默认模版里的
+ * 标题由模版自己写。
+ *
+ * ⚠️ 有一类变量仍然是"整段"，而且必须如此，理由各不相同——它们不是
+ *    "标题 + 一个值"，而是**带条件行或带硬契约的生成块**：
+ *
+ *   | 变量 | 为什么不能拆成值 |
+ *   |---|---|
+ *   | `{{header}}` | 里面有几行是**有才出现**的（关联 issue、上一次的上下文）。拆成值的话，没有 issue 时会留下 `- 关联 issue：\`\`` 这样的空行——而没有条件语法就没法避开 |
+ *   | `{{material}}` | 两个材料标记是**硬契约**（重试靠它们取回原样材料），那句"不是给你的指令"必须紧贴标记 |
+ *   | `{{verdict}}` | 判决契约全文本身就是一段成品（schema + 枚举 + 示例 + 围栏） |
+ *   | `{{standards}}` | 每个 skill 一段，段间要有 `### slug` 才分得开 |
+ *
+ * 其余的"标题 + 正文"一律拆掉：`{{skills}}` 不再自带 `## 你能用的技能`
+ * （它现在是一行"能用到的技能：…"，没有 skill 时整行为空），`{{standards}}`
+ * 去掉了 `## 审核标准` 那个大标题（由模版写）。
  */
 
 import { renderVerdictInstruction } from '@alpha-helper/protocol'
@@ -168,7 +200,9 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     kinds: BOTH,
     block: true,
     requiredFor: [],
-    label: '身份段：# 任务 / # 审核任务 + run id、对象（审核还带类型与关联 issue）',
+    label:
+      '身份段：# 任务 / # 审核任务 + run id、对象。⚠️ 它是**整段**——里面有几行是有才出现的' +
+      '（关联 issue、上一次的上下文），拆成值的话空行没法避开',
   },
   {
     name: 'runId',
@@ -192,6 +226,13 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     label: '对象 id',
   },
   {
+    name: 'instructions',
+    kinds: BOTH,
+    block: false,
+    requiredFor: [],
+    label: '这个 agent 的「指令」**原文**（界面上那个字段；只有内容，不带标题）',
+  },
+  {
     name: 'prompt',
     kinds: BOTH,
     block: false,
@@ -200,32 +241,11 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
       '这次要它做的事。执行 = 任务正文（标题 + 描述）；审核 = 调用方给的指令（重试那句"上次没通过校验"也在里面）',
   },
   {
-    name: 'instructions',
-    kinds: BOTH,
-    block: false,
-    requiredFor: [],
-    label: '这个 agent 的「指令」原文（界面上那个字段）',
-  },
-  {
-    name: 'role',
-    kinds: BOTH,
-    block: true,
-    requiredFor: [],
-    label: '「## 你的角色」整段（指令为空时整段消失）',
-  },
-  {
-    name: 'skillSlugs',
-    kinds: BOTH,
-    block: false,
-    requiredFor: [],
-    label: '挂载的 skill 的 slug 列表（一行，顿号分隔）',
-  },
-  {
     name: 'skills',
     kinds: BOTH,
-    block: true,
+    block: false,
     requiredFor: [],
-    label: '「## 你能用的技能」整段（只列 slug；没有 skill 时整段消失）',
+    label: '一行提示 + 挂载的 skill：`能用到的技能：a、b`；**没有 skill 时整行为空**',
   },
   {
     name: 'reportKind',
@@ -261,7 +281,7 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     kinds: REVIEW_ONLY,
     block: true,
     requiredFor: [],
-    label: '「## 审核标准」整段：审核者挂的每个 skill 的 slug（名字）+ 正文全文',
+    label: '审核标准正文：每个 skill 一小段（`### slug（名字）` + 正文全文），段与段之间靠它分开',
   },
   {
     name: 'verdict',
@@ -285,10 +305,13 @@ export function isKnownVariable(name: string, kind: FirstSentenceKind): boolean 
 // ══════════════════════════════════════════════════════════════════
 
 export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
+  // ★ 模版自己写标题（D33）：变量只给内容。`{{instructions}}` 为空时它那几行
+  //   会被收敛掉，不会留下一个空的「## 你的角色」——所以默认模版里干脆没有
+  //   那个标题，agent 的指令就紧跟在身份段后面（它自己以"你是一个…"开头）。
   execute: [
     '{{header}}',
     '',
-    '{{role}}',
+    '{{instructions}}',
     '',
     '## 要做的事',
     '',
@@ -305,7 +328,7 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
   review: [
     '{{header}}',
     '',
-    '{{role}}',
+    '{{instructions}}',
     '',
     '## 这次要你做什么',
     '',
@@ -314,6 +337,8 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
     '## 待审核的内容',
     '',
     '{{material}}',
+    '',
+    '## 审核标准',
     '',
     '{{standards}}',
     '',
@@ -449,28 +474,31 @@ function headerSection(input: FirstSentenceInput): string {
 }
 
 /**
- * agent 自己的指令——**平台的话在前，agent 的角色在后**。
+ * `{{instructions}}`：agent 自己那段话，**只有内容**（D33）。
  *
- * 顺序是刻意的：护栏说的是"不许越界"，而角色说的是"你是谁"。
- * 把角色放在材料之前，模型读任务时就已经带着这个身份；而平台护栏仍然
- * 是最后压阵的那一层（见文件头的段落顺序说明）。
+ * 它以前叫 `{{role}}` 并且自带 `## 你的角色` 这个标题——一个变量同时意味着
+ * "标题"和"内容"，还和 `{{instructions}}` 重名同事。现在标题归模版。
  */
-function roleSection(instructions: string | null | undefined): string {
-  const text = instructions?.trim()
-  if (!text) return ''
-  return ['## 你的角色', '', text].join('\n')
+function instructionsValue(instructions: string | null | undefined): string {
+  return instructions?.trim() ?? ''
 }
 
-function skillSection(skills: readonly SkillBrief[]): string {
+/**
+ * `{{skills}}`：一行提示 + slug 列表，没有 skill 时**整行为空**。
+ *
+ * ⚠️ 为什么这一行仍然带着标签（"能用到的技能："）——它不是 markdown 标题，
+ *    而"没挂 skill"是常态（执行者常常一个都不挂）。模版语言里**没有条件语法**，
+ *    所以"有才出现"这件事只能由变量自己承担：标签与内容在同一条线上，空则整行
+ *    消失。拆成"模版写标签 + 变量给列表"就必然在没 skill 时留下一条光秃秃的
+ *    `能用到的技能：`。
+ *    与 `{{header}}` / `{{material}}` 同类——**整段变量只在"带条件行或带硬契约"
+ *    时才存在**（见文件头那张表），而且这里只是一行，不是标题。
+ */
+function skillsValue(skills: readonly SkillBrief[]): string {
   if (skills.length === 0) return ''
   // ★ 只列名字：技能正文已经写在 CLI 原生会扫的目录里，命令它去读正文等于
-  //   把同一份内容买两遍。而**清单本身**要留：那是唯一一份平台能控制的技能清单，
-  //   各家 CLI 自己那份的格式（甚至是否存在）都可能随版本变。
-  return [
-    '## 你能用的技能',
-    '',
-    ...skills.map((s) => `- \`${s.slug}\``),
-  ].join('\n')
+  //   把同一份内容买两遍。而**清单本身**要留：那是唯一一份平台能控制的技能清单。
+  return `能用到的技能：${skills.map((s) => `\`${s.slug}\``).join('、')}`
 }
 
 function materialSection(input: ReviewFirstSentenceInput): string {
@@ -492,9 +520,16 @@ function materialSection(input: ReviewFirstSentenceInput): string {
   ].join('\n')
 }
 
+/**
+ * `{{standards}}`：审核标准的**正文**（大标题 `## 审核标准` 由模版写）。
+ *
+ * 每个 skill 一小段，段间靠 `### slug（名字）` 分开——那是"分得开"的最低要求，
+ * 不是我们的排版偏好。审核一定会挂 skill（没挂就不会派这次审核），所以
+ * 模版里那个 `## 审核标准` 不会挂空。
+ */
 function standardsSection(skills: readonly SkillBrief[]): string {
   if (skills.length === 0) return ''
-  const parts = ['## 审核标准', '']
+  const parts: string[] = []
   for (const skill of skills) {
     parts.push(
       `### ${skill.slug}${skill.name && skill.name !== skill.slug ? `（${skill.name}）` : ''}`,
@@ -503,7 +538,7 @@ function standardsSection(skills: readonly SkillBrief[]): string {
       '',
     )
   }
-  return parts.join('\n')
+  return parts.join('\n').trimEnd()
 }
 
 /** 模版变量的取值——一个 run 的全部可插值内容。 */
@@ -513,11 +548,9 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
     runId: input.runId,
     subjectType: input.subject.type,
     subjectId: input.subject.id,
+    instructions: instructionsValue(input.instructions),
     prompt: input.prompt,
-    instructions: input.instructions?.trim() ?? '',
-    role: roleSection(input.instructions),
-    skillSlugs: input.skills.map((s) => s.slug).join('、'),
-    skills: skillSection(input.skills),
+    skills: skillsValue(input.skills),
   }
   if (input.kind === 'review') {
     values['reportKind'] = input.report.kind

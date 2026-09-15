@@ -52,7 +52,7 @@ export const Workspace = z.object({
    *
    * 它**不是**每个 agent 一份：那段文字是"平台怎么把一次 run 交代给模型"的
    * 骨架，跟"这个 agent 是谁"是两件事。后者由 `Agent.instructions` 承担，
-   * 而它会被插进模版里的 `{{role}}`。
+   * 而它会作为 `{{instructions}}` 插进模版里（D33）。
    *
    * 空字符串 = 用平台默认模版（`DEFAULT_TEMPLATES[kind]`，见
    * `packages/agent-core/src/first-sentence.ts`）。两者是**同一台渲染器**，
