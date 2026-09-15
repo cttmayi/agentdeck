@@ -630,6 +630,53 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
+  // ── 迁移：把挂载的 skill 转成内联标准（D38）──
+  //
+  // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且标准正来自它。
+  // 这一步就是那个出口，所以必须端到端量（按钮 → 标准出现、挂载清空）。
+  {
+    view: '迁移（D38）',
+    key: 'migrate.legacyFixtureFound',
+    label: '★ 夹具里有一个"只挂 skill、没有内联标准"的审核者（否则下面会空过）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.buttonFound',
+    label: '★ 老形态审核者的详情页有「把挂载的 skill 转成内联标准」',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.detailSwitched',
+    label: '★ 右栏真的换成了那个老形态审核者（否则下面读到的是上一个 agent）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.legacyHintBefore',
+    label: '点之前那一段显示的是"沿用挂载的 skill"',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.legacyHintGone',
+    label: '点之后那句提示消失（不再是老形态了）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.adopted',
+    label: '★ 点完之后标准真的固化到它身上了',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.mountCleared',
+    label: '★ 挂载同时被摘掉（于是那条 skill 才卸得掉）',
+    ok: (v) => v === true,
+  },
+
   // ── 默认智能体（D36）──
   //
   // 端到端那一组：点按钮 → 徽章**移到**刚点的那张卡上（且仍然只有一个）→
@@ -974,6 +1021,29 @@ try {
     if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
   } catch (err) {
     log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
+  }
+
+  // ★ 再造一个**老形态的审核者**（D38 的迁移夹具）：只挂 skill、没有内联标准。
+  //   探针要走一遍"把挂载的 skill 转成内联标准 → 那条 skill 才卸得掉"。
+  try {
+    const skills = (await (await fetch(`${base}/api/skills`)).json()).skills
+    const probeSkill = skills.find((s) => s.slug === 'probe-skill')
+    if (!probeSkill) {
+      log(yellow('⚠ 找不到夹具 skill——迁移那几条会空过'))
+    } else {
+      const res = await fetch(`${base}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: '探针用的老形态审核者',
+          role: 'reviewer',
+          skillIds: [probeSkill.id],
+        }),
+      })
+      if (!res.ok) log(yellow(`⚠ 造老形态审核者失败（HTTP ${res.status}）`))
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造老形态审核者时出错：${err}`))
   }
 
   // ★ 再造**一个执行者**（不造 run）：探针要测"换默认智能体"，而首启播种的

@@ -792,3 +792,91 @@ describe('★ 卸载 skill（D38）', () => {
     })
   })
 })
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * 过渡期迁移：把"来自挂载 skill 的标准"固化到 agent 上（D38）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这条路的由来：使用者**删不掉**那条内置的 `general-review`——因为他的审核者还挂着
+ * 它，而且**它的审核标准正来自它**（老数据）。而"先摘掉 skill 再卸载"会先把审核者
+ * 变成一个没标准的状态，平台于是不再把产出交给它审。
+ *
+ * 所以需要一步"原样固化"：把当前生效的标准（= 挂载 skill 的正文与动作并集）写成
+ * agent 自己的 `reviewStandard`，并摘掉那些挂载。固化之后那条 skill 才能被卸载。
+ */
+describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', () => {
+  async function adopt(url: string, agentId: string) {
+    const res = await fetch(
+      `${url}/api/agents/${encodeURIComponent(agentId)}/review-standard/adopt-from-skills`,
+      { method: 'POST' },
+    )
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  }
+
+  test('★ 固化之后：标准与"固化之前生效的那份"一致、挂载清空、skill 可以卸载了', async () => {
+    await withDaemon(async (url) => {
+      // 造一条技能 + 一个只挂它、没有内联标准的审核者（＝老数据的形态）
+      const installed = await install(url, {
+        skills: [
+          { slug: 'legacy-a', name: '老标准甲', body: '# 甲\n\n只看甲。', source: 'local' },
+          { slug: 'legacy-b', name: '老标准乙', body: '# 乙\n\n只看乙。', source: 'local' },
+        ],
+        batchId: 'b1',
+      })
+      const ids = (installed.body['installed'] as Array<{ id: string }>).map((s) => s.id)
+      const reviewer = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '老形态审核者', role: 'reviewer', skillIds: ids }),
+        })
+      ).json()) as { id: string; reviewStandard: unknown; skillIds: string[] }
+      assert.equal(reviewer.reviewStandard, null)
+      assert.equal(reviewer.skillIds.length, 2)
+
+      const res = await adopt(url, reviewer.id)
+      assert.equal(res.status, 200)
+      const adopted = res.body['adopted'] as { name: string; fromSkills: string[] }
+      assert.deepEqual(adopted.fromSkills.sort(), ['legacy-a', 'legacy-b'])
+
+      const after = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; skillIds: string[]; reviewStandard: { body: string; allowedActions: string[]; name: string } | null }>
+      }).agents.find((a) => a.id === reviewer.id)!
+      assert.deepEqual(after.skillIds, [], '挂载要摘掉——标准已经在它自己身上了')
+      assert.ok(after.reviewStandard, '标准固化下来了')
+      assert.match(after.reviewStandard!.body, /只看甲/)
+      assert.match(after.reviewStandard!.body, /只看乙/, '两份 skill 的正文都要在')
+      assert.match(after.reviewStandard!.name, /老标准甲/)
+
+      // ★ 现在两条 skill 都不再被引用 ⇒ 可以卸载
+      for (const id of ids) {
+        const del = await fetch(`${url}/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        assert.equal(del.status, 200, '固化之后卸载应当成功')
+      }
+      assert.equal((await listSkills(url)).length, 0)
+    })
+  })
+
+  test('没有标准可固化 / 非审核角色 ⇒ 400，并说清怎么做', async () => {
+    await withDaemon(async (url) => {
+      const empty = await fetch(`${url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '没标准的审核者', role: 'reviewer' }),
+      }).then((r) => r.json() as Promise<{ id: string }>)
+      const res = await adopt(url, empty.id)
+      assert.equal(res.status, 400)
+      assert.match(String(res.body['error']), /没有可固化的标准/)
+
+      const executor = await fetch(`${url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '执行者', role: 'executor' }),
+      }).then((r) => r.json() as Promise<{ id: string }>)
+      assert.equal((await adopt(url, executor.id)).status, 400)
+
+      assert.equal((await adopt(url, 'not-an-agent')).status, 404)
+    })
+  })
+})

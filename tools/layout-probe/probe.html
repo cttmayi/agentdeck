@@ -686,6 +686,51 @@
           await wait(250)
         }
 
+        // ══════════════ 迁移：把挂载的 skill 转成内联标准（D38）══════════════
+        //
+        // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且标准
+        // 正来自它。这条路要端到端量：详情页那个按钮 → 标准出现、挂载清空 →
+        // 那条 skill 才卸得掉。
+        const legacyRow = [...d().querySelectorAll('.agent-row')].find((row) =>
+          (row.textContent ?? '').includes('探针用的老形态审核者'),
+        )
+        facts['migrate.legacyFixtureFound'] = !!legacyRow
+        if (legacyRow) {
+          click(legacyRow.querySelector('.agent-item'))
+          // ⚠️ 必须等右栏**换成了这个 agent**——前面的段落已经选过别的 agent 了，
+          //    只等 `.detail` 存在会立刻返回，读到的是上一个 agent 的详情
+          //    （又一次"看早"，这次被 `legacyHintBefore` 那条断言抓到）
+          facts['migrate.detailSwitched'] = await until(
+            () => text(d().querySelector('.detail h2')) === '探针用的老形态审核者',
+            60,
+          )
+          await wait(300)
+          const adoptBtn = [...d().querySelectorAll('.detail button')].find(
+            (b) => b.textContent.trim() === '把挂载的 skill 转成内联标准',
+          )
+          facts['migrate.buttonFound'] = !!adoptBtn
+          if (adoptBtn) {
+            // 固化之前：这一段显示的是"沿用挂载的 skill"那句提示
+            facts['migrate.stdRowText'] = need('审核标准那一行的文字', () => {
+              const row = [...d().querySelectorAll('.detail .field-row')].find(
+                (r) => text(r.querySelector('.row-label')) === '审核标准',
+              )
+              return row ? text(row).slice(0, 140) : null
+            })
+            facts['migrate.legacyHintBefore'] = String(facts['migrate.stdRowText'] ?? '').includes(
+              '沿用挂载',
+            )
+            click(adoptBtn)
+            // 固化之后：出现标准名的徽章（`.std-name-badge`，D37 的那个）
+            facts['migrate.adopted'] = await until(
+              () => !!d().querySelector('.detail .std-name-badge'),
+              60,
+            )
+            facts['migrate.legacyHintGone'] = !(d().textContent ?? '').includes('沿用挂载的 skill')
+            facts['migrate.mountCleared'] = !(d().textContent ?? '').includes('挂载的 skill')
+          }
+        }
+
         // ══════════════ 默认智能体（D36）══════════════
         //
         // 使用者要的是"每个智能体上一个默认按钮，设过之后新建任务默认选它"。
@@ -702,7 +747,9 @@
           const r = el.getBoundingClientRect()
           return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right }
         }
-        const badge = () => d().querySelector('.default-badge')
+        // ⚠️ 限定在**列表**里：详情页也有徽章（审核标准的名字），
+        //    文档级的 querySelectorAll 会把两件事混成一件（踩过）
+        const badge = () => d().querySelector('.agent-list .default-badge')
         const toggleBtns = () =>
           [...d().querySelectorAll('.default-toggle')].filter(Boolean)
         const cancelBtns = () =>
@@ -716,7 +763,7 @@
           (row) => row.querySelector('.badge.in_progress'),
         ).length
 
-        facts['defaultAgent.badgeCount'] = d().querySelectorAll('.default-badge').length
+        facts['defaultAgent.badgeCount'] = d().querySelectorAll('.agent-list .default-badge').length
         facts['defaultAgent.noCancelButton'] = cancelBtns().length === 0
         facts['defaultAgent.setButtonCount'] = toggleBtns().length
         facts['defaultAgent.noButtonOnReviewer'] = !(
@@ -763,7 +810,7 @@
           facts['defaultAgent.badgeMovesToTarget'] = marked
           // ★ 单选：设完之后「默认」徽章**只有一个**，而且没有"取消默认"这种东西
           facts['defaultAgent.badgeStillExactlyOne'] =
-            d().querySelectorAll('.default-badge').length === 1
+            d().querySelectorAll('.agent-list .default-badge').length === 1
           facts['defaultAgent.noCancelAfterSet'] = cancelBtns().length === 0
           facts['defaultAgent.targetHasNoToggle'] = !targetRow.querySelector('.default-toggle')
 

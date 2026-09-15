@@ -132,6 +132,19 @@ export async function setDefaultAgent(agentId: string): Promise<void> {
 }
 
 /**
+ * 把"来自挂载 skill 的标准"固化到这个审核者身上，并摘掉那些挂载（D38）。
+ *
+ * 过渡期的迁移入口：老数据里审核者的标准是从挂载的 skill 推出来的，而"卸载那条
+ * skill"必须先有这一步——否则审核者会失去依据（平台于是不会再把产出交给它审）。
+ */
+export async function adoptReviewStandard(agentId: string): Promise<void> {
+  await api(`/api/agents/${encodeURIComponent(agentId)}/review-standard/adopt-from-skills`, {
+    method: 'POST',
+  })
+  await Promise.all([loadAgents(), loadSkills()])
+}
+
+/**
  * 卸载一条 skill（D38）。
  *
  * 服务端会拒掉"还有 agent 挂着它"的情况（并把它们列出来）——这里只把它的原文

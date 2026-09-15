@@ -1803,6 +1803,56 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ⚠️ **还挂着它的 agent 会让删除被拒**，并把它们列出来。理由：静默删掉一条
     //    还被引用的东西，症状是"某个 agent 的 skill 突然没了"——那要在很久以后
     //    才被发现（而且看起来像技能求解的 bug）。宁可让使用者先摘掉引用。
+    // ── 把"来自挂载 skill 的标准"固化到 agent 上（D38）──
+    //
+    // 过渡期的迁移入口：老数据里审核者没有 `reviewStandard`，它的标准是从挂载的
+    // skill 推出来的。而"卸载那条 skill"必须先有这一步，否则审核者会失去依据。
+    //
+    // ★ 解析用**服务端同一个函数**（`resolveReviewStandard`）——里面是"正文拼起来、
+    //   动作取并集"那套规则。让前端自己拼一遍，两处规则迟早分叉，而分叉的表现是
+    //   "固化之后的标准与固化之前生效的不是同一份"。
+    const adoptMatch = /^\/api\/agents\/([^/]+)\/review-standard\/adopt-from-skills$/.exec(path)
+    if (adoptMatch && req.method === 'POST') {
+      const agentId = decodeURIComponent(adoptMatch[1]!) as Agent['id']
+      const agent = await store.getAgent(agentId)
+      if (!agent) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      if (agent.role !== 'reviewer') {
+        sendJson(res, 400, { error: '只有审核角色才有审核标准可固化' })
+        return
+      }
+      const mounted = await loadAgentSkills(store, agent)
+      const resolved = resolveReviewStandard(agent, mounted)
+      if (!resolved) {
+        sendJson(res, 400, {
+          error:
+            '它没有可固化的标准：既没有内联标准，挂着的 skill 也都没有正文。' +
+            '先在详情页写一条标准。',
+        })
+        return
+      }
+      const updated: Agent = {
+        ...agent,
+        reviewStandard: {
+          name: resolved.name,
+          body: resolved.body,
+          allowedActions: [...resolved.allowedActions],
+        },
+        // 摘掉挂载：标准已经在它自己身上了，再挂着同一份东西只会让"依据是什么"
+        // 有两处答案（而且那两处随时可能不一致）
+        skillIds: [],
+        updatedAt: Date.now(),
+      }
+      await store.insertAgent(updated)
+      sendJson(res, 200, {
+        agent: updated,
+        adopted: { name: resolved.name, fromSkills: mounted.map((s) => s.slug) },
+      })
+      return
+    }
+
     const skillMatch = /^\/api\/skills\/([^/]+)$/.exec(path)
     if (skillMatch && req.method === 'DELETE') {
       const skillId = decodeURIComponent(skillMatch[1]!) as Skill['id']
@@ -1814,12 +1864,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const agents = await store.listAgents(workspaceId)
       const holders = agents.filter((a) => a.skillIds.includes(skillId))
       if (holders.length > 0) {
+        // ★ 过渡期最常见的形态：审核者**没有内联标准**，它的判断依据正来自这条
+        //   skill（老数据，见 `resolveReviewStandard` 的兼容路径）。这时光说
+        //   "先摘掉它"是不够的——摘掉之后审核者就没标准了。所以直接指出那一步：
+        //   去详情页把标准固化到自己身上（`adopt-from-skills`）。
+        const needsAdopt = holders.filter((a) => a.role === 'reviewer' && !a.reviewStandard)
+        const names = holders.map((a) => a.name).join('、')
         sendJson(res, 400, {
           error:
-            `还有 ${holders.length} 个智能体挂着「${skill.slug}」：` +
-            `${holders.map((a) => a.name).join('、')}。` +
-            `先在它们的配置里把它摘掉，再卸载——静默删掉一条还被引用的东西，` +
-            `症状会在很久以后才出现（而且看起来像技能求解坏了）。`,
+            `还有 ${holders.length} 个智能体挂着「${skill.slug}」：${names}。` +
+            (needsAdopt.length > 0
+              ? `其中「${needsAdopt.map((a) => a.name).join('、')}」**没有内联的审核标准**` +
+                `——它的判断依据正来自这条 skill。去智能体页点开它，按「把挂载的 skill ` +
+                `转成内联标准」，再回来卸载。`
+              : `先在它们的配置里把它摘掉，再卸载`) +
+            `——静默删掉一条还被引用的东西，症状会在很久以后才出现` +
+            `（而且看起来像技能求解坏了）。`,
         })
         return
       }

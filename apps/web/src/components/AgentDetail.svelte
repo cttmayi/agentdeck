@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Agent } from '../lib/api.ts'
-  import { agents, identity, skills, updateAgent } from '../lib/stores.ts'
+  import { agents, identity, skills, updateAgent, adoptReviewStandard } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
   import ReviewStandardEditor from './ReviewStandardEditor.svelte'
 
@@ -46,6 +46,8 @@
   let editing = false
   let busy = false
   let error = ''
+  /** 正在把"来自 skill 的标准"固化到 agent 上（D38 的迁移按钮）。 */
+  let adopting = false
 
   const blankDraft = () => ({
     name: agent.name,
@@ -318,7 +320,10 @@
             {#if !isReviewer}
               <p class="empty-value">不适用 —— 执行者不审别人的产出。</p>
             {:else if agent.reviewStandard}
-              <span class="badge default-badge">{agent.reviewStandard.name}</span>
+              <!-- ⚠️ 类名别用 `default-badge`：那是 D36「默认智能体」的徽章。
+                   撞名之后"列表里「默认」有几个"这种断言会被详情页这个名字骗到
+                   （探针就是这么抓到的）。 -->
+              <span class="badge std-name-badge">{agent.reviewStandard.name}</span>
               <p class="row-hint">
                 它按下面这份标准判断；判完能触发的动作：
                 {#if agent.reviewStandard.allowedActions.length === 0}
@@ -338,7 +343,36 @@
               <p class="row-hint">
                 它还没有内联的审核标准，当前<strong>沿用挂载的 skill</strong>当标准：
                 {#each attached as s, i (s.id)}{i > 0 ? '、' : ''}<code>{s.slug}</code>{/each}。
-                点「编辑」可以把标准写进它自己身上（推荐——那样它不依赖 skill 就能审）。
+              </p>
+              <!--
+                ★ 一步做完迁移（D38）：把标准**原样**固化到它自己身上，并摘掉挂载。
+                  没有这一步，"卸载那条 skill"会先把审核者变成没标准的状态——
+                  而"没标准"意味着平台不再把产出交给它审。
+                  解析在服务端做（同一个 `resolveReviewStandard`），前端不重算。
+              -->
+              <button
+                type="button"
+                class="secondary small"
+                disabled={adopting}
+                onclick={async () => {
+                  adopting = true
+                  error = ''
+                  try {
+                    await adoptReviewStandard(agent.id)
+                    showToast('标准已固化到它自己身上；挂载已摘掉，那条 skill 现在可以卸载了')
+                    onchanged()
+                  } catch (err) {
+                    error = err instanceof Error ? err.message : String(err)
+                  } finally {
+                    adopting = false
+                  }
+                }}
+              >
+                {adopting ? '固化中…' : '把挂载的 skill 转成内联标准'}
+              </button>
+              <p class="row-hint">
+                转换是<strong>原样</strong>的（正文与允许的动作都不变），之后它不依赖 skill
+                也能审；那条 skill 也就能卸载了。
               </p>
             {:else}
               <p class="empty-value">
