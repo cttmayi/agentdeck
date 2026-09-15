@@ -414,18 +414,8 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
         agents: Array<{ id: string }>
         defaultAgentId: string | null
       }
-      // 首启会把播种的执行者设为默认；这里先显式清掉，才能测"设"这个动作
-      await fetch(`${url}/api/agents/default`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agentId: null }),
-      })
-
-      const cleared = (await (await fetch(`${url}/api/agents`)).json()) as {
-        defaultAgentId: string | null
-      }
-      assert.equal(cleared.defaultAgentId, null, '取消之后是 null')
       assert.ok(before.agents.length >= 3, '播种的 + 新建的都在')
+      assert.ok(before.defaultAgentId, '首启就该有一个默认（播种的执行者）')
 
       const set = await fetch(`${url}/api/agents/default`, {
         method: 'PUT',
@@ -453,6 +443,36 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
       const body = (await res.json()) as { error: string }
       assert.match(body.error, /只有「执行」角色/)
       assert.match(body.error, /审核者/, '要说清为什么——否则人会以为是 bug')
+    })
+  })
+
+  test('★ 没有「取消默认」：必须有一个默认（要换就设成另一个）', async () => {
+    await withDaemon(async (url) => {
+      const res = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: null }),
+      })
+      assert.equal(res.status, 400)
+      const body = (await res.json()) as { error: string }
+      assert.match(body.error, /必须有一个/)
+      assert.match(body.error, /设成另一个/, '要告诉人正确的做法是什么')
+
+      // 设成另一个 ⇒ 原来那个自动让位（单值本身保证了这一点）
+      const a = await create(url, { name: '甲执行者', role: 'executor' })
+      const b = await create(url, { name: '乙执行者', role: 'executor' })
+      for (const agent of [a, b]) {
+        const r = await fetch(`${url}/api/agents/default`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ agentId: agent.body['id'] }),
+        })
+        assert.equal(r.status, 200)
+      }
+      const list = (await (await fetch(`${url}/api/agents`)).json()) as {
+        defaultAgentId: string | null
+      }
+      assert.equal(list.defaultAgentId, b.body['id'], '最后一个设的赢（单选）')
     })
   })
 

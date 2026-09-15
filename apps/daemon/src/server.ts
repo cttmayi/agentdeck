@@ -1249,15 +1249,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      if (raw === null) {
-        // 取消：显式回到"没设过"
-        await store.insertWorkspace({ ...workspace, defaultAgentId: null, updatedAt: Date.now() })
-        sendJson(res, 200, { defaultAgentId: null })
-        return
-      }
-
+      // ★ **没有"取消默认"**：必须有一个默认（使用者的要求）。要换就直接设成另一个，
+      //   原来那个自动让位——那样"新建任务交给谁"永远是确定的，不会变成一个
+      //   每次都要现想的问题。
       if (typeof raw !== 'string' || raw.trim() === '') {
-        sendJson(res, 400, { error: 'agentId 必须是 agent 的 id，或 null（= 取消默认）' })
+        sendJson(res, 400, {
+          error:
+            'agentId 必须是某个执行者的 id —— 默认智能体必须有一个（要换就设成另一个，' +
+            '原来那个会自动让位）',
+        })
         return
       }
       const agent = await store.getAgent(raw as Agent['id'])

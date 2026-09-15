@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, newRunId, type Issue } from '../lib/api.ts'
-  import { agents, defaultAgentId, issues, loadIssues, loadRuns } from '../lib/stores.ts'
+  import { agents, effectiveDefaultAgentId, issues, loadIssues, loadRuns } from '../lib/stores.ts'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
 
   /**
@@ -34,11 +34,14 @@
   /**
    * 预选谁（D36）。
    *
-   * 顺序是：**设过默认就用默认**，没设过才退回第一个执行者。
+   * 就是**生效中的默认**（设过的那个；没设过或那个已被删除时是第一个执行者）——
+   * 界面上"必须有一个默认"这条由 `effectiveDefaultAgentId` 保证。
    * ⚠️ 只在"还没选过"时生效（`!agentId`）：使用者手动改过之后，列表或默认值的
    *    任何刷新都不该把他的选择覆盖掉。
    */
-  $: if (!agentId && executorAgents.length > 0) agentId = $defaultAgentId ?? executorAgents[0]!.id
+  $: if (!agentId && executorAgents.length > 0) {
+    agentId = $effectiveDefaultAgentId ?? executorAgents[0]!.id
+  }
   $: chosen = executorAgents.find((a) => a.id === agentId) ?? null
 
   async function submit(event: SubmitEvent): Promise<void> {
@@ -137,7 +140,7 @@
       <select bind:value={agentId}>
         {#each executorAgents as a (a.id)}
           <option value={a.id}>
-            {a.name}{a.id === $defaultAgentId ? '（默认）' : ''}
+            {a.name}{a.id === $effectiveDefaultAgentId ? '（默认）' : ''}
           </option>
         {/each}
       </select>

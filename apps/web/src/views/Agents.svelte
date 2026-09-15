@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     agents,
-    defaultAgentId,
+    effectiveDefaultAgentId,
     identity,
     loadAgents,
     loadIdentity,
@@ -191,11 +191,10 @@
                  那个按钮本身就是一条整行可点的 `<button>`，按钮里套按钮是
                  非法结构，浏览器会把里层那个拆出去（点起来就是坏的）。
             -->
-            <li class="agent-row">
+            <li class="agent-row" class:active={a.id === selectedId}>
               <button
                 type="button"
                 class="agent-item"
-                class:active={a.id === selectedId}
                 onclick={() => (selectedId = a.id)}
               >
                 <span class="agent-line">
@@ -207,7 +206,7 @@
                     <!-- 审核者不挂 skill 就审不了任何东西，这件事必须在列表上就看得见 -->
                     <span class="bad small">未挂 skill</span>
                   {/if}
-                  {#if a.id === $defaultAgentId}
+                  {#if a.id === $effectiveDefaultAgentId}
                     <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
                     <span class="badge default-badge">默认</span>
                   {/if}
@@ -223,23 +222,25 @@
               </button>
 
               <!--
-                ★ 每个 agent 一个「默认」开关（D36）：设过之后，「新建任务」的
-                  智能体选择器默认就是它。只对执行者给出这个动作——审核者不接
-                  任务（服务端也会拒，这里只是别让人白点一次）。
+                ★ 「默认」是**单选**：每个 agent 一个「设为默认」，点谁就是谁——
+                  设了新的，原来那个自动不再是默认。**没有「取消默认」**：
+                  必须有一个默认（使用者的要求），空着只会让"新建任务交给谁"
+                  变成一个每次都要想的问题。
+
+                  只对执行者给出这个动作——审核者不接任务（服务端也会拒，
+                  这里只是别让人白点一次）。
               -->
-              {#if a.role === 'executor'}
+              {#if a.role === 'executor' && a.id !== $effectiveDefaultAgentId}
                 <button
                   type="button"
                   class="ghost small default-toggle"
-                  title={a.id === $defaultAgentId
-                    ? '取消默认：新建任务不再默认选它'
-                    : '设为默认：新建任务默认交给它'}
+                  title="设为默认：新建任务默认交给它（原来那个会自动换成它）"
                   onclick={(e) => {
                     e.stopPropagation()
-                    void setDefaultAgent(a.id === $defaultAgentId ? null : a.id)
+                    void setDefaultAgent(a.id)
                   }}
                 >
-                  {a.id === $defaultAgentId ? '取消默认' : '设为默认'}
+                  设为默认
                 </button>
               {/if}
             </li>
@@ -349,22 +350,52 @@
     gap: var(--sp-1);
   }
 
-  /* 卡片 + 它的「设为默认」开关并排（开关不能嵌进卡片那个 button 里） */
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 卡片是**这一行**（li），开关在卡片**里面**
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 第一版把开关放在卡片外面（行是 flex，卡片一个 `width:100%` 的按钮、
+   * 开关是它的兄弟）。两个毛病：
+   *
+   *   1. **溢出**：`.agent-item` 的 `min-width: auto`（flex 默认）不让它缩到
+   *      内容宽度以下，于是"卡片 368px + 开关 74px"直接顶出栏外——实测开关
+   *      右边缘 710px，而左栏右边界 656px，多出 54px 的横向溢出；
+   *   2. **开关挂在边框外面**，看起来像没画完。
+   *
+   * 现在边框画在 li 上，内层按钮透明、`flex: 1` + `min-width: 0`（这条是上面
+   * 那个坑的正解），开关在同一个框里靠右。
+   */
   .agent-row {
     display: flex;
     align-items: flex-start;
     gap: var(--sp-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+  }
+
+  .agent-row:hover {
+    background: var(--surface-2);
+  }
+
+  /* 选中的那条要一眼看出来：主从布局里"右边是谁"全靠这个 */
+  .agent-row.active {
+    background: var(--surface-2);
+    border-color: var(--accent);
   }
 
   .default-toggle {
     flex-shrink: 0;
-    margin-top: var(--sp-1);
+    margin: var(--sp-2) var(--sp-2) 0 0;
   }
 
   .default-badge { color: var(--accent); }
 
   .agent-item {
-    width: 100%;
+    /* ★ `flex: 1` + `min-width: 0`：后者是让按钮能缩到内容宽度以下的关键，
+          否则它会把整行顶出栏外（见上面那段） */
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -372,20 +403,9 @@
     text-align: left;
     padding: var(--sp-3);
     background: none;
-    border: 1px solid transparent;
-    border-radius: var(--radius);
+    border: none;
     color: var(--text);
     cursor: pointer;
-  }
-
-  .agent-item:hover {
-    background: var(--surface-2);
-  }
-
-  /* 选中的那条要一眼看出来：主从布局里"右边是谁"全靠这个 */
-  .agent-item.active {
-    background: var(--surface-2);
-    border-color: var(--accent);
   }
 
   .agent-line {

@@ -100,11 +100,29 @@ export const loadAgents = (): Promise<void> =>
   )
 
 /**
- * 指定 / 取消「新建任务的默认智能体」（D36）。
+ * **生效中的**默认智能体（D36）。
  *
+ * ⚠️ 与 `defaultAgentId`（存下来的那个值）刻意分开：
+ *
+ *   - 没设过、或者设的那个 agent 已经被删掉 ⇒ 退回**第一个执行者**。
+ *     这样"必须有一个默认"在界面上始终成立——列表上永远有且只有一条标着
+ *     「默认」，新建任务页永远有确定的预选项，而不是空着让人每次现想；
+ *   - 读的时候**不写库**（"读"这条路上不该有副作用），悬空值就那么留着，
+ *     等下一次有人设默认时自然被覆盖。
+ */
+export const effectiveDefaultAgentId = derived([agents, defaultAgentId], ([$agents, $id]) => {
+  const executors = $agents.filter((a) => a.role === 'executor')
+  if ($id && executors.some((a) => a.id === $id)) return $id
+  return executors[0]?.id ?? null
+})
+
+/**
+ * 指定「新建任务的默认智能体」（D36）。
+ *
+ * **没有"取消"**：默认必须有一个（设成另一个，原来那个自动让位）。
  * 校验在服务端（角色、存在性），这里只把它的原文带回去——与其它写入口一致。
  */
-export async function setDefaultAgent(agentId: string | null): Promise<void> {
+export async function setDefaultAgent(agentId: string): Promise<void> {
   await api('/api/agents/default', {
     method: 'PUT',
     body: JSON.stringify({ agentId }),

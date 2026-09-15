@@ -121,8 +121,10 @@
         if (!entered) errors.push('点了第一条 agent 之后 .split-layout 没有带上 with-detail')
         facts['agents.afterClickClass'] = need('点击后 class', () => layout()?.className)
         facts['agents.tracks'] = need('两栏宽度', () => cs(layout()).gridTemplateColumns.split(' '))
+        // ⚠️ 选中态挂在 `.agent-row`（那一行才是卡片：边框要包住右侧的开关），
+        //    所以这里按**行**取，再确认它里面确实是刚点的那张卡
         facts['agents.activeCardClass'] = need('选中态', () =>
-          d().querySelector('.agent-item.active')?.className.replace(/ svelte-\w+/, ''),
+          d().querySelector('.agent-row.active')?.className.replace(/ svelte-\w+/, ''),
         )
         facts['agents.detailRendered'] = need('右栏是否渲染出详情', () =>
           !!d().querySelector('.detail-pane .detail'),
@@ -603,51 +605,83 @@
         // ══════════════ 默认智能体（D36）══════════════
         //
         // 使用者要的是"每个智能体上一个默认按钮，设过之后新建任务默认选它"。
-        // 这条要**端到端**量：点按钮 → 卡片上出现「默认」→ 新建任务页的
-        // 选择器预选的就是它。中间任何一环断了，量出来都是"没生效"。
+        // 两轮反馈之后的语义：**单选**（设了新的，原来那个自动让位；没有"取消默认"），
+        // 而且开关要在卡片**里面**、不许溢出。
         f.contentWindow.location.hash = '#/agents'
         await until(() => d().querySelectorAll('.agent-item').length > 0)
         await wait(400)
 
-        // 先取消默认，保证下面「设为默认」那一下是真的起作用
-        const clearBtn = [...d().querySelectorAll('.agent-row button')].find(
-          (b) => b.textContent.trim() === '取消默认',
-        )
-        facts['defaultAgent.seededOnBoot'] = !!clearBtn
-        if (clearBtn) click(clearBtn)
-        await until(
-          () => ![...d().querySelectorAll('.agent-row button')].some((b) => b.textContent.trim() === '取消默认'),
-        )
-
-        const setButtons = () =>
-          [...d().querySelectorAll('.agent-row button')].filter(
-            (b) => b.textContent.trim() === '设为默认',
+        const paneEl2 = d().querySelector('.pane')
+        const paneBodyEl = d().querySelector('.pane-body')
+        const rowBox = (el) => {
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right }
+        }
+        const badge = () => d().querySelector('.default-badge')
+        const toggleBtns = () =>
+          [...d().querySelectorAll('.default-toggle')].filter(Boolean)
+        const cancelBtns = () =>
+          [...d().querySelectorAll('.agent-row button')].filter((b) =>
+            (b.textContent ?? '').includes('取消默认'),
           )
-        facts['defaultAgent.setButtonCount'] = setButtons().length
-        // 只有执行者才有这个按钮（审核者不接任务）
+
+        // ⚠️ 第二个执行者是**夹具**（run.mjs 在启动 Chrome 之前造的，见那边的注释：
+        //    不能在探针里造，虚拟时间会让"等界面刷新"看早）。
+        facts['defaultAgent.executorCount'] = [...d().querySelectorAll('.agent-row')].filter(
+          (row) => row.querySelector('.badge.in_progress'),
+        ).length
+
+        facts['defaultAgent.badgeCount'] = d().querySelectorAll('.default-badge').length
+        facts['defaultAgent.noCancelButton'] = cancelBtns().length === 0
+        facts['defaultAgent.setButtonCount'] = toggleBtns().length
         facts['defaultAgent.noButtonOnReviewer'] = !(
-          d().querySelector('.agent-row .badge.in_review') &&
           d()
             .querySelector('.agent-row .badge.in_review')
-            .closest('.agent-row')
+            ?.closest('.agent-row')
             ?.querySelector('button.default-toggle')
         )
 
-        const target = setButtons()[0]
+        // ★ 布局：开关必须在卡片的边框**里面**，整行不许溢出栏宽
+        const paneW = rowBox(paneEl2)
+        const rowWithToggle = toggleBtns()[0]?.closest('.agent-row')
+        facts['defaultAgent.rowFitsPane'] = !!(
+          rowWithToggle &&
+          paneW &&
+          rowBox(rowWithToggle).right <= paneW.right + 1
+        )
+        facts['defaultAgent.switchInsideRow'] = !!(
+          rowWithToggle &&
+          toggleBtns()[0] &&
+          rowBox(toggleBtns()[0]).right <= rowBox(rowWithToggle).right + 1
+        )
+        facts['defaultAgent.rowOverflowX'] = rowWithToggle
+          ? rowWithToggle.scrollWidth - rowWithToggle.clientWidth
+          : null
+        facts['defaultAgent.paneBodyOverflowX'] = paneBodyEl
+          ? paneBodyEl.scrollWidth - paneBodyEl.clientWidth
+          : null
+
+        const target = toggleBtns()[0]
         facts['defaultAgent.setButtonFound'] = !!target
         if (target) {
-          const targetName = text(target.closest('.agent-row').querySelector('.agent-item strong'))
-          facts['defaultAgent.targetName'] = targetName
+          const targetRow = target.closest('.agent-row')
+          facts['defaultAgent.targetName'] = text(targetRow.querySelector('.agent-item strong'))
+          const previous = need('点之前谁是默认', () => text(badge().closest('.agent-row').querySelector('.agent-item strong')))
+          facts['defaultAgent.previousName'] = previous
+
           click(target)
-          const marked = await until(() => !!d().querySelector('.default-badge'))
-          facts['defaultAgent.badgeAppears'] = marked
-          facts['defaultAgent.badgeRowName'] = need('带「默认」徽章的那张卡', () => {
-            const badge = d().querySelector('.default-badge')
-            return text(badge.closest('.agent-row').querySelector('.agent-item strong'))
-          })
-          facts['defaultAgent.buttonFlippedToCancel'] = [...d().querySelectorAll('.agent-row button')].some(
-            (b) => b.textContent.trim() === '取消默认',
+          const marked = await until(
+            () =>
+              text(badge()?.closest('.agent-row')?.querySelector('.agent-item strong')) ===
+              facts['defaultAgent.targetName'],
           )
+          facts['defaultAgent.badgeMovesToTarget'] = marked
+          // ★ 单选：设完之后「默认」徽章**只有一个**，而且没有"取消默认"这种东西
+          facts['defaultAgent.badgeStillExactlyOne'] =
+            d().querySelectorAll('.default-badge').length === 1
+          facts['defaultAgent.noCancelAfterSet'] = cancelBtns().length === 0
+          facts['defaultAgent.targetHasNoToggle'] = !targetRow.querySelector('.default-toggle')
 
           // ★ 端到端：新建任务页预选的就是它
           f.contentWindow.location.hash = '#/new'

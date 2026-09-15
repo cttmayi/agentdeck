@@ -566,50 +566,102 @@ const CHECKS = [
 
   // ── 默认智能体（D36）──
   //
-  // 端到端那一组：点按钮 → 卡片上出现「默认」→ 新建任务页预选它。
+  // 端到端那一组：点按钮 → 徽章**移到**刚点的那张卡上（且仍然只有一个）→
+  // 新建任务页预选它。布局那几条是第二轮反馈加的：开关必须在卡片**里面**、
+  // 整行不许溢出（第一版溢出 54px，栏里多出一条横向滚动条）。
   {
     view: '默认智能体',
-    key: 'defaultAgent.seededOnBoot',
-    label: '首启就有一个默认智能体（播种的执行者），不用先想"交给谁"',
+    key: 'defaultAgent.executorCount',
+    label: '★ 至少有两个执行者，才测得了"换默认"',
+    ok: (v) => typeof v === 'number' && v >= 2,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.badgeCount',
+    label: '★ 界面上「默认」徽章**有且只有一个**（必须有一个默认）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.noCancelButton',
+    label: '★ 没有「取消默认」这种说法（要换就设成另一个）',
     ok: (v) => v === true,
   },
   {
     view: '默认智能体',
     key: 'defaultAgent.setButtonCount',
-    label: '★ 每个执行者的卡片上都有「设为默认」',
+    label: '★ 其余每个执行者卡片上都有「设为默认」',
     ok: (v) => typeof v === 'number' && v >= 1,
     show: (v) => `${v} 个`,
   },
   {
     view: '默认智能体',
     key: 'defaultAgent.noButtonOnReviewer',
-    label: '审核者的卡片上没有这个按钮（任务不会交给它）',
-    ok: (v) => v === true,
-  },
-  { view: '默认智能体', key: 'defaultAgent.setButtonFound', label: '找得到一个「设为默认」按钮', ok: (v) => v === true },
-  {
-    view: '默认智能体',
-    key: 'defaultAgent.badgeAppears',
-    label: '★ 点完之后那张卡片上出现「默认」徽章',
+    label: '审核者的卡片上没有这个开关（任务不会交给它）',
     ok: (v) => v === true,
   },
   {
     view: '默认智能体',
-    key: 'defaultAgent.badgeRowName',
-    label: '★ 徽章长在**刚点的那个** agent 上（不是别人）',
-    ok: (v, facts) =>
-      typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
+    key: 'defaultAgent.rowFitsPane',
+    label: '★ 带开关那一行不超出左栏（第一版溢出 54px）',
+    ok: (v) => v === true,
   },
   {
     view: '默认智能体',
-    key: 'defaultAgent.buttonFlippedToCancel',
-    label: '按钮变成「取消默认」（同一个按钮管取消）',
+    key: 'defaultAgent.switchInsideRow',
+    label: '★ 开关在卡片的边框**里面**（不是挂在边框外）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.rowOverflowX',
+    label: '卡片内部没有横向溢出',
+    ok: (v) => v === 0,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.paneBodyOverflowX',
+    label: '★ 左栏正文没有横向溢出（第一版这里是 54px）',
+    ok: (v) => v === 0,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.setButtonFound',
+    label: '找得到一个「设为默认」按钮',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.badgeMovesToTarget',
+    label: '★★ 点完之后「默认」徽章**移到刚点的那张卡**上（原来那个自动让位）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.badgeStillExactlyOne',
+    label: '设完之后徽章仍然只有一个（单选，不是两个都亮）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.noCancelAfterSet',
+    label: '设完之后界面上依然没有「取消默认」',
+    ok: (v) => v === true,
+  },
+  {
+    view: '默认智能体',
+    key: 'defaultAgent.targetHasNoToggle',
+    label: '已经是默认的那个不再显示开关（徽章已经说明了）',
     ok: (v) => v === true,
   },
   {
     view: '默认智能体',
     key: 'defaultAgent.optionMarked',
-    label: '★ 新建任务页的选择器里，那一项标着「（默认）」',
+    label: '新建任务页的选择器里，那一项标着「（默认）」',
     ok: (v) => v === true,
   },
   {
@@ -621,7 +673,7 @@ const CHECKS = [
   {
     view: '默认智能体',
     key: 'defaultAgent.preselected',
-    label: '★★ 新建任务页**预选**的就是设过的那个 agent（这条就是使用者要的效果）',
+    label: '★★ 新建任务页**预选**的就是设过的那个 agent',
     ok: (v, facts) =>
       typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
   },
@@ -841,6 +893,25 @@ try {
     }
   } catch (err) {
     log(yellow(`⚠ 造夹具任务时出错：${err}`))
+  }
+
+  // ★ 再造**一个执行者**（不造 run）：探针要测"换默认智能体"，而首启播种的
+  //   执行者**已经是默认**——只有一个执行者时，卡片上根本没有「设为默认」可点，
+  //   那一组检查会全部空过。
+  //
+  //   ⚠️ 这件事必须在这里做（Node 侧、真实时间），不能在探针里做：探针跑在
+  //   `--virtual-time-budget` 下，`setTimeout` 是**虚拟**的，而网络请求是真的——
+  //   在探针里"创建 → 等界面刷新"会**看早**（实测：API 已经返回 3 个 agent，
+  //   界面那一轮轮询已经跑完了上百次而没等到重新渲染）。
+  try {
+    const res = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '探针用的执行者', role: 'executor' }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造夹具 agent 失败（HTTP ${res.status}）——换默认那几条会空过`))
+  } catch (err) {
+    log(yellow(`⚠ 造夹具 agent 时出错：${err}`))
   }
 
   const outFd = fs.openSync(dumpPath, 'w')
