@@ -145,8 +145,19 @@ export interface ReviewFirstSentenceInput {
   prompt: string
   /** 审核对象的内容。 */
   report: { kind: string; title: string; body: string }
-  /** 这个 agent 挂载的审核标准。 */
+  /**
+   * 这个 agent 挂载的 skill（只用来渲染 `{{skills}}` 那份 slug 清单）。
+   *
+   * ⚠️ D37 之后，**审核标准不是它们**——标准内联在审核者身上，走下面的
+   *    `standard`。这里的 skill 对审核者只是"可选的参考/支持文件"。
+   */
   skills: readonly SkillBrief[]
+  /**
+   * 审核标准的正文（D37）。进 `{{standards}}`。
+   *
+   * 空 / 缺省 = 没有标准（调用方本不该派这次审核——派发前就会拦掉）。
+   */
+  standard?: string | null
   /** 关联的 issue —— 动作参数需要它（见协议里的说明）。 */
   relatedIssueId?: string | null
   /**
@@ -663,16 +674,17 @@ function materialValue(input: ReviewFirstSentenceInput): string {
 }
 
 /**
- * `{{standards}}`：审核者的 skill 正文，一个 skill 一段（段间空一行）。
+ * `{{standards}}`：审核标准的正文（D37：内联在审核者身上的那一条）。
  *
- * ⚠️ 这里**不再加** `### slug（名字）`——那是标题，归模版（D35）。每个 skill 的
- *    正文里通常有它自己的标题（内置那份就以 `# 通用审核` 开头）。
+ * ⚠️ 这里**不再**去拼挂载 skill 的正文——那是 D37 之前的做法。现在"标准是什么"
+ *    由调用方解析好传进来（`apps/daemon/src/review-standard.ts` 是唯一的解析点），
+ *    渲染层只管把内容放进去。
+ *
+ * ⚠️ 旧行为里每个 skill 前会加一行 `### slug（名字）`——那行是**标题**，D35 之后
+ *    归模版。而标准正文里通常自带标题（内置那份以 `# 通用审核` 开头）。
  */
-function standardsValue(skills: readonly SkillBrief[]): string {
-  return skills
-    .map((s) => s.body.trim())
-    .filter((body) => body !== '')
-    .join('\n\n')
+function standardsValue(standard: string | null | undefined): string {
+  return standard?.trim() ?? ''
 }
 
 /** 模版变量的取值——一个 run 的全部可插值内容。 */
@@ -691,7 +703,7 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
     values['previousContext'] = input.previousContextPath ?? ''
     values['materialTitle'] = input.report.title
     values['material'] = materialValue(input)
-    values['standards'] = standardsValue(input.skills)
+    values['standards'] = standardsValue(input.standard)
     // ★ schema 随模版一同下发——不能指望模型自己猜格式（FR-CLI-43）
     values['verdict'] = renderVerdictInstruction()
   }
@@ -767,13 +779,9 @@ export const SAMPLE_REVIEW_INPUT: ReviewFirstSentenceInput = {
     title: '审核执行产出（run 00000001）',
     body: '报告：我做完了，但忘了写测试。',
   },
-  skills: [
-    {
-      slug: 'general-review',
-      name: '通用审核',
-      body: '# 通用审核\n\n## 判断标准\n\n1. 能明确判断时给出 pass 或 fail，并把证据指回原文。',
-    },
-  ],
+  skills: [{ slug: 'general-review', name: '通用审核', body: '（这个 skill 对审核者只是可选参考）' }],
+  standard:
+    '# 通用审核\n\n## 判断标准\n\n1. 能明确判断时给出 pass 或 fail，并把证据指回原文。',
   relatedIssueId: '01M2ISSUE00000000000000001',
   instructions: '你是一个严格的审核者。判断依据不足时给出 needs_human。',
 }

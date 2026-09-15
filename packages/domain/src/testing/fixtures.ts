@@ -42,6 +42,8 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
     createdAt: T0,
     role: 'executor',
     reviewerAgentId: null,
+    // D37：审核标准内联在审核者上；要测就 over 里给
+    reviewStandard: null,
     updatedAt: T0,
     ...over,
     id: agentId(over.id),

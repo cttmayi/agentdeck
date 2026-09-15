@@ -305,6 +305,7 @@ describe('动作派生的真实闭环（ActionRunner.deriveRun）', () => {
       skillIds: [],
       toolIds: [],
       env: {},
+      reviewStandard: null,
       role: 'executor',
       reviewerAgentId: null,
       createdAt: Date.now(),

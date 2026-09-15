@@ -1,6 +1,7 @@
 <script lang="ts">
   import { agents, createAgent, identity, skills } from '../lib/stores.ts'
-  import type { AgentRole } from '../lib/api.ts'
+  import type { AgentRole, ReviewStandard } from '../lib/api.ts'
+  import ReviewStandardEditor from './ReviewStandardEditor.svelte'
   import { showToast } from '../lib/view.ts'
   import Drawer from './Drawer.svelte'
 
@@ -44,6 +45,13 @@
   let name = ''
   let role: AgentRole = 'executor'
   let instructions = ''
+  /**
+   * 审核标准（D37）——只对审核者有意义。
+   *
+   * 与「第一句话模版」那个全局配置不同，标准是**每个审核者一份**（不同的领域
+   * 用不同的标准，这是 D22 的立场）。执行者保持 `null`。
+   */
+  let reviewStandard: ReviewStandard | null = null
   let selectedSkills: string[] = []
   let reviewerAgentId = ''
   /**
@@ -75,9 +83,11 @@
         reviewerAgentId: role === 'executor' && reviewerAgentId ? reviewerAgentId : null,
         runtimeKey,
         workDir,
+        reviewStandard: role === 'reviewer' ? reviewStandard : null,
       })
       name = ''
       instructions = ''
+      reviewStandard = null
       selectedSkills = []
       reviewerAgentId = ''
       workDir = ''
@@ -172,6 +182,11 @@
       </span>
     </label>
 
+    {#if role === 'reviewer'}
+      <!-- D37：标准是审核者的判断依据，写在它自己身上 -->
+      <ReviewStandardEditor bind:value={reviewStandard} />
+    {/if}
+
     <label>
       挂载的 skill
       {#if $skills.length === 0}
@@ -188,8 +203,8 @@
       {/if}
       {#if role === 'reviewer'}
         <span class="hint">
-          <strong>审核者必须挂 skill</strong>——审核标准就写在 skill 里。
-          没挂 skill 的审核者不会被算作审核者。
+          审核者的判断依据是上面那条<strong>审核标准</strong>，skill 对它只是可选的
+          参考/支持文件（挂上就会随审核一起送过去）。
         </span>
       {:else}
         <span class="hint">执行者可以不挂 skill（它的产出由审核者按标准来判）。</span>

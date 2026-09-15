@@ -215,13 +215,34 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
    * 现在把解析权收归 daemon：**省略 skills 就按 agent 解析**。
    */
 
-  async function bootstrap(url: string) {
-    const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
-      agents: Array<{ id: string; name: string; skillIds: string[] }>
-    }).agents
-    const agent = agents.find((a) => a.skillIds.length > 0)
-    assert.ok(agent, 'daemon 首启会播种一个挂着内置审核模板的 agent')
-    return agent!
+  /**
+   * 造一个**挂着 skill 的执行者**当夹具。
+   *
+   * ⚠️ 原来这里挑的是"首启播种的、挂了内置审核模板的那个 agent"——而 D37 之后
+   *    审核标准内联在审核者身上，播种的审核者**不再挂 skill**，于是"播种里
+   *    找一个挂 skill 的"这条路没了。夹具要自己造，不能依赖播种的行为细节。
+   */
+  async function bootstrap(url: string): Promise<{ id: string; name: string; skillIds: string[] }> {
+    const installed = (await (
+      await fetch(`${url}/api/skills`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          skills: [{ slug: 'probe-skill', name: '夹具技能', body: '# 夹具\n\n正文。' }],
+        }),
+      })
+    ).json()) as { installed: Array<{ id: string }> }
+    const skillId = installed.installed[0]!.id
+
+    const agent = (await (
+      await fetch(`${url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '挂了 skill 的执行者', role: 'executor', skillIds: [skillId] }),
+      })
+    ).json()) as { id: string; name: string; skillIds: string[] }
+    assert.deepEqual(agent.skillIds, [skillId], '夹具 agent 得真的挂着那个 skill')
+    return agent
   }
 
   let lastSubmittedRunId = ''

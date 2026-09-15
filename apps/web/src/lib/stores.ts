@@ -9,6 +9,7 @@ import {
   type InboxItem,
   type Issue,
   type RunSummary,
+  type ReviewStandard,
   type Skill,
   type TemplateKit,
 } from './api.ts'
@@ -201,6 +202,8 @@ export async function createAgent(input: {
   reviewerAgentId: string | null
   runtimeKey: string
   workDir: string
+  /** 审核标准（D37）——只对审核者有意义；执行者传 null。 */
+  reviewStandard?: ReviewStandard | null
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
@@ -211,6 +214,7 @@ export async function createAgent(input: {
       skillIds: input.skillIds,
       reviewerAgentId: input.reviewerAgentId,
       runtimeKey: input.runtimeKey,
+      reviewStandard: input.reviewStandard ?? null,
       // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
       ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
     }),

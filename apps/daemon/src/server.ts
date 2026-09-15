@@ -44,6 +44,7 @@ import {
   type WorkspaceId,
 } from '@alpha-helper/protocol'
 import { FileStore } from '@alpha-helper/store-file'
+import { resolveReviewStandard } from './review-standard.ts'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
 import { ActionRunner, type DeriveRunRequest } from './actions.ts'
 import { RunExecutor } from './executor.ts'
@@ -490,6 +491,66 @@ async function readWorkspaceSettings(
 }
 
 /**
+ * 解析并校验「审核标准」（D37）。
+ *
+ * 三种"没给"都算**没有标准**（`value: null`）：字段缺省、显式 `null`、正文为空白。
+ * 没有标准的审核者不会拿到审核任务——那是一个**明确的状态**，不是错误
+ * （使用者可能正在编辑它）。
+ *
+ * 校验三件事，每件都有具体的坏结果撑着：
+ *
+ *   1. **名字与正文非空**：一条没有正文的"标准"等于没有标准，而它会让
+ *      "这个审核者能不能用"的判断失效（平台以为它有标准）；
+ *   2. **动作必须在枚举里**：判决里的动作按它校验，写错一个动作名会让那份
+ *      判决**永远不合规**（"动作 X 不在允许的动作子集内"），而使用者以为自己
+ *      配好了；
+ *   3. **动作不做去重以外的加工**：这里只去重，不排序、不补默认——"允许什么"
+ *      必须是使用者说了算的东西，平台不替他放宽。
+ */
+function parseReviewStandard(
+  raw: unknown,
+): { ok: true; value: Agent['reviewStandard'] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: null }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'reviewStandard 必须是「名字 + 正文 + 允许动作」的对象或 null' }
+  }
+  const obj = raw as Record<string, unknown>
+  const name = typeof obj['name'] === 'string' ? obj['name'].trim() : ''
+  const body = typeof obj['body'] === 'string' ? obj['body'].trim() : ''
+  if (name === '' || body === '') {
+    // 两者都空 ⇒ 当成"清空标准"（与传 null 等价）；只给一个 ⇒ 那是填错了
+    if (name === '' && body === '') return { ok: true, value: null }
+    return {
+      ok: false,
+      error: 'reviewStandard 需要 name 与 body 都非空（要清空就传 null，或两个都留空）',
+    }
+  }
+  if (name.length > 100) {
+    return { ok: false, error: `reviewStandard.name 太长了（上限 100 字符，收到 ${name.length}）` }
+  }
+
+  const rawActions = obj['allowedActions']
+  if (rawActions !== undefined && !Array.isArray(rawActions)) {
+    return { ok: false, error: 'reviewStandard.allowedActions 必须是数组' }
+  }
+  const actions = (rawActions ?? []) as unknown[]
+  // ⚠️ 不用 `parseAllowedActions`：那个是给技能来源解析用的，**抛异常**；
+  //    这里是路由里的校验，要的是"返回 400 并带一句可读的话"。
+  const valid = new Set<string>(ActionType.options)
+  const bad = actions.filter((a) => typeof a !== 'string' || !valid.has(a))
+  if (bad.length > 0) {
+    return {
+      ok: false,
+      error:
+        `reviewStandard.allowedActions 里有不认识的动作：${bad.map((b) => String(b)).join('、')}。` +
+        `动作表是闭合的，可用：${[...valid].join('、')}`,
+    }
+  }
+  const allowed = actions as ActionType[]
+  return { ok: true, value: { name, body, allowedActions: [...new Set(allowed)] } }
+}
+
+/**
  * 解析并校验一个「第一句话模版」字段（D32）。
  *
  * ★ 它是**全局配置**（挂在 workspace 上），不是每个 agent 一份：那段文字是
@@ -741,8 +802,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       note: chainedRunId
         ? `已串接审核：run ${chainedRunId}（审核者「${reviewer.name}」）。它继承本次的工作目录，` +
           `所以看得见这里留下的产出。`
-        : `没有串接审核：审核者「${reviewer.name}」一个 skill 都没挂，` +
-          `而审核标准就在 skill 里——没有标准的审核不算审核。`,
+        : `没有串接审核：审核者「${reviewer.name}」**没有审核标准**——` +
+          `没有标准的审核不算审核。去「智能体」页给它写一条（那是它判断的依据）。`,
     }
   }
 
@@ -823,10 +884,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     relatedIssueId?: string | null
   }): Promise<RunId | null> {
     const { reviewer } = input
-    // ★ 技能按 agent 求解（不是全局挂一遍，D22）
+    // ★ 技能按 agent 求解（不是全局挂一遍，D22）——
+    //   D37 之后它对**审核者**只是"可选的参考/支持文件"，标准本身在
+    //   `reviewStandard` 上。所以这里照旧取，但**不拿它当"能不能审"的判据**。
     const skills = await loadAgentSkills(store, reviewer)
-    if (skills.length === 0) {
-      warn(`agent ${reviewer.name} 没有挂载任何 skill，无法审核`)
+    const standard = resolveReviewStandard(reviewer, skills)
+    if (!standard) {
+      warn(`agent ${reviewer.name} 没有审核标准，无法审核`)
       return null
     }
 
@@ -955,8 +1019,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
 
     const skills = await loadAgentSkills(store, agent)
-    if (skills.length === 0) {
-      warn(`agent ${agent.name} 没有挂载任何 skill，无法重试`)
+    if (!resolveReviewStandard(agent, skills)) {
+      warn(`agent ${agent.name} 没有审核标准，无法重试`)
       return null
     }
 
@@ -1061,17 +1125,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return null
     }
 
-    const skills = await loadAgentSkills(store, agent)
-    if (skills.length === 0) {
-      warn(`agent ${agent.name} 没有挂载任何 skill，无法执行派生出的 run`)
-      return null
-    }
-
+    // ⚠️ 这里原来要求"必须挂了 skill 才能执行派生出的 run"，而同一个动作在
+    //    「新建任务」那条路上**没有**这个要求（执行者可以不挂 skill，产出由审核者
+    //    按标准判）——同一件事两套判据。D37 把"标准"从 skill 里摘出来之后这条
+    //    就更说不通了：执行者的 skill 是"做事时参考什么"，跟"能不能干活"无关。
     const issue = await store.getIssue(issueId as Issue['id'])
     if (!issue) {
       warn(`动作要指派的 issue 不存在：${issueId}`)
       return null
     }
+
+    // ★ 执行者挂着 skill 就照旧注入（它是"做事时参考什么"），挂不挂都不影响
+    //   能不能接这条任务——门槛在上面被去掉了。
+    const skills = await loadAgentSkills(store, agent)
 
     const runId = ulid() as RunId
     const outcome = await executor.submit({
@@ -1434,6 +1500,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      const standardCheck = parseReviewStandard(body['reviewStandard'])
+      if (!standardCheck.ok) {
+        sendJson(res, 400, { error: standardCheck.error })
+        return
+      }
+
       // 自定义环境变量。原来这里写死 `env: {}`，而 PATCH 的白名单里也没有它
       // ⇒ 这个字段**既写不进也读不到**，是纯装饰。现在两端都通了，
       // 执行器也会把它传给 CLI（见 executor）。
@@ -1462,6 +1534,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         env: envCheck.value,
         role: roleCheck.role,
         reviewerAgentId: roleCheck.reviewerAgentId,
+        // D37：审核标准内联在 agent 上（校验在上面）
+        reviewStandard: standardCheck.value,
         createdAt: now,
         updatedAt: now,
       }
@@ -1511,6 +1585,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           // FR-AGENT-06：自定义环境变量。它原来不在白名单里 —— 于是"支持为
           // agent 配置环境变量"只存在于协议与实体里，任何入口都改不动它。
           'env',
+          // D37：审核标准（内联在 agent 上）
+          'reviewStandard',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -1620,6 +1696,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           patch.env = envCheck.value
         }
 
+
+        if (body['reviewStandard'] !== undefined) {
+          const standardCheck = parseReviewStandard(body['reviewStandard'])
+          if (!standardCheck.ok) {
+            sendJson(res, 400, { error: standardCheck.error })
+            return
+          }
+          patch.reviewStandard = standardCheck.value
+        }
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
         await store.insertAgent(updated)
@@ -2569,12 +2654,20 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     model: null,
     runtimeKey: 'claude',
     workDir: null,
-    // 审核标准就在 skill 里——审核者**必须**挂 skill，否则它审不出有依据的结论
-    skillIds: [template.id],
+    // D37：标准在 `reviewStandard` 上，所以这里不再挂 skill
+    skillIds: [],
     toolIds: [],
     env: {},
     role: 'reviewer',
     reviewerAgentId: null,
+    // ★ D37：标准内联在审核者身上。它**不再挂载那份 skill**——skill 对审核者
+    //   退成"可选的参考/支持文件"，而标准是它的一个字段。内置的 general-review
+    //   仍留在技能库里（它是远端目录里可安装的一份）。
+    reviewStandard: {
+      name: BUILTIN_REVIEW_SKILL.name,
+      body: BUILTIN_REVIEW_SKILL.body,
+      allowedActions: [...BUILTIN_REVIEW_SKILL.allowedActions],
+    },
     createdAt: now,
     updatedAt: now,
   }
@@ -2596,6 +2689,8 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     role: 'executor',
     // ★ 指向刚播种的审核者：这样首启就是一条**通的闭环**
     reviewerAgentId: reviewer.id,
+    // 执行者没有审核标准（它是审核者那一侧的东西）
+    reviewStandard: null,
     createdAt: now,
     updatedAt: now,
   }

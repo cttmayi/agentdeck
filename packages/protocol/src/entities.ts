@@ -172,6 +172,44 @@ export const Skill = z.object({
 export type Skill = z.infer<typeof Skill>
 
 /**
+ * 审核标准（D37）：**内联在审核者身上**的一条判断依据。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么它不再借住在 skill 里
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原来标准就是一份 skill（`Skill.body` + `allowedActions`），审核者"挂上"
+ * 它才算能用——于是出现三个别扭的地方：
+ *
+ *   1. **概念没有自己的位置**。平台甚至拿"挂了几个 skill"当"有没有标准"的
+ *      代理量（没挂就不派审核，提示语还得解释"审核标准就在 skill 里"）；
+ *   2. **一段自己写的清单要走四道手续**：起 slug、写 frontmatter、安装、
+ *      回来挂载。而它本质是一段文本 +"判完能做什么"；
+ *   3. **可见性差**：审核者的判断依据藏在 Skills 页的一个 slug 后面。
+ *
+ * 现在标准是审核者自己的一等字段：名字（给人看）、正文（进第一句话的
+ * `{{standards}}`）、以及**这份标准允许触发哪些动作**。
+ *
+ * ⚠️ `allowedActions` 必须跟标准**同源**：判决里的动作按它校验
+ *    （`动作 X 不在该 skill 允许的动作子集内`）。"这条标准只允许发评论"
+ *    是标准的一部分，不是全局策略——分开存放迟早分叉成
+ *    "标准说可以、平台说不行"。
+ *
+ * ⚠️ 与 `instructions` 的区别：`instructions` 是"这个 agent 的态度与角色"
+ *    （进 `{{instructions}}`），标准是"它按什么判"（进 `{{standards}}`）。
+ *    两者是两件事，别合并。
+ */
+export const ReviewStandard = z.object({
+  /** 给人看的名字（界面上显示；不进 prompt——D35 之后变量只给内容）。 */
+  name: z.string().min(1).max(100),
+  /** 标准正文。 */
+  body: z.string().min(1),
+  /** 这份标准允许触发哪些动作；判决里出现的动作必须在这里面。 */
+  allowedActions: z.array(ActionType),
+})
+export type ReviewStandard = z.infer<typeof ReviewStandard>
+
+/**
  * Agent：可复用的 AI 协作者配置。
  *
  * **不是常驻进程**——只在被触发时执行。
@@ -222,6 +260,22 @@ export const Agent = z.object({
    * 而绝大多数用法里，审核者只有一个。
    */
   role: AgentRole,
+
+  /**
+   * 这个审核者按什么判（D37）。
+   *
+   * `null` = 没有标准。审核者没有标准 ⇒ **平台不会把产出交给它审**
+   * （没有标准的审核不算审核）。
+   *
+   * ⚠️ **过渡期**：老数据的标准还在挂载的 skill 里（`skillIds`）。解析时有一条
+   *    兼容路径（`resolveReviewStandard`）：没有内联标准但挂了 skill 时，用
+   *    skill 的正文与动作并集顶上，并在界面上提示迁移。这条路径是**为了不让
+   *    已经建好的审核者停摆**，不是长期设计。
+   *
+   * ⚠️ 它对 `role: 'reviewer'` 才有意义，但**不禁止**执行者带着它：把角色从
+   *    审核改成执行、再改回来时不该丢东西（与第一句话模版同一个理由）。
+   */
+  reviewStandard: ReviewStandard.nullable().default(null),
 
   /**
    * 由谁来审**这个执行 agent** 的产出（仅对 `role: 'executor'` 有意义）。

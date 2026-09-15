@@ -602,6 +602,86 @@
           }
         }
 
+        // ══════════════ 审核标准（D37）══════════════
+        //
+        // 标准内联在审核者身上，所以：① 列表/详情里要看得见"它按什么判"；
+        // ② 新建审核者时能写；③ 执行者那边不出现这一栏。
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => d().querySelectorAll('.agent-row').length > 0)
+        await wait(400)
+
+        // 详情：点开审核者 ⇒ 看得到标准的名字与正文
+        const reviewerRow = [...d().querySelectorAll('.agent-row')].find((row) =>
+          row.querySelector('.badge.in_review'),
+        )
+        if (reviewerRow) {
+          click(reviewerRow.querySelector('.agent-item'))
+          await until(() => !!d().querySelector('.detail'))
+          await wait(400)
+          facts['standard.detailHasName'] = need('标准名', () => {
+            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
+              text(r.querySelector('.row-label')) === '审核标准',
+            )
+            return row ? text(row.querySelector('.badge')) : null
+          })
+          facts['standard.detailShowsBody'] = (() => {
+            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
+              text(r.querySelector('.row-label')) === '审核标准',
+            )
+            const pre = row && row.querySelector('pre')
+            return pre ? (pre.textContent ?? '').trim().length > 20 : false
+          })()
+          facts['standard.detailShowsActions'] = (() => {
+            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
+              text(r.querySelector('.row-label')) === '审核标准',
+            )
+            return row ? (row.textContent ?? '').includes('comment.create') : false
+          })()
+          facts['standard.emptyWarning'] = !d()
+            .querySelector('.headline')
+            ?.textContent?.includes('审不了任何东西')
+        } else {
+          errors.push('找不到审核者的卡片')
+        }
+
+        // 新建表单：审核角色下出现标准编辑栏，执行者下不出现
+        const newBtn2 = [...d().querySelectorAll('.pane-actions button')].find(
+          (b) => b.textContent.trim() === '新建',
+        )
+        if (newBtn2) {
+          click(newBtn2)
+          await until(() => !!d().querySelector('.agent-form'))
+          const form2 = d().querySelector('.agent-form')
+          facts['standard.formHasEditorForExecutor'] = !!(
+            form2 && form2.querySelector('.standard')
+          )
+          // 切成"审核"角色 ⇒ 标准编辑栏出现
+          const roleCards = [...form2.querySelectorAll('.role-card')]
+          const reviewerCard = roleCards.find((c) => (c.textContent ?? '').includes('审核'))
+          if (reviewerCard) {
+            click(reviewerCard)
+            await until(() => !!(form2 && form2.querySelector('.standard')))
+          }
+          facts['standard.formHasEditorForReviewer'] = !!(form2 && form2.querySelector('.standard'))
+          facts['standard.formActionOptions'] = form2
+            ? form2.querySelectorAll('.standard .action-picker input').length
+            : 0
+          facts['standard.formDefaultAction'] = need('默认勾选的动作', () => {
+            const checked = [...(form2?.querySelectorAll('.standard .action-picker input') ?? [])]
+              .filter((i) => i.checked)
+              .map((i) => i.value)
+            return checked.join(',')
+          })
+          facts['standard.formMentionsNoSkillNeeded'] = (form2?.textContent ?? '').includes(
+            '判断依据是上面那条',
+          )
+          const cancel2 = [...form2.querySelectorAll('button')].find(
+            (b) => b.textContent.trim() === '取消',
+          )
+          if (cancel2) click(cancel2)
+          await wait(250)
+        }
+
         // ══════════════ 默认智能体（D36）══════════════
         //
         // 使用者要的是"每个智能体上一个默认按钮，设过之后新建任务默认选它"。

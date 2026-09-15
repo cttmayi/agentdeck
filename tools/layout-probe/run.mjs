@@ -564,6 +564,66 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
+  // ── 审核标准（D37）──
+  //
+  // 标准从 skill 里搬到审核者身上之后，界面上必须有地方看见它、写它——
+  // 否则"标准在哪"这件事又变成要读代码才知道。
+  {
+    view: '审核标准',
+    key: 'standard.detailHasName',
+    label: '★ 审核者详情里看得到标准的名字',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.detailShowsBody',
+    label: '★ 标准正文就在详情里（不用去 Skills 页对着 slug 猜）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.detailShowsActions',
+    label: '★ 它判完能触发哪些动作也看得见',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.emptyWarning',
+    label: '有标准的审核者不该显示"审不了任何东西"那条警告',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formHasEditorForExecutor',
+    label: '新建表单：执行角色下**不**出现标准栏',
+    ok: (v) => v === false,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formHasEditorForReviewer',
+    label: '★ 切到审核角色 ⇒ 出现审核标准编辑栏',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formActionOptions',
+    label: '★ 允许的动作是**勾选**（不是手写一串字符串）',
+    ok: (v) => typeof v === 'number' && v >= 6,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formDefaultAction',
+    label: '默认只勾最小权限的 comment.create',
+    ok: (v) => v === 'comment.create',
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formMentionsNoSkillNeeded',
+    label: '界面说清了"判断依据是标准，不是 skill"',
+    ok: (v) => v === true,
+  },
+
   // ── 默认智能体（D36）──
   //
   // 端到端那一组：点按钮 → 徽章**移到**刚点的那张卡上（且仍然只有一个）→

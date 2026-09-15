@@ -31,6 +31,7 @@ import {
   type TokenUsage,
 } from '@alpha-helper/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
+import { resolveReviewStandard } from './review-standard.ts'
 import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
 import type { RunRegistry } from './registry.ts'
@@ -796,6 +797,12 @@ export class RunExecutor {
         reviewTemplate: workspace?.reviewTemplate ?? '',
       }
 
+      // ★ 审核标准（D37）：内联在**这个审核者**身上，解析点只有一处
+      //   （`resolveReviewStandard`）——派发前判"能不能审"、这里渲染
+      //   `{{standards}}`、判决收口时校验动作白名单，三处用的是同一份结果。
+      //   老数据（标准还在挂载的 skill 里）走兼容路径。
+      const standard = req.kind === 'review' ? resolveReviewStandard(agentConfig ?? { reviewStandard: null }, mountedSkills) : null
+
       const firstSentence =
         req.kind === 'review' && req.review
           ? renderFirstSentence({
@@ -809,6 +816,8 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
               prompt: req.prompt,
+              // 审核标准的正文（D37）——`{{standards}}` 就是它
+              standard: standard?.body ?? null,
               // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
               // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
               template: templates.reviewTemplate,
@@ -1197,7 +1206,18 @@ export class RunExecutor {
     const subjectKey = `${run.subject.type}:${run.subject.id}`
     const invalidAttempts = this.#invalidAttempts.get(subjectKey) ?? 0
 
-    const allowedActions = (req.skills ?? []).flatMap((s) => s.allowedActions)
+    // ★ 动作白名单来自**审核标准**（D37）：`allowedActions` 与标准同源是刻意的
+    //   ——"这条标准只允许发评论"是标准的一部分，不是全局策略。原来它是所有挂载
+    //   skill 的动作并集；标准内联之后跟着标准走。
+    //
+    //   ⚠️ 这里重新解析一次（而不是把上面那个 `standard` 传下来）：这一步在
+    //   **#finishReview** 里，与组装第一句话不在同一个作用域；解析函数是纯的、
+    //   只读 store 里已经读过的数据，重算一次的代价可以忽略，而"两处各写一套
+    //   取法"才是真正会出事的那种重复。
+    const agentForStandard = await this.#deps.store.getAgent(run.agentId as never)
+    const allowedActions =
+      resolveReviewStandard(agentForStandard ?? { reviewStandard: null }, req.skills ?? [])
+        ?.allowedActions ?? []
 
     // ★ 重建链路（根 → 当前）。动作派生要用它判环与判深度。
     //   失败不能拖垮审核本身——退化成空链路（只剩深度兜底）并告警。

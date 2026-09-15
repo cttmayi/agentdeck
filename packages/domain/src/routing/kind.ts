@@ -37,12 +37,18 @@ export interface ReviewRouting {
  * ⚠️ 只看 `role`，**不看** `kind`。`kind` 仍然是报告自身的一个属性
  * （它决定审核者看到的是什么类型的材料），但它不再是**分派依据**。
  *
- * ⚠️ 顺带过滤掉没挂 skill 的审核者：审核标准就写在 skill 里，没 skill 的
- *    "审核者"审不了任何东西。把它当审核者会让 run 起不来或审出没有依据的
- *    结论——不如在这里就不算数。
+ * ⚠️ 顺带过滤"没有标准的审核者"：没有标准的审核审不出有依据的结论，把它当审核者
+ *    只会起一条注定没意义的 run。
+ *
+ * ⚠️ **这里只能看 agent 自己带的字段**（`reviewStandard`，或过渡期的 `skillIds`）：
+ *    域层手里没有 skill 的正文，"标准到底有没有内容"是 daemon 侧
+ *    `resolveReviewStandard` 的判断（那里会拒绝没有标准的派发）。所以这条筛选是
+ *    **粗筛**——把明显没标准的排掉，剩下的由真正的判据决定。
  */
 export function routeReportToReviewers(agents: readonly Agent[]): ReviewRouting {
-  const reviewers = agents.filter((a) => a.role === 'reviewer' && a.skillIds.length > 0)
+  const reviewers = agents.filter(
+    (a) => a.role === 'reviewer' && (a.reviewStandard !== null || a.skillIds.length > 0),
+  )
   return { reviewers, unmatched: reviewers.length === 0 }
 }
 

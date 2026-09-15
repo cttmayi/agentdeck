@@ -2,6 +2,7 @@
   import type { Agent } from '../lib/api.ts'
   import { agents, identity, skills, updateAgent } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
+  import ReviewStandardEditor from './ReviewStandardEditor.svelte'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -55,6 +56,8 @@
     runtimeKey: agent.runtimeKey,
     workDir: agent.workDir ?? '',
     model: agent.model ?? '',
+    // D37：审核标准（只对审核者有意义）
+    reviewStandard: agent.reviewStandard ? { ...agent.reviewStandard } : null,
   })
 
   let draft = blankDraft()
@@ -108,6 +111,9 @@
       patch['skillIds'] = draft.skillIds
     if ((draft.reviewerAgentId || null) !== (agent.reviewerAgentId ?? null))
       patch['reviewerAgentId'] = draft.reviewerAgentId || null
+    // 标准按值比较（它是对象，直接比引用永远不相等）
+    if (JSON.stringify(draft.reviewStandard) !== JSON.stringify(agent.reviewStandard ?? null))
+      patch['reviewStandard'] = draft.reviewStandard
     return patch
   }
 
@@ -151,8 +157,11 @@
 
   /** 摘要里最该被看到的那一处问题——没有就不显示。 */
   $: headline =
-    isReviewer && agent.skillIds.length === 0
-      ? { tone: 'bad', text: '它审不了任何东西：审核者必须挂 skill，审核标准就写在里面。' }
+    isReviewer && !agent.reviewStandard && agent.skillIds.length === 0
+      ? {
+          tone: 'bad',
+          text: '它审不了任何东西：没有审核标准，平台不会把产出交给它审。点「编辑」写一条。',
+        }
       : !isReviewer && !agent.reviewerAgentId
         ? { tone: 'warn', text: '执行产出不会被自动审核（没有指定审核者）。' }
         : null
@@ -257,6 +266,36 @@
       <h3>用什么标准</h3>
 
       {#if editing}
+        <!-- D37：标准内联在审核者身上，所以它是这一段的**第一件事** -->
+        {#if draft.role === 'reviewer'}
+          <div class="field-row">
+            <span class="row-label">审核标准</span>
+            <div>
+              <ReviewStandardEditor
+                value={draft.reviewStandard}
+                onchange={(next) => {
+                  draft.reviewStandard = next
+                  draft = { ...draft }
+                }}
+              />
+              {#if agent.skillIds.length > 0 && !agent.reviewStandard}
+                <!-- 过渡期：老数据的标准还在挂载的 skill 里 -->
+                {#each attached as s (s.id)}
+                  <p class="row-hint std-legacy">
+                    当前它仍然沿用挂载的 skill「<code>{s.slug}</code>」当标准（老配置）。
+                    用上面那一栏写上自己的标准即可取而代之。
+                  </p>
+                {/each}
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <div class="field-row">
+            <span class="row-label">审核标准</span>
+            <p class="empty-value">不适用 —— 执行者不审别人的产出。</p>
+          </div>
+        {/if}
+
         <div class="field-row">
           <span class="row-label">挂载的 skill</span>
           {#if $skills.length === 0}
@@ -273,6 +312,42 @@
           {/if}
         </div>
       {:else}
+        <div class="field-row">
+          <span class="row-label">审核标准</span>
+          <div>
+            {#if !isReviewer}
+              <p class="empty-value">不适用 —— 执行者不审别人的产出。</p>
+            {:else if agent.reviewStandard}
+              <span class="badge default-badge">{agent.reviewStandard.name}</span>
+              <p class="row-hint">
+                它按下面这份标准判断；判完能触发的动作：
+                {#if agent.reviewStandard.allowedActions.length === 0}
+                  <strong>一个都没有</strong>（只报告、不动作）
+                {:else}
+                  {#each agent.reviewStandard.allowedActions as a, i (a)}{i > 0 ? '、' : ''}<code
+                      >{a}</code
+                    >{/each}
+                {/if}
+              </p>
+              <details open>
+                <summary>看标准正文</summary>
+                <pre class="tpl-text">{agent.reviewStandard.body}</pre>
+              </details>
+            {:else if attached.length > 0}
+              <!-- 过渡期：标准还在挂载的 skill 里 -->
+              <p class="row-hint">
+                它还没有内联的审核标准，当前<strong>沿用挂载的 skill</strong>当标准：
+                {#each attached as s, i (s.id)}{i > 0 ? '、' : ''}<code>{s.slug}</code>{/each}。
+                点「编辑」可以把标准写进它自己身上（推荐——那样它不依赖 skill 就能审）。
+              </p>
+            {:else}
+              <p class="empty-value">
+                没有审核标准 —— <strong>它拿不到审核任务</strong>。点「编辑」写一条。
+              </p>
+            {/if}
+          </div>
+        </div>
+
         <div class="field-row">
           <span class="row-label">挂载的 skill</span>
           <div>

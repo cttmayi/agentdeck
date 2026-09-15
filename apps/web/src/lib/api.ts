@@ -134,6 +134,24 @@ export interface Agent {
   role: AgentRole
   /** 由谁来审**这个执行 agent** 的产出（仅 executor 有意义）。 */
   reviewerAgentId: string | null
+  /**
+   * 这个审核者按什么判（D37）。`null` = 没有标准（那它拿不到审核任务）。
+   *
+   * 校验在服务端：名字与正文非空、动作必须在枚举里。
+   */
+  reviewStandard: ReviewStandard | null
+}
+
+/**
+ * 审核标准（D37）。
+ *
+ * ⚠️ `allowedActions` 与标准**同源**是刻意的：判决里的动作按它校验，
+ *    "这条标准只允许发评论"是标准的一部分，不是全局策略。
+ */
+export interface ReviewStandard {
+  name: string
+  body: string
+  allowedActions: string[]
 }
 
 /** 第一句话模版的两个角色（D32）。 */

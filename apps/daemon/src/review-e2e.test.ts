@@ -189,17 +189,32 @@ after(async () => {
   await cleanup(workDir)
 })
 
-async function postReport(
+/**
+ * 往**指定的** daemon 发一份报告。
+ *
+ * ⚠️ 与 `postReport` 的区别就是那个 url：它写死了共享的 `daemon`，于是各用例
+ *    自建的 daemon 只能自己内联 fetch——那个坑在文件里已经踩过一次（见下面
+ *    `createRetryRun` 相关用例里的注释："报告会进到**另一个 daemon**里"）。
+ */
+async function postReportTo(
+  url: string,
   source: string,
   items: Array<{ externalId: string; kind: string; title: string; body: string }>,
 ): Promise<ReportIngestResponse> {
-  const res = await fetch(`${daemon.url}/api/reports`, {
+  const res = await fetch(`${url}/api/reports`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ source, items }),
   })
   assert.equal(res.status, 202)
   return (await res.json()) as ReportIngestResponse
+}
+
+async function postReport(
+  source: string,
+  items: Array<{ externalId: string; kind: string; title: string; body: string }>,
+): Promise<ReportIngestResponse> {
+  return postReportTo(daemon.url, source, items)
 }
 
 /**
@@ -389,8 +404,10 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
 
   test('★ 审核的第一句话含审核标准与判决格式要求（FR-CLI-43）', () => {
     assert.notEqual(backend.seenContext, null)
-    assert.match(backend.seenContext!, /审核标准/, '审核标准必须随 skill 下发')
-    assert.match(backend.seenContext!, /general-review/, '技能清单只列名字')
+    assert.match(backend.seenContext!, /## 审核标准/, '第一句话里要有审核标准那一段')
+    // ★ D37：标准内联在审核者身上（不再来自挂载的 skill），所以这里比的是
+    //   **标准正文**里的内容——播种的审核者带的正是内置那份通用审核标准。
+    assert.match(backend.seenContext!, /通用审核/, '标准正文必须随第一句话下发')
     assert.match(backend.seenContext!, /ALPHA_VERDICT/, '必须给出判决格式约定')
   })
 
@@ -981,5 +998,198 @@ describe('★ 重试与会话恢复（FR-CLI-06）—— 这段此前从未被�
     // 此前这里是重试的，白烧一轮 token 与时间。
     assert.equal(after, before + 1, '报告起了 1 条 run；结构性问题不该派生重试')
     await awaitRunsSettled()
+  })
+})
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * D37：审核标准内联在审核者身上
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 三条要钉的性质：
+ *
+ *   1. **没有标准就不派审核**（标准是审核的依据，没有它审不出有依据的结论）；
+ *   2. **动作白名单跟着标准走**——"这条标准只允许发评论"必须真的生效，
+ *      而不是"配了但没用"；
+ *   3. **过渡期**：老数据（标准还在挂载的 skill 里）照样能审——规则一改就让
+ *      已经建好的审核者停摆，是最不该发生的事。
+ */
+describe('D37：审核标准内联在审核者身上', () => {
+  /** 把某个 agent 的审核标准改成给的那份（PATCH）。 */
+  async function setStandard(
+    url: string,
+    agentId: string,
+    standard: { name: string; body: string; allowedActions: string[] } | null,
+  ): Promise<number> {
+    const res = await fetch(`${url}/api/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reviewStandard: standard }),
+    })
+    return res.status
+  }
+
+  /** 起一个**自带后端引用**的 daemon（要能塞判决脚本，所以不能内联 new）。 */
+  async function withBackend<T>(
+    tag: string,
+    fn: (ctx: { url: string; backend: ScriptedReviewBackend }) => Promise<T>,
+  ): Promise<T> {
+    const backend2 = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir(tag),
+      port: 0,
+      fsync: false,
+      backend: backend2,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      return await fn({ url: d.url, backend: backend2 })
+    } finally {
+      await d.close()
+    }
+  }
+
+  async function runToEnd(url: string, runId: string): Promise<void> {
+    await waitFor(async () => {
+      const res = await fetch(`${url}/api/runs/${runId}`)
+      return ((await res.json()) as { status: string }).status === 'completed' ? true : null
+    }, 8000)
+  }
+
+  async function firstSentenceOf(url: string, runId: string): Promise<string> {
+    const messages = ((await (
+      await fetch(`${url}/api/runs/${runId}/messages?since=-1`)
+    ).json()) as { messages: Array<{ content: string }> }).messages.map((m) => m.content ?? '')
+    return messages.join('\n')
+  }
+
+  test('★ 清掉标准 ⇒ 不再派审核，而且日志说清是"没有标准"', async () => {
+    await withBackend('d37-nostd', async ({ url }) => {
+      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string }>
+      }).agents
+      const reviewer = agents.find((a) => a.role === 'reviewer')!
+      assert.equal(await setStandard(url, reviewer.id, null), 200)
+
+      const executor = agents.find((a) => a.role === 'executor')!
+      const issueId = ((await (
+        await fetch(`${url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '没有标准的审核者' }),
+        })
+      ).json()) as { id: string }).id
+
+      const runId = ulid()
+      await fetch(`${url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: executor.id, name: 'x', instructions: '' },
+          subject: { type: 'issue', id: issueId },
+          prompt: '随便做点什么',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await runToEnd(url, runId)
+
+      const runs = ((await (await fetch(`${url}/api/runs`)).json()) as {
+        runs: Array<{ kind: string }>
+      }).runs
+      assert.equal(runs.filter((r) => r.kind === 'review').length, 0, '没有标准就不该起审核 run')
+
+      const text = await firstSentenceOf(url, runId)
+      assert.match(text, /没有审核标准/, '要说清是哪一条规则挡住的')
+      assert.match(text, /去「智能体」页给它写一条/, '并且告诉人去哪儿修')
+    })
+  })
+
+  test('★ 动作白名单来自**标准**：标准里没允许的动作会被拦下（要人介入）', async () => {
+    await withBackend('d37-actions', async ({ url, backend: b }) => {
+      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string }>
+      }).agents
+      const reviewer = agents.find((a) => a.role === 'reviewer')!
+      // 标准只允许发评论，而判决想改状态 ⇒ 必须被拦下
+      assert.equal(
+        await setStandard(url, reviewer.id, {
+          name: '只许评论',
+          body: '# 只许评论\n\n发现问题只发评论，不要改状态。',
+          allowedActions: ['comment.create'],
+        }),
+        200,
+      )
+      b.script = [
+        validVerdict({
+          conclusion: 'fail',
+          reasonCode: 'logic_error',
+          // 这个动作**不在**标准的白名单里
+          action: { type: 'issue.update_status', params: { issueId: 'placeholder', status: 'todo' } },
+        }),
+      ]
+
+      const summary = await postReportTo(url, 'd37-source', [
+        { externalId: 'a-1', kind: 'pr-diff', title: '越权动作', body: '内容' },
+      ])
+      const runId = summary.runIds[0]!
+      await runToEnd(url, runId)
+
+      const verdicts = ((await (
+        await fetch(`${url}/api/runs/${runId}/verdicts`)
+      ).json()) as { verdicts: Array<{ status: string }> }).verdicts
+      assert.equal(
+        verdicts[0]?.status,
+        'escalated',
+        '动作不在标准允许的子集里 ⇒ 结构性问题（模型再输出一次还是同样的东西）',
+      )
+      const text = await firstSentenceOf(url, runId)
+      assert.match(text, /只许评论/, '标准正文要真的随第一句话下发')
+    })
+  })
+
+  test('★ 过渡期：只挂 skill、没有内联标准的审核者照样能审', async () => {
+    await withBackend('d37-legacy', async ({ url, backend: b }) => {
+      const installed = ((await (
+        await fetch(`${url}/api/skills`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            skills: [{ slug: 'legacy-standard', name: '老标准', body: '# 老标准\n\n只看一件事：有没有写测试。' }],
+          }),
+        })
+      ).json()) as { installed: Array<{ id: string }> })
+      const reviewer = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: '老形态审核者',
+            role: 'reviewer',
+            skillIds: [installed.installed[0]!.id],
+          }),
+        })
+      ).json()) as { id: string; reviewStandard: unknown }
+      assert.equal(reviewer.reviewStandard, null, '这个夹具刻意不带内联标准')
+
+      // 两个审核者（播种的 + 这个老形态）都会接住这份报告 ⇒ 两次判决脚本
+      b.script = [validVerdict(), validVerdict()]
+
+      const summary = await postReportTo(url, 'd37-legacy', [
+        { externalId: 'l-1', kind: 'pr-diff', title: '老数据', body: '内容' },
+      ])
+      assert.equal(summary.unmatched, 0, '两个审核者都该接住它')
+      for (const id of summary.runIds) await runToEnd(url, id)
+
+      // ★ 关键：老形态那条 run 的第一句话里，标准正文来自**挂载的 skill**。
+      //   ⚠️ 别拿 agent 名字认它——第一句话里**没有** agent 的名字（身份段只有
+      //   run id 与对象），认串要看内部特征：老标准正文里的 `# 老标准`。
+      const texts = await Promise.all(summary.runIds.map((id) => firstSentenceOf(url, id)))
+      const legacy = texts.find((t) => t.includes('# 老标准'))
+      assert.ok(legacy, '老形态的审核者要真的被起了一条 run（标准来自挂载的 skill）')
+      assert.match(legacy!, /只看一件事/, '标准正文要真的随第一句话下发')
+    })
   })
 })
