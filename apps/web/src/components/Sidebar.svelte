@@ -1,6 +1,8 @@
 <script lang="ts">
   import { view, go, VIEWS, openDrawer } from '../lib/view.ts'
   import { identity, syncStatus } from '../lib/stores.ts'
+  import { t } from '../lib/i18n.ts'
+  import type { WebTextId } from '@alpha-helper/i18n'
 
   /**
    * 侧边栏导航。
@@ -21,11 +23,15 @@
    *
    * 挪到侧栏底部之后仍然**一眼可见**（有异常时点一下变红），点开就是设置抽屉。
    */
-  const ITEMS: Array<{ id: (typeof VIEWS)[number]; title: string; hint: string }> = [
-    { id: 'new', title: '新建任务', hint: '交给 agent 去做' },
-    { id: 'tasks', title: '任务清单', hint: '看板 / 列表 · 执行记录' },
-    { id: 'agents', title: '智能体', hint: '配置 · runtime' },
-    { id: 'skills', title: 'Skills', hint: '审核标准 · 动作子集' },
+  const ITEMS: Array<{
+    id: (typeof VIEWS)[number]
+    title: WebTextId
+    hint: WebTextId
+  }> = [
+    { id: 'new', title: 'shell.navNewTask', hint: 'shell.navNewTaskHint' },
+    { id: 'tasks', title: 'shell.navTasks', hint: 'shell.navTasksHint' },
+    { id: 'agents', title: 'shell.navAgents', hint: 'shell.navAgentsHint' },
+    { id: 'skills', title: 'shell.navSkills', hint: 'shell.navSkillsHint' },
   ]
 </script>
 
@@ -38,8 +44,8 @@
       onclick={() => go(item.id)}
       aria-current={$view === item.id ? 'page' : undefined}
     >
-      <span class="nav-title">{item.title}</span>
-      <span class="nav-hint">{item.hint}</span>
+      <span class="nav-title">{$t(item.title)}</span>
+      <span class="nav-hint">{$t(item.hint)}</span>
     </button>
   {/each}
 
@@ -52,34 +58,36 @@
         type="button"
         class="env"
         onclick={() => openDrawer.set('settings')}
-        title={envIssues.map((i) => i.summary).join('；') || '运行环境正常'}
+        title={envIssues.map((i) => i.summary).join('；') || $t('shell.envOk')}
       >
         <span class="env-dot" class:bad={problem}></span>
         <span class="env-body">
           <span class="env-line">{$identity.deviceName}</span>
           <span class="faint small">
             {#if rt === null}
-              未检测到 agent CLI
+              {$t('shell.envNoCli')}
             {:else if !rt.available}
-              未检测到 {rt.command}
+              {$t('shell.envMissing', { command: rt.command })}
+            {:else if rt.cliVersion}
+              {$t('shell.envReady', { command: rt.command, version: rt.cliVersion })}
             {:else}
-              {rt.command} {rt.cliVersion ?? '已就绪'}
+              {$t('shell.envReadyNoVersion', { command: rt.command })}
             {/if}
-            {#if envIssues.length > 0}· {envIssues.length} 个环境问题{/if}
+            {#if envIssues.length > 0}{$t('shell.envIssueCount', { count: envIssues.length })}{/if}
           </span>
         </span>
       </button>
     {/if}
 
     {#if $syncStatus?.error}
-      <div class="faint small" title={$syncStatus.error}>同步异常</div>
+      <div class="faint small" title={$syncStatus.error}>{$t('shell.syncError')}</div>
     {:else if $syncStatus}
       <div class="faint small">
-        已上报 {$syncStatus.reported}
-        {#if $syncStatus.queued > 0}· 暂存 {$syncStatus.queued}{/if}
+        {$t('shell.syncedCount', { count: $syncStatus.reported })}
+        {#if $syncStatus.queued > 0}{$t('shell.syncedQueued', { count: $syncStatus.queued })}{/if}
       </div>
     {:else}
-      <div class="faint small">尚未同步</div>
+      <div class="faint small">{$t('shell.neverSynced')}</div>
     {/if}
   </div>
 </nav>

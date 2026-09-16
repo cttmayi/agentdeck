@@ -359,6 +359,10 @@ export function renderVerdictInstruction(): string {
     JSON.stringify(example, null, 2),
     VERDICT_FENCE_END,
     '',
+    // ★ 回答语言可能不是中文（D39）——但**判决本身是机器值**，字段名与取值
+    //   一律照抄。不加这句的话，模型会"顺手翻译"，那份判决整条作废。
+    '⚠️ 下面这些字段名与取值**照原样写**，不要翻译成别的语言（它们是机器读的）。',
+    '',
     '字段规则（判决是**闭合**的：**多**一个字段名会整条不合规）：',
     '',
     '⭐ 上面这份示例是 `fail`（所以有 `action`）。**`action` / `findings` / `escalateReason`',

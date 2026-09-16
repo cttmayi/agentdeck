@@ -104,6 +104,8 @@ export interface EnvironmentIssue {
 export interface Identity {
   deviceName: string
   currentRuntime?: string
+  /** 界面语言（D39）：'zh' | 'en'。页面启动时就要知道，避免先闪一下中文。 */
+  locale?: string
   runtimes: RuntimeView[]
   /** 运行环境预检结果（例如 CLI 自己的状态目录写不进去）。 */
   environment?: { ok: boolean; issues: EnvironmentIssue[] }

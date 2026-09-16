@@ -16,6 +16,8 @@
   } from '../lib/remote-store.ts'
   import { syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
+  import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@alpha-helper/i18n'
+  import { locale, setLocale } from '../lib/i18n.ts'
 
   /**
    * 设置抽屉。
@@ -168,6 +170,32 @@
   <div class="drawer-body">
     <!-- ══════════ 成本 ══════════ -->
     {#if focus === 'all'}
+    <!--
+      ★ 界面语言（D39）：顶栏也有一份，两处指向**同一个 store**（不会各存一份）。
+        这里多给一句说明——切换器本身说不清"prompt 不变"这件事。
+    -->
+    <section class="drawer-section">
+      <h3>界面语言</h3>
+      <label>
+        语言
+        <select
+          value={$locale}
+          onchange={(e) => {
+            const v = (e.currentTarget as HTMLSelectElement).value
+            if (isLocale(v)) void setLocale(v as Locale)
+          }}
+        >
+          {#each LOCALES as l (l)}
+            <option value={l}>{LOCALE_LABEL[l]}</option>
+          {/each}
+        </select>
+      </label>
+      <p class="hint">
+        只切换界面文字。交给模型的那段话仍是中文，另外会加一条"请用 X 回答"的指令，
+        让它用你选的语言答复。
+      </p>
+    </section>
+
     <section class="drawer-section">
       <h3>成本</h3>
       {#if costsError}

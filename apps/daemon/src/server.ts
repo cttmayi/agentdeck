@@ -46,6 +46,7 @@ import {
 } from '@alpha-helper/protocol'
 import { FileStore } from '@alpha-helper/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
+import { DEFAULT_LOCALE, isLocale, type Locale } from '@alpha-helper/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
 import { ActionRunner, type DeriveRunRequest } from './actions.ts'
 import { RunExecutor } from './executor.ts'
@@ -424,12 +425,19 @@ function parseInstallSource(
 async function readWorkspaceSettings(
   store: Store,
   workspaceId: WorkspaceId,
-): Promise<{ executeTemplate: string; reviewTemplate: string; defaultAgentId: string | null }> {
+): Promise<{
+  executeTemplate: string
+  reviewTemplate: string
+  defaultAgentId: string | null
+  locale: Locale
+}> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
     executeTemplate: workspace?.executeTemplate ?? '',
     reviewTemplate: workspace?.reviewTemplate ?? '',
     defaultAgentId: workspace?.defaultAgentId ?? null,
+    // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
+    locale: workspace?.locale ?? DEFAULT_LOCALE,
   }
 }
 
@@ -1219,6 +1227,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         protocolVersion: LOCAL_PROTOCOL_VERSION,
         deviceId: device?.id ?? 'unknown',
         deviceName: device?.name ?? 'unknown',
+        // ★ 界面语言跟着身份一起给：页面启动时就要知道用哪种语言渲染，
+        //   而不是先闪一下中文再切过来（D39）
+        locale: (await readWorkspaceSettings(store, workspaceId)).locale,
         runtimes,
         capabilities: [Capability.SseResume, Capability.Artifacts],
       })
@@ -1293,6 +1304,27 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ★ 预览不放在前端拼：那样迟早与真实投递的东西走偏，而"预览里好好的"
     //   恰恰是模版功能最该防的那种错觉。这里用的是渲染器 + 同一份示例值
     //   （`SAMPLE_FIRST_SENTENCE_INPUTS`，文档里逐字贴的也是它）。
+    // ── 界面语言（D39）──
+    //
+    // 存在 workspace 上，因为 daemon 也要用它渲染第一句话里的语言指令——
+    // 浏览器偏好的话，"界面英文、模型仍被要求中文回答"就成了默认结果。
+    if (req.method === 'PUT' && path === '/api/workspace/locale') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['locale']
+      if (!isLocale(raw)) {
+        sendJson(res, 400, { error: `locale 必须是 'zh' 或 'en'（收到 ${JSON.stringify(raw)}）` })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, locale: raw, updatedAt: Date.now() })
+      sendJson(res, 200, { locale: raw })
+      return
+    }
+
     if (req.method === 'GET' && path === '/api/first-sentence/templates') {
       const current = await readWorkspaceSettings(store, workspaceId)
       sendJson(res, 200, {
@@ -2628,6 +2660,8 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // 默认智能体（D36）：首启那一对 agent 就在这里建，顺手把执行者设为默认——
     // "建完就派"的那个流程于是有确定的行为，而不是依赖"列表里第一个是谁"。
     defaultAgentId: null,
+    // 界面语言（D39）：中文（本项目的默认语言）
+    locale: DEFAULT_LOCALE,
     createdAt: now,
     updatedAt: now,
   }

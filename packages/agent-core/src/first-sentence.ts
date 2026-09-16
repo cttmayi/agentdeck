@@ -105,6 +105,13 @@ export interface ExecuteFirstSentenceInput {
   runId: string
   subject: { type: string; id: string }
   prompt: string
+  /**
+   * 模型该用什么语言回答（D39）。
+   *
+   * 界面语言切到英文时，使用者看不懂中文答复——所以第一句话里要有一条指令。
+   * 传的是**语言的显示名**（`简体中文` / `English`），模版自己决定怎么措辞。
+   */
+  language?: string | null
   skills: readonly SkillBrief[]
   /**
    * 这个 agent 自己的指令（界面上「它怎么干活」里写的那段）。
@@ -143,6 +150,8 @@ export interface ReviewFirstSentenceInput {
    *    所以 D32 的模版校验把它列为**必需变量**：自定义模版也不能漏。
    */
   prompt: string
+  /** 模型该用什么语言回答（见 `ExecuteFirstSentenceInput.language`）。 */
+  language?: string | null
   /** 审核对象的内容。 */
   report: { kind: string; title: string; body: string }
   /**
@@ -276,6 +285,15 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     label: '这个 agent 的「指令」**原文**（界面上那个字段；只有内容，没有标题）',
   },
   {
+    name: 'language',
+    kinds: BOTH,
+    multiline: false,
+    requiredFor: [],
+    label:
+      '回答用什么语言（界面语言的显示名：`简体中文` / `English`）。**只影响模型的话**——' +
+      'prompt 本身不翻译；判决 JSON 里的字段名与取值永远照原样',
+  },
+  {
     name: 'prompt',
     kinds: BOTH,
     multiline: true,
@@ -384,6 +402,10 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
     '能用到的技能：{{skills}}',
     '{{/skills}}',
     '',
+    '',
+    // ★ 回答语言（D39）：prompt 本身不翻译，但**答复**要用使用者看得懂的语言
+    '请用{{language}}回答。',
+    '',
     '## 护栏',
     '',
     '- 只做上面描述的事，不要扩大范围。',
@@ -438,6 +460,8 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
     '{{/skills}}',
     '',
     '{{standards}}',
+    '',
+    '请用{{language}}回答（判决 JSON 里的字段名与取值必须原样照抄，不要翻译）。',
     '',
     '## 护栏',
     '',
@@ -695,6 +719,8 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
     subjectId: input.subject.id,
     instructions: instructionsValue(input.instructions),
     prompt: input.prompt,
+    // 语言显示名；调用方没给就退回默认语言（中文），别让它变成空
+    language: input.language?.trim() || '简体中文',
     skills: skillsValue(input.skills),
   }
   if (input.kind === 'review') {
@@ -767,6 +793,7 @@ export const SAMPLE_EXECUTE_INPUT: ExecuteFirstSentenceInput = {
   prompt: '冒泡排序\n\n用 JS 写一个冒泡排序，并解释复杂度。',
   skills: [],
   instructions: '你是一个严谨的协作者。先理解任务，再动手。',
+  language: '简体中文',
 }
 
 export const SAMPLE_REVIEW_INPUT: ReviewFirstSentenceInput = {
@@ -784,6 +811,7 @@ export const SAMPLE_REVIEW_INPUT: ReviewFirstSentenceInput = {
     '# 通用审核\n\n## 判断标准\n\n1. 能明确判断时给出 pass 或 fail，并把证据指回原文。',
   relatedIssueId: '01M2ISSUE00000000000000001',
   instructions: '你是一个严格的审核者。判断依据不足时给出 needs_human。',
+  language: '简体中文',
 }
 
 export const SAMPLE_FIRST_SENTENCE_INPUTS: Record<FirstSentenceKind, FirstSentenceInput> = {

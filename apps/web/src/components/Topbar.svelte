@@ -1,5 +1,7 @@
 <script lang="ts">
   import { unreadCount } from '../lib/stores.ts'
+  import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@alpha-helper/i18n'
+  import { locale, setLocale, t } from '../lib/i18n.ts'
   import { openDrawer } from '../lib/view.ts'
   import {
     remoteAccount,
@@ -35,6 +37,18 @@
    */
   $: failing = $remotePlugins.filter((p) => !p.loaded).length
 
+  /**
+   * 语言切换（D39）。
+   *
+   * 放在顶栏：它是**随时会改**的偏好（跟"我是谁"同一类），而设置抽屉里也有同一份
+   * ——两处指向同一个 store，不会各存一份。
+   *
+   * ⚠️ 只翻界面文字：交给模型的 prompt 不变（会多一条"请用 X 回答"的指令）。
+   */
+  function switchLocale(next: string): void {
+    if (isLocale(next)) void setLocale(next as Locale)
+  }
+
 </script>
 
 <header class="topbar">
@@ -46,8 +60,23 @@
     排查时才看的。顶栏只留"去哪儿"（品牌）与"我是谁"（账号、通知）。
   -->
   <div class="topbar-actions">
+    <!-- 语言切换：两个语言各自用自己的写法（中文 / English），
+         一个只看得懂英文的人在中文界面里也要能找到它 -->
+    <label class="lang">
+      <span class="visually-hidden">{$t('shell.language')}</span>
+      <select
+        value={$locale}
+        aria-label={$t('shell.language')}
+        onchange={(e) => switchLocale((e.currentTarget as HTMLSelectElement).value)}
+      >
+        {#each LOCALES as l (l)}
+          <option value={l}>{LOCALE_LABEL[l]}</option>
+        {/each}
+      </select>
+    </label>
+
     <button type="button" class="ghost" onclick={() => openDrawer.set('inbox')}>
-      通知
+      {$t('shell.inbox')}
       {#if $unreadCount > 0}
         <span class="badge in_progress">{$unreadCount}</span>
       {/if}
@@ -60,10 +89,12 @@
         title={$remoteAccount?.email ?? ''}
       >
         <span class="avatar">{$remoteAccount?.displayName?.slice(0, 1)?.toUpperCase() ?? '?'}</span>
-        <span class="account-name">{$remoteAccount?.displayName ?? '已登录'}</span>
+        <span class="account-name"
+          >{$remoteAccount?.displayName ?? $t('shell.signedIn')}</span
+        >
         {#if failing > 0}
           <!-- 有插件加载失败时给个提示：插件清单是排查入口，不该等人主动去翻 -->
-          <span class="warn" title="{failing} 个插件加载失败">⚠</span>
+          <span class="warn" title={$t('shell.pluginsFailing', { count: failing })}>⚠</span>
         {/if}
       </button>
     {:else}
@@ -71,16 +102,36 @@
         type="button"
         class="ghost login"
         onclick={() => openDrawer.set('remote')}
-        title={$remoteError || '登录远端以使用目录、待办拉取与上报'}
+        title={$remoteError || $t('shell.signInHint')}
       >
-        {$remoteError ? '登录（远端不可用）' : '登录'}
+        {$remoteError ? $t('shell.signInRemoteDown') : $t('shell.signIn')}
       </button>
     {/if}
-    <button type="button" class="ghost" onclick={() => openDrawer.set('settings')}>设置</button>
+    <button type="button" class="ghost" onclick={() => openDrawer.set('settings')}>
+      {$t('shell.settings')}
+    </button>
   </div>
 </header>
 
 <style>
+  /* 语言选择器：一个紧凑的下拉（顶栏不该出现一个占半屏的控件） */
+  .lang select {
+    padding: 2px var(--sp-2);
+    font-size: var(--fs-sm);
+    background: transparent;
+    border-color: var(--line);
+  }
+
+  /* 无障碍：标签只给读屏器看 */
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
   /* 账号控件：头像 + 名字。用头像是因为纯文字的名字在顶栏里很容易
      和"设置"这类按钮混成一片，而一个圆形色块能立刻把它区分开 */
   .account {

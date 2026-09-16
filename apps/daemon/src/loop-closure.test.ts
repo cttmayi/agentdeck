@@ -37,7 +37,7 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('loop-closure')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS,
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS,
     name: '闭环测试',
     createdAt: Date.now(),
     updatedAt: Date.now(),

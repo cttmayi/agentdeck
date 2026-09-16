@@ -44,7 +44,7 @@ function msg(seq: number, content = `m${seq}`): RunMessage {
 before(async () => {
   dir = await makeTempDir('sqlite')
   store = await SqliteStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
 })
 
 after(async () => {
@@ -84,7 +84,7 @@ describe('基本 CRUD 与持久化', () => {
     const reopenDir = await makeTempDir('reopen')
     try {
       const a = await SqliteStore.open({ dataDir: reopenDir, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertAgent(makeAgent({ id: 'persist-me', workspaceId: WS }))
       await a.close()
 
@@ -101,7 +101,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('page')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (let i = 0; i < 5; i++) {
         await s.insertIssue(makeIssue({ id: `issue-${i}`, workspaceId: WS }))
       }
@@ -136,7 +136,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('cursor-gone')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (const [id, status] of [
         ['a', 'todo'],
         ['b', 'done'],
@@ -189,7 +189,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('collation')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const ids = ['m', 'z', '\uFFFD', '\u{1F600}']
       for (const id of ids) await s.insertIssue(makeIssue({ id, workspaceId: WS }))
 
@@ -210,7 +210,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('query')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertIssue(makeIssue({ id: 'i-a', workspaceId: WS, title: '依赖漏洞', status: 'todo' }))
       await s.insertIssue(
         makeIssue({ id: 'i-b', workspaceId: WS, title: '文档错别字', status: 'done' }),
@@ -235,8 +235,8 @@ describe('基本 CRUD 与持久化', () => {
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
       // 故意让 id 的字典序与创建顺序相反：按 id 排序会给出错误的默认工作区
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: wsId('zzz-first'), name: 'z', createdAt: 1, updatedAt: 1 })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: wsId('aaa-second'), name: 'a', createdAt: 2, updatedAt: 2 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('zzz-first'), name: 'z', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('aaa-second'), name: 'a', createdAt: 2, updatedAt: 2 })
 
       assert.deepEqual(await s.listWorkspaceIds(), [wsId('zzz-first'), wsId('aaa-second')])
       await s.close()
@@ -316,7 +316,7 @@ describe('CAS 状态转移（端口的支点）', () => {
     const d = await makeTempDir('cas-race')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-race', workspaceId: WS, agentId: 'a1' }))
 
       const results = await Promise.all(
@@ -341,7 +341,7 @@ describe('CAS 状态转移（端口的支点）', () => {
     const d = await makeTempDir('cas-foreign')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-foreign', workspaceId: WS, agentId: 'a1' }))
 
       const raw = new DatabaseSync(sqliteStorePath(d))
@@ -367,7 +367,7 @@ describe('patch 的 undefined / null 语义', () => {
     const d = await makeTempDir('patch')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-patch')
       await s.insertRun(makeRun({ id: 'r-patch', workspaceId: WS, agentId: 'a1' }))
       await s.transitionRun(rid, 'queued', 'dispatched', {
@@ -403,7 +403,7 @@ describe('patch 的 undefined / null 语义', () => {
     const d = await makeTempDir('patch-issue')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertIssue(
         makeIssue({
           id: 'i-p',
@@ -447,7 +447,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r-hold',
@@ -473,7 +473,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir-states')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const active: RunStatus[] = ['dispatched', 'running', 'waiting_local_directory']
       for (const [i, status] of active.entries()) {
@@ -502,7 +502,7 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
     const d = await makeTempDir('selfrace')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r1',
@@ -541,7 +541,7 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
     const d = await makeTempDir('selfrace2')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r-done',
@@ -567,7 +567,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const r1 = makeReport({ id: 'rep-1', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
       const r2 = makeReport({ id: 'rep-2', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
@@ -595,7 +595,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup-index')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertReport(makeReport({ id: 'rep-u1', workspaceId: WS, kind: 'k', dedupKey: 'uniq' }))
       await s.close()
 
@@ -626,7 +626,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup-rekey')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       await s.insertReport(makeReport({ id: 'rep-rk', workspaceId: WS, kind: 'k', dedupKey: 'old' }))
       assert.equal(
@@ -646,7 +646,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup2')
     try {
       const a = await SqliteStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertReport(makeReport({ id: 'rep-x', workspaceId: WS, kind: 'k', dedupKey: 'dup-key' }))
       await a.close()
 
@@ -687,7 +687,7 @@ describe('动作幂等键（FR-ACTION-03）', () => {
     const d = await makeTempDir('idem')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const action = makeAction({ id: 'act-1', idempotencyKey: 'v-1:comment.create:{"body":"x"}' })
       await s.insertAction(action)
@@ -721,7 +721,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-msg')
       await s.insertRun(makeRun({ id: 'r-msg', workspaceId: WS, agentId: 'a1' }))
 
@@ -745,7 +745,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     try {
       const rid = runId('r-msg2')
       const a = await SqliteStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertRun(makeRun({ id: 'r-msg2', workspaceId: WS, agentId: 'a1' }))
       await a.appendRunMessage(rid, msg(7, 'x'))
       await a.close()
@@ -763,7 +763,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages-empty')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-empty', workspaceId: WS, agentId: 'a1' }))
       // -1 才能让"从哪开始补齐"与"尚未产生任何消息"区分开
       assert.equal(await s.lastRunMessageSeq(runId('r-empty')), -1)
@@ -783,7 +783,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages-dupseq')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-dup')
       await s.insertRun(makeRun({ id: 'r-dup', workspaceId: WS, agentId: 'a1' }))
 
@@ -861,7 +861,7 @@ describe('审计链（FR-AUDIT-01）', () => {
     const d = await makeTempDir('audit')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-audit')
       await s.insertRun(makeRun({ id: 'r-audit', workspaceId: WS, agentId: 'a1' }))
 
@@ -910,7 +910,7 @@ describe('verdict 与 artifact', () => {
     const d = await makeTempDir('verdict')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-v')
       await s.insertRun(makeRun({ id: 'r-v', workspaceId: WS, agentId: 'a1' }))
       const vid = 'v-1' as VerdictId
@@ -953,7 +953,7 @@ describe('verdict 与 artifact', () => {
     const d = await makeTempDir('artifact')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-art')
       await s.insertArtifact({
         id: 'art-1' as never,
@@ -980,7 +980,7 @@ describe('通知中心（FR-ISSUE-07/08）', () => {
     const d = await makeTempDir('inbox')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const item = (id: string, createdAt: number) => ({
         id,
@@ -1025,7 +1025,7 @@ describe('注释（Comment）', () => {
     const d = await makeTempDir('comment')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const mk = (id: string, createdAt: number) => ({
         id: id as never,
         workspaceId: WS,
@@ -1161,7 +1161,7 @@ describe('打开期校验与关闭', () => {
     const d = await makeTempDir('filename')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false, fileName: 'other.sqlite' })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.close()
 
       // 默认文件名的那份仍然是空库：两边互不干扰

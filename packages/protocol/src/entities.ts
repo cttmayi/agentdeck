@@ -85,6 +85,18 @@ export const Workspace = z.object({
    */
   defaultAgentId: AgentId.nullable().default(null),
 
+  /**
+   * 界面语言（D39）。`'zh' | 'en'`，缺省 `'zh'`。
+   *
+   * ⚠️ 它存在 workspace 上而不是浏览器里，理由是**服务端也要知道**：第一句话模版
+   *    里的语言指令（`{{language}}`）是 daemon 渲染的，两边不一致就会出现
+   *    "界面英文、模型还是被要求用中文回答"。
+   *
+   * ⚠️ 它**只影响界面文字与那条语言指令**，不影响：契约值（`pass`/`comment.create`
+   *    这类机器值永不翻译）、已经写进库的历史日志与通知（不重译）。
+   */
+  locale: z.enum(['zh', 'en']).default('zh'),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })

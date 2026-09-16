@@ -32,6 +32,9 @@ importers:
       '@alpha-helper/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@alpha-helper/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@alpha-helper/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -55,6 +58,10 @@ importers:
         version: link:../../packages/protocol
 
   apps/web:
+    dependencies:
+      '@alpha-helper/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.0.3
@@ -111,6 +118,8 @@ importers:
       '@alpha-helper/protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  packages/i18n: {}
 
   packages/protocol:
     dependencies:

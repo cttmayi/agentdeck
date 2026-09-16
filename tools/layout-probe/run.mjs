@@ -791,6 +791,48 @@ const CHECKS = [
       typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
   },
 
+  // ── 语言切换（D39）──
+  //
+  // 这一段跑在**最后**（前面全是中文断言），并且在末尾切回中文。
+  {
+    view: '语言切换',
+    key: 'lang.switchPresent',
+    label: '★ 顶栏有语言切换器',
+    ok: (v) => v === true,
+  },
+  {
+    view: '语言切换',
+    key: 'lang.defaultIsZh',
+    label: '默认是中文（既有数据/文档/断言的语言）',
+    ok: (v) => v === 'zh',
+  },
+  { view: '语言切换', key: 'lang.navBefore', label: '切换前导航是中文', ok: (v) => v === '新建任务' },
+  {
+    view: '语言切换',
+    key: 'lang.switchedToEn',
+    label: '★ 切到 English 之后界面真的变英文（响应式没断）',
+    ok: (v) => v === true,
+  },
+  { view: '语言切换', key: 'lang.navAfter', label: '导航变成 New task', ok: (v) => v === 'New task' },
+  {
+    view: '语言切换',
+    key: 'lang.settingsLabel',
+    label: '顶栏那个按钮也变成 Settings',
+    ok: (v) => v === 'Settings',
+  },
+  {
+    view: '语言切换',
+    key: 'lang.contractValuesUntranslated',
+    label: '★ 契约值（comment.create 这类机器值）**不翻译**',
+    ok: (v) => v === true,
+  },
+  {
+    view: '语言切换',
+    key: 'lang.savedOnServer',
+    label: '★ 选择写回了服务端（界面与 prompt 的语言指令一致）',
+    ok: (v) => v === 'zh',
+  },
+
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '新建任务页渲染出来了（没白屏）', ok: (v) => v === true },
 ]

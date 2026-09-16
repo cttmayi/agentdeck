@@ -833,6 +833,62 @@
           })
         }
 
+        // ══════════════ 语言切换（D39）══════════════
+        //
+        // ⚠️ 这一段必须放在**最后**：前面所有检查都断言中文，切成英文会让它们全红。
+        //    测完切回中文，保证探针结束时状态与开始时一致。
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => !!d().querySelector('.topbar select'))
+        await wait(300)
+
+        const langSelect = d().querySelector('.topbar select')
+        facts['lang.switchPresent'] = !!langSelect
+        facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
+        facts['lang.navBefore'] = need('切换前的导航文字', () =>
+          text(d().querySelector('.sidebar .nav-title')),
+        )
+
+        if (langSelect) {
+          langSelect.value = 'en'
+          langSelect.dispatchEvent(new Event('change', { bubbles: true }))
+          // 英文生效：导航文字与顶栏按钮都变成英文
+          const switched = await until(
+            () => text(d().querySelector('.sidebar .nav-title')) === 'New task',
+            40,
+          )
+          facts['lang.switchedToEn'] = switched
+          facts['lang.navAfter'] = need('切换后的导航文字', () =>
+            text(d().querySelector('.sidebar .nav-title')),
+          )
+          facts['lang.settingsLabel'] = need('顶栏「设置」按钮', () => {
+            const b = [...d().querySelectorAll('.topbar-actions button')].find(
+              (x) => text(x) === 'Settings',
+            )
+            return b ? 'Settings' : null
+          })
+          // ★ 契约值**不翻译**：动作名、runtime key 这些仍然是机器值
+          f.contentWindow.location.hash = '#/skills'
+          await until(() => !!d().querySelector('.main table, .empty'))
+          await wait(400)
+          facts['lang.contractValuesUntranslated'] = need('英文界面下的动作名', () => {
+            const main = d().querySelector('.main')
+            const rows = main ? main.querySelectorAll('table tbody tr').length : 0
+            // 行必须先有（否则这条断言会"空过"），再看动作名是不是原样
+            facts['lang.skillRowsInEn'] = rows
+            return rows > 0 && (main.textContent ?? '').includes('comment.create')
+          })
+
+          // 切回中文，并以服务端为准确认它记住了
+          langSelect.value = 'zh'
+          langSelect.dispatchEvent(new Event('change', { bubbles: true }))
+          await until(() => text(d().querySelector('.sidebar .nav-title')) === '新建任务', 40)
+          const saved = await f.contentWindow
+            .fetch('/api/identity')
+            .then((r) => r.json())
+            .catch(() => null)
+          facts['lang.savedOnServer'] = saved ? saved.locale : null
+        }
+
         // ══════════════ 新建任务：至少不崩 ══════════════
         f.contentWindow.location.hash = '#/new'
         await wait(600)

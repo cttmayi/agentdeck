@@ -32,6 +32,18 @@ import {
 } from '@alpha-helper/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { resolveReviewStandard } from './review-standard.ts'
+import { DEFAULT_LOCALE } from '@alpha-helper/i18n'
+
+/**
+ * 语言在 prompt 里的**显示名**（D39）。
+ *
+ * 用语言自己的写法（`简体中文` / `English`）：模型读到哪个都能照做，而写
+ * "Chinese" 反而可能在"中文 vs 简体中文"这种要求上含糊。
+ */
+const LANGUAGE_NAME: Record<'zh' | 'en', string> = {
+  zh: '简体中文',
+  en: 'English',
+}
 import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
 import type { RunRegistry } from './registry.ts'
@@ -796,6 +808,10 @@ export class RunExecutor {
         executeTemplate: workspace?.executeTemplate ?? '',
         reviewTemplate: workspace?.reviewTemplate ?? '',
       }
+      // ★ 回答语言（D39）：界面语言决定模型用什么语言答复。**prompt 本身不翻译**，
+      //   只加一条"请用 X 回答"的指令——使用者看不懂中文答复，但判决契约与材料
+      //   标记这些硬东西一个字都不能动。
+      const language = LANGUAGE_NAME[workspace?.locale ?? DEFAULT_LOCALE]
 
       // ★ 审核标准（D37）：内联在**这个审核者**身上，解析点只有一处
       //   （`resolveReviewStandard`）——派发前判"能不能审"、这里渲染
@@ -818,6 +834,7 @@ export class RunExecutor {
               prompt: req.prompt,
               // 审核标准的正文（D37）——`{{standards}}` 就是它
               standard: standard?.body ?? null,
+              language,
               // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
               // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
               template: templates.reviewTemplate,
@@ -829,6 +846,7 @@ export class RunExecutor {
               prompt: req.prompt,
               skills: skillsBrief,
               instructions: agentConfig?.instructions ?? null,
+              language,
               template: templates.executeTemplate,
             })
 

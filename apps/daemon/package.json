@@ -15,6 +15,7 @@
     "@alpha-helper/agent-core": "workspace:*",
     "@alpha-helper/agent-generic": "workspace:*",
     "@alpha-helper/domain": "workspace:*",
+    "@alpha-helper/i18n": "workspace:*",
     "@alpha-helper/protocol": "workspace:*",
     "@alpha-helper/store-file": "workspace:*",
     "@alpha-helper/web": "workspace:*"

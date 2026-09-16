@@ -58,6 +58,8 @@ describe('第一句话：默认模版（D32）', () => {
 
 用 JS 写一个冒泡排序，并解释复杂度。
 
+请用简体中文回答。
+
 ## 护栏
 
 - 只做上面描述的事，不要扩大范围。
@@ -104,6 +106,8 @@ describe('第一句话：默认模版（D32）', () => {
 
 1. 能明确判断时给出 pass 或 fail，并把证据指回原文。
 
+请用简体中文回答（判决 JSON 里的字段名与取值必须原样照抄，不要翻译）。
+
 ## 护栏
 
 - 严格按上面的审核标准判断，不要引入标准之外的要求。
@@ -115,6 +119,21 @@ describe('第一句话：默认模版（D32）', () => {
 
 ${contract}`
     assert.equal(text, expected, '审核模版渲染出来的必须就是文档里那段（逐字节）')
+  })
+
+  test('★ D39：语言指令跟着调用方给的语言走（prompt 本身不翻译）', () => {
+    // 界面切英文时，使用者看不懂中文答复——所以第一句话里带一条"请用 X 回答"。
+    // ⚠️ 它**只影响模型的答复**：模版正文、判决契约、材料标记都不翻译。
+    const zh = renderFirstSentence({ ...SAMPLE_EXECUTE_INPUT })
+    assert.match(zh, /请用简体中文回答。/, '没给语言时退回中文')
+
+    const en = renderFirstSentence({ ...SAMPLE_EXECUTE_INPUT, language: 'English' })
+    assert.match(en, /请用English回答。/)
+    assert.match(en, /## 护栏/, '其余部分一个字都不变（prompt 不翻译）')
+
+    const review = renderFirstSentence({ ...SAMPLE_REVIEW_INPUT, language: 'English' })
+    assert.match(review, /请用English回答（判决 JSON 里的字段名与取值必须原样照抄，不要翻译）。/)
+    assert.match(review, /<<<ALPHA_MATERIAL>>>/, '材料标记这种硬契约绝不跟着语言变')
   })
 
   test('模版为空 = 平台默认（三种"没填"都算）', () => {

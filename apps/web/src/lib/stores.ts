@@ -14,6 +14,7 @@ import {
   type TemplateKit,
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
+import { setLocaleFromIdentity } from './i18n.ts'
 
 /**
  * 全局状态。
@@ -81,7 +82,16 @@ async function load<T>(
 }
 
 export const loadIdentity = (): Promise<void> =>
-  load('identity', () => api<Identity>('/api/identity'), identity)
+  load(
+    'identity',
+    async () => {
+      const payload = await api<Identity>('/api/identity')
+      // ★ 语言跟着身份一起到（D39）：页面启动就该是对的语言
+      setLocaleFromIdentity(payload.locale)
+      return payload
+    },
+    identity,
+  )
 
 export const loadIssues = (): Promise<void> =>
   load('issues', async () => (await api<{ items: Issue[] }>('/api/issues?limit=200')).items ?? [], issues)
