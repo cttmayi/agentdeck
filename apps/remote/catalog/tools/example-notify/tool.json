@@ -1,0 +1,31 @@
+{
+  "schema": "alpha-helper/tool@1",
+  "slug": "example-notify",
+  "name": "示例工具（通知：平台/渠道参数）",
+  "version": "1.0.0",
+  "description": "远端范例：演示「平台/渠道」这一类枚举参数，以及字符串、布尔、整数参数。不真的发通知——它只把收到的完整参数写成工作目录里的一条记录，用来测试「判决 → 参数 → 脚本」这条管道。",
+  "runtime": "node",
+  "entry": "scripts/send.mjs",
+  "actions": [
+    {
+      "name": "send",
+      "summary": "模拟发一条通知（不真的发，把 channel/title/content/urgent/retries 原样写成 notify.log）",
+      "reversible": true,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" },
+          "run-id": { "from": "subject.runId" }
+        },
+        "open": {
+          "channel": { "type": "enum", "values": ["dingtalk", "wecom", "feishu", "slack", "email"] },
+          "title": { "type": "string", "max": 200 },
+          "content": { "type": "string", "max": 2000 },
+          "urgent": { "type": "boolean" },
+          "retries": { "type": "integer", "min": 0, "max": 10 }
+        }
+      }
+    }
+  ]
+}

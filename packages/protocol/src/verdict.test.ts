@@ -8,7 +8,7 @@ import {
   parseVerdict,
   renderVerdictInstruction,
 } from './verdict.ts'
-import { ActionType, ReasonCode, Severity } from './enums.ts'
+import { ReasonCode, Severity } from './enums.ts'
 
 /** 一份最小的合法判决。 */
 const validPass = {
@@ -25,7 +25,15 @@ const validFail = {
   ...validPass,
   conclusion: 'fail',
   reasonCode: 'missing_tests',
-  action: { type: 'issue.update_status', params: { status: 'todo' } },
+  // ★ D45：`fail` **不得**带 action——它的出口是返工（把意见交回执行者重做），
+  //   不是处置。处置动作只属于 `pass`。
+  action: null,
+}
+
+/** 一份"带动作"的判决，用来示范 `action` 的形状。D45 之后只有 `pass` 能带。 */
+const validPassWithAction = {
+  ...validPass,
+  action: { type: 'demo-tool.say', params: { message: '请补测试' } },
 }
 
 const validNeedsHuman = {
@@ -41,8 +49,13 @@ describe('Verdict —— 基本合法性', () => {
     assert.equal(r.ok, true)
   })
 
-  test('合法的 fail（带 action）通过', () => {
+  test('合法的 fail（不带 action）通过', () => {
     const r = parseVerdict(validFail)
+    assert.equal(r.ok, true)
+  })
+
+  test('合法的 pass（带 action）通过', () => {
+    const r = parseVerdict(validPassWithAction)
     assert.equal(r.ok, true)
   })
 
@@ -52,12 +65,20 @@ describe('Verdict —— 基本合法性', () => {
   })
 })
 
-describe('Verdict —— 出口规则（INV-4/5）', () => {
-  test('fail 不给 action ⇒ 拒（判决没有出口）', () => {
-    const r = parseVerdict({ ...validFail, action: null })
+describe('Verdict —— 出口规则（INV-4/5、D45）', () => {
+  test('★ fail 带 action ⇒ 拒（fail 是返工，不是处置）', () => {
+    const r = parseVerdict({
+      ...validFail,
+      action: { type: 'demo-tool.say', params: { message: '请补测试' } },
+    })
     assert.equal(r.ok, false)
     if (r.ok) return
     assert.ok(r.issues.some((i) => i.path.join('.') === 'action'))
+  })
+
+  test('★ fail 不给 action ⇒ 通过（返工就是它的出口）', () => {
+    const r = parseVerdict(validFail)
+    assert.equal(r.ok, true)
   })
 
   test('needs_human 不给 escalateReason ⇒ 拒（升级必须带结构化原因）', () => {
@@ -91,9 +112,31 @@ describe('Verdict —— 「一开一合」的合（闭合处必须真的拒绝�
     assert.equal(r.ok, false)
   })
 
-  test('未知 action.type ⇒ 拒（必须来自注册表）', () => {
-    const r = parseVerdict({ ...validFail, action: { type: 'deploy.production', params: {} } })
-    assert.equal(r.ok, false)
+  test('★ action.type 只认 `<包 slug>.<动作名>` 这一种形状（D41 起没有内置裸名）', () => {
+    // ⚠️ D40 改过这条判据：`deploy.production` 这种**形状**现在是合法的（第三方
+    //    工具动作），它到底存不存在由 daemon 侧的运行时守卫判——schema 不知道工作区
+    //    里装了什么。所以这里守的是**形状**，不是"在不在内置注册表里"：形状不对的
+    //    名字仍然要在这一层被拒，否则"未声明即拒绝"会退化成"先收下，运行时再说"。
+    for (const bad of [
+      'deploy production',
+      'Deploy.production',
+      'a.b.c',
+      'nope',
+      'nope.',
+      '.nope',
+      'deploy.production.',
+      'issue.update_status',
+      // ⚠️ `comment.create` **不在**这张表里：D41 之后它就是一个普通的工具动作名
+      //    （来自一个叫 `comment` 的包），形状完全合法。
+    ]) {
+      const r = parseVerdict({ ...validPassWithAction, action: { type: bad, params: {} } })
+      assert.equal(r.ok, false, `形状不对的动作名不该过：${bad}`)
+    }
+    // 形状对的在这一层都过（**只有** `<包 slug>.<动作名>` 一种；存在性是运行时的事）
+    for (const good of ['deploy.production', 'demo-tool.say']) {
+      const r = parseVerdict({ ...validPassWithAction, action: { type: good, params: {} } })
+      assert.equal(r.ok, true, `${good} 的**形状**是合法的`)
+    }
   })
 
   test('顶层多一个字段 ⇒ 拒（不能从顶层绕开闭合）', () => {
@@ -103,7 +146,7 @@ describe('Verdict —— 「一开一合」的合（闭合处必须真的拒绝�
 
   test('action 里多一个字段 ⇒ 拒（尤其不能自带执行端）', () => {
     const r = parseVerdict({
-      ...validFail,
+      ...validPassWithAction,
       action: { type: 'issue.update_status', params: {}, plane: 'remote' },
     })
     assert.equal(r.ok, false)
@@ -177,7 +220,8 @@ describe('Verdict —— 「一开一合」的开（detail 是唯一出口）', 
 
 describe('Verdict —— 错误信息可读', () => {
   test('formatVerdictIssues 带字段路径', () => {
-    const r = parseVerdict({ ...validFail, action: null })
+    // D45：不合规的「路径带 action」现在来自「fail 写了 action」
+    const r = parseVerdict({ ...validFail, action: { type: 'demo-tool.say', params: {} } })
     assert.equal(r.ok, false)
     if (r.ok) return
     const msg = formatVerdictIssues(r.issues)
@@ -236,7 +280,13 @@ describe('★ 给模型看的判决指令（一次真实失败换来的）', () 
    * 那是**我们的缺陷**：要一个严格闭合的对象，却只画了个轮廓。
    */
   test('★ 指令里的示例**必须能通过校验**（否则就是在教模型一个错的形状）', () => {
-    const instruction = renderVerdictInstruction()
+    // ⚠️ 要用"有允许动作"的那份契约来验：D41 之后**默认那份**是"这次不允许任何
+    //    动作"，示例里的 action 因此是 `null`——那是合法的（`pass` 不需要 action），
+    //    但拿它验不到"示例里的动作名对不对"。所以这里显式给一个允许的动作。
+    const instruction = renderVerdictInstruction({
+      allowedActions: ['demo-tool.say'],
+      toolActions: [{ type: 'demo-tool.say', summary: '打个招呼', openParams: ['message'] }],
+    })
     const json = extractVerdictJson(instruction)
     assert.notEqual(json, null, '示例要被围栏包起来，且能被提取出来')
     const parsed = parseVerdict(JSON.parse(json!))
@@ -257,9 +307,24 @@ describe('★ 给模型看的判决指令（一次真实失败换来的）', () 
     for (const value of Severity.options) {
       assert.ok(instruction.includes(value), `severity 的取值 ${value} 必须写给模型看`)
     }
-    for (const value of ActionType.options) {
-      assert.ok(instruction.includes(value), `action.type 的取值 ${value} 必须写给模型看`)
-    }
+    // ⚠️ `action.type` 那一行**不再有固定取值可列**（D41：没有内置动作）。
+    //    它的规则改由下面两条用例钉住（有允许动作时逐个列；没有时明说不要写）。
+  })
+
+  test('★ 一个动作都不允许时，契约明说"不要写 action"（否则模型会去编一个）', () => {
+    const instruction = renderVerdictInstruction()
+    assert.match(instruction, /这次不要写/)
+    assert.doesNotMatch(instruction, /只能取/, '一个都不允许时不该说"只能取"')
+  })
+
+  test('给了允许的动作时，契约把它们逐个列出来，并用它当示例', () => {
+    const instruction = renderVerdictInstruction({
+      allowedActions: ['demo-tool.say'],
+      toolActions: [{ type: 'demo-tool.say', summary: '打个招呼', openParams: ['message'] }],
+    })
+    assert.match(instruction, /demo-tool\.say/, '名字要逐个列给模型')
+    assert.match(instruction, /message/, '开放参数要告诉它要填哪个')
+    assert.doesNotMatch(instruction, /这次不要写/, '有允许的动作时不该说"不要写 action"')
   })
 
   test('★ 要点明 findings/evidence 的形状：数组、对象、不能写成一整段字符串', () => {
@@ -268,6 +333,36 @@ describe('★ 给模型看的判决指令（一次真实失败换来的）', () 
     assert.match(instruction, /excerpt/, '证据项里该有什么字段')
     assert.match(instruction, /闭合/, '要说清"多一个字段就整条不合规"')
     assert.match(instruction, /不要.*字符串/, '明确禁止把证据写成一整段字符串')
+  })
+
+  test('★ D43：固定参数不进"你只需要给"、单独说"已固定，不要写"（模型才不会猜/漏）', () => {
+    const instruction = renderVerdictInstruction({
+      allowedActions: ['demo-tool.say'],
+      toolActions: [
+        {
+          type: 'demo-tool.say',
+          summary: '打个招呼',
+          openParams: ['message'],
+          fixedParams: [{ name: 'channel', value: 'feishu' }],
+        },
+      ],
+    })
+    // 固定参数要从"你只需要给"里**减去**：模型不需要填它（channel 不在这行的列表里）。
+    assert.doesNotMatch(instruction, /你只需要给[^\n]*channel/s, '固定参数不能再列给模型填')
+    // 但必须**单独说出口**——否则模型会当成漏填的必填项去猜。
+    assert.match(instruction, /`channel` 已由使用者在界面上固定为 "feishu"/)
+    assert.match(instruction, /不要写它/)
+    assert.match(instruction, /写了会被判不合规/)
+    // 没固定的参数照旧列。
+    assert.match(instruction, /你只需要给.*message/s)
+  })
+
+  test('★ D43：没有固定参数时，契约与 D42 逐字不变（没有多余的"已固定"行）', () => {
+    const instruction = renderVerdictInstruction({
+      allowedActions: ['demo-tool.say'],
+      toolActions: [{ type: 'demo-tool.say', summary: '打个招呼', openParams: ['message'] }],
+    })
+    assert.doesNotMatch(instruction, /已由使用者在界面上固定为/)
   })
 
   test('★ 枚举与示例都是从 schema 生成的：改 schema 不会让指令漂', () => {
@@ -398,8 +493,9 @@ describe('★ 缺省 ≡ null（"必填"只留给真正承载判断的字段）'
   test('★ 动作可以省略 params（有的动作没有参数）', () => {
     const r = parseVerdict({
       schemaVersion: 1,
-      conclusion: 'fail',
-      reasonCode: 'missing_tests',
+      // D45：带动作的判决只能是 `pass`
+      conclusion: 'pass',
+      reasonCode: 'meets_criteria',
       confidence: 0.5,
       action: { type: 'notify.emit' },
     })
@@ -407,15 +503,15 @@ describe('★ 缺省 ≡ null（"必填"只留给真正承载判断的字段）'
     if (r.ok) assert.deepEqual(r.verdict.action?.params, {})
   })
 
-  test('★ 但承载判断的出口规则一点没松：fail 没有 action 仍然拒', () => {
+  test('★ 但承载判断的出口规则一点没松：fail 带 action 仍然拒', () => {
     const r = parseVerdict({
       schemaVersion: 1,
       conclusion: 'fail',
       reasonCode: 'missing_tests',
       confidence: 0.5,
-      action: null,
+      action: { type: 'notify.emit' },
     })
-    assert.equal(r.ok, false, 'INV-4：fail 必须可执行')
+    assert.equal(r.ok, false, 'D45：fail 是返工、不是处置，处置只属于 pass')
   })
 
   test('★ needs_human 没有 escalateReason 仍然拒（INV-5）', () => {

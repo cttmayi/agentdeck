@@ -141,15 +141,19 @@ describe('Action 生命周期', () => {
 })
 
 describe('动作幂等键', () => {
+  // ⚠️ D41：这两条用到的动作名只是**幂等键的夹具**（主体是"键里含哪些东西"），
+  //    所以换成形状合法的工具动作名 `<包 slug>.<动作名>`——平台的内置动作已经
+  //    全部移除，`issue.update_status` / `comment.create` 那种内置名在平台里
+  //    不再可能出现（`<slug>.<name>` 才是唯一形状）。断言一字未改。
   test('★ 含 verdictId：不同判决的相同动作不会被去重（多视角审核，FR-AGENT-21）', () => {
-    const base = { type: 'issue.update_status', params: { status: 'todo' } }
+    const base = { type: 'fixture-tool.act', params: { text: 'todo' } }
     const a = actionIdempotencyKey({ verdictId: 'v1', ...base })
     const b = actionIdempotencyKey({ verdictId: 'v2', ...base })
     assert.notEqual(a, b, '两个不同的 verdict 产生同一动作，必须得到不同的幂等键')
   })
 
   test('同一判决重放得到同一幂等键（会被去重）', () => {
-    const input = { verdictId: 'v1', type: 'comment.create', params: { body: 'x' } }
+    const input = { verdictId: 'v1', type: 'other-tool.act', params: { text: 'x' } }
     assert.equal(actionIdempotencyKey(input), actionIdempotencyKey({ ...input }))
   })
 

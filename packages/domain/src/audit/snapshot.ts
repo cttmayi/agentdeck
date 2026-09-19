@@ -11,6 +11,7 @@ import {
   type Report,
   type Run,
   type Skill,
+  type Tool,
   type VerdictRecord,
   type Workspace,
   type WorkspaceId,
@@ -67,6 +68,17 @@ export interface DataSnapshot {
     device: Device | null
     agents: Agent[]
     skills: Skill[]
+    /**
+     * 工具包（D40）。
+     *
+     * ★ 与 skills **并排**放在这里，而不是"以后需要再加"。
+     *
+     * 审计导出要求自包含（FR-AUDIT-02）：agent 挂着的 `toolIds`、判决与审计
+     * 里的 `<slug>.<动作名>` 都是**引用**，被引用的包必须同一份文件里就在。
+     * 漏掉它不会报任何错，只会让导出物里出现"引用了一个不存在的工具包"——
+     * 拿到别处打开时看不出是"当时没导"，还是"这个包当时就不在"。
+     */
+    tools: Tool[]
     issues: Issue[]
     comments: Comment[]
     reports: Report[]
@@ -109,16 +121,18 @@ export async function exportData(
   const now = options.now ?? (() => Date.now())
   const ws = options.workspaceId
 
-  const [workspace, device, agents, skills, issues, reports, runs, inbox] = await Promise.all([
-    store.getWorkspace(ws),
-    store.getDevice(),
-    store.listAgents(ws),
-    store.listSkills(ws),
-    drainAll<Issue>((cursor) => store.listIssues({ workspaceId: ws, limit: 200, cursor })),
-    drainAll<Report>((cursor) => store.listReports({ workspaceId: ws, limit: 200, cursor })),
-    drainAll<Run>((cursor) => store.listRuns({ workspaceId: ws, limit: 200, cursor })),
-    store.listInboxItems({ workspaceId: ws, limit: 10_000 }),
-  ])
+  const [workspace, device, agents, skills, tools, issues, reports, runs, inbox] =
+    await Promise.all([
+      store.getWorkspace(ws),
+      store.getDevice(),
+      store.listAgents(ws),
+      store.listSkills(ws),
+      store.listTools(ws),
+      drainAll<Issue>((cursor) => store.listIssues({ workspaceId: ws, limit: 200, cursor })),
+      drainAll<Report>((cursor) => store.listReports({ workspaceId: ws, limit: 200, cursor })),
+      drainAll<Run>((cursor) => store.listRuns({ workspaceId: ws, limit: 200, cursor })),
+      store.listInboxItems({ workspaceId: ws, limit: 10_000 }),
+    ])
 
   // 顺着关系把从属实体取全：它们没有"列出全部"的口子，
   // 但每一个都能从 run / issue 走得到（这正是 report 当初缺 listReports
@@ -143,6 +157,7 @@ export async function exportData(
     device,
     agents,
     skills,
+    tools,
     issues,
     comments,
     reports,
@@ -281,6 +296,19 @@ export async function importData(
       rows: doc.data.skills,
       get: (id) => store.getSkill(id as Skill['id']),
       put: (row) => store.insertSkill(row),
+    },
+    {
+      /**
+       * ⚠️ 这里的 `?? []` 不是防御性编程，而是**真的会走到**：快照的格式版本
+       *    没有因为加 tools 而变（`DATA_SNAPSHOT_FORMAT_VERSION` 仍是 1），
+       *    所以使用者手上那份旧版本导出的文件是完全正常的，它的 `data` 里
+       *    没有 `tools` 这一段。此时"一个工具包都没导"才是正确解读——
+       *    **不是**补一份，也**不是**拒绝导入（拒绝等于让旧备份突然打不开）。
+       */
+      key: 'tools',
+      rows: doc.data.tools ?? [],
+      get: (id) => store.getTool(id as Tool['id']),
+      put: (row) => store.insertTool(row),
     },
     {
       key: 'issues',

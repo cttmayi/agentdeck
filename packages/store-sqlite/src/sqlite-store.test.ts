@@ -9,7 +9,9 @@ import {
   makeReport,
   makeRun,
   makeSkill,
+  makeTool,
   runId,
+  toolId,
   wsId,
 } from '@alpha-helper/domain/testing'
 import type { ActionId, BlobRef, RunMessage, RunStatus, VerdictId } from '@alpha-helper/protocol'
@@ -256,6 +258,165 @@ describe('基本 CRUD 与持久化', () => {
       await s.close()
     } finally {
       await cleanup(d)
+    }
+  })
+})
+
+/**
+ * 工具包（D40）的读写。
+ *
+ * 与 `store-file` 的那一组逐条对齐（同一套端口语义），所以这里只挑 SQL 侧
+ * 真正会走样的地方多说一句：`listTools` 按 **rowid** 返回（等于写入顺序），
+ * `getToolBySlug` 走的是 `(workspace_id, slug)` 上的索引——索引**故意不是唯一
+ * 索引**，理由写在 `sqlite-store.ts` 的建表处（唯一约束会把"装了同 slug 的包"
+ * 从"覆盖写入"变成"报错"，那是与文件适配器不一致的行为改变）。
+ */
+describe('工具包（D40）：CRUD 与卸载', () => {
+  const WSA = wsId('ws-tool-a')
+  const WSB = wsId('ws-tool-b')
+
+  async function openScratch(prefix: string): Promise<{ store: SqliteStore; dir: string }> {
+    const dir = await makeTempDir(prefix)
+    const s = await SqliteStore.open({ dataDir: dir, fsync: false })
+    for (const [id, name] of [
+      [WSA, 'A'],
+      [WSB, 'B'],
+    ] as const) {
+      await s.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id,
+        name,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+    return { store: s, dir }
+  }
+
+  test('插进去能取到，且按 workspace 隔离', async () => {
+    const { store: s, dir } = await openScratch('tool-crud')
+    try {
+      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
+      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
+      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
+
+      assert.equal((await s.getTool(toolId('t1')))?.slug, 'deploy')
+      assert.equal((await s.getTool(toolId('t3')))?.workspaceId, WSB)
+      assert.equal(await s.getTool(toolId('nope')), null)
+
+      assert.deepEqual((await s.listTools(WSA)).map((t) => t.slug), ['deploy', 'lint'])
+      assert.deepEqual((await s.listTools(WSB)).map((t) => t.slug), ['deploy'])
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('listToolsByIds 批量取，且与传入顺序无关、空集合不炸', async () => {
+    const { store: s, dir } = await openScratch('tool-byids')
+    try {
+      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
+      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
+      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
+
+      assert.deepEqual(
+        (await s.listToolsByIds([toolId('t3'), toolId('t1')])).map((t) => t.id).sort(),
+        ['t1', 't3'],
+      )
+      assert.deepEqual(
+        (await s.listToolsByIds([toolId('t1'), toolId('t3')])).map((t) => t.id).sort(),
+        ['t1', 't3'],
+      )
+      // IN () 是语法错误：空集合必须提前返回
+      assert.deepEqual(await s.listToolsByIds([]), [])
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ getToolBySlug 命中与未命中，且同名 slug 只在本 workspace 内唯一', async () => {
+    const { store: s, dir } = await openScratch('tool-slug')
+    try {
+      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
+      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
+
+      assert.equal((await s.getToolBySlug(WSA, 'deploy'))?.id, 't1')
+      assert.equal(await s.getToolBySlug(WSA, 'nope'), null)
+      assert.equal(
+        (await s.getToolBySlug(WSB, 'deploy'))?.id,
+        't3',
+        '★ 查询必须带上 workspace_id：否则会把别人空间的包当成自己的',
+      )
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 卸载：删得掉、删两次第二次返回 false（幂等，不是错误）、别的 workspace 不受影响', async () => {
+    const { store: s, dir } = await openScratch('tool-uninstall')
+    try {
+      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
+      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
+      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
+
+      assert.equal(await s.deleteTool(toolId('t1')), true)
+      // `changes = 0` ⇒ false：删一个已经不在的记录是幂等，不是错误
+      assert.equal(await s.deleteTool(toolId('t1')), false, '"它已经不在了"不是错误')
+      assert.equal(await s.deleteTool(toolId('ghost')), false)
+
+      assert.equal(await s.getTool(toolId('t1')), null)
+      assert.equal(await s.getToolBySlug(WSA, 'deploy'), null)
+      assert.deepEqual((await s.listTools(WSA)).map((t) => t.slug), ['lint'])
+      assert.deepEqual(await s.listToolsByIds([toolId('t1')]), [])
+
+      assert.deepEqual((await s.listTools(WSB)).map((t) => t.slug), ['deploy'])
+      assert.equal((await s.getToolBySlug(WSB, 'deploy'))?.id, 't3')
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 关闭后重开：工具包还在，清单 / 包内文件 / slug 查询都完好', async () => {
+    /**
+     * 本适配器是**就地更新**（删掉就真删掉了），不像文件适配器要回放 `del`
+     * 记录，所以这条用例盯着的是另一件事：清单（`manifest`）与包内文件
+     * （`files`）是整个 JSON 的一部分，重开后必须逐字回来——半截持久化
+     * （只存对了 id 与 slug）在界面上看起来"包还在"，实际根本执行不了。
+     */
+    const dir = await makeTempDir('tool-reopen')
+    try {
+      const a = await SqliteStore.open({ dataDir: dir, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: WSA,
+        name: 'A',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await a.insertTool(makeTool({ id: 'tool-1', workspaceId: WSA, slug: 'deploy' }))
+      await a.insertTool(makeTool({ id: 'tool-gone', workspaceId: WSA, slug: 'obsolete' }))
+      await a.deleteTool(toolId('tool-gone'))
+      await a.close()
+
+      const b = await SqliteStore.open({ dataDir: dir, fsync: false })
+      const back = await b.getTool(toolId('tool-1'))
+      assert.equal(back?.slug, 'deploy')
+      assert.equal(back?.manifest.actions[0]?.name, 'run')
+      assert.deepEqual(back?.files, { 'index.mjs': '// 空实现\n' })
+      assert.equal((await b.getToolBySlug(WSA, 'deploy'))?.id, 'tool-1')
+      assert.deepEqual((await b.listTools(WSA)).map((t) => t.slug), ['deploy'])
+      await b.close()
+    } finally {
+      await cleanup(dir)
     }
   })
 })

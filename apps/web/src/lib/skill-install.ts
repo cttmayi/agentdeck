@@ -1,3 +1,4 @@
+import type { TextParams, WebTextId } from '@alpha-helper/i18n'
 import { ApiError, api } from './api.ts'
 
 /**
@@ -14,28 +15,24 @@ import { ApiError, api } from './api.ts'
  *
  * 两条路都走同一个接口 `POST /api/skills/install`、同一套"必须有 SKILL.md"
  * 的检查、同一套同名冲突规则。这样"从哪装"不会改变"装成什么"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 这里拼的是**键**，不是中文句子（D39）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * "安装完成了，但 A 没装进来、B 被跳过"这类话原来是在这一层拼死的中文。界面语言
+ * 可切之后那就不成立了：库层不知道当前语言，切到英文时这些句子会留在中文里。
+ * 所以现在这层只产出 `InstallMessage`（`{ id, params }`），由界面按当前语言渲染
+ * （`Skills.svelte` 拿 `$t` 当渲染器传进 `renderInstallMessage()`）。
  */
 
 /**
- * 动作表。
- *
- * ⚠️ 必须与 `packages/protocol/src/enums.ts` 的 `ActionType` 一致。
- * 网页这边不 import protocol（那是给服务端与测试用的），所以只能列一份——
- * **但真正的守卫在 daemon 侧**：不在表里的动作会被 400 拒绝，所以这里即使
- * 漏了一个，也不会让使用者装出一个"每次判决都不合规"的技能。
+ * ⚠️ 这里原来还有一张**动作表**（`ACTION_TYPES` / `DEFAULT_ACTIONS`）：「允许这个
+ *    skill 触发哪些动作」曾是这个安装请求体的一个字段。D40 收口之后它走了——
+ *    动作权限是**审核者的能力**（`Agent.allowedActions`），与"装一份资料包"无关，
+ *    所以安装既不再收它、也不再写它（见下面两个入参类型里各自那条注释）。
+ *    那份表跟着这件事一起搬到了 `agent-actions.ts`。
  */
-export const ACTION_TYPES = [
-  'comment.create',
-  'issue.update_status',
-  'issue.add_label',
-  'issue.create',
-  'issue.assign_agent',
-  'notify.emit',
-] as const
-
-/** 默认动作：最小权限。装的时候不显式选，就只能发评论。 */
-export const DEFAULT_ACTIONS = ['comment.create']
-
 export interface InstallFile {
   path: string
   bytes: number
@@ -101,13 +98,11 @@ export function installFromPathOrUrl(input: {
   kind: 'path' | 'url'
   value: string
   slug?: string
-  allowedActions?: string[]
   overwrite?: boolean
 }): Promise<InstallResult> {
   return post({
     source: input.kind === 'path' ? { kind: 'path', path: input.value } : { kind: 'url', url: input.value },
     ...(input.slug ? { slug: input.slug } : {}),
-    ...(input.allowedActions ? { allowedActions: input.allowedActions } : {}),
     ...(input.overwrite ? { overwrite: true } : {}),
   })
 }
@@ -120,7 +115,6 @@ export function installRemoteEntry(input: {
   /** 目录给的版本——落库后界面才能判断"已安装 / 可更新"。 */
   version: string
   sourceRef: string
-  allowedActions?: string[]
   overwrite?: boolean
 }): Promise<InstallResult> {
   return post({
@@ -131,50 +125,125 @@ export function installRemoteEntry(input: {
       version: input.version,
       sourceRef: input.sourceRef,
     },
-    ...(input.allowedActions ? { allowedActions: input.allowedActions } : {}),
     ...(input.overwrite ? { overwrite: true } : {}),
   })
 }
 
 /**
- * 把安装结果变成一句人话。
+ * 界面渲染一条文案的方式（形状就是 `apps/web/src/lib/i18n.ts` 的 `tx`，直接传它）。
+ *
+ * ★ 这里**不 import** 那个 `tx`：`i18n.ts` 依赖 svelte 的 store，把库层和界面层
+ *   绑在一起之后，这些纯函数就没法在 `node:test` 里单独跑了。
+ */
+export type TextRenderer = (id: WebTextId, params?: TextParams) => string
+
+/** 安装结果里的一段话：**键 + 插值**，中文/英文由界面按当前语言渲染。 */
+export interface InstallMessage {
+  id: WebTextId
+  params?: Readonly<Record<string, InstallParamValue>>
+}
+
+/** 插值。列表占位符（`{slugs}` / `{items}`）的值是 `InstallList`（见 `renderInstallMessage`）。 */
+export type InstallParamValue = string | number | InstallList
+
+/**
+ * 一串要连接起来的片段。
+ *
+ * ★ 用一个显式的包装而不是"直接传数组"：数组在运行时**分不出**是"一串片段"
+ *   还是"一个片段"（`['a','b']` 既可能是两个 slug，也可能是一段消息），照
+ *   "是数组就当消息列表"处理会把 slug 列表渲染成空串。包一层之后，"这是列表"
+ *   在类型上和运行上都是看得见的事。
+ */
+export interface InstallList {
+  /** 片段：原样的值（如 slug），或另一段消息（如"某个没装进来的文件"）。 */
+  items: readonly (string | number | InstallMessage)[]
+}
+
+function isList(value: InstallParamValue): value is InstallList {
+  return typeof value === 'object' && value !== null && 'items' in value
+}
+
+/**
+ * 渲染一段消息。
+ *
+ * ★ 列表的连接**必须**用调用方给的 `render` 取 `install.listSeparator`：中文是
+ *   `、`、英文是 `, `，库层自己 join 会把中文的顿号带进英文界面。
+ */
+export function renderInstallMessage(message: InstallMessage, render: TextRenderer): string {
+  const params: Record<string, string | number> = {}
+  for (const [key, value] of Object.entries(message.params ?? {})) {
+    if (!isList(value)) {
+      params[key] = value
+      continue
+    }
+    params[key] = value.items
+      .map((item) => (typeof item === 'object' ? renderInstallMessage(item, render) : String(item)))
+      .join(render('install.listSeparator'))
+  }
+  return render(message.id, params)
+}
+
+/**
+ * 把安装结果变成**要显示的几段话**。
  *
  * ★ 三件事都必须在里面：**装了什么**、**什么没装上（以及为什么）**、
  *   **有什么被跳过了**。只说"安装完成"是最糟的一种——
  *   使用者会以为自己拿到了一个完整的技能，而实际可能只装了 SKILL.md。
+ *
+ * 返回数组而不是一句话：界面把它们渲染出来后按原顺序拼起来即可（原中文里的
+ * `；` 已经在各条词条里，所以拼接不需要额外的分隔符）。
  */
-export function describeInstall(result: InstallResult): string {
-  const parts: string[] = []
+export function describeInstallMessages(result: InstallResult): InstallMessage[] {
+  const messages: InstallMessage[] = []
   if (result.installed.length > 0) {
-    parts.push(`已安装 ${result.installed.map((s) => s.slug).join('、')}`)
-    parts.push(`（来自 ${result.resolvedFrom}）`)
+    // slugs 用 `InstallList` 包起来：分隔符由渲染方按语言取（见 `renderInstallMessage`）。
+    messages.push({
+      id: 'install.installedList',
+      params: { slugs: { items: result.installed.map((s) => s.slug) } },
+    })
+    messages.push({ id: 'install.fromSource', params: { source: result.resolvedFrom } })
   }
   if (result.ignored.length > 0) {
-    parts.push(
-      `；没装进来：${result.ignored.map((i) => `${i.path}（${i.reason}）`).join('、')}`,
-    )
+    messages.push({
+      id: 'install.ignoredList',
+      params: {
+        items: {
+          items: result.ignored.map((i): InstallMessage => ({
+            id: 'install.ignoredItem',
+            params: { path: i.path, reason: i.reason },
+          })),
+        },
+      },
+    })
   }
-  for (const s of result.skipped) parts.push(`；跳过 ${s.slug}：${s.reason}`)
-  return parts.join('') || '没有任何改动'
+  for (const s of result.skipped) {
+    messages.push({ id: 'install.skipped', params: { slug: s.slug, reason: s.reason } })
+  }
+  return messages
 }
 
-/** 按错误码给出下一步建议——错误信息本身不够，使用者要的是"那我该怎么做"。 */
-export function installErrorHint(code: string): string {
+/**
+ * 按错误码给出下一步建议的**键**——错误信息本身不够，使用者要的是"那我该怎么做"。
+ *
+ * 认不出的码返回 `null`（= 没有建议可说），而不是一条空词条：词表里不允许空值，
+ * 而"编一句通用的话"会把 daemon 的原始错误盖掉。
+ */
+export function installErrorHintMessage(code: string): InstallMessage | null {
   switch (code) {
     case 'blocked_host':
-      return '只支持 GitHub 的公开仓库链接。本机上的技能请改用「本地目录」并填绝对路径。'
+      return { id: 'install.errBlockedHost' }
     case 'github_rate_limited':
-      return 'GitHub 匿名访问有每小时 60 次的限制。等一会儿再试，或设置环境变量 ALPHA_HELPER_GITHUB_TOKEN。'
+      return { id: 'install.errRateLimited' }
     case 'missing_skill_md':
-      return '技能是一个**目录**，里面必须有 SKILL.md（大写）。请把链接/路径指到那个目录。'
+      return { id: 'install.errMissingSkillMd' }
     case 'bad_slug':
-      return 'slug 只能是小写字母、数字与连字符。可以显式指定一个。'
+      return { id: 'install.errBadSlug' }
     case 'not_found':
-      return '检查路径/链接：仓库是否为私有、分支名与目录是否写对。'
+      return { id: 'install.errNotFound' }
     case 'too_large':
     case 'too_many_files':
-      return '技能应当是少量文本文件。请精简后再装。'
+      return { id: 'install.errTooLarge' }
     default:
-      return ''
+      return null
   }
 }

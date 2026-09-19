@@ -2,11 +2,13 @@ import {
   extractVerdictJson,
   formatVerdictIssues,
   parseVerdict,
-  type ActionType,
+  type ActionRefType,
+  type Tool,
   type Verdict,
   type VerdictIssue,
 } from '@alpha-helper/protocol'
-import { validateActionAllowed, validateActionRef } from '../actions/registry.ts'
+import { validateActionAllowed } from '../actions/definition.ts'
+import { validateActionRefWith } from '../actions/tool-actions.ts'
 
 /**
  * 审核流水线的决策逻辑（S2 / S1 的收口处）。
@@ -28,12 +30,53 @@ import { validateActionAllowed, validateActionRef } from '../actions/registry.ts
 export interface ReviewDecisionInput {
   /** agent 的原始输出（含围栏）。 */
   output: string
-  /** 该 skill 允许触发的动作子集。 */
-  allowedActions: readonly ActionType[]
+  /**
+   * 这个**审核者**允许触发的动作（`<包 slug>.<动作名>`）。
+   *
+   * ⚠️ 措辞是"审核者"而不是"skill"：skill 不参与动作授权，白名单住在
+   *    `Agent.allowedActions`（老数据回退到标准里那份）。
+   */
+  allowedActions: readonly ActionRefType[]
+  /**
+   * 这个工作区**已安装的工具包**（D40）。
+   *
+   * ★ **不给就什么都解析不出来**（D41：没有内置动作了）——判决里带动作就会被判
+   *   "未知动作类型"（结构性 invalid）。这不是可选的优化：动作名是
+   *   `<包 slug>.<动作名>`，而"这个包装没装、有没有声明这个动作"只有拿着包清单才知道。
+   *
+   * ⚠️ 这里**不校验绑定参数**（本函数是纯的、没有 run 的事实可依据）；绑定值
+   *    由 daemon 侧执行前那一道 `ActionRunner` 收口（它手上才有 workdir 之类）。
+   */
+  tools?: readonly Tool[]
+  /**
+   * 使用者在界面上设好的固定参数（D43）：`动作名 → 参数名 → 值`。
+   *
+   * 校验判决里的动作时，这些参数名会被当成"模型不许写"——写了 ⇒ 结构性
+   * invalid（不可重试）。执行时由 daemon 侧的 `ActionRunner` 注入真实值。
+   *
+   * ⚠️ 这里**只做"模型不许写固定参数"这一条**；固定值本身合不合规由写入口
+   *    （保存 agent / 提交 run 时）校验过，这里不重复。
+   */
+  fixedParams?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>
   /** 这个 run 已经因 invalid 重试过几次。 */
   invalidAttempts: number
   /** 允许的 invalid 重试次数上限。 */
   maxInvalidRetries?: number
+  /**
+   * 这条任务允许**返工**几次（D45）。
+   *
+   * 返工 = 审核判 `fail` ⇒ 把审核意见交回执行者重做。`0`（默认）表示不返工：
+   * `fail` 直接交给人（看板「等待人处理」）。
+   */
+  maxReworks?: number
+  /**
+   * 这条任务**已经**返工过几次。
+   *
+   * ⚠️ 与 `invalidAttempts` 是两件事、两个计数：`invalid` 是"判决本身没按格式
+   *   输出"（重试的是**审核者**），`rework` 是"判决说这活不行"（重做的是**执行者**）。
+   *   混用一个计数会让"模型不会写 JSON"吃掉"活干得不行"的额度。
+   */
+  usedReworks?: number
 }
 
 export type ReviewDecision =
@@ -49,6 +92,21 @@ export type ReviewDecision =
   | { kind: 'downgrade'; issues: VerdictIssue[] }
   /** 判决不合规且必须人介入（用于结构性缺失，重试无意义）。 */
   | { kind: 'invalid'; issues: VerdictIssue[] }
+  /**
+   * 判决说"这活不行"（`fail`），且**还有返工额度** ⇒ 把审核意见交回执行者重做（D45）。
+   *
+   * 与 `retry` 的区别：`retry` 重试的是**审核者**（它没按格式输出），
+   * `rework` 重做的是**执行者**（活本身不合格）。
+   */
+  | { kind: 'rework'; verdict: Verdict }
+  /**
+   * 判决说"这活不行"，但**返工额度已经用完**（或这条任务本来就没配）⇒ 交给人（D45）。
+   *
+   * ⚠️ 这是新语义下 `fail` 的重要出口：`fail` 不再带处置动作，平台自己已经
+   *    无事可做，所以必须**明确进人的队列**，而不是静默停在"已审查"——那会让
+   *    一条被否决的任务看起来像已经处理完了。
+   */
+  | { kind: 'rework_exhausted'; verdict: Verdict }
 
 export const DEFAULT_MAX_INVALID_RETRIES = 1
 
@@ -100,11 +158,20 @@ export function decideReview(input: ReviewDecisionInput): ReviewDecision {
   }
   const verdict = parsed.verdict
 
-  // ── ③ 动作必须来自注册表，且在 skill 允许的子集内 ──
+  // ── ③ 动作必须是**已安装工具包里声明过的**，且在这个审核者的行动权限里 ──
   if (verdict.action) {
-    const known = validateActionRef(verdict.action)
+    // ★ D41：动作只可能来自工具包，所以校验必须带工具清单；
+    //   没给清单 ⇒ 什么都解析不出来（"未声明即拒绝"）。
+    //   绑定参数在这一层**不校验**（本函数是纯的、没有 run 的事实可依据）——
+    //   那一层由 daemon 侧执行前收口（`ActionRunner`）。
+    const fixedForAction = input.fixedParams?.[verdict.action.type]
+    const known = validateActionRefWith(verdict.action, {
+      tools: input.tools ?? [],
+      // D43：固定参数模型不许写——按"这次生效的那一份"（任务级覆盖优先）
+      ...(fixedForAction ? { fixed: fixedForAction } : {}),
+    })
     if (!known.ok) {
-      return invalid(known.issues.map((message) => ({ path: ['action'], message })))
+      return invalid(known.issues.map((message: string) => ({ path: ['action'], message })))
     }
     const allowed = validateActionAllowed(verdict.action, input.allowedActions)
     if (!allowed.ok) {
@@ -118,8 +185,15 @@ export function decideReview(input: ReviewDecisionInput): ReviewDecision {
       // schema 已保证 escalateReason 非空
       return { kind: 'escalate', escalateReason: verdict.escalateReason ?? '需要人判断', verdict }
     case 'fail':
-      // schema 已保证有 action；没有动作的 fail 在校验阶段就被拒了
-      return verdict.action ? { kind: 'act', verdict } : { kind: 'advisory', verdict }
+      // ★ D45：`fail` 的出口是**返工**（交回执行者重做），不是处置。
+      //   schema 已保证它没有 action——所以这里不存在"要不要执行动作"的分支。
+      //
+      //   有没有额度是两件不同的事：
+      //     有额度 ⇒ 派生一条返工 run（执行者带着审核意见重做）
+      //     没额度 ⇒ 交给人（`rework_exhausted`），**不能静默停在"已审查"**
+      return (input.usedReworks ?? 0) < (input.maxReworks ?? 0)
+        ? { kind: 'rework', verdict }
+        : { kind: 'rework_exhausted', verdict }
     case 'pass':
       return verdict.action ? { kind: 'act', verdict } : { kind: 'advisory', verdict }
   }
@@ -140,6 +214,10 @@ export function describeDecision(decision: ReviewDecision): string {
       return `判决不合规，降级为建议：${formatVerdictIssues(decision.issues)}`
     case 'invalid':
       return `判决不合规且需人介入：${formatVerdictIssues(decision.issues)}`
+    case 'rework':
+      return `判决：不通过（${decision.verdict.reasonCode}）→ 交回执行者返工`
+    case 'rework_exhausted':
+      return `判决：不通过（${decision.verdict.reasonCode}），返工次数已用完 → 交给人`
   }
 }
 
@@ -168,8 +246,8 @@ export function describeDecision(decision: ReviewDecision): string {
  *
  * | 情况 | 重试有用吗 | 为什么 |
  * |---|---|---|
- * | 动作类型不在注册表 | ✗ | 通常是 skill 里写的动作名与注册表不一致。模型照着 skill 再写一次，还是同一个名字 |
- * | 动作不在 skill 允许的子集内 | ✗ | 同上：那是**标准与注册表**对不上，是配置问题 |
+ * | 动作类型解析不出来（没装 / 包里没声明） | ✗ | 那是**配置**问题。模型再输出一次，还是同一个名字 |
+ * | 动作不在这个审核者的行动权限里 | ✗ | 同上：那是**配置**问题（要去「行动权限」里勾上） |
  * | **动作参数不合法** | ✓ | 模型这次把 `status` 写成 `"bogus"`，下次完全可能写对。这是模型失误，不是配置问题 |
  * | 没有围栏块 / JSON 不合法 | ✓ | 典型的"这次忘了格式" |
  *

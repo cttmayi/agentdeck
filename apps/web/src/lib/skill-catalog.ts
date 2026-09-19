@@ -18,7 +18,17 @@
  *
  * 所以这里做一次**诚实的比较**，并把结论落成界面上的一个状态。
  * 比较是纯函数：不碰网络、不碰存储，可以被穷举地测。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 这个状态里**没有中文**（D39）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 界面语言可切之后，"该显示什么字"就不是这层的事了：这里只说清"按钮上那条
+ * 文案是哪个键、插什么值"（`labelId` / `hintId`），由界面按当前语言渲染
+ * （`Skills.svelte` 写的是 `$t(state.labelId, state.labelParams)`）。
+ * 否则切到英文时，这一层的按钮会留在中文里——而且没有任何编译期信号。
  */
+import type { TextParams, WebTextId } from '@alpha-helper/i18n'
 
 /** 本地那一条需要的最小信息（只需要这几个字段，便于测试）。 */
 export interface LocalSkillLike {
@@ -38,10 +48,19 @@ export type CatalogAction = 'install' | 'installed' | 'update' | 'downgrade' | '
 export interface CatalogEntryState {
   /** 界面该给的动作。 */
   action: CatalogAction
-  /** 按钮上的字。 */
-  label: string
-  /** 一句话说明为什么是它（要显示出来，别让人猜）。 */
-  hint: string
+  /**
+   * 按钮上的字的**文案键**。
+   *
+   * ★ 类型是 `WebTextId`（= 词表里真实存在的键）：写错一个字母，`tsc` 就会红，
+   *   而不是等到界面上冒出一串 `install.actionInstal` 才被发现。
+   */
+  labelId: WebTextId
+  /** 按钮文案的插值（只有带版本号的动作才有）。 */
+  labelParams?: TextParams
+  /** 一句话说明为什么是它（要显示出来，别让人猜）的**文案键**。 */
+  hintId: WebTextId
+  /** 提示文案的插值。 */
+  hintParams?: TextParams
   /** 按钮是否不可点。 */
   disabled: boolean
   /**
@@ -51,6 +70,33 @@ export interface CatalogEntryState {
    *   `overwrite` 是"我知道我在覆盖"的确认，不该被顺手加上。
    */
   needsOverwrite: boolean
+}
+
+/**
+ * 组装一个状态。
+ *
+ * 抽出来是为了让"哪个动作带插值"只在这里决定一次：六个分支里带版本号的两个不一样，
+ * 而缺省时那个字段必须**整个不出现**（`exactOptionalPropertyTypes` 下
+ * `labelParams: undefined` 是编译错误）——手写六遍就是六处能写错的地方。
+ */
+function makeState(input: {
+  action: CatalogAction
+  labelId: WebTextId
+  hintId: WebTextId
+  labelParams?: TextParams
+  hintParams?: TextParams
+  disabled: boolean
+  needsOverwrite: boolean
+}): CatalogEntryState {
+  return {
+    action: input.action,
+    labelId: input.labelId,
+    ...(input.labelParams ? { labelParams: input.labelParams } : {}),
+    hintId: input.hintId,
+    ...(input.hintParams ? { hintParams: input.hintParams } : {}),
+    disabled: input.disabled,
+    needsOverwrite: input.needsOverwrite,
+  }
 }
 
 /**
@@ -107,72 +153,76 @@ export function catalogEntryState(
   // 不做这个检查就会拿两个**毫不相干**的版本号去比，然后在界面上写一句
   // "更新到 x.y.z"——错得毫无痕迹。防御成本近乎为零。
   if (!local || local.slug !== entry.slug) {
-    return {
+    return makeState({
       action: 'install',
-      label: '安装',
-      hint: `目录里有 ${entry.slug} ${entry.version}，本地还没有。`,
+      labelId: 'install.actionInstall',
+      hintId: 'install.foundInDir',
+      hintParams: { slug: entry.slug, version: entry.version },
       disabled: false,
       needsOverwrite: false,
-    }
+    })
   }
 
   const localVersion = local.version ?? null
 
   if (localVersion === null) {
-    return {
+    return makeState({
       action: 'replace',
-      label: '替换本地同名',
-      hint:
-        `本地已有一个同名的 ${entry.slug}，但它没有版本信息（本机自建，或从路径/GitHub 装的）——` +
-        `所以无法判断是不是同一份内容。替换会用目录里的 ${entry.version} 覆盖它。`,
+      labelId: 'install.actionReplace',
+      hintId: 'install.replaceLocalHint',
+      hintParams: { slug: entry.slug, version: entry.version },
       disabled: false,
       needsOverwrite: true,
-    }
+    })
   }
 
   const cmp = compareVersions(localVersion, entry.version)
 
   if (cmp === 0) {
-    return {
+    return makeState({
       action: 'installed',
-      label: '已安装',
+      labelId: 'install.actionInstalled',
       // 措辞只说版本，不说"内容相同"：我们比的是版本号，没有逐字节核对过内容。
       // 版本本来就该标识内容，但**别替它多说一句我们自己没验证的话**。
-      hint: `本地这份就是目录里的 ${entry.version}，目录里没有更新的版本。`,
+      hintId: 'install.installedHint',
+      hintParams: { version: entry.version },
       disabled: true,
       needsOverwrite: false,
-    }
+    })
   }
 
   if (cmp === null) {
     // 版本号认不出来（不是 x.y.z）。**不猜大小**，但要给得出动作：
     // 版本字符串不同就是不同，交给使用者看两个版本号自己判断。
-    return {
+    return makeState({
       action: 'update',
-      label: '更新',
-      hint: `本地 ${localVersion} → 目录 ${entry.version}（这两个版本号不是 x.y.z 形式，无法判断新旧，请自行确认）。`,
+      labelId: 'install.actionUpdate',
+      hintId: 'install.updateUnknownHint',
+      hintParams: { local: localVersion, remote: entry.version },
       disabled: false,
       needsOverwrite: true,
-    }
+    })
   }
 
   if (cmp < 0) {
-    return {
+    return makeState({
       action: 'update',
-      label: `更新到 ${entry.version}`,
-      hint: `本地 ${localVersion} → 目录 ${entry.version}。`,
+      labelId: 'install.actionUpdateTo',
+      labelParams: { version: entry.version },
+      hintId: 'install.updateHint',
+      hintParams: { local: localVersion, remote: entry.version },
       disabled: false,
       needsOverwrite: true,
-    }
+    })
   }
 
-  return {
+  return makeState({
     action: 'downgrade',
-    label: `退回 ${entry.version}`,
-    hint:
-      `本地 ${localVersion} 比目录里的 ${entry.version} **更新**。` +
-      `点下去是往回退，不是更新——确认这是你要的。`,
+    labelId: 'install.actionDowngradeTo',
+    labelParams: { version: entry.version },
+    hintId: 'install.downgradeHint',
+    hintParams: { local: localVersion, remote: entry.version },
     disabled: false,
     needsOverwrite: true,
-  }
+  })
 }

@@ -19,6 +19,12 @@ import {
   type VerdictRecord,
 } from '@alpha-helper/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import {
+  installToolPackage,
+  verdictAction,
+  writeToolPackage,
+  type ToolPackage,
+} from './testing/tool-fixture.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -143,6 +149,23 @@ let dataDir: string
 let workDir: string
 let daemon: DaemonHandle
 let backend: ScriptedReviewBackend
+/**
+ * 这个文件里判决要用的那条动作（D41）。
+ *
+ * 内置动作被全部移除之后，判决里的动作必须来自一个**真的装了**的工具包，而
+ * 首启播种的审核者**没有任何动作权限**（D41 的刻意结果）。所以 `before` 里装两个
+ * 夹具包：
+ *
+ *   · `toolPkg`（`fixture-tool.act`）—— 授给播种的审核者，判决里的正常动作；
+ *   · `deniedPkg`（`other-tool.act`）—— **只装、不授权**，用来守"装了 ≠ 允许了"
+ *     （那条用例要的正是"动作可用但不在这个审核者的行动权限里"）。
+ *
+ * 两个包都是**真 node 脚本**：只往工作目录写一个文件（NFR-T-01：不调用真实 CLI，
+ * 但自己写的脚本是真跑的）。装而不授权那一个是刻意的：只用一个包的话，"拦住它"
+ * 的可能是"包没装"而不是白名单，那条用例就变成空过了。
+ */
+let toolPkg: ToolPackage
+let deniedPkg: ToolPackage
 
 /**
  * ★ 每个用例开始前：先等上一个用例的 run 全部结束，再清空后端脚本。
@@ -181,6 +204,39 @@ before(async () => {
     onWarn: () => {},
     onInfo: () => {},
   })
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ D41：动作只能来自**装进来的工具包**，而播种的审核者没有任何动作权限
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 这个文件里绝大多数用例的主体**不是**动作本身（报告落库与路由、阶段推导、
+  // 审计链、判决分支、重试……），只是顺手让判决带一个动作。以前那个动作可以写
+  // 内置裸名（`comment.create`），现在不行了：它必须来自一个真的装了的包。
+  //
+  // 而"播种的审核者开箱即用能发评论"这条**已经不存在**——
+  // `BUILTIN_REVIEW_ALLOWED_ACTIONS` 现在是空数组，这是 D41 的刻意结果，不是
+  // 遗漏。所以这里显式装包并**给那个审核者授权**：动作权限的入口就是
+  // `Agent.allowedActions`（D40 收口之后它只住在那儿，skill 与标准都不参与）。
+  //
+  // ⚠️ 用 `setupToolFixture()` 是不行的：它会**额外**建一对 agent，而这一节里
+  //    有多条用例在数"这份报告被谁接住了、起了几条 run"——多一对审核者会让
+  //    每份报告都被审两遍。所以这里只用造包 + 装包 + 直接 PATCH 播种的那位。
+  toolPkg = await writeToolPackage()
+  await installToolPackage(daemon, toolPkg)
+  deniedPkg = await writeToolPackage({ slug: 'other-tool', summary: '装了但没有被授权的动作' })
+  await installToolPackage(daemon, deniedPkg)
+
+  const seeded = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+    agents: Array<{ id: string; name: string; role: string }>
+  }).agents.find((a) => a.role === 'reviewer')
+  assert.ok(seeded, '首启会播种审核者 —— 这个文件的多条用例都靠它接住报告')
+  const granted = await fetch(`${daemon.url}/api/agents/${seeded.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    // ★ 只授**一个**：另一个装了没授的，正是下面"不在行动权限里"那条用例要用的夹具
+    body: JSON.stringify({ allowedActions: [toolPkg.action] }),
+  })
+  assert.equal(granted.status, 200, '给播种的审核者授权一个工具动作应当成功')
 })
 
 after(async () => {
@@ -299,9 +355,16 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
   test('★ 报告落库、路由到兜底审核者、并起了一个 review run', async () => {
     backend.script = [
       validVerdict({
-        conclusion: 'fail',
-        reasonCode: 'known_vulnerability',
-        action: { type: 'comment.create', params: { issueId: 'placeholder', body: '发现了漏洞' } },
+        conclusion: 'pass',
+        reasonCode: 'meets_criteria',
+        // ★ D41：判决里的动作只能来自**装进来的工具包**（`before` 里装了一个夹具包，
+        //   并把它的动作授给了播种的审核者）。这条用例的主体是**报告摄取与路由**
+        //   （`unmatched === 0`、起了一条 review run），判决带动作只是顺带——
+        //   所以这里给的是工具动作，而不是把断言降级成"没有动作"。
+        //
+        //   只给开放参数 `text`：绑定参数（工作目录）由平台按 run 的事实注入，
+        //   模型写不出来、也不该写。
+        action: verdictAction(toolPkg.action, { text: '发现了漏洞' }),
       }),
     ]
 
@@ -320,7 +383,7 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
 
     const verdicts = await fetchVerdicts(runId)
     assert.equal(verdicts.length, 1)
-    assert.equal(verdicts[0]?.conclusion, 'fail')
+    assert.equal(verdicts[0]?.conclusion, 'pass')
     assert.equal(verdicts[0]?.status, 'dispatched_to_action', '应当已派发到动作')
   })
 
@@ -344,7 +407,7 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     const review = runs.find((r) => r.kind === 'review')
     assert.ok(review, '应当有一条审核 run')
     assert.ok(review.verdict, '★ 审核 run 必须带上判决——否则页面只能把 needs_human 显示成"已审查"')
-    assert.equal(review.verdict.conclusion, 'fail')
+    assert.equal(review.verdict.conclusion, 'pass')
     assert.equal(review.verdict.status, 'dispatched_to_action')
     // 执行 run 上没有判决（它是被审的对象，不是判决的产出者）
     const execute = runs.find((r) => r.kind === 'execute')
@@ -400,6 +463,16 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     )
     assert.notEqual(audit.promptHash, null, '必须有 prompt 哈希')
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
+
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 动作那一环也要在审计里留下痕迹（D41 之后这一点更容易悄悄丢）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 用例的名字是"判决里的动作被执行，且落进了审计链"，而这一项原来**没人断言**：
+    // 动作一旦不再由平台自己实现（D41：改成跑一个工具包脚本），"判决带了动作、
+    // 审计里却什么都没有"就成了一种完全可能的失败——判决照旧是
+    // `dispatched_to_action`，只是链子上少了一环。所以这里把那一环钉住。
+    assert.equal(audit.actionIds.length, 1, '★ 审计必须记下这条判决触发的那个动作')
   })
 
   test('★ 审核的第一句话含审核标准与判决格式要求（FR-CLI-43）', () => {
@@ -492,7 +565,6 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
               slug: 'sweep-probe',
               name: '清场探针',
               body: '# 探针\n',
-              allowedActions: [],
             },
           ],
           subject: { type: 'issue', id: issue },
@@ -570,7 +642,6 @@ describe('★ 派生出来的 review run 也要带上 skill 的支持文件', ()
               body: '# 标准\n\n先看 reference.md 再判断。',
               files: { 'reference.md': '判断依据在这里', 'scripts/check.sh': 'echo ok' },
               source: 'local',
-              allowedActions: ['comment.create'],
             },
           ],
         }),
@@ -682,13 +753,20 @@ describe('S2：判决不合规的独立处置路径（FR-REVIEW-04/05）', () =>
     assert.ok(inbox.some((i) => i.type === 'verdict.invalid'), '不合规必须可见，不得静默')
   })
 
-  test('★ 动作不在 skill 允许的子集内 ⇒ 判为结构性问题（重试无意义）', async () => {
+  test('★ 动作不在这个审核者的行动权限里 ⇒ 判为结构性问题（重试无意义）', async () => {
     backend.script = [
       validVerdict({
-        conclusion: 'fail',
-        reasonCode: 'missing_tests',
-        // 模板只允许 comment.create 与 issue.add_label
-        action: { type: 'issue.create', params: { title: '越权的动作' } },
+        conclusion: 'pass',
+        reasonCode: 'meets_criteria',
+        // ══════════════════════════════════════════════════════════════
+        // ★ D41：这条动作来自第二个夹具包——它**装了**，但**没有被授权**
+        // ══════════════════════════════════════════════════════════════
+        //
+        // 用"装了没授权"而不是"随便编一个名字"是刻意的：这条用例守的是**行动
+        // 权限**（错误信息要指出去哪儿勾上、并且判定为结构性问题 ⇒ 重试无意义）。
+        // 若用一个没装的名字，拦住它的会是"这个工作区没装那个包"，下面那句
+        // "应当指出是行动权限问题"就会以最难查的方式变成**空过**。
+        action: verdictAction(deniedPkg.action, { text: '越权的动作' }),
       }),
     ]
     backend.rawOverride = null
@@ -717,7 +795,7 @@ describe('S2：判决不合规的独立处置路径（FR-REVIEW-04/05）', () =>
     //
     // 这与状态机的既定映射一致（`verdictStatusForResolution`：
     // retry → pending_verdict、downgrade → advisory、escalate → escalated），
-    // 也才符合语义：动作名与 skill 子集对不上是**运维/配置问题**，
+    // 也才符合语义：动作名与审核者的**行动权限**对不上是**运维/配置问题**，
     // 模型再输出一次还是同样的东西，只有人能改。所以它要人介入。
     assert.equal(verdicts[0]?.status, 'escalated', '结构性问题要人介入，不是静默降级')
     assert.equal(
@@ -729,8 +807,10 @@ describe('S2：判决不合规的独立处置路径（FR-REVIEW-04/05）', () =>
     const inbox = ((await (await fetch(`${daemon.url}/api/inbox`)).json()) as {
       items: InboxItem[]
     }).items
-    const notice = inbox.find((i) => i.type === 'verdict.invalid' && i.body.includes('子集'))
-    assert.notEqual(notice, undefined, '应当指出是动作子集问题')
+    // 报错要指向**去哪儿改**（审核者的「行动权限」），而不是还提 skill——
+    // 使用者唯一能看到的就是这句话
+    const notice = inbox.find((i) => i.type === 'verdict.invalid' && i.body.includes('行动权限'))
+    assert.notEqual(notice, undefined, '应当指出是行动权限问题，并说清去哪儿勾上')
     assert.match(notice!.body, /重试不会变好/, '结构性问题必须说清重试没用')
   })
 })
@@ -969,10 +1049,14 @@ describe('★ 重试与会话恢复（FR-CLI-06）—— 这段此前从未被�
     backend.rawOverride = null
     backend.script = [
       validVerdict({
-        conclusion: 'fail',
-        reasonCode: 'missing_tests',
-        // 模板只允许 comment.create 与 issue.add_label
-        action: { type: 'issue.create', params: { title: '越权' } },
+        conclusion: 'pass',
+        reasonCode: 'meets_criteria',
+        // ★ D41：这里要的就是"**一个不存在的动作**"——任何没装进这个工作区的
+        //   `<包 slug>.<动作名>` 都会走"未知动作类型"那条路（结构性 invalid），
+        //   所以名字写成 `ghost-tool.act` 只为了把"没装"这件事写在脸上。
+        //   ⚠️ 不能再用内置名（`issue.create` 那种）：内置动作已经不存在，
+        //   留着它会让这条用例看起来在守一件已经不在的事。
+        action: verdictAction('ghost-tool.act', { text: '越权' }),
       }),
       validVerdict({ conclusion: 'pass', reasonCode: 'ok', action: null }),
       validVerdict({ conclusion: 'pass', reasonCode: 'ok', action: null }),
@@ -1009,30 +1093,49 @@ describe('★ 重试与会话恢复（FR-CLI-06）—— 这段此前从未被�
  * 三条要钉的性质：
  *
  *   1. **没有标准就不派审核**（标准是审核的依据，没有它审不出有依据的结论）；
- *   2. **动作白名单跟着标准走**——"这条标准只允许发评论"必须真的生效，
- *      而不是"配了但没用"；
- *   3. **过渡期**：老数据（标准还在挂载的 skill 里）照样能审——规则一改就让
- *      已经建好的审核者停摆，是最不该发生的事。
+ *   2. **动作权限真的生效**——"这个审核者只允许发评论"必须真的拦住判决里的
+ *      越权动作，而不是"配了但没用"。⚠️ D40 收口之后这份权限**不住在标准里**，
+ *      它在 `Agent.allowedActions` 上（这条改动的由来见
+ *      `apps/daemon/src/review-standard.ts` 的文件头）；
+ *   3. **过渡期**：老数据（**标准正文**还在挂载的 skill 里）照样能审——规则一改
+ *      就让已经建好的审核者停摆，是最不该发生的事。而 skill 的
+ *      `allowedActions`（老数据里可能还有）**不参与**动作授权。
  */
 describe('D37：审核标准内联在审核者身上', () => {
-  /** 把某个 agent 的审核标准改成给的那份（PATCH）。 */
+  /**
+   * 把某个 agent 的审核标准与**动作权限**改成给的那份（PATCH）。
+   *
+   * ⚠️ 两者是**两个字段**（D40 收口）：`reviewStandard` 只收名字与正文，
+   *    动作住在 `allowedActions` 上。这个夹具以前把动作塞在标准里，
+   *    那正是搬走之前的样子。
+   */
   async function setStandard(
     url: string,
     agentId: string,
-    standard: { name: string; body: string; allowedActions: string[] } | null,
+    standard: { name: string; body: string } | null,
+    allowedActions: string[] = [],
   ): Promise<number> {
     const res = await fetch(`${url}/api/agents/${encodeURIComponent(agentId)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ reviewStandard: standard }),
+      body: JSON.stringify({ reviewStandard: standard, allowedActions }),
     })
     return res.status
   }
 
-  /** 起一个**自带后端引用**的 daemon（要能塞判决脚本，所以不能内联 new）。 */
+  /**
+   * 起一个**自带后端引用**的 daemon（要能塞判决脚本，所以不能内联 new）。
+   *
+   * `store` 一起交出去：有些用例要造**老数据形态**的记录——那种记录**写不进来**
+   * （写入口只写新字段），只能直接落库，见下面那条回退用例。
+   */
   async function withBackend<T>(
     tag: string,
-    fn: (ctx: { url: string; backend: ScriptedReviewBackend }) => Promise<T>,
+    fn: (ctx: {
+      url: string
+      backend: ScriptedReviewBackend
+      store: DaemonHandle['store']
+    }) => Promise<T>,
   ): Promise<T> {
     const backend2 = new ScriptedReviewBackend()
     const d = await startDaemon({
@@ -1044,7 +1147,7 @@ describe('D37：审核标准内联在审核者身上', () => {
       onInfo: () => {},
     })
     try {
-      return await fn({ url: d.url, backend: backend2 })
+      return await fn({ url: d.url, backend: backend2, store: d.store })
     } finally {
       await d.close()
     }
@@ -1107,27 +1210,41 @@ describe('D37：审核标准内联在审核者身上', () => {
     })
   })
 
-  test('★ 动作白名单来自**标准**：标准里没允许的动作会被拦下（要人介入）', async () => {
+  test('★ 动作权限来自 **agent**（`Agent.allowedActions`）：没允许的动作会被拦下（要人介入）', async () => {
     await withBackend('d37-actions', async ({ url, backend: b }) => {
+      // ══════════════════════════════════════════════════════════════
+      // ★ D41：白名单里只能写**已安装工具包**声明过的动作
+      // ══════════════════════════════════════════════════════════════
+      //
+      // `Agent.allowedActions` 的写入口照旧对着"这个工作区装了哪些包"校验
+      // （未装即拒），所以内置裸名（`comment.create` 那种）现在会被 400。
+      // 这里装**两个**包：一个授权、另一个只装不授权——拦住判决的必须只能是
+      // 白名单这一关，不能是"这个名字根本没装"（那是另一条路径，另一句话）。
+      const granted = await writeToolPackage({ slug: 'granted-tool' })
+      const denied = await writeToolPackage({ slug: 'denied-tool' })
+      await installToolPackage({ url }, granted)
+      await installToolPackage({ url }, denied)
+
       const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
         agents: Array<{ id: string; role: string }>
       }).agents
       const reviewer = agents.find((a) => a.role === 'reviewer')!
-      // 标准只允许发评论，而判决想改状态 ⇒ 必须被拦下
+      // 这个审核者只允许那一个动作，而判决想用**另一个**（装了、但没授权）⇒ 必须被拦下
       assert.equal(
-        await setStandard(url, reviewer.id, {
-          name: '只许评论',
-          body: '# 只许评论\n\n发现问题只发评论，不要改状态。',
-          allowedActions: ['comment.create'],
-        }),
+        await setStandard(
+          url,
+          reviewer.id,
+          { name: '只许一个动作', body: '# 只许一个动作\n\n只允许已勾上的那一个动作，别的都不许。' },
+          [granted.action],
+        ),
         200,
       )
       b.script = [
         validVerdict({
-          conclusion: 'fail',
-          reasonCode: 'logic_error',
-          // 这个动作**不在**标准的白名单里
-          action: { type: 'issue.update_status', params: { issueId: 'placeholder', status: 'todo' } },
+          conclusion: 'pass',
+          reasonCode: 'meets_criteria',
+          // 这个动作**不在**该审核者的白名单里
+          action: verdictAction(denied.action, { text: '越权的动作' }),
         }),
       ]
 
@@ -1143,24 +1260,41 @@ describe('D37：审核标准内联在审核者身上', () => {
       assert.equal(
         verdicts[0]?.status,
         'escalated',
-        '动作不在标准允许的子集里 ⇒ 结构性问题（模型再输出一次还是同样的东西）',
+        '动作不在该审核者允许的子集里 ⇒ 结构性问题（模型再输出一次还是同样的东西）',
       )
       const text = await firstSentenceOf(url, runId)
-      assert.match(text, /只许评论/, '标准正文要真的随第一句话下发')
+      assert.match(text, /只许一个动作/, '标准正文要真的随第一句话下发')
     })
   })
 
-  test('★ 过渡期：只挂 skill、没有内联标准的审核者照样能审', async () => {
+  test('★ 过渡期：只挂 skill、没有内联标准的审核者照样能审（但 skill 不管动作）', async () => {
     await withBackend('d37-legacy', async ({ url, backend: b }) => {
       const installed = ((await (
         await fetch(`${url}/api/skills`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            skills: [{ slug: 'legacy-standard', name: '老标准', body: '# 老标准\n\n只看一件事：有没有写测试。' }],
+            skills: [
+              {
+                slug: 'legacy-standard',
+                name: '老标准',
+                body: '# 老标准\n\n只看一件事：有没有写测试。',
+                // ⚠️ 老客户端（页面还是旧的那版）会照旧带上这个字段。D40 收口之后
+                //    它**被忽略**：skill 不再声明动作权限，安装也不写它。
+                //    这里刻意留一个 **D41 之前的内置名**（老数据里就是这种名字，
+                //    而现在它连形状都不合法）：正因如此，"写入口一个字都不读它"
+                //    这件事才值得钉住——下面那条断言证明它没落库。
+                allowedActions: ['issue.create'],
+              },
+            ],
           }),
         })
-      ).json()) as { installed: Array<{ id: string }> })
+      ).json()) as { installed: Array<Record<string, unknown> & { id: string }> })
+      assert.equal(
+        'allowedActions' in installed.installed[0]!,
+        false,
+        '★ 安装 skill 不再接受动作配置：传了也不写进库（动作是审核者的能力）',
+      )
       const reviewer = (await (
         await fetch(`${url}/api/agents`, {
           method: 'POST',
@@ -1171,8 +1305,13 @@ describe('D37：审核标准内联在审核者身上', () => {
             skillIds: [installed.installed[0]!.id],
           }),
         })
-      ).json()) as { id: string; reviewStandard: unknown }
+      ).json()) as { id: string; reviewStandard: unknown; allowedActions: unknown }
       assert.equal(reviewer.reviewStandard, null, '这个夹具刻意不带内联标准')
+      assert.deepEqual(
+        reviewer.allowedActions,
+        [],
+        '★ 挂着老 skill 的审核者，动作列表不由 skill 决定（新建时没配就是空）',
+      )
 
       // 两个审核者（播种的 + 这个老形态）都会接住这份报告 ⇒ 两次判决脚本
       b.script = [validVerdict(), validVerdict()]
@@ -1190,6 +1329,231 @@ describe('D37：审核标准内联在审核者身上', () => {
       const legacy = texts.find((t) => t.includes('# 老标准'))
       assert.ok(legacy, '老形态的审核者要真的被起了一条 run（标准来自挂载的 skill）')
       assert.match(legacy!, /只看一件事/, '标准正文要真的随第一句话下发')
+    })
+  })
+
+  // ══════════════════════════════════════════════════════════════════
+  // D40 收口：动作权限搬到 agent 上之后，**老数据那条回退**必须真的在读
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 「写了回退」与「回退真的在读」是两回事。这条用例造一条**真·老数据形态**的
+  // agent 记录（动作写在标准里、agent 上连 `allowedActions` 这个键都没有——
+  // 老记录是整条 JSON 存下来的，store 不做 schema 迁移），然后让判决真的走一遍：
+  //
+  //   · 老白名单里**没有**的动作 ⇒ 被拦下，而且理由里要能看到那份**老白名单**；
+  //   · 老白名单里**有**的动作 ⇒ 放行。
+  //
+  // 两条一起才算"按它校验"：只验拦下的话，"所有动作都拦"也能通过。
+  test('★ 老数据回退：动作写在标准里（agent 上没有那个键）时，判决仍按它校验', async () => {
+    await withBackend('d40-legacy-fallback', async ({ url, backend: b, store }) => {
+      const legacyStandard = { name: '老标准', body: '# 老标准\n\n只看重不重。' }
+
+      // ══════════════════════════════════════════════════════════════
+      // ★ D41：老白名单里的动作也必须**真的来自一个装了的包**
+      // ══════════════════════════════════════════════════════════════
+      //
+      // 这条用例守的是**回退语义**（老数据里动作写在标准上、agent 上连键都没有），
+      // 而回退之后那份白名单照样要过 D41 这一关：白名单里写的动作，其包必须在
+      // 这个工作区装过（`resolveAllowedActionsWithTools` 只留"声明过且装了"的）。
+      //
+      // 所以装两个包：老白名单里写被授权的那个，判决想用的是**另一个**——
+      // 它也装了（所以拦住它的只能是白名单，不可能是"没装"）。
+      const granted = await writeToolPackage({ slug: 'legacy-granted-tool' })
+      const denied = await writeToolPackage({ slug: 'legacy-denied-tool' })
+      await installToolPackage({ url }, granted)
+      await installToolPackage({ url }, denied)
+
+      // ① 让**播种的**审核者退出：它自己也有一份动作权限（`before` 里授过一个），
+      //    会一起接住这份报告，于是断言就不再是单值的。先清空它的动作、再改角色
+      //    ——这是新规则下的两步走（"有动作的审核者不能一步变成执行者"）。
+      const seeded = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string }>
+      }).agents.find((a) => a.role === 'reviewer')!
+      const clearSeeded = await fetch(`${url}/api/agents/${seeded.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ allowedActions: [] }),
+      })
+      assert.equal(clearSeeded.status, 200)
+      const demote = await fetch(`${url}/api/agents/${seeded.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'executor' }),
+      })
+      assert.equal(demote.status, 200, '播种的审核者退出之后，这条报告只剩一个接的人')
+
+      // ② 先按新契约建一个审核者（这样它有名字与正文），再把它改写成**老形态**：
+      //    动作在标准里、agent 上**没有** `allowedActions` 这个键。
+      const created = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: '老数据审核者', role: 'reviewer', reviewStandard: legacyStandard }),
+        })
+      ).json()) as { id: string }
+      const stored = await store.getAgent(created.id as never)
+      assert.ok(stored)
+      // 老记录里根本没有这个键 ⇒ 这里**删掉**它（而不是写一个空数组）
+      const { allowedActions: _ownActions, ...withoutOwnActions } = stored
+      void _ownActions
+      await store.insertAgent({
+        ...withoutOwnActions,
+        // ★ 动作写在标准里 —— 这正是搬走之前的形状（老数据里那份动作名同样受
+        //   D41 约束：它指向的包在这个工作区里装着）
+        reviewStandard: { ...legacyStandard, allowedActions: [granted.action] },
+      })
+
+      // ③ 判决想用**另一个**动作 ⇒ 老白名单里只有 granted 那个 ⇒ 必须被拦下
+      b.script = [
+        validVerdict({
+          conclusion: 'pass',
+          reasonCode: 'meets_criteria',
+          action: verdictAction(denied.action, { text: '越权的动作' }),
+        }),
+      ]
+      const blocked = await postReportTo(url, 'd40-legacy-block', [
+        { externalId: 'lb-1', kind: 'pr-diff', title: '越权', body: '内容' },
+      ])
+      assert.equal(blocked.unmatched, 0, '老数据形态的审核者要真的接住它')
+      for (const id of blocked.runIds) await runToEnd(url, id)
+      const blockedVerdicts = ((await (
+        await fetch(`${url}/api/runs/${blocked.runIds[0]!}/verdicts`)
+      ).json()) as {
+        verdicts: Array<{ status: string; escalateReason: string | null }>
+      }).verdicts
+      assert.equal(blockedVerdicts[0]?.status, 'escalated', '老白名单里没有这个动作 ⇒ 拦下')
+      assert.match(
+        String(blockedVerdicts[0]?.escalateReason),
+        /legacy-granted-tool\.act/,
+        '★ 理由里要能看到**那份老白名单**——这才证明回退真的读了标准里那一份（而不是"一律拦下"）',
+      )
+
+      // ④ 判决用老白名单里**有**的动作 ⇒ 放行
+      b.script = [
+        validVerdict({
+          conclusion: 'pass',
+          reasonCode: 'meets_criteria',
+          action: verdictAction(granted.action, { text: '可以' }),
+        }),
+      ]
+      const allowed = await postReportTo(url, 'd40-legacy-allow', [
+        { externalId: 'la-1', kind: 'pr-diff', title: '合规', body: '内容' },
+      ])
+      for (const id of allowed.runIds) await runToEnd(url, id)
+      const allowedVerdicts = ((await (
+        await fetch(`${url}/api/runs/${allowed.runIds[0]!}/verdicts`)
+      ).json()) as {
+        verdicts: Array<{ status: string }>
+      }).verdicts
+      assert.equal(
+        allowedVerdicts[0]?.status,
+        'dispatched_to_action',
+        '★ 老白名单里允许的动作要真的放行——不然"回退"可能只是"什么都没读到"',
+      )
+    })
+  })
+
+  // ══════════════════════════════════════════════════════════════════
+  // 自检②：skill 那边确实**不再影响授权**
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 一个挂着**带 allowedActions 的老 skill** 的审核者，其有效动作列表**只**由
+  // agent 决定。这条在纯函数层有断言（`review-standard.test.ts`），这里再走一遍
+  // 真链路：它决定的是**判决能不能过**，而不只是某个返回值。
+  test('★ 挂着带动作配置的老 skill 的审核者：有效动作列表只由 agent 决定', async () => {
+    await withBackend('d40-skill-actions-ignored', async ({ url, backend: b }) => {
+      // ★ D41：装两个包，让"skill 那份不算数"这条断言**真的能红**——老 skill
+      //   声明的是另一个**已安装**的动作：如果 skill 参与授权，下面的判决就会过；
+      //   只有它确实不参与授权，判决才会被拦下。
+      const granted = await writeToolPackage({ slug: 'skill-granted-tool' })
+      const denied = await writeToolPackage({ slug: 'skill-denied-tool' })
+      await installToolPackage({ url }, granted)
+      await installToolPackage({ url }, denied)
+
+      // ① 装一条**带动作配置的老 skill**（老客户端就是这么发的；写入口会忽略它）
+      const installed = ((await (
+        await fetch(`${url}/api/skills`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            skills: [
+              {
+                slug: 'legacy-actions',
+                name: '老技能',
+                body: '# 老技能\n\n看一件事。',
+                // 老契约里 skill 自己也声明动作白名单。这里刻意写**一个装了、但
+                // agent 上没有授权的**动作：它一个字都不该算数，判决就该被拦下。
+                allowedActions: [denied.action],
+              },
+            ],
+          }),
+        })
+      ).json()) as {
+        installed: Array<Record<string, unknown> & { id: string }>
+      })
+      assert.equal(
+        'allowedActions' in installed.installed[0]!,
+        false,
+        '老 skill 的那个键不会被写进库',
+      )
+
+      // ② 播种的审核者退出（理由同上一条用例）
+      const seeded = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string }>
+      }).agents.find((a) => a.role === 'reviewer')!
+      await fetch(`${url}/api/agents/${seeded.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ allowedActions: [] }),
+      })
+      await fetch(`${url}/api/agents/${seeded.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'executor' }),
+      })
+
+      // ③ 一个挂着那条老 skill、**没有内联标准**、agent 上只允许一个工具动作
+      //    的审核者。老 skill 的正文仍然是它的标准（过渡期兼容），但动作不算数。
+      const reviewer = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: '挂老 skill 的审核者',
+            role: 'reviewer',
+            skillIds: [installed.installed[0]!.id],
+            allowedActions: [granted.action],
+          }),
+        })
+      ).json()) as { id: string; reviewStandard: unknown }
+      assert.equal(reviewer.reviewStandard, null, '夹具刻意不带内联标准（标准来自 skill）')
+
+      // ④ 判决要用老 skill 里写着允许的那个动作 ⇒ 必须被拦下：skill 不算数
+      b.script = [
+        validVerdict({
+          conclusion: 'pass',
+          reasonCode: 'meets_criteria',
+          action: verdictAction(denied.action, { text: '越权的动作' }),
+        }),
+      ]
+      const summary = await postReportTo(url, 'd40-skill-ignored', [
+        { externalId: 's-1', kind: 'pr-diff', title: '越权', body: '内容' },
+      ])
+      assert.equal(summary.unmatched, 0)
+      for (const id of summary.runIds) await runToEnd(url, id)
+      const verdicts = ((await (
+        await fetch(`${url}/api/runs/${summary.runIds[0]!}/verdicts`)
+      ).json()) as { verdicts: Array<{ status: string; escalateReason: string | null }> }).verdicts
+      assert.equal(
+        verdicts[0]?.status,
+        'escalated',
+        '★ 老 skill 里写着允许那个动作，但 skill 不参与授权 ⇒ 必须拦下',
+      )
+      assert.match(
+        String(verdicts[0]?.escalateReason),
+        /允许：skill-granted-tool\.act/,
+        '★ 允许的集合里**只有** agent 上那份（老 skill 里那个动作没被并进来）',
+      )
     })
   })
 })

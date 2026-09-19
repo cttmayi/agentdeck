@@ -8,6 +8,7 @@
   import Tasks from './views/Tasks.svelte'
   import Agents from './views/Agents.svelte'
   import Skills from './views/Skills.svelte'
+  import Tools from './views/Tools.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
@@ -16,6 +17,7 @@
     loadIssues,
     loadRuns,
     loadSkills,
+    loadTools,
     snapshot,
     syncStatus,
   } from './lib/stores.ts'
@@ -34,7 +36,15 @@
   onMount(() => {
     // 首屏数据。**并行**取，不要串起来等——串行时任何一个慢接口都会让
     // 整个首屏白着。
-    void Promise.all([loadIdentity(), loadIssues(), loadAgents(), loadSkills(), loadRuns(), loadInbox()])
+    void Promise.all([
+      loadIdentity(),
+      loadIssues(),
+      loadAgents(),
+      loadSkills(),
+      loadTools(),
+      loadRuns(),
+      loadInbox(),
+    ])
 
     // 同步循环独立于本机功能：远端挂了只影响侧边栏那一行状态
     const loop = startSyncLoop({
@@ -95,8 +105,13 @@
       <Tasks />
     {:else if $view === 'agents'}
       <Agents />
-    {:else}
+    {:else if $view === 'skills'}
       <Skills />
+    {:else}
+      <!-- ★ D40：第五项。`$view` 的取值来自 `VIEWS`，那一列只有这五个；
+           最后这个 `{:else}` 不再兼作 Skills（写死成"剩下的都是 Skills"
+           时，加视图会静默落到 Skills 上——页面能打开，只是内容不对）。 -->
+      <Tools />
     {/if}
   </main>
 </div>

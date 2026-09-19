@@ -3,25 +3,31 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import {
   removeInjectedSkills,
+  removeInjectedTools,
   renderFirstSentence,
   SkillCollisionError,
   SkillTooLargeError,
   syncInjectedSkills,
+  syncInjectedTools,
+  ToolCollisionError,
   type AgentBackend,
   type RuntimeDescriptor,
   type SkillBrief,
+  type ToolBrief,
 } from '@alpha-helper/agent-core'
 import {
   assertRunTransition,
-  loadChainSteps,
   redactArgv,
-  type ChainStep,
+  resolveAllowedActionsWithTools,
+  toolActionHints,
   type ReviewDecision,
   type Store,
+  type ToolActionHint,
 } from '@alpha-helper/domain'
 import type { SandboxOptions } from '@alpha-helper/agent-core'
 import {
   ulid,
+  type ActionRefType,
   type Issue,
   type Run,
   type RunFailure,
@@ -29,6 +35,7 @@ import {
   type RunResult,
   type SubmitRunRequest,
   type TokenUsage,
+  type Tool,
 } from '@alpha-helper/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { resolveReviewStandard } from './review-standard.ts'
@@ -153,7 +160,10 @@ function describeDecision(handling: {
   decision: ReviewDecision
   actionIds: readonly string[]
   spawnedRunId: string | null
-  derivationBlocked: { reason: string; message: string } | null
+  // ⚠️ 这里原来还有一个 `derivationBlocked`——内置动作 `issue.assign_agent`
+  //    的"指派成功、派生被回路边界拦下"那个信号。D41 之后工具动作不可能派生
+  //    run，这个字段连同上面对它的处理一起删掉了（它其实从来没被本函数读过，
+  //    只是被 `ReviewHandlingResult` 的形状拖着）。
 }): string {
   const d = handling.decision
   const summary = (v: { conclusion: string; reasonCode: string; confidence: number }): string =>
@@ -189,6 +199,28 @@ export interface RunExecutorOptions {
 const DEFAULT_WORKDIR_WAIT_MS = 10 * 60 * 1000
 
 /**
+ * 调用方没给 `limits.timeoutMs` 时的**平台默认空闲上限**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么必须有一个默认值（而不是 null = 永不超时）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 实测踩到过：执行者用 CLI 的 **Bash 后台任务**（"Command running in
+ * background with ID: …"）跑了个永远不完的截图/监听，Claude Code 会**在还有
+ * 未完成的后台任务时不让会话结束**——CLI 进程一直活着，run 于是永远停在
+ * `running`。而界面新建任务**永远**发 `timeoutMs: null`（NewTask.svelte 写死），
+ * 看门狗因此从没被开过——"会自己卡死、且没人看得出来"是最糟的形态。
+ *
+ * 用**空闲**而不是墙钟是对的：耗时长不等于出问题，卡住才是。这个默认值给得
+ * 够宽（30 分钟没有任何输出），正常任务不会碰到；真卡住了，它把 run 判成
+ * `idle_timeout` 收掉而不是永远挂着——使用者看得见，能去查那个后台任务。
+ *
+ * 调用方给了值就**用它的**；只有缺省时才落到这里，并且要在日志里说清用的是
+ * 默认（"没给上限 ⇒ 用平台默认"这种话必须说出来，不然会有人当成是 bug）。
+ */
+const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000
+
+/**
  * 关停宽限期。
  *
  * 5 秒的依据：正常取消走的是"终止进程树"（Unix 整组 / Windows 进程树），
@@ -207,6 +239,16 @@ const DEFAULT_SHUTDOWN_GRACE_MS = 5_000
  * 超限时**明说截断了多少行**：静默截断会让人以为"它只说了这些"。
  */
 const MAX_STDERR_LOG_LINES = 200
+
+/**
+ * 注入的工具包在工作目录里的位置（D42）。
+ *
+ * 与技能不同，CLI **不会**自动发现这个目录——工具靠**模型自己读**：第一句话里
+ * 列了"有哪些、在哪儿"，模型去读 `TOOL.md`、决定怎么调脚本。放在
+ * `.alpha-helper/` 下是与上下文副本（`.alpha-helper/context/`）同一族的"平台
+ * 放的东西"，一眼可辨、不会冒充 agent 的产出。
+ */
+const INJECTED_TOOLS_DIR = '.alpha-helper/tools'
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -291,6 +333,30 @@ export class RunExecutor {
       kind: req.kind,
       status: 'queued',
       agentId: req.agentRef.id,
+      // ★ 三态**原样**落库（见 `Run.reviewerAgentId`）：`undefined` = 跟随 agent
+      //   配置，`null` = 这次明确不审，id = 这次换人审。
+      //
+      //   这里绝不能写成 `reviewerAgentId: req.reviewerAgentId ?? null`——那会把
+      //   "照旧"悄悄变成"这次不审"，而这个差别在跑完之前看不出来（该审的没审，
+      //   而 run 状态一切正常）。
+      ...(req.reviewerAgentId === undefined
+        ? {}
+        : { reviewerAgentId: req.reviewerAgentId as Run['reviewerAgentId'] }),
+      // ★ 任务级动作白名单**同理**：缺字段 = 跟随那个审核者的「行动权限」。
+      //   写成 `?? []` 会把"照旧"悄悄变成"这一次一个动作都不许触发"——
+      //   表现是判决永远只能给结论，而没有任何地方会说"为什么突然不动手了"。
+      ...(req.allowedActions === undefined
+        ? {}
+        : { allowedActions: req.allowedActions as Run['allowedActions'] }),
+      // ★ 任务级固定参数（D43）同一个判据：缺字段 = 跟随审核者长期那份
+      //   （`Agent.actionParams`）；`{}` 是"这一次不固定任何参数"的明确选择。
+      ...(req.actionParams === undefined
+        ? {}
+        : { actionParams: req.actionParams as Run['actionParams'] }),
+      // ★ 任务级返工次数（D45）。缺字段 = 不返工（`fail` 直接交给人）。
+      //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
+      //   所以不需要区分三态，落一个数即可。
+      maxReworks: req.maxReworks ?? 0,
       subject: req.subject,
       trigger: req.kind === 'review' ? 'third_party' : 'assignment',
       derivedFrom: (req.derivedFrom ?? null) as Run['derivedFrom'],
@@ -598,6 +664,15 @@ export class RunExecutor {
     let injectedSkills: string[] = []
 
     /**
+     * 这次 run 注入过哪些**工具包**——给 `cleanup()` 收尾用。
+     *
+     * 与 `injectedSkills` 同一条规矩：它只是"要收哪几个"的**候选**，能不能删由
+     * **落盘的归属清单**决定（见 `removeInjectedTools`）——所以数组错了也删不到
+     * 使用者的东西。也声明在 `try` 外面，理由与技能那份完全相同。
+     */
+    let injectedTools: string[] = []
+
+    /**
      * 这次 run **实际**执行的命令行（含沙箱包装）——由后端如实上报。
      *
      * ★ 审计原来记的是 `[descriptor.command, ...descriptor.baseArgs]`：那**不是**
@@ -660,6 +735,26 @@ export class RunExecutor {
         }
       } catch (err) {
         this.#deps.onWarn?.(`移除注入的技能失败：${String(err)}`)
+      }
+
+      // ★ 工具包收掉（D42）：与技能同一条规矩——**只删落盘清单里记着的**，
+      //   `injectedTools` 只是"要收哪几个"的候选，传错也删不到使用者的东西。
+      //   同一个 try/catch 的两份收尾要分开：一处失败不该拖垮另一处。
+      try {
+        const sweptTools = await removeInjectedTools(
+          run.workDir!,
+          INJECTED_TOOLS_DIR,
+          injectedTools,
+        )
+        if (sweptTools.removed.length > 0) {
+          await this.#note(
+            runId,
+            `已移除本次注入的工具包：${sweptTools.removed.join('、')}` +
+              `（工作目录里只留 agent 的产出；本次能用哪些工具见上面的注入记录）`,
+          )
+        }
+      } catch (err) {
+        this.#deps.onWarn?.(`移除注入的工具包失败：${String(err)}`)
       }
     }
 
@@ -732,6 +827,50 @@ export class RunExecutor {
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
       }
 
+      // ── 注入工具包（D42：执行者挂载的工具 → 工作目录）──
+      //
+      // ★ 只有执行 run 注入：审核者不挂工具（能力模型：执行者用工具干活、
+      //   审核者只判断），审核 run 永远没有可注入的。
+      //
+      //   与技能的三处差别：
+      //   1. **没有 runtime 门槛**——技能靠 CLI 扫目录发现（`kind: 'none'` 就写
+      //      了也白写），工具靠模型自己读，任何 runtime 都能用；
+      //   2. 写的是**整个包**（脚本 + tool.json + TOOL.md），不是规范化成单个
+      //      约定文件；
+      //   3. 注入失败（含撞上使用者同名目录的 `ToolCollisionError`）**要让 run
+      //      失败**——理由与技能那条完全相同：静默的缺能力比报错糟得多。
+      const toolsBrief: ToolBrief[] = []
+      if (req.kind === 'execute') {
+        const mountedTools = await this.#mountedTools(run)
+        const toolsSync = await syncInjectedTools(
+          run.workDir!,
+          INJECTED_TOOLS_DIR,
+          mountedTools.map((tool) => ({
+            slug: tool.slug,
+            files: tool.files,
+            toolJson: JSON.stringify(tool.manifest, null, 2),
+            docs: tool.docs,
+          })),
+        )
+        injectedTools = toolsSync.written
+        if (toolsSync.pruned.length > 0) {
+          await this.#note(
+            runId,
+            `已从工作目录移除不再挂载的工具包：${toolsSync.pruned.join('、')}`,
+          )
+        }
+        // 清单给模型："有哪些、在哪儿、干什么用"（工具没有 CLI 自动发现，
+        // 模型要自己读 TOOL.md 决定怎么调脚本——见 `toolsValue` 的说明）。
+        for (const tool of mountedTools) {
+          toolsBrief.push({
+            slug: tool.slug,
+            name: tool.name,
+            description: tool.description,
+            dir: `${INJECTED_TOOLS_DIR}/${tool.slug}`,
+          })
+        }
+      }
+
       // ★ 环境预检的问题必须出现在**这份日志里**。
       //
       //   实测踩到过：daemon 跑在限制家目录写入的环境里（容器 / 专用用户 /
@@ -778,6 +917,20 @@ export class RunExecutor {
               `本次它们只作为「审核标准 / 参考」出现在上下文里`,
       )
 
+      // ★ 工具包的注入结果同样要进日志（D42）。
+      //
+      //   与 skill 那条同款理由：不写的话，使用者没法区分"没挂工具"与"挂了但
+      //   没送进工作目录"——而工具没有 CLI 自动发现，写没写下去**完全不可见**。
+      if (req.kind === 'execute') {
+        await this.#note(
+          runId,
+          toolsBrief.length === 0
+            ? `本次没有注入任何工具包（该执行者没挂工具）——它只用自己的内置能力干活`
+            : `已注入 ${toolsBrief.length} 个工具包：${toolsBrief.map((t) => t.slug).join('、')}` +
+              `（写入 ${INJECTED_TOOLS_DIR}/，模型会从第一句话里知道它们在哪、怎么用）`,
+        )
+      }
+
       // ══════════════════════════════════════════════════════════════════
       // ── 组装「第一句话」，并留一份副本（D29）──
       // ══════════════════════════════════════════════════════════════════
@@ -813,11 +966,38 @@ export class RunExecutor {
       //   标记这些硬东西一个字都不能动。
       const language = LANGUAGE_NAME[workspace?.locale ?? DEFAULT_LOCALE]
 
-      // ★ 审核标准（D37）：内联在**这个审核者**身上，解析点只有一处
-      //   （`resolveReviewStandard`）——派发前判"能不能审"、这里渲染
-      //   `{{standards}}`、判决收口时校验动作白名单，三处用的是同一份结果。
-      //   老数据（标准还在挂载的 skill 里）走兼容路径。
+      // ★ 审核标准与**动作权限**（D37 / D40 收口）：两者都在**这个审核者**身上，
+      //   解析点只有一处（`resolveReviewStandard`）——派发前判"能不能审"、这里
+      //   渲染 `{{standards}}`、判决收口时校验动作白名单，三处用的是同一份结果。
+      //   动作白名单的权威顺序（`Agent.allowedActions` 优先，为空才回退到老数据
+      //   里标准上那份）也只在那个函数里写了一遍。
+      //   老数据（标准还在挂载的 skill 里）的兼容路径**只对正文生效**：skill 不
+      //   参与动作授权（D40），它的正文只进 `{{standards}}`。
       const standard = req.kind === 'review' ? resolveReviewStandard(agentConfig ?? { reviewStandard: null }, mountedSkills) : null
+
+      // ★ 这次审核**允许哪些动作**（D40 收口：它在 agent 上，不在标准里）：
+      //   白名单还要考虑已安装的工具包，因为判决里可以出现
+      //   `<包 slug>.<动作名>` 这种第三方动作。
+      //   算在这里是因为它有两个消费者：①下面渲染判决契约（必须把动作名列给
+      //   模型——契约里没有的名字它写不出来）；②收口时校验判决里的动作。
+      //   两处各算一次是刻意的（与 `resolveReviewStandard` 同样的理由）：解析是
+      //   纯的、只读已读过的数据，而"两处各写一套取法"才是真正会出事的那种重复。
+      //
+      // ★★ 任务级覆盖优先（D42）：`run.allowedActions` 有值时用它，否则才用
+      //    审核者自己的「行动权限」。这一条是"新建任务页 ③ 可编辑"的落点，
+      //    而**判据只能看字段在不在**（见 `Run.allowedActions`）：
+      //    `[]` = 这一次一个动作都不许触发，是**明确的选择**，不是"没配"。
+      const reviewActions =
+        req.kind === 'review'
+          ? await this.#reviewActions(
+              run.workspaceId,
+              run.allowedActions ?? standard?.allowedActions ?? [],
+              // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）：
+              //   `run.actionParams` 有值（含空对象）就用它，否则才用审核者长期
+              //   配的那份（`Agent.actionParams`）。
+              run.actionParams ?? agentConfig?.actionParams ?? {},
+            )
+          : null
 
       const firstSentence =
         req.kind === 'review' && req.review
@@ -834,6 +1014,13 @@ export class RunExecutor {
               prompt: req.prompt,
               // 审核标准的正文（D37）——`{{standards}}` 就是它
               standard: standard?.body ?? null,
+              // ★ 允许的动作要**写进判决契约**（D40）。不写的话，审核者配了工具
+              //   动作时模型永远写不出那个名字——它合理的选择只剩"编一个"或者
+              //   "退化成 needs_human"，而"契约里没写枚举 ⇒ 整条判决作废"这条
+              //   失败史在这个仓库里真实发生过两次。
+              allowedActions: reviewActions?.allowed ?? [],
+              // 第三方动作只列**模型要填的**参数（绑定参数由平台注入，写进契约只会诱导它去写）
+              toolActions: reviewActions?.hints ?? [],
               language,
               // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
               // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
@@ -845,6 +1032,8 @@ export class RunExecutor {
               subject: req.subject,
               prompt: req.prompt,
               skills: skillsBrief,
+              // ★ 干活时能用的工具包（D42）：只对执行 run 有意义
+              tools: toolsBrief,
               instructions: agentConfig?.instructions ?? null,
               language,
               template: templates.executeTemplate,
@@ -976,24 +1165,33 @@ export class RunExecutor {
       //   `limits.timeoutMs` 此前是**接受但完全忽略**的参数。现在把它接上，
       //   而且按需求的原意做成**空闲**超时而不是墙钟超时：
       //   耗时长不等于出问题，卡住才是。
+      //
+      //   ★ 调用方没给（`null`）⇒ 用平台默认（`DEFAULT_IDLE_TIMEOUT_MS`）。
+      //     实测踩过"CLI 的后台任务吊住会话、run 永远 running"的静默卡死，
+      //     而界面从来不发 timeoutMs——缺省值就是那道兜底（见那个常量的说明）。
       let idleTimedOut = false
-      const idleTimeoutMs = req.limits.timeoutMs
+      const idleTimeoutMs = req.limits.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS
+      if (req.limits.timeoutMs === null) {
+        await this.#note(
+          runId,
+          `本次没有给空闲上限（timeoutMs=null），使用平台默认：` +
+            `空闲 ${Math.round(DEFAULT_IDLE_TIMEOUT_MS / 60_000)} 分钟没有任何输出就判定卡住并终止`,
+        )
+      }
       watchdog =
-        idleTimeoutMs === null
-          ? null
-          : startIdleWatchdog({
-              session,
-              idleTimeoutMs,
-              onIdle: (idleMs) => {
-                idleTimedOut = true
-                // 先记下来再取消：取消会让消息流结束，走到下面的失败分级时
-                // 需要知道"这次失败是我们主动掐的"，而不是 CLI 自己挂了。
-                this.#deps.onWarn?.(
-                  `run ${runId} 已空闲 ${Math.round(idleMs / 1000)} 秒（上限 ${Math.round(idleTimeoutMs / 1000)} 秒），判定卡住并终止`,
-                )
-                void session.cancel().catch(() => undefined)
-              },
-            })
+        startIdleWatchdog({
+          session,
+          idleTimeoutMs,
+          onIdle: (idleMs) => {
+            idleTimedOut = true
+            // 先记下来再取消：取消会让消息流结束，走到下面的失败分级时
+            // 需要知道"这次失败是我们主动掐的"，而不是 CLI 自己挂了。
+            this.#deps.onWarn?.(
+              `run ${runId} 已空闲 ${Math.round(idleMs / 1000)} 秒（上限 ${Math.round(idleTimeoutMs / 1000)} 秒），判定卡住并终止`,
+            )
+            void session.cancel().catch(() => undefined)
+          },
+        })
 
       let collected = ''
       for await (const message of session.messages) {
@@ -1175,17 +1373,20 @@ export class RunExecutor {
               ? 'agent_error'
               : 'infra_error',
           message: idleTimedOut
-            ? `已空闲 ${Math.round((req.limits.timeoutMs ?? 0) / 1000)} 秒没有任何输出，判定卡住并终止`
+            ? `已空闲超过 ${Math.round((req.limits.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS) / 1000)} 秒没有任何输出，判定卡住并终止`
             : (result.error ?? '运行失败'),
         })
       }
     } catch (err) {
       // ⚠️ 这里原来**一律**记 `infra_error`。而"注入失败"（同名技能撞车、
-      //    技能超过大小上限）是**使用者自己就能修好**的问题：改个目录名、
-    //    换个小点的技能。把它记成"环境/基础设施问题"，会把人往查 CLI 与
-      //    权限的方向带——`injection_failed` 这个枚举成员因此从没被写过。
+      //    技能超过大小上限、工具包撞上使用者的同名目录）是**使用者自己就能
+      //    修好**的问题：改个目录名、换个小点的技能。把它记成"环境/基础设施
+      //    问题"，会把人往查 CLI 与权限的方向带——`injection_failed` 这个
+      //    枚举成员因此从没被写过。
       const isInjection =
-        err instanceof SkillCollisionError || err instanceof SkillTooLargeError
+        err instanceof SkillCollisionError ||
+        err instanceof SkillTooLargeError ||
+        err instanceof ToolCollisionError
       await this.#finish(runId, 'failed', null, {
         reason: isInjection ? 'injection_failed' : 'infra_error',
         message: err instanceof Error ? err.message : String(err),
@@ -1223,35 +1424,84 @@ export class RunExecutor {
 
     const subjectKey = `${run.subject.type}:${run.subject.id}`
     const invalidAttempts = this.#invalidAttempts.get(subjectKey) ?? 0
+    // ★ D45：返工额度。**额度是任务级的**，住在被审的那条执行 run 上；
+    //   "已经用了几次"就是那条 run 的 `chainDepth`（每条返工 run 在前一条的
+    //   基础上 +1）。两者一比就是"还有没有额度"——所以不需要第三个计数器。
+    const reworkBudget = await this.#reworkBudgetFor(run)
 
-    // ★ 动作白名单来自**审核标准**（D37）：`allowedActions` 与标准同源是刻意的
-    //   ——"这条标准只允许发评论"是标准的一部分，不是全局策略。原来它是所有挂载
-    //   skill 的动作并集；标准内联之后跟着标准走。
+    // ★ 动作白名单来自**审核者的能力**（`Agent.allowedActions`，D40 收口）——
+    //   它以前与标准同源（"这条标准只允许发评论"），再以前是所有挂载 skill 的
+    //   动作并集。现在 skill 一个字都不参与授权，标准也不再携带动作。
+    //
+    //   ⚠️ 取值**只走那一个解析点**（`resolveReviewStandard`）：回退到老数据里
+    //   标准上那份白名单的顺序写在那里，这里不再写第二遍。
     //
     //   ⚠️ 这里重新解析一次（而不是把上面那个 `standard` 传下来）：这一步在
     //   **#finishReview** 里，与组装第一句话不在同一个作用域；解析函数是纯的、
     //   只读 store 里已经读过的数据，重算一次的代价可以忽略，而"两处各写一套
     //   取法"才是真正会出事的那种重复。
     const agentForStandard = await this.#deps.store.getAgent(run.agentId as never)
-    const allowedActions =
+    const declaredActions =
+      // ★★ 任务级覆盖优先（D42），与组装第一句话那一处**同一个判据**：
+      //    `run.allowedActions` 有值（含空数组）就用它，否则才用审核者自己的。
+      //
+      //    两处必须一致——否则会出现"契约里列了 A、收口时却不认 A"（或者反过来：
+      //    判决写了一个契约里根本没列的动作却被放行），而那种自相矛盾的判决
+      //    最难查：它每一步看起来都合规。
+      run.allowedActions ??
       resolveReviewStandard(agentForStandard ?? { reviewStandard: null }, req.skills ?? [])
-        ?.allowedActions ?? []
+        ?.allowedActions ??
+      []
+    // ★ 白名单要考虑**已安装的工具包**（D40）：判决里可以出现
+    //   `<包 slug>.<动作名>` 这种第三方动作，而"装了没有"只有 store 知道。
+    //
+    //   同一份工具清单还要传给 `decideReview`——它按"这个动作类型**现在**
+    //   存不存在"判合规（内置注册表 + 已安装的工具），而不是只按白名单判。
+    //   两处用**同一次**读取的结果：分两次读的话，中途装/卸一个包就会让
+    //   "白名单里有它、类型校验说没有"这种自相矛盾的判决出现。
+    const reviewActions = await this.#reviewActions(
+      run.workspaceId,
+      declaredActions,
+      // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）。
+      //   这里重新解析一次（而不是把上面那个 `standard` 传下来）——与
+      //   `declaredActions` 同一个理由：解析是纯的、只读已读过的数据，而
+      //   "两处各写一套取法"才是真正会出事的那种重复。
+      run.actionParams ?? agentForStandard?.actionParams ?? {},
+    )
 
-    // ★ 重建链路（根 → 当前）。动作派生要用它判环与判深度。
-    //   失败不能拖垮审核本身——退化成空链路（只剩深度兜底）并告警。
-    let chainSteps: ChainStep[] = []
-    try {
-      chainSteps = await loadChainSteps(this.#deps.store, run)
-    } catch (err) {
-      this.#deps.onWarn?.(`链路重建失败，环检测本次不可用：${String(err)}`)
-    }
+    // ⚠️ 这里原来还会**重建链路**（`loadChainSteps`）并传给审核收口——那是给
+    //    动作派生用的（`issue.assign_agent` 派新 run 之前要判环与判深度）。
+    //    D41 把内置动作全部移除之后，没有任何动作能派生 run，链路也就没有第二个
+    //    消费者了，所以这次读取连同它的告警分支一起删掉。
+    //
+    //    域层的 `loadChainSteps` / `detectChainCycle` / `assertCanDeriveRun` 仍在
+    //    （`packages/domain/src/loop/*`，INV-14~16 的实现），只是这个版本在 daemon
+    //    里没有调用点了。
+
+    // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）。
+    //   这里解析一次、两处用：①`#reviewActions`（契约减去固定参数）已经用过了；
+    //   ②这里交给收口（判决校验拦"模型写固定参数"）与动作执行（注入真实值）。
+    const effectiveFixedParams = run.actionParams ?? agentForStandard?.actionParams ?? {}
 
     const handling = await coordinator.handle({
       run,
       workspaceId: run.workspaceId,
       output,
-      allowedActions,
+      allowedActions: reviewActions.allowed,
+      tools: reviewActions.tools,
+      ...(Object.keys(effectiveFixedParams).length > 0
+        ? { fixedParams: effectiveFixedParams }
+        : {}),
       invalidAttempts,
+      // D45：返工额度。允许几次看**这条任务**（执行 run 上的 `maxReworks`），
+      //   已经用了几次看**当前这条执行 run 的 `chainDepth`**——每条返工 run 在
+      //   前一条的基础上 +1，所以两者一比就是"还有没有额度"。
+      //
+      //   ⚠️ 额度取自 `subject` 指向的那条执行 run，不是这条审核 run：审核 run
+      //   自己的 `maxReworks` 只是被带下来的副本，而"允许几次"是任务级的决定。
+      ...(reworkBudget.maxReworks > 0
+        ? { maxReworks: reworkBudget.maxReworks, usedReworks: reworkBudget.usedReworks }
+        : {}),
       inputBlobRefs: req.review?.inputBlobRef ? [req.review.inputBlobRef] : [],
       skillRefs: (req.skills ?? []).map((s) => s.ref),
       // ★ 审计里的"模型"要记 **CLI 自己报告的那个**，而不是我们请求的那个。
@@ -1274,7 +1524,6 @@ export class RunExecutor {
       cliVersion,
       argv,
       usage,
-      chainSteps,
     })
 
     // ★ 判决与审计进日志。
@@ -1295,6 +1544,114 @@ export class RunExecutor {
     } else {
       this.#invalidAttempts.delete(subjectKey)
     }
+  }
+
+  /**
+   * 审核标准声明的动作白名单 → 这个工作区**现在**真的允许的动作集合（D40）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么这一层的存在是必需的
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 判决里的动作要过两道关：**类型存在**（`validateActionRefWith`）与
+   * **在标准允许的子集内**（`validateActionAllowed`）。标准是一份静态文本，
+   * 它没法知道工作区里装了哪些工具包——那是运行时状态。
+   *
+   * 所以这一层把静态声明与运行时状态合起来：
+   *
+   *   · 标准里声明的**内置**动作原样保留（既有行为一字未改）；
+   *   · 标准里声明的第三方动作，只在**它的包确实装了**且包里真有这个动作名
+   *     时保留——否则进 `unavailable`。判决真引用了它，就会走既有的
+   *     invalid（结构性）路径，并在通知里说清是"标准/配置"的问题；
+   *   · 已安装工具包声明的动作全部放进来（"装一个包 = 授权它的整组动作"，
+   *     与 `Agent.toolIds` 的注释同一口径）。
+   *
+   * ⚠️ 读不到已安装工具时**退回标准里那份**（也就是既有行为）并把原因写进
+   *    日志。这不是静默忽略：此时工具清单是空的 ⇒ 引用第三方动作的判决会被
+   *    判成"未知动作类型"（结构性 invalid）并通知，而不是"看起来执行了"。
+   *
+   * 返回**同一份**工具清单，是因为调用方还要把它交给 `decideReview`：
+   * 两份结果必须来自同一次读取（见调用处的注释）。
+   */
+  async #reviewActions(
+    workspaceId: Run['workspaceId'],
+    /** 审核者允许触发的动作名（`Agent.allowedActions`，协议里是 `ActionRefType`）。 */
+    declared: readonly ActionRefType[],
+    /**
+     * 使用者在界面上设好的固定参数（D43）：`动作名 → 参数名 → 值`。
+     *
+     * 进契约时从"你只需要给"里**减去**固定参数、并单独说"已固定、不要写"——
+     * 否则模型会把固定参数当成漏填的必填项，要么猜值、要么整条判决作废。
+     */
+    fixedByType?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>,
+  ): Promise<{ allowed: readonly ActionRefType[]; hints: ToolActionHint[]; tools: readonly Tool[] }> {
+    let tools: readonly Tool[]
+    try {
+      tools = await this.#deps.store.listTools(workspaceId)
+    } catch (err) {
+      this.#deps.onWarn?.(
+        `读取已安装的工具包失败，这次判决只按审核者配的动作（Agent.allowedActions）判：${String(err)}`,
+      )
+      // 读不到工具 ⇒ 契约里不列第三方动作、判决里的第三方动作一律不可用
+      return { allowed: declared, hints: [], tools: [] }
+    }
+
+    const resolved = resolveAllowedActionsWithTools(declared, tools)
+    for (const item of resolved.unavailable) {
+      this.#deps.onWarn?.(`审核者配的动作 ${item.type} 当前不可用：${item.reason}`)
+    }
+
+    // 不需要任何断言：白名单与判决里的 `action.type` 现在是**同一个形状**
+    // （`ActionRefType`），一路到 `validateActionAllowed` 都是它。
+    return {
+      allowed: resolved.allowed,
+      // 契约里那几行"第三方动作 + 你只需要填哪些参数"（D40；D43 起减去固定参数）
+      hints: toolActionHints(resolved.allowed, tools, fixedByType),
+      tools,
+    }
+  }
+
+  /**
+   * 这个执行者**挂载了哪些工具包**（D42 接线）。
+   *
+   * 挂载关系住在 agent 上（`Agent.toolIds`，一组 = 一个包）。这里把 id 名单
+   * 解析成已安装的包；id 在名单里、但包没装（已卸载、残留配置）的会被跳过——
+   * 与 `#reviewActions` 处理"配了但没装"同一个口径：**静默跳过并留日志**，
+   * 而不是让 run 失败，也**绝不**把"配置说有的"当成"装了的"塞给模型。
+   *
+   * ⚠️ 只有执行 run 会调它（审核者不挂工具，`toolIds` 恒为空）。
+   */
+  /**
+   * 这条审核 run 手上的**返工额度**（D45）。
+   *
+   * 额度是**任务级**的，落在被审的那条执行 run 上（`Run.maxReworks`）；
+   * "已经用了几次"用那条 run 的 `chainDepth`——每条返工 run 在前一条的基础上
+   * +1，所以两者一比就是"还有没有额度"，不需要第三个计数器。
+   *
+   * ⚠️ `subject` 不是 `run` 的（报告摄取那条路）⇒ 额度为 0：那份材料不是我们
+   *    自己跑出来的，没有"执行者"可以返工，判决的 `fail` 只能交给人。
+   */
+  async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number; usedReworks: number }> {
+    if (run.subject.type !== 'run') return { maxReworks: 0, usedReworks: 0 }
+    const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
+    if (!executeRun) return { maxReworks: 0, usedReworks: 0 }
+    return { maxReworks: executeRun.maxReworks ?? 0, usedReworks: executeRun.chainDepth }
+  }
+
+  async #mountedTools(run: Run): Promise<readonly Tool[]> {
+    let tools: readonly Tool[]
+    try {
+      tools = await this.#deps.store.listTools(run.workspaceId)
+    } catch (err) {
+      this.#deps.onWarn?.(`读取已安装的工具包失败，这次 run 不注入任何工具：${String(err)}`)
+      return []
+    }
+    const agent = await this.#deps.store.getAgent(run.agentId as never)
+    const ids = new Set(agent?.toolIds ?? [])
+    if (ids.size === 0) return []
+    // 只取"配置了**且**装了的"：残留配置（包已卸）的 id 静默跳过，不给模型
+    // 塞一个它调不到的东西。这与 `#reviewActions` 处理"配了但没装"同一个口径。
+    return tools.filter((t) => ids.has(t.id))
   }
 
   /**

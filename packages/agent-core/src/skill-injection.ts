@@ -425,3 +425,159 @@ export async function listManagedSkills(workDir: string, skillDir: string): Prom
 export function skillPath(skillDir: string, slug: string): string {
   return join(skillDir, slug, 'SKILL.md')
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 工具包注入（D42 接线：执行者挂载的工具 → 工作目录）
+// ══════════════════════════════════════════════════════════════════
+
+/**
+ * 与技能注入共用同一套"归属清单"机制（见 `syncInjectedSkills` 的说明），
+ * 只有一处实质差别：**技能靠 CLI 扫目录发现，工具没有发现机制**——平台把包
+ * 原样放进去，模型从第一句话里知道"有哪些、在哪儿"，自己去读 TOOL.md、
+ * 自己决定怎么调脚本。所以这里写的是**包的内容**（脚本 + 清单 + 说明），
+ * 而不是规范化成某个目录约定的单个文件。
+ *
+ * 为什么工具注入**必须**与技能同规则：
+ *
+ *   - **只删我们放的**（落盘归属清单，而不是内存数组）：daemon 崩溃后残留的
+ *     工具包会被下一次 run 的对账摘掉；清单不在的一律不碰；
+ *   - **同名冲突宁可 run 失败**：工作目录里已经有一个 `.alpha-helper/tools/<slug>`
+ *     目录、又不是我们放的，覆盖它等于改写使用者的东西；
+ *   - **先记清单再写文件**：两步之间崩掉的两种残留方向不同（见技能那边的注释），
+ *     顺序不能反。
+ */
+export class ToolCollisionError extends Error {
+  readonly slug: string
+  constructor(slug: string) {
+    super(
+      `工作目录里已经有一个同名工具包目录「${slug}」，而且它**不是这个平台建的**` +
+        `（不在我们的归属清单里）。覆盖它等于改写你自己的文件，所以停下。` +
+        `请把它改名或移走，再重跑这条任务。`,
+    )
+    this.name = 'ToolCollisionError'
+    this.slug = slug
+  }
+}
+
+export interface InjectedTool {
+  slug: string
+  /** 包里的文件（相对路径 → 文本）。**不含 `tool.json`**（清单单独存）。 */
+  files: Record<string, string>
+  /** `tool.json` 的原文——写进工具目录，模型能读到动作契约。 */
+  toolJson: string
+  /** `TOOL.md` 正文（`files` 里若已有 `TOOL.md` 则用 files 里那份）。 */
+  docs: string
+}
+
+export interface SyncToolsResult {
+  /** 这次写下去的工具包。 */
+  written: string[]
+  /** 这次被删掉的（我们以前放的、现在不需要了）。 */
+  pruned: string[]
+}
+
+/**
+ * 让工作目录里的工具包与这次要用的集合**一致**——run **开始前**那一步。
+ *
+ * 语义与 `syncInjectedSkills` 逐条对齐：这次要的写下去、清单里有但这次不要的
+ * 删掉、**不在清单里的同名目录报错绝不覆盖**。删除/覆盖的依据永远是落盘的
+ * 归属清单，不是内存里的数组。
+ */
+export async function syncInjectedTools(
+  workDir: string,
+  toolsDir: string,
+  tools: readonly InjectedTool[],
+): Promise<SyncToolsResult> {
+  const dir = join(workDir, toolsDir)
+  const owned = new Set(await readManifest(dir))
+  const wanted = tools.map((t) => t.slug)
+
+  const written: string[] = []
+  const pruned: string[] = []
+
+  // ① 先对账：我们以前放的、这次不需要的，删掉
+  for (const slug of owned) {
+    if (wanted.includes(slug)) continue
+    if (slug.includes('/') || slug.includes('..')) continue
+    await rm(join(dir, slug), { recursive: true, force: true })
+    pruned.push(slug)
+  }
+
+  // ② 冲突检查：目标目录存在、但不是我们建的 ⇒ 那是使用者的东西
+  const existing = new Set(
+    await readdir(dir, { withFileTypes: true })
+      .then((entries) => entries.filter((e) => e.isDirectory()).map((e) => e.name))
+      .catch(() => [] as string[]),
+  )
+  for (const slug of wanted) {
+    if (existing.has(slug) && !owned.has(slug)) throw new ToolCollisionError(slug)
+  }
+
+  // ③ 先记归属，再写文件（顺序见 `syncInjectedSkills` 那一段的说明）
+  await writeManifest(dir, [...new Set(wanted)].sort())
+
+  // ④ 写下去：整个包原样落盘
+  for (const tool of tools) {
+    const target = join(dir, tool.slug)
+    if (tool.slug.includes('/') || tool.slug.includes('..')) continue
+    await mkdir(target, { recursive: true })
+    await writeFile(join(target, 'tool.json'), tool.toolJson, 'utf8')
+    for (const [rel, content] of Object.entries(tool.files)) {
+      // 防御：相对路径不许跑出包外（装进来的包在安装时就校验过，这里是第二道）
+      if (rel.startsWith('/') || rel.split('/').includes('..')) continue
+      const filePath = join(target, rel)
+      await mkdir(dirname(filePath), { recursive: true })
+      await writeFile(filePath, content, 'utf8')
+    }
+    // TOOL.md 是"人读的说明"，files 里通常带着；万一没有就由 docs 补一份
+    if (!Object.keys(tool.files).includes('TOOL.md') && tool.docs) {
+      await writeFile(join(target, 'TOOL.md'), tool.docs, 'utf8')
+    }
+    written.push(tool.slug)
+  }
+
+  return { written, pruned }
+}
+
+/**
+ * run **结束后**那一步：把这次注入的工具包收掉。
+ *
+ * 与 `removeInjectedSkills` 同一条规矩：**只删落盘清单里记着的**，传进来的
+ * `slugs` 只用来收窄范围——所以调用方给错名字也删不到使用者的东西。
+ */
+export async function removeInjectedTools(
+  workDir: string,
+  toolsDir: string,
+  slugs: readonly string[],
+): Promise<{ removed: string[]; kept: string[] }> {
+  const dir = join(workDir, toolsDir)
+  const owned = await readManifest(dir)
+  const target = new Set(slugs.filter((slug) => owned.includes(slug)))
+
+  const removed: string[] = []
+  for (const slug of target) {
+    if (slug.includes('/') || slug.includes('..')) continue
+    await rm(join(dir, slug), { recursive: true, force: true })
+    removed.push(slug)
+  }
+
+  const kept = owned.filter((slug) => !target.has(slug))
+  if (kept.length === 0) {
+    await rm(join(dir, MANAGED_MANIFEST), { force: true })
+    await rmdir(dir).catch(() => {})
+  } else {
+    await writeManifest(dir, kept)
+  }
+
+  return { removed, kept }
+}
+
+/** 读到我们在某个工作目录里放过的工具包 slug（诊断与测试用）。 */
+export async function listManagedTools(workDir: string, toolsDir: string): Promise<string[]> {
+  return readManifest(join(workDir, toolsDir))
+}
+
+/** 工具包在工作目录里的相对路径——用于诊断与日志。 */
+export function toolPath(toolsDir: string, slug: string): string {
+  return join(toolsDir, slug)
+}

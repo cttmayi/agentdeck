@@ -1429,7 +1429,6 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
             slug: 'general-review',
             name: '通用审核',
             body: '# 标准\n\n只判断，不提额外要求。',
-            allowedActions: ['comment.create'],
             files: {},
           },
         ],
@@ -1511,7 +1510,6 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
               slug: 'with-support',
               name: '带支持文件',
               body: '# 标准\n\n看 scripts/check.sh。',
-              allowedActions: ['comment.create'],
               files: { 'scripts/check.sh': '#!/bin/sh\necho ok\n', 'reference.md': '参考资料' },
             },
           ],
@@ -1688,7 +1686,7 @@ describe('★ 失败原因码要说对人该去哪儿查', () => {
         body: JSON.stringify({
           runId, kind: 'execute',
           agentRef: { id: 'a', name: 'A', instructions: '' },
-          skills: [{ ref: { id: 's1', slug: 'mine', source: 'local' }, slug: 'mine', name: 'mine', body: '平台的标准', allowedActions: [] }],
+          skills: [{ ref: { id: 's1', slug: 'mine', source: 'local' }, slug: 'mine', name: 'mine', body: '平台的标准' }],
           subject: { type: 'issue', id: 'i1' },
           prompt: '随便做点事',
           workDir: dir,
@@ -1911,6 +1909,110 @@ describe('★ 日志要说清沙箱**到底开没开**', () => {
       // 都被如实上报到了日志里（真包装由 agent-core 的沙箱测试覆盖）。
       assert.match(text, /命令行：/, '命令行要在')
       assert.match(text, /沙箱：/, '★ 沙箱状态要在——两者缺一个都会让人反推')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(work)
+    }
+  })
+})
+
+describe('★ 没给 timeoutMs 也有兜底：平台默认空闲上限（防静默卡死）', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这条测试钉的是"默认值真的被用上了、而且看得见"。
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 实测踩到过：执行者用 CLI 的 Bash 后台任务（"Command running in
+   * background with ID: …"）跑了个永远不完的命令，Claude Code 在还有未完成的
+   * 后台任务时**不让会话结束**——CLI 一直活着，run 永远停在 running。而界面
+   * 新建任务**永远**发 `timeoutMs: null`，看门狗因此从没被开过。
+   *
+   * 修法是 `req.limits.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS`。这里不真的等
+   * 30 分钟触发（那会拖死测试套件），只钉两件事：
+   *   ① 缺省时默认值真的被采用——日志里必须**明说**"使用平台默认"（不说的话
+   *      有人会当成 bug，或者以为跑的是旧代码）；
+   *   ② 显式给了 timeoutMs 时**没有**那句默认说明（调用方自己的值就是权威）。
+   */
+  test('★ timeoutMs=null ⇒ 日志说"使用平台默认"的空闲上限', async () => {
+    const dir = await makeTempDir('e2e-default-idle-data')
+    const work = await makeTempDir('e2e-default-idle-work')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: new FakeBackend(),
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i1' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      const out = (await (
+        await fetch(`${d.url}/api/runs/${runId}/messages`)
+      ).json()) as { messages: Array<{ content: string }> }
+      const text = out.messages.map((m) => m.content).join('\n')
+      assert.match(
+        text,
+        /使用平台默认：空闲 30 分钟没有任何输出就判定卡住并终止/,
+        '★ 缺省时默认上限必须说出口——否则"卡死没人管"会继续静默存在',
+      )
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(work)
+    }
+  })
+
+  test('★ 显式给了 timeoutMs ⇒ 没有那句默认说明（调用方的值就是权威）', async () => {
+    const dir = await makeTempDir('e2e-explicit-idle-data')
+    const work = await makeTempDir('e2e-explicit-idle-work')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: new FakeBackend(),
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i1' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: 30_000 },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      const out = (await (
+        await fetch(`${d.url}/api/runs/${runId}/messages`)
+      ).json()) as { messages: Array<{ content: string }> }
+      const text = out.messages.map((m) => m.content).join('\n')
+      assert.doesNotMatch(text, /使用平台默认/, '给了自己的值就不该再搬默认出来')
     } finally {
       await d.close()
       await cleanup(dir)

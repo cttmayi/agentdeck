@@ -1,0 +1,45 @@
+{
+  "schema": "alpha-helper/tool@1",
+  "slug": "example-issue",
+  "name": "示例工具（单据操作：绑定参数 + 动作间参数形状差异）",
+  "version": "1.0.0",
+  "description": "远端范例：演示绑定参数（工作区 id / run id）与「两个动作、两套参数形状」。不真的改任何单据——它只把收到的参数写成操作日志，用来测试参数管道。",
+  "runtime": "node",
+  "entry": "scripts/tag.mjs",
+  "actions": [
+    {
+      "name": "tag",
+      "summary": "模拟给单据打一个标签（不真的改，把 label/是否加摘要/工作区 id 写成 issue-ops.log）",
+      "reversible": true,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" },
+          "workspace-id": { "from": "workspace.id" }
+        },
+        "open": {
+          "label": { "type": "enum", "values": ["bug", "feature", "tech-debt", "blocked", "needs-info"] },
+          "add-summary": { "type": "boolean" }
+        }
+      }
+    },
+    {
+      "name": "close",
+      "summary": "模拟关闭单据（不真的关，把 reason 写成 issue-ops.log）",
+      "entry": "scripts/close.mjs",
+      "reversible": false,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" },
+          "workspace-id": { "from": "workspace.id" }
+        },
+        "open": {
+          "reason": { "type": "string", "max": 500 }
+        }
+      }
+    }
+  ]
+}

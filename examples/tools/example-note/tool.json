@@ -1,0 +1,39 @@
+{
+  "schema": "alpha-helper/tool@1",
+  "slug": "example-note",
+  "name": "示例工具（往工作目录写一条记录）",
+  "version": "1.0.0",
+  "description": "示范包：一个组、两个动作、一个支持文件。它只写工作目录里的文件，不碰别的东西。",
+  "runtime": "node",
+  "entry": "scripts/note.mjs",
+  "actions": [
+    {
+      "name": "append-note",
+      "summary": "把一句话追加到工作目录的 NOTES.md",
+      "reversible": true,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" }
+        },
+        "open": {
+          "text": { "type": "string", "max": 2000 }
+        }
+      }
+    },
+    {
+      "name": "clean-notes",
+      "summary": "把 NOTES.md 删掉（演示 reversible=false 的动作）",
+      "entry": "scripts/clean.mjs",
+      "reversible": false,
+      "dryRun": "supported",
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" },
+          "confirm": { "from": "literal", "value": "yes" }
+        }
+      }
+    }
+  ]
+}

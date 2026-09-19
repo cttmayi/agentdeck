@@ -17,6 +17,9 @@
  * 页面跑在明文 http 上：带 `Secure` 的 cookie 不会被发送，不带 `Secure`
  * 就等于把凭证暴露给同机任何进程。所以用 localStorage + `Authorization` 头。
  */
+import { renderText, webText } from '@alpha-helper/i18n'
+import { currentLocale } from './locale.ts'
+import type { ToolManifest } from './api.ts'
 
 const REMOTE_URL_KEY = 'alpha-helper.remote-url'
 const REMOTE_TOKEN_KEY = 'alpha-helper.remote-token'
@@ -70,8 +73,10 @@ async function remoteApi<T = unknown>(path: string, init: RequestInit = {}): Pro
       },
     })
   } catch (err) {
+    // 这句话会是顶栏/设置抽屉上给使用者看的提示（`remoteError`），所以要跟着
+    // 界面语言走；地址本身是值，用插值带进去。
     throw new RemoteError(
-      `连不上远端服务（${base}）。请确认它已经启动：pnpm run remote`,
+      renderText(webText, 'err.remoteUnreachable', currentLocale(), { base }),
       null,
       'network',
     )
@@ -121,9 +126,34 @@ export interface CatalogSkill {
   content: string
 }
 
+/**
+ * 远端目录里的一个**工具包**条目（D40）。
+ *
+ * 一个包 = 一个组，装一次整组可用。形状与 `apps/remote/src/server.ts` 的
+ * `catalog.tools`（源头是 `apps/remote/src/catalog.ts` 的 `CatalogToolEntry`）
+ * 一一对应。
+ *
+ * ★ `manifest` / `files` / `docs` 是**随列表一起给**的（与 skill 那条路同形）：
+ *   装的时候直接把它们交给本机 daemon（`POST /api/tools {source:'payload'}`），
+ *   中间**没有第二次取内容的机会**——两次取会让"页面看到的那份"与"装进去的
+ *   那份"可以不一样，而那种不一致没有任何报错。
+ */
+export interface CatalogTool {
+  slug: string
+  name: string
+  version: string | null
+  summary: string
+  /** 清单元件（原样）；本地会用**同一份 schema**再校验一遍。 */
+  manifest: ToolManifest
+  /** 包里的文本文件（相对路径 → 内容），含入口脚本。 */
+  files: Record<string, string>
+  /** `TOOL.md` 的正文（没有就是空串）。 */
+  docs: string
+}
+
 export interface Catalog {
   skills: CatalogSkill[]
-  tools: Array<{ name: string; summary: string }>
+  tools: CatalogTool[]
   loginMethods: Array<{ name: string; summary: string }>
 }
 

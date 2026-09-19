@@ -1,0 +1,31 @@
+{
+  "schema": "alpha-helper/tool@1",
+  "slug": "example-llm",
+  "name": "示例工具（模型调用：模型/数值边界参数）",
+  "version": "1.0.0",
+  "description": "远端范例：演示「模型」这一类枚举参数，以及数值边界的整数参数（temperature/maxTokens）、布尔参数、长字符串参数。不真的调模型——它只把收到的调用参数写成一条 JSONL 记录，用来测试参数管道。",
+  "runtime": "node",
+  "entry": "scripts/call.mjs",
+  "actions": [
+    {
+      "name": "call",
+      "summary": "模拟一次模型调用（不真的调，把 model/prompt/temperature/maxTokens/stream 原样写成 llm-calls.jsonl）",
+      "reversible": true,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" },
+          "run-id": { "from": "subject.runId" }
+        },
+        "open": {
+          "model": { "type": "enum", "values": ["deepseek-v4", "gpt-4o", "claude-sonnet-4", "qwen-max", "llama-3.3"] },
+          "prompt": { "type": "string", "max": 4000 },
+          "temperature": { "type": "integer", "min": 0, "max": 100 },
+          "max-tokens": { "type": "integer", "min": 100, "max": 100000 },
+          "stream": { "type": "boolean" }
+        }
+      }
+    }
+  ]
+}

@@ -226,6 +226,34 @@ describe('第一句话：模版变量（D32）', () => {
     assert.match(execute, /你是一个严谨的协作者/)
   })
 
+  test('★ D42：执行者挂了工具时，默认模版列出工具包（含说明与位置）', () => {
+    const text = renderFirstSentence({
+      ...SAMPLE_EXECUTE_INPUT,
+      tools: [
+        {
+          slug: 'example-notify',
+          name: '示例通知',
+          description: '发一条通知（渠道、标题、正文可选）',
+          dir: '.alpha-helper/tools/example-notify',
+        },
+      ],
+    })
+    assert.match(text, /## 干活时能用的工具包/)
+    assert.match(text, /`example-notify`（示例通知）：发一条通知（渠道、标题、正文可选）/)
+    assert.match(text, /包在 `\.alpha-helper\/tools\/example-notify`，先读里面的 TOOL\.md 再决定怎么用/)
+    // 默认模版里"有才出现"：挂了工具才出这一节
+    const none = renderFirstSentence(SAMPLE_EXECUTE_INPUT)
+    assert.doesNotMatch(none, /干活时能用的工具包/)
+  })
+
+  test('★ D42：`{{tools}}` 是**执行 run 专有**变量——审核模版里用它会被拒', () => {
+    assert.equal(isKnownVariable('tools', 'execute'), true)
+    assert.equal(isKnownVariable('tools', 'review'), false)
+    // 审核的 SAMPLE 不该带 tools；即使强行带，模板变量表也只认 execute
+    const check = validateTemplate('review', '{{prompt}}\n{{verdict}}\n{{material}}\n{{tools}}')
+    assert.equal(check.ok, false)
+  })
+
   test('★ D35：`{{material}}` 是**纯正文**——标记与那句声明现在由模版写', () => {
     // 使用者要的是"全部彻底回到模版手里"，所以 `{{material}}` 里没有任何包装。
     const onlyMaterial = renderFirstSentence({

@@ -97,6 +97,22 @@ export interface SkillBrief {
   body: string
 }
 
+/**
+ * 执行者**干活时能用的工具包**（D40 挂载的落点，D42 接线）。
+ *
+ * 与 skill 的差别：工具不是"CLI 会自己扫的目录"，而是**平台把包放进工作目录、
+ * 由模型自己读说明、自己决定怎么调用**。所以 brief 里除了 slug 还要给：
+ * 说明（它干什么用）与位置（模型要去哪儿读 TOOL.md / 找脚本）。
+ */
+export interface ToolBrief {
+  slug: string
+  name: string
+  /** 包在 `tool.json` 里的 description。 */
+  description: string
+  /** 在工作目录里的相对路径（如 `.alpha-helper/tools/<slug>`）。 */
+  dir: string
+}
+
 /** 两条链路各有一套模版（D32）。 */
 export type FirstSentenceKind = 'execute' | 'review'
 
@@ -113,6 +129,13 @@ export interface ExecuteFirstSentenceInput {
    */
   language?: string | null
   skills: readonly SkillBrief[]
+  /**
+   * 这个执行者**干活时能用的工具包**（D42 接线：挂在 agent 上的 `toolIds` 在
+   * run 开始前被送进工作目录，这里告诉模型"有哪些、在哪儿、怎么用"）。
+   *
+   * ★ 只对执行 run 有意义：审核者不挂工具，审核 run 永远传 `[]`。
+   */
+  tools?: readonly ToolBrief[]
   /**
    * 这个 agent 自己的指令（界面上「它怎么干活」里写的那段）。
    *
@@ -167,6 +190,31 @@ export interface ReviewFirstSentenceInput {
    * 空 / 缺省 = 没有标准（调用方本不该派这次审核——派发前就会拦掉）。
    */
   standard?: string | null
+  /**
+   * 这个审核者**允许触发**的动作名（内置裸名，或第三方工具包的 `<包 slug>.<动作名>`）。
+   *
+   * ★ 它进的是判决契约里那句 `type 取：…`。**必须传**（只要有标准）：契约里
+   *   没有的取值，模型写不出来——而"契约里没写枚举 ⇒ 整条判决作废"这条失败史
+   *   在本仓库真实发生过两次。缺省（没传）时契约只列内置那六个，那是既有行为的
+   *   逐字保留。
+   */
+  allowedActions?: readonly string[]
+  /**
+   * 第三方动作的简短签名（哪些参数要**模型**填）。
+   *
+   * 由调用方从已安装工具包的清单里摊出来（见 `packages/protocol/src/tools.ts`）。
+   * **绑定参数不进这里**：模型看不见也填不了。
+   *
+   * ⚠️ D43：已固定的参数不进 `openParams`（模型不需要填、写了反而会被判不合规），
+   *    并且单独在 `fixedParams` 里说出口（"已固定为 …，不要写"）——否则模型会
+   *    把固定参数当成"漏填的必填项"去猜。
+   */
+  toolActions?: readonly {
+    type: string
+    summary: string
+    openParams: readonly string[]
+    fixedParams?: readonly { name: string; value: unknown }[]
+  }[]
   /** 关联的 issue —— 动作参数需要它（见协议里的说明）。 */
   relatedIssueId?: string | null
   /**
@@ -254,6 +302,7 @@ export interface TemplateVariable {
 
 const BOTH = ['execute', 'review'] as const
 const REVIEW_ONLY = ['review'] as const
+const EXECUTE_ONLY = ['execute'] as const
 
 export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
   {
@@ -307,6 +356,15 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
     multiline: false,
     requiredFor: [],
     label: '这个 agent 挂载的 skill 的 slug，用「、」连成一行（没有 skill 时是空字符串）',
+  },
+  {
+    name: 'tools',
+    kinds: EXECUTE_ONLY,
+    multiline: true,
+    requiredFor: [],
+    label:
+      '这个执行者**干活时能用的工具包**（D42：每个包一行，含说明与在工作目录里的位置；' +
+      '没有挂工具时是空字符串）。⚠️ 只对执行 run 有意义——审核者不挂工具',
   },
   {
     name: 'reportKind',
@@ -401,6 +459,14 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, string> = {
     '{{#skills}}',
     '能用到的技能：{{skills}}',
     '{{/skills}}',
+    '',
+    // ★ 干活时能用的工具包（D42）：有才出现。内容是每个包一行（见 `toolsValue`），
+    //   标题与说明归模版——与 skills 同一个套路。
+    '{{#tools}}',
+    '## 干活时能用的工具包',
+    '',
+    '{{tools}}',
+    '{{/tools}}',
     '',
     '',
     // ★ 回答语言（D39）：prompt 本身不翻译，但**答复**要用使用者看得懂的语言
@@ -692,6 +758,25 @@ function skillsValue(skills: readonly SkillBrief[]): string {
   return skills.map((s) => s.slug).join('、')
 }
 
+/**
+ * `{{tools}}`：执行者干活时能用的工具包清单（D42，每个包一行）。
+ *
+ * 与 `{{skills}}` 不同，这里**每个包一行、带说明与位置**：工具没有"CLI 会扫的
+ * 目录"，模型要自己去读 TOOL.md、自己决定怎么调脚本——所以"它在哪、干什么用"
+ * 必须写进这份清单，否则模型只会看到目录里多了几个不知道干什么的文件。
+ *
+ * 没挂工具时是空字符串，模版用 `{{#tools}}…{{/tools}}` 决定"有才出现"。
+ */
+function toolsValue(tools: readonly ToolBrief[]): string {
+  return tools
+    .map(
+      (t) =>
+        `- \`${t.slug}\`${t.name ? `（${t.name}）` : ''}：${t.description || '（没有说明）'}` +
+        ` —— 包在 \`${t.dir}\`，先读里面的 TOOL.md 再决定怎么用`,
+    )
+    .join('\n')
+}
+
 /** `{{material}}`：待审材料的**正文**（没有任何包装，D35）。 */
 function materialValue(input: ReviewFirstSentenceInput): string {
   return input.report.body
@@ -722,6 +807,7 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
     // 语言显示名；调用方没给就退回默认语言（中文），别让它变成空
     language: input.language?.trim() || '简体中文',
     skills: skillsValue(input.skills),
+    tools: toolsValue(input.kind === 'execute' ? (input.tools ?? []) : []),
   }
   if (input.kind === 'review') {
     values['reportKind'] = input.report.kind
@@ -731,7 +817,12 @@ function templateValues(input: FirstSentenceInput): Record<string, string> {
     values['material'] = materialValue(input)
     values['standards'] = standardsValue(input.standard)
     // ★ schema 随模版一同下发——不能指望模型自己猜格式（FR-CLI-43）
-    values['verdict'] = renderVerdictInstruction()
+    //   D40：**允许的动作也从调用方来**。写死内置六个的话，审核者配了工具动作
+    //   时模型永远写不出那个名字，而它合理的选择只剩"编一个"或"退化成 needs_human"。
+    values['verdict'] = renderVerdictInstruction({
+      ...(input.allowedActions ? { allowedActions: input.allowedActions } : {}),
+      ...(input.toolActions ? { toolActions: input.toolActions } : {}),
+    })
   }
   return values
 }
@@ -792,6 +883,7 @@ export const SAMPLE_EXECUTE_INPUT: ExecuteFirstSentenceInput = {
   subject: { type: 'issue', id: '01M2ISSUE00000000000000001' },
   prompt: '冒泡排序\n\n用 JS 写一个冒泡排序，并解释复杂度。',
   skills: [],
+  tools: [],
   instructions: '你是一个严谨的协作者。先理解任务，再动手。',
   language: '简体中文',
 }

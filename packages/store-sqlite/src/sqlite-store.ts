@@ -37,6 +37,8 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
+  Tool,
+  ToolId,
   VerdictId,
   VerdictRecord,
   VerdictStatus,
@@ -171,6 +173,7 @@ const META_SCHEMA = [
 const ENTITY_TABLES = [
   'agent',
   'skill',
+  'tool',
   'issue',
   'comment',
   'run',
@@ -186,8 +189,8 @@ type EntityTable = (typeof ENTITY_TABLES)[number]
 /** 通用 upsert 覆盖的表。report 不在其中——它必须走"去重键唯一"那条语句。 */
 const GENERAL_PUT_TABLES = ENTITY_TABLES
 
-/** 需要"按 workspace 列举"的表：端口里只有 agent 与 skill 有这种列法。 */
-const WORKSPACE_LIST_TABLES = ['agent', 'skill', 'report'] as const
+/** 需要"按 workspace 列举"的表：端口里只有 agent / skill / tool / report 有这种列法。 */
+const WORKSPACE_LIST_TABLES = ['agent', 'skill', 'tool', 'report'] as const
 
 const ALL_TABLES = [
   'meta',
@@ -233,6 +236,25 @@ const SCHEMA = [
      json TEXT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS skill_workspace ON skill(workspace_id)`,
+
+  /**
+   * 工具包（D40）。slug 提成生成列，是为了让 `getToolBySlug` 走索引——
+   * 否则每次判决解析都要把一个 workspace 的包全读出来再比字符串。
+   *
+   * ⚠️ 这个索引**故意不是唯一索引**，尽管"一个 workspace 内 slug 唯一"是
+   *    端口的语义。理由与下面 action 的幂等键那条一致：唯一约束会把"调用方
+   *    装了一个同 slug 的包"从"查得到那条（文件适配器就是这么做的：按 id
+   *    覆盖写入）"变成"写失败、抛错"。那是行为改变，而且恰好是文件适配器
+   *    做不到的改变——两个适配器对同一串操作必须给出同样的结果。
+   *    slug 的唯一性由安装侧把关（安装是它唯一写入这个表的路径）。
+   */
+  `CREATE TABLE IF NOT EXISTS tool (
+     id TEXT PRIMARY KEY,
+     workspace_id TEXT NOT NULL,
+     json TEXT NOT NULL,
+     slug TEXT GENERATED ALWAYS AS (json_extract(json, '$.slug')) VIRTUAL
+   )`,
+  `CREATE INDEX IF NOT EXISTS tool_workspace_slug ON tool(workspace_id, slug)`,
 
   // ── issue：目录管理要按状态 / 指派人过滤，还要子串检索 ──
   `CREATE TABLE IF NOT EXISTS issue (
@@ -497,6 +519,23 @@ const NAMED_SQL = {
   auditsByRun: `SELECT json FROM audit WHERE run_id = ? ORDER BY queued_at, rowid`,
 
   skillsByIds: `SELECT json FROM skill
+     WHERE id IN (SELECT value FROM json_each(?))
+     ORDER BY rowid`,
+
+  /**
+   * 按 slug 取包。**必须带上 workspace_id**：slug 只在一个 workspace 内唯一，
+   * 两个空间各有一个 `deploy` 是合法的；不带这一条会把别的空间的包交给调用方，
+   * 而判决里写的 `<slug>.<动作名>` 就指向了一个根本不是它声明过的包。
+   *
+   * `ORDER BY rowid LIMIT 1`：万一同一个 workspace 里真装了两个同 slug 的包
+   * （端口没有约束它），取最早装的那个——与文件适配器"找第一条匹配"的确定性
+   * 保持一致，而不是让 SQLite 的扫描顺序决定结果。
+   */
+  toolBySlug: `SELECT json FROM tool
+     WHERE workspace_id = ? AND slug = ?
+     ORDER BY rowid LIMIT 1`,
+
+  toolsByIds: `SELECT json FROM tool
      WHERE id IN (SELECT value FROM json_each(?))
      ORDER BY rowid`,
 
@@ -847,6 +886,40 @@ export class SqliteStore implements Store {
   async deleteSkill(id: SkillId): Promise<boolean> {
     const res = this.#stmt('del:skill').run(id as string)
     // `changes` 是 sqlite 给的"真的删到了几行"——它比"先查再删"少一次竞态
+    return Number(res.changes) > 0
+  }
+
+  // ── Tool（工具包 / 组，D40）──
+
+  async getTool(id: ToolId): Promise<Tool | null> {
+    return this.#getEntity<Tool>('tool', id as string)
+  }
+
+  async listTools(workspaceId: WorkspaceId): Promise<Tool[]> {
+    return this.#listByWorkspace<Tool>('tool', workspaceId)
+  }
+
+  async listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]> {
+    // IN () 是语法错误：空集合必须提前返回，不能指望 SQLite 容忍
+    if (ids.length === 0) return []
+    const rows = this.#named('toolsByIds').all(JSON.stringify(ids)) as { json: string }[]
+    return rows.map((r) => JSON.parse(r.json) as Tool)
+  }
+
+  async getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null> {
+    return this.#parse<Tool>(
+      this.#named('toolBySlug').get(workspaceId as string, slug) as { json: string } | undefined,
+    )
+  }
+
+  async insertTool(tool: Tool): Promise<void> {
+    this.#putEntity('tool', tool.id as string, tool.workspaceId, tool)
+  }
+
+  async deleteTool(id: ToolId): Promise<boolean> {
+    // 与 deleteSkill 一样看 `changes`：文件适配器的 `del` 对不存在的 id 返回
+    // false，这里用"真的删到了几行"对齐那个语义（删两次第二次是 false，不是错）
+    const res = this.#stmt('del:tool').run(id as string)
     return Number(res.changes) > 0
   }
 

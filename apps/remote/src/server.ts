@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import {
   enabledPluginsFor,
@@ -11,6 +12,7 @@ import {
 } from './plugins.ts'
 import { collectPending } from './pending.ts'
 import { PluginStore } from './plugin-store.ts'
+import { loadCatalogTools, type CatalogToolEntry } from './catalog.ts'
 /**
  * 远端服务（M3，D19/D20）。
  *
@@ -52,6 +54,14 @@ export interface RemoteAccount {
   createdAt: string
 }
 
+/**
+ * 公共目录里工具包的默认根目录。
+ *
+ * 它指向**仓库里那份**（`apps/remote/catalog/tools`），里面有一个可装的简单
+ * 范例。部署时用 `toolsDir` 覆盖；指向不存在的目录是合法的（空目录 = 空目录）。
+ */
+const DEFAULT_TOOLS_DIR = fileURLToPath(new URL('../catalog/tools', import.meta.url))
+
 export interface RemoteOptions {
   /** 数据目录；`null` 表示纯内存（测试用）。 */
   dataDir?: string | null
@@ -59,6 +69,14 @@ export interface RemoteOptions {
   host?: string
   /** 预置插件。 */
   plugins?: LoadedPlugin[]
+  /**
+   * 公共目录里**工具包**的根目录（D40）。
+   *
+   * 缺省是仓库里的 `apps/remote/catalog/tools`——那里放着一个可装的简单范例
+   * （`hello-tool`）。测试与部署都可以覆盖它；指向不存在的目录是合法的
+   * （"目录里什么都没有"是一句真话，界面要有空态）。
+   */
+  toolsDir?: string
   now?: () => Date
 }
 
@@ -113,6 +131,8 @@ export class RemoteService {
   readonly #host: string
   readonly #now: () => Date
   #plugins: LoadedPlugin[]
+  /** 公共目录里工具包的根目录（见 `RemoteOptions.toolsDir`）。 */
+  readonly #toolsDir: string
   /**
    * 插件状态与密钥（FR-PLUGIN-09/11）。
    *
@@ -129,6 +149,7 @@ export class RemoteService {
     this.#host = options.host ?? '127.0.0.1'
     this.#now = options.now ?? (() => new Date())
     this.#plugins = options.plugins ?? []
+    this.#toolsDir = options.toolsDir ?? DEFAULT_TOOLS_DIR
     this.#pluginStore = new PluginStore(this.#dataDir)
   }
 
@@ -347,10 +368,49 @@ export class RemoteService {
      */
     skills: [],
 
-    tools: [
-      { name: 'report.get', summary: '读取报告正文' },
-      { name: 'issue.update_status', summary: '变更 issue 状态' },
-    ],
+    /**
+     * ★ 工具包目录（D40）。
+     *
+     * ══════════════════════════════════════════════════════════════════
+     * 这一节只回答"目录里**可以**列工具"，不提供安装
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 一个条目就是**一个包**（一段可以装进来的目录），不是单个动作：
+     *
+     *   · `slug`     —— 包名，同时是动作的命名空间（动作名是 `<slug>.<动作名>`）
+     *   · `name`     —— 给人看的名字
+     *   · `version`  —— 清单里的版本（`x.y.z`），没有就是 null
+     *   · `summary`  —— 一句话说明
+     *
+     * ⚠️ 它**现在是空的**，而且**不打算**在这里长出"点一下就装"的能力：
+     *    装工具包会在使用者的机器上落盘、并让那些脚本真的被执行，所以判据
+     *    （清单 schema、限额、入口文件必须在包里）全部在 daemon 侧的
+     *    `apps/daemon/src/tool-source.ts` 里。远端只负责"有哪些、叫什么"。
+     *
+     * 为什么还要先立这一节：形状要有一处**确定的**答案。等到真的有包可发的
+     * 那天再临时决定它长什么样，就会变成"远端说 A、daemon 按 B 解析"，
+     * 而那种不一致的表现是装进来的包少了一个动作。
+     *
+     * ⚠️ 原来这里的两条（`report.get` / `issue.update_status`）是**动作名**，
+     *    不是包。D40 里这个位置放整个包，留着它们会让"tools 里的是包"这条
+     *    读法在第一条记录上就破功（`report` 这个包根本不存在）。
+     */
+    /**
+     * ★ 工具包目录（D40）：**从磁盘上的包读出来**，内容是原样带下去的。
+     *
+     * 一个条目就是**一个包**（一段可以装进来的目录），不是单个动作：
+     * 本地装的是同一个格式（`tool.json` + 入口脚本），判据也是同一份 schema
+     * （`packages/protocol/src/tools.ts`）——所以"远端说 A、daemon 按 B 解析"
+     * 这类不一致在这里没有立足之地。
+     *
+     * ⚠️ 远端**不做安装**：装工具包会在使用者机器上落盘、并让那些脚本真的被
+     *    执行，那件事只能由本机的 daemon 做（`apps/daemon/src/tool-source.ts`）。
+     *    这里只回答"有哪些包、内容是什么"。
+     *
+     * ⚠️ 内容随列表一起给（与 skill 那条路同形）：多一次往返换来的是"页面拿到
+     *    的东西就是装进去的东西"，中间没有"再取一次内容"的机会去漂移。
+     */
+    tools: [] as CatalogToolEntry[],
   }
 
   // ── 职责 4：第三方查询（转发，不落盘） ───────────────────────────
@@ -513,8 +573,15 @@ export class RemoteService {
 
       // 目录是公开的——它只是"有哪些能力"，不含任何用户数据。
       if (req.method === 'GET' && path === '/api/catalog') {
+        // ★ 每次都重扫目录：远端目录是可以被人往里加包的，缓存住会让
+        //   "我刚放进去的包怎么不出现"变成一个需要重启才能解释的谜。
+        const loaded = await loadCatalogTools(this.#toolsDir)
+        for (const item of loaded.skipped) {
+          console.warn(`[warn] 目录里的包没有列出去：${item.path} —— ${item.reason}`)
+        }
         send(200, {
           ...this.catalog,
+          tools: loaded.tools,
           // 登录插件列表也公开：页面需要据此渲染登录方式。
           loginMethods: [
             { name: 'password', summary: '邮箱 + 口令（内置）' },

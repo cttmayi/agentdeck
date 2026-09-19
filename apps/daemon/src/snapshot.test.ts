@@ -90,6 +90,9 @@ describe('数据快照：导出', () => {
     const snap = await exportData(storeA, { workspaceId: WS })
     const keys = Object.keys(snap.data).sort()
     assert.deepEqual(keys, [
+      // ── 领域实体。**它们**才该出现在快照里：导出物要自包含，凡是别处
+      //    引用得到的东西（agent 挂的 skillIds / toolIds、判决引用的动作与
+      //    工具包）都得在同一份文件里。
       'actions',
       'agents',
       'artifacts',
@@ -101,10 +104,15 @@ describe('数据快照：导出', () => {
       'reports',
       'runs',
       'skills',
+      // D40：工具包（组）也是领域实体——判决与审计里的 `<slug>.<动作名>`
+      // 引用它，导出漏了它就会指向一个不存在的包
+      'tools',
       'verdicts',
       'workspace',
     ])
-    // 一旦快照里出现 "logs/..." 这样的路径，它就只是文件适配器的备份了
+    // ── 与上面相对：**存储实现**的东西一个都不许进来。
+    //    这条才是本用例的真正判据（清单只是它的一种写法）：
+    //    一旦快照里出现 "logs/..." 这样的路径，它就只是文件适配器的备份了
     const text = JSON.stringify(snap)
     assert.ok(!text.includes('jsonl'), '不该出现文件适配器的日志文件名')
     assert.ok(!text.includes('dataDir'), '不该出现数据目录路径')

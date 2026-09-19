@@ -9,12 +9,11 @@ import {
   loadChainSteps,
   type ChainStep,
 } from '@alpha-helper/domain'
-import { ulid, type Action, type Run, type VerdictRecord } from '@alpha-helper/protocol'
-import { ActionRunner } from './actions.ts'
+import { type Action, type Run, type VerdictRecord } from '@alpha-helper/protocol'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
- * 回路边界端到端（INV-14~16）。
+ * 回路边界（链路重建 + 环检测 / 深度上限，INV-14~16）。
  *
  * ══════════════════════════════════════════════════════════════════
  * 这些测试为什么重要
@@ -26,7 +25,13 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *
  * 所以这里不测"函数返回了正确的值"，而是**真的把链路建出来**：
  * 写 run、写 verdict、写 action，然后让 `loadChainSteps` 沿
- * `derivedFrom` 把整条链还原回来，最后让边界真的拦住第二圈。
+ * `derivedFrom` 把整条链还原回来，再让 `detectChainCycle` / `assertCanDeriveRun`
+ * 在域层判出环、拦住超深的那一圈。
+ *
+ * ⚠️ D41 之后这些域函数在 daemon 侧**没有调用点**了（动作全部来自工具包，而工具
+ *    脚本改不了平台数据，于是没有"动作派生新 run"这回事）。它们的实现仍在
+ *    `packages/domain/src/loop/*`，这一组用例守的就是那份实现本身——不要因为
+ *    暂时没有调用点就把它们删掉：那是**能力的规定**，不是当前接线情况。
  */
 
 const WS = 'ws_loop' as Run['workspaceId']
@@ -91,18 +96,22 @@ async function putVerdictAndAction(input: {
   actionId: string
 }): Promise<void> {
   const now = Date.now()
+  // ⚠️ 用**工具动作名**做夹具（D41 之后动作名只可能是 `<包 slug>.<动作名>` 这个形状；
+  //    原来写的 `issue.assign_agent` 连形状都不合法——下划线不在允许字符里）。
+  //    这几个 describe 只关心链路数据本身，动作名是什么并不影响断言。
+  const actionType = 'example-note.append-note'
   const verdict: VerdictRecord = {
     id: input.verdictId as VerdictRecord['id'],
     workspaceId: WS,
     runId: input.runId as VerdictRecord['runId'],
     subject: { type: 'issue', id: 'issue-1' as never },
     status: 'dispatched_to_action',
-    conclusion: 'fail',
+    conclusion: 'pass',
     reasonCode: input.reasonCode as VerdictRecord['reasonCode'],
     confidence: 0.9,
     findings: [],
     action: {
-      type: 'issue.assign_agent',
+      type: actionType,
       params: { issueId: 'issue-1', agentId: 'agent-x' },
     },
     escalateReason: null,
@@ -118,7 +127,7 @@ async function putVerdictAndAction(input: {
     id: input.actionId as Action['id'],
     workspaceId: WS,
     verdictId: verdict.id,
-    type: 'issue.assign_agent',
+    type: actionType,
     plane: 'local',
     params: { issueId: 'issue-1', agentId: 'agent-x' },
     status: 'executed',
@@ -269,173 +278,24 @@ describe('★ 环检测：A → B → A 这种短环必须被抓到', () => {
   })
 })
 
-describe('动作派生的真实闭环（ActionRunner.deriveRun）', () => {
-  /** 只够这个 describe 用的最小 store 包装，记录派生请求。 */
-  function runnerWith(derive: (input: unknown) => Promise<string | null>) {
-    return new ActionRunner({ store, deriveRun: derive as never })
-  }
-
-  async function makeIssue(): Promise<string> {
-    const id = ulid() as string
-    await store.insertIssue({
-      id: id as never,
-      workspaceId: WS,
-      title: '闭环测试 issue',
-      description: '',
-      status: 'todo',
-      priority: 'none',
-      assignee: null,
-      labels: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    return id
-  }
-
-  async function makeAgent(): Promise<string> {
-    const id = ulid() as string
-    await store.insertAgent({
-      id: id as never,
-      workspaceId: WS,
-      name: `agent-${id.slice(-4)}`,
-      instructions: '',
-      model: null,
-      runtimeKey: 'claude',
-      workDir: null,
-      skillIds: [],
-      toolIds: [],
-      env: {},
-      reviewStandard: null,
-      role: 'executor',
-      reviewerAgentId: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    return id
-  }
-
-  test('★ 指派动作真的调用了派生回调，并把返回的 runId 如实带回来', async () => {
-    const issue = await makeIssue()
-    const agent = await makeAgent()
-    let asked: unknown = null
-    const runner = runnerWith(async (input) => {
-      asked = input
-      return 'real-run-1'
-    })
-
-    const result = await runner.execute({
-      ref: { type: 'issue.assign_agent', params: { issueId: issue, agentId: agent } },
-      workspaceId: WS,
-      verdictId: 'v-x' as never,
-      runId: null,
-      chainSteps: [],
-    })
-
-    assert.equal(result.spawnedRunId, 'real-run-1')
-    assert.equal(result.derivationBlocked, undefined)
-    assert.ok(asked, '回调必须被真的调到——早先这里只返回了一个占位字符串')
-    assert.deepEqual((asked as { params: Record<string, unknown> }).params, {
-      issueId: issue,
-      agentId: agent,
-    })
-  })
-
-  test('★ 派生回调返回 null 时如实记 null，而不是编一个 id', async () => {
-    const issue = await makeIssue()
-    const agent = await makeAgent()
-    const runner = runnerWith(async () => null)
-
-    const result = await runner.execute({
-      ref: { type: 'issue.assign_agent', params: { issueId: issue, agentId: agent } },
-      workspaceId: WS,
-      verdictId: 'v-y' as never,
-      runId: null,
-      chainSteps: [],
-    })
-
-    assert.equal(result.spawnedRunId, undefined)
-    assert.equal(result.action.status, 'executed', '指派本身成功了，不能因为派生失败就记成 failed')
-    assert.equal((result.action.result as Record<string, unknown>)['spawnedRunId'], null)
-  })
-
-  test('★ 环上不再派生，但指派照常成功、且发出一条可读通知', async () => {
-    const issue = await makeIssue()
-    const agent = await makeAgent()
-    let called = false
-    const runner = runnerWith(async () => {
-      called = true
-      return 'should-not-happen'
-    })
-
-    const cycle: ChainStep[] = [
-      { subjectId: issue, agentId: agent, reasonCode: 'needs_fix' },
-      { subjectId: issue, agentId: 'other-agent', reasonCode: 'needs_fix' },
-      { subjectId: issue, agentId: agent, reasonCode: 'needs_fix' },
-    ]
-
-    const result = await runner.execute({
-      ref: { type: 'issue.assign_agent', params: { issueId: issue, agentId: agent } },
-      workspaceId: WS,
-      verdictId: 'v-cycle' as never,
-      runId: null,
-      chainSteps: cycle,
-    })
-
-    assert.equal(called, false, '边界必须先于派生生效')
-    assert.equal(result.derivationBlocked?.reason, 'cycle')
-    // 关键区分：不是 failed —— 指派做成了，是派生被拦了
-    assert.equal(result.action.status, 'executed')
-    assert.equal((result.action.result as Record<string, unknown>)['derivationBlocked'], 'cycle')
-
-    const inbox = await store.listInboxItems({ workspaceId: WS, limit: 50 })
-    const notice = inbox.find((i) => i.type === 'chain.cycle_detected')
-    assert.ok(notice, '边界起作用必须让人看得见，而不是静默跳过')
-    assert.equal(notice.severity, 'attention')
-    assert.match(notice.body, /审核标准|重复/)
-  })
-
-  test('深度超限与环被区分开 —— 两者的处置方式不同', async () => {
-    const issue = await makeIssue()
-    const agent = await makeAgent()
-    const runner = runnerWith(async () => 'nope')
-
-    // 每步 agent 都不同、原因码都不同 ⇒ 不是环，纯粹是太长
-    const long: ChainStep[] = 'ABCDEFG'.split('').map((ch) => ({
-      subjectId: issue,
-      agentId: `agent-${ch}`,
-      reasonCode: `reason-${ch}`,
-    }))
-
-    const result = await runner.execute({
-      ref: { type: 'issue.assign_agent', params: { issueId: issue, agentId: agent } },
-      workspaceId: WS,
-      verdictId: 'v-depth' as never,
-      runId: null,
-      chainSteps: long,
-    })
-
-    assert.equal(result.derivationBlocked?.reason, 'depth')
-    assert.match(result.derivationBlocked.message, /深度/)
-  })
-
-  test('★ 不能把 issue 指派给刚做出该判决的 agent（INV-1）', async () => {
-    const issue = await makeIssue()
-    const agent = await makeAgent()
-    const reviewRun = await putRun(ulid() as string, {
-      agentId: agent as Run['agentId'],
-      kind: 'review',
-    })
-
-    const runner = runnerWith(async () => 'never')
-    const result = await runner.execute({
-      ref: { type: 'issue.assign_agent', params: { issueId: issue, agentId: agent } },
-      workspaceId: WS,
-      verdictId: 'v-self-review' as never,
-      runId: reviewRun.id,
-      chainSteps: [],
-    })
-
-    assert.equal(result.action.status, 'failed')
-    assert.match(result.action.error ?? '', /审核者与执行者/)
-  })
-})
+// ─────────────────────────────────────────────────────────────
+// ⚠️ 这里原本还有一个 describe「动作派生的真实闭环（ActionRunner.deriveRun）」，
+//    5 条用例（以及只服务于它们的局部助手 `runnerWith` / `makeIssue` /
+//    `makeAgent`）已经**整块删掉**。它们守的是：
+//
+//      · 指派动作真的调用派生回调，并把返回的 runId 如实带回来；
+//      · 派生回调返回 null 时如实记 null，而不是编一个 id；
+//      · 环上不再派生，但指派照常成功、且发出一条可读通知；
+//      · 深度超限与环被区分开（`derivationBlocked.reason` 是 `depth` 还是 `cycle`）；
+//      · 不能把 issue 指派给刚做出该判决的 agent（INV-1）。
+//
+// `issue.assign_agent` 的"指派 + 派生一条新 run"已经不在平台内（D41：动作全部
+// 来自工具包，而工具脚本改不了平台数据）。环检测/深度上限的域实现
+// （`packages/domain/src/loop/*`）仍在，只是 daemon 侧没有调用点了。
+//
+// 也就是说：`ActionRunner` 不再有 `deriveRun` 回调，`ExecuteActionInput` 不再有
+// `chainSteps`，`ExecuteActionResult` 不再有 `spawnedRunId` / `derivationBlocked`。
+// 上面两个 describe 守的是**域函数**本身（`loadChainSteps` / `withCurrentVerdict` /
+// `detectChainCycle` / `assertCanDeriveRun` / `depthFromChain`），它们仍然存在、
+// 仍然要测，所以原样保留。
+// ─────────────────────────────────────────────────────────────

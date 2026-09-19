@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store'
+import { renderText, webText } from '@alpha-helper/i18n'
 import {
   getRemoteUrl,
   isLoggedIn,
@@ -7,6 +8,7 @@ import {
   type PluginInfo,
   type RemoteAccount,
 } from './remote.ts'
+import { currentLocale } from './locale.ts'
 
 /**
  * 远端账号状态的**单一来源**。
@@ -71,7 +73,9 @@ export async function refreshRemote(): Promise<void> {
       remoteLoggedIn.set(false)
       remoteAccount.set(null)
       remotePlugins.set([])
-      remoteError.set('登录已失效，请重新登录')
+      // 挂在 `remoteError` 上、界面上直接显示的一句话，所以要取词；远端自己
+      // 给的原话（`err.message`）不翻译，只把它当作展示内容（下面的 else 分支）。
+      remoteError.set(renderText(webText, 'err.sessionExpired', currentLocale()))
     } else {
       remoteError.set(err instanceof Error ? err.message : String(err))
     }

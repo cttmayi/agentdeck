@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.ts'
+
   /**
    * 右侧抽屉（这一页里"新建"与"设置"共用）。
    *
@@ -54,7 +56,9 @@
         <h2>{title}</h2>
         {#if subtitle}<p class="hint">{subtitle}</p>{/if}
       </div>
-      <button type="button" class="ghost" onclick={onclose}>关闭</button>
+      <!-- ★ 用通用的 `common.close`：抽屉的关闭按钮与别处的"关闭"是同一句话，
+           没有第二个出处（原来这里单留了 `drawer.close`，同形同义 ⇒ 改一处漏一处）。 -->
+      <button type="button" class="ghost" onclick={onclose}>{$t('common.close')}</button>
     </div>
 
     <div class="drawer-body">

@@ -14,13 +14,15 @@
   import { selectedIssueId } from '../lib/view.ts'
   import {
     PIPELINE_COLUMNS as COLUMNS,
-    STAGE_SHORT,
     formatRunStamp,
     runsForIssue,
     splitByAttention,
     stageOf,
+    stageShortId,
   } from '../lib/pipeline.ts'
   import RunLog from '../components/RunLog.svelte'
+  import { t, tx } from '../lib/i18n.ts'
+  import type { WebTextId } from '@alpha-helper/i18n'
 
   /**
    * 任务清单 + 任务详情。
@@ -83,7 +85,7 @@
   $: issueRuns = selected ? runsForIssue(selected.id, $runs) : []
 
   function agentName(id: string | null): string {
-    if (!id) return '未指派'
+    if (!id) return tx('tasks.unassigned')
     return $agents.find((a) => a.id === id)?.name ?? id
   }
 
@@ -299,7 +301,7 @@
 
     const agent = $agents.find((a) => a.id === lastExecuteRun!.agentId)
     if (!agent) {
-      sendError = '这条执行用的 agent 已经不在了，无法继续。请新建任务并指定一个 agent。'
+      sendError = tx('tasks.agentGone')
       return
     }
 
@@ -391,11 +393,17 @@
     -->
     <span class="task-title" title={issue.title}>{issue.title}</span>
     <span class="task-meta">
-      <span class="stage-tag {info.stage}">{STAGE_SHORT[info.stage]}</span>
+      <span class="stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
       <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
            「等待审核」是重复，使用者点名要去掉的就是它。 -->
-      {#if info.note}
-        <span class="faint small">{info.note}</span>
+      {#if info.noteId}
+        <span class="faint small">{$t(info.noteId)}</span>
+      {/if}
+      <!-- ★ D45：返工过就标出来。它是这条回路**真的转过**的痕迹，扫列表时
+           最该看见的就是"这个任务审了不止一轮"——否则"返工一次后通过"与
+           "一次就通过"长得一模一样。 -->
+      {#if info.reworked > 0}
+        <span class="faint small">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
       {/if}
       <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
       <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
@@ -412,26 +420,26 @@
   <section class="pane list-pane">
     <header class="pane-head">
       <div>
-        <h2>{mode === 'board' ? '任务看板' : '任务清单'}</h2>
+        <h2>{mode === 'board' ? $t('tasks.boardTitle') : $t('tasks.listTitle')}</h2>
         <p class="hint">
           {#if mode === 'board'}
-            按<strong>实际进行到哪一步</strong>分列——不是按人工维护的状态字段，而是从执行记录推出来的事实。
+            {$t('tasks.boardHintBefore')}<strong>{$t('tasks.boardHintStrong')}</strong>{$t('tasks.boardHintAfter')}
           {:else}
-            点一条看它的执行记录与产出；需要看整体堆在哪一步时切到看板。
+            {$t('tasks.listHint')}
           {/if}
         </p>
       </div>
       <div class="pane-actions">
-        <button type="button" class="ghost small" class:active={mode === 'list'} onclick={() => setMode('list')}>列表</button>
-        <button type="button" class="ghost small" class:active={mode === 'board'} onclick={() => setMode('board')}>看板</button>
-        <button type="button" class="secondary small" onclick={refresh}>刷新</button>
+        <button type="button" class="ghost small" class:active={mode === 'list'} onclick={() => setMode('list')}>{$t('tasks.modeList')}</button>
+        <button type="button" class="ghost small" class:active={mode === 'board'} onclick={() => setMode('board')}>{$t('tasks.modeBoard')}</button>
+        <button type="button" class="secondary small" onclick={refresh}>{$t('common.refresh')}</button>
       </div>
     </header>
 
     <div class="pane-body">
       <input
         bind:value={filter}
-        placeholder="搜索标题或说明…"
+        placeholder={$t('tasks.search')}
         style="max-width:22rem;margin-bottom:var(--sp-4)"
         autocomplete="off"
       />
@@ -443,21 +451,22 @@
     <div class="notice bad">{$loadError['issues']}</div>
   {:else if visible.length === 0}
     <div class="empty">
-      <strong>{filter ? '没有匹配的任务' : '还没有任务'}</strong>
-      {filter ? '换个关键词试试。' : '去「新建任务」建一个，它会立刻派给 agent。'}
+      <strong>{filter ? $t('tasks.emptyFiltered') : $t('tasks.empty')}</strong>
+      {filter ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyHint')}
     </div>
   {:else if mode === 'board'}
-    <div class="board board-4">
-      {#each COLUMNS as col (col.id)}
-        {@const items = staged.filter((x) => x.info.stage === col.id)}
+    <div class="board board-5">
+      {#each COLUMNS as col (col.ids[0])}
+        <!-- 一列可以收两档（「等待人处理」收 needs_human 与 action_failed） -->
+        {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
         <div class="column">
           <h4>
-            <span>{col.title} <span class="faint">{items.length}</span></span>
-            <span class="col-hint">{col.hint}</span>
+            <span>{$t(col.titleId)} <span class="faint">{items.length}</span></span>
+            <span class="col-hint">{$t(col.hintId)}</span>
           </h4>
 
           {#if items.length === 0}
-            <p class="col-empty faint small">（空）</p>
+            <p class="col-empty faint small">{$t('tasks.columnEmpty')}</p>
           {/if}
 
           {#each items as { issue, info } (issue.id)}
@@ -467,11 +476,11 @@
                 <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
               </span>
               <span class="card-meta">
-                {#if info.note}<span class="faint small">{info.note}</span>{/if}
+                {#if info.noteId}<span class="faint small">{$t(info.noteId)}</span>{/if}
                 <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
               </span>
-              {#if info.warning}
-                <span class="card-warning">{info.warning}</span>
+              {#if info.warningId}
+                <span class="card-warning">{$t(info.warningId, info.warningParams)}</span>
               {/if}
             </button>
           {/each}
@@ -483,16 +492,13 @@
     <div class="task-list">
       {#if byAttention.attention.length > 0}
         <div class="list-head">
-          需要注意（{byAttention.attention.length}）
-          <span class="faint small">
-            —— 执行失败/被取消（不会有审核结果）、根本没派审核，或者
-            **判决要求人介入**
-          </span>
+          {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
+          <span class="faint small">{$t('tasks.attentionHint')}</span>
         </div>
         {#each byAttention.attention as { issue, info } (issue.id)}
           {@render row(issue, info, true)}
         {/each}
-        <div class="list-head">其余任务（{byAttention.rest.length}）</div>
+        <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
       {/if}
       {#each byAttention.rest as { issue, info } (issue.id)}
         {@render row(issue, info, false)}
@@ -512,11 +518,13 @@
               type="button"
               class="ghost small back-to-list"
               onclick={() => selectedIssueId.set(null)}
-            >← 返回任务清单</button>
+            >{$t('tasks.backToList')}</button>
             <h2>{selected.title}</h2>
             <p class="detail-sub">
               {#if selectedStage}
-                <span class="stage-tag {selectedStage.stage}">{STAGE_SHORT[selectedStage.stage]}</span>
+                <span class="stage-tag {selectedStage.stage}"
+                >{$t(stageShortId(selectedStage.stage))}</span
+              >
               {/if}
               <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
               <!--
@@ -526,24 +534,62 @@
                   用的是 `toLocaleDateString`。但"更新于几点几分"原来只有那一列
                   有——只留日期就等于**悄悄丢了一条信息**。详情栏有地方，放这儿。
               -->
-              <span class="faint">更新于 {new Date(selected.updatedAt).toLocaleString()}</span>
+              <span class="faint">{$t('tasks.updatedAt', { time: new Date(selected.updatedAt).toLocaleString() })}</span>
             </p>
           </header>
 
     {#if selected.description}
       <section class="drawer-section">
-        <h3>说明</h3>
+        <h3>{$t('tasks.descriptionHeading')}</h3>
         <p class="hint" style="white-space:pre-wrap">{selected.description}</p>
       </section>
     {/if}
 
+  <!--
+    ★ 判决要求做的那个动作（D40 收口）。
+    「已审查」过去只说"判决出来了",不说"事情做没做完";这里把**事实**摆出来：
+    动作名（契约值，原样）、状态、以及失败原因（那才是"要我去做什么"）。
+  -->
+  {#if selectedStage?.action}
+    <section class="drawer-section">
+      <h3>{$t('tasks.actionHeading')}</h3>
+      <p>
+        <code>{selectedStage.action.type}</code>
+        <span class="faint small">{$t(`term.actionStatus.${selectedStage.action.status}` as WebTextId)}</span>
+      </p>
+      {#if selectedStage.action.error}
+        <p class="card-warning">{$t('tasks.actionFailed', { reason: selectedStage.action.error })}</p>
+      {/if}
+    </section>
+  {/if}
+
+  <!--
+    ★ 「这一次是谁审的」（D42）。
+    只在**偏离长期配置**时才显示：`follow` 是绝大多数情况，也说出来只会多一行噪音。
+    而 `override` / `none` 必须留痕——否则一条"这次不审"的任务，事后在界面上
+    看不出那是**当时有人这么决定**，只会看起来像"审核链路坏了"。
+  -->
+  {#if selectedStage?.executeRun?.reviewer && selectedStage.executeRun.reviewer.mode !== 'follow'}
+    <section class="drawer-section">
+      <h3>{$t('tasks.reviewerHeading')}</h3>
+      {#if selectedStage.executeRun.reviewer.mode === 'none'}
+        <p class="hint">{$t('tasks.reviewerNone')}</p>
+      {:else}
+        <p>
+          {agentName(selectedStage.executeRun.reviewer.agentId)}
+          <span class="faint small">{$t('tasks.reviewerOverridden')}</span>
+        </p>
+      {/if}
+    </section>
+  {/if}
+
   <section class="drawer-section">
-    <h3>执行记录 <span class="faint small">（{issueRuns.length}）</span></h3>
+    <h3>{$t('tasks.runsHeading')} <span class="faint small">（{issueRuns.length}）</span></h3>
 
     {#if issueRuns.length === 0}
       <div class="empty">
-        <strong>这个任务还没有执行过</strong>
-        在「新建任务」里创建时会自动派发一次。
+        <strong>{$t('tasks.neverRunTitle')}</strong>
+        {$t('tasks.neverRunHint')}
       </div>
     {:else}
       <div class="run-tabs">
@@ -557,7 +603,7 @@
             <span class="badge {run.status}">{run.status}</span>
             <!-- ★ 类型与时间必须显示：只给状态和 runId 的话，使用者**看不出
                  哪个先哪个后**——他只能凭感觉，于是会觉得"顺序不对"。 -->
-            <span class="small">{run.kind === 'review' ? '审核' : '执行'}</span>
+            <span class="small">{run.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</span>
             <span class="mono faint small" title={new Date(run.queuedAt).toLocaleString()}>
               {formatRunStamp(run.queuedAt)}
             </span>
@@ -570,7 +616,7 @@
   {#if activeRun}
     <section class="drawer-section">
       <h3>
-        {activeIsTerminal && !showRawLog ? '最后结果' : '实时输出'}
+        {activeIsTerminal && !showRawLog ? $t('tasks.finalResult') : $t('tasks.rawLog')}
         <span class="faint small mono">run {activeRun.runId.slice(-8)}</span>
         {#if activeIsTerminal}
           <!-- 跑完之后默认给结论；原始流水仍然一条不少，按需翻 -->
@@ -580,19 +626,19 @@
             style="margin-left:var(--sp-3)"
             onclick={() => (showRawLog = !showRawLog)}
           >
-            {showRawLog ? '看最后结果' : '看完整日志'}
+            {showRawLog ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
           </button>
         {/if}
       </h3>
 
       <dl class="meta-grid">
-        <dt>工作目录</dt>
+        <dt>{$t('tasks.workDir')}</dt>
         <dd class="mono">{activeRun.workDir ?? '—'}</dd>
-        <dt>类型</dt>
-        <dd>{activeRun.kind === 'review' ? '审核' : '执行'}</dd>
+        <dt>{$t('tasks.type')}</dt>
+        <dd>{activeRun.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</dd>
         {#if activeRun.finishedAt}
-          <dt>耗时</dt>
-          <dd>{((activeRun.finishedAt - activeRun.queuedAt) / 1000).toFixed(1)} 秒</dd>
+          <dt>{$t('tasks.duration')}</dt>
+          <dd>{$t('tasks.seconds', { seconds: ((activeRun.finishedAt - activeRun.queuedAt) / 1000).toFixed(1) })}</dd>
         {/if}
       </dl>
 
@@ -604,8 +650,8 @@
               <article class="markdown">{@html renderedResult}</article>
             {:else if finalOutputFor === activeRun.runId && finalOutput === ''}
               <div class="empty">
-                <strong>这次执行没有留下文字产出</strong>
-                它可能只改了文件、或者中途失败了。完整过程在「看完整日志」里。
+                <strong>{$t('tasks.noTextOutput')}</strong>
+                {$t('tasks.noTextOutputHint')}
               </div>
             {:else}
               <div class="skeleton"></div>
@@ -613,19 +659,19 @@
           </div>
 
           <aside class="result-files">
-            <h4>工作目录的文件</h4>
+            <h4>{$t('tasks.filesHeading')}</h4>
             {#if listingError}
               <div class="notice bad">
-                取不到工作目录的文件
+                {$t('tasks.filesError')}
                 <p class="faint small" style="margin:var(--sp-2) 0 0">{listingError}</p>
                 <p class="faint small" style="margin:var(--sp-2) 0 0">
-                  （如果 daemon 刚更新过，重启它再试——新接口要重启才生效）
+                  {$t('tasks.filesErrorHint')}
                 </p>
               </div>
             {:else if wdLoadedFor !== activeRun.runId}
               <div class="skeleton" style="width:70%"></div>
             {:else if wdRows.length === 0}
-              <p class="hint">这个目录还是空的。</p>
+              <p class="hint">{$t('tasks.dirEmpty')}</p>
             {:else}
               <!--
                 默认只列**第一级**，目录点一下才取它的下一层。
@@ -649,7 +695,7 @@
                         <span class="mono">{entry.name}</span>
                       </button>
                       {#if wdLoading.has(entry.path)}
-                        <span class="faint small">正在读…</span>
+                        <span class="faint small">{$t('tasks.reading')}</span>
                       {/if}
                     {:else}
                       <a
@@ -666,7 +712,7 @@
                 {/each}
               </ul>
               {#if wdTruncated}
-                <p class="faint small">（列到上限了，还有更多——请直接在磁盘上看）</p>
+                <p class="faint small">{$t('tasks.truncated')}</p>
               {/if}
             {/if}
           </aside>
@@ -686,29 +732,37 @@
           disabled={['completed', 'failed', 'cancelled'].includes(activeRun.status)}
           onclick={() => cancel(activeRun!.runId)}
         >
-          取消这次执行
+          {$t('tasks.cancelRun')}
         </button>
         <button type="button" class="secondary" onclick={() => loadVerdicts(activeRun!.runId)}>
-          读取判决
+          {$t('tasks.readVerdict')}
         </button>
       </div>
 
       {#if verdictsFor === activeRun.runId && verdicts.length > 0}
-        <h4 style="margin-top:var(--sp-4)">判决</h4>
+        <h4 style="margin-top:var(--sp-4)">{$t('tasks.verdictHeading')}</h4>
         {#each verdicts as v (v.id)}
           <article class="notice" style="margin-bottom:var(--sp-2);flex-direction:column">
             <div style="display:flex;gap:var(--sp-2);align-items:center">
+              <!--
+                ★ 契约值**不翻译**（它是判决 JSON 里的机器值），但**旁边**给一个
+                  本地化显示名：等宽的值 + 人话，两者都在，谁也不会误会哪个是真的。
+              -->
               <span class="badge {v.conclusion === 'pass' ? 'done' : v.conclusion === 'fail' ? 'failed' : 'blocked'}">
-                {v.conclusion}
+                <code>{v.conclusion}</code>
+                <span class="faint small">{$t(`term.conclusion.${v.conclusion}` as WebTextId)}</span>
               </span>
-              <span class="mono small faint">{v.reasonCode}</span>
-              <span class="faint small">置信度 {Math.round(v.confidence * 100)}%</span>
+              <span class="mono small faint" title={$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}
+                >{v.reasonCode}</span
+              >
+              <span class="faint small">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
+              <span class="faint small">{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span>
             </div>
             {#if v.action}
-              <div class="small">建议动作：<code>{v.action.type}</code></div>
+              <div class="small">{$t('tasks.suggestedAction')}<code>{v.action.type}</code></div>
             {/if}
             {#if v.escalateReason}
-              <div class="small warn">需要你判断：{v.escalateReason}</div>
+              <div class="small warn">{$t('tasks.needsHuman', { reason: v.escalateReason ?? '' })}</div>
             {/if}
             {#if v.findings.length > 0}
               <ul class="plain small" style="margin:0">
@@ -717,7 +771,7 @@
                 {/each}
               </ul>
             {:else}
-              <div class="faint small">（没有具体发现项）</div>
+              <div class="faint small">{$t('tasks.noFindings')}</div>
             {/if}
           </article>
         {/each}
@@ -739,13 +793,14 @@
       -->
       <section
         class="follow-up"
-        title="会复用同一个工作目录（{lastExecuteRun.workDir ?? '（自动分配）'}），
-并让 CLI 恢复上一次的会话；恢复被拒时日志里会说明，不会假装接上了。"
+        title={$t('tasks.continueHint', {
+          dir: lastExecuteRun.workDir ?? $t('tasks.autoWorkDir'),
+        })}
       >
         <textarea
           bind:value={followUp}
           rows="2"
-          placeholder="接着说下一步要它做什么…"
+          placeholder={$t('tasks.continuePlaceholder')}
           disabled={sending}
           onkeydown={(e) => {
             // Ctrl/Cmd+Enter 发送：「接着干」是高频动作，不该逼人去够鼠标
@@ -754,9 +809,9 @@
         ></textarea>
         <div class="follow-actions">
           <button type="button" disabled={sending || followUp.trim() === ''} onclick={sendFollowUp}>
-            {sending ? '正在派发…' : '发送并继续'}
+            {sending ? $t('tasks.sending') : $t('tasks.sendAndContinue')}
           </button>
-          <span class="faint small">接着上次的会话与工作目录 · ⌘↵ 发送</span>
+          <span class="faint small">{$t('tasks.continueFooter')}</span>
         </div>
         {#if sendError}
           <div class="notice bad" style="margin-top:var(--sp-2)">{sendError}</div>
@@ -767,8 +822,8 @@
       {:else}
         <div class="pane-body">
           <div class="empty">
-            <strong>选一个任务看它的执行与产出</strong>
-            右边的这一栏会显示"它做成了什么"、工作目录里的文件、以及判决。
+            <strong>{$t('tasks.pickOneTitle')}</strong>
+            {$t('tasks.pickOneHint')}
           </div>
         </div>
       {/if}
@@ -1039,17 +1094,23 @@
     margin-top: var(--sp-2);
   }
 
-  /* ── 四列流水线 ──
-     加上「等待人处理」之后是四档。固定列数（而不是 auto-fit）：这几列就是
-     流水线的几个状态，少一列会让人以为那个状态不存在。 */
-  .board-4 {
-    grid-template-columns: repeat(4, 1fr);
-    gap: var(--sp-4);
+  /* ── 五列流水线 ──
+     D40 起是五档：执行中 / 待审查 / 行动中 / 等待人处理（含行动失败） / 已完成审查。
+     固定列数（而不是 auto-fit）：这几列就是流水线的几个状态，少一列会让人以为
+     那个状态不存在。 */
+  .board-5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--sp-3);
   }
 
-  /* 中等宽度放 4 列会把每列压到 200px 出头，读不了 ⇒ 改成 2×2 */
-  @media (max-width: 78rem) {
-    .board-4 {
+  /* 中等宽度放 5 列会把每列压到 150px 上下，读不了 ⇒ 改成 3+2 两行 */
+  @media (max-width: 100rem) {
+    .board-5 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 64rem) {
+    .board-5 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }

@@ -15,9 +15,13 @@ import { writable } from 'svelte/store'
  *   "看到一个空白页"，排查起来更糟。
  * - **hash**：不需要服务端配合，刷新保留，能分享链接。代价是 URL 里有个
  *   `#`，在这个场景下无所谓。
+ *
+ * ⚠️ 加一个视图要动**两处**：这里的 `VIEWS` 与 `Sidebar.svelte` 的 `ITEMS`。
+ *    少动一处不会报错——只表现为"那个视图打不开 / 侧边栏点不到它"，
+ *    所以探针里有一条量"侧边栏恰好五项、最后一项是工具"。
  */
 
-export const VIEWS = ['new', 'tasks', 'agents', 'skills'] as const
+export const VIEWS = ['new', 'tasks', 'agents', 'skills', 'tools'] as const
 export type ViewName = (typeof VIEWS)[number]
 
 function fromHash(): ViewName {

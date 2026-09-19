@@ -2,8 +2,10 @@
   import { agents, createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole, ReviewStandard } from '../lib/api.ts'
   import ReviewStandardEditor from './ReviewStandardEditor.svelte'
+  import ActionPicker from './ActionPicker.svelte'
   import { showToast } from '../lib/view.ts'
   import Drawer from './Drawer.svelte'
+  import { t, tx } from '../lib/i18n.ts'
 
   /**
    * 新建智能体（D28）。
@@ -52,6 +54,29 @@
    * 用不同的标准，这是 D22 的立场）。执行者保持 `null`。
    */
   let reviewStandard: ReviewStandard | null = null
+  /**
+   * 行动权限（D40 收口）——同样**只对审核者有意义**，执行者保持空数组。
+   *
+   * ★ 初值是**空数组**（D41：内置动作整组移除之后，预勾那一档随之作废）。
+   *
+   *   这里原来预勾 `comment.create`（"最小权限里至少能留下一条评论"）。那个动作名
+   *   现在根本不是动作了——动作**只能**来自装进来的工具包（`<包 slug>.<动作名>`），
+   *   而"装了哪个包、包里有哪些动作"是使用者自己的事：平台替他勾一个，勾的要么是
+   *   不存在的名字，要么是某个他没打算授权的包。所以默认回到空——这也正是协议
+   *   schema 的默认值（"允许什么"必须由使用者说了算）。
+   *
+   *   ⚠️ 一个工具包都没装时，这一栏显示的是明确的空态（见 `ActionPicker.svelte`），
+   *      而不是一片空白。
+   *
+   * ⚠️ 详情页的编辑初值取 agent 自己的值（`effectiveAllowedActions()`）——
+   *   与这里的空数组是同一件事的两面：谁也不替使用者加权限。
+   */
+  let allowedActions: string[] = []
+  /**
+   * 动作的固定参数（D43）：与 `allowedActions` 同一档（只对审核者有意义）。
+   * 初值是空对象——"谁也不替使用者钉值"，与"谁也不替使用者加权限"同一件事。
+   */
+  let actionParams: Record<string, Record<string, unknown>> = {}
   let selectedSkills: string[] = []
   let reviewerAgentId = ''
   /**
@@ -84,15 +109,30 @@
         runtimeKey,
         workDir,
         reviewStandard: role === 'reviewer' ? reviewStandard : null,
+        // 执行者一律空数组（服务端对"执行者带动作"是 400——执行者的能力是工具）
+        allowedActions: role === 'reviewer' ? allowedActions : [],
+        // 固定参数同理：只送审核者的那份，且只送**勾上的动作**的参数（没勾的
+        // 没有落点；服务端按已装工具校验会放行，但那份固定参数永远不会被用上）
+        actionParams:
+          role === 'reviewer'
+            ? Object.fromEntries(
+                allowedActions
+                  .filter((a) => actionParams[a] && Object.keys(actionParams[a]).length > 0)
+                  .map((a) => [a, { ...actionParams[a] }]),
+              )
+            : {},
       })
       name = ''
       instructions = ''
       reviewStandard = null
+      // 回到表单的默认值：动作权限**是空的**（D41：没有内置动作可预勾了）
+      allowedActions = []
+      actionParams = {}
       selectedSkills = []
       reviewerAgentId = ''
       workDir = ''
       role = 'executor'
-      showToast('智能体已创建')
+      showToast(tx('agents.created'))
       // 关不关由父组件决定（它是"正在新建"这个状态的持有者）
       oncreated()
     } catch (err) {
@@ -107,22 +147,21 @@
   <Drawer
     {open}
     wide
-    title="新建智能体"
-    subtitle={'建好之后它就会按「设置」里那份第一句话模版接活；' +
-      '这一段会作为 {{instructions}} 插进模版。'}
+    title={$t('agents.newTitle')}
+    subtitle={$t('agents.newSubtitle')}
     {onclose}
   >
   <form onsubmit={submit} class="agent-form" id="new-agent-form">
 
     <label>
-      名称
-      <input bind:value={name} placeholder="例如：安全审核员" required autocomplete="off" />
+      {$t('agents.nameLabel')}
+      <input bind:value={name} placeholder={$t('agents.namePlaceholder')} required autocomplete="off" />
     </label>
 
     <!-- 角色：用两个大按钮而不是下拉或单选圆圈——这是一个"选边"的决定，
          值得占视觉重量；下拉会让人一扫而过 -->
     <div class="field">
-      <span class="field-label">它是做什么的</span>
+      <span class="field-label">{$t('agents.roleFieldLabel')}</span>
       <div class="role-picker">
         <button
           type="button"
@@ -130,8 +169,8 @@
           class:active={role === 'executor'}
           onclick={() => (role = 'executor')}
         >
-          <strong>执行</strong>
-          <span>接到任务后动手干活</span>
+          <strong>{$t('agents.roleExecutor')}</strong>
+          <span>{$t('agents.roleExecutorHint')}</span>
         </button>
         <button
           type="button"
@@ -139,58 +178,83 @@
           class:active={role === 'reviewer'}
           onclick={() => (role = 'reviewer')}
         >
-          <strong>审核</strong>
-          <span>按标准审别人的产出，给判决</span>
+          <strong>{$t('agents.roleReviewer')}</strong>
+          <span>{$t('agents.roleReviewerHint')}</span>
         </button>
       </div>
     </div>
 
     {#if role === 'executor'}
       <label>
-        由谁来审它
+        {$t('agents.reviewerFieldLabel')}
         {#if reviewers.length === 0}
-          <select disabled><option>（还没有审核角色的智能体）</option></select>
+          <select disabled><option>{$t('agents.noReviewerOption')}</option></select>
           <span class="hint">
-            先去建一个「审核」角色的智能体。没有审核者时，执行产出不会被自动审核。
+            {$t('agents.noReviewerHint')}
           </span>
         {:else}
           <select bind:value={reviewerAgentId}>
-            <option value="">不自动审核</option>
+            <option value="">{$t('agents.noAutoReview')}</option>
             {#each reviewers as r (r.id)}
               <option value={r.id}>{r.name}</option>
             {/each}
           </select>
           <span class="hint">
-            执行完由它审。选「不自动审核」也是一个明确的选择——不配时每个任务都多跑
-            一次审核会既费钱又吵。
+            {$t('agents.reviewerHint')}
           </span>
         {/if}
       </label>
     {/if}
 
     <label>
-      指令
+      {$t('agents.instructionsLabel')}
       <textarea
         bind:value={instructions}
         rows="3"
         placeholder={role === 'reviewer'
-          ? '它按什么态度审：严格还是宽松、拿不准时怎么办'
-          : '它是谁、怎么干活。这段会进它的上下文。'}
+          ? $t('agents.instructionsPlaceholderReviewer')
+          : $t('agents.instructionsPlaceholderExecutor')}
       ></textarea>
       <span class="hint">
-        这一段会填进第一句话模版的 <code>{'{{instructions}}'}</code>。留空也行——那就只有任务本身。
+        {$t('agents.instructionsHintBefore')}<code>{'{{instructions}}'}</code>{$t('agents.instructionsHintAfter')}
       </span>
     </label>
 
     {#if role === 'reviewer'}
-      <!-- D37：标准是审核者的判断依据，写在它自己身上 -->
-      <ReviewStandardEditor bind:value={reviewStandard} />
+      <!--
+        D37：标准是审核者的判断依据，写在它自己身上。
+        D40 收口：行动权限是审核者的**另一个**字段（原来它长在标准那一栏里）。
+        两件事分开："按什么判"是上面那一栏，"判完允许动什么"是下面那一栏。
+
+        ⚠️ **别写 `bind:value={...}`**：Svelte 5 里组件的 `bind:` 不是"子组件调了
+           `onchange` 就算"——父组件拿到的那个 setter 只会在**子组件写自己的 prop**
+           时被调用，而这两个编辑器只抛 `onchange`（它们是受控组件，`value` 只读）。
+           于是 `bind:value` 会是一条**空绑定**：抽屉里写得满满当当，父组件一个字
+           都没收到，创建出来的审核者**没有标准、没有行动权限**，而界面上一切正常。
+           （这不是推理：探针里那一条"写下正文后状态徽章变「已写」"就是被它红过的
+           ——D37 起这一行一直是 `bind:value`。）所以这里显式传 `onchange`，
+           与 `AgentDetail.svelte` 用的是同一个写法。
+      -->
+      <ReviewStandardEditor
+        value={reviewStandard}
+        onchange={(next) => (reviewStandard = next)}
+      />
+
+      <div class="field">
+        <span class="field-label">{$t('agents.sectionActions')}</span>
+        <ActionPicker
+          value={allowedActions}
+          onchange={(next) => (allowedActions = next)}
+          params={actionParams}
+          onparams={(next) => (actionParams = next)}
+        />
+      </div>
     {/if}
 
     <label>
-      挂载的 skill
+      {$t('agents.attachedSkillsLabel')}
       {#if $skills.length === 0}
-        <select disabled><option>（还没有 skill）</option></select>
+        <select disabled><option>{$t('agents.noSkillsOption')}</option></select>
       {:else}
         <div class="skill-picker">
           {#each $skills as s (s.id)}
@@ -203,32 +267,31 @@
       {/if}
       {#if role === 'reviewer'}
         <span class="hint">
-          审核者的判断依据是上面那条<strong>审核标准</strong>，skill 对它只是可选的
-          参考/支持文件（挂上就会随审核一起送过去）。
+          {$t('agents.reviewerSkillsHintBefore')}<strong>{$t('agents.standardLabel')}</strong>{$t('agents.reviewerSkillsHintAfter')}
         </span>
       {:else}
-        <span class="hint">执行者可以不挂 skill（它的产出由审核者按标准来判）。</span>
+        <span class="hint">{$t('agents.executorSkillsHint')}</span>
       {/if}
     </label>
 
     <div class="row">
       <label>
-        用哪个 runtime
+        {$t('agents.runtimeFieldLabel')}
         <select bind:value={runtimeKey}>
           {#each runtimeOptions as key (key)}
             {@const r = $identity?.runtimes.find((x) => x.key === key)}
             <option value={key}>
-              {key}{r && r.evidence !== 'verified' ? '（未对照真实程序）' : ''}
+              {key}{r && r.evidence !== 'verified' ? $t('agents.runtimeUnverified') : ''}
             </option>
           {/each}
           {#if !runtimeOptions.includes(runtimeKey)}
-            <option value={runtimeKey}>{runtimeKey}（当前）</option>
+            <option value={runtimeKey}>{$t('agents.runtimeCurrent', { key: runtimeKey })}</option>
           {/if}
         </select>
       </label>
       <label>
-        默认工作目录（可选）
-        <input bind:value={workDir} placeholder="留空 = 每个任务自动分配" />
+        {$t('agents.workDirLabelOptional')}
+        <input bind:value={workDir} placeholder={$t('agents.workDirPlaceholder')} />
       </label>
     </div>
 
@@ -237,9 +300,9 @@
     <!-- 主操作常驻底部：表单很长，正文一长就不该让人先滚到底才能按 -->
     <svelte:fragment slot="foot">
       <button type="submit" form="new-agent-form" disabled={busy || !name.trim()}>
-        {busy ? '创建中…' : '创建'}
+        {busy ? $t('common.creating') : $t('common.create')}
       </button>
-      <button type="button" class="secondary" onclick={onclose} disabled={busy}>取消</button>
+      <button type="button" class="secondary" onclick={onclose} disabled={busy}>{$t('common.cancel')}</button>
       {#if error}
         <span class="bad small">{error}</span>
       {/if}

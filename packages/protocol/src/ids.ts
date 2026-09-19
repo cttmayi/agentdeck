@@ -17,6 +17,16 @@ export type AgentId = z.infer<typeof AgentId>
 export const SkillId = z.string().brand<'SkillId'>()
 export type SkillId = z.infer<typeof SkillId>
 
+/**
+ * 工具包（D40）。**一个包 = 一个组**，一次安装一个目录。
+ *
+ * 与 `SkillId` 分开而不是共用一个 `PackageId`：两者的授权单位、审计字段
+ * 与执行路径都不同（skill 进上下文，工具进执行器），共用一个 id 类型会让
+ * "把工具 id 传进要 skill id 的地方"变成编译期合法——那正是 brand 要挡的。
+ */
+export const ToolId = z.string().brand<'ToolId'>()
+export type ToolId = z.infer<typeof ToolId>
+
 export const IssueId = z.string().brand<'IssueId'>()
 export type IssueId = z.infer<typeof IssueId>
 

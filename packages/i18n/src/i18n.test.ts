@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { readdirSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { LOCALES, LOCALE_LABEL, isLocale } from './locale.ts'
-import { placeholdersOf, renderText } from './text.ts'
-import { webText } from './web/index.ts'
+import { placeholdersOf, renderText, type TextCatalog } from './text.ts'
+import { webText, type WebTextId } from './web/index.ts'
 
 /**
  * ══════════════════════════════════════════════════════════════════
@@ -12,8 +13,53 @@ import { webText } from './web/index.ts'
  * 翻译最容易出的两类错都是**静默**的：漏了英文（英文界面里冒出一句中文）、
  * 占位符不一致（界面上留下一串 `{name}` 字面量）。它们不会报错，只会难看。
  * 所以这两条在这里机械地钉住——加词条的那一刻就会红。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 类型层的钉子：`WebTextId` 必须是**字面量联合**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `webText` 现在由 `Object.assign({}, ...webTextParts)` 合并而来（让那张清单
+ * 成为唯一来源）。这个写法**能**保住字面量键联合，但它不是显而易见的——
+ * 一旦 `WebTextId` 退化成 `string`，`$t('agents.typo')` 就不再是编译错误，
+ * 而**运行时不会报任何东西**：界面上安静地显示成键名。所以这里反向断言一次：
+ * 如果 `WebTextId` 变成 `string`，下面那行 `true` 赋给 `never` 会立刻编译报错。
  */
+type AssertLiteralKeys = string extends WebTextId ? never : true
+
+/**
+ * 把 `web/` 下的每张词表**扫出来**（文件名 → 它导出的那张表）。
+ *
+ * 为什么动态扫而不是在测试里抄一份清单：清单一旦有两份，"新加一张词表"就会
+ * 变成两处要改的地方，而**只改一处不会报错**——这正是 D39 迁移里踩过两次的坑。
+ * 每个词表文件按约定只导出一张表（`xxxText`），所以"这个模块里那个对象导出"
+ * 就是它。
+ */
+async function loadCatalogs(): Promise<Array<{ file: string; catalog: TextCatalog }>> {
+  const dir = new URL('./web/', import.meta.url)
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
+    .sort()
+  const out: Array<{ file: string; catalog: TextCatalog }> = []
+  for (const file of files) {
+    const mod = (await import(new URL(`./web/${file}`, import.meta.url).href)) as Record<
+      string,
+      unknown
+    >
+    const catalogs = Object.entries(mod).filter(
+      ([, v]) => v !== null && typeof v === 'object' && !Array.isArray(v),
+    )
+    assert.equal(catalogs.length, 1, `${file} 应当只导出一张词表，实际有 ${catalogs.length} 个对象导出`)
+    out.push({ file, catalog: catalogs[0]![1] as TextCatalog })
+  }
+  return out
+}
+
 describe('D39：界面词表', () => {
+  test('★ 词条键仍然是字面量联合（拼错键名必须是编译错误）', () => {
+    const pinned: AssertLiteralKeys = true
+    assert.equal(pinned, true)
+  })
+
   test('★ 每条词条 zh / en 都有，且都非空', () => {
     for (const [id, entry] of Object.entries(webText)) {
       for (const locale of LOCALES) {
@@ -36,8 +82,52 @@ describe('D39：界面词表', () => {
 
   test('键名沿用「区域.用途」的形状，且英文侧不残留中文', () => {
     for (const [id, entry] of Object.entries(webText)) {
-      assert.match(id, /^[a-z]+\.[a-zA-Z0-9]+$/, `${id} 的键名形状不对`)
+      // 形状：`区域.用途`，允许更深一层（术语表用 `term.<族>.<值>`，
+      // 值里带下划线与点——它们直接来自协议枚举，改一个字母就找不到那条词条）
+      // ⚠️ 允许 `-`：`term.evidence.in-range-unverified` 里的值直接来自
+      //    协议枚举（RuntimeEvidence），把它改写成驼峰会与代码里那份对不上
+      assert.match(id, /^[a-z]+\.[a-zA-Z0-9_.-]+$/, `${id} 的键名形状不对`)
       assert.doesNotMatch(entry.en, /[\u4e00-\u9fa5]/, `${id} 的英文里还有中文`)
+    }
+  })
+
+  test('★ 合并各表时没有重名的键（重名会让一条词条凭空消失）', async () => {
+    // 对象展开的语义是"后者赢"：两张表都定义 `agents.new` 时，先来的那条**静默消失**，
+    // 症状只是"某个地方显示成键名"——很难联想到是重名。
+    //
+    // ⚠️ 各张表**自己从 `web/` 目录里扫出来**（见下面 `loadCatalogs()`），
+    //    这里不抄一份文件清单。两份清单的后果很具体：加了表却只改一处时，
+    //    要么"检查红着而界面已经坏"，要么"界面坏着而检查绿着"——D39 迁移里
+    //    真实踩过两次（两个 agent 各一次）。
+    const catalogs = await loadCatalogs()
+    const sum = catalogs.reduce((n, c) => n + Object.keys(c.catalog).length, 0)
+    assert.equal(
+      Object.keys(webText).length,
+      sum,
+      `合并后少了 ${sum - Object.keys(webText).length} 条——两张表里有同名的键`,
+    )
+  })
+
+  test('★ 每个词表文件都被接进来了（漏接一张表不会报错，只会让它的词条变成键名）', async () => {
+    // 这条守的是"文件存在但没合并"：新增 `web/xxx.ts` 却忘了写进 `index.ts` 的
+    // 展开清单时，合并结果里根本没有它的词条、重名检查也不会红——症状是界面上
+    // 某个区域整片显示成键名（`tools.title`），而人只会怀疑"是不是渲染错了"。
+    //
+    // 做法是**逐文件动态 import，逐条比对**（而不是数个数）：既能抓住"整张表没
+    // 接进来"，也能抓住"接了但值不一样"（复制粘贴改了一半的那种）。
+    const catalogs = await loadCatalogs()
+    assert.ok(catalogs.length >= 10, `web/ 下只找到 ${catalogs.length} 张词表，扫目录的逻辑可能坏了`)
+    for (const { file, catalog } of catalogs) {
+      const ids = Object.keys(catalog)
+      assert.ok(ids.length > 0, `${file} 里一张词表都没有（空表也要么填满、要么别建）`)
+      for (const id of ids) {
+        const merged = (webText as Record<string, { zh: string; en: string } | undefined>)[id]
+        assert.ok(
+          merged !== undefined,
+          `${file} 里的 ${id} 没有出现在合并结果里——把它 import 进 index.ts 并展开`,
+        )
+        assert.deepEqual(merged, catalog[id], `${file} 的 ${id} 与合并结果里的值不一致`)
+      }
     }
   })
 

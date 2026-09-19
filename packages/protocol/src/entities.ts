@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import {
   ActionPlane,
+  ActionRefType,
   ActionStatus,
-  ActionType,
   ArtifactKind,
   AuthorType,
   CommentType,
@@ -29,6 +29,7 @@ import {
   RunId,
   RuntimeId,
   SkillId,
+  ToolId,
   Ulid,
   VerdictId,
   WorkspaceId,
@@ -97,6 +98,27 @@ export const Workspace = z.object({
    */
   locale: z.enum(['zh', 'en']).default('zh'),
 
+  /**
+   * 是否允许**自动执行**那些声明"不支持 dry-run"的工具动作（D40）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么默认是 false，而且这是**准入**不是"偏好"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 工具包里的脚本是第三方代码，它会在使用者机器上真的改东西。清单里的
+   * `dryRun: "supported"` 是作者在说"我能先告诉你要改什么"——那是唯一便宜到
+   * 人人都会用的预演手段。作者写 `unsupported` 就是在说"我保证不了"。
+   *
+   * 于是默认不自动执行这类动作：**先验过再放行**，而不是"装进来就等于允许
+   * 无人值守地改我的东西"。要放行得有人显式打开这个开关（界面上有警告）。
+   *
+   * ⚠️ 它必须**被真的执行**，不能只是界面上一句提示：界面写着"不能自动执行"
+   *    而平台照跑，那是**说谎**——比没有这条规矩更糟。
+   *
+   * 可选（老数据没有这个键）：读取处一律按 `?? false` 处理，不做数据迁移。
+   */
+  allowUnpreviewedActions: z.boolean().optional(),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })
@@ -152,8 +174,23 @@ export const Skill = z.object({
    */
   files: z.record(z.string(), z.string()).optional(),
   verdictSchemaVersion: z.number().int().positive(),
-  /** 允许这个 skill 触发的动作子集。 */
-  allowedActions: z.array(ActionType),
+  /**
+   * ⚠️ **这里原来有一个 `allowedActions`，已经搬走了**（D40 收口）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么"允许动什么"不该挂在 skill 上
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * skill 是**执行者干活时参考的资料**（`Agent.skillIds` 挂在执行者身上），
+   * 而"判完之后允许动什么"是**审核者的能力**——两者挂在不同的人身上。
+   * 挂在 skill 上等于让一个资料包顺手决定了谁能改状态；更糟的是 D37 之后
+   * 内联标准才是判断依据，动作白名单却还留在 skill 里，于是同一件事有了
+   * **两个出处**（老数据的兼容路径正是靠这种并集工作的）。
+   *
+   * 现在它在 `Agent.allowedActions` 上，skill 只剩"正文 + 支持文件"。
+   * 老数据里这个键还在（整条记录以 JSON 存、读取路径上没有 zod 校验），
+   * 读取方按"没有"处理即可——不需要数据迁移。
+   */
   /** 来源：本地自有 / 从远端下载。 */
   source: z.enum(['local', 'remote']),
   /** 下载来源标识（source 为 remote 时）。 */
@@ -199,13 +236,12 @@ export type Skill = z.infer<typeof Skill>
  *      回来挂载。而它本质是一段文本 +"判完能做什么"；
  *   3. **可见性差**：审核者的判断依据藏在 Skills 页的一个 slug 后面。
  *
- * 现在标准是审核者自己的一等字段：名字（给人看）、正文（进第一句话的
- * `{{standards}}`）、以及**这份标准允许触发哪些动作**。
+ * 现在标准是审核者自己的一等字段：名字（给人看）与正文（进第一句话的
+ * `{{standards}}`）。
  *
- * ⚠️ `allowedActions` 必须跟标准**同源**：判决里的动作按它校验
- *    （`动作 X 不在该 skill 允许的动作子集内`）。"这条标准只允许发评论"
- *    是标准的一部分，不是全局策略——分开存放迟早分叉成
- *    "标准说可以、平台说不行"。
+ * ⚠️ **"允许动什么"不在标准里**（D40 收口搬走了）：那是审核者的**能力**，
+ *    住在 `Agent.allowedActions`。判断依据与处置权限是两件事——分开放之后
+ *    "我改了标准正文"与"我放宽了能动的范围"在审计与界面上都能分开看。
  *
  * ⚠️ 与 `instructions` 的区别：`instructions` 是"这个 agent 的态度与角色"
  *    （进 `{{instructions}}`），标准是"它按什么判"（进 `{{standards}}`）。
@@ -216,8 +252,15 @@ export const ReviewStandard = z.object({
   name: z.string().min(1).max(100),
   /** 标准正文。 */
   body: z.string().min(1),
-  /** 这份标准允许触发哪些动作；判决里出现的动作必须在这里面。 */
-  allowedActions: z.array(ActionType),
+  /**
+   * ⚠️ **老数据的只读兼容字段**（D40 收口之后搬到了 `Agent.allowedActions`）。
+   *
+   * 它一度是"判断依据 + 允许动什么"的合体。写入口**只写新字段**；读取方在
+   * `Agent.allowedActions` 为空时回退到它（老工作区的标准里存着动作白名单）。
+   * 新数据里它是空数组——两处都写就会出现两个出处，而"哪个说了算"只能靠
+   * 注释记住（这正是这次搬家的理由）。
+   */
+  allowedActions: z.array(ActionRefType).optional(),
 })
 export type ReviewStandard = z.infer<typeof ReviewStandard>
 
@@ -243,8 +286,68 @@ export const Agent = z.object({
   workDir: z.string().nullable(),
   /** ★ 这个 agent 挂载的 skill 子集——不是全部可用 skill。 */
   skillIds: z.array(SkillId),
-  /** ★ tool 子集。首版为扩展位（FR-AGENT-17）。 */
-  toolIds: z.array(z.string()),
+  /**
+   * ★ **这个审核者允许触发哪些动作**（D40 收口）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 它是"能力"，与"判断依据"分开
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `reviewStandard` 回答"按什么判"（名字 + 正文），这个字段回答"判完**允许动
+   * 什么**"。这两件事原来挤在标准里，而动作白名单还一度挂在 skill 上——同一件事
+   * 有三个可能的位置，优先级只能靠注释记住。
+   *
+   * 取值是内置动作名（`comment.create`）或第三方工具包的 `<包 slug>.<动作名>`；
+   * 写入口逐条核对"这个包装着、且确实声明了该动作"（**早拒**：跑到一半才发现
+   * "要一个不允许的动作"，在无人值守下就是每次都失败）。
+   *
+   * ⚠️ **只有审核者用得着它**。执行者的能力是"工具"（`toolIds`，干活时用的），
+   *    而动作是**判完之后**由平台执行的；给执行者写非空值会被写入口拒。
+   *
+   * ⚠️ 它是**可选**的（不是 `.default([])`）：这个字段是 D40 收口时加的，加之前
+   *    建的 agent 记录里根本没有这个键（store 读取路径上没有 zod 校验），
+   *    而且大量内联构造 `Agent` 的地方（夹具、种子数据）也不必为了它改写。
+   *    读取方一律 `agent.allowedActions ?? 回退`——**回退那一步只写在解析点**
+   *    （`apps/daemon/src/review-standard.ts`），不要在每个调用方各写一遍。
+   */
+  allowedActions: z.array(ActionRefType).optional(),
+  /**
+   * ★ 动作的**固定参数**（界面上设置的，D43）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么需要它：动作的 open 参数默认由模型在判决时填，但"id 要事前定义、
+   * 防止大模型误操作到别的 id"这类需求要求**使用者先把某些参数钉死**。
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 形状：`Record<动作名, Record<参数名, 值>>`。语义与 bound 参数同一档：
+   * **执行时由平台注入，模型看不见、也不许写**（判决里写了固定参数 ⇒
+   * 结构性不合规）。区别只在于**值是谁定的**——bound 是平台按事实注入的，
+   * 这里是使用者在界面上设的。
+   *
+   * ⚠️ 只可能引用该动作的 **open** 参数：bound 参数是平台的事实（workdir、
+   * subject.runId…），不是使用者该钉的东西。校验在写入口做（对着已安装的
+   * 工具清单：动作必须装着了、参数必须是 open 且值必须满足类型/上限/枚举），
+   * 执行时还有第二道（与 `allowedActions` 同一个"配置时拒 + 运行时拦"的布局）。
+   *
+   * ⚠️ 与 `allowedActions` 同一条角色规矩：**只有审核者用得着它**（动作是
+   *    判完之后由平台执行的）。执行者写非空值会被写入口拒。
+   *
+   * ⚠️ 可选字段（不是 `.default({})`）：D43 之前建的记录里没有这个键；读取方
+   *    一律 `agent.actionParams ?? {}`。判据只看"字段在不在"。
+   */
+  actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())).optional(),
+
+  /**
+   * ★ 挂载的工具包（D40）。**授权单位是"组"，不是单个动作**：挂上一个包，
+   * 就等于把它声明的整组动作交给这个 agent。
+   *
+   * 原来是 `string[]`（扩展位 FR-AGENT-17），现在换成 `ToolId`——品牌类型让
+   * "把 skill id 传进这里"变成编译错误。老数据是空数组，读取路径不受影响。
+   *
+   * ⚠️ **审核者不挂工具**（`role: 'reviewer'`）：审核者只判断、不动手。
+   *    这条在服务端的写入口校验，不靠界面自觉。
+   */
+  toolIds: z.array(ToolId),
   /** 自定义环境变量。 */
   env: z.record(z.string(), z.string()),
 
@@ -281,8 +384,11 @@ export const Agent = z.object({
    *
    * ⚠️ **过渡期**：老数据的标准还在挂载的 skill 里（`skillIds`）。解析时有一条
    *    兼容路径（`resolveReviewStandard`）：没有内联标准但挂了 skill 时，用
-   *    skill 的正文与动作并集顶上，并在界面上提示迁移。这条路径是**为了不让
-   *    已经建好的审核者停摆**，不是长期设计。
+   *    skill 的**正文**顶上，并在界面上提示迁移。这条路径是**为了不让已经建好的
+   *    审核者停摆**，不是长期设计。
+   *
+   *    ⚠️ 它**只顶正文**（D40 收口）：动作权限不在 skill 上，也不在这个字段里，
+   *       而在 `Agent.allowedActions`（老数据回退到 `ReviewStandard.allowedActions`）。
    *
    * ⚠️ 它对 `role: 'reviewer'` 才有意义，但**不禁止**执行者带着它：把角色从
    *    审核改成执行、再改回来时不该丢东西（与第一句话模版同一个理由）。
@@ -433,6 +539,56 @@ export const Run = z.object({
   kind: RunKind,
   status: RunStatus,
   agentId: AgentId,
+  /**
+   * 这条 run 的**审核者覆盖**（见 `SubmitRunRequest.reviewerAgentId`）。
+   *
+   * 三态，缺一不可：
+   *   - `undefined`（字段缺失，含 D41 之前的旧数据）⇒ 跟随执行 agent 配置的
+   *     「由谁审它」；
+   *   - `null` ⇒ 这次明确不自动审；
+   *   - agent id ⇒ 这次由它审。
+   *
+   * 只有 `kind: 'execute'` 的 run 会用它（审核 run 自己是执行者派生出来的，
+   * 不会再被审一次）。
+   */
+  reviewerAgentId: AgentId.nullable().optional(),
+  /**
+   * 这条 run 的**任务级动作白名单**（见 `SubmitRunRequest.allowedActions`）。
+   *
+   * 两条路都用同一个字段、同一个含义（"**这一次**允许触发哪些动作"）：
+   *   - `kind: 'execute'` ⇒ 这是**决定**（新建任务页 ③）。缺字段 = 跟随那个
+   *     审核者的「行动权限」；
+   *   - `kind: 'review'`（由执行 run 串接派生出来那条）⇒ 这是**决定被带下来**：
+   *     判决契约里列哪些动作、判决收口时按哪份白名单校验，都用它。缺字段 =
+   *     跟随这个审核者自己的权限。
+   *
+   * 为什么不是两个字段（一个"覆盖"、一个"生效"）：那是同一个决定的两站路程，
+   * 而两个名字会让"审核用的是哪一份"变成需要推理的事——它必须一眼可见。
+   */
+  allowedActions: z.array(ActionRefType).optional(),
+  /**
+   * 这条 run 的**任务级动作固定参数**（见 `SubmitRunRequest.actionParams`，D43）。
+   *
+   * 与 `allowedActions` 同一条规矩、同一个判据（字段在不在）：
+   *   - `kind: 'execute'` ⇒ 这是**决定**（新建任务页 ③ 上设的那份）。缺字段 =
+   *     跟随那个审核者的长期固定参数（`Agent.actionParams`）；
+   *   - `kind: 'review'`（由执行 run 串接派生出来那条）⇒ 这是**决定被带下来**：
+   *     判决契约、判决校验、动作执行都用它。缺字段 = 跟随审核者自己的。
+   */
+  actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())).optional(),
+  /**
+   * 这条 run 的**任务级返工次数**（见 `SubmitRunRequest.maxReworks`，D45）。
+   *
+   * 语义：审核判 `fail` 时，把审核意见交回执行者重做，最多这么多次。
+   * `0` 或**缺字段** = 不返工，`fail` 直接交给人（看板「等待人处理」）。
+   *
+   * ⚠️ 与 `chainDepth` 配合使用：`chainDepth` 是**已经**返工了几次（每条返工 run
+   *    在前一条的基础上 +1），这个字段是**允许**几次，两者一比就知道还有没有额度。
+   *    这里**不额外记一个 `usedReworks` 计数器**——同一个事实有两个出处时，
+   *    "哪个说了算"就只能靠注释记住（`reviewStandard.allowedActions` 那次搬家
+   *    正是踩了这个）。
+   */
+  maxReworks: z.number().int().min(0).max(5).optional(),
   subject: SubjectRef,
   trigger: RunTrigger,
   /** 由哪个 action 派生；根 run 为 null。 */
@@ -503,7 +659,13 @@ export const Action = z.object({
   id: ActionId,
   workspaceId: WorkspaceId,
   verdictId: VerdictId,
-  type: ActionType,
+  /**
+   * 实际执行的动作：`<包 slug>.<动作名>`（D41 起平台不内置任何动作）。
+   *
+   * ★ 这里也必须宽——否则"判决里写了工具动作、动作记录里却只剩内置枚举"，
+   *   审计链会在最后一环断掉（而审计链正是这套东西存在的理由）。
+   */
+  type: ActionRefType,
   plane: ActionPlane,
   params: z.record(z.string(), z.unknown()),
   status: ActionStatus,

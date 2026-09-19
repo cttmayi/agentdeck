@@ -2,6 +2,7 @@
   import { afterUpdate, onMount } from 'svelte'
   import { templateKit, loadTemplateKit, previewFirstSentence } from '../lib/stores.ts'
   import type { FirstSentenceKind } from '../lib/api.ts'
+  import { t } from '../lib/i18n.ts'
 
   /**
    * 「第一句话模版」这一栏（D32）。
@@ -114,22 +115,22 @@
 
 <div class="tpl">
   <div class="tpl-head">
-    {#if showLabel}<span class="tpl-label">第一句话模版</span>{/if}
+    {#if showLabel}<span class="tpl-label">{$t('tpl.label')}</span>{/if}
     <span class="tpl-state">
       {#if custom}
-        <span class="badge custom">自定义</span>
+        <span class="badge custom">{$t('tpl.custom')}</span>
       {:else}
-        <span class="badge">平台默认</span>
+        <span class="badge">{$t('tpl.platformDefault')}</span>
       {/if}
     </span>
   </div>
 
   <p class="tpl-hint">
-    一次 run 交代给模型的<strong>全部内容</strong>就是这一段文字（只有这一条通道）。
-    <strong>变量只给内容</strong>——标题、标签、材料标记、说明那句话都写在模版里，
-    所以这一段"长什么样"你说了算。
-    留空 = 用平台默认那段；自己写 = <strong>整段取代默认</strong>，默认里的
-    「完成后给出一份报告」那类护栏也一并没了，需要自己写进去。
+    {$t('tpl.hintAllBefore')}<strong>{$t('tpl.hintAllStrong')}</strong>{$t('tpl.hintAllAfter')}
+    <strong>{$t('tpl.hintVarsOnly')}</strong>{$t('tpl.hintVarsOnlyAfter')}
+    {$t('tpl.hintYoursToShape')}
+    {$t('tpl.hintEmptyMeans')}<strong>{$t('tpl.hintReplaceAll')}</strong>{$t('tpl.hintDefaultGuardsLead')}
+    {$t('tpl.hintDefaultGuards')}
   </p>
 
   <!-- `rows` 只是没有脚本时的兜底；实际高度由 `autosize()` 按内容算 -->
@@ -138,7 +139,7 @@
     rows="16"
     bind:this={textareaEl}
     spellcheck="false"
-    placeholder="留空 = 用平台默认模版。点下面的「填入默认模版」可以从默认那段改起。"
+    placeholder={$t('tpl.placeholder')}
     value={value}
     oninput={(e) => onchange((e.currentTarget as HTMLTextAreaElement).value)}
   ></textarea>
@@ -150,7 +151,7 @@
       onclick={() => onchange(defaultText)}
       disabled={!defaultText}
     >
-      填入默认模版
+      {$t('tpl.fillDefault')}
     </button>
     <button
       type="button"
@@ -162,13 +163,13 @@
       }}
       disabled={!custom}
     >
-      清空（回到平台默认）
+      {$t('tpl.clearToDefault')}
     </button>
     <button type="button" class="ghost small" onclick={runPreview} disabled={busy}>
-      {busy ? '预览中…' : '预览'}
+      {busy ? $t('common.previewing') : $t('common.preview')}
     </button>
     <button type="button" class="ghost small" onclick={() => (showVariables = !showVariables)}>
-      {showVariables ? '收起变量' : '可用的变量'}
+      {showVariables ? $t('tpl.hideVars') : $t('tpl.showVars')}
     </button>
   </div>
 
@@ -180,18 +181,18 @@
     <div class="var-table">
       {#if variables.length === 0}
         <p class="row-hint">
-          拿不到变量表（daemon 可能没起来）。变量写法是 <code>{varToken('name')}</code>。
+          {$t('tpl.varsUnavailable')}<code>{varToken('name')}</code>。
         </p>
       {:else}
         <p class="row-hint">
-          写法是 <code>{varToken('name')}</code>，插值发生在每次 run：同一个模版，
-          模型拿到的是这一次的值。
+          {$t('tpl.varsSyntax')}<code>{varToken('name')}</code>{$t('tpl.varsSyntaxAfter')}
+          {$t('tpl.varsSyntaxAfter2')}
         </p>
         <p class="row-hint">
-          <strong>可选的东西用条件段</strong>：<code>{'{{#instructions}}…{{/instructions}}'}</code>
-          ——里面那个变量为空时，<strong>整段连标题一起不出现</strong>（所以"没写指令就
-          别留一个空标题"这件事不用你操心）。反向写法是 <code>{'{{^instructions}}…{{/instructions}}'}</code>。
-          ⚠️ 必需的那几个变量得在段<strong>外面</strong>至少出现一次。
+          <strong>{$t('tpl.condHintTitle')}</strong>：<code>{'{{#instructions}}…{{/instructions}}'}</code>
+          {$t('tpl.condHintBody')}<strong>{$t('tpl.condHintStrong')}</strong>{$t('tpl.condHintQuote1')}
+          {$t('tpl.condHintQuote2')}<code>{'{{^instructions}}…{{/instructions}}'}</code>。
+          ⚠️ {$t('tpl.requiredVarsBefore')}<strong>{$t('tpl.requiredVarsOutside')}</strong>{$t('tpl.requiredVarsAfter')}
         </p>
         <!--
           ⚠️ 这里原来是一张两列表格（变量 | 说明）。这一栏住在 416px 宽的主从
@@ -203,8 +204,8 @@
             <li>
               <span class="var-line">
                 <code>{varToken(v.name)}</code>
-                {#if v.requiredFor.includes(kind)}<span class="req">必需</span>{/if}
-                <span class="faint small">{v.multiline ? '多行' : '单值'}</span>
+                {#if v.requiredFor.includes(kind)}<span class="req">{$t('common.required')}</span>{/if}
+                <span class="faint small">{v.multiline ? $t('tpl.multiline') : $t('tpl.singleValue')}</span>
               </span>
               <span class="var-label faint small">{v.label}</span>
             </li>
@@ -217,12 +218,12 @@
   {#if showText && preview}
     <div class="preview">
       <div class="preview-head">
-        <strong>渲染出来是这样</strong>
+        <strong>{$t('tpl.previewHeading')}</strong>
         <span class="faint small">
-          —— 用的是<strong>示例值</strong>（一个假任务 / 一份假报告），不是你的真实任务；
-          但渲染器与真的那次是同一个。
+          {$t('tpl.previewNote1')}<strong>{$t('tpl.sampleValues')}</strong>{$t('tpl.previewNote2')}
+          {$t('tpl.previewNote3')}
         </span>
-        <button type="button" class="ghost small" onclick={() => (showText = false)}>收起</button>
+        <button type="button" class="ghost small" onclick={() => (showText = false)}>{$t('common.collapse')}</button>
       </div>
       <pre>{preview}</pre>
     </div>

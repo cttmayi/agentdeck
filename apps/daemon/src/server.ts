@@ -20,17 +20,22 @@ import {
   DEFAULT_MAX_CHAIN_DEPTH,
   aggregateCost,
   assertReviewerDistinct,
-  depthFromChain,
   exportAudit,
+  resolveAllowedActionsWithTools,
+  toolActionDefinitions,
+  validateFixedParams,
+  type AllowedActionsResolution,
   type Store,
 } from '@alpha-helper/domain'
 import {
   LOCAL_PROTOCOL_VERSION,
-  ActionType,
   Capability,
   parseVerdict,
+  toolSlugOfAction,
   ulid,
+  type ActionRefType,
   type Agent,
+  type InboxItem,
   type Issue,
   type BlobRef,
   type Report,
@@ -38,7 +43,9 @@ import {
   type RunId,
   type RunMessage,
   type Skill,
+  type Tool,
   type ReviewStandard,
+  type VerdictRecord,
   type SubmitRunRequest,
   type AgentRole,
   type Workspace,
@@ -46,9 +53,11 @@ import {
 } from '@alpha-helper/protocol'
 import { FileStore } from '@alpha-helper/store-file'
 import { resolveReviewStandard } from './review-standard.ts'
+import { applyDeadActionCleanup, planDeadActionCleanup } from './dead-actions.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@alpha-helper/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
-import { ActionRunner, type DeriveRunRequest } from './actions.ts'
+import { ActionRunner } from './actions.ts'
+import { createScriptExecutor } from './script-executor.ts'
 import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
@@ -80,6 +89,15 @@ import {
   type ResolvedSkillSource,
   type SkillSourceSpec,
 } from './skill-source.ts'
+import {
+  ToolSourceError,
+  buildToolPackage,
+  describeToolSource,
+  resolveLocalToolPath,
+  toToolRecord,
+  type ResolvedToolPackage,
+  type ToolSourceErrorCode,
+} from './tool-source.ts'
 
 /**
  * 本地 daemon 服务。
@@ -104,6 +122,15 @@ import {
 const MAX_BODY_BYTES = 8 * 1024 * 1024
 
 /**
+ * 任务级返工次数的上限（D45）。
+ *
+ * 与 `SubmitRunRequest.maxReworks` 的 schema 上限**必须是同一个数**：schema 管
+ * 协议层，这里管"HTTP 入口的早拒"。两处不一致时，宽的那个就是实际生效的那个
+ * ——而它会是没人审过的那个。
+ */
+const MAX_REWORKS = 5
+
+/**
  * run 的终态。
  *
  * 用在 SSE 上：晚订阅（刷新后、或连上时 run 已结束）时**补发一个 terminal
@@ -114,6 +141,13 @@ const TERMINAL_RUN_STATUSES: readonly string[] = ['completed', 'failed', 'cancel
 
 export interface DaemonOptions {
   dataDir: string
+  /**
+   * 跑脚本动作时用的 **node 解释器路径**（D40）。
+   *
+   * 默认是 daemon 自己那个（`process.execPath`）。留这个口子有两个用途：
+   * 测试里钉死一个已知解释器；部署上把解释器与 daemon 分开钉。
+   */
+  scriptRuntimePath?: string
   port: number
   fsync?: boolean
   /** 覆盖可执行文件路径（测试用）。 */
@@ -224,12 +258,36 @@ const BUILTIN_REVIEW_STANDARD: ReviewStandard = {
     '',
     '## 动作约定',
     '',
-    '- `fail` 时用一个动作表达"接下来做什么"，而不是只描述问题。',
-    '- 只有确实需要改动时才 `issue.update_status`；纯提示用 `comment.create`。',
+    '- `fail` 时用 `findings` 说清"接下来做什么"，而不是只描述问题。',
+    '- ⚠️ 这份标准里**不再点名任何动作**：D41 之后平台没有内置动作，能做什么',
+    '  完全取决于审核者的「行动权限」里勾了哪些工具包动作。没有勾任何动作时',
+    '  不要写 `action`（见任务说明里的判决契约）。',
   ].join('\n'),
-  // ★ 动作子集：这份标准只允许发表评论与打标签，不允许建 issue 或指派 agent
-  allowedActions: ['comment.create', 'issue.add_label'],
+  // ⚠️ 这里原来还有一个 `allowedActions`（这份标准只允许发表评论与打标签）。
+  //    D40 收口之后**标准里不再有动作权限**——它是审核者的能力，播种时写在
+  //    agent 上。分开之后"我改了标准正文"与"我放宽了判完能做什么"在审计与
+  //    界面上都能分开看。
 }
+
+/**
+ * 首启播种的那个审核者的动作权限（D41）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 它现在是**空的**，而且这是刻意的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这个常量原来是 `['comment.create', 'issue.add_label']`——内置动作时代的
+ * 默认权限。内置动作全部移除之后，那两个名字**没有对应的实现了**：
+ * 留着它们会让播种出的审核者带着两个"永远解析不出来的动作名"，判决一旦引用
+ * 就走**结构性 invalid**（不可重试），比空着糟得多。
+ *
+ * 于是"开箱即用地评论 / 改状态"**不再成立**——这是 D41 的刻意结果，不是回归。
+ * 开箱那条闭环仍然通（任务 → 执行 → 审核 → 判决 → 通知），只是判决**不带动作**：
+ * 协议里已经为此写明了"这次不要写 `action`"（`packages/protocol/src/verdict.ts`）。
+ *
+ * 想让判完能做事：装一个工具包，再去那个审核者的「行动权限」里勾上它声明的动作。
+ */
+const BUILTIN_REVIEW_ALLOWED_ACTIONS: Agent['allowedActions'] = []
 
 /**
  * 安装内核：**两个接口共用这一份**。
@@ -321,7 +379,11 @@ async function installSkillPayloads(input: {
       // 那种技能是坏的，而且坏得很安静
       ...(Object.keys(validated.files).length > 0 ? { files: validated.files } : {}),
       verdictSchemaVersion: 1,
-      allowedActions: payload.allowedActions ?? ['comment.create'],
+      // ⚠️ 这里原来写 `allowedActions`（默认 `['comment.create']`）。D40 收口之后
+      //    **skill 没有这个字段了**——动作权限住在审核者身上
+      //    （`Agent.allowedActions`），安装 skill 不再接受、也不再写动作配置。
+      //    老客户端在 source/payload 或批量条目里传了它会被忽略（不是"装错了"，
+      //    只是那一项不再属于 skill）；写回它反而会让实体多出一个协议里没有的键。
       // ★ 缺省是 `remote`：批量这条路本来就是"页面从远端目录下载好交过来"。
       //   把默认值反过来会让"下载来的"默认冒充"使用者自有的"，而 FR-AGENT-10
       //   正是靠这个字段判断"本地内容会不会因远端变化而改变"。
@@ -411,6 +473,293 @@ function parseInstallSource(
   return { ok: false, error: 'source.kind 必须是 path / url / payload 之一' }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// 工具包（D40）：安装 / 卸载 / 挂载
+// ══════════════════════════════════════════════════════════════════
+
+/**
+ * 工具包的错误一律用**同一个 400 形状**回。
+ *
+ * `error` 是给使用者看的一句话，`code` 让界面决定怎么提示（本地路径装不上、
+ * 清单不合规、包太大……下一步动作完全不同），`detail` 里可能有换行（比如
+ * 逐条列出的 schema 问题），界面要能**原样显示**——把它压成一行就等于把
+ * "第几个动作的哪个字段不对"这条信息丢掉。
+ */
+function sendToolError(
+  res: ServerResponse,
+  error: string,
+  code: ToolSourceErrorCode,
+  detail: string | null = null,
+): void {
+  sendJson(res, 400, { error, code, detail })
+}
+
+/**
+ * 工具包的安装来源。契约（D40）：`path` 或 `payload` 二选一。
+ *
+ * ⚠️ 与 skill 那条路（`SkillSourceSpec`）刻意分开：skill 有 `url`（GitHub），
+ *    工具包**没有**——工具包里的脚本会在使用者机器上真的执行，而"从任意
+ *    URL 下载一段可执行的东西并装上"不是首版该开的门。
+ */
+type ToolInstallSpec =
+  | { kind: 'path'; path: string; slug: string | null }
+  | {
+      kind: 'payload'
+      slug: string
+      manifest: Record<string, unknown>
+      files: Record<string, string>
+      docs: string
+      sourceRef: string
+      version: string | null
+    }
+
+/**
+ * 校验安装来源。**逐字段**校验，因为这是运行时的任意 JSON。
+ *
+ * 返回 `{ok:false}` 而不是抛异常：来源不对是**使用者输入问题**（400），
+ * 不是服务出错（500）。
+ */
+function parseToolInstallSource(
+  raw: unknown,
+): { ok: true; spec: ToolInstallSpec } | { ok: false; error: string } {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: '需要一个 JSON 对象作为请求体' }
+  }
+  const obj = raw as Record<string, unknown>
+  const source = obj['source']
+
+  if (source === 'path') {
+    const value = obj['path']
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { ok: false, error: 'source=path 需要非空的 path（绝对路径）' }
+    }
+    const slug = obj['slug']
+    if (slug !== undefined && slug !== null && typeof slug !== 'string') {
+      return { ok: false, error: 'slug 必须是字符串' }
+    }
+    return {
+      ok: true,
+      spec: {
+        kind: 'path',
+        path: value.trim(),
+        slug: typeof slug === 'string' && slug.trim() !== '' ? slug.trim() : null,
+      },
+    }
+  }
+
+  if (source === 'payload') {
+    const slug = obj['slug']
+    if (typeof slug !== 'string' || slug.trim() === '') {
+      return {
+        ok: false,
+        error: 'source=payload 需要非空的 slug（它同时是包的名字与动作的命名空间）',
+      }
+    }
+    const manifest = obj['manifest']
+    if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      return {
+        ok: false,
+        error:
+          'source=payload 需要 manifest（清单对象）。它是"是不是适配本平台的工具"的判据，' +
+          '格式见 packages/protocol/src/tools.ts',
+      }
+    }
+    const files = obj['files']
+    if (files !== undefined && files !== null) {
+      if (typeof files !== 'object' || Array.isArray(files)) {
+        return { ok: false, error: 'source.files 必须是 相对路径→内容 的对象' }
+      }
+      for (const [k, v] of Object.entries(files as Record<string, unknown>)) {
+        if (typeof v !== 'string') {
+          return {
+            ok: false,
+            error: `source.files['${k}'] 必须是字符串：首版只收文本文件（二进制装进来会写坏）`,
+          }
+        }
+      }
+    }
+    const docs = obj['docs']
+    if (docs !== undefined && docs !== null && typeof docs !== 'string') {
+      return { ok: false, error: 'source.docs 必须是字符串（TOOL.md 的正文）' }
+    }
+    const sourceRef = obj['sourceRef']
+    if (sourceRef !== undefined && sourceRef !== null && typeof sourceRef !== 'string') {
+      return { ok: false, error: 'source.sourceRef 必须是字符串' }
+    }
+    const version = obj['version']
+    if (version !== undefined && version !== null && typeof version !== 'string') {
+      return { ok: false, error: 'source.version 必须是字符串或 null' }
+    }
+    return {
+      ok: true,
+      spec: {
+        kind: 'payload',
+        slug: slug.trim(),
+        manifest: manifest as Record<string, unknown>,
+        files: (files ?? {}) as Record<string, string>,
+        docs: typeof docs === 'string' ? docs : '',
+        // ★ 缺省是 `remote:`：这条路本来就是"页面从远端目录里取好交过来"。
+        //   默认成别的会让"这包是哪来的"在数据上就错了——与 skill 那条路
+        //   （`Skill.source` 默认 `remote`）同一个理由。
+        sourceRef:
+          typeof sourceRef === 'string' && sourceRef.trim() !== ''
+            ? sourceRef.trim()
+            : `remote:${slug.trim()}`,
+        version: typeof version === 'string' ? version : null,
+      },
+    }
+  }
+
+  return {
+    ok: false,
+    error: "source 必须是 'path' 或 'payload'（从本机目录装 / 装页面送来的包）",
+  }
+}
+
+/**
+ * 来源里给的 slug 与清单里的 slug 必须一致。
+ *
+ * 理由与 `resolveLocalToolPath` 里那一段逐条相同（动作名是
+ * `<slug>.<动作名>`，两处不一致时判决里该写哪个就没有答案了）。路径那条路
+ * 已经查过一次，这里补的是 payload 那条——**同一句话在两处出现**是有意的：
+ * 调用方看到的是同一句提示，而不是"看你走哪条路"。
+ */
+function slugDisagreement(given: string | null, manifestSlug: string): string | null {
+  if (given === null || given === manifestSlug) return null
+  return (
+    `你指定的 slug「${given}」与清单里的「${manifestSlug}」不一致。` +
+    '动作名是 `<包 slug>.<动作名>` 这个形状——两处不一致时，判决里该写哪个就没有答案了。请改清单，别用覆盖值。'
+  )
+}
+
+/**
+ * 安装内核（工具包）：路由只做"slug 唯一性 + id/时间 + 写库"，
+ * "这是不是一个适配本平台的工具包"完全由 `tool-source.ts` 判。
+ *
+ * ⚠️ 这里**不重复**任何来源校验。在路由里再写一套，两条路（本地目录 /
+ *    payload）迟早会在某个边界上不一致（大小写、符号链接、限额、入口文件
+ *    是否真的存在），而那种不一致的表现是"从远端装能过、从路径装过不了"。
+ */
+async function installToolPackage(input: {
+  store: Store
+  workspaceId: WorkspaceId
+  pkg: ResolvedToolPackage
+  overwrite: boolean
+  now: number
+}): Promise<{ ok: true; tool: Tool } | { ok: false; error: string }> {
+  const { store, workspaceId, pkg, overwrite, now } = input
+  const slug = pkg.manifest.slug
+
+  // ══════════════════════════════════════════════════════════════════
+  // slug 在**一个工作区里唯一**：同名一律拒绝写入，不静默覆盖
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 与 skill 那条路同一个规则、同一句话，理由也同一条：`insertTool` 是按
+  // **id** 写入的，所以"同名但 id 不同"的两个包会**同时存在**，而
+  // `getToolBySlug` 只取得到其中一条——判决里写的 `<slug>.<动作名>` 会
+  // 抽到哪一份就没有答案了。哪种结果都不对，且都没有提示。
+  //
+  // 要替换必须显式说（`overwrite: true`）。工具包比 skill 更需要这条出路：
+  // 卸载会被"还有 agent 挂着"挡住（见 DELETE），所以"改了包里的脚本重新装"
+  // 如果只能靠卸载再装，就得先把所有挂载摘掉、装完再挂回去——那条路上任何
+  // 一步忘掉，症状都是"某个 agent 的工具悄悄没了"。
+  const clash = await store.getToolBySlug(workspaceId, slug)
+  if (clash && !overwrite) {
+    return {
+      ok: false,
+      error:
+        `已有同名工具包「${slug}」（来源：${describeToolSource(clash.sourceRef ?? clash.source)}）。` +
+        '同名一律拒绝写入，避免"装的时候顺手覆盖了你自己的东西"；' +
+        '确实要替换请显式传 overwrite: true（挂载关系会保留，因为替换复用同一个 id）。',
+    }
+  }
+
+  const tool = toToolRecord(pkg, {
+    // 同名替换时**复用原 id**：agent 的 `toolIds` 指的是**组**，换了 id 就等于
+    // 所有挂载它的 agent 指着一条已经不存在的记录（表现是"工具悄没了"）
+    id: (clash?.id ?? (ulid() as Tool['id'])) as Tool['id'],
+    workspaceId,
+    createdAt: clash?.createdAt ?? now,
+    updatedAt: now,
+  })
+  await store.insertTool(tool)
+  return { ok: true, tool }
+}
+
+/**
+ * 解析一次安装请求的结果：要么是一份**校验过的包**，要么是"输入不对"的
+ * 统一形状（直接可以交给 `sendToolError`）。
+ */
+type ToolResolveOutcome =
+  | { ok: true; pkg: ResolvedToolPackage }
+  | { ok: false; error: string; code: ToolSourceErrorCode; detail: string | null }
+
+/**
+ * 解析一次工具安装请求的**来源**（path 或 payload）→ 一份校验过的包。
+ *
+ * 两条路**共用同一关**（`resolveLocalToolPath` / `buildToolPackage`），
+ * 差别只在"文件是从哪读来的"这一点。
+ */
+async function resolveToolInstall(spec: ToolInstallSpec): Promise<ToolResolveOutcome> {
+  try {
+    if (spec.kind === 'path') {
+      const pkg = await resolveLocalToolPath(spec.path, { slug: spec.slug })
+      return { ok: true, pkg }
+    }
+
+    // `tool.json` / `TOOL.md` 不该出现在 `files` 里：它们各自有字段
+    // （`manifest` / `docs`）。两处都写时"以哪个为准"没有答案，而静默丢掉
+    // 其中一份的表现是"我明明在包里改了清单，装进来却没变"。
+    const reserved = Object.keys(spec.files).filter((p) => p === 'tool.json' || p === 'TOOL.md')
+    if (reserved.length > 0) {
+      return {
+        ok: false,
+        error: `source.files 里不该有 ${reserved.join('、')}：清单与说明另有字段（manifest / docs）`,
+        code: 'bad_input',
+        detail: '两处都写时以哪个为准没有答案。把清单放进 manifest、把说明放进 docs 即可。',
+      }
+    }
+
+    // 清单在这里**重新序列化**再过 `buildToolPackage`：这样 payload 与本地目录
+    // 走的是**同一个** `ToolManifest` 校验（含入口文件是否真的在包里）。
+    const pkg = buildToolPackage({
+      files: spec.files,
+      manifestText: JSON.stringify(spec.manifest),
+      docs: spec.docs,
+      sourceRef: spec.sourceRef,
+      resolvedFrom: spec.sourceRef,
+    })
+
+    const slugError = slugDisagreement(spec.slug, pkg.manifest.slug)
+    if (slugError !== null) {
+      return { ok: false, error: slugError, code: 'bad_input', detail: null }
+    }
+
+    // 版本只有一处权威：清单里的 `version`（`Tool.version` 就是从它落库的）。
+    // 来源里再声明一个不同的值，就是"两处版本、没有权威"——界面显示哪个、
+    // 判决里记哪个都会变成掷骰子，所以这里拒掉，并说清该改哪儿。
+    if (spec.version !== null && spec.version !== pkg.manifest.version) {
+      return {
+        ok: false,
+        error:
+          `source.version 是「${spec.version}」，而清单里的版本是` +
+          `「${pkg.manifest.version ?? '（没写）'}」——版本只有一处权威。`,
+        code: 'bad_input',
+        detail: '请把版本写进清单的 `version` 字段（写成 x.y.z），来源里的这个值只是转述。',
+      }
+    }
+
+    return { ok: true, pkg }
+  } catch (err) {
+    if (err instanceof ToolSourceError) {
+      // 400 而不是 500：这是"输入不对"，不是"服务坏了"。
+      // code 一并返回，界面可以据此做不同的提示（比如"路径不存在"要引导去改路径）。
+      return { ok: false, error: err.message, code: err.code, detail: err.detail }
+    }
+    throw err
+  }
+}
+
 /**
  * 当前生效的 workspace 级设置（D32 的模版 + D36 的默认智能体）。
  *
@@ -430,6 +779,13 @@ async function readWorkspaceSettings(
   reviewTemplate: string
   defaultAgentId: string | null
   locale: Locale
+  /**
+   * 是否允许自动执行"不支持 dry-run"的工具动作（D40）。
+   *
+   * ⚠️ 读的地方**必须**用它做准入判定（`actions.ts` 里的守卫），不能只管显示：
+   *    界面写着"不能自动执行"而平台照跑，那是在骗使用者。
+   */
+  allowUnpreviewedActions: boolean
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -438,32 +794,43 @@ async function readWorkspaceSettings(
     defaultAgentId: workspace?.defaultAgentId ?? null,
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
+    // 老数据没有这个键 ⇒ false（**更严**的那一边：这类动作默认不自动执行）
+    allowUnpreviewedActions: workspace?.allowUnpreviewedActions ?? false,
   }
 }
 
 /**
- * 解析并校验「审核标准」（D37）。
+ * 解析并校验「审核标准」（D37 / D40）。
  *
  * 三种"没给"都算**没有标准**（`value: null`）：字段缺省、显式 `null`、正文为空白。
  * 没有标准的审核者不会拿到审核任务——那是一个**明确的状态**，不是错误
  * （使用者可能正在编辑它）。
  *
- * 校验三件事，每件都有具体的坏结果撑着：
+ * 校验两件事，每件都有具体的坏结果撑着：
  *
  *   1. **名字与正文非空**：一条没有正文的"标准"等于没有标准，而它会让
  *      "这个审核者能不能用"的判断失效（平台以为它有标准）；
- *   2. **动作必须在枚举里**：判决里的动作按它校验，写错一个动作名会让那份
- *      判决**永远不合规**（"动作 X 不在允许的动作子集内"），而使用者以为自己
- *      配好了；
- *   3. **动作不做去重以外的加工**：这里只去重，不排序、不补默认——"允许什么"
- *      必须是使用者说了算的东西，平台不替他放宽。
+ *   2. **名字不超长**：它要进界面与日志。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * D40 收口：动作权限**不在这里**（它已经搬到 `Agent.allowedActions`）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这里**只收名字与正文**：标准回答"按什么判"，`Agent.allowedActions` 回答
+ * "判完允许动什么"。所以客户端若还按老契约在 `reviewStandard` 里塞
+ * `allowedActions`，那是**老客户端**的写法——值被忽略（见下面的注释），
+ * 请求本身不报错。
+ *
+ * 校验动作的那一半现在在 `parseAgentAllowedActions` 里（同一个文件、同一套
+ * 措辞），它才是写入口。
  */
 function parseReviewStandard(
   raw: unknown,
+  warn: (message: string) => void,
 ): { ok: true; value: Agent['reviewStandard'] } | { ok: false; error: string } {
   if (raw === undefined || raw === null) return { ok: true, value: null }
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: 'reviewStandard 必须是「名字 + 正文 + 允许动作」的对象或 null' }
+    return { ok: false, error: 'reviewStandard 必须是「名字 + 正文」的对象或 null' }
   }
   const obj = raw as Record<string, unknown>
   const name = typeof obj['name'] === 'string' ? obj['name'].trim() : ''
@@ -480,25 +847,274 @@ function parseReviewStandard(
     return { ok: false, error: `reviewStandard.name 太长了（上限 100 字符，收到 ${name.length}）` }
   }
 
-  const rawActions = obj['allowedActions']
-  if (rawActions !== undefined && !Array.isArray(rawActions)) {
-    return { ok: false, error: 'reviewStandard.allowedActions 必须是数组' }
+  // ⚠️ 老字段 `reviewStandard.allowedActions` 在这里**被刻意忽略**：
+  //    协议里它降级成了"老数据的只读兼容字段"（读取时在 `Agent.allowedActions`
+  //    为空的情况下回退到它），写入口只写 `Agent.allowedActions`。
+  //    老客户端（页面还是旧的那版）会照旧把它送进来——收下它等于让同一件事
+  //    又有了两个出处，那正是这次搬家的理由。
+  //
+  //    这里不报 400：老客户端不该因为"少了一次升级"就整条保存失败。但**也不
+  //    静默**——静默的表现是"我明明配了动作，判完却说不在允许范围里"，
+  //    那是这次搬家最容易产生的一类困惑，所以日志里留一句，排查有落点。
+  const legacy = obj['allowedActions']
+  if (Array.isArray(legacy) && legacy.length > 0) {
+    warn(
+      '收到 reviewStandard.allowedActions（老契约）。动作权限已经搬到 `Agent.allowedActions`，' +
+        `这次的值（${legacy.length} 个）**不会被写入**——请改在 agent 上配动作。`,
+    )
   }
-  const actions = (rawActions ?? []) as unknown[]
-  // ⚠️ 不用 `parseAllowedActions`：那个是给技能来源解析用的，**抛异常**；
-  //    这里是路由里的校验，要的是"返回 400 并带一句可读的话"。
-  const valid = new Set<string>(ActionType.options)
-  const bad = actions.filter((a) => typeof a !== 'string' || !valid.has(a))
-  if (bad.length > 0) {
+
+  return { ok: true, value: { name, body } }
+}
+
+/**
+ * 解析并校验审核者的**动作权限**（`Agent.allowedActions`，D40 收口后的唯一写入口）。
+ *
+ * 每一项必须是**已安装工具包声明的动作**（`<包 slug>.<动作名>`，与判决
+ * `action.type` 同一个形状）——D41 之后没有内置动作了，**裸名一律不接受**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么第三方动作在保存时就校验"包装着没有"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 早拒的理由是无人值守：跑到一半才发现"策略要的动作找不到包/没声明"，就是
+ * **每一次任务都以同一个原因失败**，而那时既没有人能改，错误也指向不了配置。
+ * 在这里拒，至少有人在保存的那一刻能看到"哪个动作、因为哪个包没装"，并把包装上
+ * 或把动作去掉。
+ *
+ * ⚠️ 运行时仍然有**第二道**守卫：判决被接受之前按这份白名单校验，而且动作解析
+ *    要能真的找到包的入口。这里拒的是"配置时就知道不可能的"，那道守卫拦的是
+ *    "装进来之后包被换掉/卸载"这类变化——两道都要有。
+ *
+ * ⚠️ 只做**去重**，不排序、不补默认："允许什么"必须是使用者说了算的东西，
+ *    平台不替他放宽（也不替他收紧）。
+ */
+function parseAgentAllowedActions(
+  raw: unknown,
+  installedTools: readonly Tool[],
+): { ok: true; value: ActionRefType[] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: [] }
+  if (!Array.isArray(raw)) {
+    return { ok: false, error: 'allowedActions 必须是数组' }
+  }
+  // ⚠️ 不用 `parseAllowedActions` 那一类会**抛异常**的解析：这里是路由里的校验，
+  //    要的是"返回 400 并带一句可读的话"。
+  //
+  // ⚠️ 这里原来还有一个 `const builtin = new Set(ActionType.options)`，用来
+  //    "内置动作名原样放行"。D41 把内置动作全部移除之后那个集合不存在了，
+  //    而**留着它的等价物会更糟**：白名单里允许写一个永远解析不出来的名字，
+  //    判决一旦引用就走结构性 invalid，且不可重试。
+
+  /**
+   * 已安装工具包：slug → 它声明的动作名。
+   *
+   * 用 `slug` 做键（而不是 id）：判决里写的是 `<slug>.<动作名>`，白名单与判决
+   * 必须**按同一个东西**对齐——用 id 对齐的话，白名单里就得写一个使用者看不到
+   * 的 id，而"这个动作来自哪个包"在界面上就没法解释了。
+   */
+  const toolsBySlug = new Map<string, Set<string>>()
+  for (const tool of installedTools) {
+    toolsBySlug.set(tool.slug, new Set(tool.manifest.actions.map((a) => a.name)))
+  }
+
+  const notAnAction: string[] = []
+  const fromMissingPackage: Array<{ action: string; slug: string }> = []
+  const notDeclared: Array<{ action: string; slug: string; declared: string[] }> = []
+  const accepted: string[] = []
+
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      notAnAction.push(String(entry))
+      continue
+    }
+    const action = entry.trim()
+    // 动作名一律是 `<包 slug>.<动作名>`。形状不对的一律归到"不认识的动作"，
+    // 不猜它是想写哪个（猜错会变成"允许了一个使用者没打算允许的动作"）。
+    const slug = toolSlugOfAction(action)
+    if (slug === null) {
+      notAnAction.push(action)
+      continue
+    }
+    const declared = toolsBySlug.get(slug)
+    if (!declared) {
+      fromMissingPackage.push({ action, slug })
+      continue
+    }
+    const actionName = action.slice(slug.length + 1)
+    if (!declared.has(actionName)) {
+      notDeclared.push({ action, slug, declared: [...declared] })
+      continue
+    }
+    accepted.push(action)
+  }
+
+  if (notAnAction.length > 0) {
     return {
       ok: false,
       error:
-        `reviewStandard.allowedActions 里有不认识的动作：${bad.map((b) => String(b)).join('、')}。` +
-        `动作表是闭合的，可用：${[...valid].join('、')}`,
+        `allowedActions 里有不认识的动作：${notAnAction.join('、')}。` +
+        `动作只能来自**已安装的工具包**，写成 \`<包 slug>.<动作名>\` ` +
+        `（平台没有内置动作——D41 已经把它们全部移除了）。`,
     }
   }
-  const allowed = actions as ActionType[]
-  return { ok: true, value: { name, body, allowedActions: [...new Set(allowed)] } }
+  if (fromMissingPackage.length > 0) {
+    return {
+      ok: false,
+      error:
+        'allowedActions 里有动作来自**还没安装**的工具包：' +
+        fromMissingPackage.map((m) => `${m.action}（来自工具包「${m.slug}」）`).join('、') +
+        '。先把这些包装上（装完再配动作），或者把这些动作去掉' +
+        '——这里拒掉是因为：等到真的跑起来才发现"策略要的动作找不到包"，' +
+        '在无人值守下就是每次任务都以同一个原因失败。',
+    }
+  }
+  if (notDeclared.length > 0) {
+    return {
+      ok: false,
+      error:
+        'allowedActions 里有工具包**没有声明**的动作：' +
+        notDeclared
+          .map(
+            (m) =>
+              `${m.action}（工具包「${m.slug}」声明的是：${m.declared.join('、') || '（没有动作）'}）`,
+          )
+          .join('；') +
+        '。多半是拼错了动作名——这个动作在运行时找不到实现，会让每一次判决都不合规。',
+    }
+  }
+
+  // ⚠️ 这里必须 cast：`ActionRefType` 的形状（正则）比"已安装包里真的有这个
+  //    动作"宽，而上面已经**逐条查过**每个动作来自已安装且确实声明了该动作的包，
+  //    所以运行时是安全的。不收窄的话这条路由会比协议更严，表现就是"装得上的
+  //    工具动作、agent 上却配不进去"。
+  return { ok: true, value: [...new Set(accepted)] as ActionRefType[] }
+}
+
+/**
+ * 解析并校验动作的**固定参数**（`Agent.actionParams` / `SubmitRunRequest.actionParams`，
+ * D43）。
+ *
+ * 形状：`Record<动作名, Record<参数名, 值>>`。两条判据：
+ *
+ *   1. **每个动作都必须是已安装工具包声明的动作**——与 `parseAgentAllowedActions`
+ *      同一条规矩、同一个理由（早拒：无人值守下"策略要的动作找不到包"就是每次
+ *      任务都以同一个原因失败）。
+ *   2. **每个参数都必须是那个动作的 open 参数、且值满足声明**（类型/上限/枚举）
+ *      ——固定参数与模型填的开放参数走**同一个**取值判据
+ *      （`validateFixedParams` → `openValueIssue`），否则会出现"模型填 `channel:
+ *      'qq'` 被拒、使用者在界面上设 `channel: 'qq'` 却存得进去"这种自相矛盾。
+ *      bound 参数一律拒：那是平台按事实注入的，不归使用者钉。
+ *
+ * ⚠️ 只做**去重**（同动作重复键后者覆盖前者），不排序、不补默认。
+ */
+function parseAgentActionParams(
+  raw: unknown,
+  installedTools: readonly Tool[],
+): { ok: true; value: Record<ActionRefType, Record<string, unknown>> } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: {} }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'actionParams 必须是对象：动作名 → 参数名 → 值' }
+  }
+
+  const definitions = toolActionDefinitions(installedTools)
+  const out: Record<string, Record<string, unknown>> = {}
+  const unknownActions: string[] = []
+  const badParams: string[] = []
+
+  for (const [type, params] of Object.entries(raw as Record<string, unknown>)) {
+    const definition = definitions[type as ActionRefType]
+    if (!definition) {
+      // 与 allowedActions 同一套"为什么拒"的说法：动作要来自**已安装**的包。
+      unknownActions.push(type)
+      continue
+    }
+    if (typeof params !== 'object' || params === null || Array.isArray(params)) {
+      badParams.push(`${type}（参数必须是对象）`)
+      continue
+    }
+    const check = validateFixedParams(definition, params as Record<string, unknown>)
+    if (!check.ok) {
+      badParams.push(`${type}：${check.issues.join('；')}`)
+      continue
+    }
+    out[type] = { ...(params as Record<string, unknown>) }
+  }
+
+  if (unknownActions.length > 0) {
+    return {
+      ok: false,
+      error:
+        'actionParams 里有动作来自**还没安装**的工具包（或那个包没有声明这个动作）：' +
+        unknownActions.join('、') +
+        '。先把这些包装上（装完再配固定参数），或者把这一项去掉——' +
+        '固定参数是给"这一次判决要触发的动作"钉值的，动作都不存在，参数就无处安放。',
+    }
+  }
+  if (badParams.length > 0) {
+    return {
+      ok: false,
+      error:
+        'actionParams 里有参数不合规：' +
+        badParams.join('；') +
+        '。固定参数只能设这个动作的 open 参数（模型本来要填的那几个），' +
+        '值必须满足声明（类型 / 上限 / 枚举）；bound 参数是平台按事实注入的，不归使用者钉。',
+    }
+  }
+
+  return { ok: true, value: out as Record<ActionRefType, Record<string, unknown>> }
+}
+
+/**
+ * ★ 只有**审核者**能有非空的 `allowedActions`（D40）。
+ *
+ * 执行者的能力是**工具**（`toolIds`，它干活时用的），而动作是**判完之后**由
+ * 平台执行的——那份判断属于审核者。给执行者配动作权限是把两件事混在一起：
+ * 它会看起来"能自己改状态"，而实际上那条链路（判决 → 动作）根本不经过它。
+ *
+ * 与"审核者不挂工具"是对称的两条：各自的能力只给各自的人。
+ *
+ * 写成函数而不是在两处各写一个 `if`：POST 与 PATCH 的措辞必须一致，而且
+ * PATCH 那边还要考虑"角色与动作在同一个请求里一起改"，那正是最容易漏的一处。
+ */
+function rejectActionsForExecutor(input: {
+  role: Agent['role']
+  actions: readonly string[]
+  /**
+   * 这次请求里**有没有带非空的固定参数**（`actionParams`，D43）。
+   *
+   * 固定参数与动作权限同一条角色规矩（只属于审核者）：执行者连动作都不能有，
+   * 给动作钉固定参数更是无从谈起——它会看起来"能自己决定怎么改状态"。
+   */
+  hasActionParams: boolean
+  /** 这句话会进错误信息：说清是谁。 */
+  who: string
+  /** 是不是这次请求**主动给了**动作（决定提示语的下一步怎么指）。 */
+  gaveActions: boolean
+}): string | null {
+  if (input.role === 'reviewer' || (input.actions.length === 0 && !input.hasActionParams)) {
+    return null
+  }
+  if (input.gaveActions) {
+    return (
+      `执行者不能有动作权限（allowedActions）：收到 ${input.actions.length} 个（` +
+      `${input.actions.join('、')}）。` +
+      '执行者的能力是**工具**（toolIds，干活时用的），而动作是**判完之后**由平台执行的' +
+      '——那份判断属于审核者。要让它判完之后能做什么，把角色改成审核者（reviewer）' +
+      '并在同一个请求里带上动作。'
+    )
+  }
+  if (input.hasActionParams) {
+    return (
+      `${input.who}现在配置了动作的固定参数（actionParams），不能把角色改成执行者：` +
+      '固定参数是给"判完之后要触发的动作"钉值的，而执行者的能力是**工具**（toolIds）。' +
+      '先把固定参数清空（actionParams 传空对象），再改角色。'
+    )
+  }
+  return (
+    `${input.who}现在有 ${input.actions.length} 个动作权限，不能把角色改成执行者：` +
+    '动作是**判完之后**由平台执行的，执行者的能力是**工具**（toolIds）。' +
+    '先把动作清空（allowedActions 传空数组），再改角色。'
+  )
 }
 
 /**
@@ -565,24 +1181,15 @@ function parseEnvMap(
 }
 
 /**
- * 校验动作子集。
+ * 安装 skill 的动作配置校验**已经删掉**（D40 收口）。
  *
- * ⚠️ 这里**不能容错**：动作表是闭合的（INV-9），一个不在表里的动作会让
- * 使用这条 skill 的**每一次判决**都判为不合规。装的时候放过去，等于给使用者
- * 埋一个"审核永远失败"的坑，而且原因看起来跟我们无关。
+ * 这里原来有一个 `parseAllowedActions`：它校验安装 skill 时带来的动作子集，
+ * 并写进 `Skill.allowedActions`。那个字段与那条路都不存在了——动作权限住在
+ * 审核者身上（`Agent.allowedActions`，校验见 `parseAgentAllowedActions`），
+ * 而 skill 只剩"正文 + 支持文件"。
+ *
+ * ⚠️ 别再把它加回来：一旦 skill 又能声明动作，"谁能改状态"就又有了第二个出处。
  */
-function parseAllowedActions(raw: readonly unknown[]): Skill['allowedActions'] {
-  const valid = new Set<string>(ActionType.options)
-  const bad = raw.filter((a) => typeof a !== 'string' || !valid.has(a))
-  if (bad.length > 0) {
-    throw new SkillSourceError(
-      'bad_input',
-      `不认识的动作：${bad.map((b) => String(b)).join('、')}`,
-      `动作表是闭合的，可用：${[...valid].join('、')}。`,
-    )
-  }
-  return raw as Skill['allowedActions']
-}
 
 export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const warn = options.onWarn ?? ((m: string) => console.warn(`[warn] ${m}`))
@@ -610,14 +1217,33 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const locks = new WorkDirLocks()
   const semaphore = new Semaphore(options.maxConcurrentRuns ?? 20)
 
+  // ★ D40：第三方动作（工具包里的脚本）要有人真的去起进程。
+  //   临时目录放在**数据目录下**：受限环境（沙箱）写不了系统临时目录，而且系统
+  //   临时目录是所有进程共享的。脚本文件与它的 HOME 都落在这一次执行的专用子目录
+  //   里，跑完即删（见 `apps/daemon/src/script-executor.ts` 的 finally）。
+  //   `node` 解释器用 daemon 自己那个（`process.execPath`），不查 PATH——脚本因此
+  //   与平台跑在同一个 node 上，也不受使用者的 PATH 影响。
+  const executeToolScript = createScriptExecutor({
+    tempRoot: join(options.dataDir, 'tool-tmp'),
+    ...(options.scriptRuntimePath ? { nodePath: options.scriptRuntimePath } : {}),
+  })
+
   const actionRunner = new ActionRunner({
     store,
-    deriveRun: (req) => deriveRunFromAction(req),
+    // ⚠️ 这里原来还有 `deriveRun: (req) => deriveRunFromAction(req)`——内置动作
+    //    `issue.assign_agent` 用来派生新 run 的回调。D41 之后动作**只能**来自
+    //    工具包、而工具脚本改不了平台数据，所以不再有任何东西需要这个回调。
+    executeToolScript,
+    onWarn: warn,
   })
   const reviewCoordinator = new ReviewCoordinator({
     store,
     actions: actionRunner,
     createRetryRun: (run) => createRetryRun(run),
+    // ★ D45：审核判 `fail` ⇒ 把意见交回**执行者**重做。
+    //   与 `createRetryRun` 方向相反：那个重做的是**审核者**（它没按格式输出），
+    //   这个重做的是**活本身**。
+    createReworkRun: (run, verdict) => createReworkRun(run, verdict),
   })
 
   const executor = new RunExecutor({
@@ -685,6 +1311,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return { runId: null, note: '没有串接审核：找不到这次执行用的 agent（它可能已被删除）' }
     }
 
+    // ★ 本次任务的覆盖优先（`Run.reviewerAgentId`，见新建任务页的三步链）。
+    //
+    //   三态必须分开处理，不能都折成"有没有值"：
+    //     `null`      = 这次**明确不审**——它不是配置缺失，所以既不警告也不劝
+    //                   使用者去智能体页配一个；
+    //     省略        = 跟随下面的长期安排（D28）；
+    //     agent id    = 这次换人审，覆盖 D28 的长期安排。
+    const override = input.executeRun.reviewerAgentId
+    if (override === null) {
+      return {
+        runId: null,
+        note:
+          '没有串接审核：这次任务在新建时选择了「这次不自动审核」。' +
+          '这是**明确的选择**，不是配置错误。',
+      }
+    }
+
     // ★ D28：**由这个执行 agent 自己指定**审核者，而不是"从别人里挑一个"。
     //
     //   原来是从其他 agent 里找兜底者、再退回第一个——那个规则有个很隐蔽的
@@ -693,7 +1336,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   应该被明确指定的事。
     //
     //   `reviewerAgentId` 为空 = 明确选择不自动审（不是配置错误）。
-    if (!executor.reviewerAgentId) {
+    const wanted = override ?? executor.reviewerAgentId
+    if (!wanted) {
       return {
         runId: null,
         note:
@@ -702,16 +1346,74 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
     }
 
-    const reviewer = agents.find((a) => a.id === executor.reviewerAgentId)
+    const reviewer = agents.find((a) => a.id === wanted)
     if (!reviewer) {
       warn(
-        `agent ${executor.name} 指定的审核者已不存在（${executor.reviewerAgentId}），跳过自动审核`,
+        `agent ${executor.name} 指定的审核者已不存在（${wanted}），跳过自动审核`,
       )
+      // ★ 通知，不只是日志。
+      //
+      //   这一档与上面两档**不是一回事**：上面那两档是"本来就没打算审"（D28 里
+      //   合法的选择），所以它们只写 run 记录、不打扰人；而这一档是**出事了**——
+      //   配置过一次、现在失效了，于是这条产出**没被审，而状态一切正常**。
+      //   只写一行日志的话，发现它的唯一途径是有人去翻这条 run 的日志。
+      //   （同一条道理在"链路深度超限"那档已经用过：意外 + 有后果 ⇒ 进通知中心。）
+      await store.appendInboxItem({
+        id: ulid(),
+        workspaceId,
+        type: 'review.reviewer_missing',
+        severity: 'attention',
+        title: '审核者不存在，这条产出没有被审核',
+        body:
+          override === undefined
+            ? `执行者「${executor.name}」长期指定的审核者已经不在了（id ${wanted}）。` +
+              `这条执行 run 的产出因此没有被自动审核。请去智能体页重新指定一个审核者。`
+            : `这条任务在新建时指定的审核者已经不在了（id ${wanted}）——它在创建之后被删掉了。` +
+              `这条产出因此没有被自动审核，请重试并重新选一个审核者。`,
+        issueId: issueIdOfSubject(input.executeRun),
+        runId: input.executeRun.id,
+        read: false,
+        createdAt: Date.now(),
+      })
       return {
         runId: null,
         note:
-          `没有串接审核：agent「${executor.name}」指定的审核者已经不存在了` +
-          `（id ${executor.reviewerAgentId}）。请在智能体页重新指定一个。`,
+          override === undefined
+            ? `没有串接审核：agent「${executor.name}」指定的审核者已经不存在了` +
+              `（id ${wanted}）。请在智能体页重新指定一个。`
+            : `没有串接审核：这次任务指定的审核者已经不存在了（id ${wanted}）。` +
+              `它是在新建任务之后被删掉的，请重试并重新选一个。`,
+      }
+    }
+
+    // 角色在这里再过一遍：提交时校验过一次，但 agent 的角色之后可以被改。
+    // 真出现"审核者是执行者角色"，那必须跳过而不是照跑——否则 INV-1 就破了，
+    // 而表现是"审核结论看着正常"。
+    //
+    // ★ 同样要发通知（理由与上面那条一样）：这是"配置过、现在失效"，
+    //   而不是"本来就不审"。
+    if (reviewer.role !== 'reviewer') {
+      warn(`审核者 ${reviewer.name} 当前角色是 ${reviewer.role}，不是 reviewer，跳过自动审核`)
+      await store.appendInboxItem({
+        id: ulid(),
+        workspaceId,
+        type: 'review.reviewer_role_changed',
+        severity: 'attention',
+        title: '审核者的角色被改了，这条产出没有被审核',
+        body:
+          `「${reviewer.name}」现在的角色是「${reviewer.role}」，不再是「审核者」，` +
+          `所以这条执行 run 的产出没有被自动审核（执行者与审核者不能是同一个人，INV-1）。` +
+          `请重新指定一个审核者。`,
+        issueId: issueIdOfSubject(input.executeRun),
+        runId: input.executeRun.id,
+        read: false,
+        createdAt: Date.now(),
+      })
+      return {
+        runId: null,
+        note:
+          `没有串接审核：agent「${reviewer.name}」的角色已经不是「审核者」了` +
+          `（当前是「${reviewer.role}」）。请重新指定一个审核者。`,
       }
     }
 
@@ -744,6 +1446,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       body: input.output.slice(0, 20_000),
       subject: { type: 'run', id: input.executeRun.id },
       chainDepth: depth,
+      // ★ 把这一次的动作白名单**带下去**（D42）：新建任务页 ③ 上勾的那份决定，
+      //   是"这一次允许触发什么"，而它要生效的地方是审核侧（判决契约 + 收口校验）。
+      //   原样带（不要 `?? []`）：缺字段 = 跟随审核者自己的「行动权限」。
+      ...(input.executeRun.allowedActions === undefined
+        ? {}
+        : { allowedActions: input.executeRun.allowedActions }),
+      // ★ 把这一次的固定参数**带下去**（D43）：与白名单同一个判据——缺字段 =
+      //   跟随审核者长期的固定参数（`Agent.actionParams`）。
+      ...(input.executeRun.actionParams === undefined
+        ? {}
+        : { actionParams: input.executeRun.actionParams }),
       // ★ 把 issue 交给模型：判决里的动作参数需要它
       relatedIssueId: issueIdOfSubject(input.executeRun),
       prompt: '请审核上面这次执行的产出，并按审核标准给出判决。',
@@ -764,6 +1477,47 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const probe2 = await backend.probe()
 
   const workspaceId = await bootstrap(store, info)
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 启动时清掉"永远不可能被满足"的动作名（D41 收尾）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // D41 删掉平台的内置动作之后，老工作区里存着的那串名字（`comment.create` /
+  // `issue.add_label` …）就成了死名字：它们既不是内置动作、也不对应任何已装包。
+  // 留着它们的唯一效果是**使用者打开审核者、点保存、被 400 拦住**——而那句
+  // 报错把"平台自己造成的残留"变成了他的待办。
+  //
+  // 三条边界见 `dead-actions.ts` 的文件头：只删永远不可能成立的、改了谁要说清
+  // （日志 + 通知）、别的字段一个字不碰。
+  {
+    const agents = await store.listAgents(workspaceId)
+    const tools = await store.listTools(workspaceId)
+    const plan = planDeadActionCleanup(agents, tools)
+    if (plan.changed.length > 0) {
+      await applyDeadActionCleanup(store, workspaceId, plan)
+      for (const item of plan.changed) {
+        info(
+          `清掉了「${item.agentName}」身上 ${item.dropped.length} 个已失效的动作名：` +
+            `${item.dropped.join('、')}（平台不再内置动作，它们也对应不上任何已装的工具包）`,
+        )
+        await store.appendInboxItem({
+          id: ulid() as InboxItem['id'],
+          workspaceId,
+          type: 'action.invalid_cleaned',
+          severity: 'info',
+          read: false,
+          createdAt: Date.now(),
+          title: `行动权限里清掉了 ${item.dropped.length} 个已失效的动作名`,
+          body:
+            `「${item.agentName}」原来配着 ${item.dropped.join('、')}——平台已经不再内置动作，` +
+            `它们也对应不上任何已安装的工具包，所以永远不会生效。已经去掉；` +
+            `要让它能做什么，去「工具」页装对应的包，再在它的「行动权限」里勾上。`,
+          issueId: null,
+          runId: null,
+        })
+      }
+    }
+  }
 
   // ★ Web UI 的构建产物不进版本库（gitignore），所以 clone 下来直接起 daemon
   //   会**没有界面**。这种情况必须说清楚怎么做，而不是发一个空白页让人以为
@@ -825,6 +1579,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     chainDepth: number
     inputBlobRef?: BlobRef | null
     relatedIssueId?: string | null
+    /**
+     * ★ 任务级动作白名单（D42）：**从被审的那条执行 run 带下来**。
+     *
+     * `undefined` = 跟随这个审核者自己的「行动权限」（默认，也是报告/重试那条
+     * 路的形态）；给了（含空数组）= 这一次就用它。
+     *
+     * ⚠️ **原样带，不要 `?? []`**：那会把"跟随"变成"这一次一个动作都不许触发"，
+     *    而表现是判决永远只能给结论——没有任何地方会解释为什么。
+     */
+    allowedActions?: readonly ActionRefType[]
+    /**
+     * ★ 任务级固定参数（D43）：与白名单同一个判据——**从被审的那条执行 run
+     *    带下来**。`undefined` = 跟随这个审核者长期配的那份；给了（含空对象）=
+     *    这一次就用它（空对象 = 这一次不固定任何参数，是明确的选择）。
+     */
+    actionParams?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>
   }): Promise<RunId | null> {
     const { reviewer } = input
     // ★ 技能按 agent 求解（不是全局挂一遍，D22）——
@@ -849,7 +1619,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         body: s.body,
         // 协议里是 optional（`string | undefined`），实体上是 `string | null`
         ...(s.description ? { description: s.description } : {}),
-        allowedActions: s.allowedActions,
+        // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后 skill
+        //    载荷里没有这一项了（动作权限是审核者的能力，见 `Agent.allowedActions`）
+        //    ——skill 从执行侧到审核侧都只剩"正文 + 支持文件"。
         // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
       })),
@@ -858,6 +1630,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       agentDefaultWorkDir: reviewer.workDir ?? undefined,
       limits: { maxTurns: null, timeoutMs: null },
       chainDepth: input.chainDepth,
+      // ★ 任务级白名单**原样带下去**（D42）：它是"这一次允许触发什么"这个决定在
+      //   审核侧的落点——契约里列哪些动作、判决收口时按哪份校验，都用它。
+      ...(input.allowedActions === undefined
+        ? {}
+        : { allowedActions: [...input.allowedActions] }),
+      // ★ 任务级固定参数**原样带下去**（D43）：与白名单同一个判据（字段在不在）。
+      ...(input.actionParams === undefined
+        ? {}
+        : { actionParams: input.actionParams }),
       review: {
         kind: input.kind,
         title: input.title,
@@ -994,7 +1775,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         body: s.body,
         // 协议里是 optional（`string | undefined`），实体上是 `string | null`
         ...(s.description ? { description: s.description } : {}),
-        allowedActions: s.allowedActions,
+        // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后 skill
+        //    载荷里没有这一项了（动作权限是审核者的能力，见 `Agent.allowedActions`）
+        //    ——skill 从执行侧到审核侧都只剩"正文 + 支持文件"。
         // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
       })),
@@ -1030,58 +1813,50 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
 
   /**
-   * ★ 动作派生 run 的真实实现（M2 闭环，INV-16）。
+   * 审核判 `fail` ⇒ 派生一条**返工** run（D45）：把审核意见交回执行者重做。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 早先这里是一个占位字符串
+   * 与 `createRetryRun` 的三处关键差别
    * ══════════════════════════════════════════════════════════════════
    *
-   * 旧实现返回 `pending:<issueId>:<agentId>`。它看起来像"派生成功"，
-   * 实际上没有 run 被创建——于是**环检测端到端从未被真正走到过**，
-   * 因为环需要真的有一条链路才存在。
+   * | | `createRetryRun` | `createReworkRun` |
+   * |---|---|---|
+   * | 重做的是谁 | **审核者**（它没按格式输出判决） | **执行者**（活本身不合格） |
+   * | run 的类型 | `review`（重发一次审核） | `execute`（重做一次活） |
+   * | 链深 | 不变（同一步的再试） | **+1**（确实是往前走了一步） |
    *
-   * ══════════════════════════════════════════════════════════════════
-   * 两条在这里落地的约束
-   * ══════════════════════════════════════════════════════════════════
+   * 返工之后**审核会再串一次**：新的执行 run 收尾时照常走 `autoChainReview`，
+   * 于是"执行 → 审核"这个回路能一直转到额度用完为止。
    *
-   * **① `derivedFrom` 必须写上。** 它是重建链路唯一的边；漏写的话下一次
-   *    环检测就看不到这一步，"派生"会变成一条单向遗忘。
-   *
-   * **② `chainDepth` 从真实链路推出来，而不是 `父 + 1`。**
-   *    两者在正常数据下相等，但真实链路还带着"环"这个信息——
-   *    一旦有人手改过数据，只有链路上算出来的深度是可信的。
-   *
-   * 返回 `null` 是**正常的**：agent 不存在、没有挂载技能都会走到这里。
-   * 调用方会把 `spawnedRunId: null` 如实记录，而不是编一个 id。
+   * ⚠️ **任务级的三个覆盖必须一起带下来**（`reviewerAgentId` / `allowedActions` /
+   *    `actionParams`）：它们表达的是"这一次任务怎么跑"的决定，而返工 run 还是
+   *   同一次任务。不带下去的话，第二轮会悄悄退回 agent 的长期配置——表现是
+   *   第一轮勾掉的动作在第二轮又活了，而没有任何地方会提示这件事。
    */
-  async function deriveRunFromAction(req: DeriveRunRequest): Promise<string | null> {
-    const issueId = req.params['issueId']
-    const agentId = req.params['agentId']
-    if (typeof issueId !== 'string' || typeof agentId !== 'string') {
-      warn(`动作派生的参数不完整：${JSON.stringify(req.params)}`)
+  async function createReworkRun(run: Run, verdict: VerdictRecord): Promise<string | null> {
+    // ① 被审的那条执行 run：返工的对象是它，目录、会话、agent 都从它来。
+    if (run.subject.type !== 'run') {
+      warn(`返工只对"审一条 run"有意义，subject 是 ${run.subject.type}，这次不返工`)
+      return null
+    }
+    const target = await store.getRun(run.subject.id as RunId)
+    if (!target) {
+      warn(`找不到被审的执行 run ${run.subject.id}，这次不返工`)
+      return null
+    }
+    if (target.kind !== 'execute') {
+      // 审一条审核 run（理论上不该出现）⇒ 不能把"返工"套上去
+      warn(`被审的 run ${target.id.slice(-8)} 不是执行 run，这次不返工`)
       return null
     }
 
-    const agent = await store.getAgent(agentId as Agent['id'])
+    const agent = await store.getAgent(target.agentId)
     if (!agent) {
-      warn(`动作要指派的 agent 不存在：${agentId}`)
+      warn(`无法为返工找到执行者 ${target.agentId}`)
       return null
     }
 
-    // ⚠️ 这里原来要求"必须挂了 skill 才能执行派生出的 run"，而同一个动作在
-    //    「新建任务」那条路上**没有**这个要求（执行者可以不挂 skill，产出由审核者
-    //    按标准判）——同一件事两套判据。D37 把"标准"从 skill 里摘出来之后这条
-    //    就更说不通了：执行者的 skill 是"做事时参考什么"，跟"能不能干活"无关。
-    const issue = await store.getIssue(issueId as Issue['id'])
-    if (!issue) {
-      warn(`动作要指派的 issue 不存在：${issueId}`)
-      return null
-    }
-
-    // ★ 执行者挂着 skill 就照旧注入（它是"做事时参考什么"），挂不挂都不影响
-    //   能不能接这条任务——门槛在上面被去掉了。
     const skills = await loadAgentSkills(store, agent)
-
     const runId = ulid() as RunId
     const outcome = await executor.submit({
       runId,
@@ -1092,31 +1867,101 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         slug: s.slug,
         name: s.name,
         body: s.body,
-        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
         ...(s.description ? { description: s.description } : {}),
-        allowedActions: s.allowedActions,
-        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
         files: s.files ?? {},
       })),
-      subject: { type: 'issue', id: issue.id },
-      prompt:
-        `你被指派处理 issue「${issue.title}」。\n\n` +
-        `${issue.description || '（没有更多描述）'}\n\n` +
-        `这条任务是由一次审核判决派生出来的，请完成它。`,
-      agentDefaultWorkDir: agent.workDir ?? undefined,
+      // ★ subject 用**被审那条 run 的**（也就是原任务），不是审核 run 的
+      //   （审核 run 的 subject 是 `{type:'run'}`——照抄会变成"让执行者去做
+      //   一条 run"，语义完全错，而且它会被当成一条新的审核链）。
+      subject: target.subject,
+      prompt: reworkPrompt(verdict),
+      // ★ 同一个工作目录：返工是"在原地改"，不是"另起一摊"。
+      //   落进空目录会让它看不见上次干了什么、也看不见自己留下的文件。
+      workDir: target.workDir ?? undefined,
       limits: { maxTurns: null, timeoutMs: null },
-      // ★ 链路：这一环来自那个动作
-      chainDepth: depthFromChain(req.chainSteps) + 1,
-      derivedFrom: req.fromActionId,
+      // ★ 链深 +1：这是**往前走了一步**（与 `createRetryRun` 的"同一步再试"
+      //   不同）。额度判据就靠它——`maxReworks` 是"允许几次"，它就是"已经几次"。
+      chainDepth: target.chainDepth + 1,
+      // ★ 会话恢复：执行者上次干过这活，让它接着上下文改，而不是从零再来一遍。
+      resumeFromRunId: target.id,
+      // ★ 任务级决定原样带下去（缺字段 = 跟随长期配置，这里也一样：只有原来
+      //   真的给了才带，不能 `?? null` / `?? []`——那会把"照旧"变成"明确不用"）。
+      ...(target.maxReworks !== undefined ? { maxReworks: target.maxReworks } : {}),
+      ...(target.reviewerAgentId === undefined
+        ? {}
+        : { reviewerAgentId: target.reviewerAgentId }),
+      ...(target.allowedActions === undefined
+        ? {}
+        : { allowedActions: [...target.allowedActions] }),
+      ...(target.actionParams === undefined ? {} : { actionParams: target.actionParams }),
     })
 
     if (outcome.kind !== 'accepted') {
-      warn(`动作派生的 run 未被受理：${outcome.kind}`)
+      warn(`返工 run 未被受理：${outcome.kind}`)
       return null
     }
-    info(`动作派生出一条新 run：${runId}（agent ${agent.name} ← issue ${issue.title}）`)
+    info(`审核不通过，已派生返工 run：${runId}（第 ${target.chainDepth + 1} 次）`)
     return runId
   }
+
+  /**
+   * 返工 run 的指令：**审核意见**（D45）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么必须先说"这是审核意见"，再说"请改"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 执行者拿到的是一个**新的 run**（不是"有人给我留言了"），如果不点明这层
+   * 来历，它会以为这是又一个新任务、从头再做一遍——上次干过什么、为什么被打回
+   * 全都不知道。而"接着上次改"恰恰是返工省下的那部分成本。
+   *
+   * 意见本身按**结构化**给（理由码 + 逐条 findings + 证据指向），不是一段转述：
+   * findings 里的 `evidence.locator` 是审核者指回产出原文的位置，少掉它执行者
+   * 只能靠猜"它说的到底是哪一段"。
+   */
+  function reworkPrompt(verdict: VerdictRecord): string {
+    const lines: string[] = [
+      '上一次的产出**没有通过审核**。请按下面的审核意见修改后重新交付。',
+      '',
+      `审核结论：${verdict.conclusion}（理由码：${verdict.reasonCode}）`,
+    ]
+    if (verdict.findings.length > 0) {
+      lines.push('', '审核意见：')
+      for (const f of verdict.findings) {
+        lines.push(`- [${f.severity}] ${f.summary}`)
+        for (const e of f.evidence) {
+          // locator / excerpt 都是可空的：有什么给什么，不编
+          const where = [e.locator, e.excerpt].filter(Boolean).join('：')
+          if (where) lines.push(`    证据：${where}`)
+        }
+        // `detail` 是判决里唯一自由发挥的字段（往往放着"建议怎么改"）
+        if (f.detail !== null && f.detail !== undefined) {
+          lines.push(`    补充：${JSON.stringify(f.detail)}`)
+        }
+      }
+    }
+    lines.push(
+      '',
+      '要求：',
+      '- **只改需要改的地方**，不要顺手扩大范围或重写已经通过的部分。',
+      '- 完成后照常给出一份报告：改了什么、为什么这样改、还有哪些不确定的地方。',
+    )
+    return lines.join('\n')
+  }
+
+  /**
+   * ⚠️ 这里原来还有一个 `deriveRunFromAction()`——`issue.assign_agent` 的
+   * "指派之后派生一条新 run"那一半（写上 `derivedFrom`、按链路算 `chainDepth`）。
+   *
+   * D41 把内置动作全部移除之后，**没有任何动作能派生 run 了**（工具脚本只能改
+   * 工作目录里的东西，它没有平台 API），所以这份实现连同 `ActionRunner` 的
+   * `deriveRun` 回调一起删掉了。
+   *
+   * ⚠️ **但"判完之后派生一条新 run"这件事已经回来了**（D45）：审核判 `fail`
+   * 时派生的**返工 run** 就是它。差别是触发者不再是某个动作，而是**判决本身**
+   * ——受控得多：它由 `maxReworks` 限额、由 `chainDepth` 计数、由终态判决收口，
+   * 走的是 `createReworkRun` 而不是动作回调。
+   */
 
   // ── Host 校验：防 DNS rebinding ──
   const server = createServer((req, res) => {
@@ -1231,7 +2076,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         //   而不是先闪一下中文再切过来（D39）
         locale: (await readWorkspaceSettings(store, workspaceId)).locale,
         runtimes,
-        capabilities: [Capability.SseResume, Capability.Artifacts],
+        capabilities: [
+          Capability.SseResume,
+          Capability.Artifacts,
+          // ★ D42：页面要据此决定"这一次换人审 / 这一次不审"给不给。
+          //   理由见 `Capability.ReviewerOverride` 的注释——旧 daemon 会**静默
+          //   忽略**那个字段，于是界面说的与实际发生的不一致。
+          Capability.ReviewerOverride,
+          // ★ 任务级动作白名单是**另一个**字段，所以是另一个标志（理由见协议里
+          //   `Capability.TaskActionWhitelist`）：合成一个会漏掉"支持前者、不支持
+          //   后者"的中间态——那时勾选会被静默丢掉，而使用者以为这次允许了它动手。
+          Capability.TaskActionWhitelist,
+        ],
       })
       return
     }
@@ -1322,6 +2178,33 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       await store.insertWorkspace({ ...workspace, locale: raw, updatedAt: Date.now() })
       sendJson(res, 200, { locale: raw })
+      return
+    }
+
+    // ── 「不支持预演的动作」准不准自动执行（D40）──
+    //
+    // ★ 这是**准入**，不是偏好：工具包里的脚本会在使用者机器上真的改东西，而
+    //   `dryRun: "unsupported"` 是作者在说"我保证不了先告诉你我要改什么"。
+    //   默认 false ⇒ 平台**真的不执行**这类动作（守卫在 `actions.ts`），要放行
+    //   必须有人在这里显式打开；界面同时给出警告。
+    if (req.method === 'PUT' && path === '/api/workspace/unpreviewed-actions') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['allow']
+      if (typeof raw !== 'boolean') {
+        sendJson(res, 400, { error: `allow 必须是布尔值（收到 ${JSON.stringify(raw)}）` })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({
+        ...workspace,
+        allowUnpreviewedActions: raw,
+        updatedAt: Date.now(),
+      })
+      sendJson(res, 200, { allowUnpreviewedActions: raw })
       return
     }
 
@@ -1467,9 +2350,48 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      const standardCheck = parseReviewStandard(body['reviewStandard'])
+      // 审核标准只收"名字 + 正文"（D40：动作权限不在标准里了，见那个函数）
+      const standardCheck = parseReviewStandard(body['reviewStandard'], warn)
       if (!standardCheck.ok) {
         sendJson(res, 400, { error: standardCheck.error })
+        return
+      }
+
+      // ★ 动作权限（D40 收口）：写在 **agent** 上，不再是"安装 skill 时那段配置"，
+      //   也不再住在审核标准里。第三方动作要对着**已安装的工具包**校验，所以先
+      //   把它们取出来（`<包 slug>.<动作名>`）。
+      const actionsCheck = parseAgentAllowedActions(
+        body['allowedActions'],
+        await store.listTools(workspaceId),
+      )
+      if (!actionsCheck.ok) {
+        sendJson(res, 400, { error: actionsCheck.error })
+        return
+      }
+      // ★ 动作的固定参数（D43）：与动作权限同一条角色规矩（只属于审核者），
+      //   校验对着已安装的工具清单（动作必须装着了、参数必须是 open 且值合规）。
+      const paramsCheck = parseAgentActionParams(
+        body['actionParams'],
+        await store.listTools(workspaceId),
+      )
+      if (!paramsCheck.ok) {
+        sendJson(res, 400, { error: paramsCheck.error })
+        return
+      }
+
+      // ★ 只有审核者能有非空的动作权限（执行者的能力是工具）。
+      //   角色是在这个请求里一起给的，所以"从执行者改成审核者 + 同时带上动作"
+      //   是一次合法的请求——判据用的是**这次要写下去的**角色。固定参数同一条
+      //   规矩（`hasActionParams`）：执行者连动作都不能有，钉固定参数更是无从谈起。
+      const actionsForRole = rejectActionsForExecutor({
+        role: roleCheck.role,
+        actions: actionsCheck.value,
+        hasActionParams: Object.keys(paramsCheck.value).length > 0,
+        who: `「${name}」`,
+        gaveActions: body['allowedActions'] !== undefined && body['allowedActions'] !== null,
+      })
+      if (actionsForRole !== null) {
+        sendJson(res, 400, { error: actionsForRole })
         return
       }
 
@@ -1498,6 +2420,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             : null,
         skillIds: skillIds as Agent['skillIds'],
         toolIds: [],
+        // ★ 动作权限（D40 收口）：审核者"判完允许动什么"，校验在上面
+        allowedActions: actionsCheck.value,
+        // ★ 动作的固定参数（D43）：界面上钉死的 open 参数值，校验在上面
+        actionParams: paramsCheck.value,
         env: envCheck.value,
         role: roleCheck.role,
         reviewerAgentId: roleCheck.reviewerAgentId,
@@ -1554,6 +2480,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           'env',
           // D37：审核标准（内联在 agent 上）
           'reviewStandard',
+          // ★ D40 收口：动作权限从标准（与 skill）搬到了 agent 上，所以它是这个
+          //   接口认识的字段之一。不在白名单里的话，"给审核者配动作"就只剩
+          //   重建一个 agent 这一条路。
+          'allowedActions',
+          // ★ D43：动作的固定参数——与 `allowedActions` 同一条规矩（只属于审核者）。
+          //   不在白名单里的话，"在界面上给动作钉值"就只剩重建一个 agent 这条路。
+          'actionParams',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -1665,12 +2598,86 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
 
         if (body['reviewStandard'] !== undefined) {
-          const standardCheck = parseReviewStandard(body['reviewStandard'])
+          // 同新建时：只收名字与正文（动作权限已经不在标准里了，见那个函数）
+          const standardCheck = parseReviewStandard(body['reviewStandard'], warn)
           if (!standardCheck.ok) {
             sendJson(res, 400, { error: standardCheck.error })
             return
           }
           patch.reviewStandard = standardCheck.value
+        }
+
+        // ★ 动作权限（D40 收口）：改它的入口在这里。
+        //   第三方动作照旧对着本工作区**已安装的工具包**校验。
+        if (body['allowedActions'] !== undefined) {
+          const actionsCheck = parseAgentAllowedActions(
+            body['allowedActions'],
+            await store.listTools(current.workspaceId),
+          )
+          if (!actionsCheck.ok) {
+            sendJson(res, 400, { error: actionsCheck.error })
+            return
+          }
+          patch.allowedActions = actionsCheck.value
+        }
+
+        // ★ 动作的固定参数（D43）：改它的入口在这里，校验与 POST 同一套。
+        if (body['actionParams'] !== undefined) {
+          const paramsCheck = parseAgentActionParams(
+            body['actionParams'],
+            await store.listTools(current.workspaceId),
+          )
+          if (!paramsCheck.ok) {
+            sendJson(res, 400, { error: paramsCheck.error })
+            return
+          }
+          patch.actionParams = paramsCheck.value
+        }
+
+        // ★ 只有审核者能有非空的动作权限 —— 与下面"审核者不许挂工具"对称的另一半。
+        //
+        //   判据用**改完之后**的角色与动作（而不是当前的）：角色与动作可以出现在
+        //   同一个请求里，所以"执行者 → 审核者 + 同时带上动作"必须合法，
+        //   而"审核者（有动作）→ 执行者"必须被拒。老数据里 `allowedActions`
+        //   这个键可能根本不存在，`?? []` 是那一层的兜底。固定参数同一条规矩
+        //   （`hasActionParams`）：执行者连动作都不能有，钉固定参数更是无从谈起。
+        const actionsForRole = rejectActionsForExecutor({
+          role: patch.role ?? current.role,
+          actions: patch.allowedActions ?? current.allowedActions ?? [],
+          hasActionParams:
+            Object.keys(patch.actionParams ?? current.actionParams ?? {}).length > 0,
+          who: `「${current.name}」`,
+          gaveActions: body['allowedActions'] !== undefined && body['allowedActions'] !== null,
+        })
+        if (actionsForRole !== null) {
+          sendJson(res, 400, { error: actionsForRole })
+          return
+        }
+
+        // ★ 审核者不许挂工具（D40）——这条不变量必须在**所有**能改到它的入口上成立。
+        //
+        // 工具那边（`PUT /api/agents/:id/tools`）已经拒了"给审核者挂工具"，但
+        // 角色是可以改的：一个挂着工具的**执行者**，只要把角色改成 reviewer，
+        // 就绕过了那条检查，变成一个"既判断又动手"的智能体——那正是审核者不带
+        // 工具要防的事（INV-1 的精神：判断的人不碰现场）。
+        //
+        // 拒的时候要说清下一步：先把工具摘掉（`PUT /api/agents/:id/tools` 传
+        // 空数组），再改角色。
+        // ⚠️ 只在"**要变成**审核者"时拒：老数据里可能有挂着工具的审核者（它是在
+        //    这条规则之前建的）。那种记录该修，而"连改个名字都 400"会让人连修
+        //    的入口都找不到——摘工具那条路是永远开着的（见挂载接口）。
+        if (
+          patch.role === 'reviewer' &&
+          current.role !== 'reviewer' &&
+          current.toolIds.length > 0
+        ) {
+          sendJson(res, 400, {
+            error:
+              `「${current.name}」挂着 ${current.toolIds.length} 个工具包，不能把角色改成审核者：` +
+              '审核者只做判断、不动手，工具是"动手"的能力。' +
+              '先摘掉它挂的工具（挂载接口传空数组），再改角色。',
+          })
+          return
         }
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
@@ -1865,13 +2872,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 动作权限要**过一遍运行时判据**再落下来（D41 加的）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 固化的意义是"把**现在生效的**那份搬到它自己身上"。而 D41 之后，
+      // 老数据里那串名字（`comment.create` / `issue.update_label` 之类）**必然
+      // 是死名字**——平台没有内置动作了，它们也大概率不对应任何已安装包。
+      //
+      // 原样搬过去的话，这个审核者的行动权限里就永远躺着一串解析不出来的动作：
+      // 界面上看着"配了东西"，判决一引用就走 invalid。所以这里**只搬现在真的
+      // 解析得出来的那些**，并把丢掉的原样报回去（`droppedActions`），让界面能
+      // 说清"这几个没搬过来、为什么"。
+      //
+      // 用的是**和运行时同一个**纯函数（`resolveAllowedActionsWithTools`）——
+      // 自己在这儿另写一遍"什么算可用"迟早会与运行时分叉。
+      const installedTools = await store.listTools(agent.workspaceId)
+      const resolvable = resolveAllowedActionsWithTools(resolved.allowedActions, installedTools)
+
       const updated: Agent = {
         ...agent,
-        reviewStandard: {
-          name: resolved.name,
-          body: resolved.body,
-          allowedActions: [...resolved.allowedActions],
-        },
+        // ★ 固化的是**名字 + 正文**（标准），动作权限搬到 agent 上那个字段里。
+        //   两样都要落下来，且都落在新位置：只固化正文的话，固化之后生效的动作
+        //   范围会与固化之前不同。
+        reviewStandard: { name: resolved.name, body: resolved.body },
+        allowedActions: [...resolvable.allowed],
         // 摘掉挂载：标准已经在它自己身上了，再挂着同一份东西只会让"依据是什么"
         // 有两处答案（而且那两处随时可能不一致）
         skillIds: [],
@@ -1881,6 +2906,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sendJson(res, 200, {
         agent: updated,
         adopted: { name: resolved.name, fromSkills: mounted.map((s) => s.slug) },
+        // ⚠️ **没搬过来的动作**要如实报出去：静默丢掉的话，使用者会以为
+        //    "固化把权限搬全了"，而实际上少了几条（他也没地方去发现）。
+        droppedActions: resolvable.unavailable.map((u: AllowedActionsResolution['unavailable'][number]) => ({
+          type: u.type,
+          reason: u.reason,
+        })),
       })
       return
     }
@@ -1925,6 +2956,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         source?: unknown
         slug?: unknown
         overwrite?: unknown
+        /**
+         * ⚠️ **老契约的字段，不再读**（D40 收口）。
+         *
+         * 在类型里留着它只是为了说清"它会被忽略"：老客户端（页面还是旧的那版）
+         * 会照旧把它送进来，而我们要的既不是"报错"（使用者没做错什么，只是少
+         * 升了一次级），也不是"收下"（那会让"判完允许动什么"又有第二个出处）。
+         * 动作权限现在配在**审核者**身上：`Agent.allowedActions`。
+         */
         allowedActions?: unknown
       }
 
@@ -1973,9 +3012,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
               source: source.spec.kind === 'payload' ? 'remote' : 'local',
               sourceRef: resolved.sourceRef,
               version: source.spec.kind === 'payload' ? source.spec.version : null,
-              ...(Array.isArray(raw.allowedActions)
-                ? { allowedActions: parseAllowedActions(raw.allowedActions) }
-                : {}),
+              // ⚠️ 这里原来有 `allowedActions: parseAllowedActions(raw.allowedActions)`。
+              //    D40 收口之后 skill **不接受**动作配置：动作权限是审核者的能力
+              //    （`Agent.allowedActions`），而 skill 是给执行者参考的资料包。
+              //    老客户端传进来的那个字段被忽略（不是"装错了"，只是那一项不再
+              //    属于 skill），所以它连写库都不该被带上——`Skill` 实体上已经没有
+              //    这个字段了。
             } as Partial<Skill> & { slug: string },
           ],
           overwrite: raw.overwrite === true,
@@ -2006,6 +3048,189 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         included: resolved.included,
         ignored: resolved.ignored,
       })
+      return
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 工具包：安装 / 卸载 / 挂载（D40）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 与 skill 那三个接口同形（能装、能卸、卸的时候"还挂着就拒并列出是谁"），
+    // 但有一处刻意的不同：**授权单位是"组"**——一个包一次授权，不按动作逐条授。
+    // 见挂载接口那段注释。
+
+    if (req.method === 'GET' && path === '/api/tools') {
+      const tools = await store.listTools(workspaceId)
+      // ★ `mountedBy` 一起给出来。
+      //
+      // "这个包有没有人在用"是卸载页面**必须先知道**的事：卸载会被拒
+      // （见下面的 DELETE），而让使用者先点一下、吃一个 400、再回去看谁挂着它，
+      // 是把一次可避免的往返塞给他。空数组 = 没人挂，可以直接卸。
+      const agents = await store.listAgents(workspaceId)
+      sendJson(res, 200, {
+        tools: tools.map((tool) => ({
+          ...tool,
+          mountedBy: agents
+            .filter((a) => a.toolIds.includes(tool.id))
+            .map((a) => ({ id: a.id as string, name: a.name })),
+        })),
+        // ★ 那条准入开关一起给：界面上每个"不支持预演"的动作都标着"不能自动执行"，
+        //   而开关就是这句话的落点——不把当前值给出来，界面只能显示一个猜的状态
+        //   （或者让使用者去别处翻设置）。
+        allowUnpreviewedActions: (await readWorkspaceSettings(store, workspaceId))
+          .allowUnpreviewedActions,
+      })
+      return
+    }
+
+    if (req.method === 'POST' && path === '/api/tools') {
+      const raw = (await readJsonBody(req)) as Record<string, unknown>
+
+      // ★ 来源要逐字段校验，而不是信任类型声明——这里是运行时的任意 JSON
+      const parsed = parseToolInstallSource(raw)
+      if (!parsed.ok) {
+        sendToolError(res, parsed.error, 'bad_input')
+        return
+      }
+
+      // 解析（读目录 / 校验清单 / 查入口文件）整段归同一个 catch 管：
+      // "清单不合规"是**输入不对**（400），不是服务坏了（500）。
+      const resolved = await resolveToolInstall(parsed.spec)
+      if (!resolved.ok) {
+        sendToolError(res, resolved.error, resolved.code, resolved.detail)
+        return
+      }
+
+      const outcome = await installToolPackage({
+        store,
+        workspaceId,
+        pkg: resolved.pkg,
+        // ⚠️ `overwrite` 不在原契约里，是**照着 skill 那条路补的**：同名一律
+        //    拒绝写入，但"确实要替换"必须有一条出路。工具包比 skill 更需要它——
+        //    卸载会被"还有 agent 挂着"挡住，没有 overwrite 就只能把挂载全摘掉、
+        //    装完再挂回去。
+        overwrite: raw['overwrite'] === true,
+        now: Date.now(),
+      })
+      if (!outcome.ok) {
+        // 同名冲突归到 `bad_input`（"输入不对"的一种）：界面是按 `code` 决定
+        // 怎么提示的，给一个不在表里的 code 会让它掉进 default 分支。
+        sendToolError(res, outcome.error, 'bad_input')
+        return
+      }
+      sendJson(res, 201, { tool: outcome.tool })
+      return
+    }
+
+    const toolMatch = /^\/api\/tools\/([^/]+)$/.exec(path)
+    if (toolMatch && req.method === 'DELETE') {
+      const toolId = decodeURIComponent(toolMatch[1]!) as Tool['id']
+      const tool = await store.getTool(toolId)
+      if (!tool) {
+        sendJson(res, 404, { error: `工具包不存在：${toolId}` })
+        return
+      }
+
+      // ⚠️ **还挂着它的 agent 会让删除被拒**，并把它们列出来。理由与 skill
+      //    那条路逐条相同：静默删掉一个还被引用的东西，症状是"某个 agent 的
+      //    工具突然没了"——那要在很久以后才被发现（而且看起来像动作解析坏了）。
+      //    这里比 skill 更严重：被删的包就是那些动作的**唯一**实现。
+      const agents = await store.listAgents(workspaceId)
+      const holders = agents.filter((a) => a.toolIds.includes(toolId))
+      if (holders.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `还有 ${holders.length} 个智能体挂着「${tool.slug}」：` +
+            `${holders.map((a) => a.name).join('、')}。` +
+            '先在它们的配置里把它摘掉，再卸载——静默删掉一个还被引用的东西，' +
+            '症状会在很久以后才出现（而且看起来像动作解析坏了）。',
+          // 机器可读的那一份：界面据此做成可点的列表，而不是让使用者从
+          // 一句话里自己认名字
+          holders: holders.map((a) => ({ id: a.id as string, name: a.name })),
+        })
+        return
+      }
+
+      await store.deleteTool(toolId)
+      sendJson(res, 200, { deleted: true })
+      return
+    }
+
+    // ── 挂载 / 摘挂工具包（D40）──
+    //
+    // ══════════════════════════════════════════════════════════════════
+    // 授权单位是**组**：挂上一个包 = 把整组动作交给这个 agent
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // `PUT` 语义 = 整体替换：传什么就是它挂的全部（空数组 = 全摘掉）。按**单个
+    // 动作**逐条授权看着更精细，但包里的动作清单是包说了算的：包一更新（多一个
+    // 动作），逐条授权就变成"新动作悄悄没被授权"或者"要重新授权一遍"，两种都
+    // 不好解释。所以这里只认 组 id，动作的粒度由包自己声明。
+    const agentToolsMatch = /^\/api\/agents\/([^/]+)\/tools$/.exec(path)
+    if (agentToolsMatch && req.method === 'PUT') {
+      const agentId = decodeURIComponent(agentToolsMatch[1]!) as Agent['id']
+      const current = await store.getAgent(agentId)
+      if (!current) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const rawIds = body['toolIds']
+      if (!Array.isArray(rawIds)) {
+        sendJson(res, 400, { error: 'toolIds 必须是数组（传空数组 = 把这个 agent 的工具全摘掉）' })
+        return
+      }
+      const bad = rawIds.find((v) => typeof v !== 'string' || v.trim() === '')
+      if (bad !== undefined) {
+        sendJson(res, 400, {
+          error: `toolIds 里每一项都必须是非空字符串（收到 ${JSON.stringify(bad)}）`,
+        })
+        return
+      }
+      // 去重：同一个包挂两次没有任何含义（授权是一个集合），而重复项会让
+      // "挂了几组"的计数在界面上骗人
+      const ids = [...new Set((rawIds as string[]).map((v) => v.trim()))]
+
+      // ① 挂的东西必须真的存在。挂一个不存在的 id 会在**运行时**才报
+      //    "找不到这个包"，而不是"你填错了 id"。
+      const tools = await store.listTools(current.workspaceId)
+      const known = new Set(tools.map((t) => t.id as string))
+      const unknown = ids.filter((id) => !known.has(id))
+      if (unknown.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `工具包不存在：${unknown.join('、')}。本工作区已安装的：` +
+            `${tools.map((t) => `${t.slug}（${t.name}）`).join('、') || '（一个都没有）'}`,
+          unknown,
+        })
+        return
+      }
+
+      // ② ★ 审核者不许挂工具。
+      //
+      // 审核者的产出是**判断**（判决 + 建议的动作），执行由别人做。给它工具就等于
+      // 让它一边当裁判一边下场——判错了也没人看得出，而这正是"审核者与执行者分开"
+      // 要防的事。
+      //
+      // ⚠️ **摘挂永远允许**（空数组）：老数据里可能有挂着工具的审核者，或者角色
+      //    刚刚被改成 reviewer；如果连摘都不许，那种记录就永远修不好了。
+      if (current.role === 'reviewer' && ids.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `「${current.name}」是审核者，审核者不许挂工具：它只做判断、不动手。` +
+            '要让它动手就先把它改成执行者（那时它的判决也不再被当作审核结论）。' +
+            '（摘掉已挂的工具不受这条限制。）',
+        })
+        return
+      }
+
+      const updated: Agent = {
+        ...current,
+        toolIds: ids as Agent['toolIds'],
+        updatedAt: Date.now(),
+      }
+      await store.insertAgent(updated)
+      sendJson(res, 200, { agent: updated })
       return
     }
 
@@ -2135,6 +3360,222 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           }
         }
       }
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 本次任务的审核者覆盖（`SubmitRunRequest.reviewerAgentId`）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 为什么在写入之前校验：审核者的合法性**只有这一刻能查**。等执行跑完
+      // 再发现"指定的审核者其实是个执行者"，使用者已经等了一轮执行，而且
+      // 更糟的是那一刻只能静默跳过审核——一条本该被审的产出会看起来正常结束。
+      //
+      // 三种坏值分别报清楚，因为它们对应三种不同的改法：
+      //   - 不存在 ⇒ 删掉了，换一个
+      //   - 不是审核者角色 ⇒ 选错了
+      //   - 与执行者同一个 ⇒ INV-1（自我审核 = 闭环失效）
+      //
+      // ⚠️ 非 execute 的 run 带上这个字段一律**拒绝**，而不是收下不用：
+      //   审核 run 自己不会再被审一次，收下它就是收下一个永远不会生效的设置——
+      //   而"设了但没生效"在这里是最贵的一类错（使用者以为换人审了）。
+      if (body.reviewerAgentId !== undefined && body.kind !== 'execute') {
+        sendJson(res, 400, {
+          error:
+            `reviewerAgentId 只对执行 run（kind:'execute'）有意义，` +
+            `而这条 run 的 kind 是「${body.kind}」。审核 run 不会再被审一次。`,
+          code: 'reviewer_override_not_applicable',
+        })
+        return
+      }
+      if (body.reviewerAgentId !== undefined && body.reviewerAgentId !== null) {
+        const wanted = body.reviewerAgentId
+        const picked = await store.getAgent(wanted as Agent['id'])
+        if (!picked) {
+          sendJson(res, 400, {
+            error: `指定的审核者不存在（${wanted}）。它可能已经被删掉了，请重新选一个。`,
+            code: 'reviewer_not_found',
+          })
+          return
+        }
+        // ⚠️ **顺序**：先判"是不是执行者自己"，再判角色。
+        //
+        //   反过来的话 `reviewer_must_differ` 就成了一句到不了的话：把一个执行者
+        //   指定成它自己的审核者时，命中的会是"角色不是 reviewer"，于是使用者读到
+        //   "这个 agent 不是审核者"——**指错方向**。他真正做错的是"你想让它审自己"。
+        //
+        //   （这里不比角色：`agentRef` 是执行者时它当然是 executor，拿角色做判据
+        //   等于把这条检查关掉。判据只能是 id。）
+        if ((picked.id as string) === (body.agentRef.id as string)) {
+          try {
+            assertReviewerDistinct(picked.id, {
+              type: 'run',
+              run: { agentId: body.agentRef.id } as Run,
+            })
+          } catch (err) {
+            sendJson(res, 400, {
+              error: err instanceof Error ? err.message : String(err),
+              code: 'reviewer_must_differ',
+            })
+            return
+          }
+        }
+        if (picked.role !== 'reviewer') {
+          sendJson(res, 400, {
+            error:
+              `agent「${picked.name}」的角色是「${picked.role}」，不能当审核者。` +
+              `审核者必须是一个 role 为 reviewer 的 agent。`,
+            code: 'reviewer_role_mismatch',
+          })
+          return
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 任务级动作配置（D42 白名单 + D43 固定参数）
+      //    `SubmitRunRequest.allowedActions` / `SubmitRunRequest.actionParams`
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 新建任务页 ③ 上勾的那份决定（白名单）与为动作钉的固定参数。三条判据，
+      // 缺一条都会留下一类"到跑起来才发现"的失败：
+      //
+      //   1. **只对执行 run 有意义**：审核 run 的动作配置来自被它审的那条执行
+      //      run（`createRunForReviewer` 带下去），从外面另塞一份就是第二个出处。
+      //      与 `reviewerAgentId` 同一条规矩：**收下不用的字段比拒掉更贵**。
+      //   2. **每条动作都必须来自已安装的工具包**——判据与 agent 的「行动权限」
+      //      完全同一套（`parseAgentAllowedActions` / `parseAgentActionParams`），
+      //      理由也是同一个：等到跑起来才发现"策略要的动作找不到包"，在无人值守下
+      //      就是每次任务都以同一个原因失败。这里复用那个函数而不是重写一遍，
+      //      免得两处判据分叉。
+      //   3. **这一次得有审核者**：没有审核者就没有判决，也就没有任何动作会被
+      //      触发——那时这份配置**没有落点**。收下它会让使用者以为"我配了动作"，
+      //      而实际上这条链路上什么都不可能发生。
+      // ★ 任务级返工次数（D45）：**早拒**。
+      //
+      //   ⚠️ 它**必须在**下面那个"给了动作才校验"的 `if` 块**外面**：返工次数与
+      //   "这一次允许触发什么动作"是两件无关的事，放进那个块里就会出现
+      //   "只配了返工、没碰动作 ⇒ 校验整段被跳过"——一个 `-1` 或者 `99` 于是
+      //   畅通无阻地进了执行器，而它决定的是"最多再烧几次 CLI 的钱"。
+      //   （这个位置错误是被 `rework-e2e.test.ts` 抓出来的：那条用例只给
+      //   `maxReworks`，于是越界值拿到了 202 而不是 400。）
+      if (body.maxReworks !== undefined) {
+        const n = body.maxReworks
+        if (!Number.isInteger(n) || n < 0 || n > MAX_REWORKS) {
+          sendJson(res, 400, {
+            error: `返工次数必须是 0 到 ${MAX_REWORKS} 之间的整数`,
+            code: 'max_reworks_out_of_range',
+          })
+          return
+        }
+      }
+
+      if (body.allowedActions !== undefined || body.actionParams !== undefined) {
+        if (body.kind !== 'execute') {
+          sendJson(res, 400, {
+            error:
+              `allowedActions / actionParams 只对执行 run（kind:'execute'）有意义，` +
+              `而这条 run 的 kind 是「${body.kind}」——审核 run 的动作配置来自` +
+              `被它审的那条执行 run。`,
+            code: 'allowed_actions_not_applicable',
+          })
+          return
+        }
+
+        // 这次到底有没有**能用的**审核者：覆盖优先，其次跟随执行者的长期配置。
+        //
+        // ★ 两条路必须查到**同一个深度**（存在 + 角色），不能"显式给的查两样、
+        //   跟随的只查非空"。为什么：跟随的长期配置**也会失效**（指向的人被删了，
+        //   或者角色被别人用 `PATCH /api/agents/:id` 改成了 executor——那条路是
+        //   真实可达的，没有任何一步会清理别人身上指向它的 `reviewerAgentId`）。
+        //   那种情况下带白名单的提交会照样 202，然后审核被跳过、**这份白名单一个
+        //   落点都没有**：没有判决、没有动作。而这正是下面这条 400 想防的事
+        //   （"收下它会让使用者以为我配了动作"）——漏掉跟随那一档就等于只防了一半。
+        //
+        // ⚠️ 判据与 `autoChainReview` 同一套（那边负责在跑完之后**跳过并说明**；
+        //    这里负责在写入之前**拒掉**）：两处各写一套必然分叉，而分叉的表现是
+        //    "提交时说有审核者、跑完却没人审"。
+        let reviewerCheck: { ok: true } | { ok: false; error: string }
+        if (body.reviewerAgentId === null) {
+          reviewerCheck = {
+            ok: false,
+            error:
+              '这条任务这一次选了「不自动审核」，所以动作配置没有落点——不会有判决，' +
+              '也就不会有任何动作被触发。要么在上一步选一个审核者，要么把动作白名单/固定参数去掉。',
+          }
+        } else if (body.reviewerAgentId !== undefined) {
+          // 上面那一段已经查过存在性与角色了。
+          reviewerCheck = { ok: true }
+        } else {
+          const executor = await store.getAgent(body.agentRef.id as Agent['id'])
+          const wanted = executor?.reviewerAgentId ?? null
+          if (!wanted) {
+            reviewerCheck = {
+              ok: false,
+              error:
+                `执行者「${executor?.name ?? body.agentRef.id}」没有配「由谁来审它」，` +
+                '所以这一次不会有审核者，动作配置也就没有落点——不会有判决，' +
+                '也就不会有任何动作被触发。要么在上一步选一个审核者（只对这一次生效），' +
+                '要么把动作白名单/固定参数去掉。',
+            }
+          } else {
+            const followed = await store.getAgent(wanted)
+            if (!followed) {
+              reviewerCheck = {
+                ok: false,
+                error:
+                  `执行者长期指定的审核者已经不在了（id ${wanted}），这一次不会有审核者，` +
+                  '动作配置也就没有落点。请在上一步选一个审核者，或者去智能体页重新指定。',
+              }
+            } else if (followed.role !== 'reviewer') {
+              reviewerCheck = {
+                ok: false,
+                error:
+                  `执行者长期指定的审核者「${followed.name}」现在的角色是「${followed.role}」，` +
+                  '不再能当审核者，所以这一次不会有审核、动作配置也就没有落点。' +
+                  '请在上一步选一个审核者，或者去智能体页重新指定。',
+              }
+            } else {
+              reviewerCheck = { ok: true }
+            }
+          }
+        }
+        if (!reviewerCheck.ok) {
+          sendJson(res, 400, {
+            error: reviewerCheck.error,
+            code: 'allowed_actions_without_reviewer',
+          })
+          return
+        }
+
+        // ★ 白名单解析**只在客户端真的给了它时**做：省略 = 跟随（那个 key 根本
+        //   不进请求体），而 `parseAgentAllowedActions(undefined)` 会给出 `[]`——
+        //   把它写回 `body.allowedActions` 就等于把"跟随"悄悄折成了
+        //   "这一次一个动作都不许"，上面那整段注释防的正是这个。
+        if (body.allowedActions !== undefined) {
+          const parsed = parseAgentAllowedActions(
+            body.allowedActions,
+            await store.listTools(workspaceId),
+          )
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error, code: 'allowed_actions_unresolvable' })
+            return
+          }
+          body.allowedActions = parsed.value
+        }
+
+        // ★ 任务级固定参数（D43）：判据与 agent 的固定参数同一套
+        //   （`parseAgentActionParams`）。只对执行 run 有意义、必须有审核者——
+        //   上面那两条已经拦过（同一个 `if` 块），这里只管"参数本身合不合规"。
+        if (body.actionParams !== undefined) {
+          const paramsParsed = parseAgentActionParams(
+            body.actionParams,
+            await store.listTools(workspaceId),
+          )
+          if (!paramsParsed.ok) {
+            sendJson(res, 400, { error: paramsParsed.error, code: 'action_params_unresolvable' })
+            return
+          }
+          body.actionParams = paramsParsed.value
+        }
+      }
+
       // ★ 解析 skill（见 SubmitRunRequest.skills 的说明）。
       //
       //   省略 ⇒ 按该 agent 的配置解析；显式给了就用给的。
@@ -2156,11 +3597,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             slug: s.slug,
             name: s.name,
             body: s.body,
-        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
-        ...(s.description ? { description: s.description } : {}),
-            allowedActions: s.allowedActions,
+            // 协议里是 optional（`string | undefined`），实体上是 `string | null`
+            ...(s.description ? { description: s.description } : {}),
+            // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后
+            //    skill 载荷里没有这一项了（动作权限住在 `Agent.allowedActions`）。
             // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
-        files: s.files ?? {},
+            files: s.files ?? {},
           }))
           if (skills.length > 0) {
             info(`run ${body.runId} 按 agent 配置解析到 ${skills.length} 个 skill`)
@@ -2206,6 +3648,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           failureReason: run.failureReason,
           chainDepth: run.chainDepth,
           /**
+           * ★ 这条 run 的审核者**覆盖**，三态**分开传**（见 `Run.reviewerAgentId`）。
+           *
+           *   为什么不直接给一个 `reviewerAgentId: string | null`：那样
+           *   「没覆盖，跟随 agent 的长期安排」与「这次明确不审」在**接口上
+           *   长得一模一样**（都是 null），而这两件事的后果差别很大——一个是
+           *   会有审核结论，一个是不会有。页面要如实显示，就不能靠猜。
+           *
+           *   只在 execute run 上有意义（review run 自己不会再被审一次）。
+           */
+          reviewer:
+            run.kind !== 'execute'
+              ? null
+              : run.reviewerAgentId === undefined
+                ? { mode: 'follow' as const }
+                : run.reviewerAgentId === null
+                  ? { mode: 'none' as const }
+                  : { mode: 'override' as const, agentId: run.reviewerAgentId },
+          /**
            * ★ 审核 run 的**判决结论**要带上——阶段推导需要它。
            *
            *   页面原来只能看到"审核 run 完成了没有"，于是无论判决是
@@ -2228,6 +3688,32 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
                         escalateReason: v.escalateReason,
                       }
                     : null
+                })
+              : null,
+          /**
+           * ★ 这条判决**要求做的那个动作**的结果。
+           *
+           * ══════════════════════════════════════════════════════════════════
+           * 为什么必须给页面：不然「已审查」是一句会骗人的话
+           * ══════════════════════════════════════════════════════════════════
+           *
+           * 判决通过 ≠ 事情做完了。动作可能还在跑、也可能**失败了**——而失败
+           * 过去只在通知里说了一声，任务列表上照样显示「已审查」（那是"判决已产出"
+           * 的意思，不是"事情已成"）。使用者的原话是："审核通过并行动成功才最后
+           * 算通过"。
+           *
+           * 与 `verdict` 同源同法：**只给最新的那一份**（一次判决一条动作；重放被
+           * 幂等键去重，重试会落在新的判决上）。`error` 一起给——失败原因正是
+           * "要我去做什么"。
+           */
+          action:
+            run.kind === 'review'
+              ? await store.listVerdictsByRun(run.id).then(async (vs) => {
+                  const v = vs[vs.length - 1]
+                  if (!v) return null
+                  const actions = await store.listActionsByVerdict(v.id)
+                  const a = actions[actions.length - 1]
+                  return a ? { status: a.status, type: a.type, error: a.error } : null
                 })
               : null,
         })),
@@ -2707,6 +4193,10 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // D37：标准在 `reviewStandard` 上，所以这里不再挂 skill
     skillIds: [],
     toolIds: [],
+    // ★ 动作权限在 **agent** 上（D40 收口）：原来它写在 `BUILTIN_REVIEW_STANDARD`
+    //   里面，现在跟着标准一起搬过来——播种出来的默认审核者能动的范围与改动
+    //   之前完全相同（见那个常量）。
+    allowedActions: BUILTIN_REVIEW_ALLOWED_ACTIONS,
     env: {},
     role: 'reviewer',
     reviewerAgentId: null,
@@ -2731,6 +4221,9 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // 而审核标准是审核者的事。两者混在一起会让执行者按审核标准去改自己的产出。
     skillIds: [],
     toolIds: [],
+    // ★ 动作权限是**审核者的**能力，执行者一律为空（执行者要能做事就挂工具，
+    //   见 `toolIds`）。写入口对这一点是硬的（`rejectActionsForExecutor`）。
+    allowedActions: [],
     env: {},
     role: 'executor',
     // ★ 指向刚播种的审核者：这样首启就是一条**通的闭环**

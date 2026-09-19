@@ -16,8 +16,9 @@ const VERDICT_TRANSITIONS: Readonly<Record<VerdictStatus, readonly VerdictStatus
   // 已产出，待 schema 校验
   emitted: ['validated', 'invalid'],
 
-  // 通过校验 ⇒ 三条去向
-  validated: ['dispatched_to_action', 'advisory', 'escalated'],
+  // 通过校验 ⇒ 四条去向
+  // ★ 多出来的 `rework_requested` 是 D45 加的：判决合格、结论是 `fail` ⇒ 返工
+  validated: ['dispatched_to_action', 'advisory', 'escalated', 'rework_requested'],
 
   // ★ 校验失败 ⇒ 三条处置路径
   invalid: ['pending_verdict', 'advisory', 'escalated'],
@@ -26,6 +27,11 @@ const VERDICT_TRANSITIONS: Readonly<Record<VerdictStatus, readonly VerdictStatus
   dispatched_to_action: [],
   advisory: [],
   escalated: [],
+  // ★ 判决要求返工（D45）。**这是一个终态**：这条判决的故事到此为止——
+  //   "重做"是另一条 run、另一条 verdict 记录。若留在非终态，看板会永远显示它、
+  //   统计会把它算成在途、排查的人会去等一个不会来的东西（与 `retry` 那条注释
+  //   记的是同一个教训）。
+  rework_requested: [],
 }
 
 export function canTransitionVerdict(from: VerdictStatus, to: VerdictStatus): boolean {

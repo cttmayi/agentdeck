@@ -1,6 +1,7 @@
 <script lang="ts">
   import { afterUpdate, onDestroy } from 'svelte'
   import type { RunMessage } from '../lib/api.ts'
+  import { t, tx } from '../lib/i18n.ts'
 
   export let runId: string
   export let onterminal: (status: string) => void = () => {}
@@ -203,7 +204,7 @@
           {
             seq: null,
             kind: 'disconnected',
-            text: '连接中断，正在重连…（若一直重连，多半是 daemon 停了）',
+            text: tx('runs.logDisconnected'),
             tool: null,
             input: null,
             output: null,
@@ -262,23 +263,38 @@
         break
       }
       case 'status':
-        push('status', `状态：${String(event['status'])}`)
+        push('status', tx('runs.logStatus', { status: String(event['status']) }))
         break
       case 'progress':
-        push('status', `${String(event['summary'])}（${String(event['step'])}/${String(event['total'])}）`)
+        push(
+          'status',
+          tx('runs.logProgress', {
+            summary: String(event['summary']),
+            step: String(event['step']),
+            total: String(event['total']),
+          }),
+        )
         break
       case 'usage': {
         const u = event['usage'] as { inputTokens: number; outputTokens: number; costUsdMicros: number; costSource: string }
         push(
           'status',
-          `用量：输入 ${u.inputTokens} / 输出 ${u.outputTokens} / 成本 $${(u.costUsdMicros / 1e6).toFixed(4)}` +
-            `（${u.costSource === 'provider' ? 'provider 上报' : '估算'}）`,
+          tx('runs.logUsage', {
+            input: u.inputTokens,
+            output: u.outputTokens,
+            cost: (u.costUsdMicros / 1e6).toFixed(4),
+            source: tx(u.costSource === 'provider' ? 'runs.costSourceProvider' : 'runs.costSourceEstimated'),
+          }),
         )
         break
       }
       case 'terminal': {
         const err = event['error'] as { message?: string } | null
-        push('terminal', `结束：${String(event['status'])}${err?.message ? ` — ${err.message}` : ''}`)
+        push(
+          'terminal',
+          tx('runs.logFinished', { status: String(event['status']) }) +
+            (err?.message ? ` — ${err.message}` : ''),
+        )
         live = false
         close()
         onterminal(String(event['status']))
@@ -358,10 +374,10 @@
   {#if thinkingCount > 0}
     <div class="log-toolbar">
       <button type="button" class="ghost small" onclick={toggleThinking}>
-        {showThinking ? '隐藏' : '显示'}思考过程（{thinkingCount} 段）
+        {$t(showThinking ? 'runs.hideThinking' : 'runs.showThinking', { count: thinkingCount })}
       </button>
       <span class="faint small">
-        思考过程是模型的内部推理，**不是**它给你的回答——两者在下面用样式区分
+        {$t('runs.thinkingNote')}
       </span>
     </div>
   {/if}
@@ -371,7 +387,7 @@
       <div class="log-row">
         <span class="log-seq">·</span>
         <span class="hint">
-          {thinkingCount > 0 ? '（当前只隐藏了思考过程，没有别的输出）' : '等待输出…'}
+          {$t(thinkingCount > 0 ? 'runs.thinkingOnlyHidden' : 'runs.waitingOutput')}
         </span>
       </div>
     {/if}
@@ -383,7 +399,7 @@
         <span class="log-seq">{row.seq ?? '·'}</span>
         <div class="log-body">
           <span class="log-text {row.kind}">
-            {#if row.kind === 'thinking'}<span class="thinking-tag">思考</span>{/if}
+            {#if row.kind === 'thinking'}<span class="thinking-tag">{$t('runs.thinkingTag')}</span>{/if}
             {row.text}
             {#if row.kind === 'tool_use' && row.tool}
               <span class="tool-name">{row.tool}</span>
@@ -400,11 +416,11 @@
             <pre class="payload">{open || !isLong ? payload : payload.slice(0, PREVIEW_CHARS) + '…'}</pre>
             {#if isLong}
               <button type="button" class="ghost tiny" onclick={() => toggleRow(i)}>
-                {open ? '收起' : `展开全部（${payload.length} 字符）`}
+                {$t(open ? 'runs.collapsePayload' : 'runs.expandPayload', { count: payload.length })}
               </button>
             {/if}
             {#if row.outputTruncated}
-              <span class="faint small">（这段输出在采集时已被截断，原文更长）</span>
+              <span class="faint small">{$t('runs.outputTruncated')}</span>
             {/if}
           {/if}
         </div>

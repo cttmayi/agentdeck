@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+import { installToolPackage, writeToolPackage } from './testing/tool-fixture.ts'
 
 /**
  * 新建智能体（FR-AGENT-01/12/15/20）。
@@ -363,6 +364,13 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
     // 判据取的是**描述符**：不同 runtime 的 baseArgs 不同，而它会被写进
     // 审计的 argv（那是"当时到底怎么起的进程"的权威记录）。
     await withDaemon(async (url) => {
+      // ★ D41：动作只能来自**装进来的工具包**（平台的内置动作全部移除了），
+      //   所以先装一个包，再把它声明的动作写进 `allowedActions`。继续写
+      //   `comment.create` 那种老名字的话，这次创建会以"工具的包没装"被 400 拒掉
+      //   ——而这条用例要的是"字段如实存下来"，不是"包没装会被拒"。
+      const pkg = await writeToolPackage({ slug: 'runtime-fixture-tool', actionName: 'run' })
+      await installToolPackage({ url }, pkg)
+
       const reviewer = ((await (
         await fetch(`${url}/api/agents`, {
           method: 'POST',
@@ -375,13 +383,16 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
             reviewStandard: {
               name: '夹具标准',
               body: '# 夹具\n\n只看一件事。',
-              allowedActions: ['comment.create'],
             },
+            // D40 收口：动作权限在 **agent** 上（不再是标准里那个字段）
+            // D41：这里写的那个动作来自上面装的包 —— 它是这次唯一的合法来源
+            allowedActions: [pkg.action],
           }),
         })
-      ).json()) as { id: string; runtimeKey: string })
+      ).json()) as { id: string; runtimeKey: string; allowedActions: string[] })
 
       assert.equal(reviewer.runtimeKey, 'generic', '字段如实存下来')
+      assert.deepEqual(reviewer.allowedActions, [pkg.action], '动作也如实存下来')
 
       // 用这个 agent 起一条 review run，看审计里的 argv 用哪套基础参数
       const runId = '01M2RUNTIME00000000000001'

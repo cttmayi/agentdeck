@@ -1,6 +1,5 @@
-import { derived, get, writable } from 'svelte/store'
+import { derived, get } from 'svelte/store'
 import {
-  DEFAULT_LOCALE,
   isLocale,
   renderText,
   webText,
@@ -9,6 +8,12 @@ import {
   type WebTextId,
 } from '@alpha-helper/i18n'
 import { api } from './api.ts'
+import { locale } from './locale.ts'
+
+// ★ 语言 store 的**本体**搬去了 `locale.ts`（拆掉 `i18n.ts → api.ts → i18n.ts`
+//   这个环，理由写在那份文件顶部），这里只把它 re-export 出去：`locale` 一直是
+//   组件 import 的入口，接口位置不该因为内部搬家而变化。
+export { locale } from './locale.ts'
 
 /**
  * 界面语言（D39）。
@@ -24,11 +29,12 @@ import { api } from './api.ts'
  *
  *    · 标记 / 响应式语句 ⇒ `{$t('id')}`（会跟着语言变）
  *    · 事件回调、toast、confirm ⇒ `t('id')`（调用那一刻取当前语言，够了）
+ *    · 库层（`api.ts` / `sync.ts`…）⇒ `renderText(webText, id, currentLocale())`，
+ *      从 `./locale.ts` 取 `currentLocale()`；**绝不能**引本文件（会成环）
  *
  * ⚠️ 语言存在 **workspace** 上（服务端也要用它渲染 prompt 里的语言指令），
  *    所以切换时先本地立即生效（界面不等网络），再写回服务端。
  */
-export const locale = writable<Locale>(DEFAULT_LOCALE)
 
 /** 语言 → 该语言的文案函数；标记里用 `{$t('id', params)}`。 */
 export const t = derived(locale, ($locale) => {

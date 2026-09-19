@@ -1,0 +1,26 @@
+{
+  "schema": "alpha-helper/tool@1",
+  "slug": "hello-tool",
+  "name": "远端示例工具（打个招呼）",
+  "version": "1.0.0",
+  "description": "远端目录里的范例包：一个组、一个动作。它只往工作目录写一行问候，用来演示「从远端目录安装」这条路。",
+  "runtime": "node",
+  "entry": "scripts/say.mjs",
+  "actions": [
+    {
+      "name": "say",
+      "summary": "把一句问候追加到工作目录的 HELLO.md",
+      "reversible": true,
+      "dryRun": "supported",
+      "timeoutMs": 10000,
+      "params": {
+        "bound": {
+          "dir": { "from": "workdir" }
+        },
+        "open": {
+          "message": { "type": "string", "max": 500 }
+        }
+      }
+    }
+  ]
+}

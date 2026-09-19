@@ -12,9 +12,11 @@ import {
   type ReviewStandard,
   type Skill,
   type TemplateKit,
+  type ToolWithMounts,
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
 import { setLocaleFromIdentity } from './i18n.ts'
+import { deleteTool } from './tool-install.ts'
 
 /**
  * 全局状态。
@@ -42,6 +44,15 @@ export const agents = writable<Agent[]>([])
  */
 export const defaultAgentId = writable<string | null>(null)
 export const skills = writable<Skill[]>([])
+
+/**
+ * 已安装的工具包（D40）——**一个包 = 一个组**。
+ *
+ * ★ 列表里每一行自带 `mountedBy`（接口算好的"挂给了哪些 agent"）：挂载关系住在
+ *   agent 上，让接口 join 好带回来，界面就不必自己拼两个列表（拼出来的那份迟早
+ *   与服务端认的不一致）。卸载被拒时列出的也是同一份名单。
+ */
+export const tools = writable<ToolWithMounts[]>([])
 export const runs = writable<RunSummary[]>([])
 export const inbox = writable<InboxItem[]>([])
 
@@ -168,6 +179,82 @@ export async function uninstallSkill(id: string): Promise<void> {
 export const loadSkills = (): Promise<void> =>
   load('skills', async () => (await api<{ skills: Skill[] }>('/api/skills')).skills ?? [], skills)
 
+/**
+ * 「允许自动执行不支持预演的动作」这一条准入开关（D40）。
+ *
+ * ★ 它是**准入**不是偏好：默认 `false` 时平台真的会拒掉那些声明
+ *   `dryRun: "unsupported"` 的动作（守卫在 daemon 的 `actions.ts`）。
+ *   界面把当前值显示出来，并让使用者在这里显式打开——否则那句
+ *   "不能自动执行"就成了一句没人能处理的提示。
+ */
+export const allowUnpreviewedActions = writable(false)
+
+export const loadTools = (): Promise<void> =>
+  load(
+    'tools',
+    async () => {
+      const body = await api<{ tools: ToolWithMounts[]; allowUnpreviewedActions?: boolean }>(
+        '/api/tools',
+      )
+      // 老 daemon 不返回这个字段 ⇒ 按更严的那一边显示（与守卫的默认一致）
+      allowUnpreviewedActions.set(body.allowUnpreviewedActions ?? false)
+      return (
+        body.tools?.map((t) => ({
+          ...t,
+          // 接口没算 `mountedBy` 时按"没挂"显示，而不是让列表在 `.map` 上崩掉
+          mountedBy: t.mountedBy ?? [],
+        })) ?? []
+      )
+    },
+    tools,
+  )
+
+/** 打开/关掉那条准入开关。写回成功后用**服务端返回的值**对齐本地状态。 */
+export async function setAllowUnpreviewedActions(allow: boolean): Promise<void> {
+  const body = await api<{ allowUnpreviewedActions: boolean }>(
+    '/api/workspace/unpreviewed-actions',
+    { method: 'PUT', body: JSON.stringify({ allow }) },
+  )
+  allowUnpreviewedActions.set(body.allowUnpreviewedActions)
+}
+
+/**
+ * 卸载一个工具包（D40）。
+ *
+ * 服务端会拒掉"还有 agent 挂着它"的情况并列出**它们是谁**（`ToolInUseError`，
+ * 见 `tool-install.ts`）——界面据此指名道姓地说清楚，而不是只显示一句"卸载失败"。
+ * 卸载成功之后 agent 列表也要重取：`mountedBy` 那一列跟着变。
+ */
+export async function uninstallTool(id: string): Promise<void> {
+  await deleteTool(id)
+  await Promise.all([loadTools(), loadAgents()])
+}
+
+/**
+ * 挂载/摘挂一个 agent 的工具组（D40）：`PUT /api/agents/:id/tools`。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么单独一个接口，而不是混进 `PATCH /api/agents/:id`
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 挂载是**整组替换**（传的是这份名单的全部）：把 `toolIds` 混进 PATCH 的字段
+ * 里，两个人同时改就会互相覆盖，而"谁挂了什么"是权限面，静默覆盖的后果不是
+ * 丢一行配置，是**多出/少掉一组可执行的动作**。单独一条、语义是"这就是全部"，
+ * 冲突至少是看得见的。
+ *
+ * ★ 成功之后**重新取 agent 列表**（与 `updateAgent()`/`setDefaultAgent()` 一致）：
+ *   界面上那句"已保存"必须对应服务端真的认了的那份，而不是本地勾选的样子。
+ *   返回更新后的 agent，调用方可以据此把本地草稿对齐到权威值。
+ */
+export async function setAgentTools(agentId: string, toolIds: string[]): Promise<Agent> {
+  const agent = await api<Agent>(`/api/agents/${encodeURIComponent(agentId)}/tools`, {
+    method: 'PUT',
+    body: JSON.stringify({ toolIds }),
+  })
+  await loadAgents()
+  return agent
+}
+
 export const loadRuns = (): Promise<void> =>
   load('runs', async () => (await api<{ runs: RunSummary[] }>('/api/runs')).runs ?? [], runs)
 
@@ -238,6 +325,22 @@ export async function createAgent(input: {
   workDir: string
   /** 审核标准（D37）——只对审核者有意义；执行者传 null。 */
   reviewStandard?: ReviewStandard | null
+  /**
+   * 行动权限（D40 收口）——只对审核者有意义，执行者传空数组。
+   *
+   * ★ 它是**审核者的能力**（判完之后允许触发哪些动作），与"挂什么工具"
+   *   （执行者的能力）是两回事。校验在服务端：第三方动作要对着本工作区**已安装的
+   *   工具包**核对，给执行者传非空值会被 400。
+   */
+  allowedActions?: string[]
+  /**
+   * 动作的固定参数（D43）——只对审核者有意义，执行者传空对象。
+   *
+   * 界面上给已授权动作的 open 参数钉的值：执行时由平台注入，模型不许写。
+   * 校验在服务端：每个动作必须是已装工具声明的动作、每个参数必须是它的 open
+   * 参数且值合规。
+   */
+  actionParams?: Record<string, Record<string, unknown>>
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
@@ -249,6 +352,8 @@ export async function createAgent(input: {
       reviewerAgentId: input.reviewerAgentId,
       runtimeKey: input.runtimeKey,
       reviewStandard: input.reviewStandard ?? null,
+      allowedActions: input.allowedActions ?? [],
+      actionParams: input.actionParams ?? {},
       // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
       ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
     }),

@@ -36,6 +36,8 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
+  Tool,
+  ToolId,
   VerdictId,
   VerdictRecord,
   VerdictStatus,
@@ -82,6 +84,11 @@ export const STORE_FORMAT_VERSION = 1
 const COLLECTIONS = [
   'agent',
   'skill',
+  // 工具包（D40）。与 skill 并排：两者都是"装进工作区、可挂到 agent 上、
+  // 可卸载"的东西，放一起便于对照。⚠️ 新增集合名只影响**新写**的那份日志，
+  // 老数据目录里没有 `log/tool.jsonl` 会被当成"这个 workspace 还没有工具包"，
+  // 所以不需要迁移。
+  'tool',
   'issue',
   'comment',
   'run',
@@ -200,6 +207,9 @@ class WorkspaceStore {
   }
   skill(): JsonlLog<Skill & { id: string }> {
     return this.log('skill') as unknown as JsonlLog<Skill & { id: string }>
+  }
+  tool(): JsonlLog<Tool & { id: string }> {
+    return this.log('tool') as unknown as JsonlLog<Tool & { id: string }>
   }
   issue(): JsonlLog<Issue & { id: string }> {
     return this.log('issue') as unknown as JsonlLog<Issue & { id: string }>
@@ -429,6 +439,67 @@ export class FileStore implements Store {
       const ws = await this.#ws(wsId)
       if (!ws.skill().has(id)) continue
       return ws.mutex.run(() => ws.skill().del(id))
+    }
+    return false
+  }
+
+  // ── Tool（工具包 / 组，D40）──
+
+  async getTool(id: ToolId): Promise<Tool | null> {
+    for (const ws of this.#stores.values()) {
+      const found = ws.tool().get(id)
+      if (found) return found
+    }
+    return null
+  }
+
+  async listTools(workspaceId: WorkspaceId): Promise<Tool[]> {
+    return (await this.#ws(workspaceId)).tool().all()
+  }
+
+  async listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]> {
+    const wanted = new Set<string>(ids)
+    const out: Tool[] = []
+    for (const ws of this.#stores.values()) {
+      for (const t of ws.tool().all()) if (wanted.has(t.id)) out.push(t)
+    }
+    return out
+  }
+
+  /**
+   * 按 slug 取。
+   *
+   * ⚠️ **只在给定的 workspace 里找**，不像 `getTool` 那样跨 workspace 遍历。
+   *    这不是图省事，而是一条语义：slug 只在**一个 workspace 内**唯一，
+   *    两个工作区各有一个 `deploy` 是合法的。跨着找会把别的空间的包交给
+   *    调用方——判决里写的是 `<slug>.<动作名>`，取错了包就等于执行了别人
+   *    的动作。
+   *
+   * 也不另建一张"slug → id"的内存索引：包的数量是个位数量级，而这个查询
+   * 只在安装与判决解析时发生。索引是又一份**必须与日志保持一致**的真相
+   * （report/action 那两个映射是为"唯一性保证"才不得不建的），这里不值得。
+   */
+  async getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null> {
+    const ws = await this.#ws(workspaceId)
+    return ws.tool().all().find((t) => t.slug === slug) ?? null
+  }
+
+  async insertTool(tool: Tool): Promise<void> {
+    const ws = await this.#ws(tool.workspaceId)
+    await ws.mutex.run(() => ws.tool().put(tool))
+  }
+
+  async deleteTool(id: ToolId): Promise<boolean> {
+    // 理由与 `deleteSkill` 逐条相同（端口同样没给 workspaceId，只能逐个
+    // workspace 找）。
+    //
+    // 与 skill 唯一不同的地方：工具包的**文件就在记录里**（`Tool.files` 是
+    // "相对路径 → 文本"），所以删掉这一条就等于把包整个卸掉，没有第二处
+    // 需要清理——也因此这里不像卸载 skill 那样要顾着别处的引用。
+    for (const wsId of await this.listWorkspaceIds()) {
+      const ws = await this.#ws(wsId)
+      if (!ws.tool().has(id)) continue
+      return ws.mutex.run(() => ws.tool().del(id))
     }
     return false
   }

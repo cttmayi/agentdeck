@@ -10,8 +10,10 @@ import {
   makeReport,
   makeRun,
   makeSkill,
+  makeTool,
   runId,
   skillId,
+  toolId,
   wsId,
 } from '@alpha-helper/domain/testing'
 import type {
@@ -212,6 +214,43 @@ async function scenario(store: Store): Promise<unknown[]> {
     (await store.listSkillsByIds(['s2', 's3', 's1'] as never)).map((s) => s.id),
   )
   await rec('listSkillsByIds.empty', () => store.listSkillsByIds([]))
+
+  /**
+   * ── Tool（工具包 / 组，D40）──
+   *
+   * 与 skill 那一组逐条对齐，外加**两条工具特有的语义**：
+   *
+   *   ★ `getToolBySlug` 只在**给定的 workspace 内**唯一。所以这里在两边各放
+   *     一个同 slug 的包：如果哪个适配器跨着找，`getToolBySlug.otherWorkspace`
+   *     就会拿到 A 的那个包——判决里写 `<slug>.<动作名>`，取错包等于执行了
+   *     别人没声明过的动作。
+   *   ★ `listToolsByIds` 一次要解析出多个"动作属于哪个包"，所以顺带验一下
+   *     里面夹着一个**已被卸载**的 id 时，其余照常返回而不是整体失败。
+   */
+  await store.insertTool(makeTool({ id: 't1', workspaceId: WS_A, slug: 'deploy' }))
+  await store.insertTool(makeTool({ id: 't2', workspaceId: WS_A, slug: 'lint' }))
+  await store.insertTool(makeTool({ id: 't3', workspaceId: WS_B, slug: 'deploy' }))
+  await rec('getTool', async () => (await store.getTool(toolId('t1')))?.slug ?? null)
+  await rec('getTool.missing', () => store.getTool(toolId('nope')))
+  await rec('listTools.A', async () => (await store.listTools(WS_A)).map((t) => t.slug))
+  await rec('listTools.B', async () => (await store.listTools(WS_B)).map((t) => t.slug))
+  await rec('getToolBySlug.hit', async () => (await store.getToolBySlug(WS_A, 'deploy'))?.id ?? null)
+  await rec('getToolBySlug.miss', () => store.getToolBySlug(WS_A, 'nope'))
+  await rec(
+    'getToolBySlug.otherWorkspace',
+    async () => (await store.getToolBySlug(WS_B, 'deploy'))?.id ?? null,
+  )
+  // ★ 卸载：删得掉、幂等、删完取不到、别的 workspace 不受影响
+  await rec('deleteTool.ok', () => store.deleteTool(toolId('t1')))
+  await rec('deleteTool.again', () => store.deleteTool(toolId('t1')))
+  await rec('getTool.afterDelete', () => store.getTool(toolId('t1')))
+  await rec('getToolBySlug.afterDelete', () => store.getToolBySlug(WS_A, 'deploy'))
+  await rec('listTools.A.afterDelete', async () => (await store.listTools(WS_A)).map((t) => t.slug))
+  await rec('listTools.B.untouched', async () => (await store.listTools(WS_B)).map((t) => t.slug))
+  await rec('listToolsByIds', async () =>
+    (await store.listToolsByIds(['t2', 't3', 't1'] as never)).map((t) => t.id),
+  )
+  await rec('listToolsByIds.empty', () => store.listToolsByIds([]))
 
   // ── Issue ──
   await store.insertIssue(
@@ -691,6 +730,12 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
       'blob.put.idempotent',
       'deleteSkill.ok',
       'deleteSkill.again',
+      'deleteTool.ok',
+      'deleteTool.again',
+      'getToolBySlug.hit',
+      'getToolBySlug.miss',
+      'getToolBySlug.otherWorkspace',
+      'listTools.B.untouched',
       'inbox.markRead',
       'listWorkspaceIds',
       'issueCas.ok',
@@ -733,6 +778,39 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
     })
     assert.deepEqual(got.get('listWorkspaceIds'), ['ws-a', 'ws-b'], '按创建顺序，不是按 id 排序')
     assert.deepEqual(got.get('inbox.afterRead'), ['n1'], '默认只列未读')
+
+    // ── 工具包（D40）：卸载的语义与"slug 只在 workspace 内唯一" ──
+    assert.deepEqual(got.get('deleteTool.ok'), true)
+    assert.deepEqual(got.get('deleteTool.again'), false, '删第二次是 false，**不是错误**')
+    assert.deepEqual(got.get('getTool.afterDelete'), null)
+    assert.deepEqual(
+      got.get('getToolBySlug.hit'),
+      't1',
+      '同一 workspace 内 slug 唯一 ⇒ 命中那一个包',
+    )
+    assert.deepEqual(got.get('getToolBySlug.miss'), null)
+    assert.deepEqual(
+      got.get('getToolBySlug.otherWorkspace'),
+      't3',
+      '★ 另一个 workspace 里有同 slug 的包：必须返回**它那个**，不能跨 workspace 拿成 t1',
+    )
+    assert.deepEqual(
+      got.get('getToolBySlug.afterDelete'),
+      null,
+      '包卸载后按 slug 也应当查不到，而不是留着一个悬空引用',
+    )
+    assert.deepEqual(got.get('listTools.A.afterDelete'), ['lint'])
+    assert.deepEqual(
+      got.get('listTools.B.untouched'),
+      ['deploy'],
+      '★ 删 A 的包不能动到 B 的（哪怕两者同名）',
+    )
+    assert.deepEqual(
+      got.get('listToolsByIds'),
+      ['t2', 't3'],
+      '批量取要跳过已被卸载的 id，而不是整体失败',
+    )
+    assert.deepEqual(got.get('listToolsByIds.empty'), [])
 
     // ── 游标：所有情形都要有确定的答案，不能只说"两边一样" ──
     assert.deepEqual(got.get('listIssues.page1'), { ids: ['i1', 'i2'], nextCursor: 'i2' })

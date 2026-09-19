@@ -18,6 +18,7 @@ import {
   type VerdictRecord,
 } from '@alpha-helper/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { installToolPackage, verdictAction, writeToolPackage } from './testing/tool-fixture.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -59,8 +60,10 @@ class TwoPhaseBackend implements AgentBackend {
     const isReview = context.includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
 
-    // 从受管上下文里读关联 issue —— 模型也是这么做的
-    const relatedIssue = /- 关联 issue：`([^`]+)`/.exec(context)?.[1] ?? 'missing'
+    // ⚠️ 这里原来会从受管上下文里抠出关联 issue（`- 关联 issue：…`），再把它塞进
+    //    判决的 `action.params.issueId`。D41 之后动作来自工具包，而"这条动作该落在
+    //    哪个对象上"由清单里的**绑定参数**决定（平台按 run 的事实注入，模型写不出来），
+    //    模型只填开放参数——所以这个夹具只给 `text`，见下面那段注释。
 
     if (isReview) {
       this.sawExecutorArtifact = await readFile(join(opts.workDir, EXECUTOR_ARTIFACT), 'utf8').then(
@@ -78,12 +81,22 @@ class TwoPhaseBackend implements AgentBackend {
           VERDICT_FENCE_BEGIN,
           JSON.stringify({
             schemaVersion: 1,
-            conclusion: 'fail',
+            conclusion: 'pass',
             reasonCode: 'missing_tests',
             confidence: 0.8,
             findings: [{ severity: 'high', summary: '没有测试', evidence: [] }],
-            // 用模板**允许**的动作（issue.update_status 不在子集内，会被判 invalid）
-            action: { type: 'comment.create', params: { issueId: relatedIssue, body: '缺少测试' } },
+            // ══════════════════════════════════════════════════════════
+            // ★ D41：判决里的动作必须来自**装进来的工具包**
+            // ══════════════════════════════════════════════════════════
+            //
+            // 这里原来是 `comment.create`（平台的内置动作）。内置动作已经被全部
+            // 移除，动作只能写成 `<包 slug>.<动作名>` 并且**那个包真的装了**——
+            // 而首启播种的审核者**没有任何动作权限**（D41 的刻意结果）。所以
+            // `before` 里装了一个夹具包、把它的动作授给了那个审核者，这里用它。
+            //
+            // 判决里只给**开放参数** `text`：绑定参数（工作目录）由平台按这条 run
+            // 的事实注入——写成 `issueId` 那种"模型自己指对象"的参数会被当成未知键拒掉。
+            action: verdictAction(reviewAction, { text: '缺少测试' }),
             escalateReason: null,
           }),
           VERDICT_FENCE_END,
@@ -128,6 +141,12 @@ let daemon: DaemonHandle
 let backend: TwoPhaseBackend
 let issueId: Issue['id']
 let agentId: string
+/**
+ * 判决里那条动作的完整名字（`<包 slug>.<动作名>`）。
+ *
+ * `before` 里装的那个夹具包决定它，见下面那段注释。
+ */
+let reviewAction: string
 
 before(async () => {
   dataDir = await makeTempDir('s1-data')
@@ -170,6 +189,29 @@ before(async () => {
     reviewer!.id,
     '★ 执行者默认指向审核者：首启就是一条通的闭环',
   )
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ D41：动作只能来自**装进来的工具包**，而播种的审核者没有任何动作权限
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 这条链路（执行 → 自动审核 → 判决 → 动作）的主体是**流程本身**，判决里带一个
+  // 动作只是它的落点。内置动作被全部移除之后，那个动作必须真的来自一个装了
+  // 的包；而"播种的审核者开箱即用就能发评论"已经不再成立（D41 的刻意结果：
+  // `BUILTIN_REVIEW_ALLOWED_ACTIONS` 现在是空数组）。
+  //
+  // 所以这里装一个夹具包（真 node 脚本，只往工作目录写一个文件；NFR-T-01），
+  // 并把它的动作授给那个播种的审核者——授权的入口就是 `Agent.allowedActions`
+  // （D40 收口之后动作权限只住在那儿）。不装的话判决会以"动作不可用"判成
+  // 不合规，这条用例就会变成在测别的东西。
+  const pkg = await writeToolPackage()
+  await installToolPackage(daemon, pkg)
+  const granted = await fetch(`${daemon.url}/api/agents/${reviewer!.id}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowedActions: [pkg.action] }),
+  })
+  assert.equal(granted.status, 200, '给播种的审核者授权一个工具动作应当成功')
+  reviewAction = pkg.action
 
   agentId = executor!.id
 })
@@ -216,8 +258,21 @@ describe('S1：执行完成后自动接审核', () => {
     ).json()) as { verdicts: VerdictRecord[] }).verdicts
 
     assert.equal(verdicts.length, 1)
-    assert.equal(verdicts[0]?.conclusion, 'fail')
+    assert.equal(verdicts[0]?.conclusion, 'pass')
     assert.equal(verdicts[0]?.status, 'dispatched_to_action')
+
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 而且那条动作**真的执行了**（D41：动作是一个工具脚本，不是平台的一支代码）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 产物落在**审核 run 的工作目录**里：审核继承被审那条 run 的工作目录（上面
+    // 那条用例守的就是这件事），而这份夹具脚本的 `dir` 是平台按 run 事实注入的
+    // **绑定参数**——所以文件出现在这里，同时也证明了"绑定的值真的被交给了脚本"。
+    assert.equal(
+      await readFile(join(workDir, 'fixture-out.txt'), 'utf8'),
+      '- 缺少测试\n',
+      '★ 判决里的工具动作要真的跑过 —— 只断言状态等于"已派发"是抓不到这一点的',
+    )
   })
 
   test('★ 审核者必须不同于执行者（INV-1~3）', async () => {
@@ -364,7 +419,6 @@ describe('S1：执行完成后自动接审核', () => {
               slug: 'probe-skill',
               name: '探针技能',
               body: '# 探针\n\n随便写点什么。',
-              allowedActions: [],
             },
           ],
           subject: { type: 'issue', id: issueId },

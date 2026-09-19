@@ -3,15 +3,14 @@ import {
   decideReview,
   describeDecision,
   isStructuralInvalid,
-  withCurrentVerdict,
   type ReviewDecision,
-  type ChainStep,
   type Store,
 } from '@alpha-helper/domain'
 import {
   formatVerdictIssues,
   ulid,
-  type ActionType,
+  type ActionRefType,
+  type Tool,
   type AuditRecord,
   type BlobRef,
   type InboxItem,
@@ -50,6 +49,16 @@ export interface ReviewHandlingDeps {
    * 不返回则视为"不重试"，直接降级为建议。
    */
   createRetryRun?: (run: Run) => Promise<string | null>
+  /**
+   * 为一次**审核不通过**创建返工 run（D45）：把审核意见交回执行者重做。
+   *
+   * ⚠️ 与 `createRetryRun` 方向相反：`retry` 重做的是**审核者**（它没按格式
+   *    输出判决），`rework` 重做的是**执行者**（活本身不合格）。
+   *
+   * 不返回则视为"没派出去" ⇒ 退化成交给人的那条路（`rework_exhausted`），
+   * **不能让判决悬着**。
+   */
+  createReworkRun?: (run: Run, verdict: VerdictRecord) => Promise<string | null>
   now?: () => number
 }
 
@@ -58,10 +67,28 @@ export interface ReviewHandlingInput {
   workspaceId: WorkspaceId
   /** agent 的原始输出。 */
   output: string
-  /** 该 skill 允许触发的动作子集。 */
-  allowedActions: readonly ActionType[]
+  /** 这个审核者允许触发的动作（内置裸名或第三方命名空间；skill 不参与授权）。 */
+  allowedActions: readonly ActionRefType[]
+  /**
+   * 这个工作区**已安装的工具包**（D40）——透传给 `decideReview`，否则判决里的
+   * 第三方动作会被判成"未知动作类型"。
+   */
+  tools?: readonly Tool[]
+  /**
+   * 使用者在界面上设好的固定参数（D43）：`动作名 → 参数名 → 值`。
+   *
+   * 两个落点：① `decideReview` 校验判决时，模型写了固定参数 ⇒ 结构性 invalid；
+   * ② `ActionRunner.execute` 执行时把固定值注入最终参数（像绑定值一样，模型
+   *    看不见的那一侧）。判据与 `allowedActions` 同一个：**字段在不在**——
+   *    `run.actionParams ?? 审核者.actionParams`。
+   */
+  fixedParams?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>
   /** 已因 invalid 重试过几次。 */
   invalidAttempts: number
+  /** 这条任务允许返工几次（D45）；0/缺省 = 不返工，`fail` 直接交给人。 */
+  maxReworks?: number
+  /** 这条任务已经返工过几次（D45）。与 `invalidAttempts` 是两件事、两个计数。 */
+  usedReworks?: number
   /** 审核对象快照（审计用）。 */
   inputBlobRefs: readonly BlobRef[]
   skillRefs: readonly SkillRef[]
@@ -75,13 +102,17 @@ export interface ReviewHandlingInput {
   cliVersion: string | null
   usage: TokenUsage | null | undefined
   /**
-   * 判决所属的链路（根 → 当前 run）。
+   * ⚠️ 这里原来还有 `chainSteps`（判决所属的链路，根 → 当前 run）。
    *
-   * 由调用方重建后传入。**不能在这里自己重建**：判决落库发生在动作之前，
-   * 此刻链路还是"判决之前"的样子，而动作派生需要的是同一份快照。
-   * 缺省为空链路——那意味着环检测无效，只保留深度兜底。
+   * 它是为**动作派生**服务的：`issue.assign_agent` 派生新 run 之前要判环与判
+   * 深度，而"环"需要整条链路才认得出来。D41 把内置动作全部移除之后没有任何
+   * 动作能派生 run（工具脚本没有平台 API），于是这份输入连同 daemon 侧的
+   * `loadChainSteps` 调用一起删掉了。
+   *
+   * 域层的 `packages/domain/src/loop/*`（`loadChainSteps` / `detectChainCycle` /
+   * `assertCanDeriveRun`）**保留**：它们不假设内置动作存在，仍是 INV-14~16 的
+   * 实现，只是这个版本在 daemon 里没有调用点了。
    */
-  chainSteps?: readonly ChainStep[]
 }
 
 export interface ReviewHandlingResult {
@@ -89,10 +120,13 @@ export interface ReviewHandlingResult {
   verdictId: string | null
   /** 已执行的动作 id。 */
   actionIds: string[]
-  /** 派生出的新 run（重试或动作派生）。 */
+  /**
+   * 派生出的新 run。
+   *
+   * ⚠️ D41 之后**只剩一个来源**：判决不合规时的重试（`createRetryRun`）。
+   *    原来还有"动作派生"那一支（`issue.assign_agent`），随内置动作一起没了。
+   */
   spawnedRunId: string | null
-  /** 派生被回路边界拦下时的原因（指派本身可能已经成功）。 */
-  derivationBlocked: { reason: 'cycle' | 'depth'; message: string } | null
   /**
    * 刚写下去的审计记录。
    *
@@ -107,12 +141,16 @@ export class ReviewCoordinator {
   readonly #store: Store
   readonly #actions: ActionRunner
   readonly #createRetryRun: ((run: Run) => Promise<string | null>) | undefined
+  readonly #createReworkRun:
+    | ((run: Run, verdict: VerdictRecord) => Promise<string | null>)
+    | undefined
   readonly #now: () => number
 
   constructor(deps: ReviewHandlingDeps) {
     this.#store = deps.store
     this.#actions = deps.actions
     this.#createRetryRun = deps.createRetryRun
+    this.#createReworkRun = deps.createReworkRun
     this.#now = deps.now ?? (() => Date.now())
   }
 
@@ -121,6 +159,14 @@ export class ReviewCoordinator {
       output: input.output,
       allowedActions: input.allowedActions,
       invalidAttempts: input.invalidAttempts,
+      // D40：已安装的工具包要一起给——不然判决里合法的第三方动作会被判成
+      // "未知动作类型"，而那条是**结构性 invalid**（不可重试）。
+      ...(input.tools ? { tools: input.tools } : {}),
+      // D43：模型写了固定参数 ⇒ 结构性 invalid（不可重试）
+      ...(input.fixedParams ? { fixedParams: input.fixedParams } : {}),
+      // D45：`fail` ⇒ 返工。有没有额度决定它是"交回执行者"还是"交给人"。
+      ...(input.maxReworks !== undefined ? { maxReworks: input.maxReworks } : {}),
+      ...(input.usedReworks !== undefined ? { usedReworks: input.usedReworks } : {}),
     })
 
     const verdictId = ulid(this.#now()) as VerdictRecord['id']
@@ -130,27 +176,23 @@ export class ReviewCoordinator {
 
     let actionIds: string[] = []
     let spawnedRunId: string | null = null
-    let derivationBlocked: { reason: 'cycle' | 'depth'; message: string } | null = null
 
     switch (decision.kind) {
       case 'act': {
+        const fixedForAction = input.fixedParams?.[decision.verdict.action!.type]
         const result = await this.#actions.execute({
           ref: decision.verdict.action!,
           workspaceId: input.workspaceId,
           verdictId,
           runId: input.run.id,
-          // ★ 把刚解析出的原因码并进链路最后一步。
-          //   不并的话当前这一步的 reasonCode 恒为 null，环检测永远配不上。
-          chainSteps: withCurrentVerdict(
-            input.chainSteps ?? [],
-            decision.verdict.reasonCode ?? null,
-          ),
+          // D43：固定参数在**执行这一档**注入（模型不许写，判决校验那层已经拦过）
+          ...(fixedForAction ? { fixed: fixedForAction } : {}),
         })
         actionIds = [result.action.id]
-        // ★ 动作派生出的 run 必须传出去 —— 它既是 UI 的"下一步在哪"，
-        //    也是下一次环检测往里加的那一环。早先这里被显式丢弃过。
-        if (result.spawnedRunId) spawnedRunId = result.spawnedRunId
-        if (result.derivationBlocked) derivationBlocked = result.derivationBlocked
+        // ⚠️ 这里原来还会读 `result.spawnedRunId` / `result.derivationBlocked`
+        //    （内置动作 `issue.assign_agent` 的产物：指派本身成功、派生可能被
+        //    回路边界拦下）。D41 之后工具动作**不可能**派生 run，那两个字段
+        //    连同它们的语义一起从 `ActionRunner` 的返回值里删掉了。
         await this.#store.transitionVerdict(verdictId, 'validated', 'dispatched_to_action')
         break
       }
@@ -168,6 +210,60 @@ export class ReviewCoordinator {
           type: 'verdict.escalated',
           severity: 'action_required',
           title: `需要你判断：${decision.escalateReason}`,
+          body: this.#summarizeFindings(decision),
+          issueId: issueIdOf(input.run),
+          runId: input.run.id,
+        })
+        break
+      }
+
+      case 'rework': {
+        // ══════════════════════════════════════════════════════════════
+        // ★ D45：审核不通过 ⇒ 把意见交回**执行者**重做
+        // ══════════════════════════════════════════════════════════════
+        //
+        // 与 `retry` 同一个教训：派出去之后**这条判决必须收口**。状态机允许
+        // `validated → rework_requested`，而那是一个**终态**——"重做"是另一条
+        // run、另一条 verdict 记录，这条判决的故事到此为止。
+        //
+        // 派不出去（拿不到额度/目录已被销毁之类）时**不能让它悬着**：退化成
+        // 交给人的那条路，并说清为什么。
+        const reworkRunId = this.#createReworkRun
+          ? await this.#createReworkRun(input.run, record)
+          : null
+        if (reworkRunId) {
+          spawnedRunId = reworkRunId
+          await this.#store.transitionVerdict(verdictId, 'validated', 'rework_requested')
+        } else {
+          await this.#store.transitionVerdict(verdictId, 'validated', 'escalated')
+          await this.#notify({
+            workspaceId: input.workspaceId,
+            type: 'verdict.escalated',
+            severity: 'action_required',
+            title: '审核不通过，但返工没有派出去',
+            body: this.#summarizeFindings(decision),
+            issueId: issueIdOf(input.run),
+            runId: input.run.id,
+          })
+        }
+        break
+      }
+
+      case 'rework_exhausted': {
+        // 返工额度用完（或这条任务压根没配）⇒ **明确交给人**。
+        //
+        // ⚠️ 这里绝不能落成 `advisory`：那会让看板把一条**被否决**的任务显示成
+        //    "已完成审查"。`fail` 在新语义下不带处置动作，平台确实无事可做——
+        //    正因为如此，它必须进人的队列。
+        await this.#store.transitionVerdict(verdictId, 'validated', 'escalated')
+        await this.#notify({
+          workspaceId: input.workspaceId,
+          type: 'verdict.escalated',
+          severity: 'action_required',
+          title:
+            (input.maxReworks ?? 0) > 0
+              ? `审核不通过且返工次数已用完（${input.maxReworks} 次）`
+              : '审核不通过（这条任务没有配返工）',
           body: this.#summarizeFindings(decision),
           issueId: issueIdOf(input.run),
           runId: input.run.id,
@@ -252,7 +348,7 @@ export class ReviewCoordinator {
     })
     await this.#store.appendAudit(audit)
 
-    return { decision, verdictId, actionIds, spawnedRunId, derivationBlocked, audit }
+    return { decision, verdictId, actionIds, spawnedRunId, audit }
   }
 
   #recordFrom(
@@ -338,6 +434,12 @@ function statusFor(decision: ReviewDecision): VerdictStatus {
     case 'advisory':
       return 'validated'
     case 'escalate':
+      return 'validated'
+    // D45：`fail` 的两种去向都**先落 `validated`**（判决本身是合格的），随后由
+    // 分流转到 `rework_requested`（有额度）或 `escalated`（没额度、交给人）。
+    case 'rework':
+      return 'validated'
+    case 'rework_exhausted':
       return 'validated'
     case 'retry':
       return 'invalid'

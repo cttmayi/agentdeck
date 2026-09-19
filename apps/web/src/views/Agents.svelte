@@ -12,6 +12,7 @@
   import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
+  import { t } from '../lib/i18n.ts'
 
   /**
    * 智能体视图 = agent 配置 + runtime 状态。
@@ -87,13 +88,20 @@
    */
   $: envIssues = $identity?.environment?.issues ?? []
 
-  const SUPPORT_LABEL: Record<string, string> = {
-    verified: '实测过',
-    'in-range-unverified': '在范围内但未实测',
-    'out-of-range': '超出范围',
-    undeclared: '未声明',
-    unknown: '无法判断',
-  }
+  /**
+   * 版本判定状态 → 标签。
+   *
+   * ⚠️ 用 `$:` 而不是 `const`（D39）：标签要**跟着界面语言变**。写成 `const`
+   *    只在组件初始化时算一次，切语言时这五行会停在旧语言上——而它们恰恰是
+   *    使用者判断"这个 runtime 可信不可信"的依据。
+   */
+  $: SUPPORT_LABEL = {
+    verified: $t('agents.supportVerified'),
+    'in-range-unverified': $t('agents.supportInRange'),
+    'out-of-range': $t('agents.supportOutOfRange'),
+    undeclared: $t('agents.supportUndeclared'),
+    unknown: $t('agents.supportUnknown'),
+  } as Record<string, string>
 
   function refresh(): void {
     void Promise.all([loadAgents(), loadIdentity()])
@@ -105,10 +113,9 @@
   <section class="pane list-pane">
     <header class="pane-head">
       <div>
-        <h2>智能体</h2>
+        <h2>{$t('agents.viewTitle')}</h2>
         <p class="hint">
-          每个 agent 独立配置指令、技能子集与角色：<strong>执行者</strong>接到任务动手干活，
-          <strong>审核者</strong>按挂着的 skill 给判决——所以换一个审核 agent 就等于换一套审核标准。
+          {$t('agents.listHintBefore')}<strong>{$t('agents.listHintExecutor')}</strong>{$t('agents.listHintMid')}<strong>{$t('agents.listHintReviewer')}</strong>{$t('agents.listHintAfter')}
         </p>
       </div>
       <div class="pane-actions">
@@ -127,22 +134,22 @@
             selectedId = null
           }}
         >
-          新建
+          {$t('agents.newButton')}
         </button>
         <button
           type="button"
           class="secondary small"
           disabled={settingsOpen}
-          title="平台的设置：第一句话模版等——改一次，对所有智能体生效"
+          title={$t('agents.settingsTitle')}
           onclick={() => {
             settingsOpen = true
             creating = false
             selectedId = null
           }}
         >
-          设置
+          {$t('agents.settingsButton')}
         </button>
-        <button type="button" class="secondary small" onclick={refresh}>刷新</button>
+        <button type="button" class="secondary small" onclick={refresh}>{$t('common.refresh')}</button>
       </div>
     </header>
 
@@ -155,7 +162,7 @@
           方向**。放在列表上方（而不是藏在某个详情里）比让使用者去猜便宜得多。
         -->
         <section class="env-issues">
-          <h3 class="warn">环境问题</h3>
+          <h3 class="warn">{$t('agents.envIssuesTitle')}</h3>
           {#each envIssues as issue}
             <div class="notice warn stack">
               <strong>{issue.summary}</strong>
@@ -172,19 +179,19 @@
         <div class="notice bad">{$loadError['agents']}</div>
       {:else if $agents.length === 0}
         <div class="empty">
-          <strong>还没有智能体</strong>
-          先建一个执行者，再建一个审核者并给它挂上 skill——别忘了在执行者的「由谁审它」里选它，
-          否则产出不会被自动审核。
+          <strong>{$t('agents.emptyTitle')}</strong>
+          {$t('agents.emptyHint')}
         </div>
       {:else}
         <ul class="agent-list">
           {#each $agents as a (a.id)}
             {@const reviewer =
               a.role === 'reviewer'
-                ? '它审别人'
+                ? $t('agents.reviewsOthers')
                 : !a.reviewerAgentId
-                  ? '不自动审核'
-                  : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ?? '（已不存在）')}
+                  ? $t('agents.noAutoReview')
+                  : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ??
+                    $t('agents.reviewerMissing'))}
             <!-- 整条可点：只在名字上加链接的话命中区域太小，而且其余字段看起来像"不可点" -->
             <!--
               ⚠️ 「设为默认」是**兄弟节点**，不能放进 `.agent-item` 里面：
@@ -200,24 +207,24 @@
                 <span class="agent-line">
                   <strong>{a.name}</strong>
                   <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
-                    {a.role === 'reviewer' ? '审核' : '执行'}
+                    {a.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
                   </span>
                   {#if a.role === 'reviewer' && a.skillIds.length === 0}
                     <!-- 审核者不挂 skill 就审不了任何东西，这件事必须在列表上就看得见 -->
-                    <span class="bad small">未挂 skill</span>
+                    <span class="bad small">{$t('agents.skillMissing')}</span>
                   {/if}
                   {#if a.id === $effectiveDefaultAgentId}
                     <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
-                    <span class="badge default-badge">默认</span>
+                    <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
                   {/if}
                 </span>
                 <span class="agent-note faint small">
                   {a.instructions.trim()
                     ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
-                    : '（没有指令）'}
+                    : $t('agents.noInstructions')}
                 </span>
                 <span class="agent-note faint small">
-                  {reviewer} · {a.skillIds.length} 个 skill · <code>{a.runtimeKey}</code>
+                  {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}<code>{a.runtimeKey}</code>
                 </span>
               </button>
 
@@ -234,13 +241,13 @@
                 <button
                   type="button"
                   class="ghost small default-toggle"
-                  title="设为默认：新建任务默认交给它（原来那个会自动换成它）"
+                  title={$t('agents.setDefaultTitle')}
                   onclick={(e) => {
                     e.stopPropagation()
                     void setDefaultAgent(a.id)
                   }}
                 >
-                  设为默认
+                  {$t('agents.setDefault')}
                 </button>
               {/if}
             </li>
@@ -254,12 +261,10 @@
       -->
       {#if $identity}
         <section class="runtime-block">
-          <h3>Runtime（本机）</h3>
+          <h3>{$t('agents.runtimeLocal')}</h3>
           <p class="hint">
-            <strong>证据等级</strong>：<code>provisional</code> 表示该 CLI 的字段名<strong>没有对照过
-            真实程序</strong>，是按公开形状推导的——它和 <code>verified</code> 的可信度不同。
-            <strong>版本判定</strong>：<code>undeclared</code> 表示我们<strong>没有实测过</strong>任何版本；
-            按 FR-CLI-07，凭文档推断的范围不算声明，所以这里如实报成"未声明"。
+            <strong>{$t('agents.evidenceStrong')}</strong>{$t('agents.colon')}<code>provisional</code>{$t('agents.evidenceAfter')}<strong>{$t('agents.evidenceUnverified')}</strong>{$t('agents.evidenceMid')}<code>verified</code>{$t('agents.evidenceTail')}
+            <strong>{$t('agents.versionStrong')}</strong>{$t('agents.colon')}<code>undeclared</code>{$t('agents.versionAfter')}<strong>{$t('agents.versionUntested')}</strong>{$t('agents.versionMid')}{$t('agents.versionTail')}
           </p>
 
           {#each $identity.runtimes as r (r.key)}
@@ -267,20 +272,20 @@
               <div class="runtime-line">
                 <code>{r.key}</code>
                 {#if r.available}
-                  <span class="faint small">{r.cliVersion ?? '已就绪'}</span>
+                  <span class="faint small">{r.cliVersion ?? $t('agents.runtimeReady')}</span>
                 {:else}
-                  <span class="bad small">未找到</span>
+                  <span class="bad small">{$t('agents.runtimeNotFound')}</span>
                 {/if}
                 <span class="faint small" class:good={r.evidence === 'verified'}>
-                  证据：{r.evidence}
+                  {$t('agents.runtimeEvidence', { value: r.evidence })}
                 </span>
               </div>
               <div class="runtime-line faint small">
                 <span class="mono">{r.command}</span>
-                <span>会话：{r.sessionState ?? '—'}</span>
+                <span>{$t('agents.runtimeSession', { state: r.sessionState ?? '—' })}</span>
               </div>
               <div class="runtime-line small">
-                <span class="faint">版本判定：</span>
+                <span class="faint">{$t('agents.versionSupportLabel')}</span>
                 <span
                   class:good={r.versionSupport?.status === 'verified'}
                   class:bad={r.versionSupport?.status === 'out-of-range'}
@@ -296,7 +301,7 @@
           {/each}
 
           <p class="hint">
-            要让版本判定变成"实测过"：<code>pnpm run daemon --verify-runtime all</code>
+            {$t('agents.versionVerifyHint')}<code>pnpm run daemon --verify-runtime all</code>
           </p>
         </section>
       {/if}
@@ -328,8 +333,8 @@
         />
       {:else}
         <div class="empty">
-          <strong>从左边选一个智能体</strong>
-          点左边的条目看它的指令、挂的技能，以及它用哪个 CLI 跑。
+          <strong>{$t('agents.pickOneTitle')}</strong>
+          {$t('agents.pickOneHint')}
         </div>
       {/if}
     </div>

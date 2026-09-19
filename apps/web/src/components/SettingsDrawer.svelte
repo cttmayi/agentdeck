@@ -17,7 +17,7 @@
   import { syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
   import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@alpha-helper/i18n'
-  import { locale, setLocale } from '../lib/i18n.ts'
+  import { locale, setLocale, t, tx } from '../lib/i18n.ts'
 
   /**
    * 设置抽屉。
@@ -69,7 +69,7 @@
       if (register) await doRegister(email, password)
       else await doLogin(email, password)
       password = ''
-      showToast(register ? '已注册并登录' : '已登录')
+      showToast(register ? tx('settings.registeredAndSignedIn') : tx('settings.signedIn'))
     } catch (err) {
       remoteError.set(err instanceof Error ? err.message : String(err))
     }
@@ -96,11 +96,11 @@
    * 而如果界面只说"下载完成"，使用者就会以为装上了——那就是静默。
    */
   async function installSkill(slug: string): Promise<void> {
-    remoteNote = `正在下载 ${slug}…`
+    remoteNote = tx('settings.downloadingSkill', { slug })
     try {
       const skill = $remoteCatalog?.skills.find((s) => s.slug === slug)
       if (!skill) {
-        remoteNote = `目录里没有 ${slug}`
+        remoteNote = tx('settings.notInCatalog', { slug })
         return
       }
       const out = await api<{
@@ -132,10 +132,17 @@
       const skipped = out.skipped ?? []
       remoteNote =
         (out.installed?.length ?? 0) > 0
-          ? `已安装 ${slug}` + (skipped.length ? `；跳过：${skipped.map((s) => s.reason).join('；')}` : '')
-          : `未安装：${skipped.map((s) => s.reason).join('；') || '未知原因'}`
+          ? tx('settings.installedSkill', { slug }) +
+            (skipped.length
+              ? tx('settings.skippedReasons', { reasons: skipped.map((s) => s.reason).join('；') })
+              : '')
+          : tx('settings.notInstalled', {
+              reasons: skipped.map((s) => s.reason).join('；') || tx('settings.unknownReason'),
+            })
     } catch (err) {
-      remoteNote = `安装失败：${err instanceof Error ? err.message : String(err)}`
+      remoteNote = tx('settings.installFailed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
@@ -154,7 +161,7 @@
       await remote.saveSettings({ [key]: value })
       settingKey = ''
       settingValue = ''
-      showToast('设定已保存，立即生效')
+      showToast(tx('settings.settingSaved'))
     } catch (err) {
       remoteError.set(err instanceof Error ? err.message : String(err))
     }
@@ -163,8 +170,8 @@
 
 <aside class="drawer">
   <div class="drawer-head">
-    <h2>{focus === 'remote' ? '远端账号' : '设置'}</h2>
-    <button type="button" class="ghost" onclick={onclose}>关闭</button>
+    <h2>{focus === 'remote' ? $t('settings.titleRemote') : $t('settings.title')}</h2>
+    <button type="button" class="ghost" onclick={onclose}>{$t('common.close')}</button>
   </div>
 
   <div class="drawer-body">
@@ -175,9 +182,9 @@
         这里多给一句说明——切换器本身说不清"prompt 不变"这件事。
     -->
     <section class="drawer-section">
-      <h3>界面语言</h3>
+      <h3>{$t('settings.language')}</h3>
       <label>
-        语言
+        {$t('settings.languageLabel')}
         <select
           value={$locale}
           onchange={(e) => {
@@ -191,36 +198,35 @@
         </select>
       </label>
       <p class="hint">
-        只切换界面文字。交给模型的那段话仍是中文，另外会加一条"请用 X 回答"的指令，
-        让它用你选的语言答复。
+        {$t('settings.languageHint')}
       </p>
     </section>
 
     <section class="drawer-section">
-      <h3>成本</h3>
+      <h3>{$t('settings.costs')}</h3>
       {#if costsError}
         <div class="notice bad">{costsError}</div>
       {:else if !costs}
         <div class="skeleton" style="width:40%"></div>
       {:else}
         <p>
-          总计 <strong>${(costs.total.costUsdMicros / 1e6).toFixed(4)}</strong>
-          <span class="faint">· {costs.total.runs} 次执行</span>
+          {$t('settings.costsTotalBefore')}<strong>${(costs.total.costUsdMicros / 1e6).toFixed(4)}</strong>
+          <span class="faint">· {$t('settings.runsCount', { count: costs.total.runs })}</span>
           {#if costs.runsWithoutUsage > 0}
-            <span class="bad">· 其中 {costs.runsWithoutUsage} 次没有上报用量</span>
+            <span class="bad">· {$t('settings.runsWithoutUsage', { count: costs.runsWithoutUsage })}</span>
           {/if}
         </p>
         {#if costs.byKind.length > 0}
           <div class="table-wrap">
             <table>
-              <thead><tr><th>类型</th><th>次数</th><th>成本 (USD)</th><th>备注</th></tr></thead>
+              <thead><tr><th>{$t('settings.colKind')}</th><th>{$t('settings.colRuns')}</th><th>{$t('settings.colCost')}</th><th>{$t('settings.colNote')}</th></tr></thead>
               <tbody>
                 {#each costs.byKind as b (b.key)}
                   <tr>
                     <td>{b.key}</td>
                     <td>{b.runs}</td>
                     <td>{(b.costUsdMicros / 1e6).toFixed(4)}</td>
-                    <td class="faint small">{b.estimatedRuns > 0 ? `${b.estimatedRuns} 条为估算` : '—'}</td>
+                    <td class="faint small">{b.estimatedRuns > 0 ? $t('settings.estimatedRuns', { count: b.estimatedRuns }) : '—'}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -229,19 +235,17 @@
         {/if}
         {#if costs.runsWithoutUsage > 0}
           <p class="hint">
-            ⚠️ 没有上报用量的执行<strong>不计入</strong>成本。把缺失当零会让"总成本"
-            变成一个误导性的数字。
+            {$t('settings.usageHintBefore')}<strong>{$t('settings.usageHintStrong')}</strong>{$t('settings.usageHintAfter')}
           </p>
         {/if}
       {/if}
 
       <!-- 审计导出是**下载**，不是页面内渲染——用链接让浏览器走原生下载语义 -->
       <a href="/api/audits/export" download>
-        <button type="button" class="secondary">导出审计链（JSON）</button>
+        <button type="button" class="secondary">{$t('settings.exportAudit')}</button>
       </a>
       <p class="hint">
-        导出的文件自带校验和，改动任何一个字段都会被查出来。它同时把能力边界写在文件里
-        ——审计链可追溯但<strong>不可复现</strong>（skill 记录不含指纹），argv 已脱敏。
+        {$t('settings.exportHintBefore')}<strong>{$t('settings.exportHintStrong')}</strong>{$t('settings.exportHintAfter')}
       </p>
     </section>
 
@@ -251,66 +255,65 @@
     <!-- ══════════ 远端能力 ══════════ -->
     <section class="drawer-section">
       <h3>
-        远端能力
+        {$t('settings.remoteSection')}
         {#if $remoteError}
           <span class="bad small">{$remoteError}</span>
         {:else if $remoteCatalog}
-          <span class="faint small">已连接 {getRemoteUrl()}</span>
+          <span class="faint small">{$t('settings.connected', { url: getRemoteUrl() })}</span>
         {/if}
       </h3>
 
       {#if !$remoteLoggedIn}
         <p class="hint">
-          远端服务是<strong>另一个进程</strong>，本页面直接访问它（这一跳是跨源的，
-          由远端放行回环来源）。daemon 自己不向远端发任何请求。
+          {$t('settings.remoteProcessBefore')}<strong>{$t('settings.remoteProcessStrong')}</strong>{$t('settings.remoteProcessAfter')}
         </p>
         <form onsubmit={(e) => { e.preventDefault(); void submitLogin(false) }}>
           <label>
-            邮箱
+            {$t('settings.email')}
             <input bind:value={email} type="email" required autocomplete="username" />
           </label>
           <label>
-            口令（至少 8 位）
+            {$t('settings.password')}
             <input bind:value={password} type="password" required autocomplete="current-password" />
           </label>
           <div style="display:flex;gap:var(--sp-2)">
-            <button type="submit">登录</button>
-            <button type="button" class="secondary" onclick={() => void submitLogin(true)}>注册</button>
+            <button type="submit">{$t('settings.signIn')}</button>
+            <button type="button" class="secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
           </div>
         </form>
         <label style="margin-top:var(--sp-3)">
-          远端地址
+          {$t('settings.remoteUrl')}
           <input bind:value={$remoteUrlValue} />
         </label>
-        <button type="button" class="secondary" onclick={saveRemoteUrl}>保存地址并重连</button>
+        <button type="button" class="secondary" onclick={saveRemoteUrl}>{$t('settings.saveUrl')}</button>
       {:else}
-        <p>已登录：<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
-        <button type="button" class="secondary" onclick={doLogout}>退出登录</button>
+        <p>{$t('settings.signedInAs')}<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
+        <button type="button" class="secondary" onclick={doLogout}>{$t('settings.signOut')}</button>
 
-        <h4>我的设定</h4>
+        <h4>{$t('settings.mySettings')}</h4>
         <form onsubmit={(e) => { e.preventDefault(); void saveSetting() }}>
           <label>
-            键
+            {$t('settings.key')}
             <input bind:value={settingKey} placeholder="pollIntervalMs / reportingEnabled" autocomplete="off" />
           </label>
           <label>
-            值（JSON；解析不了按字符串）
-            <input bind:value={settingValue} placeholder="60000 或 false" autocomplete="off" />
+            {$t('settings.value')}
+            <input bind:value={settingValue} placeholder={$t('settings.valuePlaceholder')} autocomplete="off" />
           </label>
-          <button type="submit">保存（立即生效）</button>
+          <button type="submit">{$t('settings.saveImmediate')}</button>
         </form>
         <p class="hint">
-          常用：<code>pollIntervalMs</code>（最小 10000）、<code>reportingEnabled: false</code>
-          关闭上报。
+          {$t('settings.commonSettingsBefore')}<code>pollIntervalMs</code>{$t('settings.commonSettingsBetween')}<code>reportingEnabled: false</code>
+          {$t('settings.commonSettingsAfter')}
         </p>
 
-        <h4>插件清单</h4>
+        <h4>{$t('settings.pluginsHeading')}</h4>
         {#if $remotePlugins.length === 0}
-          <p class="faint small">没有加载任何插件。</p>
+          <p class="faint small">{$t('settings.noPlugins')}</p>
         {:else}
           <div class="table-wrap">
             <table>
-              <thead><tr><th>插件</th><th>能力</th><th>状态</th><th>密钥</th><th></th></tr></thead>
+              <thead><tr><th>{$t('settings.colPlugin')}</th><th>{$t('settings.colCapability')}</th><th>{$t('settings.colStatus')}</th><th>{$t('settings.colSecretKeys')}</th><th></th></tr></thead>
               <tbody>
                 {#each $remotePlugins as p (p.name)}
                   <tr>
@@ -320,11 +323,11 @@
                          就分不清"代码坏了"和"我自己关掉了" -->
                     <td>
                       {#if !p.loaded}
-                        <span class="bad">加载失败</span>
+                        <span class="bad">{$t('settings.loadFailed')}</span>
                       {:else if p.enabled}
-                        <span class="good">已启用</span>
+                        <span class="good">{$t('settings.enabled')}</span>
                       {:else}
-                        <span class="faint">已停用</span>
+                        <span class="faint">{$t('settings.disabled')}</span>
                       {/if}
                     </td>
                     <!-- 只显示**键名**，绝不显示值 -->
@@ -332,7 +335,7 @@
                     <td>
                       {#if p.loaded}
                         <button type="button" class="ghost small" onclick={() => togglePlugin(p.name, p.enabled)}>
-                          {p.enabled ? '停用' : '启用'}
+                          {p.enabled ? $t('settings.disable') : $t('settings.enable')}
                         </button>
                       {/if}
                     </td>
@@ -347,9 +350,9 @@
         {/if}
       {/if}
 
-      <h4>公共 SKILL 目录</h4>
+      <h4>{$t('settings.publicCatalog')}</h4>
       {#if !$remoteCatalog}
-        <p class="faint small">远端不可用，目录暂时看不到。</p>
+        <p class="faint small">{$t('settings.catalogUnavailable')}</p>
       {:else}
         <ul class="plain">
           {#each $remoteCatalog.skills as s (s.slug)}
@@ -359,7 +362,7 @@
                 <br /><span class="faint small">{s.summary}</span>
               </span>
               <button type="button" class="secondary small" onclick={() => installSkill(s.slug)}>
-                下载到本机
+                {$t('settings.downloadToLocal')}
               </button>
             </li>
           {/each}
@@ -369,15 +372,15 @@
         <div class="notice" style="margin-top:var(--sp-2)">{remoteNote}</div>
       {/if}
 
-      <h4>同步状态</h4>
+      <h4>{$t('settings.syncHeading')}</h4>
       {#if $syncStatus?.error}
         <div class="notice warn">{$syncStatus.error}</div>
       {:else if $syncStatus}
         <p class="faint small">
-          已上报 {$syncStatus.reported}
-          {#if $syncStatus.queued > 0}· 暂存 {$syncStatus.queued} 条待补交{/if}
-          {#if $syncStatus.fetched > 0}· 取回 {$syncStatus.fetched} 条待处理项{/if}
-          {#if $syncStatus.skippedReporting}· 上报已关闭{/if}
+          {$t('settings.syncReported', { count: $syncStatus.reported })}
+          {#if $syncStatus.queued > 0}{$t('settings.syncQueued', { count: $syncStatus.queued })}{/if}
+          {#if $syncStatus.fetched > 0}{$t('settings.syncFetched', { count: $syncStatus.fetched })}{/if}
+          {#if $syncStatus.skippedReporting}{$t('settings.syncReportingOff')}{/if}
         </p>
         {#if $syncStatus.warnings.length > 0}
           <ul class="plain small">
@@ -388,12 +391,8 @@
         {/if}
       {/if}
       <p class="hint">
-        <strong>上报什么、去哪、算不算证据</strong>：页面定期把<strong>摘要</strong>送到你
-        配置的远端服务——执行的用量与状态、任务的状态变更。<strong>不包含</strong> prompt
-        正文、代码、报告原文。远端那份副本<strong>不具证据效力</strong>，权威记录在本机
-        daemon 里。<br />
-        上报可以用 <code>reportingEnabled: false</code> 关闭；关闭后本机功能完整可用。
-        远端不可达时记录会<strong>本地暂存、恢复后补交</strong>。
+        <strong>{$t('settings.reportingStrong1')}</strong>{$t('settings.reportingAfter1')}<strong>{$t('settings.reportingStrong2')}</strong>{$t('settings.reportingMid1')}<strong>{$t('settings.reportingStrong3')}</strong>{$t('settings.reportingMid2')}<strong>{$t('settings.reportingStrong4')}</strong>{$t('settings.reportingMid3')}<br />
+        {$t('settings.reportingBefore2')}<code>reportingEnabled: false</code>{$t('settings.reportingAfter2')}<strong>{$t('settings.reportingStrong5')}</strong>{$t('settings.reportingEnd')}
       </p>
     </section>
   </div>

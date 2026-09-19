@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ActionType, ReasonCode, Severity, VerdictConclusion } from './enums.ts'
+import { ActionRefType, ReasonCode, Severity, VerdictConclusion } from './enums.ts'
 import { BlobRef } from './ids.ts'
 
 /**
@@ -54,7 +54,15 @@ export type EvidenceRef = z.infer<typeof EvidenceRef>
  *   已经产生的历史判决不需要做数据迁移。
  */
 export const ActionRef = z.strictObject({
-  type: ActionType,
+  /**
+   * 内置动作的裸名，或第三方工具包的 `<slug>.<动作名>`（D40）。
+   *
+   * ⚠️ 这里只校验**形状**——schema 不知道工作区里装了什么。名字到底存不存在
+   *    由 daemon 侧的运行时守卫判定（未安装 / 未授权 / 该包没声明这个动作
+   *    ⇒ 整条判决不合规，走 invalid）。**不能**静默忽略：忽略等于给模型一条
+   *    绕过边界的路。
+   */
+  type: ActionRefType,
   /**
    * 载荷按 action type 二次校验（那属于注册表的职责，不在这里）。
    *
@@ -98,9 +106,13 @@ export const Verdict = z
     // ★ 这三个同样"缺省即 null / 空数组"
     // ══════════════════════════════════════════════════════════════════
     //
-    // 真实踩过：一份 `pass` 判决把整个 `action` 键省掉了（因为指令只说
+    // 真实踩过：一份 `pass` 判决把整个 `action` 键省掉了（当时的指令只说
     // "fail 必须给出 action"，模型合理地认为 pass 不需要它），于是
     // 「action：这个字段是必填的，但判决里没有」——整条判决作废。
+    //
+    // ⚠️ 那句指令措辞在 D45 已经改了（现在是"只有 pass 能写 action"），但**这条
+    //    教训照旧**：模型会从一句"谁必须写"里推断"谁可以不写"，然后干脆省略键。
+    //    所以 `action` 永远保持"可省略、省略即 null"，绝不改成必填。
     //
     // **安全性一点没丢**：下面 `superRefine` 里那两条出口规则看的是
     // "action 是不是 null"，不是"这个键在不在"。省略与 null 等价。
@@ -126,13 +138,24 @@ export const Verdict = z
       })
     }
 
-    // fail 必须可执行——否则判决没有出口，只能靠人来补，等于把
-    // "人" 又变回了默认关卡（INV-4）。
-    if (v.conclusion === 'fail' && v.action === null) {
+    // ★ `action` 只属于 `pass`（D45）：`fail` 的出口是**返工**，不是处置。
+    //
+    //   旧规则是"fail 必须给 action"（INV-4）。那条规则的**本意**没变——判决
+    //   不能只有一个"等人"的出口——但它把出口写死成了"处置"。加了返工回路之后
+    //   `fail` 有了第二个机器出口：把审核意见交回执行者重做（`maxReworks`）。
+    //   于是"不合格"与"处置它"被拆开了：
+    //
+    //     `pass` ⇒ 这活可以，按 action 处置
+    //     `fail` ⇒ 这活不行，去改（返工；没有额度就交给人）
+    //
+    //   ⚠️ 为什么是**拒**而不是"忽略"：静默忽略会给模型一个"我写了也没事"的
+    //   印象，下一份判决它会继续写，而我们只能靠它没写对才拦住——那是运气。
+    if (v.conclusion === 'fail' && v.action !== null) {
       ctx.addIssue({
         code: 'custom',
         path: ['action'],
-        message: '结论为 fail 时必须给出 action，否则判决无法执行',
+        message:
+          '结论为 fail 时不得给出 action：fail 会被交回执行者重做，处置动作只属于 pass',
       })
     }
   })
@@ -302,8 +325,74 @@ export function extractVerdictJson(text: string): string | null {
   return found
 }
 
-/** 让模型照此格式输出（供 skill 与上下文块生成使用）。 */
-export function renderVerdictInstruction(): string {
+/**
+ * 让模型照此格式输出（供 skill 与上下文块生成使用）。
+ *
+ * ★ 允许的动作**从调用方来**（D41 之后平台没有内置动作，写死更不可能）。
+ */
+/**
+ * 第三方动作那段说明。
+ *
+ * 只列**模型要填的**参数（`open`）：绑定参数由平台按事实注入，写进契约只会
+ * 诱导模型去写、然后被校验拒掉。没有工具动作时**一行都不加**——内置那条路
+ * 的输出因此逐字不变（有快照守着）。
+ *
+ * ⚠️ D43：已固定的参数不在 `openParams` 里（模型不需要填、写了会被判不合规），
+ *    并且要**单独说出口**（`fixedParams`："已固定为 …，不要写"）——否则模型会
+ *    把固定参数当成"漏填的必填项"，要么去猜值、要么整条判决作废。
+ */
+function toolActionLines(
+  actions?: readonly {
+    type: string
+    summary: string
+    openParams: readonly string[]
+    fixedParams?: readonly { name: string; value: unknown }[]
+  }[],
+): string[] {
+  if (!actions || actions.length === 0) return []
+  const lines = ['', '  下面这些动作来自**已安装的工具包**，参数只填列出来的那些：']
+  for (const a of actions) {
+    const params = a.openParams.length > 0 ? a.openParams.map((p) => `\`${p}\``).join('、') : '（不需要参数）'
+    lines.push(`  · \`${a.type}\` —— ${a.summary}；**你只需要给**：${params}`)
+    for (const f of a.fixedParams ?? []) {
+      lines.push(
+        `    ⚠️ \`${f.name}\` 已由使用者在界面上固定为 ${JSON.stringify(f.value)}，平台会注入——**不要写它**（写了会被判不合规）`,
+      )
+    }
+  }
+  lines.push('  ⚠️ 其余参数由平台绑定（你不要写，写了会被判不合规）。')
+  return lines
+}
+
+export interface VerdictInstructionOptions {
+  /**
+   * 允许出现的动作名（`<包 slug>.<动作名>`——D41 起只有这一种）。
+   *
+   * ⚠️ **不给就等于"这次一个动作都不允许"**（D41 之后没有内置动作），契约会明说
+   *    "不要写 `action`"——否则模型会去编一个动作名，让整条判决连带结论一起作废。
+   *    而给审核者配了工具动作的调用方**必须**传它：契约里没有的取值，模型
+   *    合理的做法只剩"编一个"或"退化成 needs_human"，而"契约里没写枚举 ⇒
+   *    整条判决作废"这条失败史在本仓库真实发生过两次。
+   */
+  allowedActions?: readonly string[]
+  /**
+   * 第三方动作的**简短签名**：哪些参数要**模型**填。
+   *
+   * 由调用方给（只有它手上有包的清单）。**绑定参数不进这里**——模型看不见、
+   * 也填不了；把它们写进契约只会诱导模型去写，然后被校验拒掉。
+   *
+   * ⚠️ D43：已固定的参数不进 `openParams`，并且单独在 `fixedParams` 里列出
+   *    （"已固定为 …，不要写"）。
+   */
+  toolActions?: readonly {
+    type: string
+    summary: string
+    openParams: readonly string[]
+    fixedParams?: readonly { name: string; value: unknown }[]
+  }[]
+}
+
+export function renderVerdictInstruction(options: VerdictInstructionOptions = {}): string {
   // ══════════════════════════════════════════════════════════════════
   // ★ 枚举与示例都**从 schema 本体生成**，不手写
   // ══════════════════════════════════════════════════════════════════
@@ -330,21 +419,39 @@ export function renderVerdictInstruction(): string {
   const list = (values: readonly string[]): string => values.join(' | ')
   const example: Verdict = {
     schemaVersion: VERDICT_SCHEMA_VERSION,
-    conclusion: 'fail',
-    reasonCode: 'missing_tests',
-    confidence: 0.8,
+    // ★ 示例必须是 `pass`（D45）：`action` 现在只属于 `pass`，所以"带动作的
+    //   判决长什么样"只能用一个 `pass` 来示范。若照旧拿 `fail` 当示例，就是
+    //   在教模型写一份**会被整条拒掉**的判决（fail 带 action）。
+    conclusion: 'pass',
+    reasonCode: 'meets_criteria',
+    confidence: 0.9,
     findings: [
       {
-        severity: 'high',
-        summary: '产出里没有测试文件',
-        evidence: [{ blobRef: null, locator: '报告第 3 段', excerpt: '我忘了写测试' }],
-        detail: { suggestion: '补一个最小的测试文件' },
+        // 通过也可以有 findings（小建议），这时 severity 用 low
+        severity: 'low',
+        summary: '变量命名可以更清楚',
+        evidence: [
+          { blobRef: null, locator: '报告第 3 段', excerpt: '我用了 a、b、c 三个变量名' },
+        ],
+        detail: { suggestion: '改成 bubbleSort、swapped 这类名字' },
       },
     ],
-    action: {
-      type: 'comment.create',
-      params: { issueId: '<关联 issue 的 id>', body: '缺少测试，请补上' },
-    },
+    action: options.allowedActions?.length
+      ? {
+          // ★ 用**这次真的允许**的那个动作当示例（D41：没有内置动作可举了）。
+          //   示例必须是一份**能通过校验**的判决（有测试钉着），而"随便写一个
+          //   动作名"在动作全部来自工具包的今天必然是错的——那会教模型去编。
+          //
+          // ⚠️ 取**排序后的第一个**，不是原数组第一个（D42）：白名单现在可以由
+          //    **单条任务**给（新建任务页 ③ 勾出来的那一份），而数组顺序就是勾选
+          //    顺序。不排序的话，同一组动作、只因为勾的先后不同，就会渲染出两份
+          //    不同的第一句话——而 `promptHash` 是审计链的一环，那种差别会让
+          //    "这两次是不是同一件事"变成一个要人工比对的问题。
+          //    （白名单本身**不排序**：那是使用者给的名单，见 `parseAgentAllowedActions`。）
+          type: [...options.allowedActions].sort()[0]! as ActionRefType,
+          params: {},
+        }
+      : null,
     escalateReason: null,
   }
 
@@ -365,10 +472,17 @@ export function renderVerdictInstruction(): string {
     '',
     '字段规则（判决是**闭合**的：**多**一个字段名会整条不合规）：',
     '',
-    '⭐ 上面这份示例是 `fail`（所以有 `action`）。**`action` / `findings` / `escalateReason`',
+    '⭐ 上面这份示例是 `pass`（所以有 `action`）。**`action` / `findings` / `escalateReason`',
     '   都可以省略**——省略与写 `null` 等价，不会因此被判不合规。最小的一份合法判决长这样：',
     '   `{ "schemaVersion": 1, "conclusion": "pass", "reasonCode": "meets_criteria", "confidence": 0.9 }`',
-    '   （`pass` 不需要 action 或 escalateReason；`fail` 必须给 action；`needs_human` 必须给 escalateReason）',
+    '   （只有 `pass` 能带 `action`；**`fail` 不要写 `action`**；`needs_human` 必须给 `escalateReason`）',
+    '',
+    // ★ `fail` ⇒ 返工的语义必须说明白（D45）。不说明的话，模型会按"不通过就
+    //   该处置"的常识去写 action，而那份判决会因为"fail 带 action"整条作废——
+    //   它前面的审核工作也一起白做。
+    '⚠️ **`fail` 的意思不是"处置它"，而是"这活不行，去改"**：给出结论与 `findings`',
+    '   （哪里不合格、证据在哪、建议怎么改）就够了。平台会把你的意见交回执行者重做，',
+    '   最多按任务上配的次数来。**不要**给 `fail` 写 `action`——写了整条不合规。',
     '',
     `- \`conclusion\`：${list(VerdictConclusion.options)}`,
     `- \`reasonCode\`：**必须**是其中之一 —— ${list(ReasonCode.options)}`,
@@ -378,8 +492,19 @@ export function renderVerdictInstruction(): string {
     '- \`evidence\` 是**数组**，每项是一个对象 \`{ "blobRef": null, "locator": "…", "excerpt": "…" }\`',
     '  （最多 20 项；\`excerpt\` 不超过 1000 字）——**不要**把证据写成一整段字符串',
     '- \`detail\` 是**唯一**可以自由发挥的字段（一个对象）；其余字段名一个都不能多',
-    `- \`action\`：\`fail\` **必须**给出（其余结论可以不写），形如 \`{ "type": "…", "params": { … } }\`，`,
-    `  \`type\` 取：${list(ActionType.options)}`,
+    ...(options.allowedActions?.length
+      ? [
+          `- \`action\`：**只有 \`pass\` 能写**（\`fail\` 写了会整条不合规），形如 \`{ "type": "…", "params": { … } }\`，`,
+          `  \`type\` 只能取：${list(options.allowedActions)}`,
+          ...toolActionLines(options.toolActions),
+        ]
+      : [
+          // ★ D41：这次**一个动作都不允许**（审核者没勾任何动作，或没装工具包）。
+          //   这时必须明说"不要写 action"，否则模型会照旧去编一个动作名——
+          //   而它编出来的东西会让整条判决被判不合规，连结论一起丢。
+          '- `action`：**这次不要写**（没有任何动作被允许）。给出结论与 `findings` 就够了；',
+          '  `action` 留空或写 `null` 都不会因此被判不合规。',
+        ]),
     '- \`escalateReason\`：\`needs_human\` 必须给出（一句话说清缺什么）',
     '- \`schemaVersion\` 固定为 1',
     '',

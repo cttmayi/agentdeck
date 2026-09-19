@@ -4,22 +4,25 @@
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
   import { catalogEntryState } from '../lib/skill-catalog.ts'
+  import { t, tx } from '../lib/i18n.ts'
   import {
-    ACTION_TYPES,
-    DEFAULT_ACTIONS,
     InstallError,
-    describeInstall,
-    installErrorHint,
+    describeInstallMessages,
+    installErrorHintMessage,
     installFromPathOrUrl,
     installRemoteEntry,
+    renderInstallMessage,
+    type InstallMessage,
     type InstallResult,
   } from '../lib/skill-install.ts'
 
   /**
    * Skills。
    *
-   * 每一项要显示**它允许触发哪些动作**——那是 skill 里最要紧的一条约束，
-   * 也是"这个 skill 到底能改什么"的唯一答案。只列名字等于没说。
+   * ★ 这一页只管**资料包**：装什么、装成什么、从哪儿装的。它**不配任何权限**——
+   *   "判完允许动什么"是审核者的能力（智能体页 → 点开审核者），D40 收口之前它
+   *   一度长在安装表单里，那时"装一份参考资料"与"授权改状态"是同一件事，
+   *   而它们本来不该在一起。
    */
   let expanded: string | null = null
 
@@ -38,7 +41,6 @@
   let slugInput = ''
   /** 正在卸载哪一条（按钮转圈用）；null = 没有在卸。 */
   let removing: string | null = null
-  let actions: string[] = [...DEFAULT_ACTIONS]
   /**
    * 允许替换同名 skill。
    *
@@ -50,21 +52,27 @@
   let overwrite = false
   let busy = false
   let errorMessage = ''
-  let errorHint = ''
+  /**
+   * 失败时"那我该怎么做"的**键 + 插值**（认不出的错误码是 `null`）。
+   *
+   * ★ 存键、不存渲染好的句子：这条提示是界面的一部分，切语言时要跟着变，所以渲染
+   *   交给标记里的 `$t`。库层那种"取词那一刻就定下来"的快照是给错误**记录**用的
+   *   （见 `errors.ts` 顶部），这里不适用。
+   */
+  let errorHint: InstallMessage | null = null
   let result: InstallResult | null = null
-  let note = ''
-
-  function toggleAction(action: string): void {
-    actions = actions.includes(action)
-      ? actions.filter((a) => a !== action)
-      : [...actions, action]
-  }
+  /**
+   * 安装结果的几段话，同样是**键 + 插值**（`describeInstallMessages()` 产出）。
+   *
+   * ★ 理由同上：装完之后切语言，这几行字必须跟着变，不能在装的那一刻就被写成中文。
+   */
+  let note: InstallMessage[] = []
 
   function resetFeedback(): void {
     errorMessage = ''
-    errorHint = ''
+    errorHint = null
     result = null
-    note = ''
+    note = []
   }
 
   async function runInstall(fn: () => Promise<InstallResult>): Promise<void> {
@@ -72,15 +80,20 @@
     resetFeedback()
     try {
       result = await fn()
-      note = describeInstall(result)
+      const messages = describeInstallMessages(result)
+      // 空数组是它说"什么都没发生"的方式。空**不等于**没话说：不补这一句，装了一趟
+      // 而结果毫无改动的技能会只留一片空白。
+      note = messages.length > 0 ? messages : [{ id: 'install.noChange' }]
       // 装完立刻刷新列表：不然使用者看着"已安装"却看不到它出现在下面
       await loadSkills()
     } catch (err) {
       if (err instanceof InstallError) {
         errorMessage = err.message
-        errorHint = installErrorHint(err.code)
-        if (err.detail) errorMessage += `（${err.detail}）`
-        note = `失败：${err.code}`
+        errorHint = installErrorHintMessage(err.code)
+        // 括号（以及英文侧的前导空格）在词条里：写死在标记里的话，英文界面就会
+        // 冒出全角括号——那正是 D39 要消掉的"一半中文"。
+        if (err.detail) errorMessage += tx('install.errDetail', { detail: err.detail })
+        note = [{ id: 'skills.noteFailed', params: { code: err.code } }]
       } else {
         errorMessage = err instanceof Error ? err.message : String(err)
       }
@@ -98,7 +111,7 @@
   function submitPath(): void {
     const value = sourceInput.trim()
     if (value === '') {
-      errorMessage = '请填一个本地目录的绝对路径，或一个 GitHub 链接。'
+      errorMessage = tx('skills.errEmptySource')
       return
     }
     const kind = /^[a-z]+:\/\//i.test(value) ? 'url' : 'path'
@@ -107,7 +120,6 @@
         kind,
         value,
         ...(slugInput.trim() ? { slug: slugInput.trim() } : {}),
-        allowedActions: actions,
         ...(overwrite ? { overwrite: true } : {}),
       }),
     )
@@ -116,7 +128,7 @@
   function installFromCatalog(slug: string): void {
     const entry = $remoteCatalog?.skills.find((s) => s.slug === slug)
     if (!entry) {
-      errorMessage = `远端目录里没有 ${slug}`
+      errorMessage = tx('skills.errNoRemoteEntry', { slug })
       return
     }
     // ★ 状态由 `catalogEntryState` 统一判定：它是纯函数、有测试。
@@ -133,7 +145,6 @@
         body: entry.content ?? '',
         version: entry.version,
         sourceRef: `remote:${entry.slug}@${entry.version}`,
-        allowedActions: actions,
         ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
@@ -146,12 +157,12 @@
    * 显示，不在前端改写。
    */
   async function uninstall(id: string, slug: string): Promise<void> {
-    if (!confirm(`卸载「${slug}」？工作目录里的技能副本会在下一次 run 开始时同步掉。`)) return
+    if (!confirm(tx('skills.confirmUninstall', { slug }))) return
     removing = id
     errorMessage = ''
     try {
       await uninstallSkill(id)
-      showToast(`已卸载 ${slug}`)
+      showToast(tx('skills.uninstalled', { slug }))
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : String(err)
     } finally {
@@ -187,16 +198,14 @@
 
 <div class="view-head">
   <div>
-    <h2>Skills</h2>
+    <h2>{$t('skills.title')}</h2>
     <p>
-      skill 携带三要素：<strong>审核标准</strong> + <strong>判决结构引用</strong> +
-      <strong>允许执行的动作子集</strong>。动作子集是白名单——不在里面的动作会让整条判决
-      判为不合规，而不是"忽略这个动作继续"。
+      {$t('skills.headIntro')}<strong>{$t('skills.headStrongBody')}</strong> + <strong>{$t('skills.headStrongFiles')}</strong>{$t('skills.headOutro')}
     </p>
   </div>
   <div style="display:flex;gap:var(--sp-2)">
-    <button type="button" class="secondary" onclick={loadSkills}>刷新</button>
-    <button type="button" onclick={openPanel}>安装 skill</button>
+    <button type="button" class="secondary" onclick={loadSkills}>{$t('common.refresh')}</button>
+    <button type="button" onclick={openPanel}>{$t('skills.install')}</button>
   </div>
 </div>
 
@@ -213,10 +222,10 @@
 
       `wide`：里面那张远端目录表有五列，34rem 会只剩横向滚动条。
   -->
-  <div class="drawer wide" role="dialog" aria-modal="true" aria-label="安装 skill">
+  <div class="drawer wide" role="dialog" aria-modal="true" aria-label={$t('skills.install')}>
     <div class="drawer-head">
-      <h2>安装 skill</h2>
-      <button type="button" class="ghost" onclick={closePanel}>关闭</button>
+      <h2>{$t('skills.install')}</h2>
+      <button type="button" class="ghost" onclick={closePanel}>{$t('common.close')}</button>
     </div>
 
     <div class="drawer-body">
@@ -229,7 +238,7 @@
           resetFeedback()
         }}
       >
-        从路径 / GitHub 安装
+        {$t('skills.tabPath')}
       </button>
       <button
         type="button"
@@ -240,46 +249,46 @@
           void refreshRemote()
         }}
       >
-        从远端目录安装
+        {$t('skills.tabRemote')}
       </button>
     </div>
 
     {#if tab === 'path'}
       <div class="field">
-        <label for="skill-source">本地目录的绝对路径，或 GitHub 链接</label>
+        <label for="skill-source">{$t('skills.pathLabel')}</label>
         <input
           id="skill-source"
           bind:value={sourceInput}
-          placeholder="https://github.com/owner/repo/tree/main/skills/foo 或 /Users/me/dev/my-skill"
+          placeholder={$t('skills.sourcePlaceholder')}
           onkeydown={(e) => e.key === 'Enter' && submitPath()}
         />
         <p class="faint small">
-          指向的目录里<strong>必须有 SKILL.md</strong>（大写）——技能就是靠"目录里有它"
-          被 CLI 发现的，没有它装进来也不会生效，所以会当场拒绝。
-          同目录下的其它文本文件会作为<strong>支持文件</strong>一起装上（二进制会被跳过并列出）。
+          {$t('skills.pathHintBefore')}<strong>{$t('skills.pathHintStrong')}</strong>{$t('skills.pathHintMid')}<strong>{$t('skills.pathHintSupportStrong')}</strong>{$t('skills.pathHintAfter')}
         </p>
       </div>
 
       <div class="field">
-        <label for="skill-slug">slug（留空则用目录名）</label>
+        <label for="skill-slug">{$t('skills.slugLabel')}</label>
         <input id="skill-slug" bind:value={slugInput} placeholder="my-skill" />
       </div>
     {:else}
       <div class="field">
         {#if remoteError}
           <div class="notice bad">
-            远端不可用：{remoteError}
+            <!-- ⚠️ 这里的 `$remoteError` 是**修掉一个既有的漏订**：原来插值写的是裸的
+                 `{remoteError}`，渲染出来是 `[object Object]`。上面的 `{#if remoteError}`
+                 同样是裸的（对象恒为真），那是另一处既有问题，**不在本次文案迁移的范围里**，
+                 所以原样保留——不要以为它是对的。 -->
+            {$t('skills.remoteUnavailable', { error: $remoteError })}
             <p class="faint small" style="margin:var(--sp-2) 0 0">
-              远端目录在<strong>另一个进程</strong>上（默认 127.0.0.1:4518）。它没起来不影响本机——
-              也可以直接用左边那个页签从 GitHub 或本地路径装。
+              {$t('skills.remoteDownBefore')}<strong>{$t('skills.remoteDownStrong')}</strong>{$t('skills.remoteDownAfter')}
             </p>
           </div>
         {:else if !isLoggedIn()}
           <div class="notice warn">
-            还没有登录远端账号。
+            {$t('skills.notSignedIn')}
             <p class="faint small" style="margin:var(--sp-2) 0 0">
-              目录是公开的，但登录后才会用你的账号去取。可以在顶栏的「远端」里登录；
-              或者直接用「从路径 / GitHub 安装」。
+              {$t('skills.notSignedInHint')}
             </p>
           </div>
         {/if}
@@ -288,7 +297,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>slug</th><th>版本</th><th>说明</th><th>本地</th><th></th></tr>
+                <tr><th>slug</th><th>{$t('skills.colVersion')}</th><th>{$t('skills.colSummary')}</th><th>{$t('skills.colLocal')}</th><th></th></tr>
               </thead>
               <tbody>
                 {#each $remoteCatalog.skills as s (s.slug)}
@@ -300,25 +309,29 @@
                     <td class="faint small">{s.summary}</td>
                     <td class="faint small">
                       {#if local}
-                        {local.version ? `已装 ${local.version}` : '已装（无版本）'}
+                        {local.version
+                          ? $t('skills.installedVersion', { version: local.version })
+                          : $t('skills.installedNoVersion')}
                       {:else}
                         —
                       {/if}
                     </td>
                     <td>
+                      <!-- 按钮上的字与那句说明都由 `catalogEntryState` 给**键**，
+                           所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
                       <button
                         type="button"
                         class={state.action === 'update' ? 'small' : 'secondary small'}
                         disabled={busy || state.disabled}
-                        title={state.hint}
+                        title={$t(state.hintId, state.hintParams)}
                         onclick={() => installFromCatalog(s.slug)}
                       >
-                        {state.label}
+                        {$t(state.labelId, state.labelParams)}
                       </button>
                     </td>
                   </tr>
                   <tr>
-                    <td colspan="5" class="faint small" style="padding-top:0">{state.hint}</td>
+                    <td colspan="5" class="faint small" style="padding-top:0">{$t(state.hintId, state.hintParams)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -328,74 +341,57 @@
       </div>
     {/if}
 
-    <fieldset class="field group">
-      <legend>允许这个 skill 触发的动作</legend>
-      <div class="actions">
-        <!-- ★ 动作是**白名单**：不在里面的动作会让整条判决判为不合规。
-             所以这里默认只勾最小权限（发评论），而不是"全都允许"。 -->
-        {#each ACTION_TYPES as a (a)}
-          <label class="action-chip">
-            <input
-              type="checkbox"
-              checked={actions.includes(a)}
-              onchange={() => toggleAction(a)}
-            />
-            <code>{a}</code>
-          </label>
-        {/each}
-      </div>
-      <p class="faint small">
-        默认只允许 <code>comment.create</code>——最小权限。要从远端/GitHub 装一个
-        会改状态的技能，请在这里显式勾上。
-      </p>
-    </fieldset>
-
     <div class="field">
       <label class="action-chip">
         <input type="checkbox" bind:checked={overwrite} />
-        允许替换同名的 skill（会**覆盖**已有那个的内容）
+        {$t('skills.overwriteLabel')}
       </label>
       <p class="faint small">
-        默认不勾：同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"。
-        确实要用新版本顶掉旧的（比如你自己改过一版、现在想换回目录里那一版）才勾上。
+        {$t('skills.overwriteHint')}
       </p>
     </div>
 
     {#if tab === 'path'}
-      <p class="faint small" style="margin:0">填好上面的来源，点右下角「检查并安装」。</p>
+      <p class="faint small" style="margin:0">{$t('skills.pathFootHint')}</p>
     {:else}
-      <p class="faint small" style="margin:0">选一个条目，用当前勾选的动作装它。</p>
+      <p class="faint small" style="margin:0">{$t('skills.remoteFootHint')}</p>
     {/if}
 
     {#if errorMessage}
       <div class="notice bad" style="margin-top:var(--sp-3)">
-        <strong>没有装上</strong>
+        <strong>{$t('skills.failedTitle')}</strong>
         <p style="margin:var(--sp-2) 0 0">{errorMessage}</p>
-        {#if errorHint}<p class="faint small" style="margin:var(--sp-2) 0 0">{errorHint}</p>{/if}
+        <!-- 错误码认不出来时 `installErrorHintMessage()` 给的是 `null`（= 没有建议
+             可说，词表里也没有一条空词条），所以这里什么都不显示，而不是显示半句。 -->
+        {#if errorHint}<p class="faint small" style="margin:var(--sp-2) 0 0">{renderInstallMessage(errorHint, (id, params) => $t(id, params))}</p>{/if}
       </div>
     {/if}
 
     {#if result}
       <div class="notice {result.installed.length > 0 ? 'good' : 'warn'}" style="margin-top:var(--sp-3)">
-        <strong>{result.installed.length > 0 ? '已安装' : '没有改动'}</strong>
-        <p style="margin:var(--sp-2) 0 0">{note}</p>
+        <strong>{result.installed.length > 0 ? $t('skills.installedTitle') : $t('skills.noChangesTitle')}</strong>
+        <!-- 几段话按原顺序拼起来即可（`；` 这些标点已经在各条词条里）。插值里有
+             **列表**（已装的 slug、被忽略的文件），由 `renderInstallMessage()`
+             按渲染方语言取 `install.listSeparator` 连接——所以传进去的是 `$t`：
+             分隔符跟着语言走，这几行也才会跟着语言重渲染。 -->
+        <p style="margin:var(--sp-2) 0 0">{#each note as message (message)}{renderInstallMessage(message, (id, params) => $t(id, params))}{/each}</p>
 
         <!-- ★ 装了什么、什么没装，都要列出来。只说"安装完成"会让使用者以为
              拿到了完整的技能，而实际可能只装了 SKILL.md。 -->
         {#if result.included.length > 0}
           <p class="faint small" style="margin:var(--sp-2) 0 0">
-            装进来 {result.included.length} 个文件：
+            {$t('skills.includedCount', { count: result.included.length })}
             {#each result.included as f (f.path)}<code>{f.path}</code>{/each}
           </p>
         {/if}
         {#if result.ignored.length > 0}
           <p class="faint small" style="margin:var(--sp-2) 0 0">
-            没装进来：
-            {#each result.ignored as i (i.path)}<code>{i.path}</code>（{i.reason}）{/each}
+            {$t('skills.ignoredHeading')}
+            {#each result.ignored as i (i.path)}<code>{i.path}</code>{$t('install.ignoredReason', { reason: i.reason })}{/each}
           </p>
         {/if}
         {#if result.sourceRef}
-          <p class="faint small" style="margin:var(--sp-2) 0 0">来源：{result.sourceRef}</p>
+          <p class="faint small" style="margin:var(--sp-2) 0 0">{$t('skills.source', { ref: result.sourceRef })}</p>
         {/if}
       </div>
     {/if}
@@ -406,11 +402,11 @@
     <div class="drawer-foot">
       {#if tab === 'path'}
         <button type="button" disabled={busy} onclick={submitPath}>
-          {busy ? '正在检查并安装…' : '检查并安装'}
+          {busy ? $t('skills.installing') : $t('skills.installCheck')}
         </button>
       {:else}
         <span class="faint small">
-          上面每一条右侧的按钮就是安装入口，用的是当前勾选的动作白名单。
+          {$t('skills.remoteFootNote')}
         </span>
       {/if}
     </div>
@@ -424,15 +420,15 @@
   <div class="notice bad">{$loadError['skills']}</div>
 {:else if $skills.length === 0}
   <div class="empty">
-    <strong>还没有 skill</strong>
-    技能是执行者干活时参考的资料包（可安装、带版本、可带支持文件）。
-    <strong>审核标准不在这里</strong>——它写在审核者自己身上（智能体页 → 点开审核者）。
+    <strong>{$t('skills.emptyTitle')}</strong>
+    {$t('skills.emptyHint')}
+    <strong>{$t('skills.emptyAuditStrong')}</strong>{$t('skills.emptyAuditAfter')}
   </div>
 {:else}
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>slug</th><th>名称</th><th>来源</th><th>文件</th><th>允许的动作</th><th>更新于</th><th></th></tr>
+        <tr><th>slug</th><th>{$t('skills.colName')}</th><th>{$t('skills.colSource')}</th><th>{$t('skills.colFiles')}</th><th>{$t('skills.colUpdatedAt')}</th><th></th></tr>
       </thead>
       <tbody>
         {#each $skills as s (s.id)}
@@ -442,7 +438,7 @@
             <td>{s.name}</td>
             <td>
               <span class="badge {s.source === 'local' ? 'todo' : 'in_review'}">
-                {s.source === 'local' ? '本机自建' : '远端下载'}
+                {s.source === 'local' ? $t('skills.sourceLocal') : $t('skills.sourceRemote')}
               </span>
               {#if s.version}
                 <!-- 版本要显示：远端目录那条能不能点「更新」，全靠它比 -->
@@ -456,9 +452,6 @@
             <td class="faint small">
               SKILL.md{#if fileCount > 0} +{fileCount}{/if}
             </td>
-            <td>
-              {#each s.allowedActions as a (a)}<code style="margin-right:4px">{a}</code>{/each}
-            </td>
             <td class="faint small">{new Date(s.updatedAt).toLocaleString()}</td>
             <td class="row-actions">
               <button
@@ -466,27 +459,28 @@
                 class="ghost small"
                 onclick={() => (expanded = expanded === s.id ? null : s.id)}
               >
-                {expanded === s.id ? '收起标准' : '看标准'}
+                {expanded === s.id ? $t('skills.collapseStandard') : $t('skills.viewStandard')}
               </button>
               <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上 -->
               <button
                 type="button"
                 class="ghost small danger"
                 disabled={removing === s.id}
-                title="卸载：还有智能体挂着它时会被拒（会告诉你还挂着的是谁）"
+                title={$t('skills.uninstallTitle')}
                 onclick={() => void uninstall(s.id, s.slug)}
               >
-                {removing === s.id ? '卸载中…' : '卸载'}
+                {removing === s.id ? $t('common.uninstalling') : $t('common.uninstall')}
               </button>
             </td>
           </tr>
           {#if expanded === s.id}
             <tr>
-              <td colspan="7">
+              <!-- 6 列：动作那一列随"skill 不再带动作"一起去掉了 -->
+              <td colspan="6">
                 <pre class="skill-body">{s.body}</pre>
                 {#if fileCount > 0}
                   <details class="support">
-                    <summary>支持文件（{fileCount}）</summary>
+                    <summary>{$t('skills.supportFiles', { count: fileCount })}</summary>
                     {#each Object.entries(s.files ?? {}) as [path, content] (path)}
                       <p class="faint small" style="margin:var(--sp-2) 0 0"><code>{path}</code></p>
                       <pre class="skill-body">{content}</pre>
@@ -534,29 +528,20 @@
     margin-bottom: var(--sp-3);
   }
 
-  .field > label,
-  .group > legend {
+  .field > label {
     display: block;
     margin-bottom: var(--sp-1);
     font-size: var(--fs-sm);
     color: var(--text-faint);
   }
 
-  .group {
-    border: none;
-    padding: 0;
-    margin-inline: 0;
-  }
-
   .field > input {
     width: 100%;
   }
 
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2) var(--sp-3);
-  }
+  /* ⚠️ 这里原来还有 `.group` / `.actions` 两条：它们只服务那一块"允许这个 skill
+     触发的动作"的 fieldset（legend + 一排 checkbox）。那块 UI 随 D40 收口整块删掉了
+     ——留着这两条会变成两个**选不中任何元素**的选择器（`svelte-check` 直接报未使用）。 */
 
   .action-chip {
     display: flex;

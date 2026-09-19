@@ -20,6 +20,8 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
+  Tool,
+  ToolId,
   VerdictId,
   VerdictRecord,
   VerdictStatus,
@@ -170,6 +172,21 @@ export interface Store {
    *    猜"能不能删"——那条规则属于业务，而且它的报错要说清是谁还挂着。
    */
   deleteSkill(id: SkillId): Promise<boolean>
+
+  // ── Tool（工具包 / 组，D40）──
+
+  getTool(id: ToolId): Promise<Tool | null>
+  listTools(workspaceId: WorkspaceId): Promise<Tool[]>
+  /** 按 id 批量取：一次要执行的动作要解析出它属于哪个包（组）。 */
+  listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]>
+  /** 按 slug 取（同一 workspace 内唯一）——判决里写的是 `<slug>.<动作名>`。 */
+  getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null>
+  insertTool(tool: Tool): Promise<void>
+  /**
+   * 卸载一个工具包。语义与 `deleteSkill` 逐条相同：删到返回 true、本来没有
+   * 返回 false，**引用检查（还有哪些 agent 挂着它）由调用方做**。
+   */
+  deleteTool(id: ToolId): Promise<boolean>
 
   // ── Issue 与 Comment ──
 

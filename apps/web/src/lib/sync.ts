@@ -1,5 +1,7 @@
+import { renderText, webText } from '@alpha-helper/i18n'
 import { isLoggedIn, remote } from './remote.ts'
 import { api } from './api.ts'
+import { currentLocale } from './locale.ts'
 
 /**
  * 页面作为远端通道的同步逻辑。
@@ -152,9 +154,11 @@ export async function runSyncCycle(options: {
     } catch (err) {
       // ★ 失败就暂存：不暂存的话，"远端抖了一下"等于那段时间的记录永久丢失
       status.queued = enqueue(options.records ?? [])
-      status.error = `上报失败（已本地暂存 ${status.queued} 条，下轮补交）：${
-        err instanceof Error ? err.message : String(err)
-      }`
+      // 这句会显示在设置抽屉与侧栏（`syncStatus.error`），所以要跟着界面语言走
+      status.error = renderText(webText, 'err.reportFailed', currentLocale(), {
+        count: status.queued,
+        reason: err instanceof Error ? err.message : String(err),
+      })
     }
   } else {
     status.skippedReporting = true
@@ -174,7 +178,13 @@ export async function runSyncCycle(options: {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    status.error = status.error ? `${status.error}；拉取待处理项失败：${message}` : `拉取待处理项失败：${message}`
+    const loc = currentLocale()
+    const fetched = renderText(webText, 'err.fetchPendingFailed', loc, { reason: message })
+    // 一轮里两条都失败时要拼成一句给使用者看；分隔符（全角分号 vs "; "）也是
+    // 文案的一部分，所以它同样从词表里取，不写死在代码里。
+    status.error = status.error
+      ? `${status.error}${renderText(webText, 'err.messageSeparator', loc)}${fetched}`
+      : fetched
   }
 
   return status

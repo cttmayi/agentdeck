@@ -6,6 +6,12 @@ import type { TextCatalog } from '../text.ts'
  * ⚠️ 只放**真正共用**的：同一个中文词在不同上下文里可能要译成不同的英文
  *    （"取消"在删除确认里是 Cancel，在"取消默认"里是 Unset）。硬凑共用键会让
  *    翻译在某一处别扭——宁可各写各的。
+ *
+ * ⚠️ 也**只放有人在用的**：这张表原来还铺了「删除 / 展开 / 重试 / 可选 / 是 / 否 /
+ *    无 / 复制 / 已复制 / 加载中…」这些"以后总要用"的词，结果是**一条都没人用**，
+ *    而各区域又各自写了一份同形的（D39 收尾时按"同一句话只有一个出处"收拢回来）。
+ *    一张大部分没人用的共享词表比没有更糟：它会让人以为"这个词已经有人管了"。
+ *    需要新词时再加一行，成本就是一行。
  */
 export const commonText = {
   'common.save': { zh: '保存', en: 'Save' },
@@ -16,21 +22,10 @@ export const commonText = {
   'common.creating': { zh: '创建中…', en: 'Creating…' },
   'common.refresh': { zh: '刷新', en: 'Refresh' },
   'common.edit': { zh: '编辑', en: 'Edit' },
-  'common.delete': { zh: '删除', en: 'Delete' },
   'common.uninstall': { zh: '卸载', en: 'Uninstall' },
   'common.uninstalling': { zh: '卸载中…', en: 'Uninstalling…' },
   'common.preview': { zh: '预览', en: 'Preview' },
   'common.previewing': { zh: '预览中…', en: 'Rendering…' },
-  'common.expand': { zh: '展开', en: 'Expand' },
   'common.collapse': { zh: '收起', en: 'Collapse' },
-  'common.retry': { zh: '重试', en: 'Retry' },
   'common.required': { zh: '必需', en: 'Required' },
-  'common.optional': { zh: '可选', en: 'Optional' },
-  'common.no': { zh: '没有', en: 'No' },
-  'common.yes': { zh: '是', en: 'Yes' },
-  'common.none': { zh: '无', en: 'None' },
-  'common.copy': { zh: '复制', en: 'Copy' },
-  'common.copied': { zh: '已复制', en: 'Copied' },
-  'common.loading': { zh: '加载中…', en: 'Loading…' },
-  'common.showMore': { zh: '看完整日志', en: 'Full log' },
 } as const satisfies TextCatalog

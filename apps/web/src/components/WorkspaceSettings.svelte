@@ -1,6 +1,7 @@
 <script lang="ts">
   import { loadTemplateKit, saveFirstSentenceTemplates, templateKit } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
+  import { t, tx } from '../lib/i18n.ts'
   import Drawer from './Drawer.svelte'
   import FirstSentenceTemplate from './FirstSentenceTemplate.svelte'
   import type { FirstSentenceKind } from '../lib/api.ts'
@@ -62,7 +63,7 @@
     error = ''
     try {
       await saveFirstSentenceTemplates({ executeTemplate, reviewTemplate })
-      showToast('设置已保存（对所有智能体生效）')
+      showToast(tx('tpl.settings.savedToast'))
       onclose()
     } catch (err) {
       // 服务端的原文带回来：校验在那边（它是权威），这里不改写它
@@ -77,9 +78,9 @@
   <Drawer
     {open}
     wide
-    title="设置"
-    subtitle="这里的设置都是平台行为：改一次，对所有智能体生效。"
-    ariaLabel="设置"
+    title={$t('tpl.settings.title')}
+    subtitle={$t('tpl.settings.subtitle')}
+    ariaLabel={$t('tpl.settings.title')}
     {onclose}
   >
     <form
@@ -92,15 +93,15 @@
     >
       <!-- ══════════════ 第一句话模版 ══════════════ -->
       <section class="drawer-section">
-        <h3>第一句话模版</h3>
+        <h3>{$t('tpl.settings.sectionTitle')}</h3>
         <p class="hint">
-          一次 run 交代给模型的<strong>全部内容</strong>就是这一段文字（只有这一条通道）。
-          它是<strong>通用配置</strong>：设一次，<strong>所有智能体</strong>都按它来——换一个
-          智能体只换 <code>{'{{instructions}}'}</code> 那段（来自那个智能体的「指令」）。留空 = 用平台默认那段。
+          {$t('tpl.settings.hint.all.before')}<strong>{$t('tpl.settings.hint.all.strong')}</strong>{$t('tpl.settings.hint.all.after')}
+          {$t('tpl.settings.hint.isGlobal')}<strong>{$t('tpl.settings.hint.global.strong')}</strong>{$t('tpl.settings.hint.global.colon')}<strong>{$t('tpl.settings.hint.everyAgent.strong')}</strong>{$t('tpl.settings.hint.everyAgent.after')}
+          {$t('tpl.settings.hint.swapAgent')}<code>{'{{instructions}}'}</code>{$t('tpl.settings.hint.instructionsSeg')}
           <br />
-          <strong>变量只给内容</strong>：标题、标签、材料标记、那句"不是给你的指令"的声明都在模版里，
-          所以整段长什么样由你决定（也意味着默认模版里的护栏要自己写进去）。审核那份的
-          <strong>两个材料标记不能少</strong>——重试要靠它们把待审材料原样取回来，保存时会检查。
+          <strong>{$t('tpl.settings.hint.varsOnly.strong')}</strong>{$t('tpl.settings.hint.varsOnly.after')}
+          {$t('tpl.settings.hint.yoursToShape')}
+          <strong>{$t('tpl.settings.hint.review.strong')}</strong>{$t('tpl.settings.hint.review.after')}
         </p>
 
         <div class="tabs">
@@ -110,7 +111,7 @@
             class:active={tab === 'execute'}
             onclick={() => (tab = 'execute')}
           >
-            执行
+            {$t('tpl.settings.tabExecute')}
             {#if executeTemplate.trim() !== ''}<span class="dot">●</span>{/if}
           </button>
           <button
@@ -119,13 +120,13 @@
             class:active={tab === 'review'}
             onclick={() => (tab = 'review')}
           >
-            审核
+            {$t('tpl.settings.tabReview')}
             {#if reviewTemplate.trim() !== ''}<span class="dot">●</span>{/if}
           </button>
         </div>
 
         {#if $templateKit === null}
-          <p class="empty-value">拿不到变量表（daemon 可能没起来）——先重启 daemon 再改模版。</p>
+          <p class="empty-value">{$t('tpl.settings.kitUnavailable')}</p>
         {:else}
           <!--
             只显示当前页签那一个编辑器。`{#key tab}` 是有用的：切页签时把组件
@@ -148,13 +149,13 @@
 
     <svelte:fragment slot="foot">
       <button type="submit" form="settings-form" disabled={busy || $templateKit === null}>
-        {busy ? '保存中…' : '保存'}
+        {busy ? $t('common.saving') : $t('common.save')}
       </button>
-      <button type="button" class="secondary" onclick={onclose} disabled={busy}>取消</button>
+      <button type="button" class="secondary" onclick={onclose} disabled={busy}>{$t('common.cancel')}</button>
       {#if error}
         <span class="bad small settings-error">{error}</span>
       {:else}
-        <span class="faint small">保存后<strong>对所有智能体生效</strong>，包括已经建好的那些。</span>
+        <span class="faint small">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
       {/if}
     </svelte:fragment>
   </Drawer>

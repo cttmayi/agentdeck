@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { catalogEntryState, compareVersions } from './skill-catalog.ts'
+import { renderText, webText, type TextParams, type WebTextId } from '@alpha-helper/i18n'
+import { catalogEntryState, compareVersions, type CatalogEntryState } from './skill-catalog.ts'
 
 /**
  * 远端目录条目 vs 本地已装 skill 的**状态判定**。
@@ -9,7 +10,20 @@ import { catalogEntryState, compareVersions } from './skill-catalog.ts'
  * 是使用者**唯一**能看到的信号，搞错其中任何一个的后果都不是"界面难看"，
  * 而是"他做了错误的决定"——比如把降级看成更新，或者看到"已安装"就
  * 不再去装一份其实内容不同的东西。
+ *
+ * ⚠️ D39 起这一层产出的是**文案键 + 插值**（`labelId` / `hintId`）。下面要断言的
+ *    仍然是"这句话该怎么说"，所以按 `renderText(..., 'zh')` 渲染出中文后再断言：
+ *    迁移前那两句原文（`已安装`、"本地 1.0.0 比目录里的 1.0.0 **更新**"…）一个字
+ *    都不能少，否则就是迁移过程中把话改没了。
  */
+const zh = (id: WebTextId, params?: TextParams): string =>
+  renderText(webText, id, 'zh', params)
+
+/** 渲染按钮上的字（消费方在界面里的做法也是这个：`$t(state.labelId, state.labelParams)`）。 */
+const labelOf = (s: CatalogEntryState): string => zh(s.labelId, s.labelParams)
+
+/** 渲染那句说明。 */
+const hintOf = (s: CatalogEntryState): string => zh(s.hintId, s.hintParams)
 
 describe('compareVersions', () => {
   test('常见形式能比大小', () => {
@@ -42,10 +56,12 @@ describe('catalogEntryState', () => {
   test('★ 版本一致 ⇒ 已安装，按钮禁用（这就是"版本一致提示已安装"）', () => {
     const s = catalogEntryState({ slug: 'general-review', version: '1.0.0' }, entry)
     assert.equal(s.action, 'installed')
-    assert.equal(s.label, '已安装')
+    // 断言的是**渲染出来的那句话**，不是键名：键可以改，话不能变。
+    assert.equal(s.labelId, 'install.actionInstalled')
+    assert.equal(labelOf(s), '已安装')
     assert.equal(s.disabled, true)
     assert.equal(s.needsOverwrite, false)
-    assert.match(s.hint, /1\.0\.0/)
+    assert.match(hintOf(s), /1\.0\.0/)
   })
 
   test('★ 目录里是新版本 ⇒ 更新（并显示版本变化）', () => {
@@ -54,27 +70,33 @@ describe('catalogEntryState', () => {
       version: '1.1.0',
     })
     assert.equal(s.action, 'update')
-    assert.match(s.label, /1\.1\.0/)
+    assert.equal(labelOf(s), '更新到 1.1.0')
+    assert.match(labelOf(s), /1\.1\.0/)
     assert.equal(s.disabled, false)
     assert.equal(s.needsOverwrite, true, '更新要覆盖本地那份，所以必须显式确认')
-    assert.match(s.hint, /1\.0\.0 → 目录 1\.1\.0/)
+    assert.equal(hintOf(s), '本地 1.0.0 → 目录 1.1.0。')
+    assert.match(hintOf(s), /1\.0\.0 → 目录 1\.1\.0/)
   })
 
   test('★ 本地更新 ⇒ 说清是"往回退"，不许叫更新', () => {
     const s = catalogEntryState({ slug: 'general-review', version: '2.0.0' }, entry)
     assert.equal(s.action, 'downgrade')
-    assert.match(s.label, /退回/)
-    assert.match(s.hint, /更新/)
-    assert.match(s.hint, /往回退/)
+    assert.equal(labelOf(s), '退回 1.0.0')
+    assert.match(labelOf(s), /退回/)
+    assert.match(hintOf(s), /更新/)
+    assert.match(hintOf(s), /往回退/)
     assert.equal(s.needsOverwrite, true)
   })
 
   test('★ 本地有版本但认不出来 ⇒ 当作可更新，但把两个版本号都摆出来', () => {
     const s = catalogEntryState({ slug: 'general-review', version: '2024-05' }, entry)
     assert.equal(s.action, 'update')
-    assert.match(s.hint, /2024-05/)
-    assert.match(s.hint, /1\.0\.0/)
-    assert.match(s.hint, /无法判断新旧/, '不能假装知道谁新谁旧')
+    // 认不出新旧时按钮上只写「更新」——**不带版本号**，因为"更新到 1.0.0"
+    // 会让这句变成一句我们其实判断不出来的话。
+    assert.equal(labelOf(s), '更新')
+    assert.match(hintOf(s), /2024-05/)
+    assert.match(hintOf(s), /1\.0\.0/)
+    assert.match(hintOf(s), /无法判断新旧/, '不能假装知道谁新谁旧')
   })
 
   test('★ 本地有同名但**没有版本** ⇒ 不能冒充"已安装"，是替换', () => {
@@ -87,10 +109,25 @@ describe('catalogEntryState', () => {
     ]) {
       const s = catalogEntryState(local, entry)
       assert.equal(s.action, 'replace', JSON.stringify(local))
+      assert.equal(labelOf(s), '替换本地同名')
       assert.equal(s.disabled, false)
       assert.equal(s.needsOverwrite, true)
-      assert.match(s.hint, /没有版本信息/)
+      assert.match(hintOf(s), /没有版本信息/)
     }
+  })
+
+  test('本地没有：说清"目录里有这一条、本地还没有"，并带上 slug 与版本', () => {
+    const s = catalogEntryState(undefined, entry)
+    assert.equal(labelOf(s), '安装')
+    assert.equal(hintOf(s), '目录里有 general-review 1.0.0，本地还没有。')
+  })
+
+  test('★ 中文那句"往回退"逐字保留（词表里的 zh 是默认语言，也是探针断言的依据）', () => {
+    const s = catalogEntryState({ slug: 'general-review', version: '2.0.0' }, entry)
+    assert.equal(
+      hintOf(s),
+      '本地 2.0.0 比目录里的 1.0.0 **更新**。点下去是往回退，不是更新——确认这是你要的。',
+    )
   })
 
   test('slug 不同不会互相影响（同名才比较）', () => {

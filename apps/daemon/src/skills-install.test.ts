@@ -81,13 +81,24 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
   test('★ 默认记成 remote —— 下载来的不能冒充"使用者自有的"', async () => {
     await withDaemon(async (url) => {
       const res = await install(url, {
-        skills: [{ slug: 'from-catalog', name: '目录里的', body: '标准', allowedActions: ['comment.create'] }],
+        // ⚠️ 老客户端（页面还是旧的那版）会照旧带上 `allowedActions`。D40 收口之后
+        //    skill 不再声明动作权限，安装也不再写它——**传了就是被忽略**。
+        //    D41：夹具值换成工具动作名（动作只可能来自工具包，内置动作已经全删）——
+        //    这个字段的内容反正不参与任何判断，换名字只是为了别让人以为它是内置动作。
+        skills: [
+          { slug: 'from-catalog', name: '目录里的', body: '标准', allowedActions: ['fixture-tool.act'] },
+        ],
         batchId: 'b1',
       })
       assert.equal(res.status, 201)
       const skills = await listSkills(url)
       const found = skills.find((s) => s.slug === 'from-catalog')
       assert.ok(found)
+      assert.equal(
+        (found as Record<string, unknown>)['allowedActions'],
+        undefined,
+        '★ skill 上没有这个字段了：动作权限是审核者的能力（`Agent.allowedActions`）',
+      )
       assert.equal(
         found.source,
         'remote',
@@ -306,7 +317,6 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
             slug: 'only-this',
             name: 'only-this',
             body: '标准',
-            allowedActions: ['comment.create'],
             files: {},
           },
         ],
@@ -486,32 +496,58 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
     }
   })
 
-  test('★ 不认识的动作被拒绝（动作表是闭合的，放过去会让每次都判不合规）', async () => {
+  test('★ 安装时传的动作配置**不再被接受**（老字段被忽略，而不是"装错了"）', async () => {
+    // ⚠️ 这两条用例原来是"不认识的动作被拒绝 / 只允许白名单里的动作被写进库"。
+    //    D40 收口之后安装 skill 这一路上**没有动作配置了**（动作权限住在审核者
+    //    身上），所以"在这里拒一个坏动作名"这条行为本身已经不存在——留一个假绿
+    //    的断言比删掉更糟。真正的那条守卫（坏动作名 400）现在在 agent 的写入口上
+    //    （`apps/daemon/src/tools-api.test.ts` 的「动作权限写在 agent 上」）。
+    //
+    //    这里钉住的是搬家的另一半：**老客户端传了它也不会被写进库**。静默收下
+    //    才是真问题——那会让"谁能改状态"多出一个看不见的出处。
     const src = await makeSkillDir({ 'SKILL.md': '# 标准' })
     try {
       await withDaemon(async (url) => {
         const res = await installFromSource(url, {
           source: { kind: 'path', path: src },
-          allowedActions: ['comment.create', 'rm -rf everything'],
+          // 老客户端的写法：动作跟着 skill 一起装。
+          // D41：夹具值换成工具动作名（`<包 slug>.<动作名>` 是动作**唯一**的形状，
+          // 内置动作已经全部移除）；这个字段的内容在这里本来就不参与任何判断。
+          allowedActions: ['fixture-tool.act', 'other-tool.act'],
         })
-        assert.equal(res.status, 400)
-        assert.match(String(res.body['error']), /不认识的动作/)
+        assert.equal(res.status, 201, '不该因为多了个老字段就整条装不上')
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed.length, 1)
+        assert.equal(
+          installed[0]?.['allowedActions'],
+          undefined,
+          '★ 那个字段既不被校验、也不被写库：skill 只剩"正文 + 支持文件"',
+        )
       })
     } finally {
       await cleanup(src)
     }
   })
 
-  test('★ 只允许白名单里的动作被写进库', async () => {
+  test('★ 装进来的 skill 上没有动作配置（写库时不带上那个键）', async () => {
     const src = await makeSkillDir({ 'SKILL.md': '# 标准' })
     try {
       await withDaemon(async (url) => {
         const res = await installFromSource(url, {
           source: { kind: 'path', path: src },
-          allowedActions: ['issue.add_label'],
+          // D41：夹具值换成形状合法的工具动作名（原来是内置动作名 `issue.add_label`）。
+          allowedActions: ['fixture-tool.act'],
         })
-        const installed = res.body['installed'] as Array<{ allowedActions: string[] }>
-        assert.deepEqual(installed[0]?.allowedActions, ['issue.add_label'])
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed[0]?.['allowedActions'], undefined)
+        // 从库里读回来也一样（不是"只在返回值里没带"）
+        const skillId = String(installed[0]?.['id'])
+        const fromStore = (await (
+          await fetch(`${url}/api/skills`)
+        ).json()) as { skills: Array<Record<string, unknown>> }
+        const found = fromStore.skills.find((s) => s['id'] === skillId)
+        assert.ok(found)
+        assert.equal(found['allowedActions'], undefined, '★ 库里的记录上没有这个键了')
       })
     } finally {
       await cleanup(src)
@@ -802,8 +838,10 @@ describe('★ 卸载 skill（D38）', () => {
  * 它，而且**它的审核标准正来自它**（老数据）。而"先摘掉 skill 再卸载"会先把审核者
  * 变成一个没标准的状态，平台于是不再把产出交给它审。
  *
- * 所以需要一步"原样固化"：把当前生效的标准（= 挂载 skill 的正文与动作并集）写成
- * agent 自己的 `reviewStandard`，并摘掉那些挂载。固化之后那条 skill 才能被卸载。
+ * 所以需要一步"原样固化"：把当前生效的标准**正文**（= 挂载 skill 的正文拼起来）
+ * 写成 agent 自己的 `reviewStandard`，**动作权限**写进 `Agent.allowedActions`
+ * （D40 收口之后动作不再从 skill 推出来，也不再住在标准里），并摘掉那些挂载。
+ * 固化之后那条 skill 才能被卸载。
  */
 describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', () => {
   async function adopt(url: string, agentId: string) {
@@ -839,15 +877,31 @@ describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', (
       assert.equal(res.status, 200)
       const adopted = res.body['adopted'] as { name: string; fromSkills: string[] }
       assert.deepEqual(adopted.fromSkills.sort(), ['legacy-a', 'legacy-b'])
+      // ★ 固化时要如实报出"哪些动作没搬过来"（D41）。这里的夹具本来就没有动作，
+      //   所以是空数组——钉的是**这个字段存在且形状正确**（界面靠它说清为什么）。
+      assert.deepEqual(res.body['droppedActions'], [], '没有动作可丢 ⇒ 空数组，而不是缺这个字段')
 
       const after = ((await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; skillIds: string[]; reviewStandard: { body: string; allowedActions: string[]; name: string } | null }>
+        agents: Array<{
+          id: string
+          skillIds: string[]
+          allowedActions: string[]
+          reviewStandard: { body: string; name: string } | null
+        }>
       }).agents.find((a) => a.id === reviewer.id)!
       assert.deepEqual(after.skillIds, [], '挂载要摘掉——标准已经在它自己身上了')
       assert.ok(after.reviewStandard, '标准固化下来了')
       assert.match(after.reviewStandard!.body, /只看甲/)
       assert.match(after.reviewStandard!.body, /只看乙/, '两份 skill 的正文都要在')
       assert.match(after.reviewStandard!.name, /老标准甲/)
+      // ★ D40 收口之后：标准只固化**正文**，动作固化到 `Agent.allowedActions` 上。
+      //   两样都要落下来，否则"固化之后生效的"与"固化之前生效的"不是同一份。
+      assert.deepEqual(after.allowedActions, [], '这个老形态审核者本来就没配动作 ⇒ 固化后仍是空')
+      assert.equal(
+        (after.reviewStandard as unknown as Record<string, unknown>)['allowedActions'],
+        undefined,
+        '★ 动作不再写回标准里（那是只读兼容字段）',
+      )
 
       // ★ 现在两条 skill 都不再被引用 ⇒ 可以卸载
       for (const id of ids) {
