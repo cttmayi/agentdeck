@@ -2,8 +2,10 @@
   import {
     api,
     newRunId,
+    type ActionView,
     type RunMessage,
     type RunSummary,
+    type VerdictActionView,
     type VerdictView,
     type WorkDirFile,
     type WorkDirListing,
@@ -54,46 +56,59 @@
   $: selectedStage = selected ? stageOf(selected.id, $runs) : null
 
   /**
-   * ★ 「行动」那一段要显示的三样东西。
+   * ★ 动作要显示的三样东西。
    *
-   * **必须在这里算**（不能写成模板里调用的函数）：Svelte 4 风格下，模板里调用的
-   * 函数里读 prop **不会**建立依赖，值变了不会重渲染——这个仓库为这个坑留过注释。
+   * ⚠️ 这里从**派生值**（`$: actionDetail = …`）改成了**函数**，是跟着显示位置
+   *    一起变的：原来是"详情里那个唯一的最新动作"，一个值算一次就够；现在动作挂在
+   *    **各自那张判决卡**上，一屏里可能有好几张（返工回路转过几圈时），要按
+   *    `verdictId` 分别求值。
+   *
+   *    改成函数是安全的：调用点在 `{#each}` 里，`verdictActions` 变了会重建那一段，
+   *    不存在"值变了但没重渲染"那个坑（那个坑是"模板里调函数读 prop"，
+   *    这里读的是 each 的局部变量）。
    *
    * 三样：
-   *   - `actionDetail`：脚本回的那句话（`result.detail`）；
-   *   - `actionMeta`：退出码 / 耗时 / 预演标记这些**事实**（有才算）；
-   *   - `actionParamEntries`：它带着什么参数跑的（合并后的那一条）。
+   *   - `actionDetailOf`：脚本回的那句话（`result.detail`）；
+   *   - `actionMetaOf`：退出码 / 耗时 / 预演标记这些**事实**（有才算）；
+   *   - `actionParamsOf`：它带着什么参数跑的（合并后的那一条）。
    */
-  $: action = selectedStage?.action ?? null
-  $: actionResult = (action?.result ?? null) as Record<string, unknown> | null
+  const actionResultOf = (a: ActionView): Record<string, unknown> | null =>
+    (a.result ?? null) as Record<string, unknown> | null
+
   /**
    * `detail` 是脚本自己写的，可能是空串或非字符串（脚本是我们之外的东西写的）。
    * 只认非空字符串——否则界面上会出现一行空的段落。
    */
-  $: actionDetail =
-    typeof actionResult?.['detail'] === 'string' && actionResult['detail'].trim() !== ''
-      ? actionResult['detail']
-      : null
-  $: actionMeta = actionResult
-    ? [
-        ...(typeof actionResult['exitCode'] === 'number'
-          ? [{ label: $t('tasks.actionExitCode', { code: actionResult['exitCode'] as number }) }]
-          : []),
-        ...(typeof actionResult['durationMs'] === 'number'
-          ? [{ label: $t('tasks.actionDuration', { ms: actionResult['durationMs'] as number }) }]
-          : []),
-        ...(actionResult['dryRun'] === true ? [{ label: $t('tasks.actionDryRun') }] : []),
-        ...(action?.finishedAt ? [{ label: new Date(action.finishedAt).toLocaleString() }] : []),
-      ]
-    : []
+  function actionDetailOf(a: ActionView): string | null {
+    const d = actionResultOf(a)?.['detail']
+    return typeof d === 'string' && d.trim() !== '' ? d : null
+  }
+
+  function actionMetaOf(a: ActionView): string[] {
+    const r = actionResultOf(a)
+    if (!r) return []
+    return [
+      ...(typeof r['exitCode'] === 'number'
+        ? [$t('tasks.actionExitCode', { code: r['exitCode'] as number })]
+        : []),
+      ...(typeof r['durationMs'] === 'number'
+        ? [$t('tasks.actionDuration', { ms: r['durationMs'] as number })]
+        : []),
+      ...(r['dryRun'] === true ? [$t('tasks.actionDryRun')] : []),
+      ...(a.finishedAt ? [new Date(a.finishedAt).toLocaleString()] : []),
+    ]
+  }
+
   /**
    * 参数的**展示**形状：值可能是对象/数组（模型填的开放参数没有形状约束），
    * 直接 `{v}` 会渲染成 `[object Object]`——那等于没显示。所以统一 `JSON.stringify`，
-   * 并按下标排序（对象的键序不定，同一条动作两次打开顺序不一样会像"变了"）。
+   * 并按**参数名**排序（对象的键序不定，同一条动作两次打开顺序不一样会像"变了"）。
    */
-  $: actionParamEntries = Object.entries((action?.params ?? {}) as Record<string, unknown>)
-    .map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)] as const)
-    .sort((a, b) => a[0].localeCompare(b[0]))
+  function actionParamsOf(a: ActionView): Array<readonly [string, string]> {
+    return Object.entries((a.params ?? {}) as Record<string, unknown>)
+      .map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)] as const)
+      .sort((x, y) => x[0].localeCompare(y[0]))
+  }
 
   /**
    * 「需要注意」单独一拨置顶。
@@ -234,6 +249,15 @@
       : ''
 
   let verdicts: VerdictView[] = []
+  /**
+   * ★ 这些判决**触发的**动作记录（D45 的显示位置调整）。
+   *
+   * 与判决**一起取**、**一起画**：使用者的原话是「应该作为审核 PASS 的依据，
+   * 放在一起更合理」——判决说"通过"，而"通过之后真的做了什么、结果如何"是那份
+   * 通过的一部分。分两处（或分两拍）显示，会让"通过了但什么也没发生"看起来
+   * 很正常。
+   */
+  let verdictActions: VerdictActionView[] = []
   let verdictsFor: string | null = null
 
   // ══════════════════════════════════════════════════════════════════
@@ -259,10 +283,14 @@
   async function loadVerdicts(runId: string): Promise<void> {
     verdictsFor = runId
     try {
-      const out = await api<{ verdicts: VerdictView[] }>(`/api/runs/${runId}/verdicts`)
+      const out = await api<{ verdicts: VerdictView[]; actions?: VerdictActionView[] }>(
+        `/api/runs/${runId}/verdicts`,
+      )
       verdicts = out.verdicts ?? []
+      verdictActions = out.actions ?? []
     } catch {
       verdicts = []
+      verdictActions = []
     }
   }
 
@@ -588,57 +616,6 @@
     {/if}
 
   <!--
-    ★ 判决要求做的那个动作（D40 收口）。
-    「已审查」过去只说"判决出来了",不说"事情做没做完";这里把**事实**摆出来：
-    动作名（契约值，原样）、状态、以及失败原因（那才是"要我去做什么"）。
-  -->
-  {#if selectedStage?.action}
-    <section class="drawer-section">
-      <h3>{$t('tasks.actionHeading')}</h3>
-      <p>
-        <code>{selectedStage.action.type}</code>
-        <span class="faint small">{$t(`term.actionStatus.${selectedStage.action.status}` as WebTextId)}</span>
-      </p>
-      {#if selectedStage.action.error}
-        <p class="card-warning">{$t('tasks.actionFailed', { reason: selectedStage.action.error })}</p>
-      {/if}
-      <!--
-        ★ **结果**（D45 修的显示缺口）。
-        这一段以前没有：页面只拿得到 `status` / `type` / `error`，于是**成功的动作
-        在界面上只剩一句"已执行"**——使用者看得见"跑过了"，看不见"跑出了什么"。
-        `result.detail` 就是脚本自己回的那句话（"做了什么 / 为什么没做成"），
-        它本来就是要给人看的（`ScriptExecutionResult.detail` 的注释写着它会进
-        动作记录、审计与失败通知——只是漏了页面这一处）。
-      -->
-      {#if actionDetail}
-        <p class="small">{actionDetail}</p>
-      {/if}
-      {#if actionMeta.length > 0}
-        <p class="faint small">
-          {#each actionMeta as m, i (m.label)}
-            {i > 0 ? ' · ' : ''}{m.label}
-          {/each}
-        </p>
-      {/if}
-      <!--
-        ★ **它带着什么参数跑的**。模型只填 open 参数，bound（工作目录之类）由平台
-        按事实注入、固定值由界面钉——三者最终合成这一份。不显示的话，"这个动作
-        到底对哪个对象做了什么"就无从核对，而这正是动作最该可核对的地方。
-      -->
-      {#if actionParamEntries.length > 0}
-        <details>
-          <summary class="faint small">{$t('tasks.actionParamsSummary')}</summary>
-          <ul class="plain small" style="margin:0">
-            {#each actionParamEntries as [k, v] (k)}
-              <li><code>{k}</code> = <code>{v}</code></li>
-            {/each}
-          </ul>
-        </details>
-      {/if}
-    </section>
-  {/if}
-
-  <!--
     ★ 「这一次是谁审的」（D42）。
     只在**偏离长期配置**时才显示：`follow` 是绝大多数情况，也说出来只会多一行噪音。
     而 `override` / `none` 必须留痕——否则一条"这次不审"的任务，事后在界面上
@@ -833,6 +810,59 @@
               <span class="faint small">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
               <span class="faint small">{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span>
             </div>
+            <!--
+              ══════════════════════════════════════════════════════════════
+              ★ 这条判决**真的做了什么**（D45 的显示位置调整）
+              ══════════════════════════════════════════════════════════════
+
+              使用者的原话：「应该作为审核 PASS 的依据，放在一起更合理」。
+
+              在这之前它单独占一段（详情里另有一个「行动」小节），于是"判决通过"
+              与"通过之后做了什么"分在两处：读者得自己在两个方块之间建立因果，
+              而"通过了但什么都没发生"和"通过了并做成了"在扫一眼时没有区别。
+
+              现在它挂回**产生它的那张判决卡**里——判决的结论、它要求的动作、
+              以及那个动作的**结果**连成一句完整的话：
+              「判了 pass ⇒ 要求 append-note ⇒ 真的 append 了（退出码 0）」。
+
+              判据用 `verdictId`（不是"最新那条"）：一张卡只认自己触发的动作，
+              返工回路转了几圈时也不会把上一轮的结论画到这一轮下面。
+            -->
+            {#each verdictActions.filter((a) => a.verdictId === v.id) as a (a.id)}
+              <div class="action-line">
+                <div class="small">
+                  <code>{a.type}</code>
+                  <span class="faint small"
+                    >{$t(`term.actionStatus.${a.status}` as WebTextId)}</span
+                  >
+                </div>
+                {#if a.error}
+                  <p class="card-warning">{$t('tasks.actionFailed', { reason: a.error })}</p>
+                {/if}
+                <!-- 脚本自己回的那句话："做了什么 / 为什么没做成" -->
+                {#if actionDetailOf(a)}
+                  <p class="small">{actionDetailOf(a)}</p>
+                {/if}
+                {#if actionMetaOf(a).length > 0}
+                  <p class="faint small">
+                    {#each actionMetaOf(a) as m, i (m)}
+                      {i > 0 ? ' · ' : ''}{m}
+                    {/each}
+                  </p>
+                {/if}
+                <!-- 它带着什么参数跑的（模型填的 open + 平台注入的 bound + 界面固定值）-->
+                {#if actionParamsOf(a).length > 0}
+                  <details>
+                    <summary class="faint small">{$t('tasks.actionParamsSummary')}</summary>
+                    <ul class="plain small" style="margin:0">
+                      {#each actionParamsOf(a) as [k, val] (k)}
+                        <li><code>{k}</code> = <code>{val}</code></li>
+                      {/each}
+                    </ul>
+                  </details>
+                {/if}
+              </div>
+            {/each}
             {#if v.action}
               <div class="small">{$t('tasks.suggestedAction')}<code>{v.action.type}</code></div>
             {/if}
@@ -1226,6 +1256,19 @@
     border-left: 2px solid var(--warn);
     padding-left: var(--sp-2);
     margin-top: var(--sp-1);
+  }
+
+  /**
+   * 判决卡里的动作块（D45 的显示位置调整）。
+   *
+   * 用左侧一道**中性**细线把它标成"这张卡的后续"——与 `.card-warning` 同一套
+   * 视觉语言（都是"挂在某句话下面的东西"），但颜色不同：`card-warning` 是
+   * **出事了**的语气，而动作块大多数时候是"顺利做完了"，用警告色会平白吓人。
+   */
+  .action-line {
+    border-left: 2px solid var(--line);
+    padding-left: var(--sp-2);
+    margin-top: var(--sp-2);
   }
 
   /* ── 看板 ── */

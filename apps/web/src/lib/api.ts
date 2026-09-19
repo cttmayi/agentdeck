@@ -441,31 +441,7 @@ export interface RunSummary {
    *   失败了就是「行动失败」——过去这两种都显示成「已审查」（那是"判决已产出"
    *   的意思，不是"事情已成"）。
    */
-  action: {
-    status: string
-    /**
-     * 动作类型（`<包 slug>.<动作名>`，如 `probe-tool.append-note`）——契约值，
-     * 原样显示、不翻译。
-     *
-     * ⚠️ D41 之后**只有这一种形状**：平台的内置动作整组移除了，所以老工作区里
-     *    存着的那几个裸名（`comment.create` 之类）只是历史值——它们会照原样显示，
-     *    但没有任何包认领，界面也查不到 `summary`。
-     */
-    type: string
-    /** 失败原因；成功时为 null。 */
-    error: string | null
-    /**
-     * ★ 脚本回的**结果**：`{ ok, detail, exitCode, durationMs, dryRun }`。
-     *
-     * `detail` 是给人看的一句话——"这个动作到底做了什么 / 为什么没做成"。
-     * ⚠️ 它以前**没有送到页面**，于是成功的动作在详情里只剩一句"已执行"：
-     *    使用者看得见"跑过了"，看不见"跑出了什么"。
-     */
-    result: Record<string, unknown> | null
-    /** ★ **合并后**的参数（bound 平台注入 / open 模型填 / 界面固定值）。 */
-    params: Record<string, unknown>
-    finishedAt: number | null
-  } | null
+  action: ActionView | null
 }
 
 export type RunDetail = RunSummary
@@ -486,6 +462,49 @@ export interface RunMessage {
   output: string | null
   outputTruncated: boolean
   at: number
+}
+
+/**
+ * 一条**动作记录**在页面上的形状。
+ *
+ * ⚠️ 提到具名类型是**必须的**（不是审美）：它原来在 `RunSummary` 里内联写了一份、
+ *    在 `StageInfo` 里又抄了一份。往 daemon 那侧加字段（`result` / `params` /
+ *    `finishedAt` 就是这么加的）时，抄的那一份**不报错、只是看不到那个字段**——
+ *    而"看不到"正好就是使用者报的那条「配了行动但看不见结果」。现在只有一份。
+ */
+export interface ActionView {
+  /**
+   * 动作类型（`<包 slug>.<动作名>`，如 `probe-tool.append-note`）——契约值，
+   * 原样显示、不翻译。
+   *
+   * ⚠️ D41 之后**只有这一种形状**：平台的内置动作整组移除了，所以老工作区里
+   *    存着的那几个裸名（`comment.create` 之类）只是历史值——它们会照原样显示，
+   *    但没有任何包认领，界面也查不到 `summary`。
+   */
+  type: string
+  status: string
+  /** 失败原因；成功时为 null。 */
+  error: string | null
+  /**
+   * 脚本回的**结果**：`{ ok, detail, exitCode, durationMs, dryRun }`。
+   *
+   * `detail` 是给人看的一句话——"这个动作到底做了什么 / 为什么没做成"。
+   */
+  result: Record<string, unknown> | null
+  /** **合并后**的参数（bound 平台注入 / open 模型填 / 界面固定值）。 */
+  params: Record<string, unknown>
+  finishedAt: number | null
+}
+
+/**
+ * 判决**触发的**动作：在 `ActionView` 之上带一个 `verdictId`。
+ *
+ * 界面靠它把动作挂回**产生它的那张判决卡**——"通过"与"通过之后做了什么"
+ * 是同一件事的两半，分两处显示会让"通过但什么也没发生"看起来很正常。
+ */
+export interface VerdictActionView extends ActionView {
+  id: string
+  verdictId: string
 }
 
 export interface VerdictView {

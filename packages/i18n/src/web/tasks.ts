@@ -81,7 +81,6 @@ export const tasksText = {
   'tasks.col.action_running.title': { zh: '行动中', en: 'Acting' },
   'tasks.col.action_running.hint': { zh: '判决要求做一件事，平台正在做', en: 'the verdict asked for something and the platform is doing it' },
   'tasks.noteActionRunning': { zh: '正在执行判决要求的动作', en: 'Running the action the verdict asked for' },
-  'tasks.actionHeading': { zh: '这次触发的动作', en: 'The action this verdict triggered' },
   'tasks.actionFailed': { zh: '失败原因：{reason}', en: 'Why it failed: {reason}' },
   // ── 「这一次是谁审的」（D42）——只在偏离长期配置时显示 ──
   'tasks.reviewerHeading': { zh: '这次由谁审', en: 'Who reviews this one' },

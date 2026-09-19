@@ -3305,9 +3305,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ── 判决与审计 ──
     const verdictsMatch = /^\/api\/runs\/([^/]+)\/verdicts$/.exec(path)
     if (req.method === 'GET' && verdictsMatch) {
-      sendJson(res, 200, {
-        verdicts: await store.listVerdictsByRun(decodeURIComponent(verdictsMatch[1]!) as RunId),
-      })
+      const verdicts = await store.listVerdictsByRun(
+        decodeURIComponent(verdictsMatch[1]!) as RunId,
+      )
+      // ★ 判决**顺带把它触发的动作**一起给（每项带 `verdictId`）。
+      //
+      //   为什么不是另开一个端点：界面要把它们**画在同一张卡片里**——判决说
+      //   "通过"，而"通过之后真的做了什么、结果如何"是那份通过的依据的一部分
+      //   （使用者的原话：「应该作为审核 PASS 的依据，放在一起更合理」）。
+      //   分两次请求的话，卡片会先画出"通过"、动作过一拍才出现，中间那一瞬
+      //   就是"审核通过了但什么也没发生"的样子——正是要避免的错觉。
+      //
+      //   一次一条判决、动作最多几条，所以这里不是 N+1 的性能问题；真要变成问题，
+      //   先改 store 的批量读，而不是把接口拆开。
+      const actions = (
+        await Promise.all(verdicts.map((v) => store.listActionsByVerdict(v.id)))
+      ).flat()
+      sendJson(res, 200, { verdicts, actions })
       return
     }
     const auditsMatch = /^\/api\/runs\/([^/]+)\/audits$/.exec(path)

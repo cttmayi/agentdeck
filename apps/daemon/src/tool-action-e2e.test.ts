@@ -423,6 +423,32 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         '★ 包括平台按事实注入的绑定参数（这里就是那个工作目录）',
       )
 
+      // ★★ 判决那一侧也要带上它触发的动作（D45 的显示位置调整）。
+      //
+      //   界面上现在把动作画在**产生它的那张判决卡**里（「应该作为审核 PASS 的
+      //   依据，放在一起更合理」），所以 `GET /api/runs/<id>/verdicts` 必须
+      //   一并给出动作记录、而且每项带 `verdictId`——界面靠它把动作挂回对应的
+      //   那张卡。少了 `verdictId` 的话，"哪张判决触发的它"就只能靠"最新那条"
+      //   去猜，返工回路转过几圈时会画错。
+      const verdictsBody = (await (
+        await fetch(`${url}/api/runs/${reviewRow?.runId}/verdicts`)
+      ).json()) as {
+        verdicts: Array<{ id: string; conclusion: string }>
+        actions?: Array<{ verdictId: string; type: string; result: Record<string, unknown> | null }>
+      }
+      assert.ok(Array.isArray(verdictsBody.actions), '★ 判决接口要顺带给出它触发的动作')
+      assert.equal(verdictsBody.actions?.length, 1, '这条判决触发了恰好一个动作')
+      assert.equal(
+        verdictsBody.actions?.[0]?.verdictId,
+        verdictsBody.verdicts[0]?.id,
+        '★ 动作要挂回**产生它的那条判决**（界面按 verdictId 分组画进同一张卡）',
+      )
+      assert.equal(
+        typeof verdictsBody.actions?.[0]?.result?.['detail'],
+        'string',
+        '★ 而结果本身也在里面——判决卡上要显示"通过之后做了什么"',
+      )
+
       // ── ⑦ 硬证据：脚本真的往那个工作目录里写了东西 ──
       const written = await until(
         async () => readFile(join(workDir, 'NOTES.md'), 'utf8').catch(() => null),
