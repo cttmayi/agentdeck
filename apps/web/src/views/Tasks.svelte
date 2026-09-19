@@ -54,6 +54,48 @@
   $: selectedStage = selected ? stageOf(selected.id, $runs) : null
 
   /**
+   * ★ 「行动」那一段要显示的三样东西。
+   *
+   * **必须在这里算**（不能写成模板里调用的函数）：Svelte 4 风格下，模板里调用的
+   * 函数里读 prop **不会**建立依赖，值变了不会重渲染——这个仓库为这个坑留过注释。
+   *
+   * 三样：
+   *   - `actionDetail`：脚本回的那句话（`result.detail`）；
+   *   - `actionMeta`：退出码 / 耗时 / 预演标记这些**事实**（有才算）；
+   *   - `actionParamEntries`：它带着什么参数跑的（合并后的那一条）。
+   */
+  $: action = selectedStage?.action ?? null
+  $: actionResult = (action?.result ?? null) as Record<string, unknown> | null
+  /**
+   * `detail` 是脚本自己写的，可能是空串或非字符串（脚本是我们之外的东西写的）。
+   * 只认非空字符串——否则界面上会出现一行空的段落。
+   */
+  $: actionDetail =
+    typeof actionResult?.['detail'] === 'string' && actionResult['detail'].trim() !== ''
+      ? actionResult['detail']
+      : null
+  $: actionMeta = actionResult
+    ? [
+        ...(typeof actionResult['exitCode'] === 'number'
+          ? [{ label: $t('tasks.actionExitCode', { code: actionResult['exitCode'] as number }) }]
+          : []),
+        ...(typeof actionResult['durationMs'] === 'number'
+          ? [{ label: $t('tasks.actionDuration', { ms: actionResult['durationMs'] as number }) }]
+          : []),
+        ...(actionResult['dryRun'] === true ? [{ label: $t('tasks.actionDryRun') }] : []),
+        ...(action?.finishedAt ? [{ label: new Date(action.finishedAt).toLocaleString() }] : []),
+      ]
+    : []
+  /**
+   * 参数的**展示**形状：值可能是对象/数组（模型填的开放参数没有形状约束），
+   * 直接 `{v}` 会渲染成 `[object Object]`——那等于没显示。所以统一 `JSON.stringify`，
+   * 并按下标排序（对象的键序不定，同一条动作两次打开顺序不一样会像"变了"）。
+   */
+  $: actionParamEntries = Object.entries((action?.params ?? {}) as Record<string, unknown>)
+    .map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)] as const)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+
+  /**
    * 「需要注意」单独一拨置顶。
    *
    * 不重排全部：使用者的心理模型是"列表大致按时间"，整体重排会让人找不到
@@ -559,6 +601,39 @@
       </p>
       {#if selectedStage.action.error}
         <p class="card-warning">{$t('tasks.actionFailed', { reason: selectedStage.action.error })}</p>
+      {/if}
+      <!--
+        ★ **结果**（D45 修的显示缺口）。
+        这一段以前没有：页面只拿得到 `status` / `type` / `error`，于是**成功的动作
+        在界面上只剩一句"已执行"**——使用者看得见"跑过了"，看不见"跑出了什么"。
+        `result.detail` 就是脚本自己回的那句话（"做了什么 / 为什么没做成"），
+        它本来就是要给人看的（`ScriptExecutionResult.detail` 的注释写着它会进
+        动作记录、审计与失败通知——只是漏了页面这一处）。
+      -->
+      {#if actionDetail}
+        <p class="small">{actionDetail}</p>
+      {/if}
+      {#if actionMeta.length > 0}
+        <p class="faint small">
+          {#each actionMeta as m, i (m.label)}
+            {i > 0 ? ' · ' : ''}{m.label}
+          {/each}
+        </p>
+      {/if}
+      <!--
+        ★ **它带着什么参数跑的**。模型只填 open 参数，bound（工作目录之类）由平台
+        按事实注入、固定值由界面钉——三者最终合成这一份。不显示的话，"这个动作
+        到底对哪个对象做了什么"就无从核对，而这正是动作最该可核对的地方。
+      -->
+      {#if actionParamEntries.length > 0}
+        <details>
+          <summary class="faint small">{$t('tasks.actionParamsSummary')}</summary>
+          <ul class="plain small" style="margin:0">
+            {#each actionParamEntries as [k, v] (k)}
+              <li><code>{k}</code> = <code>{v}</code></li>
+            {/each}
+          </ul>
+        </details>
       {/if}
     </section>
   {/if}

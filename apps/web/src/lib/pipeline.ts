@@ -121,7 +121,13 @@ export interface StageInfo {
    *    任务详情要显示"到底触发了什么动作、什么状态、为什么失败"——那些是
    *    契约值（`example-note.append-note`、`failed`），原样显示、不翻译。
    */
-  action: { status: string; type: string; error: string | null } | null
+  /**
+   * ⚠️ 形状**引用** `RunSummary['action']` 而不是在这里再抄一遍：
+   *    两处各写一份类型的话，往 daemon 那侧加一个字段（`result`/`params`/
+   *    `finishedAt` 就是这么加进来的）时，这里不会报错、只会**看不到那个字段**
+   *    ——而"看不到"的表现正好是使用者报的那条「配了行动但看不见结果」。
+   */
+  action: RunSummary['action']
   /**
    * 这个任务**已经返工过几次**（D45）。
    *

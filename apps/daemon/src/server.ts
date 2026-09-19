@@ -3713,7 +3713,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
                   if (!v) return null
                   const actions = await store.listActionsByVerdict(v.id)
                   const a = actions[actions.length - 1]
-                  return a ? { status: a.status, type: a.type, error: a.error } : null
+                  if (!a) return null
+                   // ⚠️ 这里原来只给 `{status, type, error}`，于是**成功的动作在界面上
+                   //    只剩一句"已执行"**：`result`（脚本回的那句"做了什么"、退出码、
+                   //    耗时）与 `params`（它到底带着什么参数跑的）都被丢在这里。
+                   //    使用者的反馈正是这个：「配了行动，但看不到行动的结果和它的
+                   //    反馈信息」——数据一直在库里，只是从来没送出去。
+                   return {
+                     id: a.id,
+                     status: a.status,
+                     type: a.type,
+                     error: a.error,
+                     /** 脚本回的结构：`{ ok, detail, exitCode, durationMs, dryRun }`。 */
+                     result: a.result,
+                     /** **合并后**的参数（bound 平台注入 / open 模型填 / 界面固定值）。 */
+                     params: a.params,
+                     finishedAt: a.finishedAt,
+                   }
                 })
               : null,
         })),

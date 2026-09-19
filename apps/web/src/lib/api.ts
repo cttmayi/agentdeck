@@ -454,6 +454,17 @@ export interface RunSummary {
     type: string
     /** 失败原因；成功时为 null。 */
     error: string | null
+    /**
+     * ★ 脚本回的**结果**：`{ ok, detail, exitCode, durationMs, dryRun }`。
+     *
+     * `detail` 是给人看的一句话——"这个动作到底做了什么 / 为什么没做成"。
+     * ⚠️ 它以前**没有送到页面**，于是成功的动作在详情里只剩一句"已执行"：
+     *    使用者看得见"跑过了"，看不见"跑出了什么"。
+     */
+    result: Record<string, unknown> | null
+    /** ★ **合并后**的参数（bound 平台注入 / open 模型填 / 界面固定值）。 */
+    params: Record<string, unknown>
+    finishedAt: number | null
   } | null
 }
 

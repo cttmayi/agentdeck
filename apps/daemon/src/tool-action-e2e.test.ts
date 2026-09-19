@@ -383,13 +383,45 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         runs: Array<{
           runId: string
           kind: string
-          action: { status: string; type: string; error: string | null } | null
+          action: {
+            status: string
+            type: string
+            error: string | null
+            result: Record<string, unknown> | null
+            params: Record<string, unknown>
+          } | null
         }>
       }
       const reviewRow = runsBody.runs.find((r) => r.kind === 'review')
       assert.equal(reviewRow?.action?.type, 'example-note.append-note', '列表要给出动作类型')
       assert.equal(reviewRow?.action?.status, 'executed', '以及它的状态（页面据此推到「已审查」）')
       assert.equal(runsBody.runs.find((r) => r.kind === 'execute')?.action, null, '执行 run 没有动作')
+
+      // ★★ **动作的结果必须一起送到页面**。
+      //
+      //   这一条是使用者的反馈补的：「配了行动，但查看任务细节，看不到行动的结果
+      //   和它反馈的信息」。根因不在界面，在**这里**——`result` 与 `params` 一直
+      //   躺在库里，而这个投影只取了 `{status, type, error}`，于是成功的动作在
+      //   详情里只剩一句"已执行"（失败反而看得见，因为 `error` 在里面）。
+      //
+      //   所以要断言的是**结果本身**，不只是状态：`detail` 是脚本回的那句"做了
+      //   什么"，`params` 是它带着什么参数跑的。
+      assert.equal(
+        typeof reviewRow?.action?.result?.['detail'],
+        'string',
+        '★ 动作的结果（脚本回的那句话）必须送到页面：只给 status 的话，成功与"跑完什么也没说"看起来一样',
+      )
+      assert.equal(reviewRow?.action?.result?.['ok'], true, '（结果里带着脚本自己判的成败）')
+      assert.equal(
+        reviewRow?.action?.params?.['text'],
+        '来自判决的一句话',
+        '★ 它带着什么参数跑的也要送到页面——模型填的开放参数',
+      )
+      assert.equal(
+        typeof reviewRow?.action?.params?.['dir'],
+        'string',
+        '★ 包括平台按事实注入的绑定参数（这里就是那个工作目录）',
+      )
 
       // ── ⑦ 硬证据：脚本真的往那个工作目录里写了东西 ──
       const written = await until(

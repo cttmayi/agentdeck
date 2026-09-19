@@ -149,4 +149,12 @@ export const tasksText = {
     zh: '返工 {n} 次',
     en: 'reworked {n}×',
   },
+  // ── 「行动」那一段的事实（D45 补的显示缺口：以前成功的动作只剩一句"已执行"）──
+  'tasks.actionExitCode': { zh: '退出码 {code}', en: 'exit code {code}' },
+  'tasks.actionDuration': { zh: '耗时 {ms} ms', en: 'took {ms} ms' },
+  'tasks.actionDryRun': { zh: '试运行（没有真的改东西）', en: 'dry run (nothing was changed)' },
+  'tasks.actionParamsSummary': {
+    zh: '它带着什么参数跑的',
+    en: 'What parameters it ran with',
+  },
 } as const satisfies TextCatalog
