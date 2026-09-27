@@ -4,7 +4,7 @@ import {
   AUDIT_EXPORT_FORMAT_VERSION,
   type AuditRecord,
   type TokenUsage,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { aggregateCost, checksumOf, verifyAuditExport } from './export.ts'
 
 /**

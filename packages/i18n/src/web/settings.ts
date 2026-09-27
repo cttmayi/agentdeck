@@ -7,8 +7,10 @@ import type { TextCatalog } from '../text.ts'
  * ⚠️ 两个抽屉共用这一份词表（键的前缀区分：`settings.*` / `inbox.*`）——它们都从
  *    顶栏打开、都是"抽屉"，改文案时在同一处找得到。
  *
- * ⚠️ zh 的值**必须与迁移之前逐字一致**：中文是这个项目的默认语言，也是所有既有
- *    测试、布局探针与文档断言的依据——改一个字就会有东西变红。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  *
  * ⚠️ 被 `<strong>` 拆开的句子按 `…Before` / `…Strong` / `…After` 分段（标记里的
  *    粗体结构原样保留）：分段值里的空格与标点是**渲染结果的一部分**，拼接后必须
@@ -26,6 +28,37 @@ export const settingsText = {
     zh: '只切换界面文字。交给模型的那段话仍是中文，另外会加一条"请用 X 回答"的指令，让它用你选的语言答复。',
     en: 'Switches interface text only. The prompt handed to the model stays in Chinese, plus an "answer in X" instruction so it replies in the language you pick.',
   },
+
+  // ── 界面主题（亮 / 暗 / 跟随系统）──
+  'settings.theme': { zh: '界面主题', en: 'Theme' },
+  'settings.themeLight': { zh: '亮色', en: 'Light' },
+  'settings.themeDark': { zh: '暗色', en: 'Dark' },
+  'settings.themeSystem': { zh: '跟随系统', en: 'System' },
+  'settings.themeHint': {
+    zh: '「跟随系统」就是跟着操作系统的亮暗切换走；手动选亮 / 暗会定死，系统怎么换都不影响。',
+    en: '"System" follows the OS light/dark switch; picking Light or Dark pins it, no matter what the OS does.',
+  },
+
+  /**
+   * 「关于」：这一版界面叫什么。
+   *
+   * ★ 加它的理由是一次真实误判（"聊天页不工作、任务页正常"，实际是没刷新的旧
+   *   标签页）。界面与 daemon 各是哪一版这件事**两边都不报错**，所以必须有一句
+   *   可查的话。
+   */
+  'settings.about': { zh: '关于', en: 'About' },
+  /**
+   * ⚠️ 两条版本信息**默认收起**（2026-09）：构建文件名与协议版本号是排查用的，
+   *    平时摊在设置里就是两句没人看得懂的字。收起来而不是删掉——理由见下面
+   *    `webBuildLabel` 那段（"我到底在跑哪一版"必须是一句可查的话）。
+   */
+  'settings.diagnostics': { zh: '诊断信息（排查版本错位时再看）', en: 'Diagnostic info (only needed when versions mismatch)' },
+  'settings.webBuildLabel': { zh: '这一版界面：', en: 'This UI build:' },
+  'settings.webBuildUnknown': {
+    zh: '（读不到——界面没有构建？）',
+    en: '(unreadable — UI not built?)',
+  },
+  'settings.protocolLabel': { zh: '接口协议版本：', en: 'API protocol version:' },
 
   // ── 成本 ──
   'settings.costs': { zh: '成本', en: 'Costs' },
@@ -47,14 +80,19 @@ export const settingsText = {
     en: ' cost. Treating the gap as zero would turn "total cost" into a misleading number.',
   },
   'settings.exportAudit': { zh: '导出审计链（JSON）', en: 'Export audit chain (JSON)' },
+  /**
+   * ⚠️ 这段原来写着 `argv 已脱敏` 与 `skill 记录不含指纹`（2026-09 改写）：
+   *    两句都是说给自己听的，读界面的人拿不到任何东西。改写成"抹掉的是什么、
+   *    它证明得了什么、证明不了什么"——信息量没变，只是换了说法。
+   */
   'settings.exportHintBefore': {
-    zh: '导出的文件自带校验和，改动任何一个字段都会被查出来。它同时把能力边界写在文件里——审计链可追溯但',
-    en: 'The exported file carries its own checksums, so any edited field is detected. It also writes the capability boundary into the file — the audit chain is traceable but ',
+    zh: '导出的文件自带校验和，改动任何一个字段都会被查出来。它同时把这份记录的局限写在文件里：可以追溯，但',
+    en: 'The exported file carries its own checksums, so any edited field is detected. It also writes its limits into the file: traceable, but ',
   },
   'settings.exportHintStrong': { zh: '不可复现', en: 'not reproducible' },
   'settings.exportHintAfter': {
-    zh: '（skill 记录不含指纹），argv 已脱敏。',
-    en: ' (skill records carry no fingerprint), and argv is redacted.',
+    zh: '——同一件事重跑一次不保证得到同一份文件。里面的令牌与密钥已经抹掉。',
+    en: ' — re-running the same thing is not guaranteed to produce the same file. Tokens and keys inside it have been erased.',
   },
 
   // ── 远端能力 ──
@@ -63,8 +101,8 @@ export const settingsText = {
   'settings.remoteProcessBefore': { zh: '远端服务是', en: 'The remote service is ' },
   'settings.remoteProcessStrong': { zh: '另一个进程', en: 'a separate process' },
   'settings.remoteProcessAfter': {
-    zh: '，本页面直接访问它（这一跳是跨源的，由远端放行回环来源）。daemon 自己不向远端发任何请求。',
-    en: ' this page talks to directly (that hop is cross-origin, with the remote allowing loopback origins). The daemon itself sends no requests to the remote.',
+    zh: '，由这个页面直接连它。本机服务自己不向远端发任何请求——所以远端关掉了，本机照样能用。',
+    en: ', which this page talks to directly. The local service never sends requests to the remote itself — turn the remote off and everything local still works.',
   },
   'settings.email': { zh: '邮箱', en: 'Email' },
   'settings.password': { zh: '口令（至少 8 位）', en: 'Password (at least 8 characters)' },
@@ -116,18 +154,25 @@ export const settingsText = {
     en: ' to the remote service you configured — run usage and status, and task status changes.',
   },
   'settings.reportingStrong3': { zh: '不包含', en: 'It does not include' },
+  /** ⚠️ 原文是 `prompt 正文`（2026-09 改写成使用者的话：交给模型的那段东西）。 */
   'settings.reportingMid2': {
-    zh: ' prompt 正文、代码、报告原文。远端那份副本',
-    en: ' prompt bodies, code or report text. The remote copy ',
+    zh: ' 交给模型的指令原文、代码、报告原文。远端那份副本',
+    en: ' the instructions sent to the model, code or report text. The remote copy ',
   },
   'settings.reportingStrong4': { zh: '不具证据效力', en: 'has no evidential force' },
+  /** ⚠️ 原文结尾是 `本机 daemon 里`——"daemon" 是产品内部的名字，界面上一律说「本机」。 */
   'settings.reportingMid3': {
-    zh: '，权威记录在本机 daemon 里。',
-    en: '; the authoritative record lives in the local daemon.',
+    zh: '，权威记录在这台机器上。',
+    en: '; the authoritative record is on this machine.',
   },
-  'settings.reportingBefore2': { zh: '上报可以用 ', en: 'Reporting can be turned off with ' },
+  /**
+   * ⚠️ 这里原来把配置键当句子用（`上报可以用 reportingEnabled: false 关闭`，2026-09
+   *    改写）：那句话对读界面的人是"一个我该去哪儿改的东西"，而不是一个键名。
+   *    键名仍然看得见——「我的设定」那一段列着它，那里才是改它的地方。
+   */
+  'settings.reportingBefore2': { zh: '上报可以在上面的「我的设定」里关掉', en: 'Reporting can be turned off under “My settings” above' },
   'settings.reportingAfter2': {
-    zh: ' 关闭；关闭后本机功能完整可用。远端不可达时记录会',
+    zh: '；关掉之后本机功能完整可用。远端不可达时记录会',
     en: '; with it off, everything local still works. When the remote is unreachable, records are ',
   },
   'settings.reportingStrong5': { zh: '本地暂存、恢复后补交', en: 'queued locally and resubmitted once it is back' },

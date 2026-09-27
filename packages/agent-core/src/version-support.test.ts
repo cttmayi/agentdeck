@@ -30,6 +30,7 @@ function descriptorWith(versions?: RuntimeDescriptor['versions']): RuntimeDescri
   return {
     key: 'fake',
     command: 'fake',
+    kind: 'cli',
     protocol: 'stream-json',
     family: 'generic-ndjson',
     evidence: 'provisional',
@@ -39,6 +40,7 @@ function descriptorWith(versions?: RuntimeDescriptor['versions']): RuntimeDescri
     toolConfig: { enabled: false, reason: 'r' },
     disableSwitch: { enabled: false, reason: 'r' },
     resume: { flag: '', rejectDetectable: false },
+    systemPrompt: null,
     promptDelivery: 'argv',
     baseArgs: [],
     blockedArgs: {},

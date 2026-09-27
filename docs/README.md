@@ -1,0 +1,234 @@
+# AgentDeck 开发者文档
+
+> 👤 **这份文件是给开发者的**：代码怎么组织、从哪读起、怎么开发和验证、每份文档回答什么。
+> **使用者**请读仓库根的 [`../README.md`](../README.md)（怎么跑起来、怎么用、安全边界）——
+> 其中「安全边界」那一节是必读的，开发者也不能跳过。
+
+> 📁 **目录组织（2026-09）**：文档按用途分四组——
+> [`srs/`](./srs/)（需求与决策）、[`design/`](./design/)（设计与架构）、
+> [`runtime/`](./runtime/)（运行时框架与流程）、[`reference/`](./reference/)（参考手册）。
+> 本文件是入口索引；改文档时保持"每组一份职责"的边界，不要往根目录堆新文件。
+
+---
+
+## 从哪读起
+
+| 想知道 | 读 |
+|---|---|
+| 这东西是干什么的、给谁用 | [`../README.md`](../README.md)（使用者的那一份） |
+| **要做什么**、验收标准、不变量、决策记录 | [`./srs/requirements.md`](./srs/requirements.md) |
+| **现在的代码长什么样**（模块、依赖、接口、数据落点、不变量强制点、代码索引） | [`./design/architecture.md`](./design/architecture.md) |
+| **runtime 是怎么抽象出来的**（AgentBackend 公共契约、RuntimeDescriptor 数据表、公共机器、差异点、加 runtime 清单） | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) |
+| **为什么这么做**（架构、数据模型、接口、状态机、安全边界） | [`./design/design.md`](./design/design.md) |
+| **一条 run 实际是怎么跑起来的**（命令行、注入、判决链路） | [`./runtime/pipeline.md`](./runtime/pipeline.md) |
+| **skill 是什么、住在哪、怎么装**（来源、磁盘落点、注入、限额） | [`./reference/skills.md`](./reference/skills.md) |
+| **工具包怎么开发、住在哪**（清单逐字段、脚本约定、远端目录、执行链路） | [`./reference/tools.md`](./reference/tools.md) |
+| 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
+
+**读代码的路线**：`./runtime/pipeline.md` 是按"一次 run 的生命周期"写的，每一节都标了对应文件——
+从它进比从目录树进快得多。改哪一段去哪找，见那份文档最后的「代码索引」，
+以及 `./design/architecture.md` §13 的「代码索引」与 §13.1 的「谁钉住了什么」。
+
+---
+
+## 文档地图
+
+| 文档 | 说明 | 版本 |
+|---|---|---|
+| [`./srs/requirements.md`](./srs/requirements.md) | **需求说明书（SRS）** —— 定位、目标、非目标、场景、功能需求、不变量、状态机、验收标准、里程碑、决策记录 | v2.25 |
+| [`./design/architecture.md`](./design/architecture.md) | **架构文档（当前实现）** —— 运行时拓扑、依赖方向、八个包与五个 app 的结构、完整路由表、存储布局、扩展点、不变量→强制点、代码索引与测试对照。**结论都指到具体文件** | — |
+| [`./design/design.md`](./design/design.md) | **设计文档** —— 总体架构、包结构、存储端口、数据模型、接口、状态机、Verdict schema、本地 Daemon、Claude 适配层、审核流水线、动作与审计、远端能力与插件系统、安全边界。**2026-09 的第一句话三块组装见 §15.33** | v2.8 |
+| [`./runtime/pipeline.md`](./runtime/pipeline.md) | **执行与审核：完整流程** —— 参考手册，描述**当前实现**：受理 → 准备 → 命令行 → 输入 → 收尾；执行与审核的差别、失败原因码、去哪儿看全过程、已知的坑 | — |
+| [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、三种来源（+ 本地技能目录）、**装进来落在 `log/skill.jsonl` 而不是文件**、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
+| [`./reference/tools.md`](./reference/tools.md) | **工具包参考手册** —— 一个包 = 一个组、`tool.json` 清单逐字段（含 bound/open 参数）、**怎么照着范例开发一个工具**、脚本与平台的三条约定（stdin/stdout/dry-run）、执行时的环境与临时目录、远端目录的放置位置、判决→动作的完整链路 | — |
+| [`./reference/scenarios.md`](./reference/scenarios.md) | **使用场景说明** —— 端到端走查、多 agent 分工、插件机制、异常边界、数据归属、待确认点 | v2.5 |
+| [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
+| [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
+
+> 决策记录见 `./srs/requirements.md` §16（**D1–D49**）。**决定改了就把编号写进去**——同步文档时
+> 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
+
+---
+
+## 代码结构
+
+### 可执行入口（`apps/`）
+
+| 入口 | 说明 |
+|---|---|
+| `apps/daemon` | 本机 daemon：托管界面与本地接口。**全部权威数据在本机** |
+| `apps/web` | Web UI（Vite + Svelte 5）。产物是纯静态文件，由 daemon 托管；它**不能单独跑**（`dev:web` 只是把 `/api` 代理到 daemon） |
+| `apps/cli` | **命令行**：daemon 的客户端。默认 JSON 输出、退出码有含义，供人与 agent 驱动 |
+| `apps/mcp` | **对外 MCP server**：stdio JSON-RPC，供其他 agent 驱动 |
+| `apps/remote` | **远端服务**：账号 / 设定 / 公共目录 / 第三方查询 / 记录统计 |
+
+> ⚠️ 三者（CLI、MCP、页面）走**同一套** HTTP 接口，因此权限边界也一致：
+> 都不提供"提交任意 run"——那接受任意 `workDir` 并在其中启动子进程，
+> 等于一条现成的代码执行入口。
+
+### 库（`packages/`）
+
+依赖方向是**单向**的：`protocol` ← `domain` ←（适配器 / 存储 / apps）。
+`protocol` 不依赖任何内部包，`domain` 只依赖 `protocol`。
+
+| 包 | 职责 |
+|---|---|
+| `protocol` | 全项目契约的**单一来源**：实体、枚举、接口形状、判决 schema。daemon、页面、远端都从这里取类型 |
+| `domain` | 领域模型层：状态机、不变量、路由、环路边界、审计脱敏。**不认识任何存储实现** |
+| `store-file` / `store-sqlite` | `Store` 端口的两套实现（v1 文件 / v2 SQLite）。领域层只认识端口 |
+| `agent-core` | 与具体 CLI 无关的适配层：runtime 描述表、禁改参数表、argv 组装、**第一句话模版**（D32）、技能注入、沙箱、进程树。⚠️ **受管上下文块已删**（D29）——不再有 `context-block.ts` |
+| `agent-claude` | Claude Code 适配器（首版参考实现） |
+| `agent-generic` | 第二个 CLI 适配器——价值在于给出**可插拔的第二个实证**，而不是"多支持一个厂商" |
+| `agent-codex` | 第三个适配器（**service 形状**：`codex app-server` + JSON-RPC，无 run 级 argv）。证据等级 **verified**（0.144.0-alpha.4 与 0.157.1 实测）；残余未验证项（dynamicToolCall/webSearch 等）见 `unverifiedFields()` 清单 |
+| `i18n` | 界面词表（中 / 英）+ **取值标签**（D39）。机器值一个字都不翻，翻译只加在为它配的标签上 |
+
+---
+
+## 开发环境与命令
+
+需要 **Node ≥ 22**（推荐 24——后端直接跑 `.ts`，没有构建步骤）。
+
+```bash
+pnpm install
+pnpm run build:web          # 界面是构建产物，不进版本库；clone 后必做一次
+
+pnpm run daemon             # 起本机 daemon（界面 + 接口）
+pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到 daemon，改代码即时热更新
+```
+
+| 命令 | 说明 |
+|---|---|
+| `pnpm run check` | **typecheck + 全量测试**（提交前跑这个） |
+| `pnpm run test` | 只跑测试；`pnpm run test:watch` 监听模式 |
+| `pnpm run build:web` | 构建界面到 `apps/web/dist/`（已 gitignore） |
+| `pnpm run dev:web` | 界面开发模式（5173 → 代理到 4517） |
+| `pnpm run probe:layout` | **界面布局检查**：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
+| `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务 |
+| `pnpm run remote` / `mcp` / `cli <命令>` | 另外三个入口 |
+
+---
+
+## 约定与硬约束（改代码前值得先知道）
+
+1. **测试里绝不调用真实 CLI**（NFR-T-01）。会消耗真实额度、还可能让 agent 改文件。
+   注入一个假的 `AgentBackend`（`DaemonOptions.backend`），GitHub 相关的注入 `fetchImpl`。
+2. **测试的临时目录建在仓库内**（`.cache/test-tmp`），不用系统 tmp——受限沙箱里后者可能不可写。
+   还有一条自动检查：测试文件里**不许出现 `tmpdir()`**，也不许对危险目录做递归删除
+   （这条规矩来自一次真实事故）。
+3. **注释与测试名写"为什么"**，用中文，包括踩过的坑：哪一版错了、错在哪、怎么发现的。
+   这是这个仓库最主要的防复发手段——**只写结论的注释留不住教训**。
+4. **`erasableSyntaxOnly: true`**：不能用 TS 的 `enum` / `namespace` / 构造函数参数属性
+   （`constructor(readonly x: string)` 这类需要 tsc 生成代码的写法被禁）。
+5. **界面的验证方式**：`tsc` 看不见 `.svelte` 模板，所以界面改动要过 `svelte-check`
+   （`pnpm run check` 里已包含），改布局再跑 `pnpm run probe:layout`。
+6. **不要留死接口**：这个仓库最常见的缺陷是"字段 / 接口 / 界面都在，就是没有代码路径让它发生"。
+   留下一处死接口，早晚会有人以为它生效了。
+7. **交给 CLI 的只有「第一句话」**（D29；**2026-09 起它由三块组装**：① 框架（模版）/ ② 身份（「指令」）/ ③ 任务——投递分 A/B 两档，档位记在 `Run.deliveryMode` 上；**2026-10 起三块各有一个模版框**：② 用 `{{identity}}`、③ 用 `{{task}}` 摆放，默认框 = 平台默认逐字不变）：它由 `packages/agent-core/src/first-sentence.ts`
+   组装（身份 → 角色 → 材料 → 技能清单 → 护栏 → 判决契约放最末），**整块进 run 日志**（A 档下两块分别记录）。
+   ~~同一份文本另存一份副本 `<workdir>/.agentdeck/context/<runId>.md`~~ —— **已撤（2026-09）**：
+   执行/审核都不再写副本文件（"回看它被交代了什么"看日志；它从来**不是**第二个投递通道）。再想往里面加东西，就加在那一个函数里——不要另开通道，
+   也不要写 CLI 认识的项目记忆文件名。
+8. **加一个 runtime 要做三件事**（D31）：描述表加一行（`packages/agent-core/src/runtime-table.ts`）
+   + 写一个适配器包 + 在 `apps/daemon/src/runtime-registry.ts` 的装配表加一行。
+   描述表那行**必须自己写全**：先声明 `kind`——`cli`（claude、generic 那种命令行形态）必填
+   `managedFlags`/`resume`，`service`（codex app-server 那种常驻服务 + JSON-RPC）必填 `baseArgs`，
+   加载器按 kind 校验，缺了当场报错，**不会**替你猜 claude 的拼写；技能要么声明
+   `{kind:'directory',dir}` 要么老实写 `{kind:'none',reason}`。
+   造完请跑 `apps/daemon/src/runtime-agnostic.test.ts` 那条用例——它整条跑在非 claude 的 runtime 上，
+   专门抓"还有东西写死了 claude"（审计、技能投递、界面选项、文件清单）。
+
+---
+
+## Web UI 技术栈
+
+| 层 | 选型 | 为什么 |
+|---|---|---|
+| 框架 | **Svelte 5** | 编译成很小的原生 JS，**没有运行时框架要下载**——与"daemon 托管静态文件、断网可用"这条约束最合 |
+| 构建 | **Vite 6** | 产物输出到 `apps/web/dist/`，daemon 只当它是普通静态文件，不知道 Svelte 的存在 |
+| 依赖 | 5 个 devDependencies + **1 个运行时依赖**（`highlight.js`，按需动态 import） | 模版引擎在 agent-core 侧（`mustache`） |
+| 样式 | 手写 CSS + **设计令牌层**（`apps/web/src/styles/app.css`）+ **亮/暗双主题** | 间距（4 的倍数）、字号层级、语义化颜色集中在一处；`:root` = 亮色板、`[data-theme='dark']` = 暗色板（`color-scheme` 跟随，原生控件不错位）；主题偏好存 `ah.theme-pref`（默认跟随系统，首帧前由 `index.html` 内联脚本定 `data-theme` 防闪）；扁平化：无阴影，描边/底色用 `color-mix` 随主题自适应 |
+| 实时 | 原生 `EventSource`（SSE） | 按 seq 补齐，刷新 / 重连都不丢消息 |
+
+**为什么不是 Next.js / React**：最初设计文档写的是 Next.js。但它需要 Node 运行时来渲染，
+而这里的页面由 daemon 在 `127.0.0.1` 上托管、要能断网工作；一个纯静态产物更贴合。
+UI 一直复杂到"需要组件化与路由"才换的——那次切换只动了 `apps/web/`，后端一行没改。
+
+**开发模式**：`pnpm run dev:web` 起 Vite（5173）并把 `/api` 代理到 daemon 的 4517，
+所以**浏览器看到的仍是同源**——开发与生产的同源假设一致，不会出现"开发能跑、上线 CORS 炸"。
+
+> ⚠️ 构建产物**不进版本库**，而 `vite build` 会清空 `dist/`。所以两件事：
+> clone 之后直接起 daemon 会没有界面（daemon 会明确提示你跑 `build:web`，而不是发一个空白页）；
+> 往 `dist/` 里放临时文件的东西（比如布局探针）**每次构建都要重放一次**。
+
+---
+
+## 架构与不变量（要点 + 去哪看细节）
+
+三句话概括这个系统的信任模型与硬约束；**细节不去这里找**，按最后一列读：
+
+1. **浏览器是唯一的远端通道。** 页面由 daemon 托管 ⇒ **同源**，跨源那一整套（Origin 白名单、
+   一次性令牌、私有网络预检）都不需要，只剩"只绑回环 + 校验 `Host`"两条。
+   → `./design/design.md` §14.2。
+2. **daemon 不向 agentdeck 的远端服务发起请求。** 远端只承担五件事（账号登录、用户设定、
+   公共目录、第三方查询转发、统计接收）。**一处刻意例外**：从本地路径 / GitHub 安装 skill 时
+   daemon 自己去下载（本地目录路径页面读不到）。这条路的边界**写死在
+   `apps/daemon/src/skill-source.ts`**：只允许 GitHub 的几个主机、只允许 https、**每一跳跳转都
+   重新校验主机**，并限大小 / 文件数 / 超时。要扩到任意 URL 得单独做——让本地服务去抓任意
+   地址，等于给它一个访问内网的跳板。 → `./design/design.md` §15.10。
+3. **审核者 ≠ 执行者、动作只能由判决触发、链路有深度上限与环检测。** 这三条是硬不变量，
+   **在写库之前强制校验**，不会被静默降级。 → 清单见 `./srs/requirements.md` §8，落到实现的映射见
+   `./design/design.md` §4.3。
+
+> 往使用者磁盘上写任何东西之前，先读根 README 的「安全边界」与 `./design/design.md` §14：
+> **不做沙箱隔离（NG7）是明确的范围决定**，不是待办。
+
+---
+
+## 改界面之前要知道的三件事
+
+1. **Markdown 渲染器是自己写的**（`apps/web/src/lib/markdown.ts`）。前端只有一条运行时依赖（`highlight.js`，按需 + 动态 import），
+   为一个视图引 `marked` 就把这条约束破了。而它渲染的内容是 **agent 产出的文本**，
+   页面又与 daemon **同源**，所以顺序是硬规则：**先摘出结构、再转义剩下的文字、最后拼
+   我们自己的标签**。原始 HTML 一律不认、链接只允许 `http(s)`/`mailto`、图片地址必须经
+   调用方映射。（第一版写成"先整段转义、再拼标签"，于是每一处插回去的东西都被二次转义——
+   三个 bug 都是测试抓出来的，根因是同一个。）
+2. **工作目录里的文件响应必须带 `Content-Security-Policy: sandbox allow-scripts`**。
+   因为文件是 **agent 写的**、页面又由 daemon 托管 ⇒ 一个 agent 写出来的 `html`/`svg` 被打开时
+   **默认**就拿到了这个源（能读所有 run 日志、能装 skill、能提交任务）。所以：
+   - 允许脚本 ⇒ 产出里的画布页（p5 之类）能真的画出来；
+   - **没有 `allow-same-origin`** ⇒ 文档落在**不透明源**里，`fetch('/api/…')` 变成跨源请求，
+     而 daemon 不发 CORS 头 ⇒ 响应读不到，cookie / localStorage 也拿不到。
+
+   ⚠️ **绝不要加 `allow-same-origin`**——加上它等于把上面那条断掉的路接回去。测试里专门钉着。
+3. **布局类的缺陷类型检查看不见**："两栏有没有真的并排"、"窄屏返回按钮有没有出现"、
+   `.main:has(> .split-layout)` 有没有生效——这些只有浏览器量得出来。
+   改布局用 `tools/layout-probe/`（`pnpm run probe:layout`）。
+
+---
+
+## 参考材料（`ref/`）
+
+放在仓库 `ref/` 目录下的上游行为分析材料。**属于参考输入，不是本项目文档。**
+
+> ⚠️ 这些材料是对 Multica 行为的描述。Multica 采用自定义许可（禁止对外托管与商业嵌入），
+> 因此本项目实现必须 **clean-room**，**不得复制其源码**。
+
+| 文档 | 说明 | 对应 |
+|---|---|---|
+| `ref/multica-claude-code-customization.md` | Claude Code 注入层：一条 argv 里的六个注入点、所有权约束、参数仲裁顺序、上下文块回滚、失败分级 | `./srs/requirements.md` §9.13 |
+| `ref/multica-25-backends-flattening.md` | 多个后端如何摊平成一条接口：协议族、差异旋钮、活性与超时 | FR-RUNTIME-06~08 |
+| `ref/multica-agent-invocation-deep-dive.md` | agent 间调用链路：触发拓扑、@mention 协议语法、鉴权链、去重、父任务唤醒 | FR-RUN-02、§8.5 |
+
+> ℹ️ 早前有一批 `research/` 调研报告（架构参考 / daemon 适配参考 / 部署参考 / 竞品定位），
+> 目录后来移出了仓库——对应内容由上面 `ref/` 的材料与 `requirements.md` §2 的结论摘要承担。
+> 本文件不再列它。
+
+---
+
+## 待产出
+
+| 文档 | 说明 |
+|---|---|
+| `security.md` | 安全边界与风险披露（不做沙箱隔离，需独立成篇）—— 内容基础见 `./design/design.md` §14 |
+| `deployment.md` | 部署与运维手册 |
+| `cli.md` | CLI 与 daemon 使用手册 |

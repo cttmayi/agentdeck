@@ -12,7 +12,7 @@
  *   - 429（并发已满）要**单独**处理，它不是错误，是"稍后再试"；
  *   - 路径拼接与手写 URL 的地方越少越好。
  */
-import { renderText, webText } from '@alpha-helper/i18n'
+import { renderText, webText } from '@agentdeck/i18n'
 import { currentLocale } from './locale.ts'
 
 export class ApiError extends Error {
@@ -111,6 +111,8 @@ export interface EnvironmentIssue {
 
 export interface Identity {
   deviceName: string
+  /** 本地接口协议版本（`/api/identity`）。它回答"daemon 是哪一版"。 */
+  protocolVersion?: number
   currentRuntime?: string
   /** 界面语言（D39）：'zh' | 'en'。页面启动时就要知道，避免先闪一下中文。 */
   locale?: string
@@ -125,6 +127,15 @@ export interface Identity {
    *   而两边都不报错——所以宁可**不给这个选项**，也不给一个可能不生效的。
    */
   capabilities?: string[]
+  /**
+   * 这一版界面叫什么（构建产物的文件名，例如 `index-h3UWXDfH.js`）。
+   *
+   * ★ 它是"对称的那一半"：`capabilities` 回答"daemon 是哪一版"，这个回答"界面是
+   *   哪一版"。两者不一致时的症状**两边都不报错**——一次真实的误判是"聊天页不
+   *   工作、任务页正常"，实际是那个标签页跑着旧前端（没刷新）。
+   * `null` = daemon 读不到构建产物（界面没构建）。
+   */
+  webBuild?: string | null
   /** 运行环境预检结果（例如 CLI 自己的状态目录写不进去）。 */
   environment?: { ok: boolean; issues: EnvironmentIssue[] }
 }
@@ -162,12 +173,10 @@ export interface Agent {
    *
    * ⚠️ 协议里它是必需字段（老数据是空数组），这里写成**可选**是过渡期的防御：
    *   D40 之前的 daemon 不返回它，而这一版界面会跟不同版本的 daemon 打交道
-   *   （界面先落地、后端并行落地）。缺字段时按"没挂任何工具"显示，而不是让
-   *   整个详情页在 `undefined.length` 上崩掉。
-   *
-   * ⚠️ **审核者身上永远是空的**：审核者只判断、不动手（服务端拒绝写非空值）。
+   * ⚠️⚠️ 这里原来有一个 `toolIds?: string[]`（挂载的工具包，D40）。挂载能力整个
+   *    撤掉了，字段与服务端一起删——见 `packages/protocol/src/entities.ts` 里
+   *    `Agent` 上那段说明。
    */
-  toolIds?: string[]
   /**
    * ★ **这个审核者判完之后允许触发哪些动作**（D40 收口；D41 收窄成只有一种来源）。
    *
@@ -184,13 +193,12 @@ export interface Agent {
    *   平台不替他放宽，也不替他收紧。装了什么包、包里有什么动作只有使用者知道，
    *   所以界面也**不替他预勾**（`ActionPicker.svelte` / `NewAgentForm.svelte`）。
    *
-   * ⚠️ 写成**可选**是过渡期的防御（与 `toolIds` 同一个理由）：这个字段是后加的，
+   * ⚠️ 写成**可选**是过渡期的防御：这个字段是后加的，
    *   老工作区的记录里**根本没有这个键**（store 不做 schema 迁移，读取路径也不补
    *   默认值），更早的 daemon 也不返回它。缺字段与空数组同义。
    *
-   * ⚠️ **只有审核者用得着它**：执行者的能力是**工具**（`toolIds`，它干活时用的），
-   *   而动作是**判完之后**由平台执行的。服务端拒绝给执行者写非空值，所以详情页里
-   *   这一段只出现在审核者身上。
+   * ⚠️ **只有审核者用得着它**：动作是**判完之后**由平台执行的。服务端拒绝给执行者
+   *   写非空值，所以详情页里这一段只出现在审核者身上。
    *
    * ⚠️ 老数据里这份配置在 `reviewStandard.allowedActions` 上（搬走之前它在那儿）。
    *   界面按"自己的为空就回退到那份"显示（`lib/agent-actions.ts`），只读、不回写。
@@ -207,6 +215,15 @@ export interface Agent {
    */
   actionParams?: Record<string, Record<string, unknown>>
   /**
+   * 调试动作（2026-09）：标了「调试」的那些（`allowedActions` 的子集）。
+   *
+   * 判决引用这些动作时**不跑脚本**，只记录动作与解析后的完整参数（时间线显示
+   * 「调试 · 未执行」）。只对审核者有意义，与 `allowedActions` 同一条角色规矩。
+   *
+   * ⚠️ 可选：老数据没有这个键；缺字段 = 没有标调试。
+   */
+  debugActions?: string[]
+  /**
    * 这个审核者按什么判（D37）。`null` = 没有标准（那它拿不到审核任务）。
    *
    * 校验在服务端：名字与正文非空（动作权限不在这里，见 `allowedActions`）。
@@ -222,7 +239,13 @@ export interface Agent {
  *    "我改了标准正文"与"我放宽了能动的范围"在审计与界面上都能分开看。
  */
 export interface ReviewStandard {
-  name: string
+  /**
+   * 标准正文。
+   *
+   * ⚠️ 这里原来还有一个 `name: string`。那个字段已经整个删掉了——平台侧没有
+   * 任何东西读它，而一个审核者只有一份标准，所以它也区分不了什么。老记录里
+   * 可能还带着这个键，**读取方一律忽略**（见 `Agent.reviewStandard`）。
+   */
   body: string
   /**
    * ⚠️ **老数据的只读兼容字段**（D40 收口之后动作权限搬到了 `Agent.allowedActions`）。
@@ -238,23 +261,42 @@ export interface ReviewStandard {
 }
 
 /** 第一句话模版的两个角色（D32）。 */
-export type FirstSentenceKind = 'execute' | 'review'
+/**
+ * 三条链路各有一套模版：执行 / 审核 / **聊天**（2026-09 加的第三份）。
+ * 聊天那份是它自己的 ① 框架——任务那份含 run/对象头与判决契约，灌进聊天是错的。
+ */
+export type FirstSentenceKind = 'execute' | 'review' | 'chat'
 
-/** `GET /api/first-sentence/templates`：变量对照表 + 两个默认模版。 */
+/**
+ * 三块各自的模版框（2026-10 三框改造）：① 框架 / ② 身份 / ③ 任务。
+ * 与 `BLOCK_LABELS` 一一对应。
+ */
+export type TemplateBlock = 'frame' | 'identity' | 'task'
+
+/** `GET /api/first-sentence/templates`：变量对照表 + 默认模版（按 kind × block）。 */
 export interface TemplateVariable {
   name: string
+  /** 属于哪一块的模版框（写错框会被当场拒）。 */
+  block: TemplateBlock
   /** 哪些 run 能用（执行模版里写 `material` 是填错了）。 */
   kinds: FirstSentenceKind[]
   /**
    * 是不是多行的内容（界面上标「多行 / 单值」）。
    *
-   * ⚠️ 它不代表"整段提示词"：D35 之后**所有变量都只给内容**，标题、标签、
+   * ⚠️ 它不代表"整段提示词"：**所有变量都只给内容**，标题、标签、
    *    材料标记都由模版写。
    */
   multiline: boolean
   /** 缺了会坏掉的那些——保存时就会拒。 */
   requiredFor: FirstSentenceKind[]
   label: string
+}
+
+/** 一条链路的三块模版原文（空串 = 平台默认）。 */
+export interface BlockTemplates {
+  frame: string
+  identity: string
+  task: string
 }
 
 /** `GET /api/agents`：列表 + 「新建任务的默认智能体」（D36）。 */
@@ -265,15 +307,41 @@ export interface AgentsPayload {
 }
 
 export interface TemplateKit {
-  defaults: Record<FirstSentenceKind, string>
+  defaults: Record<FirstSentenceKind, BlockTemplates>
   variables: TemplateVariable[]
   /**
-   * 当前生效的那两份（空 = 平台默认）。
+   * 当前生效的那几份（空 = 平台默认）。
    *
    * ★ 这是**全局配置**（D32）：一次设定，所有 agent 都按它来。
    *   所以它挂在这里，而不是挂在某个 agent 上。
    */
-  current: { executeTemplate: string; reviewTemplate: string }
+  current: {
+    execute: BlockTemplates
+    review: BlockTemplates
+    /** 聊天那一份（老 daemon 不返回这个键 ⇒ `undefined` 按空处理）。 */
+    chat?: BlockTemplates
+  }
+  /**
+   * ★ 平台替你调整过什么（2026-09 三块组装 / 2026-10 三框改造：六个变量退役）。
+   *
+   * 库里的老模版里可能还写着 `{{instructions}}` / `{{prompt}}` 那六个——执行器渲染前
+   * 会把它们摘掉（内容由平台组装），所以接口返回的 `current` 已经**是迁移后的样子**。
+   * 这份报告说的是"摘了哪几个、哪几行成了空标题"，界面据此如实告诉使用者。
+   *
+   * ⚠️ 不报的话：他在设置里看到一份"写了却不起作用"的文本，而真正投递的是另一份。
+   */
+  adjustments?: Record<
+    FirstSentenceKind,
+    Record<TemplateBlock, TemplateAdjustment> | undefined
+  >
+}
+
+/** 一次模版迁移动了什么。 */
+export interface TemplateAdjustment {
+  /** 摘掉了哪几个已退役的变量（按出现顺序、去重）。 */
+  removed: string[]
+  /** 摘完之后变成空标题的行（例如原来 `## 你的角色` 下面就是 `{{instructions}}`）。 */
+  orphanLines: string[]
 }
 
 export interface Skill {
@@ -297,6 +365,82 @@ export interface Skill {
   /** 这份内容的版本（远端目录给的）。没有版本时缺失/null。 */
   version?: string | null
   updatedAt: number
+  /**
+   * 这条是从哪个**本地技能目录**读进来的（Skills 页 →「设置」里勾的那些）。
+   * `null` = 手装的或远端装的。
+   *
+   * ⚠️ 老 daemon 不返回这个字段 ⇒ `undefined`，按"不是从本地目录来的"处理。
+   */
+  localDir?: string | null
+  /**
+   * 现在还能不能在智能体上被选中。
+   *
+   * 手装与远端的**恒为 true**；来自本地目录的，在"目录取消了勾选"或"文件在源
+   * 工具那边被删了"之后变 false——那条记录会留着（有智能体挂着它），但不再
+   * 出现在可选项里。
+   *
+   * ⚠️ 判断一律写 `!== false`（老 daemon 没有这个字段 = 可以选），不要写
+   *    `if (s.selectable)`——那会把老 daemon 下的所有 skill 都变成不可选。
+   */
+  selectable?: boolean
+}
+
+/** 一个被扫过的目录：里面有几个技能、什么东西被跳过了。 */
+export interface ScannedDirInfo {
+  /** 绝对路径。 */
+  path: string
+  /** 这个目录现在存在吗（不存在也能勾——可能还没建，或外置盘没挂上）。 */
+  exists: boolean
+  /** 目录里现在有几个技能（勾之前就该看得见；"里面没有 skill"是个有用的答案）。 */
+  skillCount: number
+  /**
+   * 看到但**没当成技能**的东西（没有 SKILL.md、太深、版本库目录…）。
+   *
+   * ★ 必须一直跟着目录走，不能只在"刚勾完"那一下提示：实测 `~/.claude/skills`
+   *   里有一个没有 SKILL.md 的空目录，使用者勾完看到"少了一个"，第二天再打开
+   *   设置时那个解释如果没了，就只剩一个说不清的差额。
+   */
+  skipped: Array<{ rel: string; reason: string }>
+}
+
+/** Skills 页「设置」里那一个候选目录（daemon 内置表给的）。 */
+export interface LocalSkillDirCandidate extends ScannedDirInfo {
+  /** 稳定 id（`claude` / `codex` / `cursor` / `agents`），显示名在词表里。 */
+  id: string
+}
+
+/** `GET /api/skills/local-dirs` 的回应。 */
+export interface LocalSkillDirsState {
+  candidates: LocalSkillDirCandidate[]
+  /** 勾了的路径（绝对路径，已展开 `~`）。 */
+  enabled: string[]
+  /** 使用者自己填的、不在候选表里的路径。 */
+  custom: ScannedDirInfo[]
+  /**
+   * 这一次读设置时对账的结果。
+   *
+   * ★ 它跟着**读设置**一起回来（而不是只在改勾选时）：设置这一屏要能自己说完整
+   *   ——"勾了几个目录"与"其中哪两条没读进来"是同一个问题的两面。
+   */
+  report: ReconcileReport
+}
+
+/**
+ * 一次对账的结果（勾选之后、或每次读列表时）。
+ *
+ * ★ 它存在的意义是"**别静默**"：跳过了什么、读不进来什么、为什么某条还留着，
+ *   都必须能说出来。使用者勾了一个目录却少看到几个 skill 时，这份报告是他唯一
+ *   的线索。
+ */
+export interface ReconcileReport {
+  added: string[]
+  updated: string[]
+  removed: string[]
+  keptBecauseUsed: Array<{ slug: string; dir: string; usedBy: string[] }>
+  failed: Array<{ rel: string; reason: string }>
+  skipped: Array<{ dir: string; rel: string; reason: string }>
+  dirErrors: Array<{ dir: string; reason: string }>
+  onDisk: Array<{ dir: string; slug: string }>
 }
 
 /**
@@ -392,12 +536,59 @@ export interface Tool {
 /**
  * `GET /api/tools` 的那一行：实体 + **挂给了哪些 agent**。
  *
- * ★ 挂载关系是"谁在用这个组"的唯一答案，而它住在 agent 上（`Agent.toolIds`）。
- *   让接口把它算好带回来，界面就不必自己 join 两个列表——那正是"界面显示的和
- *   服务端认的迟早不一致"的来源。卸载被拒时列出的也是同一份名单。
+ * ⚠️ 这里原来是一个 `ToolWithMounts`（`Tool` + 接口算好的 `mountedBy`）。挂载能力
+ *   撤掉之后它没有任何额外的字段，所以**类型删掉了**——多一层空壳只会让下一个
+ *   读代码的人以为"工具还有挂载关系"这回事。
  */
-export interface ToolWithMounts extends Tool {
-  mountedBy: Array<{ id: string; name: string }>
+
+/**
+ * 一个对话（`Conversation`）。
+ *
+ * ⚠️ 这里**照抄协议里的形状**，但刻意不 import 协议包——与这个文件里其他类型
+ *    同一条规矩（见上面关于 `api.ts` 不引 protocol 的那段说明）。
+ */
+export interface Conversation {
+  id: string
+  workspaceId: string
+  agentId: string
+  /**
+   * 这个对话**额外带**的 skill（第一句话定下来，之后只读）。
+   *
+   * 选的是挂在某人身上的 skill 时这里是空的——那种情况下 skill 由执行者自己带着
+   * （"选它 = 选那个人"）。有值时说明选的是**没人挂**的 skill，它跟着这个对话走。
+   *
+   * ⚠️ 老 daemon 不返回这个字段 ⇒ `undefined`，按"没有"处理（读的地方写 `?? []`）。
+   */
+  skillIds?: string[]
+  title: string
+  /** `null` = 让平台分配（`<workRoot>/chat-<对话 id>`）。 */
+  workDir: string | null
+  createdAt: number
+  updatedAt: number
+  lastTurnAt: number | null
+  turnCount: number
+}
+
+/**
+ * 对话里的一轮 + 回看它需要的几样东西。
+ *
+ * 后面那四样（`output` / `status` / `toolCount` / `durationMs`）**不是**存储里的
+ * 字段，是服务端拼出来的视图：智能体的回复本来就住在它那条 run 的 messages 里，
+ * 不另存一份。见 `GET /api/conversations/:id` 那段说明。
+ */
+export interface ChatTurnView {
+  id: string
+  conversationId: string
+  seq: number
+  userText: string
+  runId: string | null
+  createdAt: number
+  error: string | null
+  /** 那一轮的最后一段正文（取最后一条 text，与任务详情页同一规则）。 */
+  output: string | null
+  status: string | null
+  toolCount: number
+  durationMs: number | null
 }
 
 export interface RunSummary {
@@ -433,6 +624,18 @@ export interface RunSummary {
     status: string
     conclusion: string
     escalateReason: string | null
+    /**
+     * ★ 谁做的这条判决（D46）：`'human'`，或者**缺字段 / `'agent'`**（模型做的）。
+     *
+     *   阶段推导要用它——人工判「不通过」与审核者判「不通过」要给出**不同的
+     *   那句话**，见 `lib/pipeline.ts` 里 `byHuman` 那一段。
+     *
+     * ⚠️ 这里**允许 `undefined`**，不是图省事：页面与 daemon 是两份产物，
+     *    "重建前端 → 刷新页面"不带重启 daemon 是日常做法，所以这个页面**真的
+     *    会**遇到不发这个字段的旧 daemon。缺字段按 `'agent'` 读——D46 之前的
+     *    判决本来就全是模型做的，这个默认值是**对的**，不是将就。
+     */
+    source?: 'agent' | 'human'
   } | null
   /**
    * 这条判决**要求做的那个动作**的结果（没有动作 / 不是审核 run ⇒ `null`）。
@@ -517,6 +720,16 @@ export interface VerdictView {
   action: { type: string; params: Record<string, unknown> } | null
   escalateReason: string | null
   invalidResolution: string | null
+  /**
+   * ★ 这条判决是谁做的（D46）。**缺字段 ≡ `'agent'`**——D46 之前的判决全部是
+   *   模型做的，所以老数据不用迁移，这里也必须允许 `undefined`。
+   *
+   * 界面靠它做两件事：判决卡上标出「人工」，以及把"人工裁决过"这件事
+   * 说清楚（否则同一张卡上两条结论，读的人分不清哪条是模型哪条是人）。
+   */
+  source?: 'agent' | 'human'
+  /** 人工裁决的理由原文（`source === 'human'` 时有值）。 */
+  humanReason?: string | null
   createdAt: number
 }
 
@@ -568,7 +781,14 @@ export function newRunId(): string {
   return timePart + randPart
 }
 
-/** `GET /api/runs/:id/files` —— 工作目录里**一个目录**的直接子项。 */
+/**
+ * `GET /api/runs/:id/files` 与 `GET /api/conversations/:id/files`
+ * —— 工作目录里**一个目录**的直接子项。
+ *
+ * 两条路由返回同一个形状：一条按**某次执行**的目录问（任务详情右边那一栏），
+ * 一条按**某个对话**的目录问（聊天右栏底部）。对话那条存在的理由是：一个对话
+ * 可能还没有任何 run，而它的目录属于对话、不属于某一条 run。
+ */
 export interface WorkDirFile {
   /** 相对工作目录的路径（`/` 分隔）。 */
   path: string
@@ -588,5 +808,14 @@ export interface WorkDirListing {
   /** 这是哪个子目录（空串 = 顶层）。 */
   dir: string
   entries: WorkDirFile[]
+  /** 因为条数上限而没列全。 */
   truncated: boolean
+  /**
+   * 这个目录**存在吗**。
+   *
+   * ★ 与「存在但是空的」必须分开：对话刚建、第一轮还没跑时目录还没被建出来，
+   *   而两者都是空列表——那两句话给出的下一步完全不同（"再等等" vs "它确实没
+   *   产出"）。`undefined`（旧 daemon 不返回这个字段）按「存在」处理。
+   */
+  exists?: boolean
 }

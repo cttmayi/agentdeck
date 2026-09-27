@@ -1,4 +1,5 @@
 import { after, before, describe, test } from 'node:test'
+import { deliveredText } from './testing/delivered.ts'
 import assert from 'node:assert/strict'
 import {
   AsyncQueue,
@@ -6,14 +7,14 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
   ulid,
   type Issue,
   type RunId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -71,7 +72,7 @@ class OverrideBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     // D29 之后判定"这是审核还是执行"只能看第一句话（不再写 CLAUDE.md）：
     // 它的开头是 `# 任务` 或 `# 审核任务`。
-    const isReview = opts.prompt.includes('# 审核任务')
+    const isReview = deliveredText(opts).includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
 
     const text = isReview
@@ -155,12 +156,12 @@ before(async () => {
   r1 = await createAgent({
     name: '审核者 R1（长期配置）',
     role: 'reviewer',
-    reviewStandard: { name: 'R1 的标准', body: '# R1 标准\n\n只看结论有没有依据。' },
+    reviewStandard: { body: '# R1 标准\n\n只看结论有没有依据。' },
   })
   r2 = await createAgent({
     name: '审核者 R2（本次覆盖）',
     role: 'reviewer',
-    reviewStandard: { name: 'R2 的标准', body: '# R2 标准\n\n只看产出在不在。' },
+    reviewStandard: { body: '# R2 标准\n\n只看产出在不在。' },
   })
 
   executor = {
@@ -842,7 +843,7 @@ describe('★ 审核者事后失效 ⇒ 进通知中心（不是只写日志）'
     const r3 = await createAgent({
       name: '审核者 R3（待会被改成执行者）',
       role: 'reviewer',
-      reviewStandard: { name: 'R3 的标准', body: '# R3 标准\n\n随便判判。' },
+      reviewStandard: { body: '# R3 标准\n\n随便判判。' },
     })
     const e3 = {
       id: await createAgent({

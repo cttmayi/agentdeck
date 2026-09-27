@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { RunStatus } from '@alpha-helper/protocol'
+import type { RunStatus } from '@agentdeck/protocol'
 import {
   allowedRunTransitions,
   assertRunTransition,

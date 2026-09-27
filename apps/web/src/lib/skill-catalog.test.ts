@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { renderText, webText, type TextParams, type WebTextId } from '@alpha-helper/i18n'
+import { renderText, webText, type TextParams, type WebTextId } from '@agentdeck/i18n'
 import { catalogEntryState, compareVersions, type CatalogEntryState } from './skill-catalog.ts'
 
 /**
@@ -32,6 +32,14 @@ describe('compareVersions', () => {
     assert.equal(compareVersions('2.0.0', '1.9.9'), 1)
     assert.equal(compareVersions('1.0', '1.0.0'), 0, '缺一段按 0 算')
     assert.equal(compareVersions('v1.2.3', '1.2.3'), 0, '前缀 v 不影响')
+  })
+
+  test('★ 两个字符串一样 ⇒ 0，哪怕它不是 x.y.z 的形式', () => {
+    // 相等是我们判得了的。不判这一条，下面那条"认不出来 ⇒ null"会让
+    // catalogEntryState 把两个**完全相同**的版本号说成「更新」。
+    assert.equal(compareVersions('beta', 'beta'), 0)
+    assert.equal(compareVersions('2024-05', '2024-05'), 0)
+    assert.equal(compareVersions(' 1.0.0 ', '1.0.0'), 0, '两边的空白不算差异')
   })
 
   test('★ 认不出来就返回 null，而不是猜一个', () => {
@@ -122,11 +130,17 @@ describe('catalogEntryState', () => {
     assert.equal(hintOf(s), '目录里有 general-review 1.0.0，本地还没有。')
   })
 
+  /**
+   * ⚠️ 这条原来断言的是 `…1.0.0 **更新**。…`——那两个星号是 markdown 的粗体记号，
+   *    而这句话是**当纯文本渲染**的，所以在界面上它就是两个星号（2026-09 全库
+   *    清掉了这类残留）。断言的意图没变：这句中文是默认语言，也是别处（探针、
+   *    文档）引用的依据，所以逐字钉住——只是钉的那一份现在不再带记号。
+   */
   test('★ 中文那句"往回退"逐字保留（词表里的 zh 是默认语言，也是探针断言的依据）', () => {
     const s = catalogEntryState({ slug: 'general-review', version: '2.0.0' }, entry)
     assert.equal(
       hintOf(s),
-      '本地 2.0.0 比目录里的 1.0.0 **更新**。点下去是往回退，不是更新——确认这是你要的。',
+      '本地 2.0.0 比目录里的 1.0.0 更新。点下去是往回退，不是更新——确认这是你要的。',
     )
   })
 

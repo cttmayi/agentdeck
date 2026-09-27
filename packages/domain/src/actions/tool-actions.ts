@@ -10,7 +10,7 @@ import {
   type OpenParamSpec,
   type Tool,
   type ToolRuntime,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import {
   type ActionDefinition,
   type ActionValidation,
@@ -700,7 +700,7 @@ export function validateActionRefWith(
     return {
       ok: false,
       issues: [
-        `未知动作类型：${ref.type}（动作只能来自**已安装的工具包**，名字形如 <工具包 slug>.<动作名>；平台不内置任何动作）`,
+        `未知动作类型：${ref.type}（动作只能来自已安装的工具包，名字形如 <工具包 slug>.<动作名>；平台不内置任何动作）`,
       ],
     }
   }

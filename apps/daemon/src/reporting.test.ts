@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import { exportAudit, verifyAuditExport, aggregateCost } from '@alpha-helper/domain'
-import { FileStore } from '@alpha-helper/store-file'
-import type { AuditRecord, Run } from '@alpha-helper/protocol'
+import { exportAudit, verifyAuditExport, aggregateCost } from '@agentdeck/domain'
+import { FileStore } from '@agentdeck/store-file'
+import type { AuditRecord, Run } from '@agentdeck/protocol'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -31,8 +31,8 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('reporting')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_A, name: 'A', createdAt: 1, updatedAt: 1 })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_B, name: 'B', createdAt: 2, updatedAt: 2 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_A, name: 'A', createdAt: 1, updatedAt: 1 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_B, name: 'B', createdAt: 2, updatedAt: 2 })
 })
 
 after(async () => {

@@ -6,7 +6,7 @@ import {
   type Locale,
   type TextParams,
   type WebTextId,
-} from '@alpha-helper/i18n'
+} from '@agentdeck/i18n'
 import { api } from './api.ts'
 import { locale } from './locale.ts'
 

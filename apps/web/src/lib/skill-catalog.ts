@@ -28,7 +28,7 @@
  * （`Skills.svelte` 写的是 `$t(state.labelId, state.labelParams)`）。
  * 否则切到英文时，这一层的按钮会留在中文里——而且没有任何编译期信号。
  */
-import type { TextParams, WebTextId } from '@alpha-helper/i18n'
+import type { TextParams, WebTextId } from '@agentdeck/i18n'
 
 /** 本地那一条需要的最小信息（只需要这几个字段，便于测试）。 */
 export interface LocalSkillLike {
@@ -105,6 +105,12 @@ function makeState(input: {
  * 只认 `数字.数字[.数字…]` 这种最常见的形式；认不出来就返回 `null`
  * 表示**无法比较**（而不是猜一个大小）。
  *
+ * ★ 但**两个字符串一模一样**时一定返回 `0`：相等这件事我们判得了，哪怕它不是
+ *   `x.y.z` 的形式。不先判这一条，`beta` vs `beta` 会掉进下面"认不出来 ⇒ null"，
+ *   而调用方（`catalogEntryState`）把 `null` 当成"版本不同 ⇒ 可以更新"——于是
+ *   **两个完全相同的版本号**会在界面上显示成「更新」。
+ *   （这一条是加工具页的更新按钮时才发现的：那边有测试直接断言它。）
+ *
  * ⚠️ 不引 semver 依赖的理由：目录里的版本是发布者自己写的字符串，
  *    可能根本不是 semver（`2024-05`、`v2`、`beta`）。引一个严格实现
  *    只会让这些情况统统抛错，而这里的用途只是决定按钮上写什么字。
@@ -117,6 +123,7 @@ export function compareVersions(a: string, b: string): number | null {
     if (!m) return null
     return m[1]!.split('.').map((n) => Number(n))
   }
+  if (a.trim() === b.trim()) return 0
   const left = parse(a)
   const right = parse(b)
   if (!left || !right) return null

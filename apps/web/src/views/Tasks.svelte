@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import {
     api,
     newRunId,
@@ -11,11 +12,12 @@
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
-  import { flattenWorkDir, humanSize } from '../lib/workdir-view.ts'
-  import { agents, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
+    import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
+  import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { selectedIssueId } from '../lib/view.ts'
   import {
     PIPELINE_COLUMNS as COLUMNS,
+    TERMINAL_RUN_STATUSES,
     formatRunStamp,
     runsForIssue,
     splitByAttention,
@@ -24,7 +26,8 @@
   } from '../lib/pipeline.ts'
   import RunLog from '../components/RunLog.svelte'
   import { t, tx } from '../lib/i18n.ts'
-  import type { WebTextId } from '@alpha-helper/i18n'
+  import type { WebTextId } from '@agentdeck/i18n'
+  import WorkDirTree from '../components/WorkDirTree.svelte'
 
   /**
    * 任务清单 + 任务详情。
@@ -50,10 +53,28 @@
    * 执行记录与实时日志放在**任务详情**里，而不是单独一栏——执行属于某个
    * 任务，"我在看哪个任务的执行"这个问题本来就不该由使用者自己拼。
    */
-  $: staged = visible.map((issue) => ({ issue, info: stageOf(issue.id, $runs) }))
+  /**
+   * ★ 第一个参数是**整条 issue**，不是 id（D47）：阶段里多了一档「已放弃」，
+   *   而它由 **issue 自己的状态**决定——run 里根本没有这个信息。
+   *
+   * 参数是必填的（不是可选的第三个参数），所以"忘了传"是**编译错误**。这不是
+   * 洁癖：第一版做成可选时，这里两处都没传，症状是点「放弃」之后接口 200、issue
+   * 状态确实变了、而看板一动不动——不报错、不告警。
+   */
+  /**
+   * 任务清单（列表 + 看板共用）的顺序：**新的在前**（2026-09 的决定——
+   * 原来是 API 给的升序、最旧的在前，使用者要求"逆向排"）。
+   *
+   * ⚠️ 只排这一页；任务详情里的时间线仍是升序（那是历史，见 `runsForIssue`）。
+   * ⚠️ id 是 ULID（自带时间序），按 id 倒序 = 按创建时间新的在前。
+   */
+  $: staged = visible
+    .slice()
+    .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+    .map((issue) => ({ issue, info: stageOf(issue, $runs) }))
 
   /** 当前打开那个任务的阶段——详情头要显示它（不该在模板里算两遍）。 */
-  $: selectedStage = selected ? stageOf(selected.id, $runs) : null
+  $: selectedStage = selected ? stageOf(selected, $runs) : null
 
   /**
    * ★ 动作要显示的三样东西。
@@ -94,7 +115,7 @@
       ...(typeof r['durationMs'] === 'number'
         ? [$t('tasks.actionDuration', { ms: r['durationMs'] as number })]
         : []),
-      ...(r['dryRun'] === true ? [$t('tasks.actionDryRun')] : []),
+      ...(r['dryRun'] === true ? [$t('tasks.actionDebug')] : []),
       ...(a.finishedAt ? [new Date(a.finishedAt).toLocaleString()] : []),
     ]
   }
@@ -113,18 +134,52 @@
   /**
    * 「需要注意」单独一拨置顶。
    *
-   * 不重排全部：使用者的心理模型是"列表大致按时间"，整体重排会让人找不到
-   * 刚才那条。置顶一拨 + 其余保持原序，两边都成立。
+   * 不重排全部：使用者的心理模型是"列表按时间（新的在前）"，整体重排会让人
+   * 找不到刚才那条。置顶一拨 + 其余保持原序，两边都成立。
    */
   $: byAttention = splitByAttention(staged)
 
-  const VIEW_KEY = 'alpha-helper.issue-view'
+  const VIEW_KEY = 'agentdeck.issue-view'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
 
   function setMode(next: 'list' | 'board'): void {
     mode = next
     localStorage.setItem(VIEW_KEY, next)
   }
+
+  /**
+   * 顶栏那一排动作（机制见 `lib/page-actions.ts`）。
+   *
+   * ⚠️ 写在 `$:` 里并读 `$t(...)` 与 `mode`：**两种变化都要重新登记**——
+   *    语言变（标签换字）与模式变（哪个按钮算"当前"）。
+   * ⚠️ 卸载时收回来（登记里存的是抓着这一页状态的闭包）。
+   *
+   * ★ 两个模式按钮用 `ghost`：它们是"这一页怎么呈现"的开关，不是两个动作；
+   *   刷新是 `secondary`。原来它们挤在栏头全是一个样子，看不出主次。
+   */
+  $: setPageActions('tasks', [
+    {
+      id: 'list',
+      label: $t('tasks.modeList'),
+      kind: 'ghost',
+      active: mode === 'list',
+      onActivate: () => setMode('list'),
+    },
+    {
+      id: 'board',
+      label: $t('tasks.modeBoard'),
+      kind: 'ghost',
+      active: mode === 'board',
+      onActivate: () => setMode('board'),
+    },
+    {
+      id: 'refresh',
+      label: $t('common.refresh'),
+      kind: 'secondary',
+      onActivate: () => void refresh(),
+    },
+  ])
+  onDestroy(() => clearPageActions('tasks'))
 
   let filter = ''
 
@@ -153,17 +208,6 @@
   /** 这次执行的最后一段产出（最后一条 text 消息）。 */
   let finalOutput = ''
   let finalOutputFor: string | null = null
-  // ══════════ 工作目录那一栏：默认只列第一级，目录点开才取下一层 ══════════
-  let wdRoot: WorkDirFile[] = []
-  /** 已经取回来的子层：目录路径 → 它的直接子项。 */
-  let wdChildren: ReadonlyMap<string, WorkDirFile[]> = new Map()
-  let wdExpanded: ReadonlySet<string> = new Set()
-  /** 正在取哪几层（键是目录路径，'' = 顶层）。 */
-  let wdLoading: ReadonlySet<string> = new Set()
-  let wdTruncated = false
-  let wdLoadedFor: string | null = null
-  /** 取目录失败的原因——必须**显示出来**，不能静默留空。 */
-  let listingError = ''
   let showRawLog = false
 
   $: activeIsTerminal =
@@ -180,62 +224,8 @@
       finalOutput = ''
     }
     finalOutputFor = run.runId
-
-    await loadWorkDir(run.runId, '')
   }
 
-  /**
-   * 取某一层目录（`dir` 为空串 = 顶层）。
-   *
-   * 一次只取一层：递归列整棵树时，一个技能目录就能带出
-   * `.claude/skills/algorithmic-art/templates/viewer.html` 这种一长串路径，
-   * 把真正的产出淹掉十几行里。
-   */
-  async function loadWorkDir(runId: string, dir: string): Promise<void> {
-    const mark = (set: ReadonlySet<string>, path: string, on: boolean): Set<string> => {
-      const next = new Set(set)
-      if (on) next.add(path)
-      else next.delete(path)
-      return next
-    }
-    wdLoading = mark(wdLoading, dir, true)
-    try {
-      const suffix = dir === '' ? '' : `?dir=${encodeURIComponent(dir)}`
-      const out = await api<WorkDirListing>(`/api/runs/${runId}/files${suffix}`)
-      if (dir === '') {
-        wdRoot = out.entries
-        wdTruncated = out.truncated
-        wdLoadedFor = runId
-      } else {
-        const next = new Map(wdChildren)
-        next.set(dir, out.entries)
-        wdChildren = next
-      }
-      listingError = ''
-    } catch (err) {
-      // ★ 失败必须**说出来**。第一版这里是 `catch { listing = null }`，而界面把
-      //   null 渲染成骨架屏 —— 于是"接口取不到"和"还在加载"长得一模一样，
-      //   使用者看到的就是"这一栏什么都没有"（实测撞到过一次：daemon 还是旧
-      //   代码，`/files` 返回 404，而那一栏只是安静地空着）。
-      listingError = err instanceof Error ? err.message : String(err)
-    } finally {
-      wdLoading = mark(wdLoading, dir, false)
-    }
-  }
-
-  /** 展开/收起一个目录。展开时如果还没取过它的子项，就去取一层。 */
-  function toggleDir(entry: WorkDirFile): void {
-    const next = new Set(wdExpanded)
-    if (next.has(entry.path)) {
-      next.delete(entry.path)
-    } else {
-      next.add(entry.path)
-      if (!wdChildren.has(entry.path) && activeRun) void loadWorkDir(activeRun.runId, entry.path)
-    }
-    wdExpanded = next
-  }
-
-  $: wdRows = flattenWorkDir(wdRoot, wdChildren, wdExpanded)
 
   /** 工作目录里的相对路径 → 能取的地址（Markdown 里的图片靠它显示）。 */
   function resolveAsset(href: string, runId: string): string | null {
@@ -299,6 +289,215 @@
     await loadRuns()
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 人工裁决（D46）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 在这之前，一条任务的判决只可能落在三种"卡住"的状态里，而这个页面上**没有
+  // 任何出路**：判 `fail` 且没有返工额度 ⇒ 「等待人处理」；判 `needs_human` ⇒
+  // 同样；判决不合规且不可重试 ⇒ 同样。人点进去只能看到结论，唯一的按钮是
+  // 「继续沟通」——而那是**再派一次活给 agent**，不是"我自己来定"。
+  //
+  // ── 为什么它不是"一个按钮" ──
+  //
+  // 看板的阶段是**从记录推出来的**（`lib/pipeline.ts` 的 `stageOf`），所以
+  // 人工通过必须落成一条**判决记录**（`POST /api/runs/{id}/human-verdict`）。
+  // 在界面里改一个变量的话，刷新就没了、看板也不会动。
+  //
+  // ── 载体的选法必须与 daemon 的 `canHostHumanVerdict` 一致 ──
+  //
+  // 界面算"挂在哪条 run 上"，daemon 只校验"这一条能不能被裁决"。两边判据要
+  // 对齐，否则会出现"按钮点得动、请求被 409 拒"或者更糟的"点了通过、看板不动"。
+  // 下面这个 `passGate` 就是那条判据的界面侧写法。
+  $: humanVerdictSupported = ($identity?.capabilities ?? []).includes('human-verdict')
+  $: abandonSupported = ($identity?.capabilities ?? []).includes('issue-abandon')
+
+  /**
+   * 「通过」能不能点，以及那条判决要挂在哪条 run 上。
+   *
+   * `null` = **这条任务不能通过**，附带一句说清为什么（`noteId`）。
+   *
+   * ⚠️ 它**只关掉「通过」那一个按钮**，不关整块面板。D46 时它确实是整块面板的
+   *    开关（那时只有一个按钮），但 D47 之后那块装着三个出路，而「反馈」和
+   *    「放弃」在"不能通过"的时候**照样该给**——任务还卡着，人总得有条路。
+   *    整块面板的开关是 `canDecide`。
+   */
+  $: passGate = (() => {
+    const st = selectedStage
+    if (!st || !st.executeRun) return null
+    if (!humanVerdictSupported) return null
+    // 这次执行还没结束 ⇒ 没有产出可看，也就没有可裁决的结论
+    if (!TERMINAL_RUN_STATUSES.has(st.executeRun.status)) {
+      return { ok: false as const, noteId: 'tasks.humanVerdictUnavailable' as const }
+    }
+
+    // ★ 「行动中 / 行动失败」时不给：那里要解决的是**动作**，不是审核结论。
+    //   在这儿点"通过"会让看板从「行动失败」跳到「已完成审查」——把一件没做成
+    //   的事说成做完了，而 D40 收口那条规则本来就是为了防这个。
+    if (st.stage === 'action_running' || st.stage === 'action_failed') {
+      return { ok: false as const, noteId: 'tasks.humanVerdictActionFirst' as const }
+    }
+
+    const review = st.reviewRun
+    // ① 有审核结论 ⇒ 判决挂在**那条审核 run** 上（人裁决的就是那份结论）
+    if (review && review.status === 'completed' && review.verdict) {
+      return { ok: true as const, runId: review.runId }
+    }
+    // ② 审核还在跑 ⇒ 等它出结论（抢答会让两个结论打架）
+    if (review) {
+      return { ok: false as const, noteId: 'tasks.humanVerdictUnavailable' as const }
+    }
+    // ③ 压根没有审核 run（"没配审核者"那种任务）⇒ 挂在**执行 run** 上
+    return { ok: true as const, runId: st.executeRun.runId }
+  })()
+
+  /**
+   * 整块「这条任务怎么办」给不给。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 为什么是"只要选中了就给"，而不是"能人工裁决时才给"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * D46 时这块的开关是"能人工裁决"，因为那时它只有「通过」一个按钮。D47 之后
+   * 它装着三个出路，而**它们的可用条件各不相同**：
+   *
+   *   · 「通过」要有可裁决的结论（`passGate`）；
+   *   · 「反馈」要有一次**跑完**的执行可以接在后面（`feedbackReady`）；
+   *   · 「放弃」**什么都不需要**——它是"我不想管了"，与跑到哪一步无关。
+   *
+   * 用任何一个按钮的条件当整块的开关，都会让另外两个在它们**本该可用**的时候
+   * 消失。最典型的是「放弃」：一条刚建出来、一次都没跑的、或者**正在跑**的任务，
+   * 恰恰是最想放弃它的两种情形（建错了 / 在烧 token），而按"能裁决"开关的话
+   * 那块根本不会出现。
+   *
+   * 所以开关只判"有没有选中任务"，每个按钮各自置灰并各自说清为什么。代价是
+   * 一条刚建出来的任务上会看到两个灰按钮——那是**如实**的：此刻确实只有放弃
+   * 可做。
+   */
+  $: canDecide = selected !== null
+
+  /** 这条任务是不是已经放弃了。 */
+  $: isAbandoned = selected?.status === 'cancelled'
+
+  /** 放弃 / 恢复要不要给（旧 daemon 没有这两条路由 ⇒ 不给，免得点了 404）。 */
+  $: canAbandon = abandonSupported && selected !== null
+
+  /**
+   * 「反馈」能不能点：要有一次**跑完**的执行。
+   *
+   * 因为它就是"接着上次说"——`resumeFromRunId` 要指向一条已经结束的执行。
+   * 指向一条**正在跑**的 run 是没意义的（那次会话还没落定，没有 sessionId 可
+   * 恢复），而同一工作目录的并发本来也会被串行化，于是那条反馈会静悄悄地排在
+   * 后面，看起来像没生效。
+   */
+  $: feedbackReady =
+    lastExecuteRun !== null && TERMINAL_RUN_STATUSES.has(lastExecuteRun.status)
+
+  /**
+   * 「通过」不能点时那句解释；**能点、或者这个 daemon 根本没有这条路**时是 null。
+   *
+   * 后者返回 null 是为了让"旧 daemon"这一档**不显示任何提示**——那时候连按钮
+   * 都不画（见模板里 `{#if humanVerdictSupported}`），再挂一句"现在还不能人工
+   * 裁决"会让人以为等一会儿就有了。
+   */
+  $: passBlockedNoteId =
+    humanVerdictSupported && passGate !== null && !passGate.ok ? passGate.noteId : null
+
+  let humanReason = ''
+  /** 哪个按钮正在跑（`null` = 都闲着）。三个动作共用一个"忙"状态。 */
+  let deciding: 'pass' | 'feedback' | 'abandon' | 'recover' | null = null
+  let decideError = ''
+
+  /**
+   * 这条任务**已经被人判过通过**吗。
+   *
+   * 判据取已加载的判决列表里有没有 `source === 'human'` 的那条——它只是给一句
+   * 提示（"可以再判一次，历史会保留"），不是判据本身。真正的判据在 daemon 那边。
+   */
+  $: humanDecided = verdicts.some((v) => v.source === 'human')
+
+  /**
+   * ①「通过」——落一条人工判决，任务进「已完成审查」。
+   *
+   * 理由**选填**：人脑子里那个判断（"我看过了，可以"）逼他写下来，最常见的结局
+   * 是写一句"ok"或者干脆不点——门槛换来的是噪音，不是信息。所以空理由照发。
+   */
+  async function passTask(): Promise<void> {
+    if (!passGate?.ok || deciding !== null) return
+    deciding = 'pass'
+    decideError = ''
+    try {
+      await api(`/api/runs/${passGate.runId}/human-verdict`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: humanReason.trim() }),
+      })
+      humanReason = ''
+      await refresh()
+    } catch (err) {
+      decideError = err instanceof Error ? err.message : String(err)
+    } finally {
+      deciding = null
+    }
+  }
+
+  /**
+   * ②「反馈」——把上面那段话发回给执行者重做。
+   *
+   * ★ 它就是原来的「发送并继续」（`sendFollowUp`），D47 把两者合并了：**没有
+   *   任何额外的记录动作**——派出去的那条新 run 本身就足以让看板离开「等待人
+   *   处理」（新 run 未结束 ⇒ 阶段是「执行中」）。这与"人工裁决"那条路的区别
+   *   是刻意的：那边要的是**结论**（只能靠记录表达），这边要的是**干活**。
+   *
+   * 理由**必填**：这段文字就是执行者拿到的依据，一句"不行"没法干活。
+   */
+  async function feedback(): Promise<void> {
+    if (deciding !== null || !feedbackReady) return
+    const message = humanReason.trim()
+    if (message === '') {
+      // ★ 在界面这一层就说，不要等 daemon 回 400——让使用者白等一次往返没有
+      //   意义。但**权威不在这里**：这条规则的本体是"反馈必须说清要改什么"，
+      //   它写在这句话本身（`tasks.needReasonForFeedback` 的词条）和这段注释里，
+      //   而不是某个 schema 里——因为「反馈」**不落记录**，没有 schema 可挂。
+      decideError = tx('tasks.needReasonForFeedback')
+      return
+    }
+    deciding = 'feedback'
+    decideError = ''
+    try {
+      await sendFollowUp(message)
+      humanReason = ''
+    } catch (err) {
+      decideError = err instanceof Error ? err.message : String(err)
+    } finally {
+      deciding = null
+    }
+  }
+
+  /**
+   * ③「放弃」/「恢复」——改 issue 的状态（D47）。
+   *
+   * ⚠️ 放弃会**顺手取消正在跑的 run**（daemon 那边做的）。这是这个功能唯一的
+   *    副作用，所以它写在按钮旁边那句提示里，不藏在代码里。
+   */
+  async function setAbandoned(abandon: boolean): Promise<void> {
+    if (!selected || deciding !== null) return
+    deciding = abandon ? 'abandon' : 'recover'
+    decideError = ''
+    try {
+      await api(`/api/issues/${selected.id}/${abandon ? 'abandon' : 'reopen'}`, {
+        method: 'POST',
+      })
+      // ★ 放弃之后这块只剩「恢复」按钮，所以把理由框里的内容清掉——留着它会
+      //   让人以为恢复之后还会接着用那段文字（不会，恢复只是把状态改回来）。
+      if (abandon) humanReason = ''
+      await refresh()
+    } catch (err) {
+      decideError = err instanceof Error ? err.message : String(err)
+    } finally {
+      deciding = null
+    }
+  }
+
   /**
    * 从看板点开一个任务。
    *
@@ -316,12 +515,8 @@
     showRawLog = false
     finalOutput = ''
     finalOutputFor = null
-    wdRoot = []
-    wdChildren = new Map()
-    wdExpanded = new Set()
-    wdLoading = new Set()
-    wdLoadedFor = null
-    listingError = ''
+    // 工作目录那一栏的状态现在住在 `WorkDirTree` 里，换 run 时由 `reloadKey`
+    // 触发它自己清空重取——这里不再需要手动重置六个变量。
     await Promise.all([
       loadVerdicts(run.runId),
       // 跑完的才去取结果；还在跑的时候右边是实时日志，没必要多拉一次
@@ -351,10 +546,6 @@
    * 恢复是**尽力而为**：CLI 可能拒绝（换了版本、会话过期），那时它会在日志里
    * 说明"恢复被拒、本次将没有上文"，而不是假装恢复成功。
    */
-  let followUp = ''
-  let sending = false
-  let sendError = ''
-
   /**
    * 这个任务上**最新的一次执行**——接着沟通就是接在它后面。
    *
@@ -362,47 +553,54 @@
    *    数组倒序——顺序一改，`find` 就变成"最早那次"，接着沟通会接错）。
    */
   $: lastExecuteRun = issueRuns.filter((r) => r.kind === 'execute').at(-1) ?? null
-  $: canFollowUp =
-    lastExecuteRun !== null && ['completed', 'failed', 'cancelled'].includes(lastExecuteRun.status)
 
-  async function sendFollowUp(): Promise<void> {
-    const message = followUp.trim()
-    if (message === '' || !selected || !lastExecuteRun) return
+  /**
+   * ★ D47：把这段话发回给执行者重做 —— 这就是「反馈」按钮，也就是原来那个
+   *   「发送并继续」。两者是**同一件事**，所以合并成了一个（使用者的话：
+   *   "功能就合并了"）。
+   *
+   * 为什么它是"重做"而不是"聊天"：`resumeFromRunId` 指向上一次执行，daemon 会
+   * 取那次会话的 sessionId 交给 CLI 恢复（FR-CLI-06），于是执行者带着上文接着
+   * 干，而不是从头再来一遍。恢复是**尽力而为**：CLI 可能拒绝（换了版本、会话
+   * 过期），那时它会在日志里说明"恢复被拒、本次将没有上文"，而不是假装成功。
+   *
+   * ★ 它**不落任何判决记录**。这是 D47 的一个刻意决定：派出去的那条新 run
+   *   本身就足以让看板离开「等待人处理」（新 run 未结束 ⇒ 阶段是「执行中」），
+   *   而"我要求重做"这件事在那个 run 的 prompt 里写着。再补一条判决反而会带来
+   *   一个难题：那条判决该挂在哪条 run 上？（旧审核 run 已经不生效、新 run 还
+   *   没有结论）——一个挂不对地方的判决就是这个仓库最防的那种"落库了但没人看"。
+   *
+   * 抛错而不自己吞掉：调用方（`feedback()`）要在一个地方显示它。
+   */
+  async function sendFollowUp(message: string): Promise<void> {
+    if (!selected || !lastExecuteRun) return
 
     const agent = $agents.find((a) => a.id === lastExecuteRun!.agentId)
     if (!agent) {
-      sendError = tx('tasks.agentGone')
-      return
+      // 执行者被删掉了 ⇒ 这条路走不通。**说清是哪一件事坏了**：含糊的"发送失败"
+      // 会让人以为是网络问题，而实际要做的是换个 agent 或直接放弃这条任务。
+      throw new Error(tx('tasks.agentGone'))
     }
 
-    sending = true
-    sendError = ''
-    try {
-      const runId = newRunId()
-      await api('/api/runs', {
-        method: 'POST',
-        body: JSON.stringify({
-          runId,
-          kind: 'execute',
-          agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
-          // 不传 skills：由 daemon 按这个 agent 的配置解析（同 NewTask）
-          subject: { type: 'issue', id: selected.id },
-          prompt: message,
-          // ★ 指向上一次执行 ⇒ daemon 会取它的 sessionId 交给 CLI 恢复
-          resumeFromRunId: lastExecuteRun.runId,
-          limits: { maxTurns: null, timeoutMs: null },
-        }),
-      })
-      followUp = ''
-      await refresh()
-      // 立刻切到新那条 run：使用者刚说了话，想看的是它的实时输出
-      const created = $runs.find((r) => r.runId === runId)
-      if (created) await selectRun(created)
-    } catch (err) {
-      sendError = err instanceof Error ? err.message : String(err)
-    } finally {
-      sending = false
-    }
+    const runId = newRunId()
+    await api('/api/runs', {
+      method: 'POST',
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
+        // 不传 skills：由 daemon 按这个 agent 的配置解析（同 NewTask）
+        subject: { type: 'issue', id: selected.id },
+        prompt: message,
+        // ★ 指向上一次执行 ⇒ daemon 会取它的 sessionId 交给 CLI 恢复
+        resumeFromRunId: lastExecuteRun.runId,
+        limits: { maxTurns: null, timeoutMs: null },
+      }),
+    })
+    await refresh()
+    // 立刻切到新那条 run：使用者刚说了话，想看的是它的实时输出
+    const created = $runs.find((r) => r.runId === runId)
+    if (created) await selectRun(created)
   }
 
   async function refresh(): Promise<void> {
@@ -488,23 +686,26 @@
 >
   <!-- ══════════════════ 中栏：清单 / 看板 ══════════════════ -->
   <section class="pane list-pane">
-    <header class="pane-head">
-      <div>
-        <h2>{mode === 'board' ? $t('tasks.boardTitle') : $t('tasks.listTitle')}</h2>
-        <p class="hint">
-          {#if mode === 'board'}
+    <!--
+      ⚠️ 栏头**只在看板下存在**（2026-09）。
+         · 列表模式：标题与顶栏页名一字不差（同一个词条 `shell.navTasks`）→ 删了；
+           "点一条看它的执行记录与产出"那句提示 → 按要求去掉，并**并进了右栏空态**
+           （`tasks.pickOneHint`）——那句话本来描述的正是"没选中任何东西时右边是什么"，
+           放在空态那儿比压在清单上面更贴题。
+         · 看板模式：这里的分区标题与说明仍然要，因为看板是**另一种呈现**，
+           列的含义得就地讲。
+      ⚠️ 模式（列表 / 看板）由顶栏那两个按钮的高亮表示（它们搬上去了）。
+    -->
+    {#if mode === 'board'}
+      <header class="pane-head">
+        <div>
+          <h2>{$t('tasks.boardTitle')}</h2>
+          <p class="hint">
             {$t('tasks.boardHintBefore')}<strong>{$t('tasks.boardHintStrong')}</strong>{$t('tasks.boardHintAfter')}
-          {:else}
-            {$t('tasks.listHint')}
-          {/if}
-        </p>
-      </div>
-      <div class="pane-actions">
-        <button type="button" class="ghost small" class:active={mode === 'list'} onclick={() => setMode('list')}>{$t('tasks.modeList')}</button>
-        <button type="button" class="ghost small" class:active={mode === 'board'} onclick={() => setMode('board')}>{$t('tasks.modeBoard')}</button>
-        <button type="button" class="secondary small" onclick={refresh}>{$t('common.refresh')}</button>
-      </div>
-    </header>
+          </p>
+        </div>
+      </header>
+    {/if}
 
     <div class="pane-body">
       <input
@@ -525,7 +726,7 @@
       {filter ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyHint')}
     </div>
   {:else if mode === 'board'}
-    <div class="board board-5">
+    <div class="board board-6">
       {#each COLUMNS as col (col.ids[0])}
         <!-- 一列可以收两档（「等待人处理」收 needs_human 与 action_failed） -->
         {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
@@ -711,62 +912,13 @@
           </div>
 
           <aside class="result-files">
-            <h4>{$t('tasks.filesHeading')}</h4>
-            {#if listingError}
-              <div class="notice bad">
-                {$t('tasks.filesError')}
-                <p class="faint small" style="margin:var(--sp-2) 0 0">{listingError}</p>
-                <p class="faint small" style="margin:var(--sp-2) 0 0">
-                  {$t('tasks.filesErrorHint')}
-                </p>
-              </div>
-            {:else if wdLoadedFor !== activeRun.runId}
-              <div class="skeleton" style="width:70%"></div>
-            {:else if wdRows.length === 0}
-              <p class="hint">{$t('tasks.dirEmpty')}</p>
-            {:else}
-              <!--
-                默认只列**第一级**，目录点一下才取它的下一层。
-                不显示整串路径（层级靠缩进，路径在悬停提示里）；不写"平台注入"
-                那种说明文字（弱化显示就够了）。
-              -->
-              <ul class="wd">
-                {#each wdRows as { entry, depth } (entry.path)}
-                  <li style="padding-left:{depth * 0.9}rem">
-                    {#if entry.kind === 'dir'}
-                      <button
-                        type="button"
-                        class="wd-dir"
-                        class:managed={entry.managed}
-                        title={entry.path}
-                        onclick={() => toggleDir(entry)}
-                      >
-                        <span class="wd-twisty">
-                          {entry.hasChildren ? (wdExpanded.has(entry.path) ? '▾' : '▸') : '·'}
-                        </span>
-                        <span class="mono">{entry.name}</span>
-                      </button>
-                      {#if wdLoading.has(entry.path)}
-                        <span class="faint small">{$t('tasks.reading')}</span>
-                      {/if}
-                    {:else}
-                      <a
-                        class="wd-file"
-                        class:managed={entry.managed}
-                        title={entry.path}
-                        href="/api/runs/{activeRun.runId}/file?path={encodeURIComponent(entry.path)}"
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >{entry.name}</a>
-                      <span class="faint small">{humanSize(entry.sizeBytes)}</span>
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-              {#if wdTruncated}
-                <p class="faint small">{$t('tasks.truncated')}</p>
-              {/if}
-            {/if}
+            <h4>{$t('files.heading')}</h4>
+            <!--
+              工作目录那一栏现在与聊天**共用**一个组件（`WorkDirTree.svelte`）：
+              两处的差别只有"问谁"——这里按某次执行的目录问。判据（排序、注入物
+              弱化、一次一层、取不到时说什么）都在那一个组件里，见它的注释。
+            -->
+            <WorkDirTree base={`/api/runs/${activeRun.runId}`} reloadKey={activeRun.runId} />
           </aside>
         </div>
       {:else}
@@ -785,9 +937,6 @@
           onclick={() => cancel(activeRun!.runId)}
         >
           {$t('tasks.cancelRun')}
-        </button>
-        <button type="button" class="secondary" onclick={() => loadVerdicts(activeRun!.runId)}>
-          {$t('tasks.readVerdict')}
         </button>
       </div>
 
@@ -808,8 +957,31 @@
                 >{v.reasonCode}</span
               >
               <span class="faint small">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
-              <span class="faint small">{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span>
+              <!--
+                ★ D46：这条判决**是谁做的**。
+                
+                同一条 run 上可能有两条判决（模型判 fail、人后来判 pass），两张
+                卡片长得几乎一样——不标出来，读的人分不清哪条该信。所以人工那条
+                带一个徽章；`source` 缺字段（老数据）就是模型判的，不标。
+                
+                ⚠️ 置信度对人工裁决**没有意义**（人不是概率输出，落库时写的是 1），
+                所以那一项对人工判决不显示——显示出来就是一句"100% 确定"的假精确。
+              -->
+              {#if v.source === 'human'}
+                <span class="badge done">{$t('tasks.humanVerdictBadge')}</span>
+              {:else}
+                <span class="faint small"
+                  >{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span
+                >
+              {/if}
             </div>
+            <!-- 人工裁决的理由：它是**这句话**而不是一组 findings（D46） -->
+            {#if v.source === 'human' && v.humanReason}
+              <p class="small">
+                <span class="faint small">{$t('tasks.humanVerdictReasonHeading')}</span>
+                {v.humanReason}
+              </p>
+            {/if}
             <!--
               ══════════════════════════════════════════════════════════════
               ★ 这条判决**真的做了什么**（D45 的显示位置调整）
@@ -884,46 +1056,141 @@
     </section>
   {/if}
 
-        </div>
-
-        {#if canFollowUp && lastExecuteRun}
-          <!-- ══════════ 常驻底栏：继续沟通 ══════════
-               它原来是滚到底才看得到的最后一段，而"接着干"是这个产品最核心的
-               交互之一 —— 放在底栏，随时能说下一句。 -->
-          <footer class="pane-foot">
       <!--
-        ⚠️ 这一段要**短**。它原来是一整段说明加三行输入框，实测占了详情栏
-        284px —— 一个 748px 高的栏位里，常驻底栏吃掉 38%，正文就没地方了。
-        详细说明挪进 title（鼠标悬停可见），正文只留一句。
+        ══════════════════════════════════════════════════════════════
+        ★ 人工裁决（D46）
+        ══════════════════════════════════════════════════════════════
+
+        位置：**紧跟在判决区之后**。理由是它回答的问题紧接着判决卡上那句结论——
+        "审核说不行，那我能不能自己说行"。
+
+        ══════════════════════════════════════════════════════════════
+        ★ D47：它同时**取代了原来那个常驻底栏**（「发送并继续」）
+        ══════════════════════════════════════════════════════════════
+
+        使用者的要求是把三个出路摆在一起：「通过 / 反馈 / 放弃」，而且
+        **「反馈」就是「发送并继续」**——两者合并，所以底栏那个输入框连同它的
+        按钮一起撤掉了。留下来的这一块因此要覆盖底栏原来覆盖的范围，否则
+        "已经审完的任务再也说不出下一句"（那是这次合并最容易踩的坑）。
+
+        为此它的开关是 `canDecide`（**只要选中了任务就给**），而不是"能人工裁决"
+        ——那只是「通过」那一个按钮的条件。三个按钮各有自己的可用性：
+
+          · 通过：要有一条可裁决的 run（`passGate`），否则置灰 + 说清为什么；
+          · 反馈：要有一次**跑完**的执行可以接（`feedbackReady`），否则同上；
+          · 放弃：只在支持这条路由的 daemon 上给，且放弃后换成「恢复」。
+
+        ⚠️ 开关为什么放宽到"只要选中了任务"：三个按钮的可用条件互不相同，用其中
+           任何一个当整块的开关，都会让另外两个在**本该可用**时消失。最典型的是
+           「放弃」——一条刚建出来、一次都没跑的、或者**正在跑**的任务，恰恰是最
+           想放弃它的两种情形（建错了 / 在烧 token）。代价是一条新任务上会看到
+           两个灰按钮，而那是**如实**的：此刻确实只有放弃可做。
+
+        三件事在文案里刻意说清了（见 `packages/i18n/src/web/tasks.ts` 里
+        `decide*` 那组注释）：
+          ① 「通过」**不触发任何动作**（最容易的误解）；
+          ② 理由**什么时候必填**（通过选填、反馈必填）——两个按钮共用一个
+             输入框，所以这件事只能靠按钮上的提示说清；
+          ③ 「放弃」会**取消正在跑的 run**（这个功能唯一的副作用）。
       -->
-      <section
-        class="follow-up"
-        title={$t('tasks.continueHint', {
-          dir: lastExecuteRun.workDir ?? $t('tasks.autoWorkDir'),
-        })}
-      >
-        <textarea
-          bind:value={followUp}
-          rows="2"
-          placeholder={$t('tasks.continuePlaceholder')}
-          disabled={sending}
-          onkeydown={(e) => {
-            // Ctrl/Cmd+Enter 发送：「接着干」是高频动作，不该逼人去够鼠标
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') sendFollowUp()
-          }}
-        ></textarea>
-        <div class="follow-actions">
-          <button type="button" disabled={sending || followUp.trim() === ''} onclick={sendFollowUp}>
-            {sending ? $t('tasks.sending') : $t('tasks.sendAndContinue')}
-          </button>
-          <span class="faint small">{$t('tasks.continueFooter')}</span>
+      {#if canDecide}
+        <section class="drawer-section">
+          <h3>{$t('tasks.decideHeading')}</h3>
+
+          {#if isAbandoned}
+            <!-- 放弃过的任务只给一条出路：恢复。它已经出局了，不该再出现三个
+                 能改流程的按钮——那会让人以为它还在流程里。 -->
+            <p class="faint small">{$t('tasks.abandonNote')}</p>
+            {#if canAbandon}
+              <button
+                type="button"
+                disabled={deciding !== null}
+                onclick={() => setAbandoned(false)}
+              >
+                {deciding === 'recover' ? $t('tasks.decideAbandoning') : $t('tasks.decideRecover')}
+              </button>
+            {/if}
+          {:else}
+            <p class="faint small">{$t('tasks.decideIntro')}</p>
+            {#if humanDecided}
+              <p class="faint small">{$t('tasks.humanVerdictAlready')}</p>
+            {/if}
+
+            <label class="human-reason">
+              <span class="small">{$t('tasks.decideReasonLabel')}</span>
+              <textarea
+                bind:value={humanReason}
+                rows="3"
+                placeholder={$t('tasks.decideReasonPlaceholder')}
+                disabled={deciding !== null}
+                onkeydown={(e) => {
+                  // Ctrl/Cmd+Enter = 反馈。「接着干」是高频动作，不该逼人去够鼠标
+                  //（这条快捷键原来是底栏那个按钮的，合并之后跟着搬过来）。
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') feedback()
+                }}
+              ></textarea>
+            </label>
+
+            <div class="decide-actions">
+              {#if humanVerdictSupported}
+                <button
+                  type="button"
+                  disabled={deciding !== null || !passGate?.ok}
+                  title={passGate?.ok
+                    ? $t('tasks.decidePassHint')
+                    : passBlockedNoteId
+                      ? $t(passBlockedNoteId)
+                      : ''}
+                  onclick={passTask}
+                >
+                  {deciding === 'pass' ? $t('tasks.decidePassing') : $t('tasks.decidePass')}
+                </button>
+              {/if}
+              <button
+                type="button"
+                disabled={deciding !== null || !feedbackReady}
+                title={feedbackReady
+                  ? $t('tasks.decideFeedbackHint')
+                  : $t('tasks.needRunForFeedback')}
+                onclick={feedback}
+              >
+                {deciding === 'feedback'
+                  ? $t('tasks.decideFeedbacking')
+                  : $t('tasks.decideFeedback')}
+              </button>
+              {#if canAbandon}
+                <button
+                  type="button"
+                  class="danger"
+                  disabled={deciding !== null}
+                  title={$t('tasks.decideAbandonHint')}
+                  onclick={() => setAbandoned(true)}
+                >
+                  {deciding === 'abandon' ? $t('tasks.decideAbandoning') : $t('tasks.decideAbandon')}
+                </button>
+              {/if}
+            </div>
+
+            <!--
+              ★ 按钮为什么是灰的 —— **必须写出来**，而且要在按钮之外也写一遍：
+                `title` 只有鼠标悬停才看得见，而"按钮是灰的、不知道为什么"
+                正是 D46 那次需求（"没有人工通过的操作 UI"）的来源。
+            -->
+            {#if passBlockedNoteId}
+              <p class="faint small">{$t(passBlockedNoteId)}</p>
+            {/if}
+            {#if !feedbackReady}
+              <p class="faint small">{$t('tasks.needRunForFeedback')}</p>
+            {/if}
+          {/if}
+
+          {#if decideError}
+            <div class="notice bad" style="margin-top:var(--sp-2)">{decideError}</div>
+          {/if}
+        </section>
+      {/if}
+
         </div>
-        {#if sendError}
-          <div class="notice bad" style="margin-top:var(--sp-2)">{sendError}</div>
-        {/if}
-      </section>
-          </footer>
-        {/if}
       {:else}
         <div class="pane-body">
           <div class="empty">
@@ -1017,6 +1284,10 @@
   .stage-tag.reviewed { border-color: var(--status-done); color: var(--status-done); }
   /* "待人工"用告警色：它是**卡在你手里**那一档——不是进行中，也不是完成 */
   .stage-tag.needs_human { border-color: var(--warn); color: var(--warn); }
+  /* ★ D47「已放弃」用**最弱**的颜色，不是告警色也不是完成色：它既不是"出事了"
+     （放弃是人的决定，不是故障），也不是"做完了"（它只是出局了）。中性灰是唯一
+     不会误导读者的选择——这条任务既不需要你管，也没有做成什么。 */
+  .stage-tag.abandoned { border-color: var(--line); color: var(--text-faint); }
 
   /* 跑完之后：左边结论、右边产出文件 */
   .result-grid {
@@ -1033,83 +1304,6 @@
     }
   }
 
-  .markdown {
-    font-size: var(--fs-sm);
-    line-height: 1.7;
-    word-break: break-word;
-  }
-
-  .markdown :global(h1),
-  .markdown :global(h2),
-  .markdown :global(h3),
-  .markdown :global(h4) {
-    margin: var(--sp-4) 0 var(--sp-2);
-    line-height: 1.3;
-  }
-
-  .markdown :global(h1) { font-size: 1.4em; }
-  .markdown :global(h2) { font-size: 1.2em; }
-  .markdown :global(h3) { font-size: 1.05em; }
-
-  .markdown :global(p) { margin: 0 0 var(--sp-3); }
-
-  .markdown :global(ul),
-  .markdown :global(ol) {
-    margin: 0 0 var(--sp-3);
-    padding-left: 1.4em;
-  }
-
-  .markdown :global(li) { margin-bottom: var(--sp-1); }
-
-  .markdown :global(code) {
-    font-family: var(--font-mono);
-    font-size: 0.92em;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0 0.3em;
-  }
-
-  .markdown :global(pre) {
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-3);
-    overflow-x: auto;
-  }
-
-  .markdown :global(pre code) {
-    background: none;
-    border: 0;
-    padding: 0;
-  }
-
-  .markdown :global(blockquote) {
-    margin: 0 0 var(--sp-3);
-    padding-left: var(--sp-3);
-    border-left: 3px solid var(--line);
-    color: var(--text-faint);
-  }
-
-  .markdown :global(table) {
-    border-collapse: collapse;
-    margin: 0 0 var(--sp-3);
-    width: 100%;
-  }
-
-  .markdown :global(th),
-  .markdown :global(td) {
-    border: 1px solid var(--line);
-    padding: var(--sp-1) var(--sp-2);
-    text-align: left;
-  }
-
-  .markdown :global(img) {
-    max-width: 100%;
-    border-radius: var(--radius);
-    border: 1px solid var(--line);
-  }
-
   .result-files {
     border-left: 1px solid var(--line);
     padding-left: var(--sp-4);
@@ -1119,69 +1313,26 @@
     margin: 0 0 var(--sp-2);
   }
 
-  .wd {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  .wd li {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: 2px 0;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
+  /*
+    人的三个出路共用那一个输入框（D46 + D47）。
+    
+    ★ `min-width: 0` 不是装饰：这一块在窄屏下是**整宽**的，而宽屏下详情栏只有
+      半栏——不加它，输入框的固有宽度会把这一栏顶出容器（D44 那次实测过：
+      `.field-row` 缺 `min-width:0` 时 950px 的内容撑破了 725px 的栏位）。
+    ★ `box-sizing: border-box` 同理：宽度按容器算，不按内容算。
+  */
+  .human-reason {
+    display: block;
+    margin: var(--sp-3) 0 var(--sp-2);
     min-width: 0;
   }
 
-  .wd-dir {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-1);
-    background: none;
-    border: 0;
-    padding: 0;
-    color: var(--text-dim);
-    font: inherit;
-    cursor: pointer;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .wd-dir:hover { color: var(--text); }
-
-  /* 展开箭头定宽：不定宽时，目录名会随着 ▸/▾ 的宽度差左右抖 */
-  .wd-twisty {
-    width: 0.75rem;
-    flex-shrink: 0;
-    color: var(--text-faint);
-  }
-
-  .wd-file {
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* 平台注入的（技能、上下文文件）：弱化显示就够了，不再用一段文字去解释 */
-  .wd-dir.managed,
-  .wd-file.managed {
-    color: var(--text-faint);
-  }
-
-  .result-files ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  /* 常驻底栏里的它**不再自带边框与内边距**：外层 .pane-foot 已经有分隔线了，
-     再套一层框会显得像页面里的一个孤岛 */
-  .follow-up textarea {
+  .human-reason textarea {
+    display: block;
+    box-sizing: border-box;
     width: 100%;
+    min-width: 0;
+    margin-top: var(--sp-1);
     font-family: inherit;
     font-size: var(--fs-sm);
     padding: var(--sp-2);
@@ -1192,30 +1343,39 @@
     resize: vertical;
   }
 
-  .follow-actions {
+  /* 三个按钮并排。
+     ⚠️ `flex-wrap` 是必需的：窄屏下「通过 / 反馈 / 放弃」加上中文标签会超过
+        详情栏宽度，不换行就会把那一栏顶出容器（与上面 `min-width:0` 是同一类
+        事故，只是这次是按钮而不是输入框）。 */
+  .decide-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     margin-top: var(--sp-2);
   }
 
-  /* ── 五列流水线 ──
-     D40 起是五档：执行中 / 待审查 / 行动中 / 等待人处理（含行动失败） / 已完成审查。
+  /* ── 六列流水线 ──
+     D40 起是五档：执行中 / 待审查 / 行动中 / 等待人处理（含行动失败） / 已完成审查；
+     D47 又加了最后一列「已放弃」（**不是流水线的一站**，见 `PIPELINE_COLUMNS`）。
      固定列数（而不是 auto-fit）：这几列就是流水线的几个状态，少一列会让人以为
-     那个状态不存在。 */
-  .board-5 {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+     那个状态不存在。
+
+     ⚠️ 类名跟着列数走（`.board-6`），因为列数改了而名字不改，下一个改的人就要
+        先数一遍 CSS 里的 `repeat(N)` 才能确认它对应几列。 */
+  .board-6 {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: var(--sp-3);
   }
 
-  /* 中等宽度放 5 列会把每列压到 150px 上下，读不了 ⇒ 改成 3+2 两行 */
-  @media (max-width: 100rem) {
-    .board-5 {
+  /* 中等宽度放 6 列会把每列压到 130px 上下，读不了 ⇒ 改成 3+3 两行 */
+  @media (max-width: 110rem) {
+    .board-6 {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
   @media (max-width: 64rem) {
-    .board-5 {
+    .board-6 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }

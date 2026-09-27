@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildArgv, getRuntimeDescriptor, knownRuntimeKeys, loadRuntimeDescriptor } from '@alpha-helper/agent-core'
+import { buildArgv, getRuntimeDescriptor, knownRuntimeKeys, loadCliRuntimeDescriptor, loadRuntimeDescriptor } from '@agentdeck/agent-core'
 import {
   GENERIC_BLOCKED_ARGS,
   GENERIC_CLI_FACTS,
@@ -84,7 +84,7 @@ describe('第二个 runtime 的描述符（FR-CLI-47 的填空作业）', () => 
 
   test('★ rejectDetectable 为 false —— 测不出"恢复被拒"时不许声明能测', () => {
     assert.equal(GENERIC_DESCRIPTOR.resume.rejectDetectable, false)
-    assert.equal(getRuntimeDescriptor('claude').resume.rejectDetectable, true)
+    assert.equal(loadCliRuntimeDescriptor('claude').resume.rejectDetectable, true)
   })
 
   test('基础参数包含非交互与 NDJSON 输出，且禁用交互式提问', () => {

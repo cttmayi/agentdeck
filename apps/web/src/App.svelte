@@ -4,6 +4,7 @@
   import Sidebar from './components/Sidebar.svelte'
   import InboxDrawer from './components/InboxDrawer.svelte'
   import SettingsDrawer from './components/SettingsDrawer.svelte'
+  import Chat from './views/Chat.svelte'
   import NewTask from './views/NewTask.svelte'
   import Tasks from './views/Tasks.svelte'
   import Agents from './views/Agents.svelte'
@@ -15,6 +16,7 @@
     loadIdentity,
     loadInbox,
     loadIssues,
+    loadConversations,
     loadRuns,
     loadSkills,
     loadTools,
@@ -44,6 +46,8 @@
       loadTools(),
       loadRuns(),
       loadInbox(),
+      // 对话列表也在首屏取：它是侧边栏第一项的页面，晚一步到会闪一下空态。
+      loadConversations(),
     ])
 
     // 同步循环独立于本机功能：远端挂了只影响侧边栏那一行状态
@@ -99,7 +103,9 @@
   <Sidebar />
 
   <main class="main">
-    {#if $view === 'new'}
+    {#if $view === 'chat'}
+      <Chat />
+    {:else if $view === 'new'}
       <NewTask />
     {:else if $view === 'tasks'}
       <Tasks />
@@ -108,8 +114,8 @@
     {:else if $view === 'skills'}
       <Skills />
     {:else}
-      <!-- ★ D40：第五项。`$view` 的取值来自 `VIEWS`，那一列只有这五个；
-           最后这个 `{:else}` 不再兼作 Skills（写死成"剩下的都是 Skills"
+      <!-- ★ D40：最后一项。`$view` 的取值来自 `VIEWS`，每一支都写明了是哪个；
+           最后这个 `{:else}` 不再兼作别的视图（写死成"剩下的都是 Skills"
            时，加视图会静默落到 Skills 上——页面能打开，只是内容不对）。 -->
       <Tools />
     {/if}

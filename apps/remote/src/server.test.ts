@@ -173,8 +173,11 @@ describe('远端服务（M3）', () => {
     assert.ok(b.tools.length >= 1, '目录里应当列出一个可装的工具包范例')
     const hello = b.tools.find((t) => t.slug === 'hello-tool')
     assert.ok(hello, '远端范例 hello-tool 应当被列出来')
-    assert.equal(hello.version, '1.0.0')
-    assert.equal(hello.manifest.schema, 'alpha-helper/tool@1', '清单原样带下去')
+    // ⚠️ 版本会随目录改动而变：这里原来钉着 '1.0.0'，为了测「更新」功能把它提到
+    //    了 '1.0.1'（本地装的是 1.0.0 ⇒ 列表上会出现「更新到 1.0.1」）。
+    //    断言的**意图**是"版本原样带下去"，所以钉具体值不如钉形状。
+    assert.match(hello.version ?? '', /^\d+\.\d+\.\d+$/, '版本要原样带下去')
+    assert.equal(hello.manifest.schema, 'agentdeck/tool@1', '清单原样带下去')
     assert.deepEqual(
       (hello.manifest.actions as Array<{ name: string }>).map((a) => a.name),
       ['say'],
@@ -189,7 +192,7 @@ describe('远端服务（M3）', () => {
     for (const slug of ['example-notify', 'example-llm', 'example-issue']) {
       const t = b.tools.find((x) => x.slug === slug)
       assert.ok(t, `远端范例 ${slug} 应当被列出来`)
-      assert.equal(t.manifest.schema, 'alpha-helper/tool@1')
+      assert.equal(t.manifest.schema, 'agentdeck/tool@1')
       const scriptEntries = Object.keys(t.files).filter((f) => f.startsWith('scripts/'))
       assert.ok(scriptEntries.length >= 1, `${slug} 必须带入口脚本，否则本地装不上`)
       assert.match(t.docs, new RegExp(slug), `${slug} 的 TOOL.md 正文要带上`)

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { deliveredText } from './testing/delivered.ts'
 import { describe, test } from 'node:test'
 import { join } from 'node:path'
 import {
@@ -9,10 +10,10 @@ import {
   type InboxItem,
   type RunId,
   type VerdictRecord,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
-import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@alpha-helper/agent-core'
+import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@agentdeck/agent-core'
 
 /**
  * ★ D41：平台**没有内置动作**了——这条语义本身要有人守。
@@ -54,10 +55,10 @@ class VerdictBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    this.prompts.push(opts.prompt)
+    this.prompts.push(deliveredText(opts))
     // ★ 判据是"这段 prompt 是不是审核"（审核那份里带着判决契约），不是调用序号——
     //   按序号判在并行跑整个套件时会偶发地把判决喂给错误的 run。
-    const isReview = opts.prompt.includes(VERDICT_FENCE_BEGIN)
+    const isReview = deliveredText(opts).includes(VERDICT_FENCE_BEGIN)
     const verdict = isReview ? this.verdict : null
     const text =
       verdict === null

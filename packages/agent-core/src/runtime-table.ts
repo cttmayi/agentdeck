@@ -1,4 +1,4 @@
-import type { RuntimeProtocol } from '@alpha-helper/protocol'
+import type { RuntimeProtocol } from '@agentdeck/protocol'
 
 /**
  * runtime 描述表（FR-CLI-47）—— **本项目最重要的一张表**。
@@ -18,6 +18,21 @@ import type { RuntimeProtocol } from '@alpha-helper/protocol'
  */
 
 export type BlockedArgMode = 'standalone' | 'withValue'
+
+/**
+ * runtime 的形状（决定 cli-only 字段是否适用）。
+ *
+ * - `'cli'`：run 的行为是**命令行参数**——`managedFlags` / `blockedArgs` /
+ *   `promptDelivery` / `resume.flag` 都适用（claude、generic）。
+ * - `'service'`：run 的行为是**协议调用**（如 codex app-server 的 JSON-RPC）——
+ *   cli-only 字段**不适用、不填**；`baseArgs` 退化为"启动参数"；
+ *   `systemPrompt` 通常为 `null`（退回 B 档）。
+ *
+ * 为什么不给 service 行填"占位值"（cli 字段照填、适配器假装不读）：
+ * 那是**在数据里撒谎**——没人能分辨"没用"与"不存在"，而本项目
+ * "evidence 写在数据里"的规矩要求差异显式、可评审（FR-CLI-47）。
+ */
+export type RuntimeKind = 'cli' | 'service'
 
 /**
  * 该 runtime 的**证据等级**。
@@ -149,6 +164,8 @@ export interface RuntimeDescriptor {
   key: string
   /** 探测用的命令名。 */
   command: string
+  /** runtime 的形状：cli（命令行参数）还是 service（协议调用）。 */
+  kind: RuntimeKind
   protocol: RuntimeProtocol
 
   /**
@@ -159,7 +176,7 @@ export interface RuntimeDescriptor {
    * 意味着"扁平的 NDJSON 事件"。把这条差异显式化，解析器选择就不再是
    * 调用点里的 `if (key === 'claude')`。
    */
-  family: 'claude-stream-json' | 'generic-ndjson'
+  family: 'claude-stream-json' | 'generic-ndjson' | 'codex-app-server-jsonrpc'
 
   /** 证据等级——**未验证的 runtime 不得被当成已验证**。 */
   evidence: RuntimeEvidence
@@ -255,16 +272,24 @@ export interface RuntimeDescriptor {
   /** 技能禁用开关注入位。首版不启用。 */
   disableSwitch: InjectionSlot
 
-  /** 会话恢复。 */
-  resume: { flag: string; rejectDetectable: boolean }
+  /** 会话恢复。**cli-only**：service 形态走协议（如 `thread/resume`），不填。 */
+  resume?: { flag: string; rejectDetectable: boolean }
+  /**
+   * 系统提示那个旗标（①② 两块靠它投递）。`null` = 这个 runtime 没有这个概念。
+   *
+   * ★ 为什么它必须由**描述表**声明，而不是在适配器里写死：A/B 两档的选择依据就是
+   *   它——不支持就得退回 B（三块合成一段）。写死的话，换一个 runtime 时界面与
+   *   日志会声称"用了系统提示"，而实际什么都没发（这个仓库被这类事咬过三次）。
+   */
+  systemPrompt: { flag: string } | null
 
-  /** prompt 怎么送进去。 */
-  promptDelivery: PromptDelivery
+  /** prompt 怎么送进去。**cli-only**：service 形态走协议 input，不填。 */
+  promptDelivery?: PromptDelivery
 
-  /** 协议基础参数——**属于平台，使用者不可覆盖**。 */
+  /** 协议基础参数——**属于平台，使用者不可覆盖**。service 形态下是**启动参数**。 */
   baseArgs: readonly string[]
-  /** 禁改参数表。 */
-  blockedArgs: Readonly<Record<string, BlockedArgMode>>
+  /** 禁改参数表。**cli-only**：service 无 run 级 argv 可过滤，不填。 */
+  blockedArgs?: Readonly<Record<string, BlockedArgMode>>
 
   /**
    * 受管参数的旗标名。**必填**。
@@ -282,8 +307,26 @@ export interface RuntimeDescriptor {
    * 缺省的方向必须是**安全的那一侧**：宁可加载描述表时就报错，也不要替一个
    * 没声明过的 CLI 猜旗标。所以它是必填，`loadRuntimeDescriptor` 还会在
    * 运行时再验一次（描述表可能来自仓库之外的对象）。
+   *
+   * **cli-only**：service 形态没有 run 级 argv，不填（`loadRuntimeDescriptor`
+   * 按 `kind` 校验，cli 缺了就抛、service 缺了是合法的）。
    */
+  managedFlags?: ManagedFlags
+}
+
+/**
+ * cli 形状的描述符：cli-only 字段必然在位。
+ *
+ * 由 `loadCliRuntimeDescriptor()` 返回——它先走 `loadRuntimeDescriptor` 的按 kind
+ * 校验（cli 缺 `managedFlags` / `resume` 等会抛），再收窄类型。于是拼参数、
+ * 读投递方式这些消费点不用在每个字段上都 `?? 兜底`——那会掩盖"字段确实没了"
+ * 这种该报错的状况。
+ */
+export type CliRuntimeDescriptor = RuntimeDescriptor & {
   managedFlags: ManagedFlags
+  blockedArgs: Readonly<Record<string, BlockedArgMode>>
+  promptDelivery: PromptDelivery
+  resume: { flag: string; rejectDetectable: boolean }
 }
 
 /**
@@ -297,6 +340,9 @@ export interface RuntimeDescriptor {
  */
 export const CLAUDE_BLOCKED_ARGS: Readonly<Record<string, BlockedArgMode>> = {
   '-p': 'standalone', // 非交互模式
+  // ★ 系统提示由平台掌控（2026-09：①② 两块走它）。放进禁改表 ⇒ 使用者的自定义
+  //   参数覆盖不了它——否则他能替换掉"规则与身份"那一层，而平台还按自己那份记账。
+  '--append-system-prompt': 'withValue',
   '--output-format': 'withValue', // stream-json 协议
   '--input-format': 'withValue', // stream-json 协议
   '--permission-mode': 'withValue', // 无人值守
@@ -309,9 +355,10 @@ export const CLAUDE_BLOCKED_ARGS: Readonly<Record<string, BlockedArgMode>> = {
  * 提问没有 UI 可渲染，调用只会返回一个空答案，然后 agent 开始
  * **静默推断**——使用者从头到尾看不到那个问题。要澄清就写进评论里。
  */
-export const CLAUDE_DESCRIPTOR: RuntimeDescriptor = {
+export const CLAUDE_DESCRIPTOR: CliRuntimeDescriptor = {
   key: 'claude',
   command: 'claude',
+  kind: 'cli',
   protocol: 'stream-json',
   family: 'claude-stream-json',
   evidence: 'verified',
@@ -351,6 +398,15 @@ export const CLAUDE_DESCRIPTOR: RuntimeDescriptor = {
     reason: '首版不做技能禁用策略；启用时需生成策略文件、追加参数、并把该参数动态加入禁改表',
   },
   resume: { flag: '--resume', rejectDetectable: true },
+  /**
+   * 系统提示那个旗标（①② 两块用它投递）。
+   *
+   * `null` = 这个 runtime 不支持 ⇒ 调用方退回 B 档（三块合成一段）。
+   * ⚠️ 实测过：claude 2.0.14 的 bundle 里 `--append-system-prompt` 确实存在，而且
+   *    它**追加**在 CLI 自己的系统提示之后（`--system-prompt` 是**替换**，不能用——
+   *    那会丢掉 CLI 自带的工具用法与安全约束）。
+   */
+  systemPrompt: { flag: '--append-system-prompt' },
   promptDelivery: 'stdin-ndjson',
   baseArgs: [
     '-p',
@@ -412,11 +468,14 @@ export const GENERIC_BLOCKED_ARGS: Readonly<Record<string, BlockedArgMode>> = {
  * 要求测试不得调用真实 CLI）。未验证的是"字段名与真实 CLI 一致"，
  * 而不是"代码能不能工作"。这两件事必须分开说，否则会把可测的东西一起否掉。
  */
-export const GENERIC_DESCRIPTOR: RuntimeDescriptor = {
+export const GENERIC_DESCRIPTOR: CliRuntimeDescriptor = {
   key: 'generic',
   command: 'agent-cli',
+  kind: 'cli',
   protocol: 'stream-json',
   family: 'generic-ndjson',
+  // 通用 CLI 从 argv 读 prompt，没有"系统提示"这个概念 ⇒ 只能走 B 档。
+  systemPrompt: null,
   evidence: 'provisional',
   /**
    * ★ `'unknown'` 而不是 `'stateless'`。
@@ -500,6 +559,80 @@ export const GENERIC_DESCRIPTOR: RuntimeDescriptor = {
 }
 
 /**
+ * Codex（app-server 形式）的描述符。
+ *
+ * ★ **这是 service 形状**：run 的行为是 JSON-RPC 调用，不是命令行。
+ *   所以 cli-only 字段（managedFlags / blockedArgs / promptDelivery / resume）
+ *   一律**不填**——具体见 `docs/runtime/codex-runtime-design.md` §3.2（字段适用性表）。
+ *
+ * ✅ `evidence: 'verified'`：协议形状已在真实 app-server 上实测核对——**两个
+ *   版本**：0.144.0-alpha.4（插件二进制，本机 local 模型端点）与 **0.157.1**
+ *   （npm 通道 /opt/homebrew/bin/codex，local 模型端点）。核对覆盖：握手、
+ *   thread/start|resume（-32600 错误形状）、turn/start（含 approvalPolicy 参数）、
+ *   turn/interrupt、item 载荷（agentMessage.text / reasoning.summary[] /
+ *   fileChange.changes[] / commandExecution 与 mcpToolCall 的**扁平形状**）、
+ *   tokenUsage.total、turn/completed（completed|interrupted）、.codex/skills
+ *   自动发现、never 下无审批请求。残余未验证项见 `agent-codex` 的
+ *   `unverifiedFields()` 与设计稿 §7（本机未触发：dynamicToolCall/webSearch、
+ *   failed turn、-32001、PATH 上的 codex 命令）。
+ */
+export const CODEX_DESCRIPTOR: RuntimeDescriptor = {
+  key: 'codex',
+  command: 'codex',
+  kind: 'service',
+  protocol: 'jsonrpc',
+  family: 'codex-app-server-jsonrpc',
+  evidence: 'verified',
+  evidenceNote:
+    '实测版本：0.144.0-alpha.4 与 0.157.1（本机 local 模型端点，2026-09-27）。' +
+    'thread/resume 对不存在线程一律回 JSON-RPC error（-32600，三种形态都见过：' +
+    'invalid session id / no rollout found / is archived）⇒ rejectDetectable=true、' +
+    '被拒时回退新线程 + resumeRejected=true（FR-CLI-06）。' +
+    '恢复的线程 approvalPolicy 会退回 on-request ⇒ turn/start 也显式传 never。' +
+    '技能需 YAML frontmatter（writeSkill 注入时总会写，兼容）。' +
+    '★ 0.157.1 实测：工具类 item 是**扁平形状**——commandExecution 字段在 item ' +
+    '顶层（item.command / item.status / item.aggregatedOutput，没有 outputDelta ' +
+    '通知）；mcpToolCall 同（item.tool / item.arguments / item.result.content[] / ' +
+    'item.error）。sandbox 合法枚举：read-only | workspace-write | ' +
+    'danger-full-access。' +
+    '残余未验证：dynamicToolCall/webSearch 形状（本机模型未触发）、failed turn ' +
+    '的 TurnError 形状、-32001 背压码、`codex` 是否在用户 PATH（插件二进制在 ' +
+    '~/.codex/plugins/.plugin-appserver/codex）。',
+  // ★ 会话恢复是一等公民：sessionId = thread_id，`thread/resume` 原生支持。
+  //   已实测（0.144.0-alpha.4）：不存在的线程一律回 -32600 JSON-RPC error，
+  //   可识别"恢复被拒"（rejectDetectable=true，见证据注）。
+  sessionState: 'stateful',
+  // ★ 已在 0.144.0-alpha.4 与 0.157.1 上实测（FR-CLI-07）：verifiedWith 是实测
+  //   过的版本，range 声明支持窗口；窗口内未实测的版本报 in-range-unverified。
+  versions: {
+    range: '>=0.144.0-alpha.4 <0.158.0',
+    verifiedWith: ['0.144.0-alpha.4', '0.157.1'],
+    onMismatch: 'warn',
+  },
+  stateDir: '.codex',
+  // 技能走项目作用域：thread 的 cwd = 工作目录，codex 自动扫 `{cwd}/.codex/skills/`。
+  // 这与 claude/generic 是**同一套注入机制**，只是目录名来自这一行（设计稿 §2.7 路 A）。
+  skills: { kind: 'directory', dir: '.codex/skills' },
+  toolConfig: {
+    enabled: false,
+    reason:
+      '首版不做 MCP 工具配置。service 形态若有对应注入位（受管 MCP 配置），' +
+      '需另行验证 JSON-RPC 侧的存在性与形状（设计稿 §8 后续扩展）。',
+  },
+  disableSwitch: {
+    enabled: false,
+    reason:
+      '首版不做技能禁用策略；service 形态的对应注入位未验证（设计稿 §8 后续扩展）。',
+  },
+  // systemPrompt: null ⇒ 调用方自动退回 B 档（三块合成一段，作为 turn/start 的
+  // text input）。app-server 没有系统提示参数，B 档下的 ①② 随每轮走、恢复后仍在。
+  systemPrompt: null,
+  // service 语义：这是 `codex app-server` 的**启动参数**，不是 run 的 argv。
+  // `--stdio` 等价于 `--listen stdio://`（默认已是它，显式写出来免得依赖缺省）。
+  baseArgs: ['app-server', '--stdio'],
+}
+
+/**
  * 已编译进来的 runtime 表。
  *
  * 为什么是**编译进程序的表**而不是插件：登录与第三方查询是插件（FR-AUTH、
@@ -511,21 +644,41 @@ export const GENERIC_DESCRIPTOR: RuntimeDescriptor = {
 export const RUNTIMES: Readonly<Record<string, RuntimeDescriptor>> = {
   claude: CLAUDE_DESCRIPTOR,
   generic: GENERIC_DESCRIPTOR,
+  codex: CODEX_DESCRIPTOR,
 }
 
 /**
- * 返回**可直接消费**的描述符：校验必填项、并对齐两个视图。
+ * 返回**可直接消费**的描述符：按 `kind` 校验必填项、并对齐两个视图。
  *
- * 1. `managedFlags` 是必填。缺了就**抛**，而不是回落到 claude 的拼写——
- *    替一个没声明过的 CLI 猜旗标，正是"看起来能用、实际用错了"的来源。
- *    类型上它已经必填，这里再验一次是因为描述符也可能是仓库之外传进来的对象。
- * 2. `managedFlags.resume` 与 `resume.flag` 是同一件事的两个视图。
- *    在这里**强制对齐**，就不会出现"表里写 A、拼参数用 B"的静默不一致。
+ * cli 形状（`managedFlags` / `blockedArgs` / `promptDelivery` / `resume` 适用）：
+ *   1. `managedFlags` 必填。缺了就**抛**，而不是回落到 claude 的拼写——
+ *      替一个没声明过的 CLI 猜旗标，正是"看起来能用、实际用错了"的来源。
+ *      类型上它已经必填，这里再验一次是因为描述符也可能是仓库之外传进来的对象。
+ *   2. `managedFlags.resume` 与 `resume.flag` 是同一件事的两个视图。
+ *      在这里**强制对齐**，就不会出现"表里写 A、拼参数用 B"的静默不一致。
+ *   3. `resume` 必填——没有它，`rejectDetectable` 就没有出处。
+ *
+ * service 形状（cli-only 字段不适用）：
+ *   - 要求 `baseArgs`（启动参数）非空——空启动参数说明表行没填完；
+ *   - cli-only 字段**缺省即合法**，不替它补任何占位值（填了就是撒谎）。
  */
 export function loadRuntimeDescriptor(keyOrDescriptor: string | RuntimeDescriptor): RuntimeDescriptor {
   const desc =
     typeof keyOrDescriptor === 'string' ? getRuntimeDescriptor(keyOrDescriptor) : keyOrDescriptor
-  const resumeFlag = desc.resume.flag
+
+  if (desc.kind !== 'cli') {
+    // service 形状：启动参数必须非空；cli-only 字段缺省合法
+    if (!desc.baseArgs || desc.baseArgs.length === 0) {
+      throw new Error(
+        `runtime ${desc.key}（kind=service）缺少 baseArgs（启动参数，如 app-server 的 ` +
+          `--listen stdio://）。service 形态没有 run 级 argv，baseArgs 是它唯一的一行"命令"——` +
+          `空着等于表行没填完。`,
+      )
+    }
+    return { ...desc }
+  }
+
+  const resumeFlag = desc.resume?.flag
   const flags = desc.managedFlags
   if (!flags || !flags.model || !flags.maxTurns) {
     throw new Error(
@@ -533,6 +686,13 @@ export function loadRuntimeDescriptor(keyOrDescriptor: string | RuntimeDescripto
         `它们是必填的：**这里不能替它猜**——按另一个 CLI 的旗标拼参数，` +
         `轻则起不来，重则静默用了默认值而日志看起来一切正常。` +
         `请在该 runtime 的表行里写明实际的旗标名。`,
+    )
+  }
+  if (!desc.resume) {
+    throw new Error(
+      `runtime ${desc.key} 的描述符缺少 resume（flag / rejectDetectable）。` +
+        `cli 形状的 runtime 必须声明会话恢复的旗标与"恢复被拒能否检测"——` +
+        `没有它，执行器与审计就不知道恢复失败该怎么处理。`,
     )
   }
   return {
@@ -544,6 +704,25 @@ export function loadRuntimeDescriptor(keyOrDescriptor: string | RuntimeDescripto
       resume: resumeFlag || flags.resume,
     },
   }
+}
+
+/**
+ * 返回**cli 形状**的描述符（cli-only 字段必然在位）。
+ *
+ * 供 argv 组装与 cli 适配器使用：先按 kind 校验（cli 缺字段会抛、service 直接
+ * 拒绝），再收窄类型，消费点就不用逐个 `?? 兜底`。
+ */
+export function loadCliRuntimeDescriptor(
+  keyOrDescriptor: string | RuntimeDescriptor,
+): CliRuntimeDescriptor {
+  const desc = loadRuntimeDescriptor(keyOrDescriptor)
+  if (desc.kind !== 'cli') {
+    throw new Error(
+      `runtime ${desc.key} 不是 cli 形状（kind=${desc.kind}）：没有命令行参数可拼。` +
+        `buildArgv 与 cli 适配器只接受 cli 形状的描述符。`,
+    )
+  }
+  return desc as CliRuntimeDescriptor
 }
 
 export function getRuntimeDescriptor(key: string): RuntimeDescriptor {

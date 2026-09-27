@@ -43,7 +43,7 @@
  *     日志里也会说。这条路径是过渡，不是长期设计。
  *   - 两者都没有 ⇒ `null` = 没有标准 ⇒ 不派审核（提示语说清"没有标准"）。
  */
-import type { ActionRefType, Agent } from '@alpha-helper/protocol'
+import type { ActionRefType, Agent } from '@agentdeck/protocol'
 
 /**
  * 解析只需要这两样，所以参数按**结构**收，不写死成 `Skill[]`。
@@ -79,14 +79,14 @@ interface StandardSource {
 interface ActionCapableAgent {
   /** 内联标准。整个键缺失与 `null` 同义——都是"没有内联标准"。 */
   reviewStandard: Agent['reviewStandard'] | undefined
+  /** agent 的「指令」——**2026-09 之后它就是审核者身份的主干**。 */
+  instructions?: string | null | undefined
   /** ★ 这个审核者允许触发哪些动作（D40 收口之后动作权限住在这里）。 */
   allowedActions?: readonly ActionRefType[] | undefined
 }
 
 export interface ResolvedStandard {
-  /** 给人看的名字。 */
-  name: string
-  /** 标准正文（进第一句话的 `{{standards}}`）。 */
+  /** 标准正文（进第一句话的 `{{standards}}`）。这是这份解析结果唯一的内容。 */
   body: string
   /** 判决里允许出现的动作（内置裸名或第三方命名空间，见 `ActionCapableAgent`）。 */
   allowedActions: readonly ActionRefType[]
@@ -106,7 +106,7 @@ export interface ResolvedStandard {
  *
  * ⚠️ D42 起它上面还有一层：**任务级的 `Run.allowedActions`**（新建任务页 ③ 勾的
  *    那一份，只对这一次生效）。优先级是
- *      `run.allowedActions ?? resolveReviewStandard(...).allowedActions`
+ *      `run.allowedActions ?? effectiveAllowedActions(...)`
  *    ——**判据只看字段在不在**：`[]` 是"这一次一个都不许"（明确的选择），
  *    缺字段才是"跟随这里算出来的那份"。
  *
@@ -114,10 +114,23 @@ export interface ResolvedStandard {
  *    **同一个**判据。写在这里是为了让"这个函数不再是全链路的唯一取法"这件事
  *    一眼可见——不然下一个人会以为改了这里就够了。
  *
- * 它不导出给调用方用——调用方要的是 `resolveReviewStandard(...).allowedActions`
- * （同一个函数里已经带上它了）。导出只会多出一个"另写一遍取法"的入口。
+ * ★★ 2026-09：**它必须导出**，而且调用方必须直接用它。这里踩过一次真实的坑：
+ *    起因是它在代码注释里写着"不导出，调用方用 `resolveReviewStandard(...).allowedActions`
+ *    就行"，而那个函数**在没有正文时返回 `null`**（它回答的是"审核标准是什么"）。
+ *    于是判据悄悄变成了"**有没有正文**"：
+ *      · 标准内联在 agent 上时 ⇒ 动作权限正常；
+ *      · 标准并进「指令」、老字段被清掉之后 ⇒ `resolveReviewStandard` 返回 null ⇒
+ *        动作权限**整份丢掉**（`?? []`），判决一引用动作就被升级成"不在这个审核者的
+ *        行动权限里（当前允许：无）"。
+ *    而"标准并进「指令」"正是 2026-09 之后**所有新审核者的常态**——也就是说：
+ *    新建一个审核者、给它勾上动作，它永远触发不了任何动作，且没有任何一处报错。
+ *    抓它的是 `s1-e2e` 那条端到端（它给播种的审核者授权动作，而那条用例走的就是
+ *    "标准在 agent 上"这条路）——**一个坏掉的导出边界，症状出现在离它很远的地方**。
+ *
+ *    ⚠️ 结论写在这里，别再改回去：动作权限的取法**不许经过"有没有标准"这件事**。
+ *       它们本来就是两件事（D40 收口把动作从标准里搬出来，正是为了让它们分开）。
  */
-function effectiveAllowedActions(
+export function effectiveAllowedActions(
   agent: ActionCapableAgent,
   skills: readonly StandardSource[],
 ): readonly ActionRefType[] {
@@ -147,6 +160,36 @@ function effectiveAllowedActions(
  * ⚠️ 传进来的 `skills` 必须是**这个 agent 挂载的那些**（按 agent 求解，D22）——
  *    别传全局的技能表。它们只提供标准**正文**（老数据的兼容路径）。
  */
+/**
+ * 一个审核者的**身份**：agent 的「指令」＋（老数据里的）审核标准正文。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 2026-09：标准并进「指令」，不再单独设置
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者的决定是「审核 Agent 的标准也放 ② 里面，不用单独设置」，而资格判据跟着
+ * 改成「指令非空」。两件事必须一起做，否则会出现最难受的一种状态：
+ *
+ *   · 只改判据 ⇒ 一个**只写了标准、没写指令**的老审核者当场**静默停摆**（产出照样
+ *     跑、审核没了）。这正是 `resolveReviewStandard` 那段兼容路径当初要防的事；
+ *   · 只改归属 ⇒ 界面撤了那个框，而判据还在看它 ⇒ 新建的审核者永远派不出审核。
+ *
+ * 所以这里把两样**合成一份身份**：新数据只有「指令」，老数据把标准正文并进来
+ * （挂在 skill 上的那条也认，那是 D37 之前的形状）。判据看的是**这份身份非空**——
+ * 它就是 ② 要投递的那段文字，一分不差。
+ */
+export function reviewerIdentity(
+  agent: ActionCapableAgent,
+  skills: readonly StandardSource[],
+): { text: string; fromLegacyStandard: boolean } {
+  const instructions = (agent.instructions ?? '').trim()
+  const legacy = resolveReviewStandard(agent, skills)?.body.trim() ?? ''
+  // ⚠️ 指令在前：它是"这个审核者是谁"，标准是"它按什么判"——合成的这份里，
+  //    顺序决定模型先读到哪一半。
+  const text = [instructions, legacy].filter((part) => part !== '').join('\n\n')
+  return { text, fromLegacyStandard: legacy !== '' }
+}
+
 export function resolveReviewStandard(
   agent: ActionCapableAgent,
   skills: readonly StandardSource[],
@@ -155,7 +198,6 @@ export function resolveReviewStandard(
   const inline = agent.reviewStandard
   if (inline && inline.body.trim() !== '') {
     return {
-      name: inline.name,
       body: inline.body,
       allowedActions,
       fromSkills: false,
@@ -166,8 +208,6 @@ export function resolveReviewStandard(
   const usable = skills.filter((s) => s.body.trim() !== '')
   if (usable.length === 0) return null
   return {
-    // 多个 skill 时名字拼起来：它只用于显示与日志
-    name: usable.map((s) => s.name).join('、'),
     body: usable.map((s) => s.body.trim()).join('\n\n'),
     // ⚠️ 动作来自 `effectiveAllowedActions`（权威顺序在那儿写着）：这里**不再**
     //    无条件取 skill 的动作并集（D40 收口之前那一段就是干这个的）——那等于让

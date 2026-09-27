@@ -1,5 +1,5 @@
 /**
- * `@alpha-helper/domain` —— 领域模型层。
+ * `@agentdeck/domain` —— 领域模型层。
  *
  * 依赖方向（design §3.1）：只依赖 `protocol`，不依赖任何存储适配器。
  * 存储能力以**端口**（`ports/store.ts`）的形式声明，由外层适配器实现。

@@ -1,4 +1,4 @@
-import type { WebTextId } from '@alpha-helper/i18n'
+import type { WebTextId } from '@agentdeck/i18n'
 import type { BoundParamSpec, OpenParamSpec, Tool, ToolActionSpec } from './api.ts'
 
 /**
@@ -47,15 +47,20 @@ export function actionCountOf(tool: Tool): number {
 }
 
 /**
- * 这个动作**不能自动执行**吗。
+ * **所有已装工具包一共声明了多少个动作**。
  *
- * ★ 准入条件来自协议：不支持 dry-run 的动作不给"自动执行"资格。界面把这条
- *   讲出来，而不是让使用者自己去清单里对 `dryRun` 的值。
+ * ★ 它是一个**共享的分母**，所以只写这一遍：`ActionPicker` 的状态条（"已允许
+ *   1/5"）与新建任务 ③ 那颗按钮旁边的计数（"已允许 1 / 5 个动作"）说的是同一个
+ *   比值——两处各算一遍的话，两边会在"装了什么包"变化时分叉，而那种分叉的表现
+ *   是**同一屏上两个不同的总数**，看起来像其中一个坏了。
+ *
+ * ⚠️ 分母是**装进来的动作总数**，不是"这个审核者当前允许的那几个"（那是分子那
+ *    一档的事）。实测踩过：拿 `chain.actions.length` 当分母，勾第二个动作之后
+ *    界面上写着"已允许 2 / 1 个动作"。
  */
-export function cannotRunAutomatically(action: ToolActionSpec): boolean {
-  return action.dryRun !== 'supported'
+export function installedActionCount(tools: readonly Tool[]): number {
+  return tools.reduce((sum, tool) => sum + actionCountOf(tool), 0)
 }
-
 /** 绑定参数：名称 + "这个值从哪来"。 */
 export function boundParams(action: ToolActionSpec): Array<{ name: string; label: TextMessage }> {
   return Object.entries(action.params?.bound ?? {}).map(([name, spec]) => ({

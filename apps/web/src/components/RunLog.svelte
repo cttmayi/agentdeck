@@ -116,7 +116,7 @@
   const INITIAL_RETRY_MS = 500
   const MAX_RETRY_MS = 10_000
 
-  const THINKING_KEY = 'alpha-helper.show-thinking'
+  const THINKING_KEY = 'agentdeck.show-thinking'
   let showThinking = localStorage.getItem(THINKING_KEY) === '1'
 
   function toggleThinking(): void {
@@ -525,7 +525,8 @@
   }
 
   .log-row + .log-row {
-    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    /* ⚠️ 原来是 rgba(255,255,255,0.03)——暗色专用，亮色底下看不见分隔线 */
+    border-top: 1px solid var(--line);
   }
 
   .tiny {

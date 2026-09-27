@@ -33,7 +33,7 @@ import {
  */
 
 function logStderr(message: string): void {
-  process.stderr.write(`[alpha-helper-mcp] ${message}\n`)
+  process.stderr.write(`[agentdeck-mcp] ${message}\n`)
 }
 
 function write(response: JsonRpcResponse): void {

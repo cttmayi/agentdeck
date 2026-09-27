@@ -3,19 +3,24 @@ import type { AddressInfo } from 'node:net'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  ALL_KINDS,
+  buildBlocks,
   checkVersionSupport,
   DEFAULT_TEMPLATES,
   getRuntimeDescriptor,
-  MATERIAL_MARKERS,
+  migrateTemplate,
   renderFirstSentence,
   SAMPLE_FIRST_SENTENCE_INPUTS,
   shouldRefuseToRun,
+  TEMPLATE_BLOCKS,
   TEMPLATE_VARIABLES,
   validateTemplate,
   type AgentBackend,
+  type BlockTemplates,
   type FirstSentenceKind,
   type SandboxMode,
-} from '@alpha-helper/agent-core'
+  type TemplateBlock,
+} from '@agentdeck/agent-core'
 import {
   DEFAULT_MAX_CHAIN_DEPTH,
   aggregateCost,
@@ -26,7 +31,15 @@ import {
   validateFixedParams,
   type AllowedActionsResolution,
   type Store,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
+import {
+  localSkillDirCandidates,
+  normalizeSkillDir,
+  reconcileLocalSkillDirs,
+  scanSkillDir,
+  sourceDirOf,
+  type ReconcileReport,
+} from './local-skill-dirs.ts'
 import {
   LOCAL_PROTOCOL_VERSION,
   Capability,
@@ -37,27 +50,33 @@ import {
   type Agent,
   type InboxItem,
   type Issue,
+  type IssueId,
   type BlobRef,
   type Report,
   type Run,
   type RunId,
   type RunMessage,
+  type Conversation,
+  type ConversationId,
   type Skill,
+  type SkillId,
   type Tool,
   type ReviewStandard,
   type VerdictRecord,
   type SubmitRunRequest,
+  SubmitHumanVerdictRequest,
   type AgentRole,
   type Workspace,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
-import { FileStore } from '@alpha-helper/store-file'
-import { resolveReviewStandard } from './review-standard.ts'
+} from '@agentdeck/protocol'
+import { FileStore } from '@agentdeck/store-file'
+import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
 import { applyDeadActionCleanup, planDeadActionCleanup } from './dead-actions.ts'
-import { DEFAULT_LOCALE, isLocale, type Locale } from '@alpha-helper/i18n'
-import { NOT_BUILT_HINT, isWebBuilt, loadStatic } from '@alpha-helper/web'
+import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
+import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
 import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
+import { submitChatTurn, titleFromText } from './chat.ts'
 import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
@@ -73,9 +92,11 @@ import {
   WORK_FILE_HEADERS,
   contentTypeFor,
   listWorkDir,
+  type ManagedPaths,
   managedPathsFor,
   readWorkFile,
 } from './workdir-files.ts'
+import { resolveWorkDir } from './workdir.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
@@ -176,12 +197,12 @@ export interface DaemonOptions {
    * 自动分配的工作目录根（D27）。
    *
    * 缺省是**数据目录之内的 `work/`**（`fallbackWorkRoot`）——一个自洽的兜底，
-   * 不碰家目录。CLI 会显式传 `~/alpha-helper-workspace`（可见的那一个），
+   * 不碰家目录。CLI 会显式传 `~/agentdeck-workspace`（可见的那一个），
    * 因为"工作目录放哪"是面向使用者的产品决定，属于 CLI 那一层。
    */
   workRoot?: string
   /**
-   * 可选沙箱（M4）。缺省 `'none'`——见 `docs/design.md` §14.1 与 NG7：
+   * 可选沙箱（M4）。缺省 `'none'`——见 `docs/design/design.md` §14.1 与 NG7：
    * 首版 run 以 daemon 用户的完整权限执行，这一点必须如实披露。
    *
    * ⚠️ 开启后如果平台上拿不到沙箱工具，daemon **会在起 run 时报错**，
@@ -196,7 +217,7 @@ export interface DaemonOptions {
    *   匿名限额卡住、还会在没网的机器上失败。
    */
   fetchImpl?: typeof fetch
-  /** GitHub 令牌（可选）。缺省读环境变量 ALPHA_HELPER_GITHUB_TOKEN。 */
+  /** GitHub 令牌（可选）。缺省读环境变量 AGENTDECK_GITHUB_TOKEN。 */
   githubToken?: string | null
   onWarn?: (message: string) => void
   onInfo?: (message: string) => void
@@ -220,6 +241,60 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload)
 }
 
+/**
+ * 把某一层工作目录发出去（`GET …/files`）。
+ *
+ * 抽出来是因为它现在**有两个入口**：任务详情按某次执行问（`/api/runs/:id/files`），
+ * 聊天按某个对话问（`/api/conversations/:id/files`）。两处只差"目录从哪来"，
+ * 响应形状与错误口径必须一致——各写一份就是迟早只改一处。
+ */
+async function sendWorkDirListing(
+  res: ServerResponse,
+  workDir: string,
+  dir: string,
+  managed: ManagedPaths,
+): Promise<void> {
+  try {
+    sendJson(res, 200, await listWorkDir(workDir, dir, managed))
+  } catch (err) {
+    // 路径不合法是**使用者输入问题**（400），不是服务坏了
+    if (err instanceof UnsafePathError) {
+      sendJson(res, 400, { error: err.message })
+      return
+    }
+    throw err
+  }
+}
+
+/**
+ * 把工作目录里的一个文件发出去（`GET …/file?path=`）。
+ *
+ * ★ 每个响应都带 `WORK_FILE_HEADERS`（sandbox 的 CSP + `nosniff`）：这些文件是
+ *   **agent 写的**，而页面由 daemon 托管 ⇒ 与接口同源。理由见 `workdir-files.ts`
+ *   顶上那一段。
+ */
+async function sendWorkFile(
+  res: ServerResponse,
+  workDir: string,
+  relPath: string,
+): Promise<void> {
+  try {
+    const body = await readWorkFile(workDir, relPath)
+    res.writeHead(200, {
+      'content-type': contentTypeFor(relPath),
+      'content-length': body.length,
+      ...WORK_FILE_HEADERS,
+    })
+    res.end(body)
+  } catch (err) {
+    if (err instanceof UnsafePathError) {
+      sendJson(res, 400, { error: err.message })
+      return
+    }
+    throw err
+  }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
   let size = 0
@@ -234,40 +309,156 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 /**
- * 内置的通用审核模板（FR-AGENT-08/09）。
+ * 这条 run 能不能承载一条**人工裁决**（D46）。
  *
  * ══════════════════════════════════════════════════════════════════
- * 为什么提成模块级常量
+ * 为什么这个检查必须存在（而不是"界面对了就行"）
  * ══════════════════════════════════════════════════════════════════
  *
- * 它现在有**两个**用处：首启播种、以及给老数据回填版本（见下一个函数）。
- * 回填要靠"正文逐字节相同"来判断"这条就是当年那份原样的内置模板"，
- * 所以两处必须用**同一个字符串**——各写一份的话，改了一处忘了另一处，
- * 回填就会静默失效（表现为版本一直是空，界面永远显示"替换本地同名"）。
+ * 阶段推导（`apps/web/src/lib/pipeline.ts` 的 `stageOf`）**只认审核 run 上的
+ * 判决**——一条任务有没有审完，看的是"它最新那次执行有没有一条已完成的审核
+ * run"。所以如果人工裁决被挂到一条**不生效**的 run 上，后果是：
+ *
+ *   人点了「人工通过」→ 请求 201 成功 → 判决确实落库了 → **看板一动不动**。
+ *
+ * 这是这个仓库最防的那类失效："看起来对、实际错"，而且两边都不报错。所以
+ * 这个函数不是防御性编程，它是这条路由**唯一的正确性保证**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 判据：什么样的 run 才有"可裁决的结论"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * | run | 允许吗 | 为什么 |
+ * |---|---|---|
+ * | 非终态（跑着 / 排队中） | ✗ | 还没有产出，人没有可看的东西——裁决它等于凭想象下结论 |
+ * | `review`，已有判决，且它审的执行**仍是这条任务最新的一次** | ✓ | 裁决的就是那份结论 |
+ * | `review`，没有判决 | ✗ | 判决不合规到连记录都没有时，没有"结论"可裁决。这时该做的是重试审核，不是替它下结论 |
+ * | `review`，但它审的执行**已经被后来的一次执行取代** | ✗ | 那条判决在阶段推导里**已经不生效**了（看板只看最新一次执行的审核）。挂在它上面就是"点了通过、看板不动" |
+ * | `execute`，这条执行**没有任何审核 run** | ✓ | 这就是"压根没配审核者"那种任务：它永远停在「待审查」，而人想自己确认。裁决挂在执行 run 上，`stageOf` 有对应的分支 |
+ * | `execute`，**已经有审核结论** | ✗ | 裁决必须挂在**那条审核 run** 上（否则同上） |
+ * | `execute`，**审核正在跑** | ✗ | 结论马上就出来了，这时候插一脚只会让两个结论打架。等它跑完 |
+ *
+ * ⚠️ 关于"它审的执行是不是最新的一次"：这条**只对审核 run** 判，而且只判
+ *    "这条任务最新那次执行是哪条"——**不是**在 daemon 侧重算整个 `stageOf`。
+ *    锚点的完整规则（含返工、审核重试、执行失败）仍然只有 `pipeline.ts` 一处
+ *    实现，界面把算好的锚点传过来；这里补的这一条是**防陈旧页面**用的：
+ *    页面开着的时候又跑了一次执行/审核，那时界面手上的锚点就过期了。
  */
-const BUILTIN_REVIEW_STANDARD: ReviewStandard = {
-  name: '通用审核',
-  body: [
-    '# 通用审核',
-    '',
-    '## 判断标准',
-    '',
-    '1. **能明确判断**时给出 `pass` 或 `fail`，并把证据指回原文。',
-    '2. **判断依据不足**时给出 `needs_human`，写清楚缺什么。',
-    '3. 不要引入这份标准之外的要求——那是越权，不是严谨。',
-    '',
-    '## 动作约定',
-    '',
-    '- `fail` 时用 `findings` 说清"接下来做什么"，而不是只描述问题。',
-    '- ⚠️ 这份标准里**不再点名任何动作**：D41 之后平台没有内置动作，能做什么',
-    '  完全取决于审核者的「行动权限」里勾了哪些工具包动作。没有勾任何动作时',
-    '  不要写 `action`（见任务说明里的判决契约）。',
-  ].join('\n'),
-  // ⚠️ 这里原来还有一个 `allowedActions`（这份标准只允许发表评论与打标签）。
-  //    D40 收口之后**标准里不再有动作权限**——它是审核者的能力，播种时写在
-  //    agent 上。分开之后"我改了标准正文"与"我放宽了判完能做什么"在审计与
-  //    界面上都能分开看。
+async function canHostHumanVerdict(
+  store: Store,
+  run: Run,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
+    return {
+      ok: false,
+      reason: `这条 run 还没结束（${run.status}），现在没有可裁决的东西`,
+    }
+  }
+
+  if (run.kind === 'review') {
+    const verdicts = await store.listVerdictsByRun(run.id)
+    if (verdicts.length === 0) {
+      return {
+        ok: false,
+        reason:
+          '这条审核 run 没有产出过判决，所以没有可裁决的结论。' +
+          '要人工下结论，请对那条执行 run 做裁决；要重试审核，请从任务详情重新派一次审核。',
+      }
+    }
+
+    // ── 它审的那次执行，还是这条任务最新的一次吗 ──
+    //
+    // 只有"审的是 issue 的执行 run"这一种形状能判：subject 是 run 而不是 issue 的
+    // 那些（理论上存在）不在这里下结论——判不了就不拦，而不是猜一个。
+    if (run.subject.type === 'run') {
+      const target = await store.getRun(run.subject.id as RunId)
+      if (target && target.kind === 'execute' && target.subject.type === 'issue') {
+        const issueId = target.subject.id
+        const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
+        const latest = page.items
+          .filter(
+            (r) =>
+              r.kind === 'execute' && r.subject.type === 'issue' && r.subject.id === issueId,
+          )
+          .sort((a, b) => b.queuedAt - a.queuedAt)[0]
+        if (latest && latest.id !== target.id) {
+          return {
+            ok: false,
+            reason:
+              `这条审核判的是更早那次执行（run ${target.id}），它已经被后来的一次执行` +
+              `（run ${latest.id}）取代了——那条判决在看板上不生效。` +
+              '请对最新那次执行的审核结论做裁决。',
+          }
+        }
+      }
+    }
+    return { ok: true }
+  }
+
+  if (run.kind === 'execute') {
+    // 这条执行身上有没有审核 run？
+    //
+    // 一次列表读取就够（`RunQuery` 没有 kind/subject 过滤，所以在这里筛）：
+    // `limit` 取一个远大于实际规模的数——单工作区的 run 数是千级，而这是
+    // **人点按钮时**才走的一条路，不是热路径。
+    const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
+    const reviews = page.items.filter(
+      (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === run.id,
+    )
+
+    const reviewed = reviews.find((r) => r.status === 'completed')
+    if (reviewed) {
+      // 找到了就**把那条 run 的 id 说给使用者**：只说"不允许"会让人不知道
+      // 下一步该去哪儿，而这一步完全是可操作的（就是界面上那条审核 run 的标签页）。
+      return {
+        ok: false,
+        reason:
+          `这条执行已经有审核结论了（审核 run ${reviewed.id}），` +
+          '人工裁决要挂在那条审核 run 上——否则判决会落在一个阶段推导不看的地方，' +
+          '表现为"点了通过但看板不动"。',
+      }
+    }
+
+    const running = reviews.find((r) => !TERMINAL_RUN_STATUSES.includes(r.status))
+    if (running) {
+      return {
+        ok: false,
+        reason: `这条执行的审核还在跑（run ${running.id}），等它出结论再裁决`,
+      }
+    }
+
+    return { ok: true }
+  }
+
+  return { ok: false, reason: `不能对 ${run.kind} 类型的 run 做人工裁决` }
 }
+
+/**
+ * 这条 run 是不是**这条任务**的（D47 放弃时用来找出要取消哪些 run）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么不能只判 `subject.type === 'issue'`
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * **审核 run 的 subject 是那条执行 run 的 id，不是 issue**（这条链在
+ * `pipeline.ts` 顶部解释过一次，`stageOf` 也因此踩过坑）。只按 issue 过滤的
+ * 后果是：放弃一条任务时，**正在跑的审核 run 不会被取消**——它继续读产出、
+ * 继续调模型、最后写一条判决挂在一条已经放弃的任务上。
+ *
+ * 所以顺着 subject 往上走：`review → execute → issue`。深度**有界**（只走
+ * 两层），因为更长的链在当前实现里不存在，而一个无界递归遇到坏数据会转不出来。
+ */
+async function runBelongsToIssue(store: Store, run: Run, issueId: IssueId): Promise<boolean> {
+  let cursor: Run | null = run
+  for (let depth = 0; depth < 3 && cursor; depth++) {
+    const subject = cursor.subject
+    if (subject.type === 'issue') return subject.id === issueId
+    if (subject.type !== 'run') return false
+    cursor = await store.getRun(subject.id as RunId)
+  }
+  return false
+}
+
 
 /**
  * 首启播种的那个审核者的动作权限（D41）。
@@ -670,13 +861,17 @@ async function installToolPackage(input: {
       error:
         `已有同名工具包「${slug}」（来源：${describeToolSource(clash.sourceRef ?? clash.source)}）。` +
         '同名一律拒绝写入，避免"装的时候顺手覆盖了你自己的东西"；' +
-        '确实要替换请显式传 overwrite: true（挂载关系会保留，因为替换复用同一个 id）。',
+        '确实要替换请显式传 overwrite: true（替换会复用同一条记录，所以判决与审计里' +
+        '写过的「<包 slug>.<动作名>」照样对得上）。',
     }
   }
 
   const tool = toToolRecord(pkg, {
-    // 同名替换时**复用原 id**：agent 的 `toolIds` 指的是**组**，换了 id 就等于
-    // 所有挂载它的 agent 指着一条已经不存在的记录（表现是"工具悄没了"）
+    // 同名替换时**复用原 id**。原来的理由是"agent 的 toolIds 指着这个 id"，
+    // 那条已经随挂载能力一起撤了；现在复用 id 是为了**别的东西**：
+    // `allowedActions` 里的动作名是 `<包 slug>.<动作名>`，而审计记录、判决、
+    // 已经在跑的 run 里都留着这个包的 id 与 slug——换 id 会让"刚才那条动作是哪个
+    // 包做的"在追溯时对不上。
     id: (clash?.id ?? (ulid() as Tool['id'])) as Tool['id'],
     workspaceId,
     createdAt: clash?.createdAt ?? now,
@@ -777,26 +972,45 @@ async function readWorkspaceSettings(
 ): Promise<{
   executeTemplate: string
   reviewTemplate: string
+  chatTemplate: string
+  executeIdentityTemplate: string
+  executeTaskTemplate: string
+  reviewIdentityTemplate: string
+  reviewTaskTemplate: string
+  chatIdentityTemplate: string
+  chatTaskTemplate: string
   defaultAgentId: string | null
   locale: Locale
-  /**
-   * 是否允许自动执行"不支持 dry-run"的工具动作（D40）。
-   *
-   * ⚠️ 读的地方**必须**用它做准入判定（`actions.ts` 里的守卫），不能只管显示：
-   *    界面写着"不能自动执行"而平台照跑，那是在骗使用者。
-   */
-  allowUnpreviewedActions: boolean
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
     executeTemplate: workspace?.executeTemplate ?? '',
     reviewTemplate: workspace?.reviewTemplate ?? '',
+    chatTemplate: workspace?.chatTemplate ?? '',
+    // 2026-10 后加的六个键（② 身份 / ③ 任务框）：老 workspace 没有 ⇒ 空 = 平台默认
+    executeIdentityTemplate: workspace?.executeIdentityTemplate ?? '',
+    executeTaskTemplate: workspace?.executeTaskTemplate ?? '',
+    reviewIdentityTemplate: workspace?.reviewIdentityTemplate ?? '',
+    reviewTaskTemplate: workspace?.reviewTaskTemplate ?? '',
+    chatIdentityTemplate: workspace?.chatIdentityTemplate ?? '',
+    chatTaskTemplate: workspace?.chatTaskTemplate ?? '',
     defaultAgentId: workspace?.defaultAgentId ?? null,
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
-    // 老数据没有这个键 ⇒ false（**更严**的那一边：这类动作默认不自动执行）
-    allowUnpreviewedActions: workspace?.allowUnpreviewedActions ?? false,
   }
+}
+
+/**
+ * 这个工作区**勾了哪些本地技能目录**。
+ *
+ * ⚠️ 老数据没有这个键 ⇒ `[]`（与"还没勾过任何目录"同义），不做数据迁移。
+ */
+async function readLocalSkillDirs(
+  store: Store,
+  workspaceId: WorkspaceId,
+): Promise<string[]> {
+  const workspace = await store.getWorkspace(workspaceId)
+  return workspace?.localSkillDirs ?? []
 }
 
 /**
@@ -830,22 +1044,16 @@ function parseReviewStandard(
 ): { ok: true; value: Agent['reviewStandard'] } | { ok: false; error: string } {
   if (raw === undefined || raw === null) return { ok: true, value: null }
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, error: 'reviewStandard 必须是「名字 + 正文」的对象或 null' }
+    return { ok: false, error: 'reviewStandard 必须是含 body 的对象或 null' }
   }
   const obj = raw as Record<string, unknown>
-  const name = typeof obj['name'] === 'string' ? obj['name'].trim() : ''
   const body = typeof obj['body'] === 'string' ? obj['body'].trim() : ''
-  if (name === '' || body === '') {
-    // 两者都空 ⇒ 当成"清空标准"（与传 null 等价）；只给一个 ⇒ 那是填错了
-    if (name === '' && body === '') return { ok: true, value: null }
-    return {
-      ok: false,
-      error: 'reviewStandard 需要 name 与 body 都非空（要清空就传 null，或两个都留空）',
-    }
-  }
-  if (name.length > 100) {
-    return { ok: false, error: `reviewStandard.name 太长了（上限 100 字符，收到 ${name.length}）` }
-  }
+  // 正文空 ⇒ 当成"清空标准"（与传 null 等价）：没有标准就拿不到审核任务，
+  // 所以"空正文"和"没有标准"是同一件事，不该存成一条空标准。
+  if (body === '') return { ok: true, value: null }
+  // ⚠️ 老客户端会照旧送 `name` 进来（它以前是必填的）。**刻意忽略**，不报 400：
+  //    使用者没做错什么，只是少升了一次级；而收下它等于把一个已经删掉的字段
+  //    又写回数据里。与下面 `allowedActions` 那段同一个处置。
 
   // ⚠️ 老字段 `reviewStandard.allowedActions` 在这里**被刻意忽略**：
   //    协议里它降级成了"老数据的只读兼容字段"（读取时在 `Agent.allowedActions`
@@ -860,11 +1068,11 @@ function parseReviewStandard(
   if (Array.isArray(legacy) && legacy.length > 0) {
     warn(
       '收到 reviewStandard.allowedActions（老契约）。动作权限已经搬到 `Agent.allowedActions`，' +
-        `这次的值（${legacy.length} 个）**不会被写入**——请改在 agent 上配动作。`,
+        `这次的值（${legacy.length} 个）不会被写入——请改在 agent 上配动作。`,
     )
   }
 
-  return { ok: true, value: { name, body } }
+  return { ok: true, value: { body } }
 }
 
 /**
@@ -953,7 +1161,7 @@ function parseAgentAllowedActions(
       ok: false,
       error:
         `allowedActions 里有不认识的动作：${notAnAction.join('、')}。` +
-        `动作只能来自**已安装的工具包**，写成 \`<包 slug>.<动作名>\` ` +
+        `动作只能来自已安装的工具包，写成 \`<包 slug>.<动作名>\` ` +
         `（平台没有内置动作——D41 已经把它们全部移除了）。`,
     }
   }
@@ -961,7 +1169,7 @@ function parseAgentAllowedActions(
     return {
       ok: false,
       error:
-        'allowedActions 里有动作来自**还没安装**的工具包：' +
+        'allowedActions 里有动作来自还没安装的工具包：' +
         fromMissingPackage.map((m) => `${m.action}（来自工具包「${m.slug}」）`).join('、') +
         '。先把这些包装上（装完再配动作），或者把这些动作去掉' +
         '——这里拒掉是因为：等到真的跑起来才发现"策略要的动作找不到包"，' +
@@ -972,7 +1180,7 @@ function parseAgentAllowedActions(
     return {
       ok: false,
       error:
-        'allowedActions 里有工具包**没有声明**的动作：' +
+        'allowedActions 里有工具包没有声明的动作：' +
         notDeclared
           .map(
             (m) =>
@@ -1044,7 +1252,7 @@ function parseAgentActionParams(
     return {
       ok: false,
       error:
-        'actionParams 里有动作来自**还没安装**的工具包（或那个包没有声明这个动作）：' +
+        'actionParams 里有动作来自还没安装的工具包（或那个包没有声明这个动作）：' +
         unknownActions.join('、') +
         '。先把这些包装上（装完再配固定参数），或者把这一项去掉——' +
         '固定参数是给"这一次判决要触发的动作"钉值的，动作都不存在，参数就无处安放。',
@@ -1067,11 +1275,13 @@ function parseAgentActionParams(
 /**
  * ★ 只有**审核者**能有非空的 `allowedActions`（D40）。
  *
- * 执行者的能力是**工具**（`toolIds`，它干活时用的），而动作是**判完之后**由
- * 平台执行的——那份判断属于审核者。给执行者配动作权限是把两件事混在一起：
- * 它会看起来"能自己改状态"，而实际上那条链路（判决 → 动作）根本不经过它。
+ * 动作是**判完之后**由平台执行的——那份判断属于审核者。给执行者配动作权限是把
+ * 两件事混在一起：它会看起来"能自己改状态"，而实际上那条链路（判决 → 动作）
+ * 根本不经过它。
  *
- * 与"审核者不挂工具"是对称的两条：各自的能力只给各自的人。
+ * ⚠️ 这条规矩原来有一句对称的话："执行者的能力是**工具**，审核者不挂工具"。
+ *    挂载能力撤掉之后，执行者**没有**自己那一半能力了——但这条规矩本身仍然成立
+ *    （它管的是 `allowedActions`，与挂载无关），所以留在这里。
  *
  * 写成函数而不是在两处各写一个 `if`：POST 与 PATCH 的措辞必须一致，而且
  * PATCH 那边还要考虑"角色与动作在同一个请求里一起改"，那正是最容易漏的一处。
@@ -1086,33 +1296,49 @@ function rejectActionsForExecutor(input: {
    * 给动作钉固定参数更是无从谈起——它会看起来"能自己决定怎么改状态"。
    */
   hasActionParams: boolean
+  /**
+   * 这次请求里**有没有带非空的调试动作**（`debugActions`，2026-09）。
+   *
+   * 调试是"勾了之后这条动作不真跑、只记录动作与参数"——同样只属于审核者：
+   * 执行者不配动作，标调试更是无从谈起。
+   */
+  hasDebugActions: boolean
   /** 这句话会进错误信息：说清是谁。 */
   who: string
   /** 是不是这次请求**主动给了**动作（决定提示语的下一步怎么指）。 */
   gaveActions: boolean
 }): string | null {
-  if (input.role === 'reviewer' || (input.actions.length === 0 && !input.hasActionParams)) {
+  if (
+    input.role === 'reviewer' ||
+    (input.actions.length === 0 && !input.hasActionParams && !input.hasDebugActions)
+  ) {
     return null
   }
   if (input.gaveActions) {
     return (
       `执行者不能有动作权限（allowedActions）：收到 ${input.actions.length} 个（` +
       `${input.actions.join('、')}）。` +
-      '执行者的能力是**工具**（toolIds，干活时用的），而动作是**判完之后**由平台执行的' +
-      '——那份判断属于审核者。要让它判完之后能做什么，把角色改成审核者（reviewer）' +
-      '并在同一个请求里带上动作。'
+      '动作是判完之后由平台执行的——那份判断属于审核者。' +
+      '要让它判完之后能做什么，把角色改成审核者（reviewer）并在同一个请求里带上动作。'
     )
   }
   if (input.hasActionParams) {
     return (
       `${input.who}现在配置了动作的固定参数（actionParams），不能把角色改成执行者：` +
-      '固定参数是给"判完之后要触发的动作"钉值的，而执行者的能力是**工具**（toolIds）。' +
+      '固定参数是给"判完之后要触发的动作"钉值的，而执行者不配动作。' +
       '先把固定参数清空（actionParams 传空对象），再改角色。'
+    )
+  }
+  if (input.hasDebugActions) {
+    return (
+      `${input.who}现在把动作标成了「调试」（debugActions），不能把角色改成执行者：` +
+      '调试是给"判完之后要触发的动作"准备的（勾了之后只记录动作与参数、不跑脚本），而执行者不配动作。' +
+      '先把调试清空（debugActions 传空数组），再改角色。'
     )
   }
   return (
     `${input.who}现在有 ${input.actions.length} 个动作权限，不能把角色改成执行者：` +
-    '动作是**判完之后**由平台执行的，执行者的能力是**工具**（toolIds）。' +
+    '动作是判完之后由平台执行的，执行者不配动作。' +
     '先把动作清空（allowedActions 传空数组），再改角色。'
   )
 }
@@ -1130,19 +1356,39 @@ function rejectActionsForExecutor(input: {
  *    才以"模型乱答"的形式暴露，排查方向会指向模型，而不是那个拼错的变量名。
  *    界面的「新建 / 编辑」两个入口都过这一关。
  */
+/**
+ * 解析一块模版（某个 kind 的某个 block）。**与预览走同一道关**。
+ *
+ * ⚠️ 写入口漏掉一条链路的表现是**静默的**：界面上的「聊天」页签照常保存、照常
+ *   提示已保存，而库里那个键根本没写（`PUT` 只遍历它认识的那几个 key）——
+ *   使用者会以为"聊天那条模版不生效"，而真正生效的是平台默认那份。
+ *   所以这里遍历的是 `ALL_KINDS × TEMPLATE_BLOCKS` 的**完整叉积**——加第三条链路
+ *   或第三块时，写入口自动就认识它。
+ */
+function kindNameForApi(kind: FirstSentenceKind): string {
+  return kind === 'execute' ? '执行' : kind === 'review' ? '审核' : '聊天'
+}
+
+function blockNameForApi(block: TemplateBlock): string {
+  return block === 'frame' ? '① 框架' : block === 'identity' ? '② 身份' : '③ 任务'
+}
+
 function parseTemplateField(
-  key: 'executeTemplate' | 'reviewTemplate',
+  kind: FirstSentenceKind,
+  block: TemplateBlock,
   raw: unknown,
 ): { ok: true; value: string | undefined } | { ok: false; error: string } {
   if (raw === undefined) return { ok: true, value: undefined }
   if (raw === null) return { ok: true, value: '' }
   if (typeof raw !== 'string') {
-    return { ok: false, error: `${key} 必须是字符串（空字符串 = 用平台默认模版）` }
+    return {
+      ok: false,
+      error: `${kindNameForApi(kind)}的${blockNameForApi(block)}模版必须是字符串（空字符串 = 用平台默认模版）`,
+    }
   }
   const text = raw.trim()
   if (text === '') return { ok: true, value: '' }
-  const kind: FirstSentenceKind = key === 'executeTemplate' ? 'execute' : 'review'
-  const check = validateTemplate(kind, text)
+  const check = validateTemplate(kind, block, text)
   if (!check.ok) return { ok: false, error: check.error }
   return { ok: true, value: text }
 }
@@ -1303,6 +1549,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     executeRun: Run
     executorAgentId: string
     output: string
+    /**
+     * §3.3b（2026-09）：执行任务/执行结果的两份**落盘文件**路径（执行器在
+     * 完成时写好，按轮次编号、多轮不覆盖）。透传给审核 run 的第一句话做
+     * 文件引用；null = 没有（报告类审核/落盘失败）⇒ 纯内联材料。
+     */
+    materialRefs: { taskPath: string; resultPath: string } | null
   }): Promise<{ runId: RunId | null; note: string }> {
     const agents = await store.listAgents(workspaceId)
     const executor = agents.find((a) => (a.id as string) === input.executorAgentId)
@@ -1324,7 +1576,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         runId: null,
         note:
           '没有串接审核：这次任务在新建时选择了「这次不自动审核」。' +
-          '这是**明确的选择**，不是配置错误。',
+          '这是明确的选择，不是配置错误。',
       }
     }
 
@@ -1342,7 +1594,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         runId: null,
         note:
           `没有串接审核：agent「${executor.name}」没有指定审核者（「由谁审它」是空的）。` +
-          `这是**明确的选择**，不是配置错误；要自动审就在智能体页给它选一个审核者。`,
+          `这是明确的选择，不是配置错误；要自动审就在智能体页给它选一个审核者。`,
       }
     }
 
@@ -1459,6 +1711,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         : { actionParams: input.executeRun.actionParams }),
       // ★ 把 issue 交给模型：判决里的动作参数需要它
       relatedIssueId: issueIdOfSubject(input.executeRun),
+      // ★ §3.3b（2026-09）：执行任务/执行结果的文件引用（执行器落盘、多轮不覆盖）
+      materialRefs: input.materialRefs,
       prompt: '请审核上面这次执行的产出，并按审核标准给出判决。',
     })
     return {
@@ -1466,8 +1720,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       note: chainedRunId
         ? `已串接审核：run ${chainedRunId}（审核者「${reviewer.name}」）。它继承本次的工作目录，` +
           `所以看得见这里留下的产出。`
-        : `没有串接审核：审核者「${reviewer.name}」**没有审核标准**——` +
-          `没有标准的审核不算审核。去「智能体」页给它写一条（那是它判断的依据）。`,
+        : `没有串接审核：审核者「${reviewer.name}」没有写「指令」——` +
+          `审核者的身份与判断依据都写在那一栏里（2026-09 起「标准」并进「指令」）。` +
+          `没有依据的审核不算审核，去「智能体」页给它写一段。`,
     }
   }
 
@@ -1595,15 +1850,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
      *    这一次就用它（空对象 = 这一次不固定任何参数，是明确的选择）。
      */
     actionParams?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>
+    /**
+     * §3.3b（2026-09）：执行任务/执行结果的文件引用（执行器落盘的两份路径，
+     * 多轮不覆盖）。进审核的第一句话做文件引用；null/缺省 = 纯内联材料
+     * （报告类审核、重试）。
+     */
+    materialRefs?: { taskPath: string; resultPath: string } | null
   }): Promise<RunId | null> {
     const { reviewer } = input
     // ★ 技能按 agent 求解（不是全局挂一遍，D22）——
     //   D37 之后它对**审核者**只是"可选的参考/支持文件"，标准本身在
     //   `reviewStandard` 上。所以这里照旧取，但**不拿它当"能不能审"的判据**。
     const skills = await loadAgentSkills(store, reviewer)
-    const standard = resolveReviewStandard(reviewer, skills)
-    if (!standard) {
-      warn(`agent ${reviewer.name} 没有审核标准，无法审核`)
+    /**
+     * ★ 资格判据（2026-09 的决定）：**身份非空**——也就是「指令」非空。
+     *
+     * 在此之前判的是"有没有审核标准"，而标准现在并进「指令」、不再单独设置
+     * （见 `reviewerIdentity`）。⚠️ 用合成后的**身份**判、不用裸的 `instructions`：
+     * 老数据里"只写了标准、没写指令"的审核者因此仍然能派审核——直接换判据会让它
+     * **静默停摆**（产出照样跑、审核没了），而那正是这条兼容路径当初要防的事。
+     */
+    const identity = reviewerIdentity(reviewer, skills)
+    if (identity.text === '') {
+      warn(`agent ${reviewer.name} 没有写「指令」（审核者的身份与判断依据都在那里），无法审核`)
       return null
     }
 
@@ -1645,6 +1914,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         body: input.body,
         inputBlobRef: input.inputBlobRef ?? null,
         relatedIssueId: input.relatedIssueId ?? null,
+        materialRefs: input.materialRefs ?? null,
       },
     })
 
@@ -1707,30 +1977,37 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *
    * 模型是对的：**没有材料就不该审**。而它连那点材料都没有，还要花一次 CLI 的钱。
    *
-   * 材料从哪儿来：每次 run 都会把自己的「第一句话」原样留一份在
-   * `<workdir>/.alpha-helper/context/<runId>.md`，而里面的待审内容是**用标记
-   * 包起来的**（`<<<ALPHA_MATERIAL>>>`）。按标记切一刀就是原样的材料——
-   * 确定性切片，不需要另存一份、也不会随格式漂。
+   * 材料从哪儿来（2026-09 之后**不再读上下文副本**——那个文件已经不再写）：
+   * 材料**记在 run 记录上**（`previousMaterialRefs` / `previousReportBody`，
+   * 见 executor 落库处）：
+   *
+   *   · **文件式审核**（执行 run 串出来的，`materialRefs` 有值）：读
+   *     `rounds/<轮次>-result.md` 那个**结果文件**当材料（文件是完整原文，
+   *     比重试塞截断的内联更对）；
+   *   · **报告式审核**（没有执行 run ⇒ 没有文件）：`reportBody` 就是材料
+   *     （它就是渲染时被标记包起来的那段正文，原样带回）。
+   *
+   * 两种都拿不到 ⇒ 空材料 ⇒ 不起这次重试（见调用处）。
    */
   async function previousMaterial(
     previous: Run,
-  ): Promise<{ body: string; from: string | null }> {
-    const path = join(
-      previous.workDir ?? '',
-      '.alpha-helper',
-      'context',
-      `${previous.id}.md`,
-    )
-    const text = await readFile(path, 'utf8').catch(() => null)
-    if (text === null) return { body: '', from: null }
-    const begin = text.indexOf(MATERIAL_MARKERS.begin)
-    if (begin === -1) return { body: '', from: null }
-    const bodyStart = begin + MATERIAL_MARKERS.begin.length
-    // ★ 取**最后一个**结束标记：材料本身可能又是一份上下文副本（里面同样有
-    //   这对标记，比如"重试的重试"）。取第一个会把材料提前截断。
-    const end = text.lastIndexOf(MATERIAL_MARKERS.end)
-    if (end < bodyStart) return { body: '', from: null }
-    return { body: text.slice(bodyStart, end).trim(), from: path }
+  ): Promise<{
+    body: string
+    from: string | null
+    materialRefs: { taskPath: string; resultPath: string } | null
+  }> {
+    // 文件式审核：读结果文件（路径在 run 记录上）。
+    const refs = previous.materialRefs
+    if (refs) {
+      const fileBody = await readFile(refs.resultPath, 'utf8').catch(() => null)
+      if (fileBody !== null) return { body: fileBody.trim(), from: refs.resultPath, materialRefs: refs }
+    }
+    // 报告式审核：报告正文就是材料。
+    const reportBody = previous.reportBody
+    if (reportBody !== null && reportBody !== undefined && reportBody.trim() !== '') {
+      return { body: reportBody.trim(), from: null, materialRefs: null }
+    }
+    return { body: '', from: null, materialRefs: null }
   }
 
   async function createRetryRun(previous: Run): Promise<string | null> {
@@ -1743,8 +2020,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
 
     const skills = await loadAgentSkills(store, agent)
-    if (!resolveReviewStandard(agent, skills)) {
-      warn(`agent ${agent.name} 没有审核标准，无法重试`)
+    if (reviewerIdentity(agent, skills).text === '') {
+      warn(`agent ${agent.name} 没有写「指令」，无法重试审核`)
       return null
     }
 
@@ -1797,10 +2074,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       review: {
         kind: 'run-output',
         title: `重试审核（原 run ${previous.id.slice(-8)}）`,
-        // ★ 原样的材料（从上次的上下文副本里按标记切出来的），不是空串
+        // ★ 原样的材料（文件式审核读结果文件 / 报告式按标记切，见 `previousMaterial`），
+        //   不是空串
         body: material.body,
         inputBlobRef: null,
         relatedIssueId: issueIdOfSubject(previous),
+        // ★ §3.3b：上次是文件式审核就把引用**带下去**——重试 run 的第一句话
+        //   也走文件引用（不内联材料），与文件式的其它审核一个形状。
+        materialRefs: material.materialRefs,
       },
     })
 
@@ -1990,11 +2271,33 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     if (req.method === 'GET' && !path.startsWith('/api/') && path !== '/health') {
       const asset = await loadStatic(path)
       if (asset) {
+        /**
+         * ★ 缓存头是**正确性**，不是优化。
+         *
+         * 原来这里一个缓存头都不发（`index.html` 既没有 `Cache-Control` 也没有
+         * `ETag`），于是浏览器拿这份外壳没有任何办法：既不知道能不能复用，也没有
+         * 依据去问"变了没有"。表现是**重建前端之后，早就开着的标签页仍然跑旧
+         * 前端**——而两边都不报错，只能靠人猜"你刷新过没有"。见
+         * `apps/web/server/index.ts` 里 `cacheHeadersFor` 的注释。
+         *
+         * 带 `If-None-Match` 回来问的时候回 **304**：外壳每次都核对（`no-cache`），
+         * 但核对本身应该便宜——不然每次刷新都要重下一份 HTML。
+         */
+        if (req.headers['if-none-match'] === asset.etag) {
+          res.writeHead(304, {
+            etag: asset.etag,
+            'cache-control': asset.cacheControl,
+          })
+          res.end()
+          return
+        }
         res.writeHead(200, {
           'content-type': asset.contentType,
           'content-length': asset.body.length,
           // 同源页面，不需要放宽任何跨源策略
           'x-content-type-options': 'nosniff',
+          'cache-control': asset.cacheControl,
+          etag: asset.etag,
         })
         res.end(asset.body)
         return
@@ -2075,6 +2378,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ★ 界面语言跟着身份一起给：页面启动时就要知道用哪种语言渲染，
         //   而不是先闪一下中文再切过来（D39）
         locale: (await readWorkspaceSettings(store, workspaceId)).locale,
+        /**
+         * ★ 这份界面是哪一版（构建产物文件名）。
+         *
+         * 添加它的理由是一次真实误判：使用者报"聊天页不工作、任务页正常"，查下来
+         * daemon 与当前前端都是好的——他看的是一个**早就开着、没有刷新**的标签页。
+         * 这类"两边都不报错"的错位只能靠一句话回答："你现在跑的是哪一版前端"。
+         */
+        webBuild: await webBuildId(),
         runtimes,
         capabilities: [
           Capability.SseResume,
@@ -2087,6 +2398,25 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           //   `Capability.TaskActionWhitelist`）：合成一个会漏掉"支持前者、不支持
           //   后者"的中间态——那时勾选会被静默丢掉，而使用者以为这次允许了它动手。
           Capability.TaskActionWhitelist,
+          // ★ D46：人工裁决。理由见协议里 `Capability.HumanVerdict` 的注释——
+          //   要点是**别让界面画一个它兑现不了的承诺**：一个点了没反应的
+          //   「人工通过」按钮，会让人以为自己已经通过了审核，而任务还卡着。
+          Capability.HumanVerdict,
+          // ★ D47：放弃任务。它与人工裁决是**两次独立的交付**，所以是两个标志
+          //   （理由见协议里 `Capability.IssueAbandon`）：放弃只碰 issue 的状态、
+          //   不碰判决，合成一个会漏掉"支持前者、不支持后者"的中间态。
+          Capability.IssueAbandon,
+          // ★ D49 ⑩：对话自带 skill（`Conversation.skillIds`）。界面据此决定
+          //   "没人挂的 skill"给不给选——理由见协议里 `Capability.ConversationSkills`
+          //   的注释：旧 daemon 会静默忽略那个字段，而"只重建前端、不重启 daemon"
+          //   正是日常做法。
+          Capability.ConversationSkills,
+          // ★ D49 ⑩ 的第二半：对话级的工作目录（聊天右栏底部那一栏）。与上面
+          //   那条分开是**两个字段、两份契约**：那条决定 skill 怎么进去，这条
+          //   决定文件怎么看出来。合成一个会漏掉中间态——那时界面画出一栏，
+          //   而旧 daemon 上它的接口 404（"取不到"必须说出来，不能安静地空着，
+          //   这是任务页那次实测的教训）。
+          Capability.ConversationFiles,
         ],
       })
       return
@@ -2181,46 +2511,83 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
-    // ── 「不支持预演的动作」准不准自动执行（D40）──
-    //
-    // ★ 这是**准入**，不是偏好：工具包里的脚本会在使用者机器上真的改东西，而
-    //   `dryRun: "unsupported"` 是作者在说"我保证不了先告诉你我要改什么"。
-    //   默认 false ⇒ 平台**真的不执行**这类动作（守卫在 `actions.ts`），要放行
-    //   必须有人在这里显式打开；界面同时给出警告。
-    if (req.method === 'PUT' && path === '/api/workspace/unpreviewed-actions') {
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const raw = body['allow']
-      if (typeof raw !== 'boolean') {
-        sendJson(res, 400, { error: `allow 必须是布尔值（收到 ${JSON.stringify(raw)}）` })
-        return
-      }
-      const workspace = await store.getWorkspace(workspaceId)
-      if (!workspace) {
-        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
-        return
-      }
-      await store.insertWorkspace({
-        ...workspace,
-        allowUnpreviewedActions: raw,
-        updatedAt: Date.now(),
-      })
-      sendJson(res, 200, { allowUnpreviewedActions: raw })
-      return
-    }
-
     if (req.method === 'GET' && path === '/api/first-sentence/templates') {
-      const current = await readWorkspaceSettings(store, workspaceId)
+      const stored = await readWorkspaceSettings(store, workspaceId)
+      /**
+       * ★ 返回的是**迁移后**的样子（2026-09 三块组装、2026-10 三框改造）。
+       *
+       * 库里存着的老模版（框架框）里可能还写着退役变量（`{{instructions}}` 那六个）。
+       * 执行器渲染前会摘掉它们（内容由平台组装进 ②③），所以**界面必须看到同一份**
+       * ——否则使用者在设置里看到的是一份"写了却不起作用"的文本，而真正投递的是
+       * 另一份。
+       *
+       * `adjustments` 按 kind × block 把"调了什么"如实带出去，界面据此告诉他
+       * "平台替你调整过，内容一个字没丢"。**不静默**。
+       */
+      const flat: Record<FirstSentenceKind, { frame: string; identity: string; task: string }> = {
+        execute: {
+          frame: stored.executeTemplate,
+          identity: stored.executeIdentityTemplate,
+          task: stored.executeTaskTemplate,
+        },
+        review: {
+          frame: stored.reviewTemplate,
+          identity: stored.reviewIdentityTemplate,
+          task: stored.reviewTaskTemplate,
+        },
+        chat: {
+          frame: stored.chatTemplate,
+          identity: stored.chatIdentityTemplate,
+          task: stored.chatTaskTemplate,
+        },
+      }
+      /**
+       * 迁移某一条链路的三块，逐块报告"摘了什么、哪几行成了空标题"。
+       * `removed` / `orphanLines` 只可能来自**框架框**（身份/任务框是新字段，
+       * 老数据里没有）；但接口按 kind × block 给形状，界面据此逐块显示。
+       */
+      const migrateKind = (
+        t: { frame: string; identity: string; task: string },
+      ): {
+        next: BlockTemplates
+        perBlock: Record<TemplateBlock, { removed: string[]; orphanLines: string[] }>
+      } => {
+        const frame = migrateTemplate(t.frame)
+        const identity = migrateTemplate(t.identity)
+        const task = migrateTemplate(t.task)
+        return {
+          next: { frame: frame.next, identity: identity.next, task: task.next },
+          perBlock: {
+            frame: { removed: frame.removed, orphanLines: frame.orphanLines },
+            identity: { removed: identity.removed, orphanLines: identity.orphanLines },
+            task: { removed: task.removed, orphanLines: task.orphanLines },
+          },
+        }
+      }
+      const executed = migrateKind(flat.execute)
+      const reviewed = migrateKind(flat.review)
+      const chatted = migrateKind(flat.chat)
+      const current = {
+        execute: executed.next,
+        review: reviewed.next,
+        chat: chatted.next,
+      }
       sendJson(res, 200, {
         defaults: DEFAULT_TEMPLATES,
         variables: TEMPLATE_VARIABLES,
-        // ★ 当前生效的那两份（空 = 平台默认）。它是**全局配置**，
+        // ★ 当前生效的那几份（空 = 平台默认）。它是**全局配置**，
         //   与任何 agent 无关——所以这里不按 agent 分。
         current,
+        adjustments: {
+          execute: executed.perBlock,
+          review: reviewed.perBlock,
+          chat: chatted.perBlock,
+        },
       })
       return
     }
 
-    // ── 改全局的第一句话模版（D32）──
+    // ── 改全局的第一句话模版（D32，2026-10 起三块各一份）──
     //
     // ★ 它挂在 workspace 上，**一次设定对所有 agent 生效**。校验与预览、与
     //   写入口过的是同一道关（`parseTemplateField` → `validateTemplate`）。
@@ -2231,15 +2598,55 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
         return
       }
-      const patch: Partial<Workspace> = {}
-      for (const key of ['executeTemplate', 'reviewTemplate'] as const) {
-        const parsed = parseTemplateField(key, body[key])
-        if (!parsed.ok) {
-          sendJson(res, 400, { error: parsed.error })
+      // 请求体：{ execute?: { frame?, identity?, task? }, review?: {...}, chat?: {...} }
+      // 未传的块 = 别动它；空串 / null = 回到平台默认。
+      // ★ 平面键映射（kind × block → workspace 键）：执行/审核/聊天 × 框架/身份/任务
+      //   = 九个键。老键 `executeTemplate` 等就是框架框（改名会弄丢老 workspace 内容）。
+      const TEMPLATE_KEYS: Record<
+        FirstSentenceKind,
+        Record<TemplateBlock, keyof Workspace>
+      > = {
+        execute: {
+          frame: 'executeTemplate',
+          identity: 'executeIdentityTemplate',
+          task: 'executeTaskTemplate',
+        },
+        review: {
+          frame: 'reviewTemplate',
+          identity: 'reviewIdentityTemplate',
+          task: 'reviewTaskTemplate',
+        },
+        chat: {
+          frame: 'chatTemplate',
+          identity: 'chatIdentityTemplate',
+          task: 'chatTaskTemplate',
+        },
+      }
+      const patch: Record<string, string> = {}
+      for (const kind of ALL_KINDS) {
+        const kindBody = body[kind]
+        if (kindBody === undefined || kindBody === null) continue
+        if (typeof kindBody !== 'object' || Array.isArray(kindBody)) {
+          sendJson(res, 400, { error: `${kindNameForApi(kind)}的模版必须是对象（{ frame, identity, task }）` })
           return
         }
-        // undefined = 这次没传（别动它）；空串 = 回到平台默认
-        if (parsed.value !== undefined) patch[key] = parsed.value
+        const blocks = kindBody as Record<string, unknown>
+        for (const block of TEMPLATE_BLOCKS) {
+          /**
+           * ★ 存进来时先**迁移**再校验（2026-09）：老模版里那六个退役变量会被摘掉，
+           *   摘完再判合不合法。不迁移的话，使用者"原样再存一遍"会得到 400——
+           *   而那正是他上次存进去的内容，看起来像界面坏了。
+           */
+          const raw = blocks[block]
+          const seen = typeof raw === 'string' ? migrateTemplate(raw) : null
+          const parsed = parseTemplateField(kind, block, seen ? seen.next : raw)
+          if (!parsed.ok) {
+            sendJson(res, 400, { error: parsed.error })
+            return
+          }
+          // undefined = 这次没传（别动它）；空串 = 回到平台默认
+          if (parsed.value !== undefined) patch[TEMPLATE_KEYS[kind][block]] = parsed.value
+        }
       }
       if (Object.keys(patch).length > 0) {
         await store.insertWorkspace({ ...workspace, ...patch, updatedAt: Date.now() })
@@ -2251,11 +2658,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     if (req.method === 'POST' && path === '/api/first-sentence/preview') {
       const body = (await readJsonBody(req)) as Record<string, unknown>
       const kindRaw = body['kind']
-      if (kindRaw !== 'execute' && kindRaw !== 'review') {
-        sendJson(res, 400, { error: 'kind 必须是 execute 或 review' })
+      /**
+       * ★ 三条链路都能预览（2026-09 加了「聊天」）。
+       *
+       * ⚠️ 这里写死两条时的表现是**界面上一个按钮直接报错**：设置里第三个页签
+       *   （聊天）上点「预览」，得到的是"kind 必须是 execute 或 review"——
+       *   而那句话对使用者毫无意义（他点的就是界面上的页签）。判据与写入口同一份：
+       *   `ALL_KINDS` 里有什么，这里就收什么。
+       */
+      if (typeof kindRaw !== 'string' || !(ALL_KINDS as readonly string[]).includes(kindRaw)) {
+        sendJson(res, 400, {
+          error: `kind 必须是 ${ALL_KINDS.join(' / ')} 之一`,
+        })
         return
       }
-      const kind: FirstSentenceKind = kindRaw
+      const kind = kindRaw as FirstSentenceKind
+      // ★ 2026-10：预览指定**哪一块**（框架/身份/任务）。只渲染那一块——作者想看的
+      //   就是"我的 ② 身份框会变成什么"，不是把三块拼起来再看。
+      const blockRaw = body['block']
+      if (typeof blockRaw !== 'string' || !(TEMPLATE_BLOCKS as readonly string[]).includes(blockRaw)) {
+        sendJson(res, 400, { error: `block 必须是 ${TEMPLATE_BLOCKS.join(' / ')} 之一` })
+        return
+      }
+      const block = blockRaw as TemplateBlock
       const raw = body['template']
       if (raw !== undefined && raw !== null && typeof raw !== 'string') {
         sendJson(res, 400, { error: 'template 必须是字符串（留空 = 用平台默认模版）' })
@@ -2264,16 +2689,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const text = typeof raw === 'string' ? raw.trim() : ''
       // 与保存时同一道关：预览里能过，保存就能过（反之也一样）
       if (text !== '') {
-        const check = validateTemplate(kind, text)
+        const check = validateTemplate(kind, block, text)
         if (!check.ok) {
           sendJson(res, 400, { error: check.error })
           return
         }
       }
       const sample = SAMPLE_FIRST_SENTENCE_INPUTS[kind]
-      sendJson(res, 200, {
-        text: renderFirstSentence({ ...sample, template: text === '' ? null : text } as never),
-      })
+      // ★ 只渲染被预览的那一块（其它两块走平台默认，与真实投递一致）
+      const rendered = buildBlocks({
+        ...sample,
+        template: { [block]: text === '' ? null : text },
+      } as never)
+      sendJson(res, 200, { text: rendered[block] })
       return
     }
     // ── 新建 / 更新 agent ──
@@ -2379,6 +2807,26 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // ★ 调试动作（2026-09）：与固定参数同一档的校验——对着已安装的工具清单，
+      //   且必须是这次给的白名单的子集（不在白名单里的动作不会被判决引用）。
+      const debugCheck = parseAgentAllowedActions(
+        body['debugActions'],
+        await store.listTools(workspaceId),
+      )
+      if (!debugCheck.ok) {
+        sendJson(res, 400, { error: debugCheck.error })
+        return
+      }
+      const notAllowed = debugCheck.value.filter((t) => !actionsCheck.value.includes(t))
+      if (notAllowed.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `调试动作必须在行动权限里：${notAllowed.join('、')} 不在 ` +
+            '这个审核者的 allowedActions 里。先把它加进行动权限，再标调试。',
+        })
+        return
+      }
+
       // ★ 只有审核者能有非空的动作权限（执行者的能力是工具）。
       //   角色是在这个请求里一起给的，所以"从执行者改成审核者 + 同时带上动作"
       //   是一次合法的请求——判据用的是**这次要写下去的**角色。固定参数同一条
@@ -2387,6 +2835,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         role: roleCheck.role,
         actions: actionsCheck.value,
         hasActionParams: Object.keys(paramsCheck.value).length > 0,
+        hasDebugActions: debugCheck.value.length > 0,
         who: `「${name}」`,
         gaveActions: body['allowedActions'] !== undefined && body['allowedActions'] !== null,
       })
@@ -2419,11 +2868,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             ? body['workDir'].trim()
             : null,
         skillIds: skillIds as Agent['skillIds'],
-        toolIds: [],
         // ★ 动作权限（D40 收口）：审核者"判完允许动什么"，校验在上面
         allowedActions: actionsCheck.value,
         // ★ 动作的固定参数（D43）：界面上钉死的 open 参数值，校验在上面
         actionParams: paramsCheck.value,
+        // ★ 调试动作（2026-09）：校验在上面（子集 + 已安装）
+        ...(debugCheck.value.length > 0 ? { debugActions: debugCheck.value } : {}),
         env: envCheck.value,
         role: roleCheck.role,
         reviewerAgentId: roleCheck.reviewerAgentId,
@@ -2487,6 +2937,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           // ★ D43：动作的固定参数——与 `allowedActions` 同一条规矩（只属于审核者）。
           //   不在白名单里的话，"在界面上给动作钉值"就只剩重建一个 agent 这条路。
           'actionParams',
+          // ★ 2026-09：调试动作（`Agent.debugActions`）——"勾了之后这条动作
+          //   不真跑、只记录动作与参数"的那个勾选。与 `allowedActions` 同一条
+          //   角色规矩（只属于审核者）。
+          'debugActions',
         ])
         const unknown = Object.keys(body).filter((k) => !allowed.has(k))
         if (unknown.length > 0) {
@@ -2609,15 +3063,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
         // ★ 动作权限（D40 收口）：改它的入口在这里。
         //   第三方动作照旧对着本工作区**已安装的工具包**校验。
+        //   ⚠️ 校验无条件跑一次（`undefined` 时解析成 `[]`）：下面的「调试」块
+        //      要用"改完之后的白名单"判子集，而动作与调试可以在同一个请求里改。
+        const actionsCheck = parseAgentAllowedActions(
+          body['allowedActions'],
+          await store.listTools(current.workspaceId),
+        )
+        if (!actionsCheck.ok) {
+          sendJson(res, 400, { error: actionsCheck.error })
+          return
+        }
         if (body['allowedActions'] !== undefined) {
-          const actionsCheck = parseAgentAllowedActions(
-            body['allowedActions'],
-            await store.listTools(current.workspaceId),
-          )
-          if (!actionsCheck.ok) {
-            sendJson(res, 400, { error: actionsCheck.error })
-            return
-          }
           patch.allowedActions = actionsCheck.value
         }
 
@@ -2634,6 +3090,40 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           patch.actionParams = paramsCheck.value
         }
 
+        if (body['debugActions'] !== undefined) {
+          const dbg = stringArray('debugActions')
+          if (!Array.isArray(dbg)) {
+            sendJson(res, 400, { error: dbg.error })
+            return
+          }
+          // 对着已安装的工具校验（与 allowedActions 同一套：动作必须装着了）
+          const dbgCheck = parseAgentAllowedActions(
+            body['debugActions'],
+            await store.listTools(workspaceId),
+          )
+          if (!dbgCheck.ok) {
+            sendJson(res, 400, { error: dbgCheck.error })
+            return
+          }
+          // 语义是 `allowedActions` 的**子集**：不在白名单里的动作根本不会被
+          // 判决引用，标了调试也是死的。判据用改完之后的白名单——允许与调试
+          // 可以在同一个请求里一起改。
+          const allowedNow =
+            body['allowedActions'] !== undefined
+              ? actionsCheck.value
+              : (current.allowedActions ?? [])
+          const notAllowed = dbgCheck.value.filter((t) => !allowedNow.includes(t))
+          if (notAllowed.length > 0) {
+            sendJson(res, 400, {
+              error:
+                `调试动作必须在行动权限里：${notAllowed.join('、')} 不在 ` +
+                '这个审核者的 allowedActions 里。先把它加进行动权限，再标调试。',
+            })
+            return
+          }
+          patch.debugActions = dbgCheck.value
+        }
+
         // ★ 只有审核者能有非空的动作权限 —— 与下面"审核者不许挂工具"对称的另一半。
         //
         //   判据用**改完之后**的角色与动作（而不是当前的）：角色与动作可以出现在
@@ -2646,6 +3136,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           actions: patch.allowedActions ?? current.allowedActions ?? [],
           hasActionParams:
             Object.keys(patch.actionParams ?? current.actionParams ?? {}).length > 0,
+          hasDebugActions:
+            (patch.debugActions ?? current.debugActions ?? []).length > 0,
           who: `「${current.name}」`,
           gaveActions: body['allowedActions'] !== undefined && body['allowedActions'] !== null,
         })
@@ -2665,19 +3157,57 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // 空数组），再改角色。
         // ⚠️ 只在"**要变成**审核者"时拒：老数据里可能有挂着工具的审核者（它是在
         //    这条规则之前建的）。那种记录该修，而"连改个名字都 400"会让人连修
-        //    的入口都找不到——摘工具那条路是永远开着的（见挂载接口）。
-        if (
-          patch.role === 'reviewer' &&
-          current.role !== 'reviewer' &&
-          current.toolIds.length > 0
-        ) {
-          sendJson(res, 400, {
-            error:
-              `「${current.name}」挂着 ${current.toolIds.length} 个工具包，不能把角色改成审核者：` +
-              '审核者只做判断、不动手，工具是"动手"的能力。' +
-              '先摘掉它挂的工具（挂载接口传空数组），再改角色。',
-          })
-          return
+        //    的入口都找不到。
+        //
+        // ⚠️ 这里原来还有一道门："挂着工具包的 agent 不能改成审核者"。挂载能力
+        //    撤掉之后那个字段不再存在，这道门**没有可判的东西**了，一并删掉
+        //    （上面那句"连改个名字都 400"讲的正是这种门要留出路的道理）。
+
+        /**
+         * ★★ 保存时**顺手把内联老标准并进「指令」**（2026-09）。
+         *
+         * ══════════════════════════════════════════════════════════════════
+         * 为什么是"保存时"，而不是"等使用者去点那个按钮"
+         * ══════════════════════════════════════════════════════════════════
+         *
+         * 使用者的原话：「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
+         * 他说的是界面上的真实观感：明明已经把判断依据并进「指令」这件事做完了
+         * （`reviewStandard` 只剩兼容读取），可只要库里那个老字段还在，详情页就永远
+         * 挂着一条"还带着一份老的标准"的警告——**改个名字、写一段指令，那条警告
+         * 都不动**。一条只有点另一个按钮才会消失的提示，等于把清理老数据的责任
+         * 推给使用者，而他并没有做错什么。
+         *
+         * 所以：**保存一次就把老字段清掉**。这不是"顺手改数据"，因为这一步
+         * **不改变投递出去的那段文字**——`reviewerIdentity` 本来就是
+         * `[instructions, reviewStandard.body]`（同一个顺序、同一个空行分隔），
+         * 并进来之后算出来的身份与并之前**逐字节相同**（有测试钉着）。
+         * 变的只是"这段文字住在哪个字段里"。
+         *
+         * ⚠️ 三个不收工的地方，每一条都有具体理由：
+         *   ① **请求里明确带了 `reviewStandard`** ⇒ 不动它。老客户端照旧能写那个
+         *      字段，我们不该在同一次请求里把它写进去又搬走。
+         *   ② **指令为空** ⇒ 不并。并进来会把"只有一份老标准、没有身份"的审核者
+         *      变成"指令非空"，而**资格判据就是指令非空**（FR-AGENT-25）——那等于
+         *      保存一次就悄悄让它开始接审核任务。让他先写身份，那条警告就留着。
+         *      （这不是漏做：那种 agent 现在**本来就不审**，警告正好说的是这件事。）
+         *   ③ **正文来自挂载的 skill**（`reviewStandard` 是空的、body 从 skill 推出来）
+         *      ⇒ 不并。并它必须**清空 `skillIds`**，而"改个名字顺手把我的挂载摘了"
+         *      是使用者没同意的改动；那一种仍然走详情页那个按钮（它会说清"挂载也一起摘掉"）。
+         */
+        const patchedInstructions = patch.instructions ?? current.instructions ?? ''
+        const legacyInlineBody = current.reviewStandard?.body?.trim() ?? ''
+        const foldInOnSave =
+          (patch.role ?? current.role) === 'reviewer' &&
+          body['reviewStandard'] === undefined &&
+          legacyInlineBody !== '' &&
+          patchedInstructions.trim() !== ''
+        if (foldInOnSave) {
+          patch.instructions = [patchedInstructions.trim(), legacyInlineBody].join('\n\n')
+          patch.reviewStandard = null
+          warn(
+            `agent「${current.name}」：保存时把老的内联标准并进了「指令」` +
+              `（${legacyInlineBody.length} 字，位置改由平台定，投递出去的那段文字一字未变）。`,
+          )
         }
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
@@ -2692,6 +3222,75 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sendJson(res, 200, page)
       return
     }
+
+    // ── 放弃 / 恢复一条任务（D47）──
+    //
+    // ★ 两条路由而不是一条 `PUT /api/issues/{id}/status`：**每条路只意味着一件事**。
+    //   给一条通用的改状态接口，调用方就能把 issue 设成 `in_progress`、`done`
+    //   这类**平台自己不维护**的状态——而那些状态在阶段推导里没有任何位置，
+    //   于是会造出一种"看起来设了、看板不认"的记录。这里由服务端决定目标状态
+    //   （放弃 ⇒ `cancelled`，恢复 ⇒ `todo`），调用方只说意图。
+    const issueStatusMatch = /^\/api\/issues\/([^/]+)\/(abandon|reopen)$/.exec(path)
+    if (issueStatusMatch) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: '这个地址只接受 POST' })
+        return
+      }
+      const issueId = issueStatusMatch[1] as IssueId
+      const action = issueStatusMatch[2]
+      const target = action === 'abandon' ? 'cancelled' : 'todo'
+
+      const issue = await store.getIssue(issueId)
+      // 别的 workspace 的 issue 一律当"不存在"（404）——与 `/api/runs` 同一口径。
+      if (!issue || issue.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '任务不存在' })
+        return
+      }
+      if (issue.status === target) {
+        // ★ 说清"已经是了"，而不是回 200 假装改成功：界面据此把按钮置灰，
+        //   而一个静默成功的空操作会让人以为刚才那次点击没生效。
+        sendJson(res, 409, {
+          error:
+            action === 'abandon' ? '这条任务已经放弃过了' : '这条任务没有处于放弃状态',
+        })
+        return
+      }
+
+      // CAS：`expect` 是**刚读到的那一个**状态。中间被别人改过 ⇒ 返回 false，
+      // 于是这里回 409 而不是盲目覆盖（`transitionIssue` 的契约就是如此）。
+      const ok = await store.transitionIssue(issueId, issue.status, target)
+      if (!ok) {
+        sendJson(res, 409, { error: '这条任务的状态刚被别处改过，请刷新后重试' })
+        return
+      }
+
+      // ★ 放弃时**顺手取消还在跑的 run**。
+      //
+      //   不取消的话，"放弃"只改了看板，而那条 run 还在烧 token、还在往工作
+      //   目录里写东西——而"放弃"的意思恰恰是"这条不要再做了"。这是这个功能
+      //   唯一的一处副作用，所以它在界面上也写着（见 `tasks.abandonNote`）。
+      //
+      //   恢复时**不**把 run 拉回来（取消是不可逆的，而且 run 的终态没有出边）；
+      //   要接着干就点「反馈」，那会派一条新的 run——与 D45 的返工同一个形状。
+      const cancelled: string[] = []
+      if (action === 'abandon') {
+        const page = await store.listRuns({ workspaceId, limit: 10_000 })
+        for (const run of page.items) {
+          if (TERMINAL_RUN_STATUSES.includes(run.status)) continue
+          // 只碰**这条任务**的 run：review run 的 subject 是执行 run 的 id，
+          // 所以要顺着它的 subject 往上找一层，否则会漏掉正在跑的审核。
+          if (!(await runBelongsToIssue(store, run, issueId))) continue
+          if (await executor.cancel(run.id)) cancelled.push(run.id)
+        }
+      }
+
+      sendJson(res, 200, {
+        issue: (await store.getIssue(issueId)) ?? issue,
+        cancelledRunIds: cancelled,
+      })
+      return
+    }
+
     if (req.method === 'POST' && path === '/api/issues') {
       const body = (await readJsonBody(req)) as Partial<Issue>
       const now = Date.now()
@@ -2763,7 +3362,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const payload = JSON.stringify(doc, null, 2)
       res.writeHead(200, {
         'content-type': 'application/json; charset=utf-8',
-        'content-disposition': `attachment; filename="alpha-helper-audit-${Date.now()}.json"`,
+        'content-disposition': `attachment; filename="agentdeck-audit-${Date.now()}.json"`,
         'content-length': Buffer.byteLength(payload),
       })
       res.end(payload)
@@ -2771,8 +3370,138 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
 
     // ── 技能（审核模板与自建）──
+    //
+    // ★ **读列表时对账**（磁盘为准）。
+    //
+    //   使用者勾了 `~/.claude/skills` 这类目录之后，"那边改了这边要跟着变"
+    //   这件事必须发生在**他看得见的地方**。放在这里而不是放在起 run 的路上：
+    //   读列表本来就是"看现在有什么"，多一次目录扫描是它的本分；而 run 那条路
+    //   是热路径，把 I/O 与写库塞进去，代价落在每一次执行上。
+    //
+    //   ⚠️ 界面每次启动都会读一次（`loadSkills()`），所以"应用开着"就等于
+    //      "一直在对账"。纯 CLI / MCP 的场景不会自动对账——那条路上要么先
+    //      调一次这个接口，要么自己知道库里的内容停在某个时刻。
     if (req.method === 'GET' && path === '/api/skills') {
-      sendJson(res, 200, { skills: await store.listSkills(workspaceId) })
+      const dirs = await readLocalSkillDirs(store, workspaceId)
+      const report = await reconcileLocalSkillDirs({
+        store,
+        workspaceId,
+        enabledDirs: dirs,
+        now: Date.now(),
+      })
+      const onDisk = new Set(report.onDisk.map((d) => `${d.dir}\u0000${d.slug}`))
+      const skills = (await store.listSkills(workspaceId)).map((skill) => {
+        const dir = sourceDirOf(skill)
+        return {
+          ...skill,
+          // 来自哪个被勾选的目录（null = 手装 / 远端装的）
+          localDir: dir,
+          // ★ "现在还能不能被选中"。
+          //
+          //   手装与远端装的**恒为 true**（它们不受任何勾选影响）；只有来自本地
+          //   目录的才可能变 false——来源目录取消了勾选，或者文件在源工具那边
+          //   被删了。为 false 而记录还在，只有一个原因：有智能体挂着它，所以
+          //   留着（见 `Workspace.localSkillDirs` 上那段注释）。
+          //
+          //   ⚠️ 名字是"能不能选"，不是"来自本地目录且还活跃"：后者对手装的那些
+          //      是 false，而它们明明可以选——那样界面就得在每处再判一次
+          //      `localDir !== null`，判漏一处就会把一条正常 skill 显示成失效。
+          selectable: dir === null || (dirs.includes(dir) && onDisk.has(`${dir}\u0000${skill.slug}`)),
+        }
+      })
+      sendJson(res, 200, { skills, localDirs: { enabled: dirs, report } })
+      return
+    }
+
+    // ── 本地技能目录（设置）──
+    //
+    // 候选目录是**内置表**（claude / codex / cursor / agents），只给路径与 id：
+    // 显示名在界面词表里（`skills.dirTool*`）——daemon 的字符串不翻译，
+    // 把中文写在这里等于让这个功能只有一种语言。
+    if (req.method === 'GET' && path === '/api/skills/local-dirs') {
+      const enabled = await readLocalSkillDirs(store, workspaceId)
+      const candidates = localSkillDirCandidates()
+      const listed = []
+      for (const candidate of candidates) {
+        const scan = await scanSkillDir(candidate.path)
+        listed.push({
+          id: candidate.id,
+          path: candidate.path,
+          exists: scan.error === null,
+          // 目录里有几个技能——勾之前就该看得见（"这个目录是空的"是个有用的答案）
+          skillCount: scan.found.length,
+          // ★ "看到但没当成技能"的东西也要跟着走。
+          //
+          //   实测 `~/.claude/skills` 里有一个没有 SKILL.md 的空目录：使用者勾上
+          //   之后会发现"少了一个"，而**这个解释必须在他每次打开设置时都在**——
+          //   只在刚勾完那一瞬间提示一次，他第二天再来看就只剩一个解释不了的差额。
+          skipped: scan.skipped,
+        })
+      }
+      // 使用者自己填的路径：不在候选表里，但也要能看见、能取消
+      const custom = []
+      for (const dir of enabled.filter((d) => !candidates.some((c) => c.path === d))) {
+        const scan = await scanSkillDir(dir)
+        custom.push({
+          path: dir,
+          exists: scan.error === null,
+          skillCount: scan.found.length,
+          skipped: scan.skipped,
+        })
+      }
+      // ★ 顺手对一次账，把"读不进来什么""为什么某条还留着"一并带回去。
+      //
+      //   读列表（`GET /api/skills`）那边也对账，两次是同一件幂等的事——这里再来
+      //   一次是为了让**设置这一屏自己说完整**：只显示"勾了几个目录"，而把
+      //   "其中有两条没读进来"留到别处，等于让人去猜。
+      const report = await reconcileLocalSkillDirs({
+        store,
+        workspaceId,
+        enabledDirs: enabled,
+        now: Date.now(),
+      })
+      sendJson(res, 200, { candidates: listed, enabled, custom, report })
+      return
+    }
+
+    // ── 改「勾了哪些本地技能目录」──
+    if (req.method === 'PUT' && path === '/api/skills/local-dirs') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['dirs']
+      if (!Array.isArray(raw)) {
+        sendJson(res, 400, { error: 'dirs 必须是数组（传空数组 = 一个目录都不勾）' })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      const dirs: string[] = []
+      for (const item of raw) {
+        if (typeof item !== 'string') {
+          sendJson(res, 400, { error: `dirs 里每一项都必须是字符串（收到 ${JSON.stringify(item)}）` })
+          return
+        }
+        const parsed = normalizeSkillDir(item)
+        if (!parsed.ok) {
+          sendJson(res, 400, { error: parsed.error })
+          return
+        }
+        // 去重：同一个目录勾两次没有含义，而重复项会让"勾了几个"在界面上骗人
+        if (!dirs.includes(parsed.path)) dirs.push(parsed.path)
+      }
+
+      await store.insertWorkspace({ ...workspace, localSkillDirs: dirs, updatedAt: Date.now() })
+      // ★ 存完**立刻对一次账**再回话：使用者勾上之后马上要看的就是"读进来了什么"，
+      //   让他再等一次列表刷新才知道结果，等于把一次往返塞给他
+      const report = await reconcileLocalSkillDirs({
+        store,
+        workspaceId,
+        enabledDirs: dirs,
+        now: Date.now(),
+      })
+      sendJson(res, 200, { enabled: dirs, report })
       return
     }
     // ── 安装 skill（FR-AGENT-09/10/11）──
@@ -2833,7 +3562,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // 例外被严格限制在 `skill-source.ts` 里：只允许 GitHub 的三个主机、
     // 只允许 https、每跳都校验主机、限大小/文件数/超时。它**不涉及
-    // alpha-helper 的远端服务**，D20 那条规则仍然原样成立。
+    // agentdeck 的远端服务**，D20 那条规则仍然原样成立。
     // ── 卸载一个 skill（D38）──
     //
     // 这是 README 里挂着的那个已知缺口（"装了要删只有改库"）。D38 之后它更有必要：
@@ -2842,14 +3571,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ⚠️ **还挂着它的 agent 会让删除被拒**，并把它们列出来。理由：静默删掉一条
     //    还被引用的东西，症状是"某个 agent 的 skill 突然没了"——那要在很久以后
     //    才被发现（而且看起来像技能求解的 bug）。宁可让使用者先摘掉引用。
-    // ── 把"来自挂载 skill 的标准"固化到 agent 上（D38）──
+    // ── 把老形态的判断依据并进「指令」（D38，2026-09 改落点）──
     //
-    // 过渡期的迁移入口：老数据里审核者没有 `reviewStandard`，它的标准是从挂载的
-    // skill 推出来的。而"卸载那条 skill"必须先有这一步，否则审核者会失去依据。
+    // 过渡期的迁移入口。老数据有两种形态，**这条端点两种都收**（判据是
+    // `resolveReviewStandard`：内联老标准优先，没有才看挂载的 skill）：
+    //   ① 正文写在老字段 `reviewStandard` 里；
+    //   ② 正文来自挂载的 skill（更老的形态）——那时"卸载那条 skill"必须先走这一步，
+    //      否则审核者会失去依据。
+    // ⚠️ ① 那种（使用者的库里正好有一个）原来在界面上**只显示、没有按钮**，
+    //    现在统一给入口：两种都是"依据还走在老形态上"，没理由只搬一种。
     //
     // ★ 解析用**服务端同一个函数**（`resolveReviewStandard`）——里面是"正文拼起来、
     //   动作取并集"那套规则。让前端自己拼一遍，两处规则迟早分叉，而分叉的表现是
-    //   "固化之后的标准与固化之前生效的不是同一份"。
+    //   "搬完之后生效的与搬之前生效的不是同一份"。
     const adoptMatch = /^\/api\/agents\/([^/]+)\/review-standard\/adopt-from-skills$/.exec(path)
     if (adoptMatch && req.method === 'POST') {
       const agentId = decodeURIComponent(adoptMatch[1]!) as Agent['id']
@@ -2859,7 +3593,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
       if (agent.role !== 'reviewer') {
-        sendJson(res, 400, { error: '只有审核角色才有审核标准可固化' })
+        sendJson(res, 400, { error: '只有审核角色才有判断依据可搬移' })
         return
       }
       const mounted = await loadAgentSkills(store, agent)
@@ -2867,8 +3601,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (!resolved) {
         sendJson(res, 400, {
           error:
-            '它没有可固化的标准：既没有内联标准，挂着的 skill 也都没有正文。' +
-            '先在详情页写一条标准。',
+            '它没有可搬移的判断依据：既没有内联的老标准，挂着的 skill 也都没有正文。' +
+            '先在详情页给它写一段「指令」。',
         })
         return
       }
@@ -2892,12 +3626,25 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       const updated: Agent = {
         ...agent,
-        // ★ 固化的是**名字 + 正文**（标准），动作权限搬到 agent 上那个字段里。
-        //   两样都要落下来，且都落在新位置：只固化正文的话，固化之后生效的动作
-        //   范围会与固化之前不同。
-        reviewStandard: { name: resolved.name, body: resolved.body },
+        /**
+         * ★★ 2026-09：落点是**「指令」**，不再是那个已经撤掉的「标准」字段。
+         *
+         * 使用者定的口径是「审核 Agent 的标准也放 ② 里面，不用单独设置」——② 就是
+         * 「指令」。所以这一步现在做的是**搬家**：把当前生效的那份正文并进「指令」，
+         * 并把老的标准字段清掉。
+         *
+         * ⚠️ 必须**清掉**老字段而不是留着：`reviewerIdentity` 会把两处合成一段，
+         *    留着就是同一段文字被投递**两遍**（模型的上下文里出现两次一样的标准，
+         *    而我们自己看不出来）。
+         * ⚠️ 指令在前、正文在后（与 `reviewerIdentity` 同一个顺序）：这样"它原来写的
+         *    身份"仍然排在最前面。
+         */
+        instructions: [agent.instructions?.trim() ?? '', resolved.body.trim()]
+          .filter((part) => part !== '')
+          .join('\n\n'),
+        reviewStandard: null,
         allowedActions: [...resolvable.allowed],
-        // 摘掉挂载：标准已经在它自己身上了，再挂着同一份东西只会让"依据是什么"
+        // 摘掉挂载：正文已经搬进「指令」了，再挂着同一份东西只会让"依据是什么"
         // 有两处答案（而且那两处随时可能不一致）
         skillIds: [],
         updatedAt: Date.now(),
@@ -2905,7 +3652,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       await store.insertAgent(updated)
       sendJson(res, 200, {
         agent: updated,
-        adopted: { name: resolved.name, fromSkills: mounted.map((s) => s.slug) },
+        adopted: { fromSkills: mounted.map((s) => s.slug) },
         // ⚠️ **没搬过来的动作**要如实报出去：静默丢掉的话，使用者会以为
         //    "固化把权限搬全了"，而实际上少了几条（他也没地方去发现）。
         droppedActions: resolvable.unavailable.map((u: AllowedActionsResolution['unavailable'][number]) => ({
@@ -2929,17 +3676,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (holders.length > 0) {
         // ★ 过渡期最常见的形态：审核者**没有内联标准**，它的判断依据正来自这条
         //   skill（老数据，见 `resolveReviewStandard` 的兼容路径）。这时光说
-        //   "先摘掉它"是不够的——摘掉之后审核者就没标准了。所以直接指出那一步：
-        //   去详情页把标准固化到自己身上（`adopt-from-skills`）。
+        //   "先摘掉它"是不够的——摘掉之后审核者就没依据了。所以直接指出那一步：
+        //   去详情页把判断依据并进「指令」（`adopt-from-skills`）。
         const needsAdopt = holders.filter((a) => a.role === 'reviewer' && !a.reviewStandard)
         const names = holders.map((a) => a.name).join('、')
         sendJson(res, 400, {
           error:
             `还有 ${holders.length} 个智能体挂着「${skill.slug}」：${names}。` +
             (needsAdopt.length > 0
-              ? `其中「${needsAdopt.map((a) => a.name).join('、')}」**没有内联的审核标准**` +
-                `——它的判断依据正来自这条 skill。去智能体页点开它，按「把挂载的 skill ` +
-                `转成内联标准」，再回来卸载。`
+              ? `其中「${needsAdopt.map((a) => a.name).join('、')}」还没有自己的判断依据` +
+                `——它现在正拿这条 skill 当标准。去智能体页点开它，按「把这份判断依据 ` +
+                `并进「指令」」，再回来卸载。`
               : `先在它们的配置里把它摘掉，再卸载`) +
             `——静默删掉一条还被引用的东西，症状会在很久以后才出现` +
             `（而且看起来像技能求解坏了）。`,
@@ -2996,7 +3743,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           { slug: slugOverride },
           {
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-            githubToken: options.githubToken ?? process.env['ALPHA_HELPER_GITHUB_TOKEN'] ?? null,
+            githubToken: options.githubToken ?? process.env['AGENTDECK_GITHUB_TOKEN'] ?? null,
           },
         )
 
@@ -3061,25 +3808,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     if (req.method === 'GET' && path === '/api/tools') {
       const tools = await store.listTools(workspaceId)
-      // ★ `mountedBy` 一起给出来。
-      //
-      // "这个包有没有人在用"是卸载页面**必须先知道**的事：卸载会被拒
-      // （见下面的 DELETE），而让使用者先点一下、吃一个 400、再回去看谁挂着它，
-      // 是把一次可避免的往返塞给他。空数组 = 没人挂，可以直接卸。
-      const agents = await store.listAgents(workspaceId)
-      sendJson(res, 200, {
-        tools: tools.map((tool) => ({
-          ...tool,
-          mountedBy: agents
-            .filter((a) => a.toolIds.includes(tool.id))
-            .map((a) => ({ id: a.id as string, name: a.name })),
-        })),
-        // ★ 那条准入开关一起给：界面上每个"不支持预演"的动作都标着"不能自动执行"，
-        //   而开关就是这句话的落点——不把当前值给出来，界面只能显示一个猜的状态
-        //   （或者让使用者去别处翻设置）。
-        allowUnpreviewedActions: (await readWorkspaceSettings(store, workspaceId))
-          .allowUnpreviewedActions,
-      })
+      // ⚠️ 这里原来每条还带一个 `mountedBy`（"被哪些执行者挂载"）。挂载能力撤掉
+      //    之后它恒为空数组，界面那一列也删了——留着就是每次列表都去多读一遍
+      //    agents，只为算一个永远是空的东西。
+      sendJson(res, 200, { tools })
       return
     }
 
@@ -3106,9 +3838,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         workspaceId,
         pkg: resolved.pkg,
         // ⚠️ `overwrite` 不在原契约里，是**照着 skill 那条路补的**：同名一律
-        //    拒绝写入，但"确实要替换"必须有一条出路。工具包比 skill 更需要它——
-        //    卸载会被"还有 agent 挂着"挡住，没有 overwrite 就只能把挂载全摘掉、
-        //    装完再挂回去。
+        //    拒绝写入，但"确实要替换"必须有一条出路。
+        //
+        //    ★ 这条路现在**是「更新」功能唯一走的路**：远端目录里有新版本时，列表上
+        //      那个「更新到 x.y.z」就是带 `overwrite: true` 再装一遍（见
+        //      `tools/src/views/Tools.svelte` 的 `updateFromCatalog`）。所以它从
+        //      "给同名冲突留个后门"变成了主路径，别删。
         overwrite: raw['overwrite'] === true,
         now: Date.now(),
       })
@@ -3131,109 +3866,41 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      // ⚠️ **还挂着它的 agent 会让删除被拒**，并把它们列出来。理由与 skill
-      //    那条路逐条相同：静默删掉一个还被引用的东西，症状是"某个 agent 的
-      //    工具突然没了"——那要在很久以后才被发现（而且看起来像动作解析坏了）。
-      //    这里比 skill 更严重：被删的包就是那些动作的**唯一**实现。
-      const agents = await store.listAgents(workspaceId)
-      const holders = agents.filter((a) => a.toolIds.includes(toolId))
-      if (holders.length > 0) {
-        sendJson(res, 400, {
-          error:
-            `还有 ${holders.length} 个智能体挂着「${tool.slug}」：` +
-            `${holders.map((a) => a.name).join('、')}。` +
-            '先在它们的配置里把它摘掉，再卸载——静默删掉一个还被引用的东西，' +
-            '症状会在很久以后才出现（而且看起来像动作解析坏了）。',
-          // 机器可读的那一份：界面据此做成可点的列表，而不是让使用者从
-          // 一句话里自己认名字
-          holders: holders.map((a) => ({ id: a.id as string, name: a.name })),
-        })
-        return
-      }
-
+      // ⚠️⚠️ 这里原来有一段"**还挂着它的 agent 会让删除被拒**"，并把挂着它的
+      //     agent 名字列出来（`holders`）。**整段删掉了**，现在卸载一律放行。
+      //
+      // 理由是那把锁**没有钥匙**：拒绝时给的话是"先在那些智能体上把它摘掉，
+      // 再卸载"——而"摘掉"这个动作已经不存在了（智能体详情里那个摘挂载的地方
+      // 跟着挂载能力一起撤了）。于是万一真碰上一条挂着的老记录，使用者就被锁死：
+      // 卸不掉，也摘不掉，而且**界面上没有任何地方能解开它**。
+      //
+      // ★ 一条指向死路的拒绝，比不拒绝更糟：它把"我做不到"说成"你先去做那件事"。
+      //
+      // ⚠️ 那条"静默删掉一个还被引用的东西"的顾虑仍然成立，但**在这里已经不适用**：
+      //    挂载能力撤掉之后，不再有新的引用被创建；老记录里的那个键在解析时就被
+      //    丢掉了（见 `Agent` 上那段注释），所以删掉包**不会**留下悬空引用——
+      //    没有任何代码会再去按那个 id 找包。
       await store.deleteTool(toolId)
       sendJson(res, 200, { deleted: true })
       return
     }
 
-    // ── 挂载 / 摘挂工具包（D40）──
+    // ⚠️⚠️ 这里原来是 `PUT /api/agents/:id/tools`（挂载 / 摘挂工具包，D40）：
+    //     授权单位是**组**（挂上一个包 = 把整组动作交给这个 agent），语义是整体
+    //     替换。**整个接口删掉了。**
     //
-    // ══════════════════════════════════════════════════════════════════
-    // 授权单位是**组**：挂上一个包 = 把整组动作交给这个 agent
-    // ══════════════════════════════════════════════════════════════════
+    // 撤掉的两步（使用者的决定："不需要，因为我已经移除了此功能"）：
+    //   1. 先把界面入口撤掉（智能体详情里那个"可挂载的工具组"勾选栏）；
+    //   2. 再把「被哪些执行者挂载」那一列撤掉。
+    // 于是这个接口**没有任何调用方**了——界面不调、CLI 不调、MCP 也不调（都查过）。
+    // 一条只能被 curl 调用的写入口，留着只会让下一个读代码的人以为挂载还能用。
     //
-    // `PUT` 语义 = 整体替换：传什么就是它挂的全部（空数组 = 全摘掉）。按**单个
-    // 动作**逐条授权看着更精细，但包里的动作清单是包说了算的：包一更新（多一个
-    // 动作），逐条授权就变成"新动作悄悄没被授权"或者"要重新授权一遍"，两种都
-    // 不好解释。所以这里只认 组 id，动作的粒度由包自己声明。
-    const agentToolsMatch = /^\/api\/agents\/([^/]+)\/tools$/.exec(path)
-    if (agentToolsMatch && req.method === 'PUT') {
-      const agentId = decodeURIComponent(agentToolsMatch[1]!) as Agent['id']
-      const current = await store.getAgent(agentId)
-      if (!current) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const rawIds = body['toolIds']
-      if (!Array.isArray(rawIds)) {
-        sendJson(res, 400, { error: 'toolIds 必须是数组（传空数组 = 把这个 agent 的工具全摘掉）' })
-        return
-      }
-      const bad = rawIds.find((v) => typeof v !== 'string' || v.trim() === '')
-      if (bad !== undefined) {
-        sendJson(res, 400, {
-          error: `toolIds 里每一项都必须是非空字符串（收到 ${JSON.stringify(bad)}）`,
-        })
-        return
-      }
-      // 去重：同一个包挂两次没有任何含义（授权是一个集合），而重复项会让
-      // "挂了几组"的计数在界面上骗人
-      const ids = [...new Set((rawIds as string[]).map((v) => v.trim()))]
-
-      // ① 挂的东西必须真的存在。挂一个不存在的 id 会在**运行时**才报
-      //    "找不到这个包"，而不是"你填错了 id"。
-      const tools = await store.listTools(current.workspaceId)
-      const known = new Set(tools.map((t) => t.id as string))
-      const unknown = ids.filter((id) => !known.has(id))
-      if (unknown.length > 0) {
-        sendJson(res, 400, {
-          error:
-            `工具包不存在：${unknown.join('、')}。本工作区已安装的：` +
-            `${tools.map((t) => `${t.slug}（${t.name}）`).join('、') || '（一个都没有）'}`,
-          unknown,
-        })
-        return
-      }
-
-      // ② ★ 审核者不许挂工具。
-      //
-      // 审核者的产出是**判断**（判决 + 建议的动作），执行由别人做。给它工具就等于
-      // 让它一边当裁判一边下场——判错了也没人看得出，而这正是"审核者与执行者分开"
-      // 要防的事。
-      //
-      // ⚠️ **摘挂永远允许**（空数组）：老数据里可能有挂着工具的审核者，或者角色
-      //    刚刚被改成 reviewer；如果连摘都不许，那种记录就永远修不好了。
-      if (current.role === 'reviewer' && ids.length > 0) {
-        sendJson(res, 400, {
-          error:
-            `「${current.name}」是审核者，审核者不许挂工具：它只做判断、不动手。` +
-            '要让它动手就先把它改成执行者（那时它的判决也不再被当作审核结论）。' +
-            '（摘掉已挂的工具不受这条限制。）',
-        })
-        return
-      }
-
-      const updated: Agent = {
-        ...current,
-        toolIds: ids as Agent['toolIds'],
-        updatedAt: Date.now(),
-      }
-      await store.insertAgent(updated)
-      sendJson(res, 200, { agent: updated })
-      return
-    }
-
+    // ★ 老数据不需要迁移：`Agent` 是普通 `z.object`（不是 `.strict()`），多出来的
+    //   `toolIds` 键在解析时被丢掉。所以这里删的是**写入口**，不是"要清库"。
+    //
+    // ⚠️ 想恢复这个能力的话，除了把这个接口和 `Agent.toolIds` 加回来，还得把
+    //   `executor.ts` 里"把挂载的脚本送进工作目录"那一段一起恢复——那才是它唯一的
+    //   用途，也一起删了。
     // ── 第三方报告摄取（S2 的入口）──
     if (req.method === 'POST' && path === '/api/reports') {
       const body = (await readJsonBody(req)) as { source?: string; items?: unknown }
@@ -3333,6 +4000,359 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
 
     // ── POST /api/runs ──
+    // ══════════════════════════════════════════════════════════════════
+    // 聊天（`Conversation` / `ChatTurn`）——闭环的**旁路**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // ★ 一条铁律：聊天**不进闭环**。
+    //
+    //   产品的脊柱是「派活 → 审核 → 判决 → 才动手」，而它唯一的门是报告摄取
+    //   （`POST /api/reports` → `createReviewRun`）。聊天那一轮的 run
+    //   `subject.type` 是 `conversation`，报告那条路**根本不认这个 subject**，
+    //   所以它**结构上**到不了判决——这不是靠"记得别触发"，是靠没有那条路。
+    //
+    //   也因此聊天里**不会触发任何登记过的动作**：动作的门槛就是判决。
+    //
+    //   与任务之间唯一的桥是使用者自己点的那一下（把对话预填进「新建任务」），
+    //   平台不替他决定。
+    //
+    // ★ 第二个决定：一条铁律的代价换一个字段都不加——**一轮对话 = 一条 execute run**。
+    //
+    //   进程、流式、落盘、SSE、取消、超时、并发槽位、目录锁、成本、审计，
+    //   全部白拿。上下文靠 `resumeFromRunId` 接（底层是 `--resume <sessionId>`），
+    //   而"这一轮不自动审"用的是协议里**本来就有**的三态：`reviewerAgentId: null`
+    //   就是"这一次明确不自动审"。
+    if (req.method === 'GET' && path === '/api/conversations') {
+      sendJson(res, 200, { items: await store.listConversations(workspaceId) })
+      return
+    }
+
+    // ── 新建一个对话：★ 它由**第一句话**诞生 ──
+    //
+    // 刻意**不**提供"先建一个空对话、再往里说话"：那样标题就没有出处，只能
+    // 先填一个占位（「新对话」），然后等第一句话来了再覆盖它——而"我改了名却
+    // 被第一次发言覆盖掉"是那种看得见、说不清的坏结果。对话从第一句话开始，
+    // 标题就是那句话，没有第二个状态。
+    if (req.method === 'POST' && path === '/api/conversations') {
+      const body = (await readJsonBody(req)) as {
+        agentId?: unknown
+        title?: unknown
+        workDir?: unknown
+        text?: unknown
+        skillIds?: unknown
+      }
+      const agentIdRaw = typeof body?.agentId === 'string' ? body.agentId : ''
+      if (agentIdRaw === '') {
+        sendJson(res, 400, { error: '缺少 agentId', code: 'agent_required' })
+        return
+      }
+      const text = typeof body?.text === 'string' ? body.text.trim() : ''
+      if (text === '') {
+        sendJson(res, 400, { error: '缺少 text（第一句话）', code: 'text_required' })
+        return
+      }
+      const agent = await store.getAgent(agentIdRaw as Agent['id'])
+      if (!agent || agent.workspaceId !== workspaceId) {
+        sendJson(res, 400, { error: `执行者不存在（${agentIdRaw}）`, code: 'agent_not_found' })
+        return
+      }
+      // ★ 只让**执行者**来聊天。审核者的职责是按标准判事，而聊天不产出判决；
+      //   让一个审核者来闲聊，会让人误以为它说的话带判决的分量。
+      if (agent.role !== 'executor') {
+        sendJson(res, 400, {
+          error:
+            `agent「${agent.name}」的角色是「${agent.role}」，不能用来聊天。` +
+            `聊天不产出判决，所以它只接受执行者（role 为 executor）。`,
+          code: 'agent_role_mismatch',
+        })
+        return
+      }
+      const now = Date.now()
+      /**
+       * 这个对话额外带的 skill（可选）。
+       *
+       * 「新对话」那个下拉里，skill 有两种来路，这里是**第二种**：挂在某个执行者
+       * 身上的 skill 走"选它 = 选那个人"（这时代码里什么都不用带，执行者自己就有）；
+       * 而**没人挂的** skill 只能由对话自己带着——那是使用者的要求（"所有已安装的
+       * skill 都要能选"），也是这个字段存在的唯一理由。
+       *
+       * ⚠️ 校验到"这条 skill 在这个 workspace 里真的存在"为止：不存在 ⇒ 400。
+       *    接受一个不存在的 id 会让这个对话**每一轮**都少注一条 skill，而界面上
+       *    看不出任何异常——那种"静默少给"是最难查的一类。
+       * ⚠️ 去重：同一个 id 传两次不是错误，但存两遍会让注入逻辑看起来像有意的。
+       */
+      let skillIds: SkillId[] = []
+      if (body.skillIds !== undefined) {
+        if (!Array.isArray(body.skillIds)) {
+          sendJson(res, 400, { error: 'skillIds 必须是数组', code: 'skill_ids_invalid' })
+          return
+        }
+        const known = new Set(
+          (await store.listSkills(workspaceId)).map((s) => s.id as string),
+        )
+        for (const raw of body.skillIds) {
+          if (typeof raw !== 'string' || raw === '') {
+            sendJson(res, 400, { error: 'skillIds 里只能是不为空的字符串', code: 'skill_ids_invalid' })
+            return
+          }
+          if (!known.has(raw)) {
+            sendJson(res, 400, {
+              error: `skill 不存在（${raw}）`,
+              code: 'skill_not_found',
+            })
+            return
+          }
+          if (!skillIds.includes(raw as SkillId)) skillIds.push(raw as SkillId)
+        }
+      }
+      const conversation: Conversation = {
+        id: ulid() as ConversationId,
+        workspaceId,
+        agentId: agent.id,
+        skillIds,
+        title:
+          typeof body.title === 'string' && body.title.trim() !== ''
+            ? body.title.trim().slice(0, 200)
+            : titleFromText(text),
+        workDir:
+          typeof body.workDir === 'string' && body.workDir.trim() !== ''
+            ? body.workDir.trim()
+            : null,
+        createdAt: now,
+        updatedAt: now,
+        lastTurnAt: null,
+        turnCount: 0,
+      }
+      await store.insertConversation(conversation)
+      const out = await submitChatTurn(store, executor, conversation, agent, text, now, workRoot)
+      sendJson(res, 201, out)
+      return
+    }
+
+    // ── 一个对话的工作目录（聊天右栏底部那一栏）──
+    //
+    // 与「某次执行的工作目录」是同一个东西的两个入口：那边按 run 问，这边按对话
+    // 问。后者必须存在，因为一个对话**可能还没有任何 run**（刚建起来，或第一句话
+    // 就没跑起来），而它的目录属于**对话**、不属于某一条 run。
+    //
+    // 守卫、上限、Content-Type、CSP 全在 `workdir-files.ts` 与上面那两个
+    // `sendWork*` 里——这条路由只负责回答"这个对话的目录是哪个"。
+    const conversationFilesMatch = /^\/api\/conversations\/([^/]+)\/(files|file)$/.exec(path)
+    if (req.method === 'GET' && conversationFilesMatch) {
+      const id = conversationFilesMatch[1] as ConversationId
+      const sub = conversationFilesMatch[2]
+      const conversation = await store.getConversation(id)
+      // 别的 workspace 的对话一律当"不存在"（404）——与上面那条同一口径。
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      /**
+       * ★ 目录用 `resolveWorkDir` 算，与 `submitChatTurn` 出 run 时**同一个
+       *   函数、同一套参数**。界面上显示的路径和它真正干活的路径必须是同一个：
+       *   两处各算一次迟早分叉，而分叉的表现是"这一栏列的是别的目录里的东西"。
+       *
+       *   目录还不存在时（对话刚建、第一轮还没跑）`listWorkDir` 会返回
+       *   `exists: false` + 空列表——界面据此说"这个目录还不存在"，而不是
+       *   "什么都没有"。
+       */
+      const dir = resolveWorkDir({
+        requested: conversation.workDir,
+        subject: { type: 'conversation', id: conversation.id },
+        fallbackId: conversation.id,
+        workRoot,
+      }).path
+      if (sub === 'files') {
+        const agent = await store.getAgent(conversation.agentId as Agent['id'])
+        const managed = managedPathsFor(getRuntimeDescriptor(agent?.runtimeKey ?? 'claude'))
+        await sendWorkDirListing(res, dir, url.searchParams.get('dir') ?? '', managed)
+        return
+      }
+      await sendWorkFile(res, dir, url.searchParams.get('path') ?? '')
+      return
+    }
+
+    // ── 一个对话：读 / 改名改目录 / 删 ──
+    const conversationMatch = /^\/api\/conversations\/([^/]+)$/.exec(path)
+    if (conversationMatch) {
+      const id = conversationMatch[1] as ConversationId
+      const conversation = await store.getConversation(id)
+      // 别的 workspace 的对话一律当"不存在"（404）——与 `/api/issues`、`/api/runs` 同一口径。
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+
+      if (req.method === 'GET') {
+        /**
+         * 回看一个对话：把每一轮连同**那一条 run 的结果**一起给出去。
+         *
+         * ══════════════════════════════════════════════════════════════════
+         * 为什么由服务端拼，而不是让页面自己一轮一轮去拉
+         * ══════════════════════════════════════════════════════════════════
+         *
+         * 智能体的回复不另存一份（它就是那条 run 的 messages，见 `ChatTurn`
+         * 上面那段）。所以"回看整个对话"这件事，页面要么发 N 个请求
+         * （一轮一个 `/api/runs/:id/messages`），要么由拿着全部数据的这边拼。
+         *
+         * N 个请求不只是慢：**并发拉 N 条 run 的消息，回来的顺序是不定的**，
+         * 而聊天恰恰是**顺序就是内容**的那种界面——拼错了看不出是拼错，
+         * 只觉得"它怎么答非所问"。
+         *
+         * 这里只拼**回看需要的那几样**（最后一段正文、状态、工具次数），
+         * 不把 messages 整份塞进来：那是流式的活，界面在看"正在跑的那一轮"时
+         * 走的是 SSE（与任务详情页同一套）。
+         */
+        const turns = await store.listChatTurns(id)
+        const view = []
+        for (const turn of turns) {
+          if (!turn.runId) {
+            view.push({ ...turn, output: null, status: null, toolCount: 0, durationMs: null })
+            continue
+          }
+          const run = await store.getRun(turn.runId)
+          const messages = await store.listRunMessages(turn.runId)
+          // ★ 与任务详情页同一条规则：取**最后一条** text，不是拼接。
+          //   拼接会把"它中途说过一句话又改了主意"变成两段都留着。
+          let output: string | null = null
+          let toolCount = 0
+          for (const m of messages) {
+            if (m.type === 'text' && m.content.trim() !== '') output = m.content
+            if (m.type === 'tool_use') toolCount += 1
+          }
+          view.push({
+            ...turn,
+            output,
+            status: run?.status ?? null,
+            toolCount,
+            // `Run` 上没有 durationMs（那是 AgentResult 上的），用两个时间戳算。
+            durationMs:
+              run?.startedAt && run.finishedAt ? run.finishedAt - run.startedAt : null,
+          })
+        }
+        /**
+         * 这个对话**实际**在哪个目录里跑。
+         *
+         * `conversation.workDir` 为 null 表示"让平台分配"，此时真正的目录是
+         * 执行器按 subject 算出来的 `chat-<对话 id>`。这里**不去猜**：直接报
+         * 最近那一轮 run 的真实 workDir，没有就报 null（界面显示"还没跑过"）。
+         */
+        const last = await store.lastChatTurnWithRun(id)
+        const lastRun = last?.runId ? await store.getRun(last.runId) : null
+        sendJson(res, 200, {
+          conversation,
+          turns: view,
+          workDir: conversation.workDir ?? lastRun?.workDir ?? null,
+        })
+        return
+      }
+
+      if (req.method === 'PATCH') {
+        const body = (await readJsonBody(req)) as { title?: unknown; workDir?: unknown }
+        const patch: {
+          title?: string
+          workDir?: string | null
+          updatedAt: number
+        } = { updatedAt: Date.now() }
+        if (typeof body?.title === 'string') {
+          const title = body.title.trim()
+          if (title === '') {
+            // 空标题会让列表里出现一条**没有名字**的行，点都没法点。
+            sendJson(res, 400, { error: '标题不能为空', code: 'title_required' })
+            return
+          }
+          patch.title = title.slice(0, 200)
+        }
+        if (body?.workDir !== undefined) {
+          if (body.workDir !== null && typeof body.workDir !== 'string') {
+            sendJson(res, 400, { error: 'workDir 只能是字符串或 null' })
+            return
+          }
+          const dir = typeof body.workDir === 'string' ? body.workDir.trim() : ''
+          // ★ 明确区分两个意思：`null` = 「让平台分配」（回到 `chat-<对话 id>`），
+          //   空串 = 调用方搞错了。收下空串会得到一个"设了但等于没设"的目录。
+          if (typeof body.workDir === 'string' && dir === '') {
+            sendJson(res, 400, {
+              error: 'workDir 不能是空串。要回到平台分配就传 null。',
+              code: 'workdir_empty',
+            })
+            return
+          }
+          patch.workDir = typeof body.workDir === 'string' ? dir : null
+        }
+        const next = await store.updateConversation(id, patch)
+        if (!next) {
+          sendJson(res, 404, { error: '对话不存在' })
+          return
+        }
+        sendJson(res, 200, next)
+        return
+      }
+
+      if (req.method === 'DELETE') {
+        const done = await store.deleteConversation(id)
+        // ★ 说清"本来就没有"，而不是回 200 假装删成功：界面据此刷新列表，
+        //   而一个静默成功的空操作会让人以为刚才那次点击没生效。
+        sendJson(res, done ? 200 : 404, done ? { ok: true } : { error: '对话不存在' })
+        return
+      }
+
+      sendJson(res, 405, { error: '这个地址只接受 GET / PATCH / DELETE' })
+      return
+    }
+
+    // ── 说一轮 ──
+    const turnsMatch = /^\/api\/conversations\/([^/]+)\/turns$/.exec(path)
+    if (turnsMatch) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: '这个地址只接受 POST' })
+        return
+      }
+      const id = turnsMatch[1] as ConversationId
+      const conversation = await store.getConversation(id)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      const body = (await readJsonBody(req)) as { text?: unknown }
+      const text = typeof body?.text === 'string' ? body.text.trim() : ''
+      if (text === '') {
+        sendJson(res, 400, { error: '缺少 text', code: 'text_required' })
+        return
+      }
+      // 执行者可能在这中间被删掉了。**这时候要说清是哪一步坏了**，而不是
+      // 静默换一个人接着聊——那会让上文与新 agent 的指令混在一起。
+      const agent = await store.getAgent(conversation.agentId)
+      if (!agent) {
+        sendJson(res, 409, {
+          error: '这个对话的执行者已经被删掉了。换一个执行者要新建对话：' +
+            '上文的延续是那个 CLI 的会话，换人接不上。',
+          code: 'agent_gone',
+        })
+        return
+      }
+      const out = await submitChatTurn(
+        store,
+        executor,
+        conversation,
+        agent,
+        text,
+        Date.now(),
+        workRoot,
+      )
+      if (out.failure === 'no_capacity') {
+        res.setHeader('retry-after', String(Math.ceil((out.retryAfterMs ?? 2000) / 1000)))
+        sendJson(res, 429, out)
+        return
+      }
+      if (out.failure === 'error') {
+        sendJson(res, 500, out)
+        return
+      }
+      sendJson(res, 202, out)
+      return
+    }
+
     if (req.method === 'POST' && path === '/api/runs') {
       const body = (await readJsonBody(req)) as SubmitRunRequest
       // `workDir` 从 D27 起是**可选**的：缺省由 daemon 按任务自动分配。
@@ -3689,21 +4709,42 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
            *   被标为已审查，不合理」）。
            *
            *   只给最新的那一份（一次审核一条判决；重试会落在新的 run 上）。
+           *
+           * ★ D46：这里**不再按 `run.kind === 'review'` 过滤**。
+           *
+           *   人工裁决可能挂在**执行 run** 上——"压根没配审核者"那种任务没有
+           *   审核 run 可挂（见 `canHostHumanVerdict`）。而这条响应是阶段推导
+           *   读判决的**唯一**入口，过滤掉执行 run 就等于"人工裁决落库了、
+           *   看板却看不见"：那正是这条路由最要防的失效。
+           *
+           *   对模型判决**没有任何影响**：模型判决挂在审核 run 上，执行 run 上
+           *   本来就一条都没有（`listVerdictsByRun` 返回空 ⇒ `null`，与改动前
+           *   逐字相同）。
+           *
+           * ⚠️ 与下面 `action` 那条**刻意不对称**：动作仍然只在审核 run 上找。
+           *    人工裁决永远不带动作（D46 规矩②），所以对执行 run 找动作恒为
+           *    `null`——多查一次库换一个必然的空值，不如不查。
            */
-          verdict:
-            run.kind === 'review'
-              ? await store.listVerdictsByRun(run.id).then((vs) => {
-                  const v = vs[vs.length - 1]
-                  return v
-                    ? {
-                        status: v.status,
-                        conclusion: v.conclusion,
-                        // 结论之外的"为什么"——人要看的就是这一句
-                        escalateReason: v.escalateReason,
-                      }
-                    : null
-                })
-              : null,
+          verdict: await store.listVerdictsByRun(run.id).then((vs) => {
+            const v = vs[vs.length - 1]
+            return v
+              ? {
+                  status: v.status,
+                  conclusion: v.conclusion,
+                  // 结论之外的"为什么"——人要看的就是这一句
+                  escalateReason: v.escalateReason,
+                  /**
+                   * ★ 这条判决是谁做的（D46）。缺字段 ≡ `'agent'`（老数据）。
+                   *
+                   *   阶段推导要用它：人工判「不通过」与审核者判「不通过」要给出
+                   *   **不同的那句话**（"你判了不通过"vs"审核不通过"）——前者要你
+                   *   去看自己刚才的决定，后者要你去查审核意见。给同一句话，等于
+                   *   把"哪里需要我"这条最有用的信息抹平。
+                   */
+                  source: v.source ?? ('agent' as const),
+                }
+              : null
+          }),
           /**
            * ★ 这条判决**要求做的那个动作**的结果。
            *
@@ -3753,7 +4794,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
 
     const runMatch =
-      /^\/api\/runs\/([^/]+)(?:\/(events|cancel|artifacts|messages|files|file))?$/.exec(path)
+      /^\/api\/runs\/([^/]+)(?:\/(events|cancel|artifacts|messages|files|file|human-verdict))?$/.exec(
+        path,
+      )
     if (runMatch) {
       const runId = runMatch[1] as RunId
       const sub = runMatch[2]
@@ -3782,6 +4825,134 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // ══════════════════════════════════════════════════════════════════
+      // 人工裁决（D46）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 判决一直是**只能由模型产出**的（D21：verdict 只由 review run 产出）。
+      // 这条路由给「人」开了一个口子，所以边界要写清楚：它**不是"另一个审核者"**，
+      // 它是**在审核结论之上的裁决**。
+      //
+      // ── 为什么需要它 ──
+      //
+      // 在这之前，一条任务的判决只可能落在三种"卡住"状态里，而界面上**没有
+      // 任何出路**：
+      //
+      //   · 判 `fail` 且没有返工额度（用完或没配）⇒ 进「等待人处理」；
+      //   · 判 `needs_human` ⇒ 进「等待人处理」；
+      //   · 判决不合规且不可重试 ⇒ 同样。
+      //
+      // 人点进去只能看到结论，唯一的按钮是「继续沟通」——而那是**再派一次活给
+      // agent**，不是"我自己来定"。于是"我看过了，这条我认可"这件事在整个系统里
+      // **无法表达**（看板的阶段是从记录推出来的，界面上改一个变量刷新就没了）。
+      //
+      // ── 三条硬规矩 ──
+      //
+      // ① **它是追加，不是覆盖**（DR-3「历史不得被覆盖」）。模型那条判决原样
+      //    留着，人这条是**新记录**。所以"当初被判过 fail、后来被人判 pass"
+      //    可以从记录里读出来。哪条生效由 `createdAt` 决定
+      //    （`listVerdictsByRun` 已按它排序，消费方取末条）。
+      //
+      // ② **不触发任何动作**。人在这里只是下结论。动作仍然只能来自判决里的
+      //    `action`，而那条 `action` 由**模型**在判决里写出来（D41/D43）。
+      //    让人在这顺带挑一个动作执行，等于把"动作必须来自判决"这条不变量拆掉
+      //    ——动作就再也没有一个可审计的出处了。要动东西，仍然得走"让审核者
+      //    判 pass 并给出动作"那条路。
+      //
+      // ③ **只在有可裁决的结论时允许**。见 `canHostHumanVerdict` 的注释——
+      //    那是这次改动最容易出错的地方：一个"点了通过、看板却不动"的按钮，
+      //    比没有这个按钮更糟。
+      //
+      // ⚠️ 刻意**不暴露给 MCP**（`apps/mcp`）。MCP 的暴露面本来就是刻意窄的
+      //    （见那份文件开头），而这条路由的语义是"人看了产出之后的决定"——
+      //    给出去等于让别的 agent 冒充人下裁决，而"谁做的决定"正是这份记录
+      //    唯一的价值。
+      if (req.method === 'POST' && sub === 'human-verdict') {
+        const run = await store.getRun(runId)
+        // 别的 workspace 的 run 一律当"不存在"（404）：这里只有一个 workspace，
+        // 但把"不属于我"说成"没有"是这套接口一贯的口径。
+        if (!run || run.workspaceId !== workspaceId) {
+          sendJson(res, 404, { error: 'run 不存在' })
+          return
+        }
+
+        // ★ 请求体**逐项校验**，不是信任类型声明（与 `POST /api/reports` 同一条
+        //   口径）：类型是编译期的，这里是运行时的任意 JSON。
+        const parsed = SubmitHumanVerdictRequest.safeParse(await readJsonBody(req))
+        if (!parsed.success) {
+          sendJson(res, 400, {
+            error: `人工裁决的请求不合法：${parsed.error.issues
+              .map((i) => `${i.path.join('.') || '(根)'}：${i.message}`)
+              .join('；')}`,
+          })
+          return
+        }
+
+        const gate = await canHostHumanVerdict(store, run)
+        if (!gate.ok) {
+          // 409 而不是 400：请求本身是合法的，是**这条 run 现在的状态**不允许。
+          sendJson(res, 409, { error: gate.reason })
+          return
+        }
+
+        const now = Date.now()
+        const record: VerdictRecord = {
+          id: ulid(now) as VerdictRecord['id'],
+          workspaceId,
+          runId: run.id,
+          subject: run.subject,
+          /**
+           * ★ 恒为 `advisory`，而且这不是"暂时只支持通过"——是**没有别的可能**：
+           *
+           *   `advisory` 的定义本来就是"**通过、但没有动作要做** ⇒ 只记录"。
+           *   人工通过不触发动作（规矩②），所以它正好就是这个状态；`stageOf`
+           *   于是把任务判成「已完成审查」。
+           *
+           *   另两个出路**不走这条路由**，各自有自己的机制（见
+           *   `SubmitHumanVerdictRequest` 的注释）：
+           *     · 要它重做 ⇒ 派一条新的执行 run（就是「反馈」＝「发送并继续」）
+           *     · 不要了   ⇒ 改 issue 的状态（`POST /issues/{id}/abandon`）
+           *   所以这里没有"另一个结论"可选。曾经有过一个 `fail`，它被删掉是因为
+           *   **没有生产者**——留一个没人发的取值只会让下一个人以为它可用。
+           *
+           *   ⚠️ 不走 `ReviewCoordinator`：那个类的职责是"把**模型**的输出收口成
+           *      判决"，里面挂着重试计数、返工派发、通知。人工裁决不需要任何
+           *      一件——它不重试（人不会"格式不对"）、不派返工（要返工是人自己
+           *      的决定，不是这条路由替他做的）、也不发通知（人刚做完这个决定，
+           *      通知给谁看）。
+           */
+          status: 'advisory',
+          conclusion: 'pass',
+          reasonCode: 'human_decision',
+          /**
+           * `confidence` 对人工裁决**没有意义**（人不是概率输出），但 schema 要求
+           * 它在 `0..1`。取 `1` 表示"这就是决定"；取 `0` 会被任何统计读成
+           * "完全没把握"——那是方向相反的误读，比留一个无意义的 1 更坏。
+           */
+          confidence: 1,
+          /** 空的：人没有逐条发现（理由在 `humanReason` 里，两者刻意不混）。 */
+          findings: [],
+          action: null,
+          escalateReason: null,
+          invalidResolution: null,
+          skillRefs: [],
+          /** 没有模型、没有 prompt ⇒ 如实留空，不编一个占位值。 */
+          modelId: null,
+          promptHash: null,
+          source: 'human',
+          /**
+           * ★ 没写理由 ⇒ `null`，这是**正常状态**不是缺失（见 `local-api.ts` 里
+           *   `SubmitHumanVerdictRequest` 的注释）。所以 `''` 也要折成 `null`：
+           *   存空串会让消费方分不清"没写"和"写了个空"。
+           */
+          humanReason: parsed.data.reason === '' ? null : (parsed.data.reason ?? null),
+          createdAt: now,
+        }
+        await store.insertVerdict(record)
+        sendJson(res, 201, { verdictId: record.id, status: record.status })
+        return
+      }
+
       // ── 工作目录的文件（任务详情右边那一栏）──
       //
       // 被读的是**使用者工作目录里的文件**，而路径来自查询参数 ⇒ 见
@@ -3797,21 +4968,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ?dir= 列子目录（一次一层）。界面点开一个目录时才请求下一层，
         // 而不是一次把整棵树拉回来 —— 那样一长串嵌套路径会把真正的产出淹掉。
         const dir = url.searchParams.get('dir') ?? ''
-        try {
-          // ★ "哪些是平台注入的"按**这个 run 用的 runtime** 算。
-          //   写死 `.claude/` 的版本对别的 CLI 会把注入物当成 agent 的产出显示。
-          const owner = await store.getAgent(run.agentId as never)
-          const managed = managedPathsFor(
-            getRuntimeDescriptor(owner?.runtimeKey ?? 'claude'),
-          )
-          sendJson(res, 200, await listWorkDir(run.workDir, dir, managed))
-        } catch (err) {
-          if (err instanceof UnsafePathError) {
-            sendJson(res, 400, { error: err.message })
-            return
-          }
-          throw err
-        }
+        // ★ "哪些是平台注入的"按**这个 run 用的 runtime** 算。
+        //   写死 `.claude/` 的版本对别的 CLI 会把注入物当成 agent 的产出显示。
+        const owner = await store.getAgent(run.agentId as never)
+        const managed = managedPathsFor(getRuntimeDescriptor(owner?.runtimeKey ?? 'claude'))
+        await sendWorkDirListing(res, run.workDir, dir, managed)
         return
       }
 
@@ -3820,23 +4981,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         if (!run) return sendJson(res, 404, { error: 'run 不存在' })
         if (!run.workDir) return sendJson(res, 404, { error: '这条 run 没有工作目录' })
 
-        const relPath = url.searchParams.get('path') ?? ''
-        try {
-          const body = await readWorkFile(run.workDir, relPath)
-          res.writeHead(200, {
-            'content-type': contentTypeFor(relPath),
-            'content-length': body.length,
-            ...WORK_FILE_HEADERS,
-          })
-          res.end(body)
-        } catch (err) {
-          // 路径不合法是**使用者输入问题**（400），不是服务坏了
-          if (err instanceof UnsafePathError) {
-            sendJson(res, 400, { error: err.message })
-            return
-          }
-          throw err
-        }
+        await sendWorkFile(res, run.workDir, url.searchParams.get('path') ?? '')
         return
       }
 
@@ -4012,7 +5157,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'EADDRINUSE') {
       throw new Error(
-        `端口 ${options.port} 已被占用。alpha-helper **不自动换端口**——` +
+        `端口 ${options.port} 已被占用。agentdeck 不自动换端口——` +
           `随机端口意味着"重启后地址变了"，而地址会被写进书签与配置里，` +
           `那种漂移比端口冲突难查得多。请先停止占用该端口的进程，` +
           `或用 --port 显式指定另一个端口。`,
@@ -4115,7 +5260,7 @@ async function validateRoleAndReviewer(
     return {
       ok: false,
       error:
-        'reviewer 角色的 agent 不该配 reviewerAgentId——它是**审别人的那个**，' +
+        'reviewer 角色的 agent 不该配 reviewerAgentId——它是审别人的那个，' +
         '不是被审的那个。如果你想让两个审核者互相复核，那需要另一套设计，现在没有。',
     }
   }
@@ -4137,7 +5282,7 @@ async function validateRoleAndReviewer(
       ok: false,
       error:
         `${target.name} 不是审核角色（它是 executor）。审核者必须是 role: 'reviewer' 的 agent —— ` +
-        `否则它没有审核标准可用，run 起不来或审出没有依据的结论。`,
+        `否则它没有「指令」可用（审核者的身份与判断依据都在那里），run 起不来或审出没有依据的结论。`,
     }
   }
 
@@ -4173,6 +5318,7 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // 第一句话模版（D32）：空 = 平台默认。首启不替使用者写模版。
     executeTemplate: '',
     reviewTemplate: '',
+    chatTemplate: '',
     // 默认智能体（D36）：首启那一对 agent 就在这里建，顺手把执行者设为默认——
     // "建完就派"的那个流程于是有确定的行为，而不是依赖"列表里第一个是谁"。
     defaultAgentId: null,
@@ -4187,7 +5333,7 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
   if (!device) {
     const { hostname } = await import('node:os')
     await store.upsertDevice({
-      id: ulid() as import('@alpha-helper/protocol').DeviceId,
+      id: ulid() as import('@agentdeck/protocol').DeviceId,
       name: hostname(),
       createdAt: now,
       lastSeenAt: now,
@@ -4214,26 +5360,28 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     id: ulid() as Agent['id'],
     workspaceId: workspace.id,
     name: '审核员',
+    // ★ 判据（2026-09 三次改）：这是**纯判据**，一个判决词都不出现（pass /
+    //   fail / needs_human 是平台的事，由判决契约 `{{verdict}}` 统一说明）。
+    //   顺带修掉过时的"按挂载的审核标准"——2026-09 标准已并进「指令」，没有
+    //   挂载这回事了。
     instructions:
-      '你是一个严格的审核者。按挂载的审核标准逐条对照，' +
-      '判断依据不足时给出 needs_human 并说清缺什么，不要替对方补上你认为对的要求。',
+      '你是一个严格的审核者。逐条核查被审核的内容：每条结论都要有依据，' +
+      '证据要能指回原文；不要替对方补上你认为对的要求。',
     model: null,
     runtimeKey: 'claude',
     workDir: null,
-    // D37：标准在 `reviewStandard` 上，所以这里不再挂 skill
+    // 判断依据全在「指令」里（2026-09），这里不再挂 skill
     skillIds: [],
-    toolIds: [],
-    // ★ 动作权限在 **agent** 上（D40 收口）：原来它写在 `BUILTIN_REVIEW_STANDARD`
-    //   里面，现在跟着标准一起搬过来——播种出来的默认审核者能动的范围与改动
-    //   之前完全相同（见那个常量）。
+    // ★ 动作权限在 **agent** 上（D40 收口）：原来它写在审核标准里，现在跟着
+    //   判断依据一起搬到 agent 身上——播种出来的默认审核者能动的范围与改动
+    //   之前完全相同。
     allowedActions: BUILTIN_REVIEW_ALLOWED_ACTIONS,
     env: {},
     role: 'reviewer',
     reviewerAgentId: null,
-    // ★ 首启的那条标准：内联在审核者身上，**不再播种成一份 skill**（D38）。
-    //   技能库里因此是空的——skill 是"执行者干活时参考什么 / 可安装的资料包"，
-    //   审核标准不从那来。
-    reviewStandard: BUILTIN_REVIEW_STANDARD,
+    // ★ 首启的审核者**没有**独立的标准字段（2026-09：标准并进「指令」；
+    //   老数据的兼容读取走 `reviewerIdentity`，不从这里来）。
+    reviewStandard: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -4250,15 +5398,14 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     // 执行者不需要审核 skill——它的 skill 是"干活时参考什么"，
     // 而审核标准是审核者的事。两者混在一起会让执行者按审核标准去改自己的产出。
     skillIds: [],
-    toolIds: [],
-    // ★ 动作权限是**审核者的**能力，执行者一律为空（执行者要能做事就挂工具，
-    //   见 `toolIds`）。写入口对这一点是硬的（`rejectActionsForExecutor`）。
+    // ★ 动作权限是**审核者的**能力，执行者一律为空。写入口对这一点是硬的
+    //   （`rejectActionsForExecutor`）。
     allowedActions: [],
     env: {},
     role: 'executor',
     // ★ 指向刚播种的审核者：这样首启就是一条**通的闭环**
     reviewerAgentId: reviewer.id,
-    // 执行者没有审核标准（它是审核者那一侧的东西）
+    // 执行者没有「审核身份」这回事（那是审核者那一侧的东西）
     reviewStandard: null,
     createdAt: now,
     updatedAt: now,
@@ -4273,7 +5420,7 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
   // ★ 顺便说清"技能库是空的"：使用者打开 Skills 页看到空列表时，不该以为是坏了
   //   （D38：审核标准内联在审核者身上，不再播种成 skill）。
   info(
-    `已初始化工作区与两个 agent：${reviewer.name}（审核，自带「${BUILTIN_REVIEW_STANDARD.name}」标准）、` +
+    `已初始化工作区与两个 agent：${reviewer.name}（审核，判据写在它的「指令」里）、` +
       `${agent.name}（执行 → 由 ${reviewer.name} 审）。技能库是空的——` +
       `审核标准不放在 skill 里，要装 skill 请去「Skills」页。`,
   )

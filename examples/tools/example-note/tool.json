@@ -1,5 +1,5 @@
 {
-  "schema": "alpha-helper/tool@1",
+  "schema": "agentdeck/tool@1",
   "slug": "example-note",
   "name": "示例工具（往工作目录写一条记录）",
   "version": "1.0.0",

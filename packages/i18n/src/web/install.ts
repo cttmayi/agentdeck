@@ -9,9 +9,10 @@ import type { TextCatalog } from '../text.ts'
  *    界面语言，所以现在改由库层产出**键 + 插值**，界面用 `$t(id, params)` /
  *    `tx(id, params)` 渲染（那两个函数在 `apps/web/src/lib/i18n.ts`）。
  *
- * ⚠️ zh 的值**必须与迁移之前逐字一致**：中文是这个项目的默认语言，也是既有测试、
- *    布局探针与文档（`README.md` / `docs/design.md` 的"装 / 更新 / 退回"那张表）
- *    断言的依据——改一个字就会有东西变红。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  *
  * ⚠️ 过渡成员已经删掉了（D39 收尾）：`CatalogEntryState.label` / `.hint`、
  *    `describeInstall()` / `installErrorHint()`、以及它们里面那份固定的 `zh` 渲染器。
@@ -53,8 +54,8 @@ export const installText = {
   },
   // 降级不许说成"更新"：这里逐字保留那句"点下去是往回退"。
   'install.downgradeHint': {
-    zh: '本地 {local} 比目录里的 {remote} **更新**。点下去是往回退，不是更新——确认这是你要的。',
-    en: 'The local {local} is **newer** than {remote} in the catalog. Clicking goes backwards, not forwards — make sure that is what you want.',
+    zh: '本地 {local} 比目录里的 {remote} 更新。点下去是往回退，不是更新——确认这是你要的。',
+    en: 'The local {local} is newer than {remote} in the catalog. Clicking goes backwards, not forwards — make sure that is what you want.',
   },
 
   // ── 安装结果的说明（`describeInstallMessages`）──────────────────────
@@ -86,16 +87,16 @@ export const installText = {
     en: 'Only public GitHub repository links are supported. For a skill on this machine, use "local directory" and enter an absolute path instead.',
   },
   'install.errRateLimited': {
-    zh: 'GitHub 匿名访问有每小时 60 次的限制。等一会儿再试，或设置环境变量 ALPHA_HELPER_GITHUB_TOKEN。',
-    en: 'Anonymous GitHub access is capped at 60 requests per hour. Wait a while and retry, or set the ALPHA_HELPER_GITHUB_TOKEN environment variable.',
+    zh: 'GitHub 匿名访问有每小时 60 次的限制。等一会儿再试；或者先设好 AGENTDECK_GITHUB_TOKEN 这个环境变量，再启动本机 daemon。',
+    en: 'Anonymous GitHub access is capped at 60 requests per hour. Wait a while and retry, or set the AGENTDECK_GITHUB_TOKEN environment variable and start the local daemon again.',
   },
   'install.errMissingSkillMd': {
-    zh: '技能是一个**目录**，里面必须有 SKILL.md（大写）。请把链接/路径指到那个目录。',
-    en: 'A skill is a **directory**, and it must contain SKILL.md (uppercase). Point the link/path at that directory.',
+    zh: '技能是一个目录，里面必须有 SKILL.md（大写）。请把链接/路径指到那个目录。',
+    en: 'A skill is a directory, and it must contain SKILL.md (uppercase). Point the link/path at that directory.',
   },
   'install.errBadSlug': {
-    zh: 'slug 只能是小写字母、数字与连字符。可以显式指定一个。',
-    en: 'A slug may only contain lowercase letters, digits and hyphens. You can specify one explicitly.',
+    zh: '标识只能用小写字母、数字与连字符。也可以自己指定一个。',
+    en: 'An ID may only contain lowercase letters, digits and hyphens. You can also specify one yourself.',
   },
   'install.errNotFound': {
     zh: '检查路径/链接：仓库是否为私有、分支名与目录是否写对。',

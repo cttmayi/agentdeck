@@ -69,6 +69,14 @@ export interface WorkDirListing {
   entries: WorkDirEntry[]
   /** 因为条数上限而没列全。 */
   truncated: boolean
+  /**
+   * 这个目录**存在吗**。
+   *
+   * ★ 与「存在但是空的」分开：聊天里对话刚建、第一轮还没跑，目录还没被建出来，
+   *   而两种情况都是空列表。界面上那两句话给出的下一步完全不同（"再等等" vs
+   *   "它确实没产出"），所以这个事实由服务端给，不让界面猜。
+   */
+  exists: boolean
 }
 
 /**
@@ -106,7 +114,7 @@ export function managedPathsFor(descriptor: {
 }
 
 /** 我们自己放上下文副本的地方（相对工作目录）。 */
-export const CONTEXT_DIR = '.alpha-helper'
+export const CONTEXT_DIR = '.agentdeck'
 
 function isManaged(relPath: string, managed: ManagedPaths): boolean {
   if (managed.files.includes(relPath)) return true
@@ -144,7 +152,7 @@ export async function listWorkDir(
   if (info === null) {
     // 顶层目录不存在（工作目录被清理掉了、或还没建）⇒ 给一个空列表而不是报错：
     // 界面那一栏显示"这个目录还是空的"，比弹一个错更贴合事实
-    if (dir === '') return { workDir, dir, entries: [], truncated: false }
+    if (dir === '') return { workDir, dir, entries: [], truncated: false, exists: false }
     throw new UnsafePathError(`目录不存在：${dir}`)
   }
   if (!info.isDirectory()) throw new UnsafePathError(`不是一个目录：${dir}`)
@@ -154,7 +162,9 @@ export async function listWorkDir(
     items = await readdir(target, { withFileTypes: true })
   } catch {
     // 读不了就当成空目录：列文件失败不该让整个视图报错
-    return { workDir, dir, entries: [], truncated: false }
+    // 目录在，只是读不了（权限等）——那是「存在但不是空的」这一档，不该说成
+    // 「还不存在」（两者要采取的行动不一样）。
+    return { workDir, dir, entries: [], truncated: false, exists: true }
   }
 
   const entries: WorkDirEntry[] = []
@@ -196,7 +206,7 @@ export async function listWorkDir(
   entries.sort((a, b) =>
     a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'dir' ? -1 : 1,
   )
-  return { workDir, dir, entries, truncated }
+  return { workDir, dir, entries, truncated, exists: true }
 }
 
 /** 路径不安全时的原因——直接给使用者看。 */

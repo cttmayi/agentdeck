@@ -1,7 +1,7 @@
 import { DEFAULT_DAEMON_URL } from './commands.ts'
 
 /**
- * `alpha-helper` 命令行（FR-INTEG-02）。
+ * `agentdeck` 命令行（FR-INTEG-02）。
  *
  * ══════════════════════════════════════════════════════════════════
  * 它是 daemon 的**客户端**，不是 daemon 的一部分
@@ -24,10 +24,10 @@ import { DEFAULT_DAEMON_URL } from './commands.ts'
  *    本 CLI 同样**不提供**"提交任意 run"（那是任意目录代码执行）。
  */
 
-const USAGE = `alpha-helper —— 命令行（需要本机 daemon 正在运行）
+const USAGE = `agentdeck —— 命令行（需要本机 daemon 正在运行）
 
 用法：
-  alpha-helper <命令> [参数] [--daemon <url>]
+  agentdeck <命令> [参数] [--daemon <url>]
 
 命令：
   status                       daemon 与 runtime 的状态（含版本验证、会话状态）

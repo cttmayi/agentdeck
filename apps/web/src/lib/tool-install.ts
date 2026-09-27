@@ -1,4 +1,4 @@
-import type { TextParams, WebTextId } from '@alpha-helper/i18n'
+import type { TextParams, WebTextId } from '@agentdeck/i18n'
 import { ApiError, api, type Tool, type ToolManifest } from './api.ts'
 
 /**
@@ -42,16 +42,6 @@ export class ToolInstallError extends Error {
  *   还挂着的是谁（使用者的要求），而那需要结构化的 `holders`。把名单拼进
  *   错误消息里，界面就只剩下一句不可拆的话可显示。
  */
-export class ToolInUseError extends Error {
-  readonly holders: Array<{ id: string; name: string }>
-
-  constructor(holders: Array<{ id: string; name: string }>) {
-    super(`tool still mounted by ${holders.map((h) => h.name).join(', ')}`)
-    this.name = 'ToolInUseError'
-    this.holders = holders
-  }
-}
-
 /** 一段待渲染的文案：键 + 插值（渲染方式与 `skill-install.ts` 的 `TextRenderer` 同形）。 */
 export interface TextMessage {
   id: WebTextId
@@ -226,26 +216,13 @@ export async function installToolFromCatalog(entry: {
 /**
  * 卸载一个工具包：`DELETE /api/tools/:id`。
  *
- * 400 + `holders` ⇒ `ToolInUseError`（界面按名字列出来）；其余错误原样抛出。
+ * ⚠️ 这里原来会把 400 + `holders` 转成 `ToolInUseError`，让界面"指名道姓"地
+ *    说出还有哪些 agent 挂着它。服务端那条拒绝已经删掉（"摘掉"这个动作不存在了，
+ *    见 `server.ts` 里 DELETE 那段），所以这个错误类型与这段转换一并删了——
+ *    卸载现在只会抛"真的坏了"那类错误。
  */
 export async function deleteTool(id: string): Promise<void> {
-  try {
-    await api(`/api/tools/${encodeURIComponent(id)}`, { method: 'DELETE' })
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 400) {
-      const rec = readRecord(err.body)
-      const raw = rec['holders']
-      if (Array.isArray(raw) && raw.length > 0) {
-        throw new ToolInUseError(
-          raw.map((item) => {
-            const holder = readRecord(item)
-            return { id: String(holder['id'] ?? ''), name: String(holder['name'] ?? '') }
-          }),
-        )
-      }
-    }
-    throw err
-  }
+  await api(`/api/tools/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 /**

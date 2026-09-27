@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { BlobRef } from '@alpha-helper/protocol'
+import type { BlobRef } from '@agentdeck/protocol'
 import { atomicWrite, ensureDir, exists, readBytesOrNull, sha256Hex } from './fs-utils.ts'
 
 /**

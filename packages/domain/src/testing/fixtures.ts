@@ -2,6 +2,10 @@ import type {
   Agent,
   AgentId,
   Issue,
+  ChatTurn,
+  ChatTurnId,
+  Conversation,
+  ConversationId,
   IssueId,
   Report,
   ReportId,
@@ -12,8 +16,8 @@ import type {
   Tool,
   ToolId,
   WorkspaceId,
-} from '@alpha-helper/protocol'
-import { TOOL_MANIFEST_SCHEMA } from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
+import { TOOL_MANIFEST_SCHEMA } from '@agentdeck/protocol'
 
 /**
  * 测试夹具。
@@ -27,6 +31,8 @@ export const agentId = (s: string) => s as AgentId
 export const skillId = (s: string) => s as SkillId
 export const toolId = (s: string) => s as ToolId
 export const issueId = (s: string) => s as IssueId
+export const conversationId = (s: string) => s as ConversationId
+export const chatTurnId = (s: string) => s as ChatTurnId
 export const runId = (s: string) => s as RunId
 export const reportId = (s: string) => s as ReportId
 
@@ -41,7 +47,6 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
     runtimeKey: 'claude',
     workDir: null,
     skillIds: [],
-    toolIds: [],
     env: {},
     createdAt: T0,
     role: 'executor',
@@ -169,6 +174,46 @@ export function makeReport(
     ingestedAt: T0,
     ...over,
     id: reportId(over.id),
+  }
+}
+
+export function makeConversation(
+  over: Omit<Partial<Conversation>, 'id'> & { id: string },
+): Conversation {
+  return {
+    workspaceId: wsId(),
+    agentId: agentId('a1'),
+    skillIds: [],
+    title: '对话',
+    workDir: null,
+    createdAt: T0,
+    updatedAt: T0,
+    lastTurnAt: null,
+    turnCount: 0,
+    ...over,
+    id: conversationId(over.id),
+  }
+}
+
+export function makeChatTurn(
+  // ⚠️ `conversationId` 要从 `Partial<ChatTurn>` 里**摘掉**再交叉：不摘的话
+  //    交集会变成 `ConversationId & string`，调用方传普通字符串就编译不过——
+  //    而夹具的整个意义就是"测试里不必为品牌类型写一堆解析"。
+  over: Omit<Partial<ChatTurn>, 'id' | 'conversationId'> & {
+    id: string
+    conversationId: string
+  },
+): ChatTurn {
+  return {
+    workspaceId: wsId(),
+    seq: 1,
+    userText: '你好',
+    runId: null,
+    createdAt: T0,
+    error: null,
+    ...over,
+    id: chatTurnId(over.id),
+    conversationId: conversationId(over.conversationId),
   }
 }
 

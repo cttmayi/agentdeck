@@ -1,9 +1,9 @@
 {
-  "schema": "alpha-helper/tool@1",
+  "schema": "agentdeck/tool@1",
   "slug": "example-notify",
-  "name": "示例工具（通知：平台/渠道参数）",
+  "name": "示例工具（发通知：平台/渠道参数）",
   "version": "1.0.0",
-  "description": "远端范例：演示「平台/渠道」这一类枚举参数，以及字符串、布尔、整数参数。不真的发通知——它只把收到的完整参数写成工作目录里的一条记录，用来测试「判决 → 参数 → 脚本」这条管道。",
+  "description": "范例工具，不会真的发出通知：它接受「平台/渠道」等参数，把收到的参数记在工作目录里——用来看看判决给过来的参数长什么样。",
   "runtime": "node",
   "entry": "scripts/send.mjs",
   "actions": [

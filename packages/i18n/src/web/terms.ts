@@ -47,6 +47,9 @@ export const termsText = {
   'term.reasonCode.conflicting_criteria': { zh: '标准互相冲突', en: 'Conflicting criteria' },
   'term.reasonCode.criteria_not_applicable': { zh: '标准不适用', en: 'Criteria not applicable' },
   'term.reasonCode.internal_error': { zh: '内部错误', en: 'Internal error' },
+  // ★ 人工裁决（D46）：理由在自由文本里，不在这套分类里。标签要说清这一点，
+  //   否则读的人会去上面那堆码里找"它到底属于哪一类"。
+  'term.reasonCode.human_decision': { zh: '人工裁决', en: 'Decided by hand' },
 
   // ── 判决记录的状态 ──
   'term.verdictStatus.pending_verdict': { zh: '等待判决', en: 'Pending verdict' },
@@ -103,6 +106,9 @@ export const termsText = {
   'term.stage.action_failed': { zh: '行动失败', en: 'Action failed' },
   'term.stage.needs_human': { zh: '待人工', en: 'Needs you' },
   'term.stage.reviewed': { zh: '已审查', en: 'Reviewed' },
+  // ★ D47：放弃。措辞用「已放弃」而不是「已取消」——`cancelled` 是**契约值**
+  //   （它同时是 run 的状态之一），而这一档说的是"你决定不管它了"。
+  'term.stage.abandoned': { zh: '已放弃', en: 'Dropped' },
 
   // ── 证据等级 / 版本判定（runtime 卡片与编辑态）──
   'term.evidence.verified': { zh: '实测过', en: 'Verified' },

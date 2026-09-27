@@ -17,12 +17,12 @@
  * 页面跑在明文 http 上：带 `Secure` 的 cookie 不会被发送，不带 `Secure`
  * 就等于把凭证暴露给同机任何进程。所以用 localStorage + `Authorization` 头。
  */
-import { renderText, webText } from '@alpha-helper/i18n'
+import { renderText, webText } from '@agentdeck/i18n'
 import { currentLocale } from './locale.ts'
 import type { ToolManifest } from './api.ts'
 
-const REMOTE_URL_KEY = 'alpha-helper.remote-url'
-const REMOTE_TOKEN_KEY = 'alpha-helper.remote-token'
+const REMOTE_URL_KEY = 'agentdeck.remote-url'
+const REMOTE_TOKEN_KEY = 'agentdeck.remote-token'
 const DEFAULT_REMOTE_URL = 'http://127.0.0.1:4518'
 
 export function getRemoteUrl(): string {

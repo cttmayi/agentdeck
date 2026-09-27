@@ -1,20 +1,25 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import {
   removeInjectedSkills,
-  removeInjectedTools,
-  renderFirstSentence,
+  migrateTemplate,
+  renderDelivery,
+  deliveredBytes,
+  deliveryModeFor,
+  isBlankBlock,
+  BLOCK_LABELS,
+  BLOCK_ORDER,
+  type Delivery,
   SkillCollisionError,
   SkillTooLargeError,
   syncInjectedSkills,
-  syncInjectedTools,
-  ToolCollisionError,
   type AgentBackend,
   type RuntimeDescriptor,
   type SkillBrief,
-  type ToolBrief,
-} from '@alpha-helper/agent-core'
+  type BlockTemplates,
+  type FirstSentenceKind,
+} from '@agentdeck/agent-core'
 import {
   assertRunTransition,
   redactArgv,
@@ -23,8 +28,8 @@ import {
   type ReviewDecision,
   type Store,
   type ToolActionHint,
-} from '@alpha-helper/domain'
-import type { SandboxOptions } from '@alpha-helper/agent-core'
+} from '@agentdeck/domain'
+import type { SandboxOptions } from '@agentdeck/agent-core'
 import {
   ulid,
   type ActionRefType,
@@ -36,10 +41,10 @@ import {
   type SubmitRunRequest,
   type TokenUsage,
   type Tool,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
-import { resolveReviewStandard } from './review-standard.ts'
-import { DEFAULT_LOCALE } from '@alpha-helper/i18n'
+import { effectiveAllowedActions, reviewerIdentity } from './review-standard.ts'
+import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
  * 语言在 prompt 里的**显示名**（D39）。
@@ -145,6 +150,12 @@ export interface ExecutorDeps {
     executeRun: Run
     executorAgentId: string
     output: string
+    /**
+     * §3.3b（2026-09）：执行任务/执行结果的两份**落盘文件**路径（执行器
+     * 刚写好，按轮次编号、多轮不覆盖）。审核的第一句话用它做文件引用；
+     * null = 落盘失败/没有工作目录 ⇒ 审核退回纯内联材料。
+     */
+    materialRefs: { taskPath: string; resultPath: string } | null
   }) => Promise<{ runId: RunId | null; note: string }>
   now?: () => number
   onWarn?: (message: string) => void
@@ -180,7 +191,7 @@ function describeDecision(handling: {
     case 'downgrade':
       return `不合规且重试次数已用尽 → 降级为建议（已发通知），本次不执行任何动作`
     case 'invalid':
-      return `不合规且**重试无意义**（${d.issues.length} 个结构性问题）→ 已通知人处理`
+      return `不合规且重试无意义（${d.issues.length} 个结构性问题）→ 已通知人处理`
     default:
       return '（未知的判决结果）'
   }
@@ -245,10 +256,9 @@ const MAX_STDERR_LOG_LINES = 200
  *
  * 与技能不同，CLI **不会**自动发现这个目录——工具靠**模型自己读**：第一句话里
  * 列了"有哪些、在哪儿"，模型去读 `TOOL.md`、决定怎么调脚本。放在
- * `.alpha-helper/` 下是与上下文副本（`.alpha-helper/context/`）同一族的"平台
+ * `.agentdeck/` 下是与上下文副本（`.agentdeck/context/`）同一族的"平台
  * 放的东西"，一眼可辨、不会冒充 agent 的产出。
  */
-const INJECTED_TOOLS_DIR = '.alpha-helper/tools'
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -357,6 +367,16 @@ export class RunExecutor {
       //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
       //   所以不需要区分三态，落一个数即可。
       maxReworks: req.maxReworks ?? 0,
+      // ★ 2026-09（产品决定：日志已含第一句话全文，执行/审核都不再写上下文
+      //   副本文件）：审核的材料**记在 run 记录上**，判决不合规的重试从这里取——
+      //   · `materialRefs`：文件式审核的两份落盘文件（重试读结果文件）；
+      //   · `reportBody`：报告式审核的报告正文（重试要的材料就是它本身）。
+      ...(req.kind === 'review' && req.review
+        ? {
+            materialRefs: (req.review.materialRefs ?? null) as Run['materialRefs'],
+            reportBody: (req.review.body ?? null) as Run['reportBody'],
+          }
+        : {}),
       subject: req.subject,
       trigger: req.kind === 'review' ? 'third_party' : 'assignment',
       derivedFrom: (req.derivedFrom ?? null) as Run['derivedFrom'],
@@ -400,7 +420,7 @@ export class RunExecutor {
     if (resolved.origin === 'inherited' && agentDefaultDir && agentDefaultDir !== resolved.path) {
       await this.#note(
         req.runId,
-        `该 agent 配了默认工作目录 ${agentDefaultDir}，但审核必须在**被审那条 run 的**` +
+        `该 agent 配了默认工作目录 ${agentDefaultDir}，但审核必须在被审那条 run 的` +
           `目录里进行（否则看不到它留下的产出），所以本次用的是 ${resolved.path}`,
       )
     }
@@ -449,8 +469,8 @@ export class RunExecutor {
       const why =
         state === 'stateless'
           ? `${descriptor.key} 是无状态 CLI，不存在会话可恢复`
-          : `${descriptor.key} 的会话状态**未验证**（sessionState: 'unknown'），` +
-            `因此不尝试恢复——拿未验证的能力去跑，出问题时无从判断`
+          : `${descriptor.key} 能不能接着上次的会话，我们还没核对过，` +
+            `因此不尝试恢复——拿没核对过的能力去跑，出问题时无从判断`
       this.#deps.onWarn?.(`run ${run.id} 不恢复会话：${why}`)
       return { sessionId: null, reason: why }
     }
@@ -664,15 +684,6 @@ export class RunExecutor {
     let injectedSkills: string[] = []
 
     /**
-     * 这次 run 注入过哪些**工具包**——给 `cleanup()` 收尾用。
-     *
-     * 与 `injectedSkills` 同一条规矩：它只是"要收哪几个"的**候选**，能不能删由
-     * **落盘的归属清单**决定（见 `removeInjectedTools`）——所以数组错了也删不到
-     * 使用者的东西。也声明在 `try` 外面，理由与技能那份完全相同。
-     */
-    let injectedTools: string[] = []
-
-    /**
      * 这次 run **实际**执行的命令行（含沙箱包装）——由后端如实上报。
      *
      * ★ 审计原来记的是 `[descriptor.command, ...descriptor.baseArgs]`：那**不是**
@@ -716,7 +727,7 @@ export class RunExecutor {
         //
         //   同步那一步**总会**写一份归属清单（哪怕内容是空的），所以只在
         //   "注入了东西"时才收尾，会在一个没挂技能的 run 之后留下一份空清单
-        //   （`.claude/skills/.alpha-helper-managed.json`）——工作目录里于是
+        //   （`.claude/skills/.agentdeck-managed.json`）——工作目录里于是
         //   多出一个不是产出的东西，正是这次改动要清掉的那类残留。
         const swept =
           runtime.descriptor.skills.kind === 'directory'
@@ -737,25 +748,6 @@ export class RunExecutor {
         this.#deps.onWarn?.(`移除注入的技能失败：${String(err)}`)
       }
 
-      // ★ 工具包收掉（D42）：与技能同一条规矩——**只删落盘清单里记着的**，
-      //   `injectedTools` 只是"要收哪几个"的候选，传错也删不到使用者的东西。
-      //   同一个 try/catch 的两份收尾要分开：一处失败不该拖垮另一处。
-      try {
-        const sweptTools = await removeInjectedTools(
-          run.workDir!,
-          INJECTED_TOOLS_DIR,
-          injectedTools,
-        )
-        if (sweptTools.removed.length > 0) {
-          await this.#note(
-            runId,
-            `已移除本次注入的工具包：${sweptTools.removed.join('、')}` +
-              `（工作目录里只留 agent 的产出；本次能用哪些工具见上面的注入记录）`,
-          )
-        }
-      } catch (err) {
-        this.#deps.onWarn?.(`移除注入的工具包失败：${String(err)}`)
-      }
     }
 
     try {
@@ -782,7 +774,7 @@ export class RunExecutor {
         await this.#note(
           runId,
           (mountedSkills.length > 0
-            ? `⚠️ 本次**没有**注入技能：这个 agent 挂了 ${mountedSkills.length} 个 skill` +
+            ? `⚠️ 本次没有注入技能：这个 agent 挂了 ${mountedSkills.length} 个 skill` +
               `（${mountedSkills.map((s) => s.slug).join('、')}），`
             : '本次没有注入技能：') +
             `但 runtime \`${runtime.descriptor.key}\` 没有技能发现机制。` +
@@ -827,49 +819,19 @@ export class RunExecutor {
         skillsBrief.push({ slug: skill.slug, name: skill.name, body: skill.body })
       }
 
-      // ── 注入工具包（D42：执行者挂载的工具 → 工作目录）──
+      // ⚠️⚠️ 这里原来是「注入工具包」（D42：执行者挂载的工具 → 工作目录）：
+      //     读 agent 的 `toolIds` → 把那些包的脚本与 TOOL.md 写进工作目录 →
+      //     再把清单塞进第一句话。**整段删掉了**，连同 `#mountedTools`、
+      //     `syncInjectedTools` / `removeInjectedTools` 与 `INJECTED_TOOLS_DIR`。
       //
-      // ★ 只有执行 run 注入：审核者不挂工具（能力模型：执行者用工具干活、
-      //   审核者只判断），审核 run 永远没有可注入的。
+      // 挂载能力撤掉之后它**永远不会写出任何东西**：`toolIds` 这个字段已经不在
+      // 协议里了，没有任何入口能给它赋值。留着的话每次 run 都白读一遍工具表、
+      // 白跑一遍注入与回收，还会让读代码的人以为执行者能拿到工具包。
       //
-      //   与技能的三处差别：
-      //   1. **没有 runtime 门槛**——技能靠 CLI 扫目录发现（`kind: 'none'` 就写
-      //      了也白写），工具靠模型自己读，任何 runtime 都能用；
-      //   2. 写的是**整个包**（脚本 + tool.json + TOOL.md），不是规范化成单个
-      //      约定文件；
-      //   3. 注入失败（含撞上使用者同名目录的 `ToolCollisionError`）**要让 run
-      //      失败**——理由与技能那条完全相同：静默的缺能力比报错糟得多。
-      const toolsBrief: ToolBrief[] = []
-      if (req.kind === 'execute') {
-        const mountedTools = await this.#mountedTools(run)
-        const toolsSync = await syncInjectedTools(
-          run.workDir!,
-          INJECTED_TOOLS_DIR,
-          mountedTools.map((tool) => ({
-            slug: tool.slug,
-            files: tool.files,
-            toolJson: JSON.stringify(tool.manifest, null, 2),
-            docs: tool.docs,
-          })),
-        )
-        injectedTools = toolsSync.written
-        if (toolsSync.pruned.length > 0) {
-          await this.#note(
-            runId,
-            `已从工作目录移除不再挂载的工具包：${toolsSync.pruned.join('、')}`,
-          )
-        }
-        // 清单给模型："有哪些、在哪儿、干什么用"（工具没有 CLI 自动发现，
-        // 模型要自己读 TOOL.md 决定怎么调脚本——见 `toolsValue` 的说明）。
-        for (const tool of mountedTools) {
-          toolsBrief.push({
-            slug: tool.slug,
-            name: tool.name,
-            description: tool.description,
-            dir: `${INJECTED_TOOLS_DIR}/${tool.slug}`,
-          })
-        }
-      }
+      // ⚠️ 第一句话里那个 `{{tools}}` **变量留着没删**（见 `first-sentence.ts`）：
+      //    删掉它会让**已经存下来的**、用到 `{{tools}}` 的自定义模版在渲染时抛错
+      //    （`validateTemplate` 不认的名字，渲染时会报错）。它现在恒为空字符串，
+      //    所以 `{{#tools}}…{{/tools}}` 那段永远不出现——效果与"没有工具"一致。
 
       // ★ 环境预检的问题必须出现在**这份日志里**。
       //
@@ -912,24 +874,10 @@ export class RunExecutor {
           : skillDelivery.kind === 'directory'
             ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.slug).join('、')}` +
               `（写入 ${skillDelivery.dir}/，CLI 会自己扫这个目录）`
-            : `⚠️ 挂了 ${mountedSkills.length} 个 skill 但**一个都没写下去**：` +
+            : `⚠️ 挂了 ${mountedSkills.length} 个 skill 但一个都没写下去：` +
               `runtime \`${runtime.descriptor.key}\` 没有技能发现机制（原因见上一行）——` +
               `本次它们只作为「审核标准 / 参考」出现在上下文里`,
       )
-
-      // ★ 工具包的注入结果同样要进日志（D42）。
-      //
-      //   与 skill 那条同款理由：不写的话，使用者没法区分"没挂工具"与"挂了但
-      //   没送进工作目录"——而工具没有 CLI 自动发现，写没写下去**完全不可见**。
-      if (req.kind === 'execute') {
-        await this.#note(
-          runId,
-          toolsBrief.length === 0
-            ? `本次没有注入任何工具包（该执行者没挂工具）——它只用自己的内置能力干活`
-            : `已注入 ${toolsBrief.length} 个工具包：${toolsBrief.map((t) => t.slug).join('、')}` +
-              `（写入 ${INJECTED_TOOLS_DIR}/，模型会从第一句话里知道它们在哪、怎么用）`,
-        )
-      }
 
       // ══════════════════════════════════════════════════════════════════
       // ── 组装「第一句话」，并留一份副本（D29）──
@@ -957,9 +905,35 @@ export class RunExecutor {
       //   （`readFirstSentenceTemplates` 也这么读），否则"界面显示的"与
       //   "真的投递的"会分叉。
       const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
-      const templates = {
-        executeTemplate: workspace?.executeTemplate ?? '',
-        reviewTemplate: workspace?.reviewTemplate ?? '',
+      // ★ 2026-10：每条链路三块模版各一份（① 框架 / ② 身份 / ③ 任务）。
+      //   `executeTemplate` / `reviewTemplate` / `chatTemplate` 这三个老键就是
+      //   **框架框**（改名会弄丢老 workspace 里已存的内容）；身份/任务框是后加的
+      //   六个键。
+      //
+      //   store 不做 schema 迁移，加字段之前建的 workspace 读回来没有后加的那六个键，
+      //   所以在 `?? ''` 这一层补齐——**与界面上显示的那份走同一段代码**
+      //   （`readWorkspaceSettings` 也这么读），否则"界面显示的"与"真的投递的"会分叉。
+      const templates: {
+        execute: BlockTemplates
+        review: BlockTemplates
+        chat: BlockTemplates
+      } = {
+        execute: {
+          frame: workspace?.executeTemplate ?? '',
+          identity: workspace?.executeIdentityTemplate ?? '',
+          task: workspace?.executeTaskTemplate ?? '',
+        },
+        review: {
+          frame: workspace?.reviewTemplate ?? '',
+          identity: workspace?.reviewIdentityTemplate ?? '',
+          task: workspace?.reviewTaskTemplate ?? '',
+        },
+        // 聊天那一份（2026-09 加的第三份）。老 workspace 里没有这些键 ⇒ 空 = 平台默认。
+        chat: {
+          frame: workspace?.chatTemplate ?? '',
+          identity: workspace?.chatIdentityTemplate ?? '',
+          task: workspace?.chatTaskTemplate ?? '',
+        },
       }
       // ★ 回答语言（D39）：界面语言决定模型用什么语言答复。**prompt 本身不翻译**，
       //   只加一条"请用 X 回答"的指令——使用者看不懂中文答复，但判决契约与材料
@@ -973,7 +947,17 @@ export class RunExecutor {
       //   里标准上那份）也只在那个函数里写了一遍。
       //   老数据（标准还在挂载的 skill 里）的兼容路径**只对正文生效**：skill 不
       //   参与动作授权（D40），它的正文只进 `{{standards}}`。
-      const standard = req.kind === 'review' ? resolveReviewStandard(agentConfig ?? { reviewStandard: null }, mountedSkills) : null
+      /**
+       * ★ 审核者的**身份**：agent 的「指令」＋（老数据里的）审核标准正文。
+       *
+       * 2026-09 的决定：「审核 Agent 的标准也放 ② 里面，不用单独设置」。所以对审核
+       * 这条链路，② 要投递的就是这份合成身份——它与派发资格用的是**同一个函数**
+       * （`reviewerIdentity`），所以"能派出去的"与"送进去的"不可能分叉。
+       */
+      const reviewerIdentityText =
+        req.kind === 'review'
+          ? reviewerIdentity(agentConfig ?? { reviewStandard: null }, mountedSkills).text
+          : null
 
       // ★ 这次审核**允许哪些动作**（D40 收口：它在 agent 上，不在标准里）：
       //   白名单还要考虑已安装的工具包，因为判决里可以出现
@@ -991,7 +975,15 @@ export class RunExecutor {
         req.kind === 'review'
           ? await this.#reviewActions(
               run.workspaceId,
-              run.allowedActions ?? standard?.allowedActions ?? [],
+              // 动作权限的权威取法是 `effectiveAllowedActions`（唯一解析点）：
+              // agent 上那份优先，为空才回退到老数据里标准上那份
+              // ★★ 2026-09 修：这里原来写的是
+              //    `resolveReviewStandard(...)?.allowedActions ?? []`，而那个函数在
+              //    "没有正文"时返回 null ⇒ 动作权限被整份丢掉（详见
+              //    `effectiveAllowedActions` 上面那段）。判据只能是**动作权限本身**，
+              //    与"有没有标准正文"无关。
+              run.allowedActions ??
+                effectiveAllowedActions(agentConfig ?? { reviewStandard: null }, mountedSkills),
               // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）：
               //   `run.actionParams` 有值（含空对象）就用它，否则才用审核者长期
               //   配的那份（`Agent.actionParams`）。
@@ -999,21 +991,120 @@ export class RunExecutor {
             )
           : null
 
-      const firstSentence =
-        req.kind === 'review' && req.review
-          ? renderFirstSentence({
+      // ★★ 对话那一轮**不套模版**：投递出去的就是 `req.prompt`（使用者那句话）。
+      //
+      //   在**这里**分岔，而不是在 `chat.ts` 里拼一段"看起来没有模版"的文字：
+      //   模版是在执行器里套上去的，所以在执行器里决定套不套，才只有一处规矩。
+      //   判据用 `subject.type`——它本来就是"这条 run 在做什么"的唯一出处，
+      //   而「对话不是任务」这件事正由它担着（`chat.ts` 里写的就是它）。
+      //   副作用是：谁拿 `POST /api/runs` 建一条 conversation 对象的 run，也会
+      //   走这条路——那是**对的**，对话对象就该按对话办。
+      //
+      //   ⚠️ 与它配套：`Agent.instructions` 在这条路上不投递（见 `chat.ts` 里那段）。
+      /**
+       * ★ 老模版**读出来就迁移**（2026-09 三块组装；2026-10 起三块各有一个模版框）。
+       *
+       * 六个变量退役了（`{{instructions}}` / `{{prompt}}` / `{{standards}}` /
+       * `{{tools}}` / `{{material}}` / `{{materialTitle}}`）——它们的内容现在由平台
+       * 组装进 ②③，模版里想摆放那两块用 `{{identity}}` / `{{task}}`。老模版里还写着
+       * 它们，而 `validateTemplate` 会把它们当"退役变量"拒掉。
+       *
+       * 两条路都不能走：**拒绝**会让使用者已经存下来的模版当场跑不起来（那不是他做错
+       * 了什么）；**静默摘掉**又会让他以为模版还生效。所以：摘掉，**并且留痕**——
+       * 摘了什么写进这次 run 的日志（内容一个字不丢，只是位置改由平台定）。
+       * 每个框都迁移一遍（身份/任务框是新字段，防御性处理）。
+       */
+      const migratedBlocks = (t: BlockTemplates): BlockTemplates => ({
+        frame: migrateTemplate(t.frame ?? '').next,
+        identity: migrateTemplate(t.identity ?? '').next,
+        task: migrateTemplate(t.task ?? '').next,
+      })
+      const migrated = {
+        execute: migratedBlocks(templates.execute),
+        review: migratedBlocks(templates.review),
+        chat: migratedBlocks(templates.chat),
+      }
+      // 只有框架框里可能出现退役变量（身份/任务框是新字段）；审核那条老链路上也有
+      const retiredSeen = [
+        ...new Set([
+          ...migrateTemplate(templates.execute.frame ?? '').removed,
+          ...migrateTemplate(templates.review.frame ?? '').removed,
+        ]),
+      ]
+      if (retiredSeen.length > 0) {
+        await this.#note(
+          runId,
+          `第一句话模版里有已退役的变量（${retiredSeen.join('、')}），已按新规矩摘掉：` +
+            // ⚠️ 这句进**运行日志**（纯文本显示）：不写"② 身份 / ③ 任务"这种我们自己
+            //    拼装投递文本时的编号，也不留 markdown 记号（2026-09）。
+            `它们的内容现在由平台自己组装，一个字没丢。` +
+            `想让模版本身也更新，去「设置」里保存一次（或点「填入默认模版」）。`,
+        )
+      }
+
+      /**
+       * ★ 投递档：runtime 声明了系统提示的旗标就 A，否则 B（见 `deliveryModeFor`）。
+       *
+       * 这一档要**记在这条 run 上**（下面那条日志会写明），因为同一个模版在两个
+       * runtime 上投递形状不同——而"两边都不报错"正是这个仓库被咬过三次的形状。
+       */
+      const mode = deliveryModeFor(runtime.descriptor)
+      /**
+       * ★ 把这一档**写进 run**（不只是写日志）：同一个模版在两个 runtime 上投递形状
+       *   不同，而"两边都不报错"是这个仓库被咬过三次的形状。记下来之后，"这条 run
+       *   当时是怎么送的"是可查的事实。
+       */
+      if (run.deliveryMode !== mode) {
+        /**
+         * ⚠️ **必须重新读一次再写**：`run` 是这次执行开头那份快照，而在这之间
+         *    派发路径可能已经把它推到 `dispatched` 了。拿旧快照整条覆盖回去，等于
+         *    把状态**回退**成 `queued`——接着那句 `dispatched → running` 的转换就会
+         *    失败，run 永远停在"还没跑"，而报出来的只是"等不到 running"。
+         *    （实测踩过：一条"放弃会取消还在跑的 run"的 e2e 因此超时。）
+         */
+        const fresh = await store.getRun(runId)
+        if (fresh && fresh.deliveryMode !== mode) {
+          await store.insertRun({ ...fresh, deliveryMode: mode })
+        }
+      }
+
+      /** 三块怎么投递由 `mode` 决定（A：①② 进系统提示；B：三块合一段）。 */
+      const delivery: Delivery =
+        req.subject.type === 'conversation'
+          ? // ★ 对话：**①②③ 都发**（2026-09 的决定）——
+            //   ① 是聊天**自己**那份框架（任务那份含 run/对象头、"报告"要求与判决
+            //   契约，灌进聊天是错的）；② 是 agent 的「指令」（在此之前它在聊天里
+            //   **静默失效**，而技能照旧注入——同一个 agent 在两条路上性格不同）；
+            //   ③ 是使用者那句话，**逐字**。
+            renderDelivery({
+              kind: 'chat',
+              runId,
+              subject: req.subject,
+              prompt: req.prompt,
+              skills: skillsBrief,
+              instructions: agentConfig?.instructions ?? null,
+              language,
+              template: migrated.chat,
+            }, mode)
+          : req.kind === 'review' && req.review
+          ? renderDelivery({
               kind: 'review',
               runId,
               subject: req.subject,
               report: { kind: req.review.kind, title: req.review.title, body: req.review.body },
               skills: skillsBrief,
               relatedIssueId: req.review.relatedIssueId ?? null,
-              previousContextPath: await this.#previousContextPath(req),
-              instructions: agentConfig?.instructions ?? null,
+              // ★ 2026-09：不再给"上一次的上下文副本路径"——副本已不再写
+              //   （日志已含第一句话全文）。重试要的材料从 run 记录取。
+              previousContextPath: null,
+              // ★ §3.3b（2026-09）：执行任务/执行结果的**文件引用**（平台落盘，
+              //   按轮次编号、多轮不覆盖）。报告类审核没这两份 ⇒ null，不渲染引用块。
+              materialRefs: req.review.materialRefs ?? null,
+              // ★ 审核这条路上 ② 是**合成身份**（指令 + 老数据的标准）；
+              //   新数据把标准写在指令里，老数据由 `reviewerIdentity` 并进来。
+              instructions: reviewerIdentityText,
               // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
               prompt: req.prompt,
-              // 审核标准的正文（D37）——`{{standards}}` 就是它
-              standard: standard?.body ?? null,
               // ★ 允许的动作要**写进判决契约**（D40）。不写的话，审核者配了工具
               //   动作时模型永远写不出那个名字——它合理的选择只剩"编一个"或者
               //   "退化成 needs_human"，而"契约里没写枚举 ⇒ 整条判决作废"这条
@@ -1024,32 +1115,18 @@ export class RunExecutor {
               language,
               // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
               // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
-              template: templates.reviewTemplate,
-            })
-          : renderFirstSentence({
+              template: migrated.review,
+            }, mode)
+          : renderDelivery({
               kind: 'execute',
               runId,
               subject: req.subject,
               prompt: req.prompt,
               skills: skillsBrief,
-              // ★ 干活时能用的工具包（D42）：只对执行 run 有意义
-              tools: toolsBrief,
               instructions: agentConfig?.instructions ?? null,
               language,
-              template: templates.executeTemplate,
-            })
-
-      // 副本：**我们自己的文件**，谁都不覆盖谁，也不删。
-      //   - agent 需要回顾时可以自己再读（上下文被压缩之后尤其有用，而这条
-      //     不依赖任何未验证的 CLI 内部行为）；
-      //   - 你随时能看"这次它被交代了什么"；
-      //   - 路径进日志，所以它不是个隐藏文件。
-      //
-      // ⚠️ **不写 `CLAUDE.md`**（也不写别的 CLI 认识的项目记忆文件名）：
-      //    那会让它重新变成"由 CLI 隐式读取"，等于又回到双投递与猜文件名。
-      const contextPath = join(run.workDir!, '.alpha-helper', 'context', `${runId}.md`)
-      await mkdir(dirname(contextPath), { recursive: true })
-      await writeFile(contextPath, firstSentence, 'utf8')
+              template: migrated.execute,
+            }, mode)
 
       // ★ 全文进日志，**不截断**。
       //
@@ -1060,15 +1137,37 @@ export class RunExecutor {
       //   而不是 `req.prompt`。改版前哈希的是 `req.prompt`——对审核 run 来说
       //   那甚至是**没被送出去**的那句指令，于是哈希与输入对不上，
       //   "可追溯"就成了空话。
-      const deliveredHash = createHash('sha256').update(firstSentence, 'utf8').digest('hex')
+      // 口径只有一处：`deliveredBytes()`（两块 + 一个不会出现在文本里的分隔符）
+      const deliveredHash = createHash('sha256').update(deliveredBytes(delivery), 'utf8').digest('hex')
 
+      /**
+       * ★ 日志要说清**用哪一档投递的**（同一个模版在两个 runtime 上形状不同，
+       *   而"两边都不报错"是这个仓库被咬过三次的形状）。
+       */
+      const modeLabel =
+        delivery.mode === 'A'
+          ? `投递档 A：①② 走系统提示（${delivery.system.length} 字符），③ 走用户消息`
+          : `投递档 B：三块合成一段（${delivery.user.length} 字符）`
       await this.#note(
         runId,
-        `第一句话（stdin 的一行 stream-json user 消息，${firstSentence.length} 字符，` +
-          `以下就是交给 CLI 的全部内容）：`,
+        req.subject.type === 'conversation'
+          ? `这一轮是对话：交给 CLI 的就是使用者那句话（${delivery.user.length} 字符，没套任何模版）｜${modeLabel}`
+          : `第一句话（${modeLabel}，以下就是交给 CLI 的全部内容）：`,
       )
-      await this.#note(runId, firstSentence)
-      await this.#note(runId, `（同一份文本的副本：${contextPath}——需要回顾时可以再读）`)
+      // ★ 三块**分开、带名字**进日志（2026-09 的决定；使用者投诉过"只看到框架和
+      //   身份、看不到任务"——A 档 ③ 是一条无标签的单行，夹在状态行里认不出来）。
+      //   与 B 档（三块合成一段时本来就用 `===== N =====`）同一套标签：日志不
+      //   分档长得一样，头行说明投递档位。块名与顺序来自 `BLOCK_LABELS` /
+      //   `BLOCK_ORDER`（first-sentence.ts 的单一出口），改名只动那一处。
+      //
+      // ⚠️ 展示归展示、投递归投递：这里记的是三块**分开**的原文，而真正交给 CLI
+      //   的仍是 system/user 两块（见头行）。审计哈希照旧只认 `deliveredBytes()`，
+      //   与这三条日志无关。
+      for (const key of BLOCK_ORDER) {
+        const block = delivery.blocks[key]
+        if (isBlankBlock(block)) continue
+        await this.#note(runId, `===== ${BLOCK_LABELS[key]} =====\n\n${block}`)
+      }
 
       await store.transitionRun(runId, 'dispatched', 'running', { startedAt: this.#now() })
       registry.emit(runId, { t: 'status', status: 'running', at: this.#now() })
@@ -1117,7 +1216,10 @@ export class RunExecutor {
       const session = await runtime.backend.execute({
         // ★ 发的是**组装好的第一句话**，不是原始的 req.prompt：身份、材料、
         //   技能清单、护栏、判决契约都在里面（见 `first-sentence.ts`）。
-        prompt: firstSentence,
+        prompt: delivery.user,
+        // ★ ①② 两块单独送（只在该 runtime 声明支持时；`delivery.system` 为空
+        //   就表示走的是 B 档，两块已经在 user 里了）
+        ...(delivery.system === '' ? {} : { systemPrompt: delivery.system }),
         workDir: run.workDir!,
         // 使用者在这个 agent 上选的模型。留空 = 用 CLI 自己的默认（CLI 支持
         // "不给这个参数"这个语义，所以 null 是**如实**表达，不是兜底）
@@ -1259,17 +1361,18 @@ export class RunExecutor {
             title: '会话恢复被拒绝，这次执行缺了上文',
             body:
               `CLI 明确拒绝了恢复会话 ${resume.sessionId}。` +
-              `本次 run 是在**没有前文**的情况下跑的，结论未必接得上。`,
+              `本次 run 是在没有前文的情况下跑的，结论未必接得上。`,
             issueId: run.subject.type === 'issue' ? (run.subject.id as Issue['id']) : null,
             runId,
             read: false,
             createdAt: this.#now(),
           })
         } else if (result.resumeRejected === undefined) {
-          // 表里 rejectDetectable: false ⇒ 这个 undefined 是**不可信的**
+          // 各 runtime 的判定能力不同（cli 形状看描述表；service 形状由适配器
+          // 声明）——这个 undefined 是**不可信的**，不能当成"恢复成功"
           this.#deps.onWarn?.(
             `run ${runId} 请求了会话恢复，但 ${runtime.descriptor.key} 无法判断` +
-              `是否被拒绝（rejectDetectable: false）——不能当成"恢复成功"`,
+              `是否被拒绝——不能当成"恢复成功"`,
           )
         }
       }
@@ -1303,6 +1406,31 @@ export class RunExecutor {
       // ★ S1：执行完成后自动接一次审核（可选）
       let chainedRunId: RunId | null = null
       if (req.kind === 'execute' && result.status === 'completed') {
+        // ══════════════════════════════════════════════════════════════
+        // ★ §3.3b（2026-09）：执行任务与执行结果**按轮次落盘**（多轮不覆盖）——
+        //   审核 run 用文件引用（`materialRefs`）指到这两份，而不是只靠
+        //   截断的内联材料。轮次 = `chainDepth + 1`（首轮 1，每次返工 +1，
+        //   与返工 run 的 chainDepth 同一计数）。
+        //
+        //   写在清理之后、串接之前：目录此刻已收拾干净，而这两份是**我们的**
+        //   文件（在 `.agentdeck/` 下），清理不动它们。失败不拦执行——
+        //   审核退回纯内联材料，并说出口。
+        let materialRefs: { taskPath: string; resultPath: string } | null = null
+        const workDir = run.workDir
+        if (workDir) {
+          const roundsDir = join(workDir, '.agentdeck', 'rounds')
+          const round = run.chainDepth + 1
+          const taskPath = join(roundsDir, `${round}-task.md`)
+          const resultPath = join(roundsDir, `${round}-result.md`)
+          try {
+            await mkdir(roundsDir, { recursive: true })
+            await writeFile(taskPath, req.prompt, 'utf8')
+            await writeFile(resultPath, result.output || collected, 'utf8')
+            materialRefs = { taskPath, resultPath }
+          } catch (err) {
+            this.#deps.onWarn?.(`执行任务/结果落盘失败（审核退回纯内联材料）：${String(err)}`)
+          }
+        }
         try {
           // 串接的**结果**（包括"没串上"和原因）都进日志：否则"这次为什么
           // 没有审核"在日志里查不到，只能去界面上猜。
@@ -1310,6 +1438,7 @@ export class RunExecutor {
             executeRun: run,
             executorAgentId: req.agentRef.id,
             output: result.output || collected,
+            materialRefs,
           })
           if (chained) {
             chainedRunId = chained.runId
@@ -1379,14 +1508,14 @@ export class RunExecutor {
       }
     } catch (err) {
       // ⚠️ 这里原来**一律**记 `infra_error`。而"注入失败"（同名技能撞车、
-      //    技能超过大小上限、工具包撞上使用者的同名目录）是**使用者自己就能
-      //    修好**的问题：改个目录名、换个小点的技能。把它记成"环境/基础设施
-      //    问题"，会把人往查 CLI 与权限的方向带——`injection_failed` 这个
-      //    枚举成员因此从没被写过。
+      //    技能超过大小上限）是**使用者自己就能修好**的问题：改个目录名、换个小点
+      //    的技能。把它记成"环境/基础设施问题"，会把人往查 CLI 与权限的方向带
+      //    ——`injection_failed` 这个枚举成员因此从没被写过。
+      //
+      // ⚠️ 这里原来还有第三个分支 `ToolCollisionError`（工具包撞上使用者的同名
+      //    目录）。工具注入撤掉之后那个错误类不存在了，一并删掉。
       const isInjection =
-        err instanceof SkillCollisionError ||
-        err instanceof SkillTooLargeError ||
-        err instanceof ToolCollisionError
+        err instanceof SkillCollisionError || err instanceof SkillTooLargeError
       await this.#finish(runId, 'failed', null, {
         reason: isInjection ? 'injection_failed' : 'infra_error',
         message: err instanceof Error ? err.message : String(err),
@@ -1433,8 +1562,11 @@ export class RunExecutor {
     //   它以前与标准同源（"这条标准只允许发评论"），再以前是所有挂载 skill 的
     //   动作并集。现在 skill 一个字都不参与授权，标准也不再携带动作。
     //
-    //   ⚠️ 取值**只走那一个解析点**（`resolveReviewStandard`）：回退到老数据里
+    //   ⚠️ 取值**只走那一个解析点**（`effectiveAllowedActions`）：回退到老数据里
     //   标准上那份白名单的顺序写在那里，这里不再写第二遍。
+    //   （★ 2026-09：它以前借的是 `resolveReviewStandard(...).allowedActions`，
+    //   而那个函数在没有正文时返回 null——动作权限因此会在"标准并进「指令」之后"
+    //   整份丢掉。修法与理由写在 `effectiveAllowedActions` 上面那段。）
     //
     //   ⚠️ 这里重新解析一次（而不是把上面那个 `standard` 传下来）：这一步在
     //   **#finishReview** 里，与组装第一句话不在同一个作用域；解析函数是纯的、
@@ -1448,10 +1580,11 @@ export class RunExecutor {
       //    两处必须一致——否则会出现"契约里列了 A、收口时却不认 A"（或者反过来：
       //    判决写了一个契约里根本没列的动作却被放行），而那种自相矛盾的判决
       //    最难查：它每一步看起来都合规。
+      // ★★ 2026-09 修：同上面那一处——**不许**经过 `resolveReviewStandard`（它在
+      //    没有正文时返回 null，会把动作权限整份吞掉）。两处必须同一个取法，
+      //    否则会出现"契约里列了 A、收口时却不认 A"这种自相矛盾的判决。
       run.allowedActions ??
-      resolveReviewStandard(agentForStandard ?? { reviewStandard: null }, req.skills ?? [])
-        ?.allowedActions ??
-      []
+      effectiveAllowedActions(agentForStandard ?? { reviewStandard: null }, req.skills ?? [])
     // ★ 白名单要考虑**已安装的工具包**（D40）：判决里可以出现
     //   `<包 slug>.<动作名>` 这种第三方动作，而"装了没有"只有 store 知道。
     //
@@ -1483,6 +1616,11 @@ export class RunExecutor {
     //   ②这里交给收口（判决校验拦"模型写固定参数"）与动作执行（注入真实值）。
     const effectiveFixedParams = run.actionParams ?? agentForStandard?.actionParams ?? {}
 
+    // ★ 调试动作（2026-09）：审核者给哪些动作勾了「调试」——勾了的不跑脚本，
+    //   只记录动作与解析后的参数。**没有任务级覆盖**：调试是审核者自己的设定
+    //   （`Agent.debugActions`），判据只看字段在不在（`?? []`）。
+    const effectiveDebugActions = agentForStandard?.debugActions ?? []
+
     const handling = await coordinator.handle({
       run,
       workspaceId: run.workspaceId,
@@ -1491,6 +1629,9 @@ export class RunExecutor {
       tools: reviewActions.tools,
       ...(Object.keys(effectiveFixedParams).length > 0
         ? { fixedParams: effectiveFixedParams }
+        : {}),
+      ...(effectiveDebugActions.length > 0
+        ? { debugActions: effectiveDebugActions }
         : {}),
       invalidAttempts,
       // D45：返工额度。允许几次看**这条任务**（执行 run 上的 `maxReworks`），
@@ -1612,16 +1753,6 @@ export class RunExecutor {
   }
 
   /**
-   * 这个执行者**挂载了哪些工具包**（D42 接线）。
-   *
-   * 挂载关系住在 agent 上（`Agent.toolIds`，一组 = 一个包）。这里把 id 名单
-   * 解析成已安装的包；id 在名单里、但包没装（已卸载、残留配置）的会被跳过——
-   * 与 `#reviewActions` 处理"配了但没装"同一个口径：**静默跳过并留日志**，
-   * 而不是让 run 失败，也**绝不**把"配置说有的"当成"装了的"塞给模型。
-   *
-   * ⚠️ 只有执行 run 会调它（审核者不挂工具，`toolIds` 恒为空）。
-   */
-  /**
    * 这条审核 run 手上的**返工额度**（D45）。
    *
    * 额度是**任务级**的，落在被审的那条执行 run 上（`Run.maxReworks`）；
@@ -1636,37 +1767,6 @@ export class RunExecutor {
     const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
     if (!executeRun) return { maxReworks: 0, usedReworks: 0 }
     return { maxReworks: executeRun.maxReworks ?? 0, usedReworks: executeRun.chainDepth }
-  }
-
-  async #mountedTools(run: Run): Promise<readonly Tool[]> {
-    let tools: readonly Tool[]
-    try {
-      tools = await this.#deps.store.listTools(run.workspaceId)
-    } catch (err) {
-      this.#deps.onWarn?.(`读取已安装的工具包失败，这次 run 不注入任何工具：${String(err)}`)
-      return []
-    }
-    const agent = await this.#deps.store.getAgent(run.agentId as never)
-    const ids = new Set(agent?.toolIds ?? [])
-    if (ids.size === 0) return []
-    // 只取"配置了**且**装了的"：残留配置（包已卸）的 id 静默跳过，不给模型
-    // 塞一个它调不到的东西。这与 `#reviewActions` 处理"配了但没装"同一个口径。
-    return tools.filter((t) => ids.has(t.id))
-  }
-
-  /**
-   * 「接着沟通」时给一行上一次的上下文副本路径。
-   *
-   * ★ 会话恢复是**尽力而为**：CLI 可能拒绝（换版本、会话过期），代码里明确
-   *   处理过那种情况并会记"恢复被拒、本次没有上文"。而那时 agent 手里就只剩
-   *   这句追问——原任务正文既不在 prompt 里也不再别处。给一行路径，它至少能
-   *   自己把那次的上下文读回来。
-   */
-  async #previousContextPath(req: SubmitRunRequest): Promise<string | null> {
-    if (!req.resumeFromRunId) return null
-    const previous = await this.#deps.store.getRun(req.resumeFromRunId as RunId)
-    if (!previous?.workDir) return null
-    return join(previous.workDir, '.alpha-helper', 'context', `${previous.id}.md`)
   }
 
   async #finish(

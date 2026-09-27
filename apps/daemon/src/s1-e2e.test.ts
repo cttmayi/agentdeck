@@ -1,4 +1,5 @@
 import { after, before, describe, test } from 'node:test'
+import { deliveredText } from './testing/delivered.ts'
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,7 +9,7 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
@@ -16,7 +17,7 @@ import {
   type Issue,
   type RunId,
   type VerdictRecord,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { installToolPackage, verdictAction, writeToolPackage } from './testing/tool-fixture.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -56,7 +57,7 @@ class TwoPhaseBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     // D29：判定"这是审核还是执行"只能看**第一句话**（CLAUDE.md 已经不写了）。
     // 第一句话的开头就是 `# 任务` 或 `# 审核任务`。
-    const context = opts.prompt
+    const context = deliveredText(opts)
     const isReview = context.includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
 
@@ -469,7 +470,7 @@ describe('S1：执行完成后自动接审核', () => {
       assert.ok(!left.includes('probe-skill'), '★ 跑完不许留下我们注入的技能')
       // ② 归属清单也收掉了（空了就没有意义）
       assert.ok(
-        !left.includes('.alpha-helper-managed.json'),
+        !left.includes('.agentdeck-managed.json'),
         '★ 什么都没留下时，归属清单本身也该收掉',
       )
       // ③ 使用者自己的那份**一个字都没动**

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 
 /**
  * 静态资源服务（Vite 构建产物）。
@@ -32,6 +32,53 @@ const DIST_DIR = new URL('../dist/', import.meta.url)
 export interface StaticAsset {
   contentType: string
   body: Buffer
+  /** 这个响应该带什么缓存头——见 `cacheHeadersFor`。 */
+  cacheControl: string
+  /**
+   * 内容指纹（`W/"<mtimeMs>-<size>"`）。
+   *
+   * ⚠️ 这不是优化，是**正确性**：没有 ETag 也没有 Last-Modified 时，浏览器对
+   *    这份响应没有任何"这是哪一版"的依据，也就没有办法判断自己手上那份是不是
+   *    旧的。这个项目已经**两次**被"界面与 daemon 各是哪一版"咬到（第一次是
+   *    能力标志，第二次是下面这段注释写的事故）。
+   */
+  etag: string
+}
+
+/**
+ * 静态资源的缓存策略。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 起因：一次"任务页能用、聊天页不能用"的误判
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者报告聊天页那一栏不工作、任务页那栏正常。查下来：**daemon 是好的**
+ * （接口 200、内容正确），**当前这份前端也是好的**（干净浏览器里量到那一栏在、
+ * 5 项、几何正常）——他看的是一个**旧前端**：页面早就开着，而重建前端不会通知
+ * 已经打开的标签页。
+ *
+ * 而这里原本**一个缓存头都不发**：`index.html` 没有 `Cache-Control`、没有
+ * `ETag`、没有 `Last-Modified`。于是浏览器拿它没有任何办法——既不知道能不能
+ * 复用，也没有依据去问"变了没有"。
+ *
+ * 现在的规矩按"文件名有没有内容哈希"分：
+ *
+ *   · **`/assets/*`**（Vite 产物带内容哈希）⇒  `immutable` + 一年。文件内容
+ *     变了文件名就变了，所以这是安全的——也是唯一能让重建之后**不必**让使用者
+ *     手动清缓存的一档。
+ *   · **其余（含 `index.html`）** ⇒  `no-cache`。注意它**不是**"不缓存"，而是
+ *     "可以存，但每次都要回来问一句"。这一档是**外壳**：它指向哪个 `/assets/`
+ *     包决定了界面是哪一版，所以它必须每次核对。
+ *
+ * ⚠️ 别把 `index.html` 也设成 `immutable`：那样重建之后浏览器会一直用旧外壳，
+ *    而旧外壳指向的旧包**已经不存在了**（Vite 每次构建会清空 dist）——症状是
+ *    一个白页，或者更坏：一个仍然跑着旧逻辑的页面。
+ */
+export function cacheHeadersFor(pathname: string): { cacheControl: string } {
+  if (pathname.startsWith('/assets/')) {
+    return { cacheControl: 'public, max-age=31536000, immutable' }
+  }
+  return { cacheControl: 'no-cache' }
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -90,11 +137,43 @@ export async function loadStatic(pathname: string): Promise<StaticAsset | null> 
   if (!contentType) return null
 
   try {
-    const body = await readFile(new URL(normalized.slice(1), DIST_DIR))
-    return { contentType, body }
+    const target = new URL(normalized.slice(1), DIST_DIR)
+    const body = await readFile(target)
+    const info = await stat(target).catch(() => null)
+    return {
+      contentType,
+      body,
+      cacheControl: cacheHeadersFor(normalized).cacheControl,
+      etag: `W/"${Math.round(info?.mtimeMs ?? 0)}-${body.length}"`,
+    }
   } catch {
     // 文件不存在是**正常路径**（浏览器会请求 favicon 之类），返回 null
     // 让调用方去 404，而不是抛异常把请求处理打挂
+    return null
+  }
+}
+
+/**
+ * 这份界面是**哪一版**（构建产物的文件名），给 `/api/identity` 用。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么值得把它暴露出来
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * "界面与 daemon 各是哪一版"在这个项目里已经咬过两次（能力标志、以及那次
+ * "任务页能用、聊天页不能用"）。两次的现场都有同一个特征：**两边都不报错**，
+ * 只能靠人去猜"你刷新过没有"。
+ *
+ * 把这一版的名字放在身份接口里，"我现在跑的是哪一版前端"就变成一句可查的话，
+ * 而不是一场猜测。拿不到（没构建）时返回 `null`——那时该说的是"界面没构建"。
+ */
+export async function webBuildId(): Promise<string | null> {
+  try {
+    const html = await readFile(new URL('index.html', DIST_DIR), 'utf8')
+    // 外壳里引用的是 `./assets/index-<hash>.js`；取那一段就够回答"哪一版"
+    const m = /assets\/(index-[A-Za-z0-9_-]+\.js)/.exec(html)
+    return m ? m[1]! : null
+  } catch {
     return null
   }
 }

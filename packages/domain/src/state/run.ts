@@ -1,4 +1,4 @@
-import type { RunStatus } from '@alpha-helper/protocol'
+import type { RunStatus } from '@agentdeck/protocol'
 import { IllegalTransitionError } from '../errors.ts'
 
 /**

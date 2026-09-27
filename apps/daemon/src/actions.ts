@@ -6,7 +6,7 @@ import {
   type ActionFacts,
   type Store,
   type ToolActionDefinition,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
 import {
   ulid,
   type Action,
@@ -17,7 +17,7 @@ import {
   type Tool,
   type VerdictId,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import type { ScriptExecutionRequest, ScriptExecutionResult } from './script-executor.ts'
 
 /**
@@ -115,8 +115,13 @@ export interface ExecuteActionInput {
   verdictId: VerdictId
   /** 关联的 run（审计与通知用）。 */
   runId: RunId | null
-  /** 演练：只校验与记录，不产生副作用。 */
-  dryRun?: boolean
+  /**
+   * ★ 调试（审核者行动权限里给这个动作勾的「调试」）：**不跑脚本**，只记录
+   *    这条动作与解析后的完整参数——用来确认"它到底会带着什么参数发出去"。
+   *    记录会带上 `dryRun: true` 标记（协议里 `Action.dryRun` 就是"没真跑，
+   *    只记录"的意思），在任务时间线里显示成「调试 · 未执行」。
+   */
+  debug?: boolean
   /**
    * 使用者在界面上设好的固定参数（D43）：`参数名 → 值`（这一个动作的）。
    *
@@ -215,6 +220,11 @@ export class ActionRunner {
     }
     const finalParams = merged.params
 
+    // ★ 调试：这条动作**不真跑**，只记录动作与解析后的参数。用协议里现成的
+    //    `Action.dryRun` 字段当标记（它就是"没真跑、只记录"的意思），时间线靠它
+    //    显示「调试 · 未执行」。
+    const dryRunMode = input.debug === true
+
     const action: Action = {
       id: ulid(now) as Action['id'],
       workspaceId: input.workspaceId,
@@ -225,7 +235,7 @@ export class ActionRunner {
       params: finalParams,
       status: 'proposed',
       idempotencyKey,
-      dryRun: input.dryRun === true,
+      dryRun: dryRunMode,
       result: null,
       error: null,
       rollbackRef: null,
@@ -237,35 +247,28 @@ export class ActionRunner {
     // ── ④ 默认自动批准 ──
     await this.#store.transitionAction(action.id, 'proposed', 'auto_approved')
 
-    // ⚠️ dry-run **也走这条路**：约定是脚本自己保证"dry-run 时不改"，所以
-    //    `dryRun: true` 原样透传给脚本，由它描述"我打算改什么"。
-    //    （内置动作时代这里有一条"dry-run 不执行、只记下 wouldDo"的分支——
-    //    那是平台自己实现动作才做得到的事，随内置动作一起没了。）
+    // ★★ 调试短路（2026-09 取代"预演准入"）：审核者给这个动作勾了「调试」就
+    //    到这里为止——**不跑脚本**，把动作记成 `executed` 并带上"没真跑"标记与
+    //    解析后的完整参数。**脚本一次都不该被调用**，这条不是"演一遍"：
+    //    它只是把"这条动作会带着什么参数发出去"讲清楚，给人看。
+    //
+    // ⚠️ 状态要走 `auto_approved → executing → executed` 而不是直接
+    //    `auto_approved → executed`：领域状态机（`packages/domain/src/state/action.ts`）
+    //    只允许 `executed` 从 `executing` 到达——那是"事后可以回滚"那套不变量
+    //    的底座，不为调试开旁路。走标准路径、只是把"起进程"那一步省掉即可。
+    if (dryRunMode) {
+      await this.#store.transitionAction(action.id, 'auto_approved', 'executing')
+      const result = { dryRun: true, debug: true, detail: '调试模式：没有执行脚本，仅记录动作与解析后的参数。' }
+      await this.#store.transitionAction(action.id, 'executing', 'executed', {
+        result,
+        finishedAt: this.#now(),
+      })
+      return { action: { ...action, status: 'executed', result }, skipped: false }
+    }
+
     await this.#store.transitionAction(action.id, 'auto_approved', 'executing')
 
     try {
-      // ★ 准入：声明「不支持 dry-run」的动作**默认不自动执行**（D40）。
-      //
-      //   工具包里的脚本是第三方代码，它会在使用者机器上真的改东西；能先演练
-      //   一遍（dry-run）是唯一便宜到人人都会用的"先看一眼"的手段。作者在清单里
-      //   写 `unsupported` 就是在说"我保证不了"。所以默认**不放行**，要放行得有人
-      //   在 workspace 上显式打开（`allowUnpreviewedActions`，界面有警告）。
-      //
-      //   ⚠️ 这条必须在这里真的拦下，不能只写在界面上：界面上写着"不能自动执行"
-      //      而平台照跑，那是在骗使用者——比没有这条规矩更糟。
-      //   ⚠️ dry-run 本身（`input.dryRun === true`）不走这条：那次调用不会改东西，
-      //      执行器会在演练模式下拒绝 `unsupported` 的动作并说明原因。
-      if (definition.dryRun === 'unsupported' && input.dryRun !== true) {
-        const allow = await this.#allowsUnpreviewed(input.workspaceId)
-        if (!allow) {
-          throw new Error(
-            `动作 ${input.ref.type} 声明不支持 dry-run（工具包 ${definition.provider.slug} 的清单里写的是 "unsupported"），` +
-              `所以平台默认不自动执行它。两条出路：让这个工具包实现 dry-run；` +
-              `或者在「工具」页显式打开「允许自动执行不支持预演的动作」（会同时降低这一类动作的安全保证）。`,
-          )
-        }
-      }
-
       const result = await this.#runToolAction(input, definition, finalParams, facts, loaded.tools)
       await this.#store.transitionAction(action.id, 'executing', 'executed', {
         result,
@@ -294,22 +297,6 @@ export class ActionRunner {
       })
 
       return { action: { ...action, status: 'failed', error: message }, skipped: false }
-    }
-  }
-
-  /**
-   * 这个工作区**允许**自动执行"不支持 dry-run"的工具动作吗（D40）。
-   *
-   * 读不到 workspace（极罕见：store 出错）时按 **false** 处理——更严的那一边。
-   * 反过来（默认放行）会让"读不到"变成一次静默的安全降级。
-   */
-  async #allowsUnpreviewed(workspaceId: WorkspaceId): Promise<boolean> {
-    try {
-      const workspace = await this.#store.getWorkspace(workspaceId)
-      return workspace?.allowUnpreviewedActions ?? false
-    } catch (err) {
-      this.#onWarn?.(`读取 workspace 设置失败，按"不允许自动执行不支持预演的动作"处理：${String(err)}`)
-      return false
     }
   }
 
@@ -412,7 +399,10 @@ export class ActionRunner {
         dryRun: definition.dryRun,
       },
       params,
-      dryRun: input.dryRun === true,
+      // ⚠️ 调试在上面就短路了，能走到这里的一定是**真执行**——所以这里永远是
+      //    `false`（工具运行时本身的 dry-run 能力仍在 `script-executor`，与
+      //    产品里的「调试」不是一回事）。
+      dryRun: false,
       context: {
         // 上下文里的 workdir 来自 run 事实（不是模型给的），与绑定参数同源
         workdir: facts?.workdir ?? null,
@@ -429,12 +419,13 @@ export class ActionRunner {
       detail: result.detail,
       exitCode: result.exitCode ?? null,
       durationMs: result.durationMs,
-      dryRun: input.dryRun === true,
+      // 真执行 ⇒ 没有 dryRun 标记（见上面那段注释）
+      dryRun: false,
     }
   }
 }
 
-// ⚠️ `isToolActionDefinition` 仍然从 `@alpha-helper/domain` 导出（它守的是
+// ⚠️ `isToolActionDefinition` 仍然从 `@agentdeck/domain` 导出（它守的是
 //    "这份定义带不带 provider"），但这里已经不需要它：D41 之后
 //    `resolveActionDefinition` 的返回类型**就是** `ToolActionDefinition | null`，
 //    再判一次只是把一个编译期已知的事实在运行时重说一遍。

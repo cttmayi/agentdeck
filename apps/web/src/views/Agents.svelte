@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import {
     agents,
     effectiveDefaultAgentId,
@@ -12,6 +13,7 @@
   import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
+  import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
 
   /**
@@ -106,53 +108,66 @@
   function refresh(): void {
     void Promise.all([loadAgents(), loadIdentity()])
   }
+
+  /**
+   * 顶栏那一排动作（机制见 `lib/page-actions.ts`）。
+   *
+   * ⚠️ 写在 `$:` 里并读 `$t(...)`：语言一变就重新登记一遍（整体覆盖，不是追加）。
+   * ⚠️ `disabled` 也要跟着状态走：新建面板开着时不该还能点「新建」（原来是靠
+   *    就地渲染的按钮上那个 `disabled` 属性，搬家之后必须一起搬）。
+   * ⚠️ 卸载时收回来（登记里存的是抓着这一页状态的闭包）。
+   *
+   * ★ 三个按钮的权重：**新建是这一页的主线**（`primary`），设置与刷新是配套
+   *   动作（`secondary`）。
+   */
+  $: setPageActions('agents', [
+    {
+      id: 'new',
+      label: $t('agents.newButton'),
+      kind: 'primary',
+      disabled: creating,
+      onActivate: () => {
+        creating = true
+        settingsOpen = false
+        selectedId = null
+      },
+    },
+    {
+      id: 'settings',
+      label: $t('agents.settingsButton'),
+      kind: 'secondary',
+      disabled: settingsOpen,
+      title: $t('agents.settingsTitle'),
+      onActivate: () => {
+        settingsOpen = true
+        creating = false
+        selectedId = null
+      },
+    },
+    {
+      id: 'refresh',
+      label: $t('common.refresh'),
+      kind: 'secondary',
+      onActivate: refresh,
+    },
+  ])
+  onDestroy(() => clearPageActions('agents'))
 </script>
 
 <div class="split-layout" class:with-detail={selected !== null}>
   <!-- ══════════════════ 左栏：智能体清单 + Runtime ══════════════════ -->
   <section class="pane list-pane">
-    <header class="pane-head">
-      <div>
-        <h2>{$t('agents.viewTitle')}</h2>
-        <p class="hint">
-          {$t('agents.listHintBefore')}<strong>{$t('agents.listHintExecutor')}</strong>{$t('agents.listHintMid')}<strong>{$t('agents.listHintReviewer')}</strong>{$t('agents.listHintAfter')}
-        </p>
-      </div>
-      <div class="pane-actions">
-        <!--
-          ⚠️ 这里**只放按钮**：两个面板都在右侧抽屉里（见文件末尾）。
-             把面板塞进 `pane-actions`（一个 flex 行）会按它的 max-width 撑开、
-             横向盖住右栏——见 `creating` 那段注释里的实测数字；放进左栏正文
-             则是不溢出但太窄。抽屉是这两件事的正解。
-        -->
-        <button
-          type="button"
-          disabled={creating}
-          onclick={() => {
-            creating = true
-            settingsOpen = false
-            selectedId = null
-          }}
-        >
-          {$t('agents.newButton')}
-        </button>
-        <button
-          type="button"
-          class="secondary small"
-          disabled={settingsOpen}
-          title={$t('agents.settingsTitle')}
-          onclick={() => {
-            settingsOpen = true
-            creating = false
-            selectedId = null
-          }}
-        >
-          {$t('agents.settingsButton')}
-        </button>
-        <button type="button" class="secondary small" onclick={refresh}>{$t('common.refresh')}</button>
-      </div>
-    </header>
-
+    <!--
+      ⚠️ 这一栏**没有栏头了**（2026-09），原来那三样各有去处：
+         · `<h2>智能体</h2>` → 它与顶栏的页名**一字不差**，删了（同一页上下两处
+           写同一句话，看起来像渲染错了）；
+         · 那一排按钮（新建 / 设置 / 刷新）→ 顶栏里、紧跟着页名（各视图登记，
+           见 `lib/page-actions.ts`）；
+         · 说明段"每个智能体独立配置指令、技能子集与角色：…" → 按要求去掉，并
+           **并进了右栏空态**（`agents.pickOneRole*`）——那段话讲的是"选中一个
+           智能体之后你会看到什么"，只有右栏真的空着时才需要它。
+         左栏因此直接从清单开始，一屏能多看两条。
+    -->
     <div class="pane-body">
 
       {#if envIssues.length > 0}
@@ -209,10 +224,25 @@
                   <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
                     {a.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
                   </span>
-                  {#if a.role === 'reviewer' && a.skillIds.length === 0}
-                    <!-- 审核者不挂 skill 就审不了任何东西，这件事必须在列表上就看得见 -->
-                    <span class="bad small">{$t('agents.skillMissing')}</span>
-                  {/if}
+                  <!--
+                    ⚠️ 这里原来有一个「未挂 skill」徽标（`a.role === 'reviewer' &&
+                       a.skillIds.length === 0` 时显示）。**整段删掉了**，理由是它
+                       写下的那句话**已经不是真的**：
+
+                       注释原本说"审核者不挂 skill 就审不了任何东西"。那是 D37 之前
+                       的事——那时审核标准就住在挂载的 skill 里。D37 之后标准**内联在
+                       审核者身上**（`Agent.reviewStandard`），`resolveReviewStandard()`
+                       也是**先看内联标准**、只有它为空时才回退到挂载的 skill。
+                       实测线上那个「助手审核员」正是这种形态：`skillIds` 是空的、
+                       内联标准是有的、审核跑得完全正常——而列表上给它挂了一个
+                       看起来像故障的标记。
+
+                       ★ 一个**指向不存在的故障**的标记比没有标记更糟：使用者会去
+                       找一个不需要修的问题，甚至可能为了消掉它而给审核者硬挂一份
+                       用不上的 skill。真要表达"这个审核者没有判断依据"，该看的是
+                       内联标准在不在，而那是**智能体详情页**的事（列表上不显示标准
+                       正文，在这里断言它有没有就成了第二套判断）。
+                  -->
                   {#if a.id === $effectiveDefaultAgentId}
                     <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
                     <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
@@ -258,16 +288,25 @@
       <!--
         Runtime 概览：窄栏里不再用六列表格（那会只剩横向滚动条），改成一格
         一张卡——字段一个不少，只是竖着排。
+
+        ⚠️ 这一块是**给使用者看的**，所以只说人话（2026-09 改写）：原来它把描述表的
+        内部取值（`provisional` / `verified` / `undeclared` / `stateful`）、需求编号
+        FR-CLI-07、以及 `pnpm run daemon --verify-runtime all` 一起摆在界面上——
+        那些词对读界面的人不构成信息（而且 `**实测过**` 的强调号是原样显示出来的）。
+        机器取值仍在 `--verify-runtime` 的输出里，那一份是给开发者的。
+        ★ 「核对过 / 没核对过」这条如实披露一个字都没少，只是换了说法。
       -->
       {#if $identity}
         <section class="runtime-block">
           <h3>{$t('agents.runtimeLocal')}</h3>
-          <p class="hint">
-            <strong>{$t('agents.evidenceStrong')}</strong>{$t('agents.colon')}<code>provisional</code>{$t('agents.evidenceAfter')}<strong>{$t('agents.evidenceUnverified')}</strong>{$t('agents.evidenceMid')}<code>verified</code>{$t('agents.evidenceTail')}
-            <strong>{$t('agents.versionStrong')}</strong>{$t('agents.colon')}<code>undeclared</code>{$t('agents.versionAfter')}<strong>{$t('agents.versionUntested')}</strong>{$t('agents.versionMid')}{$t('agents.versionTail')}
-          </p>
+          <p class="hint">{$t('agents.runtimeIntro')}</p>
 
           {#each $identity.runtimes as r (r.key)}
+            {@const evidence = r.evidence === 'verified' ? $t('agents.runtimeEvidenceChecked') : $t('agents.runtimeEvidenceUnchecked')}
+            {@const session =
+              r.sessionState === 'stateful' ? $t('agents.runtimeSessionStateful')
+              : r.sessionState === 'stateless' ? $t('agents.runtimeSessionStateless')
+              : $t('agents.runtimeSessionUnknown')}
             <div class="runtime-card">
               <div class="runtime-line">
                 <code>{r.key}</code>
@@ -276,13 +315,17 @@
                 {:else}
                   <span class="bad small">{$t('agents.runtimeNotFound')}</span>
                 {/if}
-                <span class="faint small" class:good={r.evidence === 'verified'}>
-                  {$t('agents.runtimeEvidence', { value: r.evidence })}
+                <span
+                  class="faint small"
+                  class:good={r.evidence === 'verified'}
+                  title={$t('agents.runtimeEvidenceTitle')}
+                >
+                  {evidence}
                 </span>
               </div>
               <div class="runtime-line faint small">
                 <span class="mono">{r.command}</span>
-                <span>{$t('agents.runtimeSession', { state: r.sessionState ?? '—' })}</span>
+                <span>{$t('agents.runtimeSessionLabel', { value: session })}</span>
               </div>
               <div class="runtime-line small">
                 <span class="faint">{$t('agents.versionSupportLabel')}</span>
@@ -294,15 +337,15 @@
                   {SUPPORT_LABEL[r.versionSupport?.status ?? ''] ?? r.versionSupport?.status ?? '—'}
                 </span>
               </div>
-              {#if r.versionSupport?.message && r.versionSupport.status !== 'verified'}
-                <p class="hint small runtime-msg">{r.versionSupport.message}</p>
+              {#if r.versionSupport?.status === 'out-of-range'}
+                <p class="hint small runtime-msg">{$t('agents.runtimeWarnOutOfRange')}</p>
+              {:else if r.versionSupport?.status === 'unknown'}
+                <p class="hint small runtime-msg">{$t('agents.runtimeWarnUnknown')}</p>
               {/if}
             </div>
           {/each}
 
-          <p class="hint">
-            {$t('agents.versionVerifyHint')}<code>pnpm run daemon --verify-runtime all</code>
-          </p>
+          <p class="hint">{$t('agents.runtimeHonestNote')}</p>
         </section>
       {/if}
     </div>
@@ -332,9 +375,20 @@
           onchanged={() => void loadAgents()}
         />
       {:else}
+        <!--
+          ⚠️ 空态两段（2026-09）：
+             · 第一段是"点左边能看什么"；
+             · 第二段原来是左栏栏头那段"每个智能体独立配置指令、技能子集与角色：
+               执行者…审核者…"。它讲的是**选中之后**你会看到什么，所以搬到
+               "什么都没选中"这一屏最贴题；`<strong>` 仍然只给两个角色名，
+               免得整段都在强调（强调太多等于没强调）。
+        -->
         <div class="empty">
           <strong>{$t('agents.pickOneTitle')}</strong>
-          {$t('agents.pickOneHint')}
+          <p>{$t('agents.pickOneHint')}</p>
+          <p>
+            {$t('agents.pickOneRoleBefore')}<strong>{$t('agents.pickOneRoleExecutor')}</strong>{$t('agents.pickOneRoleMid')}<strong>{$t('agents.pickOneRoleReviewer')}</strong>{$t('agents.pickOneRoleAfter')}
+          </p>
         </div>
       {/if}
     </div>

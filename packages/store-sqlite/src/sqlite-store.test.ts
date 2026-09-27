@@ -1,10 +1,13 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { IllegalTransitionError, type RunPatch } from '@alpha-helper/domain'
+import { IllegalTransitionError, type RunPatch } from '@agentdeck/domain'
 import {
   agentId,
+  conversationId,
   makeAgent,
+  makeChatTurn,
+  makeConversation,
   makeIssue,
   makeReport,
   makeRun,
@@ -13,8 +16,8 @@ import {
   runId,
   toolId,
   wsId,
-} from '@alpha-helper/domain/testing'
-import type { ActionId, BlobRef, RunMessage, RunStatus, VerdictId } from '@alpha-helper/protocol'
+} from '@agentdeck/domain/testing'
+import type { ActionId, BlobRef, RunMessage, RunStatus, VerdictId } from '@agentdeck/protocol'
 import {
   SQLITE_STORE_FORMAT_VERSION,
   SqliteStore,
@@ -46,7 +49,7 @@ function msg(seq: number, content = `m${seq}`): RunMessage {
 before(async () => {
   dir = await makeTempDir('sqlite')
   store = await SqliteStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
 })
 
 after(async () => {
@@ -86,7 +89,7 @@ describe('基本 CRUD 与持久化', () => {
     const reopenDir = await makeTempDir('reopen')
     try {
       const a = await SqliteStore.open({ dataDir: reopenDir, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertAgent(makeAgent({ id: 'persist-me', workspaceId: WS }))
       await a.close()
 
@@ -103,7 +106,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('page')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (let i = 0; i < 5; i++) {
         await s.insertIssue(makeIssue({ id: `issue-${i}`, workspaceId: WS }))
       }
@@ -138,7 +141,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('cursor-gone')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (const [id, status] of [
         ['a', 'todo'],
         ['b', 'done'],
@@ -191,7 +194,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('collation')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const ids = ['m', 'z', '\uFFFD', '\u{1F600}']
       for (const id of ids) await s.insertIssue(makeIssue({ id, workspaceId: WS }))
 
@@ -212,7 +215,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('query')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertIssue(makeIssue({ id: 'i-a', workspaceId: WS, title: '依赖漏洞', status: 'todo' }))
       await s.insertIssue(
         makeIssue({ id: 'i-b', workspaceId: WS, title: '文档错别字', status: 'done' }),
@@ -237,8 +240,8 @@ describe('基本 CRUD 与持久化', () => {
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
       // 故意让 id 的字典序与创建顺序相反：按 id 排序会给出错误的默认工作区
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('zzz-first'), name: 'z', createdAt: 1, updatedAt: 1 })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('aaa-second'), name: 'a', createdAt: 2, updatedAt: 2 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('zzz-first'), name: 'z', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: wsId('aaa-second'), name: 'a', createdAt: 2, updatedAt: 2 })
 
       assert.deepEqual(await s.listWorkspaceIds(), [wsId('zzz-first'), wsId('aaa-second')])
       await s.close()
@@ -284,7 +287,7 @@ describe('工具包（D40）：CRUD 与卸载', () => {
     ] as const) {
       await s.insertWorkspace({
         executeTemplate: '',
-        reviewTemplate: '',
+        reviewTemplate: '', chatTemplate: '',
         defaultAgentId: null,
         locale: 'zh',
         id,
@@ -394,7 +397,7 @@ describe('工具包（D40）：CRUD 与卸载', () => {
       const a = await SqliteStore.open({ dataDir: dir, fsync: false })
       await a.insertWorkspace({
         executeTemplate: '',
-        reviewTemplate: '',
+        reviewTemplate: '', chatTemplate: '',
         defaultAgentId: null,
         locale: 'zh',
         id: WSA,
@@ -477,7 +480,7 @@ describe('CAS 状态转移（端口的支点）', () => {
     const d = await makeTempDir('cas-race')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-race', workspaceId: WS, agentId: 'a1' }))
 
       const results = await Promise.all(
@@ -502,7 +505,7 @@ describe('CAS 状态转移（端口的支点）', () => {
     const d = await makeTempDir('cas-foreign')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-foreign', workspaceId: WS, agentId: 'a1' }))
 
       const raw = new DatabaseSync(sqliteStorePath(d))
@@ -528,7 +531,7 @@ describe('patch 的 undefined / null 语义', () => {
     const d = await makeTempDir('patch')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-patch')
       await s.insertRun(makeRun({ id: 'r-patch', workspaceId: WS, agentId: 'a1' }))
       await s.transitionRun(rid, 'queued', 'dispatched', {
@@ -564,7 +567,7 @@ describe('patch 的 undefined / null 语义', () => {
     const d = await makeTempDir('patch-issue')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertIssue(
         makeIssue({
           id: 'i-p',
@@ -608,7 +611,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r-hold',
@@ -634,7 +637,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir-states')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const active: RunStatus[] = ['dispatched', 'running', 'waiting_local_directory']
       for (const [i, status] of active.entries()) {
@@ -663,7 +666,7 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
     const d = await makeTempDir('selfrace')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r1',
@@ -702,7 +705,7 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
     const d = await makeTempDir('selfrace2')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r-done',
@@ -728,7 +731,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const r1 = makeReport({ id: 'rep-1', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
       const r2 = makeReport({ id: 'rep-2', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
@@ -756,7 +759,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup-index')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertReport(makeReport({ id: 'rep-u1', workspaceId: WS, kind: 'k', dedupKey: 'uniq' }))
       await s.close()
 
@@ -787,7 +790,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup-rekey')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       await s.insertReport(makeReport({ id: 'rep-rk', workspaceId: WS, kind: 'k', dedupKey: 'old' }))
       assert.equal(
@@ -807,7 +810,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup2')
     try {
       const a = await SqliteStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertReport(makeReport({ id: 'rep-x', workspaceId: WS, kind: 'k', dedupKey: 'dup-key' }))
       await a.close()
 
@@ -848,7 +851,7 @@ describe('动作幂等键（FR-ACTION-03）', () => {
     const d = await makeTempDir('idem')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const action = makeAction({ id: 'act-1', idempotencyKey: 'v-1:comment.create:{"body":"x"}' })
       await s.insertAction(action)
@@ -882,7 +885,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-msg')
       await s.insertRun(makeRun({ id: 'r-msg', workspaceId: WS, agentId: 'a1' }))
 
@@ -906,7 +909,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     try {
       const rid = runId('r-msg2')
       const a = await SqliteStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertRun(makeRun({ id: 'r-msg2', workspaceId: WS, agentId: 'a1' }))
       await a.appendRunMessage(rid, msg(7, 'x'))
       await a.close()
@@ -924,7 +927,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages-empty')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(makeRun({ id: 'r-empty', workspaceId: WS, agentId: 'a1' }))
       // -1 才能让"从哪开始补齐"与"尚未产生任何消息"区分开
       assert.equal(await s.lastRunMessageSeq(runId('r-empty')), -1)
@@ -944,7 +947,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages-dupseq')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-dup')
       await s.insertRun(makeRun({ id: 'r-dup', workspaceId: WS, agentId: 'a1' }))
 
@@ -1022,7 +1025,7 @@ describe('审计链（FR-AUDIT-01）', () => {
     const d = await makeTempDir('audit')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-audit')
       await s.insertRun(makeRun({ id: 'r-audit', workspaceId: WS, agentId: 'a1' }))
 
@@ -1071,7 +1074,7 @@ describe('verdict 与 artifact', () => {
     const d = await makeTempDir('verdict')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-v')
       await s.insertRun(makeRun({ id: 'r-v', workspaceId: WS, agentId: 'a1' }))
       const vid = 'v-1' as VerdictId
@@ -1114,7 +1117,7 @@ describe('verdict 与 artifact', () => {
     const d = await makeTempDir('artifact')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-art')
       await s.insertArtifact({
         id: 'art-1' as never,
@@ -1141,7 +1144,7 @@ describe('通知中心（FR-ISSUE-07/08）', () => {
     const d = await makeTempDir('inbox')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const item = (id: string, createdAt: number) => ({
         id,
@@ -1186,7 +1189,7 @@ describe('注释（Comment）', () => {
     const d = await makeTempDir('comment')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const mk = (id: string, createdAt: number) => ({
         id: id as never,
         workspaceId: WS,
@@ -1208,6 +1211,421 @@ describe('注释（Comment）', () => {
       await s.close()
     } finally {
       await cleanup(d)
+    }
+  })
+})
+
+/**
+ * 聊天（Conversation 与 ChatTurn，闭环的旁路）。
+ *
+ * 这一组盯的**不是"能不能存进去"**，而是顺序与"找不到时的答案"：
+ *
+ *   ★ 列表顺序（`lastTurnAt ?? createdAt` 倒序 + id 兜底）
+ *   ★ 回合顺序（`seq` 升序）
+ *   ★ "上一轮是谁"（从后往前找第一条带 run 的）
+ *   ★ 找不到时的答案是 `null`，而且**不能顺手插出一条**
+ *
+ * 前三条错了比少了更糟：少一条轮次看得出来，顺序错了看不出来，而
+ * `lastChatTurnWithRun` 一旦答错，下一轮就会接错上文——聊天会"莫名其妙
+ * 忘了刚才说的话"，且没有任何一处报错。
+ */
+describe('聊天（Conversation 与 ChatTurn）', () => {
+  const WSA = wsId('ws-chat-a')
+  const WSB = wsId('ws-chat-b')
+
+  async function openScratch(prefix: string): Promise<{ store: SqliteStore; dir: string }> {
+    const dir = await makeTempDir(prefix)
+    const s = await SqliteStore.open({ dataDir: dir, fsync: false })
+    await insertWorkspaces(s)
+    return { store: s, dir }
+  }
+
+  async function insertWorkspaces(s: SqliteStore): Promise<void> {
+    for (const [id, name] of [
+      [WSA, 'A'],
+      [WSB, 'B'],
+    ] as const) {
+      await s.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '', chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id,
+        name,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+  }
+
+  /** 造一条回合。除给到的字段外全都固定，免得断言被无关字段干扰。 */
+  const turn = (
+    id: string,
+    conversation: string,
+    seq: number,
+    over: { runId?: string | null; createdAt?: number } = {},
+  ) =>
+    makeChatTurn({
+      id,
+      // 裸字符串在这里收成品牌类型（`ChatTurn['conversationId']`），调用点就
+      // 只需要写 id 本身，不必到处 `conversationId('c1')`
+      conversationId: conversationId(conversation),
+      workspaceId: WSA,
+      seq,
+      userText: `第 ${seq} 轮`,
+      // 显式判 null / undefined，不用 `||`：空字符串是下面要测的一个值，
+      // `||` 会把它当成"没给"，那条断言就变成测不到东西的空壳。
+      runId: over.runId === undefined || over.runId === null ? null : runId(over.runId),
+      createdAt: over.createdAt ?? 1000,
+    })
+
+  test('★ 列表按 `lastTurnAt ?? createdAt` 倒序，同键时按 id 倒序兜底', async () => {
+    const { store: s, dir } = await openScratch('chat-list')
+    try {
+      /**
+       * 四个对话把三种情形凑齐：
+       *
+       *   c-talked    createdAt 100，但说过话（lastTurnAt 300）⇒ 排最前
+       *   c-never-c   createdAt 200 ┐同一毫秒建的（排序键相同）
+       *   c-never-b   createdAt 200 ┘必须按 id 倒序兜底，否则顺序随扫描顺序变
+       *   c-old       createdAt 100，但**刚改过标题**（updatedAt 999）
+       *
+       * c-old 是这条用例的重点：排序键**不是** `updatedAt`。改个标题不该把一个
+       * 对话顶到最前面（那会让"我刚聊过的那个"随时被一次改名挤走）。
+       */
+      await s.insertConversation(
+        makeConversation({ id: 'c-never-b', workspaceId: WSA, createdAt: 200 }),
+      )
+      await s.insertConversation(
+        makeConversation({ id: 'c-never-c', workspaceId: WSA, createdAt: 200 }),
+      )
+      await s.insertConversation(
+        makeConversation({ id: 'c-old', workspaceId: WSA, createdAt: 100, updatedAt: 999 }),
+      )
+      await s.insertConversation(
+        makeConversation({
+          id: 'c-talked',
+          workspaceId: WSA,
+          createdAt: 100,
+          lastTurnAt: 300,
+        }),
+      )
+
+      assert.deepEqual(
+        (await s.listConversations(WSA)).map((c) => c.id),
+        ['c-talked', 'c-never-c', 'c-never-b', 'c-old'],
+      )
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 一轮一轮加 turn：listChatTurns 按 seq 升序（不按写入顺序、不按时间）', async () => {
+    const { store: s, dir } = await openScratch('chat-turns')
+    try {
+      // ★ 故意乱序写入、且时间戳完全相同：补齐只能靠 seq
+      await s.insertChatTurn(turn('t3', 'c1', 3))
+      await s.insertChatTurn(turn('t1', 'c1', 1))
+      await s.insertChatTurn(turn('t2', 'c1', 2))
+
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('c1'))).map((t) => t.id),
+        ['t1', 't2', 't3'],
+      )
+
+      /**
+       * 同一个 seq 追加两条（端口语义是"追加"，不是"唯一插入"）：不报错，且
+       * 顺序是**插入顺序**——文件适配器那边是 JS 的 `Array#sort`（稳定），
+       * SQL 这边靠 `ORDER BY seq, rowid` 对齐同一条语义。
+       */
+      await s.insertChatTurn(turn('t2b', 'c1', 2))
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('c1'))).map((t) => t.id),
+        ['t1', 't2', 't2b', 't3'],
+      )
+
+      // 别的对话的回合不能混进来；不存在的对话是空数组（不是 null）
+      await s.insertChatTurn(turn('x1', 'c-other', 1))
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('c1'))).map((t) => t.id),
+        ['t1', 't2', 't2b', 't3'],
+      )
+      assert.deepEqual(await s.listChatTurns(conversationId('c-nope')), [])
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ lastChatTurnWithRun 从后往前找第一条带 run 的：尾轮没抢到并发槽位是合法状态', async () => {
+    const { store: s, dir } = await openScratch('chat-last-run')
+    try {
+      assert.equal(await s.lastChatTurnWithRun(conversationId('c1')), null, '一条都没有 ⇒ null')
+
+      await s.insertChatTurn(turn('t1', 'c1', 1, { runId: 'r1' }))
+      await s.insertChatTurn(turn('t2', 'c1', 2, { runId: 'r2' }))
+      // ★ 尾轮没有 run：建 run 那一刻被并发槽位/目录锁挡下了，轮次记录仍然留着
+      await s.insertChatTurn(turn('t3', 'c1', 3, { runId: null }))
+
+      assert.equal(
+        (await s.lastChatTurnWithRun(conversationId('c1')))?.id,
+        't2',
+        '★ 必须往回再找一条，否则下一轮会丢掉上文（"我说的话它不记得了"）',
+      )
+
+      // 一个对话里一条 run 都没有 ⇒ null（不抛）
+      await s.insertChatTurn(turn('u1', 'c2', 1, { runId: null }))
+      await s.insertChatTurn(turn('u2', 'c2', 2, { runId: null }))
+      assert.equal(await s.lastChatTurnWithRun(conversationId('c2')), null)
+
+      /**
+       * ⚠️ 空字符串 runId：`RunId` 的 schema 是 `z.string()`（**没有** `.min(1)`），
+       *    所以它在类型上是合法值。文件适配器写的是 `if (t.runId)`——那是**真假值**
+       *    判断，空字符串在那边是假值，会被跳过。这里也必须跳过，否则同一条记录
+       *    在两个适配器上会给出不同的"上一轮"。
+       */
+      await s.insertChatTurn(turn('e1', 'c3', 1, { runId: '' }))
+      assert.equal(await s.lastChatTurnWithRun(conversationId('c3')), null)
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 追加一轮之后更新 lastTurnAt / turnCount：它必须被顶到列表最前面', async () => {
+    const { store: s, dir } = await openScratch('chat-touch')
+    try {
+      await s.insertConversation(
+        makeConversation({ id: 'c-a', workspaceId: WSA, createdAt: 100, updatedAt: 100 }),
+      )
+      await s.insertConversation(
+        makeConversation({ id: 'c-b', workspaceId: WSA, createdAt: 200, updatedAt: 200 }),
+      )
+      assert.deepEqual(
+        (await s.listConversations(WSA)).map((c) => c.id),
+        ['c-b', 'c-a'],
+        '还没说过话：按 createdAt 倒序',
+      )
+
+      // daemon 在 insertChatTurn 之后走这一处更新（turnCount 是冗余字段，
+      // 只有这一条路径写它——见 `Conversation` 上面的说明）
+      await s.insertChatTurn(turn('ta1', 'c-a', 1, { runId: 'ra1' }))
+      const after = await s.updateConversation(conversationId('c-a'), {
+        lastTurnAt: 500,
+        turnCount: 1,
+        updatedAt: 500,
+      })
+      assert.equal(after?.turnCount, 1)
+      assert.deepEqual(
+        (await s.listConversations(WSA)).map((c) => c.id),
+        ['c-a', 'c-b'],
+        '★ 说过话的排最前——排序键是 lastTurnAt',
+      )
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ updateConversation：改标题返回新记录；找不到返回 null，且**不能顺手插出一条**', async () => {
+    const { store: s, dir } = await openScratch('chat-update')
+    try {
+      await s.insertConversation(
+        makeConversation({
+          id: 'c1',
+          workspaceId: WSA,
+          title: '旧标题',
+          workDir: '/repo',
+          turnCount: 2,
+        }),
+      )
+
+      const updated = await s.updateConversation(conversationId('c1'), { title: '新标题' })
+      assert.equal(updated?.title, '新标题')
+      assert.equal(updated?.workDir, '/repo', 'patch 只动它说的那个字段')
+      assert.equal(updated?.turnCount, 2)
+      assert.equal(
+        (await s.getConversation(conversationId('c1')))?.title,
+        '新标题',
+        '落盘了，不只是返回值对了',
+      )
+
+      // null 才是"清空"（workDir 是 nullable，用来表达"接进我的仓库"之外的默认）
+      assert.equal((await s.updateConversation(conversationId('c1'), { workDir: null }))?.workDir, null)
+
+      /**
+       * ★ 找不到时的答案是 `null`——不抛错，也不静默成功。
+       *
+       * 最容易写歪的正是这里：`UPDATE ... WHERE id = ?` 零行匹配时**什么都不说**，
+       * 把它当成功返回会让调用方以为改名生效了。所以除了返回值，还要看
+       * "有没有凭空多出一条"——用 upsert 实现的话，一条 `updateConversation`
+       * 就能造出一个只有标题、没有 agentId 的野记录。
+       */
+      assert.equal(await s.updateConversation(conversationId('nope'), { title: 'x' }), null)
+      assert.equal(await s.getConversation(conversationId('nope')), null, '★ 不能插出一条')
+      assert.deepEqual(
+        (await s.listConversations(WSA)).map((c) => c.id),
+        ['c1'],
+        '★ 列表里也不能多出东西',
+      )
+
+      /**
+       * ⚠️ patch 里**显式**带 `undefined`：两个适配器都**不** prune（文件适配器的
+       *    `updateConversation` 就是原样 `{ ...cur, ...patch }`），于是该字段从落盘的
+       *    JSON 里消失。这与 `transition*` 那四个方法的行为**不同**，是刻意对齐
+       *    文件适配器的结果；钉住它是为了将来有人"顺手加个 pruneUndefined"时
+       *    当场失败——那会让同一个调用在两个适配器上得到不同的记录。
+       */
+      await s.updateConversation(conversationId('c1'), loosePatch({ workDir: undefined }))
+      assert.equal((await s.getConversation(conversationId('c1')))?.workDir, undefined)
+      assert.equal((await s.getConversation(conversationId('c1')))?.title, '新标题')
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 按 workspace 隔离；getConversation 则按 id 全局取（id 是 ULID，跨空间不会撞）', async () => {
+    const { store: s, dir } = await openScratch('chat-ws')
+    try {
+      await s.insertConversation(makeConversation({ id: 'ca', workspaceId: WSA, createdAt: 1 }))
+      await s.insertConversation(makeConversation({ id: 'cb', workspaceId: WSB, createdAt: 2 }))
+      await s.insertChatTurn({ ...turn('tb1', 'cb', 1, { runId: 'rb1' }), workspaceId: WSB })
+
+      assert.deepEqual((await s.listConversations(WSA)).map((c) => c.id), ['ca'])
+      assert.deepEqual(
+        (await s.listConversations(WSB)).map((c) => c.id),
+        ['cb'],
+        '★ A 的对话不能出现在 B 的列表里',
+      )
+
+      /**
+       * `getConversation` 按 id 取是**全局**的，这是与文件适配器一致的行为
+       * （那边遍历所有 workspace 的内存索引找那条 id）。这不是隔离没做好：
+       * id 是 ULID，端口的签名里也没有"在某个 workspace 内按 id 取对话"这个方法。
+       *
+       * `listChatTurns` 同理：它的签名里**没有 workspaceId**（端口就是这么定的），
+       * 所以别的 workspace 的对话，只要 id 给对了，回合就读得到。
+       */
+      assert.equal((await s.getConversation(conversationId('cb')))?.workspaceId, WSB)
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('cb'))).map((t) => t.id),
+        ['tb1'],
+      )
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ deleteConversation：删对话**连同它的轮次**；本来就不在 ⇒ false（不是错误）', async () => {
+    const { store: s, dir } = await openScratch('chat-delete')
+    try {
+      await s.insertConversation(makeConversation({ id: 'c1', workspaceId: WSA, title: '要删的' }))
+      // 轮次指向一条**真实存在**的 run，这样"删对话不能动 run"才是个完整场景
+      await s.insertRun(makeRun({ id: 'r1', agentId: 'a1', workspaceId: WSA }))
+      await s.insertChatTurn(turn('t1', 'c1', 1, { runId: 'r1' }))
+      await s.insertChatTurn(turn('t2', 'c1', 2, { runId: 'r2' }))
+      // 另一个对话，用来验"只删它自己的轮次"
+      await s.insertConversation(makeConversation({ id: 'c2', workspaceId: WSA, title: '留着' }))
+      await s.insertChatTurn(turn('u1', 'c2', 1, { runId: 'r9' }))
+
+      assert.equal(await s.deleteConversation(conversationId('c1')), true)
+      assert.equal(await s.getConversation(conversationId('c1')), null)
+      assert.deepEqual(
+        await s.listChatTurns(conversationId('c1')),
+        [],
+        '★ 轮次必须一起删掉——留下"没有对话的轮次"没有任何入口能看见它',
+      )
+
+      /**
+       * ⚠️ 那条 run **不动**。它是审计记录（成本、日志、工作目录的归属都挂在它
+       *    身上），而它的产出就是聊天记录本身——删掉 run 等于把"这次对话真的
+       *    发生过"一起删了。顺手补一条 `DELETE FROM run` 会被这两行挡住。
+       */
+      assert.equal((await s.getRun(runId('r1')))?.id, 'r1', '★ 删对话不能删 run')
+      assert.equal((await s.getRun(runId('r1')))?.status, 'queued', 'run 的状态也不能被顺手改掉')
+
+      assert.equal((await s.getConversation(conversationId('c2')))?.title, '留着')
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('c2'))).map((t) => t.id),
+        ['u1'],
+        '★ 删 A 的轮次不能动到 B 的',
+      )
+      assert.deepEqual((await s.listConversations(WSA)).map((c) => c.id), ['c2'])
+
+      // 幂等：第二次的正确答案是"没有可删的东西"，不是抛错
+      assert.equal(await s.deleteConversation(conversationId('c1')), false)
+      assert.equal(await s.deleteConversation(conversationId('nope')), false)
+
+      /**
+       * ★ 对话不存在时，**孤儿轮次也不动**。
+       *
+       * 这不是笔误，而是与文件适配器对齐：那边是"找到对话才进删除逻辑"，
+       * 所以一条没有对话的轮次（写入路径不会产生这种数据）不会被顺手删掉。
+       * 若这里图省事写成"无条件按 conversationId 删轮次"，返回值就会出现
+       * `false` 却删了东西的矛盾。
+       */
+      await s.insertChatTurn(turn('orphan', 'c-gone', 1, { runId: 'r-orphan' }))
+      assert.equal(await s.deleteConversation(conversationId('c-gone')), false)
+      assert.deepEqual(
+        (await s.listChatTurns(conversationId('c-gone'))).map((t) => t.id),
+        ['orphan'],
+      )
+    } finally {
+      await s.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 关闭后重开：对话与回合都在，排序键与"上一轮"照样算得出来', async () => {
+    /**
+     * 排序键 `sort_at` 是 **VIRTUAL 生成列**——它不落盘，重开后由 SQLite 从
+     * JSON 重新求值。所以这条用例顺带实证了那个取舍：排序键与实体内容物理上
+     * 不可能不一致，也就没有"迁移时忘了回填派生列"这回事。
+     */
+    const dir = await makeTempDir('chat-reopen')
+    try {
+      const a = await SqliteStore.open({ dataDir: dir, fsync: false })
+      await insertWorkspaces(a)
+      await a.insertConversation(
+        makeConversation({ id: 'c-old', workspaceId: WSA, createdAt: 100 }),
+      )
+      await a.insertConversation(
+        makeConversation({
+          id: 'c-live',
+          workspaceId: WSA,
+          createdAt: 100,
+          lastTurnAt: 400,
+          turnCount: 2,
+        }),
+      )
+      await a.insertChatTurn(turn('t1', 'c-live', 1, { runId: 'r1' }))
+      await a.insertChatTurn(turn('t2', 'c-live', 2, { runId: 'r2' }))
+      await a.insertChatTurn(turn('t3', 'c-live', 3, { runId: null }))
+      await a.close()
+
+      const b = await SqliteStore.open({ dataDir: dir, fsync: false })
+      assert.deepEqual(
+        (await b.listConversations(WSA)).map((c) => c.id),
+        ['c-live', 'c-old'],
+        '重开后排序键仍然有效',
+      )
+      assert.deepEqual(
+        (await b.listChatTurns(conversationId('c-live'))).map((t) => t.id),
+        ['t1', 't2', 't3'],
+      )
+      assert.equal((await b.lastChatTurnWithRun(conversationId('c-live')))?.id, 't2')
+      assert.equal((await b.getConversation(conversationId('c-live')))?.turnCount, 2)
+      assert.equal(
+        (await b.getConversation(conversationId('c-live')))?.lastTurnAt,
+        400,
+        'lastTurnAt 是整个 JSON 的一部分，重开后逐字回来',
+      )
+      await b.close()
+    } finally {
+      await cleanup(dir)
     }
   })
 })
@@ -1322,7 +1740,7 @@ describe('打开期校验与关闭', () => {
     const d = await makeTempDir('filename')
     try {
       const s = await SqliteStore.open({ dataDir: d, fsync: false, fileName: 'other.sqlite' })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.close()
 
       // 默认文件名的那份仍然是空库：两边互不干扰

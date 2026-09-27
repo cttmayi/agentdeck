@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store'
-import { DEFAULT_LOCALE, type Locale } from '@alpha-helper/i18n'
+import { DEFAULT_LOCALE, type Locale } from '@agentdeck/i18n'
 
 /**
  * 当前界面语言的**状态本体**（D39）。

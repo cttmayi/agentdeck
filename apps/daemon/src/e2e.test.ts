@@ -2,8 +2,18 @@ import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@alpha-helper/agent-core'
-import { ulid, type Issue, type RunId, type RunEvent } from '@alpha-helper/protocol'
+import {
+  AsyncQueue,
+  type AgentBackend,
+  type AgentMessage,
+  type ExecOptions,
+  type AgentSession,
+  CLAUDE_DESCRIPTOR,
+  CLAUDE_BLOCKED_ARGS,
+  GENERIC_DESCRIPTOR,
+  deliveryModeFor,
+} from '@agentdeck/agent-core'
+import { ulid, type Issue, type RunId, type RunEvent } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -33,6 +43,14 @@ class FakeBackend implements AgentBackend {
   /** 执行时看到的工作目录内容——用于验证注入发生在正确时机。 */
   seenContext: string | null = null
   seenPrompt: string | null = null
+  /**
+   * 系统提示（①② 两块）。
+   *
+   * ★ 2026-09 三块组装：runtime 支持系统提示时（claude 支持），框架与身份走这条
+   *   通道，`prompt` 里只剩 ③。假后端必须**照真实后端的样子**收下它——不收的话，
+   *   测试量到的"第一句话"就少了 ①②，而真实投递里它们在。
+   */
+  seenSystemPrompt: string | null = null
   /**
    * 执行那一刻**使用者自己的** `CLAUDE.md` 长什么样。
    *
@@ -94,6 +112,7 @@ class FakeBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
+    this.seenSystemPrompt = opts.systemPrompt ?? null
     this.seenPrompt = opts.prompt
     this.seenWorkDir = opts.workDir
     this.seenModel = opts.model ?? null
@@ -105,7 +124,8 @@ class FakeBackend implements AgentBackend {
      * 原来这里读的是工作目录里的 `CLAUDE.md`——那正是被删掉的机制。
      * 名字仍叫 `seenContext` 是因为断言都按"它被交代了什么"写的。
      */
-    this.seenContext = opts.prompt
+    // "它被交代了什么" = 系统提示 + 用户消息（A 档把 ①② 放在前者里）
+    this.seenContext = [opts.systemPrompt ?? '', opts.prompt].filter((p) => p !== '').join('\n\n')
     this.seenUserFile = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
@@ -352,7 +372,7 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
     assert.match(backend.seenContext!, /写一份关于依赖漏洞的报告/, '第一句话里应含任务内容')
   })
 
-  test('★ 每次 run 留一份上下文副本；**绝不写使用者的 CLAUDE.md**', async () => {
+  test('★ 第一句话全文进日志，**绝不写使用者的 CLAUDE.md**（也不再写上下文副本文件）', async () => {
     // ══════════════════════════════════════════════════════════════════
     // 这条期望被改动过两次，两次的"哪一份该留"都记在这里
     // ══════════════════════════════════════════════════════════════════
@@ -361,26 +381,21 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
     // ② 然后：改成**保留**它——任务的工作目录是产物之一，要能回看"它被交代了
     //    什么"。代价是必须逐字节还原使用者的原文件，还要处理共享目录里
     //    "摘掉别人正在用的块"那一整类竞态。
-    // ③ 现在（D29）：**根本不写那个文件**。同一份文本留给我们自己的
-    //    `.alpha-helper/context/<runId>.md`——谁都不覆盖谁，也不需要还原，
-    //    因为那从来不是别人的东西。
+    // ③ D29：**根本不写那个文件**。同一份文本留给我们自己的
+    //    `.agentdeck/context/<runId>.md`。
+    // ④ 2026-09（产品决定）：**副本文件也不写了**——日志已含第一句话全文
+    //    （①②③ 分开带标签、不截断），执行/审核都不再保存副本；
+    //    "回看它被交代了什么"看日志就行。
     const files = await readdir(workDir).catch(() => [] as string[])
-    assert.ok(
-      !files.includes('.claude') || true,
-      '（技能目录按 D30 跑完就收掉了）',
-    )
     assert.ok(
       !files.includes('CLAUDE.md'),
       '★ 绝不写使用者的 CLAUDE.md —— 那是他的文件，我们一个字都不该动',
     )
 
-    // 副本在：.alpha-helper/context/<runId>.md，内容是这次的第一句话
+    // 不再写上下文副本：`.agentdeck/context/` 不该出现
     const { readdir: rd } = await import('node:fs/promises')
-    const dir = join(workDir, '.alpha-helper', 'context')
-    const copies = await rd(dir).catch(() => [] as string[])
-    assert.ok(copies.length > 0, `★ 每次 run 都要留一份上下文副本，实际：${copies.join(', ')}`)
-    const first = await readFile(join(dir, copies[0]!), 'utf8')
-    assert.match(first, /^# 任务/, '副本就是这次交给 CLI 的那段文本')
+    const copies = await rd(join(workDir, '.agentdeck', 'context')).catch(() => [] as string[])
+    assert.equal(copies.length, 0, '★ 不再写上下文副本文件（2026-09：日志已含第一句话全文）')
   })
 
   test('★ 透传给 CLI 的是**组装好的第一句话**（不是干巴巴的 prompt）', () => {
@@ -388,9 +403,15 @@ describe('端到端：一个 execute run 跑通整条链路', () => {
     // （审核时）判决契约。原来只把 `req.prompt` 原样发过去，其余内容在
     // CLAUDE.md 里；现在全在这一段里，而且**就是发出的那一段**。
     const sent = backend.seenPrompt ?? ''
-    assert.match(sent, /^# 任务/, '有身份段')
+    // ★ 2026-09：claude 支持系统提示 ⇒ ①（框架）走 `systemPrompt`，`prompt` 里只有 ③。
+    //   所以"交给 CLI 的全部内容"= 两部分合起来看（这正是 A 档与 B 档的区别）。
+    const all = [backend.seenSystemPrompt ?? '', sent].filter((x) => x !== '').join('\n\n')
+    assert.ok(backend.seenSystemPrompt !== null, 'A 档必须真的送系统提示（否则规则与身份没到）')
+    assert.match(all, /^# 任务$/m, '框架里那一段标题在')
+    assert.match(all, /写一份关于依赖漏洞的报告/, '任务正文在')
+    assert.match(all, /## 护栏/, '护栏在（属于 ① 框架）')
     assert.match(sent, /写一份关于依赖漏洞的报告/, '有任务正文')
-    assert.match(sent, /## 护栏/, '有护栏')
+    assert.match(all, /## 护栏/, '护栏在（属于 ① 框架，走系统提示）')
     assert.equal(backend.seenWorkDir, workDir)
   })
 
@@ -518,12 +539,20 @@ describe('端到端：失败路径', () => {
       assert.equal(run.status, 'failed')
       assert.notEqual(run.failureReason, null, '失败必须带机器可读的原因码')
 
-      // 失败路径与成功路径**同一条规矩**：我们自己的东西照旧（副本留着），
-      // 而使用者的文件一个字都不碰（另有一组用例钉着，见下面）。
-      const copies = await readdir(join(failDir, '.alpha-helper', 'context')).catch(
+      // 失败路径与成功路径**同一条规矩**（2026-09 起）：副本文件不写（日志已含
+      // 第一句话全文），而使用者的文件一个字都不碰（另有一组用例钉着，见下面）。
+      const copies = await readdir(join(failDir, '.agentdeck', 'context')).catch(
         () => [] as string[],
       )
-      assert.ok(copies.length > 0, '失败也要留下这次的上下文副本（回看靠它）')
+      assert.equal(copies.length, 0, '★ 失败路径同样不写上下文副本（日志就是留档）')
+      // 失败也要能回看"它被交代了什么"——看 run 日志（第一句话全文在里面）
+      const msgs = ((await (await fetch(`${d.url}/api/runs/${runId}/messages`)).json()) as {
+        messages: Array<{ content: string }>
+      }).messages
+      assert.ok(
+        msgs.some((m) => (m.content ?? '').includes('会失败的任务')),
+        '★ 失败 run 的日志里也要有第一句话全文（回看靠日志，不是靠文件）',
+      )
       const leftover = await readFile(join(failDir, 'CLAUDE.md'), 'utf8').catch(() => null)
       assert.equal(leftover, null, '★ 失败路径同样不许在工作目录里造 CLAUDE.md')
     } finally {
@@ -1159,7 +1188,7 @@ describe('端到端：自动分配的工作目录落在「给 daemon 的那个�
    *
    * 两段各自都有测试（`workdir.test.ts` 测默认值，`resolveWorkDir` 是纯函数），
    * 但**中间那一段没人测**：`workRoot` 如果哪天没被传下去，两边测试照样全绿，
-   * 而使用者会发现产出跑回了 `~/.alpha-helper/data/work/` 里。
+   * 而使用者会发现产出跑回了 `~/.agentdeck/data/work/` 里。
    */
   test('★ 给了 workRoot ⇒ 自动目录就在它下面，并且受理时已经建好', async () => {
     const dataDir = await makeTempDir('e2e-wr-data')
@@ -1726,9 +1755,9 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
    * 原来只印了 prompt（前 2000 字），而 CLI 实际读的是**两样**东西：
    * stdin 上的那行 stream-json user 消息，以及工作目录里的上下文块
    * （它被当项目记忆读）。所以"它被交代了什么"在日志里答不全。
-   * 现在两样都印，并且**说清各自是怎么送进去的**。
+   * 现在 ①②③ 三块**分开带标签**整段进日志，并且说清各块怎么送进去的。
    */
-  test('★ 第一句话与上下文块都进日志；长文本截断时说明还剩多少、去哪儿看全文', async () => {
+  test('★ 第一句话三块整段进日志；长文本截断时说明还剩多少、去哪儿看全文', async () => {
     // 排查时最先要回答的两个问题是"给了它什么"与"它做了什么"。
     // 后者原本只有工具名没有参数，前者**完全不在日志里**。
     const runId = ulid() as RunId
@@ -1757,9 +1786,10 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
     const text = await waitForText(runId, /用量：/)
     assert.match(
       text,
-      /第一句话（stdin 的一行 stream-json user 消息，\d+ 字符，以下就是交给 CLI 的全部内容）：/,
-      '要说明给了它多少、以及**怎么送进去的**',
+      /第一句话（投递档 [AB]：/,
+      '要说明**用哪一档投递的**',
     )
+    assert.match(text, /以下就是交给 CLI 的全部内容）：/, '以及这就是全部内容（不截断）')
     // ★ 输入本身**不截断**：3000 字的任务也要整段进日志。
     //   它是那次 run 唯一不可变的事实——截断它，就等于把"它被交代了什么"
     //   变成要去别处拼的东西（使用者投诉过这一点）。
@@ -1768,8 +1798,15 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
 
     // 内容要真的印出来，而不是只说"有这么一段"
     assert.match(text, /## 护栏/, '第一句话里的护栏段要在')
-    assert.match(text, /## 要做的事/, '以及任务正文段')
-    assert.match(text, /\.alpha-helper\/context\//, '副本路径也要给出（需要回顾时读它）')
+    assert.match(text, /③ 走用户消息/, '以及哪一块走了用户消息（正文在它里面）')
+    // ★ 2026-09：日志按 ①②③ 三块**分开带标签**记（不写上下文副本文件了）——
+    //   "回看它被交代了什么"就看这三块。⚠️ ② 身份可能为空（这个 agent 没写
+    //   指令 ⇒ 空块不出现）——所以只钉 ① ③ 一定在，② 有就带标签。
+    assert.match(text, /===== ① 框架 =====/, '① 框架带标签在日志里')
+    assert.match(text, /===== ③ 任务 =====/, '③ 任务带标签在日志里')
+    if (/===== ② 身份 =====/.test(text)) {
+      assert.match(text, /===== ② 身份 =====/, '② 身份有内容就带标签出现')
+    }
 
     // 顺带：这些也都该在
     assert.match(text, /工作目录：/, '它跑到哪儿去了')
@@ -2024,5 +2061,40 @@ describe('★ 没给 timeoutMs 也有兜底：平台默认空闲上限（防静�
       await cleanup(dir)
       await cleanup(work)
     }
+  })
+})
+
+/**
+ * ★★ 投递档要**记在 run 上**（2026-09 三块组装）。
+ *
+ * 同一个模版在两个 runtime 上投递形状不同（A：①② 走系统提示；B：三块合成一段），
+ * 而"两边都不报错"是这个仓库被咬过三次的形状。所以这一档必须落库：
+ * "这条 run 当时是怎么送的"要是一句可查的话，不必去猜或翻日志。
+ */
+describe('2026-09：投递档记在 run 上', () => {
+  test('★ claude（支持系统提示）⇒ 落库的是 A', async () => {
+    // ⚠️ `GET /api/runs` 给的是**投影**（它连 `allowedActions` 都没有）⇒
+    //    要判落库的字段就必须回**那条 run 的原文**。
+    const { runs } = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+      runs: Array<{ runId: string }>
+    }
+    assert.ok(runs.length > 0, '夹具：至少有一条 run')
+    for (const r of runs) {
+      const doc = (await (await fetch(`${daemon.url}/api/runs/${r.runId}`)).json()) as {
+        deliveryMode?: string | null
+      }
+      assert.equal(doc.deliveryMode, 'A', `这条 run 用的是 claude，投递档该是 A（实际 ${String(doc.deliveryMode)}）`)
+    }
+  })
+
+  test('★ 不支持系统提示的 runtime ⇒ 落库的是 B（兜底那一档）', () => {
+    // 只看判据本身：描述表里没有 systemPrompt 就是 B。通用 runtime 就是这样。
+    assert.equal(deliveryModeFor(CLAUDE_DESCRIPTOR), 'A')
+    assert.equal(deliveryModeFor(GENERIC_DESCRIPTOR), 'B')
+    assert.equal(GENERIC_DESCRIPTOR.systemPrompt, null)
+  })
+
+  test('★ 禁改表挡住了系统提示旗标（使用者的自定义参数覆盖不了它）', () => {
+    assert.equal(CLAUDE_BLOCKED_ARGS['--append-system-prompt'], 'withValue')
   })
 })

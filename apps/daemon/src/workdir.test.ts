@@ -245,9 +245,9 @@ describe('★ 工作目录根：可见的那一个，和自洽的兜底', () => 
    * 时看起来对——`--data-dir /tmp/x` 会让产出落到 `/tmp/work`。
    *
    * 第二版：数据目录之内（`<dataDir>/work`）。跑偏修好了，但默认下变成
-   * `~/.alpha-helper/data/work/`——**藏在点开头的目录里，还埋在 data 下面两层**。
+   * `~/.agentdeck/data/work/`——**藏在点开头的目录里，还埋在 data 下面两层**。
    *
-   * 现在：**家目录下一个可见的 `alpha-helper-workspace/`**。
+   * 现在：**家目录下一个可见的 `agentdeck-workspace/`**。
    *
    * 为什么"可见"是硬要求：工作目录装的是 agent 真正的产出，使用者要用
    * Finder 打开、要在终端里 `cd` 进去。产出放在找不到的地方等于没有产出。
@@ -255,14 +255,14 @@ describe('★ 工作目录根：可见的那一个，和自洽的兜底', () => 
   test('★ 默认在家目录下，而且**不是隐藏目录**', () => {
     const root = defaultWorkRoot()
     assert.equal(dirname(root), homedir(), `★ 应当在家的正下方：${root}`)
-    assert.equal(basename(root), 'alpha-helper-workspace')
+    assert.equal(basename(root), 'agentdeck-workspace')
     assert.equal(
       basename(root).startsWith('.'),
       false,
       '★ 不能是点开头的隐藏目录——Finder 默认不显示，使用者就找不到产出了',
     )
     assert.equal(root.includes('//'), false, `不该有双斜杠：${root}`)
-    assert.match(root, /alpha-helper/, '使用者要能一眼认出这是本应用的地方')
+    assert.match(root, /agentdeck/, '使用者要能一眼认出这是本应用的地方')
   })
 
   test('★ 默认根只由函数自己决定，不吃任何参数', () => {
@@ -284,7 +284,7 @@ describe('★ 工作目录根：可见的那一个，和自洽的兜底', () => 
     // 之内，**任何一处忘了传 workRoot 的测试**都不可能污染真实环境。
     //
     // 这是个结构性的保证，不是靠"记得传"。故意拿几个非常规 dataDir 试。
-    for (const dataDir of ['/tmp/x', '/home/u/.alpha-helper/data', '.cache/dev/daemon-data']) {
+    for (const dataDir of ['/tmp/x', '/home/u/.agentdeck/data', '.cache/dev/daemon-data']) {
       const root = fallbackWorkRoot(dataDir)
       assert.ok(
         root.startsWith(`${dataDir}/`),
@@ -294,7 +294,7 @@ describe('★ 工作目录根：可见的那一个，和自洽的兜底', () => 
   })
 
   test('dataDir 以斜杠结尾时不会拼出双斜杠', () => {
-    const root = fallbackWorkRoot('/home/u/.alpha-helper/data/')
+    const root = fallbackWorkRoot('/home/u/.agentdeck/data/')
     assert.ok(!root.includes('//'), root)
   })
 })
@@ -313,7 +313,7 @@ describe('★ 旧工作目录的一次性迁移', () => {
     const dataDir = await makeTempDir('migrate-legacy')
     const homeDir = await makeTempDir('migrate-new')
     const legacyRoot = fallbackWorkRoot(dataDir)
-    const workRoot = join(homeDir, 'alpha-helper-workspace')
+    const workRoot = join(homeDir, 'agentdeck-workspace')
 
     try {
       await mkdir(join(legacyRoot, 'issue-01M2ABC'), { recursive: true })
@@ -338,7 +338,7 @@ describe('★ 旧工作目录的一次性迁移', () => {
     const dataDir = await makeTempDir('migrate-legacy')
     const homeDir = await makeTempDir('migrate-new')
     const legacyRoot = fallbackWorkRoot(dataDir)
-    const workRoot = join(homeDir, 'alpha-helper-workspace')
+    const workRoot = join(homeDir, 'agentdeck-workspace')
 
     const warnings: string[] = []
     try {
@@ -370,7 +370,7 @@ describe('★ 旧工作目录的一次性迁移', () => {
   test('全新安装（旧根不存在）⇒ 跳过，而且**不白建一个新目录**', async () => {
     const dataDir = await makeTempDir('migrate-legacy')
     const homeDir = await makeTempDir('migrate-new')
-    const workRoot = join(homeDir, 'alpha-helper-workspace')
+    const workRoot = join(homeDir, 'agentdeck-workspace')
 
     try {
       assert.equal(await migrateLegacyWorkRoot({ legacyRoot: fallbackWorkRoot(dataDir), workRoot }), 'skipped')
@@ -385,7 +385,7 @@ describe('★ 旧工作目录的一次性迁移', () => {
     const dataDir = await makeTempDir('migrate-legacy')
     const homeDir = await makeTempDir('migrate-new')
     const legacyRoot = fallbackWorkRoot(dataDir)
-    const workRoot = join(homeDir, 'alpha-helper-workspace')
+    const workRoot = join(homeDir, 'agentdeck-workspace')
 
     try {
       await mkdir(legacyRoot, { recursive: true })
@@ -444,7 +444,7 @@ describe('★ 旧工作目录的一次性迁移', () => {
     // 但又不至于碰到真实文件系统上别的东西。
     const blocker = join(homeDir, 'blocker')
     await writeFile(blocker, 'x', 'utf8')
-    const workRoot = join(blocker, 'alpha-helper-workspace')
+    const workRoot = join(blocker, 'agentdeck-workspace')
 
     const warnings: string[] = []
     try {

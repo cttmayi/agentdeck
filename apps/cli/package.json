@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/cli",
+  "name": "@agentdeck/cli",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -8,9 +8,9 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "alpha-helper": "./src/cli.ts"
+    "agentdeck": "./src/cli.ts"
   },
   "dependencies": {
-    "@alpha-helper/protocol": "workspace:*"
+    "@agentdeck/protocol": "workspace:*"
   }
 }

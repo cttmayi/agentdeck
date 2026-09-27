@@ -12,7 +12,7 @@ import { ToolId, WorkspaceId } from './ids.ts'
  *
  * 使用者要的是"工具目录最好有一个标准格式，用于判断是否适配"。所以格式
  * 不写在文档里靠人眼看，而是**在这里写成 schema**：装进来的包要么整份通过
- * 这里，要么带着一条具体的错被拒。文档（`docs/design.md` §15.26）只是这份
+ * 这里，要么带着一条具体的错被拒。文档（`docs/design/design.md` §15.26）只是这份
  * schema 的解说，不是判据本身——两者不一致时以这里为准。
  *
  * ── 为什么是 `tool.json` 而不是 `TOOL.md` 的 frontmatter ──
@@ -30,7 +30,7 @@ import { ToolId, WorkspaceId } from './ids.ts'
  */
 
 /** 清单格式的版本。**不认识这个值 ⇒ 明确拒绝**，不做"尽力而为"。 */
-export const TOOL_MANIFEST_SCHEMA = 'alpha-helper/tool@1'
+export const TOOL_MANIFEST_SCHEMA = 'agentdeck/tool@1'
 
 /** kebab-case：slug 与动作名共用（与 skill 的 slug 同一形状）。 */
 const KEBAB = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -134,10 +134,10 @@ export const ToolActionSpec = z
     /** 不可回滚的动作必须显式写 false（FR-ACTION-05 同款）。 */
     reversible: z.boolean(),
     /**
-     * ★ 准入条件：**不支持 dry-run 的动作不给"自动执行"资格**。
-     *
-     * 第三方脚本是你不完全了解的代码，它会在你的机器上真的改东西。
-     * dry-run 是唯一便宜到人人都会用的"先看一眼它会改什么"的手段。
+     * ⚠️ **惰性字段（2026-09）**：保留只为兼容老工具包——安装、校验照常，
+     *    但**不再参与任何判断**。那套"不支持 dry-run ⇒ 不自动执行"的预演准入
+     *    机制已经撤掉，动作直接执行；想看"动作会带什么参数发出去"是界面上的
+     *    「调试」勾选（`Agent.debugActions`），与本字段无关。
      */
     dryRun: z.enum(['supported', 'unsupported']),
     timeoutMs: z.number().int().min(1_000).max(600_000).default(60_000),

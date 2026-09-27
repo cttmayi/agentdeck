@@ -2,7 +2,7 @@ import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import type { Page, Store } from '@alpha-helper/domain'
+import type { Page, Store } from '@agentdeck/domain'
 import {
   agentId,
   makeAgent,
@@ -15,14 +15,14 @@ import {
   skillId,
   toolId,
   wsId,
-} from '@alpha-helper/domain/testing'
+} from '@agentdeck/domain/testing'
 import type {
   ActionId,
   BlobRef,
   RunMessage,
   VerdictId,
   WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { FileStore } from '../../store-file/src/file-store.ts'
 import { SqliteStore } from './sqlite-store.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -177,8 +177,8 @@ async function scenario(store: Store): Promise<unknown[]> {
   await rec('formatVersion', () => store.formatVersion())
 
   // ── Workspace / Device ──
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_A, name: 'A', createdAt: 10, updatedAt: 10 })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_B, name: 'B', createdAt: 20, updatedAt: 20 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_A, name: 'A', createdAt: 10, updatedAt: 10 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS_B, name: 'B', createdAt: 20, updatedAt: 20 })
   await rec('listWorkspaceIds', () => store.listWorkspaceIds())
   await rec('getWorkspace', () => store.getWorkspace(WS_A))
   await rec('getWorkspace.missing', () => store.getWorkspace(wsId('nope')))
@@ -862,7 +862,7 @@ describe('适配器自身的卫生', () => {
     const dir = await makeTempDir('layout')
     try {
       const store = await SqliteStore.open({ dataDir: dir, fsync: false })
-      await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: 'ws-x' as WorkspaceId,
+      await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: 'ws-x' as WorkspaceId,
         name: 'x',
         createdAt: 1,
         updatedAt: 1,

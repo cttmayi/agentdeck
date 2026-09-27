@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { startDaemon } from './server.ts'
+import { reviewerIdentity } from './review-standard.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -831,19 +832,20 @@ describe('★ 卸载 skill（D38）', () => {
 
 /**
  * ══════════════════════════════════════════════════════════════════
- * 过渡期迁移：把"来自挂载 skill 的标准"固化到 agent 上（D38）
+ * 过渡期迁移：把"来自挂载 skill 的判断依据"并进 agent 的「指令」（D38）
  * ══════════════════════════════════════════════════════════════════
  *
  * 这条路的由来：使用者**删不掉**那条内置的 `general-review`——因为他的审核者还挂着
- * 它，而且**它的审核标准正来自它**（老数据）。而"先摘掉 skill 再卸载"会先把审核者
- * 变成一个没标准的状态，平台于是不再把产出交给它审。
+ * 它，而且**它的判断依据正来自它**（老数据）。而"先摘掉 skill 再卸载"会先把审核者
+ * 变成一个没依据的状态，平台于是不再把产出交给它审。
  *
- * 所以需要一步"原样固化"：把当前生效的标准**正文**（= 挂载 skill 的正文拼起来）
- * 写成 agent 自己的 `reviewStandard`，**动作权限**写进 `Agent.allowedActions`
- * （D40 收口之后动作不再从 skill 推出来，也不再住在标准里），并摘掉那些挂载。
- * 固化之后那条 skill 才能被卸载。
+ * 所以需要一步"原样搬移"：把当前生效的标准**正文**（= 挂载 skill 的正文拼起来）
+ * 并进 agent 自己的 `instructions`（② 身份那一块；2026-09 之前是写进
+ * `reviewStandard`，那个字段现在只剩兼容读取），**动作权限**写进
+ * `Agent.allowedActions`（D40 收口之后动作不再从 skill 推出来，也不再住在标准里），
+ * 并摘掉那些挂载。搬完之后那条 skill 才能被卸载。
  */
-describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', () => {
+describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的迁移入口）', () => {
   async function adopt(url: string, agentId: string) {
     const res = await fetch(
       `${url}/api/agents/${encodeURIComponent(agentId)}/review-standard/adopt-from-skills`,
@@ -884,24 +886,32 @@ describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', (
       const after = ((await (await fetch(`${url}/api/agents`)).json()) as {
         agents: Array<{
           id: string
+          instructions: string | null
           skillIds: string[]
           allowedActions: string[]
-          reviewStandard: { body: string; name: string } | null
+          reviewStandard: { body: string } | null
         }>
       }).agents.find((a) => a.id === reviewer.id)!
-      assert.deepEqual(after.skillIds, [], '挂载要摘掉——标准已经在它自己身上了')
-      assert.ok(after.reviewStandard, '标准固化下来了')
-      assert.match(after.reviewStandard!.body, /只看甲/)
-      assert.match(after.reviewStandard!.body, /只看乙/, '两份 skill 的正文都要在')
-      assert.match(after.reviewStandard!.name, /老标准甲/)
+      assert.deepEqual(after.skillIds, [], '挂载要摘掉——正文已经搬进「指令」了')
+      /**
+       * ★★ 2026-09：落点是**「指令」**，不再是那个已经撤掉的「标准」字段。
+       *    使用者的口径是「审核 Agent 的标准也放 ② 里面，不用单独设置」。
+       */
+      assert.match(after.instructions ?? '', /只看甲/, '搬进「指令」了')
+      assert.match(after.instructions ?? '', /只看乙/, '两份 skill 的正文都要在')
+      assert.equal(
+        after.reviewStandard,
+        null,
+        '★ 老字段要清掉：留着的话 `reviewerIdentity` 会把同一段文字投递**两遍**',
+      )
+      // ⚠️ 这里原来还断言 `after.reviewStandard.name` 里有"老标准甲"——那个字段
+      //    已经删掉了（"名字"不承载任何东西，理由见协议里 `ReviewStandard`）。
+      //    固化只搬**正文**，所以上面那两条断言才是这条测试真正守的东西。
       // ★ D40 收口之后：标准只固化**正文**，动作固化到 `Agent.allowedActions` 上。
       //   两样都要落下来，否则"固化之后生效的"与"固化之前生效的"不是同一份。
       assert.deepEqual(after.allowedActions, [], '这个老形态审核者本来就没配动作 ⇒ 固化后仍是空')
-      assert.equal(
-        (after.reviewStandard as unknown as Record<string, unknown>)['allowedActions'],
-        undefined,
-        '★ 动作不再写回标准里（那是只读兼容字段）',
-      )
+      // 动作仍然落在 agent 自己那个字段上（D40 收口），标准那边一个字都不写。
+      // 2026-09 之后标准那个字段整个被清空了，这条断言连"里面有没有动作"都不必再看。
 
       // ★ 现在两条 skill 都不再被引用 ⇒ 可以卸载
       for (const id of ids) {
@@ -912,7 +922,163 @@ describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', (
     })
   })
 
-  test('没有标准可固化 / 非审核角色 ⇒ 400，并说清怎么做', async () => {
+  /**
+   * ★★ 第二种老形态：正文内联在老字段里、**没有挂任何 skill**。
+   *
+   * ⚠️ 这一条是使用者自己库里的形状（审核者：68 字「指令」＋ 289 字内联标准）。
+   *    原来界面上只显示它、**没有按钮**（按钮只给"正文来自挂载 skill"那一种），
+   *    于是那份判断依据只能靠手抄。既然两种都是"依据还走在老形态上"，就没有理由
+   *    只搬一种——而且「审核标准」那一段已经从界面上删掉了，不给入口的话这段文字
+   *    就只剩"看得见、动不了"。
+   */
+  test('★★ 内联老标准（没挂任何 skill）也能一步并进「指令」，而且顺序是指令在前', async () => {
+    await withDaemon(async (url) => {
+      const reviewer = (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: '带内联老标准的审核者',
+            role: 'reviewer',
+            instructions: '你是严格的审核者。',
+            reviewStandard: { body: '## 判定\n\n只看证据。' },
+          }),
+        })
+      ).json()) as { id: string; reviewStandard: { body: string } | null }
+      assert.equal(reviewer.reviewStandard?.body, '## 判定\n\n只看证据。')
+
+      const res = await adopt(url, reviewer.id)
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      const after = ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; instructions: string; reviewStandard: unknown }>
+      }).agents.find((a) => a.id === reviewer.id)!
+      assert.match(after.instructions, /你是严格的审核者。/, '原来的身份还在')
+      assert.match(after.instructions, /只看证据。/, '老标准的正文搬进来了')
+      assert.ok(
+        after.instructions.indexOf('你是严格的审核者。') < after.instructions.indexOf('只看证据。'),
+        '★ 顺序与 `reviewerIdentity` 一致（指令在前）：反过来的话，投递出去的那一段与搬之前不是同一份',
+      )
+      assert.equal(after.reviewStandard, null, '老字段要清掉，否则同一段文字会被投递两遍')
+    })
+  })
+
+  /**
+   * ★★ 保存时**顺手**把内联老标准并进「指令」（2026-09）。
+   *
+   * 使用者的原话：「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
+   * 他说的是界面上的真实观感：那条"还带着一份老的标准"的警告，改名字、写指令、
+   * 保存——**它都不动**，因为只有另一个按钮才会清掉老字段。一条只有点别处才会
+   * 消失的提示，等于把清理老数据的责任推给使用者。
+   *
+   * ⚠️ 所以这一组要钉住的**不是**"合并没有发生"，而是三件事一起：
+   *   ① 老字段真的清掉了（提示才会消失）；
+   *   ② **投递出去的那段文字一字未变**——判据用**同一个** `reviewerIdentity`：
+   *      并之前与并之后算出来的身份必须逐字节相同。少了这一条，"顺手清理"就可能
+   *      变成"顺手删掉一段判断依据"，而那正是这个仓库最怕的静默丢失；
+   *   ③ 不该并的两种情形**照旧不并**（指令为空、正文来自挂载的 skill）。
+   */
+  describe('保存时并进「指令」（2026-09）', () => {
+    const getAgent = async (url: string, id: string) =>
+      ((await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{
+          id: string
+          instructions: string
+          reviewStandard: { body: string } | null
+          skillIds: string[]
+        }>
+      }).agents.find((a) => a.id === id)!
+
+    const patchAgent = async (url: string, id: string, body: unknown) => {
+      const res = await fetch(`${url}/api/agents/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+    }
+
+    const makeReviewer = async (url: string, body: Record<string, unknown>) =>
+      (await (
+        await fetch(`${url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ role: 'reviewer', ...body }),
+        })
+      ).json()) as { id: string; instructions: string; reviewStandard: { body: string } | null }
+
+    test('★★ 改点别的再保存 ⇒ 老字段清掉、提示消失，而**身份那段文字一字未变**', async () => {
+      await withDaemon(async (url) => {
+        const reviewer = await makeReviewer(url, {
+          name: '带内联老标准的审核者',
+          instructions: '你是严格的审核者。',
+          reviewStandard: { body: '## 判定\n\n只看证据。' },
+        })
+        const before = await getAgent(url, reviewer.id)
+        const identityBefore = reviewerIdentity(before, [])
+        assert.equal(identityBefore.fromLegacyStandard, true, '前提：它此刻确实走在老形态上')
+
+        // 改的是**别的字段**（名字）——这正是"我什么都没配、保存一下提示该没了"的场景
+        const res = await patchAgent(url, reviewer.id, { name: '改了个名字的审核者' })
+        assert.equal(res.status, 200, JSON.stringify(res.body))
+
+        const after = await getAgent(url, reviewer.id)
+        assert.equal(after.reviewStandard, null, '老字段清掉了 ⇒ 界面上那条提示才会消失')
+        assert.match(after.instructions, /你是严格的审核者。/)
+        assert.match(after.instructions, /只看证据。/, '老标准的正文并进来了')
+
+        const identityAfter = reviewerIdentity(after, [])
+        assert.equal(identityAfter.fromLegacyStandard, false, '并完之后不再依赖老字段')
+        assert.equal(
+          identityAfter.text,
+          identityBefore.text,
+          '★★ 投递出去的那段文字必须**一字未变**——"顺手清理"不许变成"顺手丢一段判断依据"',
+        )
+      })
+    })
+
+    test('★ 指令为空 ⇒ 不并（并了会悄悄让它开始接审核任务）', async () => {
+      await withDaemon(async (url) => {
+        const reviewer = await makeReviewer(url, {
+          name: '只有老标准的审核者',
+          instructions: '',
+          reviewStandard: { body: '## 判定\n\n只看证据。' },
+        })
+        assert.equal((await patchAgent(url, reviewer.id, { name: '还是没写指令' })).status, 200)
+        const after = await getAgent(url, reviewer.id)
+        assert.equal(
+          after.reviewStandard?.body,
+          '## 判定\n\n只看证据。',
+          '★ 指令为空时不并：资格判据是「指令非空」，并进来等于保存一次就把它变成"能接审核任务"',
+        )
+        assert.equal(after.instructions.trim(), '')
+      })
+    })
+
+    test('★ 正文来自挂载的 skill ⇒ 保存**不**摘挂载（那要他自己点按钮）', async () => {
+      await withDaemon(async (url) => {
+        const installed = await install(url, {
+          skills: [{ slug: 'legacy-body', name: '老正文', body: '# 甲\n\n只看甲。', source: 'local' }],
+          batchId: 'b1',
+        })
+        const skillId = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+        const reviewer = await makeReviewer(url, {
+          name: '正文挂在 skill 上的审核者',
+          instructions: '你是严格的审核者。',
+          skillIds: [skillId],
+        })
+        assert.equal((await patchAgent(url, reviewer.id, { name: '改了个名字' })).status, 200)
+        const after = await getAgent(url, reviewer.id)
+        assert.deepEqual(
+          after.skillIds,
+          [skillId],
+          '★ 保存一次不该把别人挂着的 skill 摘掉——那是他没同意的改动；那一种仍然走详情页那颗按钮',
+        )
+        assert.doesNotMatch(after.instructions, /只看甲。/, '也不该把 skill 正文抄进「指令」')
+      })
+    })
+  })
+
+  test('没有判断依据可搬 / 非审核角色 ⇒ 400，并说清怎么做', async () => {
     await withDaemon(async (url) => {
       const empty = await fetch(`${url}/api/agents`, {
         method: 'POST',
@@ -921,7 +1087,7 @@ describe('★ 把挂载的 skill 转成内联标准（D38 的迁移入口）', (
       }).then((r) => r.json() as Promise<{ id: string }>)
       const res = await adopt(url, empty.id)
       assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /没有可固化的标准/)
+      assert.match(String(res.body['error']), /没有可搬移的判断依据/)
 
       const executor = await fetch(`${url}/api/agents`, {
         method: 'POST',

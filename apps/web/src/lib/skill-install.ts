@@ -1,4 +1,4 @@
-import type { TextParams, WebTextId } from '@alpha-helper/i18n'
+import type { TextParams, WebTextId } from '@agentdeck/i18n'
 import { ApiError, api } from './api.ts'
 
 /**

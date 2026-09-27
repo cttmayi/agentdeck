@@ -3,6 +3,7 @@ import {
   buildArgv,
   describeDropped,
   detectVersion,
+  loadCliRuntimeDescriptor,
   probeCommand,
   cliStateDir,
   planSandbox,
@@ -11,10 +12,11 @@ import {
   type AgentMessage,
   type AgentResult,
   type AgentSession,
+  type CliRuntimeDescriptor,
   type ExecOptions,
   type RuntimeDescriptor,
-} from '@alpha-helper/agent-core'
-import type { RuntimeProtocol } from '@alpha-helper/protocol'
+} from '@agentdeck/agent-core'
+import type { RuntimeProtocol } from '@agentdeck/protocol'
 import {
   ClaudeStreamParser,
   buildClaudeInput,
@@ -44,15 +46,17 @@ export class ClaudeBackend implements AgentBackend {
   readonly protocol: RuntimeProtocol
   readonly rejectDetectable: boolean
 
-  readonly #descriptor: RuntimeDescriptor
+  readonly #descriptor: CliRuntimeDescriptor
   readonly #options: ClaudeBackendOptions
 
   constructor(options: ClaudeBackendOptions) {
     this.#options = options
-    this.#descriptor = options.descriptor
-    this.key = options.descriptor.key
-    this.protocol = options.descriptor.protocol
-    this.rejectDetectable = options.descriptor.resume.rejectDetectable
+    // claude 是 cli 形状：`loadCliRuntimeDescriptor` 校验 managedFlags/resume 在位
+    // 并收窄类型（cli-only 字段已可选化——见 `RuntimeDescriptor.kind`）。
+    this.#descriptor = loadCliRuntimeDescriptor(options.descriptor)
+    this.key = this.#descriptor.key
+    this.protocol = this.#descriptor.protocol
+    this.rejectDetectable = this.#descriptor.resume.rejectDetectable
   }
 
   async #resolveExecutable(): Promise<string | null> {
@@ -84,12 +88,37 @@ export class ClaudeBackend implements AgentBackend {
       )
     }
 
+    /**
+     * ★ 系统提示（①② 两块）走 `--append-system-prompt`。
+     *
+     * ⚠️ **追加**，不是替换：`--system-prompt` 会把 CLI 自带的系统提示整份换掉——
+     *    那里面是它的工具用法与安全约束，换掉等于让 agent 变笨变野。这两个旗标
+     *    在 2.0.14 的 bundle 里都存在（实测过）。
+     *
+     * ⚠️ 调用方**不支持**这个 runtime 却传来系统提示时，这里**抛错**而不是忽略：
+     *    静默丢掉等于"规则与身份没送到"，而两边都不报错——那正是这个仓库反复在防的。
+     */
+    const managedAppend: string[] = []
+    if (opts.systemPrompt !== undefined && opts.systemPrompt !== '') {
+      const flag = this.#descriptor.systemPrompt?.flag
+      if (!flag) {
+        throw new Error(
+          `runtime「${this.#descriptor.key}」没有系统提示这条通道（描述表里 systemPrompt 是 null），` +
+            `所以不能把 ①② 两块单独送去。调用方该退回 B 档（三块合成一段）。`,
+        )
+      }
+      managedAppend.push(flag, opts.systemPrompt)
+    }
+
     const { argv, dropped } = buildArgv({
       runtime: this.#descriptor,
       model: opts.model ?? null,
       maxTurns: opts.maxTurns ?? null,
       resumeSessionId: opts.resumeSessionId ?? null,
       userArgs: opts.customArgs ?? [],
+      // 受管追加参数**最后写**（`buildArgv` 里的第 4 步）⇒ 使用者的自定义参数
+      // 覆盖不了它
+      managedAppend,
     })
 
     if (dropped.length > 0) {

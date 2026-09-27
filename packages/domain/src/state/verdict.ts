@@ -1,4 +1,4 @@
-import type { VerdictStatus } from '@alpha-helper/protocol'
+import type { VerdictStatus } from '@agentdeck/protocol'
 import { IllegalTransitionError } from '../errors.ts'
 
 /**

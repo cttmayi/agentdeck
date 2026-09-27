@@ -1,4 +1,5 @@
 import { after, before, describe, test } from 'node:test'
+import { deliveredText } from './testing/delivered.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,13 +9,13 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
   ulid,
   type RunId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import {
@@ -74,8 +75,8 @@ class ParamsBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    this.prompts.push(opts.prompt)
-    const isReview = opts.prompt.includes(VERDICT_FENCE_BEGIN)
+    this.prompts.push(deliveredText(opts))
+    const isReview = deliveredText(opts).includes(VERDICT_FENCE_BEGIN)
     const verdict = isReview ? this.verdict : null
     const text =
       verdict === null
@@ -310,7 +311,7 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
       role: 'reviewer',
       allowedActions: [action],
       actionParams: { [action]: { text: '审核者长期的固定值' } },
-      reviewStandard: { name: 'A 的标准', body: '# A 标准\n\n只要产出不为空就算通过。' },
+      reviewStandard: { body: '# A 标准\n\n只要产出不为空就算通过。' },
     })
     executor = {
       id: await createAgent(h, {
@@ -398,7 +399,7 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
           runtimeKey: 'claude',
           allowedActions: [pkg.action],
           actionParams: { [pkg.action]: { dir: '/tmp/x' } },
-          reviewStandard: { name: '标准', body: '正文' },
+          reviewStandard: { body: '正文' },
         }),
       })
       assert.equal(res.status, 400, '绑定参数不归使用者钉，必须被拒')
@@ -424,7 +425,7 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
           runtimeKey: 'claude',
           allowedActions: [pkg.action],
           actionParams: { [pkg.action]: { text: 'x'.repeat(3000) } },
-          reviewStandard: { name: '标准', body: '正文' },
+          reviewStandard: { body: '正文' },
         }),
       })
       assert.equal(res.status, 400)
@@ -446,7 +447,7 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
           role: 'reviewer',
           runtimeKey: 'claude',
           actionParams: { 'ghost-pkg.note': { text: 'x' } },
-          reviewStandard: { name: '标准', body: '正文' },
+          reviewStandard: { body: '正文' },
         }),
       })
       assert.equal(res.status, 400)
@@ -492,7 +493,7 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
         role: 'reviewer',
         allowedActions: [pkg.action],
         actionParams: { [pkg.action]: { text: '合规值' } },
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
       })
 
       // 改成超长值 ⇒ 400
@@ -543,7 +544,7 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
       const reviewerId = await createAgent(h, {
         name: '审核者 B6',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
       })
       const executorId = await createAgent(h, { name: '执行者 B', role: 'executor' })
       const agent = { id: executorId, name: '执行者 B' }
@@ -753,7 +754,10 @@ describe('D. ★★ 模型越界写固定参数 ⇒ 结构性 invalid（不是�
 
       // 同步点：结构性 ⇒ "重试无意义"那句由收口写下来
       const text = await waitForText(h, review.runId, /重试无意义/)
-      assert.match(text, /不合规且\*\*重试无意义\*\*/)
+      // ⚠️ 这里原来钉的是 `不合规且**重试无意义**`——两个星号是 markdown 的粗体记号，
+      //    而这句进的是**日志**（RunLog 逐行原样显示），所以在界面上它就是两个星号。
+      //    2026-09 把这类残留从运行时文案里清掉了，断言的意图一个字没变。
+      assert.match(text, /不合规且重试无意义/)
 
       const verdicts = (
         (await (await fetch(`${h.url}/api/runs/${review.runId}/verdicts`)).json()) as {

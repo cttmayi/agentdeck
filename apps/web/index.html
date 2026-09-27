@@ -3,7 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>alpha-helper</title>
+    <title>AgentDeck</title>
+    <script>
+      // ⚠️ 主题必须在**首帧前**定下来：CSS 在 JS 模块跑起来之前就开始画了，
+      //    而主题存在 localStorage 里——不先读的话，每次刷新都会"先默认色、
+      //    再跳成记住的色"闪一下。判定与 lib/theme.ts 保持一致（默认跟随系统）。
+      //    这段只做一件事：给 <html> 打上 data-theme，之后交给 CSS 变量。
+      try {
+        var pref = localStorage.getItem('ah.theme-pref')
+        var dark =
+          pref === 'dark' ||
+          ((pref === null || pref === 'system') &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

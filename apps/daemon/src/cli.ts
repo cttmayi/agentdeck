@@ -1,24 +1,25 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
+import { mkdir, readdir, rename, rmdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { defaultWorkRoot, fallbackWorkRoot, migrateLegacyWorkRoot } from './workdir.ts'
-import type { SandboxMode } from '@alpha-helper/agent-core'
+import type { SandboxMode } from '@agentdeck/agent-core'
 
 /**
  * CLI 入口。
  *
  * 命令面刻意保持最小（FR-RUNTIME-05）：首版只要
- * `alpha-helper daemon start` 能起来、能打印地址、能打开浏览器。
+ * `agentdeck daemon start` 能起来、能打印地址、能打开浏览器。
  * 参数面越窄，出错空间越小。
  */
 
 /** 固定端口（FR-BRIDGE-14）——随机端口会让"页面怎么找到 daemon"变成一道猜谜。 */
 export const DEFAULT_PORT = 4517
 
-export const DEFAULT_DATA_DIR = join(homedir(), '.alpha-helper', 'data')
+export const DEFAULT_DATA_DIR = join(homedir(), '.agentdeck', 'data')
 
 interface CliOptions {
   port: number
@@ -104,7 +105,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
   // 为什么这不能忍——两个真实的后果：
   //
   //   1. `--data-dir` 被忽略 ⇒ daemon 写到**别的目录**去，使用者却以为
-  //      数据在那里（实测撞到的就是这个：它去建 `~/.alpha-helper` 了）；
+  //      数据在那里（实测撞到的就是这个：它去建 `~/.agentdeck` 了）；
   //   2. `--sandbox workdir-write` 被忽略 ⇒ 沙箱**根本没开**，而使用者
   //      以为自己被保护着。这正是本项目反复在防的那种失败：**把安全感
   //      本身变成假的**。
@@ -153,10 +154,10 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
   }
 }
 
-export const HELP = `alpha-helper —— 本机 AI 工作台
+export const HELP = `agentdeck —— 本机 AI 工作台
 
 用法：
-  alpha-helper [daemon start] [选项]
+  agentdeck [daemon start] [选项]
 
 选项：
   -p, --port <端口>     本地端口（默认 ${DEFAULT_PORT}）
@@ -170,7 +171,7 @@ export const HELP = `alpha-helper —— 本机 AI 工作台
                         明确报错，不会静默退回无沙箱。
       --executable <路径>  覆盖 CLI 可执行文件路径（探测与执行共用同一个值）
       --runtime-key <key>  用哪个 runtime 起服务（默认 claude）
-      --work-root <路径>   工作区根目录（默认 ~/alpha-helper-workspace）
+      --work-root <路径>   工作区根目录（默认 ~/agentdeck-workspace）
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
@@ -196,6 +197,71 @@ export function openBrowser(url: string): void {
   } catch {
     /* 同上 */
   }
+}
+
+/**
+ * 改名（2026-09：alpha-helper → agentdeck）之后的数据目录迁移。
+ *
+ * 与 `migrateLegacyWorkRoot`（`workdir.ts`）同一套"只在完全安全的情况下搬"的
+ * 规矩：
+ *
+ *   - 新目录（`~/.agentdeck/data`）不存在，或只是个空目录（**绝不覆盖**——
+ *     那可能正是使用者手动指定的数据目录）；
+ *   - 旧目录（`~/.alpha-helper/data`）存在且非空（没东西可搬就不搬）；
+ *   - `rename` 成功（同盘是原子的；跨盘会 EXDEV，此时只警告、不删源）。
+ *
+ * 只在**用默认数据目录**（没给 `--data-dir`）时调用——显式指定 `--data-dir`
+ * 的人是在指一块他自己的地盘，不该被悄悄搬走。
+ */
+export async function migrateLegacyDataDir(input: {
+  dataDir: string
+  /** 旧数据目录。缺省是改名前的默认位置（可注入以便测试）。 */
+  legacyDataDir?: string
+  onInfo?: (message: string) => void
+  onWarn?: (message: string) => void
+}): Promise<'moved' | 'skipped' | 'failed'> {
+  const info = input.onInfo ?? ((): void => {})
+  const warn = input.onWarn ?? ((): void => {})
+  const legacyDataDir = input.legacyDataDir ?? join(homedir(), '.alpha-helper', 'data')
+  const { dataDir } = input
+
+  if (legacyDataDir === dataDir) return 'skipped'
+
+  let legacyEntries: string[]
+  try {
+    legacyEntries = await readdir(legacyDataDir)
+  } catch {
+    return 'skipped' // 旧目录不存在：全新安装，没什么可搬
+  }
+  if (legacyEntries.length === 0) return 'skipped'
+
+  const targetEntries = await readdir(dataDir).catch(() => null)
+  if (targetEntries !== null && targetEntries.length > 0) {
+    // 新目录已经有东西了：那是使用者的地盘，什么都不碰
+    warn(
+      `数据目录已经是 ${dataDir}，但旧目录 ${legacyDataDir} 里还有 ${legacyEntries.length} 项，` +
+        `因为新目录非空所以没有搬。旧目录里的内容没有丢，需要的话自行合并。`,
+    )
+    return 'skipped'
+  }
+
+  try {
+    await mkdir(dirname(dataDir), { recursive: true })
+    // 新目录刚才可能是"存在但是空的"，rename 到一个已存在的空目录在 POSIX 下
+    // 会失败（ENOTEMPTY/EEXIST 视实现），所以先把它去掉
+    if (targetEntries !== null) await rmdir(dataDir).catch(() => undefined)
+    await rename(legacyDataDir, dataDir)
+  } catch (err) {
+    // ⚠️ 这里只警告、**不删源**：搬不动就维持原样，旧目录仍然可用
+    warn(
+      `数据目录迁移失败（${legacyDataDir} → ${dataDir}）：${(err as Error).message}。` +
+        `旧内容原样保留，新任务会使用新位置。`,
+    )
+    return 'failed'
+  }
+
+  info(`数据目录已迁移：${legacyDataDir} → ${dataDir}（${legacyEntries.length} 项）`)
+  return 'moved'
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -240,9 +306,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     // ══════════════════════════════════════════════════════════════════
     //
     // `startDaemon` 的兜底是数据目录之内的 `work/`（自洽、不碰家目录）。
-    // 但只要是人自己在跑 alpha-helper，缺省就该是一块**看得见**的地方：
+    // 但只要是人自己在跑 agentdeck，缺省就该是一块**看得见**的地方：
     // 工作目录装的是 agent 真正的产出，使用者要用 Finder 打开、要在终端里
-    // `cd` 进去。藏在 `~/.alpha-helper/data/work/` 里等于找不到。
+    // `cd` 进去。藏在 `~/.agentdeck/data/work/` 里等于找不到。
     const workRoot = options.workRoot ?? defaultWorkRoot()
 
     // ★ 只有用默认位置时才迁移旧目录。
@@ -254,6 +320,16 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       await migrateLegacyWorkRoot({
         legacyRoot: fallbackWorkRoot(options.dataDir),
         workRoot,
+        onInfo: (m) => process.stdout.write(`${m}\n`),
+        onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
+      })
+    }
+
+    // ★ 只有用默认数据目录时才迁移旧目录。显式给 `--data-dir` 的人指定的是
+    //   他自己的地盘，不该被悄悄搬走。
+    if (options.dataDir === DEFAULT_DATA_DIR) {
+      await migrateLegacyDataDir({
+        dataDir: options.dataDir,
         onInfo: (m) => process.stdout.write(`${m}\n`),
         onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
       })
@@ -281,7 +357,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   // 工作目录要印出来：它是使用者会真的进去翻的地方，而"它在哪"不是一个
   // 能靠猜的东西（旧版本藏在 data/work 下面两层）。
   process.stdout.write(
-    `\nalpha-helper 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n` +
+    `\nAgentDeck 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n` +
       `  工作目录：${daemon.workRoot}\n`,
   )
   // ★ 沙箱状态必须**每次启动都报**，而不是只在开启时报。

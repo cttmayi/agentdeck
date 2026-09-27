@@ -4,9 +4,10 @@ import {
   loadRuntimeDescriptor,
   type AgentBackend,
   type RuntimeDescriptor,
-} from '@alpha-helper/agent-core'
-import { ClaudeBackend } from '@alpha-helper/agent-claude'
-import { GenericBackend } from '@alpha-helper/agent-generic'
+} from '@agentdeck/agent-core'
+import { ClaudeBackend } from '@agentdeck/agent-claude'
+import { CodexBackend } from '@agentdeck/agent-codex'
+import { GenericBackend } from '@agentdeck/agent-generic'
 
 /**
  * runtime → 适配器的装配表（FR-CLI-47 的第 2 段）。
@@ -66,6 +67,19 @@ function buildAdapters(): Record<string, RuntimeAdapter> {
       create: (options) =>
         new GenericBackend({
           descriptor: getRuntimeDescriptor('generic'),
+          ...(options.executablePath ? { executablePath: options.executablePath } : {}),
+          ...(options.onWarn ? { onWarn: options.onWarn } : {}),
+        }),
+    },
+    // ★ codex：service 形状（`codex app-server` + JSON-RPC）。
+    //   装配行与 claude/generic 完全同构——差异全部在描述表数据里（kind:'service'、
+    //   baseArgs、family），这里没有多一个 if。证据等级 provisional：
+    //   首次接入真实 codex 前先核对 `@agentdeck/agent-codex` 的 unverifiedFields()。
+    codex: {
+      descriptor: getRuntimeDescriptor('codex'),
+      create: (options) =>
+        new CodexBackend({
+          descriptor: getRuntimeDescriptor('codex'),
           ...(options.executablePath ? { executablePath: options.executablePath } : {}),
           ...(options.onWarn ? { onWarn: options.onWarn } : {}),
         }),

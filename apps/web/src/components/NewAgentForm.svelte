@@ -1,7 +1,6 @@
 <script lang="ts">
   import { agents, createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole, ReviewStandard } from '../lib/api.ts'
-  import ReviewStandardEditor from './ReviewStandardEditor.svelte'
   import ActionPicker from './ActionPicker.svelte'
   import { showToast } from '../lib/view.ts'
   import Drawer from './Drawer.svelte'
@@ -37,8 +36,12 @@
    *   2. 放进左栏正文 ⇒ 不溢出了，但**太窄**：技能多选、runtime、工作目录挤在
    *      358px 里，读起来憋。
    *
-   * 现在它是右侧抽屉（46rem = 736px，与「安装 skill」同宽）：浮在主从布局
+   * 现在它是右侧抽屉（**58rem = 928px**，D48 之前是 46rem）：浮在主从布局
    * 上面、不动清单，关掉就回到原地。字段宽度交给抽屉，不写死。
+   *
+   * ⚠️ 为什么是 58rem 而不是与「安装 skill」同宽的 46rem：这个抽屉里要**写**
+   *    一份 800 字的指令，46rem 的正文只有 686px、一行放 50 个中文字，读起来
+   *    一直在滚（见 D48）。宽度按**内容**选，不是按"大小档次"。
    */
   export let open = false
   export let onclose: () => void = () => {}
@@ -72,6 +75,11 @@
    *   与这里的空数组是同一件事的两面：谁也不替使用者加权限。
    */
   let allowedActions: string[] = []
+  /**
+   * 调试动作（2026-09）：标了「调试」的那些——是 `allowedActions` 的**子集**，
+   * 只对审核者有意义（服务端会校验子集）。
+   */
+  let debugActions: string[] = []
   /**
    * 动作的固定参数（D43）：与 `allowedActions` 同一档（只对审核者有意义）。
    * 初值是空对象——"谁也不替使用者钉值"，与"谁也不替使用者加权限"同一件事。
@@ -121,12 +129,16 @@
                   .map((a) => [a, { ...actionParams[a] }]),
               )
             : {},
+        // 调试同理：只送审核者的那份，且只送**勾上了的**（子集）
+        debugActions:
+          role === 'reviewer' ? debugActions.filter((a) => allowedActions.includes(a)) : [],
       })
       name = ''
       instructions = ''
       reviewStandard = null
       // 回到表单的默认值：动作权限**是空的**（D41：没有内置动作可预勾了）
       allowedActions = []
+      debugActions = []
       actionParams = {}
       selectedSkills = []
       reviewerAgentId = ''
@@ -146,7 +158,7 @@
 {#if open}
   <Drawer
     {open}
-    wide
+    size="wider"
     title={$t('agents.newTitle')}
     subtitle={$t('agents.newSubtitle')}
     {onclose}
@@ -208,45 +220,53 @@
 
     <label>
       {$t('agents.instructionsLabel')}
+      <!--
+        ★ 指令是**一份文档**，不是一行备注（D48）。
+
+        它原来是 `rows="3"`（约 3 行 / **150 字**），而实际写进去的是几百到上千字
+        的角色设定 —— 使用者的原话是"至少要能方便预览 800 字文章"。
+
+        ⚠️ `rows` 只是**没有 CSS 时的兜底**，真正的高度下限在下面
+           `.instructions` 的 `min-height: 22rem`。
+           （原来这里写的是 `rows="16"` + `min-height: 20rem`，而 `rows="16"`
+             本身就有 350.8px，比 20rem = 320px **更高**——于是那条 min-height
+             一个字都没生效，注释说的和代码做的正好相反。`rows="6"` 让它退回
+             兜底的位置，`22rem` 才真的说了算。）
+      -->
       <textarea
+        class="instructions"
         bind:value={instructions}
-        rows="3"
+        rows="6"
         placeholder={role === 'reviewer'
           ? $t('agents.instructionsPlaceholderReviewer')
           : $t('agents.instructionsPlaceholderExecutor')}
       ></textarea>
       <span class="hint">
-        {$t('agents.instructionsHintBefore')}<code>{'{{instructions}}'}</code>{$t('agents.instructionsHintAfter')}
+        {$t('agents.instructionsHintBefore')}<strong>{$t('agents.instructionsFieldStrong')}</strong>{$t('agents.instructionsHintAfter')}
       </span>
     </label>
 
     {#if role === 'reviewer'}
       <!--
-        D37：标准是审核者的判断依据，写在它自己身上。
-        D40 收口：行动权限是审核者的**另一个**字段（原来它长在标准那一栏里）。
-        两件事分开："按什么判"是上面那一栏，"判完允许动什么"是下面那一栏。
-
-        ⚠️ **别写 `bind:value={...}`**：Svelte 5 里组件的 `bind:` 不是"子组件调了
-           `onchange` 就算"——父组件拿到的那个 setter 只会在**子组件写自己的 prop**
-           时被调用，而这两个编辑器只抛 `onchange`（它们是受控组件，`value` 只读）。
-           于是 `bind:value` 会是一条**空绑定**：抽屉里写得满满当当，父组件一个字
-           都没收到，创建出来的审核者**没有标准、没有行动权限**，而界面上一切正常。
-           （这不是推理：探针里那一条"写下正文后状态徽章变「已写」"就是被它红过的
-           ——D37 起这一行一直是 `bind:value`。）所以这里显式传 `onchange`，
-           与 `AgentDetail.svelte` 用的是同一个写法。
+        ★ 2026-09：「标准」并进上面的「指令」，不再单独设置（使用者的决定）。
+        D40 收口：行动权限仍然是审核者的**另一个**字段。
+        所以这一栏只剩行动权限——判断依据写在上面的「指令」里。
       -->
-      <ReviewStandardEditor
-        value={reviewStandard}
-        onchange={(next) => (reviewStandard = next)}
-      />
+      <p class="hint" data-standard-merged>{$t('agents.standardMergedHint')}</p>
 
       <div class="field">
         <span class="field-label">{$t('agents.sectionActions')}</span>
         <ActionPicker
           value={allowedActions}
-          onchange={(next) => (allowedActions = next)}
+          onchange={(next) => {
+            allowedActions = next
+            // ★ 调试是允许的子集：允许里摘掉的动作，调试一起摘
+            debugActions = debugActions.filter((a) => next.includes(a))
+          }}
           params={actionParams}
           onparams={(next) => (actionParams = next)}
+          debug={debugActions}
+          ondebug={(next) => (debugActions = next)}
         />
       </div>
     {/if}
@@ -267,7 +287,7 @@
       {/if}
       {#if role === 'reviewer'}
         <span class="hint">
-          {$t('agents.reviewerSkillsHintBefore')}<strong>{$t('agents.standardLabel')}</strong>{$t('agents.reviewerSkillsHintAfter')}
+          {$t('agents.reviewerSkillsHintBefore')}<strong>{$t('agents.instructionsLabel')}</strong>{$t('agents.reviewerSkillsHintAfter')}
         </span>
       {:else}
         <span class="hint">{$t('agents.executorSkillsHint')}</span>
@@ -323,6 +343,30 @@
   }
 
   .field { margin-bottom: var(--sp-3); }
+
+  /**
+   * 指令输入框：要能读完一份 800 字的角色设定（D48）。
+   *
+   * ★ 为什么高度写成 `min-height` 的 rem，而不是靠 `rows`：
+   *   `rows` 是**行数**，它的像素高度随字号和行高变；而"能不能读完 800 字"是
+   *   个长度问题。写成 rem 之后它锚在长度上。
+   *
+   * ★ 22rem = 352px 是**实测**出来的（不是估的）：当前 13px 字号、行高 1.6
+   *   ⇒ 每行 20.8px ⇒ 框内可见 **16 行**；`wider` 抽屉正文 854px ⇒ 每行 **65**
+   *   个中文字 ⇒ 一屏 **1040 字**。要求是 800 字，留了约 30% 余量——窗口比
+   *   1440px 窄时一行装的字会变少，那点余量就是给这种情况的。
+   *
+   * ⚠️ 不要用 `height`：`resize: vertical` 拖出来的高度是**行内样式**，它会
+   *    盖掉样式表里的 `height`，看起来"拖了没用"；而 `min-height` 只挡下限，
+   *    往上拖永远有效。（代价是拖不到 22rem 以下——那正是这个下限的意思。）
+   *    `FirstSentenceTemplate.svelte` 里那个模版框关掉了 `resize`，因为它由
+   *    `autosize()` 按内容算高度，手动拖会被下一次输入覆盖回去。
+   */
+  .instructions {
+    min-height: 22rem;
+    line-height: 1.6;
+    resize: vertical;
+  }
 
   .field-label {
     display: block;

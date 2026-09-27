@@ -1,4 +1,5 @@
 import { after, before, describe, test } from 'node:test'
+import { deliveredText } from './testing/delivered.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,13 +9,13 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
   ulid,
   type RunId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import {
@@ -106,8 +107,8 @@ class WhitelistBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    this.prompts.push(opts.prompt)
-    const isReview = opts.prompt.includes(VERDICT_FENCE_BEGIN)
+    this.prompts.push(deliveredText(opts))
+    const isReview = deliveredText(opts).includes(VERDICT_FENCE_BEGIN)
     const verdict = isReview ? this.verdict : null
     const text =
       verdict === null
@@ -454,7 +455,7 @@ describe('A. ★ 任务级动作白名单：三态落库 + 带下去', () => {
       role: 'reviewer',
       // 动作权限只写在 agent 上（D40 收口；标准里那个同名键是老数据的只读兼容）
       allowedActions: [ownAction],
-      reviewStandard: { name: 'A 的标准', body: '# A 标准\n\n只要产出不为空就算通过。' },
+      reviewStandard: { body: '# A 标准\n\n只要产出不为空就算通过。' },
     })
     executor = {
       id: await createAgent(h, {
@@ -639,7 +640,7 @@ describe('C. ★ 提交校验：三种 400，且一个 run 都不许入库', () 
       name: '审核者 C',
       role: 'reviewer',
       allowedActions: [],
-      reviewStandard: { name: 'C 的标准', body: '# C 标准\n\n随便判判。' },
+      reviewStandard: { body: '# C 标准\n\n随便判判。' },
     })
     executor = {
       id: await createAgent(h, {
@@ -772,7 +773,7 @@ describe('C. ★ 提交校验：三种 400，且一个 run 都不许入库', () 
       name: '审核者 C3（待会被改成执行者）',
       role: 'reviewer',
       allowedActions: [],
-      reviewStandard: { name: 'C3 的标准', body: '# C3 标准\n\n随便判判。' },
+      reviewStandard: { body: '# C3 标准\n\n随便判判。' },
     })
     const follower = {
       id: await createAgent(h, {
@@ -1074,11 +1075,13 @@ describe('B. ★★ 白名单进判决契约与判决收口（真实链路）', 
       })
       const review = await waitForDerivedReview(h, executeRunId)
 
-      // 同步点：那句"不合规且**重试无意义**"由收口那一步写下来
+      // 同步点：那句"不合规且重试无意义"由收口那一步写下来
+      // ⚠️ 断言里原来带 `**`（markdown 粗体记号）：这句进日志、按纯文本显示，
+      //    所以那两个星号会原样出现在界面上。2026-09 清掉了这类残留。
       const text = await waitForText(h, review.runId, /重试无意义/)
       assert.match(
         text,
-        /不合规且\*\*重试无意义\*\*/,
+        /不合规且重试无意义/,
         '★ 必须走"结构性 invalid"那条路（通知人），而不是重试或降级',
       )
 

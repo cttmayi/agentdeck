@@ -1,4 +1,4 @@
-import { checkVersionSupport, knownRuntimeKeys, loadRuntimeDescriptor } from '@alpha-helper/agent-core'
+import { checkVersionSupport, knownRuntimeKeys, loadRuntimeDescriptor } from '@agentdeck/agent-core'
 import { knownRuntimeAdapters } from './runtime-registry.ts'
 
 /**

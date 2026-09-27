@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { Agent, Device, Workspace } from '@alpha-helper/protocol'
+import type { Agent, Device, Workspace } from '@agentdeck/protocol'
 import type { Page, Store } from '../ports/store.ts'
 import { checksumOf } from './export.ts'
 import { exportData, importData } from './snapshot.ts'
@@ -46,6 +46,11 @@ function stubStore(seed: { workspace: Workspace; agents: Agent[]; tools: ReturnT
     listReports: async () => empty(),
     listRuns: async () => empty(),
     listInboxItems: async () => [],
+    // 聊天：这个假 store 只实现本文件用到的方法，而导出会取**全部**实体
+    // （漏一个就是 `TypeError: store.listXxx is not a function`——比"导少了一部分"
+    // 响得多，所以这里宁可多两行）。
+    listConversations: async () => [],
+    listChatTurns: async () => [],
     listComments: async () => [],
     listVerdictsByRun: async () => [],
     listArtifactsByRun: async () => [],
@@ -64,7 +69,7 @@ const WS = wsId('ws-tools')
 function makeWorkspace(): Workspace {
   return {
     executeTemplate: '',
-    reviewTemplate: '',
+    reviewTemplate: '', chatTemplate: '',
     defaultAgentId: null,
     locale: 'zh',
     id: WS,
@@ -78,11 +83,13 @@ describe('快照：工具包（D40）', () => {
   test('★ 导出里带着 tools，且 agent 引用到的包一个不缺（FR-AUDIT-02 自包含）', async () => {
     const deploy = makeTool({ id: 'tool-deploy', workspaceId: WS, slug: 'deploy' })
     const lint = makeTool({ id: 'tool-lint', workspaceId: WS, slug: 'lint' })
-    // agent 挂着其中一个工具包——这正是"引用"的来源
+    // ★ "引用"的来源：审核者的动作权限写的是 `<包 slug>.<动作名>`，所以它按
+    //   **slug** 指着 deploy 这个包。（原来是"agent 挂着这个工具包"——挂载能力
+    //   撤掉之后那条引用不存在了，但这条还在，判据因此仍然成立。）
     const agent = makeAgent({
       id: 'ag-1',
       workspaceId: WS,
-      toolIds: [deploy.id],
+      allowedActions: ['deploy.push'],
     })
     const { store } = stubStore({ workspace: makeWorkspace(), agents: [agent], tools: [deploy, lint] })
 
@@ -95,10 +102,11 @@ describe('快照：工具包（D40）', () => {
     )
     assert.equal(snap.counts['tools'], 2)
 
-    // ★ 真正的判据：agent 引用的每一个工具包都能在这份快照里找到
-    const available = new Set(snap.data.tools.map((t) => t.id as string))
-    for (const id of agent.toolIds) {
-      assert.ok(available.has(id as string), `快照里缺少被引用的工具包 ${id}`)
+    // ★ 真正的判据：`allowedActions` 里引用到的每一个包都能在这份快照里找到
+    const availableSlugs = new Set(snap.data.tools.map((t) => t.slug))
+    for (const action of agent.allowedActions ?? []) {
+      const slug = action.split('.')[0] ?? ''
+      assert.ok(availableSlugs.has(slug), `快照里缺少被动作权限引用到的工具包 ${slug}`)
     }
   })
 

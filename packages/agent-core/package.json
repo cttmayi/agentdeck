@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/agent-core",
+  "name": "@agentdeck/agent-core",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@alpha-helper/protocol": "workspace:*",
+    "@agentdeck/protocol": "workspace:*",
     "mustache": "4.2.0",
     "yaml": "^2.9.1"
   },

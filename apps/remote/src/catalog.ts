@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
-import { ToolManifest } from '@alpha-helper/protocol'
+import { ToolManifest } from '@agentdeck/protocol'
 
 /**
  * 远端公共目录里的**工具包**（D40）。

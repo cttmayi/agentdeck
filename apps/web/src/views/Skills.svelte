@@ -1,5 +1,17 @@
 <script lang="ts">
-  import { loadSkills, loadError, loading, skills, uninstallSkill } from '../lib/stores.ts'
+  import { onDestroy } from 'svelte'
+  import {
+    loadLocalSkillDirs,
+    loadSkills,
+    loadError,
+    loading,
+    localSkillDirs,
+    saveLocalSkillDirs,
+    skills,
+    agents,
+    uninstallSkill,
+  } from '../lib/stores.ts'
+  import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { showToast } from '../lib/view.ts'
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
@@ -15,6 +27,7 @@
     type InstallMessage,
     type InstallResult,
   } from '../lib/skill-install.ts'
+  import type { LocalSkillDirCandidate, ReconcileReport } from '../lib/api.ts'
 
   /**
    * Skills。
@@ -182,6 +195,150 @@
   }
 
   /**
+   * 顶栏那一排动作（机制见 `lib/page-actions.ts`）。
+   *
+   * ⚠️ 写在 `$:` 里并读 `$t(...)`：语言一变就重新登记一遍（整体覆盖，不是追加）。
+   * ⚠️ 卸载时收回来（登记里存的是抓着这一页状态的闭包）。顶栏读的时候本来就按
+   *    视图名过滤，所以这不是"防残留"，是"不留着不用"。
+   *
+   * ★ 三个按钮的权重是有讲究的：**安装是这一页的主线**（`primary`），刷新与设置
+   *   是配套动作（`secondary`）——原来它们挤在 `view-head` 里全是一个样子。
+   */
+  $: setPageActions('skills', [
+    {
+      id: 'refresh',
+      label: $t('common.refresh'),
+      kind: 'secondary',
+      onActivate: () => void loadSkills(),
+    },
+    {
+      id: 'settings',
+      label: $t('skills.settings'),
+      kind: 'secondary',
+      onActivate: openDirs,
+    },
+    {
+      id: 'install',
+      label: $t('skills.install'),
+      kind: 'primary',
+      onActivate: openPanel,
+    },
+  ])
+  onDestroy(() => clearPageActions('skills'))
+
+  // ── 本地技能目录（「设置」抽屉）──
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 这个设置解决的是"我别的工具里已经有一堆 skill 了"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * Claude Code、Codex、Cursor 各自把 skill 放在自己的目录里。勾上那些目录，
+   * 这边的列表里就能看见、也能挂给智能体——不用一份份重新装。
+   *
+   * ★ 勾选状态是**存起来的**（工作区上），而**目录内容是每次都重扫的**：
+   *   在那边改了、加了、删了，这边跟着变。所以这个抽屉里没有"导入"按钮——
+   *   勾上就是"一直读这里"。
+   */
+  let dirsOpen = false
+  let customInput = ''
+  /** 正在保存勾选（勾选框转圈用）；null = 空闲。 */
+  let savingDirs: string | null = null
+  /**
+   * 哪些智能体挂着这条 skill。
+   *
+   * ⚠️ 必须**算成值**，不能在标记里调函数：Svelte 只追踪表达式里**看得见**的
+   *    标识符，函数体里读 `$agents` 它是看不见的——列表上那个"还有谁在用"就会
+   *    停在第一次渲染的样子（这个坑在第 14 轮已经踩过一次）。
+   */
+  $: skillHolders = new Map(
+    $skills.map((s) => [s.id, $agents.filter((a) => a.skillIds.includes(s.id)).map((a) => a.name)]),
+  )
+
+  /**
+   * 这个候选目录的显示名。
+   *
+   * ★ daemon 只给 id 与路径，**中文名在词表里**——把显示名写在 daemon 那边等于
+   *   让这个功能只有一种语言。认不出的 id（daemon 比界面新，加了新候选）就直接
+   *   显示 id：显示一个英文 id 好过显示一片空白。
+   */
+  const DIR_TOOL_KEYS = {
+    claude: 'skills.dirsToolClaude',
+    codex: 'skills.dirsToolCodex',
+    cursor: 'skills.dirsToolCursor',
+    agents: 'skills.dirsToolAgents',
+  } as const
+
+  function dirToolLabel(id: string): string {
+    const key = DIR_TOOL_KEYS[id as keyof typeof DIR_TOOL_KEYS]
+    return key ? tx(key) : id
+  }
+
+  function openDirs(): void {
+    dirsOpen = true
+    // 打开时重扫一遍：目录里现在有几个 skill、什么东西被跳过了，是这一刻的事实
+    void loadLocalSkillDirs()
+  }
+
+  function closeDirs(): void {
+    dirsOpen = false
+  }
+
+  /** 勾 / 取消勾一个目录，然后立刻把结果说出来。 */
+  async function toggleDir(path: string, checked: boolean): Promise<void> {
+    const current = $localSkillDirs.enabled
+    const next = checked
+      ? [...current.filter((d) => d !== path), path]
+      : current.filter((d) => d !== path)
+    savingDirs = path
+    try {
+      // 报告只用来**说这一句**：扫描说明（跳过了什么、读不进来什么）跟着
+      // `loadLocalSkillDirs()` 一起回来，所以它在抽屉里一直是齐的，不靠这一次
+      announceDirs(await saveLocalSkillDirs(next))
+    } catch (err) {
+      errorMessage = err instanceof Error ? err.message : String(err)
+    } finally {
+      savingDirs = null
+    }
+  }
+
+  async function addCustomDir(): Promise<void> {
+    const value = customInput.trim()
+    if (value === '') return
+    await toggleDir(value, true)
+    customInput = ''
+  }
+
+  /**
+   * 把一次对账的结果讲成一句话。
+   *
+   * ★ 只说**有内容的**那几样：一次正常勾选不该弹四行字。但"跳过了""读不进来"
+   *   一定要说——静默跳过正是这个功能最容易让人困惑的地方。
+   */
+  function announceDirs(report: ReconcileReport): void {
+    const parts: string[] = []
+    if (report.added.length + report.updated.length + report.removed.length > 0) {
+      parts.push(
+        tx('skills.dirsSaved', {
+          added: report.added.length,
+          updated: report.updated.length,
+          removed: report.removed.length,
+        }),
+      )
+    } else {
+      parts.push(tx('skills.dirsSavedNothing'))
+    }
+    if (report.keptBecauseUsed.length > 0) {
+      parts.push(
+        tx('skills.dirsKept', {
+          count: report.keptBecauseUsed.length,
+          names: report.keptBecauseUsed.map((k) => k.slug).join('、'),
+        }),
+      )
+    }
+    showToast(parts.join('　'))
+  }
+
+  /**
    * Esc 关抽屉。
    *
    * ★ 这个抽屉由本视图自己渲染（状态就住在这儿），所以它**不在**
@@ -190,24 +347,158 @@
    *   手感是说不通的。
    */
   function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && panelOpen) closePanel()
+    if (event.key !== 'Escape') return
+    if (panelOpen) closePanel()
+    if (dirsOpen) closeDirs()
   }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="view-head">
-  <div>
-    <h2>{$t('skills.title')}</h2>
-    <p>
-      {$t('skills.headIntro')}<strong>{$t('skills.headStrongBody')}</strong> + <strong>{$t('skills.headStrongFiles')}</strong>{$t('skills.headOutro')}
-    </p>
-  </div>
-  <div style="display:flex;gap:var(--sp-2)">
-    <button type="button" class="secondary" onclick={loadSkills}>{$t('common.refresh')}</button>
-    <button type="button" onclick={openPanel}>{$t('skills.install')}</button>
-  </div>
+<div class="view-intro">
+  <!--
+    ⚠️ 这里原来是一个 `<h2>Skills</h2>` + 一排按钮。两样都搬走了：
+       · 按钮 → 顶栏里、紧跟着页名（各视图登记，见 `lib/page-actions.ts`）
+       · 标题 → 顶栏左侧的页名，与侧栏共用同一个词条（`lib/view.ts`）
+    留下的这一段是**这一页是什么**，它只属于这里。
+  -->
+  <p>
+    {$t('skills.headIntro')}<strong>{$t('skills.headStrongBody')}</strong> + <strong>{$t('skills.headStrongFiles')}</strong>{$t('skills.headOutro')}
+  </p>
 </div>
+
+{#if dirsOpen}
+  <div class="drawer-backdrop" onclick={closeDirs} role="presentation"></div>
+  <aside class="drawer" aria-label={$t('skills.dirsTitle')}>
+    <header>
+      <h3>{$t('skills.dirsTitle')}</h3>
+      <button type="button" class="ghost" onclick={closeDirs} aria-label={$t('common.close')}>×</button>
+    </header>
+    <div class="drawer-body">
+      <p class="faint small" style="margin-top:0">{$t('skills.dirsIntro')}</p>
+
+      {#if $loadError['localSkillDirs']}
+        <!-- ★ 读不到就说读不到。
+             ⚠️ 少了这一条，"接口出错/daemon 是旧的那版"会表现成**一个空的候选
+                列表**——使用者看到的是"这里什么都没有"，而不是"这一趟没读到"，
+                于是他会去猜是不是自己没有那些目录。 -->
+        <div class="notice bad">{$loadError['localSkillDirs']}</div>
+      {:else if $loading['localSkillDirs'] && $localSkillDirs.candidates.length === 0}
+        <div class="skeleton" style="width:70%"></div>
+      {:else}
+        <!-- 内置候选：每个目录一行，勾选框 + 显示名 + 路径 + "里面有几个" -->
+        {#each $localSkillDirs.candidates as c (c.path)}
+          {@const checked = $localSkillDirs.enabled.includes(c.path)}
+          <label class="dir-row">
+            <input
+              type="checkbox"
+              {checked}
+              disabled={savingDirs === c.path}
+              onchange={(e) => void toggleDir(c.path, e.currentTarget.checked)}
+            />
+            <span class="dir-main">
+              <strong>{dirToolLabel(c.id)}</strong>
+              {#if !c.exists}
+                <!-- 目录不存在也要能看见、能勾：可能还没建，或外置盘没挂上 -->
+                <span class="badge todo">{$t('skills.dirsMissing')}</span>
+              {:else if c.skillCount === 0}
+                <span class="faint small">{$t('skills.dirsNoSkill')}</span>
+              {:else}
+                <span class="faint small">{$t('skills.dirsCount', { count: c.skillCount })}</span>
+              {/if}
+              <div class="faint small dir-path" title={c.path}>{c.path}</div>
+              {#if c.skipped.length > 0}
+                <!-- ★ 一直挂在这儿：勾了却"少一个"时，这句话是唯一的线索 -->
+                <div class="faint small dir-skip">
+                  {$t('skills.dirsSkipped', { list: c.skipped.map((k) => k.rel).join('、') })}
+                </div>
+              {/if}
+            </span>
+          </label>
+        {/each}
+
+        <!-- 自己填的路径：不在候选表里，但同样要能看见、能取消 -->
+        {#if $localSkillDirs.custom.length > 0}
+          <h4 class="dirs-h4">{$t('skills.dirsCustomHeading')}</h4>
+          {#each $localSkillDirs.custom as dir (dir.path)}
+            <div class="dir-row">
+              <span class="dir-main">
+                <div class="dir-path" title={dir.path}>{dir.path}</div>
+                {#if !dir.exists}
+                  <span class="badge todo">{$t('skills.dirsMissing')}</span>
+                {:else if dir.skillCount === 0}
+                  <span class="faint small">{$t('skills.dirsNoSkill')}</span>
+                {:else}
+                  <span class="faint small">{$t('skills.dirsCount', { count: dir.skillCount })}</span>
+                {/if}
+                {#if dir.skipped.length > 0}
+                  <div class="faint small dir-skip">
+                    {$t('skills.dirsSkipped', { list: dir.skipped.map((k) => k.rel).join('、') })}
+                  </div>
+                {/if}
+              </span>
+              <button
+                type="button"
+                class="ghost small danger"
+                disabled={savingDirs === dir.path}
+                onclick={() => void toggleDir(dir.path, false)}
+              >{$t('skills.dirsRemove')}</button>
+            </div>
+          {/each}
+        {/if}
+
+        <div class="dir-add">
+          <input
+            type="text"
+            bind:value={customInput}
+            placeholder={$t('skills.dirsCustomPlaceholder')}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') void addCustomDir()
+            }}
+          />
+          <button type="button" class="secondary" onclick={() => void addCustomDir()}>
+            {$t('skills.dirsAdd')}
+          </button>
+        </div>
+      {/if}
+
+      <!-- ★ 取消勾选**不会**怎样，必须写出来：使用者对"取消勾选"的直觉是"删掉"，
+             而这里的行为是"不再出现在可选项里、正在用的留着"——不写他就不敢勾 -->
+      <p class="notice small" style="margin-top:var(--sp-3)">{$t('skills.dirsUncheckNote')}</p>
+
+      <!-- 读不进来的 / 读不了的：这两样只有"真的去读一遍内容"才知道，
+           所以它们来自对账（每次读设置都会对一次账），而不是来自目录扫描。
+           ⚠️ 读不进来的**必须带原因**（路径 + 括号里那句）：不然"勾了却少一个"
+           就只能靠猜——真实案例是 fireworks-tech-graph 被文件数上限挡住，
+           页面上只说"读不进来"没说为什么。dirsUnreadable 那行已经是
+           `路径（原因）` 的形状，这里照抄同一种。 -->
+      {#if $localSkillDirs.report.failed.length > 0}
+        <p class="small" style="color:var(--warn)">
+          {$t('skills.dirsFailed', {
+            list: $localSkillDirs.report.failed
+              .map((k) => `${k.rel}（${k.reason}）`)
+              .join('、'),
+          })}
+        </p>
+      {/if}
+      {#if $localSkillDirs.report.dirErrors.length > 0}
+        <p class="small" style="color:var(--warn)">
+          {$t('skills.dirsUnreadable', {
+            list: $localSkillDirs.report.dirErrors.map((k) => `${k.dir}（${k.reason}）`).join('、'),
+          })}
+        </p>
+      {/if}
+      {#if $localSkillDirs.report.keptBecauseUsed.length > 0}
+        <p class="faint small">
+          {$t('skills.dirsKept', {
+            count: $localSkillDirs.report.keptBecauseUsed.length,
+            names: $localSkillDirs.report.keptBecauseUsed.map((k) => k.slug).join('、'),
+          })}
+        </p>
+      {/if}
+    </div>
+  </aside>
+{/if}
 
 {#if panelOpen}
   <!-- 点背景关掉：抽屉遮住列表时，"我怎么回去"必须有答案 -->
@@ -297,7 +588,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>slug</th><th>{$t('skills.colVersion')}</th><th>{$t('skills.colSummary')}</th><th>{$t('skills.colLocal')}</th><th></th></tr>
+                <tr><th>{$t('skills.colSlug')}</th><th>{$t('skills.colVersion')}</th><th>{$t('skills.colSummary')}</th><th>{$t('skills.colLocal')}</th><th></th></tr>
               </thead>
               <tbody>
                 {#each $remoteCatalog.skills as s (s.slug)}
@@ -428,25 +719,63 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>slug</th><th>{$t('skills.colName')}</th><th>{$t('skills.colSource')}</th><th>{$t('skills.colFiles')}</th><th>{$t('skills.colUpdatedAt')}</th><th></th></tr>
+        <tr><th>{$t('skills.colSlug')}</th><th>{$t('skills.colName')}</th><th>{$t('skills.colSource')}</th><th>{$t('skills.colFiles')}</th><th>{$t('skills.colUpdatedAt')}</th><th></th></tr>
       </thead>
       <tbody>
         {#each $skills as s (s.id)}
           {@const fileCount = Object.keys(s.files ?? {}).length}
           <tr>
-            <td><code>{s.slug}</code></td>
+            <td>
+              <!-- ★ 与工具页同一个做法：展开入口从行尾挪到首格 chevron——
+                   行尾那格只留卸载（和"为什么不能卸"的说明）。真按钮：
+                   tab 能到、读屏器能读、aria-expanded 能报状态。 -->
+              <button
+                type="button"
+                class="expand-toggle"
+                aria-expanded={expanded === s.id}
+                aria-label={expanded === s.id
+                  ? $t('skills.collapseStandard')
+                  : $t('skills.viewStandard')}
+                onclick={() => (expanded = expanded === s.id ? null : s.id)}
+              >
+                <span class="chevron" aria-hidden="true">
+                  {expanded === s.id ? '▾' : '▸'}
+                </span>
+              </button>
+              <code>{s.slug}</code>
+            </td>
             <td>{s.name}</td>
             <td>
-              <span class="badge {s.source === 'local' ? 'todo' : 'in_review'}">
-                {s.source === 'local' ? $t('skills.sourceLocal') : $t('skills.sourceRemote')}
-              </span>
+              {#if s.localDir}
+                <!-- 来自某个被勾选的本地目录：来源要写成**那个目录**，
+                     而不是笼统的"本机自建"——使用者要能对上自己勾的那个路径 -->
+                <span class="badge {s.selectable === false ? 'todo' : 'in_review'}">
+                  {$t('skills.fromDir', { dir: s.localDir })}
+                </span>
+              {:else}
+                <span class="badge {s.source === 'local' ? 'todo' : 'in_review'}">
+                  {s.source === 'local' ? $t('skills.sourceLocal') : $t('skills.sourceRemote')}
+                </span>
+              {/if}
+              {#if s.selectable === false}
+                <!-- ★ 这条还在、但已经不该出现在"可以选"的列表里：它之所以没被
+                     移出去，是因为还有智能体挂着它。原因与"是谁"都要写出来，
+                     否则它就是一条谁也解释不了的幽灵记录。 -->
+                <div class="faint small" title={$t('skills.fromDirInactive', { names: (skillHolders.get(s.id) ?? []).join('、') })}>
+                  {$t('skills.fromDirInactive', { names: (skillHolders.get(s.id) ?? []).join('、') })}
+                </div>
+              {/if}
               {#if s.version}
                 <!-- 版本要显示：远端目录那条能不能点「更新」，全靠它比 -->
                 <div class="faint small">v{s.version}</div>
               {/if}
-              {#if s.sourceRef}
-                <!-- 来源标识要能看见：出问题时第一件事就是"它到底从哪儿来的" -->
-                <div class="faint small" title={s.sourceRef}>{s.sourceRef}</div>
+              {#if s.sourceRef && !s.localDir}
+                <!-- 来源标识要能看见：出问题时第一件事就是"它到底从哪儿来的"。
+                     ⚠️ 但来自本地目录的那条**不重复显示**：它的 `sourceRef` 就是
+                     `localdir:<那个目录>`，而上面那个徽标已经把同一个路径写出来了
+                     ——同一行里写两遍同一个路径，只会让人以为它们是两件事。
+                     ⚠️ 长路径**不许换行**：单行省略，全文在 `title` 里。 -->
+                <div class="faint small source-ref" title={s.sourceRef}>{s.sourceRef}</div>
               {/if}
             </td>
             <td class="faint small">
@@ -454,23 +783,28 @@
             </td>
             <td class="faint small">{new Date(s.updatedAt).toLocaleString()}</td>
             <td class="row-actions">
-              <button
-                type="button"
-                class="ghost small"
-                onclick={() => (expanded = expanded === s.id ? null : s.id)}
-              >
-                {expanded === s.id ? $t('skills.collapseStandard') : $t('skills.viewStandard')}
-              </button>
-              <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上 -->
-              <button
-                type="button"
-                class="ghost small danger"
-                disabled={removing === s.id}
-                title={$t('skills.uninstallTitle')}
-                onclick={() => void uninstall(s.id, s.slug)}
-              >
-                {removing === s.id ? $t('common.uninstalling') : $t('common.uninstall')}
-              </button>
+              <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上。
+                   ⚠️ 但**来自本地目录的这条不给卸**：它每次读列表都会被重扫回来，
+                       "卸载"按下去只会让它消失一瞬间然后回来——那比没有按钮更糟
+                       （使用者会以为卸载坏了）。要去那个目录里删。 -->
+              {#if s.localDir}
+                <button
+                  type="button"
+                  class="ghost small"
+                  disabled
+                  title={$t('skills.uninstallLocalDirTitle')}
+                >{$t('common.uninstall')}</button>
+              {:else}
+                <button
+                  type="button"
+                  class="ghost small danger"
+                  disabled={removing === s.id}
+                  title={$t('skills.uninstallTitle')}
+                  onclick={() => void uninstall(s.id, s.slug)}
+                >
+                  {removing === s.id ? $t('common.uninstalling') : $t('common.uninstall')}
+                </button>
+              {/if}
             </td>
           </tr>
           {#if expanded === s.id}
@@ -553,6 +887,71 @@
 
   .row-actions { display: flex; gap: var(--sp-1); }
   .row-actions .danger { color: var(--bad); }
+
+  /* ── 展开入口（首格 chevron，与工具页同一个做法）── */
+  .expand-toggle {
+    background: none;
+    border: none;
+    border-radius: var(--radius);
+    padding: 0 var(--sp-1);
+    margin-right: var(--sp-1);
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    line-height: 1;
+    vertical-align: middle;
+  }
+  .expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
+  .expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
+
+  /* 来源标识：长路径/URL 单行省略，全文在 `title` 里（不许折行撑高这行） */
+  .source-ref {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 16rem;
+  }
+
+  /* ── 本地技能目录（设置抽屉）── */
+  .dir-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    padding: var(--sp-2) 0;
+    /* ⚠️ 原来写的是 `var(--border)`——这个变量**不存在**，border-color 落回
+       currentColor（文字色），分隔线比该有的深一截。换回 `--line`。 */
+    border-bottom: 1px solid var(--line);
+  }
+  .dir-row:last-of-type { border-bottom: none; }
+  /**
+   * ⚠️ 全局那条 `input, textarea, select { width: 100% }` **对勾选框一样生效**。
+   *    不显式收回，勾选框会撑满整行（实测 480px），把右边的路径挤成 **0 宽**
+   *    ——于是路径按 `break-all` 断成 22 行、整行 837px 高、抽屉横向溢出 87px。
+   *    界面看起来只是"这一行怎么这么高"，根本联想不到是全局样式。
+   *    （`AgentDetail.svelte` 的 `.skill-option input` 也是为同一个原因写的。）
+   *
+   *    顶对齐（`margin-top: 3px`）是因为右边的路径可能换行，居中会像飘着。
+   */
+  .dir-row input[type='checkbox'] {
+    width: auto;
+    flex: none;
+    margin: 0;
+    margin-top: 3px;
+  }
+  .dir-main { flex: 1; min-width: 0; }
+  /* 路径要能换行显示完整——截断了使用者就核不对自己勾的是哪个目录 */
+  .dir-path {
+    margin-top: 2px;
+    word-break: break-all;
+    font-family: var(--font-mono);
+  }
+  /* "跳过了什么"缩进一行：它是对上面那个目录的补充，不是另一个目录 */
+  .dir-skip { margin-top: 2px; padding-left: var(--sp-3); }
+  .dirs-h4 { margin: var(--sp-3) 0 var(--sp-1); font-size: var(--fs-sm); }
+  .dir-add { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+  /* 同一个原因：`width: 100%` + `flex: 1` 会让输入框先按整行算再被拉伸，
+     连同右边那个按钮一起顶出抽屉（实测横向溢出 87px） */
+  .dir-add input { flex: 1; width: auto; min-width: 0; }
 
   .skill-body {
     margin: 0;

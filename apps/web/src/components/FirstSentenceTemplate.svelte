@@ -1,11 +1,11 @@
 <script lang="ts">
   import { afterUpdate, onMount } from 'svelte'
   import { templateKit, loadTemplateKit, previewFirstSentence } from '../lib/stores.ts'
-  import type { FirstSentenceKind } from '../lib/api.ts'
+  import type { FirstSentenceKind, TemplateBlock } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
 
   /**
-   * 「第一句话模版」这一栏（D32）。
+   * 「第一句话模版」这一栏（D32；2026-10 起是某条链路**某一块**的模版框）。
    *
    * ══════════════════════════════════════════════════════════════════
    * 三个决定，都是为了让人**看得见自己写了什么**
@@ -20,9 +20,10 @@
    * **① 变量对照表从接口来，不在这里抄一份。**
    *    变量表、必需与否、说明文字都在 `packages/agent-core` 里（服务端那份
    *    就是校验用的同一份）。前端再写一遍，两边迟早分叉，而"照着界面的说明
-   *    写了却被拒"是最难受的一种错。
+   *    写了却被拒"是最难受的一种错。**变量按 `kind × block` 过滤**——在 ② 身份
+   *    框里不会列出框架框的变量。
    *
-   * **② 预览走服务端的真渲染器。**
+   * **② 预览走服务端的真渲染器（只渲染这一块）。**
    *    前端自己拼一段"看起来差不多"的预览，它迟早与真实投递的东西走偏——
    *    而那种偏差正是这个功能最该防的（"预览里好好的"）。预览用的是示例值，
    *    所以它会**明说**这一点，免得好好的示例任务正文被误认成自己的任务。
@@ -32,8 +33,10 @@
    *    而不是点了保存才知道。
    */
 
-  /** 这是哪一个模版（执行 / 审核）。 */
+  /** 这是哪一条链路（执行 / 审核 / 聊天）。 */
   export let kind: FirstSentenceKind
+  /** 这是哪一块（① 框架 / ② 身份 / ③ 任务）。 */
+  export let block: TemplateBlock = 'frame'
   /** 模版原文。空串 = 用平台默认模版。 */
   export let value: string
   /** 值变了（父组件自己保存；这里不做双向绑定，免得两种写法混着用）。 */
@@ -56,10 +59,12 @@
   // 变量表只在第一次需要时取一次（所有用到它的地方共用同一个 store）
   $: if ($templateKit === null) void loadTemplateKit()
 
-  $: variables = ($templateKit?.variables ?? []).filter((v) => v.kinds.includes(kind))
+  $: variables = ($templateKit?.variables ?? []).filter(
+    (v) => v.kinds.includes(kind) && v.block === block,
+  )
   $: custom = value.trim() !== ''
-  /** 这一栏里"另一条链路"的模版是不是也写了——写了两份要给个提示。 */
-  $: defaultText = $templateKit?.defaults[kind] ?? ''
+  /** 这一块"平台默认"是什么——「填入默认」与「留空 = 平台默认」都用它。 */
+  $: defaultText = $templateKit?.defaults[kind]?.[block] ?? ''
 
   /**
    * `{{name}}` 这几个字在模板里**不能裸写**：Svelte 会把 `{{name}}` 当成
@@ -102,7 +107,7 @@
     busy = true
     previewError = ''
     try {
-      preview = await previewFirstSentence(kind, value)
+      preview = await previewFirstSentence(kind, block, value)
       showText = true
     } catch (err) {
       // 服务端说的就是原因（同一个校验），原文带回来，不要在这里改写它
@@ -126,11 +131,13 @@
   </div>
 
   <p class="tpl-hint">
-    {$t('tpl.hintAllBefore')}<strong>{$t('tpl.hintAllStrong')}</strong>{$t('tpl.hintAllAfter')}
+    {$t(`tpl.settings.hint.${block}.before`)}<strong>{$t(`tpl.settings.hint.${block}.strong`)}</strong>{$t(`tpl.settings.hint.${block}.after`)}
+    {#if block === 'task'}
+      <span class="req">{$t('tpl.settings.hint.requiredTask.before')}<strong>{$t('tpl.settings.hint.requiredTask.strong')}</strong>{$t('tpl.settings.hint.requiredTask.after')}</span>
+    {/if}
     <strong>{$t('tpl.hintVarsOnly')}</strong>{$t('tpl.hintVarsOnlyAfter')}
-    {$t('tpl.hintYoursToShape')}
-    {$t('tpl.hintEmptyMeans')}<strong>{$t('tpl.hintReplaceAll')}</strong>{$t('tpl.hintDefaultGuardsLead')}
-    {$t('tpl.hintDefaultGuards')}
+    {$t('tpl.settings.hint.emptyMeans')}<strong>{$t('tpl.settings.hint.platformDefault')}</strong>
+    {#if block === 'frame'}{$t('tpl.hintDefaultGuardsLead')}{$t('tpl.hintDefaultGuards')}{/if}
   </p>
 
   <!-- `rows` 只是没有脚本时的兜底；实际高度由 `autosize()` 按内容算 -->

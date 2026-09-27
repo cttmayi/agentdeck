@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { RunId, RunMessage } from '@alpha-helper/protocol'
+import type { RunId, RunMessage } from '@agentdeck/protocol'
 import { AppendHandle, ensureDir, readBytesOrNull } from './fs-utils.ts'
 
 /**

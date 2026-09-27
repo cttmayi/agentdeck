@@ -211,3 +211,26 @@ describe('escapeHtml', () => {
     assert.equal(escapeHtml(`&<>"'`), '&amp;&lt;&gt;&quot;&#39;')
   })
 })
+
+/**
+ * ★ 代码块里的换行必须**原样留在输出里**。
+ *
+ * 起因是一次真实的误判：使用者报「聊天里那段代码的换行没有了」，看上去像模型
+ * 没写换行。实测下来渲染器是对的（文字里 10 个换行都在），问题是 CSS 给行内
+ * 代码写的 `white-space: nowrap` 被继承进了 `pre>code`，把十行压成一行。
+ *
+ * 所以这一条钉住"渲染器这一侧的产出"：只要它把换行丢掉，任何样式都救不回来。
+ */
+describe('★ 代码块：换行', () => {
+  test('围栏代码块里的换行原样保留（不是合成一段）', () => {
+    const out = renderMarkdown('```python\ndef f(a):\n    return a\n```\n')
+    const body = /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/.exec(out)?.[1] ?? ''
+    assert.equal(body, 'def f(a):\n    return a', `代码块里的换行被动了：${JSON.stringify(body)}`)
+  })
+
+  test('缩进也是内容的一部分（不能被折叠）', () => {
+    const out = renderMarkdown('```\n    indented\n\tTAB\n```\n')
+    const body = /<pre><code[^>]*>([\s\S]*?)<\/code><\/pre>/.exec(out)?.[1] ?? ''
+    assert.equal(body, '    indented\n\tTAB')
+  })
+})

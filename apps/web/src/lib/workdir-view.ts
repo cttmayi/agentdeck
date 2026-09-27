@@ -82,3 +82,19 @@ export function humanSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
+
+/**
+ * 空列表该说哪句话——**「还不存在」与「存在但是空的」不是同一件事**。
+ *
+ * 两者拿到的都是空数组，而使用者看完之后的下一步完全不同：前者是"再等等 / 先跟
+ * 它说句话"，后者是"它确实没产出"。所以判据必须是服务端给的 `exists`，不能靠
+ * 界面盯着空数组猜（猜错的那一种会把"目录还没建出来"说成"什么都没有"）。
+ *
+ * ⚠️ `exists === undefined`（旧 daemon 不返回这个字段）按「存在」处理：那时唯一
+ *    能确定的事实是"列表是空的"，说成"目录还不存在"就是替它编一个没看到的事实。
+ */
+export function emptyDirNoticeKey(
+  exists: boolean | undefined,
+): 'files.empty' | 'files.notCreated' {
+  return exists === false ? 'files.notCreated' : 'files.empty'
+}

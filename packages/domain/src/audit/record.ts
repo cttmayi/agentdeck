@@ -1,4 +1,4 @@
-import { ulid, type AuditRecord, type TokenUsage } from '@alpha-helper/protocol'
+import { ulid, type AuditRecord, type TokenUsage } from '@agentdeck/protocol'
 
 /**
  * 审计记录（FR-AUDIT-01）。

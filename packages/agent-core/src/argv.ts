@@ -1,7 +1,7 @@
 import type { DroppedArg } from './blocked-args.ts'
 import { filterBlockedArgs } from './blocked-args.ts'
-import type { RuntimeDescriptor } from './runtime-table.ts'
-import { loadRuntimeDescriptor } from './runtime-table.ts'
+import type { CliRuntimeDescriptor, RuntimeDescriptor } from './runtime-table.ts'
+import { loadCliRuntimeDescriptor } from './runtime-table.ts'
 
 /**
  * argv 组装（FR-CLI-04）。
@@ -49,8 +49,10 @@ export interface BuildArgvResult {
 }
 
 export function buildArgv(input: BuildArgvInput): BuildArgvResult {
-  const runtime = loadRuntimeDescriptor(input.runtime)
-  // `managedFlags` 是必填字段：类型上必填，`loadRuntimeDescriptor` 上一行
+  // ★ 只接受 cli 形状：service 形状没有 run 级 argv，硬拼等于替协议生成命令行
+  //   （`loadCliRuntimeDescriptor` 对 service 直接抛）。
+  const runtime: CliRuntimeDescriptor = loadCliRuntimeDescriptor(input.runtime)
+  // `managedFlags` 在 cli 形状下必填：类型上如此，`loadCliRuntimeDescriptor` 上一行
   // 还会在运行时再验一次（描述符可能是仓库之外传进来的对象）。
   const flags = runtime.managedFlags
   const argv: string[] = []

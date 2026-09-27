@@ -8,7 +8,7 @@ import type {
   RunResult,
   RunStatus,
   TokenUsage,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 
 /**
  * 进行中 run 的运行时状态（内存）+ SSE 订阅分发。

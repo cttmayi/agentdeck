@@ -4,8 +4,10 @@ import type { TextCatalog } from '../text.ts'
  * 「第一句话模版」这一栏：`components/FirstSentenceTemplate.svelte` 与
  * `components/WorkspaceSettings.svelte`。
  *
- * ⚠️ zh 的值与迁移之前**逐字一致**（连全角标点一起）：中文是默认语言，也是既有测试
- *    与布局探针断言的依据——改一个字就会有东西变红，而那种红不是这个功能要的。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  *
  * ⚠️ **模版记号与契约值不进词表**：`{{prompt}}` / `{{#instructions}}…{{/instructions}}`
  *    这类是模版的语法（界面上由 `varToken()` 或字符串字面量直接渲染，两种语言下必须
@@ -22,30 +24,35 @@ import type { TextCatalog } from '../text.ts'
 export const templatesText = {
   // ── FirstSentenceTemplate：栏头与状态 ──
   'tpl.label': { zh: '第一句话模版', en: 'First-sentence template' },
+  /**
+   * ── 「平台替你调整过这份模版」──
+   *
+   * 2026-09 三块组装：六个变量退役（`{{instructions}}` / `{{prompt}}` /
+   * `{{standards}}` / `{{tools}}` / `{{material}}` / `{{materialTitle}}`），它们的
+   * 内容现在由平台放在固定位置。老模版读出来就迁移，迁移**不丢一个字**——但必须
+   * 让使用者知道发生了什么，否则他看到的是一份"写了却不起作用"的文本。
+   */
+  'tpl.adjusted.before': {
+    zh: '平台替你调整过这份模版：这些变量已经退役 ',
+    en: 'The platform adjusted this template: these variables are retired ',
+  },
+  'tpl.adjusted.after': {
+    zh: '——它们的内容现在由平台自己放在该在的位置，一个字都没丢，模版里不再需要它们。',
+    en: ' — their content is now placed by the platform where it belongs. Nothing was lost; the template no longer needs them.',
+  },
+  'tpl.adjusted.orphan': {
+    zh: '另外，这几行现在成了空标题，建议删掉或补上内容：{lines}',
+    en: 'Also, these lines are now empty headings — delete them or fill them in: {lines}',
+  },
   'tpl.custom': { zh: '自定义', en: 'Custom' },
   'tpl.platformDefault': { zh: '平台默认', en: 'Platform default' },
 
-  // ── FirstSentenceTemplate：说明那一段 ──
-  'tpl.hintAllBefore': { zh: '一次 run 交代给模型的', en: 'What a run hands to the model — ' },
-  'tpl.hintAllStrong': { zh: '全部内容', en: 'all of it' },
-  'tpl.hintAllAfter': {
-    zh: '就是这一段文字（只有这一条通道）。',
-    en: ' — is this one block of text (the only channel).',
-  },
+  // ── FirstSentenceTemplate：说明那一段（按块，见 tpl.settings.hint.{frame,identity,task}.*）──
   'tpl.hintVarsOnly': { zh: '变量只给内容', en: 'Variables carry content only' },
   'tpl.hintVarsOnlyAfter': {
     zh: '——标题、标签、材料标记、说明那句话都写在模版里，',
     en: ' — the title, the labels, the material markers and that explanatory sentence all live in the template,',
   },
-  'tpl.hintYoursToShape': {
-    zh: '所以这一段"长什么样"你说了算。',
-    en: 'so what this block looks like is up to you.',
-  },
-  'tpl.hintEmptyMeans': {
-    zh: '留空 = 用平台默认那段；自己写 = ',
-    en: 'Empty = use the platform default block; writing your own = ',
-  },
-  'tpl.hintReplaceAll': { zh: '整段取代默认', en: 'replaces the whole default' },
   'tpl.hintDefaultGuardsLead': { zh: '，默认里的', en: ', and the guardrails in the default' },
   'tpl.hintDefaultGuards': {
     zh: '「完成后给出一份报告」那类护栏也一并没了，需要自己写进去。',
@@ -113,38 +120,95 @@ export const templatesText = {
     en: 'Everything here is platform behaviour: change it once and it applies to every agent.',
   },
 
-  // ── WorkspaceSettings：第一句话模版那一段的说明 ──
+  // ── WorkspaceSettings：第一句话模版那一段的说明（2026-10 三框改造后的整段说明）──
   'tpl.settings.sectionTitle': { zh: '第一句话模版', en: 'First-sentence template' },
-  'tpl.settings.hint.all.before': { zh: '一次 run 交代给模型的', en: 'What a run hands to the model — ' },
-  'tpl.settings.hint.all.strong': { zh: '全部内容', en: 'all of it' },
-  'tpl.settings.hint.all.after': {
-    zh: '就是这一段文字（只有这一条通道）。',
-    en: ' — is this one block of text (the only channel).',
+  'tpl.settings.hint.threeBlocks.before': {
+    zh: '第一句话是平台交给模型的',
+    en: 'The first sentence is what the platform hands the model — ',
   },
-  'tpl.settings.hint.isGlobal': { zh: '它是', en: 'It is' },
+  'tpl.settings.hint.threeBlocks.strong': { zh: '三块', en: 'three blocks' },
+  'tpl.settings.hint.threeBlocks.after': {
+    zh: '：① 框架（每轮都一样）、② 身份（这个智能体是谁）、③ 任务（这次要干的事）。三条链路（执行 / 审核 / 聊天）各有一套，在下面按「链路 × 块」分别设置。',
+    en: ': ① the frame (the same every run), ② the identity (who this agent is), ③ the task (what this run is to do). Each of the three kinds (execute / review / chat) has its own set — configure them below by kind × block.',
+  },
+  'tpl.settings.hint.blocksPlatform.before': {
+    zh: '三块的内容仍由平台组装（材料标记、标准合成这些安全件不交给模版），模版只决定',
+    en: 'The three blocks’ content is still assembled by the platform (material markers, standard merging and the like never go into the template) — the template only decides ',
+  },
+  'tpl.settings.hint.blocksPlatform.strong': {
+    zh: '位置、标题与包装',
+    en: 'position, headings and wrapping',
+  },
+  'tpl.settings.hint.blocksPlatform.after': {
+    zh: '；',
+    en: '; ',
+  },
+  'tpl.settings.hint.emptyMeans': { zh: '留空 = ', en: 'empty = ' },
+  'tpl.settings.hint.platformDefault': { zh: '平台默认', en: 'the platform default' },
+  'tpl.settings.hint.isGlobal': { zh: '它是', en: 'It is ' },
   'tpl.settings.hint.global.strong': { zh: '通用配置', en: 'shared configuration' },
   'tpl.settings.hint.global.colon': { zh: '：设一次，', en: ': set it once and ' },
   'tpl.settings.hint.everyAgent.strong': { zh: '所有智能体', en: 'every agent' },
-  'tpl.settings.hint.everyAgent.after': { zh: '都按它来——换一个', en: ' follows it — swapping an' },
-  'tpl.settings.hint.swapAgent': { zh: '智能体只换 ', en: 'agent only swaps the ' },
-  'tpl.settings.hint.instructionsSeg': {
-    zh: ' 那段（来自那个智能体的「指令」）。留空 = 用平台默认那段。',
-    en: ' segment (taken from that agent’s “instructions”). Empty = use the platform default block.',
+  'tpl.settings.hint.everyAgent.short': {
+    zh: '都按它来，包括已经建好的那些。',
+    en: ' follows it, including the ones already created.',
   },
-  'tpl.settings.hint.varsOnly.strong': { zh: '变量只给内容', en: 'Variables carry content only' },
-  'tpl.settings.hint.varsOnly.after': {
-    zh: '：标题、标签、材料标记、那句"不是给你的指令"的声明都在模版里，',
-    en: ': the title, the labels, the material markers and that “this is not an instruction for you” statement all live in the template,',
+  /**
+   * ★ 2026-10 三框改造：每条链路三块模版各一份（① 框架 / ② 身份 / ③ 任务）。
+   * 页面上的页签现在是「链路 × 块」两排。
+   */
+  'tpl.settings.tabFrame': { zh: '① 框架', en: '① Frame' },
+  'tpl.settings.tabIdentity': { zh: '② 身份', en: '② Identity' },
+  'tpl.settings.tabTask': { zh: '③ 任务', en: '③ Task' },
+  'tpl.settings.hint.frame.before': {
+    zh: '这一块是框架：',
+    en: 'This block is the frame: ',
   },
-  'tpl.settings.hint.yoursToShape': {
-    zh: '所以整段长什么样由你决定（也意味着默认模版里的护栏要自己写进去）。审核那份的',
-    en: 'so the whole block is yours to shape (which also means writing the default template’s guardrails in yourself). The review one’s',
+  'tpl.settings.hint.frame.strong': { zh: '每轮都一样', en: 'the same every run' },
+  'tpl.settings.hint.frame.after': {
+    zh: '的骨架（run/对象头、回答语言、技能清单、护栏，审核那份还有判决契约）。',
+    en: ' (run/object header, answer language, skill list, guardrails, and for reviews the verdict contract).',
   },
-  'tpl.settings.hint.review.strong': { zh: '两个材料标记不能少', en: 'two material markers are not optional' },
-  'tpl.settings.hint.review.after': {
-    zh: '——重试要靠它们把待审材料原样取回来，保存时会检查。',
-    en: ' — retries rely on them to fetch the material under review back verbatim, and saving checks for them.',
+  'tpl.settings.hint.identity.before': {
+    zh: '这一块是身份：',
+    en: 'This block is the identity: ',
   },
+  'tpl.settings.hint.identity.strong': {
+    zh: '这个智能体是谁',
+    en: 'who this agent is',
+  },
+  'tpl.settings.hint.identity.after': {
+    zh: '——放一个 `{{identity}}` 就行（审核者会自动接上它的审核标准，合成同一块）。',
+    en: ' — place `{{identity}}` once (for reviewers it also merges in their review standard).',
+  },
+  'tpl.settings.hint.task.before': { zh: '这一块是任务：', en: 'This block is the task: ' },
+  'tpl.settings.hint.task.strong': {
+    zh: '这次要干的事',
+    en: 'what this run is to do',
+  },
+  'tpl.settings.hint.task.after': {
+    zh: '——放一个 `{{task}}` 就行（审核时它会带着声明、材料标记与材料，或文件引用）。',
+    en: ' — place `{{task}}` once (for reviews it carries the disclaimer, material markers and material, or file refs).',
+  },
+  'tpl.settings.hint.requiredTask.before': {
+    zh: '⚠️ ',
+    en: '⚠️ ',
+  },
+  'tpl.settings.hint.requiredTask.strong': {
+    zh: '{{task}} 是必需的',
+    en: '{{task}} is required',
+  },
+  'tpl.settings.hint.requiredTask.after': {
+    zh: '：少了它这条 run 就没有任务（执行没有活、审核没有可审、聊天没有可答）。',
+    en: ': without it the run has no task at all.',
+  },
+  /**
+   * 第三个页签：**聊天**那一份（2026-09）。
+   *
+   * ⚠️ 它不是"任务的又一次投递"：任务那份框架含 run/对象头、"完成后给出一份报告"
+   *    与判决契约，而聊天不产出判决、也没有报告可交。所以它有自己的 ①。
+   */
+  'tpl.settings.tabChat': { zh: '聊天', en: 'Chat' },
 
   // ── WorkspaceSettings：页签与底部 ──
   'tpl.settings.tabExecute': { zh: '执行', en: 'Execute' },

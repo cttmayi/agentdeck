@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { WorkDirFile } from './api.ts'
-import { flattenWorkDir, humanSize, sortWorkDirEntries } from './workdir-view.ts'
+import {
+  emptyDirNoticeKey,
+  flattenWorkDir,
+  humanSize,
+  sortWorkDirEntries,
+} from './workdir-view.ts'
 
 /**
  * 工作目录那一栏的显示逻辑。
@@ -114,5 +119,26 @@ describe('排序与大小', () => {
     assert.equal(humanSize(42), '42 B')
     assert.equal(humanSize(2048), '2.0 KB')
     assert.equal(humanSize(3 * 1024 * 1024), '3.0 MB')
+  })
+})
+
+/**
+ * 「还不存在」与「存在但是空的」——两句给出**不同的下一步**。
+ *
+ * 两者拿到的都是空数组，所以判据只能是服务端给的 `exists`。这一条曾经被人误当成
+ * 措辞问题（"反正都是没有文件"），而它决定使用者接下来干什么：再等等 / 先去说句
+ * 话，还是"它确实没产出"。
+ */
+describe('空目录该说哪一句', () => {
+  test('★ exists:false ⇒ 说"还不存在"（聊天第一轮之前就是这一档）', () => {
+    assert.equal(emptyDirNoticeKey(false), 'files.notCreated')
+  })
+
+  test('exists:true ⇒ 说"还是空的"', () => {
+    assert.equal(emptyDirNoticeKey(true), 'files.empty')
+  })
+
+  test('★ undefined（旧 daemon 不返回这个字段）按"存在"处理——不许替它编事实', () => {
+    assert.equal(emptyDirNoticeKey(undefined), 'files.empty')
   })
 })

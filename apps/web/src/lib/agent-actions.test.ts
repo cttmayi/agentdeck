@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import type { Tool } from './api.ts'
-import { allowedActionsFromLegacyStandard, describeAllowedActions, effectiveAllowedActions, splitAllowedActions } from './agent-actions.ts'
+import {
+  allowedActionsFromLegacyStandard,
+  describeActionPicks,
+  describeAllowedActions,
+  effectiveAllowedActions,
+  splitAllowedActions,
+} from './agent-actions.ts'
 
 /**
  * 行动权限的显示逻辑（D40 收口、D41 收窄）。
@@ -281,5 +287,78 @@ describe('★ 使用者库里的真实情形：老数据带着两个已经失效
       { type: 'comment.create', summary: null },
       { type: 'issue.add_label', summary: null },
     ])
+  })
+})
+
+/**
+ * ★ ③ 那一行收起来之后，**配置细节**只剩这些胶囊在说。
+ *
+ * 这几条守的是"使用者不点开对话框也看得见自己配了什么"：哪几个动作、各自干什么、
+ * 钉了哪些固定值、其中哪个已经失效。四样缺一样，他都要点开对话框才知道——
+ * 而"点开才知道"正是这次把选择器收起来之后新引入的风险。
+ */
+describe('★ ③ 当前配置的胶囊（契约值 + 说明 + 固定值 + 还能不能用）', () => {
+  const tool = {
+    id: 't1',
+    slug: 'example-issue',
+    name: '示例单据工具',
+    manifest: {
+      actions: [
+        { name: 'close', summary: '模拟关闭单据' },
+        { name: 'tag', summary: '打标签' },
+      ],
+    },
+  } as unknown as Tool
+
+  test('每个胶囊带自己的说明（只给机器名没人知道它允许干什么）', () => {
+    assert.deepEqual(describeActionPicks(['example-issue.close'], [tool], {}, []), [
+      {
+        type: 'example-issue.close',
+        summary: '模拟关闭单据',
+        fixed: [],
+        unavailable: false,
+      },
+    ])
+  })
+
+  test('★ 固定值按**动作**取：不许把整份参数摊到每个胶囊上', () => {
+    // 摊平的后果是每个胶囊都挂着所有动作的固定值，而"哪个值属于哪个动作"
+    // 就看不出来了——那种界面比不显示更糟（它会让人以为关单会带上打标签的参数）。
+    const entries = describeActionPicks(
+      ['example-issue.close', 'example-issue.tag'],
+      [tool],
+      { 'example-issue.close': { reason: '巡检' }, 'example-issue.tag': { label: 'bug' } },
+      [],
+    )
+    assert.deepEqual(entries[0]?.fixed, [['reason', '巡检']])
+    assert.deepEqual(entries[1]?.fixed, [['label', 'bug']])
+  })
+
+  test('没钉固定值 ⇒ 空数组（不是"有个空对象"）', () => {
+    const entries = describeActionPicks(['example-issue.close'], [tool], {}, [])
+    assert.deepEqual(entries[0]?.fixed, [])
+  })
+
+
+  test('★ 「当前不可用」与「没有说明」是两件事，不许合并', () => {
+    // 配过、但包被卸载了：`summary` 会是 null（查不到），而它**不会被执行**。
+    // 把两者画成同一件事，使用者会把"已经失效"读成"只是没写说明"。
+    const entries = describeActionPicks(
+      ['gone-tool.act', 'example-issue.close'],
+      [tool],
+      {},
+      ['gone-tool.act'],
+    )
+    assert.equal(entries[0]?.summary, null)
+    assert.equal(entries[0]?.unavailable, true)
+    assert.equal(entries[1]?.unavailable, false, '装着的那个不受影响')
+  })
+
+  test('顺序跟着勾选那一份走（与发出去的数组同序，不重排）', () => {
+    const picks = ['example-issue.tag', 'example-issue.close']
+    assert.deepEqual(
+      describeActionPicks(picks, [tool], {}, []).map((e) => e.type),
+      picks,
+    )
   })
 })

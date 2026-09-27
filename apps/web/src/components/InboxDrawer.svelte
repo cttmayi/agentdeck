@@ -1,7 +1,7 @@
 <script lang="ts">
   import { inbox, loading, loadError, markInboxRead } from '../lib/stores.ts'
   import { t } from '../lib/i18n.ts'
-  import type { WebTextId } from '@alpha-helper/i18n'
+  import type { WebTextId } from '@agentdeck/i18n'
 
   export let onclose: () => void
 

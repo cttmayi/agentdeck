@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import { FileStore } from '@alpha-helper/store-file'
-import { ulid, type Run } from '@alpha-helper/protocol'
+import { FileStore } from '@agentdeck/store-file'
+import { ulid, type Run } from '@agentdeck/protocol'
 import { reconcileInterruptedRuns } from './reconcile.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -29,7 +29,8 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('reconcile')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '',
+    chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 })
 
 after(async () => {
@@ -125,7 +126,8 @@ describe('★ 收口上次遗留的非终态 run', () => {
     const d = await makeTempDir('reconcile-notice')
     const s = await FileStore.open({ dataDir: d, fsync: false })
     const W = 'ws_notice' as Run['workspaceId']
-    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '',
+    chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
 
     for (let i = 0; i < 5; i += 1) {
       const id = ulid() as Run['id']
@@ -161,7 +163,10 @@ describe('★ 收口上次遗留的非终态 run', () => {
     const inbox = await s.listInboxItems({ workspaceId: W, limit: 50 })
     assert.equal(inbox.length, 1)
     assert.match(inbox[0]!.title, /5 个执行/)
-    assert.match(inbox[0]!.body, /无法续跑|没有落盘/, '要解释为什么不能续跑')
+    // ⚠️ 这里原来钉的是 `/无法续跑|没有落盘/`。2026-09 改写正文时把"落盘"换成了
+    //    "存到盘上"（那是我们代码里的说法），所以断言跟着改——意图没变：
+    //    **要解释为什么接不上**。
+    assert.match(inbox[0]!.body, /接不上|没有存到盘上/, '要解释为什么不能续跑')
     assert.match(inbox[0]!.body, /重新发起/, '要给出可行动的下一步')
 
     await s.close()
@@ -171,7 +176,8 @@ describe('★ 收口上次遗留的非终态 run', () => {
   test('没有遗留 run 时什么都不做，也不发通知', async () => {
     const d = await makeTempDir('reconcile-empty')
     const s = await FileStore.open({ dataDir: d, fsync: false })
-    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: 'ws_empty_r' as Run['workspaceId'], name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '',
+    chatTemplate: '', defaultAgentId: null, locale: 'zh', id: 'ws_empty_r' as Run['workspaceId'], name: 'w', createdAt: 1, updatedAt: 1 })
 
     const result = await reconcileInterruptedRuns({ store: s })
     assert.deepEqual(result.interrupted, [])
@@ -185,7 +191,8 @@ describe('★ 收口上次遗留的非终态 run', () => {
     const d = await makeTempDir('reconcile-twice')
     const s = await FileStore.open({ dataDir: d, fsync: false })
     const W = 'ws_twice' as Run['workspaceId']
-    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '',
+    chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     await s.insertRun({
       id: ulid() as Run['id'],
       workspaceId: W,

@@ -7,8 +7,8 @@ import {
   type Tool,
   type ToolManifest,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
-import type { Store } from '@alpha-helper/domain'
+} from '@agentdeck/protocol'
+import type { Store } from '@agentdeck/domain'
 import { makeTempDir } from './tmp.ts'
 
 /**
@@ -38,8 +38,7 @@ export interface FixtureDaemon {
  *
  *   · `writeToolPackage()`  —— 磁盘上造一个最小工具包（真 `node` 脚本）；
  *   · `seedToolFixture()`   —— store 级：造包 + 落库（给直接用 FileStore 的测试）；
- *   · `installToolPackage()`/`mountTool()`/`mountTools()` —— HTTP 级：走真实的
- *     安装与挂载接口（⚠️ 挂载是 `PUT`＝整体替换，挂多个包必须一次传全，见 `mountTools()`）；
+ *   · `installToolPackage()` —— HTTP 级：走真实的安装接口；
  *   · `setupToolFixture()`  —— HTTP 级一行版（最常见的用法）。
  *
  * ══════════════════════════════════════════════════════════════════
@@ -245,34 +244,10 @@ export async function installToolPackage(d: FixtureDaemon, pkg: ToolPackage): Pr
   return body.tool
 }
 
-/**
- * 把一个包按**组**挂到某个 agent 身上（`PUT /api/agents/:id/tools`）。
- *
- * ⚠️ 这个接口是 `PUT`（**整体替换**），不是"追加"：传什么就是它挂的全部。
- *    要挂多个包请用 `mountTools()`——连着调两次 `mountTool` 会让第二次把
- *    第一次顶掉，而症状是"包装了却跑不了"。
- */
-export async function mountTool(
-  d: FixtureDaemon,
-  agentId: string,
-  toolId: string,
-): Promise<Agent> {
-  return mountTools(d, agentId, [toolId])
-}
-
-/** 一次挂多个包（同一个 `PUT`：这份清单就是它挂的全部）。 */
-export async function mountTools(
-  d: FixtureDaemon,
-  agentId: string,
-  toolIds: readonly string[],
-): Promise<Agent> {
-  const body = await sendJson<{ agent: Agent }>(
-    `${d.url}/api/agents/${agentId}/tools`,
-    { toolIds: [...toolIds] },
-    'PUT',
-  )
-  return body.agent
-}
+// ⚠️ 这里原来有 `mountTool()` / `mountTools()`（`PUT /api/agents/:id/tools`：
+//    把一个包按**组**挂到某个 agent 身上）。挂载能力撤掉、接口也删了，两个夹具
+//    函数一并删掉——夹具是给测试用的**入口**，留着一个"还能挂"的入口等于给下一个人
+//    递一把开不了门的钥匙。
 
 /**
  * `POST /api/agents` 的最小封装。
@@ -305,8 +280,6 @@ export interface ToolFixtureSpec extends ToolPackageSpec {
    * 显式传空数组可以造出"审核者什么都不能做"那种局面（D41 的播种默认值）。
    */
   allowedActions?: readonly string[]
-  /** 执行者要挂的**额外**工具包（默认只挂这一个）。 */
-  extraToolIds?: readonly string[]
 }
 
 export interface ToolFixture {
@@ -366,9 +339,6 @@ export async function setupToolFixture(
   if (!patched.ok) {
     throw new Error(`设置审核者应当成功，实际 ${patched.status}：${(await patched.text()).slice(0, 300)}`)
   }
-
-  // ⚠️ 一次 `PUT` 挂完全部：`PUT` 是**整体替换**，分两次调会让第二次把第一次顶掉。
-  await mountTools(d, executor.id, [tool.id, ...(spec.extraToolIds ?? [])])
 
   return { pkg, tool, executor, reviewer, action: pkg.action, allowedActions }
 }

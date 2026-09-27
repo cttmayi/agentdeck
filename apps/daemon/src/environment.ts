@@ -1,7 +1,7 @@
 import { access, constants, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { RuntimeDescriptor } from '@alpha-helper/agent-core'
+import type { RuntimeDescriptor } from '@agentdeck/agent-core'
 
 /**
  * 运行环境预检（实跑之后补上的一块）。
@@ -107,7 +107,9 @@ export async function checkEnvironment(
           `其实工作目录是好的。`,
         action:
           `给这个目录写权限，或把 daemon 换成一个家目录可写的用户来跑。` +
-          `注意：把 daemon 跑在受限环境（容器 / 专用用户 / 沙箱）里是**推荐做法**，` +
+          // ⚠️ 这句话会进**运行日志**（界面上按纯文本逐行显示），所以不留 markdown
+          //    的粗体记号：`**推荐做法**` 到使用者眼里就是两个星号（2026-09 清理）。
+          `注意：把 daemon 跑在受限环境（容器 / 专用用户 / 沙箱）里是推荐做法，` +
           `所以撞上它是正常的——只是要记得同时放开 CLI 自己的状态目录。`,
       })
     }

@@ -51,6 +51,11 @@ export type ArtifactId = z.infer<typeof ArtifactId>
 export const AuditId = z.string().brand<'AuditId'>()
 export type AuditId = z.infer<typeof AuditId>
 
+export const ConversationId = z.string().brand<'ConversationId'>()
+export type ConversationId = z.infer<typeof ConversationId>
+
+export const ChatTurnId = z.string().brand<'ChatTurnId'>()
+export type ChatTurnId = z.infer<typeof ChatTurnId>
 export const RuntimeId = z.string().brand<'RuntimeId'>()
 export type RuntimeId = z.infer<typeof RuntimeId>
 

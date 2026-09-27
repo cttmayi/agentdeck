@@ -1,4 +1,4 @@
-import type { AgentId, Report, Run } from '@alpha-helper/protocol'
+import type { AgentId, Report, Run } from '@agentdeck/protocol'
 import { ReviewerMustDifferError } from '../errors.ts'
 
 /**

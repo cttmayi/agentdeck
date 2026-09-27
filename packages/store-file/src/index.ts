@@ -1,7 +1,7 @@
 /**
- * `@alpha-helper/store-file` —— `Store` 端口的文件存储实现（v1）。
+ * `@agentdeck/store-file` —— `Store` 端口的文件存储实现（v1）。
  *
- * 这是**适配器**：领域层只认识 `@alpha-helper/domain` 里的 `Store` 接口，
+ * 这是**适配器**：领域层只认识 `@agentdeck/domain` 里的 `Store` 接口，
  * 不知道底下是文件还是数据库。换存储实现时，只有本包需要重写。
  */
 

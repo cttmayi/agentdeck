@@ -1,7 +1,7 @@
 import { mkdir, readdir, rename, rmdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Run, SubjectRef } from '@alpha-helper/protocol'
+import type { Run, SubjectRef } from '@agentdeck/protocol'
 
 /**
  * 工作目录的解析（D27）。
@@ -47,6 +47,10 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   issue: 'issue',
   report: 'report',
   run: 'run',
+  // ★ 聊天那一轮的 run 也走这条分配：`<workRoot>/chat-<对话 id>`。
+  //   用 `chat-` 而不是 `conversation-`：目录名是给人 `ls` 看的，
+  //   短的那个一眼认得出，而且它和界面上那三个字（「聊天」）对得上。
+  conversation: 'chat',
 }
 
 /**
@@ -169,14 +173,14 @@ export async function ensureWorkDir(path: string): Promise<void> {
 }
 
 /**
- * 默认的工作区根目录：**家目录下一个可见的 `alpha-helper-workspace/`**。
+ * 默认的工作区根目录：**家目录下一个可见的 `agentdeck-workspace/`**。
  *
  * ══════════════════════════════════════════════════════════════════
  * 这条规则改过两次，两次都是"位置不对"，但不对的方式不同
  * ══════════════════════════════════════════════════════════════════
  *
  * 最初是数据目录的**同级**（`<dataDir>/../work`）。默认下得到
- * `~/.alpha-helper/work`，看着挺好——但那个"挺好"完全依赖数据目录恰好叫
+ * `~/.agentdeck/work`，看着挺好——但那个"挺好"完全依赖数据目录恰好叫
  * `data` 这个巧合。换成别的就出事：
  *
  *   --data-dir /tmp/x        ⇒ /tmp/work          ← 跑到 /tmp 根上
@@ -184,7 +188,7 @@ export async function ensureWorkDir(path: string): Promise<void> {
  *
  * 于是第二版改成**数据目录之内**（`<dataDir>/work`）。这修掉了"跑到应用
  * 命名空间之外"，但代价是工作目录变成了 `<dataDir>/work`，默认下就是
- * `~/.alpha-helper/data/work/`——**藏在一个点开头的目录里，还埋在 data 下面两层**。
+ * `~/.agentdeck/data/work/`——**藏在一个点开头的目录里，还埋在 data 下面两层**。
  *
  * ══════════════════════════════════════════════════════════════════
  * 为什么"可见"是硬要求，不是审美问题
@@ -195,7 +199,7 @@ export async function ensureWorkDir(path: string): Promise<void> {
  * 它跑出来的结果。使用者要能直接用 Finder 打开、能在终端里 `cd` 进去、
  * 能把它拖到编辑器里。
  *
- * 一个 `~/.alpha-helper/data/work/issue-01M2…/` 满足不了这三件事：
+ * 一个 `~/.agentdeck/data/work/issue-01M2…/` 满足不了这三件事：
  * 点开头 ⇒ Finder 默认不显示；`data/work` 两层 ⇒ 得先知道有这么个约定。
  * **产出放在一个使用者找不到的地方，等于没有产出。**
  *
@@ -216,7 +220,7 @@ export async function ensureWorkDir(path: string): Promise<void> {
  *    使用者的家目录里造出一堆工作目录。
  */
 export function defaultWorkRoot(): string {
-  return join(homedir(), 'alpha-helper-workspace')
+  return join(homedir(), 'agentdeck-workspace')
 }
 
 /**
@@ -226,7 +230,7 @@ export function defaultWorkRoot(): string {
  * 它和 `defaultWorkRoot()` 是两个层次的东西，不要混
  * ══════════════════════════════════════════════════════════════════
  *
- * `defaultWorkRoot()` 回答"**人**运行 alpha-helper 时工作目录在哪"——那是
+ * `defaultWorkRoot()` 回答"**人**运行 agentdeck 时工作目录在哪"——那是
  * 一条**面向使用者的产品决定**，所以它在 CLI 那一层。
  *
  * 这个函数回答的是"**调用 `startDaemon` 的人没给目录时**用什么"——它必须

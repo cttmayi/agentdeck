@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { verifyAuditExport } from '@alpha-helper/domain'
+import { verifyAuditExport } from '@agentdeck/domain'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -77,7 +77,7 @@ describe('M4 只读接口', () => {
         /attachment/,
         '导出物是给人存下来的文件',
       )
-      assert.match(res.headers.get('content-disposition') ?? '', /alpha-helper-audit-/)
+      assert.match(res.headers.get('content-disposition') ?? '', /agentdeck-audit-/)
     })
   })
 

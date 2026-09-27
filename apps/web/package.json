@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/web",
+  "name": "@agentdeck/web",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -13,7 +13,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json --threshold error"
   },
   "dependencies": {
-    "@alpha-helper/i18n": "workspace:*"
+    "@agentdeck/i18n": "workspace:*",
+    "highlight.js": "^11.12.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

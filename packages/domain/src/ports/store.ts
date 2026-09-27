@@ -7,7 +7,11 @@ import type {
   Artifact,
   AuditRecord,
   BlobRef,
+  ChatTurn,
+  ChatTurnId,
   Comment,
+  Conversation,
+  ConversationId,
   Device,
   InboxItem,
   Issue,
@@ -27,7 +31,7 @@ import type {
   VerdictStatus,
   Workspace,
   WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 
 /**
  * 存储端口。
@@ -201,6 +205,38 @@ export interface Store {
   ): Promise<boolean>
   listComments(issueId: IssueId): Promise<Comment[]>
   insertComment(comment: Comment): Promise<void>
+
+  // ── Conversation 与 ChatTurn（聊天）──
+
+  getConversation(id: ConversationId): Promise<Conversation | null>
+  /** 按 `lastTurnAt` 倒序（从没说过话的按 `createdAt`）。 */
+  listConversations(workspaceId: WorkspaceId): Promise<Conversation[]>
+  insertConversation(conversation: Conversation): Promise<void>
+  updateConversation(
+    id: ConversationId,
+    patch: Partial<
+      Pick<Conversation, 'title' | 'workDir' | 'updatedAt' | 'lastTurnAt' | 'turnCount'>
+    >,
+  ): Promise<Conversation | null>
+
+  listChatTurns(conversationId: ConversationId): Promise<ChatTurn[]>
+  insertChatTurn(turn: ChatTurn): Promise<void>
+  /**
+   * 这个对话里最后一条**带着 run 的**轮次。
+   *
+   * ★ 它是"上一轮是谁"的唯一答案：下一轮要靠它拿 `resumeFromRunId` 去接上文。
+   *   按 `seq` 取而不是按时间——同一毫秒内连着两轮时，时间戳分不出先后。
+   */
+  lastChatTurnWithRun(conversationId: ConversationId): Promise<ChatTurn | null>
+
+  /**
+   * 删掉一个对话**连同它的全部轮次**。返回是否真的删到了。
+   *
+   * ⚠️ 只删对话与轮次，**那条 run 留着**。run 是审计记录（成本、日志、工作目录
+   *    的归属都挂在它身上），而且它的产出与聊天记录是**同一份东西**——删掉
+   *    run 等于把"这次对话真的发生过"这件事一起删了。
+   */
+  deleteConversation(id: ConversationId): Promise<boolean>
 
   // ── Report ──
 

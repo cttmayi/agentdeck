@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { api, newRunId, type Issue } from '../lib/api.ts'
   import {
     agents,
@@ -11,7 +12,10 @@
     loading,
     tools,
   } from '../lib/stores.ts'
-  import { describeAllowedActions } from '../lib/agent-actions.ts'
+  import { describeActionPicks } from '../lib/agent-actions.ts'
+  import { newTaskDraft } from '../lib/view.ts'
+  import { splitRequest } from '../lib/request-text.ts'
+  import { installedActionCount } from '../lib/tool-view.ts'
   import {
     actionsRunField,
     defaultActionParams,
@@ -26,6 +30,7 @@
     toReviewerPick,
   } from '../lib/newtask-chain.ts'
   import ActionPicker from '../components/ActionPicker.svelte'
+  import Modal from '../components/Modal.svelte'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
   import { t, tx } from '../lib/i18n.ts'
 
@@ -63,8 +68,25 @@
    *    （省略 / null / id），错一格就是"使用者选了一个安排，发出去的是另一个"。
    */
   let title = ''
-  let description = ''
   let workDir = ''
+
+  /**
+   * 聊天页那条桥：把聊出来的内容预填进来。
+   *
+   * ⚠️ 取走之后**必须清空**（`newTaskDraft.set(null)`）：留着的话，下次从侧边栏
+   *    点「新建任务」，上次那段文字会莫名其妙又出现在框里——而那一刻使用者
+   *    心里想的是"新建一个空白任务"。
+   *
+   * ⚠️ 也**不**顺手替他选执行者/审核者/动作：那三样正是"派活"这件事本身。
+   *    这里只填内容，判断留给使用者在这一页做。
+   */
+  onMount(() => {
+    const draft = $newTaskDraft
+    if (draft !== null && draft.trim() !== '') {
+      title = draft
+      newTaskDraft.set(null)
+    }
+  })
   let agentId = ''
   let busy = false
   let error = ''
@@ -232,8 +254,28 @@
    */
   $: toolsKnown = !$loading['tools'] && !$loadError['tools']
 
-  /** ③ 列出来的动作（契约值 + 工具清单里的 `summary`）。 */
-  $: actionEntries = describeAllowedActions(chain.actions, $tools)
+  /**
+   * ③ 此刻是**哪一档**——一个地方判，卡片与它下面的细节两块都读它。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么要有这个名字：③ 的内容现在分两处画
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 三步排成一行之后，③ 那一格只有**一列宽**（约 350px），而"允许的动作"那几枚
+   * 胶囊在全宽下才排得开（挤在一列里会折成四五行的窄条）。所以 ③ 拆成两块：
+   * **卡片**里是标题 + 这一栏的主控件，**它下面全宽的那一条**是细节。
+   *
+   * ⚠️ 两块各自 `{#if}` 一遍档位，迟早会分叉（改了一处忘了另一处，症状是
+   *    "卡片说只读、细节却画着勾选框"这类自相矛盾的画面）。所以档位在这里算一次，
+   *    两块都只 switch 这个值。
+   */
+  $: actionsMode = !chain.reviewer
+    ? 'no-reviewer'
+    : !toolsKnown
+      ? 'tools-unknown'
+      : !whitelistSupported
+        ? 'read-only'
+        : 'editable'
 
   /**
    * ③ 上勾了哪些。
@@ -254,6 +296,15 @@
    *    `actionsDirty` / `actionsRunField` 判——**不需要**再另立一个"碰过"的标记。
    */
   let actionPicks: string[] | null = null
+
+  /**
+   * ③ 那个挑选对话框开着没有。
+   *
+   * ⚠️ 它**不进请求体、也不进任何推导**——纯界面状态（与 `actionPicks` 那种
+   *    "碰过没有"的语义完全无关，所以不放在一起）。关掉对话框**不撤销**里面的
+   *    改动：那是草稿，提交点仍然是表单底部那颗按钮（与智能体页同一个口径）。
+   */
+  let actionsOpen = false
 
   /** 上面那份勾选是**给哪个审核者的**（`null` = 这次没有审核者）。 */
   let picksForReviewer: string | null = null
@@ -293,6 +344,25 @@
    *   （`actionsRunField`）——两处各判一遍就会出现"页面说没改、请求体里带了覆盖"。
    */
   $: actionsDirty = !picksMatchReviewer(effectiveActionPicks, chain)
+
+  /**
+   * ③ 那一行要显示的**配置细节**（契约值 + 说明 + 固定值 + 还能不能用）。
+   *
+   * ★ 描述的是 `effectiveActionPicks`（**这一次真正生效的那一份**），不是
+   *   `chain.actions`（那个审核者长期配的那几个）：使用者在这一页勾上的动作可能
+   *   是它长期没有的（这正是这份覆盖的意义），拿长期那一份画出来的胶囊会说错。
+   *
+   * ⚠️ 这个 `$:` 必须在这里算（不能在模板里调函数）：Svelte 4 的模板只跟踪
+   *    **那个表达式里看得见的标识符**，函数体里读的 `$tools` / `effectiveActionParams`
+   *    它是看不见的——后果是勾了新动作、计数变了、胶囊却没变（同一个坑在
+   *    `ActionPicker.svelte` 里踩过，那里留了注释）。
+   */
+  $: pickEntries = describeActionPicks(
+    effectiveActionPicks,
+    $tools,
+    effectiveActionParams,
+    chain.unavailableActions,
+  )
 
   /**
    * ③ 上钉的固定参数（D43）：`null` = **还没碰过**（"跟随"）。
@@ -358,11 +428,79 @@
         ? (chosen?.reviewerAgentId ?? '')
         : ''
 
+  /**
+   * 多行框里的回车是**换行**，不再是提交——所以提交要多给一条快捷键。
+   *
+   * ⚠️ 不补这一条的话，习惯原来那个单行框的人会觉得"按回车没反应"（而原来那个
+   *    框按回车就是提交）。`Ctrl/Cmd+Enter` 是这类表单的通行做法。
+   *    走 `requestSubmit()` 而不是直接调 `submit()`：它会把浏览器那套校验
+   *    （`required`）跑一遍，与点按钮完全同一条路。
+   */
+  /**
+   * 「要做什么」那个框：**默认 3 行，写多了自己长高，到 15 行封顶**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么要长高，而不是给个固定高度
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 这一页只有**一个**输入框，任务写长了（多段、带步骤、贴一段日志）是很正常
+   * 的事。固定高度只有两种下场：给矮了——写第四行时就得在一个三行的小窗里滚动，
+   * 看不到自己刚写的；给高了——空着的时候占掉小半屏，把下面三步挤下去。
+   *
+   * 所以：3 行起步（够写一句话，也是绝大多数任务的长度），随输入长高，**15 行
+   * 封顶**（再多就自己滚——一个框吃掉整屏会让"提交"又跑到屏幕外，而这一页已经
+   * 因为这件事改过一轮了）。
+   *
+   * ⚠️ 高度由 JS 设成 `scrollHeight`，上限交给 CSS 的 `max-height`（`lh` 单位
+   *    算的 15 行）——两处都算一遍行高，迟早对不上（字号一改就分叉）。
+   *    超上限时 `scrollHeight > max-height`，于是 `overflow-y` 切成 `auto`。
+   *
+   * ⚠️ `resize: vertical` 关掉了（见样式）：高度归自动加高管，手工拖出来的高度
+   *    下一次敲键就被覆盖——留着一个按下去会弹回去的把手，比没有更让人困惑。
+   */
+  const TITLE_ROWS = 3
+  const TITLE_MAX_ROWS = 15
+
+  function autoGrow(
+    node: HTMLTextAreaElement,
+    _dep: unknown,
+  ): { update: () => void; destroy: () => void } {
+    const fit = (): void => {
+      node.style.height = 'auto'
+      const cs = getComputedStyle(node)
+      const line = Number.parseFloat(cs.lineHeight) || 20
+      const chrome =
+        Number.parseFloat(cs.paddingTop) +
+        Number.parseFloat(cs.paddingBottom) +
+        Number.parseFloat(cs.borderTopWidth) +
+        Number.parseFloat(cs.borderBottomWidth)
+      const max = line * TITLE_MAX_ROWS + chrome
+      const want = node.scrollHeight
+      node.style.height = `${Math.min(want, max)}px`
+      node.style.overflowY = want > max ? 'auto' : 'hidden'
+    }
+    node.addEventListener('input', fit)
+    fit()
+    return {
+      // 参数是 `title`：**清空表单、粘贴、程序化改值**都要重新量一次
+      // （只监听 `input` 会漏掉这些——它们的症状是"框里字很多，但框还是三行高"）。
+      update: fit,
+      destroy: () => node.removeEventListener('input', fit),
+    }
+  }
+
+  function onTitleKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return
+    event.preventDefault()
+    ;(event.currentTarget as HTMLTextAreaElement).closest('form')?.requestSubmit()
+  }
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
     error = ''
     const trimmed = title.trim()
     if (!trimmed) return
+    const { issueTitle, issueDescription } = splitRequest(trimmed)
     const agent = chosen
     if (!agent) {
       error = tx('newtask.noAgents')
@@ -374,8 +512,8 @@
       const issue = await api<Issue>('/api/issues', {
         method: 'POST',
         body: JSON.stringify({
-          title: trimmed,
-          description: description.trim(),
+          title: issueTitle,
+          description: issueDescription,
           assignee: { type: 'agent', id: agent.id },
         }),
       })
@@ -394,7 +532,9 @@
           //   Claude 用回它自己的默认行为，而 run 状态还是 completed。
           //   "审核标准由 skill 决定"是这个产品的核心，那条路径等于把它关掉了。
           subject: { type: 'issue', id: issue.id },
-          prompt: [trimmed, description.trim()].filter(Boolean).join('\n\n'),
+          // ★ 全文进 prompt（**不切**）：执行者要看到使用者写的每一个字。
+          //   切分只影响"记录里怎么存"，不影响"agent 看到什么"。
+          prompt: trimmed,
           // 只有真的填了才带这个字段：空字符串与"没指定"是两件事
           ...(workDir.trim() ? { workDir: workDir.trim() } : {}),
           // ★★ ② 的三态**原样**进请求体（省略 ≠ null ≠ id）：
@@ -433,7 +573,6 @@
       })
 
       title = ''
-      description = ''
       await Promise.all([loadIssues(), loadRuns()])
       // 切到任务清单并选中它——跳过这一步的话，使用者提交后停在原地，
       // 不知道到底成没成
@@ -454,23 +593,55 @@
   }
 </script>
 
-<div class="view-head">
-  <div>
-    <h2>{$t('newtask.title')}</h2>
-    <p>{$t('newtask.subtitle')}</p>
-  </div>
-</div>
+<!--
+  ⚠️ 这一页**主区里没有页头**（2026-09）：
+     · 标题 → 顶栏左侧的页名（`newtask.title` 与它重复，一起删了）
+     · 副标题"写清楚要做什么，其余默认值不用动。" → 按要求去掉
+     两样都搬走之后 `.view-intro` 是空的，所以整块删掉——**首屏因此多出约 60px**，
+     正好给下面那三个问题（这块以前就为了首屏被砍短过一次）。
+-->
 
 <form onsubmit={submit} class="newtask-form">
+  <!--
+    ══════════════════════════════════════════════════════════════════
+    一个问题，不是一个标题 + 一段补充说明
+    ══════════════════════════════════════════════════════════════════
+
+    ★ 原来这里是两个字段：「要做什么」是一个**单行** `input`，「补充说明」是一个
+      4 行 textarea。两件事都不对：
+
+      ① 单行框装不下真正要说的东西。使用者一按回车就提交了（表单里 `input` 的
+         回车就是提交），而他想换行；写得长一点只能横着滚，看不到全句。
+      ② "标题 + 补充说明"这个二分**是平台的分法，不是使用者的**。他要说的是
+         "帮我做这件事"，至于哪半句算标题是**记录格式**的事——把一个格式问题
+         摆成两个输入框，等于让他先做一次分类，而分类错了没有任何提示。
+
+    所以：**一个多行框**装下全部内容。派发时按第一行切出 `Issue.title`
+    （任务清单要一行标题），全文进 `prompt`，剩下的行进 `Issue.description`
+    （见 `submit()`）。切分是**平台的**责任，不再是使用者要回答的问题。
+
+    ⚠️ 回车键：`textarea` 里回车是换行（不是提交）。提交仍然是那个按钮 +
+       `Ctrl/Cmd+Enter`（见下面的 `onkeydown`）——这是"多行框"必须配的一件事，
+       否则习惯了单行框的人会觉得"按回车没反应"。
+  -->
   <div class="form-lead">
     <label>
       {$t('newtask.titleLabel')}
-      <input bind:value={title} placeholder={$t('newtask.titlePlaceholder')} required autocomplete="off" />
-    </label>
-
-    <label>
-      {$t('newtask.descriptionLabel')}
-      <textarea bind:value={description} rows="4" placeholder={$t('newtask.descriptionPlaceholder')}></textarea>
+      <textarea
+        bind:value={title}
+        use:autoGrow={title}
+        rows={TITLE_ROWS}
+        required
+        autocomplete="off"
+        placeholder={$t('newtask.titlePlaceholder')}
+        onkeydown={onTitleKeydown}
+      ></textarea>
+      <!--
+        ★ 切分规则必须**说出来**：不说的话，"我写的第二行去哪了"只能靠翻任务详情
+          猜。一句话讲清"第一行当标题、其余进说明"，使用者就知道标题是可控的
+          （想换标题按一下回车就行）。
+      -->
+      <span class="hint">{$t('newtask.titleSplitHint')}</span>
     </label>
   </div>
 
@@ -612,19 +783,23 @@
     </section>
 
     <!-- ══════════════════ ③ 行动（可改，只对这一次生效） ══════════════════ -->
+    <!--
+      ★ 卡片里只有"这一栏此刻是什么状态"与它的主控件；**允许的动作那几枚胶囊
+        在下面全宽的那一条里**（见 `actionsMode` 那段注释）。
+    -->
     <section class="chain-step step-actions">
       <span class="step-title">{$t('newtask.stepActions')}</span>
       <span class="field-label">{$t('newtask.actionsLabel')}</span>
 
-      {#if !chain.reviewer}
+      {#if actionsMode === 'no-reviewer'}
         <!-- ② 上没有审核者 ⇒ 这一栏说的是"连判决都不会有"，而不是"没有动作"。 -->
         <p class="hint">
           <span class="warn">{$t('newtask.actionsNoReviewerStrong')}</span>{$t('newtask.actionsNoReviewerHint')}
         </p>
-      {:else if !toolsKnown}
+      {:else if actionsMode === 'tools-unknown'}
         <!-- 清单没到之前**一句关于动作的话都不说**（判据见 script 里 `toolsKnown`）。 -->
         <p class="hint">{$t('newtask.actionsToolsUnknown')}</p>
-      {:else if !whitelistSupported}
+      {:else if actionsMode === 'read-only'}
         <!--
           ★ 旧 daemon 兑现不了**这一栏的**覆盖（`capabilities` 里没有
             `task-action-whitelist`）⇒ 退回只读，而且照旧画 chip。
@@ -636,26 +811,6 @@
             界面说的与实际发生的不一致，而**两边都不报错**。宁可只读 + 说清"重启
             daemon 之后才有"（与 ② 那条 `overrideNeedsRestart` 同一个补救动作）。
         -->
-        {#if actionEntries.length === 0}
-          <p class="hint">
-            <strong>{$t('newtask.actionsNoneStrong')}</strong>{$t('newtask.actionsNoneHint')}
-          </p>
-          {#if $tools.length === 0}
-            <p class="hint">{$t('newtask.actionsNoTools')}</p>
-          {/if}
-        {:else}
-          <!-- 契约值原样显示（判决里写的就是这一串），后面跟工具清单里的 `summary`。 -->
-          <div class="chips">
-            {#each actionEntries as item (item.type)}
-              <span class="chip">
-                <code>{item.type}</code>
-                {#if item.summary}
-                  <span class="chip-sub">{item.summary}</span>
-                {/if}
-              </span>
-            {/each}
-          </div>
-        {/if}
         <p class="hint">{$t('newtask.actionsOverrideNeedsRestart')}</p>
       {:else}
         <!--
@@ -668,87 +823,152 @@
              工具（它只判断、不动手），而覆盖的意义正在于**可以勾一个它长期配置里
              没有的动作**。空态（一个包都没装）由组件自己说清"为什么没有、下一步
              去哪"（与智能体页同一个口径）。
+
+          ★ 选择器**不在这一页里**，改成一个按钮 + 居中对话框：它原来直接铺在这一段
+            里，实测 412px 高（两栏各 ~480px，五行动作），加上前后的说明，整段 ③ 是
+            537px——而它在 700px 高的视口里从 y=670 开始，等于"这一页的下半屏全是
+            这一栏"。而 ③ 在多数任务里根本不用改（默认那一份就是审核者的长期配置）。
         -->
-        <ActionPicker
-          variant="task"
-          value={effectiveActionPicks}
-          onchange={(next) => (actionPicks = next)}
-          params={effectiveActionParams}
-          onparams={(next) => (actionParamsDraft = next)}
-        />
+        <div class="actions-summary">
+          <button type="button" class="secondary" onclick={() => (actionsOpen = true)}>
+            {$t('newtask.actionsChoose')}
+          </button>
+          <span class="actions-count">
+            {$t('newtask.actionsCount', {
+              picked: effectiveActionPicks.length,
+              // ★ 分母是**装进来的动作总数**（与选择器状态条同一个函数）：
+              //   不是 `chain.actions.length`——那是这个审核者当前允许的几个，
+              //   拿它当分母会写出"已允许 2 / 1 个动作"（实测踩过）。
+              total: installedActionCount($tools),
+            })}
+          </span>
+        </div>
 
-        {#if paramsDirty}
-          <!-- 固定参数改过：与白名单那句"只对这一次生效"同一条口径。 -->
-          <p class="hint warn">{$t('newtask.actionsParamsDirty')}</p>
+        {#if actionsDirty && chain.reviewer}
+          <!-- 改过 ⇒ 在**提交之前**就说清"只对这一次生效"（原来那句在对话框里，
+               关上对话框就看不见了，而它是这一栏最容易误解的一件事）。
+               ⚠️ `&& chain.reviewer` 看着多余（`actionsMode === 'editable'` 已经
+               蕴含它有值），但类型系统看不出这层蕴含——少了它 svelte-check 报
+               "'chain.reviewer' is possibly 'null'"。 -->
+          <p class="hint warn">{$t('newtask.actionsOnceOnly', { name: chain.reviewer.name })}</p>
         {/if}
+      {/if}
 
-        {#if effectiveActionPicks.length === 0}
-          <!--
-            ★ 一个都没勾 ⇒ 必须说清**后果**（判决只会给结论、不会触发任何操作）：
-              "没勾动作"很容易被读成"这个人比较保守"，而它真正的意思是"这次跑完就
-              到头了"——那是提交前最该知道的一件事。
-            ⚠️ 两种情况分开说：**它本来就没有**（前面半句复用只读那一档的
-              `actionsNoneStrong`）与**你这一次一个都不勾**（发出去的是空数组，
-              那是一条决定，不是"没配"）。
-          -->
-          {#if chain.actions.length === 0}
-            <p class="hint">
-              <strong>{$t('newtask.actionsNoneStrong')}</strong>{$t('newtask.actionsNoneEditableHint')}
-            </p>
+      <!--
+        ══════════════════════════════════════════════════════════════════════
+        ★★ 当前的配置**细节**：一个计数不算配置
+        ══════════════════════════════════════════════════════════════════════
+
+        「已允许 1 / 5 个动作」只说了**几个**，没说**是哪几个、各自干什么、
+        钉了什么值**。选择器进了对话框之后，这一条是**不点开就唯一能看见配置的
+        地方**——只给一个计数，等于把"这次到底允许它做什么"变成必须点开才知道，
+        而那是收起来之前从来没有过的问题（原来铺在页面上，一眼就看全了）。
+
+        形状与智能体页那个「行动权限」**逐字同款**（`AgentDetail.svelte`：
+        契约值 + `summary` + 「当前不可用」 + 「固定值: name=value」）：同一件事
+        （"现在允许它做什么"）在两个页面上必须是同一种画法，否则使用者要学两遍。
+
+        ⚠️ **它必须在 ③ 这张卡片里面**——曾经挪出去过，做成三步那一行下面一条
+           全宽的（理由是这一格只有一列宽、胶囊会折行）。那是拿"排版省事"换
+           "它属于谁"：挪出去之后那一块读起来是**另一件事**（页面上多出一片没有
+           归属的胶囊），而使用者问"这些是什么"时，答案在 ③ 里，不在外面。
+           窄了就让它窄着折行：**位置对**比**一行放得下**重要。
+
+        ⚠️ 契约值（`<包 slug>.<动作名>`）原样显示、**不翻译**：判决里写的就是
+           这一串，翻译了就对不上了。
+      -->
+      {#if actionsMode === 'read-only' || actionsMode === 'editable'}
+        <div class="actions-detail">
+          {#if pickEntries.length === 0}
+            <!--
+              ★ 一个动作都没有 ⇒ 必须说清**后果**（判决只会给结论、不会触发任何操作）：
+                "没勾动作"很容易被读成"这个人比较保守"，而它真正的意思是"这次跑完就
+                到头了"——那是提交前最该知道的一件事。
+              ⚠️ 两种情况分开说：**它本来就没有**（`actionsNoneStrong`）与**你这一次
+                一个都不勾**（发出去的是空数组，那是一条决定，不是"没配"）。
+            -->
+            {#if actionsMode === 'read-only' || chain.actions.length === 0}
+              <p class="hint">
+                <strong>{$t('newtask.actionsNoneStrong')}</strong>{#if actionsMode === 'read-only'}{$t('newtask.actionsNoneHint')}{:else}{$t('newtask.actionsNoneEditableHint')}{/if}
+              </p>
+              {#if $tools.length === 0}
+                <p class="hint">{$t('newtask.actionsNoTools')}</p>
+              {/if}
+            {:else}
+              <p class="hint">
+                <strong>{$t('newtask.actionsClearedStrong')}</strong>{$t('newtask.actionsClearedHint')}
+              </p>
+            {/if}
           {:else}
-            <p class="hint">
-              <strong>{$t('newtask.actionsClearedStrong')}</strong>{$t('newtask.actionsClearedHint')}
-            </p>
+            <!--
+              ══════════════════════════════════════════════════════════════════
+              ★★ 当前的配置**细节**：一个计数不算配置
+              ══════════════════════════════════════════════════════════════════
+
+              「已允许 1 / 5 个动作」只说了**几个**，没说**是哪几个、各自干什么、
+              钉了什么值**。选择器进了对话框之后，这一条是**不点开就唯一能看见配置的
+              地方**——只给一个计数，等于把"这次到底允许它做什么"变成必须点开才知道，
+              而那是收起来之前从来没有过的问题（原来铺在页面上，一眼就看全了）。
+
+              形状与智能体页那个「行动权限」**逐字同款**（`AgentDetail.svelte`：
+              契约值 + `summary` + 「当前不可用」+ 「固定值: name=value」）：同一件事
+              （"现在允许它做什么"）在两个页面上必须是同一种画法，否则使用者要学两遍。
+
+              ⚠️ 契约值（`<包 slug>.<动作名>`）原样显示、**不翻译**：判决里写的就是
+              这一串，翻译了就对不上了。
+            -->
+            <div class="chips">
+              {#each pickEntries as item (item.type)}
+                <span class="chip">
+                  <span class="chip-head">
+                    <code>{item.type}</code>
+                    {#if item.fixed.length > 0}
+                      <!--
+                        ★★ 钉死的固定值**与契约值同一行**（原来压在整枚胶囊的最后
+                          一行，说明下面）。使用者要的是"看得见配置"：同一句"模拟
+                          关闭单据"，钉了 `reason=巡检` 与没钉是两回事——不写出来
+                          的话，他以为这次会带着上次钉的值去执行，而实际发出去的是
+                          另一个（或者模型当场编一个）。
+                        ⚠️ 它在**第一行**：与动作名一起读成"这个动作，这样调"。
+                      -->
+                      <span class="chip-sub fixed"
+                        >{$t('tools.paramFixedChip')}:
+                        {#each item.fixed as [name, value] (name)}
+                          <code>{name}={value as string | number | boolean}</code>
+                        {/each}
+                      </span>
+                    {/if}
+                  </span>
+                  {#if item.summary}
+                    <span class="chip-sub">{item.summary}</span>
+                  {:else if item.unavailable}
+                    <!-- 配过、但现在没有出处：契约值照原样留着（那是"配过"的证据），
+                         旁边明说它当前不可用——不能让它看着还能用。 -->
+                    <span class="chip-sub bad">{$t('agents.actionsUnresolvedChip')}</span>
+                  {/if}
+                  <!--
+                    ⚠️ 这里**只**列钉死的固定值（在上一行、与契约值同一行），不列
+                       "由模型填 / 平台注入"——试过一版把三类参数都摆出来，结果是
+                       每枚胶囊多两行机器名（`由模型填: reason`、`平台注入: dir、
+                       workspace-id`），而这两行**使用者没法据它做任何决定**：
+                       开放参数本来就会由模型填，平台注入的值他也改不了。
+                       一屏里能改变决定的只有"哪些值被钉死了"。
+                  -->
+                </span>
+              {/each}
+            </div>
           {/if}
-        {/if}
-      {/if}
 
-      {#if chain.reviewer && toolsKnown}
-        {#if chain.unavailableActions.length > 0}
-          <!--
-            ★ 「配过、但现在解析不出来」单独一组（D41 收尾，措辞与智能体页同一口径）：
-              动作是从**已装工具包的清单**画的，而这些名字现在没有出处（包被卸载了、
-              或者名字来自很早以前的配置）。静默丢掉等于使用者没同意就改了权限，所以
-              照原样列出来并明说**当前不可用**。
-            ★ 它们**不可勾选、也不进发出去的数组**：带着它们提交必然被服务端拒
-              （`allowed_actions_unresolvable` —— 判据与 agent 的「行动权限」同一套）。
-              于是这里给的是"这一次它们不会被执行"，而不是一个"移除"入口：这一页删
-              不了那个审核者的长期配置，给了按钮只会把人引到一个不存在的东西上。
-          -->
-          <div class="unresolved">
-            <span class="field-label">{$t('newtask.actionsUnresolvedHeading')}</span>
-            {#each chain.unavailableActions as type (type)}
-              <div class="unresolved-row">
-                <code>{type}</code>
-                <span class="chip-sub bad">{$t('agents.actionsUnresolvedChip')}</span>
-              </div>
-            {/each}
-            <p class="hint">{$t('newtask.actionsUnresolvedHint')}</p>
-          </div>
-        {/if}
-      {/if}
-
-      {#if chain.reviewer && toolsKnown && whitelistSupported}
-        <!-- 默认那一份是从哪来的：不点破的话，预先勾着的框会被当成平台的默认值。 -->
-        <p class="hint">{$t('newtask.actionsEditableSource', { name: chain.reviewer.name })}</p>
-        {#if actionsDirty}
-          <!--
-            ★ 与 ② 那一条同一个口径：**这一次 ≠ 长期安排**。少了它，在这里取消一个
-              动作会被当成改了那个审核者的长期「行动权限」，下一条任务又变回老样子。
-          -->
-          <p class="hint">{$t('newtask.actionsOnceOnly', { name: chain.reviewer.name })}</p>
-        {/if}
-        {#if chain.reviewerSource === 'override'}
-          <!--
-            ★ ② 上"这一次换人"会**连带换掉**这一栏：能触发什么本来是**那个人**的能力。
-              不点破的话，"我换了审核者"与"这次能做什么也跟着变了"之间的因果只靠
-              出处句暗示——而这是提交前最该知道的第二件事。
-          -->
-          <p class="hint">{$t('newtask.actionsFollowReviewerOnce')}</p>
-        {/if}
-      {:else if chain.reviewer && toolsKnown}
-        <!-- 只读那一档（旧 daemon）的出处句：它说的"要改，去「智能体」页改它"在那里才是对的。 -->
-        <p class="hint">{$t('newtask.actionsFromReviewer', { name: chain.reviewer.name })}</p>
+          {#if actionsMode === 'editable' && chain.reviewer && toolsKnown}
+            <!-- 默认那一份是从哪来的：不点破的话，"预先就是这个样子"会被当成平台的
+                 默认值（而不是那个审核者的长期配置）。 -->
+            <p class="hint">{$t('newtask.actionsEditableSource', { name: chain.reviewer.name })}</p>
+          {:else if chain.reviewer && toolsKnown}
+            <!-- 只读那一档（旧 daemon）的出处句：它说的"要改，去「智能体」页改它"
+                 在那里才是对的。 -->
+            <p class="hint">{$t('newtask.actionsFromReviewer', { name: chain.reviewer.name })}</p>
+          {/if}
+        </div>
       {/if}
     </section>
   {/if}
@@ -766,16 +986,112 @@
     </p>
   </details>
 
-  {#if error}
-    <div class="notice bad form-span">{error}</div>
-  {/if}
+  <!--
+    ══════════════════════════════════════════════════════════════════════
+    提交栏：**吸底**
+    ══════════════════════════════════════════════════════════════════════
 
+    ★ 原来它是页面最后一行，实测在 y=891 而首屏只有 448px——这一页唯一要做的那件
+      事要滚**两屏**才够得着。而把页面压到一屏是不现实的（那些提示文字都有用，
+      不想靠藏起来换高度），所以改成**它跟着视口走**：无论滚到哪，按钮都在。
+
+    ★ 错误提示搬进这一栏（原来在按钮上方一点）。吸底之后那个位置会跑到视口外，
+      而**提交失败必须在按钮旁边看得见**——不然使用者点一下、没反应，再点一下。
+
+    ★ 右边那一行是"我即将提交的是什么"：交给谁、谁审、允许几个动作。滚下去看
+      高级选项时，它是唯一还在的上下文。
+  -->
   <div class="form-foot">
-    <button type="submit" disabled={busy || !title.trim() || !chosen}>
-      {busy ? $t('newtask.creating') : $t('newtask.createAndDispatch')}
-    </button>
+    {#if error}
+      <div class="notice bad">{error}</div>
+    {/if}
+    <div class="foot-row">
+      <button type="submit" disabled={busy || !title.trim() || !chosen}>
+        {busy ? $t('newtask.creating') : $t('newtask.createAndDispatch')}
+      </button>
+      {#if chosen}
+        <span class="foot-summary">
+          {$t('newtask.footExecutor', { name: chosen.name })}
+          <span class="foot-sep">·</span>
+          {#if chain.reviewer}
+            {$t('newtask.footReviewer', { name: chain.reviewer.name })}
+          {:else}
+            {$t('newtask.footReviewerNone')}
+          {/if}
+          <span class="foot-sep">·</span>
+          {$t('newtask.footActions', { n: effectiveActionPicks.length })}
+        </span>
+      {/if}
+    </div>
   </div>
 </form>
+
+<!--
+  ══════════════════ ③ 的挑选对话框 ══════════════════
+
+  ⚠️ 放在 `<form>` **外面**：它是浮层，不是表单里的一栏。留在表单里的话，
+     里面每个 `input` 都成了这个表单的控件（回车/校验都会牵进去），而对话框
+     里那些勾选框**不是要提交的东西**——它们是草稿，提交时由
+     `actionsRunField(effectiveActionPicks, chain)` 统一编码。
+-->
+{#if chosen && chain.reviewer && toolsKnown && whitelistSupported}
+  <Modal
+    open={actionsOpen}
+    size="wide"
+    title={$t('newtask.actionsLabel')}
+    subtitle={$t('newtask.actionsDialogSubtitle', { name: chain.reviewer.name })}
+    onclose={() => (actionsOpen = false)}
+  >
+    <ActionPicker
+      variant="task"
+      value={effectiveActionPicks}
+      onchange={(next) => (actionPicks = next)}
+      params={effectiveActionParams}
+      onparams={(next) => (actionParamsDraft = next)}
+    />
+
+    {#if paramsDirty}
+      <!-- 固定参数改过：与白名单那句"只对这一次生效"同一条口径。 -->
+      <p class="hint warn">{$t('newtask.actionsParamsDirty')}</p>
+    {/if}
+
+    {#if chain.unavailableActions.length > 0}
+      <!--
+        ★ 「配过、但现在解析不出来」那一组（D41 收尾，措辞与智能体页同一口径）：
+          动作是从**已装工具包的清单**画的，而这些名字现在没有出处（包被卸载了、
+          或者名字来自很早以前的配置）。静默丢掉等于使用者没同意就改了权限，所以
+          照原样列出来并明说**当前不可用**。
+        ★ 它们**不可勾选、也不进发出去的数组**：带着它们提交必然被服务端拒
+          （`allowed_actions_unresolvable` —— 判据与 agent 的「行动权限」同一套）。
+          于是这里给的是"这一次它们不会被执行"，而不是一个"移除"入口：这一页删
+          不了那个审核者的长期配置，给了按钮只会把人引到一个不存在的东西上。
+      -->
+      <div class="unresolved">
+        <span class="field-label">{$t('newtask.actionsUnresolvedHeading')}</span>
+        {#each chain.unavailableActions as type (type)}
+          <div class="unresolved-row">
+            <code>{type}</code>
+            <span class="chip-sub bad">{$t('agents.actionsUnresolvedChip')}</span>
+          </div>
+        {/each}
+        <p class="hint">{$t('newtask.actionsUnresolvedHint')}</p>
+      </div>
+    {/if}
+
+    {#if chain.reviewerSource === 'override'}
+      <!--
+        ★ ② 上"这一次换人"会**连带换掉**这一栏：能触发什么本来是**那个人**的能力。
+          不点破的话，"我换了审核者"与"这次能做什么也跟着变了"之间的因果只靠
+          出处句暗示——而这是提交前最该知道的第二件事。
+      -->
+      <p class="hint">{$t('newtask.actionsFollowReviewerOnce')}</p>
+    {/if}
+
+    <svelte:fragment slot="foot">
+      <button type="button" onclick={() => (actionsOpen = false)}>{$t('newtask.actionsDialogDone')}</button>
+    </svelte:fragment>
+  </Modal>
+{/if}
 
 <p class="hint" style="margin-top:var(--sp-5);max-width:52rem">
   ⚠️ <strong>{$t('newtask.footerStrong')}</strong>{$t('newtask.footerAfter1')}
@@ -798,6 +1114,23 @@
          · 高级选项 / 错误 / 提交按钮：整行。
        窄屏（<72rem）退回单列，与原来一样。
   */
+  /**
+   * 两列：**左列 ① 执行（占满两行），右列 ② 审核在上、③ 行动在下**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 试过的三种排法，以及为什么是这一种
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * · **三列一行**（上一版）：三个问题确实同时可见，但三张卡片高矮差得太多
+   *   （① 373 / ② 128 / ③ 427），② 那张下面空着一大片，整行看着是散的。
+   * · **①② 一行 + ③ 独占下面一行**：③ 一宽，右上的 ② 下面还是空的。
+   * · **现在这种**：左列一张高的 ①，右列 ② 压着 ③。两列各自成块，右列两块
+   *   高度接近（128 + 427），左列拉伸到与右列齐平——**页面是一整块矩形**，
+   *   没有哪个格子空着。
+   *
+   * ⚠️ ③ 必须在**②下面**（同一列）：它是"审完之后允许做什么"，与 ② 是同一条
+   *    线上的两件事（先判、再动）。把它放到左列或独占一行，读起来就与 ② 脱钩了。
+   */
   .newtask-form {
     width: 100%;
     min-width: 0;
@@ -807,30 +1140,180 @@
     align-items: start;
   }
 
+  /**
+   * ⚠️⚠️ 行号必须**显式**写出来，而且 `.form-lead` 要占第 1 行。
+   *
+   * 踩过的坑：`.step-exec` 写了 `grid-row: 1 / span 2`（显式行），而
+   * `.form-lead` 只写了列（`grid-column: 1 / -1`）、行留给自动排布。CSS Grid 的
+   * 排布顺序是**先把行列都确定的放好**，再放"只定了列"的——于是第 1、2 行已经被
+   * 三步占满，「要做什么」被挤到第 3 行：**输入框跑到三步下面去了**。
+   * （它还在 DOM 最前面，只是被网格挪走了——所以"看代码觉得没问题"。）
+   *
+   * 现在四块的行列全部写死，不再依赖自动排布的顺序。
+   */
+  .form-lead {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  /* ① 占左列两行，并**拉伸**到与右列齐平（不拉伸的话左列第二格会空出一个洞） */
+  .step-exec {
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    align-self: stretch;
+  }
+  /* ② 右上、③ 右下：一条线上的两件事（先判、再动） */
+  .step-review {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .step-actions {
+    grid-column: 2;
+    grid-row: 3;
+  }
+  /* 高级设置与提交栏接在下面（也写死，免得自动排布又把它插到别处） */
+  .form-advanced {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+  .form-foot {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
   /* 标题 + 描述：一行两列，各自限一个阅读宽度 */
+  /* ③ 收成一行：按钮 + 计数（选择器搬进对话框了，见标记里那段注释） */
+  .actions-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+  .actions-count {
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+  }
+
   .form-lead {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* 只有一个字段了，不再分两栏（分栏会把框压到一半宽，而这一页唯一要写的
+       东西就是它——实测原来只用了 544px / 1096px，右边一半是空的）。 */
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-4);
     align-items: start;
   }
   .form-lead > label {
-    max-width: 34rem;
+    max-width: none;
     margin-bottom: 0;
   }
+  /**
+   * 「要做什么」那个框：默认 3 行，随输入长高，**15 行封顶**（见 `autoGrow()`）。
+   *
+   * ⚠️ `resize: none`：高度归自动加高管，手工拖出来的高度下一次敲键就被覆盖。
+   *    留着一个按下去会弹回去的把手，比没有更让人困惑。
+   * ⚠️ `max-height` 用 `lh` 算——行高只有 CSS 知道，JS 那边读 `scrollHeight`
+   *    不需要知道它（超了就是超了）。
+   */
+  .form-lead textarea {
+    resize: none;
+    max-height: calc(15lh + 1.6rem);
+  }
 
-  /* ③ 独占整行；高级选项 / 错误 / 提交按钮同样 */
-  .step-actions,
+  /* 高级选项 / 提交栏占整行（③ 那张卡片自己占一列） */
   .form-advanced,
-  .form-span,
   .form-foot {
     grid-column: 1 / -1;
   }
 
+  /**
+   * ③ 里的配置细节（胶囊 + 出处句）。
+   *
+   * ⚠️ 它在 ③ **卡片里面**——曾经做成三步那一行下面一条全宽的，理由是这一格
+   *    只有一列宽、胶囊会折行。那是拿"排版省事"换"它属于谁"：挪出去之后那一块
+   *    读起来是另一件事。窄了就让它窄着排。
+   */
+  .actions-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  /**
+   * ★ 这一格里的胶囊**竖着排**（一个动作一行）。
+   *
+   * 横排（`.chips` 默认 `flex-wrap`）在一列宽里会变成"契约值半行、说明挤到下一
+   * 行、下一枚胶囊又从半路接上"的乱条——竖排之后每一枚是完整的一行，扫下来就是
+   * "允许这三个：A 干什么、B 干什么、C 干什么"。
+   */
+  .step-actions .chips {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  /**
+   * ★ 而且胶囊**内部**也要竖着排（契约值一行、说明另起一行）。
+   *
+   * ⚠️ 这一条是量出来的：`.chip` 默认是 `inline-flex` + `align-items: baseline`，
+   *    三样东西（契约值 / `summary` / 固定值）**横着并排**。在智能体页那一栏
+   *    （全宽）没问题，但 ③ 只有一列宽：306px 分给三样，说明那一段只剩几十像素，
+   *    于是一句话折成二十来行——实测这一块 **590px**，整张 ③ 卡片 722px。
+   *    竖排之后契约值占一行、说明用满宽度，同一块降到 ~120px。
+   */
+  .step-actions .chip {
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+  }
+  /* 第一行：契约值 + 钉死的固定值（两样都在这一行，读成"这个动作，这样调"） */
+  .step-actions .chip-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .step-actions .chip code,
+  .step-actions .chip-sub {
+    overflow-wrap: anywhere;
+  }
+
   .form-advanced { margin: var(--sp-2) 0; }
 
-  .form-foot { display: flex; justify-content: flex-start; }
+  /**
+   * 提交栏吸底。
+   *
+   * ⚠️ 负外边距是**故意的**：`.main` 自己有 `padding: var(--sp-5) var(--sp-6)`，
+   *    不留负边距的话这一条会缩在那圈留白里，滚过去的内容会从它左右两侧露出来
+   *    （看起来像"一条浮在中间的小横条"）。
+   *
+   * ⚠️ `background` 必须是**不透明**的：半透明的话下面的内容会透上来，而那正是
+   *    它要挡住的东西。
+   */
+  .form-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin: var(--sp-3) calc(var(--sp-6) * -1) calc(var(--sp-5) * -1);
+    padding: var(--sp-3) var(--sp-6);
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+
+  .foot-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+  }
+
+  .foot-summary {
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+  }
+  .foot-sep { margin: 0 var(--sp-1); opacity: 0.6; }
 
   .chain-step {
     display: flex;
@@ -852,6 +1335,21 @@
     .newtask-form,
     .form-lead {
       grid-template-columns: minmax(0, 1fr);
+    }
+    /**
+     * ⚠️ 单列时**必须把行列号一起松开**：`grid-column: 2` 在一列网格里会凭空
+     *    造出第二列（宽度 0），③ 于是被挤成一条竖线——而它的内容还在，只是
+     *    看不见，看起来像"行动那一栏没了"。
+     */
+    .form-lead,
+    .step-exec,
+    .step-review,
+    .step-actions,
+    .form-advanced,
+    .form-foot {
+      grid-column: 1;
+      grid-row: auto;
+      align-self: auto;
     }
     .form-lead > label,
     .step-exec label,
@@ -886,7 +1384,13 @@
     gap: var(--sp-2);
     padding: var(--sp-1) var(--sp-3);
     border: 1px solid var(--line-strong);
-    border-radius: 100px;
+    /**
+     * ⚠️ 原来是 `100px`（"胶囊"造型）。一枚里只有一行字时它很好看，但 ③ 里的
+     *    胶囊有 3~4 行（契约值 + 固定值 + 说明），`100px` 的圆角在那么高的框上
+     *    会变成**两段夸张的弧**——左右两条直边几乎没了，看着像椭圆而不是框。
+     *    改用普通圆角（`--radius`，8px）：与页面其它卡片同一套。
+     */
+    border-radius: var(--radius);
     background: var(--surface);
     font-size: var(--fs-sm);
   }

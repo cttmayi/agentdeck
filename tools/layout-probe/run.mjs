@@ -13,7 +13,7 @@
  * 它做四件事：
  *
  *   1. 起一个**一次性 daemon**（数据与工作目录都在 .cache/layout-probe/ 下，
- *      绝不碰 ~/.alpha-helper，也不写任何仓库外的地方）。首启会播种一对
+ *      绝不碰 ~/.agentdeck，也不写任何仓库外的地方）。首启会播种一对
  *      agent 与一个审核模板，所以断言有确定的数据可依；
  *   2. 把 `probe.html` 拷进 `apps/web/dist/`（daemon 只从那里提供静态文件），
  *      跑完删掉——它是构建产物目录，不该长期留着探针；
@@ -191,6 +191,13 @@ const CHECKS = [
     label: '每张 runtime 卡都有多行字段（版本/证据/判定没丢）',
     ok: (v) => v === true,
   },
+  {
+    view: '智能体',
+    key: 'agents.settingsDraftDiscarded',
+    label:
+      '★★★ 「设置」里改过内容、**没保存就关掉**，重开时必须回到**打开时那一份**（已保存的值，空也算一份）——这条来自使用者的原话："我修改了内容，没有保存直接点关闭或者取消后，重新打开，内容没有恢复保存前的内容"',
+    ok: (v) => v === true,
+  },
 
   // ── 任务清单：同一套主从 + 去重字样 ──
   { view: '任务清单', key: 'tasks.gotRows', label: '夹具任务渲染成了表格行（否则下面那条会空过）', ok: (v) => v === true },
@@ -250,8 +257,9 @@ const CHECKS = [
   {
     view: '任务清单',
     key: 'tasks.boardColumnCount',
-    label: '★ 看板是**五档**状态（执行中 / 待审查 / 行动中 / 等待人处理 / 已完成审查）',
-    ok: (v) => v === 5,
+    label:
+      '★ 看板是**六档**状态（执行中 / 待审查 / 行动中 / 等待人处理 / 已完成审查 / 已放弃，D47）',
+    ok: (v) => v === 6,
     show: (v) => `${v} 列`,
   },
   {
@@ -324,6 +332,103 @@ const CHECKS = [
   },
   { view: 'Skills', key: 'skills.drawerGoneAfterEsc', label: 'Esc 能关掉抽屉', ok: (v) => v === true },
 
+  // ── 本地技能目录（勾一个别的 AI 工具的目录 ⇒ 看见 ⇒ 能挂）──
+  { view: 'Skills', key: 'skills.settingsButtonFound', label: '★ 页头有「设置」入口', ok: (v) => v === true },
+  {
+    view: 'Skills',
+    key: 'skills.dirsCandidateCount',
+    label: '内置候选目录都列出来了（claude / codex / cursor / agents）',
+    ok: (v) => v === 4,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsCandidateLabels',
+    label: '候选用的是工具名（不是路径或 id）',
+    ok: (v) => Array.isArray(v) && v.includes('Claude Code') && v.includes('Codex'),
+    show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
+  },
+  { view: 'Skills', key: 'skills.dirsAllHavePath', label: '每个候选都显示了完整路径（要能核对自己勾的是哪个）', ok: (v) => v === true },
+  { view: 'Skills', key: 'skills.dirsAllHaveCheckbox', label: '每个候选都有勾选框', ok: (v) => v === true },
+  {
+    view: 'Skills',
+    key: 'skills.dirsCheckboxWidth',
+    label: '★★ 勾选框是勾选框的大小（全局 `input { width: 100% }` 会把它撑成整行，实测 480px ⇒ 路径被挤成 0 宽）',
+    ok: (v) => typeof v === 'number' && v > 8 && v <= 24,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsPathWidth',
+    label: '★ 路径占住了整行剩下的宽度（没被挤成 0）',
+    ok: (v, all) => typeof v === 'number' && typeof all['skills.dirsRowWidth'] === 'number' && v > all['skills.dirsRowWidth'] * 0.6,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsBodyOverflowX',
+    label: '★ 抽屉内容不横向溢出',
+    ok: (v) => v === 0,
+    show: (v) => `溢出 ${v}px`,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsRowHeights',
+    label: '★ 候选行没有被撑高（每行一两个文本行的高度）',
+    ok: (v) => Array.isArray(v) && v.every((h) => h > 0 && h < 110),
+    show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsUncheckNote',
+    label: '★ 写清了"取消勾选不会删掉什么、正在用的不会抽走"',
+    ok: (v) => typeof v === 'string' && v.includes('不会删掉') && v.includes('摘'),
+  },
+  { view: 'Skills', key: 'skills.dirsAddInputFound', label: '能自己填一个路径（内置表之外也要能勾）', ok: (v) => v === true },
+  {
+    view: 'Skills',
+    key: 'skills.localSkillCount',
+    label: '★★ 勾上夹具目录之后，那两个 skill 真的出现在列表里',
+    ok: (v) => v === 2,
+    show: (v) => `${v}/2 个`,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.localBadgeHasPath',
+    label: '★ 来源徽标写的是那个目录（不是笼统的「本机自建」）',
+    ok: (v) => v === true,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.localUninstallDisabled',
+    label: '★ 来自本地目录的那条不给卸载（删了也会被下次扫描带回来）',
+    ok: (v) => v === true,
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsSkipNote',
+    label: '★ 空目录被如实报出来（"勾了却少一个"要能追到原因）',
+    ok: (v) => typeof v === 'string' && v.includes('probe-empty-dir') && v.includes('SKILL.md'),
+  },
+  {
+    view: 'Skills',
+    key: 'skills.dirsCustomRow',
+    label: '自己填的路径单独列出来（要能看见、能取消）',
+    ok: (v) => typeof v === 'string' && v.includes('fixture-local-skills'),
+  },
+  {
+    view: '智能体',
+    key: 'skills.pickerHasLocalSkill',
+    label: '★★ 读进来的 skill 能挂给智能体（选择器里有它）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'skills.pickerCheckboxTook',
+    label: '★ 真的能勾上（不是只有一行字）',
+    ok: (v) => v === true,
+  },
+
   // ── 侧边栏第五项 + 工具页（D40）──
   //
   // ★ **"侧边栏恰好四项"这条从 D40 起改成五项**：使用者点名要「工具」作为
@@ -335,8 +440,8 @@ const CHECKS = [
   {
     view: '工具（D40）',
     key: 'shell.navItemCount',
-    label: '★ 侧边栏是五项（D40 起「工具」是第 5 项）',
-    ok: (v) => v === 5,
+    label: '★ 侧边栏是六项（聊天是最轻的入口，排第一；D40 起「工具」是最后一项）',
+    ok: (v) => v === 6,
     show: (v) => `${v} 项`,
   },
   {
@@ -349,13 +454,233 @@ const CHECKS = [
     view: '工具（D40）',
     key: 'shell.navItems',
     label:
-      '★★ 侧边栏**整串顺序**就是这五项（顺序错、中间少/换一项、多出第 6 项都会红——只数个数＋看末项会漏掉中间那几种）',
+      '★★ 侧边栏**整串顺序**就是这六项（顺序错、中间少/换一项、多出第 7 项都会红——只数个数＋看末项会漏掉中间那几种）',
     ok: (v) =>
       JSON.stringify(v) ===
-      JSON.stringify(['新建任务', '任务清单', '智能体', 'Skills', '工具']),
+      // ★ 聊天排在最前：它是最轻的入口（先聊清楚，再决定要不要派活），
+      //   而且它要管多个对话，本身就是一个完整页面。
+      JSON.stringify(['聊天', '新建任务', '任务清单', '智能体', 'Skills', '工具']),
     show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
   },
   { view: '工具（D40）', key: 'tools.title', label: '工具页渲染出来了', ok: (v) => v === '工具' },
+
+  // ══════════════ 聊天（闭环的旁路）══════════════
+  {
+    view: '聊天',
+    key: 'chat.hasListPane',
+    label: '左栏（对话列表）在',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.hasDetailPane',
+    label: '右栏（消息流）在',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.twoColumnsSideBySide',
+    label: '★ 两栏真的**并排**（左栏整个在右栏左边，两栏各自有宽度）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.listNarrowerThanDetail',
+    label: '左栏比右栏窄（对话列表是索引，消息流是正文）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.emptyStateShown',
+    label: '没有对话时列表里是空态（不是一片空白）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.composerInsideDetail',
+    label: '★★ 输入框在**右栏里**（上一回的表单就是这样画进左栏、横盖右栏的）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.composerNotInList',
+    label: '★ 输入框**不在**左栏里',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.agentPickerOrHint',
+    label: '新对话要有执行者选择器，没有执行者时要给提示（不能让人白打一段字）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.enterHint',
+    label: '★ 页面上写明 Enter 发送 / Shift+Enter 换行（与「要做什么」**正好相反**）',
+    ok: (v) => v === true,
+  },
+  // ⚠️ 这里原有 `chat.boundaryHint`（"页面上写明这里不动手"）：2026-09 那句话
+  //    按要求从页面上拿掉了，断言一起删——留一条量不存在的东西的断言，比没有更坏。
+  {
+    view: '聊天',
+    key: 'chat.bubbleRadiusRule',
+    label:
+      '★ 气泡圆角不是胶囊：要么是圆角令牌，要么是个小像素值（100px 那种在多行文本上会变成两条夸张的弧线）',
+    ok: (v) => {
+      if (typeof v !== 'string') return false
+      const t = v.trim()
+      // 令牌就是对的：`--radius` / `--radius-sm` 都是 8px 级别的
+      if (/^var\(--radius(-sm)?\)$/.test(t)) return true
+      const px = /^(\d+(?:\.\d+)?)px$/.exec(t)
+      return px !== null && Number(px[1]) <= 12
+    },
+    show: (v) => String(v),
+  },
+  {
+    view: '任务清单',
+    key: 'tasks.filesColumnStillRenders',
+    label:
+      '★★ 任务详情右边那一栏**换成一个共用组件之后照旧能列**（抽组件动的是任务页那条已经在用的路径：base 传错会表现成"取不到"或一直骨架屏，两者肉眼都不明显）——要求真的拿到东西，且**不许**出现"取不到"那一块',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.filesPanelPresent',
+    label:
+      '★★ 对话打开着的时候，右栏底部有「工作目录的文件」那一栏（任务详情那一栏与它是同一个组件，只是"问谁"不同）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.filesListsFixtureAndManagedLast',
+    label:
+      '★★★ 展开之后真的列得出目录里的东西，而且**平台注入物排在产出后面**——顺序由界面侧的 sortWorkDirEntries 保证（服务端返回的是目录自己的顺序），所以只能在这一层量',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.filesOneLevelThenExpand',
+    label:
+      '★★ 一次只列一层：没点开 notes/ 之前看不到里面的 deep.txt，点开之后才出现（递归列整棵树会把真正的产出淹掉）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.codeBlockKeepsNewlines',
+    label:
+      '★★★ 代码块里的换行**真的显示出来**（`white-space` 不是 nowrap/normal，且六行的高度与行数相称）——这条来自一次真实误判：行内代码那条 `nowrap` 被继承进 `pre > code`，十行代码折成一行、`<pre>` 只有 47px，而**看起来像模型没写换行**',
+    ok: (v) => v === true,
+  },
+  {
+    view: '外壳',
+    key: 'web.shellNotCachedBlindly',
+    label:
+      '★★★ 外壳（index.html）**每次都核对**（`no-cache` + ETag）——这条来自一次真实误判："聊天页不工作、任务页正常"，实际是那个标签页跑着旧前端：而这边原本一个缓存头都不发，浏览器拿那份外壳没有任何办法',
+    ok: (v) => v === true,
+  },
+  {
+    view: '外壳',
+    key: 'web.hashedAssetImmutable',
+    label:
+      '★★ 带内容哈希的产物是 `immutable` 长缓存，而带 `If-None-Match` 回来问时回 **304**（核对要便宜，否则每次刷新都重下 HTML）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '外壳',
+    key: 'web.identityReportsBuild',
+    label:
+      '★★ 身份接口报出**这一版界面叫什么**（`webBuild`）：`capabilities` 回答"daemon 是哪一版"，它回答"界面是哪一版"——两者不一致时两边都不报错，只能靠一句可查的话',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerRawIsVerbatim',
+    label:
+      '★★★ 文件查看器的「原文」**逐字等于接口发回来的字节**（探针自己再 fetch 一次比对）——格式化、重排、去掉空行都会让它红：这一栏存在的意义就是"我看到的就是磁盘上那个文件"',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerMarkdownFaces',
+    label:
+      '★★ Markdown 两面都对：渲染面里是标题（`h1`），原文面里是字面量 `# 结论`——把 Markdown 当纯文本显示**不报错**，只是少了渲染，所以必须两面都量',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerFrameNotSameOrigin',
+    label:
+      '★★★ HTML 的渲染面是 iframe，**允许脚本但没有 allow-same-origin**（直接读属性），而且父页面**读不到**它的 document——脚本能跑是为了让 p5 画布那类产出真的画出来，不透明源是为了让 agent 写的页面调不到这个 daemon 的接口',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerBinaryIsHex',
+    label:
+      '★★ 二进制不当文本渲染：只有说明 + 前若干字节的十六进制（当文本渲染得到的是一屏替换字符，看起来像文件坏了）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerTooBigNoHighlight',
+    label:
+      '★★ 超过阈值的源码**不着色**，但原文照旧完整，并说明原因（给 8MB 文本套高亮会把页面卡死，而使用者只会以为这一栏很慢）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.filesHiddenInDraft',
+    label: '★ 草稿态**不画**那一栏（还没有对话，也就还没有目录）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.filesUnsupportedOnOldDaemon',
+    label:
+      '★★★ 旧 daemon（没有 `conversation-files`）⇒ 那一栏**说明原因**、不许真去列——任务页那边撞过一次：404 的失败被画成骨架屏，"取不到"与"还在加载"长得一模一样',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.hasContent',
+    label: '聊天页渲染出来了',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.ownedSkillOption',
+    label:
+      '★★ 「新对话」的执行者下拉里，除了执行者还有"按 skill 选"这一组——选项文字要说清是哪条 skill、等于跟谁说话',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.allSkillsOffered',
+    label:
+      '★★★ **所有已安装的 skill** 都在那个下拉里，一条不少——包括没人挂的那条（"有它的执行者"不存在时，这条 skill 由对话自己带着走）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.skillBindsOwner',
+    label:
+      '★★★ 选了有主的 skill 之后，界面上写出"将使用谁"，而那个名字必须就是**接口上真挂着这条 skill 的执行者**（等于"和有这个 skill 的 agent 对话"这句话本身）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.unownedHiddenOnOldDaemon',
+    label:
+      '★★★ 旧 daemon（`capabilities` 里没有 `conversation-skills`）：没人挂的 skill **不许出现在下拉里**，并说出原因——旧 daemon 会静默忽略 `skillIds`，界面却会写着"将使用它 + 这条 skill"，两边都不报错（有主的 skill 不受影响）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.orphanSkillSentAsSkillIds',
+    label:
+      '★★★ 选了没人挂的 skill 之后，**发出去的请求体里真的带上了 skillIds**（界面画对而忘了带，这一轮就是白选——页面上还看不出异常）',
+    ok: (v) => v === true,
+  },
   {
     view: '工具（D40）',
     key: 'tools.fixtureFound',
@@ -367,12 +692,6 @@ const CHECKS = [
     key: 'tools.fixtureActionCell',
     label: '★ 那一行的**动作数**是 2（一个组里有几个动作）',
     ok: (v) => typeof v === 'string' && v.includes('2'),
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.fixtureMountedBy',
-    label: '★ 那一行说得出它挂给了哪个 agent（挂载关系是卸载能否成功的前提）',
-    ok: (v) => typeof v === 'string' && v.includes('探针用的执行者'),
   },
   {
     view: '工具（D40）',
@@ -393,14 +712,8 @@ const CHECKS = [
   },
   {
     view: '工具（D40）',
-    key: 'tools.noDryRunFlag',
-    label: '★ `dryRun: unsupported` 的动作显式标了「不支持预演，不能自动执行」',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
     key: 'tools.boundGroupNote',
-    label: '★ 绑定参数单独成组，并写明"模型看不到也填不了"',
+    label: '★ 绑定参数单独成组，并写明"模型看不到也填不了"（说明整块面板只说一次）',
     ok: (v) => v === true,
   },
   {
@@ -471,39 +784,28 @@ const CHECKS = [
   },
   { view: '工具（D40）', key: 'tools.drawerGoneAfterEsc', label: 'Esc 能关掉安装抽屉', ok: (v) => v === true },
   {
+    // ★ 这一段撤了两次，所以这三条查的是**最终态**（使用者的要求：
+    //   「执行智能体不支持"行动"，去掉」，然后「"干活时能用的工具包"…是否也应该去掉」）：
+    //   执行者详情里那一段**整段不在**，且「可挂载的工具组」这句不再出现。
+    //   原来那五条（detailSectionForExecutor / detailPickerHasFixture /
+    //   detailMountHintWording / mountSaveTookEffect / mountRestoreTookEffect）
+    //   随那一段一起删了——界面既然不再提供挂载，就没有"从界面上挂一次、看它真的
+    //   写进去了"这回事可查。挂载接口本身仍由 `tools-api.test.ts` 覆盖。
     view: '工具（D40）',
-    key: 'tools.detailSectionForExecutor',
-    label: '★ 执行者的详情里有「干活时能用的工具包」那一段，并列出挂着的组',
+    key: 'tools.executorHasNoToolsSection',
+    label: '★ 执行者的详情里**没有**「干活时能用的工具包」那一段了',
     ok: (v) => v === true,
   },
   {
     view: '工具（D40）',
-    key: 'tools.detailMountHintWording',
-    label: '★ 执行者工具段的挂载说明说清"挂载 = 送进它的工作目录"（D42：两个行为面分开，不再说"把整组动作交给它"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.detailPickerHasFixture',
-    label: '编辑态里能勾到已安装的组（挂载单位是组）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.mountSaveTookEffect',
-    label: '★ 摘挂保存之后详情**真的刷新**（摘掉之后那一段就不再显示它）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.mountRestoreTookEffect',
-    label: '★ 再挂回去同样生效（来回走的都是接口，不是本地勾选的样子）',
+    key: 'tools.executorNoPickLabel',
+    label: '★ 「可挂载的工具组」这句在执行者详情里不再出现（使用者看到的就是这一句）',
     ok: (v) => v === true,
   },
   {
     view: '工具（D40）',
     key: 'tools.reviewerHasNoToolsSection',
-    label: '★ 审核者的详情里**没有**工具那一段（只判断不动手，不给必然失败的开关）',
+    label: '★ 审核者的详情里**也没有**工具那一段（只判断不动手；现在两边都没有了）',
     ok: (v) => v === true,
   },
   {
@@ -569,16 +871,10 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
-    key: 'template.formInsideHead',
-    label: '★ 抽屉更不在栏头里（曾经它在，于是整垮了主从布局）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '新建表单 / 设置',
-    key: 'template.headGrowthPx',
-    label: '★ 打开抽屉后栏头高度不变',
-    ok: (v) => v === 0,
-    show: (v) => `涨了 ${v}px`,
+    key: 'template.drawerLeavesLayoutAlone',
+    label:
+      '★★ 打开抽屉前后，主区里**每一块的位置与尺寸都没动**（它曾经被渲染进栏头，把栏头从 167px 撑到 1070px、整垮主从布局）',
+    ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
@@ -634,10 +930,9 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
-    key: 'settings.headGrowthPx',
-    label: '★ 打开设置抽屉后栏头高度不变',
-    ok: (v) => v === 0,
-    show: (v) => `涨了 ${v}px`,
+    key: 'settings.drawerLeavesLayoutAlone',
+    label: '★★ 打开设置抽屉前后，主区里每一块的位置与尺寸都没动',
+    ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
@@ -669,11 +964,28 @@ const CHECKS = [
   {
     view: '新建表单 / 设置',
     key: 'settings.tabLabels',
-    label: '★ 段里两个页签：执行 / 审核',
-    ok: (v) => Array.isArray(v) && v.length === 2 && v[0] === '执行' && v[1] === '审核',
+    label:
+      '★ 段里三个**链路**页签：执行 / 审核 / **聊天**（2026-09 加的第三份——聊天不套任务模版，它有自己的 ① 框架）',
+    ok: (v) =>
+      Array.isArray(v) && v.length === 3 && v[0] === '执行' && v[1] === '审核' && v[2] === '聊天',
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.blockTabLabels',
+    label:
+      '★★ 每条链路下面有**块**页签：① 框架 / ② 身份 / ③ 任务（2026-10 三框改造——不是合并成一篇）',
+    ok: (v) =>
+      Array.isArray(v) && v.length === 3 && v[0] === '① 框架' && v[1] === '② 身份' && v[2] === '③ 任务',
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   { view: '新建表单 / 设置', key: 'settings.activeTab', label: '默认停在「执行」', ok: (v) => v === '执行' },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.activeBlock',
+    label: '★ 默认停在「① 框架」那一块',
+    ok: (v) => v === '① 框架',
+  },
   { view: '新建表单 / 设置', key: 'settings.tplFieldPresent', label: '有模版输入框', ok: (v) => v === true },
   {
     view: '新建表单 / 设置',
@@ -717,8 +1029,9 @@ const CHECKS = [
   { view: '新建表单 / 设置', key: 'settings.fillButtonFound', label: '有「填入默认模版」', ok: (v) => v === true },
   {
     view: '新建表单 / 设置',
-    key: 'settings.filledHasPrompt',
-    label: '填入默认模版后框里真的有变量 {{prompt}}',
+    key: 'settings.filledHasFrameVars',
+    label:
+      '填入默认模版后框里是**真正的框架**（有 `{{runId}}` 这类在用变量，且没有已退役的 `{{prompt}}`）',
     ok: (v) => v === true,
   },
   { view: '新建表单 / 设置', key: 'settings.filledBadge', label: '填完之后状态变「自定义」', ok: (v) => v === '自定义' },
@@ -730,8 +1043,16 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
-    key: 'settings.reviewFilledHasMaterial',
-    label: '审核那份填入默认后带 {{material}}（两份各有各的必需变量）',
+    key: 'settings.reviewFilledHasVerdict',
+    label:
+      '审核那份填入默认后带判决契约（`{{verdict}}` 是现在**唯一**的必需变量——材料与标记由平台放，不在模版里了）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.reviewFilledHasNoMaterial',
+    label:
+      '★ 审核那份的默认模版里**没有** `{{material}}`（材料与标记由平台放——模版里写它会被保存时拒掉）',
     ok: (v) => v === true,
   },
   {
@@ -741,20 +1062,25 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v >= 5,
     show: (v) => `${v} 行`,
   },
-  { view: '新建表单 / 设置', key: 'settings.varHasPrompt', label: '变量清单里有 {{prompt}}', ok: (v) => v === true },
   {
     view: '新建表单 / 设置',
-    key: 'settings.varListHasNoRoleVar',
-    label: '★ 变量清单里没有 {{role}}（D33：它自带标题、与 {{instructions}} 重名同事，已取消）',
+    key: 'settings.varListHasLive',
+    label: '变量清单里列着**还在用**的那些（{{runId}} / {{skills}}）',
     ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
-    key: 'settings.varHasInstructions',
-    label: '变量清单里有 {{instructions}}（内容那个）',
+    key: 'settings.varListHasNoRetired',
+    label:
+      '★★ 变量清单里**没有**六个退役变量与 `{{role}}`——列了就等于教人写它（写了会被保存时专门拒掉并说清去处）',
     ok: (v) => v === true,
   },
-  { view: '新建表单 / 设置', key: 'settings.varMarksRequired', label: '必需的变量上标了「必需」', ok: (v) => v === true },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.varRowCountIsNine',
+    label: '变量表正好九条（退役六个之后）——条数变了就说明表与文档/代码又分叉了',
+    ok: (v) => v === true,
+  },
   {
     view: '新建表单 / 设置',
     key: 'settings.previewHasHeader',
@@ -796,6 +1122,37 @@ const CHECKS = [
   { view: '新建表单 / 设置', key: 'settings.savedReview', label: '★ 审核那份也落库了', ok: (v) => v === true },
   {
     view: '新建表单 / 设置',
+    key: 'settings.chatTabFound',
+    label: '★ 有第三个页签「聊天」（聊天有自己的 ①：它不是任务的又一次投递）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.chatPreviewRenders',
+    label: '★★ 在聊天那一档点「预览」真的渲染出来了（接口原来只收 execute / review ⇒ 这个按钮直接报错）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.chatPreviewNoRawVar',
+    label: '★ 聊天的预览里也没有没展开的变量',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.savedChat',
+    label:
+      '★★ 聊天那份**真的落库**了（直接问接口）——写入口只认两个 key 时，快捷键提示照样说"已保存"，而库里一个字都没写',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.reopenedChat',
+    label: '★ 重开设置、切到聊天页签，框里是刚存进去的那份（走了一圈库回来）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
     key: 'settings.reopenedBadge',
     label: '★ 重开设置时看到的就是刚存下的那份（显示与生效是同一份）',
     ok: (v) => v === '自定义',
@@ -807,20 +1164,50 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
-  // ── 审核标准（D37）──
+  // ── 判断依据（D37 → 2026-09 收口到「指令」）──
   //
-  // 标准从 skill 里搬到审核者身上之后，界面上必须有地方看见它、写它——
-  // 否则"标准在哪"这件事又变成要读代码才知道。
+  // ★ 这一段量的是**一次删除**：使用者说「移除审核智能体的『审核标准』」，而那件事
+  //   能做的前提是判断依据已经并进 ② 身份（= 「指令」）。所以判据有两半：
+  //   ① 那个字段名与那一段**一个字都不剩**；
+  //   ② 老数据那份正文与"并进来"的入口**都在「指令」那一栏里**（否则就是
+  //      "删干净了，顺手把依据也删没了"）。
+  //   ⚠️ 只量一半都会假绿：只量①，正文没了也绿；只量②，段还在也绿。
   {
     view: '审核标准',
-    key: 'standard.detailHasName',
-    label: '★ 审核者详情里看得到标准的名字',
-    ok: (v) => typeof v === 'string' && v.length > 0,
+    key: 'standard.detailHasNoNameBadge',
+    label: '★ 审核者详情里**没有**"标准的名字"徽标了（那个字段已删：平台侧没人读它、'
+      + '一个审核者只有一份标准所以区分不了什么、默认值又是常量）',
+    ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.detailShowsBody',
-    label: '★ 标准正文就在详情里（不用去 Skills 页对着 slug 猜）',
+    label: '★ 老数据那份判断依据正文现在显示在「指令」那一栏里（不用去 Skills 页对着 slug 猜）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.noStandardRowLabel',
+    label: '★★ 详情里**没有任何一行**叫「审核标准」了（使用者的要求：「移除审核智能体的『审核标准』」）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.noStandardSectionTitle',
+    label: '★★ 也没有「用什么标准」那一段的标题（删的是整段，不是把标签换个说法）',
+    ok: (v) => v === true,
+    show: (v, facts) => `${v}　实测各段标题：${JSON.stringify(facts['standard.detailSectionTitles'] ?? null)}`,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.foldInButtonInInstructionsRow',
+    label: '★★ 而"把这份判断依据并进「指令」"的入口在「指令」那一栏里（内联老标准原本只能手抄，现在也给了入口）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.skillsSectionStillThere',
+    label: '★ 「技能」那一段还在（删的是"标准"，不是"挂载"——skill 的勾选/展示一条都没少）',
     ok: (v) => v === true,
   },
   {
@@ -841,6 +1228,47 @@ const CHECKS = [
     key: 'standard.executorHasNoActionsSection',
     label: '★ 执行者的详情里**没有**「行动权限」段（它的能力是工具，不给必然失败的勾选）',
     ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.executorEditHasNoActionsSection',
+    label: '★ 执行者**点「编辑」之后**也没有「行动权限」段（编辑态走 draft.role，是另一条判据）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.executorEditSectionHeadings',
+    label: '编辑态实际渲染出来的段落标题（它必须先有内容，上面那条才作数）',
+    ok: (v) => Array.isArray(v) && v.length > 0,
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
+  {
+    view: '审核标准',
+    key: 'standard.switchWhileEditingName',
+    label:
+      '★ 编辑到一半换 agent ⇒ **退出编辑态**（输入框里不会再留着上一个人的草稿；留在编辑态会让人以为还在改 A）',
+    ok: (v) => v === '(不在编辑态)',
+    show: (v) => `"${String(v)}"`,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.switchWhileEditingTitle',
+    label: '★ 换过去之后右栏标题是**新的那个人**（不是上一个人的名字）',
+    ok: (v) => v === '探针用的执行者',
+    show: (v) => `"${String(v)}"`,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.switchWhileEditingNoActions',
+    label: '★ 编辑到一半换成执行者 ⇒ 不再显示「行动权限」（草稿的 role 是上一个人的时候会露出来）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.switchWhileEditingHeadings',
+    label: '换 agent 之后实际渲染出来的段落标题',
+    ok: (v) => Array.isArray(v) && v.length > 0,
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   {
     view: '审核标准',
@@ -871,7 +1299,7 @@ const CHECKS = [
   {
     view: '审核标准',
     key: 'standard.detailActionsOutOfStandard',
-    label: '★ 那份动作清单**不再**出现在「审核标准」那一行里（同一件事只有一个出处）',
+    label: '★ 那份动作清单**不在**承载判断依据的那一栏（现在是「指令」）里——同一件事只有一个出处',
     ok: (v) => v === true,
   },
   {
@@ -883,7 +1311,34 @@ const CHECKS = [
   {
     view: '审核标准',
     key: 'standard.emptyWarning',
-    label: '有标准的审核者不该显示"审不了任何东西"那条警告',
+    label: '有判断依据的审核者不该显示"审不了任何东西"那条警告',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.emptyReviewerFixtureFound',
+    label: '★ 夹具里有一个"什么都没写"的审核者（否则下面那条正向断言空过）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.emptyReviewerSwitched',
+    label: '★ 右栏真的换成了那个夹具（否则量到的是上一个审核者的头部）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.headlineWhenNoIdentity',
+    label:
+      '★★ 真的没有依据时那条警告**要出现**（"它审不了任何东西…"）——没有这一半，上面那条负向断言靠"警告永远不显示"也能绿',
+    ok: (v) => typeof v === 'string' && v.includes('审不了任何东西'),
+    show: (v) => `"${String(v)}"`,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.headlineWordingUpdated',
+    label:
+      '★★ 而且那句话说的是**「没有写「指令」」**，不再说「没有审核标准」——那个字段界面上已经没有了（使用者报的就是这句）',
     ok: (v) => v === true,
   },
   {
@@ -900,8 +1355,16 @@ const CHECKS = [
   },
   {
     view: '审核标准',
-    key: 'standard.formHasEditorForReviewer',
-    label: '★ 切到审核角色 ⇒ 出现审核标准编辑栏',
+    key: 'standard.formStandardEditorRemoved',
+    label:
+      '★★ 切到审核角色 ⇒ **不再有标准编辑框**（2026-09：标准并进「指令」，不再单独设置）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formHasMergedHint',
+    label:
+      '★★ 那一栏**说明还在**：「身份与判断依据写在「指令」里，标准不再单独设置」——只说"框没了"会让使用者以为标准凭空消失',
     ok: (v) => v === true,
   },
   {
@@ -954,23 +1417,20 @@ const CHECKS = [
   },
   {
     view: '审核标准',
-    key: 'standard.formStandardEditorIsNameAndBody',
-    label: '★ 标准编辑器容器里是**名字 + 正文**（与动作块拆成两处）',
+    key: 'standard.formStandardEditorGone',
+    label:
+      '★★ 那个编辑容器（`.standard`）**整个不在了**（它连同"正文"一起并进了「指令」）',
     ok: (v) => v === true,
   },
-  {
-    view: '审核标准',
-    key: 'standard.formStandardEditorHasNoActions',
-    label: '★ 标准编辑器容器里**没有**动作勾选了（它已经搬到「行动权限」段）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formStandardReachesParent',
-    label: '★ 标准栏与父组件是**通的**：写下正文后状态徽章从「没有标准」变「已写」',
-    ok: (v) => v === '已写',
-    show: (v) => `"${String(v)}"`,
-  },
+  // ⚠️ 原来这里有一条"标准编辑器容器里没有动作勾选"。2026-09 标准并进「指令」之后
+  //    **那个容器整个不存在了** ⇒ 这条失去主语，删掉而不是留一个永远量不到的键。
+  //    "动作勾选只在「行动权限」段"这件事仍由下面 `standard.formActionsBlockLabel`
+  //    与 `standard.formNoBuiltinGroup` 两条钉着。
+  // ⚠️ 原来这里有一条"标准栏与父组件是通的（写下正文后徽章变「已写」）"。
+  //    2026-09 标准并进「指令」之后，**那个徽章与那个框都不存在了** ⇒ 这条删掉，
+  //    而不是留着量一个 null（探针里"空过"等于永远绿）。同一件事现在由
+  //    「指令那一栏与父组件是通的」承担（见下面那组 instructions 的检查）。
+
   {
     view: '审核标准',
     key: 'standard.actionEditSaved',
@@ -999,7 +1459,7 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
-  // ── 迁移：把挂载的 skill 转成内联标准（D38）──
+  // ── 迁移：把挂载的 skill 里的判断依据并进「指令」（D38）──
   //
   // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且标准正来自它。
   // 这一步就是那个出口，所以必须端到端量（按钮 → 标准出现、挂载清空）。
@@ -1012,7 +1472,13 @@ const CHECKS = [
   {
     view: '迁移（D38）',
     key: 'migrate.buttonFound',
-    label: '★ 老形态审核者的详情页有「把挂载的 skill 转成内联标准」',
+    label: '★ 老形态审核者的详情页有「把这份判断依据并进「指令」」',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.noInstructionsBefore',
+    label: '★ 搬移**之前**那一栏说"没有写「指令」 ⇒ 拿不到审核任务"（就是这句在搬完之后不许再说）',
     ok: (v) => v === true,
   },
   {
@@ -1036,7 +1502,7 @@ const CHECKS = [
   {
     view: '迁移（D38）',
     key: 'migrate.adopted',
-    label: '★ 点完之后标准真的固化到它身上了',
+    label: '★ 点完之后标准真的固化到它身上了（详情里出现了那份正文）',
     ok: (v) => v === true,
   },
   {
@@ -1074,6 +1540,105 @@ const CHECKS = [
     view: '迁移（D38）',
     key: 'migrate.legacyActionsHintGone',
     label: '★ 固化（挂载被摘掉）之后那句提示跟着消失（再说就是假话）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.instructionsRowNoFalseClaim',
+    label:
+      '★★ 搬完之后「指令」那一栏**不再**是"没有写「指令」"那个空态——正文刚刚并进来，那句话此刻是假的（与上面 `noInstructionsBefore` 成对：搬之前真、搬之后假）',
+    ok: (v) => v === true,
+    show: (v, facts) => `${v}　实测：「${String(facts['migrate.instructionsRowAfterText'] ?? '')}」`,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.legacyNoticeGone',
+    label:
+      '★★ 老形态的提示与那颗「并进」按钮也跟着消失（留着的话，界面会在搬完之后继续暗示"你还有一份老标准没处理"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.noFalseHeadlineAfterAdopt',
+    label:
+      '★★★ 搬完之后（依据在「指令」里、老字段清空、没有挂载）顶上那条"审不了任何东西"的红警告**不许出现**——这就是使用者报的那条假警报',
+    ok: (v) => v === true,
+  },
+  {
+    view: '迁移（D38）',
+    key: 'migrate.noStandardRowAfter',
+    label: '★ 搬完之后整个详情里仍然没有「审核标准」那一行（那一段是被删掉的，不是被藏起来的）',
+    ok: (v) => v === true,
+  },
+
+  // ── 保存一次就把"老的信息"清掉（2026-09）──
+  //
+  // 使用者说「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
+  // 这一组的判据是**两半**：提示消失（老字段清掉）＋ **身份那段文字一字未变**。
+  // 只量前一半，把老字段直接删掉也能绿，而那是丢了一段判断依据。
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.fixtureFound',
+    label: '★ 夹具里有一个带内联老标准的审核者（否则下面整组空过）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.detailSwitched',
+    label: '★ 右栏真的换成了这个夹具（否则下面量到的是上一个 agent）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.noticeBefore',
+    label: '★ 前提：保存**之前**那条"还带着老的字段"的提示确实在（不然"它消失了"没法量）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.editHintWarns',
+    label: '★ 编辑态**提前说清**保存会发生什么（"我的指令怎么多了一段"不该是没预告的改动）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.leftEditing',
+    label: '★ 保存之后真的退出了编辑（等的是"输入框消失"，不是固定 sleep）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.reviewStandardAfter',
+    label:
+      '★★ 老字段真的清掉了（问接口：`reviewStandard` 是 null；界面「no-agent」= 接口根本没读到，那也不算通过）',
+    ok: (v) => v === null,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.instructionsGotBody',
+    label: '★ 老标准的正文并进了「指令」（不是被删掉）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.identityUnchanged',
+    label:
+      '★★★ 而**投递出去的那段文字逐字节相同**（前后各自按 `[指令, 老标准]` 拼一遍比）——"顺手清理"不许变成"顺手丢一段判断依据"',
+    ok: (v) => v === true,
+    show: (v, facts) =>
+      `${v}　前：${JSON.stringify(facts['fold.identityBefore'])}　后：${JSON.stringify(facts['fold.identityAfter'])}`,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.noticeAfter',
+    label: '★★ 保存之后那条老提示**消失了**（使用者要的正是这一条：重新编辑保存后旧资讯就该没了）',
+    ok: (v) => v === false,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.readOnlyShowsMerged',
+    label: '★ 而且只读态「指令」那一栏里现在就是那段合并后的文字（界面上看得见"依据还在"）',
     ok: (v) => v === true,
   },
 
@@ -1191,6 +1756,109 @@ const CHECKS = [
       typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
   },
 
+  // ── 顶栏：页名 + 这一页的动作（2026-09 改版）──
+  //
+  // ⚠️ 这一段与语言那一段**顺序不能颠倒**：它断言的是中文界面（页名「任务清单」
+  //    这类字面）。语言那一段跑在最后，测完切回中文。
+  //
+  // 判据的方向是"**跟着页换**"：三个页面各一条，期望值是逐页写死的。只量
+  // "按钮数量 > 0"的话，五个页面全显示同一排按钮也能过——而那正是这次改版要防的。
+  {
+    view: '顶栏',
+    key: 'topbar.pageName',
+    label: '★ 顶栏左边写着**当前这一页**的名字（任务清单 / 智能体 / 工具 三轮都对）',
+    ok: (v) =>
+      v && v['#/tasks'] === '任务清单' && v['#/agents'] === '智能体' && v['#/tools'] === '工具',
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.actions',
+    label:
+      '★★ 顶栏里紧跟着页名的那排动作**只属于当前这一页**（换页就整排换掉，上一页的按钮一个都不留）',
+    ok: (v) =>
+      v &&
+      JSON.stringify(v['#/tasks']) === JSON.stringify(['列表', '看板', '刷新']) &&
+      JSON.stringify(v['#/agents']) === JSON.stringify(['新建', '设置', '刷新']) &&
+      JSON.stringify(v['#/tools']) === JSON.stringify(['刷新', '安装工具']),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.sameAsSidebar#/tasks',
+    label: '★ 页名与侧栏那一项**是同一句话**（两处各写一份迟早会不一样）',
+    ok: (v) => v === '任务清单',
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.sameAsSidebar#/agents',
+    label: '页名与侧栏那一项一致（智能体）',
+    ok: (v) => v === '智能体',
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.sameAsSidebar#/tools',
+    label: '页名与侧栏那一项一致（工具）',
+    ok: (v) => v === '工具',
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.oneLine',
+    label: '★ 顶栏恒为**一行**（三个页面都量）：高度被 `.shell` 的 calc 用着，换行会把整页挤歪',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.overflowPx',
+    label: '★ 顶栏**不横向溢出**（三个页面都量）：窄窗口下动作收进 `⋯`，不靠换行解决',
+    ok: (v) => v && v['#/tasks'] === 0 && v['#/agents'] === 0 && v['#/tools'] === 0,
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.actionsAtSidebarEdge',
+    label:
+      '★★ 这一页的动作，**左缘与侧栏右缘对齐**（= 与主区内容共一条竖线）——页名长短不影响它，顶栏与 .shell 共用同一个 grid，结构上就对齐',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.actionsLeftOfTitleRight',
+    label:
+      '★★ 这一页的动作在最左边那一组里，而在最右边的是与页面无关的那几个（推到最右时两者隔着一千多像素，看起来是两件不相干的事）',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.buttonHeights',
+    label: '★ 顶栏里所有按钮**一种高度**（原来页面动作是页面里那个大尺寸，与旁边几个高低错落）',
+    ok: (v) =>
+      !!v &&
+      ['#/tasks', '#/agents', '#/tools'].every((k) => Array.isArray(v[k]) && v[k].length === 1),
+    show: (v) =>
+      Object.entries(v ?? {})
+        .map(([k, hs]) => `${k}: ${Array.isArray(hs) ? hs.join('/') + 'px' : hs}`)
+        .join('　'),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.activeModeVisible',
+    label:
+      '★★ 当前那个模式按钮**看得出来**（`.active` 曾经是死类名：界面上根本没有它的样式，于是「列表 / 看板」长得一模一样）',
+    // 「不适用」= 这一页没有模式切换（只有任务页有），那是正常的
+    ok: (v) =>
+      !!v &&
+      ['#/tasks', '#/agents', '#/tools'].every(
+        (k) => v[k] === true || v[k] === '不适用（这一页没有"当前模式"）',
+      ),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.moreHiddenWide',
+    label: '★ 宽屏下 `⋯` **不出现**（三个页面都量）：收起来只是窄屏的事',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+  },
+
   // ── 语言切换（D39）──
   //
   // 这一段跑在**最后**（前面全是中文断言），并且在末尾切回中文。
@@ -1242,18 +1910,18 @@ const CHECKS = [
   {
     view: '语言切换',
     key: 'lang.boardColumnsInEn',
-    label: '★ 看板五个列头都翻（`titleId`），一个中文字都不剩',
+    label: '★ 看板六个列头都翻（`titleId`），一个中文字都不剩',
     ok: (v) =>
       Array.isArray(v) &&
-      v.length === 5 &&
-      v.join('|') === 'Executing|Executed · awaiting review|Acting|Needs a human|Reviewed',
+      v.length === 6 &&
+      v.join('|') === 'Executing|Executed · awaiting review|Acting|Needs a human|Reviewed|Dropped',
   },
   {
     view: '语言切换',
     key: 'lang.boardHintsInEn',
     label: '★ 列说明也翻（`hintId`）',
     ok: (v) =>
-      Array.isArray(v) && v.length === 5 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
+      Array.isArray(v) && v.length === 6 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
   },
   {
     view: '语言切换',
@@ -1608,6 +2276,308 @@ const CHECKS = [
       '★★ 并且带上了它**实际会跟到的那个审核者**（D28 的长期安排在提交前就看得见）',
     ok: (v) => typeof v === 'string' && v.includes(CHAIN_REVIEWER),
     show: (v) => `"${String(v)}"`,
+  },
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 版面：三步排成一行 + 首屏看得见三个问题
+  // ══════════════════════════════════════════════════════════════════
+  {
+    view: '新建任务',
+    key: 'newtask.layoutLead',
+    label: '★★★「要做什么」在**三步上面**（它在 DOM 里一直是最前面一个，却被网格挪走过：'
+      + '`.step-exec` 写了显式 `grid-row: 1 / span 2`，它只定了列、行交给自动排布，'
+      + '而 CSS Grid 先放"行列都确定"的——于是输入框掉到三步下面。看代码看不出来）',
+    ok: (v) =>
+      !!v?.lead &&
+      !!v?.firstStep &&
+      v.lead.top < v.firstStep.top &&
+      // 输入框整条都在三步上面（不是"标签在上面、框在下面"）
+      (v.textarea ? v.textarea.top + v.textarea.h <= v.firstStep.top + 1 : false),
+    show: (v) =>
+      v?.lead
+        ? `「要做什么」top=${v.lead.top} 高=${v.lead.h}　输入框 top=${v.textarea?.top} 高=${v.textarea?.h}　三步第一块 top=${v.firstStep.top}`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.layoutFlushAfterConfig',
+    label: '★★ ① **被要求拉满**（`align-self: stretch`）且两列齐平——`layoutSteps` 那条'
+      + '在进页面时量，夹具里两列恰好一样高，**怎么都是齐的**，测不出拉伸有没有生效，'
+      + '所以这里另量一次并直接断言那条 CSS 属性。'
+      + '⚠️ 夹具的右列（128+16+231）与 ① 的自然高度一样，这一条仍偏弱；'
+      + '真正拉开差距的是真实数据（③ 有两枚胶囊时 ① 483px vs 自然 375px）',
+    ok: (v) =>
+      !!v &&
+      v.alignSelf === 'stretch' &&
+      v.actionsH > 0 &&
+      Math.abs(v.execBottom - v.actionsBottom) <= 2,
+    show: (v) =>
+      v
+        ? `① 高=${v.execH} 底=${v.execBottom}　③ 高=${v.actionsH} 底=${v.actionsBottom}　align-self=${v.alignSelf}`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.chipRadius',
+    label: '★ 胶囊的圆角是**普通圆角**（8px），不是"胶囊"造型的 100px——一枚里有 3~4 行字时，'
+      + '100px 在那么高的框上会变成两段夸张的弧，左右两条直边几乎没了',
+    ok: (v) => !!v && Number.parseFloat(v.radius) <= 12,
+    show: (v) => (v ? `圆角 ${v.radius}（框高 ${v.height}px）` : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.layoutSteps',
+    label: '★★ 两列：**左列 ① 执行，右列 ② 审核在上、③ 行动在下**（③ 与 ② 同列同一条线：'
+      + '先判、再动），且 ① **拉到与右列齐平**（不拉平的话左列第二格会空出一个洞）',
+    ok: (v) => {
+      const a = v?.exec
+      const b = v?.review
+      const c = v?.actions
+      if (!a || !b || !c) return false
+      const ntSameRow = a.top === b.top
+      const ntOtherCol = a.left !== b.left
+      const ntStacked = b.left === c.left && c.top > b.top
+      const ntFlush = Math.abs(a.top + a.h - (c.top + c.h)) <= 2
+      return ntSameRow && ntOtherCol && ntStacked && ntFlush
+    },
+    show: (v) =>
+      v?.exec
+        ? `① top=${v.exec.top} left=${v.exec.left} 高=${v.exec.h}　② top=${v.review?.top} left=${v.review?.left}　③ top=${v.actions?.top} left=${v.actions?.left} 高=${v.actions?.h}`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.titleAutoGrow',
+    label: '★★「要做什么」**默认 3 行、随输入长高、15 行封顶**（判据是量出来的高度，'
+      + '不是"它有个 rows 属性"——写死的 rows 与"真的会跟着长"在属性上看不出区别）',
+    ok: (v) =>
+      // 1 行与 3 行一样高 ⇒ 起步就是 3 行
+      v?.h1 === v?.h3 &&
+      // 超过 3 行开始长
+      v?.h6 > v?.h3 &&
+      // 一直长到 15 行
+      v?.h15 > v?.h6 &&
+      // 15 行之后封顶（30 行不再变高；留 4px 余量——`scrollHeight` 是整数、
+      // 行高是小数，卡死在"完全相等"上会因为一两像素的取整假红），并且改成自己滚
+      v?.h30 <= v?.h15 + 4 &&
+      v?.overflowAt30 === 'auto' &&
+      // 清空之后回到起步高度（程序化改值也要重新量）
+      v?.hAfterClear === v?.h3,
+    show: (v) =>
+      v
+        ? `rows=${v.rows}　1行=${v.h1} 3行=${v.h3} 6行=${v.h6} 15行=${v.h15} 30行=${v.h30}（${v.overflowAt30}）清空后=${v.hAfterClear}`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.titleFullWidth',
+    label: '★ 那个框**占满整行宽度**（这一页唯一要写的东西就是它，原来只用了 544px / 1096px，'
+      + '右边一半是空的）',
+    ok: (v) => !!v && v.width > v.formWidth * 0.9,
+    show: (v) => (v ? `${v.width}px / 整行 ${v.formWidth}px` : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigParamLines',
+    label: '★★ 每个动作的**钉死的固定值 `name=value` 与契约值同一行**（同一句"模拟关闭单据"，'
+      + '钉了 `reason=巡检` 与没钉是两回事），且胶囊上**没有**多余的参数行',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length > 0 &&
+      v.every((c) => typeof c?.type === 'string') &&
+      // 夹具那个动作钉了 `text=长期钉的` ⇒ 它的固定值必须在**第一行**（head）里
+      v.some((c) => (c.head ?? '').includes('已固定')) &&
+      // ⚠️ 而且**不许**多出别的参数行：曾经多过"由模型填 / 平台注入"两行机器名，
+      //    使用者没法据它们做任何决定（开放参数本来就会由模型填、平台注入的值
+      //    他也改不了）。一枚胶囊最多两行字：契约值+固定值、说明。
+      v.every((c) => (c.subCount ?? 0) <= 2),
+    show: (v) =>
+      Array.isArray(v)
+        ? v.map((c) => `${c.type} → [${c.subs.join(' | ')}]`).join('　')
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.layoutFirstScreen',
+    label: '★★ 首屏（不滚动）里三个问题的**标题与主控件**都在——这一页要回答的就是这三个问题，'
+      + '看不到就等于要滚下去猜',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length === 3 &&
+      v.every((x) => x.titleVisible === true && x.controlVisible === true),
+    show: (v) =>
+      Array.isArray(v)
+        ? v.map((x) => `${x.title}:标题${x.titleVisible ? '✓' : '✗'}控件${x.controlVisible ? '✓' : '✗'}`).join('　')
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigInCard',
+    label: '★★ 允许的动作那几枚胶囊**在 ③ 那张卡片里面**（不是页面上另一处的一条）——'
+      + '挪出去之后那一块读起来是"另一件事"：使用者问"这些是什么"时，答案在 ③ 里，不在外面',
+    ok: (v) => v?.detailInsideCard === true && v?.chipsInCard > 0 && v?.chipsOutside === 0,
+    show: (v) =>
+      v
+        ? `在卡片里=${v.detailInsideCard}　卡片内 ${v.chipsInCard} 枚 / 卡片外 ${v.chipsOutside} 枚`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigOnePerLine',
+    label: '★ 那几枚胶囊**一枚一行**（③ 只有一列宽，横排会折成"契约值半行、说明挤到下一行、'
+      + '下一枚又从半路接上"的乱条）',
+    ok: (v) =>
+      Array.isArray(v?.tops) && v.tops.length > 0 && new Set(v.tops).size === v.tops.length,
+    show: (v) =>
+      Array.isArray(v?.tops)
+        ? `${v.count} 枚，${new Set(v.tops).size} 个不同顶边　高 ${v.heights?.join('/')}px`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.footSummaryText',
+    label: '★★ 提交栏那一行说清"我即将提交的是什么"（交给谁 · 谁审 · 允许几个动作）——'
+      + '滚下去看高级选项时，它是唯一还在的上下文',
+    ok: (v) =>
+      typeof v === 'string' &&
+      v.includes(CHAIN_EXECUTOR) &&
+      v.includes(CHAIN_REVIEWER) &&
+      /\d/.test(v),
+    show: (v) => `"${String(v)}"`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.footStickyAtBottom',
+    label: '★★ 滚到页面最底下时提交栏**还在视口里**（判据是"滚了之后还在"，不是"它有个 sticky 声明"）',
+    ok: (v) => v?.visible === true,
+    show: (v) => (v ? `可见=${v.visible}　横贯=${v.spansPane}（${v.footW}px vs 可滚区 ${v.paneW}px）` : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.footSpansPane',
+    label: '★ 提交栏**横贯整块可滚区**（`.main` 自己有左右留白，不留负边距它会缩在那圈留白里，'
+      + '滚过去的内容从两侧露出来）',
+    ok: (v) => v?.spansPane === true,
+    show: (v) => (v ? `${v.footW}px vs 可滚区 ${v.paneW}px` : String(v)),
+  },
+  // ══════════════════════════════════════════════════════════════════
+  // ★「要做什么」：两个字段合并成一个多行框
+  // ══════════════════════════════════════════════════════════════════
+  {
+    view: '新建任务',
+    key: 'newtask.titleField',
+    label: '★「要做什么」是**一个多行框**（单行 `input` 装不下真正要说的东西：一按回车就提交、'
+      + '写得长只能横着滚）',
+    ok: (v) => v?.count === 1 && v?.multiline === true && v?.required === true,
+    show: (v) => (v ? `${v.tag} · 多行=${v.multiline} · 必填=${v.required} · 这一栏共 ${v.count} 个控件` : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.hasDescriptionField',
+    label: '★「补充说明」那一栏**没有了**（"标题 + 补充说明"是记录格式的分法，不是使用者的；'
+      + '切分交给 `lib/request-text.ts`，他不必先做一次分类）',
+    ok: (v) => v === false,
+  },
+  // ══════════════════════════════════════════════════════════════════
+  // ★ ③ 行动：从"铺一整段选择器"改成"一个按钮 + 居中对话框"
+  // ══════════════════════════════════════════════════════════════════
+  {
+    view: '新建任务',
+    key: 'newtask.actionsSectionHeight',
+    label: '★ ③ 行动那一段**收起来了**（原来选择器直接铺在里面，实测 537px、在 700px 高的视口里'
+      + '从 y=670 开始——等于下半屏全是这一栏，提交按钮被推到两屏之外）',
+    // ⚠️ 判据改过：③ 现在**理应**装下"配置细节"（胶囊 + 出处句），比原来高是对的
+    //    ——拿一个像素上限守它，只会逼着人把配置挪到别处去（那正是被否掉的那一版）。
+    //    这里守的是**那一整块选择器没有铺回来**：铺回来时这一段会是 700px 以上，
+    //    而 `actionsPickerNotInline` 只管 `.action-perms` 在不在、管不到"是不是又
+    //    变成一整屏"。两条一起才封得住。
+    ok: (v) => typeof v === 'number' && v > 0 && v < 640,
+    show: (v, facts) => {
+      const ntParts = facts['newtask.actionsSectionParts']
+      const ntBreak = Array.isArray(ntParts)
+        ? '　[' + ntParts.map((x) => `${String(x.cls).split(' ')[0]} ${x.h}px`).join(' + ') + ']'
+        : ''
+      return `${v}px（改之前 537px）${ntBreak}`
+    },
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsPickerNotInline',
+    label: '★ 选择器**不在页面上**了（它住进对话框；留在页面里就会把这一栏重新撑回几百像素）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigChips',
+    label: '★★ ③ 上画的是**当前的配置细节**（每个允许的动作一枚胶囊：契约值 + 它的 `summary`），'
+      + '不是一个计数——选择器进对话框之后，这一行是**不点开就唯一能看见配置的地方**',
+    ok: (v) =>
+      Array.isArray(v) &&
+      v.length > 0 &&
+      v.every((c) => typeof c?.type === 'string' && c.type.includes('.') && !!c?.summary),
+    show: (v) => (Array.isArray(v) ? v.map((c) => c.type).join(' | ') : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigFixedText',
+    label: '★★ 钉死的固定值在页面上**看得见**（`已固定: text=长期钉的`）——不写出来的话，'
+      + '使用者以为这次会带着他上次钉的值去执行，而实际发出去的是另一个值',
+    ok: (v) => typeof v === 'string' && v.includes('已固定') && v.includes('text='),
+    show: (v) => `"${String(v)}"`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsConfigMatchesPicks',
+    label: '★★ 页面上的胶囊 == 对话框里勾着的框（同一个事实的两种画法）——两处各算一遍就会分叉，'
+      + '而分叉的表现是"页面上写着允许 A、点开对话框里勾的是 B"，且没有任何报错',
+    ok: (v) =>
+      Array.isArray(v?.chips) && Array.isArray(v?.picks) && v.chips.join() === v.picks.join(),
+    show: (v) =>
+      Array.isArray(v?.chips)
+        ? `胶囊 ${v.chips.join(' | ') || '（空）'}　勾着 ${v.picks.join(' | ') || '（空）'}`
+        : String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsDialogClosedInitially',
+    label: '一进页面 ③ 的对话框是**关着**的（默认状态不该有浮层盖着表单）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsChooseButtonText',
+    label: '★ 那颗按钮的字回答"点开能干什么"（`选择动作…`），不是"这里是什么"'
+      + '（后者与上面那行标签重复，同一件事两个出处）',
+    ok: (v) => typeof v === 'string' && v.includes('选择动作'),
+    show: (v) => String(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsDialogOpens',
+    label: '★★ 点那颗按钮**真的打开**了浮层（按钮在、点了不开是这次改动最容易出的错，'
+      + '而它的症状是后面所有勾选框断言一起红）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsDialogHasPicker',
+    label: '★ 对话框里就是那个**左选右配**的选择器（搬进去的是同一个组件，不是另画一个）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsDialogBox',
+    label: '★ 对话框**一屏放得下**（装不下就会出现"浮层自己套一层滚动条"，'
+      + '而两栏挑选器在里面滚最难受：左栏滚走了、右栏还在）',
+    ok: (v) => v?.fits === true,
+    show: (v) => (v ? `高 ${v.h}px · 顶边 ${v.top}px · 视口内=${v.fits}` : String(v)),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.actionsCountMatchesPicker',
+    label: '★★ 按钮旁的计数与选择器状态条**同一个分母**（两处各算一遍就会在"装了什么包"变化时'
+      + '分叉，症状是同一屏上两个不同的总数——实测踩过"已允许 2 / 1 个动作"）',
+    ok: (v) => v !== null && v.button[0] === v.picker[0] && v.button[1] === v.picker[1],
+    show: (v) => (v ? `按钮 ${v.button.join('/')} · 状态条 ${v.picker.join('/')}` : String(v)),
   },
   {
     view: '新建任务的三步链',
@@ -2169,6 +3139,14 @@ const CHECKS = [
       `键在吗：${JSON.stringify(v)}　值：${JSON.stringify(facts['newtask.followRunAllowedActions'])}（null = 没有那个键或者值是 null，看左边那一位）`,
   },
   {
+    view: '新建任务',
+    key: 'newtask.deliveryModeRecorded',
+    label:
+      '★★ 投递档**落在 run 上**：探针的 run 走 generic（没有系统提示通道）⇒ 该是 **B**（三块合成一段）。这条钉住 A 档的另一侧——换个 runtime 投递形状真的变了，而且**说得出来**',
+    ok: (v) => v === 'B',
+    show: (v) => String(v),
+  },
+  {
     view: '新建任务的三步链',
     key: 'newtask.clearedSubmitUntick',
     label: '★ E2 的前提：探针真的把 ③ 上那个勾**取消**了',
@@ -2392,7 +3370,7 @@ fs.copyFileSync(probeSrc, probeDst)
 
 const port = await freePort()
 const base = `http://127.0.0.1:${port}`
-log(dim(`一次性 daemon：${base}（数据在 .cache/layout-probe/，不碰 ~/.alpha-helper）`))
+log(dim(`一次性 daemon：${base}（数据在 .cache/layout-probe/，不碰 ~/.agentdeck）`))
 
 const daemon = spawn(
   process.execPath,
@@ -2483,7 +3461,7 @@ try {
   }
 
   // ★ 再造一个**老形态的审核者**（D38 的迁移夹具）：只挂 skill、没有内联标准。
-  //   探针要走一遍"把挂载的 skill 转成内联标准 → 那条 skill 才卸得掉"。
+  //   探针要走一遍"把判断依据并进「指令」→ 那条 skill 才卸得掉"。
   try {
     const skills = (await (await fetch(`${base}/api/skills`)).json()).skills
     const probeSkill = skills.find((s) => s.slug === 'probe-skill')
@@ -2503,6 +3481,89 @@ try {
     }
   } catch (err) {
     log(yellow(`⚠ 造老形态审核者时出错：${err}`))
+  }
+
+  /**
+   * ★★ 再造一个**什么都没有的审核者**（2026-09）：验证详情页顶上那条红警告
+   * 「它审不了任何东西：没有写「指令」…」在**真的没有依据**时才出现。
+   *
+   * ⚠️ 它的孪生情形更重要：**只写了「指令」的审核者不该看到这条警告**——那条
+   *    判据原来只看老字段（`reviewStandard` / `skillIds`），于是正常的审核者被
+   *    误报（使用者的原话：「这个提示有问题」）。那个"不该出现"的方向用 D38 的
+   *    夹具量（它搬完之后正是"只有指令"的形态），这里造的这一个量"该出现"。
+   */
+  try {
+    const res = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '探针用的没写指令的审核者', role: 'reviewer' }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造没写指令的审核者失败（HTTP ${res.status}）`))
+  } catch (err) {
+    log(yellow(`⚠ 造没写指令的审核者时出错：${err}`))
+  }
+
+  /**
+   * ★★ 再造一个**带内联老标准**的审核者（2026-09）：探针要走一遍
+   * 「重新编辑保存一次 ⇒ 那条"还带着一份老的标准"的提示就该消失」。
+   *
+   * ⚠️ 为什么要**单独造一个**、而不是拿首启那个审核员来试：首启那个审核员
+   *    被前面一组检查读着（老正文显示、并进来的按钮），把它改掉会让那一组
+   *    量到"改完之后"的样子——一条断言读到的是别的现场，是这一整个探针里
+   *    反复踩过的那类坑。
+   */
+  try {
+    const res = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: '探针用的内联老标准审核者',
+        role: 'reviewer',
+        instructions: '你是严格的审核者。',
+        // ⚠️ 正文要**长于 20 个字符**：`standard.detailShowsBody` 那条检查量的是
+        //   "老正文真的显示出来了"（`pre` 里非空的一段），阈值 >20 是当初内置
+        //   标准那段的长度——夹具正文太短会量不到"显示"这件事。
+        reviewStandard: {
+          body: '## 判定\n\n只看证据。\n\n1. 结论要有依据，证据要能指回原文。\n2. 不要引入标准之外的要求。',
+        },
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造内联老标准审核者失败（HTTP ${res.status}）`))
+  } catch (err) {
+    log(yellow(`⚠ 造内联老标准审核者时出错：${err}`))
+  }
+
+  /**
+   * ★★ 再造一个**详情用的老标准审核者**（2026-09 三次改）：[审核标准] 那一段
+   *   原来拿首启的审核员量"老正文显示 + 并进来的入口"，而首启的判据已并进
+   *   「指令」（`reviewStandard` 是 null）——老正文那两条现在由**这一个**夹具
+   *   来量。
+   *
+   * ⚠️ 为什么**不能**复用 `探针用的内联老标准审核者`：那一个是 fold-on-save 段
+   *    的夹具（要留着完整的 `reviewStandard`），而 [审核标准] 段会在它身上走
+   *    **真实保存**（勾 append-note 保存 ⇒ 内联老标准被服务端并进「指令」并清掉）。
+   *    两条共用的话，fold-on-save 段量到的就是"改完之后"的样子——探针里反复
+   *    踩过的那类坑（一条断言读到的是别的现场）。
+   */
+  try {
+    const res = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: '探针用的老标准详情审核者',
+        role: 'reviewer',
+        instructions: '你是严格的审核者。',
+        // ⚠️ 正文要**长于 20 个字符**：`standard.detailShowsBody` 那条检查量的是
+        //   "老正文真的显示出来了"（`pre` 里非空的一段），阈值 >20 是当初内置
+        //   标准那段的长度——夹具正文太短会量不到"显示"这件事。
+        reviewStandard: {
+          body: '## 判定\n\n只看证据。\n\n1. 结论要有依据，证据要能指回原文。\n2. 不要引入标准之外的要求。',
+        },
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造老标准详情审核者失败（HTTP ${res.status}）`))
+  } catch (err) {
+    log(yellow(`⚠ 造老标准详情审核者时出错：${err}`))
   }
 
   // ★ 再造**一个执行者**（不造 run）：探针要测"换默认智能体"，而首启播种的
@@ -2525,14 +3586,121 @@ try {
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // 造**聊天页的夹具**：一个挂着 skill 的执行者 + 一个谁都没挂的 skill
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 「新对话」那个下拉里有一组选项是"按 skill 找的那个人"（选了它 = 和有这个
+  // skill 的执行者对话）。没有夹具的话那几条检查会**空过**——空过等于永远绿，
+  // 等于没量。
+  //
+  // ⚠️ 特意新造 skill、而不是复用上面的 `probe-skill`：那一条挂在**老形态审核者**
+  //    身上，D38 的迁移那一段会动它的挂载。夹具之间不能互相踩。
+  try {
+    const res = await fetch(`${base}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [
+          { slug: 'chat-probe-skill', name: '聊天夹具技能', body: '# 聊天夹具\n', source: 'local' },
+          { slug: 'chat-orphan-skill', name: '没人挂的聊天夹具', body: '# 没人挂\n', source: 'local' },
+        ],
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造聊天夹具 skill 失败（HTTP ${res.status}）——聊天那几条会空过`))
+    const all = (await (await fetch(`${base}/api/skills`)).json()).skills ?? []
+    const owned = all.find((s) => s.slug === 'chat-probe-skill')
+    if (!owned) {
+      log(yellow('⚠ 找不到聊天夹具 skill——聊天那几条会空过'))
+    } else {
+      const r2 = await fetch(`${base}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: '探针用的技能执行者',
+          role: 'executor',
+          skillIds: [owned.id],
+        }),
+      })
+      if (!r2.ok) log(yellow(`⚠ 造技能执行者失败（HTTP ${r2.status}）`))
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造聊天夹具时出错：${err}`))
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 造**对话目录夹具**：聊天右栏底部那一栏「工作目录的文件」
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 那几条检查要一个**真的有东西的目录**，而且要三种东西都在：
+  //
+  //   · 产出（`结论.md`）与一个**还没展开**的子目录（`notes/`）——"一次只列一层"
+  //     只有目录里真有一层可展开时才量得到；
+  //   · 平台注入物（`.claude/skills/…` 与 `.agentdeck/context/…`）——"注入物
+  //     排在产出后面"与"弱化显示"两条只有它们在的时候才有判据。
+  //
+  // ⚠️ **执行者用 `runtimeKey: 'generic'`**：建对话要带上第一句话，而那会立刻
+  //    起一条 run。`generic` 的命令是 `agent-cli`（不存在），run 立刻以 ENOENT
+  //    失败——这一条检查要的是"对话存在、目录是它报出来的那个"，与那一轮跑不跑
+  //    得起来无关。探针不该替使用者去调真的 CLI（与三步链那三个夹具同一个理由）。
+  //
+  // ⚠️ 目录的路径**从 URL 交给探针页**：探针不该靠"列表里的第一条对话"这种脆
+  //    假设去找它（`chatFilesWorkDir`）。
+  //
+  // ⚠️⚠️ **播种阶段刻意不建那条对话**：聊天那一段（执行者下拉、skill 那几条）
+  //    是在"左栏一个对话都没有"的前提下量的——上一版在这里顺手建了对话，
+  //    结果那一段全部变红（草稿态起不来、空态检查也失效）。所以对话由探针在
+  //    **要量那一栏的那一刻**自己建（见 probe.html 里 `chatEnsureFixtureConversation`）。
+  const chatFilesDir = path.join(SCRATCH, 'chat-files-wd')
+  let chatFilesWorkDir = ''
+  try {
+    // 用 `fs.*Sync`（与上面工具夹具同一套）：这一段在起 daemon 之前跑，同步更直白
+    const put = (rel, text) => {
+      const full = path.join(chatFilesDir, rel)
+      fs.mkdirSync(path.dirname(full), { recursive: true })
+      fs.writeFileSync(full, text)
+    }
+    put('结论.md', '# 结论\n\n夹具目录里的产出。\n')
+    put('notes/deep.txt', 'deep\n')
+    put('.claude/skills/probe-fixture/SKILL.md', '# 注入物\n')
+    put('.agentdeck/context/probe.md', '上下文\n')
+    // 查看器那几条要的东西：
+    //   · 一个**真的会跑脚本**的 html（用来验 iframe 的 sandbox：脚本要能跑，
+    //     而父页面**读不到**它的 document——那正是不透明源的意思）；
+    //   · 一个带 NUL 的二进制（扩展名认不出 ⇒ 服务端回 octet-stream）；
+    //   · 一个超过高亮阈值的源码文件（256KB 以上 ⇒ 不着色，但原文照旧完整）。
+    put(
+      'page.html',
+      '<!doctype html><meta charset="utf-8"><title>probe</title>' +
+        '<body><h1 id="t">还没跑</h1>' +
+        '<script>document.getElementById("t").textContent="跑过了"</script>',
+    )
+    put('blob.bin', Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x41, 0x42, 0x00, 0xff]))
+    put('big.py', Array.from({ length: 40000 }, (_, i) => `x${i} = ${i}`).join('\n') + '\n')
+
+    const madeAgent = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: '探针用的目录执行者',
+        role: 'executor',
+        runtimeKey: 'generic',
+      }),
+    })
+    if (!madeAgent.ok) throw new Error(`造目录执行者失败（HTTP ${madeAgent.status}）`)
+    chatFilesWorkDir = chatFilesDir
+  } catch (err) {
+    log(yellow(`⚠ 造对话目录夹具时出错：${err}——那几条检查会空过`))
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // 造**工具包夹具**（D40）：三个目录，加一次真的安装
   // ══════════════════════════════════════════════════════════════════
   //
   // 三份夹具各管一件事，缺一条就会有一段检查**空过**：
   //
   //   ① `probe-tool`：装得上、**两个动作**，其中 `clean-notes` 是
-  //      `reversible: false` + `dryRun: 'unsupported'`——"不可回滚 / 不支持预演"
-  //      那两条标注只有动作本身带着这两个值时才量得到；
+  //      `reversible: false`——"不可回滚"那条标注只有动作本身带着这个值时才量得到
+  //      （2026-09：`dryRun` 声明保留在夹具里，但它不再参与任何判断、也没有标注）；
   //   ② `probe-tool-ui`：给**抽屉里那次真实安装**用（换个 slug，否则同名会被
   //      自己的 ① 挡住，量到的是"同名冲突"而不是"装上了"）；
   //   ③ `probe-broken`：清单合法但**入口脚本不在包里** ⇒ 服务端回
@@ -2561,11 +3729,11 @@ try {
     writeTool(
       toolFixtureDir,
       {
-        schema: 'alpha-helper/tool@1',
+        schema: 'agentdeck/tool@1',
         slug: 'probe-tool',
         name: '探针工具（夹具）',
         version: '1.0.0',
-        description: '探针夹具：两个动作，其中一个不可回滚且不支持预演。',
+        description: '探针夹具：两个动作，其中一个不可回滚。',
         runtime: 'node',
         entry: 'scripts/note.mjs',
         actions: [
@@ -2584,7 +3752,7 @@ try {
           },
           {
             name: 'clean-notes',
-            // ★ 这一条是"不可回滚 + 不支持预演"两条标注的唯一来源
+            // ★ 这一条是"不可回滚"那条标注的唯一来源
             summary: '把 NOTES.md 删掉（演示 reversible=false 的动作）',
             entry: 'scripts/clean.mjs',
             reversible: false,
@@ -2608,7 +3776,7 @@ try {
     writeTool(
       uiToolFixtureDir,
       {
-        schema: 'alpha-helper/tool@1',
+        schema: 'agentdeck/tool@1',
         slug: 'probe-tool-ui',
         name: '探针工具（从抽屉里装的）',
         version: '0.1.0',
@@ -2629,7 +3797,7 @@ try {
     writeTool(
       brokenToolFixtureDir,
       {
-        schema: 'alpha-helper/tool@1',
+        schema: 'agentdeck/tool@1',
         slug: 'probe-broken',
         name: '探针坏包（清单合法、入口不在）',
         runtime: 'node',
@@ -2652,28 +3820,12 @@ try {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ source: 'path', path: toolFixtureDir }),
     })
+    // ⚠️ 这里原来还会把夹具工具 `PUT` 到夹具执行者身上（`/api/agents/:id/tools`），
+    //    好让「被哪些执行者挂载」那一列有内容可量。那一列与那条挂载能力一起撤掉了
+    //    （使用者的决定），所以这次 PUT 没有消费者了，一并删掉——留着就是一条
+    //    只为不存在的界面服务的夹具。接口本身仍由 `tools-api.test.ts` 覆盖。
     if (!res.ok) {
       log(yellow(`⚠ 装夹具工具失败（HTTP ${res.status}）——工具那几条会量到空态`))
-    } else {
-      const { tool } = await res.json()
-      // ★ 把它挂到**夹具执行者**身上：Tools 那两处要量的正是"挂给了谁"与
-      //   "智能体详情里挂载了什么"。没人挂的工具只能量到"未挂给任何智能体"，
-      //   而"挂了一个"是另一条显示分支——两条都得有夹具才量得全。
-      //
-      //   挂在夹具执行者（而不是播种的那个）上：探针要在 agents 页按名字找到
-      //   这一行，名字是确定的，不依赖列表顺序。
-      const agents = (await (await fetch(`${base}/api/agents`)).json()).agents ?? []
-      const fixtureExec = agents.find((a) => a.name === '探针用的执行者')
-      if (!fixtureExec) {
-        log(yellow('⚠ 找不到夹具执行者——"挂给了谁"那几条会量到空态'))
-      } else {
-        const put = await fetch(`${base}/api/agents/${encodeURIComponent(fixtureExec.id)}/tools`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ toolIds: [tool.id] }),
-        })
-        if (!put.ok) log(yellow(`⚠ 把夹具工具挂到执行者上失败（HTTP ${put.status}）`))
-      }
     }
   } catch (err) {
     log(yellow(`⚠ 装夹具工具时出错：${err}`))
@@ -2767,6 +3919,40 @@ try {
     log(yellow(`⚠ 造三步链夹具时出错：${err}`))
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // 造**本地技能目录夹具**（Skills 页 →「设置」）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 这一组量的是"勾一个别的 AI 工具的目录 ⇒ skill 出现在这一页 ⇒ 能挂给智能体"
+  // 这条链**真的通**。三份夹具各管一件事：
+  //
+  //   ① `probe-local-a` / ② `probe-local-b`：两个真技能（要量"读进来了几个"，
+  //      一个的话"只读进来一个"和"只认得一个"分不清）；
+  //   ③ `probe-empty-dir/`：**没有 SKILL.md 的空目录**——实测
+  //      `~/.claude/skills` 里就有一个这样的，而"勾了却少一个"是使用者最可能
+  //      撞上的困惑，界面上必须有一句话解释它。
+  //
+  // ⚠️ 目录写在 SCRATCH 里（`.cache/layout-probe/`），仓库外一个字节都不写。
+  // ⚠️ 路径要传给探针页：抽屉里那次勾选是"真的往输入框里打字"驱动的。
+  const fixtureLocalSkillsRoot = path.join(SCRATCH, 'fixture-local-skills')
+  try {
+    for (const [slug, summary] of [
+      ['probe-local-a', '探针夹具：本地目录里的第一个技能。'],
+      ['probe-local-b', '探针夹具：本地目录里的第二个技能。'],
+    ]) {
+      const dir = path.join(fixtureLocalSkillsRoot, slug)
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(
+        path.join(dir, 'SKILL.md'),
+        `---\nname: ${slug}\ndescription: ${summary}\n---\n\n# ${slug}\n\n${summary}\n`,
+      )
+    }
+    // 没有 SKILL.md 的目录：要出现在"跳过"那句话说的地方
+    fs.mkdirSync(path.join(fixtureLocalSkillsRoot, 'probe-empty-dir'), { recursive: true })
+  } catch (err) {
+    log(yellow(`⚠ 造本地技能目录夹具时出错：${err}`))
+  }
+
   const outFd = fs.openSync(dumpPath, 'w')
   const errFd = fs.openSync(path.join(SCRATCH, 'chrome.err'), 'w')
   // `--virtual-time-budget` 决定了 dump 的时机：给它足够长，让探针把四步都跑完
@@ -2799,7 +3985,9 @@ try {
         `&chainExecutor=${encodeURIComponent(chainFixture.executorId)}` +
         `&chainReviewer=${encodeURIComponent(chainFixture.reviewerId)}` +
         `&chainEmptyReviewer=${encodeURIComponent(chainFixture.emptyReviewerId)}` +
-        `&chainAction=${encodeURIComponent(CHAIN_ACTION)}`,
+        `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
+        `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
+        (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : ''),
     ],
     { stdio: ['ignore', outFd, errFd] },
   )

@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { knownRuntimeKeys } from '@alpha-helper/agent-core'
+import { knownRuntimeKeys } from '@agentdeck/agent-core'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
 
 /**
@@ -24,12 +24,32 @@ describe('runtime 装配表（FR-CLI-47 的第 2 段）', () => {
     assert.ok(knownRuntimeKeys().includes('generic'), '第二个 runtime 必须在表里')
   })
 
-  test('★ 拿到的描述符是补齐过的（managedFlags 一定在位）', () => {
+  test('★ 拿到的描述符是补齐过的（按 kind 校验：cli 的 managedFlags 一定在位，service 一定没有）', () => {
     for (const key of knownRuntimeKeys()) {
       const { descriptor } = createRuntimeBackend(key)
-      assert.ok(descriptor.managedFlags, `${key} 的 managedFlags 没补齐，拼参数会读到 undefined`)
-      assert.equal(descriptor.managedFlags.resume, descriptor.resume.flag, '恢复旗标两个视图必须一致')
+      if (descriptor.kind === 'cli') {
+        assert.ok(descriptor.managedFlags, `${key} 的 managedFlags 没补齐，拼参数会读到 undefined`)
+        assert.equal(descriptor.managedFlags.resume, descriptor.resume?.flag, '恢复旗标两个视图必须一致')
+      } else {
+        // service 形状：cli-only 字段不填（填占位值就是撒谎），baseArgs 是启动参数
+        assert.equal(descriptor.managedFlags, undefined, `${key} 是 service，不得有受管旗标`)
+        assert.equal(descriptor.resume, undefined, `${key} 是 service，恢复走协议`)
+        assert.ok(descriptor.baseArgs.length > 0, `${key} 的 baseArgs（启动参数）必须非空`)
+      }
     }
+  })
+
+  test('★ codex（service）装配出来是一个真后端，且没有 cli 字段', () => {
+    const codex = createRuntimeBackend('codex')
+    assert.equal(codex.backend.key, 'codex')
+    assert.equal(codex.descriptor.kind, 'service')
+    assert.equal(codex.descriptor.protocol, 'jsonrpc')
+    assert.equal(codex.backend.protocol, 'jsonrpc')
+    // ★ 已实测（0.144.0-alpha.4）：thread/resume 失败一律回 -32600 JSON-RPC
+    //   error ⇒ "恢复被拒"可检测，rejectDetectable=true（由适配器声明）
+    assert.equal(codex.backend.rejectDetectable, true)
+    assert.equal(typeof codex.backend.probe, 'function')
+    assert.equal(typeof codex.backend.execute, 'function')
   })
 
   test('★ 两个 runtime 造出来的后端都属于同一份契约', () => {
@@ -42,7 +62,8 @@ describe('runtime 装配表（FR-CLI-47 的第 2 段）', () => {
 
     for (const { backend, descriptor } of [claude, generic]) {
       assert.equal(backend.protocol, descriptor.protocol)
-      assert.equal(backend.rejectDetectable, descriptor.resume.rejectDetectable)
+      // claude/generic 都是 cli 形状，resume 必然在位（上面那条按 kind 校验守着）
+      assert.equal(backend.rejectDetectable, descriptor.resume?.rejectDetectable)
       assert.equal(typeof backend.probe, 'function')
       assert.equal(typeof backend.execute, 'function')
     }

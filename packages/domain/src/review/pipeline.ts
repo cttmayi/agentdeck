@@ -6,7 +6,7 @@ import {
   type Tool,
   type Verdict,
   type VerdictIssue,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { validateActionAllowed } from '../actions/definition.ts'
 import { validateActionRefWith } from '../actions/tool-actions.ts'
 

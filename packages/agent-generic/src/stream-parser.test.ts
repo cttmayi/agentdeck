@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { AgentMessage } from '@alpha-helper/agent-core'
+import type { AgentMessage } from '@agentdeck/agent-core'
 import {
   GENERIC_EVENT_TYPES,
   GenericStreamParser,

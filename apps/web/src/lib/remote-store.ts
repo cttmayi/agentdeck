@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store'
-import { renderText, webText } from '@alpha-helper/i18n'
+import { renderText, webText } from '@agentdeck/i18n'
 import {
   getRemoteUrl,
   isLoggedIn,

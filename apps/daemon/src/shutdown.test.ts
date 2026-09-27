@@ -9,8 +9,8 @@ import {
   type AgentResult,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
-import { ulid, type RunId } from '@alpha-helper/protocol'
+} from '@agentdeck/agent-core'
+import { ulid, type RunId } from '@agentdeck/protocol'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 

@@ -12,7 +12,7 @@ import {
   type RunPatch,
   type RunQuery,
   type Store,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
 import type {
   Action,
   ActionId,
@@ -22,7 +22,10 @@ import type {
   Artifact,
   AuditRecord,
   BlobRef,
+  ChatTurn,
   Comment,
+  Conversation,
+  ConversationId,
   Device,
   InboxItem,
   Issue,
@@ -43,8 +46,8 @@ import type {
   VerdictStatus,
   Workspace,
   WorkspaceId,
-} from '@alpha-helper/protocol'
-import { ulid } from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
+import { ulid } from '@agentdeck/protocol'
 import { BlobStore } from './blobs.ts'
 import {
   atomicWrite,
@@ -91,6 +94,11 @@ const COLLECTIONS = [
   'tool',
   'issue',
   'comment',
+  // 聊天（闭环的旁路）。两个一起加：`conversation` 是对话本体，`chat-turn` 是
+  // 回合——**智能体的回复不在这里**，它就是那条 run 的 messages（存两份必然分叉，
+  // 见 `Conversation` 上面那段）。
+  'conversation',
+  'chat-turn',
   'run',
   'report',
   'verdict',
@@ -216,6 +224,12 @@ class WorkspaceStore {
   }
   comment(): JsonlLog<Comment & { id: string }> {
     return this.log('comment') as unknown as JsonlLog<Comment & { id: string }>
+  }
+  conversation(): JsonlLog<Conversation & { id: string }> {
+    return this.log('conversation') as unknown as JsonlLog<Conversation & { id: string }>
+  }
+  chatTurn(): JsonlLog<ChatTurn & { id: string }> {
+    return this.log('chat-turn') as unknown as JsonlLog<ChatTurn & { id: string }>
   }
   report(): JsonlLog<Report & { id: string }> {
     return this.log('report') as unknown as JsonlLog<Report & { id: string }>
@@ -570,6 +584,102 @@ export class FileStore implements Store {
   async insertComment(comment: Comment): Promise<void> {
     const ws = await this.#ws(comment.workspaceId)
     await ws.mutex.run(() => ws.comment().put(comment))
+  }
+
+  // ── Conversation 与 ChatTurn（聊天）──
+
+  async getConversation(id: ConversationId): Promise<Conversation | null> {
+    for (const ws of this.#stores.values()) {
+      const found = ws.conversation().get(id)
+      if (found) return found
+    }
+    return null
+  }
+
+  async listConversations(workspaceId: WorkspaceId): Promise<Conversation[]> {
+    const all = (await this.#ws(workspaceId)).conversation().all()
+    /**
+     * ★ 排序：最近说过话的排最前。
+     *
+     * 键用 `lastTurnAt ?? createdAt`，**不用 `updatedAt`**：改个标题不该把一个
+     * 对话顶到最前面（那会让"我刚聊过的那个"随时被一次改名挤走）。
+     *
+     * ⚠️ 同键时用 id 兜底：两个对话可能是同一毫秒建的，不兜底排序就不稳定，
+     *    列表顺序会随读到的顺序变——而顺序变了，使用者会以为顺序有含义。
+     */
+    return [...all].sort((a, b) => {
+      const ka = a.lastTurnAt ?? a.createdAt
+      const kb = b.lastTurnAt ?? b.createdAt
+      if (ka !== kb) return kb - ka
+      return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+    })
+  }
+
+  async insertConversation(conversation: Conversation): Promise<void> {
+    const ws = await this.#ws(conversation.workspaceId)
+    await ws.mutex.run(() => ws.conversation().put(conversation))
+  }
+
+  async updateConversation(
+    id: ConversationId,
+    patch: Partial<
+      Pick<Conversation, 'title' | 'workDir' | 'updatedAt' | 'lastTurnAt' | 'turnCount'>
+    >,
+  ): Promise<Conversation | null> {
+    for (const ws of this.#stores.values()) {
+      const cur = ws.conversation().get(id)
+      if (!cur) continue
+      const next = { ...cur, ...patch } as Conversation & { id: string }
+      await ws.mutex.run(() => ws.conversation().put(next))
+      return next
+    }
+    return null
+  }
+
+  async listChatTurns(conversationId: ConversationId): Promise<ChatTurn[]> {
+    const out: ChatTurn[] = []
+    for (const ws of this.#stores.values()) {
+      for (const t of ws.chatTurn().all()) {
+        if (t.conversationId === conversationId) out.push(t)
+      }
+    }
+    // ★ 按 seq 排，不按写入顺序也不按时间：seq 是"使用者眼里的第几轮"。
+    //   回看时**顺序错了比少了更糟**——少一条看得出来，错一条看不出来。
+    return out.sort((a, b) => a.seq - b.seq)
+  }
+
+  async insertChatTurn(turn: ChatTurn): Promise<void> {
+    const ws = await this.#ws(turn.workspaceId)
+    await ws.mutex.run(() => ws.chatTurn().put(turn))
+  }
+
+  async lastChatTurnWithRun(conversationId: ConversationId): Promise<ChatTurn | null> {
+    const turns = await this.listChatTurns(conversationId)
+    // 从后往前走：最后一轮可能因为没抢到并发槽位而没有 run（那是合法状态），
+    // 此时"上一轮是谁"要往回再找一条——否则聊天会莫名其妙丢掉上文。
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const t = turns[i]!
+      if (t.runId) return t
+    }
+    return null
+  }
+
+  async deleteConversation(id: ConversationId): Promise<boolean> {
+    for (const ws of this.#stores.values()) {
+      const cur = ws.conversation().get(id)
+      if (!cur) continue
+      await ws.mutex.run(async () => {
+        // ★ 先删轮次再删对话。反过来的话，中途失败会留下一堆**指向不存在对话**
+        //   的轮次——而那种记录没有任何入口能看见（列表按对话走），
+        //   却会在下次"我到底说了什么"的时候对不上。
+        for (const t of ws.chatTurn().all()) {
+          if (t.conversationId === id) await ws.chatTurn().del(t.id)
+        }
+        await ws.conversation().del(id)
+      })
+      return true
+    }
+    return false
   }
 
   // ── Report ──

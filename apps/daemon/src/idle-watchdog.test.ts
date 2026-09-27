@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { AgentMessage, AgentSession } from '@alpha-helper/agent-core'
+import type { AgentMessage, AgentSession } from '@agentdeck/agent-core'
 import { startIdleWatchdog } from './idle-watchdog.ts'
 
 /**

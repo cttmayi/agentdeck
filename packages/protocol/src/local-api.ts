@@ -1,13 +1,13 @@
 import { z } from 'zod'
-import { ActionRefType, RunFailureReason, RunKind, RunStatus } from './enums.ts'
-import { AgentId, BlobRef, RunId, SkillId, Ulid } from './ids.ts'
-import { EpochMs, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
+import { ActionRefType, RunFailureReason, RunKind, RunStatus, VerdictStatus } from './enums.ts'
+import { AgentId, BlobRef, RunId, SkillId, Ulid, VerdictId } from './ids.ts'
+import { EpochMs, Issue, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
 
 /**
  * 本地接口契约（daemon ↔ 同源页面）。
  *
  * 关键约束（FR-BRIDGE-08、D19）：
- * - daemon **不向 alpha-helper 的远端服务**发请求；取 run、查第三方、上报记录、
+ * - daemon **不向 agentdeck 的远端服务**发请求；取 run、查第三方、上报记录、
  *   拉远端 skill 目录全部由页面代为发起；
  * - 页面与本地接口**同源**，因此不需要跨源协商。
  *
@@ -23,7 +23,7 @@ import { EpochMs, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
  *   2. GitHub 的跨源与私有仓库凭证在页面侧很难处理，而"下载到本地"这件事
  *      本来就发生在 daemon 所在的这台机器上。
  *
- * 这条例外**不涉及 alpha-helper 的远端服务**（D20 那条规则仍然成立），
+ * 这条例外**不涉及 agentdeck 的远端服务**（D20 那条规则仍然成立），
  * 但它是 daemon 第一次具备对外请求能力，所以边界写死在
  * `skill-source.ts` 里：**只允许 GitHub 的三个主机、只允许 https、
  * 限大小、限文件数、限超时**。要扩到任意 URL 得单独做，不能顺手放开。
@@ -263,6 +263,20 @@ export const SubmitRunRequest = z.object({
        * 上下文里，模型就只能瞎写一个——那不是模型的问题，是我们没给它。
        */
       relatedIssueId: z.string().nullable().optional(),
+      /**
+       * 执行任务/执行结果的**文件引用**（§3.3b，2026-09）。
+       *
+       * 平台在串接审核前，把「执行任务」与「执行结果」各自落盘到审核 run
+       * 的工作目录 `.agentdeck/rounds/<轮次>-task.md` / `-result.md`
+       * （多轮不覆盖），再通过这里把两份路径交给第一句话渲染——模型**按需
+       * 读文件**来审，内联材料仍保留作兜底。
+       *
+       * 报告类审核没有执行 run，缺省为 null ⇒ 不渲染引用块。
+       */
+      materialRefs: z
+        .object({ taskPath: z.string().min(1), resultPath: z.string().min(1) })
+        .nullable()
+        .optional(),
     })
     .nullable()
     .optional(),
@@ -283,6 +297,91 @@ export const SubmitRunRejected = z.object({
   retryAfterMs: z.number().int().positive(),
 })
 export type SubmitRunRejected = z.infer<typeof SubmitRunRejected>
+
+/**
+ * `POST /runs/{id}/human-verdict` —— **人工裁决：人判通过**（D46）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么这里**只有"通过"这一个结论**，连 `conclusion` 字段都没有
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 人的三个出路是「通过 / 反馈 / 放弃」，但它们**不是同一件事**，所以也没有走
+ * 同一条路由：
+ *
+ * | 出路 | 机制 | 为什么不用判决 |
+ * |---|---|---|
+ * | **通过** | **这条路由**：追加一条 `source: 'human'` 的判决 | 看板只能从记录推出"通过了"，所以必须有记录 |
+ * | **反馈** | 派一条新的执行 run（就是原来那个「发送并继续」） | 它要的是**干活**，不是结论。一条 run 已经足以让看板离开「等待人处理」 |
+ * | **放弃** | 改 issue 的状态（`POST /issues/{id}/abandon`） | 它要的是**别再盯着它**，与判决无关 |
+ *
+ * 曾经这里有一个 `conclusion: 'pass' | 'fail'` 字段。它被删掉不是简化，是因为
+ * **`fail` 那一边没有生产者**：人判"不通过"的意思就是"回去重做"，而那件事由
+ * 「反馈」用一条新 run 完成——两条路并存的话，同一件事会有两种记录方式，而且
+ * 它们的看板结果还不一样（判决 `fail` ⇒ 停在「等待人处理」；派了新 run ⇒
+ * 「执行中」）。**留一个没人发的取值，只会让下一个人以为它是一条可用的路。**
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么 `reason` 是**选填**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这里改过一次，记下来免得被"顺手改回去"：
+ *
+ *   最初写成必填，理由是"这条判决除了一句话之外什么都没有——没有 `findings`、
+ *   没有证据引用、没有置信度、没有模型，理由再留空就只剩'某人在某时刻点了通过'"。
+ *   那个论证本身没错，但它**把代价算错了**：人点「通过」时脑子里已经有一个判断
+ *   （"我看过了，可以"），逼他把它写下来，最常见的结局是写一句"ok"或者干脆
+ *   不点了——**门槛换来的是噪音，不是信息**。
+ *
+ *   而"要它重做"那边完全相反：必须说清要改什么，否则执行者拿到一句"不行"没法
+ *   干活。所以必填落在**「反馈」**那一边（见 `Tasks.svelte` 里 `feedback()` 的
+ *   拦截与 `tasks.needReasonForFeedback`），不落在这一条上。
+ *
+ * ⚠️ 因此 `VerdictRecord.humanReason` 为 `null` 是**正常状态**（人没写理由），
+ *    不是数据缺失。消费方不要把它当成"记录不完整"。
+ *
+ * 上限 4000：够写一段说明，又不至于把一条判决变成一篇文档——判决卡上要显示它，
+ * 而卡片不是给人读长文的地方。
+ */
+export const SubmitHumanVerdictRequest = z.object({
+  /**
+   * 为什么判通过。原文保存，不解释、不改写。**不填就存 `null`**。
+   */
+  reason: z.string().trim().max(4000).optional(),
+})
+export type SubmitHumanVerdictRequest = z.infer<typeof SubmitHumanVerdictRequest>
+
+/** `POST /runs/{id}/human-verdict` 的响应。 */
+export const SubmitHumanVerdictResponse = z.object({
+  verdictId: VerdictId,
+  /** 落库后的状态。人工裁决只有"通过、无动作"这一种 ⇒ 恒为 `advisory`。 */
+  status: VerdictStatus,
+})
+export type SubmitHumanVerdictResponse = z.infer<typeof SubmitHumanVerdictResponse>
+
+/**
+ * `POST /issues/{id}/abandon` —— **放弃这条任务**（D47）。
+ *
+ * 语义只有一句：**别再让我盯着它了**。它不删除任何东西——run、判决、审计
+ * 全部原样留着，只是这条 issue 的状态变成 `cancelled`，看板把它收进末尾那列
+ * 「已放弃」。所以它是**可撤销的**（`POST /issues/{id}/reopen`）。
+ *
+ * 请求体是空的（`{}` 或干脆没有 body）：放弃不需要理由——理由在这个产品里
+ * 是给**执行者**看的（返工依据），而放弃的下一步没有执行者。
+ */
+export const AbandonIssueRequest = z.object({}).strict()
+export type AbandonIssueRequest = z.infer<typeof AbandonIssueRequest>
+
+/**
+ * `POST /issues/{id}/abandon` 与 `/reopen` 的响应：**改完之后的那条 issue**。
+ *
+ * ★ 返回整条而不是 `{ ok: true }`：界面要把它的状态显示出来（列名、按钮的
+ *   下一态都取决于它），返回整条就省掉一次重新拉取——而"改完再拉一次"正是
+ *   界面显示出旧状态的那类竞态的来源。
+ */
+export const IssueStatusChangeResponse = z.object({
+  issue: Issue,
+})
+export type IssueStatusChangeResponse = z.infer<typeof IssueStatusChangeResponse>
 
 // ─────────────────────────────────────────────────────────────
 // 流式事件（SSE）
@@ -467,6 +566,58 @@ export const Capability = {
    *   这正是 `ReviewerOverride` 那条注释里说的同一件事，所以按同一条规矩办。
    */
   TaskActionWhitelist: 'task-action-whitelist',
+  /**
+   * `POST /runs/{id}/human-verdict` 存在（人工裁决，D46）。
+   *
+   * ★ 这条与前面几条**不是同一类风险**，所以更要说清为什么仍然需要标志：
+   *   前面几条漏掉的后果是"某个选项被静默忽略"（功能少了，但不会做错事）。
+   *   这一条漏掉的后果是——界面画出一个「人工通过」按钮，点下去请求打到
+   *   一个**不认识这个路径**的旧 daemon 上，得到 404。那至少是**响亮的失败**，
+   *   比静默好。
+   *
+   *   真正的理由是**别让界面画一个它兑现不了的承诺**：人工裁决是"人替审核者
+   *   下结论"，它必须真的落库、真的让看板动起来。一个点了没反应的按钮会让
+   *   人以为自己已经通过了审核——而任务其实还卡着。所以按同一条规矩办：
+   *   能力标志优先于版本号，页面据此决定那一块给不给。
+   */
+  HumanVerdict: 'human-verdict',
+  /**
+   * `POST /issues/{id}/abandon` 与 `/reopen` 存在（放弃任务，D47）。
+   *
+   * ★ 这条与 `HumanVerdict` 是**两次独立的交付**，所以是两个标志：放弃这条路
+   *   只碰 issue 的状态、不碰判决，它可以先落地也可以后落地。合成一个的话，
+   *   中间那个状态下界面会画出「放弃」按钮而旧 daemon 404——而那正是这条标志
+   *   存在的理由。
+   */
+  IssueAbandon: 'issue-abandon',
+  /**
+   * `POST /conversations` 认 `Conversation.skillIds`（对话自带 skill，D49 ⑩）。
+   *
+   * ★ 与前两条同一类风险，而且这一条**很容易真的发生**：只重建前端、刷新页面
+   *   （不带重启 daemon）正是日常做法。旧 daemon 不解析这个字段（请求体那层没有
+   *   zod 校验，未知字段被忽略），于是"选了一条没人挂的 skill"会被**静默地当成
+   *   没说**——那一轮就是用一个没带这条 skill 的执行者在说话，而页面上写着"将使用
+   *   它 + 这条 skill"。两边都不报错。
+   *
+   *   所以：界面**只在这个标志在的时候**才把"没人挂的 skill"列进下拉；没有它时
+   *   那些选项不出现，并说明原因（重启 daemon 之后就有）。有主的那些 skill 不受
+   *   影响——它们走"选它 = 选那个执行者"，skill 由执行者自己带着，那个字段根本
+   *   用不到，所以旧 daemon 上也照常能用。
+   */
+  ConversationSkills: 'conversation-skills',
+  /**
+   * `GET /conversations/{id}/files` 与 `/file` 存在（对话级的工作目录，D49 ⑩）。
+   *
+   * ★ 与 `ConversationSkills` 分开，因为它们是**两个接口、两份契约**：一个决定
+   *   skill 怎么进去，一个决定文件怎么看出来。合成一个会漏掉那个中间态——
+   *   daemon 支持前者、不支持后者时，界面上会画出一栏而它的接口 404。
+   *
+   *   而 404 这一档**不能靠"反正会报错"糊过去**：任务页那次实测撞到的正是它，
+   *   当时那一栏把失败渲染成了骨架屏 ⇒ 接口取不到和还在加载长得一模一样，
+   *   使用者看到的就是"这一栏什么都没有"。所以：标志不在时，那一栏要么不画，
+   *   要么把原因写出来。
+   */
+  ConversationFiles: 'conversation-files',
 } as const
 
 /** `POST /skills` —— 页面下载好 skill 后交给 daemon 落盘。 */

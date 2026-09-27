@@ -4,7 +4,9 @@ import {
   type Agent,
   type Artifact,
   type AuditRecord,
+  type ChatTurn,
   type Comment,
+  type Conversation,
   type Device,
   type InboxItem,
   type Issue,
@@ -15,7 +17,7 @@ import {
   type VerdictRecord,
   type Workspace,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import type { Store } from '../ports/store.ts'
 import { checksumOf } from './export.ts'
 
@@ -73,14 +75,29 @@ export interface DataSnapshot {
      *
      * ★ 与 skills **并排**放在这里，而不是"以后需要再加"。
      *
-     * 审计导出要求自包含（FR-AUDIT-02）：agent 挂着的 `toolIds`、判决与审计
-     * 里的 `<slug>.<动作名>` 都是**引用**，被引用的包必须同一份文件里就在。
+     * 审计导出要求自包含（FR-AUDIT-02）：判决与审计里的 `<slug>.<动作名>`、
+     * 以及审核者 `allowedActions` 里的动作名都是**引用**，被引用的包必须同一份
+     * 文件里就在。（原来这里还写着"agent 挂着的 `toolIds`"——挂载能力已经撤掉，
+     * 那个字段不在协议里了。）
      * 漏掉它不会报任何错，只会让导出物里出现"引用了一个不存在的工具包"——
      * 拿到别处打开时看不出是"当时没导"，还是"这个包当时就不在"。
      */
     tools: Tool[]
     issues: Issue[]
     comments: Comment[]
+    /**
+     * 聊天（对话 + 轮次）。
+     *
+     * ★ 放在这里而不是"聊天不进闭环所以不用导"：导出物是使用者**全部数据**的
+     *   一份自包含副本（FR-STOR-05）。漏掉它不会报任何错——只会在换一台机器
+     *   打开时，他的对话记录**静静地不在那儿**，而他从界面上分不清"当时没导"
+     *   还是"这些对话本来就不存在"。
+     *
+     * ⚠️ 智能体的回复**不在**这两组里：它就是那些 run 的 messages，而 run
+     *    本来就在导。所以这里不重复存，也就不存在"两份对不上"的可能。
+     */
+    conversations: Conversation[]
+    chatTurns: ChatTurn[]
     reports: Report[]
     runs: Run[]
     verdicts: VerdictRecord[]
@@ -121,7 +138,7 @@ export async function exportData(
   const now = options.now ?? (() => Date.now())
   const ws = options.workspaceId
 
-  const [workspace, device, agents, skills, tools, issues, reports, runs, inbox] =
+  const [workspace, device, agents, skills, tools, issues, reports, runs, inbox, conversations] =
     await Promise.all([
       store.getWorkspace(ws),
       store.getDevice(),
@@ -132,6 +149,7 @@ export async function exportData(
       drainAll<Report>((cursor) => store.listReports({ workspaceId: ws, limit: 200, cursor })),
       drainAll<Run>((cursor) => store.listRuns({ workspaceId: ws, limit: 200, cursor })),
       store.listInboxItems({ workspaceId: ws, limit: 10_000 }),
+      store.listConversations(ws),
     ])
 
   // 顺着关系把从属实体取全：它们没有"列出全部"的口子，
@@ -139,6 +157,10 @@ export async function exportData(
   // 会让整个导出不完整的原因）。
   const comments: Comment[] = []
   for (const issue of issues) comments.push(...(await store.listComments(issue.id)))
+
+  // 轮次顺着对话走（`listChatTurns` 只按对话 id 取，端口没有"列出全部轮次"的口子）。
+  const chatTurns: ChatTurn[] = []
+  for (const c of conversations) chatTurns.push(...(await store.listChatTurns(c.id)))
 
   const verdicts: VerdictRecord[] = []
   const artifacts: Artifact[] = []
@@ -160,6 +182,8 @@ export async function exportData(
     tools,
     issues,
     comments,
+    conversations,
+    chatTurns,
     reports,
     runs,
     verdicts,
@@ -329,6 +353,12 @@ export async function importData(
       put: (row) => store.insertVerdict(row),
     },
     {
+      key: 'conversations',
+      rows: doc.data.conversations ?? [],
+      get: (id) => store.getConversation(id as Conversation['id']),
+      put: (row) => store.insertConversation(row),
+    },
+    {
       key: 'actions',
       rows: doc.data.actions,
       get: (id) => store.getAction(id as Action['id']),
@@ -349,6 +379,16 @@ export async function importData(
   }
 
   // ── 只增的从属集合（端口没有"按 id 取"，所以按父对象先查一遍去重）──
+  for (const turn of doc.data.chatTurns ?? []) {
+    const siblings = await store.listChatTurns(turn.conversationId)
+    if (siblings.some((t) => t.id === turn.id)) {
+      bump(skipped, 'chatTurns')
+      continue
+    }
+    await store.insertChatTurn(turn)
+    bump(imported, 'chatTurns')
+  }
+
   for (const comment of doc.data.comments) {
     const siblings = await store.listComments(comment.issueId)
     if (siblings.some((c) => c.id === comment.id)) {
@@ -417,7 +457,7 @@ export async function importData(
     warnings.push(
       `有 ${danglingBlobRefs} 处内容引用（blob）在快照里没有对应内容——` +
         `快照刻意不含二进制原文（见 export-data 的说明）。` +
-        `这些记录还在，但它们的**原文读不到了**。`,
+        `这些记录还在，但它们的原文读不到了。`,
     )
   }
 

@@ -1,7 +1,10 @@
 import { mount } from 'svelte'
-import { DEFAULT_LOCALE, renderText, webText } from '@alpha-helper/i18n'
+import { DEFAULT_LOCALE, renderText, webText } from '@agentdeck/i18n'
 import App from './App.svelte'
 import './styles/app.css'
+// ⚠️ 主题（亮/暗/跟随系统）：import 即订阅生效——`data-theme` 由 index.html 里
+//    那段同步脚本在首帧前打好，这里接手"偏好变化 / 系统变化"之后的实时切换。
+import './lib/theme.ts'
 
 /**
  * 入口。

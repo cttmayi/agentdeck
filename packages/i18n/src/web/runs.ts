@@ -6,8 +6,10 @@ import type { TextCatalog } from '../text.ts'
  * 负责：`components/RunLog.svelte`（`runs.*`）、`components/Drawer.svelte`（`drawer.*`）。
  * `App.svelte` 的外壳里没有直接写死的中文（见文件末尾的说明），所以没有 `app.*`。
  *
- * ⚠️ zh 的值**必须与迁移之前逐字一致**：中文是这个项目的默认语言，也是所有既有
- *    测试、布局探针与文档断言的依据——改一个字就会有东西变红。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  */
 export const runsText = {
   // ── RunLog.svelte：工具条（思考过程的显示开关与说明）───────────────
@@ -16,10 +18,12 @@ export const runsText = {
   // 组合不像中文那样能直接拼（Hide thinking / Show thinking 才是对的）。
   'runs.hideThinking': { zh: '隐藏思考过程（{count} 段）', en: 'Hide thinking ({count} blocks)' },
   'runs.showThinking': { zh: '显示思考过程（{count} 段）', en: 'Show thinking ({count} blocks)' },
-  // zh 里的 `**` 是**原样显示**的（那句话不在 markdown 里渲染），所以逐字保留；
-  // 英文侧不写这层标记——它本来就不是排版，只是历史遗留。
+  // ⚠️ 这条原来带着 `**`（markdown 的粗体记号），注释还写着"逐字保留"——而这句话
+  //    在界面上是**纯文本**（RunLog 没有 markdown 渲染），所以那个记号就是使用者
+  //    看到的两个星号。2026-09 连同全库其余 17 处一起清掉了。现在有测试钉着：
+  //    词条里再出现 `**` 会直接变红（`i18n.test.ts`）。
   'runs.thinkingNote': {
-    zh: '思考过程是模型的内部推理，**不是**它给你的回答——两者在下面用样式区分',
+    zh: '思考过程是模型的内部推理，不是它给你的回答——两者在下面用样式区分',
     en: "Thinking is the model's internal reasoning, not its answer to you — the two are styled differently below.",
   },
   'runs.thinkingTag': { zh: '思考', en: 'Thinking' },

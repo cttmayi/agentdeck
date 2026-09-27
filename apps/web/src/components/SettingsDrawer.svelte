@@ -14,10 +14,18 @@
     remotePlugins,
     remoteUrlValue,
   } from '../lib/remote-store.ts'
-  import { syncStatus } from '../lib/stores.ts'
+  import { identity, syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
-  import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@alpha-helper/i18n'
+  import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@agentdeck/i18n'
   import { locale, setLocale, t, tx } from '../lib/i18n.ts'
+  import { setThemePref, themePref, type ThemePref } from '../lib/theme.ts'
+
+  /** 主题三档：**存键、不存渲染好的句子**（切语言时标签要跟着变，渲染交给 $t）。 */
+  const THEME_CHOICES = [
+    { value: 'light', labelId: 'settings.themeLight' },
+    { value: 'dark', labelId: 'settings.themeDark' },
+    { value: 'system', labelId: 'settings.themeSystem' },
+  ] as const satisfies ReadonlyArray<{ value: ThemePref; labelId: string }>
 
   /**
    * 设置抽屉。
@@ -178,8 +186,31 @@
     <!-- ══════════ 成本 ══════════ -->
     {#if focus === 'all'}
     <!--
-      ★ 界面语言（D39）：顶栏也有一份，两处指向**同一个 store**（不会各存一份）。
-        这里多给一句说明——切换器本身说不清"prompt 不变"这件事。
+      ★ 界面主题（亮 / 暗 / 跟随系统）：**唯一入口**在这里——顶栏不再放
+        第二个开关（语言那份就是"设置里已有、顶栏不重复"撤掉的）。三档
+        是"跟随系统 / 手动定死"，不是两种颜色；见 `lib/theme.ts` 顶部。
+    -->
+    <section class="drawer-section">
+      <h3>{$t('settings.theme')}</h3>
+      <div class="theme-picker" role="radiogroup" aria-label={$t('settings.theme')}>
+        {#each THEME_CHOICES as c (c.value)}
+          <button
+            type="button"
+            class:active={$themePref === c.value}
+            role="radio"
+            aria-checked={$themePref === c.value}
+            onclick={() => setThemePref(c.value)}
+          >
+            {$t(c.labelId)}
+          </button>
+        {/each}
+      </div>
+      <p class="hint">{$t('settings.themeHint')}</p>
+    </section>
+
+    <!--
+      ★ 界面语言（D39）：这里是**唯一入口**（顶栏那份 2026-09 已撤——不是常用
+        设置）。切换器本身说不清"prompt 不变"这件事，所以这里多给一句说明。
     -->
     <section class="drawer-section">
       <h3>{$t('settings.language')}</h3>
@@ -201,6 +232,37 @@
         {$t('settings.languageHint')}
       </p>
     </section>
+
+    <!--
+      ★ 「关于」这一小段是为一次真实误判加的。
+
+      使用者报"聊天页不工作、任务页正常"，查下来 daemon 与当前前端都是好的——
+      他看的是一个**早就开着、没有刷新**的标签页。这类错位（界面与 daemon 各是
+      哪一版）在这个项目里已经咬过两次，而两次都是**两边都不报错**。
+
+      所以把"这一版界面叫什么"写在界面上：它由 daemon 从构建产物里读出来
+      （`/api/identity` 的 `webBuild`），所以"我到底在跑哪一版"从此是一句可查的
+      话，而不是一场猜测。它是只读的——这里没有任何可改的东西。
+
+      ⚠️ 但它**默认收起**（2026-09）：构建文件名与协议版本号是排查用的东西，
+      平时摊在设置里就是两条没人看得懂的字（`index-CKNBcUzP.js` / `1`）。
+      信息一个字没少，只是要主动点开——判据仍然是"这句话给谁看"。
+    -->
+    {#if $identity}
+      <section class="drawer-section" data-about>
+        <h3>{$t('settings.about')}</h3>
+        <details>
+          <summary class="hint" style="cursor:pointer">{$t('settings.diagnostics')}</summary>
+          <p class="hint">
+            {$t('settings.webBuildLabel')}
+            <code data-web-build>{$identity.webBuild ?? $t('settings.webBuildUnknown')}</code>
+          </p>
+          <p class="hint">
+            {$t('settings.protocolLabel')} <code>{$identity.protocolVersion}</code>
+          </p>
+        </details>
+      </section>
+    {/if}
 
     <section class="drawer-section">
       <h3>{$t('settings.costs')}</h3>
@@ -392,7 +454,7 @@
       {/if}
       <p class="hint">
         <strong>{$t('settings.reportingStrong1')}</strong>{$t('settings.reportingAfter1')}<strong>{$t('settings.reportingStrong2')}</strong>{$t('settings.reportingMid1')}<strong>{$t('settings.reportingStrong3')}</strong>{$t('settings.reportingMid2')}<strong>{$t('settings.reportingStrong4')}</strong>{$t('settings.reportingMid3')}<br />
-        {$t('settings.reportingBefore2')}<code>reportingEnabled: false</code>{$t('settings.reportingAfter2')}<strong>{$t('settings.reportingStrong5')}</strong>{$t('settings.reportingEnd')}
+        {$t('settings.reportingBefore2')}{$t('settings.reportingAfter2')}<strong>{$t('settings.reportingStrong5')}</strong>{$t('settings.reportingEnd')}
       </p>
     </section>
   </div>

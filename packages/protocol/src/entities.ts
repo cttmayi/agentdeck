@@ -22,14 +22,15 @@ import {
   ArtifactId,
   AuditId,
   BlobRef,
+  ChatTurnId,
   CommentId,
+  ConversationId,
   DeviceId,
   IssueId,
   ReportId,
   RunId,
   RuntimeId,
   SkillId,
-  ToolId,
   Ulid,
   VerdictId,
   WorkspaceId,
@@ -70,6 +71,36 @@ export const Workspace = z.object({
   executeTemplate: z.string().default(''),
   /** 同上，审核那次用的。 */
   reviewTemplate: z.string().default(''),
+  /**
+   * 同上，**聊天**那一轮用的（① 框架）。
+   *
+   * ★ 聊天**不套任务模版**——那份是"被交代一件事"的工作说明书（身份行、材料、
+   *   护栏、判决契约）。所以它有自己的 ①：默认很薄（"这不是派活" + 语言 + 技能
+   *   清单）。空 = 平台默认。
+   */
+  /**
+   * ⚠️ `optional()`：这是**后加**的字段，老 workspace 里根本没有它。
+   * "缺省"与"空串"在读取侧是同一个意思（空 = 平台默认），所以不必逼所有夹具写它。
+   */
+  chatTemplate: z.string().default('').optional(),
+
+  // ── 2026-10：② 身份 / ③ 任务 各自独立的模版框（三个老键是 ① 框架）──
+  /**
+   * 每条链路三块模版各一份。`executeTemplate` / `reviewTemplate` / `chatTemplate`
+   * 这三个老键就是 **① 框架框**（改名会弄丢老 workspace 里已存的内容）；下面是
+   * 后加的六个键：② 身份框（`{{identity}}` = 那个 agent 的指令 + 审核标准整块）、
+   * ③ 任务框（`{{task}}` = 这次要干的事 + 材料/文件引用整块）。
+   *
+   * 空 = 平台默认（`DEFAULT_TEMPLATES[kind][block]`）。三块的内容仍由平台组装
+   * （材料标记、标准合成这些安全件不交给模版），模版只决定位置、标题与包装。
+   * 校验见 `validateTemplate(kind, block, text)`。
+   */
+  executeIdentityTemplate: z.string().default('').optional(),
+  executeTaskTemplate: z.string().default('').optional(),
+  reviewIdentityTemplate: z.string().default('').optional(),
+  reviewTaskTemplate: z.string().default('').optional(),
+  chatIdentityTemplate: z.string().default('').optional(),
+  chatTaskTemplate: z.string().default('').optional(),
 
   /**
    * ★ 「新建任务」默认交给哪个智能体（D36）。
@@ -99,25 +130,25 @@ export const Workspace = z.object({
   locale: z.enum(['zh', 'en']).default('zh'),
 
   /**
-   * 是否允许**自动执行**那些声明"不支持 dry-run"的工具动作（D40）。
+   * ★ **勾选了的本地技能目录**（绝对路径）——从别的 AI 工具那儿读 skill 进来。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 为什么默认是 false，而且这是**准入**不是"偏好"
+   * 它是什么，以及它**不是**什么
    * ══════════════════════════════════════════════════════════════════
    *
-   * 工具包里的脚本是第三方代码，它会在使用者机器上真的改东西。清单里的
-   * `dryRun: "supported"` 是作者在说"我能先告诉你要改什么"——那是唯一便宜到
-   * 人人都会用的预演手段。作者写 `unsupported` 就是在说"我保证不了"。
+   * 使用者在 Skills 页勾上一个目录（`~/.claude/skills`、`~/.codex/skills`…），
+   * 那个目录里的 skill 就会出现在技能库里、并能挂给智能体。**磁盘为准**：
+   * 每次读技能列表时按这些目录对一遍账（改了、加了、删了都跟着变），
+   * 所以这里存的是"**要读哪些目录**"，不是"导过哪些目录"。
    *
-   * 于是默认不自动执行这类动作：**先验过再放行**，而不是"装进来就等于允许
-   * 无人值守地改我的东西"。要放行得有人显式打开这个开关（界面上有警告）。
+   * ⚠️ 取消勾选**不等于删掉**：只影响"还能不能被选中"。已经有智能体挂着的
+   *    那几条会**留着**——把一条正在生效的能力从人家身上悄悄抽走，症状会在
+   *    很久以后才出现（"这个智能体怎么突然不会做那件事了"），而那时没人会
+   *    想到是几天前取消了一个勾。要彻底删掉得先在智能体上把它摘掉。
    *
-   * ⚠️ 它必须**被真的执行**，不能只是界面上一句提示：界面写着"不能自动执行"
-   *    而平台照跑，那是**说谎**——比没有这条规矩更糟。
-   *
-   * 可选（老数据没有这个键）：读取处一律按 `?? false` 处理，不做数据迁移。
+   * ⚠️ 可选（老数据没有这个键）：读取处一律 `?? []`，不做数据迁移。
    */
-  allowUnpreviewedActions: z.boolean().optional(),
+  localSkillDirs: z.array(z.string()).optional(),
 
   createdAt: EpochMs,
   updatedAt: EpochMs,
@@ -236,8 +267,17 @@ export type Skill = z.infer<typeof Skill>
  *      回来挂载。而它本质是一段文本 +"判完能做什么"；
  *   3. **可见性差**：审核者的判断依据藏在 Skills 页的一个 slug 后面。
  *
- * 现在标准是审核者自己的一等字段：名字（给人看）与正文（进第一句话的
- * `{{standards}}`）。
+ * 现在标准是审核者自己的一等字段：**一段正文**（进第一句话的 `{{standards}}`）。
+ *
+ * ⚠️ **"名字"这个字段删掉了**（它一度是"名字 + 正文"）。它不承载任何东西：
+ *    平台侧没有任何东西读它——不进 prompt（D35：`{{standards}}` 只给正文）、
+ *    不进判决契约、不进审计、不进消息流、不进智能体列表；唯一读它的地方是
+ *    智能体详情页那个徽标，而徽标就贴在同一份正文的正上方。它也没有可区分的
+ *    对象：一个审核者只有**一份**标准，不像 skill 那样库里有很多份要互相区分
+ *    （"按哪份标准判的"由"哪个审核者判的"回答，任务里记的是 `reviewerAgentId`）。
+ *    而使用者手里那份实测名字是「通用审核」、正文第一行是「# 通用审核」——
+ *    逐字节相同的一份重复拷贝，且那个名字来自平台内置那份标准的常量（该常量
+ *    2026-09 随"标准并进指令"一起删了），没人选过它。
  *
  * ⚠️ **"允许动什么"不在标准里**（D40 收口搬走了）：那是审核者的**能力**，
  *    住在 `Agent.allowedActions`。判断依据与处置权限是两件事——分开放之后
@@ -248,9 +288,13 @@ export type Skill = z.infer<typeof Skill>
  *    两者是两件事，别合并。
  */
 export const ReviewStandard = z.object({
-  /** 给人看的名字（界面上显示；不进 prompt——D35 之后变量只给内容）。 */
-  name: z.string().min(1).max(100),
-  /** 标准正文。 */
+  /**
+   * 标准正文。**进第一句话的 `{{standards}}`**，也是这份记录唯一的实质内容。
+   *
+   * ⚠️ 老数据里可能还有一个 `name` 键（删掉之前留下的）。整条记录以 JSON 存、
+   *    读取路径上没有 zod 校验，所以读回来会带着它——**读取方一律忽略**，
+   *    不需要数据迁移（与 `allowedActions` 搬走时同一个套路）。
+   */
   body: z.string().min(1),
   /**
    * ⚠️ **老数据的只读兼容字段**（D40 收口之后搬到了 `Agent.allowedActions`）。
@@ -301,8 +345,9 @@ export const Agent = z.object({
    * 写入口逐条核对"这个包装着、且确实声明了该动作"（**早拒**：跑到一半才发现
    * "要一个不允许的动作"，在无人值守下就是每次都失败）。
    *
-   * ⚠️ **只有审核者用得着它**。执行者的能力是"工具"（`toolIds`，干活时用的），
-   *    而动作是**判完之后**由平台执行的；给执行者写非空值会被写入口拒。
+   * ⚠️ **只有审核者用得着它**。动作是**判完之后**由平台执行的；给执行者写非空值
+   *    会被写入口拒。（原来这里还有一句"执行者的能力是工具 `toolIds`"——那个
+   *    能力已经整个撤掉了，见下面 `env` 上面那段。）
    *
    * ⚠️ 它是**可选**的（不是 `.default([])`）：这个字段是 D40 收口时加的，加之前
    *    建的 agent 记录里根本没有这个键（store 读取路径上没有 zod 校验），
@@ -311,6 +356,24 @@ export const Agent = z.object({
    *    （`apps/daemon/src/review-standard.ts`），不要在每个调用方各写一遍。
    */
   allowedActions: z.array(ActionRefType).optional(),
+  /**
+   * ★ 调试动作（2026-09）：在「行动权限」里勾了「调试」的那些动作。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 它是什么
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 判决引用这里面的动作时，平台**不跑脚本**，只把这条动作连同解析后的完整
+   * 参数记录进时间线（`Action.dryRun: true` ⇒ 界面显示「调试 · 未执行」）——
+   * 用来确认"它到底会带着什么参数发出去"，是给调试看的，不是真的执行。
+   *
+   * 只对 `allowedActions` 里的动作有意义（不在白名单里的动作根本不会被判决
+   * 引用到）；语义是 `allowedActions` 的**子集**。写入口会校验这一条。
+   *
+   * ⚠️ 可选（老数据没有这个键）：读取处一律 `agent.debugActions ?? []`。
+   *    判据只看"字段在不在"。
+   */
+  debugActions: z.array(ActionRefType).optional(),
   /**
    * ★ 动作的**固定参数**（界面上设置的，D43）。
    *
@@ -338,16 +401,23 @@ export const Agent = z.object({
   actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())).optional(),
 
   /**
-   * ★ 挂载的工具包（D40）。**授权单位是"组"，不是单个动作**：挂上一个包，
-   * 就等于把它声明的整组动作交给这个 agent。
+   * ⚠️⚠️ 这里原来有一个 `toolIds`（挂载的工具包，D40）。**整个能力已经撤掉**，
+   *     字段一并删除——理由与做法记在这里，因为它是**协议里的字段**，删掉它
+   *     意味着老数据里还留着那个键。
    *
-   * 原来是 `string[]`（扩展位 FR-AGENT-17），现在换成 `ToolId`——品牌类型让
-   * "把 skill id 传进这里"变成编译错误。老数据是空数组，读取路径不受影响。
+   * 撤掉的两步：先把界面入口撤掉（智能体详情里那个"可挂载的工具组"勾选栏），
+   * 再把「被哪些执行者挂载」那一列撤掉。使用者的决定是"不需要，因为我已经移除了
+   * 此功能"——于是服务端这一整套（字段、`PUT /api/agents/:id/tools`、执行时把
+   * 包里的脚本复制进工作目录那一段）就没有任何调用方了。
    *
-   * ⚠️ **审核者不挂工具**（`role: 'reviewer'`）：审核者只判断、不动手。
-   *    这条在服务端的写入口校验，不靠界面自觉。
+   * ★ **老数据不需要迁移**：`Agent` 是普通 `z.object`（**不是 `.strict()`**），
+   *   多出来的键在解析时被丢掉，不会报错；agent 又是 append-only 的 JSONL，
+   *   老行原样留着、新行不再写这个键。所以存储格式版本**不用**动。
+   *
+   * ⚠️ 想恢复这个能力的话，光把字段加回来不够：`executor.ts` 里那段"把挂载的
+   *    脚本送进工作目录"是它的**唯一**用途，一起被删了。
    */
-  toolIds: z.array(ToolId),
+
   /** 自定义环境变量。 */
   env: z.record(z.string(), z.string()),
 
@@ -465,6 +535,131 @@ export const Comment = z.object({
 export type Comment = z.infer<typeof Comment>
 
 // ─────────────────────────────────────────────────────────────
+// Conversation / ChatTurn（聊天场景）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Conversation：一个**对话**（聊天场景的容器）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 它是闭环的**旁路**，不是闭环的入口
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 产品的脊柱是「派活 → 审核 → 判决 → 才动手」。聊天不在这条脊柱上：
+ * 它没有判决，因此**不允许触发任何登记过的动作**（那些动作的门槛就是判决）。
+ *
+ * 两者之间唯一的桥是一个**使用者点一下**的动作（把对话预填进「新建任务」），
+ * 而不是平台替使用者决定的——预填进去之后，审核者与动作白名单仍然要他自己
+ * 在那一页确认。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 一个对话绑一个 agent，绑定之后不改
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 上文的延续靠底层 CLI 的会话恢复（`--resume <sessionId>`），而那个 session
+ * 属于**某一个 CLI 的某一次运行**。换一个 agent 去"接着聊"在语义上不成立：
+ * 新 agent 拿不到那段会话，只能从头读一份文本——那与"新建一个对话、把上文
+ * 粘过去"没有区别，却让人以为中间那一段是连续的。所以不提供换人：要换就新建。
+ */
+export const Conversation = z.object({
+  id: ConversationId,
+  workspaceId: WorkspaceId,
+  /**
+   * 这个对话固定的执行者。
+   *
+   * ⚠️ 只放**执行者**（`role: 'executor'`）。审核者不能被选来聊天：聊天不产出
+   *    判决，让一个"按标准判事"的 agent 来闲聊，会让人误以为它说的话有判决的
+   *    分量。写入口按角色拒绝。
+   */
+  agentId: AgentId,
+  /**
+   * 这个对话要**额外带上的 skill**（第一句话定下来，之后只读）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么对话自己要记一份 skill
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 「新对话」那个下拉里，skill 是**执行者的另一条入口**：选一条挂在某人身上的
+   * skill，就等于选那个人（性格与 skill 同源，不需要这里记什么）。
+   *
+   * 但装着的 skill 未必挂在谁身上，而使用者的要求是"**所有已安装的 skill 都要
+   * 能选**"。那种 skill 没有"有它的执行者"可绑，于是它走另一条路：这次对话自己
+   * 带着它——执行者仍是你选的那个人，skill 从这里注入。
+   *
+   * ⚠️ 因此 run 的 skill 集 = **执行者自己挂的 ∪ 这个数组**（`apps/daemon/src/chat.ts`）。
+   *    不是替换：执行者身上那些是它的一部分，凭空丢掉等于悄悄缩小了它的能力。
+   * ⚠️ 只读：不给它开 `PATCH`。与"一个对话绑一个执行者、中途不换"同一个口径——
+   *    改了的语义是"这半场换了个人"，而前半场的上下文还留在那条 CLI 会话里。
+   * ⚠️ 老记录没有这个键（`.default([])`）：那种对话就是"没有额外 skill"，不是
+   *    "未知"，所以解析成一个空数组而不是拒绝。
+   */
+  skillIds: z.array(SkillId).default([]),
+  /** 标题。缺省取第一句话的第一个非空行（可改）。 */
+  title: z.string().min(1).max(200),
+  /**
+   * 这个对话的工作目录。
+   *
+   * 缺省 = daemon 按对话分配一个专属目录（`<workRoot>/chat-<对话 id>`），
+   * 与任务的目录同级。可以改成任意路径——那是"把它接进我的仓库"这类用法，
+   * 与任务里的语义一致。
+   *
+   * ⚠️ 说清楚它有多大的权：claude 用 `--permission-mode bypassPermissions`，
+   *    而沙箱**默认是关的**，此时 run 以 daemon 进程的 OS 用户权限执行。所以
+   *    "专属目录"只是**少一点误伤**，不是隔离。真要隔离得开沙箱，而那是整个
+   *    daemon 的一个开关（不是 per-agent、也不是 per-conversation）。
+   */
+  workDir: z.string().nullable(),
+  createdAt: EpochMs,
+  updatedAt: EpochMs,
+  /** 最后一轮的时间；列表按它倒序。 */
+  lastTurnAt: EpochMs.nullable(),
+  /**
+   * 轮次计数。
+   *
+   * ★ 它是**冗余**的（turns 数得出来），但列表要为每个对话显示它，而列表里
+   *   逐个去数轮次等于 N+1 次读。冗余字段的风险是"某条路径忘了更新"，所以
+   *   它只在**追加一轮**那一处写（`insertChatTurn` 之后由 daemon 一起更新）。
+   */
+  turnCount: z.number().int().nonnegative(),
+})
+export type Conversation = z.infer<typeof Conversation>
+
+/**
+ * ChatTurn：对话里的**一回合**——使用者说的一句话 + 它换来的那条 run。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么智能体的回复**不在这里**再存一份
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 它就是 `runId` 那条 run 的 messages：已经落盘、已经有单调 seq、已经有流式
+ * 广播、已经进审计与成本统计。再存一份等于同一件事有两个真相，而两个真相
+ * 迟早会分叉——分叉的表现是"回看时聊天的记录和日志对不上"，且无从判断哪个对。
+ *
+ * `seq` 是这个对话内的序号（1 开始），用来把轮次与（可能缺失的）run 排序。
+ */
+export const ChatTurn = z.object({
+  id: ChatTurnId,
+  workspaceId: WorkspaceId,
+  conversationId: ConversationId,
+  /** 对话内序号，从 1 开始，单调递增。 */
+  seq: z.number().int().positive(),
+  /** 使用者说的那一句（原文，不加工）。 */
+  userText: z.string().min(1),
+  /**
+   * 这一轮对应的 run。
+   *
+   * `null` = **还没建起来**（建 run 那一刻被并发槽位/目录锁挡下了）。留着这条
+   * 记录而不是丢掉，是因为"我说了这句话但它没跑起来"是使用者必须看到的一件事
+   * ——丢了它就变成"我说的话消失了"。
+   */
+  runId: RunId.nullable(),
+  createdAt: EpochMs,
+  /** 建 run 失败时的原因原文（成功则 null）。 */
+  error: z.string().nullable(),
+})
+export type ChatTurn = z.infer<typeof ChatTurn>
+
+// ─────────────────────────────────────────────────────────────
 // Report（第三方进来的不可变快照）
 // ─────────────────────────────────────────────────────────────
 
@@ -502,7 +697,16 @@ export type Report = z.infer<typeof Report>
 
 /** 审核对象。 */
 export const SubjectRef = z.object({
-  type: z.enum(['issue', 'report', 'run']),
+  /**
+   * ⚠️ 加 `'conversation'` 是为了让**聊天那一轮的 run 也有一个 subject**。
+   *
+   * 它不参与闭环：报告摄取（`POST /api/reports`）只认 issue/report/run，
+   * 一条 subject 是对话的 run 永远走不到审判那一步。但工作目录的分配
+   * （`workdir.ts` 的 `<workRoot>/<type>-<id>`）与"同一 subject 的并发串行化"
+   * 都按 subject 走——不认它，聊天就只能显式传一个 workDir，而那会让
+   * "默认给个专属目录"这件事从平台默认退化成调用方的责任。
+   */
+  type: z.enum(['issue', 'report', 'run', 'conversation']),
   id: z.string(),
 })
 export type SubjectRef = z.infer<typeof SubjectRef>
@@ -533,6 +737,15 @@ export type TokenUsage = z.infer<typeof TokenUsage>
  * - 同一 workDir 同时只允许一个 run，其余进入 `waiting_local_directory`；
  * - `derivedFrom` 记录派生来源，用于回路边界（INV-16）。
  */
+/**
+ * 投递档：三块怎么送出去（见 `Run.deliveryMode`）。
+ *
+ * 名字取 A/B 而不是语义名（`system-prompt` / `one-block`）是刻意的：这两个档的
+ * 差别**只在投递形状**，用名字描述形状反而会让人以为内容也不同。
+ */
+export const RunDeliveryMode = z.enum(['A', 'B'])
+export type RunDeliveryMode = z.infer<typeof RunDeliveryMode>
+
 export const Run = z.object({
   id: RunId,
   workspaceId: WorkspaceId,
@@ -597,8 +810,35 @@ export const Run = z.object({
   chainDepth: z.number().int().nonnegative(),
   skillRefs: z.array(SkillRef),
   workDir: z.string().nullable(),
+  /**
+   * 这一条 run 的投递档（2026-09 三块组装）。
+   *
+   *   · `A`：①②（框架 + 身份）走**系统提示**，③（任务）走用户消息；
+   *   · `B`：三块合成**一段**（runtime 没有系统提示时的兜底）。
+   *
+   * ★ 为什么要记在 run 上：同一个模版在两个 runtime 上投递形状不同，而"两边都不
+   *   报错"是这个仓库被咬过三次的形状（能力标志、旧前端、以及这次）。记下来之后
+   *   "这条 run 当时是怎么送的"是一句可查的话，不必去猜或翻日志。
+   * **缺省** = 这条 run 早于这个字段（老数据），不是"没有投递档"——所以用
+   * `optional`（与 `allowedActions` 同一个口径：字段在不在本身就是判据）。
+   */
+  deliveryMode: RunDeliveryMode.nullable().optional(),
   /** `waiting_local_directory` 时携带被占用的路径，供 UI 显示。 */
   waitReason: z.string().nullable(),
+  /**
+   * 审核 run：**文件式审核**引用的两份落盘文件（`rounds/<轮次>-task.md` /
+   * `-result.md`，§3.3b）。
+   *
+   * 判决不合规的重试从这里取材料（读结果文件），**不再读工作目录里的上下文副本**
+   * （2026-09 产品决定：日志已含第一句话全文，执行/审核都不再写副本文件）。
+   * 报告式审核没有这两份 ⇒ `null`；非审核 run 缺字段。
+   */
+  materialRefs: z.object({ taskPath: z.string(), resultPath: z.string() }).nullable().optional(),
+  /**
+   * 审核 run：**报告式审核**的报告正文（重试取材料就是它本身；文件式审核为
+   * `null`）。与 `materialRefs` 同源同因——重试不读上下文副本了。
+   */
+  reportBody: z.string().nullable().optional(),
   sessionId: z.string().nullable(),
   attempt: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
@@ -620,6 +860,20 @@ export type Run = z.infer<typeof Run>
  *
  * `skillRefs` 固化"用了哪个 skill"（FR-REVIEW-06）。注意**不记指纹**，
  * 因此审计链是"可追溯"而非"完全可复现"（D9、§1.3）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ `runId` 的语义：**这条判决归属的那条 run**（D46）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * - `source: 'agent'` ⇒ 归属**产出它的那条 review run**（一直是这个意思）；
+ * - `source: 'human'` ⇒ 人没有"产出它的 run"，所以归属**它裁决的那条 run**：
+ *   有审核结论时是那条 review run（裁决的就是那份结论），没有审核结论时
+ *   是最新那条执行 run（人看的就是那份产出）。
+ *
+ * 两条路**互斥且确定**，不是"视情况而定"：判据是"这条任务有没有已完成且
+ * 带判决的 review run"，而那个判据只有一处实现（`apps/web/src/lib/pipeline.ts`
+ * 的 `stageOf`）——界面把锚点算好传过来，daemon 只校验它能不能被裁决，
+ * 不自己再算一遍（同一规则两处实现，正是这个仓库反复在防的那类缺陷）。
  */
 export const VerdictRecord = z.object({
   id: VerdictId,
@@ -639,6 +893,35 @@ export const VerdictRecord = z.object({
   /** 决策依据的固化（FR-REVIEW-06）。 */
   modelId: z.string().nullable(),
   promptHash: z.string().nullable(),
+  /**
+   * ★ 这条判决是谁做的（D46）。
+   *
+   * - **缺字段 ≡ `'agent'`**：D46 之前的全部判决都是模型做的，所以老数据
+   *   一个字都不用迁移。这里刻意用"字段在不在"而不是给一个 `default`：
+   *   `default` 会在**写**的时候把值填进去，而我们要的是"读老数据时也成立"
+   *   ——两件事，前者解决不了后者。
+   * - `'human'`：人在任务详情页上给出的裁决（`POST /runs/{id}/human-verdict`）。
+   *
+   * ⚠️ **为什么不另立一个实体**：人工判决与模型判决的**形状是同一个**——
+   *    结论、理由码、发现、动作、归属 run。差别只有"谁做的"这一项。另立实体
+   *    意味着 store 端口、两套存储实现、审计导出、阶段推导全都要各写一遍，
+   *    而两边一旦漂移，"判决"这个词在系统里就有两个意思了。
+   *
+   * ⚠️ **它是追加，不是覆盖**：人工裁决产生**新的一条记录**，模型那条原样留着。
+   *    DR-3「历史不得被覆盖」在这里的具体含义是——"这条产出当初被模型判过
+   *    fail、后来被人判 pass"这件事必须能从记录里读出来。谁最后生效由
+   *    `createdAt` 决定（`listVerdictsByRun` 已按它排序，取末条）。
+   */
+  source: z.enum(['agent', 'human']).optional(),
+  /**
+   * 人工裁决的理由原文（`source === 'human'` 时有值，缺省 ≡ `null`）。
+   *
+   * ★ **为什么不塞进 `findings`**：`findings` 的契约是"判决**发现的问题**，逐条"。
+   *   人工通过时并没有"发现的问题"，只有"我为什么认为它行"。塞进去之后，
+   *   任何按 `findings` 做统计或展示的地方都会把人的一段话混进问题清单里——
+   *   而那种错误不会报错，只会让数字悄悄变得没有意义。
+   */
+  humanReason: z.string().nullable().optional(),
   createdAt: EpochMs,
 })
 export type VerdictRecord = z.infer<typeof VerdictRecord>
@@ -670,6 +953,11 @@ export const Action = z.object({
   params: z.record(z.string(), z.unknown()),
   status: ActionStatus,
   idempotencyKey: z.string().min(1),
+  /**
+   * 没真跑、只记录（2026-09 起=「调试」）：审核者给这个动作勾了「调试」时，
+   * 平台不执行脚本，只记录动作与解析后的参数；界面据此显示「调试 · 未执行」。
+   * （它**不再**表示"预演"——那套作为执行准入的机制已经撤掉。）
+   */
   dryRun: z.boolean(),
   result: z.record(z.string(), z.unknown()).nullable(),
   error: z.string().nullable(),

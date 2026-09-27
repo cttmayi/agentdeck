@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ToolSourceError, resolveLocalToolPath } from './tool-source.ts'
+import { MAX_FILES } from './skill-source.ts'
 import { makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -38,7 +39,7 @@ async function writePackage(
 
 const manifest = (patch: Record<string, unknown> = {}): string =>
   JSON.stringify({
-    schema: 'alpha-helper/tool@1',
+    schema: 'agentdeck/tool@1',
     slug: 'demo',
     name: '演示工具',
     runtime: 'node',
@@ -92,7 +93,7 @@ describe('D40：工具包来源解析', () => {
 
   test('清单不是合法 JSON ⇒ bad_json（并说清 JSON 的规矩）', async () => {
     const dir = await writePackage('bad-json', {
-      'tool.json': "{ schema: 'alpha-helper/tool@1' }",
+      'tool.json': "{ schema: 'agentdeck/tool@1' }",
       'run.mjs': 'x',
     })
     const err = await resolveLocalToolPath(dir).catch((e: ToolSourceError) => e)
@@ -184,8 +185,10 @@ describe('D40：工具包来源解析', () => {
   })
 
   test('文件数量超上限 ⇒ too_many_files', async () => {
+    // ⚠️ 随共享的 `MAX_FILES` 走（skill 与工具**共享规则常量**，见 tool-source.ts 头注释）：
+    //    写死 70 会随着上限提高变成"没超限却期望报错"（2026-10 上限提到 512 就踩了）。
     const files: Record<string, string> = { 'tool.json': manifest(), 'run.mjs': 'x' }
-    for (let i = 0; i < 70; i += 1) files[`f${i}.txt`] = 'x'
+    for (let i = 0; i < MAX_FILES; i += 1) files[`f${i}.txt`] = 'x'
     const dir = await writePackage('many', files)
     const err = await resolveLocalToolPath(dir).catch((e: ToolSourceError) => e)
     assert.ok(err instanceof ToolSourceError)

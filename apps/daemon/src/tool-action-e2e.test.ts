@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { deliveredText } from './testing/delivered.ts'
 import { describe, test } from 'node:test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -9,10 +10,10 @@ import {
   type Agent,
   type RunId,
   type Tool,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon } from './server.ts'
 import { makeTempDir } from './testing/tmp.ts'
-import type { AgentBackend, AgentMessage, AgentSession, ExecOptions } from '@alpha-helper/agent-core'
+import type { AgentBackend, AgentMessage, AgentSession, ExecOptions } from '@agentdeck/agent-core'
 
 /**
  * 工具动作的**端到端**：判决里写一个第三方动作 ⇒ 脚本真的跑了（D40）。
@@ -65,12 +66,12 @@ class ScriptedBackend implements AgentBackend {
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    this.prompts.push(opts.prompt)
+    this.prompts.push(deliveredText(opts))
     // ★ 判据是**这段 prompt 是不是审核**（审核那份里带着判决契约），不是"这是第
     //   几次调用"。按调用序号判断在并行跑整个套件时会偶发失败：多出一次调用
     //   （重试、派生）就会把预置的判决喂给错误的那个 run，而症状是"动作记录
     //   一直不落库"——排查方向会指向执行器而不是夹具。
-    const isReview = opts.prompt.includes(VERDICT_FENCE_BEGIN)
+    const isReview = deliveredText(opts).includes(VERDICT_FENCE_BEGIN)
     const verdict = isReview ? this.verdict : null
     const text =
       verdict === null
@@ -228,7 +229,6 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         //   那个字段已经降级成"老数据的只读兼容字段"，写入口不再写它）
         allowedActions: ['example-note.append-note'],
         reviewStandard: {
-          name: '示例标准',
           body: '# 示例标准\n\n只要产出不为空就算通过。',
         },
       })
@@ -241,21 +241,11 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
       })
       assert.ok(patched.ok, `设置审核者应当成功：${patched.status}`)
 
-      // 工具按**组**挂到执行者身上
-      const mounted = await sendJson<{ agent: Agent }>(
-        `${url}/api/agents/${executor.id}/tools`,
-        { toolIds: [installed.tool.id] },
-        'PUT',
-      )
-      assert.deepEqual(mounted.agent.toolIds, [installed.tool.id])
-
-      // ── ②' 审核者不许挂工具（服务端拒，不是靠界面隐藏） ──
-      const forbidden = await fetch(`${url}/api/agents/${reviewer.id}/tools`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ toolIds: [installed.tool.id] }),
-      })
-      assert.equal(forbidden.status, 400, '审核者只判断不动手')
+      // ⚠️ 这里原来还有两段：把工具包"按组挂到执行者身上"（`PUT
+      //    /api/agents/:id/tools`）与"审核者不许挂工具"（同一接口应回 400）。
+      //    挂载能力整个撤掉、那条接口也删了，所以两段一并删掉——**这条链本身
+      //    不依赖挂载**：动作能不能触发看的是审核者的 `allowedActions` 加上
+      //    "那个包确实装了"（见 `resolveAllowedActionsWithTools`）。
 
       // ── ④ 审核该说的话：一条带第三方动作的判决 ──
       //   （自动审核会读它；subject 是那条执行 run ⇒ 继承它的工作目录）
@@ -465,10 +455,11 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
     }
   })
 
-  test('★ 「不支持预演」的动作默认**不自动执行**；显式放行之后才执行（D40 的准入）', async () => {
-    // 使用者看到的那句界面文案是"不支持预演，不能自动执行"。这条测试保证它
-    // **不是一句空话**：平台真的会在准入那一步拦下来，而不是照跑。
-    const dir = await makeTempDir('tool-admission')
+  test('★ 声明「不支持预演」的动作**直接执行**（2026-09：预演准入撤掉了）', async () => {
+    // 同一个"有副作用"的工具包：清单里写 dryRun: "unsupported"。2026-09 起这个
+    // 声明**不再参与任何判断**（预演准入撤掉了）——判决引用它就该真的执行，
+    // 入口脚本写出的标记文件是"它到底跑没跑"的硬证据。
+    const dir = await makeTempDir('tool-direct-run')
     const backend = new ScriptedBackend()
     const daemon = await startDaemon({
       dataDir: dir,
@@ -483,15 +474,12 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
     const url = daemon.url
 
     try {
-      // ── 一个"我保证不了"的工具包：清单里写 dryRun: unsupported ──
-      //   入口脚本故意是**有副作用**的（写一个标记文件）——这样"它到底跑没跑"
-      //   有硬证据，不用猜。
       const pkgDir = join(dir, 'risky-tool')
       await mkdir(join(pkgDir, 'scripts'), { recursive: true })
       await writeFile(
         join(pkgDir, 'tool.json'),
         JSON.stringify({
-          schema: 'alpha-helper/tool@1',
+          schema: 'agentdeck/tool@1',
           slug: 'risky-tool',
           name: '不能预演的工具',
           runtime: 'node',
@@ -517,15 +505,14 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
           'for await (const c of process.stdin) chunks.push(c)',
           'const input = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")',
           // ⚠️ 标记文件的内容刻意**不含换行**：这段脚本是"文本里的文本"，
-          //   写 `\n` 会在生成时被解释成一个真的换行，于是脚本自己成了语法错误
-          //   （第一次跑就踩到了，症状是"脚本以非 0 退出码结束"）。
+          //   写 `\n` 会在生成时被解释成一个真的换行，于是脚本自己成了语法错误。
           'await writeFile(join(input.params.dir, "RISKY.txt"), "跑了", "utf8")',
           'process.stdout.write(JSON.stringify({ ok: true, detail: "写了标记文件" }))',
         ].join('\n'),
         'utf8',
       )
 
-      const installed = await sendJson<{ tool: Tool }>(`${url}/api/tools`, {
+      await sendJson<{ tool: Tool }>(`${url}/api/tools`, {
         source: 'path',
         path: pkgDir,
       })
@@ -540,10 +527,9 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         instructions: '',
         runtimeKey: 'claude',
         role: 'reviewer',
-        // ★ 动作权限在 **agent** 上（D40 收口）
+        // ★ 动作权限在 **agent** 上（D40 收口）；不标「调试」⇒ 直接执行
         allowedActions: ['risky-tool.touch'],
         reviewStandard: {
-          name: '放行标准',
           body: '# 放行标准\n\n什么都算通过。',
         },
       })
@@ -552,13 +538,7 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ reviewerAgentId: reviewer.id }),
       })
-      await sendJson<{ agent: Agent }>(
-        `${url}/api/agents/${executor.id}/tools`,
-        { toolIds: [installed.tool.id] },
-        'PUT',
-      )
-
-      // 审核我说什么：通过，并触发那个不能预演的动作
+      // 审核我说什么：通过，并触发那个动作
       backend.verdict = {
         schemaVersion: 1,
         conclusion: 'pass',
@@ -569,15 +549,27 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         escalateReason: null,
       }
 
-      const findAction = async (): Promise<Array<{ status: string; error: string | null; params: Record<string, unknown> }>> =>
+      const findAction = async (): Promise<
+        Array<{
+          status: string
+          error: string | null
+          dryRun: boolean
+          result: Record<string, unknown> | null
+          params: Record<string, unknown>
+        }>
+      > =>
         until(
           async () => {
             const { runs } = (await (await fetch(`${url}/api/runs`)).json()) as {
               runs: Array<{ runId: string; kind: string }>
             }
-            // ⚠️ 要把**所有**判决的动作都收齐再回来：只看"第一个有动作的判决"会让
-            //    第二次执行（放行之后）永远读不到——它落在另一个判决上。
-            const all: Array<{ status: string; error: string | null; params: Record<string, unknown> }> = []
+            const all: Array<{
+              status: string
+              error: string | null
+              dryRun: boolean
+              result: Record<string, unknown> | null
+              params: Record<string, unknown>
+            }> = []
             for (const run of runs.filter((r) => r.kind === 'review')) {
               const { verdicts } = (await (
                 await fetch(`${url}/api/runs/${run.runId}/verdicts`)
@@ -600,78 +592,183 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
           'risky-tool.touch 的动作记录到达终态',
         )
 
-      // ── ① 默认不放行：动作失败、**脚本一次都没跑**、通知里有话 ──
       const executeRunId = ulid() as RunId
       await postRun(url, {
         runId: executeRunId,
         kind: 'execute',
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
         skills: [],
-        subject: { type: 'issue', id: 'issue-admission-1' },
+        subject: { type: 'issue', id: 'issue-direct-1' },
         prompt: '干点活',
         limits: { maxTurns: null, timeoutMs: null },
       })
       assert.equal(await waitTerminal(url, executeRunId), 'completed')
 
-      const first = await findAction()
-      assert.equal(first[0]?.status, 'failed', '默认不放行 ⇒ 动作失败（不是静默跳过）')
-      assert.match(String(first[0]?.error), /不支持 dry-run/, '失败原因要说清是准入拦下的')
-      assert.match(String(first[0]?.error), /「工具」页/, '并指出去哪儿改（否则使用者只会看到"动作失败"）')
-      await assert.rejects(
-        readFile(join(String(first[0]?.params['dir']), 'RISKY.txt'), 'utf8'),
-        '★ 脚本不该被执行——文案说"不能自动执行"，平台就必须真的不执行',
+      // ★ 不再被准入拦下：动作 **executed**，错误为空，脚本真的跑了
+      const done = await until(
+        async () => (await findAction()).find((a) => a.status === 'executed') ?? null,
+        '动作直接执行成功',
+      )
+      assert.equal(done.error, null, '不再有"不支持 dry-run"的拒绝')
+      assert.equal(done.dryRun, false, '真执行 ⇒ 不带"没真跑"标记')
+      const marker = await until(
+        async () => readFile(join(String(done.params['dir']), 'RISKY.txt'), 'utf8').catch(() => null),
+        '脚本真的执行了（标记文件出现）',
+      )
+      assert.match(marker, /跑了/)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  test('★ 「调试」：不跑脚本，只记录动作与解析后的参数（2026-09）', async () => {
+    // 同一个"有副作用"的工具包，但审核者在行动权限里给它标了「调试」
+    // （`debugActions`）——判决引用它时平台**不执行脚本**，只把动作连同解析后
+    // 的完整参数记进时间线（`dryRun: true` ⇒ 界面显示「调试 · 未执行」）。
+    // 标记文件**不出现**是硬证据。
+    const dir = await makeTempDir('tool-debug')
+    const backend = new ScriptedBackend()
+    const daemon = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      workRoot: join(dir, 'workroot'),
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+      scriptRuntimePath: process.execPath,
+    })
+    const url = daemon.url
+
+    try {
+      const pkgDir = join(dir, 'risky-tool')
+      await mkdir(join(pkgDir, 'scripts'), { recursive: true })
+      await writeFile(
+        join(pkgDir, 'tool.json'),
+        JSON.stringify({
+          schema: 'agentdeck/tool@1',
+          slug: 'risky-tool',
+          name: '不能预演的工具',
+          runtime: 'node',
+          entry: 'scripts/touch.mjs',
+          actions: [
+            {
+              name: 'touch',
+              summary: '写一个标记文件',
+              reversible: false,
+              dryRun: 'unsupported',
+              params: { bound: { dir: { from: 'workdir' } }, open: {} },
+            },
+          ],
+        }),
+        'utf8',
+      )
+      await writeFile(
+        join(pkgDir, 'scripts', 'touch.mjs'),
+        [
+          "import { writeFile } from 'node:fs/promises'",
+          "import { join } from 'node:path'",
+          'const chunks = []',
+          'for await (const c of process.stdin) chunks.push(c)',
+          'const input = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")',
+          'await writeFile(join(input.params.dir, "RISKY.txt"), "跑了", "utf8")',
+          'process.stdout.write(JSON.stringify({ ok: true, detail: "写了标记文件" }))',
+        ].join('\n'),
+        'utf8',
       )
 
-      // ── ② 显式放行之后：真的执行、标记文件出现 ──
-      const flip = await fetch(`${url}/api/workspace/unpreviewed-actions`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ allow: true }),
+      await sendJson<{ tool: Tool }>(`${url}/api/tools`, {
+        source: 'path',
+        path: pkgDir,
       })
-      assert.ok(flip.ok, `打开开关应当成功：${flip.status}`)
+      const executor = await sendJson<Agent>(`${url}/api/agents`, {
+        name: '执行者3',
+        instructions: '',
+        runtimeKey: 'claude',
+        role: 'executor',
+      })
+      const reviewer = await sendJson<Agent>(`${url}/api/agents`, {
+        name: '审核者3',
+        instructions: '',
+        runtimeKey: 'claude',
+        role: 'reviewer',
+        // ★ 授权它（allowedActions）+ 标「调试」（debugActions，allowedActions 的子集）
+        allowedActions: ['risky-tool.touch'],
+        debugActions: ['risky-tool.touch'],
+        reviewStandard: {
+          body: '# 放行标准\n\n什么都算通过。',
+        },
+      })
+      assert.deepEqual(
+        reviewer.debugActions,
+        ['risky-tool.touch'],
+        'POST 建审核者时 debugActions 要落库',
+      )
+      await fetch(`${url}/api/agents/${executor.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reviewerAgentId: reviewer.id }),
+      })
+      backend.verdict = {
+        schemaVersion: 1,
+        conclusion: 'pass',
+        reasonCode: 'meets_criteria',
+        confidence: 0.9,
+        findings: [],
+        action: { type: 'risky-tool.touch', params: {} },
+        escalateReason: null,
+      }
 
-      // 第二条执行 run：它自己的审核会把同一个动作再走一遍（不同的判决 ⇒ 不同幂等键）
-      const secondRunId = ulid() as RunId
+      const executeRunId = ulid() as RunId
       await postRun(url, {
-        runId: secondRunId,
+        runId: executeRunId,
         kind: 'execute',
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
         skills: [],
-        subject: { type: 'issue', id: 'issue-admission-2' },
-        prompt: '再干点活',
+        subject: { type: 'issue', id: 'issue-debug-1' },
+        prompt: '干点活',
         limits: { maxTurns: null, timeoutMs: null },
       })
-      assert.equal(await waitTerminal(url, secondRunId), 'completed')
+      assert.equal(await waitTerminal(url, executeRunId), 'completed')
 
       const done = await until(
         async () => {
-          const actions = await findAction()
-          // 等**执行成功**的那一条（第一条永远是 failed 的那条）
-          return actions.find((a) => a.status === 'executed') ?? null
+          const { runs } = (await (await fetch(`${url}/api/runs`)).json()) as {
+            runs: Array<{ runId: string; kind: string }>
+          }
+          for (const run of runs.filter((r) => r.kind === 'review')) {
+            const { verdicts } = (await (
+              await fetch(`${url}/api/runs/${run.runId}/verdicts`)
+            ).json()) as { verdicts: Array<{ id: string }> }
+            for (const verdict of verdicts) {
+              const actions = await daemon.store.listActionsByVerdict(verdict.id as never)
+              const hit = actions.find(
+                (a) => a.type === 'risky-tool.touch' && a.status === 'executed',
+              )
+              if (hit) return hit
+            }
+          }
+          return null
         },
-        '放行之后动作执行成功',
-      ).catch(async (err: unknown) => {
-        const { runs } = (await (await fetch(`${url}/api/runs`)).json()) as {
-          runs: Array<{ runId: string; kind: string; status: string }>
-        }
-        const dump: string[] = []
-        for (const run of runs) {
-          const verdicts = await fetch(`${url}/api/runs/${run.runId}/verdicts`)
-            .then((r) => r.json())
-            .catch(() => null)
-          dump.push(`${run.kind}/${run.status} ${JSON.stringify(verdicts).slice(0, 400)}`)
-        }
-        const all = await findAction().catch(() => [])
-        const ws = await daemon.store.getWorkspace('' as never).catch(() => null)
-        throw new Error(
-          `${String(err)}\n各 run 与判决：\n${dump.join('\n')}\n记录：${JSON.stringify(all)}\nworkspace：${JSON.stringify(ws)}`,
-        )
-      })
-      const marker = await until(
-        async () => readFile(join(String(done.params['dir']), 'RISKY.txt'), 'utf8').catch(() => null),
-        '放行之后脚本真的跑了（标记文件出现）',
+        '调试动作记录到达 executed',
       )
-      assert.match(marker, /跑了/)
+
+      // ★ 记录带着"没真跑"标记（协议里 `Action.dryRun` = 没真跑、只记录）
+      assert.equal(done.dryRun, true, '调试记录带 dryRun 标记（时间线显示「调试 · 未执行」）')
+      assert.ok(
+        String(done.result?.['detail'] ?? '').includes('调试模式'),
+        'result 里说明这是调试模式：' + JSON.stringify(done.result),
+      )
+      // ★ 解析后的完整参数原样记下（bound 的 dir 是平台按事实注入的）
+      assert.ok(
+        typeof done.params['dir'] === 'string' && done.params['dir'].length > 0,
+        '动作与解析后的参数被记录：' + JSON.stringify(done.params),
+      )
+      // ★ 脚本一次都没跑：标记文件必须不存在
+      await assert.rejects(
+        readFile(join(String(done.params['dir']), 'RISKY.txt'), 'utf8'),
+        '调试模式不该执行脚本——标记文件不该出现',
+      )
     } finally {
       await daemon.close()
     }

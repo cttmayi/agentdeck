@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>alpha-helper layout probe</title>
+    <title>agentdeck layout probe</title>
     <style>
       html, body { margin: 0; background: #111; color: #eee; font: 12px/1.5 monospace; }
       iframe { width: 1280px; height: 880px; border: 0; display: block; }
@@ -220,9 +220,90 @@
         facts['agents.runtimeCardsWellFormed'] =
           rc().length > 0 && rc().every((c) => c.querySelectorAll('.runtime-line').length >= 2)
 
+        /**
+         * ★★ 「设置」抽屉：**没保存就关掉，草稿必须丢掉**。
+         *
+         * ══════════════════════════════════════════════════════════════
+         * 这条检查的由来：使用者报的一次"内容没恢复"
+         * ══════════════════════════════════════════════════════════════
+         *
+         * 原话是「我修改了内容，没有保存直接点关闭或者取消后，重新打开，内容没有
+         * 恢复保存前的内容」。实测确实如此：改到 238 字符、关掉、重开——还是 238。
+         *
+         * 根因是那个"初始值只取一次"的开关只被设成 true、**从来不重置**：第一次
+         * 打开之后它永远是 true，于是"取消"之后再打开，框里留着的是上一次没保存
+         * 的草稿。而"取一次"本身是对的（保存之后 store 会刷新，那一冲会让人以为
+         * 自己写的东西没了）——所以修法是**每次打开重新取一遍**，不是去掉它。
+         *
+         * ⚠️ 这条检查**不改动任何已保存的东西**：它只往输入框里打字，然后关掉
+         *    （不点保存），所以那份配置在服务端一个字都没变。
+         * ⚠️ 判据是"重开之后的内容 == 打开时的内容（= 已保存的值）"，而不是
+         *    "字数变了没有"：只有前者才是使用者那句话的意思。
+         */
+        facts['agents.settingsDraftDiscarded'] = await (async () => {
+          f.contentWindow.location.hash = '#/agents'
+          // ⚠️ 2026-09 顶栏改版：页面标题从主区头部搬到了顶栏，所以"这一页出来了"
+          //    这个信号跟着改量点（判据没变：仍然是**这一页的名字**出现在屏幕上）。
+          await until(() => text(d().querySelector('.page-name')) === '智能体', 60)
+          await wait(500)
+          const openSettings = async () => {
+            // 页面动作（「设置」等）2026-09 起在顶栏里、紧跟着页名：所有页面**同一个位置**
+            const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+              (b) => text(b) === '设置',
+            )
+            if (!btn) return false
+            click(btn)
+            await wait(1500)
+            return d().querySelector('.drawer textarea') !== null
+          }
+          const field = () => d().querySelector('.drawer textarea')
+          if (!(await openSettings())) {
+            errors.push('打开智能体页的「设置」之后没看到模版输入框')
+            return false
+          }
+          /**
+           * ⚠️ 已保存的值**可能是空的**（平台有默认模版，`current.executeTemplate`
+           *    就是空串，界面靠 placeholder 显示默认那一段）。所以这里不要求它非空：
+           *    判据是"改完之后关掉，重开必须回到**打开时那一份**"——空也算一份。
+           */
+          const saved = field()?.value ?? ''
+          // 改一下（**不保存**）
+          const box = field()
+          box.value = `${saved}\n\n【探针：这段没保存，关掉之后不该还在】`
+          box.dispatchEvent(new Event('input', { bubbles: true }))
+          await wait(400)
+          if ((field()?.value ?? '').length === saved.length) {
+            errors.push('改了输入框但内容没变（这一条量不到）')
+            return false
+          }
+          // 关掉（走 Esc，等于点「关闭」）
+          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+          await wait(800)
+          if (d().querySelector('.drawer') !== null) {
+            errors.push('Esc 没关掉抽屉（这一条的第一步就没成立）')
+            return false
+          }
+          // 重开：必须回到已保存的那份
+          if (!(await openSettings())) {
+            errors.push('重开「设置」时没看到模版输入框')
+            return false
+          }
+          const again = field()?.value ?? ''
+          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+          await wait(400)
+          if (again !== saved) {
+            errors.push(
+              `没保存就关掉之后，重开时框里不是已保存的内容（${saved.length} → ${again.length} 字符）` +
+                `——多出来的是上一次的草稿`,
+            )
+            return false
+          }
+          return true
+        })()
+
         // ══════════════ 任务清单：同样的主从 + 去重字样 ══════════════
         f.contentWindow.location.hash = '#/tasks'
-        await until(() => d().querySelector('.view-head, .pane-head'))
+        await until(() => text(d().querySelector('.page-name')) === '任务清单')
         // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
         // 下面那条"重复字样"的检查会**空过**——所以这里必须如实报出来。
         const gotRows = await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
@@ -316,11 +397,9 @@
 
         // ══════════════ Skills：安装面板在抽屉里 ══════════════
         f.contentWindow.location.hash = '#/skills'
-        await until(() => d().querySelector('.view-head h2')?.textContent.trim() === 'Skills')
+        await until(() => text(d().querySelector('.page-name')) === 'Skills')
         await wait(500)
-        facts['skills.title'] = need('Skills 标题', () =>
-          text(d().querySelector('.view-head h2')),
-        )
+        facts['skills.title'] = need('Skills 标题', () => text(d().querySelector('.page-name')))
         // 老结构（正文里展开的面板）不该再存在
         facts['skills.oldInlinePanel'] = need('正文里还有 .install-panel 吗', () =>
           !!d().querySelector('.install-panel'),
@@ -370,6 +449,194 @@
           facts['skills.drawerGoneAfterEsc'] = !d().querySelector('.drawer')
         }
 
+        // ══════════════ 本地技能目录（Skills 页 →「设置」）══════════════
+        //
+        // 使用者要的是一条链：**勾上一个别的 AI 工具的目录 ⇒ skill 出现在这一页
+        // ⇒ 能挂给智能体**。三件事各自"看起来对"而中间断了，是最容易漏的那种，
+        // 所以这里一路量到底，而且用的是**真实点击 + 真实打字**。
+        //
+        // ⚠️ 夹具目录由 `run.mjs` 造、路径从 URL 传进来：探针跑在
+        //    `--virtual-time-budget` 下，不可能自己编出 `.cache/layout-probe/…`
+        //    这个绝对路径。
+        const ldsDir = new URLSearchParams(location.search).get('localSkillsDir')
+
+        const ldsSettingsBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+          (b) => b.textContent.trim() === '设置',
+        )
+        facts['skills.settingsButtonFound'] = !!ldsSettingsBtn
+        if (!ldsSettingsBtn) {
+          errors.push('Skills 页找不到「设置」按钮')
+        } else {
+          click(ldsSettingsBtn)
+          const opened = await until(() => d().querySelector('.drawer'))
+          if (!opened) errors.push('点了「设置」之后没有出现 .drawer')
+        }
+
+        const ldsDrawer = d().querySelector('.drawer')
+        if (ldsDrawer) {
+          // 内置候选：四个目录，每个都要有路径与"里面几个 skill"
+          const ldsRows = [...ldsDrawer.querySelectorAll('.dir-row')]
+          facts['skills.dirsCandidateCount'] = ldsRows.length
+          facts['skills.dirsCandidateLabels'] = ldsRows.map((r) => text(r.querySelector('strong')))
+          facts['skills.dirsAllHavePath'] = ldsRows.every((r) => !!r.querySelector('.dir-path'))
+          facts['skills.dirsAllHaveCheckbox'] = ldsRows.every((r) => !!r.querySelector('input[type=checkbox]'))
+          // ⚠️ 只量"勾选框在不在"是不够的：全局那条 `input { width: 100% }` 会让
+          //    勾选框**撑满整行**（实测 480px），把右边的路径挤成 0 宽——勾选框
+          //    明明"在"，而整行变成 837px 高、抽屉横向溢出。所以宽度与溢出都要量。
+          const ldsRect = (el) => Math.round(el.getBoundingClientRect().width)
+          facts['skills.dirsCheckboxWidth'] = ldsRows[0]
+            ? ldsRect(ldsRows[0].querySelector('input[type=checkbox]'))
+            : null
+          facts['skills.dirsPathWidth'] = ldsRows[0]?.querySelector('.dir-path')
+            ? ldsRect(ldsRows[0].querySelector('.dir-path'))
+            : null
+          facts['skills.dirsRowWidth'] = ldsRows[0] ? ldsRect(ldsRows[0]) : null
+          const ldsBody = ldsDrawer.querySelector('.drawer-body')
+          facts['skills.dirsBodyOverflowX'] = ldsBody ? ldsBody.scrollWidth - ldsBody.clientWidth : null
+          facts['skills.dirsRowHeights'] = ldsRows.map((r) => Math.round(r.getBoundingClientRect().height))
+          // 「取消勾选不会删掉什么」必须写在抽屉里：不写使用者就不敢勾
+          facts['skills.dirsUncheckNote'] = need('取消勾选的说明', () =>
+            text(ldsDrawer.querySelector('.notice')),
+          )
+          // 真实打字 + 真实点击：把夹具目录勾上
+          const ldsInput = ldsDrawer.querySelector('.dir-add input')
+          const ldsAddBtn = ldsDrawer.querySelector('.dir-add button')
+          facts['skills.dirsAddInputFound'] = !!ldsInput && !!ldsAddBtn
+          if (ldsInput && ldsAddBtn && ldsDir) {
+            ldsInput.value = ldsDir
+            ldsInput.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(120)
+            click(ldsAddBtn)
+            // 等对账回来 + 列表刷新（真的发了一次 PUT 与两次 GET）
+            await until(
+              () => [...d().querySelectorAll('.main table tbody td')].some((td) =>
+                td.textContent.includes('probe-local-a'),
+              ),
+              120,
+            )
+          } else if (!ldsDir) {
+            errors.push('URL 里没有 localSkillsDir，勾选那一半量不了')
+          }
+        }
+
+        // 关掉抽屉，看列表
+        const ldsClose = d().querySelector('.drawer header button')
+        if (ldsClose) {
+          click(ldsClose)
+          await until(() => !d().querySelector('.drawer'), 40)
+        }
+
+        const ldsRowOf = (slug) =>
+          [...d().querySelectorAll('.main table tbody tr')].find((tr) =>
+            tr.querySelector('code')?.textContent.trim() === slug,
+          )
+
+        facts['skills.localSkillARow'] = !!ldsRowOf('probe-local-a')
+        facts['skills.localSkillBRow'] = !!ldsRowOf('probe-local-b')
+        facts['skills.localSkillCount'] = ['probe-local-a', 'probe-local-b'].filter((slug) =>
+          ldsRowOf(slug),
+        ).length
+        facts['skills.localBadge'] = need('本地目录那条的来源徽标', () =>
+          text(ldsRowOf('probe-local-a')?.querySelector('.badge')),
+        )
+        // 来源徽标要写成**那个目录**，而不是笼统的"本机自建"
+        facts['skills.localBadgeHasPath'] = need('徽标里有没有那个路径', () => {
+          const badge = ldsRowOf('probe-local-a')?.querySelector('.badge')
+          return !!badge && !!ldsDir && badge.textContent.includes(ldsDir)
+        })
+        // 来自本地目录的那条**不给卸载**：删了会被下次扫描带回来
+        facts['skills.localUninstallDisabled'] = need('本地目录那条的卸载按钮', () => {
+          const row = ldsRowOf('probe-local-a')
+          const btn = [...(row?.querySelectorAll('button') ?? [])].find(
+            (b) => b.textContent.trim() === '卸载',
+          )
+          return btn ? btn.disabled : null
+        })
+
+        // 再打开一次设置：跳过的那个空目录要如实说出来
+        const ldsSettingsBtn2 = [...d().querySelectorAll('.topbar .page-actions button')].find(
+          (b) => b.textContent.trim() === '设置',
+        )
+        if (ldsSettingsBtn2) {
+          click(ldsSettingsBtn2)
+          await until(() => d().querySelector('.drawer'), 60)
+          // ⚠️ 这里**必须等条件**，不能 `wait(300)`：探针跑在 `--virtual-time-budget`
+          //    下，`setTimeout` 是虚拟的而网络是真的——固定等 300ms 会在
+          //    "抽屉开了、设置还没读回来"的那一刻就往下量（第一版就是这么错的）
+          await until(
+            () =>
+              [...d().querySelectorAll('.dir-row')].some((r) =>
+                r.textContent.includes('fixture-local-skills'),
+              ),
+            80,
+          )
+          const ldsDrawer2 = d().querySelector('.drawer')
+          // ★ 用**夹具**那个空目录来量，不用机器上的真实目录：真实目录里有没有
+          //   空目录是随机的，拿它断言会让这条检查在某些机器上悄悄变成"空过"
+          facts['skills.dirsSkipNote'] = need('跳过说明', () => {
+            const skips = [...(ldsDrawer2?.querySelectorAll('.dir-skip') ?? [])]
+            return text(skips.find((el) => el.textContent.includes('probe-empty-dir')))
+          })
+          // ⚠️ `text()` 收的是**元素**：写成 `.map(r => r.textContent).find(...)`
+          //    会把一个字符串交给它，于是 `string.textContent.replace` 抛错，
+          //    而 `need()` 会把这条记成"拿不到值"——症状看起来像"界面上没有"，
+          //    其实是被自己的取值方式坑了（第一版就是这么错的）
+          facts['skills.dirsCustomRow'] = need('自己填的路径那一行', () =>
+            text(
+              [...(ldsDrawer2?.querySelectorAll('.dir-row') ?? [])].find((r) =>
+                r.textContent.includes('fixture-local-skills'),
+              ),
+            ),
+          )
+          const ldsClose2 = d().querySelector('.drawer header button')
+          if (ldsClose2) {
+            click(ldsClose2)
+            await until(() => !d().querySelector('.drawer'), 40)
+          }
+        }
+
+        // ── 能挂给智能体：去智能体页点开一个执行者，看选择器里有没有它 ──
+        f.contentWindow.location.hash = '#/agents'
+        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await wait(400)
+        const ldsExecItem = [...d().querySelectorAll('.agent-item')].find((el) =>
+          el.textContent.includes('执行'),
+        )
+        if (ldsExecItem) {
+          click(ldsExecItem)
+          await wait(400)
+          // ⚠️ 挂载选择器只在**编辑态**渲染（`{#if editing}` 里面），所以要先进编辑
+          const ldsEditBtn = [...d().querySelectorAll('.detail-pane button')].find(
+            (b) => b.textContent.trim() === '编辑',
+          )
+          facts['skills.pickerEditButtonFound'] = !!ldsEditBtn
+          if (ldsEditBtn) click(ldsEditBtn)
+          await until(() => d().querySelector('.skill-picker'), 80)
+          await wait(300)
+          const ldsPicker = d().querySelector('.skill-picker')
+          facts['skills.pickerFound'] = !!ldsPicker
+          const ldsOptions = [...(ldsPicker?.querySelectorAll('.skill-option') ?? [])].map((l) =>
+            text(l),
+          )
+          facts['skills.pickerOptions'] = ldsOptions
+          facts['skills.pickerHasLocalSkill'] = ldsOptions.some((t) => t && t.includes('probe-local-a'))
+          // ★ 勾一个：这条链的最后一环——"选中"必须真的能被提交
+          const ldsTarget = [...(ldsPicker?.querySelectorAll('.skill-option') ?? [])].find((l) =>
+            l.textContent.includes('probe-local-a'),
+          )
+          const ldsBox = ldsTarget?.querySelector('input[type=checkbox]')
+          if (ldsBox) {
+            ldsBox.checked = true
+            ldsBox.dispatchEvent(new Event('change', { bubbles: true }))
+            await wait(300)
+            facts['skills.pickerCheckboxTook'] = !!d().querySelector('.skill-picker input:checked')
+          }
+        } else {
+          errors.push('智能体页找不到执行者卡片，挂载那一环量不了')
+        }
+        f.contentWindow.location.hash = '#/skills'
+        await until(() => text(d().querySelector('.page-name')) === 'Skills', 60)
+
         // ══════════════ 侧边栏第五项 + 工具（D40）══════════════
         //
         // 使用者要的是"可插拔的行动"：一个工具包 = **一个组**（一个目录、一次
@@ -379,8 +646,7 @@
         //   ① **侧边栏五项**（D40 起「工具」是第 5 项，排在 Skills 之后）；
         //   ② 列表：组名、动作数、**挂给了谁**；
         //   ③ 点开一行：动作清单（契约值 `<slug>.<动作名>`、`summary`、
-        //      「不可回滚」「不支持预演，不能自动执行」两条标注、参数分
-        //      bound / open 两组）；
+        //      「不可回滚」标注、参数分 bound / open 两组）；
         //   ④ 安装抽屉：**右侧**、Esc 能关、失败时显示 error + **多行 detail**，
         //      成功时说清装进来了什么、并且列表立刻多一条；
         //   ⑤ 智能体详情：执行者有「工具」段、挂载能来回改并立刻刷新；
@@ -395,7 +661,7 @@
         const uiToolPath = probeQuery.get('uiToolPath')
 
         f.contentWindow.location.hash = '#/tools'
-        await until(() => text(d().querySelector('.view-head h2')) === '工具')
+        await until(() => text(d().querySelector('.page-name')) === '工具')
         await until(() => d().querySelectorAll('.tool-table tbody tr.tool-row').length > 0)
         await wait(400)
 
@@ -420,7 +686,7 @@
           probeNavTitles.length > 0 ? probeNavTitles[probeNavTitles.length - 1] : null
 
         // ── ② 列表 ──
-        facts['tools.title'] = need('工具页标题', () => text(d().querySelector('.view-head h2')))
+        facts['tools.title'] = need('工具页标题', () => text(d().querySelector('.page-name')))
         const probeToolRows = () => [...d().querySelectorAll('.tool-table tbody tr.tool-row')]
         const probeFixtureRow = () =>
           probeToolRows().find(
@@ -431,9 +697,6 @@
         if (!probeFixtureRow()) errors.push('工具列表里找不到夹具工具 probe-tool（夹具没装上？）')
         facts['tools.fixtureActionCell'] = need('夹具那行的动作数', () =>
           text(probeFixtureRow()?.querySelector('.tool-action-count')),
-        )
-        facts['tools.fixtureMountedBy'] = need('夹具那行的"挂给了谁"', () =>
-          text(probeFixtureRow()?.querySelector('.tool-mounted')),
         )
 
         // ── ③ 点一行 → 动作清单 ──
@@ -452,12 +715,18 @@
         facts['tools.irreversibleFlag'] = need('不可回滚那条标注', () =>
           probeActionText().includes('不可回滚'),
         )
-        facts['tools.noDryRunFlag'] = need('不支持预演那条标注', () =>
-          probeActionText().includes('不支持预演，不能自动执行'),
-        )
+        // ⚠️ 「模型看不到也填不了」那句解释**不在每个动作卡片里**了：它整块面板只说
+        //    一次（`.param-legend`）。理由见 Tools.svelte 里那段注释（实测 2 个动作时
+        //    那两句重复了 124px）。所以这条要分两半量：**分组还在**，而且**解释还在**。
         facts['tools.boundGroupNote'] = need('绑定参数那一组', () => {
           const group = d().querySelector('.tool-detail-row .params-bound')
-          return !!group && (text(group) ?? '').includes('模型看不到也填不了')
+          const legend = d().querySelector('.tool-detail-row .param-legend')
+          return (
+            !!group &&
+            text(group).startsWith('平台绑定') &&
+            !!legend &&
+            (text(legend) ?? '').includes('模型看不到也填不了')
+          )
         })
         facts['tools.openGroupNote'] = need('模型可填那一组', () => {
           const group = d().querySelector('.tool-detail-row .params-open')
@@ -466,7 +735,7 @@
         })
 
         // ── ④ 安装抽屉：右侧 + Esc + 失败（多行 detail）+ 成功 ──
-        const probeInstallBtn = [...d().querySelectorAll('.view-head button')].find(
+        const probeInstallBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
           (b) => text(b) === '安装工具',
         )
         facts['tools.installButtonFound'] = !!probeInstallBtn
@@ -571,10 +840,18 @@
         await until(() => d().querySelectorAll('.agent-row').length > 0)
         await wait(400)
 
-        /** 详情里那一段「干活时能用的工具包」的标题元素——判据是 h3 的文字，不是类名。 */
+        /**
+         * 详情里还有没有"工具包"那一段——判据是 h3 的**文字**，不是类名。
+         *
+         * ⚠️ 这个探针原来是找那一段**存在**，现在找它**不存在**：使用者要求
+         *    「执行智能体不支持"行动"，去掉」，那一段整段撤掉了（理由见
+         *    `AgentDetail.svelte` 里"执行者的详情里没有工具那一段了"）。
+         *    用文字而不是类名，是因为这一段连着改了两轮，类名先没了、标题后没的，
+         *    按类名找会在"标题还在、勾选栏没了"的中间态上误判成通过。
+         */
         const probeToolsHeading = () =>
-          [...d().querySelectorAll('.detail .section h3')].find(
-            (h) => text(h) === '干活时能用的工具包',
+          [...d().querySelectorAll('.detail .section h3')].find((h) =>
+            text(h).includes('工具包'),
           ) ?? null
         const probeDetailText = () => text(d().querySelector('.detail')) ?? ''
 
@@ -592,8 +869,14 @@
           )
           if (!probeSwitched) errors.push('点开夹具执行者之后右栏没换成它')
           await wait(300)
-          facts['tools.detailSectionForExecutor'] =
-            !!probeToolsHeading() && probeDetailText().includes('probe-tool')
+          // ★ 执行者详情里**没有**"工具包"那一段（连只读的那半截也撤了）。
+          //   判据不能只是"找不到标题"——整页空白也成立，所以先要一个**必须先有**
+          //   的东西：这一页的段落标题得是真的渲染出来了。
+          facts['tools.executorHasNoToolsSection'] = need('执行者详情里的段落标题', () => {
+            const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+            return headings.length > 0 && probeToolsHeading() === null
+          })
+          facts['tools.executorNoPickLabel'] = !probeDetailText().includes('可挂载的工具组')
 
           // ★ 对称的一条（D40 收口）：**执行者**详情里没有「行动权限」段。
           //   与下面"审核者没有工具段"是同一条不变量：各人的能力只给各自的人
@@ -607,7 +890,15 @@
             return headings.length > 0 && !headings.some((h) => h.includes('行动权限'))
           })
 
-          // ── 编辑态：勾选 → 保存 → 摘掉 → 再挂回来 ──
+          // ── 编辑态：也要查一遍"没有那一段" ──
+          //
+          //   使用者的要求（原话）：「执行智能体不支持"行动"，去掉」。他去「智能体」
+          //   页选了「助手」、点「编辑」，看到的就是那一栏里的「可挂载的工具组」。
+          //
+          //   ⚠️ 编辑态走的是**另一条判据**（见下面那条注释），所以只查只读态等于
+          //      另一条没人管。这一段撤了两次：先撤勾选栏、再整段撤，所以这里查的是
+          //      **整段不在**，而不是"勾选栏不在"——中间态（标题还在、控件没了）
+          //      也算过的话，就等于没查。
           const probeEditBtn = [...d().querySelectorAll('.detail button')].find(
             (b) => text(b) === '编辑',
           )
@@ -615,63 +906,90 @@
             errors.push('详情里找不到「编辑」按钮')
           } else {
             click(probeEditBtn)
-            await until(() => !!d().querySelector('.tool-picker'))
-            const probeOptions = () => [
-              ...d().querySelectorAll('.tool-picker .tool-option'),
-            ]
-            facts['tools.detailPickerHasFixture'] = probeOptions().some((o) =>
-              (o.textContent ?? '').includes('probe-tool'),
-            )
-            // ★ D42 行为面：编辑态的说明必须说清"挂载 = 送进工作目录、干活时用"，
-            //   而不是旧的"把整组动作交给它"（那是审核者那一侧的说法——两个
-            //   行为面混成一个，正是使用者担心会误解的地方）。
-            facts['tools.detailMountHintWording'] = need('执行者工具段的挂载说明', () =>
-              (text(d().querySelector('.detail')) ?? '').includes('送进它的工作目录'),
-            )
-            const probeSaveBtn = () =>
-              [...d().querySelectorAll('.detail button')].find(
-                (b) => text(b) === '保存挂载',
-              )
+            await until(() => !!d().querySelector('#agent-name'))
+            await wait(400)
 
-            const probeSetMount = async (on) => {
-              const option = probeOptions().find((o) =>
-                (o.textContent ?? '').includes('probe-tool'),
-              )
-              const input = option?.querySelector('input')
-              if (!input) return false
-              if (input.checked !== on) click(input)
-              const save = probeSaveBtn()
-              if (!save) return false
-              click(save)
-              // 保存是**真的**写接口：等按钮从"保存中…"回到「保存挂载」再走
-              const settled = await until(
-                () => text(probeSaveBtn() ?? { textContent: '' }) === '保存挂载',
-                60,
-              )
-              return settled
-            }
+            // ★ **编辑态也要查一遍**（使用者的原话：「智能体详情，点『编辑』就可以看见」）。
+            //
+            //   上面那条查的是**只读态**，而编辑态走的是**另一条判据**：
+            //   只读态看 `isReviewer`（= `agent.role`），编辑态看 `draft.role`。
+            //   两条判据是两段代码，只查一条等于另一条没人管 —— 而"改到一半的角色"
+            //   正是这里最容易出错的地方（`draft` 是进编辑态时才拷的一份）。
+            facts['standard.executorEditHasNoActionsSection'] = need('执行者编辑态的段落标题', () => {
+              const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+              facts['standard.executorEditSectionHeadings'] = headings
+              return headings.length > 0 && !headings.some((h) => h.includes('行动权限'))
+            })
 
-            const probeUnmounted = await probeSetMount(false)
-            // 退出编辑态才看得到只读那段（"保存后真的刷新"就看它）
             const probeCancelBtn = () =>
               [...d().querySelectorAll('.detail button')].find((b) => text(b) === '取消')
             if (probeCancelBtn()) click(probeCancelBtn())
             await wait(400)
-            facts['tools.mountSaveTookEffect'] =
-              probeUnmounted && !probeDetailText().includes('probe-tool')
+          }
+        }
 
-            // 再挂回去：来回都走接口，而不是"本地勾选的样子"
-            const probeEditAgain = [...d().querySelectorAll('.detail button')].find(
+        // ── ★ 编辑到一半**换一个 agent**：草稿必须跟着作废 ──
+        //
+        //   使用者的原话：「智能体详情，点『编辑』就可以看见[行动权限]」。
+        //
+        //   根因不在那条 `{#if}`（它是对的），而在**草稿的归属**：`draft` 是进编辑态
+        //   时从 `agent` 拷的一份，而 `Agents.svelte` 是
+        //   `{#if selected}<AgentDetail agent={selected}/>{/if}` —— 换一个 agent 时
+        //   组件实例被**复用**，`editing` 还是 true、`draft` 还是**上一个人**的。
+        //
+        //   两个后果，第二个比第一个严重得多：
+        //     ① 执行者的详情里冒出「行动权限」（判据 `draft.role === 'reviewer'`
+        //        读的是上一个审核者的草稿）；
+        //     ② 点「保存」会把**上一个人的**名字/指令/角色 PATCH 到这个人身上
+        //        —— `buildPatch()` 拿 `draft.*` 与新 `agent.*` 比，于是这些字段
+        //        全都"变了"。
+        //
+        //   所以这条查的是**输入框里的值**，而不只是段落标题：标题只是症状。
+        {
+          const probeSwitchReviewer = [...d().querySelectorAll('.agent-row')].find((row) =>
+            row.querySelector('.badge.in_review'),
+          )
+          const probeSwitchExec = [...d().querySelectorAll('.agent-row')].find((row) =>
+            (row.textContent ?? '').includes('探针用的执行者'),
+          )
+          if (!probeSwitchReviewer || !probeSwitchExec) {
+            errors.push('换 agent 那条查不了：找不到夹具审核者或执行者')
+          } else {
+            click(probeSwitchReviewer.querySelector('.agent-item'))
+            await until(() => !!d().querySelector('.detail .section h3'), 60)
+            await wait(300)
+            const probeEditForSwitch = [...d().querySelectorAll('.detail button')].find(
               (b) => text(b) === '编辑',
             )
-            if (probeEditAgain) {
-              click(probeEditAgain)
-              await until(() => !!d().querySelector('.tool-picker'))
-              const probeRemounted = await probeSetMount(true)
-              if (probeCancelBtn()) click(probeCancelBtn())
+            if (!probeEditForSwitch) {
+              errors.push('换 agent 那条查不了：审核者详情里没有「编辑」')
+            } else {
+              click(probeEditForSwitch)
               await wait(400)
-              facts['tools.mountRestoreTookEffect'] =
-                probeRemounted && probeDetailText().includes('probe-tool')
+              // **在编辑态里**换成执行者
+              click(probeSwitchExec.querySelector('.agent-item'))
+              const probeSwitched = await until(
+                () => text(d().querySelector('.detail h2')) === '探针用的执行者',
+                60,
+              )
+              await wait(500)
+              facts['standard.switchWhileEditingTitle'] = text(d().querySelector('.detail h2'))
+              facts['standard.switchWhileEditingName'] = (() => {
+                const input = d().querySelector('#agent-name')
+                return input ? input.value : '(不在编辑态)'
+              })()
+              const probeSwitchHeadings = [...d().querySelectorAll('.detail .section h3')].map((h) =>
+                text(h),
+              )
+              facts['standard.switchWhileEditingHeadings'] = probeSwitchHeadings
+              facts['standard.switchWhileEditingNoActions'] =
+                probeSwitched && !probeSwitchHeadings.some((h) => h.includes('行动权限'))
+              // 收尾：别把状态留在编辑态
+              const probeSwitchCancel = [...d().querySelectorAll('.detail button')].find(
+                (b) => text(b) === '取消',
+              )
+              if (probeSwitchCancel) click(probeSwitchCancel)
+              await wait(300)
             }
           }
         }
@@ -715,20 +1033,41 @@
         await wait(400)
 
         const paneEl = d().querySelector('.pane')
-        const headEl = d().querySelector('.pane-head')
         const box = (el) => {
           if (!el) return null
           const r = el.getBoundingClientRect()
           return { x: r.x, y: r.y, w: r.width, h: r.height }
         }
         const paneBox = box(paneEl)
-        const headBox = box(headEl)
         facts['template.paneWidthPx'] = paneBox ? Math.round(paneBox.w) : null
-        facts['template.headHeightBefore'] = headBox ? Math.round(headBox.h) : null
         facts['template.viewportWidth'] = f.contentWindow.innerWidth
 
+        /**
+         * ★ 抽屉是**浮层**：打开它不该动主区里任何东西的几何。
+         *
+         * 原来这里量的是"栏头高度开抽屉前后不变"（抽屉曾经被渲染进栏头，把栏头从
+         * 167px 撑到 1070px、把主从布局整垮）。2026-09 智能体页左栏的栏头整个删了
+         * （标题与顶栏页名重复、按钮搬去顶栏、说明段并进右栏空态），那个量点就
+         * **没有主体了**——照旧量一个不存在的元素，它会两边都是 0 而永远通过，
+         * 也就是"空过"（`README.md` 的教训一节讲的正是这种全绿但没量到东西）。
+         *
+         * 所以改成量一张**几何快照**：顶栏 / 侧栏 / 左栏 / 右栏 / 清单里第一条的
+         * 位置与尺寸。抽屉一旦进了文档流，这几项里至少有一项会动。
+         */
+        const layoutSnapshot = () =>
+          ['.topbar', '.sidebar', '.list-pane', '.detail-pane', '.agent-item']
+            .map((sel) => {
+              const el = d().querySelector(sel)
+              if (!el) return `${sel}:—`
+              const r = el.getBoundingClientRect()
+              return `${sel}:${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`
+            })
+            .join(' | ')
+        const layoutBefore = layoutSnapshot()
+
+        // 智能体页的「新建 / 设置 / 刷新」2026-09 起在顶栏里、紧跟着页名（原来在左栏头部）
         const paneBtn = (label) =>
-          [...d().querySelectorAll('.pane-actions button')].find(
+          [...d().querySelectorAll('.topbar .page-actions button')].find(
             (b) => b.textContent.trim() === label,
           )
         const findIn = (root, label) =>
@@ -747,8 +1086,6 @@
           (b) => b.textContent.trim() === '第一句话设置',
         )
 
-        const headNow = () => Math.round((headEl?.getBoundingClientRect().height ?? 0))
-
         if (!newAgentBtn) {
           errors.push('找不到「新建」按钮')
         } else {
@@ -766,8 +1103,10 @@
             drawerBox && Math.abs(drawerBox.x + drawerBox.w - f.contentWindow.innerWidth) <= 1
           )
           facts['template.formInsidePane'] = !!(paneEl && drawer && paneEl.contains(drawer))
-          facts['template.formInsideHead'] = !!(headEl && drawer && headEl.contains(drawer))
-          facts['template.headGrowthPx'] = headNow() - (facts['template.headHeightBefore'] ?? 0)
+          facts['template.layoutBeforeDrawer'] = layoutBefore
+          facts['template.layoutAfterDrawer'] = layoutSnapshot()
+          facts['template.drawerLeavesLayoutAlone'] =
+            facts['template.layoutAfterDrawer'] === facts['template.layoutBeforeDrawer']
           facts['template.formOverflowX'] = drawer ? drawer.scrollWidth - drawer.clientWidth : null
           facts['template.formHasNoTemplateField'] = !(
             drawer && drawer.querySelector('.agent-form .tpl-text')
@@ -807,7 +1146,9 @@
             panelBox && Math.abs(panelBox.x + panelBox.w - f.contentWindow.innerWidth) <= 1
           )
           facts['settings.panelInsidePane'] = !!(paneEl && panel && paneEl.contains(panel))
-          facts['settings.headGrowthPx'] = headNow() - (facts['template.headHeightBefore'] ?? 0)
+          facts['settings.layoutAfterDrawer'] = layoutSnapshot()
+          facts['settings.drawerLeavesLayoutAlone'] =
+            facts['settings.layoutAfterDrawer'] === layoutBefore
           facts['settings.panelOverflowX'] = panel ? panel.scrollWidth - panel.clientWidth : null
           // 它是"装设置的容器"：底部有一个共用的保存，正文里是分段的
           facts['settings.sectionCount'] = panel.querySelectorAll('.drawer-section').length
@@ -818,11 +1159,23 @@
             text(panel.querySelector('.drawer-foot button')),
           )
 
-          const tabs = [...(panel?.querySelectorAll('.tabs .tab') ?? [])]
-          facts['settings.tabCount'] = tabs.length
-          facts['settings.tabLabels'] = tabs.map((t) => text(t).replace('●', '').trim())
+          const kindTabs = [...(panel?.querySelectorAll('.tabs:not(.block-tabs) .tab') ?? [])]
+          // ★ 2026-10：每条链路下面还有第二排「块」页签（① 框架 / ② 身份 / ③ 任务）
+          const blockTabs = [...(panel?.querySelectorAll('.block-tabs .tab') ?? [])]
+          /**
+           * 聊天那一份的夹具：一句能认出来的话 + 一个**只属于这一档**的变量写法。
+           * 变量必须是聊天允许的那五个之一（`{{verdict}}` 之类会被写入口拒掉）。
+           */
+          const CHAT_MARK = '这是探针写的聊天框架'
+          const CHAT_TPL = `## 聊天框架\n\n- 语言：{{language}}\n\n${CHAT_MARK}`
+          facts['settings.tabCount'] = kindTabs.length
+          facts['settings.tabLabels'] = kindTabs.map((t) => text(t).replace('●', '').trim())
+          facts['settings.blockTabLabels'] = blockTabs.map((t) => text(t).replace('●', '').trim())
           facts['settings.activeTab'] = need('当前页签', () =>
-            text(tabs.find((t) => t.className.includes('active'))).replace('●', '').trim(),
+            text(kindTabs.find((t) => t.className.includes('active'))).replace('●', '').trim(),
+          )
+          facts['settings.activeBlock'] = need('当前块页签', () =>
+            text(blockTabs.find((t) => t.className.includes('active'))).replace('●', '').trim(),
           )
           facts['settings.badgeBefore'] = need('模版状态徽章', () =>
             text(panel.querySelector('.tpl-state .badge')),
@@ -842,7 +1195,11 @@
           if (fillBtn) {
             click(fillBtn)
             await wait(150)
-            facts['settings.filledHasPrompt'] = ta ? ta.value.includes('{{prompt}}') : null
+            // ⚠️ 默认模版现在**只有框架**：`{{prompt}}` 已退役（2026-09）⇒ 改钉
+            //    "填进来的是一份真的框架"（有还在用的变量、且没有退役的）
+            facts['settings.filledHasFrameVars'] = ta
+              ? ta.value.includes('{{runId}}') && !ta.value.includes('{{prompt}}')
+              : null
             facts['settings.filledBadge'] = need('填完后的状态徽章', () =>
               text(panel.querySelector('.tpl-state .badge')),
             )
@@ -855,7 +1212,7 @@
           }
 
           // 切到审核页签：**另一份是独立的**
-          const reviewTab = tabs.find((t) => text(t).includes('审核'))
+          const reviewTab = kindTabs.find((t) => text(t).includes('审核'))
           facts['settings.reviewTabFound'] = !!reviewTab
           if (reviewTab) {
             click(reviewTab)
@@ -868,8 +1225,13 @@
               click(fill2)
               await wait(200)
               const ta2 = d().querySelector('.drawer .tpl-text')
-              facts['settings.reviewFilledHasMaterial'] = ta2
-                ? ta2.value.includes('{{material}}')
+              // ⚠️ `{{material}}` 与两个标记现在由**平台**放进 ③，不在模版里
+              //（2026-09）；模版里唯一的必需变量是判决契约。
+              facts['settings.reviewFilledHasVerdict'] = ta2
+                ? ta2.value.includes('{{verdict}}')
+                : null
+              facts['settings.reviewFilledHasNoMaterial'] = ta2
+                ? !ta2.value.includes('{{material}}')
                 : null
               facts['settings.reviewFilledLines'] = ta2 ? ta2.value.split('\n').length : null
               facts['settings.tplFieldHeightReviewPx'] = ta2
@@ -884,21 +1246,25 @@
             await until(() => !!d().querySelector('.drawer .var-list li'))
             const rows = [...d().querySelectorAll('.drawer .var-list li')]
             facts['settings.varRowCount'] = rows.length
-            facts['settings.varHasPrompt'] = rows.some((r) =>
-              (r.textContent ?? '').includes('{{prompt}}'),
+            /**
+             * ⚠️ 2026-09 三块组装之后，变量表**只剩九个**：`{{prompt}}` / `{{instructions}}` /
+             *    `{{standards}}` / `{{tools}}` / `{{material}}` / `{{materialTitle}}` 六个
+             *    退役（身份/任务/材料由平台放在固定位置）。所以这三条检查也跟着改：
+             *    列出来的必须是还在用的那些，而退役的**不许**再列（列了等于教人写它）。
+             */
+            facts['settings.varListHasLive'] = ['{{runId}}', '{{skills}}'].every((name) =>
+              rows.some((r) => (r.textContent ?? '').includes(name)),
             )
-            facts['settings.varMarksRequired'] = rows.some(
-              (r) =>
-                (r.textContent ?? '').includes('{{prompt}}') &&
-                (r.textContent ?? '').includes('必需'),
-            )
-            // ★ D33：`{{role}}` 这个名字取消了（它自带标题，与 {{instructions}} 重名同事）
-            facts['settings.varListHasNoRoleVar'] = !rows.some((r) =>
-              /\{\{role\}\}/.test(r.textContent ?? ''),
-            )
-            facts['settings.varHasInstructions'] = rows.some((r) =>
-              (r.textContent ?? '').includes('{{instructions}}'),
-            )
+            facts['settings.varListHasNoRetired'] = ![
+              '{{prompt}}',
+              '{{instructions}}',
+              '{{standards}}',
+              '{{tools}}',
+              '{{material}}',
+              '{{materialTitle}}',
+              '{{role}}',
+            ].some((name) => rows.some((r) => (r.textContent ?? '').includes(name)))
+            facts['settings.varRowCountIsNine'] = rows.length === 9
           }
 
           const pvBtn = findIn(d().querySelector('.drawer'), '预览')
@@ -908,9 +1274,70 @@
             const pre = d().querySelector('.drawer .preview pre')
             const rendered = pre ? pre.textContent ?? '' : ''
             facts['settings.previewHasHeader'] = rendered.includes('# 审核任务')
-            facts['settings.previewHasSampleMaterial'] = rendered.includes('审核执行产出')
             facts['settings.previewHasNoRawVar'] = !rendered.includes('{{')
             facts['settings.previewOverflowX'] = pre ? pre.scrollWidth - pre.clientWidth : null
+          }
+          // ★ 2026-10 三框改造：预览按块。示例材料在 **③ 任务框**里（`{{task}}` 展开
+          //   的那整块），切到任务块再预览一次——材料标记/正文要真的渲染出来。
+          const taskTab = blockTabs.find((t) => text(t).includes('任务'))
+          if (taskTab) {
+            click(taskTab)
+            await wait(250)
+            const pvTask = findIn(d().querySelector('.drawer'), '预览')
+            if (pvTask) {
+              click(pvTask)
+              await until(() => !!d().querySelector('.drawer .preview pre'), 40)
+              const preTask = d().querySelector('.drawer .preview pre')
+              const taskRendered = preTask ? preTask.textContent ?? '' : ''
+              facts['settings.previewHasSampleMaterial'] = taskRendered.includes('审核执行产出')
+              // 预览里不许留生变量（漏渲染的表现就是大括号原样出现）
+              facts['settings.previewHasNoRawVar'] =
+                facts['settings.previewHasNoRawVar'] && !taskRendered.includes('{{')
+            }
+          }
+
+          /**
+           * ★★ 第三个页签（聊天）：**写一份进去 → 预览它 → 保存之后从接口读回来**。
+           *
+           * ⚠️ 这三步缺一不可，因为这条链路上真的漏过两处，而且都是**静默**的：
+           *   ① 写入口只遍历 `executeTemplate` / `reviewTemplate` ⇒ 界面上照常提示
+           *      "已保存"，而库里那个键一个字都没写（`settings.savedChat` 钉的就是它）；
+           *   ② 预览接口只收 `execute` / `review` ⇒ 在这一档点「预览」直接得到一句
+           *      "kind 必须是 execute 或 review"（用户看不懂的错）。
+           *   只检查"页签在不在"完全看不出这两件事——所以这里走完整条路。
+           *
+           * ⚠️ 放在审核那份的预览**之后**：那几条断言量的是审核渲染出来的样子
+           *    （`# 审核任务` / 示例材料），切到聊天页签之后它们就不成立了。
+           */
+          const chatTab = kindTabs.find((t) => text(t).includes('聊天'))
+          facts['settings.chatTabFound'] = !!chatTab
+          if (chatTab) {
+            click(chatTab)
+            await wait(250)
+            // ★ 2026-10：块页签跨链路**保持**（刚才在审核/任务块）。聊天这份要写
+            //   的是它的 ① 框架（`{{language}}` 是框架变量），先切回框架块。
+            const chatFrameTab = blockTabs.find((t) => text(t).includes('框架'))
+            if (chatFrameTab) {
+              click(chatFrameTab)
+              await wait(200)
+            }
+            const taChat = d().querySelector('.drawer .tpl-text')
+            if (taChat) {
+              taChat.value = CHAT_TPL
+              taChat.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(200)
+              const pvChat = findIn(d().querySelector('.drawer'), '预览')
+              if (pvChat) {
+                click(pvChat)
+                await until(() => !!d().querySelector('.drawer .preview pre'), 40)
+                await wait(200)
+                const preChat = d().querySelector('.drawer .preview pre')
+                const chatRendered = preChat ? preChat.textContent ?? '' : ''
+                facts['settings.chatPreviewRenders'] = chatRendered.includes(CHAT_MARK)
+                // ★ 预览里不许留生变量：漏渲染的表现就是那几个大括号原样出现
+                facts['settings.chatPreviewNoRawVar'] = !chatRendered.includes('{{')
+              }
+            }
           }
 
           const saveBtn = findIn(d().querySelector('.drawer'), '保存')
@@ -928,8 +1355,19 @@
               .fetch('/api/first-sentence/templates')
               .then((r) => r.json())
               .catch(() => null)
-            facts['settings.savedExecute'] = api ? api.current.executeTemplate.length > 0 : null
-            facts['settings.savedReview'] = api ? api.current.reviewTemplate.length > 0 : null
+            // ★ 2026-10 三框改造：接口的 current 按 kind × block 给
+            //   （`current.execute.frame` 就是老 `executeTemplate`，身份/任务框是新的）
+            facts['settings.savedExecute'] = api
+              ? (api.current?.execute?.frame ?? '').length > 0
+              : null
+            facts['settings.savedReview'] = api
+              ? (api.current?.review?.frame ?? '').length > 0
+              : null
+            // ★ 聊天那一份必须**真的落库**（不只是界面上显示着）：写入口漏掉这个 key
+            //   时，这里读回来的是空串，而界面刚刚才提示过"已保存"。
+            facts['settings.savedChat'] = api
+              ? String(api.current?.chat?.frame ?? '').includes(CHAT_MARK)
+              : null
             const again = paneBtn('设置')
             if (again) {
               click(again)
@@ -938,6 +1376,19 @@
               facts['settings.reopenedBadge'] = need('重开后的徽章', () =>
                 text(d().querySelector('.drawer .tpl-state .badge')),
               )
+              // ★ 重开之后切到聊天页签：框里应当是**刚存进去的那份**（走了一圈库
+              //   回来，而不是内存里那份草稿）
+              const chatTab2 = [...d().querySelectorAll('.drawer .tabs .tab')].find((t) =>
+                text(t).includes('聊天'),
+              )
+              if (chatTab2) {
+                click(chatTab2)
+                await wait(250)
+                const taChat2 = d().querySelector('.drawer .tpl-text')
+                facts['settings.reopenedChat'] = taChat2
+                  ? taChat2.value.includes(CHAT_MARK)
+                  : null
+              }
               // Esc 关（抽屉组件里的统一处理）
               f.contentWindow.dispatchEvent(
                 new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -947,35 +1398,72 @@
           }
         }
 
-        // ══════════════ 审核标准（D37）══════════════
+        // ══════════════ 判断依据：只有「指令」那一栏，没有「审核标准」══════════════
         //
-        // 标准内联在审核者身上，所以：① 列表/详情里要看得见"它按什么判"；
-        // ② 新建审核者时能写；③ 执行者那边不出现这一栏。
+        // ★ 2026-09：使用者的要求是「移除审核智能体的『审核标准』」。判断依据已经并进
+        //   ② 身份（= agent 的「指令」），所以详情里**不该再有**任何一行叫「审核标准」、
+        //   也不该再有那一段。老数据那份正文改在「指令」那一栏里显示（它此刻仍然会被
+        //   合成进 ② 一起投递——藏起来等于让人看不见自己的依据去哪了）。
+        //
+        // ⚠️ 这里量的是**两件事**：① 那个字段名在页面上一个字都没有了；② 老正文与
+        //   "并进来"的入口都在「指令」那一栏里。只量①会漏掉"删了段、把正文也一起
+        //   删没了"，只量②会漏掉"段还在、只是换了个位置"。
         f.contentWindow.location.hash = '#/agents'
         await until(() => d().querySelectorAll('.agent-row').length > 0)
         await wait(400)
 
-        // 详情：点开审核者 ⇒ 看得到标准的名字与正文
+        // 详情：点开审核者 ⇒ 看得到**判断依据**（名字那个字段已经删了，见下）
+        //
+        // ⚠️ 2026-09 三次改：不再拿首启那个审核员来量——它的判据已并进「指令」、
+        //   `reviewStandard` 是 null（没有老正文可显示了）。"老正文显示 + 并进来
+        //   的入口"这两条由**探针自己的老标准夹具**（`探针用的老标准详情审核者`，
+        //   带 `reviewStandard.body`，专门给这一段用——fold-on-save 段用的是另一
+        //   个夹具，两个都要保持各自完整）来量，与首启那个解耦。
         const reviewerRow = [...d().querySelectorAll('.agent-row')].find((row) =>
-          row.querySelector('.badge.in_review'),
+          (row.textContent ?? '').includes('探针用的老标准详情审核者'),
         )
         if (reviewerRow) {
           click(reviewerRow.querySelector('.agent-item'))
           await until(() => !!d().querySelector('.detail'))
           await wait(400)
-          facts['standard.detailHasName'] = need('标准名', () => {
-            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
-              text(r.querySelector('.row-label')) === '审核标准',
+          // ⚠️ 这里原来量的是"标准那一行里有一个显示名字的徽标"（`.std-name-badge`）。
+          //    `ReviewStandard.name` 整个字段删掉之后，那条量的东西**已经不存在**
+          //    了——留着它只会变成一条永远红的检查。换成**反向**断言：那个徽标
+          //    不该再出现在详情里。反向断言才守得住这次删除：以后谁把"名字"加回来
+          //    （比如觉得"给标准起个名"是个好主意），这里会立刻红。
+          facts['standard.detailHasNoNameBadge'] = !d().querySelector('.detail .std-name-badge')
+          const labelRows = () =>
+            [...d().querySelectorAll('.detail .field-row')].map((r) =>
+              text(r.querySelector('.row-label')),
             )
-            return row ? text(row.querySelector('.badge')) : null
-          })
+          const sectionTitles = () =>
+            [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+          // ★ 那个字段名一个字都不许剩（行标签、段标题两处都要看）
+          facts['standard.noStandardRowLabel'] = !labelRows().some((l) => l === '审核标准')
+          facts['standard.noStandardSectionTitle'] = !sectionTitles().some((t) =>
+            (t ?? '').includes('用什么标准'),
+          )
+          facts['standard.detailSectionTitles'] = sectionTitles()
+          const instructionsRow = () =>
+            [...d().querySelectorAll('.detail .field-row')].find(
+              (r) => text(r.querySelector('.row-label')) === '指令',
+            ) ?? null
           facts['standard.detailShowsBody'] = (() => {
-            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
-              text(r.querySelector('.row-label')) === '审核标准',
-            )
-            const pre = row && row.querySelector('pre')
+            const pre = instructionsRow()?.querySelector('pre')
             return pre ? (pre.textContent ?? '').trim().length > 20 : false
           })()
+          // ★ 老形态那一栏里要给出**并进来**的入口（原来只有"正文来自挂载 skill"
+          //   那一种有按钮；内联老标准只能手抄——而现在连那一段都没有了）
+          facts['standard.foldInButtonInInstructionsRow'] = !!(
+            instructionsRow() &&
+            [...instructionsRow().querySelectorAll('button')].some((b) =>
+              (text(b) ?? '').includes('并进'),
+            )
+          )
+          // ★ 技能那一段还在（删的是"标准"，不是"挂载"）
+          facts['standard.skillsSectionStillThere'] = sectionTitles().some(
+            (t) => t === '技能',
+          )
           // ★ D40 收口：行动权限是审核者自己的**一段**（不在「审核标准」那一行里了）。
           //   原来这两条读的都是"审核标准"那一行里的文字；现在读的是那一段本身
           //   ——位置变了，断言跟着改（改的是"它现在在哪一段"，不是放宽判据）。
@@ -1033,22 +1521,31 @@
           facts['standard.actionsHintAbsentWhenSet'] = !String(
             text(actionsSection) ?? '',
           ).includes('也来自这些 skill')
-          // 反向：那一行**不再**在「审核标准」里（否则同一件事有两个出处）。
-          // ⚠️ 判据不能是"那一行的文字里有没有 comment.create"——标准的**正文**本身
+          // 反向：动作清单**不在**承载判断依据的那一栏里（同一件事只有一个出处）。
+          // ⚠️ 判据不能是"那一行的文字里有没有 comment.create"——判断依据的**正文**本身
           //    就提到了这个动作名（内置标准里那句"纯提示用 `comment.create`"），
           //    于是"正文提到过"会把这条检查骗成红的。动作在界面上是 `.chip`，
-          //    所以按结构判：标准那一行里不该有任何动作 chip。
-          //    （只看**标准那一行**，不看"用什么标准"整段：那一段里还有"挂载的
-          //     skill"那一行，它本来就该有 chip。）
+          //    所以按结构判：那一栏里不该有任何 chip。
+          // ★ 2026-09：判据的容器从「审核标准」那一行换成了**「指令」那一行**——
+          //   那一段被删掉之后，"依据在哪一栏、动作在哪一栏"这件事仍然要有人看着；
+          //   写成"那一行不存在 ⇒ 通过"会让这条断言在段被删掉之后**空过**。
           facts['standard.detailActionsOutOfStandard'] = (() => {
             const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
-              text(r.querySelector('.row-label')) === '审核标准',
+              text(r.querySelector('.row-label')) === '指令',
             )
             return row ? row.querySelector('.chip') === null : false
           })()
-          facts['standard.emptyWarning'] = !d()
-            .querySelector('.headline')
-            ?.textContent?.includes('审不了任何东西')
+          /**
+           * 顶上那条红警告：**这一条现在必须不在**（打开的审核者有依据 —— 它有内联
+           * 老标准、也写了指令）。
+           *
+           * ⚠️ 判据原来是 `!reviewStandard && skillIds.length === 0`（两半都在看老形态），
+           *   于是"只写了「指令」"的正常审核者被误报成"审不了任何东西"。这条负向断言
+           *   只守得住一半：**正向**（真的没依据时要出现）由下面那一段量。
+           */
+          const headlineText = () =>
+            text(d().querySelector('.detail .headline')) ?? ''
+          facts['standard.emptyWarning'] = !headlineText().includes('审不了任何东西')
 
           // ── 端到端：在详情里勾一个动作 → 保存 → **以接口为准**真的变了 ──
           //
@@ -1124,7 +1621,7 @@
         }
 
         // 新建表单：审核角色下出现标准编辑栏，执行者下不出现
-        const newBtn2 = [...d().querySelectorAll('.pane-actions button')].find(
+        const newBtn2 = [...d().querySelectorAll('.topbar .page-actions button')].find(
           (b) => b.textContent.trim() === '新建',
         )
         if (newBtn2) {
@@ -1140,17 +1637,24 @@
           facts['standard.formActionsAbsentForExecutor'] = !(
             form2?.querySelector('.action-perms') ?? null
           )
-          // 切成"审核"角色 ⇒ 标准编辑栏出现
+          /**
+           * 切成"审核"角色 ⇒ **不再有标准编辑框**，而是「已并进指令」的说明。
+           *
+           * 2026-09：使用者定了「审核 Agent 的标准也放 ② 里面，不用单独设置」。
+           * 所以这一条量的是**反面**：`.standard` 那个编辑容器不该再出现，
+           * 而 `[data-standard-merged]` 那句说明要在——否则使用者会以为标准凭空没了。
+           */
           const roleCards = [...form2.querySelectorAll('.role-card')]
           const reviewerCard = roleCards.find((c) => (c.textContent ?? '').includes('审核'))
           if (reviewerCard) {
             click(reviewerCard)
-            await until(() => !!(form2 && form2.querySelector('.standard')))
+            await wait(400)
           }
-          facts['standard.formHasEditorForReviewer'] = !!(form2 && form2.querySelector('.standard'))
+          facts['standard.formStandardEditorRemoved'] = !(form2 && form2.querySelector('.standard'))
+          facts['standard.formHasMergedHint'] = !!(form2 && form2.querySelector('[data-standard-merged]'))
 
           // ══════════════════════════════════════════════════════════════
-          // 两栏各自量：**标准 = 名字 + 正文**，**行动权限 = 动作勾选**
+          // 两栏各自量：**标准 = 一段正文**，**行动权限 = 动作勾选**
           // ══════════════════════════════════════════════════════════════
           //
           // ★ 动作的勾选从"审核标准那一栏"搬到了新的「行动权限」栏（D40 收口），
@@ -1169,15 +1673,18 @@
           facts['standard.formActionsBlockLabel'] = need('行动权限那一栏的标题', () =>
             actionsHost ? text(actionsHost.querySelector('.field-label')) : null,
           )
-          // 标准编辑器容器（名字 + 正文）
-          const standardHost = form2?.querySelector('.standard') ?? null
-          facts['standard.formStandardEditorIsNameAndBody'] = !!(standardHost?.querySelector('input') &&
-            standardHost?.querySelector('textarea'))
-          // ★ 标准那个容器里**不该**再有动作勾选（否则"动作住在新字段上"这句话在
-          //   界面上就不成立）——这是这次搬家在界面上最直接的一条判据。
-          facts['standard.formStandardEditorHasNoActions'] = !standardHost?.querySelector(
-            '.action-picker',
-          )
+          // 标准编辑器容器（**只有正文**）
+          //
+          // ⚠️ 这条原来量的是"容器里既有 input（名字）又有 textarea（正文）"。
+          //    名字那个输入框删掉之后，那条会永远红——所以改成量**它的反面**：
+          //    容器里有一个 textarea、而且**一个 input 都没有**。这条比原来那条
+          //    更强：它同时钉住"正文还能写"和"名字没被加回来"。
+          /**
+           * ⚠️ 这一条原来量的是"标准编辑器容器里只有正文（一个 textarea、零个 input）"。
+           *    2026-09「标准并进指令」之后**那个容器整个没了** ⇒ 改成量它的消失，
+           *    并附上"说明那一句在"（见上面那条），两条合起来才说得清界面上的状态。
+           */
+          facts['standard.formStandardEditorGone'] = !(form2 && form2.querySelector('.standard'))
 
           // ══════════════════════════════════════════════════════════════
           // D41：这一栏里**没有**内置动作那一组，而且一个都不预勾
@@ -1213,8 +1720,10 @@
               .map((i) => i.value)
             return checked.join(',')
           })
+          // ⚠️ 2026-09：这句话跟着「指令」那一栏的改动改了口径——判断依据写在
+          //   「指令」里（原来写的是"上面那条**审核标准**"，而那个字段已经没有了）。
           facts['standard.formMentionsNoSkillNeeded'] = (form2?.textContent ?? '').includes(
-            '判断依据是上面那条',
+            '判断依据写在上面那条',
           )
           // ★ D40：行动权限里也要能勾到**已装工具的动作**（它原来在标准那一栏里）。
           //   两者管的是两件事——"挂载"回答"这个执行者能触发什么"（住在 agent
@@ -1253,15 +1762,19 @@
             tickBox.dispatchEvent(new Event('change', { bubbles: true }))
             await wait(200)
           }
-          const stdTextarea = standardHost?.querySelector('textarea')
-          if (stdTextarea) {
-            stdTextarea.value = '探针写的标准正文'
-            stdTextarea.dispatchEvent(new Event('input', { bubbles: true }))
+          /**
+           * ⚠️ 2026-09：标准框没了 ⇒ 这里改成往**「指令」**里打字。
+           *
+           * 这条检查要钉的是"两份草稿互不覆盖"（写着字的时候勾选还在）。标准并进
+           * 指令之后，与勾选并存的那份草稿就是「指令」，所以主语换成它，
+           * 判断一模一样。
+           */
+          const insBox = form2?.querySelector('textarea.instructions')
+          if (insBox) {
+            insBox.value = '探针写的指令与判断依据'
+            insBox.dispatchEvent(new Event('input', { bubbles: true }))
             await wait(250)
           }
-          facts['standard.formStandardReachesParent'] = need('标准的状态徽章', () =>
-            text(form2.querySelector('.std-head .badge')),
-          )
           facts['standard.formTickSurvivesTyping'] = need('写下正文之后仍勾着的动作', () => {
             const checked = formActionBoxes()
               .filter((i) => i.checked)
@@ -1275,10 +1788,38 @@
           await wait(250)
         }
 
-        // ══════════════ 迁移：把挂载的 skill 转成内联标准（D38）══════════════
+        // ── 顶上那条红警告的**两半**：真的没依据 ⇒ 必须出现；只写了指令 ⇒ 不许出现 ──
         //
-        // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且标准
-        // 正来自它。这条路要端到端量：详情页那个按钮 → 标准出现、挂载清空 →
+        // ★ 使用者原话：「这个提示有问题」——他看到的就是"只写了「指令」的审核者被挂上
+        //   『它审不了任何东西：没有审核标准…』"。判据原来只看老字段，所以两个方向都要量。
+        //
+        // ⚠️ 放在这一段的**最后**：上面那几条端到端检查量的是**播下的审核员**，中途把右栏
+        //   换到别的 agent 就会让它们量错人（这里第一版就是放在中间的，两条端到端当场红了）。
+        {
+          const emptyRow = [...d().querySelectorAll('.agent-row')].find((row) =>
+            (row.textContent ?? '').includes('探针用的没写指令的审核者'),
+          )
+          facts['standard.emptyReviewerFixtureFound'] = !!emptyRow
+          if (emptyRow) {
+            click(emptyRow.querySelector('.agent-item'))
+            // ⚠️ 等右栏**真的换成它**：只等 `.detail` 会立刻返回，读到上一个
+            facts['standard.emptyReviewerSwitched'] = await until(
+              () => text(d().querySelector('.detail h2')) === '探针用的没写指令的审核者',
+              60,
+            )
+            await wait(300)
+            const headline = text(d().querySelector('.detail .headline')) ?? ''
+            facts['standard.headlineWhenNoIdentity'] = headline
+            // ★ 措辞也必须跟上：界面上已经没有「审核标准」这个字段了
+            facts['standard.headlineWordingUpdated'] =
+              headline.includes('没有写「指令」') && !headline.includes('没有审核标准')
+          }
+        }
+
+        // ══════════════ 迁移：把挂载的 skill 里的判断依据并进「指令」（D38）══════════════
+        //
+        // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且判断依据
+        // 正来自它。这条路要端到端量：详情页那个按钮 → 正文并进「指令」、挂载清空 →
         // 那条 skill 才卸得掉。
         const legacyRow = [...d().querySelectorAll('.agent-row')].find((row) =>
           (row.textContent ?? '').includes('探针用的老形态审核者'),
@@ -1307,19 +1848,33 @@
           )
           await wait(300)
           const adoptBtn = [...d().querySelectorAll('.detail button')].find(
-            (b) => b.textContent.trim() === '把挂载的 skill 转成内联标准',
+            (b) => b.textContent.trim() === '把这份判断依据并进「指令」',
           )
           facts['migrate.buttonFound'] = !!adoptBtn
           if (adoptBtn) {
-            // 固化之前：这一段显示的是"沿用挂载的 skill"那句提示
-            facts['migrate.stdRowText'] = need('审核标准那一行的文字', () => {
-              const row = [...d().querySelectorAll('.detail .field-row')].find(
-                (r) => text(r.querySelector('.row-label')) === '审核标准',
-              )
-              return row ? text(row).slice(0, 140) : null
+            /**
+             * ⚠️ 判据从「审核标准」那一行换到了**「指令」那一行**（2026-09）：
+             *   那一段已经被删掉（判断依据并进 ② 身份），老数据那份正文与"并进来"
+             *   的入口都搬到了「指令」栏里。**判据本身一个字没放宽**——原来量的是
+             *   "承载这件事实的那一栏说了什么"，现在承载它的换成了「指令」。
+             */
+            const instructionsRow = () =>
+              [...d().querySelectorAll('.detail .field-row')].find(
+                (r) => text(r.querySelector('.row-label')) === '指令',
+              ) ?? null
+            // 固化之前：那一栏显示的是"沿用挂载的 skill"那句提示
+            facts['migrate.stdRowText'] = need('「指令」那一行的文字', () => {
+              const row = instructionsRow()
+              return row ? text(row).slice(0, 160) : null
             })
             facts['migrate.legacyHintBefore'] = String(facts['migrate.stdRowText'] ?? '').includes(
               '沿用挂载',
+            )
+            // ★ 这个夹具**没有写「指令」**（`run.mjs` 造它时只挂了 skill），所以那一段
+            //   此刻必须说清后果。这条同时是下面 `instructionsRowNoFalseClaim` 的**前提**：
+            //   句子在搬移**之前**是真的，才有"搬移之后不该再说"这回事。
+            facts['migrate.noInstructionsBefore'] = !!instructionsRow()?.querySelector(
+              '[data-no-instructions]',
             )
 
             // ★ 老数据的**更早一层**：这个夹具只挂了 skill、agent 上没有动作权限，
@@ -1352,9 +1907,13 @@
               facts['migrate.legacyActionsHintShown'] === true
 
             click(adoptBtn)
-            // 固化之后：出现标准名的徽章（`.std-name-badge`，D37 的那个）
+            // 固化之后：正文出现在**「指令」那一栏**里（`.detail .prose` 就是只读态的
+            // 指令正文，全页唯一一处）。原来等的是 `.tpl-text`（`reviewStandard`
+            // 的正文折叠块）——搬移的落点改成「指令」之后，那里不再有东西，等它就
+            // 永远超时。判据用的是夹具 skill 的正文（`run.mjs` 里造的 `probe-skill`：
+            // `# 探针\n\n夹具。`）——并进「指令」的就是它。
             facts['migrate.adopted'] = await until(
-              () => !!d().querySelector('.detail .std-name-badge'),
+              () => (text(d().querySelector('.detail .prose')) ?? '').includes('夹具。'),
               60,
             )
             // ⚠️ 这三条原来写的是 `d().textContent`——而 `d()` 是**文档**，
@@ -1369,6 +1928,45 @@
             //   那句提示必须跟着消失（否则它开始说假话）。
             facts['migrate.legacyActionsHintGone'] = !mainText().includes('也来自这些 skill')
 
+            /**
+             * ★★ 搬完之后「指令」那一栏必须**改口**：正文已经并进来、那句提示也没了。
+             *
+             * ⚠️ 这三条一起量的是同一件事的三面，缺一面就有一种"看起来对"的假绿：
+             *   ① `adopted`（上面）——正文真的进来了；
+             *   ② `instructionsRowNoFalseClaim`——**不再**说"没有写「指令」"（那句话
+             *      在搬之前是真的，`noInstructionsBefore` 是它的对照组）；
+             *   ③ `legacyNoticeGone`——老形态的提示与入口都跟着消失（`data-legacy-standard`
+             *      与"并进来"那颗按钮都不该再在），否则界面会在搬完之后继续暗示
+             *      "你还有一份老标准没处理"。
+             */
+            const insRowAfter = instructionsRow()
+            facts['migrate.instructionsRowAfterText'] = text(
+              insRowAfter?.querySelector('div') ?? null,
+            )
+            facts['migrate.instructionsRowNoFalseClaim'] =
+              !insRowAfter?.querySelector('[data-no-instructions]')
+            facts['migrate.legacyNoticeGone'] =
+              !insRowAfter?.querySelector('[data-legacy-standard]') &&
+              ![...(insRowAfter?.querySelectorAll('button') ?? [])].some((b) =>
+                (text(b) ?? '').includes('并进'),
+              )
+            // ★ 顺便钉死"那一段真的没了"：整个详情里不该再出现「审核标准」这个字段名
+            //   （使用者的要求就是这一条；它原来是一整段，包括那一行标签）
+            /**
+             * ★★ 搬完之后这个审核者就是"只有「指令」"的形态（依据并进来了、老字段清空、
+             *    也没有挂载）——**顶上那条红警告必须在此时消失**。
+             *
+             * ⚠️ 这条是使用者报的那个问题的正向复现：判据原来只看老字段，于是这种
+             *    （完全正常的）审核者会被挂上「它审不了任何东西：没有审核标准…」。
+             */
+            facts['migrate.noFalseHeadlineAfterAdopt'] = !(
+              text(d().querySelector('.detail .headline')) ?? ''
+            ).includes('审不了任何东西')
+            facts['migrate.noStandardRowAfter'] =
+              ![...d().querySelectorAll('.detail .field-row')].some(
+                (r) => text(r.querySelector('.row-label')) === '审核标准',
+              )
+
             // ★ "挂载被摘掉"问接口，而不是扫页面文字（见上）
             const agentsAfter = await f.contentWindow
               .fetch('/api/agents')
@@ -1380,6 +1978,96 @@
             facts['migrate.mountCleared'] = adoptedAgent
               ? (adoptedAgent.skillIds ?? []).length === 0
               : null
+          }
+        }
+
+        // ══════════════ 保存一次就把"老的信息"清掉（2026-09）══════════════
+        //
+        // 使用者的原话：「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
+        // 这条走的是**完整那条路**：详情页进编辑 → 保存 → 老提示消失、老正文进了「指令」，
+        // 而且**投递出去的那段文字一字未变**（拿接口返回的前后两份自己拼一遍比）。
+        //
+        // ⚠️ 只量"提示没了"是不够的：把老字段直接删掉也能让它消失，而那会**丢掉
+        //   一段判断依据**（投递出去的 ② 短了一截，界面上看不出任何异常）。所以
+        //   这条的判据是两半：提示消失 + 身份那段文字逐字节相同。
+        const foldRow = [...d().querySelectorAll('.agent-row')].find((row) =>
+          (row.textContent ?? '').includes('探针用的内联老标准审核者'),
+        )
+        facts['fold.fixtureFound'] = !!foldRow
+        if (foldRow) {
+          click(foldRow.querySelector('.agent-item'))
+          facts['fold.detailSwitched'] = await until(
+            () => text(d().querySelector('.detail h2')) === '探针用的内联老标准审核者',
+            60,
+          )
+          await wait(300)
+          // 前提：此刻确实是"老形态"（提示在、正文也在）
+          facts['fold.noticeBefore'] = !!d().querySelector('.detail [data-legacy-standard]')
+          const readAgent = async () =>
+            await f.contentWindow
+              .fetch('/api/agents')
+              .then((r) => r.json())
+              .then((j) =>
+                (j?.agents ?? []).find((a) => a.name.startsWith('探针用的内联老标准审核者')) ?? null,
+              )
+              .catch(() => null)
+          const beforeAgent = await readAgent()
+          const identityFrom = (a) =>
+            [(a?.instructions ?? '').trim(), (a?.reviewStandard?.body ?? '').trim()]
+              .filter((x) => x !== '')
+              .join('\n\n')
+          facts['fold.identityBefore'] = beforeAgent ? identityFrom(beforeAgent) : null
+          const editBtn = [...d().querySelectorAll('.detail button')].find(
+            (b) => text(b) === '编辑',
+          )
+          if (editBtn) {
+            click(editBtn)
+            await until(() => !!d().querySelector('.detail textarea.instructions'), 60)
+            await wait(200)
+            // ★ 编辑态必须**提前说清**保存会发生什么（否则"我的指令怎么多了一段"
+            //   就是一次没预告的改动）
+            facts['fold.editHintWarns'] = (text(d().querySelector('.detail')) ?? '').includes(
+              '并进上面这段',
+            )
+            // 改个**别的字段**（名字）：这正是"我什么都没配、保存一下提示该没了"的场景，
+            // 而且指令不动 ⇒ 前后身份必须逐字节相同，断言最干净
+            const nameBox = d().querySelector('#agent-name')
+            if (nameBox) {
+              nameBox.value = '探针用的内联老标准审核者（改过）'
+              nameBox.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(150)
+            }
+            const saveBtn = [...d().querySelectorAll('.detail button')].find(
+              (b) => text(b) === '保存',
+            )
+            facts['fold.saveButtonFound'] = !!saveBtn
+            if (saveBtn) {
+              click(saveBtn)
+              // 等真的退出编辑（textarea 消失）再读——固定 sleep 在虚拟时间下会看早
+              facts['fold.leftEditing'] = await until(
+                () => !d().querySelector('.detail textarea.instructions'),
+                80,
+              )
+              await wait(300)
+              const afterAgent = await readAgent()
+              // ⚠️ 三态：'no-agent'（接口没读到）不许与"清掉了"混成同一个值——
+              //    `afterAgent && ...` 写法的表现是"读不到 ⇒ 断言通过"，那是空过。
+              facts['fold.reviewStandardAfter'] =
+                afterAgent === null ? 'no-agent' : afterAgent.reviewStandard ? 'still-there' : null
+              facts['fold.instructionsGotBody'] = !!(
+                afterAgent && (afterAgent.instructions ?? '').includes('只看证据。')
+              )
+              facts['fold.identityUnchanged'] =
+                beforeAgent && afterAgent
+                  ? identityFrom(afterAgent) === identityFrom(beforeAgent)
+                  : null
+              facts['fold.identityAfter'] = afterAgent ? identityFrom(afterAgent) : null
+              // 界面上：那条老提示没了，而「指令」那一栏里现在就是那段文字
+              facts['fold.noticeAfter'] = !!d().querySelector('.detail [data-legacy-standard]')
+              facts['fold.readOnlyShowsMerged'] = (
+                text(d().querySelector('.detail .prose')) ?? ''
+              ).includes('只看证据。')
+            }
           }
         }
 
@@ -1485,6 +2173,150 @@
           })
         }
 
+        // ══════════════ 顶栏：页名 + 这一页的动作 + 与页面无关的那几个 ══════════════
+        //
+        // 三个页面各量一遍（任务 / 智能体 / 工具），每个页面问六件事：
+        //   ① 顶栏左边写着**这一页的名字**，而且与侧栏那一项**是同一句话**
+        //   ② 动作**只属于这一页**——上一页的按钮一个都不许留下
+        //   ③ `⋯` 在宽屏下不出现（动作直接平铺）
+        //   ④ 顶栏恒为一行、不横向溢出：它的高度被 `.shell` 的
+        //      `calc(100vh - var(--topbar-h))` 用着，一旦换行整个布局就错位
+        //   ⑤ ★ 动作**紧跟着页名**（靠左），而在最右边的是与页面无关的那几个
+        //      （语言 / 通知 / 登录 / 设置）——"这一页 + 这一页能做什么"是一句话，
+        //      隔着一千多像素就变成两件不相干的事了
+        //   ⑥ ★ 顶栏里的按钮**一种尺寸**，而且**当前模式看得出来**
+        //      （`.active` 曾经是死类名：界面上根本没有它的样式，于是「列表 / 看板」
+        //      两个按钮长得一模一样，使用者看不出自己在哪一个模式里）
+        //
+        // ⚠️ 期望值是**逐页写死**的，不写成"数量 > 0"：这一段的全部意义就是
+        //    "按钮跟着页换"，只数个数的话，五个页面全显示同一排按钮也能过。
+        facts['topbar.pageName'] = {}
+        facts['topbar.actions'] = {}
+        facts['topbar.oneLine'] = {}
+        facts['topbar.overflowPx'] = {}
+        facts['topbar.moreHiddenWide'] = {}
+        facts['topbar.actionsLeftOfTitleRight'] = {}
+        facts['topbar.actionsAtSidebarEdge'] = {}
+        facts['topbar.actionGapPx'] = {}
+        facts['topbar.buttonHeights'] = {}
+        facts['topbar.activeModeVisible'] = {}
+        for (const [tpHash, tpName, tpWant] of [
+          ['#/tasks', '任务清单', ['列表', '看板', '刷新']],
+          ['#/agents', '智能体', ['新建', '设置', '刷新']],
+          ['#/tools', '工具', ['刷新', '安装工具']],
+        ]) {
+          f.contentWindow.location.hash = tpHash
+          const tpHere = await until(() => text(d().querySelector('.page-name')) === tpName, 60)
+          if (!tpHere) errors.push(`顶栏页名：切到 ${tpHash} 之后没等到「${tpName}」`)
+          const tpBar = d().querySelector('.topbar')
+          facts['topbar.pageName'][tpHash] = need(`顶栏页名（${tpHash}）`, () =>
+            text(d().querySelector('.page-name')),
+          )
+          // ① 与侧栏那一项对齐：两处各写一份文案迟早会不一样，所以这里钉住"同一句话"
+          facts[`topbar.sameAsSidebar${tpHash}`] = need(`侧栏选中项（${tpHash}）`, () => {
+            const active = d().querySelector('.sidebar .nav-item.active .nav-title')
+            return active ? text(active) : null
+          })
+          // ② 动作清单：顺序也要对（顺序就是按钮顺序）
+          facts['topbar.actions'][tpHash] = [
+            ...d().querySelectorAll('.topbar .page-actions button'),
+          ].map((b) => text(b))
+          if (JSON.stringify(facts['topbar.actions'][tpHash]) !== JSON.stringify(tpWant)) {
+            errors.push(
+              `顶栏动作（${tpHash}）：${JSON.stringify(facts['topbar.actions'][tpHash])} ≠ ${JSON.stringify(tpWant)}`,
+            )
+          }
+          // ③ 宽屏不该出现 `⋯`
+          facts['topbar.moreHiddenWide'][tpHash] = need(`⋯（${tpHash}）`, () => {
+            const more = d().querySelector('.page-more')
+            return more ? cs(more).display === 'none' : null
+          })
+          // ④ 一行 + 不溢出
+          facts['topbar.oneLine'][tpHash] = need(`顶栏高度（${tpHash}）`, () => {
+            const want =
+              parseFloat(cs(d().documentElement).getPropertyValue('--topbar-h')) *
+              parseFloat(cs(d().documentElement).fontSize)
+            return (
+              tpBar.clientHeight === tpBar.scrollHeight &&
+              Math.round(tpBar.getBoundingClientRect().height) <= Math.round(want) + 1
+            )
+          })
+          facts['topbar.overflowPx'][tpHash] = need(`顶栏溢出（${tpHash}）`, () =>
+            Math.max(0, tpBar.scrollWidth - tpBar.clientWidth),
+          )
+          // ⑤ 动作的**左缘与侧栏右缘对齐**（= 与主区内容共一条竖线），全局那组在最右
+          //
+          // ⚠️ 动作区在窄屏是 `display: none`，那时它的矩形是**退化的 0×0**（在
+          //    父元素左上角），量出来的"间距"会是一个负数而看着像布局错了。
+          //    所以这里先问"它这一档宽度下在不在"，不在就不量这一条。
+          const actsVisible = (() => {
+            const el = d().querySelector('.page-actions')
+            return !!el && cs(el).display !== 'none' && el.getBoundingClientRect().width > 0
+          })()
+          facts['topbar.actionGapPx'][tpHash] = !actsVisible
+            ? null
+            : need(`页名与动作的间距（${tpHash}）`, () => {
+                const name = d().querySelector('.page-name')?.getBoundingClientRect()
+                const acts = d().querySelector('.page-actions')?.getBoundingClientRect()
+                if (!name || !acts) return null
+                return Math.round(acts.left - name.right)
+              })
+          facts['topbar.actionsAtSidebarEdge'][tpHash] = !actsVisible
+            ? null
+            : need(`动作左缘与侧栏右缘（${tpHash}）`, () => {
+                const acts = d().querySelector('.page-actions')?.getBoundingClientRect()
+                const side = d().querySelector('.sidebar')?.getBoundingClientRect()
+                if (!acts || !side) return null
+                // 顶栏与 `.shell` 共用同一个 `grid-template-columns`，动作的左缘
+                // **在结构上**就该等于侧栏的右缘；允许 1px 取整误差。
+                // ⚠️ 页名长短不该影响它：这一条量的是"对齐"，不是"间距"。
+                return Math.abs(acts.left - side.right) <= 1
+              })
+          facts['topbar.actionsLeftOfTitleRight'][tpHash] = !actsVisible
+            ? null
+            : need(`动作与全局那组的位置关系（${tpHash}）`, () => {
+                const acts = d().querySelector('.page-actions')?.getBoundingClientRect()
+                const glob = d().querySelector('.global-actions')?.getBoundingClientRect()
+                const bar = tpBar.getBoundingClientRect()
+                if (!acts || !glob) return null
+                /**
+                 * ⚠️ 不能写成"动作在左半边"：1440px 下动作到 300px 左右，条件太松。
+                 *    真正要钉的是**两组的相对关系**：动作整段在全局那组左边，
+                 *    而且动作的右缘离顶栏右缘还有一大截（它没被推到右边去）。
+                 */
+                return acts.right < glob.left && bar.right - acts.right > bar.width * 0.3
+              })
+          // ⑥ 一种尺寸 + 激活态看得出来
+          facts['topbar.buttonHeights'][tpHash] = need(`顶栏按钮高度（${tpHash}）`, () => {
+            // ⚠️ 按**矩形高度 > 0** 过滤，不能只看 `display`：父元素 `display: none`
+            //    时子元素的 computed display 仍然是 `inline-flex`，它会带着一个
+            //    0px 的矩形混进来（自查脚本第一次跑就被这个骗了，报"高度不齐 30/0"）。
+            const hs = [...d().querySelectorAll('.topbar button')]
+              .filter((b) => b.getBoundingClientRect().height > 0)
+              .map((b) => Math.round(b.getBoundingClientRect().height))
+            // 去重后的种类数：全都一样高时是 1
+            return [...new Set(hs)]
+          })
+          facts['topbar.activeModeVisible'][tpHash] = need(`当前模式的标记（${tpHash}）`, () => {
+            const btns = [...d().querySelectorAll('.topbar .page-actions button')]
+            const on = btns.filter((b) => b.classList.contains('active'))
+            /**
+             * ⚠️ 只有任务页有"当前模式"这个概念（列表 / 看板）。另外两页一个
+             *    `active` 都没有是**正常的**，不能算通过也不能算不通过——返回一个
+             *    显式的"不适用"，`run.mjs` 那边按它放行。含糊地返回 true 会让这
+             *    一条在多数页面上变成一句空话。
+             */
+            if (on.length === 0) return '不适用（这一页没有"当前模式"）'
+            if (on.length !== 1) return `有 ${on.length} 个被标成当前`
+            const off = btns.find((b) => !b.classList.contains('active'))
+            if (!off) return '所有按钮都被标成当前'
+            const a = cs(on[0])
+            const b = cs(off)
+            // 背景或文字色至少有一处不一样，否则"当前"是看不见的
+            return a.backgroundColor !== b.backgroundColor || a.color !== b.color
+          })
+        }
+
         // ══════════════ 语言切换（D39）══════════════
         //
         // ⚠️ 这一段必须放在**最后**：前面所有检查都断言中文，切成英文会让它们全红。
@@ -1496,24 +2328,41 @@
         const langSelect = d().querySelector('.topbar select')
         facts['lang.switchPresent'] = !!langSelect
         facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
-        facts['lang.navBefore'] = need('切换前的导航文字', () =>
-          text(d().querySelector('.sidebar .nav-title')),
-        )
+        /**
+         * ⚠️ 量的是**「新建任务」那一项**，不是"第一项"。
+         *
+         * 原来这里写的是 `.sidebar .nav-title` 的**第一个**——加「聊天」之后
+         * 第一项变成了聊天，这三条当场变红。那不是它们要报的事：这三条问的是
+         * "界面语言真的切了吗"，与侧边栏顺序无关。按**文字**去取那一项，
+         * 以后再加视图也不会误报。
+         */
+        const langNavItem = (label) =>
+          [...d().querySelectorAll('.sidebar .nav-title')].find((el) => text(el) === label) ?? null
+        facts['lang.navBefore'] = need('切换前的导航文字', () => {
+          const el = langNavItem('新建任务')
+          return el ? text(el) : null
+        })
 
         if (langSelect) {
           langSelect.value = 'en'
           langSelect.dispatchEvent(new Event('change', { bubbles: true }))
           // 英文生效：导航文字与顶栏按钮都变成英文
-          const switched = await until(
-            () => text(d().querySelector('.sidebar .nav-title')) === 'New task',
-            40,
-          )
+          const switched = await until(() => langNavItem('New task') !== null, 40)
           facts['lang.switchedToEn'] = switched
-          facts['lang.navAfter'] = need('切换后的导航文字', () =>
-            text(d().querySelector('.sidebar .nav-title')),
-          )
+          facts['lang.navAfter'] = need('切换后的导航文字', () => {
+            const el = langNavItem('New task')
+            return el ? text(el) : null
+          })
           facts['lang.settingsLabel'] = need('顶栏「设置」按钮', () => {
-            const b = [...d().querySelectorAll('.topbar-actions button')].find(
+            /**
+             * ⚠️ 必须点名 `.global-actions`（2026-09 顶栏改版之后加的那一层）。
+             *    **智能体页那个「设置」按钮在英文下同样叫 `Settings`**，而页面动作
+             *    就在同一格里（`/agents` 页那个「设置」）——
+             *    按钮在英文下同样叫 `Settings`**——按文字在全条顶栏里找，找到的
+             *    很可能是页面那个，于是这条就变成了"页面动作翻译了吗"，而它问的是
+             *    "与页面无关的那个设置按钮翻译了吗"。
+             */
+            const b = [...d().querySelectorAll('.topbar .global-actions button')].find(
               (x) => text(x) === 'Settings',
             )
             return b ? 'Settings' : null
@@ -1535,11 +2384,14 @@
           //      在**同一个审核者**身上、走真实写入口刚勾上去的那个工具动作
           //      （见上面那条端到端）。所以这一条量的是一个**确实存在的契约值**，
           //      不是一条老数据里可能碰巧留着的字符串。
+          //   ⚠️ 2026-09 三次改：勾了 append-note 的是 `探针用的老标准详情审核者`
+          //      （[审核标准] 段在它身上走的真实保存），所以这里按名字选它，不再
+          //      拿"第一个审核者"——首启那个审核员现在没有动作（判据纯文字）。
           f.contentWindow.location.hash = '#/agents'
           await until(() => d().querySelectorAll('.agent-row').length > 0, 60)
           await wait(300)
           const reviewerRowEn = [...d().querySelectorAll('.agent-row')].find((row) =>
-            row.querySelector('.badge.in_review'),
+            (row.textContent ?? '').includes('探针用的老标准详情审核者'),
           )
           if (reviewerRowEn) click(reviewerRowEn.querySelector('.agent-item'))
           await until(() => !!d().querySelector('.detail'), 60)
@@ -1681,7 +2533,18 @@
               (s) => text(s.querySelector('.step-title')) === ntTitle,
             ) ?? null
           const ntActions = () => ntStep('③ 行动')
+          /**
+           * ③ 那一栏**说了什么**。
+           *
+           * ⚠️ 细节（胶囊 + 出处句）**在 ③ 这张卡片里面**，不是外面的一条。
+           *    中间试过挪出去做成全宽的一条（理由是这一格只有一列宽、胶囊会折行），
+           *    读起来就成了"另一件事"——使用者问"这些是什么"时，答案在 ③ 里。
+           *    所以取文字就是取这张卡片（`.actions-detail` 是它的子孙，天然含在内）。
+           */
           const ntActionsText = () => text(ntActions())
+
+          /** ③ 里那块配置细节（胶囊 + 出处句）——它在卡片**内部**。 */
+          const ntActionsDetail = () => ntActions()?.querySelector('.actions-detail') ?? null
           /** ① 那个下拉：认**取值里有夹具执行者**，不认"页面上的第一个 select"。 */
           const ntExecutorSelect = () =>
             [...d().querySelectorAll('select')].find((s) =>
@@ -1712,12 +2575,19 @@
             ntSel.dispatchEvent(new Event('change', { bubbles: true }))
             return until(() => ntReworkSelect()?.value === String(ntValue), 40)
           }
-          /** 标题输入框：工作目录那个在「高级」折叠区里，不算。 */
+          /**
+           * 标题那个**多行框**：工作目录那个在「高级」折叠区里，不算。
+           *
+           * ⚠️ 它原来是一个 `input`（单行），探针按"第一个不在 details 里的 input"
+           *    找。改成多行 `textarea` 之后那个找法会返回 `null`——而症状是
+           *    **提交按钮一直 disabled**，看起来像"表单坏了"（实测：这一改让 30 多条
+           *    端到端断言变红，全都是"提交没走完"这一个原因）。
+           */
           const ntTitleInput = () => {
             const ntForm = d().querySelector('form')
             if (!ntForm) return null
             return (
-              [...ntForm.querySelectorAll('input')].find((i) => !i.closest('details')) ?? null
+              [...ntForm.querySelectorAll('textarea')].find((i) => !i.closest('details')) ?? null
             )
           }
           const ntSubmitButton = () =>
@@ -1765,7 +2635,7 @@
             f.contentWindow.location.hash = '#/agents'
             await until(() => d().querySelectorAll('.agent-row').length > 0, 40)
             f.contentWindow.location.hash = '#/new'
-            await until(() => text(d().querySelector('.view-head h2')) === '新建任务', 40)
+            await until(() => text(d().querySelector('.page-name')) === '新建任务', 40)
             await until(() => !!ntExecutorSelect(), 40)
             const ntSel = ntExecutorSelect()
             if (!ntSel) return false
@@ -1773,6 +2643,20 @@
             ntSel.dispatchEvent(new Event('change', { bubbles: true }))
             // ②③ 都在 `{#if chosen}` 里：等它们真的画出来再往下量
             return until(() => !!ntReviewerSelect() && !!ntActions(), 60)
+          }
+
+          /**
+           * 进页面**并**打开 ③ 的对话框。
+           *
+           * ⚠️ 重进 `#/new` 会把这一页重新挂载 ⇒ `actionsOpen` 回到 `false`
+           *    （它是组件状态，不跨挂载存活）。所以凡是要量勾选框的地方都得用这个，
+           *    不能用裸的 `ntEnter()`——否则量到的是"对话框没开"的现场，而症状是
+           *    一批断言说"0 个框"，看起来像权限没了。
+           */
+          const ntEnterWithActions = async () => {
+            const ntOk = await ntEnter()
+            if (!ntOk) return false
+            return await ntOpenActions()
           }
 
           /** 把 ② 切成某一档（下拉的**取值**就是三态的编码）。 */
@@ -1796,8 +2680,46 @@
            *    这一条要证明的是"**这一栏有可勾的东西**"，类名改了不该把它弄红
            *    （真弄红了，读到的是"找不到框"，而不是"框没了"）。
            */
+          /**
+           * 打开 ③ 的挑选对话框（选择器从页面上搬进去了，见 `NewTask.svelte` 里那段）。
+           *
+           * ★ 判据是**那颗按钮真的点开了浮层**（不是"页面上有个按钮"）：按钮存在
+           *   但点了不开，是这次改动最容易出的错，而它的症状是后面所有关于勾选框的
+           *   断言一起红——一片红里看不出是哪一条坏的。
+           */
+          const ntOpenActions = async () => {
+            if (d().querySelector('.modal')) return true
+            const ntBtn = [...(ntActions()?.querySelectorAll('button') ?? [])].find((b) =>
+              (text(b) ?? '').includes('选择动作'),
+            )
+            if (!ntBtn) return false
+            click(ntBtn)
+            return until(() => !!d().querySelector('.modal'), 60)
+          }
+          /**
+           * 对话框里的文字。
+           *
+           * ★ 有些话跟着选择器一起搬进去了（"固定参数改了"那句说的是**右栏里那些
+           *   固定值**），所以它只能在对话框里读到——读页面上那一段会永远读不到，
+           *   而症状是"那句提示没出现"，看起来像功能坏了。
+           */
+          const ntDialogText = () => text(d().querySelector('.modal'))
+
+          /** 关掉它（用对话框自己的「完成」按钮——顺带量了那个按钮真的能关）。 */
+          const ntCloseActions = async () => {
+            const ntBtn = d().querySelector('.modal-foot button')
+            if (!ntBtn) return false
+            click(ntBtn)
+            return until(() => !d().querySelector('.modal'), 40)
+          }
+          /**
+           * ③ 上的勾选框 = **对话框里**的那些。
+           *
+           * ⚠️ 作用域必须是 `.modal`，不能是 `document`：智能体页那边也有一个同款
+           *    选择器，而"哪一页的框"这种错在探针里是静默的（数量对得上就绿）。
+           */
           const ntBoxes = () =>
-            [...(ntActions()?.querySelectorAll('input[type=checkbox]') ?? [])]
+            [...(d().querySelectorAll('.modal input[type=checkbox]') ?? [])]
           /** 勾着的那些框的契约值（`value` 就是契约值本身，判决里写的也是它）。 */
           const ntCheckedValues = () => ntBoxes().filter((b) => b.checked).map((b) => b.value)
           /**
@@ -1822,8 +2744,9 @@
            * ★ 这一份**不是**给可勾那一档用的：③ 可勾时契约值画在勾选框旁边，
            *   而"旧 daemon 兑现不了覆盖"那一档才退回 chip——那两个形状各量各的。
            */
+          // 胶囊在**细节那一条**里（不是卡片里，见 `ntActionsText` 那段）。
           const ntChips = () =>
-            [...(ntActions()?.querySelectorAll('.chip') ?? [])].map((c) =>
+            [...(ntActionsDetail()?.querySelectorAll('.chip') ?? [])].map((c) =>
               text(c.querySelector('code')),
             )
           /** 切某一个框的勾选（`change` 事件用的是界面自己那个 `onchange`）。 */
@@ -1916,6 +2839,180 @@
               '新建任务页没能把 ① 选成夹具执行者（②③ 在 `{#if chosen}` 里，下面那一组会空过）',
             )
           }
+          // ══════════════════════════════════════════════════════════════
+          // ★ 版面：三步排成一行 + 首屏看得见三个问题 + 提交栏那行摘要
+          // ══════════════════════════════════════════════════════════════
+          //
+          // ★ 这一组守的是**这一页的形状**：它要回答的就是"谁做 / 谁审 / 能做什么"
+          //   三个问题，而原来 ①② 一行、③ 掉到第二行，实测首屏（448px）只看得见
+          //   「要做什么」和 ① 的开头——三个问题一个都没看全，同时屏幕里还有 204px
+          //   是空的（① 高 332、② 只有 128）。
+          const ntRectOf = (el) => {
+            if (!el) return null
+            const r = el.getBoundingClientRect()
+            return {
+              top: Math.round(r.top),
+              left: Math.round(r.left),
+              w: Math.round(r.width),
+              // ★ 高度是"两列是否齐平"那条判据要用的
+              h: Math.round(r.height),
+            }
+          }
+          /**
+           * ★★「要做什么」那一块的位置。
+           *
+           * ★ 为什么要单独量：它曾经被网格**挪到三步下面**——`.step-exec` 写了显式
+           *   `grid-row: 1 / span 2`，而它只定了列、行交给自动排布，CSS Grid 先把
+           *   "行列都确定"的放好，于是它被挤到第 3 行。它在 DOM 里仍是最前面一个，
+           *   看代码完全看不出问题——**只有量位置才发现**。
+           */
+          facts['newtask.layoutLead'] = (() => {
+            const ntLead = ntRectOf(d().querySelector('.form-lead'))
+            const ntTa = ntRectOf(ntTitleInput())
+            const ntFirst = ntRectOf(d().querySelector('.step-exec'))
+            return ntLead && ntFirst ? { lead: ntLead, textarea: ntTa, firstStep: ntFirst } : null
+          })()
+
+          facts['newtask.layoutSteps'] = {
+            exec: ntRectOf(d().querySelector('.step-exec')),
+            review: ntRectOf(d().querySelector('.step-review')),
+            actions: ntRectOf(d().querySelector('.step-actions')),
+            detail: ntRectOf(d().querySelector('.actions-detail')),
+          }
+          facts['newtask.layoutFirstScreen'] = (() => {
+            const ntSc = d().querySelector('.main')
+            if (!ntSc) return null
+            const ntBottom = ntSc.getBoundingClientRect().bottom
+            return [...d().querySelectorAll('.chain-step')].map((el) => {
+              const ntTitle = el.querySelector('.step-title')
+              // 这一栏的**主控件**（按钮 / 下拉）在不在首屏里
+              const ntCtl = el.querySelector('button, select')
+              return {
+                title: text(ntTitle),
+                titleVisible: ntTitle ? ntTitle.getBoundingClientRect().bottom <= ntBottom : null,
+                controlVisible: ntCtl ? ntCtl.getBoundingClientRect().bottom <= ntBottom : null,
+              }
+            })
+          })()
+          /**
+           * ★★「要做什么」那个框：默认 3 行、随输入长高、**15 行封顶**、占满宽度。
+           *
+           * ★ 判据是**量出来的高度**，不是"它有个 `rows` 属性"：`rows=3` 只是个
+           *   初值，一个写死的 `rows` 与"真的会跟着长"在属性上看不出区别——而
+           *   使用者要的正是后者（写第四行时不该在一个三行的小窗里滚动）。
+           *
+           * ⚠️ 量完**必须还原**（把值写回空并触发一次 input）：这一条会改页面上的
+           *    输入框，而后面所有端到端提交都靠它。
+           */
+          facts['newtask.titleAutoGrow'] = await (async () => {
+            const ntTa = ntTitleInput()
+            if (!ntTa) return null
+            const ntBack = ntTa.value
+            const ntH = () => Math.round(ntTa.getBoundingClientRect().height)
+            const ntSet = async (ntN) => {
+              ntTa.value = Array.from({ length: ntN }, (_, i) => `第 ${i + 1} 行`).join('\n')
+              ntTa.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(140)
+              return ntH()
+            }
+            const ntOut = {
+              rows: ntTa.rows,
+              width: Math.round(ntTa.getBoundingClientRect().width),
+              formWidth: Math.round(
+                d().querySelector('.newtask-form')?.getBoundingClientRect().width ?? 0,
+              ),
+              resize: getComputedStyle(ntTa).resize,
+            }
+            ntOut.h1 = await ntSet(1)
+            ntOut.h3 = await ntSet(3)
+            ntOut.h6 = await ntSet(6)
+            ntOut.h15 = await ntSet(15)
+            ntOut.h30 = await ntSet(30)
+            ntOut.overflowAt30 = getComputedStyle(ntTa).overflowY
+            ntTa.value = ntBack
+            ntTa.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(160)
+            ntOut.hAfterClear = ntH()
+            return ntOut
+          })()
+
+          // 宽度单独一条 fact（判据不同、失败时也各自看得见是哪一条）
+          facts['newtask.titleFullWidth'] = (() => {
+            const ntTa = ntTitleInput()
+            const ntForm = d().querySelector('.newtask-form')
+            if (!ntTa || !ntForm) return null
+            return {
+              width: Math.round(ntTa.getBoundingClientRect().width),
+              formWidth: Math.round(ntForm.getBoundingClientRect().width),
+            }
+          })()
+
+          facts['newtask.footSummaryText'] = text(d().querySelector('.foot-summary'))
+          // ══════════════════════════════════════════════════════════════
+          // ★★ 提交栏**吸底**：滚到这一页最底下时它还在视口里
+          // ══════════════════════════════════════════════════════════════
+          //
+          // ★ 判据必须是"**滚动之后**它还在"，不是"它有个 sticky 声明"：这一页
+          //   实测 914px 而首屏只有 448px，提交按钮原来在 y=891——这一页唯一要做
+          //   的那件事要滚两屏才够得着。CSS 写了但没生效（父级 overflow 不对、
+          //   或者被后面的元素盖住）是最常见的一种"看着改了其实没改"。
+          //
+          // ★ 顺带量宽度：它要**横贯整块可滚区**（`.main` 自己有左右留白，不留
+          //   负边距的话它会缩在那圈留白里，滚过去的内容从两侧露出来）。
+          //
+          // ⚠️ 必须在这一页**真的在屏幕上**时量。放到 E1 之后就会踩在"任务清单"
+          //    那一页上（提交成功会跳过去），那时 `.form-foot` 根本不存在——症状是
+          //    这两条永远"没量到值"，看着像选择器写错了。
+          {
+            const ntSc = d().querySelector('.main')
+            const ntFoot = d().querySelector('.form-foot')
+            if (ntSc && ntFoot) {
+              const ntBack = ntSc.scrollTop
+              ntSc.scrollTop = ntSc.scrollHeight
+              await wait(350)
+              const ntFr = ntFoot.getBoundingClientRect()
+              const ntSr = ntSc.getBoundingClientRect()
+              // ⚠️ 比的是 `clientWidth`，不是 `getBoundingClientRect().width`：
+              //    后者**把滚动条那一条也算进去**（实测差 10px），于是"横贯整块
+              //    可滚区"这条断言会在有滚动条时永远差一点点——一个纯属测量口径的
+              //    假红，会让人去改本来正确的 CSS。
+              const ntSpan = {
+                spansPane: Math.abs(ntFr.width - ntSc.clientWidth) <= 2,
+                footW: Math.round(ntFr.width),
+                paneW: ntSc.clientWidth,
+              }
+              facts['newtask.footStickyAtBottom'] = {
+                visible: ntFr.top >= ntSr.top - 1 && ntFr.bottom <= ntSr.bottom + 1,
+                ...ntSpan,
+              }
+              // 宽度单独一条（两条断言各自能红，不必从上面那条里挑字段看）
+              facts['newtask.footSpansPane'] = ntSpan
+              ntSc.scrollTop = ntBack
+              await wait(250)
+            }
+          }
+
+          //
+          // ⚠️ 这两条守的是一次**合并**（两个字段 → 一个多行框）。判据要具体到
+          //    "控件类型"与"另一个字段真的不在了"：只看"页面里有没有那个词"的话，
+          //    把「补充说明」换成一句提示文字也会绿。
+          facts['newtask.titleField'] = (() => {
+            const ntLead = d().querySelector('.form-lead')
+            if (!ntLead) return null
+            const ntCtl = [...ntLead.querySelectorAll('input, textarea')]
+            return {
+              count: ntCtl.length,
+              tag: ntCtl[0]?.tagName ?? null,
+              // 多行的判据是**控件类型**，不是"rows 写了没有"（`rows` 只是个初值，
+              // 而 `input` 永远不换行）
+              multiline: ntCtl[0]?.tagName === 'TEXTAREA',
+              required: ntCtl[0]?.required ?? null,
+            }
+          })()
+          facts['newtask.hasDescriptionField'] = (text(d().querySelector('.form-lead')) ?? '').includes(
+            '补充说明',
+          )
+
           facts['newtask.stepTitles'] = [
             ...d().querySelectorAll('.chain-step .step-title'),
           ].map((el) => text(el))
@@ -1988,6 +3085,198 @@
           })
 
           facts['newtask.actionsSectionFound'] = ntActions() !== null
+
+          // ══════════════════════════════════════════════════════════════
+          // ★ ③ 收成了一行：选择器搬进对话框（这次改动在界面上的全部内容）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 先量"收起来了"这件事，**再**打开对话框量里面——顺序反了的话下面那些
+          // 关于"页面上没有选择器"的断言会踩在打开状态上（而它们本该在关闭状态量）。
+          facts['newtask.actionsSectionHeight'] = ntActions()
+            ? Math.round(ntActions().getBoundingClientRect().height)
+            : null
+          /**
+           * ③ 那一段**由什么撑起来的**（逐块高度）。
+           *
+           * ★ 这是给高度那条断言配的"读数"：它红了的时候，输出里直接写着是哪一块
+           *   变高了（说明句？胶囊？还是一整块选择器又铺回来了）——不然只能看到
+           *   "722px" 这个数字，然后回去猜。
+           */
+          facts['newtask.actionsSectionParts'] = ntActions()
+            ? [...ntActions().children].map((el) => ({
+                cls: el.className,
+                h: Math.round(el.getBoundingClientRect().height),
+                text: (text(el) ?? '').slice(0, 30),
+              }))
+            : null
+          facts['newtask.actionsPickerNotInline'] = !ntActions()?.querySelector('.action-perms')
+          facts['newtask.actionsDialogClosedInitially'] = !d().querySelector('.modal')
+          facts['newtask.actionsChooseButtonText'] = need('③ 那颗按钮的字', () => {
+            const ntBtn = [...(ntActions()?.querySelectorAll('button') ?? [])][0]
+            return ntBtn ? text(ntBtn) : null
+          })
+          facts['newtask.actionsCountText'] = need('③ 的计数', () =>
+            text(ntActions()?.querySelector('.actions-count')),
+          )
+          /**
+           * ★★ ③ 上**当前的配置细节**：一个计数不算配置。
+           *
+           * 「已允许 1 / 5」只说了几个，没说"是哪几个、各自干什么、钉了什么值"。
+           * 选择器进对话框之后，这一行是**不点开就唯一能看见配置的地方**——所以
+           * 它必须真的把配置画出来（契约值 + 说明 + 固定值），而不是只报个数。
+           */
+          const ntConfigChips = () => [
+            ...(ntActionsDetail()?.querySelectorAll('.chip') ?? []),
+          ]
+          facts['newtask.actionsConfigChips'] = ntConfigChips().map((c) => ({
+            type: text(c.querySelector('code')),
+            summary: text(c.querySelector('.chip-sub:not(.fixed):not(.bad)')),
+            fixed: text(c.querySelector('.chip-sub.fixed')),
+          }))
+          /**
+           * ★★ 配置细节**在 ③ 那张卡片里面**（不是页面另一处的一条）。
+           *
+           * ★ 这是使用者提出来的一条：挪出去之后那一块读起来是"另一件事"——
+           *   页面上多出一片没有归属的胶囊，而使用者问"这些是什么"时，答案在 ③ 里。
+           *   窄了就该让它窄着折行，**位置对**比**一行放得下**重要。
+           */
+          /**
+           * ★★ ③ 变高之后 ① 是否**跟着长**（两列仍然齐平）。
+           *
+           * ★ 这条和上面 `layoutSteps` 里那个"齐平"是两回事：那一条在**进页面时**
+           *   量，夹具里 ① 的自然高度恰好等于右列，所以它**怎么都是齐的**——测不出
+           *   "拉伸有没有生效"。这一条在 ③ 里多了一枚胶囊（③ 变高）之后重量，
+           *   这时右列比 ① 的自然高度高，只有 `align-self: stretch` 真的生效才齐。
+           *
+           * ⚠️ 三个数必须在**同一时刻**取：我第一版把"勾之前量的 ①"和"勾之后量的
+           *    ③"放在一起比，得出过假的"不齐平"。
+           */
+          facts['newtask.layoutFlushAfterConfig'] = (() => {
+            const ntExec = ntRectOf(d().querySelector('.step-exec'))
+            const ntAct = ntRectOf(d().querySelector('.step-actions'))
+            if (!ntExec || !ntAct) return null
+            return {
+              execBottom: ntExec.top + ntExec.h,
+              actionsBottom: ntAct.top + ntAct.h,
+              execH: ntExec.h,
+              actionsH: ntAct.h,
+              alignSelf: getComputedStyle(d().querySelector('.step-exec')).alignSelf,
+            }
+          })()
+
+          facts['newtask.chipRadius'] = (() => {
+            const ntChip = ntActionsDetail()?.querySelector('.chip')
+            if (!ntChip) return null
+            return {
+              radius: getComputedStyle(ntChip).borderTopLeftRadius,
+              height: Math.round(ntChip.getBoundingClientRect().height),
+            }
+          })()
+
+          facts['newtask.actionsConfigOnePerLine'] = (() => {
+            const ntDetail = ntActionsDetail()
+            if (!ntDetail) return null
+            const ntChips = [...ntDetail.querySelectorAll('.chip')]
+            return {
+              count: ntChips.length,
+              tops: ntChips.map((c) => Math.round(c.getBoundingClientRect().top)),
+              heights: ntChips.map((c) => Math.round(c.getBoundingClientRect().height)),
+              widths: ntChips.map((c) => Math.round(c.getBoundingClientRect().width)),
+            }
+          })()
+
+          facts['newtask.actionsConfigInCard'] = (() => {
+            const ntCard = ntActions()
+            const ntDetail = ntActionsDetail()
+            if (!ntCard || !ntDetail) return null
+            const ntChipsAll = d().querySelectorAll('.chip')
+            const ntChipsHere = ntCard.querySelectorAll('.chip')
+            return {
+              detailInsideCard: ntCard.contains(ntDetail),
+              chipsInCard: ntChipsHere.length,
+              chipsOutside: ntChipsAll.length - ntChipsHere.length,
+              // 一枚一行：一列宽里横排会折成"契约值半行、说明挤到下一行"的乱条
+              chipTops: [...ntDetail.querySelectorAll('.chip')].map((c) =>
+                Math.round(c.getBoundingClientRect().top),
+              ),
+              chipWidths: [...ntDetail.querySelectorAll('.chip')].map((c) =>
+                Math.round(c.getBoundingClientRect().width),
+              ),
+            }
+          })()
+
+          /**
+           * ★★ 每个动作的**参数**：钉死的（`name=value`）、由模型填的、平台注入的。
+           *
+           * ★ 使用者要的是"看得见配置"：一个动作名 + 一句说明还不够——同一句
+           *   "模拟关闭单据"，钉了 `reason=巡检` 与没钉是两回事。而**钉死的值必须
+           *   与契约值同一行**（第一行）：压在说明下面时，那是最容易漏看的一行。
+           */
+          facts['newtask.actionsConfigParamLines'] = ntConfigChips().map((c) => ({
+            type: text(c.querySelector('code')),
+            head: text(c.querySelector('.chip-head')),
+            subs: [...c.querySelectorAll('.chip-sub')].map((x) => text(x)),
+            /**
+             * ⚠️ 胶囊里**只该有**这些：契约值 + 钉死的固定值（同一行）+ `summary`
+             *    （或"当前不可用"）。曾经多出过"由模型填 / 平台注入"两行机器名——
+             *    使用者没法据它们做任何决定，纯噪音。
+             */
+            subCount: c.querySelectorAll('.chip-sub').length,
+          }))
+
+          // ★ 固定值必须在页面上看得见：夹具那个审核者钉了 `text=长期钉的`，
+          //   所以那一枚胶囊上一定带「已固定: text=长期钉的」。看不见的话，使用者
+          //   以为这次会带着他上次钉的值去执行，而实际发出去的是另一个。
+          facts['newtask.actionsConfigFixedText'] = ntConfigChips()
+            .map((c) => text(c.querySelector('.chip-sub.fixed')))
+            .filter(Boolean)
+            .join(' | ')
+
+          // 打开它：从这一行往下，③ 的勾选框都在这个浮层里
+          facts['newtask.actionsDialogOpens'] = await ntOpenActions()
+          // ⚠️ 这里**不**用 `ntPicker()`：它定义在下面（`const` 在 TDZ 里，调用
+          //    它会抛 ReferenceError，而症状是整个探针"什么都没量到"——一片 `—`，
+          //    看不出是哪一条坏的）。直接写选择器，不引入顺序耦合。
+          facts['newtask.actionsDialogHasPicker'] = !!d().querySelector('.modal .action-perms')
+          // ★★ 页面上的胶囊 == 对话框里勾着的框（同一个事实的两种画法）。
+          //    两处各算一遍就会分叉，而分叉的表现是"页面上写着允许 A、点开对话框
+          //    里勾的是 B"——那种不一致没有任何报错，使用者只能靠运气发现。
+          facts['newtask.actionsConfigMatchesPicks'] = (() => {
+            const ntChips = ntConfigChips()
+              .map((c) => text(c.querySelector('code')))
+              .filter(Boolean)
+              .sort()
+            const ntPicks = ntBoxes()
+              .filter((b) => b.checked)
+              .map((b) => b.value)
+              .sort()
+            return { chips: ntChips, picks: ntPicks }
+          })()
+          facts['newtask.actionsDialogBox'] = need('对话框的盒子', () => {
+            const ntModal = d().querySelector('.modal')
+            if (!ntModal) return null
+            const ntBox = ntModal.getBoundingClientRect()
+            return {
+              h: Math.round(ntBox.height),
+              top: Math.round(ntBox.top),
+              // ★ 浮层要**一屏放得下**：装不下就会出现"对话框自己套一层滚动条"，
+              //   而两栏挑选器在里面滚是最难受的一种（左栏滚走了右栏还在）。
+              fits: ntBox.height <= f.contentWindow.innerHeight && ntBox.top >= 0,
+            }
+          })
+          // ★ 按钮旁的计数与选择器状态条**必须同分母**：两处各算一遍就会在"装了
+          //   什么包"变化时分叉，而症状是同一屏上两个不同的总数（实测踩过：
+          //   "已允许 2 / 1 个动作"）。
+          facts['newtask.actionsCountMatchesPicker'] = (() => {
+            const ntCount = text(ntActions()?.querySelector('.actions-count'))
+            const ntStatus = text(d().querySelector('.modal .ap-status'))
+            if (!ntCount || !ntStatus) return null
+            const ntA = /(\d+)\s*\/\s*(\d+)/.exec(ntCount)
+            const ntB = /(\d+)\/(\d+)/.exec(ntStatus)
+            if (!ntA || !ntB) return null
+            return { button: [ntA[1], ntA[2]], picker: [ntB[1], ntB[2]] }
+          })()
+
           // ⚠️ 这里原来的 `actionChips` / `actionChipSummary` 是**只读那一档**的
           //    判据（`.chip code` + `.chip-sub`）。③ 可勾之后这一档的契约值画在
           //    **勾选框旁边**，所以那两条搬到"旧 daemon 兑现不了覆盖"那一档去量
@@ -2047,7 +3336,7 @@
           //   · 改过一个值 ⇒ "固定参数改了"那句（与白名单"只对这一次任务生效"
           //     同一条口径）必须出现；改回来 ⇒ 必须消失（没改却带一次覆盖出去，
           //     等于把长期配置冻成一次性决定）。
-          const ntPicker = () => ntStep('③ 行动')?.querySelector('.action-perms') ?? null
+          const ntPicker = () => d().querySelector('.modal .action-perms') ?? null
           const ntPickRow = (v) =>
             [...(ntPicker()?.querySelectorAll('.ap-row') ?? [])].find(
               (r) => r.getAttribute('data-type') === v,
@@ -2111,7 +3400,7 @@
               const el = ntParamEditor()
               const sel = el?.querySelector('.param-fixed-pair select')
               const input = ntParamTextInput(el)
-              const dirty = (ntActionsText() ?? '').includes('固定参数改了')
+              const dirty = (ntDialogText() ?? '').includes('固定参数改了')
               const hit = !!sel && !!input && sel.value === 'open' && input.value === '' && dirty
               if (hit) snap = { mode: sel.value, inputVisible: true, inputValue: input.value, dirty: true }
               return hit
@@ -2149,7 +3438,7 @@
                 mode: el?.querySelector('.param-fixed-pair select')?.value ?? null,
                 hasInput: !!inp,
                 inputValue: inp?.value ?? null,
-                dirty: (ntActionsText() ?? '').includes('固定参数改了'),
+                dirty: (ntDialogText() ?? '').includes('固定参数改了'),
                 textPreview: (text(el) ?? '').slice(0, 160),
                 appErrors: appErrors.slice(0, 3),
               }
@@ -2188,7 +3477,7 @@
               input.value = '长期钉的'
               input.dispatchEvent(new Event('input', { bubbles: true }))
             }
-            await until(() => !(ntActionsText() ?? '').includes('固定参数改了'), 30)
+            await until(() => !(ntDialogText() ?? '').includes('固定参数改了'), 30)
           }
           // 改一个值（受控组件：value 由父组件持有，`input` 事件是它唯一的入口）
           const ntParamInput = ntParamTextInput(ntParamEditor())
@@ -2197,7 +3486,7 @@
             ntParamInput.dispatchEvent(new Event('input', { bubbles: true }))
           }
           facts['newtask.paramDirtyShown'] = await until(
-            () => (ntActionsText() ?? '').includes('固定参数改了'),
+            () => (ntDialogText() ?? '').includes('固定参数改了'),
             30,
           )
           // 改回来 ⇒ 那句消失（"其实没改"不许带覆盖出去）
@@ -2207,7 +3496,7 @@
             ntParamInput2.dispatchEvent(new Event('input', { bubbles: true }))
           }
           facts['newtask.paramDirtyGone'] = await until(
-            () => !(ntActionsText() ?? '').includes('固定参数改了'),
+            () => !(ntDialogText() ?? '').includes('固定参数改了'),
             30,
           )
           // ★ 智能体详情**只读**那一档：契约值 chip 旁边带「已固定: text=长期钉的」
@@ -2235,7 +3524,7 @@
               .map((c) => text(c))
               .join(' | ')
             f.contentWindow.location.hash = '#/newtask'
-            await until(() => text(d().querySelector('.view-head h2')) === '新建任务', 60)
+            await until(() => text(d().querySelector('.page-name')) === '新建任务', 60)
             await wait(200)
             return { chip }
           })()
@@ -2262,6 +3551,12 @@
           // ★ 可勾那一档的第二个形态：审核者**一个动作都没有** ⇒ 框照画（框是照
           //   已装工具画的），但**一个都不勾**。所以这里量的不是"没有框"，是
           //   "框在、全空"——两者的差别正是"这一栏还能不能加一个动作"。
+          //
+          // ⚠️ 上面那个 IIFE 去过一趟智能体页再回来（`location.hash` 换了两次），
+          //    这一页是**重新挂载**的 ⇒ 对话框回到关着（`actionsOpen` 是组件状态）。
+          //    不重新打开的话这里量到的是"0 个框"，而症状是"这一档一个框都不画"，
+          //    看起来像功能坏了（实测就是这条先红）。
+          await ntOpenActions()
           facts['newtask.emptyPermsBoxValues'] = ntBoxes().map((b) => b.value).sort()
           facts['newtask.emptyPermsCheckedValues'] = ntCheckedValues()
 
@@ -2308,9 +3603,9 @@
           facts['newtask.toolsUnknownPatched'] = ntFailToolsFetch()
           facts['newtask.toolsUnknownRefreshClicked'] = await ntRefreshView(
             '#/tools',
-            '.view-head h2',
+            '.page-name',
             '工具',
-            '.view-head',
+            '.topbar .page-actions',
           )
           // 失败**真的落到了界面上**：那一页显示的就是 store 里记下的那条
           // `loadError`（判据是探针自己编的那句话原样出现在页面上）。
@@ -2332,11 +3627,11 @@
           f.contentWindow.fetch = ntRealFetch
           facts['newtask.toolsUnknownRefreshBack'] = await ntRefreshView(
             '#/tools',
-            '.view-head h2',
+            '.page-name',
             '工具',
-            '.view-head',
+            '.topbar .page-actions',
           )
-          facts['newtask.toolsUnknownEnteredBack'] = await ntEnter()
+          facts['newtask.toolsUnknownEnteredBack'] = await ntEnterWithActions()
           // ★ 残局收拾干净了吗：后面那两条端到端量的必须是**恢复之后**的现场
           facts['newtask.toolsUnknownRestored'] = await until(
             () =>
@@ -2383,9 +3678,9 @@
           facts['newtask.oldDaemonPatched'] = ntStripWhitelistCap()
           facts['newtask.oldDaemonRefreshClicked'] = await ntRefreshView(
             '#/agents',
-            '.pane-head h2',
+            '.page-name',
             '智能体',
-            '.pane-head',
+            '.topbar .page-actions',
           )
           // patch 之后那份身份**确实少了那一个标志**（从探针这一侧再问一遍）
           facts['newtask.oldDaemonCapsAfterPatch'] = await f.contentWindow
@@ -2399,10 +3694,16 @@
           facts['newtask.oldDaemonControlCount'] = ntControlCount()
           facts['newtask.oldDaemonChips'] = ntChips()
           facts['newtask.oldDaemonChipSummary'] = need('只读那一档 chip 旁边的 summary', () => {
-            const ntChip = [...(ntActions()?.querySelectorAll('.chip') ?? [])].find(
+            // 胶囊在**细节那一条**里（三步排成一行之后 ③ 的卡片只有一列宽）
+            const ntChip = [...(ntActionsDetail()?.querySelectorAll('.chip') ?? [])].find(
               (c) => text(c.querySelector('code')) === ntAction,
             )
-            return ntChip ? text(ntChip.querySelector('.chip-sub')) : null
+            // ⚠️ 不能取"第一个 `.chip-sub`"：胶囊第一行现在是**契约值 + 已固定**
+            //    （钉死的固定值与动作名同一行），第一个 `.chip-sub` 常常是那一枚。
+            //    说明要按"既不是 fixed 也不是 bad"来挑。
+            return ntChip
+              ? text(ntChip.querySelector('.chip-sub:not(.fixed):not(.bad)'))
+              : null
           })
           facts['newtask.oldDaemonText'] = ntActionsText()
           facts['newtask.oldDaemonReviewerOptions'] = ntReviewerSelect()
@@ -2412,11 +3713,11 @@
           f.contentWindow.fetch = ntRealFetch
           facts['newtask.oldDaemonRefreshBack'] = await ntRefreshView(
             '#/agents',
-            '.pane-head h2',
+            '.page-name',
             '智能体',
-            '.pane-head',
+            '.topbar .page-actions',
           )
-          facts['newtask.oldDaemonEnteredBack'] = await ntEnter()
+          facts['newtask.oldDaemonEnteredBack'] = await ntEnterWithActions()
           facts['newtask.oldDaemonRestored'] = await until(
             () =>
               ntBoxes().length > 0 &&
@@ -2446,7 +3747,7 @@
           //   量的必须是恢复正常之后的现场，不能踩在残局上。
           facts['newtask.fetchRestored'] = f.contentWindow.fetch === ntRealFetch
 
-          await ntEnter() // 重进页面：② 回到默认的「跟随」
+          await ntEnterWithActions() // 重进页面：② 回到默认的「跟随」
           // ★ 提交之前**原样记下 ② 上是哪一档**（这一条只观察、不设置）：它若不
           //   是 `follow`，那么"跟随 ⇒ follow"这条端到端断言量到的其实是别的东西。
           facts['newtask.followSubmitPick'] = ntReviewerSelect()
@@ -2463,6 +3764,18 @@
           if (ntFollowSubmit.run) {
             const ntFollowRec = await ntRunRecord(ntFollowSubmit.run.runId)
             facts['newtask.followRunRecordRead'] = ntFollowRec !== null
+          /**
+           * ★★ 投递档要落在 run 上（2026-09 三块组装）。
+           *
+           * 探针里的 run 走 **generic** runtime（刻意不调真 CLI），而它没有系统提示
+           * 这条通道 ⇒ 该落 **B**（三块合成一段）。这一条正好钉住 A 档的**另一侧**：
+           * 换一个 runtime 时投递形状真的变了、而且**说得出来**。
+           */
+          // ⚠️ 这里是浏览器里的**原生 JS**，不能写 TypeScript 的 `as`（写了一次，
+          //    整个探针脚本直接语法错误、页面不执行，表现成"探针没在超时前给出结果"）。
+          facts['newtask.deliveryModeRecorded'] = ntFollowRec
+            ? (ntFollowRec.deliveryMode ?? null)
+            : null
             facts['newtask.followRunHasAllowedActionsKey'] = ntFollowRec
               ? Object.prototype.hasOwnProperty.call(ntFollowRec, 'allowedActions')
               : null
@@ -2476,7 +3789,7 @@
           }
 
           // ── E2：③ 上一个都不勾再提交 ⇒ `[]`（键在、空数组）──
-          await ntEnter()
+          await ntEnterWithActions()
           // ★ 动一下：把夹具那个动作的勾取消（夹具里那个审核者只有这一条）
           facts['newtask.clearedSubmitUntick'] = ntSetBox(ntAction, false)
           // 提交之前**原样记下 ③ 上是哪几个勾**（只观察、不设置）：接口上那个 `[]`
@@ -2513,7 +3826,7 @@
           // "配了不返工"而没有任何提示。所以两端都量：
           //   ① 进页面时它必须是 **0**（默认不返工，不能替使用者决定多跑几轮）；
           //   ② 拧到 2 再提交 ⇒ 落库原文里 `maxReworks === 2`。
-          await ntEnter()
+          await ntEnterWithActions()
           facts['newtask.reworkDefault'] = ntReworkSelect()?.value ?? null
           facts['newtask.setRework'] = await ntSetRework(2)
           const ntReworkSubmit = await ntSubmit('探针的三步链夹具：返工 2 次（别动它）')
@@ -2529,7 +3842,7 @@
             facts['newtask.reworkRunMaxReworks'] = null
           }
 
-          await ntEnter()
+          await ntEnterWithActions()
           await ntSetReviewer('none')
           const ntNoneSubmit = await ntSubmit('探针的三步链夹具：不自动审核（别动它）')
           facts['newtask.noneSubmitReachedTasks'] = ntNoneSubmit.reached
@@ -2552,6 +3865,93 @@
         //    量不到了，所以不能在中间做。剩下的只有"新建页不崩"那一条，它不依赖工具。
         // ⚠️ 每一步都**如实上报**（卸载被拒 / 刷新按钮找不到都没有藏起来）：
         //    这一组绿的意思是"空态真的被看到过"，不是"没跑到"。
+        /* ══════════════════════════════════════════════════════════════
+         * 任务详情右边那一栏（与聊天那一栏**同一个组件**）
+         * ══════════════════════════════════════════════════════════════
+         *
+         * 抽组件这一刀动的是**任务页**那条已经在用的路径，而这一条检查就是它的
+         * 回归网：左边那一栏换成组件之后，`base` 传错（比如传成一个空 id）会表现
+         * 成"那一栏报错"或"一直骨架屏"，而这两种在肉眼扫一眼截图时都不明显。
+         *
+         * 判据是**真的打到接口上拿到东西**：跑完的任务点开之后，右边要么列出目录
+         * 里的条目、要么说"这个目录还是空的/还不存在"；**不许出现"取不到"那一块**
+         * （它意味着请求失败——旧 daemon、或者 base 传错了）。
+         *
+         * ⚠️ 只在**跑完的**任务上量：还在跑的时候右边是实时日志，没有文件那一栏。
+         *    所以这里顺着列表往下找前几条，找到一条跑完的为止。
+         */
+        facts['tasks.filesColumnStillRenders'] = await (async () => {
+          /**
+           * ⚠️ 先**等一条 run 跑完**再点：还在跑的时候右边是实时日志，没有文件那
+           *    一栏——第一版就是没等，于是"前 5 条里没有一条跑完的"（探针当场报红，
+           *    而那是探针自己的前提没立住，不是界面坏了）。
+           *
+           * 用的是接口上的状态（`GET /api/runs`），不是页面上的字。
+           */
+          const TERMINAL = ['completed', 'failed', 'cancelled']
+          const runsNow = () =>
+            f.contentWindow
+              .fetch('/api/runs')
+              .then((r) => r.json())
+              .then((p) => p.runs ?? [])
+              .catch(() => [])
+          let terminalRun = null
+          for (let i = 0; i < 25; i += 1) {
+            terminalRun = (await runsNow()).find((r) => TERMINAL.includes(r.status))
+            if (terminalRun) break
+            await wait(400)
+          }
+          if (!terminalRun) {
+            errors.push('等不到任何一条跑完的 run——这一条量不到（那几条会空过）')
+            return false
+          }
+          f.contentWindow.location.hash = '#/tasks'
+          await until(() => !!d().querySelector('.detail-pane'), 60)
+          await wait(600)
+          /**
+           * ⚠️ 视图模式（列表 / 看板）**存在 localStorage 里**：本视图前面那一段
+           *    切过看板，不切回来的话 `.task-row` 一条都抓不到——而症状看起来像
+           *    "没有任务"（这与 `ntSubmit` 那边踩过的是同一个坑）。
+           */
+          if (d().querySelectorAll('.list-pane .task-row').length === 0) {
+            const toList = [...d().querySelectorAll('button')].find((b) => text(b) === '列表')
+            if (toList) {
+              click(toList)
+              await until(() => d().querySelectorAll('.list-pane .task-row').length > 0, 40)
+            }
+          }
+          const rows = [...d().querySelectorAll('.list-pane .task-row')]
+          for (const row of rows.slice(0, 5)) {
+            click(row)
+            await wait(900)
+            const aside = d().querySelector('.detail-pane aside.result-files')
+            if (!aside) continue // 这一条还在跑（右边是实时日志）⇒ 换下一条
+            const body = text(aside)
+            if (body.includes('取不到工作目录的文件')) {
+              errors.push('任务详情那一栏报"取不到"——组件抽出来之后 base 或接口对不上')
+              return false
+            }
+            if (!body.includes('工作目录的文件')) {
+              errors.push(`任务详情那一栏没有标题（量到的是「${body.slice(0, 60)}」）`)
+              return false
+            }
+            // 骨架屏也是"没量到东西"：等一下再看一次
+            await wait(700)
+            const again = text(d().querySelector('.detail-pane aside.result-files') ?? aside)
+            if (again.includes('取不到工作目录的文件')) {
+              errors.push('任务详情那一栏等完之后变成了"取不到"')
+              return false
+            }
+            return true
+          }
+          errors.push(
+            `点了前 5 条任务都没看到「工作目录的文件」那一栏（列表里 ${rows.length} 行，` +
+              `右栏当前是「${text(d().querySelector('.detail-pane')).slice(0, 80)}」）——` +
+              `还在跑的任务右边是实时日志，这一条量不到`,
+          )
+          return false
+        })()
+
         {
           const fetchAgents = () =>
             f.contentWindow
@@ -2571,9 +3971,9 @@
           /** 「工具」页那个**刷新**按钮：界面的 `$tools` 靠它重新取一遍。 */
           const refreshToolsInUi = async () => {
             f.contentWindow.location.hash = '#/tools'
-            await until(() => !!d().querySelector('.view-head h2'), 60)
+            await until(() => text(d().querySelector('.page-name')) === '工具', 60)
             await wait(300)
-            const btn = [...d().querySelectorAll('.view-head button')].find(
+            const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
               (b) => text(b) === '刷新',
             )
             if (btn) {
@@ -2767,23 +4167,12 @@
           // ══════════════════════════════════════════════════════════════
           // 阶段 B：**一个工具包都没装** ⇒ 「行动权限」那一栏的空态
           // ══════════════════════════════════════════════════════════════
-          const agentsNow = await fetchAgents()
           const toolsNow = await fetchTools()
           let refusals = 0
           for (const tool of toolsNow) {
-            // ① 摘掉所有挂着它的 agent（不摘的话卸载会被 400 拒）
-            for (const a of agentsNow.filter((x) => (x.toolIds ?? []).includes(tool.id))) {
-              const put = await f.contentWindow.fetch(
-                `/api/agents/${encodeURIComponent(a.id)}/tools`,
-                {
-                  method: 'PUT',
-                  headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ toolIds: [] }),
-                },
-              )
-              if (!put.ok) refusals++
-            }
-            // ② 卸载
+            // ⚠️ 这里原来先"摘掉所有挂着它的 agent"（不摘的话卸载会被 400 拒）。
+            //    挂载能力撤掉之后既没有那个接口、也没有那条拒绝：卸载一律放行，
+            //    所以这一步删掉了。
             const del = await f.contentWindow.fetch(
               `/api/tools/${encodeURIComponent(tool.id)}`,
               { method: 'DELETE' },
@@ -2793,9 +4182,9 @@
           facts['noTools.refusals'] = refusals
           // ③ 「工具」页那个**刷新**按钮：界面的 `$tools` 靠它重新取一遍
           f.contentWindow.location.hash = '#/tools'
-          await until(() => !!d().querySelector('.view-head h2'), 60)
+          await until(() => text(d().querySelector('.page-name')) === '工具', 60)
           await wait(300)
-          const refreshBtn = [...d().querySelectorAll('.view-head button')].find(
+          const refreshBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
             (b) => text(b) === '刷新',
           )
           facts['noTools.refreshButtonFound'] = !!refreshBtn
@@ -2904,7 +4293,7 @@
                 await wait(600)
                 facts['noTools.linkNavigatesToTools'] =
                   f.contentWindow.location.hash === '#/tools' &&
-                  text(d().querySelector('.view-head h2')) === '工具'
+                  text(d().querySelector('.page-name')) === '工具'
               }
             }
           }
@@ -3049,6 +4438,901 @@
             }
           }
         }
+
+        // ══════════════ 聊天（闭环的旁路）══════════════
+        //
+        // 这一组刻意**不造对话、不发消息**：发一条就会起一条真 run，而这个探针
+        // 的边界是"基本不造 run"（唯一例外是新建任务那组三步链）。所以量的是
+        // **空态那一屏**——它恰恰是最容易画错的一屏（没有对话时右栏该显示什么、
+        // 输入框在不在该在的容器里）。
+        //
+        // ⚠️ 历史教训（`README.md` 的"教训"一节）：上一回表单画进了左栏、横盖
+        //    右栏，而当时所有检查全绿——因为只量了"长什么样"、没量"在不在该在的
+        //    容器里"。所以这里量的是**包含关系与几何**，不是"页面上有没有这几个字"。
+        f.contentWindow.location.hash = '#/chat'
+        await until(() => text(d().querySelector('.list-pane h2')) === '对话')
+        await wait(400)
+
+        const chatList = () => d().querySelector('.list-pane')
+        const chatDetail = () => d().querySelector('.detail-pane')
+        const chatRect = (el) => {
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return {
+            top: Math.round(r.top),
+            left: Math.round(r.left),
+            w: Math.round(r.width),
+            h: Math.round(r.height),
+          }
+        }
+
+        facts['chat.hasListPane'] = chatList() !== null
+        facts['chat.hasDetailPane'] = chatDetail() !== null
+        facts['chat.twoColumnsSideBySide'] = need('两栏并排', () => {
+          const a = chatRect(chatList())
+          const b = chatRect(chatDetail())
+          if (!a || !b) return false
+          // 并排 = 左栏整个在右栏左边，而且两栏各自真有宽度
+          return a.left + a.w < b.left + 2 && a.w > 100 && b.w > 100
+        })
+        facts['chat.listNarrowerThanDetail'] = need('左栏比右栏窄', () => {
+          const a = chatRect(chatList())
+          const b = chatRect(chatDetail())
+          return a && b ? a.w < b.w : false
+        })
+
+        // ── 空态：没有对话时列表里是空态，而输入框必须在**右栏里** ──
+        facts['chat.emptyStateShown'] = (() => {
+          const empty = d().querySelector('.list-pane .empty')
+          return empty !== null && text(empty.querySelector('strong') ?? empty).length > 0
+        })()
+        facts['chat.composerInsideDetail'] = need('输入框在右栏里', () => {
+          const box = d().querySelector('.detail-pane textarea')
+          if (!box) return false
+          return chatDetail().contains(box)
+        })
+        facts['chat.composerNotInList'] = need('输入框不在左栏里', () => {
+          return d().querySelector('.list-pane textarea') === null
+        })
+        // 没选执行者时不该让人白打一段字：要么有下拉、要么有一条"先去建一个"的提示
+        facts['chat.agentPickerOrHint'] = need('执行者选择器或提示', () => {
+          const sel = d().querySelector('.detail-pane select')
+          const warn = d().querySelector('.detail-pane .notice')
+          return sel !== null || warn !== null
+        })
+        // ★ 发送键那句话必须在页面上说明白：这里 Enter 发送，与「新建任务」的
+        //   「要做什么」（Enter 换行）**正好相反**，靠猜是不负责任的。
+        facts['chat.enterHint'] = need('Enter 发送的说明', () => {
+          const foot = d().querySelector('.detail-pane .pane-foot')
+          if (!foot) return false
+          const t = text(foot)
+          return t.includes('Enter') && t.includes('Shift')
+        })
+        /**
+         * ⚠️ 这里原有 `chat.boundaryHint`（左栏底部那句"这里不动手：聊天不产出判决，
+         *    而动作的门槛就是判决。"）。2026-09 按要求把那句话从页面上拿掉了，这条
+         *    断言连同 `run.mjs` 里的那一条一起删——**留一条量一个已经不存在的东西的
+         *    断言，比没有断言更坏**：它会把"这句话又回来了"当成正常。
+         *    边界本身没变，落点改在「带过去」（预填到新建任务）那条路上。
+         */
+        /**
+         * 气泡圆角。
+         *
+         * ⚠️ 两条弯路，都走过：
+         *
+         *   1. 往 body 里塞一个 `class="bubble"` 去量 ⇒ 那条样式是 Chat.svelte
+         *      **局部作用域**的（构建后是 `.bubble.svelte-xxxx`），塞在 body 里的
+         *      元素根本匹配不到，量出来永远是 0px。**"量到了但量的是别的东西"
+         *      比没有检查更糟**。
+         *   2. 扫 `document.styleSheets` 找规则 ⇒ 这里量到的是 `null`（同步拿不到
+         *      那份样式表；具体哪一环不可见不重要，结论是这条路从探针这侧不成立）。
+         *
+         * 现在改成就地读**构建产物那份 CSS 的文本**，正则在里面找 `.bubble` 的
+         * border-radius。它量的是"样式表里写了什么"，不是"某个元素算出来是多少"
+         * ——空态下页面上一个气泡都没有（探针不造对话），所以后者本来也量不到。
+         */
+        facts['chat.bubbleRadiusRule'] = await (async () => {
+          const link = d().querySelector('link[rel="stylesheet"]')
+          if (!link) return null
+          try {
+            const css = await f.contentWindow.fetch(link.href).then((r) => r.text())
+            const m = css.match(/\.bubble[^{,]*\{[^}]*border-radius:\s*([^;}]+)/)
+            return m ? m[1].trim() : null
+          } catch {
+            return null
+          }
+        })()
+
+        facts['chat.hasContent'] = need('聊天页有内容', () => main().textContent.trim().length > 0)
+
+        /**
+         * 聊天那一页的下拉：执行者 + **每一条装着的 skill**。
+         *
+         * ★ 两条都要在：使用者要的是"**所有已安装的 skill** 都能选"，包括**没人挂**
+         *   的那条。有主的走"选它 = 选那个人"（所以这里量"界面写出的那个名字是不是
+         *   接口上真挂着它的执行者"——facts 从 `/api/agents` 现取，不从选项文字反读，
+         *   反读就成了自说自话）；没主的绑当前执行者、由这个对话自己带着，而**那件事
+         *   只能从发出去的请求体看出来**，所以最后一条检查把 `fetch` 截下来看
+         *   `skillIds`：它要是没带上，界面可以一片正常，而这一轮就是白选。
+         */
+        const chatSelect = () => d().querySelector('#chat-agent')
+        const chatSkillOpts = () =>
+          [...(chatSelect()?.querySelectorAll('option') ?? [])].filter((o) =>
+            (o.getAttribute('value') ?? '').startsWith('skill:'),
+          )
+        const chatFixtures = await (async () => {
+          try {
+            const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+            const skills = (await f.contentWindow.fetch('/api/skills').then((r) => r.json())).skills ?? []
+            const owned = skills.find((s) => s.slug === 'chat-probe-skill')
+            const orphan = skills.find((s) => s.slug === 'chat-orphan-skill')
+            const owner = agents.find(
+              (a) => a.role === 'executor' && (a.skillIds ?? []).includes(owned?.id),
+            )
+            const executors = agents.filter((a) => a.role === 'executor').map((a) => a.id)
+            return { skills, owned, orphan, owner, executors }
+          } catch {
+            return {}
+          }
+        })()
+        facts['chat.ownedSkillOption'] = need('挂在执行者身上的 skill 是一个选项，且写出等于跟谁说话', () => {
+          const opt = chatSkillOpts().find(
+            (o) => o.getAttribute('value') === `skill:${chatFixtures.owned?.id}`,
+          )
+          if (!opt) return false
+          const t = opt.textContent ?? ''
+          return t.includes('chat-probe-skill') && t.includes(chatFixtures.owner?.name ?? '\u0000')
+        })
+        facts['chat.allSkillsOffered'] = await (async () => {
+          const skills = chatFixtures.skills ?? []
+          if (skills.length === 0) {
+            errors.push('所有已安装的 skill 都在选项里：夹具没造出来（见 run.mjs 里 skill 那一段）')
+            return false
+          }
+          const opts = chatSkillOpts().map((o) => o.getAttribute('value'))
+          const missing = skills.filter((s) => !opts.includes(`skill:${s.id}`))
+          if (missing.length > 0) {
+            errors.push(
+              `装了却没出现在下拉里的 skill：${missing.map((s) => s.slug).join('、')}` +
+                `（下拉里 ${opts.length} 项，装着 ${skills.length} 条）`,
+            )
+            return false
+          }
+          if (opts.length !== skills.length) {
+            errors.push(`skill 选项数（${opts.length}）与装着的条数（${skills.length}）不一致`)
+            return false
+          }
+          // 没人挂的那条也必须出现（"所有已安装的 skill 都要能选"）
+          const orphanOpt = chatSkillOpts().find(
+            (o) => o.getAttribute('value') === `skill:${chatFixtures.orphan?.id}`,
+          )
+          if (!orphanOpt) {
+            errors.push('「chat-orphan-skill」没人挂，但它也必须能选——它现在不在下拉里')
+            return false
+          }
+          return (orphanOpt.textContent ?? '').includes('chat-orphan-skill')
+        })()
+        facts['chat.skillBindsOwner'] = await (async () => {
+          const sel = chatSelect()
+          const opt = chatSkillOpts().find(
+            (o) => o.getAttribute('value') === `skill:${chatFixtures.owned?.id}`,
+          )
+          if (!sel || !opt || !chatFixtures.owner) {
+            errors.push('选 skill 绑定执行者：缺夹具（见 run.mjs 里 chat-probe-skill 那一段）')
+            return false
+          }
+          const before = sel.value
+          sel.value = opt.getAttribute('value')
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(250)
+          const hint = text(d().querySelector('.detail-pane [data-skill-owner]'))
+          // 量完把它放回去：这一页后面还要按"初始状态"被别组检查看一眼
+          sel.value = before
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(120)
+          if (!hint.includes(chatFixtures.owner.name)) {
+            errors.push(`选 skill 之后界面上没写出"将使用 ${chatFixtures.owner.name}"（量到的是「${hint}」）`)
+            return false
+          }
+          return true
+        })()
+        /**
+         * ★★ 没人挂的 skill：选了要（1）说出"这一轮会带上它"、（2）**真的把
+         * skillIds 发出去**。
+         *
+         * (2) 才是这条检查的全部意义：界面可以画得完全正确，而 `skillIds` 忘了带
+         * ——那一轮就是用一个没带这条 skill 的执行者在说话，页面上看不出任何异常。
+         * 所以把 `fetch` 换掉、只**截请求体**再回一个错误（不能让它真去建对话，
+         * 那会起一条 run），量完立刻换回来。
+         */
+        facts['chat.orphanSkillSentAsSkillIds'] = await (async () => {
+          const sel = chatSelect()
+          const opt = chatSkillOpts().find(
+            (o) => o.getAttribute('value') === `skill:${chatFixtures.orphan?.id}`,
+          )
+          if (!sel || !opt || !chatFixtures.orphan) {
+            errors.push('没人挂的 skill：缺夹具（见 run.mjs 里 chat-orphan-skill 那一段）')
+            return false
+          }
+          const before = sel.value
+          sel.value = opt.getAttribute('value')
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(250)
+          const hint = text(d().querySelector('.detail-pane [data-skill-owner]'))
+          if (!hint.includes('chat-orphan-skill')) {
+            errors.push(`选了没人挂的 skill 之后，界面没说明这一轮会带上它（量到的是「${hint}」）`)
+          }
+
+          const real = f.contentWindow.fetch
+          let sent = null
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            const method = (init && init.method) || 'GET'
+            if (String(url).includes('/api/conversations') && method === 'POST') {
+              try {
+                sent = JSON.parse(String((init && init.body) || 'null'))
+              } catch {
+                sent = null
+              }
+              return Promise.resolve(
+                new Response(JSON.stringify({ error: '探针只截请求体', code: 'probe' }), {
+                  status: 500,
+                  headers: { 'content-type': 'application/json' },
+                }),
+              )
+            }
+            return real.call(f.contentWindow, input, init)
+          }
+          try {
+            const box = d().querySelector('.detail-pane textarea')
+            const sendBtn = [...d().querySelectorAll('.detail-pane button')].find(
+              (b) => (b.textContent ?? '').trim() === '发送',
+            )
+            if (!box || !sendBtn) {
+              errors.push('没人挂的 skill：右栏里找不到输入框或"发送"按钮')
+              return false
+            }
+            box.value = '探针：截一下请求体'
+            box.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(200)
+            click(sendBtn)
+            await wait(600)
+          } finally {
+            f.contentWindow.fetch = real
+            sel.value = before
+            sel.dispatchEvent(new Event('change', { bubbles: true }))
+            await wait(120)
+          }
+
+          if (!sent) {
+            errors.push('没人挂的 skill：没截到 POST /api/conversations 的请求体')
+            return false
+          }
+          if (!Array.isArray(sent.skillIds) || sent.skillIds.length !== 1) {
+            errors.push(
+              `选了没人挂的 skill 却没把 skillIds 发出去（实际 ${JSON.stringify(sent.skillIds)}）——这一轮等于白选`,
+            )
+            return false
+          }
+          if (sent.skillIds[0] !== chatFixtures.orphan.id) {
+            errors.push(`skillIds 发的是 ${sent.skillIds[0]}，不是选中的 ${chatFixtures.orphan.id}`)
+            return false
+          }
+          // 绑的人必须还是个真执行者——"没人挂"不等于"没人说话"
+          if (!(chatFixtures.executors ?? []).includes(sent.agentId)) {
+            errors.push(`没人挂的 skill：请求体里的 agentId「${sent.agentId}」不是一个执行者`)
+            return false
+          }
+          return true
+        })()
+
+        /**
+         * ★★ 旧 daemon：`/api/identity` 里没有 `conversation-skills`。
+         *
+         * 这一档**很容易真踩上**：日常做法是"重建前端 → 刷新页面"，而**不带**重启
+         * daemon。旧 daemon 不解析 `skillIds`（请求体那层没有 zod 校验，未知字段被
+         * 忽略），于是"选了没人挂的 skill"会被**静默地当成没说**——那一轮用一个没带
+         * 这条 skill 的执行者在说话，而界面上写着"将使用它 + 这条 skill"，两边都不报错。
+         *
+         * 所以那个标志不在时，没人挂的 skill **不许出现在下拉里**，并且要说明原因
+         * （与「换人审 / 不审」「人工裁决」「任务级动作白名单」同一规矩：宁可少给一个
+         * 选项，也不能给一个兑现不了的承诺）。有主的 skill 不受影响。
+         *
+         * 量完必须**还原**：把 fetch 换回来，并重新走一遍会重读身份的路径，让后面
+         * 那些检查量到的是真实身份。
+         */
+        /**
+         * 绕到「智能体」页**点一次它的「刷新」**，再回到聊天页。
+         *
+         * ⚠️ 只换 hash 是不够的：身份（`/api/identity`）是在那一页的 `refresh()`
+         *    里重读的，光换视图拿到的是**上一次加载的那份**。第一版就是这么写的，
+         *    于是下面那条检查量到的仍是"新 daemon"的行为（探针当场报了红——这正是
+         *    "前提不成立时要能被抓住"的价值）。
+         */
+        const chatReloadIdentity = async () => {
+          f.contentWindow.location.hash = '#/agents'
+          if (!(await until(() => text(d().querySelector('.page-name')) === '智能体', 60))) {
+            return false
+          }
+          await wait(200)
+          // 「刷新」2026-09 起在顶栏里、紧跟着页名（原来在左栏头部）。⚠️ 这个 helper 的
+          // 调用方会**紧接着读聊天页左栏**（`chatEnsureFixtureConversation`），
+          // 所以这里点不到就等于页面留在智能体页 —— 后面那一串会一起红。
+          const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => text(b) === '刷新',
+          )
+          if (!btn) return false
+          click(btn)
+          await wait(400)
+          f.contentWindow.location.hash = '#/chat'
+          const back = await until(() => text(d().querySelector('.list-pane h2')) === '对话', 60)
+          await wait(400)
+          return back
+        }
+        facts['chat.unownedHiddenOnOldDaemon'] = await (async () => {
+          const real = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (!String(url).includes('/api/identity')) {
+              return real.call(f.contentWindow, input, init)
+            }
+            return real.call(f.contentWindow, input, init).then(async (res) => {
+              const body = await res.json().catch(() => null)
+              if (!body) return res
+              body.capabilities = (body.capabilities ?? []).filter(
+                (c) => c !== 'conversation-skills',
+              )
+              return new Response(JSON.stringify(body), {
+                status: res.status,
+                headers: { 'content-type': 'application/json' },
+              })
+            })
+          }
+          let out = false
+          try {
+            await chatReloadIdentity()
+            const sel = chatSelect()
+            if (!sel) {
+              errors.push('旧 daemon 那一档：回到聊天页之后没找到执行者下拉（草稿态没起来）')
+            } else {
+              const stillOffered = chatSkillOpts().some(
+                (o) => o.getAttribute('value') === `skill:${chatFixtures.orphan?.id}`,
+              )
+              const hint = text(d().querySelector('.detail-pane [data-skills-need-restart]'))
+              if (stillOffered) {
+                errors.push(
+                  '旧 daemon（不认识 skillIds）上，"没人挂的 skill"仍然出现在下拉里——那一轮会静默地不带上它',
+                )
+              } else if (!hint.includes('chat-orphan-skill')) {
+                errors.push(
+                  `旧 daemon 上少了一个选项，但页面上没说原因（量到的提示是「${hint}」）`,
+                )
+              } else if (!chatSkillOpts().some((o) => o.getAttribute('value') === 'skill:' + (chatFixtures.owned?.id ?? ''))) {
+                errors.push('旧 daemon 上连"有主的 skill"都不见了——那本来不受影响（走"选它 = 选那个人"）')
+              } else {
+                out = true
+              }
+            }
+          } finally {
+            f.contentWindow.fetch = real
+            await chatReloadIdentity()
+          }
+          return out
+        })()
+
+
+        /* ══════════════════════════════════════════════════════════════
+         * 右栏底部那一栏「工作目录的文件」
+         * ══════════════════════════════════════════════════════════════
+         *
+         * 任务详情右边那一栏与它是**同一个组件**，差别只在"问谁"：那边按某次执行
+         * 的目录问，这边按某个对话的目录问。这里量的是**按对话问**这条新路走通了
+         * 没有，以及那一栏最要紧的两件事有没有真的落到屏幕上：
+         *
+         *   ① 目录里**真的有东西时**列得出来（空过等于永远绿，所以夹具目录里
+         *      放了产出、一个还没展开的子目录、以及平台注入物三种）；
+         *   ② **注入物排在产出后面**——顺序是界面侧 `sortWorkDirEntries` 保证的
+         *      （服务端返回的是目录自己的顺序，那一层刻意不断言），所以顺序只能
+         *      在这一层量。
+         *
+         * 夹具（目录 + 对话）在 `run.mjs` 里造，路径从 URL 传进来
+         * （`chatFilesWorkDir`）——不靠"列表里的第一条对话"这种脆假设。
+         */
+        const chatFilesWorkDir = probeQuery.get('chatFilesWorkDir') || ''
+        const chatFilesPanel = () => d().querySelector('.detail-pane [data-chat-files]')
+        const chatFilesOpenIt = async () => {
+          const panel = chatFilesPanel()
+          if (!panel) return false
+          const head = panel.querySelector('button[aria-expanded]')
+          if (!head) return false
+          if (head.getAttribute('aria-expanded') !== 'true') {
+            click(head)
+            await wait(300)
+          }
+          return true
+        }
+        const chatFilesRows = () =>
+          [...(chatFilesPanel()?.querySelectorAll('li') ?? [])].map((li) => ({
+            text: text(li),
+            managed: li.querySelector('.managed') !== null,
+          }))
+
+        /**
+         * 把夹具那条对话准备好，并打开它。
+         *
+         * ⚠️ 对话**在这里建**，不在 `run.mjs` 播种时建：聊天那一段（执行者下拉、
+         *    skill 那几条）是在"左栏一个对话都没有"的前提下量的——播种时就建好
+         *    的话，那一段会因为页面直接进了某个对话而全部变红（试过）。
+         *
+         * ⚠️ 用**目录**认它（`workDir`），不认"列表里的第一条"：那种脆假设在
+         *    上面几处已经被点名过。
+         * ⚠️ 建完之后要**离开再回来**：左栏那份列表是页面自己的 store（只在空的时候
+         *    拉一次），接口建出来的对话不刷新它就不会出现。
+         */
+        const chatEnsureFixtureConversation = async () => {
+          if (chatFilesWorkDir === '') {
+            errors.push('没有 chatFilesWorkDir（run.mjs 里那一组夹具没造出来）——这几条会空过')
+            return false
+          }
+          const list = () =>
+            f.contentWindow.fetch('/api/conversations').then((r) => r.json())
+          let items = (await list()).items ?? []
+          if (!items.some((c) => c.workDir === chatFilesWorkDir)) {
+            const agents = (
+              await f.contentWindow.fetch('/api/agents').then((r) => r.json())
+            ).agents ?? []
+            const dirAgent = agents.find((a) => a.name === '探针用的目录执行者')
+            if (!dirAgent) {
+              errors.push('找不到夹具执行者「探针用的目录执行者」——那几条会空过')
+              return false
+            }
+            const res = await f.contentWindow.fetch('/api/conversations', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                agentId: dirAgent.id,
+                text: '探针：这一条对话用来看工作目录那一栏',
+                workDir: chatFilesWorkDir,
+              }),
+            })
+            if (!res.ok) {
+              errors.push(`造夹具对话失败（HTTP ${res.status}）——那几条会空过`)
+              return false
+            }
+            items = (await list()).items ?? []
+          }
+          const target = items.find((c) => c.workDir === chatFilesWorkDir)
+          if (!target) {
+            errors.push(`建完之后列表里还是找不到夹具对话（workDir = ${chatFilesWorkDir}）`)
+            return false
+          }
+          // 离开再回来：让左栏那份 store 重新拉一次，并确保页面停在聊天页
+          await chatReloadIdentity()
+          const item = [...d().querySelectorAll('.list-pane .conv-item')].find((b) =>
+            text(b).includes('探针：这一条对话'),
+          )
+          if (!item) {
+            errors.push('左栏找不到夹具对话那一项（它由第一句话命名）')
+            return false
+          }
+          click(item)
+          await wait(700)
+          return true
+        }
+        const chatOpenFixtureConversation = chatEnsureFixtureConversation
+
+        facts['chat.filesPanelPresent'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const panel = chatFilesPanel()
+          if (!panel) {
+            errors.push('对话打开着，右栏底部却没有「工作目录的文件」那一栏')
+            return false
+          }
+          // 头部那一行常驻（默认收起），标题与条数都在
+          const head = text(panel.querySelector('button[aria-expanded]') ?? panel)
+          if (!head.includes('工作目录的文件')) {
+            errors.push(`那一栏的头部没写出标题（量到的是「${head}」）`)
+            return false
+          }
+          return true
+        })()
+
+        facts['chat.filesListsFixtureAndManagedLast'] = await (async () => {
+          if (!(await chatFilesOpenIt())) {
+            errors.push('展不开「工作目录的文件」那一栏')
+            return false
+          }
+          await wait(500)
+          const rows = chatFilesRows()
+          const names = rows.map((r) => r.text)
+          if (rows.length === 0) {
+            errors.push('展开之后一行都没有——夹具目录里明明有文件（那几条会空过）')
+            return false
+          }
+          if (!names.some((n) => n.includes('结论.md'))) {
+            errors.push(`目录里的产出没被列出来（量到的是：${names.join(' / ')}）`)
+            return false
+          }
+          // ★ 注入物（.claude / .agentdeck）必须排在产出**后面**
+          const firstManaged = rows.findIndex((r) => r.managed)
+          const lastProduced = rows.map((r) => r.managed).lastIndexOf(false)
+          if (firstManaged !== -1 && lastProduced !== -1 && lastProduced > firstManaged) {
+            errors.push(
+              `平台注入物排在了产出前面（会把真正的产出淹掉）：${rows
+                .map((r) => `${r.text}${r.managed ? '(注入)' : ''}`)
+                .join(' / ')}`,
+            )
+            return false
+          }
+          return rows.some((r) => r.managed)
+        })()
+
+        facts['chat.filesOneLevelThenExpand'] = await (async () => {
+          const panel = chatFilesPanel()
+          if (!panel) return false
+          const before = chatFilesRows().map((r) => r.text)
+          if (before.some((t) => t.includes('deep.txt'))) {
+            errors.push('还没展开 notes/ 就把里面的 deep.txt 列出来了——那正是"一次只列一层"要避免的')
+            return false
+          }
+          const dir = [...panel.querySelectorAll('li button')].find((b) =>
+            text(b).includes('notes'),
+          )
+          if (!dir) {
+            errors.push('目录里找不到 notes/ 这一项（夹具没造出来？）')
+            return false
+          }
+          click(dir)
+          await wait(500)
+          return chatFilesRows().some((r) => r.text.includes('deep.txt'))
+        })()
+
+        /**
+         * ★★ 静态资源的缓存头。
+         *
+         * 这一组来自一次真实的误判：使用者报"聊天页不工作、任务页正常"，查下来
+         * daemon 与当前前端都是好的——他看的是一个**早就开着、没有刷新**的标签页。
+         * 而那边原本**一个缓存头都不发**：浏览器对那份外壳既不知道能不能复用，
+         * 也没有依据去问"变了没有"。
+         *
+         * 所以：外壳 `no-cache`（每次核对）+ 带内容哈希的产物 `immutable`，
+         * 并且**带 ETag 回来问时要回 304**（核对要便宜，否则每次刷新都重下 HTML）。
+         */
+        facts['web.shellNotCachedBlindly'] = await (async () => {
+          const res = await f.contentWindow.fetch('/index.html')
+          const cc = res.headers.get('cache-control') ?? ''
+          const etag = res.headers.get('etag') ?? ''
+          if (!/no-cache/.test(cc)) {
+            errors.push(`外壳的 cache-control 不是 no-cache（实际「${cc}」）——浏览器会拿着旧外壳不放`)
+            return false
+          }
+          if (etag === '') {
+            errors.push('外壳没有 ETag：浏览器没法问"变了没有"，只能整份重下或者一直用旧的')
+            return false
+          }
+          return true
+        })()
+
+        facts['web.hashedAssetImmutable'] = await (async () => {
+          const html = await (await f.contentWindow.fetch('/index.html')).text()
+          const m = /assets\/(index-[A-Za-z0-9_-]+\.js)/.exec(html)
+          if (!m) {
+            errors.push('外壳里找不到构建产物（界面没构建？）')
+            return false
+          }
+          const res = await f.contentWindow.fetch(`/assets/${m[1]}`)
+          const cc = res.headers.get('cache-control') ?? ''
+          if (!/immutable/.test(cc) || !/max-age=\d{6,}/.test(cc)) {
+            errors.push(`带内容哈希的产物应当是 immutable 长缓存（实际「${cc}」）`)
+            return false
+          }
+          // 带 ETag 回来问 ⇒ 必须 304（核对便宜，否则每次刷新都重下）
+          const etag = res.headers.get('etag')
+          if (!etag) {
+            errors.push('产物没有 ETag')
+            return false
+          }
+          const again = await f.contentWindow.fetch(`/assets/${m[1]}`, {
+            headers: { 'if-none-match': etag },
+          })
+          if (again.status !== 304) {
+            errors.push(`带 If-None-Match 再问应当是 304，实际 ${again.status}`)
+            return false
+          }
+          return true
+        })()
+
+        facts['web.identityReportsBuild'] = await (async () => {
+          const id = await f.contentWindow.fetch('/api/identity').then((r) => r.json())
+          if (typeof id.webBuild !== 'string' || !id.webBuild.includes('index-')) {
+            errors.push(`身份里没有报出这一版界面（webBuild = ${JSON.stringify(id.webBuild)}）`)
+            return false
+          }
+          return true
+        })()
+
+        /**
+         * ★★ 代码块里的换行必须真的显示出来。
+         *
+         * ══════════════════════════════════════════════════════════════
+         * 这条检查的由来：一次"看起来像模型没写换行"的误判
+         * ══════════════════════════════════════════════════════════════
+         *
+         * 使用者报「聊天里那段代码的换行没有了」。用真实数据量 computed style：
+         * 文字里**有 10 个换行**，而 `<code>` 的 `white-space` 是 **`nowrap`**
+         * ——那条规则本来是给**行内**代码写的（中文段落里不被压扁），却被继承进了
+         * `pre > code`，于是十行代码被折成一行、那个 `<pre>` 只有 47px 高。
+         *
+         * ⚠️ 怎么量：探针的 daemon 没有真模型，页面上生不出真实的代码块，所以这里
+         *    在**真实页面**里插一段与渲染器产出**完全相同**的结构，量它的 computed
+         *    style 与高度。测的是那两条**全局**规则（`code{nowrap}` 与 `pre code`），
+         *    而那正是当初出错的地方——不是"照着想象量"。
+         * ⚠️ 高度必须与行数相称：只看 `white-space` 会漏掉"换成 pre-wrap 之后仍然
+         *    没有换行"之类的情况，而使用者看到的就是高度。
+         */
+        facts['chat.codeBlockKeepsNewlines'] = (() => {
+          const LINES = 6
+          const host = d().createElement('div')
+          host.className = 'markdown'
+          host.setAttribute('data-probe-code', '')
+          host.style.position = 'absolute'
+          host.style.left = '-9999px'
+          const body = Array.from({ length: LINES }, (_, i) => `line ${i + 1}`).join('\n')
+          host.innerHTML = `<pre><code>${body}</code></pre>`
+          d().body.appendChild(host)
+          try {
+            const code = host.querySelector('code')
+            const pre = host.querySelector('pre')
+            const ws = f.contentWindow.getComputedStyle(code).whiteSpace
+            const h = Math.round(pre.getBoundingClientRect().height)
+            if (ws === 'nowrap' || ws === 'normal') {
+              errors.push(
+                `代码块的 white-space 是「${ws}」——换行会被折掉（行内代码那条 nowrap 被继承进来了）`,
+              )
+              return false
+            }
+            // 六行、字号 xs（约 12px）、行高 1.55 ⇒ 至少要到 60px 以上；折成一行只有 ~20px
+            if (h < LINES * 12) {
+              errors.push(
+                `六行代码块只有 ${h}px 高（每行约 ${Math.round(h / LINES)}px）——换行没有真的显示出来`,
+              )
+              return false
+            }
+            return true
+          } finally {
+            host.remove()
+          }
+        })()
+
+        /* ══════════════════════════════════════════════════════════════
+         * 文件查看器：渲染 / 原文两面
+         * ══════════════════════════════════════════════════════════════
+         *
+         * 这一栏里的文件是 **agent 写的**，使用者要靠它判断"到底做成了什么"。
+         * 所以最要紧的一条检查是**「原文」必须逐字等于接口发回来的字节**——
+         * 探针自己去 fetch 一次同一个文件，与界面里那一面逐字比对。这一条钉住的
+         * 是"平台没有偷偷加工你的文件"：格式化、重排、去掉空行都会让它红。
+         *
+         * 其余几条各自挡一类"不报错但讲错事实"的错：
+         *   · Markdown 被当纯文本显示（看起来完全正常，只是少了渲染）；
+         *   · iframe 被顺手放宽成 `allow-same-origin`（等于把 agent 写的页面
+         *     与 daemon 的接口接回同一个源）——**直接读属性**，不靠"我们记得"；
+         *   · 二进制被当文本渲染（一屏替换字符，看起来像文件坏了）；
+         *   · 超大文件套高亮（页面卡死，而使用者只会以为这一栏很慢）。
+         */
+        const fvBar = () => d().querySelector('.fv-bar')
+        const fvOpenFile = async (name) => {
+          if (!(await chatFilesOpenIt())) return false
+          await wait(400)
+          const btn = [...(chatFilesPanel()?.querySelectorAll('button.wd-file') ?? [])].find((b) =>
+            text(b).trim() === name,
+          )
+          if (!btn) {
+            errors.push(`树里找不到文件「${name}」（夹具没造出来？）`)
+            return false
+          }
+          click(btn)
+          await wait(700)
+          return fvBar() !== null
+        }
+        const fvClose = async () => {
+          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+          await wait(400)
+        }
+        const fvFixtureConversation = async () => {
+          const items =
+            (await f.contentWindow.fetch('/api/conversations').then((r) => r.json())).items ?? []
+          return items.find((c) => c.workDir === chatFilesWorkDir) ?? null
+        }
+
+        facts['chat.fileViewerRawIsVerbatim'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          if (!(await fvOpenFile('结论.md'))) return false
+          const rawBtn = fvBar()?.querySelector('[data-face-raw]')
+          if (!rawBtn) {
+            errors.push('查看器里没有「原文」这一面（Markdown 应该两面都有）')
+            return false
+          }
+          click(rawBtn)
+          await wait(400)
+          const shown = d().querySelector('.fv-pre[data-raw-text]')?.textContent ?? null
+          if (shown === null) {
+            errors.push('点了「原文」之后没看到原文那一块')
+            return false
+          }
+          // ★★ 与接口发回来的字节逐字比对（探针自己再 fetch 一次）
+          const conv = await fvFixtureConversation()
+          const res = await f.contentWindow.fetch(
+            `/api/conversations/${conv.id}/file?path=${encodeURIComponent('结论.md')}`,
+          )
+          const truth = await res.text()
+          if (shown !== truth) {
+            errors.push(
+              `「原文」与接口发回来的字节不一致——平台加工了文件（界面 ${shown.length} 字符 / 接口 ${truth.length} 字符）`,
+            )
+            return false
+          }
+          await fvClose()
+          return true
+        })()
+
+        facts['chat.fileViewerMarkdownFaces'] = await (async () => {
+          if (!(await fvOpenFile('结论.md'))) return false
+          const rendered = d().querySelector('.fv-md')
+          const hasH1 = rendered !== null && rendered.querySelector('h1') !== null
+          // 切到原文：必须看到字面量 `# 结论`（渲染那一面里它是标题，不是这几个字）
+          click(fvBar()?.querySelector('[data-face-raw]'))
+          await wait(400)
+          const raw = d().querySelector('.fv-pre[data-raw-text]')?.textContent ?? ''
+          await fvClose()
+          if (!hasH1) {
+            errors.push('Markdown 的「渲染」面里没有 h1——它被当纯文本显示了')
+            return false
+          }
+          if (!raw.includes('# 结论')) {
+            errors.push(`「原文」面里该看到字面量「# 结论」，实际是「${raw.slice(0, 40)}」`)
+            return false
+          }
+          return true
+        })()
+
+        facts['chat.fileViewerFrameNotSameOrigin'] = await (async () => {
+          if (!(await fvOpenFile('page.html'))) return false
+          const frame = d().querySelector('iframe[data-file-frame]')
+          if (!frame) {
+            errors.push('HTML 文件的「渲染」面里没有 iframe')
+            await fvClose()
+            return false
+          }
+          const sandbox = frame.getAttribute('sandbox') ?? ''
+          // ★★ 直接读属性：安全这条不许靠"我们记得没放宽"
+          if (sandbox.includes('allow-same-origin')) {
+            errors.push('iframe 被放宽了：带上了 allow-same-origin（agent 写的页面就能调这个 daemon 的接口了）')
+            await fvClose()
+            return false
+          }
+          if (!sandbox.includes('allow-scripts')) {
+            errors.push(`iframe 没允许脚本，产出是画布页时点开会是一片空白（实际 sandbox=「${sandbox}」）`)
+            await fvClose()
+            return false
+          }
+          /**
+           * ★ 再量一条**行为**上的证据：父页面**读不到** iframe 里的 document。
+           *   这不只是"读不到"，它正是不透明源的意思——agent 写的页面拿不到
+           *   这个源的任何东西。
+           */
+          let childReadable = true
+          try {
+            childReadable = frame.contentDocument !== null && frame.contentDocument !== undefined
+          } catch {
+            childReadable = false
+          }
+          await fvClose()
+          if (childReadable) {
+            errors.push('父页面能读到 iframe 里的 document——那说明它不是不透明源')
+            return false
+          }
+          return true
+        })()
+
+        facts['chat.fileViewerBinaryIsHex'] = await (async () => {
+          if (!(await fvOpenFile('blob.bin'))) return false
+          const hex = d().querySelector('pre[data-hex]')?.textContent ?? ''
+          const hasRawText = d().querySelector('.fv-pre[data-raw-text]') !== null
+          const notice = text(d().querySelector('.fv-note'))
+          await fvClose()
+          if (hasRawText) {
+            errors.push('二进制文件被当文本渲染了（那会是一屏替换字符）')
+            return false
+          }
+          if (!hex.includes('50 4b 03 04')) {
+            errors.push(`十六进制里看不到夹具的字节（量到的是「${hex.slice(0, 40)}」）`)
+            return false
+          }
+          return notice.length > 0
+        })()
+
+        facts['chat.fileViewerTooBigNoHighlight'] = await (async () => {
+          if (!(await fvOpenFile('big.py'))) return false
+          const text_ = d().querySelector('.fv-pre[data-plain-text]')?.textContent ?? ''
+          const highlighted = d().querySelector('.fv-pre .hljs-keyword, .fv-pre .hljs-string') !== null
+          const note = text(d().querySelector('.fv-note'))
+          await fvClose()
+          if (highlighted) {
+            errors.push('超大源码文件仍然被高亮了——那一屏会把页面卡住')
+            return false
+          }
+          if (text_.length < 200000) {
+            errors.push(`超大文件的原文不完整（只有 ${text_.length} 字符）`)
+            return false
+          }
+          return note.includes('太大')
+        })()
+
+        facts['chat.filesHiddenInDraft'] = await (async () => {
+          // 草稿态：还没有对话，也就还没有目录 ⇒ 不画那一栏
+          //
+          // ⚠️ 2026-09 顶栏改版：「新对话」从**左栏头部**搬到了顶栏里、紧跟着页名（它是整页
+          //    的主线动作，不是左栏的动作）。量点跟着搬，判据没变——仍然是
+          //    "点它一下进入起草态"。
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            text(b).trim().startsWith('新对话'),
+          )
+          if (!newBtn) {
+            errors.push('顶栏找不到「新对话」按钮——这一条量不到')
+            return false
+          }
+          click(newBtn)
+          await wait(500)
+          const stillThere = chatFilesPanel() !== null
+          if (stillThere) {
+            errors.push('草稿态下那一栏还在——那时还没有对话，也就还没有目录')
+          }
+          return !stillThere
+        })()
+
+        /**
+         * ★ 旧 daemon：没有 `conversation-files` ⇒ 那一栏要**说明原因**，而不是
+         * 让它去撞 404 再把失败画成骨架屏——任务页那边正是这么撞过一次，
+         * 表现是"取不到"和"还在加载"长得一模一样。
+         */
+        facts['chat.filesUnsupportedOnOldDaemon'] = await (async () => {
+          const real = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (!String(url).includes('/api/identity')) {
+              return real.call(f.contentWindow, input, init)
+            }
+            return real.call(f.contentWindow, input, init).then(async (res) => {
+              const body = await res.json().catch(() => null)
+              if (!body) return res
+              body.capabilities = (body.capabilities ?? []).filter(
+                (c) => c !== 'conversation-files',
+              )
+              return new Response(JSON.stringify(body), {
+                status: res.status,
+                headers: { 'content-type': 'application/json' },
+              })
+            })
+          }
+          let out = false
+          try {
+            await chatReloadIdentity()
+            if (!(await chatOpenFixtureConversation())) return false
+            if (!(await chatFilesOpenIt())) return false
+            const hint = text(chatFilesPanel()?.querySelector('[data-files-need-restart]'))
+            if (!hint.includes('重启')) {
+              errors.push(`旧 daemon 上那一栏没说明原因（量到的是「${hint}」）`)
+              return false
+            }
+            out = chatFilesRows().length === 0
+            if (!out) errors.push('旧 daemon 上那一栏不该真的去列文件')
+          } finally {
+            f.contentWindow.fetch = real
+            await chatReloadIdentity()
+          }
+          return out
+        })()
 
         // ══════════════ 新建任务：至少不崩 ══════════════
         f.contentWindow.location.hash = '#/new'

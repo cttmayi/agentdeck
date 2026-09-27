@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { ToolManifest, type Tool } from '@alpha-helper/protocol'
+import { ToolManifest, type Tool } from '@agentdeck/protocol'
 import {
   MAX_DEPTH,
   MAX_FILES,
@@ -180,7 +180,7 @@ export function buildToolPackage(input: {
     throw new ToolSourceError(
       'missing_entry',
       `清单里声明的入口文件不在包里：${missing.map((m) => `${m.path}（${m.action}）`).join('、')}`,
-      `${describeDir(Object.keys(files))}\n入口是**相对包根**的路径（例如 scripts/run.mjs），且必须是包里的真实文件。`,
+      `${describeDir(Object.keys(files))}\n入口是相对包根的路径（例如 scripts/run.mjs），且必须是包里的真实文件。`,
     )
   }
 
@@ -235,7 +235,7 @@ export async function resolveLocalToolPath(
       throw new ToolSourceError(
         'not_a_directory',
         `这是一个文件，不是工具包目录：${expanded}`,
-        `工具包是一个**目录**，里面至少要有 ${MANIFEST_FILE}。`,
+        `工具包是一个目录，里面至少要有 ${MANIFEST_FILE}。`,
       )
     }
     dir = dirname(expanded)

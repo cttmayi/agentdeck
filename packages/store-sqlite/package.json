@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/store-sqlite",
+  "name": "@agentdeck/store-sqlite",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@alpha-helper/domain": "workspace:*",
-    "@alpha-helper/protocol": "workspace:*"
+    "@agentdeck/domain": "workspace:*",
+    "@agentdeck/protocol": "workspace:*"
   }
 }

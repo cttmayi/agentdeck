@@ -1,4 +1,4 @@
-import type { PluginCapability } from '@alpha-helper/protocol'
+import type { PluginCapability } from '@agentdeck/protocol'
 
 export type { PluginCapability }
 

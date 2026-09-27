@@ -1,4 +1,4 @@
-import { ulid } from '@alpha-helper/protocol'
+import { ulid } from '@agentdeck/protocol'
 
 /**
  * 对外 MCP server（M4、FR-INTEG-01）。
@@ -277,7 +277,7 @@ export async function handleRequest(
         result: {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: 'alpha-helper', version: '0.1.0' },
+          serverInfo: { name: 'agentdeck', version: '0.1.0' },
         },
       }
 

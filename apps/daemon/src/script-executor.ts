@@ -1,7 +1,7 @@
 import { spawn as spawnChildProcess, type ChildProcess } from 'node:child_process'
 import { access, constants, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import type { ToolRuntime } from '@alpha-helper/protocol'
+import type { ToolRuntime } from '@agentdeck/protocol'
 
 /**
  * 工具脚本执行器（D40）：把第三方工具包里的脚本**跑起来**。
@@ -248,7 +248,7 @@ function killProcessTree(child: ChildProcess): void {
  * 为什么不把 daemon 的环境原样传下去
  * ══════════════════════════════════════════════════════════════════
  *
- * daemon 的环境里有密钥（`ALPHA_HELPER_GITHUB_TOKEN` 之类），还有
+ * daemon 的环境里有密钥（`AGENTDECK_GITHUB_TOKEN` 之类），还有
  * `NODE_OPTIONS`（它是 `--require` 任意模块的入口）。第三方脚本是**你不完全
  * 了解的代码**，把整份环境递过去等于把密钥递给它，而且是无声的。
  *

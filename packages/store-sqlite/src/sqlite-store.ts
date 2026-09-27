@@ -14,7 +14,7 @@ import {
   type RunPatch,
   type RunQuery,
   type Store,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
 import type {
   Action,
   ActionId,
@@ -24,7 +24,10 @@ import type {
   Artifact,
   AuditRecord,
   BlobRef,
+  ChatTurn,
   Comment,
+  Conversation,
+  ConversationId,
   Device,
   InboxItem,
   Issue,
@@ -44,12 +47,12 @@ import type {
   VerdictStatus,
   Workspace,
   WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 
 /**
  * SQLite 存储适配器 —— `Store` 端口的 v2 实现（`node:sqlite`）。
  *
- * 与 `@alpha-helper/store-file` 的**行为契约完全一致**：同一个端口，
+ * 与 `@agentdeck/store-file` 的**行为契约完全一致**：同一个端口，
  * 换一种存储。领域层不需要知道底下是文件还是数据库，这正是端口存在的理由
  * （FR-STOR-03）。`port-thinness.test.ts` 里跑了一份差分测试，把同一串操作
  * 分别在两个适配器上执行并逐项对比结果。
@@ -176,6 +179,15 @@ const ENTITY_TABLES = [
   'tool',
   'issue',
   'comment',
+  /**
+   * 聊天（闭环的旁路）。与文件适配器的 `COLLECTIONS` 同序摆放：两者一起加，
+   * 因为 `chat_turn` 离开 `conversation` 没有意义。
+   *
+   * ⚠️ 表名用下划线（`chat_turn`），文件适配器那边叫 `chat-turn`——那是**日志
+   *    文件名**，这里是 SQL 标识符，两者不必同名（同 `run_message` 的先例）。
+   */
+  'conversation',
+  'chat_turn',
   'run',
   'verdict',
   'action',
@@ -275,6 +287,56 @@ const SCHEMA = [
      created_at INTEGER GENERATED ALWAYS AS (json_extract(json, '$.createdAt')) VIRTUAL
    )`,
   `CREATE INDEX IF NOT EXISTS comment_issue ON comment(issue_id, created_at)`,
+
+  /**
+   * ── 聊天：conversation 与 chat_turn ──
+   *
+   * ★ `sort_at` 这一列是本组的关键：列表按 `lastTurnAt ?? createdAt` 倒序，
+   *   而 `ORDER BY COALESCE(last_turn_at, created_at)` 这种**表达式**用不上
+   *   建在单列上的索引。把合并后的排序键落成一个虚拟生成列，索引才真的能
+   *   服务这条排序（虚拟生成列照样可建索引，见文件头第 1 条取舍）。
+   *
+   * ⚠️ 用 `lastTurnAt` 而不是 `updatedAt` 当排序键：改个标题不该把对话顶到
+   *    最前面。排序键的语义是**领域层的决定**，适配器只负责照做。
+   *
+   * `id` 作为 ORDER BY 的第二关键字（倒序）不是装饰：两个对话可能是同一毫秒
+   * 建的，不兜底排序就不稳定。索引里把 `id DESC` 也写上，让这条排序整个由
+   * 索引承担。
+   */
+  `CREATE TABLE IF NOT EXISTS conversation (
+     id TEXT PRIMARY KEY,
+     workspace_id TEXT NOT NULL,
+     json TEXT NOT NULL,
+     sort_at INTEGER GENERATED ALWAYS AS (
+       COALESCE(json_extract(json, '$.lastTurnAt'), json_extract(json, '$.createdAt'))
+     ) VIRTUAL
+   )`,
+  `CREATE INDEX IF NOT EXISTS conversation_workspace_recent
+     ON conversation(workspace_id, sort_at DESC, id DESC)`,
+
+  /**
+   * 回合表。`seq` 是"使用者眼里的第几轮"，排序与"最后一条带 run 的"都看它。
+   *
+   * ★ 这里**故意不建 `(conversation_id, seq)` 唯一约束**：端口的语义是"追加"，
+   *   文件适配器允许同一个 `seq` 追加两条（读取时按 seq 稳定排序、两条都返回）。
+   *   加唯一约束会把"调用方给重了 seq"从一个调用方 bug 升级成存储报错，
+   *   那是行为改变——与 `run_message` 的 seq 同一条理由。
+   */
+  `CREATE TABLE IF NOT EXISTS chat_turn (
+     id TEXT PRIMARY KEY,
+     workspace_id TEXT NOT NULL,
+     json TEXT NOT NULL,
+     conversation_id TEXT GENERATED ALWAYS AS (json_extract(json, '$.conversationId')) VIRTUAL,
+     seq INTEGER GENERATED ALWAYS AS (json_extract(json, '$.seq')) VIRTUAL,
+     run_id TEXT GENERATED ALWAYS AS (json_extract(json, '$.runId')) VIRTUAL
+   )`,
+  `CREATE INDEX IF NOT EXISTS chat_turn_conversation_seq ON chat_turn(conversation_id, seq)`,
+  /**
+   * `lastChatTurnWithRun` 走的是"这个对话里 `run_id` 非空、seq 最大"那条，
+   * 所以索引把 `run_id` 放在 `seq` **前面**：过滤先于排序，扫描量从"整个对话
+   * 的轮次"降到"有 run 的那几轮"。一个对话几百轮时这不是小事。
+   */
+  `CREATE INDEX IF NOT EXISTS chat_turn_with_run ON chat_turn(conversation_id, run_id, seq)`,
 
   /**
    * ★ report 的去重键必须是**数据库**层的唯一约束。
@@ -517,6 +579,72 @@ const NAMED_SQL = {
   actionsByVerdict: `SELECT json FROM action WHERE verdict_id = ? ORDER BY created_at, rowid`,
   artifactsByRun: `SELECT json FROM artifact WHERE run_id = ? ORDER BY created_at, rowid`,
   auditsByRun: `SELECT json FROM audit WHERE run_id = ? ORDER BY queued_at, rowid`,
+
+  // ── Conversation 与 ChatTurn（聊天）──
+
+  /**
+   * 列表：`sort_at` 就是 `lastTurnAt ?? createdAt`（见建表处），倒序。
+   *
+   * `id DESC` 是**同键兜底**，不是可有可无的：两个对话同一毫秒建的（或同一
+   * 毫秒说过话的）若不兜底，顺序就由扫描顺序决定，使用者会以为顺序有含义。
+   *
+   * ⚠️ 一处**已知且不可达**的差异，与上面 `issueList` 那条同源：`id DESC` 用的
+   *    是 SQLite 的 BINARY 排序规则（UTF-8 字节序），文件适配器比的是 JS 的
+   *    UTF-16 代码单元。两者只在 id 含 U+FFFF 以上的字符（星平面）时相反。
+   *    端口的 id 是 ULID（ASCII），此时两种序完全一致；不为了对齐 UTF-16 去
+   *    存一列手工算出来的排序键——那是本文件开头反对的"双份真相"。
+   */
+  conversationList: `SELECT json FROM conversation
+     WHERE workspace_id = ?
+     ORDER BY sort_at DESC, id DESC`,
+
+  /**
+   * 回合列表：按 `seq` **升序**，同 seq 时按插入顺序（rowid）。
+   *
+   * 不按时间排：同一个时间戳下连着两轮时，时间分不出先后。文件适配器那边是
+   * JS 的 `Array#sort`（ES2019 起稳定），稳定的语义正是"同 seq 保持写入顺序"，
+   * 所以这里补 `rowid` 才能逐项对上。
+   */
+  chatTurnsByConversation: `SELECT json FROM chat_turn
+     WHERE conversation_id = ?
+     ORDER BY seq, rowid`,
+
+  /**
+   * "上一轮是谁"：`seq` 最大的那条**带 run 的**轮次。
+   *
+   * ★ 不能写成"取最后一条，如果它没 run 就返回 null"：最后一轮可能因为没抢到
+   *   并发槽位而没有 run（那是合法状态），此时要往回**再找一条**，否则聊天会
+   *   莫名其妙丢掉上文。`seq DESC, rowid DESC` 与文件适配器"从后往前走，
+   *   返回第一条 runId 非空的"逐项等价。
+   *
+   * `run_id <> ''` 不是多余的：文件适配器写的是 `if (t.runId)`，那是**真假值**
+   * 判断，空字符串在那边是假值。`RunId` 的 schema 是 `z.string()`（没有 `.min(1)`），
+   * 所以 `''` 在类型上是个合法值——不写这一条，两种存储对同一条记录会给出
+   * 不同的答案。真实 ULID 永远非空，这条是给"类型允许"兜底。
+   */
+  chatTurnLastWithRun: `SELECT json FROM chat_turn
+     WHERE conversation_id = ? AND run_id IS NOT NULL AND run_id <> ''
+     ORDER BY seq DESC, rowid DESC
+     LIMIT 1`,
+
+  /**
+   * 删对话时**连带删掉它的轮次**。
+   *
+   * ★ 顺序不能反（先轮次、后对话）。中途失败时，留下的若是"指向不存在对话的
+   *   轮次"，那些记录**没有任何入口能看见**（轮次列表按对话走），却会在下次
+   *   "我到底说了什么"的时候对不上——看不见的脏数据比看得见的报错难查得多。
+   *
+   * ⚠️ 带上 `workspace_id`，而不是只按 `conversationId` 删：文件适配器是在
+   *   **找到那个对话的 workspace** 里遍历轮次再删的，所以一条 `workspace_id`
+   *   与对话不一致的轮次（写入路径不会产生这种数据）两边都会留下。
+   *   "顺手删得更干净"在这里是错的——两个适配器对同一串操作必须给出同样的结果。
+   *
+   * 那条 run **留着**：它是审计记录（成本、日志、工作目录的归属都挂在它身上），
+   * 而且它的产出与聊天记录是同一份东西——删掉 run 等于把"这次对话真的发生过"
+   * 一起删了。端口文档里也是这么写的。
+   */
+  chatTurnsDeleteByConversation: `DELETE FROM chat_turn
+     WHERE workspace_id = ? AND conversation_id = ?`,
 
   skillsByIds: `SELECT json FROM skill
      WHERE id IN (SELECT value FROM json_each(?))
@@ -983,6 +1111,118 @@ export class SqliteStore implements Store {
 
   async insertComment(comment: Comment): Promise<void> {
     this.#putEntity('comment', comment.id as string, comment.workspaceId, comment)
+  }
+
+  // ── Conversation 与 ChatTurn（聊天）──
+
+  async getConversation(id: ConversationId): Promise<Conversation | null> {
+    /**
+     * 按 id 直接取，**不带 workspace_id**：文件适配器的 `getConversation` 是
+     * 遍历所有 workspace 的内存索引找个遍（它不知道调用方想问哪个空间）。
+     * id 是 ULID、全局唯一，所以"全局按 id 取一条"与那个遍历逐项等价。
+     */
+    return this.#getEntity<Conversation>('conversation', id as string)
+  }
+
+  async listConversations(workspaceId: WorkspaceId): Promise<Conversation[]> {
+    const rows = this.#named('conversationList').all(workspaceId as string) as { json: string }[]
+    return rows.map((r) => JSON.parse(r.json) as Conversation)
+  }
+
+  async insertConversation(conversation: Conversation): Promise<void> {
+    this.#putEntity(
+      'conversation',
+      conversation.id as string,
+      conversation.workspaceId,
+      conversation,
+    )
+  }
+
+  /**
+   * ★ 找不到时返回 `null`——不是抛错，也不是静默成功。
+   *
+   * 这一条是端口明确要求的，也是最容易写歪的地方：`UPDATE ... WHERE id = ?`
+   * 在零行匹配时**什么都不说**，把它当成功返回会让调用方以为改名生效了。
+   * 所以这里是"先读、没有就 null、有才写"，与文件适配器同构。
+   *
+   * ⚠️ 读与写之间**不能出现 `await`**（本文件所有方法体都守着这条，见文件头
+   *    第 2 条取舍）：`DatabaseSync` 是同步的，一个方法体里不 await，进程内就
+   *    不可能有另一个调用插进来改掉这条记录。
+   *
+   * patch 的合并是**原样的** `{ ...cur, ...patch }`，**不做 `pruneUndefined`**：
+   * 这一点与 `transition*` 那四个方法刻意不同，因为文件适配器的
+   * `updateConversation` 就是这么写的（那边只有 `transition*` 才 prune）。
+   * 两边都保留"patch 里显式传 `undefined` ⇒ 该字段从落盘的 JSON 里消失"这个
+   * 行为，免得同一个调用在两个适配器上得到不同的记录。
+   */
+  async updateConversation(
+    id: ConversationId,
+    patch: Partial<
+      Pick<Conversation, 'title' | 'workDir' | 'updatedAt' | 'lastTurnAt' | 'turnCount'>
+    >,
+  ): Promise<Conversation | null> {
+    const cur = this.#getEntity<Conversation>('conversation', id as string)
+    if (!cur) return null
+    const next = { ...cur, ...patch } as Conversation
+    /**
+     * 写回的 `workspace_id` 取 **`cur`** 的那个，不是 `next` 的。
+     *
+     * patch 的类型里没有 `workspaceId`，所以正常路径上两者相同。但万一运行时
+     * 真塞进来一个（类型管不住 `as` 出来的对象），文件适配器是把记录留在**原来
+     * 那个 workspace 的日志**里的——`listConversations` 仍然按原 workspace 列得
+     * 到它。用 `cur.workspaceId` 才是同一个结果；用 `next` 的会让它从原
+     * workspace 的列表里凭空消失，而新 workspace 里也查不到（`get` 是按 id 的）。
+     */
+    this.#putEntity('conversation', id as string, cur.workspaceId, next)
+    return next
+  }
+
+  /**
+   * 这个对话的回合，按 `seq` 升序。
+   *
+   * 签名里**没有 workspaceId**（端口就是这么定的）：`conversationId` 唯一确定
+   * 一个对话，再要一个 workspace 只会多出一个可以对不上的参数。
+   */
+  async listChatTurns(conversationId: ConversationId): Promise<ChatTurn[]> {
+    const rows = this.#named('chatTurnsByConversation').all(conversationId as string) as {
+      json: string
+    }[]
+    return rows.map((r) => JSON.parse(r.json) as ChatTurn)
+  }
+
+  async insertChatTurn(turn: ChatTurn): Promise<void> {
+    this.#putEntity('chat_turn', turn.id as string, turn.workspaceId, turn)
+  }
+
+  async lastChatTurnWithRun(conversationId: ConversationId): Promise<ChatTurn | null> {
+    return this.#parse<ChatTurn>(
+      this.#named('chatTurnLastWithRun').get(conversationId as string) as
+        | { json: string }
+        | undefined,
+    )
+  }
+
+  /**
+   * ★ 返回"真的删到了没有"，**不抛**。
+   *
+   * 本来就不在 ⇒ `false`（不是错误）：调用方按 id 删两次是合法的，第二次的
+   * 正确答案是"没有可删的东西"，而不是一条异常。与 `deleteSkill` /
+   * `deleteTool` 的语义一致。
+   *
+   * 先读一次再删，是为了对齐文件适配器里一条不显眼但真实的规则：**对话不存在
+   * 时，它的轮次也不动**。文件适配器的实现是"找到对话才进那段删除逻辑"，
+   * 所以一条没有对话的孤儿轮次不会被这里顺手删掉。若图省事写成"无条件按
+   * conversation_id 删轮次 + 删对话"，返回值就对不上了（`false` 却删了东西）。
+   *
+   * 轮次与对话**都在同一个方法体内同步删完**，中间没有 `await`（见文件头第 2
+   * 条取舍），所以不存在"删了一半"这种能被另一个调用观察到的中间态。
+   */
+  async deleteConversation(id: ConversationId): Promise<boolean> {
+    const cur = this.#getEntity<Conversation>('conversation', id as string)
+    if (!cur) return false
+    this.#named('chatTurnsDeleteByConversation').run(cur.workspaceId as string, id as string)
+    this.#stmt('del:conversation').run(id as string)
+    return true
   }
 
   // ── Report ──

@@ -1,13 +1,13 @@
 import { z } from 'zod'
 import { createHash } from 'node:crypto'
-import { routeReportToReviewers, type Store } from '@alpha-helper/domain'
+import { routeReportToReviewers, type Store } from '@agentdeck/domain'
 import {
   ulid,
   type Agent,
   type InboxItem,
   type Report,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 
 /**
  * Report 摄取（FR-REPORT-01~05、D14）。

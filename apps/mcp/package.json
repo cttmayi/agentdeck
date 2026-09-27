@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/mcp",
+  "name": "@agentdeck/mcp",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -8,9 +8,9 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "alpha-helper-mcp": "./src/cli.ts"
+    "agentdeck-mcp": "./src/cli.ts"
   },
   "dependencies": {
-    "@alpha-helper/protocol": "workspace:*"
+    "@agentdeck/protocol": "workspace:*"
   }
 }

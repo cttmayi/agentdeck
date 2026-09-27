@@ -1,4 +1,4 @@
-import type { RunId } from '@alpha-helper/protocol'
+import type { RunId } from '@agentdeck/protocol'
 
 /**
  * 工作目录锁（D20 —— 同一目录串行化）。

@@ -11,24 +11,49 @@ import {
 } from './runtime-table.ts'
 
 describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填空题）', () => {
-  test('★ 表里有两行：claude 与第二个 runtime（"填空"这件事真的被做过一次）', () => {
+  test('★ 表里有三行：claude、generic 与 codex（service 形状）', () => {
     // 这条断言首版写的是 `['claude']`，第二个适配器落地时它**故意失败了一次**——
     // 那正是"填空题"想要的效果：改一行数据，就有一处守卫提醒你表变了。
-    assert.deepEqual(knownRuntimeKeys().sort(), ['claude', 'generic'])
+    // 现在第三行（codex）是 **service 形状**，cli-only 字段对它不适用（见下）。
+    assert.deepEqual(knownRuntimeKeys().sort(), ['claude', 'codex', 'generic'])
 
     for (const key of knownRuntimeKeys()) {
       const d = RUNTIMES[key]!
       // 一个新 runtime 要回答的问题永远同样几个
+      assert.ok(d.kind === 'cli' || d.kind === 'service', '每个 runtime 都要声明形状')
       assert.ok(d.skills, '技能怎么投递：目录，或者明确"没有这个机制"')
-      assert.ok(d.managedFlags?.model && d.managedFlags.maxTurns, '受管旗标必须逐条声明')
       assert.ok(d.toolConfig)
       assert.ok(d.disableSwitch)
-      assert.ok(d.resume.flag)
       assert.ok(d.protocol)
       assert.ok(d.family, '协议族决定用哪个解析器读输出')
       assert.ok(d.evidence, '证据等级：未验证的 runtime 不得冒充已验证')
-      assert.ok(d.promptDelivery, 'prompt 怎么送进去也是一条数据')
+      assert.ok(d.baseArgs.length > 0, 'baseArgs：cli 是协议参数，service 是启动参数——都必须非空')
+
+      if (d.kind === 'cli') {
+        assert.ok(d.managedFlags?.model && d.managedFlags.maxTurns, '受管旗标必须逐条声明（cli）')
+        assert.ok(d.resume?.flag, '会话恢复旗标必须声明（cli）')
+        assert.ok(d.promptDelivery, 'prompt 怎么送进去也是一条数据（cli）')
+      } else {
+        // service 形状：cli-only 字段**不填**——填占位值就是撒谎（见 kind 的说明）
+        assert.equal(d.managedFlags, undefined, 'service 没有 run 级 argv，不得填受管旗标')
+        assert.equal(d.resume, undefined, 'service 走协议恢复（如 thread/resume），不得填旗标')
+        assert.equal(d.promptDelivery, undefined, 'service 走协议 input，不得填投递方式')
+      }
     }
+  })
+
+  test('★ codex 是 service 形状的表行（设计稿 §6 的关键取值）', () => {
+    const codex = RUNTIMES['codex']!
+    assert.equal(codex.kind, 'service')
+    assert.equal(codex.protocol, 'jsonrpc')
+    assert.equal(codex.family, 'codex-app-server-jsonrpc')
+    assert.equal(codex.sessionState, 'stateful')
+    assert.equal(codex.systemPrompt, null, 'app-server 没有系统提示参数 ⇒ B 档')
+    assert.deepEqual([...codex.baseArgs], ['app-server', '--stdio'], 'baseArgs 是启动参数')
+    assert.deepEqual(codex.skills, { kind: 'directory', dir: '.codex/skills' })
+    assert.equal(codex.evidence, 'verified')
+    assert.deepEqual([...codex.versions!.verifiedWith], ['0.144.0-alpha.4', '0.157.1'], '实测过的版本要如实填')
+    assert.equal(codex.versions!.range, '>=0.144.0-alpha.4 <0.158.0')
   })
 
   test('★ 两个 runtime 的答案不得处处相同（否则等于没填）', () => {
@@ -36,7 +61,7 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
     const other = RUNTIMES['generic']!
     assert.notEqual(other.skills.kind, claude.skills.kind)
     assert.notEqual(other.family, claude.family)
-    assert.notEqual(other.resume.flag, claude.resume.flag)
+    assert.notEqual(other.resume?.flag, claude.resume?.flag)
     assert.notDeepEqual([...other.baseArgs], [...claude.baseArgs])
   })
 

@@ -381,7 +381,6 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
             runtimeKey: 'generic',
             // D37/D38：审核者靠**自己带的标准**审，不再靠挂 skill
             reviewStandard: {
-              name: '夹具标准',
               body: '# 夹具\n\n只看一件事。',
             },
             // D40 收口：动作权限在 **agent** 上（不再是标准里那个字段）

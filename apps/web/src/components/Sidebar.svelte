@@ -2,7 +2,7 @@
   import { view, go, VIEWS, openDrawer } from '../lib/view.ts'
   import { identity, syncStatus } from '../lib/stores.ts'
   import { t } from '../lib/i18n.ts'
-  import type { WebTextId } from '@alpha-helper/i18n'
+  import type { WebTextId } from '@agentdeck/i18n'
 
   /**
    * 侧边栏导航。
@@ -30,6 +30,7 @@
     title: WebTextId
     hint: WebTextId
   }> = [
+    { id: 'chat', title: 'shell.navChat', hint: 'shell.navChatHint' },
     { id: 'new', title: 'shell.navNewTask', hint: 'shell.navNewTaskHint' },
     { id: 'tasks', title: 'shell.navTasks', hint: 'shell.navTasksHint' },
     { id: 'agents', title: 'shell.navAgents', hint: 'shell.navAgentsHint' },

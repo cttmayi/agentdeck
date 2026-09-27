@@ -4,7 +4,7 @@ import {
   type PromptDelivery,
   type RuntimeDescriptor,
   type RuntimeEvidence,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 
 /**
  * 第二个 runtime 的描述符（FR-CLI-47 的填空作业）。

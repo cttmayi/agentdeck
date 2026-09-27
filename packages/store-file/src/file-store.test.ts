@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { IllegalTransitionError } from '@alpha-helper/domain'
+import { IllegalTransitionError } from '@agentdeck/domain'
 import {
   agentId,
   issueId,
@@ -14,8 +14,8 @@ import {
   runId,
   toolId,
   wsId,
-} from '@alpha-helper/domain/testing'
-import type { ActionId, RunId, VerdictId } from '@alpha-helper/protocol'
+} from '@agentdeck/domain/testing'
+import type { ActionId, RunId, VerdictId } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -27,7 +27,7 @@ const WS = wsId('ws-1')
 before(async () => {
   dir = await makeTempDir('store')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '默认', createdAt: Date.now(), updatedAt: Date.now() })
 })
 
 after(async () => {
@@ -54,7 +54,7 @@ describe('基本 CRUD 与持久化', () => {
     const reopenDir = await makeTempDir('reopen')
     try {
       const a = await FileStore.open({ dataDir: reopenDir, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertAgent(makeAgent({ id: 'persist-me', workspaceId: WS }))
       await a.close()
 
@@ -70,7 +70,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('page')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (let i = 0; i < 5; i++) {
         await s.insertIssue(makeIssue({ id: `issue-${i}`, workspaceId: WS }))
       }
@@ -96,7 +96,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('cursor-gone')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       // id 有序，于是排序 = id 升序，翻页位置是可预期的
       for (const id of ['a', 'b', 'c', 'd', 'e']) {
         await s.insertIssue(makeIssue({ id, workspaceId: WS }))
@@ -140,7 +140,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('cursor-junk')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (const id of ['a', 'b', 'c']) {
         await s.insertIssue(makeIssue({ id, workspaceId: WS }))
       }
@@ -163,7 +163,7 @@ describe('基本 CRUD 与持久化', () => {
     const d = await makeTempDir('query')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertIssue(makeIssue({ id: 'i-a', workspaceId: WS, title: '依赖漏洞', status: 'todo' }))
       await s.insertIssue(makeIssue({ id: 'i-b', workspaceId: WS, title: '文档错别字', status: 'done' }))
 
@@ -402,7 +402,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({ id: 'r-hold', workspaceId: WS, agentId: 'a1', status: 'running', workDir: '/repo' }),
       )
@@ -424,7 +424,7 @@ describe('工作目录串行化（D20）', () => {
     const d = await makeTempDir('workdir2')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({ id: 'r-done', workspaceId: WS, agentId: 'a1', status: 'completed', workDir: '/repo' }),
       )
@@ -441,7 +441,7 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
     const d = await makeTempDir('selfrace')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await s.insertRun(
         makeRun({
           id: 'r1',
@@ -480,7 +480,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const r1 = makeReport({ id: 'rep-1', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
       const r2 = makeReport({ id: 'rep-2', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
@@ -502,7 +502,7 @@ describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）'
     const d = await makeTempDir('dedup2')
     try {
       const a = await FileStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertReport(
         makeReport({ id: 'rep-x', workspaceId: WS, kind: 'k', dedupKey: 'dup-key' }),
       )
@@ -528,7 +528,7 @@ describe('动作幂等键（FR-ACTION-03）', () => {
     const d = await makeTempDir('idem')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
 
       const action = {
         id: 'act-1' as ActionId,
@@ -566,7 +566,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     const d = await makeTempDir('messages')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-msg')
       await s.insertRun(makeRun({ id: 'r-msg', workspaceId: WS, agentId: 'a1' }))
 
@@ -600,7 +600,7 @@ describe('消息流（FR-BRIDGE-18）', () => {
     try {
       const rid = runId('r-msg2')
       const a = await FileStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertRun(makeRun({ id: 'r-msg2', workspaceId: WS, agentId: 'a1' }))
       await a.appendRunMessage(rid, {
         seq: 7,
@@ -670,7 +670,7 @@ describe('审计链（FR-AUDIT-01）', () => {
     const d = await makeTempDir('audit')
     try {
       const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       const rid = runId('r-audit')
       await s.insertRun(makeRun({ id: 'r-audit', workspaceId: WS, agentId: 'a1' }))
 
@@ -716,7 +716,7 @@ describe('压缩（compaction）', () => {
     const d = await makeTempDir('compact')
     try {
       const a = await FileStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       for (let i = 0; i < 5; i++) {
         await a.insertIssue(makeIssue({ id: `ci-${i}`, workspaceId: WS }))
       }
@@ -742,7 +742,7 @@ describe('压缩（compaction）', () => {
     const d = await makeTempDir('compact2')
     try {
       const a = await FileStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
       await a.insertIssue(makeIssue({ id: 'before', workspaceId: WS }))
       await a.compact()
       await a.insertIssue(makeIssue({ id: 'after', workspaceId: WS }))

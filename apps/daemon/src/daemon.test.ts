@@ -6,7 +6,7 @@ import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { Semaphore } from './semaphore.ts'
 import { WorkDirLocks } from './workdir-locks.ts'
 import { parseCliArgs, DEFAULT_PORT } from './cli.ts'
-import type { RunId, RunMessage } from '@alpha-helper/protocol'
+import type { RunId, RunMessage } from '@agentdeck/protocol'
 
 const addr = (port: number): AddressInfo => ({
   address: '127.0.0.1',

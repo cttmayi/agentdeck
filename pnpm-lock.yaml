@@ -14,54 +14,60 @@ importers:
 
   apps/cli:
     dependencies:
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
 
   apps/daemon:
     dependencies:
-      '@alpha-helper/agent-claude':
+      '@agentdeck/agent-claude':
         specifier: workspace:*
         version: link:../../packages/agent-claude
-      '@alpha-helper/agent-core':
+      '@agentdeck/agent-codex':
+        specifier: workspace:*
+        version: link:../../packages/agent-codex
+      '@agentdeck/agent-core':
         specifier: workspace:*
         version: link:../../packages/agent-core
-      '@alpha-helper/agent-generic':
+      '@agentdeck/agent-generic':
         specifier: workspace:*
         version: link:../../packages/agent-generic
-      '@alpha-helper/domain':
+      '@agentdeck/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@alpha-helper/i18n':
+      '@agentdeck/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@alpha-helper/store-file':
+      '@agentdeck/store-file':
         specifier: workspace:*
         version: link:../../packages/store-file
-      '@alpha-helper/web':
+      '@agentdeck/web':
         specifier: workspace:*
         version: link:../web
 
   apps/mcp:
     dependencies:
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
 
   apps/remote:
     dependencies:
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
 
   apps/web:
     dependencies:
-      '@alpha-helper/i18n':
+      '@agentdeck/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      highlight.js:
+        specifier: ^11.12.0
+        version: 11.12.0
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^5.0.3
@@ -81,16 +87,25 @@ importers:
 
   packages/agent-claude:
     dependencies:
-      '@alpha-helper/agent-core':
+      '@agentdeck/agent-core':
         specifier: workspace:*
         version: link:../agent-core
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/agent-codex:
+    dependencies:
+      '@agentdeck/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/agent-core:
     dependencies:
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
       mustache:
@@ -106,16 +121,16 @@ importers:
 
   packages/agent-generic:
     dependencies:
-      '@alpha-helper/agent-core':
+      '@agentdeck/agent-core':
         specifier: workspace:*
         version: link:../agent-core
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/domain:
     dependencies:
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
 
@@ -129,19 +144,19 @@ importers:
 
   packages/store-file:
     dependencies:
-      '@alpha-helper/domain':
+      '@agentdeck/domain':
         specifier: workspace:*
         version: link:../domain
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
 
   packages/store-sqlite:
     dependencies:
-      '@alpha-helper/domain':
+      '@agentdeck/domain':
         specifier: workspace:*
         version: link:../domain
-      '@alpha-helper/protocol':
+      '@agentdeck/protocol':
         specifier: workspace:*
         version: link:../protocol
 
@@ -546,6 +561,10 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  highlight.js@11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
+    engines: {node: '>=12.0.0'}
 
   is-reference@3.0.3:
     resolution: {integrity: sha512-ixkJoqQvAP88E6wLydLGGqCJsrFUnqoH6HnaczB8XmDH1oaWU+xxdptvikTgaEhtZ53Ky6YXiBuUI2WXLMCwjw==}
@@ -954,6 +973,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  highlight.js@11.12.0: {}
 
   is-reference@3.0.3:
     dependencies:

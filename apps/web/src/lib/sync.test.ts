@@ -79,7 +79,7 @@ describe('★ 上报队列：失败要暂存，且不能无限涨', () => {
   })
 
   test('队列坏掉时读出空数组，而不是抛异常', () => {
-    store.set('alpha-helper.report-queue', '{ 这不是 json')
+    store.set('agentdeck.report-queue', '{ 这不是 json')
     assert.deepEqual(sync.readQueue(), [])
     sync.clearQueue()
   })

@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { MAX_SKILL_BYTES } from '@alpha-helper/agent-core'
+import { MAX_SKILL_BYTES } from '@agentdeck/agent-core'
 
 // 转出去，好让"安装"这条链路的其它地方（接口、测试）也从这里取同一个数，
 // 而不是各自 import 一次 agent-core——两处都是同一个值，但只有一处是"来源"
@@ -53,10 +53,22 @@ export { MAX_SKILL_BYTES }
  * 技能——而那种失败发生在很久以后、离原因很远。
  */
 export const MAX_SUPPORT_FILE_BYTES = 256 * 1024
-/** 一个技能所有文件加起来的字节上限。 */
-export const MAX_TOTAL_BYTES = 1024 * 1024
-/** 文件数上限（含 SKILL.md）。 */
-export const MAX_FILES = 64
+/**
+ * 一个技能所有文件加起来的字节上限。
+ *
+ * ⚠️ 2026-10 从 1 MB 提到 8 MB：真实技能仓库（fireworks-tech-graph 那一类）是
+ * **完整仓库**——SKILL.md 在根、测试/示例/脚本照常带，实测文本部分就有 2.4 MB。
+ * 1 MB 会把它挡在门外。8 MB 仍是硬护栏：一段塞满的正文库照样会被拒。
+ */
+export const MAX_TOTAL_BYTES = 8 * 1024 * 1024
+/**
+ * 文件数上限（含 SKILL.md）。
+ *
+ * ⚠️ 2026-10 从 64 提到 512：同样因为完整仓库（上面那句的实测是 234 个文本
+ * 文件）。512 仍是硬护栏：一个塞满东西的目录照样会被拒，只是不再误伤正经的
+ * 完整仓库。
+ */
+export const MAX_FILES = 512
 /** 目录递归深度上限。 */
 export const MAX_DEPTH = 4
 /** 单次 HTTP 请求的超时。 */
@@ -324,7 +336,7 @@ export async function resolveLocalPath(
       throw new SkillSourceError(
         'not_a_directory',
         `这是一个文件，不是技能目录：${expanded}`,
-        '技能是一个**目录**，里面至少要有 SKILL.md。',
+        '技能是一个目录，里面至少要有 SKILL.md。',
       )
     }
     dir = dirname(expanded)
@@ -586,7 +598,7 @@ async function githubFetch(
   const doFetch = deps.fetchImpl ?? fetch
   const headers: Record<string, string> = {
     accept,
-    'user-agent': 'alpha-helper',
+    'user-agent': 'agentdeck',
     'x-github-api-version': '2022-11-28',
   }
   if (deps.githubToken) headers['authorization'] = `Bearer ${deps.githubToken}`
@@ -633,7 +645,7 @@ async function githubFetch(
         remaining === '0'
           ? 'GitHub 的匿名访问次数用完了（每小时 60 次）。'
           : 'GitHub 拒绝了这次请求（403/429）。',
-        '等一会儿再试，或设置环境变量 ALPHA_HELPER_GITHUB_TOKEN 用令牌提高限额。',
+        '等一会儿再试，或设置环境变量 AGENTDECK_GITHUB_TOKEN 用令牌提高限额。',
       )
     }
     return res
@@ -849,7 +861,7 @@ export async function resolveGithubUrl(
 /**
  * 远端目录那条来源。
  *
- * daemon 不向 alpha-helper 的远端服务发请求（D20），所以这条路仍然是
+ * daemon 不向 agentdeck 的远端服务发请求（D20），所以这条路仍然是
  * **页面把内容取好交过来**。但"必须有 SKILL.md"这一关一样要过：条目里的
  * `files['SKILL.md']` 优先，没有就要求 `body` 非空——`body` 的定义本来就是
  * "SKILL.md 的内容"。

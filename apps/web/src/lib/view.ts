@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store'
+import type { WebTextId } from '@agentdeck/i18n'
 
 /**
  * 视图路由。
@@ -21,8 +22,38 @@ import { writable } from 'svelte/store'
  *    所以探针里有一条量"侧边栏恰好五项、最后一项是工具"。
  */
 
-export const VIEWS = ['new', 'tasks', 'agents', 'skills', 'tools'] as const
+/**
+ * ★ 顺序 = 侧边栏顺序：聊天在最前。
+ *
+ * 它是最轻的入口——先聊清楚，再决定要不要派活。排在「新建任务」上面而不是
+ * 塞进那一页当 tab：聊天要管**多个对话**，本身就是一个完整页面（左对话列表 /
+ * 右消息流），和「任务」页是同一个形状。
+ */
+export const VIEWS = ['chat', 'new', 'tasks', 'agents', 'skills', 'tools'] as const
 export type ViewName = (typeof VIEWS)[number]
+
+/**
+ * 顶栏左侧那个页名。
+ *
+ * ★ 复用**侧栏的词条**，不另立一套：同一个页面在导航里叫什么、在顶栏上就该叫
+ *   什么。各写一份的后果是"侧栏说『任务清单』、顶栏说『任务』"，而这种不一致
+ *   没人会去查——两处都对，只是不是一件事。
+ *
+ * ⚠️ 这里的键必须与 `Sidebar.svelte` 的 `ITEMS` **逐条对上**（工具那一项的
+ *    导航词条在 `tools.ts`，不在 `shell.ts`——见那边顶部的说明）。探针里有一条
+ *    量的是"顶栏页名 == 侧栏那一项的文字"，对不上就会红。
+ *
+ * ⚠️ 映射是**穷尽**的（`satisfies Record<ViewName, TextKey>`）：加一个视图却忘了
+ *    加页名是编译错误，不会变成"顶栏那一格空着"。
+ */
+export const VIEW_TITLE_KEYS = {
+  chat: 'shell.navChat',
+  new: 'shell.navNewTask',
+  tasks: 'shell.navTasks',
+  agents: 'shell.navAgents',
+  skills: 'shell.navSkills',
+  tools: 'tools.navTitle',
+} as const satisfies Record<ViewName, WebTextId>
 
 function fromHash(): ViewName {
   const raw = location.hash.replace(/^#\/?/, '')
@@ -50,6 +81,23 @@ export const selectedIssueId = writable<string | null>(null)
  * 分成两个独立组件会在两处各写一遍表单，迟早不一致。
  */
 export const openDrawer = writable<'inbox' | 'settings' | 'remote' | null>(null)
+
+/**
+ * 「新建任务」的预填草稿 —— 聊天页通往那一页的**唯一**一条路。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么是预填，而不是直接替使用者提交
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 派活 = 决定"谁去干、谁来审、允许它做哪些动作"。这三样正是这个产品的核心判断，
+ * 而聊天没有资格替使用者做：聊天里没有判决，也就没有依据说"这些动作可以放行"。
+ * 所以桥的另一头是一个**填好的表单**，不是一个已经提交的任务。
+ *
+ * ⚠️ 用完必须清空（`NewTask.svelte` 取走之后就 `set(null)`）：留在这里的话，
+ *    下次从侧边栏点「新建任务」会莫名其妙地又出现上次那段文字——而那一刻
+ *    使用者心里想的是"新建一个空白任务"。
+ */
+export const newTaskDraft = writable<string | null>(null)
 
 /** 一闪而过的提示（操作成功/失败的一句话反馈）。 */
 export const toast = writable<string | null>(null)

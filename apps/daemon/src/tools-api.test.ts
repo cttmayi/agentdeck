@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { TOOL_MANIFEST_SCHEMA, type Tool } from '@alpha-helper/protocol'
+import { TOOL_MANIFEST_SCHEMA, type Tool } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { installToolPackage, writeToolPackage } from './testing/tool-fixture.ts'
@@ -76,14 +76,12 @@ async function call(
 /** 装一个包（两条来源走同一个接口）。 */
 const installTool = (d: DaemonHandle, body: unknown) => call(d, 'POST', '/api/tools', body)
 
-interface ListedTool extends Tool {
-  mountedBy: Array<{ id: string; name: string }>
-}
-
-async function listTools(d: DaemonHandle): Promise<ListedTool[]> {
+// ⚠️ 这里原来叫 `ListedTool`，比 `Tool` 多一个 `mountedBy`（"被哪些执行者挂载"）。
+//    挂载能力撤掉之后接口不再算它，类型也就退回了 `Tool` 本身。
+async function listTools(d: DaemonHandle): Promise<Tool[]> {
   const res = await call(d, 'GET', '/api/tools')
   assert.equal(res.status, 200)
-  return res.body['tools'] as ListedTool[]
+  return res.body['tools'] as Tool[]
 }
 
 /**
@@ -151,10 +149,9 @@ describe('★ 安装工具包：装 → 列表 → 库里的字段', () => {
       assert.equal(tool.source, 'local', '从本机路径装的是"使用者自有的"，不是 remote')
       assert.equal(tool.sourceRef, `path:${dir}`)
 
-      // ① 列表里有它，而且"谁挂着"是显式给出来的（空数组 = 没人挂）
+      // ① 列表里有它
       const listed = (await listTools(d)).find((t) => t.id === tool.id)
       assert.ok(listed, '装完必须能在列表里看到')
-      assert.deepEqual(listed.mountedBy, [], '没人挂 = 空数组；卸载页据此判断"可以直接卸"')
 
       // ② ★ 直接读 store：接口回的那份与真正落库的那份必须是同一份
       const stored = await d.store.getTool(tool.id)
@@ -437,18 +434,13 @@ describe('★ 同名冲突：一律拒绝写入，绝不静默覆盖（与 skill
     })
   })
 
-  test('★ 显式 overwrite 才替换，且**复用原 id**（挂载关系不断）', async () => {
+  test('★ 显式 overwrite 才替换，且**复用原 id**（追溯不断）', async () => {
     await withDaemon(async (d) => {
       const dirA = await makeToolDir('dup-tool', { manifest: { name: '第一份' } })
       const dirB = await makeToolDir('dup-tool', { manifest: { name: '第二份' } })
       const first = await installTool(d, { source: 'path', path: dirA })
       const firstId = (first.body['tool'] as Tool).id
       const firstCreatedAt = (first.body['tool'] as Tool).createdAt
-
-      // 挂到一个执行者身上——替换之后这个挂载必须还在
-      const agentId = await makeExecutor(d, '挂着工具的执行者')
-      const mounted = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [firstId] })
-      assert.equal(mounted.status, 200)
 
       const second = await installTool(d, {
         source: 'path',
@@ -460,18 +452,14 @@ describe('★ 同名冲突：一律拒绝写入，绝不静默覆盖（与 skill
       assert.equal(
         replaced.id,
         firstId,
-        '★ 复用原 id：agent 的 toolIds 指的是组，换 id 就等于所有挂载指着一条不存在的记录',
+        '★ 复用原 id：审计记录、判决与已在跑的 run 里都留着这个包的 id 与 slug，换 id 会让追溯对不上',
       )
       assert.equal(replaced.name, '第二份')
       assert.equal(replaced.createdAt, firstCreatedAt, '这不是新装的一个包，是同一条记录的更新')
 
       const tools = await listTools(d)
       assert.equal(tools.length, 1)
-      assert.deepEqual(
-        tools[0]!.mountedBy.map((a) => a.id),
-        [agentId],
-        '替换之后挂载关系还在',
-      )
+      assert.equal(tools[0]!.id, firstId, '列表里也只有一条——是同一条记录被替换，不是新装了一个')
     })
   })
 })
@@ -480,7 +468,7 @@ describe('★ 同名冲突：一律拒绝写入，绝不静默覆盖（与 skill
 // 卸载
 // ══════════════════════════════════════════════════════════════════
 
-describe('★ 卸载：还挂着就拒，并说清是谁', () => {
+describe('★ 卸载：一律放行（"还挂着就拒"那把锁已经删掉）', () => {
   test('没人挂着 ⇒ 删得掉；再删一次是 404（"本来就没有"不是错误）', async () => {
     await withDaemon(async (d) => {
       const dir = await makeToolDir('gone-tool')
@@ -498,210 +486,49 @@ describe('★ 卸载：还挂着就拒，并说清是谁', () => {
     })
   })
 
-  test('★ 还有 agent 挂着 ⇒ 400，且把**名字**列出来（不是让人从一句话里认）', async () => {
+  /**
+   * ⚠️ 这里原来是「**还有 agent 挂着 ⇒ 400**，并把名字列出来」。
+   *
+   * 那条拒绝已经删掉，理由是它**把使用者锁死**：它给的下一步是"先在那些智能体
+   * 上把它摘掉"，而"摘掉"这个动作已经不存在了（挂载能力撤掉、那个勾选栏也没了）。
+   * 一条指向死路的拒绝比不拒绝更糟——它把"我做不到"说成"你先去做那件事"。
+   *
+   * 所以现在**卸载一律成功**。这条测试留着，是为了盯住"以后别再把它加回来"：
+   * 老数据里那个 `toolIds` 键在解析时就被丢掉了，删包不会留下悬空引用。
+   */
+  test('★ 卸载一个**老数据里被引用过**的包也照样成功（不再有"还挂着就拒"）', async () => {
     await withDaemon(async (d) => {
       const dir = await makeToolDir('busy-tool')
       const installed = await installTool(d, { source: 'path', path: dir })
       const id = (installed.body['tool'] as Tool).id
 
-      const agentId = await makeExecutor(d, '小李的执行者')
-      await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [id] })
+      // 一个执行者（老数据里它可能"挂着"这个包——那个键现在会被解析丢掉）
+      await makeExecutor(d, '小李的执行者')
 
       const res = await call(d, 'DELETE', `/api/tools/${id}`)
-      assert.equal(res.status, 400)
-      assert.deepEqual(
-        res.body['holders'],
-        [{ id: agentId, name: '小李的执行者' }],
-        '★ 界面要能把它做成可点的列表',
-      )
-      assert.match(String(res.body['error']), /小李的执行者/)
-      assert.match(String(res.body['error']), /busy-tool/)
-
-      assert.ok(await d.store.getTool(id as Tool['id']), '★ 拒了就不能还是删了')
-      assert.equal((await listTools(d)).length, 1)
-
-      // 摘掉之后就能卸了——不然这条记录会永远删不掉
-      await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [] })
-      assert.equal((await call(d, 'DELETE', `/api/tools/${id}`)).status, 200)
+      assert.equal(res.status, 200, '★ 卸载必须放行：拒绝会把使用者锁死')
+      assert.equal(res.body['deleted'], true)
+      assert.equal(await d.store.getTool(id as Tool['id']), null, '库里必须真的没了')
+      assert.deepEqual(await listTools(d), [])
     })
   })
 })
 
 // ══════════════════════════════════════════════════════════════════
-// 挂载 / 摘挂
-// ══════════════════════════════════════════════════════════════════
-
-describe('★ 挂载与摘挂：授权单位是**组**', () => {
-  test('★ PUT 是整体替换：挂两个 → 摘一个 → 全摘', async () => {
-    await withDaemon(async (d) => {
-      const a = await installTool(d, { source: 'path', path: await makeToolDir('tool-a') })
-      const b = await installTool(d, { source: 'path', path: await makeToolDir('tool-b') })
-      const idA = (a.body['tool'] as Tool).id
-      const idB = (b.body['tool'] as Tool).id
-      const agentId = await makeExecutor(d, '多面手')
-
-      const both = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [idA, idB] })
-      assert.equal(both.status, 200, JSON.stringify(both.body))
-      assert.deepEqual((both.body['agent'] as { toolIds: string[] }).toolIds, [idA, idB])
-
-      let listed = await listTools(d)
-      for (const id of [idA, idB]) {
-        const tool = listed.find((t) => t.id === id)
-        assert.deepEqual(tool?.mountedBy.map((x) => x.name), ['多面手'])
-      }
-
-      // 摘掉一个：传的这份就是它挂的全部，没传的那个等于被摘掉
-      const one = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [idA] })
-      assert.deepEqual((one.body['agent'] as { toolIds: string[] }).toolIds, [idA])
-      listed = await listTools(d)
-      assert.deepEqual(listed.find((t) => t.id === idB)?.mountedBy, [])
-
-      const none = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [] })
-      assert.equal(none.status, 200)
-      assert.deepEqual((none.body['agent'] as { toolIds: string[] }).toolIds, [])
-      listed = await listTools(d)
-      assert.deepEqual(listed.find((t) => t.id === idA)?.mountedBy, [])
-
-      // 摘挂之后每个包都能卸了
-      assert.equal((await call(d, 'DELETE', `/api/tools/${idA}`)).status, 200)
-      assert.equal((await call(d, 'DELETE', `/api/tools/${idB}`)).status, 200)
-    })
-  })
-
-  test('★ 挂一个不存在的 id ⇒ 400 并列出哪几个（不能等运行时才发现）', async () => {
-    await withDaemon(async (d) => {
-      const installed = await installTool(d, { source: 'path', path: await makeToolDir('real-tool') })
-      const realId = (installed.body['tool'] as Tool).id
-      const agentId = await makeExecutor(d)
-
-      const res = await call(d, 'PUT', `/api/agents/${agentId}/tools`, {
-        toolIds: [realId, 'tool_不存在'],
-      })
-      assert.equal(res.status, 400)
-      assert.deepEqual(res.body['unknown'], ['tool_不存在'])
-      assert.match(String(res.body['error']), /real-tool/, '要顺带说清"可用的是哪些"')
-
-      const agent = await call(d, 'GET', `/api/agents/${agentId}`)
-      assert.deepEqual(
-        (agent.body as { toolIds: string[] }).toolIds,
-        [],
-        '★ 整份请求都不生效，不能"合法的那几个先挂上"',
-      )
-    })
-  })
-
-  test('toolIds 不是数组 / 有空白项 / agent 不存在 —— 都是 400 或 404', async () => {
-    await withDaemon(async (d) => {
-      const agentId = await makeExecutor(d)
-      const notArray = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: 'x' })
-      assert.equal(notArray.status, 400)
-
-      const blank = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: ['  '] })
-      assert.equal(blank.status, 400)
-
-      const noAgent = await call(d, 'PUT', '/api/agents/agent_不存在/tools', { toolIds: [] })
-      assert.equal(noAgent.status, 404)
-    })
-  })
-
-  test('重复的 id 去重（授权是一个集合，"挂了两组"是假象）', async () => {
-    await withDaemon(async (d) => {
-      const installed = await installTool(d, { source: 'path', path: await makeToolDir('once-tool') })
-      const id = (installed.body['tool'] as Tool).id
-      const agentId = await makeExecutor(d)
-      const res = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [id, id] })
-      assert.equal(res.status, 200)
-      assert.deepEqual((res.body['agent'] as { toolIds: string[] }).toolIds, [id])
-    })
-  })
-})
-
-// ══════════════════════════════════════════════════════════════════
-// 审核者不许挂工具
-// ══════════════════════════════════════════════════════════════════
-
-describe('★ 审核者不许挂工具：它只判断、不动手', () => {
-  test('★ 给审核者挂工具 ⇒ 400，并说清理由；摘挂（空数组）不被这条挡', async () => {
-    await withDaemon(async (d) => {
-      const installed = await installTool(d, { source: 'path', path: await makeToolDir('judge-tool') })
-      const id = (installed.body['tool'] as Tool).id
-
-      const reviewer = await call(d, 'POST', '/api/agents', { name: '审核者', role: 'reviewer' })
-      assert.equal(reviewer.status, 201, JSON.stringify(reviewer.body))
-      const reviewerId = reviewer.body['id'] as string
-
-      const res = await call(d, 'PUT', `/api/agents/${reviewerId}/tools`, { toolIds: [id] })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /审核者/)
-      assert.match(
-        String(res.body['error']),
-        /判断|不动手/,
-        '★ 理由要写出来：不是"平台不允许"，而是"审核者只做判断"',
-      )
-
-      // 老数据里可能有挂着工具的审核者，或者角色刚被改过——摘挂必须永远允许
-      const clear = await call(d, 'PUT', `/api/agents/${reviewerId}/tools`, { toolIds: [] })
-      assert.equal(clear.status, 200, '连摘都不许的话，那种记录就永远修不好了')
-
-      const agent = await call(d, 'GET', `/api/agents/${reviewerId}`)
-      assert.deepEqual((agent.body as { toolIds: string[] }).toolIds, [])
-    })
-  })
-
-  test('★ 角色改成 reviewer 也要挡：挂着工具的执行者不能一步变成审核者', async () => {
-    await withDaemon(async (d) => {
-      const installed = await installTool(d, { source: 'path', path: await makeToolDir('switch-tool') })
-      const id = (installed.body['tool'] as Tool).id
-      const agentId = await makeExecutor(d, '先动手的')
-      await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [id] })
-
-      const res = await call(d, 'PATCH', `/api/agents/${agentId}`, { role: 'reviewer' })
-      assert.equal(res.status, 400, '★ 不然"审核者不许挂工具"这条从角色这一侧就绕过去了')
-      assert.match(String(res.body['error']), /工具包/)
-      assert.match(String(res.body['error']), /审核者/)
-
-      const agent = await call(d, 'GET', `/api/agents/${agentId}`)
-      assert.equal((agent.body as { role: string }).role, 'executor', '改不动就是改不动')
-
-      // 按提示先摘工具，再改角色 —— 这条提示指的下一步必须真的可行
-      await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [] })
-      const ok = await call(d, 'PATCH', `/api/agents/${agentId}`, { role: 'reviewer' })
-      assert.equal(ok.status, 200, JSON.stringify(ok.body))
-      assert.equal((ok.body as { role: string }).role, 'reviewer')
-    })
-  })
-
-  test('★ 老数据（挂着工具的审核者）不能被这条规则锁死：改名能过、摘工具能过', async () => {
-    await withDaemon(async (d) => {
-      const installed = await installTool(d, { source: 'path', path: await makeToolDir('legacy-tool') })
-      const id = (installed.body['tool'] as Tool).id
-
-      // 造一条"先挂了工具、后把角色改成 reviewer"的记录（这条规则之前建的数据）
-      const agentId = await makeExecutor(d, '历史遗留')
-      await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [id] })
-      const current = await d.store.getAgent(agentId as never)
-      assert.ok(current)
-      await d.store.insertAgent({ ...current, role: 'reviewer' })
-
-      const rename = await call(d, 'PATCH', `/api/agents/${agentId}`, { name: '改个名字' })
-      assert.equal(rename.status, 200, '★ 不然这种记录连修的入口都没有（改名字都 400）')
-
-      const clear = await call(d, 'PUT', `/api/agents/${agentId}/tools`, { toolIds: [] })
-      assert.equal(clear.status, 200, '★ 摘挂永远允许，这条记录才修得好')
-      assert.equal((await call(d, 'DELETE', `/api/tools/${id}`)).status, 200, '摘完就能卸了')
-    })
-  })
-})
-
-// ══════════════════════════════════════════════════════════════════
-// 审核者的动作权限（D40 收口：从 skill / 标准 搬到 `Agent.allowedActions`）
-// ══════════════════════════════════════════════════════════════════
+// ⚠️ 这里原来有两整块测试，共 8 个用例，全部删掉了：
 //
-// ★ D41：平台的内置动作**全部移除**，所以"能被接受的动作"只有一种来源——
-//   装进来的工具包声明过的那个（`<包 slug>.<动作名>`）。凡是需要一个"合法动作"
-//   当夹具的用例，都先用共享夹具 `writeToolPackage()` 造一个真包再装上来；
-//   继续用 `comment.create` 这类老名字当夹具的话，请求会因为"包没装"被拒，
-//   用例测到的就变成了另一条规则。
+//   · 「挂载与摘挂：授权单位是**组**」——测 `PUT /api/agents/:id/tools`
+//     （整体替换 / 挂不存在的 id / 参数校验 / 去重）；
+//   · 「审核者不许挂工具：它只判断、不动手」——测同一个接口的两条角色规矩。
+//
+// 那个接口**已经删除**（见 `server.ts` 里那段说明：挂载能力撤掉之后它没有任何
+// 调用方）。接口没了，测它的用例就是测一条不存在的路——留着只会让下一个读代码的
+// 人以为挂载还能用。
+//
+// ⚠️ 其中有一条测试防的是"老数据（挂着工具的审核者）被规则锁死"——那条**顾虑
+//    本身仍然成立**，只是它现在由"卸载一律放行"来满足（见上面卸载那一块），
+//    因为字段已经从协议里删掉，老数据里那个键解析时就被丢掉了。
+// ══════════════════════════════════════════════════════════════════
 
 describe('★ 动作权限写在 agent 上：接受已装工具的第三方动作，未安装的在保存时拒', () => {
   test('★ 已安装工具的动作可以写在 agent 上（`<包 slug>.<动作名>`）', async () => {
@@ -719,7 +546,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const created = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: [one.action, two.action],
       })
       assert.equal(created.status, 201, JSON.stringify(created.body))
@@ -762,7 +589,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const created = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: [pkg.action],
       })
       assert.equal(created.status, 201, JSON.stringify(created.body))
@@ -795,7 +622,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const res = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: ['demo-tool.runn'],
       })
       assert.equal(res.status, 400)
@@ -809,7 +636,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const res = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: ['Demo_Tool.run'],
       })
       assert.equal(res.status, 400)
@@ -826,7 +653,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const shaped = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: ['comment.create'],
       })
       assert.equal(shaped.status, 400)
@@ -841,7 +668,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const unshaped = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: ['issue.update_status', 'issue.add_label'],
       })
       assert.equal(unshaped.status, 400)
@@ -857,7 +684,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const created = await call(d, 'POST', '/api/agents', {
         name: '审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: ['demo-tool.run'],
       })
       assert.equal(created.status, 201)
@@ -876,10 +703,11 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
   // 只有**审核者**能有非空的动作权限（D40）
   // ══════════════════════════════════════════════════════════════════
   //
-  // 与"审核者不许挂工具"是**对称的两条**：各自的能力只给各自的人。执行者的能力
-  // 是工具（`toolIds`），动作是**判完之后**由平台执行的。
+  // ⚠️ 这条规矩原来有一句对称的话："执行者的能力是**工具**，审核者不挂工具"。
+  //    挂载能力撤掉之后执行者**没有**自己那一半能力了，但这条规矩本身仍然成立
+  //    （它管的是 `allowedActions`，与挂载无关）。
 
-  test('★ 执行者带非空动作 ⇒ 400，并说清"执行者的能力是工具"', async () => {
+  test('★ 执行者带非空动作 ⇒ 400，并说清"动作是判完之后由平台执行的"', async () => {
     await withDaemon(async (d) => {
       // ★ 夹具必须是**已装**工具包声明的动作：随手写一个没装的名字会让这份请求先被
       //   "包没装"拦下，这条用例就再也测不到"执行者不许有动作权限"了——下面那行
@@ -892,7 +720,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
         role: 'executor',
         allowedActions: [pkg.action],
       })
-      assert.equal(res.status, 400, '★ 执行者的能力是工具（toolIds），动作是判完之后由平台执行的')
+      assert.equal(res.status, 400, '★ 动作是判完之后由平台执行的，执行者不配动作')
       const error = String(res.body['error'])
       assert.doesNotMatch(
         error,
@@ -900,7 +728,10 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
         '★ 被拒的理由必须是"执行者不许有动作权限"，不是"包没装"',
       )
       assert.match(error, /执行者/)
-      assert.match(error, /工具/, '要说清它的能力是什么')
+      // ⚠️ 这句原来是 `assert.match(error, /工具/, '要说清它的能力是什么')`。
+      //    提示原文是"执行者的能力是**工具**"，挂载撤掉之后那句话不成立了。
+      //    真正要守的是**提示说清了下一步怎么办**，所以钉住那一句。
+      assert.match(error, /把角色改成审核者/, '要说清该怎么办')
       assert.match(error, /allowedActions/, '要点名是哪个字段')
     })
   })
@@ -934,7 +765,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const created = await call(d, 'POST', '/api/agents', {
         name: '先审后执',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文' },
+        reviewStandard: { body: '正文' },
         allowedActions: [pkg.action],
       })
       assert.equal(created.status, 201, JSON.stringify(created.body))
@@ -944,7 +775,11 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       assert.equal(res.status, 400, '★ 不然"执行者不许有动作权限"这条从角色这一侧就绕过去了')
       const error = String(res.body['error'])
       assert.match(error, /动作/)
-      assert.match(error, /工具/)
+      // ⚠️ 这句原来断言提示里出现「工具」（原文是"执行者的能力是**工具**"）。
+      //    挂载撤掉之后执行者没有"工具"这个能力了，提示改成"动作是判完之后由
+      //    平台执行的，执行者不配动作"——断言跟着改成**提示里说清了下一步**
+      //    （下面那段"按提示先清空动作"才是真正要守的东西）。
+      assert.match(error, /先把动作清空/)
 
       const still = await call(d, 'GET', `/api/agents/${id}`)
       assert.equal((still.body as { role: string }).role, 'reviewer', '改不动就是改不动')
@@ -969,7 +804,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       const created = await call(d, 'POST', '/api/agents', {
         name: '老客户端建的审核者',
         role: 'reviewer',
-        reviewStandard: { name: '标准', body: '正文', allowedActions: [pkg.action] },
+        reviewStandard: { body: '正文', allowedActions: [pkg.action] },
       })
       assert.equal(created.status, 201, '不是"装错了"，只是那一项不再属于标准——不该整条拒掉')
       const body = created.body as {

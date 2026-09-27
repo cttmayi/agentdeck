@@ -1,5 +1,5 @@
-import type { TextParams, WebTextId } from '@alpha-helper/i18n'
-import type { RunSummary } from './api.ts'
+import type { TextParams, WebTextId } from '@agentdeck/i18n'
+import type { Issue, RunSummary } from './api.ts'
 
 /**
  * 任务流水线的阶段推导。
@@ -69,6 +69,26 @@ export type Stage =
   | 'action_failed'
   | 'needs_human'
   | 'reviewed'
+  /**
+   * ★ 放弃：**任务级**的事实，盖过一切由 run 推出来的阶段（D47）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么它必须是**覆盖**而不是"再算一种情况"
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 前六档全部由 **run** 推出来；这一档由 **issue 自己的状态**决定。两者不是
+   * 同一层的东西——一条被放弃的任务可能同时"有一条 run 正在跑"、"有一条判决
+   * 要求人介入"，而"我不管它了"这句话与它们全都无关，它只说一件事：
+   * **别再让它占着你的注意力**。
+   *
+   * 所以它不是流水线上的一站（从左到右越来越接近结束），而是一个**出口**：
+   * 看板把它放在最后一列，与流程方向无关，与"结束"也无关——放弃的任务可能
+   * 一条 run 都没跑完。
+   *
+   * ⚠️ 它是**可撤销的**（`POST /issues/{id}/reopen`），所以那一列的任务还能
+   *    回到流水线上。这也是为什么它不隐藏、不删除：放弃是一个判断，判断会变。
+   */
+  | 'abandoned'
 
 /** run 的终态。不在其中的都算"还在进行"。 */
 export const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -241,7 +261,66 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
-export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageInfo {
+/**
+ * 哪些 issue 状态算"这条任务已经放弃了"（D47）。
+ *
+ * 只有 `cancelled` 一个。用集合而不是 `=== 'cancelled'`，是为了让**这条规则
+ * 只有一处**：将来若再加一个"放弃"的取值（比如区分"放弃"与"重复"），改这里
+ * 就够了，不会漏掉某个 `===` 比较。
+ */
+const ABANDONED_ISSUE_STATUSES: ReadonlySet<string> = new Set(['cancelled'])
+
+/**
+ * 阶段推导。**这是"一条任务现在到哪一步了"的唯一出处**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 为什么第一个参数是**整条 issue**，而不是 `issueId: string`（D47）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * D47 之前它只要 id 就够了（阶段全部由 run 推出来）。加了「已放弃」那一档之后，
+ * 还需要 **issue 自己的状态**——而那个信息 run 里根本没有。
+ *
+ * 第一版把它做成了**可选**的第三个参数（`issueStatus?`），理由是"那一大批只关心
+ * run 的用例不用改"。**那是个错误，而且它当场就咬人了**：`views/Tasks.svelte` 里
+ * 两个调用点都没传，于是点「放弃」之后接口返回 200、issue 状态确实变了、而看板
+ * **一动不动**——不报错、不告警，正是这个文件最防的那类失效。
+ *
+ * 所以现在改成**必填**：调用方手里本来就有整条 issue，传进来是零成本的，而
+ * "忘了传"从"一个静默的错误行为"变成了**编译错误**。这就是这个仓库一贯的做法——
+ * 能让编译器守住的约定，不要写成注释里的约定。
+ */
+export function stageOf(
+  issue: Pick<Issue, 'id' | 'status'>,
+  allRuns: readonly RunSummary[],
+): StageInfo {
+  const derived = deriveStage(issue.id, allRuns)
+
+  // ★ D47：放弃是**任务级**的事实，它盖过一切由 run 推出来的阶段。
+  //
+  //   在这里覆盖而不是在 `deriveStage` 里再插一个分支，是因为那个函数有**六个
+  //   早返回点**——每加一档就要在每个返回点都记得带上它，漏一个的表现就是
+  //   "放弃过的任务偶尔还显示在「等待人处理」里"（取决于它当初卡在哪一档）。
+  //   包一层之后，"放弃赢"这件事只有一个地方说了算。
+  if (ABANDONED_ISSUE_STATUSES.has(issue.status)) {
+    return {
+      ...derived,
+      stage: 'abandoned',
+      // ⚠️ 提示与警告都必须清掉：放弃过的任务不该再进「需要注意」那一拨
+      //    （`splitByAttention` 的判据就是 `warningId !== null`），也不该再
+      //    提示"没有派审核"——那是**要你去办**的事，而你已经决定不办了。
+      noteId: null,
+      warningId: null,
+    }
+  }
+
+  return derived
+}
+
+/**
+ * 真正的推导：只看 run。**不要直接调用它**（除了 `stageOf`）——放弃那一条
+ * 覆盖规则在 `stageOf` 里，绕过它就会得到"放弃过的任务还卡在等待人处理"。
+ */
+function deriveStage(issueId: string, allRuns: readonly RunSummary[]): StageInfo {
   const executes = allRuns
     .filter(
       (r) => r.kind === 'execute' && r.subject?.type === 'issue' && r.subject.id === issueId,
@@ -290,12 +369,41 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
     .sort((a, b) => b.queuedAt - a.queuedAt)
 
   const finished = reviews.find((r) => r.status === 'completed')
-  if (finished) {
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ★ D46：这条任务**生效的判决**挂在哪条 run 上
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 判决一直只可能挂在审核 run 上（D21）。人工裁决开了一个口子，而它有**两种**
+   * 落点，判据只有一条：
+   *
+   *   - 这条执行**有**一条已完成、带判决的审核 run ⇒ 人工裁决挂在那条审核 run 上
+   *     （人裁决的就是那份结论）。这时下面这个 `finished` 分支照旧，**一个字都
+   *     不用改**——`listVerdictsByRun` 已按 `createdAt` 排序，人工那条是最新的，
+   *     所以 `finished.verdict` 拿到的就是人工裁决。
+   *   - 这条执行**没有**任何审核结论（"压根没配审核者"那种任务）⇒ 人工裁决挂在
+   *     **执行 run** 上。这就是 `humanOnExecute` 存在的理由：不加它，人点了
+   *     「人工通过」、判决也落了库，而看板**一动不动**（阶段推导只看审核 run）。
+   *
+   * ⚠️ 判据必须是 `source === 'human'`，不能只判"执行 run 上有没有判决"：
+   *    执行 run 上出现**模型**判决是另一件事（那条链路不存在），真出现了也不该
+   *    被当成人工裁决——那会把一个实现错误显示成"人做的决定"。
+   *
+   * ⚠️ 两条路**互斥**：有 `finished` 时 `humanOnExecute` 恒为 `null`。所以"人工
+   *    裁决挂哪儿"是确定的，不是"看情况"——daemon 侧那条路由按同一个判据拦下了
+   *    挂错位置的情况（`canHostHumanVerdict`）。
+   */
+  const humanOnExecute =
+    finished === undefined && latest.verdict?.source === 'human' ? latest : null
+
+  const holder = finished ?? humanOnExecute
+  if (holder) {
     // ★ 判决说"需要人"时**不是**完成态。
     //   判据取两个：结论是 `needs_human`，或者判决状态是 `escalated`
     //   （后者还覆盖"判决不合规且无法重试 ⇒ 交给人"那条路）。
     //   两者都是"卡在人这儿"，而界面上原来一律显示成"已审查"。
-    const verdict = finished.verdict
+    const verdict = holder.verdict
     const needsHuman =
       verdict !== null &&
       verdict !== undefined &&
@@ -309,16 +417,23 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
       //   带那个字段。所以按结论分开说：**"审核不通过"与"审核者拿不准"是
       //   两件事**，前者要你去改活、后者要你去补判断依据，给同一句话等于
       //   把"哪里需要我"这条最有用的信息抹平。
+      //
+      // ★ 这里**不再**区分"谁判的不通过"（D47 删掉了那个分支）。
+      //
+      //   D46 曾经给人工判 `fail` 留了一条 `tasks.warnHumanRejected`（"你判了
+      //   不通过"）。D47 把"要它重做"合并进「反馈」（派一条新 run，不落判决）
+      //   之后，人工判决**只可能是通过**，于是那个分支永远走不到。留着它的代价
+      //   不是几行代码，而是让读的人以为"人可以判不通过"——而那条路已经不存在。
       const reason = verdict.escalateReason?.trim()
       const rejected = verdict.conclusion === 'fail'
       return {
         stage: 'needs_human',
         reworked,
         executeRun: latest,
-        reviewRun: finished,
+        reviewRun: finished ?? null,
         // 标签"待人工"已经说了这件事；缺什么在 warning 里（那是要给你看的）
         noteId: null,
-        action: finished.action ?? null,
+        action: holder.action ?? null,
         warningId: rejected
           ? 'tasks.warnRejectedNoRework'
           : reason
@@ -339,17 +454,17 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
     //     · 还在跑（proposed/auto_approved/executing）⇒ 行动中
     //     · failed                                    ⇒ 行动失败（卡在人手里）
     //     · executed / skipped / rolled_back / 没有动作 ⇒ 已审查
-    const action = finished.action ?? null
+    const action = holder.action ?? null
 
     // ⚠️ 判决已经说"派给动作了"，而动作记录**还没出现**（判决落库与动作落库之间
     //    那一小段）：这时只能算「行动中」，不能算「已审查」——否则那一瞬间它会
     //    短暂地显示成"做完了"。判据取判决自己的状态（`dispatched_to_action`）。
-    if (action === null && finished.verdict?.status === 'dispatched_to_action') {
+    if (action === null && holder.verdict?.status === 'dispatched_to_action') {
       return {
         stage: 'action_running',
         reworked,
         executeRun: latest,
-        reviewRun: finished,
+        reviewRun: finished ?? null,
         noteId: 'tasks.noteActionRunning',
         warningId: null,
         action: null,
@@ -360,12 +475,12 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
     //    列表刷新之间那一小段）。这时算「执行中」——返工就是要再跑一次活。
     //    不处理的话它会短暂显示成「已审查」，而那是这条判决**最不**该有的样子：
     //    它是"不通过、正在重做"，不是"做完了"。
-    if (action === null && finished.verdict?.status === 'rework_requested') {
+    if (action === null && holder.verdict?.status === 'rework_requested') {
       return {
         stage: 'executing',
         reworked,
         executeRun: latest,
-        reviewRun: finished,
+        reviewRun: finished ?? null,
         noteId: 'tasks.noteReworking',
         warningId: null,
         action: null,
@@ -378,7 +493,7 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
         stage: failed ? 'action_failed' : 'action_running',
         reworked,
         executeRun: latest,
-        reviewRun: finished,
+        reviewRun: finished ?? null,
         action,
         // 动作名是**契约值**（`example-note.append-note` 那种），原样显示；
         // 它是对"到底在做什么"最有用的那一条信息。
@@ -404,7 +519,7 @@ export function stageOf(issueId: string, allRuns: readonly RunSummary[]): StageI
       stage: 'reviewed',
       reworked,
       executeRun: latest,
-      reviewRun: finished,
+      reviewRun: finished ?? null,
       noteId: null, // 标签已经是"已审查"，再说一遍就是重复
       warningId: null,
       action,
@@ -479,6 +594,7 @@ const SHORT_LABEL_ID: Record<Stage, WebTextId> = {
   action_failed: 'term.stage.action_failed',
   needs_human: 'term.stage.needs_human',
   reviewed: 'term.stage.reviewed',
+  abandoned: 'term.stage.abandoned',
 }
 
 /** 某个阶段的短标签键（表格单元格、卡片角标用）。 */
@@ -500,7 +616,7 @@ export interface StagedIssue<T> {
  * ══════════════════════════════════════════════════════════════════
  *
  * 单独一拨而不是"按优先级重排全部"：重排会让**其余任务的顺序也变**，而使用者的
- * 心理模型是"列表大致按时间"，突然整体重排会让人找不到刚才那条。
+ * 心理模型是"列表按时间（新的在前）"，突然整体重排会让人找不到刚才那条。
  * 置顶一拨 + 其余保持原序，两边都成立。
  *
  * 判据只用 `StageInfo.warningId`（有没有那条"需要注意"的提示），它现在覆盖两类
@@ -563,4 +679,16 @@ export const PIPELINE_COLUMNS: ReadonlyArray<{
     hintId: 'tasks.col.needs_human.hint',
   },
   { ids: ['reviewed'], titleId: 'tasks.col.reviewed.title', hintId: 'tasks.col.reviewed.hint' },
+  /**
+   * ★ D47：「已放弃」**不在流水线上**，所以它排在最后、与"越来越接近结束"无关。
+   *
+   * 它是人的一个判断（"这条我不管了"），不是流程走过的一站——一条被放弃的任务
+   * 可能一条 run 都没跑完。放在末尾是为了让它**看得见但不占注意力**：它会退出
+   * 「需要注意」那一拨（`stageOf` 把 warning 清掉了），但不会被藏起来。
+   */
+  {
+    ids: ['abandoned'],
+    titleId: 'tasks.col.abandoned.title',
+    hintId: 'tasks.col.abandoned.hint',
+  },
 ]

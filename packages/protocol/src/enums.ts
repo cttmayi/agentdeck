@@ -89,6 +89,20 @@ export const ReasonCode = z.enum([
   'criteria_not_applicable',
   // 系统
   'internal_error',
+  /**
+   * ★ 人工裁决（D46）。
+   *
+   * 上面那些码都是**给模型用的**：它们回答"这条产出为什么不满足标准"。而人工
+   * 裁决的理由不是从这套分类里挑出来的——人写的是**一句话**，那句话原文进
+   * `findings`。所以这里给一个码，意思是"这条判决的理由在自由文本里，别去
+   * 上面的分类里找"。
+   *
+   * ⚠️ 为什么不复用 `meets_criteria` / `insufficient_context` 之类：
+   *    人工通过时填 `meets_criteria` 会让统计把"审核者按标准判通过"与
+   *    "人看了一眼说行"算成同一件事——而这两件事的**证据强度完全不同**，
+   *    合并之后"通过率"这个数字就不再回答任何问题了。
+   */
+  'human_decision',
 ])
 export type ReasonCode = z.infer<typeof ReasonCode>
 

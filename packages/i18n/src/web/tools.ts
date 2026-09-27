@@ -3,8 +3,8 @@ import type { TextCatalog } from '../text.ts'
 /**
  * 工具（D40）：`apps/web/src/views/Tools.svelte`（列表 + 安装抽屉）、
  * `apps/web/src/lib/tool-install.ts`（安装结果的说明、错误码的下一步建议）、
- * `apps/web/src/components/AgentDetail.svelte`（挂载那一段）与
- * `apps/web/src/components/ReviewStandardEditor.svelte`（可勾的工具动作）。
+ * `apps/web/src/components/AgentDetail.svelte`（「行动权限」那一段）与
+ * `apps/web/src/components/ActionPicker.svelte`（可勾的工具动作）。
  *
  * ⚠️ 导航那两条（`tools.navTitle` / `tools.navHint`）**按说该在 `shell.ts`**里
  *    （"一个区域一份"的分法就是照代码结构来的）。放这里是因为这一轮 D40 的交界
@@ -27,17 +27,26 @@ export const toolsText = {
   'tools.navHint': { zh: '一组动作 · 装一次整组可用', en: 'Action groups · install once' },
 
   // ── 页头 ──
-  'tools.title': { zh: '工具', en: 'Tools' },
+  /**
+   * ⚠️ 这里**原有一个 `tools.title`**，2026-09 改版时删了：页名由顶栏显示，而顶栏
+   *    与侧栏共用同一个词条（`tools.navTitle`，见 `apps/web/src/lib/view.ts` 的
+   *    `VIEW_TITLE_KEYS`）。主区里那行重复的 `<h2>工具</h2>` 同一次删掉。
+   */
   'tools.headIntro': { zh: '工具是', en: 'A tool is ' },
   'tools.headStrongGroup': { zh: '一组动作', en: 'a group of actions' },
   // ★ D42：同一个包有两种身份，措辞必须把两个行为面分开——
   //   · 执行者那一侧（工具挂载）：**干活时**把包的脚本与说明送进它的工作目录；
   //   · 审核者那一侧（行动权限）：**判完之后**让平台触发包里的动作。
   //   合在一起说"挂给智能体 = 把动作交给它"会让人把两件事混成一个。
+  // ⚠️ 原文说「它有两种用法——给执行者干活时用（挂载后把包的脚本与说明送进它的
+  //    工作目录），或给审核者判完之后触发组里的动作」。第一种用法已经不存在了：
+  //    挂载这个能力整个撤掉了（使用者的决定），界面上没有任何入口能把工具包挂给
+  //    执行者。留着那半句就是在页头许诺一件做不到的事。
   'tools.headOutro': {
-    zh: '：一次安装装进整组。它有两种用法——给执行者**干活时**用（挂载后把包的脚本与说明送进它的工作目录），或给审核者**判完之后**触发组里的动作（在审核者的「行动权限」里勾）。',
-    en: ': one install brings in the whole group, used two ways — mounted on an executor, the package’s scripts and docs are placed into its work directory while it works; or a reviewer may trigger the group’s actions after a verdict (ticked under its action permissions).',
+    zh: '：一次安装装进整组。装进来之后，组里的动作才能在审核者的「行动权限」里勾选——判决说「通过」时由平台触发。',
+    en: ': one install brings in the whole group. Once installed, the group’s actions can be ticked under a reviewer’s action permissions — the platform triggers them when a verdict says "pass".',
   },
+
 
   // ── 列表 ──
   'tools.colGroup': { zh: '组名', en: 'Group' },
@@ -45,18 +54,15 @@ export const toolsText = {
   'tools.colVersion': { zh: '版本', en: 'Version' },
   'tools.colActionCount': { zh: '动作数', en: 'Actions' },
   'tools.colSource': { zh: '来源', en: 'Source' },
-  'tools.colMountedBy': { zh: '被哪些执行者挂载', en: 'Mounted by executors' },
+  // 最后一列只有按钮、没有可见表头，这个名字是给它 `aria-label` 用的
+  'tools.colRowActions': { zh: '操作', en: 'Row actions' },
   'tools.sourceLocal': { zh: '本机目录', en: 'Local directory' },
   'tools.sourceRemote': { zh: '远端目录', en: 'Remote catalog' },
   'tools.versionNone': { zh: '无版本', en: 'No version' },
   'tools.actionCount': { zh: '{count} 个动作', en: '{count} action(s)' },
-  'tools.mountedByNone': { zh: '未挂给任何智能体', en: 'Not mounted on any agent' },
   'tools.viewActions': { zh: '看动作', en: 'View actions' },
   'tools.hideActions': { zh: '收起动作', en: 'Hide actions' },
-  'tools.uninstallTitle': {
-    zh: '卸载：还有智能体挂着它时会被拒（会告诉你还挂着的是谁）',
-    en: 'Uninstall: refused while agents still mount it (it tells you which ones)',
-  },
+  'tools.uninstallTitle': { zh: '卸载这个工具包', en: 'Uninstall this tool package' },
 
   'tools.emptyTitle': { zh: '还没有装任何工具', en: 'No tools installed yet' },
   'tools.emptyHint': {
@@ -73,32 +79,6 @@ export const toolsText = {
   // ── 展开：组内动作 ──
   'tools.actionsHeading': { zh: '组内动作', en: 'Actions in this group' },
   'tools.actionIrreversible': { zh: '不可回滚', en: 'Not reversible' },
-  // ── 准入开关（D40）：不支持预演的动作默认不自动执行 ──────────────
-  'tools.allowUnpreviewed': {
-    zh: '允许自动执行「不支持预演」的动作',
-    en: 'Allow “no dry run” actions to be run automatically',
-  },
-  'tools.allowUnpreviewedHint': {
-    zh:
-      '工具包里的脚本会在你的机器上真的改东西。声明「不支持预演」的动作默认**不会**被自动执行——' +
-      '打开这个开关就是放行它们，代价是你没法先看一眼它会改什么。',
-    en:
-      'Scripts in a tool package really change things on your machine. Actions declared as “no dry run” are ' +
-      'NOT run automatically by default — turning this on lets them run, at the cost of not being able to ' +
-      'preview what they would change.',
-  },
-  'tools.allowUnpreviewedOn': {
-    zh: '已允许自动执行不支持预演的动作',
-    en: '“No dry run” actions may now run automatically',
-  },
-  'tools.allowUnpreviewedOff': {
-    zh: '已改回：不支持预演的动作不会被自动执行',
-    en: 'Back to strict: “no dry run” actions will not run automatically',
-  },
-  'tools.allowUnpreviewedFailed': {
-    zh: '保存这个开关失败：{error}',
-    en: 'Could not save this switch: {error}',
-  },
   // ── 安装：两个来源页签（D40）──────────────────────────────────────
   'tools.actionInstall': { zh: '安装', en: 'Install' },
   'tools.tabPath': { zh: '从本机目录安装', en: 'Install from a local directory' },
@@ -111,17 +91,19 @@ export const toolsText = {
   'tools.remoteUnavailableTitle': { zh: '远端不可用', en: 'Remote unavailable' },
   'tools.remoteUnavailable': { zh: '取不到远端目录：{error}', en: 'Could not load the remote catalog: {error}' },
   'tools.remoteHint': {
-    zh: '包里带的是**清单与脚本原文**，装的时候原样交给本机 daemon 再校验一遍——远端说的和装进来的必须是同一份。',
+    zh: '包里带的是清单与脚本原文，装的时候原样交给本机 daemon 再校验一遍——远端说的和装进来的必须是同一份。',
     en: 'The entry carries the manifest and scripts verbatim; the local daemon validates them again on install — what the remote lists and what gets installed must be the same thing.',
   },
   'tools.errNoRemoteEntry': { zh: '远端目录里没有 {slug}', en: 'No {slug} in the remote catalog' },
   'tools.installed': { zh: '已安装工具包 {slug}', en: 'Installed tool package {slug}' },
+  // 更新是**同名替换**，说清是替换到了哪一版：只说"已安装"的话，
+  // 使用者分不清这次点击是装了新的还是又装了一遍旧的。
+  'tools.updated': {
+    zh: '已把 {slug} 更新到 {version}',
+    en: 'Updated {slug} to {version}',
+  },
   'tools.colActions': { zh: '组内动作', en: 'Actions in the group' },
   'tools.colPackage': { zh: '包名（组）', en: 'Package (group)' },
-  'tools.actionNoDryRun': {
-    zh: '不支持预演，不能自动执行',
-    en: 'No dry run — cannot be run automatically',
-  },
   'tools.actionTimeout': { zh: '超时 {ms} ms', en: 'Timeout {ms} ms' },
   'tools.paramsBoundHeading': { zh: '平台绑定', en: 'Bound by the platform' },
   'tools.paramsBoundNote': {
@@ -232,18 +214,21 @@ export const toolsText = {
     en: ' (that is how the platform decides whether a package is a tool it can run: one group, several actions in it). If it is missing, or the manifest has an invalid field, the whole package is refused with the offending entry named; binary files are explicitly skipped and listed.',
   },
   'tools.slugLabel': { zh: 'slug（留空则用清单里的 slug）', en: 'slug (empty = the one in the manifest)' },
-  // ★ 这个勾选框不是可选项，是**必要的逃生口**：卸载会被"还有 agent 挂着它"
-  //   挡住，所以"改了包里的脚本想重装"如果没有这条出路，就得先把挂载全摘掉、
-  //   装完再挂回去——那条路上任何一步忘掉，症状都是"某个 agent 的工具悄悄没了"。
+  // ★ 这个勾选框不是可选项，是**必要的逃生口**：想改包里那个脚本再装一遍，
+  //   如果没有这条出路就只能卸载再装，而卸载会被"还有别的地方指着它"挡住。
+  //   ⚠️ 原来这条注释与下面那句提示说的是"挂载会被挡住 / 挂载关系会保留"——
+  //   挂载能力已经整个撤掉（D41），那套说法现在是一句**过期的话**：使用者读到
+  //   "挂载它的智能体会继续挂着"只会去找一个不存在的挂载入口。替换复用同一条
+  //   记录，如今真正被保住的是**判决与审计里写过的 `<包 slug>.<动作名>`**。
   //   （服务端要求显式传 overwrite: true；界面不提供这个开关，同名冲突在浏览器里
   //   就是一条死路，而使用者看到的是一句"请显式传 overwrite: true"。）
   'tools.overwriteLabel': {
-    zh: '允许替换同名的工具（会**覆盖**已有那个的内容）',
+    zh: '允许替换同名的工具（会覆盖已有那个的内容）',
     en: 'Allow replacing a tool with the same name (this overwrites the existing one)',
   },
   'tools.overwriteHint': {
-    zh: '默认不勾：同名一律拒绝写入，避免"装的时候顺手覆盖了你自己的东西"。替换会复用同一条记录，所以挂载它的智能体会继续挂着。',
-    en: 'Off by default: a duplicate name is always refused, so installing cannot quietly overwrite your own work. A replacement reuses the same record, so agents mounting it stay mounted.',
+    zh: '默认不勾：同名一律拒绝写入，避免"装的时候顺手覆盖了你自己的东西"。替换会复用同一条记录，所以已经授权过这些动作的审核者不受影响。',
+    en: 'Off by default: a duplicate name is always refused, so installing cannot quietly overwrite your own work. A replacement reuses the same record, so reviewers already allowed these actions keep working.',
   },
   'tools.installCheck': { zh: '检查并安装', en: 'Check and install' },
   'tools.installing': { zh: '正在检查并安装…', en: 'Checking and installing…' },
@@ -280,8 +265,8 @@ export const toolsText = {
     en: 'Check the path: whether the directory exists and is spelled correctly (only local directories on this machine are read).',
   },
   'tools.errNotADirectory': {
-    zh: '要指向工具的那个**目录**（里面放着 tool.json），不是单个文件。',
-    en: 'Point at the tool **directory** (the one holding tool.json), not at a single file.',
+    zh: '要指向工具的那个目录（里面放着 tool.json），不是单个文件。',
+    en: 'Point at the tool directory (the one holding tool.json), not at a single file.',
   },
   'tools.errMissingToolJson': {
     zh: '工具包里必须有全小写的 tool.json。请指向那个目录，或先把清单补上。',
@@ -308,15 +293,12 @@ export const toolsText = {
     en: 'A tool should be a small set of text files. Trim it down and install again.',
   },
 
-  // ── 卸载被拒（还有 agent 挂着）与确认 ──
-  'tools.errInUseTitle': { zh: '不能卸载', en: 'Cannot uninstall' },
-  'tools.errInUse': {
-    zh: '「{slug}」还挂着它的有 {names}，先在这些智能体上摘掉再卸载。',
-    en: '"{slug}" is still mounted by {names} — unmount it on those agents first, then uninstall.',
-  },
+  // ⚠️ 这里原来有「不能卸载」/「还挂在 X 上」两句（`tools.errInUseTitle` /
+  //    `tools.errInUse`）。服务端那条"还挂着就拒"的规则已经删掉、卸载一律放行，
+  //    所以这两句没有触发的地方了，一并删掉。
   'tools.confirmUninstall': {
-    zh: '卸载工具「{slug}」？这一组动作会一起消失，挂载它的智能体也要先摘掉。',
-    en: 'Uninstall the tool "{slug}"? Its whole group of actions goes with it, and agents mounting it must be unmounted first.',
+    zh: '卸载工具「{slug}」？这一组动作会一起消失。',
+    en: 'Uninstall the tool "{slug}"? Its whole group of actions goes with it.',
   },
   'tools.uninstalled': { zh: '已卸载 {slug}', en: 'Uninstalled {slug}' },
 
@@ -326,23 +308,14 @@ export const toolsText = {
   //    "挂载"的意思从"把整组动作交给它"（那是审核者那一侧的事）改成
   //    "把包的脚本与说明送进它的工作目录，干活时可以调用"——两个行为面必须
   //    在措辞上分开，不然"工具"这个字在两个角色身上各说一半，最容易让人误会。
-  'tools.detailSection': { zh: '干活时能用的工具包', en: 'Tool packages for working' },
-  'tools.detailMountedLabel': { zh: '干活时能用的工具组', en: 'Tool packages it can use while working' },
-  'tools.detailNoTools': {
-    zh: '还没挂任何工具——它只用自己的内置能力干活。',
-    en: 'No tools mounted — it works with its built-in capabilities only.',
-  },
-  'tools.detailPickLabel': { zh: '可挂载的工具组', en: 'Tool packages to mount' },
-  'tools.detailNoInstalled': {
-    zh: '还没有装任何工具（先到「工具」页装一个）。',
-    en: 'No tools installed yet (install one on the Tools page first).',
-  },
-  'tools.detailMountHint': {
-    zh: '挂载 = 把这几个包的脚本与说明送进它的工作目录，干活时可以调用。取消勾选即摘掉；审核者不挂工具（它只判断、不动手），所以审核者的详情里没有这一段。',
-    en: 'Mounting = placing that package’s scripts and docs into its work directory, callable while it works. Untick to unmount; reviewers mount no tools (they only judge, never act), which is why a reviewer has no such section.',
-  },
-  'tools.detailSave': { zh: '保存挂载', en: 'Save mounts' },
-  'tools.detailSaved': { zh: '已保存工具挂载', en: 'Tool mounts saved' },
+  // ⚠️ 这里原来有 8 条只属于**执行者详情里"工具包"那一段**的词：
+  //    detailSection「干活时能用的工具包」/ detailMountedLabel「干活时能用的工具组」/
+  //    detailNoTools / detailPickLabel「可挂载的工具组」/ detailNoInstalled /
+  //    detailMountHint / detailSave「保存挂载」/ detailSaved。
+  //    使用者的要求是「执行智能体不支持"行动"，去掉」——先撤勾选栏、再整段撤掉，
+  //    这 8 条就没有渲染点了，一并删掉。留着就是"词表里有一条谁也渲染不出来的话"，
+  //    下一个人会以为哪里漏了。
+  //    要恢复那个界面入口，这 8 条连同 AgentDetail 里那一段一起加回来。
 
   // ── 行动权限：可勾已装工具的动作 ──
   //

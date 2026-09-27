@@ -1,4 +1,4 @@
-import type { Run } from '@alpha-helper/protocol'
+import type { Run } from '@agentdeck/protocol'
 import type { Store } from '../ports/store.ts'
 import type { ChainStep } from './bounds.ts'
 

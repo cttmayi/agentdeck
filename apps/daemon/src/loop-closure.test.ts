@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import { FileStore } from '@alpha-helper/store-file'
+import { FileStore } from '@agentdeck/store-file'
 import {
   assertCanDeriveRun,
   detectChainCycle,
@@ -8,8 +8,8 @@ import {
   withCurrentVerdict,
   loadChainSteps,
   type ChainStep,
-} from '@alpha-helper/domain'
-import { type Action, type Run, type VerdictRecord } from '@alpha-helper/protocol'
+} from '@agentdeck/domain'
+import { type Action, type Run, type VerdictRecord } from '@agentdeck/protocol'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -42,7 +42,8 @@ let store: FileStore
 before(async () => {
   dir = await makeTempDir('loop-closure')
   store = await FileStore.open({ dataDir: dir, fsync: false })
-  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS,
+  await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '',
+    chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS,
     name: '闭环测试',
     createdAt: Date.now(),
     updatedAt: Date.now(),

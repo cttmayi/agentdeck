@@ -1,7 +1,9 @@
 import type { TextCatalog } from '../text.ts'
 import { agentsText } from './agents.ts'
+import { chatText } from './chat.ts'
 import { commonText } from './common.ts'
 import { errorsText } from './errors.ts'
+import { filesText } from './files.ts'
 import { installText } from './install.ts'
 import { newtaskText } from './newtask.ts'
 import { runsText } from './runs.ts'
@@ -33,6 +35,8 @@ import { toolsText } from './tools.ts'
  */
 export const webText = {
   ...commonText,
+  // ★ 聊天：闭环的旁路（没有判决，因此也没有动作）
+  ...chatText,
   ...shellText,
   ...tasksText,
   ...agentsText,
@@ -43,6 +47,7 @@ export const webText = {
   ...newtaskText,
   ...runsText,
   ...errorsText,
+  ...filesText,
   ...termsText,
   // ★ D40：工具（列表 / 安装抽屉 / 智能体详情里的挂载 / 审核标准里可勾的工具动作）
   ...toolsText,

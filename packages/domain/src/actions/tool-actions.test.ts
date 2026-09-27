@@ -6,7 +6,7 @@ import {
   VERDICT_FENCE_END,
   type ActionRef,
   type Tool,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { decideReview, isStructuralInvalid } from '../review/pipeline.ts'
 import {
   bindParams,
@@ -56,7 +56,7 @@ function makeTool(
 ): Tool {
   const slug = input.slug ?? 'example-note'
   const manifest = ToolManifest.parse({
-    schema: 'alpha-helper/tool@1',
+    schema: 'agentdeck/tool@1',
     slug,
     name: input.name ?? '示例工具',
     version: input.version === undefined ? '1.0.0' : input.version,

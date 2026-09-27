@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { ActionRefType, Agent } from '@alpha-helper/protocol'
-import { resolveReviewStandard } from './review-standard.ts'
+import type { ActionRefType, Agent } from '@agentdeck/protocol'
+import {
+  effectiveAllowedActions,
+  resolveReviewStandard,
+  reviewerIdentity,
+} from './review-standard.ts'
 
 /**
  * ══════════════════════════════════════════════════════════════════
@@ -62,21 +66,32 @@ describe('D37：审核标准怎么解析', () => {
   test('有内联标准 ⇒ 用它，且不标成"来自 skill"', () => {
     const resolved = resolveReviewStandard(
       agent(
-        { name: '安全审核', body: '# 安全审核\n\n1. 只看越权。' },
+        { body: '# 安全审核\n\n1. 只看越权。' },
         ['fixture-tool.act'],
       ),
       [],
     )
     assert.ok(resolved)
-    assert.equal(resolved.name, '安全审核')
     assert.match(resolved.body, /只看越权/)
     assert.deepEqual(resolved.allowedActions, ['fixture-tool.act'], '来自 agent.allowedActions')
     assert.equal(resolved.fromSkills, false)
   })
 
+  test('★★ 老数据里的标准还带着 `name` 键 ⇒ 读的时候忽略它，不需要迁移', () => {
+    // 删掉那个字段之前存的记录里，标准是 `{ name, body }` 两截。整条记录以 JSON
+    // 存、读取路径上没有 zod 校验，所以老记录读回来**一定**还带着 `name`——
+    // 这条钉的是"不需要数据迁移"这句话：多的那个键不影响任何解析结果。
+    const legacy = { name: '当年起的名字', body: '# 正文\n\n照旧要能判' } as unknown as Agent['reviewStandard']
+    const resolved = resolveReviewStandard(agent(legacy, ['fixture-tool.act']), [])
+    assert.ok(resolved, '带多余键的老标准照样能用')
+    assert.equal(resolved.body, '# 正文\n\n照旧要能判')
+    assert.deepEqual(resolved.allowedActions, ['fixture-tool.act'])
+    assert.equal(resolved.fromSkills, false)
+  })
+
   test('★ 动作来自 `Agent.allowedActions`，不是标准里的那份（搬家后的正常路径）', () => {
     // 内联标准里**没有**动作字段（写入口只写名字与正文），agent 上那份才是权威。
-    const resolved = resolveReviewStandard(agent({ name: '标准', body: '正文' }, ['other-tool.act']), [])
+    const resolved = resolveReviewStandard(agent({ body: '正文' }, ['other-tool.act']), [])
     assert.ok(resolved)
     assert.deepEqual(resolved.allowedActions, ['other-tool.act'])
   })
@@ -86,7 +101,7 @@ describe('D37：审核标准怎么解析', () => {
     // 键**根本不存在** ⇒ 读取时按空处理）。判决必须照旧按它校验，否则
     // "一次升级就把在跑的审核者的动作权限抹掉"。
     const resolved = resolveReviewStandard(
-      agent({ name: '老标准', body: '正文', allowedActions: ['fixture-tool.act', 'other-tool.act'] }),
+      agent({ body: '正文', allowedActions: ['fixture-tool.act', 'other-tool.act'] }),
       [],
     )
     assert.ok(resolved)
@@ -101,7 +116,7 @@ describe('D37：审核标准怎么解析', () => {
     // 合并语义是安全相关的：并集等于悄悄放宽权限、交集等于莫名其妙收紧，
     // 两个都不该是隐式行为。谁在权威位置上，就只按谁判。
     const resolved = resolveReviewStandard(
-      agent({ name: '标准', body: '正文', allowedActions: ['third-tool.act'] }, ['fixture-tool.act']),
+      agent({ body: '正文', allowedActions: ['third-tool.act'] }, ['fixture-tool.act']),
       [],
     )
     assert.ok(resolved)
@@ -144,7 +159,7 @@ describe('D37：审核标准怎么解析', () => {
   })
 
   test('★ 内联标准优先于挂载的 skill（两份都在时以内联为准，不合并）', () => {
-    const resolved = resolveReviewStandard(agent({ name: '内联', body: '内联正文' }, ['fixture-tool.act']), [
+    const resolved = resolveReviewStandard(agent({ body: '内联正文' }, ['fixture-tool.act']), [
       skill('挂着的', 'skill 正文'),
       legacySkill('老挂着的', '老正文', ['other-tool.act', 'third-tool.act']),
     ])
@@ -172,7 +187,7 @@ describe('D37：审核标准怎么解析', () => {
     assert.equal(resolveReviewStandard(agent(null), []), null)
     assert.equal(resolveReviewStandard(agent(null), [skill('空壳', '   ')]), null)
     assert.equal(
-      resolveReviewStandard(agent({ name: '空正文', body: '  ' }), []),
+      resolveReviewStandard(agent({ body: '  ' }), []),
       null,
       '只有空白的"标准"等于没有标准',
     )
@@ -181,12 +196,116 @@ describe('D37：审核标准怎么解析', () => {
   test('内联标准存在但正文空白时，**回落到 skill**（而不是当成"有标准"）', () => {
     // 边界情形：使用者把正文清空了、但没删除那条标准。这时不能拿它当标准
     // （它没有任何内容），也不能让审核者直接变成"审不了"——挂了 skill 就照旧用。
-    const resolved = resolveReviewStandard(agent({ name: 'x', body: '' }, ['fixture-tool.act']), [
+    const resolved = resolveReviewStandard(agent({ body: '' }, ['fixture-tool.act']), [
       skill('兜底标准', '兜底正文'),
     ])
     assert.ok(resolved)
     assert.equal(resolved.fromSkills, true)
     assert.match(resolved.body, /兜底正文/)
     assert.deepEqual(resolved.allowedActions, ['fixture-tool.act'], '动作仍然只由 agent 决定')
+  })
+})
+
+/**
+ * ★★ 2026-09：标准并进「指令」，资格判据改成「身份非空」。
+ *
+ * 两件事必须一起做（只做一件都会坏）：
+ *
+ *   · 只改判据 ⇒ 一个**只写了标准、没写指令**的老审核者当场**静默停摆**；
+ *   · 只改归属 ⇒ 界面撤了那个框，判据还在看它 ⇒ 新建的审核者永远派不出审核。
+ *
+ * 所以判据看的是**合成后的身份**：指令在前，老数据的标准正文并进来。
+ */
+describe('2026-09：审核者身份（指令 + 老数据的标准）', () => {
+  const skills = [{ name: 'skill-probe', body: '# 老标准\n\n只看有没有写测试。' }]
+
+  test('★ 只有指令 ⇒ 身份就是指令（新数据的正常路径）', () => {
+    const out = reviewerIdentity({ reviewStandard: null, instructions: '你按这条判。' }, [])
+    assert.equal(out.text, '你按这条判。')
+    assert.equal(out.fromLegacyStandard, false)
+  })
+
+  test('★★ 只有老数据里的标准 ⇒ 身份是它，而且仍然算"有身份"（不会静默停摆）', () => {
+    const inline = reviewerIdentity(
+      { reviewStandard: { body: '# 老内联标准', allowedActions: [] }, instructions: '' },
+      [],
+    )
+    assert.equal(inline.text, '# 老内联标准')
+    assert.equal(inline.fromLegacyStandard, true)
+
+    const fromSkill = reviewerIdentity({ reviewStandard: null, instructions: '' }, skills)
+    assert.match(fromSkill.text, /老标准/)
+    assert.equal(fromSkill.fromLegacyStandard, true)
+  })
+
+  test('★ 两样都有 ⇒ 合成（指令在前，标准在后），并标出标准是老数据', () => {
+    const out = reviewerIdentity(
+      { reviewStandard: { body: '# 老内联标准', allowedActions: [] }, instructions: '你是谁。' },
+      [],
+    )
+    assert.equal(out.text, '你是谁。\n\n# 老内联标准')
+    assert.equal(out.fromLegacyStandard, true)
+  })
+
+  test('★ 两样都空 ⇒ 空身份（这时才不派审核）', () => {
+    assert.equal(reviewerIdentity({ reviewStandard: null, instructions: '   ' }, []).text, '')
+    assert.equal(reviewerIdentity({ reviewStandard: null, instructions: null }, []).text, '')
+  })
+})
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * ★★ 动作权限的取法**不许经过"有没有标准正文"**（2026-09 修的那个坑）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这是本仓库里"一个坏掉的导出边界、症状出现在离它很远的地方"的典型：
+ *
+ *   `effectiveAllowedActions` 原来**不导出**，注释里写着"调用方用
+ *   `resolveReviewStandard(...).allowedActions` 就行"。而后者回答的是
+ *   "审核标准是什么"——**没有正文时它返回 `null`**。于是 `executor.ts` 里那两处
+ *
+ *     `run.allowedActions ?? resolveReviewStandard(...)?.allowedActions ?? []`
+ *
+ *   的判据悄悄变成了"**有没有正文**"：
+ *
+ *     · 标准内联在 agent 上 ⇒ 动作权限正常；
+ *     · 标准并进「指令」、老字段被清成 `null` ⇒ 这一项变成 `[]` ⇒ 判决一引用动作，
+ *       就被升级成「动作 X 不在这个审核者的行动权限里（当前允许：无）」。
+ *
+ * 而"标准并进「指令」"正是 2026-09 之后**所有新审核者的常态**：新建一个审核者、
+ * 给它勾上动作，它永远触发不了任何动作，且**没有任何一处报错**。
+ * 抓它的是 `s1-e2e` 那条端到端（它给播种的审核者授权动作，而那条用例走的就是
+ * "标准在 agent 上"这条路；一次"保存时并进「指令」"的改动把它点着了）。
+ */
+describe('★★ 动作权限与"有没有标准正文"是两件事（2026-09）', () => {
+  const ACT = 'fixture-tool.act' as ActionRefType
+
+  test('★★★ 标准并进「指令」之后（`reviewStandard: null`）动作权限**仍然拿得到**', () => {
+    const merged = { reviewStandard: null, instructions: '你是谁。\n\n# 判定', allowedActions: [ACT] }
+    assert.deepEqual(
+      effectiveAllowedActions(merged, []),
+      [ACT],
+      '★ 这就是那个坑：动作权限必须与正文无关（否则"并进「指令」"等于把权限清空）',
+    )
+    assert.equal(
+      resolveReviewStandard(merged, []),
+      null,
+      '⚠️ 而 `resolveReviewStandard` 在这种形态下**确实**返回 null——它回答的是"标准是什么"，' +
+        '所以动作权限不能借它的返回值（借了就会被 `?? []` 吞掉）',
+    )
+  })
+
+  test('★ 老数据的回退顺序照旧：自己的那份优先，为空才回退到标准里那份', () => {
+    const legacy = {
+      reviewStandard: { body: '# 老标准', allowedActions: ['legacy.act' as ActionRefType] },
+      instructions: '',
+      allowedActions: [ACT],
+    }
+    assert.deepEqual(effectiveAllowedActions(legacy, []), [ACT], '自己有 ⇒ 用自己那份')
+    assert.deepEqual(
+      effectiveAllowedActions({ ...legacy, allowedActions: [] }, []),
+      ['legacy.act'],
+      '自己空 ⇒ 回退到老标准里那份（只读兼容）',
+    )
   })
 })

@@ -122,7 +122,7 @@ export const COMMANDS: CommandSpec[] = [
     needsPositional: true,
     async run(ctx, { positionals, flags }) {
       const title = positionals[0]
-      if (!title) throw new CommandError('需要标题：alpha-helper issue-create "标题"')
+      if (!title) throw new CommandError('需要标题：agentdeck issue-create "标题"')
       return api(ctx, '/api/issues', {
         method: 'POST',
         body: JSON.stringify({ title, description: str(flags, 'desc') ?? '' }),

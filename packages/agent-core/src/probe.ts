@@ -144,17 +144,18 @@ export function clearProbeCache(): void {
  */
 export async function detectVersion(executablePath: string): Promise<string | null> {
   return new Promise((resolve) => {
-    let out = ''
+    const stdoutLines: string[] = []
+    const stderrLines: string[] = []
     const handle = spawnProcessTree({
       command: executablePath,
       args: ['--version'],
       cwd: process.cwd(),
       env: process.env,
       onStdoutLine: (line) => {
-        out += `${line}\n`
+        stdoutLines.push(line)
       },
       onStderrLine: (line) => {
-        out += `${line}\n`
+        stderrLines.push(line)
       },
     })
 
@@ -166,10 +167,18 @@ export async function detectVersion(executablePath: string): Promise<string | nu
 
     void handle.exited.then(() => {
       clearTimeout(timer)
-      const first = out.trim().split('\n')[0]?.trim() ?? ''
-      if (!first) return resolve(null)
-      const match = first.match(/\d+\.\d+\.\d+(?:[-.\w]*)?/)
-      resolve(match ? match[0] : first.slice(0, 64))
+      // ★ 版本号以 **stdout** 为准：stderr 可能是警告/日志（codex 的 --version
+      //   会先在 stderr 打一行 WARNING，抢到"第一行"会把版本探测变成垃圾串）。
+      //   从 stdout 里找第一个长得像版本的；stdout 为空才退回 stderr。
+      const pick = (lines: string[]): string | null => {
+        if (lines.length === 0) return null
+        const withVersion = lines.map((l) => l.trim()).find((l) => /\d+\.\d+\.\d+(?:[-.\w]*)?/.test(l))
+        const first = withVersion ?? lines[0]?.trim() ?? ''
+        if (!first) return null
+        const match = first.match(/\d+\.\d+\.\d+(?:[-.\w]*)?/)
+        return match ? match[0] : first.slice(0, 64)
+      }
+      resolve(pick(stdoutLines) ?? pick(stderrLines))
     })
   })
 }

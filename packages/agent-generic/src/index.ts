@@ -1,5 +1,5 @@
 /**
- * `@alpha-helper/agent-generic` —— 第二个 agent CLI 适配器。
+ * `@agentdeck/agent-generic` —— 第二个 agent CLI 适配器。
  *
  * 存在的意义不在于"多支持一个厂商"，而在于给出**可插拔的第二个实证**：
  * 描述表里加一行、本包实现 `AgentBackend`，其余调用点（argv 组装、

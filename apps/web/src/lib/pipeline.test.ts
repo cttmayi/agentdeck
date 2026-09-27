@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { renderText, webText } from '@alpha-helper/i18n'
+import { renderText, webText } from '@agentdeck/i18n'
 import {
   PIPELINE_COLUMNS,
   formatRunStamp,
@@ -11,7 +11,7 @@ import {
   type Stage,
   type StageInfo,
 } from './pipeline.ts'
-import type { RunSummary } from './api.ts'
+import type { Issue, RunSummary } from './api.ts'
 
 /**
  * ★ `note` / `warning` 已经是**文案键**（D39），所以这里先把它们按中文渲染出来
@@ -59,16 +59,27 @@ function run(over: Partial<RunSummary> & { runId: string; kind: string }): RunSu
 
 const ISSUE = 'i1'
 
+/**
+ * 造一个"够 `stageOf` 用"的任务：它只关心 id 与 status。
+ *
+ * `status` 默认 `'todo'`——那是新建任务的默认状态（daemon 侧 `POST /api/issues`），
+ * 也就是**未放弃**。所以下面那几十条只关心 run 推导的用例读起来跟以前一样，
+ * 而"放弃"那几条显式传 `'cancelled'`。
+ */
+function task(id: string, status: Issue['status'] = 'todo'): Pick<Issue, 'id' | 'status'> {
+  return { id, status }
+}
+
 describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   test('一条执行 run 都没有 ⇒ 第一列（还没开始）', () => {
-    const info = stageOf(ISSUE, [])
+    const info = stageOf(task(ISSUE), [])
     assert.equal(info.stage, 'executing')
     assert.equal(note(info), '还没开始执行')
     assert.equal(info.executeRun, null)
   })
 
   test('执行中 ⇒ 第一列', () => {
-    const info = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'running' })])
+    const info = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'running' })])
     assert.equal(info.stage, 'executing')
     // 标签就写着"执行中"，note 必须为空——否则就是使用者点掉的那种重复
     assert.equal(note(info), null)
@@ -76,7 +87,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
 
   test('★ 等目录释放时说清楚，而不是含糊的"进行中"', () => {
     // 这个状态可能停很久，而"进行中"会让人以为在跑
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'waiting_local_directory' }),
     ])
     assert.match(String(note(info)), /排队中/)
@@ -86,7 +97,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   test('★ 执行完成、审核未跑 ⇒ 第二列，并指出"没有派审核"', () => {
     // 这是**配置问题**（agent 没配「由谁审它」），不是运行故障。
     // 只显示"等待审核"会让人一直等一个不会来的东西。
-    const info = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
+    const info = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
     assert.equal(info.stage, 'awaiting_review')
     assert.equal(note(info), null, '★ 标签已经是"待审查"，不能再写一遍"等待审核"')
     assert.match(String(warn(info)), /没有派审核/)
@@ -94,7 +105,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   })
 
   test('审核进行中 ⇒ 第二列，不报警', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -104,7 +115,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   })
 
   test('★ 审核完成 ⇒ 第三列', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -119,7 +130,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
     //
     // `needs_human` 的意思是**判决自己说了"这事得人来定"**——它没在等人审，
     // 它在等**你**。归进「已审查」等于把待办显示成做完了。
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
         runId: 'r1',
@@ -140,7 +151,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   })
 
   test('★ 判决状态 escalated 同样算「待人工」（D45：fail 用完返工/没配返工就是这条路）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
         runId: 'r1',
@@ -157,7 +168,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   })
 
   test('★ D45：判决已派返工（rework_requested）⇒「执行中」，不是「已审查」', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
         runId: 'r1',
@@ -171,6 +182,205 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
     assert.equal(info.stage, 'executing', '不通过 + 正在重做 ≠ 做完了')
   })
 
+  // ══════════════════════════════════════════════════════════════════
+  // ★ D46：人工裁决
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 人工裁决有两种落点，这一段把两条路**分别**钉住。要紧的是第二组：裁决挂在
+  // **执行 run** 上（"压根没配审核者"那种任务）。推导层漏掉那个分支的症状是
+  // "请求 201 成功、判决确实落库了、看板一动不动"——最难查的一类失效。
+
+  test('★ 人工判通过（挂在审核 run 上）⇒「已审查」', () => {
+    // 与上面那条 `escalated + fail` 的用例是**同一套记录**，只差最后一条判决是
+    // 谁做的、结论是什么。这个对照正是要说明人工裁决不必特殊对待：
+    // `listVerdictsByRun` 按 createdAt 排序，末条就是人工那条。
+    const info = stageOf(task(ISSUE), [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: {
+          status: 'advisory',
+          conclusion: 'pass',
+          escalateReason: null,
+          source: 'human',
+        },
+      }),
+    ])
+    assert.equal(info.stage, 'reviewed', '★ 人判通过 ⇒ 出「等待人处理」')
+    assert.equal(warn(info), null)
+  })
+
+  test('★ 人工判通过 ⇒「已审查」；它**只可能是通过**（D47 之后没有人工 fail）', () => {
+    const info = stageOf(task(ISSUE), [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: {
+          status: 'advisory',
+          conclusion: 'pass',
+          escalateReason: null,
+          source: 'human',
+        },
+      }),
+    ])
+    assert.equal(info.stage, 'reviewed')
+    assert.equal(warn(info), null)
+  })
+
+  test('★ 没有审核 run 时，人工裁决挂在**执行 run** 上（"没配审核者"那种任务）', () => {
+    // 「这一次明确不审」（D28 里的合法选择）⇒ 一条 review run 都没有。在这之前
+    // 这种任务永远停在「待审查」+ "没有派审核"的警告，而人无路可走。
+    const before = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
+    assert.equal(before.stage, 'awaiting_review', '前提：没有审核结论时是「待审查」')
+
+    const after = stageOf(task(ISSUE), [
+      run({
+        runId: 'e1',
+        kind: 'execute',
+        status: 'completed',
+        // ★ 这就是 daemon 侧 D46 改动的那条投影：执行 run 现在也会带上判决
+        verdict: {
+          status: 'advisory',
+          conclusion: 'pass',
+          escalateReason: null,
+          source: 'human',
+        },
+      }),
+    ])
+    assert.equal(after.stage, 'reviewed', '★ 人自己确认过 ⇒ 出「待审查」')
+    assert.equal(after.reviewRun, null, '这里**没有**审核 run——判决挂在执行 run 上')
+    assert.equal(after.executeRun?.runId, 'e1')
+  })
+
+  test('★ 执行 run 上的判决**不是人工做的**时，不许当成人工裁决', () => {
+    // 判据必须是 `source === 'human'`，不能只判"执行 run 上有没有判决"：执行 run
+    // 上出现**模型**判决是另一条不存在的链路，真出现了也不该被显示成"人做的决定"
+    // ——那会把一个实现错误伪装成一个合法状态。
+    const info = stageOf(task(ISSUE), [
+      run({
+        runId: 'e1',
+        kind: 'execute',
+        status: 'completed',
+        verdict: {
+          status: 'advisory',
+          conclusion: 'pass',
+          escalateReason: null,
+          source: 'agent',
+        },
+      }),
+    ])
+    assert.equal(info.stage, 'awaiting_review', '★ 缺字段 / agent 一律按"没有人工裁决"处理')
+  })
+
+  test('★ 行动失败不会被人工裁决掩盖（回归）', () => {
+    // 判决通过了、动作失败了 ⇒ 仍然「行动失败」。这一段钉住的是界面那边
+    // "行动中 / 行动失败不给人工通过"那个闸门的前提：如果推导层在这里判成
+    // 「已审查」，那么在那个阶段点一下"通过"就能把没做成的事说成做完了。
+    const info = stageOf(task(ISSUE), [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: { status: 'dispatched_to_action', conclusion: 'pass', escalateReason: null },
+        action: { status: 'failed', type: 'example-note.append-note', error: '写不进去' },
+      }),
+    ])
+    assert.equal(info.stage, 'action_failed')
+  })
+
+  // ══════════════════════════════════════════════════════════════════
+  // ★ D47：放弃
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 放弃是**任务级**的事实，它盖过一切由 run 推出来的阶段。这一段要钉住的正是
+  // "盖过"这件事——包括最难查的那种：一个**正在跑**的任务被放弃之后，run 跑完
+  // 时阶段必须仍然是「已放弃」，而不是自己跳回「待审查」。
+
+  test('★ 放弃的任务一律是「已放弃」，与它卡在哪一档无关', () => {
+    // 逐个覆盖：每一档都拿一条本来会推出别的结论的记录，把状态换成 cancelled。
+    const cases: Array<[string, RunSummary[]]> = [
+      ['一条 run 都没有', []],
+      ['执行中', [run({ runId: 'e1', kind: 'execute', status: 'running' })]],
+      ['待审查', [run({ runId: 'e1', kind: 'execute', status: 'completed' })]],
+      [
+        '等待人处理',
+        [
+          run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+          run({
+            runId: 'r1',
+            kind: 'review',
+            status: 'completed',
+            subject: { type: 'run', id: 'e1' },
+            verdict: { status: 'escalated', conclusion: 'fail', escalateReason: null },
+          }),
+        ],
+      ],
+      [
+        '已完成审查',
+        [
+          run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+          run({
+            runId: 'r1',
+            kind: 'review',
+            status: 'completed',
+            subject: { type: 'run', id: 'e1' },
+            verdict: { status: 'advisory', conclusion: 'pass', escalateReason: null },
+          }),
+        ],
+      ],
+    ]
+    for (const [label, runs] of cases) {
+      const plain = stageOf(task(ISSUE), runs)
+      const dropped = stageOf(task(ISSUE, 'cancelled'), runs)
+      assert.equal(dropped.stage, 'abandoned', `放弃之后必须盖过「${label}」（原本是 ${plain.stage}）`)
+      // ★ 提示与警告都要清掉：`splitByAttention` 的判据就是 warningId，留着它
+      //   会让放弃过的任务继续占着「需要注意」那一拨——而放弃的全部意义就是
+      //   让它别再占你的注意力。
+      assert.equal(dropped.noteId, null, `「${label}」放弃之后不该再有提示`)
+      assert.equal(dropped.warningId, null, `「${label}」放弃之后不该再进「需要注意」`)
+    }
+  })
+
+  test('★ 放弃不会丢掉 run 的事实（详情页还要用它）', () => {
+    const runs = [
+      run({ runId: 'e1', kind: 'execute', status: 'completed' }),
+      run({
+        runId: 'r1',
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'e1' },
+        verdict: { status: 'escalated', conclusion: 'fail', escalateReason: null },
+      }),
+    ]
+    const info = stageOf(task(ISSUE, 'cancelled'), runs)
+    assert.equal(info.executeRun?.runId, 'e1', '★ 只改阶段，不把 run 抹掉')
+    assert.equal(info.reviewRun?.runId, 'r1')
+  })
+
+  test('★ 未放弃时（`todo`）推导结果与 D47 之前逐字相同', () => {
+    // `todo` 正是新建任务的默认状态（daemon 侧 `POST /api/issues`），也是
+    // `task()` 那个工厂的默认值——所以"放弃"那几条之外的用例全都走这一档，
+    // 它们的行为必须与 D47 之前逐字相同。
+    const runs = [run({ runId: 'e1', kind: 'execute', status: 'completed' })]
+    assert.equal(stageOf(task(ISSUE), runs).stage, 'awaiting_review')
+    // 其余任何非放弃状态同理：只有 `cancelled` 那一档会改变结论。
+    for (const status of ['backlog', 'in_progress', 'in_review', 'done', 'blocked']) {
+      assert.equal(
+        stageOf(task(ISSUE, status), runs).stage,
+        'awaiting_review',
+        `${status} 不是放弃，不该改变推导`,
+      )
+    }
+  })
+
   test('decided 的判决（pass/fail）仍然是「已审查」——别把正常的判成待人工', () => {
     // ⚠️ 用 `advisory`（判决有效、没有后续动作）而不是 `dispatched_to_action`：
     //   后者表示"派给了动作"，那在 D40 之后按「行动中」算（它必须真的做过才算完）。
@@ -178,7 +388,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
       ['pass', 'advisory'],
       ['fail', 'advisory'],
     ] as const) {
-      const info = stageOf(ISSUE, [
+      const info = stageOf(task(ISSUE), [
         run({ runId: 'e1', kind: 'execute', status: 'completed' }),
         run({
           runId: 'r1',
@@ -194,7 +404,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
   })
 
   test('审核还没跑完 ⇒ 仍是「待审查」，不是「待人工」', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -207,7 +417,7 @@ describe('★ 那条链：审核的 subject 是**执行 run 的 id**，不是 is
     // 审核 run 的 subject 是 `{type:'run', id: 执行runId}`。
     // 如果实现里写成"按 issue 过滤 review run"，这里就会判成"没有派审核"，
     // 而实际上审核已经完成了。症状是卡片永远停在第二列。
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -215,7 +425,7 @@ describe('★ 那条链：审核的 subject 是**执行 run 的 id**，不是 is
   })
 
   test('审核 run 指向**别的**执行时不算数', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       // 这条审核是审另一次执行的，与 e1 无关
       run({ runId: 'r9', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e99' } }),
@@ -224,7 +434,7 @@ describe('★ 那条链：审核的 subject 是**执行 run 的 id**，不是 is
   })
 
   test('别的 issue 的执行 run 不参与', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'other', kind: 'execute', status: 'running', subject: { type: 'issue', id: 'i2' } }),
     ])
     assert.equal(info.executeRun, null, '只看这个 issue 的执行')
@@ -233,7 +443,7 @@ describe('★ 那条链：审核的 subject 是**执行 run 的 id**，不是 is
 
 describe('★ 重试：以**最新**那次为准', () => {
   test('★ 旧执行已完成、新执行在跑 ⇒ 第一列（不是第二列）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed', queuedAt: 1000 }),
       run({ runId: 'e2', kind: 'execute', status: 'running', queuedAt: 5000 }),
     ])
@@ -241,7 +451,7 @@ describe('★ 重试：以**最新**那次为准', () => {
   })
 
   test('★ 最新执行已有完成的审核 ⇒ 第三列，即使更早有失败的执行', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'failed', queuedAt: 1000 }),
       run({ runId: 'e2', kind: 'execute', status: 'completed', queuedAt: 5000 }),
       run({ runId: 'r2', kind: 'review', status: 'completed', queuedAt: 6000, subject: { type: 'run', id: 'e2' } }),
@@ -250,7 +460,7 @@ describe('★ 重试：以**最新**那次为准', () => {
   })
 
   test('旧执行有审核、新执行没有 ⇒ 第二列（新那次的审核还没跑）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed', queuedAt: 1000 }),
       run({ runId: 'r1', kind: 'review', status: 'completed', queuedAt: 2000, subject: { type: 'run', id: 'e1' } }),
       run({ runId: 'e2', kind: 'execute', status: 'completed', queuedAt: 5000 }),
@@ -263,7 +473,7 @@ describe('★ 失败的执行要说明，不能静静躺在"待审查"里', () =
   test('★ 执行失败 ⇒ 第二列 + 明确的失败提示', () => {
     // 失败的执行**不会**有审核结果——没有产出可审。只显示"等待审核"
     // 会让人一直等。
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'failed', failureReason: 'infra_error' }),
     ])
     assert.equal(info.stage, 'awaiting_review')
@@ -272,31 +482,35 @@ describe('★ 失败的执行要说明，不能静静躺在"待审查"里', () =
   })
 
   test('被取消的执行说"被取消"，不说"失败"', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'cancelled' }),
     ])
     assert.match(String(warn(info)), /被取消/)
   })
 
   test('执行成功但没派审核时，提示的是"没派审核"而不是"失败"', () => {
-    const info = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
+    const info = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
     assert.match(String(warn(info)), /没有派审核/)
     assert.ok(!String(warn(info)).includes('失败'))
   })
 })
 
-describe('五列的定义', () => {
+describe('六列的定义', () => {
   test('★ 顺序就是流水线方向：行动中在「已审查」之前，待人工也在它之前', () => {
     // 从左往右读 = 越来越接近结束：
     //   执行中 → 待审查 → 行动中 → 等待人处理 → 已完成审查
     // "待人工"与"行动失败"都是**卡在你手里**那一档——还没结束，所以在"已审查"前面。
+    //
+    // ★ D47：「已放弃」在最后，但它**不是流水线的下一站**——它是人的一个判断
+    //   （"我不管它了"），与"越来越接近结束"无关。放在末尾是为了让它看得见但不
+    //   占注意力，不是为了让它读起来像终点。
     assert.deepEqual(
       PIPELINE_COLUMNS.map((c) => c.ids[0]),
-      ['executing', 'awaiting_review', 'action_running', 'needs_human', 'reviewed'],
+      ['executing', 'awaiting_review', 'action_running', 'needs_human', 'reviewed', 'abandoned'],
     )
   })
 
-  test('★ 六档 stage **一个不漏**地落在某一列里（否则那一档的任务会凭空消失）', () => {
+  test('★ 七档 stage **一个不漏**地落在某一列里（否则那一档的任务会凭空消失）', () => {
     // 这是"加了一档却忘了给它一列"的守卫：阶段推导出新值、而列里没有它时，
     // 看板上那条任务**哪里都不出现**（列表还在，看板里没有），最难查的那种。
     const inColumns = PIPELINE_COLUMNS.flatMap((c) => [...c.ids])
@@ -307,6 +521,7 @@ describe('五列的定义', () => {
       'action_failed',
       'needs_human',
       'reviewed',
+      'abandoned',
     ]
     for (const stage of all) {
       assert.ok(inColumns.includes(stage), `阶段 ${stage} 没有落在任何一列里`)
@@ -426,7 +641,7 @@ describe('★ 任务名下的 run：执行 + 审它的 review（审查结论才�
       run({ runId: 'e1', kind: 'execute', queuedAt: 1000 }),
       run({ runId: 'r1', kind: 'review', queuedAt: 2000, subject: { type: 'run', id: 'e1' } }),
     ]
-    const info = stageOf(ISSUE, all)
+    const info = stageOf(task(ISSUE), all)
     assert.equal(info.stage, 'reviewed')
     assert.equal(info.reviewRun?.runId, 'r1')
     assert.ok(
@@ -457,7 +672,7 @@ describe('★ 「需要注意」单独一拨（不是重排全部）', () => {
             : (r.subject ?? { type: 'run', id: 'unknown' }),
       }),
     )
-    return { issue: { id }, info: stageOf(id, list) }
+    return { issue: { id }, info: stageOf(task(id), list) }
   }
 
   test('★ 执行失败的任务进「需要注意」，并带原因', () => {
@@ -548,7 +763,7 @@ describe('★ note：只给标签之外的信息（去掉重复字样）', () =>
    * 所以这里逐种情况钉住"该说什么、不该说什么"。
    */
   test('★ 待审查 + 还没开始审 / 审核在排队 ⇒ note 为空（标签已经说了）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'queued', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -557,7 +772,7 @@ describe('★ note：只给标签之外的信息（去掉重复字样）', () =>
   })
 
   test('★ 待审查 + 审核正在跑 ⇒ note 说「审核中」（这是额外信息）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'running', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -565,24 +780,24 @@ describe('★ note：只给标签之外的信息（去掉重复字样）', () =>
   })
 
   test('★ 执行中（真的在跑）⇒ note 为空；排队中 ⇒ 说清是排队', () => {
-    const running = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'running' })])
+    const running = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'running' })])
     assert.equal(running.stage, 'executing')
     assert.equal(note(running), null, '★ 不能在「执行中」后面再写「执行中」')
 
-    const queued = stageOf(ISSUE, [
+    const queued = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'waiting_local_directory' }),
     ])
     assert.match(note(queued) ?? '', /排队中/, '排队是标签之外的信息，要留着')
   })
 
   test('★ 一次都没跑过 ⇒ note 说「还没开始执行」（否则标签会说谎）', () => {
-    const info = stageOf(ISSUE, [])
+    const info = stageOf(task(ISSUE), [])
     assert.equal(info.stage, 'executing')
     assert.equal(note(info), '还没开始执行')
   })
 
   test('★ 已审查 ⇒ note 为空', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({ runId: 'r1', kind: 'review', status: 'completed', subject: { type: 'run', id: 'e1' } }),
     ])
@@ -597,7 +812,7 @@ describe('★ note：只给标签之外的信息（去掉重复字样）', () =>
     //
     // 所以这里断言它**不存在**——这条断言就是防复发的闸门。（与
     // `RunSummary.lastSeq` 被删掉时留下的那两条断言同一个思路。）
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
     ])
     assert.equal(
@@ -647,7 +862,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
   test('★ 动作还在跑 ⇒ 行动中（不是"已审查"）', () => {
     for (const status of ['proposed', 'auto_approved', 'executing']) {
-      const info = stageOf(ISSUE, withAction({ status, type: 'comment.create', error: null }))
+      const info = stageOf(task(ISSUE), withAction({ status, type: 'comment.create', error: null }))
       assert.equal(info.stage, 'action_running', `${status} 应当显示成"行动中"`)
       assert.equal(info.warningId, null, '还在跑不是"需要注意"')
     }
@@ -656,13 +871,13 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
   test('★ 判决说"派给动作了"、动作记录还没落库 ⇒ 也算「行动中」（不是「已审查」）', () => {
     // 判决落库与动作落库之间有一小段窗口。那一瞬间显示成"做完了"是会骗人的，
     // 所以判据取判决自己的状态（`dispatched_to_action`）。
-    const info = stageOf(ISSUE, withAction(null))
+    const info = stageOf(task(ISSUE), withAction(null))
     assert.equal(info.stage, 'action_running')
   })
 
   test('★ 动作失败 ⇒ 行动失败，而且进「需要注意」并带上原因', () => {
     const info = stageOf(
-      ISSUE,
+      task(ISSUE),
       withAction({ status: 'failed', type: 'example-note.append-note', error: '脚本以非 0 退出码结束' }),
     )
     assert.equal(info.stage, 'action_failed')
@@ -673,7 +888,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
   test('★ 没有原因时换一条词条（否则界面上会留下 `{reason}` 字面量）', () => {
     const info = stageOf(
-      ISSUE,
+      task(ISSUE),
       withAction({ status: 'failed', type: 'comment.create', error: null }),
     )
     assert.equal(info.warningId, 'tasks.warnActionFailedNoReason')
@@ -682,11 +897,11 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
   test('★ 动作做成了（或本来就无需动作）⇒ 才算「已审查」', () => {
     for (const status of ['executed', 'skipped', 'rolled_back']) {
-      const info = stageOf(ISSUE, withAction({ status, type: 'comment.create', error: null }))
+      const info = stageOf(task(ISSUE), withAction({ status, type: 'comment.create', error: null }))
       assert.equal(info.stage, 'reviewed', `${status} 算做完了`)
     }
     // 判决有效但**没有要求任何动作**（`advisory`）⇒ 判决一出来就算完
-    const noAction = stageOf(ISSUE, [
+    const noAction = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
         runId: 'r1',
@@ -703,14 +918,14 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
   test('★ 不认识的（新加的）动作状态按"没做完"处理', () => {
     // 判据是**白名单**：将来加了新状态时，宁可多显示一会儿"行动中"，
     // 也不要把没做完的说成做完了。
-    const info = stageOf(ISSUE, withAction({ status: 'some_future_status', type: 'x.y', error: null }))
+    const info = stageOf(task(ISSUE), withAction({ status: 'some_future_status', type: 'x.y', error: null }))
     assert.equal(info.stage, 'action_running')
   })
 
   test('★ 行动失败的任务会进「需要注意」那一拨', () => {
     const staged = [
-      { issue: { id: ISSUE }, info: stageOf(ISSUE, withAction({ status: 'failed', type: 'x.y', error: '炸了' })) },
-      { issue: { id: 'ok' }, info: stageOf('ok', [run({ runId: 'e2', kind: 'execute', status: 'completed' })]) },
+      { issue: { id: ISSUE }, info: stageOf(task(ISSUE), withAction({ status: 'failed', type: 'x.y', error: '炸了' })) },
+      { issue: { id: 'ok' }, info: stageOf(task('ok'), [run({ runId: 'e2', kind: 'execute', status: 'completed' })]) },
     ]
     const { attention } = splitByAttention(staged)
     assert.deepEqual(attention.map((x) => x.issue.id), [ISSUE])
@@ -719,7 +934,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
 describe('★ 事实与提示分开：`action` 装的是这次到底做了什么', () => {
   test('动作事实原样带出来（契约值不翻译，详情页要显示它）', () => {
-    const info = stageOf(ISSUE, [
+    const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
         runId: 'r1',
@@ -739,7 +954,7 @@ describe('★ 事实与提示分开：`action` 装的是这次到底做了什么
   })
 
   test('没有动作 / 判决还没到那一步 ⇒ `action` 是 null（不是编一个空对象）', () => {
-    const noRuns = stageOf(ISSUE, [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
+    const noRuns = stageOf(task(ISSUE), [run({ runId: 'e1', kind: 'execute', status: 'completed' })])
     assert.equal(noRuns.action, null)
   })
 })

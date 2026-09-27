@@ -9,7 +9,8 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+  deliveredBytes,
+} from '@agentdeck/agent-core'
 import {
   ulid,
   VERDICT_FENCE_BEGIN,
@@ -17,7 +18,7 @@ import {
   type AuditRecord,
   type InboxItem,
   type VerdictRecord,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import {
   installToolPackage,
@@ -44,6 +45,8 @@ class ScriptedReviewBackend implements AgentBackend {
   script: unknown[] = []
   rawOverride: string | null = null
   seenContext: string | null = null
+  /** 系统提示（①②）。A 档下框架与身份走这条通道，`prompt` 里只剩 ③。 */
+  seenSystemPrompt: string | null = null
   calls = 0
   /**
    * 执行那一刻 `.claude/skills/` 下的文件（`slug/相对路径` → 内容）。
@@ -64,7 +67,11 @@ class ScriptedReviewBackend implements AgentBackend {
     this.calls += 1
     opts.onCommandLine?.({ argv: this.reportedArgv, sandboxDescription: '未启用沙箱（测试）' })
     // D29：交给 CLI 的只有第一句话（走 prompt），不再有 CLAUDE.md。
-    this.seenContext = opts.prompt
+    // 2026-09：三块组装之后，A 档把 ①② 放进系统提示 ⇒ "它被交代了什么"是两块合起来。
+    this.seenSystemPrompt = opts.systemPrompt ?? null
+    this.seenContext = [opts.systemPrompt ?? '', opts.prompt]
+      .filter((p) => p !== '')
+      .join('\n\n')
 
     this.seenSkillFiles = {}
     const skillsRoot = join(opts.workDir, '.claude', 'skills')
@@ -446,20 +453,56 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     // ★ 而且必须是**投递出去那段文本**的哈希，不是 `req.prompt`。
     //   改版前哈希的是 `req.prompt`——审核 run 的那句"请审核…"甚至没被送出去，
     //   于是哈希与输入对不上，"可追溯"就成了空话。
-    const sentence = await (async () => {
+    // ★ 从**这条 run 自己的日志**里取回那两块（2026-09 起日志把 ①②③ 三块
+    //   **分开带标签**记，见 executor.ts——那三块就是投递出去的内容本身，
+    //   逐字、不截断）。
+    //   ⚠️ 为什么不从日志按位置取 system/user：位置的先后是排版、不是投递事实；
+    //     A 档 system = ①② 按与 `renderDelivery` 同一口径拼、user = ③；B 档
+    //     user = 三条带标签的 note 原样 join（那就是投递出去的那一段）。
+    //   ⚠️ 按 run 取，不靠"后端最后收到的那一份"——那是全局的，后面再跑一条
+    //     run 就把它覆盖了。
+    const parts = await (async () => {
       const msgs = (
         ((await (await fetch(`${daemon.url}/api/runs/${reviewRun!.runId}/messages?since=-1`)).json()) as {
           messages: Array<{ content: string }>
         }).messages
       ).map((m) => m.content ?? '')
-      const at = msgs.findIndex((c) => c.startsWith('第一句话（'))
-      return at === -1 ? null : (msgs[at + 1] ?? null)
+      const header = msgs.find((c) => /投递档 [AB]：/.test(c)) ?? ''
+      const mode = /投递档 ([AB])：/.exec(header)?.[1]
+      if (!mode) return null
+      const blockOf = (label: string): string => {
+        const note = msgs.find((c) => c.startsWith(`===== ${label} =====`))
+        if (!note) return ''
+        return note.slice(`===== ${label} =====`.length).replace(/^\n+/, '')
+      }
+      const frame = blockOf('① 框架')
+      const identity = blockOf('② 身份')
+      const task = blockOf('③ 任务')
+      if (task === '') return null
+      if (mode === 'B') {
+        // B 档的 user = 三条带标签的 note 按序 join（与 `renderDelivery` B 同一拼法）
+        const notes = msgs.filter((c) => /^===== [①②③] /.test(c))
+        return { system: '', user: notes.join('\n\n') }
+      }
+      return { system: [frame, identity].filter((p) => p !== '').join('\n\n'), user: task }
     })()
-    assert.notEqual(sentence, null, '日志里应当能找到投递出去的第一句话')
+    assert.notEqual(parts, null, '日志里应当能找到三块带标签的内容（投递出去的那段）')
+    // ⚠️ 口径与执行器**同一处**（`deliveredBytes`）：两块 + 一个不会出现在文本里的分隔符。
+    //    各拼一份的话，某天两边分叉，审计里的哈希就对不上真正投递的东西。
+    // ⚠️ 判据用**后端真的收到的那两块**（那才是"投递出去的东西"）——从副本文件
+    //    取，是因为它逐字保存了投递的那段文本（含系统/用户的分界标记）。
     assert.equal(
       audit.promptHash,
-      createHash('sha256').update(sentence!, 'utf8').digest('hex'),
-      '★ 输入哈希要等于**真正投递的那段文本**的 sha256',
+      createHash('sha256')
+        .update(
+          deliveredBytes({
+            system: parts!.system,
+            user: parts!.user,
+          }),
+          'utf8',
+        )
+        .digest('hex'),
+      '★ 输入哈希要等于**真正投递出去的那两块**的 sha256',
     )
     assert.notEqual(audit.promptHash, null, '必须有 prompt 哈希')
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
@@ -477,10 +520,14 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
 
   test('★ 审核的第一句话含审核标准与判决格式要求（FR-CLI-43）', () => {
     assert.notEqual(backend.seenContext, null)
-    assert.match(backend.seenContext!, /## 审核标准/, '第一句话里要有审核标准那一段')
-    // ★ D37：标准内联在审核者身上（不再来自挂载的 skill），所以这里比的是
-    //   **标准正文**里的内容——播种的审核者带的正是内置那份通用审核标准。
-    assert.match(backend.seenContext!, /通用审核/, '标准正文必须随第一句话下发')
+    // 2026-09：标准并进 ② 身份那一块（不再由平台加「## 审核标准」标题，
+    // 标题归模版/正文自己），所以这里认"那一块"与标准正文本身
+    assert.match(backend.seenContext!, /^# 审核任务$/m, '框架那一块（走系统提示）')
+    assert.match(backend.seenContext!, /你是一个严格的审核者/, '身份那一块（②）')
+    // ★ 2026-09 三次改：标准并进「指令」，播种审核者的判据是**纯判据**（内置
+    //   那份"通用审核"标准已删，判决词汇是平台契约的事、不在判据里），所以这里
+    //   比的是判据正文——它必须随第一句话下发。
+    assert.match(backend.seenContext!, /每条结论都要有依据/, '判据正文必须随第一句话下发')
     assert.match(backend.seenContext!, /ALPHA_VERDICT/, '必须给出判决格式约定')
   })
 
@@ -506,7 +553,12 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       .map((m) => m.content ?? '')
       .join('\n')
 
-    assert.match(text, /## 这次要你做什么/, '★ 要有"要你做什么"这一段')
+    // 2026-09：调用方的指令在 ③（平台放的），模版里那条标题已经不在默认模版里
+    assert.match(
+      text,
+      /③ 走用户消息/,
+      '★ 日志要说清 ③ 走了用户消息（调用方的指令在那一块里）',
+    )
     assert.match(text, /请审核|审核这条/, '★ 段里要有调用方给的指令原文')
   })
 
@@ -520,7 +572,7 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.doesNotMatch(backend.seenContext!, /开箱可用的通用审核标准/)
   })
 
-  test('★ 结束后不残留注入的技能（上下文记录按约定保留）', async () => {
+  test('★ 结束后不残留注入的技能（也不再写上下文副本文件）', async () => {
     // ══════════════════════════════════════════════════════════════════
     // ★ 这条原来是**空过**的
     // ══════════════════════════════════════════════════════════════════
@@ -580,12 +632,13 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       const left = await readdir(join(dir, '.claude', 'skills')).catch(() => [] as string[])
       assert.deepEqual(left, [], `注入的技能与归属清单都该收掉，实际剩：${left.join(', ')}`)
 
-      // 上下文记录是**有意保留**的（使用者的决定：跑完要能回看"它被交代了什么"）。
-      // ⚠️ D29 之后它落在 `.alpha-helper/context/<runId>.md`——**我们自己起的
-      //    名字**，不是 CLI 的项目记忆文件（`CLAUDE.md`）。
-      assert.ok(
-        (await readdir(join(dir, '.alpha-helper', 'context'))).length > 0,
-        '.alpha-helper/context/<runId>.md 要留着（回看靠它）',
+      // 上下文副本**不再写**（2026-09 产品决定：日志已含第一句话全文，执行/审核
+      // 都不保存副本文件）。工作目录里不该留下 `.agentdeck/context/`。
+      // ⚠️ `.agentdeck/` 本身仍是受管路径（§3.3b 的 rounds/ 文件在里面）。
+      assert.equal(
+        (await readdir(join(dir, '.agentdeck', 'context')).catch(() => [] as string[])).length,
+        0,
+        '★ 不写上下文副本文件（回看靠日志里的第一句话全文）',
       )
       assert.ok(
         !(await readdir(dir)).includes('CLAUDE.md'),
@@ -1167,13 +1220,27 @@ describe('D37：审核标准内联在审核者身上', () => {
     return messages.join('\n')
   }
 
-  test('★ 清掉标准 ⇒ 不再派审核，而且日志说清是"没有标准"', async () => {
+  /**
+   * ★ 2026-09：判据从"有没有标准"改成"**身份非空**"（= 指令非空）。
+   *
+   * 所以要让它不再派审核，要清的是**指令**——清标准已经不管用了（标准并进指令，
+   * 而标准本身不再单独设置）。这条测试跟着改，而不是删掉：它钉的是"没有依据的
+   * 审核者拿不到审核任务，而且日志说清为什么、去哪儿修"。
+   */
+  test('★ 清掉「指令」⇒ 不再派审核，而且日志说清是"没有依据"', async () => {
     await withBackend('d37-nostd', async ({ url }) => {
       const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
         agents: Array<{ id: string; role: string }>
       }).agents
       const reviewer = agents.find((a) => a.role === 'reviewer')!
+      // 两个都清：标准（老字段）与指令。判据只看**合成后的身份**非空。
       assert.equal(await setStandard(url, reviewer.id, null), 200)
+      const cleared = await fetch(`${url}/api/agents/${encodeURIComponent(reviewer.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ instructions: '' }),
+      })
+      assert.equal(cleared.status, 200, '夹具：指令要能清掉')
 
       const executor = agents.find((a) => a.role === 'executor')!
       const issueId = ((await (
@@ -1205,8 +1272,8 @@ describe('D37：审核标准内联在审核者身上', () => {
       assert.equal(runs.filter((r) => r.kind === 'review').length, 0, '没有标准就不该起审核 run')
 
       const text = await firstSentenceOf(url, runId)
-      assert.match(text, /没有审核标准/, '要说清是哪一条规则挡住的')
-      assert.match(text, /去「智能体」页给它写一条/, '并且告诉人去哪儿修')
+      assert.match(text, /没有写「指令」/, '要说清是哪一条规则挡住的')
+      assert.match(text, /去「智能体」页给它写一段/, '并且告诉人去哪儿修')
     })
   })
 
@@ -1555,5 +1622,360 @@ describe('D37：审核标准内联在审核者身上', () => {
         '★ 允许的集合里**只有** agent 上那份（老 skill 里那个动作没被并进来）',
       )
     })
+  })
+})
+
+/**
+ * S2：执行任务与执行结果**落盘成文件**、审核**引用文件**来审（§3.3b，2026-09）。
+ *
+ * 设计（见 docs/runtime/pipeline.md §3.3b）：执行完成后，执行器把「执行任务」与
+ * 「执行结果」按轮次写到工作目录 `.agentdeck/rounds/<轮次>-task.md` /
+ * `-result.md`（多轮不覆盖），审核的第一句话给这两份的文件引用；内联材料
+ * 仍保留作兜底。
+ */
+describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
+  test('★ 执行完按轮次落盘 task/result，审核第一句话引用它们，文件内容正确', async () => {
+    const b = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('rounds-files'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+      }).agents
+      const executor = agents.find((a) => a.role === 'executor')!
+      assert.ok(executor.reviewerAgentId, '首启播种的执行者指向审核者 —— 这条用例靠它自动串接')
+
+      // 第一条给**执行 run** 当产出（随便一段报告），第二条是**审核 run** 的判决
+      //（pass、无动作 ⇒ 链一次到底，不派生别的 run）。顺序不能反：执行先跑。
+      b.script = [
+        { report: '执行者的报告：改成冒泡排序，并补了两个测试。' },
+        validVerdict({ conclusion: 'pass', reasonCode: 'meets_criteria' }),
+      ]
+
+      const issueId = ((await (
+        await fetch(`${d.url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '落盘引用用例' }),
+        })
+      ).json()) as { id: string }).id
+
+      const taskText = '把排序函数改成冒泡排序，并补两个测试。'
+      const runId = ulid()
+      const res = await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: executor.id, name: 'x', instructions: '' },
+          subject: { type: 'issue', id: issueId },
+          prompt: taskText,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      // 等审核 run 也走完（链要静默，否则下一条用例的 script 会被偷）
+      await waitFor(async () => {
+        const { runs } = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ status: string; kind: string }>
+        }
+        const review = runs.find((r) => r.kind === 'review')
+        return review && review.status === 'completed' ? true : null
+      }, 8000)
+
+      const reviewRunId = (
+        (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; kind: string }>
+        }
+      ).runs.find((r) => r.kind === 'review')!.runId
+
+      // 从 run 自己的消息里取第一句话（不靠全局 seenContext —— 别的 run 会覆盖它）
+      const first = (
+        ((await (
+          await fetch(`${d.url}/api/runs/${reviewRunId}/messages?since=-1`)
+        ).json()) as { messages: Array<{ content: string }> }).messages
+      )
+        .map((m) => m.content ?? '')
+        .join('\n')
+
+      // ③ 里要有「完整材料（文件）」引用块，两份路径都在，且是首轮（1-）
+      assert.match(first, /## 完整材料（文件）/, '审核的第一句话要声明"完整材料在文件里"')
+      const taskPath = /- 执行任务：`([^`]+)`/.exec(first)?.[1]
+      const resultPath = /- 执行结果：`([^`]+)`/.exec(first)?.[1]
+      assert.ok(taskPath, '要有执行任务的文件路径')
+      assert.ok(resultPath, '要有执行结果的文件路径')
+      assert.match(taskPath!, /rounds\/1-task\.md$/, '首轮执行 ⇒ rounds/1-task.md')
+      assert.match(resultPath!, /rounds\/1-result\.md$/, '首轮执行 ⇒ rounds/1-result.md')
+      // ★ §3.3b：文件式审核**不再内联**材料——有文件引用就够了，不该再有
+      //   「待审核的内容」/ 材料标记（内联那段是截断的转述，留着只会诱导模型
+      //   只看转述、不看文件）。
+      assert.doesNotMatch(
+        first,
+        /待审核的内容|<<<ALPHA_MATERIAL>>>|<<<END_ALPHA_MATERIAL>>>/,
+        '文件式审核的第一句话不该再内联材料（要审的是文件）',
+      )
+
+      // 文件真的在，内容分别是任务原文与执行产出
+      assert.equal((await readFile(taskPath!, 'utf8')).trim(), taskText, 'task 文件装的是任务原文')
+      const resultContent = await readFile(resultPath!, 'utf8')
+      assert.match(
+        resultContent,
+        /执行者的报告：改成冒泡排序/,
+        'result 文件装的是执行产出（假后端的输出）',
+      )
+    } finally {
+      await d.close()
+    }
+  })
+
+  test('★ 多轮返工**不覆盖**前一轮：rounds/1-* 与 2-* 各自保留，第 2 轮审核引用第 2 轮文件', async () => {
+    const b = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('rounds-rework'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    const workDir = await makeTempDir('rounds-rework-work')
+    try {
+      const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+      }).agents
+      const executor = agents.find((a) => a.role === 'executor')!
+      assert.ok(executor.reviewerAgentId, '执行者默认指向审核者 —— 这条用例靠它自动串接')
+
+      // 执行1 → 审核1(fail) → 返工执行2 → 审核2(pass)。顺序不能乱：假后端按序 shift。
+      b.script = [
+        { report: '第 1 次产出：没写测试。' },
+        {
+          schemaVersion: 1,
+          conclusion: 'fail',
+          reasonCode: 'missing_tests',
+          confidence: 0.8,
+          findings: [
+            {
+              severity: 'high',
+              summary: '产出里没有测试文件',
+              evidence: [{ blobRef: null, locator: '报告第 1 段', excerpt: '我忘了写测试' }],
+              detail: { suggestion: '补一个最小的测试' },
+            },
+          ],
+          action: null,
+          escalateReason: null,
+        },
+        { report: '第 2 次产出：补上了测试。' },
+        validVerdict({ conclusion: 'pass', reasonCode: 'meets_criteria' }),
+      ]
+
+      const issueId = ((await (
+        await fetch(`${d.url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '多轮不覆盖用例' }),
+        })
+      ).json()) as { id: string }).id
+
+      const taskText = '把排序函数改成冒泡排序，并补两个测试。'
+      const res = await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: ulid(),
+          kind: 'execute',
+          agentRef: { id: executor.id, name: 'x', instructions: '' },
+          subject: { type: 'issue', id: issueId },
+          prompt: taskText,
+          workDir,
+          limits: { maxTurns: null, timeoutMs: null },
+          maxReworks: 1,
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      // 等两条审核 run 都完成（第 2 条 pass 收尾，链静默）
+      await waitFor(async () => {
+        const { runs } = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ status: string; kind: string }>
+        }
+        const reviews = runs.filter((r) => r.kind === 'review')
+        return reviews.length >= 2 && reviews.every((r) => r.status === 'completed') ? true : null
+      }, 10000)
+
+      // ★ 多轮不覆盖：两轮的 task/result 各一份，谁都没被后一轮顶掉
+      const rounds = await readdir(join(workDir, '.agentdeck', 'rounds'))
+      assert.deepEqual(
+        rounds.sort(),
+        ['1-result.md', '1-task.md', '2-result.md', '2-task.md'].sort(),
+        'rounds/ 下必须是两轮各两份，后一轮不得覆盖前一轮',
+      )
+      assert.equal(
+        (await readFile(join(workDir, '.agentdeck', 'rounds', '1-task.md'), 'utf8')).trim(),
+        taskText,
+        '第 1 轮任务 = 原始任务正文',
+      )
+      assert.match(
+        await readFile(join(workDir, '.agentdeck', 'rounds', '1-result.md'), 'utf8'),
+        /第 1 次产出/,
+        '第 1 轮结果 = 第 1 次执行的产出',
+      )
+      assert.match(
+        await readFile(join(workDir, '.agentdeck', 'rounds', '2-task.md'), 'utf8'),
+        /没有通过审核/,
+        '第 2 轮任务 = 返工指令（带审核意见），不是原始任务的副本',
+      )
+      assert.match(
+        await readFile(join(workDir, '.agentdeck', 'rounds', '2-result.md'), 'utf8'),
+        /第 2 次产出/,
+        '第 2 轮结果 = 返工那次执行的产出',
+      )
+
+      // 各轮的审核引用**自己那一轮**的文件
+      const reviewRunIds = (
+        (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; kind: string }>
+        }
+      ).runs
+        .filter((r) => r.kind === 'review')
+        .map((r) => r.runId)
+      const firsts = await Promise.all(
+        reviewRunIds.map(async (id) =>
+          (
+            ((await (
+              await fetch(`${d.url}/api/runs/${id}/messages?since=-1`)
+            ).json()) as { messages: Array<{ content: string }> }).messages
+          )
+            .map((m) => m.content ?? '')
+            .join('\n'),
+        ),
+      )
+      assert.ok(
+        firsts.some((f) => f.includes('rounds/1-task.md') && f.includes('rounds/1-result.md')),
+        '第 1 轮审核要引用第 1 轮的文件',
+      )
+      assert.ok(
+        firsts.some((f) => f.includes('rounds/2-task.md') && f.includes('rounds/2-result.md')),
+        '第 2 轮审核要引用第 2 轮的文件（不能指着第 1 轮的旧材料）',
+      )
+    } finally {
+      await d.close()
+      await cleanup(workDir)
+    }
+  })
+
+  test('★ 文件式审核判决不合规 ⇒ 重试 run 也从结果文件取材料（不内联）', async () => {
+    const b = new ScriptedReviewBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('rounds-retry'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+      }).agents
+      const executor = agents.find((a) => a.role === 'executor')!
+      assert.ok(executor.reviewerAgentId, '执行者默认指向审核者 —— 自动串接')
+
+      // 执行 → 审核1（判决**不合 schema**，在围栏里但不是合法判决 ⇒ 重试）
+      //     → 重试审核2（pass，链静默）。顺序不能乱：假后端按序 shift。
+      b.script = [
+        { report: '执行者的报告：改好了。' },
+        { bogus: true },
+        validVerdict({ conclusion: 'pass', reasonCode: 'meets_criteria' }),
+      ]
+
+      const issueId = ((await (
+        await fetch(`${d.url}/api/issues`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: '重试-from-文件用例' }),
+        })
+      ).json()) as { id: string }).id
+
+      const res = await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: ulid(),
+          kind: 'execute',
+          agentRef: { id: executor.id, name: 'x', instructions: '' },
+          subject: { type: 'issue', id: issueId },
+          prompt: '把功能实现一下',
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202)
+
+      // 等两条审核 run 都完成（第 2 条 pass 收尾，链静默）
+      await waitFor(async () => {
+        const { runs } = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ status: string; kind: string }>
+        }
+        const reviews = runs.filter((r) => r.kind === 'review')
+        return reviews.length >= 2 && reviews.every((r) => r.status === 'completed') ? true : null
+      }, 10000)
+
+      const reviewRuns = (
+        (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; kind: string }>
+        }
+      ).runs.filter((r) => r.kind === 'review')
+
+      // 第一条审核：判决不合规 ⇒ invalid + 处置方式是重试
+      const verdicts1 = ((await (
+        await fetch(`${d.url}/api/runs/${reviewRuns[0]!.runId}/verdicts`)
+      ).json()) as { verdicts: Array<{ status: string; invalidResolution: string | null }> }).verdicts
+      assert.equal(verdicts1[0]?.status, 'invalid', '第一条判决必须不合规')
+      assert.equal(
+        verdicts1[0]?.invalidResolution,
+        'retry',
+        '★ 而且必须记下"发了重试"（不是静默降级）',
+      )
+
+      // 重试 run（第二条审核）：第一句话**也是文件式**（不内联），且引用结果文件
+      const retrySentence = (
+        ((await (
+          await fetch(`${d.url}/api/runs/${reviewRuns[1]!.runId}/messages?since=-1`)
+        ).json()) as { messages: Array<{ content: string }> }).messages
+      )
+        .map((m) => m.content ?? '')
+        .join('\n')
+      assert.match(
+        retrySentence,
+        /## 完整材料（文件）/,
+        '重试 run 也要走文件式审核（和正常审核一个形状）',
+      )
+      assert.match(
+        retrySentence,
+        /rounds\/1-result\.md/,
+        '★ 重试从**结果文件**拿材料（引用还在，没有材料也能取回）',
+      )
+      assert.doesNotMatch(
+        retrySentence,
+        /待审核的内容|<<<ALPHA_MATERIAL>>>/,
+        '重试 run 不该内联材料',
+      )
+
+      // 第二条审核拿到合法判决 ⇒ pass，链静默
+      const verdicts2 = ((await (
+        await fetch(`${d.url}/api/runs/${reviewRuns[1]!.runId}/verdicts`)
+      ).json()) as { verdicts: Array<{ conclusion: string }> }).verdicts
+      assert.equal(verdicts2[0]?.conclusion, 'pass', '重试那一次要真的给出合法判决')
+    } finally {
+      await d.close()
+    }
   })
 })

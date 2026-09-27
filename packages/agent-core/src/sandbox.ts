@@ -246,7 +246,7 @@ export class SandboxUnavailableError extends Error {
   constructor(reason: string) {
     super(
       `沙箱模式已开启但不可用：${reason}\n` +
-        `**不会静默降级为无沙箱执行**——那会让你在以为自己被保护着的情况下裸奔。` +
+        `不会静默降级为无沙箱执行——那会让你在以为自己被保护着的情况下裸奔。` +
         `请安装对应工具，或显式把沙箱模式改回 none 并接受 NG7 的风险。`,
     )
     this.name = 'SandboxUnavailableError'

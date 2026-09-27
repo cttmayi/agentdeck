@@ -8,7 +8,7 @@ import {
   type ActionFacts,
   type Store,
   type ToolActionDefinition,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
@@ -17,7 +17,7 @@ import {
   type Tool,
   type ToolId,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { ActionRunner } from './actions.ts'
 import { ReviewCoordinator } from './review.ts'
 import {
@@ -251,7 +251,7 @@ describe('传给脚本的东西：命令、参数、cwd、env、stdin', () => {
           LANG: 'zh_CN.UTF-8',
           TZ: 'Asia/Shanghai',
           // 这三样**一个都不该**出现在脚本的环境里
-          ALPHA_HELPER_GITHUB_TOKEN: 'ghp_secret',
+          AGENTDECK_GITHUB_TOKEN: 'ghp_secret',
           NODE_OPTIONS: '--require /tmp/evil.js',
           HOME: '/Users/someone',
         },
@@ -263,7 +263,7 @@ describe('传给脚本的东西：命令、参数、cwd、env、stdin', () => {
       assert.equal(env['PATH'], '/usr/bin:/bin')
       assert.equal(env['LANG'], 'zh_CN.UTF-8')
       assert.equal(env['TZ'], 'Asia/Shanghai')
-      assert.equal(env['ALPHA_HELPER_GITHUB_TOKEN'], undefined)
+      assert.equal(env['AGENTDECK_GITHUB_TOKEN'], undefined)
       assert.equal(env['NODE_OPTIONS'], undefined)
       assert.notEqual(env['HOME'], '/Users/someone')
       assert.ok(env['HOME']!.startsWith(tempRoot), 'HOME 应当指到本次执行的临时目录')
@@ -962,7 +962,7 @@ function fakeStore(input: {
 
 function toolRecord(): Tool {
   const manifest = {
-    schema: 'alpha-helper/tool@1',
+    schema: 'agentdeck/tool@1',
     slug: 'example-note',
     name: '示例工具',
     version: '1.0.0',
@@ -1199,14 +1199,14 @@ describe('ActionRunner：工具动作交给脚本执行器（动作只有这一�
     )
   })
 
-  test('★ dry-run 交给脚本执行器（dryRun: true 原样传下去，动作记 dryRun=true）', async () => {
+  test('★ 调试：不跑脚本，只记录动作与解析后的参数（2026-09 取代预演准入）', async () => {
     const fake = fakeStore({ tools: [toolRecord()], run })
     const calls: ScriptExecutionRequest[] = []
     const runner = new ActionRunner({
       store: fake.store,
       executeToolScript: async (req) => {
         calls.push(req)
-        return { ok: true, detail: '会写一行（dry-run）', exitCode: 0, durationMs: 1 }
+        return { ok: true, detail: '不该被调用', exitCode: 0, durationMs: 1 }
       },
     })
 
@@ -1215,40 +1215,17 @@ describe('ActionRunner：工具动作交给脚本执行器（动作只有这一�
       workspaceId: WORKSPACE,
       verdictId: 'v1' as never,
       runId: 'run-1' as never,
-      dryRun: true,
+      debug: true,
     })
 
+    // ★ 硬证据：脚本**一次都没被调用**——调试不是"演一遍"，是根本不跑。
+    assert.equal(calls.length, 0, '调试模式下一次都不该起脚本')
     assert.equal(result.action.status, 'executed')
+    // 协议里 `Action.dryRun` = "没真跑、只记录"：时间线靠它显示「调试 · 未执行」
     assert.equal(result.action.dryRun, true)
-    assert.equal(calls[0]!.dryRun, true)
-  })
-
-  test('★ dry-run + dryRun: "unsupported" ⇒ 真执行器拒绝，动作记 failed 并通知', async () => {
-    const tempRoot = await makeTempDir('runner-dryrun')
-    try {
-      const fake = fakeStore({ tools: [toolRecord()], run })
-      const spawn = fakeSpawn({ stdout: okStdout })
-      const executor = new ScriptExecutor({ tempRoot, spawn: spawn.spawn, findExecutable: noLookup })
-      const runner = new ActionRunner({
-        store: fake.store,
-        executeToolScript: (req) => executor.execute(req),
-      })
-
-      const result = await runner.execute({
-        ref: { type: 'example-note.unsafe-clean', params: {} } as never,
-        workspaceId: WORKSPACE,
-        verdictId: 'v1' as never,
-        runId: 'run-1' as never,
-        dryRun: true,
-      })
-
-      assert.equal(result.action.status, 'failed')
-      assert.match(result.action.error ?? '', /不支持 dry-run/)
-      assert.equal(spawn.calls.length, 0, '平台不许在演练模式下跑这种动作')
-      assert.equal(fake.inbox.length, 1)
-    } finally {
-      await cleanup(tempRoot)
-    }
+    assert.equal(result.action.params['text'], 'x', '解析后的参数原样记下')
+    assert.equal(result.action.result?.['debug'], true)
+    assert.match(String(result.action.result?.['detail']), /调试模式/)
   })
 
   // ⚠️ 这里原本有一条「★ 内置动作那条路没变：dry-run 仍然只记录"会做什么"」。

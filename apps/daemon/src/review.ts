@@ -5,7 +5,7 @@ import {
   isStructuralInvalid,
   type ReviewDecision,
   type Store,
-} from '@alpha-helper/domain'
+} from '@agentdeck/domain'
 import {
   formatVerdictIssues,
   ulid,
@@ -22,7 +22,7 @@ import {
   type VerdictRecord,
   type VerdictStatus,
   type WorkspaceId,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import type { ActionRunner } from './actions.ts'
 
 /**
@@ -83,6 +83,14 @@ export interface ReviewHandlingInput {
    *    `run.actionParams ?? 审核者.actionParams`。
    */
   fixedParams?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>
+  /**
+   * 审核者给哪些动作勾了「调试」（`Agent.debugActions`，2026-09）。
+   *
+   * 勾了的动作在 `act` 收口时**不跑脚本**，只记录动作与解析后的完整参数
+   * （时间线显示「调试 · 未执行」）。判据与 `fixedParams` 同一个：**字段在
+   * 不在**——读取处是 `agentForStandard?.debugActions ?? []`。
+   */
+  debugActions?: readonly ActionRefType[]
   /** 已因 invalid 重试过几次。 */
   invalidAttempts: number
   /** 这条任务允许返工几次（D45）；0/缺省 = 不返工，`fail` 直接交给人。 */
@@ -187,6 +195,9 @@ export class ReviewCoordinator {
           runId: input.run.id,
           // D43：固定参数在**执行这一档**注入（模型不许写，判决校验那层已经拦过）
           ...(fixedForAction ? { fixed: fixedForAction } : {}),
+          // ★ 2026-09：审核者给这个动作勾了「调试」⇒ 不跑脚本，只记录动作与参数。
+          //   判据与白名单同源（`debugActions ?? []`，见 `ReviewHandlingInput`）。
+          debug: (input.debugActions ?? []).includes(decision.verdict.action!.type),
         })
         actionIds = [result.action.id]
         // ⚠️ 这里原来还会读 `result.spawnedRunId` / `result.derivationBlocked`

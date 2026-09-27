@@ -5,10 +5,10 @@ import {
   exportData,
   importData,
   verifyDataSnapshot,
-} from '@alpha-helper/domain'
-import { FileStore } from '@alpha-helper/store-file'
-import { makeIssue, makeReport, wsId } from '@alpha-helper/domain/testing'
-import { ulid, type Report, type Run } from '@alpha-helper/protocol'
+} from '@agentdeck/domain'
+import { FileStore } from '@agentdeck/store-file'
+import { makeIssue, makeReport, wsId } from '@agentdeck/domain/testing'
+import { ulid, type Report, type Run } from '@agentdeck/protocol'
 import { join } from 'node:path'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -48,7 +48,7 @@ before(async () => {
   storeA = await FileStore.open({ dataDir: dirA, fsync: false })
   storeB = await FileStore.open({ dataDir: dirB, fsync: false })
 
-  await storeA.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '快照测试', createdAt: 1, updatedAt: 1 })
+  await storeA.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '快照测试', createdAt: 1, updatedAt: 1 })
   await storeA.insertIssue(makeIssue({ id: 'i-1', workspaceId: WS, title: '第一件事' }))
   await storeA.insertIssue(makeIssue({ id: 'i-2', workspaceId: WS, title: '第二件事' }))
 
@@ -97,7 +97,11 @@ describe('数据快照：导出', () => {
       'agents',
       'artifacts',
       'audits',
+      // 聊天（闭环的旁路）：对话与轮次也是使用者的数据，导出漏了它不会报错，
+      // 只会在换机器打开时发现对话记录静静地不在那儿。
+      'chatTurns',
       'comments',
+      'conversations',
       'device',
       'inbox',
       'issues',
@@ -137,7 +141,7 @@ describe('数据快照：导出', () => {
     const many = await makeTempDir('alpha-snap-many')
     const store = await FileStore.open({ dataDir: many, fsync: false })
     const W = wsId('ws_many')
-    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     for (let i = 0; i < 250; i += 1) {
       await store.insertIssue(makeIssue({ id: `bulk-${String(i).padStart(4, '0')}`, workspaceId: W }))
     }
@@ -185,7 +189,7 @@ describe('★ 数据快照：导入（只增不改）', () => {
   test('★ 导入**不覆盖**已有数据 —— 覆盖是不可逆的', async () => {
     const target = await makeTempDir('alpha-snap-merge')
     const store = await FileStore.open({ dataDir: target, fsync: false })
-    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '目标库', createdAt: 1, updatedAt: 1 })
+    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: '目标库', createdAt: 1, updatedAt: 1 })
     // 目标库里已有一条同 id 但内容不同的 issue
     await store.insertIssue(makeIssue({ id: 'i-1', workspaceId: WS, title: '目标库里原本的标题' }))
 
@@ -253,7 +257,7 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
     const s2 = await FileStore.open({ dataDir: target, fsync: false })
 
     const W = wsId('ws_blob')
-    await s1.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await s1.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     const blobRef = await s1.putBlob(new TextEncoder().encode('报告的原文'))
     const report = { ...(makeReport({ id: 'rb-1', workspaceId: W, kind: 'ci-failure' })), blobRef }
     await s1.insertReport(report)
@@ -283,7 +287,7 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
   test('blob 也在目标库里时，不报悬空', async () => {
     const store = await FileStore.open({ dataDir: await makeTempDir('alpha-snap-ok') })
     const W = wsId('ws_ok')
-    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     const ref = await store.putBlob(new TextEncoder().encode('x'))
     await store.insertReport({ ...(makeReport({ id: 'ok-1', workspaceId: W, kind: 'ci-failure' })), blobRef: ref })
 
@@ -300,7 +304,7 @@ describe('run 谱系也要一起搬过去', () => {
     const dir = await makeTempDir('alpha-snap-graph')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
     const W = wsId('ws_graph')
-    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
+    await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
 
     const runId = ulid() as Run['id']
     await store.insertRun({

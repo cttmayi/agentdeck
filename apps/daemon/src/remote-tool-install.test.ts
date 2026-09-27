@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { Tool } from '@alpha-helper/protocol'
+import type { Tool } from '@agentdeck/protocol'
 import { RemoteService } from '../../remote/src/server.ts'
 import { startDaemon } from './server.ts'
 import { makeTempDir } from './testing/tmp.ts'
@@ -82,7 +82,7 @@ describe('D40：从远端目录装一个工具包', () => {
       assert.equal(installed.version, entry.version)
       assert.equal(installed.source, 'remote', '来源要记成 remote（否则"本地自有"与"远端来的"分不清）')
       assert.equal(installed.sourceRef, `remote:${entry.slug}@${entry.version}`)
-      assert.equal(installed.manifest.schema, 'alpha-helper/tool@1')
+      assert.equal(installed.manifest.schema, 'agentdeck/tool@1')
       assert.deepEqual(
         installed.manifest.actions.map((a) => a.name),
         ['say'],
@@ -99,7 +99,7 @@ describe('D40：从远端目录装一个工具包', () => {
       // ── ④ 装进来的这条**真的能被执行**：拿执行器直接跑一次（dry-run） ──
       //   这一步比"字段对了"更强：它证明脚本与清单的约定没有断。
       const { createScriptExecutor } = await import('./script-executor.ts')
-      const { toolActionDefinitions } = await import('@alpha-helper/domain')
+      const { toolActionDefinitions } = await import('@agentdeck/domain')
       const definitions = toolActionDefinitions([installed])
       const definition = definitions['hello-tool.say']
       assert.ok(definition, '装进来之后应当能解析出这个动作')

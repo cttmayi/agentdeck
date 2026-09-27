@@ -1,4 +1,5 @@
 import { after, before, describe, test } from 'node:test'
+import { deliveredText } from './testing/delivered.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,7 +9,7 @@ import {
   type AgentMessage,
   type AgentSession,
   type ExecOptions,
-} from '@alpha-helper/agent-core'
+} from '@agentdeck/agent-core'
 import {
   VERDICT_FENCE_BEGIN,
   VERDICT_FENCE_END,
@@ -16,7 +17,7 @@ import {
   type Issue,
   type RunId,
   type VerdictRecord,
-} from '@alpha-helper/protocol'
+} from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -58,7 +59,7 @@ class AlwaysFailReviewBackend implements AgentBackend {
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
     // D29：判定"这是审核还是执行"只看第一句话的开头
-    const isReview = opts.prompt.includes('# 审核任务')
+    const isReview = deliveredText(opts).includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
 
     let text: string
@@ -86,7 +87,7 @@ class AlwaysFailReviewBackend implements AgentBackend {
         VERDICT_FENCE_END,
       ].join('\n')
     } else {
-      this.executePrompts.push(opts.prompt)
+      this.executePrompts.push(deliveredText(opts))
       this.workDirs.push(opts.workDir)
       await (await import('node:fs/promises')).writeFile(
         join(opts.workDir, ARTIFACT),

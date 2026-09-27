@@ -5,7 +5,7 @@ import {
   buildArgv,
   describeDropped,
   detectVersion,
-  loadRuntimeDescriptor,
+  loadCliRuntimeDescriptor,
   probeCommand,
   cliStateDir,
   planSandbox,
@@ -14,10 +14,11 @@ import {
   type AgentMessage,
   type AgentResult,
   type AgentSession,
+  type CliRuntimeDescriptor,
   type ExecOptions,
   type RuntimeDescriptor,
-} from '@alpha-helper/agent-core'
-import type { RuntimeProtocol } from '@alpha-helper/protocol'
+} from '@agentdeck/agent-core'
+import type { RuntimeProtocol } from '@agentdeck/protocol'
 import {
   GenericStreamParser,
   buildGenericInput,
@@ -153,14 +154,14 @@ export class GenericBackend implements AgentBackend {
   readonly protocol: RuntimeProtocol
   readonly rejectDetectable: boolean
 
-  readonly #descriptor: RuntimeDescriptor
+  readonly #descriptor: CliRuntimeDescriptor
   readonly #options: GenericBackendOptions
 
   constructor(options: GenericBackendOptions) {
     this.#options = options
-    // 补齐 managedFlags 等可选字段：调用方传进来的可能是一行"裸表行"，
-    // 直接拿它去拼参数会读到 undefined。
-    this.#descriptor = loadRuntimeDescriptor(options.descriptor)
+    // generic 是 cli 形状：`loadCliRuntimeDescriptor` 校验 managedFlags/resume 在位
+    // 并收窄类型（cli-only 字段已可选化——见 `RuntimeDescriptor.kind`）。
+    this.#descriptor = loadCliRuntimeDescriptor(options.descriptor)
     this.key = this.#descriptor.key
     this.protocol = this.#descriptor.protocol
     this.rejectDetectable = this.#descriptor.resume.rejectDetectable

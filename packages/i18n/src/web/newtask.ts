@@ -3,8 +3,10 @@ import type { TextCatalog } from '../text.ts'
 /**
  * 新建任务（`views/NewTask.svelte`）。
  *
- * ⚠️ zh 的值与迁移之前**逐字一致**：中文是默认语言，也是既有测试与布局探针断言的
- *    依据——改一个字就会有东西变红，而那种红不是这个功能要的。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  *
  * ⚠️ 命令式的两处（提交失败的错误、成功后的 toast）走 `tx()`：事件回调里取的是
  *    **调用那一刻**的语言；标记里一律用 `{$t(...)}`，它才会跟着语言切换重渲染。
@@ -14,12 +16,21 @@ import type { TextCatalog } from '../text.ts'
  *    回来的错误原文（`error = err.message`），那是服务端说的话，不在这里改写。
  */
 export const newtaskText = {
-  // ── 页头 ──
-  'newtask.title': { zh: '新建任务', en: 'New task' },
-  'newtask.subtitle': {
-    zh: '写清楚要做什么。创建后会立刻派给 agent 执行，你可以在「任务清单」里看它的进展。',
-    en: 'Say clearly what needs doing. Once created it is dispatched to an agent right away, and you can watch its progress under “Tasks”.',
-  },
+  /**
+   * ── 页头：**两样都删了**（2026-09）──
+   *
+   * · `newtask.title`（`新建任务` / `New task`）→ 页名由顶栏显示，而顶栏与侧栏共用
+   *   同一个词条（`shell.navNewTask`，见 `apps/web/src/lib/view.ts` 的
+   *   `VIEW_TITLE_KEYS`）。主区里那行重复的 `<h2>新建任务</h2>` 同一次删掉。
+   * · `newtask.subtitle`（`写清楚要做什么，其余默认值不用动。`）→ 按要求去掉。
+   *   它以前为**首屏**被砍短过一次（原来是"写清楚要做什么。创建后会立刻派给 agent
+   *   执行，你可以在「任务清单」里看它的进展。"），现在整句没了，主区顶部空出来
+   *   约 60px —— 首屏那笔账反而更宽裕了。
+   *
+   * 于是这一页**主区里没有页头**，`NewTask.svelte` 里那块 `.view-intro` 也整块
+   * 删了；需要知道"创建之后会发生什么"的人，看 ② 审核 / ③ 行动那两张卡片——
+   * 那两处写的是**这一次**到底会发生什么，比一句概括更有用。
+   */
 
   // ── 标题与说明 ──
   'newtask.titleLabel': { zh: '要做什么', en: 'What needs doing' },
@@ -27,10 +38,14 @@ export const newtaskText = {
     zh: '例如：审一下这次依赖升级的影响面',
     en: 'e.g. review the impact of this dependency upgrade',
   },
-  'newtask.descriptionLabel': { zh: '补充说明（可选）', en: 'Extra description (optional)' },
-  'newtask.descriptionPlaceholder': {
-    zh: '背景、约束、你希望看到什么',
-    en: 'Background, constraints, what you want to see',
+  /**
+   * ⚠️ 这里原来还有 `descriptionLabel` / `descriptionPlaceholder`（「补充说明」那
+   *    一栏）。那两个字段合并成一个多行框之后就没有了——切分交给
+   *    `lib/request-text.ts`，使用者不必先做一次"哪半句算标题"的分类。
+   */
+  'newtask.titleSplitHint': {
+    zh: '可以写多行：第一行会当任务清单里的标题，其余进这条任务的说明。',
+    en: 'Multiple lines are fine: the first line becomes the title in the task list, the rest goes into the task’s description.',
   },
 
   // ── 选智能体 ──
@@ -120,10 +135,14 @@ export const newtaskText = {
    *
    * ⚠️ 措辞上要说清是"**现在这个 daemon 还不支持**"，而不是"这个功能不存在"——
    *    使用者要做的事是重启，不是放弃。
+   *
+   * ⚠️ 别把"为什么"写进来（2026-09 改写）：这里原来点破了内部机制（"连着的 daemon
+   *    版本还不支持…"），而使用者的处境与那句话无关——他只需要知道"现在换不了、
+   *    重启一下就能换"。
    */
   'newtask.overrideNeedsRestart': {
-    zh: '这次先由上面那个执行者的长期安排决定——你现在连着的 daemon 版本还不支持在单条任务上换审核者或不审（那要重启 daemon 之后才有）。',
-    en: 'This time the executor’s long-term setting decides — the daemon you are connected to does not support picking a reviewer (or skipping review) for a single task yet. Restart the daemon to get it.',
+    zh: '这一次先按上面那个执行者的长期安排来：你现在连着的 daemon 还没更新，单条任务上换审核者（或不审）要重启 daemon 之后才能选。',
+    en: 'This time the executor’s long-term setting decides: the daemon you are connected to has not been updated, so picking a reviewer (or skipping review) for a single task needs a daemon restart first.',
   },
   /**
    * ② 上选了非"跟随"的那两项之后那句"只对这一次生效"。
@@ -177,6 +196,50 @@ export const newtaskText = {
     zh: '判完之后允许触发的动作',
     en: 'Actions it may trigger after a verdict',
   },
+  /**
+   * ★ ③ 从"铺一整段选择器"改成"一个按钮 + 一个居中对话框"（实测那一段原来 537px，
+   *   而它在 700px 高的视口里从 y=670 开始——等于下半屏全是这一栏，提交按钮被推到
+   *   两屏之外）。
+   *
+   * 按钮上的字要回答"点开之后能干什么"，不是"这里是什么"：`actionsLabel` 已经
+   * 说了这里是什么，按钮再说一遍就成了两个出处。
+   */
+  'newtask.actionsChoose': { zh: '选择动作…', en: 'Choose actions…' },
+  /**
+   * 按钮旁边那个计数。
+   *
+   * ⚠️ **两个数都要有**：只写"已允许 1 个"看不出"一共几个"——1/1 与 1/5 是两件
+   *    完全不同的事（前者没得改，后者有四个没勾）。而这一栏现在收成了一行，
+   *    这个比值就是"要不要点开"的唯一依据。
+   */
+  /**
+   * 提交栏右边那一行："我即将提交的是什么"。
+   *
+   * ★ 拆成四段而不是一句整话：审核者那一档有三种（跟随 / 指名 / 这一次不审），
+   *   整句拼的话"不审"那一档要么少一个词、要么多一个空位。
+   */
+  'newtask.footExecutor': { zh: '交给 {name}', en: 'to {name}' },
+  'newtask.footReviewer': { zh: '由 {name} 审', en: 'reviewed by {name}' },
+  'newtask.footReviewerNone': { zh: '不自动审核', en: 'no auto review' },
+  'newtask.footActions': { zh: '允许 {n} 个动作', en: '{n} actions allowed' },
+
+  'newtask.actionsCount': {
+    zh: '已允许 {picked} / {total} 个动作',
+    en: '{picked} of {total} actions allowed',
+  },
+  /**
+   * 对话框的第二行说明：一句话讲清**这里挑的东西作用范围多大**（与抽屉同一条规矩）。
+   *
+   * ★ 这一句在页面上原来叫 `actionsEditableSource`（"默认来自 X"）。搬进对话框时
+   *   **不能**照抄那一句：对话框一关就看不见了，而"只对这一次生效"是提交前必须
+   *   知道的事——所以那一句留在页面上（`actionsOnceOnly`），对话框里说的是
+   *   "你正在改的是什么"。
+   */
+  'newtask.actionsDialogSubtitle': {
+    zh: '默认按「{name}」现在的配置。这里改的只对这一次任务生效。',
+    en: 'Starts from {name}’s current setup. What you change here applies to this task only.',
+  },
+  'newtask.actionsDialogDone': { zh: '完成', en: 'Done' },
   /**
    * ③ 空态之一：这次**没有审核者**（② 选了"不审"，或跟随到"没配"/"没了"）。
    *
@@ -344,8 +407,10 @@ export const newtaskText = {
    *    同一句话在同一步里出现两遍）。
    */
   'newtask.actionsOverrideNeedsRestart': {
-    zh: '这一栏这一次改不了 —— 你现在连着的 daemon 版本还不支持在单条任务上改动作白名单（那要重启 daemon 之后才有）。',
-    en: 'This section cannot be changed this time — the daemon you are connected to does not support overriding the action whitelist for a single task yet. Restart the daemon to get it.',
+    // ⚠️ "重启 daemon" 这几个字是**探针钉着的**（[新建任务的三步链] 那一组要求这句
+    //    说清补救动作）：别改成"重启它"——指代确实清楚，但机器检查的是词。
+    zh: '这一栏这一次改不了 —— 你现在连着的 daemon 还没更新，单条任务上改动作白名单要重启 daemon 之后才能改。',
+    en: 'This section cannot be changed this time — the daemon you are connected to has not been updated, so overriding the allowed actions for a single task needs a daemon restart first.',
   },
 
   // ── 选中那个 agent 的现状 ──

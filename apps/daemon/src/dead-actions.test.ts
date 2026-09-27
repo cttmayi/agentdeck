@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { Agent, Tool, WorkspaceId } from '@alpha-helper/protocol'
+import type { Agent, Tool, WorkspaceId } from '@agentdeck/protocol'
 import { join } from 'node:path'
-import { FileStore } from '@alpha-helper/store-file'
+import { FileStore } from '@agentdeck/store-file'
 import { planDeadActionCleanup } from './dead-actions.ts'
 import { startDaemon } from './server.ts'
 import { makeTempDir } from './testing/tmp.ts'
-import { makeAgent, makeTool } from '@alpha-helper/domain/testing'
+import { makeAgent, makeTool } from '@agentdeck/domain/testing'
 
 /**
  * 清掉"永远不可能被满足"的动作名（D41 收尾）。
@@ -60,7 +60,6 @@ describe('D41 收尾：清掉已失效的动作名', () => {
           name: '审核员',
           // 使用者的真实数据：动作写在老字段里（reviewStandard.allowedActions）
           reviewStandard: {
-            name: '通用审核',
             body: '# 通用审核',
             allowedActions: ['comment.create', 'issue.add_label'],
           } as never,
@@ -166,7 +165,8 @@ describe('D41 收尾：重启之后老数据真的被清干净', () => {
       ...agent,
       allowedActions: [],
       reviewStandard: {
-        name: agent.reviewStandard?.name ?? '通用审核',
+        // ⚠️ 这里故意**照当年那样**带上 `name`：这个夹具造的是老记录，
+        //    而老记录里那个键还在（字段删掉之后读取方一律忽略）。
         body: agent.reviewStandard?.body ?? '# 通用审核',
         allowedActions: ['comment.create', 'issue.add_label'],
       } as never,

@@ -1,5 +1,5 @@
-import { DomainError, DomainErrorCode, type Store } from '@alpha-helper/domain'
-import { ulid, type InboxItem, type Run, type RunId, type WorkspaceId } from '@alpha-helper/protocol'
+import { DomainError, DomainErrorCode, type Store } from '@agentdeck/domain'
+import { ulid, type InboxItem, type Run, type RunId, type WorkspaceId } from '@agentdeck/protocol'
 
 /**
  * 重启后的遗留 run 处置（FR-RUNTIME-11）。
@@ -146,9 +146,10 @@ function noticeFor(
     title: `${count} 个执行因 daemon 重启而中断`,
     body:
       `daemon 上次退出时这些执行还在进行，它们已被标记为失败（原因：daemon_restarted）。\n\n` +
-      `**为什么会这样**：执行所需的信息（prompt、技能正文、限额）是随请求传来的，` +
-      `没有落盘，所以重启后无法续跑——只能明确标记中断，而不是留一个永远"进行中"的状态。\n\n` +
-      `**接下来怎么办**：在任务上重新发起一次即可。重跑会是一条新的 run，` +
+      `为什么会这样：一次执行需要的东西（交给模型的指令、技能正文、限额）是随请求` +
+      `传来的，没有存到盘上，所以重启后接不上——只能明确标成中断，而不是留下一个` +
+      `永远"进行中"的状态。\n\n` +
+      `接下来怎么办：在任务上重新发起一次即可。重跑会是一条新的执行，` +
       `旧记录仍然保留可查。`,
     issueId: null,
     runId: null,

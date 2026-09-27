@@ -112,6 +112,52 @@ export function describeAllowedActions(
   return actions.map((type) => ({ type, summary: summaryOfAction(type, tools) }))
 }
 
+/**
+ * 一个动作**在这一次任务上**的完整样子（③ 那一行要显示的东西）。
+ *
+ * ★ 为什么不是 `ActionEntry` 加几个可选字段：这四个值回答的是同一个问题——
+ *   "这一次到底允许它做什么"，而界面上它们是**同一个胶囊**里的四样东西。
+ *   拆成两个类型只会让调用方把它们拼起来时漏掉一两样（漏掉"固定值"那一样，
+ *   使用者就看不到"这次它会带着 `reason=巡检` 去关单"）。
+ */
+export interface ActionPickEntry extends ActionEntry {
+  /** 钉死的固定值（`name → value`），空数组 = 没钉。 */
+  fixed: Array<[string, unknown]>
+  /**
+   * 配过、但**现在解析不出来**（提供它的包被卸载了，或者名字来自很早以前的配置）。
+   *
+   * ⚠️ 它与 `summary === null` 不是同一件事：`summary` 缺失只说明"没有说明可显示"，
+   *    而这个字段说的是"它现在**不会被执行**"——两者必须分开，否则界面会把
+   *    "还配着、但已经失效"画成"还配着、只是没写说明"。
+   */
+  unavailable: boolean
+}
+
+/**
+ * 把**这一次生效的勾选**变成要显示的胶囊：契约值 + 说明 + 固定值 + 还能不能用。
+ *
+ * 与 `describeAllowedActions` 的分工：那个回答"这一串名字各是什么"，这个回答
+ * "这一次的配置**长什么样**"——后者是 ③ 那一行收起来之后唯一能看见配置的地方
+ * （选择器进了对话框，不点开就什么都看不到）。
+ *
+ * ⚠️ 参数按**动作**取（`params[type]`），不是把整份参数摊平：摊平之后每个胶囊上
+ *    都会挂着所有动作的固定值，而"哪个值属于哪个动作"就看不出来了。
+ */
+export function describeActionPicks(
+  picks: readonly string[],
+  tools: readonly Tool[],
+  params: Readonly<Record<string, Record<string, unknown>>>,
+  unavailable: readonly string[],
+): ActionPickEntry[] {
+  const dead = new Set(unavailable)
+  return picks.map((type) => ({
+    type,
+    summary: summaryOfAction(type, tools),
+    fixed: Object.entries(params[type] ?? {}),
+    unavailable: dead.has(type),
+  }))
+}
+
 function summaryOfAction(type: string, tools: readonly Tool[]): string | null {
   // D41 之后动作只有一种来源：**已装工具包的清单**。所以这里只有一次查表——
   // 原来那一步"先判是不是内置动作"（内置动作的名字里也有点，不能靠"有没有点"

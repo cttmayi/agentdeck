@@ -1,10 +1,10 @@
 <script lang="ts">
   import { loading, loadError, tools } from '../lib/stores.ts'
   import { splitAllowedActions } from '../lib/agent-actions.ts'
-  import { actionsOf, openParams, boundParams } from '../lib/tool-view.ts'
+  import { actionsOf, openParams, boundParams, installedActionCount } from '../lib/tool-view.ts'
   import { go } from '../lib/view.ts'
   import { t } from '../lib/i18n.ts'
-  import type { WebTextId } from '@alpha-helper/i18n'
+  import type { WebTextId } from '@agentdeck/i18n'
   import ActionParamEditor from './ActionParamEditor.svelte'
 
   /**
@@ -46,6 +46,14 @@
   /** 动作 → 参数名 → 固定值。同一套受控规矩。 */
   export let params: Record<string, Record<string, unknown>> = {}
   export let onparams: (next: Record<string, Record<string, unknown>>) => void = () => {}
+  /**
+   * 标了「调试」的动作（`debugActions`，2026-09）——是 `value` 的**子集**。
+   *
+   * ⚠️ 只在**审核者长期配置**（`variant: 'agent'`）里出现：调试是审核者自己的
+   *    设定，没有"这一次任务覆盖"（任务级只有白名单与固定参数那两档）。
+   */
+  export let debug: readonly string[] = []
+  export let ondebug: (next: string[]) => void = () => {}
   /** 文案变体：`agent` = 审核者长期配置；`task` = 这一次任务的覆盖。 */
   export let variant: 'agent' | 'task' = 'agent'
 
@@ -156,6 +164,12 @@
 
   function toggle(action: string, on: boolean): void {
     onchange(on ? [...value, action] : value.filter((a) => a !== action))
+    // ★ 调试是允许的**子集**：取消允许时调试必须一起摘，否则会留下一个"没允许
+    //    却标着调试"的动作（服务端写入口也会拒，但界面不该给那个错的机会）。
+    if (!on && debug.includes(action)) ondebug(debug.filter((a) => a !== action))
+  }
+  function toggleDebug(action: string, on: boolean): void {
+    ondebug(on ? [...debug, action] : debug.filter((a) => a !== action))
   }
   function drop(type: string): void {
     onchange(value.filter((a) => a !== type))
@@ -212,7 +226,7 @@
     <!-- ══ 顶部状态条：计数 + 筛选 + 全部展开/折叠 + 搜索 ══ -->
     <div class="picker-head">
       <span class="ap-status">
-        {$t('tools.pickerCount', { allowed: allowedCount, total: allActions.length, fixed: fixedCount })}
+        {$t('tools.pickerCount', { allowed: allowedCount, total: installedActionCount($tools), fixed: fixedCount })}
       </span>
       <div class="ap-chips">
         {#each filters as f (f.kind)}
@@ -285,6 +299,23 @@
                       {$t('tools.pickerBadgeFixed', {
                         n: Object.keys(params[item.type] ?? {}).length,
                       })}
+                    </span>
+                  {/if}
+                  {#if variant === 'agent' && value.includes(item.type)}
+                    <!-- ★ 调试（2026-09）：只对**已允许**的动作出现（是允许的子集），
+                         也只出现在审核者长期配置（`variant: 'agent'`）里——任务级
+                         没有调试这一档。勾上 = 这个动作执行时不跑脚本、只记录动作
+                         与解析后的参数（时间线显示「调试 · 未执行」）。 -->
+                    <span class="ap-debug" title={$t('agents.actionsDebugHint')}>
+                      <input
+                        type="checkbox"
+                        class="ap-dbg-ck"
+                        checked={debug.includes(item.type)}
+                        onclick={(e) => e.stopPropagation()}
+                        onchange={(e) =>
+                          toggleDebug(item.type, (e.currentTarget as HTMLInputElement).checked)}
+                      />
+                      <span class="ap-dbg-txt">{$t('agents.actionsDebug')}</span>
                     </span>
                   {/if}
                 </div>
@@ -639,6 +670,29 @@
     border: 1px solid rgba(78, 201, 160, 0.4);
     background: rgba(78, 201, 160, 0.08);
     white-space: nowrap;
+  }
+
+  /* ★ 调试勾选（2026-09）：小、弱、贴着行尾——它是"偶尔看一眼"的调试位，
+     不是日常开关，不能抢「允许」那个勾选的存在感 */
+  .ap-debug {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+    flex: none;
+    color: var(--text-dim);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    white-space: nowrap;
+    padding-left: var(--sp-2);
+    border-left: 1px solid var(--line);
+  }
+  .ap-dbg-ck {
+    margin: 0;
+    accent-color: var(--text-dim);
+  }
+  .ap-dbg-txt {
+    line-height: 1;
   }
 
   /* 「配过、解析不出来」那一组 */

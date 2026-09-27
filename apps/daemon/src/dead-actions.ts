@@ -2,8 +2,8 @@ import {
   resolveAllowedActionsWithTools,
   type AllowedActionsResolution,
   type Store,
-} from '@alpha-helper/domain'
-import type { Agent, Tool, WorkspaceId } from '@alpha-helper/protocol'
+} from '@agentdeck/domain'
+import type { Agent, Tool, WorkspaceId } from '@agentdeck/protocol'
 
 /**
  * 清掉老数据里那些**已经不可能被满足**的动作名（D41 收尾）。
@@ -112,7 +112,9 @@ export async function applyDeadActionCleanup(
     ).allowed
     const reviewStandard = agent.reviewStandard
       ? {
-          name: agent.reviewStandard.name,
+          // ⚠️ 这里原来还搬一个 `name`。那个字段已经从 `ReviewStandard` 删掉了
+          //    （它不承载任何东西，理由见协议里那段注释），所以不再搬运——
+          //    顺手把它从老记录里去掉，正是这个函数该做的事。
           body: agent.reviewStandard.body,
           ...(legacyKept.length > 0 ? { allowedActions: [...legacyKept] } : {}),
         }

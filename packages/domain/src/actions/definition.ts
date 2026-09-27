@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { ActionPlane, ActionRef, ActionRefType } from '@alpha-helper/protocol'
+import type { ActionPlane, ActionRef, ActionRefType } from '@agentdeck/protocol'
 
 /**
  * 动作的**形状**与白名单校验（D41）。

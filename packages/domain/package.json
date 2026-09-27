@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/domain",
+  "name": "@agentdeck/domain",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -9,6 +9,6 @@
     "./testing": "./src/testing/fixtures.ts"
   },
   "dependencies": {
-    "@alpha-helper/protocol": "workspace:*"
+    "@agentdeck/protocol": "workspace:*"
   }
 }

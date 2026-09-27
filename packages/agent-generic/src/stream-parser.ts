@@ -1,5 +1,5 @@
-import type { AgentMessage } from '@alpha-helper/agent-core'
-import type { TokenUsage } from '@alpha-helper/protocol'
+import type { AgentMessage } from '@agentdeck/agent-core'
+import type { TokenUsage } from '@agentdeck/protocol'
 
 /**
  * 第二个 CLI 的 NDJSON 事件解析器。

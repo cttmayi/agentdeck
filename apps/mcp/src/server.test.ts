@@ -51,7 +51,7 @@ describe('MCP 协议握手', () => {
     }
     assert.equal(result.protocolVersion, MCP_PROTOCOL_VERSION)
     assert.ok(result.capabilities.tools, '必须声明 tools 能力，否则客户端根本不会来调')
-    assert.equal(result.serverInfo.name, 'alpha-helper')
+    assert.equal(result.serverInfo.name, 'agentdeck')
   })
 
   test('notifications 不产生响应（回了就是协议违规）', async () => {

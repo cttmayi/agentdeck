@@ -5,7 +5,6 @@
     identity,
     loadError,
     loading,
-    setAgentTools,
     skills,
     tools,
     updateAgent,
@@ -13,16 +12,20 @@
   } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
   import { go } from '../lib/view.ts'
-  import ReviewStandardEditor from './ReviewStandardEditor.svelte'
   import ActionPicker from './ActionPicker.svelte'
   import { t, tx } from '../lib/i18n.ts'
-  import { actionCountOf } from '../lib/tool-view.ts'
   import {
     allowedActionsFromLegacyStandard,
     describeAllowedActions,
     effectiveAllowedActions,
     splitAllowedActions,
   } from '../lib/agent-actions.ts'
+  /**
+   * ★ "它有没有判断依据"那条判据（决定顶上要不要挂红警告）：抽成纯函数放在
+   *   `lib/`，由 `agent-identity.test.ts` 钉住——`apps/web` 没有组件级测试，
+   *   判据留在标记里就没人守得住（这条判据写错过一次，见下面 `headline`）。
+   */
+  import { hasReviewIdentity } from '../lib/agent-identity.ts'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -89,9 +92,47 @@
     actionParams: agent.actionParams
       ? JSON.parse(JSON.stringify(agent.actionParams)) as Record<string, Record<string, unknown>>
       : {},
+    // ★ 调试动作（2026-09）：自己的那份（缺 = 没设，没有"老数据回退"这回事）。
+    debugActions: [...(agent.debugActions ?? [])],
   })
 
   let draft = blankDraft()
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 草稿属于**某一个人**：换 agent 就作废（连编辑态一起退掉）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `draft` 是进编辑态时从 `agent` 拷的一份**快照**，而 `Agents.svelte` 是
+   * `{#if selected}<AgentDetail agent={selected} …/>{/if}` —— 换一个 agent 时
+   * `{#if}` 仍然是真，于是**组件实例被复用**：`agent` 换了，`editing` 还是 true、
+   * `draft` 还是**上一个人**的。
+   *
+   * 两个后果，第二个比第一个严重得多：
+   *
+   *   ① 段落判据读的是 `draft.role` —— 那是**上一个人**的角色。于是"编辑到一半
+   *      换成执行者"，执行者的详情里仍然挂着「行动权限」那一段。
+   *      （使用者的原话：「智能体详情，点『编辑』就可以看见」。）
+   *   ② 点「保存」会把**上一个人的**名字、指令、角色 PATCH 到这个人身上：
+   *      `buildPatch()` 拿 `draft.*` 与**新的** `agent.*` 比，于是这些字段全都
+   *      判成"变了"。这是**改错人**，不是显示错。
+   *
+   * 判据是 `agent.id` —— 不是 `role`、也不是 `name`：同一个人刷新之后还是同一份
+   * 草稿（改到一半被 `loadAgents()` 刷一下不该把输入清空），换人才作废。
+   *
+   * `editing` 一起退回只读：编辑到一半换了对象，继续留在编辑态本身就是个陷阱
+   * —— 界面上写着 B 的名字，而每个输入框里都是 A 的内容。
+   *
+   * ⚠️ 在父组件写 `{#key selected.id}` 也能治，但那是**绕过**：组件自己持有了一份
+   *    会过期的拷贝，就该由它自己作废。否则换个地方复用这个组件，同一个坑再来一次。
+   */
+  let draftOwner = agent.id
+  $: if (agent.id !== draftOwner) {
+    draftOwner = agent.id
+    draft = blankDraft()
+    editing = false
+    error = ''
+  }
 
   /**
    * 可选的 runtime —— **从身份接口来，不写死**。
@@ -191,6 +232,17 @@
     if (!actionParamsEqual(nextParams, agent.actionParams ?? {}))
       patch['actionParams'] = nextParams
 
+    /**
+     * 调试动作走**同一个 PATCH**（`debugActions`，2026-09）。
+     *
+     * 与固定参数同两条规矩：① 只送**白名单里勾了「调试」**的动作（调试是允许的
+     * 子集，服务端也这么校验）；② 角色改成执行者时必须清空（服务端 400）。
+     */
+    const nextDebug =
+      draft.role === 'executor' ? [] : draft.debugActions.filter((a) => nextActions.includes(a))
+    if (nextDebug.slice().sort().join() !== (agent.debugActions ?? []).slice().sort().join())
+      patch['debugActions'] = nextDebug
+
     return patch
   }
 
@@ -249,6 +301,21 @@
   }
 
   $: attached = $skills.filter((s) => agent.skillIds.includes(s.id))
+  /**
+   * 能挂上去的 skill。
+   *
+   * ★ 规则是「**现在能选的** ∪ **这个智能体已经挂着的**」，两半都不能少：
+   *
+   *   · 少了前半 —— 本地目录里读进来的 skill 挂不上；
+   *   · 少了后半 —— 使用者取消勾选一个目录之后，那个智能体上挂着的那条会在
+   *     这里**消失**。它其实还挂着（能力没被抽走），但界面上看不见，于是
+   *     "我明明挂过它"变成了一件无法查证的事，也再也没法在这里把它摘掉。
+   *
+   * ⚠️ `!== false` 不是 `=== true`：老 daemon 不返回这个字段，按"能选"处理。
+   */
+  $: pickableSkills = $skills.filter(
+    (s) => s.selectable !== false || agent.skillIds.includes(s.id),
+  )
   $: reviewers = $agents.filter((a) => a.role === 'reviewer' && a.id !== agent.id)
   $: chosenReviewer = $agents.find((a) => a.id === agent.reviewerAgentId) ?? null
   $: isReviewer = agent.role === 'reviewer'
@@ -267,6 +334,36 @@
    */
   $: legacyActions = allowedActionsFromLegacyStandard(agent)
   $: visibleActions = describeAllowedActions(effectiveAllowedActions(agent), $tools)
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 老数据那份「审核标准」：**不再有单独一段**，它归到「指令」那一栏里
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ★ 使用者的要求（原话）：「移除审核智能体的『审核标准』」。这一步之所以能删，
+   *   是因为判断依据已经并进 ② 身份（= 那个 agent 的「指令」）：界面上一件事
+   *   只该有一个出处，而留一段"标准"只会让人在两个框之间来回搬文字。
+   *
+   * ⚠️ 但**投递链条上它还在**：老数据的 `Agent.reviewStandard`（以及"正文来自挂载
+   *   skill"那种更老的形态）仍然会被执行器合成进 ②（`reviewerIdentity`）。所以
+   *   删掉那一段之后必须把这两件事**搬到「指令」那一栏里说清**，否则界面会开始
+   *   撒谎：使用者看着一段指令，以为那就是全部依据，而实际投递出去的还多出一段。
+   *   这也是"宁可显示得啰嗦，也不静默少一段"的那条老规矩。
+   *
+   * ★ 一并给出**一步并进来**的按钮（`adopt-from-skills` 那个端点现在也收"内联
+   *   老标准"这一种，见下）：原来只有在"正文来自挂载 skill"时才给按钮，于是带
+   *   内联老标准的审核者（使用者的库里正好有一个）只能自己抄——而"看得见但搬不动"
+   *   正是这次改造要消掉的那种状态。
+   *
+   * ⚠️ 按钮**只在只读态**出现。编辑态里点它会导致一次数据打架：搬移会在服务端把
+   *   `skillIds` 清空，而草稿里还留着旧的那份 ⇒ 接着点「保存」会把挂载又写回去，
+   *   于是同一段正文既在「指令」里、又在 skill 里被投递**两遍**（服务端那句注释
+   *   说的就是这个）。所以编辑态只提示、不提供入口，并说清去哪儿点。
+   */
+  $: legacyStandardBody = isReviewer ? (agent.reviewStandard?.body ?? '') : ''
+  $: legacyFromSkills = isReviewer && !agent.reviewStandard && attached.length > 0
+  /** 这份判断依据还走在老形态上（内联老标准，或来自挂载的 skill）⇒ 可以并进来 */
+  $: legacyStandardPending = legacyStandardBody !== '' || legacyFromSkills
 
   /**
    * ★ 那几行里**哪些是"配过、但现在解析不出来"的**（D41 收尾）。
@@ -321,64 +418,33 @@
 
   /**
    * ══════════════════════════════════════════════════════════════════
-   * 工具挂载（D40）
+   * 执行者的详情里**没有**工具那一段了
    * ══════════════════════════════════════════════════════════════════
    *
-   * ★ **挂载单位是组**：一个工具包 = 一个组，勾上就是把这一整组动作交给它。
-   *   没有"只挂组里某一个动作"这回事——组里的动作共享同一个清单与入口，
-   *   拆开授权等于让一半动作处于"声明了却永远轮不到"的状态。
+   * ★ 使用者的要求（原话）：「执行智能体不支持"行动"，去掉」。
    *
-   * ⚠️ 这一段**只给执行者看**（`{#if !isReviewer}`）。审核者只判断、不动手：
-   *   服务端对 `role: 'reviewer'` 的挂载请求一律 400，界面就不该给出一个
-   *   必然失败的开关。这里选择**整段不显示**（而不是"显示但禁用 + 一句说明"）：
-   *   禁用态的开关会让人以为"是我权限不够"或者"哪里没装对"，而事实是这个
-   *   角色在结构上就没有这个能力——详情页头部已经写着"审核者只判断不动手"，
-   *   再挂一个永远点不动的控件只会让人多问一次。
+   *   他在「智能体」页选「助手」、点「编辑」，看到的是那一栏「可挂载的工具组」。
+   *   先撤掉勾选栏，再整段撤掉——**两段都撤的理由不一样**：
+   *     ① 勾选栏是"能改"，撤掉之后这一段只剩"能看"；
+   *     ② 而"能看"那半截对一个使用者**永远是同一句空话**：`toolIds` 只能由
+   *        `PUT /api/agents/:id/tools` 写，而那条接口没有界面、CLI 和 MCP 都
+   *        没有入口（查过 `apps/cli`、`apps/mcp`，一处引用都没有）。所以它对他
+   *        建的每个智能体都会一直显示"还没挂任何工具"——而"还没"是在许诺一件
+   *        界面做不到的事，正是这一轮误解的来源。
    *
-   * ⚠️ toolIds 走**单独一条接口**（`PUT /api/agents/:id/tools`），不混进
-   *    `PATCH /api/agents/:id`：挂载是整组替换，混进 PATCH 的字段里，
-   *   两个人同时改就会互相覆盖，而"谁挂了什么"是权限面。
+   * ★★ **后续（已做完）**：使用者随后定了"不需要挂载，因为我已经移除了此功能"，
+   *    于是那条链**整个清掉了**，这一段的"后果"不再是"悬着的事"：
+   *      - `Agent.toolIds` 从协议里删除（老数据不用迁移：`Agent` 不是 strict）；
+   *      - `PUT /api/agents/:id/tools` 删除；
+   *      - `executor.ts` 里"把挂载的脚本送进工作目录"那段与
+   *        `syncInjectedTools` / `removeInjectedTools` 一起删除；
+   *      - 「工具」页的「被哪些执行者挂载」那一列、以及"卸载被拒"那条分支删除
+   *        （卸载现在一律放行——那条拒绝是一把**没有钥匙的锁**：它叫人"去摘掉"，
+   *        而摘掉的地方已经不存在了）。
+   *
+   *    恢复界面入口：把这一段、`{#if editing}` 那个勾选栏，以及上面这一整条链
+   *    一起加回来（见 `packages/protocol/src/entities.ts` 里 `Agent` 上那段说明）。
    */
-  let toolSelection: string[] = [...(agent.toolIds ?? [])]
-  /** 上一次同步勾选时是哪个 agent——换一个 agent 时把草稿重来一份。 */
-  let toolAgentId = agent.id
-  let toolsSaving = false
-  let toolsError = ''
-
-  // 换 agent（详情栏复用了同一个组件实例）⇒ 勾选必须跟着换，否则会把上一个
-  // agent 的勾选状态带到这一个身上——而按「保存挂载」就真的写进去了。
-  $: if (agent.id !== toolAgentId) {
-    toolAgentId = agent.id
-    toolSelection = [...(agent.toolIds ?? [])]
-    toolsError = ''
-  }
-
-  $: mountedToolIds = agent.toolIds ?? []
-  $: mountedTools = $tools.filter((x) => mountedToolIds.includes(x.id))
-  /** 勾选有没有改动（排序后再比，顺序不算改动）。 */
-  $: toolsDirty =
-    toolSelection.slice().sort().join() !== mountedToolIds.slice().sort().join()
-
-  async function saveTools(): Promise<void> {
-    toolsSaving = true
-    toolsError = ''
-    try {
-      // ★ 接口回的就是**权威值**：用它对齐本地勾选，而不是假设服务端照单全收
-      //   （它可能因为"这个组已经不存在了"之类剔掉某一项）。
-      const updated = await setAgentTools(agent.id, toolSelection)
-      toolSelection = [...(updated.toolIds ?? [])]
-      showToast(tx('tools.detailSaved'))
-      // `setAgentTools()` 里已经重新取过 agent 列表（`$agents` 一变，上面那个
-      // `mountedTools` 就跟着变）。这里再叫一次父组件，是为了与这一页别的写入口
-      // （保存、固化标准）走同一条路——刷新只在一个地方发生，才不会漏。
-      onchanged()
-    } catch (err) {
-      toolsError = err instanceof Error ? err.message : String(err)
-    } finally {
-      toolsSaving = false
-    }
-  }
-
 
   /**
    * 哪些执行者指向了这个审核者。
@@ -389,12 +455,29 @@
    */
   $: executorsPointingHere = $agents.filter((a) => a.reviewerAgentId === agent.id)
 
-  /** 摘要里最该被看到的那一处问题——没有就不显示。 */
+  /**
+   * 摘要里最该被看到的那一处问题——没有就不显示。
+   *
+   * ⚠️ 审核者那一半的判据**换过**（2026-09）。它原来是
+   *   `isReviewer && !agent.reviewStandard && agent.skillIds.length === 0`
+   * ——两半都在看**老形态**。而判断依据早已并进 ② 身份（= 那个 agent 的「指令」），
+   * 于是一个**完全正常**的审核者（写了指令、没有标准字段、也没挂 skill）会被挂上
+   *
+   *   「它审不了任何东西：没有审核标准，平台不会把产出交给它审。点「编辑」写一条。」
+   *
+   * 而它审得好好的。★ 使用者的原话就是「这个提示有问题」。这类"指向一个不存在的
+   * 故障"的警告比没有警告更糟：它会让人去找一个不需要修的问题——同一条链路上，
+   * 列表里那个「未挂 skill」徽标已经因为同一类过时判据被整段删掉了
+   * （见 `views/Agents.svelte`）。
+   *
+   * ★ 判据现在是纯函数（`lib/agent-identity.ts`）：三种形态（「指令」/ 内联老标准 /
+   *   挂载的 skill）都算有依据，只有真的空才算没有。
+   */
   $: headline =
-    isReviewer && !agent.reviewStandard && agent.skillIds.length === 0
+    isReviewer && !hasReviewIdentity(agent)
       ? {
           tone: 'bad',
-          text: $t('agents.headlineNoStandard'),
+          text: $t('agents.headlineNoInstructions'),
         }
       : !isReviewer && !agent.reviewerAgentId
         ? { tone: 'warn', text: $t('agents.headlineNoReviewer') }
@@ -483,99 +566,65 @@
         <div class="field-row">
           <label for="agent-instructions">{$t('agents.instructionsLabel')}</label>
           <div>
-            <textarea id="agent-instructions" bind:value={draft.instructions} rows="4"></textarea>
-            <p class="row-hint">{$t('agents.detailInstructionsHintBefore')}<code>{'{{instructions}}'}</code>{$t('agents.detailInstructionsHintAfter')}</p>
+            <!--
+              ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
+                指令是一份几百到上千字的文档，不是一行备注。这里原来是 `rows="4"`
+                （约 4 行），于是"新建的时候能读、改的时候读不了"——同一个东西在
+                两处给不同的可读性，是最没必要的不一致。
+            -->
+            <textarea id="agent-instructions" class="instructions" bind:value={draft.instructions} rows="6"></textarea>
+            <p class="row-hint">{$t('agents.instructionsHintBefore')}<strong>{$t('agents.instructionsFieldStrong')}</strong>{$t('agents.instructionsHintAfter')}</p>
+            {#if legacyStandardPending}
+              <!--
+                ★ 编辑态**只提示**（按钮在只读态，理由见上面那段注释：搬移会清空
+                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。
+              -->
+              <p class="row-hint std-legacy" data-standard-merged data-legacy-standard>
+                {$t('agents.standardFoldInEditHint')}
+              </p>
+            {/if}
           </div>
         </div>
       {:else}
         <div class="field-row">
           <span class="row-label">{$t('agents.instructionsLabel')}</span>
-          {#if agent.instructions.trim()}
-            <p class="prose">{agent.instructions}</p>
-          {:else}
-            <p class="empty-value">{$t('agents.noInstructionsHint')}</p>
-          {/if}
-        </div>
-      {/if}
-    </section>
-
-    <!-- ══════════════ 用什么标准 ══════════════ -->
-    <section class="section">
-      <h3>{$t('agents.sectionStandard')}</h3>
-
-      {#if editing}
-        <!-- D37：标准内联在审核者身上，所以它是这一段的**第一件事** -->
-        {#if draft.role === 'reviewer'}
-          <div class="field-row">
-            <span class="row-label">{$t('agents.standardLabel')}</span>
-            <div>
-              <ReviewStandardEditor
-                value={draft.reviewStandard}
-                onchange={(next) => {
-                  draft.reviewStandard = next
-                  draft = { ...draft }
-                }}
-              />
-              {#if agent.skillIds.length > 0 && !agent.reviewStandard}
-                <!-- 过渡期：老数据的标准还在挂载的 skill 里 -->
-                {#each attached as s (s.id)}
-                  <p class="row-hint std-legacy">
-                    {$t('agents.legacySkillBefore')}<code>{s.slug}</code>{$t('agents.legacySkillAfter')}
-                  </p>
-                {/each}
-              {/if}
-            </div>
-          </div>
-        {:else}
-          <div class="field-row">
-            <span class="row-label">{$t('agents.standardLabel')}</span>
-            <p class="empty-value">{$t('agents.notApplicableExecutor')}</p>
-          </div>
-        {/if}
-
-        <div class="field-row">
-          <span class="row-label">{$t('agents.attachedSkillsLabel')}</span>
-          {#if $skills.length === 0}
-            <p class="empty-value">{$t('agents.noSkillsYet')}</p>
-          {:else}
-            <div class="skill-picker">
-              {#each $skills as s (s.id)}
-                <label class="skill-option">
-                  <input type="checkbox" value={s.id} bind:group={draft.skillIds} />
-                  <span><code>{s.slug}</code></span>
-                </label>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {:else}
-        <div class="field-row">
-          <span class="row-label">{$t('agents.standardLabel')}</span>
           <div>
-            {#if !isReviewer}
-              <p class="empty-value">{$t('agents.notApplicableExecutor')}</p>
-            {:else if agent.reviewStandard}
-              <!-- ⚠️ 类名别用 `default-badge`：那是 D36「默认智能体」的徽章。
-                   撞名之后"列表里「默认」有几个"这种断言会被详情页这个名字骗到
-                   （探针就是这么抓到的）。 -->
-              <span class="badge std-name-badge">{agent.reviewStandard.name}</span>
-              <!-- ⚠️ 这里原来还有一行"判完能触发的动作"：那份清单已经搬到下面
-                   「行动权限」那一段（D40 收口）。留在这里的话，同一件事在页面上
-                   会有两个出处，而"哪个说了算"就得靠读代码才知道。 -->
+            {#if agent.instructions.trim()}
+              <p class="prose">{agent.instructions}</p>
+            {:else if isReviewer}
+              <!-- ★ 审核者的资格判据就是这一条：指令非空。空 ⇒ 拿不到审核任务 -->
+              <p class="empty-value" data-no-instructions>
+                {$t('agents.noStandardBefore')}<strong>{$t('agents.noStandardStrong')}</strong>{$t('agents.noStandardAfter')}
+              </p>
+            {:else}
+              <p class="empty-value">{$t('agents.noInstructionsHint')}</p>
+            {/if}
+
+            <!-- ── 老数据：判断依据还带着一段（内联老标准 / 来自挂载的 skill）── -->
+            <!--
+              ★ 它显示在**这一栏**里，而不是另开一段：投递时它本来就与指令合成 ②，
+                摆在别处会让人以为那是"另一个设置"。
+            -->
+            {#if legacyStandardBody !== ''}
+              <p class="row-hint std-legacy" data-legacy-standard>{$t('agents.standardLegacyNoticeInline')}</p>
+              <!-- ⚠️ 这份正文**照旧显示**：它此刻仍然会被合成进 ② 一起投递，
+                   藏起来等于让人看不见自己那份判断依据去哪了。 -->
               <details open>
                 <summary>{$t('agents.standardBodySummary')}</summary>
-                <pre class="tpl-text">{agent.reviewStandard.body}</pre>
+                <pre class="tpl-text">{legacyStandardBody}</pre>
               </details>
-            {:else if attached.length > 0}
-              <!-- 过渡期：标准还在挂载的 skill 里 -->
+            {:else if legacyFromSkills}
+              <p class="row-hint" data-legacy-standard>{$t('agents.standardLegacyNoticeFromSkill')}</p>
               <p class="row-hint">
                 {$t('agents.legacyInlineBefore')}<strong>{$t('agents.legacyInlineStrong')}</strong>{$t('agents.legacyInlineAfter')}
                 {#each attached as s, i (s.id)}{i > 0 ? $t('agents.listSeparator') : ''}<code>{s.slug}</code>{/each}{$t('agents.legacyInlineEnd')}
               </p>
+            {/if}
+            {#if legacyStandardPending}
               <!--
-                ★ 一步做完迁移（D38）：把标准**原样**固化到它自己身上，并摘掉挂载。
-                  没有这一步，"卸载那条 skill"会先把审核者变成没标准的状态——
-                  而"没标准"意味着平台不再把产出交给它审。
+                ★ 一步做完迁移（D38）：把判断依据**原样**并进「指令」（审核者那一段），
+                  并摘掉挂载。没有这一步，"卸载那条 skill"会先把审核者变成没依据的
+                  状态——而"没依据"意味着平台不再把产出交给它审。
                   解析在服务端做（同一个 `resolveReviewStandard`），前端不重算。
               -->
               <button
@@ -601,14 +650,52 @@
               <p class="row-hint">
                 {$t('agents.adoptHintBefore')}<strong>{$t('agents.adoptHintStrong')}</strong>{$t('agents.adoptHintAfter')}
               </p>
-            {:else}
-              <p class="empty-value">
-                {$t('agents.noStandardBefore')}<strong>{$t('agents.noStandardStrong')}</strong>{$t('agents.noStandardAfter')}
-              </p>
             {/if}
           </div>
         </div>
+      {/if}
+    </section>
 
+    <!-- ══════════════ 挂载的 skill ══════════════ -->
+    <!--
+      ★ 原来它与「审核标准」挤在同一段里（那段叫「用什么标准」）。标准搬进「指令」之后，
+        这一段只剩下它自己的事：**这个 agent 干活时能翻哪些资料包**。
+        审核者挂 skill 是可选的（判断依据在「指令」里），执行者挂 skill 才是常态。
+    -->
+    <section class="section">
+      <h3>{$t('agents.sectionSkills')}</h3>
+
+      {#if editing}
+        <div class="field-row">
+          <span class="row-label">{$t('agents.attachedSkillsLabel')}</span>
+          {#if $skills.length === 0}
+            <p class="empty-value">{$t('agents.noSkillsYet')}</p>
+          {:else if pickableSkills.length === 0}
+            <!-- 库非空、但一条都不能挂：不能复用上面那句"还没有任何 skill" -->
+            <p class="empty-value">{$t('agents.noSelectableSkills')}</p>
+          {:else}
+            <div class="skill-picker">
+              {#each pickableSkills as s (s.id)}
+                <label class="skill-option">
+                  <input type="checkbox" value={s.id} bind:group={draft.skillIds} />
+                  <span>
+                    <code>{s.slug}</code>
+                    <!-- ★ 同 slug 可以有好几条（每个来源目录各一条，实测
+                         ~/.claude、~/.codex、~/.cursor 里都有 browser-use）。
+                         只显示 slug 的话选择器里会出现三个一模一样的东西，
+                         使用者只能靠猜——所以这里要带上它住在哪个目录。 -->
+                    {#if s.localDir}
+                      <span class="faint small skill-option-from" title={s.localDir}>
+                        {$t('agents.skillFromDir', { dir: s.localDir })}
+                      </span>
+                    {/if}
+                  </span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else}
         <div class="field-row">
           <span class="row-label">{$t('agents.attachedSkillsLabel')}</span>
           <div>
@@ -666,6 +753,11 @@
                 params={draft.actionParams}
                 onparams={(next) => {
                   draft.actionParams = next
+                  draft = { ...draft }
+                }}
+                debug={draft.debugActions}
+                ondebug={(next) => {
+                  draft.debugActions = next
                   draft = { ...draft }
                 }}
               />
@@ -726,6 +818,9 @@
                           {/each}
                         </span>
                       {/if}
+                      {#if (agent.debugActions ?? []).includes(item.type)}
+                        <span class="chip-sub debug">{$t('agents.actionsDebug')}</span>
+                      {/if}
                     </span>
                   {/each}
                 </div>
@@ -755,72 +850,6 @@
             {$t('agents.legacySkillActionsBefore')}
             {#each attached as s, i (s.id)}{i > 0 ? $t('agents.listSeparator') : ''}<code>{s.slug}</code>{/each}
           </p>
-        {/if}
-      </section>
-    {/if}
-
-    <!-- ══════════════ 它能干什么（工具组，D40）══════════════ -->
-    <!--
-      ★ 整段只给执行者：审核者不挂工具（它只判断、不动手）。服务端也会拒，
-        理由写在上面 `toolSelection` 那一段注释里——界面不该给出一个必然失败的开关。
-    -->
-    {#if !isReviewer}
-      <section class="section">
-        <h3>{$t('tools.detailSection')}</h3>
-
-        {#if editing}
-          <div class="field-row">
-            <span class="row-label">{$t('tools.detailPickLabel')}</span>
-            <div>
-              {#if $tools.length === 0}
-                <p class="empty-value">{$t('tools.detailNoInstalled')}</p>
-              {:else}
-                <div class="tool-picker">
-                  {#each $tools as tool (tool.id)}
-                    <label class="tool-option">
-                      <input type="checkbox" value={tool.id} bind:group={toolSelection} />
-                      <span>
-                        <code>{tool.slug}</code>
-                        <span class="chip-sub">{$t('tools.actionCount', { count: actionCountOf(tool) })}</span>
-                      </span>
-                    </label>
-                  {/each}
-                </div>
-              {/if}
-              <p class="row-hint">{$t('tools.detailMountHint')}</p>
-              <div class="tool-save">
-                <button
-                  type="button"
-                  class="secondary small"
-                  disabled={toolsSaving || !toolsDirty}
-                  onclick={() => void saveTools()}
-                >
-                  {toolsSaving ? $t('common.saving') : $t('tools.detailSave')}
-                </button>
-              </div>
-              {#if toolsError}
-                <p class="row-hint bad">{toolsError}</p>
-              {/if}
-            </div>
-          </div>
-        {:else}
-          <div class="field-row">
-            <span class="row-label">{$t('tools.detailMountedLabel')}</span>
-            <div>
-              {#if mountedTools.length === 0}
-                <p class="empty-value">{$t('tools.detailNoTools')}</p>
-              {:else}
-                <div class="chips">
-                  {#each mountedTools as tool (tool.id)}
-                    <span class="chip">
-                      <code>{tool.slug}</code>
-                      <span class="chip-sub">{$t('tools.actionCount', { count: actionCountOf(tool) })}</span>
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
         {/if}
       </section>
     {/if}
@@ -895,7 +924,7 @@
 
       {#if editing}
         <div class="field-row">
-          <label for="agent-runtime">runtime</label>
+          <label for="agent-runtime">{$t('agents.runtimeRowLabel')}</label>
           <div>
             <select id="agent-runtime" bind:value={draft.runtimeKey}>
               {#each runtimeOptions as key (key)}
@@ -932,7 +961,12 @@
         </div>
       {:else}
         <div class="field-row">
-          <span class="row-label">runtime</span>
+          <!--
+            ⚠️ 这里原来硬编码着 `runtime`（编辑态的同一栏 906 行早就走词表了）：
+            只读态与编辑态是同一个字段的两张面孔，没有理由一边说人话、一边留
+            英文内部叫法（2026-09）。
+          -->
+          <span class="row-label">{$t('agents.runtimeRowLabel')}</span>
           <div>
             <code>{agent.runtimeKey}</code>
             {#if evidenceWarnings[agent.runtimeKey]}
@@ -964,10 +998,15 @@
      布局
      ══════════════════════════════════════════════════════════════════
 
-     上限 52rem 是**阅读宽度**：再宽的话眼睛从 label 扫到 value 要横跨
-     一整屏，反而更难对齐行。 */
+     ⚠️ 2026-09：**不再设 `max-width`**（原来钉死 52rem）。任务详情那一栏是
+     占满右栏的，而智能体详情被那条上限卡在 832px——宽窗口下右栏右侧空出
+     一大片（1920 宽实测 400px+），使用者报「主区不满屏」。去掉之后：
+        · `.field-row` 的值列本来就是 `minmax(0, 1fr)`，直接跟着撑满；
+        · 长文字（指令 / 提示）由各自的 `46ch` 上限管着，不会拉成整屏长行；
+        · label 定宽 9rem 不变，值列起点不变，行对齐不受影响。
+     与任务的详情栏保持同一套行为。 */
   .detail {
-    max-width: 52rem;
+    min-width: 0;
   }
 
   /* ── 头部 ── */
@@ -1088,8 +1127,10 @@
     margin: 0;
     white-space: pre-wrap;
     color: var(--text-dim);
-    /* 指令可能是一整段，限一下宽度避免行长过长 */
-    max-width: 46ch;
+    /* ⚠️ 2026-09：**不再限宽**（原来 `max-width: 46ch` ≈ 23 个汉字/行）。右栏
+       撑满之后，指令正文还被卡在 406px 会让文字在行中间就换行、右侧空一大片
+       （使用者报「指令显示的文字中间就被换行了」）。去掉上限后它填满值列：
+       作者自己写的换行由 `pre-wrap` 保留，超长行按容器宽度折行。 */
   }
 
   .empty-value {
@@ -1103,6 +1144,22 @@
     font-size: var(--fs-xs);
     color: var(--text-faint);
     max-width: 46ch;
+  }
+
+  /**
+   * 指令输入框：要能读完一份 800 字的角色设定（D48）。
+   *
+   * 22rem = 352px 是实测值（13px 字号 / 行高 1.6 ⇒ 16 行），与
+   * `NewAgentForm.svelte` 里那一份**必须一致**。
+   *
+   * ⚠️ 两个文件里各有一份这个规则，因为 Svelte 的 `<style>` 默认**不外泄**，
+   *    两个组件没法共用一条作用域规则（提到全局 `app.css` 也不对：那里放的是
+   *    通用元素样式，不是某一个字段的高度）。所以只能靠注释互相指认。
+   */
+  .instructions {
+    min-height: 22rem;
+    line-height: 1.6;
+    resize: vertical;
   }
 
   .path {
@@ -1142,6 +1199,16 @@
     gap: var(--sp-1);
   }
 
+  /* 调试（2026-09）：不抢「固定参数」的存在感——它是"这条动作不真跑、只看
+     参数"的标记，用弱一点的颜色与不加边框表示"不是日常状态" */
+  .chip-sub.debug {
+    color: var(--text-dim);
+    border: 1px dashed var(--line-strong);
+    border-radius: 999px;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+
   /* ── 编辑控件 ── */
 
   .skill-picker {
@@ -1156,6 +1223,7 @@
     background: var(--bg);
   }
 
+  .skill-option-from { margin-left: var(--sp-1); }
   .skill-option {
     display: flex;
     align-items: center;
@@ -1170,42 +1238,9 @@
     margin: 0;
   }
 
-  /* ── 工具组（D40）──
-     与 skill 选择器同一套骨架：一格里一个组，"整组装进来"的形状在界面上也成立。 */
-
-  .tool-picker {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-    gap: var(--sp-1);
-    max-height: 11rem;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2);
-    background: var(--bg);
-  }
-
-  .tool-option {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    margin: 0;
-    cursor: pointer;
-    font-size: var(--fs-sm);
-  }
-
-  .tool-option input {
-    width: auto;
-    margin: 0;
-  }
-
-  .tool-option .chip-sub {
-    margin-left: var(--sp-2);
-  }
-
-  .tool-save {
-    margin-top: var(--sp-2);
-  }
+  /* 原来这里有一组 `.tool-picker / .tool-option / .tool-save` 的规则，给执行者
+     详情里那个「可挂载的工具组」勾选栏用。整段撤掉之后一并删了——留着就是给
+     不存在的 DOM 写样式。 */
 
   /* 角色选择：两个等宽卡片。这是"选边"的决定，值得占视觉重量 */
   .role-picker {

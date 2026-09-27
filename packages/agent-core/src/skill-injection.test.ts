@@ -23,11 +23,6 @@ import {
   SkillCollisionError,
   listManagedSkills,
   syncInjectedSkills,
-  listManagedTools,
-  removeInjectedTools,
-  syncInjectedTools,
-  ToolCollisionError,
-  toolPath,
 } from './skill-injection.ts'
 
 function frontmatterOf(content: string): Record<string, unknown> {
@@ -171,7 +166,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
    *
    * ① 最早：run 结束就把技能删掉。坏在**删除的依据是进程内的数组**——
    *    daemon 崩溃/被 kill 之后那份记忆就没了，残留的技能文件**会被以后的
-   *    run 继续发现**（实测在 `~/.alpha-helper-workspace/run-01M2SANDBOX…`
+   *    run 继续发现**（实测在 `~/.agentdeck-workspace/run-01M2SANDBOX…`
    *    里就躺着这么一个残留的 `general-review`）。
    * ② 中间：改成保留（使用者的要求）。
    * ③ 现在：**还是收掉**（使用者放弃了保留那条要求），但删除的依据是**落盘
@@ -248,7 +243,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
       // 这次一个技能都不挂了
       const result = await syncInjectedSkills(dir, '.claude/skills', [])
       assert.deepEqual(result.pruned, ['leftover'])
-      assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['.alpha-helper-managed.json'])
+      assert.deepEqual(await readdir(join(dir, '.claude', 'skills')), ['.agentdeck-managed.json'])
     } finally {
       await cleanup(dir)
     }
@@ -293,7 +288,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
       const left = await readdir(join(dir, '.claude', 'skills'))
       assert.ok(left.includes('b') && !left.includes('a'))
       const manifest = JSON.parse(
-        await readFile(join(dir, '.claude', 'skills', '.alpha-helper-managed.json'), 'utf8'),
+        await readFile(join(dir, '.claude', 'skills', '.agentdeck-managed.json'), 'utf8'),
       ) as { slugs: string[] }
       assert.deepEqual(manifest.slugs, ['b'], '★ 清单要跟着更新，否则残留无从识别')
     } finally {
@@ -318,7 +313,7 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
     const dir = await tmp()
     try {
       await mkdir(join(dir, '.claude', 'skills'), { recursive: true })
-      await writeFile(join(dir, '.claude', 'skills', '.alpha-helper-managed.json'), '{坏掉的 json', 'utf8')
+      await writeFile(join(dir, '.claude', 'skills', '.agentdeck-managed.json'), '{坏掉的 json', 'utf8')
       await mkdir(join(dir, '.claude', 'skills', 'theirs'), { recursive: true })
       await writeFile(join(dir, '.claude', 'skills', 'theirs', 'SKILL.md'), '别人的', 'utf8')
 
@@ -334,103 +329,6 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
   })
 })
 
-describe('★ 工具包在工作目录里的去留（D42：按落盘的归属清单对账）', () => {
-  const TOOLS_DIR = '.alpha-helper/tools'
-
-  function sampleTool(slug: string): Parameters<typeof syncInjectedTools>[2][number] {
-    return {
-      slug,
-      files: {
-        'scripts/send.mjs': `console.log('${slug}')`,
-        'TOOL.md': `# ${slug} 的说明`,
-      },
-      toolJson: JSON.stringify({ slug, name: slug, actions: [{ name: 'send' }] }, null, 2),
-      docs: `# ${slug} 的说明`,
-    }
-  }
-
-  test('写下去的是**整个包**：脚本、tool.json、TOOL.md 都在', async () => {
-    const dir = await makeTempDir('tools')
-    try {
-      const r = await syncInjectedTools(dir, TOOLS_DIR, [sampleTool('example-notify')])
-      assert.deepEqual(r.written, ['example-notify'])
-      assert.deepEqual(r.pruned, [])
-      const base = join(dir, TOOLS_DIR, 'example-notify')
-      assert.equal(await readFile(join(base, 'scripts', 'send.mjs'), 'utf8'), `console.log('example-notify')`)
-      assert.equal(
-        JSON.parse(await readFile(join(base, 'tool.json'), 'utf8')).slug,
-        'example-notify',
-      )
-      assert.equal(await readFile(join(base, 'TOOL.md'), 'utf8'), '# example-notify 的说明')
-      assert.deepEqual(await listManagedTools(dir, TOOLS_DIR), ['example-notify'])
-    } finally {
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 同名的使用者工具目录**绝不被覆盖**，而是明确报错（ToolCollisionError）', async () => {
-    const dir = await makeTempDir('tools')
-    try {
-      await mkdir(join(dir, TOOLS_DIR, 'example-notify'), { recursive: true })
-      await writeFile(join(dir, TOOLS_DIR, 'example-notify', 'keep.txt'), '使用者的东西', 'utf8')
-      await assert.rejects(
-        () => syncInjectedTools(dir, TOOLS_DIR, [sampleTool('example-notify')]),
-        (e: unknown) => e instanceof ToolCollisionError && e.slug === 'example-notify',
-      )
-      // 使用者的文件必须原样还在
-      assert.equal(
-        await readFile(join(dir, TOOLS_DIR, 'example-notify', 'keep.txt'), 'utf8'),
-        '使用者的东西',
-      )
-    } finally {
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 摘掉的工具会从工作目录消失（按清单自愈），下次同步清掉残渣', async () => {
-    const dir = await makeTempDir('tools')
-    try {
-      await syncInjectedTools(dir, TOOLS_DIR, [sampleTool('a'), sampleTool('b')])
-      // 这次只要 a ⇒ b（我们放过、现在不需要了）被摘掉
-      const r = await syncInjectedTools(dir, TOOLS_DIR, [sampleTool('a')])
-      assert.deepEqual(r.pruned, ['b'])
-      await assert.rejects(readFile(join(dir, TOOLS_DIR, 'b', 'tool.json')))
-      assert.deepEqual(await listManagedTools(dir, TOOLS_DIR), ['a'])
-    } finally {
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 收尾只收清单里记着的：点名一个别人的目录也不会删', async () => {
-    const dir = await makeTempDir('tools')
-    try {
-      await mkdir(join(dir, TOOLS_DIR, 'theirs'), { recursive: true })
-      await writeFile(join(dir, TOOLS_DIR, 'theirs', 'x.txt'), '别人的', 'utf8')
-      const swept = await removeInjectedTools(dir, TOOLS_DIR, ['theirs'])
-      assert.deepEqual(swept.removed, [], '★ 没有清单 = 我们什么都没放过 = 一个都不删')
-      assert.equal(await readFile(join(dir, TOOLS_DIR, 'theirs', 'x.txt'), 'utf8'), '别人的')
-    } finally {
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 收尾真的删掉注入的包，且清单清了连清单一起收掉', async () => {
-    const dir = await makeTempDir('tools')
-    try {
-      await syncInjectedTools(dir, TOOLS_DIR, [sampleTool('a'), sampleTool('b')])
-      const swept = await removeInjectedTools(dir, TOOLS_DIR, ['a', 'b'])
-      assert.deepEqual(swept.removed.sort(), ['a', 'b'])
-      await assert.rejects(readFile(join(dir, TOOLS_DIR, 'a', 'tool.json')))
-      await assert.rejects(readFile(join(dir, TOOLS_DIR, 'b', 'tool.json')))
-      // 清单空了 ⇒ 清单文件也收掉（不留空壳）
-      await assert.rejects(readFile(join(dir, TOOLS_DIR, '.alpha-helper-managed.json')))
-      assert.deepEqual(await listManagedTools(dir, TOOLS_DIR), [])
-    } finally {
-      await cleanup(dir)
-    }
-  })
-
-  test('toolPath：诊断与日志用的相对路径', () => {
-    assert.equal(toolPath('.alpha-helper/tools', 'example-notify'), '.alpha-helper/tools/example-notify')
-  })
-})
+// ⚠️ 这里原来还有一整块「工具包在工作目录里的去留（D42）」，连同
+//    `syncInjectedTools` / `removeInjectedTools` / `ToolCollisionError` 一起删掉了——
+//    挂载能力撤掉之后那一套没有调用方。见 `skill-injection.ts` 末尾那段说明。

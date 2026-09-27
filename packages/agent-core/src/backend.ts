@@ -1,4 +1,4 @@
-import type { RuntimeProtocol, TokenUsage } from '@alpha-helper/protocol'
+import type { RuntimeProtocol, TokenUsage } from '@agentdeck/protocol'
 import type { SandboxOptions } from './sandbox.ts'
 
 /**
@@ -27,7 +27,22 @@ export interface AgentMessage {
 }
 
 export interface ExecOptions {
+  /**
+   * 用户消息（③ 任务那一块）。
+   *
+   * ⚠️ 2026-09 起**它不再是"全部内容"**：① 框架与 ② 身份走 `systemPrompt`（如果
+   *    runtime 支持），或者由调用方把它们并进这段文本（见 `first-sentence.ts` 的
+   *    A/B 两档）。谁送来什么，这里照发，后端不做任何拼装。
+   */
   prompt: string
+  /**
+   * 系统提示（①② 两块）。**空 / 缺省 = 不发这个参数。**
+   *
+   * ★ 用不用它由调用方按 runtime 能力决定（`RuntimeDescriptor.systemPrompt`）。
+   *   实测（claude 2.0.14）：系统提示**活不过 `--resume`** ⇒ 支持它的 runtime 必须
+   *   **每轮都带**，否则第二轮起就没有规则与身份了（而两边都不报错）。
+   */
+  systemPrompt?: string
   /** ★ 使用者指定的工作目录；平台不做仓库检出（D20）。 */
   workDir: string
   model?: string | null
@@ -36,7 +51,15 @@ export interface ExecOptions {
   resumeSessionId?: string | null
   /** 额外环境变量（在任务级覆盖之后应用）。 */
   env?: Record<string, string>
-  /** 用户自定义参数——会被禁改表过滤。 */
+  /**
+   * 用户自定义参数（会被禁改表过滤）。
+   *
+   * ⚠️ **只有 `kind: 'cli'` 的 runtime 才有语义**：它们拼进 run 级 argv。
+   *    `kind: 'service'` 的 runtime（如 codex app-server）没有 run 级 argv——
+   *    这个字段对它们**无处安放**。按约定：适配器收到非空 customArgs 时
+   *    **警告 + 忽略**（不得静默），核心不做校验（daemon 今天没有写入口，
+   *    无从校验；详见 `docs/runtime/codex-runtime-design.md` §3.4）。
+   */
   customArgs?: readonly string[]
   signal?: AbortSignal
   /** 子进程输出一行时的回调（用于活动性判定，FR-RUN-08）。 */

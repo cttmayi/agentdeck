@@ -6,16 +6,23 @@ import type { TextCatalog } from '../text.ts'
  * ⚠️ 分文件的依据是**代码结构**（一个区域一份），所以"界面上那句话在代码哪儿"
  *    是直接的：看到 `skills.install` 就知道去 `Skills.svelte` 找调用点。
  *
- * ⚠️ zh 的值**必须与迁移之前逐字一致**：中文是这个项目的默认语言，也是所有既有
- *    测试、布局探针与文档断言的依据——改一个字就会有东西变红，而那种红不是这个
- *    功能要的。
+ * ⚠️ zh 的值改之前先看一眼**有没有东西钉着它**：中文是默认语言，既有测试、布局
+ *    探针与文档都引用它。⚠️ 但"与迁移之前逐字一致"**不再是判据**（2026-09 的文案
+ *    改写把那批文字按"这句话是给谁看的"重写了一遍：去掉开发口径、机器取值与
+ *    markdown 残留）。有引用就一起改，没有就按读者改。
  *
  * ⚠️ 被 `<strong>` 拆开的句子按 `…Before` / `…Strong` / `…After` 分段（标记里的
  *    粗体结构原样保留）：分段值里的空格与标点是**渲染结果的一部分**，拼接后必须
  *    与原来那句一字不差。
  */
 export const skillsText = {
-  'skills.title': { zh: 'Skills', en: 'Skills' },
+  /**
+   * ⚠️ 这里**原有一个 `skills.title`**（= 侧栏那一项的写法），2026-09 改版时删了：
+   *    页名现在由顶栏显示，而顶栏与侧栏**共用同一个词条**（`shell.navSkills`，
+   *    见 `apps/web/src/lib/view.ts` 的 `VIEW_TITLE_KEYS`）。留着它就等于同一句话
+   *    有两个来源，改一处不会报错，只会让两处慢慢不一样。
+   *    同一次删掉的还有主区里那行重复的 `<h2>Skills</h2>`。
+   */
   /**
    * ⚠️ 这句原本列的是 skill 的"三要素"（审核标准 + 判决结构引用 + 允许执行的
    *    动作子集）。D37 把标准搬走、D40 收口又把动作权限搬走之后，那三样里有两样
@@ -30,8 +37,8 @@ export const skillsText = {
   'skills.headStrongBody': { zh: '正文（SKILL.md）', en: 'the body (SKILL.md)' },
   'skills.headStrongFiles': { zh: '支持文件', en: 'support files' },
   'skills.headOutro': {
-    zh: '。它不决定审核标准，也不决定"判完允许动什么"——那两样都写在审核者自己身上（智能体页 → 点开审核者）。',
-    en: '. It decides neither the review standard nor what a verdict may trigger — both live on the reviewer itself (Agents page → open the reviewer).',
+    zh: '。它不决定审核者的判断依据，也不决定"判完允许动什么"——那两样都写在审核者自己身上（判断依据在它的「指令」里；智能体页 → 点开审核者）。',
+    en: '. It decides neither the reviewer’s judging criteria nor what a verdict may trigger — both live on the reviewer itself (the criteria in its Instructions; Agents page → open the reviewer).',
   },
   'skills.install': { zh: '安装 skill', en: 'Install skill' },
 
@@ -56,7 +63,12 @@ export const skillsText = {
     zh: '一起装上（二进制会被跳过并列出）。',
     en: ' along with it (binaries are skipped and listed).',
   },
-  'skills.slugLabel': { zh: 'slug（留空则用目录名）', en: 'slug (empty = use the directory name)' },
+  /**
+   * ⚠️ 这里原来直接写着 `slug`（2026-09 改写）：那是我们自己代码里的叫法，界面上
+   *    一律说「标识」——它在这一页就是"这条 skill 叫什么名字"。
+   */
+  'skills.slugLabel': { zh: '标识（留空则用目录名）', en: 'ID (empty = use the directory name)' },
+  'skills.colSlug': { zh: '标识', en: 'ID' },
 
   'skills.remoteUnavailable': { zh: '远端不可用：{error}', en: 'Remote unavailable: {error}' },
   'skills.remoteDownBefore': { zh: '远端目录在', en: 'The remote catalog runs in ' },
@@ -83,7 +95,7 @@ export const skillsText = {
    *    勾选写的说明也一并删掉（留着就是"界面上没有、词表里还在"的死词条）。
    */
   'skills.overwriteLabel': {
-    zh: '允许替换同名的 skill（会**覆盖**已有那个的内容）',
+    zh: '允许替换同名的 skill（会覆盖已有那个的内容）',
     en: 'Allow replacing a skill with the same name (this overwrites the existing one)',
   },
   'skills.overwriteHint': {
@@ -117,10 +129,10 @@ export const skillsText = {
     zh: '技能是执行者干活时参考的资料包（可安装、带版本、可带支持文件）。',
     en: 'A skill is a reference pack the executor consults while working (installable, versioned, optionally with support files).',
   },
-  'skills.emptyAuditStrong': { zh: '审核标准不在这里', en: 'Audit criteria are not here' },
+  'skills.emptyAuditStrong': { zh: '判断依据不在这里', en: 'Judging criteria are not here' },
   'skills.emptyAuditAfter': {
-    zh: '——它写在审核者自己身上（智能体页 → 点开审核者）。',
-    en: ' — they live on the reviewer itself (Agents page → open the reviewer).',
+    zh: '——它写在审核者的「指令」里（智能体页 → 点开那个审核者）。',
+    en: ' — they live in the reviewer’s Instructions (Agents page → open that reviewer).',
   },
 
   'skills.colName': { zh: '名称', en: 'Name' },
@@ -131,8 +143,13 @@ export const skillsText = {
   'skills.colUpdatedAt': { zh: '更新于', en: 'Updated' },
   'skills.sourceLocal': { zh: '本机自建', en: 'Built locally' },
   'skills.sourceRemote': { zh: '远端下载', en: 'Downloaded' },
-  'skills.viewStandard': { zh: '看标准', en: 'View criteria' },
-  'skills.collapseStandard': { zh: '收起标准', en: 'Hide criteria' },
+  /**
+   * ⚠️ 这两个键名还带着 `Standard`，而它们按的其实是**这个 skill 的正文**
+   *    （`SKILL.md` 展开/收起）。键名留着是为了少改一处调用点，**措辞必须准**：
+   *    界面上写「看标准」会让人以为标准还住在 skill 里——D37 之后它就不在那儿了。
+   */
+  'skills.viewStandard': { zh: '看正文', en: 'View body' },
+  'skills.collapseStandard': { zh: '收起正文', en: 'Hide body' },
   'skills.uninstallTitle': {
     zh: '卸载：还有智能体挂着它时会被拒（会告诉你还挂着的是谁）',
     en: 'Uninstall: refused while agents still mount it (it tells you which ones)',
@@ -140,6 +157,55 @@ export const skillsText = {
   // ★ 「卸载」/「卸载中…」不放这儿：`common.uninstall` / `common.uninstalling` 就是这两句，
   //   再写一份就有两个出处（改一处漏一处）。只有这句带说明的标题是本区域独有的。
   'skills.supportFiles': { zh: '支持文件（{count}）', en: 'Support files ({count})' },
+
+  // ── 本地 skill 目录（把别的 AI 工具那儿的 skill 读进来）──
+  'skills.settings': { zh: '设置', en: 'Settings' },
+  'skills.dirsTitle': { zh: '本地 skill 目录', en: 'Local skill directories' },
+  'skills.dirsIntro': {
+    zh: '勾上别的 AI 工具放 skill 的目录，那儿的 skill 就会出现在这一页，也能挂给智能体用。目录是每次都重扫的：你在那边改了、加了、删了，这边跟着变。',
+    en: 'Tick the directories where other AI tools keep their skills; those skills then show up on this page and can be attached to agents. The directories are re-scanned every time: edit, add or delete over there and this side follows.',
+  },
+  'skills.dirsToolClaude': { zh: 'Claude Code', en: 'Claude Code' },
+  'skills.dirsToolCodex': { zh: 'Codex', en: 'Codex' },
+  'skills.dirsToolCursor': { zh: 'Cursor', en: 'Cursor' },
+  'skills.dirsToolAgents': { zh: 'AGENTS 约定目录', en: 'AGENTS convention' },
+  'skills.dirsMissing': { zh: '这个目录不存在', en: 'This directory does not exist' },
+  'skills.dirsCount': { zh: '里面 {count} 个 skill', en: '{count} skill(s) inside' },
+  'skills.dirsNoSkill': { zh: '里面没有 skill', en: 'No skills inside' },
+  'skills.dirsScanning': { zh: '正在看这些目录…', en: 'Looking at these directories…' },
+  'skills.dirsCustomHeading': { zh: '自己填的路径', en: 'Paths you added' },
+  'skills.dirsCustomPlaceholder': { zh: '绝对路径，比如 /Users/me/my-skills', en: 'Absolute path, e.g. /Users/me/my-skills' },
+  'skills.dirsAdd': { zh: '加进来', en: 'Add' },
+  'skills.dirsRemove': { zh: '去掉', en: 'Remove' },
+  /**
+   * ⚠️ 这段话必须说**取消勾选不会怎样**。使用者对"取消勾选"的直觉是"删掉"，
+   *    而这里的实际行为是"不再出现在可选项里、正在用的留着"——两者差得很远，
+   *    不写出来他会以为勾掉就把 skill 删了（于是不敢勾）。
+   */
+  'skills.dirsUncheckNote': {
+    zh: '取消勾选只表示"不再出现在能选的列表里"，不会删掉什么，也不会把已经有智能体挂着的那条抽走——不然那个智能体会悄悄少一条能力。要彻底删掉，先在智能体上把它摘下来。',
+    en: 'Unticking only means "no longer offered for selection". It deletes nothing and does not take away a skill an agent already mounts — otherwise that agent would quietly lose an ability. To remove one for good, detach it from the agent first.',
+  },
+  'skills.dirsSkipped': { zh: '跳过（没有 SKILL.md，不算技能）：{list}', en: 'Skipped (no SKILL.md, not a skill): {list}' },
+  'skills.dirsUnreadable': { zh: '读不了：{list}', en: 'Unreadable: {list}' },
+  'skills.dirsFailed': { zh: '读不进来：{list}', en: 'Could not read: {list}' },
+  'skills.dirsSaved': { zh: '读进来 {added} 个，更新 {updated} 个，移出 {removed} 个', en: 'Read in {added}, updated {updated}, removed {removed}' },
+  'skills.dirsSavedNothing': { zh: '已保存（没有新的 skill 读进来）', en: 'Saved (no new skills read in)' },
+  'skills.dirsKept': {
+    zh: '{count} 个还有智能体在用，所以留着：{names}',
+    en: '{count} kept because agents still mount them: {names}',
+  },
+
+  // ── 列表里"这条是从本地目录来的" ──
+  'skills.fromDir': { zh: '来自 {dir}', en: 'From {dir}' },
+  'skills.fromDirInactive': {
+    zh: '来源目录已取消勾选或文件已移走，但还有智能体在用：{names}',
+    en: 'Its source directory is unticked or the file is gone, but agents still mount it: {names}',
+  },
+  'skills.uninstallLocalDirTitle': {
+    zh: '这条 skill 住在本地目录里，这里不给卸载——删了也会被下一次扫描带回来。要删就去那个目录里删。',
+    en: 'This skill lives in a local directory, so it cannot be uninstalled here — deleting it would just be undone by the next scan. Delete it in that directory instead.',
+  },
 
   // ── 命令式文案：toast / confirm / 就地错误（事件回调里用 `tx`）──
   'skills.errEmptySource': {

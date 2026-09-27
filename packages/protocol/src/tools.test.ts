@@ -49,7 +49,7 @@ describe('D40：工具包清单', () => {
   })
 
   test('★ 判据一：schema 版本不认识 ⇒ 拒绝（不做"尽力而为"）', () => {
-    const r = parse({ schema: 'alpha-helper/tool@2' })
+    const r = parse({ schema: 'agentdeck/tool@2' })
     assert.equal(r.success, false)
   })
 

@@ -1,4 +1,4 @@
-import type { AgentSession } from '@alpha-helper/agent-core'
+import type { AgentSession } from '@agentdeck/agent-core'
 
 /**
  * 空闲看门狗（FR-RUN-08）。

@@ -1,7 +1,7 @@
 import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { RuntimeDescriptor } from '@alpha-helper/agent-core'
+import type { RuntimeDescriptor } from '@agentdeck/agent-core'
 import { genericDescriptor } from '../generic-descriptor.ts'
 
 /**

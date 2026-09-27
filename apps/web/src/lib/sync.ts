@@ -1,4 +1,4 @@
-import { renderText, webText } from '@alpha-helper/i18n'
+import { renderText, webText } from '@agentdeck/i18n'
 import { isLoggedIn, remote } from './remote.ts'
 import { api } from './api.ts'
 import { currentLocale } from './locale.ts'
@@ -10,13 +10,13 @@ import { currentLocale } from './locale.ts'
  * 为什么同步逻辑必须在**页面**里
  * ══════════════════════════════════════════════════════════════════
  *
- * daemon **不向 alpha-helper 的远端服务**发起请求（D20）。这不是偷懒，是架构选择：
+ * daemon **不向 agentdeck 的远端服务**发起请求（D20）。这不是偷懒，是架构选择：
  * 它一旦开始外联，就多出一整类"谁能通过远端影响本机执行"的攻击面。
  * 所以页面是唯一的通道——两条腿都在它身上，它还得负责一件容易忽略的事：
  * **两边的可用性无关**。远端挂了，本机功能必须照常可用（FR-AUTH-06）。
  */
 
-const QUEUE_KEY = 'alpha-helper.report-queue'
+const QUEUE_KEY = 'agentdeck.report-queue'
 const QUEUE_LIMIT = 500
 
 export const DEFAULT_POLL_INTERVAL_MS = 60_000

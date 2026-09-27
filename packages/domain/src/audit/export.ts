@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { AUDIT_EXPORT_FORMAT_VERSION, type AuditRecord, type TokenUsage } from '@alpha-helper/protocol'
+import { AUDIT_EXPORT_FORMAT_VERSION, type AuditRecord, type TokenUsage } from '@agentdeck/protocol'
 import type { Store } from '../ports/store.ts'
-import type { WorkspaceId } from '@alpha-helper/protocol'
+import type { WorkspaceId } from '@agentdeck/protocol'
 
 /**
  * 审计导出（M4）。

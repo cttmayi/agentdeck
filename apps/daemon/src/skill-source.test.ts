@@ -522,7 +522,7 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
       () => resolveGithubUrl('https://github.com/o/r/tree/main/x', {}, { fetchImpl: gh.impl }),
       'github_rate_limited',
     )
-    assert.match(err.detail ?? '', /ALPHA_HELPER_GITHUB_TOKEN/)
+    assert.match(err.detail ?? '', /AGENTDECK_GITHUB_TOKEN/)
   })
 
   test('★ 跳转到白名单之外 ⇒ 拒绝（白名单不能靠第一跳就完事）', async () => {

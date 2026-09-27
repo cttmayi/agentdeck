@@ -1,5 +1,5 @@
 {
-  "name": "@alpha-helper/daemon",
+  "name": "@agentdeck/daemon",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
@@ -8,16 +8,17 @@
     ".": "./src/index.ts"
   },
   "bin": {
-    "alpha-helper": "./src/cli.ts"
+    "agentdeck": "./src/cli.ts"
   },
   "dependencies": {
-    "@alpha-helper/agent-claude": "workspace:*",
-    "@alpha-helper/agent-core": "workspace:*",
-    "@alpha-helper/agent-generic": "workspace:*",
-    "@alpha-helper/domain": "workspace:*",
-    "@alpha-helper/i18n": "workspace:*",
-    "@alpha-helper/protocol": "workspace:*",
-    "@alpha-helper/store-file": "workspace:*",
-    "@alpha-helper/web": "workspace:*"
+    "@agentdeck/agent-claude": "workspace:*",
+    "@agentdeck/agent-codex": "workspace:*",
+    "@agentdeck/agent-core": "workspace:*",
+    "@agentdeck/agent-generic": "workspace:*",
+    "@agentdeck/domain": "workspace:*",
+    "@agentdeck/i18n": "workspace:*",
+    "@agentdeck/protocol": "workspace:*",
+    "@agentdeck/store-file": "workspace:*",
+    "@agentdeck/web": "workspace:*"
   }
 }
