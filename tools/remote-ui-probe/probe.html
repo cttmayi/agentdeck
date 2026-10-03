@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>remote-ui-probe</title></head>
+<body>
+<!-- 量到的结果写进这个 <pre>，run.mjs 从 Chrome 的 --dump-dom 输出里读它 -->
+<pre id="out">running</pre>
+<iframe id="f" src="/" style="width:100%;height:1200px;border:0"></iframe>
+<script>
+/**
+ * 远端管理页的**界面探针**（跑在远端服务自己的源上，所以能自由量 iframe 里的东西）。
+ *
+ * ⚠️ 这里**只量事实**、不下判断：判断（哪些数值算对）全在 `run.mjs` 里。
+ *    分开的理由与 daemon 那个探针一致——"量"和"判"混在一起时，改判据就得改测量页，
+ *    而改测量页会让上次的报告失去可比性。
+ *
+ * 这条探针是 2026-10 界面审查（D53）的产物：那次量出 7 处问题，其中"按钮被挤成两行"
+ * 与"表格被裁掉"**肉眼看不出来**，只有量才知道。所以把它们固化成机器检查。
+ */
+const f = document.getElementById('f')
+const d = () => f.contentDocument
+const win = () => f.contentWindow
+const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+async function until(fn, tries = 100, step = 100) {
+  for (let i = 0; i < tries; i += 1) { if (fn()) return true; await wait(step) }
+  return false
+}
+const box = (el) => {
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+}
+const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : null)
+// ⚠️ `new win().MouseEvent(...)` 会被解析成 `new (win())` —— `win()` 返回的是 iframe 的
+//    window 对象，不是构造函数 ⇒ "win is not a constructor"（第一版就这么写的，
+//    而且因为当时没有 try/catch，页面只是卡在 running 上，看不出是抛了）。
+const click = (el) => {
+  const W = win()
+  el.dispatchEvent(new W.MouseEvent('click', { bubbles: true, cancelable: true }))
+}
+const pressEscape = () => {
+  const W = win()
+  W.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+}
+
+async function collect() {
+  const doc = d()
+  const facts = {}
+
+  // ── 骨架 ──
+  facts.appFilled = (doc.getElementById('app')?.children.length ?? 0) > 0
+  facts.h1Count = doc.querySelectorAll('h1').length
+  facts.pageName = text(doc.querySelector('.page-name'))
+  // ⚠️ 侧栏那一项里还有 `.nav-hint`（说明文字），整块 textContent 会把它一起带上——
+  //    第一版就是这么比的，于是"页名 === 侧栏项"永远不相等。只取它**自己的第一段文字**。
+  const navEl = doc.querySelector('.nav-item.active')
+  facts.navActive = navEl
+    ? (navEl.childNodes[0]?.textContent ?? '').replace(/\s+/g, ' ').trim()
+    : null
+  facts.hasNav = !!doc.querySelector('nav')
+
+  // ── 顶栏控件（D53 量的：裸 select 37px 且被拉到整格宽）──
+  const sels = [...doc.querySelectorAll('.topbar select')]
+  facts.topbarSelectBoxes = sels.map((s) => box(s))
+  const topbar = doc.querySelector('.topbar')
+  facts.topbarBox = box(topbar)
+  facts.topbarOverflow = topbar ? Math.max(0, topbar.scrollWidth - topbar.clientWidth) : null
+  const topbarBtn = doc.querySelector('.topbar button')
+  facts.topbarButtonBox = box(topbarBtn)
+
+  // ── 同步那一行（D53 量的：长说明把按钮挤成两行 ⇒ 54px）──
+  const actions = doc.querySelector('.main .page-actions')
+  facts.syncRowBox = box(actions)
+  facts.syncButtonBox = box(actions?.querySelector('button'))
+  facts.syncButtonLabel = text(actions?.querySelector('button'))
+  facts.syncStatusText = text(actions?.querySelector('span'))
+  const mainBtn = doc.querySelector('.main table tbody button')
+  facts.mainRowButtonBox = box(mainBtn)
+
+  // ── 清单摘要那一行（D54：真实数据，不许是键名/硬编码）──
+  facts.manifestLine = text(doc.querySelector('.manifest-line'))
+
+  // ── 表格 ──
+  const wrap = doc.querySelector('.table-wrap')
+  facts.tableExists = !!doc.querySelector('table')
+  facts.tableHeaders = [...doc.querySelectorAll('table thead th')]
+    .map((th) => text(th) || '(空)')
+  facts.tableRows = doc.querySelectorAll('table tbody tr').length
+  facts.tableOverflowX = wrap ? Math.max(0, wrap.scrollWidth - wrap.clientWidth) : null
+  facts.tableWrapOverflowCss = wrap ? win().getComputedStyle(wrap).overflowX : null
+  const row = doc.querySelector('table tbody tr')
+  facts.firstRowButtonLabels = [...(row?.querySelectorAll('button') ?? [])].map((b) => text(b))
+  const title = row?.querySelector('.row-title')
+  const titleCode = title?.querySelector('code')
+  // ⚠️ 徽章在**来源**列（D69.6 前在 `.row-title` 里）——从整行找，仍与 slug 同一行
+  const titleBadge = row?.querySelector('.badge')
+  facts.slugBox = box(titleCode)
+  facts.badgeBox = box(titleBadge)
+  facts.badgeTexts = [...doc.querySelectorAll('table tbody .badge')].map((b) => text(b))
+  facts.incompleteNotes = [...doc.querySelectorAll('table tbody .warn')].map((b) => text(b))
+  facts.disabledRowButtons = [...doc.querySelectorAll('table tbody button:disabled')].map((b) => ({
+    label: text(b),
+    title: b.getAttribute('title') ?? '',
+  }))
+  // ★ D69：单元格原子样式是 app.css 共用——钉住它们真的生效。
+  //   `.source-ref` 单行省略（remote 原来**没有**这条样式、会折行）；
+  //   版本统一 v 前缀 + 无版本号（夹具 probe-synced=abc1234 → vabc1234；
+  //   probe-local 无版本 → 无版本号）。
+  //   ⚠️ 列序（D69.6 加了「来源」列）：0=技能 1=来源 2=版本 3=文件 4=抓取于 5=操作。
+  const firstRef = doc.querySelector('table tbody .source-ref')
+  facts.sourceRefNowrap = firstRef ? win().getComputedStyle(firstRef).whiteSpace : null
+  facts.versionCellTexts = [...doc.querySelectorAll('table tbody tr')]
+    .map((tr) => text(tr.children[2] ?? null))
+    .filter((t) => t !== '')
+  // ★ D69.5：文件列与 daemon 同一档——`SKILL.md` + 支持文件数（files 不含
+  //   SKILL.md，同一个 resolveLocalPath 规则）；夹具第一行（probe-synced）没有
+  //   支持文件，所以格子里就是裸的 `SKILL.md`，不许出现"0 个文件"那种显示。
+  facts.filesCellTexts = [...doc.querySelectorAll('table tbody tr')]
+    .map((tr) => text(tr.children[3] ?? null))
+    .filter((t) => t !== '')
+  // ★ D69.6：来源串（`github:…`）必须在**来源**列（col 1），不许再塞在技能列
+  //   （col 0）——使用者报过"github:… 为什么放在技能列而不是来源列"。
+  facts.sourceColumnPlacement = [...doc.querySelectorAll('table tbody tr')]
+    .map((tr) => ({
+      slugCol: text(tr.children[0] ?? null) ?? '',
+      sourceCol: text(tr.children[1] ?? null) ?? '',
+    }))
+    .filter((r) => r.slugCol.includes('github:') || r.sourceCol.includes('github:'))
+    .every((r) => r.slugCol.indexOf('github:') === -1 && r.sourceCol.includes('github:'))
+
+  // ── 安装表单 ──
+  const installBox = doc.querySelector('.install-box')
+  facts.installFormPresent = !!installBox
+  facts.installFormSummary = text(installBox?.querySelector('summary'))
+  facts.installUrlPresent = !!doc.querySelector('#install-url')
+  const installRow = doc.querySelector('.install-row')
+  facts.installRowCols = installRow ? win().getComputedStyle(installRow).gridTemplateColumns : null
+
+  // ── 未翻译的键名（`remote.xxx` 直接出现在页面上就是漏词条）──
+  const bodyText = text(doc.body) ?? ''
+  facts.untranslatedKeys = (bodyText.match(/remote\.[a-z][a-zA-Z.]+/g) ?? []).slice(0, 5)
+
+  // ── 交互①：点「查看」开抽屉，里面要有 SKILL.md 正文；Esc 关掉 ──
+  const viewBtn = doc.querySelector('table tbody button.secondary')
+  if (viewBtn) {
+    click(viewBtn)
+    await until(() => doc.querySelector('.drawer'))
+    const drawer = doc.querySelector('.drawer')
+    facts.drawerOpened = !!drawer
+    facts.drawerHeadHasH2 = !!drawer?.querySelector('.drawer-head h2')
+    facts.drawerContentLength = (drawer?.querySelector('.file-text')?.textContent ?? '').length
+    // ★ D69.7：抽屉里要显示「需要配置」（夹具带 needs: 还得配个 key）——装了才
+    //   发现要配 key，比不推荐更糟。
+    facts.drawerShowsNeeds = (drawer?.textContent ?? '').includes('还得配个 key')
+    pressEscape()
+    await wait(250)
+    facts.drawerClosedByEsc = !doc.querySelector('.drawer')
+  }
+
+  // ── 交互①.5：首行有 ▸ chevron，点它也能开抽屉（与 daemon 同一入口，D69.8）──
+  const expToggle = doc.querySelector('table tbody .expand-toggle')
+  facts.expandTogglePresent = !!expToggle
+  if (expToggle) {
+    click(expToggle)
+    await until(() => doc.querySelector('.drawer'))
+    facts.expandToggleOpensDrawer = !!doc.querySelector('.drawer')
+    pressEscape()
+    await wait(250)
+  }
+
+  // ── 交互②：点本地那条的「卸载」⇒ 弹**自己画的**确认框（不是 window.confirm）⇒ 取消 ──
+  const uninstallBtn = [...doc.querySelectorAll('table tbody button')].find(
+    (b) => text(b) === '卸载' && !b.disabled,
+  )
+  facts.uninstallButtonFound = !!uninstallBtn
+  if (uninstallBtn) {
+    click(uninstallBtn)
+    await until(() => doc.querySelector('.modal'))
+    facts.confirmModalOpened = !!doc.querySelector('.modal')
+    facts.confirmModalText = text(doc.querySelector('.modal'))
+    const cancel = [...doc.querySelectorAll('.modal-foot button')].find((b) => text(b) === '取消')
+    if (cancel) click(cancel)
+    await wait(250)
+    facts.confirmModalClosed = !doc.querySelector('.modal')
+    // 取消之后那条**必须还在**（确认框不是装饰）
+    facts.rowCountAfterCancel = doc.querySelectorAll('table tbody tr').length
+  }
+
+  return facts
+}
+
+/**
+ * ⚠️ **任何异常都要写出来**：第一版没有 try/catch，页面卡在 `running`，而 Chrome 的
+ *    dump 里什么都看不到——只能猜是"加载慢"还是"抛了"（实际排查时两种都猜过）。
+ */
+async function safely(fn) {
+  try {
+    return await fn()
+  } catch (err) {
+    document.getElementById('out').textContent = JSON.stringify(
+      { probeError: String((err && err.stack) || err) },
+      null,
+      1,
+    )
+    return null
+  }
+}
+
+window.addEventListener('load', () => {
+  void safely(async () => {
+  // ⚠️ 必须等**目录真的加载完**（表格有行 / 空态 / 错误态）再量：第一版在 `load` 之后
+  //    立刻量，结果量到的是"正在读取…"那一瞬间 —— 13 项假失败。
+  //    三种终态都算"加载完了"（夹具里应当落到第一种）。
+  const ready = await until(
+    () =>
+      d().querySelector('table tbody tr') !== null ||
+      d().querySelector('.empty') !== null ||
+      d().querySelector('.notice.bad') !== null,
+  )
+  await wait(500)
+  const facts = await collect()
+  facts.probeWaitedForData = ready
+  facts.probeIframeText = (text(d().body) ?? '').slice(0, 200)
+  document.getElementById('out').textContent = JSON.stringify(facts, null, 1)
+  })
+})
+</script>
+</body>
+</html>

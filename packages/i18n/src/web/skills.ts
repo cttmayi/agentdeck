@@ -31,16 +31,16 @@ export const skillsText = {
    *    文件），并明说另外两样住在审核者身上。
    */
   'skills.headIntro': {
-    zh: 'skill 是执行者干活时参考的资料包：',
+    zh: '技能是执行者干活时参考的资料包：',
     en: 'A skill is a reference pack the executor consults: ',
   },
   'skills.headStrongBody': { zh: '正文（SKILL.md）', en: 'the body (SKILL.md)' },
   'skills.headStrongFiles': { zh: '支持文件', en: 'support files' },
   'skills.headOutro': {
-    zh: '。它不决定审核者的判断依据，也不决定"判完允许动什么"——那两样都写在审核者自己身上（判断依据在它的「指令」里；智能体页 → 点开审核者）。',
+    zh: '。它不决定审核者的判断依据，也不决定「判完允许动什么」——那两样都写在审核者自己身上（判断依据在它的「指令」里；智能体页 → 点开审核者）。',
     en: '. It decides neither the reviewer’s judging criteria nor what a verdict may trigger — both live on the reviewer itself (the criteria in its Instructions; Agents page → open the reviewer).',
   },
-  'skills.install': { zh: '安装 skill', en: 'Install skill' },
+  'skills.install': { zh: '安装技能', en: 'Install skill' },
 
   'skills.tabPath': { zh: '从路径 / GitHub 安装', en: 'Install from a path / GitHub' },
   'skills.tabRemote': { zh: '从远端目录安装', en: 'Install from the remote catalog' },
@@ -55,7 +55,7 @@ export const skillsText = {
   'skills.pathHintBefore': { zh: '指向的目录里', en: 'The target directory ' },
   'skills.pathHintStrong': { zh: '必须有 SKILL.md', en: 'must contain SKILL.md' },
   'skills.pathHintMid': {
-    zh: '（大写）——技能就是靠"目录里有它"被 CLI 发现的，没有它装进来也不会生效，所以会当场拒绝。同目录下的其它文本文件会作为',
+    zh: '（大写）——技能就是靠「目录里有它」被 CLI 发现的，没有它装进来也不会生效，所以会当场拒绝。同目录下的其它文本文件会作为',
     en: ' (uppercase) — that is how the CLI discovers a skill, and without it the install would not take effect, so it is rejected on the spot. Other text files in the same directory are installed as ',
   },
   'skills.pathHintSupportStrong': { zh: '支持文件', en: 'support files' },
@@ -68,7 +68,7 @@ export const skillsText = {
    *    一律说「标识」——它在这一页就是"这条 skill 叫什么名字"。
    */
   'skills.slugLabel': { zh: '标识（留空则用目录名）', en: 'ID (empty = use the directory name)' },
-  'skills.colSlug': { zh: '标识', en: 'ID' },
+  'skills.colSlug': { zh: '技能', en: 'Skill' },
 
   'skills.remoteUnavailable': { zh: '远端不可用：{error}', en: 'Remote unavailable: {error}' },
   'skills.remoteDownBefore': { zh: '远端目录在', en: 'The remote catalog runs in ' },
@@ -95,11 +95,11 @@ export const skillsText = {
    *    勾选写的说明也一并删掉（留着就是"界面上没有、词表里还在"的死词条）。
    */
   'skills.overwriteLabel': {
-    zh: '允许替换同名的 skill（会覆盖已有那个的内容）',
+    zh: '允许替换同名的技能（会覆盖已有那个的内容）',
     en: 'Allow replacing a skill with the same name (this overwrites the existing one)',
   },
   'skills.overwriteHint': {
-    zh: '默认不勾：同名一律拒绝写入，避免"下载顺手覆盖了你自己的东西"。确实要用新版本顶掉旧的（比如你自己改过一版、现在想换回目录里那一版）才勾上。',
+    zh: '默认不勾：同名一律拒绝写入，避免「下载顺手覆盖了你自己的东西」。确实要用新版本顶掉旧的（比如你自己改过一版、现在想换回目录里那一版）才勾上。',
     en: 'Off by default: the same name is always refused, so a download cannot quietly overwrite your own work. Tick it only when you really want the new version to replace the old one (say you edited your copy and now want the catalog version back).',
   },
   'skills.pathFootHint': {
@@ -124,7 +124,7 @@ export const skillsText = {
     en: 'The button on the right of each row above is the install entry point.',
   },
 
-  'skills.emptyTitle': { zh: '还没有 skill', en: 'No skills yet' },
+  'skills.emptyTitle': { zh: '还没有技能', en: 'No skills yet' },
   'skills.emptyHint': {
     zh: '技能是执行者干活时参考的资料包（可安装、带版本、可带支持文件）。',
     en: 'A skill is a reference pack the executor consults while working (installable, versioned, optionally with support files).',
@@ -141,8 +141,10 @@ export const skillsText = {
   // ⚠️ 这里原来还有一条 `colAllowedActions`（列表里那一列动作）——那一列随
   //    "skill 不再带动作"一起去掉了。
   'skills.colUpdatedAt': { zh: '更新于', en: 'Updated' },
-  'skills.sourceLocal': { zh: '本机自建', en: 'Built locally' },
-  'skills.sourceRemote': { zh: '远端下载', en: 'Downloaded' },
+  /** 最后一列是按钮列、没有可见表头，读屏器用这个 aria-label（与工具页同一做法）。 */
+  'skills.colActions': { zh: '操作', en: 'Actions' },
+  'skills.sourceLocal': { zh: '本机', en: 'Local' },
+  'skills.sourceRemote': { zh: '远端', en: 'Remote' },
   /**
    * ⚠️ 这两个键名还带着 `Standard`，而它们按的其实是**这个 skill 的正文**
    *    （`SKILL.md` 展开/收起）。键名留着是为了少改一处调用点，**措辞必须准**：
@@ -160,9 +162,9 @@ export const skillsText = {
 
   // ── 本地 skill 目录（把别的 AI 工具那儿的 skill 读进来）──
   'skills.settings': { zh: '设置', en: 'Settings' },
-  'skills.dirsTitle': { zh: '本地 skill 目录', en: 'Local skill directories' },
+  'skills.dirsTitle': { zh: '本地技能目录', en: 'Local skill directories' },
   'skills.dirsIntro': {
-    zh: '勾上别的 AI 工具放 skill 的目录，那儿的 skill 就会出现在这一页，也能挂给智能体用。目录是每次都重扫的：你在那边改了、加了、删了，这边跟着变。',
+    zh: '勾上别的 AI 工具放技能的目录，那儿的技能就会出现在这一页，也能挂给智能体用。目录是每次都重扫的：你在那边改了、加了、删了，这边跟着变。',
     en: 'Tick the directories where other AI tools keep their skills; those skills then show up on this page and can be attached to agents. The directories are re-scanned every time: edit, add or delete over there and this side follows.',
   },
   'skills.dirsToolClaude': { zh: 'Claude Code', en: 'Claude Code' },
@@ -170,27 +172,29 @@ export const skillsText = {
   'skills.dirsToolCursor': { zh: 'Cursor', en: 'Cursor' },
   'skills.dirsToolAgents': { zh: 'AGENTS 约定目录', en: 'AGENTS convention' },
   'skills.dirsMissing': { zh: '这个目录不存在', en: 'This directory does not exist' },
-  'skills.dirsCount': { zh: '里面 {count} 个 skill', en: '{count} skill(s) inside' },
-  'skills.dirsNoSkill': { zh: '里面没有 skill', en: 'No skills inside' },
+  'skills.dirsCount': { zh: '里面 {count} 个技能', en: '{count} skill(s) inside' },
+  'skills.dirsNoSkill': { zh: '里面没有技能', en: 'No skills inside' },
   'skills.dirsScanning': { zh: '正在看这些目录…', en: 'Looking at these directories…' },
   'skills.dirsCustomHeading': { zh: '自己填的路径', en: 'Paths you added' },
   'skills.dirsCustomPlaceholder': { zh: '绝对路径，比如 /Users/me/my-skills', en: 'Absolute path, e.g. /Users/me/my-skills' },
   'skills.dirsAdd': { zh: '加进来', en: 'Add' },
   'skills.dirsRemove': { zh: '去掉', en: 'Remove' },
+  /** 「移除」这个目录（只是取消勾选，不删任何东西）。 */
+  'skills.dirsRemoveTitle': { zh: '取消勾选这个目录（不会删掉里面的东西）', en: 'Uncheck this directory (nothing is deleted)' },
   /**
    * ⚠️ 这段话必须说**取消勾选不会怎样**。使用者对"取消勾选"的直觉是"删掉"，
    *    而这里的实际行为是"不再出现在可选项里、正在用的留着"——两者差得很远，
    *    不写出来他会以为勾掉就把 skill 删了（于是不敢勾）。
    */
   'skills.dirsUncheckNote': {
-    zh: '取消勾选只表示"不再出现在能选的列表里"，不会删掉什么，也不会把已经有智能体挂着的那条抽走——不然那个智能体会悄悄少一条能力。要彻底删掉，先在智能体上把它摘下来。',
+    zh: '取消勾选只表示「不再出现在能选的列表里」，不会删掉什么，也不会把已经有智能体挂着的那条抽走——不然那个智能体会悄悄少一条能力。要彻底删掉，先在智能体上把它摘下来。',
     en: 'Unticking only means "no longer offered for selection". It deletes nothing and does not take away a skill an agent already mounts — otherwise that agent would quietly lose an ability. To remove one for good, detach it from the agent first.',
   },
   'skills.dirsSkipped': { zh: '跳过（没有 SKILL.md，不算技能）：{list}', en: 'Skipped (no SKILL.md, not a skill): {list}' },
   'skills.dirsUnreadable': { zh: '读不了：{list}', en: 'Unreadable: {list}' },
   'skills.dirsFailed': { zh: '读不进来：{list}', en: 'Could not read: {list}' },
   'skills.dirsSaved': { zh: '读进来 {added} 个，更新 {updated} 个，移出 {removed} 个', en: 'Read in {added}, updated {updated}, removed {removed}' },
-  'skills.dirsSavedNothing': { zh: '已保存（没有新的 skill 读进来）', en: 'Saved (no new skills read in)' },
+  'skills.dirsSavedNothing': { zh: '已保存（没有新的技能读进来）', en: 'Saved (no new skills read in)' },
   'skills.dirsKept': {
     zh: '{count} 个还有智能体在用，所以留着：{names}',
     en: '{count} kept because agents still mount them: {names}',
@@ -203,7 +207,7 @@ export const skillsText = {
     en: 'Its source directory is unticked or the file is gone, but agents still mount it: {names}',
   },
   'skills.uninstallLocalDirTitle': {
-    zh: '这条 skill 住在本地目录里，这里不给卸载——删了也会被下一次扫描带回来。要删就去那个目录里删。',
+    zh: '这条技能住在本地目录里，这里不给卸载——删了也会被下一次扫描带回来。要删就去那个目录里删。',
     en: 'This skill lives in a local directory, so it cannot be uninstalled here — deleting it would just be undone by the next scan. Delete it in that directory instead.',
   },
 
@@ -213,9 +217,35 @@ export const skillsText = {
     en: 'Enter an absolute path of a local directory, or a GitHub link.',
   },
   'skills.errNoRemoteEntry': { zh: '远端目录里没有 {slug}', en: 'No {slug} in the remote catalog' },
-  'skills.confirmUninstall': {
-    zh: '卸载「{slug}」？工作目录里的技能副本会在下一次 run 开始时同步掉。',
-    en: 'Uninstall "{slug}"? The copy in the working directory is synced away when the next run starts.',
+  /** 目录里是精选推荐（2026-10：推荐清单），不是投稿目录。 */
+  'skills.remotePickedNote': {
+    zh: '目录里是维护者核过来源的推荐项；每条都写着它的原始 GitHub 来源，装的时候也按那个来源记档。',
+    en: 'The catalog holds picks whose sources were checked by the maintainer; each row shows its original GitHub source, which is also recorded when you install it.',
+  },
+  /**
+   * 目录里现在没有条目。
+   * ⚠️ 与"远端不可用""未登录"**必须分开**：那是"没拉到 / 没问到"，这是
+   *    "问到了，目录里就是空的"——三者的下一步不同。
+   */
+  /**
+   * 「内容不完整」：维护者在清单里声明了 exclude，所以有几个文件**没有**装进来。
+   * ⚠️ 必须在装之前就看得见——装了的东西少了零件而界面上不说，跑起来才知道。
+   */
+  'skills.remoteIncomplete': {
+    // ⚠️ 说"项"而不是"个文件"：维护者写的排除图案可以是**整目录**（`docs/**`），
+    //    那时被剪掉的是那一棵子树，报出来的也是目录。
+    zh: '内容不完整：跳过了 {count} 项（清单里声明的排除）',
+    en: 'Incomplete: {count} item(s) skipped (declared exclusions)',
+  },
+  'skills.remoteEmpty': { zh: '远端目录里现在没有条目', en: 'The remote catalog has no entries right now' },
+  'skills.remoteEmptyHint': {
+    zh: '维护者还没同步推荐清单（或清单是空的）。要装东西可以直接在上面那一栏填 GitHub 链接。',
+    en: 'The maintainer has not synced the recommended list yet (or it is empty). You can install from a GitHub link in the tab above.',
+  },
+  'skills.confirmUninstallTitle': { zh: '卸载「{slug}」', en: 'Uninstall "{slug}"' },
+  'skills.confirmUninstallBody': {
+    zh: '工作目录里的技能副本会在下一次 run 开始时同步掉。',
+    en: 'The copy in the working directory is synced away when the next run starts.',
   },
   'skills.uninstalled': { zh: '已卸载 {slug}', en: 'Uninstalled {slug}' },
   'skills.noteFailed': { zh: '失败：{code}', en: 'Failed: {code}' },

@@ -575,6 +575,15 @@ const NAMED_SQL = {
 
   // ── 按外键列的列表（排序与文件适配器的 JS 稳定排序一致：时间相同则按插入顺序）──
   commentsByIssue: `SELECT json FROM comment WHERE issue_id = ? ORDER BY created_at, rowid`,
+  /**
+   * 删任务（issue）时遍历全部 run、按 subject 链判定归属（与文件适配器同一个
+   * 判据：执行 run 的 subject 是 issue，审核 run 的 subject 是它审的那条执行
+   * run，最多 3 层）。`runsBySubjectIssue` 只匹配第一层，会漏掉审核 run——
+   * 所以这里取全表在内存里判定，删除是罕见操作，量级无所谓。
+   */
+  runsAll: `SELECT json FROM run ORDER BY rowid`,
+  /** 删任务时连带删掉它的评论。 */
+  commentsDeleteByIssue: `DELETE FROM comment WHERE issue_id = ?`,
   verdictsByRun: `SELECT json FROM verdict WHERE run_id = ? ORDER BY created_at, rowid`,
   actionsByVerdict: `SELECT json FROM action WHERE verdict_id = ? ORDER BY created_at, rowid`,
   artifactsByRun: `SELECT json FROM artifact WHERE run_id = ? ORDER BY created_at, rowid`,
@@ -645,6 +654,21 @@ const NAMED_SQL = {
    */
   chatTurnsDeleteByConversation: `DELETE FROM chat_turn
      WHERE workspace_id = ? AND conversation_id = ?`,
+
+  // ── deleteRun 的连带删除（与文件适配器同一串操作，见 `Store.deleteRun`）──
+
+  /** 哪些对话的轮次引用了这条 run：删轮次后要重算它们的 `turnCount`。 */
+  chatTurnsByRun: `SELECT json FROM chat_turn WHERE run_id = ? ORDER BY seq, rowid`,
+  /** 删掉引用这条 run 的轮次（那一轮的内容就是 run 的 messages，run 没了轮次只剩半句话）。 */
+  chatTurnsDeleteByRun: `DELETE FROM chat_turn WHERE run_id = ?`,
+  /** 重算对话轮数用的计数。 */
+  chatTurnsCountByConversation: `SELECT COUNT(*) AS n FROM chat_turn WHERE conversation_id = ?`,
+  /** action 挂在 verdict 上：先删 action（按这些 verdict 的 id）再删 verdict。 */
+  actionsDeleteByRunVerdicts: `DELETE FROM action
+     WHERE verdict_id IN (SELECT id FROM verdict WHERE run_id = ?)`,
+  verdictsDeleteByRun: `DELETE FROM verdict WHERE run_id = ?`,
+  artifactsDeleteByRun: `DELETE FROM artifact WHERE run_id = ?`,
+  runMessagesDeleteByRun: `DELETE FROM run_message WHERE run_id = ?`,
 
   skillsByIds: `SELECT json FROM skill
      WHERE id IN (SELECT value FROM json_each(?))
@@ -1223,6 +1247,78 @@ export class SqliteStore implements Store {
     this.#named('chatTurnsDeleteByConversation').run(cur.workspaceId as string, id as string)
     this.#stmt('del:conversation').run(id as string)
     return true
+  }
+
+  /**
+   * 删掉一条 run 连同它派生的一切。连带范围与理由见端口文档
+   * （`Store.deleteRun`）。与 `deleteConversation` 同一条约定：**方法体内同步
+   * 删完、没有 `await`**，不存在可被观察到的中间态。
+   */
+  async deleteRun(id: RunId): Promise<boolean> {
+    const run = this.#getEntity<Run>('run', id as string)
+    if (!run) return false
+    // ① 先找出引用这条 run 的轮次属于哪些对话（重算 turnCount 要用），再删轮次。
+    const affected = this.#named('chatTurnsByRun').all(id as string) as { json: string }[]
+    const convIds = [
+      ...new Set(affected.map((r) => (JSON.parse(r.json) as ChatTurn).conversationId)),
+    ]
+    this.#named('chatTurnsDeleteByRun').run(id as string)
+    for (const convId of convIds) {
+      const conv = this.#getEntity<Conversation>('conversation', convId as string)
+      if (!conv) continue
+      const { n } = this.#named('chatTurnsCountByConversation').get(convId as string) as {
+        n: number
+      }
+      this.#putEntity('conversation', convId as string, conv.workspaceId, {
+        ...conv,
+        turnCount: n,
+        updatedAt: Date.now(),
+      })
+    }
+    // ② verdict 与由它触发的 action（先 action 后 verdict）
+    this.#named('actionsDeleteByRunVerdicts').run(id as string)
+    this.#named('verdictsDeleteByRun').run(id as string)
+    // ③ artifacts、④ 消息流、⑤ run 本体
+    this.#named('artifactsDeleteByRun').run(id as string)
+    this.#named('runMessagesDeleteByRun').run(id as string)
+    this.#stmt('del:run').run(id as string)
+    return true
+  }
+
+  /**
+   * 删掉一条任务（issue）连同挂它名下的一切。连带范围见端口文档
+   * （`Store.deleteIssue`）；与 `deleteRun` 同一条约定：方法体内同步删完。
+   * 该 issue 上的 run（含审核链）逐个走 `deleteRun`（嵌套调用，SQLite 是同步
+   * 执行的，不存在中间态）。
+   */
+  async deleteIssue(id: IssueId): Promise<boolean> {
+    const cur = this.#getEntity<Issue>('issue', id as string)
+    if (!cur) return false
+    // ★ 先**收集**再删：判定"属于这条 issue"要靠 subject 链（审核 run 的 subject
+    //   指向执行 run），若边删边判，执行 run 先消失会让后面审核 run 的链断掉、
+    //   被当成"不属于"而漏删。
+    const runs = this.#named('runsAll').all() as { json: string }[]
+    const toDelete = runs
+      .map((r) => JSON.parse(r.json) as Run)
+      .filter((run) => this.#runBelongsToIssue(run, id))
+    for (const run of toDelete) {
+      await this.deleteRun(run.id)
+    }
+    this.#named('commentsDeleteByIssue').run(id as string)
+    this.#stmt('del:issue').run(id as string)
+    return true
+  }
+
+  /** 与文件适配器 / server 侧同一个判据：顺着 subject 链往上找，最多 3 层。 */
+  #runBelongsToIssue(run: Run, issueId: IssueId): boolean {
+    let cursor: Run | null = run
+    for (let depth = 0; depth < 3 && cursor; depth++) {
+      const subject: Run['subject'] = cursor.subject
+      if (subject.type === 'issue') return subject.id === issueId
+      if (subject.type !== 'run') return false
+      cursor = this.#getEntity<Run>('run', subject.id as string)
+    }
+    return false
   }
 
   // ── Report ──

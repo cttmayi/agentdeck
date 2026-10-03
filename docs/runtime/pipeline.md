@@ -543,7 +543,9 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 ⚠️ **2026-09 三块组装之后，模版只管 ① 框架**——这句话到 2026-10 变成"模版**每块一个框**"：
 `Agent.instructions` 不再作为 `{{instructions}}` 插进模版，而是平台先组装成 ②、由身份框用
 `{{identity}}` 摆放（`{{instructions}}` 等六个变量因此退役）。聊天那一份是**第三条链路自己的
-三框**：它不是在派活，所以框架里没有"交报告"与判决契约。
+三框**：框架里没有"交报告"与判决契约（2026-10 起聊天**能干活**——在对话自己的工作目录里
+读写文件、跑命令，但它**不进审核闭环**：`subject.type` 是 `conversation`、`reviewerAgentId`
+恒为 `null`，结构上到不了判决，见 §3.3 与 `first-sentence.ts` 的说明）。
 
 **默认模版本身就是一个模版**，所以只有一台渲染器：文档里 §2.1 ③ / §3.3 贴的那两段、
 界面上「填入默认模版」拿到的、以及真的投递出去的，是同一个字符串渲染出来的
@@ -705,6 +707,15 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 挂着的参考 skill：general-review
 
 请用简体中文回答（判决 JSON 里的字段名与取值必须原样照抄，不要翻译）。
+
+## 公共裁判准则
+
+- 对事不对人：只说材料本身的问题，不带情绪、不指责。
+- 结论先行：先给出结论，再摆理由，每一条理由都要能落在证据上。
+- 指出问题就要给出可执行的改进建议（`fail` 时尤其要具体，让执行者知道怎么改）。
+- 同一类问题只记一条 finding，不重复计数；严重度按影响定，不按数量堆。
+- 标准没有覆盖到的地方：能明确判断就按专业判断下结论；明确不了就选 `needs_human`，绝不硬凑。
+- 只依据本次材料判断，不把材料之外的外部信息当证据。
 
 ## 护栏
 
@@ -1335,7 +1346,7 @@ skill <slug>：<规范化改了什么>              ← 例如"原文没有 fron
 | 全局设置的入口与页签（链路 × 块两排：执行/审核/聊天 × ① 框架/② 身份/③ 任务，2026-10 三框） | `apps/web/src/views/Agents.svelte`、`components/WorkspaceSettings.svelte` |
 | 右侧抽屉（新建 / 设置共用；遮罩 + Esc 在里面） | `apps/web/src/components/Drawer.svelte` |
 | 居中对话框（**从一大堆东西里挑**用的浮层；遮罩 + Esc 在里面） | `apps/web/src/components/Modal.svelte` |
-| 吸底提交栏（`.form-foot`，`position: sticky; bottom: 0`；错误提示也在里面） | `apps/web/src/views/NewTask.svelte` |
+| 吸底提交栏（`.form-foot`，`position: sticky; bottom: 0`；错误提示也在里面） | `apps/web/src/components/NewTaskForm.svelte` |
 | 工作目录规则（纯函数，可单测） | `apps/daemon/src/workdir.ts` |
 | 工作目录里哪些路径归我们管（技能目录 / 状态目录 / `.agentdeck`） | `apps/daemon/src/workdir-files.ts` |
 | 技能注入与归属清单对账 | `packages/agent-core/src/skill-injection.ts` |
@@ -1350,7 +1361,7 @@ skill <slug>：<规范化改了什么>              ← 例如"原文没有 fron
 | ~~工具包注入工作目录~~（随挂载能力撤除；现在只有技能注入） | — |
 | 工具包脚本的执行（起进程、超时、输出上限） | `apps/daemon/src/script-executor.ts` |
 | 界面语言：词表、取值标签、六条护栏 | `packages/i18n/src/web/*.ts`、`apps/web/src/lib/i18n.ts` |
-| **新建任务页三步链**（执行 → 审核 → 行动，D42） | `apps/web/src/views/NewTask.svelte` |
+| **新建任务页三步链**（执行 → 审核 → 行动，D42） | `apps/web/src/components/NewTaskForm.svelte` |
 | **行动权限编辑器**（左选右配：挑动作 / 配参数，D43/D44） | `apps/web/src/components/ActionPicker.svelte`、`ActionParamEditor.svelte` |
 | 供审核串接、报告摄取、重试、判决收口 | `apps/daemon/src/server.ts`、`review.ts`、`ingest.ts` |
 | runtime 描述表（能力位、旗标、投递方式、证据等级） | `packages/agent-core/src/runtime-table.ts` |

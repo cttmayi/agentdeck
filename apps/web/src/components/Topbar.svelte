@@ -1,13 +1,13 @@
 <script lang="ts">
   import { unreadCount } from '../lib/stores.ts'
   import { t } from '../lib/i18n.ts'
+  import Icon from './Icon.svelte'
   import { VIEW_TITLE_KEYS, openDrawer, view } from '../lib/view.ts'
   import { actionsFor, pageActions } from '../lib/page-actions.ts'
   import {
     remoteAccount,
     remoteError,
     remoteLoggedIn,
-    remotePlugins,
   } from '../lib/remote-store.ts'
 
   /**
@@ -47,7 +47,6 @@
    *    `lib/page-actions.ts`）。按视图名过滤这一步也在那边（`actionsFor`），
    *    因为"换页时旧组件的清理不该清掉新页"这条只有它知道。
    */
-  $: failing = $remotePlugins.filter((p) => !p.loaded).length
 
   /** 当前这一页的动作（登记的不是这一页就是空的）。 */
   $: pageActionsOfView = actionsFor($pageActions, $view)
@@ -103,18 +102,28 @@
     ⚠️ 宽屏平铺、窄屏收进 `⋯`：两处渲染的是**同一份数据**（见 `lib/page-actions.ts`），
        不是两套按钮。
   -->
-  <div class="page-actions" aria-label={$t('shell.pageActions')} role="group">
-    {#each pageActionsOfView as action (action.id)}
-      <button
-        type="button"
-        class={action.kind ?? 'secondary'}
-        class:active={action.active}
-        disabled={action.disabled}
-        title={action.title}
-        onclick={action.onActivate}
-      >{action.label}</button>
-    {/each}
-  </div>
+  {#if pageActionsOfView.length > 0}
+    <!--
+      ⚠️ 一整块都包在 `{#if}` 里（2026-10 / D59）：这一排现在是一**条有底色的
+         工具条**，空着不画就是一块灰色小斑（聊天正在起草时动作是空数组——
+         实测就是那一块斑）。
+    -->
+    <div class="page-actions" aria-label={$t('shell.pageActions')} role="group">
+      {#each pageActionsOfView as action (action.id)}
+        <button
+          type="button"
+          class={action.kind ?? 'secondary'}
+          class:active={action.active}
+          disabled={action.disabled}
+          title={action.title}
+          onclick={action.onActivate}
+        >
+          {#if action.icon}<Icon name={action.icon} />{/if}
+          {action.label}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   {#if pageActionsOfView.length > 0}
     <div class="page-more">
@@ -141,8 +150,11 @@
               onclick={() => {
                 moreOpen = false
                 action.onActivate()
-                }}>{action.label}</button
-              >
+              }}
+            >
+              {#if action.icon}<Icon name={action.icon} />{/if}
+              {action.label}
+            </button>
             {/each}
           </div>
         {/if}
@@ -189,10 +201,6 @@
         <span class="account-name"
           >{$remoteAccount?.displayName ?? $t('shell.signedIn')}</span
         >
-        {#if failing > 0}
-          <!-- 有插件加载失败时给个提示：插件清单是排查入口，不该等人主动去翻 -->
-          <span class="warn" title={$t('shell.pluginsFailing', { count: failing })}>⚠</span>
-        {/if}
       </button>
     {:else}
       <button

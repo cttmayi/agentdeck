@@ -35,6 +35,18 @@ export const installText = {
     zh: '目录里有 {slug} {version}，本地还没有。',
     en: 'The catalog has {slug} {version}, and nothing is installed locally yet.',
   },
+  /**
+   * 目录里这条**没有版本号**（推荐清单取不到上游提交）时的两句话。
+   * ⚠️ 别拿 `{version}` 硬套：那会渲染成一个空位（"目录里有 foo ，本地还没有"）。
+   */
+  'install.foundInDirNoVersion': {
+    zh: '目录里有 {slug}，本地还没有（这条没有版本号：取不到上游提交）。',
+    en: 'The catalog has {slug} and nothing is installed locally (no version for this one — the upstream commit could not be read).',
+  },
+  'install.replaceNoRemoteVersion': {
+    zh: '本地已有一个同名的 {slug}，而目录里这条也没有版本号（取不到上游提交）——所以无法判断是不是同一份内容。替换会用目录里的内容覆盖它。',
+    en: 'A local {slug} with the same name exists, and the catalog entry has no version either (the upstream commit could not be read), so we cannot tell whether it is the same content. Replacing overwrites it with the catalog copy.',
+  },
   'install.replaceLocalHint': {
     zh: '本地已有一个同名的 {slug}，但它没有版本信息（本机自建，或从路径/GitHub 装的）——所以无法判断是不是同一份内容。替换会用目录里的 {version} 覆盖它。',
     en: 'A local {slug} with the same name already exists, but it carries no version information (built on this machine, or installed from a path/GitHub), so we cannot tell whether it is the same content. Replacing overwrites it with {version} from the catalog.',

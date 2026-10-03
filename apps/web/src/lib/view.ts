@@ -1,5 +1,9 @@
 import { writable } from 'svelte/store'
 import type { WebTextId } from '@agentdeck/i18n'
+import { CREATE_HASH, VIEWS, hashFor, parseHash, type ViewName } from './route.ts'
+
+export { VIEWS }
+export type { ViewName }
 
 /**
  * 视图路由。
@@ -22,15 +26,6 @@ import type { WebTextId } from '@agentdeck/i18n'
  *    所以探针里有一条量"侧边栏恰好五项、最后一项是工具"。
  */
 
-/**
- * ★ 顺序 = 侧边栏顺序：聊天在最前。
- *
- * 它是最轻的入口——先聊清楚，再决定要不要派活。排在「新建任务」上面而不是
- * 塞进那一页当 tab：聊天要管**多个对话**，本身就是一个完整页面（左对话列表 /
- * 右消息流），和「任务」页是同一个形状。
- */
-export const VIEWS = ['chat', 'new', 'tasks', 'agents', 'skills', 'tools'] as const
-export type ViewName = (typeof VIEWS)[number]
 
 /**
  * 顶栏左侧那个页名。
@@ -48,26 +43,61 @@ export type ViewName = (typeof VIEWS)[number]
  */
 export const VIEW_TITLE_KEYS = {
   chat: 'shell.navChat',
-  new: 'shell.navNewTask',
+  // ⚠️ 这里**没有** `new`（2026-10 / D58）：建任务不再是独立一页，它是「任务」页
+  //    右栏的一个状态 —— 顶栏那一格写着「任务」，右栏里的表单自己带一个标题。
+  //    硬留一条 `new: 'shell.navNewTask'` 的后果是"页面有几个"有两份答案，
+  //    而 `satisfies Record<ViewName, WebTextId>` 会因为多出一个键直接编译不过。
   tasks: 'shell.navTasks',
   agents: 'shell.navAgents',
   skills: 'shell.navSkills',
   tools: 'tools.navTitle',
 } as const satisfies Record<ViewName, WebTextId>
 
-function fromHash(): ViewName {
-  const raw = location.hash.replace(/^#\/?/, '')
-  return (VIEWS as readonly string[]).includes(raw) ? (raw as ViewName) : 'new'
+/**
+ * 当前路由 = **视图 + 「任务」页右栏是不是在新建**。
+ *
+ * ⚠️ 两个 store 由 `syncRoute()` **一处**写（地址是唯一出处）：分头写的后果是
+ *    "地址栏写着 /tasks/new 而右栏画着某条任务的详情"——两个都对，只是不是一件事，
+ *    而且刷新一下才现形。
+ */
+export const view = writable<ViewName>(parseHash(location.hash).view)
+
+/**
+ * 「任务」页右栏此刻是不是**建任务**（而不是某条任务的详情）。
+ *
+ * ★ 它是**地址**的一部分（`#/tasks/new`）而不是组件里的开关：合并之前"建任务"
+ *   是一个可以被书签、被别人发给你的地址，合并之后这个能力不能凭空消失。
+ */
+export const creating = writable<boolean>(parseHash(location.hash).creating)
+
+/** 读地址 → 写两个 store。地址是唯一出处，两个 store 只是它的两个投影。 */
+function syncRoute(): void {
+  const route = parseHash(location.hash)
+  view.set(route.view)
+  creating.set(route.creating)
 }
 
-export const view = writable<ViewName>(fromHash())
-
 // 浏览器前进/后退要跟着走——否则后退键看起来"没反应"
-window.addEventListener('hashchange', () => view.set(fromHash()))
+window.addEventListener('hashchange', syncRoute)
 
 export function go(next: ViewName): void {
-  location.hash = `#/${next}`
-  view.set(next)
+  location.hash = hashFor(next)
+  // ⚠️ 不等 `hashchange`（它晚一拍）：提交成功之后是"切回任务页并选中新任务"，
+  //    晚那一拍会先画一帧"还在建任务的表单"，然后才跳走。
+  syncRoute()
+}
+
+/**
+ * 进「建任务」那一栏（`#/tasks/new`）。
+ *
+ * ⚠️ 与 `go('tasks')` 是**两个不同的动作**，不能合成一个带参数的 `go`：
+ *    这里的语义是"把右栏切成表单"，而 `go('tasks')` 是"回任务页"（右栏回到
+ *    列表或详情）。合成一个之后，调用点就得自己记住传哪个参数，而传错的表现
+ *    只是"右栏画的东西不对"。
+ */
+export function goCreate(): void {
+  location.hash = CREATE_HASH
+  syncRoute()
 }
 
 /** 任务详情里选中的任务；null = 显示列表/看板。 */
@@ -81,23 +111,6 @@ export const selectedIssueId = writable<string | null>(null)
  * 分成两个独立组件会在两处各写一遍表单，迟早不一致。
  */
 export const openDrawer = writable<'inbox' | 'settings' | 'remote' | null>(null)
-
-/**
- * 「新建任务」的预填草稿 —— 聊天页通往那一页的**唯一**一条路。
- *
- * ══════════════════════════════════════════════════════════════════
- * 为什么是预填，而不是直接替使用者提交
- * ══════════════════════════════════════════════════════════════════
- *
- * 派活 = 决定"谁去干、谁来审、允许它做哪些动作"。这三样正是这个产品的核心判断，
- * 而聊天没有资格替使用者做：聊天里没有判决，也就没有依据说"这些动作可以放行"。
- * 所以桥的另一头是一个**填好的表单**，不是一个已经提交的任务。
- *
- * ⚠️ 用完必须清空（`NewTask.svelte` 取走之后就 `set(null)`）：留在这里的话，
- *    下次从侧边栏点「新建任务」会莫名其妙地又出现上次那段文字——而那一刻
- *    使用者心里想的是"新建一个空白任务"。
- */
-export const newTaskDraft = writable<string | null>(null)
 
 /** 一闪而过的提示（操作成功/失败的一句话反馈）。 */
 export const toast = writable<string | null>(null)

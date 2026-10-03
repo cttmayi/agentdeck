@@ -1,0 +1,16 @@
+{
+  "name": "@agentdeck/ui",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./components": "./src/components/index.ts",
+    "./styles/app.css": "./src/styles/app.css"
+  },
+  "dependencies": {
+    "@agentdeck/i18n": "workspace:*",
+    "svelte": "^5.0.0"
+  }
+}

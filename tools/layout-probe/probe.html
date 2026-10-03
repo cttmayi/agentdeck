@@ -81,24 +81,27 @@
         // ══════════════ 智能体：主从布局 ══════════════
         // 首启会播种一对 agent（一个执行、一个审核），所以这里等得到卡片；
         // 等不到就说明界面或接口坏了——那本身就是要报出来的事。
-        const gotCards = await until(() => d().querySelectorAll('.agent-item').length > 0)
-        const cards = () => [...d().querySelectorAll('.agent-item')]
+        const gotCards = await until(() => d().querySelectorAll('.list-row-main').length > 0)
+        const cards = () => [...d().querySelectorAll('.list-row-main')]
         facts['agents.gotData'] = gotCards
-        if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .agent-item（数据没到或列表没渲染）')
+        if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .list-row-main（数据没到或列表没渲染）')
 
         facts['agents.cardCount'] = cards().length
-        // 每张卡都要有：名字、角色徽章、两行说明（指令摘要 + 关系/技能/runtime）
+        // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
+        // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
+        //   使用者要求合并成一行——所以这里改量 `.agent-notes` 里的两个子 span。
         facts['agents.everyCardWellFormed'] =
           cards().length > 0 &&
           cards().every(
             (c) =>
               !!c.querySelector('strong') &&
               !!c.querySelector('.badge') &&
-              c.querySelectorAll('.agent-note').length === 2,
+              !!c.querySelector('.agent-notes-trunc') &&
+              !!c.querySelector('.agent-notes-meta'),
           )
         facts['agents.executorShowsReviewer'] = need('执行者卡片上的审核者', () => {
           const exec = cards().find((c) => c.textContent.includes('执行'))
-          return exec ? text(exec.querySelectorAll('.agent-note')[1]) : null
+          return exec ? text(exec.querySelector('.agent-notes-meta')) : null
         })
 
         const layout = () => d().querySelector('.split-layout')
@@ -136,6 +139,29 @@
         facts['agents.detailHeading'] = need('右栏标题', () =>
           text(d().querySelector('.detail-pane h2')),
         )
+        // ── D69.15 标题统一：智能体栏头标题字号必须 fs-lg（原来全局 h2 的
+        //    fs-xl 22px，比聊天/列表栏头大一圈）
+        facts['heads.agentsHeadTitleFs'] = need('智能体栏头标题字号 fs-lg', () => {
+          const h2 = d().querySelector('.detail-pane .hero h2')
+          return h2 ? cs(h2).fontSize === '17px' : 'NO-HERO'
+        })
+        // ── D69.15.2 风格一致：hero 必须**通栏**（hero 在 pane-body 里，负边距
+        //    抵消留白——分隔线横贯整栏、与任务/聊天栏头同位置；否则缩在 24px
+        //    留白里窄 48px）。
+        facts['heads.agentsHeroFullBleed'] = need('智能体 hero 通栏', () => {
+          const hero = d().querySelector('.detail-pane .hero')
+          const pane = d().querySelector('.detail-pane')
+          if (!hero || !pane) return 'NO-HERO'
+          const a = hero.getBoundingClientRect()
+          const b = pane.getBoundingClientRect()
+          return Math.abs(a.left - b.left) <= 1 && Math.abs(a.top - b.top) <= 1
+        })
+        // ── D69.15.2 风格一致：角色提示小字 14px（曾用 `small` 12px，比任务/
+        //    聊天的副题元信息小一圈）
+        facts['heads.agentsRoleHintFs'] = need('智能体角色提示字号 14px', () => {
+          const hint = d().querySelector('.detail-pane .hero .role-line .faint')
+          return hint ? cs(hint).fontSize === '14px' : 'NO-HINT'
+        })
         // ── runtime 选择器：选项必须来自身份接口，不是写死两项 ──
         //
         //   加一个 runtime = 描述表一行 + 适配器包 + 装配表一行。若界面写死
@@ -150,27 +176,24 @@
           await until(() => d().querySelector('select#agent-runtime'))
           const sel = d().querySelector('select#agent-runtime')
           facts['agents.runtimeOptions'] = sel ? [...sel.options].map((o) => o.value).sort() : null
+          // ── 未接真实 CLI 的 runtime（evidence 非 verified）不进 runtimes 数组 ──
+          //
+          //   2026-10（使用者决定）：未验证的 runtime（generic）**不显示在 UI 上**，
+          //   所以身份接口的 `runtimes` 数组只应含 `verified` 的项（UI 全从它来）。
+          //   判据是 `evidence` 而不是 runtime 名字——加第四个未验证 runtime 时
+          //   自动隐藏，不用改这一处。原先把非 claude 的 runtime 当成"未验证"去
+          //   选中并期望警告出现——那套在"未验证不进列表"之后量不到了。
           try {
             const identity = await fetch(`${location.origin}/api/identity`).then((r) => r.json())
             facts['agents.identityRuntimeKeys'] = (identity.runtimes ?? [])
               .map((r) => r.key)
               .sort()
+            facts['agents.noProvisionalRuntime'] = (identity.runtimes ?? []).every(
+              (r) => r.evidence === 'verified',
+            )
           } catch {
             facts['agents.identityRuntimeKeys'] = null
-          }
-          // ── 选一个**未验证**的 runtime，警告必须出现 ──
-          //
-          //   判据是描述表里的 `evidence`。改成"选到它时该不该有提示"这件事
-          //   以前**在编辑态根本没有**（提示只在只读态、而且还写死了
-          //   `runtimeKey === 'generic'`）。所以这条不只是防写死。
-          const provisional = (facts['agents.identityRuntimeKeys'] ?? []).find((k) => k !== 'claude')
-          if (sel && provisional) {
-            sel.value = provisional
-            sel.dispatchEvent(new Event('change', { bubbles: true }))
-            const warned = await until(() => !!d().querySelector('.field-row .row-hint.warn'))
-            facts['agents.provisionalWarningInEdit'] = warned
-              ? text(d().querySelector('.field-row .row-hint.warn'))
-              : null
+            facts['agents.noProvisionalRuntime'] = null
           }
 
           // 别把状态留在编辑态：后面的断言按只读态写的
@@ -218,7 +241,66 @@
         const rc = () => [...d().querySelectorAll('.runtime-card')]
         facts['agents.runtimeCardCount'] = rc().length
         facts['agents.runtimeCardsWellFormed'] =
-          rc().length > 0 && rc().every((c) => c.querySelectorAll('.runtime-line').length >= 2)
+          rc().length > 0 && rc().every((c) => c.querySelectorAll('.runtime-line').length >= 1)
+
+        // ★ 2026-10 极简（使用者点名"只显示 claude 2.0.14，其他都不需要"）：
+        //    每张卡**只**有「CLI 名 + 版本」，不再有核对/会话/版本支持那些行。
+        facts['agents.runtimeCardMinimal'] = need('CLI 卡只剩名字与版本', () => {
+          const card = rc().find((c) => text(c).includes('claude'))
+          if (!card) return false
+          const t = text(card)
+          const noExtras =
+            !t.includes('会话') &&
+            !t.includes('核对') &&
+            !t.includes('声明支持') &&
+            !t.includes('没有写明')
+          return noExtras
+        })
+
+        // ★ 2026-10（D63）：智能体页的页头导语**按要求去掉了**（"这里配置每个
+        //   智能体：它的指令、行动权限，以及由谁来审它。"——它是在复述下面卡片
+        //   已经在说的话）。原来这里钉的是"必须有导语"（`common.pageIntros`），
+        //   跟着改成钉"**没有**"：谁把导语加回来（或探针停错了页），这条就红。
+        facts['agents.noPageIntro'] = need('智能体页没有页头导语', () => {
+          const intro = d().querySelector('.view-intro')
+          return !intro
+        })
+
+        // ★ 2026-10 一致性：**置灰的按钮必须写清为什么**（项目纪律）。
+        //   只查"有 title"这一半：另一半是"按钮文字随状态变"（如「保存中…」），
+        //   那种在这里量不出来，但它不算"没解释"。
+        facts['common.disabledButtonsExplained'] = need('置灰按钮都有解释', () => {
+          const btns = [...d().querySelectorAll('button[disabled]')]
+          const naked = btns.filter((b) => !b.getAttribute('title'))
+          if (naked.length > 0) {
+            errors.push(
+              `${naked.length} 个置灰按钮没写为什么：` +
+                naked.map((b) => text(b).trim().slice(0, 12)).join(' / '),
+            )
+          }
+          return naked.length === 0
+        })
+
+        // ★ 2026-10 一致性：**提示文字不叠加两档字号**
+        //   （原来有 `class="hint faint small"` 这种写法：fs-sm 与 fs-xs 一起上，
+        //   同一页的说明文字因此大小不一）。
+        facts['common.noHintStacking'] = need('提示文字不叠加字号档', () => {
+          return d().querySelectorAll('.hint.faint.small, .hint.small').length === 0
+        })
+
+        // ★ 2026-10 一致性：**抽屉的头部只有一种写法**（`.drawer-head` + `<h2>`）。
+        //   技能页的目录抽屉原来写的是 `<header>` + `<h3>`，而那个文件里没有
+        //   `header`/`h3` 的样式 ⇒ 它**完全没有抽屉头部的样式**（没有 flex、
+        //   没有内边距、没有分隔线，关闭按钮从右侧掉到标题下面）。
+        facts['common.drawerHeadsStandard'] = need('抽屉头部写法统一', () => {
+          const bad = [...d().querySelectorAll('.drawer')].filter(
+            (dr) => dr.querySelector('.drawer-head') === null,
+          )
+          if (bad.length > 0) {
+            errors.push(`${bad.length} 个抽屉没有 .drawer-head（头部写法不一致）`)
+          }
+          return bad.length === 0
+        })
 
         /**
          * ★★ 「设置」抽屉：**没保存就关掉，草稿必须丢掉**。
@@ -301,16 +383,27 @@
           return true
         })()
 
-        // ══════════════ 任务清单：同样的主从 + 去重字样 ══════════════
+        // ══════════════ 任务：同样的主从 + 去重字样 ══════════════
+        // ⚠️ 页名是「任务」（顶上那条 `shell.navTasks`——侧栏叫什么这里就叫什么，
+        //    合并之后侧栏那一项改叫「任务」了；D58 之前这里等的是「任务清单」）。
         f.contentWindow.location.hash = '#/tasks'
-        await until(() => text(d().querySelector('.page-name')) === '任务清单')
+        await until(() => text(d().querySelector('.page-name')) === '任务')
         // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
         // 下面那条"重复字样"的检查会**空过**——所以这里必须如实报出来。
         const gotRows = await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
         facts['tasks.gotRows'] = gotRows
-        if (!gotRows) errors.push('任务清单里一行都没等到（夹具任务没造上或列表没渲染）')
+        if (!gotRows) errors.push('任务页里一行都没等到（夹具任务没造上或列表没渲染）')
 
         const rows = [...d().querySelectorAll('.list-pane .task-row')]
+
+        // ── D69.15.2 风格一致：空态=纯空态提示，**不该有栏头**（D69.15 一度把
+        //    返回按钮/空标题挂在空态上方——backLabel 无条件传、sub snippet 恒真，
+        //    空态头顶一条边框线 + 窄屏一枚没用的返回按钮）。
+        facts['heads.tasksEmptyNoHead'] = need('任务空态没有栏头', () => {
+          const pane = d().querySelector('.detail-pane')
+          if (!pane) return 'NO-PANE'
+          return !pane.querySelector('.detail-head') && !!pane.querySelector('.empty')
+        })
         facts['tasks.rowCount'] = rows.length
         // 从没跑过的任务：标签「执行中」+ 额外信息「还没开始执行」。
         // 这一行同时钉住了"标签之外的信息该不该显示"这条规则。
@@ -361,7 +454,7 @@
         facts['tasks.clickedRowTitle'] = need('被点那一行的标题', () =>
           text(rows[0]?.querySelector('.task-title')),
         )
-        click(rows[0])
+        click(rows[0]?.querySelector('.list-row-main') ?? rows[0])
         await until(() => d().querySelector('.detail-pane .detail-head h2'))
         facts['tasks.detailTitleAfterClick'] = need('点之后右栏的标题', () =>
           text(d().querySelector('.detail-pane .detail-head h2')),
@@ -370,6 +463,392 @@
         facts['tasks.detailHasTimestamp'] = need('右栏有没有完整时间戳', () =>
           /\d{1,2}:\d{2}/.test(text(d().querySelector('.detail-pane .detail-sub')) ?? ''),
         )
+
+        // ── D69.9：任务详情重排——"重要资讯直接展示、非重要资讯折叠" ──
+        // 夹具第一行是**从没跑过**的任务（见上面 firstRowStageCell 的注释）。
+        //   a) 折叠区块头部是**真按钮** + aria-expanded（与表格 ExpandToggle 同一纪律）；
+        //   b) 未跑的任务描述默认**展开**（状态驱动：未跑时描述是唯一正文）；
+        //   c) 点折叠头真的能收起 / 再展开（折叠不是摆设）。
+        const descHead = [...d().querySelectorAll('.detail-pane .fold-head')].find((h) =>
+          text(h).includes('说明'),
+        )
+        facts['tasks.foldHeadsAreButtons'] = need('折叠头是真按钮', () => {
+          const heads = [...d().querySelectorAll('.detail-pane .fold-head')]
+          return (
+            heads.length >= 1 &&
+            heads.every((h) => h.tagName === 'BUTTON' && h.hasAttribute('aria-expanded'))
+          )
+        })
+        facts['tasks.neverRunDescOpen'] = need('未跑任务描述默认展开', () => {
+          const body = d().querySelector('.detail-pane .fold-body')
+          return (
+            descHead?.getAttribute('aria-expanded') === 'true' &&
+            !!body &&
+            cs(body).display !== 'none'
+          )
+        })
+        facts['tasks.foldToggles'] = await (async () => {
+          if (!descHead) return 'NO-FOLD-HEAD'
+          click(descHead)
+          await wait(200)
+          const closed = descHead.getAttribute('aria-expanded') === 'false'
+          click(descHead)
+          await wait(200)
+          const reopened = descHead.getAttribute('aria-expanded') === 'true'
+          return closed && reopened
+        })()
+
+        // ── D69.10：人工裁决条 sticky 钉底——内容超出一屏时「通过/反馈/放弃」
+        //    固定在本栏底部、不跟着滚走；不满一屏时自然跟在正文后面。
+        facts['tasks.decideBarSticky'] = need('人工裁决条钉在底部', () => {
+          const bar = d().querySelector('.detail-pane .decide-bar')
+          if (!bar) return 'NO-DECIDE-BAR'
+          return cs(bar).position === 'sticky' && cs(bar).bottom === '0px'
+        })
+
+        // ── D69.14：裁决区标题「这条任务怎么办」已删（使用者要求去掉字样）──
+        facts['tasks.noDecideHeading'] = need('裁决区不再有「这条任务怎么办」标题', () => {
+          const bar = d().querySelector('.detail-pane .decide-bar')
+          if (!bar) return 'NO-DECIDE-BAR'
+          return !text(bar).includes('这条任务怎么办')
+        })
+
+        // ── D69.15 标题统一：任务详情栏头（MainArea 渲染）标题字号 fs-lg +
+        //    与 `.pane-head` 同一套留白/下边框。使用者抓的："连最基本的 Title
+        //    高度都不一样"——任务/智能体标题原来 22px（全局 h2 的 fs-xl）、
+        //    聊天 17px（fs-lg），且任务头贴顶、没有下边框。
+        facts['heads.tasksHeadMetrics'] = need('任务详情栏头标题统一指标', () => {
+          const h2 = d().querySelector('.detail-pane .detail-head h2')
+          const head = d().querySelector('.detail-pane .detail-head')
+          if (!h2 || !head) return 'NO-HEAD'
+          return (
+            cs(h2).fontSize === '17px' &&
+            cs(head).paddingTop === '16px' &&
+            cs(head).paddingBottom === '12px' &&
+            cs(head).borderBottomWidth === '1px'
+          )
+        })
+
+        // ── 每项右侧的删除按钮：需求本身（"任务列表每项加删除按钮"）──
+        // 每个 `.task-row` 里都该有一个 `.list-row-action`，且它不在主按钮里
+        // （按钮套按钮是非法结构）。
+        facts['tasks.deleteButtonPerRow'] = need('每行右侧的删除按钮', () =>
+          rows.every(
+            (r) =>
+              !!r.querySelector('.list-row-main') &&
+              !!r.querySelector(':scope > .list-row-action'),
+          ),
+        )
+
+        // ★ 选中框的样式：上面刚点过一行，所以这里有 `.active`。
+        //   这两个值会与聊天栏的同名量值比对（见 run.mjs 里 `chat.activeItemBorder`
+        //   那条）——"当前选中"在三处列表里必须长得一样。
+        facts['tasks.activeItemBorder'] = need('任务选中项的描边色', () => {
+          const el = d().querySelector('.list-pane .task-row.active')
+          return el ? cs(el).borderTopColor : ''
+        })
+        facts['tasks.activeItemBackground'] = need('任务选中项的背景色', () => {
+          const el = d().querySelector('.list-pane .task-row.active')
+          return el ? cs(el).backgroundColor : ''
+        })
+
+        // ★ 2026-10：**协议状态值不许上屏**。执行记录的状态徽标原来是裸的
+        //   `{run.status}`（界面上出现 `completed` / `running` /
+        //   `waiting_local_directory`），而词表里 `term.runStatus.*` 八条中文
+        //   早就写好了、一条都没被引用。同页的判决结论、动作状态、任务阶段
+        //   都有中文，只有它没有。
+        facts['tasks.runStatusLocalized'] = need('执行记录状态是中文', () => {
+          const english = [
+            'deferred',
+            'queued',
+            'dispatched',
+            'waiting_local_directory',
+            'running',
+            'completed',
+            'failed',
+            'cancelled',
+          ]
+          const bad = [...d().querySelectorAll('.badge')].filter((b) =>
+            english.includes(text(b).trim()),
+          )
+          if (bad.length > 0) {
+            errors.push(
+              `徽标里还在显示协议英文状态：${bad.map((b) => text(b).trim()).join(', ')}`,
+            )
+          }
+          return bad.length === 0
+        })
+
+        // ★ 容器是 `<ul>`（每项要装"主按钮 + 兄弟删除按钮"，只有 `li` 装得下），
+        //   而 `ul` 自带 `padding-inline-start: 40px` 与圆点标记。忘了归零的表现
+        //   是**整列内容右移 40px**（使用者的原话："任务清单的列表的每个项目的
+        //   内容怎么靠右了"）。这里量两件事：行左边缘贴着列表左边缘、
+        //   标题也从行的左边起（不是被推到中间/右边）。
+        facts['tasks.rowsNotIndented'] = need('任务行没有 ul 默认缩进', () => {
+          const list = d().querySelector('.list-pane .task-list')
+          const row = rows[0]
+          if (!list || !row) return false
+          const l = list.getBoundingClientRect()
+          const r = row.getBoundingClientRect()
+          const title = row.querySelector('.task-title')
+          if (!title) return false
+          const t = title.getBoundingClientRect()
+          return Math.abs(l.left - r.left) <= 1 && t.left - r.left < 40
+        })
+        // 圆点标记也不该有（`list-style: none`）
+        facts['tasks.noListMarker'] = need('行首没有圆点标记', () => {
+          const row = rows[0]
+          return !!row && cs(row).listStyleType === 'none'
+        })
+
+        // ── ★ 2026-10（D58）：建任务的入口**在这一页**，而且点了真到得了表单 ──
+        //   合并（侧栏「新建任务」并进「任务」）这件事，少一个入口就必须多一个
+        //   入口——否则功能是"没了"而不是"搬家"，而那种缺失在界面上看不出来
+        //   （只是"没地方建"）。三条一起钉：文字、它是主操作、点了真跳。
+        //   ⚠️ 点击会切页再切回来（旧的行节点会失效），所以放在所有"先抓住
+        //      行节点再断言"的检查**之后**、切看板那一段之前。
+        const createBtn = [...d().querySelectorAll('.page-actions button')].find(
+          (b) => b.textContent.trim() === '新建任务',
+        )
+        facts['tasks.createActionLabel'] = need('任务页顶栏的「新建任务」按钮文字', () =>
+          createBtn ? createBtn.textContent.trim() : null,
+        )
+        facts['tasks.createActionKind'] = need('那个按钮的 class', () =>
+          createBtn ? createBtn.className.replace(/ svelte-\w+/, '').trim() : null,
+        )
+        if (!createBtn) {
+          errors.push('任务页顶栏没有「新建任务」按钮——侧栏那一项已经去掉了，建任务就没入口了')
+        } else {
+          click(createBtn)
+          // ★★ 判据三条一起要（D58 第二步）：地址是**正规那个**（`#/tasks/new`）、
+          //   表单真的在**右栏里**（不是整页换来换去）、而且**左边那份清单还在**。
+          //   只判"到得了表单"会漏掉这次改动的全部意义——那样整页表单也能过。
+          const reached = await until(
+            () =>
+              f.contentWindow.location.hash === '#/tasks/new' &&
+              text(d().querySelector('.page-name')) === '任务' &&
+              !!d().querySelector('.detail-pane .create-body .newtask-form'),
+            40,
+          )
+          const ntRowsBeside = d().querySelectorAll('.list-pane .task-row').length
+          const ntListVisible = cs(d().querySelector('.list-pane')).display !== 'none'
+          facts['tasks.createActionReachesForm'] = reached
+          facts['tasks.createKeepsListBeside'] = reached && ntListVisible && ntRowsBeside > 0
+          facts['tasks.createPaneFormPresent'] = !!d().querySelector(
+            '.detail-pane .create-body .newtask-form',
+          )
+          // 提交栏的可滚区：这一栏里是**右栏**，不是 `.main`（它 `overflow: hidden`）
+          facts['tasks.createBodyIsScroller'] = need('建任务那一栏的可滚区', () => {
+            const body = d().querySelector('.detail-pane .create-body')
+            return body ? cs(body).overflowY : null
+          })
+          if (!reached) {
+            errors.push(
+              `点任务页的「新建任务」没进到右栏的表单（hash=${f.contentWindow.location.hash}，` +
+                `页名=${text(d().querySelector('.page-name'))}）`,
+            )
+          }
+          if (!facts['tasks.createKeepsListBeside']) {
+            errors.push(
+              `建任务时左边那份清单不见了（列表 display=${cs(d().querySelector('.list-pane')).display}，` +
+                `行数=${ntRowsBeside}）——合并的意义正是"清单当参照、表单在右边"`,
+            )
+          }
+
+          // ── ★★ 窄屏：表单**占满整栏**（清单让位）+ 有「返回列表」 ──
+          //   这是合并最容易漏的一档：`.split-layout:not(.with-detail) .detail-pane`
+          //   在 `≤72rem` 时是 `display:none`，而"进建任务"正好是**没有选中任何
+          //   任务**的时刻——`with-detail` 少算一个 `$creating`，窗口一窄点「新建
+          //   任务」就**什么都不出现**（宽屏上完全看不出来）。
+          //
+          //   ⚠️ 顺便钉住容器查询：`800px` 的窗口里右栏内容宽约 496px
+          //      （< 34rem）⇒ 表单必须退成**单列**。按窗口判的旧写法（`@media`）
+          //      在这里看见的是 800 ⇒ 也退单列，看不出差别；真正的差别在
+          //      **1280 的窗口**：右栏只有 624px，而 `@media` 会说"窗口挺宽的"。
+          //      所以下面还量一条 1280 下右栏表单的实际列数。
+          f.style.width = '800px'
+          await wait(500)
+          facts['tasks.createNarrowListHidden'] = need('窄屏左栏', () =>
+            cs(d().querySelector('.list-pane')).display,
+          )
+          facts['tasks.createNarrowPaneShown'] = need('窄屏右栏', () =>
+            cs(d().querySelector('.detail-pane')).display,
+          )
+          // ★★ 窄屏下**真的出得去**（原来那一栏上面有个「返回任务清单」按钮，按要求
+          //    去掉了 ⇒ 出口变成侧边栏的「任务」那一项，而它**一定会**在）。
+          //    ⚠️ 这一条量的是"点了之后回到了列表"，不是"某个按钮在不在"——
+          //    按钮在不在是排版，出不出得去才是功能（而"出不去"在窄屏上表现为
+          //    卡在一张表单里，连清单都看不见）。
+          facts['tasks.createNarrowExitViaSidebar'] = await (async () => {
+            const nav = [...d().querySelectorAll('.sidebar .nav-item')].find(
+              (b) => text(b).includes('任务'),
+            )
+            if (!nav) return null
+            click(nav)
+            const back = await until(
+              () =>
+                !d().querySelector('.detail-pane .create-body') &&
+                cs(d().querySelector('.list-pane')).display !== 'none',
+              40,
+            )
+            return back
+          })()
+          // ⚠️ 上面那一步**把表单关掉了**（验证的就是"出得去"），而下面两条
+          //    （列数 / 不横向溢出）都要求表单在 ⇒ 立刻再进来一次。
+          f.contentWindow.location.hash = '#/tasks/new'
+          await until(() => !!d().querySelector('.detail-pane .create-body .newtask-form'), 40)
+          await wait(200)
+          facts['tasks.createNarrowColumns'] = need('窄屏表单列数', () => {
+            const form = d().querySelector('.detail-pane .create-body .newtask-form')
+            if (!form) return null
+            return cs(form).gridTemplateColumns.split(' ').filter(Boolean).length
+          })
+          // 收窄到 800 之后这一栏**不许横向溢出**（容器查询那一档的意义就在这里：
+          // 两列硬撑着排会溢出，单列才放得下）。
+          //
+          // ⚠️ 量的是**这一栏**（可滚区）与包着表单的那一层 frame，**不是 `<form>`**：
+          //    提交栏是 `sticky` + 负外边距，它**故意**比 `<form>` 宽出去一点
+          //    （去抵消 frame 的左右留白，不然滚过去的内容会从它两侧露出来）——
+          //    拿 `<form>` 量会把这条设计判成"溢出"（我第一版就是这么错的：
+          //    实测 form 517/533 而 frame 与这一栏都是干净的）。
+          facts['tasks.createNarrowNoOverflowX'] = need('窄屏这一栏是否横向溢出', () => {
+            const body = d().querySelector('.detail-pane .create-body')
+            const frame = d().querySelector('.detail-pane .create-body .form-frame')
+            if (!body || !frame) return null
+            return (
+              body.scrollWidth <= body.clientWidth + 2 && frame.scrollWidth <= frame.clientWidth + 2
+            )
+          })
+          // ── 回到 1280：这就是探针默认那个窗口，而**右栏只有 624px** ──
+          f.style.width = '1280px'
+          await wait(500)
+          facts['tasks.createWideColumns'] = need('1280 窗口下右栏表单的列数', () => {
+            const form = d().querySelector('.detail-pane .create-body .newtask-form')
+            if (!form) return null
+            return cs(form).gridTemplateColumns.split(' ').filter(Boolean).length
+          })
+          facts['tasks.createWidePaneInner'] = need('1280 窗口下右栏内容宽', () => {
+            const frame = d().querySelector('.detail-pane .create-body .form-frame')
+            return frame ? Math.round(frame.getBoundingClientRect().width) : null
+          })
+          // 对照：窗口画宽到 1600 ⇒ 右栏内容约 860px ⇒ 回到**两列**
+          // （这一条与上面那条配对，"按容器判"才算被证过：同一份 CSS，窗口不同、
+          //   右栏宽度不同 ⇒ 列数不同）
+          f.style.width = '1600px'
+          await wait(500)
+          facts['tasks.createWiderColumns'] = need('1600 窗口下右栏表单的列数', () => {
+            const form = d().querySelector('.detail-pane .create-body .newtask-form')
+            if (!form) return null
+            return cs(form).gridTemplateColumns.split(' ').filter(Boolean).length
+          })
+          facts['tasks.createWiderPaneInner'] = need('1600 窗口下右栏内容宽', () => {
+            const frame = d().querySelector('.detail-pane .create-body .form-frame')
+            return frame ? Math.round(frame.getBoundingClientRect().width) : null
+          })
+          f.style.width = '1280px'
+          await wait(400)
+
+          // ── ★ 宽屏"怎么回去"：顶栏那颗「列表」——它本来就已经是选中态，
+          //   而在建任务时点它必须**表示"离开表单、回列表"**（从前那种写法直接
+          //   `return`，点了毫无反应，而使用者那时正想回去）。
+          //    ⚠️ 这一条在窄屏（≤60rem）量不了：那时顶栏那排动作收进 `⋯` 里了。
+          facts['tasks.createListButtonLeaves'] = await (async () => {
+            const btn = [...d().querySelectorAll('.page-actions button')].find(
+              (b) => text(b).trim() === '列表',
+            )
+            if (!btn) return null
+            click(btn)
+            const left = await until(() => !d().querySelector('.detail-pane .create-body'), 40)
+            if (!left) return false
+            // 再进来，后面那几条都要求表单在
+            f.contentWindow.location.hash = '#/tasks/new'
+            await until(() => !!d().querySelector('.detail-pane .create-body .newtask-form'), 40)
+            return true
+          })()
+
+          // ── ★★ 填过东西再切走：**先问一句**，取消之后字还在 ──
+          //   合并把"一整页"变成了"右栏里的一块"，于是"切走"变得非常容易
+          //   （点列表里任意一条就换了）。丢掉写了一半的东西是最难被人发现的
+          //   那种损失：界面上不留任何痕迹。
+          const ntTa = d().querySelector('.detail-pane .create-body textarea')
+          const ntRow = d().querySelector('.list-pane .task-row .list-row-main')
+          if (ntTa && ntRow) {
+            ntTa.value = '探针：这条任务不打算建'
+            ntTa.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(120)
+            click(ntRow)
+            const ntAsked = await until(() => !!d().querySelector('.modal'), 40)
+            facts['tasks.leaveCreateAsks'] = ntAsked
+            if (!ntAsked) {
+              errors.push('表单里写了一半、点左边另一条任务 ⇒ 没有问一句就把右栏换掉了（草稿会静默消失）')
+            } else {
+              const ntCancel = [...d().querySelectorAll('.modal .modal-foot button')].find(
+                (b) => text(b).trim() === '取消',
+              )
+              if (!ntCancel) {
+                errors.push('放弃草稿那个确认框里没有「取消」')
+                facts['tasks.leaveCreateCancelKeepsDraft'] = false
+              } else {
+                click(ntCancel)
+                await wait(250)
+                const ntTaAfter = d().querySelector('.detail-pane .create-body textarea')
+                const ntKept =
+                  !!ntTaAfter &&
+                  ntTaAfter.value === '探针：这条任务不打算建' &&
+                  !d().querySelector('.modal')
+                facts['tasks.leaveCreateCancelKeepsDraft'] = ntKept
+                if (!ntKept) {
+                  errors.push('点了「取消」之后草稿没了（或者确认框没关掉）——那这个确认框等于没问')
+                }
+              }
+            }
+            // ── ★★ 第二条出口：**侧边栏的「任务」那一项** ──
+            //   这一栏上面那个「返回任务清单」按要求去掉了 ⇒ 侧栏这一项（全屏常驻、
+            //   最容易点到的一个）就是"怎么回去"的答案之一，而它走的是通用导航、
+            //   压根不知道"建任务"这件事。不接住的话，点它一次就把写了一半的东西
+            //   静默丢掉——而这是**最容易被点到**的那条路。
+            //   ★ 顺带补上"确认之后真的走得了"这一半（上面那条只量了取消）。
+            const ntNav = [...d().querySelectorAll('.sidebar .nav-item')].find((b) =>
+              text(b).includes('任务'),
+            )
+            if (ntNav) {
+              click(ntNav)
+              const ntAsked2 = await until(() => !!d().querySelector('.modal'), 40)
+              facts['tasks.sidebarLeaveAsks'] = ntAsked2
+              if (!ntAsked2) {
+                errors.push('写着草稿、点侧栏「任务」⇒ 没有问一句就切走了（那条路最容易点到）')
+                facts['tasks.discardConfirmLeaves'] = false
+              } else {
+                const ntGive = [...d().querySelectorAll('.modal .modal-foot button')].find(
+                  (b) => text(b).trim() === '放弃',
+                )
+                if (!ntGive) {
+                  errors.push('放弃草稿那个确认框里没有「放弃」按钮')
+                  facts['tasks.discardConfirmLeaves'] = false
+                } else {
+                  click(ntGive)
+                  await wait(350)
+                  const ntLeft =
+                    !d().querySelector('.detail-pane .create-body') &&
+                    cs(d().querySelector('.list-pane')).display !== 'none'
+                  facts['tasks.discardConfirmLeaves'] = ntLeft
+                  if (!ntLeft) errors.push('点了「放弃」之后没回到列表（确认框点了等于没点）')
+                }
+              }
+            } else {
+              facts['tasks.sidebarLeaveAsks'] = null
+              errors.push('侧边栏里没有「任务」那一项（那一条出口没量到）')
+            }
+          } else {
+            facts['tasks.leaveCreateAsks'] = null
+            errors.push('建任务那一栏里没有正文框（或列表没有可点的行），草稿那两条没量到')
+          }
+
+          // 切回任务页：下面那段看板检查要在这一页上跑。
+          f.contentWindow.location.hash = '#/tasks'
+          await until(() => text(d().querySelector('.page-name')) === '任务')
+          await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
+        }
 
         // ── 看板：四档状态，且"待人工"排在"已审查"之前 ──
         //
@@ -397,30 +876,65 @@
 
         // ══════════════ Skills：安装面板在抽屉里 ══════════════
         f.contentWindow.location.hash = '#/skills'
-        await until(() => text(d().querySelector('.page-name')) === 'Skills')
+        await until(() => text(d().querySelector('.page-name')) === '技能')
         await wait(500)
-        facts['skills.title'] = need('Skills 标题', () => text(d().querySelector('.page-name')))
+        facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // 老结构（正文里展开的面板）不该再存在
         facts['skills.oldInlinePanel'] = need('正文里还有 .install-panel 吗', () =>
           !!d().querySelector('.install-panel'),
         )
         const skillRows = () => d().querySelectorAll('.main table tbody tr').length
         facts['skills.tableRows'] = skillRows()
+        // ★ 2026-10：「说明」列要真的显示出来。夹具的 SKILL.md frontmatter 里写着
+        //   `description: 探针夹具的说明`——它必须出现在**名称列**（那一格是
+        //   名称 + 说明两行），否则这一列就是永远空着的装饰。
+        facts['skills.descriptionShown'] = need('技能表名称列里的说明', () => {
+          const rows = [...d().querySelectorAll('.main table tbody tr')]
+          const row = rows.find((r) => text(r).includes('probe-skill'))
+          return !!row && text(row).includes('探针夹具的说明')
+        })
         // 卸载入口：README 里"没有卸载"那个缺口补上了
         facts['skills.uninstallButtonFound'] = [...d().querySelectorAll('.main table tbody button')].some(
           (b) => b.textContent.trim() === '卸载',
         )
+        // ★ D69.6：文件列是 `SKILL.md` + 支持文件数（夹具没带支持文件 → 裸 SKILL.md，
+        //   不许显示成"0 个文件"那种）。钉住格式与 remote 同一档。
+        facts['skills.filesCellFormat'] = (() => {
+          const row = [...d().querySelectorAll('.main table tbody tr')].find((r) =>
+            text(r).includes('probe-skill'),
+          )
+          const cell = row ? row.children[4] : null
+          return cell ? text(cell).trim() : null
+        })()
+        // ★ D69.7：技能表首列叫「技能」（不是「标识」），且「来源」列在「版本」之前
+        facts['skills.slugHeader'] = (() => {
+          const ths = [...d().querySelectorAll('.main table thead th')]
+          return ths[0] ? text(ths[0]) : null
+        })()
+        facts['skills.sourceBeforeVersion'] = (() => {
+          const ths = [...d().querySelectorAll('.main table thead th')].map((th) => text(th))
+          return ths.indexOf('来源') !== -1 && ths.indexOf('来源') < ths.indexOf('版本')
+        })()
+        // ★ D69.8：首格 `▸ slug` 由 flex（.row-title）撑住、flex-wrap 必须 nowrap
+        //   ——列一窄内联元素会折行，flex 不会（这就是"▸ xxx 被换行"的一劳永逸修法）
+        facts['skills.slugCellFlexWrap'] = (() => {
+          const row = [...d().querySelectorAll('.main table tbody tr')].find((r) =>
+            text(r).includes('probe-skill'),
+          )
+          const el = row?.querySelector('.row-title')
+          return el ? cs(el).flexWrap : null
+        })()
 
         const openBtn = [...d().querySelectorAll('button')].find(
-          (b) => b.textContent.trim() === '安装 skill',
+          (b) => b.textContent.trim() === '安装技能',
         )
         facts['skills.openButtonFound'] = !!openBtn
         if (!openBtn) {
-          errors.push('找不到「安装 skill」按钮')
+          errors.push('找不到「安装技能」按钮')
         } else {
           click(openBtn)
           const opened = await until(() => d().querySelector('.drawer'))
-          if (!opened) errors.push('点了「安装 skill」之后没有出现 .drawer')
+          if (!opened) errors.push('点了「安装技能」之后没有出现 .drawer')
         }
 
         const drawer = d().querySelector('.drawer')
@@ -440,6 +954,64 @@
           // 页签条里那个和抽屉头重复的「关闭」应当已经删掉
           facts['skills.duplicateCloseInTabs'] = !!d().querySelector('.drawer .tabs .close')
           facts['skills.rowsBehindDrawer'] = skillRows()
+
+          // ══════════════ 远端目录页签的**状态链**（2026-10 使用者报过的那条）══════════════
+          //
+          // 报的原话：「安装 skill，提示『远端不可用』，我明确已经启动 remote 了」。
+          // 根因在模板里：`{#if remoteError}` 写的是**裸的 store 对象**（恒为真），
+          // 于是这条"远端不可用"**无条件**显示、冒号后面还空着（因为压根没有错误），
+          // 同时把"未登录"和"目录里没有条目"两个状态都挤掉了。
+          //
+          // 两条判据刻意做成**与环境无关**（远端在不在、有没有登录都成立）：
+          //   · 出现了「远端不可用」⇒ 冒号后面必须有**真实的错误文字**（不许空着）
+          //   · 这个页签不许一片空白 ⇒ 四种状态里必须有一种在渲染
+          const remoteTabBtn = [...drawer.querySelectorAll('.tab')].find((b) =>
+            /远端/.test(b.textContent),
+          )
+          if (!remoteTabBtn) {
+            errors.push('安装抽屉里找不到「远端目录」页签')
+          } else {
+            click(remoteTabBtn)
+            await wait(600)
+            // ★ 判据一：**出现了**那句提示，冒号后面就必须有真实的错误文字。
+            //   它没出现也是正常（远端在跑、目录拉到了）——所以这条判据是
+            //   "如果出现就不许空着"，与环境无关。
+            facts['skills.remoteUnavailableLabel'] = need(
+              '「远端不可用」那句提示（出现时冒号后必须有真实错误）',
+              () => {
+                const bad = drawer.querySelector('.notice.bad')
+                if (!bad) return '(没有出现，正常)'
+                // 那句话 = 提示块的文字减去下面那段说明（说明里也有地址和括号，
+                // 直接对整块做正则会**被它救活**，于是这条检查永远绿）
+                const hint = bad.querySelector('p')
+                const label = (text(bad) || '').replace(hint ? text(hint) || '' : '', '').trim()
+                if (!/：\s*\S/.test(label)) {
+                  throw new Error(
+                    `冒号后面没有错误文字（渲染成「${label}」）——这正是 2026-10 那个 bug：` +
+                      '裸用 store（`{#if remoteError}`）让这条提示无条件显示',
+                  )
+                }
+                return label.slice(0, 80)
+              },
+            )
+            // ★ 判据二：这个页签**不许一片空白**。四种状态（远端不可用 / 未登录 /
+            //   目录为空 / 表）必须至少有一种在——原来那个 bug 把其中两种压成了
+            //   死代码，而"整页只剩一句错的提示"看起来也像"页面就是这样"。
+            facts['skills.remoteStates'] = need(
+              '远端目录页签的状态（四种里至少有一种在渲染）',
+              () => {
+                const states = ['.notice.bad', '.notice.warn', '.empty', 'table'].filter(
+                  (sel) => drawer.querySelector(sel) !== null,
+                )
+                if (states.length === 0) {
+                  throw new Error(
+                    '四种状态一个都没渲染（远端不可用 / 未登录 / 目录为空 / 表）',
+                  )
+                }
+                return states.join('+')
+              },
+            )
+          }
 
           // Esc 关闭（这个抽屉是视图自己渲染的，不在 App 的 $openDrawer 里）
           f.contentWindow.dispatchEvent(
@@ -597,9 +1169,9 @@
 
         // ── 能挂给智能体：去智能体页点开一个执行者，看选择器里有没有它 ──
         f.contentWindow.location.hash = '#/agents'
-        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await until(() => d().querySelectorAll('.list-row-main').length > 0)
         await wait(400)
-        const ldsExecItem = [...d().querySelectorAll('.agent-item')].find((el) =>
+        const ldsExecItem = [...d().querySelectorAll('.list-row-main')].find((el) =>
           el.textContent.includes('执行'),
         )
         if (ldsExecItem) {
@@ -635,7 +1207,7 @@
           errors.push('智能体页找不到执行者卡片，挂载那一环量不了')
         }
         f.contentWindow.location.hash = '#/skills'
-        await until(() => text(d().querySelector('.page-name')) === 'Skills', 60)
+        await until(() => text(d().querySelector('.page-name')) === '技能', 60)
 
         // ══════════════ 侧边栏第五项 + 工具（D40）══════════════
         //
@@ -699,10 +1271,39 @@
           text(probeFixtureRow()?.querySelector('.tool-action-count')),
         )
 
+        // ★ D69：单元格原子样式（`.desc-clamp` / `.row-actions`）已上移 app.css
+        //   共用——钉住它们**真的生效**（有人把样式改回各视图私有、或删掉，这里就红）。
+        facts['tools.descClampApplied'] = (() => {
+          const el = probeFixtureRow()?.querySelector('.desc-clamp')
+          return el ? cs(el).webkitLineClamp : null
+        })()
+        facts['tools.rowActionsFlex'] = (() => {
+          const el = probeFixtureRow()?.querySelector('.row-actions')
+          return el ? cs(el).display : null
+        })()
+
+        // ★ 2026-10 与技能页同格式：工具表也有「更新于」列（原来没有）
+        facts['tools.updatedAtColumn'] = need('工具表有「更新于」列', () => {
+          const head = text(d().querySelector('.tool-table thead'))
+          return head.includes('更新于')
+        })
+        // ★ D69.7：工具表「来源」列也在「版本」之前（与技能页同一列序）
+        facts['tools.sourceBeforeVersion'] = (() => {
+          const ths = [...d().querySelectorAll('.tool-table thead th')].map((th) => text(th))
+          return ths.indexOf('来源') !== -1 && ths.indexOf('来源') < ths.indexOf('版本')
+        })()
+        // ★ D69.8：同技能页——首格 `▸ slug` 的 flex 容器不折行
+        facts['tools.slugCellFlexWrap'] = (() => {
+          const row = probeFixtureRow()
+          const el = row?.querySelector('.row-title')
+          return el ? cs(el).flexWrap : null
+        })()
+
         // ── ③ 点一行 → 动作清单 ──
-        const probeExpand = [...(probeFixtureRow()?.querySelectorAll('button') ?? [])].find(
-          (b) => text(b) === '看动作',
-        )
+        // ★ 2026-10：展开入口早就从「看动作」文字按钮挪到首格的 chevron
+        //   （`expand-toggle`）——探针这里还在找文字按钮，会一直找不到、一直
+        //   量不到展开后的动作，下面四条全红。改点 chevron。
+        const probeExpand = probeFixtureRow()?.querySelector('.expand-toggle')
         if (probeExpand) {
           click(probeExpand)
           await until(() => !!d().querySelector('.tool-detail-row .tool-action'))
@@ -861,7 +1462,7 @@
         if (!probeExecRow) {
           errors.push('找不到夹具执行者「探针用的执行者」')
         } else {
-          click(probeExecRow.querySelector('.agent-item'))
+          click(probeExecRow.querySelector('.list-row-main'))
           // ⚠️ 必须等右栏**换成了这个 agent**：前面的段落已经选过别的 agent 了
           const probeSwitched = await until(
             () => text(d().querySelector('.detail h2')) === '探针用的执行者',
@@ -955,7 +1556,7 @@
           if (!probeSwitchReviewer || !probeSwitchExec) {
             errors.push('换 agent 那条查不了：找不到夹具审核者或执行者')
           } else {
-            click(probeSwitchReviewer.querySelector('.agent-item'))
+            click(probeSwitchReviewer.querySelector('.list-row-main'))
             await until(() => !!d().querySelector('.detail .section h3'), 60)
             await wait(300)
             const probeEditForSwitch = [...d().querySelectorAll('.detail button')].find(
@@ -967,7 +1568,7 @@
               click(probeEditForSwitch)
               await wait(400)
               // **在编辑态里**换成执行者
-              click(probeSwitchExec.querySelector('.agent-item'))
+              click(probeSwitchExec.querySelector('.list-row-main'))
               const probeSwitched = await until(
                 () => text(d().querySelector('.detail h2')) === '探针用的执行者',
                 60,
@@ -1004,7 +1605,7 @@
         if (!probeReviewerRow) {
           errors.push('找不到审核者的卡片')
         } else {
-          click(probeReviewerRow.querySelector('.agent-item'))
+          click(probeReviewerRow.querySelector('.list-row-main'))
           const probeReviewerSwitched = await until(
             () => !!d().querySelector('.detail .badge.in_review'),
             60,
@@ -1029,7 +1630,7 @@
         // 有遮罩、够宽、不在主从两栏里、Esc 能关、栏头不会被撑大。
         // 上一版正是**量外观的检查全绿而布局已经垮了**，所以这一组量容纳关系。
         f.contentWindow.location.hash = '#/agents'
-        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await until(() => d().querySelectorAll('.list-row-main').length > 0)
         await wait(400)
 
         const paneEl = d().querySelector('.pane')
@@ -1055,7 +1656,7 @@
          * 位置与尺寸。抽屉一旦进了文档流，这几项里至少有一项会动。
          */
         const layoutSnapshot = () =>
-          ['.topbar', '.sidebar', '.list-pane', '.detail-pane', '.agent-item']
+          ['.topbar', '.sidebar', '.list-pane', '.detail-pane', '.list-row-main']
             .map((sel) => {
               const el = d().querySelector(sel)
               if (!el) return `${sel}:—`
@@ -1073,7 +1674,7 @@
         const findIn = (root, label) =>
           [...(root?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === label)
 
-        const newAgentBtn = paneBtn('新建')
+        const newAgentBtn = paneBtn('新建智能体')
         const settingsBtn = paneBtn('设置')
         facts['template.openButtonFound'] = !!newAgentBtn
         facts['template.openButtonLabel'] = newAgentBtn ? newAgentBtn.textContent.trim() : null
@@ -1124,7 +1725,7 @@
           // Esc 关掉（Esc 在 Drawer 组件里统一处理）
           f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
           facts['template.formGoneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
-          facts['template.listBackAfterEsc'] = !!d().querySelector('.agent-item')
+          facts['template.listBackAfterEsc'] = !!d().querySelector('.list-row-main')
         }
 
         // ══════════════ 设置抽屉 ══════════════
@@ -1423,7 +2024,7 @@
           (row.textContent ?? '').includes('探针用的老标准详情审核者'),
         )
         if (reviewerRow) {
-          click(reviewerRow.querySelector('.agent-item'))
+          click(reviewerRow.querySelector('.list-row-main'))
           await until(() => !!d().querySelector('.detail'))
           await wait(400)
           // ⚠️ 这里原来量的是"标准那一行里有一个显示名字的徽标"（`.std-name-badge`）。
@@ -1520,7 +2121,7 @@
           //   （列表明明是满的）。只读与编辑两种形态都不该有。
           facts['standard.actionsHintAbsentWhenSet'] = !String(
             text(actionsSection) ?? '',
-          ).includes('也来自这些 skill')
+          ).includes('也来自这些技能')
           // 反向：动作清单**不在**承载判断依据的那一栏里（同一件事只有一个出处）。
           // ⚠️ 判据不能是"那一行的文字里有没有 comment.create"——判断依据的**正文**本身
           //    就提到了这个动作名（内置标准里那句"纯提示用 `comment.create`"），
@@ -1622,7 +2223,7 @@
 
         // 新建表单：审核角色下出现标准编辑栏，执行者下不出现
         const newBtn2 = [...d().querySelectorAll('.topbar .page-actions button')].find(
-          (b) => b.textContent.trim() === '新建',
+          (b) => b.textContent.trim() === '新建智能体',
         )
         if (newBtn2) {
           click(newBtn2)
@@ -1801,7 +2402,7 @@
           )
           facts['standard.emptyReviewerFixtureFound'] = !!emptyRow
           if (emptyRow) {
-            click(emptyRow.querySelector('.agent-item'))
+            click(emptyRow.querySelector('.list-row-main'))
             // ⚠️ 等右栏**真的换成它**：只等 `.detail` 会立刻返回，读到上一个
             facts['standard.emptyReviewerSwitched'] = await until(
               () => text(d().querySelector('.detail h2')) === '探针用的没写指令的审核者',
@@ -1838,7 +2439,7 @@
         const legacyAgentId = legacyAgent ? legacyAgent.id : null
         facts['migrate.legacyAgentFound'] = legacyAgentId !== null
         if (legacyRow) {
-          click(legacyRow.querySelector('.agent-item'))
+          click(legacyRow.querySelector('.list-row-main'))
           // ⚠️ 必须等右栏**换成了这个 agent**——前面的段落已经选过别的 agent 了，
           //    只等 `.detail` 存在会立刻返回，读到的是上一个 agent 的详情
           //    （又一次"看早"，这次被 `legacyHintBefore` 那条断言抓到）
@@ -1891,7 +2492,7 @@
               ) ?? null
             facts['migrate.legacyActionsHintShown'] = String(
               text(legacyActionsSection) ?? '',
-            ).includes('也来自这些 skill')
+            ).includes('也来自这些技能')
             facts['migrate.legacyActionsNoFalseClaim'] = !String(
               text(legacyActionsSection) ?? '',
             ).includes('只报告、不动作')
@@ -1923,10 +2524,10 @@
             //    "永远 false"，才回头看出这三条一直在空过。）
             //    改成读**页面主区**的文字。
             const mainText = () => text(d().querySelector('.main')) ?? ''
-            facts['migrate.legacyHintGone'] = !mainText().includes('沿用挂载的 skill')
+            facts['migrate.legacyHintGone'] = !mainText().includes('沿用挂载的技能')
             // ★ 固化会把挂载摘掉（`skillIds: []`）⇒ 动作不再可能来自 skill，
             //   那句提示必须跟着消失（否则它开始说假话）。
-            facts['migrate.legacyActionsHintGone'] = !mainText().includes('也来自这些 skill')
+            facts['migrate.legacyActionsHintGone'] = !mainText().includes('也来自这些技能')
 
             /**
              * ★★ 搬完之后「指令」那一栏必须**改口**：正文已经并进来、那句提示也没了。
@@ -1995,7 +2596,7 @@
         )
         facts['fold.fixtureFound'] = !!foldRow
         if (foldRow) {
-          click(foldRow.querySelector('.agent-item'))
+          click(foldRow.querySelector('.list-row-main'))
           facts['fold.detailSwitched'] = await until(
             () => text(d().querySelector('.detail h2')) === '探针用的内联老标准审核者',
             60,
@@ -2077,7 +2678,7 @@
         // 两轮反馈之后的语义：**单选**（设了新的，原来那个自动让位；没有"取消默认"），
         // 而且开关要在卡片**里面**、不许溢出。
         f.contentWindow.location.hash = '#/agents'
-        await until(() => d().querySelectorAll('.agent-item').length > 0)
+        await until(() => d().querySelectorAll('.list-row-main').length > 0)
         await wait(400)
 
         const paneEl2 = d().querySelector('.pane')
@@ -2137,14 +2738,14 @@
         facts['defaultAgent.setButtonFound'] = !!target
         if (target) {
           const targetRow = target.closest('.agent-row')
-          facts['defaultAgent.targetName'] = text(targetRow.querySelector('.agent-item strong'))
-          const previous = need('点之前谁是默认', () => text(badge().closest('.agent-row').querySelector('.agent-item strong')))
+          facts['defaultAgent.targetName'] = text(targetRow.querySelector('.list-row-main strong'))
+          const previous = need('点之前谁是默认', () => text(badge().closest('.agent-row').querySelector('.list-row-main strong')))
           facts['defaultAgent.previousName'] = previous
 
           click(target)
           const marked = await until(
             () =>
-              text(badge()?.closest('.agent-row')?.querySelector('.agent-item strong')) ===
+              text(badge()?.closest('.agent-row')?.querySelector('.list-row-main strong')) ===
               facts['defaultAgent.targetName'],
           )
           facts['defaultAgent.badgeMovesToTarget'] = marked
@@ -2154,20 +2755,32 @@
           facts['defaultAgent.noCancelAfterSet'] = cancelBtns().length === 0
           facts['defaultAgent.targetHasNoToggle'] = !targetRow.querySelector('.default-toggle')
 
-          // ★ 端到端：新建任务页预选的就是它
-          f.contentWindow.location.hash = '#/new'
-          await until(() => !!d().querySelector('select'))
-          await wait(500)
-          const select = [...d().querySelectorAll('select')].find((sel) =>
-            [...sel.options].some((o) => (o.textContent ?? '').includes('（默认）')),
+          // ★ 端到端：建任务那一栏里预选的就是它
+          // ⚠️ 2026-10（D58 第二步）：表单住进「任务」页右栏之后，等的东西也变了——
+          //    要等**那一栏里的**表单画出来（原来等的是"页面上有 select"，而任务页
+          //    的列表/看板上也有 select 之类的东西，等到的是谁并不确定）。
+          f.contentWindow.location.hash = '#/tasks/new'
+          const ntReady = await until(
+            () => !!d().querySelector('.detail-pane .create-body .newtask-form select'),
+            60,
           )
+          await wait(500)
+          // ⚠️ 限定在**那张表单**里找（原来是在整页的 select 里找第一个带「（默认）」的）。
+          const lead = ntReady ? d().querySelector('.detail-pane .create-body .newtask-form') : null
+          const select = lead
+            ? [...lead.querySelectorAll('select')].find((sel) =>
+                [...sel.options].some((o) => (o.textContent ?? '').includes('（默认）')),
+              )
+            : null
           facts['defaultAgent.optionMarked'] = !!select
           facts['defaultAgent.selectListsOnlyExecutors'] = need('选择器里的选项', () => {
-            const sel = select ?? d().querySelector('select')
+            const sel = select ?? (lead ? lead.querySelector('select') : null)
+            if (!sel) return null
             return [...sel.options].every((o) => !(o.textContent ?? '').includes('（审核）'))
           })
-          facts['defaultAgent.preselected'] = need('新建任务页预选的 agent', () => {
-            const sel = select ?? d().querySelector('select')
+          facts['defaultAgent.preselected'] = need('建任务那一栏预选的 agent', () => {
+            const sel = select ?? (lead ? lead.querySelector('select') : null)
+            if (!sel) return null
             const chosen = sel.options[sel.selectedIndex]
             return chosen ? (chosen.textContent ?? '').replace('（默认）', '').trim() : null
           })
@@ -2199,13 +2812,20 @@
         facts['topbar.actionsAtSidebarEdge'] = {}
         facts['topbar.actionGapPx'] = {}
         facts['topbar.buttonHeights'] = {}
+        facts['topbar.trackHeight'] = {}
         facts['topbar.activeModeVisible'] = {}
         for (const [tpHash, tpName, tpWant] of [
-          ['#/tasks', '任务清单', ['列表', '看板', '刷新']],
-          ['#/agents', '智能体', ['新建', '设置', '刷新']],
-          ['#/tools', '工具', ['刷新', '安装工具']],
+          // ★ 2026-10（D58）：主操作排在最前（它就是「新建任务」——侧栏那一项
+          //   并进了这一页），顺序也钉住。
+          ['#/tasks', '任务', ['新建任务', '列表', '看板', '刷新']],
+          ['#/agents', '智能体', ['新建智能体', '设置', '刷新']],
+          ['#/tools', '工具', ['安装工具', '刷新']],
         ]) {
           f.contentWindow.location.hash = tpHash
+          // ⚠️ 等到**地址真的生效**再量：`hashchange` 晚一拍，而页名在"建任务"
+          //    与"任务"两种状态下都是「任务」⇒ 只等页名会立刻通过，量到的却是
+          //    上一页的状态（实测踩过：那边还在建任务，于是被标成"当前"的按钮有 2 个）。
+          await until(() => f.contentWindow.location.hash === tpHash, 40)
           const tpHere = await until(() => text(d().querySelector('.page-name')) === tpName, 60)
           if (!tpHere) errors.push(`顶栏页名：切到 ${tpHash} 之后没等到「${tpName}」`)
           const tpBar = d().querySelector('.topbar')
@@ -2286,16 +2906,29 @@
                  */
                 return acts.right < glob.left && bar.right - acts.right > bar.width * 0.3
               })
-          // ⑥ 一种尺寸 + 激活态看得出来
+          // ⑥ 两档尺寸（工具条里的格子 / 工具条外的常驻控件）+ 激活态看得出来
+          //
+          // ⚠️ 2026-10（D59）：这一排改成了**一条工具条**，所以"整条带子上只有一种
+          //    按钮高度"这条老判据不再成立——工具条的**轨道**与常驻控件同高（30），
+          //    轨道里的**格子**矮一档（24），那是嵌套关系。分开量两组，两组的内部
+          //    都必须齐：一组不齐仍然是"加一个按钮就把这排弄歪"。
           facts['topbar.buttonHeights'][tpHash] = need(`顶栏按钮高度（${tpHash}）`, () => {
             // ⚠️ 按**矩形高度 > 0** 过滤，不能只看 `display`：父元素 `display: none`
             //    时子元素的 computed display 仍然是 `inline-flex`，它会带着一个
             //    0px 的矩形混进来（自查脚本第一次跑就被这个骗了，报"高度不齐 30/0"）。
-            const hs = [...d().querySelectorAll('.topbar button')]
+            const h = (b) => Math.round(b.getBoundingClientRect().height)
+            const cells = [...d().querySelectorAll('.topbar .page-actions button')]
               .filter((b) => b.getBoundingClientRect().height > 0)
-              .map((b) => Math.round(b.getBoundingClientRect().height))
-            // 去重后的种类数：全都一样高时是 1
-            return [...new Set(hs)]
+              .map(h)
+            const others = [...d().querySelectorAll('.topbar button')]
+              .filter((b) => !b.closest('.page-actions') && b.getBoundingClientRect().height > 0)
+              .map(h)
+            return { cells: [...new Set(cells)], others: [...new Set(others)] }
+          })
+          // 轨道的高度：它要与常驻控件同高（"这一条带子上的节奏"）
+          facts['topbar.trackHeight'][tpHash] = need(`工具条轨道高度（${tpHash}）`, () => {
+            const el = d().querySelector('.topbar .page-actions')
+            return el ? Math.round(el.getBoundingClientRect().height) : null
           })
           facts['topbar.activeModeVisible'][tpHash] = need(`当前模式的标记（${tpHash}）`, () => {
             const btns = [...d().querySelectorAll('.topbar .page-actions button')]
@@ -2308,10 +2941,24 @@
              */
             if (on.length === 0) return '不适用（这一页没有"当前模式"）'
             if (on.length !== 1) return `有 ${on.length} 个被标成当前`
-            const off = btns.find((b) => !b.classList.contains('active'))
-            if (!off) return '所有按钮都被标成当前'
+            /**
+             * ⚠️⚠️ 比对的**必须是同一种 kind 的旁边那一格**，不能是"随便找个没标
+             *    active 的"：这一排里第一颗是**主操作**（强调色文字），拿它当基准的
+             *    话，"当前那颗有没有底色"永远成立——实测踩过：我把 `.active` 的实心
+             *    底整条删掉，这条检查**照样绿**（差异来自主操作那一颗的颜色）。
+             *    同一 kind = 形状本该一样、只有状态不同，那才是要量的事。
+             */
+            const kindOf = (b) =>
+              [...b.classList]
+                .filter((c) => c !== 'active')
+                .sort()
+                .join(' ')
+            const peer =
+              btns.find((b) => !b.classList.contains('active') && kindOf(b) === kindOf(on[0])) ??
+              btns.find((b) => !b.classList.contains('active'))
+            if (!peer) return '所有按钮都被标成当前'
             const a = cs(on[0])
-            const b = cs(off)
+            const b = cs(peer)
             // 背景或文字色至少有一处不一样，否则"当前"是看不见的
             return a.backgroundColor !== b.backgroundColor || a.color !== b.color
           })
@@ -2321,11 +2968,34 @@
         //
         // ⚠️ 这一段必须放在**最后**：前面所有检查都断言中文，切成英文会让它们全红。
         //    测完切回中文，保证探针结束时状态与开始时一致。
+        //
+        // ★ 2026-10：语言切换器 2026-09 已从顶栏撤进**设置抽屉**（顶栏那份撤了——
+        //   "不是常用设置"）。探针原来量 `.topbar select`，那早已不存在，这一组
+        //   一直全红。改为：打开设置抽屉 → 取抽屉里 value 是 'zh'/'en' 的那个
+        //   select（其它 select 的 value 不是 locale 码，不会误取）。
         f.contentWindow.location.hash = '#/agents'
-        await until(() => !!d().querySelector('.topbar select'))
+        await until(() => d().querySelectorAll('.agent-row').length > 0, 60)
         await wait(300)
-
-        const langSelect = d().querySelector('.topbar select')
+        {
+          // ⚠️ 必须点**全局**那组的设置（`openDrawer.set('settings')`）：agents
+          //   页的「设置」开的是 WorkspaceSettings（第一句话模版），**没有语言
+          //   切换器**——语言段 2026-09 起在全局 SettingsDrawer 里。全局组里
+          //   inbox 和 settings 都是 icon-btn，按 aria-label 区分。
+          const openBtn = [
+            ...d().querySelectorAll('.topbar .global-actions button.icon-btn'),
+          ].find((b) => (b.getAttribute('aria-label') ?? '') === '设置')
+          if (openBtn) {
+            click(openBtn)
+            await wait(1500)
+          } else {
+            errors.push('语言组：全局设置按钮（icon-btn）找不到（抽屉打不开，语言切换量不到）')
+          }
+        }
+        const langSelectOf = () =>
+          [...d().querySelectorAll('.drawer select')].find(
+            (s) => ['zh', 'en'].includes(s.value),
+          ) ?? null
+        const langSelect = langSelectOf()
         facts['lang.switchPresent'] = !!langSelect
         facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
         /**
@@ -2338,19 +3008,28 @@
          */
         const langNavItem = (label) =>
           [...d().querySelectorAll('.sidebar .nav-title')].find((el) => text(el) === label) ?? null
+        // ⚠️ 2026-10（D58）：取样点从「新建任务」换成「任务」——前者已不是导航项
+        //    （合并进「任务」了）。这一条问的是"界面语言真的切了吗"，与取样哪一项无关。
         facts['lang.navBefore'] = need('切换前的导航文字', () => {
-          const el = langNavItem('新建任务')
+          const el = langNavItem('任务')
           return el ? text(el) : null
         })
 
         if (langSelect) {
-          langSelect.value = 'en'
-          langSelect.dispatchEvent(new Event('change', { bubbles: true }))
+          // ⚠️ 同下：切 en 的瞬间抽屉还没重渲染，旧引用仍有效；但为对称起见
+          //    也重新取一次（万一前面的 wait 已经让抽屉刷过一遍）。
+          const langSelectEn = langSelectOf()
+          if (langSelectEn) {
+            langSelectEn.value = 'en'
+            langSelectEn.dispatchEvent(new Event('change', { bubbles: true }))
+          } else {
+            errors.push('语言组：切换时抽屉里的语言 select 不见了')
+          }
           // 英文生效：导航文字与顶栏按钮都变成英文
-          const switched = await until(() => langNavItem('New task') !== null, 40)
+          const switched = await until(() => langNavItem('Tasks') !== null, 40)
           facts['lang.switchedToEn'] = switched
           facts['lang.navAfter'] = need('切换后的导航文字', () => {
-            const el = langNavItem('New task')
+            const el = langNavItem('Tasks')
             return el ? text(el) : null
           })
           facts['lang.settingsLabel'] = need('顶栏「设置」按钮', () => {
@@ -2361,10 +3040,13 @@
              *    按钮在英文下同样叫 `Settings`**——按文字在全条顶栏里找，找到的
              *    很可能是页面那个，于是这条就变成了"页面动作翻译了吗"，而它问的是
              *    "与页面无关的那个设置按钮翻译了吗"。
+             *    ★ 2026-10：全局那组 2026-09 起是**图标按钮**（SVG，无文字），
+             *      文字 `text() === 'Settings'` 永远匹配不到——改按 `aria-label`
+             *      量（读屏器拿到的就是它，翻译的正是这一份）。
              */
-            const b = [...d().querySelectorAll('.topbar .global-actions button')].find(
-              (x) => text(x) === 'Settings',
-            )
+            const b = [
+              ...d().querySelectorAll('.topbar .global-actions button.icon-btn'),
+            ].find((x) => (x.getAttribute('aria-label') ?? '') === 'Settings')
             return b ? 'Settings' : null
           })
           // ★ 契约值**不翻译**：动作名、runtime key 这些仍然是机器值。
@@ -2393,7 +3075,7 @@
           const reviewerRowEn = [...d().querySelectorAll('.agent-row')].find((row) =>
             (row.textContent ?? '').includes('探针用的老标准详情审核者'),
           )
-          if (reviewerRowEn) click(reviewerRowEn.querySelector('.agent-item'))
+          if (reviewerRowEn) click(reviewerRowEn.querySelector('.list-row-main'))
           await until(() => !!d().querySelector('.detail'), 60)
           await wait(300)
           // 先记一个"详情真的渲染出来了"的基数（否则下面那条会空过）
@@ -2479,9 +3161,19 @@
           }
 
           // 切回中文，并以服务端为准确认它记住了
-          langSelect.value = 'zh'
-          langSelect.dispatchEvent(new Event('change', { bubbles: true }))
-          await until(() => text(d().querySelector('.sidebar .nav-title')) === '新建任务', 40)
+          // ⚠️ 用 `langSelectOf()` 重新取：切到 en 之后抽屉因 locale 重渲染，
+          //    旧的 `langSelect` 引用可能已脱离 DOM（探针第一次跑就栽在这）。
+          const langSelectZh = langSelectOf()
+          if (!langSelectZh) errors.push('语言组：切回中文时抽屉里的语言 select 不见了')
+          else {
+            langSelectZh.value = 'zh'
+            langSelectZh.dispatchEvent(new Event('change', { bubbles: true }))
+          }
+          // ⚠️ 这里原来等的是 `.sidebar .nav-title` 的**第一项**等于「新建任务」——
+          //    加「聊天」之后第一项就是聊天，那条等待**永远超时**（每次白烧 10s 虚拟时间）。
+          //    D58 又把「新建任务」从导航里去掉了，所以改成"按文字找那一项"（与上面
+          //    `langNavItem` 同一套）。
+          await until(() => langNavItem('任务') !== null, 40)
           const saved = await f.contentWindow
             .fetch('/api/identity')
             .then((r) => r.json())
@@ -2489,7 +3181,26 @@
           facts['lang.savedOnServer'] = saved ? saved.locale : null
         }
 
+        // ★ 2026-10：语言组开着的设置抽屉要关掉——后面那几组（三步链等）量的是
+        //   中文界面，抽屉浮层（含遮罩）会挡着它们点按钮。
+        {
+          const closeBtn = [...d().querySelectorAll('.drawer-head button')].find(
+            (b) => ['关闭', 'Close'].includes(text(b).trim()),
+          )
+          if (closeBtn) click(closeBtn)
+          await wait(300)
+        }
+
         // ══════════════ 新建任务的三步链：① 执行 → ② 审核 → ③ 行动 ══════════════
+        //
+        // ⚠️ 2026-10（D58 第二步）：表单搬进「任务」页右栏之后，**这一组要把窗口
+        //    画宽一点**（1600 而不是默认的 1280）——右栏的宽度 = 窗口 - 侧栏 240 -
+        //    左栏清单 416，1280 的窗口下只剩 549px，按容器判会退成单列（那是**对**
+        //    的，见任务页那几条 `createNarrow*/createWide*`），但这一组要量的是
+        //    **那一张三步链的地图**（① 左、②③ 同列上下），单列下它没有形状可量。
+        //    所以这一组统一在"右栏 860px"的窗口下跑，跑完还原。
+        f.style.width = '1600px'
+        await wait(400)
         //
         // 这一页原来只问一件事（交给谁执行），审核者藏在**执行者的长期配置**里
         // （`Agent.reviewerAgentId`），于是"这条任务会不会被审、由谁审、判完之后
@@ -2634,8 +3345,17 @@
           const ntEnter = async () => {
             f.contentWindow.location.hash = '#/agents'
             await until(() => d().querySelectorAll('.agent-row').length > 0, 40)
-            f.contentWindow.location.hash = '#/new'
-            await until(() => text(d().querySelector('.page-name')) === '新建任务', 40)
+            // ⚠️ 2026-10（D58 第二步）：建任务的表单**住在「任务」页右栏**里了。
+            //    地址仍是 `#/tasks/new`（`#/new` 是老地址，同样直达），但顶栏
+            //    页名是**「任务」**（那张表单不再是独立一页），所以等待条件从
+            //    "页名 == 新建任务"改成"页名 == 任务 **且** 表单真的在右栏里"。
+            f.contentWindow.location.hash = '#/tasks/new'
+            await until(
+              () =>
+                text(d().querySelector('.page-name')) === '任务' &&
+                !!d().querySelector('.detail-pane .create-body .newtask-form'),
+              60,
+            )
             await until(() => !!ntExecutorSelect(), 40)
             const ntSel = ntExecutorSelect()
             if (!ntSel) return false
@@ -2681,7 +3401,7 @@
            *    （真弄红了，读到的是"找不到框"，而不是"框没了"）。
            */
           /**
-           * 打开 ③ 的挑选对话框（选择器从页面上搬进去了，见 `NewTask.svelte` 里那段）。
+           * 打开 ③ 的挑选对话框（选择器从页面上搬进去了，见 `components/NewTaskForm.svelte` 里那段）。
            *
            * ★ 判据是**那颗按钮真的点开了浮层**（不是"页面上有个按钮"）：按钮存在
            *   但点了不开，是这次改动最容易出的错，而它的症状是后面所有关于勾选框的
@@ -2964,8 +3684,20 @@
           //    那一页上（提交成功会跳过去），那时 `.form-foot` 根本不存在——症状是
           //    这两条永远"没量到值"，看着像选择器写错了。
           {
-            const ntSc = d().querySelector('.main')
             const ntFoot = d().querySelector('.form-foot')
+            // ⚠️ 可滚区**不再写死成 `.main`**（D58 第二步之后表单住在右栏里，
+            //    而 `.main` 在 `:has(> .split-layout)` 那条规则下是 `overflow: hidden`）。
+            //    改成"从提交栏往上找第一个能滚的祖先"：这样它量的是**事实**，
+            //    以后再换容器也不会因为选择器过期而静默失效。
+            const ntSc = (() => {
+              let el = ntFoot?.parentElement ?? null
+              while (el) {
+                const o = cs(el).overflowY
+                if (o === 'auto' || o === 'scroll') return el
+                el = el.parentElement
+              }
+              return null
+            })()
             if (ntSc && ntFoot) {
               const ntBack = ntSc.scrollTop
               ntSc.scrollTop = ntSc.scrollHeight
@@ -3513,7 +4245,7 @@
               if (!row) await wait(150)
             }
             if (!row) return null
-            click(row.querySelector('.agent-item'))
+            click(row.querySelector('.list-row-main'))
             const switched = await until(
               () => text(d().querySelector('.detail h2')) === '探针用的三步链审核者',
               60,
@@ -3523,10 +4255,23 @@
             const chip = [...d().querySelectorAll('.detail .chip-sub.fixed')]
               .map((c) => text(c))
               .join(' | ')
-            f.contentWindow.location.hash = '#/newtask'
-            await until(() => text(d().querySelector('.page-name')) === '新建任务', 60)
+            // ⚠️ 这里原来写的是 `#/newtask`（**一个不存在的地址**）——它能"用"纯属
+            //    借了当时"未知 hash 回落 `#/new`"那条规则（D58 之前），于是这一行
+            //    连同下面那条等待**一直在静默失效**：`until` 的返回值被丢掉了，
+            //    而 chip 是在**上一页**读的，所以这条检查照样绿。回落目标改成
+            //    `#/tasks` 之后它才现形（这一批 8 条红就是这么来的）。
+            //    地址写对，并且把"到没到"如实记进结果里——写错的地址不该测得过。
+            f.contentWindow.location.hash = '#/new'
+            // ⚠️ 合并之后这一栏的页名是**「任务」**（表单在右栏里，不是独立一页）。
+            const ntBack = await until(
+              () =>
+                text(d().querySelector('.page-name')) === '任务' &&
+                !!d().querySelector('.detail-pane .create-body .newtask-form'),
+              60,
+            )
+            if (!ntBack) errors.push('从智能体页回「新建任务」没到位（地址写错或没回落）')
             await wait(200)
-            return { chip }
+            return { chip, landed: ntBack }
           })()
 
           // ── ② 指名换一个审核者（那个**没有配动作**的）⇒ ③ 该改说后果 ──
@@ -3850,6 +4595,10 @@
           facts['newtask.noneRunMode'] = ntNoneSubmit.run?.reviewer?.mode ?? null
         }
 
+        // 这一组量完了：把窗口还原成探针默认的 1280（后面那些组按它量的）
+        f.style.width = '1280px'
+        await wait(400)
+
         // ══════════════ 一个工具包都没装：那一栏的空态（D41）══════════════
         //
         // 使用者点名要的空态是"还没有装工具包 ⇒ 现在没有任何动作可授权"，而且要
@@ -3924,6 +4673,7 @@
           for (const row of rows.slice(0, 5)) {
             click(row)
             await wait(900)
+            // ★ D69.9.1：文件回到结果区**右侧栏**（使用者：高频项，不折叠）。
             const aside = d().querySelector('.detail-pane aside.result-files')
             if (!aside) continue // 这一条还在跑（右边是实时日志）⇒ 换下一条
             const body = text(aside)
@@ -3941,6 +4691,40 @@
             if (again.includes('取不到工作目录的文件')) {
               errors.push('任务详情那一栏等完之后变成了"取不到"')
               return false
+            }
+            // ★ D69.12：点「看完整日志」不该有**外置滚动条**（使用者报双滚动条：
+            //   .log 内置一条 + 详情栏又一条）。正解：日志视图时详情栏切成
+            //   flex 纵向布局、overflow hidden，滚动全在 .log 自己的盒子里。
+            const logToggle = [...d().querySelectorAll('.detail-pane button')].find((b) =>
+              text(b).includes('完整日志'),
+            )
+            if (logToggle) {
+              // D69.13：按钮词条**精确值**（substring 匹配挡不住「完整日志」被改
+              // 回「看完整日志」——`.includes` 照样过，这里钉死整串）
+              facts['tasks.logToggleLabel'] =
+                (logToggle.textContent ?? '').trim() === '完整日志'
+              click(logToggle)
+              await wait(400)
+              const logEl = d().querySelector('.detail-pane .log')
+              const pane = d().querySelector('.detail-pane .pane-body.detail-scroll')
+              facts['tasks.logModeNoOuterScroll'] =
+                logEl && pane
+                  ? cs(pane).overflowY === 'hidden' && cs(pane).display === 'flex'
+                  : 'NO-LOG'
+              // 切过来之后同一个按钮变成「最后结果」
+              facts['tasks.showFinalResultLabel'] =
+                (logToggle.textContent ?? '').trim() === '最后结果'
+              // 日志是详情栏的**主体**：高度占比过半（flex 吃满剩余空间；
+              // flex 断掉日志会塌成一小条——占比直接量得到）
+              facts['tasks.logFillsPane'] =
+                logEl && pane ? logEl.offsetHeight / pane.clientHeight : 'NO-LOG'
+              click(logToggle) // 切回最后结果，别把状态留在日志视图
+              await wait(300)
+            } else {
+              facts['tasks.logToggleLabel'] = 'NO-TOGGLE'
+              facts['tasks.showFinalResultLabel'] = 'NO-TOGGLE'
+              facts['tasks.logModeNoOuterScroll'] = 'NO-TOGGLE'
+              facts['tasks.logFillsPane'] = 'NO-TOGGLE'
             }
             return true
           }
@@ -4028,7 +4812,7 @@
               (r.textContent ?? '').includes(name),
             )
             if (!row) return false
-            click(row.querySelector('.agent-item'))
+            click(row.querySelector('.list-row-main'))
             return until(() => text(d().querySelector('.detail h2')) === name, 40)
           }
           const detailButton = (label) =>
@@ -4223,7 +5007,7 @@
           )
           facts['noTools.fixtureRowFound'] = !!migratedRow
           if (migratedRow) {
-            click(migratedRow.querySelector('.agent-item'))
+            click(migratedRow.querySelector('.list-row-main'))
             // ⚠️ 等右栏真的换成**这个** agent：只等 `.detail` 会立刻返回，读到上一个
             facts['noTools.detailSwitched'] = await until(
               () => text(d().querySelector('.detail h2')) === '探针用的老形态审核者',
@@ -4326,7 +5110,7 @@
               (row.textContent ?? '').includes(holder.name),
             )
             if (holderRow) {
-              click(holderRow.querySelector('.agent-item'))
+              click(holderRow.querySelector('.list-row-main'))
               facts['noTools.deadDetailSwitched'] = await until(
                 () => text(d().querySelector('.detail h2')) === holder.name,
                 60,
@@ -4479,6 +5263,17 @@
           const a = chatRect(chatList())
           const b = chatRect(chatDetail())
           return a && b ? a.w < b.w : false
+        })
+
+        // ── 每项右侧的删除按钮：需求本身（"对话列表每项加删除按钮"）──
+        // 此刻可能还没有对话（夹具是后面建的）：没有项就没有要检查的——空过；
+        // 有项则每一项都必须满足"主按钮 + 兄弟删除按钮"（不是按钮套按钮）。
+        facts['chat.deleteButtonPerItem'] = need('每项右侧的删除按钮', () => {
+          const items = [...d().querySelectorAll('.list-pane .conv-row')]
+          return items.every(
+            (li) =>
+              !!li.querySelector('.list-row-main') && !!li.querySelector(':scope > .list-row-action'),
+          )
         })
 
         // ── 空态：没有对话时列表里是空态，而输入框必须在**右栏里** ──
@@ -4908,7 +5703,7 @@
           }
           // 离开再回来：让左栏那份 store 重新拉一次，并确保页面停在聊天页
           await chatReloadIdentity()
-          const item = [...d().querySelectorAll('.list-pane .conv-item')].find((b) =>
+          const item = [...d().querySelectorAll('.list-pane .list-row-main')].find((b) =>
             text(b).includes('探针：这一条对话'),
           )
           if (!item) {
@@ -4936,6 +5731,55 @@
           }
           return true
         })()
+
+        // ── D69.15 标题统一：聊天栏头标题字号必须 fs-lg（与任务/智能体同款）──
+        facts['heads.chatHeadTitleFs'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const h2 = d().querySelector('.detail-pane .chat-head h2')
+          return h2 ? cs(h2).fontSize === '17px' : 'NO-CHAT-HEAD'
+        })()
+
+        // ── D69.15.2 风格一致：聊天标题**顶在栏头行首**（曾因改名按钮高 38px、
+        //    baseline 对齐把 h2 顶下去 7px，标题比任务/智能体低一截）。
+        //    ⚠️ 量的是 h2 相对 chat-head-main 的 rect 差，不是 offsetTop——后者
+        //    相对 offsetParent（可能不是那一行），测的是别的东西。
+        facts['heads.chatTitleRowTop'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const main = d().querySelector('.detail-pane .chat-head .chat-head-main')
+          const h2 = main?.querySelector('h2')
+          if (!main || !h2) return 'NO-CHAT-TITLE'
+          return Math.round(h2.getBoundingClientRect().top - main.getBoundingClientRect().top) <= 6
+        })()
+
+        // ★ 工作目录**只读**（2026-10）：它只在「新对话」界面设一次，详情页不许改。
+        //    `.chat-dir` 里不该有任何输入框或按钮（改名/保存/改回平台分配都没了）。
+        facts['chat.detailWorkDirReadOnly'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const dir = d().querySelector('.detail-pane .chat-dir')
+          if (!dir) {
+            errors.push('详情页没有工作目录那一行')
+            return false
+          }
+          const editable = dir.querySelectorAll('input, button').length
+          if (editable !== 0) {
+            errors.push(`详情页的工作目录还能改（量到 ${editable} 个可编辑控件）`)
+            return false
+          }
+          return true
+        })()
+
+        // ★ 对话列表的选中框（此刻夹具对话是打开着的 ⇒ 它是 `.active`）。
+        //   量出来与任务栏的两个值比对，见 run.mjs 里 `chat.activeItemBorder`。
+        //   使用者的原话：「聊天对话选中的框 和任务的不一样，请修改」——原来
+        //   这里描边是灰的（`--line-strong`），任务那边是强调色。
+        facts['chat.activeItemBorder'] = need('对话选中项的描边色', () => {
+          const el = d().querySelector('.list-pane .conv-row.active')
+          return el ? cs(el).borderTopColor : ''
+        })
+        facts['chat.activeItemBackground'] = need('对话选中项的背景色', () => {
+          const el = d().querySelector('.list-pane .conv-row.active')
+          return el ? cs(el).backgroundColor : ''
+        })
 
         facts['chat.filesListsFixtureAndManagedLast'] = await (async () => {
           if (!(await chatFilesOpenIt())) {
@@ -5276,7 +6120,7 @@
           //    的主线动作，不是左栏的动作）。量点跟着搬，判据没变——仍然是
           //    "点它一下进入起草态"。
           const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
-            text(b).trim().startsWith('新对话'),
+            text(b).trim().startsWith('新建对话'),
           )
           if (!newBtn) {
             errors.push('顶栏找不到「新对话」按钮——这一条量不到')
@@ -5288,6 +6132,19 @@
           if (stillThere) {
             errors.push('草稿态下那一栏还在——那时还没有对话，也就还没有目录')
           }
+
+          // ★ 工作目录的设定在「新对话」界面（2026-10）：Agent 选择器**下面**就是
+          //    目录输入框（可留空 = 平台自动分配）。用 DOM 位置判断"在下面"——
+          //    "出现了"和"出现在对的地方"是两回事。
+          //    必须在这里量：**进入草稿态后**顶栏的「新对话」按钮会消失
+          //    （起草时再给一个"开始新事情"的按钮是自相矛盾），单独一条要
+          //    再点一次就点不到了。
+          facts['chat.draftWorkDirInput'] = need('草稿态的工作目录输入框', () => {
+            const select = d().querySelector('.detail-pane #chat-agent')
+            const input = d().querySelector('.detail-pane #chat-draft-workdir')
+            if (!select || !input) return false
+            return (select.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+          })
           return !stillThere
         })()
 
@@ -5334,10 +6191,212 @@
           return out
         })()
 
-        // ══════════════ 新建任务：至少不崩 ══════════════
+        // ══════════════ 删除确认：平台自己的居中对话框 ══════════════
+        //
+        // ★ 使用者的原话：「点删除对话，弹出来系统提示框，改用平台框，放中间」。
+        //   所以这里量两件事：① 弹的是**平台画的** `.modal`（不是浏览器
+        //   `window.confirm`——headless 里那个不画任何东西，量不到 `.modal`
+        //   就说明还在用系统框）；② 它**在中间**。
+        //   ⚠️ 必须点「取消」收场：真按了确认会把这个夹具对话删掉，后面
+        //      依赖它的断言全跟着红。
+        facts['chat.deleteConfirmUsesModal'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const row = [...d().querySelectorAll('.list-pane .conv-row')].find((li) =>
+            text(li).includes('探针：这一条对话'),
+          )
+          const del = row?.querySelector('.list-row-action')
+          if (!del) {
+            errors.push('夹具对话那一项上没有删除按钮')
+            return false
+          }
+          click(del)
+          await wait(400)
+          const modal = d().querySelector('.modal')
+          if (!modal) {
+            errors.push('点了删除没有弹出平台自己的对话框（还是 window.confirm？）')
+            return false
+          }
+          const r = modal.getBoundingClientRect()
+          const winW = f.contentWindow.innerWidth
+          const offset = Math.abs((r.left + r.right) / 2 - winW / 2)
+          if (offset > 60) {
+            errors.push(`确认框没在中间（偏离中线 ${Math.round(offset)}px）`)
+          }
+          // 「取消」收场：框要关掉，而且那条对话**还在**
+          const cancel = [...modal.querySelectorAll('.modal-foot button')].find(
+            (b) => text(b).trim() === '取消',
+          )
+          if (!cancel) {
+            errors.push('确认框里没有「取消」')
+            return false
+          }
+          click(cancel)
+          await wait(300)
+          const stillOpen = d().querySelector('.modal') !== null
+          if (stillOpen) errors.push('点了「取消」确认框没关掉')
+          const survived = [...d().querySelectorAll('.list-pane .conv-row')].some((li) =>
+            text(li).includes('探针：这一条对话'),
+          )
+          if (!survived) errors.push('★ 点了「取消」却把对话删掉了')
+          return !stillOpen && survived && offset <= 60
+        })()
+
+        // ══════════════ 建任务那一栏：至少不崩 ══════════════
+        // ⚠️ 2026-10（D58 第二步）：`#/new` 现在落到「任务」页并**在右栏里**开表单，
+        //    所以判据从"主区有内容"改成"右栏里那张表单真的画出来了 + 左边清单还在"
+        //    ——"有内容"太松了：整页画着列表也能过长，而那时建任务这条路是断的。
         f.contentWindow.location.hash = '#/new'
-        await wait(600)
-        facts['new.hasContent'] = need('新建页有内容', () => main().textContent.trim().length > 0)
+        await wait(900)
+        facts['new.hasContent'] = need('建任务那一栏真的画出来了', () => {
+          const body = d().querySelector('.detail-pane .create-body')
+          const form = d().querySelector('.detail-pane .create-body .newtask-form')
+          const rows = d().querySelectorAll('.list-pane .task-row').length
+          return !!body && !!form && rows > 0
+        })
+
+        // ══════════════ 列表栏骨架（D61，D62 补智能体栏头带）══════════════
+        //
+        // 聊天 / 任务 / 智能体三页的列表栏共用同一套骨架：
+        //   · 栏头带：三页都有一条 51px 的栏头带。只有"栏标题 ≠ 页名"才放**标题**
+        //     （聊天「对话」——它的计数也跟在标题旁边）；任务与智能体放
+        //     **计数 + 搜索**（不放标题——与页名重复）。D62 给智能体补了带子
+        //     （D61 使用者反馈"变化不大，只有任务有点变化"）；D63 给聊天补了
+        //     计数 + 搜索（使用者："聊天页也改和任务类似呀"）。
+        //   · 搜索框永远进栏头右侧，不独行（任务列表模式从"独行怼在列表上方"改来）。
+        //   · 行高同一档（`--list-row-min-h`），每页内部恒定，三页互相相差 ≤1px。
+        //   · 删除/操作按钮同一位置（右缘内缩 `--sp-1`、垂直居中）。
+        //
+        // ⚠️ 必须放在**这一段**（最后）：聊天那组刻意"不造对话"量的是空态，只有
+        //    聊天段自己的夹具对话（`chatEnsureFixtureConversation`）造出来之后，
+        //    左栏才有行可量。放在它前面，聊天三条会全部"没量到"（实测踩过）。
+        {
+          const sk = {
+            headH: {}, searchInHead: {}, rowH: {}, delInset: {}, titleInHead: {},
+            title: {}, chip: {}, rowBox: {}, hover: {},
+          }
+          const skPages = [
+            { key: 'chat', hash: '#/chat', rows: '.conv-row', titleSel: '.conv-title', chipSel: null },
+            { key: 'tasks', hash: '#/tasks', rows: '.task-row', titleSel: '.task-title', chipSel: '.stage-tag' },
+            { key: 'agents', hash: '#/agents', rows: '.agent-row', titleSel: '.agent-line strong', chipSel: '.badge' },
+          ]
+          for (const pg of skPages) {
+            f.contentWindow.location.hash = pg.hash
+            await until(() => f.contentWindow.location.hash === pg.hash, 40)
+            const haveRows = await until(() => {
+              if (d().querySelectorAll('.list-pane ' + pg.rows).length > 0) return true
+              if (d().querySelector('.board')) {
+                const listBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+                  b.textContent.trim().startsWith('列表'),
+                )
+                if (listBtn) { click(listBtn); return false }
+              }
+              return false
+            }, 50)
+            await wait(300)
+            const lp = d().querySelector('.list-pane')
+            const head = lp.querySelector(':scope > .pane-head')
+            // 栏头与搜索**不依赖行**：就算这一页没有行（理论上不该有），也要量
+            sk.headH[pg.key] = need(`列表栏头高度（${pg.key}）`, () =>
+              head ? Math.round(head.getBoundingClientRect().height) : null)
+            sk.searchInHead[pg.key] = need(`搜索框位置（${pg.key}）`, () => {
+              const inHead = !!head?.querySelector('input')
+              const inBody = !!lp.querySelector('.pane-body input')
+              return { inHead, inBody }
+            })
+            // D64：三页栏头带里**都不许有标题**（聊天原来的「对话」按要求去掉）——
+            // 栏头规则从"标题 ≠ 页名才放标题"实际落到"三页都不放"。
+            sk.titleInHead[pg.key] = need(`栏头带无标题（${pg.key}）`, () =>
+              !head?.querySelector('h2'))
+            if (pg.key === 'tasks') {
+              // D64 顺手修 D61 的漏：全局 `.list-head`（51px）曾漏到任务列表里的
+              // 分组标题「需你处理 / 其余任务」上，把它们**固定**撑成 51px
+              // （实测 sep0/sep1 都是 51px）。修掉之后是内容高度：单行那条
+              // （其余任务）38px、双行那条（需要注意+长提示折行）59px。
+              // D67：「需要注意」后面的解释句（"执行失败/被取消…"）按要求删了，
+              // 两条都回到单行 ~38px。漏的特征是"全部 == 51"——用 **min** 抓它。
+              sk.separatorHeights = need('任务分组标题是内容高度', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-head')]
+                if (seps.length === 0) return { min: 0, max: 0 }
+                const hs = seps.map((x) => Math.round(x.getBoundingClientRect().height))
+                return { min: Math.min(...hs), max: Math.max(...hs) }
+              })
+              // D67：删掉的解释句要**钉住"没有"**（谁把它加回来就红）——
+              // 判据：第一条分组标题（需要注意）的文本里不许再出现它。
+              sk.separatorNoHint = need('「需要注意」分组不带解释', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .list-head')]
+                const t = seps.length > 0 ? text(seps[0]) ?? '' : ''
+                return !t.includes('执行失败') && !t.includes('——')
+              })
+            }
+            if (!haveRows) {
+              sk.rowH[pg.key] = null
+              continue
+            }
+            const first = d().querySelector('.list-pane ' + pg.rows)
+            sk.rowH[pg.key] = need(`列表行高（${pg.key}）`, () =>
+              first ? Math.round(first.getBoundingClientRect().height) : null)
+            // ── 行内细节（D65）：标题 / 徽标 / 行容器 / hover 三页统一 ──
+            sk.title[pg.key] = need(`行内标题（${pg.key}）`, () => {
+              const t = first?.querySelector(pg.titleSel)
+              if (!t) return null
+              const c = getComputedStyle(t)
+              return { fs: Math.round(parseFloat(c.fontSize) * 10) / 10, w: Number(c.fontWeight) }
+            })
+            if (pg.chipSel) {
+              sk.chip[pg.key] = need(`徽标形状（${pg.key}）`, () => {
+                const b = first?.querySelector(pg.chipSel)
+                return b ? getComputedStyle(b).borderRadius : null
+              })
+            }
+            sk.rowBox[pg.key] = need(`行容器（${pg.key}）`, () => {
+              const c = first ? getComputedStyle(first) : null
+              return c ? { align: c.alignItems, gap: c.gap } : null
+            })
+            sk.hover[pg.key] = need(`行 hover 底色（${pg.key}）`, () => {
+              // D66：三页行 hover 统一在标准控件 ListRow 的 `.list-row:hover` 里
+              // （scoped 选择器形如 `.list-row.svelte-xxx:hover`，`:hover` 在 hash 后面）。
+              for (const sheet of [...d().styleSheets]) {
+                try {
+                  for (const rule of [...sheet.cssRules]) {
+                    const st = rule.selectorText ?? ''
+                    if (/\.list-row(?:\.|:)/.test(st) && st.includes(':hover')) {
+                      const bg = rule.style.background || rule.style.backgroundColor
+                      if (bg) return bg
+                    }
+                  }
+                } catch {}
+              }
+              return null
+            })
+            if (pg.key === 'chat' || pg.key === 'tasks') {
+              sk.delInset[pg.key] = need(`操作按钮位置（${pg.key}）`, () => {
+                const li = first
+                const btn = li?.querySelectorAll('button')[1]
+                if (!li || !btn) return null
+                const lr = li.getBoundingClientRect()
+                const br = btn.getBoundingClientRect()
+                return {
+                  inset: Math.round((lr.right - br.right) * 10) / 10,
+                  centerDelta:
+                    Math.round(Math.abs(br.top + br.height / 2 - (lr.top + lr.height / 2)) * 10) / 10,
+                }
+              })
+            }
+          }
+          Object.assign(facts, {
+            'skeleton.headH': sk.headH,
+            'skeleton.searchInHead': sk.searchInHead,
+            'skeleton.rowH': sk.rowH,
+            'skeleton.delInset': sk.delInset,
+            'skeleton.headsTitleless': sk.titleInHead,
+            'skeleton.separatorHeights': sk.separatorHeights,
+            'skeleton.separatorNoHint': sk.separatorNoHint,
+            'rowdetail.title': sk.title,
+            'rowdetail.chip': sk.chip,
+            'rowdetail.rowBox': sk.rowBox,
+            'rowdetail.hover': sk.hover,
+          })
+        }
 
         publish(true)
       }

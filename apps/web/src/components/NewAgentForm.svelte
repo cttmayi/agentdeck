@@ -319,12 +319,26 @@
 
     <!-- 主操作常驻底部：表单很长，正文一长就不该让人先滚到底才能按 -->
     <svelte:fragment slot="foot">
-      <button type="submit" form="new-agent-form" disabled={busy || !name.trim()}>
+      <button
+      type="submit"
+      form="new-agent-form"
+      disabled={busy || !name.trim()}
+      title={busy || !name.trim() ? $t('agents.createNeedsName') : undefined}
+    >
         {busy ? $t('common.creating') : $t('common.create')}
       </button>
-      <button type="button" class="secondary" onclick={onclose} disabled={busy}>{$t('common.cancel')}</button>
+      <button
+        type="button"
+        class="secondary"
+        onclick={onclose}
+        disabled={busy}
+        title={busy ? $t('common.busyHint') : undefined}
+        >{$t('common.cancel')}</button
+      >
       {#if error}
-        <span class="bad small">{error}</span>
+        <!-- ★ 与其它页面的保存失败同一呈现（`.notice bad`）：
+             原来是脚注里一行行内小字，与别处的错误提示长得不一样。 -->
+        <div class="notice bad">{error}</div>
       {/if}
     </svelte:fragment>
   </Drawer>
@@ -342,7 +356,6 @@
     box-sizing: border-box;
   }
 
-  .field { margin-bottom: var(--sp-3); }
 
   /**
    * 指令输入框：要能读完一份 800 字的角色设定（D48）。

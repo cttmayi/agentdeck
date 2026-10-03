@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type CostReport } from '../lib/api.ts'
-  import { getRemoteUrl, remote, setRemoteUrl } from '../lib/remote.ts'
+  import { getRemoteUrl, setRemoteUrl } from '../lib/remote.ts'
   import {
     doLogin,
     doLogout,
@@ -11,14 +11,13 @@
     remoteCatalog,
     remoteError,
     remoteLoggedIn,
-    remotePlugins,
     remoteUrlValue,
   } from '../lib/remote-store.ts'
   import { identity, syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
   import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@agentdeck/i18n'
   import { locale, setLocale, t, tx } from '../lib/i18n.ts'
-  import { setThemePref, themePref, type ThemePref } from '../lib/theme.ts'
+  import { setThemePref, themePref, type ThemePref } from '@agentdeck/ui'
 
   /** 主题三档：**存键、不存渲染好的句子**（切语言时标签要跟着变，渲染交给 $t）。 */
   const THEME_CHOICES = [
@@ -56,9 +55,6 @@
 
   let email = ''
   let password = ''
-  let settingKey = ''
-  let settingValue = ''
-  let remoteNote = ''
 
   onMount(async () => {
     // 聚焦远端时不必去读成本——那是另一段的事，白读一次还慢
@@ -88,92 +84,8 @@
     await refreshRemote()
   }
 
-  async function togglePlugin(name: string, enabled: boolean): Promise<void> {
-    try {
-      await remote.setPluginEnabled(name, !enabled)
-      await refreshRemote()
-    } catch (err) {
-      remoteError.set(err instanceof Error ? err.message : String(err))
-    }
-  }
 
-  /**
-   * 把远端目录里的 skill 交给**本机 daemon**。
-   *
-   * 冲突必须**看得见**：daemon 那边对同名一律拒绝写入（不覆盖你的东西），
-   * 而如果界面只说"下载完成"，使用者就会以为装上了——那就是静默。
-   */
-  async function installSkill(slug: string): Promise<void> {
-    remoteNote = tx('settings.downloadingSkill', { slug })
-    try {
-      const skill = $remoteCatalog?.skills.find((s) => s.slug === slug)
-      if (!skill) {
-        remoteNote = tx('settings.notInCatalog', { slug })
-        return
-      }
-      const out = await api<{
-        installed: unknown[]
-        skipped: Array<{ slug: string; reason: string }>
-      }>('/api/skills', {
-        method: 'POST',
-        body: JSON.stringify({
-          batchId: `dl-${Date.now()}`,
-          skills: [
-            {
-              slug: skill.slug,
-              name: skill.slug,
-              body: skill.content ?? '',
-              source: 'remote',
-              // ★ 版本必须一起带上。
-              //
-              //   这里原来没有 `version`，而 Skills 视图那条路（走
-              //   `/api/skills/install`）**带了** —— 于是从同一份远端目录下载
-              //   同一个 skill：一条路装完显示「已安装」，另一条路永远显示
-              //   「替换本地同名」（因为本地这条的 version 是 null，界面没法比）。
-              //   两条路行为不一致，而且都没有报错。
-              version: skill.version,
-              sourceRef: `remote:${skill.slug}@${skill.version}`,
-            },
-          ],
-        }),
-      })
-      const skipped = out.skipped ?? []
-      remoteNote =
-        (out.installed?.length ?? 0) > 0
-          ? tx('settings.installedSkill', { slug }) +
-            (skipped.length
-              ? tx('settings.skippedReasons', { reasons: skipped.map((s) => s.reason).join('；') })
-              : '')
-          : tx('settings.notInstalled', {
-              reasons: skipped.map((s) => s.reason).join('；') || tx('settings.unknownReason'),
-            })
-    } catch (err) {
-      remoteNote = tx('settings.installFailed', {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
 
-  async function saveSetting(): Promise<void> {
-    const key = settingKey.trim()
-    if (!key) return
-    try {
-      // 值按 JSON 解析；解析不了就当字符串——这样 `false` 与 `"false"`
-      // 不会悄悄混为一谈
-      let value: unknown = settingValue.trim()
-      try {
-        value = JSON.parse(settingValue)
-      } catch {
-        /* 当字符串 */
-      }
-      await remote.saveSettings({ [key]: value })
-      settingKey = ''
-      settingValue = ''
-      showToast(tx('settings.settingSaved'))
-    } catch (err) {
-      remoteError.set(err instanceof Error ? err.message : String(err))
-    }
-  }
 </script>
 
 <aside class="drawer">
@@ -343,95 +255,20 @@
             <button type="button" class="secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
           </div>
         </form>
+        <!-- 2026-10（紧凑性）：保存按钮不再独占一行——与地址输入框同排 -->
         <label style="margin-top:var(--sp-3)">
           {$t('settings.remoteUrl')}
-          <input bind:value={$remoteUrlValue} />
+          <div style="display:flex;gap:var(--sp-2)">
+            <input bind:value={$remoteUrlValue} style="flex:1;min-width:0" />
+            <button type="button" class="secondary" style="flex:none" onclick={saveRemoteUrl}>
+              {$t('settings.saveUrl')}
+            </button>
+          </div>
         </label>
-        <button type="button" class="secondary" onclick={saveRemoteUrl}>{$t('settings.saveUrl')}</button>
       {:else}
         <p>{$t('settings.signedInAs')}<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
         <button type="button" class="secondary" onclick={doLogout}>{$t('settings.signOut')}</button>
 
-        <h4>{$t('settings.mySettings')}</h4>
-        <form onsubmit={(e) => { e.preventDefault(); void saveSetting() }}>
-          <label>
-            {$t('settings.key')}
-            <input bind:value={settingKey} placeholder="pollIntervalMs / reportingEnabled" autocomplete="off" />
-          </label>
-          <label>
-            {$t('settings.value')}
-            <input bind:value={settingValue} placeholder={$t('settings.valuePlaceholder')} autocomplete="off" />
-          </label>
-          <button type="submit">{$t('settings.saveImmediate')}</button>
-        </form>
-        <p class="hint">
-          {$t('settings.commonSettingsBefore')}<code>pollIntervalMs</code>{$t('settings.commonSettingsBetween')}<code>reportingEnabled: false</code>
-          {$t('settings.commonSettingsAfter')}
-        </p>
-
-        <h4>{$t('settings.pluginsHeading')}</h4>
-        {#if $remotePlugins.length === 0}
-          <p class="faint small">{$t('settings.noPlugins')}</p>
-        {:else}
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>{$t('settings.colPlugin')}</th><th>{$t('settings.colCapability')}</th><th>{$t('settings.colStatus')}</th><th>{$t('settings.colSecretKeys')}</th><th></th></tr></thead>
-              <tbody>
-                {#each $remotePlugins as p (p.name)}
-                  <tr>
-                    <td><code>{p.name}</code></td>
-                    <td class="faint small">{p.capability}</td>
-                    <!-- 「加载成功」与「使用者启用」必须分开显示：混成一个布尔
-                         就分不清"代码坏了"和"我自己关掉了" -->
-                    <td>
-                      {#if !p.loaded}
-                        <span class="bad">{$t('settings.loadFailed')}</span>
-                      {:else if p.enabled}
-                        <span class="good">{$t('settings.enabled')}</span>
-                      {:else}
-                        <span class="faint">{$t('settings.disabled')}</span>
-                      {/if}
-                    </td>
-                    <!-- 只显示**键名**，绝不显示值 -->
-                    <td class="faint small">{p.secretKeys.join(', ') || '—'}</td>
-                    <td>
-                      {#if p.loaded}
-                        <button type="button" class="ghost small" onclick={() => togglePlugin(p.name, p.enabled)}>
-                          {p.enabled ? $t('settings.disable') : $t('settings.enable')}
-                        </button>
-                      {/if}
-                    </td>
-                  </tr>
-                  {#if p.error}
-                    <tr><td colspan="5" class="hint">{p.error}</td></tr>
-                  {/if}
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      {/if}
-
-      <h4>{$t('settings.publicCatalog')}</h4>
-      {#if !$remoteCatalog}
-        <p class="faint small">{$t('settings.catalogUnavailable')}</p>
-      {:else}
-        <ul class="plain">
-          {#each $remoteCatalog.skills as s (s.slug)}
-            <li style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-2);padding:var(--sp-2) 0;border-bottom:1px solid var(--line)">
-              <span>
-                <code>{s.slug}</code> <span class="faint small">{s.version}</span>
-                <br /><span class="faint small">{s.summary}</span>
-              </span>
-              <button type="button" class="secondary small" onclick={() => installSkill(s.slug)}>
-                {$t('settings.downloadToLocal')}
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      {#if remoteNote}
-        <div class="notice" style="margin-top:var(--sp-2)">{remoteNote}</div>
       {/if}
 
       <h4>{$t('settings.syncHeading')}</h4>

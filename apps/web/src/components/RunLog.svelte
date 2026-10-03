@@ -5,6 +5,13 @@
 
   export let runId: string
   export let onterminal: (status: string) => void = () => {}
+  /**
+   * ★ D69.11：日志吃满一屏（详情页主视图用）。
+   *   默认 `max-height: 26rem`——聊天轮次里那是"一段辅助输出"，够了；任务详情里
+   *   点「看完整日志」时日志就是**主内容**，26rem 是"固定高低"、浪费可用屏。
+   *   `fill` 后按视口定高（`calc(100vh - 19rem)`），不设 max-height。
+   */
+  export let fill: boolean = false
 
   /**
    * 实时日志。
@@ -370,7 +377,7 @@
   })
 </script>
 
-<div class="log-wrap">
+<div class="log-wrap" class:fill={fill}>
   {#if thinkingCount > 0}
     <div class="log-toolbar">
       <button type="button" class="ghost small" onclick={toggleThinking}>
@@ -382,7 +389,7 @@
     </div>
   {/if}
 
-  <div class="log" bind:this={logEl} onscroll={onScroll}>
+  <div class="log" class:fill={fill} bind:this={logEl} onscroll={onScroll}>
     {#if visibleRows.length === 0}
       <div class="log-row">
         <span class="log-seq">·</span>
@@ -414,13 +421,21 @@
           -->
           {#if payload.trim()}
             <pre class="payload">{open || !isLong ? payload : payload.slice(0, PREVIEW_CHARS) + '…'}</pre>
-            {#if isLong}
-              <button type="button" class="ghost tiny" onclick={() => toggleRow(i)}>
-                {$t(open ? 'runs.collapsePayload' : 'runs.expandPayload', { count: payload.length })}
-              </button>
-            {/if}
-            {#if row.outputTruncated}
-              <span class="faint small">{$t('runs.outputTruncated')}</span>
+            <!--
+              ★ 2026-10（紧凑性）：折叠按钮与"输出已被截断"提示原来各占一行
+                ——合并进同一行（按钮左、提示右，中间留 gap）。
+            -->
+            {#if isLong || row.outputTruncated}
+              <span class="payload-meta">
+                {#if isLong}
+                  <button type="button" class="ghost tiny" onclick={() => toggleRow(i)}>
+                    {$t(open ? 'runs.collapsePayload' : 'runs.expandPayload', { count: payload.length })}
+                  </button>
+                {/if}
+                {#if row.outputTruncated}
+                  <span class="faint small">{$t('runs.outputTruncated')}</span>
+                {/if}
+              </span>
             {/if}
           {/if}
         </div>
@@ -434,6 +449,16 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     overflow: hidden;
+  }
+
+  /* ★ D69.12：fill（详情页日志主视图）——作为 flex 链的中间环：
+     run-section(flex col) → log-wrap(flex 1) → .log(flex 1 内部滚动)。
+     `overflow: hidden` 保住圆角，内部滚动由 .log 自己负责。 */
+  .log-wrap.fill {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .log-toolbar {
@@ -461,6 +486,17 @@
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     line-height: 1.55;
+  }
+
+  /* ★ D69.12：详情页主视图的日志吃满剩余空间（flex:1 + min-height:0 内部滚动）。
+     D69.11 用 `calc(100vh - 19rem)` 定高——但下面的判决/元数据区还在，整栏
+     仍然溢出、出现**外置滚动条**（使用者报双滚动条）；flex 链精确吃掉剩余
+     空间，外置滚动消失。 */
+  .log.fill {
+    max-height: none;
+    height: auto;
+    flex: 1 1 0;
+    min-height: 0;
   }
 
   .log-row {
@@ -532,6 +568,13 @@
   .tiny {
     padding: 0 var(--sp-2);
     font-size: var(--fs-xs);
+  }
+
+  .payload-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-top: var(--sp-1);
   }
 
   /* 用颜色区分消息类型，但**克制**：只有真正需要区分的才上色 */

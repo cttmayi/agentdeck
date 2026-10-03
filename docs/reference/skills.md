@@ -9,7 +9,9 @@
 >
 > ⚠️ 判定"这是不是一个 skill""这个 skill 合不合规"的**唯一判据是代码**，不是这份
 > 文档：`packages/protocol/src/entities.ts` 的 `Skill` 与
-> `apps/daemon/src/skill-source.ts`。文档与代码不一致时以代码为准，然后回来改这份文档。
+> `packages/skill-source/src/skill-source.ts`（2026-10 起独立成包：daemon 装技能与
+> 推荐清单的同步工具 `pnpm run sync-skills` 抓取时**共用同一份规则**）。文档与代码不一致时以代码为准，
+> 然后回来改这份文档。
 
 ---
 
@@ -126,11 +128,24 @@ my-skill/
 |---|---|---|---|
 | **本机目录** | `source.kind = 'path'`，绝对路径（`~` 会展开） | `path:<绝对路径>` | daemon 直接读盘 |
 | **GitHub 链接** | `source.kind = 'url'` | `github:<owner>/<repo>@<ref>:<dir>` | daemon 自己下载 |
-| **远端目录** | `source.kind = 'payload'`（页面取好交过来） | `remote:<slug>@<版本>` | 页面 → daemon 再校验 |
+| **远端目录** | `source.kind = 'payload'`（页面取好交过来） | **原始 GitHub 来源**（`github:…`，见下） | 页面 → daemon 再校验 |
 | **本地技能目录**（§8） | 在「设置」里勾一个目录，**不是逐条装** | `localdir:<绝对路径>` | daemon 扫描 + 对账 |
 
 界面上「安装」抽屉里那两个页签 = 前两条（输入框**自动判断**是路径还是链接：`/` 或 `~` 开头
 是路径，含 `://` 是链接）+ 远端目录。
+
+> **远端目录里放的是「推荐清单」（D50，2026-10）**：来源由维护者核过（清单
+> `tools/skill-catalog-sync/recommended-skills.json`），内容由**独立工具**
+> `pnpm run sync-skills`（`tools/skill-catalog-sync/`）从上游抓下来、写进一个目录
+> （默认远端数据目录下的 `catalog-skills/`）。⚠️ 抓取与远端服务**互不相干**：
+> 工具只写目录、服务只读目录，中间没有代码依赖。**`sourceRef` 保留原始 GitHub 来源**（不是
+> `remote:…`）——远端是中转，不是出处：库里这条记录仍然指回上游，装的时候
+> **支持文件一起带走**（少了它们技能是坏的，而且坏得很安静）。
+> 目录还可以是空的（还没同步过），界面有对应空态。
+> **维护者视角**：远端的**管理页**（`http://127.0.0.1:4518/`，D51/D52）把这份目录列出来——
+> 每条带来源、版本、文件数、**被清单排除的记录**与 SKILL.md 正文，还有"重新同步"按钮、
+> **手动装一条**（填 GitHub 链接）与**卸载**（只对本地装的；同步来的要改清单）。
+> 手动装的白在另一个目录（`<dataDir>/catalog-skills-local`），同步工具不碰它。
 
 ### ⚠️ 远端目录里**没有** skill
 
@@ -140,10 +155,12 @@ my-skill/
 - 那里曾经放过一份 `general-review`，那是**审核标准**——而标准属于 daemon 侧（内联在审核者
   身上）。放在远端目录里会重新制造一个已经去掉的混淆：让使用者以为"要审东西先得装一份
   skill"；
-- 所以「远端目录」那个页签**永远是空态**，而这是**一句真话**，不是没做完；
-- 远端目录里**只有工具包**（见 [`tools.md`](tools.md) §4）。
+- 所以公共目录里**不放审核标准**——这是仍然成立的那一半；
+- 但「远端目录」那个页签**不再是恒空**：它列的是**推荐清单**（D50）——维护者
+  核过来源、由独立工具 `pnpm run sync-skills` 把内容抓下来放进那个目录。它也可能**是空的**（还没同步过），
+  那时界面有一句空态（与"远端不可用""未登录"分开说）。
 
-于是 skill 的实际来源是：**本机目录 / GitHub 链接 / 本地技能目录**。
+于是 skill 的**四种**来源是：**本机目录 / GitHub 链接 / 推荐清单（远端目录）/ 本地技能目录**。
 
 ### GitHub 那条路的规矩
 
@@ -154,6 +171,23 @@ my-skill/
   需要 IP 段判断、DNS 重绑定防护一整套东西，那是另一件事；
 - 只允许 **https**；**每一跳跳转都重新校验主机**；限单文件/总量/文件数/超时；
 - 私有仓库要 token 时读环境变量 `AGENTDECK_GITHUB_TOKEN`；
+- **可选：GitHub 加速器**（2026-10，第三方，**默认不用**）。国内直连 GitHub 常失败，
+  社区做法是走一个"加速器"：`pnpm run sync-skills --github-proxy`（**裸写即可，值可省略
+  ⇒ `https://gh-proxy.com`**；也可以给别的地址，或 `--github-proxy off` 直连），
+  daemon 那边是 `pnpm run daemon --github-proxy`（环境变量 `AGENTDECK_GITHUB_PROXY`
+  只对同步工具有效）。三条硬规矩：
+  ①**只代理 GitHub 自己那三个主机**（使用者填的其它地址照样被白名单挡在外面——加速器不会
+  变成一个访问任意地址的跳板）；
+  ②**走代理时不带我们的 token**（`githubRequestTarget` 一个判据管两处；代理自己带凭证，
+  实测它给的额度是 5000 次/小时，本机那 60 次也就不适用了）；
+  ③**默认关，只有你显式指定才启用**，开了会在启动/运行时**大声说**"内容正经过第三方 X"。
+  ⚠️ 代价如实写在这里：**加速器能看、也能改**转发给我们的内容（它就是链路上的中间人）。
+- **可选：清单可以声明 `include` / `exclude`**（相对技能目录的 glob，2026-10）。技能格式
+  **没有"必须文件清单"**，而有些仓库（"整仓即技能"）把营销素材、README 图、测试产物和技能
+  内容混在一棵树里——那就由维护者在清单里声明排除什么。三条规矩：**`SKILL.md` 不许被排除**、
+  图案不许是绝对路径或含 `..`、被排除的东西**逐个列出来**（同步日志 + 装进来的记录 + 目录
+  条目的 `excluded`，界面在装之前就显示"内容不完整：跳过了 N 项"）。排除**在下载之前**生效；
+  改过图案就不复用旧内容。见 `tools/skill-catalog-sync/README.md` 里两个真仓的实测对照。
 - 支持的链接形状（都在 `skill-source.ts` 里解析）：
 
 ```
@@ -174,7 +208,7 @@ daemon 读得到（页面读不了磁盘），而"下载到本地"本来就发�
 | 规则 | 值 | 出处 |
 |---|---|---|
 | `SKILL.md` 上限 | **256 KB** | `packages/agent-core/src/skill-injection.ts` 的 `MAX_SKILL_BYTES` |
-| 单个支持文件上限 | 256 KB | `apps/daemon/src/skill-source.ts` |
+| 单个支持文件上限 | 256 KB | `packages/skill-source/src/skill-source.ts` |
 | 所有文件加起来 | 8 MB（2026-10 从 1 MB 提上来） | 同上 |
 | 文件数（含 SKILL.md） | 512（2026-10 从 64 提上来） | 同上 |
 | 目录递归深度 | 4 | 同上 |
@@ -217,7 +251,7 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 
 ## 6. 本地技能目录（「设置」里勾选的那几个）
 
-这一节是 `localSkillDirs` 那套东西（界面：Skills 页 →「设置」）。它解决的是另一个问题：
+这一节是 `localSkillDirs` 那套东西（界面：技能页 →「设置」）。它解决的是另一个问题：
 **你已经在 Claude Code / Codex / Cursor 里攒了一堆 skill，不想再复制一份。**
 
 ### 勾选的含义
@@ -279,7 +313,7 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 | 想知道 | 去哪 |
 |---|---|
 | 实体与字段 | `packages/protocol/src/entities.ts`（`Skill`、`Agent.skillIds`、`Agent.reviewStandard`、`Agent.allowedActions`） |
-| 从路径 / GitHub 解析与限额 | `apps/daemon/src/skill-source.ts` |
+| 从路径 / GitHub 解析与限额 | `packages/skill-source/src/skill-source.ts` |
 | 本地技能目录：候选、扫描、对账 | `apps/daemon/src/local-skill-dirs.ts` |
 | 注入（写文件、归属清单、冲突、清理） | `packages/agent-core/src/skill-injection.ts` |
 | frontmatter 归一化 | 同上（`normalizeSkillFrontmatter`） |
@@ -287,4 +321,4 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 | 接口 | `apps/daemon/src/server.ts`：`GET/POST /api/skills`、`POST /api/skills/install`、`DELETE /api/skills/:id`、`GET/PUT /api/skills/local-dirs` |
 | 落在磁盘上的布局 | `packages/store-file/src/file-store.ts`（文件头有完整目录树） |
 | 运行时怎么投递技能 | `packages/agent-core/src/runtime-table.ts`（每个 runtime 的 `skills` 字段） |
-| 测试 | `apps/daemon/src/skill-source.test.ts`、`apps/daemon/src/local-skill-dirs.test.ts`、`apps/daemon/src/skills-local-dirs-api.test.ts`、`packages/agent-core/src/skill-injection.test.ts` |
+| 测试 | `packages/skill-source/src/skill-source.test.ts`、`apps/daemon/src/local-skill-dirs.test.ts`、`apps/daemon/src/skills-local-dirs-api.test.ts`、`packages/agent-core/src/skill-injection.test.ts` |

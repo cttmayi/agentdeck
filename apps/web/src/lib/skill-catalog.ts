@@ -40,7 +40,15 @@ export interface LocalSkillLike {
 /** 远端目录里那一条。 */
 export interface CatalogEntryLike {
   slug: string
-  version: string
+  /**
+   * 目录里这条的版本。
+   *
+   * ⚠️ **可以是 `null`**（2026-10 起）：推荐清单的版本取自"上游那个目录最近一次
+   *    提交"，而那次查询失败（匿名限额、网络抖动）时它是 null。null 的含义是
+   *    **我们不知道**，不是"没有版本"——所以这里必须与"本地没有版本"分开处理，
+   *    不能拿它去比大小。
+   */
+  version: string | null
 }
 
 export type CatalogAction = 'install' | 'installed' | 'update' | 'downgrade' | 'replace'
@@ -163,10 +171,25 @@ export function catalogEntryState(
     return makeState({
       action: 'install',
       labelId: 'install.actionInstall',
-      hintId: 'install.foundInDir',
-      hintParams: { slug: entry.slug, version: entry.version },
+      // 目录这条没版本号时不能说"目录里有 {slug} {version}"（会渲染成一个空位）
+      hintId: entry.version === null ? 'install.foundInDirNoVersion' : 'install.foundInDir',
+      hintParams: { slug: entry.slug, version: entry.version ?? '' },
       disabled: false,
       needsOverwrite: false,
+    })
+  }
+
+  // ★ 目录这条**没有版本号**（上游提交取不到）：不知道手上这份是不是同一份内容，
+  //   所以既不能说"已安装"，也不能说"更新"——只能如实说"无法判断"，并且要求
+  //   显式覆盖。与"本地没有版本信息"是两件事，写在同一句话里会让人分不清。
+  if (entry.version === null) {
+    return makeState({
+      action: 'replace',
+      labelId: 'install.actionReplace',
+      hintId: 'install.replaceNoRemoteVersion',
+      hintParams: { slug: entry.slug },
+      disabled: false,
+      needsOverwrite: true,
     })
   }
 

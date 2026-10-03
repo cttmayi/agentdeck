@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { CLI_OPTIONS, DEFAULT_PORT, HELP, parseCliArgs } from './cli.ts'
+import { DEFAULT_GITHUB_PROXY } from '@agentdeck/skill-source'
 
 /**
  * 命令行解析。
@@ -63,6 +64,29 @@ describe('daemon 命令行解析', () => {
   test('文档里写的 `daemon start` 位置参数仍被接受（不是错误）', () => {
     const options = parseCliArgs(['daemon', 'start'])
     assert.equal(options.port, DEFAULT_PORT)
+  })
+})
+
+describe('★ `--github-proxy`（值可选：裸写 = 默认加速器）', () => {
+  test('★ 裸写就用默认那一个，而且**不许把后面的旗标当成地址**', () => {
+    // `--github-proxy --port 4599` 是最自然的打法（先想起加速器，再想起端口），
+    // 而 `node:util` 的 parseArgs 会把 `--port` 当成前者的值 ⇒ 端口那项直接丢。
+    const parsed = parseCliArgs(['--github-proxy', '--port', '4599'])
+    assert.equal(parsed.githubProxy, DEFAULT_GITHUB_PROXY)
+    assert.equal(parsed.port, 4599, '★ 后面的旗标不能被当成地址吃掉')
+  })
+
+  test('★ 给了地址用它；`off` 直连；不给就不开（默认仍然是直连）', () => {
+    assert.equal(
+      parseCliArgs(['--github-proxy', 'https://other.example']).githubProxy,
+      'https://other.example',
+    )
+    assert.equal(parseCliArgs(['--github-proxy', 'off']).githubProxy, null)
+    assert.equal(parseCliArgs([]).githubProxy, null, '不给旗标 ⇒ 直连')
+  })
+
+  test('★ 非法地址当场报错，而不是悄悄直连（同一类假安全感）', () => {
+    assert.throws(() => parseCliArgs(['--github-proxy', 'http://gh-proxy.com']), /https/)
   })
 })
 

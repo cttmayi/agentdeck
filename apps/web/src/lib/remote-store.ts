@@ -5,7 +5,6 @@ import {
   isLoggedIn,
   remote,
   type Catalog,
-  type PluginInfo,
   type RemoteAccount,
 } from './remote.ts'
 import { currentLocale } from './locale.ts'
@@ -26,7 +25,6 @@ import { currentLocale } from './locale.ts'
  */
 
 export const remoteAccount = writable<RemoteAccount | null>(null)
-export const remotePlugins = writable<PluginInfo[]>([])
 export const remoteCatalog = writable<Catalog | null>(null)
 export const remoteLoggedIn = writable<boolean>(isLoggedIn())
 export const remoteError = writable<string>('')
@@ -56,14 +54,12 @@ export async function refreshRemote(): Promise<void> {
   if (!isLoggedIn()) {
     remoteLoggedIn.set(false)
     remoteAccount.set(null)
-    remotePlugins.set([])
     return
   }
 
   try {
     const me = await remote.me()
     remoteAccount.set(me.account)
-    remotePlugins.set(me.plugins)
     remoteLoggedIn.set(true)
   } catch (err) {
     // ★ 401 是"凭证过期了"，不是"远端坏了"——要区别对待，否则使用者会去
@@ -72,8 +68,7 @@ export async function refreshRemote(): Promise<void> {
       remote.logout()
       remoteLoggedIn.set(false)
       remoteAccount.set(null)
-      remotePlugins.set([])
-      // 挂在 `remoteError` 上、界面上直接显示的一句话，所以要取词；远端自己
+          // 挂在 `remoteError` 上、界面上直接显示的一句话，所以要取词；远端自己
       // 给的原话（`err.message`）不翻译，只把它当作展示内容（下面的 else 分支）。
       remoteError.set(renderText(webText, 'err.sessionExpired', currentLocale()))
     } else {
@@ -96,5 +91,4 @@ export function doLogout(): void {
   remote.logout()
   remoteLoggedIn.set(false)
   remoteAccount.set(null)
-  remotePlugins.set([])
 }

@@ -322,18 +322,111 @@ hr {
 }
 
 /**
- * ★ 这一页的动作：左缘与**侧栏右缘对齐**（右格的第一列起点）。
+ * ★ 这一页的动作：一条**工具条**（2026-10 / D59 改版）。
  *
- * 之前它紧跟着页名，页名一短（「聊天」只有两个字）动作就悬在侧栏上方的半空里，
- * 跟下面的清单栏对不齐——所以把顶栏改成与 `.shell` 同一套 `grid-template-columns`，
- * 动作**在结构上**就从侧栏右缘开始，不是"差不多对齐"。
+ * ══════════════════════════════════════════════════════════════════
+ * 改版前是什么样，为什么"看着不好看"是可以量出来的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 改版前那一排是三种重量混着排：实心蓝的主操作（#2f6fd0 对白底 4.88:1）、
+ * secondary 底（#eef0f4，**1.14:1**）、ghost 的选中态底（#e6e9ef，**1.22:1**）。
+ * 后两个低于"看得见一条边"的门槛（非文字对比 3:1），所以屏幕上其实是
+ * **一个色块 + 三段文字**——不是一组控件。而且"新建"（做一件事）、"列表/看板"
+ * （换一种看法）、"刷新"（重复一次）三种不同性质的东西长成了同一种形状。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 现在：一条轨道 + 三种状态
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 轨道（`--line`：#e2e5ea / 深色 #262b36，对顶栏底 1.26 / 1.24）说明
+ * "这几个是一组"；组里每一格的形状**完全一样**，状态靠三档底色说清楚：
+ *
+ *   常态  透明（与轨道同色）
+ *   hover `--surface`（浅色下是白格浮起来，深色下是深格沉下去——两种主题里
+ *         都与轨道差 1.18~1.26，比改版前那个 1.14 的"选中态"还明显）
+ *   当前  `--accent-dim` 实心 + 白字（4.88:1）——**这才是"我是哪一种"**
+ *
+ * ★ 左缘与**侧栏右缘对齐**（右格的第一列起点）这条没变：页名一短（「聊天」只有
+ *   两个字）动作就会悬在侧栏上方的半空里。顶栏与 `.shell` 共用同一套
+ *   `grid-template-columns`，所以这个对齐是**结构上**的，不是"差不多"。
  *
  * ⚠️ 宽屏平铺。窄屏被 `@media` 换成 `⋯`（见文件里的断点）——两处是同一份数据。
  */
-.page-actions {
+.topbar .page-actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  /* ★ 高度钉成与右边那几个图标控件一样（`--topbar-h` 那条带子上的节奏）：
+     里面每一格矮一档，是**嵌套**关系，不是"高度不齐"（探针按这一点量）。 */
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+
+/**
+ * 组里每一格：同样的形状，只有底色随状态变。
+ *
+ * ⚠️ 选择器**必须带上 `.topbar`**：同一条带子上还有一条给常驻控件（通知 / 设置）
+ *    的 `.topbar button { height: 1.9rem }`，两者同分，**靠源序决胜**——而这一块
+ *    在文件里排在它前面，于是格子被拉到 30px、工具条变成一条没有呼吸的实心带
+ *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
+ */
+.topbar .page-actions button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar .page-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  /* 覆盖全局那条 `filter: brightness()`：在这一排里"浮起一格"才是 hover 该有的样子 */
+  filter: none;
+}
+
+/**
+ * 主操作（新建 / 安装）：**只靠文字分重量**，不靠一整块实心色。
+ *
+ * ⚠️ 颜色不是直接的 `var(--accent)`：它压在浅色轨道上只有 **3.88:1**，而这个字号
+ *    （13px）按 AA 要 4.5。朝正文色压 15% 之后是 **4.62:1**，色相不变、仍然一眼
+ *    看出是"强调"。深色主题下这个式子算出来是 5.9:1，同样成立——所以只写一条。
+ */
+.topbar .page-actions button.primary {
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  font-weight: 600;
+}
+
+/* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
+.topbar .page-actions button.active {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+.topbar .page-actions button.active:hover:not(:disabled) {
+  background: var(--accent-dim);
+  filter: brightness(1.15);
+}
+
+/**
+ * 顶栏里的原生控件（`select` 这种）要**紧凑**，而且**宽度按内容**。
+ *
+ * ★ 2026-10 加远端管理页时量的：全局 `select` 的规矩是"表单里用的"——`width: 100%`、
+ *   一行内距，于是顶栏里那个语言下拉实测 **37px 高**、还被拉到整格宽，与同一排的
+ *   按钮（32px 那一档）明显不是一套。远端管理页的语言/主题就在顶栏里，所以在这里
+ *   补一条**只作用于顶栏**的规矩（daemon 顶栏没有原生控件，加了也不影响它）。
+ */
+.topbar select {
+  width: auto;
+  height: 2rem;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
 }
 
 /**
@@ -386,13 +479,6 @@ hr {
   gap: var(--sp-2);
 }
 
-.topbar .page-actions button.active,
-.topbar .page-menu button.active {
-  /* 扁平化：激活态 = 底色 + 深一档的字（边框那套随按钮去描边一起删了） */
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
 /**
  * 窄屏的 `⋯`：默认不显示（宽屏动作直接平铺），窄屏里它接管整排动作。
  *
@@ -430,6 +516,30 @@ hr {
 .page-menu button {
   width: 100%;
   text-align: left;
+  /* ⚠️ 菜单项**不是**工具条里那一格（那一格 24px 高、方角、透明底）。
+     它继承同一条 `.topbar button` 的规矩，但要在这里明确回来：竖排菜单里
+     需要的是"整行可点 + 左对齐"，而且外面那条 `.page-actions button` 的
+     高度/内距选择器命中不到它（它不在 `.page-actions` 里）——写这一条是为了
+     让"两处形状不同"变成一句看得见的话，而不是靠选择器作用域去猜。 */
+  height: 1.75rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.page-menu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.page-menu button.active {
+  background: var(--accent-dim);
+  color: #fff;
 }
 
 /* 点空白处关闭（与抽屉同一个办法：全屏透明遮罩，不必判断"点哪儿算外面"） */
@@ -587,6 +697,72 @@ hr {
   min-height: 0; /* grid/flex 子项默认不许缩，不写这句内部滚动会失效 */
 }
 
+/**
+ * ★ 列表栏骨架（D61）：聊天 / 任务 / 智能体三页的列表栏共用同一套常量。
+ *
+ * · `--list-head-h`：**单行栏头**的高度（聊天页那个只有标题的栏头、任务页列表
+ *   模式那个"计数 + 搜索"的栏头）。钉成一个值，三处看起来才是同一件东西；
+ *   探针按它量（51px）。
+ * ⚠️ **看板模式不算**：它的栏头里有标题 + 说明两行，本来就更高，是另一种呈现。
+ * ⚠️ **不要因为"三页行高差几像素"就抽一个 ListItem 组件**（D61 的判据之一）：
+ *   三页条目的信息差异是真差异（阶段标签 / 轮数 / 角色徽标），硬抽只会把差异
+ *   塞回 props 和插槽。统一的是**常量**（内距、字号、行高），不是结构。
+ */
+:root {
+  --list-head-h: 51px;
+  /* 列表行**至少**多高（三栏同款）。内容（徽标 / 阶段标签）更高时跟随内容——
+     统一的是这条底线与内距，不是把内容压扁（D61）。 */
+  --list-row-min-h: 64px;
+}
+
+/* ══════════════ 列表行壳（D66 标准控件 ListRow / ListPane）══════════════ */
+
+/* 行盒 + 主按钮 + 行盒的 hover/选中态样式在 `ListRow.svelte` 的 scoped 样式里
+   （行盒类 `.list-row` 只有它会用）。这里只剩 **动作按钮**（`.list-row-action`）：
+
+   ⚠️ 它为什么放全局：动作按钮是**页面的 snippet** 提供的（聊天/任务的删除钮），
+   snippet 内容不吃 ListRow 的 scoped 样式——放组件里就永远匹配不上。 */
+
+/* 行右侧动作钮（原来聊天 `.conv-delete` 与任务 `.task-delete` 各写一份同样的，
+   D66 收成一条）：1.75rem 方块、右缘内缩 `--sp-1`、垂直居中。 */
+.list-row-action {
+  flex-shrink: 0;
+  margin-right: var(--sp-1);
+  width: 1.75rem;
+  height: 1.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.list-row-action:hover {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+  color: var(--bad);
+}
+
+/* 三个单行栏头（聊天 / 任务列表 / 智能体的工具行）：同高、内容垂直居中。
+   看板模式的 `.pane-head` 不带这个类，不受影响。
+
+   ⚠️ D64：**没有 `.list-head` 了**。D61 加它的时候不知道任务页自己的 scoped
+   样式里已经有一个 `.list-head`（列表里的分组标题「需你处理 / 其余任务」）——
+   全局这条的 `height: 51px` 漏到那两行分组标题上，把它们从 ~28px 撑成 51px
+   （实测 sep0/sep1 都是 51px）。D64 聊天栏头改走 `.list-toolbar`，顺手把全局
+   这条删掉——分组标题回到内容高度；栏头带统一只叫 `.list-toolbar`。 */
+.list-toolbar {
+  height: var(--list-head-h);
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+  align-items: center;
+}
+
 .pane + .pane {
   border-left: 1px solid var(--line);
 }
@@ -625,7 +801,16 @@ hr {
   padding: var(--sp-3) var(--sp-5);
 }
 
+/* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
+   与 `.pane-head` 同一套指标——留白、下边框、标题字号 fs-lg（全局 h2 是 fs-xl
+   22px，不钉字号标题就会比聊天栏头大 5px——使用者当场抓到的"Title 高度不一样"） */
+.detail-head {
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
 .detail-head h2 {
+  font-size: var(--fs-lg);
   margin-bottom: var(--sp-1);
 }
 
@@ -828,6 +1013,19 @@ label > input,
 label > textarea,
 label > select { margin-top: var(--sp-1); }
 
+/* ★ 表单字段组（一个 label + 一个控件 + 说明）。
+   ⚠️ 这三条**原来在 `Skills.svelte` 与 `Tools.svelte` 里各抄了一份、逐字相同**
+      （用 `diff` 验过）——同一套样式两份出处，改一处漏一处，两个页面立刻长得
+      不一样。提到全局：同一件事只有一个出处。 */
+.field { margin-bottom: var(--sp-3); }
+.field > label {
+  display: block;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+.field > input { width: 100%; }
+
 /* ══════════════ 表格 ══════════════ */
 
 table {
@@ -862,9 +1060,122 @@ tbody tr:last-child td { border-bottom: 0; }
 .table-wrap {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  overflow: hidden;
+  /* ⚠️ `overflow-x: auto` + `overflow-y: hidden`，**不是** `overflow: hidden`。
+     2026-10 量出来的：写 `hidden` 时窗口一窄，表格右边的列被**裁掉且无法到达**
+     ——daemon 的技能表在 860px 窗口下被裁掉 **316px**（"抓取于""操作"那几列直接
+     看不见，而界面上没有任何提示）。裁切与滚动是两种不同的失败：滚动是"要动一下
+     才看到"，裁切是"根本没有"。横向可滚之后圆角仍然由 `overflow-y: hidden` 裁住
+     （表格的直角不会戳出圆角边框）。 */
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--surface);
 }
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
+
+/* 操作列：两个以上按钮并排不折行（daemon 4 张表 + remote 2 张都用它） */
+.row-actions { display: flex; gap: var(--sp-1); }
+.row-actions .danger { color: var(--bad); }
+
+/* 首格行：chevron + slug 并排（D69.8 从 remote 技能页上移为共享）。
+   ⚠️ `display:flex` 的 `flex-wrap` 默认 `nowrap`——这是"`▸ slug` 永不折行"的
+   保证：内联元素在列被压窄时会换行（`table{width:100%}` 一窄就折），flex 不会；
+   实在放不下时整格溢出、由 `.table-wrap` 横向滚动。 */
+.row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 折叠区块（D69.9）：头部是**整行真按钮**，chevron + 标题 + 右侧小字摘要——
+   "重要资讯直接展示、非重要资讯折叠"的载体，与表格 `.expand-toggle` 同一视觉
+   语言。内容只在展开时渲染（`{#if}`）。 */
+.fold-section { margin: var(--sp-2) 0; }
+.fold-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: var(--sp-1);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.fold-head:hover { background: var(--surface-hover); }
+.fold-head .chevron {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  flex: 0 0 auto;
+}
+.fold-head[aria-expanded='true'] .chevron { color: var(--accent); }
+.fold-title { font-weight: 600; }
+.fold-summary {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+.fold-body { padding: var(--sp-1); }
+
+/* 名称/说明下面那句说明：**最多两行**截断，全文在 `title` 里。
+   ⚠️ 用行数上限而不是定宽单行：表格列宽自适应，定宽没意义；行数上限保证
+   "再长的说明也不把这一行撑成十行"（实测最长 400+ 字符）。 */
+.desc-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 首格展开 chevron（`ExpandToggle` 组件）：
+   · 按钮本身只有图标大小，不撑高这行；
+   · 展开时箭头朝下、给强调色——"这一行现在是开着的"一眼可见；
+   · ⚠️ 不写 `width/height` 死值：按钮高度随行高走，否则会被行高顶歪。 */
+.expand-toggle {
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 var(--sp-1);
+  margin-right: var(--sp-1);
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  vertical-align: middle;
+}
+.expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
+.expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
+
+/* 来源标识：路径/URL 再长也不许折行（一折这一格就变高、整行跟着变高）。
+   `span` 与徽章同行（2026-10 紧凑性），单行省略，全文在 `title` 里。 */
+.source-ref {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: var(--sp-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+}
+
+/* 操作列按钮不许断行：这一格窄（两个按钮挤在一起），断了就变竖排 */
+.row-actions button { white-space: nowrap; }
+
+/* ══════════ 表格单元格原子（D69 上移：原来 `Skills.svelte` 与 `Tools.svelte`
+   ══════════ 各抄一份、逐字相同，远端管理页**一份都没有**——它的 `.source-ref`
+   因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
+   提到这里，remote 自动获得同样的行为。 */
 
 /* ══════════════ 状态徽标 ══════════════ */
 
@@ -892,13 +1203,23 @@ tbody tr:last-child td { border-bottom: 0; }
   background: currentColor;
 }
 
-/* ⚠️ `todo` 现在只被「本机自建」那个徽章用（Skills 视图），不再是任务状态 */
+/* ⚠️ `todo` 现在只被「本地技能目录缺哪几个」那个徽章用（设置抽屉），不再是任务状态；
+   表格 source 徽标已换 `badge.local`（D69）。 */
 .badge.todo, .badge.backlog { color: var(--status-todo); }
 .badge.in_progress { color: var(--status-active); }
 .badge.in_review { color: var(--status-review); }
 .badge.done, .badge.completed { color: var(--status-done); }
 .badge.blocked, .badge.failed { color: var(--status-blocked); }
 .badge.cancelled { color: var(--text-faint); }
+
+/* ★ 来源徽标的「本地」档（D69 统一配方：同步/推荐 = 默认灰徽章，
+   本地 = accent 强调。原 remote 自己一份、daemon 用任务状态色 `todo`——
+   状态色是给任务状态用的，来源不该借它。远端管理页原来就叫 `.local`，
+   daemon 技能/工具两页的 source 徽标改用同一档）。 */
+.badge.local {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* ══════════════ 文本语义 ══════════════ */
 

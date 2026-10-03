@@ -39,20 +39,6 @@ export function isTurnRunning(turn: Pick<ChatTurnView, 'runId' | 'status'>): boo
   return turn.runId !== null && !isTurnTerminal(turn.status)
 }
 
-/** 相对时间。只做到"天"，再久就直接说日期——"37 天前"没人算得出来是什么时候。 */
-export function relativeTime(at: number, now: number): string {
-  const diff = Math.max(0, now - at)
-  const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1) return tx('chat.justNow')
-  if (minutes < 60) return tx('chat.minutesAgo', { count: minutes })
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return tx('chat.hoursAgo', { count: hours })
-  const days = Math.floor(hours / 24)
-  if (days < 30) return tx('chat.daysAgo', { count: days })
-  const d = new Date(at)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
 /**
  * 「新对话」那个下拉里的一项。
  *
@@ -193,35 +179,6 @@ export function applyChoice(
   return { agentId, skillId: choice.skill?.id ?? '' }
 }
 
-/**
- * 把一轮（或整个对话）拼成「新建任务」里「要做什么」的那段文字。
- *
- * ══════════════════════════════════════════════════════════════════
- * 只搬**内容**，不搬判断
- * ══════════════════════════════════════════════════════════════════
- *
- * 拼出来的东西是预填值，使用者改完才提交。刻意不在这里替他决定执行者、审核者、
- * 动作白名单——那三样正是"派活"这件事本身，聊天没有资格替他选。
- *
- * 整个对话带过去时，**每一轮都带上**"我说了什么 + 它答了什么"：只带结论的话，
- * 到了「新建任务」那一页就只剩一句没有来龙去脉的话，而使用者当初是在对话里
- * 一步步把需求聊清楚的——那些铺垫正是任务描述该有的东西。
- *
- * ⚠️ 空产出（还在跑、跑失败、没出文字）不要拼成一句空话：跳过它，别写
- *    "（无输出）"这种东西——它会混进任务的正文里，看起来像需求的一部分。
- */
-export function bridgeTextFromTurns(turns: readonly ChatTurnView[]): string {
-  const lines: string[] = []
-  for (const turn of turns) {
-    lines.push(turn.userText.trim())
-    const output = turn.output?.trim()
-    if (output) {
-      lines.push('', output)
-    }
-    lines.push('')
-  }
-  return lines.join('\n').trim()
-}
 
 /**
  * 聊天右栏底部那一栏「工作目录的文件」该不该画、画成哪一种。

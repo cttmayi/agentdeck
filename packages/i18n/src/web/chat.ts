@@ -8,15 +8,33 @@ import type { TextCatalog } from '../text.ts'
  *    最容易误会的就是这一点。
  *
  *    ⚠️ 2026-09：**页面上那句常驻的边界提示去掉了**（原来是左栏底部那一行
- *    `chat.noActionsHint`，每一屏都在说同一件事）。现在这个边界的落点是
- *    「带过去」那条路：想动手就得预填到新建任务那一页，那里才定审核者与动作。
+ *    `chat.noActionsHint`，每一屏都在说同一件事）。
+ *    ⚠️ 2026-10：**「派发任务」也去掉了**（两个按钮：把整个对话派出去 / 用这个去派活，
+ *    它们把内容预填进「新建任务」）。所以现在页面上不再有任何说明边界的话——
+ *    想动手就直接去「新建任务」写，两页之间没有任何隐藏通道。
  *
  * ⚠️ zh / en 两边都要有，占位符要一致（`i18n.test.ts` 逐条守着）。
  */
 export const chatText = {
-  'chat.listTitle': { zh: '对话', en: 'Conversations' },
-  'chat.newConversation': { zh: '新对话', en: 'New conversation' },
-  'chat.empty': { zh: '还没有对话。', en: 'No conversations yet.' },
+  /**
+   * ⚠️ 这里**原有一个 `chat.listTitle`**（`对话` / `Conversations`）——2026-10（D64）
+   *    按要求整条删了：聊天栏头的「对话」二字去掉，栏头变成与任务/智能体**完全同款**
+   *    的「计数 + 搜索」。"这一栏装的是什么"由顶栏页名（聊天）+ 行内信息承担。
+   *    删的时候探针也加了判据：三页栏头带里**都不许有 h2**（`skeleton.headsTitleless`）。
+   */
+  'chat.newConversation': { zh: '新建对话', en: 'New conversation' },
+  /**
+   * 栏头带（D63 加计数搜索、D64 去掉标题后）：与任务/智能体**完全同款**的
+   * 「计数 + 搜索」。计数数的是**当前显示**的条数（过滤之后）。
+   */
+  'chat.listCount': { zh: '共 {count} 条', en: '{count} conversations' },
+  'chat.search': { zh: '搜索标题…', en: 'Search titles…' },
+  'chat.emptyFiltered': { zh: '没有匹配的对话', en: 'No matching conversations' },
+  'chat.emptyFilteredHint': {
+    zh: '换个关键词，或清空搜索框。',
+    en: 'Try another keyword, or clear the search box.',
+  },
+  'chat.empty': { zh: '还没有对话', en: 'No conversations yet' },
   'chat.emptyHint': {
     zh: '选一个执行者，说第一句话——对话就从那句话开始。',
     en: 'Pick an executor and say the first thing — the conversation starts there.',
@@ -33,7 +51,7 @@ export const chatText = {
   'chat.pickAgent': { zh: '选执行者', en: 'Choose an executor' },
   'chat.agentGroup': { zh: '执行者', en: 'Executors' },
   'chat.skillGroup': {
-    zh: '或者按 skill 选（装着几条就有几条）',
+    zh: '或者按技能选（装着几条就有几条）',
     en: 'Or pick a skill (one entry per installed skill)',
   },
   'chat.skillOptionOwned': { zh: '{skill}（→ {agent}）', en: '{skill} (→ {agent})' },
@@ -43,7 +61,7 @@ export const chatText = {
     en: 'Will use {agent} — it has {skill}.',
   },
   'chat.skillSelfCarried': {
-    zh: '将使用 {agent} + {skill}——没有执行者挂它，这条 skill 跟着这个对话走。',
+    zh: '将使用 {agent} + {skill}——没有执行者挂它，这条技能跟着这个对话走。',
     en: 'Will use {agent} + {skill} — no executor has it, so this conversation carries it.',
   },
   'chat.noExecutor': { zh: '还没有执行者。先去「智能体」建一个。', en: 'No executor yet. Create one under Agents first.' },
@@ -80,7 +98,7 @@ export const chatText = {
     en: 'This shows what is in the directory now — including files it wrote itself. Chat still triggers no registered actions.',
   },
   'chat.skillsNeedRestart': {
-    zh: '{skills} 现在选不到：这个对话自带 skill 的功能要重启本机的 daemon 之后才有（现在跑着的那个还不认识它）。',
+    zh: '{skills} 现在选不到：这个对话自带技能的功能要重启本机的 daemon 之后才有（现在跑着的那个还不认识它）。',
     en: '{skills} cannot be picked right now: per-conversation skills need a restart of the local daemon — the one running now does not know about them yet.',
   },
   'chat.reviewerCannotChat': {
@@ -89,7 +107,9 @@ export const chatText = {
   },
 
   'chat.workDirLabel': { zh: '工作目录', en: 'Working directory' },
-  'chat.workDirAuto': { zh: '平台分配', en: 'Chosen by the platform' },
+  // 「新对话」界面上的设定（2026-10 起工作目录只在这里设；详情页只读）。
+  'chat.draftWorkDirLabel': { zh: '工作目录（可选）', en: 'Working directory (optional)' },
+  'chat.workDirAuto': { zh: '自动分配', en: 'Chosen automatically' },
   'chat.workDirAutoHint': {
     zh: '留空 = 平台给这个对话分配一个专属目录。填路径 = 把它接进你的仓库，那个目录里的东西它会读、会改。',
     en: 'Empty = the platform gives this conversation its own directory. A path = point it at your repo, where it can read and write.',
@@ -104,8 +124,6 @@ export const chatText = {
     zh: '注意：它在这个目录里不只是读——它能改、能删、能新建，权限和你自己在终端里跑命令一样。',
     en: 'Heads up: inside this directory it does not just read — it can change, delete and create files, with the same rights you have when running commands in a terminal.',
   },
-  'chat.workDirSave': { zh: '保存目录', en: 'Save directory' },
-  'chat.workDirReset': { zh: '改回平台分配', en: 'Back to platform-chosen' },
   'chat.notRunYet': { zh: '还没跑过', en: 'Not run yet' },
 
   'chat.placeholder': { zh: '说点什么…（Enter 发送，Shift+Enter 换行）', en: 'Say something… (Enter to send, Shift+Enter for a new line)' },
@@ -125,34 +143,31 @@ export const chatText = {
 
   'chat.rename': { zh: '改名', en: 'Rename' },
   'chat.renameSave': { zh: '保存', en: 'Save' },
+  'chat.renamed': { zh: '已改名', en: 'Renamed' },
+  'chat.deleteConfirmYes': { zh: '确认删除', en: 'Delete' },
+  'chat.deleted': { zh: '对话已删除', en: 'Conversation deleted' },
+  // ⚠️ 这四条是**误删后从构建产物里恢复的**（2026-10）：我用正则批量删 bridge 词条时，
+  //    非贪婪匹配吃到了这几条。教训写在 D57 里：删词条要**按模块解析**，不要用正则扫文本。
   'chat.renameCancel': { zh: '取消', en: 'Cancel' },
   'chat.delete': { zh: '删除对话', en: 'Delete conversation' },
   'chat.deleteConfirm': {
-    zh: '删掉这个对话和它的全部轮次？执行记录会留着（审计与成本统计还认得它）。',
-    en: 'Delete this conversation and all its turns? The run records stay (audit and cost still know about them).',
+    zh: '这个对话和它的全部轮次会被删掉。执行记录会留着（审计与成本统计还认得它）。',
+    en: 'This conversation and all its turns will be deleted. The run records stay (audit and cost still know about them).',
   },
-  'chat.deleteConfirmYes': { zh: '确认删除', en: 'Delete' },
-  'chat.deleted': { zh: '对话已删除', en: 'Conversation deleted' },
-
-  'chat.bridgeTurn': { zh: '用这个去派活', en: 'Turn this into a task' },
-  'chat.bridgeAll': { zh: '把整个对话派出去', en: 'Turn the whole conversation into a task' },
-  'chat.bridgeHint': {
-    zh: '只是把内容预填进「新建任务」：审核者和动作白名单仍然要你自己在那一页定，聊天这边不会替你决定。',
-    en: 'This only pre-fills the New task page: the reviewer and the action whitelist are still yours to set there. Chat never decides that for you.',
+  'chat.sendNotReady': {
+    zh: '先输入内容；这一轮跑完之前不能再发',
+    en: 'Type something first; you cannot send again until this turn finishes',
   },
-  'chat.bridged': { zh: '已经预填到「新建任务」，确认后提交。', en: 'Pre-filled on the New task page — review and submit there.' },
 
   /**
    * ⚠️ 这里原有 `chat.noActionsHint`（"这里不动手：聊天不产出判决，而动作的门槛
    *    就是判决。"），2026-09 按要求删掉了：它常驻左栏底部，每一屏都在说同一件事。
    *
-   *    边界**本身没有变**（聊天里跑的东西不产判决，因此不触发动作），但落点只剩
-   *    「带过去」那一条路——上面那句 `chat.bridgeHint` 仍然写着"审核者和动作白名单
-   *    要你在新建任务那一页定"，想动手就得走那儿。
+   *    边界**本身没有变**（聊天里跑的东西不产判决，因此不触发动作）。2026-10 又
+   *    按要求去掉了「派发任务」那两个按钮（`chat.bridgeAll` / `chat.bridgeTurn`），
+   *    所以现在这一页**既不产出判决，也不往「新建任务」送东西**——边界只剩"这里是闲聊"。
    */
   'chat.summary': { zh: '{turns} 轮 · 最近 {when}', en: '{turns} turn(s) · last {when}' },
-  'chat.justNow': { zh: '刚刚', en: 'just now' },
-  'chat.minutesAgo': { zh: '{count} 分钟前', en: '{count} min ago' },
-  'chat.hoursAgo': { zh: '{count} 小时前', en: '{count} h ago' },
-  'chat.daysAgo': { zh: '{count} 天前', en: '{count} d ago' },
+  // ⚠️ 相对时间那四条（刚刚/分钟前/小时前/天前）已提升到 `common.*`：
+  //    它不只是聊天的东西——任务/技能/工具列表都要用（见 `lib/time.ts`）。
 } as const satisfies TextCatalog

@@ -1,5 +1,5 @@
-import { get, writable } from 'svelte/store'
-import { DEFAULT_LOCALE, type Locale } from '@agentdeck/i18n'
+import { DEFAULT_LOCALE, webText, type Locale, type WebTextId } from '@agentdeck/i18n'
+import { createLocaleKit } from '@agentdeck/ui'
 
 /**
  * 当前界面语言的**状态本体**（D39）。
@@ -19,16 +19,20 @@ import { DEFAULT_LOCALE, type Locale } from '@agentdeck/i18n'
  *
  * 所以把**状态与取值**沉到这一个模块：它不 import 任何 app 模块，谁都能引它，
  * 不再有环。界面用的 `t` / `tx` / `setLocale` 仍在 `i18n.ts`（那边依赖 api）。
- */
-export const locale = writable<Locale>(DEFAULT_LOCALE)
-
-/**
- * 命令式取当前语言——**每次调用都读当下的值**。
  *
- * ⚠️ 这正是"语言切换后新产生的消息就是新语言"的原因：库层不在响应式上下文里，
- *    不可能订阅 store，只能在造消息的那一刻问一次。已经造好的消息不会重译，
- *    这是有意的（见 `err.*` 词条顶部的说明）。
+ * ⚠️ 2026-11：语言层的**形状**（store + `t` + `tx` + `currentLocale`）来自
+ *    `@agentdeck/ui` 的 `createLocaleKit`（远端管理页用同一个工厂，只是文案表
+ *    与持久化不同）——形状只有一处，`webText` 与"写回 workspace"仍是本端的事。
+ *    语言**读**哪来：本端语言由身份接口（workspace）决定，启动时默认中文，
+ *    `setLocaleFromIdentity` 再装上（见 `i18n.ts`）——所以这里 `read` 只给默认值，
+ *    `write` 是空操作（写回 workspace 需要 api，会成环，由 `i18n.ts` 负责）。
  */
-export function currentLocale(): Locale {
-  return get(locale)
-}
+export const { locale, t, tx, currentLocale } = createLocaleKit<WebTextId>({
+  texts: webText,
+  read: () => DEFAULT_LOCALE,
+  write: () => {
+    /* 见上：本端落盘在 i18n.ts 的 setLocale（依赖 api，不能在这儿引）。 */
+  },
+})
+
+export type { Locale }

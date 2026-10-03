@@ -12,18 +12,23 @@ import type { TextCatalog } from '../text.ts'
  *    markdown 残留）。有引用就一起改，没有就按读者改。
  */
 export const shellText = {
-  // ★ 聊天排在「新建任务」**上面**：它是最轻的入口——先聊清楚，再决定要不要派活。
+  // ★ 聊天排在「新建任务」**上面**：它是最轻的入口——先聊清楚。
+  //   ⚠️ 提示词原来是"先聊清楚，再派活"（D57 前后）：**派发那条路 2026-10 去掉了**
+  //   （聊天不再能把内容带进「新建任务」），所以那句话成了一句空头承诺 —— 现在只说到"聊"。
   //   侧边栏每一项都是一个场景，所以这一项是一整个页面（左对话列表 / 右消息流），
   //   不是「新建任务」页里的一条 tab。
   'shell.navChat': { zh: '聊天', en: 'Chat' },
-  'shell.navChatHint': { zh: '先聊清楚，再派活', en: 'Talk it through, then hand it off' },
+  'shell.navChatHint': { zh: '先聊清楚这件事', en: 'Talk it through first' },
   'shell.navNewTask': { zh: '新建任务', en: 'New task' },
-  'shell.navNewTaskHint': { zh: '交给 agent 去做', en: 'Hand it to an agent' },
-  'shell.navTasks': { zh: '任务清单', en: 'Tasks' },
-  'shell.navTasksHint': { zh: '看板 / 列表 · 执行记录', en: 'Board / list · run records' },
+  'shell.navNewTaskHint': { zh: '交给智能体去做', en: 'Hand it to an agent' },
+  // ⚠️ 2026-10（D58）：这一项原来是「任务清单」，与侧栏另一项「新建任务」并列。
+  //    两者合并成一页「任务」——**建**（顶栏那个主操作）与**看**（看板 / 列表）
+  //    本来就是同一件事的两半。按使用者的定名：就叫「任务」。
+  'shell.navTasks': { zh: '任务', en: 'Tasks' },
+  'shell.navTasksHint': { zh: '看 + 建 · 看板 / 列表', en: 'View & create · board / list' },
   'shell.navAgents': { zh: '智能体', en: 'Agents' },
   'shell.navAgentsHint': { zh: '指令 · 用哪个 CLI', en: 'Instructions · which CLI' },
-  'shell.navSkills': { zh: 'Skills', en: 'Skills' },
+  'shell.navSkills': { zh: '技能', en: 'Skills' },
   'shell.navSkillsHint': { zh: '执行者的参考资料 · 可安装', en: 'Reference packs for executors' },
 
   'shell.envOk': { zh: '运行环境正常', en: 'Environment OK' },
@@ -43,7 +48,6 @@ export const shellText = {
   'shell.login': { zh: '登录', en: 'Sign in' },
   'shell.settings': { zh: '设置', en: 'Settings' },
   'shell.signedIn': { zh: '已登录', en: 'Signed in' },
-  'shell.pluginsFailing': { zh: '{count} 个插件加载失败', en: '{count} plugin(s) failed to load' },
   'shell.signIn': { zh: '登录', en: 'Sign in' },
   'shell.signInRemoteDown': { zh: '登录（远端不可用）', en: 'Sign in (remote unavailable)' },
   'shell.signInHint': { zh: '登录远端以使用目录、待办拉取与上报', en: 'Sign in to use the catalog, todo pull and reporting' },

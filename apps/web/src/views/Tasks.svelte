@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import ListPane from '../components/ListPane.svelte'
+  import ListRow from '../components/ListRow.svelte'
+  import MainArea from '../components/MainArea.svelte'
   import {
     api,
     newRunId,
@@ -12,9 +15,13 @@
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
-    import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs } from '../lib/stores.ts'
+    import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
-  import { selectedIssueId } from '../lib/view.ts'
+  import { leaveCreate } from '../lib/leave-create.ts'
+  import { creating, goCreate, go, selectedIssueId, showToast } from '../lib/view.ts'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { absoluteTime, relativeTime } from '../lib/time.ts'
+  import { finalResultText } from '../lib/final-output.ts'
   import {
     PIPELINE_COLUMNS as COLUMNS,
     TERMINAL_RUN_STATUSES,
@@ -27,7 +34,9 @@
   import RunLog from '../components/RunLog.svelte'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
+  import NewTaskForm from '../components/NewTaskForm.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
+  import { FoldSection } from '@agentdeck/ui/components'
 
   /**
    * 任务清单 + 任务详情。
@@ -68,6 +77,35 @@
    * ⚠️ 只排这一页；任务详情里的时间线仍是升序（那是历史，见 `runsForIssue`）。
    * ⚠️ id 是 ULID（自带时间序），按 id 倒序 = 按创建时间新的在前。
    */
+
+  /**
+   * run 状态 → 徽标颜色类。
+   *
+   * ★ 协议里的 `RunStatus` 有 8 个值，而 `app.css` 的状态色只覆盖了
+   *   `completed`/`failed`/`cancelled` 三个——`running`/`queued`/`dispatched`/
+   *   `deferred`/`waiting_local_directory` **原来一个颜色都没有**（徽标落回
+   *   `currentColor`，看起来"没有状态"）。这里映射到已有的那批语义色，
+   *   不新增 CSS 变量：`queued`/`deferred`/`waiting_local_directory` 都表示
+   *   "还没轮到它"，与看板的待办同色。
+   */
+  const RUN_STATUS_CLASS: Record<string, string> = {
+    queued: 'backlog',
+    deferred: 'backlog',
+    waiting_local_directory: 'backlog',
+    dispatched: 'in_progress',
+    running: 'in_progress',
+    completed: 'done',
+    failed: 'failed',
+    cancelled: 'cancelled',
+  }
+
+  /** 状态徽标里的字：走词表（`term.runStatus.*`），**不显示协议英文值**。 */
+  function runStatusLabel(status: string): WebTextId {
+    return `term.runStatus.${status}` as WebTextId
+  }
+
+  /** 相对时间的「现在」——每次响应式更新重算一遍。 */
+  $: now = Date.now()
   $: staged = visible
     .slice()
     .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
@@ -142,7 +180,65 @@
   const VIEW_KEY = 'agentdeck.issue-view'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
 
-  function setMode(next: 'list' | 'board'): void {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 右栏的两种占用：某条任务的详情 / 建任务那张表单（D58 第二步）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 右栏一次只放一件事，而这两件事**都会丢东西**：表单里有使用者写了一半的正文，
+   * 详情里有他正在读的执行记录。所以凡是"把右栏换成另一件事"的动作都要走守卫
+   * （`leaveCreate()`，见 `lib/leave-create.ts`），而不是各自去 `set`。
+   *
+   * ⚠️ 判据（"填过没有"= `createDirty`）只有一处、离这里很远，而且**不止这一页
+   *    在用**：侧边栏的「任务」那一项也走同一个守卫（那一栏上面那个返回按钮按
+   *    要求去掉了，顶栏那两颗按钮与侧栏那一项就是"怎么回去"的全部答案）。
+   */
+  /** 进「建任务」那一栏（顶栏那个主操作）。进来时**不选中任何任务**：
+      右栏已经给表单了，列表上再高亮一条会让人以为"这条正在被改"。 */
+  function startCreate(): void {
+    selectedIssueId.set(null)
+    goCreate()
+  }
+
+  /**
+   * ★★ 建任务**只在列表那一档成立**，所以进这一栏就把模式拨回列表。
+   *
+   * ⚠️ 这一条是**探针逼出来的**：右栏（表单住的地方）只在 `mode === 'list'` 下
+   *    渲染，而模式存在 `localStorage` 里。于是"上一次用的是看板"的人点
+   *    「新建任务」——地址变了、`$creating` 也真了，**屏幕上却什么都不出现**
+   *    （看板是全宽呈现，右栏整个不存在）。这与我先前担心过的那个窄屏坑是同一类：
+   *    状态都设对了，只是那一块**没有地方画**。
+   *
+   * ⚠️ 顺带**写回存储**：不写的话，离开这一页再回来又跳回看板，而使用者明明
+   *    刚从看板过来建任务。
+   *
+   * ⚠️ 写成 `$:` 而不是只在 `startCreate()` 里改：直接打开/收藏 `#/tasks/new`
+   *    （书签、别人发来的链接）根本不经过那个按钮，而它踩的是同一个坑。
+   */
+  $: if ($creating && mode !== 'list') {
+    mode = 'list'
+    localStorage.setItem(VIEW_KEY, 'list')
+  }
+
+  /** 点列表里的一条：如果右栏正开着表单，先按上面的规矩问一句。 */
+  async function pickIssue(id: string): Promise<void> {
+    if ($creating && !(await leaveCreate())) return
+    selectedIssueId.set(id)
+  }
+
+  /**
+   * 切列表 / 看板。
+   *
+   * ⚠️ 切到看板会把右栏整块收掉（看板是全宽呈现），也就是"表单被切走了"——
+   *    与点另一条任务是同一件事，所以同样要问。
+   */
+  async function setMode(next: 'list' | 'board'): Promise<void> {
+    // ★ 2026-10：这一栏上面那个「返回任务清单」按要求去掉了，于是**顶栏那两颗按钮
+    //   就是宽屏下"怎么回去"的答案**——所以"已经写着列表还要再点一次列表"不能是
+    //   空操作：在建任务里它必须表示"离开表单、回列表"（从前 `mode === next` 直接
+    //   返回，点它一点反应都没有，而使用者那时正想回去）。
+    if (mode === next && !$creating) return
+    if ($creating && !(await leaveCreate())) return
     mode = next
     localStorage.setItem(VIEW_KEY, next)
   }
@@ -159,9 +255,28 @@
    */
   $: setPageActions('tasks', [
     {
+      // ★ 2026-10（D58）：「新建任务」并进这一页 ⇒ 它就是这一页的**主操作**
+      //   （primary 排在模式开关前面）。词条复用导航那一条（`shell.navNewTask`）：
+      //   同一句话在两个地方出现，**只有一个出处**——各写一份的后果是
+      //   "侧栏说『新建任务』、按钮说『新任务』"，而那种不一致没人会去查。
+      //   `title` 用 `shell.navNewTaskHint`（原来挂在侧栏那一项下面的说明）。
+      id: 'new',
+      label: $t('shell.navNewTask'),
+      kind: 'primary',
+      icon: 'plus',
+      // ⚠️ **不给它 `active`**（虽然"正在建任务"确实是一种"当前"）：这一排里
+      //   `active` 的语义是**"现在是哪一种呈现方式"**，而那有且只有一个
+      //   （列表 / 看板）。两处都能点亮时，一排里会出现两个实心块，而"我在哪一种"
+      //   这个问题反而没人回答得出来（实测：探针那条"当前模式只有一个"红了）。
+      //   正在建任务这件事由**右栏**说（标题就是「新建任务」）。
+      title: $t('shell.navNewTaskHint'),
+      onActivate: () => startCreate(),
+    },
+    {
       id: 'list',
       label: $t('tasks.modeList'),
       kind: 'ghost',
+      icon: 'list',
       active: mode === 'list',
       onActivate: () => setMode('list'),
     },
@@ -169,6 +284,7 @@
       id: 'board',
       label: $t('tasks.modeBoard'),
       kind: 'ghost',
+      icon: 'board',
       active: mode === 'board',
       onActivate: () => setMode('board'),
     },
@@ -176,6 +292,7 @@
       id: 'refresh',
       label: $t('common.refresh'),
       kind: 'secondary',
+      icon: 'refresh',
       onActivate: () => void refresh(),
     },
   ])
@@ -212,6 +329,12 @@
 
   $: activeIsTerminal =
     activeRun !== null && ['completed', 'failed', 'cancelled'].includes(activeRun.status)
+  /**
+   * ★ D69.12：日志视图（正在跑 / 点「看完整日志」）。此时详情栏切成 flex
+   *   纵向布局：日志 `flex:1` 精确填满剩余空间、内部滚动——外置滚动条消失。
+   *   结果视图（terminal 且没切日志）保持原来的整栏滚动 + sticky 裁决条。
+   */
+  $: logMode = activeRun !== null && !(activeIsTerminal && !showRawLog)
 
   async function loadResult(run: RunSummary): Promise<void> {
     // 最后一段 text 就是"产出"。取最后一条而不是拼接：中间那些
@@ -233,9 +356,27 @@
     return `/api/runs/${runId}/file?path=${encodeURIComponent(href)}`
   }
 
+  /**
+   * 「最后结果」要显示的文字。
+   *
+   * ★ 判决块（`<<<ALPHA_VERDICT>>>` … `<<<END_ALPHA_VERDICT>>>`）是**机器读的**：
+   *   它已经按结论 / 理由码 / 证据 / 行动分项显示在下面的判决卡片里了，正文里再
+   *   摊一遍原始标记与 JSON 只是噪音——而且看起来像"平台没处理"（使用者的原话：
+   *   显示 `<<<ALPHA_VERDICT>>>` 不优美）。所以**这条 run 有落库判决时**剥掉它。
+   *
+   * ⚠️ **没有**判决记录时不剥：那种情形通常是模型给的块没通过校验、或者块是半开的，
+   *    而那段原文是使用者唯一能看到"它到底写了什么"的地方——替人擦掉现场比难看更糟。
+   *    `activeRun.verdict` 随列表响应一起来（不是异步取的那一份判决），所以这里
+   *    没有"先剥了、又发现其实没判决"的时序问题。
+   */
+  $: resultText =
+    activeRun === null || finalOutputFor !== activeRun.runId
+      ? ''
+      : finalResultText(finalOutput, activeRun.verdict !== null)
+
   $: renderedResult =
-    activeRun && finalOutputFor === activeRun.runId && finalOutput !== ''
-      ? renderMarkdown(finalOutput, { resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
+    resultText !== ''
+      ? renderMarkdown(resultText, { resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
       : ''
 
   let verdicts: VerdictView[] = []
@@ -285,8 +426,27 @@
   }
 
   async function cancel(runId: string): Promise<void> {
-    await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
-    await loadRuns()
+    // ★ 停下来就不可逆（不会自己接着跑）——按与删除同一判据先问一句。
+    if (
+      !(await askConfirm({
+        title: $t('tasks.cancelRun'),
+        message: $t('tasks.confirmCancelRunBody'),
+        confirmLabel: $t('tasks.cancelRun'),
+        danger: true,
+      }))
+    )
+      return
+    // ★ 必须 try/catch：原来这里是裸 `await`，取消失败（daemon 不在、run 已经
+    //   结束、网络断了）时是一个 **unhandled rejection**——界面上**什么都不发生**，
+    //   使用者只会觉得"点了没反应"，然后反复点。同一页的删除（`removeTask`）和
+    //   聊天页的停止（`Chat.svelte` 的 `stop()`）都是带 catch 的。
+    runError = ''
+    try {
+      await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
+      await loadRuns()
+    } catch (err) {
+      runError = err instanceof Error ? err.message : String(err)
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -407,6 +567,8 @@
   /** 哪个按钮正在跑（`null` = 都闲着）。三个动作共用一个"忙"状态。 */
   let deciding: 'pass' | 'feedback' | 'abandon' | 'recover' | null = null
   let decideError = ''
+  /** run 操作的错误（现在只有「取消这次执行」）。显示在 run 详情区里。 */
+  let runError = ''
 
   /**
    * 这条任务**已经被人判过通过**吗。
@@ -481,6 +643,19 @@
    */
   async function setAbandoned(abandon: boolean): Promise<void> {
     if (!selected || deciding !== null) return
+    // ★ 放弃要比「恢复」多一道确认：它会**顺手取消正在跑的 run**（服务端做的），
+    //   而那一步不可逆。原来它直接执行——同页的删除要确认、这个更贵的动作不要，
+    //   分级是反的。判据沿用工具页那条：「停掉就接不回来 ⇒ 问一句」。
+    if (
+      abandon &&
+      !(await askConfirm({
+        title: $t('tasks.confirmAbandonTitle'),
+        message: $t('tasks.confirmAbandonBody'),
+        confirmLabel: $t('tasks.decideAbandon'),
+        danger: true,
+      }))
+    )
+      return
     deciding = abandon ? 'abandon' : 'recover'
     decideError = ''
     try {
@@ -495,6 +670,33 @@
       decideError = err instanceof Error ? err.message : String(err)
     } finally {
       deciding = null
+    }
+  }
+
+  /**
+   * ④「删除任务」——列表每项右侧那个「×」。
+   *
+   * 与「放弃」不同：放弃只是改状态（run 还留着），删除是**连同全部执行记录
+   * 一起删掉**（消息、审核结果、产物；审计保留）。所以确认文案里写清楚了
+   * "无法找回"，这里也只做一件事：调接口 + 重取两份列表。
+   */
+  async function removeTask(id: string): Promise<void> {
+    // ★ 平台自己的确认框（居中），不是 `window.confirm`——理由见 `lib/confirm.ts`
+    if (
+      !(await askConfirm({
+        title: $t('tasks.delete'),
+        message: $t('tasks.deleteConfirm'),
+        confirmLabel: $t('tasks.delete'),
+        danger: true,
+      }))
+    )
+      return
+    try {
+      await deleteTask(id)
+      if ($selectedIssueId === id) selectedIssueId.set(null)
+      showToast($t('tasks.deleted'))
+    } catch (err) {
+      decideError = err instanceof Error ? err.message : String(err)
     }
   }
 
@@ -642,61 +844,67 @@
       阶段/指派给/更新于 收进第二行的元信息里。行高不再由标题长度决定，
       而**信息一个没少**。与「智能体」那一栏的列表也是同一个形状。
   -->
-  <button
-    type="button"
-    class="task-row"
-    class:attention={needsAttention}
-    class:active={$selectedIssueId === issue.id}
-    onclick={() => selectedIssueId.set(issue.id)}
+  <ListRow
+    rowClass={needsAttention ? 'task-row attention' : 'task-row'}
+    active={$selectedIssueId === issue.id}
+    onclick={() => void pickIssue(issue.id)}
   >
-    <!--
-      ★ 标题**单行 + 省略号**，不是"最多两行"。
+    {#snippet children()}
+      <!--
+        ★ 标题**单行 + 省略号**，不是"最多两行"。
 
-        先量了才定的（tools/layout-probe 里有一条"长短标题的行高差"）：
-        两行截断能把 191px 压到 80px，但**短标题那行仍然是 61px**——
-        也就是说行高还在跟着标题长度变（差 19px）。列表的节奏要的是**每行一样高**，
-        所以这里单行截断：短标题、长标题占的都是那一行。
+          先量了才定的（tools/layout-probe 里有一条"长短标题的行高差"）：
+          两行截断能把 191px 压到 80px，但**短标题那行仍然是 61px**——
+          也就是说行高还在跟着标题长度变（差 19px）。列表的节奏要的是**每行一样高**，
+          所以这里单行截断：短标题、长标题占的都是那一行。
 
-        完整标题在 `title`（悬停可见）和右栏详情里；列表是用来扫的。
-    -->
-    <span class="task-title" title={issue.title}>{issue.title}</span>
-    <span class="task-meta">
-      <span class="stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
-      <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
-           「等待审核」是重复，使用者点名要去掉的就是它。 -->
-      {#if info.noteId}
-        <span class="faint small">{$t(info.noteId)}</span>
-      {/if}
-      <!-- ★ D45：返工过就标出来。它是这条回路**真的转过**的痕迹，扫列表时
-           最该看见的就是"这个任务审了不止一轮"——否则"返工一次后通过"与
-           "一次就通过"长得一模一样。 -->
-      {#if info.reworked > 0}
-        <span class="faint small">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
-      {/if}
-      <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
-      <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
-    </span>
-  </button>
+          完整标题在 `title`（悬停可见）和右栏详情里；列表是用来扫的。
+      -->
+      <span class="task-title" title={issue.title}>{issue.title}</span>
+      <span class="task-meta">
+        <span class="stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
+        <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
+             「等待审核」是重复，使用者点名要去掉的就是它。 -->
+        {#if info.noteId}
+          <span class="faint small">{$t(info.noteId)}</span>
+        {/if}
+        <!-- ★ D45：返工过就标出来。它是这条回路**真的转过**的痕迹，扫列表时
+             最该看见的就是"这个任务审了不止一轮"——否则"返工一次后通过"与
+             "一次就通过"长得一模一样。 -->
+        {#if info.reworked > 0}
+          <span class="faint small">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
+        {/if}
+        <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+        <span class="faint small" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
+      </span>
+    {/snippet}
+    {#snippet action()}
+      <button
+        type="button"
+        class="list-row-action"
+        title={$t('tasks.delete')}
+        aria-label={$t('tasks.delete')}
+        onclick={() => void removeTask(issue.id)}
+      >
+        ×
+      </button>
+    {/snippet}
+  </ListRow>
 {/snippet}
 
 <div
   class="split-layout"
   class:board={mode === 'board'}
-  class:with-detail={mode === 'list' && selected !== null}
+  class:with-detail={mode === 'list' && (selected !== null || $creating)}
 >
   <!-- ══════════════════ 中栏：清单 / 看板 ══════════════════ -->
-  <section class="pane list-pane">
+  {#if mode === 'board'}
     <!--
-      ⚠️ 栏头**只在看板下存在**（2026-09）。
-         · 列表模式：标题与顶栏页名一字不差（同一个词条 `shell.navTasks`）→ 删了；
-           "点一条看它的执行记录与产出"那句提示 → 按要求去掉，并**并进了右栏空态**
-           （`tasks.pickOneHint`）——那句话本来描述的正是"没选中任何东西时右边是什么"，
-           放在空态那儿比压在清单上面更贴题。
-         · 看板模式：这里的分区标题与说明仍然要，因为看板是**另一种呈现**，
-           列的含义得就地讲。
-      ⚠️ 模式（列表 / 看板）由顶栏那两个按钮的高亮表示（它们搬上去了）。
+      ⚠️ 看板是**另一种呈现**（D61 起就不算进"三页同款"的列表栏）：它的栏头有
+      标题 + 说明两行（列的含义得就地讲），列表模式的「计数 + 搜索」栏头带在
+      ListPane 里。这里保留自己的 pane 结构；加载 / 报错 / 空态与列表同一套。
     -->
-    {#if mode === 'board'}
+    <section class="pane list-pane">
       <header class="pane-head">
         <div>
           <h2>{$t('tasks.boardTitle')}</h2>
@@ -704,117 +912,141 @@
             {$t('tasks.boardHintBefore')}<strong>{$t('tasks.boardHintStrong')}</strong>{$t('tasks.boardHintAfter')}
           </p>
         </div>
+        <!--
+          ★ 2026-10（紧凑性）：看板是**全宽**呈现，搜索框不再独占一整行——
+          并进栏头右侧，与标题同排（列表模式的搜索框留在下方 pane-body 里）。
+        -->
+        <input
+          bind:value={filter}
+          placeholder={$t('tasks.search')}
+          style="max-width:16rem;align-self:center"
+          autocomplete="off"
+        />
       </header>
-    {/if}
 
-    <div class="pane-body">
-      <input
-        bind:value={filter}
-        placeholder={$t('tasks.search')}
-        style="max-width:22rem;margin-bottom:var(--sp-4)"
-        autocomplete="off"
-      />
+      <div class="pane-body">
+        {#if $loading['issues'] && $issues.length === 0}
+          <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
+          <div class="skeleton" style="width:70%"></div>
+        {:else if $loadError['issues']}
+          <div class="notice bad">{$loadError['issues']}</div>
+        {:else if visible.length === 0}
+          <div class="empty">
+            <strong>{filter ? $t('tasks.emptyFiltered') : $t('tasks.empty')}</strong>
+            {filter ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyHint')}
+          </div>
+        {:else}
+          <div class="board board-6">
+            {#each COLUMNS as col (col.ids[0])}
+              <!-- 一列可以收两档（「等待人处理」收 needs_human 与 action_failed） -->
+              {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
+              <div class="column">
+                <h4>
+                  <span>{$t(col.titleId)} <span class="faint">{items.length}</span></span>
+                  <span class="col-hint">{$t(col.hintId)}</span>
+                </h4>
 
-  {#if $loading['issues'] && $issues.length === 0}
-    <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-    <div class="skeleton" style="width:70%"></div>
-  {:else if $loadError['issues']}
-    <div class="notice bad">{$loadError['issues']}</div>
-  {:else if visible.length === 0}
-    <div class="empty">
-      <strong>{filter ? $t('tasks.emptyFiltered') : $t('tasks.empty')}</strong>
-      {filter ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyHint')}
-    </div>
-  {:else if mode === 'board'}
-    <div class="board board-6">
-      {#each COLUMNS as col (col.ids[0])}
-        <!-- 一列可以收两档（「等待人处理」收 needs_human 与 action_failed） -->
-        {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
-        <div class="column">
-          <h4>
-            <span>{$t(col.titleId)} <span class="faint">{items.length}</span></span>
-            <span class="col-hint">{$t(col.hintId)}</span>
-          </h4>
+                {#if items.length === 0}
+                  <p class="col-empty faint small">{$t('tasks.columnEmpty')}</p>
+                {/if}
 
-          {#if items.length === 0}
-            <p class="col-empty faint small">{$t('tasks.columnEmpty')}</p>
-          {/if}
-
-          {#each items as { issue, info } (issue.id)}
-            <button type="button" class="card" onclick={() => selectFromBoard(issue.id)}>
-              <span class="card-title">{issue.title}</span>
-              <span class="card-meta">
-                <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
-              </span>
-              <span class="card-meta">
-                {#if info.noteId}<span class="faint small">{$t(info.noteId)}</span>{/if}
-                <span class="faint small">{new Date(issue.updatedAt).toLocaleDateString()}</span>
-              </span>
-              {#if info.warningId}
-                <span class="card-warning">{$t(info.warningId, info.warningParams)}</span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      {/each}
-    </div>
-
+                {#each items as { issue, info } (issue.id)}
+                  <button type="button" class="card" onclick={() => selectFromBoard(issue.id)}>
+                    <span class="card-title">{issue.title}</span>
+                    <span class="card-meta">
+                      <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+                    </span>
+                    <span class="card-meta">
+                      {#if info.noteId}<span class="faint small">{$t(info.noteId)}</span>{/if}
+                      <span class="faint small" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
+                    </span>
+                    {#if info.warningId}
+                      <span class="card-warning">{$t(info.warningId, info.warningParams)}</span>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </section>
   {:else}
-    <div class="task-list">
-      {#if byAttention.attention.length > 0}
-        <div class="list-head">
-          {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
-          <span class="faint small">{$t('tasks.attentionHint')}</span>
-        </div>
-        {#each byAttention.attention as { issue, info } (issue.id)}
-          {@render row(issue, info, true)}
-        {/each}
-        <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
-      {/if}
-      {#each byAttention.rest as { issue, info } (issue.id)}
-        {@render row(issue, info, false)}
-      {/each}
-    </div>
+    <!-- 列表模式（D66）：栏头带 + 五态壳在标准控件 ListPane 里，这一页给内容。
+         栏头没有标题——它与顶栏页名一字不差（同一个词条 `shell.navTasks`），
+         同页上下写同一句话看起来像渲染错了。 -->
+    <ListPane
+      countLabel={$t('tasks.listCount', { count: visible.length })}
+      searchPlaceholder={$t('tasks.search')}
+      filter={filter}
+      onFilter={(v) => (filter = v)}
+      loading={($loading['issues'] && $issues.length === 0) ?? false}
+      loadError={$loadError['issues'] ?? null}
+      empty={!filter && visible.length === 0}
+      emptyTitle={$t('tasks.empty')}
+      emptyHint={$t('tasks.emptyHint')}
+      emptyFiltered={filter !== '' && visible.length === 0}
+      emptyFilteredTitle={$t('tasks.emptyFiltered')}
+      emptyFilteredHint={$t('tasks.emptyFilteredHint')}
+    >
+      {#snippet loadingSkeleton()}
+        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
+        <div class="skeleton" style="width:70%"></div>
+      {/snippet}
+      {#snippet rows()}
+        <ul class="task-list">
+          {#if byAttention.attention.length > 0}
+            <div class="list-head">
+              {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
+            </div>
+            {#each byAttention.attention as { issue, info } (issue.id)}
+              {@render row(issue, info, true)}
+            {/each}
+            <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
+          {/if}
+          {#each byAttention.rest as { issue, info } (issue.id)}
+            {@render row(issue, info, false)}
+          {/each}
+        </ul>
+      {/snippet}
+    </ListPane>
   {/if}
-    </div>
-  </section>
 
-  <!-- ══════════════════ 右栏：任务详情（宽屏并排 / 窄屏整页）══════════════════ -->
+  <!-- ══════════════════ 右栏：建任务 / 任务详情（宽屏并排 / 窄屏整页）══════════════════ -->
   {#if mode === 'list'}
-    <section class="pane detail-pane">
-      {#if selected}
-        <div class="pane-body detail-scroll">
-          <header class="detail-head">
-            <button
-              type="button"
-              class="ghost small back-to-list"
-              onclick={() => selectedIssueId.set(null)}
-            >{$t('tasks.backToList')}</button>
-            <h2>{selected.title}</h2>
-            <p class="detail-sub">
-              {#if selectedStage}
-                <span class="stage-tag {selectedStage.stage}"
-                >{$t(stageShortId(selectedStage.stage))}</span
-              >
-              {/if}
-              <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
-              <!--
-                ★ 完整时间戳放在这里，因为列表里只剩日期了。
-
-                  列表那一列的宽度要留给标题（见行模板上的说明），所以元信息里
-                  用的是 `toLocaleDateString`。但"更新于几点几分"原来只有那一列
-                  有——只留日期就等于**悄悄丢了一条信息**。详情栏有地方，放这儿。
-              -->
-              <span class="faint">{$t('tasks.updatedAt', { time: new Date(selected.updatedAt).toLocaleString() })}</span>
-            </p>
-          </header>
-
-    {#if selected.description}
-      <section class="drawer-section">
-        <h3>{$t('tasks.descriptionHeading')}</h3>
-        <p class="hint" style="white-space:pre-wrap">{selected.description}</p>
-      </section>
-    {/if}
+    <!-- ★ 右主区（D69.15）：壳 / 栏头 / 空态统一在 MainArea，正文三态自管。
+         建任务 / 任务详情 / 没选中 都走同一个壳；栏头（返回+标题+副题）由
+         MainArea 的结构化 props 渲染——从此详情栏头固定在上方、不再跟着滚走
+         （与聊天的 chat-head 同一形态，这正是统一的意义）。 -->
+    <MainArea
+      empty={!$creating && !selected}
+      emptyTitle={$t('tasks.pickOneTitle')}
+      emptyHint={$t('tasks.pickOneHint')}
+      headClass={$creating ? 'detail-head create-head' : 'detail-head'}
+      backLabel={selected ? $t('tasks.backToList') : undefined}
+      onBack={() => selectedIssueId.set(null)}
+      title={$creating ? $t('shell.navNewTask') : selected?.title ?? ''}
+      bodyClass={$creating ? 'create-body' : logMode ? 'detail-scroll log-mode' : 'detail-scroll'}
+    >
+      {#snippet sub()}
+        {#if $creating}
+          <span class="faint">{$t('shell.navNewTaskHint')}</span>
+        {:else if selected}
+          {#if selectedStage}
+            <span class="stage-tag {selectedStage.stage}"
+            >{$t(stageShortId(selectedStage.stage))}</span
+          >
+          {/if}
+          <span class="faint">{agentName(selected.assignee?.id ?? null)}</span>
+          <!-- ★ 完整时间戳放在栏头副题：列表只剩日期了（见 D42 原注释） -->
+          <span class="faint">{$t('tasks.updatedAt', { time: new Date(selected.updatedAt).toLocaleString() })}</span>
+        {/if}
+      {/snippet}
+      {#snippet body()}
+        {#if $creating}
+          <NewTaskForm />
+        {:else if selected}
+          {#key selected.id}
 
   <!--
     ★ 「这一次是谁审的」（D42）。
@@ -853,7 +1085,9 @@
             class:active={activeRun?.runId === run.runId}
             onclick={() => selectRun(run)}
           >
-            <span class="badge {run.status}">{run.status}</span>
+            <span class="badge {RUN_STATUS_CLASS[run.status] ?? ''}"
+              >{$t(runStatusLabel(run.status))}</span
+            >
             <!-- ★ 类型与时间必须显示：只给状态和 runId 的话，使用者**看不出
                  哪个先哪个后**——他只能凭感觉，于是会觉得"顺序不对"。 -->
             <span class="small">{run.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</span>
@@ -866,11 +1100,21 @@
     {/if}
   </section>
 
+  {#if selected.description}
+    <!-- ★ D69.9：描述是**任务原文**（可能很长）——跑过之后默认折叠（首行标题行
+         常驻），未跑的任务展开它（那是唯一的正文）。 -->
+    <FoldSection title={$t('tasks.descriptionHeading')} open={issueRuns.length === 0}>
+      <p class="hint" style="white-space:pre-wrap">{selected.description}</p>
+    </FoldSection>
+  {/if}
+
   {#if activeRun}
-    <section class="drawer-section">
+    <section class="drawer-section run-section">
       <h3>
         {activeIsTerminal && !showRawLog ? $t('tasks.finalResult') : $t('tasks.rawLog')}
-        <span class="faint small mono">run {activeRun.runId.slice(-8)}</span>
+        <span class="faint small mono"
+          >{$t('tasks.runIdLabel', { id: activeRun.runId.slice(-8) })}</span
+        >
         {#if activeIsTerminal}
           <!-- 跑完之后默认给结论；原始流水仍然一条不少，按需翻 -->
           <button
@@ -881,19 +1125,37 @@
           >
             {showRawLog ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
           </button>
+        {:else}
+          <!--
+            ★ 2026-10（使用者要求重排）：「取消这次执行」从日志区底部的独立按钮
+              挪进 run 的头部工具栏——它操作的就是**这条 run**，放在 run 自己的
+              标题行（紧挨 run id）语义才对得上，而且只在这条 run 还能停的时候
+              出现：跑完（completed/failed/cancelled）按钮随之消失，不再留一个
+              永远灰着的占位（原来那个按钮正是这样：run 结束后照常显示、永久
+              disabled，且没有任何"为什么灰"的说明——违背按钮置灰必须写出来的
+              那条纪律）。
+
+              ⚠️ 终态切换按钮（上面）与停止按钮**互斥**出现：前者只在跑完显示，
+              后者只在跑着显示，所以两个按钮不会同排。可取消 = 非终态（queued /
+              dispatched / waiting_local_directory / running / deferred），与
+              daemon 的 `executor.cancel()` 覆盖的范围一致；deferred 点取消可能
+              409（它还没被调度），这是既有行为，不在这里展开。
+          -->
+          <button
+            type="button"
+            class="danger small"
+            style="margin-left:var(--sp-3)"
+            onclick={() => cancel(activeRun!.runId)}
+          >
+            {$t('tasks.cancelRun')}
+          </button>
         {/if}
       </h3>
 
-      <dl class="meta-grid">
-        <dt>{$t('tasks.workDir')}</dt>
-        <dd class="mono">{activeRun.workDir ?? '—'}</dd>
-        <dt>{$t('tasks.type')}</dt>
-        <dd>{activeRun.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</dd>
-        {#if activeRun.finishedAt}
-          <dt>{$t('tasks.duration')}</dt>
-          <dd>{$t('tasks.seconds', { seconds: ((activeRun.finishedAt - activeRun.queuedAt) / 1000).toFixed(1) })}</dd>
-        {/if}
-      </dl>
+      <!-- ★ 取消失败要看得见：按钮就在上面一行，错误紧跟其后（触发它的地方） -->
+      {#if runError}
+        <p class="notice bad">{runError}</p>
+      {/if}
 
       {#if activeIsTerminal && !showRawLog}
         <!-- ══════════ 最后结果：左结论 / 右产出文件 ══════════ -->
@@ -901,6 +1163,15 @@
           <div class="result-main">
             {#if renderedResult}
               <article class="markdown">{@html renderedResult}</article>
+            {:else if finalOutputFor === activeRun.runId && finalOutput !== '' && resultText === ''}
+              <!-- ★ 正文里**只有**判决块（审核那条路很常见）：剥完之后一个字都不剩。
+                   这时**不能**沿用下面那个空态——"这次执行没有留下文字产出 / 它可能
+                   只改了文件、或者中途失败了"在这里是**说错话**：它明明产出了判决，
+                   只是那一段是机器读的。说错话比空着更糟。 -->
+              <div class="empty">
+                <strong>{$t('tasks.verdictOnly')}</strong>
+                {$t('tasks.verdictOnlyHint')}
+              </div>
             {:else if finalOutputFor === activeRun.runId && finalOutput === ''}
               <div class="empty">
                 <strong>{$t('tasks.noTextOutput')}</strong>
@@ -926,23 +1197,14 @@
              一条消息的序号"。`since` 的语义是"跳过它及之前的一切"，于是打开一条
              已经跑完的任务时全部历史都被跳过 —— 日志空的，agent 的最后产出看不到。
              订阅游标现在由 RunLog 自己持有，父组件没有机会传错。 -->
-        <RunLog runId={activeRun.runId} onterminal={() => void refresh()} />
+        <RunLog runId={activeRun.runId} onterminal={() => void refresh()} fill />
       {/if}
 
-      <div style="margin-top:var(--sp-3);display:flex;gap:var(--sp-2)">
-        <button
-          type="button"
-          class="danger"
-          disabled={['completed', 'failed', 'cancelled'].includes(activeRun.status)}
-          onclick={() => cancel(activeRun!.runId)}
-        >
-          {$t('tasks.cancelRun')}
-        </button>
-      </div>
-
+      {#if !logMode}
       {#if verdictsFor === activeRun.runId && verdicts.length > 0}
         <h4 style="margin-top:var(--sp-4)">{$t('tasks.verdictHeading')}</h4>
         {#each verdicts as v (v.id)}
+          {@const actionCount = verdictActions.filter((a) => a.verdictId === v.id).length}
           <article class="notice" style="margin-bottom:var(--sp-2);flex-direction:column">
             <div style="display:flex;gap:var(--sp-2);align-items:center">
               <!--
@@ -982,6 +1244,11 @@
                 {v.humanReason}
               </p>
             {/if}
+            <!-- ★ D69.9：结论行（徽标+理由码+来源）常驻，证据明细折叠 -->
+            <FoldSection
+              title={$t('tasks.verdictDetails')}
+              summary={$t('tasks.verdictDetailCount', { actions: actionCount, findings: v.findings.length })}
+            >
             <!--
               ══════════════════════════════════════════════════════════════
               ★ 这条判决**真的做了什么**（D45 的显示位置调整）
@@ -1050,9 +1317,27 @@
             {:else}
               <div class="faint small">{$t('tasks.noFindings')}</div>
             {/if}
+            </FoldSection>
           </article>
         {/each}
       {/if}
+
+      <!-- ★ D69.9：元数据（工作目录/类型/耗时）默认折叠；标题行把工作目录
+            放在摘要位——它常常是唯一想确认的那一项 -->
+      <FoldSection title={$t('tasks.metaHeading')} summary={activeRun.workDir ?? ''}>
+        <dl class="meta-grid">
+          <dt>{$t('tasks.workDir')}</dt>
+          <dd class="mono">{activeRun.workDir ?? '—'}</dd>
+          <dt>{$t('tasks.type')}</dt>
+          <dd>{activeRun.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</dd>
+          {#if activeRun.finishedAt}
+            <dt>{$t('tasks.duration')}</dt>
+            <dd>{$t('tasks.seconds', { seconds: ((activeRun.finishedAt - activeRun.queuedAt) / 1000).toFixed(1) })}</dd>
+          {/if}
+        </dl>
+      </FoldSection>
+      {/if}
+
     </section>
   {/if}
 
@@ -1093,10 +1378,8 @@
              输入框，所以这件事只能靠按钮上的提示说清；
           ③ 「放弃」会**取消正在跑的 run**（这个功能唯一的副作用）。
       -->
-      {#if canDecide}
-        <section class="drawer-section">
-          <h3>{$t('tasks.decideHeading')}</h3>
-
+      {#if canDecide && !logMode}
+        <section class="drawer-section decide-bar">
           {#if isAbandoned}
             <!-- 放弃过的任务只给一条出路：恢复。它已经出局了，不该再出现三个
                  能改流程的按钮——那会让人以为它还在流程里。 -->
@@ -1105,19 +1388,19 @@
               <button
                 type="button"
                 disabled={deciding !== null}
+                title={deciding !== null ? $t('common.busyHint') : undefined}
                 onclick={() => setAbandoned(false)}
               >
                 {deciding === 'recover' ? $t('tasks.decideAbandoning') : $t('tasks.decideRecover')}
               </button>
             {/if}
           {:else}
-            <p class="faint small">{$t('tasks.decideIntro')}</p>
             {#if humanDecided}
               <p class="faint small">{$t('tasks.humanVerdictAlready')}</p>
             {/if}
 
             <label class="human-reason">
-              <span class="small">{$t('tasks.decideReasonLabel')}</span>
+              <span class="small reason-label">{$t('tasks.decideReasonLabel')}</span>
               <textarea
                 bind:value={humanReason}
                 rows="3"
@@ -1175,12 +1458,16 @@
               ★ 按钮为什么是灰的 —— **必须写出来**，而且要在按钮之外也写一遍：
                 `title` 只有鼠标悬停才看得见，而"按钮是灰的、不知道为什么"
                 正是 D46 那次需求（"没有人工通过的操作 UI"）的来源。
+              ★ 2026-10（紧凑性）：两条提示（为什么不能通过 / 为什么不能反馈）
+                合并成一行、用「·」隔开——run 还在跑时两条经常同时出现，各占
+                一整行都是极短的小字。缺一则只出其一。
             -->
-            {#if passBlockedNoteId}
-              <p class="faint small">{$t(passBlockedNoteId)}</p>
-            {/if}
-            {#if !feedbackReady}
-              <p class="faint small">{$t('tasks.needRunForFeedback')}</p>
+            {#if passBlockedNoteId || !feedbackReady}
+              <p class="faint small">
+                {#if passBlockedNoteId}{$t(passBlockedNoteId)}{/if}{#if passBlockedNoteId && !feedbackReady}
+                  <span class="faint"> · </span>
+                {/if}{#if !feedbackReady}{$t('tasks.needRunForFeedback')}{/if}
+              </p>
             {/if}
           {/if}
 
@@ -1189,27 +1476,77 @@
           {/if}
         </section>
       {/if}
-
-        </div>
-      {:else}
-        <div class="pane-body">
-          <div class="empty">
-            <strong>{$t('tasks.pickOneTitle')}</strong>
-            {$t('tasks.pickOneHint')}
-          </div>
-        </div>
-      {/if}
-    </section>
+          {/key}
+        {/if}
+      {/snippet}
+    </MainArea>
   {/if}
 </div>
 
 <style>
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 建任务那一栏：**留白归表单自己**（这里 `padding: 0`）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 右栏平时（任务详情）用的是 `.pane-body` 自己的留白。建任务这一栏不一样：
+   * 表单底部那条提交栏是 `position: sticky` + **负外边距**去抵消容器的内边距
+   * （不留负边距的话，滚过去的内容会从它两侧露出来），也就是说"容器的内边距"
+   * 与"提交栏的负外边距"是**一对**、必须相等。
+   *
+   * ⚠️ 两边各写一份 `var(--sp-6)` 就是一对会漂移的常量（改了一处、另一处不报错，
+   *    只是提交栏左右各差 24px）。所以这里把内边距**归零**、由 `.form-frame`
+   *    自己带——一份留白，一个出处。
+   */
+  /* D69.15：`.create-body` 是 MainArea 渲染的（bodyClass），Tasks 的 scoped
+     样式跨不过组件边界——打成 :global 才能命中。
+     ⚠️ 写成 `:global(.pane-body.create-body)` 而不是 `.create-body`：后者与
+     app.css 的 `.pane-body`（padding）同特异性，bundle 里 `.pane-body` 靠后、
+     会把 `padding: 0` 盖掉——实测 frame 宽度差 48px、提交栏横贯不了可滚区。
+     双类选择器特异性升到 (0,2,0)，与出现顺序无关地稳压。 */
+  :global(.pane-body.create-body) {
+    padding: 0;
+    /**
+     * ★ 这一栏的左右留白**只有一个出处**：`--create-pad-x`。
+     *
+     * 三个地方读它：这一栏的标题（下面）、表单的 `.form-frame`（它自带留白）、
+     * 以及提交栏那两个负外边距（要抵消掉同一份留白才横贯整栏）。自定义属性会继承，
+     * 所以表单里读得到——而"三处各写一份 var(--sp-6)"就是三个会漂移的常量：
+     * 我第一版在窄屏那条断点里只改了两处，提交栏比容器宽 32px、整张表单横向溢出。
+     */
+    --create-pad-x: var(--sp-6);
+  }
+
+  /* 与 `.main` 同一条断点、同一个值（窄窗口下平台各处都收一档留白） */
+  @media (max-width: 60rem) {
+    :global(.pane-body.create-body) {
+      --create-pad-x: var(--sp-4);
+    }
+  }
+
+  /* 这一栏自己的小标题（返回列表 / 新建任务 / 交给智能体去做）：留白跟着上面那个变量
+     （D69.15：MainArea 渲染，:global）。
+     ⚠️ 必须写双类 `:global(.detail-head.create-head)`：app.css 现在给 `.detail-head`
+     统一了留白/下边框（标题字号统一那轮），单类 `.create-head` 与它同特异性、bundle
+     里 app.css 靠后会把它盖掉——双类 (0,2,0) 稳压，留白继续跟 `--create-pad-x`。 */
+  :global(.detail-head.create-head) {
+    padding: var(--sp-4) var(--create-pad-x) 0;
+  }
+
   /* ══════════════ 列表：两行的行（标题 + 元信息）══════════════ */
 
+  /* ⚠️ 这三行**必须有**：容器是 `<ul>`（每项要放"整行可点的主按钮 + 兄弟删除
+     按钮"，`li` 才装得下），而 `ul` 自带 `padding-inline-start: 40px` 与圆点
+     标记——不归零的话整列内容会**整体右移 40px 并多出一排圆点**（实测的表现
+     就是"内容怎么靠右了"）。与聊天页 `.conv-list` 同一处理。 */
   .task-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    /* D66：行距与聊天/智能体一致（原来 2px vs var(--sp-1)） */
+    gap: var(--sp-1);
   }
 
   /* 「需要注意」那一拨：左边一条醒目色条，不靠颜色变字体 */
@@ -1220,34 +1557,16 @@
     border-bottom: 1px solid var(--line);
   }
 
-  .task-row {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 3px;
-    text-align: left;
-    padding: var(--sp-2) var(--sp-3);
-    background: none;
-    border: 1px solid transparent;
-    border-radius: var(--radius);
-    color: var(--text);
-    cursor: pointer;
+  /* ★ 整行可点 + 右侧独立删除按钮（与「智能体」「聊天」两栏同形）：
+       `li` 容器里放主按钮（flex:1）+ 兄弟删除按钮。 */
+  /* ★ 列表模式的栏头（D61）：与聊天页那个"只有标题"的栏头**同高同款**
+     （`.list-head` / `.list-toolbar` 共用 `--list-head-h`，见 app.css）。
+     没有标题（与页名重复），左边计数、右边搜索，搜索框不再独行。 */
+  .list-toolbar {
+    align-items: center;
   }
 
-  .task-row:hover {
-    background: var(--surface-2);
-  }
-
-  .task-row.active {
-    background: var(--surface-2);
-    border-color: var(--accent);
-  }
-
-  .task-row.attention {
-    border-left: 2px solid var(--warn);
-  }
-
+  /* 删除按钮：默认几乎不可见，hover 才露出危险色——扫列表时不该被一排 × 吵到 */
   .task-meta {
     display: flex;
     align-items: center;
@@ -1269,27 +1588,47 @@
     font-weight: 600;
   }
 
+  /* D65：阶段标签与平台徽标（`.badge`）**同一条配方**——胶囊 + 圆点 + 10% 底 +
+     28% 发丝边。原来它是描边方角（r4px、无底无点），和智能体的角色徽标、技能/工具
+     页的徽标是两种形状。改完之后任务列表与看板里的阶段 chip 都变成胶囊。 */
   .stage-tag {
-    display: inline-block;
-    padding: 0 var(--sp-1);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--line-strong);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    /* 竖内距 0（`0.1rem` 会把它撑成 ~20px，任务行跟着 65→67px，D61 的行高判据
+       会红——而它在这个列表里是元信息行的内容，该贴文本行高）。横向留 `--sp-2`
+       与 `.badge` 一致；胶囊形状（圆角 + 圆点 + 底）不变。 */
+    padding: 0 var(--sp-2);
+    border-radius: 100px;
     font-size: var(--fs-xs);
-    color: var(--text-dim);
+    font-weight: 500;
+    border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+    background: color-mix(in srgb, currentColor 10%, transparent);
+    white-space: nowrap;
   }
 
-  /* 阶段色与看板的列色一致：同一件事在两个视图里该是同一个颜色 */
-  .stage-tag.executing { border-color: var(--status-active); color: var(--status-active); }
-  .stage-tag.awaiting_review { border-color: var(--status-review); color: var(--status-review); }
-  .stage-tag.reviewed { border-color: var(--status-done); color: var(--status-done); }
+  .stage-tag::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* 阶段色与看板的列色一致：同一件事在两个视图里该是同一个颜色。
+     ⚠️ 只设 `color`：描边与底都从 currentColor 派生（color-mix），
+     与 `.badge` 同一条配方。 */
+  .stage-tag.executing { color: var(--status-active); }
+  .stage-tag.awaiting_review { color: var(--status-review); }
+  .stage-tag.reviewed { color: var(--status-done); }
   /* "待人工"用告警色：它是**卡在你手里**那一档——不是进行中，也不是完成 */
-  .stage-tag.needs_human { border-color: var(--warn); color: var(--warn); }
+  .stage-tag.needs_human { color: var(--warn); }
   /* ★ D47「已放弃」用**最弱**的颜色，不是告警色也不是完成色：它既不是"出事了"
      （放弃是人的决定，不是故障），也不是"做完了"（它只是出局了）。中性灰是唯一
      不会误导读者的选择——这条任务既不需要你管，也没有做成什么。 */
-  .stage-tag.abandoned { border-color: var(--line); color: var(--text-faint); }
+  .stage-tag.abandoned { color: var(--text-faint); }
 
-  /* 跑完之后：左边结论、右边产出文件 */
+  /* 跑完之后：左边结论、右边产出文件（D69.9.1 从折叠区挪回——文件是高频项） */
   .result-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(14rem, 20rem);
@@ -1343,10 +1682,54 @@
     resize: vertical;
   }
 
+  /* ── 日志视图 = flex 纵向布局（D69.12）：日志吃满剩余空间、内置滚动，
+     **外置滚动条消失**（使用者：点「看完整日志」出现两个滚动条——内置+外置，
+     不该有外置那个）。
+     flex 链：pane-body(flex col, overflow hidden) → .run-section(flex 1, flex col)
+         → RunLog 的 .log-wrap(flex 1, flex col) → .log(flex 1, 内部滚动)。
+     只有日志视图才 flex——结果视图保持整栏滚动 + sticky 裁决条。
+     ⚠️ D69.15 起 pane-body 由 MainArea 渲染（bodyClass 传入 `log-mode`），
+     scoped 样式跨不过组件边界——三个选择器打成 :global 才能命中。 */
+  :global(.detail-scroll.log-mode) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  :global(.detail-scroll.log-mode) > * {
+    flex-shrink: 0;
+  }
+  :global(.detail-scroll.log-mode) .run-section {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 0;
+  }
+
+  /* ── 人工裁决条（D69.10）：内容超出一屏时**固定在本栏底部**（sticky bottom），
+     「通过 / 反馈 / 放弃」永远够得着；不满一屏时自然跟在正文后面。
+     ⚠️ 实底背景 + 顶边是必须的：内容从条底下滚过时不透字。
+     ⚠️ **不给结果/报告区定高**：它们用自然高度、吃满可用的一屏，裁决条只靠
+     sticky 钉底——固定高低会把可用空间框死或浪费掉。 */
+  .decide-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--bg);
+    margin: var(--sp-2) calc(-1 * var(--sp-5)) 0;
+    padding: var(--sp-3) var(--sp-5) var(--sp-4);
+    border-top: 1px solid var(--line);
+  }
+
   /* 三个按钮并排。
      ⚠️ `flex-wrap` 是必需的：窄屏下「通过 / 反馈 / 放弃」加上中文标签会超过
         详情栏宽度，不换行就会把那一栏顶出容器（与上面 `min-width:0` 是同一类
         事故，只是这次是按钮而不是输入框）。 */
+  /* D69.13+D69.14：「理由 / 反馈内容」独立加粗（「这条任务怎么办」标题已删，它现在是这块的醒目行） */
+  .human-reason .reason-label {
+    font-weight: 600;
+  }
+
   .decide-actions {
     display: flex;
     flex-wrap: wrap;

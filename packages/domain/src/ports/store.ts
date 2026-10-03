@@ -206,6 +206,22 @@ export interface Store {
   listComments(issueId: IssueId): Promise<Comment[]>
   insertComment(comment: Comment): Promise<void>
 
+  /**
+   * 删掉一条任务（issue）**连同挂它名下的一切**。
+   *
+   * 连带范围（使用者确认过："删任务 = 连带删除全部执行记录"）：
+   *   ① 该 issue 上所有 run —— 逐个走 `deleteRun` 的连带（消息流 / verdicts /
+   *      actions / artifacts / 引用那些 run 的对话轮次；审计与 blob 不删）；
+   *   ② 该 issue 的全部评论；
+   *   ③ issue 本体。
+   *
+   * ⚠️ 只按 `subject.type === 'issue' && subject.id === issueId` 找 run：
+   *    聊天轮次的 run subject 是 `conversation`，不在其列（删任务不碰聊天）。
+   * ⚠️ 通知（inbox）不删——"发生了什么"的痕迹留着，与审计同一条理由。
+   * ⚠️ 返回 false = 本来就没有这条 issue（不是错误），与 `deleteConversation` 一致。
+   */
+  deleteIssue(id: IssueId): Promise<boolean>
+
   // ── Conversation 与 ChatTurn（聊天）──
 
   getConversation(id: ConversationId): Promise<Conversation | null>
@@ -237,6 +253,22 @@ export interface Store {
    *    run 等于把"这次对话真的发生过"这件事一起删了。
    */
   deleteConversation(id: ConversationId): Promise<boolean>
+
+  /**
+   * 删掉一条 run **连同它派生的一切**：消息流、verdicts、由那些 verdict 触发的
+   * actions、artifacts，以及**引用它的对话轮次**（那一轮的内容就是这条 run 的
+   * messages——run 没了，轮次只剩"我说了句什么"的半句话，留着是断的）。
+   *
+   * ⚠️ **审计记录与内容寻址 blob 不删**：审计是"发生过什么"的不可变历史
+   *    （FR-AUDIT-01），blob 被审计/报告引用——删掉它们等于把可追溯性挖掉一块。
+   *    它们留着、`runId` 指向一条已删的 run，是允许的（读取端按 runId 查，没有
+   *    外键）。
+   * ⚠️ 受影响对话的 `turnCount` 会重算（它是冗余字段，删轮次后必须同步）。
+   * ⚠️ 返回 false = 本来就没有这条 run（不是错误），与 `deleteConversation` 一致。
+   * ⚠️ 运行中的 run 不该走到这里（`DELETE /api/runs/:id` 路由按非终态状态挡下）；
+   *    存储层不替调用方做这个判断，与 `cancel` 同一口径。
+   */
+  deleteRun(id: RunId): Promise<boolean>
 
   // ── Report ──
 

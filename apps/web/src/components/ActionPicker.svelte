@@ -725,7 +725,9 @@
   .ap-placeholder {
     color: var(--text-faint);
     text-align: center;
-    margin: var(--sp-8) var(--sp-3);
+    /* 2026-10（紧凑性）：原来上下各 48px（sp-8）写死——`margin: auto` 在
+       flex column 里垂直居中、随栏高自适应，去掉了那 96px 的固定空白。 */
+    margin: auto var(--sp-3);
     font-size: var(--fs-sm);
   }
   .ap-act-title {

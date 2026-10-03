@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    /**
+     * 这个包是**界面侧**的（`theme.ts` 用 `document` / `window` / `matchMedia`），
+     * 所以与 `apps/web` 同一套编译选项：DOM lib + bundler 解析 + 不做"可擦除语法"
+     * 的限制（代码全部经过 Vite 编译）。
+     *
+     * ⚠️ 根 `tsconfig.json`（Node 侧）**把本包排除掉了**：那边没有 DOM lib，
+     *    拿它检查这个包只会得到一堆 "Cannot find name 'document'"。
+     *    所以根 `typecheck` 脚本要显式跑这一份——见根 `package.json`。
+     */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "erasableSyntaxOnly": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

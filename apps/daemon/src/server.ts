@@ -15,6 +15,7 @@ import {
   TEMPLATE_BLOCKS,
   TEMPLATE_VARIABLES,
   validateTemplate,
+  extractSkillMeta,
   type AgentBackend,
   type BlockTemplates,
   type FirstSentenceKind,
@@ -109,7 +110,7 @@ import {
   resolveSkillSource,
   type ResolvedSkillSource,
   type SkillSourceSpec,
-} from './skill-source.ts'
+} from '@agentdeck/skill-source'
 import {
   ToolSourceError,
   buildToolPackage,
@@ -209,6 +210,14 @@ export interface DaemonOptions {
    *    而不是静默降级——静默降级会让人在以为自己被保护着的情况下裸奔。
    */
   sandboxMode?: SandboxMode
+  /**
+   * GitHub **加速器**基址（`parseGithubProxy` 规范化过的，2026-10）。
+   *
+   * 不给 = 直连 GitHub。给 = 每个 GitHub 请求都转给这个第三方主机
+   * （国内直连不稳时用），代价是**它能看也能改内容**——所以只在命令行
+   * 显式指定时才启用，而且**不会**把 `githubToken` 交给它（见 `githubRequestTarget`）。
+   */
+  githubProxy?: string | null
   /**
    * 注入 fetch，供"从 GitHub 安装 skill"使用。
    *
@@ -562,7 +571,9 @@ async function installSkillPayloads(input: {
       workspaceId,
       slug,
       name: payload.name ?? slug,
-      description: payload.description ?? null,
+      // ★ payload 给了就用 payload 的；没有就从 SKILL.md frontmatter 解析
+      //   （作者写的那句用途说明）。都没有才是真的"没有说明"。
+      description: payload.description ?? extractSkillMeta(validated.body).description ?? null,
       // 用**校验过的**正文与支持文件，而不是原始入参：规范化（比如 frontmatter
       // 里的 name 与 slug 对齐）在 `resolvePayloadEntry` 那边已经做过了
       body: validated.body,
@@ -2321,10 +2332,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // ★ runtimes 数组从"只有当前那一个"改成**枚举装配表里的全部**。
       //
       //   原先只报当前 runtime，于是"平台支持哪些 CLI"这件事在接口上
-      //   根本看不出来——第二个适配器插上了也没人知道。现在每一项都带
-      //   `evidence`：`provisional` 的条目在 UI 上应当被标注为未验证，
-      //   否则使用者会以为它和 claude 一样可信（见 RuntimeDescriptor 的注释）。
-      const adapterEntries = Object.entries(knownRuntimeAdapters())
+      //   根本看不出来——第二个适配器插上了也没人知道。每一项都带
+      //   `evidence`（见 RuntimeDescriptor 的注释）。
+      //
+      // ⚠️ 2026-10（使用者决定）：**未接真实 CLI 的 runtime 不进这个数组**。
+      //   当前只有 generic（`evidence: 'provisional'`，命令名 agent-cli 是猜的、
+      //   从未对照真实 CLI 验证过）——它没有实际功能，列出来只会让使用者
+      //   以为它可用（"为什么我能选 agent-cli？"）。
+      //   判据是**证据等级**而不是 runtime 名字：加第四个未验证 runtime 时
+      //   会自动隐藏，不用再来改这一处。
+      //   这只影响 UI 能看到的清单；开发者通道不受影响——`--runtime-key
+      //   generic`、`--verify-runtime all`、以及直接调 API 建 generic agent
+      //   仍然可用（校验在 `resolveRuntimeKey`，与这个数组无关）。
+      const adapterEntries = Object.entries(knownRuntimeAdapters()).filter(
+        ([, adapter]) => adapter.descriptor.evidence === 'verified',
+      )
       const runtimes = await Promise.all(
         adapterEntries.map(async ([key, adapter]) => {
           const isCurrent = key === descriptor.key
@@ -3230,6 +3252,35 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   这类**平台自己不维护**的状态——而那些状态在阶段推导里没有任何位置，
     //   于是会造出一种"看起来设了、看板不认"的记录。这里由服务端决定目标状态
     //   （放弃 ⇒ `cancelled`，恢复 ⇒ `todo`），调用方只说意图。
+    // ══════════════════════════════════════════════════════════════════
+    // 删除一条任务（任务列表每项右侧的「删除」按钮）
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 连带范围在 `Store.deleteIssue` 的文档里（该 issue 上的全部 run——含审核
+    // 链——逐个走 deleteRun 的连带，再加评论与 issue 本体；审计、通知与 blob
+    // 不删）。与 run 的删除不同，这里**没有"运行中不能删"的闸**：任务删除
+    // 先把还在跑的 run 取消掉（与「放弃」同一处副作用），再删——否则一条
+    // 正在烧 token 的任务会在删除的瞬间变成"看不见的正在跑"。
+    const issueDeleteMatch = /^\/api\/issues\/([^/]+)$/.exec(path)
+    if (issueDeleteMatch && req.method === 'DELETE') {
+      const issueId = issueDeleteMatch[1] as IssueId
+      const issue = await store.getIssue(issueId)
+      if (!issue || issue.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '任务不存在' })
+        return
+      }
+      // ★ 先取消还在跑的 run，再删（与 abandon 同一处副作用、同一句解释）。
+      const page = await store.listRuns({ workspaceId, limit: 10_000 })
+      for (const run of page.items) {
+        if (TERMINAL_RUN_STATUSES.includes(run.status)) continue
+        if (!(await runBelongsToIssue(store, run, issueId))) continue
+        await executor.cancel(run.id)
+      }
+      await store.deleteIssue(issueId)
+      sendJson(res, 200, { ok: true })
+      return
+    }
+
     const issueStatusMatch = /^\/api\/issues\/([^/]+)\/(abandon|reopen)$/.exec(path)
     if (issueStatusMatch) {
       if (req.method !== 'POST') {
@@ -3394,6 +3445,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const dir = sourceDirOf(skill)
         return {
           ...skill,
+          // ★ 旧记录落库时没有 description（改动前一直 null）。这里**按需补**：
+          //   从 SKILL.md frontmatter 解析出作者写的那句用途说明——不补的话，
+          //   已经装好的技能列表里永远是"没有说明"，除非重新装一遍。
+          //   ⚠️ 这是纯展示层的兜底，不动库（审计是 append-only 的）；
+          //   新装的记录在写入时就带上了正确的 description。
+          description:
+            skill.description ??
+            extractSkillMeta(skill.body).description ??
+            null,
           // 来自哪个被勾选的目录（null = 手装 / 远端装的）
           localDir: dir,
           // ★ "现在还能不能被选中"。
@@ -3744,6 +3804,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           {
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
             githubToken: options.githubToken ?? process.env['AGENTDECK_GITHUB_TOKEN'] ?? null,
+            ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
           },
         )
 
@@ -3754,6 +3815,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             {
               slug: resolved.slug,
               name: resolved.slug,
+              // ★ 作者在 SKILL.md frontmatter 里写的 description 要落库，
+              //   否则列表里永远是"没有说明"（与本地目录扫描同一做法）。
+              description: extractSkillMeta(resolved.body).description ?? null,
               body: resolved.body,
               files: resolved.files,
               source: source.spec.kind === 'payload' ? 'remote' : 'local',
@@ -4805,6 +4869,37 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const run = await store.getRun(runId)
         if (!run) return sendJson(res, 404, { error: 'run 不存在' })
         sendJson(res, 200, run)
+        return
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // 删除一条 run（任务列表每项右侧的「删除」按钮）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 连带范围在 `Store.deleteRun` 的文档里（messages / verdicts / actions /
+      // artifacts / 引用它的对话轮次一起删；**审计与 blob 不删**——可追溯性
+      // 是"发生过什么"的不可变历史）。这里只守两道闸：
+      //
+      //   ① 别的 workspace 的 run 一律当"不存在"（404，与 human-verdict 同一口径）；
+      //   ② **运行中的不能删**（409）：删了它，正在跑的进程还在写
+      //      `runs/<id>/messages.jsonl`，而文件已经没了——留下一个写完就丢、
+      //      状态永远卡住的残骸。先「取消」或等它结束再删。
+      //
+      //   非终态判断复用本文件已有的 `TERMINAL_RUN_STATUSES`（补集就是
+      //   `reconcile.ts` 的 `NON_TERMINAL_RUN_STATUSES`——deferred/queued/
+      //   dispatched/waiting_local_directory/running）。
+      if (req.method === 'DELETE' && sub === undefined) {
+        const run = await store.getRun(runId)
+        if (!run || run.workspaceId !== workspaceId) {
+          sendJson(res, 404, { error: 'run 不存在' })
+          return
+        }
+        if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
+          sendJson(res, 409, { error: '这条 run 还在执行中，先取消或等它结束再删除' })
+          return
+        }
+        await store.deleteRun(runId)
+        sendJson(res, 200, { ok: true })
         return
       }
 

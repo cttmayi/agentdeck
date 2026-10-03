@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { IllegalTransitionError, type RunPatch } from '@agentdeck/domain'
 import {
   agentId,
+  chatTurnId,
   conversationId,
   makeAgent,
   makeChatTurn,
@@ -17,7 +18,17 @@ import {
   toolId,
   wsId,
 } from '@agentdeck/domain/testing'
-import type { ActionId, BlobRef, RunMessage, RunStatus, VerdictId } from '@agentdeck/protocol'
+import type {
+  Action,
+  ActionId,
+  Artifact,
+  AuditRecord,
+  BlobRef,
+  RunMessage,
+  RunStatus,
+  VerdictId,
+  VerdictRecord,
+} from '@agentdeck/protocol'
 import {
   SQLITE_STORE_FORMAT_VERSION,
   SqliteStore,
@@ -1767,5 +1778,274 @@ describe('打开期校验与关闭', () => {
     } finally {
       await cleanup(d)
     }
+  })
+})
+
+describe('deleteRun：删掉一条 run 连同它派生的一切（与文件适配器同一串操作）', () => {
+  async function seedFullRun(s: SqliteStore, id: string) {
+    const rid = runId(id)
+    await s.insertRun(makeRun({ id, workspaceId: WS, agentId: 'a1', status: 'completed' }))
+    await s.appendRunMessage(rid, {
+      seq: 0,
+      type: 'text',
+      tool: null,
+      content: 'm0',
+      input: null,
+      output: null,
+      outputTruncated: false,
+      at: 1000,
+    })
+    const convId = conversationId('c1')
+    await s.insertConversation(makeConversation({ id: 'c1', workspaceId: WS, turnCount: 2 }))
+    await s.insertChatTurn(
+      makeChatTurn({ id: 't1', conversationId: 'c1', workspaceId: WS, seq: 1, runId: rid }),
+    )
+    await s.insertChatTurn(
+      makeChatTurn({ id: 't2', conversationId: 'c1', workspaceId: WS, seq: 2, runId: null }),
+    )
+    const vid = 'v1' as VerdictId
+    await s.insertVerdict({
+      id: vid,
+      workspaceId: WS,
+      runId: rid,
+      subject: { type: 'issue', id: 'i1' as never },
+      status: 'dispatched_to_action',
+      conclusion: 'pass',
+      reasonCode: 'ok' as VerdictRecord['reasonCode'],
+      confidence: 0.9,
+      findings: [],
+      action: { type: 'x.y', params: {} },
+      escalateReason: null,
+      invalidResolution: null,
+      skillRefs: [],
+      modelId: null,
+      promptHash: null,
+      createdAt: 1,
+    })
+    await s.insertAction({
+      id: 'act1' as Action['id'],
+      workspaceId: WS,
+      verdictId: vid,
+      type: 'x.y',
+      plane: 'local',
+      params: {},
+      status: 'executed',
+      idempotencyKey: 'k1',
+      dryRun: false,
+      result: null,
+      error: null,
+      rollbackRef: null,
+      createdAt: 1,
+      finishedAt: 1,
+    })
+    await s.insertArtifact({
+      id: 'art1' as Artifact['id'],
+      workspaceId: WS,
+      runId: rid,
+      kind: 'document',
+      summary: '产出',
+      blobRef: `sha256:${'a'.repeat(64)}` as BlobRef,
+      createdAt: 1,
+    })
+    await s.appendAudit({
+      id: 'aud1' as AuditRecord['id'],
+      workspaceId: WS,
+      runId: rid,
+      subject: { type: 'issue', id: 'i1' },
+      inputBlobRefs: [],
+      skillRefs: [],
+      runtimeDescriptorKey: 'claude',
+      cliVersion: '1',
+      modelId: null,
+      promptHash: null,
+      argvRedacted: ['claude'],
+      verdictId: null,
+      actionIds: [],
+      queuedAt: 1,
+      startedAt: null,
+      finishedAt: null,
+      usage: null,
+    })
+    return { rid, convId }
+  }
+
+  test('删掉一条孤立 run：返回 true、记录与消息没了；再删一次返回 false（幂等，不是错误）', async () => {
+    const d = await makeTempDir('delrun-sql-1')
+    try {
+      const s = await SqliteStore.open({ dataDir: d, fsync: false })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      const rid = runId('r-iso')
+      await s.insertRun(makeRun({ id: 'r-iso', workspaceId: WS, agentId: 'a1', status: 'failed' }))
+      await s.appendRunMessage(rid, {
+        seq: 0,
+        type: 'text',
+        tool: null,
+        content: 'm0',
+        input: null,
+        output: null,
+        outputTruncated: false,
+        at: 1000,
+      })
+
+      assert.equal(await s.deleteRun(rid), true)
+      assert.equal(await s.getRun(rid), null)
+      await assert.rejects(() => s.listRunMessages(rid), /找不到 run/)
+      assert.equal(await s.deleteRun(rid), false)
+      await s.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★ 连带删除：引用它的对话轮次删掉、另一个轮次与对话保留、turnCount 重算', async () => {
+    const { rid, convId } = await seedFullRun(store, 'r-full')
+    assert.equal((await store.getConversation(convId))?.turnCount, 2)
+
+    assert.equal(await store.deleteRun(rid), true)
+
+    assert.equal(await store.getRun(rid), null)
+    const turns = await store.listChatTurns(convId)
+    assert.deepEqual(
+      turns.map((t) => t.id),
+      [chatTurnId('t2')],
+    )
+    assert.equal((await store.getConversation(convId))?.turnCount, 1)
+  })
+
+  test('★ 连带删除：verdict、由它触发的 action、artifact 都删掉；审计记录保留', async () => {
+    const { rid } = await seedFullRun(store, 'r-full2')
+    assert.equal(await store.deleteRun(rid), true)
+
+    assert.deepEqual(await store.listVerdictsByRun(rid), [])
+    assert.deepEqual(await store.listActionsByVerdict('v1' as VerdictId), [])
+    assert.deepEqual(await store.listArtifactsByRun(rid), [])
+    const audits = await store.listAuditsByRun(rid)
+    assert.equal(audits.length, 1)
+    assert.equal(audits[0]!.id, 'aud1')
+  })
+
+  test('★ 孤立对话（没有轮次引用这条 run）不受影响', async () => {
+    const d = await makeTempDir('delrun-sql-2')
+    try {
+      const s = await SqliteStore.open({ dataDir: d, fsync: false })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+      const rid = runId('r-orphan')
+      await s.insertRun(makeRun({ id: 'r-orphan', workspaceId: WS, agentId: 'a1', status: 'completed' }))
+      const convId = conversationId('c2')
+      await s.insertConversation(makeConversation({ id: 'c2', workspaceId: WS, turnCount: 1 }))
+      await s.insertChatTurn(
+        makeChatTurn({ id: 't3', conversationId: 'c2', workspaceId: WS, seq: 1, runId: runId('other') }),
+      )
+
+      await s.deleteRun(rid)
+      assert.deepEqual(
+        (await s.listChatTurns(convId)).map((t) => t.id),
+        [chatTurnId('t3')],
+      )
+      assert.equal((await s.getConversation(convId))?.turnCount, 1)
+      await s.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+})
+
+describe('deleteIssue：删掉一条任务连同挂它名下的一切（与文件适配器同一串操作）', () => {
+  test('★ 删任务 = 执行 run + 审核链 run + 评论 + issue 本体一起删；审计保留；聊天 run 不碰', async () => {
+    const d = await makeTempDir('delissue-sql-1')
+    try {
+      const s = await SqliteStore.open({ dataDir: d, fsync: false })
+      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+
+      await s.insertIssue(makeIssue({ id: 'i-del', workspaceId: WS, title: '要删的任务' }))
+      await s.insertComment({
+        id: 'c1' as never,
+        workspaceId: WS,
+        issueId: 'i-del' as never,
+        authorType: 'member' as const,
+        authorId: 'me',
+        type: 'comment' as const,
+        content: '评论',
+        createdAt: 1,
+      })
+
+      const execId = runId('r-exec')
+      await s.insertRun(
+        makeRun({
+          id: 'r-exec',
+          workspaceId: WS,
+          agentId: 'a1',
+          status: 'completed',
+          subject: { type: 'issue', id: 'i-del' },
+          trigger: 'assignment',
+        }),
+      )
+      await s.appendRunMessage(execId, {
+        seq: 0,
+        type: 'text',
+        tool: null,
+        content: 'm0',
+        input: null,
+        output: null,
+        outputTruncated: false,
+        at: 1000,
+      })
+      await s.insertRun(
+        makeRun({
+          id: 'r-review',
+          workspaceId: WS,
+          agentId: 'a1',
+          status: 'completed',
+          subject: { type: 'run', id: 'r-exec' },
+          trigger: 'assignment',
+          kind: 'review',
+        }),
+      )
+      await s.insertRun(
+        makeRun({
+          id: 'r-chat',
+          workspaceId: WS,
+          agentId: 'a1',
+          status: 'completed',
+          subject: { type: 'conversation', id: 'c-chat' },
+          trigger: 'chat',
+        }),
+      )
+      await s.appendAudit({
+        id: 'aud-del' as AuditRecord['id'],
+        workspaceId: WS,
+        runId: execId,
+        subject: { type: 'issue', id: 'i-del' },
+        inputBlobRefs: [],
+        skillRefs: [],
+        runtimeDescriptorKey: 'claude',
+        cliVersion: '1',
+        modelId: null,
+        promptHash: null,
+        argvRedacted: ['claude'],
+        verdictId: null,
+        actionIds: [],
+        queuedAt: 1,
+        startedAt: null,
+        finishedAt: null,
+        usage: null,
+      })
+
+      assert.equal(await s.deleteIssue('i-del' as never), true)
+
+      assert.equal(await s.getIssue('i-del' as never), null)
+      assert.deepEqual(await s.listComments('i-del' as never), [])
+      assert.equal(await s.getRun(execId), null)
+      assert.equal(await s.getRun(runId('r-review')), null)
+      assert.ok(await s.getRun(runId('r-chat')))
+      assert.equal((await s.listAuditsByRun(execId)).length, 1)
+      await s.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★ 不存在的任务返回 false（幂等，不是错误）', async () => {
+    assert.equal(await store.deleteIssue('nope' as never), false)
   })
 })

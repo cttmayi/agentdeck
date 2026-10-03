@@ -4,13 +4,20 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import {
+  DEFAULT_GITHUB_PROXY,
+  assertValidPathPatterns,
+  globToRegExp,
+  matchingExclude,
   MAX_FILES,
   MAX_SKILL_BYTES,
   SkillSourceError,
+  githubRequestTarget,
   isProbablyText,
+  parseGithubProxy,
   parseGithubUrl,
   resolveGithubUrl,
   resolveLocalPath,
+  resolveGithubProxy,
   resolvePayloadEntry,
   resolveSkillSource,
   toSlug,
@@ -717,5 +724,289 @@ describe('统一入口', () => {
     } finally {
       await cleanup(dir)
     }
+  })
+})
+
+/**
+ * 一个"加速器"的假实现：把 `<base>/<原地址>` 还原成原地址，并**把收到的请求头记下来**。
+ *
+ * 记请求头是这几条用例的重点：**走代理时不许把 token 交给它**。
+ */
+function fakeProxyGithub(
+  files: Record<string, string>,
+  proxyBase = 'https://gh-proxy.com',
+): { impl: typeof fetch; seen: Array<{ url: string; authorization: string | null }> } {
+  const seen: Array<{ url: string; authorization: string | null }> = []
+
+  const serve = (url: string): Response => {
+    const raw = /^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/(.*)$/.exec(url)
+    if (raw) {
+      const content = files[raw[1]!]
+      if (content === undefined) return new Response('not found', { status: 404 })
+      return new Response(content, {
+        status: 200,
+        headers: { 'content-length': String(Buffer.byteLength(content, 'utf8')) },
+      })
+    }
+    const contents = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/contents\/(.*?)(?:\?|$)/.exec(url)
+    if (contents) {
+      const dir = contents[1] ?? ''
+      const names = new Map<string, { path: string; isDir: boolean }>()
+      for (const path of Object.keys(files)) {
+        if (dir !== '' && !path.startsWith(`${dir}/`)) continue
+        const rest = dir === '' ? path : path.slice(dir.length + 1)
+        const [head, ...tail] = rest.split('/')
+        if (!head) continue
+        names.set(head, { path: dir === '' ? head : `${dir}/${head}`, isDir: tail.length > 0 })
+      }
+      const entries = [...names.entries()].map(([name, e]) => ({
+        name,
+        path: e.path,
+        type: e.isDir ? 'dir' : 'file',
+        ...(e.isDir
+          ? {}
+          : {
+              size: Buffer.byteLength(files[e.path] ?? '', 'utf8'),
+              download_url: `https://raw.githubusercontent.com/o/r/main/${e.path}`,
+            }),
+      }))
+      return new Response(JSON.stringify(entries), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response('unexpected url', { status: 500 })
+  }
+
+  const impl = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const authorization = new Headers((init?.headers ?? {}) as Record<string, string>).get('authorization')
+    seen.push({ url, authorization })
+    if (!url.startsWith(`${proxyBase}/https://`)) {
+      return new Response(`没走代理：${url}`, { status: 502 })
+    }
+    return serve(url.slice(proxyBase.length + 1))
+  }) as typeof fetch
+
+  return { impl, seen }
+}
+
+describe('★ GitHub 加速器（可选；第三方，默认不用）', () => {
+  test('改写规则：只代理 GitHub 自己的主机，且**不带凭证**', () => {
+    const raw = 'https://raw.githubusercontent.com/o/r/main/x/SKILL.md'
+    const api = 'https://api.github.com/repos/o/r/contents/x'
+
+    assert.deepEqual(githubRequestTarget(raw, null), { url: raw, sendAuth: true })
+    assert.deepEqual(githubRequestTarget(raw, 'https://gh-proxy.com'), {
+      url: `https://gh-proxy.com/${raw}`,
+      sendAuth: false,
+    })
+    assert.deepEqual(githubRequestTarget(api, 'https://gh-proxy.com'), {
+      url: `https://gh-proxy.com/${api}`,
+      sendAuth: false,
+    })
+    // ★ 使用者自己填的**非 GitHub** 地址不会被"顺手"代理过去：加速器不该变成
+    //   一个访问任意地址的跳板（那正是本包白名单存在的理由）
+    const other = 'https://evil.example.com/x'
+    assert.deepEqual(githubRequestTarget(other, 'https://gh-proxy.com'), {
+      url: other,
+      sendAuth: true,
+    })
+  })
+
+  test('加速器地址本身要校验：必须 https、不能就是 GitHub', () => {
+    assert.equal(parseGithubProxy('https://gh-proxy.com/'), 'https://gh-proxy.com')
+    assert.equal(parseGithubProxy('https://host/gh'), 'https://host/gh', '允许带路径前缀')
+    assert.throws(() => parseGithubProxy('http://gh-proxy.com'), /https/)
+    assert.throws(() => parseGithubProxy('https://raw.githubusercontent.com'), /GitHub 自己/)
+    assert.throws(() => parseGithubProxy('不是 URL'), /合法的 URL/)
+  })
+
+  test('★★ 走代理装技能：请求都发给代理，而且**一个 authorization 都不带**', async () => {
+    const files = { 'skills/foo/SKILL.md': '# 正文', 'skills/foo/extra.md': '补充' }
+    const proxy = fakeProxyGithub(files)
+
+    const resolved = await resolveGithubUrl(
+      'https://github.com/o/r/tree/main/skills/foo',
+      {},
+      {
+        fetchImpl: proxy.impl,
+        // ⚠️ 故意塞一个 token：它**绝不该**出现在发给代理的请求里
+        githubToken: 'secret-token-must-not-leak',
+        githubProxy: 'https://gh-proxy.com',
+      },
+    )
+
+    assert.equal(resolved.body, '# 正文')
+    assert.ok(proxy.seen.length > 0)
+    for (const req of proxy.seen) {
+      assert.ok(req.url.startsWith('https://gh-proxy.com/https://'), `请求该发给代理：${req.url}`)
+      assert.equal(
+        req.authorization,
+        null,
+        '★ 凭证不许交给第三方：代理自己带凭证，我们的 token 没理由给它看',
+      )
+    }
+  })
+
+  test('★ 直连时照旧带 token（"不带"是走代理才有的规矩，不是一律去掉）', async () => {
+    const seen: Array<string | null> = []
+    // 直连用的假 GitHub（**不要求**代理前缀——那正是这条用例在验的事）
+    const inner = fakeGithub({ 'skills/foo/SKILL.md': '# 正文' })
+    const impl = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      seen.push(new Headers((init?.headers ?? {}) as Record<string, string>).get('authorization'))
+      return inner.impl(input as string, init)
+    }) as typeof fetch
+
+    await resolveGithubUrl(
+      'https://github.com/o/r/tree/main/skills/foo',
+      {},
+      { fetchImpl: impl, githubToken: 'token-abc' },
+    )
+
+    assert.ok(seen.length > 0)
+    assert.ok(
+      seen.every((h) => h === 'Bearer token-abc'),
+      `直连时该带上 token，实际：${JSON.stringify(seen)}`,
+    )
+  })
+
+  test('★ 配了加速器也不放行其它主机：跳转到白名单外照样被挡', async () => {
+    const impl = (async (): Promise<Response> =>
+      new Response('', {
+        status: 302,
+        headers: { location: 'https://evil.example.com/payload' },
+      })) as typeof fetch
+
+    await assert.rejects(
+      () =>
+        resolveGithubUrl(
+          'https://github.com/o/r/tree/main/skills/foo',
+          {},
+          { fetchImpl: impl, githubProxy: 'https://gh-proxy.com' },
+        ),
+      /白名单/,
+    )
+  })
+})
+
+describe('★ `--github-proxy` 的取值规则（裸写 = 默认加速器）', () => {
+  test('★ 裸写旗标 ⇒ 用默认加速器；不给 ⇒ 直连（默认仍然是不开）', () => {
+    assert.equal(DEFAULT_GITHUB_PROXY, 'https://gh-proxy.com')
+    assert.equal(resolveGithubProxy({ flagValue: true }), DEFAULT_GITHUB_PROXY)
+    assert.equal(resolveGithubProxy({ flagValue: '' }), DEFAULT_GITHUB_PROXY, '空串也算裸写')
+    assert.equal(resolveGithubProxy({}), null, '★ 没给旗标就是直连——"默认关"这条没有变')
+    assert.equal(resolveGithubProxy({ envValue: '' }), null)
+  })
+
+  test('★ 给了地址就用它；`off` / `none` 是直连（并且能覆盖环境变量）', () => {
+    assert.equal(resolveGithubProxy({ flagValue: 'https://other.example' }), 'https://other.example')
+    assert.equal(resolveGithubProxy({ flagValue: 'off' }), null)
+    assert.equal(resolveGithubProxy({ flagValue: 'none' }), null)
+    assert.equal(
+      resolveGithubProxy({ flagValue: 'off', envValue: 'https://gh-proxy.com' }),
+      null,
+      '命令行优先：环境变量开着也能被这一次的调用盖掉',
+    )
+    assert.equal(resolveGithubProxy({ envValue: 'off' }), null)
+  })
+
+  test('★ 环境变量只在没给旗标时生效；非法地址照旧当场拒绝', () => {
+    assert.equal(resolveGithubProxy({ envValue: 'https://gh-proxy.com' }), 'https://gh-proxy.com')
+    assert.equal(
+      resolveGithubProxy({ flagValue: true, envValue: 'https://other.example' }),
+      DEFAULT_GITHUB_PROXY,
+      '旗标优先于环境变量',
+    )
+    assert.throws(() => resolveGithubProxy({ flagValue: 'http://x.com' }), /https/)
+    assert.throws(() => resolveGithubProxy({ envValue: '不是 URL' }), /合法的 URL/)
+  })
+})
+
+describe('★ 清单声明的 include / exclude（"哪些文件是必须的"由维护者声明）', () => {
+  test('glob 语义：`**` 跨目录、`*` 不跨、`?` 单字符', () => {
+    assert.equal(globToRegExp('docs/**').test('docs/a.png'), true)
+    assert.equal(globToRegExp('docs/**').test('docs/x/y.png'), true)
+    assert.equal(globToRegExp('docs/**').test('assets/a.png'), false)
+    assert.equal(globToRegExp('assets/*.png').test('assets/a.png'), true)
+    assert.equal(globToRegExp('assets/*.png').test('assets/x/a.png'), false, '`*` 不跨目录')
+    assert.equal(globToRegExp('a?c.txt').test('abc.txt'), true)
+    assert.equal(globToRegExp('./docs/**').test('docs/a.png'), true, '开头的 `./` 无所谓')
+  })
+
+  test('★ `SKILL.md` 永远不被排除（少了它就不是技能）', () => {
+    assert.equal(matchingExclude('SKILL.md', ['**', 'SKILL.md', '*.md']), null)
+    assert.equal(matchingExclude('docs/a.png', ['docs/**']), 'docs/**', '别的文件照常排除')
+  })
+
+  test('★ 抓取时**在下载之前**剪枝：被排除的文件一个字节都不下、且逐个记进 ignored', async () => {
+    // ⚠️ 键是**仓库相对**路径（假 GitHub 按它过滤目录）——目标目录是 skills/foo
+    const files = {
+      'skills/foo/SKILL.md': '# 正文',
+      'skills/foo/references/a.md': '参考',
+      'skills/foo/assets/big.png': 'x'.repeat(200_000),
+      'skills/foo/docs/readme/hero.md': 'README 图说明',
+      'skills/foo/scripts/verify-output/out.png': 'y'.repeat(400_000),
+    }
+    const gh = fakeGithub(files)
+    const resolved = await resolveGithubUrl(
+      'https://github.com/o/r/tree/main/skills/foo',
+      {},
+      { fetchImpl: gh.impl, filter: { exclude: ['docs/**', 'scripts/verify-output/**', 'assets/*.png'] } },
+    )
+
+    // 装进来的：只剩该留的
+    assert.equal(resolved.body, '# 正文')
+    assert.deepEqual(Object.keys(resolved.files), ['references/a.md'])
+    // ★ 结构化记下"被清单排除的"（要一路传到界面上）。
+    //   ⚠️ 目录图案（`docs/**`）是在**目录那一层**剪掉的，所以记下来的是 `docs/`
+    //   而不是它里面的每个文件——这更好：少跑一趟列目录，报出来也更清楚
+    //   （"整目录排除了"比"跳过了 12 个文件"更接近维护者写的声明）。
+    assert.deepEqual(
+      resolved.excluded.map((e) => e.path).sort(),
+      ['assets/big.png', 'docs/', 'scripts/verify-output/'],
+    )
+    // ★ 也必须出现在 `ignored` 里（装进来的记录要如实显示"没装什么"）
+    for (const path of ['assets/big.png', 'docs/']) {
+      const hit = resolved.ignored.find((i) => i.path === path)
+      assert.ok(hit, `${path} 要出现在 ignored 里`)
+      assert.match(hit.reason, /清单里排除了/, '原因要说清是清单声明的，不是抓取出错')
+    }
+    // ★ 真正的判据：那三个文件**一次都没被请求**（不然 3.5 MB 的营销图还是白下）
+    assert.ok(
+      !gh.calls.some((u) => /big\.png|hero\.md|out\.png/.test(u)),
+      `被排除的文件不该被下载，实际请求：${gh.calls.join(' | ')}`,
+    )
+  })
+
+  test('★ include 是白名单：只取列出的（SKILL.md 始终保留），且不相干的目录**连列都不列**', async () => {
+    const files = {
+      'skills/foo/SKILL.md': '# 正文',
+      'skills/foo/references/a.md': '参考',
+      'skills/foo/scripts/run.sh': 'echo',
+      'skills/foo/docs/readme/hero.md': '说明',
+    }
+    const gh = fakeGithub(files)
+    const resolved = await resolveGithubUrl(
+      'https://github.com/o/r/tree/main/skills/foo',
+      {},
+      { fetchImpl: gh.impl, filter: { include: ['references/**'] } },
+    )
+    assert.deepEqual(Object.keys(resolved.files), ['references/a.md'])
+    assert.equal(resolved.body, '# 正文', 'SKILL.md 始终保留')
+    // 省调用：`docs`/`scripts` 不可能命中 include ⇒ 连它们的目录列表都不该请求
+    assert.ok(
+      !gh.calls.some((u) => u.includes('contents/docs') || u.includes('contents/scripts')),
+      `不相关的目录不该白跑一趟：${gh.calls.join(' | ')}`,
+    )
+  })
+
+  test('★ 图案形状校验：绝对路径、`..`、排除 SKILL.md 都当场拒绝', () => {
+    assert.throws(() => assertValidPathPatterns(['/etc/**'], 'exclude', '第 1 条'), /相对路径/)
+    assert.throws(() => assertValidPathPatterns(['../**'], 'exclude', '第 1 条'), /相对路径/)
+    assert.throws(() => assertValidPathPatterns(['**'], 'exclude', '第 1 条'), /SKILL\.md/)
+    assert.throws(() => assertValidPathPatterns([''], 'exclude', '第 1 条'), /空图案/)
+    assert.doesNotThrow(() => assertValidPathPatterns(['docs/**'], 'exclude', '第 1 条'))
   })
 })

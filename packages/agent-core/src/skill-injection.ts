@@ -91,6 +91,42 @@ export function splitFrontmatter(content: string): { frontmatter: string | null;
 }
 
 /**
+ * 只读地取出 SKILL.md frontmatter 里的元数据。
+ *
+ * 与 `normalizeSkillFrontmatter` 的区别：**不改写、不注入**，只把作者写了
+ * 的 `name` / `description` 原样拿出来。用途：安装/扫描落库时把作者写的
+ * `description` 一并存进 `Skill.description`——否则界面列表里永远只有
+ * "没有说明"，而作者明明在 frontmatter 里写了一句。
+ *
+ * `name` 只在这里**不权威**：列表显示名仍以 slug 为准（同名不同源的技能
+ * 必须可区分，见 `normalizeSkillFrontmatter` 的注释），所以它只是顺手
+ * 带出来，调用方要用才用。
+ *
+ * frontmatter 缺失或 YAML 损坏时返回 `{}`（不抛）：作者没写不是异常，
+ * 那正是"没有 description"的正当来源。
+ */
+export function extractSkillMeta(
+  content: string,
+): { name?: string; description?: string | null } {
+  const { frontmatter } = splitFrontmatter(content)
+  if (frontmatter === null) return {}
+  let parsed: unknown
+  try {
+    parsed = parseYaml(frontmatter)
+  } catch {
+    return {}
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const meta = parsed as Record<string, unknown>
+  const name = typeof meta['name'] === 'string' && meta['name'].trim() !== '' ? meta['name'].trim() : undefined
+  const description =
+    typeof meta['description'] === 'string' && meta['description'].trim() !== ''
+      ? meta['description'].trim()
+      : null
+  return name === undefined && description === null ? {} : { ...(name !== undefined ? { name } : {}), ...(description !== null ? { description } : {}) }
+}
+
+/**
  * 规范化技能元数据。
  *
  * 处理三种残缺：

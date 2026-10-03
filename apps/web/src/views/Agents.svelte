@@ -10,8 +10,11 @@
     loadError,
     setDefaultAgent,
   } from '../lib/stores.ts'
+  import MainArea from '../components/MainArea.svelte'
   import NewAgentForm from '../components/NewAgentForm.svelte'
   import WorkspaceSettings from '../components/WorkspaceSettings.svelte'
+  import ListPane from '../components/ListPane.svelte'
+  import ListRow from '../components/ListRow.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
@@ -52,6 +55,14 @@
    */
   /** 当前点开查看的 agent。null = 还没有选（右栏显示占位）。 */
   let selectedId: string | null = null
+  /**
+   * 页面级动作失败（现在只有「设为默认」）。
+   *
+   * ★ 必须写出来：原来那里是裸 `void setDefaultAgent(a.id)`，失败时客户端拿到的
+   *   是一个 **unhandled rejection**、界面上毫无反应——而"设为默认"失败的样子
+   *   与成功**一模一样**（徽标不动），使用者会以为已经设上了。
+   */
+  let actionError = ''
   $: selected = $agents.find((a) => a.id === selectedId) ?? null
 
   /**
@@ -72,6 +83,19 @@
   let creating = false
 
   /**
+   * 栏头带的搜索（D62）：与任务页列表模式同款。只过滤**名称与指令**——
+   * 关系（审核者是谁、几个技能）是次要信息，搜它反而容易找不到想要的。
+   */
+  let filter = ''
+  $: visibleAgents = $agents.filter((a) => {
+    if (!filter.trim()) return true
+    const q = filter.trim().toLowerCase()
+    return (
+      a.name.toLowerCase().includes(q) || a.instructions.trim().toLowerCase().includes(q)
+    )
+  })
+
+  /**
    * 打开「设置」（右侧抽屉）。
    *
    * ★ 里面装的是**平台行为**的设置：现在有"第一句话模版"（D32，通用配置——
@@ -89,21 +113,6 @@
    *    与普通代码不同——svelte-check 会如实报出来，tsc 根本看不到这些行。
    */
   $: envIssues = $identity?.environment?.issues ?? []
-
-  /**
-   * 版本判定状态 → 标签。
-   *
-   * ⚠️ 用 `$:` 而不是 `const`（D39）：标签要**跟着界面语言变**。写成 `const`
-   *    只在组件初始化时算一次，切语言时这五行会停在旧语言上——而它们恰恰是
-   *    使用者判断"这个 runtime 可信不可信"的依据。
-   */
-  $: SUPPORT_LABEL = {
-    verified: $t('agents.supportVerified'),
-    'in-range-unverified': $t('agents.supportInRange'),
-    'out-of-range': $t('agents.supportOutOfRange'),
-    undeclared: $t('agents.supportUndeclared'),
-    unknown: $t('agents.supportUnknown'),
-  } as Record<string, string>
 
   function refresh(): void {
     void Promise.all([loadAgents(), loadIdentity()])
@@ -123,8 +132,16 @@
   $: setPageActions('agents', [
     {
       id: 'new',
-      label: $t('agents.newButton'),
+      /*
+       * ★ 复用**它打开的那个面板的标题**（`agents.newTitle`），不另立一条按钮词条：
+       *   2026-10 使用者要求按钮从「新建」改成「新建智能体」——而抽屉标题早就是
+       *   「新建智能体」，两处一直各写一份、于是按钮与它打开的面板说的不是一句话。
+       *   合成一条之后，"同一句话只有一个出处"这件事在界面上看得见（任务页那条
+       *   `shell.navNewTask` 是同一个做法）。
+       */
+      label: $t('agents.newTitle'),
       kind: 'primary',
+      icon: 'plus',
       disabled: creating,
       onActivate: () => {
         creating = true
@@ -148,28 +165,44 @@
       id: 'refresh',
       label: $t('common.refresh'),
       kind: 'secondary',
+      icon: 'refresh',
       onActivate: refresh,
     },
   ])
   onDestroy(() => clearPageActions('agents'))
 </script>
 
+<!--
+  ★ 页头导语（D63 去掉）：原来是「这里配置每个智能体：它的指令、行动权限，以及
+  由谁来审它。」（`agents.headIntro`）——它与技能页/工具页同款。2026-10 使用者
+  点名去掉：这句是在复述下面每一条卡片已经在说的话（指令 / 行动权限 / 审核者都在
+  卡片与详情里），而顶栏页名 + 栏头带已经把"这一页是什么"说清了。技能页/工具页
+  保留自己的导语（它们没有别的地方说那一句）；这一页删。
+-->
+
 <div class="split-layout" class:with-detail={selected !== null}>
   <!-- ══════════════════ 左栏：智能体清单 + Runtime ══════════════════ -->
-  <section class="pane list-pane">
-    <!--
-      ⚠️ 这一栏**没有栏头了**（2026-09），原来那三样各有去处：
-         · `<h2>智能体</h2>` → 它与顶栏的页名**一字不差**，删了（同一页上下两处
-           写同一句话，看起来像渲染错了）；
-         · 那一排按钮（新建 / 设置 / 刷新）→ 顶栏里、紧跟着页名（各视图登记，
-           见 `lib/page-actions.ts`）；
-         · 说明段"每个智能体独立配置指令、技能子集与角色：…" → 按要求去掉，并
-           **并进了右栏空态**（`agents.pickOneRole*`）——那段话讲的是"选中一个
-           智能体之后你会看到什么"，只有右栏真的空着时才需要它。
-         左栏因此直接从清单开始，一屏能多看两条。
-    -->
-    <div class="pane-body">
-
+  <!--
+    ⚠️ 左栏从"没有栏头"（2026-09）到 D62 加回一条与任务/智能体同款的
+    「计数 + 搜索」栏头带（栏头里**没有标题**——它与顶栏页名一字不差；
+    规则：栏标题 ≠ 页名才放标题）。D66：整栏（栏头带 + 五态壳）收进标准
+    控件 ListPane，这一页只给内容 snippet。
+  -->
+  <ListPane
+    countLabel={$t('agents.listCount', { count: visibleAgents.length })}
+    searchPlaceholder={$t('agents.search')}
+    filter={filter}
+    onFilter={(v) => (filter = v)}
+    loading={($loading['agents'] && $agents.length === 0) ?? false}
+    loadError={$loadError['agents'] ?? null}
+    empty={$agents.length === 0}
+    emptyTitle={$t('agents.emptyTitle')}
+    emptyHint={$t('agents.emptyHint')}
+    emptyFiltered={visibleAgents.length === 0}
+    emptyFilteredTitle={$t('agents.emptyFiltered')}
+    emptyFilteredHint={$t('agents.emptyFilteredHint')}
+  >
+    {#snippet top()}
       {#if envIssues.length > 0}
         <!--
           环境预检的问题要显示出来。它最常见的形态是"CLI 自己的状态目录写不进去"，
@@ -186,78 +219,78 @@
           {/each}
         </section>
       {/if}
-
-      {#if $loading['agents'] && $agents.length === 0}
-        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-        <div class="skeleton" style="width:60%"></div>
-      {:else if $loadError['agents']}
-        <div class="notice bad">{$loadError['agents']}</div>
-      {:else if $agents.length === 0}
-        <div class="empty">
-          <strong>{$t('agents.emptyTitle')}</strong>
-          {$t('agents.emptyHint')}
-        </div>
-      {:else}
-        <ul class="agent-list">
-          {#each $agents as a (a.id)}
-            {@const reviewer =
-              a.role === 'reviewer'
-                ? $t('agents.reviewsOthers')
-                : !a.reviewerAgentId
-                  ? $t('agents.noAutoReview')
-                  : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ??
-                    $t('agents.reviewerMissing'))}
-            <!-- 整条可点：只在名字上加链接的话命中区域太小，而且其余字段看起来像"不可点" -->
-            <!--
-              ⚠️ 「设为默认」是**兄弟节点**，不能放进 `.agent-item` 里面：
-                 那个按钮本身就是一条整行可点的 `<button>`，按钮里套按钮是
-                 非法结构，浏览器会把里层那个拆出去（点起来就是坏的）。
-            -->
-            <li class="agent-row" class:active={a.id === selectedId}>
-              <button
-                type="button"
-                class="agent-item"
-                onclick={() => (selectedId = a.id)}
-              >
-                <span class="agent-line">
-                  <strong>{a.name}</strong>
-                  <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
-                    {a.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
-                  </span>
-                  <!--
-                    ⚠️ 这里原来有一个「未挂 skill」徽标（`a.role === 'reviewer' &&
-                       a.skillIds.length === 0` 时显示）。**整段删掉了**，理由是它
-                       写下的那句话**已经不是真的**：
-
-                       注释原本说"审核者不挂 skill 就审不了任何东西"。那是 D37 之前
-                       的事——那时审核标准就住在挂载的 skill 里。D37 之后标准**内联在
-                       审核者身上**（`Agent.reviewStandard`），`resolveReviewStandard()`
-                       也是**先看内联标准**、只有它为空时才回退到挂载的 skill。
-                       实测线上那个「助手审核员」正是这种形态：`skillIds` 是空的、
-                       内联标准是有的、审核跑得完全正常——而列表上给它挂了一个
-                       看起来像故障的标记。
-
-                       ★ 一个**指向不存在的故障**的标记比没有标记更糟：使用者会去
-                       找一个不需要修的问题，甚至可能为了消掉它而给审核者硬挂一份
-                       用不上的 skill。真要表达"这个审核者没有判断依据"，该看的是
-                       内联标准在不在，而那是**智能体详情页**的事（列表上不显示标准
-                       正文，在这里断言它有没有就成了第二套判断）。
-                  -->
-                  {#if a.id === $effectiveDefaultAgentId}
-                    <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
-                    <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
-                  {/if}
+    {/snippet}
+    {#snippet loadingSkeleton()}
+      <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
+      <div class="skeleton" style="width:60%"></div>
+    {/snippet}
+    {#snippet readyTop()}
+      <!-- ★ 「设为默认」失败要看得见：列表就在下面，错误在它上面一行 -->
+      {#if actionError}
+        <div class="notice bad">{actionError}</div>
+      {/if}
+    {/snippet}
+    {#snippet rows()}
+      <ul class="agent-list">
+        {#each visibleAgents as a (a.id)}
+          {@const reviewer =
+            a.role === 'reviewer'
+              ? $t('agents.reviewsOthers')
+              : !a.reviewerAgentId
+                ? $t('agents.noAutoReview')
+                : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ??
+                  $t('agents.reviewerMissing'))}
+          <ListRow
+            rowClass="agent-row"
+            active={a.id === selectedId}
+            onclick={() => (selectedId = a.id)}
+          >
+            {#snippet children()}
+              <span class="agent-line">
+                <strong>{a.name}</strong>
+                <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
+                  {a.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
                 </span>
-                <span class="agent-note faint small">
+                <!--
+                  ⚠️ 这里原来有一个「未挂 skill」徽标（`a.role === 'reviewer' &&
+                     a.skillIds.length === 0` 时显示）。**整段删掉了**，理由是它
+                     写下的那句话**已经不是真的**：
+
+                     注释原本说"审核者不挂 skill 就审不了任何东西"。那是 D37 之前
+                     的事——那时审核标准就住在挂载的 skill 里。D37 之后标准**内联在
+                     审核者身上**（`Agent.reviewStandard`），`resolveReviewStandard()`
+                     也是**先看内联标准**、只有它为空时才回退到挂载的 skill。
+                     实测线上那个「助手审核员」正是这种形态：`skillIds` 是空的、
+                     内联标准是有的、审核跑得完全正常——而列表上给它挂了一个
+                     看起来像故障的标记。
+
+                     ★ 一个**指向不存在的故障**的标记比没有标记更糟：使用者会去
+                     找一个不需要修的问题，甚至可能为了消掉它而给审核者硬挂一份
+                     用不上的 skill。真要表达"这个审核者没有判断依据"，该看的是
+                     内联标准在不在，而那是**智能体详情页**的事（列表上不显示标准
+                     正文，在这里断言它有没有就成了第二套判断）。
+                -->
+                {#if a.id === $effectiveDefaultAgentId}
+                  <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
+                  <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
+                {/if}
+              </span>
+              <!--
+                ★ 2026-10（紧凑性）：指令摘要与元信息不再各占一整行——合并成
+                一行：摘要可截断（flex:1）、元信息不收缩靠右。
+              -->
+              <span class="agent-notes faint small">
+                <span class="agent-notes-trunc">
                   {a.instructions.trim()
                     ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
                     : $t('agents.noInstructions')}
                 </span>
-                <span class="agent-note faint small">
+                <span class="agent-notes-meta">
                   {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}<code>{a.runtimeKey}</code>
                 </span>
-              </button>
-
+              </span>
+            {/snippet}
+            {#snippet action()}
               <!--
                 ★ 「默认」是**单选**：每个 agent 一个「设为默认」，点谁就是谁——
                   设了新的，原来那个自动不再是默认。**没有「取消默认」**：
@@ -274,39 +307,47 @@
                   title={$t('agents.setDefaultTitle')}
                   onclick={(e) => {
                     e.stopPropagation()
-                    void setDefaultAgent(a.id)
+                    void (async () => {
+                      actionError = ''
+                      try {
+                        await setDefaultAgent(a.id)
+                      } catch (err) {
+                        actionError = err instanceof Error ? err.message : String(err)
+                      }
+                    })()
                   }}
                 >
                   {$t('agents.setDefault')}
                 </button>
               {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-
-      <!--
-        Runtime 概览：窄栏里不再用六列表格（那会只剩横向滚动条），改成一格
-        一张卡——字段一个不少，只是竖着排。
-
-        ⚠️ 这一块是**给使用者看的**，所以只说人话（2026-09 改写）：原来它把描述表的
-        内部取值（`provisional` / `verified` / `undeclared` / `stateful`）、需求编号
-        FR-CLI-07、以及 `pnpm run daemon --verify-runtime all` 一起摆在界面上——
-        那些词对读界面的人不构成信息（而且 `**实测过**` 的强调号是原样显示出来的）。
-        机器取值仍在 `--verify-runtime` 的输出里，那一份是给开发者的。
-        ★ 「核对过 / 没核对过」这条如实披露一个字都没少，只是换了说法。
-      -->
+            {/snippet}
+          </ListRow>
+        {/each}
+      </ul>
+    {/snippet}
+    {#snippet bottom()}
       {#if $identity}
+        <!--
+          Runtime 概览：窄栏里不再用六列表格（那会只剩横向滚动条），改成一格
+          一张卡——字段一个不少，只是竖着排。
+
+          ⚠️ 这一块是**给使用者看的**，所以只说人话（2026-09 改写）：原来它把描述表的
+          内部取值（`provisional` / `verified` / `undeclared` / `stateful`）、需求编号
+          FR-CLI-07、以及 `pnpm run daemon --verify-runtime all` 一起摆在界面上——
+          那些词对读界面的人不构成信息（而且 `**实测过**` 的强调号是原样显示出来的）。
+          机器取值仍在 `--verify-runtime` 的输出里，那一份是给开发者的。
+          ★ 2026-10 再简化（使用者点名）：卡片只显示「CLI 名 + 版本号」，
+            核对/会话/版本支持判定一律不画。判定数据仍在 `--verify-runtime` 里。
+        -->
         <section class="runtime-block">
           <h3>{$t('agents.runtimeLocal')}</h3>
           <p class="hint">{$t('agents.runtimeIntro')}</p>
 
           {#each $identity.runtimes as r (r.key)}
-            {@const evidence = r.evidence === 'verified' ? $t('agents.runtimeEvidenceChecked') : $t('agents.runtimeEvidenceUnchecked')}
-            {@const session =
-              r.sessionState === 'stateful' ? $t('agents.runtimeSessionStateful')
-              : r.sessionState === 'stateless' ? $t('agents.runtimeSessionStateless')
-              : $t('agents.runtimeSessionUnknown')}
+            <!--
+              ★ 2026-10 极简：每张卡**只**显示「CLI 名 + 版本号」（如
+                 `gpt-4o` → `gpt-4o`；若探测不到版本就显示 ready 态）。
+            -->
             <div class="runtime-card">
               <div class="runtime-line">
                 <code>{r.key}</code>
@@ -315,41 +356,13 @@
                 {:else}
                   <span class="bad small">{$t('agents.runtimeNotFound')}</span>
                 {/if}
-                <span
-                  class="faint small"
-                  class:good={r.evidence === 'verified'}
-                  title={$t('agents.runtimeEvidenceTitle')}
-                >
-                  {evidence}
-                </span>
               </div>
-              <div class="runtime-line faint small">
-                <span class="mono">{r.command}</span>
-                <span>{$t('agents.runtimeSessionLabel', { value: session })}</span>
-              </div>
-              <div class="runtime-line small">
-                <span class="faint">{$t('agents.versionSupportLabel')}</span>
-                <span
-                  class:good={r.versionSupport?.status === 'verified'}
-                  class:bad={r.versionSupport?.status === 'out-of-range'}
-                  class:faint={!['verified', 'out-of-range'].includes(r.versionSupport?.status ?? '')}
-                >
-                  {SUPPORT_LABEL[r.versionSupport?.status ?? ''] ?? r.versionSupport?.status ?? '—'}
-                </span>
-              </div>
-              {#if r.versionSupport?.status === 'out-of-range'}
-                <p class="hint small runtime-msg">{$t('agents.runtimeWarnOutOfRange')}</p>
-              {:else if r.versionSupport?.status === 'unknown'}
-                <p class="hint small runtime-msg">{$t('agents.runtimeWarnUnknown')}</p>
-              {/if}
             </div>
           {/each}
-
-          <p class="hint">{$t('agents.runtimeHonestNote')}</p>
         </section>
       {/if}
-    </div>
-  </section>
+    {/snippet}
+  </ListPane>
 
   <!--
     ⚠️ 两个抽屉挂在**这一层**（与主从两栏并列，不在 `.pane-body` 里）：
@@ -366,33 +379,26 @@
   <WorkspaceSettings open={settingsOpen} onclose={() => (settingsOpen = false)} />
 
   <!-- ══════════════════ 右栏：选中的那个 agent（宽屏并排 / 窄屏整页）══════════════════ -->
-  <section class="pane detail-pane">
-    <div class="pane-body">
+  <MainArea empty={selected === null}>
+    {#snippet emptyContent()}
+      <div class="empty">
+        <strong>{$t('agents.pickOneTitle')}</strong>
+        <p>{$t('agents.pickOneHint')}</p>
+        <p>
+          {$t('agents.pickOneRoleBefore')}<strong>{$t('agents.pickOneRoleExecutor')}</strong>{$t('agents.pickOneRoleMid')}<strong>{$t('agents.pickOneRoleReviewer')}</strong>{$t('agents.pickOneRoleAfter')}
+        </p>
+      </div>
+    {/snippet}
+    {#snippet body()}
       {#if selected}
         <AgentDetail
           agent={selected}
           onclose={() => (selectedId = null)}
           onchanged={() => void loadAgents()}
         />
-      {:else}
-        <!--
-          ⚠️ 空态两段（2026-09）：
-             · 第一段是"点左边能看什么"；
-             · 第二段原来是左栏栏头那段"每个智能体独立配置指令、技能子集与角色：
-               执行者…审核者…"。它讲的是**选中之后**你会看到什么，所以搬到
-               "什么都没选中"这一屏最贴题；`<strong>` 仍然只给两个角色名，
-               免得整段都在强调（强调太多等于没强调）。
-        -->
-        <div class="empty">
-          <strong>{$t('agents.pickOneTitle')}</strong>
-          <p>{$t('agents.pickOneHint')}</p>
-          <p>
-            {$t('agents.pickOneRoleBefore')}<strong>{$t('agents.pickOneRoleExecutor')}</strong>{$t('agents.pickOneRoleMid')}<strong>{$t('agents.pickOneRoleReviewer')}</strong>{$t('agents.pickOneRoleAfter')}
-          </p>
-        </div>
       {/if}
-    </div>
-  </section>
+    {/snippet}
+  </MainArea>
 </div>
 
 <style>
@@ -410,61 +416,13 @@
   }
 
   /**
-   * ══════════════════════════════════════════════════════════════════
-   * 卡片是**这一行**（li），开关在卡片**里面**
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 第一版把开关放在卡片外面（行是 flex，卡片一个 `width:100%` 的按钮、
-   * 开关是它的兄弟）。两个毛病：
-   *
-   *   1. **溢出**：`.agent-item` 的 `min-width: auto`（flex 默认）不让它缩到
-   *      内容宽度以下，于是"卡片 368px + 开关 74px"直接顶出栏外——实测开关
-   *      右边缘 710px，而左栏右边界 656px，多出 54px 的横向溢出；
-   *   2. **开关挂在边框外面**，看起来像没画完。
-   *
-   * 现在边框画在 li 上，内层按钮透明、`flex: 1` + `min-width: 0`（这条是上面
-   * 那个坑的正解），开关在同一个框里靠右。
+   * 行盒（`.list-row`）与主按钮（`.list-row-main`）的样式在标准控件
+   * `ListRow.svelte` 里（D66 抽成标准控件后，三页各一份的复制删掉了）。
+   * 这一页 scoped 只剩行**内容**的样式：名字 / 徽标 / 注释摘要 / 「设为默认」。
+   * 名字与聊天/任务标题同一档（D65：600；strong 默认 700，实测三页 400/600/700）。
    */
-  .agent-row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-1);
-    border: 1px solid transparent;
-    border-radius: var(--radius);
-  }
-
-  .agent-row:hover {
-    background: var(--surface-2);
-  }
-
-  /* 选中的那条要一眼看出来：主从布局里"右边是谁"全靠这个 */
-  .agent-row.active {
-    background: var(--surface-2);
-    border-color: var(--accent);
-  }
-
-  .default-toggle {
-    flex-shrink: 0;
-    margin: var(--sp-2) var(--sp-2) 0 0;
-  }
-
-  .default-badge { color: var(--accent); }
-
-  .agent-item {
-    /* ★ `flex: 1` + `min-width: 0`：后者是让按钮能缩到内容宽度以下的关键，
-          否则它会把整行顶出栏外（见上面那段） */
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    text-align: left;
-    padding: var(--sp-3);
-    background: none;
-    border: none;
-    color: var(--text);
-    cursor: pointer;
+  .agent-line strong {
+    font-weight: 600;
   }
 
   .agent-line {
@@ -474,11 +432,24 @@
     flex-wrap: wrap;
   }
 
-  .agent-note {
+  .agent-notes {
     width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .agent-notes-trunc {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .agent-notes-meta {
+    flex-shrink: 0;
   }
 
   /* ══════════════ 环境问题 ══════════════ */
@@ -523,9 +494,5 @@
     align-items: center;
     gap: var(--sp-2);
     flex-wrap: wrap;
-  }
-
-  .runtime-msg {
-    margin: var(--sp-2) 0 0;
   }
 </style>

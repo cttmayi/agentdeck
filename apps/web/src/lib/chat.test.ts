@@ -5,11 +5,9 @@ import { fileURLToPath } from 'node:url'
 import {
   TERMINAL_RUN_STATUSES,
   applyChoice,
-  bridgeTextFromTurns,
   chatFilesState,
   executorChoices,
   isTurnRunning,
-  relativeTime,
   skillsHeldBackByDaemon,
   type DraftPick,
 } from './chat.ts'
@@ -37,77 +35,8 @@ describe('聊天的纯逻辑', () => {
     assert.equal(isTurnRunning({ runId: null, status: null }), false)
   })
 
-  test('相对时间：只到"天"，再久直接给日期——"37 天前"没人算得出来是哪天', () => {
-    const now = 1_700_000_000_000
-    assert.equal(relativeTime(now, now), '刚刚')
-    assert.equal(relativeTime(now - 5 * 60_000, now), '5 分钟前')
-    assert.equal(relativeTime(now - 3 * 3_600_000, now), '3 小时前')
-    assert.equal(relativeTime(now - 2 * 86_400_000, now), '2 天前')
-    const old = relativeTime(now - 400 * 86_400_000, now)
-    assert.match(old, /^\d{4}-\d{2}-\d{2}$/)
-    // 未来时间不能出现"-3 分钟前"
-    assert.equal(relativeTime(now + 60_000, now), '刚刚')
-  })
 })
 
-describe('通往「新建任务」的那段预填文字', () => {
-  const turn = (over: Partial<Parameters<typeof bridgeTextFromTurns>[0][number]>) => ({
-    id: 't',
-    conversationId: 'c',
-    seq: 1,
-    userText: '看下 build',
-    runId: 'r',
-    createdAt: 0,
-    error: null,
-    output: '是依赖没装',
-    status: 'completed',
-    toolCount: 2,
-    durationMs: 1000,
-    ...over,
-  })
-
-  test('一轮 = 我说的 + 它答的', () => {
-    assert.equal(bridgeTextFromTurns([turn({})]), '看下 build\n\n是依赖没装')
-  })
-
-  test('整个对话：每一轮都带上，不砍成最后一条结论', () => {
-    const out = bridgeTextFromTurns([
-      turn({ seq: 1, userText: '第一问', output: '第一答' }),
-      turn({ seq: 2, userText: '第二问', output: '第二答' }),
-    ])
-    assert.equal(out, '第一问\n\n第一答\n\n第二问\n\n第二答')
-  })
-
-  test('★ 没有产出就不要拼出一句空话——它会混进任务正文，看起来像需求的一部分', () => {
-    const out = bridgeTextFromTurns([
-      turn({ userText: '还在跑的那轮', output: null, status: 'running' }),
-      turn({ seq: 2, userText: '挂掉的那轮', output: null, runId: null, error: '没跑起来' }),
-    ])
-    assert.equal(out, '还在跑的那轮\n\n挂掉的那轮')
-    assert.ok(!out.includes('（无输出）'))
-    assert.ok(!out.includes('null'))
-  })
-
-  test('全是空白就给空串，让调用方自己决定怎么办（不要凭空造一句"未命名"）', () => {
-    assert.equal(bridgeTextFromTurns([]), '')
-    assert.equal(bridgeTextFromTurns([turn({ userText: '   ', output: '  ' })]), '')
-  })
-
-  test('首尾不留空行', () => {
-    const out = bridgeTextFromTurns([turn({})])
-    assert.equal(out, out.trim())
-  })
-})
-
-/**
- * 「新对话」那个下拉：执行者 + **每一条装着的 skill**。
- *
- * 这一组钉两句话：
- *
- *   · 有主的 skill ⇒ 选它 = 和有这个 skill 的执行者对话（人设与 skill 同源）；
- *   · 没主的 skill ⇒ 也能选（"所有已安装的 skill 都要能选"），这时绑**你当前
- *     那个人**、由这个对话自己带着这条 skill——**不许顺手把你换成默认执行者**。
- */
 describe('新对话的下拉：skill 是执行者的另一条入口', () => {
   // Agent / Skill 的字段都很多，这里只填判据用得到的，其余按类型断言放过。
   const agent = (id: string, name: string, skillIds: string[] = [], role = 'executor'): Agent =>

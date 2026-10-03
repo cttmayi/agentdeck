@@ -77,6 +77,121 @@ export const FETCH_TIMEOUT_MS = 15_000
 /** GitHub 允许的三个主机——**这是白名单，不是示例**。 */
 const ALLOWED_HOSTS = new Set(['github.com', 'raw.githubusercontent.com', 'api.github.com'])
 
+/**
+ * GitHub **加速器**（可选，2026-10，使用者要求）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 它是什么、代价是什么
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 国内网络直连 GitHub 经常失败，社区做法是走一个"加速器"：把原地址拼在它后面
+ * （`https://gh-proxy.com/https://raw.githubusercontent.com/...`）。实测它连
+ * `raw` 与 `api.github.com` 都能转，而且**它用自己的凭证去请求 GitHub**
+ * （响应头是 `x-ratelimit-limit: 5000`），所以本机那 60 次/小时的匿名限额也不再适用。
+ *
+ * ⚠️ **代价必须写在代码里**：加速器是**第三方**，它能看、也能改转发给我们的内容。
+ * 本包的 `ALLOWED_HOSTS` 白名单原本就是为了"不让本机服务变成一个访问任意地址的
+ * 跳板"（SSRF）——加一个可配的第三方主机，等于在**你明确指定**的前提下开一个口子。
+ * 所以三条硬规矩：
+ *
+ *   1. **默认不用**（`deps.githubProxy` 不给就是不启用），绝不是"自动挑一个加速器"；
+ *   2. **只代理 GitHub 自己的主机**：用户给的其它地址照样被白名单挡在外面，
+ *      加速器不会变成"任意 URL 的抓取器"；
+ *   3. **走代理时不带我们的 token**（见 `githubRequestTarget`）：代理自己有凭证，
+ *      而 token 是秘密——不给第三方看，也不赌它会不会转发。
+ */
+/**
+ * **裸写 `--github-proxy`（不带地址）时用的那一个**（使用者 2026-10 定）。
+ *
+ * 他要的是"命令记不住/懒得打字时也能用"：`pnpm run sync-skills --github-proxy`
+ * 就等于 `--github-proxy https://gh-proxy.com`。**默认仍然是不开**——不带这个旗标
+ * 就直连 GitHub，这条没有变。
+ */
+export const DEFAULT_GITHUB_PROXY = 'https://gh-proxy.com'
+
+/** `--github-proxy off` / `none`：显式关掉（也用来覆盖环境变量）。 */
+function isProxyOff(value: string): boolean {
+  return value === 'off' || value === 'none' || value === 'no'
+}
+
+/**
+ * 把"命令行给了什么 + 环境变量给了什么"收敛成一个代理地址（或 `null` = 直连）。
+ *
+ * ★ **判据只有一处**：同步工具与 daemon 都调它，免得两边对"裸旗标算什么意思"、
+ *   "`off` 怎么解释"各有一套说法（那种不一致最难查：同一行命令在两个入口行为不同）。
+ *
+ * 规则（2026-10 使用者定）：
+ *   · 旗标没给、环境变量也空 ⇒ `null`（直连；**默认不开**）
+ *   · **裸写**旗标（`true`，或给了空串）⇒ `DEFAULT_GITHUB_PROXY`
+ *   · 给了地址 ⇒ 用它（`parseGithubProxy` 校验 https、不许是 GitHub 自己）
+ *   · 值是 `off` / `none` ⇒ `null`（覆盖环境变量：这次就想直连）
+ */
+export function resolveGithubProxy(input: {
+  /** `true` = 裸写旗标；字符串 = 给了值；`undefined` = 没给这个旗标。 */
+  flagValue?: string | boolean | undefined
+  envValue?: string | undefined
+}): string | null {
+  const fromFlag = input.flagValue
+  if (fromFlag === true) return parseGithubProxy(DEFAULT_GITHUB_PROXY)
+  if (typeof fromFlag === 'string') {
+    const value = fromFlag.trim()
+    if (value === '') return parseGithubProxy(DEFAULT_GITHUB_PROXY)
+    return isProxyOff(value) ? null : parseGithubProxy(value)
+  }
+
+  const fromEnv = (input.envValue ?? '').trim()
+  if (fromEnv === '') return null
+  return isProxyOff(fromEnv) ? null : parseGithubProxy(fromEnv)
+}
+
+export function parseGithubProxy(input: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(input)
+  } catch {
+    throw new SkillSourceError('bad_input', `加速器地址不是合法的 URL：${input}`)
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new SkillSourceError(
+      'bad_input',
+      `加速器必须是 https：${input}`,
+      '明文 http 意味着链路上任何人都能看和改内容——加速器本来就已经能改，不该再叠一层。',
+    )
+  }
+  if (ALLOWED_HOSTS.has(parsed.hostname)) {
+    throw new SkillSourceError(
+      'bad_input',
+      `加速器不能就是 GitHub 自己：${input}`,
+      '那只会绕一圈回到同一个地址；不用加速器时请直接不传这个参数。',
+    )
+  }
+  // 允许带路径前缀（有些加速器是 `https://host/gh` 这种），但去掉尾斜杠
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
+}
+
+/**
+ * 这个请求最终发给谁、以及**能不能带凭证**。
+ *
+ * ★ 判据只有一处：daemon 装技能与同步工具都走这个函数，免得两边对"什么算 GitHub 地址"
+ *   或"代理要不要给 token"各有一套说法。
+ */
+export function githubRequestTarget(
+  url: string,
+  proxy: string | null,
+): { url: string; sendAuth: boolean } {
+  if (!proxy) return { url, sendAuth: true }
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return { url, sendAuth: true }
+  }
+  if (!ALLOWED_HOSTS.has(parsed.hostname)) return { url, sendAuth: true }
+  // ⚠️ `sendAuth: false` 是这条路的重点：代理自己会带凭证（实测 5000/h），
+  //    我们的 token 没必要、也不应该交给第三方。
+  return { url: `${proxy}/${url}`, sendAuth: false }
+}
+
 /** 递归时跳过的目录名：版本库内部结构与依赖，都不是技能内容。 */
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.github'])
 
@@ -131,6 +246,14 @@ export interface ResolvedSkillSource {
   included: Array<{ path: string; bytes: number }>
   /** **明确没装**的东西及原因（二进制、超限、跳过的目录）。 */
   ignored: Array<{ path: string; reason: string }>
+  /**
+   * 被**清单里声明的图案**排除掉的东西（结构化给出，`path` + 命中的图案）。
+   *
+   * ★ 单独一个字段、而不是让人去 `ignored` 里 match 原因字符串：字符串匹配是判据
+   *   散在几处的开始（改一个字就静默失配），而这个列表要一路传到界面上说
+   *   "内容不完整：跳过了 N 个文件"。
+   */
+  excluded: Array<{ path: string; pattern: string }>
 }
 
 export interface ResolveDeps {
@@ -138,6 +261,144 @@ export interface ResolveDeps {
   fetchImpl?: typeof fetch
   /** GitHub 令牌（可选：私有仓库，或提高匿名限额）。 */
   githubToken?: string | null
+  /**
+   * GitHub 加速器基址（`parseGithubProxy` 规范化过的）。不给 = 直连 GitHub。
+   * 见 `parseGithubProxy` 上面那段：它把第三方拉进了信任链，所以**默认不用**。
+   */
+  githubProxy?: string | null
+  /**
+   * 路径过滤（清单里声明的 include/exclude）。不给 = 全取。
+   * 只影响 **GitHub 那条路**（本地目录那条路是使用者自己的东西，不替他挑）。
+   */
+  filter?: PathFilter | null
+}
+
+// ─────────────────────────────────────────────────────────────
+// 路径过滤：清单里声明的 include / exclude
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 路径过滤（可选）：技能是**一个目录**，而有些仓库把营销素材、README 图、
+ * 测试产物和技能内容混在一个目录树里——"整仓即技能"就是这种形状。
+ *
+ * ★ 为什么要有它（2026-10 使用者问："类似这样的仓库（包括大量的其他文件），我有什么
+ *   好的办法区分哪些是必须的吗？"）：**格式本身没有"必须文件清单"**（`SKILL.md` 的
+ *   frontmatter 不声明依赖），所以只能**声明**或推断。我们选择**声明**：维护者读一次
+ *   仓库、把决定写进清单，机器只执行——可复核、可复现，不靠运行时猜。
+ *
+ * 实测（同一天，两个真仓）：
+ *   · `op7418/guizang-ppt-skill`：`assets/` 13 个文件 5.6 MB，只有 3 个被 `SKILL.md`
+ *     引用，超限的 `ppt-skill-showcase.png`（3.5 MB）与一张背景图**既没被 SKILL.md
+ *     提到、也没被模板引用** ⇒ 营销素材。
+ *   · `lewislulu/html-ppt-skill`：`assets/` 70 个**全部**被引用（所以"assets 一律可丢"
+ *     是错的），而 `docs/readme/**` 12 个 4.7 MB 与 `scripts/verify-output/**` 的测试
+ *     产物没人引用 ⇒ 垃圾。
+ *   结论：**任何单一的自动判据都会判错**（约定目录里有垃圾、assets 有时全必需），
+ *   所以这里提供的是"声明"能力，而不是"自动挑一个算法替你决定"。
+ *
+ * ⚠️ 三条硬规矩：
+ *   1. **`SKILL.md` 永远不能被排除**（少了它就不是技能；见 `matchesExclude` 的断言）；
+ *   2. 被排除的文件**逐个记进 `ignored` 并写明是哪条图案排除的**——跳过必须大声，
+ *      "少了零件"要在装之前就能看见（P7：宁可失败，不可静默降级）；
+ *   3. 图案只用于**匹配相对路径**，绝不参与拼路径 ⇒ 没有 `..` 逃逸这回事（仍然显式拒绝）。
+ */
+export interface PathFilter {
+  /** 只取匹配这些图案的（`SKILL.md` 始终保留）。不给 = 全取。 */
+  include?: readonly string[]
+  /** 跳过匹配这些图案的（在 `include` 之后应用）。 */
+  exclude?: readonly string[]
+}
+
+/** 图案是否可能匹配**这个目录之下**的东西（用来避免白跑一趟子目录）。 */
+function couldMatchUnder(dirRel: string, patterns: readonly string[]): boolean {
+  return patterns.some((raw) => {
+    const pattern = raw.replace(/^\.\//, '')
+    const head = pattern.split('*')[0]!.replace(/\/$/, '')
+    if (head === '') return true
+    // 图案的前缀与这个目录有交集（互为前缀）才值得进去
+    return dirRel.startsWith(head) || head.startsWith(`${dirRel}/`) || head === dirRel
+  })
+}
+
+/** glob → 正则：`**` 跨目录，`*` 不跨目录，`?` 单个字符。 */
+export function globToRegExp(pattern: string): RegExp {
+  const cleaned = pattern.replace(/^\.\//, '').replace(/\/+$/, '')
+  let out = ''
+  for (let i = 0; i < cleaned.length; i += 1) {
+    const ch = cleaned[i]!
+    if (ch === '*') {
+      const isDouble = cleaned[i + 1] === '*'
+      if (isDouble) {
+        // `**/` 连同后面的斜杠一起吞（`docs/**` 既要匹配 `docs/a.png`，也要匹配 `docs/x/y.png`）
+        if (cleaned[i + 2] === '/') {
+          out += '(?:.*/)?'
+          i += 2
+        } else {
+          out += '.*'
+          i += 1
+        }
+      } else {
+        out += '[^/]*'
+      }
+      continue
+    }
+    if (ch === '?') {
+      out += '[^/]'
+      continue
+    }
+    out += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp(`^${out}$`)
+}
+
+/** 这个相对路径是否被某条 exclude 图案排除（返回命中的图案名，便于如实报出）。 */
+export function matchingExclude(
+  relPath: string,
+  exclude: readonly string[] | undefined,
+): string | null {
+  if (!exclude || exclude.length === 0) return null
+  // ★ 铁律：SKILL.md 不能被排除（否则抓出来的是一个没有入口的"技能"）
+  if (relPath === 'SKILL.md') return null
+  for (const pattern of exclude) {
+    if (globToRegExp(pattern).test(relPath)) return pattern
+    // 目录图案（`docs/**`）也要能整目录排除：`docs` 这一层本身也匹配
+    if (globToRegExp(pattern).test(`${relPath}/`)) return pattern
+  }
+  return null
+}
+
+/** 有 `include` 时，这个路径是否被允许（`SKILL.md` 始终允许）。 */
+function allowedByInclude(relPath: string, include: readonly string[] | undefined): boolean {
+  if (!include || include.length === 0) return true
+  if (relPath === 'SKILL.md') return true
+  return include.some((pattern) => globToRegExp(pattern).test(relPath))
+}
+
+/** 清单里声明的图案做**形状**校验（在读清单时就报错，而不是抓的时候才发现）。 */
+export function assertValidPathPatterns(
+  patterns: readonly string[],
+  field: 'include' | 'exclude',
+  where: string,
+): void {
+  for (const pattern of patterns) {
+    if (pattern.trim() === '') {
+      throw new SkillSourceError('bad_input', `${where} 的 ${field} 里有空图案`)
+    }
+    if (pattern.startsWith('/') || pattern.includes('..')) {
+      throw new SkillSourceError(
+        'bad_input',
+        `${where} 的 ${field} 图案必须是技能目录内的相对路径：${pattern}`,
+        '图案只用来匹配相对路径，不参与拼路径——绝对路径与 `..` 在这里没有意义，一律拒绝。',
+      )
+    }
+    if (globToRegExp(pattern).test('SKILL.md')) {
+      throw new SkillSourceError(
+        'bad_input',
+        `${where} 的 ${field} 图案会排除 SKILL.md：${pattern}`,
+        'SKILL.md 是技能的入口，少了它就不是技能。',
+      )
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -271,10 +532,12 @@ function assemble(input: {
   skillMd: string
   others: readonly CollectedFile[]
   ignored: Array<{ path: string; reason: string }>
+  excluded?: ReadonlyArray<{ path: string; pattern: string }>
 }): ResolvedSkillSource {
   const files: Record<string, string> = {}
   for (const file of input.others) files[file.relPath] = file.text
 
+  const excluded = input.excluded ?? []
   return {
     slug: input.slug,
     body: input.skillMd,
@@ -285,7 +548,17 @@ function assemble(input: {
       { path: 'SKILL.md', bytes: Buffer.byteLength(input.skillMd, 'utf8') },
       ...input.others.map((f) => ({ path: f.relPath, bytes: f.bytes })),
     ],
-    ignored: input.ignored,
+    // ★ 被排除的东西**也在 `ignored` 里出现**（同一个真相的两种呈现）：`ignored`
+    //   是"装进来时如实显示没装什么"用的，`excluded` 是"这是清单声明的、不是出错"
+    //   用的。少了前者，跳过的文件就没人看见了。
+    ignored: [
+      ...input.ignored,
+      ...excluded.map((e) => ({
+        path: e.path,
+        reason: `清单里排除了（${e.pattern}）—— 这是维护者的声明，不是抓取出错`,
+      })),
+    ],
+    excluded: [...excluded],
   }
 }
 
@@ -297,6 +570,8 @@ interface Collected {
   skillMd: string | null
   others: CollectedFile[]
   ignored: Array<{ path: string; reason: string }>
+  /** 被清单图案排除的（结构化；见 `ResolvedSkillSource.excluded`）。 */
+  excluded?: Array<{ path: string; pattern: string }>
   /** 顶层条目的名字（缺 SKILL.md 时用来说清"这里有什么"）。 */
   topLevelNames: string[]
 }
@@ -461,6 +736,7 @@ function finish(
     skillMd: collected.skillMd,
     others: collected.others,
     ignored: collected.ignored,
+    ...(collected.excluded ? { excluded: collected.excluded } : {}),
   })
 }
 
@@ -596,23 +872,37 @@ async function githubFetch(
   accept = 'application/vnd.github+json',
 ): Promise<Response> {
   const doFetch = deps.fetchImpl ?? fetch
+  const proxy = deps.githubProxy ?? null
   const headers: Record<string, string> = {
     accept,
     'user-agent': 'agentdeck',
     'x-github-api-version': '2022-11-28',
   }
-  if (deps.githubToken) headers['authorization'] = `Bearer ${deps.githubToken}`
 
-  let current = url
+  // ★ 走加速器时：地址改写成 `<proxy>/<原地址>`，而**凭证不带**（见
+  //   `githubRequestTarget` 与 `parseGithubProxy` 上的那三条硬规矩）。
+  const first = githubRequestTarget(url, proxy)
+  if (first.sendAuth && deps.githubToken) {
+    headers['authorization'] = `Bearer ${deps.githubToken}`
+  }
+
+  // 配了代理时，白名单里多出**那一个**主机（且是 https）——不是"随便什么都能抓"，
+  // 因为代理主机是使用者显式指定的那一个。
+  const allowed = new Set(ALLOWED_HOSTS)
+  if (proxy !== null) allowed.add(new URL(proxy).hostname)
+
+  let current = first.url
   // 手动跟随跳转：**每一跳都要重新校验主机**，否则一个 302 就能把我们带到
   // 白名单之外去——白名单就形同虚设了
   for (let hop = 0; hop < 4; hop++) {
     const target = new URL(current)
-    if (target.protocol !== 'https:' || !ALLOWED_HOSTS.has(target.hostname)) {
+    if (target.protocol !== 'https:' || !allowed.has(target.hostname)) {
       throw new SkillSourceError(
         'blocked_host',
         `跳转到了白名单之外：${target.hostname}`,
-        '只允许跳转回 GitHub 自己的主机。',
+        proxy === null
+          ? '只允许跳转回 GitHub 自己的主机。'
+          : '只允许跳转回 GitHub 自己的主机，或你配置的那个加速器主机。',
       )
     }
 
@@ -643,9 +933,12 @@ async function githubFetch(
       throw new SkillSourceError(
         'github_rate_limited',
         remaining === '0'
-          ? 'GitHub 的匿名访问次数用完了（每小时 60 次）。'
+          ? 'GitHub 的访问次数用完了。'
           : 'GitHub 拒绝了这次请求（403/429）。',
-        '等一会儿再试，或设置环境变量 AGENTDECK_GITHUB_TOKEN 用令牌提高限额。',
+        proxy === null
+          ? '匿名限额是每小时 60 次：等一会儿再试，或设置环境变量 AGENTDECK_GITHUB_TOKEN 用令牌提高限额（5000 次）。'
+          : `当前走加速器 ${new URL(proxy).hostname}：**限额是它的**（实测 5000 次/小时），本机那 60 次不适用——` +
+            '被挡住时通常等一会儿就好；也可以去掉加速器改用令牌。',
       )
     }
     return res
@@ -790,27 +1083,54 @@ export async function resolveGithubUrl(
   const ignored: Array<{ path: string; reason: string }> = []
   let skillMd: string | null = null
 
+  // ★ 清单里声明的 include/exclude：**必须在下载之前**剪枝——不然那 3.5 MB 的营销图
+  //   还是会被拉下来（只是装的时候不装），而"省流量、避开限额"正是它的一半目的。
+  const filter = deps.filter ?? null
+  const excluded: Array<{ path: string; pattern: string }> = []
+  const relOf = (repoPath: string): string =>
+    target.dir === '' ? repoPath : repoPath.slice(target.dir.length + 1)
+
   const walk = async (path: string, list: GithubEntry[], depth: number): Promise<void> => {
     for (const entry of list) {
+      const rel = relOf(entry.path)
       if (entry.type === 'dir') {
         if (SKIP_DIRS.has(entry.name)) {
-          ignored.push({ path: entry.path, reason: '版本库/依赖目录，不属于技能内容' })
+          ignored.push({ path: rel, reason: '版本库/依赖目录，不属于技能内容' })
+          continue
+        }
+        const byExclude = filter ? matchingExclude(rel, filter.exclude) : null
+        if (byExclude) {
+          excluded.push({ path: `${rel}/`, pattern: byExclude })
+          continue
+        }
+        if (filter?.include && !couldMatchUnder(rel, filter.include)) {
+          // 一个子目录不可能命中任何 include 图案：**连列目录都不用去**（省调用）
+          excluded.push({ path: `${rel}/`, pattern: `include: ${filter.include.join(' ')}` })
           continue
         }
         if (depth + 1 > MAX_DEPTH) {
-          ignored.push({ path: entry.path, reason: `超过递归深度上限 ${MAX_DEPTH}` })
+          ignored.push({ path: rel, reason: `超过递归深度上限 ${MAX_DEPTH}` })
           continue
         }
         await walk(entry.path, await listGithubDir(target, entry.path, deps), depth + 1)
         continue
       }
       if (entry.type !== 'file') {
-        ignored.push({ path: entry.path, reason: `不是普通文件（${entry.type}），未跟随` })
+        ignored.push({ path: rel, reason: `不是普通文件（${entry.type}），未跟随` })
+        continue
+      }
+      const byExclude = filter ? matchingExclude(rel, filter.exclude) : null
+      if (byExclude) {
+        excluded.push({ path: rel, pattern: byExclude })
+        continue
+      }
+      if (!allowedByInclude(rel, filter?.include)) {
+        excluded.push({ path: rel, pattern: `include: ${(filter?.include ?? []).join(' ')}` })
         continue
       }
 
       const buf = await fetchFile(entry, target, deps)
-      const relPath = target.dir === '' ? entry.path : entry.path.slice(target.dir.length + 1)
+      const relPath = rel
 
       if (entry.name === 'SKILL.md') {
         if (!isProbablyText(buf)) {
@@ -840,7 +1160,7 @@ export async function resolveGithubUrl(
   assertValidSlug(slug, `来源名是「${fallback}」，收敛后是「${toSlug(fallback)}」。要改请显式指定 slug。`)
 
   return finish(
-    { skillMd, others, ignored, topLevelNames: names },
+    { skillMd, others, ignored, topLevelNames: names, excluded },
     {
       slug,
       sourceRef:

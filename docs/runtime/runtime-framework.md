@@ -241,7 +241,7 @@ export interface RuntimeDescriptor {
 | 3.5 | **环境预检**（`environment`） | 起 run 前检查 `stateDir` 能否建/写，给出可读诊断 | `.claude` | `.codex` |
 | 3.6 | **审计**（`audit/record`） | 后端上报**最终**命令行 → `redactArgv` 脱敏（脱敏只有一份，各适配器不各自脱敏）→ 记入审计；`result.model` 记"实际跑的"；`result.usage` 记用量 | `claude -p …` | `codex app-server --stdio` |
 | 3.7 | **工作目录清单**（`workdir-files`） | `managedPathsFor(descriptor)` 标记注入物 = `skills.dir` + `stateDir` + `.agentdeck/` | 同函数 | 同函数 |
-| 3.8 | **界面与身份**（`server` identity） | `runtimes` 数组 = **枚举装配表**；选项与"未验证"提示全部数据驱动（按 `evidence` 判，不按 runtimeKey 判） | 自动覆盖 | 自动覆盖，一行不改 |
+| 3.8 | **界面与身份**（`server` identity） | `runtimes` 数组 = 装配表里 **`evidence === 'verified'`** 的那些（2026-10 起：未接真实 CLI 的 runtime 不进 UI——判据是证据等级不是 runtimeKey，加第四个未验证 runtime 时自动隐藏；开发者通道 `--runtime-key` / `--verify-runtime all` / 直接调 API 不受影响） | 自动覆盖 | 自动覆盖，一行不改 |
 | 3.9 | **版本验证**（`verify-runtime`） | 枚举装配表，对每个 runtime probe + 版本支持判定 | 自动覆盖 | 自动覆盖 |
 | 3.10 | **失败分级** | 同一套纪律：**宽容读取，明确失败**——不可解析的输出绝不静默丢掉，计数 + 升级为明确失败（`cli_unparsable_output` / `agent_error`） | `ClaudeStreamParser` | `classifyCodexFailure` ✅（判据同构：零事件 / 没等到 `turn/completed`） |
 

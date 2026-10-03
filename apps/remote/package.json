@@ -11,6 +11,7 @@
     "agentdeck-remote": "./src/cli.ts"
   },
   "dependencies": {
-    "@agentdeck/protocol": "workspace:*"
+    "@agentdeck/protocol": "workspace:*",
+    "@agentdeck/skill-source": "workspace:*"
   }
 }

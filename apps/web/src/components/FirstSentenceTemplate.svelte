@@ -119,18 +119,34 @@
 </script>
 
 <div class="tpl">
-  <div class="tpl-head">
-    {#if showLabel}<span class="tpl-label">{$t('tpl.label')}</span>{/if}
-    <span class="tpl-state">
-      {#if custom}
-        <span class="badge custom">{$t('tpl.custom')}</span>
-      {:else}
-        <span class="badge">{$t('tpl.platformDefault')}</span>
-      {/if}
-    </span>
-  </div>
+  <!--
+    ★ 2026-10（紧凑性）：`showLabel=false`（WorkspaceSettings 里）时不再渲染
+      这一行——原来它里面只剩状态徽章一个元素、独占一整行，右侧全是空白；
+      徽章改并进下方 hint 段落的行首。
+  -->
+  {#if showLabel}
+    <div class="tpl-head">
+      <span class="tpl-label">{$t('tpl.label')}</span>
+      <span class="tpl-state">
+        {#if custom}
+          <span class="badge custom">{$t('tpl.custom')}</span>
+        {:else}
+          <span class="badge">{$t('tpl.platformDefault')}</span>
+        {/if}
+      </span>
+    </div>
+  {/if}
 
   <p class="tpl-hint">
+    {#if !showLabel}
+      <span class="tpl-state tpl-state-inline">
+        {#if custom}
+          <span class="badge custom">{$t('tpl.custom')}</span>
+        {:else}
+          <span class="badge">{$t('tpl.platformDefault')}</span>
+        {/if}
+      </span>
+    {/if}
     {$t(`tpl.settings.hint.${block}.before`)}<strong>{$t(`tpl.settings.hint.${block}.strong`)}</strong>{$t(`tpl.settings.hint.${block}.after`)}
     {#if block === 'task'}
       <span class="req">{$t('tpl.settings.hint.requiredTask.before')}<strong>{$t('tpl.settings.hint.requiredTask.strong')}</strong>{$t('tpl.settings.hint.requiredTask.after')}</span>
@@ -241,6 +257,9 @@
   .tpl { grid-column: 1 / -1; }
 
   .tpl-head { display: flex; align-items: center; gap: var(--sp-2); }
+
+  /* 徽章并进 hint 行内时（showLabel=false）：与文字同排、留一点右间距 */
+  .tpl-state-inline { margin-right: var(--sp-2); }
 
   .tpl-label {
     font-size: var(--fs-sm);

@@ -13,10 +13,13 @@
   } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { showToast } from '../lib/view.ts'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { absoluteTime, relativeTime } from '../lib/time.ts'
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
   import { catalogEntryState } from '../lib/skill-catalog.ts'
   import { t, tx } from '../lib/i18n.ts'
+  import { Table, SourceRef, ExpandToggle } from '@agentdeck/ui/components'
   import {
     InstallError,
     describeInstallMessages,
@@ -65,6 +68,20 @@
   let overwrite = false
   let busy = false
   let errorMessage = ''
+  /**
+   * ★ 页面级错误（**卸载失败**）。
+   *
+   * ⚠️ 原来卸载失败也写进 `errorMessage`，而它**只有一个渲染点**——在「安装」
+   *    抽屉里面。于是卸载失败时（抽屉通常是关着的）错误被彻底吞掉：使用者
+   *    以为卸载成功了，而技能还在。工具页的同场景早就在页顶渲染（`Tools.svelte`
+   *    的 `uninstallError`），这里是漏了第二个渲染点。
+   *
+   * 原则：**错误显示在触发它的地方**——卸载在列表行上触发 ⇒ 显示在列表上方；
+   *      目录操作在抽屉里触发 ⇒ 显示在抽屉里（`dirsError`）。
+   */
+  let pageError = ''
+  /** 目录操作（勾选 / 移除 / 加自定义路径）失败——渲染在目录抽屉里。 */
+  let dirsError = ''
   /**
    * 失败时"那我该怎么做"的**键 + 插值**（认不出的错误码是 `null`）。
    *
@@ -156,8 +173,12 @@
         slug: entry.slug,
         // 远端目录给的是 SKILL.md 的正文；空的话服务端会拒绝并说清楚
         body: entry.content ?? '',
+        // ★ 支持文件要一起交下去（少了它技能是坏的，而且坏得很安静）
+        ...(entry.files ? { files: entry.files } : {}),
         version: entry.version,
-        sourceRef: `remote:${entry.slug}@${entry.version}`,
+        // ★ 溯源：用目录给的**原始来源**（`github:owner/repo@ref:dir`），
+        //   而不是 `remote:…`。远端是中转，不是出处——落库记录要指回上游。
+        sourceRef: entry.sourceRef ?? `remote:${entry.slug}@${entry.version ?? 'unknown'}`,
         ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
@@ -170,14 +191,24 @@
    * 显示，不在前端改写。
    */
   async function uninstall(id: string, slug: string): Promise<void> {
-    if (!confirm(tx('skills.confirmUninstall', { slug }))) return
+    // ★ 平台自己的确认框（居中），不是 `window.confirm`——理由见 `lib/confirm.ts`
+    if (
+      !(await askConfirm({
+        title: tx('skills.confirmUninstallTitle', { slug }),
+        message: tx('skills.confirmUninstallBody'),
+        confirmLabel: tx('common.uninstall'),
+        danger: true,
+      }))
+    )
+      return
     removing = id
-    errorMessage = ''
+    pageError = ''
     try {
       await uninstallSkill(id)
       showToast(tx('skills.uninstalled', { slug }))
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err)
+      // ★ 写在**页面级**（列表上方会渲染）：卸载是从列表行触发的，错误就该在那儿
+      pageError = err instanceof Error ? err.message : String(err)
     } finally {
       removing = null
     }
@@ -204,11 +235,24 @@
    * ★ 三个按钮的权重是有讲究的：**安装是这一页的主线**（`primary`），刷新与设置
    *   是配套动作（`secondary`）——原来它们挤在 `view-head` 里全是一个样子。
    */
+  /** 相对时间的「现在」——每次响应式更新重算一遍。 */
+  $: now = Date.now()
+  // ★ 顺序：**主线动作（primary）排最前**，配套动作（secondary）跟后面——
+  //   与智能体页一致。原来这里 primary 排在最后，于是"装一个技能"在顶栏里
+  //   是最右边那个，而"智能体"那页最主要那个在最左边：同一排按钮，两页两种读法。
   $: setPageActions('skills', [
+    {
+      id: 'install',
+      label: $t('skills.install'),
+      kind: 'primary',
+      icon: 'plus',
+      onActivate: openPanel,
+    },
     {
       id: 'refresh',
       label: $t('common.refresh'),
       kind: 'secondary',
+      icon: 'refresh',
       onActivate: () => void loadSkills(),
     },
     {
@@ -216,12 +260,6 @@
       label: $t('skills.settings'),
       kind: 'secondary',
       onActivate: openDirs,
-    },
-    {
-      id: 'install',
-      label: $t('skills.install'),
-      kind: 'primary',
-      onActivate: openPanel,
     },
   ])
   onDestroy(() => clearPageActions('skills'))
@@ -290,12 +328,14 @@
       ? [...current.filter((d) => d !== path), path]
       : current.filter((d) => d !== path)
     savingDirs = path
+    dirsError = ''
     try {
       // 报告只用来**说这一句**：扫描说明（跳过了什么、读不进来什么）跟着
       // `loadLocalSkillDirs()` 一起回来，所以它在抽屉里一直是齐的，不靠这一次
       announceDirs(await saveLocalSkillDirs(next))
     } catch (err) {
-      errorMessage = err instanceof Error ? err.message : String(err)
+      // ★ 写在**抽屉里**（目录操作是在这儿触发的）
+      dirsError = err instanceof Error ? err.message : String(err)
     } finally {
       savingDirs = null
     }
@@ -367,13 +407,29 @@
   </p>
 </div>
 
+<!-- ★ 卸载失败要**在这儿**说出来（列表上方）。
+     ⚠️ 原来它写进安装抽屉里的 `errorMessage`，抽屉关着时错误就彻底没了——
+     使用者以为卸载成功，技能却还在。服务端"还有智能体挂着它"那条原文很长
+     且带名单，正是最需要被看见的一类错误。 -->
+{#if pageError}
+  <div class="notice bad">{pageError}</div>
+{/if}
+
 {#if dirsOpen}
   <div class="drawer-backdrop" onclick={closeDirs} role="presentation"></div>
-  <aside class="drawer" aria-label={$t('skills.dirsTitle')}>
-    <header>
-      <h3>{$t('skills.dirsTitle')}</h3>
-      <button type="button" class="ghost" onclick={closeDirs} aria-label={$t('common.close')}>×</button>
-    </header>
+  <!-- ★ 与页面里其它浮层同一个形状（`role="dialog"` + `aria-modal`）：
+           同文件的安装抽屉、以及 Modal/Drawer/InboxDrawer/SettingsDrawer 都有，
+           这里原来只有 `aria-label`——读屏器不会把它当对话框播报。 -->
+  <div class="drawer" role="dialog" aria-modal="true" aria-label={$t('skills.dirsTitle')}>
+    <!-- ★ 与所有其它抽屉**同一个头部**：`.drawer-head` + `<h2>`。
+         ⚠️ 原来这里写的是 `<header>` + `<h3>`，而 Skills.svelte 里没有 `header` /
+         `h3` 的样式——于是这个头部**完全没有抽屉头部的样式**：没有 flex 布局、
+         没有内边距、没有那条分隔线，关闭按钮从右侧掉到了标题下面。别处抽屉全是
+         `.drawer-head`（flex + 两端对齐），只有它不一样。 -->
+    <div class="drawer-head">
+      <h2>{$t('skills.dirsTitle')}</h2>
+      <button type="button" class="ghost" onclick={closeDirs}>{$t('common.close')}</button>
+    </div>
     <div class="drawer-body">
       <p class="faint small" style="margin-top:0">{$t('skills.dirsIntro')}</p>
 
@@ -441,6 +497,7 @@
                 type="button"
                 class="ghost small danger"
                 disabled={savingDirs === dir.path}
+                title={savingDirs === dir.path ? $t('common.busyHint') : $t('skills.dirsRemoveTitle')}
                 onclick={() => void toggleDir(dir.path, false)}
               >{$t('skills.dirsRemove')}</button>
             </div>
@@ -460,6 +517,13 @@
             {$t('skills.dirsAdd')}
           </button>
         </div>
+
+        <!-- ★ 目录操作（勾选/移除/加自定义路径）失败：**就在抽屉里**说出来。
+             错误显示在触发它的地方——这一条原来写进安装抽屉的变量，于是
+             勾目录失败时两边都看不见。 -->
+        {#if dirsError}
+          <div class="notice bad" style="margin-top:var(--sp-3)">{dirsError}</div>
+        {/if}
       {/if}
 
       <!-- ★ 取消勾选**不会**怎样，必须写出来：使用者对"取消勾选"的直觉是"删掉"，
@@ -497,7 +561,7 @@
         </p>
       {/if}
     </div>
-  </aside>
+  </div>
 {/if}
 
 {#if panelOpen}
@@ -564,12 +628,15 @@
       </div>
     {:else}
       <div class="field">
-        {#if remoteError}
+        {#if $remoteError}
           <div class="notice bad">
-            <!-- ⚠️ 这里的 `$remoteError` 是**修掉一个既有的漏订**：原来插值写的是裸的
-                 `{remoteError}`，渲染出来是 `[object Object]`。上面的 `{#if remoteError}`
-                 同样是裸的（对象恒为真），那是另一处既有问题，**不在本次文案迁移的范围里**，
-                 所以原样保留——不要以为它是对的。 -->
+            <!-- ⚠️ 曾经这里写的是 `{#if remoteError}`（**裸的 store 对象**，恒为真）：
+                 于是这条"远端不可用"**无条件**显示，冒号后面还空着（因为压根没有错误）
+                 ——使用者明明已经把远端起起来了，却一直被告知"远端不可用"
+                 （2026-10 使用者报的就是这个）。同一处的 `{:else if !remoteError …}`
+                 让下面的空态**永远走不到**，中间那个"未登录"分支也成了死代码。
+                 改成订阅值（`$remoteError`）之后三个状态才真的分开。
+                 ⚠️ 机器检查：`tests/web-template-stores.test.ts` 会抓这类裸用。 -->
             {$t('skills.remoteUnavailable', { error: $remoteError })}
             <p class="faint small" style="margin:var(--sp-2) 0 0">
               {$t('skills.remoteDownBefore')}<strong>{$t('skills.remoteDownStrong')}</strong>{$t('skills.remoteDownAfter')}
@@ -584,20 +651,59 @@
           </div>
         {/if}
 
-        {#if $remoteCatalog}
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>{$t('skills.colSlug')}</th><th>{$t('skills.colVersion')}</th><th>{$t('skills.colSummary')}</th><th>{$t('skills.colLocal')}</th><th></th></tr>
-              </thead>
-              <tbody>
-                {#each $remoteCatalog.skills as s (s.slug)}
+        {#if $remoteCatalog && $remoteCatalog.skills.length > 0}
+          <!-- ★ 目录里是**精选推荐**（2026-10）：来源由维护者在远端核过，每条都
+               带着**原始 GitHub 来源**（下面那一格），装的时候落库记录也指回上游。
+               所以这一页签不是"谁都能往里投稿的目录"，是"平台挑过的几条"。 -->
+          <p class="faint small" style="margin:0 0 var(--sp-2)">{$t('skills.remotePickedNote')}</p>
+          <Table
+            columns={[
+              { label: $t('skills.colSlug') },
+              { label: $t('skills.colSource') },
+              { label: $t('skills.colVersion') },
+              { label: $t('skills.colSummary') },
+              { label: $t('skills.colLocal') },
+              { label: '', ariaLabel: $t('skills.colActions') },
+            ]}
+          >
+            {#snippet rows()}
+              {#each $remoteCatalog.skills as s (s.slug)}
                   {@const local = $skills.find((x) => x.slug === s.slug)}
                   {@const state = catalogEntryState(local, { slug: s.slug, version: s.version })}
                   <tr>
-                    <td><code>{s.slug}</code></td>
-                    <td class="faint small">{s.version}</td>
-                    <td class="faint small">{s.summary}</td>
+                    <td>
+                      <code>{s.slug}</code>
+                      {#if s.name}
+                        <div class="faint small">{s.name}</div>
+                      {/if}
+                      <!-- ★ 「内容不完整」必须在**装之前**看得见（2026-10）：
+                           维护者可以在清单里声明 exclude（仓库里混着营销素材/测试产物
+                           时用得上）。装了的东西少了零件而界面上不说，正是这个仓库
+                           最防的那种失败：跑起来才发现少东西。
+                           全文在 title 里，行内只说个数。 -->
+                      {#if s.excluded && s.excluded.length > 0}
+                        <div
+                          class="warn small"
+                          title={s.excluded.join('\n')}
+                        >{$t('skills.remoteIncomplete', { count: s.excluded.length })}</div>
+                      {/if}
+                    </td>
+                    <td>
+                      <!-- ★ 来源列（D69.6）：`github:…` 来源标识放这里，不塞在技能列
+                           ——与主表同一布局。这张表是精选推荐，来源必须看得见。 -->
+                      {#if s.sourceRef}
+                        <SourceRef value={s.sourceRef} />
+                      {/if}
+                    </td>
+                    <td class="faint small">{s.version ? `v${s.version}` : $t('common.noVersion')}</td>
+                    <td class="faint small">
+                      {s.summary}
+                      <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说：装完才发现不能用，
+                           比不推荐更糟（如 firecrawl 那一类要 API key）。 -->
+                      {#if s.needs}
+                        <div class="warn small">{s.needs}</div>
+                      {/if}
+                    </td>
                     <td class="faint small">
                       {#if local}
                         {local.version
@@ -620,13 +726,22 @@
                         {$t(state.labelId, state.labelParams)}
                       </button>
                     </td>
+                    <!-- 2026-10（紧凑性）：原来每条 skill 在数据行之下还有一整行
+                         状态提示（colspan=5），与按钮的 `title` 是同一句话——删掉，
+                         悬停按钮仍能看到同样的说明。 -->
                   </tr>
-                  <tr>
-                    <td colspan="5" class="faint small" style="padding-top:0">{$t(state.hintId, state.hintParams)}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+            {/each}
+            {/snippet}
+          </Table>
+        {:else if !$remoteError && isLoggedIn()}
+          <!-- ★ 空态（2026-10）：`server.ts` 那条注释早就写着"目录可以为空，界面
+               要有对应的空态——'目录里什么都没有'是一句真话"，而这张表一直只是
+               渲染出一个空 `<tbody>`：一句话都没有，看起来像界面坏了。
+               ⚠️ 与上面两种状态**必须分开**：远端不可用是"没拉到"，未登录是"没问到"，
+               这里是"问到了，目录里现在没有条目"——三者的下一步完全不同。 -->
+          <div class="empty">
+            <strong>{$t('skills.remoteEmpty')}</strong>
+            {$t('skills.remoteEmptyHint')}
           </div>
         {/if}
       </div>
@@ -716,44 +831,60 @@
     <strong>{$t('skills.emptyAuditStrong')}</strong>{$t('skills.emptyAuditAfter')}
   </div>
 {:else}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>{$t('skills.colSlug')}</th><th>{$t('skills.colName')}</th><th>{$t('skills.colSource')}</th><th>{$t('skills.colFiles')}</th><th>{$t('skills.colUpdatedAt')}</th><th></th></tr>
-      </thead>
-      <tbody>
-        {#each $skills as s (s.id)}
+  <Table
+    columns={[
+      { label: $t('skills.colSlug') },
+      { label: $t('skills.colName') },
+      { label: $t('skills.colSource') },
+      { label: $t('skills.colVersion') },
+      { label: $t('skills.colFiles') },
+      { label: $t('skills.colUpdatedAt') },
+      { label: '', ariaLabel: $t('skills.colActions') },
+    ]}
+  >
+    {#snippet rows()}
+      {#each $skills as s (s.id)}
           {@const fileCount = Object.keys(s.files ?? {}).length}
           <tr>
             <td>
               <!-- ★ 与工具页同一个做法：展开入口从行尾挪到首格 chevron——
                    行尾那格只留卸载（和"为什么不能卸"的说明）。真按钮：
                    tab 能到、读屏器能读、aria-expanded 能报状态。 -->
-              <button
-                type="button"
-                class="expand-toggle"
-                aria-expanded={expanded === s.id}
-                aria-label={expanded === s.id
-                  ? $t('skills.collapseStandard')
-                  : $t('skills.viewStandard')}
-                onclick={() => (expanded = expanded === s.id ? null : s.id)}
-              >
-                <span class="chevron" aria-hidden="true">
-                  {expanded === s.id ? '▾' : '▸'}
-                </span>
-              </button>
-              <code>{s.slug}</code>
+              <!-- D69.8：chevron + slug 包进 flex（.row-title）——列一窄内联元素
+                   会折行（table 是 width:100%），flex 永不折行 -->
+              <div class="row-title">
+                <ExpandToggle
+                  expanded={expanded === s.id}
+                  labelExpand={$t('skills.viewStandard')}
+                  labelCollapse={$t('skills.collapseStandard')}
+                  onclick={() => (expanded = expanded === s.id ? null : s.id)}
+                />
+                <code class="skill-slug">{s.slug}</code>
+              </div>
             </td>
-            <td>{s.name}</td>
+            <td>
+              <!-- D69：名称与目录表 / remote 同一档（faint small）——slug 才是
+                   主标识，名称是第二行 -->
+              <div class="faint small">{s.name}</div>
+              <!-- ★ 与工具页同一格式：名称下面跟一句说明（没有就不画）。
+                   ⚠️ 说明可能很长（实测有 400+ 字符的），所以**最多两行**截断、
+                   全文在 `title` 里——列表是用来扫的，一行被撑成十行就扫不动了。
+                   完整内容在展开后的正文里。 -->
+              {#if s.description}
+                <div class="faint small desc-clamp" title={s.description}>{s.description}</div>
+              {/if}
+            </td>
             <td>
               {#if s.localDir}
                 <!-- 来自某个被勾选的本地目录：来源要写成**那个目录**，
                      而不是笼统的"本机自建"——使用者要能对上自己勾的那个路径 -->
-                <span class="badge {s.selectable === false ? 'todo' : 'in_review'}">
+                <span class="badge local">
                   {$t('skills.fromDir', { dir: s.localDir })}
                 </span>
               {:else}
-                <span class="badge {s.source === 'local' ? 'todo' : 'in_review'}">
+                <!-- D69：来源徽标统一配方——同步/远端 = 默认灰徽章，本地 = accent。
+                     不再借任务状态色 `todo/in_review`（那是给任务状态用的）。 -->
+                <span class="badge" class:local={s.source === 'local'}>
                   {s.source === 'local' ? $t('skills.sourceLocal') : $t('skills.sourceRemote')}
                 </span>
               {/if}
@@ -765,25 +896,28 @@
                   {$t('skills.fromDirInactive', { names: (skillHolders.get(s.id) ?? []).join('、') })}
                 </div>
               {/if}
-              {#if s.version}
-                <!-- 版本要显示：远端目录那条能不能点「更新」，全靠它比 -->
-                <div class="faint small">v{s.version}</div>
-              {/if}
               {#if s.sourceRef && !s.localDir}
                 <!-- 来源标识要能看见：出问题时第一件事就是"它到底从哪儿来的"。
                      ⚠️ 但来自本地目录的那条**不重复显示**：它的 `sourceRef` 就是
                      `localdir:<那个目录>`，而上面那个徽标已经把同一个路径写出来了
                      ——同一行里写两遍同一个路径，只会让人以为它们是两件事。
-                     ⚠️ 长路径**不许换行**：单行省略，全文在 `title` 里。 -->
-                <div class="faint small source-ref" title={s.sourceRef}>{s.sourceRef}</div>
+                     ⚠️ 长路径**不许换行**：单行省略，全文在 `title` 里。
+                     ★ 2026-10（紧凑性）：与工具页同一做法——`span` 与徽章同行，
+                     块级 div 换行会把整行撑高一截。 -->
+                <SourceRef value={s.sourceRef} />
               {/if}
+            </td>
+            <td class="faint small">
+              {s.version ? `v${s.version}` : $t('common.noVersion')}
             </td>
             <td class="faint small">
               SKILL.md{#if fileCount > 0} +{fileCount}{/if}
             </td>
-            <td class="faint small">{new Date(s.updatedAt).toLocaleString()}</td>
-            <td class="row-actions">
-              <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上。
+            <td class="faint small" title={absoluteTime(s.updatedAt)}>{relativeTime(s.updatedAt, now)}</td>
+            <!-- ⚠️ 与工具页同一做法：flex 放在**内层 div** 上，不放 td 上 -->
+            <td>
+              <div class="row-actions">
+                <!-- 卸载（D38）：README 里挂着的"没有卸载，要删只有改库"到这里补上。
                    ⚠️ 但**来自本地目录的这条不给卸**：它每次读列表都会被重扫回来，
                        "卸载"按下去只会让它消失一瞬间然后回来——那比没有按钮更糟
                        （使用者会以为卸载坏了）。要去那个目录里删。 -->
@@ -805,12 +939,13 @@
                   {removing === s.id ? $t('common.uninstalling') : $t('common.uninstall')}
                 </button>
               {/if}
+              </div>
             </td>
           </tr>
           {#if expanded === s.id}
             <tr>
-              <!-- 6 列：动作那一列随"skill 不再带动作"一起去掉了 -->
-              <td colspan="6">
+              <!-- 7 列：动作那一列随"skill 不再带动作"一起去掉了 -->
+              <td colspan="7">
                 <pre class="skill-body">{s.body}</pre>
                 {#if fileCount > 0}
                   <details class="support">
@@ -824,10 +959,9 @@
               </td>
             </tr>
           {/if}
-        {/each}
-      </tbody>
-    </table>
-  </div>
+    {/each}
+    {/snippet}
+  </Table>
 {/if}
 
 <style>
@@ -858,21 +992,6 @@
     border-bottom-color: var(--accent);
   }
 
-  .field {
-    margin-bottom: var(--sp-3);
-  }
-
-  .field > label {
-    display: block;
-    margin-bottom: var(--sp-1);
-    font-size: var(--fs-sm);
-    color: var(--text-faint);
-  }
-
-  .field > input {
-    width: 100%;
-  }
-
   /* ⚠️ 这里原来还有 `.group` / `.actions` 两条：它们只服务那一块"允许这个 skill
      触发的动作"的 fieldset（legend + 一排 checkbox）。那块 UI 随 D40 收口整块删掉了
      ——留着这两条会变成两个**选不中任何元素**的选择器（`svelte-check` 直接报未使用）。 */
@@ -883,33 +1002,6 @@
     gap: var(--sp-1);
     font-size: var(--fs-xs);
     cursor: pointer;
-  }
-
-  .row-actions { display: flex; gap: var(--sp-1); }
-  .row-actions .danger { color: var(--bad); }
-
-  /* ── 展开入口（首格 chevron，与工具页同一个做法）── */
-  .expand-toggle {
-    background: none;
-    border: none;
-    border-radius: var(--radius);
-    padding: 0 var(--sp-1);
-    margin-right: var(--sp-1);
-    color: var(--text-faint);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    line-height: 1;
-    vertical-align: middle;
-  }
-  .expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
-  .expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
-
-  /* 来源标识：长路径/URL 单行省略，全文在 `title` 里（不许折行撑高这行） */
-  .source-ref {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 16rem;
   }
 
   /* ── 本地技能目录（设置抽屉）── */

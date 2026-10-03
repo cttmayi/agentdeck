@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import ListPane from '../components/ListPane.svelte'
+  import MainArea from '../components/MainArea.svelte'
+  import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
@@ -8,15 +11,16 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
     applyChoice,
-    bridgeTextFromTurns,
     chatFilesState,
     executorChoices,
     isTurnRunning,
-    relativeTime,
     skillsHeldBackByDaemon,
     type DraftPick,
   } from '../lib/chat.ts'
-  import { go, newTaskDraft, showToast } from '../lib/view.ts'
+  import { showToast } from '../lib/view.ts'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { absoluteTime, relativeTime } from '../lib/time.ts'
+  import type { WebTextId } from '@agentdeck/i18n'
   import {
     activeConversationId,
     agents,
@@ -32,7 +36,6 @@
     openConversation,
     renameConversation,
     sendChatTurn,
-    setConversationWorkDir,
     skills,
     startConversation,
   } from '../lib/stores.ts'
@@ -49,8 +52,10 @@
    * conversation），所以这里触发不了任何登记过的动作——这不是"我们没做"，
    * 是这条路上没有那个门。
    *
-   * 想让它真的动手，走那条桥：把内容预填进「新建任务」，在那里定执行者、
-   * 审核者与动作白名单，提交之后照常走闭环。
+   * ⚠️ 2026-10 按要求**去掉了"派发任务"**（原来有两个按钮：「把整个对话派出去」与
+   *   每轮次上的「用这个去派活」，它们把内容预填进「新建任务」）。
+   *   所以现在这一页与本闭环**完全不相通**：想动手就去「新建任务」写，
+   *   聊天这边不提供那条路（要带内容过去，自己复制粘贴——不再有隐藏的预填）。
    *
    * ══════════════════════════════════════════════════════════════════
    * 一轮对话 = 一条 run
@@ -67,6 +72,15 @@
   // ── 本地状态 ──
   /** 正在"起一个新对话"（还没说第一句话，所以服务端还没有这条对话）。 */
   let drafting = false
+  /**
+   * 栏头带的搜索（D63）：与任务/智能体同款。只过滤**标题**——对话没有别的
+   * 可搜的正文（轮数/相对时间是元信息，不是检索词）。
+   */
+  let chatFilter = ''
+  $: visibleConversations = $conversations.filter((c) => {
+    if (!chatFilter.trim()) return true
+    return c.title.trim().toLowerCase().includes(chatFilter.trim().toLowerCase())
+  })
   /**
    * 下拉里当前选的那一项，值是 `agent:<id>` / `skill:<id>`。
    *
@@ -102,8 +116,11 @@
   let errorText = ''
   let renaming = false
   let renameValue = ''
-  let workDirDraft = ''
-  let editingWorkDir = false
+  /**
+   * 「新对话」界面上的工作目录设定（2026-10 起只在建对话时设一次；
+   * 详情页只读）。空字符串 = 平台自动分配。
+   */
+  let draftWorkDir = ''
 
   /**
    * 执行者名字（对话只存 id）。
@@ -188,8 +205,9 @@
     String(filesTick),
   ].join('\u0000')
   $: canSend = input.trim() !== '' && !sending && runningTurn === null
+  /** 相对时间的「现在」——每次响应式更新重算一遍（列表刷新时跟着走）。 */
+  $: now = Date.now()
   $: actualWorkDir = detail?.workDir ?? null
-  $: bridgeAll = activeTurns.length > 0
   /** 右栏有没有"可以说话的地方"：草稿态（还没说第一句）也算。 */
   $: activeOrDrafting = drafting || activeConversation !== null
 
@@ -212,6 +230,7 @@
     errorText = ''
     input = ''
     pendingText = ''
+    draftWorkDir = ''
     const first = $effectiveDefaultAgentId ?? executors[0]?.id ?? ''
     draftChoice = first === '' ? '' : `agent:${first}`
     draftPick = { agentId: first, skillId: '' }
@@ -232,6 +251,7 @@
       id: 'new',
       label: $t('chat.newConversation'),
       kind: 'primary',
+      icon: 'plus',
       onActivate: startDrafting,
     },
   ])
@@ -274,6 +294,9 @@
           agentId: draftPick.agentId,
           text,
           skillIds: draftPick.skillId === '' ? [] : [draftPick.skillId],
+          // 空 = 平台自动分配：**不传** `workDir`（`exactOptionalPropertyTypes`
+          // 下显式传 undefined 是非法的；省略才是"没设"）。
+          ...(draftWorkDir.trim() === '' ? {} : { workDir: draftWorkDir.trim() }),
         })
         drafting = false
         input = ''
@@ -347,32 +370,35 @@
     if (!id || title === '' || title === activeConversation?.title) return
     try {
       await renameConversation(id, title)
+      // ★ 保存成功要有反馈：其它每一处保存（智能体详情、新建智能体、工作区设置）
+      //   都弹一句，这里原来**什么都不说**——而"改了名之后界面还是旧名字"
+      //   （列表刷新慢一拍）看起来就是没保存上。
+      showToast($t('chat.renamed'))
     } catch (err) {
       errorText = err instanceof Error ? err.message : String(err)
     }
   }
 
-  async function saveWorkDir(reset: boolean): Promise<void> {
-    const id = $activeConversationId
-    editingWorkDir = false
+  async function remove(id: string): Promise<void> {
     if (!id) return
-    const value = reset ? null : workDirDraft.trim() || null
-    try {
-      await setConversationWorkDir(id, value)
-    } catch (err) {
-      errorText = err instanceof Error ? err.message : String(err)
-    }
-  }
-
-  async function remove(): Promise<void> {
-    const id = $activeConversationId
-    if (!id) return
-    if (!window.confirm($t('chat.deleteConfirm'))) return
+    // ★ 平台自己的确认框（居中），不是 `window.confirm`——理由见 `lib/confirm.ts`
+    if (
+      !(await askConfirm({
+        title: $t('chat.delete'),
+        message: $t('chat.deleteConfirm'),
+        confirmLabel: $t('chat.deleteConfirmYes'),
+        danger: true,
+      }))
+    )
+      return
     try {
       await deleteConversation(id)
       showToast($t('chat.deleted'))
-      if ($conversations.length > 0) await openConversation($conversations[0]!.id)
-      else startDrafting()
+      // 删的是当前正在看的对话：落到列表第一个，或直接开始新对话
+      if (id === $activeConversationId) {
+        if ($conversations.length > 0) await openConversation($conversations[0]!.id)
+        else startDrafting()
+      }
     } catch (err) {
       errorText = err instanceof Error ? err.message : String(err)
     }
@@ -387,136 +413,92 @@
     await openConversation(id)
   }
 
-  /**
-   * 桥：把内容预填进「新建任务」，然后切过去。
-   *
-   * ⚠️ 这里只**填**，不提交：执行者、审核者、动作白名单都等着在那一页确认。
-   *    这一条是产品主张的边界——聊天能提议，派活的判断归使用者。
-   */
-  function bridge(turns: readonly ChatTurnView[]): void {
-    const text = bridgeTextFromTurns(turns)
-    if (text === '') return
-    newTaskDraft.set(text)
-    showToast($t('chat.bridged'))
-    go('new')
-  }
 </script>
 
 <div class="split-layout">
-  <!-- ══════════ 左：对话列表 ══════════ -->
-  <aside class="pane list-pane">
-    <div class="pane-head">
-      <!--
-        ⚠️ 这个标题是「对话」（左栏装的是什么），与顶栏的页名「聊天」**不是一句话**，
-           所以它留下；原来紧挨着它的「新对话」按钮搬去了顶栏里、紧跟着页名的位置——那一个是整页的
-           主线动作，不是左栏的动作。
-      -->
-      <h2>{$t('chat.listTitle')}</h2>
-    </div>
-    <div class="pane-body">
-      {#if $loading.conversations && $conversations.length === 0}
-        <div class="skeleton" style="height: 4rem"></div>
-      {:else if $loadError.conversations}
-        <p class="notice bad">{$loadError.conversations}</p>
-      {:else if $conversations.length === 0}
-        <div class="empty">
-          <strong>{$t('chat.empty')}</strong>
-          <p class="faint small">{$t('chat.emptyHint')}</p>
-        </div>
-      {:else}
-        <ul class="conv-list">
-          {#each $conversations as conversation (conversation.id)}
-            <li>
-              <button
-                class="conv-item"
-                class:active={!drafting && conversation.id === $activeConversationId}
-                onclick={() => void select(conversation.id)}
+  <!-- ══════════ 左：对话列表（D66：栏头带 + 五态壳在 ListPane 里）══════════ -->
+  <ListPane
+    countLabel={$t('chat.listCount', { count: visibleConversations.length })}
+    searchPlaceholder={$t('chat.search')}
+    filter={chatFilter}
+    onFilter={(v) => (chatFilter = v)}
+    loading={($loading.conversations && $conversations.length === 0) ?? false}
+    loadError={$loadError.conversations ?? null}
+    empty={$conversations.length === 0}
+    emptyTitle={$t('chat.empty')}
+    emptyHint={$t('chat.emptyHint')}
+    emptyFiltered={visibleConversations.length === 0}
+    emptyFilteredTitle={$t('chat.emptyFiltered')}
+    emptyFilteredHint={$t('chat.emptyFilteredHint')}
+  >
+    {#snippet rows()}
+      <ul class="conv-list">
+        {#each visibleConversations as conversation (conversation.id)}
+          <ListRow
+            rowClass="conv-row"
+            active={!drafting && conversation.id === $activeConversationId}
+            onclick={() => void select(conversation.id)}
+          >
+            {#snippet children()}
+              <!-- ★ `title` 必须有：这一格是单行省略的，没有它标题一长就**永远看不全**
+                 （任务列表、技能/工具的名称列都有） -->
+              <span class="conv-title" title={conversation.title}>{conversation.title}</span>
+              <!-- ★ 「N 轮 · 最近 X 分钟前」：轮数说明它有多重，相对时间说明
+                   它有多旧——两者一起才是「这一条还值不值得点开」的答案。
+                   ⚠️ 这句用的是 `chat.summary`，它**一直存在却没人用**：原本就
+                   打算显示，只是没接上（`relativeTime` 同样是死导入）。
+                   准确时间在 `title` 里（列表只需要量级）。 -->
+              <span
+                class="conv-sub faint small"
+                title={conversation.lastTurnAt === null
+                  ? $t('chat.neverUsed')
+                  : absoluteTime(conversation.lastTurnAt)}
               >
-                <span class="conv-title">{conversation.title}</span>
-                <span class="conv-sub faint small">
-                  {agentNames.get(conversation.agentId) ?? '—'} ·
-                  {conversation.turnCount === 0
-                    ? $t('chat.neverUsed')
-                    : $t('chat.turnCount', { count: conversation.turnCount })}
-                </span>
+                {agentNames.get(conversation.agentId) ?? '—'} ·
+                {conversation.turnCount === 0 || conversation.lastTurnAt === null
+                  ? $t('chat.neverUsed')
+                  : $t('chat.summary', {
+                      turns: conversation.turnCount,
+                      when: relativeTime(conversation.lastTurnAt, now),
+                    })}
+              </span>
+            {/snippet}
+            {#snippet action()}
+              <button
+                type="button"
+                class="list-row-action"
+                title={$t('chat.delete')}
+                aria-label={$t('chat.delete')}
+                onclick={() => void remove(conversation.id)}
+              >
+                ×
               </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-    <!--
-      ⚠️ 这里原来常驻一句话："这里不动手：聊天不产出判决，而动作的门槛就是判决。"
-         2026-09 按要求去掉（它是页面底部一行反复出现的说明，而使用者已经知道聊天
-         不派活）。**边界本身没有变**：聊天里跑的东西不产判决、因此不触发动作，
-         这一点仍然由「带过去」（预填到新建任务）那条路来说明——想动手就得走那儿。
-    -->
-  </aside>
+            {/snippet}
+          </ListRow>
+        {/each}
+      </ul>
+    {/snippet}
+  </ListPane>
 
   <!-- ══════════ 右：消息流 ══════════ -->
-  <section class="pane detail-pane">
-    {#if drafting}
-      <div class="pane-head">
-        <h2>{$t('chat.newConversation')}</h2>
-      </div>
-      <div class="pane-body">
-        <label for="chat-agent">{$t('chat.agentLabel')}</label>
-        <select id="chat-agent" value={draftChoice} onchange={onDraftChoice}>
-          <optgroup label={$t('chat.agentGroup')}>
-            {#each agentChoices as choice (choice.value)}
-              <option value={choice.value}>{agentNames.get(choice.agentId) ?? '—'}</option>
-            {/each}
-          </optgroup>
-          {#if skillChoices.length > 0}
-            <optgroup label={$t('chat.skillGroup')}>
-              {#each skillChoices as choice (choice.value)}
-                <option value={choice.value}>
-                  {choice.agentId === ''
-                    ? $t('chat.skillOptionSelf', { skill: choice.skill?.slug ?? '' })
-                    : $t('chat.skillOptionOwned', {
-                        skill: choice.skill?.slug ?? '',
-                        agent: agentNames.get(choice.agentId) ?? '—',
-                      })}
-                </option>
-              {/each}
-            </optgroup>
-          {/if}
-        </select>
-        {#if executors.length === 0}
-          <p class="notice warn">{$t('chat.noExecutor')}</p>
-        {/if}
-        {#if heldBackSkills.length > 0}
-          <p class="hint" data-skills-need-restart>
-            {$t('chat.skillsNeedRestart', {
-              skills: heldBackSkills.map((s) => s.slug).join(', '),
-            })}
-          </p>
-        {/if}
-        <p class="hint">{$t('chat.agentHint')}</p>
-        {#if draftSkill !== null}
-          <p class="hint" data-skill-owner>
-            {draftSkillOwned
-              ? $t('chat.skillOwner', {
-                  agent: agentNames.get(draftPick.agentId) ?? '—',
-                  skill: draftSkill.slug,
-                })
-              : $t('chat.skillSelfCarried', {
-                  agent: agentNames.get(draftPick.agentId) ?? '—',
-                  skill: draftSkill.slug,
-                })}
-          </p>
-        {/if}
-        {#if errorText !== ''}
-          <p class="notice bad">{errorText}</p>
-        {/if}
-      </div>
-    {:else if activeConversation === null}
-      <div class="pane-body">
-        <div class="empty">
-          <strong>{$t('chat.noSelection')}</strong>
-        </div>
-      </div>
-    {:else}
+    <!-- ★ 右主区（D69.15）：壳 / 栏头 / 空态统一在 MainArea。
+         聊天三态：草稿（简单栏头+表单）/ 没选中（空态）/ 对话（chat-head 改名形态
+         + 工作目录 + 消息流 + 文件树 + 输入条）。栏头与输入条都是**特殊情况**：
+         · 栏头走 head snippet（改名输入要替换 h2、pane-actions 是兄弟元素，塞不进
+           结构化 back/title/sub/actions）；
+         · 输入条在草稿与对话**两支都在**（D46/D58 的教训：新对话选完执行者必须
+           能说第一句话），走 foot snippet 且在空态不渲染。 -->
+    <MainArea
+      empty={!drafting && activeConversation === null}
+      emptyTitle={$t('chat.noSelection')}
+      bodyClass={activeConversation !== null ? 'chat-stream' : ''}
+    >
+      {#snippet head()}
+        {#if drafting}
+          <div class="pane-head">
+            <h2>{$t('chat.newConversation')}</h2>
+          </div>
+        {:else if activeConversation !== null}
       <div class="pane-head chat-head">
         <div class="chat-head-main">
           {#if renaming}
@@ -551,44 +533,94 @@
           </span>
         </div>
         <div class="pane-actions">
-          <button class="ghost" disabled={!bridgeAll} onclick={() => bridge(activeTurns)}>
-            {$t('chat.bridgeAll')}
+          <button class="danger" onclick={() => void remove($activeConversationId ?? '')}>
+            {$t('chat.delete')}
           </button>
-          <button class="danger" onclick={() => void remove()}>{$t('chat.delete')}</button>
         </div>
       </div>
 
+      <!--
+        工作目录**只读**（2026-10）：它只在「新对话」界面上设定，对话开始后不再
+        能改——改目录等于把"这次对话在哪个目录里干的活"变成不确定的，而回看时
+        列出的文件、路径都指着旧目录。这里只回答"这个对话的目录是哪个"。
+      -->
       <div class="chat-dir">
         <span class="faint small">{$t('chat.workDirLabel')}</span>
-        {#if editingWorkDir}
-          <input
-            class="dir-input"
-            bind:value={workDirDraft}
-            placeholder={$t('chat.workDirAuto')}
-            autocomplete="off"
-            onkeydown={(e) => {
-              if (e.key === 'Enter') void saveWorkDir(false)
-              if (e.key === 'Escape') editingWorkDir = false
-            }}
-          />
-          <button onclick={() => void saveWorkDir(false)}>{$t('chat.workDirSave')}</button>
-          <button class="ghost" onclick={() => void saveWorkDir(true)}>{$t('chat.workDirReset')}</button>
-        {:else}
-          <code class="mono small">{actualWorkDir ?? $t('chat.notRunYet')}</code>
-          <button
-            class="ghost"
-            onclick={() => {
-              workDirDraft = activeConversation.workDir ?? ''
-              editingWorkDir = true
-            }}>{$t('chat.rename')}</button
-          >
-        {/if}
+        <code class="mono small">{actualWorkDir ?? $t('chat.notRunYet')}</code>
       </div>
-      <p class="chat-dir-hint faint small">
-        {$t('chat.workDirAutoHint')} {$t('chat.workDirWarning')}
-      </p>
-
-      <div class="pane-body chat-stream">
+      <p class="chat-dir-hint faint small">{$t('chat.workDirWarning')}</p>
+        {/if}
+      {/snippet}
+      {#snippet body()}
+        {#if drafting}
+        <label for="chat-agent">{$t('chat.agentLabel')}</label>
+        <select id="chat-agent" value={draftChoice} onchange={onDraftChoice}>
+          <optgroup label={$t('chat.agentGroup')}>
+            {#each agentChoices as choice (choice.value)}
+              <option value={choice.value}>{agentNames.get(choice.agentId) ?? '—'}</option>
+            {/each}
+          </optgroup>
+          {#if skillChoices.length > 0}
+            <optgroup label={$t('chat.skillGroup')}>
+              {#each skillChoices as choice (choice.value)}
+                <option value={choice.value}>
+                  {choice.agentId === ''
+                    ? $t('chat.skillOptionSelf', { skill: choice.skill?.slug ?? '' })
+                    : $t('chat.skillOptionOwned', {
+                        skill: choice.skill?.slug ?? '',
+                        agent: agentNames.get(choice.agentId) ?? '—',
+                      })}
+                </option>
+              {/each}
+            </optgroup>
+          {/if}
+        </select>
+        {#if executors.length === 0}
+          <p class="notice warn">{$t('chat.noExecutor')}</p>
+        {/if}
+        {#if heldBackSkills.length > 0}
+          <p class="hint" data-skills-need-restart>
+            {$t('chat.skillsNeedRestart', {
+              skills: heldBackSkills.map((s) => s.slug).join(', '),
+            })}
+          </p>
+        {/if}
+        <p class="hint">{$t('chat.agentHint')}</p>
+        <!--
+          工作目录（2026-10 起**只在这里设**）：建对话时定一次，之后详情页只读。
+          留空 = 平台自动分配（`conversation.workDir = null`）；填了 = 接进你的
+          仓库。风险披露在下面那行，不藏。
+        -->
+        <label for="chat-draft-workdir" class="draft-workdir-label">
+          {$t('chat.draftWorkDirLabel')}
+        </label>
+        <input
+          id="chat-draft-workdir"
+          class="draft-workdir-input"
+          bind:value={draftWorkDir}
+          placeholder={$t('chat.workDirAuto')}
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="hint">{$t('chat.workDirAutoHint')}</p>
+        <p class="hint">{$t('chat.workDirWarning')}</p>
+        {#if draftSkill !== null}
+          <p class="hint" data-skill-owner>
+            {draftSkillOwned
+              ? $t('chat.skillOwner', {
+                  agent: agentNames.get(draftPick.agentId) ?? '—',
+                  skill: draftSkill.slug,
+                })
+              : $t('chat.skillSelfCarried', {
+                  agent: agentNames.get(draftPick.agentId) ?? '—',
+                  skill: draftSkill.slug,
+                })}
+          </p>
+        {/if}
+        {#if errorText !== ''}
+          <p class="notice bad">{errorText}</p>
+        {/if}
+        {:else if activeConversation !== null}
         {#if $loadError.chatDetail}
           <p class="notice bad">{$loadError.chatDetail}</p>
         {/if}
@@ -631,13 +663,15 @@
                 {#if turn.output}
                   <article class="bubble agent markdown">{@html renderedFor(turn)}</article>
                 {:else if turn.status !== null && turn.status !== 'completed'}
-                  <p class="notice bad">{turn.status}</p>
+                  <!-- ★ 状态走词表（`term.runStatus.*`），**不摊协议英文值**：
+                       原来这里直接显示 `failed` / `cancelled`，中文界面上
+                       是一串英文。与任务详情的执行记录徽标同一套词条。 -->
+                  <p class="notice bad">
+                    {$t(`term.runStatus.${turn.status}` as WebTextId)}
+                  </p>
                 {:else}
                   <p class="faint small">{$t('chat.noOutput')}</p>
                 {/if}
-                <div class="turn-actions">
-                  <button class="ghost" onclick={() => bridge([turn])}>{$t('chat.bridgeTurn')}</button>
-                </div>
               {/if}
             {/if}
           </article>
@@ -650,36 +684,10 @@
             <p class="faint small">{$t('chat.sending')}</p>
           </article>
         {/if}
-      </div>
-
-    {/if}
-
-    <!--
-      ★ 输入框在**两支里都在**（草稿与已有对话）。
-
-      这一点曾经写错过一次：草稿那一支里没有输入框，于是"新对话 → 选执行者 →
-      然后**没法说第一句话**"。而对话是**由第一句话诞生**的（服务端没有"先建
-      一个空对话"这条路），没有输入框就等于这条路走不通。
-      是布局探针把它抓出来的（`chat.composerInsideDetail`）——这也是那条检查
-      存在的理由：它量的是"在不在该在的容器里"，不是"页面上有没有这几个字"。
-    -->
-    {#if !activeOrDrafting}
-      <div class="pane-body"></div>
-    {:else}
-      <!--
-        ══════════ 工作目录的文件（右栏底部，默认收起）══════════
-
-        ★ 放在**输入框上面**、而不是最底下：输入框的位置不能动。放在它下面的话，
-          一展开就把输入框顶上去——正打字的时候界面自己动，是最糟的一类跳动。
-          展开时缩的是上面那块消息区，输入框原地不动。
-
-        ★ 默认收起：头部那一行常驻并写出「N 项」，值不值得点开由使用者判断。
-          一个默认展开的树会在每一轮之后把消息挤走。
-
-        ★ 草稿态**不画**这一栏（还没有对话，也就还没有目录），旧 daemon 上画出来
-          但把原因写在里面——两种情况都由 `chatFilesState` 判定，界面不自己猜。
-      -->
-      {#if filesState !== 'hidden'}
+        {/if}
+      {/snippet}
+      {#snippet foot()}
+        {#if activeConversation !== null && filesState !== 'hidden'}
         <section class="chat-files" data-chat-files>
           <div class="chat-files-head">
             <button
@@ -721,12 +729,12 @@
                 reloadKey={filesReloadKey}
                 bind:count={filesCount}
               />
-              <p class="hint faint small">{$t('chat.filesNotAnAction')}</p>
+              <p class="hint">{$t('chat.filesNotAnAction')}</p>
             </div>
           {/if}
         </section>
-      {/if}
-
+        {/if}
+        {#if drafting || activeConversation !== null}
       <div class="pane-foot chat-composer">
         {#if errorText !== ''}
           <p class="notice bad">{errorText}</p>
@@ -746,11 +754,16 @@
               {$t('chat.enterHint')}
             {/if}
           </span>
-          <button disabled={!canSend} onclick={() => void send()}>{$t('chat.send')}</button>
+          <button
+            disabled={!canSend}
+            title={canSend ? undefined : $t('chat.sendNotReady')}
+            onclick={() => void send()}
+          >{$t('chat.send')}</button>
         </div>
       </div>
-    {/if}
-  </section>
+        {/if}
+      {/snippet}
+    </MainArea>
 </div>
 
 <style>
@@ -778,10 +791,13 @@
     color: var(--text-faint);
   }
 
-  .list-pane {
-    max-width: 22rem;
-  }
-
+  /*
+    ★ 2026-10（紧凑性）：原来 `.list-pane` 有 `max-width: 22rem`，而 `.split-layout`
+      的 grid 第一列是 `minmax(20rem, 26rem)`——宽窗口下列是 416px，列表栏却只
+      画到 352px，右侧空出一整条 64px 的 grid 列（实测左栏右缘 592、右栏左缘 656）。
+      选中框因此看起来"宽度不够"。去掉 max-width，让列表栏占满自己的列（与
+      Agents/Tasks 同一档 416px）。
+  */
   .conv-list {
     list-style: none;
     margin: 0;
@@ -791,31 +807,18 @@
     gap: var(--sp-1);
   }
 
-  .conv-item {
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius);
-    padding: var(--sp-2);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    cursor: pointer;
-  }
-
-  .conv-item:hover {
-    background: var(--surface-hover);
-  }
-
-  /* 与侧边栏 .nav-item.active 同一套语义：当前所在的那个 */
-  .conv-item.active {
-    background: var(--surface-2);
-    border-color: var(--line-strong);
-  }
-
+  /* ★ 整行可点 + 右侧独立删除按钮（与「智能体」那栏的 `.agent-row` 同形）。
+       按钮里套按钮是非法结构，所以容器是 `li`，里面放主按钮 + 兄弟删除按钮。 */
+  /* ★ 选中框画在**容器 `li`** 上（背景 + `--accent` 描边），与任务页
+     `.task-row` / 智能体页 `.agent-row` 完全同形：三项列表的"当前选中"长得
+     一模一样，连"框把右边的删除按钮一起圈进去"这一点都一致。
+     ⚠️ 描边色原来写在里面的按钮上、用的是 `--line-strong`（灰）——那是**唯一**
+     一处这样写的，于是聊天栏的选中框与另外两栏不一样（颜色不同、范围也不同）。 */
+  /* 删除按钮：默认几乎不可见，hover 才露出危险色——扫列表时不该被一排 × 吵到 */
   .conv-title {
-    font-size: var(--fs-sm);
+    /* D65：标题与任务/智能体同一档（`--fs-base` 继承 + 600）——原来 fs-sm/常规，
+       三页标题字号字重各不一样（实测 13/400、14/600、14/700）。 */
+    font-weight: 600;
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -843,6 +846,21 @@
     min-width: 14rem;
   }
 
+  /* D69.15.2 栏头标题对齐：默认的 ghost 按钮（垂直 padding 8px×2，高 38px）和
+     input（自带内边距，高 ~31px）在 baseline 对齐里是**行里最高的**，把 h2 往下
+     顶（实测标题 top 75 vs 任务/智能体的 68——"Title 高度不一样"的第二个出处）。
+     压到与标题同高（竖 padding 归零、input 字号对齐 fs-lg），行高=标题高，标题
+     回到栏头顶部 16px 那一档。 */
+  .chat-head-main .ghost {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .rename-input {
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: var(--fs-lg);
+  }
+
   .chat-dir {
     display: flex;
     align-items: center;
@@ -852,15 +870,18 @@
     margin-top: var(--sp-1);
   }
 
-  .dir-input {
-    min-width: 18rem;
-  }
-
   .chat-dir-hint {
     margin: var(--sp-1) var(--sp-4) 0;
   }
 
-  .chat-stream {
+  /* 「新对话」界面上的工作目录设定：与上面那个执行者选择器同一节奏 */
+  .draft-workdir-label {
+    margin-top: var(--sp-3);
+  }
+
+  /* D69.15：`.chat-stream` 打在 MainArea 渲染的 pane-body 上（bodyClass），
+     scoped 样式跨不过组件边界——:global 才能命中（与 Tasks 的 log-mode 同一处理） */
+  :global(.chat-stream) {
     display: flex;
     flex-direction: column;
     gap: var(--sp-4);
@@ -929,11 +950,6 @@
     border-radius: var(--radius-sm);
     padding: var(--sp-2);
     overflow-x: auto;
-  }
-
-  .turn-actions {
-    display: flex;
-    gap: var(--sp-2);
   }
 
   .stop {

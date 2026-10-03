@@ -28,4 +28,13 @@ export const commonText = {
   'common.previewing': { zh: '预览中…', en: 'Rendering…' },
   'common.collapse': { zh: '收起', en: 'Collapse' },
   'common.required': { zh: '必需', en: 'Required' },
+  /** 「这一项没有版本号」——技能与工具两页同用（原来是 `tools.versionNone` 独有）。 */
+  'common.noVersion': { zh: '无版本', en: 'No version' },
+  /** 按钮置灰时的通用解释：**上一次操作还没结束**（项目纪律：置灰必须写清为什么）。 */
+  /** 相对时间的四档（`lib/time.ts` 用；列表一律用它，准确时间放 `title`）。 */
+  'common.justNow': { zh: '刚刚', en: 'just now' },
+  'common.minutesAgo': { zh: '{count} 分钟前', en: '{count} min ago' },
+  'common.hoursAgo': { zh: '{count} 小时前', en: '{count} h ago' },
+  'common.daysAgo': { zh: '{count} 天前', en: '{count} d ago' },
+  'common.busyHint': { zh: '上一次操作还没结束，稍等一下', en: 'The previous action has not finished yet — one moment' },
 } as const satisfies TextCatalog

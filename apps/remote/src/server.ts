@@ -1,7 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { spawn } from 'node:child_process'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { extname, join, normalize, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import {
@@ -12,7 +14,15 @@ import {
 } from './plugins.ts'
 import { collectPending } from './pending.ts'
 import { PluginStore } from './plugin-store.ts'
-import { loadCatalogTools, type CatalogToolEntry } from './catalog.ts'
+import { loadCatalogSkills, loadCatalogTools, type CatalogSkillEntry, type CatalogToolEntry } from './catalog.ts'
+import { CONFIG_FILE_NAME, summarizeManifest } from '../../../tools/skill-catalog-sync/src/manifest-config.ts'
+import {
+  LocalSkillConflict,
+  describeInstallError,
+  installLocalSkill,
+  listLocalSkills,
+  uninstallLocalSkill,
+} from './local-skills.ts'
 /**
  * 远端服务（M3，D19/D20）。
  *
@@ -30,9 +40,15 @@ import { loadCatalogTools, type CatalogToolEntry } from './catalog.ts'
  * 它绝不做的事（否则整个架构就退化成"又一个云平台"）
  * ══════════════════════════════════════════════════════════════════
  *
- * - **不保存任何 payload**。第三方查询是"你来问、我转发、答完即弃"。
+ * - **不保存任何 payload**（**一处例外见下**）。第三方查询是"你来问、我转发、答完即弃"。
  *   正因为不留存，才不需要 TTL、不需要过期策略、不需要清理任务。
  *   （需求方原话："不需要暂存，有需求的时候，远端重新调用端口去询问第3方"。）
+ *   ⚠️ 唯一例外是**公共技能目录**：内容由一个**独立工具**
+ *   （`tools/skill-catalog-sync/`，`pnpm run sync-skills`）从推荐的 GitHub 技能抓下来，
+ *   写进数据目录（`CATALOG_SKILLS_SUBDIR`）。那是"公共目录"这件事本身要的东西，
+ *   **不是**使用者的 payload。本服务**不抓取技能**（不碰 `api.github.com`、
+ *   没有一行抓取代码）：它只读那个目录（每次请求重扫），写它的那个进程是谁跟它无关
+ *   （D50 / 2026-10 A 案）。
  * - **不决定谁来审、审成什么样**。审核标准与判决都在 daemon 侧。
  *   远端若也存一份标准，两边会漂移。
  * - **不主动推任何东西**。daemon 不向远端发起请求；本服务永远是被动的。
@@ -62,6 +78,80 @@ export interface RemoteAccount {
  */
 const DEFAULT_TOOLS_DIR = fileURLToPath(new URL('../catalog/tools', import.meta.url))
 
+/**
+ * 公共目录里**技能**（推荐清单）的默认根目录。
+ *
+ * ⚠️ 与工具包不同，它**不在仓库里**：技能内容由一个**独立工具**
+ *    （`tools/skill-catalog-sync/`）从上游抓下来，写进这个目录。仓库里只有清单
+ *    （`tools/skill-catalog-sync/recommended-skills.json`，只有 URL 与我们自己写的说明）。
+ *
+ * ⚠️ 这个目录是**两个进程之间唯一的约定**：工具写、本服务读。工具用 `--out`
+ *    改到别处、或本服务用 `--data-dir` 改了数据目录，两边就对不上了——那时的
+ *    表现是"界面里目录是空的"，而两个进程都不觉得自己错了。所以工具会把写到了
+ *    哪儿打出来。
+ *
+ * 纯内存模式（测试）没有数据目录：这时它指向一个不存在的路径——"目录里什么都
+ * 没有"是一句真话，界面要有空态，这与工具包那条路同一个口径。
+ */
+const CATALOG_SKILLS_SUBDIR = 'catalog-skills'
+
+/**
+ * 手动安装的技能落在**另一个子目录**（D52）：同步工具独占 `catalog-skills`，
+ * 它整目录原子替换，手动塞进去的东西下次同步就没了（而且是静默消失）。
+ * 详见 `local-skills.ts` 顶部那段。
+ */
+const CATALOG_SKILLS_LOCAL_SUBDIR = 'catalog-skills-local'
+
+/**
+ * 管理页的构建产物目录（`apps/remote/web/dist`）。
+ *
+ * ⚠️ 相对本文件解析（`import.meta.url`），不是相对 `process.cwd()`：服务可能从
+ *    任何目录启动，而"管理页在哪儿"只跟代码在哪儿有关。
+ */
+const DEFAULT_WEB_DIR = fileURLToPath(new URL('../web/dist', import.meta.url))
+
+/**
+ * 同步工具（`tools/skill-catalog-sync/src/cli.ts`）。
+ *
+ * ★ **服务不 import 它**，而是当子进程跑：2026-10 的定案是"抓取与远端服务分开"
+ *   （使用者原话："还是单独工具吧，不要和 remote 连在一起"）。把它当子进程跑，
+ *   这条线仍然成立——抓取崩了不影响服务，服务也不必为抓取装任何东西。
+ *   文件不在（比如部署时只带了 apps/）⇒ 按钮置灰并说明原因，**不是**静默失败。
+ */
+const DEFAULT_SYNC_TOOL = fileURLToPath(
+  new URL('../../../tools/skill-catalog-sync/src/cli.ts', import.meta.url),
+)
+
+/** 静态文件的类型表（少到不需要引依赖）。 */
+const CONTENT_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+}
+
+/** 同步状态（一个进程里同时只允许一次）。 */
+export interface SyncStatus {
+  state: 'idle' | 'running' | 'ok' | 'failed' | 'unavailable'
+  startedAt: string | null
+  finishedAt: string | null
+  exitCode: number | null
+  /** 子进程输出里**末尾**若干行（界面直接显示，不加工、不截断成一句话）。 */
+  tail: string[]
+}
+
+/** 同步输出最多留多少行（够看清失败原因，又不会把内存与界面撑爆）。 */
+const SYNC_TAIL_LINES = 200
+
 export interface RemoteOptions {
   /** 数据目录；`null` 表示纯内存（测试用）。 */
   dataDir?: string | null
@@ -70,6 +160,28 @@ export interface RemoteOptions {
   /** 预置插件。 */
   plugins?: LoadedPlugin[]
   /**
+   * 管理页的静态产物目录；`null` = 不托管页面（纯 API）。
+   * 缺省 `apps/remote/web/dist`（见 `DEFAULT_WEB_DIR`）。
+   */
+  webDir?: string | null
+  /**
+   * 注入 fetch，供"手动装一条技能"用（**测试用**，与 `DaemonOptions.fetchImpl`
+   * 同一个理由：单元测试绝不联网，NFR-T-01）。
+   */
+  fetchImpl?: typeof fetch
+  /**
+   * 推荐清单的**配置文件**路径；`null` = 不读清单（页面就只说"看不到清单"）。
+   * 缺省 `<dataDir>/recommended-skills.json`——与工具那边的默认一致
+   * （工具会**转存**内置默认到这里，服务只读）。见 `manifest-config.ts`。
+   */
+  manifest?: string | null
+  /**
+   * 同步工具的入口脚本；`null` = 不提供"重新同步"按钮。
+   * 缺省自动探测仓库里的 `tools/skill-catalog-sync/src/cli.ts`（见 `DEFAULT_SYNC_TOOL`）。
+   * ⚠️ 服务**不 import** 它，只把它当子进程跑——见 `DEFAULT_SYNC_TOOL` 的说明。
+   */
+  syncTool?: string | null
+  /**
    * 公共目录里**工具包**的根目录（D40）。
    *
    * 缺省是仓库里的 `apps/remote/catalog/tools`——那里放着一个可装的简单范例
@@ -77,6 +189,13 @@ export interface RemoteOptions {
    * （"目录里什么都没有"是一句真话，界面要有空态）。
    */
   toolsDir?: string
+  /**
+   * 公共目录里**技能**的根目录（推荐清单）。
+   *
+   * 缺省是 `<dataDir>/catalog-skills`——**不在代码仓库里**，见
+   * `CATALOG_SKILLS_SUBDIR` 那段注释。测试与部署都可以覆盖它。
+   */
+  skillsDir?: string
   now?: () => Date
 }
 
@@ -133,6 +252,21 @@ export class RemoteService {
   #plugins: LoadedPlugin[]
   /** 公共目录里工具包的根目录（见 `RemoteOptions.toolsDir`）。 */
   readonly #toolsDir: string
+  /** 公共目录里技能的根目录（见 `RemoteOptions.skillsDir`）。 */
+  readonly #skillsDir: string
+  /** 管理页产物目录；`null` = 不托管页面。 */
+  readonly #webDir: string | null
+  /** 手动安装的技能的目录（本地层，D52）。 */
+  readonly #localSkillsDir: string
+  /** 注入的 fetch（测试用；不给就是全局 fetch）。 */
+  readonly #fetchImpl: typeof fetch | undefined
+  /** 推荐清单的配置文件（只读；工具才转存）。 */
+  readonly #manifestPath: string | null
+  /** 同步工具入口；`null` = 不提供同步按钮。 */
+  readonly #syncTool: string | null
+  /** 同步状态（一个进程里同时只允许一次）。 */
+  #sync: SyncStatus = { state: 'idle', startedAt: null, finishedAt: null, exitCode: null, tail: [] }
+  #syncChild: ReturnType<typeof spawn> | null = null
   /**
    * 插件状态与密钥（FR-PLUGIN-09/11）。
    *
@@ -144,12 +278,38 @@ export class RemoteService {
   #loaded = false
 
   constructor(options: RemoteOptions = {}) {
-    this.#dataDir = options.dataDir === undefined ? null : options.dataDir
+    // ★ 一律转成**绝对路径**（`resolve`）：`loadCatalogSkills` / `resolveLocalPath`
+    //   （共用取包规则）**只收绝对路径**——这是它刻意的规定（相对路径取决于调用方从
+    //   哪个目录启动）。2026-10 实测撞到：`--data-dir .cache/x`（相对）时，本地装的
+    //   技能**一条都列不出来**（服务日志里有一句"本地装的技能没有列出去：…路径必须是
+    //   绝对路径"）。第二次踩同一类坑了——所以这里一次把四个目录都转绝对。
+    this.#dataDir =
+      options.dataDir === undefined || options.dataDir === null ? options.dataDir ?? null : resolve(options.dataDir)
     this.#port = options.port ?? 0
     this.#host = options.host ?? '127.0.0.1'
     this.#now = options.now ?? (() => new Date())
     this.#plugins = options.plugins ?? []
-    this.#toolsDir = options.toolsDir ?? DEFAULT_TOOLS_DIR
+    this.#toolsDir = resolve(options.toolsDir ?? DEFAULT_TOOLS_DIR)
+    this.#skillsDir = resolve(
+      options.skillsDir ??
+        (this.#dataDir === null
+          ? join(homedir(), '.agentdeck', 'remote', CATALOG_SKILLS_SUBDIR)
+          : join(this.#dataDir, CATALOG_SKILLS_SUBDIR)),
+    )
+    this.#fetchImpl = options.fetchImpl
+    this.#localSkillsDir = resolve(
+      this.#dataDir === null
+        ? join(homedir(), '.agentdeck', 'remote', CATALOG_SKILLS_LOCAL_SUBDIR)
+        : join(this.#dataDir, CATALOG_SKILLS_LOCAL_SUBDIR),
+    )
+    this.#manifestPath =
+      options.manifest === undefined
+        ? (this.#dataDir === null
+            ? join(homedir(), '.agentdeck', 'remote', CONFIG_FILE_NAME)
+            : join(this.#dataDir, CONFIG_FILE_NAME))
+        : options.manifest
+    this.#webDir = options.webDir === undefined ? DEFAULT_WEB_DIR : options.webDir
+    this.#syncTool = options.syncTool === undefined ? DEFAULT_SYNC_TOOL : options.syncTool
     this.#pluginStore = new PluginStore(this.#dataDir)
   }
 
@@ -357,16 +517,20 @@ export class RemoteService {
    */
   catalog = {
     /**
-     * ★ 公共目录里**不再有** `general-review`（D38）。
+     * ★ 技能目录（2026-10：推荐清单）。
      *
-     * 那一份是"审核标准"，而审核标准属于 daemon 侧——它内联在每个审核者身上
-     * （`Agent.reviewStandard`，D37）。放在这里会重新制造一个我们已经去掉的
-     * 混淆：让使用者以为"要审东西先得装一份 skill"。
+     * ⚠️ 这一段是**占位**：真正的内容在 `/api/catalog` 那条路由里由
+     *    `loadCatalogSkills(this.#skillsDir)` 现扫现给（每次请求重扫，与工具包
+     *    同一条理由）。这里留 `[]` 是为了"目录的形状有一处确定的答案"。
      *
-     * ⚠️ 目录**可以为空**，界面要有对应的空态——"目录里什么都没有"是一句
-     *    真话，比放一份已经不该用的东西强。
+     * 两条历史，都还在生效：
+     *   · 公共目录里**不再有** `general-review`（D38）——那一份是"审核标准"，
+     *     而审核标准内联在每个审核者身上（`Agent.reviewStandard`，D37）。放进
+     *     目录会重新制造那个我们已经去掉的混淆："要审东西先得装一份 skill"。
+     *   · 目录**可以为空**，界面要有对应的空态——"目录里什么都没有"是一句真话，
+     *     比放一份已经不该用的东西强。
      */
-    skills: [],
+    skills: [] as CatalogSkillEntry[],
 
     /**
      * ★ 工具包目录（D40）。
@@ -507,6 +671,11 @@ export class RemoteService {
   }
 
   async close(): Promise<void> {
+    // 同步还在跑就把它收掉：服务关了却留一个子进程在写目录，是最容易漏的那种残留
+    if (this.#syncChild !== null) {
+      this.#syncChild.kill('SIGTERM')
+      this.#syncChild = null
+    }
     const server = this.#server
     if (!server) return
     this.#server = null
@@ -579,9 +748,45 @@ export class RemoteService {
         for (const item of loaded.skipped) {
           console.warn(`[warn] 目录里的包没有列出去：${item.path} —— ${item.reason}`)
         }
+        // ★ 技能也**每次重扫**（与工具包同一条理由）：远端目录是可以被维护者
+        //   往里放东西的，缓存住会让"我刚同步完怎么不出现"变成需要重启才能解释的谜。
+        //
+        // ★ 两层合并（D52）：同步来的（`<dataDir>/catalog-skills`，工具独占）与
+        //   手动装的（`<dataDir>/catalog-skills-local`）。**同名时同步来的优先**
+        //   ——那是维护者在清单里核过的；本地那条不列出并记一条 warning（"被顶掉了"
+        //   要说出来，不能让它在目录里变成看不见的条目）。
+        const loadedSkills = await loadCatalogSkills(this.#skillsDir)
+        for (const item of loadedSkills.skipped) {
+          console.warn(`[warn] 目录里的技能没有列出去：${item.path} —— ${item.reason}`)
+        }
+        const loadedLocal = await loadCatalogSkills(this.#localSkillsDir)
+        for (const item of loadedLocal.skipped) {
+          console.warn(`[warn] 本地装的技能没有列出去：${item.path} —— ${item.reason}`)
+        }
+        const syncedSlugs = new Set(loadedSkills.skills.map((s) => s.slug))
+        const localSkills: CatalogSkillEntry[] = []
+        for (const entry of loadedLocal.skills) {
+          if (syncedSlugs.has(entry.slug)) {
+            console.warn(
+              `[warn] 本地装的技能「${entry.slug}」没有列出去：推荐清单里已经有同名的（同步来的优先）`,
+            )
+            continue
+          }
+          localSkills.push(entry)
+        }
         send(200, {
           ...this.catalog,
           tools: loaded.tools,
+          skills: [
+            ...loadedSkills.skills.map((e) => ({ ...e, source: 'synced' as const })),
+            ...localSkills.map((e) => ({ ...e, source: 'local' as const })),
+          ],
+          // ★ 清单摘要（D54）：页面要说清"按哪一份清单、几条、核对于哪天"。
+          //   服务**只读**它（转存发生在工具里），读不到就如实说 —— 见 `summarizeManifest`。
+          manifest:
+            this.#manifestPath === null
+              ? null
+              : await summarizeManifest(this.#manifestPath),
           // 登录插件列表也公开：页面需要据此渲染登录方式。
           loginMethods: [
             { name: 'password', summary: '邮箱 + 口令（内置）' },
@@ -591,6 +796,117 @@ export class RemoteService {
             })),
           ],
         })
+        return
+      }
+
+      // ── 管理页：技能 / 工具的公共目录（只读，2026-10）──
+      if (path === '/api/catalog/skills/sync') {
+        if (req.method === 'GET') {
+          send(200, await this.syncStatus())
+          return
+        }
+        if (req.method === 'POST') {
+          // ★ 跨源页面不许触发同步：浏览器对 `text/plain` 那种"简单请求"不做预检，
+          //   所以光靠 CORS 拦不住"恶意页面的 POST"。这里显式要求**来源是回环**
+          //   （本机自己的脚本没有 Origin，照常放行）。
+          if (origin !== undefined && !allowed) {
+            send(403, { error: '只允许回环来源触发同步', code: 'forbidden_origin' })
+            return
+          }
+          const result = await this.syncCatalogSkills()
+          send(result.status, result.body)
+          return
+        }
+      }
+
+      // ── 手动安装 / 卸载一条技能（D52）──
+      //
+      // ★ 为什么这两条**不属于**"目录归同步工具独占"的例外：它们写的是**另一个目录**
+      //   （`<dataDir>/catalog-skills-local`），同步工具永远不碰它。
+      // ★ 与同步触发同一条来源规矩：非回环 Origin 一律 403（浏览器对简单请求
+      //   不做预检，光靠 CORS 拦不住）。
+      if (path.startsWith('/api/catalog/skills/local')) {
+        if (origin !== undefined && !allowed) {
+          send(403, { error: '只允许回环来源改动远端目录', code: 'forbidden_origin' })
+          return
+        }
+
+        if (req.method === 'POST' && path === '/api/catalog/skills/local') {
+          const body = (await this.#readJson(req)) as {
+            url?: unknown
+            name?: unknown
+            summary?: unknown
+            needs?: unknown
+            category?: unknown
+          }
+          const url = typeof body.url === 'string' ? body.url.trim() : ''
+          if (url === '') {
+            send(400, { error: '需要一个 GitHub 链接（url）', code: 'bad_request' })
+            return
+          }
+          // 撞名判定要**两层都看**：同步目录里已经有同名的也算撞（否则本地那条
+          // 永远列不出来，等于装了个隐形条目）
+          const synced = await loadCatalogSkills(this.#skillsDir)
+          const local = await listLocalSkills(this.#localSkillsDir)
+          const taken = new Set([...synced.skills.map((s) => s.slug), ...local.map((s) => s.slug)])
+          try {
+            const item = await installLocalSkill(this.#localSkillsDir, {
+              url,
+              takenSlugs: taken,
+              ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
+              ...(typeof body.name === 'string' ? { name: body.name } : {}),
+              ...(typeof body.summary === 'string' ? { summary: body.summary } : {}),
+              ...(typeof body.category === 'string' ? { category: body.category } : {}),
+              ...(typeof body.needs === 'string' || body.needs === null
+                ? { needs: body.needs as string | null }
+                : {}),
+            })
+            send(201, { installed: { slug: item.slug, sourceRef: item.sourceRef, files: item.files } })
+          } catch (err) {
+            if (err instanceof LocalSkillConflict) {
+              send(409, {
+                error:
+                  `已经有一个叫「${err.slug}」的技能了（推荐清单里或本地装的）。` +
+                  '要换内容请先卸掉那一条，或者改用别的来源目录。',
+                code: 'conflict',
+              })
+              return
+            }
+            // 取包失败的原话照给（含 detail）——"为什么装不上"是使用者唯一能行动的信息
+            send(400, { error: describeInstallError(err), code: 'install_failed' })
+          }
+          return
+        }
+
+        if (req.method === 'DELETE' && path.startsWith('/api/catalog/skills/local/')) {
+          const slug = decodeURIComponent(path.slice('/api/catalog/skills/local/'.length))
+          // ⚠️ 同步来的**不在这一层**，删不到——要说清"该怎么删"，而不是回一个 404
+          const synced = await loadCatalogSkills(this.#skillsDir)
+          if (synced.skills.some((s) => s.slug === slug)) {
+            send(409, {
+              error:
+                `「${slug}」是推荐清单同步下来的，不能在页面上删：` +
+                '把它从清单里去掉、再跑一次同步即可（页面上那个「重新同步」按钮）。',
+              code: 'synced_entry',
+            })
+            return
+          }
+          const removed = await uninstallLocalSkill(this.#localSkillsDir, slug)
+          if (!removed) {
+            send(404, { error: `本地装的技能里没有「${slug}」`, code: 'not_found' })
+            return
+          }
+          send(200, { removed: slug })
+          return
+        }
+
+        send(405, { error: '只支持 POST（装一条）与 DELETE（卸一条）', code: 'method_not_allowed' })
+        return
+      }
+
+      // ── 不是 /api/ ⇒ 当作静态资源（管理页）──
+      if (!path.startsWith('/api/')) {
+        await this.#serveStatic(path, res)
         return
       }
 
@@ -723,6 +1039,149 @@ export class RemoteService {
       const status = /邮箱或口令|未登录/.test(message) ? 401 : 400
       send(status, { error: message })
     }
+  }
+
+  /**
+   * 发一个静态文件（管理页）。
+   *
+   * 三条要守住的：
+   *   1. **不许穿出去**：解析后必须仍在 web 目录之内（`..` 与编码过的 `%2e%2e`
+   *      都走同一条判据）。裸拼路径是这个仓库最不愿意见到的那种洞。
+   *   2. **未知路径回 index.html**（hash 路由的兜底）；`/api/` 不走这里（那是接口）。
+   *   3. **产物不存在时说清怎么办**：`pnpm run build:remote-web`。一句"404"会让
+   *      维护者以为是路由写错了。
+   */
+  async #serveStatic(pathname: string, res: ServerResponse): Promise<void> {
+    const webDir = this.#webDir
+    if (webDir === null) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('这个远端服务没有托管管理页（启动时未指定 web 目录）。')
+      return
+    }
+
+    let decoded = pathname
+    try {
+      decoded = decodeURIComponent(pathname)
+    } catch {
+      // 编码坏了就按原样试；反正下面还有"必须在目录内"那道闸
+    }
+    const root = resolve(webDir)
+    const wanted = normalize(decoded).replace(/^\/+/, '')
+    const target = resolve(root, wanted)
+    // ★ 判据只有一条：**解析之后**必须仍在 root 里。前缀比较用 sep 收尾，
+    //   否则 `/a/bc` 会被误判成在 `/a/b` 之内。
+    const inside = target === root || target.startsWith(root + sep)
+
+    const file = inside && wanted !== '' ? await this.#readIfFile(target) : null
+    if (file !== null) {
+      res.writeHead(200, {
+        'content-type': CONTENT_TYPES[extname(target).toLowerCase()] ?? 'application/octet-stream',
+        'content-length': String(file.length),
+        // 带内容哈希的静态资源可以长缓存；入口文件不缓存（否则刷新看不到新版）
+        'cache-control': /\.(js|css|woff2|svg|png|webp)$/.test(target)
+          ? 'public, max-age=31536000, immutable'
+          : 'no-cache',
+      })
+      res.end(file)
+      return
+    }
+
+    const index = await this.#readIfFile(join(root, 'index.html'))
+    if (index === null) {
+      res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end(
+        `管理页还没构建：${root} 里没有 index.html。\n` +
+          '先跑 `pnpm run build:remote-web`（或直接用接口：GET /api/catalog）。',
+      )
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' })
+    res.end(index)
+  }
+
+  /** 读一个普通文件；不存在/不是普通文件/读不了 ⇒ `null`（调用方决定怎么答）。 */
+  async #readIfFile(path: string): Promise<Buffer | null> {
+    try {
+      const info = await stat(path)
+      if (!info.isFile()) return null
+      return await readFile(path)
+    } catch {
+      return null
+    }
+  }
+
+  /** 同步状态（管理页轮询它）。工具不在 ⇒ `unavailable`（按钮据此置灰并说明原因）。 */
+  async syncStatus(): Promise<SyncStatus> {
+    if (this.#syncTool === null || (await this.#readIfFile(this.#syncTool)) === null) {
+      return { ...this.#sync, state: 'unavailable', tail: this.#sync.tail }
+    }
+    return { ...this.#sync, tail: this.#sync.tail }
+  }
+
+  /**
+   * 触发一次同步：把**独立工具**当子进程跑（服务不 import 抓取代码，见
+   * `DEFAULT_SYNC_TOOL` 的说明）。
+   *
+   * ★ 三条行为：
+   *   · **单飞**：已经有一次在跑时返回 409（并带上当下状态），不排队、不重复跑；
+   *   · **输出留着**：子进程 stdout/stderr 的末尾若干行进 `tail`，失败时界面直接
+   *     显示"为什么失败"，而不是一句"同步失败"；
+   *   · **失败不静默**：非零退出记 `failed` + 退出码；"失败就一个字都不写"那条
+   *     规矩在工具里（P7），服务只负责如实转述。
+   */
+  async syncCatalogSkills(): Promise<{ status: number; body: SyncStatus }> {
+    const status = await this.syncStatus()
+    if (status.state === 'unavailable') return { status: 409, body: status }
+    if (this.#sync.state === 'running') return { status: 409, body: status }
+
+    const tool = this.#syncTool
+    if (tool === null) return { status: 409, body: status }
+
+    const startedAt = this.#now().toISOString()
+    this.#sync = { state: 'running', startedAt, finishedAt: null, exitCode: null, tail: [] }
+
+    // ★ 显式把清单路径交给工具：这样"页面上说的那份清单"与"真正被抓的那份"是同一个文件
+    //   （工具自己也会按同一套规则找，但显式传过去就不存在两边各自解析出不同结果的可能）。
+    const args = [
+      tool,
+      '--out',
+      this.#skillsDir,
+      ...(this.#manifestPath === null ? [] : ['--manifest', this.#manifestPath]),
+    ]
+    const proxy = process.env['AGENTDECK_GITHUB_PROXY']
+    if (proxy !== undefined && proxy.trim() !== '') args.push('--github-proxy', proxy.trim())
+
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    this.#syncChild = child
+    const push = (chunk: Buffer): void => {
+      for (const line of chunk.toString('utf8').split('\n')) {
+        if (line.trim() === '') continue
+        this.#sync.tail = [...this.#sync.tail, line].slice(-SYNC_TAIL_LINES)
+      }
+    }
+    child.stdout?.on('data', push)
+    child.stderr?.on('data', push)
+    child.on('error', (err) => {
+      push(Buffer.from(`启动同步工具失败：${err.message}`))
+      this.#sync = {
+        ...this.#sync,
+        state: 'failed',
+        exitCode: null,
+        finishedAt: this.#now().toISOString(),
+      }
+      this.#syncChild = null
+    })
+    child.on('close', (code) => {
+      this.#sync = {
+        ...this.#sync,
+        state: code === 0 ? 'ok' : 'failed',
+        exitCode: code,
+        finishedAt: this.#now().toISOString(),
+      }
+      this.#syncChild = null
+    })
+
+    return { status: 202, body: await this.syncStatus() }
   }
 
   async #readJson(req: IncomingMessage): Promise<unknown> {

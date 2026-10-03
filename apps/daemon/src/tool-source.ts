@@ -10,7 +10,7 @@ import {
   assertValidSlug,
   isProbablyText,
   toSlug,
-} from './skill-source.ts'
+} from '@agentdeck/skill-source'
 
 /**
  * 工具包的来源解析（D40）。

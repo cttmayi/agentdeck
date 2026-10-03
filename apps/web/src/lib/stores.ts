@@ -396,12 +396,6 @@ export async function renameConversation(id: string, title: string): Promise<voi
   if (get(activeConversationId) === id) await openConversation(id)
 }
 
-/** `null` = 改回"平台分配"（`<workRoot>/chat-<对话 id>`）。 */
-export async function setConversationWorkDir(id: string, workDir: string | null): Promise<void> {
-  await api(`/api/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ workDir }) })
-  if (get(activeConversationId) === id) await openConversation(id)
-}
-
 /**
  * 删对话。**run 留着**（审计与成本统计还认得它），所以这里只重取对话列表。
  */
@@ -417,6 +411,17 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export const loadRuns = (): Promise<void> =>
   load('runs', async () => (await api<{ runs: RunSummary[] }>('/api/runs')).runs ?? [], runs)
+
+/**
+ * 删任务——**连同它的全部执行记录**（连带范围见 daemon 侧 `Store.deleteIssue`）。
+ * 与删对话不同：run 是审计记录，但任务没了，挂在它名下的执行记录也没了意义，
+ * 所以这里重取任务列表**和**执行记录两份。当前选中的任务是否要清掉由调用方
+ * （Tasks 页）决定——列表推导会把它变成 `null`，这里只负责数据。
+ */
+export async function deleteTask(id: string): Promise<void> {
+  await api(`/api/issues/${id}`, { method: 'DELETE' })
+  await Promise.all([loadIssues(), loadRuns()])
+}
 
 export const loadInbox = (): Promise<void> =>
   load(

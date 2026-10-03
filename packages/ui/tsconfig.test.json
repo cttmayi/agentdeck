@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // 测试跑在 Node 里（`node:test`），而被测代码用到 `localStorage` ⇒ DOM 也留着。
+    // 与 `apps/web/tsconfig.test.json` 同一个道理。
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}

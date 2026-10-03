@@ -54,11 +54,12 @@ export const toolsText = {
   'tools.colVersion': { zh: '版本', en: 'Version' },
   'tools.colActionCount': { zh: '动作数', en: 'Actions' },
   'tools.colSource': { zh: '来源', en: 'Source' },
+  // ★ 与技能页同列（`skills.colUpdatedAt` 同一个中文）：两页列表按同一套格式摆
+  'tools.colUpdatedAt': { zh: '更新于', en: 'Updated' },
   // 最后一列只有按钮、没有可见表头，这个名字是给它 `aria-label` 用的
   'tools.colRowActions': { zh: '操作', en: 'Row actions' },
-  'tools.sourceLocal': { zh: '本机目录', en: 'Local directory' },
-  'tools.sourceRemote': { zh: '远端目录', en: 'Remote catalog' },
-  'tools.versionNone': { zh: '无版本', en: 'No version' },
+  'tools.sourceLocal': { zh: '本机', en: 'Local' },
+  'tools.sourceRemote': { zh: '远端', en: 'Remote' },
   'tools.actionCount': { zh: '{count} 个动作', en: '{count} action(s)' },
   'tools.viewActions': { zh: '看动作', en: 'View actions' },
   'tools.hideActions': { zh: '收起动作', en: 'Hide actions' },
@@ -81,6 +82,8 @@ export const toolsText = {
   'tools.actionIrreversible': { zh: '不可回滚', en: 'Not reversible' },
   // ── 安装：两个来源页签（D40）──────────────────────────────────────
   'tools.actionInstall': { zh: '安装', en: 'Install' },
+  /** 安装按钮置灰时的 `title`：说清「为什么现在不能点」。 */
+  'tools.installingBusy': { zh: '正在装另一个工具包，装完再点这个', en: 'Another tool is installing — this one after it finishes' },
   'tools.tabPath': { zh: '从本机目录安装', en: 'Install from a local directory' },
   'tools.tabRemote': { zh: '从远端目录安装', en: 'Install from the remote catalog' },
   'tools.remoteReading': { zh: '正在读远端目录…', en: 'Reading the remote catalog…' },
@@ -210,10 +213,10 @@ export const toolsText = {
   'tools.sourcePlaceholder': { zh: '/Users/me/dev/my-tool', en: '/Users/me/dev/my-tool' },
   'tools.pathHintBefore': { zh: '指向的目录里必须有 ', en: 'The target directory must contain ' },
   'tools.pathHintAfter': {
-    zh: '（平台判断"是不是适配本平台的工具"就看它：一个组、组内若干动作）。缺了它、或清单里有非法字段，会被整份拒绝并说清是哪一条；二进制文件会被明确跳过并列出。',
+    zh: '（平台判断「是不是适配本平台的工具」就看它：一个组、组内若干动作）。缺了它、或清单里有非法字段，会被整份拒绝并说清是哪一条；二进制文件会被明确跳过并列出。',
     en: ' (that is how the platform decides whether a package is a tool it can run: one group, several actions in it). If it is missing, or the manifest has an invalid field, the whole package is refused with the offending entry named; binary files are explicitly skipped and listed.',
   },
-  'tools.slugLabel': { zh: 'slug（留空则用清单里的 slug）', en: 'slug (empty = the one in the manifest)' },
+  'tools.slugLabel': { zh: '标识（留空则用清单里的标识）', en: 'ID (empty = the one in the manifest)' },
   // ★ 这个勾选框不是可选项，是**必要的逃生口**：想改包里那个脚本再装一遍，
   //   如果没有这条出路就只能卸载再装，而卸载会被"还有别的地方指着它"挡住。
   //   ⚠️ 原来这条注释与下面那句提示说的是"挂载会被挡住 / 挂载关系会保留"——
@@ -227,7 +230,7 @@ export const toolsText = {
     en: 'Allow replacing a tool with the same name (this overwrites the existing one)',
   },
   'tools.overwriteHint': {
-    zh: '默认不勾：同名一律拒绝写入，避免"装的时候顺手覆盖了你自己的东西"。替换会复用同一条记录，所以已经授权过这些动作的审核者不受影响。',
+    zh: '默认不勾：同名一律拒绝写入，避免「装的时候顺手覆盖了你自己的东西」。替换会复用同一条记录，所以已经授权过这些动作的审核者不受影响。',
     en: 'Off by default: a duplicate name is always refused, so installing cannot quietly overwrite your own work. A replacement reuses the same record, so reviewers already allowed these actions keep working.',
   },
   'tools.installCheck': { zh: '检查并安装', en: 'Check and install' },
@@ -257,7 +260,7 @@ export const toolsText = {
   // ── 安装失败：按错误码给"那我该怎么做" ──
   // 错误码本身（`manifest_invalid`…）是契约值，不翻译；翻译的是下一步。
   'tools.errBadInput': {
-    zh: '看一下上面那条原文：路径要指向一个含 tool.json 的本地目录；如果是"已有同名工具包"，就勾上「允许替换同名的工具」再装一次。',
+    zh: '看一下上面那条原文：路径要指向一个含 tool.json 的本地目录；如果是「已有同名工具包」，就勾上「允许替换同名的工具」再装一次。',
     en: 'Read the message above: the path must point at a local directory containing tool.json; if it says a tool with the same name already exists, tick "Allow replacing a tool with the same name" and install again.',
   },
   'tools.errNotFound': {
@@ -277,7 +280,7 @@ export const toolsText = {
     en: 'tool.json is not valid JSON — fix it first, then install again.',
   },
   'tools.errManifestInvalid': {
-    zh: '清单里有一处不合规（上面那条详情说的是哪一处）。平台按清单判断"是不是适配的工具"，所以整份拒绝，不会只装一半。',
+    zh: '清单里有一处不合规（上面那条详情说的是哪一处）。平台按清单判断「是不是适配的工具」，所以整份拒绝，不会只装一半。',
     en: 'One entry in the manifest is invalid (the details above name it). The platform decides from the manifest whether a package is a tool it can run, so the whole package is refused rather than half-installed.',
   },
   'tools.errMissingEntry': {
@@ -296,9 +299,10 @@ export const toolsText = {
   // ⚠️ 这里原来有「不能卸载」/「还挂在 X 上」两句（`tools.errInUseTitle` /
   //    `tools.errInUse`）。服务端那条"还挂着就拒"的规则已经删掉、卸载一律放行，
   //    所以这两句没有触发的地方了，一并删掉。
-  'tools.confirmUninstall': {
-    zh: '卸载工具「{slug}」？这一组动作会一起消失。',
-    en: 'Uninstall the tool "{slug}"? Its whole group of actions goes with it.',
+  'tools.confirmUninstallTitle': { zh: '卸载工具「{slug}」', en: 'Uninstall the tool "{slug}"' },
+  'tools.confirmUninstallBody': {
+    zh: '这一组动作会一起消失。',
+    en: 'Its whole group of actions goes with it.',
   },
   'tools.uninstalled': { zh: '已卸载 {slug}', en: 'Uninstalled {slug}' },
 
@@ -328,7 +332,7 @@ export const toolsText = {
   'tools.stdToolsHintBefore': { zh: '勾上一个动作 = 允许触发它；契约值是 ', en: 'Ticking an action allows triggering it; its contract value is ' },
   'tools.stdToolsHintAfter': { zh: '（等宽那一串，判决里写的就是它）。', en: ' (the monospaced string — that is what goes in a verdict).' },
   'tools.stdToolsNote': {
-    zh: '这里列的是已安装的全部工具动作：行动权限管的是"判完允许触发什么"，与哪个执行者挂了它无关。',
+    zh: '这里列的是已安装的全部工具动作：行动权限管的是「判完允许触发什么」，与哪个执行者挂了它无关。',
     en: 'This lists every action of every installed tool: action permissions govern what a verdict may trigger, regardless of which executor mounts it.',
   },
   // ⚠️ 这里原来还有一条 `tools.stdToolsNone`（"还没有装任何工具——只有上面那些内置

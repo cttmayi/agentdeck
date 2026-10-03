@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { test } from 'node:test'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { RemoteService, isLoopbackOrigin } from './server.ts'
 import { loadPlugins } from './plugins.ts'
+import { loadCatalogSkills } from './catalog.ts'
 
 /**
  * 这些测试打的是**协议与语义**，不是实现细节：
@@ -159,10 +161,18 @@ describe('远端服务（M3）', () => {
       }>
       loginMethods: { name: string }[]
     }
-    // ★ D38：公共目录里**不再有** `general-review`——那是一份"审核标准"，
-    //   而标准内联在每个审核者身上（daemon 侧的东西）。目录**可以为空**，
-    //   界面要有对应的空态："目录里什么都没有"是一句真话。
-    assert.deepEqual(b.skills, [], '审核标准不该出现在公共目录里')
+    // ★ D38 的那条规矩**仍然成立**：公共目录里**不该有审核标准**（`general-review`
+    //   那一类）——标准内联在每个审核者身上，属于 daemon 侧的东西。
+    //
+    //   ⚠️ 但断言不能写成"数组为空"（2026-10，D50）：目录里现在**可以有技能**
+    //   （推荐清单抓下来的），那时"数组为空"会红得莫名其妙，而它想守的东西
+    //   （标准不许进目录）根本没被守住——一条会被无关变化弄红的断言，等于没有。
+    //   所以这里断言的是**意图**：没有一个条目是审核标准。
+    assert.equal(
+      b.skills.some((s) => s.slug === 'general-review'),
+      false,
+      '审核标准不该出现在公共目录里',
+    )
     // ★ D40：这一节列的是**包**（一个目录 = 一个包 = 一组动作），不是单个动作。
     //   原来那两条（`report.get` / `issue.update_status`）是动作名，留着会让
     //   "tools 里的是包"这条读法在第一条记录上就破功。
@@ -645,5 +655,138 @@ describe('★ 插件停用必须真的生效（FR-PLUGIN-09）', () => {
       },
     ] as never)
     await assert.rejects(() => svc.queryThirdParty('broken', {}), /entry 越出了插件目录/)
+  })
+})
+
+describe('远端服务：技能目录（内容由独立工具写，本服务只读）', () => {
+  let svc: RemoteService
+  let origin: string
+  let dataDir: string
+
+  before(async () => {
+    dataDir = await makeTempDir('remote-catalog-skills')
+
+    // ★ 夹具是**手写**的，这是刻意的：要钉的正是那条缝——抓取工具与服务之间
+    //   **没有代码依赖**，只有一份「目录布局」的约定（`tools/skill-catalog-sync/
+    //   README.md` 的"目录布局"一节）。如果这一侧的测试去 import 那个工具，
+    //   就等于把 2026-10 刚拆开的耦合又接回来了。
+    //
+    //   ⚠️ 代价是键名可能漂移（工具改了字段，这边的手写夹具不会红）。所以两边的
+    //   测试各钉一份**键表**：工具那边断言它写出来的键（`skills-sync.test.ts`），
+    //   这边断言它读得进去的键。任何一边改字段，都会有一条测试说出另一边。
+    const root = join(dataDir, 'catalog-skills')
+    await mkdir(join(root, 'pptx', 'scripts'), { recursive: true })
+    await writeFile(join(root, 'pptx', 'SKILL.md'), '---\nname: PPTX\n---\n\n正文', 'utf8')
+    await writeFile(join(root, 'pptx', 'scripts', 'make.py'), 'print(1)\n', 'utf8')
+
+    // 第二条：索引里写了、目录却不在（有人手删过 / 上一次同步被中断的残留）。
+    // 它**不该**被列成"可装"，也不该让整个目录 500。
+    await writeFile(
+      join(root, '.sync.json'),
+      JSON.stringify(
+        {
+          schema: 'agentdeck/recommended-skills-sync@1',
+          syncedAt: '2026-10-05T00:00:00.000Z',
+          items: [
+            {
+              url: 'https://github.com/anthropics/skills/tree/main/skills/pptx',
+              name: 'PowerPoint 生成',
+              category: '文档',
+              origin: 'official',
+              summary: '生成 pptx',
+              fills: '能出稿',
+              needs: '装完还得自己配 python-pptx',
+              slug: 'pptx',
+              sourceRef: 'github:anthropics/skills@main:skills/pptx',
+              version: 'abc1234',
+              fetchedAt: '2026-10-05T00:00:00.000Z',
+              files: ['SKILL.md', 'scripts/make.py'],
+              // 清单里声明排除、**没有装进来**的东西（2026-10 起索引里有这个字段）
+              excluded: ['docs/'],
+            },
+            {
+              url: 'https://github.com/o/r/tree/main/skills/gone',
+              name: '目录不在的那条',
+              category: 'other',
+              origin: 'community',
+              summary: '',
+              fills: null,
+              needs: null,
+              slug: 'gone',
+              sourceRef: 'github:o/r@main:skills/gone',
+              version: null,
+              fetchedAt: '2026-10-05T00:00:00.000Z',
+              files: ['SKILL.md'],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    svc = new RemoteService({ port: 0, dataDir })
+    const port = await svc.start()
+    origin = `http://127.0.0.1:${port}`
+  })
+
+  after(async () => {
+    await svc.close()
+    await cleanup(dataDir)
+  })
+
+  it('★ 工具写下的目录 ⇒ /api/catalog 里列得出来，且**来源指回 GitHub**（不是 remote:）', async () => {
+    const res = await fetch(`${origin}/api/catalog`)
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as {
+      skills: Array<{
+        slug: string
+        name: string
+        version: string | null
+        content: string
+        files: Record<string, string>
+        sourceRef: string
+        needs: string | null
+        excluded: string[]
+      }>
+    }
+
+    const pptx = body.skills.find((s) => s.slug === 'pptx')
+    assert.ok(pptx, '工具写下的技能要出现在公共目录里（只读那个目录，不联网）')
+    assert.equal(pptx.sourceRef, 'github:anthropics/skills@main:skills/pptx')
+    // ★ 溯源指回上游，不是 `remote:pptx`：远端是中转，不是出处——落库记录与
+    //   审计链要靠它。
+    assert.ok(!pptx.sourceRef.startsWith('remote:'), '不许把中转站当成出处')
+    assert.equal(pptx.version, 'abc1234', '版本原样带下去（界面靠它说"可更新"）')
+    assert.match(pptx.content, /正文/, ' SKILL.md 的正文要带上（列表里就要能看）')
+    assert.equal(pptx.files['scripts/make.py'], 'print(1)\n', '支持文件要随列表一起给')
+    assert.equal(pptx.needs, '装完还得自己配 python-pptx', '装之前就要说清还要配什么')
+    // ★ 「内容不完整」也要一路传到界面上：维持者声明了排除 ⇒ 条目如实带上
+    assert.deepEqual(pptx.excluded, ['docs/'], '被清单排除的东西要在接口里看得见')
+  })
+
+  it('★ 索引里有、内容却读不出来 ⇒ 跳过它**并说出原因**，而不是列出半条', async () => {
+    const loaded = await loadCatalogSkills(join(dataDir, 'catalog-skills'))
+
+    assert.deepEqual(
+      loaded.skills.map((s) => s.slug),
+      ['pptx'],
+      '目录不在的那条不许被列成"可装"',
+    )
+    assert.equal(loaded.skipped.length, 1, '跳过就要给出原因，不能静默少一条')
+    assert.match(loaded.skipped[0]!.path, /gone/)
+    assert.match(loaded.skipped[0]!.reason, /内容读不出来/)
+  })
+
+  it('★ 还没同步过（没有 .sync.json）⇒ 空目录是**真话**，不是错误', async () => {
+    const empty = await makeTempDir('remote-no-skills')
+    try {
+      const loaded = await loadCatalogSkills(join(empty, 'catalog-skills'))
+      assert.deepEqual(loaded.skills, [])
+      assert.deepEqual(loaded.skipped, [], '目录压根不存在不算"有东西没读出来"')
+    } finally {
+      await cleanup(empty)
+    }
   })
 })

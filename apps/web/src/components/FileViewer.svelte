@@ -25,7 +25,7 @@
    * 但它落在不透明源里，读不到 daemon 的任何接口。这与"在新标签页打开"是**同一
    * 套属性**——就地看只是省一次跳转，安全边界一个字不动。
    */
-  import Modal from './Modal.svelte'
+  import { Modal } from '@agentdeck/ui/components'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { humanSize } from '../lib/workdir-view.ts'
@@ -238,6 +238,7 @@
   ariaLabel={entry?.name ?? ''}
   {onclose}
   title={parts.name}
+  closeLabel={$t('common.close')}
 >
   {#if entry !== null}
     <div class="fv-bar">

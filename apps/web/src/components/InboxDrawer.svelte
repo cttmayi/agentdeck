@@ -18,8 +18,22 @@
     info: 'inbox.severityInfo',
   }
 
+  /**
+   * 标记已读失败时的那句话。
+   *
+   * ★ 原来这里是裸 `await markInboxRead(id)`：失败时是一个 unhandled rejection，
+   *   抽屉里**什么都不显示**——而"标记已读"失败的样子与"点错了"一模一样
+   *   （那条还在，看起来只是没反应），使用者只会反复点。
+   */
+  let actionError = ''
+
   async function markRead(id: string): Promise<void> {
-    await markInboxRead(id)
+    actionError = ''
+    try {
+      await markInboxRead(id)
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err)
+    }
   }
 </script>
 
@@ -30,6 +44,10 @@
   </div>
 
   <div class="drawer-body">
+    <!-- ★ 「标记已读」失败：就在抽屉里说出来（触发它的地方） -->
+    {#if actionError}
+      <div class="notice bad" style="margin-bottom:var(--sp-2)">{actionError}</div>
+    {/if}
     {#if $loading['inbox']}
       <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
       <div class="skeleton" style="width:70%"></div>
@@ -49,14 +67,20 @@
               {severityId ? $t(severityId) : item.severity}
             </span>
             <span class="faint small mono">{item.type}</span>
+            <!-- 2026-10（紧凑性）：「标为已读」不再独占一行——并入第一行靠右 -->
+            <button
+              type="button"
+              class="ghost small"
+              style="margin-left:auto"
+              onclick={() => markRead(item.id)}
+            >
+              {$t('inbox.markRead')}
+            </button>
           </div>
           <strong style="color:var(--text)">{item.title}</strong>
           {#if item.body}
             <p class="hint" style="white-space:pre-wrap;margin:0">{item.body}</p>
           {/if}
-          <button type="button" class="ghost small" onclick={() => markRead(item.id)}>
-            {$t('inbox.markRead')}
-          </button>
         </article>
       {/each}
     {/if}

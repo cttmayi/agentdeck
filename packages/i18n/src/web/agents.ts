@@ -31,7 +31,7 @@ export const agentsText = {
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
   'agents.reviewerFieldLabel': { zh: '由谁来审它', en: 'Who reviews it' },
   'agents.noAutoReview': { zh: '不自动审核', en: 'No automatic review' },
-  'agents.attachedSkillsLabel': { zh: '挂载的 skill', en: 'Attached skills' },
+  'agents.attachedSkillsLabel': { zh: '挂载的技能', en: 'Attached skills' },
   'agents.workDirLabel': { zh: '默认工作目录', en: 'Default work directory' },
   'agents.workDirPlaceholder': { zh: '留空 = 每个任务自动分配', en: 'Empty = one directory per task' },
   'agents.runtimeCurrent': { zh: '{key}（当前）', en: '{key} (current)' },
@@ -52,7 +52,6 @@ export const agentsText = {
    *    原来的键名带 `listHint`（左栏清单上方那段提示），搬走之后名字会指错地方，
    *    所以一并改名为 `pickOneRole*`。
    */
-  'agents.newButton': { zh: '新建', en: 'New' },
   'agents.settingsButton': { zh: '设置', en: 'Settings' },
   'agents.settingsTitle': {
     zh: '平台的设置：第一句话模版等——改一次，对所有智能体生效',
@@ -61,19 +60,31 @@ export const agentsText = {
   'agents.envIssuesTitle': { zh: '环境问题', en: 'Environment issues' },
   'agents.emptyTitle': { zh: '还没有智能体', en: 'No agents yet' },
   'agents.emptyHint': {
-    zh: '先建一个执行者，再建一个审核者并给它挂上 skill——别忘了在执行者的「由谁来审它」里选它，否则产出不会被自动审核。',
+    zh: '先建一个执行者，再建一个审核者并给它挂上技能——别忘了在执行者的「由谁来审它」里选它，否则产出不会被自动审核。',
     en: 'Create an executor first, then a reviewer with a skill attached — and remember to pick it under “Who reviews it” on the executor, or its output will not be reviewed automatically.',
   },
   'agents.reviewsOthers': { zh: '它审别人', en: 'Reviews others' },
   'agents.reviewerMissing': { zh: '（已不存在）', en: '(no longer exists)' },
   'agents.defaultBadge': { zh: '默认', en: 'Default' },
   'agents.noInstructions': { zh: '（没有指令）', en: '(No instructions)' },
-  'agents.skillCount': { zh: ' · {count} 个 skill · ', en: ' · {count} skill(s) · ' },
+  'agents.skillCount': { zh: ' · {count} 个技能 · ', en: ' · {count} skill(s) · ' },
   'agents.setDefaultTitle': {
     zh: '设为默认：新建任务默认交给它（原来那个会自动换成它）',
     en: 'Make default: new tasks go to it by default (the previous one switches over)',
   },
   'agents.setDefault': { zh: '设为默认', en: 'Make default' },
+  /**
+   * 栏头带（D62）：与任务页列表模式同款的「计数 + 搜索」栏头——三页同一条
+   * 栏头带，统一才看得见（D61 那版智能体没有栏头，肉眼上三页不像同一套）。
+   * 计数数的是**当前显示**的条数（过滤之后），不是全部。
+   */
+  'agents.listCount': { zh: '共 {count} 个', en: '{count} agent(s)' },
+  'agents.search': { zh: '搜索名称或指令…', en: 'Search name or instructions…' },
+  'agents.emptyFiltered': { zh: '没有匹配的智能体', en: 'No matching agents' },
+  'agents.emptyFilteredHint': {
+    zh: '换个关键词，或清空搜索框。',
+    en: 'Try another keyword, or clear the search box.',
+  },
   'agents.pickOneTitle': { zh: '从左边选一个智能体', en: 'Pick an agent on the left' },
   'agents.pickOneHint': {
     zh: '点左边的条目看它的指令、挂的技能，以及它用哪个 CLI 跑。',
@@ -84,14 +95,14 @@ export const agentsText = {
    * 搬过来并改名）。`<strong>` 只给两个角色名——整段都在强调等于没强调。
    */
   'agents.pickOneRoleBefore': {
-    zh: '每个 agent 独立配置指令、技能子集与角色：',
+    zh: '每个智能体独立配置指令、技能子集与角色：',
     en: 'Each agent configures its own instructions, skill subset and role: ',
   },
   'agents.pickOneRoleExecutor': { zh: '执行者', en: 'executors' },
   'agents.pickOneRoleMid': { zh: '接到任务动手干活，', en: ' take on tasks and do the work, while ' },
   'agents.pickOneRoleReviewer': { zh: '审核者', en: 'reviewers' },
   'agents.pickOneRoleAfter': {
-    zh: '按它自己那份判断依据给判决——所以换一个审核 agent 就等于换一套判断依据。',
+    zh: '按它自己那份判断依据给判决——所以换一个审核智能体就等于换一套判断依据。',
     en: ' give verdicts against their own judging criteria — so swapping the reviewer agent means swapping the whole set of criteria.',
   },
 
@@ -104,51 +115,30 @@ export const agentsText = {
    *    那些词对读界面的人没有任何意义——"这句话是给谁看的"是界面文案唯一的判据。
    *    机器取值留给 `--verify-runtime` 那份输出（那份是给开发者的）。
    *
-   * ★ 改写**没有**削弱"如实披露"：只有真的在某个版本上跑通过才写「核对过」，
-   *   没跑过就写「没核对过」——变的只是用词，不是诚实的程度。
+   * ★ 2026-10 再简化：卡片只显示「CLI 名 + 版本号」（如 `claude 2.0.14`），
+   *   核对徽标、会话、版本支持判定全部去掉（使用者点名"其他都不需要"）。
+   *   那些判定仍然活在 `--verify-runtime` 的输出里，一条没丢。
    */
   'agents.runtimeLocal': { zh: '本机 CLI', en: 'CLI on this machine' },
   'agents.runtimeIntro': {
-    zh: '这里列出这台机器上装着哪些 CLI、各是什么版本，以及我们核对到什么程度——只有真的在某个版本上跑通过，才写成「核对过」。',
-    en: 'Which CLIs are installed here, at which versions, and how far we checked them — only versions we actually ran are marked “checked”.',
+    zh: '这台机器上装着的 CLI 与版本。',
+    en: 'CLIs installed on this machine, with versions.',
   },
   'agents.runtimeReady': { zh: '已就绪', en: 'Ready' },
   'agents.runtimeNotFound': { zh: '未找到', en: 'Not found' },
-  'agents.runtimeEvidenceChecked': { zh: '核对过', en: 'checked' },
-  'agents.runtimeEvidenceUnchecked': { zh: '没核对过', en: 'not checked' },
-  /** 悬停时的那一句解释（省得在每张卡上重复同一段话）。 */
-  'agents.runtimeEvidenceTitle': {
-    zh: '只有真的在某个版本上跑通过，才写成「核对过」。',
-    en: 'Only versions we actually ran are marked “checked”.',
-  },
-  'agents.runtimeSessionLabel': { zh: '会话：{value}', en: 'Session: {value}' },
-  'agents.runtimeSessionStateful': { zh: '能接着上一次继续', en: 'can continue from last time' },
-  'agents.runtimeSessionStateless': { zh: '每次都从头开始', en: 'starts fresh every time' },
-  'agents.runtimeSessionUnknown': { zh: '还不确定', en: 'not sure yet' },
-  'agents.versionSupportLabel': { zh: '能用哪些版本：', en: 'Which versions work: ' },
-  'agents.supportVerified': { zh: '本机这个版本跑通过', en: 'this exact version was run here' },
-  'agents.supportInRange': {
-    zh: '在写明的范围内，但这个具体版本没跑过',
-    en: 'inside the stated range, but this exact version was not run',
-  },
-  'agents.supportOutOfRange': { zh: '超出它写明的范围', en: 'outside the range it states' },
-  'agents.supportUndeclared': { zh: '没有写明', en: 'not stated' },
-  'agents.supportUnknown': { zh: '判断不了', en: 'cannot tell' },
-  'agents.runtimeWarnOutOfRange': {
-    zh: '本机这个版本超出它写明的范围，可能不兼容。',
-    en: 'The version installed here is outside the range it states — it may not work.',
-  },
-  'agents.runtimeWarnUnknown': {
-    zh: '没能读到版本号，所以判断不了能不能用。',
-    en: 'The version could not be read, so compatibility cannot be judged.',
-  },
-  'agents.runtimeHonestNote': {
-    zh: '「没核对过」不等于不能用，只是我们没在这台机器上验过它——所以这里不写"都支持"。',
-    en: '“Not checked” does not mean it will not work — it has simply not been verified on this machine, so we do not claim it is supported.',
-  },
 
   // ── NewAgentForm.svelte ──
+  /**
+   * ⚠️ 这里**原有一个 `agents.headIntro`**（`这里配置每个智能体：它的指令、行动权限，
+   *    以及由谁来审它。` / `Each agent is configured here: …`）——2026-10（D63）按
+   *    使用者要求整条删了：那句是在复述下面每一条卡片已经在说的话，而顶栏页名 +
+   *    栏头带已经把"这一页是什么"说清了。删掉的时候连探针那条 `common.pageIntros`
+   *    一起改（它原来钉着"智能体页必须有导语"，改成钉"没有"——见 probe.html）。
+   *    技能页/工具页自己的导语（`skills.headIntro` / `tools.headIntro`）保留。
+   */
   'agents.newTitle': { zh: '新建智能体', en: 'New agent' },
+  /** 提交按钮置灰时的 `title`。 */
+  'agents.createNeedsName': { zh: '先给它起个名字', en: 'Give it a name first' },
   'agents.newSubtitle': {
     zh: '这一段就是它的「指令」：它干活时按它做，别人审它时也看它。',
     en: 'This section is the agent’s “instructions”: it works by them, and its reviewer reads them too.',
@@ -198,17 +188,17 @@ export const agentsText = {
     zh: '：平台每派一次活都会带上它（不用你在别处再配一遍）。留空也行——那就只剩任务本身；但审核者留空就拿不到审核任务。',
     en: ': the platform sends it with every job (there is nowhere else to configure it). Leaving it empty is fine — then only the task itself is sent; but a reviewer left empty gets no review tasks.',
   },
-  'agents.noSkillsOption': { zh: '（还没有 skill）', en: '(No skills yet)' },
+  'agents.noSkillsOption': { zh: '（还没有技能）', en: '(No skills yet)' },
   'agents.reviewerSkillsHintBefore': {
     zh: '审核者的判断依据写在上面那条',
     en: 'What a reviewer judges by lives in the ',
   },
   'agents.reviewerSkillsHintAfter': {
-    zh: '里，skill 对它只是可选的参考/支持文件（挂上就会随审核一起送过去）。',
+    zh: '里，技能对它只是可选的参考/支持文件（挂上就会随审核一起送过去）。',
     en: ' field above, while skills are only optional reference/support files for it (attached ones are sent along with the review).',
   },
   'agents.executorSkillsHint': {
-    zh: '执行者可以不挂 skill（它的产出由审核者按自己的判断依据来判）。',
+    zh: '执行者可以不挂技能（它的产出由审核者按自己的判断依据来判）。',
     en: 'An executor can go without skills (its output is judged by the reviewer against the reviewer’s own criteria).',
   },
   'agents.runtimeFieldLabel': { zh: '用哪个 CLI', en: 'Which CLI' },
@@ -258,7 +248,7 @@ export const agentsText = {
     en: '⚠️ The judging criteria still live in the old field — they are delivered merged with Instructions anyway, and one save from the editor folds them into Instructions (the text is unchanged).',
   },
   'agents.standardLegacyNoticeFromSkill': {
-    zh: '⚠️ 它的判断依据还来自挂载的 skill——并进「指令」会连挂载一起摘掉，所以那一步要你自己点（下面那颗按钮）。',
+    zh: '⚠️ 它的判断依据还来自挂载的技能——并进「指令」会连挂载一起摘掉，所以那一步要你自己点（下面那颗按钮）。',
     en: '⚠️ Its judging criteria still come from an attached skill — folding them into Instructions also removes the attachment, so that step is yours to take (the button below).',
   },
 
@@ -414,10 +404,10 @@ export const agentsText = {
    *    "行动权限一个都没勾"却能触发动作，进而以为界面坏了。
    */
   'agents.legacySkillActionsBefore': {
-    zh: '它现在能触发的动作也来自这些 skill（老配置）——勾选上面那一段「行动权限」即可取而代之：',
+    zh: '它现在能触发的动作也来自这些技能（老配置）——勾选上面那一段「行动权限」即可取而代之：',
     en: 'The actions it may trigger also come from those skills (legacy setup) — ticking them under “Action permissions” above replaces that:',
   },
-  'agents.noSkillsYet': { zh: '还没有任何 skill。', en: 'No skills yet.' },
+  'agents.noSkillsYet': { zh: '还没有任何技能。', en: 'No skills yet.' },
   /**
    * ⚠️ 选择器里**必须**带上来源目录：同 slug 可以有好几条（每个来源目录各一条
    *    ——实测 `~/.claude`、`~/.codex`、`~/.cursor` 里都有 `browser-use`）。
@@ -431,7 +421,7 @@ export const agentsText = {
    *    指出那一步：去勾上它们的目录。
    */
   'agents.noSelectableSkills': {
-    zh: '技能库里现在没有能挂的 skill。来自本地目录的那几条，要在 Skills 页 →「设置」里勾上它们的目录才会出现在这里。',
+    zh: '技能库里现在没有能挂的技能。来自本地目录的那几条，要在技能页 →「设置」里勾上它们的目录才会出现在这里。',
     en: 'The library currently has no attachable skills. The ones from local directories only appear here once their directories are ticked in Skills → Settings.',
   },
   /** 行动权限为空时的说明（在「行动权限」那一段里，与标准无关）。 */
@@ -449,12 +439,12 @@ export const agentsText = {
     zh: '它的判断依据还没有并进「指令」，当前',
     en: 'Its judging criteria are not merged into Instructions yet; it currently uses ',
   },
-  'agents.legacyInlineStrong': { zh: '沿用挂载的 skill', en: 'the attached skills' },
+  'agents.legacyInlineStrong': { zh: '沿用挂载的技能', en: 'the attached skills' },
   'agents.legacyInlineAfter': { zh: '当标准：', en: ' as its standard: ' },
   /** 上面那句末尾的句号（它排在 `{#each}` 后面，是一个独立的文本节点）。 */
   'agents.legacyInlineEnd': { zh: '。', en: '.' },
   'agents.standardAdopted': {
-    zh: '判断依据已并进「指令」（原先的挂载也一起摘掉了，那条 skill 现在可以卸载）',
+    zh: '判断依据已并进「指令」（原先的挂载也一起摘掉了，那条技能现在可以卸载）',
     en: 'The judging criteria are merged into Instructions (any attachment was removed too, so that skill can now be uninstalled)',
   },
   'agents.adopting': { zh: '搬移中…', en: 'Moving…' },
@@ -484,7 +474,7 @@ export const agentsText = {
   'agents.adoptHintBefore': { zh: '搬移是', en: 'The move is ' },
   'agents.adoptHintStrong': { zh: '原样', en: 'verbatim' },
   'agents.adoptHintAfter': {
-    zh: '的（正文与允许的动作都不变），之后它不依赖 skill 也能审；那条 skill 也就能卸载了。',
+    zh: '的（正文与允许的动作都不变），之后它不依赖技能也能审；那条技能也就能卸载了。',
     en: ' (body and allowed actions unchanged); afterwards it can review without depending on the skill, and that skill can be uninstalled.',
   },
   // 判据已经是"身份非空"（指令 ＋ 老数据的标准）⇒ 措辞跟着改成「指令」
@@ -495,7 +485,7 @@ export const agentsText = {
     en: ' (a reviewer’s identity and judging criteria both live there). Click “Edit” to write some.',
   },
   'agents.reviewerNoSkills': {
-    zh: '一个都没挂 —— 这没问题：判断依据写在「指令」里，skill 对审核者只是可选的参考。',
+    zh: '一个都没挂 —— 这没问题：判断依据写在「指令」里，技能对审核者只是可选的参考。',
     en: 'None attached — that is fine: the judging criteria live in Instructions; a skill is only an optional reference for a reviewer.',
   },
   'agents.executorNoSkills': {

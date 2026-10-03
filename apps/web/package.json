@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@agentdeck/i18n": "workspace:*",
+    "@agentdeck/ui": "workspace:*",
     "highlight.js": "^11.12.0"
   },
   "devDependencies": {

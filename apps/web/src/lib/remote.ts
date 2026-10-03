@@ -119,11 +119,41 @@ export interface PluginInfo {
   secretKeys: string[]
 }
 
+/**
+ * 远端目录里的一个**技能**条目（2026-10：推荐清单）。
+ *
+ * ★ 与工具包那条路的关键区别：技能的取包规则在 daemon 侧
+ *   （`@agentdeck/skill-source`），而写目录的那个独立工具**用同一份实现**
+ *   把内容抓下来放进目录。所以条目里带的 `sourceRef` 是**原始 GitHub 来源**，
+ *   不是 `remote:…`——远端在这里是中转，不是出处。
+ *
+ * ⚠️ `files` **必须一起带下去装**：技能可以带支持文件（pptx 有 `scripts/`、
+ *    `LICENSE.txt`），少了它装进来只有 `SKILL.md`。那种技能是坏的，而且坏得很
+ *    安静——界面显示"已安装"，跑起来才发现少东西。
+ */
 export interface CatalogSkill {
   slug: string
-  version: string
+  /** 上游那个目录最近一次提交的短 sha；取不到时是 null。 */
+  version: string | null
+  /** 给人看的名字（清单里写的）。 */
+  name?: string
   summary: string
+  /** SKILL.md 的正文。 */
   content: string
+  /** 支持文件（相对路径 → 内容）。 */
+  files?: Record<string, string>
+  /** 清单里声明排除、没有装进来的文件（相对路径）。非空 ⇒ 这一条**内容不完整**。 */
+  excluded?: string[]
+  /** 原始来源标识（`github:owner/repo@ref:dir`）——落库时原样交给 daemon。 */
+  sourceRef?: string
+  category?: string
+  origin?: 'official' | 'community'
+  /** 相对"你已经有的能力"补什么。 */
+  fills?: string | null
+  /** 装完还得自己配的东西（**必须在装之前显示**）。 */
+  needs?: string | null
+  /** 这份内容是什么时候抓的（ISO）。 */
+  fetchedAt?: string
 }
 
 /**

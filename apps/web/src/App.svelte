@@ -4,8 +4,9 @@
   import Sidebar from './components/Sidebar.svelte'
   import InboxDrawer from './components/InboxDrawer.svelte'
   import SettingsDrawer from './components/SettingsDrawer.svelte'
+  import { ConfirmDialog } from '@agentdeck/ui/components'
+  import { t } from './lib/i18n.ts'
   import Chat from './views/Chat.svelte'
-  import NewTask from './views/NewTask.svelte'
   import Tasks from './views/Tasks.svelte'
   import Agents from './views/Agents.svelte'
   import Skills from './views/Skills.svelte'
@@ -103,10 +104,12 @@
   <Sidebar />
 
   <main class="main">
+    <!-- ⚠️ 这里**没有** `new` 这一支（2026-10 / D58）：建任务不再是独立一页，
+         它是「任务」页右栏的一个状态（`$creating`），由 `Tasks.svelte` 自己画。
+         留着一条 `{#if $view === 'new'}` 的后果是"页面有几个"有两份答案——
+         而 `ViewName` 里已经没有它了，写出来是编译错误。 -->
     {#if $view === 'chat'}
       <Chat />
-    {:else if $view === 'new'}
-      <NewTask />
     {:else if $view === 'tasks'}
       <Tasks />
     {:else if $view === 'agents'}
@@ -137,3 +140,13 @@
     <div style="padding:var(--sp-3) var(--sp-4)">{$toast}</div>
   </div>
 {/if}
+
+<!--
+  ★ 确认框挂在**外壳这一层**、只有一份（`askConfirm()` 弹出来的是它）。
+    不放进各视图：四个调用点（删对话/删任务/卸技能/卸工具包）里有两个会
+    把当前视图整个换掉，弹窗跟着视图卸载就会闪一下。
+-->
+<ConfirmDialog
+  cancelLabel={$t('common.cancel')}
+  closeLabel={$t('common.close')}
+/>

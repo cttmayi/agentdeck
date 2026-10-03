@@ -262,12 +262,24 @@
     </form>
 
     <svelte:fragment slot="foot">
-      <button type="submit" form="settings-form" disabled={busy || $templateKit === null}>
+      <button
+        type="submit"
+        form="settings-form"
+        disabled={busy || $templateKit === null}
+        title={busy ? $t('common.busyHint') : $templateKit === null ? $t('settings.kitNotLoaded') : undefined}
+      >
         {busy ? $t('common.saving') : $t('common.save')}
       </button>
-      <button type="button" class="secondary" onclick={onclose} disabled={busy}>{$t('common.cancel')}</button>
+      <button
+        type="button"
+        class="secondary"
+        onclick={onclose}
+        disabled={busy}
+        title={busy ? $t('common.busyHint') : undefined}
+        >{$t('common.cancel')}</button
+      >
       {#if error}
-        <span class="bad small settings-error">{error}</span>
+        <div class="notice bad settings-error">{error}</div>
       {:else}
         <span class="faint small">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
       {/if}

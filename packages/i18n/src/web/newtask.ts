@@ -50,8 +50,13 @@ export const newtaskText = {
 
   // ── 选智能体 ──
   'newtask.agentLabel': { zh: '交给哪个智能体', en: 'Which agent gets it' },
+  /** 提交按钮置灰时说明缺什么（项目纪律：置灰必须写清为什么）。 */
+  'newtask.submitNotReady': {
+    zh: '写清楚「要做什么」并选好执行者之后才能提交',
+    en: 'Fill in what to do and pick an executor before submitting',
+  },
   'newtask.noExecutorOption': {
-    zh: '（还没有「执行」角色的智能体）',
+    zh: '（还没有执行角色的智能体）',
     en: '(No agent with the “executor” role yet)',
   },
   'newtask.createExecutorBefore': { zh: '去「智能体」页建一个', en: 'Create one with the ' },
@@ -409,13 +414,13 @@ export const newtaskText = {
   'newtask.actionsOverrideNeedsRestart': {
     // ⚠️ "重启 daemon" 这几个字是**探针钉着的**（[新建任务的三步链] 那一组要求这句
     //    说清补救动作）：别改成"重启它"——指代确实清楚，但机器检查的是词。
-    zh: '这一栏这一次改不了 —— 你现在连着的 daemon 还没更新，单条任务上改动作白名单要重启 daemon 之后才能改。',
+    zh: '这一栏这一次改不了 —— 你现在连着的 daemon 还没更新，单条任务上改「行动权限」要重启 daemon 之后才能改。',
     en: 'This section cannot be changed this time — the daemon you are connected to has not been updated, so overriding the allowed actions for a single task needs a daemon restart first.',
   },
 
   // ── 选中那个 agent 的现状 ──
   'newtask.instructionsPreview': { zh: '它会按这个指令干活：', en: 'It works from this instruction: ' },
-  'newtask.noInstructionsWarn': { zh: '这个 agent 还没写指令', en: 'This agent has no instructions yet' },
+  'newtask.noInstructionsWarn': { zh: '这个智能体还没写指令', en: 'This agent has no instructions yet' },
   'newtask.noInstructionsAfter': {
     zh: '——它只会拿到任务标题与说明。',
     en: ' — it only gets the task title and description.',
@@ -440,7 +445,7 @@ export const newtaskText = {
   },
   'newtask.workDirHintAfter1': { zh: '，不需要你操心。', en: ', with nothing for you to manage.' },
   'newtask.workDirHintAfter2': {
-    zh: '填这里只在你要让 agent 直接在你的仓库里干活时才有意义——填了之后，',
+    zh: '填这里只在你要让智能体直接在你的仓库里干活时才有意义——填了之后，',
     en: 'Filling this in only makes sense when you want the agent to work directly in your own repository — once set,',
   },
   'newtask.workDirHintAfter3': {

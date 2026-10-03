@@ -1,4 +1,5 @@
 import { writable, type Readable } from 'svelte/store'
+import type { IconId } from './icons.ts'
 import type { ViewName } from './view.ts'
 
 /**
@@ -52,13 +53,29 @@ export type PageAction = {
   /** 按钮上的字。跟着 `$t(...)` 走。 */
   label: string
   /**
-   * 视觉权重，与界面别处的按钮同一套说法：
-   * `primary` = 这一页的主线动作（安装 / 新建），`secondary` = 配套动作（刷新 /
-   * 设置），`ghost` = 轻量的呈现切换（列表 / 看板）。
+   * 视觉权重。
+   *
+   * ⚠️ 2026-10（D59）之后这一排是一**条工具条**（见 `app.css` 里 `.page-actions`
+   *    那一段），所以 `kind` 只区分两件事：
+   *    · `primary` = 这一页的**主线动作**（新建 / 安装）——文字用强调色 + 半粗；
+   *    · 其余（`secondary` / `ghost`）在这一排里长得一样：普通文字色。
+   *    呈现模式那两颗（列表 / 看板）不再靠"更轻"来区分，而是靠 `active` 的
+   *    **实心底**——那才是"我是哪一种"该有的信号（旧的三种重量里，ghost 与
+   *    secondary 的底色对比只有 1.14:1，等于没画）。
    */
   kind?: 'primary' | 'secondary' | 'ghost'
-  /** 互斥的呈现模式（列表 / 看板）里，标出**当前**那一个。 */
+  /** 互斥的呈现模式（列表 / 看板）里，标出**当前**那一个；也是"正在这一栏"。 */
   active?: boolean
+  /**
+   * 动作前面那个小图标（可选，见 `lib/icons.ts`）。
+   *
+   * ★ 只给"词条短到没有形状"的那几个用（新建 / 刷新 / 列表 / 看板）。不写就
+   *   只有文字——**不要为了整齐给每个按钮都塞一个图标**：中文词条本身好认，
+   *   一排小图标反而变成噪点。
+   *
+   * ⚠️ 传进来的是 `IconId`（那四个之一），写错是编译错误。
+   */
+  icon?: IconId
   disabled?: boolean
   /** 悬停提示。省缺时不给 `title`（不要给每个按钮都塞一句废话）。 */
   title?: string

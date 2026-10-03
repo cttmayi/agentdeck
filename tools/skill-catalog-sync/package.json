@@ -1,0 +1,14 @@
+{
+  "name": "@agentdeck/skill-catalog-sync",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "推荐技能目录的同步工具：把清单里的 GitHub 技能抓到一个目录里，给远端服务当公共目录读",
+  "bin": {
+    "agentdeck-skill-catalog-sync": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@agentdeck/skill-source": "workspace:*"
+  }
+}

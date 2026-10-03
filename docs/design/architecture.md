@@ -67,7 +67,9 @@
 |---|---|---|
 | **daemon** | 全部权威数据、run 执行、审核收口、动作执行、审计 | 不向远端服务发请求（唯一例外：从 GitHub/本地路径装 skill 时自己下载，见 §9.3） |
 | **页面（web）** | 视图与交互；**代 daemon 与远端通信** | 不持有权威状态；不能单独跑（`dev:web` 只是把 `/api` 代理到 daemon） |
-| **远端（remote）** | 账号、设定、公共工具包目录、第三方查询转发、记录统计 | 不存任何第三方 payload；不经手安装；权威记录不在它那里 |
+| **远端（remote）** | 账号、设定、公共工具包目录、**推荐技能目录**（只读一个目录，见 §11.3）、**管理页**（`apps/remote/web`，只读 + 重新同步按钮）、第三方查询转发、记录统计 | 不存**使用者的**任何 payload（prompt / 报告 / 日志只上报摘要）；**不抓取技能**（不碰 `api.github.com`、没有一行抓取代码）；不经手安装；权威记录不在它那里。⚠️ 公共技能目录里的**第三方内容**是它唯一会存的第三方文件——那是"目录"这件事的代价，所以内容落在一个目录里、不进代码仓库，清单里只有 URL 与自写说明（D50） |
+| **共用 UI**（`packages/ui/`） | 设计令牌 + 基础组件样式（`src/styles/app.css`）+ 主题判定（`src/theme.ts`） | 不含任何页面与数据逻辑：daemon 界面与远端管理页都 import 它，"风格相似"靠这个而不是靠各抄一份 |
+| **同步工具**（`tools/skill-catalog-sync/`） | 读推荐清单、联网抓 GitHub、校验、**原子替换**目录 | 不是服务、不监听端口、不知道谁是使用者；与远端服务**只有目录这一条约定**，没有代码依赖（2026-10 A 案，见 §11.3） |
 | **CLI / MCP** | 无状态客户端 | 不提供"提交任意 run"（那等于开放代码执行入口，见 §7.4） |
 
 ### 1.3 端口与默认路径（都写死，不随机）
@@ -100,7 +102,7 @@
 
 | # | 原则 | 落点 |
 |---|---|---|
-| P1 | 页面是唯一通路；daemon 不外联 | `apps/daemon/src/server.ts` 全文无对外 `fetch`，除 `skill-source.ts` |
+| P1 | 页面是唯一通路；daemon 不外联 | `apps/daemon/src/server.ts` 全文无对外 `fetch`，除 `@agentdeck/skill-source`（那是刻意的例外，见 §7.3） |
 | P2 | 词汇单一来源 | 状态、原因码、动作名、接口契约全部在 `packages/protocol/src/` |
 | P3 | 存储是端口，不是实现 | `packages/domain/src/ports/store.ts`；领域层不认识任何存储实现 |
 | P4 | 注入即所有权，可逐字节回滚 | `packages/agent-core/src/skill-injection.ts` |
@@ -134,7 +136,11 @@ agentdeck/
 │   └── i18n/         界面词表（中/英）+ 机器值的标签映射
 ├── docs/             文档（本文在其中）
 ├── examples/tools/   可照抄的本机工具包示例
-├── tools/layout-probe/ 界面布局探针（真浏览器量布局）
+├── packages/ui/      两个前端共用的设计系统（令牌 + 基础组件样式 + 主题判定）
+├── tools/            独立工具（不属于任何 app 的运行时）
+│   ├── layout-probe/    界面布局探针（真浏览器量布局）
+│   ├── skill-catalog-sync/ 推荐技能目录的同步工具（抓 GitHub 写目录，远端服务只读它）
+│   └── remote-ui-probe/    远端管理页的界面探针（真浏览器量布局并断言）
 ├── tests/            仓库级自动检查（如"测试里不许出现 tmpdir()"）
 └── ref/              上游行为分析材料（参考输入，**不是本项目文档**）
 ```
@@ -767,7 +773,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/conversations` | 对话列表（按最近说过话排序） |
 | POST | `/api/conversations` | **对话由第一句话诞生**（没有"先建一个空对话"这条路）：标题取第一个非空行；agent 必须是**执行者**（审核者 ⇒ `agent_role_mismatch`） |
 | GET | `/api/conversations/{id}` | 对话 + 全部轮次（每轮带 `output` / `status` / `toolCount` / `durationMs`）+ **实际工作目录** |
-| PATCH | `/api/conversations/{id}` | 改名 / 改工作目录（`workDir: null` = 回到平台分配；**空串是 400**，两者刻意不同） |
+| PATCH | `/api/conversations/{id}` | 改名 / 改工作目录（`workDir: null` = 回到自动分配；**空串是 400**，两者不同）。⚠️ **界面只在「新对话」那一步设工作目录**（详情页只读）：改目录等于把"这次对话在哪个目录里干的活"变成不确定的，而回看时列出的文件、路径都指着旧目录。接口仍然收这个字段（老客户端与脚本照旧能用） |
 | DELETE | `/api/conversations/{id}` | 删对话**连同它的轮次**；那一轮的 run 一个都不动（成本与审计还认得它） |
 | POST | `/api/conversations/{id}/turns` | 说下一句 ⇒ 202（并发位满 ⇒ 429 + `retry-after`） |
 | GET | `/api/conversations/{id}/files` | 这个对话工作目录的文件树（一次一层；D49 ⑪） |
@@ -780,9 +786,11 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/runs/{id}/events` | **SSE 流**（`?since=N` 补齐） |
 | GET | `/api/runs/{id}/messages` | 消息列表 |
 | POST | `/api/runs/{id}/cancel` | 取消 |
+| DELETE | `/api/runs/{id}` | **删掉一条 run 连同它派生的一切**（消息流、verdict 与它触发的 action、artifacts、以及**引用它的对话轮次**——那一轮的内容就是这条 run 的消息）。**审计记录与 blob 保留**（可追溯性是不可变历史）。⚠️ 还在跑 ⇒ **409** 并说明先取消或等它结束；别的 workspace ⇒ 404 |
 | POST | `/api/runs/{id}/human-verdict` | **人工裁决 = 人判通过**（D46）：`{reason?}` ⇒ 追加一条 `source: 'human'` / `advisory` 的判决。**不触发任何动作、不发通知**。挂错 run（该挂审核 run 却挂了执行 run、审核还在跑、非终态…）⇒ **409 并指出该挂到哪条**。见 §8.2 |
 | POST | `/api/issues/{id}/abandon` | **放弃任务**（D47）：issue 状态 → `cancelled`，**并取消这条任务上还在跑的 run**（含正在跑的审核 run）。不删任何东西。见 §8.2 |
 | POST | `/api/issues/{id}/reopen` | **恢复任务**（D47）：issue 状态 → `todo`。撤销"放弃"的唯一入口 |
+| DELETE | `/api/issues/{id}` | **删掉一条任务连同挂它名下的一切**：它名下的每条 run（顺 `subject` 链，所以审核 run 也跟着走）走上面那条 `DELETE /api/runs/{id}`，再加任务自己的评论与本体。**先取消这条任务上仍在跑的 run**（与「放弃」同一处副作用），否则会出现"看不见的正在跑"。inbox 通知保留；别的 workspace ⇒ 404。任务列表每项右侧那个「×」走的就是它 |
 | GET | `/api/runs/{id}/verdicts` | 判决 **+ 它触发的动作**（画在同一张卡片里） |
 | GET | `/api/runs/{id}/audits` | 审计记录 |
 | GET | `/api/runs/{id}/artifacts` | 产出物（blobRef + 大小） |
@@ -1145,7 +1153,7 @@ my-tool/
 | 远端公共目录 | 页面 | 远端只列内容、**不经手安装**，装由本机做并再校验一遍 |
 
 ⚠️ **唯一一处 daemon 会主动出网**：从本地路径 / GitHub 装 skill。
-边界**写死在** `apps/daemon/src/skill-source.ts`：
+边界**写死在** `packages/skill-source/src/skill-source.ts`：
 
 - 只允许 **https**；
 - 只允许 GitHub 的几个主机；
@@ -1193,27 +1201,36 @@ macOS 上能碰巧读到，Linux 上不行。
 
 | 视图 | 路由 | 做什么 |
 |---|---|---|
-| 聊天 | `#/chat` | **闭环的旁路**（D49）：多个对话，一个对话绑一个执行者。一轮对话 = 一条 execute run，所以流式 / 停止 / 刷新后还在跑都是白拿的；**有自己那份很薄的 ①**（`chatTemplate`：不是派活 + 语言 + 技能清单），**② 照发**，③ 是那句话**逐字**（⚠️ 2026-09 修正：在此之前它什么都不套——那让同一个 agent 在两条路上性格不同。工作目录走 `workDir` 字段，不写进正文）——任务是"被交代一件事"，聊天就是说话；`reviewerAgentId: null`、`subject.type = 'conversation'` ⇒ **没有判决这条出口，也就触发不了任何动作**（⚠️ 2026-09：页面上那句常驻的"这里不动手"按要求去掉了，边界的落点是「带过去」——想动手就得预填到新建任务那一页）。⚠️ 页面形状：左窄右宽两栏；**输入框在草稿态与已有对话两支里都在**（对话由第一句话诞生，草稿态没有输入框＝这条路走不通——布局探针抓过一次）；Enter 发送 / Shift+Enter 换行，与「要做什么」**正好相反**，所以两处各自写在输入框下面；⚠️ 「新对话」的执行者下拉里**两组选项**：执行者，以及**每一条装着的 skill**——有主的选了就等于选挂着它的那个执行者（绑定仍是一个 `agentId`）；没人挂的绑当前执行者、并由 `Conversation.skillIds` 让这个对话自己带着它（每轮注入 = 执行者挂的 ∪ 对话带的）。选完界面上要写出「将使用谁」（有主/没主两种说法）；`skillIds` 只读，对话头部显示出来。布局探针四条钉住，含"所有已安装的都必须在选项里""选完之后绑的必须是接口上真挂着它的那个执行者""选了没人挂的那条时**发出去的请求体里真的带上了 `skillIds`**"；⚠️ 右栏底部还有一栏**「工作目录的文件」**（默认收起、头部写出条数），它按**对话**问目录（`GET /api/conversations/:id/files`，与任务详情右边那一栏**共用** `components/WorkDirTree.svelte`，差别只有 `base`）：一个对话可能还没有任何 run，而它的目录属于对话；目录用 `resolveWorkDir` 算（与出 run 同一个函数），`exists` 把"还不存在"与"空的"分开，顺序由界面侧的 `sortWorkDirEntries` 保证（服务端返回目录自己的顺序）。布局探针十条钉住（那一栏在不在、列没列到夹具文件且**注入物排在产出后面**、一次只列一层、草稿态不画、旧 daemon 上说明原因而不是去撞 404；再加上**查看器那五条**：**「原文」逐字等于接口发回来的字节**、Markdown 两面都对（渲染面是 `h1`、原文面是字面量 `# 结论`）、iframe 的 `sandbox` 属性没有 `allow-same-origin` 且父页面**读不到**它的 document、二进制只给说明与十六进制、超大源码不着色但原文完整）。⚠️ 点文件**不再跳新标签页**，而是就地打开查看器（`components/FileViewer.svelte`，判定在 `lib/file-view.ts`） |
-| 新建任务 | `#/new` | 三步链：**执行 → 审核 → 行动**（D42）。默认值从长期配置推导，②③**只为这一次**可改，三处都提前说清后果。⚠️ 页面形状：任务内容只有**一个多行框**（没有"标题 + 补充说明"两个字段——切分在 `apps/web/src/lib/request-text.ts`：第一行当标题、其余进说明，全文进 `prompt`；**默认 3 行、随输入长高、15 行封顶**）；三步是**两列**（左列 ① 执行拉满两行，右列 ② 审核在上、③ 行动在下）；③ 的行动选择器住在一个**居中对话框**里（`components/Modal.svelte`），页面上只剩「选择动作…」+ 计数，允许的动作以胶囊列在 ③ **卡片里面**（契约值 + **已固定 `name=value`（与契约值同一行）** + `summary`——只列钉死的值，不列"由模型填 / 平台注入"，那两行使用者没法据它做决定）；提交栏**吸底**（`position: sticky`），滚动时始终可点，错误提示也在那一栏里 |
-| 任务清单 | `#/tasks` | 列表 / 看板（六列，阶段是推出来的，见 §8.5；「已放弃」由 issue 状态覆盖，见 §8.2） |
+| 聊天 | `#/chat` | **闭环的旁路**（D49）：多个对话，一个对话绑一个执行者。一轮对话 = 一条 execute run，所以流式 / 停止 / 刷新后还在跑都是白拿的；**有自己那份很薄的 ①**（`chatTemplate`：不是派活 + 语言 + 技能清单），**② 照发**，③ 是那句话**逐字**（⚠️ 2026-09 修正：在此之前它什么都不套——那让同一个 agent 在两条路上性格不同。工作目录走 `workDir` 字段，不写进正文）——任务是"被交代一件事"，聊天就是说话；`reviewerAgentId: null`、`subject.type = 'conversation'` ⇒ **没有判决这条出口，也就触发不了任何动作**（⚠️ 2026-09：页面上那句常驻的"这里不动手"按要求去掉了；⚠️ **2026-10：连「派发任务」也去掉了**（D57——原来两个按钮「把整个对话派出去」/「用这个去派活」会把内容预填进「新建任务」）⇒ 这一页现在与闭环**完全不相通**：不产出判决，也不往「新建任务」送东西）。⚠️ 页面形状：左窄右宽两栏；**输入框在草稿态与已有对话两支里都在**（对话由第一句话诞生，草稿态没有输入框＝这条路走不通——布局探针抓过一次）；Enter 发送 / Shift+Enter 换行，与「要做什么」**正好相反**，所以两处各自写在输入框下面；⚠️ 「新对话」的执行者下拉里**两组选项**：执行者，以及**每一条装着的 skill**——有主的选了就等于选挂着它的那个执行者（绑定仍是一个 `agentId`）；没人挂的绑当前执行者、并由 `Conversation.skillIds` 让这个对话自己带着它（每轮注入 = 执行者挂的 ∪ 对话带的）。选完界面上要写出「将使用谁」（有主/没主两种说法）；`skillIds` 只读，对话头部显示出来。布局探针四条钉住，含"所有已安装的都必须在选项里""选完之后绑的必须是接口上真挂着它的那个执行者""选了没人挂的那条时**发出去的请求体里真的带上了 `skillIds`**"；⚠️ 右栏底部还有一栏**「工作目录的文件」**（默认收起、头部写出条数），它按**对话**问目录（`GET /api/conversations/:id/files`，与任务详情右边那一栏**共用** `components/WorkDirTree.svelte`，差别只有 `base`）：一个对话可能还没有任何 run，而它的目录属于对话；目录用 `resolveWorkDir` 算（与出 run 同一个函数），`exists` 把"还不存在"与"空的"分开，顺序由界面侧的 `sortWorkDirEntries` 保证（服务端返回目录自己的顺序）。布局探针十条钉住（那一栏在不在、列没列到夹具文件且**注入物排在产出后面**、一次只列一层、草稿态不画、旧 daemon 上说明原因而不是去撞 404；再加上**查看器那五条**：**「原文」逐字等于接口发回来的字节**、Markdown 两面都对（渲染面是 `h1`、原文面是字面量 `# 结论`）、iframe 的 `sandbox` 属性没有 `allow-same-origin` 且父页面**读不到**它的 document、二进制只给说明与十六进制、超大源码不着色但原文完整）。⚠️ 点文件**不再跳新标签页**，而是就地打开查看器（`components/FileViewer.svelte`，判定在 `lib/file-view.ts`） |
+| 建任务（不是视图） | `#/tasks/new`（老地址 `#/new` 一样直达） | ⚠️ **2026-10（D58）：「新建任务」不再是一项导航，也不再是一个视图**——侧栏只剩五项，那张表单**住在「任务」页右栏里**：顶栏那个主操作（`kind: 'primary'`）只是把右栏切成它（`goCreate()` → `#/tasks/new`）。⚠️ **它不是第 6 个视图**：`VIEWS` 里没有 `new`，路由解析出来的是一对 `{ view: 'tasks', creating: true }`（`apps/web/src/lib/route.ts`，纯函数、有单测）。⚠️ 三个具体后果：① **`with-detail` 必须把"正在建"也算进去**——窄屏那条 `.split-layout:not(.with-detail) .detail-pane { display:none }` 会把它整栏藏掉（"点新建任务什么都不出现"，宽屏上看不出来）；② **进建任务要把模式拨回列表**（右栏只在列表那一档存在；模式存在 `localStorage` 里，"上次用看板"的人点进来会屏幕上什么都没有）；③ 填过东西再切走要先问一句（`lib/create-draft.ts` 那个 store + `lib/leave-create.ts` 那个守卫 + `askConfirm`）——⚠️ 那一栏上面**没有**返回按钮（2026-10 按要求去掉），出口是**顶栏的「列表 / 看板」**与**侧栏的「任务」那一项**，而这两处都要过同一个守卫（各写一遍的后果不是重复而是**漏**——漏掉的那条正是静默丢草稿的那条）；顶栏的「列表」在建任务时不能是空操作（`mode === next` 也要放行）。**浏览器后退拦不住**（地址是路由的唯一出处，拦一次后退要么"改地址再改回来"、要么上 History API——这个应用刻意不用），真正的解法是把草稿留在 store 里，见 §15.36。三步链：**执行 → 审核 → 行动**（D42）。默认值从长期配置推导，②③**只为这一次**可改，三处都提前说清后果。⚠️ 页面形状：任务内容只有**一个多行框**（没有"标题 + 补充说明"两个字段——切分在 `apps/web/src/lib/request-text.ts`：第一行当标题、其余进说明，全文进 `prompt`；**默认 3 行、随输入长高、15 行封顶**）；三步是**两列**（左列 ① 执行拉满两行，右列 ② 审核在上、③ 行动在下）；③ 的行动选择器住在一个**居中对话框**里（`components/Modal.svelte`），页面上只剩「选择动作…」+ 计数，允许的动作以胶囊列在 ③ **卡片里面**（契约值 + **已固定 `name=value`（与契约值同一行）** + `summary`——只列钉死的值，不列"由模型填 / 平台注入"，那两行使用者没法据它做决定）；提交栏**吸底**（`position: sticky`），滚动时始终可点，错误提示也在那一栏里 |
+| 任务 | `#/tasks` | 列表 / 看板（六列，阶段是推出来的，见 §8.5；「已放弃」由 issue 状态覆盖，见 §8.2）；⚠️ **2026-10（D58）：建任务的入口在这一页**（顶栏那个主操作），而且表单就开在这一页的**右栏**里（见上一行）——这一页因此同时是"看"和"建"两个方向的门。右栏一次只放一件事（某条任务的详情 / 建任务那张表单），两者互斥，切换要过守卫 |
 | 智能体 | `#/agents` | 主从布局。详情里有「由谁审它」、**「指令」（② 身份：判断依据就写在里面，老数据那份老标准也显示在这一栏并带一键并进）**、**挂载的 skill**、**行动权限**编辑器（左选右配，D43/D44）。⚠️ 2026-09 起**没有单独的「审核标准」那一栏了** |
 | 技能 | `#/skills` | 三个来源安装 + 卸载（D38） |
 | 工具 | `#/tools` | 安装 / 查看工具包；放行"不支持预演的动作"的开关也在这里 |
 
-**路由是极简的 hash 路由，没有路由库**（`src/lib/view.ts`）：白名单就是上面六个值
-（`VIEWS`），不在白名单里回落 `#/new`。之所以用 hash 而不是 History API：
+**路由是极简的 hash 路由，没有路由库**（`src/lib/route.ts` 是判据、`src/lib/view.ts`
+是它的两个 store）：白名单是 `VIEWS` 里那五个值（`chat` / `tasks` / `agents` /
+`skills` / `tools`），不在白名单里回落 **`#/tasks`**。⚠️ 2026-10（D58）三处：
+① 回落目标从 `#/new` 改成 `#/tasks`——合并之后"任务"才是主场，把人扔到一个表单上
+会显得莫名其妙；② `#/tasks/new` 与老的 `#/new` **都解析成同一个状态**
+（`{ tasks, creating: true }`），老地址继续有效（书签、文档、探针都在用），而
+`hashFor()` 只吐正规那个；③ **判据从 `view.ts` 里搬到了 `route.ts`**——原来它在
+`view.ts`（那个文件挂着 store 与 `window`，`node --test` import 不了），于是
+"地址解析得对不对"从来没被测过，只能隔着浏览器看；现在 `parseHash`/`hashFor`
+是纯函数、有单测，而且有一对往返测试（`VIEWS` 逐项过一遍）。之所以用 hash
+而不是 History API：
 daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 404。
 
 **"选中了哪个任务 / 哪个 agent"不进 URL**（是组件内的 store），刷新即丢。
 
 `src/lib/` 里的模块（多数有对应测试）：
 
-⚠️ 行数是 **2026-09 的快照，只作量级参考**——它涨得比文档快，别拿它当判据（改文件时也不必同步这一列）。
+⚠️ 行数是 **2026-10 的快照，只作量级参考**——它涨得比文档快，别拿它当判据（改文件时也不必同步这一列）。
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `api.ts` | 798 | 同源 API 客户端 + 全部响应类型（**刻意不 import `packages/protocol`**：前端类型是独立的视图形状） |
-| `stores.ts` | 567 | 共享状态（identity / agents / runs / skills / tools / inbox …）+ 全部 load/写入口 |
+| `api.ts` | 821 | 同源 API 客户端 + 全部响应类型（**刻意不 import `packages/protocol`**：前端类型是独立的视图形状） |
+| `stores.ts` | 571 | 共享状态（identity / agents / runs / skills / tools / inbox …）+ 全部 load/写入口 |
 | `pipeline.ts` | 694 | 任务阶段推导（看板六列的判据）+ 执行记录时间线 |
 | `newtask-chain.ts` | 431 | 新建任务三步链的默认值与覆盖语义（`follow` ⇒ 请求体里**不出现该键**） |
 | `markdown.ts` | 287 | 自写 Markdown 渲染器（顺序是硬规则，见 §7.3） |
@@ -1221,11 +1238,13 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | `sync.ts` | 242 | 上报队列 + 拉 `pending` 的轮询循环（**失败不抛异常，只落状态**） |
 | `remote.ts` / `remote-store.ts` | 198 / 100 | 远端跨源客户端（凭证放 localStorage + `Authorization: Bearer`，**不用 cookie**——页面跑在明文 http）/ 远端账号状态单一来源 |
 | `agent-actions.ts` | 217 | 行动权限展示（含老数据从 `reviewStandard.allowedActions` 的只读回退） |
-| `chat.ts` | 258 | 聊天的纯逻辑：终态那一列（有测试**读协议源码**把它钉上，抄的东西会腐烂）、"正在跑"看状态而不是看界面记没记住、相对时间、通往「新建任务」的那段预填文字，以及"新对话"那个下拉的选项（`executorChoices` / `applyChoice`——**skill 是执行者的另一条入口**：只认执行者、多人挂同一个 skill 时优先平台默认执行者、**没人挂的也能选**（绑当前执行者 + 由对话自己带着）、选没人挂的那条时不许把执行者换掉、以及"工作目录那一栏该不该画"（`chatFilesState`：草稿态 / 旧 daemon / 正常）） |
-| `file-view.ts` | 299 | 文件查看器的判据：按 content-type 与扩展名分类、默认看哪一面、着色阈值（256KB）、语言映射（认不出给 null，绝不 `highlightAuto`）、十六进制、CSV 拆表（RFC4180 最小集）。全部纯函数、有测试——写在模板里的分支只能靠手点界面验证，而"Markdown 被当纯文本显示"**不报错** |
-| `tool-view.ts` / `workdir-view.ts` / `skill-catalog.ts` / `view.ts` / `locale.ts` / `i18n.ts` | 135 / 100 / 235 / 86 / 34 / 68 | 视图模型、目录版本比较（安装/更新/退回）、路由与本地化 |
+| `chat.ts` | 214 | 聊天的纯逻辑：终态那一列（有测试**读协议源码**把它钉上，抄的东西会腐烂）、"正在跑"看状态而不是看界面记没记住，以及"新对话"那个下拉的选项（`executorChoices` / `applyChoice`——**skill 是执行者的另一条入口**：只认执行者、多人挂同一个 skill 时优先平台默认执行者、**没人挂的也能选**（绑当前执行者 + 由对话自己带着）、选没人挂的那条时不许把执行者换掉、以及"工作目录那一栏该不该画"（`chatFilesState`：草稿态 / 旧 daemon / 正常）） |
+| `time.ts` | 45 | **相对时间与完整时间戳的唯一出处**（`relativeTime` / `absoluteTime`）：列表一律显示相对时间、准确时间放 `title`。⚠️ 这两个函数原来住在 `chat.ts` 里——而时间格式化跟聊天没关系，结果每个页面各写一份（任务列表只到天、技能/工具表到分钟、聊天与智能体列表干脆不显示）。⚠️ 相对时间那四条词条也随之从 `chat.*` 提到 `common.*` |
+| `confirm.ts` | 74 | **平台自己的确认框**（`askConfirm` → `Promise<boolean>`），取代 `window.confirm`：浏览器那个是浏览器 chrome（位置、样式、语言都归它管，还会阻塞整个 JS 线程，在部分 webview 里干脆被忽略）。命令式是因为四处调用点（删对话 / 删任务 / 卸技能 / 卸工具包）要的是同一件事；全局只有一个待答请求，后来的把前一个按**取消**收场（否则那个 `await` 永久挂起） |
+| `file-view.ts` | 328 | 文件查看器的判据：按 content-type 与扩展名分类、默认看哪一面、着色阈值（256KB）、语言映射（认不出给 null，绝不 `highlightAuto`）、十六进制、CSV 拆表（RFC4180 最小集）。全部纯函数、有测试——写在模板里的分支只能靠手点界面验证，而"Markdown 被当纯文本显示"**不报错** |
+| `tool-view.ts` / `workdir-view.ts` / `skill-catalog.ts` / `view.ts` / `locale.ts` / `i18n.ts` | 124 / 100 / 235 / 110 / 34 / 68 | 视图模型、目录版本比较（安装/更新/退回）、路由与本地化 |
 
-**SSE 的处理不在 `src/lib/`，而在 `src/components/RunLog.svelte`**（574 行）。
+**SSE 的处理不在 `src/lib/`，而在 `src/components/RunLog.svelte`**（590 行）。
 三条值得知道的实现约定：**起点永远是 `since=-1`**（游标只用于重连，父组件无法传错）；
 `seq` 驱动去重（`seq <= lastSeq` 直接丢）；收到终态后 `close()` 不再重连，
 否则自己接管重连（退避 500ms 翻倍、封顶 10s）并插一行 `disconnected`。
@@ -1257,8 +1276,13 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/accounts/register` | 注册 |
 | POST | `/api/accounts/login` | 登录（发 token） |
-| GET | `/api/catalog` | 公共目录（当前**只有工具包**） |
-| GET | `/api/me` | 账号 + 插件清单 |
+| GET | `/api/catalog` | 公共目录：**工具包**（`apps/remote/catalog/tools/`，仓库内）+ **技能**（`<dataDir>/catalog-skills/`，由**独立工具** `pnpm run sync-skills` 写，本服务只读） |
+| GET | `/api/catalog/skills/sync` | 同步状态（`idle/running/ok/failed/unavailable` + 开始/结束时间、退出码、输出末尾若干行）。**公开** |
+| POST | `/api/catalog/skills/sync` | 触发一次同步：把独立工具当**子进程**跑（服务不 import 抓取代码）；**单飞**（跑着再点回 409）；**非回环 Origin 一律 403**（浏览器对简单请求不做预检，光靠 CORS 拦不住）。202 = 已开始 |
+| POST | `/api/catalog/skills/local` | **手动装一条技能**进远端目录的**本地层**（`<dataDir>/catalog-skills-local`，D52）：复用与 daemon 同一份取包规则（只允许 GitHub、必须有 `SKILL.md`）；**撞名一律 409**（不覆盖）；**非回环 Origin 403**。201 = 装上了 |
+| DELETE | `/api/catalog/skills/local/<slug>` | **卸载**（只对本地层）：同步来的那条会 **409 拒绝**并把替代路径写清楚（改清单 → 重新同步）；不在本地层 ⇒ 404 |
+| GET | 其它路径 | **管理页静态文件**（`apps/remote/web/dist`，D51）：未知路径回 `index.html`（hash 路由兜底）；`resolve` 之后必须仍在页面目录内（穿越不出去，有测试）；产物没构建时回一句"先跑 `pnpm run build:remote-web`"而不是 404 |
+| GET | `/api/me` | 账号 + 插件清单（⚠️ 2026-10 起**界面上没有展示它的地方**了，见 D56；接口本身仍然如实——FR-PLUGIN-10） |
 | GET/PUT | `/api/settings` | 用户设定（含 `reportingEnabled`） |
 | GET | `/api/pending` | 待处理项（页面轮询它，取回后投给本机 daemon） |
 | POST | `/api/third-party/query` | 第三方查询转发 |
@@ -1277,7 +1301,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 **上报什么**：只有摘要——执行的用量与状态、任务的状态变更。**不含** prompt 正文、
 代码、报告原文（`sync.ts` 的 `collectRecords` **只取 id/状态/时间**，结构上就拿不到正文）。
 远端那份副本是**同步快照，不具证据效力**，权威记录在本机 daemon 里。
-可以在远端设定里用 `reportingEnabled: false` 关闭上报，关闭后本机功能**完整可用**；
+关闭上报 = 给远端写 `reportingEnabled: false`（`PUT /api/settings`；**界面上暂无入口**，见 D56），关闭后本机功能**完整可用**；
 远端整体不可达时同样如此。
 
 ### 11.2 存储与安全
@@ -1288,7 +1312,14 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | `<dataDir>/plugins.state.json` | `{enabled, config}` | 插件启停与配置 |
 | `<dataDir>/plugins.secrets.json` | `{secrets}` | 权限 **`0o600`**，**单独一个文件**是为了让"普通设定"在结构上不可能含密钥 |
 | `<dataDir>/plugins/<name>/plugin.json` | 插件目录 | 入口必须在插件目录内（按路径解析后比 `relative`，**字符串前缀判断是错的**） |
+| `apps/remote/web/**` | **管理页**（第二个前端，D51） | 产物 `dist/` 由远端服务当静态文件发在 `/`；**与 daemon 界面共用 `@agentdeck/ui`**（同一份设计令牌与主题判定）、共用 `@agentdeck/i18n`（命名空间 `remote/`）；只读 + 一个"重新同步"按钮（把独立工具当子进程跑） |
 | `apps/remote/catalog/tools/**` | 公共工具包目录 | 每次请求**重扫磁盘**；用**与 daemon 同一份** `ToolManifest` schema 校验；限额 128KiB/文件、512KiB/包、32 文件；**符号链接一律不跟随** |
+| `tools/skill-catalog-sync/recommended-skills.json` | **推荐清单**（手写，跟同步工具放一起） | 只有 GitHub 链接、我们自己写的说明，以及可选的 `include`/`exclude`（相对技能目录的 glob，用于"整仓即技能"那种混着营销素材/测试产物的仓库；`SKILL.md` 不许被排除）——**不含第三方内容**。⚠️ 它**不在** `apps/remote/` 里：清单与抓取都属于工具，远端服务不知道它的存在 |
+| `<dir>/catalog-skills/**` | 公共技能目录（**推荐清单抓下来的内容**） | 由**独立工具** `pnpm run sync-skills --out <dir>` 写（默认 `~/.agentdeck/remote/catalog-skills`）；远端服务每次请求**重扫磁盘**，用**与 daemon 同一份**取包规则（`@agentdeck/skill-source`）读回；元数据在旁边的 `.sync.json`（放进技能目录会被当成支持文件装给使用者）。**目录是工具与服务之间唯一的约定** |
+| （可选）GitHub 加速器 | **工具/daemon 可选的第三方出口**（`--github-proxy`，裸写 = `gh-proxy.com`） | 只代理 GitHub 那三个主机、**不带 token**、默认不用（裸写只是省打字）；开了等于让第三方进入链路（能看也能改内容）。远端服务**不参与**这件事 |
+| `<dataDir>/recommended-skills.json` | 推荐清单的**配置文件**（D54） | 第一次跑同步时由工具把**内置默认**（`tools/skill-catalog-sync/recommended-skills.json`）转存到这里；之后工具与服务都读**这一份**（服务只读、绝不写）。`--manifest <文件>` 可另指一份（那时不转存） |
+| `<dataDir>/catalog-skills-local/**` | **本地层**：管理页上**手动装的**技能（D52） | 与同步目录**并列**展示、来源徽标「本地添加」；同名时**同步来的优先**（本地那条不列出并记 warning）。同步工具**永远不碰**它 ⇒ 手动装的东西不会被下次同步抹掉 |
+| `<dir>/catalog-skills.partial/**` | **断点目录**（工具自己用，服务不看） | 抓一条落一条：撞限额/被杀时**已发布目录一个字都不改**（P7），但已抓到的留着，下一轮只补缺的；整轮成功后才删掉。断点那份**跨小时也沿用**（花过配额的不丢）——否则匿名限额下多轮也凑不齐一轮 |
 
 - 认证：`Authorization: Bearer <token>`（`randomBytes(24)`），口令哈希是
   `sha256(salt + ':' + password)` + `timingSafeEqual`。
@@ -1302,11 +1333,23 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 
 ### 11.3 公共目录与插件
 
-- 目录落在 `apps/remote/catalog/tools/<slug>/`（`tool.json` + `TOOL.md` + `scripts/`），
+- **工具包**目录落在 `apps/remote/catalog/tools/<slug>/`（`tool.json` + `TOOL.md` + `scripts/`），
   由 `catalog.ts` 读取。四个示例包：`hello-tool`（最简形）、`example-notify`（枚举 + 布尔 +
   整数参数）、`example-llm`（数值边界）、`example-issue`（同包两动作 + **`reversible: false`**）。
-- `GET /api/catalog` 返回的 `skills` 目前**恒为空数组**（D38 起目录里只有工具包）；
-  技能那一路的实际来源是"本地路径 / GitHub 地址"。
+- **技能**目录是**推荐清单**（D50，2026-10 改为**独立工具**）：清单
+  `tools/skill-catalog-sync/recommended-skills.json` 里只有 GitHub 链接与我们自己写的说明；
+  维护者跑 `pnpm run sync-skills`（工具在 `tools/skill-catalog-sync/`，**不在 `apps/remote/` 里**），
+  它用**与 daemon 同一份**取包规则（`@agentdeck/skill-source`）把内容抓下来、校验、写进
+  **一个目录**（默认 `~/.agentdeck/remote/catalog-skills/`，**不进代码仓库**），再原子替换整个目录。
+  ⚠️ **拆分是刻意的**（使用者原话："还是单独工具吧，不要和 remote 连在一起"）：抓取要联网、
+  要过 GitHub 限额、还可能因上游改名而失败，这些都是**维护时刻**的事，不该混进"服务在跑"
+  这条路径；工具崩了不影响服务，服务也不必为抓取装任何东西。两边**只靠目录相连**——
+  工具用 `--out` 说了算，服务用它自己的 `--data-dir` 去读，谁也不知道对方是谁。
+  `loadCatalogSkills()` 每次请求重扫它，所以同步完**不用重启**。
+  ⚠️ 单条失败 ⇒ **整个目录一个字都不替换**（P7：宁可失败，不可静默降级——半份目录会让
+  使用者点到一个"看起来能装、其实是半截"的条目，而维护者以为同步成功了）。
+  ⚠️ `GET /api/catalog` 的 `skills` 因此**可以为空**（还没同步过、或清单是空的）——界面
+  有对应空态，且与"远端不可用""未登录"分开说（三者的下一步不同）。
 - 插件：`plugins.ts`（契约）、`plugin-store.ts`（持久化）、`loader.ts`（加载）。
   `PLUGIN_API_VERSION = 1`；能力白名单 `login` / `third-party`；scope 白名单
   `account:identify` / `thirdparty:query` / `settings:read`——**未声明即拒绝**。
@@ -1391,7 +1434,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 动作执行 / 脚本进程 | `apps/daemon/src/actions.ts` / `script-executor.ts` |
 | 工作目录分配 / 文件读取 | `apps/daemon/src/workdir.ts` / `workdir-files.ts` |
 | 重启对账 | `apps/daemon/src/reconcile.ts` |
-| 装 skill / 装工具包 | `apps/daemon/src/skill-source.ts` / `tool-source.ts` |
+| 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts` |
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |

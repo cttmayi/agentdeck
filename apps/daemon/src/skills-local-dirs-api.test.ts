@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
-import { startDaemon } from './server.ts'
+import { startDaemon, type DaemonHandle } from './server.ts'
+import type { Skill } from '@agentdeck/protocol'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -17,7 +18,9 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * 勾一个真目录，然后**用同一个 daemon** 把那条 skill 挂到智能体上。
  */
 
-async function withDaemon<T>(fn: (url: string) => Promise<T>): Promise<T> {
+async function withDaemon<T>(
+  fn: (url: string, store: DaemonHandle['store']) => Promise<T>,
+): Promise<T> {
   const dir = await makeTempDir('local-skill-dirs-api')
   const d = await startDaemon({
     dataDir: dir,
@@ -39,7 +42,7 @@ async function withDaemon<T>(fn: (url: string) => Promise<T>): Promise<T> {
     onInfo: () => {},
   })
   try {
-    return await fn(d.url)
+    return await fn(d.url, d.store)
   } finally {
     await d.close()
     await cleanup(dir)
@@ -127,6 +130,12 @@ describe('★ 本地技能目录：勾选 → 看见 → 能挂', () => {
           assert.equal(skill.localDir, root, '要说清它是从哪个目录来的')
           assert.equal(skill.selectable, true, '目录还勾着、文件还在 ⇒ 可以选')
           assert.equal(skill.source, 'local')
+          // ★ 2026-10：作者写在 SKILL.md frontmatter 里的 description 要落库
+          //   （原来恒为 null，列表里那一列永远是空的）
+          assert.equal(
+            (skill as { description?: string | null }).description,
+            `${skill.slug} 的说明`,
+          )
         }
         assert.deepEqual(localDirs.enabled, [root])
 
@@ -367,11 +376,79 @@ describe('★ 本地技能目录：勾选 → 看见 → 能挂', () => {
 
         await putDirs(url, [])
         await listSkills(url)
-        const slugs = (await listSkills(url)).skills.map((s) => s.slug)
+        const skills = (await listSkills(url)).skills
+        const slugs = skills.map((s) => s.slug)
         assert.ok(slugs.includes('from-dir'), '★ 对账顺手删掉别人的东西是最难查的那种事故')
+        // ★ 2026-10：从路径装的那条也要带上 frontmatter 里的说明
+        assert.equal(
+          (skills.find((s) => s.slug === 'from-dir') as { description?: string | null })
+            .description,
+          'from-dir 的说明',
+        )
       })
     } finally {
       await cleanup(root)
     }
+  })
+})
+
+describe('★ 列表里的「说明」列', () => {
+  /**
+   * ★ 旧记录（改动之前装的）在库里 `description` 是 null，而它的 SKILL.md
+   *   frontmatter 里其实写着说明。列表接口要**当场补出来**——否则已经装好的
+   *   技能永远只显示空那一列，除非使用者把所有技能重装一遍。
+   */
+  test('★★ 库里 description 为 null 的旧记录，列表接口从 frontmatter 补出来', async () => {
+    await withDaemon(async (url, store) => {
+      const ws = ((await store.listWorkspaceIds())[0] ?? 'ws_test') as Skill['workspaceId']
+      // 直接写一条"旧记录"：body 里有 frontmatter，但 description 是 null
+      await store.insertSkill({
+        id: 'sk_legacy' as Skill['id'],
+        workspaceId: ws,
+        slug: 'legacy-skill',
+        name: 'legacy-skill',
+        description: null,
+        body: '---\nname: legacy-skill\ndescription: 老记录里那句说明\n---\n\n正文。\n',
+        verdictSchemaVersion: 1,
+        source: 'local',
+        sourceRef: 'github:owner/repo@main:skills/legacy-skill',
+        version: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+
+      const found = (await listSkills(url)).skills.find((s) => s.slug === 'legacy-skill')
+      assert.ok(found, '这条旧记录应该在列表里')
+      assert.equal(
+        (found as { description?: string | null }).description,
+        '老记录里那句说明',
+        '★ 库里的 null 不该盖住作者写在 frontmatter 里的说明',
+      )
+      // ★ 只补展示，**不动库**：库里那份仍然是 null（审计是 append-only 的）
+      const raw = await store.getSkill('sk_legacy' as Skill['id'])
+      assert.equal(raw?.description, null, '列表接口不该顺手改库')
+    })
+  })
+
+  test('库里有 description 时就用自己的（不从正文覆盖）', async () => {
+    await withDaemon(async (url, store) => {
+      const ws = ((await store.listWorkspaceIds())[0] ?? 'ws_test') as Skill['workspaceId']
+      await store.insertSkill({
+        id: 'sk_stored' as Skill['id'],
+        workspaceId: ws,
+        slug: 'stored-desc',
+        name: 'stored-desc',
+        description: '库里登记的那句',
+        body: '---\nname: stored-desc\ndescription: frontmatter 里那句\n---\n\n正文。\n',
+        verdictSchemaVersion: 1,
+        source: 'remote',
+        sourceRef: 'remote:stored-desc',
+        version: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      const found = (await listSkills(url)).skills.find((s) => s.slug === 'stored-desc')
+      assert.equal((found as { description?: string | null }).description, '库里登记的那句')
+    })
   })
 })

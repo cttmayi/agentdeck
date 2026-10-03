@@ -24,6 +24,18 @@ import type { TextCatalog } from '../text.ts'
  *    于是"这个枚举措辞改了"会在**编译期**以缺键的形式暴露出来，而不是界面上
  *    悄悄显示成键名。缺键时 renderText 会返回键名——看得见，好排查。
  */
+/**
+ * ⚠️ 2026-10 收口：这里**删掉了 18 条没人引用的词条**——`term.verdictStatus.*`（7）、
+ *    `term.role.*` / `term.kind.*` / `term.source.*`（各 2）、`term.evidence.*`（5）。
+ *    它们与本文件里那条 `term.action.*` 的旧注释同一个病：**词表里备着、界面上
+ *    没有任何地方用**（角色、来源、判决状态各页面都写了自己的键）。留着的后果
+ *    不是"以后可能用得上"，而是下一个人会以为"这些东西已经在界面上显示了"。
+ *    本项目对词表的纪律写在 `common.ts` 顶部：**只放有人在用的**。
+ *
+ *    在用的那些一个字没动：`term.conclusion.*`（判决结论）、`term.reasonCode.*`、
+ *    `term.actionStatus.*`、`term.runStatus.*`（执行记录与聊天那一轮的状态徽标）、
+ *    `term.stage.*`（任务阶段短标签）。
+ */
 export const termsText = {
   // ── 判决结论 ──
   'term.conclusion.pass': { zh: '通过', en: 'Pass' },
@@ -51,15 +63,6 @@ export const termsText = {
   //   否则读的人会去上面那堆码里找"它到底属于哪一类"。
   'term.reasonCode.human_decision': { zh: '人工裁决', en: 'Decided by hand' },
 
-  // ── 判决记录的状态 ──
-  'term.verdictStatus.pending_verdict': { zh: '等待判决', en: 'Pending verdict' },
-  'term.verdictStatus.emitted': { zh: '已产出', en: 'Emitted' },
-  'term.verdictStatus.validated': { zh: '已校验', en: 'Validated' },
-  'term.verdictStatus.invalid': { zh: '不合规', en: 'Invalid' },
-  'term.verdictStatus.dispatched_to_action': { zh: '已派发动作', en: 'Dispatched to action' },
-  'term.verdictStatus.advisory': { zh: '仅建议', en: 'Advisory only' },
-  'term.verdictStatus.escalated': { zh: '已升级给人', en: 'Escalated' },
-
   // ── 动作 ──
   //
   // ⚠️ 这里原来有六条 `term.action.*`（`comment.create` / `issue.update_status` /
@@ -69,15 +72,7 @@ export const termsText = {
   //    动作名由包的作者定，没有一份可以预先翻译的清单）。留着这些词条的后果很
   //    具体：下一个人会以为"平台还有这几个动作，只是界面上没显示"。
 
-  // ── 角色 / 来源 / 运行 ──
-  'term.role.executor': { zh: '执行', en: 'Executor' },
-  'term.role.reviewer': { zh: '审核', en: 'Reviewer' },
-  'term.kind.execute': { zh: '执行', en: 'Execute' },
-  'term.kind.review': { zh: '审核', en: 'Review' },
-  'term.source.local': { zh: '本机自建', en: 'Local' },
-  'term.source.remote': { zh: '远端下载', en: 'Remote' },
-
-  // ── 运行状态 ──
+  // ── 运行状态（`RunStatus` 的 8 个值；执行记录徽标与聊天那一轮的状态都用它）──
   'term.runStatus.deferred': { zh: '已延后', en: 'Deferred' },
   'term.runStatus.queued': { zh: '排队中', en: 'Queued' },
   'term.runStatus.dispatched': { zh: '已派发', en: 'Dispatched' },
@@ -111,9 +106,4 @@ export const termsText = {
   'term.stage.abandoned': { zh: '已放弃', en: 'Dropped' },
 
   // ── 证据等级 / 版本判定（runtime 卡片与编辑态）──
-  'term.evidence.verified': { zh: '实测过', en: 'Verified' },
-  'term.evidence.in-range-unverified': { zh: '在范围内但未实测', en: 'In range, unverified' },
-  'term.evidence.out-of-range': { zh: '超出范围', en: 'Out of range' },
-  'term.evidence.undeclared': { zh: '未声明', en: 'Not declared' },
-  'term.evidence.unknown': { zh: '无法判断', en: 'Unknown' },
 } as const satisfies TextCatalog

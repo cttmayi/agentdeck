@@ -25,7 +25,7 @@ export const settingsText = {
   'settings.language': { zh: '界面语言', en: 'Interface language' },
   'settings.languageLabel': { zh: '语言', en: 'Language' },
   'settings.languageHint': {
-    zh: '只切换界面文字。交给模型的那段话仍是中文，另外会加一条"请用 X 回答"的指令，让它用你选的语言答复。',
+    zh: '只切换界面文字。交给模型的那段话仍是中文，另外会加一条「请用 X 回答」的指令，让它用你选的语言答复。',
     en: 'Switches interface text only. The prompt handed to the model stays in Chinese, plus an "answer in X" instruction so it replies in the language you pick.',
   },
 
@@ -76,7 +76,7 @@ export const settingsText = {
   'settings.usageHintBefore': { zh: '⚠️ 没有上报用量的执行', en: '⚠️ Runs that report no usage ' },
   'settings.usageHintStrong': { zh: '不计入', en: 'do not count toward' },
   'settings.usageHintAfter': {
-    zh: '成本。把缺失当零会让"总成本"变成一个误导性的数字。',
+    zh: '成本。把缺失当零会让「总成本」变成一个误导性的数字。',
     en: ' cost. Treating the gap as zero would turn "total cost" into a misleading number.',
   },
   'settings.exportAudit': { zh: '导出审计链（JSON）', en: 'Export audit chain (JSON)' },
@@ -113,33 +113,10 @@ export const settingsText = {
   'settings.signedInAs': { zh: '已登录：', en: 'Signed in: ' },
   'settings.signOut': { zh: '退出登录', en: 'Sign out' },
 
-  'settings.mySettings': { zh: '我的设定', en: 'My settings' },
-  'settings.key': { zh: '键', en: 'Key' },
-  'settings.value': { zh: '值（JSON；解析不了按字符串）', en: 'Value (JSON; parsed as a string if that fails)' },
-  'settings.valuePlaceholder': { zh: '60000 或 false', en: '60000 or false' },
-  'settings.saveImmediate': { zh: '保存（立即生效）', en: 'Save (takes effect immediately)' },
-  'settings.commonSettingsBefore': { zh: '常用：', en: 'Common: ' },
-  'settings.commonSettingsBetween': { zh: '（最小 10000）、', en: ' (minimum 10000), ' },
-  'settings.commonSettingsAfter': { zh: '关闭上报。', en: 'turns reporting off.' },
 
-  'settings.pluginsHeading': { zh: '插件清单', en: 'Plugins' },
-  'settings.noPlugins': { zh: '没有加载任何插件。', en: 'No plugins loaded.' },
-  'settings.colPlugin': { zh: '插件', en: 'Plugin' },
-  'settings.colCapability': { zh: '能力', en: 'Capability' },
-  'settings.colStatus': { zh: '状态', en: 'Status' },
-  'settings.colSecretKeys': { zh: '密钥', en: 'Secret keys' },
-  'settings.loadFailed': { zh: '加载失败', en: 'Load failed' },
-  'settings.enabled': { zh: '已启用', en: 'Enabled' },
-  'settings.disabled': { zh: '已停用', en: 'Disabled' },
-  'settings.disable': { zh: '停用', en: 'Disable' },
-  'settings.enable': { zh: '启用', en: 'Enable' },
 
-  'settings.publicCatalog': { zh: '公共 SKILL 目录', en: 'Public skill catalog' },
-  'settings.catalogUnavailable': {
-    zh: '远端不可用，目录暂时看不到。',
-    en: 'Remote unavailable, the catalog is not visible right now.',
-  },
-  'settings.downloadToLocal': { zh: '下载到本机', en: 'Download to this machine' },
+  /** 模版还没从服务端读回来时，提交按钮为什么点不动。 */
+  'settings.kitNotLoaded': { zh: '模版还没读回来，稍等一下', en: 'The template has not loaded yet — one moment' },
 
   'settings.syncHeading': { zh: '同步状态', en: 'Sync status' },
   'settings.syncReported': { zh: '已上报 {count}', en: 'Reported {count}' },
@@ -170,7 +147,15 @@ export const settingsText = {
    *    改写）：那句话对读界面的人是"一个我该去哪儿改的东西"，而不是一个键名。
    *    键名仍然看得见——「我的设定」那一段列着它，那里才是改它的地方。
    */
-  'settings.reportingBefore2': { zh: '上报可以在上面的「我的设定」里关掉', en: 'Reporting can be turned off under “My settings” above' },
+  // ⚠️ 2026-10：远端设置那一节（「我的设定」）已从界面上撤掉，所以这句话不能再指向它。
+  //    上报开关本身仍然存在（远端的 `reportingEnabled`），只是改为**走接口**：
+  //    界面上没有入口了 —— 与其指一个不存在的地方，不如直说怎么关。
+  'settings.reportingBefore2': {
+    // ⚠️ 不许用反引号/星号这类 markdown 记号：界面上是**纯文本**渲染，记号会原样显示
+    //    （`i18n.test.ts` 有一条守卫拦这两种记号）。这里原来带了反引号，已被它拦下。
+    zh: '关掉上报：给远端写一条设定 reportingEnabled: false（接口 PUT /api/settings，界面上暂无入口）',
+    en: 'To turn reporting off: write reportingEnabled: false to the remote settings (API PUT /api/settings; no UI entry for now)',
+  },
   'settings.reportingAfter2': {
     zh: '；关掉之后本机功能完整可用。远端不可达时记录会',
     en: '; with it off, everything local still works. When the remote is unreachable, records are ',
@@ -181,14 +166,6 @@ export const settingsText = {
   // ── 命令式文案：toast / 就地状态（事件回调里用 `tx`）──
   'settings.registeredAndSignedIn': { zh: '已注册并登录', en: 'Registered and signed in' },
   'settings.signedIn': { zh: '已登录', en: 'Signed in' },
-  'settings.downloadingSkill': { zh: '正在下载 {slug}…', en: 'Downloading {slug}…' },
-  'settings.notInCatalog': { zh: '目录里没有 {slug}', en: 'No {slug} in the catalog' },
-  'settings.installedSkill': { zh: '已安装 {slug}', en: 'Installed {slug}' },
-  'settings.skippedReasons': { zh: '；跳过：{reasons}', en: '; skipped: {reasons}' },
-  'settings.notInstalled': { zh: '未安装：{reasons}', en: 'Not installed: {reasons}' },
-  'settings.unknownReason': { zh: '未知原因', en: 'unknown reason' },
-  'settings.installFailed': { zh: '安装失败：{error}', en: 'Install failed: {error}' },
-  'settings.settingSaved': { zh: '设定已保存，立即生效', en: 'Setting saved and in effect immediately' },
 
   // ── 通知抽屉（`InboxDrawer.svelte`）──
   'inbox.title': { zh: '通知', en: 'Inbox' },

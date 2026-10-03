@@ -16,7 +16,7 @@ import { EpochMs, Issue, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
  * ══════════════════════════════════════════════════════════════════
  *
  * `POST /api/skills/install` 由 **daemon 自己去读**本地路径或 GitHub 链接
- * （见 apps/daemon/src/skill-source.ts）。原因有两条，都不是"图省事"：
+ * （见 packages/skill-source/src/skill-source.ts）。原因有两条，都不是"图省事"：
  *
  *   1. **本地目录路径只有 daemon 读得到。** 使用者在自己机器上开发技能，
  *      要装的就是 `/Users/me/dev/my-skill` 这种路径——页面读不了磁盘；

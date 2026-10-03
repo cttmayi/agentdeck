@@ -169,6 +169,30 @@ function isActiveRun(run: Run): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(run.status)
 }
 
+/**
+ * 这条 run 是否属于某条 issue（顺着 subject 链往上找，最多 3 层）。
+ *
+ * 判据与 server 侧 `runBelongsToIssue` 同一条：执行 run 的 subject 是 issue，
+ * 审核 run 的 subject 是它审的那条执行 run（`subject.type === 'run'`）。
+ * 深度上限 3 与那边一致——超过仍找不到 issue 的链视为"不属于"。
+ *
+ * 在文件适配器里 `runLog` 是同一个 workspace 的 JsonlLog（内存索引，同步读）。
+ */
+function runBelongsToIssueInLog(
+  runLog: JsonlLog<Run & { id: string }>,
+  run: Run,
+  issueId: IssueId,
+): boolean {
+  let cursor: Run | null = run
+  for (let depth = 0; depth < 3 && cursor; depth++) {
+    const subject: Run['subject'] = cursor.subject
+    if (subject.type === 'issue') return subject.id === issueId
+    if (subject.type !== 'run') return false
+    cursor = runLog.get(subject.id as RunId) ?? null
+  }
+  return false
+}
+
 /** 单个 workspace 的数据。 */
 class WorkspaceStore {
   readonly #root: string
@@ -273,6 +297,24 @@ class WorkspaceStore {
       this.#messages.set(key, log)
     }
     return log
+  }
+
+  /**
+   * 关掉某个 run 的消息流句柄并从缓存里摘掉（deleteRun 用：删文件前必须关句柄，
+   * 否则在部分平台上删不掉，且缓存里会留一个指向已删文件的句柄）。
+   * 没开过 ⇒ no-op。
+   */
+  async closeMessageLog(runId: RunId): Promise<void> {
+    const key = runId as string
+    const log = this.#messages.get(key)
+    if (!log) return
+    await log.close()
+    this.#messages.delete(key)
+  }
+
+  /** 消息流文件在磁盘上的路径（仅 deleteRun 删除文件时用）。 */
+  messageLogPathOf(runId: RunId): string {
+    return messageLogPath(join(this.#root, 'runs'), runId)
   }
 
   // ── Report 去重 ──
@@ -676,6 +718,108 @@ export class FileStore implements Store {
           if (t.conversationId === id) await ws.chatTurn().del(t.id)
         }
         await ws.conversation().del(id)
+      })
+      return true
+    }
+    return false
+  }
+
+  /**
+   * 删掉一条 run 连同它派生的一切。连带范围与理由见端口文档
+   * （`Store.deleteRun`）——这里只补一条文件存储特有的：
+   * `runs/<runId>/messages.jsonl` 要先关掉缓存里的句柄再删文件。
+   */
+  async deleteRun(id: RunId): Promise<boolean> {
+    for (const ws of this.#stores.values()) {
+      const run = ws.run().get(id)
+      if (!run) continue
+      await ws.mutex.run(() => this.#deleteRunUnlocked(ws, id))
+      return true
+    }
+    return false
+  }
+
+  /**
+   * deleteRun 的**无锁**实现：调用方必须已持有 `ws.mutex`。
+   *
+   * 单独拆出来而不是让 `deleteIssue` 直接调 `deleteRun`：`Mutex` 是 promise
+   * 队列（**不可重入**），外层锁里再调 `deleteRun`（它自己又拿同一把锁）会让
+   * 内层永远排在"外层完成"之后——死锁。同一 workspace 内的所有删除操作
+   * 都必须在**同一把锁**里串行完成。
+   */
+  async #deleteRunUnlocked(ws: WorkspaceStore, id: RunId): Promise<void> {
+    // ① 引用这条 run 的对话轮次：那一轮的内容就是 run 的 messages，run 没了
+    //    轮次只剩半句话。删掉后重算受影响对话的 `turnCount`（冗余字段，删轮
+    //    次后必须同步，否则列表上的轮数就是假的）。
+    const affected = new Set<ConversationId>()
+    for (const t of ws.chatTurn().all()) {
+      if (t.runId === id) {
+        affected.add(t.conversationId)
+        await ws.chatTurn().del(t.id)
+      }
+    }
+    for (const convId of affected) {
+      const conv = ws.conversation().get(convId)
+      if (!conv) continue
+      const count = ws
+        .chatTurn()
+        .all()
+        .filter((t) => t.conversationId === convId).length
+      await ws.conversation().patch(convId, { turnCount: count, updatedAt: Date.now() })
+    }
+    // ② verdict 与由它触发的 action（action 挂在 verdict 上，先删 action 再删
+    //    verdict——顺序反过来会留下一批指向不存在判决的动作记录）。
+    for (const v of ws.verdict().all()) {
+      if (v.runId !== id) continue
+      for (const a of ws.action().all()) {
+        if (a.verdictId === v.id) await ws.action().del(a.id)
+      }
+      await ws.verdict().del(v.id)
+    }
+    // ③ artifacts（这条 run 的产物清单）
+    for (const a of ws.artifact().all()) {
+      if (a.runId === id) await ws.artifact().del(a.id)
+    }
+    // ④ 消息流文件：先关掉缓存的句柄再删（开着的文件在部分平台上删不掉；
+    //    即便当前平台没这个问题，留着缓存里一个指向已删文件的句柄
+    //    也会在下次 close 时踩到 ENOENT）。
+    await ws.closeMessageLog(id)
+    await removeQuietly(ws.messageLogPathOf(id))
+    // ⑤ run 记录本体
+    await ws.run().del(id)
+  }
+
+  /**
+   * 删掉一条任务（issue）连同挂它名下的一切。连带范围见端口文档
+   * （`Store.deleteIssue`）。该 issue 上的每条 run 走 `#deleteRunUnlocked`
+   * （同一把 `ws.mutex` 里，不能调公共 `deleteRun`——那个会再拿锁，死锁）。
+   *
+   * "属于这条 issue"的判据与 server 侧 `runBelongsToIssue` 同一条：顺着
+   * subject 链往上找（执行 run 的 subject 是 issue；审核 run 的 subject 是
+   * 它审的那条执行 run），最多 3 层——不满足就把审核 run 漏下，删了任务
+   * 留下一堆指向已删 run 的孤儿审核记录。
+   */
+  async deleteIssue(id: IssueId): Promise<boolean> {
+    for (const ws of this.#stores.values()) {
+      const issue = ws.issue().get(id)
+      if (!issue) continue
+      await ws.mutex.run(async () => {
+        // ★ 先**收集**再删：判定"属于这条 issue"要靠 subject 链（审核 run 的
+        //   subject 指向执行 run），若边删边判，执行 run 先消失会让后面审核 run
+        //   的链断掉、被当成"不属于"而漏删。
+        const toDelete = ws
+          .run()
+          .all()
+          .filter((r) => runBelongsToIssueInLog(ws.run(), r, id))
+        for (const r of toDelete) {
+          await this.#deleteRunUnlocked(ws, r.id)
+        }
+        // ② 评论
+        for (const c of ws.comment().all()) {
+          if (c.issueId === id) await ws.comment().del(c.id)
+        }
+        // ③ issue 本体
+        await ws.issue().del(id)
       })
       return true
     }

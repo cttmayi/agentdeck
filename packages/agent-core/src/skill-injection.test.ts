@@ -23,6 +23,7 @@ import {
   SkillCollisionError,
   listManagedSkills,
   syncInjectedSkills,
+  extractSkillMeta,
 } from './skill-injection.ts'
 
 function frontmatterOf(content: string): Record<string, unknown> {
@@ -53,6 +54,27 @@ describe('frontmatter 拆分', () => {
   test('BOM 被剥离', () => {
     const r = splitFrontmatter('\ufeff---\nname: a\n---\nb')
     assert.equal(r.frontmatter, 'name: a')
+  })
+})
+
+describe('extractSkillMeta（只读元数据）', () => {
+  test('★ 取出作者写的 name 与 description（不改写、不注入）', () => {
+    const r = extractSkillMeta('---\nname: 艺术算法\ndescription: 生成算法艺术图\n---\n正文')
+    assert.deepEqual(r, { name: '艺术算法', description: '生成算法艺术图' })
+  })
+  test('只有 description 时只给 description', () => {
+    assert.deepEqual(extractSkillMeta('---\ndescription: 只看文档\n---\n正文'), {
+      description: '只看文档',
+    })
+  })
+  test('没有 frontmatter ⇒ 空对象（作者没写不是异常）', () => {
+    assert.deepEqual(extractSkillMeta('# 标题\n\n正文'), {})
+  })
+  test('YAML 损坏 ⇒ 空对象，不抛', () => {
+    assert.deepEqual(extractSkillMeta('---\nname: [未闭合\ndescription: : :\n---\n正文'), {})
+  })
+  test('description 为空白 ⇒ null（当作没写）', () => {
+    assert.deepEqual(extractSkillMeta('---\ndescription: "  "\n---\n正文'), {})
   })
 })
 

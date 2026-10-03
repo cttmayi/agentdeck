@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    /**
+     * 与 `apps/web` 同一套：DOM lib + bundler 解析 + 不做"可擦除语法"限制
+     * （这里的东西全部经过 Vite 编译）。
+     */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+    "erasableSyntaxOnly": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

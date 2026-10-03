@@ -498,7 +498,7 @@
             <span class="badge {isReviewer ? 'in_review' : 'in_progress'}">
               {isReviewer ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
             </span>
-            <span class="faint small">
+            <span class="faint">
               {isReviewer ? $t('agents.roleReviewerHint') : $t('agents.roleExecutorHint')}
             </span>
           </p>
@@ -510,7 +510,14 @@
       {#if !editing}
         <button type="button" onclick={startEdit}>{$t('common.edit')}</button>
       {:else}
-        <button type="button" class="secondary" onclick={cancelEdit} disabled={busy}>{$t('common.cancel')}</button>
+        <button
+          type="button"
+          class="secondary"
+          onclick={cancelEdit}
+          disabled={busy}
+          title={busy ? $t('common.busyHint') : undefined}
+          >{$t('common.cancel')}</button
+        >
         <button type="button" onclick={save} disabled={busy}>
           {busy
             ? $t('common.saving')
@@ -627,29 +634,36 @@
                   状态——而"没依据"意味着平台不再把产出交给它审。
                   解析在服务端做（同一个 `resolveReviewStandard`），前端不重算。
               -->
-              <button
-                type="button"
-                class="secondary small"
-                disabled={adopting}
-                onclick={async () => {
-                  adopting = true
-                  error = ''
-                  try {
-                    await adoptReviewStandard(agent.id)
-                    showToast(tx('agents.standardAdopted'))
-                    onchanged()
-                  } catch (err) {
-                    error = err instanceof Error ? err.message : String(err)
-                  } finally {
-                    adopting = false
-                  }
-                }}
-              >
-                {adopting ? $t('agents.adopting') : $t('agents.adoptStandard')}
-              </button>
-              <p class="row-hint">
-                {$t('agents.adoptHintBefore')}<strong>{$t('agents.adoptHintStrong')}</strong>{$t('agents.adoptHintAfter')}
-              </p>
+              <!--
+                ★ 2026-10（紧凑性）：按钮不再独占一整行——与下面那句提示
+                  并排（flex-wrap 兜底：提示太长时自然换行，按钮留在行首）。
+              -->
+              <div style="display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap">
+                <button
+                  type="button"
+                  class="secondary small"
+                  disabled={adopting}
+                  title={adopting ? $t('common.busyHint') : undefined}
+                  onclick={async () => {
+                    adopting = true
+                    error = ''
+                    try {
+                      await adoptReviewStandard(agent.id)
+                      showToast(tx('agents.standardAdopted'))
+                      onchanged()
+                    } catch (err) {
+                      error = err instanceof Error ? err.message : String(err)
+                    } finally {
+                      adopting = false
+                    }
+                  }}
+                >
+                  {adopting ? $t('agents.adopting') : $t('agents.adoptStandard')}
+                </button>
+                <p class="row-hint" style="margin:0">
+                  {$t('agents.adoptHintBefore')}<strong>{$t('agents.adoptHintStrong')}</strong>{$t('agents.adoptHintAfter')}
+                </p>
+              </div>
             {/if}
           </div>
         </div>
@@ -781,12 +795,21 @@
                       而现在是"整个平台此刻没有可授权的动作"——两件事的下一步不一样
                       （一个去勾，一个去装包），所以必须分开说。
                   -->
+                  <!--
+                    ★ 2026-10（紧凑性）：原来「去『工具』页装一个」按钮独占一行
+                    ——并进空态文字做行内 CTA，省掉一整行。
+                  -->
                   <p class="empty-value">
                     <strong>{$t('agents.actionsNoToolsStrong')}</strong>{$t('agents.actionsNoToolsHint')}
+                    <button
+                      type="button"
+                      class="secondary small"
+                      style="margin-left:var(--sp-2)"
+                      onclick={() => go('tools')}
+                    >
+                      {$t('agents.actionsGoTools')}
+                    </button>
                   </p>
-                  <button type="button" class="secondary small" onclick={() => go('tools')}>
-                    {$t('agents.actionsGoTools')}
-                  </button>
                 {:else}
                   <!-- ⚠️ 老数据（动作来自挂载的 skill）时**不说**"只报告、不动作"：
                        那句话此刻是**假的**——列表空是因为白名单住在 skill 里。下面
@@ -1016,8 +1039,16 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--sp-4);
-    padding-bottom: var(--sp-4);
-    margin-bottom: var(--sp-4);
+    /* D69.15.2 与任务/聊天栏头同款通栏：hero 在 pane-body 里，用负边距抵消
+       pane-body 的留白（与裁决条 `.decide-bar` 同一模式）——头与栏顶对齐、
+       分隔线横贯整栏（否则缩在 24px 留白里，比任务/聊天栏头窄 48px）。
+       padding 补回内容留白（顶/左右），位置与任务/聊天标题一致（y=68, x=681）。 */
+    /* D69.15.2 与任务/聊天栏头同款通栏：hero 在 pane-body 里，用负边距抵消
+       pane-body 的留白（与裁决条 `.decide-bar` 同一模式）——头与栏顶对齐、
+       分隔线横贯整栏（否则缩在 24px 留白里，比任务/聊天栏头窄 48px）。
+       padding 补回内容留白（顶/左右），位置与任务/聊天标题一致（y=68, x=681）。 */
+    margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-5)) 0;
+    padding: var(--sp-4) var(--sp-5) var(--sp-4);
     border-bottom: 1px solid var(--line);
   }
 
@@ -1052,7 +1083,10 @@
   }
 
   .hero-title h2 {
+    /* D69.15：栏头标题统一 fs-lg——全局 h2 是 fs-xl（22px），聊天/列表栏头
+       都是 fs-lg（17px），这里不钉字号标题就比别的栏头大一圈 */
     margin: 0 0 2px;
+    font-size: var(--fs-lg);
   }
 
   .role-line {
@@ -1069,7 +1103,7 @@
   }
 
   .headline {
-    margin-bottom: var(--sp-4);
+    margin-bottom: var(--sp-3);
   }
 
   /* ── 分组 ── */

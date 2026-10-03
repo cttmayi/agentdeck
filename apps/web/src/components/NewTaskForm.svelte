@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy } from 'svelte'
   import { api, newRunId, type Issue } from '../lib/api.ts'
   import {
     agents,
@@ -13,7 +13,6 @@
     tools,
   } from '../lib/stores.ts'
   import { describeActionPicks } from '../lib/agent-actions.ts'
-  import { newTaskDraft } from '../lib/view.ts'
   import { splitRequest } from '../lib/request-text.ts'
   import { installedActionCount } from '../lib/tool-view.ts'
   import {
@@ -29,13 +28,21 @@
     reviewerRunField,
     toReviewerPick,
   } from '../lib/newtask-chain.ts'
-  import ActionPicker from '../components/ActionPicker.svelte'
-  import Modal from '../components/Modal.svelte'
+  import ActionPicker from './ActionPicker.svelte'
+  import { Modal } from '@agentdeck/ui/components'
+  import { createDirty } from '../lib/create-draft.ts'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
   import { t, tx } from '../lib/i18n.ts'
 
   /**
-   * 新建任务。
+   * 新建任务的那张表单。
+   *
+   * ⚠️ 2026-10（D58 第二步）：它是**「任务」页右栏里的一个状态**，不再是独立一页。
+   *    容器（右栏、可滚区、窄屏下"占满一栏 + 返回"）由 `views/Tasks.svelte` 提供；
+   *    这一份只管表单本身。两条随之而来的规矩写在下面两处：
+   *      · `.form-frame` 里那句 `container-type`——一列还是两列按**这一栏实际多宽**
+   *        决定（不是按窗口）；
+   *      · `createDirty`——填过东西之后要换页时，由外面先问一句。
    *
    * ══════════════════════════════════════════════════════════════════
    * 工作目录默认**不需要填**（D27）
@@ -70,23 +77,7 @@
   let title = ''
   let workDir = ''
 
-  /**
-   * 聊天页那条桥：把聊出来的内容预填进来。
-   *
-   * ⚠️ 取走之后**必须清空**（`newTaskDraft.set(null)`）：留着的话，下次从侧边栏
-   *    点「新建任务」，上次那段文字会莫名其妙又出现在框里——而那一刻使用者
-   *    心里想的是"新建一个空白任务"。
-   *
-   * ⚠️ 也**不**顺手替他选执行者/审核者/动作：那三样正是"派活"这件事本身。
-   *    这里只填内容，判断留给使用者在这一页做。
-   */
-  onMount(() => {
-    const draft = $newTaskDraft
-    if (draft !== null && draft.trim() !== '') {
-      title = draft
-      newTaskDraft.set(null)
-    }
-  })
+
   let agentId = ''
   let busy = false
   let error = ''
@@ -100,6 +91,15 @@
    *   不能替他决定"多试几轮"。
    */
   let reworkCount = 0
+
+  /**
+   * 「跟随」那一档的编码值。
+   *
+   * ⚠️ 提到一个名字上，是因为它现在有**两个**用处：下拉的初值，以及"表单脏了没有"
+   *    的判据（见 `createDirty`）。两处各写一遍 `toReviewerPick({ mode: 'follow' })`
+   *    的话，改了编码方式就会有一处漏掉——而漏掉的表现是"一进页面就提示未保存"。
+   */
+  const FOLLOW_PICK = toReviewerPick({ mode: 'follow' })
 
   /**
    * 可选的返工次数。**0–5**，上限与 `SubmitRunRequest.maxReworks` 的 schema
@@ -118,7 +118,7 @@
    *   那条注释说的是同一件事）。**默认不替使用者做决定**——"这一次不审"必须是他
    *   点出来的，因为那会改变这条产出会不会被审。
    */
-  let reviewerPick = toReviewerPick({ mode: 'follow' })
+  let reviewerPick = FOLLOW_PICK
 
   /**
    * 能接任务的智能体：**只有执行者**。
@@ -495,6 +495,27 @@
     ;(event.currentTarget as HTMLTextAreaElement).closest('form')?.requestSubmit()
   }
 
+  /**
+   * ★ 填过没有 —— 上报给外面（见 `lib/create-draft.ts` 里那段"为什么是 store"）。
+   *
+   * 判据是"手上有过东西"，不是"和默认值不一样"：默认值本身会变（`$tools` 晚到、
+   * 智能体列表轮询刷新、审核者的行动权限在别处被改），拿它们做基准的话，
+   * 使用者**什么都没做**也会被判成"脏"，于是每次切页都白问一句。
+   */
+  $: createDirty.set(
+    title.trim() !== '' ||
+      workDir.trim() !== '' ||
+      reworkCount !== 0 ||
+      reviewerPick !== FOLLOW_PICK ||
+      actionPicks !== null ||
+      actionParamsDraft !== null ||
+      agentId !== ($effectiveDefaultAgentId ?? executorAgents[0]?.id ?? ''),
+  )
+
+  // 离开这一栏（提交成功、或者被切走）时把标记放掉：它是**这一张表单**的状态，
+  // 表单没了它还留着的话，下一次进来会一开始就"脏"。
+  onDestroy(() => createDirty.set(false))
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault()
     error = ''
@@ -601,6 +622,25 @@
      正好给下面那三个问题（这块以前就为了首屏被砍短过一次）。
 -->
 
+<!--
+  ══════════════════════════════════════════════════════════════════
+  `.form-frame`：一列还是两列，按**这一栏实际有多宽**决定
+  ══════════════════════════════════════════════════════════════════
+
+  D58 之前这一页独占主区（1400px 的窗口里主区 1160px），"两列"几乎永远成立，
+  所以那条断点写成 `@media (max-width: 72rem)`——**按窗口**判。
+
+  搬进「任务」页右栏之后，那个判据就错了：同样一个 1280px 的窗口，右栏只有
+  624px（左栏的清单占掉 416px），而 `@media` 看见的是 1280 ⇒ 表单照样按两列排，
+  每列只剩 ~265px。**窗口宽，不等于这一栏宽**——所以要按容器判（`@container`）。
+
+  ⚠️ 容器必须包住表单、但**不能包住下面那个对话框**：`container-type` 会带来
+     `contain: layout`，而那让容器成为 `position: fixed` 后代的包含块——对话框
+     （`Modal.svelte`）是 `position: fixed` 的，被包进去之后它就不再相对**视口**
+     居中了，而是相对这一栏居中（探针里那条"确认框在中间"抓的正是这件事）。
+     所以容器是这一层 wrapper，而 `<Modal>` 是它的**兄弟**。
+-->
+<div class="form-frame">
 <form onsubmit={submit} class="newtask-form">
   <!--
     ══════════════════════════════════════════════════════════════════
@@ -1006,7 +1046,11 @@
       <div class="notice bad">{error}</div>
     {/if}
     <div class="foot-row">
-      <button type="submit" disabled={busy || !title.trim() || !chosen}>
+      <button
+      type="submit"
+      disabled={busy || !title.trim() || !chosen}
+      title={busy || !title.trim() || !chosen ? $t('newtask.submitNotReady') : undefined}
+    >
         {busy ? $t('newtask.creating') : $t('newtask.createAndDispatch')}
       </button>
       {#if chosen}
@@ -1025,6 +1069,7 @@
     </div>
   </div>
 </form>
+</div>
 
 <!--
   ══════════════════ ③ 的挑选对话框 ══════════════════
@@ -1041,6 +1086,7 @@
     title={$t('newtask.actionsLabel')}
     subtitle={$t('newtask.actionsDialogSubtitle', { name: chain.reviewer.name })}
     onclose={() => (actionsOpen = false)}
+    closeLabel={$t('common.close')}
   >
     <ActionPicker
       variant="task"
@@ -1296,8 +1342,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-    margin: var(--sp-3) calc(var(--sp-6) * -1) calc(var(--sp-5) * -1);
-    padding: var(--sp-3) var(--sp-6);
+    /* ⚠️ 左右那两个负值必须与 `.form-frame` 的留白是**同一个出处**（见那边） */
+    margin: var(--sp-3) calc(var(--create-pad-x, var(--sp-6)) * -1) calc(var(--sp-5) * -1);
+    padding: var(--sp-3) var(--create-pad-x, var(--sp-6));
     background: var(--bg);
     border-top: 1px solid var(--line);
   }
@@ -1331,7 +1378,45 @@
     max-width: 30rem;
   }
 
-  @media (max-width: 72rem) {
+  /**
+   * ★★ 容器：**一列还是两列，按这一栏实际有多宽判**（不是按窗口）。
+   *
+   * ⚠️ 阈值 **36rem（576px）**：它下面是"两列各自只剩 260px 上下"，① 里的下拉、
+   *    ② 里那句说明就折得看不出形状了。而 36rem 以上两列的意义是**三个问题一眼
+   *    看全**（单列时 ③ 会被推到第二屏，那条不变量有探针钉着）。
+   *
+   *   实测（1280 的窗口）：「任务」页右栏的内容宽只有 **549px**（左栏的清单占掉
+   *   416px、窗口再减去侧栏）⇒ 单列。同一份代码在 1440 的窗口下右栏是 710px ⇒
+   *   两列。**同一个窗口宽度说不出这件事**，这正是要按容器判的原因。
+   *
+   * ⚠️ `container-type` 在这里、`<Modal>` 在外面——理由见模板顶部那段说明
+   *   （它会成为 `position: fixed` 的包含块，对话框就不再相对视口居中了）。
+   */
+  .form-frame {
+    container-type: inline-size;
+    container-name: newtask;
+    width: 100%;
+    min-width: 0;
+    /**
+     * ★ 这一栏的左右留白由**表单自己**带（容器 `.create-body` 的 `padding: 0`），
+     *   而且只有一个出处：`--create-pad-x`（由 `Tasks.svelte` 定义在 `.create-body`
+     *   上，自定义属性会继承过来）。
+     *
+     * ⚠️⚠️ 为什么必须共用：提交栏 `.form-foot` 是 `position: sticky` + **负外边距**
+     *   去抵消这层内边距的。两边各写一份（`padding: var(--sp-6)` 对
+     *   `margin: calc(var(--sp-6) * -1)`）看着对称，**实际会漂移**——我在窄屏那条
+     *   断点里就漂了一次：那里把留白收成 `sp-4`，而提交栏仍按 `sp-6` 往外顶，
+     *   于是它比容器宽 32px、整张表单横向溢出（探针那条 `scrollWidth ≤ clientWidth`
+     *   当场抓住）。
+     *
+     * ⚠️ 容器查询量的是**内容盒**（`container-type: inline-size` 建立的是内容盒
+     *   尺寸的查询容器），所以这层内边距不算进"这一栏有多宽"——正是表单真正能用
+     *   的那个宽度，两列/单列的判据因此也在这一层上。
+     */
+    padding: var(--sp-5) var(--create-pad-x, var(--sp-6));
+  }
+
+  @container newtask (max-width: 36rem) {
     .newtask-form,
     .form-lead {
       grid-template-columns: minmax(0, 1fr);

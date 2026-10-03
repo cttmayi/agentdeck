@@ -117,7 +117,7 @@ const CHECKS = [
   {
     view: '智能体',
     key: 'agents.everyCardWellFormed',
-    label: '每张卡片都有名字、角色徽章、两行说明',
+    label: '每张卡片都有名字、角色徽章、一行说明（摘要 + 元信息，2026-10 由两行合并）',
     ok: (v) => v === true,
   },
   {
@@ -173,10 +173,10 @@ const CHECKS = [
   },
   {
     view: '智能体',
-    key: 'agents.provisionalWarningInEdit',
-    label: '★ 编辑态里选到**未验证**的 runtime 会给提示（以前编辑态没有任何提示）',
-    ok: (v) => typeof v === 'string' && v.length > 10,
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 22)}…"`),
+    key: 'agents.noProvisionalRuntime',
+    label: '★ 未接真实 CLI 的 runtime（evidence 非 verified）不进身份接口的 runtimes 数组（UI 全从它来，2026-10 起不显示未验证 runtime）',
+    ok: (v) => v === true,
+    show: (v) => (v === null ? 'null' : String(v)),
   },
   {
     view: '智能体',
@@ -188,7 +188,37 @@ const CHECKS = [
   {
     view: '智能体',
     key: 'agents.runtimeCardsWellFormed',
-    label: '每张 runtime 卡都有多行字段（版本/证据/判定没丢）',
+    label: '每张 runtime 卡都至少有一行（名字+版本还在）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.noPageIntro',
+    label: '★ 智能体页**没有**页头导语（D63 按要求去掉："这里配置每个智能体…"——那句在复述卡片已经在说的话）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'common.disabledButtonsExplained',
+    label: '★ 置灰的按钮都写了「为什么不能点」（项目纪律）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'common.drawerHeadsStandard',
+    label: '★ 抽屉头部只有一种写法（`.drawer-head`；技能页目录抽屉原来是裸 `<header>`，样式全丢）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'common.noHintStacking',
+    label: '提示文字不叠加两档字号（`hint faint small` 那种写法已清掉）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.runtimeCardMinimal',
+    label: 'CLI 卡极简：只剩「claude + 版本」，核对/会话/版本支持那些行全没了',
     ok: (v) => v === true,
   },
   {
@@ -199,36 +229,36 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
-  // ── 任务清单：同一套主从 + 去重字样 ──
-  { view: '任务清单', key: 'tasks.gotRows', label: '夹具任务渲染成了表格行（否则下面那条会空过）', ok: (v) => v === true },
+  // ── 任务：同一套主从 + 去重字样 ──
+  { view: '任务', key: 'tasks.gotRows', label: '夹具任务渲染成了表格行（否则下面那条会空过）', ok: (v) => v === true },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.firstRowStageCell',
     label: '从没跑过的那行：标签「执行中」+ 额外信息「还没开始执行」',
     ok: (v) => /^执行中\s+还没开始执行/.test(String(v)),
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.heightSpread',
     label: '★ 行高与标题长度**无关**：长标题与短标题的行一样高（差 ≤ 2px）',
     ok: (v) => typeof v === 'number' && v <= 2,
     show: (v) => `差 ${v}px`,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.maxRowHeight',
     label: '行高还有个上限（两条都是矮的，也别是"两个都很高"）',
     ok: (v) => typeof v === 'number' && v <= 120,
     show: (v) => `${v}px`,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.titleClipped',
     label: '长标题确实被截断了（否则"行高无关"是空过的）',
     ok: (v) => v === true,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.detailTitleAfterClick',
     label: '点一行会打开它的详情，且标题是**完整**的（列表里那份是截断的）',
     ok: (v, facts) =>
@@ -236,26 +266,122 @@ const CHECKS = [
     show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 18)}…"`),
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.detailHasTimestamp',
     label: '列表只留了日期，完整时间戳（含时分）在详情里还看得见',
     ok: (v) => v === true,
   },
   {
-    view: '任务清单',
+    view: '任务',
+    key: 'tasks.foldHeadsAreButtons',
+    label: '★ 折叠区块头部是真按钮 + aria-expanded（D69.9 详情重排）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.neverRunDescOpen',
+    label: '★ 从没跑过的任务：描述默认展开（D69.9 状态驱动：未跑时描述是唯一正文）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.foldToggles',
+    label: '★ 点折叠头真的能收起 / 再展开（D69.9 折叠不是摆设）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.decideBarSticky',
+    label: '★ 裁决条 sticky 钉在详情栏底部（D69.10：超一屏也永远够得着通过/反馈/放弃；D69.14 起标题「这条任务怎么办」已删）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.noDecideHeading',
+    label: '★ 词条：裁决区不再有「这条任务怎么办」标题（D69.14 使用者要求去掉字样）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'heads.tasksEmptyNoHead',
+    label: '★ 任务空态没有栏头（D69.15.2：空态=纯提示，不再挂返回按钮/空标题/边框线）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'heads.chatTitleRowTop',
+    label: '★ 聊天标题顶在栏头行首（D69.15.2：改名按钮不再把标题顶低 7px）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'heads.agentsHeroFullBleed',
+    label: '★ 智能体 hero 通栏（D69.15.2：分隔线横贯整栏、与任务/聊天同位置）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'heads.agentsRoleHintFs',
+    label: '★ 智能体角色提示小字 14px（D69.15.2：与任务/聊天副题同号）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'heads.tasksHeadMetrics',
+    label: '★ 任务详情栏头标题统一指标（D69.15：字号 fs-lg 17px、留白 16/12、下边框 1px——使用者抓的 Title 高度不一致）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'heads.agentsHeadTitleFs',
+    label: '★ 智能体栏头标题字号 fs-lg 17px（D69.15 标题统一）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'heads.chatHeadTitleFs',
+    label: '★ 聊天栏头标题字号 fs-lg 17px（D69.15 标题统一）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.deleteButtonPerRow',
+    label: '每项右侧有独立的删除按钮（主按钮之外、不是按钮套按钮）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.runStatusLocalized',
+    label: '★ 执行记录的状态是中文（不再把协议英文值 completed/running/… 摊在徽标上）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.rowsNotIndented',
+    label: '★ 任务行没有 `<ul>` 默认的左缩进（行与标题都从左边起，不是"内容靠右"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.noListMarker',
+    label: '行首没有列表圆点（`list-style: none`）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
     key: 'tasks.titleWidth',
     label: '标题独占一行：宽度接近整个列表栏（≥ 240px）',
     ok: (v) => typeof v === 'number' && v >= 240,
     show: (v) => `${v}px`,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.boardButtonFound',
     label: '看板/列表可以切换（下面两条要在看板里量）',
     ok: (v) => v === true,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.boardColumnCount',
     label:
       '★ 看板是**六档**状态（执行中 / 待审查 / 行动中 / 等待人处理 / 已完成审查 / 已放弃，D47）',
@@ -263,13 +389,13 @@ const CHECKS = [
     show: (v) => `${v} 列`,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.boardHasActingColumn',
     label: '★ 「行动中」有自己的一列（判决要求做的动作还没做完时不再显示成"已审查"）',
     ok: (v) => v === true,
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.boardColumns',
     label: '★ 「待人工」排在「已审查」之前——从左往右越来越接近结束',
     ok: (v) =>
@@ -279,15 +405,15 @@ const CHECKS = [
         v.findIndex((t) => t.includes('已完成审查')),
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
-  { view: '任务清单', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
+  { view: '任务', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.mainOverflowY',
     label: '任务页 `:has()` 同样生效',
     ok: (v) => v === 'hidden',
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.duplicateStageTextCount',
     label: '渲染结果里「等待审核」出现 0 次（使用者点名要去掉的重复字样）',
     ok: (v) => v === 0,
@@ -295,123 +421,172 @@ const CHECKS = [
   },
 
   // ── Skills：安装面板在抽屉里 ──
-  { view: 'Skills', key: 'skills.title', label: 'Skills 页渲染', ok: (v) => v === 'Skills' },
-  { view: 'Skills', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板', ok: (v) => v === false },
-  { view: 'Skills', key: 'skills.tableRows', label: 'skill 列表有内容', ok: (v) => v >= 1, show: (v) => `${v} 行` },
-  { view: 'Skills', key: 'skills.openButtonFound', label: '找得到「安装 skill」按钮', ok: (v) => v === true },
+  { view: '技能', key: 'skills.title', label: '技能页渲染（中文页名）', ok: (v) => v === '技能' },
+  { view: '技能', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板', ok: (v) => v === false },
+  { view: '技能', key: 'skills.tableRows', label: 'skill 列表有内容', ok: (v) => v >= 1, show: (v) => `${v} 行` },
   {
-    view: 'Skills',
+    view: '技能',
+    key: 'skills.descriptionShown',
+    label: '★ 名称列把 SKILL.md frontmatter 里的说明显示出来了（不是永远空的一格）',
+    ok: (v) => v === true,
+  },
+  { view: '技能', key: 'skills.openButtonFound', label: '找得到「安装技能」按钮', ok: (v) => v === true },
+  {
+    view: '技能',
     key: 'skills.uninstallButtonFound',
     label: '★ 每行有「卸载」（D38 补齐：原来"装了要删只有改库"）',
     ok: (v) => v === true,
   },
   {
-    view: 'Skills',
+    view: '技能',
+    key: 'skills.filesCellFormat',
+    label: '★ 文件列是 `SKILL.md`（夹具没带支持文件；不许显示成"0 个文件"，D69.5）',
+    ok: (v) => v === 'SKILL.md',
+  },
+  {
+    view: '技能',
+    key: 'skills.slugHeader',
+    label: '★ 首列叫「技能」（不是「标识」，D69.7）',
+    ok: (v) => v === '技能',
+  },
+  {
+    view: '技能',
+    key: 'skills.sourceBeforeVersion',
+    label: '★ 「来源」列在「版本」之前（D69.7 统一列序）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.slugCellFlexWrap',
+    label: '★ 首格 `▸ slug` 是 flex 且不折行（D69.8：列一窄就换行的问题的根治）',
+    ok: (v) => v === 'nowrap',
+  },
+  {
+    view: '技能',
     key: 'skills.drawerClass',
     label: '打开的是抽屉且用了宽版',
     ok: (v) => String(v).includes('drawer') && String(v).includes('wide'),
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.drawerWidth',
     label: '抽屉宽 46rem(736px)',
     ok: (v) => near(v, 736, 4),
     show: (v) => `${v}px`,
   },
-  { view: 'Skills', key: 'skills.backdropPresent', label: '有背景遮罩（点它可关）', ok: (v) => v === true },
-  { view: 'Skills', key: 'skills.footButtonText', label: '底部常驻的是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
-  { view: 'Skills', key: 'skills.footBottomDelta', label: '主操作贴住视口底部', ok: (v) => near(v, 0, 1), show: (v) => `差 ${v}px` },
-  { view: 'Skills', key: 'skills.tabCount', label: '两个来源页签都在', ok: (v) => v === 2, show: (v) => `${v} 个` },
-  { view: 'Skills', key: 'skills.duplicateCloseInTabs', label: '页签条里没有与抽屉头重复的「关闭」', ok: (v) => v === false },
+  { view: '技能', key: 'skills.backdropPresent', label: '有背景遮罩（点它可关）', ok: (v) => v === true },
+  { view: '技能', key: 'skills.footButtonText', label: '底部常驻的是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
+  { view: '技能', key: 'skills.footBottomDelta', label: '主操作贴住视口底部', ok: (v) => near(v, 0, 1), show: (v) => `差 ${v}px` },
+  { view: '技能', key: 'skills.tabCount', label: '两个来源页签都在', ok: (v) => v === 2, show: (v) => `${v} 个` },
+  { view: '技能', key: 'skills.duplicateCloseInTabs', label: '页签条里没有与抽屉头重复的「关闭」', ok: (v) => v === false },
   {
-    view: 'Skills',
+    view: '技能',
+    key: 'skills.remoteUnavailableLabel',
+    // ★ 2026-10 使用者报过："安装 skill 提示远端不可用，我明确已经启动 remote 了"。
+    //   根因是模板里裸用 store（`{#if remoteError}`，对象恒为真）⇒ 这条提示**无条件**
+    //   显示、冒号后面空着。判据刻意**与环境无关**：没出现也算通过（远端在跑、
+    //   目录拉到了就该没有它），出现了就必须带上真实错误文字。
+    label: '★「远端不可用」出现时必须带真实错误（冒号不许空着——2026-10 那个 bug）',
+    ok: (v) =>
+      typeof v === 'string' && (v === '(没有出现，正常)' || /：\s*\S/.test(v)),
+  },
+  {
+    view: '技能',
+    key: 'skills.remoteStates',
+    // ⚠️ 那条 bug 同时把"未登录"与"目录为空"两个状态压成了死代码，而界面上
+    //   看不出少了东西（"整页只有一句提示"也像正常）。所以这里钉"四种里至少有一种"。
+    label: '★ 远端目录页签的状态至少渲染出一种（不可用 / 未登录 / 空 / 表）',
+    ok: (v) => typeof v === 'string' && v !== '' && v !== '(空)',
+  },
+  {
+    view: '技能',
     key: 'skills.rowsBehindDrawer',
     label: '抽屉没把后面的 skill 列表吞掉（装完就能看见它）',
     ok: (v) => v >= 1,
     show: (v) => `${v} 行`,
   },
-  { view: 'Skills', key: 'skills.drawerGoneAfterEsc', label: 'Esc 能关掉抽屉', ok: (v) => v === true },
+  { view: '技能', key: 'skills.drawerGoneAfterEsc', label: 'Esc 能关掉抽屉', ok: (v) => v === true },
 
   // ── 本地技能目录（勾一个别的 AI 工具的目录 ⇒ 看见 ⇒ 能挂）──
-  { view: 'Skills', key: 'skills.settingsButtonFound', label: '★ 页头有「设置」入口', ok: (v) => v === true },
+  { view: '技能', key: 'skills.settingsButtonFound', label: '★ 页头有「设置」入口', ok: (v) => v === true },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsCandidateCount',
     label: '内置候选目录都列出来了（claude / codex / cursor / agents）',
     ok: (v) => v === 4,
     show: (v) => `${v} 个`,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsCandidateLabels',
     label: '候选用的是工具名（不是路径或 id）',
     ok: (v) => Array.isArray(v) && v.includes('Claude Code') && v.includes('Codex'),
     show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
   },
-  { view: 'Skills', key: 'skills.dirsAllHavePath', label: '每个候选都显示了完整路径（要能核对自己勾的是哪个）', ok: (v) => v === true },
-  { view: 'Skills', key: 'skills.dirsAllHaveCheckbox', label: '每个候选都有勾选框', ok: (v) => v === true },
+  { view: '技能', key: 'skills.dirsAllHavePath', label: '每个候选都显示了完整路径（要能核对自己勾的是哪个）', ok: (v) => v === true },
+  { view: '技能', key: 'skills.dirsAllHaveCheckbox', label: '每个候选都有勾选框', ok: (v) => v === true },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsCheckboxWidth',
     label: '★★ 勾选框是勾选框的大小（全局 `input { width: 100% }` 会把它撑成整行，实测 480px ⇒ 路径被挤成 0 宽）',
     ok: (v) => typeof v === 'number' && v > 8 && v <= 24,
     show: (v) => `${v}px`,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsPathWidth',
     label: '★ 路径占住了整行剩下的宽度（没被挤成 0）',
     ok: (v, all) => typeof v === 'number' && typeof all['skills.dirsRowWidth'] === 'number' && v > all['skills.dirsRowWidth'] * 0.6,
     show: (v) => `${v}px`,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsBodyOverflowX',
     label: '★ 抽屉内容不横向溢出',
     ok: (v) => v === 0,
     show: (v) => `溢出 ${v}px`,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsRowHeights',
     label: '★ 候选行没有被撑高（每行一两个文本行的高度）',
     ok: (v) => Array.isArray(v) && v.every((h) => h > 0 && h < 110),
     show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsUncheckNote',
     label: '★ 写清了"取消勾选不会删掉什么、正在用的不会抽走"',
     ok: (v) => typeof v === 'string' && v.includes('不会删掉') && v.includes('摘'),
   },
-  { view: 'Skills', key: 'skills.dirsAddInputFound', label: '能自己填一个路径（内置表之外也要能勾）', ok: (v) => v === true },
+  { view: '技能', key: 'skills.dirsAddInputFound', label: '能自己填一个路径（内置表之外也要能勾）', ok: (v) => v === true },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.localSkillCount',
     label: '★★ 勾上夹具目录之后，那两个 skill 真的出现在列表里',
     ok: (v) => v === 2,
     show: (v) => `${v}/2 个`,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.localBadgeHasPath',
     label: '★ 来源徽标写的是那个目录（不是笼统的「本机自建」）',
     ok: (v) => v === true,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.localUninstallDisabled',
     label: '★ 来自本地目录的那条不给卸载（删了也会被下次扫描带回来）',
     ok: (v) => v === true,
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsSkipNote',
     label: '★ 空目录被如实报出来（"勾了却少一个"要能追到原因）',
     ok: (v) => typeof v === 'string' && v.includes('probe-empty-dir') && v.includes('SKILL.md'),
   },
   {
-    view: 'Skills',
+    view: '技能',
     key: 'skills.dirsCustomRow',
     label: '自己填的路径单独列出来（要能看见、能取消）',
     ok: (v) => typeof v === 'string' && v.includes('fixture-local-skills'),
@@ -440,8 +615,8 @@ const CHECKS = [
   {
     view: '工具（D40）',
     key: 'shell.navItemCount',
-    label: '★ 侧边栏是六项（聊天是最轻的入口，排第一；D40 起「工具」是最后一项）',
-    ok: (v) => v === 6,
+    label: '★ 侧边栏是五项（聊天最轻、排第一；D58 起「新建任务」并进了「任务」）',
+    ok: (v) => v === 5,
     show: (v) => `${v} 项`,
   },
   {
@@ -454,15 +629,38 @@ const CHECKS = [
     view: '工具（D40）',
     key: 'shell.navItems',
     label:
-      '★★ 侧边栏**整串顺序**就是这六项（顺序错、中间少/换一项、多出第 7 项都会红——只数个数＋看末项会漏掉中间那几种）',
+      '★★ 侧边栏**整串顺序**就是这五项（顺序错、中间少/换一项、多出第 6 项都会红——只数个数＋看末项会漏掉中间那几种）',
     ok: (v) =>
       JSON.stringify(v) ===
-      // ★ 聊天排在最前：它是最轻的入口（先聊清楚，再决定要不要派活），
-      //   而且它要管多个对话，本身就是一个完整页面。
-      JSON.stringify(['聊天', '新建任务', '任务清单', '智能体', 'Skills', '工具']),
+      // ★ 聊天排在最前：它是最轻的入口（先聊清楚），而且它要管多个对话，
+      //   本身就是一个完整页面。
+      // ★ 2026-10（D58）：「新建任务」不再是侧栏一项——它并进了「任务」，
+      //   建任务变成那一页右上角的主操作（下面那条 `tasks.createAction*` 钉它）。
+      JSON.stringify(['聊天', '任务', '智能体', '技能', '工具']),
     show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
   },
   { view: '工具（D40）', key: 'tools.title', label: '工具页渲染出来了', ok: (v) => v === '工具' },
+  {
+    view: '任务',
+    // ★ 2026-10（D58）：合并之后**建任务的入口在这一页**。这一条钉的正是"合并"
+    //   这件事本身：少一个入口（侧栏）就必须多一个（这一页），否则功能是**没了**
+    //   而不是"搬家"——而那种缺失在界面上看不出来（只是"没地方建"）。
+    key: 'tasks.createActionLabel',
+    label: '★ 任务页顶栏有「新建任务」主操作（D58 把建并入这一页）',
+    ok: (v) => v === '新建任务',
+  },
+  {
+    view: '任务',
+    key: 'tasks.createActionKind',
+    label: '★ 它是 primary（这一页的主操作，不是与模式开关并列的第三个开关）',
+    ok: (v) => v === 'primary',
+  },
+  {
+    view: '任务',
+    key: 'tasks.createActionReachesForm',
+    label: '★★ 点它**真的到得了那个表单**（不是画了一个按钮）',
+    ok: (v) => v === true,
+  },
 
   // ══════════════ 聊天（闭环的旁路）══════════════
   {
@@ -488,6 +686,49 @@ const CHECKS = [
     key: 'chat.listNarrowerThanDetail',
     label: '左栏比右栏窄（对话列表是索引，消息流是正文）',
     ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.detailWorkDirReadOnly',
+    label: '详情页的工作目录只读（没有改名/保存/改回平台分配的控件）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.draftWorkDirInput',
+    label: '「新对话」界面在 Agent 选择器下面有工作目录输入（可留空=自动分配）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.deleteButtonPerItem',
+    label: '每项右侧有独立的删除按钮（主按钮之外、不是按钮套按钮）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.deleteConfirmUsesModal',
+    label: '★ 点删除弹的是**平台自己的居中对话框**（不是 window.confirm），且「取消」不删',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.activeItemBorder',
+    label: '★ 对话列表的选中框与任务列表**完全一致**（同一个描边色——原来这里是灰的、任务那边是强调色）',
+    ok: (v, facts) =>
+      typeof v === 'string' &&
+      v !== '' &&
+      v !== 'rgba(0, 0, 0, 0)' &&
+      v === facts['tasks.activeItemBorder'],
+    show: (v, facts) => `${v}（任务：${facts['tasks.activeItemBorder']}）`,
+  },
+  {
+    view: '聊天',
+    key: 'chat.activeItemBackground',
+    label: '选中项的背景色两处也一致',
+    ok: (v, facts) =>
+      typeof v === 'string' && v !== '' && v === facts['tasks.activeItemBackground'],
+    show: (v, facts) => `${v}（任务：${facts['tasks.activeItemBackground']}）`,
   },
   {
     view: '聊天',
@@ -537,11 +778,36 @@ const CHECKS = [
     show: (v) => String(v),
   },
   {
-    view: '任务清单',
+    view: '任务',
     key: 'tasks.filesColumnStillRenders',
     label:
-      '★★ 任务详情右边那一栏**换成一个共用组件之后照旧能列**（抽组件动的是任务页那条已经在用的路径：base 传错会表现成"取不到"或一直骨架屏，两者肉眼都不明显）——要求真的拿到东西，且**不许**出现"取不到"那一块',
+      '★★ 任务详情结果区**右侧栏**照旧能列（D69.9.1 文件回右侧栏、不折叠——使用者：高频项；共用组件那条路径没坏：base 传错会表现成"取不到"或一直骨架屏，两者肉眼都不明显）——要求真的拿到东西，且**不许**出现"取不到"那一块',
     ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.logModeNoOuterScroll',
+    label: '★★ 点「完整日志」后详情栏**不再有外置滚动条**（D69.12：双滚动条——内置+外置，外置不该有；详情栏 flex + overflow hidden，滚动全在日志自己的盒子里）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.logToggleLabel',
+    label: '★ 词条：「完整日志」按钮文字精确匹配（D69.13；substring 挡不住被改回「看完整日志」）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.showFinalResultLabel',
+    label: '★ 词条：切过去后同一按钮显示「最后结果」（D69.13）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.logFillsPane',
+    label: '★ 日志是详情栏主体（高度占比过半 = flex 吃满剩余空间，不再 26rem 固定高低）',
+    ok: (v) => typeof v === 'number' && v > 0.45,
+    show: (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : String(v)),
   },
   {
     view: '聊天',
@@ -695,6 +961,36 @@ const CHECKS = [
   },
   {
     view: '工具（D40）',
+    key: 'tools.descClampApplied',
+    label: '★ 说明列的两行截断真的生效（`.desc-clamp` 是 app.css 共用样式）',
+    ok: (v) => v === '2',
+  },
+  {
+    view: '工具（D40）',
+    key: 'tools.rowActionsFlex',
+    label: '★ 操作列是 flex 容器（`.row-actions` 是 app.css 共用样式）',
+    ok: (v) => v === 'flex',
+  },
+  {
+    view: '工具（D40）',
+    key: 'tools.updatedAtColumn',
+    label: '★ 工具表也有「更新于」列（与技能页同一套格式）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '工具（D40）',
+    key: 'tools.sourceBeforeVersion',
+    label: '★ 「来源」列在「版本」之前（与技能页同一列序，D69.7）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '工具（D40）',
+    key: 'tools.slugCellFlexWrap',
+    label: '★ 首格 `▸ slug` 是 flex 且不折行（D69.8）',
+    ok: (v) => v === 'nowrap',
+  },
+  {
+    view: '工具（D40）',
     key: 'tools.actionTypes',
     label: '★ 点开一行看得到组内动作，且动作名是契约值 `<slug>.<动作名>`',
     ok: (v) =>
@@ -832,7 +1128,7 @@ const CHECKS = [
   // 这一组量的是**容纳关系**（在不在该在的地方、够不够宽、有没有溢出）——
   // 上一版正是"量外观的检查全绿，而布局已经垮了"。
   { view: '新建表单 / 设置', key: 'template.openButtonFound', label: '智能体页有「新建」入口', ok: (v) => v === true },
-  { view: '新建表单 / 设置', key: 'template.openButtonLabel', label: '按钮文案就是「新建」', ok: (v) => v === '新建' },
+  { view: '新建表单 / 设置', key: 'template.openButtonLabel', label: '按钮文案就是「新建智能体」', ok: (v) => v === '新建智能体' },
   { view: '新建表单 / 设置', key: 'template.settingsButtonFound', label: '★「设置」就在「新建」旁边', ok: (v) => v === true },
   { view: '新建表单 / 设置', key: 'template.settingsButtonLabel', label: '按钮文案就是「设置」（不是"第一句话设置"）', ok: (v) => v === '设置' },
   {
@@ -1739,7 +2035,7 @@ const CHECKS = [
   {
     view: '默认智能体',
     key: 'defaultAgent.optionMarked',
-    label: '新建任务页的选择器里，那一项标着「（默认）」',
+    label: '建任务那一栏的选择器里，那一项标着「（默认）」',
     ok: (v) => v === true,
   },
   {
@@ -1751,14 +2047,14 @@ const CHECKS = [
   {
     view: '默认智能体',
     key: 'defaultAgent.preselected',
-    label: '★★ 新建任务页**预选**的就是设过的那个 agent',
+    label: '★★ 建任务那一栏**预选**的就是设过的那个 agent',
     ok: (v, facts) =>
       typeof v === 'string' && v.length > 0 && v === facts['defaultAgent.targetName'],
   },
 
   // ── 顶栏：页名 + 这一页的动作（2026-09 改版）──
   //
-  // ⚠️ 这一段与语言那一段**顺序不能颠倒**：它断言的是中文界面（页名「任务清单」
+  // ⚠️ 这一段与语言那一段**顺序不能颠倒**：它断言的是中文界面（页名「任务」
   //    这类字面）。语言那一段跑在最后，测完切回中文。
   //
   // 判据的方向是"**跟着页换**"：三个页面各一条，期望值是逐页写死的。只量
@@ -1766,9 +2062,8 @@ const CHECKS = [
   {
     view: '顶栏',
     key: 'topbar.pageName',
-    label: '★ 顶栏左边写着**当前这一页**的名字（任务清单 / 智能体 / 工具 三轮都对）',
-    ok: (v) =>
-      v && v['#/tasks'] === '任务清单' && v['#/agents'] === '智能体' && v['#/tools'] === '工具',
+    label: '★ 顶栏左边写着**当前这一页**的名字（任务 / 智能体 / 工具 三轮都对）',
+    ok: (v) => v && v['#/tasks'] === '任务' && v['#/agents'] === '智能体' && v['#/tools'] === '工具',
   },
   {
     view: '顶栏',
@@ -1777,15 +2072,17 @@ const CHECKS = [
       '★★ 顶栏里紧跟着页名的那排动作**只属于当前这一页**（换页就整排换掉，上一页的按钮一个都不留）',
     ok: (v) =>
       v &&
-      JSON.stringify(v['#/tasks']) === JSON.stringify(['列表', '看板', '刷新']) &&
-      JSON.stringify(v['#/agents']) === JSON.stringify(['新建', '设置', '刷新']) &&
-      JSON.stringify(v['#/tools']) === JSON.stringify(['刷新', '安装工具']),
+      // ★ 2026-10（D58）：任务页多了一个主操作（建任务被并进这一页）——
+      //   这里同时钉住它排在**最前**（主操作该在模式开关前面）。
+      JSON.stringify(v['#/tasks']) === JSON.stringify(['新建任务', '列表', '看板', '刷新']) &&
+      JSON.stringify(v['#/agents']) === JSON.stringify(['新建智能体', '设置', '刷新']) &&
+      JSON.stringify(v['#/tools']) === JSON.stringify(['安装工具', '刷新']),
   },
   {
     view: '顶栏',
     key: 'topbar.sameAsSidebar#/tasks',
     label: '★ 页名与侧栏那一项**是同一句话**（两处各写一份迟早会不一样）',
-    ok: (v) => v === '任务清单',
+    ok: (v) => v === '任务',
   },
   {
     view: '顶栏',
@@ -1830,20 +2127,38 @@ const CHECKS = [
   {
     view: '顶栏',
     key: 'topbar.buttonHeights',
-    label: '★ 顶栏里所有按钮**一种高度**（原来页面动作是页面里那个大尺寸，与旁边几个高低错落）',
+    label:
+      '★★ 两档高度**各自齐**：工具条里的格子 24px、工具条外的常驻控件 30px（2026-10 改版之后这是嵌套关系，不是"不齐"——但**组内**不齐仍然是"加一个按钮就把这排弄歪"）',
     ok: (v) =>
       !!v &&
-      ['#/tasks', '#/agents', '#/tools'].every((k) => Array.isArray(v[k]) && v[k].length === 1),
+      ['#/tasks', '#/agents', '#/tools'].every(
+        (k) =>
+          v[k] &&
+          JSON.stringify(v[k].cells) === JSON.stringify([24]) &&
+          JSON.stringify(v[k].others) === JSON.stringify([30]),
+      ),
     show: (v) =>
       Object.entries(v ?? {})
-        .map(([k, hs]) => `${k}: ${Array.isArray(hs) ? hs.join('/') + 'px' : hs}`)
+        .map(([k, hs]) =>
+          hs && hs.cells ? `${k}: 格子 ${hs.cells.join('/')}px · 常驻 ${hs.others.join('/')}px` : `${k}: ${hs}`,
+        )
         .join('　'),
+  },
+  {
+    view: '顶栏',
+    key: 'topbar.trackHeight',
+    label:
+      '★ 工具条**轨道**与常驻控件同高（30px）——这一条钉的是"一条带子上的节奏"，也正是上面那个 bug 该被抓住的地方（格子被拉到 30 时轨道看不出问题，而工具条会变成一条没有呼吸的实心带）',
+    ok: (v) => v && v['#/tasks'] === 30 && v['#/agents'] === 30 && v['#/tools'] === 30,
+    show: (v) => Object.entries(v ?? {}).map(([k, h]) => `${k}: ${h}px`).join('　'),
   },
   {
     view: '顶栏',
     key: 'topbar.activeModeVisible',
     label:
-      '★★ 当前那个模式按钮**看得出来**（`.active` 曾经是死类名：界面上根本没有它的样式，于是「列表 / 看板」长得一模一样）',
+      '★★ 当前那个模式按钮**看得出来**（`.active` 曾经是死类名：「列表 / 看板」长得一模一样。'
+      + '⚠️ 比对的基准必须是**同一种 kind 的旁边那一格**——拿主操作当基准的话，'
+      + '把 `.active` 的样式整条删掉它照样绿，实测踩过）',
     // 「不适用」= 这一页没有模式切换（只有任务页有），那是正常的
     ok: (v) =>
       !!v &&
@@ -1865,7 +2180,7 @@ const CHECKS = [
   {
     view: '语言切换',
     key: 'lang.switchPresent',
-    label: '★ 顶栏有语言切换器',
+    label: '★ 设置抽屉里有语言切换器（2026-09 从顶栏撤进设置抽屉；探针原来量顶栏 select，早已不存在）',
     ok: (v) => v === true,
   },
   {
@@ -1874,14 +2189,16 @@ const CHECKS = [
     label: '默认是中文（既有数据/文档/断言的语言）',
     ok: (v) => v === 'zh',
   },
-  { view: '语言切换', key: 'lang.navBefore', label: '切换前导航是中文', ok: (v) => v === '新建任务' },
+  // ⚠️ 取样那一项是「任务」（合并之后导航里没有「新建任务」了——见 D58）。
+  //    这里问的是"界面语言真的切了吗"，与取样哪一项无关，跟着改就行。
+  { view: '语言切换', key: 'lang.navBefore', label: '切换前导航是中文', ok: (v) => v === '任务' },
   {
     view: '语言切换',
     key: 'lang.switchedToEn',
     label: '★ 切到 English 之后界面真的变英文（响应式没断）',
     ok: (v) => v === true,
   },
-  { view: '语言切换', key: 'lang.navAfter', label: '导航变成 New task', ok: (v) => v === 'New task' },
+  { view: '语言切换', key: 'lang.navAfter', label: '导航变成 Tasks', ok: (v) => v === 'Tasks' },
   {
     view: '语言切换',
     key: 'lang.settingsLabel',
@@ -1895,6 +2212,123 @@ const CHECKS = [
       '★ 契约值（`probe-tool.append-note` 这类机器值）**不翻译**（探针刚走真实写入口把它勾上去）',
     ok: (v) => v === true,
   },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.headH',
+    label:
+      '★★ 三条栏头带同高 51px、完全同款（D64 后聊天也没标题了——只有计数+搜索，与任务/智能体一模一样）',
+    ok: (v) => !!v && v.chat === 51 && v.tasks === 51 && v.agents === 51,
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]}px`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.searchInHead',
+    label:
+      '★ 搜索框**在栏头里**、不独行：三页 inHead=true / inBody=false（聊天 D63 也补了计数+搜索）',
+    ok: (v) => {
+      const t = v?.tasks
+      const c = v?.chat
+      const a = v?.agents
+      return (
+        !!t && t.inHead === true && t.inBody === false &&
+        !!c && c.inHead === true && c.inBody === false &&
+        !!a && a.inHead === true && a.inBody === false
+      )
+    },
+    show: (v) =>
+      ['chat', 'tasks', 'agents'].map((k) => `${k}: 栏头内 ${v?.[k]?.inHead} / 列表内 ${v?.[k]?.inBody}`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.rowH',
+    label:
+      '★★ 三页列表行高同一档（`--list-row-min-h` 64px，内容更高的跟随内容）且每页内部恒定——三页两两相差 ≤1px',
+    ok: (v) => {
+      const hs = ['chat', 'tasks', 'agents'].map((k) => v?.[k])
+      return hs.every((h) => typeof h === 'number' && h >= 63) && Math.max(...hs) - Math.min(...hs) <= 1
+    },
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]}px`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.headsTitleless',
+    label:
+      '★ 三页栏头带里**都没有标题**（D64：聊天「对话」二字按要求去掉——三页同款才像一个整体）',
+    ok: (v) => !!v && v.chat === true && v.tasks === true && v.agents === true,
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: 有标题=${v?.[k]}`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.separatorHeights',
+    label:
+      '★ 任务列表的分组标题回到**内容高度**（D61 全局 `.list-head` 曾把两行都固定成 51px，D64 修掉）：单行那条 <51px（min 抓"固定带"这个漏的特征），双行那条 ≤64px',
+    ok: (v) => !!v && v.min < 51 && v.max <= 64,
+    show: (v) => (v ? `min ${v.min}px / max ${v.max}px` : `${v}`),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.separatorNoHint',
+    label: '★「需要注意」分组**不带解释**（D67："执行失败/被取消…"那句按要求删了，加回来就红）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '行内细节（D65）',
+    key: 'rowdetail.title',
+    label:
+      '★ 三页行内标题同一档：字号 14（--fs-base）、字重 600（原来实测 13/400、14/600、14/700）',
+    ok: (v) =>
+      ['chat', 'tasks', 'agents'].every(
+        (k) => !!v?.[k] && Math.abs(v[k].fs - 14) < 0.1 && v[k].w === 600,
+      ),
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]?.fs}/${v?.[k]?.w}`).join('　'),
+  },
+  {
+    view: '行内细节（D65）',
+    key: 'rowdetail.chip',
+    label:
+      '★ 徽标同一形状：任务阶段标签与智能体角色徽标都是胶囊（radius=100px；原来任务描边方角 r4px）',
+    ok: (v) => !!v && v.tasks === '100px' && v.agents === '100px' && v.tasks === v.agents,
+    show: (v) => ['tasks', 'agents'].map((k) => `${k}: ${v?.[k]}`).join('　'),
+  },
+  {
+    view: '行内细节（D65）',
+    key: 'rowdetail.rowBox',
+    label:
+      '★ 行容器同款：三页都是 align-items center、gap 2px（智能体原来 flex-start / 4px）',
+    ok: (v) =>
+      ['chat', 'tasks', 'agents'].every(
+        (k) => !!v?.[k] && v[k].align === 'center' && v[k].gap === '2px',
+      ),
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k]?.align}/${v?.[k]?.gap}`).join('　'),
+  },
+  {
+    view: '行内细节（D65）',
+    key: 'rowdetail.hover',
+    label:
+      '★ 三页行 hover 底色统一 `--surface-hover`（任务/智能体原来误用 `--surface-2`——那是选中态底色）',
+    ok: (v) =>
+      ['chat', 'tasks', 'agents'].every((k) => v?.[k] === 'var(--surface-hover)'),
+    show: (v) => ['chat', 'tasks', 'agents'].map((k) => `${k}: ${v?.[k] ?? '?'}`).join('　'),
+  },
+  {
+    view: '列表栏骨架（D61）',
+    key: 'skeleton.delInset',
+    label:
+      '★ 删除按钮同一位置（右缘内缩 `--sp-1`、垂直居中）——聊天与任务两栏一致（原来 -1 贴边 vs -5）',
+    ok: (v) => {
+      const a = v?.chat
+      const b = v?.tasks
+      return !!a && !!b && a.inset === b.inset && a.centerDelta <= 2 && b.centerDelta <= 2
+    },
+    show: (v) =>
+      ['chat', 'tasks']
+        .map((k) => {
+          const x = v?.[k]
+          return x ? `${k}: 内缩${x.inset}px 居中差${x.centerDelta}px` : `${k}: ${x}`
+        })
+        .join('　'),
+  },
+
   {
     view: '语言切换',
     key: 'lang.stageShort',
@@ -2811,6 +3245,10 @@ const CHECKS = [
       '★★★ 智能体详情**只读**那一档：契约值 chip 旁边带「已固定: text=长期钉的」（固定值在界面上看得见，别让使用者忘了自己钉过什么）',
     ok: (v) =>
       v !== null &&
+      // ★ 还要求"读完之后真的回到了新建任务页"（`landed`）：这一条原来只认 chip，
+      //   而 chip 是在**智能体页**读的 ⇒ 回程那一步即使失败也照样绿（D58 之前它
+      //   写着一个不存在的地址 `#/newtask`，靠"未知 hash 回落"才碰巧有效）。
+      v.landed === true &&
       typeof v.chip === 'string' &&
       v.chip.includes('已固定') &&
       v.chip.includes('text=长期钉的'),
@@ -3229,7 +3667,122 @@ const CHECKS = [
   },
 
   // ── 新建任务 ──
-  { view: '新建任务', key: 'new.hasContent', label: '新建任务页渲染出来了（没白屏）', ok: (v) => v === true },
+  { view: '新建任务', key: 'new.hasContent', label: '建任务那一栏渲染出来了（表单在右栏里 + 左边清单还在）', ok: (v) => v === true },
+  {
+    view: '任务',
+    key: 'tasks.createKeepsListBeside',
+    label:
+      '★★ 「新建任务」进的是**右栏里的表单**，而左边那份清单还在（这是合并的意义：清单当参照、表单写在右边）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createPaneFormPresent',
+    label: '★ 表单真的在右栏里（`.detail-pane .create-body` 里面）——不是又画了一个整页',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createBodyIsScroller',
+    label: '★ 那一栏自己滚（`overflow-y: auto`）——不滚的话提交栏吸底吸的是整个窗口，滚起来会飘走',
+    ok: (v) => v === 'auto',
+  },
+  {
+    view: '任务',
+    key: 'tasks.createNarrowListHidden',
+    label:
+      '★★ 窄屏（800px）进建任务：清单**让位**（`display:none`）——不让位的话两栏各半，表单挤得没法用',
+    ok: (v) => v === 'none',
+  },
+  {
+    view: '任务',
+    key: 'tasks.createNarrowPaneShown',
+    label:
+      '★★★ 而右栏**必须还在**（这一条是那个坑本身：右栏的显隐由 `.with-detail` 管，`$creating` 少算进去就是"点新建任务什么都不出现"）',
+    ok: (v) => v === 'flex',
+  },
+  {
+    view: '任务',
+    key: 'tasks.createNarrowExitViaSidebar',
+    label:
+      '★★★ 窄屏下**真的出得去**：点侧栏「任务」⇒ 回到列表（那一栏上面原来有个「返回任务清单」，按要求去掉了 ⇒ 出口落到侧栏这一项上，而它一定在；"出不去"在窄屏上的样子是卡在一张表单里、连清单都看不见）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createListButtonLeaves',
+    label:
+      '★★ 宽屏下点顶栏的「列表」也出得去——它本来就已经是选中态，而在建任务时它必须表示"离开表单、回列表"（从前那种写法直接 return，点了毫无反应）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createNarrowColumns',
+    label:
+      '★★ 800px 窗口 ⇒ 右栏内容宽约 496px（< 36rem）⇒ 表单退成**单列**（两列硬撑会溢出）',
+    ok: (v) => v === 1,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createNarrowNoOverflowX',
+    label:
+      '★ 单列之后这一栏**不横向溢出**（可滚区与包着表单那一层都算，`scrollWidth ≤ clientWidth`）——容器查询那一档的意义就在这儿',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createWideColumns',
+    label:
+      '★★★ 1280 的窗口下右栏只有 624px ⇒ 表单**仍然是单列**——这一条钉的是"按容器判、不按窗口判"（`@media` 会看见 1280 而排成两列，每列 265px）',
+    ok: (v) => v === 1,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createWidePaneInner',
+    label: '★ 顺带如实记下右栏的实际内容宽（两列那条阈值 36rem 就是照它定的）',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createWiderColumns',
+    label:
+      '★★★ 窗口画宽到 1600 ⇒ 右栏约 860px ⇒ 表单**回到两列**——与上面那条配对：同一份 CSS，窗口不同、右栏宽度不同 ⇒ 列数不同（这才是"按容器判"）',
+    ok: (v) => v === 2,
+  },
+  {
+    view: '任务',
+    key: 'tasks.createWiderPaneInner',
+    label: '★ 宽窗口下右栏的实际内容宽',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '任务',
+    key: 'tasks.leaveCreateAsks',
+    label:
+      '★★ 表单里写了内容、又点了左边另一条任务 ⇒ **先问一句**（不问就是静默丢掉写了一半的东西，而界面上不留任何痕迹）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.sidebarLeaveAsks',
+    label:
+      '★★★ 写着草稿时点**侧边栏的「任务」**也要先问一句——去掉那个返回按钮之后，这一项是全屏常驻、最容易点到的那条出口，而它走通用导航、压根不知道"建任务"这件事',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.discardConfirmLeaves',
+    label: '★★★ 而点「放弃」之后**真的回到列表**（上面那条只证明它会问；"问了但走不掉"同样是个坏掉的出口）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.leaveCreateCancelKeepsDraft',
+    label: '★★★ 点「取消」之后**字还在、框关掉了**——确认框要真的能拦住这一次切换（否则它只是个装饰）',
+    ok: (v) => v === true,
+  },
 ]
 
 // ══════════════════════════════════════════════════════════════════════
@@ -3414,7 +3967,7 @@ try {
   // 造**一条任务**——但绝不造 run
   // ══════════════════════════════════════════════════════════════════
   //
-  // ★ 这条是必需的，不是装饰：任务清单的"重复字样"检查最初是**空过**的
+  // ★ 这条是必需的，不是装饰：任务页的"重复字样"检查最初是**空过**的
   //   ——没有任务时表格一行都不渲染，于是把「等待审核」这句话塞回模板
   //   也照样全绿（变异测试抓到的：变异 3 退出码 0）。表格里必须有行，
   //   那条检查才真的在检查。
@@ -3452,7 +4005,17 @@ try {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        skills: [{ slug: 'probe-skill', name: '探针技能', body: '# 探针\n\n夹具。', source: 'local' }],
+        skills: [
+          {
+            slug: 'probe-skill',
+            name: '探针技能',
+            // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
+            //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
+            //   断言认的是正文里那句）。
+            body: '---\nname: probe-skill\ndescription: 探针夹具的说明\n---\n\n# 探针\n\n夹具。',
+            source: 'local',
+          },
+        ],
       }),
     })
     if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
@@ -3975,7 +4538,9 @@ try {
       //    而**超时的** `until()` 一次就吃掉 15s 虚拟时间。放宽到 120s。
       //    放宽本身没有代价：探针一跑完页面就空闲，剩下的虚拟预算会**瞬间**
       //    用光（虚拟时间在任务队列空的时候是直接跳过去的），dump 不会变慢。
-      '--virtual-time-budget=120000',
+      // ⚠️ 120s 那档在「列表栏骨架（D61）」那一组（末尾多量三页、每页两三次
+      //    等待）之后又紧了：实测 dump 出来时 `done` 还没写。放宽到 180s。
+      '--virtual-time-budget=300000',
       '--dump-dom',
       // ★ 把夹具路径交给探针页：抽屉里那次安装是"真的往输入框里打字"驱动的，
       //   而探针不可能自己编出 `.cache/layout-probe/…` 这个绝对路径。

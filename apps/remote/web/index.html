@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentDeck Remote</title>
+    <script>
+      // ⚠️ 与 daemon 界面**同一段**首帧防闪逻辑、**同一个 localStorage 键**
+      //    （`ah.theme-pref`）：两个界面在同一次访问里就应该是同一个主题，
+      //    否则切到另一页会"跳色"。判定与 `@agentdeck/ui` 的 `resolveTheme` 一致。
+      try {
+        var pref = localStorage.getItem('ah.theme-pref')
+        var dark =
+          pref === 'dark' ||
+          ((pref === null || pref === 'system') &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

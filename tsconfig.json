@@ -1,6 +1,15 @@
 {
   "extends": "./tsconfig.base.json",
   // apps/web 有自己的 tsconfig（DOM lib + bundler 解析），见 apps/web/tsconfig.json
-  "include": ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["apps/web/src/**"]
+  // tools/*/src：独立工具的源码也要**被类型检查**（不进 tsconfig 就等于它可以烂掉，
+  // 而"没被检查"这件事本身不会报错——见 tools/skill-catalog-sync/README.md）
+  "include": [
+    "packages/*/src/**/*.ts",
+    "apps/*/src/**/*.ts",
+    "tools/*/src/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  // apps/web 与 packages/ui 都是**界面侧**代码：DOM lib + bundler 解析，
+  // 各有自己的 tsconfig（见各自的 tsconfig.json 里的说明），由根 typecheck 显式跑
+  "exclude": ["apps/web/src/**", "packages/ui/src/**"]
 }

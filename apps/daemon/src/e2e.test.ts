@@ -323,9 +323,21 @@ after(async () => {
 describe('端到端：一个 execute run 跑通整条链路', () => {
   test('身份接口报出可用 runtime', async () => {
     const res = await fetch(`${daemon.url}/api/identity`)
-    const body = (await res.json()) as { runtimes: Array<{ key: string; available: boolean }> }
+    const body = (await res.json()) as {
+      runtimes: Array<{ key: string; available: boolean; evidence: string }>
+    }
     assert.equal(body.runtimes[0]?.key, 'claude')
     assert.equal(body.runtimes[0]?.available, true)
+
+    // ★ 2026-10（使用者决定）：没接真实 CLI 的 runtime（evidence !== 'verified'，
+    //   当前只有 generic）不进身份接口的 runtimes 数组——UI 全从它来，所以不会
+    //   出现在 Runtime 概览 / 新建与编辑 agent 的下拉里。判据是证据等级不是
+    //   名字：加第四个未验证 runtime 时自动隐藏。开发者通道（--runtime-key /
+    //   --verify-runtime all / 直接调 API 建 generic agent）不受这个数组影响。
+    for (const rt of body.runtimes) {
+      assert.equal(rt.evidence, 'verified', `runtimes 里不该出现未验证的 runtime：${rt.key}`)
+    }
+    assert.ok(!body.runtimes.some((r) => r.key === 'generic'), 'generic 不该出现在 UI 的 runtime 清单里')
   })
 
   test('★ 提交 run → 收到流式消息 → 终态 completed', async () => {
@@ -1830,11 +1842,32 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
         limits: { maxTurns: null, timeoutMs: null },
       }),
     })
-    const text = await waitForText(runId, /第一句话（/)
+    // ⚠️ 等的是**③ 任务那一块本身**，不是头行。
+    //   原来等 `/第一句话（/`：那行写在三块之前，块还没落盘就可能断言；
+    //   而断言里的 `/把功能实现一下\n/`——那个换行是 `messages.join('\n')`
+    //   拼出来的**下一条消息的分隔符**，根本不是这一块的内容：后面没消息
+    //   写进来时它必然红（实测整文件跑红、单独跑绿，就是这个原因）。
+    //   等块本身，"逐字写进去了吗"这条判据才只跟这一块有关。
+    const text = await waitForText(runId, /===== ③ 任务 =====\n\n把功能实现一下/)
     assert.match(text, /把功能实现一下/)
-    // 短 prompt 要**逐字**出现（连行一起），且不带任何"未显示"的话
-    assert.match(text, /把功能实现一下\n/, '短文本要完整写进去')
-    assert.ok(!/还有 \\d+ 字符未显示/.test(text), '没截断就不该说截断了')
+    // 短 prompt 要**逐字**出现（连行一起），且不带任何"未显示"的话。
+    // ★ 判在那一块**自己的内容**上：等于 prompt 才算逐字，多一个字符少一个
+    //   字符都算没写对——用 join 出来的那个换行判，会把"后面还有消息"
+    //   当成"写全了"，跟这条断言想问的事没关系。
+    const taskMsg = (await waitForMessages(runId)).find((m) =>
+      m.content.startsWith('===== ③ 任务 ====='),
+    )
+    assert.ok(taskMsg, '③ 任务那一块要在日志里')
+    assert.equal(
+      taskMsg.content.slice('===== ③ 任务 =====\n\n'.length),
+      '把功能实现一下',
+      '短文本要完整写进去',
+    )
+    // ⚠️ 原来这里还有一条"不许说截断了"的否定断言（`/还有 \\d+ 字符未显示/`），
+    //   已删：一是 `\\d` 在正则字面量里是**反斜杠 + d**（永远为真），二是
+    //   `字符未显示` 这句话在实现里**已经不存在**了——2026-09 起第一句话
+    //   全文进日志、不截断（见 `executor.ts` 那条 ★）。
+    //   所以"没截断"这件事只能由上面那条逐字相等来判：它才是能变红的判据。
   })
 
   test('★ 没配审核者时，日志要说清"为什么没有审核"', async () => {

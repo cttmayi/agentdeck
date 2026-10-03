@@ -112,8 +112,15 @@ export function installRemoteEntry(input: {
   slug: string
   /** SKILL.md 的内容（远端目录的 `content`）。 */
   body: string
-  /** 目录给的版本——落库后界面才能判断"已安装 / 可更新"。 */
-  version: string
+  /**
+   * ★ **支持文件**（相对路径 → 内容）。不传的话装进来只有 `SKILL.md`——
+   *   而技能是可以带脚本与参考文件的（pptx 那类），少了它们技能就是坏的，
+   *   且坏得很安静：界面显示"已安装"，跑起来才发现少东西。
+   *   daemon 收这个字段（`POST /api/skills` 的 payload 路），并**再校验一遍**。
+   */
+  files?: Record<string, string>
+  /** 目录给的版本——落库后界面才能判断"已安装 / 可更新"。取不到时是 null。 */
+  version: string | null
   sourceRef: string
   overwrite?: boolean
 }): Promise<InstallResult> {
@@ -122,6 +129,7 @@ export function installRemoteEntry(input: {
       kind: 'payload',
       slug: input.slug,
       body: input.body,
+      ...(input.files && Object.keys(input.files).length > 0 ? { files: input.files } : {}),
       version: input.version,
       sourceRef: input.sourceRef,
     },

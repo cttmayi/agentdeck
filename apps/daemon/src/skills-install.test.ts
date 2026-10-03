@@ -30,7 +30,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 async function withDaemon<T>(
   fn: (url: string) => Promise<T>,
-  options: { fetchImpl?: typeof fetch } = {},
+  options: { fetchImpl?: typeof fetch; githubToken?: string; githubProxy?: string } = {},
 ): Promise<T> {
   const dir = await makeTempDir('skills-install')
   const d = await startDaemon({
@@ -40,6 +40,8 @@ async function withDaemon<T>(
     // 工作目录也要显式给：兜底虽然不会碰家目录，但显式给更清楚
     workRoot: join(dir, 'work'),
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    ...(options.githubToken ? { githubToken: options.githubToken } : {}),
+    ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
     backend: {
       key: 'claude',
       protocol: 'stream-json',
@@ -115,6 +117,44 @@ describe('★ skill 安装：来源要如实（FR-AGENT-10）', () => {
         batchId: 'b1',
       })
       assert.equal((await listSkills(url)).find((s) => s.slug === 'mine')?.source, 'local')
+    })
+  })
+
+  test('★ 没传 description 时从 SKILL.md frontmatter 解析（作者写的说明不该丢）', async () => {
+    await withDaemon(async (url) => {
+      await install(url, {
+        skills: [
+          {
+            slug: 'from-frontmatter',
+            name: 'from-frontmatter',
+            body: '---\nname: from-frontmatter\ndescription: 生成算法艺术图\n---\n\n正文。\n',
+          },
+        ],
+        batchId: 'b1',
+      })
+      const found = (await listSkills(url)).find((s) => s.slug === 'from-frontmatter')
+      assert.equal(
+        (found as { description?: string | null } | undefined)?.description,
+        '生成算法艺术图',
+      )
+    })
+  })
+
+  test('payload 明确给了 description 就用它（不从正文覆盖调用方的选择）', async () => {
+    await withDaemon(async (url) => {
+      await install(url, {
+        skills: [
+          {
+            slug: 'explicit-desc',
+            name: 'explicit-desc',
+            description: '目录里登记的那句',
+            body: '---\nname: explicit-desc\ndescription: frontmatter 里那句\n---\n\n正文。\n',
+          },
+        ],
+        batchId: 'b1',
+      })
+      const found = (await listSkills(url)).find((s) => s.slug === 'explicit-desc')
+      assert.equal((found as { description?: string | null }).description, '目录里登记的那句')
     })
   })
 })
@@ -591,6 +631,58 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
       },
       { fetchImpl: gh },
     )
+  })
+
+  test('★★ 走加速器装技能（daemon 那条路）：请求发给代理，且**不带 token**', async () => {
+    // 使用者 2026-10 的决定：可以走第三方加速器（国内直连不稳），但**凭证不给它**。
+    // 这条与共用取包规则里那一条是同一个判据的两个入口（daemon 装 / 工具同步），
+    // 所以两边各钉一次——只测一边的话，另一边的接线断掉时没人会知道。
+    const seen: Array<{ url: string; authorization: string | null }> = []
+    const inner = fakeGithub({
+      'skills/foo/SKILL.md': '# 走代理装进来的',
+      'skills/foo/extra.md': '补充',
+    }) // ← 本文件的 fakeGithub 直接返回 fetch 函数（不是 {impl} 那种形状）
+    const proxyImpl = (async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      seen.push({
+        url,
+        authorization: new Headers((init?.headers ?? {}) as Record<string, string>).get('authorization'),
+      })
+      if (!url.startsWith('https://gh-proxy.com/https://')) {
+        return new Response(`没走代理：${url}`, { status: 502 })
+      }
+      return inner(url.slice('https://gh-proxy.com/'.length), init)
+    }) as typeof fetch
+
+    await withDaemon(
+      async (url) => {
+        const res = await installFromSource(url, {
+          source: { kind: 'url', url: 'https://github.com/o/r/tree/main/skills/foo' },
+        })
+        assert.equal(res.status, 201, JSON.stringify(res.body))
+        const installed = res.body['installed'] as Array<Record<string, unknown>>
+        assert.equal(installed[0]?.['body'], '# 走代理装进来的')
+      },
+      {
+        fetchImpl: proxyImpl,
+        githubToken: 'secret-token-must-not-leak',
+        githubProxy: 'https://gh-proxy.com',
+      },
+    )
+
+    assert.ok(seen.length > 0, '应当真的发出了请求')
+    for (const req of seen) {
+      assert.ok(req.url.startsWith('https://gh-proxy.com/https://'), `该走代理：${req.url}`)
+      assert.equal(
+        req.authorization,
+        null,
+        '★ 凭证不许交给第三方加速器（它自己带凭证；我们不该赌它会不会转发）',
+      )
+    }
   })
 
   test('★ 从远端目录装进来的会记下版本（界面据此判断"已安装/可更新"）', async () => {

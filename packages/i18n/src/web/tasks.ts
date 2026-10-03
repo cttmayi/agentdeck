@@ -28,34 +28,82 @@ export const tasksText = {
   'tasks.emptyFiltered': { zh: '没有匹配的任务', en: 'No matching tasks' },
   'tasks.empty': { zh: '还没有任务', en: 'No tasks yet' },
   'tasks.emptyFilteredHint': { zh: '换个关键词试试。', en: 'Try another keyword.' },
-  'tasks.emptyHint': { zh: '去「新建任务」建一个，它会立刻派给 agent。', en: 'Create one under “New task” — it is dispatched to an agent right away.' },
-  'tasks.columnEmpty': { zh: '（空）', en: '(empty)' },
-  'tasks.attentionTitle': { zh: '需要注意（{count}）', en: 'Needs attention ({count})' },
-  'tasks.attentionHint': {
-    zh: '—— 执行失败/被取消（不会有审核结果）、根本没派审核，或者判决要求人介入',
-    en: '— run failed/cancelled (so no review), no review was dispatched at all, or the verdict asks for a human',
+  // ⚠️ 2026-10（D58）：新建任务并进这一页之后，"去『新建任务』"这个指路要改成
+  //    **指这一页自己的主操作**（顶栏），否则空态会把人指去一个不存在的侧栏项。
+  //    ⚠️ 2026-10：原来写的是"右上角"——从 2026-09 起这一页的动作就搬到顶栏、而且是
+  //    靠**左**的（与主区内容共一条竖线），所以那句话一直是错的。
+  'tasks.emptyHint': { zh: '点顶栏的「新建任务」建一个，它会立刻派给智能体。', en: 'Use “New task” in the top bar — it is dispatched to an agent right away.' },
+  /**
+   * 离开「新建任务」那一栏时的确认框（D58）。
+   *
+   * ⚠️ 三条都只说**会发生什么**（写的东西不留），不说"确定吗"——按钮上写的是
+   *    动作名（`leaveCreateConfirm` = 「放弃」），与平台上其他确认框同一个口径。
+   */
+  'tasks.leaveCreateTitle': { zh: '放弃这条还没建的任务？', en: 'Discard this unsaved task?' },
+  'tasks.leaveCreateBody': {
+    zh: '表单里已经写了内容，切走之后它不会留下——这条任务不会被创建。',
+    en: 'The form has content in it. Leaving will not create the task, and what you wrote is not kept.',
   },
+  'tasks.leaveCreateConfirm': { zh: '放弃', en: 'Discard' },
+  'tasks.columnEmpty': { zh: '（空）', en: '(empty)' },
+  /**
+   * 列表模式栏头左侧的计数（D61）：搜索框并进栏头右侧之后，左边得有个同伴，
+   * 否则栏头就是半空。数的是**当前列表里实际显示的条数**（过滤之后）。
+   */
+  'tasks.listCount': { zh: '共 {count} 条', en: '{count} tasks' },
+  'tasks.attentionTitle': { zh: '需要注意（{count}）', en: 'Needs attention ({count})' },
   'tasks.restTitle': { zh: '其余任务（{count}）', en: 'Everything else ({count})' },
   'tasks.backToList': { zh: '← 返回任务清单', en: '← Back to tasks' },
   'tasks.updatedAt': { zh: '更新于 {time}', en: 'Updated {time}' },
   'tasks.descriptionHeading': { zh: '说明', en: 'Description' },
   'tasks.runsHeading': { zh: '执行记录', en: 'Runs' },
+  /** 详情头里那行小字：`run 3f9a2c1b`（原来硬编码英文 "run"）。 */
+  'tasks.runIdLabel': { zh: '执行 {id}', en: 'Run {id}' },
   'tasks.neverRunTitle': { zh: '这个任务还没有执行过', en: 'This task has not run yet' },
   'tasks.neverRunHint': { zh: '在「新建任务」里创建时会自动派发一次。', en: 'Creating it under “New task” dispatches a run automatically.' },
   'tasks.kindReview': { zh: '审核', en: 'Review' },
   'tasks.kindExecute': { zh: '执行', en: 'Execute' },
   'tasks.finalResult': { zh: '最后结果', en: 'Final result' },
   'tasks.rawLog': { zh: '实时输出', en: 'Live output' },
-  'tasks.showFinalResult': { zh: '看最后结果', en: 'Final result' },
-  'tasks.showRawLog': { zh: '看完整日志', en: 'Full log' },
+  'tasks.showFinalResult': { zh: '最后结果', en: 'Final result' },
+  'tasks.showRawLog': { zh: '完整日志', en: 'Full log' },
   'tasks.workDir': { zh: '工作目录', en: 'Work directory' },
   'tasks.type': { zh: '类型', en: 'Type' },
   'tasks.duration': { zh: '耗时', en: 'Duration' },
   'tasks.seconds': { zh: '{seconds} 秒', en: '{seconds}s' },
   'tasks.noTextOutput': { zh: '这次执行没有留下文字产出', en: 'This run left no text output' },
-  'tasks.noTextOutputHint': { zh: '它可能只改了文件、或者中途失败了。完整过程在「看完整日志」里。', en: 'It may have only changed files, or failed midway. The full process is in “Full log”.' },
+  'tasks.noTextOutputHint': { zh: '它可能只改了文件、或者中途失败了。完整过程在「完整日志」里。', en: 'It may have only changed files, or failed midway. The full process is in “Full log”.' },
+  /**
+   * 正文里只有判决块的那种 run（审核常见）：剥掉机器读的那一段之后一个字都不剩。
+   * ⚠️ 这时**不能**沿用 `noTextOutput`——"它可能只改了文件、或者中途失败了"是
+   *    说错话：它明明产出了判决，只是那段是机器读的。
+   * ⚠️ 措辞**不指向"下面那张卡片"**：判决没落库时那张卡片根本不渲染，而空态
+   *    必须是**任何情况下都成立**的话（"由平台按项列出"说的是一般事实）。
+   */
+  'tasks.verdictOnly': { zh: '这次审核没有写解释文字，只给出了判决', en: 'This review wrote no explanation — it only gave a verdict' },
+  'tasks.verdictOnlyHint': {
+    zh: '判决本体是机器读的（结论、理由码、证据、行动），平台会按项列出；完整过程在「完整日志」里。',
+    en: 'The verdict itself is machine-read (conclusion, reason code, evidence, action) and is listed by the platform item by item; the full process is in “Full log”.',
+  },
+  /** 放弃任务前的确认（它**会顺手取消正在跑的 run**，那一步不可逆）。 */
+  'tasks.confirmAbandonTitle': { zh: '放弃这条任务', en: 'Drop this task' },
+  'tasks.confirmAbandonBody': {
+    zh: '放弃会顺手取消正在跑的那次执行——这一步不可逆。任务本身之后还能「恢复」，但被取消的执行不会自己接着跑。',
+    en: 'Dropping also cancels the run in flight — that part cannot be undone. The task itself can be recovered later, but the cancelled run will not resume on its own.',
+  },
+  /** 取消执行的确认（停下来就不可逆）。 */
+  'tasks.confirmCancelRunBody': {
+    zh: '这次执行会被停下，而且不会自己接着跑——要接着做只能重新派一次。',
+    en: 'This run will be stopped and will not resume on its own — carrying on means dispatching a new one.',
+  },
   'tasks.cancelRun': { zh: '取消这次执行', en: 'Cancel this run' },
   'tasks.verdictHeading': { zh: '判决', en: 'Verdict' },
+  'tasks.metaHeading': { zh: '执行信息', en: 'Run info' },
+  'tasks.verdictDetails': { zh: '判决明细', en: 'Verdict details' },
+  'tasks.verdictDetailCount': {
+    zh: '{actions} 条行动 · {findings} 条发现',
+    en: '{actions} actions · {findings} findings',
+  },
   'tasks.confidence': { zh: '置信度 {percent}%', en: '{percent}% confidence' },
   'tasks.suggestedAction': { zh: '建议动作：', en: 'Suggested action: ' },
   'tasks.needsHuman': { zh: '需要你判断：{reason}', en: 'Needs your call: {reason}' },
@@ -74,14 +122,14 @@ export const tasksText = {
     en: 'Open a row on the left to see its runs and output — this pane shows what it produced, the files in the work directory, and the verdict. Switch to Board above to see where everything is piling up.',
   },
   'tasks.unassigned': { zh: '未指派', en: 'Unassigned' },
-  'tasks.agentGone': { zh: '这条执行用的 agent 已经不在了，无法继续。请新建任务并指定一个 agent。', en: 'The agent for this run no longer exists, so it cannot continue. Create a task and pick an agent.' },
+  'tasks.agentGone': { zh: '这条执行用的智能体已经不在了，无法继续。请新建任务并指定一个智能体。', en: 'The agent for this run no longer exists, so it cannot continue. Create a task and pick an agent.' },
   'tasks.autoWorkDir': { zh: '（自动分配）', en: '(auto-assigned)' },
 
   // ── 阶段：看板列头、表格短标签、行内提示 ─────────────────────────────
   // ⚠️ 列头（`tasks.col.*`）与表格里的短标签（`term.stage.*`）**分开**：
   //    「已完成执行 · 待审查」塞进表格单元格会把那一列撑开、把标题挤没。
   'tasks.col.executing.title': { zh: '正在执行', en: 'Executing' },
-  'tasks.col.executing.hint': { zh: 'agent 正在干活', en: 'the agent is working' },
+  'tasks.col.executing.hint': { zh: '智能体正在干活', en: 'the agent is working' },
   'tasks.col.awaiting_review.title': { zh: '已完成执行 · 待审查', en: 'Executed · awaiting review' },
   'tasks.col.awaiting_review.hint': { zh: '等审核给出判决', en: 'waiting for the review verdict' },
   'tasks.col.action_running.title': { zh: '行动中', en: 'Acting' },
@@ -135,7 +183,7 @@ export const tasksText = {
     en: 'Execution was cancelled ({reason})',
   },
   'tasks.warnNoReview': {
-    zh: '没有派审核 —— 检查这个 agent 的「由谁来审它」',
+    zh: '没有派审核 —— 检查这个智能体的「由谁来审它」',
     en: 'No review was dispatched — check this agent’s “who reviews it” setting',
   },
   'tasks.warnNeedsHuman': {
@@ -189,11 +237,6 @@ export const tasksText = {
   //      两个按钮共用一个输入框，所以这件事只能靠**按钮上的提示**说清。
   //   ③ **说清「放弃」会取消正在跑的 run**。那是这个功能唯一的副作用，
   //      不写出来就是让人在不知情的情况下丢掉一次正在跑的执行。
-  'tasks.decideHeading': { zh: '这条任务怎么办', en: 'What to do with this task' },
-  'tasks.decideIntro': {
-    zh: '审核卡住了、或者这条任务压根没有审核者时，由你来收场。',
-    en: 'When a review is stuck — or this task never had a reviewer — you settle it.',
-  },
   'tasks.decidePassHint': {
     zh: '「通过」：把这条任务判为完成。不会触发任何动作——动作只能来自审核者判决里写的那一条。理由选填。',
     en: 'Pass: mark this task as done. It triggers no action — an action can only come from the one named in a reviewer’s verdict. The reason is optional.',
@@ -254,4 +297,12 @@ export const tasksText = {
     zh: '这条任务已经放弃了 —— 它不再出现在「需要注意」里。要接着做就点「恢复」。',
     en: 'This task was dropped — it no longer shows under “needs attention”. Recover it to pick it back up.',
   },
+  // 删除任务（列表每项右侧的「×」）——与「放弃」不同：放弃只是改状态，
+  // 删除是**连同全部执行记录一起删掉**（连带范围见 daemon 侧 `Store.deleteIssue`）。
+  'tasks.delete': { zh: '删除任务', en: 'Delete task' },
+  'tasks.deleteConfirm': {
+    zh: '删除后，这条任务的执行记录（消息、审核结果、产物）会一起删掉，且无法找回。',
+    en: 'Deleting this task also removes all of its runs (messages, verdicts, artifacts), and it cannot be recovered.',
+  },
+  'tasks.deleted': { zh: '任务已删除', en: 'Task deleted' },
 } as const satisfies TextCatalog

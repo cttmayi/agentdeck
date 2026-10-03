@@ -89,9 +89,9 @@ export const templatesText = {
     zh: '整段连标题一起不出现',
     en: 'the whole section, heading included, disappears',
   },
-  'tpl.condHintQuote1': { zh: '（所以"没写指令就', en: '(so you never have to worry about “' },
+  'tpl.condHintQuote1': { zh: '（所以「没写指令就', en: '(so you never have to worry about “' },
   'tpl.condHintQuote2': {
-    zh: '别留一个空标题"这件事不用你操心）。反向写法是 ',
+    zh: '别留一个空标题」这件事不用你操心）。反向写法是 ',
     en: 'leaving an empty heading behind” when the instructions are empty). The reverse form is ',
   },
   'tpl.requiredVarsBefore': { zh: '必需的那几个变量得在段', en: 'Required variables must appear ' },
@@ -178,8 +178,9 @@ export const templatesText = {
     en: 'who this agent is',
   },
   'tpl.settings.hint.identity.after': {
-    zh: '——放一个 `{{identity}}` 就行（审核者会自动接上它的审核标准，合成同一块）。',
-    en: ' — place `{{identity}}` once (for reviewers it also merges in their review standard).',
+    // ⚠️ 反引号去掉（同上：纯文本渲染，记号会原样显示）
+    zh: '——放一个 {{identity}} 就行（审核者会自动接上它的审核标准，合成同一块）。',
+    en: ' — place {{identity}} once (for reviewers it also merges in their review standard).',
   },
   'tpl.settings.hint.task.before': { zh: '这一块是任务：', en: 'This block is the task: ' },
   'tpl.settings.hint.task.strong': {
@@ -187,8 +188,8 @@ export const templatesText = {
     en: 'what this run is to do',
   },
   'tpl.settings.hint.task.after': {
-    zh: '——放一个 `{{task}}` 就行（审核时它会带着声明、材料标记与材料，或文件引用）。',
-    en: ' — place `{{task}}` once (for reviews it carries the disclaimer, material markers and material, or file refs).',
+    zh: '——放一个 {{task}} 就行（审核时它会带着声明、材料标记与材料，或文件引用）。',
+    en: ' — place {{task}} once (for reviews it carries the disclaimer, material markers and material, or file refs).',
   },
   'tpl.settings.hint.requiredTask.before': {
     zh: '⚠️ ',

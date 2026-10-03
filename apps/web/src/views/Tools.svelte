@@ -12,6 +12,9 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { showToast } from '../lib/view.ts'
   import { t, tx } from '../lib/i18n.ts'
+  import { Table, SourceRef, ExpandToggle } from '@agentdeck/ui/components'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { absoluteTime, relativeTime } from '../lib/time.ts'
   import {
     ToolInstallError,
     installToolFromCatalog,
@@ -111,6 +114,8 @@
    *    `askedRemote` 是"只问一次"的闸门——不设它，这条反应式语句会自己触发自己。
    */
   let askedRemote = false
+  /** 相对时间的「现在」——每次响应式更新重算一遍。 */
+  $: now = Date.now()
   $: if (!askedRemote && isLoggedIn() && $remoteCatalog === null) {
     askedRemote = true
     void refreshRemote()
@@ -242,18 +247,21 @@
    *    顶栏读的时候本来就按视图名过滤（`actionsFor`），所以这不是"防残留"，
    *    是"不留着不用"。
    */
+  // ★ 与技能页/智能体页同一读法：**主线动作（primary）在最前**，刷新跟在后面。
   $: setPageActions('tools', [
-    {
-      id: 'refresh',
-      label: $t('common.refresh'),
-      kind: 'secondary',
-      onActivate: refreshTools,
-    },
     {
       id: 'install',
       label: $t('tools.install'),
       kind: 'primary',
+      icon: 'plus',
       onActivate: openPanel,
+    },
+    {
+      id: 'refresh',
+      label: $t('common.refresh'),
+      kind: 'secondary',
+      icon: 'refresh',
+      onActivate: refreshTools,
     },
   ])
   onDestroy(() => clearPageActions('tools'))
@@ -316,7 +324,16 @@
    * 能指名道姓；其它失败按原文显示，与别的写入口一致。
    */
   async function uninstall(id: string, slug: string): Promise<void> {
-    if (!confirm(tx('tools.confirmUninstall', { slug }))) return
+    // ★ 平台自己的确认框（居中），不是 `window.confirm`——理由见 `lib/confirm.ts`
+    if (
+      !(await askConfirm({
+        title: tx('tools.confirmUninstallTitle', { slug }),
+        message: tx('tools.confirmUninstallBody'),
+        confirmLabel: tx('common.uninstall'),
+        danger: true,
+      }))
+    )
+      return
     removing = id
     uninstallError = ''
     try {
@@ -400,13 +417,16 @@
           <!-- 空目录是**真话**，不是错误：说清"远端目录里现在没有包"比留一片空白好 -->
           <p class="faint small">{$t('tools.remoteEmpty')}</p>
         {:else}
-          <table class="remote-tools">
+          <!-- ★ 与技能页的远端目录表同一套表格样式（全局 `thead th` / `tbody td`）：
+               原来这里自带一份 `.remote-tools`（表头字重 600 vs 500、内边距更小、
+               分隔线用 `--line` 而不是 `--line-strong`），两张"同一种表"长得不一样。 -->
+          <table>
             <thead>
               <tr>
-                <th>{$t('tools.colPackage')}</th>
-                <th>{$t('tools.colActions')}</th>
-                <th>{$t('tools.colVersion')}</th>
-                <th></th>
+                <th scope="col">{$t('tools.colPackage')}</th>
+                <th scope="col">{$t('tools.colActions')}</th>
+                <th scope="col">{$t('tools.colVersion')}</th>
+                <th scope="col" aria-label={$t('tools.colRowActions')}></th>
               </tr>
             </thead>
             <tbody>
@@ -423,11 +443,13 @@
                       <div><code>{entry.slug}.{a.name}</code></div>
                     {/each}
                   </td>
-                  <td>{entry.version ?? '—'}</td>
+                  <td class="faint small">{entry.version ? `v${entry.version}` : $t('common.noVersion')}</td>
                   <td>
                     <button
                       type="button"
+                      class="secondary small"
                       disabled={installing !== null}
+                      title={installing !== null ? $t('tools.installingBusy') : $t('tools.actionInstall')}
                       onclick={() => void installFromCatalog(entry.slug)}
                     >
                       {installing === entry.slug ? $t('common.saving') : $t('tools.actionInstall')}
@@ -557,22 +579,20 @@
     </p>
   </div>
 {:else}
-  <div class="table-wrap">
-    <table class="tool-table">
-      <thead>
-        <tr>
-          <!-- ★ `scope="col"` 是给屏幕阅读器的：没有它，读一个单元格时读不出"这是哪一列"。
-               最后一列是按钮列，没有可见的表头文字，所以用 `aria-label` 给它一个名字。 -->
-          <th scope="col">{$t('tools.colGroup')}</th>
-          <th scope="col">{$t('tools.colName')}</th>
-          <th scope="col">{$t('tools.colVersion')}</th>
-          <th scope="col">{$t('tools.colActionCount')}</th>
-          <th scope="col">{$t('tools.colSource')}</th>
-          <th scope="col" aria-label={$t('tools.colRowActions')}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each $tools as tool (tool.id)}
+  <Table
+    tableClass="tool-table"
+    columns={[
+      { label: $t('tools.colGroup') },
+      { label: $t('tools.colName') },
+      { label: $t('tools.colSource') },
+      { label: $t('tools.colVersion') },
+      { label: $t('tools.colActionCount') },
+      { label: $t('tools.colUpdatedAt') },
+      { label: '', ariaLabel: $t('tools.colRowActions') },
+    ]}
+  >
+    {#snippet rows()}
+      {#each $tools as tool (tool.id)}
           {@const count = actionCountOf(tool)}
           <tr class="tool-row">
             <td>
@@ -583,43 +603,45 @@
                 ⚠️ 用**真按钮**（不是 `onclick` 挂整行）：tab 能到、读屏器能读、
                 aria-expanded 能报状态——整行可点对键盘用户是死的。
               -->
-              <button
-                type="button"
-                class="expand-toggle"
-                aria-expanded={expanded === tool.id}
-                aria-label={expanded === tool.id
-                  ? $t('tools.hideActions')
-                  : $t('tools.viewActions')}
-                onclick={() => (expanded = expanded === tool.id ? null : tool.id)}
-              >
-                <span class="chevron" aria-hidden="true">
-                  {expanded === tool.id ? '▾' : '▸'}
-                </span>
-              </button>
-              <code class="tool-slug">{tool.slug}</code>
+              <div class="row-title">
+                <ExpandToggle
+                  expanded={expanded === tool.id}
+                  labelExpand={$t('tools.viewActions')}
+                  labelCollapse={$t('tools.hideActions')}
+                  onclick={() => (expanded = expanded === tool.id ? null : tool.id)}
+                />
+                <code class="tool-slug">{tool.slug}</code>
+              </div>
             </td>
             <td>
-              {tool.name}
+              <!-- D69：名称与技能页同一档（faint small）——slug 才是主标识 -->
+              <div class="faint small">{tool.name}</div>
+              <!-- ★ 与技能页同一格式：说明最多两行，全文在 `title` 里 -->
               {#if tool.description}
-                <div class="faint small">{tool.description}</div>
+                <div class="faint small desc-clamp" title={tool.description}>{tool.description}</div>
               {/if}
-            </td>
-            <td class="faint small">
-              {tool.version ? `v${tool.version}` : $t('tools.versionNone')}
             </td>
             <!-- 动作数：一眼看出"这一组装了几个动作"。与展开后那条清单必须对得上 -->
             <td class="tool-action-count">{$t('tools.actionCount', { count })}</td>
             <td>
-              <span class="badge {tool.source === 'local' ? 'todo' : 'in_review'}">
+              <!-- D69：来源徽标统一配方——同步/远端 = 默认灰徽章，本地 = accent -->
+              <span class="badge" class:local={tool.source === 'local'}>
                 {tool.source === 'local' ? $t('tools.sourceLocal') : $t('tools.sourceRemote')}
               </span>
               {#if tool.sourceRef}
                 <!-- 来源标识要能看见：出问题时第一件事就是"它到底从哪儿来的"。
                      ⚠️ 路径/URL 可能很长，**不许换行**（一折这行就变高）——单行
-                     省略 + hover 悬浮出全文（`title` 就是完整值）。 -->
-                <div class="faint small source-ref" title={tool.sourceRef}>{tool.sourceRef}</div>
+                     省略 + hover 悬浮出全文（`title` 就是完整值）。
+                     ★ 2026-10（紧凑性）：`source-ref` 从 div 改成 span、与徽章
+                     同行——原来它块级换行，凡带 sourceRef 的行都比实际高一整行。 -->
+                <SourceRef value={tool.sourceRef} />
               {/if}
             </td>
+            <td class="faint small">
+              {tool.version ? `v${tool.version}` : $t('common.noVersion')}
+            </td>
+            <!-- 更新于：与技能页同一列同一格式 -->
+            <td class="faint small" title={absoluteTime(tool.updatedAt)}>{relativeTime(tool.updatedAt, now)}</td>
             <!--
               ★ 这里原来有一格「被哪些执行者挂载」。撤掉了：使用者的决定是
                 「不需要"被哪些执行者挂载"，因为我已经移除了此功能」——挂载这个
@@ -663,7 +685,7 @@
 
           {#if expanded === tool.id}
             <tr class="tool-detail-row">
-              <td colspan="6">
+              <td colspan="7">
                 <div class="tool-actions">
                   <div class="actions-intro">
                   <h4 class="tool-actions-heading">{$t('tools.actionsHeading')}</h4>
@@ -741,30 +763,14 @@
               </td>
             </tr>
           {/if}
-        {/each}
-      </tbody>
-    </table>
-  </div>
+    {/each}
+    {/snippet}
+  </Table>
 {/if}
 
 <style>
   /* 抽屉内部与结果块。容器（`.drawer` / `.table-wrap` / `.notice`）由全局
      `app.css` 提供——这里只管这一页独有的那几块。 */
-
-  .field {
-    margin-bottom: var(--sp-3);
-  }
-
-  .field > label {
-    display: block;
-    margin-bottom: var(--sp-1);
-    font-size: var(--fs-sm);
-    color: var(--text-faint);
-  }
-
-  .field > input {
-    width: 100%;
-  }
 
   .check-row {
     display: flex;
@@ -810,41 +816,6 @@
     max-height: 16rem;
     overflow-y: auto;
   }
-
-  .row-actions { display: flex; gap: var(--sp-1); }
-  .row-actions .danger { color: var(--bad); }
-
-  /* ★ 展开入口（首格 chevron）：
-     · 按钮本身只有图标大小，不撑高这行；
-     · 展开时箭头朝下、给个强调色——"这一行现在是开着的"一眼可见；
-     · ⚠️ 不写 `width/height` 死值：按钮高度随行高走，否则会被行高顶歪。 */
-  .expand-toggle {
-    background: none;
-    border: none;
-    border-radius: var(--radius);
-    padding: 0 var(--sp-1);
-    margin-right: var(--sp-1);
-    color: var(--text-faint);
-    cursor: pointer;
-    font-size: var(--fs-sm);
-    line-height: 1;
-    vertical-align: middle;
-  }
-  .expand-toggle:hover { color: var(--text); background: var(--surface-hover); }
-  .expand-toggle[aria-expanded='true'] .chevron { color: var(--accent); }
-
-  /* ★ 来源标识：路径/URL 再长也不许折行（一折这一格就变高、整行跟着变高）。
-     单行 + 省略号，全文在 `title` 里，hover 能看到。 */
-  .source-ref {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 16rem;
-  }
-  /* ★ 按钮的文字不许断行：这一格窄（两个按钮挤在一起），断了就变成竖排
-     （实测修之前「看动作」是 56x56、「卸载」是 46x56，文字各折成两行，
-     看着像"卸"在上"载"在下）。整行的行高也因此被撑到 126。 */
-  .row-actions button { white-space: nowrap; }
 
   /* ★ 「1 个动作」不许断行。这一列去掉左右 padding 只剩 42px，而「1 个动作」
      要 55px，不 nowrap 就一定折成「1 个动」/「作」两行。
@@ -1003,20 +974,5 @@
   .tab.active {
     color: var(--text);
     border-bottom-color: var(--accent);
-  }
-  .remote-tools {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  .remote-tools th {
-    text-align: left;
-    font-weight: 600;
-    padding: var(--sp-1) var(--sp-2);
-    border-bottom: 1px solid var(--line);
-  }
-  .remote-tools td {
-    padding: var(--sp-2);
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
   }
 </style>

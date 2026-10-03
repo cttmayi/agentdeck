@@ -107,6 +107,27 @@ describe('catalogEntryState', () => {
     assert.match(hintOf(s), /无法判断新旧/, '不能假装知道谁新谁旧')
   })
 
+  test('★ 目录这条**没有版本号**（取不到上游提交）⇒ 两种情形都不许瞎比大小', () => {
+    // 2026-10 起推荐清单的版本取自"上游那个目录最近一次提交"，取不到时是 null。
+    // null 的含义是**我们不知道**——不是"没有版本"，也不是"版本为空"。
+    const noVer = { slug: 'pptx', version: null }
+
+    // ① 本地没有 ⇒ 装，但不能说"目录里有 pptx vxxx"（那会渲染成一个空位）
+    const fresh = catalogEntryState(undefined, noVer)
+    assert.equal(fresh.action, 'install')
+    assert.equal(labelOf(fresh), '安装')
+    assert.doesNotMatch(hintOf(fresh), /\s\s/)
+    assert.match(hintOf(fresh), /取不到上游提交/)
+
+    // ② 本地有版本 ⇒ **不能**说"已安装"（不知道是不是同一份内容），要么替换要么更新
+    const local = { slug: 'pptx', version: 'abc1234' }
+    const s = catalogEntryState(local, noVer)
+    assert.equal(s.action, 'replace')
+    assert.equal(s.needsOverwrite, true)
+    assert.equal(s.disabled, false)
+    assert.match(hintOf(s), /无法判断是不是同一份内容/)
+  })
+
   test('★ 本地有同名但**没有版本** ⇒ 不能冒充"已安装"，是替换', () => {
     // 从路径/GitHub 装进来的、或者本机自建的，都没有版本。
     // 我们不知道手上这份是不是同一份内容，所以不能替它背书。

@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { ToolSourceError, resolveLocalToolPath } from './tool-source.ts'
-import { MAX_FILES } from './skill-source.ts'
+import { MAX_FILES } from '@agentdeck/skill-source'
 import { makeTempDir } from './testing/tmp.ts'
 
 /**

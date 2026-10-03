@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { LOCALES, LOCALE_LABEL, isLocale } from './locale.ts'
 import { placeholdersOf, renderText, type TextCatalog } from './text.ts'
+import { remoteText, type RemoteTextId } from './remote/index.ts'
 import { webText, type WebTextId } from './web/index.ts'
 
 /**
@@ -26,6 +27,21 @@ import { webText, type WebTextId } from './web/index.ts'
  */
 type AssertLiteralKeys = string extends WebTextId ? never : true
 
+/** 同一条件对**远端管理页**的词表再钉一次（`remoteText` 也可能退化成 string）。 */
+type AssertRemoteLiteralKeys = string extends RemoteTextId ? never : true
+
+/**
+ * 有词表的**两个前端**。
+ *
+ * 2026-10 加了第二个前端（远端的技能/工具管理页，跑在 4518 上），它有自己的
+ * 命名空间 `remote/`。下面所有守卫**对两者一视同仁**（循环跑两遍），而不是给
+ * 新前端再抄一套检查——那种抄法迟早只改一边。
+ */
+const NAMESPACES = [
+  { label: 'daemon 界面', dir: './web/', text: webText as TextCatalog, minTables: 10 },
+  { label: '远端管理页', dir: './remote/', text: remoteText as TextCatalog, minTables: 4 },
+] as const
+
 /**
  * 把 `web/` 下的每张词表**扫出来**（文件名 → 它导出的那张表）。
  *
@@ -34,14 +50,16 @@ type AssertLiteralKeys = string extends WebTextId ? never : true
  * 每个词表文件按约定只导出一张表（`xxxText`），所以"这个模块里那个对象导出"
  * 就是它。
  */
-async function loadCatalogs(): Promise<Array<{ file: string; catalog: TextCatalog }>> {
-  const dir = new URL('./web/', import.meta.url)
+async function loadCatalogs(
+  dirName = './web/',
+): Promise<Array<{ file: string; catalog: TextCatalog }>> {
+  const dir = new URL(dirName, import.meta.url)
   const files = readdirSync(dir)
     .filter((f) => f.endsWith('.ts') && f !== 'index.ts')
     .sort()
   const out: Array<{ file: string; catalog: TextCatalog }> = []
   for (const file of files) {
-    const mod = (await import(new URL(`./web/${file}`, import.meta.url).href)) as Record<
+    const mod = (await import(new URL(`${dirName}${file}`, import.meta.url).href)) as Record<
       string,
       unknown
     >
@@ -57,41 +75,47 @@ async function loadCatalogs(): Promise<Array<{ file: string; catalog: TextCatalo
 describe('D39：界面词表', () => {
   test('★ 词条键仍然是字面量联合（拼错键名必须是编译错误）', () => {
     const pinned: AssertLiteralKeys = true
-    assert.equal(pinned, true)
+    const pinnedRemote: AssertRemoteLiteralKeys = true
+    assert.equal(pinned && pinnedRemote, true)
   })
 
-  test('★ 每条词条 zh / en 都有，且都非空', () => {
-    for (const [id, entry] of Object.entries(webText)) {
-      for (const locale of LOCALES) {
-        const value = entry[locale]
-        assert.equal(typeof value, 'string', `${id} 缺 ${locale}`)
-        assert.ok(value.trim() !== '', `${id} 的 ${locale} 是空的`)
+  for (const ns of NAMESPACES) {
+    test(`★ 每条词条 zh / en 都有，且都非空（${ns.label}）`, () => {
+      for (const [id, entry] of Object.entries(ns.text)) {
+        for (const locale of LOCALES) {
+          const value = entry[locale]
+          assert.equal(typeof value, 'string', `${id} 缺 ${locale}`)
+          assert.ok(value.trim() !== '', `${id} 的 ${locale} 是空的`)
+        }
       }
-    }
-  })
+    })
 
-  test('★ 同一条词条两边占位符一致（否则界面上会剩下 `{name}` 字面量）', () => {
-    for (const [id, entry] of Object.entries(webText)) {
-      assert.deepEqual(
-        placeholdersOf(entry.en),
-        placeholdersOf(entry.zh),
-        `${id} 的占位符两边不一致`,
-      )
-    }
-  })
+    test(`★ 同一条词条两边占位符一致（${ns.label}）`, () => {
+      for (const [id, entry] of Object.entries(ns.text)) {
+        assert.deepEqual(
+          placeholdersOf(entry.en),
+          placeholdersOf(entry.zh),
+          `${id} 的占位符两边不一致`,
+        )
+      }
+    })
+  }
 
-  test('键名沿用「区域.用途」的形状，且英文侧不残留中文', () => {
-    for (const [id, entry] of Object.entries(webText)) {
+  for (const ns of NAMESPACES) {
+    test(`键名沿用「区域.用途」的形状，且英文侧不残留中文（${ns.label}）`, () => {
+      for (const [id, entry] of Object.entries(ns.text)) {
       // 形状：`区域.用途`，允许更深一层（术语表用 `term.<族>.<值>`，
       // 值里带下划线与点——它们直接来自协议枚举，改一个字母就找不到那条词条）
       // ⚠️ 允许 `-`：`term.evidence.in-range-unverified` 里的值直接来自
       //    协议枚举（RuntimeEvidence），把它改写成驼峰会与代码里那份对不上
-      assert.match(id, /^[a-z]+\.[a-zA-Z0-9_.-]+$/, `${id} 的键名形状不对`)
-      assert.doesNotMatch(entry.en, /[\u4e00-\u9fa5]/, `${id} 的英文里还有中文`)
-    }
-  })
+        assert.match(id, /^[a-z]+\.[a-zA-Z0-9_.-]+$/, `${id} 的键名形状不对`)
+        assert.doesNotMatch(entry.en, /[\u4e00-\u9fa5]/, `${id} 的英文里还有中文`)
+      }
+    })
+  }
 
-  test('★ 合并各表时没有重名的键（重名会让一条词条凭空消失）', async () => {
+  for (const ns of NAMESPACES) {
+    test(`★ 合并各表时没有重名的键（${ns.label}）`, async () => {
     // 对象展开的语义是"后者赢"：两张表都定义 `agents.new` 时，先来的那条**静默消失**，
     // 症状只是"某个地方显示成键名"——很难联想到是重名。
     //
@@ -99,39 +123,46 @@ describe('D39：界面词表', () => {
     //    这里不抄一份文件清单。两份清单的后果很具体：加了表却只改一处时，
     //    要么"检查红着而界面已经坏"，要么"界面坏着而检查绿着"——D39 迁移里
     //    真实踩过两次（两个 agent 各一次）。
-    const catalogs = await loadCatalogs()
-    const sum = catalogs.reduce((n, c) => n + Object.keys(c.catalog).length, 0)
-    assert.equal(
-      Object.keys(webText).length,
-      sum,
-      `合并后少了 ${sum - Object.keys(webText).length} 条——两张表里有同名的键`,
-    )
-  })
+      const catalogs = await loadCatalogs(ns.dir)
+      const sum = catalogs.reduce((n, c) => n + Object.keys(c.catalog).length, 0)
+      assert.equal(
+        Object.keys(ns.text).length,
+        sum,
+        `合并后少了 ${sum - Object.keys(ns.text).length} 条——两张表里有同名的键`,
+      )
+    })
+  }
 
-  test('★ 每个词表文件都被接进来了（漏接一张表不会报错，只会让它的词条变成键名）', async () => {
+  for (const ns of NAMESPACES) {
+    test(`★ 每个词表文件都被接进来了（${ns.label}）`, async () => {
     // 这条守的是"文件存在但没合并"：新增 `web/xxx.ts` 却忘了写进 `index.ts` 的
     // 展开清单时，合并结果里根本没有它的词条、重名检查也不会红——症状是界面上
     // 某个区域整片显示成键名（`tools.title`），而人只会怀疑"是不是渲染错了"。
     //
     // 做法是**逐文件动态 import，逐条比对**（而不是数个数）：既能抓住"整张表没
     // 接进来"，也能抓住"接了但值不一样"（复制粘贴改了一半的那种）。
-    const catalogs = await loadCatalogs()
-    assert.ok(catalogs.length >= 10, `web/ 下只找到 ${catalogs.length} 张词表，扫目录的逻辑可能坏了`)
-    for (const { file, catalog } of catalogs) {
-      const ids = Object.keys(catalog)
-      assert.ok(ids.length > 0, `${file} 里一张词表都没有（空表也要么填满、要么别建）`)
-      for (const id of ids) {
-        const merged = (webText as Record<string, { zh: string; en: string } | undefined>)[id]
-        assert.ok(
-          merged !== undefined,
-          `${file} 里的 ${id} 没有出现在合并结果里——把它 import 进 index.ts 并展开`,
-        )
-        assert.deepEqual(merged, catalog[id], `${file} 的 ${id} 与合并结果里的值不一致`)
+      const catalogs = await loadCatalogs(ns.dir)
+      assert.ok(
+        catalogs.length >= ns.minTables,
+        `${ns.dir} 下只找到 ${catalogs.length} 张词表，扫目录的逻辑可能坏了`,
+      )
+      for (const { file, catalog } of catalogs) {
+        const ids = Object.keys(catalog)
+        assert.ok(ids.length > 0, `${file} 里一张词表都没有（空表也要么填满、要么别建）`)
+        for (const id of ids) {
+          const merged = (ns.text as Record<string, { zh: string; en: string } | undefined>)[id]
+          assert.ok(
+            merged !== undefined,
+            `${file} 里的 ${id} 没有出现在合并结果里——把它 import 进 index.ts 并展开`,
+          )
+          assert.deepEqual(merged, catalog[id], `${file} 的 ${id} 与合并结果里的值不一致`)
+        }
       }
-    }
-  })
+    })
+  }
 
-  test('★ 词条里不许出现 markdown 的强调号 `**`（界面上它是原样显示的）', () => {
+  for (const ns of NAMESPACES) {
+    test(`★ 词条里不许出现 markdown 记号（\`**\` 与反引号）（${ns.label}）`, () => {
     // 2026-09 全库清扫：18 处词条里带着 `**`，而它们**都是当纯文本渲染**的
     // （`$t(...)` 的返回值直接进文本节点，中间没有 markdown 渲染器），所以使用者
     // 看到的是"会**覆盖**已有那个的内容"——记号跟着一起显示出来了。
@@ -139,12 +170,18 @@ describe('D39：界面词表', () => {
     // 这类残留的可怕之处在于**两边都不报错**：中文界面看起来只是"多了两个星号"，
     // 而写词条的人以为自己标了粗体。所以在这里机械地钉死：想强调就用词。
     // 英文侧同样不许——那串星号在英文界面上一样难看。
-    for (const [id, entry] of Object.entries(webText)) {
-      for (const locale of LOCALES) {
-        assert.doesNotMatch(entry[locale], /\*\*/, `${id} 的 ${locale} 里带着 markdown 强调号`)
+      // ★ 两种记号一起拦（2026-10）：界面上是**纯文本**渲染，`**加粗**` 与 `` `代码` ``
+      //   都会原样显示给使用者。原来只拦了 `**`；加反引号是因为我自己新写的词条里
+      //   带了它（`reportingEnabled: false`），而当时的守卫看不见——**守卫漏掉的那类
+      //   错误，写的人就一定会犯**。
+      for (const [id, entry] of Object.entries(ns.text)) {
+        for (const locale of LOCALES) {
+          assert.doesNotMatch(entry[locale], /\*\*/, `${id} 的 ${locale} 里带着 markdown 强调号`)
+          assert.doesNotMatch(entry[locale], /`/, `${id} 的 ${locale} 里带着反引号（会原样显示）`)
+        }
       }
-    }
-  })
+    })
+  }
 
   test('渲染：插值、缺键、缺语言三种情形的行为都是确定的', () => {
     const catalog = {

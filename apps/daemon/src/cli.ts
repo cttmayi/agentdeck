@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { defaultWorkRoot, fallbackWorkRoot, migrateLegacyWorkRoot } from './workdir.ts'
 import type { SandboxMode } from '@agentdeck/agent-core'
+import { DEFAULT_GITHUB_PROXY, resolveGithubProxy } from '@agentdeck/skill-source'
 
 /**
  * CLI 入口。
@@ -51,6 +52,8 @@ interface CliOptions {
    * 想把它单独放到一块盘上时用这个。
    */
   workRoot: string | null
+  /** GitHub 加速器（第三方，默认 null = 直连；见 server.ts 的 `DaemonOptions.githubProxy`）。 */
+  githubProxy: string | null
 }
 
 const SANDBOX_MODES: readonly SandboxMode[] = ['none', 'workdir-write']
@@ -83,12 +86,34 @@ export const CLI_OPTIONS = {
   executable: { type: 'string' },
   'runtime-key': { type: 'string' },
   'work-root': { type: 'string' },
+  'github-proxy': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
+/**
+ * `--github-proxy` 的值是**可选**的（裸写 = 用默认加速器），而 `node:util` 的
+ * `parseArgs` 会把**紧跟其后的旗标**当成它的值（`--github-proxy --port 9` ⇒ 值变成
+ * `'--port'`，端口那项就丢了）。所以先把它补成明确的值，再交给 parseArgs。
+ *
+ * ★ 这条不是防御性编程：daemon 的帮助里就写着"裸写就用默认值"，而 `--github-proxy --port`
+ *   这种组合是**最自然**的打法（先想起加速器，再想起端口）。
+ */
+function fillOptionalValueFlag(
+  argv: readonly string[],
+  flag: string,
+  fallback: string,
+): string[] {
+  const out = [...argv]
+  const idx = out.indexOf(flag)
+  if (idx === -1) return out
+  const next = out[idx + 1]
+  if (next === undefined || next.startsWith('-')) out.splice(idx + 1, 0, fallback)
+  return out
+}
+
 export function parseCliArgs(argv: readonly string[]): CliOptions {
   const { values } = parseArgs({
-    args: [...argv],
+    args: fillOptionalValueFlag(argv, '--github-proxy', DEFAULT_GITHUB_PROXY),
     options: CLI_OPTIONS,
     allowPositionals: true,
     strict: false,
@@ -151,6 +176,17 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     executablePath: typeof values['executable'] === 'string' ? values['executable'] : null,
     runtimeKey: typeof values['runtime-key'] === 'string' ? values['runtime-key'] : null,
     workRoot: typeof values['work-root'] === 'string' ? values['work-root'] : null,
+    // ⚠️ 校验**严格**（与 --sandbox 同一个口径）：写错了就报错退出，而不是
+    //    悄悄直连——"我以为走了加速器"与"我以为沙箱开着"是同一类假安全感。
+    //    裸写旗标 ⇒ `DEFAULT_GITHUB_PROXY`（`fillOptionalValueFlag` 已经补好值）；
+    //    `--github-proxy off` ⇒ 直连。判据在共用包里的 `resolveGithubProxy`。
+    //    ⚠️ **只认旗标**：环境变量只对同步工具有效（守护进程的配置应当写在命令行上，
+    //    而不是靠 shell 里恰好 export 了什么）。
+    githubProxy: resolveGithubProxy(
+      typeof values['github-proxy'] === 'string'
+        ? { flagValue: values['github-proxy'] }
+        : {},
+    ),
   }
 }
 
@@ -172,6 +208,13 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --executable <路径>  覆盖 CLI 可执行文件路径（探测与执行共用同一个值）
       --runtime-key <key>  用哪个 runtime 起服务（默认 claude）
       --work-root <路径>   工作区根目录（默认 ~/agentdeck-workspace）
+      --github-proxy [地址] 从 GitHub 装 skill 时走**加速器**（默认直连）。
+                        ⚠️ 它是**第三方**：能看也能改转发过来的内容，所以默认不用、
+                        只在显式指定时启用；凭证**不会**交给它。
+                        **不带地址就用 https://gh-proxy.com**（裸写这个旗标即可）。
+                        例：--github-proxy            （= gh-proxy.com）
+                            --github-proxy https://别的加速器
+                            --github-proxy off        （这次直连）
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
@@ -342,9 +385,19 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       ...(options.executablePath ? { executablePath: options.executablePath } : {}),
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
       workRoot,
+      ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
       onInfo: (m) => process.stdout.write(`${m}\n`),
       onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
     })
+    if (options.githubProxy) {
+      // ★ 必须**大声说**：从这里开始，每一次"从 GitHub 装 skill"都会经过第三方主机，
+      //   而它能看、也能改内容。这种事实不该只写在帮助文本里等人去读。
+      process.stdout.write(
+        `⚠️ GitHub 加速器已启用：${new URL(options.githubProxy).hostname}\n` +
+          '   从 GitHub 装 skill 的请求都会经过它（第三方，能看也能改内容）；' +
+          '凭证不会交给它。\n',
+      )
+    }
   } catch (err) {
     // 端口被占用之类的启动失败必须说清楚——静默换端口会让页面连不上
     process.stderr.write(

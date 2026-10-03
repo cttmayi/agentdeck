@@ -1,10 +1,14 @@
 import { mount } from 'svelte'
 import { DEFAULT_LOCALE, renderText, webText } from '@agentdeck/i18n'
 import App from './App.svelte'
-import './styles/app.css'
+// ★ 设计系统现在住在共用包里（`@agentdeck/ui`）：**远端管理页与 daemon 界面用的是
+//   同一份 CSS**（2026-10）。抽出去的理由很实际——"两个前端长得像"不能靠各抄一份
+//   样式表，那种复制两天就会漂移，而漂移的表现是"同一个按钮在两页不一样高"这种
+//   没人会去报的小差别，累积起来就是"不是同一个产品"。
+import '@agentdeck/ui/styles/app.css'
 // ⚠️ 主题（亮/暗/跟随系统）：import 即订阅生效——`data-theme` 由 index.html 里
 //    那段同步脚本在首帧前打好，这里接手"偏好变化 / 系统变化"之后的实时切换。
-import './lib/theme.ts'
+import '@agentdeck/ui' // 主题：import 即订阅生效（判定与远端管理页共用同一份）
 
 /**
  * 入口。

@@ -2,7 +2,8 @@ import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { ulid, type Skill, type WorkspaceId } from '@agentdeck/protocol'
-import { resolveLocalPath, type ResolvedSkillSource } from './skill-source.ts'
+import { extractSkillMeta } from '@agentdeck/agent-core'
+import { resolveLocalPath, type ResolvedSkillSource } from '@agentdeck/skill-source'
 
 /**
  * 「本地技能目录」：把**别的 AI 工具**那儿的 skill 读进来，让它们出现在
@@ -427,8 +428,11 @@ function buildRecord(
     id: (previous?.id ?? (ulid() as Skill['id'])) as Skill['id'],
     workspaceId,
     slug: resolved.slug,
+    // ★ 显示名以 slug 为权威（同名不同源必须可区分），但**作者在 frontmatter
+    //   里写的 description 要落库**——没有它，列表里永远是"没有说明"，
+    //   而作者明明写了一句。
     name: resolved.slug,
-    description: null,
+    description: extractSkillMeta(resolved.body).description ?? null,
     // 用**解析过的**正文与支持文件，不是原始入参：规范化（frontmatter 补齐、
     // name 与 slug 对齐）在 `resolveLocalPath` 那边已经做过了
     body: resolved.body,

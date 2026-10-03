@@ -59,8 +59,84 @@ function parsePort(argv: readonly string[]): number {
   return n
 }
 
+/**
+ * 认识的选项只有两个（`--port` / `--data-dir`）；其余一律拒绝。
+ *
+ * ⚠️ 为什么值得单独一个函数、还带注释：**默认路径是会吃人的**。本 CLI 不做子命令
+ * 分派，任何它没看懂的 token 都会让它继续往下走，最后"服务起来了"——那看起来像
+ * 成功，而使用者要的可能是另一件事（历史上就是这么出过一次）。
+ *
+ * 值也算被消费（`--port 4599` 里的 `4599` 不是"多余的位置参数"），否则合法的
+ * 调用会被这条闸误伤——闸误伤正常用法，下一个人就会把它删掉。
+ */
+function assertNoStrayArgs(argv: readonly string[]): void {
+  const consumed = new Set<number>()
+  argv.forEach((token, i) => {
+    if (
+      token === '--port' ||
+      token === '--data-dir' ||
+      token === '--web-dir' ||
+      token === '--sync-tool' ||
+      token === '--manifest' ||
+      token === '--github-proxy'
+    ) {
+      consumed.add(i)
+      if (argv[i + 1] !== undefined) consumed.add(i + 1)
+    }
+  })
+  const stray = argv.filter((_, i) => !consumed.has(i))
+  if (stray.length === 0) return
+
+  if (stray.includes('sync-skills')) {
+    throw new Error(
+      '抓取推荐技能**已经不是远端的子命令**了（2026-10 改成独立工具）：' +
+        '请用 `pnpm run sync-skills`（加 `--dry-run` 先看会改什么）。' +
+        '远端服务只管读那个目录并把目录返回给页面。',
+    )
+  }
+  throw new Error(
+    `不认识的位置参数：${stray.join(' ')}。本命令只启动远端服务，可用选项：` +
+      `--port <端口>、--data-dir <目录>、--web-dir <目录>（管理页产物）、` +
+      `--sync-tool <脚本>、--manifest <文件>（推荐清单的配置，默认数据目录下那份）`,
+  )
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
+
+  // ★ 第一件事：拒绝那个 `--`。与 `apps/cli/src/args.ts` 同一道闸：pnpm 会把
+  //   `pnpm run remote -- --port 4519` 里的 `--` **原样传进来**（它不吃掉它），
+  //   于是它之后的选项会不会失效就看各人怎么写解析——仓库只有一条口径：
+  //   **见到就拒，并告诉正确写法**，不留给使用者去记"哪个命令能吃 --"。
+  //
+  //   ⚠️ 必须挡在**任何落盘动作之前**：下面 `migrateLegacyRemoteDir()` 会搬数据
+  //   目录，而被拒的调用不该顺带改动任何东西。
+  //
+  //   （2026-10 之前这里还有一条更阴的历史：`sync-skills` 曾经是本 CLI 的子命令，
+  //   于是带 `--` 时 `argv[0]` 不是 `sync-skills`，子命令匹配不上——它就若无其事地
+  //   把**服务**起起来，输出"正在监听 http://127.0.0.1:4518"。抓取现已独立成
+  //   `tools/skill-catalog-sync/`（`pnpm run sync-skills`），这条路径不复存在，
+  //   但闸留着。）
+  const ddIndex = argv.indexOf('--')
+  if (ddIndex !== -1) {
+    throw new Error(
+      '检测到 `--`：pnpm 会把它原样传进来，它之后的选项可能被当成位置参数而失效。' +
+        '请直接写 `pnpm run remote --port 4519`，去掉那个 `--`。',
+    )
+  }
+
+  // ★ 第二件事：**不认识的参数一律拒绝**，尤其是位置参数。
+  //
+  //   起因是一次真踩（2026-10）：抓取从本 CLI 的子命令改成独立工具之后，
+  //   `pnpm run remote sync-skills` 这条**原来有意义**的写法不再有意义——而它
+  //   不会报错，会掉进"那就起服务吧"这条默认路径：你以为在同步技能，屏幕上却是
+  //   服务起来了（实测它真的在 4518 上挂着，直到被外部杀掉，300 秒里没有任何
+  //   一行说自己理解错了）。
+  //
+  //   这条与上面那道 `--` 闸是**同一件事的两半**：参数层的任何意外都不许被
+  //   "按默认往下走"消化掉。认得出旧写法时，直接把新命令报出来。
+  assertNoStrayArgs(argv)
+
   const port = parsePort(argv)
   const dataDirIdx = argv.indexOf('--data-dir')
   const usingDefaultDataDir = dataDirIdx === -1
@@ -73,7 +149,19 @@ async function main(): Promise<void> {
     await migrateLegacyRemoteDir(dataDir)
   }
 
-  const service = new RemoteService({ port, dataDir })
+  // 管理页与同步工具：都不给就用默认（产物目录 / 仓库里的工具脚本）。
+  // ⚠️ 默认值算的是"代码在哪儿"（`import.meta.url`），不是 `process.cwd()`——
+  //    服务可能从任何目录启动。
+  const webDirIdx = argv.indexOf('--web-dir')
+  const syncToolIdx = argv.indexOf('--sync-tool')
+  const manifestIdx = argv.indexOf('--manifest')
+  const service = new RemoteService({
+    port,
+    dataDir,
+    ...(webDirIdx !== -1 ? { webDir: argv[webDirIdx + 1] ?? null } : {}),
+    ...(syncToolIdx !== -1 ? { syncTool: argv[syncToolIdx + 1] ?? null } : {}),
+    ...(manifestIdx !== -1 ? { manifest: argv[manifestIdx + 1] ?? null } : {}),
+  })
 
   // 插件目录：没有就空着——插件是扩展，不是运行前提。
   //
@@ -111,7 +199,12 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write(`agentdeck remote 正在监听 http://127.0.0.1:${actual}\n`)
+  process.stdout.write(`管理页：http://127.0.0.1:${actual}/（技能 / 工具目录，只读）\n`)
   process.stdout.write(`数据目录：${dataDir}\n`)
+  process.stdout.write(
+    `推荐清单：${join(dataDir, 'recommended-skills.json')}` +
+      '（第一次跑同步时由工具把内置默认转存到这里；服务只读它）\n',
+  )
 
   const shutdown = (): void => {
     void service.close().then(() => process.exit(0))

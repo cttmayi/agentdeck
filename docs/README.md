@@ -39,8 +39,10 @@
 | [`./design/architecture.md`](./design/architecture.md) | **架构文档（当前实现）** —— 运行时拓扑、依赖方向、八个包与五个 app 的结构、完整路由表、存储布局、扩展点、不变量→强制点、代码索引与测试对照。**结论都指到具体文件** | — |
 | [`./design/design.md`](./design/design.md) | **设计文档** —— 总体架构、包结构、存储端口、数据模型、接口、状态机、Verdict schema、本地 Daemon、Claude 适配层、审核流水线、动作与审计、远端能力与插件系统、安全边界。**2026-09 的第一句话三块组装见 §15.33** | v2.8 |
 | [`./runtime/pipeline.md`](./runtime/pipeline.md) | **执行与审核：完整流程** —— 参考手册，描述**当前实现**：受理 → 准备 → 命令行 → 输入 → 收尾；执行与审核的差别、失败原因码、去哪儿看全过程、已知的坑 | — |
-| [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、三种来源（+ 本地技能目录）、**装进来落在 `log/skill.jsonl` 而不是文件**、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
+| [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、四种来源（+ 本地技能目录，其中远端目录是**推荐清单**）、**装进来落在 `log/skill.jsonl` 而不是文件**、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
+| [`../tools/skill-catalog-sync/README.md`](../tools/skill-catalog-sync/README.md) | **推荐技能目录的同步工具**（独立工具，不属于远端服务）—— 清单怎么改、**一次同步要花多少次 GitHub API 调用**（以及撞限额时是什么表现）、失败语义（单条失败一个字都不换）、目录布局（工具与服务之间的唯一约定） | — |
 | [`./reference/tools.md`](./reference/tools.md) | **工具包参考手册** —— 一个包 = 一个组、`tool.json` 清单逐字段（含 bound/open 参数）、**怎么照着范例开发一个工具**、脚本与平台的三条约定（stdin/stdout/dry-run）、执行时的环境与临时目录、远端目录的放置位置、判决→动作的完整链路 | — |
+| [`./reference/first-sentence-template.md`](./reference/first-sentence-template.md) | **第一句话模版参考（当前实现）** —— 三块组装（① 框架 / ② 身份 / ③ 任务）× 三条链路（执行 / 审核 / 聊天）的逐项细节、变量表（11 条）、默认模版与渲染实例（逐字）、A/B 投递档、校验规则、老模版迁移、**调整时必须守住的不变量**与代码索引 | — |
 | [`./reference/scenarios.md`](./reference/scenarios.md) | **使用场景说明** —— 端到端走查、多 agent 分工、插件机制、异常边界、数据归属、待确认点 | v2.5 |
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
@@ -100,11 +102,14 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 |---|---|
 | `pnpm run check` | **typecheck + 全量测试**（提交前跑这个） |
 | `pnpm run test` | 只跑测试；`pnpm run test:watch` 监听模式 |
-| `pnpm run build:web` | 构建界面到 `apps/web/dist/`（已 gitignore） |
+| `pnpm run build:web` | 构建**两个**前端：daemon 界面 → `apps/web/dist/`、远端管理页 → `apps/remote/web/dist/`（都已 gitignore） |
+| `pnpm run build:remote-web` | 只构建远端管理页（`apps/remote/web/dist/`） |
 | `pnpm run dev:web` | 界面开发模式（5173 → 代理到 4517） |
-| `pnpm run probe:layout` | **界面布局检查**：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
+| `pnpm run probe:layout` | **daemon 界面的布局检查**（约 470 项）：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
+| `pnpm run probe:remote` | **远端管理页的界面检查**（21 项）：起一次性远端服务（夹具数据、假同步工具、不联网）用真 Chrome 量。改过远端页时跑，**不在 `check` 里**——见 `../tools/remote-ui-probe/README.md` |
 | `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务 |
-| `pnpm run remote` / `mcp` / `cli <命令>` | 另外三个入口 |
+| `pnpm run sync-skills` | **推荐技能目录的同步工具**：抓清单里的 GitHub 技能写进公共目录（跑一次就退出，**不是**服务；参数 `--dry-run` / `--out` / `--manifest`）。⚠️ 要联网、会撞 GitHub 匿名限额（60 次/小时；**实测一条大技能就 11 次**——`pptx` 52 个文件、9 个目录 ⇒ 列目录 10 次 + 取版本 1 次，所以 12 条在匿名下装不下一整轮）。**第一条失败就停**、**1 小时内抓过的不再下载**、已抓到的进**断点目录**。**记不住选项就敲 `pnpm run sync-skills --help`**（只读、无副作用）——见 `../tools/skill-catalog-sync/README.md` |
+| `pnpm run remote` / `mcp` / `cli <命令>` | 另外三个入口。推荐清单的**配置文件**在数据目录下（`recommended-skills.json`）：第一次跑同步时由工具把内置默认转存过去，`--manifest <文件>` 可另指一份（D54）。⚠️ `remote` 起来之后 **http://127.0.0.1:4518/** 就是**管理页**（技能 / 工具目录，D51/D52）：能看、能**重新同步**、能**手动装一条技能**（填 GitHub 链接）、能**卸载本地装的那条**（同步来的要改清单再同步）；`--web-dir` / `--sync-tool` 可换产物目录与同步工具 |
 
 ---
 
@@ -172,7 +177,7 @@ UI 一直复杂到"需要组件化与路由"才换的——那次切换只动了
 2. **daemon 不向 agentdeck 的远端服务发起请求。** 远端只承担五件事（账号登录、用户设定、
    公共目录、第三方查询转发、统计接收）。**一处刻意例外**：从本地路径 / GitHub 安装 skill 时
    daemon 自己去下载（本地目录路径页面读不到）。这条路的边界**写死在
-   `apps/daemon/src/skill-source.ts`**：只允许 GitHub 的几个主机、只允许 https、**每一跳跳转都
+   `packages/skill-source/src/skill-source.ts`**：只允许 GitHub 的几个主机、只允许 https、**每一跳跳转都
    重新校验主机**，并限大小 / 文件数 / 超时。要扩到任意 URL 得单独做——让本地服务去抓任意
    地址，等于给它一个访问内网的跳板。 → `./design/design.md` §15.10。
 3. **审核者 ≠ 执行者、动作只能由判决触发、链路有深度上限与环检测。** 这三条是硬不变量，

@@ -18,6 +18,7 @@
     "@agentdeck/domain": "workspace:*",
     "@agentdeck/i18n": "workspace:*",
     "@agentdeck/protocol": "workspace:*",
+    "@agentdeck/skill-source": "workspace:*",
     "@agentdeck/store-file": "workspace:*",
     "@agentdeck/web": "workspace:*"
   }

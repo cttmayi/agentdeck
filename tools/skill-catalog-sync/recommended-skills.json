@@ -1,0 +1,125 @@
+{
+  "schema": "agentdeck/recommended-skills@1",
+  "verifiedAt": "2026-10-05",
+  "note": "维护者手写。改完跑 `pnpm run sync-skills`（加 --dry-run 先看会改什么）。slug 与 sourceRef 不在这里声明——它们由 @agentdeck/skill-source 的取包规则算出来，与 daemon 装的时候逐字相同。 有些仓库（「整仓即技能」那种）把营销素材、README 图、测试产物和技能内容混在一棵树里，那就在该条上写 exclude（相对技能目录的 glob，SKILL.md 不许排除）；同步时被排除的文件会逐个列出来，界面也会标「内容不完整」。",
+  "items": [
+    {
+      "url": "https://github.com/anthropics/skills/tree/main/skills/pptx",
+      "name": "PPT 读写（Anthropic 官方）",
+      "category": "slides",
+      "origin": "official",
+      "summary": "读写 .pptx：提文本、生成整套幻灯片缩略图网格、新建与改 XML",
+      "fills": "补版式与文件级操作（PPT 的基础能力本机已经有了）",
+      "needs": null
+    },
+    {
+      "url": "https://github.com/anthropics/skills/tree/main/skills/docx",
+      "name": "Word 报告（Anthropic 官方）",
+      "category": "docs",
+      "origin": "official",
+      "summary": "Word 报告生成：目录、页码、表格、信头、批注、修订",
+      "fills": "补报告排版与批注/修订这条链路",
+      "needs": null
+    },
+    {
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/research",
+      "name": "调研（一手来源 + 引用链）",
+      "category": "research",
+      "origin": "community",
+      "summary": "派后台 agent 只查一手来源，产出带回链的 Markdown",
+      "fills": "补「一手来源、带引用」这条调研纪律",
+      "needs": null
+    },
+    {
+      "url": "https://github.com/anthropics/skills/tree/main/skills/xlsx",
+      "name": "表格 / 数据型报告（Anthropic 官方）",
+      "category": "report",
+      "origin": "official",
+      "summary": "读写 .xlsx，做数据型报告",
+      "fills": null,
+      "needs": null
+    },
+    {
+      "url": "https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring",
+      "name": "协作写作流程（Anthropic 官方）",
+      "category": "report",
+      "origin": "official",
+      "summary": "结构化协作写作：收集上下文 → 分节迭代 → 用无上下文的新会话做「读者测试」",
+      "fills": "补写汇报/方案时的迭代流程",
+      "needs": null
+    },
+    {
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/productivity/to-questionnaire",
+      "name": "问卷设计",
+      "category": "research",
+      "origin": "community",
+      "summary": "把要问的事变成一份能用的问卷",
+      "fills": "补问卷式调查这一步",
+      "needs": null
+    },
+    {
+      "url": "https://github.com/op7418/guizang-ppt-skill",
+      "name": "横滑网页 PPT（中文，杂志风/瑞士风）",
+      "category": "slides",
+      "origin": "community",
+      "summary": "生成单文件 HTML 的横滑网页 PPT，带演讲者视图与讲稿备注",
+      "fills": "补中文版式设计感，适合分享与发布会",
+      "needs": null,
+      "exclude": [
+        "assets/ppt-skill-showcase.png",
+        "assets/screenshot-backgrounds/**",
+        "docs/**",
+        ".github/**"
+      ]
+    },
+    {
+      "url": "https://github.com/lewislulu/html-ppt-skill",
+      "name": "HTML PPT 工厂（24 主题 / 31 布局）",
+      "category": "slides",
+      "origin": "community",
+      "summary": "24 主题、31 布局、20+ 动画的 HTML PPT 生成",
+      "fills": null,
+      "needs": null,
+      "exclude": [
+        "docs/**",
+        "scripts/verify-output/**"
+      ]
+    },
+    {
+      "url": "https://github.com/jimliu/baoyu-skills/tree/main/skills/baoyu-slide-deck",
+      "name": "图片式 slide（AI 出图）",
+      "category": "slides",
+      "origin": "community",
+      "summary": "整页图片式的 slide，偏阅读与传播",
+      "fills": null,
+      "needs": "出图依赖图像生成能力（本机已有 imagegen）"
+    },
+    {
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/customer-research",
+      "name": "用户调研（访谈 / 评论挖掘）",
+      "category": "research",
+      "origin": "community",
+      "summary": "用户访谈与评论挖掘",
+      "fills": null,
+      "needs": "写的是海外营销语境，中文场景自行判断"
+    },
+    {
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/competitor-profiling",
+      "name": "竞品拆解",
+      "category": "research",
+      "origin": "community",
+      "summary": "把竞品拆成可对比的几栏",
+      "fills": null,
+      "needs": null
+    },
+    {
+      "url": "https://github.com/firecrawl/firecrawl-workflows/tree/main/skills/firecrawl-deep-research",
+      "name": "深度调研（带引用长报告）",
+      "category": "research",
+      "origin": "community",
+      "summary": "带引用的长报告",
+      "fills": null,
+      "needs": "需要自己准备 Firecrawl API key（装进来也跑不了）"
+    }
+  ]
+}
