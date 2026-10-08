@@ -86,11 +86,12 @@ export function localSkillDirCandidates(home: string = homedir()): LocalSkillDir
   ]
 }
 
-/** 展开 `~`（只认开头的 `~` 或 `~/`），并收敛成绝对路径。 */
+/** 展开 `~`（只认开头的 `~`、`~/`、`~\`），并收敛成绝对路径。 */
 export function expandSkillDirPath(input: string, home: string = homedir()): string {
   const trimmed = input.trim()
   if (trimmed === '~') return home
-  if (trimmed.startsWith('~/')) return join(home, trimmed.slice(2))
+  // ⚠️ `~\` 也认：Windows 使用者敲的是这个（理由同 tool-source.ts 的 expandHome）
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) return join(home, trimmed.slice(2))
   return trimmed
 }
 

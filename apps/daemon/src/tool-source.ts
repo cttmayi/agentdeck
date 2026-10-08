@@ -161,7 +161,10 @@ export function buildToolPackage(input: {
   for (const [relPath, text] of Object.entries(input.files)) {
     if (relPath === MANIFEST_FILE || relPath === DOCS_FILE) continue
     // 纵深防御：清单已校验过路径，但这里是"文件真的从外部来的"那一层
-    if (relPath.startsWith('/') || relPath.includes('..')) {
+    // ⚠️ 绝对路径用 `isAbsolute`（Windows 上还有 `C:\…`、`\\server\…`、`\x` 三种
+    //    形态，都不以 `/` 开头）。这里只是**纵深防御的第一道**：真正拦住它们的是
+    //    物化时那道 `resolveInside`（`resolve` + 按 `sep` 比前缀）。
+    if (isAbsolute(relPath) || relPath.includes('..')) {
       throw new ToolSourceError(
         'bad_input',
         `包里的路径不合法：${relPath}`,
@@ -281,9 +284,13 @@ export async function resolveLocalToolPath(
   return pkg
 }
 
-function expandHome(p: string): string {
+/** 展开开头的 `~`。导出是为了**能直接测**（它是个纯函数，两条分隔符各一条判据）。 */
+export function expandHome(p: string): string {
   if (p === '~') return homedir()
-  if (p.startsWith('~/')) return join(homedir(), p.slice(2))
+  // ⚠️ `~/` 与 `~\` 都认：Windows 使用者在输入框里敲的是 `~\my-tools`，
+  //    只认 `/` 的话那条路径会被原样拿去当相对路径用（找不到，而且报的是
+  //    "这个工具包不存在"——错在了别处）。见 docs/reference/windows-compat.md。
+  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2))
   return p
 }
 

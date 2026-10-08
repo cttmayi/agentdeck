@@ -270,6 +270,16 @@ describe('文件查看器：原文的呈现', () => {
   test('路径拆成目录与文件名（标题栏里目录要弱化）', () => {
     assert.deepEqual(splitPath('a/b/c.md'), { dir: 'a/b/', name: 'c.md' })
     assert.deepEqual(splitPath('c.md'), { dir: '', name: 'c.md' })
+    // ⚠️ Windows 的绝对路径：整条不能被当成"文件名"（2026-10 Windows 兼容性审计）
+    assert.deepEqual(splitPath('C:\\Users\\ling\\wd\\clip.webm'), {
+      dir: 'C:/Users/ling/wd/',
+      name: 'clip.webm',
+    })
+    // 混用两种分隔符（Windows 上真会出现：daemon 给的相对路径是 `/`，使用者给的可能是 `\`）
+    assert.deepEqual(splitPath('C:\\wd/sub\\clip.webm'), {
+      dir: 'C:/wd/sub/',
+      name: 'clip.webm',
+    })
   })
 
   test('「新标签页打开」的地址与那一栏用的是同一套', () => {

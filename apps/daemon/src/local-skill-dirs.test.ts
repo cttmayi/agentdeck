@@ -5,6 +5,7 @@ import { describe, test } from 'node:test'
 import type { Skill, WorkspaceId } from '@agentdeck/protocol'
 import {
   LOCAL_DIR_SOURCE_PREFIX,
+  expandSkillDirPath,
   localSkillDirCandidates,
   normalizeSkillDir,
   reconcileLocalSkillDirs,
@@ -109,6 +110,18 @@ function existingRecord(input: {
     updatedAt: 1,
   }
 }
+
+describe('★ Windows：`~\` 也是家目录（2026-10 兼容性审计）', () => {
+  // ⚠️ 为什么这条值得钉：Windows 使用者在输入框里敲的是 `~\my-skills`。
+  //    只认 `~/` 的版本会把整串当相对路径用——报出来的却是"这个目录不存在"，
+  //    错误指向了别处（这类"错在别处"是本项目最花时间的一类故障）。
+  test('expandSkillDirPath 认 `~/` 也认 `~\`，其余原样', () => {
+    assert.equal(expandSkillDirPath('~/skills', '/home/u'), join('/home/u', 'skills'))
+    assert.equal(expandSkillDirPath('~\\skills', '/home/u'), join('/home/u', 'skills'))
+    assert.equal(expandSkillDirPath('  ~ ', '/home/u'), '/home/u')
+    assert.equal(expandSkillDirPath('/abs/skills', '/home/u'), '/abs/skills')
+  })
+})
 
 describe('★ 扫描：认得出真实存在的两种形状', () => {
   test('★ 扁平形状（claude / cursor）：`<slug>/SKILL.md`', async () => {

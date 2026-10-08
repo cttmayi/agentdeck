@@ -1,0 +1,34 @@
+# 行尾一律 LF（2026-10：Windows 兼容性审计）
+#
+# ══════════════════════════════════════════════════════════════════
+# 为什么这个仓库必须钉住行尾
+# ══════════════════════════════════════════════════════════════════
+#
+# 两个理由，各自都会真的弄坏东西：
+#
+#   1. **被 bash 执行的脚本**。`runtime: 'shell'` 的工具包、示例脚本、
+#      开发工具里的 shell 片段，一旦带 CRLF，bash 会以
+#      `$'\r': command not found` 失败——而那句话完全指不到行尾上去。
+#   2. **按字节比较自己写出去的东西**。审计里的哈希、投递出去的文本、
+#      上下文副本都是逐字节算的；源码在两个平台检出成不同的字节，
+#      是"同一份代码、两台机器上哈希不一样"这类最难查的故障的温床。
+#
+# Git for Windows 的安装默认 `core.autocrlf=true`，所以 Windows 上检出
+# 会变成 CRLF——**这个文件就是为此存在的**。不是 Windows 的锅：只要有人
+# 在 Windows 上 clone 一次再提交，仓库里就会混进 CRLF。
+* text=auto eol=lf
+
+# 二进制：`text=auto` 的探测已经能认出大多数，这里把明确的再说一遍，
+# 免得某天被当成文本"规范化"（图片、字体、压缩包、媒体）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.tar.gz binary
+*.mp4 binary
+*.webm binary

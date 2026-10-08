@@ -1,5 +1,5 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
-import { join, relative, resolve, sep } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 /**
  * 工作目录的文件浏览（任务详情右边那一栏，以及 Markdown 里引用的图片）。
@@ -252,8 +252,13 @@ export async function resolveWorkFilePath(workDir: string, relPath: string): Pro
   if (relPath === '') throw new UnsafePathError('缺少 path 参数')
   if (relPath.includes('\0')) throw new UnsafePathError('路径里有非法字符')
 
-  // 绝对路径直接拒绝，而不是"把它当相对的"——静默纠正会让调用方以为自己对了
-  if (relPath.startsWith('/')) throw new UnsafePathError('path 必须是相对工作目录的路径')
+  // 绝对路径直接拒绝，而不是"把它当相对的"——静默纠正会让调用方以为自己对了。
+  // ⚠️ 判据用 `isAbsolute` 而不是 `startsWith('/')`：Windows 上绝对路径还有
+  //    `C:\…`、`\\server\share\…`、`\x` 三种形态，都不以 `/` 开头（2026-10
+  //    Windows 兼容性审计）。用 `startsWith('/')` 时它们会落到下面那道"跑出了
+  //    工作目录"——**拦住是拦住了**（真正管用的是下面 `resolve` + `sep` 比前缀那道），
+  //    但报出来的原因是错的。
+  if (isAbsolute(relPath)) throw new UnsafePathError('path 必须是相对工作目录的路径')
 
   const root = await realpath(workDir).catch(() => resolve(workDir))
   const target = resolve(root, relPath)

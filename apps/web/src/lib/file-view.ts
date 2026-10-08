@@ -351,9 +351,15 @@ export function languageOf(path: string): string | null {
 
 /** 这一份文件的路径要不要显示成两段（目录暗、文件名亮）——基名与目录。 */
 export function splitPath(path: string): { dir: string; name: string } {
-  const slash = path.lastIndexOf('/')
-  if (slash === -1) return { dir: '', name: path }
-  return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) }
+  // ⚠️ **Windows 的反斜杠也认**：这里切的是**绝对路径**（工作目录下某个文件的
+  //    全路径），而 Windows 上它是 `C:\Users\…\clip.webm`。只认 `/` 的话，
+  //    整条路径会被当成"文件名"显示在标题栏里，前面那一长串目录名看不见。
+  //    （工作目录**树**不受影响：daemon 给的相对路径一律用 `/` 拼，
+  //    见 apps/daemon/src/workdir-files.ts。）切完统一成 `/`，显示不混两种分隔符。
+  const normalized = path.replace(/\\/g, '/')
+  const slash = normalized.lastIndexOf('/')
+  if (slash === -1) return { dir: '', name: normalized }
+  return { dir: normalized.slice(0, slash + 1), name: normalized.slice(slash + 1) }
 }
 
 /** 十六进制预览：每行 16 字节，右侧配可打印字符（不可打印打 `.`）。 */

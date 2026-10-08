@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { homedir } from 'node:os'
 import { describe, test } from 'node:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { ToolSourceError, resolveLocalToolPath } from './tool-source.ts'
+import { ToolSourceError, expandHome, resolveLocalToolPath } from './tool-source.ts'
 import { MAX_FILES } from '@agentdeck/skill-source'
 import { makeTempDir } from './testing/tmp.ts'
 
@@ -196,3 +197,13 @@ describe('D40：工具包来源解析', () => {
   })
 })
 
+describe('★ Windows：`~\` 也是家目录（2026-10 兼容性审计）', () => {
+  test('expandHome 认 `~/` 也认 `~\`；不认别的', () => {
+    const home = homedir()
+    assert.equal(expandHome('~'), home)
+    assert.ok(expandHome('~/tools').startsWith(home), '`~/tools` 要展开到家目录底下')
+    assert.ok(expandHome('~\\tools').startsWith(home), '`~\\tools` 也要展开')
+    // 中间的 `~` 不是家目录（`a/~/b` 是普通相对路径）
+    assert.equal(expandHome('a/~/b'), 'a/~/b')
+  })
+})

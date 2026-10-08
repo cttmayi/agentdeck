@@ -25,6 +25,7 @@
 | **工具包怎么开发、住在哪**（清单逐字段、脚本约定、远端目录、执行链路） | [`./reference/tools.md`](./reference/tools.md) |
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | **智能体组是怎么工作的**（工作流：执行 → 审核 → 行动、展开、返工闭环、四道闸） | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
+| **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看 A 级三条，再看"最小验收清单"） |
 
 **读代码的路线**：`./runtime/pipeline.md` 是按"一次 run 的生命周期"写的，每一节都标了对应文件——
 从它进比从目录树进快得多。改哪一段去哪找，见那份文档最后的「代码索引」，
@@ -44,6 +45,7 @@
 | [`../tools/skill-catalog-sync/README.md`](../tools/skill-catalog-sync/README.md) | **推荐技能目录的同步工具**（独立工具，不属于远端服务）—— 清单怎么改、**一次同步要花多少次 GitHub API 调用**（以及撞限额时是什么表现）、失败语义（单条失败一个字都不换）、目录布局（工具与服务之间的唯一约定） | — |
 | [`./reference/tools.md`](./reference/tools.md) | **工具包参考手册** —— 一个包 = 一个组、`tool.json` 清单逐字段（含 bound/open 参数）、**怎么照着范例开发一个工具**、脚本与平台的三条约定（stdin/stdout/dry-run）、执行时的环境与临时目录、远端目录的放置位置、判决→动作的完整链路 | — |
 | [`./reference/first-sentence-template.md`](./reference/first-sentence-template.md) | **第一句话模版参考（当前实现）** —— 三块组装（① 框架 / ② 身份 / ③ 任务）× 三条链路（执行 / 审核 / 聊天）的逐项细节、变量表（11 条）、默认模版与渲染实例（逐字）、A/B 投递档、校验规则、老模版迁移、**调整时必须守住的不变量**与代码索引 | — |
+| [`./reference/windows-compat.md`](./reference/windows-compat.md) | **Windows 兼容性审计（2026-10）** —— 在 Windows 上能跑到哪一步、A/B/C/D 四级缺口（每条都指到文件行，并标了 `[量到]`/`[判断]`）、建议的修复顺序、真机最小验收清单、以及**没量到的**那一节 | — |
 | [`./reference/scenarios.md`](./reference/scenarios.md) | **使用场景说明** —— 端到端走查、多 agent 分工、插件机制、异常边界、数据归属、待确认点 | v2.5 |
 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) | **工作流智能体组：它是怎么工作的**（当前实现）—— 组里装了什么、三步（执行 → 审核 → 行动）、建任务时怎么摊开成普通配置、判决怎么分流、**返工闭环**（交回同一执行者原地改）、行动与固定参数、几道边界、界面看到什么 | — |
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
