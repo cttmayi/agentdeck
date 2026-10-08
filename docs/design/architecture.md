@@ -171,8 +171,17 @@ protocol  ←  domain  ←  store-file / store-sqlite
 ### 2.3 为什么没有构建步骤（后端）
 
 `tsconfig.base.json` 设了 `erasableSyntaxOnly: true`，并禁用 `enum` / `namespace` /
-构造函数参数属性。因此后端直接由 **Node ≥ 22 的类型擦除**执行 `.ts`，没有编译产物：
-`pnpm run daemon` 就是 `node apps/daemon/src/cli.ts`。这条约束反过来影响了整个代码风格
+构造函数参数属性。因此后端直接由 **Node 的类型擦除**执行 `.ts`，没有编译产物：
+`pnpm run daemon` 就是 `node apps/daemon/src/cli.ts`。
+
+⚠️ **门槛是 Node ≥ 22.18（23.x 那条线要 ≥ 23.6）**，不是"≥ 22"——类型擦除默认可用是
+23.6 起、并回移到 22.18（实测 22.17 报 `ERR_UNKNOWN_FILE_EXTENSION`）。
+所以四条 CLI 命令前面套了一层**普通 JavaScript** 的版本守卫
+（`scripts/node-entry.mjs`，写成 `.mjs` 是必须的：守卫写在 `.ts` 里跑不到，
+node 连那个文件都加载不了），它顺手把 `process.argv` 掰回"入口直接跑"的样子再 `import()`。
+`engines` 也相应收紧到 `>=22.18`。见 `docs/reference/windows-compat.md`。
+
+这条约束反过来影响了整个代码风格
 （所有枚举都是 `as const` 数组 + 派生类型，见 `packages/protocol/src/enums.ts`）。
 
 ---
@@ -597,6 +606,23 @@ interface AgentSession {
 
 `runtime-agnostic.test.ts` 整条跑在第二个 runtime 上，专门抓"还有东西写死了 claude"
 （审计、技能投递、界面选项、文件清单）。
+
+**真的要 exec 什么**（`spawn-target.ts`，2026-10）：探测到的**可执行文件路径**在 Windows 上
+可能不是能 exec 的东西——npm 装的 CLI 是 `.cmd` 垫片，而 Node 从 2024-04 的安全版本起
+（CVE-2024-27980）**拒绝 `shell: false` 地 spawn `.cmd`/`.bat`**（参数校验阶段抛 `EINVAL`）。
+所以 spawn 之前先问 `resolveSpawnTarget`：
+
+| 情形 | 结果 |
+|---|---|
+| 非 Windows | 原样（`via: 'direct'`，Unix 行为一个字没变） |
+| `.cmd`/`.bat` 且认得出 npm 垫片形状 | 解开成 `<node> <cli.js> <真实参数>`（`via: 'shim'`）——参数**不经 shell** |
+| `.cmd`/`.bat` 但认不出来 | `cmd.exe /d /s /c`（`via: 'cmd'`）；参数里有 cmd 无法如实传递的字符（`"`/`%`/换行）就**拒绝**，不静默改写 |
+| `.ps1` | **拒绝**并说清"npm 同时给了 `.cmd`"（Node 起不了 `.ps1`） |
+
+⚠️ 这句话是**故意的**：`spawnProcessTree` 因此可能同步抛 `UnspawnableCommandError`。
+探测侧的候选扩展名也跟着改了：以机器的 `PATHEXT` 为准，并按"Node 起得起来"过滤
+（**`.ps1` 不再出现在候选里**——它一度在，表现是"预检说可用、真跑必炸"）。
+理由、取舍与实测边界见 `docs/reference/windows-compat.md`。
 
 ### 6.3 第一句话：三块组装与两个投递档（D29 / 2026-09）
 

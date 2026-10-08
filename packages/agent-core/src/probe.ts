@@ -1,6 +1,7 @@
 import { access, constants } from 'node:fs/promises'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { spawnProcessTree } from './process-tree.ts'
+import { WINDOWS_SPAWNABLE_EXT, isWindowsSpawnableExt } from './spawn-target.ts'
 
 /**
  * 可执行文件探测（FR-RUNTIME-03）。
@@ -23,11 +24,42 @@ import { spawnProcessTree } from './process-tree.ts'
  * 没有这个兜底，"几乎总有一个没装上的 provider 会让 LookPath 失败"。
  */
 
-const WINDOWS_EXTENSIONS = ['.exe', '.cmd', '.bat', '.ps1', '']
+/**
+ * Windows 上要找哪些扩展名。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 旧版这里写死了一张表，里面还带 `.ps1`——那是错的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `.ps1` 是 PowerShell 脚本，**Node 起不了它**（要 `powershell.exe -NoProfile -File`）。
+ * 于是探测会"成功"、真跑的时候才炸——正是"预检说可用、运行时报错"那类最难归因的
+ * 故障（2026-10 Windows 兼容性审计的 A2）。
+ *
+ * 现在两件事一起改：
+ *   1. 以机器的 **`PATHEXT`** 为准（`script-executor.findExecutable` 一直是这么做的，
+ *      两处不一致本身就是坑）；
+ *   2. 用 `WINDOWS_SPAWNABLE_EXT` **把 Node 起不来的那些滤掉**——`.ps1`、`.VBS`、
+ *      `.JS`、`.WSF` 都在 PATHEXT 里、也都起不了。
+ *
+ * 末尾那个空串是"命令本身已经带扩展名"的情形（`claude.exe`）：不试它就永远找不到。
+ */
+export function windowsCandidateExtensions(pathext: string | undefined): string[] {
+  const declared = (pathext ?? '')
+    .split(';')
+    .map((ext) => ext.trim().toLowerCase())
+    .filter((ext) => ext !== '')
+  const spawnable = declared.filter((ext) => isWindowsSpawnableExt(ext))
+  // PATHEXT 可能被改窄过（有人把它设成只有 `.EXE`），但 PATH 里真有 `.cmd` 垫片
+  // 时我们仍然该找到它——所以三类可 spawn 的扩展名一个都不能少。
+  for (const ext of WINDOWS_SPAWNABLE_EXT) {
+    if (!spawnable.includes(ext)) spawnable.push(ext)
+  }
+  return [...new Set([...spawnable, ''])]
+}
 
-function candidatesIn(dir: string, command: string): string[] {
+export function candidatesIn(dir: string, command: string): string[] {
   if (process.platform !== 'win32') return [join(dir, command)]
-  return WINDOWS_EXTENSIONS.map((ext) => join(dir, `${command}${ext}`))
+  return windowsCandidateExtensions(process.env['PATHEXT']).map((ext) => join(dir, `${command}${ext}`))
 }
 
 async function isExecutable(path: string): Promise<boolean> {

@@ -1,6 +1,7 @@
 import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { executableWrapper } from '@agentdeck/agent-core'
 import type { RuntimeDescriptor } from '@agentdeck/agent-core'
 import { codexDescriptor } from '../codex-descriptor.ts'
 
@@ -37,24 +38,25 @@ export async function makeFakeAppServer(dir: string): Promise<FakeAppServer> {
   // 与 generic 同款教训：扩展名必须是 `.ts`，Node 24 原生执行 TS（类型擦除）；
   // 拷成 `.mjs` 会在子进程里抛 SyntaxError，表现是"stdout 一个字都没有"。
   const scriptPath = join(dir, 'fake-app-server.ts')
-  const wrapperPath = join(dir, FAKE_COMMAND)
   const dataDir = join(dir, 'data')
 
   const source = join(HERE, 'fake-app-server.ts')
   await copyFile(source, scriptPath)
   await mkdir(dataDir, { recursive: true })
 
-  await writeFile(
-    wrapperPath,
-    [
-      '#!/bin/sh',
-      '# 假 app-server 的包装脚本：把后端拼出的真实启动 argv 原样转发给 node。',
-      `exec "${process.execPath}" "${scriptPath}" "$@"`,
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-  await chmod(wrapperPath, 0o755)
+  // ⚠️ 包装的形状**按平台定**：Unix 是 `#!/bin/sh` + exec；Windows 上没有 sh、
+  //    chmod 也是空操作，改用一段形状与 npm 垫片一致的 `.cmd`——它会被
+  //    `resolveSpawnTarget` 解开成 `<node> <script> <真实参数>`，于是
+  //    "被测的 argv 仍是真实 argv"这条性质两个平台都成立。
+  //    见 docs/reference/windows-compat.md 的 A3。
+  const wrapper = executableWrapper({
+    name: FAKE_COMMAND,
+    nodePath: process.execPath,
+    scriptPath,
+  })
+  const wrapperPath = join(dir, wrapper.name)
+  await writeFile(wrapperPath, wrapper.content, 'utf8')
+  if (wrapper.needsChmod) await chmod(wrapperPath, 0o755)
 
   return {
     executablePath: wrapperPath,

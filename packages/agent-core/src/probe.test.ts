@@ -2,7 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { detectVersion } from './probe.ts'
+import { detectVersion, windowsCandidateExtensions } from './probe.ts'
 
 /**
  * `detectVersion` 的回归测试。
@@ -58,3 +58,27 @@ describe('detectVersion（版本探测，FR-CLI-07 的输入）', () => {
 function dirnameOf(path: string): string {
   return path.slice(0, path.lastIndexOf('/'))
 }
+
+describe('★ Windows 的候选扩展名（2026-10 兼容性审计的 A2）', () => {
+  // 旧版这里写死了 `.exe/.cmd/.bat/.ps1/''`：`.ps1` 是 PowerShell 脚本，
+  // **Node 起不了它**（要 `powershell -File`）⇒ 探测"成功"、真跑必炸。
+  // 现在以机器的 PATHEXT 为准，并按"Node 起得起来"过滤。
+
+  test('★ 真实机器上的 PATHEXT ⇒ 滤掉 Node 起不了的那几个', () => {
+    // 这是 Windows 默认值（一字不差）
+    const ext = windowsCandidateExtensions('.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC')
+    assert.deepEqual(ext, ['.com', '.exe', '.bat', '.cmd', ''])
+    for (const bad of ['.ps1', '.vbs', '.js', '.wsf', '.msc']) {
+      assert.ok(!ext.includes(bad), `${bad} 不该在候选里（Node 起不了它）`)
+    }
+  })
+
+  test('PATHEXT 缺了/被改窄 ⇒ 三种可 spawn 的还是要补上', () => {
+    assert.deepEqual(windowsCandidateExtensions(undefined), ['.exe', '.com', '.cmd', '.bat', ''])
+    assert.deepEqual(windowsCandidateExtensions('.EXE'), ['.exe', '.com', '.cmd', '.bat', ''])
+  })
+
+  test('末尾的空串在（"命令自带扩展名"那种情形就靠它）', () => {
+    assert.equal(windowsCandidateExtensions('.EXE;.CMD').at(-1), '')
+  })
+})

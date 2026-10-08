@@ -27,14 +27,24 @@
 
 | 编号 | 改了什么 | 在哪 |
 |---|---|---|
-| B1（一半） | `engines` 从 `>=22` 收紧到 **`>=22.18`**，README 的安装节把"为什么不是 ≥22 就够"写清了（附 Node 22.17 上的实测报错） | `package.json`、`README.md` |
+| **A1** | spawn 之前先问 `resolveSpawnTarget`：`.cmd`/`.bat` 会被**解开成 `<node> <cli.js> <真实参数>`**（`via: 'shim'`；用完 daemon 的这个 node，理由同 `resolveCommand('node')`），认不出来才退回 `cmd.exe /d /s /c`（`via: 'cmd'`，且参数里有 cmd 无法如实传递的字符就**拒绝**而不是静默改写） | 新 `packages/agent-core/src/spawn-target.ts`；接进 `process-tree.ts`、`apps/daemon/src/script-executor.ts` |
+| **A2** | 候选扩展名改读机器的 **`PATHEXT`**，并按"Node 起得起来"过滤——**`.ps1` 从此不在候选里**（`.VBS`/`.JS`/`.WSF` 同理）；`.ps1` 真的被指到时**明确拒绝**并说清"npm 同时给了 `.cmd`" | `packages/agent-core/src/probe.ts`、`spawn-target.ts` |
+| **A3** | 假 CLI 的包装按平台产出：Unix 仍是 `#!/bin/sh` + exec（形状逐字未变），Windows 改成一段**形状与 npm 垫片一致**的 `.cmd`——于是"被测的 argv 仍是真实 argv"两个平台都成立 | `spawn-target.ts` 的 `executableWrapper`；`packages/agent-generic`、`packages/agent-codex` 的两个 helper |
+| B1（另一半） | 入口前置壳 `scripts/node-entry.mjs`：跑 `.ts` 之前先查 Node 版本，不合格就把 `ERR_UNKNOWN_FILE_EXTENSION` 那段堆栈换成一句能照做的话（**实测**：真的 Node 22.17.0 上现在是这段话 + 退出码 1）。⚠️ 守卫**必须**是 `.mjs`——写在 `.ts` 里是跑不到的 | `scripts/node-entry.mjs` + 四条 `pnpm run` 命令 |
+| B1（一半） | `engines` 从 `>=22` 收紧到 **`>=22.18`**，README 的安装节把"为什么不是 ≥22 就够"写清了（含 23.x 那条线要 23.6） | `package.json`、`README.md` |
 | B4 | `splitPath` 认反斜杠（Windows 绝对路径不再被整条当成"文件名"显示） | `apps/web/src/lib/file-view.ts` + 测试 |
 | B5 | 两处"必须是相对路径"的判据从 `startsWith('/')` 换成 `isAbsolute()`（Windows 的三种绝对形态现在报的是对的原因） | `apps/daemon/src/workdir-files.ts`、`apps/daemon/src/tool-source.ts` |
 | B7 | 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制白名单）——Git for Windows 默认把检出变成 CRLF | `.gitattributes` |
 | B9 | `~\` 也当家目录展开（Windows 使用者敲的是这个） | `apps/daemon/src/tool-source.ts`、`apps/daemon/src/local-skill-dirs.ts` + 测试 |
 
-⚠️ 这些改动**没有在真 Windows 上跑过**（本机是 macOS）；B4/B7/B9 是平台无关的、
-B5 是"在 Windows 上才生效、在 POSIX 上行为不变"。**A 级那三条还都在**——那才是真正的拦路虎。
+⚠️ **这些改动没有在真 Windows 上跑过**（本机是 macOS）。哪些是量到的、哪些还只是判断：
+
+- **量到**：垫片解析与平台判断（21 条判据，夹具是**逐字抄的真 npm 垫片**）、假 CLI 包装的两种形状
+  （含"我们的解析器认得出我们造的包装"这条往返）、候选扩展名（拿 Windows 默认 PATHEXT 当输入）、
+  版本守卫（真的 Node 22.17.0 跑出来的那段话）、argv 转交（真起进程）、
+  以及 **Unix 上行为一个字没变**（`via: 'direct'`，原来的测试全绿）。
+- **还只是判断**：真 Windows 上 `.cmd` 垫片 exec 得起来吗、cmd 的引号规则在真机上是不是如我所想、
+  `taskkill /T` 在"我们成了 node 的父进程"之后是否照样收掉整棵树。**这三条要在真机上量**（见下面清单）。
 
 ---
 
@@ -302,9 +312,10 @@ node -e "require('node:fs').access(process.env.USERPROFILE, 2, (e)=>console.log(
 ## 没量到的（诚实清单）
 
 1. **真 Windows 上的一次完整跑通**——这份报告里所有 `[判断]` 都没有真机证据。
-2. **`.cmd` 垫片能否原样转发参数**（中文、空格、引号、`%`）：这决定 A1 选①还是②，
-   也是最该在真机上先量的一条：写一个带 `%~dp0` 的 `.cmd` 打进假 CLI，把真实 argv 落盘，再和
-   期望比对（仓库里已有 `FAKE_ARGV_ECHO_FILE` 这套机制，直接能用）。
+2. **`.cmd` 垫片能否原样转发参数**（中文、空格）：A1 已经选了"解开垫片"这条路（参数不经 shell），
+   所以这条已经**在我们这侧**绕开了；真机上要量的是"解开之后 exec 得起来吗"。
+   仓库里现成的手段：`FAKE_ARGV_ECHO_FILE` 会把进程**实际收到**的 argv 落盘 ⇒
+   在 Windows 上跑 `packages/agent-generic/src/generic-backend.test.ts` 就能同时验到 A1 与 A3。
 3. **`fs.access(W_OK)` 在 Windows 上对 ACL 拒绝目录的返回值**（B3 的判断依据）。
 4. **Defender / 索引器对 `rename` 的干扰面**（B6 的频率，是"偶发"还是"经常"）。
 5. **长路径（MAX_PATH 260）**：工作目录默认在 `%USERPROFILE%\agentdeck-workspace\…`，够短；

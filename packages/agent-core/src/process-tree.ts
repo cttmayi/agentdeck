@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
+import { resolveSpawnTarget } from './spawn-target.ts'
 
 /**
  * 进程树管理（NFR-P-05）。
@@ -17,6 +18,21 @@ import { createInterface } from 'node:readline'
  *             （Job Object 是更彻底的方案，见下）
  *
  * 平台差异用一个接口盖住，上层不需要知道自己在哪个系统上。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ⚠️ Windows 上"要 exec 的东西"和"探测到的东西"**不是同一个文件**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * npm 装在 Windows 上的 CLI 是 `.cmd` 垫片，而 Node 从 2024-04 的安全版本起
+ * （CVE-2024-27980）**拒绝 `shell: false` 地 spawn `.cmd`/`.bat`**（参数校验阶段
+ * 抛 `EINVAL`）。所以这里**先问 `resolveSpawnTarget`**：它会把垫片解开成
+ * `<node> <cli.js> <真实参数>`（`via: 'shim'`），认不出来才退回 `cmd.exe`
+ * （`via: 'cmd'`）。诊据与取舍全在 `spawn-target.ts` 的模块头与
+ * `docs/reference/windows-compat.md`。
+ *
+ * ⚠️ 正因为有这条：`spawnProcessTree` **可能同步抛** `UnspawnableCommandError`
+ *    （比如探测到的是 `.ps1`，或者参数里有 cmd 无法如实传递的字符）。
+ *    那是**故意的**——静默改写参数会让"prompt 少了半句"，比失败难查得多。
  */
 
 export interface SpawnInput {
@@ -76,7 +92,9 @@ const DEFAULT_GRACE_MS = 5_000
 export function spawnProcessTree(input: SpawnInput): ProcessHandle {
   const isWindows = process.platform === 'win32'
 
-  const child: ChildProcess = spawn(input.command, [...input.args], {
+  const target = resolveSpawnTarget({ command: input.command, args: input.args })
+
+  const child: ChildProcess = spawn(target.command, target.args, {
     cwd: input.cwd,
     env: input.env,
     stdio: ['pipe', 'pipe', 'pipe'],

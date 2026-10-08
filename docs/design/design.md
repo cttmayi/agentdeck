@@ -5215,3 +5215,87 @@ GET /api/catalog → catalog.skills[]（每次请求重扫）
 - **不加播放列表 / 全屏自定义控件 / 转码**：转码要引入 ffmpeg 这条重依赖，而"浏览器
   放不了"已经如实说清楚了。
 - **不动 `.ts`**、不动文本/图片那一档的 CSP 与 8MB 上限。
+
+---
+
+## 15.59 Windows 兼容性：A 级三条 + 入口版本守卫（2026-10）
+
+**这一轮的起因**：使用者的原话——「此项目需要可以在 windows 下执行， 请检查兼容性」。
+审计写在 `docs/reference/windows-compat.md`（按 A/B/C/D 四级、每条指到文件行、
+并逐条标 `[量到]`/`[判断]`）；这一节只记**改了什么、为什么这么改**。
+
+### 最要紧的一条：Windows 上"探测到的文件"不是"能 exec 的文件"
+
+npm 装在 Windows 上的 CLI 是 **`.cmd` 垫片**，而 Node 从 2024-04 的安全版本起
+（CVE-2024-27980）**拒绝 `shell: false` 地 spawn `.cmd`/`.bat`**——参数校验阶段抛
+`EINVAL`。原来的 `process-tree.ts` 是 `spawn(探测到的路径)`，于是 **Windows 上所有
+runtime、所有任务一起挂**，报的还是一句裸的 `spawn EINVAL`
+（`describeSpawnError` 熟悉的是 ENOENT/EACCES，不认这个码）。
+
+三条路里选了**解开垫片**（`spawn-target.ts`）：
+
+- ① 主路径：垫片里真正调的是 `"<node>" "<…\cli.js>" %*` ⇒ 抠出那个脚本，
+  用**正在跑 daemon 的这个 node** 起它。参数**原样**交给 CLI（不经 shell），
+  进程树干净（`taskkill /T` 照样管用）。为什么不用垫片自带那个 `node.exe`：
+  它要么不存在（现代 npm 写 `SET "_prog=node"`，意思是"从 PATH 找"），
+  要么是来路不明的副本——**猜错解释器的表现是"CLI 起来了但报语法错"**。
+- ② 兜底：形状认不出来就 `cmd.exe /d /s /c`。⚠️ 参数里出现 `"`/`%`/换行就
+  **明确拒绝**而不是转义：cmd 的解析器与目标程序的 CRT 解析器各有各的规则，
+  "转义一次两边都对"的写法不存在，而静默改写的表现是"prompt 少了半句"。
+- ③ `shell: true`：**不采用**（注入面 + Node 的 DEP0190 警告 + `.cmd` 里的 `%*`
+  又是另一套引号规则）。
+
+顺带两处（同一轮审计的 A2/A3）：
+
+- **`.ps1` 从探测候选里拿掉**，候选扩展名改读机器的 `PATHEXT` 并按"Node 起得起来"
+  过滤。`.ps1` 一度在候选表里，而 **Node 起不了它**（要 `powershell -File`）——
+  表现是"预检说这个 CLI 可用、真跑必炸"。`.ps1` 真被指到时现在会明确拒绝，
+  并说清"npm 装的时候同时给了 `.cmd`"。
+- **假 CLI 的包装按平台产出**（`executableWrapper`）：Unix 仍是 `#!/bin/sh` + exec
+  （形状逐字未变），Windows 改成一段**形状与 npm 垫片一致**的 `.cmd`。
+  于是"被测的 argv 仍是真实 argv"这条性质（假 CLI 存在的全部意义）两个平台都成立。
+  这条不修的话，依赖它的 **61 条**测试在 Windows 上必红，而红的原因会指向适配器。
+
+### 为什么这些判据能在 macOS 上跑
+
+平台与文件内容都是**注入**的（`platform: 'win32'`、`readText`），夹具用的是
+**逐字抄的真 npm 垫片**（不是自己编的形状——拿自己编的形状测自己的解析器等于没测）。
+31 条新判据里真起进程的那几条（argv 转交）用本机 node，其余全是纯函数。
+**没被钉住的只剩最后一层**："真 Windows 上 exec 得起来吗"——写在审计文档的
+"没量到的"那一节，别把它当成已验。
+
+### 入口版本守卫：为什么必须是 `.mjs`
+
+`engines` 写 `>=22` 是错的：仓库把 `.ts` **直接交给 node** 跑，靠类型擦除，
+而它默认可用是 **23.6 起、回移到 22.18**。实测（下载真的 Node 22.17.0 跑仓库代码）：
+
+```
+TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts" for …/apps/daemon/src/cli.ts
+```
+
+那句话里没有一个字提到"你的 node 太老"，看起来像仓库坏了。所以加了一层前置壳
+`scripts/node-entry.mjs`：先在**普通 JavaScript** 里检查版本（⚠️ 写在 `.ts` 里是
+跑不到的——node 连那个文件都加载不了），不合格就换成一句能照做的话并退出 1，
+合格则**把 `process.argv` 掰回"入口直接跑"的样子**再 `import()` 真入口
+（不然所有入口按 `slice(2)` 读参数时会把入口路径当成第一个位置参数）。
+
+于是 `pnpm run daemon` 现在是 `node scripts/node-entry.mjs apps/daemon/src/cli.ts`——
+命令**多了一层**，这是明确的取舍：换来的是"版本不够时不会让你去猜"。
+`engines` 同时收紧到 `>=22.18`（23.x 那条线要 23.6）。
+
+### 验证
+
+- `pnpm run typecheck` 0 错 0 警；`pnpm run test` **1832/0**（+31 条判据）。
+- **实测**：真的 Node 22.17.0 上跑 `scripts/node-entry.mjs apps/daemon/src/cli.ts`
+  ⇒ 打印那段话 + 退出码 1（对照：不加壳时是 `ERR_UNKNOWN_FILE_EXTENSION` 堆栈）。
+- **Unix 行为一个字没变**：`resolveSpawnTarget` 在非 Windows 上原样返回
+  （`via: 'direct'`，且**连垫片文件都不读**），原来的进程树/适配器测试全绿。
+- 顺手修的 B 级五条（`splitPath` 认反斜杠、`isAbsolute`、`.gitattributes`、`~\`）
+  见审计文档的"已经修掉的"表。
+
+### 不同意的/没做的
+
+- **不给 Windows 装 sandbox**：`sandbox.ts` 在 win32 上仍然返回"没有实现可选沙箱"，
+  `mode: 'required'` 会明确抛（**不静默降级**）。这是设计决定，不是缺口。
+- **不改环境预检的可写判定**（B3）、**不给 `rename` 加退避重试**（B6）、
+  **不动探针**（D 级）：都列在审计文档里等着。

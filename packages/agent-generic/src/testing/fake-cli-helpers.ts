@@ -1,6 +1,7 @@
 import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { executableWrapper } from '@agentdeck/agent-core'
 import type { RuntimeDescriptor } from '@agentdeck/agent-core'
 import { genericDescriptor } from '../generic-descriptor.ts'
 
@@ -54,7 +55,6 @@ export async function makeFakeCli(dir: string): Promise<FakeCli> {
   // 都没有、退出码 1"——后端的解析器把它读成"输出不可解析"。
   // 于是测试失败信息指向解析器，真正的问题却在测试脚手架的扩展名上。
   const scriptPath = join(dir, 'fake-cli.ts')
-  const wrapperPath = join(dir, FAKE_COMMAND)
   const dataDir = join(dir, 'data')
 
   const source = join(HERE, 'fake-cli.ts')
@@ -65,18 +65,19 @@ export async function makeFakeCli(dir: string): Promise<FakeCli> {
   // 让测试看起来像是解析器坏了。
   await mkdir(dataDir, { recursive: true })
 
-  await writeFile(
-    wrapperPath,
-    [
-      '#!/bin/sh',
-      '# 假 CLI 的包装脚本：把后端拼出的真实 argv 原样转发给 node。',
-      '# 用 exec 而不是调用：让 node 取代 sh，进程树与信号语义和真 CLI 一致。',
-      `exec "${process.execPath}" "${scriptPath}" "$@"`,
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-  await chmod(wrapperPath, 0o755)
+  // ⚠️ 包装的形状**按平台定**：Unix 是 `#!/bin/sh` + exec；Windows 上没有 sh、
+  //    chmod 也是空操作，改用一段形状与 npm 垫片一致的 `.cmd`——它会被
+  //    `resolveSpawnTarget` 解开成 `<node> <script> <真实参数>`，于是
+  //    "被测的 argv 仍是真实 argv"这条（假 CLI 存在的全部意义）两个平台都成立。
+  //    见 docs/reference/windows-compat.md 的 A3。
+  const wrapper = executableWrapper({
+    name: FAKE_COMMAND,
+    nodePath: process.execPath,
+    scriptPath,
+  })
+  const wrapperPath = join(dir, wrapper.name)
+  await writeFile(wrapperPath, wrapper.content, 'utf8')
+  if (wrapper.needsChmod) await chmod(wrapperPath, 0o755)
 
   return {
     executablePath: wrapperPath,

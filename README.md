@@ -69,10 +69,13 @@ AgentDeck 把这一关翻了过来：
 需要 **Node ≥ 22.18**（推荐 24；包管理器用 pnpm）。
 
 > ⚠️ **为什么不是"≥ 22"就够**：这个仓库是**把 `.ts` 直接交给 node 跑**的
-> （`pnpm run daemon` = `node apps/daemon/src/cli.ts`），靠的是 Node 的类型擦除——
-> 它从 **22.18** 起才默认可用。实测 22.17 会报
+> （`pnpm run daemon` 最终是 `node apps/daemon/src/cli.ts`），靠的是 Node 的类型擦除——
+> 它从 **22.18** 起才默认可用（23.x 那条线上要 **23.6**）。实测 22.17 会报
 > `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`（加
 > `--experimental-strip-types` 也能跑）。分不清就装 Node 24。
+>
+> 版本不够时不会让你去猜：命令入口前面有一层守卫
+> （`scripts/node-entry.mjs`），它会把那段堆栈换成一句能照做的话。
 
 **平台**：macOS / Linux 是第一公民；Windows 可用，但有几处已知缺口
 （最要紧的一条：npm 装的 agent CLI 在 Windows 上是 `.cmd` 垫片，而现代 Node 拒绝 spawn

@@ -1,6 +1,7 @@
 import { spawn as spawnChildProcess, type ChildProcess } from 'node:child_process'
 import { access, constants, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { resolveSpawnTarget } from '@agentdeck/agent-core'
 import type { ToolRuntime } from '@agentdeck/protocol'
 
 /**
@@ -136,7 +137,12 @@ export type SpawnScript = (input: SpawnScriptInput) => ScriptProcess
 /** 默认实现：`node:child_process.spawn`。 */
 export function nodeSpawn(): SpawnScript {
   return (input) => {
-    const child = spawnChildProcess(input.command, [...input.args], {
+    // ★ Windows 上"要 exec 的东西"可能不是探测到的那个文件：npm 装的解释器
+    //   （或 `.cmd` 里的包装）是 `.cmd` 垫片，而 Node 拒绝 `shell: false` 地
+    //   spawn `.cmd`（CVE-2024-27980 之后的行为）。判断只有一处实现，
+    //   见 `@agentdeck/agent-core` 的 spawn-target.ts。
+    const target = resolveSpawnTarget({ command: input.command, args: input.args })
+    const child = spawnChildProcess(target.command, target.args, {
       cwd: input.cwd,
       env: input.env,
       stdio: ['pipe', 'pipe', 'pipe'],

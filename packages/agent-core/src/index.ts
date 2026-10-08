@@ -14,6 +14,7 @@ export * from './backend.ts'
 export * from './process-tree.ts'
 export * from './async-queue.ts'
 export * from './probe.ts'
+export * from './spawn-target.ts'
 export * from './skill-injection.ts'
 
 export * from './sandbox.ts'
