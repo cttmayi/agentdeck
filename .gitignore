@@ -3,6 +3,9 @@ node_modules/
 .cache/
 # DSH 视觉工具的产物目录：它能被 `git add -A` 顺手收进库（踩过一次）
 .dsh-vision-router/
+# 会话草稿（截图、临时 Chrome profile…）：同样会被 `git add -A` 顺手收进来，
+# 而里面全是几十 MB 的浏览器 profile，没有任何代码价值
+.scratch/
 *.log
 
 # ── 构建产物 ──
