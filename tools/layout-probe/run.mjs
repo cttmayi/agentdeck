@@ -3904,7 +3904,23 @@ function findChrome() {
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
   ]
-  return candidates.find((p) => fs.existsSync(p)) ?? null
+  // ── Windows（2026-10 兼容性审计的 D 级）──────────────────────────────
+  // Windows 上 Chrome 装在每台机器都可能不一样的地方，而**还有 Edge**：
+  // 它是 Chromium 内核，CDP 那套用法一模一样。有的机器上（Server、新装的
+  // Windows）Edge 是唯一存在的浏览器——那正好是"探针能不能跑"的分界。
+  if (process.platform === 'win32') {
+    const pf = process.env['ProgramFiles'] ?? 'C:\\Program Files'
+    const pf86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'
+    const local = process.env['LOCALAPPDATA'] ?? ''
+    candidates.push(
+      `${pf}\\Google Chrome\\Application\\chrome.exe`,
+      `${pf86}\\Google Chrome\\Application\\chrome.exe`,
+      ...(local === '' ? [] : [`${local}\\Google Chrome\\Application\\chrome.exe`]),
+      `${pf86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${pf}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    )
+  }
+  return candidates.find((p) => p !== '' && fs.existsSync(p)) ?? null
 }
 
 /**
@@ -4033,13 +4049,24 @@ async function waitFor(url, ms) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/** 只按这次专用的 profile 目录匹配——绝不宽匹配（那会杀掉使用者自己的浏览器）。 */
+/**
+ * 只按这次专用的 profile 目录匹配——绝不宽匹配（那会杀掉使用者自己的浏览器）。
+ *
+ * ⚠️ Windows 上 `pkill` 不存在，而且**光杀父进程不够**：Chrome 会 fork 出一堆
+ *    渲染/GPU 子进程，杀掉父进程后它们还活着、还占着那个 profile 目录
+ *    （于是下一次运行会看到"profile 已被占用"）。那边要用 `taskkill /T`——
+ *    和 `process-tree.ts` 在 Windows 上收子进程树是同一个理由、同一把工具。
+ */
 function killChrome(profile, child) {
   try {
     child.kill('SIGKILL')
   } catch {}
   try {
-    execFileSync('pkill', ['-f', profile], { stdio: 'ignore' })
+    if (process.platform === 'win32') {
+      if (typeof child.pid === 'number') execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      execFileSync('pkill', ['-f', profile], { stdio: 'ignore' })
+    }
   } catch {}
 }
 

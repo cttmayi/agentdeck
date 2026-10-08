@@ -5218,7 +5218,7 @@ GET /api/catalog → catalog.skills[]（每次请求重扫）
 
 ---
 
-## 15.59 Windows 兼容性：A 级三条 + 入口版本守卫（2026-10）
+## 15.59 Windows 兼容性：A 级三条 + 入口版本守卫 + B 级收尾（2026-10）
 
 **这一轮的起因**：使用者的原话——「此项目需要可以在 windows 下执行， 请检查兼容性」。
 审计写在 `docs/reference/windows-compat.md`（按 A/B/C/D 四级、每条指到文件行、
@@ -5283,9 +5283,44 @@ TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts" for …/app
 命令**多了一层**，这是明确的取舍：换来的是"版本不够时不会让你去猜"。
 `engines` 同时收紧到 `>=22.18`（23.x 那条线要 23.6）。
 
+### B 级收尾（同一条审计线索，第二刀）
+
+A 级修完，接着把"能跑但会误导人或掉功能"那几条做完。三条都是**同一个毛病：
+提示或判据在最需要它的平台上不成立**。
+
+- **B2（解释器文案）**：工具包的 `shell`/`python3` 找不到时，文案原来只提
+  "macOS 自带 / Debian 上 `apt install`"——Windows 使用者拿它**照做不了**，
+  而照做不了的错误提示等于没有提示。现在抽成纯函数按平台分支
+  （Windows 上给 `winget install Git.Git` / `Python.Python.3.12`、点明那个可执行文件叫
+  `python.exe`），并且 Windows 上把 **`python` 也当候选**——少了这一步的表现是
+  "使用者明明装了 Python 3、`python --version` 也能跑，工具包却报'没装 python3'"。
+- **B3（可写判据）**：环境预检的**全部理由**是把"CLI 状态目录写不进去"从一句指向
+  错方向的 EPERM 提前成启动时的一句人话；而它用的 `access(W_OK)` 在 Windows 上
+  不查 ACL ⇒ **正好会在最需要它的那台机器上报"一切正常"**，问题照样推到运行时。
+  改成真写一个探针文件再删掉（非 Windows 保留 `access` 快路：那边它是准的，
+  而且不往使用者家目录里落任何东西）。顺手补了一条与平台无关的判定：
+  那个位置上有个**同名文件**时也报不可用——两种平台的旧实现都说"ok"，
+  而 CLI 会在运行中报 `ENOTDIR`，那句话里看不出"是你的状态路径被文件占了"。
+- **B6（原子写重试）**：Windows 的 `rename` 在目标文件**此刻被别的进程打开着**时会
+  以 `EPERM`/`EACCES` 失败，而占用的原因常常是别人的事（杀毒扫描、索引器）——
+  毫秒级就过去了。我们的写入面正好是最容易被扫的（`meta.json` 每次启动都重写），
+  所以"偶发 EPERM"在那边是常态，而它现在会让**启动直接失败**。
+  加 4 次退避重试（20/40/80/160ms），**只在 win32 上**——POSIX 的 `rename`
+  覆盖已打开的文件是允许的，在那边重试只会让"真没权限"晚 300ms 才报出来；
+  别的错误码（`ENOSPC` 之类）一次都不重试。
+- **D（探针）**：Windows 上也找得到浏览器了（Chrome 三个常见位置 + **Edge** 兜底——
+  有些机器上 Edge 是唯一存在的浏览器，那正好是"探针能不能跑"的分界），
+  收尾用 `taskkill /T /F` 而不是 `pkill`（Chrome 的子进程在杀掉父进程之后还活着、
+  还占着那个 profile 目录）。
+
+判据同样都**能在 macOS 上成立**：平台是注入的（`platform: 'win32'`），
+"写探针"与"rename"也都是注入的——所以"Windows 上必须真写一次"、"EPERM 要重试到第 4 次"
+这两件事是**逐次钉住的真判据**，而不是"看起来应该会"。新增 20 条
+（解释器文案 3 + 可写预检 8 + rename 重试 9）。
+
 ### 验证
 
-- `pnpm run typecheck` 0 错 0 警；`pnpm run test` **1832/0**（+31 条判据）。
+- `pnpm run typecheck` 0 错 0 警；`pnpm run test` **1852/0**（+51 条判据）。
 - **实测**：真的 Node 22.17.0 上跑 `scripts/node-entry.mjs apps/daemon/src/cli.ts`
   ⇒ 打印那段话 + 退出码 1（对照：不加壳时是 `ERR_UNKNOWN_FILE_EXTENSION` 堆栈）。
 - **Unix 行为一个字没变**：`resolveSpawnTarget` 在非 Windows 上原样返回
@@ -5297,5 +5332,7 @@ TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts" for …/app
 
 - **不给 Windows 装 sandbox**：`sandbox.ts` 在 win32 上仍然返回"没有实现可选沙箱"，
   `mode: 'required'` 会明确抛（**不静默降级**）。这是设计决定，不是缺口。
-- **不改环境预检的可写判定**（B3）、**不给 `rename` 加退避重试**（B6）、
-  **不动探针**（D 级）：都列在审计文档里等着。
+- ~~不改环境预检的可写判定（B3）~~、~~不给 `rename` 加退避重试（B6）~~、
+  ~~不动探针（D 级）~~：这三条在第二刀里做完了（见上）。
+- **仍然不做的**：给 Windows 装 sandbox、给探针做 Windows 上的回归（那边要真机）、
+  以及审计文档"C 级"清单里那些**已经是对的**东西（那些不用动）。

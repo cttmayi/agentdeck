@@ -36,6 +36,10 @@
 | B5 | 两处"必须是相对路径"的判据从 `startsWith('/')` 换成 `isAbsolute()`（Windows 的三种绝对形态现在报的是对的原因） | `apps/daemon/src/workdir-files.ts`、`apps/daemon/src/tool-source.ts` |
 | B7 | 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制白名单）——Git for Windows 默认把检出变成 CRLF | `.gitattributes` |
 | B9 | `~\` 也当家目录展开（Windows 使用者敲的是这个） | `apps/daemon/src/tool-source.ts`、`apps/daemon/src/local-skill-dirs.ts` + 测试 |
+| **B2** | 工具包解释器的失败文案按平台给能照做的指令（Windows 上给 `winget install Git.Git` / `Python.Python.3.12` 并点明 `python.exe`），Windows 上把 **`python` 也当候选**（官方安装器给的就是它） | `apps/daemon/src/script-executor.ts` 的 `missingInterpreterMessage` / `resolveCommand` + 3 条判据 |
+| **B3** | 预检在 Windows 上**真写一个临时文件再删掉**（`access(W_OK)` 在那里不查 ACL ⇒ 会在最需要它的机器上漏报）；顺带：状态目录位置上有个**同名文件**时也报错（不然是运行中的 `ENOTDIR`） | `apps/daemon/src/environment.ts` + 新 `environment.test.ts`（8 条） |
+| **B6** | `rename` 对 `EPERM`/`EACCES`/`EBUSY` 做 4 次退避重试（20/40/80/160ms，约 300ms 上限），**只在 win32 上**——POSIX 上重试只会让"真没权限"晚 300ms 才报出来 | `packages/store-file/src/fs-utils.ts` 的 `renameWithRetry` + 新 `fs-utils.test.ts`（9 条） |
+| **D** | 探针在 Windows 上也找得到浏览器（Chrome 三个常见位置 + **Edge** 兜底），收尾用 `taskkill /T /F` 而不是 `pkill`（Chrome 的子进程杀掉父进程后还活着、还占着 profile） | `tools/layout-probe/run.mjs` |
 
 ⚠️ **这些改动没有在真 Windows 上跑过**（本机是 macOS）。哪些是量到的、哪些还只是判断：
 
@@ -175,8 +179,12 @@ agentdeck —— 本机 AI 工作台          ← 加 flag 就能跑
 
 而两条失败文案只写了"macOS 自带 / Debian 上 apt / brew"——**Windows 使用者拿不到能照做的指令**。
 
-**改法**：① 文案按平台分支（Windows 上给 `winget install Git.Git` / `winget install Python.Python.3.12`）；
-② Windows 上把 `python` 也当候选（或在文案里点明 `py -3` 那条路）。
+**已经这么改了**：① 文案抽成纯函数 `missingInterpreterMessage(runtime, platform)` 按平台分支
+（Windows 上给 `winget install Git.Git` / `Python.Python.3.12`，并点明那个可执行文件叫 `python.exe`）；
+② Windows 上把 `python` 也当候选——少了这一步的表现是"使用者明明装了 Python 3、`python --version`
+也能跑，工具包却报'没装 python3'"。三条判据钉住（含"别给 Windows 使用者一条 Debian 的命令"这种硬要求）。
+⚠️ Windows 上 `runtime: 'shell'`（要 `bash`）**仍然**需要 Git for Windows 或 WSL——这不是缺陷，
+是那个 runtime 的定义；文案现在会说清怎么装。
 
 ### B3. 环境预检"能不能写"的判据在 Windows 上不可靠 `[判断]`
 
@@ -184,7 +192,12 @@ agentdeck —— 本机 AI 工作台          ← 加 flag 就能跑
 Windows 上 `access` 的 `W_OK` 主要反映**只读属性**，**不查 ACL**。后果是：
 状态目录其实写不进去时，预检**报 ok**，问题推到运行时以 EPERM 出现——
 而本文件存在的全部理由就是"EPERM 看起来像'工作目录没建成功'，其实是状态目录写不了"。
-**改法**：Windows 上改成"真写一个临时文件再删掉"（失败消息直接带上路径与 errno）。
+**已经这么改了**：Windows 上真写一个 `.agentdeck-write-probe-<pid>-<时间戳>` 再立刻删掉
+（写完就删，不留垃圾；失败消息带上真实 errno）；非 Windows 保留 `access` 那条快路——
+POSIX 上它是准的，而且不往使用者的家目录里落任何东西。
+顺手补了一条**与平台无关**的判定：那个位置上有个**同名文件**时也报不可用
+（两种平台的旧实现都会说"ok"，而 CLI 会在运行中报 `ENOTDIR`——那句话里看不出
+"是你的状态路径被文件占了"）。新增 8 条判据（Windows 那条用注入的 `writeProbe` 在 macOS 上钉住）。
 
 ### B4. 界面里按 `/` 切路径：Windows 绝对路径会显示成一整条 `[判断]`
 
@@ -210,8 +223,11 @@ Windows 上绝对路径还有 `C:\…`、`\\server\share\…`、`\x` 三种形�
 `packages/store-file/src/fs-utils.ts:28-39`（临时文件 → `fsync` → `rename`）。
 `rename` 覆盖已存在的文件在 Windows 上是可行的（libuv 传了 `MOVEFILE_REPLACE_EXISTING`），
 但**目标被别的进程持着句柄**时（杀毒、索引器、编辑器）会以 `EPERM`/`EBUSY` 失败——
-这是 Windows 上"偶发、难复现"那一类。**改法**：对 `EPERM`/`EBUSY`/`EACCES` 做几次退避重试
-（几十毫秒），重试完再如实抛出。`fsync` 本身没问题（我们对**文件** fsync，没有对目录 fsync——
+这是 Windows 上"偶发、难复现"那一类。**已经这么改了**：`renameWithRetry` 对 `EPERM`/`EACCES`/`EBUSY` 退避重试
+（20/40/80/160ms，1 次首发 + 4 次重试），重试完把**原始错误**抛出去；别的错误码
+（`ENOSPC` 之类）**一次都不重试**——那类重试没有意义，只会让错误晚 300ms 才报出来。
+重试**只在 win32 上做**：POSIX 的 `rename` 覆盖已打开的文件是允许的，这是两个平台的根本差别。
+新增 9 条判据（注入 `rename`/`sleep`，不真的睡）。`fsync` 本身没问题（我们对**文件** fsync，没有对目录 fsync——
 后者在 Windows 上本来就不成立，现在这样是对的）。
 
 ### B7. 没有 `.gitattributes`：Git for Windows 默认 `core.autocrlf=true` `[量到：文件不存在]`
@@ -291,20 +307,34 @@ Windows 使用者在输入框里敲 `~\my-tools\note` 不会展开成家目录�
 
 ```powershell
 node --version                       # 必须 ≥ 22.18（推荐 24）
+# ★ 顺手验版本守卫：故意用一个老的 node（比如 22.17）跑下面这行，
+#   期望它是"这个命令要用 Node ≥ 22.18 跑…" + 退出码 1，而不是 ERR_UNKNOWN_FILE_EXTENSION
+node scripts/node-entry.mjs apps/daemon/src/cli.ts --help
+
 where.exe claude                     # 看是 .exe 还是 .cmd —— 这条决定 A1 会不会被撞上
 pnpm install
 pnpm run build:web
 node apps/daemon/src/cli.ts --verify-runtime all   # 探到没探到、探到的是哪个文件
 pnpm run daemon                      # 界面 200（首次绑 127.0.0.1 会有防火墙提示，允许即可）
 # ★ 关键一步：界面上建一条任务、让它真跑一次 —— 这一步才会走到 A1
-pnpm run test                        # 期望 1799/0（A3 没修好时适配器那一片会红）
+pnpm run test                        # 期望 1852/0（A3 没修好时适配器那一片会红）
 ```
 
-补两条诊断用的：
+⭐ **最省事的一次性验法**：在 Windows 上跑 `pnpm run test`。
+其中 `packages/agent-generic/src/generic-backend.test.ts` 与
+`packages/agent-codex/src/codex-backend.test.ts` 会**真的 spawn 一个假 CLI**
+（A3 造的 `.cmd` 包装）并把**进程实际收到的 argv** 落盘比对——
+一次同时验到 A1（解开垫片、exec 得起来）与 A3（包装形状对）。
+
+补几条诊断用的：
 
 ```powershell
 node -e "console.log(process.env.PATHEXT)"
-node -e "require('node:fs').access(process.env.USERPROFILE, 2, (e)=>console.log(e))"   # B3 那条
+node -e "console.log(process.env.COMSPEC)"     # A1 的兜底路径用的就是它
+node -e "require('node:fs').access(process.env.USERPROFILE, 2, (e)=>console.log(e))"   # B3 那条（在 Windows 上不可信）
+node -e "require('node:fs').writeFileSync(require('node:path').join(process.env.USERPROFILE,'.agentdeck-write-probe'),''); require('node:fs').unlinkSync(require('node:path').join(process.env.USERPROFILE,'.agentdeck-write-probe'))"   # 权威判据
+# 探针能不能找到浏览器（D）：应打出一个存在的路径
+pnpm run probe:layout -- --dry-run 2>$null | Select-String -Pattern 'chrome'
 ```
 
 ---

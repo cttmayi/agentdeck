@@ -1,4 +1,4 @@
-import { access, constants, mkdir } from 'node:fs/promises'
+import { access, constants, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { RuntimeDescriptor } from '@agentdeck/agent-core'
@@ -51,27 +51,95 @@ export interface EnvironmentReport {
   checkedPaths: string[]
 }
 
-async function isWritableDir(path: string): Promise<{ ok: boolean; reason?: string }> {
+export interface WritableProbeDeps {
+  /** 注入平台（默认 `process.platform`）——注入是为了能在 macOS 上测 Windows 那条分支。 */
+  platform?: NodeJS.Platform
+  /** 真的写一次并删掉。默认实现见 `probeWrite`。 */
+  writeProbe?: (path: string) => Promise<void>
+}
+
+/**
+ * ★ Windows 上**必须真写一次**，不能只看 `access(W_OK)`。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么（2026-10 Windows 兼容性审计的 B3）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 这个函数存在的全部理由，是把"CLI 状态目录写不进去"从**一句指向错方向的
+ * EPERM**（见文件头）提前成启动时的**一句人话**。而 `access(W_OK)` 在 Windows 上
+ * 给出的答案不反映 ACL——它看的是只读属性那一套。也就是说：**在那台真正会出问题的
+ * 机器上，这个预检会报"一切正常"**，问题照样推到运行时、照样以 EPERM 出现、
+ * 照样被读成"工作目录没建成功"。
+ *
+ * 所以 Windows 上改成"真写一个临时文件再删掉"：那是唯一权威的判据。
+ * 非 Windows 上保留 `access` 那条快路（POSIX 上它是准的，而且不往使用者的
+ * 家目录里落任何东西——那也是"别碰别人东西"这条规矩的一部分）。
+ *
+ * 代价说清楚：Windows 上会在 CLI 的状态目录里**短暂出现**一个
+ * `.agentdeck-write-probe-<pid>` 文件（写完立刻删）。一个只读目录里它建不出来，
+ * 而"建不出来"正是我们要知道的答案。
+ */
+async function probeWrite(path: string): Promise<void> {
+  // ⚠️ 不覆盖任何已有文件（万一这个 pid 的死文件还在，换一个名字）
+  const probe = join(path, `.agentdeck-write-probe-${process.pid}-${Date.now()}`)
+  try {
+    await writeFile(probe, '', 'utf8')
+  } finally {
+    await rm(probe, { force: true }).catch(() => {
+      /* 删不掉不影响结论：能不能写已经量到了 */
+    })
+  }
+}
+
+export async function isWritableDir(
+  path: string,
+  deps: WritableProbeDeps = {},
+): Promise<{ ok: boolean; reason?: string }> {
+  const platform = deps.platform ?? process.platform
   try {
     // 先看存不存在
     await access(path, constants.F_OK)
-    try {
-      await access(path, constants.W_OK)
-      return { ok: true }
-    } catch {
-      return { ok: false, reason: '目录存在但不可写' }
-    }
   } catch {
     // 不存在 ⇒ 试着建。这才是真实场景：CLI 首次运行时要建它。
     try {
       await mkdir(path, { recursive: true })
       return { ok: true }
     } catch (err) {
-      return {
-        ok: false,
-        reason: err instanceof Error ? err.message : String(err),
-      }
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) }
     }
+  }
+
+  // ⚠️ 存在还不够，它得是个**目录**：那个位置上有个同名文件时，CLI 会在运行中报
+  //    `ENOTDIR`（一句话里看不出"是你的状态路径被文件占了"），而这个预检的价值
+  //    正是把这类环境问题提前成启动时的一句话。这条与平台无关。
+  try {
+    const info = await stat(path)
+    if (!info.isDirectory()) {
+      return { ok: false, reason: '那个位置上有个同名的文件，不是目录' }
+    }
+  } catch (err) {
+    // 坏掉的符号链接之类：stat 本身就会失败，如实说出来
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+
+  if (platform === 'win32') {
+    try {
+      await (deps.writeProbe ?? probeWrite)(path)
+      return { ok: true }
+    } catch (err) {
+      // 带上真实 errno（Windows 上 EPERM/EACCES 的含义与 POSIX 不完全一样，
+      // 使用者要拿它去搜、去问 IT）
+      const code = (err as NodeJS.ErrnoException).code
+      const detail = err instanceof Error ? err.message : String(err)
+      return { ok: false, reason: code === undefined ? detail : `${detail}（${code}）` }
+    }
+  }
+
+  try {
+    await access(path, constants.W_OK)
+    return { ok: true }
+  } catch {
+    return { ok: false, reason: '目录存在但不可写' }
   }
 }
 
@@ -82,7 +150,7 @@ async function isWritableDir(path: string): Promise<{ ok: boolean; reason?: stri
  */
 export async function checkEnvironment(
   runtimes: ReadonlyArray<{ descriptor: RuntimeDescriptor; available: boolean }>,
-  options: { homeDir?: string } = {},
+  options: { homeDir?: string; deps?: WritableProbeDeps } = {},
 ): Promise<EnvironmentReport> {
   const home = options.homeDir ?? homedir()
   const issues: EnvironmentIssue[] = []
@@ -95,7 +163,7 @@ export async function checkEnvironment(
 
     const path = join(home, stateDir)
     checkedPaths.push(path)
-    const result = await isWritableDir(path)
+    const result = await isWritableDir(path, options.deps)
 
     if (!result.ok) {
       issues.push({

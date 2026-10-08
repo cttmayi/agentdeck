@@ -351,6 +351,8 @@ export async function resolveCommand(
   find: (command: string) => Promise<string | null> = (c) => findExecutable(c),
   /** `node` 用哪个可执行文件。默认 `process.execPath`（理由见下面那条注释）。 */
   nodePath: string = process.execPath,
+  /** 注入平台（默认 `process.platform`）——注入是为了能在 macOS 上测 Windows 那条分支。 */
+  platform: NodeJS.Platform = process.platform,
 ): Promise<ResolvedCommand> {
   switch (runtime) {
     case 'node':
@@ -363,29 +365,65 @@ export async function resolveCommand(
       return { ok: true, command: nodePath }
     case 'shell': {
       const found = await find('bash')
-      if (found === null) {
-        return {
-          ok: false,
-          detail:
-            '没找到 bash：这个工具包声明 runtime 为 shell，平台用 bash 跑它，但 PATH 里没有 bash。' +
-            '装一个 bash（macOS 自带；Debian/Ubuntu 上是 `apt install bash`）或把它所在的目录加进 PATH 后重试。',
-        }
-      }
+      if (found === null) return { ok: false, detail: missingInterpreterMessage('shell', platform) }
       return { ok: true, command: found }
     }
     case 'python3': {
-      const found = await find('python3')
-      if (found === null) {
-        return {
-          ok: false,
-          detail:
-            '没找到 python3：这个工具包声明 runtime 为 python3，平台用 python3 跑它，但 PATH 里没有 python3。' +
-            '装一个 Python 3（`brew install python3` / `apt install python3`）或把它所在的目录加进 PATH 后重试。',
-        }
-      }
+      let found = await find('python3')
+      // ★ Windows 上官方安装器给的是 `python.exe`（`python3.exe` 只有 Microsoft Store
+      //   那个别名才有），所以那边要把 `python` 也当候选。少了这一步的表现是：
+      //   使用者明明装了 Python 3、`python --version` 也能跑，工具包却报"没装 python3"。
+      if (found === null && platform === 'win32') found = await find('python')
+      if (found === null) return { ok: false, detail: missingInterpreterMessage('python3', platform) }
       return { ok: true, command: found }
     }
   }
+}
+
+/**
+ * "没找到解释器"那段话——**按平台给能照做的指令**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么值得单独一个函数（而不是在分支里拼字符串）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原来那段话只提了 macOS/Debian/Ubuntu（"macOS 自带 / apt install bash"），
+ * Windows 使用者拿到它**照做不了**——而"照做不了"的错误提示等于没有提示
+ * （2026-10 Windows 兼容性审计的 B2）。
+ *
+ * 抽成纯函数之后，三条平台各有一条判据钉住（含"必须提到 winget"这种硬要求），
+ * 免得下次改文案时又把某个平台漏掉。
+ */
+export function missingInterpreterMessage(
+  runtime: 'shell' | 'python3',
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (runtime === 'shell') {
+    if (platform === 'win32') {
+      return (
+        '没找到 bash：这个工具包声明 runtime 为 shell，平台用 bash 跑它，' +
+        '而 Windows 不自带 bash。装 Git for Windows（它带的 Git Bash 会提供 bash）或 WSL，' +
+        '并确认 bash 在 PATH 里：`winget install Git.Git`。' +
+        '（另一种选择是让工具包改用 runtime 为 node 或 python3。）'
+      )
+    }
+    return (
+      '没找到 bash：这个工具包声明 runtime 为 shell，平台用 bash 跑它，但 PATH 里没有 bash。' +
+      '装一个 bash（macOS 自带；Debian/Ubuntu 上是 `apt install bash`）或把它所在的目录加进 PATH 后重试。'
+    )
+  }
+  if (platform === 'win32') {
+    return (
+      '没找到 python3（也试过 python）：这个工具包声明 runtime 为 python3，平台用 python3 跑它。' +
+      'Windows 上官方安装器给的是 python.exe，所以平台会把 python 也当候选——两个都没有时,' +
+      '装一个 Python 3：`winget install Python.Python.3.12`，装完确认 `python --version` 能跑 ' +
+      '（安装时勾上 "Add python.exe to PATH"）。'
+    )
+  }
+  return (
+    '没找到 python3：这个工具包声明 runtime 为 python3，平台用 python3 跑它，但 PATH 里没有 python3。' +
+    '装一个 Python 3（`brew install python3` / `apt install python3`）或把它所在的目录加进 PATH 后重试。'
+  )
 }
 
 // ══════════════════════════════════════════════════════════════════

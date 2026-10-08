@@ -24,6 +24,7 @@ import {
   ScriptExecutor,
   buildScriptEnv,
   findExecutable,
+  missingInterpreterMessage,
   resolveCommand,
   type ScriptActionSpec,
   type ScriptExecutionRequest,
@@ -703,6 +704,47 @@ describe('runtime → 解释器（只有白名单里的三种）', () => {
 
     const found = await resolveCommand('shell', async (c) => `/usr/local/bin/${c}`)
     assert.deepEqual(found, { ok: true, command: '/usr/local/bin/bash' })
+  })
+
+  test('★ Windows：python3 找不到时退一步找 python（官方安装器给的就是 python.exe）', async () => {
+    const looked: string[] = []
+    const found = await resolveCommand(
+      'python3',
+      async (c) => {
+        looked.push(c)
+        return c === 'python' ? 'C:\\Python312\\python.exe' : null
+      },
+      process.execPath,
+      'win32',
+    )
+    assert.deepEqual(looked, ['python3', 'python'], '两个都要找，顺序是先 python3 再 python')
+    assert.deepEqual(found, { ok: true, command: 'C:\\Python312\\python.exe' })
+  })
+
+  test('★ 非 Windows 上**不会**去试 python（行为与改动前一致）', async () => {
+    const looked: string[] = []
+    const missing = await resolveCommand('python3', async (c) => {
+      looked.push(c)
+      return null
+    }, process.execPath, 'darwin')
+    assert.deepEqual(looked, ['python3'])
+    assert.ok(!missing.ok)
+  })
+
+  test('★ 失败文案按平台给能照做的指令（Windows 上要提 winget/Git Bash）', () => {
+    const winShell = missingInterpreterMessage('shell', 'win32')
+    assert.match(winShell, /winget install Git\.Git/)
+    assert.match(winShell, /Git Bash|WSL/)
+    assert.ok(!/apt install/.test(winShell), '别给 Windows 使用者一条 Debian 的命令')
+
+    const winPy = missingInterpreterMessage('python3', 'win32')
+    assert.match(winPy, /winget install Python/)
+    assert.match(winPy, /python\.exe/, '要说清 Windows 上那个可执行文件叫什么')
+    assert.match(winPy, /也试过 python/, '要说明平台已经退一步找过 python 了')
+
+    // 非 Windows 的老文案保持（有既有判据盯着它）
+    assert.match(missingInterpreterMessage('python3', 'linux'), /apt install python3/)
+    assert.match(missingInterpreterMessage('shell', 'darwin'), /macOS 自带/)
   })
 
   test('shell 的动作：命令是 bash，入口作为单个参数（不拼命令行）', async () => {
