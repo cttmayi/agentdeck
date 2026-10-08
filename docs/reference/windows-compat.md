@@ -313,6 +313,24 @@ Windows 使用者在输入框里敲 `~\my-tools\note` 不会展开成家目录�
 
 ## Windows 真机上的最小验收清单
 
+**先把代码搬过去。** 这台开发机连不上 github.com（直连、SSH:443、本地常见代理端口都试过，
+都不通），所以仓库打成了一份**自包含**的 git bundle：
+
+```bash
+# 在能拿到这份 bundle 的机器上（bundle 在 .cache/ 里，3.7 MB）
+git clone /path/to/agentdeck-all.bundle agentdeck
+```
+
+已经有一份仓库、只想把新提交并进来的话：
+
+```bash
+git fetch /path/to/agentdeck-all.bundle 'refs/heads/*:refs/heads/bundle-*'
+git merge bundle-main          # 或者直接 git checkout bundle-main
+```
+
+（bundle 是"整份历史"，`git bundle verify` 通过；`.cache/` 在 .gitignore 里、
+不进版本库，所以每次改完要**重新生成**：`git bundle create .cache/agentdeck-all.bundle --all`。）
+
 ```powershell
 node --version                       # 必须 ≥ 22.18（推荐 24）
 # ★ 顺手验版本守卫：故意用一个老的 node（比如 22.17）跑下面这行，
