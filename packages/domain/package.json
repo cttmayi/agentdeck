@@ -9,6 +9,7 @@
     "./testing": "./src/testing/fixtures.ts"
   },
   "dependencies": {
-    "@agentdeck/protocol": "workspace:*"
+    "@agentdeck/protocol": "workspace:*",
+    "zod": "^4.6.2"
   }
 }

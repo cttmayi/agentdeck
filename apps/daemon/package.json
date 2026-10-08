@@ -20,6 +20,7 @@
     "@agentdeck/protocol": "workspace:*",
     "@agentdeck/skill-source": "workspace:*",
     "@agentdeck/store-file": "workspace:*",
-    "@agentdeck/web": "workspace:*"
+    "@agentdeck/web": "workspace:*",
+    "zod": "^4.6.2"
   }
 }

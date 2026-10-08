@@ -25,6 +25,7 @@
     "probe:remote": "node tools/remote-ui-probe/run.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/node": "^24.0.0"
   }
 }
