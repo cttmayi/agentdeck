@@ -5308,6 +5308,12 @@ A 级修完，接着把"能跑但会误导人或掉功能"那几条做完。三�
   加 4 次退避重试（20/40/80/160ms），**只在 win32 上**——POSIX 的 `rename`
   覆盖已打开的文件是允许的，在那边重试只会让"真没权限"晚 300ms 才报出来；
   别的错误码（`ENOSPC` 之类）一次都不重试。
+- **spawn 失败的翻译**（审计里"放大伤害的细节 2"）：`EINVAL` 是 Windows 上
+  "`shell: false` 地 spawn `.cmd`/`.bat`"的报错码，而 `describeSpawnError` 只认
+  ENOENT/EACCES ⇒ 使用者看到裸的 `spawn EINVAL`，一个不指向任何东西的码。
+  补上这个码的翻译，并**把重复的两份收进一处**——`agent-generic` 与 `agent-codex`
+  里各有一份，注释写着"与 generic 同一份约定，改的时候要一起改"，
+  而那正是最会漂的安排：判断"能 exec 什么"与"exec 失败怎么解释"本来就该在一起。
 - **D（探针）**：Windows 上也找得到浏览器了（Chrome 三个常见位置 + **Edge** 兜底——
   有些机器上 Edge 是唯一存在的浏览器，那正好是"探针能不能跑"的分界），
   收尾用 `taskkill /T /F` 而不是 `pkill`（Chrome 的子进程在杀掉父进程之后还活着、
@@ -5316,11 +5322,11 @@ A 级修完，接着把"能跑但会误导人或掉功能"那几条做完。三�
 判据同样都**能在 macOS 上成立**：平台是注入的（`platform: 'win32'`），
 "写探针"与"rename"也都是注入的——所以"Windows 上必须真写一次"、"EPERM 要重试到第 4 次"
 这两件事是**逐次钉住的真判据**，而不是"看起来应该会"。新增 20 条
-（解释器文案 3 + 可写预检 8 + rename 重试 9）。
+（解释器文案 3 + 可写预检 8 + rename 重试 9 + spawn 翻译 3）。
 
 ### 验证
 
-- `pnpm run typecheck` 0 错 0 警；`pnpm run test` **1852/0**（+51 条判据）。
+- `pnpm run typecheck` 0 错 0 警；`pnpm run test` **1855/0**（+54 条判据）。
 - **实测**：真的 Node 22.17.0 上跑 `scripts/node-entry.mjs apps/daemon/src/cli.ts`
   ⇒ 打印那段话 + 退出码 1（对照：不加壳时是 `ERR_UNKNOWN_FILE_EXTENSION` 堆栈）。
 - **Unix 行为一个字没变**：`resolveSpawnTarget` 在非 Windows 上原样返回

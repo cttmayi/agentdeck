@@ -52,7 +52,11 @@
 
 ---
 
-## A 级：会拦住"真跑任务"（建议先修这三条）
+## A 级：会拦住"真跑任务"
+
+> ✅ **这三条已经修完了**（2026-10，改动见上面那张"已经修掉的"表）。下面保留的是
+> **当时的现场与判断依据**——为什么它必须这么修、以及哪些方案被否掉了。
+> 想直接看结论就看那张表；想知道"为什么不能用 `shell: true` 一行改完"就看这一节。
 
 ### A1. `spawn` 一个 `.cmd` 垫片 —— Node 会直接抛 `EINVAL` `[判断，但机制是确定的]`
 
@@ -85,8 +89,11 @@ const child: ChildProcess = spawn(input.command, [...input.args], { …, detache
    （同步抛 `EINVAL`），而 `exited` 那条路会把异步失败一律压成 `{ code: null }`；
    `[判断]`——它到底是同步抛出还是 `'error'` 事件，我在这台 macOS 上量不到，但**两种都会让
    这条 run 失败、且都不是人话**，写文案前要在真机上确认一次；
-2. `packages/agent-codex/src/codex-backend.ts:473` 的 `describeSpawnError` **不认 `EINVAL`**
-   （它熟悉的是 ENOENT/EACCES），所以使用者会看到裸的 `spawn EINVAL`；
+2. `describeSpawnError` **不认 `EINVAL`**（它熟悉的是 ENOENT/EACCES），所以使用者会看到
+   裸的 `spawn EINVAL`。**已经补上**：这个码现在会翻成"这个文件不能被直接执行 + `.cmd`
+   是主因 + 改用原生安装器"——⚠️ 而且顺手把**重复的两份**（`agent-generic` 与
+   `agent-codex` 各一份，注释写着"改的时候要一起改"）收进了 `agent-core` 的
+   `spawn-target.ts`：判断"能 exec 什么"和"exec 失败怎么解释"本来就该在一起；
 3. 这条一坏，**所有 runtime、所有任务**都跑不起来——不是边角功能。
 
 **修法（推荐 ①）**：
@@ -242,6 +249,7 @@ Windows 上绝对路径还有 `C:\…`、`\\server\share\…`、`\x` 三种形�
 
 ### B8. 可选沙箱在 Windows 上**没有实现**（但它是诚实的）`[量到：代码里明说]`
 
+
 `packages/agent-core/src/sandbox.ts:145-175`：macOS 用 `sandbox-exec`、Linux 用 `bwrap`，
 其余平台返回
 `当前平台（win32）没有实现可选沙箱。`，且 `planSandbox` 在 `mode: 'required'` 时**抛异常**
@@ -317,7 +325,7 @@ pnpm run build:web
 node apps/daemon/src/cli.ts --verify-runtime all   # 探到没探到、探到的是哪个文件
 pnpm run daemon                      # 界面 200（首次绑 127.0.0.1 会有防火墙提示，允许即可）
 # ★ 关键一步：界面上建一条任务、让它真跑一次 —— 这一步才会走到 A1
-pnpm run test                        # 期望 1852/0（A3 没修好时适配器那一片会红）
+pnpm run test                        # 期望 1855/0（A3 没修好时适配器那一片会红）
 ```
 
 ⭐ **最省事的一次性验法**：在 Windows 上跑 `pnpm run test`。

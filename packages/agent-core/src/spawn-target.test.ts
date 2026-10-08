@@ -4,6 +4,7 @@ import {
   UnspawnableCommandError,
   WINDOWS_SPAWNABLE_EXT,
   buildCmdLine,
+  describeSpawnError,
   executableWrapper,
   npmShimText,
   parseNpmShim,
@@ -300,5 +301,27 @@ describe('★ npmShimText：造一个"我们的解析器认得、形状与 npm �
     const shim = parseNpmShim(text, 'C:\\tmp\\agent-cli.cmd')
     assert.notEqual(shim, null)
     assert.equal(shim!.script, 'C:\\tmp\\fake-cli.ts')
+  })
+})
+
+describe('★ describeSpawnError：把所有 spawn 失败都翻成人话', () => {
+  // ⚠️ 这份翻译原先在 agent-generic 与 agent-codex 里**各有一份**，注释写着
+  //    "改的时候要一起改"——那正是最会漂的安排。现在只有一份，判据也只有一处。
+  test('★ EINVAL ⇒ 说清"这个文件不能直接执行"并给出可照做的替代（`.cmd` 是主因）', () => {
+    const text = describeSpawnError({ code: 'EINVAL' }, 'claude', 'C:\\npm\\claude.cmd')
+    assert.match(text, /不能被直接执行/)
+    assert.match(text, /\.cmd/)
+    assert.match(text, /原生安装器|\.exe/, '要给出一条能照做的路')
+    assert.ok(!text.includes('**'), '这段话会进界面与日志，别留 markdown 记号')
+  })
+
+  test('ENOENT / EACCES 的老话不变（有人在界面上认得出它们）', () => {
+    assert.match(describeSpawnError({ code: 'ENOENT' }, 'claude', '/x/claude'), /找不到 claude 可执行文件/)
+    assert.match(describeSpawnError({ code: 'EACCES' }, 'claude', '/x/claude'), /不可执行/)
+  })
+
+  test('没见过的错误 ⇒ 原样带上，不吞细节', () => {
+    assert.match(describeSpawnError(new Error('莫名其妙'), 'claude', '/x/claude'), /莫名其妙/)
+    assert.match(describeSpawnError(null, 'claude', '/x/claude'), /启动 claude 失败/)
   })
 })

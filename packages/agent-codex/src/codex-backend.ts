@@ -6,6 +6,7 @@ import {
   loadRuntimeDescriptor,
   probeCommand,
   cliStateDir,
+  describeSpawnError,
   planSandbox,
   spawnProcessTree,
   type AgentBackend,
@@ -467,22 +468,6 @@ function describeCodexFailure(
     ctx.cliErrorText ??
     `${ctx.command}（app-server）报告运行失败（exit=${ctx.exitCode ?? 'null'}）。${suffix}`
   )
-}
-
-/** 各类 spawn 失败的可读翻译（与 generic 同一份约定，改的时候要一起改）。 */
-function describeSpawnError(err: unknown, command: string, path: string): string {
-  const code = (err as NodeJS.ErrnoException | null)?.code
-  switch (code) {
-    case 'ENOENT':
-      return (
-        `找不到 ${command} 可执行文件（${path}）。` +
-        `请先安装它；若已安装，试着重启 daemon 以重新探测 PATH。`
-      )
-    case 'EACCES':
-      return `${command} 不可执行（${path}）：权限不足。检查文件权限或挂载选项。`
-    default:
-      return `启动 ${command} 失败：${String(err)}`
-  }
 }
 
 /** 这个路径能不能当程序跑：必须是**普通文件**，且带执行权限（generic 同款）。 */

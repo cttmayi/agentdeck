@@ -9,7 +9,8 @@
  * （`%APPDATA%\npm\claude.cmd`）。而 Node 从 2024-04 的安全版本起
  * （CVE-2024-27980）**拒绝 `shell: false` 地 spawn `.cmd`/`.bat`**：
  * 参数校验阶段就抛 `EINVAL`。表现是——**所有 runtime、所有任务一起挂**，
- * 报的还是裸的 `spawn EINVAL`（`describeSpawnError` 熟悉的是 ENOENT/EACCES）。
+ * 报的还是裸的 `spawn EINVAL`（当时 `describeSpawnError` 只认 ENOENT/EACCES——
+ * 现在它也认 EINVAL 了，见本文件末尾）。
  *
  * ⚠️ 不是"Windows 全都不行"：新版 Claude Code 的**原生安装器**给的是
  *    `claude.exe`（`%USERPROFILE%\.local\bin`），`.exe` 在候选表里排在
@@ -156,6 +157,42 @@ export function executableWrapper(input: {
       '',
     ].join('\n'),
     needsChmod: true,
+  }
+}
+
+/**
+ * 各类 spawn 失败的可读翻译。
+ *
+ * ⚠️ 这份东西原先在 `agent-generic` 与 `agent-codex` 里**各有一份**，注释写着
+ *    "与 generic 同一份约定，改的时候要一起改"——那正是最会漂的一种安排。
+ *    两处判断（"能 exec 什么"与"exec 失败了怎么解释"）本来就该在一起，所以收在这里。
+ *
+ * 为什么补 `EINVAL`（2026-10 审计里"放大伤害的细节"之一）：它是 Windows 上
+ * "`shell: false` 地 spawn `.cmd`/`.bat`"的报错码（CVE-2024-27980 之后的行为）。
+ * 不认它的后果是使用者看到裸的 `spawn EINVAL`——一个不指向任何东西的码。
+ * 现在 A1 已经把这条路绕开了，但**绕过它不等于它不会再出现**（比如 `.cmd` 形状
+ * 认不出来、`COMSPEC` 又指错了地方），所以给这个码一句能照做的话。
+ */
+export function describeSpawnError(err: unknown, command: string, path: string): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  switch (code) {
+    case 'ENOENT':
+      return (
+        `找不到 ${command} 可执行文件（${path}）。` +
+        `请先安装它；若已安装，试着重启 daemon 以重新探测 PATH。`
+      )
+    case 'EACCES':
+      return `${command} 不可执行（${path}）：权限不足。检查文件权限或挂载选项。`
+    case 'EINVAL':
+      return (
+        `启动 ${command} 失败（${path}）：这个文件不能被直接执行。` +
+        `在 Windows 上最常见的原因是它是一个 .cmd/.bat 包装脚本——` +
+        `那种文件必须经 cmd.exe 跑（平台已经会自己解开 npm 的垫片，走到这里说明` +
+        `这次没解开）。如果是 npm 装的 CLI，改用它的原生安装器（给出的是 .exe），` +
+        `或把 npm 全局目录里的 .cmd 换成 .exe 版本。`
+      )
+    default:
+      return `启动 ${command} 失败：${String(err)}`
   }
 }
 
