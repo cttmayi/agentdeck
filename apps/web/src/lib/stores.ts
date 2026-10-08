@@ -4,10 +4,13 @@ import {
   type AgentRole,
   type AgentsPayload,
   type Agent,
+  type AgentGroup,
   type BlockTemplates,
   type ChatTurnView,
   type Conversation,
   type FirstSentenceKind,
+  type GroupsPayload,
+  type GroupCreateAgentDraft,
   type Identity,
   type InboxItem,
   type Issue,
@@ -41,6 +44,22 @@ import { deleteTool } from './tool-install.ts'
 export const identity = writable<Identity | null>(null)
 export const issues = writable<Issue[]>([])
 export const agents = writable<Agent[]>([])
+
+/**
+ * 组页视图里的一个组（第二轮起）：组 + 它引用的**完整成员对象**（含私有）。
+ *
+ * ★ 私有成员不在 `agents`（全局 `GET /api/agents` 被服务端过滤了）——组自己的
+ *   数据必须带成员，否则组里的私有成员"查无此人"。组页、新建任务页、链推导
+ *   （`newtask-chain.ts`）都从这份 `memberAgents` join，不各自从 `agents` 猜。
+ */
+export type AgentGroupView = AgentGroup & { memberAgents: Agent[] }
+
+/**
+ * 智能体组（D70 增量添加）：组的列表。
+ *
+ * 与 `agents` 并行——组页拿它画列表与详情，新建任务页拿它当"从组选"那一档。
+ */
+export const groups = writable<AgentGroupView[]>([])
 
 /**
  * 「新建任务的默认智能体」（D36）。
@@ -165,6 +184,59 @@ export const loadAgents = (): Promise<void> =>
     },
     agents,
   )
+
+export const loadGroups = (): Promise<void> =>
+  load(
+    'groups',
+    async () => {
+      const payload = await api<GroupsPayload>('/api/agent-groups')
+      const byId = new Map((payload.members ?? []).map((m) => [m.id, m]))
+      // ★ 按 `group.members`（id 列表）的顺序 join 出成员对象；查不到的（成员被
+      //   删）不硬塞——界面据此显示「成员已删除」而不是拿一个假对象顶替。
+      return (payload.groups ?? []).map((g) => ({
+        ...g,
+        memberAgents: g.members
+          .map((id) => byId.get(id))
+          .filter((a): a is Agent => a !== undefined),
+      }))
+    },
+    groups,
+  )
+
+/** 建组 / 改组的写入口。成功后重拉列表（与 agents 同款：让界面跟着数据走）。 */
+export async function saveGroup(input: {
+  id?: string
+  name: string
+  members: string[]
+  allowedActions: string[]
+  actionParams: Record<string, Record<string, unknown>>
+  debugActions: string[]
+  /** 0–100，`null` = 无限返工。 */
+  maxReworks: number | null
+  enabled: boolean
+  /** 第二轮：这次要新建的私有成员草稿（组是它们的创建入口）。 */
+  createAgents?: GroupCreateAgentDraft[]
+}): Promise<AgentGroupView | null> {
+  const res = input.id
+    ? await api<{ group: AgentGroup }>(`/api/agent-groups/${encodeURIComponent(input.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      })
+    : await api<{ group: AgentGroup }>('/api/agent-groups', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+  await loadGroups()
+  if (!res.group) return null
+  const fresh = get(groups).find((g) => g.id === res.group!.id) ?? null
+  return fresh
+}
+
+/** 删组。成功后重拉列表。 */
+export async function deleteGroup(id: string): Promise<void> {
+  await api(`/api/agent-groups/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  await loadGroups()
+}
 
 /**
  * **生效中的**默认智能体（D36）。
@@ -495,34 +567,29 @@ export async function createAgent(input: {
   role: AgentRole
   instructions: string
   skillIds: string[]
-  reviewerAgentId: string | null
   runtimeKey: string
-  workDir: string
+  /**
+   * ⚠️ 2026-10（使用者的决定）：`reviewerAgentId` 与 `workDir` **不再由新建表单
+   * 生成**（审核走智能体组；工作目录是任务级的）。协议字段原样保留——老数据
+   * 继续有效，需要时直接调接口仍能写。这里干脆不声明，避免界面再把它捞回来。
+   */
   /** 审核标准（D37）——只对审核者有意义；执行者传 null。 */
   reviewStandard?: ReviewStandard | null
   /**
-   * 行动权限（D40 收口）——只对审核者有意义，执行者传空数组。
+   * ⚠️ 2026-10：这里原来还有 **`allowedActions` / `actionParams` / `debugActions`**
+   *    三个"行动权限"字段（D40 收口时它们是审核者身上的配置）。**整个能力从
+   *    agent 上撤掉了**——"判完允许动什么"属于**这条链**（这队人的活判过之后允许
+   *    做什么），不属于审核者个人：同一个审核者在不同组里本来就该配不同的权限。
    *
-   * ★ 它是**审核者的能力**（判完之后允许触发哪些动作），与"挂什么工具"
-   *   （执行者的能力）是两回事。校验在服务端：第三方动作要对着本工作区**已安装的
-   *   工具包**核对，给执行者传非空值会被 400。
-   */
-  allowedActions?: string[]
-  /**
-   * 动作的固定参数（D43）——只对审核者有意义，执行者传空对象。
+   *    唯一权威现在是 `AgentGroup.allowedActions` / `actionParams` / `debugActions`
+   *    （组配置页 ③ 行动），建任务时由 daemon 展开进 `Run.*`。
    *
-   * 界面上给已授权动作的 open 参数钉的值：执行时由平台注入，模型不许写。
-   * 校验在服务端：每个动作必须是已装工具声明的动作、每个参数必须是它的 open
-   * 参数且值合规。
+   *    ★ 服务端**不留情面**：新建 / 编辑一个 agent 时带上这三个键（或那个已撤掉的
+   *      `reviewerAgentId`）会被 400「不认识的字段」——保留它们等于把这个概念从
+   *      界面这一侧再捞回来。
    */
-  actionParams?: Record<string, Record<string, unknown>>
-  /**
-   * 调试动作（2026-09）——只对审核者有意义，执行者传空数组。
-   *
-   * 勾了「调试」的动作：判决引用它时不跑脚本，只记录动作与解析后的参数。
-   * 是 `allowedActions` 的**子集**（服务端校验）。
-   */
-  debugActions?: string[]
+  /** 私有归属（第二轮）：有值 = 这个 agent 属于某个组（组详情直接建私有成员时用）。 */
+  ownerGroupId?: string
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
@@ -531,16 +598,10 @@ export async function createAgent(input: {
       role: input.role,
       instructions: input.instructions,
       skillIds: input.skillIds,
-      reviewerAgentId: input.reviewerAgentId,
       runtimeKey: input.runtimeKey,
       reviewStandard: input.reviewStandard ?? null,
-      allowedActions: input.allowedActions ?? [],
-      actionParams: input.actionParams ?? {},
-      ...(input.debugActions && input.debugActions.length > 0
-        ? { debugActions: input.debugActions }
-        : {}),
-      // 空字符串会被协议当成"没指定"——D27 下那是**默认路径**，不是错误
-      ...(input.workDir.trim() ? { workDir: input.workDir.trim() } : {}),
+      // `exactOptionalPropertyTypes`：没给就整个键不出现（字段在不在 = 全局/私有）
+      ...(input.ownerGroupId ? { ownerGroupId: input.ownerGroupId } : {}),
     }),
   })
   await loadAgents()
@@ -563,6 +624,17 @@ export async function updateAgent(
   })
   await loadAgents()
   return agent
+}
+
+/**
+ * 删一个 agent（2026-11：智能体编辑页底部新增的「删除」）。
+ *
+ * 服务端有两道闸（被智能体组引用 / 是默认智能体），拒绝时会把"下一步怎么做"
+ * 说清；历史 run 不挡（run 上是执行时的快照）。删完刷新列表。
+ */
+export async function deleteAgent(id: string): Promise<void> {
+  await api(`/api/agents/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  await loadAgents()
 }
 
 /** 当前数据快照，供同步循环收集摘要用。 */

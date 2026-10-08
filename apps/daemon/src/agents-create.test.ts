@@ -153,14 +153,20 @@ describe('★ 数组字段要校验元素类型，不是"给了数组就行"', (
   })
 })
 
-describe('★ 角色与"由谁审我"（D28）', () => {
+describe('★ 角色（原来还管"由谁审我"，2026-10 起那件事只有组能回答）', () => {
   test('缺省角色是 executor', async () => {
     // 新建一个 agent 时"它能干活"是最合理的默认；默认成审核者会让它
-    // 悄悄进入审核小组
+    // 悄悄进入审核小组。
     await withDaemon(async (url) => {
       const res = await create(url, { name: 'x' })
       assert.equal(res.body['role'], 'executor')
-      assert.equal(res.body['reviewerAgentId'], null)
+      // ⚠️ 这里原来还断言 `reviewerAgentId === null`——那个字段已经从 `Agent` 上
+      //    整个撤掉，所以现在的判据是"读回来的记录里**没有这个键**"（而不是"它是
+      //    null"）。这一条同时钉住"老字段不会从任何角落里漏出来"。
+      assert.ok(
+        !Object.hasOwn(res.body as Record<string, unknown>, 'reviewerAgentId'),
+        '撤掉的字段不该出现在新建记录里（连 null 都不该有）',
+      )
     })
   })
 
@@ -171,68 +177,59 @@ describe('★ 角色与"由谁审我"（D28）', () => {
     })
   })
 
-  test('★ executor 可以指定一个 reviewer 作为它的审核者', async () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ⚠️ 这一节原来有六条用例，全是"由谁审我"的校验（D28）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 它们钉的是：执行者能指定一个审核者、指定的必须是**审核角色**、不能指向自己、
+   * 审核者自己不许配、指向不存在的 id 要 400。**这六条现在都没有对象了**——
+   * `Agent.reviewerAgentId` 已从协议里撤掉（"谁审我"这件事现在只有**智能体组**
+   * 能回答，见 `AgentGroup`），所以那些请求现在一律走"不认识的字段"这条 400。
+   *
+   * ★ 而它们防的那几件事**一件都没丢**，只是换了承载体和发生时机：
+   *
+   *   · "指定的必须是审核角色" / "不能是自己" / "不能一个执行者都没有" ⇒
+   *     组的**形态校验器**（`checkGroupShape`：恰好 1 执行 + 1 审核，报出实际是
+   *     谁、缺谁），而且它**每次派活时都会再校验一遍**（成员会被删、角色会被改）
+   *     ——比"在写入口校验一次"更强；
+   *   · "指向不存在的 id" ⇒ 同样由形态校验器报（成员不存在时会点名那个 id）；
+   *   · INV-1（审核者 ≠ 执行者）另有一道：`POST /api/runs` 上的
+   *     `assertReviewerDistinct`（写入前强制）。
+   *
+   * 所以这里不再重写那六条，而是钉住**新的事实**：那几个键现在进不来。
+   */
+  test('★★ 撤掉的字段写进接口 ⇒ 400「不认识的字段」（而不是被静默忽略）', async () => {
+    // 静默忽略是最坏的一种处理：使用者以为"我给它配了审核者/动作权限"，界面也
+    // 一路 200，而库里一个字节都没写——下次打开发现配置不见了，谁也说不清是哪
+    // 一步丢的。所以写入口**明确拒绝**，并在错误里点出可改的字段。
     await withDaemon(async (url) => {
-      // 首启会播种一对：审核员（reviewer）与助手（executor）
-      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; name: string; role: string }>
-      }).agents
-      const reviewer = agents.find((a) => a.role === 'reviewer')
-      assert.ok(reviewer, '首启会播种一个审核者 —— 否则报告全都无人可审')
-
-      const res = await create(url, { name: '执行者', reviewerAgentId: reviewer!.id })
-      assert.equal(res.status, 201)
-      assert.equal(res.body['reviewerAgentId'], reviewer!.id)
+      for (const key of ['reviewerAgentId', 'allowedActions', 'actionParams', 'debugActions']) {
+        const res = await create(url, { name: `想写 ${key} 的执行者`, [key]: [] })
+        assert.equal(res.status, 400, `${key}：必须拒绝，实际 ${res.status}`)
+        assert.match(String(res.body['error']), /不认识的字段/, `${key}：要说清是字段不认识`)
+        assert.match(String(res.body['error']), new RegExp(key), `${key}：要点名是哪一个`)
+      }
     })
   })
 
-  test('★ 指定的审核者必须真的是审核角色', async () => {
-    // 指向一个 executor 是最容易犯的错：名字看起来对，但那个 agent 没有
-    // 审核标准可用，run 起不来或审出没有依据的结论
+  test('★★ 撤掉的字段连 PATCH 也进不来（保存一次不该把它带回来）', async () => {
     await withDaemon(async (url) => {
-      const executor = (await create(url, { name: '另一个执行者' })).body as { id: string }
-      const res = await create(url, { name: 'x', reviewerAgentId: executor.id })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /不是审核角色/)
-    })
-  })
-
-  test('★ 审核者不能是自己', async () => {
-    await withDaemon(async (url) => {
-      const made = (await create(url, { name: 'r', role: 'reviewer' })).body as { id: string }
+      const made = (await create(url, { name: '普通执行者' })).body as { id: string }
       const res = await fetch(`${url}/api/agents/${made.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'executor', reviewerAgentId: made.id }),
+        body: JSON.stringify({ reviewerAgentId: null }),
       })
-      assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /审自己|自己/)
-    })
-  })
-
-  test('★ reviewer 角色不该配 reviewerAgentId', async () => {
-    // 它是审别人的那个，不是被审的那个
-    await withDaemon(async (url) => {
-      const agents = ((await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string }>
-      }).agents
-      const reviewer = agents.find((a) => a.role === 'reviewer')!
-      const res = await create(url, {
-        name: 'r2',
-        role: 'reviewer',
-        reviewerAgentId: reviewer.id,
+      assert.equal(res.status, 400, '旧字段写一次也是 400（不然"保存时顺手清掉"就无从谈起）')
+      // 而普通字段照旧能改——这条反向对照防的是"整个 PATCH 被改坏了"
+      const ok = await fetch(`${url}/api/agents/${made.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '改个名字' }),
       })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /审别人的那个/)
-    })
-  })
-
-  test('指定的审核者不存在 ⇒ 400（而不是留一个悬空引用）', async () => {
-    await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x', reviewerAgentId: 'no-such-agent' })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /不存在/)
+      assert.equal(ok.status, 200)
+      assert.equal(((await ok.json()) as { name: string }).name, '改个名字')
     })
   })
 })
@@ -364,12 +361,10 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
     // 判据取的是**描述符**：不同 runtime 的 baseArgs 不同，而它会被写进
     // 审计的 argv（那是"当时到底怎么起的进程"的权威记录）。
     await withDaemon(async (url) => {
-      // ★ D41：动作只能来自**装进来的工具包**（平台的内置动作全部移除了），
-      //   所以先装一个包，再把它声明的动作写进 `allowedActions`。继续写
-      //   `comment.create` 那种老名字的话，这次创建会以"工具的包没装"被 400 拒掉
-      //   ——而这条用例要的是"字段如实存下来"，不是"包没装会被拒"。
-      const pkg = await writeToolPackage({ slug: 'runtime-fixture-tool', actionName: 'run' })
-      await installToolPackage({ url }, pkg)
+      // ⚠️ 2026-10：这里原来还顺带造一个工具包、把它的动作写进审核者的
+      //    `allowedActions`（D41：动作只能来自装进来的包）。那一步现在**没有落点了**
+      //    ——agent 上不再有动作字段（动作只属于组），所以这条用例回到它真正的
+      //    被测对象：`runtimeKey` 是否如实落库、并且真的决定用哪个 CLI。
 
       const reviewer = ((await (
         await fetch(`${url}/api/agents`, {
@@ -383,15 +378,11 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
             reviewStandard: {
               body: '# 夹具\n\n只看一件事。',
             },
-            // D40 收口：动作权限在 **agent** 上（不再是标准里那个字段）
-            // D41：这里写的那个动作来自上面装的包 —— 它是这次唯一的合法来源
-            allowedActions: [pkg.action],
           }),
         })
-      ).json()) as { id: string; runtimeKey: string; allowedActions: string[] })
+      ).json()) as { id: string; runtimeKey: string })
 
       assert.equal(reviewer.runtimeKey, 'generic', '字段如实存下来')
-      assert.deepEqual(reviewer.allowedActions, [pkg.action], '动作也如实存下来')
 
       // 用这个 agent 起一条 review run，看审计里的 argv 用哪套基础参数
       const runId = '01M2RUNTIME00000000000001'

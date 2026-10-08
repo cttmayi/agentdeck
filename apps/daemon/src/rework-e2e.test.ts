@@ -144,6 +144,14 @@ let daemon: DaemonHandle
 let backend: AlwaysFailReviewBackend
 let issueId: Issue['id']
 let agentId: string
+/**
+ * 首启播种的那个**默认组**的 id。
+ *
+ * ⚠️ 2026-10 起"谁审我"只有组能回答：不带 `groupId` 的执行 run **不会**派生审核
+ *    run，于是"等审核"的断言会以**超时**的形式失败（看起来像 daemon 卡住，
+ *    其实一切正常）。所以这条链的每一处提交都要带上它。
+ */
+let groupId: string
 
 async function listRuns(): Promise<RunRow[]> {
   const res = (await (await fetch(`${daemon.url}/api/runs`)).json()) as { runs: RunRow[] }
@@ -160,11 +168,14 @@ async function submitTask(maxReworks: number): Promise<RunId> {
       runId,
       kind: 'execute',
       agentRef: { id: agentId, name: '助手', instructions: '' },
+      // ★ 带组 ⇒ 组的审核者成为这条任务的审核者（带组时执行者必须与组的一致）
+      groupId,
       skills: [],
       subject: { type: 'issue', id: issueId },
       prompt: '把功能实现一下',
       workDir,
       limits: { maxTurns: null, timeoutMs: null },
+      // 显式给的额度**覆盖**组默认（播种组的 `maxReworks` 是 0；这条链路测的就是返工）
       maxReworks,
     }),
   })
@@ -193,13 +204,24 @@ before(async () => {
   issueId = ((await res.json()) as Issue).id
 
   const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-    agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+    agents: Array<{ id: string; role: string }>
   }).agents
   const executor = agents.find((a) => a.role === 'executor')
   const reviewer = agents.find((a) => a.role === 'reviewer')
   assert.ok(executor, 'bootstrap 会播种一个执行者')
   assert.ok(reviewer, 'bootstrap 会播种一个审核者')
-  assert.equal(executor!.reviewerAgentId, reviewer!.id, '执行者默认指向审核者')
+
+  // ⚠️ 这里原来断言 `executor.reviewerAgentId === reviewer.id`（"执行者默认指向
+  //    审核者"）。那个字段**已经撤掉**——同一条语义（首启就是一条通的闭环）现在由
+  //    **播种的默认组**承载：它的成员正是这一对。
+  const groups = ((await (await fetch(`${daemon.url}/api/agent-groups`)).json()) as {
+    groups: Array<{ id: string; members: string[] }>
+  }).groups
+  const seeded = groups.find(
+    (g) => g.members.includes(executor!.id) && g.members.includes(reviewer!.id),
+  )
+  assert.ok(seeded, '★ bootstrap 播种的默认组把这一对串起来：首启就是一条通的闭环')
+  groupId = seeded!.id
   agentId = executor!.id
 })
 
@@ -299,7 +321,7 @@ describe('D45：审核不通过 ⇒ 返工', () => {
   })
 
   test('★ 超出范围的返工次数被写入口拒掉（早拒，别等跑起来才发现）', async () => {
-    for (const bad of [-1, 6, 1.5]) {
+    for (const bad of [-1, 101, 1.5]) {
       const res = await fetch(`${daemon.url}/api/runs`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

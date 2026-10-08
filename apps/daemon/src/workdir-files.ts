@@ -27,12 +27,36 @@ import { join, relative, resolve, sep } from 'node:path'
  *
  * 所以每个响应都带 `sandbox` 的 CSP（脚本一律不执行）与 `nosniff`。
  * 这样即使被当作文档打开，它也只是"一张静态图/一段静态文本"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 第三个要紧的（2026-10）：**音视频要流着发，而且要有 Range**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者报的是「展示页面目前不支持视频文件显示」。查下来是两件事叠在一起：
+ *
+ *   1. 后缀表里**没有**任何 `video/*` / `audio/*` ⇒ 一个 `.mp4` 被回成
+ *      `application/octet-stream` ⇒ 界面按"二进制"处理，给一屏十六进制；
+ *   2. 这条路由**先把整份文件读进内存**（8MB 上限）再发 ⇒ 就算认出了类型，
+ *      一段几十 MB 的视频会被"超过读取上限"挡掉，而且浏览器没法 seek。
+ *
+ * 所以音视频走另一条路：**不读进内存**，直接 `createReadStream` 流出去，
+ * 并且认 `Range`（206 + `content-range`）。这不是优化，是**能不能播**的问题——
+ * 没有 Range 就没有 seek，而"看一段视频却不能拖"等于没支持。
+ *
+ * ⚠️ 而且媒体响应**不带**那条 `sandbox` 的 CSP，理由写在 `MEDIA_FILE_HEADERS`
+ *    上面（那条 CSP 是给"agent 写的**文档**"用的，媒体不是文档，而它会把浏览器
+ *    在新标签页里为媒体合成的那张文档自己的 `media-src` 一起挡掉）。
  */
 
 /** 单次列目录的上限——一个目录里塞几千个文件时别把页面拖垮。 */
 export const MAX_ENTRIES = 500
 /** 单个文件的读取上限（图片/文本够用；更大的请去磁盘上看）。 */
 export const MAX_FILE_BYTES = 8 * 1024 * 1024
+/**
+ * 音视频的上限——它们**不读进内存**（流着发），所以上限只防"离谱的大文件"，
+ * 不防内存。8MB 那一档对视频毫无意义：一段 1080p 一分钟就有几十 MB。
+ */
+export const MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024
 
 export interface WorkDirEntry {
   /** 相对工作目录的路径，POSIX 风格（`/` 分隔）。 */
@@ -249,18 +273,108 @@ export async function resolveWorkFilePath(workDir: string, relPath: string): Pro
   return real
 }
 
-/** 读一个文件（有大小上限）。 */
-export async function readWorkFile(workDir: string, relPath: string): Promise<Buffer> {
+/**
+ * 一份**已经过全部守卫**的文件：真实路径、大小、类型，以及"该不该流着发"。
+ *
+ * ⚠️ 之所以要这个中间层，是为了让"守卫 / 上限 / 类型"三件事只有**一处**实现：
+ *    路由那条现在有两条发法（流式 / 读进内存），两处各写一遍守卫就会分叉，
+ *    而分叉的表现是"其中一条路上能读到工作目录外面的文件"——最难查的那种。
+ */
+export interface WorkFileHandle {
+  /** 磁盘上的真实路径（软链已经解开、已经在工作目录之内）。 */
+  path: string
+  size: number
+  contentType: string
+  /** 音视频：流着发 + 认 Range（理由见文件顶上那一段）。 */
+  streamable: boolean
+}
+
+/**
+ * 媒体类型吗——判据是**类型**，不是后缀：`contentTypeFor` 是"这个文件是什么"的
+ * 唯一出处（与界面那边 `file-view.ts` 的分工一致）。
+ */
+export function isStreamableType(contentType: string): boolean {
+  const type = contentType.split(';')[0]!.trim().toLowerCase()
+  return type.startsWith('video/') || type.startsWith('audio/')
+}
+
+/** 解开路径、查大小与类型，并按档检查上限。**所有守卫都在这里**。 */
+export async function openWorkFile(workDir: string, relPath: string): Promise<WorkFileHandle> {
   const full = await resolveWorkFilePath(workDir, relPath)
   const info = await stat(full)
   if (!info.isFile()) throw new UnsafePathError(`不是一个文件：${relPath}`)
-  if (info.size > MAX_FILE_BYTES) {
+  const contentType = contentTypeFor(relPath)
+  const streamable = isStreamableType(contentType)
+  const cap = streamable ? MAX_MEDIA_BYTES : MAX_FILE_BYTES
+  if (info.size > cap) {
     throw new UnsafePathError(
-      `文件有 ${Math.round(info.size / 1024)}KB，超过 ${MAX_FILE_BYTES / 1024 / 1024}MB 的读取上限。` +
+      `文件有 ${Math.round(info.size / 1024)}KB，超过 ${Math.round(cap / 1024 / 1024)}MB 的上限。` +
         `请直接在磁盘上打开它。`,
     )
   }
-  return readFile(full)
+  return { path: full, size: info.size, contentType, streamable }
+}
+
+/** 读一个文件（有大小上限）——非媒体那条路（界面要的就是这串字节）。 */
+export async function readWorkFile(workDir: string, relPath: string): Promise<Buffer> {
+  const handle = await openWorkFile(workDir, relPath)
+  return readFile(handle.path)
+}
+
+/**
+ * 解析 `Range: bytes=…`。
+ *
+ * 只支持**单区间**：多区间要回 `multipart/byteranges`，而浏览器放媒体从来只问
+ * 单区间；认不出来的区间就当"没有 Range"（回 200 整份），不当错误——那是
+ * HTTP 允许的（服务器可以忽略 Range）。
+ *
+ * 三档返回值：
+ *   · `null`            ⇒ 没有 Range 头（或认不出），回 200 整份；
+ *   · `'unsatisfiable'` ⇒ 有 Range 但**越界**，必须回 **416** + `content-range: bytes *​/size`
+ *     （回 200 整份是不合规的：客户端会以为拿到了它要的那一段）；
+ *   · `{start,end}`     ⇒ 回 206，带 `content-range`。`end` 是**闭区间**（HTTP 语义）。
+ */
+export function parseByteRange(
+  header: string | null | undefined,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (!header) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!m) return null
+  const [, rawStart, rawEnd] = m
+  if (rawStart === '' && rawEnd === '') return null
+  // 空 size：任何区间都越界
+  if (size <= 0) return 'unsatisfiable'
+
+  if (rawStart === '') {
+    // `bytes=-N`：**最后** N 个字节
+    const n = Number(rawEnd)
+    if (!Number.isFinite(n) || n <= 0) return 'unsatisfiable'
+    return { start: Math.max(0, size - n), end: size - 1 }
+  }
+  const start = Number(rawStart)
+  if (!Number.isFinite(start) || start >= size) return 'unsatisfiable'
+  if (rawEnd === '') return { start, end: size - 1 }
+  const end = Number(rawEnd)
+  if (!Number.isFinite(end) || end < start) return 'unsatisfiable'
+  return { start, end: Math.min(end, size - 1) }
+}
+
+/**
+ * 音视频响应的头。
+ *
+ * ⚠️ **没有**那条 `sandbox` 的 CSP，这是刻意的：`WORK_FILE_HEADERS` 里那条 CSP
+ *    是给**文档**用的（挡住 agent 写的 html/svg 在本源里跑脚本）。媒体不是文档，
+ *    而那条 CSP 会把浏览器在新标签页里为媒体合成的那张文档自己也一起管住
+ *    （`default-src 'none'` ⇒ 它自己的 `media-src` 落回 `none`，视频放不出来）。
+ *    安全性并没有因此变松：`nosniff` + 正确的 `video/*` 类型 ⇔ 浏览器**不会**
+ *    把它当文档解析，所以"agent 写的文件反过来操作 daemon"那条路依然是断的。
+ */
+export const MEDIA_FILE_HEADERS: Record<string, string> = {
+  'x-content-type-options': 'nosniff',
+  'cache-control': 'no-store',
+  /** 让浏览器知道可以按区间来取（seek 就靠它）。 */
+  'accept-ranges': 'bytes',
 }
 
 /**
@@ -291,6 +405,34 @@ const CONTENT_TYPES: Record<string, string> = {
   '.ts': 'text/plain; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
   '.pdf': 'application/pdf',
+  // ── 音视频（2026-10）──────────────────────────────────────────────
+  //
+  // ⚠️ 这里给的是**容器**的类型，不是编码的：能不能播由浏览器决定（`.mkv`、
+  //    `.avi` 这类容器 Chrome 多半放不了，那是浏览器的事，界面会把"放不出来"
+  //    如实说一句，而不是假装它坏了）。给类型这件事我们只说"这是什么文件"。
+  //
+  // ⚠️ 刻意**没有** `.ts`：那个后缀在本项目里绝大多数时候是 TypeScript 源码，
+  //    把它当 MPEG-TS 视频会让一堆代码文件变成播放器。
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
+  '.ogv': 'video/ogg',
+  '.mpg': 'video/mpeg',
+  '.mpeg': 'video/mpeg',
+  '.wmv': 'video/x-ms-wmv',
+  '.flv': 'video/x-flv',
+  '.3gp': 'video/3gpp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.oga': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
 }
 
 export function contentTypeFor(name: string): string {

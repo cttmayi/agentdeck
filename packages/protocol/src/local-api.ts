@@ -50,9 +50,9 @@ export const SkillPayload = z.object({
   body: z.string(),
   /**
    * ⚠️ **这里原来有一个 `allowedActions`，已经搬走了**（D40 收口）：装 skill
-   * 不再携带"允许触发哪些动作"——那是**审核者**的能力（`Agent.allowedActions`），
-   * 而 skill 是给执行者参考的资料包。老客户端传了这个字段也**不报错但会被忽略**
-   * （它不是"装错了"，只是那一项不再属于 skill）。
+   * 不再携带"允许触发哪些动作"——那份权限属于**智能体组**
+   * （`AgentGroup.allowedActions`），而 skill 是给执行者参考的资料包。老客户端
+   * 传了这个字段也**不报错但会被忽略**（它不是"装错了"，只是那一项不再属于 skill）。
    */
 
   /** 支持文件的相对路径 → 内容（UTF-8 文本）。可为空——只支持文本，见 `Skill.files`。 */
@@ -122,6 +122,29 @@ export const SubmitRunRequest = z.object({
    * 放在这里是因为执行器需要在不查库的前提下决定目录。
    */
   agentDefaultWorkDir: z.string().min(1).optional(),
+  /**
+   * **这一次从哪个智能体组走**（D70 增量添加）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 组的语义 = "执行 → 审核 → 行动"整条链的默认配置
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * **给 id** ⇒ 执行者、审核者、行动权限、固定参数、默认返工次数全部默认从这条
+   * 组取（daemon 在写入前展开成 `agentRef` / `reviewerAgentId` / `allowedActions`
+   * / `actionParams` / `maxReworks`，跑的是同一条老链路）。下面那几个字段仍可
+   * **单独覆盖**组的默认——省略 = 跟随组，给了值 = 这一次用它（与老路径"省略 =
+   * 跟随执行者/审核者"是同一套三态纪律）。
+   *
+   * **省略** ⇒ 老路径：执行者 = `agentRef`，审核者跟执行者自己的「由谁审它」。
+   *
+   * ⚠️ 与 `reviewerAgentId` 的优先级：`groupId` 决定**默认**，`reviewerAgentId`
+   *    给值就**盖过**组的审核者（这次换人）。两个都省略 = 纯老路径。
+   *
+   * ⚠️ 为什么 daemon 展开而不是界面展开：展开涉及查库（组、成员 agent），界面
+   *    没有权威数据；而且展开后要走 daemon 现有的全部校验（INV-1、审核者存在性
+   *    与角色、动作白名单合法性），展开放在写入前正好复用它们。
+   */
+  groupId: z.string().min(1).optional(),
   limits: z.object({
     maxTurns: z.number().int().positive().nullable(),
     timeoutMs: z.number().int().positive().nullable(),
@@ -190,6 +213,20 @@ export const SubmitRunRequest = z.object({
    */
   actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())).optional(),
   /**
+   * **这一次**的调试动作（D70 增量添加，与 `allowedActions` 对称）。
+   *
+   * 调试动作 = 判决引用它时**不跑脚本**、只记录动作与解析后的参数。老路径没有
+   * 任务级覆盖（审核 run 的调试集合从审核者 `Agent.debugActions` 取）；组展开
+   * 时组的 `debugActions` 默认落在这里。
+   *
+   * **省略** ⇒ 跟随审核者的 `Agent.debugActions`；**给了数组** ⇒ 这一次用这一份。
+   * 空数组 = 这一次一个都不标调试（合法，与 `allowedActions: []` 同一档）。
+   *
+   * ⚠️ 前端建任务时通常**不发**这个字段（调试勾选住在组详情 / 审核者详情，跟组走）；
+   *    这个任务级字段主要是给组展开用的，顺带保留了"这次改调试"的对称能力。
+   */
+  debugActions: z.array(ActionRefType).optional(),
+  /**
    * **这一次**允许返工几次——审核判 `fail` 时把意见交回执行者重做（D45）。
    *
    * ══════════════════════════════════════════════════════════════════
@@ -203,7 +240,10 @@ export const SubmitRunRequest = z.object({
    * **省略 / `0`** ⇒ 不返工。审核判 `fail` 时平台无处可去，**直接把任务交给人**
    * （看板「等待人处理」）——这是默认，也是绝大多数情况。
    *
-   * **给 N** ⇒ 最多返工 N 次（总执行 run 最多 1 + N 条）。用完仍 `fail` ⇒ 同样交给人。
+   * **给 N（0–100）** ⇒ 最多返工 N 次（总执行 run 最多 1 + N 条）。用完仍 `fail` ⇒ 同样交给人。
+   *
+   * **`null`** ⇒ **无限**：`fail` 就一直交回执行者重做，直到通过或交给人——
+   *   会持续烧 CLI 额度，慎用。
    *
    * ⚠️ 与 `chainDepth` 的分工：`chainDepth` 是**已经**返工了几次（由派生方 +1），
    *    这个字段是**允许**几次。两者一比就知道还有没有额度——所以不需要另记一个
@@ -213,7 +253,7 @@ export const SubmitRunRequest = z.object({
    *    （重试的是**审核者**），`rework` 是"判决说这活不行"（重做的是**执行者**）。
    *    混成一个额度会让"模型不会写 JSON"吃掉"活干得不行"的次数。
    */
-  maxReworks: z.number().int().min(0).max(5).optional(),
+  maxReworks: z.number().int().min(0).max(100).nullable().optional(),
   /**
    * 链路深度（INV-14）。
    *
@@ -618,6 +658,30 @@ export const Capability = {
    *   要么把原因写出来。
    */
   ConversationFiles: 'conversation-files',
+  /**
+   * `POST /runs` 接受 `SubmitRunRequest.groupId`，且 `/api/agent-groups` 存在
+   * （智能体组，D70 增量添加）。
+   *
+   * ★ 与前几条同一类风险，且**最容易真的发生**：界面与 daemon 是两份产物，
+   *   只重建前端、刷新页面（不重启 daemon）时，新界面会把「从智能体组」选进
+   *   建任务页——而旧 daemon 不解析 `groupId`（请求体那层没有 zod 校验，未知
+   *   字段被忽略），于是这条 run **被当成"没选组"跑老路径**：执行者还是
+   *   `agentRef` 那个，审核者跟执行者自己的配置，**组的安排全部落空**，而两边
+   *   都不报错。
+   *
+   *   所以：界面**只在这个标志在的时候**才把组的选项给出来；没有它时，建任务页
+   *   不出现「智能体组」那一档（老路径照常可用）。
+   */
+  AgentGroups: 'agent-groups',
+  /**
+   * 工作流模式的组 + 私有智能体（第二轮，2026 续）。
+   *
+   * ★ 与 `AgentGroups` 同一条规矩，且这次的风险**更隐蔽**：旧 daemon 会静默
+   *   忽略 `ownerGroupId`，于是「新建私有」创建的 agent 会**建成全局的**——它
+   *   出现在智能体页里、能被别的组引用，而界面上的"私有"承诺落空，两边都不报
+   *   错。所以界面**只在这个标志在的时候**才给「新建私有」与模式展示。
+   */
+  AgentGroupsWorkflow: 'agent-groups-workflow',
 } as const
 
 /** `POST /skills` —— 页面下载好 skill 后交给 daemon 落盘。 */

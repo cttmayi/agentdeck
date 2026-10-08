@@ -20,6 +20,8 @@ import type {
   ActionId,
   ActionStatus,
   Agent,
+  AgentGroup,
+  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -48,6 +50,7 @@ import type {
   Workspace,
   WorkspaceId,
 } from '@agentdeck/protocol'
+import { cleanAgent } from '@agentdeck/protocol'
 
 /**
  * SQLite 存储适配器 —— `Store` 端口的 v2 实现（`node:sqlite`）。
@@ -175,6 +178,8 @@ const META_SCHEMA = [
 /** 有 workspace 归属的实体表。键名即表名，下文用它拼通用语句。 */
 const ENTITY_TABLES = [
   'agent',
+  // 智能体组（D70 增量添加）。与文件适配器的 `COLLECTIONS` 同序摆放。
+  'group',
   'skill',
   'tool',
   'issue',
@@ -202,7 +207,7 @@ type EntityTable = (typeof ENTITY_TABLES)[number]
 const GENERAL_PUT_TABLES = ENTITY_TABLES
 
 /** 需要"按 workspace 列举"的表：端口里只有 agent / skill / tool / report 有这种列法。 */
-const WORKSPACE_LIST_TABLES = ['agent', 'skill', 'tool', 'report'] as const
+const WORKSPACE_LIST_TABLES = ['agent', 'group', 'skill', 'tool', 'report'] as const
 
 const ALL_TABLES = [
   'meta',
@@ -241,6 +246,14 @@ const SCHEMA = [
      json TEXT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS agent_workspace ON agent(workspace_id)`,
+
+  // ── 无查询条件的实体表：JSON 里没有需要索引的字段 ──
+  `CREATE TABLE IF NOT EXISTS "group" (
+     id TEXT PRIMARY KEY,
+     workspace_id TEXT NOT NULL,
+     json TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS group_workspace ON "group"(workspace_id)`,
 
   `CREATE TABLE IF NOT EXISTS skill (
      id TEXT PRIMARY KEY,
@@ -478,6 +491,17 @@ const NAMED_SQL = {
 
   workspaceGet: `SELECT json FROM workspace WHERE id = ?`,
   workspacePut: `INSERT INTO workspace(id, json) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
+  /**
+   * 某个 agent 属于哪些组（D70）。
+   *
+   * `members` 是 JSON 数组，用 `json_each` 展开后按元素匹配。⚠️ 必须用
+   * `EXISTS` 而不是 `json_each(json) ... WHERE` 直接 join：后者一行组会产生
+   * 多行结果，还要去重；EXISTS 一行一组，语义直接。
+   */
+  groupListByAgent: `SELECT json FROM "group"
+     WHERE EXISTS (
+       SELECT 1 FROM json_each(json_extract("group".json, '$.members')) WHERE value = ?
+     ) ORDER BY rowid`,
   /**
    * ★ 按**插入顺序**返回，不是按 id 排序。
    *
@@ -718,9 +742,12 @@ type NamedStmt = keyof typeof NAMED_SQL
 /** 通用语句：按表名拼键。表名来自编译期常量，不可能是注入点。 */
 function derivedSql(): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const t of ALL_TABLES) out[`count:${t}`] = `SELECT count(*) AS n FROM ${t}`
+  // `group` 是 SQL 保留字：拼语句时必须加引号（CREATE TABLE 那侧已经引了）。
+  // 键名仍用裸名（`get:group`），只有 SQL 里的表名带引号。
+  const q = (t: string): string => (t === 'group' ? '"group"' : t)
+  for (const t of ALL_TABLES) out[`count:${t}`] = `SELECT count(*) AS n FROM ${q(t)}`
   for (const t of [...ENTITY_TABLES, 'report'] as const) {
-    out[`get:${t}`] = `SELECT json FROM ${t} WHERE id = ?`
+    out[`get:${t}`] = `SELECT json FROM ${q(t)} WHERE id = ?`
   }
   for (const t of GENERAL_PUT_TABLES) {
     /**
@@ -728,16 +755,16 @@ function derivedSql(): Record<string, string> {
      * 是覆盖（最后一条赢），不是报错。端口里没有"仅插入一次"的语义——
      * 唯一的例外是 report 的去重键，那条单独处理。
      */
-    out[`put:${t}`] = `INSERT INTO ${t}(id, workspace_id, json) VALUES(?, ?, ?)
+    out[`put:${t}`] = `INSERT INTO ${q(t)}(id, workspace_id, json) VALUES(?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, json = excluded.json`
   }
   for (const t of GENERAL_PUT_TABLES) {
     // 与 put 对称的一条：删掉就真的删掉（sqlite 是就地更新的，不像文件适配器
     // 那样要追加一条 del 记录再等 compact）——D38 加，用于卸载 skill。
-    out[`del:${t}`] = `DELETE FROM ${t} WHERE id = ?`
+    out[`del:${t}`] = `DELETE FROM ${q(t)} WHERE id = ?`
   }
   for (const t of WORKSPACE_LIST_TABLES) {
-    out[`listByWorkspace:${t}`] = `SELECT json FROM ${t} WHERE workspace_id = ? ORDER BY rowid`
+    out[`listByWorkspace:${t}`] = `SELECT json FROM ${q(t)} WHERE workspace_id = ? ORDER BY rowid`
   }
   return out
 }
@@ -1002,16 +1029,63 @@ export class SqliteStore implements Store {
 
   // ── Agent ──
 
+  // ⚠️ 与文件存储同一个判据：agent 读取的唯一总闸，撤掉的字段（老记录里还留着）
+  //    在**读**这一层就摘掉，见 `stripLegacyAgentFields`。
   async getAgent(id: AgentId): Promise<Agent | null> {
-    return this.#getEntity<Agent>('agent', id as string)
+    const found = this.#getEntity<Agent>('agent', id as string)
+    return found ? cleanAgent(found) : null
   }
 
   async listAgents(workspaceId: WorkspaceId): Promise<Agent[]> {
+    return this.#listByWorkspace<Agent>('agent', workspaceId).map(cleanAgent)
+  }
+
+  // 未经清理的那一份（`json` 列里存的是什么就是什么）：只给启动时的老记录清理用
+  // ——它要删的正是读时兜底藏起来的那几个键，用 `listAgents` 就永远判不出"需要清"。
+  async listAgentsRaw(workspaceId: WorkspaceId): Promise<Agent[]> {
     return this.#listByWorkspace<Agent>('agent', workspaceId)
   }
 
   async insertAgent(agent: Agent): Promise<void> {
     this.#putEntity('agent', agent.id as string, agent.workspaceId, agent)
+  }
+
+  async deleteAgent(id: AgentId): Promise<boolean> {
+    const res = this.#stmt('del:agent').run(id as string)
+    return Number(res.changes) > 0
+  }
+
+  // ── AgentGroup（智能体组，D70 增量添加）──
+
+  async getGroup(id: AgentGroupId): Promise<AgentGroup | null> {
+    return this.#getEntity<AgentGroup>('group', id as string)
+  }
+
+  async listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]> {
+    return this.#listByWorkspace<AgentGroup>('group', workspaceId)
+  }
+
+  async listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]> {
+    const rows = this.#stmt('groupListByAgent').all(agentId as string) as { json: string }[]
+    return rows.map((r) => JSON.parse(r.json) as AgentGroup)
+  }
+
+  async insertGroup(group: AgentGroup): Promise<void> {
+    this.#putEntity('group', group.id as string, group.workspaceId, group)
+  }
+
+  async updateGroup(group: AgentGroup): Promise<boolean> {
+    // sqlite 的 upsert 无法可靠区分"更新"与"插入"（`changes` 对两路径取值
+    // 不一致），所以先查存在性。同一进程内 `DatabaseSync` 是同步的，`get` 与
+    // `put` 之间没有 await，不存在并发窗口。
+    if (this.#getEntity<AgentGroup>('group', group.id as string) === null) return false
+    this.#putEntity('group', group.id as string, group.workspaceId, group)
+    return true
+  }
+
+  async deleteGroup(id: AgentGroupId): Promise<boolean> {
+    const res = this.#stmt('del:group').run(id as string)
+    return res.changes > 0
   }
 
   // ── Skill ──

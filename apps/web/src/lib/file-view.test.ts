@@ -9,6 +9,9 @@ import {
   extOf,
   fileKindOf,
   fileUrl,
+  mediaFailureReason,
+  mediaKindOf,
+  previewMode,
   hasFace,
   hexDump,
   languageOf,
@@ -91,6 +94,76 @@ describe('文件查看器：按什么看', () => {
   })
 })
 
+describe('文件查看器：音视频（2026-10）', () => {
+  test('服务端给 video/*、audio/* ⇒ 就是它们', () => {
+    assert.equal(fileKindOf('video/mp4', 'a.mp4'), 'video')
+    assert.equal(fileKindOf('video/webm', 'a.webm'), 'video')
+    assert.equal(fileKindOf('audio/mpeg', 'a.mp3'), 'audio')
+    assert.equal(fileKindOf('audio/ogg', 'a.opus'), 'audio')
+    // 带参数也要认得出
+    assert.equal(fileKindOf('video/mp4; charset=binary', 'a.mp4'), 'video')
+  })
+
+  test('★ 老 daemon 回 octet-stream 时按后缀补上：那正是"视频显示成十六进制"的根因', () => {
+    // 没有这一层，`.mp4` 会被当二进制给一屏 hex —— 使用者报的就是这个
+    assert.equal(fileKindOf('application/octet-stream', 'clip.mp4'), 'video')
+    assert.equal(fileKindOf('application/octet-stream', '资料/录音.m4a'), 'audio')
+    // ⚠️ 但这条**只对媒体**：内容是二进制的 .py 仍然必须是二进制
+    assert.equal(fileKindOf('application/octet-stream', 'a.py'), 'binary')
+    assert.equal(fileKindOf('application/octet-stream', 'noext'), 'binary')
+  })
+
+  test('★ `.ts` 是 TypeScript，不是 MPEG-TS 视频', () => {
+    // 把 .ts 当视频会让一堆源码文件变成播放器——这个后缀在本项目里最常见
+    assert.equal(mediaKindOf('a.ts'), null)
+    assert.equal(previewMode('a.ts'), 'bytes')
+    assert.equal(fileKindOf('text/plain; charset=utf-8', 'a.ts'), 'code')
+  })
+
+  test('★ 取字节还是交给播放器：音视频一律"不下载"', () => {
+    // 这条是"页面会不会被几百 MB 卡死"的分界线
+    assert.equal(previewMode('clip.mp4'), 'stream')
+    assert.equal(previewMode('dir/clip.webm'), 'stream')
+    assert.equal(previewMode('song.mp3'), 'stream')
+    assert.equal(previewMode('录音.WAV'), 'stream', '大小写不该改变结论')
+    // 其余照旧自己取（文本 / hex / 图片）
+    assert.equal(previewMode('note.md'), 'bytes')
+    assert.equal(previewMode('photo.png'), 'bytes')
+    assert.equal(previewMode('blob.bin'), 'bytes')
+  })
+
+  test('★ 放不出来时"是谁的事"：老 daemon 与浏览器不支持要分开说', () => {
+    // 老 daemon：不认 Range（回 200）或类型还是 octet-stream——"只重建前端、刷新
+    // 页面"是这个仓库的日常做法，所以这一档会经常撞上，该说的是"重启 daemon"
+    assert.equal(
+      mediaFailureReason({ status: 200, contentType: 'application/octet-stream' }),
+      'unsupportedByDaemon',
+    )
+    assert.equal(mediaFailureReason({ status: 400, contentType: 'application/json' }), 'unsupportedByDaemon')
+    // 206 但类型不对（老 daemon 的表里没有这个容器）
+    assert.equal(
+      mediaFailureReason({ status: 206, contentType: 'application/octet-stream' }),
+      'unsupportedByDaemon',
+    )
+    // 接口是对的 ⇒ 那就是浏览器不认这个容器/编码（.mkv / .avi / HEVC…）
+    assert.equal(
+      mediaFailureReason({ status: 206, contentType: 'video/x-matroska' }),
+      'unsupportedByBrowser',
+    )
+    assert.equal(mediaFailureReason({ status: 206, contentType: 'audio/ogg' }), 'unsupportedByBrowser')
+  })
+
+  test('后缀 → 类别：认不出给 null（不猜）', () => {
+    assert.equal(mediaKindOf('a.mp4'), 'video')
+    assert.equal(mediaKindOf('dir/a.MKV'), 'video')
+    assert.equal(mediaKindOf('a.opus'), 'audio')
+    assert.equal(mediaKindOf('a.wav'), 'audio')
+    assert.equal(mediaKindOf('a.xyz'), null)
+    assert.equal(mediaKindOf('noext'), null)
+    assert.equal(mediaKindOf('archive.tar.gz'), null)
+  })
+})
+
 describe('文件查看器：两面', () => {
   test('二进制只有「原文」；PDF 只有「渲染」；图片两面都有', () => {
     assert.equal(hasFace('binary', 'rendered'), false)
@@ -114,6 +187,25 @@ describe('文件查看器：两面', () => {
     assert.equal(defaultFace('csv'), 'rendered')
     assert.equal(defaultFace('image'), 'rendered')
     assert.equal(defaultFace('binary'), 'raw')
+    // 音视频默认就是**播放**那一面
+    assert.equal(defaultFace('video'), 'rendered')
+    assert.equal(defaultFace('audio'), 'rendered')
+  })
+
+  test('★ 音视频只有「渲染」这一面（播放），没有可读的「原文」', () => {
+    // 把几百 MB 拉进页面来 hex dump 前 512 字节是荒谬的；要看字节有「新标签页打开」
+    for (const k of ['video', 'audio'] as const) {
+      assert.equal(hasFace(k, 'rendered'), true, `${k} 应该有播放面`)
+      assert.equal(hasFace(k, 'raw'), false, `${k} 不该有原文面`)
+    }
+  })
+
+  test('★ 音视频不参与"解出来像不像二进制"（与 image / pdf 同一个理由）', () => {
+    // 一段 mp4 按 UTF-8 解出来必然带 NUL；拿这个去判断会把它误伤成二进制
+    assert.equal(refineKind('video', '\u0000\u0000'), 'video')
+    assert.equal(refineKind('audio', '\u0000\u0000'), 'audio')
+    // 文本那一档照旧
+    assert.equal(refineKind('text', 'a\u0000b'), 'binary')
   })
 
   test('原文面是 hex 还是文本：二进制与位图是 hex，SVG 是文本', () => {
@@ -127,6 +219,10 @@ describe('文件查看器：两面', () => {
     assert.equal(rawFaceIsHex('image', 'dir/a.svg'), false)
     // 不带路径时按位图处理（默认面不受影响）
     assert.equal(rawFaceIsHex('image'), true)
+    // 音视频没有原文面（见 hasFace），这条只是把"它不是 hex"钉住：真要看字节
+    // 该走「新标签页打开」，界面不该为此去下载整份文件
+    assert.equal(rawFaceIsHex('video', 'a.mp4'), false)
+    assert.equal(rawFaceIsHex('audio', 'a.mp3'), false)
     // 文本类都不是 hex
     assert.equal(rawFaceIsHex('text'), false)
     assert.equal(rawFaceIsHex('code'), false)

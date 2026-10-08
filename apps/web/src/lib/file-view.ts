@@ -32,6 +32,8 @@ export type FileKind =
   | 'markdown'
   | 'html'
   | 'image'
+  | 'video'
+  | 'audio'
   | 'pdf'
   | 'json'
   | 'csv'
@@ -49,6 +51,67 @@ export const HIGHLIGHT_MAX_BYTES = 256 * 1024
 export const HEX_PEEK_BYTES = 512
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.avif'])
+/**
+ * 音视频后缀 → 类别。
+ *
+ * ⚠️ 与 `IMAGE_EXT` 不同，这张表**不只**用来细分文本，它还决定"要不要下载字节"
+ *    （见 `previewMode`）——所以它必须与 daemon 那边 `CONTENT_TYPES` 里的音视频
+ *    后缀**对齐**。两边各有一份的原因见 `previewMode` 的注释。
+ *
+ * ⚠️ 刻意**没有** `.ts`：那个后缀在本项目里绝大多数时候是 TypeScript 源码（它在
+ *    `CODE_EXT` 里），把它当 MPEG-TS 视频会让一堆代码文件变成播放器。
+ */
+const MEDIA_EXT: Record<string, 'video' | 'audio'> = {
+  '.mp4': 'video',
+  '.m4v': 'video',
+  '.webm': 'video',
+  '.mov': 'video',
+  '.mkv': 'video',
+  '.avi': 'video',
+  '.ogv': 'video',
+  '.mpg': 'video',
+  '.mpeg': 'video',
+  '.wmv': 'video',
+  '.flv': 'video',
+  '.3gp': 'video',
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.m4a': 'audio',
+  '.aac': 'audio',
+  '.flac': 'audio',
+  '.oga': 'audio',
+  '.ogg': 'audio',
+  '.opus': 'audio',
+}
+
+/** 后缀看，这是一份音视频吗（认不出给 `null`）。 */
+export function mediaKindOf(path: string): 'video' | 'audio' | null {
+  return MEDIA_EXT[extOf(path)] ?? null
+}
+
+/**
+ * 这一份文件**怎么取**：`'stream'` = 交给浏览器自己按 Range 取（`<video src>`），
+ * `'bytes'` = 我们 `fetch` 回来自己处理（文本 / 十六进制 / 图片）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么这条判断按**后缀**，而不是按服务端给的 content-type
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 因为这是一个"**要不要发请求**"的问题，而 content-type 要发完请求才知道——
+ * 一段 300MB 的视频，等知道类型时它已经被下载进内存了。所以这里只能先用后缀
+ * 做决定：
+ *
+ *   · 后缀像媒体 ⇒ **一个字节都不下载**，直接把 URL 交给 `<video>`，由浏览器
+ *     按 Range 流式取（daemon 那条路由支持 206，见 `workdir-files.ts`）；
+ *   · 其余 ⇒ 老路子，`fetch` 整份（有 8MB 上限）。
+ *
+ * 这不是"用后缀猜类型"：类型仍然以服务端为准（`fileKindOf` 的注释），这里定的是
+ * **显示策略**。后缀说它是视频、而服务端回 `text/plain` 的那种谎，代价只是
+ * 播放器报一次错（界面会如实说一句"放不出来"），而不是显示错的东西。
+ */
+export function previewMode(path: string): 'stream' | 'bytes' {
+  return mediaKindOf(path) === null ? 'bytes' : 'stream'
+}
 const CODE_EXT = new Set([
   '.py',
   '.js',
@@ -101,9 +164,22 @@ export function extOf(path: string): string {
 export function fileKindOf(contentType: string, path: string): FileKind {
   const type = contentType.split(';')[0]!.trim().toLowerCase()
   if (type.startsWith('image/')) return 'image'
+  if (type.startsWith('video/')) return 'video'
+  if (type.startsWith('audio/')) return 'audio'
   if (type === 'application/pdf') return 'pdf'
   if (type === 'text/html') return 'html'
-  if (type === 'application/octet-stream') return 'binary'
+  if (type === 'application/octet-stream') {
+    // ⚠️ octet-stream 是服务端的"我不认识"（**不是** "这是文本"）。对音视频这
+    //    一句要再补一层后缀判断，因为不补的后果正是使用者报的那个 bug：老一点的
+    //    daemon（或表里还没有的容器，如 `.mkv`）回 octet-stream ⇒ 一段视频被当
+    //    二进制给一屏十六进制。
+    //
+    //    这不与上面那条"octet-stream 优先于后缀"冲突：那条针对的是**文本**
+    //    （一个内容是二进制的 `.py` 不该按文本渲染）。这里判的是媒体——媒体这个
+    //    类别本来就不参与"解出来像不像文本"（见 `refineKind`），后缀是它唯一的
+    //    线索，而错判的代价只是播放器报一次错。
+    return mediaKindOf(path) ?? 'binary'
+  }
 
   const ext = extOf(path)
   if (ext === '.md' || ext === '.markdown') return 'markdown'
@@ -134,7 +210,8 @@ export function looksBinaryText(text: string): boolean {
  * "PNG 显示成原文"这个 bug 的来源。
  */
 export function refineKind(kind: FileKind, text: string): FileKind {
-  if (kind === 'binary' || kind === 'image' || kind === 'pdf') return kind
+  if (kind === 'binary' || kind === 'image' || kind === 'video') return kind
+  if (kind === 'audio' || kind === 'pdf') return kind
   return looksBinaryText(text) ? 'binary' : kind
 }
 
@@ -145,6 +222,8 @@ export function defaultFace(kind: FileKind): FileFace {
   if (kind === 'markdown' || kind === 'html') return 'rendered'
   if (kind === 'json' || kind === 'csv') return 'rendered'
   if (kind === 'image' || kind === 'pdf') return 'rendered'
+  // 音视频的"渲染"就是**播放**——那才是打开它想干的事（原文面不存在，见 hasFace）
+  if (kind === 'video' || kind === 'audio') return 'rendered'
   // 代码与纯文本没有"渲染"：着色只是加标记，默认给的就是它。
   return 'rendered'
 }
@@ -160,6 +239,11 @@ export function defaultFace(kind: FileKind): FileFace {
 export function hasFace(kind: FileKind, face: FileFace): boolean {
   if (kind === 'binary') return face === 'raw'
   if (kind === 'pdf') return face === 'rendered'
+  // ⚠️ 音视频**只有播放这一面**（2026-10）。这不是省事，是取舍：它的「原文」面
+  //    要么是十六进制（把几百 MB 拉进页面来 hex dump 前 512 字节——页面的读取
+  //    上限也拦不住它），要么是解出来的乱码文本。真要看字节，右侧有「在新标签页
+  //    打开」（浏览器自己按 Range 取，还能另存）。
+  if (kind === 'video' || kind === 'audio') return face === 'rendered'
   return true
 }
 
@@ -175,6 +259,39 @@ export function rawFaceIsHex(kind: FileKind, path = ''): boolean {
   if (kind === 'binary') return true
   if (kind === 'image') return extOf(path) !== '.svg'
   return false
+}
+
+/**
+ * 播放器放不出来时，**到底是谁的事**——这句话决定了使用者下一步去干什么。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么值得单独一条纯函数
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 两种失败看起来**一模一样**（一口黑框 + 播放器 error），但处置完全不同：
+ *
+ *   · `'unsupportedByDaemon'` —— daemon 还是旧的那份（那条路由不认音视频、也不认
+ *     `Range`，回 `octet-stream` / 400）。**"只重建前端、刷新页面"是这个仓库的日常
+ *     做法**（重启 daemon 会打断正在跑的 run），所以这一档会经常撞上。这时该说的是
+ *     "重启 daemon 之后就能放"，而不是"浏览器放不了"——后者会让人去查一个不存在的
+ *     问题，或者以为这一轮没做对。
+ *   · `'unsupportedByBrowser'` —— 接口是对的，浏览器不认这个容器/编码（`.mkv`、
+ *     `.avi`、HEVC…）。这时该说"不是文件坏了，去新标签页或磁盘上看"。
+ *
+ * 判据来自一次**很便宜的探测**：`Range: bytes=0-0` 要回 **206**，而且类型得是
+ * `video/*` / `audio/*`。两点都不满足就是老 daemon。探测只在**已经失败之后**才发
+ * （正常播放那条路上一次多余的请求都没有）。
+ */
+export function mediaFailureReason(probe: {
+  /** 探测请求的状态码。 */
+  status: number
+  /** 探测请求的 content-type。 */
+  contentType: string
+}): 'unsupportedByDaemon' | 'unsupportedByBrowser' {
+  const type = probe.contentType.split(';')[0]!.trim().toLowerCase()
+  const isMedia = type.startsWith('video/') || type.startsWith('audio/')
+  if (probe.status !== 206 || !isMedia) return 'unsupportedByDaemon'
+  return 'unsupportedByBrowser'
 }
 
 /**

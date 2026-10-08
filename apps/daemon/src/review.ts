@@ -93,8 +93,8 @@ export interface ReviewHandlingInput {
   debugActions?: readonly ActionRefType[]
   /** 已因 invalid 重试过几次。 */
   invalidAttempts: number
-  /** 这条任务允许返工几次（D45）；0/缺省 = 不返工，`fail` 直接交给人。 */
-  maxReworks?: number
+  /** 这条任务允许返工几次（D45）；0/缺省 = 不返工，`fail` 直接交给人；`null` = 无限。 */
+  maxReworks?: number | null
   /** 这条任务已经返工过几次（D45）。与 `invalidAttempts` 是两件事、两个计数。 */
   usedReworks?: number
   /** 审核对象快照（审计用）。 */

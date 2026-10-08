@@ -16,6 +16,7 @@ import {
   type RunId,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { createChainGroup } from './testing/chain.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -65,6 +66,19 @@ class OverrideBackend implements AgentBackend {
   /** 每次调用是执行还是审核——用来区分"派生了 run"与"run 真的跑了"。 */
   readonly phases: string[] = []
 
+  /**
+   * ★ 闸门：挂上之后 `execute` 会**等它 resolve** 才结束。
+   *
+   * 为什么需要它：有一条用例要测"**跑着的时候**配置被改了"——那是这批用例里唯一
+   * 不能靠"先改后提交"构造的局面（先改后提交会在**提交那一刻**就被组形态校验拦下，
+   * 那是另一条规矩、另一个 400）。而"跑着的时候改"如果靠 `setTimeout` 去凑时序，
+   * 断言就成了碰运气：假后端跑完只要几毫秒，改角色的那次 PATCH 随时可能落在
+   * 串接**之后**——于是用例时红时绿，而红的时候看起来像"通知没发"。
+   *
+   * 挂上闸门之后，时序是**确定的**：run 停在跑的过程中，改完配置再放行。
+   */
+  hold: Promise<void> | null = null
+
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
   }
@@ -74,6 +88,9 @@ class OverrideBackend implements AgentBackend {
     // 它的开头是 `# 任务` 或 `# 审核任务`。
     const isReview = deliveredText(opts).includes('# 审核任务')
     this.phases.push(isReview ? 'review' : 'execute')
+
+    // ★ 闸门（只有那条"跑着的时候改配置"的用例会挂它；其余时候是 null）
+    if (this.hold !== null) await this.hold
 
     const text = isReview
       ? [
@@ -123,8 +140,15 @@ let issueId: string
 let r1: string
 /** 只在**这一次任务**上被指定的另一个审核者（R2）。 */
 let r2: string
-/** 配了 R1 的执行者——本文件绝大多数用例都用它提交。 */
+/** 由组里的 R1 审的执行者——本文件绝大多数用例都用它提交。 */
 let executor: { id: string; name: string }
+/**
+ * 把"执行者 E + R1"串起来的那个组（2026-10 起"长期由谁审"只有组能表达）。
+ *
+ * ★ **它才是"省略 ⇒ 跟随"这一态的载体**：以前跟随的是执行者身上那条长期配置，
+ *   现在跟随的是组——而组是在 `POST /api/runs` 里被**展开**成 run 上那几个字段的。
+ */
+let groupId: string
 /** 另一个执行者：用来验证"选错了人（角色不是 reviewer）"。 */
 let otherExecutor: { id: string; name: string }
 /** 本文件自建的临时工作目录，`after` 里统一清掉。 */
@@ -164,14 +188,18 @@ before(async () => {
     reviewStandard: { body: '# R2 标准\n\n只看产出在不在。' },
   })
 
-  executor = {
-    id: await createAgent({
-      name: '执行者 E（长期由 R1 审）',
-      role: 'executor',
-      reviewerAgentId: r1,
-    }),
-    name: '执行者 E（长期由 R1 审）',
-  }
+  const executorId = await createAgent({
+    name: '执行者 E（由组里的 R1 审）',
+    role: 'executor',
+  })
+  executor = { id: executorId, name: '执行者 E（由组里的 R1 审）' }
+  // ⚠️ 2026-10：这里原来是 `createAgent({ reviewerAgentId: r1 })`——那个字段已经
+  //    从 `Agent` 上撤掉（写它就是 400「不认识的字段」）。"长期由 R1 审"这件事现在
+  //    由**组**表达：成员是这一对，提交 run 时带 `groupId` 就会派 R1 去审。
+  groupId = await createChainGroup(
+    { url: daemon.url },
+    { name: '长期组（R1 审）', members: [executorId, r1] },
+  )
   otherExecutor = {
     id: await createAgent({ name: '另一个执行者 E2', role: 'executor' }),
     name: '另一个执行者 E2',
@@ -179,13 +207,13 @@ before(async () => {
 
   // 建完自检一次：长期配置真的写下去了。
   //   少了它，用例 1 失败时会分不清"三态折了"还是"这个夹具压根没配上"。
-  const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-    agents: Array<{ id: string; reviewerAgentId: string | null }>
-  }).agents
-  assert.equal(
-    agents.find((a) => a.id === executor.id)?.reviewerAgentId,
-    r1,
-    '夹具前提：执行者的长期「由谁审它」必须指向 R1',
+  const groups = ((await (await fetch(`${daemon.url}/api/agent-groups`)).json()) as {
+    groups: Array<{ id: string; members: string[] }>
+  }).groups
+  assert.deepEqual(
+    groups.find((g) => g.id === groupId)?.members.slice().sort(),
+    [executor.id, r1].sort(),
+    '夹具前提：那个组的成员必须是"执行者 E + R1"（谁审谁只有组能回答）',
   )
 })
 
@@ -225,8 +253,16 @@ async function submitRun(input: {
   agent?: { id: string; name: string }
   workDir: string
   prompt?: string
-  /** 三态：不传这个键 = 省略，传 null = 这次不审，传 id = 这次换人审。 */
+  /**
+   * 三态：不传这个键 = 省略，传 null = 这次不审，传 id = 这次指定谁审。
+   *
+   * ⚠️ 2026-10：**省略仍然是一个独立的状态**（库里缺这个键），但它的**含义**变了
+   * ——以前是"跟随执行者的长期配置"，现在没有可跟随的东西了，所以省略 = 没有任何
+   * 审核者……**除非同一次带了 `groupId`**（那才是有审核者的两条路之一）。
+   */
   reviewerAgentId?: string | null
+  /** 智能体组（2026-10 起"谁审我"的主路：组把它的审核者展开进这条 run）。 */
+  groupId?: string
   kind?: string
   subject?: { type: string; id: string }
 }): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -242,6 +278,7 @@ async function submitRun(input: {
     limits: { maxTurns: null, timeoutMs: null },
   }
   if ('reviewerAgentId' in input) payload['reviewerAgentId'] = input.reviewerAgentId
+  if ('groupId' in input) payload['groupId'] = input.groupId
 
   const res = await fetch(`${daemon.url}/api/runs`, {
     method: 'POST',
@@ -254,7 +291,8 @@ async function submitRun(input: {
 /**
  * 造一条"被审的"执行 run，返回它的 id。
  *
- * ★ 它自己带 `reviewerAgentId: null`：这样它**不会**派生审核 run，测试里就没有
+ * ★ 它自己带 `reviewerAgentId: null`：这样它**不会**派生审核 run（`null` 与缺字段
+ *   在这一层同义），测试里就没有
  *   后台跑着的噪声 run（那些 run 会往 runs 列表里添东西、也要占用工作目录）。
  *   这几条用例只关心审核 run 那边被拒，不需要这边热闹。
  */
@@ -285,7 +323,7 @@ async function listRunRows(): Promise<
     status: string
     agentId: string
     subject?: { type: string; id: string }
-    reviewer?: { mode: 'follow' | 'none' | 'override'; agentId?: string } | null
+    reviewer?: { mode: 'none' | 'assigned'; agentId?: string } | null
   }>
 > {
   const res = await fetch(`${daemon.url}/api/runs`)
@@ -345,6 +383,22 @@ async function waitForSettled(runId: string, timeoutMs = 8000): Promise<void> {
  * 那句话写下来之前就断言，报出来的是"日志里没有 XX"的假失败（e2e.test.ts 里
  * 就是这个理由记着一句警告）。
  */
+/**
+ * 轮询等到一个非 null 的值（与 `waitForText` 同一套路，只是判据由调用方给）。
+ *
+ * ★ 这条用例里它等的是"假后端**开始跑**了"——闸门挂上之后那个状态是稳定的，
+ *   所以这不是在赌时序，而是在等一个**确定会发生**的事件。
+ */
+async function waitFor<T>(fn: () => Promise<T | null>, what: string, timeoutMs = 8000): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const got = await fn()
+    if (got !== null) return got
+    if (Date.now() > deadline) throw new Error(`等不到：${what}（${timeoutMs}ms）`)
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
 async function waitForText(runId: string, pattern: RegExp, timeoutMs = 10_000): Promise<string> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -387,52 +441,50 @@ describe('★ 新建任务时的审核者覆盖（三态）', () => {
     )
   })
 
-  test('★ 省略 reviewerAgentId ⇒ 跟随执行者的长期配置（回归保护）', async () => {
+  test('★ 省略 reviewerAgentId + 带组 ⇒ 组里那个审核者（R1）去审（回归保护）', async () => {
     /**
      * ══════════════════════════════════════════════════════════════════
      * 这条是**回归保护**，不是新功能测试
      * ══════════════════════════════════════════════════════════════════
      *
-     * 加这个可选字段最容易犯的错，是在 `executor.submit()` 那几行把它写成
-     * `req.reviewerAgentId ?? null`——看着只是"补个默认值"，实际把
-     * 「照旧（跟随 D28 的长期安排）」**悄悄变成了「这次不审」**。
+     * ⚠️ 2026-10 这条的**判据变过**，说清楚免得下次有人以为是在改测试凑绿：
      *
-     * 而它的表现是：该审的没审，run 状态一切正常、日志里那句"没有串接审核"
-     * 还理直气壮地说"这是明确的选择"。**没有任何地方会报错。**
+     *   以前"省略"= 跟随**执行者身上**那条长期配置（`Agent.reviewerAgentId`），
+     *   所以判据是"派 R1 去审 + 库里**缺这个键**"（缺键 = 使用者没说）。
      *
-     * 所以这里同时钉两件事：
-     *   1. 派生出来的审核 run 用的是长期配置里的 R1；
-     *   2. run 记录里这个键**压根不存在**（不是 null）——"省略"必须在库里
-     *      保持"使用者没说"的样子。
+     *   现在"长期由谁审"这件事住在**组**上，而组是在 `POST /api/runs` 里被
+     *   **展开**成 run 上那几个字段的 ⇒ 省略的结果是 run 上**有值**，值是组里的
+     *   R1。判据因此变成"派 R1 去审 + 库里的值就是 R1"。
+     *
+     * ★ 仍然要防的错一个字没变：把"省略"折成"这次不审"（在 `executor.submit` 或
+     *   `autoChainReview` 里写成 `req.reviewerAgentId ?? null`）。表现是**该审的
+     *   没审**，而 run 状态一切正常、日志里那句"没有串接审核"还理直气壮。
+     *   **没有任何地方会报错。** 折成 null 就会在这里红（不会有审核 run）。
      */
     const workDir = await newWorkDir()
     const runId = ulid() as RunId
 
-    const res = await submitRun({ runId, workDir })
+    const res = await submitRun({ runId, workDir, groupId })
     assert.equal(res.status, 202, '受理必须返回 202')
 
     const review = await waitForDerivedReview(runId)
     assert.equal(
       review.agentId,
       r1,
-      '★ 省略覆盖时必须跟随执行 agent 的长期「由谁审它」——折成 null 就会变成"这次不审"',
+      '★ 省略 + 带组时必须派**组里**那个审核者去审——折成 null 就会变成"这次不审"',
     )
     assert.ok(backend.phases.includes('review'), '审核要真的跑过，而不只是有一条 run 记录')
 
     const record = await getRunRecord(runId)
     assert.equal(
-      'reviewerAgentId' in record,
-      false,
-      `★ "省略"必须在库里保持缺字段的样子，实际是 ${JSON.stringify(record['reviewerAgentId'])}`,
+      record['reviewerAgentId'],
+      r1,
+      '★ 组的审核者要**展开进**这条 run（它就是这条链的载体，审计靠它回答"谁审的"）',
     )
-    assert.equal(record['reviewerAgentId'], undefined, '缺字段读出来就是 undefined，不是 null')
 
     const row = (await listRunRows()).find((r) => r.runId === runId)
-    assert.equal(
-      row?.reviewer?.mode,
-      'follow',
-      '★ 投影要给页面一个能分辨的形态：follow / none / override 三态不能都显示成 null',
-    )
+    assert.equal(row?.reviewer?.mode, 'assigned', '★ 投影要说清"这条任务有审核者"')
+    assert.equal(row?.reviewer?.agentId, r1)
   })
 
   test('★ reviewerAgentId: null ⇒ 这一次明确不审，且不许把它说成故障', async () => {
@@ -441,7 +493,7 @@ describe('★ 新建任务时的审核者覆盖（三态）', () => {
      * "这一次别审了"是一个**合法意图**，不是配置缺失
      * ══════════════════════════════════════════════════════════════════
      *
-     * 执行者明明配了 R1（长期安排成立），但这次带 null ⇒ 不派生审核 run。
+     * 这条任务本来可以带组（那就由组里的 R1 审），但这次显式带 null ⇒ 不派生审核 run。
      * 这条用例守三件事：
      *
      *   1. **真的没派生**（否则"这次不审"只是个说法）；
@@ -452,10 +504,14 @@ describe('★ 新建任务时的审核者覆盖（三态）', () => {
      *      改一个本来就不该改的配置。
      *
      * ⚠️ 关于第 3 点的断言写法：**不能**简单地写 `doesNotMatch(/配置错误/)`。
-     *    那句日志本身是「…这是**明确的选择**，不是配置错误。」——它**故意**
+     *    那句日志本身是「…这是明确的选择，不是配置错误。」——它**故意**
      *    包含"配置错误"四个字（而且是它的否定）。所以这里断言的是**具体那种
      *    说法**（"「由谁审它」是空的"、"要自动审就在智能体页…"），
-     *    它们只出现在"跟随"和"审核者已被删掉"那两条分支里。
+     *    它们只出现在"没人审"与"审核者已被删掉"那几条分支里。
+     *
+     * ⚠️ 2026-10：这一档的日志**必须**与"没选组"那一档分开说，而实现也照做了
+     *    （`autoChainReview` 里按 `=== null` 分两支）。判据因此多了一条：不许出现
+     *    "没选智能体组"那种**指点使用者去改配置**的说法——这条路径上没人做错什么。
      */
     const workDir = await newWorkDir()
     const runId = ulid() as RunId
@@ -479,6 +535,11 @@ describe('★ 新建任务时的审核者覆盖（三态）', () => {
       text,
       /要自动审就在智能体页|请在智能体页重新指定一个/,
       '★ 不许劝使用者去智能体页改配置：这条路径上没有任何东西配错了',
+    )
+    assert.doesNotMatch(
+      text,
+      /要自动审，建任务时选一个智能体组/,
+      '★ 也不许劝他去"选个组"：这次他就是**主动**选的"不自动审核"，不是漏选',
     )
 
     // ⚠️ 顺序是有意的：**先等日志，再断言"没有派生"**。
@@ -529,7 +590,9 @@ describe('★ 新建任务时的审核者覆盖（三态）', () => {
     assert.equal(record['reviewerAgentId'], r2, '这次的决定要随执行 run 一起落库')
 
     const row = (await listRunRows()).find((r) => r.runId === runId)
-    assert.equal(row?.reviewer?.mode, 'override')
+    // ⚠️ 投影名从 `override` 改成了 `assigned`（2026-10：三态收成两态，
+    //    "这条任务有审核者"是它现在唯一要表达的事；来自组还是本次指定看 `Run.groupId`）
+    assert.equal(row?.reviewer?.mode, 'assigned')
     assert.equal(row?.reviewer?.agentId, r2)
   })
 })
@@ -747,7 +810,7 @@ describe('★ 非执行 run 上带 reviewerAgentId ⇒ 一律拒绝，不许静�
   })
 })
 
-describe('★ 三态落库保真：库里能分辨 undefined / null / id', () => {
+describe('★ 落库保真：库里能分辨 undefined / null / id', () => {
   test('★ 三条 run 的 reviewerAgentId 分别是"缺字段 / null / 那个 id"', async () => {
     /**
      * ══════════════════════════════════════════════════════════════════
@@ -755,17 +818,18 @@ describe('★ 三态落库保真：库里能分辨 undefined / null / id', () =>
      * ══════════════════════════════════════════════════════════════════
      *
      * 上面那几条用例断言的是**行为**（派生/不派生/派给谁）。而"行为"是
-     * `autoChainReview()` 拿这个字段算出来的结果：它把"缺字段"读成 undefined 才
-     * 会去跟随长期配置。如果哪天 `executor.submit()` 把它折成 null，
-     * 用例 1 会红——但**审计这一层**要的是更直接的东西：事后回看这条 run，
-     * 能不能分辨"使用者当时到底说了什么"。
+     * `autoChainReview()` 拿这个字段算出来的结果。如果哪天 `executor.submit()`
+     * 把它折成一个值，**审计这一层**就分不出"使用者当时到底说了什么"了。
      *
      * `Run.reviewerAgentId` 的注释把这三种情形分开写着，正是因为
      * "这条小改动就别审了"是一个**决定**，折进 `undefined` 就没人知道那是谁的决定。
+     * ⚠️ 2026-10：`undefined` 与 `null` 在**行为**上已经同义（都不审），但它们在
+     * **记录**上仍然要分开——日志那两句就是照这个区别说的（"你主动选的"对
+     * "你没选组"）。折成一个值，那句区分当场变成谎话。
      *
      * 观测点：`GET /api/runs/<id>` 返回的就是落库的那个 Run 对象（不是投影），
      * 所以 `'reviewerAgentId' in record` 直接回答"键在不在"。
-     * （列表投影另外给了一个面向界面的三态 `reviewer.mode`，两条都断言。）
+     * （列表投影另外给了一个面向界面的 `reviewer.mode`，两条都断言。）
      */
     const workDir = await newWorkDir()
 
@@ -805,11 +869,16 @@ describe('★ 三态落库保真：库里能分辨 undefined / null / id', () =>
     )
 
     // 投影那一层（页面读的就是它）
+    //
+    // ⚠️ 2026-10：投影从三态收成**两态**（`follow` 那一态随着 `Agent.reviewerAgentId`
+    //    一起撤销了：没有可跟随的东西）。所以"省略"与"null"在投影上都读作 `none`
+    //    ——这不是"折了"，而是它们**对页面而言本来就是同一件事**：这条任务没人审。
+    //    要区分得看上面那层记录（键在不在），而日志那两句正是照它说的。
     const rows = await listRunRows()
     const modeOf = (id: string): string | undefined => rows.find((r) => r.runId === id)?.reviewer?.mode
-    assert.equal(modeOf(followId), 'follow')
+    assert.equal(modeOf(followId), 'none')
     assert.equal(modeOf(noneId), 'none')
-    assert.equal(modeOf(overrideId), 'override')
+    assert.equal(modeOf(overrideId), 'assigned')
   })
 })
 
@@ -845,40 +914,54 @@ describe('★ 审核者事后失效 ⇒ 进通知中心（不是只写日志）'
       role: 'reviewer',
       reviewStandard: { body: '# R3 标准\n\n随便判判。' },
     })
-    const e3 = {
-      id: await createAgent({
-        name: '执行者 E3（长期由 R3 审）',
-        role: 'executor',
-        reviewerAgentId: r3,
-      }),
-      name: '执行者 E3（长期由 R3 审）',
-    }
+    const e3Id = await createAgent({ name: '执行者 E3（由 R3 审）', role: 'executor' })
+    const e3 = { id: e3Id, name: '执行者 E3（由 R3 审）' }
 
-    // 把审核者的角色改掉——这是这条用例的**前提**，所以必须确认它真的成功了；
-    // 否则失败时会分不清"通知没发"还是"角色根本没改"。
-    const patched = await fetch(`${daemon.url}/api/agents/${r3}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ role: 'executor' }),
-    })
-    // ⚠️ body 只能读一次：`.text()` 之后再 `.json()` 会抛
-    //    "Body has already been read"（这条踩过一次）。
-    const patchedBody = await patched.text()
-    assert.equal(patched.status, 200, `改角色应当成功：${patchedBody}`)
-    assert.equal((JSON.parse(patchedBody) as { role: string }).role, 'executor')
-    // 执行者身上的长期配置**照旧指着它**（没有任何一步会去清理它）
-    const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-      agents: Array<{ id: string; reviewerAgentId: string | null }>
-    }).agents
-    assert.equal(
-      agents.find((a) => a.id === e3.id)?.reviewerAgentId,
-      r3,
-      '前提：改角色不该动别人的 reviewerAgentId（那等于替使用者改配置）',
+    // ⚠️ 2026-10：这一条原来是"先把角色改掉、再提交"——那时提交**不查**审核者的
+    //    角色（长期配置那条路只在跑完时查）。现在"谁审"由组展开，而组的形态在
+    //    **提交那一刻**就校验（先改后提交会在那里被拦成 `group_shape_invalid`，
+    //    那是另一条规矩、另一个 400，见 `task-action-whitelist.test.ts`）。
+    //
+    //    于是这条用例回到它名字里本来就写着的那件事：**在提交之后**改。
+    //    为了不靠时序碰运气（假后端只跑几毫秒），这里用闸门把执行 run 挂在
+    //    "跑着"的状态上，改完配置再放行——顺序因此是确定的。
+    const groupId = await createChainGroup(
+      { url: daemon.url },
+      { name: 'E3 组', members: [e3Id, r3] },
     )
 
+    let release: () => void = () => {}
+    backend.hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
     const runId = ulid() as RunId
-    const res = await submitRun({ runId, agent: e3, workDir: await newWorkDir() })
-    assert.equal(res.status, 202, '★ 提交本身必须成功：这是"跑完之后"才发现的事')
+    let res: { status: number; body: Record<string, unknown> }
+    try {
+      res = await submitRun({ runId, agent: e3, workDir: await newWorkDir(), groupId })
+      assert.equal(res.status, 202, '★ 提交本身必须成功：这是"跑完之后"才发现的事')
+
+      // 等执行**真的跑起来**（闸门就是在这里生效的），此时配置还是好的
+      await waitFor(async () => (backend.phases.includes('execute') ? true : null), '执行跑起来')
+
+      // 现在把审核者的角色改掉——这是这条用例的**前提**，所以必须确认它真的成功了；
+      // 否则失败时会分不清"通知没发"还是"角色根本没改"。
+      const patched = await fetch(`${daemon.url}/api/agents/${r3}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'executor' }),
+      })
+      // ⚠️ body 只能读一次：`.text()` 之后再 `.json()` 会抛
+      //    "Body has already been read"（这条踩过一次）。
+      const patchedBody = await patched.text()
+      assert.equal(patched.status, 200, `改角色应当成功：${patchedBody}`)
+      assert.equal((JSON.parse(patchedBody) as { role: string }).role, 'executor')
+    } finally {
+      // ★ 放行必须写在 finally 里：上面任何一句断言失败时，不放行就会把这条 run
+      //   永远挂在"跑着"，后续用例会跟着一起红（症状离原因很远）。
+      backend.hold = null
+      release()
+    }
 
     const text = await waitForText(runId, /角色已经不是「审核者」/)
     assert.match(text, /请重新指定一个审核者/, '日志要说清下一步')

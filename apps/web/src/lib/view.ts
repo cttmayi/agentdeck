@@ -49,6 +49,8 @@ export const VIEW_TITLE_KEYS = {
   //    而 `satisfies Record<ViewName, WebTextId>` 会因为多出一个键直接编译不过。
   tasks: 'shell.navTasks',
   agents: 'shell.navAgents',
+  // ★ D70 第六项（与 `VIEWS` / `Sidebar` 同序）。
+  groups: 'shell.navGroups',
   skills: 'shell.navSkills',
   tools: 'tools.navTitle',
 } as const satisfies Record<ViewName, WebTextId>

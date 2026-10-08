@@ -37,6 +37,8 @@
     //    `#/tasks/new` 直达那个表单，任务页顶栏那个主操作也跳它。
     { id: 'tasks', title: 'shell.navTasks', hint: 'shell.navTasksHint' },
     { id: 'agents', title: 'shell.navAgents', hint: 'shell.navAgentsHint' },
+    // ★ D70 第六项：智能体组（排在智能体后面——先有"人"，才有"队"）。
+    { id: 'groups', title: 'shell.navGroups', hint: 'shell.navGroupsHint' },
     { id: 'skills', title: 'shell.navSkills', hint: 'shell.navSkillsHint' },
     // ★ D40 第五项。词条在 `tools.ts`（导航那两条本该在 `shell.ts`，理由写在
     //   那份文件顶部：这一轮的交界不让动 shell.ts，D40 收口时归位）。

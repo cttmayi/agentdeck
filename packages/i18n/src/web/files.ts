@@ -55,6 +55,27 @@ export const filesText = {
     zh: '下面是前 {bytes} 字节的十六进制。',
     en: 'Below is the hex of the first {bytes} bytes.',
   },
+  /**
+   * ── 音视频（2026-10）──
+   *
+   * ⚠️ 这一句要**说清是谁的事**：放不出来多半是浏览器不认这个容器/编码
+   *    （`.mkv`、`.avi`、HEVC…），不是文件坏了、也不是平台坏了。不写清楚，
+   *    使用者会以为"又出 bug 了"，然后去查一个不存在的问题。
+   */
+  'files.mediaUnsupported': {
+    zh: '这个容器或编码浏览器放不了（不是文件坏了）。可以到「新标签页打开」，或直接在磁盘上用别的播放器看。',
+    en: "The browser cannot play this container or codec (the file is fine). Try Open in new tab, or a player on disk.",
+  },
+  /**
+   * ⚠️ 这一句与上一句**必须分开**：两者的症状一模一样（一口黑框），处置却完全不同。
+   *    "只重建前端、刷新页面"是这个仓库的日常做法（重启 daemon 会打断正在跑的 run），
+   *    所以"daemon 还是旧的那份"这一档会经常撞上——那时说"浏览器放不了"会把人引到
+   *    一个不存在的问题上去。
+   */
+  'files.mediaNeedsDaemonRestart': {
+    zh: '这个 daemon 还是旧的那份（它还不支持视频流）。重启 daemon 之后就能就地播放；现在可以先「新标签页打开」。',
+    en: 'This daemon is an older build (no media streaming yet). Restart it to play here — for now use Open in new tab.',
+  },
   'files.jsonBroken': {
     zh: '这份 JSON 解析不了，按原文显示——不替它猜一个结构出来。',
     en: 'This JSON does not parse, so it is shown raw rather than guessing a structure.',

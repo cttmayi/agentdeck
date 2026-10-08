@@ -1049,12 +1049,17 @@
           {#key selected.id}
 
   <!--
-    ★ 「这一次是谁审的」（D42）。
-    只在**偏离长期配置**时才显示：`follow` 是绝大多数情况，也说出来只会多一行噪音。
-    而 `override` / `none` 必须留痕——否则一条"这次不审"的任务，事后在界面上
-    看不出那是**当时有人这么决定**，只会看起来像"审核链路坏了"。
+    ★ 「这一次是谁审的」（D42；2026-10 收成两态）。
+
+    ⚠️ 原来是**三态**：`follow`（跟随执行者的长期配置）那一档不画（绝大多数情况，
+    说出来只是噪音），只在"偏离长期配置"时才说。`follow` 随 `Agent.reviewerAgentId`
+    撤销之后，能出现的事实只剩两件——**有审核者**（可能来自组）与**没有审核者**，
+    两件都必须说出来：
+      · "没有人审"必须留痕，否则一条没被审的产出事后看起来像"审核链路坏了"；
+      · "谁审的"也要说，而且**来自组还是本次指定**由 run 上有没有 `groupId` 决定
+        （不同的来源要用不同的话说，见下面 `tasks.reviewerOverridden*` 两句）。
   -->
-  {#if selectedStage?.executeRun?.reviewer && selectedStage.executeRun.reviewer.mode !== 'follow'}
+  {#if selectedStage?.executeRun?.reviewer}
     <section class="drawer-section">
       <h3>{$t('tasks.reviewerHeading')}</h3>
       {#if selectedStage.executeRun.reviewer.mode === 'none'}
@@ -1062,7 +1067,13 @@
       {:else}
         <p>
           {agentName(selectedStage.executeRun.reviewer.agentId)}
-          <span class="faint small">{$t('tasks.reviewerOverridden')}</span>
+          <span class="faint small">
+            {$t(
+              selectedStage.executeRun.groupId
+                ? 'tasks.reviewerFromGroup'
+                : 'tasks.reviewerOverridden',
+            )}
+          </span>
         </p>
       {/if}
     </section>

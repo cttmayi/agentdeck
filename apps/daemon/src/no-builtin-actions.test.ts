@@ -7,6 +7,7 @@ import {
   VERDICT_FENCE_END,
   ulid,
   type Agent,
+  type AgentGroup,
   type InboxItem,
   type RunId,
   type VerdictRecord,
@@ -104,6 +105,13 @@ async function withDaemon<T>(
     store: Awaited<ReturnType<typeof startDaemon>>['store']
     executor: Agent
     reviewer: Agent
+    /**
+     * 首启播种的**智能体组**（2026-10 起播种一个）。
+     *
+     * ⚠️ 这一组用例要测的是"开箱是什么样"，而"开箱时判完允许动什么"现在**只有组**
+     *    能回答（agent 上不再有动作字段）。所以开箱形态必须连组一起看。
+     */
+    group: AgentGroup
   }) => Promise<T>,
 ): Promise<T> {
   const dir = await makeTempDir('no-builtin-actions')
@@ -126,12 +134,18 @@ async function withDaemon<T>(
     const executor = agents.find((a) => a.role === 'executor')
     const reviewer = agents.find((a) => a.role === 'reviewer')
     assert.ok(executor && reviewer, '首启应当播种一对 agent')
+    const { groups } = (await (await fetch(`${daemon.url}/api/agent-groups`)).json()) as {
+      groups: AgentGroup[]
+    }
+    const group = groups[0]
+    assert.ok(group, '首启应当播种一个智能体组（谁审谁只有它能回答）')
     return await fn({
       url: daemon.url,
       backend,
       store: daemon.store,
       executor: executor!,
       reviewer: reviewer!,
+      group: group!,
     })
   } finally {
     await daemon.close()
@@ -139,10 +153,18 @@ async function withDaemon<T>(
   }
 }
 
-/** 提一条执行 run，等它到终态（审核由 daemon 自己派，D28）。 */
+/**
+ * 提一条执行 run，等它到终态（审核由 daemon 自己派）。
+ *
+ * ⚠️ **必须带 `groupId`**（2026-10）：审核者这件事现在只有组能回答——不带组就是
+ *    "这条任务没有审核者"，daemon 不会派生审核 run，而依赖"审核真的被派了"的
+ *    断言会以**超时**的形式失败（看起来像 daemon 卡住，其实一切正常）。
+ */
 async function runOnce(ctx: {
   url: string
   executor: Agent
+  /** 组的 id（`AgentGroup['id']`）——只需要 id，不必是整条组记录。 */
+  group: { id: AgentGroup['id'] }
 }): Promise<void> {
   const runId = ulid() as RunId
   const res = await fetch(`${ctx.url}/api/runs`, {
@@ -151,6 +173,7 @@ async function runOnce(ctx: {
     body: JSON.stringify({
       runId,
       kind: 'execute',
+      groupId: ctx.group.id,
       agentRef: { id: ctx.executor.id, name: ctx.executor.name, instructions: '' },
       skills: [],
       subject: { type: 'issue', id: 'issue-d41-1' },
@@ -194,18 +217,23 @@ async function readVerdict(url: string, expected: string): Promise<VerdictRecord
 
 describe('★ D41：平台没有内置动作了', () => {
   test('① 首启播种的审核者**没有任何动作权限**（开箱不再"能评论/能改状态"）', async () => {
-    await withDaemon(async ({ reviewer, executor, url, backend }) => {
-      // ★ 这条是 D41 的刻意结果：这个常量原来是
+    await withDaemon(async ({ group, executor, url, backend }) => {
+      // ★ 这条是 D41 的刻意结果：播种时原来给审核者授
       //   `['comment.create', 'issue.add_label']`，而那两个名字已经**没有实现**了。
       //   留着它们会让判决一旦引用就走结构性 invalid（不可重试），比空着糟得多。
+      //
+      // ⚠️ 2026-10：授权这件事的载体从**审核者 agent** 变成了**组**（agent 上的
+      //    动作字段整个撤掉了），所以判据跟着搬家——**结论一字未变**：开箱
+      //    一个动作都不许。
       assert.deepEqual(
-        reviewer.allowedActions,
+        group.allowedActions,
         [],
-        'D41：内置动作全部移除 ⇒ 播种的审核者不再带任何动作权限',
+        'D41：内置动作全部移除 ⇒ 播种的组不带任何动作权限',
       )
+      assert.deepEqual(group.debugActions, [], '也不带"调试"标记（没有动作可标）')
 
       // 跑一条执行 run，让 daemon 自己派审核（D28）——这样才拿得到审核那份 prompt。
-      await runOnce({ url, executor })
+      await runOnce({ url, executor, group })
 
       // 契约侧的证据：**一个动作都不允许**时，判决契约必须明说"这次不要写 action"。
       // 不说的话模型会照旧去编一个动作名，而那个名字会让**整条判决**（连结论一起）
@@ -228,14 +256,16 @@ describe('★ D41：平台没有内置动作了', () => {
   })
 
   test('③ 白名单里写裸名（`comment.create`）⇒ 保存时就 400（不再有特殊身份）', async () => {
-    await withDaemon(async ({ url }) => {
-      const res = await fetch(`${url}/api/agents`, {
+    // ⚠️ 写入口在 2026-10 从 `POST /api/agents` 搬到了 `POST /api/agent-groups`
+    //    （动作只属于组），这条用例**跟着写入口走**——它守的是"裸名会被拒"这件事，
+    //    不是某一个 URL。顺带钉住旧入口：往 agent 上写这个键现在是"不认识的字段"。
+    await withDaemon(async ({ url, executor, reviewer }) => {
+      const res = await fetch(`${url}/api/agent-groups`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name: '想写内置动作的审核者',
-          runtimeKey: 'claude',
-          role: 'reviewer',
+          name: '想写内置动作的组',
+          members: [executor.id, reviewer.id],
           allowedActions: ['comment.create'],
         }),
       })
@@ -262,7 +292,7 @@ describe('★ D41：平台没有内置动作了', () => {
   })
 
   test('④ 判决引用内置动作名 ⇒ 结构性 invalid（重试无意义）+ 升级给人，绝不执行', async () => {
-    await withDaemon(async ({ url, backend, store, executor }) => {
+    await withDaemon(async ({ url, backend, store, executor, group }) => {
       // 一个形状合法（看起来像 `<slug>.<name>`）但**没有任何包提供**的名字。
       // `comment.create` 正是这种情况：D41 之前它是内置动作，现在只是一句空话。
       backend.verdict = {
@@ -278,7 +308,7 @@ describe('★ D41：平台没有内置动作了', () => {
         escalateReason: null,
       }
 
-      await runOnce({ url, executor })
+      await runOnce({ url, executor, group })
 
       // ★ 等它落到 `escalated`：内置动作名解析不出来 ⇒ 结构性 invalid
       //   （"未声明即拒绝"），不可重试 ⇒ 升级给人。
@@ -339,7 +369,7 @@ describe('★ D41：平台没有内置动作了', () => {
         escalateReason: null,
         action: verdictAction(fx.action, { text: '工具动作照旧' }),
       }
-      await runOnce({ url: daemon.url, executor: fx.executor })
+      await runOnce({ url: daemon.url, executor: fx.executor, group: { id: fx.groupId } })
 
       const verdict = await readVerdict(daemon.url, 'dispatched_to_action')
       assert.equal(verdict.status, 'dispatched_to_action', '★ 工具动作必须照旧能被派发')

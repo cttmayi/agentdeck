@@ -4,6 +4,7 @@ import { chatText } from './chat.ts'
 import { commonText } from './common.ts'
 import { errorsText } from './errors.ts'
 import { filesText } from './files.ts'
+import { groupsText } from './groups.ts'
 import { installText } from './install.ts'
 import { newtaskText } from './newtask.ts'
 import { runsText } from './runs.ts'
@@ -40,6 +41,8 @@ export const webText = {
   ...shellText,
   ...tasksText,
   ...agentsText,
+  // ★ D70：智能体组（执行 → 审核 → 行动 整链的默认配置）。
+  ...groupsText,
   ...skillsText,
   ...installText,
   ...settingsText,

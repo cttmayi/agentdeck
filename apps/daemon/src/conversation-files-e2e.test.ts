@@ -276,6 +276,77 @@ describe('D49 ⑩：对话的工作目录（聊天右栏底部那一栏）', () 
     assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
   })
 
+  test('★ 媒体：不带 Range 时回 200 + accept-ranges（浏览器据此知道能 seek）', async () => {
+    const conv = await makeConversation()
+    // 一段"视频"：内容是不是真视频不影响这条路由的性质（类型按后缀给）
+    const bytes = Buffer.alloc(4096, 0x7a)
+    await writeFile(join(conv.dir, 'clip.mp4'), bytes)
+
+    const res = await fetch(
+      `${daemon.url}/api/conversations/${conv.id}/file?path=${encodeURIComponent('clip.mp4')}`,
+    )
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('content-type'), 'video/mp4', '类型要认出来（不然界面当二进制）')
+    assert.equal(res.headers.get('accept-ranges'), 'bytes')
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(Number(res.headers.get('content-length')), bytes.length)
+    const got = Buffer.from(await res.arrayBuffer())
+    assert.ok(got.equals(bytes), '整份字节要一模一样')
+  })
+
+  test('★ 媒体：Range ⇒ 206 + content-range，而且**只发那一段**', async () => {
+    const conv = await makeConversation()
+    const bytes = Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 256))
+    await writeFile(join(conv.dir, 'clip.webm'), bytes)
+
+    const res = await fetch(
+      `${daemon.url}/api/conversations/${conv.id}/file?path=${encodeURIComponent('clip.webm')}`,
+      { headers: { range: 'bytes=100-199' } },
+    )
+    assert.equal(res.status, 206)
+    assert.equal(res.headers.get('content-type'), 'video/webm')
+    assert.equal(res.headers.get('content-range'), `bytes 100-199/${bytes.length}`)
+    assert.equal(Number(res.headers.get('content-length')), 100)
+    const got = Buffer.from(await res.arrayBuffer())
+    assert.equal(got.length, 100, '只该发要的那 100 字节')
+    assert.ok(got.equals(bytes.subarray(100, 200)), '而且是**那一段**，不是从头开始')
+  })
+
+  test('★ 媒体：越界的 Range ⇒ 416（不是"忽略它回 200 整份"）', async () => {
+    const conv = await makeConversation()
+    await writeFile(join(conv.dir, 'clip.mkv'), Buffer.alloc(50, 3))
+
+    const res = await fetch(
+      `${daemon.url}/api/conversations/${conv.id}/file?path=${encodeURIComponent('clip.mkv')}`,
+      { headers: { range: 'bytes=999-1200' } },
+    )
+    assert.equal(res.status, 416)
+    assert.equal(res.headers.get('content-range'), 'bytes */50')
+  })
+
+  test('★ 媒体响应**不带**那条 sandbox 的 CSP——带了视频在新标签页里放不出来', async () => {
+    const conv = await makeConversation()
+    await writeFile(join(conv.dir, 'clip.mp3'), Buffer.alloc(32, 9))
+
+    const res = await fetch(
+      `${daemon.url}/api/conversations/${conv.id}/file?path=${encodeURIComponent('clip.mp3')}`,
+    )
+    assert.equal(res.headers.get('content-security-policy'), null)
+    // 但 nosniff 必须在：那条 CSP 挡的是"当文档执行"，而 nosniff 挡的是"当文档解析"
+    assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
+    await res.arrayBuffer()
+  })
+
+  test('★ 文本文件照旧带 sandbox 的 CSP（这条边界一个字都没松）', async () => {
+    const conv = await makeConversation()
+    await writeFile(join(conv.dir, 'page.html'), '<script>alert(1)</script>')
+    const res = await fetch(
+      `${daemon.url}/api/conversations/${conv.id}/file?path=${encodeURIComponent('page.html')}`,
+    )
+    assert.match(res.headers.get('content-security-policy') ?? '', /sandbox/)
+    await res.text()
+  })
+
   test('★ 未知对话 ⇒ 404（别的 workspace 的也当不存在，同一口径）', async () => {
     const { status } = await json('/api/conversations/01NOTACONVERSATION00000000/files')
     assert.equal(status, 404)

@@ -31,10 +31,15 @@ export interface ReviewDecisionInput {
   /** agent 的原始输出（含围栏）。 */
   output: string
   /**
-   * 这个**审核者**允许触发的动作（`<包 slug>.<动作名>`）。
+   * 这条链允许触发的动作（`<包 slug>.<动作名>`）。
    *
-   * ⚠️ 措辞是"审核者"而不是"skill"：skill 不参与动作授权，白名单住在
-   *    `Agent.allowedActions`（老数据回退到标准里那份）。
+   * ⚠️ 措辞是"这条链"而不是"skill"、也不是"这个审核者"：skill 不参与动作授权，
+   *    而白名单**属于智能体组**（`AgentGroup.allowedActions`）——它由 daemon 在
+   *    提交时展开进 `Run.allowedActions`，`decideReview` 只认传进来的这一份。
+   *
+   *    ★ 2026-10：这里原来说"白名单住在 `Agent.allowedActions`，老数据回退到
+   *      标准里那份"。那个字段撤掉了（审核者个人不再有权限），所以**报告审核**
+   *      这条路上这一份恒为空——判决带动作一定会被拦下（只能给结论）。
    */
   allowedActions: readonly ActionRefType[]
   /**
@@ -67,8 +72,10 @@ export interface ReviewDecisionInput {
    *
    * 返工 = 审核判 `fail` ⇒ 把审核意见交回执行者重做。`0`（默认）表示不返工：
    * `fail` 直接交给人（看板「等待人处理」）。
+   *
+   * `null` = **无限**（2026-09）：`fail` 就一直交回执行者重做，直到通过或交给人。
    */
-  maxReworks?: number
+  maxReworks?: number | null
   /**
    * 这条任务**已经**返工过几次。
    *
@@ -191,9 +198,16 @@ export function decideReview(input: ReviewDecisionInput): ReviewDecision {
       //   有没有额度是两件不同的事：
       //     有额度 ⇒ 派生一条返工 run（执行者带着审核意见重做）
       //     没额度 ⇒ 交给人（`rework_exhausted`），**不能静默停在"已审查"**
-      return (input.usedReworks ?? 0) < (input.maxReworks ?? 0)
-        ? { kind: 'rework', verdict }
-        : { kind: 'rework_exhausted', verdict }
+      //
+      //   2026-09：`null` = **无限**——预算取无穷大，任何已用次数都还有额度，
+      //   `fail` 永远回到执行者（直到通过或 `needs_human`）。
+      {
+        const budget =
+          input.maxReworks === null ? Number.POSITIVE_INFINITY : (input.maxReworks ?? 0)
+        return (input.usedReworks ?? 0) < budget
+          ? { kind: 'rework', verdict }
+          : { kind: 'rework_exhausted', verdict }
+      }
     case 'pass':
       return verdict.action ? { kind: 'act', verdict } : { kind: 'advisory', verdict }
   }

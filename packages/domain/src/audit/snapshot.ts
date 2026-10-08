@@ -2,6 +2,7 @@ import {
   DATA_SNAPSHOT_FORMAT_VERSION,
   type Action,
   type Agent,
+  type AgentGroup,
   type Artifact,
   type AuditRecord,
   type ChatTurn,
@@ -69,6 +70,19 @@ export interface DataSnapshot {
     workspace: Workspace | null
     device: Device | null
     agents: Agent[]
+    /**
+     * 智能体组（2026-10 加）。
+     *
+     * ★★ 为什么必须导：**"谁审谁"与"判完允许动什么"现在只有组能回答**。
+     *    `Agent.reviewerAgentId` 与 agent 上那份 `allowedActions` 已经整个撤掉，
+     *    组是这两件事的**唯一记录**——不导它，导出物里就只剩下一堆互不相干的
+     *    agent，换台机器打开时"这条链本来该怎么跑"永久丢失（而使用者从界面上
+     *    分不清"当时没导"还是"我当时就没配"）。
+     *
+     * ⚠️ `?? []` 与 `tools` 同一条规矩：格式版本没有因为加它而变，所以旧备份的
+     *    `data` 里没有这一段——那是"当时没有组"，不是损坏。
+     */
+    agentGroups: AgentGroup[]
     skills: Skill[]
     /**
      * 工具包（D40）。
@@ -138,11 +152,23 @@ export async function exportData(
   const now = options.now ?? (() => Date.now())
   const ws = options.workspaceId
 
-  const [workspace, device, agents, skills, tools, issues, reports, runs, inbox, conversations] =
-    await Promise.all([
+  const [
+    workspace,
+    device,
+    agents,
+    agentGroups,
+    skills,
+    tools,
+    issues,
+    reports,
+    runs,
+    inbox,
+    conversations,
+  ] = await Promise.all([
       store.getWorkspace(ws),
       store.getDevice(),
       store.listAgents(ws),
+      store.listGroups(ws),
       store.listSkills(ws),
       store.listTools(ws),
       drainAll<Issue>((cursor) => store.listIssues({ workspaceId: ws, limit: 200, cursor })),
@@ -178,6 +204,7 @@ export async function exportData(
     workspace,
     device,
     agents,
+    agentGroups,
     skills,
     tools,
     issues,
@@ -314,6 +341,14 @@ export async function importData(
       rows: doc.data.agents,
       get: (id) => store.getAgent(id as Agent['id']),
       put: (row) => store.insertAgent(row),
+    },
+    {
+      // ⚠️ 与 tools 同一个理由的 `?? []`：旧备份里没有 `agentGroups` 这一段。
+      //    （成员指向的 agent 由 agents 那一行负责恢复，顺序上 agent 先。）
+      key: 'agentGroups',
+      rows: doc.data.agentGroups ?? [],
+      get: (id) => store.getGroup(id as AgentGroup['id']),
+      put: (row) => store.insertGroup(row),
     },
     {
       key: 'skills',

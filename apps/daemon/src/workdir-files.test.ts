@@ -6,10 +6,14 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { getRuntimeDescriptor } from '@agentdeck/agent-core'
 import {
   MAX_FILE_BYTES,
+  MAX_MEDIA_BYTES,
   UnsafePathError,
   contentTypeFor,
+  isStreamableType,
   listWorkDir,
   managedPathsFor,
+  openWorkFile,
+  parseByteRange,
   readWorkFile,
   resolveWorkFilePath,
 } from './workdir-files.ts'
@@ -324,5 +328,109 @@ describe('Content-Type', () => {
 
   test('★ 大小写不影响判定', () => {
     assert.match(contentTypeFor('A.PNG'), /^image\/png/)
+  })
+
+  test('★ 音视频认得出（2026-10：它们以前一律是 octet-stream）', () => {
+    // 认不出的后果就是"视频显示成十六进制"——界面按 content-type 分类
+    assert.equal(contentTypeFor('a.mp4'), 'video/mp4')
+    assert.equal(contentTypeFor('dir/CLIP.MP4'), 'video/mp4')
+    assert.equal(contentTypeFor('a.webm'), 'video/webm')
+    assert.equal(contentTypeFor('a.mov'), 'video/quicktime')
+    assert.equal(contentTypeFor('a.mkv'), 'video/x-matroska')
+    assert.equal(contentTypeFor('a.mp3'), 'audio/mpeg')
+    assert.equal(contentTypeFor('a.wav'), 'audio/wav')
+    assert.equal(contentTypeFor('a.opus'), 'audio/ogg')
+  })
+
+  test('★ `.ts` 仍然是文本，不是 MPEG-TS 视频', () => {
+    // 把 .ts 当视频会让一堆 TypeScript 源码文件变成播放器——这个后缀在本项目里
+    // 最常见的就是源码
+    assert.match(contentTypeFor('a.ts'), /^text\/plain/)
+    assert.equal(isStreamableType(contentTypeFor('a.ts')), false)
+  })
+
+  test('只有音视频是"流着发"的（文本/图片仍然整份读出来）', () => {
+    assert.equal(isStreamableType(contentTypeFor('a.mp4')), true)
+    assert.equal(isStreamableType(contentTypeFor('a.mp3')), true)
+    assert.equal(isStreamableType('video/mp4; charset=binary'), true)
+    assert.equal(isStreamableType(contentTypeFor('a.png')), false)
+    assert.equal(isStreamableType(contentTypeFor('a.md')), false)
+    assert.equal(isStreamableType(contentTypeFor('blob.bin')), false)
+  })
+})
+
+describe('★ Range（音视频的 seek 全靠它）', () => {
+  test('没有 Range 头 ⇒ null（回 200 整份）', () => {
+    assert.equal(parseByteRange(undefined, 100), null)
+    assert.equal(parseByteRange(null, 100), null)
+    assert.equal(parseByteRange('', 100), null)
+    // 认不出来的写法当成"没有 Range"（HTTP 允许服务器忽略它），不当错误
+    assert.equal(parseByteRange('items=0-9', 100), null)
+    assert.equal(parseByteRange('bytes=0-9,20-29', 100), null, '多区间不支持：当没给')
+  })
+
+  test('三档区间写法都对', () => {
+    // bytes=0-99 ⇒ 前 100 字节
+    assert.deepEqual(parseByteRange('bytes=0-99', 1000), { start: 0, end: 99 })
+    // bytes=500- ⇒ 到结尾
+    assert.deepEqual(parseByteRange('bytes=500-', 1000), { start: 500, end: 999 })
+    // bytes=-100 ⇒ **最后** 100 字节
+    assert.deepEqual(parseByteRange('bytes=-100', 1000), { start: 900, end: 999 })
+    // 结尾越界 ⇒ 收到 size-1（HTTP 的语义就是这样，不是错误）
+    assert.deepEqual(parseByteRange('bytes=900-999999', 1000), { start: 900, end: 999 })
+    // 前后空格也要认
+    assert.deepEqual(parseByteRange(' bytes=0-9 ', 100), { start: 0, end: 9 })
+  })
+
+  test('★ 起点越界 ⇒ unsatisfiable（要回 416，不是"忽略 Range 回 200"）', () => {
+    // 回 200 整份是不合规的：客户端会以为自己拿到了要的那一段
+    assert.equal(parseByteRange('bytes=1000-', 1000), 'unsatisfiable')
+    assert.equal(parseByteRange('bytes=2000-3000', 1000), 'unsatisfiable')
+    // 空文件：任何区间都越界
+    assert.equal(parseByteRange('bytes=0-', 0), 'unsatisfiable')
+  })
+
+  test('倒过来的区间与坏数字都当越界', () => {
+    assert.equal(parseByteRange('bytes=50-10', 1000), 'unsatisfiable')
+    assert.equal(parseByteRange('bytes=-0', 1000), 'unsatisfiable')
+  })
+})
+
+describe('★ 上限分两档：音视频不读进内存，所以上限高得多', () => {
+  test('媒体上限远高于 8MB 那一档（一段 1080p 一分钟就几十 MB）', () => {
+    assert.ok(MAX_MEDIA_BYTES > MAX_FILE_BYTES * 10)
+  })
+
+  test('openWorkFile 认得类型、给出"该不该流着发"', async () => {
+    const root = await makeWorkDir()
+    try {
+      await writeFile(join(root, 'clip.mp4'), Buffer.alloc(64, 1))
+      await writeFile(join(root, 'note.txt'), 'hi\n')
+
+      const media = await openWorkFile(root, 'clip.mp4')
+      assert.equal(media.streamable, true)
+      assert.equal(media.contentType, 'video/mp4')
+      assert.equal(media.size, 64)
+
+      const text = await openWorkFile(root, 'note.txt')
+      assert.equal(text.streamable, false)
+      assert.equal(text.size, 3)
+    } finally {
+      await cleanup(root)
+    }
+  })
+
+  test('★ 守卫在 openWorkFile 里也生效（流式那条路不许绕过它）', async () => {
+    const root = await makeWorkDir()
+    try {
+      await assert.rejects(() => openWorkFile(root, '../outside.mp4'), UnsafePathError)
+      await assert.rejects(() => openWorkFile(root, '/etc/passwd'), UnsafePathError)
+      await assert.rejects(() => openWorkFile(root, 'nope.mp4'), UnsafePathError)
+      // 非媒体那一档仍然卡在 8MB
+      await writeFile(join(root, 'huge.md'), Buffer.alloc(MAX_FILE_BYTES + 1, 0x61))
+      await assert.rejects(() => openWorkFile(root, 'huge.md'), UnsafePathError)
+    } finally {
+      await cleanup(root)
+    }
   })
 })

@@ -40,7 +40,7 @@
  *     意味着"dist 比源码旧"是常态——那种情况下量到的是旧界面，必须拦住。
  */
 
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -57,6 +57,19 @@ const flag = (name) => argv.includes(`--${name}`)
 const KEEP = flag('keep')
 const ALLOW_STALE = flag('allow-stale')
 const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? 120_000)
+/**
+ * Chrome 的 `--virtual-time-budget`（毫秒，**虚拟**时间）。
+ *
+ * ★ 2026-10 起可调：它与 `TIMEOUT_MS`（真实时间）是两把不同的闸，而"探针没在超时前
+ *   给出结果"这句话可能是**任意一把**先到：
+ *   · `TIMEOUT_MS` 到了 ⇒ 我们主动杀掉 Chrome，dump 被截断（甚至 0 字节）；
+ *   · 虚拟预算到了 ⇒ 探针还在跑，dump 里 `done` 不是 true（但 `#out` 里有**跑到
+ *     哪一段**的全部事实，见 `check-facts.mjs`）。
+ *   虚拟时间在任务队列空的时候是**直接跳过去**的，所以调大它的代价通常很小；而当
+ *   有过期断言在超时（每条 `until()` 吃 15s 虚拟时间）时，调大是唯一能看到更多段落的
+ *   办法。两者一起给：`PROBE_VIRTUAL_MS=900000 PROBE_TIMEOUT_MS=900000 pnpm run probe:layout`。
+ */
+const VIRTUAL_MS = Number(process.env.PROBE_VIRTUAL_MS ?? 300_000)
 
 const log = (s = '') => process.stdout.write(s + '\n')
 const paint = (code, s) => `\u001b[${code}m${s}\u001b[0m`
@@ -147,14 +160,18 @@ const CHECKS = [
   },
   { view: '智能体', key: 'agents.activeCardClass', label: '选中的卡片有 active 态', ok: (v) => String(v).includes('active') },
   { view: '智能体', key: 'agents.detailRendered', label: '右栏真的渲染出了 agent 详情', ok: (v) => v === true },
-  { view: '智能体', key: 'agents.wideBackDisplay', label: '宽屏不显示返回按钮（列表就在左边）', ok: (v) => v === 'none' },
   { view: '智能体', key: 'agents.wideListDisplay', label: '宽屏左栏可见', ok: (v) => v === 'flex' },
   { view: '智能体', key: 'agents.narrowListDisplay', label: '窄屏 + 选中详情时列表隐藏', ok: (v) => v === 'none' },
   { view: '智能体', key: 'agents.narrowDetailDisplay', label: '窄屏 + 选中详情时详情可见', ok: (v) => v === 'flex' },
-  { view: '智能体', key: 'agents.narrowBackDisplay', label: '窄屏出现返回按钮', ok: (v) => v !== 'none' && v !== 'MISSING' },
-  { view: '智能体', key: 'agents.afterBackClass', label: '点返回后 with-detail 撤掉', ok: (v) => !String(v).includes('with-detail') },
-  { view: '智能体', key: 'agents.afterBackListDisplay', label: '返回后左栏回来', ok: (v) => v === 'flex' },
-  { view: '智能体', key: 'agents.afterBackDetailDisplay', label: '窄屏下返回后详情栏消失', ok: (v) => v === 'none' },
+  // ⚠️ 2026-10：原来这里有四条针对**窄屏返回按钮**的断言（宽屏不出现 / 窄屏出现 /
+  //    点它回到列表 / 点它之后右栏消失）。那个按钮已经不存在了——AgentDetail 改成
+  //    "选中即编辑"（没有查看态）、栏头交给 `MainArea` 渲染，而智能体页没给它
+  //    `backLabel`。窄屏的出口与任务页同一个：**侧边栏那一项**（全屏常驻、最容易
+  //    点到）。判据因此换成"真的出得去"，而不是"某个按钮在不在"。
+  { view: '智能体', key: 'agents.narrowExitFound', label: '★ 窄屏的出口在（侧边栏「智能体」那一项）', ok: (v) => v === true },
+  { view: '智能体', key: 'agents.afterExitClass', label: '★ 点侧边栏「智能体」后 with-detail 撤掉（回到列表）', ok: (v) => !String(v).includes('with-detail') },
+  { view: '智能体', key: 'agents.afterExitListDisplay', label: '★ 出口之后左栏回来', ok: (v) => v === 'flex' },
+  { view: '智能体', key: 'agents.afterExitDetailDisplay', label: '★ 窄屏下出口之后详情栏消失', ok: (v) => v === 'none' },
   {
     view: '智能体',
     key: 'agents.editButtonFound',
@@ -422,7 +439,13 @@ const CHECKS = [
 
   // ── Skills：安装面板在抽屉里 ──
   { view: '技能', key: 'skills.title', label: '技能页渲染（中文页名）', ok: (v) => v === '技能' },
-  { view: '技能', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板', ok: (v) => v === false },
+  { view: '技能', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板（`.install-panel`）', ok: (v) => v === false },
+  {
+    view: '技能',
+    key: 'skills.noLegacyDrawerBeforeOpen',
+    label: '★ 没打开安装面板时，页面上**没有** `.drawer`（它是主区面板，不是弹框）',
+    ok: (v) => v === true,
+  },
   { view: '技能', key: 'skills.tableRows', label: 'skill 列表有内容', ok: (v) => v >= 1, show: (v) => `${v} 行` },
   {
     view: '技能',
@@ -463,20 +486,50 @@ const CHECKS = [
   },
   {
     view: '技能',
-    key: 'skills.drawerClass',
-    label: '打开的是抽屉且用了宽版',
-    ok: (v) => String(v).includes('drawer') && String(v).includes('wide'),
+    key: 'skills.panelClass',
+    label: '打开的是主区就地面板（`.main-panel`，不是 `.drawer`）',
+    ok: (v) => String(v).includes('main-panel') && !String(v).includes('drawer'),
   },
   {
     view: '技能',
-    key: 'skills.drawerWidth',
-    label: '抽屉宽 46rem(736px)',
-    ok: (v) => near(v, 736, 4),
-    show: (v) => `${v}px`,
+    key: 'skills.panelInMain',
+    // ★ 2026-10（使用者：「安装都是右侧弹框，需要改成类似新建智能体那样，在主区
+    //   显示」）：面板必须是 `.main` 内容盒里的一块，且**不是**浮层。这一条同时
+    //   钉住"左右边缘对齐主区"——量的是真盒子，不是某个 class 在不在。
+    label: '★ 安装面板在主区内容盒里、且不是浮层（position 不是 fixed/absolute）',
+    ok: (v) => v === true,
   },
-  { view: '技能', key: 'skills.backdropPresent', label: '有背景遮罩（点它可关）', ok: (v) => v === true },
-  { view: '技能', key: 'skills.footButtonText', label: '底部常驻的是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
-  { view: '技能', key: 'skills.footBottomDelta', label: '主操作贴住视口底部', ok: (v) => near(v, 0, 1), show: (v) => `差 ${v}px` },
+  {
+    view: '技能',
+    key: 'skills.panelNoBackdrop',
+    label: '★ 没有背景遮罩（它不是对话框——后面的列表是被换掉的，不是被挡住的）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.panelReplacesList',
+    label: '★ 面板**取代**列表（开着时表格不在 DOM 里，而不是被推到视口外）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.panelBackVisible',
+    label: '★ 头部有**一直可见**的返回入口（列表被换掉了，它是唯一的路）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.panelBackLabel',
+    label: '返回入口说的是「← 返回技能列表」',
+    ok: (v) => v === '← 返回技能列表',
+  },
+  {
+    view: '技能',
+    key: 'skills.backReturnsToList',
+    label: '★ 点返回就回到列表（表格回来、面板没了）',
+    ok: (v) => v === true,
+  },
+  { view: '技能', key: 'skills.footButtonText', label: '面板底部是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
   { view: '技能', key: 'skills.tabCount', label: '两个来源页签都在', ok: (v) => v === 2, show: (v) => `${v} 个` },
   { view: '技能', key: 'skills.duplicateCloseInTabs', label: '页签条里没有与抽屉头重复的「关闭」', ok: (v) => v === false },
   {
@@ -500,12 +553,10 @@ const CHECKS = [
   },
   {
     view: '技能',
-    key: 'skills.rowsBehindDrawer',
-    label: '抽屉没把后面的 skill 列表吞掉（装完就能看见它）',
-    ok: (v) => v >= 1,
-    show: (v) => `${v} 行`,
+    key: 'skills.escClosesPanel',
+    label: 'Esc 能关掉安装面板（与同一页的设置抽屉同一手感）',
+    ok: (v) => v === true,
   },
-  { view: '技能', key: 'skills.drawerGoneAfterEsc', label: 'Esc 能关掉抽屉', ok: (v) => v === true },
 
   // ── 本地技能目录（勾一个别的 AI 工具的目录 ⇒ 看见 ⇒ 能挂）──
   { view: '技能', key: 'skills.settingsButtonFound', label: '★ 页头有「设置」入口', ok: (v) => v === true },
@@ -615,8 +666,11 @@ const CHECKS = [
   {
     view: '工具（D40）',
     key: 'shell.navItemCount',
-    label: '★ 侧边栏是五项（聊天最轻、排第一；D58 起「新建任务」并进了「任务」）',
-    ok: (v) => v === 5,
+    // ★ 2026-10（D70）：侧边栏第五项变第六项——「智能体组」加在「智能体」后面
+    //   （先有"人"，才有"队"）。这一条与下面就差一个数，两条一起才守得住"中间
+    //   少一项 / 多一项"。
+    label: '★ 侧边栏是六项（聊天最轻、排第一；D58 把「新建任务」并进「任务」、D70 加了「智能体组」）',
+    ok: (v) => v === 6,
     show: (v) => `${v} 项`,
   },
   {
@@ -629,14 +683,16 @@ const CHECKS = [
     view: '工具（D40）',
     key: 'shell.navItems',
     label:
-      '★★ 侧边栏**整串顺序**就是这五项（顺序错、中间少/换一项、多出第 6 项都会红——只数个数＋看末项会漏掉中间那几种）',
+      '★★ 侧边栏**整串顺序**就是这六项（顺序错、中间少/换一项、多出第 7 项都会红——只数个数＋看末项会漏掉中间那几种）',
     ok: (v) =>
       JSON.stringify(v) ===
       // ★ 聊天排在最前：它是最轻的入口（先聊清楚），而且它要管多个对话，
       //   本身就是一个完整页面。
       // ★ 2026-10（D58）：「新建任务」不再是侧栏一项——它并进了「任务」，
       //   建任务变成那一页右上角的主操作（下面那条 `tasks.createAction*` 钉它）。
-      JSON.stringify(['聊天', '任务', '智能体', '技能', '工具']),
+      // ★ 2026-10（D70）：「智能体组」插在「智能体」后面——组是"队"，
+      //   紧跟在"人"后面读起来才顺（`Sidebar.svelte` 的 `ITEMS` 是唯一出处）。
+      JSON.stringify(['聊天', '任务', '智能体', '智能体组', '技能', '工具']),
     show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
   },
   { view: '工具（D40）', key: 'tools.title', label: '工具页渲染出来了', ok: (v) => v === '工具' },
@@ -895,6 +951,40 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.fileViewerVideoPlays',
+    label:
+      '★★★ 视频渲染成 `<video controls>`，**没有**十六进制/原文那一面，而且 `readyState >= 1`——播放器真的拿到了元数据（一口空黑框挡不住"视频显示不了"这个 bug）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerVideoRange206',
+    label:
+      '★★★ 带 `Range` 的请求回 **206** + 正确的 `content-range` + 只有那 100 字节（探针自己再整份取一次逐字节比对），且响应有 `accept-ranges: bytes`——这是"能不能拖进度"的判据',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerMediaNoSandboxCsp',
+    label:
+      '★★★ 媒体响应**不带**那条 sandbox 的 CSP（带了它，浏览器在新标签页里为媒体合成的那张文档自己会被 `default-src none` 管住、视频放不出来），但 `nosniff` 还在；而文本/HTML 那一档的 CSP **一个字没松**',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerAudioPlays',
+    label: '★ 音频同理：渲染成 `<audio>`、拿到元数据、不当二进制',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.fileViewerUnplayableSaysWhy',
+    label:
+      '★★ 放不出来的容器（用冒充 `.mkv` 的垃圾字节造，确定性）**退化成"浏览器放不了"这句人话**，而不是一口黑框、也不是十六进制——不说清是谁的事，使用者会去查一个不存在的 bug',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
     key: 'chat.filesHiddenInDraft',
     label: '★ 草稿态**不画**那一栏（还没有对话，也就还没有目录）',
     ok: (v) => v === true,
@@ -1021,18 +1111,30 @@ const CHECKS = [
   { view: '工具（D40）', key: 'tools.installButtonFound', label: '标题栏有「安装工具」', ok: (v) => v === true },
   {
     view: '工具（D40）',
-    key: 'tools.drawerAtRight',
-    label: '★ 安装抽屉开在**右侧**（贴住视口右边缘）',
+    key: 'tools.panelInMain',
+    label: '★ 安装面板在主区内容盒里、且不是浮层（与技能页同一套判据）',
     ok: (v) => v === true,
   },
   {
     view: '工具（D40）',
-    key: 'tools.drawerWidth',
-    label: '抽屉是宽版 46rem(736px)（那张表有六列）',
-    ok: (v) => near(v, 736, 4),
-    show: (v) => `${v}px`,
+    key: 'tools.panelNoBackdrop',
+    label: '★ 没有背景遮罩（它不是对话框）',
+    ok: (v) => v === true,
   },
-  { view: '工具（D40）', key: 'tools.drawerBackdrop', label: '有背景遮罩（点它可关）', ok: (v) => v === true },
+  {
+    view: '工具（D40）',
+    key: 'tools.panelReplacesList',
+    label: '★ 面板**取代**工具列表（开着时表格不在 DOM 里）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '工具（D40）',
+    key: 'tools.panelBackVisible',
+    label: '★ 头部有**一直可见**的返回入口',
+    ok: (v) => v === true,
+  },
+  { view: '工具（D40）', key: 'tools.panelBackLabel', label: '返回入口说的是「← 返回工具列表」', ok: (v) => v === '← 返回工具列表' },
+  { view: '工具（D40）', key: 'tools.backReturnsToList', label: '★ 点返回就回到列表', ok: (v) => v === true },
   {
     view: '工具（D40）',
     key: 'tools.installFailureShown',
@@ -1078,7 +1180,7 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v >= 2,
     show: (v) => `${v} 行`,
   },
-  { view: '工具（D40）', key: 'tools.drawerGoneAfterEsc', label: 'Esc 能关掉安装抽屉', ok: (v) => v === true },
+  { view: '工具（D40）', key: 'tools.escClosesPanel', label: 'Esc 能关掉安装面板', ok: (v) => v === true },
   {
     // ★ 这一段撤了两次，所以这三条查的是**最终态**（使用者的要求：
     //   「执行智能体不支持"行动"，去掉」，然后「"干活时能用的工具包"…是否也应该去掉」）：
@@ -3805,6 +3907,77 @@ function findChrome() {
   return candidates.find((p) => fs.existsSync(p)) ?? null
 }
 
+/**
+ * 造音视频夹具（2026-10）：一段真能解码的小视频 + 一个手写的 WAV。
+ *
+ * ⚠️ **WAV 是手写的**（44 字节头 + PCM），不依赖 ffmpeg：音频那条判据因此
+ *    在任何机器上都量得到。视频只能靠 ffmpeg，没有它就把这一条如实报成红。
+ */
+function makeMediaFixtures(dir) {
+  const made = []
+  try {
+    // ① 真视频：160x120、1 秒、纯色 + 一个方块（编解码器认的是容器与码流，不是画面）
+    const clip = path.join(dir, 'clip.webm')
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1',
+        '-c:v', 'libvpx', '-b:v', '100k', '-an',
+        clip,
+      ],
+      { stdio: 'ignore' },
+    )
+    if (r.status !== 0) return { ok: false, why: 'ffmpeg 生成 webm 失败（没装 ffmpeg？）', made }
+    made.push('clip.webm')
+
+    // ② mp4：只用来量"类型认得出来 + Range 对"（不要求解码，Chromium 没有 H.264）
+    const mp4 = path.join(dir, 'clip.mp4')
+    const r2 = spawnSync(
+      'ffmpeg',
+      [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-an',
+        mp4,
+      ],
+      { stdio: 'ignore' },
+    )
+    if (r2.status === 0) made.push('clip.mp4')
+
+    // ③ WAV：手写——44 字节 RIFF 头 + 0.2 秒 8kHz 单声道正弦
+    const rate = 8000
+    const samples = Math.round(rate * 0.2)
+    const pcm = Buffer.alloc(samples * 2)
+    for (let i = 0; i < samples; i += 1) {
+      pcm.writeInt16LE(Math.round(12000 * Math.sin((2 * Math.PI * 440 * i) / rate)), i * 2)
+    }
+    const head = Buffer.alloc(44)
+    head.write('RIFF', 0)
+    head.writeUInt32LE(36 + pcm.length, 4)
+    head.write('WAVE', 8)
+    head.write('fmt ', 12)
+    head.writeUInt32LE(16, 16) // fmt 块大小
+    head.writeUInt16LE(1, 20) // PCM
+    head.writeUInt16LE(1, 22) // 单声道
+    head.writeUInt32LE(rate, 24)
+    head.writeUInt32LE(rate * 2, 28) // 字节率
+    head.writeUInt16LE(2, 32) // 块对齐
+    head.writeUInt16LE(16, 34) // 位深
+    head.write('data', 36)
+    head.writeUInt32LE(pcm.length, 40)
+    fs.writeFileSync(path.join(dir, 'tone.wav'), Buffer.concat([head, pcm]))
+    made.push('tone.wav')
+
+    // ④ 一段**放不出来**的东西（冒充 .mkv）：用来量"放不出来时界面有没有说一句人话"
+    fs.writeFileSync(path.join(dir, 'broken.mkv'), Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04]))
+    made.push('broken.mkv')
+    return { ok: true, why: '', made }
+  } catch (err) {
+    return { ok: false, why: String(err), made }
+  }
+}
+
 function fail(code, ...lines) {
   log()
   for (const l of lines) log(red('✗ ') + l)
@@ -4240,6 +4413,19 @@ try {
     put('blob.bin', Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x41, 0x42, 0x00, 0xff]))
     put('big.py', Array.from({ length: 40000 }, (_, i) => `x${i} = ${i}`).join('\n') + '\n')
 
+    // ── 音视频（2026-10）──
+    //
+    // 需要**真能解码**的文件：视频那一条判据是"播放器拿到了元数据"（`readyState`），
+    // 光有 `<video>` 元素不算数（一口空黑框正是这一条要挡的东西）。
+    //
+    // ⚠️ 用 **WebM/VP8**：Chrome 与 Chromium 都解码得了（H.264 只有 Google Chrome
+    //    的官方包带），所以这条判据不取决于探针用的是哪个二进制。
+    // ⚠️ `ffmpeg` 是**可选**依赖：没有就退化成"夹具没造出来"，那几条检查会因为
+    //    找不到文件而红——而不是**静默变绿**（这是这个探针一贯的取舍）。
+    const media = makeMediaFixtures(chatFilesDir)
+    if (!media.ok) log(yellow(`⚠ 造音视频夹具失败：${media.why}——那几条检查会红`))
+    else log(dim(`  音视频夹具：${media.made.join('、')}`))
+
     const madeAgent = await fetch(`${base}/api/agents`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -4540,7 +4726,7 @@ try {
       //    用光（虚拟时间在任务队列空的时候是直接跳过去的），dump 不会变慢。
       // ⚠️ 120s 那档在「列表栏骨架（D61）」那一组（末尾多量三页、每页两三次
       //    等待）之后又紧了：实测 dump 出来时 `done` 还没写。放宽到 180s。
-      '--virtual-time-budget=300000',
+      `--virtual-time-budget=${VIRTUAL_MS}`,
       '--dump-dom',
       // ★ 把夹具路径交给探针页：抽屉里那次安装是"真的往输入框里打字"驱动的，
       //   而探针不可能自己编出 `.cache/layout-probe/…` 这个绝对路径。

@@ -28,6 +28,11 @@ export const shellText = {
   'shell.navTasksHint': { zh: '看 + 建 · 看板 / 列表', en: 'View & create · board / list' },
   'shell.navAgents': { zh: '智能体', en: 'Agents' },
   'shell.navAgentsHint': { zh: '指令 · 用哪个 CLI', en: 'Instructions · which CLI' },
+  // ★ D70 第六项：智能体组（一队人的编队：执行 → 审核 → 行动）。
+  //   ⚠️ 与「智能体」是**两个页面**（设计稿 §7.1）：智能体页保灵活性（每个人的
+  //   指令/角色/审核者），组页保方便性（整条链的默认配置，新建任务一下选走）。
+  'shell.navGroups': { zh: '智能体组', en: 'Agent groups' },
+  'shell.navGroupsHint': { zh: '编队 · 执行+审核的默认配置', en: 'Teams · default executor+reviewer config' },
   'shell.navSkills': { zh: '技能', en: 'Skills' },
   'shell.navSkillsHint': { zh: '执行者的参考资料 · 可安装', en: 'Reference packs for executors' },
 

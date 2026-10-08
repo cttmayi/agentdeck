@@ -26,7 +26,7 @@ skill 是**给执行者干活时参考的资料/方法包**。它**不是**判�
 | 你可能以为它在这 | 其实在 | 为什么 |
 |---|---|---|
 | 判断依据（"按什么判"） | **审核者的「指令」**（`Agent.instructions`；老数据那份 `Agent.reviewStandard` 仍然会被一起投递，详情页里能一键并进「指令」） | 判断依据是审核者的能力，不是一份可以顺手挂上来的资料（D37）；2026-09 起它和身份写在同一栏里 |
-| 行动权限（"判完允许动什么"） | `Agent.allowedActions`——也在审核者身上 | 同上；挂在 skill 上等于让一个资料包决定谁能改状态（D40 收口） |
+| 行动权限（"判完允许动什么"） | `AgentGroup.allowedActions`——**在智能体组上**（2026-10；D40 收口时一度在审核者身上） | 同上；挂在 skill 上等于让一个资料包决定谁能改状态（D40 收口） |
 
 所以：**skill 挂给执行者**（`Agent.skillIds`），**判断依据与权限配给审核者**。skill 对审核者
 只是可选的参考/支持文件。
@@ -131,7 +131,7 @@ my-skill/
 | **远端目录** | `source.kind = 'payload'`（页面取好交过来） | **原始 GitHub 来源**（`github:…`，见下） | 页面 → daemon 再校验 |
 | **本地技能目录**（§8） | 在「设置」里勾一个目录，**不是逐条装** | `localdir:<绝对路径>` | daemon 扫描 + 对账 |
 
-界面上「安装」抽屉里那两个页签 = 前两条（输入框**自动判断**是路径还是链接：`/` 或 `~` 开头
+界面上「安装」面板（主区就地面板，2026-10 起不再是抽屉）里那两个页签 = 前两条（输入框**自动判断**是路径还是链接：`/` 或 `~` 开头
 是路径，含 `://` 是链接）+ 远端目录。
 
 > **远端目录里放的是「推荐清单」（D50，2026-10）**：来源由维护者核过（清单
@@ -312,7 +312,7 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 
 | 想知道 | 去哪 |
 |---|---|
-| 实体与字段 | `packages/protocol/src/entities.ts`（`Skill`、`Agent.skillIds`、`Agent.reviewStandard`、`Agent.allowedActions`） |
+| 实体与字段 | `packages/protocol/src/entities.ts`（`Skill`、`Agent.skillIds`、`Agent.reviewStandard`、`AgentGroup.allowedActions`） |
 | 从路径 / GitHub 解析与限额 | `packages/skill-source/src/skill-source.ts` |
 | 本地技能目录：候选、扫描、对账 | `apps/daemon/src/local-skill-dirs.ts` |
 | 注入（写文件、归属清单、冲突、清理） | `packages/agent-core/src/skill-injection.ts` |

@@ -37,10 +37,16 @@ export const skillsText = {
   'skills.headStrongBody': { zh: '正文（SKILL.md）', en: 'the body (SKILL.md)' },
   'skills.headStrongFiles': { zh: '支持文件', en: 'support files' },
   'skills.headOutro': {
-    zh: '。它不决定审核者的判断依据，也不决定「判完允许动什么」——那两样都写在审核者自己身上（判断依据在它的「指令」里；智能体页 → 点开审核者）。',
-    en: '. It decides neither the reviewer’s judging criteria nor what a verdict may trigger — both live on the reviewer itself (the criteria in its Instructions; Agents page → open the reviewer).',
+    zh: '。它不决定审核者的判断依据（那在审核者的「指令」里；智能体页 → 点开审核者），也不决定「判完允许动什么」（那是智能体组的事；智能体组页 → ③ 行动）。',
+    en: '. It decides neither the reviewer’s judging criteria (that lives in the reviewer’s Instructions; Agents page → open the reviewer) nor what a verdict may trigger (that belongs to the agent group; Groups page → 3 Act).',
   },
   'skills.install': { zh: '安装技能', en: 'Install skill' },
+  /*
+   * ★ 2026-10：安装面板从右侧抽屉改成主区的就地面板，于是需要一句"怎么回去"。
+   *   它**必须一直可见**（面板把列表换掉了）——与任务页/智能体页的「← …列表」
+   *   同一个说法，只是那边的按钮只在窄屏出现。
+   */
+  'skills.backToList': { zh: '← 返回技能列表', en: '← Back to skills' },
 
   'skills.tabPath': { zh: '从路径 / GitHub 安装', en: 'Install from a path / GitHub' },
   'skills.tabRemote': { zh: '从远端目录安装', en: 'Install from the remote catalog' },

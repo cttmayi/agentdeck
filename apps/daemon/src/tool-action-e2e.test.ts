@@ -160,6 +160,29 @@ async function postRun(url: string, body: Record<string, unknown>): Promise<void
   assert.equal(res.status, 202, `提交 run 必须是 202，实际 ${res.status}：${text.slice(0, 300)}`)
 }
 
+/**
+ * 建一个"执行者 + 审核者"的组（2026-10 起动作权限的唯一写入口）。
+ *
+ * ⚠️ 这个助手存在的理由就是那条搬家：动作权限与"谁审谁"原来分别写在
+ *    审核者 agent 与执行者 agent 上，现在**都只在组上**。三个用例的授权
+ *    形态完全一样，所以抽成一个——各写一遍迟早在某处漏掉"审核者是谁"。
+ */
+async function grantViaGroup(
+  url: string,
+  executor: { id: string },
+  reviewer: { id: string },
+  actions: string[],
+  debugActions: string[] = [],
+): Promise<string> {
+  const created = await sendJson<{ group: { id: string } }>(`${url}/api/agent-groups`, {
+    name: '动作链组',
+    members: [executor.id, reviewer.id],
+    allowedActions: actions,
+    debugActions,
+  })
+  return created.group.id
+}
+
 async function waitTerminal(url: string, runId: string): Promise<string> {
   let last: string = '(没读到)'
   try {
@@ -225,21 +248,15 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         instructions: '',
         runtimeKey: 'claude',
         role: 'reviewer',
-        // ★ 动作权限写在 **agent** 上（D40 收口：它一度写在 `reviewStandard` 里，
-        //   那个字段已经降级成"老数据的只读兼容字段"，写入口不再写它）
-        allowedActions: ['example-note.append-note'],
         reviewStandard: {
           body: '# 示例标准\n\n只要产出不为空就算通过。',
         },
       })
 
-      // 执行者的产出由谁审（D28）
-      const patched = await fetch(`${url}/api/agents/${executor.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reviewerAgentId: reviewer.id }),
-      })
-      assert.ok(patched.ok, `设置审核者应当成功：${patched.status}`)
+      // ★★ 授权与"谁审谁"走**组**（2026-10）：agent 上不再有 `allowedActions`，
+      //    也不再有自己的 `reviewerAgentId`——建任务时带 `groupId`，组把这两样
+      //    展开进这条 run，链路本身一字未变。
+      const groupId = await grantViaGroup(url, executor, reviewer, ['example-note.append-note'])
 
       // ⚠️ 这里原来还有两段：把工具包"按组挂到执行者身上"（`PUT
       //    /api/agents/:id/tools`）与"审核者不许挂工具"（同一接口应回 400）。
@@ -269,6 +286,7 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
       await postRun(url, {
         runId: executeRunId,
         kind: 'execute',
+        groupId,
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
         skills: [],
         subject: { type: 'issue', id: 'issue-e2e-1' },
@@ -527,17 +545,12 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         instructions: '',
         runtimeKey: 'claude',
         role: 'reviewer',
-        // ★ 动作权限在 **agent** 上（D40 收口）；不标「调试」⇒ 直接执行
-        allowedActions: ['risky-tool.touch'],
         reviewStandard: {
           body: '# 放行标准\n\n什么都算通过。',
         },
       })
-      await fetch(`${url}/api/agents/${executor.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reviewerAgentId: reviewer.id }),
-      })
+      // ★ 授权在组上；**不**标「调试」⇒ 直接执行
+      const groupId = await grantViaGroup(url, executor, reviewer, ['risky-tool.touch'])
       // 审核我说什么：通过，并触发那个动作
       backend.verdict = {
         schemaVersion: 1,
@@ -596,6 +609,7 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
       await postRun(url, {
         runId: executeRunId,
         kind: 'execute',
+        groupId,
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
         skills: [],
         subject: { type: 'issue', id: 'issue-direct-1' },
@@ -692,23 +706,28 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
         instructions: '',
         runtimeKey: 'claude',
         role: 'reviewer',
-        // ★ 授权它（allowedActions）+ 标「调试」（debugActions，allowedActions 的子集）
-        allowedActions: ['risky-tool.touch'],
-        debugActions: ['risky-tool.touch'],
         reviewStandard: {
           body: '# 放行标准\n\n什么都算通过。',
         },
       })
-      assert.deepEqual(
-        reviewer.debugActions,
-        ['risky-tool.touch'],
-        'POST 建审核者时 debugActions 要落库',
+      // ★★ 2026-10：授权与「调试」标签都写在**组**上（agent 上不再有动作字段）。
+      //    提交 run 时带 `groupId`，组把这两样展开进 `Run.*`——链路与以前完全一样，
+      //    变的只是"配置住在哪儿"。
+      const group = await sendJson<{ group: { id: string; debugActions: string[] } }>(
+        `${url}/api/agent-groups`,
+        {
+          name: '组3',
+          members: [executor.id, reviewer.id],
+          // 授权（allowedActions）+ 标「调试」（debugActions，allowedActions 的子集）
+          allowedActions: ['risky-tool.touch'],
+          debugActions: ['risky-tool.touch'],
+        },
       )
-      await fetch(`${url}/api/agents/${executor.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reviewerAgentId: reviewer.id }),
-      })
+      assert.deepEqual(
+        group.group.debugActions,
+        ['risky-tool.touch'],
+        'POST 建组时 debugActions 要落库',
+      )
       backend.verdict = {
         schemaVersion: 1,
         conclusion: 'pass',
@@ -723,6 +742,8 @@ describe('D40：判决里的工具动作真的跑起来了', () => {
       await postRun(url, {
         runId: executeRunId,
         kind: 'execute',
+        // ★ 带组提交：审核者、动作白名单与调试标签都从组展开
+        groupId: group.group.id,
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
         skills: [],
         subject: { type: 'issue', id: 'issue-debug-1' },

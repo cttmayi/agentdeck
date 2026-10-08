@@ -163,8 +163,21 @@ export interface Agent {
   runtimeKey: string
   /** 干活的还是审的（D28）。 */
   role: AgentRole
-  /** 由谁来审**这个执行 agent** 的产出（仅 executor 有意义）。 */
-  reviewerAgentId: string | null
+  /**
+   * ⚠️ 2026-10：这里原来有 `reviewerAgentId: string | null`（"由谁来审**这个执行
+   *    agent** 的产出"）。那个字段连同概念一起撤掉了：**谁审由智能体组决定**
+   *    （组里那个 `role === 'reviewer'` 的成员），而"挂在执行者身上"的那个字段
+   *    造成了一条看不见的隐式链接——换个人审要去改**执行者**的设置。
+   *
+   *   所以这一版界面上没有"某人有一个人审它"这回事：`Agent` 上既没有这个字段、
+   *    也没有替代品（新建任务选智能体组，组的成员才决定谁审）。run 上的
+   *    `reviewerAgentId` 照旧（那是"这一次是谁审的"的**记录**，见 `RunRow`）。
+   *
+   * ⚠️ 与 `ownerGroupId` 那类"过渡期可选字段"不同，这里**不留一个可选字段**：
+   *    留着它，界面就有机会去读一个服务端**永远不会再返回**的东西（读出来恒为
+   *    `undefined`/`null`），于是"某个人被我配过审核者"这种错觉会从类型上看起来
+   *    合法。
+   */
   /**
    * 挂在这个 agent 上的**工具组**（D40）。
    *
@@ -178,65 +191,105 @@ export interface Agent {
    *    `Agent` 上那段说明。
    */
   /**
-   * ★ **这个审核者判完之后允许触发哪些动作**（D40 收口；D41 收窄成只有一种来源）。
+   * ⚠️ 2026-10：这里原来有三个字段——`allowedActions`（"这个审核者判完之后允许触发
+   *    哪些动作"）、它的固定参数 `actionParams`、以及调试勾选 `debugActions`。
+   *    三个一起撤掉了：**动作属于智能体组**（`AgentGroup` 上那三个同名字段，
+   *    组配置页 ③ 行动），不属于某个人。
    *
-   * "按什么判"（`reviewStandard`）与"判完允许动什么"（这里）是两件事：前者是
-   * 一段文本，后者是一份**能力**。
-   *
-   * ⚠️ 取值**只有一种形状**：已装工具包的 `<包 slug>.<动作名>`
-   *   （`probe-tool.append-note`）。平台的内置动作已经整组移除——协议里的
-   *   `ActionType` 枚举没有了，`packages/domain` 的注册表换成了 `definition.ts`——
-   *   所以老工作区里存着的那几个裸名（`comment.create` 之类）只是**历史值**：
-   *   界面上原样显示（契约值不翻译），但没有任何包认领它，也就没有 `summary`。
-   *
-   * ★ 默认是**空数组**（= 只报告、不动作）："允许什么"必须由使用者说了算，
-   *   平台不替他放宽，也不替他收紧。装了什么包、包里有什么动作只有使用者知道，
-   *   所以界面也**不替他预勾**（`ActionPicker.svelte` / `NewAgentForm.svelte`）。
-   *
-   * ⚠️ 写成**可选**是过渡期的防御：这个字段是后加的，
-   *   老工作区的记录里**根本没有这个键**（store 不做 schema 迁移，读取路径也不补
-   *   默认值），更早的 daemon 也不返回它。缺字段与空数组同义。
-   *
-   * ⚠️ **只有审核者用得着它**：动作是**判完之后**由平台执行的。服务端拒绝给执行者
-   *   写非空值，所以详情页里这一段只出现在审核者身上。
-   *
-   * ⚠️ 老数据里这份配置在 `reviewStandard.allowedActions` 上（搬走之前它在那儿）。
-   *   界面按"自己的为空就回退到那份"显示（`lib/agent-actions.ts`），只读、不回写。
+   *    为什么必须撤（而不是"以组为准、人也留一份"）：同一个审核者在不同组里本来
+   *    就该配不同的权限，挂在人身上只能共用一份；而"以组为准"这种双重来源的后果
+   *    是使用者改了其中一份、却看到另一份在生效——这类"哪份说了算"的问题只能靠
+   *    注释记住，那正是当初把这份权限从审核标准里搬出来时想避免的事。
    */
-  allowedActions?: string[]
-  /**
-   * 动作的**固定参数**（D43）：`动作名 → 参数名 → 值`。
-   *
-   * 界面上给已授权动作的 open 参数设的固定值：执行时由平台注入，**模型不许写**
-   * （写了会被判不合规）。只可能是该动作的 open 参数（bound 是平台的事实）。
-   *
-   * ⚠️ 可选：老工作区记录里没有这个键；缺字段 = 没设任何固定参数。
-   * ⚠️ **只有审核者用得着它**（与 `allowedActions` 同一条规矩）。
-   */
-  actionParams?: Record<string, Record<string, unknown>>
-  /**
-   * 调试动作（2026-09）：标了「调试」的那些（`allowedActions` 的子集）。
-   *
-   * 判决引用这些动作时**不跑脚本**，只记录动作与解析后的完整参数（时间线显示
-   * 「调试 · 未执行」）。只对审核者有意义，与 `allowedActions` 同一条角色规矩。
-   *
-   * ⚠️ 可选：老数据没有这个键；缺字段 = 没有标调试。
-   */
-  debugActions?: string[]
   /**
    * 这个审核者按什么判（D37）。`null` = 没有标准（那它拿不到审核任务）。
    *
-   * 校验在服务端：名字与正文非空（动作权限不在这里，见 `allowedActions`）。
+   * 校验在服务端：正文非空。
    */
   reviewStandard: ReviewStandard | null
+  /**
+   * 私有归属（第二轮）：有值 = 私有智能体（只属于 `ownerGroupId` 那个组）。
+   *
+   * ★ 字段**在不在就是判据**：`undefined` = 全局智能体。私有 agent 不进全局
+   *   `GET /api/agents`（服务端过滤），只经组到达任务；随组删。
+   *
+   * ⚠️ 可选：旧 daemon 不返回它；缺字段 = 全局。
+   */
+  ownerGroupId?: string
+}
+
+/**
+ * 智能体组（D70 增量添加）：一队 agent 的编队。
+ *
+ * 组是「执行 → 审核 → 行动」整条链的**默认配置单位**，与老路径（执行者「由谁审
+ * 它」+ 审核者「行动权限」）并行：新建任务选了组，daemon 把组的默认展开成现有
+ * 字段；老字段一行没改。
+ *
+ * 形态：**恰好 1 执行 + 1 审核**（`members` 是列表，但这一版只支持这一个形态——
+ * 多执行者/多审核者是未来扩展，见 `packages/domain/src/groups/shape.ts`）。
+ *
+ * ⚠️ 这份类型只描述"界面要读写的那部分"；服务端才是权威（`AgentGroup` 实体）。
+ */
+export interface AgentGroup {
+  id: string
+  workspaceId: string
+  name: string
+  /**
+   * 组的模式（第二轮）：现在只有 `'workflow'`（工作流模式 = 「执行 → 审核 →
+   * 行动」顺序链）。⚠️ 省略即默认工作流（老组没有这个键）；mode 只在创建时写。
+   */
+  mode?: 'workflow'
+  /** 组员 id（这一版恰好 1 执行 + 1 审核）。 */
+  members: string[]
+  /** 组默认的行动权限（省略时落进任务；任务级仍可覆盖）。 */
+  allowedActions: string[]
+  /** 组默认的固定参数（`动作名 → 参数名 → 值`）。 */
+  actionParams: Record<string, Record<string, unknown>>
+  /** 组默认的调试动作（`allowedActions` 的子集）。 */
+  debugActions: string[]
+  /** 组默认的返工次数：0–100，`null` = 无限返工（任务级仍可覆盖）。 */
+  maxReworks: number | null
+  /** false = 停用：新建任务时选不了它。 */
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * `GET /api/agent-groups`：组的列表（第二轮起带成员）。
+ *
+ * `members` 是**全部组引用的成员**（含私有，去重后一张表）——界面按
+ * `group.members`（id 列表）从这张表 join 名字/角色。私有成员不在全局
+ * `GET /api/agents` 里，所以组自己的数据必须带它们，否则私有成员"查无此人"。
+ */
+export interface GroupsPayload {
+  groups: AgentGroup[]
+  members: Agent[]
+}
+
+/**
+ * 私有成员的草稿（第二轮）：建组 / 改组请求里的 `createAgents` 数组元素。
+ *
+ * 组是私有智能体的**创建入口**——表单里"新建私有"攒下的这一份，随组请求一起
+ * 交给 daemon（它建好 agent、`ownerGroupId = 组 id`、把新 id 并进 `members`）。
+ * 表单收敛（使用者拍板）：名字 + 指令（执行者）/ 审核标准（审核者）+ runtime +
+ * 可选技能。
+ */
+export interface GroupCreateAgentDraft {
+  name: string
+  role: 'executor' | 'reviewer'
+  instructions: string
+  reviewStandard: ReviewStandard | null
+  runtimeKey: string
+  skillIds: string[]
 }
 
 /**
  * 审核标准（D37）：**内联在审核者身上**的一条判断依据。
  *
- * ⚠️ **"允许动什么"不在标准里**（D40 收口搬走了）：那是审核者的**能力**，
- *    住在 `Agent.allowedActions`。判断依据与处置权限是两件事——分开放之后
- *    "我改了标准正文"与"我放宽了能动的范围"在审计与界面上都能分开看。
+ * ⚠️ **"允许动什么"不在标准里**（D40 收口搬走了，2026-10 起它住在**智能体组**上）：
+ *    判断依据与处置权限是两件事——分开放之后，改了标准正文与放宽了能动的范围
+ *    在审计与界面上都能分开看。
  */
 export interface ReviewStandard {
   /**
@@ -247,17 +300,10 @@ export interface ReviewStandard {
    * 可能还带着这个键，**读取方一律忽略**（见 `Agent.reviewStandard`）。
    */
   body: string
-  /**
-   * ⚠️ **老数据的只读兼容字段**（D40 收口之后动作权限搬到了 `Agent.allowedActions`）。
-   *
-   * 搬走之前动作白名单就写在标准里，而老工作区的记录里它还在。界面**按它显示**
-   * （`Agent.allowedActions` 为空时回退到它，见 `lib/agent-actions.ts`），
-   * 但**一个字都不往里写**：写入口只有 `Agent.allowedActions` 一处，
-   * 写成两处就会出现"哪个说了算"只能靠注释记住的问题——那正是这次搬家的理由。
-   *
-   * 可选：新数据里这个键根本不存在，老数据里可能是空数组。
-   */
-  allowedActions?: string[]
+  // ⚠️ 2026-10：这里原来有一个 `allowedActions?: string[]`（"老数据的只读兼容字段"：
+  //    动作白名单最早写在审核标准里，后来搬到 `Agent.allowedActions`）。搬家的中转
+  //    字段一起撤掉了——动作现在只在组上，所以标准里既不读它也不写它。
+  //    老记录里存着的那个键由服务端在启动时摘掉（`agent-legacy-cleanup.ts`）。
 }
 
 /** 第一句话模版的两个角色（D32）。 */
@@ -354,11 +400,12 @@ export interface Skill {
   /** 支持文件：相对路径 → 内容。缺失表示只有 SKILL.md。 */
   files?: Record<string, string>
   /**
-   * ⚠️ **这里原来有一个 `allowedActions`，已经搬走了**（D40 收口）。
+   * ⚠️ **这里原来有一个 `allowedActions`，已经搬走了**（D40 收口，2026-10 起
+   *    权威是 `AgentGroup.allowedActions`）。
    *
-   * "判完之后允许触发什么"是**审核者的能力**（`Agent.allowedActions`），不是
-   * 一份资料包的属性——挂在 skill 上等于让"给执行者参考的东西"顺手决定了谁能
-   * 改状态。老记录里这个键可能还在（整条记录以 JSON 存），界面按"没有"处理即可。
+   * "判完之后允许触发什么"不是一份资料包的属性——挂在 skill 上等于让"给执行者
+   * 参考的东西"顺手决定了谁能改状态。老记录里这个键可能还在（整条记录以 JSON 存），
+   * 界面按"没有"处理即可。
    */
   source: 'local' | 'remote'
   sourceRef: string | null
@@ -604,16 +651,36 @@ export interface RunSummary {
   failureReason: string | null
   chainDepth: number
   /**
-   * 这条**执行** run 的审核者覆盖（`kind !== 'execute'` 时为 `null`）。
+   * 这条 run 来自哪个**智能体组**（`null` = 没选组 / 组已被删；缺这个键 = 更早的
+   * daemon，也按"没选组"处理）。
    *
-   * ★ 三态必须分开，不能折成一个 `string | null`：
-   *   `follow` = 跟随那个 agent 的「由谁审它」（长期安排）；
-   *   `none` = 这次**明确不审**；
-   *   `override` = 这次换人审。
-   *   `follow` 与 `none` 都可能表现为"没有审核结论"，但**原因不同**，
-   *   页面上要如实说清：一个是配置没配，一个是这次的决定。
+   * ★ 页面用它说清"审核者是从哪来的"：组的审核者与"这一次单独指定"在
+   *   `reviewer` 上长得一样（都有 `agentId`），但后续完全不同——一个随组走，
+   *   一个只对那一条任务有效。
+   *
+   * ⚠️ 写成**可选**而不是 `string | null`：这一版 daemon 一定会回这个键（没组时
+   *    是 `null`），但**更早的 daemon 没有它**，而这一页要跟不同版本打交道。
+   *    对"来自哪个组"这件事，缺键与 `null` **后果相同**（都不是从组来的）——
+   *    与 `Run.reviewerAgentId` 那种"缺键 ≠ null"的三态不同，所以这里可以合并。
    */
-  reviewer: { mode: 'follow' } | { mode: 'none' } | { mode: 'override'; agentId: string } | null
+  groupId?: string | null
+  /**
+   * 这条**执行** run 的审核者（`kind !== 'execute'` 时为 `null`）。
+   *
+   * ★ 为什么不是 `string | null`：页面要如实显示"这条任务没人审"，而 `null` 这个值
+   *   本身读不出这层意思（它长得像"没填"）。所以给一个带 `mode` 的小对象，让
+   *   "没人审"是**说得出口的状态**。
+   *
+   *   `assigned` ⇒ 有审核者（**可能来自组**，也可能是这一次指定的——要区分看
+   *                `Run.groupId`）；
+   *   `none`     ⇒ 这条任务没有审核者。
+   *
+   * ⚠️ 2026-10：原来是**三态**（`follow` / `none` / `override`）。`follow` 那一态
+   *    （"没点名 ⇒ 跟随执行者身上那条长期配置"）随 `Agent.reviewerAgentId` 一起
+   *    撤销了——没有可跟随的东西，也就没有"跟随着谁"要显示。daemon 那边的投影
+   *    同一时刻收成两态（见 `apps/daemon/src/server.ts` 的 `reviewer:` 那一段）。
+   */
+  reviewer: { mode: 'none' } | { mode: 'assigned'; agentId: string } | null
   /**
    * 审核 run 的判决（只对 `kind === 'review'` 有值；还没判时为 `null`）。
    *

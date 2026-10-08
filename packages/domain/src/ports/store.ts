@@ -3,6 +3,8 @@ import type {
   ActionId,
   ActionStatus,
   Agent,
+  AgentGroup,
+  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -157,7 +159,68 @@ export interface Store {
 
   getAgent(id: AgentId): Promise<Agent | null>
   listAgents(workspaceId: WorkspaceId): Promise<Agent[]>
+  /**
+   * 读**未经清理**的 agent 记录：磁盘上是什么样就是什么样。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 它只为一件事存在：把老记录里撤掉的键**从磁盘上**摘掉
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `getAgent` / `listAgents` 会摘掉那几个键（读时兜底，见
+   * `packages/protocol/src/agent-legacy.ts`），于是**磁盘清理没法用它们**：读回来
+   * 的记录已经"看起来干净"，判据永远是"没有老字段"⇒ 一个字都不用改 ⇒ 磁盘上那些
+   * 键会永久留着（而使用者的要求是"不要遗留旧数据"）。
+   *
+   * ⚠️ 这是**唯一**一个"绕过总闸"的读口，所以调用方必须是清理那一处
+   *    （`apps/daemon/src/agent-legacy-cleanup.ts`）——别在业务代码里用它：那样会把
+   *    撤掉的字段重新带回链路里，而它们的语义已经不存在了（读到也不知道该怎么办）。
+   */
+  listAgentsRaw(workspaceId: WorkspaceId): Promise<Agent[]>
   insertAgent(agent: Agent): Promise<void>
+  /**
+   * 删除一个 agent（第二轮，2026 续：智能体组删除时**级联删私有成员**）。
+   *
+   * @returns 真的删到了返回 true；本来就没有返回 false（**不是错误**）。
+   *
+   * ⚠️ Agent 原来是 append-only（只有 insert，没有 delete）——所以这个方法是
+   *    **新增**的，不是补齐缺口。调用方负责引用检查：私有 agent 随组删（这轮
+   *    唯一的生产调用点）；全局 agent 有没有被组引用由调用方在删之前反查
+   *    （`listGroupsByAgent`）。
+   */
+  deleteAgent(id: AgentId): Promise<boolean>
+
+  // ── AgentGroup（智能体组，D70 增量添加）──
+
+  getGroup(id: AgentGroupId): Promise<AgentGroup | null>
+  listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]>
+  /**
+   * 某个 agent 属于哪些组。
+   *
+   * 用途：智能体页删 agent / 改角色前**反查**——有组引用它时要被拒并列出组
+   * （与 skill 卸载被拒同一个"不得静默丢弃"的口径）。组页"这个审核者在为谁
+   * 服务"也用它。
+   */
+  listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]>
+  insertGroup(group: AgentGroup): Promise<void>
+  /**
+   * 更新一条组（按 id 覆盖整条记录）。
+   *
+   * @returns 真的更新到了返回 true；不存在返回 false（**不是错误**——调用方
+   *          据此区分"被删了"与"更新失败"）。
+   *
+   * ⚠️ 组是**当前配置**（可编辑），不是 append-only 的历史实体——所以有 update，
+   *    与 Agent（append-only、只 insert）不同。形态校验（`checkGroupShape`）由
+   *    调用方在写入前做，存储层不猜业务。
+   */
+  updateGroup(group: AgentGroup): Promise<boolean>
+  /**
+   * 删除一条组。语义与 `deleteSkill` 相同：删到返回 true、本来没有返回 false。
+   *
+   * ⚠️ 调用方负责**引用检查**（还有 run 引用它吗——其实 run 只是记录了
+   *    `groupId`，删组不删 run；这条检查目前没有生产调用点，与 INV-14~16 同款
+   *    的"边界先立着"）。
+   */
+  deleteGroup(id: AgentGroupId): Promise<boolean>
 
   // ── Skill ──
 

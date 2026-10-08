@@ -801,6 +801,56 @@ hr {
   padding: var(--sp-3) var(--sp-5);
 }
 
+/* ══════════════ 主区里的就地面板（`.main-panel`）══════════════
+   ★ 2026-10：技能页与工具页的「安装」原来是右侧抽屉（`.drawer`），使用者要求改成
+   "类似新建智能体那样，在主区显示"——所以这里给它们一套与主区面板同族的容器：
+   边框 + 圆角 + 头部 / 正文 / 底部三段，指标与 `.pane-head` / `.pane-body` /
+   `.pane-foot` 对齐（同一套留白与字号，看不出是两套东西）。
+
+   它**不是**对话框（`.drawer` / `.modal`）：没有 `position: fixed`、没有遮罩、
+   也没有 `z-index`——它随页面滚，是被"换进主区"的内容。所以风格上也就不该借用
+   `.drawer-*` 那几个类：借了之后下一次有人调抽屉宽度，会把这一块一起改掉。 */
+.main-panel {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.main-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.main-panel-head h2 {
+  font-size: var(--fs-lg);
+}
+
+/* ⚠️ 返回入口必须**一直可见**（它是这一块唯一的"怎么回去"）。
+   不能复用 `.back-to-list`：那个 class 在宽屏是 `display:none`（主从布局里列表
+   就在左边，不需要返回）。这里列表是被面板**换掉**的，与屏宽无关。 */
+.panel-back {
+  flex-shrink: 0;
+}
+
+.main-panel-body {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.main-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: var(--sp-3) var(--sp-5);
+}
+
 /* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
    与 `.pane-head` 同一套指标——留白、下边框、标题字号 fs-lg（全局 h2 是 fs-xl
    22px，不钉字号标题就会比聊天栏头大 5px——使用者当场抓到的"Title 高度不一样"） */

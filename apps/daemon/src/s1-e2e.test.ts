@@ -148,6 +148,13 @@ let agentId: string
  * `before` 里装的那个夹具包决定它，见下面那段注释。
  */
 let reviewAction: string
+/**
+ * 首启播种的那个**默认组**的 id（2026-10 起"谁审我"只有组能回答）。
+ *
+ * 不带 `groupId` 的执行 run 不会派生审核 run——本文件测的正是"执行完自动接审核"，
+ * 所以每一处提交都要带上它。
+ */
+let groupId: string
 
 before(async () => {
   dataDir = await makeTempDir('s1-data')
@@ -172,24 +179,32 @@ before(async () => {
   // 建一个**独立的审核 agent**——INV-1 要求审核者不同于执行者，
   // 所以只有一个 agent 时系统会（正确地）跳过自动审核。
   // ══════════════════════════════════════════════════════════════════
-  // D28 之后，自动审核靠"执行者指向审核者"，不再靠 autoReview 开关
+  // 自动审核靠**智能体组**（2026-10），不再靠 autoReview 开关、也不再靠
+  // "执行者指向审核者"那个字段
   // ══════════════════════════════════════════════════════════════════
   //
-  // 所以这里不再手工造一个审核者：bootstrap 已经播种了一对，而且
-  // **执行者默认就指着那个审核者**——首启就是一条通的闭环。
+  // 所以这里不再手工造一个审核者：bootstrap 已经播种了一对 agent **和一个默认组**
+  // （成员正是这一对），而建任务时带上那个组就是一条通的闭环。
   const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-    agents: Array<{ id: string; name: string; role: string; reviewerAgentId: string | null }>
+    agents: Array<{ id: string; name: string; role: string }>
   }).agents
 
   const reviewer = agents.find((a) => a.role === 'reviewer')
   const executor = agents.find((a) => a.role === 'executor')
   assert.ok(reviewer, '★ bootstrap 必须播种审核者 —— 否则报告与执行产出都无人可审')
   assert.ok(executor, 'bootstrap 也会播种一个执行者')
-  assert.equal(
-    executor!.reviewerAgentId,
-    reviewer!.id,
-    '★ 执行者默认指向审核者：首启就是一条通的闭环',
+
+  // ⚠️ 这里原来断言 `executor.reviewerAgentId === reviewer.id`（"执行者默认指向
+  //    审核者：首启就是一条通的闭环"）。那个字段**已经撤掉**，同一条语义现在由
+  //    **播种的默认组**承载——判据换成"这个组的成员正是那一对"。
+  const groups = ((await (await fetch(`${daemon.url}/api/agent-groups`)).json()) as {
+    groups: Array<{ id: string; name: string; members: string[] }>
+  }).groups
+  const seeded = groups.find(
+    (g) => g.members.includes(executor!.id) && g.members.includes(reviewer!.id),
   )
+  assert.ok(seeded, '★ 播种的默认组把这一对串起来：首启就是一条通的闭环')
+  groupId = seeded!.id
 
   // ══════════════════════════════════════════════════════════════════
   // ★ D41：动作只能来自**装进来的工具包**，而播种的审核者没有任何动作权限
@@ -201,17 +216,17 @@ before(async () => {
   // `BUILTIN_REVIEW_ALLOWED_ACTIONS` 现在是空数组）。
   //
   // 所以这里装一个夹具包（真 node 脚本，只往工作目录写一个文件；NFR-T-01），
-  // 并把它的动作授给那个播种的审核者——授权的入口就是 `Agent.allowedActions`
-  // （D40 收口之后动作权限只住在那儿）。不装的话判决会以"动作不可用"判成
+  // 并把它的动作授给那个播种的**组**——2026-10 起"判完允许动什么"只住在那儿
+  // （agent 上的 `allowedActions` 已撤掉）。不装的话判决会以"动作不可用"判成
   // 不合规，这条用例就会变成在测别的东西。
   const pkg = await writeToolPackage()
   await installToolPackage(daemon, pkg)
-  const granted = await fetch(`${daemon.url}/api/agents/${reviewer!.id}`, {
+  const granted = await fetch(`${daemon.url}/api/agent-groups/${groupId}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ allowedActions: [pkg.action] }),
   })
-  assert.equal(granted.status, 200, '给播种的审核者授权一个工具动作应当成功')
+  assert.equal(granted.status, 200, '给播种的组授权一个工具动作应当成功')
   reviewAction = pkg.action
 
   agentId = executor!.id
@@ -233,6 +248,8 @@ describe('S1：执行完成后自动接审核', () => {
         runId,
         kind: 'execute',
         agentRef: { id: agentId, name: '助手', instructions: '' },
+        // ★ 带组 ⇒ 组的审核者成为这条任务的审核者（带组时执行者必须与组的一致）
+        groupId,
         skills: [],
         subject: { type: 'issue', id: issueId },
         prompt: '把功能实现一下',
@@ -414,6 +431,7 @@ describe('S1：执行完成后自动接审核', () => {
           runId,
           kind: 'execute',
           agentRef: { id: agentId, name: '助手', instructions: '' },
+          groupId,
           skills: [
             {
               ref: { id: 'sk1', slug: 'probe-skill', source: 'local' },

@@ -94,6 +94,9 @@ describe('数据快照：导出', () => {
       //    引用得到的东西（agent 挂的 skillIds / toolIds、判决引用的动作与
       //    工具包）都得在同一份文件里。
       'actions',
+      // ★ 智能体组（2026-10）："谁审谁 + 判完允许动什么"现在**只有组**能回答，
+      //   所以它必须进快照——不导它，导出物里就只剩一堆互不相干的 agent。
+      'agentGroups',
       'agents',
       'artifacts',
       'audits',

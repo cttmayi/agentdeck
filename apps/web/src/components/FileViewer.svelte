@@ -17,6 +17,25 @@
    * 靠手点界面验证，而"Markdown 被当纯文本显示"这种错**不报错**。
    *
    * ══════════════════════════════════════════════════════════════════
+   * 音视频：**一个字节都不自己下载**，URL 直接交给播放器
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者报的是「展示页面目前不支持视频文件显示」，而根因有两层（服务端
+   * 把 `.mp4` 认成 octet-stream；这条路由又把整份文件读进内存）。修法见
+   * `workdir-files.ts` 顶上第三段。**这里**那一层的要点是：
+   *
+   * 查看器**不许**去 `fetch` 一段视频——那会把几百 MB 拉进页面内存（`fetch`
+   * 拿的是完整 body，`<video>` 才会按 Range 去取）。所以取字节还是交 URL 给
+   * 播放器，由 `lib/file-view.ts` 的 `previewMode` 按后缀分流（那里的注释写了
+   * 为什么这条判断只能按后缀）。
+   *
+   * ⚠️ 「原文」面对音视频**不存在**（`hasFace`）：把几百 MB 拉回来 hex dump
+   *    前 512 字节是荒谬的。要看字节请用右侧的「在新标签页打开」。
+   *    ⚠️ 而"画不画那对切换按钮"必须**按后缀当场算**（`shownKind`），不能等
+   *    `load()` 赋的 `kind`——那会晚一拍，实测症状是"视频能放，标题栏上却还挂着
+   *    「渲染 | 原文」"（布局探针抓到的）。
+   *
+   * ══════════════════════════════════════════════════════════════════
    * HTML 那一面沿用文件响应自己的 CSP，不放宽
    * ══════════════════════════════════════════════════════════════════
    *
@@ -36,6 +55,9 @@
     defaultFace,
     fileUrl,
     hasFace,
+    mediaFailureReason,
+    mediaKindOf,
+    previewMode,
     hexDump,
     languageOf,
     parseCsv,
@@ -62,6 +84,10 @@
   let text = ''
   let contentType = ''
   let kind: FileKind = 'text'
+  /** 后缀当场能看出来的那一类（音视频）；其余是 `null`。见下面 `shownKind` 的注释。 */
+  let mediaKind: 'video' | 'audio' | null = null
+  /** 渲染时真正该用的类别：媒体看后缀，其余看 `load()` 取回来的结论。 */
+  let shownKind: FileKind = 'text'
   let face: FileFace = 'rendered'
   /** 高亮之后的 HTML（空串 = 这一面没有高亮）。 */
   let highlighted = ''
@@ -69,10 +95,46 @@
   let noHighlight: '' | 'tooBig' | 'unknownLanguage' = ''
   let jsonBroken = false
   let copied = ''
+  /**
+   * 播放器报错了吗。
+   *
+   * ⚠️ 要有这个：`.mkv` / `.avi` 这类容器 Chrome 放不了，而"黑框里什么都没有"
+   *    看起来像**我们**坏了。所以放不出来时如实说一句"这个容器/编码浏览器放不了，
+   *    可以到新标签页或磁盘上打开"。
+   */
+  let mediaFailed = false
+  /**
+   * 放不出来时**是谁的事**（决定说哪一句话）。
+   *
+   * ⚠️ 两种失败长得一模一样（一口黑框 + 播放器 error），但处置完全不同：daemon 还是
+   *    旧的那份 ⇒ "重启 daemon 之后就能放"；接口是对的而浏览器不认这个容器/编码 ⇒
+   *    "不是文件坏了，去新标签页或磁盘上看"。判据在 `mediaFailureReason`（纯函数、有
+   *    测试）。⚠️ 探测只在**已经失败之后**才发：正常播放那条路上一次多余的请求都没有。
+   */
+  let mediaReason: 'unsupportedByDaemon' | 'unsupportedByBrowser' = 'unsupportedByBrowser'
 
   $: parts = entry === null ? { dir: '', name: '' } : splitPath(entry.path)
-  $: canRendered = entry !== null && hasFace(kind, 'rendered')
-  $: canRaw = entry !== null && hasFace(kind, 'raw')
+  /**
+   * 这一份文件**按哪一类渲染**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 音视频按**后缀当场**定，不押在 `kind` 上（探针抓过一次）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * `kind` 是在 `load()` 里赋的，而 `load()` 对普通文件是**异步的**（要 `await
+   * fetch`）。把"要画哪些按钮、画哪个分支"押在它上面，就会出现"这一轮渲染用着
+   * 上一份文件的类别"的时间差——实测到的症状是：一段视频**放出来了**（分支对了），
+   * 而标题栏上**还挂着「渲染 | 原文」那对按钮**（那是上一份代码文件的类别算出来的）。
+   * 使用者看到的是"这段视频居然能切回原文"，点进去只会得到一屏十六进制。
+   *
+   * 后缀**同步可得**（`mediaKindOf`），所以用它做渲染判据就没有这个时间差；
+   * 其余类别的判据必须等字节回来（`.md` 与 `.txt` 在服务端都是 `text/plain`），
+   * 那些照旧用 `kind`。
+   */
+  $: mediaKind = entry === null ? null : mediaKindOf(entry.path)
+  $: shownKind = mediaKind ?? kind
+  $: canRendered = entry !== null && hasFace(shownKind, 'rendered')
+  $: canRaw = entry !== null && hasFace(shownKind, 'raw')
   $: sizeText = bytes === 0 ? '' : humanSize(bytes)
   /** 已经为哪个路径取过——`entry` 变了就重取。 */
   let loadedPath: string | null = null
@@ -98,6 +160,26 @@
     noHighlight = ''
     jsonBroken = false
     copied = ''
+    mediaFailed = false
+    mediaReason = 'unsupportedByBrowser'
+
+    // ── 音视频：不下载，URL 交给播放器（见文件顶上那一段）──
+    //
+    // 类型由**后缀**定（`mediaKindOf`），因为这正是 `previewMode` 分流的依据，
+    // 两者必须一致；真实类型仍在服务端给的 content-type 里，而播放器自己会去读它。
+    // 大小直接用目录列表里的那个数——不必为了显示"多大"去下载整份文件。
+    const media = mediaKindOf(target.path)
+    if (previewMode(target.path) === 'stream' && media !== null) {
+      kind = media
+      contentType = ''
+      text = ''
+      raw = new Uint8Array()
+      bytes = target.sizeBytes
+      face = 'rendered'
+      loading = false
+      return
+    }
+
     try {
       const res = await fetch(fileUrl(base, target))
       if (!res.ok) {
@@ -150,6 +232,33 @@
         jsonBroken = true
       }
     }
+  }
+
+  /**
+   * 播放器报错之后，问一次"接口那一层对不对"。
+   *
+   * `Range: bytes=0-0` 在支持它的 daemon 上只回 1 个字节（206），而老 daemon 会回
+   * 200 + **整份文件**——所以拿到响应头就立刻把 body 掐掉，别真的下下来。
+   */
+  async function diagnoseMedia(target: WorkDirFile): Promise<void> {
+    try {
+      const res = await fetch(fileUrl(base, target), { headers: { Range: 'bytes=0-0' } })
+      const probe = {
+        status: res.status,
+        contentType: res.headers.get('content-type') ?? '',
+      }
+      await res.body?.cancel().catch(() => {})
+      mediaReason = mediaFailureReason(probe)
+    } catch {
+      // 探测本身失败：保持默认那句（"浏览器放不了"）——它不会把人引到错的方向
+      mediaReason = 'unsupportedByBrowser'
+    }
+  }
+
+  /** 播放器 error ⇒ 记下来，并问一次是谁的事。 */
+  function onMediaError(target: WorkDirFile): void {
+    mediaFailed = true
+    void diagnoseMedia(target)
   }
 
   // ── highlight.js：按需注册 + 动态 import（不进主包）──
@@ -272,9 +381,15 @@
           >{$t('files.faceRaw')}</button>
         </span>
       {/if}
-      <button type="button" class="ghost" onclick={() => void copyRaw()} data-copy-raw>
-        {copied === '' ? $t('files.copyRaw') : copied}
-      </button>
+      <!--
+        ⚠️ 「复制原文」只在**真有原文**时才画（`raw` 非空）。音视频那一档一个字节都
+           没下载（见文件顶上那一段）⇒ 画出来点一下只会复制到一个空串，那比不画更坏。
+      -->
+      {#if raw.length > 0}
+        <button type="button" class="ghost" onclick={() => void copyRaw()} data-copy-raw>
+          {copied === '' ? $t('files.copyRaw') : copied}
+        </button>
+      {/if}
       <a class="ghost" href={fileUrl(base, entry)} target="_blank" rel="noreferrer noopener">
         {$t('files.openTab')}
       </a>
@@ -319,6 +434,57 @@
         src={fileUrl(base, entry)}
         data-file-frame
       ></iframe>
+    {:else if shownKind === 'video'}
+      <!--
+        音视频：`src` 直接指那条路由，浏览器自己按 Range 取（daemon 支持 206）。
+        `preload="metadata"`：先只拿头部拿到时长/尺寸，别一打开就下整段。
+        `playsinline`：手机上不要一按就全屏抢走整个页面。
+      -->
+      <div class="fv-media">
+        <!--
+          ⚠️ a11y lint 要求 `<video>` 带 `<track kind="captions">`。这里**不能**加：
+              那是 agent 产出的一段视频，我们手里没有任何字幕轨——塞一个空 track
+              只是把 lint 骗过去，对使用者毫无用处（a11y 规则要的是"别让聋人用户
+              以为有字幕"，这里本来就一个都没有，正确的做法是别假装）。
+              名字用 `title` 给（它就是这个文件的路径，和标题栏那一行一致）。
+        -->
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video
+          class="fv-video"
+          controls
+          playsinline
+          preload="metadata"
+          title={parts.name}
+          src={fileUrl(base, entry)}
+          data-file-video
+          onerror={() => onMediaError(entry)}
+        ></video>
+        {#if mediaFailed}
+          <p class="faint small" data-media-failed>
+            {mediaReason === 'unsupportedByDaemon'
+              ? $t('files.mediaNeedsDaemonRestart')
+              : $t('files.mediaUnsupported')}
+          </p>
+        {/if}
+      </div>
+    {:else if shownKind === 'audio'}
+      <div class="fv-media">
+        <audio
+          class="fv-audio"
+          controls
+          preload="metadata"
+          src={fileUrl(base, entry)}
+          data-file-audio
+          onerror={() => onMediaError(entry)}
+        ></audio>
+        {#if mediaFailed}
+          <p class="faint small" data-media-failed>
+            {mediaReason === 'unsupportedByDaemon'
+              ? $t('files.mediaNeedsDaemonRestart')
+              : $t('files.mediaUnsupported')}
+          </p>
+        {/if}
+      </div>
     {:else if kind === 'image'}
       <div class="fv-image">
         <img src={fileUrl(base, entry)} alt={parts.name} data-file-image />
@@ -486,6 +652,42 @@
     max-width: 100%;
     max-height: 62vh;
     object-fit: contain;
+  }
+
+  /**
+   * 播放器：黑底、居中、别超出浮层。
+   * ⚠️ `width: 100%` + `max-height` 一起给，否则一个竖屏视频（手机拍的）会把
+   *    浮层撑到看不清控制条。
+   */
+  .fv-media {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+    background: #000;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-2);
+  }
+
+  /* 音频没有画面，黑底那一大块就没有意义——它只需要一根控制条 */
+  .fv-media:has(.fv-audio) {
+    background: var(--bg);
+  }
+
+  .fv-video {
+    width: 100%;
+    max-height: 62vh;
+    display: block;
+  }
+
+  .fv-audio {
+    width: 100%;
+  }
+
+  .fv-media .faint {
+    margin: 0;
+    color: #ddd;
   }
 
   .fv-note {

@@ -971,16 +971,21 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       assert.equal(res.status, 200)
       const adopted = res.body['adopted'] as { name: string; fromSkills: string[] }
       assert.deepEqual(adopted.fromSkills.sort(), ['legacy-a', 'legacy-b'])
-      // ★ 固化时要如实报出"哪些动作没搬过来"（D41）。这里的夹具本来就没有动作，
-      //   所以是空数组——钉的是**这个字段存在且形状正确**（界面靠它说清为什么）。
-      assert.deepEqual(res.body['droppedActions'], [], '没有动作可丢 ⇒ 空数组，而不是缺这个字段')
+      // ⚠️ 这里原来断言固化会回传 `droppedActions`（"哪些动作没搬过来"，D41）。
+      //    2026-10 起 agent 上没有动作字段可搬，所以那个字段**整个不再存在**——
+      //    固化只搬**正文**。断言因此改成"它确实没有这个键"：留着"回传空数组"
+      //    那种期待，下一个人会以为动作还会被搬。
+      assert.equal(
+        res.body['droppedActions'],
+        undefined,
+        '固化只搬正文（动作只属于组），不再有"没搬过来的动作"这回事',
+      )
 
       const after = ((await (await fetch(`${url}/api/agents`)).json()) as {
         agents: Array<{
           id: string
           instructions: string | null
           skillIds: string[]
-          allowedActions: string[]
           reviewStandard: { body: string } | null
         }>
       }).agents.find((a) => a.id === reviewer.id)!
@@ -999,11 +1004,15 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       // ⚠️ 这里原来还断言 `after.reviewStandard.name` 里有"老标准甲"——那个字段
       //    已经删掉了（"名字"不承载任何东西，理由见协议里 `ReviewStandard`）。
       //    固化只搬**正文**，所以上面那两条断言才是这条测试真正守的东西。
-      // ★ D40 收口之后：标准只固化**正文**，动作固化到 `Agent.allowedActions` 上。
-      //   两样都要落下来，否则"固化之后生效的"与"固化之前生效的"不是同一份。
-      assert.deepEqual(after.allowedActions, [], '这个老形态审核者本来就没配动作 ⇒ 固化后仍是空')
-      // 动作仍然落在 agent 自己那个字段上（D40 收口），标准那边一个字都不写。
-      // 2026-09 之后标准那个字段整个被清空了，这条断言连"里面有没有动作"都不必再看。
+      // ⚠️ 这里原来断言"固化把动作也搬到 `Agent.allowedActions` 上"（D40 收口）。
+      //    2026-10 起 agent 上没有动作字段（动作只属于**组**），固化**只搬正文**
+      //    ——所以判据改成"记录里连这个键都不该有"。留着"空数组"那种期待，
+      //    下一个人会以为这里还有一份动作配置。
+      assert.equal(
+        (after as unknown as Record<string, unknown>)['allowedActions'],
+        undefined,
+        'agent 上不该有任何动作字段（动作只属于组），固化也只搬正文',
+      )
 
       // ★ 现在两条 skill 都不再被引用 ⇒ 可以卸载
       for (const id of ids) {

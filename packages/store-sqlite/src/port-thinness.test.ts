@@ -195,6 +195,16 @@ async function scenario(store: Store): Promise<unknown[]> {
   await rec('getAgent.crossWorkspace', () => store.getAgent(agentId('a3')))
   await rec('listAgents.A', async () => (await store.listAgents(WS_A)).map((a) => a.id))
   await rec('listAgents.B', async () => (await store.listAgents(WS_B)).map((a) => a.id))
+  // ★ 删 agent（第二轮：组删除时级联删私有成员）——删得掉、幂等、别的 workspace 不受影响
+  await rec('deleteAgent.ok', () => store.deleteAgent(agentId('a2')))
+  await rec('deleteAgent.again', () => store.deleteAgent(agentId('a2')))
+  await rec('getAgent.afterDelete', () => store.getAgent(agentId('a2')))
+  await rec('listAgents.A.afterDelete', async () =>
+    (await store.listAgents(WS_A)).map((a) => a.id),
+  )
+  await rec('listAgents.B.untouched', async () =>
+    (await store.listAgents(WS_B)).map((a) => a.id),
+  )
 
   await store.insertSkill(makeSkill({ id: 's1', workspaceId: WS_A, slug: 'sec-vuln' }))
   await store.insertSkill(makeSkill({ id: 's2', workspaceId: WS_A, slug: 'style' }))
@@ -730,6 +740,8 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
       'blob.put.idempotent',
       'deleteSkill.ok',
       'deleteSkill.again',
+      'deleteAgent.ok',
+      'deleteAgent.again',
       'deleteTool.ok',
       'deleteTool.again',
       'getToolBySlug.hit',

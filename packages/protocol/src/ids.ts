@@ -59,6 +59,15 @@ export type ChatTurnId = z.infer<typeof ChatTurnId>
 export const RuntimeId = z.string().brand<'RuntimeId'>()
 export type RuntimeId = z.infer<typeof RuntimeId>
 
+/**
+ * 智能体组（D70 增量添加）。
+ *
+ * 与 `AgentId` 分开：组是"一队 agent 的编队"，是提交任务的单位；把组 id 传进
+ * 要 agent id 的地方是编译期错误，那正是 brand 要挡的。
+ */
+export const AgentGroupId = z.string().brand<'AgentGroupId'>()
+export type AgentGroupId = z.infer<typeof AgentGroupId>
+
 export const AccountId = z.string().brand<'AccountId'>()
 export type AccountId = z.infer<typeof AccountId>
 

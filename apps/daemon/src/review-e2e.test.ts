@@ -20,6 +20,7 @@ import {
   type VerdictRecord,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { createChainGroup } from './testing/chain.ts'
 import {
   installToolPackage,
   verdictAction,
@@ -173,6 +174,13 @@ let backend: ScriptedReviewBackend
  */
 let toolPkg: ToolPackage
 let deniedPkg: ToolPackage
+/**
+ * 播种那一对（执行者 + 审核者）所在的**组**，组上带着 `toolPkg.action`。
+ *
+ * ★ 它是"动作真的被执行"那条用例的落点：报告那条路**不属于任何组**（所以拿不到
+ *   任何动作授权），要验动作就得走一条**带组的执行 run**。
+ */
+let seededGroupId: string
 
 /**
  * ★ 每个用例开始前：先等上一个用例的 run 全部结束，再清空后端脚本。
@@ -213,37 +221,55 @@ before(async () => {
   })
 
   // ══════════════════════════════════════════════════════════════════
-  // ★ D41：动作只能来自**装进来的工具包**，而播种的审核者没有任何动作权限
+  // ★ D41 + 2026-10：动作只能来自**装进来的工具包**，而且只属于**组**
   // ══════════════════════════════════════════════════════════════════
   //
   // 这个文件里绝大多数用例的主体**不是**动作本身（报告落库与路由、阶段推导、
   // 审计链、判决分支、重试……），只是顺手让判决带一个动作。以前那个动作可以写
   // 内置裸名（`comment.create`），现在不行了：它必须来自一个真的装了的包。
   //
-  // 而"播种的审核者开箱即用能发评论"这条**已经不存在**——
-  // `BUILTIN_REVIEW_ALLOWED_ACTIONS` 现在是空数组，这是 D41 的刻意结果，不是
-  // 遗漏。所以这里显式装包并**给那个审核者授权**：动作权限的入口就是
-  // `Agent.allowedActions`（D40 收口之后它只住在那儿，skill 与标准都不参与）。
+  // ⚠️⚠️ **而这份文件走的是报告那条路**（`POST /api/reports` ⇒ 兜底审核者），
+  //    2026-10 之后**报告审核不属于任何组**（组描述的是"执行 → 审核 → 行动"这条
+  //    链，而报告没有那条链）⇒ 它的动作白名单**永远是空的** ⇒ **判决只能给结论**。
+  //    这是使用者明确接受的结果（"动作只属于组，报告审核只能给结论"），不是遗漏。
+  //
+  //    所以这一节里"判决带动作"的那几处都改成了"不带动作"，而"带动作会怎样"
+  //    单独有一条用例钉住（越权的动作一定被拦下）。**动作真的被执行**那条路
+  //    仍然有覆盖，但它需要一条**带组的执行 run**——见下面
+  //    「★ 动作只有挂在组上才会被执行」那一节。
+  //
+  // 两个包照旧装着：这样"动作被拦下"的理由只可能是**白名单**，而不是
+  // "这个名字根本没装"（那是另一条路径、另一句话）。
   //
   // ⚠️ 用 `setupToolFixture()` 是不行的：它会**额外**建一对 agent，而这一节里
   //    有多条用例在数"这份报告被谁接住了、起了几条 run"——多一对审核者会让
-  //    每份报告都被审两遍。所以这里只用造包 + 装包 + 直接 PATCH 播种的那位。
+  //    每份报告都被审两遍。
   toolPkg = await writeToolPackage()
   await installToolPackage(daemon, toolPkg)
   deniedPkg = await writeToolPackage({ slug: 'other-tool', summary: '装了但没有被授权的动作' })
   await installToolPackage(daemon, deniedPkg)
 
-  const seeded = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+  const seededAgents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
     agents: Array<{ id: string; name: string; role: string }>
-  }).agents.find((a) => a.role === 'reviewer')
-  assert.ok(seeded, '首启会播种审核者 —— 这个文件的多条用例都靠它接住报告')
-  const granted = await fetch(`${daemon.url}/api/agents/${seeded.id}`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    // ★ 只授**一个**：另一个装了没授的，正是下面"不在行动权限里"那条用例要用的夹具
-    body: JSON.stringify({ allowedActions: [toolPkg.action] }),
-  })
-  assert.equal(granted.status, 200, '给播种的审核者授权一个工具动作应当成功')
+  }).agents
+  const seededReviewer = seededAgents.find((a) => a.role === 'reviewer')
+  const seededExecutor = seededAgents.find((a) => a.role === 'executor')
+  assert.ok(seededReviewer, '首启会播种审核者 —— 这个文件的多条用例都靠它接住报告')
+  assert.ok(seededExecutor, '首启也会播种一个执行者')
+
+  // ★ 给**播种的那一对**建一个组，组上带那个夹具动作。
+  //
+  //   它**不影响报告那条路**（报告不属于任何组，所以永远拿不到这份授权），
+  //   它是给"动作真的被执行"那条用例用的：带这个组提交一条执行 run，执行完派生
+  //   出来的审核 run 就带着这份白名单，判决里的动作这才有落点。
+  seededGroupId = await createChainGroup(
+    { url: daemon.url },
+    {
+      name: '播种组的动作授权',
+      members: [seededExecutor.id, seededReviewer.id],
+      allowedActions: [toolPkg.action],
+    },
+  )
 })
 
 after(async () => {
@@ -353,6 +379,27 @@ async function fetchVerdicts(runId: string): Promise<VerdictRecord[]> {
   return ((await res.json()) as { verdicts: VerdictRecord[] }).verdicts
 }
 
+/**
+ * 读**播种的默认组**的 id（首启会建一组：播种的执行者 + 播种的审核者）。
+ *
+ * ★ 2026-10 起"执行者由谁审"只有组能回答。首启播种的那一对被一个默认组串起来，
+ *   所以"这条用例靠它自动串接"这类夹具前提，判据就是"那个组在、成员对得上"。
+ */
+async function seededGroupOf(url: string): Promise<string | null> {
+  const { agents } = (await (await fetch(`${url}/api/agents`)).json()) as {
+    agents: Array<{ id: string; role: string }>
+  }
+  const executor = agents.find((a) => a.role === 'executor')
+  const reviewer = agents.find((a) => a.role === 'reviewer')
+  if (!executor || !reviewer) return null
+  const { groups } = (await (await fetch(`${url}/api/agent-groups`)).json()) as {
+    groups: Array<{ id: string; members: string[] }>
+  }
+  return (
+    groups.find((g) => g.members.includes(executor.id) && g.members.includes(reviewer.id))?.id ?? null
+  )
+}
+
 async function fetchRun(runId: string): Promise<{ status: string }> {
   const res = await fetch(`${daemon.url}/api/runs/${runId}`)
   return (await res.json()) as { status: string }
@@ -364,14 +411,12 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       validVerdict({
         conclusion: 'pass',
         reasonCode: 'meets_criteria',
-        // ★ D41：判决里的动作只能来自**装进来的工具包**（`before` 里装了一个夹具包，
-        //   并把它的动作授给了播种的审核者）。这条用例的主体是**报告摄取与路由**
-        //   （`unmatched === 0`、起了一条 review run），判决带动作只是顺带——
-        //   所以这里给的是工具动作，而不是把断言降级成"没有动作"。
-        //
-        //   只给开放参数 `text`：绑定参数（工作目录）由平台按 run 的事实注入，
-        //   模型写不出来、也不该写。
-        action: verdictAction(toolPkg.action, { text: '发现了漏洞' }),
+        // ⚠️ 2026-10：这里原来带一个动作（`verdictAction(toolPkg.action, …)`）。
+        //    **报告那条路现在拿不到任何动作授权**——它不属于任何组，而动作只属于组
+        //    ⇒ 判决带动作只会被判成结构性问题（下面单独有一条用例钉这件事）。
+        //    这条用例的主体是**报告摄取与路由**（`unmatched === 0`、起了一条 review
+        //    run），所以判决改成"只给结论"，断言回到它本来要守的那几件事。
+        action: null,
       }),
     ]
 
@@ -391,7 +436,11 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     const verdicts = await fetchVerdicts(runId)
     assert.equal(verdicts.length, 1)
     assert.equal(verdicts[0]?.conclusion, 'pass')
-    assert.equal(verdicts[0]?.status, 'dispatched_to_action', '应当已派发到动作')
+    assert.equal(
+      verdicts[0]?.status,
+      'advisory',
+      '★ 报告审核只给结论（没有组就没有动作权限）⇒ advisory，而不是 dispatched_to_action',
+    )
   })
 
   test('★ /api/runs 要带上审核 run 的判决结论（阶段推导靠它）', async () => {
@@ -415,13 +464,13 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.ok(review, '应当有一条审核 run')
     assert.ok(review.verdict, '★ 审核 run 必须带上判决——否则页面只能把 needs_human 显示成"已审查"')
     assert.equal(review.verdict.conclusion, 'pass')
-    assert.equal(review.verdict.status, 'dispatched_to_action')
+    assert.equal(review.verdict.status, 'advisory', '报告审核只给结论（见上一条）')
     // 执行 run 上没有判决（它是被审的对象，不是判决的产出者）
     const execute = runs.find((r) => r.kind === 'execute')
     assert.equal(execute?.verdict ?? null, null, '执行 run 不该有判决字段')
   })
 
-  test('★ 判决里的动作被执行，且落进了审计链', async () => {
+  test('★ 审核这个 run 本身在审计链里留下完整事实（报告那条路没有动作）', async () => {
     const runs = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
       runs: Array<{ runId: string; kind: string }>
     }
@@ -508,14 +557,21 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
     assert.equal(audit.verdictId, (await fetchVerdicts(reviewRun!.runId))[0]?.id)
 
     // ══════════════════════════════════════════════════════════════════
-    // ★ 动作那一环也要在审计里留下痕迹（D41 之后这一点更容易悄悄丢）
+    // ★ 动作那一环：这一节里的审核**不该有动作**（而且审计要如实地是空的）
     // ══════════════════════════════════════════════════════════════════
     //
-    // 用例的名字是"判决里的动作被执行，且落进了审计链"，而这一项原来**没人断言**：
-    // 动作一旦不再由平台自己实现（D41：改成跑一个工具包脚本），"判决带了动作、
-    // 审计里却什么都没有"就成了一种完全可能的失败——判决照旧是
-    // `dispatched_to_action`，只是链子上少了一环。所以这里把那一环钉住。
-    assert.equal(audit.actionIds.length, 1, '★ 审计必须记下这条判决触发的那个动作')
+    // 这条断言原来钉的是"审计必须记下这条判决触发的那个动作"（`actionIds.length === 1`），
+    // 那时判决带着一个动作、走的也是报告这条路。
+    //
+    // ⚠️ 2026-10：**报告审核拿不到动作授权**（它不属于任何组）⇒ 这条链上的判决只能
+    //    给结论，`actionIds` 必须是空的。所以这一条反过来变成"空"的硬证据：它防的是
+    //    "某天动作权限又从某个角落漏回报告这条路"——那种漏法会让报告里的判决
+    //    重新具备动手能力，而报告是**外部内容**驱动的（自动摄取），权限边界必须比
+    //    执行 run 那条路更死。
+    //
+    // ★ 而"动作真的被执行、并落进审计链"这件事仍然有覆盖：它现在需要一条**带组的
+    //   执行 run**——见下面「★ 动作只有挂在组上才会被执行」那一节。
+    assert.deepEqual(audit.actionIds, [], '★ 报告这条路没有动作权限 ⇒ 审计里也不该有动作')
   })
 
   test('★ 审核的第一句话含审核标准与判决格式要求（FR-CLI-43）', () => {
@@ -646,6 +702,126 @@ describe('S2：报告 → 审核 → 判决 → 动作', () => {
       )
     } finally {
       await cleanup(dir)
+    }
+  })
+})
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 动作只有挂在**组**上才会被执行（2026-10 之后唯一那条路）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 上面那一节走的是**报告**那条路，而报告不属于任何组 ⇒ 那份判决只能给结论
+ * （`audit.actionIds` 是空的，有一条用例专门钉它）。
+ *
+ * 这一节是它的**正面**：同样一个带动作的判决，只要这条审核是**带组的执行 run
+ * 派生出来的**，动作就真的会被执行、而且落进审计链。
+ *
+ * 两节合起来才完整：单看任何一节，都分不清"动作没执行"是因为**权限边界**，
+ * 还是因为动作这条路整个坏了。
+ *
+ * ⚠️ 为什么要在这里再测一遍（`tool-action-e2e.test.ts` 已经测过动作能跑）：
+ *    这里测的是**审计链**那一环——"判决带了动作、审计里却什么都没有"是一种
+ *    完全可能的失败（判决照旧 `dispatched_to_action`，只是链子上少了一环）。
+ *    原来那条断言在报告路径上，而现在那条路径永远没有动作，于是它迁到这里。
+ */
+describe('★ 动作只有挂在组上才会被执行（带组的执行 run ⇒ 派生审核 ⇒ 动作落地）', () => {
+  test('★ 判决里的动作被执行、落进审计链，而报告那条路永远是空的（对照）', async () => {
+    // 带组提交一条执行 run ⇒ 组的审核者就是这条链的审核者，组那份动作白名单
+    // 也随之展开进这条 run（`before` 里建的那个组带的就是 `toolPkg.action`）。
+    const agents = ((await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+      agents: Array<{ id: string; name: string; role: string }>
+    }).agents
+    const executor = agents.find((a) => a.role === 'executor')!
+    const issueId = ((await (
+      await fetch(`${daemon.url}/api/issues`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: '动作落在组上' }),
+      })
+    ).json()) as { id: string }).id
+
+    const executeRunId = ulid()
+    const workDir = await makeTempDir('review-action-work')
+    try {
+      // 判决带那个**被组允许**的动作，并且只给开放参数（绑定参数由平台注入）
+      //
+      // ⚠️ `script` 是**按调用顺序**依次取用的（`shift()`），而这条用例会有**两次**
+      //    后端调用：先执行、后审核。所以第一项是给执行那一趟的占位（它的内容无关
+      //    紧要——执行 run 的输出不参与判决），第二项才是审核的那份判决。
+      //    只写一项的话，判决会被执行那趟"吃掉"，审核那趟拿到 `undefined` ⇒
+      //    判决以"输出里没有判决块"判成 invalid，而症状看起来像权限问题。
+      backend.script = [
+        null,
+        validVerdict({
+          conclusion: 'pass',
+          reasonCode: 'meets_criteria',
+          action: verdictAction(toolPkg.action, { text: '组允许的动作' }),
+        }),
+      ]
+
+      const res = await fetch(`${daemon.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: executeRunId,
+          kind: 'execute',
+          agentRef: { id: executor.id, name: executor.name, instructions: '' },
+          groupId: seededGroupId,
+          skills: [],
+          subject: { type: 'issue', id: issueId },
+          prompt: '干点活',
+          workDir,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(res.status, 202, `提交必须受理：${await res.text()}`)
+
+      // 执行跑完 ⇒ daemon 自己派生审核 run（组把审核者展开进这条 run）
+      const reviewRunId = await waitFor(async () => {
+        const { runs } = (await (await fetch(`${daemon.url}/api/runs`)).json()) as {
+          runs: Array<{ runId: string; kind: string; subject?: { type: string; id: string } }>
+        }
+        return (
+          runs.find((r) => r.kind === 'review' && r.subject?.id === executeRunId)?.runId ?? null
+        )
+      })
+      await waitFor(async () => ((await fetchRun(reviewRunId)).status === 'completed' ? true : null))
+
+      const verdicts = await fetchVerdicts(reviewRunId)
+      assert.equal(
+        verdicts[0]?.status,
+        'dispatched_to_action',
+        `★ 组允许的动作必须真的派下去（实际判决：${JSON.stringify(verdicts[0])}）`,
+      )
+
+      // ── 硬证据①：工具脚本真的跑了（它往工作目录写了一个文件） ──
+      const written = await waitFor(async () =>
+        readFile(join(workDir, 'fixture-out.txt'), 'utf8').catch(() => null),
+      )
+      assert.match(written, /组允许的动作/, '★ 脚本收到的就是使用者钉的那个值')
+
+      // ── 硬证据②：审计链上记着这一环 ──
+      const audits = ((await (
+        await fetch(`${daemon.url}/api/runs/${reviewRunId}/audits`)
+      ).json()) as { audits: AuditRecord[] }).audits
+      assert.equal(audits.length, 1)
+      assert.equal(
+        audits[0]!.actionIds.length,
+        1,
+        '★ 审计必须记下这条判决触发的那个动作（报告那条路则是空的）',
+      )
+      assert.equal(audits[0]!.verdictId, verdicts[0]?.id)
+
+      // ── 硬证据③：动作记录本身（状态、参数）──
+      //    ⚠️ 没有 `/api/runs/<id>/actions` 这个接口（动作记录只有 store 这一层读法），
+      //       所以这里直接问 store——与本文件其它"落库事实"的读法一致。
+      const actions = await daemon.store.listActionsByVerdict(verdicts[0]!.id as never)
+      assert.equal(actions.length, 1)
+      assert.equal(actions[0]?.params['text'], '组允许的动作')
+      assert.equal(actions[0]?.params['dir'], workDir, '绑定参数照旧由平台注入')
+    } finally {
+      await cleanup(workDir)
     }
   })
 })
@@ -940,18 +1116,22 @@ describe('S2：路由（D28 —— 不再按 kind 分派）', () => {
     })
 
     try {
-      // 首启播种**一对**：一个审核者 + 一个执行者（执行者指向审核者）
+      // 首启播种**一对**：一个审核者 + 一个执行者
       const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; name: string; role: string; reviewerAgentId: string | null }>
+        agents: Array<{ id: string; name: string; role: string }>
       }).agents
       const reviewer = agents.find((a) => a.role === 'reviewer')
       const executor = agents.find((a) => a.role === 'executor')
       assert.ok(reviewer, '★ 首启必须播种审核者 —— 否则所有报告都无人可审')
       assert.ok(executor, '首启也会播种一个执行者')
-      assert.equal(
-        executor.reviewerAgentId,
-        reviewer.id,
-        '★ 执行者默认指向那个审核者，首启就是一条通的闭环',
+      // ⚠️ 这里原来断言 `executor.reviewerAgentId === reviewer.id`（"首启就是一条通的
+      //    闭环"）。那个字段已撤掉，同一条语义现在由**播种的默认组**承载。
+      const seededGroups = ((await (await fetch(`${d.url}/api/agent-groups`)).json()) as {
+        groups: Array<{ members: string[] }>
+      }).groups
+      assert.ok(
+        seededGroups.some((g) => g.members.includes(executor.id) && g.members.includes(reviewer.id)),
+        '★ 首启播种的默认组把这一对串起来：那才是一条通的闭环',
       )
 
       const res = await fetch(`${d.url}/api/reports`, {
@@ -1162,16 +1342,23 @@ describe('D37：审核标准内联在审核者身上', () => {
    *    动作住在 `allowedActions` 上。这个夹具以前把动作塞在标准里，
    *    那正是搬走之前的样子。
    */
+  /**
+   * 改一个审核者的**审核标准**。
+   *
+   * ⚠️ 2026-10：这个助手原来还带一个 `allowedActions` 参数（"顺便把动作权限也授了"）。
+   *    那个字段已从 `Agent` 上撤掉——**动作只属于组**，而这一节走的都是报告那条路
+   *    （报告不属于任何组）⇒ 报告审核**拿不到任何动作授权**。所以参数去掉，写入口
+   *    也不再发这个键（发了就是 400「不认识的字段」）。
+   */
   async function setStandard(
     url: string,
     agentId: string,
     standard: { name: string; body: string } | null,
-    allowedActions: string[] = [],
   ): Promise<number> {
     const res = await fetch(`${url}/api/agents/${encodeURIComponent(agentId)}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ reviewStandard: standard, allowedActions }),
+      body: JSON.stringify({ reviewStandard: standard }),
     })
     return res.status
   }
@@ -1251,6 +1438,16 @@ describe('D37：审核标准内联在审核者身上', () => {
         })
       ).json()) as { id: string }).id
 
+      // ⚠️ 2026-10：这条链必须**带组**。以前"执行者指向审核者"是隐含的，那条路
+      //    撤掉之后，不带组的 run 压根没有审核者——于是"没有起审核 run"会以
+      //    **另一个原因**成立（没人审），而这条用例要证明的是"标准空 ⇒ 挡住"。
+      //    判据必须落在"是哪一条规则挡住的"这句话上，所以先把人串起来。
+      const reviewerId = (agents.find((a) => a.role === 'reviewer') as { id: string }).id
+      const groupId = await createChainGroup(
+        { url },
+        { name: '清掉指令的组', members: [executor.id, reviewerId] },
+      )
+
       const runId = ulid()
       await fetch(`${url}/api/runs`, {
         method: 'POST',
@@ -1259,6 +1456,7 @@ describe('D37：审核标准内联在审核者身上', () => {
           runId,
           kind: 'execute',
           agentRef: { id: executor.id, name: 'x', instructions: '' },
+          groupId,
           subject: { type: 'issue', id: issueId },
           prompt: '随便做点什么',
           limits: { maxTurns: null, timeoutMs: null },
@@ -1277,16 +1475,21 @@ describe('D37：审核标准内联在审核者身上', () => {
     })
   })
 
-  test('★ 动作权限来自 **agent**（`Agent.allowedActions`）：没允许的动作会被拦下（要人介入）', async () => {
+  test('★★ 报告审核**只能给结论**：判决里带动作一定被拦下（要人介入）', async () => {
     await withBackend('d37-actions', async ({ url, backend: b }) => {
       // ══════════════════════════════════════════════════════════════
-      // ★ D41：白名单里只能写**已安装工具包**声明过的动作
+      // ★ D41 + 2026-10：动作只能来自**已安装的工具包**，而且只属于**组**
       // ══════════════════════════════════════════════════════════════
       //
-      // `Agent.allowedActions` 的写入口照旧对着"这个工作区装了哪些包"校验
-      // （未装即拒），所以内置裸名（`comment.create` 那种）现在会被 400。
-      // 这里装**两个**包：一个授权、另一个只装不授权——拦住判决的必须只能是
-      // 白名单这一关，不能是"这个名字根本没装"（那是另一条路径，另一句话）。
+      // 这里装**两个**已装包（都用得上）：判别据的必须只能是**白名单**这一关，
+      // 而不能是"这个名字根本没装"——那是另一条路径、另一句话，混在一起这条用例
+      // 就变成空过了。所以判决里写的是那个**装了、而且能解析**的动作，它照样被拦下。
+      //
+      // ⚠️ 2026-10：这条用例原来叫「动作权限来自 **agent**」——那时"这个审核者被
+      //    授权了 A、判决写了 B"两边都有落点。现在**报告审核不属于任何组**（组描述的
+      //    是"执行 → 审核 → 行动"这条链，报告没有那条链）⇒ 它的动作白名单**永远是
+      //    空的** ⇒ 判决只能给结论。这是使用者明确接受的结果，所以判据收成一条：
+      //    **任何动作都要被拦下**，而且拦它的理由必须是"这条链没有授权"。
       const granted = await writeToolPackage({ slug: 'granted-tool' })
       const denied = await writeToolPackage({ slug: 'denied-tool' })
       await installToolPackage({ url }, granted)
@@ -1296,21 +1499,18 @@ describe('D37：审核标准内联在审核者身上', () => {
         agents: Array<{ id: string; role: string }>
       }).agents
       const reviewer = agents.find((a) => a.role === 'reviewer')!
-      // 这个审核者只允许那一个动作，而判决想用**另一个**（装了、但没授权）⇒ 必须被拦下
       assert.equal(
-        await setStandard(
-          url,
-          reviewer.id,
-          { name: '只许一个动作', body: '# 只许一个动作\n\n只允许已勾上的那一个动作，别的都不许。' },
-          [granted.action],
-        ),
+        await setStandard(url, reviewer.id, {
+          name: '只给结论',
+          body: '# 只给结论\n\n这条链上没有动作权限，只给结论。',
+        }),
         200,
       )
       b.script = [
         validVerdict({
           conclusion: 'pass',
           reasonCode: 'meets_criteria',
-          // 这个动作**不在**该审核者的白名单里
+          // 这个动作**装包了、能解析**，但报告这条链没有授权它
           action: verdictAction(denied.action, { text: '越权的动作' }),
         }),
       ]
@@ -1330,7 +1530,7 @@ describe('D37：审核标准内联在审核者身上', () => {
         '动作不在该审核者允许的子集里 ⇒ 结构性问题（模型再输出一次还是同样的东西）',
       )
       const text = await firstSentenceOf(url, runId)
-      assert.match(text, /只许一个动作/, '标准正文要真的随第一句话下发')
+      assert.match(text, /只给结论/, '标准正文要真的随第一句话下发')
     })
   })
 
@@ -1372,12 +1572,15 @@ describe('D37：审核标准内联在审核者身上', () => {
             skillIds: [installed.installed[0]!.id],
           }),
         })
-      ).json()) as { id: string; reviewStandard: unknown; allowedActions: unknown }
+      ).json()) as { id: string; reviewStandard: unknown }
       assert.equal(reviewer.reviewStandard, null, '这个夹具刻意不带内联标准')
-      assert.deepEqual(
-        reviewer.allowedActions,
-        [],
-        '★ 挂着老 skill 的审核者，动作列表不由 skill 决定（新建时没配就是空）',
+      // ⚠️ 2026-10：这里原来断言 `allowedActions` 是**空数组**（"skill 不决定动作"）。
+      //    agent 上已经没有这个字段了 ⇒ 判据换成"这个键压根不在"——比"是空数组"更死：
+      //    空数组还允许它哪天被填上，缺字段则说明**这条路已经不存在**（动作只属于组）。
+      assert.equal(
+        'allowedActions' in reviewer,
+        false,
+        '★ agent 上不再有动作列表：动作只属于组，skill 也从来不管它',
       )
 
       // 两个审核者（播种的 + 这个老形态）都会接住这份报告 ⇒ 两次判决脚本
@@ -1400,229 +1603,19 @@ describe('D37：审核标准内联在审核者身上', () => {
   })
 
   // ══════════════════════════════════════════════════════════════════
-  // D40 收口：动作权限搬到 agent 上之后，**老数据那条回退**必须真的在读
+  // ⚠️ 这里原来有两条用例，钉的是"动作权限的三级回退"：
+  //   · 老数据把白名单写在 `reviewStandard.allowedActions` 里 ⇒ 判决按它校验；
+  //   · 老 skill 里那份 `allowedActions` **一个字都不算数**。
+  //
+  //   2026-10 起这两条都没有对象了：agent 上**不再有**动作字段，动作的唯一出处
+  //   是**智能体组**（`AgentGroup.allowedActions`，见 `packages/protocol/src/entities.ts`
+  //   里那段说明）。回退链连同它的三个坑一起删掉了，所以这里不再造"老形态的
+  //   agent 记录"——那种记录现在连字段都被摘掉了（启动时一次性清理，见
+  //   `apps/daemon/src/agent-legacy-cleanup.ts`）。
+  //
+  //   ⚠️ 现在**动作能不能过**这件事的端到端在 `tool-action-e2e.test.ts`（那里用
+  //      真组、真判决、真执行），组本身的展开在 `groups-e2e.test.ts`。
   // ══════════════════════════════════════════════════════════════════
-  //
-  // 「写了回退」与「回退真的在读」是两回事。这条用例造一条**真·老数据形态**的
-  // agent 记录（动作写在标准里、agent 上连 `allowedActions` 这个键都没有——
-  // 老记录是整条 JSON 存下来的，store 不做 schema 迁移），然后让判决真的走一遍：
-  //
-  //   · 老白名单里**没有**的动作 ⇒ 被拦下，而且理由里要能看到那份**老白名单**；
-  //   · 老白名单里**有**的动作 ⇒ 放行。
-  //
-  // 两条一起才算"按它校验"：只验拦下的话，"所有动作都拦"也能通过。
-  test('★ 老数据回退：动作写在标准里（agent 上没有那个键）时，判决仍按它校验', async () => {
-    await withBackend('d40-legacy-fallback', async ({ url, backend: b, store }) => {
-      const legacyStandard = { name: '老标准', body: '# 老标准\n\n只看重不重。' }
-
-      // ══════════════════════════════════════════════════════════════
-      // ★ D41：老白名单里的动作也必须**真的来自一个装了的包**
-      // ══════════════════════════════════════════════════════════════
-      //
-      // 这条用例守的是**回退语义**（老数据里动作写在标准上、agent 上连键都没有），
-      // 而回退之后那份白名单照样要过 D41 这一关：白名单里写的动作，其包必须在
-      // 这个工作区装过（`resolveAllowedActionsWithTools` 只留"声明过且装了"的）。
-      //
-      // 所以装两个包：老白名单里写被授权的那个，判决想用的是**另一个**——
-      // 它也装了（所以拦住它的只能是白名单，不可能是"没装"）。
-      const granted = await writeToolPackage({ slug: 'legacy-granted-tool' })
-      const denied = await writeToolPackage({ slug: 'legacy-denied-tool' })
-      await installToolPackage({ url }, granted)
-      await installToolPackage({ url }, denied)
-
-      // ① 让**播种的**审核者退出：它自己也有一份动作权限（`before` 里授过一个），
-      //    会一起接住这份报告，于是断言就不再是单值的。先清空它的动作、再改角色
-      //    ——这是新规则下的两步走（"有动作的审核者不能一步变成执行者"）。
-      const seeded = ((await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string }>
-      }).agents.find((a) => a.role === 'reviewer')!
-      const clearSeeded = await fetch(`${url}/api/agents/${seeded.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ allowedActions: [] }),
-      })
-      assert.equal(clearSeeded.status, 200)
-      const demote = await fetch(`${url}/api/agents/${seeded.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'executor' }),
-      })
-      assert.equal(demote.status, 200, '播种的审核者退出之后，这条报告只剩一个接的人')
-
-      // ② 先按新契约建一个审核者（这样它有名字与正文），再把它改写成**老形态**：
-      //    动作在标准里、agent 上**没有** `allowedActions` 这个键。
-      const created = (await (
-        await fetch(`${url}/api/agents`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: '老数据审核者', role: 'reviewer', reviewStandard: legacyStandard }),
-        })
-      ).json()) as { id: string }
-      const stored = await store.getAgent(created.id as never)
-      assert.ok(stored)
-      // 老记录里根本没有这个键 ⇒ 这里**删掉**它（而不是写一个空数组）
-      const { allowedActions: _ownActions, ...withoutOwnActions } = stored
-      void _ownActions
-      await store.insertAgent({
-        ...withoutOwnActions,
-        // ★ 动作写在标准里 —— 这正是搬走之前的形状（老数据里那份动作名同样受
-        //   D41 约束：它指向的包在这个工作区里装着）
-        reviewStandard: { ...legacyStandard, allowedActions: [granted.action] },
-      })
-
-      // ③ 判决想用**另一个**动作 ⇒ 老白名单里只有 granted 那个 ⇒ 必须被拦下
-      b.script = [
-        validVerdict({
-          conclusion: 'pass',
-          reasonCode: 'meets_criteria',
-          action: verdictAction(denied.action, { text: '越权的动作' }),
-        }),
-      ]
-      const blocked = await postReportTo(url, 'd40-legacy-block', [
-        { externalId: 'lb-1', kind: 'pr-diff', title: '越权', body: '内容' },
-      ])
-      assert.equal(blocked.unmatched, 0, '老数据形态的审核者要真的接住它')
-      for (const id of blocked.runIds) await runToEnd(url, id)
-      const blockedVerdicts = ((await (
-        await fetch(`${url}/api/runs/${blocked.runIds[0]!}/verdicts`)
-      ).json()) as {
-        verdicts: Array<{ status: string; escalateReason: string | null }>
-      }).verdicts
-      assert.equal(blockedVerdicts[0]?.status, 'escalated', '老白名单里没有这个动作 ⇒ 拦下')
-      assert.match(
-        String(blockedVerdicts[0]?.escalateReason),
-        /legacy-granted-tool\.act/,
-        '★ 理由里要能看到**那份老白名单**——这才证明回退真的读了标准里那一份（而不是"一律拦下"）',
-      )
-
-      // ④ 判决用老白名单里**有**的动作 ⇒ 放行
-      b.script = [
-        validVerdict({
-          conclusion: 'pass',
-          reasonCode: 'meets_criteria',
-          action: verdictAction(granted.action, { text: '可以' }),
-        }),
-      ]
-      const allowed = await postReportTo(url, 'd40-legacy-allow', [
-        { externalId: 'la-1', kind: 'pr-diff', title: '合规', body: '内容' },
-      ])
-      for (const id of allowed.runIds) await runToEnd(url, id)
-      const allowedVerdicts = ((await (
-        await fetch(`${url}/api/runs/${allowed.runIds[0]!}/verdicts`)
-      ).json()) as {
-        verdicts: Array<{ status: string }>
-      }).verdicts
-      assert.equal(
-        allowedVerdicts[0]?.status,
-        'dispatched_to_action',
-        '★ 老白名单里允许的动作要真的放行——不然"回退"可能只是"什么都没读到"',
-      )
-    })
-  })
-
-  // ══════════════════════════════════════════════════════════════════
-  // 自检②：skill 那边确实**不再影响授权**
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // 一个挂着**带 allowedActions 的老 skill** 的审核者，其有效动作列表**只**由
-  // agent 决定。这条在纯函数层有断言（`review-standard.test.ts`），这里再走一遍
-  // 真链路：它决定的是**判决能不能过**，而不只是某个返回值。
-  test('★ 挂着带动作配置的老 skill 的审核者：有效动作列表只由 agent 决定', async () => {
-    await withBackend('d40-skill-actions-ignored', async ({ url, backend: b }) => {
-      // ★ D41：装两个包，让"skill 那份不算数"这条断言**真的能红**——老 skill
-      //   声明的是另一个**已安装**的动作：如果 skill 参与授权，下面的判决就会过；
-      //   只有它确实不参与授权，判决才会被拦下。
-      const granted = await writeToolPackage({ slug: 'skill-granted-tool' })
-      const denied = await writeToolPackage({ slug: 'skill-denied-tool' })
-      await installToolPackage({ url }, granted)
-      await installToolPackage({ url }, denied)
-
-      // ① 装一条**带动作配置的老 skill**（老客户端就是这么发的；写入口会忽略它）
-      const installed = ((await (
-        await fetch(`${url}/api/skills`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            skills: [
-              {
-                slug: 'legacy-actions',
-                name: '老技能',
-                body: '# 老技能\n\n看一件事。',
-                // 老契约里 skill 自己也声明动作白名单。这里刻意写**一个装了、但
-                // agent 上没有授权的**动作：它一个字都不该算数，判决就该被拦下。
-                allowedActions: [denied.action],
-              },
-            ],
-          }),
-        })
-      ).json()) as {
-        installed: Array<Record<string, unknown> & { id: string }>
-      })
-      assert.equal(
-        'allowedActions' in installed.installed[0]!,
-        false,
-        '老 skill 的那个键不会被写进库',
-      )
-
-      // ② 播种的审核者退出（理由同上一条用例）
-      const seeded = ((await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string }>
-      }).agents.find((a) => a.role === 'reviewer')!
-      await fetch(`${url}/api/agents/${seeded.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ allowedActions: [] }),
-      })
-      await fetch(`${url}/api/agents/${seeded.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'executor' }),
-      })
-
-      // ③ 一个挂着那条老 skill、**没有内联标准**、agent 上只允许一个工具动作
-      //    的审核者。老 skill 的正文仍然是它的标准（过渡期兼容），但动作不算数。
-      const reviewer = (await (
-        await fetch(`${url}/api/agents`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            name: '挂老 skill 的审核者',
-            role: 'reviewer',
-            skillIds: [installed.installed[0]!.id],
-            allowedActions: [granted.action],
-          }),
-        })
-      ).json()) as { id: string; reviewStandard: unknown }
-      assert.equal(reviewer.reviewStandard, null, '夹具刻意不带内联标准（标准来自 skill）')
-
-      // ④ 判决要用老 skill 里写着允许的那个动作 ⇒ 必须被拦下：skill 不算数
-      b.script = [
-        validVerdict({
-          conclusion: 'pass',
-          reasonCode: 'meets_criteria',
-          action: verdictAction(denied.action, { text: '越权的动作' }),
-        }),
-      ]
-      const summary = await postReportTo(url, 'd40-skill-ignored', [
-        { externalId: 's-1', kind: 'pr-diff', title: '越权', body: '内容' },
-      ])
-      assert.equal(summary.unmatched, 0)
-      for (const id of summary.runIds) await runToEnd(url, id)
-      const verdicts = ((await (
-        await fetch(`${url}/api/runs/${summary.runIds[0]!}/verdicts`)
-      ).json()) as { verdicts: Array<{ status: string; escalateReason: string | null }> }).verdicts
-      assert.equal(
-        verdicts[0]?.status,
-        'escalated',
-        '★ 老 skill 里写着允许那个动作，但 skill 不参与授权 ⇒ 必须拦下',
-      )
-      assert.match(
-        String(verdicts[0]?.escalateReason),
-        /允许：skill-granted-tool\.act/,
-        '★ 允许的集合里**只有** agent 上那份（老 skill 里那个动作没被并进来）',
-      )
-    })
-  })
 })
 
 /**
@@ -1646,10 +1639,14 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
     })
     try {
       const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+        agents: Array<{ id: string; role: string }>
       }).agents
       const executor = agents.find((a) => a.role === 'executor')!
-      assert.ok(executor.reviewerAgentId, '首启播种的执行者指向审核者 —— 这条用例靠它自动串接')
+      // ⚠️ 2026-10：这里原来断言执行者身上那个 `reviewerAgentId` 有值（"靠它自动串接"）。
+      //    那个字段撤掉之后，"谁审我"由**组**回答 ⇒ 判据换成"播种的默认组把播种的这一对
+      //    串起来了"，而提交时带的就是那个组的 id。
+      const seededGroupId = await seededGroupOf(d.url)
+      assert.ok(seededGroupId !== null, '首启播种的执行者指向审核者 —— 这条用例靠它自动串接'.replace('指向审核者', '所在的默认组要存在'))
 
       // 第一条给**执行 run** 当产出（随便一段报告），第二条是**审核 run** 的判决
       //（pass、无动作 ⇒ 链一次到底，不派生别的 run）。顺序不能反：执行先跑。
@@ -1675,6 +1672,7 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
           runId,
           kind: 'execute',
           agentRef: { id: executor.id, name: 'x', instructions: '' },
+          groupId: seededGroupId,
           subject: { type: 'issue', id: issueId },
           prompt: taskText,
           limits: { maxTurns: null, timeoutMs: null },
@@ -1749,10 +1747,14 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
     const workDir = await makeTempDir('rounds-rework-work')
     try {
       const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+        agents: Array<{ id: string; role: string }>
       }).agents
       const executor = agents.find((a) => a.role === 'executor')!
-      assert.ok(executor.reviewerAgentId, '执行者默认指向审核者 —— 这条用例靠它自动串接')
+      // ⚠️ 2026-10：这里原来断言执行者身上那个 `reviewerAgentId` 有值（"靠它自动串接"）。
+      //    那个字段撤掉之后，"谁审我"由**组**回答 ⇒ 判据换成"播种的默认组把播种的这一对
+      //    串起来了"，而提交时带的就是那个组的 id。
+      const seededGroupId = await seededGroupOf(d.url)
+      assert.ok(seededGroupId !== null, '执行者默认指向审核者 —— 这条用例靠它自动串接'.replace('指向审核者', '所在的默认组要存在'))
 
       // 执行1 → 审核1(fail) → 返工执行2 → 审核2(pass)。顺序不能乱：假后端按序 shift。
       b.script = [
@@ -1793,6 +1795,7 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
           runId: ulid(),
           kind: 'execute',
           agentRef: { id: executor.id, name: 'x', instructions: '' },
+          groupId: seededGroupId,
           subject: { type: 'issue', id: issueId },
           prompt: taskText,
           workDir,
@@ -1884,10 +1887,14 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
     })
     try {
       const agents = ((await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string; reviewerAgentId: string | null }>
+        agents: Array<{ id: string; role: string }>
       }).agents
       const executor = agents.find((a) => a.role === 'executor')!
-      assert.ok(executor.reviewerAgentId, '执行者默认指向审核者 —— 自动串接')
+      // ⚠️ 2026-10：这里原来断言执行者身上那个 `reviewerAgentId` 有值（"靠它自动串接"）。
+      //    那个字段撤掉之后，"谁审我"由**组**回答 ⇒ 判据换成"播种的默认组把播种的这一对
+      //    串起来了"，而提交时带的就是那个组的 id。
+      const seededGroupId = await seededGroupOf(d.url)
+      assert.ok(seededGroupId !== null, '执行者默认指向审核者 —— 自动串接'.replace('指向审核者', '所在的默认组要存在'))
 
       // 执行 → 审核1（判决**不合 schema**，在围栏里但不是合法判决 ⇒ 重试）
       //     → 重试审核2（pass，链静默）。顺序不能乱：假后端按序 shift。
@@ -1912,6 +1919,7 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
           runId: ulid(),
           kind: 'execute',
           agentRef: { id: executor.id, name: 'x', instructions: '' },
+          groupId: seededGroupId,
           subject: { type: 'issue', id: issueId },
           prompt: '把功能实现一下',
           limits: { maxTurns: null, timeoutMs: null },

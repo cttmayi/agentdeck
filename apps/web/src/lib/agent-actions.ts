@@ -2,17 +2,22 @@ import type { Tool } from './api.ts'
 import { actionsOf } from './tool-view.ts'
 
 /**
- * 行动权限（`Agent.allowedActions`）的**展示层纯函数**（D40 收口、D41 收窄）。
+ * 行动权限（`AgentGroup.allowedActions`）的**展示层纯函数**。
  *
  * ══════════════════════════════════════════════════════════════════
- * 它为什么从 `skill-install.ts` 搬到这里
+ * 它服务的是**组**的行动权限（2026-10 起的唯一出处）
  * ══════════════════════════════════════════════════════════════════
  *
- * 那六个内置动作原来住在 `skill-install.ts` 里，因为那时候"允许触发哪些动作"
- * 是**装 skill 时勾的一组 checkbox**。D40 收口之后它成了**审核者的能力**
- * （`Agent.allowedActions`）——留在"安装 skill"那个模块里，会让人以为装 skill
- * 还要配动作（那时已经没有这回事了）。所以搬到这里：一个模块只回答一件事，
- * "行动权限怎么显示、怎么取"就是这一件。
+ * ⚠️ 这个模块的名字与它的历史：这里原来叫"`Agent.allowedActions` 的展示层"——
+ *    动作权限当时是**审核者个人的能力**（再早一轮是"装 skill 时勾的一组
+ *    checkbox"）。2026-10 那个字段连同概念一起撤掉了：动作属于**这条链**，
+ *    唯一权威是 `AgentGroup` 上那三个同名字段（组配置页 ③ 行动）。
+ *
+ *    搬家的直接后果：文件里那两个针对"人"的函数（`effectiveAllowedActions` ——
+ *    从 `reviewStandard.allowedActions` 回退，以及 `allowedActionsFromLegacyStandard`
+ *    ——"这份是从老标准回退来的吗"）**一起删了**：agent 上已经没有那份配置，
+ *    回退没有对象。剩下的是与"一份动作名清单怎么显示"有关的纯函数，它们与
+ *    "清单挂在谁身上"无关，所以组页与新任务页照旧用。
  *
  * ══════════════════════════════════════════════════════════════════
  * D41：内置动作**整组不存在了**，于是这里也没有那份表了
@@ -32,57 +37,6 @@ import { actionsOf } from './tool-view.ts'
  * ⚠️ 这里**只产出值 + 文案键**，不产出中文句子（D39）：库层不知道当前界面语言，
  *    渲染交给界面用 `$t(...)` / `<code>` 做。与 `skill-install.ts` 同一条规矩。
  */
-
-/**
- * 一个 agent 身上与"行动权限"有关的那两处。
- *
- * 都按"可能没有"收：`allowedActions` 是后加的字段，老工作区的记录里
- * **根本没有这个键**（store 不做 schema 迁移，读取路径也不补默认值），所以
- * `undefined` 与 `[]` 同义。`reviewStandard` 同理（老数据可能整个是 null）。
- */
-export interface ActionCapableAgent {
-  /** ★ 它的行动权限（D40 收口之后住在这里）。 */
-  allowedActions?: readonly string[] | undefined
-  /** 内联标准；`allowedActions` 那个键是**老数据的只读兼容字段**。 */
-  reviewStandard: { allowedActions?: readonly string[] | undefined } | null
-}
-
-/**
- * ★ 一个 agent 的**有效**行动权限——界面显示与编辑的初值都用它。
- *
- * ══════════════════════════════════════════════════════════════════
- * 为什么界面要做这个回退（以及它**只做显示**）
- * ══════════════════════════════════════════════════════════════════
- *
- * 动作权限搬走之前写在审核标准里，所以老工作区里那份配置还在
- * `reviewStandard.allowedActions` 上。界面若只读新字段，那些使用者会看到
- * 一片空白——**以为自己的配置丢了**，然后重新配一遍（或者更糟：以为平台
- * 不再允许任何动作）。所以显示时回退。
- *
- * ⚠️ 回退**只到显示与编辑初值为止**：写入口永远只写 `Agent.allowedActions`
- *    （见 `AgentDetail.svelte` 的 `buildPatch()`），界面上任何一处都不会去写
- *    老字段。于是"哪个优先"这件事在界面这一侧根本不需要回答——它只在这里出现
- *    一次，与服务端 `resolveReviewStandard` 的那一条顺序说的是同一件事。
- */
-export function effectiveAllowedActions(agent: ActionCapableAgent): string[] {
-  const own = agent.allowedActions ?? []
-  if (own.length > 0) return [...own]
-  return [...(agent.reviewStandard?.allowedActions ?? [])]
-}
-
-/**
- * 显示的那份是**从老字段回退来的**吗。
- *
- * ★ 界面据此说一句"它来自老配置，保存时会写到行动权限上"。少了这一句，
- *   使用者会以为自己在看新字段，而"保存之后权限还在不在"就成了一个谜
- *   ——服务端只写新字段，保存时并不替他把老字段搬过去。
- */
-export function allowedActionsFromLegacyStandard(agent: ActionCapableAgent): boolean {
-  return (
-    (agent.allowedActions ?? []).length === 0 &&
-    (agent.reviewStandard?.allowedActions ?? []).length > 0
-  )
-}
 
 /** 一条动作在界面上怎么显示：**契约值** + 它的说明。 */
 export interface ActionEntry {
@@ -180,8 +134,8 @@ function summaryOfAction(type: string, tools: readonly Tool[]): string | null {
  * 为什么必须有它：界面上会出现"看不见、也去不掉"的权限
  * ══════════════════════════════════════════════════════════════════
  *
- * 编辑态那一栏只画**已装工具的动作**（勾选框从清单来）。而 agent 身上存着的值
- * 可能指向一个已经不存在的动作（老数据里的内置动作名、或者那个包被卸载了）：
+ * 编辑态那一栏只画**已装工具的动作**（勾选框从清单来）。而组上存着的值
+ * 可能指向一个已经不存在的动作（很早以前配的动作名、或者那个包被卸载了）：
  * 它**不在勾选框里**，于是使用者既看不见它、也没法取消它——一保存就被服务端拒
  * （"不认识的动作"），而错误里说的那个名字在界面上**根本不存在**。
  *

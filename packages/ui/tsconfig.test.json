@@ -5,5 +5,11 @@
     // 与 `apps/web/tsconfig.test.json` 同一个道理。
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  /**
+   * ⚠️ **必须写 `"exclude": []`**：上面 `extends` 的那份配置里有一条把 `src/**` 下的
+   * 测试文件排除掉的 `exclude`，而 `exclude` **会被继承**——不覆盖它的话，这份配置
+   * **一个测试文件都没检查**（`apps/web` / `apps/remote/web` 上都踩过同一个坑）。
+   */
+  "exclude": []
 }

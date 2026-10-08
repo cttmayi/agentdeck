@@ -9,11 +9,13 @@
   import Chat from './views/Chat.svelte'
   import Tasks from './views/Tasks.svelte'
   import Agents from './views/Agents.svelte'
+  import Groups from './views/Groups.svelte'
   import Skills from './views/Skills.svelte'
   import Tools from './views/Tools.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
+    loadGroups,
     loadIdentity,
     loadInbox,
     loadIssues,
@@ -43,6 +45,8 @@
       loadIdentity(),
       loadIssues(),
       loadAgents(),
+      // 智能体组（D70）：组页与新建任务页都要它，首屏一起取。
+      loadGroups(),
       loadSkills(),
       loadTools(),
       loadRuns(),
@@ -114,6 +118,9 @@
       <Tasks />
     {:else if $view === 'agents'}
       <Agents />
+    {:else if $view === 'groups'}
+      <!-- ★ D70：智能体组页。与智能体页分开的两个页面（见设计稿 §7.1）。 -->
+      <Groups />
     {:else if $view === 'skills'}
       <Skills />
     {:else}

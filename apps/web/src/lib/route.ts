@@ -22,7 +22,7 @@
  *     有几个"这件事有两个答案（这个数组说六个、侧栏画五个），而那种分叉最后
  *     一定会在某处漏出来（顶栏页名、探针的项数、文档里的表）。
  */
-export const VIEWS = ['chat', 'tasks', 'agents', 'skills', 'tools'] as const
+export const VIEWS = ['chat', 'tasks', 'agents', 'groups', 'skills', 'tools'] as const
 export type ViewName = (typeof VIEWS)[number]
 
 /**

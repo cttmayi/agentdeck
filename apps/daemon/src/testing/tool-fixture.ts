@@ -4,11 +4,13 @@ import {
   TOOL_MANIFEST_SCHEMA,
   ulid,
   type Agent,
+  type AgentGroup,
   type Tool,
   type ToolManifest,
   type WorkspaceId,
 } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
+import { createChainGroup } from './chain.ts'
 import { makeTempDir } from './tmp.ts'
 
 /**
@@ -274,36 +276,54 @@ export interface ToolFixtureSpec extends ToolPackageSpec {
   /** 审核标准正文；不给就用一句"什么都算通过"。 */
   standardBody?: string
   /**
-   * 审核者的行动权限。
+   * **组的**行动权限。
    *
    * 默认就是**这个包声明的那个动作**——夹具的常规用途是"判决能触发一个动作"。
-   * 显式传空数组可以造出"审核者什么都不能做"那种局面（D41 的播种默认值）。
+   * 显式传空数组可以造出"什么都不能做"那种局面（D41 的播种默认值）。
+   *
+   * ⚠️ 2026-10 起这份名单住在**智能体组**上（agent 上不再有动作字段），所以夹具
+   *    建的组同时承担"谁审谁"与"判完允许动什么"这两件事。
    */
   allowedActions?: readonly string[]
+  /** 组的「调试」标记（不真跑、只记录）；不给就是空。 */
+  debugActions?: readonly string[]
 }
 
 export interface ToolFixture {
   pkg: ToolPackage
   tool: Tool
-  /** 执行者（`reviewerAgentId` 已指向下面那个审核者）。 */
+  /** 执行者（它本身**不带**"由谁审它"——那件事现在由组决定）。 */
   executor: Agent
-  /** 审核者（带标准与行动权限）。 */
+  /** 审核者（带标准；动作权限**不在它身上**，在组上）。 */
   reviewer: Agent
+  /**
+   * ★ 这一对 agent 所在的**组**（2026-10 起必须带它提交 run）。
+   *
+   * `POST /api/runs` 带 `groupId`，组才会把审核者与动作白名单展开进这条 run。
+   * ⚠️ 不带组的后果是**安静的**：`Run.reviewerAgentId` 为空 ⇒ 不派生审核 run，
+   *    于是"等审核"的断言会以超时的形式失败（看起来像 daemon 卡了）。
+   */
+  groupId: AgentGroup['id']
   /** 完整动作名 `<slug>.<动作名>`。 */
   action: string
-  /** 审核者的行动权限（最终值）。 */
+  /** 组允许触发的动作（最终值）。 */
   allowedActions: string[]
 }
 
 /**
- * ★ HTTP 级一行版：造包 → 装 → 建执行者 + 审核者 → 执行者指向审核者 →
- *   把工具挂到执行者 → 给审核者那份行动权限。
+ * ★ HTTP 级一行版：造包 → 装 → 建执行者 + 审核者 → **建一个包含这两人的组**
+ *   （组上带着行动权限）。
  *
- * 这几步的正常顺序就这五步，任何一处装错（漏挂、漏白名单）都会让"判决带动作"
- * 以"动作不合规"的形式失败——而那个症状指向的是产品，不是夹具。所以收成一行。
+ * 这几步的正常顺序就这四步，任何一处装错（漏白名单、成员写错）都会让"判决带动作"
+ * 以"动作不合规"或"根本没审核"的形式失败——而那个症状指向的是产品，不是夹具。
+ * 所以收成一行。
  *
  * ⚠️ 审核者**不挂工具**（那是服务端硬规则：审核者只判断不动手）。动作的执行
- *    发生在**平台**这一侧，而"平台会执行哪些动作"由审核者的行动权限决定。
+ *    发生在**平台**这一侧，而"平台会执行哪些动作"由**组**的行动权限决定。
+ *
+ * ⚠️ 2026-10 之前这里做的是"建审核者（带 `allowedActions`）+ 把执行者的
+ *    `reviewerAgentId` 指向它"——那两个字段都已经从 `Agent` 上撤掉，所以现在
+ *    改成建**组**：一次性把"谁审谁"和"允许动什么"两件事都放进去。
  */
 export async function setupToolFixture(
   d: FixtureDaemon,
@@ -318,29 +338,26 @@ export async function setupToolFixture(
     runtimeKey: 'claude',
     role: 'executor',
   })
-  const allowedActions = [...(spec.allowedActions ?? [pkg.action])]
   const reviewer = await createAgent(d, {
     name: spec.reviewerName ?? '夹具审核者',
     instructions: '',
     runtimeKey: 'claude',
     role: 'reviewer',
-    allowedActions,
     reviewStandard: {
       name: '夹具标准',
       body: spec.standardBody ?? '# 夹具标准\n\n只要产出不为空就算通过。',
     },
   })
 
-  const patched = await fetch(`${d.url}/api/agents/${executor.id}`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ reviewerAgentId: reviewer.id }),
+  const allowedActions = [...(spec.allowedActions ?? [pkg.action])]
+  const groupId = await createChainGroup(d, {
+    name: '夹具组',
+    members: [executor.id, reviewer.id],
+    allowedActions,
+    debugActions: spec.debugActions,
   })
-  if (!patched.ok) {
-    throw new Error(`设置审核者应当成功，实际 ${patched.status}：${(await patched.text()).slice(0, 300)}`)
-  }
 
-  return { pkg, tool, executor, reviewer, action: pkg.action, allowedActions }
+  return { pkg, tool, executor, reviewer, groupId, action: pkg.action, allowedActions }
 }
 
 // ══════════════════════════════════════════════════════════════════

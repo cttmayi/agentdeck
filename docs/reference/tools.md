@@ -347,7 +347,7 @@ daemon——daemon 不主动访问 agentdeck 的远端服务。
 它是否在审核者的行动权限里 + 参数是否合规；清单里的 `dryRun` 声明保留但不再参与任何判断。
 
 想看"这条动作会带着什么参数发出去"改用**审核者行动权限里的「调试」勾选**
-（`Agent.debugActions`，`allowedActions` 的子集，只对审核者有意义、没有任务级覆盖）：
+（`AgentGroup.debugActions`，`allowedActions` 的子集、配在**组**上、没有任务级覆盖——2026-10 起；在那之前短暂地在审核者身上）：
 勾上之后判决引用该动作时**不跑脚本**，只把动作连同解析后的完整参数（平台绑定 + 模型
 填的 + 固定参数）记进时间线（`Action.dryRun: true` ⇒ 显示「调试 · 未执行」）。守卫在
 `apps/daemon/src/actions.ts`——不是界面一句提示。
@@ -401,7 +401,7 @@ daemon——daemon 不主动访问 agentdeck 的远端服务。
 | 远端目录的响应 | `apps/remote/src/server.ts`（`catalog`） |
 | 脚本执行器（物化、白名单环境、超时、杀进程组） | `apps/daemon/src/script-executor.ts` |
 | 动作的解析 / 校验 / 幂等 / 授权 / 调试短路 | `apps/daemon/src/actions.ts`、`packages/domain/src/actions/tool-actions.ts` |
-| 接口 | `apps/daemon/src/server.ts`：`GET/POST/DELETE /api/tools`；动作授权与调试在 `PATCH/POST /api/agents`（`allowedActions` / `debugActions`，2026-09） |
+| 接口 | `apps/daemon/src/server.ts`：`GET/POST/DELETE /api/tools`；动作授权与调试在**组的 CRUD** 上（`allowedActions` / `actionParams` / `debugActions`，2026-10 起；在那之前是 `PATCH/POST /api/agents`） |
 | 落在磁盘上的布局 | `packages/store-file/src/file-store.ts`（文件头有完整目录树） |
 | 可照抄的范例 | `examples/tools/example-note/`、`apps/remote/catalog/tools/*/` |
 | 测试 | `apps/daemon/src/tool-source.test.ts`、`apps/daemon/src/tool-action-e2e.test.ts`、`apps/daemon/src/tools-api.test.ts`、`apps/daemon/src/remote-tool-install.test.ts`、`apps/remote/src/catalog.ts` 的测试 |

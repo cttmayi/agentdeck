@@ -16,6 +16,7 @@ import {
   type RunId,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { createChainGroup } from './testing/chain.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -134,6 +135,8 @@ let daemon: DaemonHandle
 let backend: HumanVerdictBackend
 /** 配了审核者的执行者——绝大多数用例用它，于是会派生审核 run。 */
 let executor: { id: string; name: string }
+/** 首启/夹具里把执行者与审核者串起来的那个组（带它提交 run 才会派生审核）。 */
+let groupId: string
 /** 自建的临时工作目录，`after` 里统一清掉。 */
 const workDirs: string[] = []
 
@@ -158,10 +161,15 @@ before(async () => {
     reviewStandard: { body: '# 标准\n\n只看结论有没有依据。' },
   })
   const name = '执行者'
-  executor = {
-    id: await createAgent({ name, role: 'executor', reviewerAgentId: reviewerId }),
-    name,
-  }
+  const executorId = await createAgent({ name, role: 'executor' })
+  executor = { id: executorId, name }
+  // ⚠️ 2026-10：这里原来是 `createAgent({ reviewerAgentId: reviewerId })`——那个
+  //    字段已从 `Agent` 上撤掉（写它就是 400「不认识的字段」）。"谁审我"现在由
+  //    **组**承载，所以改成建一个组；提交 run 时带上它的 id 才会派生审核。
+  groupId = await createChainGroup(
+    { url: daemon.url },
+    { name: '人工裁决用例组', members: [executorId, reviewerId] },
+  )
 })
 
 after(async () => {
@@ -200,11 +208,17 @@ async function newWorkDir(): Promise<string> {
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
 
-/** 提交一条 execute run 并等它（以及它派生的审核）全部跑完。 */
+/**
+ * 提交一条 execute run 并等它（以及它派生的审核）全部跑完。
+ *
+ * ⚠️ 2026-10：**带组才有审核者**。原来这里靠"省略 = 跟随 agent 的「由谁审它」"，
+ *    而那个字段已经撤掉——所以现在多了一个显式开关 `withReviewer`：不审的那两条
+ *    用例传 `false`（它们要的就是"没有审核 run"那种局面）。
+ */
 async function runTask(input: {
   issueId: string
-  /** 省略 = 跟随 agent 的「由谁审它」；`null` = 这一次明确不审。 */
-  reviewerAgentId?: string | null
+  /** `false` = 这一次**不带组** ⇒ 没有审核者 ⇒ 不派生审核 run。默认带组。 */
+  withReviewer?: boolean
 }): Promise<{ executeRunId: RunId; reviewRunId: RunId | null }> {
   const runId = ulid() as RunId
   const payload: Record<string, unknown> = {
@@ -217,7 +231,7 @@ async function runTask(input: {
     workDir: await newWorkDir(),
     limits: { maxTurns: null, timeoutMs: null },
   }
-  if ('reviewerAgentId' in input) payload['reviewerAgentId'] = input.reviewerAgentId
+  if (input.withReviewer !== false) payload['groupId'] = groupId
 
   const res = await fetch(`${daemon.url}/api/runs`, {
     method: 'POST',
@@ -492,11 +506,15 @@ describe('D46：人工裁决', () => {
   })
 
   test('★ 没有审核结论的执行 run 也能裁决（挂在执行 run 上）', async () => {
-    // 「这一次明确不审」（`reviewerAgentId: null`，D28 里的合法选择）⇒ 没有审核 run，
+    // 「这一次没有审核者」（不带组提交：`ReviewerSelection` 里那一态）⇒ 没有审核 run，
     // 任务永远停在「待审查」。人想自己确认时，裁决挂在**执行 run** 上。
+    //
+    // ⚠️ 这一态的说法 2026-10 变了：原来是"执行者身上那个「由谁审它」在这一次被
+    //    显式设成 `null`"，而那个字段已经撤掉——现在**缺字段与 `null` 同义**，
+    //    而没有审核者的常见来路是"建任务时没选组"。
     backend.reviewConclusion = 'fail'
     const issueId = await newIssue('没配审核者：人工自己确认')
-    const { executeRunId, reviewRunId } = await runTask({ issueId, reviewerAgentId: null })
+    const { executeRunId, reviewRunId } = await runTask({ issueId, withReviewer: false })
     assert.equal(reviewRunId, null, '夹具前提：这条执行不许派生审核 run')
     assert.equal((await getRunRow(executeRunId)).verdict, null, '前提：执行 run 上本来没有判决')
 
@@ -547,7 +565,7 @@ describe('D46：人工裁决', () => {
     // 直接往库里写是不行的（测试不该绕过接口），所以这里用"提交后立刻裁决"的竞态
     // 不稳；改用一个**非 execute/review 的 kind** 走另一条分支即可覆盖"类型不对"。
     const issueId = await newIssue('类型不对的 run')
-    const { executeRunId } = await runTask({ issueId, reviewerAgentId: null })
+    const { executeRunId } = await runTask({ issueId, withReviewer: false })
     // 已经跑完 ⇒ 允许；再确认一次"允许"这条路径没被上面的检查误伤
     const ok = await postHumanVerdict(executeRunId, { reason: '可以' })
     assert.equal(ok.status, 201)

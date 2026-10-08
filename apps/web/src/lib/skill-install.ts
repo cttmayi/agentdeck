@@ -29,9 +29,9 @@ import { ApiError, api } from './api.ts'
 /**
  * ⚠️ 这里原来还有一张**动作表**（`ACTION_TYPES` / `DEFAULT_ACTIONS`）：「允许这个
  *    skill 触发哪些动作」曾是这个安装请求体的一个字段。D40 收口之后它走了——
- *    动作权限是**审核者的能力**（`Agent.allowedActions`），与"装一份资料包"无关，
- *    所以安装既不再收它、也不再写它（见下面两个入参类型里各自那条注释）。
- *    那份表跟着这件事一起搬到了 `agent-actions.ts`。
+ *    动作权限与"装一份资料包"无关，所以安装既不再收它、也不再写它（见下面两个
+ *    入参类型里各自那条注释）。那份表跟着这件事一起搬到了 `agent-actions.ts`
+ *    （2026-10 之后它的服务对象是**组**：动作只属于智能体组）。
  */
 export interface InstallFile {
   path: string

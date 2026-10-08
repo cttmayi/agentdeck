@@ -91,8 +91,10 @@
 **产出**：一条 `issue` + 一条 `queued` 的 `execute run`。
 
 ⚠️ **只有"字段在不在"说了算**（D42 的任务级覆盖）：页面**只送这次改过的字段**，没改的字段
-根本不出现。省略 = 跟随长期配置；`reviewerAgentId: null` = **这次明确不审**（与"省略"后果不同）；
-`allowedActions: []` = **这次明确不许动手**。三态**不得**折成一个 `string | null`。
+根本不出现。省略 = 用**组**配的那份（★ 2026-10）；`reviewerAgentId: null` = **这次明确不审**；
+`allowedActions: []` = **这次明确不许动手**。三态**不得**折成一个 `string | null`
+（★ 省略与 `null` 现在**行为相同**——都不会有人审——但**记录与日志不同**：一句说
+"你没选组"，一句说"这是你选的"。折起来会让库里那条记录说的不是使用者做的事）。
 → 细节 §1.1、§1.2、§3.1b
 
 ### 0.4 ② 执行：agent 干活
@@ -142,12 +144,13 @@
 | **报告进来** | `{type:'report', id}` | 第三方报告（**不继承目录**，给它自己的） |
 | **判决不合规的重试** | 同一条 run | 沿用同一目录 + `resumeFromRunId` |
 
-**判的三样东西都写在审核者身上**（都不在 skill 里）：
+**判的三样东西**——判断依据写在审核者身上，其余两样不属于某个人：
 
 | 东西 | 在哪 | 没有会怎样 |
 |---|---|---|
 | **判断依据**（按什么判） | 审核者的 `Agent.instructions`（② 身份）；老数据那份 `Agent.reviewStandard` 仍会合成进去（★ 2026-09：**保存一次就并进「指令」**，投递出去的那段文字一字不变） | **不串接这次审核**——没有写「指令」的审核不算审核 |
-| **行动权限**（判完允许动什么） | `Agent.allowedActions`（D40 收口） | 判决只能给结论，**触发不了任何动作** |
+| **行动权限**（判完允许动什么） | **智能体组**的 `AgentGroup.allowedActions`（2026-10 起唯一出处；在那之前短暂地是 `Agent.allowedActions`，再早是 skill 上的一组勾选）。组在提交时把它**展开**进 `Run.allowedActions` | 判决只能给结论，**触发不了任何动作**（**报告审核**这条路上恒为此档：报告不属于任何组） |
+| **谁审**（这次派不派审核） | **智能体组**的审核者（组里那个 `role === 'reviewer'` 的成员）；`Run.reviewerAgentId` 是展开后的记录，也可由这一次点名直接给 | 没有组、也没点名 ⇒ **这条任务没有审核者**（日志里说清"要自动审就建任务时选一个智能体组"），不会有判决，也就不会有动作 |
 | **工作目录** | 继承被审那条 run 的 | 继承赢过 agent 默认，冲突写进日志 |
 
 **判决怎么来**（§3.4）：从输出里**确定性切片**——取**最后一个完整围栏块**
@@ -512,7 +515,10 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
    审核 run 写进同一个 `CLAUDE.md` 的块摘掉）。D29 之后那个机制没了，竞态在结构上
    不存在；而且收尾只删**清单里属于本次**的技能，吃不到审核者的技能。顺序保留，
    但现在的理由只是"让审核 run 拿到一个干净的目录"；
-5. 若这个执行 agent 配了 `reviewerAgentId`，自动串接一次审核（见 §3.1）。
+5. 若**这条 run 有审核者**（组展开写进来的、或这一次点名给的），自动串接一次审核（见 §3.1）。
+   ★ 2026-10：这里原来是"若这个**执行 agent** 配了 `reviewerAgentId`"——那个字段撤掉了，
+   现在只看**这条 run 上有没有审核者**（判据与提交时那条 400、以及
+   `autoChainReview` 里的跳过逻辑是同一套）。
 
 ### 2.6 第一句话的模版（D32）
 
@@ -642,7 +648,7 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 
 | 来源 | subject | 说明 |
 |---|---|---|
-| 执行完成后**自动串接**（`autoChainReview`） | `{type:'run', id:<被审的 run>}` | 主路径。条件：执行 agent 的 `reviewerAgentId` 非空、链深未超限 |
+| 执行完成后**自动串接**（`autoChainReview`） | `{type:'run', id:<被审的 run>}` | 主路径。条件：**这条 run 上有审核者**（`Run.reviewerAgentId` 非空——组展开写进来的、或这一次点名给的）、链深未超限 |
 | **报告进来** | `{type:'report', id}` | 第三方报告（`Report` 里没有指回我们任何对象的字段，所以**不继承目录**，给它自己的目录） |
 | **判决不合规的重试** | 同一条 run | 沿用同一目录 + `resumeFromRunId` 指向上一次 |
 
@@ -664,9 +670,13 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 
 | 字段 | 省略 | 给了 |
 |---|---|---|
-| `reviewerAgentId` | 跟随执行者的「由谁审它」（`Agent.reviewerAgentId`） | 用这一次指定的人审（`null` = **这次不审**） |
-| `allowedActions` | 跟随审核者的长期动作权限 | 用这一次这份（**空数组 = 明确不许动手**） |
-| `actionParams` | 跟随审核者的长期固定参数 | 用这一次这份（**键在为准**，不做深合并） |
+| `reviewerAgentId` | 用**组**的审核者（组在写入前把它展开进这条 run）；**没选组 ⇒ 这条任务没有审核者** | 用这一次点名的人审（`null` = **这次不审**） |
+| `allowedActions` | 用**组**配的那份（展开进这条 run） | 用这一次这份（**空数组 = 明确不许动手**） |
+| `actionParams` | 用**组**配的那份 | 用这一次这份（**键在为准**，不做深合并） |
+
+★ 2026-10：这张表原来说"省略 = 跟随**执行者**的「由谁审它」/ **审核者**的长期动作权限"。
+那两个 agent 上的字段撤掉之后，省略跟随的只有**组**那一份——而"没选组"那一档
+（界面上"选单个智能体"）就是**没有审核者**，这一点摘要必须说出来，不能沉默地少一行。
 
 不支持的旧 daemon 会**静默忽略** `reviewerAgentId`，所以那些选项只在能力标志在位时才给。
 覆盖值随任务落库（`Run.actionParams` / 任务级字段），**判决契约与执行注入都按覆盖后的值算**——
@@ -921,8 +931,9 @@ D29 之前是那样分工的，现在只有一条通道。
 > （`fail`/`missing_tests`），模型把示例抄回来会变成一份**通过校验的错误判决**——
 > 那比作废更糟。
 
-**② 校验**：schema + **动作是否在审核者的白名单里**（D40 收口后权威是 `Agent.allowedActions`；
-更早的版本把它放在 skill 上，那是 D37 之前的形状）。判决是「一开一合」：
+**② 校验**：schema + **动作是否在这一次的白名单里**（2026-10 起的权威是
+`AgentGroup.allowedActions`，提交时展开进 `Run.allowedActions`；中间那一版在
+`Agent.allowedActions` 上，最早放在 skill 上）。判决是「一开一合」：
 闭合字段用 `z.strictObject`（**多一个字段名就整条不合规**），**唯一**开放的字段是
 `finding.detail`。而"必填"只留给**真正承载判断**的字段：
 
@@ -1118,8 +1129,8 @@ stageOf(issue, runs)                    ← issue 是整条，不是 id
 | 默认智能体 | 1 个 id（全局） | `Workspace.defaultAgentId` | 「新建任务」默认交给谁（D36）；只有执行者能当默认，悬空按"没设过"处理 |
 | **判断依据** | 审核者的 **`Agent.instructions`**（② 身份，2026-09 起）；老数据的 `Agent.reviewStandard`（每个审核者一份）只剩兼容读取 | 协议实体（D38：**技能库里没有**审核标准——首启不播种任何 skill） | **一段正文**；**没写「指令」⇒ 不派审核**（判据是「指令非空」，不再是「有没有标准字段」）。⚠️ 原来还有一个 `name`（"标准的名字"），**已删**——平台侧没人读它（不进 prompt：D35 只给正文）、一个审核者只有一份标准所以它区分不了什么、默认值又是常量；老记录里那个键还在，读取方忽略即可（不迁移）。⚠️「允许触发的动作」**不在它里面**了——D40 收口搬到 `Agent.allowedActions`，`reviewStandard` 上那个同名字段只是**老数据的只读兼容**（`Agent.allowedActions` 为空时才回退读它） |
 | 工具包（组） | `Tool`（每个 workspace 一份清单 + 文件） | `packages/protocol/src/tools.ts`（清单判据）、`apps/daemon/src/tool-source.ts`（来源解析） | 一个包 = 一个组；第三方动作名 `<包 slug>.<动作名>`（D40）；**审核者不挂工具**（挂载能力已撤：工具包只提供动作，由「行动权限」授权） |
-| 任务级覆盖（D42） | `Run.reviewerAgentId` / `Run.allowedActions` / `Run.actionParams` | 协议实体 | **字段在不在**为准：省略 = 跟随长期配置，给了 = 用这一次的（`allowedActions: []` = 明确不许动手）。不支持的旧 daemon 会静默忽略 `reviewerAgentId` |
-| 调试动作（2026-09） | `Agent.debugActions`（`allowedActions` 的**子集**，可选） | 协议实体 | 审核者在「行动权限」里给动作勾「调试」：判决引用它时**不跑脚本**，只记录动作与解析后的参数（时间线显示「调试 · 未执行」）。**没有任务级覆盖**；只对审核者有意义。⚠️ 这里原来有一行「工具包预演开关（D40）」（`Workspace.allowUnpreviewedActions`）——那套"不支持预演的动作默认不自动执行"的准入机制 2026-09 **整体撤掉**：动作直接执行，清单里的 `dryRun` 声明保留但不再参与任何判断 |
+| 任务级覆盖（D42） | `Run.reviewerAgentId` / `Run.allowedActions` / `Run.actionParams` | 协议实体 | **字段在不在**为准：省略 = 用**组**配的那份（★ 2026-10），给了 = 用这一次的（`allowedActions: []` = 明确不许动手）。不支持的旧 daemon 会静默忽略 `reviewerAgentId` |
+| 调试动作（2026-09） | `AgentGroup.debugActions`（`allowedActions` 的**子集**，可选） | 协议实体 | 在**组配置页 ③ 行动**里给动作勾「调试」：判决引用它时**不跑脚本**，只记录动作与解析后的参数（时间线显示「调试 · 未执行」）。**没有任务级覆盖**（`SubmitRunRequest` 里没有对应字段，所以它不进请求体）。⚠️ 这里原来有一行「工具包预演开关（D40）」（`Workspace.allowUnpreviewedActions`）——那套"不支持预演的动作默认不自动执行"的准入机制 2026-09 **整体撤掉**：动作直接执行，清单里的 `dryRun` 声明保留但不再参与任何判断 |
 | 动作参数 | 每个动作的 `bound` / `open` | 清单（`ToolManifest`） | `bound` 由平台按事实注入、模型看不见也填不了；`open` 是模型填的、**每项必须有界**。⚠️ **没有内置动作**（D41）：动作一律来自已安装工具包，`apps/daemon/src/actions.ts` 只负责编排（解析→校验→幂等→绑定→执行→记录） |
 | 空闲超时 | `limits.timeoutMs` | 协议 | **空闲**超时（不是墙钟）；界面传 `null` ⇒ 落到平台默认 `DEFAULT_IDLE_TIMEOUT_MS`（**30 分钟**），**不是不设看门狗**（`apps/daemon/src/executor.ts`） |
 
@@ -1352,7 +1363,7 @@ skill <slug>：<规范化改了什么>              ← 例如"原文没有 fron
 | 技能注入与归属清单对账 | `packages/agent-core/src/skill-injection.ts` |
 | 判决 schema、围栏标记、判决指令渲染、提取与报错翻译 | `packages/protocol/src/verdict.ts` |
 | **审核标准的解析**（内联 / 过渡期来自 skill / 没有） | `apps/daemon/src/review-standard.ts` |
-| 判断依据那一栏（只有「指令」+ 老数据的老标准与一键并进；独立的标准编辑框 2026-09 已删，动作勾选在 D40 收口时搬去「行动权限」） | `apps/web/src/components/AgentDetail.svelte` |
+| 判断依据那一栏（只有「指令」+ 老数据的老标准与一键并进；独立的标准编辑框 2026-09 已删，动作勾选 2026-10 搬去**组配置页 ③ 行动**，智能体页只留一句指路） | `apps/web/src/components/AgentDetail.svelte` |
 | 判决 → 动作 → 状态（`decideReview`、重试上限） | `packages/domain/src/review/pipeline.ts` |
 | **动作的编排**（解析 → 校验 → 幂等 → 绑定 → 执行 → 记录；D41 后没有内置动作） | `apps/daemon/src/actions.ts` |
 | 动作定义的形状 + 白名单校验（D41 后**没有**注册表） | `packages/domain/src/actions/definition.ts`、`tool-actions.ts` |
@@ -1362,7 +1373,7 @@ skill <slug>：<规范化改了什么>              ← 例如"原文没有 fron
 | 工具包脚本的执行（起进程、超时、输出上限） | `apps/daemon/src/script-executor.ts` |
 | 界面语言：词表、取值标签、六条护栏 | `packages/i18n/src/web/*.ts`、`apps/web/src/lib/i18n.ts` |
 | **新建任务页三步链**（执行 → 审核 → 行动，D42） | `apps/web/src/components/NewTaskForm.svelte` |
-| **行动权限编辑器**（左选右配：挑动作 / 配参数，D43/D44） | `apps/web/src/components/ActionPicker.svelte`、`ActionParamEditor.svelte` |
+| **行动权限编辑器**（左选右配：挑动作 / 配参数，D43/D44）——2026-10 起**只在组配置页**用（智能体页不再有这一栏） | `apps/web/src/components/ActionPicker.svelte`、`ActionParamEditor.svelte`（挂在 `views/Groups.svelte` 的 ③ 行动） |
 | 供审核串接、报告摄取、重试、判决收口 | `apps/daemon/src/server.ts`、`review.ts`、`ingest.ts` |
 | runtime 描述表（能力位、旗标、投递方式、证据等级） | `packages/agent-core/src/runtime-table.ts` |
 | runtime 的组装点（换 runtime 只改这里） | `apps/daemon/src/runtime-registry.ts` |

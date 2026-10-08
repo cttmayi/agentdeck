@@ -29,11 +29,10 @@ export const agentsText = {
   'agents.roleLabel': { zh: '角色', en: 'Role' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
-  'agents.reviewerFieldLabel': { zh: '由谁来审它', en: 'Who reviews it' },
-  'agents.noAutoReview': { zh: '不自动审核', en: 'No automatic review' },
+  // ⚠️ 2026-10（使用者的决定）：`reviewerFieldLabel`（由谁来审它）、
+  // `noAutoReview`、`workDirLabel`（默认工作目录）、`workDirPlaceholder` 随设置
+  // 一起删了——审核走智能体组；工作目录是任务级的。协议字段原样保留。
   'agents.attachedSkillsLabel': { zh: '挂载的技能', en: 'Attached skills' },
-  'agents.workDirLabel': { zh: '默认工作目录', en: 'Default work directory' },
-  'agents.workDirPlaceholder': { zh: '留空 = 每个任务自动分配', en: 'Empty = one directory per task' },
   'agents.runtimeCurrent': { zh: '{key}（当前）', en: '{key} (current)' },
 
   // ── Agents.svelte：清单 ──
@@ -60,11 +59,10 @@ export const agentsText = {
   'agents.envIssuesTitle': { zh: '环境问题', en: 'Environment issues' },
   'agents.emptyTitle': { zh: '还没有智能体', en: 'No agents yet' },
   'agents.emptyHint': {
-    zh: '先建一个执行者，再建一个审核者并给它挂上技能——别忘了在执行者的「由谁来审它」里选它，否则产出不会被自动审核。',
-    en: 'Create an executor first, then a reviewer with a skill attached — and remember to pick it under “Who reviews it” on the executor, or its output will not be reviewed automatically.',
+    zh: '先建一个执行者，再建一个审核者并给它挂上技能。要执行产出被自动审核，把它们放进同一个智能体组——审核者由组决定（2026-10 起执行者不再单独配「由谁来审它」）。',
+    en: 'Create an executor first, then a reviewer with a skill attached. To have executor output reviewed automatically, put both in the same agent group — the group decides the reviewer (since 2026-10 executors no longer pick one themselves).',
   },
   'agents.reviewsOthers': { zh: '它审别人', en: 'Reviews others' },
-  'agents.reviewerMissing': { zh: '（已不存在）', en: '(no longer exists)' },
   'agents.defaultBadge': { zh: '默认', en: 'Default' },
   'agents.noInstructions': { zh: '（没有指令）', en: '(No instructions)' },
   'agents.skillCount': { zh: ' · {count} 个技能 · ', en: ' · {count} skill(s) · ' },
@@ -145,18 +143,6 @@ export const agentsText = {
   },
   'agents.namePlaceholder': { zh: '例如：安全审核员', en: 'e.g. Security reviewer' },
   'agents.roleFieldLabel': { zh: '它是做什么的', en: 'What it does' },
-  'agents.noReviewerOption': {
-    zh: '（还没有审核角色的智能体）',
-    en: '(No agent with the reviewer role yet)',
-  },
-  'agents.noReviewerHint': {
-    zh: '先去建一个「审核」角色的智能体。没有审核者时，执行产出不会被自动审核。',
-    en: 'Create an agent with the “Review” role first. Without a reviewer, executor output is not reviewed automatically.',
-  },
-  'agents.reviewerHint': {
-    zh: '执行完由它审。选「不自动审核」也是一个明确的选择——不配时每个任务都多跑一次审核会既费钱又吵。',
-    en: 'It reviews what this agent produces. Choosing “No automatic review” is also a clear decision — without one, every task runs one extra review, which costs money and makes noise.',
-  },
   'agents.instructionsPlaceholderExecutor': {
     zh: '它是谁、怎么干活。这段会进它的上下文。',
     en: 'Who it is and how it works. This goes into its context.',
@@ -208,10 +194,6 @@ export const agentsText = {
   },
   /** 详情页那一行的短标签（与上面的表单标签是同一个字段，两处都要短）。 */
   'agents.runtimeRowLabel': { zh: 'CLI', en: 'CLI' },
-  'agents.workDirLabelOptional': {
-    zh: '默认工作目录（可选）',
-    en: 'Default work directory (optional)',
-  },
   'agents.created': { zh: '智能体已创建', en: 'Agent created' },
 
   /**
@@ -252,15 +234,31 @@ export const agentsText = {
     en: '⚠️ Its judging criteria still come from an attached skill — folding them into Instructions also removes the attachment, so that step is yours to take (the button below).',
   },
 
-  // ── 行动权限（D40 收口：从「审核标准」里搬出来的独立一段）──
+  // ── 行动权限（2026-10 起**只属于智能体组**）──
   //
-  // 用它的地方：`AgentDetail.svelte` 的「行动权限」段（只读态与编辑态）、
-  // `ActionPermissions.svelte`（勾选栏，详情编辑态与新建表单共用）。已装工具的
-  // 那一半词条在 `tools.ts`（`tools.stdTools*`）——那一块的区域前缀没跟着改，
-  // 理由写在那边。
+  // ⚠️ 用它的地方变了：以前是 `AgentDetail.svelte` 的「行动权限」段（勾选栏就在
+  //    那儿）与 `NewAgentForm.svelte`，现在**只剩智能体组页**（`Groups.svelte` 的
+  //    ③ 行动，勾选栏组件 `ActionPicker.svelte`）。智能体页那两处只留一句指路
+  //    （`agents.actionsMovedToGroup`）——动作属于"这条链"，不属于某个人：同一个
+  //    审核者在不同组里本来就该配不同的权限。
+  //
+  // 已装工具的那一半词条在 `tools.ts`（`tools.stdTools*`）——那一块的区域前缀
+  // 没跟着改，理由写在那边。
   'agents.sectionActions': {
-    zh: '行动权限：判完之后允许做什么',
-    en: 'Action permissions: what it may do after a verdict',
+    zh: '行动权限：由智能体组决定',
+    en: 'Action permissions: decided by the agent group',
+  },
+  /**
+   * ★ 智能体页那句指路（2026-10）。
+   *
+   * 使用者在这里看到的应该只有一句话、**没有勾选框**：两处长得一模一样、只有一处
+   * 生效，是最坏的一种界面——他会在智能体页勾一遍，然后在组里再勾一遍，而只有组
+   * 那份起作用。所以这句话要说清两件事：① 谁决定（智能体组）；② 去哪儿改（组的
+   * ③ 行动）。
+   */
+  'agents.actionsMovedToGroup': {
+    zh: '动作属于这条链（这队人的活判过之后允许做什么），所以不在这里配：请到「智能体组」页，在组的 ③ 行动里勾。同一个人在不同组里可以有不同的权限——挂在人身上就只能共用一份。',
+    en: 'Actions belong to the chain (what this crew may do after a verdict), so they are not configured here: open the Agents-group page and tick them under ③ Actions. The same person can have different permissions in different groups — tied to a person, they can only share one set.',
   },
   'agents.actionsLabel': { zh: '允许触发的动作', en: 'Actions it may trigger' },
   /**
@@ -354,28 +352,30 @@ export const agentsText = {
     zh: '。动作是判完之后由平台执行的——审核者自己只判断。',
     en: '. The platform performs these actions after a verdict — the reviewer itself only judges.',
   },
-  'agents.actionsLegacyNote': {
-    zh: '这些动作来自老配置（写在审核标准里的那一份）。保存时会写到行动权限上，之后它就不再依赖标准了。',
-    en: 'These actions come from the legacy setup (the copy stored in the review standard). Saving writes them to the action permissions, after which they no longer depend on the standard.',
-  },
-  /**
-   * ★ 上面那条的**有不可用动作那一版**（D41 收尾）。
-   *
-   * ⚠️ 两句话必须分开：上面那条保证"保存时会写到行动权限上"，而名单里只要有一个
-   *    **解析不出来**的动作（老的内置动作名、或者那个包被卸载了），这句保证就是
-   *    **假的**——服务端会在保存那一刻拒掉整份名单。不说清的话，使用者照着那句
-   *    保证去按保存，撞上的是一句他没法理解的拒绝。
-   */
-  'agents.actionsLegacyNoteUnresolved': {
-    zh: '这些动作来自老配置（写在审核标准里的那一份）：其中找不到出处的那些要先移除，否则保存会被服务端拒；其余的保存时会写到行动权限上，之后就不再依赖标准了。',
-    en: 'These actions come from the legacy setup (the copy stored in the review standard): remove the ones that no longer have a source first, otherwise the server refuses the save; the rest are written to the action permissions, after which they no longer depend on the standard.',
-  },
+  // ⚠️ 2026-10：这里原来有一对 `agents.actionsLegacyNote` /
+  //    `agents.actionsLegacyNoteUnresolved`（"这些动作来自老配置（写在审核标准里的
+  //    那一份）…保存时会写到行动权限上，之后它就不再依赖标准了"）。两条一起删了：
+  //    它们说的是**行动权限从老标准迁移到 agent 上**这件事，而现在动作只属于组，
+  //    那条迁移路连同字段一起撤掉了（老记录里那几个键由 daemon 启动时摘掉，
+  //    见 `agent-legacy-cleanup.ts`）。留着这两条只会指向一个不存在的操作。
 
   // ── AgentDetail.svelte ──
   'agents.backToList': { zh: '← 智能体列表', en: '← Agents' },
   'agents.saveWithCount': { zh: '保存 {count} 处改动', en: 'Save {count} change(s)' },
   'agents.saved': { zh: '已保存', en: 'Saved' },
-  'agents.sectionBehavior': { zh: '它怎么干活', en: 'How it works' },
+  // ★ 2026-11：编辑页底部新增「删除」（保存 / 删除 / 取消，与组页同款）。
+  //   历史 run 不删（那是执行时的快照）；被智能体组引用 / 是默认智能体时，
+  //   服务端会 400 并说明下一步，这里原样展示。
+  'agents.deleteButton': { zh: '删除', en: 'Delete' },
+  'agents.confirmDeleteTitle': { zh: '删除智能体', en: 'Delete agent' },
+  'agents.confirmDeleteBody': {
+    zh: '确定删除「{name}」？历史任务记录会保留（它们带的是执行时的快照），只是它不再出现在智能体列表里。',
+    en: 'Delete "{name}"? Past task records keep their snapshot; it will just leave the agent list.',
+  },
+  'agents.confirmDelete': { zh: '删除', en: 'Delete' },
+  // ⚠️ 2026-10：`sectionBehavior` / `sectionSkills` / `sectionRuntime` 三个小节
+  //   标题随「详情改成一张卡片」一起删了——字段区现在是 `cell-label`（名字/CLI/
+  //   指令/技能）直接当标签，不再有小节。`sectionActions` 保留（还是 `cell-label`）。
   /**
    * ★ 2026-09：这里曾经有一条与新建表单"只有一字之差"的重复提示（各写各的键）。
    *   现在两处用的是**同一组**词（`instructionsHintBefore` / `instructionsFieldStrong`
@@ -390,7 +390,6 @@ export const agentsText = {
    * （那段叫「用什么标准」）——标准并进「指令」、那一段被删掉之后，
    * 这一段只剩它自己的事：**这个 agent 干活时能翻哪些资料包**。
    */
-  'agents.sectionSkills': { zh: '技能', en: 'Skills' },
   /**
    * ⚠️ 这里原来还有一对 `legacySkillBefore` / `legacySkillAfter`（「当前它仍然沿用
    *    挂载的 skill「X」当标准…用上面那一栏写上自己的标准即可取而代之」）——
@@ -492,46 +491,12 @@ export const agentsText = {
     zh: '没有挂（执行者可以不挂，产出由审核者按自己的判断依据来判）。',
     en: 'None attached (an executor can go without; its output is judged by the reviewer against the reviewer’s own criteria).',
   },
-  'agents.sectionRelations': { zh: '与其他智能体的关系', en: 'Relations to other agents' },
-  'agents.reviewerHintDetail': {
-    zh: '执行完由它审。选「不自动审核」也是明确的选择——每个任务都多跑一次审核会既费钱又吵。',
-    en: 'It reviews what this agent produces. Choosing “No automatic review” is also a clear decision — every task would run one extra review, which costs money and makes noise.',
-  },
-  'agents.reviewerNotApplicableBefore': { zh: '不适用 —— 它是', en: 'Not applicable — it is ' },
-  'agents.reviewerNotApplicableStrong': {
-    zh: '审别人的那个',
-    en: 'the one who reviews others',
-  },
-  'agents.reviewerNotApplicableAfter': {
-    zh: '。反过来，在执行角色的智能体上指定它即可。',
-    en: '. Instead, point an executor agent at it.',
-  },
-  'agents.reviewsWhoLabel': { zh: '谁由它来审', en: 'Who it reviews' },
-  'agents.noExecutorsPointing': {
-    zh: '暂时没有执行者指向它 —— 在某个执行角色的智能体上把「由谁来审它」设成它。',
-    en: 'No executor points at it yet — set “Who reviews it” to it on an executor agent.',
-  },
-  'agents.reviewerChosenHint': {
-    zh: '它执行完的产出会交给这个审核者。',
-    en: 'What this agent produces is handed to this reviewer.',
-  },
-  'agents.reviewerGoneWithId': {
-    zh: '指定的审核者已不存在（{id}）',
-    en: 'The named reviewer no longer exists ({id})',
-  },
-  'agents.noReviewerChosen': {
-    zh: '没有指定 —— 执行产出不会被自动审核。这是明确的选择，不是错误。',
-    en: 'None set — executor output is not reviewed automatically. That is a clear decision, not a mistake.',
-  },
-  'agents.sectionRuntime': { zh: '运行环境', en: 'Runtime' },
-  'agents.modelLabel': { zh: '模型', en: 'Model' },
-  'agents.modelPlaceholder': { zh: '留空 = 用 CLI 默认', en: 'Empty = use the CLI default' },
-  'agents.cliDefault': { zh: '用 CLI 默认', en: 'CLI default' },
-  'agents.autoWorkDir': { zh: '每个任务自动分配', en: 'One per task' },
-  'agents.workDirHint': {
-    zh: '留空时每个任务得到自己的目录（重试还看得见上次的文件）。填了之后，这个目录同时只跑一个任务，其余排队。',
-    en: 'When empty, every task gets its own directory (a retry still sees the previous files). When set, only one task runs in that directory at a time and the rest queue.',
-  },
+  // ⚠️ 2026-10（使用者的决定）：`sectionRelations` 一节及其全部词条
+  // （`reviewerHintDetail` / `reviewerNotApplicable*` / `reviewsWhoLabel` /
+  // `noExecutorsPointing` / `reviewerChosenHint` / `reviewerGoneWithId` /
+  // `noReviewerChosen`）、以及运行环境里的 `modelLabel` / `modelPlaceholder` /
+  // `cliDefault` / `autoWorkDir` / `workDirHint` 随「由谁来审它」「模型」「默认
+  // 工作目录」三个设置一起删了。协议字段原样保留（老数据继续有效）。
   'agents.evidenceNoteFallback': {
     zh: '未对照真实程序（字段名是按公开形状推导的）',
     en: 'Not checked against the real program (field names are derived from the public shape)',
@@ -545,9 +510,5 @@ export const agentsText = {
   'agents.headlineNoInstructions': {
     zh: '它审不了任何东西：没有写「指令」（判断依据就写在那里），平台不会把产出交给它审。点「编辑」写一段。',
     en: 'It cannot review anything: with no Instructions written (the judging criteria live there) the platform will not hand it output to review. Click “Edit” to write some.',
-  },
-  'agents.headlineNoReviewer': {
-    zh: '执行产出不会被自动审核（没有指定审核者）。',
-    en: 'Executor output is not reviewed automatically (no reviewer set).',
   },
 } as const satisfies TextCatalog

@@ -1,5 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["node"] },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  /**
+   * ⚠️ **必须写 `"exclude": []`**：上面 `extends` 的那份配置里有一条把 `src/**` 下的
+   * 测试文件排除掉的 `exclude`（给应用代码用的），而 `exclude` **会被继承**——不覆盖
+   * 它的话，这份"测试专用"配置**一个测试文件都没检查**，
+   * `pnpm run typecheck` 里那一行等于白跑（`apps/web` 上踩过同一个坑）。
+   */
+  "exclude": []
 }

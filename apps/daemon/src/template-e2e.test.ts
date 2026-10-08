@@ -20,6 +20,7 @@ import {
   type Agent,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { createChainGroup } from './testing/chain.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -602,8 +603,19 @@ describe('D32：全局模版真的被投递（所有 agent 都按它来）', () 
     })
     const skillId = (installed as { installed: Array<{ id: string }> }).installed[0]!.id
 
-    const reviewer = await makeAgent({ name: '自定义模版的审核者', role: 'reviewer', skillIds: [skillId] })
-    const executor = await makeAgent({ name: '执行者', reviewerAgentId: reviewer.id })
+    const reviewer = await makeAgent({
+      name: '自定义模版的审核者',
+      role: 'reviewer',
+      skillIds: [skillId],
+    })
+    const executor = await makeAgent({ name: '执行者' })
+    // ⚠️ 2026-10：这里原来是 `makeAgent({ reviewerAgentId: reviewer.id })`——那个
+    //    字段已从 `Agent` 上撤掉（写它就是 400「不认识的字段」）。同一件事现在
+    //    由**组**表达，而提交那条 run 时要带上组的 id。
+    const groupId = await createChainGroup(
+      { url: daemon.url },
+      { name: '模版用例组', members: [executor.id, reviewer.id] },
+    )
 
     // ★ 全局：只设一次，执行与审核两份各一份
     const set = await setTemplates({
@@ -623,6 +635,8 @@ describe('D32：全局模版真的被投递（所有 agent 都按它来）', () 
         runId,
         kind: 'execute',
         agentRef: { id: executor.id, name: executor.name, instructions: '' },
+        // ★ 带组 ⇒ 自动串出审核 run（本用例要的就是"执行 + 审核两次投递"）
+        groupId,
         skills: [],
         subject: { type: 'issue', id: issueId },
         prompt: '写点东西',

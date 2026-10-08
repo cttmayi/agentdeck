@@ -43,7 +43,7 @@ export const toolsText = {
   //    挂载这个能力整个撤掉了（使用者的决定），界面上没有任何入口能把工具包挂给
   //    执行者。留着那半句就是在页头许诺一件做不到的事。
   'tools.headOutro': {
-    zh: '：一次安装装进整组。装进来之后，组里的动作才能在审核者的「行动权限」里勾选——判决说「通过」时由平台触发。',
+    zh: '：一次安装装进整组。装进来之后，组里的动作才能被智能体组的「行动权限」勾选——判决说「通过」时由平台触发。',
     en: ': one install brings in the whole group. Once installed, the group’s actions can be ticked under a reviewer’s action permissions — the platform triggers them when a verdict says "pass".',
   },
 
@@ -67,12 +67,14 @@ export const toolsText = {
 
   'tools.emptyTitle': { zh: '还没有装任何工具', en: 'No tools installed yet' },
   'tools.emptyHint': {
-    // ⚠️ 这里原来说"也才能被**审核标准**勾选"：那说的是动作权限还长在审核标准
-    //    那一栏里的年代（D40 收口把它搬成了审核者自己的「行动权限」段，D41 又把
-    //    内置动作整组移除）。现在动作只有这一个来源，所以句子说的是**行动权限**
-    //    ——界面上的那一栏就叫这个名字。
-    zh: '工具是一个包、一组动作：装进来之后，组内动作才能被判决触发、也才能在审核者的「行动权限」里勾选。首版从本地目录安装（目录里要有 tool.json）。',
-    en: 'A tool is one package holding a group of actions: only once it is installed can those actions be triggered by a verdict and ticked under a reviewer’s action permissions. For now they are installed from a local directory (which must contain tool.json).',
+    // ⚠️ 这句话改过两次，两次都是跟着"行动权限住在哪"搬的：
+    //    ① 最早说"才能被审核标准勾选"（那时权限长在标准那一栏里）；
+    //    ② D40 收口搬到审核者身上，于是说"审核者的「行动权限」"；
+    //    ③ 2026-10 撤掉审核者身上那一栏之后，**唯一能在哪儿勾**是
+    //       **智能体组配置页 ③ 行动**——句子必须指到那儿，否则使用者会去
+    //       智能体页找一个已经不存在的框。
+    zh: '工具是一个包、一组动作：装进来之后，组内动作才能被判决触发、也才能在智能体组的「行动权限」（组配置页 → ③ 行动）里勾选。首版从本地目录安装（目录里要有 tool.json）。',
+    en: 'A tool is one package holding a group of actions: only once it is installed can those actions be triggered by a verdict and ticked under an agent group’s action permissions (Groups page → 3 Act). For now they are installed from a local directory (which must contain tool.json).',
   },
   'tools.emptyExampleBefore': { zh: '示例包在 ', en: 'There is an example package at ' },
   'tools.emptyExampleAfter': { zh: '，可以先拿它试一次。', en: ' — you can try it first.' },
@@ -209,6 +211,8 @@ export const toolsText = {
 
   // ── 安装抽屉 ──
   'tools.install': { zh: '安装工具', en: 'Install tool' },
+  // ★ 2026-10：安装面板改成主区就地面板（理由见技能页那条同名词条）
+  'tools.backToList': { zh: '← 返回工具列表', en: '← Back to tools' },
   'tools.pathLabel': { zh: '本地目录的绝对路径', en: 'Absolute path of a local directory' },
   'tools.sourcePlaceholder': { zh: '/Users/me/dev/my-tool', en: '/Users/me/dev/my-tool' },
   'tools.pathHintBefore': { zh: '指向的目录里必须有 ', en: 'The target directory must contain ' },
@@ -321,23 +325,15 @@ export const toolsText = {
   //    下一个人会以为哪里漏了。
   //    要恢复那个界面入口，这 8 条连同 AgentDetail 里那一段一起加回来。
 
-  // ── 行动权限：可勾已装工具的动作 ──
-  //
-  // ⚠️ 这几条原来挂在**审核标准**那一栏里（键名里的 `std` 就是"standard"）。
-  //    D40 收口之后那一块搬成了审核者自己的「行动权限」段（见
-  //    `components/ActionPermissions.svelte`），所以下面 `stdToolsNote` 里那句
-  //    "审核标准管的是……"改成说"这一段管的是……"——不然界面上会出现一句
-  //    指向别处的话，而那一处已经不在了。
-  'tools.stdToolsHeading': { zh: '已装工具的动作', en: 'Actions from installed tools' },
-  'tools.stdToolsHintBefore': { zh: '勾上一个动作 = 允许触发它；契约值是 ', en: 'Ticking an action allows triggering it; its contract value is ' },
-  'tools.stdToolsHintAfter': { zh: '（等宽那一串，判决里写的就是它）。', en: ' (the monospaced string — that is what goes in a verdict).' },
-  'tools.stdToolsNote': {
-    zh: '这里列的是已安装的全部工具动作：行动权限管的是「判完允许触发什么」，与哪个执行者挂了它无关。',
-    en: 'This lists every action of every installed tool: action permissions govern what a verdict may trigger, regardless of which executor mounts it.',
-  },
-  // ⚠️ 这里原来还有一条 `tools.stdToolsNone`（"还没有装任何工具——只有上面那些内置
-  //    动作可以勾"）。D41 把内置动作整组移除之后，那句话里的"上面那些内置动作"
-  //    已经不存在了，而空态的句子也换了地方：它现在说的是"动作只能来自装进来的
-  //    工具包 ⇒ 现在没有动作可授权"（`agents.actionsNoTools*`，因为说这句话的
-  //    两处界面都在智能体那一边：编辑态那一栏与详情里的只读那一行）。
+  /*
+   * ⚠️ 这里原来有 4 条 `tools.stdTools*`（"已装工具的动作" + 两截提示 + 一句说明）。
+   *    它们服务的是**审核者身上**那一栏「行动权限」——2026-10 那一栏整段撤掉
+   *    （动作只属于智能体组）之后，**一个渲染点都没有了**，于是连同它们一起删除：
+   *    留着就是"词表里有一条谁也渲染不出来的话"，而下一个人会照它去找一个不存在的
+   *    界面。现在那一栏的词条在 `groups.*`（组配置页 ③ 行动，`ActionPicker.svelte`
+   *    用），空态那句是 `agents.actionsNoTools*`。
+   *
+   *    另一处同类的老词条（"还没有装任何工具——只有上面那些内置动作可以勾"）在 D41
+   *    把内置动作整组移除时就已经删了。
+   */
 } as const satisfies TextCatalog

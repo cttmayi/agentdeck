@@ -66,7 +66,16 @@
   /** 展开了哪一个包的动作清单；null = 都收着。 */
   let expanded: string | null = null
 
-  // ── 安装抽屉 ──
+  // ── 安装面板 ──
+  /**
+   * ⚠️ 2026-10：与技能页同步——它**不再是右侧抽屉**，而是主区里的就地面板。
+   *
+   * 使用者的话：「技能和工具的安装都是右侧弹框，需要改成类似新建智能体那样，在主区
+   * 显示，而不是弹框」。打开安装 = 主区换成面板（列表让位），头部一个「← 返回工具列表」。
+   * 当初做成抽屉的顾虑（"表单插在页头和列表之间会把列表推到看不见的地方"）现在由
+   * "面板**取代**列表"解决：列表一行都没被推走，而是整块让开；装进来的动作与文件在
+   * 结果块里逐条列出来，返回时列表已经刷新过。
+   */
   let panelOpen = false
 
   /**
@@ -254,6 +263,9 @@
       label: $t('tools.install'),
       kind: 'primary',
       icon: 'plus',
+      // ⚠️ 面板开着时置灰（与智能体页「新建智能体」同一个做法）：它已经开着，
+      //    再点一次什么都不发生——那是最容易让人以为卡片坏了的一种状态。
+      disabled: panelOpen,
       onActivate: openPanel,
     },
     {
@@ -271,10 +283,11 @@
   }
 
   /**
-   * Esc 关抽屉。
+   * Esc 关掉安装面板。
    *
-   * ★ 与 `Skills.svelte` 里那条一模一样：抽屉由视图自己渲染，就不在 App 的
-   *   `$openDrawer` 处理里。顶栏那两个抽屉都能 Esc 关，同一页里两种手感说不通。
+   * ★ 与 `Skills.svelte` 里那条一模一样。安装面板已经是主区的就地内容（按返回就能
+   *   回去），但 Esc 照旧关掉它：技能页也这么做，两页同一件事必须同一手感。
+   *   ⚠️ 这一页没有别的浮层由本视图渲染（设置抽屉只在技能页）。
    */
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && panelOpen) closePanel()
@@ -366,25 +379,27 @@
   <div class="notice bad" style="margin-bottom:var(--sp-3)">{uninstallError}</div>
 {/if}
 
+<!--
+  ══════════════════════════════════════════════════════════════════
+  安装面板：主区**就地**显示（2026-10，不再是右侧抽屉）
+  ══════════════════════════════════════════════════════════════════
+
+  与「安装技能」同一个形状（那边写着完整的理由）：面板**取代**列表，头部一个一直
+  可见的「← 返回工具列表」。没有遮罩、没有 `role="dialog"` / `aria-modal`——后面的
+  列表是被"换掉"的，不是被挡住的，读屏器不该被告知这里有个模态框。
+-->
 {#if panelOpen}
-  <!-- 点背景关掉：抽屉遮住列表时，"我怎么回去"必须有答案 -->
-  <div class="drawer-backdrop" onclick={closePanel} role="presentation"></div>
-
-  <!--
-    ★ 与「安装 skill」同构：右侧抽屉 + `wide`（46rem）。
-      里面那张表要放"组名 / 名称 / 版本 / 动作数 / 来源 / 被哪些执行者挂载"，窄版会只剩
-      横向滚动条；而装完最想看的正是下面那张表——抽屉浮在它上面，关掉就回到原地。
-
-      正文里只剩一个「安装工具」按钮：表单插在页头和列表之间的那版，一打开就把
-      列表推到看不见的地方。
-  -->
-  <div class="drawer wide" role="dialog" aria-modal="true" aria-label={$t('tools.install')}>
-    <div class="drawer-head">
+  <section class="main-panel" aria-label={$t('tools.install')}>
+    <header class="main-panel-head">
+      <button
+        type="button"
+        class="ghost small panel-back"
+        onclick={closePanel}>{$t('tools.backToList')}</button
+      >
       <h2>{$t('tools.install')}</h2>
-      <button type="button" class="ghost" onclick={closePanel}>{$t('common.close')}</button>
-    </div>
+    </header>
 
-    <div class="drawer-body">
+    <div class="main-panel-body">
       <!--
         两个来源页签（D40）：**路径** 与 **远端目录**。
         它们不是"两种能力"，是同一件事的两条来源——并排摆字段会让人以为要填两处。
@@ -556,14 +571,15 @@
       {/if}
     </div>
 
-    <!-- 主操作常驻底部（`.drawer-foot`）：与「安装 skill」同一个布局 -->
-    <div class="drawer-foot">
+    <!-- 主操作在面板自己的底部（`.main-panel-foot`）：与「安装 skill」同一个布局。
+         ⚠️ 它原来贴住视口底部（弹框的手感），就地面板里它是"表单的最后一步"。 -->
+    <div class="main-panel-foot">
       <button type="button" disabled={busy} onclick={submitPath}>
         {busy ? $t('tools.installing') : $t('tools.installCheck')}
       </button>
     </div>
-  </div>
-{/if}
+  </section>
+{:else}
 
 {#if $loading['tools'] && $tools.length === 0}
   <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
@@ -768,8 +784,10 @@
   </Table>
 {/if}
 
+{/if}
+
 <style>
-  /* 抽屉内部与结果块。容器（`.drawer` / `.table-wrap` / `.notice`）由全局
+  /* 面板内部与结果块。容器（`.main-panel*` / `.table-wrap` / `.notice`）由全局
      `app.css` 提供——这里只管这一页独有的那几块。 */
 
   .check-row {

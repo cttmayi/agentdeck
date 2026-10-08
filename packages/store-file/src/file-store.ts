@@ -18,6 +18,8 @@ import type {
   ActionId,
   ActionStatus,
   Agent,
+  AgentGroup,
+  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -47,7 +49,7 @@ import type {
   Workspace,
   WorkspaceId,
 } from '@agentdeck/protocol'
-import { ulid } from '@agentdeck/protocol'
+import { cleanAgent, ulid } from '@agentdeck/protocol'
 import { BlobStore } from './blobs.ts'
 import {
   atomicWrite,
@@ -86,6 +88,10 @@ export const STORE_FORMAT_VERSION = 1
 
 const COLLECTIONS = [
   'agent',
+  // 智能体组（D70 增量添加）。与 agent 并排：组是 agent 的**编队**。
+  // ⚠️ 新增集合名只影响**新写**的那份日志，老数据目录里没有
+  // `log/group.jsonl` 会被当成"这个 workspace 还没有组"，所以不需要迁移。
+  'group',
   'skill',
   // 工具包（D40）。与 skill 并排：两者都是"装进工作区、可挂到 agent 上、
   // 可卸载"的东西，放一起便于对照。⚠️ 新增集合名只影响**新写**的那份日志，
@@ -236,6 +242,9 @@ class WorkspaceStore {
   }
   agent(): JsonlLog<Agent & { id: string }> {
     return this.log('agent') as unknown as JsonlLog<Agent & { id: string }>
+  }
+  group(): JsonlLog<AgentGroup & { id: string }> {
+    return this.log('group') as unknown as JsonlLog<AgentGroup & { id: string }>
   }
   skill(): JsonlLog<Skill & { id: string }> {
     return this.log('skill') as unknown as JsonlLog<Skill & { id: string }>
@@ -443,21 +452,89 @@ export class FileStore implements Store {
 
   // ── Agent ──
 
+  // ⚠️ 两个读方法都要过 `cleanAgent`（**这里是 agent 读取的唯一总闸**）：
+  //    agent 整条以 JSON 存，2026-10 撤掉的字段（`reviewerAgentId` / 行动权限那三个）
+  //    还留在老记录里，而删 schema 字段**不会**让它们消失——只会让读的人看不见。
+  //    摘在这里，"界面拿到的"与"内部链路拿到的"才是同一份干净记录。
+  //    （磁盘上那一次的彻底清理见 `apps/daemon/src/agent-legacy-cleanup.ts`。）
   async getAgent(id: AgentId): Promise<Agent | null> {
     for (const ws of this.#stores.values()) {
       const found = ws.agent().get(id)
-      if (found) return found
+      if (found) return cleanAgent(found)
     }
     return null
   }
 
   async listAgents(workspaceId: WorkspaceId): Promise<Agent[]> {
+    return (await this.#ws(workspaceId)).agent().all().map(cleanAgent)
+  }
+
+  // 未经清理的那一份（磁盘上是什么样就是什么样）：只给启动时的老记录清理用——
+  // 它要删的正是读时兜底藏起来的那几个键，用 `listAgents` 就永远判不出"需要清"。
+  async listAgentsRaw(workspaceId: WorkspaceId): Promise<Agent[]> {
     return (await this.#ws(workspaceId)).agent().all()
   }
 
   async insertAgent(agent: Agent): Promise<void> {
     const ws = await this.#ws(agent.workspaceId)
     await ws.mutex.run(() => ws.agent().put(agent))
+  }
+
+  async deleteAgent(id: AgentId): Promise<boolean> {
+    for (const wsId of await this.listWorkspaceIds()) {
+      const ws = await this.#ws(wsId)
+      if (!ws.agent().has(id as string)) continue
+      return ws.mutex.run(() => ws.agent().del(id as string))
+    }
+    return false
+  }
+
+  // ── AgentGroup（智能体组，D70 增量添加）──
+
+  async getGroup(id: AgentGroupId): Promise<AgentGroup | null> {
+    for (const ws of this.#stores.values()) {
+      const found = ws.group().get(id as string)
+      if (found) return found
+    }
+    return null
+  }
+
+  async listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]> {
+    return (await this.#ws(workspaceId)).group().all()
+  }
+
+  async listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]> {
+    const wanted = agentId as string
+    const out: AgentGroup[] = []
+    for (const ws of this.#stores.values()) {
+      for (const g of ws.group().all()) {
+        if (g.members.includes(wanted as never)) out.push(g)
+      }
+    }
+    return out
+  }
+
+  async insertGroup(group: AgentGroup): Promise<void> {
+    const ws = await this.#ws(group.workspaceId)
+    await ws.mutex.run(() => ws.group().put(group))
+  }
+
+  async updateGroup(group: AgentGroup): Promise<boolean> {
+    const ws = await this.#ws(group.workspaceId)
+    return ws.mutex.run(async () => {
+      if (!ws.group().has(group.id as string)) return false
+      await ws.group().put(group)
+      return true
+    })
+  }
+
+  async deleteGroup(id: AgentGroupId): Promise<boolean> {
+    for (const wsId of await this.listWorkspaceIds()) {
+      const ws = await this.#ws(wsId)
+      if (!ws.group().has(id as string)) continue
+      return ws.mutex.run(() => ws.group().del(id as string))
+    }
+    return false
   }
 
   // ── Skill ──

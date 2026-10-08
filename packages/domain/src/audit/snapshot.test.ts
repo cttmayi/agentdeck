@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import type { Agent, Device, Workspace } from '@agentdeck/protocol'
+import type { Agent, AgentGroup, Device, Workspace } from '@agentdeck/protocol'
 import type { Page, Store } from '../ports/store.ts'
 import { checksumOf } from './export.ts'
 import { exportData, importData } from './snapshot.ts'
@@ -30,16 +30,29 @@ import { makeAgent, makeTool, toolId, wsId } from '../testing/fixtures.ts'
  */
 
 /** 一个只实现本文件用到的那几个方法的假 store。 */
-function stubStore(seed: { workspace: Workspace; agents: Agent[]; tools: ReturnType<typeof makeTool>[] }): {
+function stubStore(seed: {
+  workspace: Workspace
+  agents: Agent[]
+  tools: ReturnType<typeof makeTool>[]
+  /** 智能体组（2026-10：谁审谁 + 判完能做什么的唯一记录）。 */
+  groups?: AgentGroup[]
+}): {
   store: Store
   tools: Map<string, ReturnType<typeof makeTool>>
+  groups: Map<string, AgentGroup>
 } {
   const tools = new Map(seed.tools.map((t) => [t.id as string, t]))
+  const groups = new Map((seed.groups ?? []).map((g) => [g.id as string, g]))
   const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null })
   const store = {
     getWorkspace: async (id: string) => (id === (seed.workspace.id as string) ? seed.workspace : null),
     getDevice: async (): Promise<Device | null> => null,
     listAgents: async () => seed.agents,
+    listGroups: async () => [...groups.values()],
+    getGroup: async (id: string) => groups.get(id) ?? null,
+    insertGroup: async (group: never) => {
+      groups.set((group as { id: string }).id, group)
+    },
     listSkills: async () => [],
     listTools: async () => [...tools.values()],
     listIssues: async () => empty(),
@@ -56,12 +69,20 @@ function stubStore(seed: { workspace: Workspace; agents: Agent[]; tools: ReturnT
     listArtifactsByRun: async () => [],
     listAuditsByRun: async () => [],
     listActionsByVerdict: async () => [],
+    // agents 那一行（导入时会 get + put；导出时只用 listAgents）
+    getAgent: async (id: string) => seed.agents.find((a) => a.id === id) ?? null,
+    insertAgent: async (agent: never) => {
+      const a = agent as Agent
+      const i = seed.agents.findIndex((x) => x.id === a.id)
+      if (i >= 0) seed.agents[i] = a
+      else seed.agents.push(a)
+    },
     getTool: async (id: string) => tools.get(id) ?? null,
     insertTool: async (tool: never) => {
       tools.set((tool as { id: string }).id, tool)
     },
   } as unknown as Store
-  return { store, tools }
+  return { store, tools, groups }
 }
 
 const WS = wsId('ws-tools')
@@ -79,19 +100,47 @@ function makeWorkspace(): Workspace {
   } as Workspace
 }
 
+/** 一个最小的组（成员是执行者 + 审核者，动作权限可以指定）。 */
+function makeGroup(input: {
+  id: string
+  members: string[]
+  allowedActions?: string[]
+}): AgentGroup {
+  return {
+    id: input.id as AgentGroup['id'],
+    workspaceId: WS,
+    name: `组 ${input.id}`,
+    members: input.members as AgentGroup['members'],
+    allowedActions: (input.allowedActions ?? []) as AgentGroup['allowedActions'],
+    actionParams: {},
+    debugActions: [],
+    maxReworks: 0,
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
 describe('快照：工具包（D40）', () => {
-  test('★ 导出里带着 tools，且 agent 引用到的包一个不缺（FR-AUDIT-02 自包含）', async () => {
+  test('★ 导出里带着 tools，且**组**引用到的包一个不缺（FR-AUDIT-02 自包含）', async () => {
     const deploy = makeTool({ id: 'tool-deploy', workspaceId: WS, slug: 'deploy' })
     const lint = makeTool({ id: 'tool-lint', workspaceId: WS, slug: 'lint' })
-    // ★ "引用"的来源：审核者的动作权限写的是 `<包 slug>.<动作名>`，所以它按
-    //   **slug** 指着 deploy 这个包。（原来是"agent 挂着这个工具包"——挂载能力
-    //   撤掉之后那条引用不存在了，但这条还在，判据因此仍然成立。）
-    const agent = makeAgent({
-      id: 'ag-1',
-      workspaceId: WS,
+    const exec = makeAgent({ id: 'ag-exec', workspaceId: WS, role: 'executor' })
+    const rev = makeAgent({ id: 'ag-rev', workspaceId: WS, role: 'reviewer' })
+    // ★ "引用"的来源是**组**的动作权限（2026-10：它原来写在审核者 agent 上，
+    //   现在 agent 上没有这个字段了）。动作名写的是 `<包 slug>.<动作名>`，所以它
+    //   按 **slug** 指着 deploy 这个包。
+    const group = makeGroup({
+      id: 'grp-1',
+      members: [exec.id as string, rev.id as string],
       allowedActions: ['deploy.push'],
     })
-    const { store } = stubStore({ workspace: makeWorkspace(), agents: [agent], tools: [deploy, lint] })
+    const { store } = stubStore({
+      workspace: makeWorkspace(),
+      agents: [exec, rev],
+      tools: [deploy, lint],
+      groups: [group],
+    })
 
     const snap = await exportData(store, { workspaceId: WS })
 
@@ -102,11 +151,22 @@ describe('快照：工具包（D40）', () => {
     )
     assert.equal(snap.counts['tools'], 2)
 
-    // ★ 真正的判据：`allowedActions` 里引用到的每一个包都能在这份快照里找到
+    // ★★ 组也必须在里面：它是"谁审谁 + 判完能做什么"的唯一记录，不导它，
+    //    导出物里就只剩一堆互不相干的 agent。
+    assert.deepEqual(
+      snap.data.agentGroups.map((g) => g.id),
+      ['grp-1'],
+      '智能体组必须进快照——它现在承载 reviewerAgentId 与 allowedActions 两件事',
+    )
+    assert.deepEqual(snap.data.agentGroups[0]?.members, [exec.id, rev.id])
+
+    // ★ 真正的判据：组里引用到的每一个包都能在这份快照里找到
     const availableSlugs = new Set(snap.data.tools.map((t) => t.slug))
-    for (const action of agent.allowedActions ?? []) {
-      const slug = action.split('.')[0] ?? ''
-      assert.ok(availableSlugs.has(slug), `快照里缺少被动作权限引用到的工具包 ${slug}`)
+    for (const g of snap.data.agentGroups) {
+      for (const action of g.allowedActions ?? []) {
+        const slug = action.split('.')[0] ?? ''
+        assert.ok(availableSlugs.has(slug), `快照里缺少被动作权限引用到的工具包 ${slug}`)
+      }
     }
   })
 
@@ -138,7 +198,32 @@ describe('快照：工具包（D40）', () => {
     assert.equal(target.tools.size, 1, '不能变成两个包')
   })
 
-  test('★ 没有 tools 段的旧快照仍然能导入（格式版本没变 ⇒ 旧文件是正常的）', async () => {
+  test('★ 组随导出→导入一起过去（换台机器时"这条链本来怎么跑"不丢）', async () => {
+    const exec = makeAgent({ id: 'ag-exec', workspaceId: WS, role: 'executor' })
+    const rev = makeAgent({ id: 'ag-rev', workspaceId: WS, role: 'reviewer' })
+    const group = makeGroup({
+      id: 'grp-1',
+      members: [exec.id as string, rev.id as string],
+      allowedActions: ['deploy.push'],
+    })
+    const source = stubStore({
+      workspace: makeWorkspace(),
+      agents: [exec, rev],
+      tools: [],
+      groups: [group],
+    })
+    const target = stubStore({ workspace: makeWorkspace(), agents: [], tools: [], groups: [] })
+
+    const snap = await exportData(source.store, { workspaceId: WS })
+    const result = await importData(target.store, snap)
+
+    assert.equal(result.imported['agentGroups'], 1)
+    const restored = await target.store.getGroup('grp-1' as AgentGroup['id'])
+    assert.deepEqual(restored?.members, [exec.id, rev.id], '成员（谁和谁是一队）必须一起过去')
+    assert.deepEqual(restored?.allowedActions, ['deploy.push'], '动作权限必须一起过去')
+  })
+
+  test('★ 没有 tools / agentGroups 段的旧快照仍然能导入（格式版本没变 ⇒ 旧文件是正常的）', async () => {
     /**
      * `DATA_SNAPSHOT_FORMAT_VERSION` 没有因为加 tools 而升版，所以使用者手上
      * 那份旧版本导出的文件**必须**还能导进来。这里按旧文件的真实形状构造：
@@ -152,6 +237,8 @@ describe('快照：工具包（D40）', () => {
     const legacy = JSON.parse(JSON.stringify(snap)) as Record<string, unknown>
     delete (legacy['data'] as Record<string, unknown>)['tools']
     delete (legacy['counts'] as Record<string, unknown>)['tools']
+    delete (legacy['data'] as Record<string, unknown>)['agentGroups']
+    delete (legacy['counts'] as Record<string, unknown>)['agentGroups']
     const { checksum: _drop, ...rest } = legacy
     legacy['checksum'] = checksumOf(rest)
 
@@ -160,6 +247,8 @@ describe('快照：工具包（D40）', () => {
 
     assert.equal(result.imported['tools'] ?? 0, 0, '旧快照里没有工具包 ⇒ 一个都不该被造出来')
     assert.equal(target.tools.size, 0)
+    assert.equal(result.imported['agentGroups'] ?? 0, 0, '旧快照里没有组 ⇒ 一个都不该被造出来')
+    assert.equal(target.groups.size, 0)
     assert.deepEqual(result.warnings, [], '这不是"损坏"，不该报任何警告')
   })
 })

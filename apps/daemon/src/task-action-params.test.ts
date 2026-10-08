@@ -17,6 +17,7 @@ import {
   type RunId,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { createChainGroup } from './testing/chain.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import {
   installToolPackage,
@@ -157,6 +158,8 @@ async function submitRun(
     allowedActions?: string[]
     actionParams?: Record<string, Record<string, unknown>>
     reviewerAgentId?: string | null
+    /** ★ 智能体组（2026-10 起"谁审我 + 判完允许动什么"的唯一出处）。 */
+    groupId?: string
   },
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const payload: Record<string, unknown> = {
@@ -172,6 +175,7 @@ async function submitRun(
   if ('allowedActions' in input) payload['allowedActions'] = input.allowedActions
   if ('actionParams' in input) payload['actionParams'] = input.actionParams
   if ('reviewerAgentId' in input) payload['reviewerAgentId'] = input.reviewerAgentId
+  if ('groupId' in input) payload['groupId'] = input.groupId
 
   const res = await fetch(`${h.url}/api/runs`, {
     method: 'POST',
@@ -188,6 +192,7 @@ async function submitExecute(
     workDir: string
     allowedActions?: string[]
     actionParams?: Record<string, Record<string, unknown>>
+    groupId?: string
   },
 ): Promise<RunId> {
   const runId = ulid() as RunId
@@ -298,6 +303,8 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
   let action: string
   let reviewerId: string
   let executor: { id: string; name: string }
+  /** 把这一对串起来的组（带它提交才有审核者；省略 `actionParams` 时跟随它那份）。 */
+  let groupId: string
 
   before(async () => {
     h = await startHarness('params-a')
@@ -307,20 +314,29 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
     action = pkg.action
 
     reviewerId = await createAgent(h, {
-      name: '审核者 A（自己固定了一个参数）',
+      name: '审核者 A',
       role: 'reviewer',
-      allowedActions: [action],
-      actionParams: { [action]: { text: '审核者长期的固定值' } },
       reviewStandard: { body: '# A 标准\n\n只要产出不为空就算通过。' },
     })
-    executor = {
-      id: await createAgent(h, {
-        name: '执行者 A（长期由审核者 A 审）',
-        role: 'executor',
-        reviewerAgentId: reviewerId,
-      }),
-      name: '执行者 A（长期由审核者 A 审）',
-    }
+    const executorId = await createAgent(h, {
+      name: '执行者 A（由组里的审核者 A 审）',
+      role: 'executor',
+    })
+    executor = { id: executorId, name: '执行者 A（由组里的审核者 A 审）' }
+
+    // ⚠️ 2026-10：这一对原来是"审核者带 `allowedActions` + `actionParams`、执行者带
+    //    `reviewerAgentId`"。三个字段都已撤掉，同一件事现在由**组**表达：固定参数
+    //    写在组上（`actionParams`），"谁审我"由成员表达。三态判据一个字没变，只是
+    //    "省略时跟随"的那一份换了出处（以前跟随审核者，现在跟随**组**）。
+    groupId = await createChainGroup(
+      { url: h.url },
+      {
+        name: 'A 组',
+        members: [executorId, reviewerId],
+        allowedActions: [action],
+        actionParams: { [action]: { text: '组的长期固定值' } },
+      },
+    )
   })
 
   after(async () => {
@@ -330,11 +346,14 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
   test('★ 带 actionParams ⇒ 执行 run 与派生审核 run 的记录上都有这个键（原样带下去）', async () => {
     const workDir = await h.newWorkDir()
     const fixed = { [action]: { text: '这一次的值' } }
+    // ★ 带组提交：组那份固定值是"组的长期固定值"，而这一次钉的是"这一次的值"
+    //   ——这一条同时证明"覆盖优先"（顶掉的不是空，而是另一份有值的配置）
     const runId = await submitExecute(h, {
       agent: executor,
       workDir,
       allowedActions: [action],
       actionParams: fixed,
+      groupId,
     })
 
     const executeRecord = await getRunRecord(h, runId)
@@ -347,19 +366,44 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
     assert.deepEqual(reviewRecord['actionParams'], fixed)
   })
 
-  test('★ 省略 actionParams ⇒ 两条 run 记录上都没有这个键（"跟随"绝不能变成空对象）', async () => {
+  test('★ 省略 actionParams ⇒ 跟随**组**那份（两条 run 记录上都是组那份）', async () => {
+    /**
+     * ⚠️ 2026-10 判据变过，说清楚免得下次有人以为是在改测试凑绿：
+     *
+     *   以前"省略"跟随的是**审核者自己**的固定参数，而那份配置住在 agent 上
+     *   ⇒ 省略时 run 记录上**不该有这个键**（键不在 = "使用者没说"）。
+     *
+     *   现在那份长期配置住在**组**上，由 `POST /api/runs` 展开成 run 上的字段
+     *   （`if (body.actionParams === undefined) body.actionParams = group.actionParams`）
+     *   ⇒ 省略的结果是 run 上**有值**，值是**组那份**。
+     *
+     * ★ 仍然要防的错一个字没变：把"省略"折成"这一次不固定任何参数"（在
+     *   `executor.submit` 或 `autoChainReview` 里写 `?? {}`）。那种折法的表现是
+     *   "组里钉好的值全部失效、模型又开始自己编参数"，而 run 状态一切正常、
+     *   日志里没有一个字解释为什么——**没有任何地方会报错**。判据因此从"键不在"
+     *   变成"值等于组那份"：折成 `{}` 或者折成缺键都会在这里红。
+     */
     const workDir = await h.newWorkDir()
     const runId = await submitExecute(h, {
       agent: executor,
       workDir,
       allowedActions: [action],
+      groupId,
     })
 
     const executeRecord = await getRunRecord(h, runId)
-    assert.equal('actionParams' in executeRecord, false, '★ 省略 = 跟随，键不许出现')
+    assert.deepEqual(
+      executeRecord['actionParams'],
+      { [action]: { text: '组的长期固定值' } },
+      '★ 省略 ⇒ 跟随**组**那份（折成 `{}` 或折成缺键都会在这里红）',
+    )
     const review = await waitForDerivedReview(h, runId)
     const reviewRecord = await getRunRecord(h, review.runId)
-    assert.equal('actionParams' in reviewRecord, false, '★ 带下去那一站同样不许补出空对象')
+    assert.deepEqual(
+      reviewRecord['actionParams'],
+      { [action]: { text: '组的长期固定值' } },
+      '★ 派生出来的审核 run 要拿到同一份（它才是这份配置生效的地方）',
+    )
   })
 
   test('★ 带空对象 ⇒ 键在、值是 {}（"这一次不固定任何参数"是**明确的选择**，顶掉审核者长期那份）', async () => {
@@ -369,6 +413,7 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
       workDir,
       allowedActions: [action],
       actionParams: {},
+      groupId,
     })
 
     const executeRecord = await getRunRecord(h, runId)
@@ -383,153 +428,144 @@ describe('A. ★ 任务级固定参数：三态落库 + 带下去（与白名单
 // B. 保存时校验：写入口（agent POST/PATCH）与提交入口（POST /runs）
 // ══════════════════════════════════════════════════════════════════
 
-describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、参数必须是 open 且值合规、只属于审核者', () => {
-  test('★ agent POST：绑定参数名不能钉（bound 是平台的事实）⇒ 400', async () => {
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * ⚠️ 这一块原来测的是**agent 的写入口**（`POST/PATCH /api/agents` 上的
+ *    `allowedActions` / `actionParams`）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 2026-10 起动作权限与固定参数**只属于智能体组**，所以写入口搬到了
+ * `POST/PATCH /api/agent-groups`。校验逻辑一个字没变（同一个
+ * `parseAllowedActions` / 同一套参数判据），所以这一块**跟着写入口走**：
+ * 它守的是"哪些固定参数被接受/被拒"，不是某一个 URL。这样搬家之后矩阵仍然是满的。
+ *
+ * ── 两条用例**删掉**了（它们的对象不再存在，理由写在这里）──
+ *
+ *   · 「agent POST：执行者带固定参数 ⇒ 400」（"执行者的能力是工具"）；
+ *   · 「审核者带着参数改执行者 ⇒ 400 + 先清空再改角色」。
+ *
+ * 它们守的是"只有**审核者**才配得上动作权限与固定参数"这条角色规矩。现在这些东西
+ * 挂在**组**上，而组按形态**必然**是 1 执行 + 1 审核——角色与参数之间不再有可判的
+ * 关系，那条规矩**没有可判的东西了**（`rejectActionsForExecutor` 随字段一起删掉了）。
+ *
+ * ⚠️ 但它防过的那件事仍然成立、只是换了位置：执行者拿不到固定参数，因为执行者身上
+ *    根本没有这个字段（写进 `POST /api/agents` 就是 400「不认识的字段」——那条在
+ *    `agents-create.test.ts` 里钉着）。
+ */
+describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、参数必须是 open 且值合规', () => {
+  /** 建一对"执行者 + 审核者"（组的形态必须是恰好 1+1），返回它们的 id。 */
+  async function makePair(h: Harness): Promise<[string, string]> {
+    const executor = await createAgent(h, { name: '组里的执行者', role: 'executor' })
+    const reviewer = await createAgent(h, {
+      name: '组里的审核者',
+      role: 'reviewer',
+      reviewStandard: { body: '正文' },
+    })
+    return [executor, reviewer]
+  }
+
+  /** 往组的写入口发一份请求（本块所有用例的观测点）。 */
+  async function postGroup(
+    h: Harness,
+    extra: Record<string, unknown>,
+    method: 'POST' | 'PATCH' = 'POST',
+    groupId?: string,
+  ): Promise<{ status: number; body: { error?: string; group?: { id: string } } }> {
+    const members = method === 'POST' ? await makePair(h) : undefined
+    const res = await fetch(
+      method === 'POST' ? `${h.url}/api/agent-groups` : `${h.url}/api/agent-groups/${groupId}`,
+      {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...(members === undefined ? {} : { name: '参数测试组', members }),
+          ...extra,
+        }),
+      },
+    )
+    return { status: res.status, body: (await res.json()) as { error?: string; group?: { id: string } } }
+  }
+
+  test('★ 组 POST：绑定参数名不能钉（bound 是平台的事实）⇒ 400', async () => {
     const h = await startHarness('params-b1')
     try {
       const pkgRoot = await h.newWorkDir('params-b1-pkg')
       const pkg = await writeToolPackage({ slug: 'pb1-tool', actionName: 'note', root: pkgRoot })
       await installToolPackage(h.daemon, pkg)
-      const res = await fetch(`${h.url}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: '想钉绑定参数的人',
-          role: 'reviewer',
-          runtimeKey: 'claude',
-          allowedActions: [pkg.action],
-          actionParams: { [pkg.action]: { dir: '/tmp/x' } },
-          reviewStandard: { body: '正文' },
-        }),
+      const res = await postGroup(h, {
+        allowedActions: [pkg.action],
+        actionParams: { [pkg.action]: { dir: '/tmp/x' } },
       })
       assert.equal(res.status, 400, '绑定参数不归使用者钉，必须被拒')
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /不归使用者钉/)
+      assert.match(String(res.body.error), /不归使用者钉/)
     } finally {
       await h.close()
     }
   })
 
-  test('★ agent POST：值不合规（超上限）⇒ 400，与模型填**同一套**取值判据', async () => {
+  test('★ 组 POST：值不合规（超上限）⇒ 400，与模型填**同一套**取值判据', async () => {
     const h = await startHarness('params-b2')
     try {
       const pkgRoot = await h.newWorkDir('params-b2-pkg')
       const pkg = await writeToolPackage({ slug: 'pb2-tool', actionName: 'note', root: pkgRoot })
       await installToolPackage(h.daemon, pkg)
-      const res = await fetch(`${h.url}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: '想钉超长值的人',
-          role: 'reviewer',
-          runtimeKey: 'claude',
-          allowedActions: [pkg.action],
-          actionParams: { [pkg.action]: { text: 'x'.repeat(3000) } },
-          reviewStandard: { body: '正文' },
-        }),
+      const res = await postGroup(h, {
+        allowedActions: [pkg.action],
+        actionParams: { [pkg.action]: { text: 'x'.repeat(3000) } },
       })
       assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /动作参数 text/)
+      assert.match(String(res.body.error), /动作参数 text/)
     } finally {
       await h.close()
     }
   })
 
-  test('★ agent POST：动作对不上已安装的包 ⇒ 400（与 allowedActions 同一条判据）', async () => {
+  test('★ 组 POST：动作对不上已安装的包 ⇒ 400（与 allowedActions 同一条判据）', async () => {
     const h = await startHarness('params-b3')
     try {
-      const res = await fetch(`${h.url}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: '想钉一个没装的包',
-          role: 'reviewer',
-          runtimeKey: 'claude',
-          actionParams: { 'ghost-pkg.note': { text: 'x' } },
-          reviewStandard: { body: '正文' },
-        }),
+      const res = await postGroup(h, {
+        actionParams: { 'ghost-pkg.note': { text: 'x' } },
       })
       assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /还没安装/)
+      assert.match(String(res.body.error), /还没安装/)
     } finally {
       await h.close()
     }
   })
 
-  test('★ agent POST：执行者带固定参数 ⇒ 400（执行者的能力是工具，动作不是它的）', async () => {
-    const h = await startHarness('params-b4')
-    try {
-      const pkgRoot = await h.newWorkDir('params-b4-pkg')
-      const pkg = await writeToolPackage({ slug: 'pb4-tool', actionName: 'note', root: pkgRoot })
-      await installToolPackage(h.daemon, pkg)
-      const res = await fetch(`${h.url}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: '想钉参数的执行者',
-          role: 'executor',
-          runtimeKey: 'claude',
-          actionParams: { [pkg.action]: { text: 'x' } },
-        }),
-      })
-      assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /执行者/)
-    } finally {
-      await h.close()
-    }
-  })
-
-  test('★ agent PATCH：改出不合规的固定参数 ⇒ 400；审核者带着参数改执行者 ⇒ 400', async () => {
+  test('★ 组 PATCH：改出不合规的固定参数 ⇒ 400（存量那份原样留着）', async () => {
     const h = await startHarness('params-b5')
     try {
       const pkgRoot = await h.newWorkDir('params-b5-pkg')
       const pkg = await writeToolPackage({ slug: 'pb5-tool', actionName: 'note', root: pkgRoot })
       await installToolPackage(h.daemon, pkg)
-      const reviewerId = await createAgent(h, {
-        name: '审核者 B',
-        role: 'reviewer',
+      const created = await postGroup(h, {
         allowedActions: [pkg.action],
         actionParams: { [pkg.action]: { text: '合规值' } },
-        reviewStandard: { body: '正文' },
       })
+      assert.equal(created.status, 201, JSON.stringify(created.body))
+      // ⚠️ 用**建出来的那条组**的 id：`postGroup` 内部自己造了一对成员，拿外面
+      //    另造的一对去列表里找会找不到（第一版就是这么错的）。
+      const groupId = created.body.group!.id
 
-      // 改成超长值 ⇒ 400
-      const bad = await fetch(`${h.url}/api/agents/${reviewerId}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          actionParams: { [pkg.action]: { text: 'x'.repeat(3000) } },
-        }),
-      })
+      const bad = await postGroup(
+        h,
+        { actionParams: { [pkg.action]: { text: 'x'.repeat(3000) } } },
+        'PATCH',
+        groupId,
+      )
       assert.equal(bad.status, 400, 'PATCH 写入口必须校验固定参数')
+      assert.match(String(bad.body.error), /动作参数 text/)
 
-      // 带着固定参数把角色改成执行者 ⇒ 400（动作连执行者都不许有，钉值更无从谈起）
-      const role = await fetch(`${h.url}/api/agents/${reviewerId}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'executor' }),
-      })
-      assert.equal(role.status, 400, '审核者带着固定参数改执行者必须被拒')
-      const roleBody = (await role.json()) as { error: string }
-      assert.match(roleBody.error, /固定参数/)
-
-      // 先清空**动作权限与固定参数**再改角色 ⇒ 合法（那条路必须永远开着；
-      // 只清参数还不够——审核者还挂着动作，执行者连动作都不能有）
-      const clear = await fetch(`${h.url}/api/agents/${reviewerId}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ actionParams: {}, allowedActions: [] }),
-      })
-      assert.equal(clear.status, 200)
-      const okRole = await fetch(`${h.url}/api/agents/${reviewerId}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'executor' }),
-      })
-      assert.equal(okRole.status, 200, '清空后改角色必须放行')
+      // 拒了就不能动到存量那份（与"拒了不留痕"同一条纪律）
+      const after = (await (
+        await fetch(`${h.url}/api/agent-groups/${groupId}`)
+      ).json()) as { group: { actionParams: Record<string, Record<string, unknown>> } }
+      assert.deepEqual(
+        after.group.actionParams,
+        { [pkg.action]: { text: '合规值' } },
+        '★ 被拒的请求不许改到库里那份',
+      )
     } finally {
       await h.close()
     }
@@ -548,12 +584,24 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
       })
       const executorId = await createAgent(h, { name: '执行者 B', role: 'executor' })
       const agent = { id: executorId, name: '执行者 B' }
+      // ★ 第三个 case 要有**能用的审核者**，否则会在更早的"没有审核者"那一关被拦下。
+      //   2026-10 起"能用的审核者"有两条路：带组，或者 run 上**显式**点名一个。
+      //   这里刻意用**显式点名**那条（它没有组，也就没有组那份参数来顶掉这一次的）。
+      const groupId = await createChainGroup(
+        { url: h.url },
+        { name: 'B6 组', members: [executorId, reviewerId], allowedActions: [pkg.action] },
+      )
       const workDir = await h.newWorkDir()
       const fixed = { [pkg.action]: { text: 'x' } }
 
-      const cases: Array<{ runId: RunId; patch: Record<string, unknown>; code: string }> = [
+      const cases: Array<{
+        runId: RunId
+        patch: Record<string, unknown>
+        code: string
+      }> = [
         {
           runId: ulid() as RunId,
+          // ⚠️ 审核 run 上**既**不能带 `actionParams`、也不能带组（组描述的是执行链）
           patch: { kind: 'review', actionParams: fixed },
           code: 'allowed_actions_not_applicable',
         },
@@ -563,10 +611,8 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
           code: 'allowed_actions_without_reviewer',
         },
         {
-          // ★ 第三个 case 要有**能用的审核者**（这次显式指定），否则会在更早的
-          //    "没有审核者"那一关被拦下，测不到"动作没装"这条。
           runId: ulid() as RunId,
-          patch: { reviewerAgentId: reviewerId, actionParams: { 'ghost-pkg.note': { text: 'x' } } },
+          patch: { groupId, actionParams: { 'ghost-pkg.note': { text: 'x' } } },
           code: 'action_params_unresolvable',
         },
       ]
@@ -576,7 +622,12 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
           runId: c.runId,
           workDir,
           agent,
-          ...(c.patch as { kind?: string; reviewerAgentId?: null; actionParams?: Record<string, Record<string, unknown>> }),
+          ...(c.patch as {
+            kind?: string
+            reviewerAgentId?: null
+            groupId?: string
+            actionParams?: Record<string, Record<string, unknown>>
+          }),
         })
         assert.equal(res.status, 400, `应 400：${JSON.stringify(c.patch)}`)
         assert.equal((res.body as { code?: string }).code, c.code)
@@ -589,10 +640,6 @@ describe('B. ★ 固定参数的写入口校验：动作要对得上已装包、
   })
 })
 
-// ══════════════════════════════════════════════════════════════════
-// C. 任务级覆盖优先：契约减去固定参数 + 执行注入固定值（真实链路）
-// ══════════════════════════════════════════════════════════════════
-
 describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"、执行注入钉的值', () => {
   test('★★ 审核者长期固定了参数；这一次省略 ⇒ 用长期那份（契约减去它、执行注入它）', async () => {
     const h = await startHarness('params-c1')
@@ -602,19 +649,26 @@ describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"�
         actionName: 'note',
         root: await h.newWorkDir('params-c1-pkg'),
       })
-      // 审核者长期固定 `text`（它是必填的 open 参数——固定后模型**不该**再给）
-      const res = await fetch(`${h.url}/api/agents/${fx.reviewer.id}`, {
+      // 组的长期固定 `text`（它是必填的 open 参数——固定后模型**不该**再给）
+      //
+      // ⚠️ 2026-10：这份长期参数原来钉在**审核者 agent** 上（`Agent.actionParams`），
+      //    现在钉在**组**上——"审完能动手时用什么参数"是这条链的配置，不是某个人的。
+      const res = await fetch(`${h.url}/api/agent-groups/${fx.groupId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ actionParams: { [fx.action]: { text: '长期钉的值' } } }),
       })
-      assert.equal(res.status, 200, '给审核者钉长期固定参数应当成功')
+      assert.equal(res.status, 200, '给组钉长期固定参数应当成功')
 
       // 判决：触发动作，但**不写 text**（它已固定，契约说了不要写）
       h.backend.verdict = { ...PASS_VERDICT, action: verdictAction(fx.action, {}) }
 
       const workDir = await h.newWorkDir()
-      const executeRunId = await submitExecute(h, { agent: fx.executor, workDir })
+      const executeRunId = await submitExecute(h, {
+        agent: fx.executor,
+        workDir,
+        groupId: fx.groupId,
+      })
       const review = await waitForDerivedReview(h, executeRunId)
 
       // ── 契约：固定参数不进"你只需要给"、单独说"已固定，不要写" ──
@@ -650,7 +704,8 @@ describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"�
         actionName: 'note',
         root: await h.newWorkDir('params-c2-pkg'),
       })
-      await fetch(`${h.url}/api/agents/${fx.reviewer.id}`, {
+      // ⚠️ 2026-10：长期参数钉在**组**上（原来钉在审核者 agent 上）
+      await fetch(`${h.url}/api/agent-groups/${fx.groupId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ actionParams: { [fx.action]: { text: '长期钉的值' } } }),
@@ -663,6 +718,7 @@ describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"�
         agent: fx.executor,
         workDir,
         actionParams: { [fx.action]: { text: '这一次的值' } },
+        groupId: fx.groupId,
       })
       const review = await waitForDerivedReview(h, executeRunId)
 
@@ -688,7 +744,8 @@ describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"�
         actionName: 'note',
         root: await h.newWorkDir('params-c3-pkg'),
       })
-      await fetch(`${h.url}/api/agents/${fx.reviewer.id}`, {
+      // ⚠️ 2026-10：长期参数钉在**组**上（原来钉在审核者 agent 上）
+      await fetch(`${h.url}/api/agent-groups/${fx.groupId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ actionParams: { [fx.action]: { text: '长期钉的值' } } }),
@@ -705,6 +762,7 @@ describe('C. ★★ 固定参数的真实链路：契约说"已固定不要写"�
         agent: fx.executor,
         workDir,
         actionParams: {},
+        groupId: fx.groupId,
       })
       const review = await waitForDerivedReview(h, executeRunId)
 
@@ -736,7 +794,8 @@ describe('D. ★★ 模型越界写固定参数 ⇒ 结构性 invalid（不是�
         actionName: 'note',
         root: await h.newWorkDir('params-d1-pkg'),
       })
-      await fetch(`${h.url}/api/agents/${fx.reviewer.id}`, {
+      // ⚠️ 2026-10：长期参数钉在**组**上（原来钉在审核者 agent 上）
+      await fetch(`${h.url}/api/agent-groups/${fx.groupId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ actionParams: { [fx.action]: { text: '固定值' } } }),
@@ -749,7 +808,11 @@ describe('D. ★★ 模型越界写固定参数 ⇒ 结构性 invalid（不是�
       }
 
       const workDir = await h.newWorkDir()
-      const executeRunId = await submitExecute(h, { agent: fx.executor, workDir })
+      const executeRunId = await submitExecute(h, {
+        agent: fx.executor,
+        workDir,
+        groupId: fx.groupId,
+      })
       const review = await waitForDerivedReview(h, executeRunId)
 
       // 同步点：结构性 ⇒ "重试无意义"那句由收口写下来

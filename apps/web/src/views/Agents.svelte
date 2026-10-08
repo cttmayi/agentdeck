@@ -180,7 +180,7 @@
   保留自己的导语（它们没有别的地方说那一句）；这一页删。
 -->
 
-<div class="split-layout" class:with-detail={selected !== null}>
+<div class="split-layout" class:with-detail={creating || selected !== null}>
   <!-- ══════════════════ 左栏：智能体清单 + Runtime ══════════════════ -->
   <!--
     ⚠️ 左栏从"没有栏头"（2026-09）到 D62 加回一条与任务/智能体同款的
@@ -234,16 +234,16 @@
       <ul class="agent-list">
         {#each visibleAgents as a (a.id)}
           {@const reviewer =
-            a.role === 'reviewer'
-              ? $t('agents.reviewsOthers')
-              : !a.reviewerAgentId
-                ? $t('agents.noAutoReview')
-                : ($agents.find((x) => x.id === a.reviewerAgentId)?.name ??
-                  $t('agents.reviewerMissing'))}
+            a.role === 'reviewer' ? $t('agents.reviewsOthers') : ''}
           <ListRow
             rowClass="agent-row"
             active={a.id === selectedId}
-            onclick={() => (selectedId = a.id)}
+            onclick={() => {
+              selectedId = a.id
+              // ★ 2026-10：新建表单住在右栏了——点清单行就退出"正在新建"
+              //   （不然右栏同时想画两样东西）。
+              creating = false
+            }}
           >
             {#snippet children()}
               <span class="agent-line">
@@ -286,6 +286,10 @@
                     : $t('agents.noInstructions')}
                 </span>
                 <span class="agent-notes-meta">
+                  <!-- ⚠️ 2026-10（使用者的决定）：执行者的「由谁来审它」设置整段拿掉
+                       （审核走智能体组），列表上那一半（不自动审核 / 审核者名）随之
+                       去掉——新执行者没有这个设置，留着只会永远显示"不自动审核"。
+                       审核者保留「它审别人」。 -->
                   {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}<code>{a.runtimeKey}</code>
                 </span>
               </span>
@@ -365,21 +369,13 @@
   </ListPane>
 
   <!--
-    ⚠️ 两个抽屉挂在**这一层**（与主从两栏并列，不在 `.pane-body` 里）：
-       它们是浮层，谁都不该"住在"左栏里——那正是上一版把布局整垮的原因。
+    ⚠️ 2026-10：新建智能体**不再弹右侧抽屉**——与编辑态同款，住在右栏正文里
+    （`MainArea` body 的 `{#if creating}`，见下）。`WorkspaceSettings` 仍是抽屉。
   -->
-  <NewAgentForm
-    open={creating}
-    onclose={() => (creating = false)}
-    oncreated={() => {
-      creating = false
-      void loadAgents()
-    }}
-  />
   <WorkspaceSettings open={settingsOpen} onclose={() => (settingsOpen = false)} />
 
-  <!-- ══════════════════ 右栏：选中的那个 agent（宽屏并排 / 窄屏整页）══════════════════ -->
-  <MainArea empty={selected === null}>
+  <!-- ══════════════════ 右栏：新建表单 / 选中的 agent（宽屏并排 / 窄屏整页）══════════════════ -->
+  <MainArea empty={!creating && selected === null}>
     {#snippet emptyContent()}
       <div class="empty">
         <strong>{$t('agents.pickOneTitle')}</strong>
@@ -390,7 +386,15 @@
       </div>
     {/snippet}
     {#snippet body()}
-      {#if selected}
+      {#if creating}
+        <NewAgentForm
+          onclose={() => (creating = false)}
+          oncreated={() => {
+            creating = false
+            void loadAgents()
+          }}
+        />
+      {:else if selected}
         <AgentDetail
           agent={selected}
           onclose={() => (selectedId = null)}

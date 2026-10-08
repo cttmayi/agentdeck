@@ -447,7 +447,7 @@ export function renderVerdictInstruction(options: VerdictInstructionOptions = {}
           //    顺序。不排序的话，同一组动作、只因为勾的先后不同，就会渲染出两份
           //    不同的第一句话——而 `promptHash` 是审计链的一环，那种差别会让
           //    "这两次是不是同一件事"变成一个要人工比对的问题。
-          //    （白名单本身**不排序**：那是使用者给的名单，见 `parseAgentAllowedActions`。）
+          //    （白名单本身**不排序**：那是使用者给的名单，见 `parseAllowedActions`。）
           type: [...options.allowedActions].sort()[0]! as ActionRefType,
           params: {},
         }

@@ -41,6 +41,24 @@ const warn = (info: StageInfo): string | null =>
  * 不是 issue。按 issue 直接找 review run 会一条也找不到。那个 bug 我犯过一次。
  */
 
+/**
+ * 一条动作记录（`ActionView`）。
+ *
+ * ⚠️ 这些用例关心的是**状态**（`status`）与失败原因，所以下面 9 处原来都只写了
+ *    `{status, type, error}` 三个字段——而 `ActionView` 还有 `result` / `params` /
+ *    `finishedAt`。夹具少写字段**不会报错**（少写的键读出来是 `undefined`），
+ *    所以它一直被容忍着；直到有一天这个文件的类型检查真的跑起来（见
+ *    `apps/web/tsconfig.test.json` 的 `exclude`）才发现夹具与类型已经脱节。
+ *    这里补齐：**夹具要么像真的记录，要么就别假装是**。
+ */
+function action(over: {
+  status: string
+  type: string
+  error: string | null
+}): NonNullable<RunSummary['action']> {
+  return { result: null, params: {}, finishedAt: null, ...over }
+}
+
 function run(over: Partial<RunSummary> & { runId: string; kind: string }): RunSummary {
   return {
     status: 'completed',
@@ -54,7 +72,11 @@ function run(over: Partial<RunSummary> & { runId: string; kind: string }): RunSu
     verdict: null,
     action: null,
     ...over,
-  }
+    // ⚠️ `exactOptionalPropertyTypes` 下不能直接展开 `Partial<RunSummary>` 再返回：
+    //    可选属性（`groupId?`）展开后会带上 `| undefined`，而 `groupId?: string | null`
+    //    不接受**显式** undefined。夹具的职责是"补默认值 + 让调用方覆盖"，不是再演
+    //    一遍可选属性的语义，所以这里断言一次收口（比给每个可选字段写 `?? null` 诚实）。
+  } as RunSummary
 }
 
 const ISSUE = 'i1'
@@ -290,7 +312,7 @@ describe('★ 阶段推导：以**最新一次执行**为锚点', () => {
         status: 'completed',
         subject: { type: 'run', id: 'e1' },
         verdict: { status: 'dispatched_to_action', conclusion: 'pass', escalateReason: null },
-        action: { status: 'failed', type: 'example-note.append-note', error: '写不进去' },
+        action: action({ status: 'failed', type: 'example-note.append-note', error: '写不进去' }),
       }),
     ])
     assert.equal(info.stage, 'action_failed')
@@ -862,7 +884,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
   test('★ 动作还在跑 ⇒ 行动中（不是"已审查"）', () => {
     for (const status of ['proposed', 'auto_approved', 'executing']) {
-      const info = stageOf(task(ISSUE), withAction({ status, type: 'comment.create', error: null }))
+      const info = stageOf(task(ISSUE), withAction(action({ status, type: 'comment.create', error: null })))
       assert.equal(info.stage, 'action_running', `${status} 应当显示成"行动中"`)
       assert.equal(info.warningId, null, '还在跑不是"需要注意"')
     }
@@ -878,7 +900,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
   test('★ 动作失败 ⇒ 行动失败，而且进「需要注意」并带上原因', () => {
     const info = stageOf(
       task(ISSUE),
-      withAction({ status: 'failed', type: 'example-note.append-note', error: '脚本以非 0 退出码结束' }),
+      withAction(action({ status: 'failed', type: 'example-note.append-note', error: '脚本以非 0 退出码结束' })),
     )
     assert.equal(info.stage, 'action_failed')
     assert.equal(info.warningId, 'tasks.warnActionFailed')
@@ -889,7 +911,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
   test('★ 没有原因时换一条词条（否则界面上会留下 `{reason}` 字面量）', () => {
     const info = stageOf(
       task(ISSUE),
-      withAction({ status: 'failed', type: 'comment.create', error: null }),
+      withAction(action({ status: 'failed', type: 'comment.create', error: null })),
     )
     assert.equal(info.warningId, 'tasks.warnActionFailedNoReason')
     assert.doesNotMatch(String(warn(info)), /\{reason\}/)
@@ -897,7 +919,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
   test('★ 动作做成了（或本来就无需动作）⇒ 才算「已审查」', () => {
     for (const status of ['executed', 'skipped', 'rolled_back']) {
-      const info = stageOf(task(ISSUE), withAction({ status, type: 'comment.create', error: null }))
+      const info = stageOf(task(ISSUE), withAction(action({ status, type: 'comment.create', error: null })))
       assert.equal(info.stage, 'reviewed', `${status} 算做完了`)
     }
     // 判决有效但**没有要求任何动作**（`advisory`）⇒ 判决一出来就算完
@@ -918,13 +940,16 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
   test('★ 不认识的（新加的）动作状态按"没做完"处理', () => {
     // 判据是**白名单**：将来加了新状态时，宁可多显示一会儿"行动中"，
     // 也不要把没做完的说成做完了。
-    const info = stageOf(task(ISSUE), withAction({ status: 'some_future_status', type: 'x.y', error: null }))
+    const info = stageOf(task(ISSUE), withAction(action({ status: 'some_future_status', type: 'x.y', error: null })))
     assert.equal(info.stage, 'action_running')
   })
 
   test('★ 行动失败的任务会进「需要注意」那一拨', () => {
     const staged = [
-      { issue: { id: ISSUE }, info: stageOf(task(ISSUE), withAction({ status: 'failed', type: 'x.y', error: '炸了' })) },
+      {
+        issue: { id: ISSUE },
+        info: stageOf(task(ISSUE), withAction(action({ status: 'failed', type: 'x.y', error: '炸了' }))),
+      },
       { issue: { id: 'ok' }, info: stageOf(task('ok'), [run({ runId: 'e2', kind: 'execute', status: 'completed' })]) },
     ]
     const { attention } = splitByAttention(staged)
@@ -934,6 +959,7 @@ describe('★ 行动结果进阶段：判决通过 ≠ 事情做完了', () => {
 
 describe('★ 事实与提示分开：`action` 装的是这次到底做了什么', () => {
   test('动作事实原样带出来（契约值不翻译，详情页要显示它）', () => {
+    const record = action({ status: 'executed', type: 'example-note.append-note', error: null })
     const info = stageOf(task(ISSUE), [
       run({ runId: 'e1', kind: 'execute', status: 'completed' }),
       run({
@@ -942,15 +968,18 @@ describe('★ 事实与提示分开：`action` 装的是这次到底做了什么
         subject: { type: 'run', id: 'e1' },
         queuedAt: 2000,
         verdict: { status: 'dispatched_to_action', conclusion: 'pass', escalateReason: null },
-        action: { status: 'executed', type: 'example-note.append-note', error: null },
+        action: record,
       }),
     ])
     assert.equal(info.stage, 'reviewed')
-    assert.deepEqual(info.action, {
-      status: 'executed',
-      type: 'example-note.append-note',
-      error: null,
-    })
+    /**
+     * ★ 比的是**整条记录**（含 `result` / `params` / `finishedAt`）。
+     *
+     * 这里原来只写三个字段——那时夹具也只有三个字段，于是"原样带出来"这句话
+     * 实际上只被三个字段**验证**过：将来谁在这一层加一次投影（比如为了省流量只留
+     * `status`），这条断言照样绿，而详情页会开始缺东西。断言与夹具同步补齐。
+     */
+    assert.deepEqual(info.action, record)
   })
 
   test('没有动作 / 判决还没到那一步 ⇒ `action` 是 null（不是编一个空对象）', () => {

@@ -1900,9 +1900,12 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
       })
 
       const text = await waitForText(runId, /没有串接审核/)
-      assert.match(text, /没有串接审核：agent/, '要说清是哪个 agent')
-      assert.match(text, /「由谁审它」是空的/, '还要说清**去哪儿改**')
-      assert.match(text, /不是配置错误/, '以及这不是故障——D28 里"不自动审"是明确选择')
+      // ⚠️ 2026-10：文案变了。原来说的是"agent「X」没有指定审核者（「由谁审它」是空的）"
+      //    ——那个设置（`Agent.reviewerAgentId`）已经整个撤掉，"谁审"现在只有**组**
+      //    能回答。所以新的说法指向**建任务时选组**（那才是使用者能动手的地方），
+      //    而不再点名某个 agent 的某个已经不存在的配置框。
+      assert.match(text, /这条任务没有审核者/, '要说清这一次没有审核者')
+      assert.match(text, /智能体组/, '还要说清**去哪儿改**（建任务时选组）')
     } finally {
       await cleanup(dir)
     }

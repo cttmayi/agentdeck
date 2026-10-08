@@ -1,5 +1,5 @@
 import type { Agent, Tool } from './api.ts'
-import { effectiveAllowedActions, splitAllowedActions } from './agent-actions.ts'
+import { splitAllowedActions } from './agent-actions.ts'
 
 /**
  * 「执行 → 审核 → 行动」这条链的**推导**（新建任务页）。
@@ -8,15 +8,16 @@ import { effectiveAllowedActions, splitAllowedActions } from './agent-actions.ts
  * 为什么是独立一个纯函数文件，而不是 `.svelte` 里的几个 `$:`
  * ══════════════════════════════════════════════════════════════════
  *
- * 这一页要推出来的东西有三件，而且它们**互相依赖**：② 的审核者是谁（取决于
- * ① 选了谁、以及执行者长期配的是谁），③ 显示哪些动作（取决于 ② 最终那个人），
- * 以及**提交时那个 key 到底写不写**（取决于 ② 是"跟随"还是"这一次换人"）。
+ * 这一页要推出来的东西有三件，而且它们**互相依赖**：② 的审核者是谁（2026-10 起
+ * **只有组**能回答：组里那个审核者；点了名就是那个人），③ 显示哪些动作（取决于
+ * 这条链有没有组），以及**提交时那个 key 到底写不写**（取决于 ② 是"不点名"还是
+ * "这一次点名"）。
  *
  * 写成组件里的 `$:` 之后，这三件事都只能靠"打开页面点一遍"来验证，而这个仓库
  * 的 `apps/web` **没有组件级测试的跑法**（Svelte 组件在 node 里渲不出来，见
  * `agent-actions.test.ts` 里那段说明）。而这里推错一格的后果不是排版难看：
- * "跟随"被错推成"换人"会**悄悄把长期安排固化成一次覆盖**；"不审"被错推成
- * "跟随"会让一条本该被审的产出看起来正常结束。所以判据放进纯函数，用
+ * "不点名"被错推成"点名"会**悄悄把组的默认固化成一次覆盖**；"不审"被错推成
+ * "不点名"会让那条记录说的不是使用者做的事。所以判据放进纯函数，用
  * `node --test` 钉住（见 `newtask-chain.test.ts`）。
  *
  * ══════════════════════════════════════════════════════════════════
@@ -26,13 +27,13 @@ import { effectiveAllowedActions, splitAllowedActions } from './agent-actions.ts
  * `SubmitRunRequest.reviewerAgentId` 的三态各有后果，所以这里的 `ReviewerChoice`
  * 跟着它一一对应，并且**不合并**：
  *
- *   · `follow`  ⇒ 请求体里**不出现这个 key**（照执行者的长期安排走）；
+ *   · `default` ⇒ 请求体里**不出现这个 key**（不点名：有组就由组决定谁审）；
  *   · `none`    ⇒ `reviewerAgentId: null`（这一次明确不审）；
- *   · `pick`    ⇒ `reviewerAgentId: '<id>'`（这一次换人，**不改**长期配置）。
+ *   · `pick`    ⇒ `reviewerAgentId: '<id>'`（这一次点名，**不改**组的默认）。
  *
- * ★ "跟随"**不等于**"把当前解析出来的那个 id 写进请求体"：那会把一件长期安排
- *   冻结成这一次的覆盖——下一个人在智能体页把审核者换掉之后，这条路上仍然按
- *   老那个人跑。所以 `reviewer`（推出来给界面显示的人）与**请求体里写什么**
+ * ★ "不点名"**不等于**"把当前解析出来的那个 id 写进请求体"：那会把组的默认
+ *   冻结成这一次的覆盖——以后组里换了审核者，这条路上仍然按老那个人跑。
+ *   所以 `reviewer`（推出来给界面显示的人）与**请求体里写什么**
  *   是两件事，后者只看 `ReviewerChoice`（`reviewerRunField()`）。
  *
  * ══════════════════════════════════════════════════════════════════
@@ -67,10 +68,19 @@ import { effectiveAllowedActions, splitAllowedActions } from './agent-actions.ts
  * ② 上选了什么。
  *
  * ⚠️ 三种模式的**后果不同**，所以这是一个可辨识联合而不是"一个可空 id"：
- *    可空 id 表达不了"照旧"与"这次不审"的区别（那正是整个设计的关键）。
+ *    可空 id 表达不了"不点名"与"这次明确不审"的区别——前者由组决定审核者，
+ *    后者是**明确关掉审核**，库里也是两条不同的记录（缺字段 / `null`）。
+ *
+ * ⚠️ 2026-10：第一档原来是 `'follow'`（"跟随**执行者**身上那条「由谁来审它」"）。
+ *    那个设置从 `Agent` 上整个撤掉了，所以这一档改名成 `'default'`，语义收成一条：
+ *    **这一次不点名**——有组就是组的审核者，没有组就没有审核者（旧 daemon 会说
+ *    "这条任务没有审核者"，并指向"建任务时选一个智能体组"）。
+ *
+ *    名字换掉是对的：`follow` 会让人以为还有一份"长期配置"可跟随，而那种东西
+ *    已经不存在了。**判据与后果一个字没变**（不点名 ⇒ 库里缺这个键）。
  */
 export type ReviewerChoice =
-  | { mode: 'follow' }
+  | { mode: 'default' }
   | { mode: 'none' }
   | { mode: 'pick'; agentId: string }
 
@@ -86,18 +96,22 @@ export interface NewTaskChain {
   /**
    * 这个结果是从哪来的。
    *
-   * ⚠️ 它说的是**决定走的是哪条路**（跟随 / 这一次换人 / 这一次不审），不是
+   * ⚠️ 它说的是**决定走的是哪条路**（组默认 / 这一次点名 / 这一次明确不审），不是
    *    "解析成功了没有"——解析失败由 `notReviewing` 说（`dangling`）。
+   *
+   * ⚠️ `'group'` 这一档原来是 `'follow'`（"跟随执行者的长期配置"）：现在**只有组**
+   *    能让"不点名"这件事有落点，所以名字照实说。
    */
-  reviewerSource: 'follow' | 'override' | 'none'
+  reviewerSource: 'group' | 'override' | 'none'
   /**
    * 为什么这次不会有审核结论；`null` = 会审。
    *
-   *   · `not_configured` ⇒ 执行者没配「由谁来审它」（**长期**就没配）；
+   *   · `not_configured` ⇒ 这次**没有审核者**：② 没点名，而这条链也没有组
+   *                        （2026-10 之后"谁审"只有组能回答）；
    *   · `explicit_none`  ⇒ 使用者在 ② 上明确选了「不自动审核」；
-   *   · `dangling`       ⇒ 指向的那个 agent 已经不存在了（执行者配的、或者
+   *   · `dangling`       ⇒ 指向的那个 agent 已经不存在了（组的审核者、或者
    *                        ② 上选的那个被人删了）。★ 这一档必须是**独立状态**：
-   *                        静默退回"跟随"等于替使用者做了一个他没做过的决定。
+   *                        静默退回"不点名"等于替使用者做了一个他没做过的决定。
    */
   notReviewing: 'not_configured' | 'explicit_none' | 'dangling' | null
   /**
@@ -106,8 +120,8 @@ export interface NewTaskChain {
    * ★ 它同时是 ③ 的两件事：**勾选框里有哪几项是勾着的**（初值，见
    *   `defaultActionPicks()`），以及提交时判"改没改过"的**比较基准**
    *   （见 `picksMatchReviewer()`）。所以它必须真的来自
-   *   `splitAllowedActions(effectiveAllowedActions(reviewer))`——换个来源就会
-   *   出现"界面上的勾与提交时比的不是同一份"。
+   *   `splitAllowedActions(组配的那份)`——换个来源就会出现"界面上的勾与提交时
+   *   比的不是同一份"。
    */
   actions: readonly string[]
   /** 生效但**现在解析不出定义**的动作（包被卸载了，或名字来自很早以前的配置）。 */
@@ -121,6 +135,41 @@ export interface NewTaskChain {
    * 换个来源就会出现"界面上的表单与提交时比的不是同一份"。
    */
   actionParams: Record<string, Record<string, unknown>>
+  /**
+   * 这一栏的**默认返工次数**（D70 组模式才有）。
+   *
+   * 老路径没有组，默认恒为 `0`（不返工，见 `reworkRunField`）；组模式下它等于
+   * 组的 `maxReworks`——界面拿它当返工下拉的初值，提交时"没改"就省略 key
+   * （daemon 用组的默认）。`undefined` = 老路径（没有组默认这回事）。
+   *
+   * 2026-09：`null` = 组的默认是**无限返工**。
+   */
+  maxReworks?: number | null
+}
+
+/**
+ * 组给链的默认（D70 增量添加；第二轮升级成员为完整对象）。
+ *
+ * ⚠️ 只取**链要消费的那几样**，不整传 `AgentGroup`：这个文件只依赖"界面能看到的
+ *    形状"，协议里 `AgentGroup` 的其它字段（`enabled` 之类）链不关心。
+ *
+ * ⚠️ `members` 是**完整成员对象**（含私有，来自 groups store 的 `memberAgents`，
+ *    不是被过滤的全局 `$agents`）：`byId` 在候选池之后回退到这里，私有执行者 /
+ *    审核者因此能被解析（跟随组 → 组审核者、锁定显示的执行者名）。
+ *
+ * ⚠️ `reviewerId` 是**调用方解析好的**：调用方的取法是"执行者（`groupExecutor`）
+ *    之外的那个成员 id"——这样即使审核者那个 agent **已经被删**，我们仍知道它
+ *    的 id，于是链能正确报 `dangling` 而不是"没配"（后者会把"人没了"说成
+ *    "本来就不审"）。
+ */
+export interface GroupChainDefaults {
+  members: readonly Agent[]
+  /** 组的审核者 id；`null` = 组里没有（形态坏了 / 成员全被删）。 */
+  reviewerId: string | null
+  allowedActions: readonly string[]
+  actionParams: Record<string, Record<string, unknown>>
+  /** 组的默认返工次数：0–100，`null` = 无限返工。 */
+  maxReworks: number | null
 }
 
 export interface NewTaskChainInput {
@@ -129,20 +178,29 @@ export interface NewTaskChainInput {
   choice: ReviewerChoice
   agents: readonly Agent[]
   tools: readonly Tool[]
+  /**
+   * D70：选了智能体组。`null` = 老路径（手动选人）。
+   *
+   * 组模式下的默认来源变了：审核者 = 组的审核者（成员里 `role === 'reviewer'`
+   * 那个）、动作与参数 = 组的、返工 = 组的——**而不是**执行者长期配的。组一
+   * 定，这条链的"跟随"就有了确定的落点；② ③ 上的覆盖照旧只对这一次生效。
+   */
+  group?: GroupChainDefaults | null
 }
 
 /**
  * 把三个输入推成那条链。
  *
- * ⚠️ 动作那一份**复用** `agent-actions.ts`：`effectiveAllowedActions()`（有效值，
- *    含老数据从 `reviewStandard.allowedActions` 的回退）与 `splitAllowedActions()`
- *    （按"现在能不能解析"分两拨）。自己在这里再判一遍"这个动作名认不认识"，
- *    迟早与智能体页那一栏分叉——而分叉的表现是"同一个审核者，两页显示的权限
- *    不一样"。
+ * ⚠️ 动作那一份**复用** `agent-actions.ts` 的 `splitAllowedActions()`（按"现在能不能
+ *    解析"分两拨，与组配置页 ③ 同一套判据）。自己在这里再判一遍"这个动作名认不认识"，
+ *    迟早与组页那一栏分叉——而分叉的表现是"同一个组，两页显示的动作不一样"。
  */
 export function resolveNewTaskChain(input: NewTaskChainInput): NewTaskChain {
-  const { executor, choice, agents, tools } = input
-  const byId = (id: string): Agent | null => agents.find((a) => a.id === id) ?? null
+  const { executor, choice, agents, tools, group } = input
+  // 第二轮：候选池（`agents`）之后回退到组的成员（`group.members`，含私有）——
+  // 私有执行者/审核者不在全局候选池里，但必须在链里解析得出来。
+  const byId = (id: string): Agent | null =>
+    agents.find((a) => a.id === id) ?? (group?.members.find((m) => m.id === id) ?? null)
 
   let reviewer: Agent | null = null
   let notReviewing: NewTaskChain['notReviewing'] = null
@@ -157,13 +215,25 @@ export function resolveNewTaskChain(input: NewTaskChainInput): NewTaskChain {
       // ★ 选了的人不在了（界面开着的时候被删掉）：说它没了，而不是当作"没选"。
       if (!reviewer) notReviewing = 'dangling'
       break
-    case 'follow': {
-      // 老数据里这个键可能整个不存在 ⇒ `?? null` 与 `null` 同义（"没配"）。
-      const wanted = executor?.reviewerAgentId ?? null
-      if (!wanted) {
+    case 'default': {
+      // ⚠️ 2026-10：这里原来分两条路——有组就跟随组，没组就**跟随执行者身上那条
+      //    「由谁来审它」**（`executor.reviewerAgentId`）。后者随字段一起撤掉了：
+      //    没有组 ⇒ **这次没有审核者**（`not_configured`）。
+      //
+      //    ★ 这也是"选了智能体 ⇒ 不会自动审核"那句话在代码里的落点：界面上
+      //      `NewTaskForm` 的 `choice` 恒为不点名，所以**选智能体那一档永远走到这里**，
+      //      而摘要必须把这件事说出来（不能沉默地少一行——那看起来像"审核链路坏了"）。
+      if (!group) {
+        notReviewing = 'not_configured'
+        break
+      }
+      // 组的审核者 id 由调用方解析好（`GroupChainDefaults.reviewerId`）：
+      // 即使那个 agent 已经被删，我们仍能说出"它没了"（`dangling`），
+      // 而不是把"人没了"当成"本来就不审"。
+      if (!group.reviewerId) {
         notReviewing = 'not_configured'
       } else {
-        reviewer = byId(wanted)
+        reviewer = byId(group.reviewerId)
         if (!reviewer) notReviewing = 'dangling'
       }
       break
@@ -171,13 +241,20 @@ export function resolveNewTaskChain(input: NewTaskChainInput): NewTaskChain {
   }
 
   const reviewerSource: NewTaskChain['reviewerSource'] =
-    choice.mode === 'follow' ? 'follow' : choice.mode === 'pick' ? 'override' : 'none'
+    choice.mode === 'default' ? 'group' : choice.mode === 'pick' ? 'override' : 'none'
 
   // 没有审核者 ⇒ 一份动作都没有：动作是**审核者**的能力（判完之后由平台执行），
   // 没有审核者就没有判决，也就没有可谈的动作。这比"列出某个人的权限"更诚实。
-  const split = reviewer
-    ? splitAllowedActions(effectiveAllowedActions(reviewer), tools)
-    : { available: [], unavailable: [] }
+  //
+  // D70：动作的**来源**变了——组模式用组的 `allowedActions`（组的行动权限就是
+  // 这条链的默认，无论②最终是谁在审），老路径用审核者自己的。只换了来源，
+  // "按现在能不能解析分两拨"（`splitAllowedActions`）照旧复用，与智能体页同一套。
+  // ⚠️ 2026-10：这里原来是 `group ? group.allowedActions : effectiveAllowedActions(reviewer)`
+  //    ——老路径取**审核者身上**那份（还带一层"从老标准回退"）。那个字段撤掉了，
+  //    所以动作只有一个出处：**组**。没组 ⇒ 动作清单是空的（因此 ③ 那一栏也是空的，
+  //    这与"没有审核者就没有判决、也就没有动作"是同一条道理）。
+  const actionsOf = group ? group.allowedActions : []
+  const split = reviewer ? splitAllowedActions(actionsOf, tools) : { available: [], unavailable: [] }
 
   return {
     reviewer,
@@ -185,9 +262,26 @@ export function resolveNewTaskChain(input: NewTaskChainInput): NewTaskChain {
     notReviewing,
     actions: split.available,
     unavailableActions: split.unavailable,
-    // D43：审核者长期配的固定参数（可能是老记录里没有的键 ⇒ `{}`）。
-    actionParams: reviewer?.actionParams ?? {},
+    // D43：动作的固定参数（动作名 → 参数名 → 值）。2026-10 起**只有一个出处**：
+    //   组（`AgentGroup.actionParams`）。没有组 ⇒ `{}`（也没有动作可固定）。
+    //   ⚠️ 这里原来是 `group ? group.actionParams : (reviewer?.actionParams ?? {})`
+    //      ——老路径取审核者个人那份，那个字段已经撤掉了。
+    actionParams: group ? group.actionParams : {},
+    // `exactOptionalPropertyTypes` 下不能写 `group?.maxReworks`（那是 `number |
+    // undefined`，不是"缺这个键"）；组模式才带键，老路径整个不出现。
+    ...(group ? { maxReworks: group.maxReworks } : {}),
   }
+}
+
+/**
+ * 组的执行者（D70；第二轮起直接从成员对象里找）。
+ *
+ * 组形态在写入前校验过恰好 1 执行 + 1 审核，所以这里**不查数量**、只按角色找
+ * 第一个。找不到（成员被删、或数据被改坏）返回 `null`——那时提交会被服务端以
+ * `group_shape_invalid` 拒绝，这一页负责把话说在前头（`newtask.groupBroken`）。
+ */
+export function groupExecutor(members: readonly Agent[]): Agent | null {
+  return members.find((a) => a.role === 'executor') ?? null
 }
 
 /**
@@ -213,16 +307,16 @@ export function reviewerCandidates(
  *
  * `<select>` 只能绑字符串，而 `ReviewerChoice` 是一个对象——把三态编码成三个
  * 取值，比在下拉那里传一个"看起来像 id 的哨兵字符串"结实：agent id 万一哪天
- * 变得可自定义，`'follow'` 这种哨兵就会与真的 id 撞上。
+ * 变得可自定义，`'default'` 这种哨兵就会与真的 id 撞上。
  */
-export type ReviewerPick = 'follow' | 'none' | `pick:${string}`
+export type ReviewerPick = 'default' | 'none' | `pick:${string}`
 
 const PICK_PREFIX = 'pick:'
 
 export function toReviewerPick(choice: ReviewerChoice): ReviewerPick {
   switch (choice.mode) {
-    case 'follow':
-      return 'follow'
+    case 'default':
+      return 'default'
     case 'none':
       return 'none'
     case 'pick':
@@ -233,44 +327,48 @@ export function toReviewerPick(choice: ReviewerChoice): ReviewerPick {
 /**
  * 解码下拉的值。
  *
- * ⚠️ 认不出来的一律当 **`follow`**（"照旧"）：取不到值只可能是 DOM 被改坏，
- *    而三种结果里只有"跟随"是**不会凭空多出一个审核者、也不会凭空少掉审核**的
- *    那一个——跟随是这一页的默认，也是唯一与"这个值坏了"后果最轻的一档。
+ * ⚠️ 认不出来的一律当 **`default`**（"不点名"）：取不到值只可能是 DOM 被改坏，
+ *    而三种结果里只有它是**一个都不指定**的那一档——它不会凭空多出一个审核者。
+ *    （"少掉审核"这件事在这条路上本来就成立：不点名 + 没有组 = 不审，见
+ *    `resolveNewTaskChain`；所以这里选的是"后果最轻"的那个默认。）
  */
 export function reviewerChoiceOf(pick: string): ReviewerChoice {
   if (pick === 'none') return { mode: 'none' }
   if (pick.startsWith(PICK_PREFIX) && pick.length > PICK_PREFIX.length) {
     return { mode: 'pick', agentId: pick.slice(PICK_PREFIX.length) }
   }
-  return { mode: 'follow' }
+  return { mode: 'default' }
 }
 
 /**
  * 提交时**请求体里写什么**——三态的关键就在这个函数里。
  *
  * ══════════════════════════════════════════════════════════════════
- * "跟随"必须让那个 key **根本不出现**（省略 ≠ null）
+ * "不点名"必须让那个 key **根本不出现**（省略 ≠ null）
  * ══════════════════════════════════════════════════════════════════
  *
- * 省略的意思是"照执行者的长期安排"（daemon 去读 `reviewerAgentId` 配置），
- * `null` 的意思是"这一次不审"。两者后果差得很远（一个会派生审核 run、
- * 一个不会），在库里也是两条不同的记录。所以"跟随"**不能**写成
- * `reviewerAgentId: null`，也不能写成"把当前解析出来的那个 id 传过去"：
+ * 省略的意思是"**这一次不点名**——有组就由组决定谁审"（daemon 按 `groupId` 展开，
+ * 没组就没有审核者），而 `null` 的意思是"这一次明确不审"（两者现在**行为相同**，
+ * 但记录不同、日志也不同：一句说"你没选组"，一句说"这是你选的"）。
  *
- *   · 传 `null` ⇒ 使用者以为自己只是照旧，实际把审核关掉了；
- *   · 传 id   ⇒ 使用者以为改了长期安排就生效，实际这一条被冻结成覆盖。
+ * 所以"不点名"**不能**写成 `reviewerAgentId: null`，也不能写成"把当前解析出来的
+ * 那个 id 传过去"：
  *
- * ★ 判据只看 `choice`（使用者选了什么），**不看** `chain.reviewer`：跟随模式下
- *   `reviewer` 通常非空（那是拿来显示的），而请求体里绝不能出现它。
+ *   · 传 `null` ⇒ 使用者以为自己只是照旧，实际在库里留下一个"他决定不审"的记录；
+ *   · 传 id   ⇒ 这一条被**冻结**成覆盖：以后组里换了审核者，这条老任务不受影响，
+ *                而使用者以为自己只是"照旧"。
+ *
+ * ★ 判据只看 `choice`（使用者选了什么），**不看** `chain.reviewer`：不点名时
+ *   `reviewer` 通常非空（那是拿来显示的，来自组），而请求体里绝不能出现它。
  *
  * ⚠️ `pick` 指向一个已经不存在的 id 时**照样把它传过去**：让服务端回
- *    `reviewer_not_found` 的原文（页面上显示的就是它）。在这里悄悄改成"跟随"
+ *    `reviewer_not_found` 的原文（页面上显示的就是它）。在这里悄悄改成"不点名"
  *    或 `null`，等于替使用者做了一个他没做过的决定——而且那条产出会**看起来
  *    正常结束**。
  */
 export function reviewerRunField(choice: ReviewerChoice): { reviewerAgentId?: string | null } {
   switch (choice.mode) {
-    case 'follow':
+    case 'default':
       // ★ 空对象：`JSON.stringify` 之后这个 key 根本不在请求体里。
       return {}
     case 'none':
@@ -285,10 +383,11 @@ export function reviewerRunField(choice: ReviewerChoice): { reviewerAgentId?: st
 // ══════════════════════════════════════════════════════════════════════
 //
 // 这三个函数与上面 `reviewerRunField()` 是一对：② 决定"谁审"，③ 决定"这一次
-// 允许触发什么"，而两者的**省略语义完全相同**——省略 = 跟随那个审核者的长期
-// 配置，给了值 = 只覆盖这一次。所以判据也必须同样"宁可不带"：多带一次覆盖的
-// 代价是把长期安排冻死，少带一次覆盖的代价只是使用者这次改的没生效（而那种
-// 情况只会发生在"他改的东西与原有那份一模一样"时——那时两者本来就没差别）。
+// 允许触发什么"，而两者的**省略语义完全相同**——省略 = 用**组**配的那份（谁审、
+// 允许动什么），给了值 = 只覆盖这一次。所以判据也必须同样"宁可不带"：多带一次
+// 覆盖的代价是把组的默认冻死在这一条任务上，少带一次覆盖的代价只是使用者这次改的
+// 没生效（而那种情况只会发生在"他改的东西与原有那份一模一样"时——那时两者本来
+// 就没差别）。
 
 /**
  * ③ 上勾了哪些（受控状态）。
@@ -347,17 +446,17 @@ export function picksMatchReviewer(picks: ActionPicks, chain: NewTaskChain): boo
  * "没改"必须让那个 key **根本不出现**（省略 ≠ 空数组）
  * ══════════════════════════════════════════════════════════════════
  *
- * 省略 = 跟随那个审核者的「行动权限」（权威说明见协议里
+ * 省略 = 用**组**配的那份「行动权限」（权威说明见协议里
  * `SubmitRunRequest.allowedActions` / `Run.allowedActions` 那两段注释）；
  * 给了数组 = 这一次就用这一份。★ 把当前解析出来的那份**原样传过去**是最容易犯的
- * 错：它把一件长期安排**冻结成一次覆盖**，以后在智能体页给这个审核者加了动作，
- * 从这一页建的任务仍然按老那份跑（`reviewerAgentId` 上已经踩过一次同一个坑）。
+ * 错：它把组的默认**冻结成一次覆盖**，以后在组配置页给这个组加了动作，从这一页
+ * 建的任务仍然按老那份跑（`reviewerAgentId` 上已经踩过一次同一个坑）。
  *
  * ⚠️ **空数组是合法而且有意义的**："这一次一个动作都不许触发"（判决只能给结论）。
  *    它与"省略"是两件事，所以"一个都不勾"必须发 `[]`，**不能**靠"数组是空的就
  *    省掉"来偷懒——那个偷懒会让使用者的收紧静默失效，而这类任务的产出只是
  *    "看起来正常结束"。
- *    只有一种情况省略是**对的**：审核者那份本来就是空的——那属于"一致"，
+ *    只有一种情况省略是**对的**：组那份本来就是空的——那属于"一致"，
  *    `picksMatchReviewer()` 已经把它判掉了。
  */
 export function actionsRunField(
@@ -428,4 +527,36 @@ export function paramsRunField(
 ): { actionParams?: Record<string, Record<string, unknown>> } {
   if (paramsMatchReviewer(params, chain)) return {}
   return { actionParams: params }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 返工次数（D45 + D70 组模式 + 2026-09 无限）：与 ②③ 同一个"省略 = 跟随"语义
+// ══════════════════════════════════════════════════════════════════════
+//
+// 老路径：默认 `0` = 不返工，"只在真的要返工时带上"（0 与缺字段后果相同）。
+// 组模式（D70）：默认 = 组的 `maxReworks`，而"跟随组"必须让那个 key **根本不
+// 出现**——daemon 在 `groupId` 展开时才用它填默认（见 `POST /api/runs`）。
+// 所以判据是"下拉上的数与链的默认比"：
+//
+//   · 相等（没改） ⇒ `{}`（key 不出现。老路径下"0 与 0"相等、组模式下"组的数
+//     与组的数"相等——两者都正确地省略）；
+//   · 不等（改了） ⇒ 带上这个数。老路径里这只会发生在 `> 0`（从 0 往上加），
+//     组模式里还包括"从组的默认往下改到 0"——那是**明确的收紧**（组说可以重做
+//     2 次，这一次一次都不重做），必须发出去，不能因为"0 是老默认"就省掉。
+//
+// ⚠️ UI 用 `-1` 表示"无限"（下拉只能绑数值，`null` 会被 Svelte 序列化成字符串
+// "null"）——到协议边界才转成 `null`：`-1 → null`，其余原样。组默认是 `null`
+// （无限）时，"没改"同样以 `-1 === null` 判等省略；改成有限数 / 0 则发出收紧。
+export function reworkRunField(count: number, chain: NewTaskChain): { maxReworks?: number | null } {
+  const want: number | null = count === -1 ? null : count
+  if (chain.maxReworks !== undefined) {
+    // 组默认（可能是 null = 无限）："没改"就省略，让 daemon 用组的默认。
+    if (want === chain.maxReworks) return {}
+    return { maxReworks: want }
+  }
+  // 老路径默认 0：只有真的改过才带。`-1`（无限）必须发 `null`——它与
+  // "不返工"语义相反，不能因为"0 是默认"就吞掉。
+  if (want !== null && want > 0) return { maxReworks: want }
+  if (want === null) return { maxReworks: null }
+  return {}
 }

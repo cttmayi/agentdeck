@@ -139,12 +139,26 @@ export const tasksText = {
   // ── 「这一次是谁审的」（D42）——只在偏离长期配置时显示 ──
   'tasks.reviewerHeading': { zh: '这次由谁审', en: 'Who reviews this one' },
   'tasks.reviewerNone': {
-    zh: '这次没有自动审核——新建任务时选的。产出不会被审，也不会有审核结论。',
-    en: 'No automatic review this time — that was the choice when the task was created. The output will not be reviewed and there will be no verdict.',
+    zh: '这条任务没有审核者。产出没有被审，也不会有审核结论——建任务时要自动审核，得选一个「智能体组」（组的审核者就是这条链的审核者）。',
+    en: 'This task has no reviewer. Its output was not reviewed and there is no verdict — to get an automatic review, pick an agent group when creating the task (the group’s reviewer is the one that reviews the chain).',
+  },
+  /**
+   * ★ 两种来源要分开说（2026-10）：
+   *
+   *   · `reviewerFromGroup` —— 审核者是**组里**那个人。这件事的后续是"改了组，
+   *     以后的任务跟着变"；
+   *   · `reviewerOverridden` —— 这一次单独点名的人（只对这条任务有效）。
+   *
+   *   两句混成一句（原来那句说的是"没有改它长期的「由谁来审它」"）会指向一个**已经
+   *   不存在的设置**：那个字段撤掉了，现在没有"长期的由谁审"这回事。
+   */
+  'tasks.reviewerFromGroup': {
+    zh: '（来自这条任务选的智能体组：改组的审核者，以后的任务跟着变）',
+    en: '(from the agent group this task picked: change the group’s reviewer and later tasks follow)',
   },
   'tasks.reviewerOverridden': {
-    zh: '（这一次单独指定的审核者，没有改它长期的「由谁来审它」）',
-    en: '(reviewer picked for this task only; its long-term “who reviews it” setting is unchanged)',
+    zh: '（这条任务单独指定的审核者，只对这一次有效）',
+    en: '(reviewer picked for this task alone; applies to this run only)',
   },
   'tasks.warnActionFailed': {
     zh: '行动失败：{reason}',

@@ -530,51 +530,73 @@ describe('★ 卸载：一律放行（"还挂着就拒"那把锁已经删掉）'
 //    因为字段已经从协议里删掉，老数据里那个键解析时就被丢掉了。
 // ══════════════════════════════════════════════════════════════════
 
-describe('★ 动作权限写在 agent 上：接受已装工具的第三方动作，未安装的在保存时拒', () => {
-  test('★ 已安装工具的动作可以写在 agent 上（`<包 slug>.<动作名>`）', async () => {
+describe('★ 动作权限写在**组**上：接受已装工具的第三方动作，未安装的在保存时拒', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ⚠️ 这一整块原来测的是"动作权限写在 **agent** 上"（D40 收口）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 2026-10 起动作权限**只属于智能体组**（`AgentGroup.allowedActions`）：同一个
+   * 审核者出现在不同的组里，本来就该配不同的处置权限——而"判完允许动什么"是**这条
+   * 链**的事，不是某个人长期的能力。所以写入口从 `POST/PATCH /api/agents` 搬到了
+   * `POST/PATCH /api/agent-groups`，而校验逻辑（对着**已安装的工具包**核）一个字
+   * 没变：它本来就在 `parseAllowedActions` 里，两边共用。
+   *
+   * 于是这一块的每个用例都**跟着写入口走**：它守的是"哪些动作名被接受/被拒"这件事，
+   * 不是某一个 URL。这样搬家之后，校验矩阵仍然是满的。
+   *
+   * ── 三条用例**删掉**了（它们的对象不再存在，理由写在这里）──
+   *
+   *   · 「执行者带非空动作 ⇒ 400」（`rejectActionsForExecutor`）；
+   *   · 「角色从执行者改成审核者时可以一并带上动作」；
+   *   · 「有动作的审核者不能一步变成执行者（先清空，再改角色）」。
+   *
+   * 它们守的是"只有**审核者**能有动作权限"这条角色规矩。现在动作挂在**组**上，
+   * 而组按形态**必然**是 1 执行 + 1 审核——角色与动作之间不再有可判的关系，
+   * 那条规矩**没有可判的东西了**。`rejectActionsForExecutor` 也随字段一起删掉了。
+   *
+   * ⚠️ 但它防过的那件事仍然成立、只是换了位置：动作**不会**被某个执行者顺手拿到，
+   *    因为执行者身上根本没有动作字段（写进 `POST /api/agents` 就是 400
+   *    「不认识的字段」——这条在上面的 agents 用例里钉着）。
+   */
+
+  /** 建一对"执行者 + 审核者"（组必须恰好 1+1），返回它们的 id。 */
+  async function makePair(d: DaemonHandle): Promise<[string, string]> {
+    const executor = await makeExecutor(d, '组里的执行者')
+    const reviewer = (await call(d, 'POST', '/api/agents', {
+      name: '组里的审核者',
+      role: 'reviewer',
+      reviewStandard: { body: '正文' },
+    })).body['id'] as string
+    return [executor, reviewer]
+  }
+
+  /** 建一个带指定动作的组（本块所有用例的写入口）。 */
+  async function makeGroup(
+    d: DaemonHandle,
+    allowedActions: string[],
+    members?: [string, string],
+  ): Promise<CallResult> {
+    const pair = members ?? (await makePair(d))
+    return call(d, 'POST', '/api/agent-groups', {
+      name: '动作测试组',
+      members: pair,
+      allowedActions,
+    })
+  }
+
+  test('★ 已安装工具的动作可以写在组上（`<包 slug>.<动作名>`）', async () => {
     await withDaemon(async (d) => {
-      // ★ D41：能写在白名单里的动作**只能**来自装进来的工具包，所以这两个包是
-      //   这条用例的前提，不是装饰（原来这里还写了 `comment.create`，那是内置动作
-      //   时代的东西——现在它会被按"来自工具包 comment、而它没装"拒掉，
-      //   见本 describe 里那条记录 D41 语义变化的用例）。
-      const one = await writeToolPackage({ slug: 'demo-tool', actionName: 'run' })
-      const two = await writeToolPackage({ slug: 'other-tool', actionName: 'run' })
-      await installToolPackage(d, one)
-      await installToolPackage(d, two)
+      const pkg = await writeToolPackage({ slug: 'demo-tool' })
+      await installToolPackage(d, pkg)
 
-      // 新建这条入口
-      const created = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: [one.action, two.action],
-      })
-      assert.equal(created.status, 201, JSON.stringify(created.body))
+      const res = await makeGroup(d, [pkg.action])
+      assert.equal(res.status, 201, JSON.stringify(res.body))
+      const group = res.body['group'] as { allowedActions: string[] }
       assert.deepEqual(
-        (created.body as { allowedActions: string[] }).allowedActions,
-        [one.action, two.action],
-        '★ 动作写在 agent 上（不再是 reviewStandard 里那个老字段）',
-      )
-      assert.deepEqual(
-        (created.body as { reviewStandard: Record<string, unknown> }).reviewStandard[
-          'allowedActions'
-        ],
-        undefined,
-        '★ 写入口只写 `Agent.allowedActions`：标准里不再写动作（老字段是只读兼容）',
-      )
-
-      // 修改这条入口（路由里的等价写入口就是 agent 的 PATCH/PUT）
-      //
-      // ⚠️ 传进去的顺序与"排好序的顺序"**故意不同**（`other-tool` 在前）：只去重、
-      //    不排序这条断言才立得住。
-      const patched = await call(d, 'PATCH', `/api/agents/${created.body['id']}`, {
-        allowedActions: [two.action, one.action, two.action],
-      })
-      assert.equal(patched.status, 200, JSON.stringify(patched.body))
-      assert.deepEqual(
-        (patched.body as { allowedActions: string[] }).allowedActions,
-        [two.action, one.action],
-        '只去重，不排序、不补默认——"允许什么"是使用者说了算的',
+        group.allowedActions,
+        [pkg.action],
+        '★ 已装包声明的动作要如实存下来 —— 判决引用它时才有依据',
       )
     })
   })
@@ -585,20 +607,15 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       //   就会先被"包没装"拦下，这条用例再也测不到"整份请求都不生效"。
       const pkg = await writeToolPackage({ slug: 'demo-tool', actionName: 'run' })
       await installToolPackage(d, pkg)
-
-      const created = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: [pkg.action],
-      })
+      const pair = await makePair(d)
+      const created = await makeGroup(d, [pkg.action], pair)
       assert.equal(created.status, 201, JSON.stringify(created.body))
-      const id = created.body['id'] as string
+      const id = (created.body['group'] as { id: string }).id
 
       // "没装的那个包"用一个**明确不存在**的名字：老的内置名（`comment.create`）
       // 现在也落在同一条规则里，但拿它当夹具会让"哪个包没装"这句读起来像在说一个
       // 内置动作（那条语义变化单独记在下面那条用例里）。
-      const res = await call(d, 'PATCH', `/api/agents/${id}`, {
+      const res = await call(d, 'PATCH', `/api/agent-groups/${id}`, {
         allowedActions: [pkg.action, 'ghost-tool.run'],
       })
       assert.equal(res.status, 400, '★ 早拒：跑到一半才发现"策略要的动作找不到包"就是每次都失败')
@@ -607,9 +624,9 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       assert.match(error, /ghost-tool/, '要说清**因为哪个包没装**')
       assert.match(error, /安装/)
 
-      const agent = await call(d, 'GET', `/api/agents/${id}`)
+      const group = await call(d, 'GET', `/api/agent-groups/${id}`)
       assert.deepEqual(
-        (agent.body as { allowedActions: string[] }).allowedActions,
+        (group.body['group'] as { allowedActions: string[] }).allowedActions,
         [pkg.action],
         '拒了就不能写进去（原来那份要原样留着）',
       )
@@ -619,12 +636,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
   test('★ 包装着、但没声明这个动作 ⇒ 也拒（拼错动作名不能拖到运行时）', async () => {
     await withDaemon(async (d) => {
       await installTool(d, { source: 'path', path: await makeToolDir('demo-tool') })
-      const res = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: ['demo-tool.runn'],
-      })
+      const res = await makeGroup(d, ['demo-tool.runn'])
       assert.equal(res.status, 400)
       assert.match(String(res.body['error']), /没有声明/)
       assert.match(String(res.body['error']), /run/, '要顺带说清这个包声明的是哪些动作')
@@ -633,12 +645,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
 
   test('形状不对的动作名照旧拒（不认识就是不认识，不猜）', async () => {
     await withDaemon(async (d) => {
-      const res = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: ['Demo_Tool.run'],
-      })
+      const res = await makeGroup(d, ['Demo_Tool.run'])
       assert.equal(res.status, 400)
       assert.match(String(res.body['error']), /不认识的动作/)
     })
@@ -650,12 +657,7 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       // （那时有一个"内置动作集合"专门给它们开一条路）。D41 把那个集合删了，
       // 于是这些老名字和任何一个动作名走**同一条**校验——再没有"内置"与"第三方"
       // 的区别了。这条用例把新的现实钉住，免得以后有人以为它们还在。
-      const shaped = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: ['comment.create'],
-      })
+      const shaped = await makeGroup(d, ['comment.create'])
       assert.equal(shaped.status, 400)
       assert.match(
         String(shaped.body['error']),
@@ -665,131 +667,28 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
       assert.match(String(shaped.body['error']), /comment/)
 
       // 这一批连形状都不合法（下划线不在允许字符里），所以更容易认：不是动作名。
-      const unshaped = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: ['issue.update_status', 'issue.add_label'],
-      })
+      const unshaped = await makeGroup(d, ['issue.update_status', 'issue.add_label'])
       assert.equal(unshaped.status, 400)
       assert.match(String(unshaped.body['error']), /不认识的动作/)
       assert.match(String(unshaped.body['error']), /issue\.update_status/)
     })
   })
 
-  test('★ 包被卸载之后，agent 上那份动作仍然在（它是保存时的快照，不是活引用）', async () => {
+  test('★ 包被卸载之后，组上那份动作仍然在（它是保存时的快照，不是活引用）', async () => {
     await withDaemon(async (d) => {
       const installed = await installTool(d, { source: 'path', path: await makeToolDir('demo-tool') })
       const toolId = (installed.body['tool'] as Tool).id
-      const created = await call(d, 'POST', '/api/agents', {
-        name: '审核者',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: ['demo-tool.run'],
-      })
-      assert.equal(created.status, 201)
+      const created = await makeGroup(d, ['demo-tool.run'])
+      assert.equal(created.status, 201, JSON.stringify(created.body))
+      const id = (created.body['group'] as { id: string }).id
       assert.equal((await call(d, 'DELETE', `/api/tools/${toolId}`)).status, 200)
 
-      const agent = await call(d, 'GET', `/api/agents/${created.body['id']}`)
+      const group = await call(d, 'GET', `/api/agent-groups/${id}`)
       assert.deepEqual(
-        (agent.body as { allowedActions: string[] }).allowedActions,
+        (group.body['group'] as { allowedActions: string[] }).allowedActions,
         ['demo-tool.run'],
-        '库里的那份不该因为卸载而被改掉——该拦的是"再保存一次"（见上一个测试）',
+        '库里的那份不该因为卸载而被改掉——该拦的是"再保存一次"（那一次会被"包没装"拒）',
       )
-    })
-  })
-
-  // ══════════════════════════════════════════════════════════════════
-  // 只有**审核者**能有非空的动作权限（D40）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ 这条规矩原来有一句对称的话："执行者的能力是**工具**，审核者不挂工具"。
-  //    挂载能力撤掉之后执行者**没有**自己那一半能力了，但这条规矩本身仍然成立
-  //    （它管的是 `allowedActions`，与挂载无关）。
-
-  test('★ 执行者带非空动作 ⇒ 400，并说清"动作是判完之后由平台执行的"', async () => {
-    await withDaemon(async (d) => {
-      // ★ 夹具必须是**已装**工具包声明的动作：随手写一个没装的名字会让这份请求先被
-      //   "包没装"拦下，这条用例就再也测不到"执行者不许有动作权限"了——下面那行
-      //   断言就是守着这一点的。
-      const pkg = await writeToolPackage({ slug: 'exec-tool', actionName: 'run' })
-      await installToolPackage(d, pkg)
-
-      const res = await call(d, 'POST', '/api/agents', {
-        name: '执行者',
-        role: 'executor',
-        allowedActions: [pkg.action],
-      })
-      assert.equal(res.status, 400, '★ 动作是判完之后由平台执行的，执行者不配动作')
-      const error = String(res.body['error'])
-      assert.doesNotMatch(
-        error,
-        /还没安装/,
-        '★ 被拒的理由必须是"执行者不许有动作权限"，不是"包没装"',
-      )
-      assert.match(error, /执行者/)
-      // ⚠️ 这句原来是 `assert.match(error, /工具/, '要说清它的能力是什么')`。
-      //    提示原文是"执行者的能力是**工具**"，挂载撤掉之后那句话不成立了。
-      //    真正要守的是**提示说清了下一步怎么办**，所以钉住那一句。
-      assert.match(error, /把角色改成审核者/, '要说清该怎么办')
-      assert.match(error, /allowedActions/, '要点名是哪个字段')
-    })
-  })
-
-  test('★ 角色从执行者改成审核者时可以一并带上动作（同一个请求里合法）', async () => {
-    await withDaemon(async (d) => {
-      // ★ D41：带上来的动作也要来自已装工具包，否则先被"包没装"拒掉，
-      //   测不到"角色与动作一起改"这条规则。
-      const pkg = await writeToolPackage({ slug: 'switch-role-tool', actionName: 'run' })
-      await installToolPackage(d, pkg)
-
-      const id = await makeExecutor(d, '要转岗的')
-      const res = await call(d, 'PATCH', `/api/agents/${id}`, {
-        role: 'reviewer',
-        allowedActions: [pkg.action],
-      })
-      assert.equal(res.status, 200, JSON.stringify(res.body))
-      const body = res.body as { role: string; allowedActions: string[] }
-      assert.equal(body.role, 'reviewer')
-      assert.deepEqual(body.allowedActions, [pkg.action], '★ 一次请求里两件事一起改要合法')
-    })
-  })
-
-  test('★ 反过来要挡：有动作的审核者不能一步变成执行者（先清空，再改角色）', async () => {
-    await withDaemon(async (d) => {
-      // ★ D41：这条用例要的是"审核者身上**真的有一份**动作权限"，而合法的动作
-      //   只能来自已装工具包。
-      const pkg = await writeToolPackage({ slug: 'review-tool', actionName: 'run' })
-      await installToolPackage(d, pkg)
-
-      const created = await call(d, 'POST', '/api/agents', {
-        name: '先审后执',
-        role: 'reviewer',
-        reviewStandard: { body: '正文' },
-        allowedActions: [pkg.action],
-      })
-      assert.equal(created.status, 201, JSON.stringify(created.body))
-      const id = created.body['id'] as string
-
-      const res = await call(d, 'PATCH', `/api/agents/${id}`, { role: 'executor' })
-      assert.equal(res.status, 400, '★ 不然"执行者不许有动作权限"这条从角色这一侧就绕过去了')
-      const error = String(res.body['error'])
-      assert.match(error, /动作/)
-      // ⚠️ 这句原来断言提示里出现「工具」（原文是"执行者的能力是**工具**"）。
-      //    挂载撤掉之后执行者没有"工具"这个能力了，提示改成"动作是判完之后由
-      //    平台执行的，执行者不配动作"——断言跟着改成**提示里说清了下一步**
-      //    （下面那段"按提示先清空动作"才是真正要守的东西）。
-      assert.match(error, /先把动作清空/)
-
-      const still = await call(d, 'GET', `/api/agents/${id}`)
-      assert.equal((still.body as { role: string }).role, 'reviewer', '改不动就是改不动')
-
-      // 按提示先清空动作，再改角色 —— 这条提示指的下一步必须真的可行
-      const clear = await call(d, 'PATCH', `/api/agents/${id}`, { allowedActions: [] })
-      assert.equal(clear.status, 200, JSON.stringify(clear.body))
-      const ok = await call(d, 'PATCH', `/api/agents/${id}`, { role: 'executor' })
-      assert.equal(ok.status, 200, JSON.stringify(ok.body))
-      assert.equal((ok.body as { role: string }).role, 'executor')
     })
   })
 
@@ -807,13 +706,14 @@ describe('★ 动作权限写在 agent 上：接受已装工具的第三方动�
         reviewStandard: { body: '正文', allowedActions: [pkg.action] },
       })
       assert.equal(created.status, 201, '不是"装错了"，只是那一项不再属于标准——不该整条拒掉')
-      const body = created.body as {
-        allowedActions: string[]
-        reviewStandard: Record<string, unknown>
-      }
-      assert.deepEqual(body.allowedActions, [], '★ 老字段里的值不会被搬到新字段上（写入口只写一处）')
+      const body = created.body as Record<string, unknown>
       assert.equal(
-        body.reviewStandard['allowedActions'],
+        body['allowedActions'],
+        undefined,
+        '★ 老字段里的值不会被搬到任何地方去（动作只属于组，agent 上连这个键都不该有）',
+      )
+      assert.equal(
+        (body['reviewStandard'] as Record<string, unknown>)['allowedActions'],
         undefined,
         '★ 标准里也不留那个键：两处都写就会出现两个出处',
       )

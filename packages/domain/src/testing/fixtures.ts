@@ -50,10 +50,6 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
     env: {},
     createdAt: T0,
     role: 'executor',
-    reviewerAgentId: null,
-    // ★ D40 收口：动作权限在 **agent** 上（它一度住在 skill 里、也一度住在
-    //   `reviewStandard` 里）。缺省为空——只有审核者才该有非空值。
-    allowedActions: [],
     // D37：审核标准内联在审核者上；要测就 over 里给
     reviewStandard: null,
     updatedAt: T0,
@@ -73,8 +69,9 @@ export function makeSkill(
     body: '',
     verdictSchemaVersion: 1,
     // ⚠️ 这里原来有 `allowedActions: []`。D40 收口之后 `Skill` **没有**这个字段
-    //    ——动作权限是审核者的能力（`Agent.allowedActions`），skill 只剩
-    //    "正文 + 支持文件"。夹具里留着它会掩盖"skill 又能声明动作了"这件事。
+    //    ——动作权限属于**智能体组**（2026-10 起 `AgentGroup.allowedActions`，
+    //    在那之前短暂地是 `Agent.allowedActions`），skill 只剩"正文 + 支持文件"。
+    //    夹具里留着它会掩盖"skill 又能声明动作了"这件事。
     source: 'local',
     sourceRef: null,
     createdAt: T0,

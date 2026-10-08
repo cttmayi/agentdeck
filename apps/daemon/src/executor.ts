@@ -43,7 +43,7 @@ import {
   type Tool,
 } from '@agentdeck/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
-import { effectiveAllowedActions, reviewerIdentity } from './review-standard.ts'
+import { reviewerIdentity } from './review-standard.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -352,6 +352,10 @@ export class RunExecutor {
       ...(req.reviewerAgentId === undefined
         ? {}
         : { reviewerAgentId: req.reviewerAgentId as Run['reviewerAgentId'] }),
+      // ★ 智能体组（D70 增量添加）：只作**记录**（这条 run 是哪队人），
+      //   组的默认值已经由 `POST /api/runs` 展开进上面那几个字段了。
+      //   `undefined` = 老路径（执行者「由谁审它」）。
+      ...(req.groupId === undefined ? {} : { groupId: req.groupId as Run['groupId'] }),
       // ★ 任务级动作白名单**同理**：缺字段 = 跟随那个审核者的「行动权限」。
       //   写成 `?? []` 会把"照旧"悄悄变成"这一次一个动作都不许触发"——
       //   表现是判决永远只能给结论，而没有任何地方会说"为什么突然不动手了"。
@@ -363,10 +367,17 @@ export class RunExecutor {
       ...(req.actionParams === undefined
         ? {}
         : { actionParams: req.actionParams as Run['actionParams'] }),
+      // ★ 任务级调试动作（D70 增量添加，与 `allowedActions` 同款三态）：
+      //   缺字段 = 跟随审核者的 `Agent.debugActions`。
+      ...(req.debugActions === undefined
+        ? {}
+        : { debugActions: req.debugActions as Run['debugActions'] }),
       // ★ 任务级返工次数（D45）。缺字段 = 不返工（`fail` 直接交给人）。
       //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
       //   所以不需要区分三态，落一个数即可。
-      maxReworks: req.maxReworks ?? 0,
+      //   2026-09：`null` = **无限**——必须原样保留，不能用 `?? 0` 吞掉
+      //   （`?? 0` 会把"无限"悄悄降级成"不返工"，语义完全反了）。
+      maxReworks: req.maxReworks === undefined ? 0 : req.maxReworks,
       // ★ 2026-09（产品决定：日志已含第一句话全文，执行/审核都不再写上下文
       //   副本文件）：审核的材料**记在 run 记录上**，判决不合规的重试从这里取——
       //   · `materialRefs`：文件式审核的两份落盘文件（重试读结果文件）；
@@ -940,13 +951,15 @@ export class RunExecutor {
       //   标记这些硬东西一个字都不能动。
       const language = LANGUAGE_NAME[workspace?.locale ?? DEFAULT_LOCALE]
 
-      // ★ 审核标准与**动作权限**（D37 / D40 收口）：两者都在**这个审核者**身上，
-      //   解析点只有一处（`resolveReviewStandard`）——派发前判"能不能审"、这里
-      //   渲染 `{{standards}}`、判决收口时校验动作白名单，三处用的是同一份结果。
-      //   动作白名单的权威顺序（`Agent.allowedActions` 优先，为空才回退到老数据
-      //   里标准上那份）也只在那个函数里写了一遍。
+      // ★ 审核标准**在这个审核者身上**（D37），解析点只有一处
+      //   （`resolveReviewStandard`）——派发前判"能不能审"、这里渲染 `{{standards}}`、
+      //   判决收口时校验动作白名单，三处用的是同一份结果。
       //   老数据（标准还在挂载的 skill 里）的兼容路径**只对正文生效**：skill 不
       //   参与动作授权（D40），它的正文只进 `{{standards}}`。
+      //
+      //   ⚠️ 2026-10：动作白名单**不再来自审核者**——它属于智能体组
+      //   （`AgentGroup.allowedActions`），提交时展开进 `Run.allowedActions`。
+      //   agent 上那份字段撤掉了，所以这里不再有"回退到标准里那份"的顺序问题。
       /**
        * ★ 审核者的**身份**：agent 的「指令」＋（老数据里的）审核标准正文。
        *
@@ -982,12 +995,12 @@ export class RunExecutor {
               //    "没有正文"时返回 null ⇒ 动作权限被整份丢掉（详见
               //    `effectiveAllowedActions` 上面那段）。判据只能是**动作权限本身**，
               //    与"有没有标准正文"无关。
-              run.allowedActions ??
-                effectiveAllowedActions(agentConfig ?? { reviewStandard: null }, mountedSkills),
-              // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）：
-              //   `run.actionParams` 有值（含空对象）就用它，否则才用审核者长期
-              //   配的那份（`Agent.actionParams`）。
-              run.actionParams ?? agentConfig?.actionParams ?? {},
+              // ★★ 唯一权威是**这条 run**（组展开时落下来的那份）。2026-10：
+              //   agent 上那份行动权限**整个撤掉**了（归属错了——"判完允许动什么"
+              //   是这条链的事，不是某个审核者个人的），所以这里没有第二来源可回退。
+              run.allowedActions ?? [],
+              // ★★ 固定参数同理：只有 run 上那一份（组展开时落下来的）。
+              run.actionParams ?? {},
             )
           : null
 
@@ -1558,33 +1571,26 @@ export class RunExecutor {
     //   基础上 +1）。两者一比就是"还有没有额度"——所以不需要第三个计数器。
     const reworkBudget = await this.#reworkBudgetFor(run)
 
-    // ★ 动作白名单来自**审核者的能力**（`Agent.allowedActions`，D40 收口）——
-    //   它以前与标准同源（"这条标准只允许发评论"），再以前是所有挂载 skill 的
-    //   动作并集。现在 skill 一个字都不参与授权，标准也不再携带动作。
+    // ★ 动作白名单来自**这条链**：`Run.allowedActions`（★ 2026-10 起它的唯一出处是
+    //   智能体组 `AgentGroup.allowedActions`，提交时由 `POST /api/runs` 展开；
+    //   报告审核那条路上它是空的 ⇒ 判决只能给结论）。
     //
-    //   ⚠️ 取值**只走那一个解析点**（`effectiveAllowedActions`）：回退到老数据里
-    //   标准上那份白名单的顺序写在那里，这里不再写第二遍。
-    //   （★ 2026-09：它以前借的是 `resolveReviewStandard(...).allowedActions`，
-    //   而那个函数在没有正文时返回 null——动作权限因此会在"标准并进「指令」之后"
-    //   整份丢掉。修法与理由写在 `effectiveAllowedActions` 上面那段。）
+    //   演变：它与标准同源过（"这条标准只允许发评论"）→ 所有挂载 skill 的动作并集
+    //   → 搬到 `Agent.allowedActions`（D40 收口，审核者个人一份）→ 2026-10 搬到
+    //   组上（同一个人在不同组里本来就该有不同的权限）。skill 从头到尾不参与授权。
+    //
+    //   ⚠️ 取值只看**这条 run 记下来的那一份**（`run.allowedActions`），不再有
+    //   "回退到某个 agent 身上的配置"这回事——那种回退正是"事后看不出按谁判的"的
+    //   来源。
     //
     //   ⚠️ 这里重新解析一次（而不是把上面那个 `standard` 传下来）：这一步在
     //   **#finishReview** 里，与组装第一句话不在同一个作用域；解析函数是纯的、
     //   只读 store 里已经读过的数据，重算一次的代价可以忽略，而"两处各写一套
     //   取法"才是真正会出事的那种重复。
-    const agentForStandard = await this.#deps.store.getAgent(run.agentId as never)
-    const declaredActions =
-      // ★★ 任务级覆盖优先（D42），与组装第一句话那一处**同一个判据**：
-      //    `run.allowedActions` 有值（含空数组）就用它，否则才用审核者自己的。
-      //
-      //    两处必须一致——否则会出现"契约里列了 A、收口时却不认 A"（或者反过来：
-      //    判决写了一个契约里根本没列的动作却被放行），而那种自相矛盾的判决
-      //    最难查：它每一步看起来都合规。
-      // ★★ 2026-09 修：同上面那一处——**不许**经过 `resolveReviewStandard`（它在
-      //    没有正文时返回 null，会把动作权限整份吞掉）。两处必须同一个取法，
-      //    否则会出现"契约里列了 A、收口时却不认 A"这种自相矛盾的判决。
-      run.allowedActions ??
-      effectiveAllowedActions(agentForStandard ?? { reviewStandard: null }, req.skills ?? [])
+    // ★ 2026-10：agent 上那份行动权限整个撤掉 ⇒ 白名单**只有 run 这一个出处**
+    //   （组展开时落下的那份）。没有值就是空——报告摄取那条路不属于任何组，
+    //   所以它的判决触发不了动作（刻意承担，见 `Agent` 上那段说明）。
+    const declaredActions = run.allowedActions ?? []
     // ★ 白名单要考虑**已安装的工具包**（D40）：判决里可以出现
     //   `<包 slug>.<动作名>` 这种第三方动作，而"装了没有"只有 store 知道。
     //
@@ -1599,7 +1605,7 @@ export class RunExecutor {
       //   这里重新解析一次（而不是把上面那个 `standard` 传下来）——与
       //   `declaredActions` 同一个理由：解析是纯的、只读已读过的数据，而
       //   "两处各写一套取法"才是真正会出事的那种重复。
-      run.actionParams ?? agentForStandard?.actionParams ?? {},
+      run.actionParams ?? {},
     )
 
     // ⚠️ 这里原来还会**重建链路**（`loadChainSteps`）并传给审核收口——那是给
@@ -1614,12 +1620,14 @@ export class RunExecutor {
     // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）。
     //   这里解析一次、两处用：①`#reviewActions`（契约减去固定参数）已经用过了；
     //   ②这里交给收口（判决校验拦"模型写固定参数"）与动作执行（注入真实值）。
-    const effectiveFixedParams = run.actionParams ?? agentForStandard?.actionParams ?? {}
+    const effectiveFixedParams = run.actionParams ?? {}
 
     // ★ 调试动作（2026-09）：审核者给哪些动作勾了「调试」——勾了的不跑脚本，
-    //   只记录动作与解析后的参数。**没有任务级覆盖**：调试是审核者自己的设定
-    //   （`Agent.debugActions`），判据只看字段在不在（`?? []`）。
-    const effectiveDebugActions = agentForStandard?.debugActions ?? []
+    //   只记录动作与解析后的参数。
+    //   D70：组展开时把组的 `debugActions` 落进 `Run.debugActions`，所以这里
+    //   优先 `run.debugActions`（任务级决定），缺省回退到审核者自己的
+    //   （`Agent.debugActions`）——与 `allowedActions` 同一个判据（字段在不在）。
+    const effectiveDebugActions = run.debugActions ?? []
 
     const handling = await coordinator.handle({
       run,
@@ -1640,7 +1648,10 @@ export class RunExecutor {
       //
       //   ⚠️ 额度取自 `subject` 指向的那条执行 run，不是这条审核 run：审核 run
       //   自己的 `maxReworks` 只是被带下来的副本，而"允许几次"是任务级的决定。
-      ...(reworkBudget.maxReworks > 0
+      //
+      //   ⚠️ 判据是 `!== 0` 而不是 `> 0`：`0` = 不返工（预算不往下传，判决直接
+      //   交给人），而 `null` = **无限**（预算必须传下去，判决才能一直返工）。
+      ...(reworkBudget.maxReworks !== 0
         ? { maxReworks: reworkBudget.maxReworks, usedReworks: reworkBudget.usedReworks }
         : {}),
       inputBlobRefs: req.review?.inputBlobRef ? [req.review.inputBlobRef] : [],
@@ -1716,7 +1727,7 @@ export class RunExecutor {
    */
   async #reviewActions(
     workspaceId: Run['workspaceId'],
-    /** 审核者允许触发的动作名（`Agent.allowedActions`，协议里是 `ActionRefType`）。 */
+    /** 这条链允许触发的动作名（`Run.allowedActions`，协议里是 `ActionRefType`）。 */
     declared: readonly ActionRefType[],
     /**
      * 使用者在界面上设好的固定参数（D43）：`动作名 → 参数名 → 值`。
@@ -1731,7 +1742,7 @@ export class RunExecutor {
       tools = await this.#deps.store.listTools(workspaceId)
     } catch (err) {
       this.#deps.onWarn?.(
-        `读取已安装的工具包失败，这次判决只按审核者配的动作（Agent.allowedActions）判：${String(err)}`,
+        `读取已安装的工具包失败，这次判决只按这条链配的动作（Run.allowedActions）判：${String(err)}`,
       )
       // 读不到工具 ⇒ 契约里不列第三方动作、判决里的第三方动作一律不可用
       return { allowed: declared, hints: [], tools: [] }
@@ -1761,12 +1772,19 @@ export class RunExecutor {
    *
    * ⚠️ `subject` 不是 `run` 的（报告摄取那条路）⇒ 额度为 0：那份材料不是我们
    *    自己跑出来的，没有"执行者"可以返工，判决的 `fail` 只能交给人。
+   *
+   * ⚠️ 2026-09：`Run.maxReworks` 的 `null` = **无限**，必须原样传出去——不能
+   *    `?? 0`（那会把"无限"降级成"不返工"）。只有**缺字段**（老 run / 非执行
+   *    材料）才按 0 处理。
    */
-  async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number; usedReworks: number }> {
+  async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number | null; usedReworks: number }> {
     if (run.subject.type !== 'run') return { maxReworks: 0, usedReworks: 0 }
     const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
     if (!executeRun) return { maxReworks: 0, usedReworks: 0 }
-    return { maxReworks: executeRun.maxReworks ?? 0, usedReworks: executeRun.chainDepth }
+    return {
+      maxReworks: executeRun.maxReworks === undefined ? 0 : executeRun.maxReworks,
+      usedReworks: executeRun.chainDepth,
+    }
   }
 
   async #finish(

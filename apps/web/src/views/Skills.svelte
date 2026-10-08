@@ -36,9 +36,9 @@
    * Skills。
    *
    * ★ 这一页只管**资料包**：装什么、装成什么、从哪儿装的。它**不配任何权限**——
-   *   "判完允许动什么"是审核者的能力（智能体页 → 点开审核者），D40 收口之前它
-   *   一度长在安装表单里，那时"装一份参考资料"与"授权改状态"是同一件事，
-   *   而它们本来不该在一起。
+   *   "判完允许动什么"属于**智能体组**（组配置页 ③ 行动），D40 收口之前它一度长在
+   *   安装表单里，那时"装一份参考资料"与"授权改状态"是同一件事，而它们本来不该
+   *   在一起。
    */
   let expanded: string | null = null
 
@@ -50,6 +50,19 @@
    *
    * "我要装一个 skill"是一个念头，不该先让使用者去判断"我这算远端还是本地"。
    * 所以一个按钮打开一个面板，里面两个页签：**路径 / GitHub** 与**远端目录**。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * ⚠️ 2026-10：它**不再是右侧抽屉**，而是主区里的就地面板
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者的原话：「技能和工具的安装都是右侧弹框，需要改成类似新建智能体那样，在主区
+   * 显示，而不是弹框」。所以打开安装 = **主区换成安装面板**（与智能体页「新建」同一个
+   * 行为），头部给一个「← 返回技能列表」。
+   *
+   * 当初做成抽屉的理由是"表单插在页头和列表之间会把列表推到看不见的地方"——那个
+   * 顾虑现在换一种方式解决：面板**取代**列表（不是把它推下去），所以列表一行都不会
+   * 被挤到视口外；而"装完看不见列表"这件事由**结果块**兜住（装了哪些文件、哪个 slug、
+   * 来源逐条列出来），返回列表时它已经刷新过。
    */
   let panelOpen = false
   let tab: 'path' | 'remote' = 'path'
@@ -246,7 +259,19 @@
       label: $t('skills.install'),
       kind: 'primary',
       icon: 'plus',
+      /**
+       * ⚠️ 面板开着时这个按钮置灰：与智能体页「新建智能体」同一个做法（那边也是
+       *    `disabled: creating`）。它已经开着，再点一次没有意义，而"能点但什么都不
+       *    发生"是最容易让人以为卡片坏了的一种状态。
+       */
+      disabled: panelOpen,
       onActivate: openPanel,
+    },
+    {
+      id: 'settings',
+      label: $t('skills.settings'),
+      kind: 'secondary',
+      onActivate: openDirs,
     },
     {
       id: 'refresh',
@@ -254,12 +279,6 @@
       kind: 'secondary',
       icon: 'refresh',
       onActivate: () => void loadSkills(),
-    },
-    {
-      id: 'settings',
-      label: $t('skills.settings'),
-      kind: 'secondary',
-      onActivate: openDirs,
     },
   ])
   onDestroy(() => clearPageActions('skills'))
@@ -379,12 +398,12 @@
   }
 
   /**
-   * Esc 关抽屉。
+   * Esc 关掉那个浮层。
    *
-   * ★ 这个抽屉由本视图自己渲染（状态就住在这儿），所以它**不在**
-   *   `App.svelte` 那个 `$openDrawer` 的 Esc 处理里——不写这一条，
-   *   Esc 对它就没反应，而顶栏那两个抽屉都能 Esc 关掉，同一页里两种
-   *   手感是说不通的。
+   * ★ 这里现在只剩**设置抽屉**（本地技能目录）要处理：安装面板改成主区的就地面板
+   *   之后，它本来就是"按返回就回去"的普通界面，但 Esc 照旧关掉它——同一页里
+   *   设置抽屉能 Esc 关、安装面板不能，两种手感说不通（而且 Esc 在这一页上一向
+   *   就是"退出当前这件事"）。
    */
   function onKeydown(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
@@ -564,26 +583,34 @@
   </div>
 {/if}
 
+<!--
+  ══════════════════════════════════════════════════════════════════
+  安装面板：主区**就地**显示（2026-10，不再是右侧抽屉）
+  ══════════════════════════════════════════════════════════════════
+
+  使用者报的是"安装是个弹框"，要的是与智能体页「新建智能体」同一种行为：**主区换
+  成表单**。所以这里用 `{#if panelOpen} … {:else} …列表… {/if}`——面板取代列表，
+  而不是浮在它上面。
+
+  ⚠️ 与真正的对话框（`.drawer` / `.modal`）的差别不只是位置：
+     · 没有遮罩、没有 `role="dialog"` / `aria-modal`——**底色之后的东西没有被挡住**，
+       读屏器也不该被告诉"这里有个模态框"（那会让它把后面的列表当成不可达）；
+     · 它随着页面滚，不贴视口（`position` 不是 fixed）——它现在就是主区的内容；
+     · 唯一的"怎么回去"是头部那个**一直可见**的「← 返回技能列表」
+       （`.back-to-list` 那个全局 class 只在窄屏才显示，这里不能用它）。
+-->
 {#if panelOpen}
-  <!-- 点背景关掉：抽屉遮住列表时，"我怎么回去"必须有答案 -->
-  <div class="drawer-backdrop" onclick={closePanel} role="presentation"></div>
-
-  <!--
-    ★ 安装面板做成抽屉，而不是正文里一块展开的方块。
-
-      原来它插在页头和列表之间：打开一次，下面的 skill 列表就被推到看不见
-      的地方——而使用者装完 skill 第一件想做的事，正是看它有没有出现在列表里。
-      抽屉浮在列表上面，装完关掉就还在原地。
-
-      `wide`：里面那张远端目录表有五列，34rem 会只剩横向滚动条。
-  -->
-  <div class="drawer wide" role="dialog" aria-modal="true" aria-label={$t('skills.install')}>
-    <div class="drawer-head">
+  <section class="main-panel" aria-label={$t('skills.install')}>
+    <header class="main-panel-head">
+      <button
+        type="button"
+        class="ghost small panel-back"
+        onclick={closePanel}>{$t('skills.backToList')}</button
+      >
       <h2>{$t('skills.install')}</h2>
-      <button type="button" class="ghost" onclick={closePanel}>{$t('common.close')}</button>
-    </div>
+    </header>
 
-    <div class="drawer-body">
+    <div class="main-panel-body">
     <div class="tabs">
       <button
         type="button"
@@ -803,9 +830,13 @@
     {/if}
     </div>
 
-    <!-- 主操作常驻底部（`.drawer-foot`）：正文一长就不该让使用者先滚到底才能按。
-         反馈（上面那两个 notice）正好落在按钮正上方，按下就能看见。 -->
-    <div class="drawer-foot">
+    <!--
+      主操作在**面板自己的底部**（`.main-panel-foot`）。
+      ⚠️ 它原来贴住视口底部（`.drawer-foot` 是 flex 列的固定一截）——那是弹框才有的
+         手感。就地面板里它是"表单的最后一步"，跟着内容走；而反馈（上面两个 notice）
+         依然紧挨在它上面，按下就能看见。
+    -->
+    <div class="main-panel-foot">
       {#if tab === 'path'}
         <button type="button" disabled={busy} onclick={submitPath}>
           {busy ? $t('skills.installing') : $t('skills.installCheck')}
@@ -816,8 +847,8 @@
         </span>
       {/if}
     </div>
-  </div>
-{/if}
+  </section>
+{:else}
 
 {#if $loading['skills'] && $skills.length === 0}
   <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
@@ -964,10 +995,12 @@
   </Table>
 {/if}
 
+{/if}
+
 <style>
-  /* 安装面板的容器样式由全局的 `.drawer` 提供（见 app.css）——这里只管
-     抽屉**内部**那几块。原来那个 `.install-panel`（带边框的正文方块）
-     随抽屉改版一起删掉了：抽屉自己就是容器，再套一层边框是多余的。 */
+  /* 面板的容器（边框 / 圆角 / 头部 / 底部）由全局的 `.main-panel*` 提供
+     （见 `packages/ui/src/styles/app.css`，工具页用同一套）。这里只管面板
+     **内部**那几块。 */
   .tabs {
     display: flex;
     gap: var(--sp-1);

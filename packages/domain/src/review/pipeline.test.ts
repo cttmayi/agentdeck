@@ -157,6 +157,24 @@ describe('审核决策（S2/S1 的收口）', () => {
     assert.equal(d.kind, 'rework_exhausted')
   })
 
+  test('★ fail 且 maxReworks = null（无限）⇒ 用多少次都还有额度、继续返工', () => {
+    // 无限返工：已经返工过很多次（比如 99）也仍然 rework，永远不 exhaust。
+    for (const used of [0, 1, 5, 99]) {
+      const d = decideReview({
+        ...base,
+        maxReworks: null,
+        usedReworks: used,
+        output: fence({
+          ...passVerdict,
+          conclusion: 'fail',
+          reasonCode: 'missing_tests',
+          action: null,
+        }),
+      })
+      assert.equal(d.kind, 'rework', `usedReworks=${used} 时应继续返工`)
+    }
+  })
+
   test('★ needs_human ⇒ escalate，且带结构化原因', () => {
     const d = decideReview({
       ...base,
