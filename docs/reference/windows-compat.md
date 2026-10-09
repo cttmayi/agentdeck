@@ -10,16 +10,53 @@
 
 ---
 
-## 一句话结论
+## 现在的状态（2026-10，A / B / D 三级已修完）
 
-| 部分 | 在 Windows 上 |
+| 部分 | 状态 |
 |---|---|
-| 装依赖、构建界面、起 daemon、开界面、看数据 | **可以**（无原生编译依赖，锁文件里 win32 产物齐全） |
-| **真跑一条任务**（拉起 agent CLI） | **会挂在第一条 A 级缺口上**：npm 装的 CLI 是 `.cmd` 垫片，现代 Node **拒绝 spawn `.cmd`** |
-| 跑测试 | **61 条会红**（3 个文件：泛型后端 28 + codex 后端 13 + 流解析 20）——假 CLI 是 `#!/bin/sh` 包装 + `chmod`。其余测试**不受影响**（daemon 的 e2e 用进程内 `FakeBackend`，不起进程） |
-| 布局探针 | 不支持（Chrome 路径与 `pkill` 都是 macOS/Linux 的） |
+| 装依赖、构建界面、起 daemon、开界面、看数据 | **可以**（无原生编译依赖，锁文件里 win32 产物齐全）——审计当时就是可以的 |
+| **真跑一条任务**（拉起 agent CLI） | **已修**（A1）：npm 装的 `.cmd` 垫片会被解开成 `<node> <cli.js> <真实参数>`，参数不经 shell |
+| 探测 CLI 在哪 | **已修**（A2）：候选扩展名读机器的 `PATHEXT`，`.ps1` 不再出现（Node 起不了它） |
+| 跑测试 | **已修**（A3）：假 CLI 的包装在 Windows 上是 npm 垫片形状的 `.cmd`，那 61 条不再会红 |
+| 起的命令（`pnpm run daemon` 等） | **已修**（B1）：入口前面有一层 `.mjs` 版本守卫，Node 不够时给的是一句能照做的话，不是 `ERR_UNKNOWN_FILE_EXTENSION` |
+| 布局探针 | **已修**（D）：Windows 上也找得到浏览器（含 Edge 兜底），收尾用 `taskkill /T /F` |
+| ⚠️ **真机上量过一次** | **还没**。本机是 macOS，没有 Windows 机器/容器/虚拟机 —— 见下面「下一步」 |
 
-也就是说：**这台项目的主体是跨平台的，缺的是"起 CLI 的那一步"和"测试脚手架"这两处。**
+> **一句话**：审计当时"会拦住真跑任务"的三条（A 级）与"能跑但会误导人"的八条（B 级）
+> 都已经改完，改动随四份提交进库；**剩下的唯一一件事是在真 Windows 上跑一遍**，
+> 把那几条 `[判断]` 变成 `[量到]`。哪几条还只是判断，见本文最后的「没量到的」。
+
+---
+
+## 下一步（新对话从这里接）
+
+只剩一件事：**在一台真 Windows 上验一次**。按这个顺序做，出问题时下面有定位办法。
+
+```powershell
+# ① 拿代码（这台开发机连不上 github.com，所以是自包含 bundle；见「最小验收清单」）
+git clone /path/to/agentdeck-all.bundle agentdeck ; cd agentdeck
+pnpm install ; pnpm run build:web
+
+# ② 一次跑完最省事的一步：它同时验 A1 与 A3（真起进程、比对进程实际收到的 argv）
+pnpm run test                        # 期望 1855/0
+
+# ③ 再验"真跑一条任务"（界面上建一条，让它跑一次）
+pnpm run daemon
+```
+
+**真出问题时按这个顺序定位**（都是"看到什么 ⇒ 说明什么"）：
+
+| 现象 | 先看哪里 |
+|---|---|
+| 任务起不来、报 `spawn EINVAL` | `packages/agent-core/src/spawn-target.ts` 的 `via` 值：`shim` 是解开了垫片、`cmd` 是走 cmd.exe 兜底。兜底也不成 ⇒ 看 `%COMSPEC%` 指到哪（`node -e "console.log(process.env.COMSPEC)"`） |
+| 参数里带引号/`%` 时明确失败 | 那是**故意的**（cmd 无法如实传递就拒绝，不静默改写）——见 A1 的「修法」表与 `buildCmdLine` 的注释 |
+| 探测"找不到 CLI" | `node scripts/node-entry.mjs apps/daemon/src/cli.ts --verify-runtime all`，再看 `PATHEXT` |
+| 假 CLI 那 61 条红 | `pnpm run test` 跑 `packages/agent-generic/src/generic-backend.test.ts`：`FAKE_ARGV_ECHO_FILE` 会把进程**实际收到**的 argv 落盘，直接看它 |
+| 版本守卫本身 | 故意用老的 node 跑 `node scripts/node-entry.mjs apps/daemon/src/cli.ts --help`，期望一句人话 + 退出码 1 |
+
+**已经明确不做**的（别当成待办）：给 Windows 装 sandbox（`mode: 'required'` 会明确抛，
+是设计决定）；探针的 Windows 回归（要真机，且 D 级只是开发工具）；C 级那批**已经是对的**
+东西（列在下面，别白改）。
 
 ---
 
@@ -290,14 +327,22 @@ Windows 使用者在输入框里敲 `~\my-tools\note` 不会展开成家目录�
 
 ## D 级：只有开发工具（探针）不支持
 
+> ✅ **已修**：浏览器候选补上了 Windows 的 Chrome 三个位置与 **Edge** 兜底，收尾改成
+> `taskkill /PID … /T /F`。下面保留的是当时的现场。
+
 `tools/layout-probe/run.mjs:3895-3903` 只找 macOS/Linux 的 Chrome 路径（有 `CHROME=` 逃生口），
 `:4042` 用 `pkill -f` 收尾；视频夹具还要求 PATH 里有 `ffmpeg`。
 这是**开发工具**，不影响使用者；要么在 README 里标明"探针目前只在 macOS/Linux 上跑"，
 要么补两条：Windows 的 Chrome 路径 + 用 `taskkill /F /PID` 收尾。
+⚠️ 补的时候注意：Windows 上 `pkill` 不存在，而且**光杀父进程不够**——Chrome 的子进程
+还活着、还占着那个 profile 目录（下次运行会看到"profile 已被占用"），所以要用 `/T`。
 
 ---
 
-## 建议的修复顺序
+## 建议的修复顺序（已按这个顺序做完）
+
+> ✅ 六步全做完了（见上面"已经修掉的"表）。保留这段是因为**顺序本身有理由**：
+> A3 的修法依赖 A1 的能力，B3 挡的是最难归因的那个故障，所以排在 B4/B5 那种"一行修"前面。
 
 1. **A1 + A3**（`.cmd`/`.bat` 的 spawn 路径 + 假 CLI 包装改 `.cmd`）——决定"Windows 上能不能真跑任务、
    测试能不能跑"。一起改，因为 A3 的修法依赖 A1 的能力。

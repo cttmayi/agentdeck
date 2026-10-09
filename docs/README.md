@@ -25,7 +25,7 @@
 | **工具包怎么开发、住在哪**（清单逐字段、脚本约定、远端目录、执行链路） | [`./reference/tools.md`](./reference/tools.md) |
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | **智能体组是怎么工作的**（工作流：执行 → 审核 → 行动、展开、返工闭环、四道闸） | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
-| **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看 A 级三条，再看"最小验收清单"） |
+| **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看「现在的状态」，再看「下一步」与「最小验收清单」） |
 
 **读代码的路线**：`./runtime/pipeline.md` 是按"一次 run 的生命周期"写的，每一节都标了对应文件——
 从它进比从目录树进快得多。改哪一段去哪找，见那份文档最后的「代码索引」，
@@ -45,13 +45,13 @@
 | [`../tools/skill-catalog-sync/README.md`](../tools/skill-catalog-sync/README.md) | **推荐技能目录的同步工具**（独立工具，不属于远端服务）—— 清单怎么改、**一次同步要花多少次 GitHub API 调用**（以及撞限额时是什么表现）、失败语义（单条失败一个字都不换）、目录布局（工具与服务之间的唯一约定） | — |
 | [`./reference/tools.md`](./reference/tools.md) | **工具包参考手册** —— 一个包 = 一个组、`tool.json` 清单逐字段（含 bound/open 参数）、**怎么照着范例开发一个工具**、脚本与平台的三条约定（stdin/stdout/dry-run）、执行时的环境与临时目录、远端目录的放置位置、判决→动作的完整链路 | — |
 | [`./reference/first-sentence-template.md`](./reference/first-sentence-template.md) | **第一句话模版参考（当前实现）** —— 三块组装（① 框架 / ② 身份 / ③ 任务）× 三条链路（执行 / 审核 / 聊天）的逐项细节、变量表（11 条）、默认模版与渲染实例（逐字）、A/B 投递档、校验规则、老模版迁移、**调整时必须守住的不变量**与代码索引 | — |
-| [`./reference/windows-compat.md`](./reference/windows-compat.md) | **Windows 兼容性审计（2026-10）** —— 在 Windows 上能跑到哪一步、A/B/C/D 四级缺口（每条都指到文件行，并标了 `[量到]`/`[判断]`）、建议的修复顺序、真机最小验收清单、以及**没量到的**那一节 | — |
+| [`./reference/windows-compat.md`](./reference/windows-compat.md) | **Windows 兼容性审计（2026-10）** —— **现在的状态**（A/B/D 已修完、B8 是设计决定）、**下一步**（只剩"在真 Windows 上量一次"，附定位办法）、A/B/C/D 四级缺口逐条（都指到文件行并标 `[量到]`/`[判断]`）、真机最小验收清单、以及**没量到的**那一节 | — |
 | [`./reference/scenarios.md`](./reference/scenarios.md) | **使用场景说明** —— 端到端走查、多 agent 分工、插件机制、异常边界、数据归属、待确认点 | v2.5 |
 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) | **工作流智能体组：它是怎么工作的**（当前实现）—— 组里装了什么、三步（执行 → 审核 → 行动）、建任务时怎么摊开成普通配置、判决怎么分流、**返工闭环**（交回同一执行者原地改）、行动与固定参数、几道边界、界面看到什么 | — |
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
 
-> 决策记录见 `./srs/requirements.md` §16（**D1–D49**）。**决定改了就把编号写进去**——同步文档时
+> 决策记录见 `./srs/requirements.md` §16（**D1–D70**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
 > 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
 
 ---
@@ -92,7 +92,13 @@
 
 ## 开发环境与命令
 
-需要 **Node ≥ 22**（推荐 24——后端直接跑 `.ts`，没有构建步骤）。
+需要 **Node ≥ 22.18**（23.x 那条线要 ≥ 23.6；推荐 24——后端直接跑 `.ts`，没有构建步骤）。
+⚠️ 不是"≥ 22"就够：类型擦除默认可用是 23.6 起、回移到 22.18，实测 22.17 会报
+`ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`。
+所以四条 `pnpm run` 入口前面套了一层**普通 JavaScript** 的版本守卫
+（[`../scripts/node-entry.mjs`](../scripts/node-entry.mjs)，写成 `.mjs` 是必须的——
+守卫写在 `.ts` 里跑不到，node 连那个文件都加载不了）：版本不够时给一句能照做的话，
+够的时候把 `process.argv` 掰回"入口直接跑"的样子再 `import()` 真入口。
 
 ```bash
 pnpm install
@@ -111,9 +117,24 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | `pnpm run dev:web` | 界面开发模式（5173 → 代理到 4517） |
 | `pnpm run probe:layout` | **daemon 界面的布局检查**（约 470 项）：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
 | `pnpm run probe:remote` | **远端管理页的界面检查**（21 项）：起一次性远端服务（夹具数据、假同步工具、不联网）用真 Chrome 量。改过远端页时跑，**不在 `check` 里**——见 `../tools/remote-ui-probe/README.md` |
-| `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务 |
+| `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务。⚠️ 所有 `pnpm run <入口>` 命令都先过 `scripts/node-entry.mjs` 那层版本守卫（上面"开发环境"一节），直接敲 `node apps/…/cli.ts` 则**绕过**它 |
 | `pnpm run sync-skills` | **推荐技能目录的同步工具**：抓清单里的 GitHub 技能写进公共目录（跑一次就退出，**不是**服务；参数 `--dry-run` / `--out` / `--manifest`）。⚠️ 要联网、会撞 GitHub 匿名限额（60 次/小时；**实测一条大技能就 11 次**——`pptx` 52 个文件、9 个目录 ⇒ 列目录 10 次 + 取版本 1 次，所以 12 条在匿名下装不下一整轮）。**第一条失败就停**、**1 小时内抓过的不再下载**、已抓到的进**断点目录**。**记不住选项就敲 `pnpm run sync-skills --help`**（只读、无副作用）——见 `../tools/skill-catalog-sync/README.md` |
 | `pnpm run remote` / `mcp` / `cli <命令>` | 另外三个入口。推荐清单的**配置文件**在数据目录下（`recommended-skills.json`）：第一次跑同步时由工具把内置默认转存过去，`--manifest <文件>` 可另指一份（D54）。⚠️ `remote` 起来之后 **http://127.0.0.1:4518/** 就是**管理页**（技能 / 工具目录，D51/D52）：能看、能**重新同步**、能**手动装一条技能**（填 GitHub 链接）、能**卸载本地装的那条**（同步来的要改清单再同步）；`--web-dir` / `--sync-tool` 可换产物目录与同步工具 |
+
+---
+
+## 当前进行中的工作（新对话从这里接）
+
+| 线索 | 状态 | 去哪看 |
+|---|---|---|
+| **Windows 兼容性**（2026-10） | A / B / D 三级**已修完**（`pnpm run test` 1855/0、`typecheck` 0 错）；**剩"在真 Windows 上量一次"**——那几条 `[判断]` 还没变成 `[量到]` | [`./reference/windows-compat.md`](./reference/windows-compat.md) 的「现在的状态」+「下一步（新对话从这里接）」 |
+| 展示页面支持音视频 | 已做完（daemon 认 `video/*`/`audio/*` + 支持 `Range`；查看器就地播放） | `./design/design.md` §15.58 |
+| 远端管理页（技能 / 工具目录） | 已做完（含常驻探针 `pnpm run probe:remote`，21 项） | `./srs/requirements.md` §16 的 D51–D55 |
+
+> ⚠️ **提交与分发**：这台开发机连不上 github.com（直连、SSH:443、本地常见代理端口都试过，
+> 都不通），所以推送做不了；要换机器就用自包含 bundle——
+> `git bundle create .cache/agentdeck-all.bundle --all`（`.cache/` 已 gitignore），
+> 另一边 `git clone <bundle> agentdeck`。改完记得**重新生成**。
 
 ---
 

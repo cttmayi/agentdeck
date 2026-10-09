@@ -172,7 +172,7 @@ protocol  ←  domain  ←  store-file / store-sqlite
 
 `tsconfig.base.json` 设了 `erasableSyntaxOnly: true`，并禁用 `enum` / `namespace` /
 构造函数参数属性。因此后端直接由 **Node 的类型擦除**执行 `.ts`，没有编译产物：
-`pnpm run daemon` 就是 `node apps/daemon/src/cli.ts`。
+`pnpm run daemon` 就是 `node apps/daemon/src/cli.ts`（入口前面还有一层版本守卫，见下）。
 
 ⚠️ **门槛是 Node ≥ 22.18（23.x 那条线要 ≥ 23.6）**，不是"≥ 22"——类型擦除默认可用是
 23.6 起、并回移到 22.18（实测 22.17 报 `ERR_UNKNOWN_FILE_EXTENSION`）。
@@ -1473,6 +1473,11 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
+| **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |
+| CLI 入口的 Node 版本守卫 | `scripts/node-entry.mjs`（四条 `pnpm run` 命令都过它；`.mjs` 是必须的，写在 `.ts` 里跑不到） |
+| 预检：CLI 状态目录能不能写 | `apps/daemon/src/environment.ts`（Windows 上**真写一次**，不信 `access(W_OK)`） |
+| 原子写 / 追加句柄 | `packages/store-file/src/fs-utils.ts`（`renameWithRetry` 只在 win32 上重试） |
+| **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
@@ -1497,6 +1502,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 存储端口的两套实现 | `packages/store-sqlite/src/port-thinness.test.ts`（差分契约）、`file-store.test.ts`、`sqlite-store.test.ts` |
 | 快照与审计导出 | `apps/daemon/src/snapshot.test.ts`、`reporting.test.ts` |
 | 界面 | `apps/web/src/lib/*.test.ts` + `svelte-check` + `pnpm run probe:layout` |
+| **进程怎么起 / 平台差异**（Windows 的 `.cmd` 垫片、`PATHEXT`、假 CLI 包装、入口版本守卫、可写预检、`rename` 重试） | `packages/agent-core/src/spawn-target.test.ts`、`probe.test.ts`、`scripts/node-entry.test.mjs`、`apps/daemon/src/environment.test.ts`、`packages/store-file/src/fs-utils.test.ts`。⚠️ 这几条**平台是注入的**（`platform: 'win32'`），所以在 macOS 上就是真判据；「真 Windows 上 exec 得起来吗」那条不在测试里，见 `docs/reference/windows-compat.md` 的「没量到的」 |
 | 仓库级规矩 | `tests/test-safety.test.ts`（不许 `tmpdir()`、不许对危险目录递归删除） |
 
 ---

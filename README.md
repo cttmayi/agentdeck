@@ -77,9 +77,12 @@ AgentDeck 把这一关翻了过来：
 > 版本不够时不会让你去猜：命令入口前面有一层守卫
 > （`scripts/node-entry.mjs`），它会把那段堆栈换成一句能照做的话。
 
-**平台**：macOS / Linux 是第一公民；Windows 可用，但有几处已知缺口
-（最要紧的一条：npm 装的 agent CLI 在 Windows 上是 `.cmd` 垫片，而现代 Node 拒绝 spawn
-`.cmd`）。装之前先看 [`docs/reference/windows-compat.md`](./docs/reference/windows-compat.md)。
+**平台**：macOS / Linux 是第一公民；**Windows 已按 2026-10 的兼容性审计修过**
+（原本最要紧的一条是"npm 装的 agent CLI 在 Windows 上是 `.cmd` 垫片，而现代 Node 拒绝
+spawn `.cmd`"——现在平台会自己把垫片解开，参数不经 shell）。
+⚠️ 但那台审计机器是 macOS：**"在真 Windows 上跑一遍"这件事还没做**。
+装之前先看 [`docs/reference/windows-compat.md`](./docs/reference/windows-compat.md)
+（「现在的状态」+「下一步」两节），那里也说清了**哪些结论已经量到、哪些还只是判断**。
 
 ```bash
 pnpm install

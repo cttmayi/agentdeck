@@ -286,7 +286,10 @@ node tools/layout-probe/check-facts.mjs                 # 拿 dump 里的事实�
   探针可能还没跑完）。有过期断言在超时时，两把一起调大才看得到更多段落：
   `PROBE_VIRTUAL_MS=900000 PROBE_TIMEOUT_MS=900000 pnpm run probe:layout`；
 - 杀 Chrome 只按**本次专用的 user-data-dir** 匹配。早先用 `pkill -f "Google Chrome"`
-  把使用者本人的浏览器一起杀掉过，是个事故——不要写宽匹配；
+  把使用者本人的浏览器一起杀掉过，是个事故——不要写宽匹配。
+  ⚠️ **Windows 上不能照搬这一句**（2026-10）：那边没有 `pkill`，而且**光杀父进程不够**——
+  Chrome 的子进程还活着、还占着那个 profile 目录（下次运行会看到"profile 已被占用"），
+  所以走 `taskkill /PID <pid> /T /F`（在 `killChrome()` 里按平台分支）；
 - **探针里的 `const` 不能重名**。整个内联脚本是一个作用域，重复声明会让**整段脚本**
   语法错误——而症状看起来完完全全是"Chrome 超时"：`dump.html` 里 `#out` 还是
   `pending`，一条 error 都没有（`main()` 里的 catch 根本没机会跑，因为脚本没被解析）。
