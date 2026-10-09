@@ -530,7 +530,7 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   { view: '技能', key: 'skills.footButtonText', label: '面板底部是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
-  { view: '技能', key: 'skills.tabCount', label: '两个来源页签都在', ok: (v) => v === 2, show: (v) => `${v} 个` },
+  { view: '技能', key: 'skills.tabCount', label: '三个来源页签都在（路径/GitHub · 远端目录 · 本地清单）', ok: (v) => v === 3, show: (v) => `${v} 个` },
   { view: '技能', key: 'skills.duplicateCloseInTabs', label: '页签条里没有与抽屉头重复的「关闭」', ok: (v) => v === false },
   {
     view: '技能',

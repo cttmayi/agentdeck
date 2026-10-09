@@ -1,0 +1,93 @@
+{
+  "schema": "agentdeck/skill-list@1",
+  "note": "本地安装清单：界面「技能 → 安装技能 → 从本地清单安装」就是这份。改这个文件即可增删条目；起 daemon 时用 --skills-catalog <路径> 可以换一份。每条写 name + 恰好一个 url 或 path（url 只认 GitHub 的三个主机，见 @agentdeck/skill-source）。slug 不在这里声明——它由取包规则算出来，与 daemon 装的时候逐字相同。⚠️ 经 url 安装会把那个仓库的整棵树拉下来（不像推荐清单可以先 exclude 掉营销素材/测试产物）。",
+  "items": [
+    {
+      "name": "PPT 读写（Anthropic 官方）",
+      "url": "https://github.com/anthropics/skills/tree/main/skills/pptx",
+      "category": "slides",
+      "origin": "official",
+      "summary": "读写 .pptx：提文本、生成整套幻灯片缩略图网格、新建与改 XML"
+    },
+    {
+      "name": "Word 报告（Anthropic 官方）",
+      "url": "https://github.com/anthropics/skills/tree/main/skills/docx",
+      "category": "docs",
+      "origin": "official",
+      "summary": "Word 报告生成：目录、页码、表格、信头、批注、修订"
+    },
+    {
+      "name": "表格 / 数据型报告（Anthropic 官方）",
+      "url": "https://github.com/anthropics/skills/tree/main/skills/xlsx",
+      "category": "report",
+      "origin": "official",
+      "summary": "读写 .xlsx，做数据型报告"
+    },
+    {
+      "name": "协作写作流程（Anthropic 官方）",
+      "url": "https://github.com/anthropics/skills/tree/main/skills/doc-coauthoring",
+      "category": "report",
+      "origin": "official",
+      "summary": "结构化协作写作：收集上下文 → 分节迭代 → 用无上下文的新会话做「读者测试」"
+    },
+    {
+      "name": "调研（一手来源 + 引用链）",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/engineering/research",
+      "category": "research",
+      "origin": "community",
+      "summary": "派后台 agent 只查一手来源，产出带回链的 Markdown"
+    },
+    {
+      "name": "问卷设计",
+      "url": "https://github.com/mattpocock/skills/tree/main/skills/productivity/to-questionnaire",
+      "category": "research",
+      "origin": "community",
+      "summary": "把要问的事变成一份能用的问卷"
+    },
+    {
+      "name": "横滑网页 PPT（中文，杂志风/瑞士风）",
+      "url": "https://github.com/op7418/guizang-ppt-skill",
+      "category": "slides",
+      "origin": "community",
+      "summary": "生成单文件 HTML 的横滑网页 PPT，带演讲者视图与讲稿备注"
+    },
+    {
+      "name": "HTML PPT 工厂（24 主题 / 31 布局）",
+      "url": "https://github.com/lewislulu/html-ppt-skill",
+      "category": "slides",
+      "origin": "community",
+      "summary": "24 主题、31 布局、20+ 动画的 HTML PPT 生成"
+    },
+    {
+      "name": "图片式 slide（AI 出图）",
+      "url": "https://github.com/jimliu/baoyu-skills/tree/main/skills/baoyu-slide-deck",
+      "category": "slides",
+      "origin": "community",
+      "summary": "整页图片式的 slide，偏阅读与传播",
+      "needs": "出图依赖图像生成能力（本机已有 imagegen）"
+    },
+    {
+      "name": "用户调研（访谈 / 评论挖掘）",
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/customer-research",
+      "category": "research",
+      "origin": "community",
+      "summary": "用户访谈与评论挖掘",
+      "needs": "写的是海外营销语境，中文场景自行判断"
+    },
+    {
+      "name": "竞品拆解",
+      "url": "https://github.com/coreyhaines31/marketingskills/tree/main/skills/competitor-profiling",
+      "category": "research",
+      "origin": "community",
+      "summary": "把竞品拆成可对比的几栏"
+    },
+    {
+      "name": "深度调研（带引用长报告）",
+      "url": "https://github.com/firecrawl/firecrawl-workflows/tree/main/skills/firecrawl-deep-research",
+      "category": "research",
+      "origin": "community",
+      "summary": "带引用的长报告",
+      "needs": "需要自己准备 Firecrawl API key（装进来也跑不了）"
+    }
+  ]
+}

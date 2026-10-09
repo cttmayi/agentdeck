@@ -50,6 +50,11 @@ export const skillsText = {
 
   'skills.tabPath': { zh: '从路径 / GitHub 安装', en: 'Install from a path / GitHub' },
   'skills.tabRemote': { zh: '从远端目录安装', en: 'Install from the remote catalog' },
+  /*
+   * ★ 第三个页签：一份**仓库自带**的 JSON 清单，每条写一个安装方法（GitHub 链接
+   *   或本地路径）。它**不需要**远端服务、同步工具或登录——点一下由 daemon 现去取。
+   */
+  'skills.tabList': { zh: '从本地清单安装', en: 'Install from a local list' },
   'skills.pathLabel': {
     zh: '本地目录的绝对路径，或 GitHub 链接',
     en: 'Absolute path of a local directory, or a GitHub link',
@@ -115,6 +120,32 @@ export const skillsText = {
   'skills.remoteFootHint': {
     zh: '选一个条目，点它右侧的按钮把它装进来。',
     en: 'Pick an entry and click the button on its right to install it.',
+  },
+
+  // ── 本地清单（第三个页签）──
+  'skills.listFootHint': {
+    zh: '选一条，点它右侧的按钮把它装进来——装的时候会现去 GitHub（或你写的那条路径）取。',
+    en: 'Pick an entry and click the button on its right to install it — it is fetched on the spot from GitHub (or the path you wrote).',
+  },
+  'skills.listEmpty': { zh: '本地清单里没有条目', en: 'The local list has no entries' },
+  'skills.listEmptyHint': {
+    zh: '清单文件里现在没有可安装的条目（可能被改空了，或每一条都写得不合法）。',
+    en: 'The list file has no installable entries right now (it may have been emptied, or every entry is invalid).',
+  },
+  /**
+   * 清单**本身**坏掉（读不了 / 不是 JSON / 顶层格式不对）。
+   * ⚠️ 与"清单是空的"必须分开：那是"读到了，里面就是没有"，这是"根本没读到"——
+   *    两者的下一步完全不同（改清单内容 vs 修文件本身）。
+   */
+  'skills.listLoadFailed': { zh: '本地清单读不了：{error}', en: 'Could not read the local list: {error}' },
+  /**
+   * 清单里有条目**没**列出来（缺 url/path、主机不在白名单……）。
+   * ⚠️ 必须说出来：静默跳过会让"我写了 12 条怎么只有 11 条"无从解释。
+   */
+  'skills.listSkipped': { zh: '没列出来的条目：{list}', en: 'Entries not listed: {list}' },
+  'skills.listFootNote': {
+    zh: '上面每一条右侧的按钮就是安装入口。清单是仓库自带的，改它即可增删条目。',
+    en: 'The button on the right of each row above is the install entry point. The list ships with the repo; edit it to add or remove entries.',
   },
 
   'skills.failedTitle': { zh: '没有装上', en: 'Not installed' },

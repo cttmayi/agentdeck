@@ -106,6 +106,7 @@ import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
 import { Semaphore } from './semaphore.ts'
 import { WorkDirLocks } from './workdir-locks.ts'
+import { defaultSkillListPath, loadSkillList } from './skill-list.ts'
 import {
   SkillSourceError,
   describeSource,
@@ -224,6 +225,13 @@ export interface DaemonOptions {
    * 显式指定时才启用，而且**不会**把 `githubToken` 交给它（见 `githubRequestTarget`）。
    */
   githubProxy?: string | null
+  /**
+   * 「本地安装清单」的路径（技能页「从本地清单安装」读的那份 JSON）。
+   *
+   * 缺省用仓库自带的那份（`skill-list.ts` 的 `defaultSkillListPath()`）。给了就用
+   * 给的——**不回落**：路径写错时接口明确报错，而不是悄悄改用默认那份。
+   */
+  skillListPath?: string
   /**
    * 注入 fetch，供"从 GitHub 安装 skill"使用。
    *
@@ -1822,6 +1830,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 兜底在数据目录**之内**（绝不碰家目录），可见的那个默认值由 CLI 给出——
   // 见 `fallbackWorkRoot` 的注释。
   const workRoot = options.workRoot ?? fallbackWorkRoot(options.dataDir)
+
+  // 「本地安装清单」的路径：给了 `--skills-catalog` 就用给的，否则用仓库自带那份。
+  // 每次请求现读现算（清单是使用者会手改的文件，缓存它只会让改动看不见）。
+  const skillListPath = options.skillListPath ?? defaultSkillListPath()
 
   const registry = new RunRegistry()
   const locks = new WorkDirLocks()
@@ -3971,6 +3983,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }
       })
       sendJson(res, 200, { skills, localDirs: { enabled: dirs, report } })
+      return
+    }
+
+    // ── 「本地安装清单」（技能页「从本地清单安装」）──
+    //
+    // 读一份**仓库自带**的 JSON（`--skills-catalog` 可换），列出可安装技能的**安装方法**
+    // （GitHub 链接 / 本地路径）。它与「远端目录」不同：远端那份是**已经抓好的内容**，
+    // 这份是**安装方法**——点一下才由 daemon 现去取（走 `POST /api/skills/install`）。
+    //
+    // ★ 这条接口**不联网**：只读本地那份 JSON、算 slug（`skill-list.ts`），不抓 GitHub。
+    //   真正的下载发生在使用者点「安装」之后，由 install 那条路负责（那才是刻意例外）。
+    //
+    // ⚠️ 清单本身坏掉时**明确报错**（抛 ⇒ 全局 500），而不是回一张空表——"我以为
+    //   清单是空的"与"清单读不了"是两件事，悄悄给空表正是这个仓库最防的那种失败。
+    if (req.method === 'GET' && path === '/api/skills/install-list') {
+      sendJson(res, 200, await loadSkillList(skillListPath))
       return
     }
 

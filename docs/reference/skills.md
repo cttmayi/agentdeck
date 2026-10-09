@@ -131,8 +131,24 @@ my-skill/
 | **远端目录** | `source.kind = 'payload'`（页面取好交过来） | **原始 GitHub 来源**（`github:…`，见下） | 页面 → daemon 再校验 |
 | **本地技能目录**（§8） | 在「设置」里勾一个目录，**不是逐条装** | `localdir:<绝对路径>` | daemon 扫描 + 对账 |
 
-界面上「安装」面板（主区就地面板，2026-10 起不再是抽屉）里那两个页签 = 前两条（输入框**自动判断**是路径还是链接：`/` 或 `~` 开头
-是路径，含 `://` 是链接）+ 远端目录。
+界面上「安装」面板（主区就地面板，2026-10 起不再是抽屉）里有**三个页签**：
+
+1. **路径 / GitHub** = 前两条（输入框**自动判断**是路径还是链接：`/` 或 `~` 开头是路径，
+   含 `://` 是链接）；
+2. **远端目录** = 第三条（推荐清单，见下）；
+3. **本地清单**（2026-10）= 一份**仓库自带**的 JSON（`apps/daemon/catalog/skills.json`），
+   每条写一个**安装方法**（GitHub 链接或本地路径）。界面把它列成可点的表，点一下就装。
+
+> ★ **「本地清单」不是新的来源**：它点的每一条都落进第 1 条那条路（daemon 现去取），
+> `sourceRef` 也是 `github:…` / `path:…`。它的价值在于**不用远端服务、不用同步工具、
+> 不用登录**——把一批安装方法固化成一份可点列表（`GET /api/skills/install-list`）。
+> 清单可用 `--skills-catalog <路径>` 换一份（清单**本身**坏掉时接口明确报错，不给空表；
+> 单条坏掉只进 `skipped` 并列出原因）。
+> ⚠️ 它**不声明 slug**——slug 由取包规则算出（与真正装的时候逐字相同），清单声明的 slug
+> 一旦与重算的不一致，界面会拿错 slug 去比"装没装过"，把已装的显示成「安装」。
+> ⚠️ 经 url 安装会把那个仓库的**整棵树**拉下来（清单不带 `exclude` 修剪语义——那是推荐
+> 清单才有的），只在限额内。它与推荐清单（`tools/skill-catalog-sync/recommended-skills.json`）
+> 是**两份各自独立的文件**，不承诺同步。
 
 > **远端目录里放的是「推荐清单」（D50，2026-10）**：来源由维护者核过（清单
 > `tools/skill-catalog-sync/recommended-skills.json`），内容由**独立工具**
@@ -161,6 +177,7 @@ my-skill/
   那时界面有一句空态（与"远端不可用""未登录"分开说）。
 
 于是 skill 的**四种**来源是：**本机目录 / GitHub 链接 / 推荐清单（远端目录）/ 本地技能目录**。
+（界面上的「本地清单」页签是**入口**不是来源——它点的每一条都落进前两种之一。）
 
 ### GitHub 那条路的规矩
 
@@ -314,11 +331,12 @@ fireworks-tech-graph：234 个文本文件、2.4 MB 文本），旧上限（64 �
 |---|---|
 | 实体与字段 | `packages/protocol/src/entities.ts`（`Skill`、`Agent.skillIds`、`Agent.reviewStandard`、`AgentGroup.allowedActions`） |
 | 从路径 / GitHub 解析与限额 | `packages/skill-source/src/skill-source.ts` |
+| 本地安装清单：读、校验、算 slug | `apps/daemon/src/skill-list.ts`（自带清单在 `apps/daemon/catalog/skills.json`） |
 | 本地技能目录：候选、扫描、对账 | `apps/daemon/src/local-skill-dirs.ts` |
 | 注入（写文件、归属清单、冲突、清理） | `packages/agent-core/src/skill-injection.ts` |
 | frontmatter 归一化 | 同上（`normalizeSkillFrontmatter`） |
 | 工作目录怎么算出来的 | `apps/daemon/src/workdir.ts`（`defaultWorkRoot`、`resolveWorkDir`） |
-| 接口 | `apps/daemon/src/server.ts`：`GET/POST /api/skills`、`POST /api/skills/install`、`DELETE /api/skills/:id`、`GET/PUT /api/skills/local-dirs` |
+| 接口 | `apps/daemon/src/server.ts`：`GET/POST /api/skills`、`POST /api/skills/install`、`DELETE /api/skills/:id`、`GET/PUT /api/skills/local-dirs`、`GET /api/skills/install-list` |
 | 落在磁盘上的布局 | `packages/store-file/src/file-store.ts`（文件头有完整目录树） |
 | 运行时怎么投递技能 | `packages/agent-core/src/runtime-table.ts`（每个 runtime 的 `skills` 字段） |
-| 测试 | `packages/skill-source/src/skill-source.test.ts`、`apps/daemon/src/local-skill-dirs.test.ts`、`apps/daemon/src/skills-local-dirs-api.test.ts`、`packages/agent-core/src/skill-injection.test.ts` |
+| 测试 | `packages/skill-source/src/skill-source.test.ts`、`apps/daemon/src/local-skill-dirs.test.ts`、`apps/daemon/src/skills-local-dirs-api.test.ts`、`apps/daemon/src/skill-list.test.ts`、`apps/daemon/src/skills-install-list-api.test.ts`、`packages/agent-core/src/skill-injection.test.ts` |

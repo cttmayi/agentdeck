@@ -132,6 +132,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | 远端管理页（技能 / 工具目录） | 已做完（含常驻探针 `pnpm run probe:remote`，21 项） | `./srs/requirements.md` §16 的 D51–D55 |
 | **文档对账**（2026-10） | 已做完（只改文档、没动代码）：把「链路深度上限与环检测」被说成硬不变量的两处 README 改回实情；给 `architecture.md` 的「完整路由表」补上**整段漏掉的 `/api/agent-groups` 5 条**并修掉 `POST /api/agents` 的过时字段；术语表的「行动权限」落点从 agent 改到**智能体组**；§14 补上本轮新查到的几处开口 | `./design/architecture.md` §4.3 / §7.2 / §13 / §14；本文件下面那节「架构与不变量」 |
 | **布局探针重对齐** | ⚠️ **没做，且是当前最大的空缺**：探针 542 条里 74 红 / 105 没量到，红在「新建任务的三步链 / 审核标准 / 智能体」这些**已经被改掉的形状**上 ⇒ **界面暂时没有可信的自动回归网**。另有一层环境障碍：它要真无头 Chrome，受限环境下 Chrome 可能连 Crashpad 目录都写不了（`exit 133`） | `tools/layout-probe/README.md` 的「⚠️ 现状：有 7 段已经过期」；`./design/design.md` §15.57 |
+| **从「本地清单」安装技能**（2026-10） | 已做完：安装面板第三个页签，读仓库自带的一份 JSON（`apps/daemon/catalog/skills.json`），点一下由 daemon 现去取——**不用远端服务 / 同步工具 / 登录**（`--skills-catalog` 可换一份） | `./srs/requirements.md` §16 的 **D71**；`./reference/skills.md` §3；`./design/architecture.md` §7.2 / §13 |
 
 > ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
 > （`git ls-remote origin HEAD` 成功返回 `2954eff`）。所以推送**可能**做得了（本地 `main`

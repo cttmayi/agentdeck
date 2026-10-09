@@ -804,6 +804,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | POST | `/api/skills` | 直接写入（页面不走这条，走 install） |
 | POST | `/api/skills/install` | 装技能：本地路径 / GitHub 地址 / 远端目录（D38） |
 | GET/PUT | `/api/skills/local-dirs` | 勾了哪些**本机技能目录**（读别的 AI 工具的 `skills/` 目录；PUT 会重扫并回报 added/updated/removed） |
+| GET | `/api/skills/install-list` | 读**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法 url/path；daemon 算 slug）。**不联网**——只读本地那份文件；清单本身坏掉时**报错**而不是回空表。路径可用 `--skills-catalog` 换 |
 | DELETE | `/api/skills/{id}` | 卸载（还被 agent 挂着时**被拒**并列出是谁） |
 | **工具包** | | |
 | GET | `/api/tools` | 列表 + 「不支持预演就自动执行」那个开关的当前值 |
@@ -1489,7 +1490,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 动作执行 / 脚本进程 | `apps/daemon/src/actions.ts` / `script-executor.ts` |
 | 工作目录分配 / 文件读取 | `apps/daemon/src/workdir.ts` / `workdir-files.ts` |
 | 重启对账 | `apps/daemon/src/reconcile.ts` |
-| 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts` |
+| 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts`；**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法）：`apps/daemon/src/skill-list.ts`（自带清单 `apps/daemon/catalog/skills.json`，`--skills-catalog` 可换） |
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |

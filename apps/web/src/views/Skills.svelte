@@ -18,6 +18,7 @@
   import { remoteCatalog, remoteError, refreshRemote } from '../lib/remote-store.ts'
   import { isLoggedIn } from '../lib/remote.ts'
   import { catalogEntryState } from '../lib/skill-catalog.ts'
+  import { fetchSkillList, type SkillListEntry, type SkillListResult } from '../lib/skill-list.ts'
   import { t, tx } from '../lib/i18n.ts'
   import { Table, SourceRef, ExpandToggle } from '@agentdeck/ui/components'
   import {
@@ -45,11 +46,15 @@
   // ── 安装面板 ──
   /**
    * ══════════════════════════════════════════════════════════════════
-   * 两个来源放在同一个面板里，而不是各做一个入口
+   * 三个来源放在同一个面板里，而不是各做一个入口
    * ══════════════════════════════════════════════════════════════════
    *
    * "我要装一个 skill"是一个念头，不该先让使用者去判断"我这算远端还是本地"。
-   * 所以一个按钮打开一个面板，里面两个页签：**路径 / GitHub** 与**远端目录**。
+   * 所以一个按钮打开一个面板，里面三个页签：**路径 / GitHub**、**远端目录**、
+   * 以及**本地清单**（一份仓库自带的 JSON，列出可点的安装方法）。
+   *
+   * ★ 第三个页签**不需要**远端服务、同步工具或登录：它读的是 daemon 自带的一份
+   *   安装方法清单（`apps/daemon/catalog/skills.json`），点一下由 daemon 现去取。
    *
    * ══════════════════════════════════════════════════════════════════
    * ⚠️ 2026-10：它**不再是右侧抽屉**，而是主区里的就地面板
@@ -65,9 +70,20 @@
    * 来源逐条列出来），返回列表时它已经刷新过。
    */
   let panelOpen = false
-  let tab: 'path' | 'remote' = 'path'
+  let tab: 'path' | 'remote' | 'list' = 'path'
   let sourceInput = ''
   let slugInput = ''
+  /**
+   * 「本地清单」页签的内容。
+   *
+   * ★ 与远端目录（`remote-store.ts` 那个 store）不同，这里用**组件本地状态**：
+   *   清单只有这一个组件读、只有这一个页签显示，没有跨视图共享的需要。
+   *   `null` = 还没取过（首次切到这个页签才去取）。
+   */
+  let skillList: SkillListResult | null = null
+  let skillListLoading = false
+  /** 清单**本身**取不到（daemon 起不来 / 文件坏了）——渲染成一整块红字。 */
+  let skillListError = ''
   /** 正在卸载哪一条（按钮转圈用）；null = 没有在卸。 */
   let removing: string | null = null
   /**
@@ -195,6 +211,46 @@
         ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
       }),
     )
+  }
+
+  /**
+   * 从「本地清单」装一条。
+   *
+   * ★ 清单给的是**安装方法**（url / path），不是内容——所以这里走的是**老路**
+   *   `installFromPathOrUrl`，由 daemon 现去取。与远端目录那条（内容已抓好、
+   *   走 payload 路）是两条不同的路，只是最终都落到同一个安装接口。
+   *
+   * ★ 状态同样由 `catalogEntryState` 判：清单里**没有版本号**，所以传 `version: null`
+   *   ——本地有同名时它给出「替换」并要求 overwrite，本地没有时是「安装」。
+   *   界面不自己拼"要不要 overwrite"（那正是最容易写错的地方）。
+   */
+  function installFromList(entry: SkillListEntry): void {
+    const state = catalogEntryState($skills.find((s) => s.slug === entry.slug), {
+      slug: entry.slug,
+      version: null,
+    })
+    void runInstall(() =>
+      installFromPathOrUrl({
+        kind: entry.source.kind,
+        value: entry.source.value,
+        ...(state.needsOverwrite || overwrite ? { overwrite: true } : {}),
+      }),
+    )
+  }
+
+  /** 取一次本地清单（切到那个页签、或清单取失败后重试时调）。 */
+  async function refreshSkillList(): Promise<void> {
+    skillListLoading = true
+    skillListError = ''
+    try {
+      skillList = await fetchSkillList()
+    } catch (err) {
+      // 清单坏掉（读不了 / 不是 JSON / 顶层格式不对）时 daemon 返回非 2xx——
+      // 原文带回来显示，不在前端改写。
+      skillListError = err instanceof Error ? err.message : String(err)
+    } finally {
+      skillListLoading = false
+    }
   }
 
   /**
@@ -633,6 +689,18 @@
       >
         {$t('skills.tabRemote')}
       </button>
+      <button
+        type="button"
+        class={tab === 'list' ? 'tab active' : 'tab'}
+        onclick={() => {
+          tab = 'list'
+          resetFeedback()
+          // 每次切过来都重取：清单是可编辑的（改文件即可增删），看到的不该是上一次的
+          void refreshSkillList()
+        }}
+      >
+        {$t('skills.tabList')}
+      </button>
     </div>
 
     {#if tab === 'path'}
@@ -653,7 +721,7 @@
         <label for="skill-slug">{$t('skills.slugLabel')}</label>
         <input id="skill-slug" bind:value={slugInput} placeholder="my-skill" />
       </div>
-    {:else}
+    {:else if tab === 'remote'}
       <div class="field">
         {#if $remoteError}
           <div class="notice bad">
@@ -772,6 +840,103 @@
           </div>
         {/if}
       </div>
+    {:else}
+      <!-- 本地清单：读的是 daemon 自带的一份「安装方法」JSON（可编辑）。
+           ★ 与远端目录不同，这里**不需要**远端服务 / 同步工具 / 登录。 -->
+      <div class="field">
+        {#if skillListError}
+          <!-- ★ 清单**本身**坏掉（读不了 / 不是 JSON / 顶层格式不对）时 daemon 返回
+               非 2xx。那是一处配置错误，必须把原文显示出来，而不是给一张空表——
+               空表会让使用者以为"清单里就是没有东西"。 -->
+          <div class="notice bad">
+            {$t('skills.listLoadFailed', { error: skillListError })}
+          </div>
+        {:else if skillListLoading && skillList === null}
+          <div class="skeleton" style="width:60%"></div>
+        {:else if skillList}
+          {#if skillList.entries.length > 0}
+            <Table
+              columns={[
+                { label: $t('skills.colSlug') },
+                { label: $t('skills.colSource') },
+                { label: $t('skills.colSummary') },
+                { label: $t('skills.colLocal') },
+                { label: '', ariaLabel: $t('skills.colActions') },
+              ]}
+            >
+              {#snippet rows()}
+                <!-- ⚠️ 在 snippet 里重新取一次：snippet 像函数，外层 `{#if skillList}`
+                     的收窄带不进来（svelte-check 会报 "possibly null"）。`?.` + `?? []`
+                     既绕开它，也在清单被换成 null 时给一个空表而不是崩。 -->
+                {@const entries = skillList?.entries ?? []}
+                {#each entries as e (e.slug)}
+                  {@const local = $skills.find((x) => x.slug === e.slug)}
+                  {@const state = catalogEntryState(local, { slug: e.slug, version: null })}
+                  <tr>
+                    <td>
+                      <code>{e.slug}</code>
+                      {#if e.name}
+                        <div class="faint small">{e.name}</div>
+                      {/if}
+                    </td>
+                    <td>
+                      <!-- ★ 来源是**安装方法**本身（GitHub 链接或本地路径），原样显示：
+                           使用者要能核对"我点的这条到底从哪儿装"。长链接单行省略，
+                           全文在 title 里。 -->
+                      <span class="faint small list-source" title={e.source.value}>{e.source.value}</span>
+                    </td>
+                    <td class="faint small">
+                      {e.summary}
+                      <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说（如某个 API key）。 -->
+                      {#if e.needs}
+                        <div class="warn small">{e.needs}</div>
+                      {/if}
+                    </td>
+                    <td class="faint small">
+                      {#if local}
+                        {local.version
+                          ? $t('skills.installedVersion', { version: local.version })
+                          : $t('skills.installedNoVersion')}
+                      {:else}
+                        —
+                      {/if}
+                    </td>
+                    <td>
+                      <!-- 按钮上的字与那句说明都由 `catalogEntryState` 给**键**，
+                           所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
+                      <button
+                        type="button"
+                        class={state.action === 'install' ? 'secondary small' : 'small'}
+                        disabled={busy || state.disabled}
+                        title={$t(state.hintId, state.hintParams)}
+                        onclick={() => installFromList(e)}
+                      >
+                        {$t(state.labelId, state.labelParams)}
+                      </button>
+                    </td>
+                  </tr>
+                {/each}
+              {/snippet}
+            </Table>
+          {:else}
+            <!-- 空态：问到了，清单里现在就是没有条目（与"没取到"是两回事）。 -->
+            <div class="empty">
+              <strong>{$t('skills.listEmpty')}</strong>
+              {$t('skills.listEmptyHint')}
+            </div>
+          {/if}
+
+          {#if skillList.skipped.length > 0}
+            <!-- ★ 明确**没**列出来的条目及原因：静默跳过是这类功能最容易让人困惑的
+                 地方（"我清单里写了 12 条，怎么只有 11 条"）。 -->
+            <p class="warn small" style="margin-top:var(--sp-2)">
+              {$t('skills.listSkipped', {
+                list: skillList.skipped.map((s) => `${s.path}（${s.reason}）`).join('、'),
+              })}
+            </p>
+          {/if}
+        {/if}
+      </div>
     {/if}
 
     <div class="field">
@@ -786,8 +951,10 @@
 
     {#if tab === 'path'}
       <p class="faint small" style="margin:0">{$t('skills.pathFootHint')}</p>
-    {:else}
+    {:else if tab === 'remote'}
       <p class="faint small" style="margin:0">{$t('skills.remoteFootHint')}</p>
+    {:else}
+      <p class="faint small" style="margin:0">{$t('skills.listFootHint')}</p>
     {/if}
 
     {#if errorMessage}
@@ -841,9 +1008,13 @@
         <button type="button" disabled={busy} onclick={submitPath}>
           {busy ? $t('skills.installing') : $t('skills.installCheck')}
         </button>
-      {:else}
+      {:else if tab === 'remote'}
         <span class="faint small">
           {$t('skills.remoteFootNote')}
+        </span>
+      {:else}
+        <span class="faint small">
+          {$t('skills.listFootNote')}
         </span>
       {/if}
     </div>
@@ -1035,6 +1206,17 @@
     gap: var(--sp-1);
     font-size: var(--fs-xs);
     cursor: pointer;
+  }
+
+  /* 本地清单的「来源」列：一条 GitHub 链接或本地路径可能很长。单行省略、全文在
+     title 里——列表是用来扫的，一行被撑成十行就扫不动了。 */
+  .list-source {
+    display: inline-block;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
   }
 
   /* ── 本地技能目录（设置抽屉）── */

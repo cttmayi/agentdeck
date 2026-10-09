@@ -54,6 +54,13 @@ interface CliOptions {
   workRoot: string | null
   /** GitHub 加速器（第三方，默认 null = 直连；见 server.ts 的 `DaemonOptions.githubProxy`）。 */
   githubProxy: string | null
+  /**
+   * 换一份「本地安装清单」（技能页「从本地清单安装」读的那份 JSON）。
+   *
+   * 缺省是仓库自带的那份（`apps/daemon/catalog/skills.json`）——见 `skill-list.ts`。
+   * 给了就用给的，**不回落**：清单路径写错时界面会明确报错，而不是悄悄用默认那份。
+   */
+  skillListPath: string | null
 }
 
 const SANDBOX_MODES: readonly SandboxMode[] = ['none', 'workdir-write']
@@ -87,6 +94,7 @@ export const CLI_OPTIONS = {
   'runtime-key': { type: 'string' },
   'work-root': { type: 'string' },
   'github-proxy': { type: 'string' },
+  'skills-catalog': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
 
@@ -187,6 +195,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
         ? { flagValue: values['github-proxy'] }
         : {},
     ),
+    skillListPath: typeof values['skills-catalog'] === 'string' ? values['skills-catalog'] : null,
   }
 }
 
@@ -208,6 +217,8 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --executable <路径>  覆盖 CLI 可执行文件路径（探测与执行共用同一个值）
       --runtime-key <key>  用哪个 runtime 起服务（默认 claude）
       --work-root <路径>   工作区根目录（默认 ~/agentdeck-workspace）
+      --skills-catalog <路径>  换一份「本地安装清单」（技能页「从本地清单安装」读的
+                        那份 JSON）。默认用仓库自带的那份（apps/daemon/catalog/skills.json）。
       --github-proxy [地址] 从 GitHub 装 skill 时走**加速器**（默认直连）。
                         ⚠️ 它是**第三方**：能看也能改转发过来的内容，所以默认不用、
                         只在显式指定时启用；凭证**不会**交给它。
@@ -386,6 +397,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
       workRoot,
       ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
+      ...(options.skillListPath ? { skillListPath: options.skillListPath } : {}),
       onInfo: (m) => process.stdout.write(`${m}\n`),
       onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
     })
