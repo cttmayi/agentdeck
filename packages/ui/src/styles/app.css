@@ -1253,8 +1253,9 @@ tbody tr:last-child td { border-bottom: 0; }
   background: currentColor;
 }
 
-/* ⚠️ `todo` 现在只被「本地技能目录缺哪几个」那个徽章用（设置抽屉），不再是任务状态；
-   表格 source 徽标已换 `badge.local`（D69）。 */
+/* ⚠️ `todo` / `backlog` 已无使用点：原来那个「本地技能目录缺哪几个」徽章挂在设置抽屉里，
+   而设置抽屉随"本地技能目录改成显式安装"撤掉了（D73）。任务状态徽章另有各档（见下），
+   表格 source 徽标已换 `badge.local`（D69）。保留这条只为兼容旧样式，不新增使用。 */
 .badge.todo, .badge.backlog { color: var(--status-todo); }
 .badge.in_progress { color: var(--status-active); }
 .badge.in_review { color: var(--status-review); }

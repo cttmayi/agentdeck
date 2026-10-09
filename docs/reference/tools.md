@@ -262,11 +262,15 @@ curl -s -X POST http://127.0.0.1:4517/api/tools \
 ~/.agentdeck/data/                     ← 数据目录（--data-dir 可覆盖）
 └── workspaces/<wsId>/
     ├── log/tool.jsonl                    ← ★ 工具包的权威记录在这里（append-only）
-    └── log/skill.jsonl                   ← skill（见 skills.md）
+    └── log/skill.jsonl                   ← skill 的**索引**（正文在 ~/.agentdeck/skills/，见 skills.md）
 ```
 
 记录里存的是：解析通过的 `manifest`（zod 校验过的原件）、`files`（相对路径 → 文本内容）、
 `docs`（`TOOL.md` 正文）、`source`（`local` / `remote`）与 `sourceRef`。
+
+> ⚠️ **与 skill 不同**：工具包**整条存在记录里**（清单 + 文件正文 + `TOOL.md`）。
+> skill 的正文与支持文件在 2026-10 改成了磁盘上的 `<skillsRoot>/<slug>/`（`log/skill.jsonl`
+> 只留索引，**磁盘为准**）——工具包没有跟着改，它的内容仍在记录里。
 
 | `sourceRef` 形状 | 从哪来 | 界面上的说法 |
 |---|---|---|

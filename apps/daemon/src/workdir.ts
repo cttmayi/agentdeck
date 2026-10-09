@@ -246,6 +246,28 @@ export function fallbackWorkRoot(dataDir: string): string {
 }
 
 /**
+ * 技能内容的默认落点：`~/.agentdeck/skills`（2026-10）。
+ *
+ * 与 `defaultWorkRoot()` 同一层次、同一个理由：技能正文（`SKILL.md`）与支持文件
+ * 是**使用者会去翻、会去改**的东西——藏在数据目录里的 `log/skill.jsonl` 里
+ * 等于翻不到。所以默认放在家目录下一个可见、可预期的路径，要换用 `--skills-root`。
+ */
+export function defaultSkillsRoot(): string {
+  return join(homedir(), '.agentdeck', 'skills')
+}
+
+/**
+ * 数据目录之内的 `skills/`——**自洽的兜底**（与 `fallbackWorkRoot` 逐字对应）。
+ *
+ * 调用 `startDaemon` 的人没给 `skillsRoot` 时用它。它只用调用者给的 `dataDir`，
+ * **绝不碰家目录**——否则任何一处忘了传 `skillsRoot` 的测试都会在使用者家目录里
+ * 造技能目录。
+ */
+export function fallbackSkillsRoot(dataDir: string): string {
+  return join(dataDir, 'skills')
+}
+
+/**
  * 一次性把**旧位置**的工作目录搬到新位置。
  *
  * ══════════════════════════════════════════════════════════════════

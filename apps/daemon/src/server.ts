@@ -35,12 +35,11 @@ import {
   type Store,
 } from '@agentdeck/domain'
 import {
+  LOCAL_DIR_SOURCE_PREFIX,
   localSkillDirCandidates,
-  normalizeSkillDir,
-  reconcileLocalSkillDirs,
   scanSkillDir,
   sourceDirOf,
-  type ReconcileReport,
+  type LocalSkillDirCandidate,
 } from './local-skill-dirs.ts'
 import {
   LOCAL_PROTOCOL_VERSION,
@@ -89,7 +88,7 @@ import {
 } from './ingest.ts'
 import { reconcileInterruptedRuns } from './reconcile.ts'
 import { checkEnvironment, renderEnvironmentReport } from './environment.ts'
-import { fallbackWorkRoot } from './workdir.ts'
+import { fallbackSkillsRoot, fallbackWorkRoot } from './workdir.ts'
 import {
   MEDIA_FILE_HEADERS,
   UnsafePathError,
@@ -110,6 +109,7 @@ import { defaultSkillListPath, loadSkillList } from './skill-list.ts'
 import {
   SkillSourceError,
   describeSource,
+  resolveLocalPath,
   resolvePayloadEntry,
   resolveSkillSource,
   type ResolvedSkillSource,
@@ -210,6 +210,14 @@ export interface DaemonOptions {
    */
   workRoot?: string
   /**
+   * 技能内容的落点根（2026-10）。
+   *
+   * 缺省是**数据目录之内的 `skills/`**（`fallbackSkillsRoot`）——与 `workRoot`
+   * 逐字对应的自洽兜底，不碰家目录。CLI 会显式传 `~/.agentdeck/skills`（可见的
+   * 那个），因为"技能正文放哪"是面向使用者的产品决定，属于 CLI 那一层。
+   */
+  skillsRoot?: string
+  /**
    * 可选沙箱（M4）。缺省 `'none'`——见 `docs/design/design.md` §14.1 与 NG7：
    * 首版 run 以 daemon 用户的完整权限执行，这一点必须如实披露。
    *
@@ -233,6 +241,14 @@ export interface DaemonOptions {
    */
   skillListPath?: string
   /**
+   * 「从本地安装」页签扫的那几个目录（内置表：claude / codex / cursor / agents）。
+   *
+   * 缺省用 `localSkillDirCandidates()`（读当前用户的家目录）。给了就用给的——
+   * **测试要指向临时目录**（NFR-T-01 的同类理由：测试不能依赖跑测机器上真的装着
+   * Claude Code）。生产代码永远不传它。
+   */
+  skillDirCandidates?: () => LocalSkillDirCandidate[]
+  /**
    * 注入 fetch，供"从 GitHub 安装 skill"使用。
    *
    * ★ 存在的理由是 **NFR-T-01**：测试**绝不能联网**。不注入的话，任何一条
@@ -252,6 +268,8 @@ export interface DaemonHandle {
   store: Store
   /** 实际生效的工作目录根——启动横幅要显示它，见 cli.ts。 */
   workRoot: string
+  /** 实际生效的技能内容根——同样要印在启动横幅上（技能正文就落在这里）。 */
+  skillsRoot: string
   close(): Promise<void>
 }
 
@@ -672,7 +690,17 @@ function parseInstallSource(
     if (typeof value !== 'string' || value.trim() === '') {
       return { ok: false, error: 'source.kind=path 需要非空的 path（绝对路径）' }
     }
-    return { ok: true, spec: { kind: 'path', path: value.trim() } }
+    // 可选来源标识：「从本地安装」页签传 `localdir:<根目录>`，让列表显示得出
+    // "来自本地技能目录：…"。不给就是默认的 `path:<技能目录>`。
+    const sourceRef = obj['sourceRef']
+    if (sourceRef !== undefined && sourceRef !== null && typeof sourceRef !== 'string') {
+      return { ok: false, error: 'source.sourceRef 必须是字符串' }
+    }
+    const ref = typeof sourceRef === 'string' ? sourceRef.trim() : ''
+    return {
+      ok: true,
+      spec: { kind: 'path', path: value.trim(), ...(ref !== '' ? { sourceRef: ref } : {}) },
+    }
   }
 
   if (kind === 'url') {
@@ -1056,19 +1084,6 @@ async function readWorkspaceSettings(
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
   }
-}
-
-/**
- * 这个工作区**勾了哪些本地技能目录**。
- *
- * ⚠️ 老数据没有这个键 ⇒ `[]`（与"还没勾过任何目录"同义），不做数据迁移。
- */
-async function readLocalSkillDirs(
-  store: Store,
-  workspaceId: WorkspaceId,
-): Promise<string[]> {
-  const workspace = await store.getWorkspace(workspaceId)
-  return workspace?.localSkillDirs ?? []
 }
 
 /**
@@ -1813,7 +1828,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const warn = options.onWarn ?? ((m: string) => console.warn(`[warn] ${m}`))
   const info = options.onInfo ?? ((m: string) => console.log(m))
 
-  const store = await FileStore.open({ dataDir: options.dataDir, fsync: options.fsync ?? true })
+  // 技能内容的落点（2026-10）：正文 + 支持文件存成真文件放在这里，`skill.jsonl`
+  // 退化成索引。兜底在数据目录之内（不碰家目录），可见的默认值由 CLI 给出。
+  const skillsRoot = options.skillsRoot ?? fallbackSkillsRoot(options.dataDir)
+
+  const store = await FileStore.open({
+    dataDir: options.dataDir,
+    fsync: options.fsync ?? true,
+    skillsRoot,
+  })
 
   // ★ runtime 的选择从"写死 claude"变成"查装配表"（FR-CLI-47）。
   //   表里有几个 runtime，这里就能跑几个——本文件不再认识任何具体 CLI。
@@ -3935,27 +3958,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     // ── 技能（审核模板与自建）──
     //
-    // ★ **读列表时对账**（磁盘为准）。
-    //
-    //   使用者勾了 `~/.claude/skills` 这类目录之后，"那边改了这边要跟着变"
-    //   这件事必须发生在**他看得见的地方**。放在这里而不是放在起 run 的路上：
-    //   读列表本来就是"看现在有什么"，多一次目录扫描是它的本分；而 run 那条路
-    //   是热路径，把 I/O 与写库塞进去，代价落在每一次执行上。
-    //
-    //   ⚠️ 界面每次启动都会读一次（`loadSkills()`），所以"应用开着"就等于
-    //      "一直在对账"。纯 CLI / MCP 的场景不会自动对账——那条路上要么先
-    //      调一次这个接口，要么自己知道库里的内容停在某个时刻。
+    // 2026-10 起这条接口**只读、无副作用**：不再对账。以前它读列表时会顺手把
+    // `~/.claude/skills` 这类目录里的技能自动读进库（`reconcileLocalSkillDirs`），
+    // 那条路已随"本地技能目录改成显式安装"撤掉——装是「从本地安装」页签那条路
+    // （`POST /api/skills/install`）的事，读列表就只是"看现在库里有什么"。
     if (req.method === 'GET' && path === '/api/skills') {
-      const dirs = await readLocalSkillDirs(store, workspaceId)
-      const report = await reconcileLocalSkillDirs({
-        store,
-        workspaceId,
-        enabledDirs: dirs,
-        now: Date.now(),
-      })
-      const onDisk = new Set(report.onDisk.map((d) => `${d.dir}\u0000${d.slug}`))
       const skills = (await store.listSkills(workspaceId)).map((skill) => {
-        const dir = sourceDirOf(skill)
         return {
           ...skill,
           // ★ 旧记录落库时没有 description（改动前一直 null）。这里**按需补**：
@@ -3963,26 +3971,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           //   已经装好的技能列表里永远是"没有说明"，除非重新装一遍。
           //   ⚠️ 这是纯展示层的兜底，不动库（审计是 append-only 的）；
           //   新装的记录在写入时就带上了正确的 description。
-          description:
-            skill.description ??
-            extractSkillMeta(skill.body).description ??
-            null,
-          // 来自哪个被勾选的目录（null = 手装 / 远端装的）
-          localDir: dir,
-          // ★ "现在还能不能被选中"。
-          //
-          //   手装与远端装的**恒为 true**（它们不受任何勾选影响）；只有来自本地
-          //   目录的才可能变 false——来源目录取消了勾选，或者文件在源工具那边
-          //   被删了。为 false 而记录还在，只有一个原因：有智能体挂着它，所以
-          //   留着（见 `Workspace.localSkillDirs` 上那段注释）。
-          //
-          //   ⚠️ 名字是"能不能选"，不是"来自本地目录且还活跃"：后者对手装的那些
-          //      是 false，而它们明明可以选——那样界面就得在每处再判一次
-          //      `localDir !== null`，判漏一处就会把一条正常 skill 显示成失效。
-          selectable: dir === null || (dirs.includes(dir) && onDisk.has(`${dir}\u0000${skill.slug}`)),
+          description: skill.description ?? extractSkillMeta(skill.body).description ?? null,
+          // 从**本地技能目录**装进来的（null = 手装 / 远端 / 给路径装的）——
+          // 界面据此显示「来自本地技能目录：…」。装完就是一条普通技能了，
+          // 这里只是留个来源标记，没有任何"跟随磁盘"的语义。
+          localDir: sourceDirOf(skill),
         }
       })
-      sendJson(res, 200, { skills, localDirs: { enabled: dirs, report } })
+      sendJson(res, 200, { skills })
       return
     }
 
@@ -4002,95 +3998,66 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
-    // ── 本地技能目录（设置）──
+    // ── 「从本地安装」（技能页页签）──
     //
-    // 候选目录是**内置表**（claude / codex / cursor / agents），只给路径与 id：
-    // 显示名在界面词表里（`skills.dirTool*`）——daemon 的字符串不翻译，
-    // 把中文写在这里等于让这个功能只有一种语言。
+    // 扫内置的候选目录（claude / codex / cursor / agents），把里面发现的技能列出来，
+    // 由使用者**逐条显式安装**（走 `POST /api/skills/install`）。
+    //
+    // ★ 这条接口**只读、无副作用**。2026-10 之前它是"勾上目录 ⇒ 每次读列表自动把
+    //   里面的技能对账读进库"；那套已撤，见 D73。装不装由使用者点，扫只负责"看
+    //   现在有什么"——所以它不写库、不改工作区，扫完就返回。
+    //
+    // 候选目录是**内置表**，只给路径与 id：显示名在界面词表里（`skills.dirTool*`）
+    // ——daemon 的字符串不翻译，把中文写在这里等于让这个功能只有一种语言。
     if (req.method === 'GET' && path === '/api/skills/local-dirs') {
-      const enabled = await readLocalSkillDirs(store, workspaceId)
-      const candidates = localSkillDirCandidates()
-      const listed = []
+      const installed = new Set((await store.listSkills(workspaceId)).map((s) => s.slug))
+      const candidates = (options.skillDirCandidates ?? localSkillDirCandidates)()
+      const dirs = []
       for (const candidate of candidates) {
         const scan = await scanSkillDir(candidate.path)
-        listed.push({
+        const skills = []
+        // ★ 「看到但没当成技能」的东西要跟着走，而且**要一直跟着**：实测
+        //   `~/.claude/skills` 里有一个没有 SKILL.md 的空目录，界面上要是只说
+        //   "这里 1 个技能"，使用者打开 Finder 数出两个，就会去查权限、查扫描是不是
+        //   坏了——真正的原因（"那个没有 SKILL.md，所以它不是技能"）一个字都没说。
+        const skipped = [...scan.skipped]
+        for (const found of scan.found) {
+          // ★ 每个发现的技能都走**安装同一条解析**（`resolveLocalPath`）来拿 slug 与
+          //   description——不能在这儿自己算一遍 slug：那样"扫描显示的 slug"和
+          //   "装进来后的 slug"就各有一处规则，迟早分叉（界面显示装 A，库里出现 B）。
+          try {
+            const resolved = await resolveLocalPath(found.dir)
+            skills.push({
+              slug: resolved.slug,
+              // 相对根目录的路径（`.system/skill-creator` 这种）——界面按它分组
+              rel: found.rel,
+              dir: found.dir,
+              name: found.name,
+              description: extractSkillMeta(resolved.body).description ?? null,
+              // 库里已经有同 slug 的 ⇒ 界面显示「已安装」并禁用按钮
+              installed: installed.has(resolved.slug),
+            })
+          } catch (err) {
+            // 解析不了 ⇒ 如实说出来（"看到了但装不了"），不静默略过
+            skipped.push({
+              rel: found.rel,
+              reason: err instanceof SkillSourceError ? err.message : String(err),
+            })
+          }
+        }
+        dirs.push({
           id: candidate.id,
           path: candidate.path,
+          // 装的时候原样带回：`source:{kind:'path', path:<技能目录>, sourceRef:<这里>}`
+          sourceRef: `${LOCAL_DIR_SOURCE_PREFIX}${candidate.path}`,
           exists: scan.error === null,
-          // 目录里有几个技能——勾之前就该看得见（"这个目录是空的"是个有用的答案）
-          skillCount: scan.found.length,
-          // ★ "看到但没当成技能"的东西也要跟着走。
-          //
-          //   实测 `~/.claude/skills` 里有一个没有 SKILL.md 的空目录：使用者勾上
-          //   之后会发现"少了一个"，而**这个解释必须在他每次打开设置时都在**——
-          //   只在刚勾完那一瞬间提示一次，他第二天再来看就只剩一个解释不了的差额。
-          skipped: scan.skipped,
+          // 目录本身读不了（不存在 / 没权限）⇒ 说清是哪个目录、为什么
+          error: scan.error,
+          skills,
+          skipped,
         })
       }
-      // 使用者自己填的路径：不在候选表里，但也要能看见、能取消
-      const custom = []
-      for (const dir of enabled.filter((d) => !candidates.some((c) => c.path === d))) {
-        const scan = await scanSkillDir(dir)
-        custom.push({
-          path: dir,
-          exists: scan.error === null,
-          skillCount: scan.found.length,
-          skipped: scan.skipped,
-        })
-      }
-      // ★ 顺手对一次账，把"读不进来什么""为什么某条还留着"一并带回去。
-      //
-      //   读列表（`GET /api/skills`）那边也对账，两次是同一件幂等的事——这里再来
-      //   一次是为了让**设置这一屏自己说完整**：只显示"勾了几个目录"，而把
-      //   "其中有两条没读进来"留到别处，等于让人去猜。
-      const report = await reconcileLocalSkillDirs({
-        store,
-        workspaceId,
-        enabledDirs: enabled,
-        now: Date.now(),
-      })
-      sendJson(res, 200, { candidates: listed, enabled, custom, report })
-      return
-    }
-
-    // ── 改「勾了哪些本地技能目录」──
-    if (req.method === 'PUT' && path === '/api/skills/local-dirs') {
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const raw = body['dirs']
-      if (!Array.isArray(raw)) {
-        sendJson(res, 400, { error: 'dirs 必须是数组（传空数组 = 一个目录都不勾）' })
-        return
-      }
-      const workspace = await store.getWorkspace(workspaceId)
-      if (!workspace) {
-        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
-        return
-      }
-      const dirs: string[] = []
-      for (const item of raw) {
-        if (typeof item !== 'string') {
-          sendJson(res, 400, { error: `dirs 里每一项都必须是字符串（收到 ${JSON.stringify(item)}）` })
-          return
-        }
-        const parsed = normalizeSkillDir(item)
-        if (!parsed.ok) {
-          sendJson(res, 400, { error: parsed.error })
-          return
-        }
-        // 去重：同一个目录勾两次没有含义，而重复项会让"勾了几个"在界面上骗人
-        if (!dirs.includes(parsed.path)) dirs.push(parsed.path)
-      }
-
-      await store.insertWorkspace({ ...workspace, localSkillDirs: dirs, updatedAt: Date.now() })
-      // ★ 存完**立刻对一次账**再回话：使用者勾上之后马上要看的就是"读进来了什么"，
-      //   让他再等一次列表刷新才知道结果，等于把一次往返塞给他
-      const report = await reconcileLocalSkillDirs({
-        store,
-        workspaceId,
-        enabledDirs: dirs,
-        now: Date.now(),
-      })
-      sendJson(res, 200, { enabled: dirs, report })
+      sendJson(res, 200, { dirs })
       return
     }
     // ── 安装 skill（FR-AGENT-09/10/11）──
@@ -5861,6 +5828,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     port: address.port,
     store,
     workRoot,
+    skillsRoot,
     async close() {
       // 先断开所有连接：`server.close()` 会等现有连接自然结束，而页面的
       // keep-alive 与 SSE 长连接可能挂很久——那会让"停止 daemon"看起来卡住。

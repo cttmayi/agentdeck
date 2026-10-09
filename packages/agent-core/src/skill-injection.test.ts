@@ -228,6 +228,24 @@ describe('★ 技能在工作目录里的去留：按落盘的归属清单对账
     }
   })
 
+  test('★★ 空正文 ⇒ 当场失败，绝不写一个空 SKILL.md 出去（2026-10）', async () => {
+    const dir = await tmp()
+    try {
+      // 场景：技能正文存在磁盘上（`<skillsRoot>/<slug>/SKILL.md`），使用者手删了
+      // 那个目录 ⇒ store 回填出来的正文是空的。不管它就会写一个空 `SKILL.md`
+      // 到工作目录——CLI 会发现它、它却什么都没说，一个**静默的坏技能**。
+      await assert.rejects(
+        () => syncInjectedSkills(dir, '.claude/skills', [{ slug: 'empty', content: '  \n' }]),
+        /正文是空的/,
+      )
+      // 坏技能不该留在工作目录里
+      const entries = await readdir(join(dir, '.claude', 'skills')).catch(() => [] as string[])
+      assert.equal(entries.includes('empty'), false)
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
   test('★ 摘掉的技能会从工作目录消失（按清单自愈）', async () => {
     const dir = await tmp()
     try {

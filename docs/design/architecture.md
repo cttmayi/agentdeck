@@ -473,6 +473,16 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 `<collection>` 共 **12** 个：`agent` / `skill` / `tool` / `issue` / `comment` / `run` /
 `report` / `verdict` / `action` / `artifact` / `audit` / `inbox`。
 
+> **技能内容不在数据目录里**（2026-10）：正文与支持文件落在 `<skillsRoot>/<slug>/`
+> （默认 `~/.agentdeck/skills`，`--skills-root` 可覆盖），`log/skill.jsonl` 里那条记录
+> 退化成**索引**（id / slug / 来源 / 版本 / 时间）。**磁盘为准**——改那里的 `SKILL.md`
+> 就生效。**没有例外**：从本地技能目录装进来的（`localdir:`）也落盘——它装完就是一条
+> 普通技能，正文在 `~/.agentdeck/skills/<slug>/`（2026-10 D73 撤掉了旧的 `localdir:`
+> 例外：那时它的正文留在记录里、不落盘）。老记录（含老的 `localdir:` 记录）在
+> `FileStore.open` 里**一次性迁移**落盘（幂等）。落点与回读见 `packages/store-file/src/skill-files.ts`；
+> 兜底 `fallbackSkillsRoot` 在 `apps/daemon/src/workdir.ts`（与 `fallbackWorkRoot` 同层，
+> 绝不碰家目录）。
+
 > ⚠️ 设计文档里还列过 `runs/<runId>/run.json`，实现时**有意去掉了**：run 记录已经以追加
 > 记录的形式存在于 `log/run.jsonl`，再存一份就变成**双份真相**，迟早会不一致。
 > `runs/<runId>/` 只放消息流。
@@ -803,7 +813,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/skills` | 列表 |
 | POST | `/api/skills` | 直接写入（页面不走这条，走 install） |
 | POST | `/api/skills/install` | 装技能：本地路径 / GitHub 地址 / 远端目录（D38） |
-| GET/PUT | `/api/skills/local-dirs` | 勾了哪些**本机技能目录**（读别的 AI 工具的 `skills/` 目录；PUT 会重扫并回报 added/updated/removed） |
+| GET | `/api/skills/local-dirs` | **只读发现**：扫内置的那几个本机技能目录（别的 AI 工具的 `skills/`），列出里面发现的技能与「已装」标记（D73；原来的 PUT 对账已删） |
 | GET | `/api/skills/install-list` | 读**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法 url/path；daemon 算 slug）。**不联网**——只读本地那份文件；清单本身坏掉时**报错**而不是回空表。路径可用 `--skills-catalog` 换 |
 | DELETE | `/api/skills/{id}` | 卸载（还被 agent 挂着时**被拒**并列出是谁） |
 | **工具包** | | |
@@ -1200,13 +1210,17 @@ my-tool/
 
 装完之后要在**审核者**的「行动权限」里勾上动作（D40 收口）——勾的动作还能**钉固定参数**。
 
-### 9.3 装 skill 的三种来源与出网边界
+### 9.3 装 skill 的来源与出网边界
 
 | 来源 | 谁下载 | 边界 |
 |---|---|---|
 | 本地目录路径 | **daemon** | 页面读不到本地目录，所以这条路必须由 daemon 走 |
 | GitHub 链接 | **daemon** | 见下 |
 | 远端公共目录 | 页面 | 远端只列内容、**不经手安装**，装由本机做并再校验一遍 |
+
+⚠️ 界面上的「从本地安装」页签（扫 `~/.claude/skills` 那类目录）**不是第四种来源**：
+它扫出来后走的就是**本地目录路径**那条路（装完落盘、`sourceRef` 带 `localdir:` 标记，D73）。
+所以出网边界没有变化。
 
 ⚠️ **唯一一处 daemon 会主动出网**：从本地路径 / GitHub 装 skill。
 边界**写死在** `packages/skill-source/src/skill-source.ts`：
@@ -1261,7 +1275,7 @@ macOS 上能碰巧读到，Linux 上不行。
 | 建任务（不是视图） | `#/tasks/new`（老地址 `#/new` 一样直达） | ⚠️ **2026-10（D58）：「新建任务」不再是一项导航，也不再是一个视图**——侧栏只剩五项，那张表单**住在「任务」页右栏里**：顶栏那个主操作（`kind: 'primary'`）只是把右栏切成它（`goCreate()` → `#/tasks/new`）。⚠️ **它不是第 6 个视图**：`VIEWS` 里没有 `new`，路由解析出来的是一对 `{ view: 'tasks', creating: true }`（`apps/web/src/lib/route.ts`，纯函数、有单测）。⚠️ 三个具体后果：① **`with-detail` 必须把"正在建"也算进去**——窄屏那条 `.split-layout:not(.with-detail) .detail-pane { display:none }` 会把它整栏藏掉（"点新建任务什么都不出现"，宽屏上看不出来）；② **进建任务要把模式拨回列表**（右栏只在列表那一档存在；模式存在 `localStorage` 里，"上次用看板"的人点进来会屏幕上什么都没有）；③ 填过东西再切走要先问一句（`lib/create-draft.ts` 那个 store + `lib/leave-create.ts` 那个守卫 + `askConfirm`）——⚠️ 那一栏上面**没有**返回按钮（2026-10 按要求去掉），出口是**顶栏的「列表 / 看板」**与**侧栏的「任务」那一项**，而这两处都要过同一个守卫（各写一遍的后果不是重复而是**漏**——漏掉的那条正是静默丢草稿的那条）；顶栏的「列表」在建任务时不能是空操作（`mode === next` 也要放行）。**浏览器后退拦不住**（地址是路由的唯一出处，拦一次后退要么"改地址再改回来"、要么上 History API——这个应用刻意不用），真正的解法是把草稿留在 store 里，见 §15.36。三步链：**执行 → 审核 → 行动**（D42）。默认值从长期配置推导，②③**只为这一次**可改，三处都提前说清后果。⚠️ 页面形状：任务内容只有**一个多行框**（没有"标题 + 补充说明"两个字段——切分在 `apps/web/src/lib/request-text.ts`：第一行当标题、其余进说明，全文进 `prompt`；**默认 3 行、随输入长高、15 行封顶**）；三步是**两列**（左列 ① 执行拉满两行，右列 ② 审核在上、③ 行动在下）；③ 的行动选择器住在一个**居中对话框**里（`components/Modal.svelte`），页面上只剩「选择动作…」+ 计数，允许的动作以胶囊列在 ③ **卡片里面**（契约值 + **已固定 `name=value`（与契约值同一行）** + `summary`——只列钉死的值，不列"由模型填 / 平台注入"，那两行使用者没法据它做决定）；提交栏**吸底**（`position: sticky`），滚动时始终可点，错误提示也在那一栏里 |
 | 任务 | `#/tasks` | 列表 / 看板（六列，阶段是推出来的，见 §8.5；「已放弃」由 issue 状态覆盖，见 §8.2）；⚠️ **2026-10（D58）：建任务的入口在这一页**（顶栏那个主操作），而且表单就开在这一页的**右栏**里（见上一行）——这一页因此同时是"看"和"建"两个方向的门。右栏一次只放一件事（某条任务的详情 / 建任务那张表单），两者互斥，切换要过守卫 |
 | 智能体 | `#/agents` | 主从布局。详情里有「由谁审它」、**「指令」（② 身份：判断依据就写在里面，老数据那份老标准也显示在这一栏并带一键并进）**、**挂载的 skill**、**行动权限**编辑器（左选右配，D43/D44）。⚠️ 2026-09 起**没有单独的「审核标准」那一栏了** |
-| 技能 | `#/skills` | 三个来源安装 + 卸载（D38） |
+| 技能 | `#/skills` | 四页签安装（路径 / GitHub、**从本地安装**、远端目录、本地清单）+ 卸载（D38；本地技能目录由"自动对账"改成显式安装，D73） |
 | 工具 | `#/tools` | 安装 / 查看工具包；放行"不支持预演的动作"的开关也在这里 |
 
 **路由是极简的 hash 路由，没有路由库**（`src/lib/route.ts` 是判据、`src/lib/view.ts`
@@ -1490,10 +1504,11 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 动作执行 / 脚本进程 | `apps/daemon/src/actions.ts` / `script-executor.ts` |
 | 工作目录分配 / 文件读取 | `apps/daemon/src/workdir.ts` / `workdir-files.ts` |
 | 重启对账 | `apps/daemon/src/reconcile.ts` |
-| 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts`；**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法）：`apps/daemon/src/skill-list.ts`（自带清单 `apps/daemon/catalog/skills.json`，`--skills-catalog` 可换） |
+| 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts`；「从本地安装」扫别的 AI 工具的技能目录：`apps/daemon/src/local-skill-dirs.ts`（只读扫描，无对账）；**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法）：`apps/daemon/src/skill-list.ts`（自带清单 `apps/daemon/catalog/skills.json`，`--skills-catalog` 可换） |
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |
+| **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
 | **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |
 | CLI 入口的 Node 版本守卫 | `scripts/node-entry.mjs`（四条 `pnpm run` 命令都过它；`.mjs` 是必须的，写在 `.ts` 里跑不到） |
@@ -1517,7 +1532,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 返工回路（D45） | `rework-e2e.test.ts` |
 | **人的三个出路**（D46 / D47） | `human-verdict.test.ts`（裁决接口与落库 + 放弃/恢复 + **放弃时取消正在跑的 run**，用一个不自己结束的假后端造出 `running`）、`apps/web/src/lib/pipeline.test.ts`（两种载体的阶段推导、`abandoned` 覆盖每一档、六列覆盖率） |
 | 动作与工具包 | `tool-action-e2e.test.ts`、`task-action-params.test.ts`、`task-action-whitelist.test.ts`、`tools-api.test.ts`、`no-builtin-actions.test.ts`、`script-executor.test.ts` |
-| 安装（skill / 工具） | `skills-install.test.ts`、`skill-source.test.ts`、`tool-source.test.ts`、`remote-tool-install.test.ts` |
+| 安装（skill / 工具） | `skills-install.test.ts`、`skill-source.test.ts`、`tool-source.test.ts`、`remote-tool-install.test.ts`、`skills-local-dirs-api.test.ts`（从本地安装：扫描 → 装 → 落盘 → 挂给智能体）、`local-skill-dirs.test.ts`（扫描） |
 | 换一个 runtime | `runtime-agnostic.test.ts`、`runtime-registry.test.ts` |
 | 第一句话模版 | `template-e2e.test.ts`、`packages/agent-core/src/first-sentence.test.ts` |
 | 工作目录与文件服务 | `workdir.test.ts`、`workdir-files.test.ts` |

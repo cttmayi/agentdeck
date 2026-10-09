@@ -62,6 +62,7 @@ import { JsonlLog } from './log.ts'
 import { LockHeldError, acquireLock } from './lock.ts'
 import { MessageLog, ensureRunDir, messageLogPath } from './messages.ts'
 import { Mutex, pruneUndefined } from './mutex.ts'
+import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-files.ts'
 
 /**
  * 文件存储适配器 —— `Store` 端口的 v1 实现。
@@ -78,6 +79,11 @@ import { Mutex, pruneUndefined } from './mutex.ts'
  *       ├── log/<collection>.jsonl.snapshot   压缩后的物化快照
  *       ├── blobs/<前两位>/<sha256>    内容寻址
  *       └── runs/<runId>/messages.jsonl        执行消息流
+ *
+ * 另外**技能内容**不在这棵树下（2026-10）：`SKILL.md` 正文与支持文件落在
+ * `<skillsRoot>/<slug>/`（`skill-files.ts`），`log/skill.jsonl` 里只留索引与
+ * 元数据。`skillsRoot` 由调用方给（CLI 默认 `~/.agentdeck/skills`，想放进
+ * 数据目录之内也行），不传时兜底到 `<dataDir>/skills`——**绝不碰家目录**。
  *
  * 关于设计文档的一处偏离：文档里还列了 `runs/<runId>/run.json`。
  * 实现时去掉了它——run 记录已经以追加记录的形式存在于 `log/run.jsonl`，
@@ -125,6 +131,15 @@ export interface FileStoreOptions {
   dataDir: string
   /** 关掉 fsync 换取速度——**只应在测试里用**。 */
   fsync?: boolean
+  /**
+   * 技能内容的落点（`<skillsRoot>/<slug>/SKILL.md` + 支持文件）。
+   *
+   * 缺省 `<dataDir>/skills`——与 `fallbackWorkRoot` 同一思路：调用方不传时
+   * **自洽、绝不碰家目录**。CLI 那一层会显式传 `~/.agentdeck/skills`（面向
+   * 使用者的产品决定）；核心层的兜底待在自己的数据目录里，是为了让"忘了传"
+   * 的测试不会在使用者家目录里造目录。
+   */
+  skillsRoot?: string
 }
 
 /** 排序 + 游标分页。游标就是上一页最后一条的 id（ULID，可排序）。 */
@@ -173,6 +188,21 @@ function paginate<T extends { id: string }>(items: readonly T[], q: PageQuery): 
 
 function isActiveRun(run: Run): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(run.status)
+}
+
+/**
+ * 落盘用的**索引记录**：去掉正文与支持文件，只留元数据（id / slug / 来源 /
+ * 版本 / 时间）。
+ *
+ * 类型上仍按 `Skill` 流转（端口形状不变），正文与支持文件由 `FileStore.#hydrate`
+ * 从磁盘补回来。写出去的对象少这两个键是安全的：读取路径上本来就没有 zod
+ * 校验（整条记录以 JSON 存，见 `Skill.files` 那段注释）。
+ */
+function toIndexRecord(skill: Skill): Skill {
+  const record: Record<string, unknown> = { ...skill }
+  delete record['body']
+  delete record['files']
+  return record as unknown as Skill
 }
 
 /**
@@ -362,6 +392,7 @@ export class FileStore implements Store {
   readonly #dataDir: string
   readonly #fsync: boolean
   readonly #meta: Meta
+  readonly #skillsRoot: string
   /** workspace 记录单独存放——这样 getWorkspace 不必先打开它的目录。 */
   readonly #wsIndex: JsonlLog<Workspace & { id: string }>
   readonly #device = new Mutex()
@@ -369,10 +400,16 @@ export class FileStore implements Store {
   readonly #stores = new Map<string, WorkspaceStore>()
   #releaseLock: (() => Promise<void>) | null = null
 
-  private constructor(dataDir: string, meta: Meta, fsync: boolean) {
+  private constructor(
+    dataDir: string,
+    meta: Meta,
+    fsync: boolean,
+    skillsRoot: string,
+  ) {
     this.#dataDir = dataDir
     this.#fsync = fsync
     this.#meta = meta
+    this.#skillsRoot = skillsRoot
     this.#wsIndex = new JsonlLog<Workspace & { id: string }>(join(dataDir, 'workspaces.jsonl'), {
       fsync,
     })
@@ -381,6 +418,7 @@ export class FileStore implements Store {
   static async open(options: FileStoreOptions): Promise<FileStore> {
     const { dataDir } = options
     const fsync = options.fsync ?? true
+    const skillsRoot = options.skillsRoot ?? join(dataDir, 'skills')
     await ensureDir(dataDir)
 
     const existing = await readJsonOrNull<Meta>(join(dataDir, 'meta.json'))
@@ -398,7 +436,7 @@ export class FileStore implements Store {
       await atomicWrite(join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2))
     }
 
-    const store = new FileStore(dataDir, meta, fsync)
+    const store = new FileStore(dataDir, meta, fsync, skillsRoot)
     // 锁必须在读日志之前拿到，否则第二个进程会先读到一半状态
     store.#releaseLock = await acquireLock(dataDir)
     await store.#wsIndex.open()
@@ -412,7 +450,55 @@ export class FileStore implements Store {
     for (const ws of store.#wsIndex.all()) {
       await store.#ws(ws.id as WorkspaceId)
     }
+
+    // 技能内容从"记录里"搬到"磁盘上"的一次性迁移（2026-10）。必须在预加载
+    // 之后——它要遍历 `#stores` 里的记录。
+    await store.#migrateSkillsToDisk()
     return store
+  }
+
+  /**
+   * 把**老记录**里的技能内容落到磁盘（`<skillsRoot>/<slug>/`），并把记录重写成
+   * 只留索引。
+   *
+   * 为什么在 `open()` 里做、而不是懒迁移：迁移是**一次性的**，且幂等——
+   * 重写后记录里没有正文，下次 `open()` 直接跳过。放在启动时做，读路径
+   * （`listSkills` 等）就保持**无副作用**，不用一边读一边往磁盘写东西。
+   *
+   * ★ 2026-10：**不再有例外**。早前 `localdir:` 那类（从 `~/.claude/skills`
+   *   读进来的技能）跳过迁移，理由是内容另有出处、且对账要拿记录里的正文比对。
+   *   本地技能目录改成"显式安装"之后这条理由没了——所有带正文的老记录一律落盘。
+   */
+  async #migrateSkillsToDisk(): Promise<void> {
+    for (const ws of this.#stores.values()) {
+      for (const rec of ws.skill().all()) {
+        if (typeof rec.body !== 'string' || rec.body === '') continue // 已经是索引记录
+        await writeSkillFiles(this.#skillsRoot, rec)
+        await ws.mutex.run(() => ws.skill().put(toIndexRecord(rec)))
+      }
+    }
+  }
+
+  /**
+   * 把一条记录回读成完整的 `Skill`（把正文与支持文件补齐）。
+   *
+   * 规则**纯机械**，不看来源：
+   *   · 记录里**有正文** ⇒ 用它（只可能是还没迁移的老记录）；
+   *   · 没有 ⇒ 从 `<skillsRoot>/<slug>/` 读回（**磁盘为准**）。
+   *
+   * 盘上找不到（使用者手删了目录）⇒ 正文空。由注入侧的空正文守卫
+   * （`agent-core` 的 `writeSkill`）把它变成一次**响亮的失败**，而不是
+   * 静默写一个空 `SKILL.md` 出去。
+   */
+  async #hydrate(rec: Skill & { id: string }): Promise<Skill> {
+    if (typeof rec.body === 'string' && rec.body !== '') return rec
+    const content = await readSkillContent(this.#skillsRoot, rec.slug)
+    if (content === null) return { ...rec, body: '' }
+    return {
+      ...rec,
+      body: content.body,
+      ...(Object.keys(content.files).length > 0 ? { files: content.files } : {}),
+    }
   }
 
   async formatVersion(): Promise<number> {
@@ -542,27 +628,35 @@ export class FileStore implements Store {
   async getSkill(id: SkillId): Promise<Skill | null> {
     for (const ws of this.#stores.values()) {
       const found = ws.skill().get(id)
-      if (found) return found
+      if (found) return this.#hydrate(found)
     }
     return null
   }
 
   async listSkills(workspaceId: WorkspaceId): Promise<Skill[]> {
-    return (await this.#ws(workspaceId)).skill().all()
+    const ws = await this.#ws(workspaceId)
+    return Promise.all(ws.skill().all().map((rec) => this.#hydrate(rec)))
   }
 
   async listSkillsByIds(ids: readonly SkillId[]): Promise<Skill[]> {
     const wanted = new Set<string>(ids)
     const out: Skill[] = []
     for (const ws of this.#stores.values()) {
-      for (const s of ws.skill().all()) if (wanted.has(s.id)) out.push(s)
+      for (const rec of ws.skill().all()) {
+        if (wanted.has(rec.id)) out.push(await this.#hydrate(rec))
+      }
     }
     return out
   }
 
   async insertSkill(skill: Skill): Promise<void> {
     const ws = await this.#ws(skill.workspaceId)
-    await ws.mutex.run(() => ws.skill().put(skill))
+    // ★ 先写文件、再写记录。崩在两步之间时两种残留的方向完全不同：
+    //   - **先写文件**：残留是"盘上有目录、记录里没有" ⇒ 界面上不可见
+    //     （列表来自记录），下次装同名会覆盖它——最轻；
+    //   - 反过来：残留是"记录在、内容不在" ⇒ 一条**可见的坏技能**。
+    await writeSkillFiles(this.#skillsRoot, skill)
+    await ws.mutex.run(() => ws.skill().put(toIndexRecord(skill)))
   }
 
   async deleteSkill(id: SkillId): Promise<boolean> {
@@ -570,8 +664,14 @@ export class FileStore implements Store {
     // 但**别假设这一点**：找不删的代价只是多几次读）
     for (const wsId of await this.listWorkspaceIds()) {
       const ws = await this.#ws(wsId)
-      if (!ws.skill().has(id)) continue
-      return ws.mutex.run(() => ws.skill().del(id))
+      const rec = ws.skill().get(id)
+      if (!rec) continue
+      const removed = await ws.mutex.run(() => ws.skill().del(id))
+      // 记录真删掉了才动磁盘
+      if (removed) {
+        await removeSkillFiles(this.#skillsRoot, rec.slug)
+      }
+      return removed
     }
     return false
   }

@@ -220,6 +220,20 @@ export async function writeSkill(
   skillDir: string,
   skill: SkillFileInput,
 ): Promise<NormalizedSkill> {
+  // ★ 空正文**当场失败**，绝不写出去。
+  //
+  //   库里本来不可能有空正文的技能（每个安装来源都拒空：`resolvePayloadEntry`
+  //   与 `checkSkillMd`）。但 2026-10 之后技能正文存在磁盘上
+  //   （`<skillsRoot>/<slug>/SKILL.md`），使用者手删了那个目录时，store 回填
+  //   出来的正文就是空的——此时若照样写一个空 `SKILL.md` 到工作目录，就是一个
+  //   **静默的坏技能**：CLI 会发现它、它却什么都没说。这里把它变成一次响亮的失败。
+  if (skill.content.trim() === '') {
+    throw new Error(
+      `技能「${skill.slug}」的正文是空的，拒绝注入。` +
+        `正文存在技能目录的 SKILL.md 里（daemon 默认落在 ~/.agentdeck/skills/<slug>/）——` +
+        `如果那里被删了，请重新安装这个技能。`,
+    )
+  }
   const normalized = normalizeSkillFrontmatter(skill.slug, skill.content, skill.description)
   const targetDir = join(workDir, skillDir, normalized.slug)
 

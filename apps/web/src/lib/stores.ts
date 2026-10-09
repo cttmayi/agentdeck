@@ -15,7 +15,6 @@ import {
   type InboxItem,
   type Issue,
   type LocalSkillDirsState,
-  type ReconcileReport,
   type RunSummary,
   type ReviewStandard,
   type Skill,
@@ -304,53 +303,20 @@ export const loadSkills = (): Promise<void> =>
   load('skills', async () => (await api<{ skills: Skill[] }>('/api/skills')).skills ?? [], skills)
 
 /**
- * 本地技能目录（Skills 页 →「设置」）。
+ * 「从本地安装」（Skills 页页签）：扫内置技能目录得到的一份**只读清单**。
  *
- * ★ 它跟技能列表是**两件事**：列表是"库里有什么"，这里是"要读哪些目录"。
- *   所以是两个 store、两个加载点——混成一个，"设置里勾了什么"就会跟着列表的
- *   刷新节奏变，而那是两个不同的时机。
+ * ★ 它跟技能列表是**两件事**：列表是"库里有什么"，这里是"那几个目录里有什么"。
+ *   所以是两个 store、两个加载点——打开页签时才扫，不跟着列表的刷新节奏走。
+ *   扫完不写库；装哪条由使用者点，装的动作走 `POST /api/skills/install`。
  */
-const EMPTY_REPORT: ReconcileReport = {
-  added: [],
-  updated: [],
-  removed: [],
-  keptBecauseUsed: [],
-  failed: [],
-  skipped: [],
-  dirErrors: [],
-  onDisk: [],
-}
+export const localSkillScan = writable<LocalSkillDirsState>({ dirs: [] })
 
-export const localSkillDirs = writable<LocalSkillDirsState>({
-  candidates: [],
-  enabled: [],
-  custom: [],
-  report: EMPTY_REPORT,
-})
-
-export const loadLocalSkillDirs = (): Promise<void> =>
+export const loadLocalSkillScan = (): Promise<void> =>
   load(
-    'localSkillDirs',
+    'localSkillScan',
     async () => await api<LocalSkillDirsState>('/api/skills/local-dirs'),
-    localSkillDirs,
+    localSkillScan,
   )
-
-/**
- * 改「勾了哪些本地技能目录」。
- *
- * ★ 返回这次对账的报告（而不是 `void`）：使用者勾上一个目录之后，马上要知道的
- *   就是"读进来了什么、跳过了什么"。让界面再发一次列表请求才能知道结果，等于
- *   把一次往返塞给他，而中间那段空白正是"我勾了到底有没有用"的焦虑来源。
- */
-export async function saveLocalSkillDirs(dirs: string[]): Promise<ReconcileReport> {
-  const body = await api<{ enabled: string[]; report: ReconcileReport }>('/api/skills/local-dirs', {
-    method: 'PUT',
-    body: JSON.stringify({ dirs }),
-  })
-  // 列表与设置一起刷新：勾选状态变了，两边都会变
-  await Promise.all([loadSkills(), loadLocalSkillDirs()])
-  return body.report
-}
 
 export const loadTools = (): Promise<void> =>
   load(

@@ -197,56 +197,37 @@ export const skillsText = {
   //   再写一份就有两个出处（改一处漏一处）。只有这句带说明的标题是本区域独有的。
   'skills.supportFiles': { zh: '支持文件（{count}）', en: 'Support files ({count})' },
 
-  // ── 本地 skill 目录（把别的 AI 工具那儿的 skill 读进来）──
-  'skills.settings': { zh: '设置', en: 'Settings' },
-  'skills.dirsTitle': { zh: '本地技能目录', en: 'Local skill directories' },
-  'skills.dirsIntro': {
-    zh: '勾上别的 AI 工具放技能的目录，那儿的技能就会出现在这一页，也能挂给智能体用。目录是每次都重扫的：你在那边改了、加了、删了，这边跟着变。',
-    en: 'Tick the directories where other AI tools keep their skills; those skills then show up on this page and can be attached to agents. The directories are re-scanned every time: edit, add or delete over there and this side follows.',
-  },
+  // ── 「从本地安装」页签（把别的 AI 工具那儿的 skill 装进来）──
+  /**
+   * ★ 这一页签**不做自动同步**（2026-10 改的）：它扫那几个目录、列出里面的技能，
+   *   逐条装。装完就是一条普通技能（正文落在 `~/.agentdeck/skills/` 下），与其它
+   *   来源一致——所以这里没有勾选框、没有"导入"，只有「安装」。
+   */
+  'skills.tabDirs': { zh: '从本地安装', en: 'Install from local dirs' },
   'skills.dirsToolClaude': { zh: 'Claude Code', en: 'Claude Code' },
   'skills.dirsToolCodex': { zh: 'Codex', en: 'Codex' },
   'skills.dirsToolCursor': { zh: 'Cursor', en: 'Cursor' },
   'skills.dirsToolAgents': { zh: 'AGENTS 约定目录', en: 'AGENTS convention' },
-  'skills.dirsMissing': { zh: '这个目录不存在', en: 'This directory does not exist' },
-  'skills.dirsCount': { zh: '里面 {count} 个技能', en: '{count} skill(s) inside' },
   'skills.dirsNoSkill': { zh: '里面没有技能', en: 'No skills inside' },
-  'skills.dirsScanning': { zh: '正在看这些目录…', en: 'Looking at these directories…' },
-  'skills.dirsCustomHeading': { zh: '自己填的路径', en: 'Paths you added' },
-  'skills.dirsCustomPlaceholder': { zh: '绝对路径，比如 /Users/me/my-skills', en: 'Absolute path, e.g. /Users/me/my-skills' },
-  'skills.dirsAdd': { zh: '加进来', en: 'Add' },
-  'skills.dirsRemove': { zh: '去掉', en: 'Remove' },
-  /** 「移除」这个目录（只是取消勾选，不删任何东西）。 */
-  'skills.dirsRemoveTitle': { zh: '取消勾选这个目录（不会删掉里面的东西）', en: 'Uncheck this directory (nothing is deleted)' },
-  /**
-   * ⚠️ 这段话必须说**取消勾选不会怎样**。使用者对"取消勾选"的直觉是"删掉"，
-   *    而这里的实际行为是"不再出现在可选项里、正在用的留着"——两者差得很远，
-   *    不写出来他会以为勾掉就把 skill 删了（于是不敢勾）。
-   */
-  'skills.dirsUncheckNote': {
-    zh: '取消勾选只表示「不再出现在能选的列表里」，不会删掉什么，也不会把已经有智能体挂着的那条抽走——不然那个智能体会悄悄少一条能力。要彻底删掉，先在智能体上把它摘下来。',
-    en: 'Unticking only means "no longer offered for selection". It deletes nothing and does not take away a skill an agent already mounts — otherwise that agent would quietly lose an ability. To remove one for good, detach it from the agent first.',
+  /** 目录本身读不了（不存在 / 没权限）——说清是哪个目录、为什么。 */
+  'skills.dirReadError': { zh: '这个目录读不了：{error}', en: 'This directory could not be read: {error}' },
+  /** 一条待安装技能的按钮。 */
+  'skills.dirInstall': { zh: '安装', en: 'Install' },
+  /** 库里已经有同 slug 的了。 */
+  'skills.dirInstalled': { zh: '已安装', en: 'Installed' },
+  /** 看到却没列出来的东西（没有 SKILL.md、太深、解析不了…），带原因。 */
+  'skills.dirsSkipped': { zh: '跳过：{list}', en: 'Skipped: {list}' },
+  'skills.dirsFootHint': {
+    zh: '这些是别的 AI 工具（Claude Code / Codex / Cursor / AGENTS）放技能的目录。装进来的技能正文会落在 AgentDeck 自己的 skills 目录下，之后就是一条普通技能——想在那边改了也生效，就再装一次，或直接改我们这份。',
+    en: 'These are the directories where other AI tools (Claude Code / Codex / Cursor / AGENTS) keep their skills. Installed skills are copied into AgentDeck’s own skills directory and then behave like any other skill — to pick up later edits over there, install again or edit our copy.',
   },
-  'skills.dirsSkipped': { zh: '跳过（没有 SKILL.md，不算技能）：{list}', en: 'Skipped (no SKILL.md, not a skill): {list}' },
-  'skills.dirsUnreadable': { zh: '读不了：{list}', en: 'Unreadable: {list}' },
-  'skills.dirsFailed': { zh: '读不进来：{list}', en: 'Could not read: {list}' },
-  'skills.dirsSaved': { zh: '读进来 {added} 个，更新 {updated} 个，移出 {removed} 个', en: 'Read in {added}, updated {updated}, removed {removed}' },
-  'skills.dirsSavedNothing': { zh: '已保存（没有新的技能读进来）', en: 'Saved (no new skills read in)' },
-  'skills.dirsKept': {
-    zh: '{count} 个还有智能体在用，所以留着：{names}',
-    en: '{count} kept because agents still mount them: {names}',
+  'skills.dirsFootNote': {
+    zh: '逐个安装：装完就是一条普通技能，不再跟着源目录走。',
+    en: 'Install one by one: once installed it behaves like any other skill and no longer follows the source directory.',
   },
 
   // ── 列表里"这条是从本地目录来的" ──
   'skills.fromDir': { zh: '来自 {dir}', en: 'From {dir}' },
-  'skills.fromDirInactive': {
-    zh: '来源目录已取消勾选或文件已移走，但还有智能体在用：{names}',
-    en: 'Its source directory is unticked or the file is gone, but agents still mount it: {names}',
-  },
-  'skills.uninstallLocalDirTitle': {
-    zh: '这条技能住在本地目录里，这里不给卸载——删了也会被下一次扫描带回来。要删就去那个目录里删。',
-    en: 'This skill lives in a local directory, so it cannot be uninstalled here — deleting it would just be undone by the next scan. Delete it in that directory instead.',
-  },
 
   // ── 命令式文案：toast / confirm / 就地错误（事件回调里用 `tx`）──
   'skills.errEmptySource': {

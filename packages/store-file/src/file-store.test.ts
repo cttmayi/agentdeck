@@ -1,7 +1,7 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { access } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { IllegalTransitionError } from '@agentdeck/domain'
 import {
   agentId,
@@ -18,6 +18,7 @@ import {
   makeTool,
   reportId,
   runId,
+  skillId,
   toolId,
   wsId,
 } from '@agentdeck/domain/testing'
@@ -1074,5 +1075,254 @@ describe('deleteIssue：删掉一条任务连同挂它名下的一切', () => {
 
   test('★ 不存在的任务返回 false（幂等，不是错误）', async () => {
     assert.equal(await store.deleteIssue(issueId('nope')), false)
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════
+// 技能内容落盘（2026-10）
+// ══════════════════════════════════════════════════════════════════
+//
+// 改动的要点：技能正文 + 支持文件**存成真文件**放在 `<skillsRoot>/<slug>/`，
+// `skill.jsonl` 退化成索引（只留元数据）。**磁盘为准**——改文件就生效。
+// ⚠️ **没有例外**（2026-10）：`localdir:` 那类也一律落盘（那条例外已随"本地技能
+//    目录改成显式安装"撤掉，见 D73）。
+describe('技能内容落盘：正文与支持文件存成真文件', () => {
+  const WS2 = wsId('ws-skilldisk')
+  const skillLogPath = (d: string): string => join(d, 'workspaces', WS2, 'log', 'skill.jsonl')
+
+  async function openStore(): Promise<{ d: string; s: FileStore }> {
+    const d = await makeTempDir('skilldisk')
+    const s = await FileStore.open({ dataDir: d, fsync: false })
+    await s.insertWorkspace({
+      executeTemplate: '',
+      reviewTemplate: '',
+      chatTemplate: '',
+      defaultAgentId: null,
+      locale: 'zh',
+      id: WS2,
+      name: 'w',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    return { d, s }
+  }
+
+  async function exists(p: string): Promise<boolean> {
+    try {
+      await access(p)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** 从 skill.jsonl 里取某条 id **最后一次** put 的 value（索引记录）。 */
+  async function rawRecord(d: string, id: string): Promise<Record<string, unknown>> {
+    const raw = await readFile(skillLogPath(d), 'utf8')
+    const rec = raw
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { op: string; id: string; value?: Record<string, unknown> })
+      .filter((e) => e.op === 'put' && e.id === id)
+      .at(-1)?.value
+    assert.ok(rec, `skill.jsonl 里应有 ${id} 的 put 记录`)
+    return rec
+  }
+
+  test('★ 装一条 ⇒ 文件真落在 <skillsRoot>/<slug>/，记录里没有 body/files', async () => {
+    const { d, s } = await openStore()
+    try {
+      await s.insertSkill(
+        makeSkill({
+          id: 'sk1',
+          workspaceId: WS2,
+          slug: 'pptx',
+          body: '# 幻灯片\n正文',
+          files: { 'ref/note.md': '支持文件' },
+        }),
+      )
+
+      assert.equal(await readFile(join(d, 'skills', 'pptx', 'SKILL.md'), 'utf8'), '# 幻灯片\n正文')
+      assert.equal(await readFile(join(d, 'skills', 'pptx', 'ref', 'note.md'), 'utf8'), '支持文件')
+
+      const rec = await rawRecord(d, 'sk1')
+      assert.equal(rec['body'], undefined, '索引记录不该留正文')
+      assert.equal(rec['files'], undefined, '索引记录不该留支持文件')
+      assert.equal(rec['slug'], 'pptx', '元数据仍在记录里')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('读回：正文与支持文件从磁盘补回来（getSkill 与 listSkills 都是）', async () => {
+    const { d, s } = await openStore()
+    try {
+      const skill = makeSkill({
+        id: 'sk2',
+        workspaceId: WS2,
+        slug: 'research',
+        body: '正文A',
+        files: { 'a.md': 'x' },
+      })
+      await s.insertSkill(skill)
+
+      const got = await s.getSkill(skill.id)
+      assert.equal(got?.body, '正文A')
+      assert.deepEqual(got?.files, { 'a.md': 'x' })
+
+      const listed = (await s.listSkills(WS2)).find((x) => x.id === 'sk2')
+      assert.equal(listed?.body, '正文A')
+      assert.deepEqual(listed?.files, { 'a.md': 'x' })
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 磁盘为准：手改 SKILL.md ⇒ 再读回来是改后的内容', async () => {
+    const { d, s } = await openStore()
+    try {
+      const skill = makeSkill({ id: 'sk3', workspaceId: WS2, slug: 'editme', body: '旧内容' })
+      await s.insertSkill(skill)
+      // 直接改盘上的文件——这正是"使用者改技能"的路径
+      await writeFile(join(d, 'skills', 'editme', 'SKILL.md'), '新内容', 'utf8')
+      assert.equal((await s.getSkill(skill.id))?.body, '新内容')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('卸载 ⇒ 记录与目录都没了', async () => {
+    const { d, s } = await openStore()
+    try {
+      const skill = makeSkill({ id: 'sk4', workspaceId: WS2, slug: 'gone', body: 'x' })
+      await s.insertSkill(skill)
+      assert.ok(await exists(join(d, 'skills', 'gone')))
+
+      assert.equal(await s.deleteSkill(skill.id), true)
+      assert.equal(await s.getSkill(skill.id), null)
+      assert.equal(await exists(join(d, 'skills', 'gone')), false, '目录也要删掉')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('★ 老记录（带 body、盘上无目录）⇒ open 时迁移落盘并重写成索引', async () => {
+    const d = await makeTempDir('skilldisk')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: WS2,
+        name: 'w',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await a.close()
+
+      // 直接写一条**老式**记录（正文藏在记录里、盘上没有目录）——模拟升级前的数据
+      const old = makeSkill({ id: 'sk-old', workspaceId: WS2, slug: 'legacy', body: '# 老正文' })
+      await mkdir(dirname(skillLogPath(d)), { recursive: true })
+      await writeFile(
+        skillLogPath(d),
+        `${JSON.stringify({ seq: 1, at: 1, op: 'put', id: old.id, value: old })}\n`,
+        'utf8',
+      )
+
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      try {
+        // 迁移：正文落盘 + 记录重写
+        assert.equal(await readFile(join(d, 'skills', 'legacy', 'SKILL.md'), 'utf8'), '# 老正文')
+        assert.equal((await rawRecord(d, 'sk-old'))['body'], undefined, '迁移后记录不该留正文')
+        // 再读走磁盘
+        assert.equal((await b.getSkill(skillId('sk-old')))?.body, '# 老正文')
+      } finally {
+        await b.close()
+      }
+
+      // 幂等：再开一次不再改（记录里已无正文，直接跳过）
+      const c = await FileStore.open({ dataDir: d, fsync: false })
+      try {
+        assert.equal((await c.getSkill(skillId('sk-old')))?.body, '# 老正文')
+      } finally {
+        await c.close()
+      }
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('★★ 老的 `localdir:` 记录（带 body）⇒ 迁移落盘、记录转索引（不再有例外）', async () => {
+    const d = await makeTempDir('skilldisk-localdir-legacy')
+    try {
+      const a = await FileStore.open({ dataDir: d, fsync: false })
+      await a.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: WS2,
+        name: 'w',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await a.close()
+
+      // 直接写一条**老式**记录：`localdir:` 来源，正文藏在记录里、盘上没有目录
+      // ——模拟"本地技能目录改成显式安装"之前落库的数据。
+      const old = makeSkill({
+        id: 'sk-l',
+        workspaceId: WS2,
+        slug: 'local-one',
+        source: 'local',
+        sourceRef: 'localdir:/home/u/.claude/skills/local-one',
+        body: '本地正文',
+      })
+      await mkdir(dirname(skillLogPath(d)), { recursive: true })
+      await writeFile(
+        skillLogPath(d),
+        `${JSON.stringify({ seq: 1, at: 1, op: 'put', id: old.id, value: old })}\n`,
+        'utf8',
+      )
+
+      const b = await FileStore.open({ dataDir: d, fsync: false })
+      try {
+        // ★ 迁移：`localdir:` 不再例外，正文落盘 + 记录重写成索引
+        assert.equal(
+          await readFile(join(d, 'skills', 'local-one', 'SKILL.md'), 'utf8'),
+          '本地正文',
+          '★ localdir 记录也要落盘（改动前它是不落盘的）',
+        )
+        assert.equal((await rawRecord(d, 'sk-l'))['body'], undefined, '迁移后记录不该留正文')
+        assert.equal((await b.getSkill(skillId('sk-l')))?.body, '本地正文', '读回走磁盘')
+      } finally {
+        await b.close()
+      }
+    } finally {
+      await cleanup(d)
+    }
+  })
+
+  test('手删目录 ⇒ 读回正文空（由注入侧守卫把它变成响亮失败）', async () => {
+    const { d, s } = await openStore()
+    try {
+      const skill = makeSkill({ id: 'sk5', workspaceId: WS2, slug: 'deleted', body: 'x' })
+      await s.insertSkill(skill)
+      await rm(join(d, 'skills', 'deleted'), { recursive: true, force: true })
+      // 记录还在、内容没了 ⇒ 正文空；不在这里报错（读路径无副作用），
+      // 由 agent-core 的 writeSkill 空正文守卫拦下
+      assert.equal((await s.getSkill(skill.id))?.body, '')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
   })
 })

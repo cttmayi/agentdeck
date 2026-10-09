@@ -413,81 +413,60 @@ export interface Skill {
   version?: string | null
   updatedAt: number
   /**
-   * 这条是从哪个**本地技能目录**读进来的（Skills 页 →「设置」里勾的那些）。
-   * `null` = 手装的或远端装的。
+   * 这条是从哪个**本地技能目录**装进来的（Skills 页 →「从本地安装」）。
+   * `null` = 手装的、给路径装的、或远端装的。
+   *
+   * ⚠️ 它只是一个**来源标记**，没有任何"跟随磁盘"的语义：装完就是一条普通技能，
+   *    正文在我们自己的 `~/.agentdeck/skills/<slug>/` 里。
    *
    * ⚠️ 老 daemon 不返回这个字段 ⇒ `undefined`，按"不是从本地目录来的"处理。
    */
   localDir?: string | null
-  /**
-   * 现在还能不能在智能体上被选中。
-   *
-   * 手装与远端的**恒为 true**；来自本地目录的，在"目录取消了勾选"或"文件在源
-   * 工具那边被删了"之后变 false——那条记录会留着（有智能体挂着它），但不再
-   * 出现在可选项里。
-   *
-   * ⚠️ 判断一律写 `!== false`（老 daemon 没有这个字段 = 可以选），不要写
-   *    `if (s.selectable)`——那会把老 daemon 下的所有 skill 都变成不可选。
-   */
-  selectable?: boolean
 }
 
-/** 一个被扫过的目录：里面有几个技能、什么东西被跳过了。 */
-export interface ScannedDirInfo {
+/** 「从本地安装」页签里，某个目录中**发现的一个技能**。 */
+export interface LocalSkillCandidate {
+  /** 装到库里时的 slug（走与安装同一条解析规则得出）。 */
+  slug: string
+  /** 相对被扫的那个根目录的路径（`.system/skill-creator` 这种）。 */
+  rel: string
+  /** 技能目录的绝对路径——装的时候原样传回 `POST /api/skills/install`。 */
+  dir: string
+  /** 目录名。 */
+  name: string
+  /** SKILL.md frontmatter 里作者写的用途说明。 */
+  description: string | null
+  /** 库里已经有同 slug 的了 ⇒ 显示「已安装」并禁用按钮。 */
+  installed: boolean
+}
+
+/** 「从本地安装」页签里被扫的一个目录（daemon 内置表给的）。 */
+export interface LocalSkillScanDir {
+  /** 稳定 id（`claude` / `codex` / `cursor` / `agents`），显示名在词表里。 */
+  id: string
   /** 绝对路径。 */
   path: string
-  /** 这个目录现在存在吗（不存在也能勾——可能还没建，或外置盘没挂上）。 */
+  /** 装的时候带回去当来源标记：`localdir:<path>`。 */
+  sourceRef: string
+  /** 这个目录现在存在吗（不存在 = 那个工具没装，或没建过技能目录）。 */
   exists: boolean
-  /** 目录里现在有几个技能（勾之前就该看得见；"里面没有 skill"是个有用的答案）。 */
-  skillCount: number
+  /** 目录本身读不了的原因（不存在 / 没权限）；`null` = 读到了。 */
+  error: string | null
+  /** 里面发现的技能。 */
+  skills: LocalSkillCandidate[]
   /**
-   * 看到但**没当成技能**的东西（没有 SKILL.md、太深、版本库目录…）。
+   * 看到但**没当成技能**的东西（没有 SKILL.md、太深、版本库目录、解析不了…）。
    *
-   * ★ 必须一直跟着目录走，不能只在"刚勾完"那一下提示：实测 `~/.claude/skills`
-   *   里有一个没有 SKILL.md 的空目录，使用者勾完看到"少了一个"，第二天再打开
-   *   设置时那个解释如果没了，就只剩一个说不清的差额。
+   * ★ 必须一直跟着目录走：实测 `~/.claude/skills` 里有一个没有 SKILL.md 的空目录，
+   *   使用者打开这一屏看到"少了一个"时，解释必须就在这儿——不然他会去查权限、
+   *   查扫描是不是坏了。
    */
   skipped: Array<{ rel: string; reason: string }>
 }
 
-/** Skills 页「设置」里那一个候选目录（daemon 内置表给的）。 */
-export interface LocalSkillDirCandidate extends ScannedDirInfo {
-  /** 稳定 id（`claude` / `codex` / `cursor` / `agents`），显示名在词表里。 */
-  id: string
-}
-
-/** `GET /api/skills/local-dirs` 的回应。 */
+/** `GET /api/skills/local-dirs` 的回应（只读扫描，不写库）。 */
 export interface LocalSkillDirsState {
-  candidates: LocalSkillDirCandidate[]
-  /** 勾了的路径（绝对路径，已展开 `~`）。 */
-  enabled: string[]
-  /** 使用者自己填的、不在候选表里的路径。 */
-  custom: ScannedDirInfo[]
-  /**
-   * 这一次读设置时对账的结果。
-   *
-   * ★ 它跟着**读设置**一起回来（而不是只在改勾选时）：设置这一屏要能自己说完整
-   *   ——"勾了几个目录"与"其中哪两条没读进来"是同一个问题的两面。
-   */
-  report: ReconcileReport
-}
-
-/**
- * 一次对账的结果（勾选之后、或每次读列表时）。
- *
- * ★ 它存在的意义是"**别静默**"：跳过了什么、读不进来什么、为什么某条还留着，
- *   都必须能说出来。使用者勾了一个目录却少看到几个 skill 时，这份报告是他唯一
- *   的线索。
- */
-export interface ReconcileReport {
-  added: string[]
-  updated: string[]
-  removed: string[]
-  keptBecauseUsed: Array<{ slug: string; dir: string; usedBy: string[] }>
-  failed: Array<{ rel: string; reason: string }>
-  skipped: Array<{ dir: string; rel: string; reason: string }>
-  dirErrors: Array<{ dir: string; reason: string }>
-  onDisk: Array<{ dir: string; slug: string }>
+  dirs: LocalSkillScanDir[]
 }
 
 /**

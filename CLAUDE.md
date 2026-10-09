@@ -78,7 +78,7 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
 
 - **改哪段代码 → 去哪几个文件**：`docs/design/architecture.md` §13「代码索引」与 §13.1「谁钉住了什么」。
 - **不变量清单**：`docs/srs/requirements.md` §8；落到实现的映射与「已知的边界与开口」见 `docs/design/architecture.md` §4.3 与 §14。
-- **决策记录**：`docs/srs/requirements.md` §16（D1–D70）。决定改了就把编号写进去——决策只活在代码里就会漂。
+- **决策记录**：`docs/srs/requirements.md` §16（D1–D73）。决定改了就把编号写进去——决策只活在代码里就会漂。
 - **当前进行中的工作 / 新对话从哪接**：`docs/README.md` 的「当前进行中的工作」一节。
 - **安全边界是必读**（不做沙箱隔离 NG7 是明确的范围决定，不是待办）：根 `README.md` 的「安全边界」与 `docs/design/design.md` §14。
 - **`ref/` 是上游行为分析材料，不是本项目文档，且已 gitignore**。实现必须 **clean-room**——**不得从 `ref/multica/`（上游源码 checkout）复制任何源码**。

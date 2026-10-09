@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { startDaemon } from './server.ts'
 import { reviewerIdentity } from './review-standard.ts'
@@ -29,16 +29,20 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  */
 
 async function withDaemon<T>(
-  fn: (url: string) => Promise<T>,
+  fn: (url: string, ctx: { dir: string; skillsRoot: string }) => Promise<T>,
   options: { fetchImpl?: typeof fetch; githubToken?: string; githubProxy?: string } = {},
 ): Promise<T> {
   const dir = await makeTempDir('skills-install')
+  // 技能内容的落点：显式给（兜底虽然不会碰家目录，但显式给更清楚，也方便断言
+  // "文件真的落在 skillsRoot 下"）。
+  const skillsRoot = join(dir, 'skills')
   const d = await startDaemon({
     dataDir: dir,
     port: 0,
     fsync: false,
     // 工作目录也要显式给：兜底虽然不会碰家目录，但显式给更清楚
     workRoot: join(dir, 'work'),
+    skillsRoot,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.githubToken ? { githubToken: options.githubToken } : {}),
     ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
@@ -57,7 +61,7 @@ async function withDaemon<T>(
     onInfo: () => {},
   })
   try {
-    return await fn(d.url)
+    return await fn(d.url, { dir, skillsRoot })
   } finally {
     await d.close()
     await cleanup(dir)
@@ -447,6 +451,29 @@ describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
         // 真的进了库
         const listed = await listSkills(url)
         assert.equal(listed.some((s) => s.slug === installed[0]?.['slug']), true)
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★★ `path` 来源可以带 `sourceRef`（「从本地安装」用它记「从哪个目录装的」）', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 从本地技能目录装的' })
+    try {
+      await withDaemon(async (url) => {
+        const res = await installFromSource(url, {
+          source: { kind: 'path', path: src, sourceRef: 'localdir:/home/u/.claude/skills' },
+        })
+        assert.equal(res.status, 201, JSON.stringify(res.body))
+        assert.equal(
+          res.body['sourceRef'],
+          'localdir:/home/u/.claude/skills',
+          '★ 给的 sourceRef 要原样落库（不是默认的 path:<目录>）',
+        )
+        const slug = (res.body['installed'] as Array<{ slug: string }>)[0]!.slug
+        const found = (await listSkills(url)).find((s) => s.slug === slug)
+        assert.ok(found, '装进来的那条要在列表里')
+        assert.equal((found as Record<string, unknown>)['sourceRef'], 'localdir:/home/u/.claude/skills')
       })
     } finally {
       await cleanup(src)
@@ -1198,6 +1225,78 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       assert.equal((await adopt(url, executor.id)).status, 400)
 
       assert.equal((await adopt(url, 'not-an-agent')).status, 404)
+    })
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════
+// 技能内容落盘（2026-10）：正文与支持文件存成真文件
+// ══════════════════════════════════════════════════════════════════
+//
+// 使用者的要求："skill 本身还是要以单独的文件保存，放在 ~/.agentdeck/skills"。
+// 于是装一条技能不再只是往 `skill.jsonl` 写一条记录——正文与支持文件落到
+// `<skillsRoot>/<slug>/`，而且是**磁盘为准**：改文件就生效。
+describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10）', () => {
+  async function exists(p: string): Promise<boolean> {
+    try {
+      await access(p)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  test('★★ 从路径装 ⇒ 文件真落在 <skillsRoot>/<slug>/ 下', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 我的标准', 'extra.md': '补充材料' })
+    try {
+      await withDaemon(async (url, { skillsRoot }) => {
+        const res = await installFromSource(url, { source: { kind: 'path', path: src } })
+        assert.equal(res.status, 201)
+        const slug = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['slug'])
+        assert.equal(await readFile(join(skillsRoot, slug, 'SKILL.md'), 'utf8'), '# 我的标准')
+        assert.equal(await readFile(join(skillsRoot, slug, 'extra.md'), 'utf8'), '补充材料')
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★★ 磁盘为准：改盘上的 SKILL.md ⇒ 列表读回的就是改后的内容', async () => {
+    const src = await makeSkillDir({ 'SKILL.md': '# 旧的标准' })
+    try {
+      await withDaemon(async (url, { skillsRoot }) => {
+        const res = await installFromSource(url, { source: { kind: 'path', path: src } })
+        const slug = String((res.body['installed'] as Array<Record<string, unknown>>)[0]?.['slug'])
+        // 直接改盘上的文件——这正是"使用者改技能"的路径
+        await writeFile(join(skillsRoot, slug, 'SKILL.md'), '# 改过的标准', 'utf8')
+        const listed = await listSkills(url)
+        assert.equal(
+          listed.find((s) => s.slug === slug)?.body,
+          '# 改过的标准',
+          '★ 磁盘是权威：改了文件，界面/注入读到的就该是改后的',
+        )
+      })
+    } finally {
+      await cleanup(src)
+    }
+  })
+
+  test('★ 卸载 ⇒ 盘上的目录也一起删掉', async () => {
+    await withDaemon(async (url, { skillsRoot }) => {
+      const installed = await install(url, {
+        skills: [{ slug: 'to-disk-remove', name: '待卸载', body: '# x', source: 'local' }],
+        batchId: 'b1',
+      })
+      const id = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+      assert.ok(await exists(join(skillsRoot, 'to-disk-remove')), '装上时目录在')
+
+      const del = await fetch(`${url}/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      assert.equal(del.status, 200)
+      assert.equal(
+        await exists(join(skillsRoot, 'to-disk-remove')),
+        false,
+        '★ 卸载要把盘上的目录一起收掉，否则留下一个"看起来还装着"的残骸',
+      )
     })
   })
 })

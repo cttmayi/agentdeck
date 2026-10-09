@@ -41,7 +41,7 @@
 | [`./design/architecture.md`](./design/architecture.md) | **架构文档（当前实现）** —— 运行时拓扑、依赖方向、八个包与五个 app 的结构、完整路由表、存储布局、扩展点、不变量→强制点、代码索引与测试对照。**结论都指到具体文件** | — |
 | [`./design/design.md`](./design/design.md) | **设计文档** —— 总体架构、包结构、存储端口、数据模型、接口、状态机、Verdict schema、本地 Daemon、Claude 适配层、审核流水线、动作与审计、远端能力与插件系统、安全边界。**2026-09 的第一句话三块组装见 §15.33** | v2.8 |
 | [`./runtime/pipeline.md`](./runtime/pipeline.md) | **执行与审核：完整流程** —— 参考手册，描述**当前实现**：受理 → 准备 → 命令行 → 输入 → 收尾；执行与审核的差别、失败原因码、去哪儿看全过程、已知的坑 | — |
-| [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、四种来源（+ 本地技能目录，其中远端目录是**推荐清单**）、**装进来落在 `log/skill.jsonl` 而不是文件**、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
+| [`./reference/skills.md`](./reference/skills.md) | **Skill 参考手册** —— 一个 skill 由什么构成、来源（本机目录 / GitHub / 推荐清单；界面另有「本地清单」「从本地安装」两个**入口**）、**装进来正文与支持文件落成真文件（`~/.agentdeck/skills/<slug>/`，磁盘为准）而 `log/skill.jsonl` 只留索引**（**没有例外**）、注入到工作目录的哪、frontmatter 会被怎么改写、限额与常见坑 | — |
 | [`../tools/skill-catalog-sync/README.md`](../tools/skill-catalog-sync/README.md) | **推荐技能目录的同步工具**（独立工具，不属于远端服务）—— 清单怎么改、**一次同步要花多少次 GitHub API 调用**（以及撞限额时是什么表现）、失败语义（单条失败一个字都不换）、目录布局（工具与服务之间的唯一约定） | — |
 | [`./reference/tools.md`](./reference/tools.md) | **工具包参考手册** —— 一个包 = 一个组、`tool.json` 清单逐字段（含 bound/open 参数）、**怎么照着范例开发一个工具**、脚本与平台的三条约定（stdin/stdout/dry-run）、执行时的环境与临时目录、远端目录的放置位置、判决→动作的完整链路 | — |
 | [`./reference/first-sentence-template.md`](./reference/first-sentence-template.md) | **第一句话模版参考（当前实现）** —— 三块组装（① 框架 / ② 身份 / ③ 任务）× 三条链路（执行 / 审核 / 聊天）的逐项细节、变量表（11 条）、默认模版与渲染实例（逐字）、A/B 投递档、校验规则、老模版迁移、**调整时必须守住的不变量**与代码索引 | — |
@@ -51,7 +51,7 @@
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
 
-> 决策记录见 `./srs/requirements.md` §16（**D1–D70**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
+> 决策记录见 `./srs/requirements.md` §16（**D1–D73**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
 > 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
 
 ---
@@ -133,6 +133,8 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | **文档对账**（2026-10） | 已做完（只改文档、没动代码）：把「链路深度上限与环检测」被说成硬不变量的两处 README 改回实情；给 `architecture.md` 的「完整路由表」补上**整段漏掉的 `/api/agent-groups` 5 条**并修掉 `POST /api/agents` 的过时字段；术语表的「行动权限」落点从 agent 改到**智能体组**；§14 补上本轮新查到的几处开口 | `./design/architecture.md` §4.3 / §7.2 / §13 / §14；本文件下面那节「架构与不变量」 |
 | **布局探针重对齐** | ⚠️ **没做，且是当前最大的空缺**：探针 542 条里 74 红 / 105 没量到，红在「新建任务的三步链 / 审核标准 / 智能体」这些**已经被改掉的形状**上 ⇒ **界面暂时没有可信的自动回归网**。另有一层环境障碍：它要真无头 Chrome，受限环境下 Chrome 可能连 Crashpad 目录都写不了（`exit 133`） | `tools/layout-probe/README.md` 的「⚠️ 现状：有 7 段已经过期」；`./design/design.md` §15.57 |
 | **从「本地清单」安装技能**（2026-10） | 已做完：安装面板第三个页签，读仓库自带的一份 JSON（`apps/daemon/catalog/skills.json`），点一下由 daemon 现去取——**不用远端服务 / 同步工具 / 登录**（`--skills-catalog` 可换一份） | `./srs/requirements.md` §16 的 **D71**；`./reference/skills.md` §3；`./design/architecture.md` §7.2 / §13 |
+| **技能内容落盘**（2026-10） | 已做完：技能正文与支持文件存成**真文件**放在 `~/.agentdeck/skills/<slug>/`（`--skills-root` 可覆盖），**磁盘为准**（改文件就生效）；`log/skill.jsonl` 退化成索引（**所有来源都是这样，没有例外**——`localdir:` 那条例外随 D73 撤掉了） | `./srs/requirements.md` §16 的 **D72**；`./reference/skills.md` §2；`./design/architecture.md` §5.1 / §13 |
+| **本地技能目录改成显式安装**（2026-10） | 已做完：原来勾选目录 ⇒ 每次读列表自动对账读入；现在改成安装面板的第四个页签「从本地安装」——扫内置的那几个目录（claude / codex / cursor / agents），**逐条装**，装完落 `~/.agentdeck/skills/<slug>/`、带 `localdir:<根目录>` 标记。`Workspace.localSkillDirs` 与 `PUT /api/skills/local-dirs` 删掉，`FileStore` 的 `localdir:` 例外也撤了 | `./srs/requirements.md` §16 的 **D73**；`./reference/skills.md` §6；`./design/architecture.md` §5.1 / §7.2 |
 
 > ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
 > （`git ls-remote origin HEAD` 成功返回 `2954eff`）。所以推送**可能**做得了（本地 `main`

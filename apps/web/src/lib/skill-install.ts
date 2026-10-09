@@ -98,10 +98,22 @@ export function installFromPathOrUrl(input: {
   kind: 'path' | 'url'
   value: string
   slug?: string
+  /**
+   * 来源标记（只对 `path` 有用）。「从本地安装」页签装的时候传 `localdir:<根目录>`，
+   * 落库后列表里就能显示「来自本地技能目录：…」。不给 = daemon 用默认的 `path:<目录>`。
+   */
+  sourceRef?: string
   overwrite?: boolean
 }): Promise<InstallResult> {
   return post({
-    source: input.kind === 'path' ? { kind: 'path', path: input.value } : { kind: 'url', url: input.value },
+    source:
+      input.kind === 'path'
+        ? {
+            kind: 'path',
+            path: input.value,
+            ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
+          }
+        : { kind: 'url', url: input.value },
     ...(input.slug ? { slug: input.slug } : {}),
     ...(input.overwrite ? { overwrite: true } : {}),
   })

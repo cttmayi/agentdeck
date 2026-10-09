@@ -585,7 +585,7 @@ interface Collected {
  */
 export async function resolveLocalPath(
   inputPath: string,
-  options: { slug?: string | null } = {},
+  options: { slug?: string | null; sourceRef?: string | null } = {},
 ): Promise<ResolvedSkillSource> {
   const expanded = expandHome(inputPath)
 
@@ -628,7 +628,9 @@ export async function resolveLocalPath(
   )
   return finish(collected, {
     slug,
-    sourceRef: `path:${dir}`,
+    // 调用方可以给一个更贴切的来源标识（例如「从本地安装」页签给的
+    // `localdir:<根目录>`）——没有就用默认的 `path:<技能目录>`。
+    sourceRef: options.sourceRef?.trim() || `path:${dir}`,
     resolvedFrom: dir,
     emptyDirNames: [],
   })
@@ -1238,7 +1240,12 @@ export function resolvePayloadEntry(input: {
 // ─────────────────────────────────────────────────────────────
 
 export type SkillSourceSpec =
-  | { kind: 'path'; path: string }
+  | {
+      kind: 'path'
+      path: string
+      /** 覆盖默认的 `path:<目录>` 来源标识（「从本地安装」用 `localdir:<根目录>`）。 */
+      sourceRef?: string
+    }
   | { kind: 'url'; url: string }
   | {
       kind: 'payload'
@@ -1258,7 +1265,7 @@ export async function resolveSkillSource(
 ): Promise<ResolvedSkillSource> {
   switch (spec.kind) {
     case 'path':
-      return resolveLocalPath(spec.path, options)
+      return resolveLocalPath(spec.path, { ...options, sourceRef: spec.sourceRef ?? null })
     case 'url':
       return resolveGithubUrl(spec.url, options, deps)
     case 'payload':
@@ -1270,7 +1277,10 @@ export async function resolveSkillSource(
 export function describeSource(spec: SkillSourceSpec): string {
   switch (spec.kind) {
     case 'path':
-      return `本地目录 ${spec.path}`
+      // 「从本地安装」给了 `localdir:<根目录>` 时，说"本地技能目录"更准
+      return spec.sourceRef?.startsWith('localdir:')
+        ? `本地技能目录 ${spec.sourceRef.slice('localdir:'.length)}`
+        : `本地目录 ${spec.path}`
     case 'url':
       return `链接 ${spec.url}`
     case 'payload':
