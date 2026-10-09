@@ -585,7 +585,8 @@ device                                      (本机设备标识，不是账号)
 | `/api/runs/{id}/files` · `/api/runs/{id}/file` | GET | 某条 run 工作目录的文件树 / 文件内容（查看器用） |
 | `/api/conversations` · `/api/conversations/{id}` | GET/POST/PATCH/DELETE | 聊天：对话（**由第一句话诞生**）、轮次、工作目录；删对话**连同轮次**，但那一轮的 run 一个都不动（D49） |
 | `/api/conversations/{id}/turns` | POST | 说下一句（一轮 = 一条 execute run，`reviewerAgentId: null`） |
-| `/api/agents` · `/api/agents/{id}` | GET/POST/PATCH/DELETE | 智能体（含 `allowedActions`、`actionParams`；`reviewStandard` 是**老数据的兼容字段**——只剩读取，保存时会被并进「指令」并清空。⚠️ `toolIds` 已随挂载能力一起删掉） |
+| `/api/agents` · `/api/agents/{id}` | GET/POST/PATCH/DELETE | 智能体。⚠️ **2026-10 起 agent 上没有 `allowedActions` / `actionParams` / `debugActions` / `reviewerAgentId`**——"判完允许动什么"与"谁审谁"都归**智能体组**（下一行）；请求里带这四个字段会拿到 **400「不认识的字段」**，不是被忽略。`reviewStandard` 是**老数据的兼容字段**——只剩读取，保存时会被并进「指令」并清空。`toolIds` 已随挂载能力一起删掉（2026-09） |
+| `/api/agent-groups` · `/api/agent-groups/{id}` | GET/POST/PATCH/DELETE | **智能体组**（2026-10）：恰好 1 执行者 + 1 审核者 + 行动权限（`allowedActions` / `actionParams` / `debugActions`）+ 返工次数（`maxReworks`，可为 `null` = 无限）。这是"谁审谁"与"判完允许动什么"的**唯一权威**；提交 run 时摊平进 `Run.*`，改组不影响已派出的活。DELETE 会**级联删掉组的私有成员**。⚠️ `mode` 只在创建时定，PATCH 不接受 |
 | `/api/agents/default` | PUT | 默认执行者（D36，全局单值） |
 | `/api/skills` · `/api/skills/{id}` | GET/POST/DELETE | 技能（**卸载**在 DELETE，D38） |
 | `/api/skills/install` | POST | 装技能（本地目录 / GitHub 地址 / 远端目录，D38） |

@@ -81,7 +81,7 @@
 |---|---|
 | `protocol` | 全项目契约的**单一来源**：实体、枚举、接口形状、判决 schema。daemon、页面、远端都从这里取类型 |
 | `domain` | 领域模型层：状态机、不变量、路由、环路边界、审计脱敏。**不认识任何存储实现** |
-| `store-file` / `store-sqlite` | `Store` 端口的两套实现（v1 文件 / v2 SQLite）。领域层只认识端口 |
+| `store-file` / `store-sqlite` | `Store` 端口的两套实现（v1 文件 / v2 SQLite）。领域层只认识端口。⚠️ **`store-sqlite` 已实现但没有接线**：daemon 用的是 `store-file`，而且 `apps/daemon/package.json` 里**没有** `@agentdeck/store-sqlite` 这个依赖——现在连 import 都解析不到 |
 | `agent-core` | 与具体 CLI 无关的适配层：runtime 描述表、禁改参数表、argv 组装、**第一句话模版**（D32）、技能注入、沙箱、进程树。⚠️ **受管上下文块已删**（D29）——不再有 `context-block.ts` |
 | `agent-claude` | Claude Code 适配器（首版参考实现） |
 | `agent-generic` | 第二个 CLI 适配器——价值在于给出**可插拔的第二个实证**，而不是"多支持一个厂商" |
@@ -130,9 +130,12 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | **Windows 兼容性**（2026-10） | A / B / D 三级**已修完**（`pnpm run test` 1855/0、`typecheck` 0 错）；**剩"在真 Windows 上量一次"**——那几条 `[判断]` 还没变成 `[量到]` | [`./reference/windows-compat.md`](./reference/windows-compat.md) 的「现在的状态」+「下一步（新对话从这里接）」 |
 | 展示页面支持音视频 | 已做完（daemon 认 `video/*`/`audio/*` + 支持 `Range`；查看器就地播放） | `./design/design.md` §15.58 |
 | 远端管理页（技能 / 工具目录） | 已做完（含常驻探针 `pnpm run probe:remote`，21 项） | `./srs/requirements.md` §16 的 D51–D55 |
+| **文档对账**（2026-10） | 已做完（只改文档、没动代码）：把「链路深度上限与环检测」被说成硬不变量的两处 README 改回实情；给 `architecture.md` 的「完整路由表」补上**整段漏掉的 `/api/agent-groups` 5 条**并修掉 `POST /api/agents` 的过时字段；术语表的「行动权限」落点从 agent 改到**智能体组**；§14 补上本轮新查到的几处开口 | `./design/architecture.md` §4.3 / §7.2 / §13 / §14；本文件下面那节「架构与不变量」 |
+| **布局探针重对齐** | ⚠️ **没做，且是当前最大的空缺**：探针 542 条里 74 红 / 105 没量到，红在「新建任务的三步链 / 审核标准 / 智能体」这些**已经被改掉的形状**上 ⇒ **界面暂时没有可信的自动回归网**。另有一层环境障碍：它要真无头 Chrome，受限环境下 Chrome 可能连 Crashpad 目录都写不了（`exit 133`） | `tools/layout-probe/README.md` 的「⚠️ 现状：有 7 段已经过期」；`./design/design.md` §15.57 |
 
-> ⚠️ **提交与分发**：这台开发机连不上 github.com（直连、SSH:443、本地常见代理端口都试过，
-> 都不通），所以推送做不了；要换机器就用自包含 bundle——
+> ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
+> （`git ls-remote origin HEAD` 成功返回 `2954eff`）。所以推送**可能**做得了（本地 `main`
+> 当时领先 `origin/main` **6 个提交**，未推）。网络会变，推送失败时就走自包含 bundle：
 > `git bundle create .cache/agentdeck-all.bundle --all`（`.cache/` 已 gitignore），
 > 另一边 `git clone <bundle> agentdeck`。改完记得**重新生成**。
 
@@ -205,9 +208,12 @@ UI 一直复杂到"需要组件化与路由"才换的——那次切换只动了
    `packages/skill-source/src/skill-source.ts`**：只允许 GitHub 的几个主机、只允许 https、**每一跳跳转都
    重新校验主机**，并限大小 / 文件数 / 超时。要扩到任意 URL 得单独做——让本地服务去抓任意
    地址，等于给它一个访问内网的跳板。 → `./design/design.md` §15.10。
-3. **审核者 ≠ 执行者、动作只能由判决触发、链路有深度上限与环检测。** 这三条是硬不变量，
-   **在写库之前强制校验**，不会被静默降级。 → 清单见 `./srs/requirements.md` §8，落到实现的映射见
-   `./design/design.md` §4.3。
+3. **审核者 ≠ 执行者、动作只能由判决触发。** 这两条是硬不变量，**在写库之前强制校验**，
+   不会被静默降级。⚠️ **别把「链路深度上限与环检测」并列进来**：深度上限只在
+   「执行完自动串接审核」这一条路上生效，且超限的动作是**发通知 + 停止派生**（不是拒绝写入）；
+   返工回路改由 `maxReworks` 限额管着（可为 `null` = 无限）；**环检测这一版没有生产调用点**。
+   → 清单见 `./srs/requirements.md` §8，落到实现的映射见 `./design/architecture.md` §4.3
+   与 `./design/architecture.md` §14（后者的「已知的边界与开口」表是查证这件事的地方）。
 
 > 往使用者磁盘上写任何东西之前，先读根 README 的「安全边界」与 `./design/design.md` §14：
 > **不做沙箱隔离（NG7）是明确的范围决定**，不是待办。
@@ -252,6 +258,11 @@ UI 一直复杂到"需要组件化与路由"才换的——那次切换只动了
 > ℹ️ 早前有一批 `research/` 调研报告（架构参考 / daemon 适配参考 / 部署参考 / 竞品定位），
 > 目录后来移出了仓库——对应内容由上面 `ref/` 的材料与 `requirements.md` §2 的结论摘要承担。
 > 本文件不再列它。
+
+> ⚠️ **`ref/` 下还有一份 `ref/multica/`——上游的整份源码 checkout（约 88 MB）**，
+> 就是上面那三份分析所描述的对象。它**不在 git 里**（`ref/` 已 gitignore，`git ls-files ref/` = 0，
+> 现有的 `.cache/agentdeck-all.bundle` 里也没有它的对象），所以**不会被提交、也不会进 bundle**。
+> 留在这里只为对照阅读；**clean-room 这条线不因为它在磁盘上而松动——不得从它复制任何源码**。
 
 ---
 

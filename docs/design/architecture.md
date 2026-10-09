@@ -380,16 +380,31 @@ proposed ──┬──▶ auto_approved ──▶ executing ──┬──▶
 | INV-11 | 幂等 | `actionIdempotencyKey` + `findActionByIdempotencyKey` | 命中 ⇒ `skipped` |
 | INV-12 | 不可回滚必须显式标注 | `ToolActionSpec.reversible`；界面上标出来 | 清单 schema |
 | INV-13 | 执行端不由判决决定 | `ActionRef` **没有** `plane` 字段；`Action.plane` 在执行时落库固化 | 类型层面就没有这个字段 |
-| INV-14 | 链路深度上限 | `loop/bounds.ts` 的 `assertChainWithinDepth()`（默认 5）；daemon 侧 `DEFAULT_MAX_CHAIN_DEPTH` 检查 | 抛 `DomainError(ChainDepthExceeded)` / 发通知 |
-| INV-15 | 环检测 | `loop/bounds.ts` 的 `detectChainCycle()` / `assertNoChainCycle()` | 键 = `(对象, agent, 原因码)` |
-| INV-16 | 派生的 run 必须显式打标 | `Run.derivedFrom`（`ActionId`）+ `loop/chain.ts` 沿该边重建 | 类型 + 重建函数 |
+| INV-14 | 链路深度上限 | ⚠️ **只有一条生产路径**：`apps/daemon/src/server.ts` 的 `autoChainReview`（`server.ts:2040`）。⚠️ 那一行是**手写的比较**（`depth > DEFAULT_MAX_CHAIN_DEPTH`），**不是**调用域层的 `assertChainWithinDepth()`；域层那个函数（默认 5）只有 `loop/bounds.test.ts` 在用 | **发一条 `attention` 通知 + 返回 `null` 停止派生**——不是抛错，也不是拒绝写入。返工链路走 `createReworkRun`，那里 `chainDepth + 1`（`server.ts:2549`）**不查这个上限**，它的上界是 `maxReworks`（可为 `null`） |
+| INV-15 | 环检测 | `loop/bounds.ts` 的 `detectChainCycle()` / `assertNoChainCycle()` —— ⚠️ **零生产调用点**，调用它们的 `assertCanDeriveRun()` 只被 `loop/bounds.test.ts` 与 `apps/daemon/src/loop-closure.test.ts` 用 | 键 = `(对象, agent, 原因码)`。**当前形态是"实现与判据就绪、没接进生产路径"**，不是"在写库之前强制校验" |
+| INV-16 | 派生的 run 必须显式打标 | `Run.derivedFrom`（`ActionId`）+ `loop/chain.ts` 沿该边重建 | 类型 + 重建函数。⚠️ **没有生产者**（见下） |
 | INV-17 | 同一 agent 对同一对象不自我竞争 | 端口 `findActiveRunForSubjectAgent()` + `ACTIVE_RUN_STATUSES` | 受理时排除 |
 | INV-18 | 词汇不漂移 | 全部词汇在 `packages/protocol` 一处定义 | 单一来源 |
 
-> ⚠️ **INV-14~16 当前没有生产调用点**：唯一会派生 run 的动作 `issue.assign_agent`
-> 随内置动作一起删掉了（D41），所以"动作 → 新 run"这条边不存在了。
-> 实现与测试仍在域层（`loop/bounds.ts`、`loop/bounds.test.ts`），这是**有意的保留**：
-> 将来加回能派生 run 的动作时，边界已经在那儿了。改这块之前先读 `design.md` §15.29。
+> ⚠️ **INV-14 / 15 / 16 三条要分开读，它们不是同一档强度**（2026-10 复核）：
+>
+> - **INV-14（深度）有一条生产路径**，但形态是"**发通知 + 停止派生**"而不是抛错。
+>   上面那句"不会被静默降级"对它成立（发了通知就不算静默），但**别把它读成"写库之前会被拒绝"**。
+>   ⚠️ 同一段里还有**同形的第二条**：`autoChainReview` 发现审核者的角色中途被改掉了
+>   （`server.ts:2014`，`review.reviewer_role_changed`）也是"发 `attention` 通知 + 返回 `null`"。
+>   两条的理由是同一条注释里写的"**这是配置过、现在失效，而不是本来就不审**"——
+>   也就是说这个仓库对"边界拦住了但事情本来该发生"一律留痕，**降级合法，静默不合法**。
+>   返工链路（D45）的 `chainDepth + 1` 不查这个上限，上界是 `maxReworks`。
+> - **INV-15（环检测）零生产调用点。** 实现、判据与测试都在，但这一版没有接进任何生产路径。
+> - **INV-16（`derivedFrom`）没有生产者。** `SubmitRunRequest` 仍接受这个字段
+>   （`packages/protocol/src/local-api.ts:273`），但**没有任何生产代码会填它**：唯一会派生
+>   run 的动作 `issue.assign_agent` 随内置动作一起删掉了（D41）。于是 `Run.derivedFrom`
+>   恒为 `null`，`loop/chain.ts` 那条"重建链路"的边也走不到头——重试与返工是**新建 run**
+>   并靠 `subject` / `resumeFromRunId` 关联，并不走这条边。
+>
+> 实现与测试仍留在域层（`loop/bounds.ts`、`loop/chain.ts`、`loop/bounds.test.ts`），
+> 这是**有意的保留**：将来加回能派生 run 的动作时，边界已经在那儿了。
+> 改这块之前先读 `design.md` §15.29。
 
 ### 4.4 审核决策：`decideReview`
 
@@ -768,11 +783,17 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/api/identity` | 协议版本、deviceId、可用 runtime、capabilities |
 | **智能体** | | |
 | GET | `/api/agents` | 列表 + 「新建任务的默认智能体」（D36） |
-| POST | `/api/agents` | 新建（逐项校验 name / skillIds / role / reviewer / runtimeKey / reviewStandard / allowedActions / actionParams / env） |
+| POST | `/api/agents` | 新建。**认识的字段只有这些**：`name` / `instructions` / `model` / `runtimeKey` / `workDir` / `skillIds` / `env` / `role` / `reviewStandard` / `ownerGroupId`；未知字段**明确 400**（拼错名字静默忽略会让人以为保存成功了） |
 | GET | `/api/agents/{id}` | 读单个 |
 | PATCH / PUT | `/api/agents/{id}` | 改（PATCH 语义：只改给的字段；**未知字段明确 400**） |
 | PUT | `/api/agents/default` | 默认执行者（只认 executor，没有"取消默认"这回事，D36） |
-| POST | `/api/agents/{id}/review-standard/adopt-from-skills` | 把挂载 skill 里的判断依据**原样**并进 agent 的「指令」并摘掉挂载（D38；2026-09 之前落点是 `reviewStandard`），解析不出来的动作进 `droppedActions` 如实回报 |
+| POST | `/api/agents/{id}/review-standard/adopt-from-skills` | 把挂载 skill 里的判断依据**原样**并进 agent 的「指令」并摘掉挂载（D38；2026-09 之前落点是 `reviewStandard`），解析不出来的动作进 `droppedActions` 如实回报。⚠️ 界面上**目前没有入口**（那个按钮在 2026-10 的改版里被删了，见 §14） |
+| **智能体组**（2026-10 起「谁审谁」与「判完允许动什么」的**唯一权威**） | | |
+| GET | `/api/agent-groups` | 列表 |
+| POST | `/api/agent-groups` | 新建组。请求体可同时带 `createAgents`（草稿成员）——「在组里新建私有成员」是 `ownerGroupId` 唯一的生产入口。⚠️ 写入前先算**最终形态**（已有成员 + 草稿角色），不对就一个都不建 |
+| GET | `/api/agent-groups/{id}` | 读单个，返回 `{ group, members }`（成员一并给全，省一次往返） |
+| PATCH / PUT | `/api/agent-groups/{id}` | 改（PATCH 语义）。**可改的字段**：`name` / `members` / `allowedActions` / `actionParams` / `debugActions` / `maxReworks` / `enabled` / `createAgents`；未知字段明确 400。⚠️ **`mode` 不在这里**——模式只在创建时定（这轮唯一合法值是 `'workflow'`，改了也没意义） |
+| DELETE | `/api/agent-groups/{id}` | 删组，**并级联删掉它的私有成员**（按 `ownerGroupId` 找，所以建到一半的孤儿也一起清）；先删 agent 再删组（失败时不会出现"组没了、私有 agent 悬着"）。返回 `{ ok, removedPrivateAgents }` |
 | **工作区设定** | | |
 | PUT | `/api/workspace/locale` | 界面语言（`zh` / `en`，挂在 workspace 上，D39） |
 | **第一句话模版** | | |
@@ -1479,6 +1500,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 原子写 / 追加句柄 | `packages/store-file/src/fs-utils.ts`（`renameWithRetry` 只在 win32 上重试） |
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
+| **智能体组**（谁审谁 / 行动权限 / 返工次数） | 形状与判据：`packages/domain/src/groups/shape.ts`（"恰好 1 执行 + 1 审核"，多执行者 / 多审核者会明确报"还没有实现"）；实体：`packages/protocol/src/entities.ts` 的 `AgentGroup`；接口：`apps/daemon/src/server.ts` 的 `/api/agent-groups` 那 5 条；**摊平点**：`POST /api/runs` 的组展开（`server.ts:4990` 一带）；界面：`apps/web/src/views/Groups.svelte` + `components/MemberSlotForm.svelte` + `lib/newtask-chain.ts`。设计缘由见 `docs/design/agent-groups.md` |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
 | 远端接口 / 插件 | `apps/remote/src/server.ts` / `plugins.ts` |
@@ -1490,6 +1512,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 |---|---|
 | 本地接口 / 端到端链路 | `apps/daemon/src/e2e.test.ts`、`s1-e2e.test.ts`、`m4-routes.test.ts` |
 | 审核与判决 | `review-e2e.test.ts`、`reviewer-override.test.ts`、`review-standard.test.ts`、`loop-closure.test.ts` |
+| **智能体组**（谁审谁 / 行动权限 / 返工次数） | `groups-e2e.test.ts`（组 CRUD + 摊平进 run + 私有成员级联删）、`packages/domain/src/groups/shape.test.ts`（"恰好 1 执行 + 1 审核"的判据与两种"还没有实现"的拒绝）、`agents-create.test.ts` / `agents-delete.test.ts`（`ownerGroupId` 与级联）、`task-action-whitelist.test.ts` / `task-action-params.test.ts`（组给的白名单与固定参数真的管住了动作）、`apps/web/src/lib/newtask-chain.test.ts` + `agent-actions.test.ts`（新建任务三步链的组装与校验）、`agent-legacy-cleanup.test.ts`（已撤字段真的从磁盘上删掉） |
 | 返工回路（D45） | `rework-e2e.test.ts` |
 | **人的三个出路**（D46 / D47） | `human-verdict.test.ts`（裁决接口与落库 + 放弃/恢复 + **放弃时取消正在跑的 run**，用一个不自己结束的假后端造出 `running`）、`apps/web/src/lib/pipeline.test.ts`（两种载体的阶段推导、`abandoned` 覆盖每一档、六列覆盖率） |
 | 动作与工具包 | `tool-action-e2e.test.ts`、`task-action-params.test.ts`、`task-action-whitelist.test.ts`、`tools-api.test.ts`、`no-builtin-actions.test.ts`、`script-executor.test.ts` |
@@ -1501,7 +1524,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | Host 校验等安全项 | `daemon.test.ts` |
 | 存储端口的两套实现 | `packages/store-sqlite/src/port-thinness.test.ts`（差分契约）、`file-store.test.ts`、`sqlite-store.test.ts` |
 | 快照与审计导出 | `apps/daemon/src/snapshot.test.ts`、`reporting.test.ts` |
-| 界面 | `apps/web/src/lib/*.test.ts` + `svelte-check` + `pnpm run probe:layout` |
+| 界面 | `apps/web/src/lib/*.test.ts` + `svelte-check`。⚠️ **`pnpm run probe:layout` 现在不能当判据用**：探针整体落后于界面（542 条里 74 红、105 没量到，其中「新建任务的三步链 28 / 审核标准 13 / 智能体 8」正是被这几轮改掉的形状）。哪几段过期、为什么过期、怎么复现那份判据，见 `tools/layout-probe/README.md` 的「⚠️ 现状：有 7 段已经过期」一节——**重对齐是单独一轮的活** |
 | **进程怎么起 / 平台差异**（Windows 的 `.cmd` 垫片、`PATHEXT`、假 CLI 包装、入口版本守卫、可写预检、`rename` 重试） | `packages/agent-core/src/spawn-target.test.ts`、`probe.test.ts`、`scripts/node-entry.test.mjs`、`apps/daemon/src/environment.test.ts`、`packages/store-file/src/fs-utils.test.ts`。⚠️ 这几条**平台是注入的**（`platform: 'win32'`），所以在 macOS 上就是真判据；「真 Windows 上 exec 得起来吗」那条不在测试里，见 `docs/reference/windows-compat.md` 的「没量到的」 |
 | 仓库级规矩 | `tests/test-safety.test.ts`（不许 `tmpdir()`、不许对危险目录递归删除） |
 
@@ -1515,10 +1538,14 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 |---|---|---|
 | **不做沙箱隔离**（NG7） | 默认 run 以启动 daemon 的 OS 用户完整权限执行 | 明确的范围决定，**不是待办**。`--sandbox workdir-write` 是可选缓解，**不是安全边界** |
 | **脚本动作执行器不做沙箱** | 工具包脚本继承 daemon 的权限 | 它的边界是"参数有界、环境干净、超时有界、入口不经 shell"，**不是**"改不了你的文件" |
-| INV-14~16（回路边界） | 实现与测试在域层，但**没有生产调用点**（D41 删了唯一能派生 run 的动作） | 将来加回"能派生 run 的动作"时边界已经在那儿 |
+| INV-14 / 15 / 16（回路边界） | ⚠️ **三条强度不同，别当成一档**：INV-14（深度）**有一条**生产路径（`autoChainReview`，形态是"发通知 + 停止派生"）；INV-15（环检测）**零生产调用点**；INV-16（`derivedFrom`）**没有生产者**（D41 删了唯一能派生 run 的动作，重试/返工靠 `subject` + `resumeFromRunId` 关联）。逐条见 §4.3 | 将来加回"能派生 run 的动作"时边界已经在那儿。**但两份 README 原先把它说成"在写库之前强制校验"，已按实情改过** |
+| `TERMINAL_RUN_STATUSES` 有 4 份定义（INV-18 的漂移） | `packages/protocol/src/enums.ts` 那份是官方来源，但**配套的 `isTerminalRunStatus()` 零引用**；另外三份分别在 `apps/daemon/src/server.ts`、`apps/web/src/lib/pipeline.ts`、`apps/web/src/lib/chat.ts`（外加 `reconcile.ts` 一份语义不同的 `NON_TERMINAL_RUN_STATUSES`）。`enums.ts` 开头写着"枚举只在这里定义" | 值目前一致（`chat.test.ts` 钉住了其中一份），所以**不会立刻出错**；但改协议时没有任何机制会让这四处跟着动。**这是 INV-18 目前唯一被破的地方** |
+| `POST /api/agents/{id}/review-standard/adopt-from-skills` 界面无入口 | 接口活着、测试覆盖着，但界面上**那个按钮在 2026-10 的改版里被删了**（"没有预览页了，选中即编辑"）；它唯一的客户端函数 `stores.ts` 的 `adoptReviewStandard()` **零调用**，`AgentDetail.svelte` 里只剩一个提示段落 | 带内联老标准的审核者现在**看得见但搬不动**——正是这次改造想消掉的那个状态，又回来了。要恢复只需给那个提示段落接一个按钮（接口不用动） |
+| `pnpm run probe:layout` 落后于界面 | 542 条里 **74 红 / 105 没量到**，红集中在前面几轮改掉的形状（新建任务的三步链 28 / 审核标准 13 / 智能体 8）。⚠️ 它**跑不起来还有第二层原因**：探针要真无头 Chrome，而 Chrome 在受限环境里可能连 Crashpad 目录都写不了（`exit 133`） | **界面目前没有可信的自动回归网**：`apps/web/src/lib/*.test.ts` + `svelte-check` 还在，但它们不量布局与真实交互。重对齐是单独一轮的活，见 `tools/layout-probe/README.md` |
+| NFR-T-01「测试绝不调用真实 CLI」只有约定，没有机器守卫 | `DaemonOptions.backend` 就是为它存在的（字段文档里明写），全仓 42 处 `startDaemon` 都注入了假后端——**但 `apps/daemon/src/remote-tool-install.test.ts` 漏了**，于是 `server.ts` 的 `backend.probe()` 会真的 spawn 使用者的 `claude --version`（探测失败还会 fork 登录 shell 去加载 rc） | 影响有限（`--version` 不烧额度），但"这句话绝不会发生"在这条用例上不成立。对比：`tmpdir()` 有 `tests/test-safety.test.ts` 守着，这条规则**什么守卫都没有** |
 | INV-6（显式声明才等批准） | `requiresApproval` 无消费方；`awaiting_approval` 无生产调用点 | 当前默认路径恒为 `auto_approved`。**与 D46 的人工裁决不是一回事**：那个不是"判决的前置审批"，而是**另出一条判决**（模型已出过结论之后追加），两者刻意不合并 |
 | 人工裁决的锚点校验 | daemon 侧只判"这条审核审的执行是不是最新的一次执行"（`canHostHumanVerdict`），**不重算整个 `stageOf`** | 直接调接口时，若传一条**已失效但仍能通过那一条检查**的审核 run（例如同一执行上多条审核 run），判决会落在一个阶段推导不看的地方。界面走不到那条路（它从 `stageOf` 取锚点）；**完整规则只有 `pipeline.ts` 一处实现**，这是刻意的不重复 |
-| `store-sqlite` | 已实现、行为契约与 `store-file` 一致，但 **daemon 未接线**（无 driver 开关） | 切换要改 `startDaemon` 的装配点 |
+| `store-sqlite` | 已实现、行为契约与 `store-file` 一致，但 **daemon 未接线**（无 driver 开关）。⚠️ 比"没接线"更硬一层：`apps/daemon/package.json` 里**根本没有这个依赖**，所以 daemon 现在连 import 都解析不到；`cli.ts` 里也没有任何 store 相关参数 | 切换要改 `startDaemon` 的装配点，**并且要先把它加进 daemon 的依赖**。另注：`packages/store-file` 与 `packages/store-sqlite` 各自导出的 `openFileStore` / `openSqliteStore` **都是死函数**（daemon 走的是静态方法 `FileStore.open`） |
 | `statusAfterDispatch()` | 域函数只在测试里被调用（daemon 直接写 `transitionRun`） | 同目录串行化的判据没有走这个域函数 |
 | `invalidAttempts` 计数器 | **只在内存**（`executor.ts` 按 subject 键） | daemon 重启后"判决不合规"的重试预算被重置；`reconcile.ts` 不碰它 |
 | `Run.attempt` / `maxAttempts` | 落了库，但**没有消费方** | 重试是**新建 run**，不是 attempt+1；这两个字段目前是纯记录 |
@@ -1539,7 +1566,8 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **工具包（tool）** | 一组动作：一个目录 + `tool.json` + 入口脚本。平台**不内置**任何动作 |
 | **skill** | 可安装、带版本与来源、可带支持文件的**资料/方法包**（执行者干活时参考什么）。审核标准与行动权限**都不在** skill 里 |
 | **审核标准** | 2026-09 起它**并入「指令」**（② 身份）——界面上没有单独的「审核标准」了。老数据仍可能有 `Agent.reviewStandard`（一段正文），投递时与「指令」合成 ②；没写「指令」的审核者拿不到审核任务 |
-| **行动权限** | 也写在审核者身上（`Agent.allowedActions`）：判完之后**允许触发哪些动作** |
+| **智能体组** | 2026-10 起「谁审谁」与「判完允许动什么」的**唯一权威**：一个组 = 恰好 1 执行者 + 1 审核者 + 行动权限 + 返工次数（`AgentGroup`，`packages/protocol/src/entities.ts`）。**没有组就没有审核者**，产出也就没人审。提交 run 时**摊平**进 `Run.*` 字段，所以改组不影响已经派出去的活（见 `./agent-groups.md`） |
+| **行动权限** | 写在**智能体组**上（`AgentGroup.allowedActions`）：判完之后**允许触发哪些动作**。⚠️ 它曾经落在 skill 上、后来又落在审核者 agent 上（`Agent.allowedActions`）——两次都撤了（D40 / 2026-10），现在 agent 上传这些字段是**不认识的字段 400** |
 | **第一句话** | 交给 CLI 的三块（① 框架 / ② 身份 / ③ 任务，`first-sentence.ts`），两块合起来进 run 日志；投递档记在 `Run.deliveryMode` 上 |
 | **工作目录** | `~/agentdeck-workspace/<类型>-<id>/`，agent 的真实产出所在。刻意放在家目录下、不隐藏 |
 | **数据目录** | `~/.agentdeck/data`，程序内部状态（SQLite/JSONL、锁、blob 日志）。刻意隐藏 |
