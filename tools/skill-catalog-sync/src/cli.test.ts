@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { execFile } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { BOOL_FLAGS, HELP, OPTIONAL_VALUE_FLAGS, VALUE_FLAGS } from './cli.ts'
+import { BOOL_FLAGS, HELP, isDirectInvocation, OPTIONAL_VALUE_FLAGS, VALUE_FLAGS } from './cli.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -212,5 +212,21 @@ describe('★ HELP：命令记不住时的那条退路（而且它不许撒谎�
     )
     const missing = documented.filter((flag) => !HELP.includes(flag))
     assert.deepEqual(missing, [], `实现了但帮助里没写的旗标（隐藏开关）：${missing.join(', ')}`)
+  })
+})
+
+describe('入口判据 isDirectInvocation', () => {
+  /**
+   * 与 `apps/daemon/src/cli.ts` 同一套判据，同一个 Windows 缺陷：曾经比 basename，
+   * 而 Windows 的 `argv[1]` 是反斜杠 ⇒ 判据永远 false ⇒ 命令静默什么都不做。
+   * 用**当前平台**的绝对路径：在 Windows 上 `self` 天然带反斜杠，正好复现那个 bug。
+   */
+  test('★ 比整条路径，不比 basename（Windows 反斜杠曾让它永远 false）', () => {
+    const self = resolve('/', 'tmp', 'sync', 'cli.ts')
+    const url = pathToFileURL(self).href
+
+    assert.equal(isDirectInvocation(self, url), true)
+    assert.equal(isDirectInvocation(resolve('/', 'tmp', 'other', 'cli.ts'), url), false)
+    assert.equal(isDirectInvocation(undefined, url), false)
   })
 })

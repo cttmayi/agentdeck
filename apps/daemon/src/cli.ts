@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readdir, rename, rmdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import {
@@ -473,10 +474,24 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   })
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')
+/**
+ * 这个模块是不是被当成**入口**跑起来的（而不是被 import 的）。
+ *
+ * ⚠️ 必须比**完整的文件 URL**，不能比 basename（这里曾经写的是
+ * `import.meta.url.endsWith(process.argv[1].split('/').pop())`）：Windows 的
+ * `process.argv[1]` 是 `C:\…\cli.ts`（**反斜杠**），`split('/')` 切不开 ⇒
+ * `.pop()` 原样返回整条路径 ⇒ `endsWith` **永远 false** ⇒ `main()` 根本不被调用，
+ * daemon 在 Windows 上**静默不启动**（终端里只剩版本守卫那行"已自动带 flag 重跑"，
+ * 然后什么都不发生）。`pathToFileURL` 按平台规则把两种分隔符都正确转成 `file:///…`，
+ * 与 `import.meta.url` 逐字可比——`scripts/node-entry.mjs` 用的就是这条（它的
+ * "已自动带 flag"那行在 Windows 上能打出来，正说明这条判据在那里是好的）。
+ */
+export function isDirectInvocation(argv1: string | undefined, moduleUrl: string): boolean {
+  if (argv1 === undefined || argv1 === '') return false
+  return pathToFileURL(argv1).href === moduleUrl
+}
 
-if (invokedDirectly) {
+if (isDirectInvocation(process.argv[1], import.meta.url)) {
   void main().then((code) => {
     if (code !== 0) process.exit(code)
   })

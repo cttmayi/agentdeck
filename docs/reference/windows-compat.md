@@ -77,6 +77,7 @@ pnpm run daemon
 | **B3** | 预检在 Windows 上**真写一个临时文件再删掉**（`access(W_OK)` 在那里不查 ACL ⇒ 会在最需要它的机器上漏报）；顺带：状态目录位置上有个**同名文件**时也报错（不然是运行中的 `ENOTDIR`） | `apps/daemon/src/environment.ts` + 新 `environment.test.ts`（8 条） |
 | **B6** | `rename` 对 `EPERM`/`EACCES`/`EBUSY` 做 4 次退避重试（20/40/80/160ms，约 300ms 上限），**只在 win32 上**——POSIX 上重试只会让"真没权限"晚 300ms 才报出来 | `packages/store-file/src/fs-utils.ts` 的 `renameWithRetry` + 新 `fs-utils.test.ts`（9 条） |
 | **D** | 探针在 Windows 上也找得到浏览器（Chrome 三个常见位置 + **Edge** 兜底），收尾用 `taskkill /T /F` 而不是 `pkill`（Chrome 的子进程杀掉父进程后还活着、还占着 profile） | `tools/layout-probe/run.mjs` |
+| **B10** | 入口判据从"比 basename"改成"比**完整文件 URL**"（`pathToFileURL(argv1).href === import.meta.url`）——daemon 与同步工具的 `main()` 才真的会被调用。旧判据（`import.meta.url.endsWith(argv1.split('/').pop())`）在 Windows 上**永远 false**（`argv[1]` 是反斜杠，`split('/')` 切不开）⇒ **daemon 静默不启动**（终端里只剩版本守卫那行提示，什么都不发生） | `apps/daemon/src/cli.ts`、`tools/skill-catalog-sync/src/cli.ts` 的 `isDirectInvocation()` + 判据 |
 
 ⚠️ **这些改动没有在真 Windows 上跑过**（本机是 macOS）。哪些是量到的、哪些还只是判断：
 
@@ -218,6 +219,46 @@ agentdeck —— 本机 AI 工作台          ← 加 flag 就能跑
 > `engines` 放到 **`>=22.6`**，`pnpm run test` 也纳入这层。真机重验：Node 22.17.0 上
 > `pnpm run daemon` 与**全量** `pnpm run test` 都跑通（脚本见 D75）。见
 > [`../design/design.md`](../design/design.md) §15.59 的"后续"。
+
+### B10. 入口判据比 basename：Windows 上 daemon **静默不启动** `[量到（逻辑）+ 判断（真机）]`
+
+**2026-10，D75 之后真机复现出来的。** 使用者在 Windows + Node 22.16 上跑 `pnpm run daemon`，
+看到守卫那行"已自动带 `--experimental-strip-types` 重跑一层"，**然后什么都不发生**——
+进程起来了、又立刻退了，没有报错、没有 banner。
+
+根因在两个入口文件结尾的**"这个模块是不是被直接跑起来的"**判据：
+
+```js
+// apps/daemon/src/cli.ts（旧）
+const invokedDirectly =
+  process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')
+```
+
+`.split('/')` 假定正斜杠。而 Windows 上 `process.argv[1]` 是 `C:\…\cli.ts`（**反斜杠**）——
+切不开 ⇒ `.pop()` 原样返回整条路径 ⇒ `import.meta.url`（`file:///C:/…/cli.ts`）
+**永远不以它结尾** ⇒ `invokedDirectly` 恒为 `false` ⇒ **`main()` 根本不被调用**，
+模块加载完就正常退出（退出码 0，所以连报错都没有）。
+
+机制上可直接量到（本机 macOS 上复现判据本身）：
+
+```
+argv[1] = C:\repo\apps\daemon\src\cli.ts
+.split('/').pop() = "C:\repo\apps\daemon\src\cli.ts"   ← 反斜杠切不开
+'file:///C:/repo/apps/daemon/src/cli.ts'.endsWith(…) = false
+```
+
+⚠️ **为什么之前没被发现**：`scripts/node-entry.mjs` 自己的 `isMain` 用的是**对**的写法
+（`import.meta.url === pathToFileURL(process.argv[1]).href`），所以在 Windows 上守卫那行
+**能打出来**——看起来"守卫没问题"。而在 D75 之前，22.16 的 node 会在守卫那一步就报
+`ERR_UNKNOWN_FILE_EXTENSION`、根本走不到入口，这条隐藏的第二个 bug 也就照不出来。
+门槛一放开，它立刻现形。
+
+**改法**：判据改成与 `node-entry.mjs` **同一条**——`pathToFileURL(argv1).href === moduleUrl`
+（`pathToFileURL` 按平台规则把两种分隔符都正确转成 `file:///…`）。两个入口
+（`apps/daemon/src/cli.ts`、`tools/skill-catalog-sync/src/cli.ts`）都抽成导出函数
+`isDirectInvocation()`，各配一条**用当前平台绝对路径**的判据——在 Windows 上跑时那条路径
+天然带反斜杠，正好会把旧写法钉红。⚠️ `apps/cli` / `apps/mcp` / `apps/remote` 是
+**无条件调 `main()`**（不设这道闸），不受影响。
 
 ### B2. 工具包的 `shell` / `python3` 在 Windows 上默认不存在，且文案没提 Windows `[量到 + 判断]`
 
@@ -396,6 +437,9 @@ where.exe claude                     # 看是 .exe 还是 .cmd —— 这条决�
 pnpm install
 pnpm run build:web
 node apps/daemon/src/cli.ts --verify-runtime all   # 探到没探到、探到的是哪个文件
+# ★ 期望先打出 "AgentDeck 已就绪" + 地址 + 工作目录/技能目录 + 沙箱那几行；
+#   若只看到"已自动带 --experimental-strip-types 重跑"然后就**什么都没了** ⇒ B10（入口判据），
+#   不是"起不来"，是 main() 压根没被调用
 pnpm run daemon                      # 界面 200（首次绑 127.0.0.1 会有防火墙提示，允许即可）
 # ★ 关键一步：界面上建一条任务、让它真跑一次 —— 这一步才会走到 A1
 pnpm run test                        # 期望 1855/0（A3 没修好时适配器那一片会红）

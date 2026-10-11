@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 
 import { resolveGithubProxy } from '@agentdeck/skill-source'
@@ -377,13 +377,18 @@ async function main(): Promise<void> {
  * `main().catch` 里的 `process.exit(1)` 把**测试进程本身**干掉，表现是"每条用例都
  * 过了、这个文件却失败"（2026-10 实测：9 条全绿、文件红）。
  *
- * 判据与 `apps/daemon/src/cli.ts` 同一套（比文件名，不比整条路径——`pnpm run` 传进来的
- * 路径形态与 `import.meta.url` 未必逐字相同）。
+ * 判据与 `apps/daemon/src/cli.ts` 的 `isDirectInvocation` **同一套**：比**完整的文件
+ * URL**（`pathToFileURL(argv1).href === import.meta.url`），**不比 basename**。
+ * ⚠️ 曾经比的是 basename（`import.meta.url.endsWith(argv1.split('/').pop())`），在
+ * Windows 上 `argv1` 是 `C:\…\cli.ts`（反斜杠）⇒ `split('/')` 切不开 ⇒ 判据永远 false
+ * ⇒ `main()` 不被调用、命令静默什么都不做。详见 daemon 那处的注释。
  */
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].split('/').pop() ?? '')
+export function isDirectInvocation(argv1: string | undefined, moduleUrl: string): boolean {
+  if (argv1 === undefined || argv1 === '') return false
+  return pathToFileURL(argv1).href === moduleUrl
+}
 
-if (invokedDirectly) {
+if (isDirectInvocation(process.argv[1], import.meta.url)) {
   main().catch((err: unknown) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
     process.exit(1)

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { CLI_OPTIONS, DEFAULT_PORT, HELP, parseCliArgs } from './cli.ts'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { CLI_OPTIONS, DEFAULT_PORT, HELP, isDirectInvocation, parseCliArgs } from './cli.ts'
 import { DEFAULT_GITHUB_PROXY } from '@agentdeck/skill-source'
 
 /**
@@ -120,5 +122,32 @@ describe('★ HELP 里承诺的旗标必须真的存在', () => {
       [],
       `CLI_OPTIONS 里有但 HELP 没说明的旗标：${missing.join(', ')}——隐藏开关没人能发现`,
     )
+  })
+})
+
+describe('入口判据 isDirectInvocation', () => {
+  /**
+   * ⚠️ 这条钉的是一个**只在 Windows 上现出来**的缺陷：入口判据曾经比 basename
+   * （`import.meta.url.endsWith(argv1.split('/').pop())`），而 Windows 的 `argv[1]`
+   * 是 `C:\…\cli.ts`（反斜杠）——`split('/')` 切不开，`endsWith` 永远 false ⇒
+   * `main()` 不被调用、daemon 静默不启动。判据改成比**完整文件 URL** 之后才成立。
+   *
+   * 这条用例用**当前平台**的绝对路径（`resolve` 产出该平台的分隔符）：在 Windows 上
+   * 跑时 `self` 天然带反斜杠，正好复现那个 bug（旧判据会返回 false、这条红）；在
+   * macOS/Linux 上它至少钉住"比整条路径、不比 basename"这条不变式。
+   */
+  test('★ 认得出直接入口，且同名不同目录不算（比整条路径，不比 basename）', () => {
+    const self = resolve('/', 'tmp', 'agentdeck', 'cli.ts')
+    const url = pathToFileURL(self).href
+
+    assert.equal(isDirectInvocation(self, url), true, '自己那条路径就是入口')
+    // 另一个目录里的同名文件：basename 比较会把它误判成"是入口"
+    assert.equal(
+      isDirectInvocation(resolve('/', 'tmp', 'other', 'cli.ts'), url),
+      false,
+      '同名但不同目录的东西不是入口',
+    )
+    assert.equal(isDirectInvocation(undefined, url), false, '没有 argv[1]（被 import）不是入口')
+    assert.equal(isDirectInvocation('', url), false, '空串不是入口')
   })
 })
