@@ -32,9 +32,9 @@ pnpm run probe:layout     # daemon 界面布局检查（真 Chrome + 真 daemon�
 pnpm run probe:remote     # 远端管理页布局检查（不在 check 里）
 ```
 
-**跑单个测试**：`node --test packages/domain/src/state/state.test.ts`（测试用 `node:test`，文件 glob 见 `package.json` 的 `test` 脚本；也可传多个路径/glob）。
+**跑单个测试**：`node scripts/node-entry.mjs --test packages/domain/src/state/state.test.ts`（测试用 `node:test`，文件 glob 见 `package.json` 的 `test` 脚本；也可传多个路径/glob）。直接 `node --test …` 只在默认开类型擦除的 node（≥22.18 / ≥23.6 / 24）上等价。
 
-**Node 版本要求 ≥ 22.18**（推荐 24）。不是"≥22"就够：类型擦除默认可用是 23.6 起、回移到 22.18。四条 `pnpm run` 入口前套了一层普通 JS 版本守卫 `scripts/node-entry.mjs`（写成 `.mjs` 是必须的——写在 `.ts` 里 node 连文件都加载不了），版本不够时把堆栈换成一句能照做的话。直接 `node apps/…/cli.ts` 会**绕过**这层守卫。
+**Node 版本要求 ≥ 22.6**（推荐 24）。类型擦除（把 `.ts` 直接交给 node 跑）是 22.6 加进来的、22.18 起默认开（23.x 那条线要 23.6）。所有 `pnpm run <入口>` 命令与 `pnpm run test` 前面套了一层普通 JS 版本守卫 `scripts/node-entry.mjs`（写成 `.mjs` 是必须的——写在 `.ts` 里 node 连文件都加载不了）：**22.6–22.17（含 23.0–23.5）它自动补 `--experimental-strip-types` 重跑一层**，低于 22.6 才把堆栈换成一句能照做的话。直接 `node apps/…/cli.ts` 会**绕过**这层守卫。
 
 **`--` 是个坑**：不要写 `pnpm run daemon -- --port 4599`——pnpm 会把 `--` 一并传进来，后面所有选项都被当位置参数而**静默失效**。daemon 与 CLI 遇到 `--` 会**直接报错**，而不是静默回落。同理，`remote` 会**点名拒绝**它不认识的参数（从前会"若无其事地把服务起起来"，看起来像成功）。
 
@@ -78,7 +78,7 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
 
 - **改哪段代码 → 去哪几个文件**：`docs/design/architecture.md` §13「代码索引」与 §13.1「谁钉住了什么」。
 - **不变量清单**：`docs/srs/requirements.md` §8；落到实现的映射与「已知的边界与开口」见 `docs/design/architecture.md` §4.3 与 §14。
-- **决策记录**：`docs/srs/requirements.md` §16（D1–D73）。决定改了就把编号写进去——决策只活在代码里就会漂。
+- **决策记录**：`docs/srs/requirements.md` §16（D1–D75）。决定改了就把编号写进去——决策只活在代码里就会漂。
 - **当前进行中的工作 / 新对话从哪接**：`docs/README.md` 的「当前进行中的工作」一节。
 - **安全边界是必读**（不做沙箱隔离 NG7 是明确的范围决定，不是待办）：根 `README.md` 的「安全边界」与 `docs/design/design.md` §14。
 - **`ref/` 是上游行为分析材料，不是本项目文档，且已 gitignore**。实现必须 **clean-room**——**不得从 `ref/multica/`（上游源码 checkout）复制任何源码**。

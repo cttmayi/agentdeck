@@ -231,6 +231,12 @@ function normalizeItem(entry: unknown, pluginName: string): NormalizeResult {
  * 超时**不等于**取消底层操作——这里做不到（插件是个普通函数）。
  * 但至少让轮询能继续往下走，而不是挂在一个永远不返回的 Promise 上。
  * 这一点要如实说明：泄漏的那个 Promise 仍然在跑，只是不再被等待。
+ *
+ * ⚠️ 这个计时器**不能 unref**（曾经 unref 过，是个 bug）：插件真不回话时
+ * （`promise` 永不 settle），它就是**唯一**待着的东西——unref 掉事件循环会当场空，
+ * 而 `node --test` 看见"测试还挂着、循环却空了"会把它**取消**（`cancelledByParent`，
+ * 不是 fail），一个文件后面几十条跟着红。Node 24 的 runner 自己占着 handle 所以看不出来，
+ * Node 22 一眼就现。语义上它本来也不该 unref：这里**就是要等**满这个超时再下结论。
  */
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined
@@ -239,7 +245,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
       promise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error(message)), ms)
-        if (typeof timer.unref === 'function') timer.unref()
       }),
     ])
   } finally {

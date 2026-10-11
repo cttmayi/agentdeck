@@ -67,8 +67,8 @@ pnpm run daemon
 | **A1** | spawn 之前先问 `resolveSpawnTarget`：`.cmd`/`.bat` 会被**解开成 `<node> <cli.js> <真实参数>`**（`via: 'shim'`；用完 daemon 的这个 node，理由同 `resolveCommand('node')`），认不出来才退回 `cmd.exe /d /s /c`（`via: 'cmd'`，且参数里有 cmd 无法如实传递的字符就**拒绝**而不是静默改写） | 新 `packages/agent-core/src/spawn-target.ts`；接进 `process-tree.ts`、`apps/daemon/src/script-executor.ts` |
 | **A2** | 候选扩展名改读机器的 **`PATHEXT`**，并按"Node 起得起来"过滤——**`.ps1` 从此不在候选里**（`.VBS`/`.JS`/`.WSF` 同理）；`.ps1` 真的被指到时**明确拒绝**并说清"npm 同时给了 `.cmd`" | `packages/agent-core/src/probe.ts`、`spawn-target.ts` |
 | **A3** | 假 CLI 的包装按平台产出：Unix 仍是 `#!/bin/sh` + exec（形状逐字未变），Windows 改成一段**形状与 npm 垫片一致**的 `.cmd`——于是"被测的 argv 仍是真实 argv"两个平台都成立 | `spawn-target.ts` 的 `executableWrapper`；`packages/agent-generic`、`packages/agent-codex` 的两个 helper |
-| B1（另一半） | 入口前置壳 `scripts/node-entry.mjs`：跑 `.ts` 之前先查 Node 版本，不合格就把 `ERR_UNKNOWN_FILE_EXTENSION` 那段堆栈换成一句能照做的话（**实测**：真的 Node 22.17.0 上现在是这段话 + 退出码 1）。⚠️ 守卫**必须**是 `.mjs`——写在 `.ts` 里是跑不到的 | `scripts/node-entry.mjs` + 四条 `pnpm run` 命令 |
-| B1（一半） | `engines` 从 `>=22` 收紧到 **`>=22.18`**，README 的安装节把"为什么不是 ≥22 就够"写清了（含 23.x 那条线要 23.6） | `package.json`、`README.md` |
+| B1（另一半） | 入口前置壳 `scripts/node-entry.mjs`：跑 `.ts` 之前先查 Node 版本，不合格就把 `ERR_UNKNOWN_FILE_EXTENSION` 那段堆栈换成一句能照做的话（**实测**：真的 Node 22.17.0 上现在是这段话 + 退出码 1）。⚠️ 守卫**必须**是 `.mjs`——写在 `.ts` 里是跑不到的。**（2026-10 稍后扩成三档，见 D75：22.6–22.17 / 23.0–23.5 改为自动补 flag，不再报错。）** | `scripts/node-entry.mjs` + 所有 `pnpm run` 命令（含 `test`） |
+| B1（一半） | `engines` 从 `>=22` 收紧到 **`>=22.18`**，README 的安装节把"为什么不是 ≥22 就够"写清了（含 23.x 那条线要 23.6）。**（2026-10 稍后放到 `>=22.6`，见 D75。）** | `package.json`、`README.md` |
 | B4 | `splitPath` 认反斜杠（Windows 绝对路径不再被整条当成"文件名"显示） | `apps/web/src/lib/file-view.ts` + 测试 |
 | B5 | 两处"必须是相对路径"的判据从 `startsWith('/')` 换成 `isAbsolute()`（Windows 的三种绝对形态现在报的是对的原因） | `apps/daemon/src/workdir-files.ts`、`apps/daemon/src/tool-source.ts` |
 | B7 | 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制白名单）——Git for Windows 默认把检出变成 CRLF | `.gitattributes` |
@@ -211,6 +211,13 @@ agentdeck —— 本机 AI 工作台          ← 加 flag 就能跑
 `apps/mcp/src/cli.ts`）加一道**一句话守卫**：版本不够就把 `ERR_UNKNOWN_FILE_EXTENSION`
 那段堆栈换成"这个命令要用 Node ≥ 22.18 跑：你的是 v22.17.0；装 Node 24 或加 `--experimental-strip-types`"。
 （`node:sqlite` 反而没问题：22.17 上免 flag 可用，实测过。）
+
+> **补记（2026-10，D75）**：上面这套"收紧门槛 + 报错"只是**如实**，不是**尽力**——
+> 22.6–22.17 的 node 里本来就有类型擦除，只是没默认开。使用者随后报"我用 Node 22 报错"，
+> 于是守卫改成**自动补 `--experimental-strip-types` 重跑一层**（22.6–22.17 / 23.0–23.5），
+> `engines` 放到 **`>=22.6`**，`pnpm run test` 也纳入这层。真机重验：Node 22.17.0 上
+> `pnpm run daemon` 与**全量** `pnpm run test` 都跑通（脚本见 D75）。见
+> [`../design/design.md`](../design/design.md) §15.59 的"后续"。
 
 ### B2. 工具包的 `shell` / `python3` 在 Windows 上默认不存在，且文案没提 Windows `[量到 + 判断]`
 
@@ -377,10 +384,13 @@ git merge bundle-main          # 或者直接 git checkout bundle-main
 不进版本库，所以每次改完要**重新生成**：`git bundle create .cache/agentdeck-all.bundle --all`。）
 
 ```powershell
-node --version                       # 必须 ≥ 22.18（推荐 24）
-# ★ 顺手验版本守卫：故意用一个老的 node（比如 22.17）跑下面这行，
-#   期望它是"这个命令要用 Node ≥ 22.18 跑…" + 退出码 1，而不是 ERR_UNKNOWN_FILE_EXTENSION
+node --version                       # 必须 ≥ 22.6（22.18 起免开关，推荐 24）
+# ★ 验"自动补 flag"这一档：用一个 22.6–22.17 的 node（比如 22.17）跑下面这行，
+#   期望它打一行"已自动带 --experimental-strip-types 重跑"然后**正常出 --help**，
+#   而不是 ERR_UNKNOWN_FILE_EXTENSION 堆栈
 node scripts/node-entry.mjs apps/daemon/src/cli.ts --help
+# ★ 再验"只能升级"那一档：用一个 < 22.6 的 node（比如 22.5、20.x）跑同一行，
+#   期望"这个命令要用 Node ≥ 22.6 跑…" + 退出码 1
 
 where.exe claude                     # 看是 .exe 还是 .cmd —— 这条决定 A1 会不会被撞上
 pnpm install

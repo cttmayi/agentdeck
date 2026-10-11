@@ -5,13 +5,13 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.6"
   },
   "packageManager": "pnpm@9.6.0",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.test.json && tsc --noEmit -p apps/web/tsconfig.test.json && tsc --noEmit -p apps/remote/web/tsconfig.test.json && pnpm --filter @agentdeck/web run check && pnpm --filter @agentdeck/remote-web run check",
-    "test": "node --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"apps/*/web/src/**/*.test.ts\" \"apps/web/server/**/*.test.ts\" \"tools/*/src/**/*.test.ts\" \"tests/**/*.test.ts\" \"scripts/*.test.mjs\"",
-    "test:watch": "node --test --watch \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"apps/*/web/src/**/*.test.ts\" \"tools/*/src/**/*.test.ts\" \"tests/**/*.test.ts\"",
+    "test": "node scripts/node-entry.mjs --test \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"apps/*/web/src/**/*.test.ts\" \"apps/web/server/**/*.test.ts\" \"tools/*/src/**/*.test.ts\" \"tests/**/*.test.ts\" \"scripts/*.test.mjs\"",
+    "test:watch": "node scripts/node-entry.mjs --test --watch \"packages/*/src/**/*.test.ts\" \"apps/*/src/**/*.test.ts\" \"apps/*/web/src/**/*.test.ts\" \"tools/*/src/**/*.test.ts\" \"tests/**/*.test.ts\"",
     "check": "pnpm run typecheck && pnpm run test",
     "daemon": "node scripts/node-entry.mjs apps/daemon/src/cli.ts",
     "remote": "node scripts/node-entry.mjs apps/remote/src/cli.ts",

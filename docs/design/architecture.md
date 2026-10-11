@@ -174,12 +174,13 @@ protocol  ←  domain  ←  store-file / store-sqlite
 构造函数参数属性。因此后端直接由 **Node 的类型擦除**执行 `.ts`，没有编译产物：
 `pnpm run daemon` 就是 `node apps/daemon/src/cli.ts`（入口前面还有一层版本守卫，见下）。
 
-⚠️ **门槛是 Node ≥ 22.18（23.x 那条线要 ≥ 23.6）**，不是"≥ 22"——类型擦除默认可用是
-23.6 起、并回移到 22.18（实测 22.17 报 `ERR_UNKNOWN_FILE_EXTENSION`）。
-所以四条 CLI 命令前面套了一层**普通 JavaScript** 的版本守卫
+⚠️ **门槛是 Node ≥ 22.6**，不是"≥ 22"——类型擦除是 22.6 加进来的、**22.18** 起才默认开
+（23.x 那条线要 **23.6**），低于 22.6 报 `ERR_UNKNOWN_FILE_EXTENSION`（实测 22.17 也会报）。
+所以所有 `pnpm run` 命令（含 `test`）前面套了一层**普通 JavaScript** 的版本守卫
 （`scripts/node-entry.mjs`，写成 `.mjs` 是必须的：守卫写在 `.ts` 里跑不到，
-node 连那个文件都加载不了），它顺手把 `process.argv` 掰回"入口直接跑"的样子再 `import()`。
-`engines` 也相应收紧到 `>=22.18`。见 `docs/reference/windows-compat.md`。
+node 连那个文件都加载不了）：它分三档——默认可用就把 `process.argv` 掰回"入口直接跑"的样子再
+`import()`；**22.6–22.17 / 23.0–23.5 自动补 `--experimental-strip-types` 重跑一层**；
+低于 22.6 给一句能照做的话。`engines` 相应是 `>=22.6`。见 `docs/reference/windows-compat.md`。
 
 这条约束反过来影响了整个代码风格
 （所有枚举都是 `as const` 数组 + 派生类型，见 `packages/protocol/src/enums.ts`）。
@@ -1511,7 +1512,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
 | **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |
-| CLI 入口的 Node 版本守卫 | `scripts/node-entry.mjs`（四条 `pnpm run` 命令都过它；`.mjs` 是必须的，写在 `.ts` 里跑不到） |
+| CLI 入口的 Node 版本守卫 | `scripts/node-entry.mjs`（**所有** `pnpm run` 命令都过它，含 `test`；`.mjs` 是必须的，写在 `.ts` 里跑不到）。裸 Node ≥ 22.6 且默认没开类型擦除时自动补 `--experimental-strip-types` 重跑 |
 | 预检：CLI 状态目录能不能写 | `apps/daemon/src/environment.ts`（Windows 上**真写一次**，不信 `access(W_OK)`） |
 | 原子写 / 追加句柄 | `packages/store-file/src/fs-utils.ts`（`renameWithRetry` 只在 win32 上重试） |
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |

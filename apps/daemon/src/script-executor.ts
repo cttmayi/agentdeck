@@ -737,11 +737,18 @@ export class ScriptExecutor {
         proc.terminate()
         // 杀完要等它真的退。但**不能无限等**：一个赖着不走的进程不该把整个
         // 判决卡死。等不到就如实说"已经发了 SIGKILL、但没有确认它退出"。
+        //
+        // ⚠️ 这个计时器**不能 unref**（曾经 unref 过，是个 bug）：当进程真的赖着不走时
+        // （`exited` 永不 resolve），它就是**唯一**待着的东西——unref 掉事件循环会当场空，
+        // 而 `node --test` 一旦看见"测试还挂着、循环却空了"就把它**取消**掉
+        // （`cancelledByParent`，不是 fail）。表现是一整个文件后面几十条跟着红/取消。
+        // Node 24 的 runner 自己占着 handle 所以看不出来，Node 22 一眼就现。
+        // 语义上它本来就不该 unref：这里**就是要等**满这个 grace 再下判决。
         const grace = new Promise<'grace'>((resolveGrace) => {
           setTimeout(
             () => resolveGrace('grace'),
             this.#deps.terminateGraceMs ?? TERMINATE_GRACE_MS,
-          ).unref()
+          )
         })
         const after = await Promise.race([proc.exited.then(() => 'exited' as const), grace])
         if (after === 'exited') exit = await proc.exited

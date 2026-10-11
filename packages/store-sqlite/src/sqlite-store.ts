@@ -100,12 +100,15 @@ import { cleanAgent } from '@agentdeck/protocol'
  * `node:sqlite` 是 Node 内置模块，但**不是所有 Node 版本都能直接用**：
  *
  *   Node ≥ 24      直接可用，不需要任何开关（本包在此验证：SQLite 3.53.4）
- *   Node 22.5–23   需要 `--experimental-sqlite`，否则 `node:sqlite` 不存在
+ *   Node 22.17     也免开关可用（2026-10 实测：`require('node:sqlite')` 直接成功）
+ *   Node 更早      未逐版量过：这个模块是 22.5 才加进来的，早期要 `--experimental-sqlite`；
+ *                  具体从哪一版起免开关**没人逐版量过**（只量到 22.17 已经不需要）——
+ *                  所以这里不写死区间（此前写的"22.5–23 需要"是猜的）
  *
  * 之所以写在这里而不是写个"检测不到就安静跳过"的分支：本项目的存储换错版本
- * 是**不能静默降级**的事情——安静跳过的测试等于没有测试。Node 22 上跑会直接
- * 报 `No such built-in module: node:sqlite`，那条消息已经把原因说清楚了；
- * 需要支持 22.x 时在启动脚本里加开关即可。
+ * 是**不能静默降级**的事情——安静跳过的测试等于没有测试。真落到一个没有
+ * `node:sqlite` 的 node 上时会直接报 `No such built-in module: node:sqlite`，
+ * 那条消息已经把原因说清楚了。
  *
  * ══════════════════════════════════════════════════════════════
  * 与文件适配器的存储目录关系
@@ -1156,12 +1159,16 @@ export class SqliteStore implements Store {
   }
 
   async listIssues(q: IssueQuery): Promise<Page<Issue>> {
-    const rows = this.#named('issueList').all(
-      q.workspaceId as string,
-      q.status?.length ? JSON.stringify(q.status) : null,
-      q.assigneeId || null,
-      q.cursor || '',
-    ) as { json: string }[]
+    // ⚠️ 这两个 `?1..?N` 的语句必须**按名字**绑（传对象），不能按位置传一串实参：
+    // Node 24 的 `node:sqlite` 两种都收，但 22.x 那一版**只认名字**——按位置传会抛
+    // `ERR_SQLITE_ERROR: column index out of range`（实测 Node 22.17）。传对象在两边都对。
+    // 别改成匿名 `?`：`issueList` 里 `?2`/`?3` 各出现两次，匿名化会把实参个数从 4 变成 6。
+    const rows = this.#named('issueList').all({
+      1: q.workspaceId as string,
+      2: q.status?.length ? JSON.stringify(q.status) : null,
+      3: q.assigneeId || null,
+      4: q.cursor || '',
+    }) as { json: string }[]
     let items = rows.map((r) => JSON.parse(r.json) as Issue)
 
     /**
@@ -1472,12 +1479,13 @@ export class SqliteStore implements Store {
   }
 
   async listRuns(q: RunQuery): Promise<Page<Run>> {
-    const rows = this.#named('runList').all(
-      q.workspaceId as string,
-      q.status?.length ? JSON.stringify(q.status) : null,
-      q.agentId ? (q.agentId as string) : null,
-      q.cursor || '',
-    ) as { json: string }[]
+    // 与 listIssues 同一条规矩：`?1..?N` 按名字绑（见那里的注释）
+    const rows = this.#named('runList').all({
+      1: q.workspaceId as string,
+      2: q.status?.length ? JSON.stringify(q.status) : null,
+      3: q.agentId ? (q.agentId as string) : null,
+      4: q.cursor || '',
+    }) as { json: string }[]
     const items = rows.map((r) => JSON.parse(r.json) as Run)
     return this.#page(items, q.limit ?? 50)
   }

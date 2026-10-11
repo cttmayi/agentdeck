@@ -250,6 +250,76 @@
   }
 
   /**
+   * ══════════════════════════════════════════════════════════════════
+   * 「本地清单」按 category 分组、可折叠（默认折叠）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ★ 类别 id 是清单里的**机器值**（英文，如 `software`）。**先显示哪一组**是
+   *   界面的事，所以顺序写死在这里；**显示名**在词表里（`skills.cat*`，D39）。
+   *   认不出的 id（清单比界面新、加了新类别）排到最后、按字母序，并**原样显示
+   *   那个 id**——显示一个英文 id 好过把它悄悄丢掉。
+   */
+  const CATEGORY_ORDER = [
+    'software',
+    'docs',
+    'slides',
+    'research',
+    'planning',
+    'persona',
+    'writing',
+    'security',
+    'other',
+  ]
+  // ⚠️ 写成 `as const`（与上面 `DIR_TOOL_KEYS` 同一做法）：`tx` 只接受词表里**真的有**
+  //    的键（字面量联合），`Record<string, string>` 会退化成 `string` 而被它拒。
+  const CATEGORY_KEYS = {
+    software: 'skills.catSoftware',
+    docs: 'skills.catDocs',
+    slides: 'skills.catSlides',
+    research: 'skills.catResearch',
+    planning: 'skills.catPlanning',
+    persona: 'skills.catPersona',
+    writing: 'skills.catWriting',
+    security: 'skills.catSecurity',
+    other: 'skills.catOther',
+  } as const
+  function catLabel(id: string): string {
+    const key = CATEGORY_KEYS[id as keyof typeof CATEGORY_KEYS]
+    return key ? tx(key) : id
+  }
+
+  interface SkillGroup {
+    id: string
+    entries: SkillListEntry[]
+  }
+
+  /** 把清单条目按 category 分组，按 `CATEGORY_ORDER` 排、未知的垫底。 */
+  function groupSkillList(entries: SkillListEntry[]): SkillGroup[] {
+    const byCat = new Map<string, SkillListEntry[]>()
+    for (const e of entries) {
+      const list = byCat.get(e.category)
+      if (list) list.push(e)
+      else byCat.set(e.category, [e])
+    }
+    const known = CATEGORY_ORDER.filter((c) => byCat.has(c))
+    const unknown = [...byCat.keys()].filter((c) => !CATEGORY_ORDER.includes(c)).sort()
+    return [...known, ...unknown].map((id) => ({ id, entries: byCat.get(id)! }))
+  }
+
+  /**
+   * 哪几组是展开的——**默认全折叠**（空对象）。
+   *
+   * ⚠️ 这一页是 **legacy 反应式**（用 `let` + `$:`，没有 runes）：改这个对象要
+   *    **整体重新赋值**（`{ ...openCats, [id]: … }`）才会触发重渲染，就地改属性
+   *    不会。这也是它写成对象而不是 `Set` 的原因（`Set` 就地增删同样不触发）。
+   */
+  let openCats: Record<string, boolean> = {}
+  function toggleCat(id: string): void {
+    openCats = { ...openCats, [id]: !openCats[id] }
+  }
+  $: skillGroups = groupSkillList(skillList?.entries ?? [])
+
+  /**
    * 卸载一条 skill（D38）。
    *
    * 服务端会拒掉"还有 agent 挂着它"，并把它们列出来——那条错误原文要**带回来**
@@ -349,6 +419,18 @@
    */
   /** 正在装哪一条（按钮转圈用）；null = 没有在装。 */
   let installingDir: string | null = null
+
+  /**
+   * 「从本地安装」哪几个**目录**组是展开的——**默认全折叠**，与「本地清单」的类别组
+   * 同一套做法。
+   *
+   * ⚠️ 与 `openCats` 一样：这一页是 legacy 反应式，改这个对象要**整体重新赋值**
+   *    （就地改属性不触发重渲染）。键是目录的绝对路径（`dir.path`，组里唯一）。
+   */
+  let openDirs: Record<string, boolean> = {}
+  function toggleDirGroup(path: string): void {
+    openDirs = { ...openDirs, [path]: !openDirs[path] }
+  }
 
   /**
    * 这个候选目录的显示名。
@@ -530,8 +612,11 @@
       <!--
         从本地安装：扫别的 AI 工具的技能目录，列出里面的技能，逐条装。
 
+        ★ 与「本地清单」**用同一个表格壳、同一组列**（技能 / 来源 / 说明 / 本地 /
+          操作），也按目录分组、点标题折叠——两个页签是同一件事的两个来源，长得该像
+          （2026-10 使用者："这两个列表差异太大，请调整"）。
         ★ 这里**没有勾选框**：装完就是一条普通技能（正文落在 `~/.agentdeck/skills/`
-          下），与其它来源一致。所以只有「安装」这一个动作。
+          下），与其它来源一致。所以每行只有「安装」这一个动作。
       -->
       <div class="field">
         {#if $loadError['localSkillScan']}
@@ -541,51 +626,108 @@
         {:else if $loading['localSkillScan'] && $localSkillScan.dirs.length === 0}
           <div class="skeleton" style="width:60%"></div>
         {:else}
-          {#each $localSkillScan.dirs as dir (dir.path)}
-            <div class="dir-block">
-              <div class="dir-head">
-                <strong>{dirToolLabel(dir.id)}</strong>
-                <div class="faint small dir-path" title={dir.path}>{dir.path}</div>
-              </div>
-              {#if dir.error}
-                <!-- 目录本身读不了（不存在 / 没权限）——说清是哪个目录、为什么 -->
-                <div class="notice warn small">{$t('skills.dirReadError', { error: dir.error })}</div>
-              {:else if dir.skills.length === 0}
-                <p class="faint small" style="margin:0">{$t('skills.dirsNoSkill')}</p>
-              {/if}
-              {#each dir.skills as s (s.dir)}
-                <div class="dir-skill">
-                  <div class="dir-skill-main">
-                    <code>{s.slug}</code>
-                    {#if s.description}
-                      <div class="faint small desc-clamp" title={s.description}>{s.description}</div>
-                    {/if}
-                  </div>
-                  {#if s.installed}
-                    <span class="badge local">{$t('skills.dirInstalled')}</span>
-                  {:else}
+          <Table
+            columns={[
+              { label: $t('skills.colSlug') },
+              { label: $t('skills.colSource') },
+              { label: $t('skills.colSummary') },
+              { label: $t('skills.colLocal') },
+              { label: '', ariaLabel: $t('skills.colActions') },
+            ]}
+          >
+            {#snippet rows()}
+              {#each $localSkillScan.dirs as dir (dir.path)}
+                <tr class="cat-row">
+                  <td colspan="5">
+                    <!-- 整行一个真按钮（与「本地清单」的类别行同一做法）：点哪儿都能折叠。 -->
                     <button
                       type="button"
-                      class="secondary small"
-                      disabled={busy || installingDir === s.dir}
-                      onclick={() => void installFromDir(dir, s)}
+                      class="cat-toggle"
+                      aria-expanded={openDirs[dir.path] ?? false}
+                      onclick={() => toggleDirGroup(dir.path)}
                     >
-                      {installingDir === s.dir ? $t('skills.installing') : $t('skills.dirInstall')}
+                      <span class="chevron" aria-hidden="true">{openDirs[dir.path] ? '▾' : '▸'}</span>
+                      <span class="cat-label">{dirToolLabel(dir.id)}</span>
+                      <span class="faint small cat-count">{dir.skills.length}</span>
+                      <span class="faint small dir-group-path" title={dir.path}>{dir.path}</span>
                     </button>
+                  </td>
+                </tr>
+                {#if openDirs[dir.path]}
+                  {#each dir.skills as s (s.dir)}
+                    <tr>
+                      <td>
+                        <code>{s.slug}</code>
+                        <!-- 目录名派生的 name 常常与 slug 相同，重复一行没有信息量。 -->
+                        {#if s.name && s.name !== s.slug}
+                          <div class="faint small">{s.name}</div>
+                        {/if}
+                      </td>
+                      <!-- ★ 「来源」在这一列是**技能在目录里的相对位置**：目录本身已经
+                           在组标题里了，逐条再写一遍那串路径只是重复。 -->
+                      <td class="faint small">
+                        <span class="list-source" title={s.rel}>{s.rel}</span>
+                      </td>
+                      <td class="faint small">
+                        {#if s.description}
+                          <div class="desc-clamp" title={s.description}>{s.description}</div>
+                        {/if}
+                      </td>
+                      <td class="faint small">
+                        {#if s.installed}{$t('skills.installedNoVersion')}{:else}—{/if}
+                      </td>
+                      <td>
+                        {#if s.installed}
+                          <!-- 目录装进来的没有版本号，只能如实说「已安装」并禁用。 -->
+                          <button type="button" class="secondary small" disabled>
+                            {$t('skills.dirInstalled')}
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            class="secondary small"
+                            disabled={busy || installingDir === s.dir}
+                            onclick={() => void installFromDir(dir, s)}
+                          >
+                            {installingDir === s.dir ? $t('skills.installing') : $t('skills.dirInstall')}
+                          </button>
+                        {/if}
+                      </td>
+                    </tr>
+                  {/each}
+                {/if}
+                {#if dir.error}
+                  <!-- ★ 目录读不了就说读不了，而且**不藏在折叠里**：折叠住的错误等于没报
+                       （"读不到就说读不到"是这一页的一贯原则）。 -->
+                  <tr>
+                    <td colspan="5">
+                      <div class="notice warn small">{$t('skills.dirReadError', { error: dir.error })}</div>
+                    </td>
+                  </tr>
+                {:else}
+                  {#if dir.skills.length === 0}
+                    <tr>
+                      <td colspan="5"><p class="faint small" style="margin:0">{$t('skills.dirsNoSkill')}</p></td>
+                    </tr>
                   {/if}
-                </div>
+                  {#if dir.skipped.length > 0}
+                    <!-- ★ 一直挂在这儿：看到了却没列出来的东西，理由必须当场说清
+                         （没有 SKILL.md、太深、解析不了…）——否则就是"少了一个"，
+                         而且它会让人去查权限、查扫描是不是坏了。 -->
+                    <tr>
+                      <td colspan="5">
+                        <div class="faint small dir-skip">
+                          {$t('skills.dirsSkipped', {
+                            list: dir.skipped.map((k) => `${k.rel}（${k.reason}）`).join('、'),
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  {/if}
+                {/if}
               {/each}
-              {#if dir.skipped.length > 0}
-                <!-- ★ 一直挂在这儿：看到了却没列出来的东西，理由必须当场说清
-                     （没有 SKILL.md、太深、解析不了…）——否则就是"少了一个"。 -->
-                <div class="faint small dir-skip">
-                  {$t('skills.dirsSkipped', {
-                    list: dir.skipped.map((k) => `${k.rel}（${k.reason}）`).join('、'),
-                  })}
-                </div>
-              {/if}
-            </div>
-          {/each}
+            {/snippet}
+          </Table>
         {/if}
       </div>
     {:else if tab === 'remote'}
@@ -732,56 +874,74 @@
               ]}
             >
               {#snippet rows()}
-                <!-- ⚠️ 在 snippet 里重新取一次：snippet 像函数，外层 `{#if skillList}`
-                     的收窄带不进来（svelte-check 会报 "possibly null"）。`?.` + `?? []`
-                     既绕开它，也在清单被换成 null 时给一个空表而不是崩。 -->
-                {@const entries = skillList?.entries ?? []}
-                {#each entries as e (e.slug)}
-                  {@const local = $skills.find((x) => x.slug === e.slug)}
-                  {@const state = catalogEntryState(local, { slug: e.slug, version: null })}
-                  <tr>
-                    <td>
-                      <code>{e.slug}</code>
-                      {#if e.name}
-                        <div class="faint small">{e.name}</div>
-                      {/if}
-                    </td>
-                    <td>
-                      <!-- ★ 来源是**安装方法**本身（GitHub 链接或本地路径），原样显示：
-                           使用者要能核对"我点的这条到底从哪儿装"。长链接单行省略，
-                           全文在 title 里。 -->
-                      <span class="faint small list-source" title={e.source.value}>{e.source.value}</span>
-                    </td>
-                    <td class="faint small">
-                      {e.summary}
-                      <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说（如某个 API key）。 -->
-                      {#if e.needs}
-                        <div class="warn small">{e.needs}</div>
-                      {/if}
-                    </td>
-                    <td class="faint small">
-                      {#if local}
-                        {local.version
-                          ? $t('skills.installedVersion', { version: local.version })
-                          : $t('skills.installedNoVersion')}
-                      {:else}
-                        —
-                      {/if}
-                    </td>
-                    <td>
-                      <!-- 按钮上的字与那句说明都由 `catalogEntryState` 给**键**，
-                           所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
+                <!-- 按类别分组、每组一个可折叠的标题行（默认折叠）。`skillGroups`
+                     是 `$:` 响应式的，`null` 不收窄也没关系（它不是 null）。 -->
+                {#each skillGroups as group (group.id)}
+                  <tr class="cat-row">
+                    <td colspan="5">
+                      <!-- 整行一个**真按钮**：tab 能到、读屏器能读、`aria-expanded`
+                           报折叠状态——与表格的 `ExpandToggle`、`FoldSection` 同一纪律。 -->
                       <button
                         type="button"
-                        class={state.action === 'install' ? 'secondary small' : 'small'}
-                        disabled={busy || state.disabled}
-                        title={$t(state.hintId, state.hintParams)}
-                        onclick={() => installFromList(e)}
+                        class="cat-toggle"
+                        aria-expanded={openCats[group.id] ?? false}
+                        onclick={() => toggleCat(group.id)}
                       >
-                        {$t(state.labelId, state.labelParams)}
+                        <span class="chevron" aria-hidden="true">{openCats[group.id] ? '▾' : '▸'}</span>
+                        <span class="cat-label">{catLabel(group.id)}</span>
+                        <span class="faint small cat-count">{group.entries.length}</span>
                       </button>
                     </td>
                   </tr>
+                  {#if openCats[group.id]}
+                    {#each group.entries as e (e.slug)}
+                      {@const local = $skills.find((x) => x.slug === e.slug)}
+                      {@const state = catalogEntryState(local, { slug: e.slug, version: null })}
+                      <tr>
+                        <td>
+                          <code>{e.slug}</code>
+                          {#if e.name}
+                            <div class="faint small">{e.name}</div>
+                          {/if}
+                        </td>
+                        <td>
+                          <!-- ★ 来源是**安装方法**本身（GitHub 链接或本地路径），原样显示：
+                               使用者要能核对"我点的这条到底从哪儿装"。长链接单行省略，
+                               全文在 title 里。 -->
+                          <span class="faint small list-source" title={e.source.value}>{e.source.value}</span>
+                        </td>
+                        <td class="faint small">
+                          {e.summary}
+                          <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说（如某个 API key）。 -->
+                          {#if e.needs}
+                            <div class="warn small">{e.needs}</div>
+                          {/if}
+                        </td>
+                        <td class="faint small">
+                          {#if local}
+                            {local.version
+                              ? $t('skills.installedVersion', { version: local.version })
+                              : $t('skills.installedNoVersion')}
+                          {:else}
+                            —
+                          {/if}
+                        </td>
+                        <td>
+                          <!-- 按钮上的字与那句说明都由 `catalogEntryState` 给**键**，
+                               所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
+                          <button
+                            type="button"
+                            class={state.action === 'install' ? 'secondary small' : 'small'}
+                            disabled={busy || state.disabled}
+                            title={$t(state.hintId, state.hintParams)}
+                            onclick={() => installFromList(e)}
+                          >
+                            {$t(state.labelId, state.labelParams)}
+                          </button>
+                        </td>
+                      </tr>
+                    {/each}
+                  {/if}
                 {/each}
               {/snippet}
             </Table>
@@ -1076,31 +1236,45 @@
     vertical-align: bottom;
   }
 
-  /* ── 「从本地安装」页签 ── */
-  /* 一个目录一块：头部（工具名 + 路径）、下面每条技能一行。 */
-  .dir-block {
-    padding: var(--sp-3) 0;
-    border-bottom: 1px solid var(--line);
+  /* 本地清单：类别标题行（可折叠）。整行一个按钮，撑满宽度——点哪儿都行，
+     不用瞄准那个小箭头。 */
+  .cat-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: var(--sp-2) 0;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
   }
-  .dir-block:last-of-type { border-bottom: none; }
-  .dir-head { margin-bottom: var(--sp-2); }
-  /* 路径要能换行显示完整——截断了使用者就核不对自己看的是哪个目录 */
-  .dir-path {
-    margin-top: 2px;
-    word-break: break-all;
+  .cat-toggle:hover { color: var(--accent); }
+  .cat-label { flex: 1; }
+  /* 类别标题行与上面的组、与下面展开出来的行都要分得开：上边框 + 一层底色。
+     底色用 `color-mix` 随主题自适应（与全站的扁平化描边同一套做法）。 */
+  .cat-row td {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+    border-top: 1px solid var(--line);
+  }
+
+  /* ── 「从本地安装」页签 ── */
+  /* 目录组标题里的路径（与「本地清单」的类别标题行是同一套 `.cat-toggle`）：靠右、
+     单行省略，全文在 `title` 里——工具名就在旁边，扫描时看名字即可。 */
+  .dir-group-path {
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--font-mono);
   }
-  /* 一条技能：左边 slug + 说明，右边「安装」/「已安装」 */
-  .dir-skill {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-2);
-    padding: var(--sp-2) 0;
-    padding-left: var(--sp-3);
-  }
-  .dir-skill-main { flex: 1; min-width: 0; }
   /* "跳过了什么"缩进一行：它是对上面那个目录的补充，不是另一个目录 */
-  .dir-skip { margin-top: 2px; padding-left: var(--sp-3); }
+  .dir-skip { padding-left: var(--sp-3); padding-bottom: var(--sp-2); }
 
   .skill-body {
     margin: 0;

@@ -124,9 +124,26 @@ export const skillsText = {
 
   // ── 本地清单（第三个页签）──
   'skills.listFootHint': {
-    zh: '选一条，点它右侧的按钮把它装进来——装的时候会现去 GitHub（或你写的那条路径）取。',
-    en: 'Pick an entry and click the button on its right to install it — it is fetched on the spot from GitHub (or the path you wrote).',
+    zh: '清单按类别分组。点一下类别把它展开，再选一条、点它右侧的按钮装进来——装的时候会现去 GitHub（或你写的那条路径）取。',
+    en: 'The list is grouped by category. Click a category to expand it, then pick an entry and click the button on its right to install it — it is fetched on the spot from GitHub (or the path you wrote).',
   },
+  /**
+   * 类别名（分组折叠区的标题）。
+   *
+   * ★ 类别 id 是**清单里的机器值**（英文，如 `software`）——它一个字都不翻，翻译只
+   *   加在这些标签上（D39）。清单里出现了这里没有的 id 时，界面**原样显示那个 id**
+   *   （显示一个英文 id 好过显示一片空白），所以这几个键只管"认得的"那些。
+   * ★ emoji 与文字一起放在值里（两种语言同一份）：它只是个视觉锚点，不翻译。
+   */
+  'skills.catSoftware': { zh: '🧑💻 软件开发 & 工程', en: '🧑💻 Software & engineering' },
+  'skills.catDocs': { zh: '📄 文档 & 数据处理', en: '📄 Documents & data' },
+  'skills.catSlides': { zh: '🎞️ 幻灯片 & 演示', en: '🎞️ Slides & decks' },
+  'skills.catResearch': { zh: '🔍 调研 & 分析', en: '🔍 Research & analysis' },
+  'skills.catPlanning': { zh: '📊 项目管理 & 规划', en: '📊 Planning & project management' },
+  'skills.catPersona': { zh: '🧑 角色蒸馏 & 人格模拟', en: '🧑 Persona & role-play' },
+  'skills.catWriting': { zh: '✍️ 写作、创意 & 媒体', en: '✍️ Writing, creative & media' },
+  'skills.catSecurity': { zh: '🛡️ 安全 & 运维', en: '🛡️ Security & ops' },
+  'skills.catOther': { zh: '📦 其它', en: '📦 Other' },
   'skills.listEmpty': { zh: '本地清单里没有条目', en: 'The local list has no entries' },
   'skills.listEmptyHint': {
     zh: '清单文件里现在没有可安装的条目（可能被改空了，或每一条都写得不合法）。',

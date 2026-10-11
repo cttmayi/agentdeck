@@ -51,7 +51,7 @@
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
 
-> 决策记录见 `./srs/requirements.md` §16（**D1–D73**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
+> 决策记录见 `./srs/requirements.md` §16（**D1–D75**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
 > 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
 
 ---
@@ -92,13 +92,17 @@
 
 ## 开发环境与命令
 
-需要 **Node ≥ 22.18**（23.x 那条线要 ≥ 23.6；推荐 24——后端直接跑 `.ts`，没有构建步骤）。
-⚠️ 不是"≥ 22"就够：类型擦除默认可用是 23.6 起、回移到 22.18，实测 22.17 会报
+需要 **Node ≥ 22.6**（推荐 24——后端直接跑 `.ts`，没有构建步骤）。
+⚠️ 不是"≥ 22"就够：类型擦除（把 `.ts` 直接交给 node）是 **22.6** 加进来的、
+**22.18** 起才默认开（23.x 那条线要 **23.6**），低于 22.6 会报
 `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"`。
-所以四条 `pnpm run` 入口前面套了一层**普通 JavaScript** 的版本守卫
+所以所有 `pnpm run` 入口（含 `test`）前面套了一层**普通 JavaScript** 的版本守卫
 （[`../scripts/node-entry.mjs`](../scripts/node-entry.mjs)，写成 `.mjs` 是必须的——
-守卫写在 `.ts` 里跑不到，node 连那个文件都加载不了）：版本不够时给一句能照做的话，
-够的时候把 `process.argv` 掰回"入口直接跑"的样子再 `import()` 真入口。
+守卫写在 `.ts` 里跑不到，node 连那个文件都加载不了），它分三档：
+**默认可用** ⇒ 把 `process.argv` 掰回"入口直接跑"的样子再 `import()` 真入口；
+**22.6–22.17 / 23.0–23.5** ⇒ 自动补 `--experimental-strip-types` **重跑一层**
+（`pnpm run <命令>` 自己传不了 flag，所以只能在守卫里补）；**低于 22.6** ⇒ 给一句能照做的话。
+真机验证过：Node 22.17.0 上 `pnpm run daemon` 与 `pnpm run test` 都跑得通（D75）。
 
 ```bash
 pnpm install
@@ -135,6 +139,8 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | **从「本地清单」安装技能**（2026-10） | 已做完：安装面板第三个页签，读仓库自带的一份 JSON（`apps/daemon/catalog/skills.json`），点一下由 daemon 现去取——**不用远端服务 / 同步工具 / 登录**（`--skills-catalog` 可换一份） | `./srs/requirements.md` §16 的 **D71**；`./reference/skills.md` §3；`./design/architecture.md` §7.2 / §13 |
 | **技能内容落盘**（2026-10） | 已做完：技能正文与支持文件存成**真文件**放在 `~/.agentdeck/skills/<slug>/`（`--skills-root` 可覆盖），**磁盘为准**（改文件就生效）；`log/skill.jsonl` 退化成索引（**所有来源都是这样，没有例外**——`localdir:` 那条例外随 D73 撤掉了） | `./srs/requirements.md` §16 的 **D72**；`./reference/skills.md` §2；`./design/architecture.md` §5.1 / §13 |
 | **本地技能目录改成显式安装**（2026-10） | 已做完：原来勾选目录 ⇒ 每次读列表自动对账读入；现在改成安装面板的第四个页签「从本地安装」——扫内置的那几个目录（claude / codex / cursor / agents），**逐条装**，装完落 `~/.agentdeck/skills/<slug>/`、带 `localdir:<根目录>` 标记。`Workspace.localSkillDirs` 与 `PUT /api/skills/local-dirs` 删掉，`FileStore` 的 `localdir:` 例外也撤了 | `./srs/requirements.md` §16 的 **D73**；`./reference/skills.md` §6；`./design/architecture.md` §5.1 / §7.2 |
+| **本地清单按类别分组**（2026-10） | 已做完：安装面板「本地清单」页签改成**按类别分组、默认折叠**（点类别标题展开）；清单内容从 12 条扩到 **28 条**——使用者给的一批里逐条**联网核实**，能装的才写进 `apps/daemon/catalog/skills.json`（6 个合集仓库指到具体子目录；失效/非 GitHub/无 SKILL.md 的不写，另附说明） | `./srs/requirements.md` §16 的 **D74**；`./reference/skills.md` §3 |
+| **Node 22 兼容**（2026-10） | 已做完：入口守卫 `scripts/node-entry.mjs` 从"两档"改成**三档**——22.6–22.17 / 23.0–23.5 **自动补 `--experimental-strip-types` 重跑一层**（不再报 `ERR_UNKNOWN_FILE_EXTENSION`），`< 22.6` 才劝升级；`engines` 放到 `>=22.6`，`pnpm run test` 也走这层（测试的 `.ts` 夹具靠 `NODE_OPTIONS` 继承 flag）。顺带修两处真机上撞到的：`node:sqlite` 的 `?N` 语句在 22.x **只认按名字绑**、超时等待的 grace 计时器**不能 `unref`**（22 的 test runner 会把"循环空了的挂起测试"取消掉）。真机在 **Node 22.17.0** 上跑通 `pnpm run daemon` 与全量测试 | `./srs/requirements.md` §16 的 **D75**；`./reference/windows-compat.md` 的 B1「补记」 |
 
 > ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
 > （`git ls-remote origin HEAD` 成功返回 `2954eff`）。所以推送**可能**做得了（本地 `main`

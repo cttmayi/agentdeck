@@ -86,7 +86,7 @@
 | 层 | 选型 | 理由 |
 |---|---|---|
 | 语言 | TypeScript（全栈） | 契约单源共享（P2）；D1 只支持一个 CLI，无多语言收益 |
-| 运行时 | Node ≥ 22.18（23.x 要 ≥ 23.6） | 原生 fetch / WebSocket / test runner；与目标 CLI 生态一致。⚠️ 门槛不是"≥ 22"：仓库把 `.ts` 直接交给 node 跑，类型擦除默认可用是 23.6 起、回移到 22.18。四条 CLI 入口前有一层 `.mjs` 版本守卫（`scripts/node-entry.mjs`），见 §15.59 |
+| 运行时 | Node ≥ 22.6（22.18 起免开关，23.x 那条线 23.6 起免开关） | 原生 fetch / WebSocket / test runner；与目标 CLI 生态一致。⚠️ 门槛不是"≥ 22"：仓库把 `.ts` 直接交给 node 跑，类型擦除是 22.6 加进来的、22.18 起才默认开。所有 `pnpm run` 入口前有一层 `.mjs` 版本守卫（`scripts/node-entry.mjs`）：22.6–22.17 / 23.0–23.5 自动补 `--experimental-strip-types` 重跑，低于 22.6 才报错。见 §15.59 |
 | **构建** | **无**——Node 原生类型擦除直跑 `.ts` | 见下方说明 |
 | daemon | **Node 内置 `http`** | 首版路由面很小；省掉一个框架依赖，与"不得依赖原生模块"一致 |
 | Web | **零构建**的原生 ES 模块（HTML + JS + CSS） | 见下方说明 |
@@ -5292,6 +5292,20 @@ TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts" for …/app
 于是 `pnpm run daemon` 现在是 `node scripts/node-entry.mjs apps/daemon/src/cli.ts`——
 命令**多了一层**，这是明确的取舍：换来的是"版本不够时不会让你去猜"。
 `engines` 同时收紧到 `>=22.18`（23.x 那条线要 23.6）。
+
+**后续（2026-10，D75：使用者要求"兼容 22"）**：收紧到 `>=22.18` 只是**如实**，不是**尽力**——
+22.6–22.17 的 node 里**本来就有**类型擦除，只是没默认打开（要 `--experimental-strip-types`，
+22.6 起就有）。使用者在那台机器上撞到的正是这一段，"只能升级"是把能做的一步推给了人。
+于是守卫从"查版本、不够就报错"改成**分三档**：默认可用 ⇒ 照旧 `import()`；
+**22.6–22.17 / 23.0–23.5 ⇒ 自动补 `--experimental-strip-types` 重跑一层**
+（`pnpm run <命令>` 自己传不了 flag，所以补 flag 只能在这一层做）；低于 22.6 ⇒ 才报错。
+重跑前会往 stderr 打一行说明"已自动带 flag 重跑"——**不是静默适配**（daemon 的 pid 为什么
+是个 shim，使用者该有据可查）。`engines` 相应放到 `>=22.6`，`test` 脚本也改走这一层
+（测试文件也是 `.ts`，`node --test` 直跑在旧 node 上同样加载不了）。
+真机验证：真的 Node 22.17.0 上 `pnpm run daemon` 与全量 `pnpm run test` 都跑通
+（对照：不加壳时是 `ERR_UNKNOWN_FILE_EXTENSION`）。顺带纠正一处**旧文档的错误**：
+`node:sqlite` 在 22.17 上**免 flag 可用**（实测 `require('node:sqlite')` 成功）——
+`sqlite-store.ts` 里"22.5–23 需要 `--experimental-sqlite`"那句是过时的。
 
 ### B 级收尾（同一条审计线索，第二刀）
 

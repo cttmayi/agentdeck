@@ -30,7 +30,7 @@ export interface SkillListSource {
  * 一条清单条目。
  *
  * ⚠️ 这里**只声明界面真的用到的字段**（与 `api.ts` 里其它接口形状同一规矩）：
- *    清单里还有 `category` / `origin`，界面这一版不显示它们，所以不声明。
+ *    清单里还有 `origin`，界面这一版不显示它，所以不声明。
  */
 export interface SkillListEntry {
   /**
@@ -42,6 +42,15 @@ export interface SkillListEntry {
   slug: string
   name: string
   summary: string
+  /**
+   * 分组用的**机器值**（英文 id，如 `software` / `docs`）。
+   *
+   * ★ 界面按它把清单分成可折叠的几组。**显示名不在这里**——它是词表里的
+   *   `skills.cat*`（D39：机器值一个字都不翻，翻译只加在为它配的标签上）；
+   *   认不出的 id（清单比界面新）排到最后并原样显示那个 id。
+   *   daemon 侧缺省是 `other`（见 `skill-list.ts`），所以这里不会是空串。
+   */
+  category: string
   /** 装之前还得自己准备什么（如某个 API key）；没有就是 null。 */
   needs: string | null
   source: SkillListSource
