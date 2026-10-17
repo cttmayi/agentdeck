@@ -63,7 +63,14 @@ const EXECUTE_FRAME = `# 任务
 - 完成后给出一份**报告**：做了什么、结论是什么、还有哪些不确定的地方。`
 
 const EXECUTE_IDENTITY = '你是一个严谨的协作者。先理解任务，再动手。'
-const EXECUTE_TASK = '冒泡排序\n\n用 JS 写一个冒泡排序，并解释复杂度。'
+const EXECUTE_TASK = `冒泡排序
+
+用 JS 写一个冒泡排序，并解释复杂度。
+
+## 任务边界
+
+- 只在自己的工作目录里活动：读写文件、执行命令都限定在这个目录内（它就是你运行命令时的 cwd）。
+- 不要读取、列出或修改工作目录之外的任何路径——包括上级目录、其他任务目录、家目录与系统目录。`
 
 /** 审核档的 ①，判决契约用占位符（契约本体由 protocol 自己的测试管）。 */
 const REVIEW_FRAME = `# 审核任务
@@ -145,6 +152,20 @@ describe('第一句话：三块的内容归属', () => {
     const blocks = buildBlocks(SAMPLE_EXECUTE_INPUT)
     assert.doesNotMatch(blocks.frame, /你是一个严谨的协作者/)
     assert.doesNotMatch(blocks.frame, /冒泡排序/)
+  })
+
+  test('★★ 任务边界是平台强制、只进 ③（任务隔离，2026-10）：chat/review 不带，execute 必带', () => {
+    // 背景：claude 会自己 `ls ..` 去看兄弟任务目录、读其他 issue 的产出当参考——
+    // 那份"聪明"越过了任务边界。这一句是**引导层**（硬拦截在 PreToolUse hook），
+    // 且必须无条件写进 ③（平台组装区），不能依赖使用者记得在模版里写。
+    const execute = buildBlocks(SAMPLE_EXECUTE_INPUT)
+    assert.match(execute.task, /## 任务边界/)
+    assert.match(execute.task, /只在自己的工作目录里活动/)
+    assert.doesNotMatch(execute.frame, /任务边界/, '边界不该出现在 ①（系统提示层）')
+    const review = buildBlocks(SAMPLE_REVIEW_INPUT)
+    assert.doesNotMatch(review.task, /任务边界/, '审核是只读的，不带任务边界')
+    const chat = buildBlocks({ ...SAMPLE_EXECUTE_INPUT, kind: 'chat', prompt: '聊聊' } as never)
+    assert.equal(chat.task, '聊聊', 'chat 逐字，绝不追加平台内容')
   })
 
   test('★★ 材料与标记**只在 ③**，绝不进 ①（系统提示）', () => {

@@ -1509,6 +1509,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |
+| **任务隔离（引导 + 拦截，D76）** | 引导：`packages/agent-core/src/first-sentence.ts` 的 ③ 任务块无条件追加「任务边界」；拦截：`apps/daemon/src/run-hooks/inject.ts`（注入 / 清理 `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`，只在 `runtime.descriptor.key === 'claude'` 时）——hook 脚本 `apps/daemon/src/run-hooks/pre-tool-use.py`（PreToolUse：结构化路径全拦、Bash 只拦明显越界） |
 | **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
 | **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |

@@ -105,7 +105,7 @@
 |---|---|---|---|
 | ① | **受理** | 定目录、`mkdir -p`、幂等、抢并发位、落 `queued` | 拿不到并发位 ⇒ `no_capacity`（提示稍后重试） |
 | ② | **排队** | `queued → dispatched`；抢**工作目录锁** | 目录被占 ⇒ `waiting_local_directory` 并**写明等谁**；等满 10 分钟 ⇒ `failed`（`infra_error`） |
-| ③ | **准备** | 清上次残渣 → 注入技能 → 环境预检 → 拼「第一句话」（2026-09 起**不写副本文件**，全文进日志） | 撞上你自己的同名技能 ⇒ `SkillCollisionError` ⇒ `injection_failed`；CLI 找不到 ⇒ 直接失败，**不猜路径** |
+| ③ | **准备** | 清上次残渣 → 注入技能 → 注入任务隔离 hook（claude）→ 环境预检 → 拼「第一句话」（2026-09 起**不写副本文件**，全文进日志） | 撞上你自己的同名技能 ⇒ `SkillCollisionError` ⇒ `injection_failed`；CLI 找不到 ⇒ 直接失败，**不猜路径** |
 | ④ | **执行** | 拼 `argv`（顺序与禁改表固定）→（可选沙箱）→ `spawnProcessTree` → 第一句话写进 stdin | spawn 失败 ⇒ `infra_error` |
 | ⑤ | **运行** | stdout 逐行解析 → 追加消息 → SSE 推给页面；**空闲看门狗**盯着 | 空闲超时（默认 30 分钟）⇒ `idle_timeout`；使用者取消 ⇒ `cancelled` + `cancelled_by_user` |
 | ⑥ | **收尾** | 转终态 → 收掉本次注入的技能 → **执行 run 收尾时串接审核** | 不串接**不是错误**：写一行「没有串接审核：<原因>」（七种，§8） |
@@ -115,6 +115,7 @@
 | 路径 | 内容 | 跑完 |
 |---|---|---|
 | `.claude/skills/<slug>/` + `.agentdeck-managed.json` | 这个 agent 挂的技能（**只在 runtime 声明有技能发现机制时**才写） | **收掉**（按落盘清单删，只删自己写的） |
+| `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py` | **任务隔离 hook（2026-10，D76）**：PreToolUse 在工具执行前校验目标路径，越界就 deny（只对 claude runtime 注入；第一句话里的「任务边界」是引导层，hook 是拦截层） | **收掉**（幂等） |
 | ~~`.agentdeck/tools/<slug>/`~~ | ~~这个执行者挂的工具包（D42）~~ **已撤掉**：挂载能力整个删了（`Agent.toolIds` 不在协议里，`{{tools}}` 恒为空） | — |
 | `.agentdeck/rounds/<轮次>-{task,result}.md` | §3.3b：执行任务 / 执行结果的落盘（审核按文件引用读） | **留着**（多轮不覆盖） |
 | ~~`.agentdeck/context/<runId>.md`~~ | ~~「第一句话」的副本~~ **已撤（2026-09）**：日志已含第一句话全文（①②③ 分开带标签、不截断），执行/审核都不再写副本文件；"回看它被交代了什么"看日志 | — |

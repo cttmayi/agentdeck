@@ -1858,11 +1858,13 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
       m.content.startsWith('===== ③ 任务 ====='),
     )
     assert.ok(taskMsg, '③ 任务那一块要在日志里')
-    assert.equal(
-      taskMsg.content.slice('===== ③ 任务 =====\n\n'.length),
-      '把功能实现一下',
-      '短文本要完整写进去',
-    )
+    // ★ 逐字判在**任务正文**上（连行一起、不多一个字符）：2026-10 起平台在
+    //   任务正文之后**无条件追加**「任务边界」（任务隔离，见 first-sentence.ts），
+    //   所以整块 ≠ prompt——要验的是"prompt 没被截断/没被改"，不是"整块只有
+    //   prompt"。边界本身由 first-sentence 自己的测试钉住。
+    const taskBody = taskMsg.content.slice('===== ③ 任务 =====\n\n'.length)
+    assert.ok(taskBody.startsWith('把功能实现一下'), '短文本要完整写进去')
+    assert.match(taskBody, /## 任务边界/, '任务边界是平台强制的，随 ③ 一起落日志')
     // ⚠️ 原来这里还有一条"不许说截断了"的否定断言（`/还有 \\d+ 字符未显示/`），
     //   已删：一是 `\\d` 在正则字面量里是**反斜杠 + d**（永远为真），二是
     //   `字符未显示` 这句话在实现里**已经不存在**了——2026-09 起第一句话

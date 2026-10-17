@@ -1027,7 +1027,22 @@ function taskBlock(input: FirstSentenceInput): string {
   // ③：执行 = 任务正文；聊天 = 使用者那句话**逐字**（`trim()` 都不做——
   // "逐字"是这个功能的卖点，见 chat-e2e 里那条断言）
   if (input.kind === 'chat') return input.prompt
-  if (input.kind === 'execute') return input.prompt.trim()
+  if (input.kind === 'execute') {
+    // ★ 任务边界是**平台强制**的内容（2026-10）：它在 ③ 里、由平台无条件写，
+    //   不交给模版——「只在自己的工作目录里活动」是一条安全边界（任务隔离），
+    //   不能指望使用者记得在模版里写。实测 claude 会自己 `ls ..` 去看兄弟任务
+    //   的目录、读其他 issue 的产出当参考——那份"聪明"越过了任务边界。
+    //   ⚠️ 真正的硬拦截在 PreToolUse hook（executor 注入），这一句是引导层：
+    //   模型先看到规则，hook 再兜底。
+    return [
+      input.prompt.trim(),
+      '',
+      '## 任务边界',
+      '',
+      '- 只在自己的工作目录里活动：读写文件、执行命令都限定在这个目录内（它就是你运行命令时的 cwd）。',
+      '- 不要读取、列出或修改工作目录之外的任何路径——包括上级目录、其他任务目录、家目录与系统目录。',
+    ].join('\n')
+  }
   const title = input.report.title.trim()
   // ★ §3.3b（2026-09）：执行任务/执行结果已**落盘成文件**（executor 在完成时写、
   //   按轮次编号、多轮不覆盖），审核按文件引用**读文件**来审。

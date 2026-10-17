@@ -44,6 +44,7 @@ import {
 } from '@agentdeck/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
+import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -759,6 +760,15 @@ export class RunExecutor {
         this.#deps.onWarn?.(`移除注入的技能失败：${String(err)}`)
       }
 
+      // 任务隔离 hook 的收尾（幂等）：摘掉平台写的 `.claude/settings.json`
+      // 与 `.agentdeck/hooks/`——它们不是 agent 的产出。失败只警告，不阻断。
+      if (runtime.descriptor.key === 'claude') {
+        try {
+          await removeRunHooks(run.workDir!)
+        } catch (err) {
+          this.#deps.onWarn?.(`移除任务隔离 hook 失败：${String(err)}`)
+        }
+      }
     }
 
     try {
@@ -821,6 +831,27 @@ export class RunExecutor {
         }
         for (const { slug, note } of skillSync.notes) {
           await this.#note(runId, `skill ${slug}：${note}`)
+        }
+      }
+
+      // ── 注入任务隔离 hook（2026-10）──
+      //
+      // claude 会把 Bash/Read 跑到工作目录之外（实测会 `ls ..` 看兄弟任务目录、
+      // 读其他 issue 的产出当参考）。第一句话里的「任务边界」是引导层，这里是
+      // 硬拦截：PreToolUse hook 在工具执行前校验目标路径，越界就 deny。
+      // 只对 claude runtime 注入（codex 是 service 形状，没有 hooks 机制）。
+      //
+      // ⚠️ 注入失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
+      //    隔离（静默缺能力比报错糟——那是这个仓库的原则）。
+      if (runtime.descriptor.key === 'claude') {
+        try {
+          await injectRunHooks(run.workDir!)
+        } catch (err) {
+          await this.#note(
+            runId,
+            `⚠️ 任务隔离 hook 注入失败（${String(err)}）——本次 run 不拦截越界路径，` +
+              `只靠第一句话里的「任务边界」引导。`,
+          )
         }
       }
 

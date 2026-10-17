@@ -555,9 +555,14 @@ describe('D32：全局模版真的被投递（所有 agent 都按它来）', () 
         ].join('\n')
 
       assert.equal(first.system, systemFor(first, '你是个木匠。'))
-      assert.equal(first.user, '打一张桌子')
+      // ③ 任务块 = 任务正文 + **平台强制的任务边界**（2026-10，任务隔离）：
+      // 边界是安全件，由平台无条件追加，不依赖这份模版写了什么。
+      assert.ok(first.user.startsWith('打一张桌子'), '任务正文在前')
+      assert.match(first.user, /## 任务边界/)
+      assert.match(first.user, /只在自己的工作目录里活动/)
       assert.equal(second.system, systemFor(second, '你是个铁匠。'))
-      assert.equal(second.user, '打一把刀')
+      assert.ok(second.user.startsWith('打一把刀'), '任务正文在前')
+      assert.match(second.user, /## 任务边界/)
     } finally {
       await cleanup(workDir)
       await setBlock('execute', 'frame', '')

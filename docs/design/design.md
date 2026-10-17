@@ -412,7 +412,7 @@ device                                      (本机设备标识，不是账号)
 |---|---|
 | `Conversation.agentId` | **一个对话绑一个执行者，中途不换**（上文靠 `--resume`，而那个 session 属于某一个 CLI 进程） |
 | `Conversation.skillIds` | 这个对话**额外带**的 skill（第一句话定下来，只读）。选了挂在某人身上的 skill 时是空的——那种情况下 skill 由执行者自己带着；有值说明选的是**没人挂**的那条（见下一节）。老记录没有这个键 ⇒ 解析成 `[]`（"没有额外 skill"，不是"未知"） |
-| `Conversation.workDir` | `string \| null`：null = 自动分配 `<workRoot>/chat-<id>`（界面上的词是「自动分配」），非 null = 使用者指定（把它接进某个真仓库）。⚠️ **不是隔离**——claude 以 `bypassPermissions` 跑，沙箱是 daemon 的全局开关、默认 `none`，专属目录只是缩小误伤面 |
+| `Conversation.workDir` | `string \| null`：null = 自动分配 `<workRoot>/chat-<id>`（界面上的词是「自动分配」），非 null = 使用者指定（把它接进某个真仓库）。⚠️ **不是沙箱**——claude 以 `bypassPermissions` 跑，沙箱是 daemon 的全局开关、默认 `none`，专属目录只是缩小误伤面（2026-10 起 claude runtime 另有一层 PreToolUse hook 硬拦截越界路径，见 §9.6 与 D76；它仍是隔离不是沙箱） |
 | `Conversation.lastTurnAt` / `turnCount` | 列表按 `lastTurnAt ?? createdAt` 倒序（最近说过话的在最前） |
 | `ChatTurn.seq` | 从 1 递增，每轮一条 |
 | `ChatTurn.userText` | 使用者那一句，原样 |
@@ -1180,6 +1180,7 @@ inject(file, block):
 | 环境变量顺序 | 任务级覆盖必须在**使用者自定义环境变量之后**应用 |
 | 临时目录 | 任务专属 |
 | 同目录串行化 | 同一工作目录同时只允许一个 run（§8.3） |
+| 越界访问（claude，D76） | **PreToolUse hook 硬拦截**：工作目录注入 `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`，`Bash / Read / Edit / Write / Glob / Grep` 的目标路径在工作目录外就 **deny**（结构化全拦、Bash 只拦明显越界：`..` / `~` / 工作目录外的绝对路径）；第一句话里另有「任务边界」引导层。⚠️ **不是沙箱**（NG7 不变）——Bash 是自由文本、解析不完美，绕过面仍在 |
 | ~~仓库缓存 / worktree~~ | **不做**（D20） |
 
 ### 9.7 失败分级（FR-CLI-41）
