@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   removeInjectedSkills,
@@ -45,6 +46,7 @@ import {
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
 import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
+import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -160,6 +162,20 @@ export interface ExecutorDeps {
   }) => Promise<{ runId: RunId | null; note: string }>
   now?: () => number
   onWarn?: (message: string) => void
+  /**
+   * claude 个人配置的受管目录（D78）。claude run 时设 `CLAUDE_CONFIG_DIR`
+   * 指向它——用户级 skill/MCP（`~/.claude/skills/`、`~/.claude.json` 的
+   * mcpServers）从此不可见，只剩项目级。缺省 = 不隔离（保持旧行为）。
+   *
+   * ★ 位置约束见 `run-hooks/claude-config.ts` 头注释：必须在 daemon 数据
+   *   目录下（agent 不可见），**绝不放任务工作目录**（key 会漏给 agent）。
+   */
+  claudeConfigDir?: string
+  /**
+   * copy env 的源：`~/.claude/settings.json`。做成可注入是为了测试——
+   * 测试绝不读使用者的真实配置（NFR-T-01 的精神）。缺省 = 使用者主目录。
+   */
+  claudeSettingsSource?: string
 }
 
 /**
@@ -855,6 +871,37 @@ export class RunExecutor {
         }
       }
 
+      // ── claude 个人配置隔离（2026-10，D78）──
+      //
+      // 把 `CLAUDE_CONFIG_DIR` 指向平台受管的干净目录：用户级 skill/MCP
+      // 从此不加载（实测 `mcp_servers: []`、只剩内置 skill），任务里只剩
+      // 项目级——含上面注入的 hook 与技能注入的 `.claude/skills/`。
+      // 认证从 `~/.claude/settings.json` 的 env 每次 run 现读 copy（见
+      // `run-hooks/claude-config.ts` 头注释：为什么是它、目录放哪、为什么
+      // 全局复用一个）。
+      //
+      // ⚠️ 失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
+      //    隔离（与 hook 注入同一原则，静默缺能力比报错糟）。
+      if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir) {
+        const sync = await syncClaudeConfigDir(
+          this.#deps.claudeConfigDir,
+          this.#deps.claudeSettingsSource ?? join(homedir(), '.claude', 'settings.json'),
+        )
+        if (!sync.ok) {
+          await this.#note(
+            runId,
+            `⚠️ claude 个人配置隔离未生效（${sync.reason}）——` +
+              `本次 run 会看到用户级 skill/MCP（如 rea、个人 skill）。`,
+          )
+        } else {
+          await this.#note(
+            runId,
+            `claude 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
+              `用户级 skill/MCP 不可见，env ${sync.envCount} 项已同步。`,
+          )
+        }
+      }
+
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
       // 那一份**清单，即使这个 runtime 不扫目录也要告诉模型"有哪些标准可用"。
       for (const skill of mountedSkills) {
@@ -1275,7 +1322,16 @@ export class RunExecutor {
         disallowOptionalTools: workspace?.webSearchEnabled === false,
         // agent 的自定义环境变量。后端是 `{...process.env, ...opts.env}`，
         // **合并**而不是替换——所以给 `{}` 与不给都不影响 CLI 拿到 PATH
-        env: agentConfig?.env ?? {},
+        //
+        // ★ D78：claude 的 `CLAUDE_CONFIG_DIR` 在这里注入（指向受管配置
+        //   目录，见上面的隔离块）。平台最后写 → 覆盖 agent 自己同名 env
+        //   ——隔离是平台强制的，不能由 agent 自定义环境变量关掉。
+        env: {
+          ...(agentConfig?.env ?? {}),
+          ...(runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
+            ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
+            : {}),
+        },
         onCommandLine: ({ argv, sandboxDescription }) => {
           actualArgv = argv
           void this.#note(runId, `命令行：${redactArgv(argv).join(' ')}`)

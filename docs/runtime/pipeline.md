@@ -105,7 +105,7 @@
 |---|---|---|---|
 | ① | **受理** | 定目录、`mkdir -p`、幂等、抢并发位、落 `queued` | 拿不到并发位 ⇒ `no_capacity`（提示稍后重试） |
 | ② | **排队** | `queued → dispatched`；抢**工作目录锁** | 目录被占 ⇒ `waiting_local_directory` 并**写明等谁**；等满 10 分钟 ⇒ `failed`（`infra_error`） |
-| ③ | **准备** | 清上次残渣 → 注入技能 → 注入任务隔离 hook（claude）→ 环境预检 → 拼「第一句话」（2026-09 起**不写副本文件**，全文进日志） | 撞上你自己的同名技能 ⇒ `SkillCollisionError` ⇒ `injection_failed`；CLI 找不到 ⇒ 直接失败，**不猜路径** |
+| ③ | **准备** | 清上次残渣 → 注入技能 → 注入任务隔离 hook（claude）→ 同步 claude 受管配置（D78，`CLAUDE_CONFIG_DIR`）→ 环境预检 → 拼「第一句话」（2026-09 起**不写副本文件**，全文进日志） | 撞上你自己的同名技能 ⇒ `SkillCollisionError` ⇒ `injection_failed`；CLI 找不到 ⇒ 直接失败，**不猜路径** |
 | ④ | **执行** | 拼 `argv`（顺序与禁改表固定）→（可选沙箱）→ `spawnProcessTree` → 第一句话写进 stdin | spawn 失败 ⇒ `infra_error` |
 | ⑤ | **运行** | stdout 逐行解析 → 追加消息 → SSE 推给页面；**空闲看门狗**盯着 | 空闲超时（默认 30 分钟）⇒ `idle_timeout`；使用者取消 ⇒ `cancelled` + `cancelled_by_user` |
 | ⑥ | **收尾** | 转终态 → 收掉本次注入的技能 → **执行 run 收尾时串接审核** | 不串接**不是错误**：写一行「没有串接审核：<原因>」（七种，§8） |
@@ -119,6 +119,15 @@
 | ~~`.agentdeck/tools/<slug>/`~~ | ~~这个执行者挂的工具包（D42）~~ **已撤掉**：挂载能力整个删了（`Agent.toolIds` 不在协议里，`{{tools}}` 恒为空） | — |
 | `.agentdeck/rounds/<轮次>-{task,result}.md` | §3.3b：执行任务 / 执行结果的落盘（审核按文件引用读） | **留着**（多轮不覆盖） |
 | ~~`.agentdeck/context/<runId>.md`~~ | ~~「第一句话」的副本~~ **已撤（2026-09）**：日志已含第一句话全文（①②③ 分开带标签、不截断），执行/审核都不再写副本文件；"回看它被交代了什么"看日志 | — |
+
+**claude 个人配置隔离（2026-10，D78）不落在工作目录**：受管配置目录在 **daemon 数据目录**下
+（`<dataDir>/claude-config/settings.json`，默认 `~/.agentdeck/data/claude-config/`），**绝不放工作目录**
+（agent 能读自己的工作目录——放那里等于把 key 递给 agent）。每次 run 准备阶段把 `~/.claude/settings.json`
+的 `env` 同步进受管 settings.json（`chmod 600`，幂等覆盖 = 改 key/base url 即时生效），spawn 时设
+`CLAUDE_CONFIG_DIR=<受管目录>`——用户级 skill/MCP（`~/.claude/skills/`、`~/.claude.json` 的 mcpServers）
+从此不加载，只剩项目级（含上面注入的技能与 hook）。**全局复用一个目录、跨 run 稳定**：claude 会话状态
+（`--resume` 依赖的 `projects/`）存在 config dir 下，每 run 新建会丢会话；claude 按 cwd 分目录存会话，
+任务间天然隔离。注入失败不失败 run（note 明说"隔离未生效"）。实现：`apps/daemon/src/run-hooks/claude-config.ts`。
 
 **「第一句话」是唯一的投递通道**（D29）：CLI 收到的东西**只有它**，所以**整段进日志、不截断**。
 ⚠️ **2026-09 起它由三块组成、分两档送**（见 §2.1 ③ 与 ../design/design.md §15.33）：A 档 = ①② 走系统提示
@@ -266,7 +275,7 @@
 | 你想动… | 去 |
 |---|---|
 | ① 任务：受理、目录、排队、并发 | §1，`apps/daemon/src/executor.ts` 的 `submit()` |
-| ② 执行：准备与注入 | §2.1，`packages/agent-core/src/skill-injection.ts`（**技能注入**；工具包注入已随挂载能力撤掉） |
+| ② 执行：准备与注入 | §2.1，`packages/agent-core/src/skill-injection.ts`（**技能注入**；工具包注入已随挂载能力撤掉）；claude 受管配置隔离（D78）：`apps/daemon/src/run-hooks/claude-config.ts` |
 | ② 执行：第一句话（逐字 + 模版） | §2.1 ③、§2.6 |
 | ② 执行：argv / 沙箱 / spawn | §2.2，`agent-core/argv.ts`、`sandbox.ts` |
 | ③ 审核：谁发起、覆盖、标准 | §3.1、§3.1b、§3.3 |
@@ -319,6 +328,7 @@
 | ② 注入技能 | 按**这个 agent 挂的子集**写文件——但**只在 runtime 声明有技能发现机制时**（D31 的能力位） | claude：`<workdir>/.claude/skills/`；声明 `none` 的 runtime：**一个文件都不写**，只在日志里说清 |
 | ③ 组装「第一句话」 | 三块组装（2026-09）+ 三框模版（2026-10）：**① 框架**由**框架框**渲染（空 = 平台默认模版，见 §2.6；默认= 「run/对象头 + 技能清单 + 回答语言 + 护栏」，审核那份还含判决契约）；**② 身份** = `Agent.instructions`（审核者接上老标准），在**身份框**里用 `{{identity}}` 摆放；**③ 任务** = 这次的正文（审核那份还有声明 + 两个材料标记 + 材料），在**任务框**里用 `{{task}}` 摆放（见 §3.3） | **不写任何 CLI 认识的项目记忆文件**；也不写我们自己的副本文件（2026-09 起，见下） |
 | ④ 第一句话进日志 | **整段进日志、不截断**（它是那次 run 唯一不可变的事实），按 ①②③ 三块**分开带标签**记 | 日志：`第一句话（…）：` + `===== ① 框架 =====` / `===== ② 身份 =====` / `===== ③ 任务 =====` 各一块（空块不出现） |
+| ⑤ claude 个人配置隔离（D78） | 把 `~/.claude/settings.json` 的 `env` 同步进受管目录 `<dataDir>/claude-config/settings.json`（`chmod 600`；幂等覆盖 = 改 key 即时生效），spawn 时设 `CLAUDE_CONFIG_DIR=<受管目录>`——用户级 skill/MCP 不加载，只剩项目级 | 受管目录（**不在工作目录**，agent 不可见）；失败 → note `⚠️ claude 个人配置隔离未生效：…`，**run 不失败** |
 
 **技能的文件布局**（run 开始前写、**跑完收掉**）：
 

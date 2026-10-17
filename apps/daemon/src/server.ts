@@ -258,6 +258,21 @@ export interface DaemonOptions {
   fetchImpl?: typeof fetch
   /** GitHub 令牌（可选）。缺省读环境变量 AGENTDECK_GITHUB_TOKEN。 */
   githubToken?: string | null
+  /**
+   * claude 个人配置的受管目录（D78）。缺省 = `dataDir/claude-config`。
+   *
+   * ★ 位置约束见 `run-hooks/claude-config.ts` 头注释：必须在 daemon 数据
+   *   目录下（agent 不可见），**绝不放任务工作目录**。测试可覆盖（指向
+   *   临时目录）。
+   */
+  claudeConfigDir?: string
+  /**
+   * copy env 的源 settings.json（D78）。缺省 = 使用者 `~/.claude/settings.json`。
+   *
+   * 做成可注入是 NFR-T-01 的同类理由：测试**绝不读使用者的真实配置**，
+   * 生产代码永远不传它。
+   */
+  claudeSettingsSource?: string
   onWarn?: (message: string) => void
   onInfo?: (message: string) => void
 }
@@ -1897,6 +1912,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const executor = new RunExecutor({
     store,
     workRoot,
+    // ★ D78：claude 个人配置的受管目录（CLAUDE_CONFIG_DIR 指向它）。
+    //   缺省放数据目录下（agent 不可见）——绝不放任务工作目录，key 会漏。
+    //   `claudeSettingsSource` 只由测试注入（NFR-T-01：测试不读真实配置）。
+    claudeConfigDir: options.claudeConfigDir ?? join(options.dataDir, 'claude-config'),
+    ...(options.claudeSettingsSource
+      ? { claudeSettingsSource: options.claudeSettingsSource }
+      : {}),
     // ★ 按 agent 的 runtimeKey 解析 backend（D28）。
     //   在此之前 agent.runtimeKey 是个没人读的字段——界面上能选、审计里会记，
     //   行为上所有 agent 都跑同一个 CLI。那正是"接口接受了、行为上不存在"。
