@@ -632,7 +632,7 @@
 |---|---|---|
 | FR-CLI-01 | 以**非交互模式 + stream-json 双向通信**驱动：`-p --output-format stream-json --input-format stream-json --verbose` | P0 |
 | FR-CLI-02 | 使用无人值守权限模式 `--permission-mode bypassPermissions` | P0 |
-| FR-CLI-03 | 必须禁用内置交互式提问工具（`--disallowedTools AskUserQuestion`）。理由：非交互模式下提问无 UI 可渲染，调用返回空答案，agent 转而**静默推断**。需要澄清一律写进评论 | P0 |
+| FR-CLI-03 | 必须禁用内置交互式提问工具（`--disallowedTools AskUserQuestion`）。理由：非交互模式下提问无 UI 可渲染，调用返回空答案，agent 转而**静默推断**。需要澄清一律写进评论。⚠️ **2026-10-17 追加禁用 `WebSearch` / `WebFetch`**：它们是 Anthropic **服务端工具**（执行在 API 服务器上），第三方兼容端点不执行、模型幻觉搜索结果 → 搜索死循环撑爆上下文（`Autocompact is thrashing`）。见 `docs/runtime/pipeline.md` §2.2 | P0 |
 | FR-CLI-04 | 参数拼装顺序固定：**平台基础参数 → 平台受管参数 → 过滤后的使用者参数 → 平台受管追加参数**。**最后写的赢** | P0 |
 | FR-CLI-05 | **不得**把系统提示词内联——CLI 自己会加载工作目录中的上下文文件。**先确认上游是否会替你传，再决定自己传不传** | P0 |
 | FR-CLI-06 | 必须支持会话恢复，并区分「恢复被拒绝」与「无法判断是否被拒绝」 | P0 |

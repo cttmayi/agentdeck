@@ -1044,7 +1044,7 @@ export const RUNTIMES: Record<string, RuntimeDescriptor> = {
 
 ```
 claude -p --output-format stream-json --input-format stream-json --verbose
-  --permission-mode bypassPermissions --disallowedTools AskUserQuestion
+  --permission-mode bypassPermissions --disallowedTools AskUserQuestion,WebSearch,WebFetch
   [--model <m>] [--max-turns <n>] [--resume <id>]
   <过滤后的使用者参数>
   [--append-system-prompt <系统提示：① 框架 + ② 身份>]

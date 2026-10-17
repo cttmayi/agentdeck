@@ -261,7 +261,7 @@ export interface RuntimeDescriptor {
 | 输入投递 | stdin stream-json 帧 | `turn/start` 的 `input:[{type:'text'}]` |
 | 输出解析 | 事件流解析器 | `jsonrpc-transport` + 通知流解析器 |
 | 会话恢复 | `--resume <id>` 旗标 | `thread/resume`（RPC） |
-| 审批 | `--disallowedTools AskUserQuestion` | `approvalPolicy:'never'` + 防御性 decline |
+| 审批 | `--disallowedTools AskUserQuestion,WebSearch,WebFetch` | `approvalPolicy:'never'` + 防御性 decline |
 | 禁改表 | `CLAUDE_BLOCKED_ARGS`（协议旗标） | service 无 run 级 argv（customArgs 收到即警告） |
 | 沙箱 | 平台 `planSandbox` | 平台 `planSandbox` + codex 每线程 sandbox |
 | 证据等级 | `verified` | `provisional`（待核对清单升 verified） |

@@ -83,11 +83,14 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
     assert.ok(a.includes('bypassPermissions'))
   })
 
-  test('★ 禁用了交互式提问工具（非交互模式下它会静默返回空答案）', () => {
+  test('★ 禁用了交互式提问与服务端搜索工具（非交互下提问会静默返回空答案；WebSearch/WebFetch 是 Anthropic 服务端工具，第三方兼容端点不执行、模型会幻觉结果导致搜索死循环）', () => {
     const a = CLAUDE_DESCRIPTOR.baseArgs
     const i = a.indexOf('--disallowedTools')
     assert.notEqual(i, -1)
-    assert.equal(a[i + 1], 'AskUserQuestion')
+    const deniedArg = a[i + 1]
+    assert.ok(deniedArg)
+    const denied = deniedArg.split(',').map((s) => s.trim())
+    assert.deepEqual(denied, ['AskUserQuestion', 'WebSearch', 'WebFetch'])
   })
 
   test('未知 runtime 报错并列出已知的', () => {

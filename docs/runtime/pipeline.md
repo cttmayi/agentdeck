@@ -441,8 +441,17 @@ run 日志里会明说——**写进一个没人读的目录等于假装支持**
 
 ```
 claude -p --output-format stream-json --input-format stream-json --verbose \
-       --permission-mode bypassPermissions --disallowedTools AskUserQuestion
+       --permission-mode bypassPermissions \
+       --disallowedTools AskUserQuestion,WebSearch,WebFetch
 ```
+
+`AskUserQuestion` 之外，`WebSearch` / `WebFetch` 也是 **Anthropic 服务端工具**——执行在
+API 服务器上，不在 claude code 本地。第三方兼容端点（DeepSeek / 阿里云百炼的
+`/anthropic` 通道）没有这个执行器，模型"调用"搜索后收不到真实结果、只能**幻觉伪造**，
+claude 拿到假结果就继续搜，几轮把上下文撑满触发 `Autocompact is thrashing` 整条 run 失败
+（2026-10-17 实测：113 万 input token / 输出 919 / $1.44 / 零产出）。禁掉之后 claude 退化为
+**Bash + curl** 抓网页调研——执行在本地，任何兼容端点都能干活。将来端点支持服务端工具
+（或 two-api 在代理层补上真实搜索执行器）再从 runtime 表移除。
 
 按情况追加。顺序**固定**，而且顺序本身就是一份声明——**最后写的赢**：
 

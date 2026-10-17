@@ -354,6 +354,21 @@ export const CLAUDE_BLOCKED_ARGS: Readonly<Record<string, BlockedArgMode>> = {
  * `--disallowedTools AskUserQuestion` 的理由值得记下来：非交互模式下
  * 提问没有 UI 可渲染，调用只会返回一个空答案，然后 agent 开始
  * **静默推断**——使用者从头到尾看不到那个问题。要澄清就写进评论里。
+ *
+ * ★ 2026-10-17 把 `WebSearch` / `WebFetch` 也加进禁用列表，理由值得记下来：
+ * 这两个是 **Anthropic 服务端工具**（`web_search_20250305` 等）——**执行在
+ * API 服务器上，不在 claude code 本地**。第三方兼容端点（DeepSeek / 阿里云
+ * 百炼的 `/anthropic` 通道）没有这个执行器，但 claude 照常把工具暴露给模型，
+ * 于是模型"调用"搜索后**收不到真实结果、只能幻觉伪造**（实测搜「Memento 3」
+ * 编出 2000 年电影的维基条目）。claude 拿到假结果就继续搜，每轮把全部上下文
+ * 全量重发（第三方端点无 prompt caching），几轮就把上下文撑满，触发
+ * `Autocompact is thrashing` 整条 run 失败（实测 113 万 input token、
+ * 输出 919、$1.44 烧掉、工作目录零产出）。
+ *
+ * 禁掉之后 claude 会退化为 **Bash + curl** 抓网页调研——执行在本地，不依赖
+ * 端点的服务端工具，任何兼容端点都能干活。代价是搜索质量略降（没有专用搜索
+ * 引擎的聚合与去重），对「调研」类任务可接受。将来若端点支持服务端工具
+ * （或 two-api 在代理层补上真实搜索执行器），再从这里移除。
  */
 export const CLAUDE_DESCRIPTOR: CliRuntimeDescriptor = {
   key: 'claude',
@@ -418,7 +433,7 @@ export const CLAUDE_DESCRIPTOR: CliRuntimeDescriptor = {
     '--permission-mode',
     'bypassPermissions',
     '--disallowedTools',
-    'AskUserQuestion',
+    'AskUserQuestion,WebSearch,WebFetch',
   ],
   blockedArgs: CLAUDE_BLOCKED_ARGS,
   // 显式写出来而不是靠缺省：第二个 runtime 就在隔壁，缺省值会让"这是谁的选择"
