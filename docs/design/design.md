@@ -1044,11 +1044,15 @@ export const RUNTIMES: Record<string, RuntimeDescriptor> = {
 
 ```
 claude -p --output-format stream-json --input-format stream-json --verbose
-  --permission-mode bypassPermissions --disallowedTools AskUserQuestion,WebSearch,WebFetch
+  --permission-mode bypassPermissions --disallowedTools AskUserQuestion[,WebSearch,WebFetch]
   [--model <m>] [--max-turns <n>] [--resume <id>]
   <过滤后的使用者参数>
   [--append-system-prompt <系统提示：① 框架 + ② 身份>]
 ```
+
+`WebSearch` / `WebFetch` 是否追加由 **workspace 开关 `webSearchEnabled`**（D77）决定：默认开 =
+不追加（它们是 Anthropic 服务端工具，官方端点真执行；第三方兼容端点会幻觉——默认尊重功能，
+关掉时 claude 退化为 Bash+curl 调研）。
 
 | 段 | 内容 | 归属 |
 |---|---|---|

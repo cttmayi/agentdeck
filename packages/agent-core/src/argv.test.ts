@@ -83,14 +83,17 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
     assert.ok(a.includes('bypassPermissions'))
   })
 
-  test('★ 禁用了交互式提问与服务端搜索工具（非交互下提问会静默返回空答案；WebSearch/WebFetch 是 Anthropic 服务端工具，第三方兼容端点不执行、模型会幻觉结果导致搜索死循环）', () => {
+  test('★ 基础禁集只含 AskUserQuestion；WebSearch/WebFetch 走可选禁集（D77）', () => {
+    // 非交互下提问会静默返回空答案（基础禁集，永远禁）。WebSearch/WebFetch 是
+    // Anthropic 服务端工具、第三方端点会幻觉——但它们是正经功能，所以**默认不禁**、
+    // 由 workspace 开关决定（`buildArgv` 的 `disallowOptionalTools`，见下面那条测试）。
     const a = CLAUDE_DESCRIPTOR.baseArgs
     const i = a.indexOf('--disallowedTools')
     assert.notEqual(i, -1)
     const deniedArg = a[i + 1]
     assert.ok(deniedArg)
-    const denied = deniedArg.split(',').map((s) => s.trim())
-    assert.deepEqual(denied, ['AskUserQuestion', 'WebSearch', 'WebFetch'])
+    assert.deepEqual(deniedArg.split(',').map((s) => s.trim()), ['AskUserQuestion'])
+    assert.deepEqual(CLAUDE_DESCRIPTOR.disallowedToolsOptional, ['WebSearch', 'WebFetch'])
   })
 
   test('未知 runtime 报错并列出已知的', () => {
@@ -193,6 +196,21 @@ describe('argv 组装（FR-CLI-04）', () => {
   test('首版 managedAppend 为空也不影响', () => {
     const { argv } = buildArgv({ runtime: CLAUDE_DESCRIPTOR })
     assert.deepEqual(argv, [...CLAUDE_DESCRIPTOR.baseArgs])
+  })
+
+  test('★ D77：可选禁集（WebSearch/WebFetch）默认不开，关掉时并进 --disallowedTools', () => {
+    const val = (argv: string[]) => argv[argv.indexOf('--disallowedTools') + 1]
+    const optional = CLAUDE_DESCRIPTOR.disallowedToolsOptional ?? []
+    // 默认（缺省 / 显式 false）：只有 AskUserQuestion——WebSearch 可用（尊重功能）
+    assert.equal(val(buildArgv({ runtime: CLAUDE_DESCRIPTOR }).argv), 'AskUserQuestion')
+    assert.equal(
+      val(buildArgv({ runtime: CLAUDE_DESCRIPTOR, disallowOptionalTools: false }).argv),
+      'AskUserQuestion',
+    )
+    // workspace 关掉搜索：WebSearch/WebFetch 并进禁用列表
+    const closed = buildArgv({ runtime: CLAUDE_DESCRIPTOR, disallowOptionalTools: true }).argv
+    assert.equal(val(closed), `AskUserQuestion,${optional.join(',')}`)
+    assert.deepEqual(optional, ['WebSearch', 'WebFetch'])
   })
 
   test('maxTurns 为 0 / null 时不追加', () => {

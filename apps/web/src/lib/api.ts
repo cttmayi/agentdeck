@@ -116,6 +116,8 @@ export interface Identity {
   currentRuntime?: string
   /** 界面语言（D39）：'zh' | 'en'。页面启动时就要知道，避免先闪一下中文。 */
   locale?: string
+  /** D77：claude 的 WebSearch/WebFetch 开关（默认开）。设置页据此渲染那个开关。 */
+  webSearchEnabled?: boolean
   runtimes: RuntimeView[]
   /**
    * daemon 的能力标志（`apps/daemon/src/server.ts` 的 `GET /api/identity`）。

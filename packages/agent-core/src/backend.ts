@@ -61,6 +61,12 @@ export interface ExecOptions {
    *    无从校验；详见 `docs/runtime/codex-runtime-design.md` §3.4）。
    */
   customArgs?: readonly string[]
+  /**
+   * ★ 是否把 runtime 声明在 `disallowedToolsOptional` 里的工具一并禁掉
+   * （2026-10，D77：workspace 的 WebSearch 开关，`webSearchEnabled === false`）。
+   * 只有声明了那个字段的 cli runtime（目前只有 claude）有语义，其它忽略。
+   */
+  disallowOptionalTools?: boolean
   signal?: AbortSignal
   /** 子进程输出一行时的回调（用于活动性判定，FR-RUN-08）。 */
   onActivity?: () => void

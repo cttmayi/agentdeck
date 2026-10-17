@@ -13,7 +13,7 @@
     remoteLoggedIn,
     remoteUrlValue,
   } from '../lib/remote-store.ts'
-  import { identity, syncStatus } from '../lib/stores.ts'
+  import { identity, loadIdentity, syncStatus } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
   import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@agentdeck/i18n'
   import { locale, setLocale, t, tx } from '../lib/i18n.ts'
@@ -143,6 +143,37 @@
       <p class="hint">
         {$t('settings.languageHint')}
       </p>
+    </section>
+
+    <!--
+      ★ claude 的 WebSearch / WebFetch 开关（D77，默认开）。
+
+      WebSearch/WebFetch 是 Anthropic **服务端**工具：官方端点真执行；第三方
+      兼容端点（DeepSeek / 阿里云百炼）没有执行器、模型会**幻觉搜索结果**。
+      默认开 = 尊重功能（调研类任务是刚需）；在第三方端点上真出幻觉死循环时，
+      关掉它让 claude 退化为 Bash+curl 调研（执行在本地、任何端点都能干活）。
+    -->
+    <section class="drawer-section" data-web-search>
+      <h3>{$t('settings.webSearch')}</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={$identity?.webSearchEnabled ?? true}
+          onchange={(e) => {
+            const next = (e.currentTarget as HTMLInputElement).checked
+            void api('/api/workspace/web-search', {
+              method: 'PUT',
+              body: JSON.stringify({ enabled: next }),
+            })
+              .then(() => void loadIdentity())
+              .catch((err) =>
+                showToast(err instanceof Error ? err.message : String(err)),
+              )
+          }}
+        />
+        {$t('settings.webSearchLabel')}
+      </label>
+      <p class="hint">{$t('settings.webSearchHint')}</p>
     </section>
 
     <!--

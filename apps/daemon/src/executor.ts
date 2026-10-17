@@ -1270,6 +1270,9 @@ export class RunExecutor {
         model: agentConfig?.model ?? null,
         maxTurns: req.limits.maxTurns,
         resumeSessionId: resume.sessionId,
+        // ★ D77：workspace 关掉 WebSearch 时把 WebSearch/WebFetch 禁掉（服务端
+        //   工具在第三方端点会幻觉）。缺省（没这个字段 / 老数据）= 开 = 不禁。
+        disallowOptionalTools: workspace?.webSearchEnabled === false,
         // agent 的自定义环境变量。后端是 `{...process.env, ...opts.env}`，
         // **合并**而不是替换——所以给 `{}` 与不给都不影响 CLI 拿到 PATH
         env: agentConfig?.env ?? {},

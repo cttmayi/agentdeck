@@ -38,6 +38,16 @@ export interface BuildArgvInput {
    * 而**不需要改动本函数的任何逻辑**。
    */
   managedAppend?: readonly string[]
+  /**
+   * ★ 是否把 runtime 声明在 `disallowedToolsOptional` 里的工具一并禁掉
+   * （2026-10，D77：workspace 的 WebSearch 开关）。
+   *
+   * `true` 时把 `runtime.disallowedToolsOptional` 并进 `--disallowedTools` 的值
+   * （如 `AskUserQuestion` → `AskUserQuestion,WebSearch,WebFetch`）。缺省
+   * `false` = 不禁（默认尊重 WebSearch 功能）。只对声明了那个字段的 runtime
+   * 有语义（目前只有 claude）；没声明的传 true 也不会有任何变化。
+   */
+  disallowOptionalTools?: boolean
 }
 
 export interface BuildArgvResult {
@@ -59,6 +69,18 @@ export function buildArgv(input: BuildArgvInput): BuildArgvResult {
 
   // 1. 平台基础参数
   argv.push(...runtime.baseArgs)
+
+  // ★ 可选禁集（D77）：workspace 关掉 WebSearch 时，把 `disallowedToolsOptional`
+  //    （WebSearch/WebFetch）并进 `--disallowedTools` 的值。在基础参数 push 之后
+  //    改，是为了让"禁用列表"始终只有一处拼装（这里的追加是平台自己对自己的
+  //    参数做加法，与使用者的自定义参数无关）。
+  if (input.disallowOptionalTools === true && runtime.disallowedToolsOptional?.length) {
+    const flagIdx = argv.indexOf('--disallowedTools')
+    const valueIdx = flagIdx >= 0 ? flagIdx + 1 : -1
+    if (valueIdx >= 0 && valueIdx < argv.length) {
+      argv[valueIdx] = `${argv[valueIdx]},${runtime.disallowedToolsOptional.join(',')}`
+    }
+  }
 
   // 2. 平台受管参数
   if (input.model) argv.push(flags.model, input.model)

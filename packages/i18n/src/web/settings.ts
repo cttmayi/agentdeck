@@ -29,6 +29,17 @@ export const settingsText = {
     en: 'Switches interface text only. The prompt handed to the model stays in Chinese, plus an "answer in X" instruction so it replies in the language you pick.',
   },
 
+  // ── claude 的 WebSearch / WebFetch 开关（D77）──
+  'settings.webSearch': { zh: '联网搜索', en: 'Web search' },
+  'settings.webSearchLabel': {
+    zh: '允许 claude 使用 WebSearch / WebFetch',
+    en: 'Allow claude to use WebSearch / WebFetch',
+  },
+  'settings.webSearchHint': {
+    zh: '官方 Anthropic 端点会真实联网搜索；第三方兼容端点（如 DeepSeek / 阿里云百炼）没有搜索执行器，模型可能编造搜索结果并死循环——遇到这种情况把它关掉，claude 会改用 Bash + curl 调研（任何端点都能干活）。',
+    en: 'On the official Anthropic endpoint this performs real web search. Third-party endpoints (e.g. DeepSeek / Alibaba Bailian) expose the tool without an executor, so the model may fabricate results and loop — turn it off there and claude falls back to Bash + curl research (works on any endpoint).',
+  },
+
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },
   'settings.themeLight': { zh: '亮色', en: 'Light' },

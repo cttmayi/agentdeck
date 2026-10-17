@@ -116,6 +116,9 @@ export class ClaudeBackend implements AgentBackend {
       maxTurns: opts.maxTurns ?? null,
       resumeSessionId: opts.resumeSessionId ?? null,
       userArgs: opts.customArgs ?? [],
+      // ★ D77：workspace 关掉 WebSearch 时，把 WebSearch/WebFetch 并进
+      //   --disallowedTools（服务端工具在第三方端点会幻觉；默认开 = 不追加）。
+      disallowOptionalTools: opts.disallowOptionalTools ?? false,
       // 受管追加参数**最后写**（`buildArgv` 里的第 4 步）⇒ 使用者的自定义参数
       // 覆盖不了它
       managedAppend,

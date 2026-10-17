@@ -443,22 +443,24 @@ run 日志里会明说——**写进一个没人读的目录等于假装支持**
 ```
 claude -p --output-format stream-json --input-format stream-json --verbose \
        --permission-mode bypassPermissions \
-       --disallowedTools AskUserQuestion,WebSearch,WebFetch
+       --disallowedTools AskUserQuestion
 ```
 
 `AskUserQuestion` 之外，`WebSearch` / `WebFetch` 也是 **Anthropic 服务端工具**——执行在
 API 服务器上，不在 claude code 本地。第三方兼容端点（DeepSeek / 阿里云百炼的
 `/anthropic` 通道）没有这个执行器，模型"调用"搜索后收不到真实结果、只能**幻觉伪造**，
 claude 拿到假结果就继续搜，几轮把上下文撑满触发 `Autocompact is thrashing` 整条 run 失败
-（2026-10-17 实测：113 万 input token / 输出 919 / $1.44 / 零产出）。禁掉之后 claude 退化为
-**Bash + curl** 抓网页调研——执行在本地，任何兼容端点都能干活。将来端点支持服务端工具
-（或 two-api 在代理层补上真实搜索执行器）再从 runtime 表移除。
+（2026-10-17 实测：113 万 input token / 输出 919 / $1.44 / 零产出；后来查明 thrashing 的
+**主因**是端点 usage 上报虚高，搜索只是放大器）。⚠️ **2026-10（D77）改为默认不禁**：
+它们是正经功能（官方端点真执行、调研类刚需），所以走 workspace 级开关 `webSearchEnabled`
+（默认开）；关掉时 executor 把它们并进 `--disallowedTools`（`AskUserQuestion,WebSearch,WebFetch`），
+claude 退化为 **Bash + curl** 抓网页调研——执行在本地，任何兼容端点都能干活。
 
 按情况追加。顺序**固定**，而且顺序本身就是一份声明——**最后写的赢**：
 
 | 段 | 内容 | 来源 |
 |---|---|---|
-| 1 平台基础参数 | 上面那串 | runtime 表 `baseArgs`，使用者不可覆盖 |
+| 1 平台基础参数 | 上面那串；**关掉 WebSearch 时**另追加 `,WebSearch,WebFetch`（D77，workspace 开关） | runtime 表 `baseArgs`（+ `disallowedToolsOptional`），使用者不可覆盖 |
 | 2 平台受管参数 | `--model <m>` / `--max-turns <n>` / `--resume <id>` | agent 的 `model`、`limits.maxTurns`、会话恢复 |
 | 3 使用者自定义参数 | 原样，但过**禁改表** | 目前没有界面入口；被丢掉的会记警告 |
 | 4 平台受管追加 | `--append-system-prompt <①② 两块>`（**A 档靠它**） | MCP / settings 仍预留 |

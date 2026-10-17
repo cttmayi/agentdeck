@@ -65,6 +65,8 @@ class FakeBackend implements AgentBackend {
   seenEnv: Record<string, string> = {}
   /** 这次执行要求恢复哪个会话（`--resume` 的入参）——"接着上次说"靠它。 */
   seenResumeSessionId: string | null = null
+  /** D77：workspace 的 WebSearch 开关传下来的值（executor → backend 的通道要真的通）。 */
+  seenDisallowOptionalTools: boolean | null = null
 
   /**
    * 执行那一刻，工作目录里 `.claude/skills/` 下的文件（相对技能目录的路径 → 内容）。
@@ -118,6 +120,8 @@ class FakeBackend implements AgentBackend {
     this.seenModel = opts.model ?? null
     this.seenEnv = opts.env ?? {}
     this.seenResumeSessionId = opts.resumeSessionId ?? null
+    // ★ D77：workspace 的 WebSearch 开关有没有真的传到后端（值正确才不算死接口）
+    this.seenDisallowOptionalTools = opts.disallowOptionalTools ?? false
     /**
      * 这次 run 交给 CLI 的**第一句话**（D29 之后它走 prompt，不再有 CLAUDE.md）。
      *
@@ -1179,6 +1183,88 @@ describe('★ agent 上填的模型与环境变量必须真的传到 CLI', () =>
         '★ agent 上填的模型必须传下去 —— 写死 null 会让"换模型"变成一个不生效的动作',
       )
       assert.equal(b.seenEnv['MY_FLAG'], 'on', '★ agent 的自定义环境变量同样要传下去')
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
+describe('★ workspace 的 WebSearch 开关（D77）真的传到后端', () => {
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 开关默认开（WebSearch 可用），关掉时 executor 要向后端传
+   * `disallowOptionalTools: true`（claude-backend 据此把 WebSearch/WebFetch
+   * 并进 `--disallowedTools`）。这一条验的是 **executor → backend 的通道真的
+   * 通**——值拼进 argv 的转换由 `argv.test.ts` 钉住（NFR-T-01：不调真实 CLI）。
+   * ══════════════════════════════════════════════════════════════════
+   */
+  test('默认开 → false；关掉 → true；再开 → false', async () => {
+    const dataDir = await makeTempDir('e2e-ws-data')
+    const work = await makeTempDir('e2e-ws-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    const runOnce = async (n: number): Promise<void> => {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a1', name: '助手', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: `i-ws-${n}` },
+          prompt: `第 ${n} 轮`,
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+    }
+
+    try {
+      // 默认（老数据没有这个字段）⇒ 开 ⇒ 不追加
+      await runOnce(1)
+      assert.equal(b.seenDisallowOptionalTools, false, '默认 = 开 = 不追加可选禁集')
+
+      // 关掉 ⇒ 追加
+      const off = await fetch(`${d.url}/api/workspace/web-search`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      })
+      assert.equal(off.status, 200)
+      await runOnce(2)
+      assert.equal(b.seenDisallowOptionalTools, true, '关掉后必须传 true（WebSearch/WebFetch 禁用）')
+
+      // 再开 ⇒ 不追加
+      const on = await fetch(`${d.url}/api/workspace/web-search`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: true }),
+      })
+      assert.equal(on.status, 200)
+      await runOnce(3)
+      assert.equal(b.seenDisallowOptionalTools, false, '再开 = 不追加')
+
+      // 非法值：不是布尔 ⇒ 400
+      const bad = await fetch(`${d.url}/api/workspace/web-search`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: 'false' }),
+      })
+      assert.equal(bad.status, 400, '字符串 "false" 不是布尔，不能算"关了"')
     } finally {
       await d.close()
       await cleanup(work)

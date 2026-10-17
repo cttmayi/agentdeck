@@ -130,6 +130,24 @@ export const Workspace = z.object({
    */
   locale: z.enum(['zh', 'en']).default('zh'),
 
+  /**
+   * ★ claude 的 WebSearch / WebFetch 是否可用（2026-10，D77）。
+   *
+   * 这两个是 Anthropic **服务端**工具（`web_search_20250305`）——执行在 API
+   * 服务器上，不在 claude code 本地。官方端点真执行；第三方 `/anthropic`
+   * 兼容端点（DeepSeek / 阿里云百炼）暴露工具名但没有执行器，模型会**幻觉
+   * 搜索结果**（编造"我搜索了…"+ 假条目）→ 死循环放大上下文 → thrashing
+   * （主因是端点 usage 上报虚高，搜索只是放大器）。所以给一个**全局开关**：
+   * `true`（默认）= claude 命令行不禁它们（能用搜索）；`false` = 追加进
+   * `--disallowedTools`（搜索与抓取都禁，claude 退化为 Bash+curl 调研）。
+   *
+   * ⚠️ 默认开是刻意（尊重 WebSearch 功能，调研类任务是刚需；真出幻觉死循环
+   *    再手动关）。开关只控制命令行禁不禁，不控制端点有没有执行器。
+   *
+   * ⚠️ `optional()`：**后加**的字段，老 workspace 里根本没有它（缺省 = 开）。
+   */
+  webSearchEnabled: z.boolean().default(true).optional(),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })

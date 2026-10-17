@@ -1067,6 +1067,8 @@ async function readWorkspaceSettings(
   chatTaskTemplate: string
   defaultAgentId: string | null
   locale: Locale
+  /** D77：claude 的 WebSearch/WebFetch 开关。老数据没有这个键 ⇒ 默认开。 */
+  webSearchEnabled: boolean
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1083,6 +1085,7 @@ async function readWorkspaceSettings(
     defaultAgentId: workspace?.defaultAgentId ?? null,
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
+    webSearchEnabled: workspace?.webSearchEnabled ?? true,
   }
 }
 
@@ -2808,6 +2811,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ★ 界面语言跟着身份一起给：页面启动时就要知道用哪种语言渲染，
         //   而不是先闪一下中文再切过来（D39）
         locale: (await readWorkspaceSettings(store, workspaceId)).locale,
+        // ★ D77：claude 的 WebSearch/WebFetch 开关（默认开）。设置页据此渲染
+        //   那个开关——"界面显示的"与"executor 真的用的"走同一份读（上面的
+        //   readWorkspaceSettings），不许分叉。
+        webSearchEnabled: (await readWorkspaceSettings(store, workspaceId)).webSearchEnabled,
         /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
@@ -3142,6 +3149,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       await store.insertWorkspace({ ...workspace, locale: raw, updatedAt: Date.now() })
       sendJson(res, 200, { locale: raw })
+      return
+    }
+
+    // ── claude 的 WebSearch / WebFetch 开关（D77）──
+    //
+    // 这两个是服务端工具：官方端点真执行，第三方兼容端点（百炼/DeepSeek）无
+    // 执行器会幻觉搜索结果。全局开关默认开（尊重功能）；关掉时 executor 把
+    // WebSearch/WebFetch 并进 claude 的 `--disallowedTools`（退化为 Bash+curl
+    // 调研）。校验收在**布尔字面量**上：收到字符串 "false" 不算关（前端传
+    // JSON 布尔，不会出现那种情况；但接口自己别把"假值"当"关了"）。
+    if (req.method === 'PUT' && path === '/api/workspace/web-search') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      if (typeof body['enabled'] !== 'boolean') {
+        sendJson(res, 400, { error: `enabled 必须是布尔值（收到 ${JSON.stringify(body['enabled'])}）` })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, webSearchEnabled: body['enabled'], updatedAt: Date.now() })
+      sendJson(res, 200, { enabled: body['enabled'] })
       return
     }
 
