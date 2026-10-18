@@ -782,8 +782,35 @@ export const SubjectRef = z.object({
    */
   type: z.enum(['issue', 'report', 'run', 'conversation', 'skill-draft']),
   id: z.string(),
+  /**
+   * D80 界面改版（2026-10-19）：`skill-draft` 起草 run 记**它从哪条 run 发起**
+   * （对话 = 那一轮的 run，任务 = 任务执行 run）。这是"恢复进行中的起草"的前提
+   * （重开流程页按它找最近未入库的草稿，§4.1.1）。
+   *
+   * ⚠️ 只在 `skill-draft` 上带；其他 subject 缺字段。`conversation` 场景一个
+   * 会话有多轮（多条 run）——查找时按会话的所有轮次 runId 匹配（见
+   * `crystallize.ts` 的 `activeDraft` 口径）。
+   */
+  sourceRunId: z.string().optional(),
 })
 export type SubjectRef = z.infer<typeof SubjectRef>
+
+/**
+ * D80（2026-10-19）：`skill-draft` 起草 run 的**沉淀目标**（它要把素材变成
+ * 什么：新建 skill / 更新哪条 skill）。
+ *
+ * 记在 run 上，是"恢复进行中的起草"（§4.1.1）的配套：重开流程页把一条
+ * 已完成待审阅的草稿**继续**到审阅/入库时，commit 需要目标（更新 = 复用原
+ * id 进化；新建 = clash 判重），不能凭"用户这次又选了啥"猜——草稿当初是
+ * 按哪个目标起草的，入库就得按哪个目标走。
+ *
+ * ⚠️ 只记提交需要的部分：`purpose`（只影响起草 prompt）不落库。
+ */
+export const CrystallizeTargetRef = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('new') }),
+  z.object({ kind: z.literal('update'), skillId: z.string() }),
+])
+export type CrystallizeTargetRef = z.infer<typeof CrystallizeTargetRef>
 
 /** run 使用的 skill 的**标识与来源**（不记版本、不记指纹，D9）。 */
 export const SkillRef = z.object({
@@ -951,6 +978,22 @@ export const Run = z.object({
   dispatchedAt: EpochMs.nullable(),
   startedAt: EpochMs.nullable(),
   finishedAt: EpochMs.nullable(),
+  /**
+   * D80（2026-10-19）：`skill-draft` 起草 run 是否**已被确认入库**（`POST
+   * /api/crystallize/commit` 成功时由 commit 路由置 true）。
+   *
+   * 只给 `skill-draft` 用。用途：`GET /api/crystallize/targets` 的 `activeDraft`
+   * （"恢复进行中的起草"）要跳过**已入库**的草稿——不然每次重开流程页都会把
+   * 上一条已经沉淀完的草稿再"继续"一遍。字段在不在就是判据（老 run / 非起草
+   * run 缺字段），与 `deliveryMode` 同一口径。
+   */
+  crystallized: z.boolean().optional(),
+  /**
+   * D80（2026-10-19）：`skill-draft` 起草 run 的**沉淀目标**（新建 / 更新哪条），
+   * 起草时随 `SubmitRunRequest.crystallizeTarget` 落库。恢复进行中的起草时
+   * 按它还原目标，见 `CrystallizeTargetRef`。
+   */
+  crystallizeTarget: CrystallizeTargetRef.optional(),
 })
 export type Run = z.infer<typeof Run>
 

@@ -5,7 +5,7 @@
   import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
-  import CrystallizePanel from '../components/CrystallizePanel.svelte'
+  import CrystallizeView from '../components/CrystallizeView.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -403,6 +403,8 @@
       showToast($t('chat.deleted'))
       // 删的是当前正在看的对话：落到列表第一个，或直接开始新对话
       if (id === $activeConversationId) {
+        // 沉淀流程页挂的是这个对话的 runId——对话没了，流程页也得关（D80）。
+        crystallizeOpen = false
         if ($conversations.length > 0) await openConversation($conversations[0]!.id)
         else startDrafting()
       }
@@ -412,7 +414,11 @@
   }
 
   async function select(id: string): Promise<void> {
+    void 'DSH-SMOKE-MARKER-77'
     if (id === $activeConversationId && !drafting) return
+    // 切对话时关掉沉淀流程页：它挂的是**上一个**对话的 runId，留着会显示
+    // 别人的流程（D80 界面改版后流程页替换右主区，列表仍可点）。
+    crystallizeOpen = false
     drafting = false
     pendingText = ''
     errorText = ''
@@ -488,6 +494,19 @@
   </ListPane>
 
   <!-- ══════════ 右：消息流 ══════════ -->
+    <!-- ══════════ 右：消息流 / 沉淀流程（互相替换） ══════════ -->
+  {#if crystallizeOpen}
+    <!-- D80 沉淀成 skill（设计 §4.1.1 界面改版）：任务详情式**全页**流程，
+         替换聊天主区；栏头返回 = 回对话。沉淀不是任务——起草 run 不在任务
+         列表，进度只在这页（重开按对话找回，见 activeDraft 恢复）。 -->
+    <CrystallizeView
+      runId={crystallizeRunId}
+      sourceLabel={activeConversation?.title ?? ''}
+      backLabel={$t('crystallize.backToChat')}
+      onback={() => (crystallizeOpen = false)}
+      ondone={() => void refresh()}
+    />
+  {:else}
     <!-- ★ 右主区（D69.15）：壳 / 栏头 / 空态统一在 MainArea。
          聊天三态：草稿（简单栏头+表单）/ 没选中（空态）/ 对话（chat-head 改名形态
          + 工作目录 + 消息流 + 文件树 + 输入条）。栏头与输入条都是**特殊情况**：
@@ -780,14 +799,7 @@
         {/if}
       {/snippet}
     </MainArea>
-
-    <!-- D80：沉淀成 skill 面板（目标 → 起草 → 审阅，三态一体） -->
-    <CrystallizePanel
-      open={crystallizeOpen}
-      runId={crystallizeRunId}
-      onclose={() => (crystallizeOpen = false)}
-      ondone={() => void refresh()}
-    />
+  {/if}
 </div>
 
 <style>

@@ -188,10 +188,14 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       reviewed: boolean
       hasUserFeedback: boolean
       loadedSkills: unknown[]
+      materialStats: { turns: number; toolCalls: number } | null
+      activeDraft: { runId: string; status: string } | null
     }
     assert.equal(res.scope, 'task')
     assert.equal(res.reviewed, false, '没有审核 run 就不算审核过')
     assert.equal(res.hasUserFeedback, false, '还没有用户反馈机制')
+    assert.ok(res.materialStats, '素材统计起草前可见')
+    assert.equal(res.activeDraft, null, '还没起草过')
   })
 
   test('draft：受理返回 draftRunId + 素材统计，subject 是 skill-draft', async () => {
@@ -211,10 +215,13 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     let status = ''
     for (let i = 0; i < 40; i += 1) {
       const run = (await (await fetch(`${daemon.url}/api/runs/${body.draftRunId}`)).json()) as {
-        subject: { type: string }
+        subject: { type: string; sourceRunId?: string }
         status: string
       }
-      if (i === 0) assert.equal(run.subject.type, 'skill-draft', '起草 run 不进闭环')
+      if (i === 0) {
+        assert.equal(run.subject.type, 'skill-draft', '起草 run 不进闭环')
+        assert.equal(run.subject.sourceRunId, runId, '起草 run 记 source（恢复进行中的起草用）')
+      }
       status = run.status
       if (['completed', 'failed', 'cancelled'].includes(status)) break
       await new Promise((resolve) => setTimeout(resolve, 50))
@@ -228,6 +235,16 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       runId,
       target: { kind: 'new', purpose: '把这份流程沉淀成 skill' },
     })
+
+    // ★ 恢复进行中的起草：起草完成但未入库 → targets 给 activeDraft
+    const t1 = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
+      activeDraft: { runId: string; status: string; target: { kind: string } } | null
+    }
+    assert.deepEqual(
+      t1.activeDraft,
+      { runId: draftRunId, status: 'completed', target: { kind: 'new' } },
+      '已完成待审阅可恢复，目标随行',
+    )
 
     const { status, body } = await commit({
       draftRunId,
@@ -255,6 +272,12 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.equal((body['versioning'] as { enabled: boolean }).enabled, true)
     const log = await git('log', '--oneline')
     assert.match(log, /沉淀（新建）/)
+
+    // ★ 入库后 → activeDraft 清空（crystallized 跳过，不再"继续"已沉淀的草稿）
+    const t2 = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
+      activeDraft: { runId: string; status: string } | null
+    }
+    assert.equal(t2.activeDraft, null, '入库后不恢复')
   })
 
   test('★ 撞 slug：同一 slug 再新建 ⇒ 409 clash_mine + existing 指回旧那条', async () => {

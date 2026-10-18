@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ActionRefType, RunFailureReason, RunKind, RunStatus, VerdictStatus } from './enums.ts'
 import { AgentId, BlobRef, RunId, SkillId, Ulid, VerdictId } from './ids.ts'
-import { EpochMs, Issue, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
+import { EpochMs, Issue, CrystallizeTargetRef, SkillRef, SubjectRef, TokenUsage } from './entities.ts'
 
 /**
  * 本地接口契约（daemon ↔ 同源页面）。
@@ -282,6 +282,13 @@ export const SubmitRunRequest = z.object({
    * 而且"恢复谁"是一个可审计的关系，传 id 比传一个裸字符串留下了更多线索。
    */
   resumeFromRunId: z.string().min(1).nullable().optional(),
+  /**
+   * D80（2026-10-19）：`skill-draft` 起草 run 的**沉淀目标**（新建 / 更新哪条）。
+   *
+   * 只在起草 run 上带；随 run 落库（`Run.crystallizeTarget`），供"恢复进行中
+   * 的起草"还原目标（§4.1.1）——草稿当初按哪个目标起草，入库就按哪个目标走。
+   */
+  crystallizeTarget: CrystallizeTargetRef.optional(),
   /**
    * `review` run 的审核对象内容。
    *

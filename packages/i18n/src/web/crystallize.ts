@@ -2,15 +2,27 @@ import type { TextCatalog } from '../text.ts'
 
 /**
  * 聊天/任务沉淀 skill（D80）——`views/Chat.svelte` 与 `views/Tasks.svelte`
- * 的「沉淀成 skill / 优化 skill」按钮 + `CrystallizePanel.svelte` 面板。
+ * 的「沉淀成 skill / 优化 skill」入口 + `components/CrystallizeView.svelte`
+ * 全页流程（设计 §4.1.1 界面改版：任务详情式全页 + 步骤条 + 分节渐进展开）。
  *
- * 流程（设计文档 `docs/design/skill-crystallization.md`）：
- * 选目标（新建必填作用描述 / 更新本次加载的）→ 起草 run → 草稿审阅 → 确认入库。
+ * 流程：选目标（新建必填作用描述 / 更新本次加载的）→ 起草 run → 草稿审阅 →
+ * 确认入库；有进行中的起草时可「继续」恢复。
  *
  * ⚠️ zh / en 两边都要有，占位符要一致（`i18n.test.ts` 逐条守着）。
  */
 export const crystallizeText = {
   'crystallize.title': { zh: '沉淀成 skill', en: 'Crystallize into a skill' },
+
+  // ── 步骤条 ──
+  'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
+  'crystallize.stepDraft': { zh: '起草 run', en: 'Draft run' },
+  'crystallize.stepReview': { zh: '审阅入库', en: 'Review & save' },
+
+  // ── 栏头返回 ──
+  'crystallize.backToChat': { zh: '返回对话', en: 'Back to chat' },
+  'crystallize.backToTask': { zh: '返回任务', en: 'Back to task' },
+
+  // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },
   'crystallize.targetUpdate': { zh: '更新本次加载的 skill', en: 'Update a loaded skill' },
   'crystallize.targetUpdateHint': {
@@ -40,36 +52,72 @@ export const crystallizeText = {
     zh: '选中 = 基于安装版创建你的版本（遮蔽安装版；安装的不会被改动）',
     en: 'Select = create your version from it (shadows the installed one; the installed skill is untouched)',
   },
-  'crystallize.materialSummary': {
-    zh: '素材：{turns} 轮 · {tools} 次工具调用',
-    en: 'Material: {turns} turns · {tools} tool calls',
-  },
   'crystallize.userFeedbackLabel': { zh: '补充反馈（可选）', en: 'Additional feedback (optional)' },
   'crystallize.userFeedbackPlaceholder': {
     zh: '哪里不对 / 该怎么改（任务场景：审核判决会自动带上）',
     en: 'What went wrong / how to fix (task: the review verdict is included automatically)',
   },
   'crystallize.start': { zh: '开始沉淀', en: 'Start' },
-  'crystallize.drafting': { zh: '起草中…（agent 从素材里提炼 SKILL.md，可停止）', en: 'Drafting… (the agent extracts a SKILL.md from the material; can be stopped)' },
+
+  // ── 素材摘要（起草前就可见，§4.1.1） ──
+  'crystallize.materialSection': { zh: '素材摘要', en: 'Material' },
+  'crystallize.materialSummary': {
+    zh: '{turns} 轮 · {tools} 次工具调用',
+    en: '{turns} turns · {tools} tool calls',
+  },
+  'crystallize.scopeConversation': { zh: '对话', en: 'Conversation' },
+  'crystallize.scopeTask': { zh: '任务', en: 'Task' },
+  'crystallize.reviewedYes': { zh: '有审核判决', en: 'Reviewed' },
+  'crystallize.reviewedNo': { zh: '无审核判决', en: 'Not reviewed' },
+  'crystallize.feedbackNo': { zh: '无用户反馈', en: 'No user feedback' },
+  'crystallize.noMaterial': {
+    zh: '这个 run 没有可沉淀的内容——无法开始',
+    en: 'Nothing to crystallize here — cannot start',
+  },
+
+  // ── 恢复进行中的起草（§4.1.1） ──
+  'crystallize.resumeNotice': {
+    zh: '有进行中的起草（{status}）',
+    en: 'An in-progress draft exists ({status})',
+  },
+  'crystallize.resumeContinue': { zh: '继续', en: 'Continue' },
+  'crystallize.resumeNew': { zh: '新起草', en: 'New draft' },
+
+  // ── 起草 run ──
+  'crystallize.draftSection': { zh: '起草 run', en: 'Draft run' },
+  'crystallize.drafting': {
+    zh: 'agent 正从素材里提炼 SKILL.md…（起草不进任务列表，进度都在这页）',
+    en: 'The agent is extracting a SKILL.md from the material… (drafts live here, not in the task list)',
+  },
   'crystallize.draftFailed': { zh: '起草失败', en: 'Drafting failed' },
-  'crystallize.draftRetry': { zh: '重试', en: 'Retry' },
+  'crystallize.draftStopped': { zh: '已停止', en: 'Stopped' },
+  'crystallize.retryDraft': { zh: '重新起草', en: 'Draft again' },
+
+  // ── 草稿审阅 ──
   'crystallize.reviewTitle': { zh: '审阅草稿', en: 'Review draft' },
   'crystallize.slugLabel': { zh: 'slug（kebab-case）', en: 'slug (kebab-case)' },
   'crystallize.nameLabel': { zh: '名称', en: 'Name' },
   'crystallize.descriptionLabel': { zh: 'description（含触发条件）', en: 'description (with trigger condition)' },
   'crystallize.bodyLabel': { zh: '正文（SKILL.md）', en: 'Body (SKILL.md)' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
-  'crystallize.cancel': { zh: '取消', en: 'Cancel' },
-  'crystallize.saved': { zh: '已沉淀 skill {name}', en: 'Skill {name} saved' },
-  'crystallize.savedVersioningOff': {
-    zh: '已沉淀 skill {name}（版本管理未启用：系统无 git，无历史回退）',
-    en: 'Skill {name} saved (versioning off: no git on this system, no history)',
-  },
+  'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {
     zh: '已有你提炼的同名 skill（{slug}）——选「覆盖（进化）」或改名',
     en: 'You already crystallized a skill with this slug ({slug}) — overwrite (evolve) or rename',
   },
   'crystallize.switchToUpdate': { zh: '改为更新它', en: 'Update it instead' },
+
+  // ── 完成态 ──
+  'crystallize.doneTitle': { zh: '已沉淀', en: 'Crystallized' },
+  'crystallize.doneText': {
+    zh: 'skill {name} 已入库（skills-mine）',
+    en: 'Skill {name} saved (skills-mine)',
+  },
+  'crystallize.doneVersioningOn': { zh: '已提交到 git', en: 'Committed to git' },
+  'crystallize.viewSkill': { zh: '查看技能', en: 'View skill' },
+  'crystallize.backToSource': { zh: '返回', en: 'Back' },
+
+  // ── 任务页「优化 skill」按钮的触发前置（Skills 列表也在用下面四个） ──
   'crystallize.taskGated': {
     zh: '该任务没有反馈、也未审核，无法据此优化 skill',
     en: 'No feedback or review on this task — cannot optimize a skill from it',
@@ -83,6 +131,8 @@ export const crystallizeText = {
   'crystallize.groupMine': { zh: '我提炼的', en: 'Mine' },
   'crystallize.groupInstalled': { zh: '安装的', en: 'Installed' },
   'crystallize.mineBadge': { zh: '我提炼的', en: 'mine' },
+
+  // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },
   'crystallize.errDraftRejected': { zh: '起草未受理：{error}', en: 'Draft not accepted: {error}' },
   'crystallize.errEmptyMaterial': { zh: '这个 run 没有可沉淀的内容', en: 'This run has nothing to crystallize' },

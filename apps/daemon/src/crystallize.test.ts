@@ -112,9 +112,71 @@ describe('crystallizeTargets：目标面板信息', () => {
     const mineEntry = targets.loadedSkills.find((s) => s.slug === 'my-flow')
     assert.equal(mineEntry?.source, 'mine', '提炼的来源如实带出（可进化）')
     assert.equal(targets.reviewed, false, '聊天没有审核')
+    assert.equal(targets.materialStats, null, '没有消息 = 素材为空（早失败判据）')
+    assert.equal(targets.activeDraft, null, '还没有起草过')
   })
 
-  test('task：有 completed 审核 run 才算 reviewed', async () => {
+  test('conversation：素材统计起草前可见；activeDraft 按会话全部轮次匹配', async () => {
+    const agent = await seedAgent({ id: 'exec1b' })
+    const conversationId = 'conv-1b'
+    await store.insertConversation({
+      id: conversationId as never,
+      workspaceId: WS,
+      agentId: agent.id,
+      skillIds: [],
+      title: '对话一b',
+      workDir: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastTurnAt: null,
+      turnCount: 2,
+    })
+    await store.insertChatTurn({
+      id: 'turn-b1' as never,
+      workspaceId: WS,
+      conversationId: conversationId as never,
+      seq: 1,
+      userText: '第一步',
+      runId: 'run-conv-b1' as never,
+      createdAt: 1,
+      error: null,
+    })
+    await store.insertChatTurn({
+      id: 'turn-b2' as never,
+      workspaceId: WS,
+      conversationId: conversationId as never,
+      seq: 2,
+      userText: '第二步',
+      runId: 'run-conv-b2' as never,
+      createdAt: 2,
+      error: null,
+    })
+    await seedRun({ id: 'run-conv-b1', agentId: agent.id as string, subject: { type: 'conversation', id: conversationId } })
+    await seedRun({ id: 'run-conv-b2', agentId: agent.id as string, subject: { type: 'conversation', id: conversationId } })
+    await appendMessage('run-conv-b1', { type: 'text', content: '做 A' })
+    await appendMessage('run-conv-b1', { type: 'tool_use', tool: 'Bash' })
+
+    // 草稿从**另一轮**（run-conv-b1）发起——用 run-conv-b2 打开流程页也要能找回
+    const draft = makeRun({
+      id: 'draft-b1',
+      agentId: agent.id as string,
+      kind: 'execute',
+      subject: { type: 'skill-draft', id: 'draft-b1', sourceRunId: 'run-conv-b1' },
+      crystallizeTarget: { kind: 'new' },
+    })
+    await store.insertRun(draft)
+
+    const runB2 = await store.getRun('run-conv-b2' as never)
+    const targets = await crystallizeTargets(store, runB2!)
+    assert.deepEqual(targets.materialStats, { turns: 2, toolCalls: 1 }, '起草前就显示素材统计')
+    assert.deepEqual(
+      targets.activeDraft,
+      { runId: 'draft-b1', status: draft.status, target: { kind: 'new' } },
+      '跨轮次找回进行中的草稿，带目标',
+    )
+  })
+
+  test('task：activeDraft = 最近一条未入库的 skill-draft run（已入库的跳过）', async () => {
     const agent = await seedAgent({ id: 'exec2' })
     const taskRun = await seedRun({
       id: 'run-task',
@@ -124,6 +186,7 @@ describe('crystallizeTargets：目标面板信息', () => {
     const targets1 = await crystallizeTargets(store, taskRun)
     assert.equal(targets1.scope, 'task')
     assert.equal(targets1.reviewed, false, '还没有审核 run')
+    assert.equal(targets1.activeDraft, null, '还没有起草')
 
     // 加一条 completed 的审核 run（subject 指向任务 run）
     const reviewRun = makeRun({
@@ -148,6 +211,63 @@ describe('crystallizeTargets：目标面板信息', () => {
     await store.insertRun(pendingRun)
     const targets3 = await crystallizeTargets(store, taskRun)
     assert.equal(targets3.reviewed, true, '已完成的那条仍然成立')
+  })
+
+  test('task：activeDraft 的恢复语义（起草中 / 已完成待审阅 / 已入库跳过 / 最近优先）', async () => {
+    const agent = await seedAgent({ id: 'exec2b' })
+    const taskRun = await seedRun({
+      id: 'run-task2b',
+      agentId: agent.id as string,
+      subject: { type: 'issue', id: 'issue-2b' },
+    })
+    await appendMessage('run-task2b', { type: 'text', content: '有内容' })
+
+    // ① 起草中（非终态）→ 找回（带起草时落库的目标）
+    const running = makeRun({
+      id: 'draft-running',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'running',
+      subject: { type: 'skill-draft', id: 'draft-running', sourceRunId: 'run-task2b' },
+      crystallizeTarget: { kind: 'new' },
+      queuedAt: 100,
+    })
+    await store.insertRun(running)
+    let t = await crystallizeTargets(store, taskRun)
+    assert.deepEqual(t.activeDraft, { runId: 'draft-running', status: 'running', target: { kind: 'new' } })
+
+    // ② 已入库（crystallized）→ 跳过
+    await store.insertRun({ ...running, crystallized: true })
+    t = await crystallizeTargets(store, taskRun)
+    assert.equal(t.activeDraft, null, '已入库的草稿不恢复')
+
+    // ③ 已完成待审阅 + 更新的起草中 → 取最近（queuedAt 大）
+    const completed = makeRun({
+      id: 'draft-completed',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'completed',
+      subject: { type: 'skill-draft', id: 'draft-completed', sourceRunId: 'run-task2b' },
+      crystallizeTarget: { kind: 'new' },
+      queuedAt: 200,
+    })
+    await store.insertRun(completed)
+    const newer = makeRun({
+      id: 'draft-newer',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'running',
+      subject: { type: 'skill-draft', id: 'draft-newer', sourceRunId: 'run-task2b' },
+      crystallizeTarget: { kind: 'update', skillId: 's1' },
+      queuedAt: 300,
+    })
+    await store.insertRun(newer)
+    t = await crystallizeTargets(store, taskRun)
+    assert.deepEqual(
+      t.activeDraft,
+      { runId: 'draft-newer', status: 'running', target: { kind: 'update', skillId: 's1' } },
+      '取最近一条，目标随行',
+    )
   })
 })
 

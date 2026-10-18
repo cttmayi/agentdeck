@@ -4164,11 +4164,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         skills: [],
         // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
         //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
-        subject: { type: 'skill-draft', id: draftRunId },
+        //   `sourceRunId` = 它从哪条 run 发起（对话 = 那一轮 run，任务 =
+        //   任务执行 run）——"恢复进行中的起草"按它找回这条草稿（§4.1.1）。
+        subject: { type: 'skill-draft', id: draftRunId, sourceRunId: runId },
         prompt,
         limits: { maxTurns: null, timeoutMs: null },
         // 起草 run **绝不自动审**（评审在人——审阅界面是它唯一的大门）。
         reviewerAgentId: null,
+        // 沉淀目标随 run 落库：恢复进行中的起草时按它还原（§4.1.1）。
+        // ⚠️ purpose 不落库——它只影响起草 prompt，提交时用不到。
+        crystallizeTarget:
+          target.kind === 'new' ? { kind: 'new' } : { kind: 'update', skillId: target.skillId },
         // 起草的产出是文本草稿，进 run 的 result；工作目录给它一间专用小屋，
         // 不碰源 run 的目录（草稿不进任何工作目录，设计 §5）。
         workDir: join(workRoot, `skill-draft-${draftRunId}`),
@@ -4347,6 +4353,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
 
       sendJson(res, 201, { skill, versioning })
+
+      // ★ 标记这条起草 run 已入库（`crystallized: true`）——"恢复进行中的
+      //   起草"（targets 的 activeDraft）要跳过已入库的草稿，不然每次重开
+      //   流程页都会把上一条沉淀完的草稿再"继续"一遍（§4.1.1）。
+      //   放在 sendJson 之后：入库成功是唯一事实，git 降级不影响它。
+      await store.insertRun({ ...draftRun, crystallized: true })
       return
     }
 

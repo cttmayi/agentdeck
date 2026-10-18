@@ -16,7 +16,7 @@
  */
 
 import type { Store } from '@agentdeck/domain'
-import type { Agent, Conversation, Run, RunId, Skill } from '@agentdeck/protocol'
+import type { Agent, Conversation, CrystallizeTargetRef, Run, RunId, Skill } from '@agentdeck/protocol'
 
 /** 沉淀目标面板需要的信息（§4.1 第 1 步 + §4.3 触发前置）。 */
 export interface CrystallizeTargets {
@@ -39,6 +39,18 @@ export interface CrystallizeTargets {
   hasUserFeedback: boolean
   /** 素材作用域：conversation = 聊天场景；task = 任务场景（含审核/反馈）。 */
   scope: 'conversation' | 'task'
+  /**
+   * 素材统计（界面改版 §4.1.1：起草前就显示"N 轮 / M 次工具调用"）。
+   * `null` = 素材为空（没有可沉淀的内容）——前端在目标态就禁用 [开始起草]，
+   * **早失败**而不是起草完才发现 400 empty_material。
+   */
+  materialStats: { turns: number; toolCalls: number } | null
+  /**
+   * 该来源**最近一条未入库**的 skill-draft 起草 run（恢复进行中的起草）。
+   * 起草中（非终态）与已完成待审阅都算；`crystallized: true`（已入库）的跳过。
+   * `null` = 没有进行中的起草。
+   */
+  activeDraft: { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null
 }
 
 /** 素材打包结果。 */
@@ -86,12 +98,72 @@ export async function crystallizeTargets(
   }
 
   const loadedSkills = await resolveLoadedSkills(store, agentId, extraSkillIds)
+
+  // ── 素材统计（起草前可见，§4.1.1）──
+  // 与 /draft 同一份打包：空素材 = null（前端据此早失败）。
+  const material = await buildMaterial(store, run)
+  const materialStats =
+    material.text.trim() === ''
+      ? null
+      : { turns: material.stats.turns, toolCalls: material.stats.toolCalls }
+
+  // ── 恢复进行中的起草（§4.1.1）──
+  // 找该来源最近一条**未入库**（crystallized 不是 true）的 skill-draft run。
+  // 口径：任务 = 源 run id 精确匹配；对话 = 会话所有轮次的 runId 都算
+  // （一个会话多条 run，流程页从哪一轮进都可能）。
+  const activeDraft = await findActiveDraft(store, run)
+
   return {
     loadedSkills,
     reviewed,
     hasUserFeedback: false,
     scope,
+    materialStats,
+    activeDraft,
   }
+}
+
+/**
+ * 找该来源最近一条未入库的 skill-draft run（恢复进行中的起草）。
+ *
+ * 匹配口径：
+ *   · 任务（run.subject.type !== 'conversation'）——`subject.sourceRunId === run.id`；
+ *   · 对话——run 是某一轮的 run，会话还有别的轮：先取会话全部轮次的 runId，
+ *     再匹配 `sourceRunId ∈ 那些 runId`。
+ * 排序取 `queuedAt` 最新一条；`crystallized: true`（已入库）的跳过。
+ * 带上起草时落库的沉淀目标（`crystallizeTarget`），前端按它还原目标。
+ */
+async function findActiveDraft(
+  store: Store,
+  run: Run,
+): Promise<{ runId: string; status: Run['status']; target: CrystallizeTargetRef } | null> {
+  const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
+  const drafts = page.items.filter(
+    (r) => r.kind === 'execute' && r.subject.type === 'skill-draft',
+  )
+  if (drafts.length === 0) return null
+
+  // 对话：收集会话所有轮次的 runId（含当前这条）
+  let sourceRunIds: string[]
+  if (run.subject.type === 'conversation') {
+    const turns = await store.listChatTurns(run.subject.id as Conversation['id'])
+    const ids = turns.map((t) => (t.runId ? (t.runId as string) : '')).filter((x) => x !== '')
+    if (!ids.includes(run.id as string)) ids.push(run.id as string)
+    sourceRunIds = ids
+  } else {
+    sourceRunIds = [run.id as string]
+  }
+
+  const matched = drafts
+    .filter((r) => {
+      if (r.crystallized === true) return false
+      const src = r.subject.sourceRunId
+      return src !== undefined && sourceRunIds.includes(src)
+    })
+    .sort((a, b) => b.queuedAt - a.queuedAt)
+  const latest = matched[0]
+  if (!latest || !latest.crystallizeTarget) return null
+  return { runId: latest.id as string, status: latest.status, target: latest.crystallizeTarget }
 }
 
 /**

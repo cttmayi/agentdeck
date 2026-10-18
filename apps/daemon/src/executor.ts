@@ -404,6 +404,11 @@ export class RunExecutor {
       ...(req.debugActions === undefined
         ? {}
         : { debugActions: req.debugActions as Run['debugActions'] }),
+      // ★ D80 起草 run 的沉淀目标（新建 / 更新哪条）：随 run 落库，
+      //   "恢复进行中的起草"按它还原目标（见 `CrystallizeTargetRef`）。
+      ...(req.crystallizeTarget === undefined
+        ? {}
+        : { crystallizeTarget: req.crystallizeTarget as Run['crystallizeTarget'] }),
       // ★ 任务级返工次数（D45）。缺字段 = 不返工（`fail` 直接交给人）。
       //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
       //   所以不需要区分三态，落一个数即可。

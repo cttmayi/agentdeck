@@ -1,8 +1,8 @@
 # 聊天沉淀 skill（chat-to-skill）设计
 
-> 状态：**§8 的 1–6 已实作**（2026-10-18，提交 951417a / 16e8dcd / c5c95d9 / e318641）；
-> **界面改版（§4.1.1 / §8.1 的 7–8）设计已定、未实作**（2026-10-19 使用者定稿：任务详情式
-> 全页替换抽屉 + 素材摘要前置）。
+> 状态：**§8 的 1–9 已实作**（1–6：2026-10-18，提交 951417a / 16e8dcd / c5c95d9 /
+> e318641；7–9：2026-10-19 界面改版——任务详情式全页替换抽屉 + 素材摘要前置 +
+> 沉淀不是任务 + 恢复进行中的起草）。
 > 配套决策记录：`docs/srs/requirements.md` §16 的 **D80**。
 > 本文档回答"聊天里怎么沉淀出（并可进化）可复用 skill"的完整设计；实现范围见 §8。
 
@@ -211,10 +211,15 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 4. **冲突/遮蔽交互不变**：新建撞提炼根 slug → 审阅分节顶部 notice + [改成更新它（进化）]；
    更新安装的 → 同 slug 落你的版本并遮蔽（§1.1）。
 
-**后端小改动（一处）**
+**后端小改动（界面改版实作，2026-10-19）**
 - `GET /api/crystallize/targets` 增加 `materialStats: { turns, toolCalls } | null`：
   buildMaterial 是现成读操作，空素材返回 `null`，前端在目标态就禁用 [开始起草] 并提示
-  （**早失败**，而不是起草完才发现 400 empty_material）。draft / commit 接口不动。
+  （**早失败**，而不是起草完才发现 400 empty_material）。
+- `POST /api/crystallize/draft`：起草 run 带 `crystallizeTarget`（新建 / 更新哪条）随 run
+  落库——恢复进行中的起草进审阅/入库时按它还原目标（commit 需要目标：更新 = 复用原 id
+  进化；不能凭用户这次又选啥猜）。`purpose` 不落库（只影响起草 prompt）。
+- `POST /api/crystallize/commit`：入库成功后把起草 run 标 `crystallized: true`——targets 的
+  `activeDraft` 据此跳过已入库的草稿（否则每次重开都会把沉淀完的草稿再"继续"一遍）。
 
 **归属：沉淀不是任务（2026-10-19 使用者定）**
 - 起草 run 仍是 **run**（`kind: execute`、`subject: {type: 'skill-draft'}`），**不挂 issue**、
@@ -228,13 +233,15 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 - 修法：
   1. 起草 run 上**记 source**（`subject.sourceRunId` = 源 run id）——现在 subject 里没有
      这条链接，加上是恢复的前提。
-  2. `GET /api/crystallize/targets` 顺带返回 `activeDraft: { runId, status } | null` =
-     该源 run 最近的、**未入库**的 skill-draft run（起草中 / 已完成待审阅都算）。
+  2. `GET /api/crystallize/targets` 顺带返回 `activeDraft: { runId, status, target } | null` =
+     该源 run 最近的、**未入库**的 skill-draft run（起草中 / 已完成待审阅都算；
+     `target` = 起草时落库的沉淀目标，恢复时按它还原）。
   3. 流程页打开时：有 `activeDraft` → 顶部提示"有进行中的起草（起草中/待审阅）"，
      「继续」挂回那条（RunLog 接着看、审阅接续），或「新起草」（放弃旧的）；
      没有 → 正常从目标态开始。
 
-**状态**：设计已定（2026-10-19），**未实作**——列入 §8 实现范围。
+**状态**：设计已定（2026-10-19），**已实作**（§8.1 的 9，2026-10-19）——含上面提到的
+随 run 落库沉淀目标与对话按全部轮次匹配两处实作补充。
 
 #### 4.1.2 未来扩展：沉淀 Agent（同流程页，产出类型维度，2026-10-19 使用者提出）
 
@@ -443,7 +450,7 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
 **被"沉淀目标面板手动选更新"取代**（§4.1 第 1 步，2026-10-18）——人工选目标比自动建议
 更可控，可二期。
 
-### 8.1 界面改版（2026-10-19 使用者定稿，未实作）
+### 8.1 界面改版（2026-10-19 使用者定稿，已实作）
 
 - **7. 界面改版：任务详情式全页替换抽屉**（§4.1.1）——点按钮后右主区切换成沉淀流程页
   （MainArea 壳：返回 + 标题 + 来源副题 + 随流程变的栏头操作），不再是抽屉；
@@ -453,10 +460,13 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
   空素材在目标态就禁用 [开始起草]，早失败）。draft / commit 接口不动。
 - **9. 沉淀不是任务 + 恢复进行中的起草**（§4.1.1）——起草 run 不挂 issue、不进任务列表；
   起草 run 记 `subject.sourceRunId`，targets 返回 `activeDraft`，重开流程页「继续」挂回
-  那条（不重复起草）。
+  那条（不重复起草）。实作补充：起草时把沉淀目标（`crystallizeTarget`：新建 / 更新哪条）
+  随 run 落库，恢复进审阅/入库时按它还原目标——commit 需要目标（更新 = 复用原 id 进化），
+  不能凭用户这次又选啥猜；对话场景 activeDraft 按**会话全部轮次的 runId** 匹配（一个
+  会话多条 run，从哪一轮进流程页都找得回）。
 
 > 1–6 已实作（2026-10-18，提交 951417a / 16e8dcd / c5c95d9 + 后续 e318641 修正安装遮蔽）；
-> 7–9 设计已定、**未实作**（2026-10-19）。
+> 7–9 已实作（2026-10-19，界面改版提交）。
 
 ## 9. 开放问题（本次未定）
 

@@ -3,7 +3,7 @@
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
-  import CrystallizePanel from '../components/CrystallizePanel.svelte'
+  import CrystallizeView from '../components/CrystallizeView.svelte'
   import {
     api,
     newRunId,
@@ -1045,6 +1045,17 @@
          建任务 / 任务详情 / 没选中 都走同一个壳；栏头（返回+标题+副题）由
          MainArea 的结构化 props 渲染——从此详情栏头固定在上方、不再跟着滚走
          （与聊天的 chat-head 同一形态，这正是统一的意义）。 -->
+    {#if optimizeOpen}
+      <!-- D80 沉淀成 skill（设计 §4.1.1 界面改版）：任务详情式**全页**流程，
+           替换任务详情主区；栏头返回 = 回任务。素材带审核判决 + 用户反馈。 -->
+      <CrystallizeView
+        runId={activeRun?.runId ?? ''}
+        sourceLabel={selected?.title ?? ''}
+        backLabel={$t('crystallize.backToTask')}
+        onback={() => (optimizeOpen = false)}
+        ondone={() => void loadSkills()}
+      />
+    {:else}
     <MainArea
       empty={!$creating && !selected}
       emptyTitle={$t('tasks.pickOneTitle')}
@@ -1535,15 +1546,8 @@
         {/if}
       {/snippet}
     </MainArea>
+    {/if}
   {/if}
-
-  <!-- D80：任务「优化 skill」面板（素材带审核判决 + 用户反馈，同一套三态） -->
-  <CrystallizePanel
-    open={optimizeOpen}
-    runId={activeRun?.runId ?? ''}
-    onclose={() => (optimizeOpen = false)}
-    ondone={() => void loadSkills()}
-  />
 </div>
 
 <style>
