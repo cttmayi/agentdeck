@@ -105,6 +105,10 @@ my-skill/
   它们装完之后就是一条普通技能，正文在 `~/.agentdeck/skills/<slug>/`，与其它来源完全一致。
   （改动前 `localdir:` 是唯一的例外、正文留在索引记录里；那条例外随"本地技能目录改成**显式
   安装**"撤掉了，见 D73。）
+- ✅ **唯一的例外是"聊天沉淀"（`mine:`，设计未实现，见 D80）**：自己提炼的 skill 落
+  **另一个根** `~/.agentdeck/skills-mine/<slug>/`（git 化 + 平台自动 commit），与安装根
+  **物理分离**——安装的重装覆盖语义不能碰自己的沉淀资产；同 slug 冲突时提炼的优先
+  （详见 `docs/design/skill-crystallization.md` §1.1）。
 
 ### ③ 跑任务时：注入到工作目录
 
