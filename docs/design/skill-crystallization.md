@@ -85,7 +85,14 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 
 **点击后：先选沉淀目标（新建 or 更新本次对话加载的 skill），再起草**
 1. 点按钮 → 弹出「**沉淀目标**」选择面板：
-   - 「**新建 skill**」——起草全新技能（素材 = 整段会话）。
+   - 「**新建 skill**」——起草全新技能（素材 = 整段会话）。选中后出现「**作用描述**」
+     输入框（2026-10-18 使用者补——**担心 agent 自己总结会偏离**）：
+     - **必填**，placeholder 引导："这个 skill 是做什么的？什么时候用？一句话或几行
+       都行"（触发条件导向，如"用来审核 xx 类报告的步骤"）。
+     - **双重用途**：① 进起草 run 的 prompt，锚定提炼方向（防抓错重点/步骤幻觉）；
+       ② **直接作为草稿 frontmatter `description` 的基底**——"这个 skill 干什么用"
+       这一层是用户自己的话、不可能偏（渐进式披露第一层，§4.4），agent 只负责补正文
+       （When to Use / Procedure / Pitfalls / Verification），审阅时可微调措辞。
    - 「**更新本次对话加载的 skill**」（2026-10-18 两次修正定稿）——列表列出**当前对话
      实际注入的 skill**（不是全库）：
      - **为什么只列被加载的**：对话的前提往往是"**某个 skill 不好用，这次对话就是在矫正
@@ -93,7 +100,9 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
        当前对话没挂 skill（注入为空）时此选项**置灰**，提示"本次对话没有加载 skill，
        只能新建"。
      - **提炼的**（`skills-mine`，标注"你的"）——选中 = 进化（§7）：素材 = 整段会话 +
-       该 skill 现有 SKILL.md，起草"修订版"，确认后覆盖 + git commit。
+       该 skill 现有 SKILL.md，起草"修订版"，确认后覆盖 + git commit。**作用描述可选**
+       （有旧 SKILL.md 作基线 + 对话本身在矫正它，偏离风险小；填了同样进 prompt + 作为
+       description 修订基底）。
      - **安装的**（`~/.agentdeck/skills/`，标注"安装的"）——选中 = 基于它创建你的版本：
        素材 = 整段会话 + 安装版 SKILL.md，确认后存为 `skills-mine/<slug>/`
        （`source: 'mine'`）并**遮蔽安装版**（§1.1），安装根原文件不动。
@@ -153,11 +162,13 @@ dsh-skill-evolution 的信号模型）记录在案，等考虑清楚再捡起：
 平台起一个**专门的 run（kind 建议 `skill-draft`）**，runtime 用当前 workspace 默认的
 claude/codex，复用现有执行管道（第一句话投递、日志、审核收口——全部现成，零新机制）。
 
-prompt = 三块拼装：
-1. **沉淀素材**（§4.1 打包的消息 + 工具调用 + 结果）
-2. **SKILL.md 模板指引**（§4.4 的结构约束）
-3. **现有 skill 列表**（name + description）——让起草者判断是否该 `FOLD_INTO`（合并进已有
-   skill）而不是新建重复项
+prompt = 拼装：
+1. **沉淀素材**（§4.1 打包的消息 + 工具调用 + 结果）。
+2. **用户作用描述**（§4.1 第 1 步，新建必填 / 更新可选）——锚定提炼方向；草稿的
+   frontmatter `description` 以它为基底（用户的话，防偏离）。
+3. **SKILL.md 模板指引**（§4.4 的结构约束）。
+4. **现有 skill 列表**（name + description）——让起草者判断是否该 `FOLD_INTO`（合并进已有
+   skill）而不是新建重复项。
 
 产出 = SKILL.md 草稿（文本，落成一个临时候选文件，不进任何工作目录）。
 
