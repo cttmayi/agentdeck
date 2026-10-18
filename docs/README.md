@@ -50,6 +50,7 @@
 | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) | **工作流智能体组：它是怎么工作的**（当前实现）—— 组里装了什么、三步（执行 → 审核 → 行动）、建任务时怎么摊开成普通配置、判决怎么分流、**返工闭环**（交回同一执行者原地改）、行动与固定参数、几道边界、界面看到什么 | — |
 | [`./runtime/runtime-framework.md`](./runtime/runtime-framework.md) | **Runtime 抽象框架（当前实现）** —— AgentBackend 公共契约与 RuntimeDescriptor 数据表（都贴真代码）、claude 与 codex 两行对照、daemon 公共机器路径表、差异在哪、加第三个 runtime 的清单 | — |
 | [`runtime/codex-runtime-design.md`](runtime/codex-runtime-design.md) | **Codex 支持设计（app-server 形式）** —— 为什么用 app-server 而不是 `codex exec`、事实核查、`kind` 契约扩展、per-run 进程模型、包结构、描述表取值、未验证项清单（✅ 已接入真实 codex 0.144.0-alpha.4 与 0.157.1，证据等级 verified；实测与文档差异清单） | v2 |
+| [`./design/skill-crystallization.md`](./design/skill-crystallization.md) | **聊天沉淀 skill 设计（chat-to-skill，已设计未实现）** —— 在 conversation 里把"这段做法"提炼成 SKILL.md 入库、可进化（覆盖 + git 版本管理）；触发双层（用户主动按钮 + 信号建议）、起草 run + 不结晶清单、审阅后入库、git 化自动 commit；调研依据（skilldistill / dsh-skill-evolution / skill-miner / Anthropic 官方）与实现范围六项 | 设计稿（D80） |
 
 > 决策记录见 `./srs/requirements.md` §16（**D1–D75**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
 > 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
@@ -141,6 +142,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | **本地技能目录改成显式安装**（2026-10） | 已做完：原来勾选目录 ⇒ 每次读列表自动对账读入；现在改成安装面板的第四个页签「从本地安装」——扫内置的那几个目录（claude / codex / cursor / agents），**逐条装**，装完落 `~/.agentdeck/skills/<slug>/`、带 `localdir:<根目录>` 标记。`Workspace.localSkillDirs` 与 `PUT /api/skills/local-dirs` 删掉，`FileStore` 的 `localdir:` 例外也撤了 | `./srs/requirements.md` §16 的 **D73**；`./reference/skills.md` §6；`./design/architecture.md` §5.1 / §7.2 |
 | **本地清单按类别分组**（2026-10） | 已做完：安装面板「本地清单」页签改成**按类别分组、默认折叠**（点类别标题展开）；清单内容从 12 条扩到 **28 条**——使用者给的一批里逐条**联网核实**，能装的才写进 `apps/daemon/catalog/skills.json`（6 个合集仓库指到具体子目录；失效/非 GitHub/无 SKILL.md 的不写，另附说明） | `./srs/requirements.md` §16 的 **D74**；`./reference/skills.md` §3 |
 | **Node 22 兼容**（2026-10） | 已做完：入口守卫 `scripts/node-entry.mjs` 从"两档"改成**三档**——22.6–22.17 / 23.0–23.5 **自动补 `--experimental-strip-types` 重跑一层**（不再报 `ERR_UNKNOWN_FILE_EXTENSION`），`< 22.6` 才劝升级；`engines` 放到 `>=22.6`，`pnpm run test` 也走这层（测试的 `.ts` 夹具靠 `NODE_OPTIONS` 继承 flag）。顺带修两处真机上撞到的：`node:sqlite` 的 `?N` 语句在 22.x **只认按名字绑**、超时等待的 grace 计时器**不能 `unref`**（22 的 test runner 会把"循环空了的挂起测试"取消掉）。真机在 **Node 22.17.0** 上跑通 `pnpm run daemon` 与全量测试 | `./srs/requirements.md` §16 的 **D75**；`./reference/windows-compat.md` 的 B1「补记」 |
+| **聊天沉淀 skill（chat-to-skill）**（2026-10） | 📐 **设计已定，未实现**：conversation 里把"这段做法"提炼成 SKILL.md 入库、可进化（覆盖 + git 版本管理）。**要开做时从实现范围六项的最小闭环（1–5）切入**（消息级按钮+起点选中 / 素材打包 / 起草 run / 草稿审阅界面 / git 化+自动 commit）；信号建议与 FOLD_INTO 二期。**当前 skills 根目录不是 git 仓库、全局 git 身份已配置**（git 化的前置条件就绪） | `./design/skill-crystallization.md`；`./srs/requirements.md` §16 的 **D80** |
 
 > ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
 > （`git ls-remote origin HEAD` 成功返回 `2954eff`）。所以推送**可能**做得了（本地 `main`
