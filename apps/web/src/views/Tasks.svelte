@@ -19,7 +19,7 @@
     import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { leaveCreate } from '../lib/leave-create.ts'
-  import { creating, goCreate, go, selectedIssueId, showToast } from '../lib/view.ts'
+  import { creating, crystallize, go, goCreate, goCrystallize, selectedIssueId, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import { finalResultText } from '../lib/final-output.ts'
@@ -221,9 +221,31 @@
     localStorage.setItem(VIEW_KEY, 'list')
   }
 
+  /**
+   * 流程页源 run 的 subject 是 `{type:'issue', id}`——据此找回来源任务并选中。
+   *
+   * ⚠️ 流程页只在 `mode === 'list'` 的右栏渲染，但**不强制**拨回列表（与建任务
+   *    不同）：切到看板 = 流程页暂时收起来，地址还挂在 crystallize 上，切回列表
+   *    就回来了——流程页是"一页"，不该因为看了眼其他视图就丢。
+   */
+  async function resolveFlowTask(runId: string): Promise<void> {
+    try {
+      const run = await api<{ subject: { type: string; id?: string } }>(`/api/runs/${runId}`)
+      if (run.subject?.type === 'issue' && run.subject.id) {
+        selectedIssueId.set(run.subject.id)
+      }
+    } catch {
+      // run 已不存在：流程页照常显示，只是列表没有可高亮的那一条。
+    }
+  }
+
   /** 点列表里的一条：如果右栏正开着表单，先按上面的规矩问一句。 */
   async function pickIssue(id: string): Promise<void> {
     if ($creating && !(await leaveCreate())) return
+    // 点另一条任务时关掉沉淀流程页：它挂的是**上一条**任务的 runId，留着会显示
+    // 别人的流程（D80 界面改版后流程页替换右主区，列表仍可点）。关 = 回普通
+    // 任务地址——地址是唯一出处，不能只改组件状态。
+    if ($crystallize !== null) go('tasks')
     selectedIssueId.set(id)
   }
 
@@ -323,13 +345,21 @@
 
   let activeRun: RunSummary | null = null
   // ── D80：任务「优化 skill」的置灰门（有用户反馈 或 审核过）──
-  let optimizeOpen = false
   let optimizeGate: { reviewed: boolean; hasUserFeedback: boolean } | null = null
   let optimizeGateRunId = ''
   $: canOptimizeSkill =
     activeIsTerminal &&
     optimizeGate !== null &&
     (optimizeGate.reviewed || optimizeGate.hasUserFeedback)
+
+  /**
+   * 带着流程页地址（`#/tasks/crystallize/<runId>`）进来（切页回来 / 刷新 /
+   * 分享链接）且还没选中任务：把来源任务选上——返回后直接回到那条任务的详情
+   * （设计 §4.1.1「返回键回到来源视图」）。
+   */
+  $: if ($crystallize !== null && $selectedIssueId === null) {
+    void resolveFlowTask($crystallize.runId)
+  }
 
   /** run 终态后取一次置灰门（轻量 GET；开面板时会再取一次新鲜的）。 */
   async function refreshOptimizeGate(runId: string): Promise<void> {
@@ -1045,14 +1075,16 @@
          建任务 / 任务详情 / 没选中 都走同一个壳；栏头（返回+标题+副题）由
          MainArea 的结构化 props 渲染——从此详情栏头固定在上方、不再跟着滚走
          （与聊天的 chat-head 同一形态，这正是统一的意义）。 -->
-    {#if optimizeOpen}
+    {#if $crystallize !== null}
       <!-- D80 沉淀成 skill（设计 §4.1.1 界面改版）：任务详情式**全页**流程，
-           替换任务详情主区；栏头返回 = 回任务。素材带审核判决 + 用户反馈。 -->
+           替换任务详情主区；栏头返回 = 回任务。素材带审核判决 + 用户反馈。
+           流程页是一条地址（`#/tasks/crystallize/<runId>`）：切页回来 / 刷新 /
+           分享链接都还在，返回 = 回普通任务地址（选中任务仍在）。 -->
       <CrystallizeView
-        runId={activeRun?.runId ?? ''}
+        runId={$crystallize.runId}
         sourceLabel={selected?.title ?? ''}
         backLabel={$t('crystallize.backToTask')}
-        onback={() => (optimizeOpen = false)}
+        onback={() => go('tasks')}
         ondone={() => void loadSkills()}
       />
     {:else}
@@ -1091,7 +1123,7 @@
             class="ghost"
             disabled={!canOptimizeSkill}
             title={canOptimizeSkill ? '' : $t('crystallize.taskGated')}
-            onclick={() => (optimizeOpen = true)}
+            onclick={() => goCrystallize('tasks', activeRun?.runId ?? '')}
           >
             {$t('crystallize.optimize')}
           </button>

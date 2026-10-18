@@ -12,13 +12,13 @@ import { CREATE_HASH, VIEWS, hashFor, parseHash } from './route.ts'
  */
 describe('parseHash', () => {
   it('★ `#/tasks/new` 是建任务那一栏的正规地址', () => {
-    assert.deepEqual(parseHash('#/tasks/new'), { view: 'tasks', creating: true })
+    assert.deepEqual(parseHash('#/tasks/new'), { view: 'tasks', creating: true, crystallize: null })
   })
 
   it('★★ `#/new` 是老地址，仍然直达同一个状态（书签不作废）', () => {
     // D58 之前「新建任务」是一整页、侧栏一项，`#/new` 被写进了文档与探针。
     // 改地址时把它丢掉的表现是"那条链接落到列表上"，而没有人会收到任何提示。
-    assert.deepEqual(parseHash('#/new'), { view: 'tasks', creating: true })
+    assert.deepEqual(parseHash('#/new'), { view: 'tasks', creating: true, crystallize: null })
   })
 
   it('★ 两个地址指向**同一个**状态（不是两个视图）', () => {
@@ -26,12 +26,28 @@ describe('parseHash', () => {
   })
 
   it('`#/tasks` 只是任务页，不带建模式（否则"看"和"建"永远说不清）', () => {
-    assert.deepEqual(parseHash('#/tasks'), { view: 'tasks', creating: false })
+    assert.deepEqual(parseHash('#/tasks'), { view: 'tasks', creating: false, crystallize: null })
+  })
+
+  it('★ 沉淀流程页：`#/chat/crystallize/<runId>` 落在聊天视图、带 runId', () => {
+    assert.deepEqual(parseHash('#/chat/crystallize/01M57WHC'), {
+      view: 'chat',
+      creating: false,
+      crystallize: { runId: '01M57WHC' },
+    })
+  })
+
+  it('★ 沉淀流程页：任务侧同样认得', () => {
+    assert.deepEqual(parseHash('#/tasks/crystallize/01M57WHC'), {
+      view: 'tasks',
+      creating: false,
+      crystallize: { runId: '01M57WHC' },
+    })
   })
 
   it('★★ 未知地址回落「任务」（D58 改的方向：合并之后任务才是主场）', () => {
     for (const bogus of ['', '#', '#/', '#/nope', '#/newtask', '#/tasks/board']) {
-      assert.deepEqual(parseHash(bogus), { view: 'tasks', creating: false }, bogus)
+      assert.deepEqual(parseHash(bogus), { view: 'tasks', creating: false, crystallize: null }, bogus)
     }
   })
 
@@ -48,12 +64,20 @@ describe('hashFor', () => {
   it('★ 与 parseHash 是一对：逐项来回都还原得回来', () => {
     for (const v of VIEWS) {
       const round = parseHash(hashFor(v))
-      assert.deepEqual(round, { view: v, creating: false }, v)
+      assert.deepEqual(round, { view: v, creating: false, crystallize: null }, v)
     }
     assert.deepEqual(parseHash(hashFor('tasks', { creating: true })), {
       view: 'tasks',
       creating: true,
+      crystallize: null,
     })
+  })
+
+  it('★ 沉淀流程页地址与 parseHash 是一对（刷新还在、能分享链接的那一页）', () => {
+    for (const v of ['chat', 'tasks'] as const) {
+      const round = parseHash(hashFor(v, { crystallize: { runId: '01M57WHC' } }))
+      assert.deepEqual(round, { view: v, creating: false, crystallize: { runId: '01M57WHC' } }, v)
+    }
   })
 
   it('建模式只吐正规那个地址（老地址只进不出）', () => {
@@ -62,5 +86,10 @@ describe('hashFor', () => {
 
   it('★ `creating` 只对「任务」成立（别的视图没有这个状态）', () => {
     assert.equal(hashFor('agents', { creating: true }), '#/agents')
+  })
+
+  it('★ `crystallize` 只对「聊天 / 任务」成立（别的视图没有这个状态）', () => {
+    assert.equal(hashFor('agents', { crystallize: { runId: 'X' } }), '#/agents')
+    assert.equal(hashFor('skills', { crystallize: { runId: 'X' } }), '#/skills')
   })
 })

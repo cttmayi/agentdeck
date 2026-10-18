@@ -484,10 +484,19 @@
   {#snippet body()}
     <div class="crystal-flow">
       <!-- ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ── -->
-      <ol class="crystal-steps">
-        <li class={stepStates[0]}><span class="step-no">{stepStates[0] === 'done' ? '✓' : 1}</span>{$t('crystallize.stepTarget')}</li>
-        <li class={stepStates[1]}><span class="step-no">{stepStates[1] === 'done' ? '✓' : 2}</span>{$t('crystallize.stepDraft')}</li>
-        <li class={stepStates[2]}><span class="step-no">{stepStates[2] === 'done' ? '✓' : 3}</span>{$t('crystallize.stepReview')}</li>
+      <ol class="crystal-steps" aria-label="流程步骤">
+        <li class={stepStates[0]}>
+          <span class="step-no" aria-hidden="true">{stepStates[0] === 'done' ? '✓' : 1}</span>
+          <span class="step-label">{$t('crystallize.stepTarget')}</span>
+        </li>
+        <li class={stepStates[1]}>
+          <span class="step-no" aria-hidden="true">{stepStates[1] === 'done' ? '✓' : 2}</span>
+          <span class="step-label">{$t('crystallize.stepDraft')}</span>
+        </li>
+        <li class={stepStates[2]}>
+          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 3}</span>
+          <span class="step-label">{$t('crystallize.stepReview')}</span>
+        </li>
       </ol>
 
       {#if error && targets === null}
@@ -512,33 +521,36 @@
 
       <!-- ── 素材摘要：起草前就可见（§4.1.1），空素材 = 无法开始 ── -->
       <section class="drawer-section">
-        <h3>{$t('crystallize.materialSection')}</h3>
-        {#if loading}
-          <div class="skeleton" style="height:1.1rem"></div>
-        {:else if targets}
-          {#if targets.materialStats}
-            <p class="faint">
-              {$t('crystallize.materialSummary', {
-                turns: String(targets.materialStats.turns),
-                tools: String(targets.materialStats.toolCalls),
-              })}
-              · {targets.scope === 'conversation'
-                ? $t('crystallize.scopeConversation')
-                : $t('crystallize.scopeTask')}
-              {#if targets.scope === 'task'}
-                · {targets.reviewed ? $t('crystallize.reviewedYes') : $t('crystallize.reviewedNo')}
-                · {$t('crystallize.feedbackNo')}
-              {/if}
-            </p>
-          {:else}
-            <div class="notice bad small">{ $t('crystallize.noMaterial') }</div>
+        <h3><span>{$t('crystallize.materialSection')}</span></h3>
+        <div class="section-body">
+          {#if loading}
+            <div class="skeleton" style="height:1.1rem"></div>
+          {:else if targets}
+            {#if targets.materialStats}
+              <p class="faint">
+                {$t('crystallize.materialSummary', {
+                  turns: String(targets.materialStats.turns),
+                  tools: String(targets.materialStats.toolCalls),
+                })}
+                · {targets.scope === 'conversation'
+                  ? $t('crystallize.scopeConversation')
+                  : $t('crystallize.scopeTask')}
+                {#if targets.scope === 'task'}
+                  · {targets.reviewed ? $t('crystallize.reviewedYes') : $t('crystallize.reviewedNo')}
+                  · {$t('crystallize.feedbackNo')}
+                {/if}
+              </p>
+            {:else}
+              <div class="notice bad small">{ $t('crystallize.noMaterial') }</div>
+            {/if}
           {/if}
-        {/if}
+        </div>
       </section>
 
       <!-- ── 沉淀目标：目标态可编辑；起草后收成只读摘要 ── -->
       <section class="drawer-section">
-        <h3>{$t('crystallize.stepTarget')}</h3>
+        <h3><span>{$t('crystallize.stepTarget')}</span></h3>
+        <div class="section-body">
         {#if step === 'target'}
           {#if targets === null}
             <div class="skeleton" style="height:1.1rem"></div>
@@ -632,30 +644,36 @@
             {/if}
           </p>
         {/if}
+        </div>
       </section>
 
       <!-- ── 起草 run：日志常驻（审阅时也看得见）；失败/停止 = 失败态 + 重新起草 ── -->
       {#if draftRunId !== '' && step !== 'done'}
         <section class="drawer-section">
           <h3>
-            {$t('crystallize.draftSection')} · run {runShort}…
-            {#if draftStatus}
-              <span class="badge {draftStatus === 'completed' ? 'done' : draftStatus === 'cancelled' ? 'cancelled' : 'failed'}">
-                {statusLabel(draftStatus)}
-              </span>
-            {/if}
+            <span>{$t('crystallize.draftSection')}</span>
+            <span class="section-meta">
+              run {runShort}…
+              {#if draftStatus}
+                <span class="badge {draftStatus === 'completed' ? 'done' : draftStatus === 'cancelled' ? 'cancelled' : 'failed'}">
+                  {statusLabel(draftStatus)}
+                </span>
+              {/if}
+            </span>
           </h3>
-          {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-            <div class="notice bad small">
-              {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-              {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
-              <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+          <div class="section-body">
+            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
+              <div class="notice bad small">
+                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
+                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
+                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+              </div>
+            {:else}
+              <p class="faint small">{$t('crystallize.drafting')}</p>
+            {/if}
+            <div class="log-box">
+              <RunLog runId={draftRunId} onterminal={(s) => void onDraftTerminal(s)} />
             </div>
-          {:else}
-            <p class="faint small">{$t('crystallize.drafting')}</p>
-          {/if}
-          <div class="log-box">
-            <RunLog runId={draftRunId} onterminal={(s) => void onDraftTerminal(s)} />
           </div>
         </section>
       {/if}
@@ -663,41 +681,43 @@
       <!-- ── 草稿审阅 ── -->
       {#if step === 'review'}
         <section class="drawer-section">
-          <h3>{$t('crystallize.reviewTitle')}</h3>
-          {#if clash}
-            <div class="notice">
-              {error}
-              <button class="ghost small" onclick={() => void switchToUpdate()}>
-                {$t('crystallize.switchToUpdate')}
-              </button>
+          <h3><span>{$t('crystallize.reviewTitle')}</span></h3>
+          <div class="section-body">
+            {#if clash}
+              <div class="notice">
+                {error}
+                <button class="ghost small" onclick={() => void switchToUpdate()}>
+                  {$t('crystallize.switchToUpdate')}
+                </button>
+              </div>
+            {:else if error}
+              <div class="notice bad">{error}</div>
+            {/if}
+
+            <div class="grid-2">
+              <label class="field">
+                <span class="faint small">{$t('crystallize.slugLabel')}</span>
+                <input bind:value={slug} autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="faint small">{$t('crystallize.nameLabel')}</span>
+                <input bind:value={name} autocomplete="off" />
+              </label>
             </div>
-          {:else if error}
-            <div class="notice bad">{error}</div>
-          {/if}
+            <label class="field">
+              <span class="faint small">{$t('crystallize.descriptionLabel')}</span>
+              <textarea bind:value={description} rows="2"></textarea>
+            </label>
+            <label class="field">
+              <span class="faint small">{$t('crystallize.bodyLabel')}</span>
+              <textarea bind:value={skillBody} rows="14" class="mono"></textarea>
+            </label>
 
-          <div class="grid-2">
-            <label class="field">
-              <span class="faint small">{$t('crystallize.slugLabel')}</span>
-              <input bind:value={slug} autocomplete="off" />
-            </label>
-            <label class="field">
-              <span class="faint small">{$t('crystallize.nameLabel')}</span>
-              <input bind:value={name} autocomplete="off" />
-            </label>
+            <details>
+              <summary class="faint small">{$t('crystallize.reviewTitle')} · {$t('crystallize.bodyLabel')}</summary>
+              <div class="preview markdown">{@html renderMarkdown(skillBody)}</div>
+            </details>
           </div>
-          <label class="field">
-            <span class="faint small">{$t('crystallize.descriptionLabel')}</span>
-            <textarea bind:value={description} rows="2"></textarea>
-          </label>
-          <label class="field">
-            <span class="faint small">{$t('crystallize.bodyLabel')}</span>
-            <textarea bind:value={skillBody} rows="14" class="mono"></textarea>
-          </label>
-
-          <details>
-            <summary class="faint small">{$t('crystallize.reviewTitle')} · {$t('crystallize.bodyLabel')}</summary>
-            <div class="preview markdown">{@html renderMarkdown(skillBody)}</div>
-          </details>
         </section>
       {/if}
 
@@ -723,55 +743,118 @@
   .crystal-flow {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-4);
+    gap: var(--sp-5);
     max-width: 56rem;
   }
 
-  /* ══════════ 步骤条 ══════════ */
+  /* ══════════ 步骤条：圆点 + 连线（走过 = 着强调色；当前步高亮；完成打勾） ══════════ */
   .crystal-steps {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2);
+    align-items: center;
     list-style: none;
     margin: 0;
     padding: 0;
     font-size: var(--fs-sm);
   }
   .crystal-steps li {
+    flex: 1;
     display: flex;
     align-items: center;
-    gap: var(--sp-1);
+    gap: var(--sp-2);
+    min-width: 0;
     color: var(--text-faint);
   }
+  /* 步与步之间的连线。只有"上一档已走完"才着强调色（走过的路）——当前步还没走完，
+     它到下一步的那一段仍是虚的（与"建任务三步链"那套同一个语义）。 */
   .crystal-steps li + li::before {
-    content: '›';
-    color: var(--text-faint);
-    opacity: 0.6;
-    margin-right: var(--sp-1);
+    content: '';
+    flex: 1;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--line);
+    margin-left: var(--sp-1);
+    margin-right: var(--sp-3);
+  }
+  .crystal-steps li.done + li::before {
+    background: var(--accent);
   }
   .step-no {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
+    width: 1.6rem;
+    height: 1.6rem;
     border-radius: 50%;
-    border: 1px solid var(--line-strong);
+    border: 1.5px solid var(--line-strong);
     font-size: 0.8em;
+    font-weight: 600;
+    flex-shrink: 0;
   }
-  .crystal-steps li.current { color: var(--accent); }
-  .crystal-steps li.current .step-no { border-color: var(--accent); color: var(--accent); }
-  .crystal-steps li.done { color: var(--status-done); }
+  .step-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .crystal-steps li.current {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .crystal-steps li.current .step-no {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .crystal-steps li.done {
+    color: var(--status-done);
+  }
   .crystal-steps li.done .step-no {
     background: var(--status-done);
     border-color: var(--status-done);
     color: var(--bg);
   }
-  .crystal-steps li.bad { color: var(--status-blocked); }
+  .crystal-steps li.bad {
+    color: var(--status-blocked);
+  }
   .crystal-steps li.bad .step-no {
     background: var(--status-blocked);
     border-color: var(--status-blocked);
     color: var(--bg);
+  }
+
+  /* ══════════ 分节卡片：栏头行（标题 + 右侧状态）+ 正文块 ══════════ */
+  .drawer-section {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .drawer-section > h3 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin: 0;
+    padding: var(--sp-2) var(--sp-4);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 1px solid var(--line);
+    line-height: 1.6;
+  }
+  .section-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-weight: 400;
+    color: var(--text-faint);
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .section-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
   }
 
   /* ══════════ 恢复提示（继续 / 新起草） ══════════ */
@@ -781,6 +864,10 @@
     justify-content: space-between;
     gap: var(--sp-3);
     flex-wrap: wrap;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: var(--sp-3) var(--sp-4);
   }
   .resume-text {
     display: flex;
@@ -811,7 +898,7 @@
     border-top: 1px solid var(--line);
   }
   .radio-row:hover {
-    background: var(--bg);
+    background: var(--surface-hover);
   }
   .radio-row:has(input:checked) {
     background: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -873,7 +960,7 @@
     border-top: 1px solid var(--line);
   }
   .skill-row:hover {
-    background: var(--bg);
+    background: var(--surface-hover);
   }
   .skill-row:has(input:checked) {
     background: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -902,7 +989,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-1);
-    margin: 0 0 var(--sp-2);
+    margin: 0;
   }
   .field textarea,
   .field input {
@@ -923,8 +1010,7 @@
   .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--sp-2);
-    margin-bottom: var(--sp-2);
+    gap: var(--sp-3);
   }
   .row-end {
     display: flex;
@@ -937,7 +1023,6 @@
     border-radius: var(--radius-sm);
     max-height: 24rem;
     overflow: auto;
-    margin-top: var(--sp-2);
   }
   .preview {
     border: 1px solid var(--line);
@@ -952,9 +1037,10 @@
 
   /* ══════════ 完成态 ══════════ */
   .done-box {
-    border: 1px solid var(--line-strong);
+    border: 1px solid var(--line);
     border-radius: var(--radius);
-    padding: var(--sp-4);
+    background: var(--surface);
+    padding: var(--sp-5) var(--sp-4);
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);

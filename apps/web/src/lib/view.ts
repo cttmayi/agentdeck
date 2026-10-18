@@ -56,9 +56,9 @@ export const VIEW_TITLE_KEYS = {
 } as const satisfies Record<ViewName, WebTextId>
 
 /**
- * 当前路由 = **视图 + 「任务」页右栏是不是在新建**。
+ * 当前路由 = **视图 + 「任务」页右栏是不是在新建 + 沉淀流程页开没开**。
  *
- * ⚠️ 两个 store 由 `syncRoute()` **一处**写（地址是唯一出处）：分头写的后果是
+ * ⚠️ 三个 store 由 `syncRoute()` **一处**写（地址是唯一出处）：分头写的后果是
  *    "地址栏写着 /tasks/new 而右栏画着某条任务的详情"——两个都对，只是不是一件事，
  *    而且刷新一下才现形。
  */
@@ -72,11 +72,21 @@ export const view = writable<ViewName>(parseHash(location.hash).view)
  */
 export const creating = writable<boolean>(parseHash(location.hash).creating)
 
-/** 读地址 → 写两个 store。地址是唯一出处，两个 store 只是它的两个投影。 */
+/**
+ * 沉淀流程页（D80 §4.1.1 界面改版）：非空 = 聊天/任务视图的右主区在流程页。
+ *
+ * ★ 与 `creating` 同构、同一个理由：它是**地址**（`#/chat/crystallize/<runId>`）
+ *   而不是组件里的开关——流程页是"切走还能回来、刷新还在、能分享链接"的一页。
+ *   放组件里一卸载就丢，使用者反馈过"切到其他页面就回不来了"。
+ */
+export const crystallize = writable<{ runId: string } | null>(parseHash(location.hash).crystallize)
+
+/** 读地址 → 写三个 store。地址是唯一出处，三个 store 只是它的三个投影。 */
 function syncRoute(): void {
   const route = parseHash(location.hash)
   view.set(route.view)
   creating.set(route.creating)
+  crystallize.set(route.crystallize)
 }
 
 // 浏览器前进/后退要跟着走——否则后退键看起来"没反应"
@@ -99,6 +109,18 @@ export function go(next: ViewName): void {
  */
 export function goCreate(): void {
   location.hash = CREATE_HASH
+  syncRoute()
+}
+
+/**
+ * 进沉淀流程页（`#/chat/crystallize/<runId>` / `#/tasks/crystallize/<runId>`）。
+ *
+ * ★ 与 `goCreate()` 同构：流程页是"某视图右栏的一个位置"，地址读起来也是那样
+ *   （`chat/crystallize/<runId>` 而不是 `crystallize/<runId>`——来源视图是第一层）。
+ *   关掉流程页 = `go('chat')` / `go('tasks')`（回到普通右栏），不必另开一个函数。
+ */
+export function goCrystallize(view: 'chat' | 'tasks', runId: string): void {
+  location.hash = hashFor(view, { crystallize: { runId } })
   syncRoute()
 }
 

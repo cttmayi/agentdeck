@@ -39,18 +39,36 @@ export interface Route {
   view: ViewName
   /** 「任务」页右栏此刻是**建任务**的表单（而不是某条任务的详情）。 */
   creating: boolean
+  /**
+   * 沉淀流程页（D80 §4.1.1 界面改版）：非空 = 对应视图的右主区在流程页。
+   *
+   * ★ 它是一条**地址**（`#/chat/crystallize/<runId>` / `#/tasks/crystallize/<runId>`）
+   *   而不是组件里的开关：流程页是"切走还能回来、刷新还在"的一页（使用者反馈：
+   *   "切到其他页面就回不来了"——局部开关一卸载就丢，地址不会）。
+   *   与 `creating` 同构：`view` 决定住哪个视图，crystallize 决定右栏画什么。
+   */
+  crystallize: { runId: string } | null
 }
+
+/** 沉淀流程页的正规地址形态：`<view>/crystallize/<runId>`。 */
+const CRYSTALLIZE_RE = /^(chat|tasks)\/crystallize\/([0-9A-Za-z]+)$/
 
 /** 地址 → 路由。认不出来的一律回落「任务」。 */
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '')
+  // 沉淀流程页：先于普通视图匹配（`chat/crystallize/…` 不是 VIEWS 里的一项）。
+  const crystal = CRYSTALLIZE_RE.exec(raw)
+  if (crystal) {
+    const view = crystal[1] as 'chat' | 'tasks'
+    return { view, creating: false, crystallize: { runId: crystal[2]! } }
+  }
   // ⚠️ 两个地址都指向同一个状态：`tasks/new` 是正规写法，`new` 是 D58 之前那个
   //    「新建任务」整页的地址（当时它还是侧栏一项）。同义地址写两处会不会分叉？
   //    不会——它们在这里**就是同一行**，而 `hashFor()` 只吐正规那个。
-  if (raw === 'tasks/new' || raw === 'new') return { view: 'tasks', creating: true }
+  if (raw === 'tasks/new' || raw === 'new') return { view: 'tasks', creating: true, crystallize: null }
   // 未知地址回落 `tasks`（D58 改的：原来回落到那个表单，而合并之后"任务"才是主场）
-  if (!(VIEWS as readonly string[]).includes(raw)) return { view: 'tasks', creating: false }
-  return { view: raw as ViewName, creating: false }
+  if (!(VIEWS as readonly string[]).includes(raw)) return { view: 'tasks', creating: false, crystallize: null }
+  return { view: raw as ViewName, creating: false, crystallize: null }
 }
 
 /**
@@ -58,7 +76,12 @@ export function parseHash(hash: string): Route {
  * 逐项钉住（`VIEWS` 里每一项都过一遍）。两处各写一份映射的后果是"点进去是 A、
  * 地址栏写着 B"，而刷新一下才发现。
  */
-export function hashFor(view: ViewName, opts: { creating?: boolean } = {}): string {
+export function hashFor(view: ViewName, opts: { creating?: boolean; crystallize?: { runId: string } } = {}): string {
+  // ⚠️ `crystallize` 只对「聊天 / 任务」成立：别的视图没有这个状态，传进来就当没传
+  //    （与 `creating` 同一个处方，见下）。
+  if (opts.crystallize && (view === 'chat' || view === 'tasks')) {
+    return `#/${view}/crystallize/${opts.crystallize.runId}`
+  }
   // ⚠️ `creating` 只对「任务」成立：别的视图没有"建任务"这个状态，传进来就当没传
   //    （不然会造出一个 `#/agents` 之外还带着建模式的地址，而没人认得它）。
   return opts.creating === true && view === 'tasks' ? CREATE_HASH : `#/${view}`
