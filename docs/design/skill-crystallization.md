@@ -216,6 +216,24 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
   buildMaterial 是现成读操作，空素材返回 `null`，前端在目标态就禁用 [开始起草] 并提示
   （**早失败**，而不是起草完才发现 400 empty_material）。draft / commit 接口不动。
 
+**归属：沉淀不是任务（2026-10-19 使用者定）**
+- 起草 run 仍是 **run**（`kind: execute`、`subject: {type: 'skill-draft'}`），**不挂 issue**、
+  **不进任务列表**——它是从对话/任务发起的"工具动作"，不是"工作项"；也不进任务的审核
+  闭环（`reviewerAgentId: null`、无返工）。任务列表里不会出现沉淀条目。
+- 进度/历史只能从来源（对话 / 任务）再进流程页看——这是该方案的既定代价（使用者已接受）。
+
+**恢复进行中的起草（补"关页面丢进度"缺口，2026-10-19 使用者定 A 方案附带）**
+- 现状缺口：起草 run 在后台真实地跑，但关闭流程页后 UI 不知道它的 id，重开会另起一条
+  → 重复起草。
+- 修法：
+  1. 起草 run 上**记 source**（`subject.sourceRunId` = 源 run id）——现在 subject 里没有
+     这条链接，加上是恢复的前提。
+  2. `GET /api/crystallize/targets` 顺带返回 `activeDraft: { runId, status } | null` =
+     该源 run 最近的、**未入库**的 skill-draft run（起草中 / 已完成待审阅都算）。
+  3. 流程页打开时：有 `activeDraft` → 顶部提示"有进行中的起草（起草中/待审阅）"，
+     「继续」挂回那条（RunLog 接着看、审阅接续），或「新起草」（放弃旧的）；
+     没有 → 正常从目标态开始。
+
 **状态**：设计已定（2026-10-19），**未实作**——列入 §8 实现范围。
 
 ### 4.2 信号建议（辅触发）——⏸️ 暂缓，首版不做（2026-10-18 使用者定）
@@ -403,9 +421,12 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
   起草日志/草稿审阅/完成态，RunLog 常驻）。
 - **8. 素材摘要前置**——`GET /api/crystallize/targets` 加 `materialStats`（起草前可见，
   空素材在目标态就禁用 [开始起草]，早失败）。draft / commit 接口不动。
+- **9. 沉淀不是任务 + 恢复进行中的起草**（§4.1.1）——起草 run 不挂 issue、不进任务列表；
+  起草 run 记 `subject.sourceRunId`，targets 返回 `activeDraft`，重开流程页「继续」挂回
+  那条（不重复起草）。
 
 > 1–6 已实作（2026-10-18，提交 951417a / 16e8dcd / c5c95d9 + 后续 e318641 修正安装遮蔽）；
-> 7–8 设计已定、**未实作**（2026-10-19）。
+> 7–9 设计已定、**未实作**（2026-10-19）。
 
 ## 9. 开放问题（本次未定）
 
