@@ -163,8 +163,8 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
 ### 7.3 git 版本管理（使用者定的语义：覆盖 + git 类似版本管理）
 
 - `~/.agentdeck/skills-mine/` **做成 git 仓库**：首次开做时 `git init`（实测安装根
-  `~/.agentdeck/skills/` 当前不是 git 仓库；全局 git 身份已配置 `cttmayi@hotmail.com` /
-  `Ling Yuan`，平台自动 commit 有身份可用）。**只 git 化提炼根**——安装根是外部内容，
+  `~/.agentdeck/skills/` 当前不是 git 仓库；全局 git 身份已配置，平台自动 commit
+  有身份可用）。**只 git 化提炼根**——安装根是外部内容，
   平台不自动 commit（§1.1）。
 - 每次入库/进化后平台**自动 `git add` + `commit`**，commit message 带版本说明，如
   `skill <slug> v2：新增 X 边界`。
