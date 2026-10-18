@@ -409,7 +409,7 @@ export interface Skill {
    * 参考的东西"顺手决定了谁能改状态。老记录里这个键可能还在（整条记录以 JSON 存），
    * 界面按"没有"处理即可。
    */
-  source: 'local' | 'remote'
+  source: 'local' | 'remote' | 'mine'
   sourceRef: string | null
   /** 这份内容的版本（远端目录给的）。没有版本时缺失/null。 */
   version?: string | null

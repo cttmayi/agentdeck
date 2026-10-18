@@ -5,6 +5,7 @@
   import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
+  import CrystallizePanel from '../components/CrystallizePanel.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -137,6 +138,12 @@
   $: liveTurn = activeTurns.find((turn) => turn.runId === $chatLiveRunId) ?? null
   $: runningTurn =
     activeTurns.find((turn) => isTurnRunning(turn)) ?? null
+  // ── 沉淀成 skill（D80）──
+  // 设计 §4.1：会话级按钮，**至少有一轮已结束**即可用（素材 = 已落库的部分）。
+  // 源 run = 最后一轮有 runId 的轮次（其 subject 是对话，素材打包会扫全部轮）。
+  let crystallizeOpen = false
+  $: crystallizeRunId = [...activeTurns].reverse().find((turn) => turn.runId && !turn.error)?.runId ?? ''
+  $: crystallizeEnabled = activeConversation !== null && activeTurns.some((turn) => turn.runId && !isTurnRunning(turn))
   $: executors = $agents.filter((agent) => agent.role === 'executor')
   /**
    * 下拉的全部选项：执行者 + **每一条装着的 skill**。
@@ -533,6 +540,15 @@
           </span>
         </div>
         <div class="pane-actions">
+          <!-- D80：会话级「沉淀成 skill」——至少有一轮已结束才可用 -->
+          <button
+            class="ghost"
+            disabled={!crystallizeEnabled}
+            title={crystallizeEnabled ? '' : $t('chat.crystallizeDisabledHint')}
+            onclick={() => (crystallizeOpen = true)}
+          >
+            {$t('crystallize.title')}
+          </button>
           <button class="danger" onclick={() => void remove($activeConversationId ?? '')}>
             {$t('chat.delete')}
           </button>
@@ -764,6 +780,14 @@
         {/if}
       {/snippet}
     </MainArea>
+
+    <!-- D80：沉淀成 skill 面板（目标 → 起草 → 审阅，三态一体） -->
+    <CrystallizePanel
+      open={crystallizeOpen}
+      runId={crystallizeRunId}
+      onclose={() => (crystallizeOpen = false)}
+      ondone={() => void refresh()}
+    />
 </div>
 
 <style>

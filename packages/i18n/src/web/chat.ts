@@ -150,6 +150,11 @@ export const chatText = {
   //    非贪婪匹配吃到了这几条。教训写在 D57 里：删词条要**按模块解析**，不要用正则扫文本。
   'chat.renameCancel': { zh: '取消', en: 'Cancel' },
   'chat.delete': { zh: '删除对话', en: 'Delete conversation' },
+  // D80：沉淀成 skill 按钮在对话没有任何已结束轮次时的提示（按钮置灰）
+  'chat.crystallizeDisabledHint': {
+    zh: '至少有一轮对话已结束，才能提炼',
+    en: 'Finish at least one turn before crystallizing',
+  },
   'chat.deleteConfirm': {
     zh: '这个对话和它的全部轮次会被删掉。执行记录会留着（审计与成本统计还认得它）。',
     en: 'This conversation and all its turns will be deleted. The run records stay (audit and cost still know about them).',

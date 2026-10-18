@@ -3,6 +3,7 @@
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
+  import CrystallizePanel from '../components/CrystallizePanel.svelte'
   import {
     api,
     newRunId,
@@ -15,7 +16,7 @@
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
-    import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask } from '../lib/stores.ts'
+    import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { leaveCreate } from '../lib/leave-create.ts'
   import { creating, goCreate, go, selectedIssueId, showToast } from '../lib/view.ts'
@@ -321,6 +322,27 @@
   // ── 任务详情 ──
 
   let activeRun: RunSummary | null = null
+  // ── D80：任务「优化 skill」的置灰门（有用户反馈 或 审核过）──
+  let optimizeOpen = false
+  let optimizeGate: { reviewed: boolean; hasUserFeedback: boolean } | null = null
+  let optimizeGateRunId = ''
+  $: canOptimizeSkill =
+    activeIsTerminal &&
+    optimizeGate !== null &&
+    (optimizeGate.reviewed || optimizeGate.hasUserFeedback)
+
+  /** run 终态后取一次置灰门（轻量 GET；开面板时会再取一次新鲜的）。 */
+  async function refreshOptimizeGate(runId: string): Promise<void> {
+    try {
+      const res = await api<{ reviewed: boolean; hasUserFeedback: boolean }>(
+        `/api/crystallize/targets?runId=${encodeURIComponent(runId)}`,
+      )
+      optimizeGate = { reviewed: res.reviewed, hasUserFeedback: res.hasUserFeedback }
+    } catch {
+      // 取不到就不放行（按钮置灰比误放行安全）
+      optimizeGate = null
+    }
+  }
   // ── 最后结果（跑完之后）──
   /** 这次执行的最后一段产出（最后一条 text 消息）。 */
   let finalOutput = ''
@@ -329,6 +351,11 @@
 
   $: activeIsTerminal =
     activeRun !== null && ['completed', 'failed', 'cancelled'].includes(activeRun.status)
+  // ★ 取置灰门放在 activeIsTerminal 之后：避免在它尚未求值（undefined）时白跑
+  $: if (activeRun && activeIsTerminal && optimizeGateRunId !== activeRun.runId) {
+    optimizeGateRunId = activeRun.runId
+    void refreshOptimizeGate(activeRun.runId)
+  }
   /**
    * ★ D69.12：日志视图（正在跑 / 点「看完整日志」）。此时详情栏切成 flex
    *   纵向布局：日志 `flex:1` 精确填满剩余空间、内部滚动——外置滚动条消失。
@@ -1042,6 +1069,23 @@
           <span class="faint">{$t('tasks.updatedAt', { time: new Date(selected.updatedAt).toLocaleString() })}</span>
         {/if}
       {/snippet}
+      {#snippet actions()}
+        {#if selected && !$creating}
+          <!--
+            D80：任务「优化 skill」按钮（§4.3）——按钮可用 ⟺ 任务 run 终态
+            且（有用户反馈 或 审核过）。置灰时 title 说明"为什么灰"。
+          -->
+          <button
+            type="button"
+            class="ghost"
+            disabled={!canOptimizeSkill}
+            title={canOptimizeSkill ? '' : $t('crystallize.taskGated')}
+            onclick={() => (optimizeOpen = true)}
+          >
+            {$t('crystallize.optimize')}
+          </button>
+        {/if}
+      {/snippet}
       {#snippet body()}
         {#if $creating}
           <NewTaskForm />
@@ -1492,6 +1536,14 @@
       {/snippet}
     </MainArea>
   {/if}
+
+  <!-- D80：任务「优化 skill」面板（素材带审核判决 + 用户反馈，同一套三态） -->
+  <CrystallizePanel
+    open={optimizeOpen}
+    runId={activeRun?.runId ?? ''}
+    onclose={() => (optimizeOpen = false)}
+    ondone={() => void loadSkills()}
+  />
 </div>
 
 <style>

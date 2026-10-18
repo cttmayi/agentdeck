@@ -2,6 +2,7 @@ import type { TextCatalog } from '../text.ts'
 import { agentsText } from './agents.ts'
 import { chatText } from './chat.ts'
 import { commonText } from './common.ts'
+import { crystallizeText } from './crystallize.ts'
 import { errorsText } from './errors.ts'
 import { filesText } from './files.ts'
 import { groupsText } from './groups.ts'
@@ -38,6 +39,8 @@ export const webText = {
   ...commonText,
   // ★ 聊天：闭环的旁路（没有判决，因此也没有动作）
   ...chatText,
+  // ★ D80：聊天/任务沉淀 skill（沉淀目标面板 + 草稿审阅）。
+  ...crystallizeText,
   ...shellText,
   ...tasksText,
   ...agentsText,

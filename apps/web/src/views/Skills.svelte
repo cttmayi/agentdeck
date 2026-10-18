@@ -40,7 +40,27 @@
    *   在一起。
    */
   let expanded: string | null = null
-
+  // ── D80：列表分组（我提炼的 / 安装的）+ 遮蔽标注 ──
+  /**
+   * 双根之后列表要分组（设计 §1.1）：mine（我提炼的）在前、安装的在后，各自按
+   * updatedAt 倒序。遮蔽标注：安装的 slug 若已有提炼版（注入时提炼版优先，
+   * 见 daemon `loadAgentSkills`），在行尾点破"被你的版本遮蔽"。
+   */
+  $: mineSlugs = new Set($skills.filter((s) => s.source === 'mine').map((s) => s.slug))
+  $: groupedSkills = [
+    ...$skills
+      .filter((s) => s.source === 'mine')
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((s) => ({ skill: s, group: 'mine' as const, shadowed: false })),
+    ...$skills
+      .filter((s) => s.source !== 'mine')
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((s) => ({
+        skill: s,
+        group: 'installed' as const,
+        shadowed: mineSlugs.has(s.slug),
+      })),
+  ]
   // ── 安装面板 ──
   /**
    * ══════════════════════════════════════════════════════════════════
@@ -1078,8 +1098,21 @@
     ]}
   >
     {#snippet rows()}
-      {#each $skills as s (s.id)}
+      {#each groupedSkills as entry, i (entry.skill.id)}
+          {@const s = entry.skill}
           {@const fileCount = Object.keys(s.files ?? {}).length}
+          {@const prev = groupedSkills[i - 1]}
+          {#if i === 0 || !prev || prev.group !== entry.group}
+            <tr class="group-head">
+              <td colspan="7">
+                <span class="faint small group-label">
+                  {entry.group === 'mine'
+                    ? $t('crystallize.groupMine')
+                    : $t('crystallize.groupInstalled')}
+                </span>
+              </td>
+            </tr>
+          {/if}
           <tr>
             <td>
               <!-- ★ 与工具页同一个做法：展开入口从行尾挪到首格 chevron——
@@ -1117,11 +1150,23 @@
                 <span class="badge local">
                   {$t('skills.fromDir', { dir: s.localDir })}
                 </span>
+              {:else if s.source === 'mine'}
+                <!-- D80：我提炼的（skills-mine 根，git 版本管理）——与安装的分组
+                     徽标，让"这是我的资产"一眼可辨。 -->
+                <span class="badge mine">
+                  {$t('crystallize.mineBadge')}
+                </span>
               {:else}
                 <!-- D69：来源徽标统一配方——同步/远端 = 默认灰徽章，本地 = accent。
                      不再借任务状态色 `todo/in_review`（那是给任务状态用的）。 -->
                 <span class="badge" class:local={s.source === 'local'}>
                   {s.source === 'local' ? $t('skills.sourceLocal') : $t('skills.sourceRemote')}
+                </span>
+              {/if}
+              {#if entry.shadowed}
+                <!-- D80：安装的 slug 被提炼版遮蔽——注入用提炼版，这一条实际不生效 -->
+                <span class="badge shadowed" title={$t('crystallize.shadowed')}>
+                  {$t('crystallize.shadowed')}
                 </span>
               {/if}
               {#if s.sourceRef && !s.localDir}
@@ -1297,5 +1342,25 @@
     cursor: pointer;
     font-size: var(--fs-xs);
     color: var(--text-faint);
+  }
+
+  /* D80：分组表头行（我提炼的 / 安装的）——不喧宾夺主，只把两摊分开 */
+  .group-head td {
+    padding-top: var(--sp-3);
+    padding-bottom: var(--sp-1);
+    border-bottom: 1px solid var(--line);
+  }
+  .group-label {
+    text-transform: none;
+    letter-spacing: 0.02em;
+  }
+  .badge.mine {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .badge.shadowed {
+    color: var(--text-faint);
+    border-color: var(--line);
+    opacity: 0.85;
   }
 </style>
