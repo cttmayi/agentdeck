@@ -286,48 +286,61 @@
         <!-- 素材统计在起草受理后才有（targets 接口不打包素材——那是起草 run 的事），
              这里只放目标选择。 -->
 
-        <label class="radio-row">
-          <input type="radio" bind:group={targetKind} value="new" />
-          <div>
-            <strong>{$t('crystallize.targetNew')}</strong>
-            <span class="faint small block">{$t('crystallize.purposeHint')}</span>
-          </div>
-        </label>
-        {#if targetKind === 'new'}
-          <label class="field">
-            <span class="faint small">{$t('crystallize.purposeLabel')}</span>
-            <textarea
-              bind:value={purpose}
-              rows="2"
-              placeholder={$t('crystallize.purposePlaceholder')}
-            ></textarea>
+        <!-- 两个目标选项做成一张"卡片列表"：选中项底色高亮、分隔线分明——
+             不用裸 radio 漂浮在空白上（裸 radio 会被全局 input 样式撑成
+             通栏宽、还带边框和 padding，见本文件底部 .radio-row 的 reset）。 -->
+        <div class="option-group">
+          <label class="radio-row">
+            <input type="radio" bind:group={targetKind} value="new" />
+            <span class="opt-text">
+              <strong>{$t('crystallize.targetNew')}</strong>
+              <span class="faint small">{$t('crystallize.purposeHint')}</span>
+            </span>
           </label>
-        {/if}
-
-        <label class="radio-row">
-          <input type="radio" bind:group={targetKind} value="update" disabled={targets.loadedSkills.length === 0} />
-          <div>
-            <strong>{$t('crystallize.targetUpdate')}</strong>
-            <span class="faint small block">{$t('crystallize.targetUpdateHint')}</span>
-          </div>
-        </label>
+          {#if targetKind === 'new'}
+            <div class="sub-field">
+              <label class="field-inner">
+                <span class="faint small">{$t('crystallize.purposeLabel')}</span>
+                <textarea
+                  bind:value={purpose}
+                  rows="2"
+                  placeholder={$t('crystallize.purposePlaceholder')}
+                ></textarea>
+              </label>
+            </div>
+          {/if}
+          <label class="radio-row" class:disabled={targets.loadedSkills.length === 0}>
+            <input
+              type="radio"
+              bind:group={targetKind}
+              value="update"
+              disabled={targets.loadedSkills.length === 0}
+            />
+            <span class="opt-text">
+              <strong>{$t('crystallize.targetUpdate')}</strong>
+              <span class="faint small">{$t('crystallize.targetUpdateHint')}</span>
+            </span>
+          </label>
+        </div>
         {#if targetKind === 'update'}
           {#if targets.loadedSkills.length === 0}
             <p class="notice">{ $t('crystallize.noLoadedSkills') }</p>
           {:else}
             <div class="skill-list">
               {#each targets.loadedSkills as s (s.id)}
-                <label class="radio-row compact">
+                <label class="skill-row">
                   <input type="radio" bind:group={selectedSkillId} value={s.id} />
-                  <div>
-                    <code>{s.slug}</code>
-                    <span class="badge" class:mine={s.source === 'mine'}>
-                      {s.source === 'mine' ? $t('crystallize.badgeMine') : $t('crystallize.badgeInstalled')}
+                  <span class="skill-info">
+                    <span class="skill-head">
+                      <code>{s.slug}</code>
+                      <span class="badge" class:mine={s.source === 'mine'}>
+                        {s.source === 'mine' ? $t('crystallize.badgeMine') : $t('crystallize.badgeInstalled')}
+                      </span>
                     </span>
                     {#if s.description}
-                      <span class="faint small block">{s.description}</span>
+                      <span class="faint small">{s.description}</span>
                     {/if}
-                  </div>
+                  </span>
                 </label>
               {/each}
             </div>
@@ -435,28 +448,125 @@
     flex-direction: column;
     gap: var(--sp-3);
   }
+
+  /* ══════════ 目标选项：卡片列表 ══════════ */
+  .option-group {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
   .radio-row {
     display: flex;
-    gap: var(--sp-2);
     align-items: flex-start;
+    gap: var(--sp-2);
+    margin: 0;
+    padding: var(--sp-3);
     cursor: pointer;
+    font-size: var(--fs-sm);
   }
-  .radio-row.compact {
-    padding: var(--sp-1) 0;
+  .radio-row + .radio-row {
+    border-top: 1px solid var(--line);
   }
-  .block {
-    display: block;
+  .radio-row:hover {
+    background: var(--bg);
   }
+  .radio-row:has(input:checked) {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .radio-row.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  /* ★ 全局 `input` 规则把 radio 撑成通栏宽、还带边框与 padding——这里逐条 reset
+     （与 NewAgentForm 的 `.skill-option input { width: auto }` 同一处方）。 */
+  .radio-row input[type='radio'],
+  .skill-row input[type='radio'] {
+    width: auto;
+    margin: 0.15em 0 0;
+    padding: 0;
+    border: none;
+    background: none;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+  }
+  .opt-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-width: 0;
+  }
+  /* 选中「新建」后的作用描述：缩进到与选项文字对齐（radio 列宽 + gap） */
+  .sub-field {
+    padding: 0 var(--sp-3) var(--sp-3) calc(var(--sp-3) + 1.6rem);
+    border-top: 1px solid var(--line);
+  }
+  .field-inner {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin: 0;
+  }
+  .field-inner textarea {
+    margin-top: 0;
+  }
+
+  /* ══════════ 更新目标：技能行列表 ══════════ */
+  .skill-list {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    max-height: 16rem;
+    overflow-y: auto;
+  }
+  .skill-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+  }
+  .skill-row + .skill-row {
+    border-top: 1px solid var(--line);
+  }
+  .skill-row:hover {
+    background: var(--bg);
+  }
+  .skill-row:has(input:checked) {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  .skill-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-width: 0;
+  }
+  .skill-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .badge.mine {
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--sp-1);
+    font-size: 0.85em;
+  }
+
+  /* ══════════ 表单字段（审阅态） ══════════ */
   .field {
     display: flex;
     flex-direction: column;
     gap: var(--sp-1);
+    margin: 0;
   }
   .field textarea,
   .field input {
     font: inherit;
+    margin-top: 0;
     padding: var(--sp-1) var(--sp-2);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     background: var(--bg);
     color: var(--text);
@@ -466,6 +576,7 @@
     font-size: 0.9em;
     line-height: 1.5;
   }
+
   .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -481,20 +592,6 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-  }
-  .skill-list {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    padding: var(--sp-2);
-    max-height: 16rem;
-    overflow-y: auto;
-  }
-  .badge.mine {
-    background: var(--accent);
-    color: var(--bg);
-    border-radius: var(--radius-sm);
-    padding: 0 var(--sp-1);
-    font-size: 0.85em;
   }
   .drafting {
     display: flex;
