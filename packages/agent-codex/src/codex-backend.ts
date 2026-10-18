@@ -159,9 +159,13 @@ export class CodexBackend implements AgentBackend {
       args: launchArgs,
       workDir: opts.workDir,
       // CLI 自己的状态目录必须放行：codex 要往 ~/.codex 写线程 rollout / 日志。
+      // ★ 2026-10（D78 的 codex 版）：平台注入 `CODEX_HOME` 指向受管目录时，
+      //   codex 改往那里写（用户级配置隔离，见 apps/daemon run-hooks/codex-config.ts）
+      //   ——受管目录同样必须放行，否则平台沙箱会把 codex 的会话状态写挡掉。
       extraWritableDirs: [
         ...(opts.sandbox?.extraWritableDirs ?? []),
         ...cliStateDir(this.#descriptor),
+        ...(typeof opts.env?.CODEX_HOME === 'string' ? [opts.env.CODEX_HOME] : []),
       ],
     })
 

@@ -37,7 +37,7 @@
 | 集成形态 | 每次 run 起一个 `codex app-server`（`--listen stdio://`），JSON-RPC 对话后关闭；**per-run 进程模型**（§4，v1 推荐） |
 | 一次 run 的时序 | `initialize` 握手 → `thread/start`（新线程，cwd=工作目录）或 `thread/resume`（续上次）→ `turn/start`（B 档 prompt 作为 text input）→ 收 `item/*` 通知 → `turn/completed` → 关进程 |
 | 会话恢复 | **一等公民**：sessionId = `thread_id`，`thread/resume` 原生支持 ⇒ `sessionState: 'stateful'`（相对 CLI 形式的最大收益：返工、聊天都能接着上次会话） |
-| 沙箱 | 每线程原生 `sandbox: workspace-write` + `approvalPolicy: never`（无人值守）；平台进程级沙箱可包住 per-run app-server |
+| 沙箱 | ⚠️ **2026-10-18 修正**：每线程原生 `sandbox: danger-full-access` + `approvalPolicy: never`——macOS 上 `workspace-write` 的 Seatbelt 忽略 `[sandbox_workspace_write] network_access`（openai/codex#10390，无修复版本），进程内连本地模型端点都出不去、turn 直接 502；`danger-full-access` 是 macOS 上唯一能联网的选项。任务隔离不靠它：平台进程级沙箱（sandbox-exec 包装）+ 第一句话引导层 |
 | 技能注入 | **机制不变**：写 `<workdir>/.codex/skills/<slug>/SKILL.md`（codex 项目作用域，thread cwd=workdir 时自动发现） |
 | 协议 | `RuntimeProtocol` 已有的 **`'jsonrpc'`** 首次启用；`family: 'codex-app-server-jsonrpc'`（新值） |
 | 轮次上限 | app-server 没有 turn 上限 ⇒ `maxTurns` 无法执行；因 `managedFlags` 对 service 不适用（cli-only，可选化），**不再需要** v1 的 `maxTurns: string\|null` 扩展 |
@@ -114,7 +114,7 @@ codex app-server generate-ts --out DIR    # 生成协议 schema（可作我们�
 | `model` | agent 配置的模型 | — |
 | `cwd` | 工作目录 | 每个线程自己的工作目录 |
 | `approvalPolicy` | `"never"` | 无人值守（取值：never/untrusted/on-request/on-failure/reject） |
-| `sandbox` | `"workspace-write"` | 每线程原生"只写工作区"（取值：read-only/workspace-write/danger-full-access） |
+| `sandbox` | `"danger-full-access"` | ⚠️ macOS 修正（2026-10-18）：`workspace-write` 断网（#10390），见上表「沙箱」行（取值：read-only/workspace-write/danger-full-access） |
 | `ephemeral` | `false`（缺省） | 线程要落盘才能 resume |
 
 响应：`{thread:{id:"thr_…",…}, model, modelProvider, cwd, approvalPolicy, sandbox}` ——
@@ -300,7 +300,7 @@ execute(opts):
   2. planSandbox(…, extraWritableDirs: [...cliStateDir(descriptor)])   // ~/.codex 放行
   3. spawn: [codex, 'app-server', '--stdio']  （onCommandLine 如实上报 + sandboxDescription）
   4. initialize 握手（clientInfo: agentdeck）→ initialized
-  5. resumeSessionId ? thread/resume(id) : thread/start({model, cwd, approvalPolicy:'never', sandbox:'workspace-write'})
+  5. resumeSessionId ? thread/resume(id) : thread/start({model, cwd, approvalPolicy:'never', sandbox:'danger-full-access'})
        → sessionId = thread.id；model = response.model（AgentResult.model 用这个）
   6. turn/start({threadId, input:[{type:'text', text: opts.prompt}]})   // prompt 已是 B 档三段
   7. 通知流 → stream-parser → queue（messages）

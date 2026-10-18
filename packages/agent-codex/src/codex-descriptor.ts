@@ -21,8 +21,18 @@ export interface CodexServerFacts {
   clientName: string
   /** thread/start 与 turn/start 的无人值守审批策略（两者都要传——恢复的线程会退回 on-request）。 */
   approvalPolicy: 'never'
-  /** thread/start 的工作区沙箱——codex 每线程原生"只写工作区"。 */
-  sandbox: 'workspace-write'
+  /**
+   * thread/start 的工作区沙箱。
+   *
+   * ★ 2026-10-18 实测修正：**macOS 上必须用 `danger-full-access`**——
+   *   `workspace-write` 的 Seatbelt 沙箱在 macOS 上忽略
+   *   `[sandbox_workspace_write] network_access = true`（openai/codex#10390，
+   *   无已知修复版本），进程内连本地模型端点（127.0.0.1:8080）都出不去、
+   *   turn 直接 502 失败——**codex 任务在 macOS 上根本连不上模型**。
+   *   `danger-full-access` 是 macOS 上唯一能联网的选项；任务隔离不靠它
+   *   （AgentDeck 真正的沙箱是平台层 sandbox-exec 包装 + 第一句话引导层）。
+   */
+  sandbox: 'danger-full-access'
   /** 本 run 用到的 JSON-RPC 方法名（协议级）。 */
   methods: {
     initialize: string
@@ -50,7 +60,7 @@ export interface CodexServerFacts {
 export const CODEX_SERVER_FACTS: CodexServerFacts = {
   clientName: 'agentdeck',
   approvalPolicy: 'never',
-  sandbox: 'workspace-write',
+  sandbox: 'danger-full-access',
   methods: {
     initialize: 'initialize',
     initialized: 'initialized',

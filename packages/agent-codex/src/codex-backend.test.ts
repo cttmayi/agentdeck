@@ -113,7 +113,9 @@ describe('CodexBackend（codex app-server 适配器，假 server 上整链跑通
       const threadStart = echo.requests.find((r) => r.method === 'thread/start')
       assert.ok(threadStart, '应该调用 thread/start')
       assert.equal((threadStart!.params as Record<string, unknown>)['approvalPolicy'], 'never')
-      assert.equal((threadStart!.params as Record<string, unknown>)['sandbox'], 'workspace-write')
+      // ★ macOS 上 workspace-write 的 seatbelt 断网（#10390，实测 502）——
+      //   codex 任务必须 danger-full-access 才能连模型端点（见 codex-descriptor.ts）
+      assert.equal((threadStart!.params as Record<string, unknown>)['sandbox'], 'danger-full-access')
       assert.equal((threadStart!.params as Record<string, unknown>)['model'], 'gpt-5.3-codex')
       assert.equal((threadStart!.params as Record<string, unknown>)['cwd'], workDir)
       const turnStart = echo.requests.find((r) => r.method === 'turn/start')

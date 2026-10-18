@@ -47,6 +47,7 @@ import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
 import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
+import { syncCodexConfigDir } from './run-hooks/codex-config.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -176,6 +177,20 @@ export interface ExecutorDeps {
    * 测试绝不读使用者的真实配置（NFR-T-01 的精神）。缺省 = 使用者主目录。
    */
   claudeSettingsSource?: string
+  /**
+   * codex 个人配置的受管目录（2026-10，D78 的 codex 版）。codex run 时设
+   * `CODEX_HOME` 指向它——用户级 skill（`~/.codex/skills/`）从此不可见，
+   * 只剩项目级。缺省 = 不隔离（保持旧行为）。
+   *
+   * ★ 位置约束同 claude 版（见 `run-hooks/codex-config.ts` 头注释）：必须在
+   *   daemon 数据目录下（agent 不可见），**绝不放任务工作目录**。
+   */
+  codexConfigDir?: string
+  /**
+   * copy 认证/端点的源：`~/.codex/`。做成可注入是为了测试——测试绝不读
+   * 使用者的真实配置。缺省 = 使用者主目录。
+   */
+  codexConfigSource?: string
 }
 
 /**
@@ -902,6 +917,37 @@ export class RunExecutor {
         }
       }
 
+      // ── codex 个人配置隔离（2026-10，D78 的 codex 版）──
+      //
+      // 与 claude 同机制、同原则：把 `CODEX_HOME` 指向平台受管的干净目录，
+      // 用户级 skill（`~/.codex/skills/`）从此不加载，任务里只剩项目级
+      // （thread cwd = 工作目录，`.codex/skills/` 照常自动发现——含技能注入
+      // 写进去的）。认证与端点从 `~/.codex/` 每次 run 现读 copy（auth.json +
+      // config.toml，见 `run-hooks/codex-config.ts` 头注释：为什么整份 copy、
+      // 目录放哪、为什么全局复用一个）。
+      //
+      // ⚠️ 失败不失败 run：与 claude 版同一原则（隔离是增强不是核心，
+      //    静默缺能力比报错糟）。
+      if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir) {
+        const sync = await syncCodexConfigDir(
+          this.#deps.codexConfigDir,
+          this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
+        )
+        if (!sync.ok) {
+          await this.#note(
+            runId,
+            `⚠️ codex 个人配置隔离未生效（${sync.reason}）——` +
+              `本次 run 会看到用户级 skill（如 browser-use）。`,
+          )
+        } else {
+          await this.#note(
+            runId,
+            `codex 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
+              `用户级 skill 不可见，已同步 ${sync.copied.join('、')}。`,
+          )
+        }
+      }
+
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
       // 那一份**清单，即使这个 runtime 不扫目录也要告诉模型"有哪些标准可用"。
       for (const skill of mountedSkills) {
@@ -1326,10 +1372,14 @@ export class RunExecutor {
         // ★ D78：claude 的 `CLAUDE_CONFIG_DIR` 在这里注入（指向受管配置
         //   目录，见上面的隔离块）。平台最后写 → 覆盖 agent 自己同名 env
         //   ——隔离是平台强制的，不能由 agent 自定义环境变量关掉。
+        //   ★ codex 的 `CODEX_HOME` 同款注入（D78 的 codex 版）。
         env: {
           ...(agentConfig?.env ?? {}),
           ...(runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
             ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
+            : {}),
+          ...(runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir
+            ? { CODEX_HOME: this.#deps.codexConfigDir }
             : {}),
         },
         onCommandLine: ({ argv, sandboxDescription }) => {

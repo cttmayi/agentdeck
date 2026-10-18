@@ -1473,6 +1473,206 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
   })
 })
 
+describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_HOME 传下去、受管配置写出来', () => {
+  /**
+   * 机制：executor 把 `CODEX_HOME` 指向平台受管目录——codex 从此不加载
+   * 用户级 skill（`~/.codex/skills/`），只剩项目级（thread cwd = 工作目录，
+   * `.codex/skills/` 照常自动发现）；`~/.codex/` 的 auth.json + config.toml
+   * 每次 run 同步进受管目录（key/端点不丢）。为什么是它、目录放哪、为什么
+   * 全局复用：见 `run-hooks/codex-config.ts` 头注释。
+   *
+   * 这条验的是 **executor → 后端 env 的通道真的通 + 受管文件真的写了**；
+   * codex 读 CODEX_HOME 之后的行为（用户 skill 消失、项目级保留）由真
+   * codex 实测钉住（NFR-T-01 不调真实 CLI，这里只验通道与落盘）。
+   *
+   * ⚠️ daemon 级 runtime 设为 codex（`runtimeKey: 'codex'`）：注入的假后端
+   *   只对 selected runtime 生效（server.ts 的 resolveRuntime），不这样设
+   *   codex run 会去找真的 `codex` 可执行文件。
+   */
+  test('正常：env 带 CODEX_HOME，受管目录写出 auth.json 与 config.toml', async () => {
+    const dataDir = await makeTempDir('e2e-cxd-data')
+    const work = await makeTempDir('e2e-cxd-work')
+    // 模拟 `~/.codex/`——测试绝不读使用者的真实配置
+    const source = join(dataDir, 'fake-codex-home')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-fake' }), 'utf8')
+    await writeFile(
+      join(source, 'config.toml'),
+      'model = "codex"\n[model_providers.local]\nbase_url = "http://127.0.0.1:8080"\n',
+      'utf8',
+    )
+    const configDir = join(dataDir, 'codex-config')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      runtimeKey: 'codex',
+      codexConfigDir: configDir,
+      codexConfigSource: source,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a-cxd', name: '助手', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-cxd' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      assert.equal(
+        b.seenEnv['CODEX_HOME'],
+        configDir,
+        '★ CODEX_HOME 必须传给后端（codex 靠它隔离用户级 skill）',
+      )
+      const auth = JSON.parse(await readFile(join(configDir, 'auth.json'), 'utf8')) as { OPENAI_API_KEY: string }
+      assert.equal(auth.OPENAI_API_KEY, 'sk-fake', '受管 auth.json 必须带着源认证（key 不丢）')
+      const toml = await readFile(join(configDir, 'config.toml'), 'utf8')
+      assert.match(toml, /model_providers\.local/, '受管 config.toml 必须整份 copy（端点不丢）')
+      assert.equal((await stat(join(configDir, 'auth.json'))).mode & 0o777, 0o600, '有 key 的文件只给属主读')
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('agent 自定义 env 里的同名 CODEX_HOME 被平台覆盖（隔离不能由 agent 关掉）', async () => {
+    const dataDir = await makeTempDir('e2e-cxd-override-data')
+    const work = await makeTempDir('e2e-cxd-override-work')
+    const source = join(dataDir, 'fake-codex-home')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "codex"\n', 'utf8')
+    const configDir = join(dataDir, 'codex-config')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      runtimeKey: 'codex',
+      codexConfigDir: configDir,
+      codexConfigSource: source,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const created = (await (
+        await fetch(`${d.url}/api/agents`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: '试图关掉隔离的执行者',
+            instructions: '干活',
+            role: 'executor',
+            env: { CODEX_HOME: '/evil/user-config' },
+            runtimeKey: 'codex',
+          }),
+        })
+      ).json()) as { id: string }
+
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: created.id, name: '试图关掉隔离的执行者', instructions: '干活' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-cxd2' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      assert.equal(
+        b.seenEnv['CODEX_HOME'],
+        configDir,
+        '★ 平台注入的 CODEX_HOME 必须覆盖 agent 自定义的同名 env——隔离是平台强制的',
+      )
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('源配置缺失 → run 照常完成，日志里明说"隔离未生效"', async () => {
+    const dataDir = await makeTempDir('e2e-cxd-fail-data')
+    const work = await makeTempDir('e2e-cxd-fail-work')
+    const b = new FakeBackend()
+    const d = await startDaemon({
+      dataDir,
+      workRoot: join(dataDir, 'work'),
+      port: 0,
+      fsync: false,
+      backend: b,
+      runtimeKey: 'codex',
+      codexConfigDir: join(dataDir, 'codex-config'),
+      codexConfigSource: join(dataDir, 'no-such-codex-home'),
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a-cxd3', name: '助手', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-cxd3' },
+          prompt: '干活',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      const { events, terminal } = await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+
+      assert.equal(terminal?.t, 'terminal', '源配置缺失绝不能把 run 弄挂——隔离是增强不是核心')
+      const notes = events
+        .filter((e): e is Extract<RunEvent, { t: 'message' }> => e.t === 'message')
+        .map((e) => e.message.content)
+      assert.ok(
+        notes.some((n) => n.includes('codex 个人配置隔离未生效')),
+        `日志里要有"隔离未生效"的说明，实际：\n${notes.join('\n')}`,
+      )
+      assert.equal(
+        b.seenEnv['CODEX_HOME'],
+        join(dataDir, 'codex-config'),
+        'CODEX_HOME 仍应注入（失败的是配置同步，不是隔离本身）',
+      )
+    } finally {
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+})
+
 describe('端到端：自动分配的工作目录落在「给 daemon 的那个根」底下', () => {
   /**
    * ══════════════════════════════════════════════════════════════════

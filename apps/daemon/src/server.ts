@@ -273,6 +273,16 @@ export interface DaemonOptions {
    * 生产代码永远不传它。
    */
   claudeSettingsSource?: string
+  /**
+   * codex 个人配置的受管目录（2026-10，D78 的 codex 版）。缺省 = 数据目录下
+   * 的 `codex-config`（agent 不可见），**绝不放任务工作目录**。测试可覆盖。
+   */
+  codexConfigDir?: string
+  /**
+   * copy 认证/端点的源 `~/.codex/`（D78 的 codex 版）。缺省 = 使用者主目录。
+   * 做成可注入是 NFR-T-01 的同类理由：测试绝不读使用者的真实配置。
+   */
+  codexConfigSource?: string
   onWarn?: (message: string) => void
   onInfo?: (message: string) => void
 }
@@ -1918,6 +1928,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     claudeConfigDir: options.claudeConfigDir ?? join(options.dataDir, 'claude-config'),
     ...(options.claudeSettingsSource
       ? { claudeSettingsSource: options.claudeSettingsSource }
+      : {}),
+    // ★ D78 的 codex 版：codex 个人配置的受管目录（CODEX_HOME 指向它）。
+    //   同样放数据目录下（agent 不可见）；`codexConfigSource` 只由测试注入。
+    codexConfigDir: options.codexConfigDir ?? join(options.dataDir, 'codex-config'),
+    ...(options.codexConfigSource
+      ? { codexConfigSource: options.codexConfigSource }
       : {}),
     // ★ 按 agent 的 runtimeKey 解析 backend（D28）。
     //   在此之前 agent.runtimeKey 是个没人读的字段——界面上能选、审计里会记，
