@@ -278,6 +278,53 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.equal(typeof existing.id, 'string', 'existing 带 id，前端好切「更新」')
   })
 
+  test('★ 更新安装的 skill：创建你的版本遮蔽它，安装根原文件不动', async () => {
+    // 先装一条"安装的" skill（POST /api/skills 走安装通道，source 不是 mine）
+    const installRes = await fetch(`${daemon.url}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [{ slug: 'installed-flow', name: '安装的流程', body: '# 安装版\n原样保留' }],
+        overwrite: false,
+      }),
+    })
+    assert.equal(installRes.status, 201)
+    const installedList = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ id: string; slug: string; source: string; body: string }>
+    }
+    const installed = installedList.skills.find((s) => s.slug === 'installed-flow')!
+    assert.notEqual(installed.source, 'mine', '装出来的是安装来源')
+
+    // 以"安装的"为目标起草 + 入库（设计 §4.1 第 1 步：选中安装的 = 基于它创建你的版本）
+    const runId = await runOnce('流程任务（矫正安装版）')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'update', skillId: installed.id } })
+    const { status, body } = await commit({
+      draftRunId,
+      target: { kind: 'update', skillId: installed.id },
+      slug: 'installed-flow',
+      name: '我的流程（基于安装版）',
+      description: 'd',
+      body: '# 我的版本\n基于安装版沉淀',
+    })
+    assert.equal(status, 201, JSON.stringify(body))
+    const skill = body['skill'] as { id: string; source: string; slug: string }
+    assert.equal(skill.source, 'mine', '落的是你的版本')
+    assert.notEqual(skill.id, installed.id, '不是改安装那条——新建你的版本')
+
+    // 安装那条原样不动
+    const after = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ id: string; slug: string; source: string; body: string }>
+    }
+    const installedAfter = after.skills.find((s) => s.id === installed.id)!
+    assert.equal(installedAfter.body, '# 安装版\n原样保留', '安装根原文件不动')
+    // 遮蔽：mine 版与安装版同 slug 并存
+    const mineNow = after.skills.find((s) => s.slug === 'installed-flow' && s.source === 'mine')!
+    assert.equal(mineNow.body, '# 我的版本\n基于安装版沉淀')
+    // git 提交在（你的版本进仓库）
+    const log = await git('log', '--oneline')
+    assert.match(log, /进化（更新）/)
+  })
+
   test('★ 更新（进化）：复用原 id、正文覆盖、git 再提交一条', async () => {
     const runId = await runOnce('流程被纠正过一次')
     const skillId = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {

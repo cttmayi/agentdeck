@@ -4252,12 +4252,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         if (s.source === 'mine') clashMine = s
         else clashInstalled = s
       }
-      // 更新目标：必须是提炼的（source:'mine'）——安装的不能原地改（那是外部内容），
-      // 更新安装的 = 存为你的版本（遮蔽），走"新建 + 同 slug 遮蔽"那条路。
+      // 更新目标：提炼的 = 进化（复用原 id 覆盖 + commit）；安装的 = **基于它
+      // 创建你的版本**（设计 §4.1 第 1 步：同 slug 落 skills-mine 并遮蔽安装版，
+      // **安装根原文件不动**——安装的是外部内容，平台不碰）。两者都不允许改 slug
+      // （改名请走"新建"）。
       if (target.kind === 'update') {
         const targetSkill = existing.find((s) => (s.id as string) === target.skillId)
-        if (!targetSkill || targetSkill.source !== 'mine') {
-          sendJson(res, 400, { error: '更新目标必须是提炼的 skill（source: mine）', code: 'target_not_mine' })
+        if (!targetSkill) {
+          sendJson(res, 404, { error: `skill 不存在（${target.skillId}）`, code: 'skill_not_found' })
           return
         }
         if (targetSkill.slug !== validated.slug) {
@@ -4277,12 +4279,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
 
       const now = Date.now()
+      // 落库 id 的决定：
+      //   · 新建 → 新 id；
+      //   · 更新提炼的 → 复用它的 id（进化，不留孤儿记录）；
+      //   · 更新安装的 → **你的版本**：提炼根已有同 slug 就复用那条（继续进化你的
+      //     遮蔽版），没有就新开一条（基于安装版创建你的版本，设计 §4.1 第 1 步）。
+      //     ⚠️ 无论哪种，安装根那条**原样不动**。
+      let targetId: Skill['id']
+      let targetCreatedAt: number
+      if (target.kind === 'update') {
+        const targetSkill = existing.find((s) => (s.id as string) === target.skillId)!
+        if (targetSkill.source === 'mine') {
+          targetId = targetSkill.id
+          targetCreatedAt = targetSkill.createdAt
+        } else {
+          // 安装的 → 落到提炼根（遮蔽）：你的版本优先复用已有 mine 同 slug 那条
+          targetId = clashMine?.id ?? (ulid() as Skill['id'])
+          targetCreatedAt = clashMine?.createdAt ?? now
+        }
+      } else {
+        targetId = ulid() as Skill['id']
+        targetCreatedAt = now
+      }
+
       const skill: Skill = {
-        // 更新 = 复用原 id（不留孤儿记录）；新建 = 新 id。
-        id:
-          target.kind === 'update'
-            ? (target.skillId as Skill['id'])
-            : (ulid() as Skill['id']),
+        id: targetId,
         workspaceId,
         slug: validated.slug,
         name,
@@ -4293,10 +4314,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         source: 'mine',
         sourceRef: `mine:${validated.slug}`,
         version: null,
-        createdAt:
-          target.kind === 'update'
-            ? (clashMine?.createdAt ?? now)
-            : now,
+        createdAt: targetCreatedAt,
         updatedAt: now,
       }
       await store.insertSkill(skill)

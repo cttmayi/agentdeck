@@ -36,6 +36,10 @@ export const crystallizeText = {
     zh: '选中 = 进化：素材 = 本次对话/任务 + 它的现有 SKILL.md，确认后覆盖',
     en: 'Select = evolve: material = this conversation/task + its current SKILL.md, overwrite on confirm',
   },
+  'crystallize.updateIsShadow': {
+    zh: '选中 = 基于安装版创建你的版本（遮蔽安装版；安装的不会被改动）',
+    en: 'Select = create your version from it (shadows the installed one; the installed skill is untouched)',
+  },
   'crystallize.materialSummary': {
     zh: '素材：{turns} 轮 · {tools} 次工具调用',
     en: 'Material: {turns} turns · {tools} tool calls',

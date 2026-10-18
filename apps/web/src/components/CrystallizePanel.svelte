@@ -326,6 +326,7 @@
           {#if targets.loadedSkills.length === 0}
             <p class="notice">{ $t('crystallize.noLoadedSkills') }</p>
           {:else}
+            {@const picked = targets.loadedSkills.find((x) => x.id === selectedSkillId)}
             <div class="skill-list">
               {#each targets.loadedSkills as s (s.id)}
                 <label class="skill-row">
@@ -344,7 +345,11 @@
                 </label>
               {/each}
             </div>
-            <p class="faint small">{$t('crystallize.updateIsEvolve')}</p>
+            <p class="faint small">
+              {picked?.source === 'mine'
+                ? $t('crystallize.updateIsEvolve')
+                : $t('crystallize.updateIsShadow')}
+            </p>
           {/if}
         {/if}
 
