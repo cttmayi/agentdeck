@@ -1326,3 +1326,130 @@ describe('技能内容落盘：正文与支持文件存成真文件', () => {
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────
+// 双根（D80）：`source: 'mine'` 落提炼根 `skills-mine/`，与安装根物理分离
+// ─────────────────────────────────────────────────────────────
+//
+// 设计定稿（`docs/design/skill-crystallization.md` §1.1）：
+// "不应该把安装的 skill 和我自己提炼的 skill 混在一起"——提炼的落
+// `<skillsMineRoot>/<slug>/`，读回走同一个根，删除也走同一个根。
+// 安装根（`skillsRoot`）不受影响：安装的照旧落那边。
+describe('技能双根（D80）：mine 落提炼根，与安装根分离', () => {
+  const WS3 = wsId('ws-mine')
+  const mineLogPath = (d: string): string => join(d, 'workspaces', WS3, 'log', 'skill.jsonl')
+
+  async function openStore(): Promise<{ d: string; s: FileStore }> {
+    const d = await makeTempDir('mine-root')
+    const s = await FileStore.open({ dataDir: d, fsync: false })
+    await s.insertWorkspace({
+      executeTemplate: '',
+      reviewTemplate: '',
+      chatTemplate: '',
+      defaultAgentId: null,
+      locale: 'zh',
+      id: WS3,
+      name: 'w',
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    return { d, s }
+  }
+
+  test('★ mine 落 skills-mine/，安装的落 skills/，两个根互不干扰', async () => {
+    const { d, s } = await openStore()
+    try {
+      await s.insertSkill(
+        makeSkill({
+          id: 'mine1',
+          workspaceId: WS3,
+          slug: 'my-review-flow',
+          body: '# 我的流程\n提炼的正文',
+          source: 'mine',
+        }),
+      )
+      await s.insertSkill(
+        makeSkill({
+          id: 'inst1',
+          workspaceId: WS3,
+          slug: 'general-review',
+          body: '# 通用审核\n安装的正文',
+          source: 'remote',
+        }),
+      )
+
+      // mine → skills-mine/；安装 → skills/
+      assert.equal(await readFile(join(d, 'skills-mine', 'my-review-flow', 'SKILL.md'), 'utf8'), '# 我的流程\n提炼的正文')
+      assert.equal(await readFile(join(d, 'skills', 'general-review', 'SKILL.md'), 'utf8'), '# 通用审核\n安装的正文')
+
+      // 读回：正文从各自的根补回来
+      assert.equal((await s.getSkill(skillId('mine1')))?.body, '# 我的流程\n提炼的正文')
+      assert.equal((await s.getSkill(skillId('inst1')))?.body, '# 通用审核\n安装的正文')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('★ 同 slug 两条（mine + 安装）并存：索引按 id、磁盘按来源分流', async () => {
+    const { d, s } = await openStore()
+    try {
+      // 设计 §1.1：提炼的与安装的可以同 slug 并存（mine 遮蔽安装的）
+      await s.insertSkill(
+        makeSkill({ id: 'a', workspaceId: WS3, slug: 'pptx', body: '我的版本', source: 'mine' }),
+      )
+      await s.insertSkill(
+        makeSkill({ id: 'b', workspaceId: WS3, slug: 'pptx', body: '安装版本', source: 'remote' }),
+      )
+
+      assert.equal(
+        await readFile(join(d, 'skills-mine', 'pptx', 'SKILL.md'), 'utf8'),
+        '我的版本',
+        'mine 落在提炼根',
+      )
+      assert.equal(
+        await readFile(join(d, 'skills', 'pptx', 'SKILL.md'), 'utf8'),
+        '安装版本',
+        '安装的落在安装根',
+      )
+      const list = await s.listSkills(WS3)
+      assert.equal(list.length, 2, '两条记录都在（按 id 区分）')
+      const mine = list.find((x) => (x.id as string) === 'a')
+      assert.equal(mine?.source, 'mine')
+      assert.equal(mine?.body, '我的版本', 'mine 从提炼根读回')
+      const installed = list.find((x) => (x.id as string) === 'b')
+      assert.equal(installed?.body, '安装版本', '安装的从安装根读回')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+
+  test('删除：mine 只删提炼根里的文件，安装根的同 slug 不受影响', async () => {
+    const { d, s } = await openStore()
+    try {
+      await s.insertSkill(
+        makeSkill({ id: 'c', workspaceId: WS3, slug: 'pptx', body: '我的版本', source: 'mine' }),
+      )
+      await s.insertSkill(
+        makeSkill({ id: 'd', workspaceId: WS3, slug: 'pptx', body: '安装版本', source: 'remote' }),
+      )
+      assert.equal(await s.deleteSkill(skillId('c')), true)
+      // mine 目录被删、安装目录还在
+      const mineExists = await readFile(join(d, 'skills-mine', 'pptx', 'SKILL.md'), 'utf8').then(
+        () => true,
+        () => false,
+      )
+      assert.equal(mineExists, false, 'mine 的文件被删')
+      assert.equal(
+        await readFile(join(d, 'skills', 'pptx', 'SKILL.md'), 'utf8'),
+        '安装版本',
+        '安装的同 slug 原样保留',
+      )
+      assert.equal((await s.getSkill(skillId('d')))?.body, '安装版本')
+    } finally {
+      await s.close()
+      await cleanup(d)
+    }
+  })
+})

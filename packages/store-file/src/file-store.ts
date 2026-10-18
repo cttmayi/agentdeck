@@ -140,6 +140,17 @@ export interface FileStoreOptions {
    * 的测试不会在使用者家目录里造目录。
    */
   skillsRoot?: string
+  /**
+   * **使用者提炼**技能（D80）的落点（`source: 'mine'` 的技能正文）。
+   *
+   * 与 `skillsRoot` **物理分离**：提炼的与安装的不混一个根（设计定稿——
+   * "不应该把安装的 skill 和我自己提炼的 skill 混在一起"）。缺省
+   * `<dataDir>/skills-mine`。CLI 那一层会显式传 `~/.agentdeck/skills-mine`。
+   *
+   * ★ 这个根同时是 **git 仓库**（平台自动 commit，可回退）——git 化由
+   *   daemon 的 `skill-mine.ts` 负责，store 只负责落盘与读回，不碰 git。
+   */
+  skillsMineRoot?: string
 }
 
 /** 排序 + 游标分页。游标就是上一页最后一条的 id（ULID，可排序）。 */
@@ -393,6 +404,8 @@ export class FileStore implements Store {
   readonly #fsync: boolean
   readonly #meta: Meta
   readonly #skillsRoot: string
+  /** 使用者提炼技能（D80）的落点——与 `#skillsRoot` 物理分离，见 `FileStoreOptions`。 */
+  readonly #mineRoot: string
   /** workspace 记录单独存放——这样 getWorkspace 不必先打开它的目录。 */
   readonly #wsIndex: JsonlLog<Workspace & { id: string }>
   readonly #device = new Mutex()
@@ -405,11 +418,13 @@ export class FileStore implements Store {
     meta: Meta,
     fsync: boolean,
     skillsRoot: string,
+    mineRoot: string,
   ) {
     this.#dataDir = dataDir
     this.#fsync = fsync
     this.#meta = meta
     this.#skillsRoot = skillsRoot
+    this.#mineRoot = mineRoot
     this.#wsIndex = new JsonlLog<Workspace & { id: string }>(join(dataDir, 'workspaces.jsonl'), {
       fsync,
     })
@@ -419,6 +434,7 @@ export class FileStore implements Store {
     const { dataDir } = options
     const fsync = options.fsync ?? true
     const skillsRoot = options.skillsRoot ?? join(dataDir, 'skills')
+    const mineRoot = options.skillsMineRoot ?? join(dataDir, 'skills-mine')
     await ensureDir(dataDir)
 
     const existing = await readJsonOrNull<Meta>(join(dataDir, 'meta.json'))
@@ -436,7 +452,7 @@ export class FileStore implements Store {
       await atomicWrite(join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2))
     }
 
-    const store = new FileStore(dataDir, meta, fsync, skillsRoot)
+    const store = new FileStore(dataDir, meta, fsync, skillsRoot, mineRoot)
     // 锁必须在读日志之前拿到，否则第二个进程会先读到一半状态
     store.#releaseLock = await acquireLock(dataDir)
     await store.#wsIndex.open()
@@ -492,13 +508,21 @@ export class FileStore implements Store {
    */
   async #hydrate(rec: Skill & { id: string }): Promise<Skill> {
     if (typeof rec.body === 'string' && rec.body !== '') return rec
-    const content = await readSkillContent(this.#skillsRoot, rec.slug)
+    const content = await readSkillContent(this.#rootFor(rec.source), rec.slug)
     if (content === null) return { ...rec, body: '' }
     return {
       ...rec,
       body: content.body,
       ...(Object.keys(content.files).length > 0 ? { files: content.files } : {}),
     }
+  }
+
+  /**
+   * 技能落点按来源分流（D80）：`mine` → 提炼根（skills-mine，git 化），
+   * 其余（`local`/`remote`）→ 安装根。
+   */
+  #rootFor(source: string): string {
+    return source === 'mine' ? this.#mineRoot : this.#skillsRoot
   }
 
   async formatVersion(): Promise<number> {
@@ -655,7 +679,8 @@ export class FileStore implements Store {
     //   - **先写文件**：残留是"盘上有目录、记录里没有" ⇒ 界面上不可见
     //     （列表来自记录），下次装同名会覆盖它——最轻；
     //   - 反过来：残留是"记录在、内容不在" ⇒ 一条**可见的坏技能**。
-    await writeSkillFiles(this.#skillsRoot, skill)
+    // 落点按来源分流（D80）：`mine` 进提炼根（git 化），其余进安装根。
+    await writeSkillFiles(this.#rootFor(skill.source), skill)
     await ws.mutex.run(() => ws.skill().put(toIndexRecord(skill)))
   }
 
@@ -667,9 +692,9 @@ export class FileStore implements Store {
       const rec = ws.skill().get(id)
       if (!rec) continue
       const removed = await ws.mutex.run(() => ws.skill().del(id))
-      // 记录真删掉了才动磁盘
+      // 记录真删掉了才动磁盘（落点同样按来源分流）
       if (removed) {
-        await removeSkillFiles(this.#skillsRoot, rec.slug)
+        await removeSkillFiles(this.#rootFor(rec.source), rec.slug)
       }
       return removed
     }

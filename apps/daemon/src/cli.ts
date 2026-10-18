@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import {
   defaultSkillsRoot,
+  defaultSkillsMineRoot,
   defaultWorkRoot,
   fallbackWorkRoot,
   migrateLegacyWorkRoot,
@@ -65,6 +66,11 @@ interface CliOptions {
    * 产品决定——技能正文是使用者会去翻、会去改的东西。要放别处用这个。
    */
   skillsRoot: string | null
+  /**
+   * 使用者提炼技能的落点根目录（D80）。缺省 `~/.agentdeck/skills-mine`——
+   * 与安装根物理分离，且这个根是 git 仓库（平台自动 commit）。要放别处用这个。
+   */
+  skillsMineRoot: string | null
   /** GitHub 加速器（第三方，默认 null = 直连；见 server.ts 的 `DaemonOptions.githubProxy`）。 */
   githubProxy: string | null
   /**
@@ -107,6 +113,7 @@ export const CLI_OPTIONS = {
   'runtime-key': { type: 'string' },
   'work-root': { type: 'string' },
   'skills-root': { type: 'string' },
+  'skills-mine-root': { type: 'string' },
   'github-proxy': { type: 'string' },
   'skills-catalog': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
@@ -199,6 +206,8 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     runtimeKey: typeof values['runtime-key'] === 'string' ? values['runtime-key'] : null,
     workRoot: typeof values['work-root'] === 'string' ? values['work-root'] : null,
     skillsRoot: typeof values['skills-root'] === 'string' ? values['skills-root'] : null,
+    skillsMineRoot:
+      typeof values['skills-mine-root'] === 'string' ? values['skills-mine-root'] : null,
     // ⚠️ 校验**严格**（与 --sandbox 同一个口径）：写错了就报错退出，而不是
     //    悄悄直连——"我以为走了加速器"与"我以为沙箱开着"是同一类假安全感。
     //    裸写旗标 ⇒ `DEFAULT_GITHUB_PROXY`（`fillOptionalValueFlag` 已经补好值）；
@@ -234,6 +243,8 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --work-root <路径>   工作区根目录（默认 ~/agentdeck-workspace）
       --skills-root <路径> 技能内容的落点（默认 ~/.agentdeck/skills）。
                         技能正文与支持文件存成真文件放在这里，**改文件就生效**。
+      --skills-mine-root <路径> 提炼技能的落点（默认 ~/.agentdeck/skills-mine，D80）。
+                        与安装根物理分离，平台自动 git commit（可回退）。
       --skills-catalog <路径>  换一份「本地安装清单」（技能页「从本地清单安装」读的
                         那份 JSON）。默认用仓库自带的那份（apps/daemon/catalog/skills.json）。
       --github-proxy [地址] 从 GitHub 装 skill 时走**加速器**（默认直连）。
@@ -386,6 +397,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     // CLI 这一层（可见、可预期的家目录），核心层只留自洽的兜底
     // （`fallbackSkillsRoot`，数据目录之内、绝不碰家目录）。
     const skillsRoot = options.skillsRoot ?? defaultSkillsRoot()
+    // 使用者提炼技能（D80）的可见默认根：`~/.agentdeck/skills-mine`——与安装根
+    // **物理分离**且 git 化（平台自动 commit）。测试可覆盖（NFR-T-01）。
+    const skillsMineRoot = options.skillsMineRoot ?? defaultSkillsMineRoot()
 
     // ★ 只有用默认位置时才迁移旧目录。
     //
@@ -419,6 +433,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       ...(options.runtimeKey ? { runtimeKey: options.runtimeKey } : {}),
       workRoot,
       skillsRoot,
+      skillsMineRoot,
       ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
       ...(options.skillListPath ? { skillListPath: options.skillListPath } : {}),
       onInfo: (m) => process.stdout.write(`${m}\n`),
@@ -447,7 +462,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   // 技能目录同理——2026-10 起技能正文是磁盘上的真文件，使用者会进去改它。
   process.stdout.write(
     `\nAgentDeck 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n` +
-      `  工作目录：${daemon.workRoot}\n  技能目录：${daemon.skillsRoot}\n`,
+      `  工作目录：${daemon.workRoot}\n  技能目录：${daemon.skillsRoot}\n` +
+      `  提炼技能目录：${daemon.skillsMineRoot}\n`,
   )
   // ★ 沙箱状态必须**每次启动都报**，而不是只在开启时报。
   //   "这次跑的东西有没有被沙箱"是个要紧的事实，不该要人去翻命令历史。

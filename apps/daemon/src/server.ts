@@ -79,6 +79,8 @@ import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/w
 import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
+import { buildDraftPrompt, buildMaterial, crystallizeTargets } from './crystallize.ts'
+import { commitMine, ensureMineRepo, probeGit } from './run-hooks/skill-mine.ts'
 import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
@@ -218,6 +220,14 @@ export interface DaemonOptions {
    */
   skillsRoot?: string
   /**
+   * **使用者提炼**技能（D80）的落点根。缺省 = 数据目录内的 `skills-mine/`
+   * （`fallbackSkillsRoot` 的对应兜底）；CLI 显式传 `~/.agentdeck/skills-mine`。
+   *
+   * ★ 这个根是 **git 仓库**（平台自动 commit，可回退，见 `run-hooks/skill-mine.ts`）；
+   *   测试可覆盖（指向临时目录，NFR-T-01 的同类理由）。
+   */
+  skillsMineRoot?: string
+  /**
    * 可选沙箱（M4）。缺省 `'none'`——见 `docs/design/design.md` §14.1 与 NG7：
    * 首版 run 以 daemon 用户的完整权限执行，这一点必须如实披露。
    *
@@ -295,6 +305,8 @@ export interface DaemonHandle {
   workRoot: string
   /** 实际生效的技能内容根——同样要印在启动横幅上（技能正文就落在这里）。 */
   skillsRoot: string
+  /** 使用者提炼技能（D80）的落点根（git 化）——CLI 横幅一并显示。 */
+  skillsMineRoot: string
   close(): Promise<void>
 }
 
@@ -1859,11 +1871,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 技能内容的落点（2026-10）：正文 + 支持文件存成真文件放在这里，`skill.jsonl`
   // 退化成索引。兜底在数据目录之内（不碰家目录），可见的默认值由 CLI 给出。
   const skillsRoot = options.skillsRoot ?? fallbackSkillsRoot(options.dataDir)
+  // 使用者提炼技能（D80）的落点：与安装根**物理分离**（`skills-mine`），
+  // 且这个根是 git 仓库（平台自动 commit）。兜底同样在数据目录之内。
+  const skillsMineRoot = options.skillsMineRoot ?? join(options.dataDir, 'skills-mine')
 
   const store = await FileStore.open({
     dataDir: options.dataDir,
     fsync: options.fsync ?? true,
     skillsRoot,
+    skillsMineRoot,
   })
 
   // ★ runtime 的选择从"写死 claude"变成"查装配表"（FR-CLI-47）。
@@ -4024,6 +4040,298 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
+    // ── 聊天/任务沉淀 skill（D80）──
+    //
+    // 两个场景、一套流水线（设计文档 `docs/design/skill-crystallization.md`）：
+    // 点按钮 → 沉淀目标面板（新建必填作用描述 / 更新本次加载的）→ 起草 run →
+    // 草稿审阅 → 确认入库（skills-mine 根，source:'mine'，git 化）。
+    //
+    // 三个端点：
+    //   · GET  /api/crystallize/targets?runId=…  目标面板信息（加载的 skill、任务是否审核过）
+    //   · POST /api/crystallize/draft            打包素材 → 起草 run → 返回 draftRunId
+    //   · POST /api/crystallize/commit           审阅确认 → 落 skills-mine + git commit
+    if (req.method === 'GET' && path === '/api/crystallize/targets') {
+      const url2 = new URL(req.url ?? '/', 'http://localhost')
+      const runId = url2.searchParams.get('runId') ?? ''
+      if (runId === '') {
+        sendJson(res, 400, { error: '需要 runId', code: 'run_id_required' })
+        return
+      }
+      const run = await store.getRun(runId as RunId)
+      if (!run || run.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `run 不存在（${runId}）`, code: 'run_not_found' })
+        return
+      }
+      sendJson(res, 200, await crystallizeTargets(store, run))
+      return
+    }
+
+    if (req.method === 'POST' && path === '/api/crystallize/draft') {
+      const raw = (await readJsonBody(req)) as {
+        runId?: unknown
+        target?: unknown
+        userFeedback?: unknown
+      }
+      const runId = typeof raw?.runId === 'string' ? raw.runId : ''
+      if (runId === '') {
+        sendJson(res, 400, { error: '需要 runId', code: 'run_id_required' })
+        return
+      }
+      const sourceRun = await store.getRun(runId as RunId)
+      if (!sourceRun || sourceRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `run 不存在（${runId}）`, code: 'run_not_found' })
+        return
+      }
+      // 目标：新建（必填作用描述）或 更新本次加载的 skill。
+      let target:
+        | { kind: 'new'; purpose: string }
+        | { kind: 'update'; skillId: string }
+      const t = raw?.target as Record<string, unknown> | undefined
+      if (t?.kind === 'new') {
+        const purpose = typeof t['purpose'] === 'string' ? t['purpose'].trim() : ''
+        if (purpose === '') {
+          sendJson(res, 400, { error: '新建需要「作用描述」（防 agent 总结偏离）', code: 'purpose_required' })
+          return
+        }
+        target = { kind: 'new', purpose }
+      } else if (t?.kind === 'update') {
+        const skillId = typeof t['skillId'] === 'string' ? t['skillId'] : ''
+        if (skillId === '') {
+          sendJson(res, 400, { error: '更新需要 skillId', code: 'skill_id_required' })
+          return
+        }
+        target = { kind: 'update', skillId }
+      } else {
+        sendJson(res, 400, { error: '需要 target（{kind:"new"} 或 {kind:"update"}）', code: 'target_required' })
+        return
+      }
+
+      // ── 素材打包 ──
+      const userFeedback = typeof raw?.userFeedback === 'string' ? raw.userFeedback : undefined
+      const material = await buildMaterial(store, sourceRun, userFeedback)
+      if (material.text.trim() === '') {
+        sendJson(res, 400, { error: '这个 run 没有可沉淀的内容（消息为空）', code: 'empty_material' })
+        return
+      }
+
+      // ── 现有 skill 列表 + 更新基线 ──
+      const targets = await crystallizeTargets(store, sourceRun)
+      const existingSkills = targets.loadedSkills.map((s) => ({
+        slug: s.slug,
+        name: s.name,
+        description: s.description,
+      }))
+      let existingSkill: { name: string; body: string; description: string | null } | null = null
+      if (target.kind === 'update') {
+        const mine = await store.listSkills(workspaceId)
+        const skill = mine.find((s) => (s.id as string) === target.skillId)
+        if (!skill) {
+          sendJson(res, 404, { error: `skill 不存在（${target.skillId}）`, code: 'skill_not_found' })
+          return
+        }
+        existingSkill = {
+          name: skill.name,
+          body: skill.body,
+          description: skill.description,
+        }
+      }
+
+      const prompt = buildDraftPrompt({
+        material: material.text,
+        ...(target.kind === 'new' ? { purpose: target.purpose } : {}),
+        existingSkill,
+        existingSkills,
+        scope: targets.scope,
+      })
+
+      // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
+      const draftRunId = ulid() as RunId
+      const sourceAgent = await store.getAgent(sourceRun.agentId)
+      if (!sourceAgent) {
+        sendJson(res, 400, { error: '发起 run 的执行者已不存在', code: 'agent_not_found' })
+        return
+      }
+      const outcome = await executor.submit({
+        runId: draftRunId,
+        kind: 'execute',
+        agentRef: {
+          id: sourceAgent.id,
+          name: sourceAgent.name,
+          instructions: sourceAgent.instructions,
+        },
+        // 起草 run 不注入任何 skill——素材里已含现有技能列表（文本），
+        // 注入会干扰"提炼"这件事本身。
+        skills: [],
+        // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
+        //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
+        subject: { type: 'skill-draft', id: draftRunId },
+        prompt,
+        limits: { maxTurns: null, timeoutMs: null },
+        // 起草 run **绝不自动审**（评审在人——审阅界面是它唯一的大门）。
+        reviewerAgentId: null,
+        // 起草的产出是文本草稿，进 run 的 result；工作目录给它一间专用小屋，
+        // 不碰源 run 的目录（草稿不进任何工作目录，设计 §5）。
+        workDir: join(workRoot, `skill-draft-${draftRunId}`),
+      })
+      if (outcome.kind === 'rejected') {
+        sendJson(res, 503, { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' })
+        return
+      }
+      sendJson(res, 202, { draftRunId, materialStats: material.stats })
+      return
+    }
+
+    if (req.method === 'POST' && path === '/api/crystallize/commit') {
+      const raw = (await readJsonBody(req)) as {
+        draftRunId?: unknown
+        target?: unknown
+        slug?: unknown
+        name?: unknown
+        description?: unknown
+        body?: unknown
+        files?: unknown
+      }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      // 起草 run 必须跑完（completed）才能确认入库——草稿都没出来就入库是幻觉。
+      if (draftRun.status !== 'completed') {
+        sendJson(res, 409, { error: `起草 run 尚未完成（${draftRun.status}）`, code: 'draft_not_completed' })
+        return
+      }
+
+      let target: { kind: 'new' } | { kind: 'update'; skillId: string }
+      const t = raw?.target as Record<string, unknown> | undefined
+      if (t?.kind === 'new') {
+        target = { kind: 'new' }
+      } else if (t?.kind === 'update' && typeof t['skillId'] === 'string' && t['skillId'] !== '') {
+        target = { kind: 'update', skillId: t['skillId'] }
+      } else {
+        sendJson(res, 400, { error: '需要 target', code: 'target_required' })
+        return
+      }
+
+      const slug = typeof raw?.slug === 'string' ? raw.slug.trim() : ''
+      const name = typeof raw?.name === 'string' ? raw.name.trim() : ''
+      const body = typeof raw?.body === 'string' ? raw.body : ''
+      const description = typeof raw?.description === 'string' ? raw.description.trim() : ''
+      if (slug === '' || name === '' || body.trim() === '') {
+        sendJson(res, 400, { error: '需要 slug / name / body', code: 'fields_required' })
+        return
+      }
+
+      // 校验（与安装同一关：`resolvePayloadEntry` 做规范化与限额检查）。
+      let validated
+      try {
+        validated = resolvePayloadEntry({
+          slug,
+          body,
+          files: typeof raw?.files === 'object' && raw.files !== null ? (raw.files as Record<string, string>) : null,
+          sourceRef: `mine:${slug}`,
+        })
+      } catch (err) {
+        sendJson(res, 400, {
+          error: err instanceof Error ? err.message : String(err),
+          code: 'invalid_skill',
+        })
+        return
+      }
+
+      const existing = await store.listSkills(workspaceId)
+      let clashMine: Skill | null = null
+      let clashInstalled: Skill | null = null
+      for (const s of existing) {
+        if (s.slug !== validated.slug) continue
+        if (s.source === 'mine') clashMine = s
+        else clashInstalled = s
+      }
+      // 更新目标：必须是提炼的（source:'mine'）——安装的不能原地改（那是外部内容），
+      // 更新安装的 = 存为你的版本（遮蔽），走"新建 + 同 slug 遮蔽"那条路。
+      if (target.kind === 'update') {
+        const targetSkill = existing.find((s) => (s.id as string) === target.skillId)
+        if (!targetSkill || targetSkill.source !== 'mine') {
+          sendJson(res, 400, { error: '更新目标必须是提炼的 skill（source: mine）', code: 'target_not_mine' })
+          return
+        }
+        if (targetSkill.slug !== validated.slug) {
+          sendJson(res, 400, { error: '更新不允许改 slug（改名请新建）', code: 'slug_mismatch' })
+          return
+        }
+      } else {
+        // 新建撞提炼根已有同 slug → 让前端切到"更新"（进化）或改名。
+        if (clashMine) {
+          sendJson(res, 409, {
+            error: `已有你提炼的同名 skill（${clashMine.slug}）`,
+            code: 'clash_mine',
+            existing: { slug: clashMine.slug, name: clashMine.name, id: clashMine.id },
+          })
+          return
+        }
+      }
+
+      const now = Date.now()
+      const skill: Skill = {
+        // 更新 = 复用原 id（不留孤儿记录）；新建 = 新 id。
+        id:
+          target.kind === 'update'
+            ? (target.skillId as Skill['id'])
+            : (ulid() as Skill['id']),
+        workspaceId,
+        slug: validated.slug,
+        name,
+        description: description !== '' ? description : null,
+        body: validated.body,
+        ...(Object.keys(validated.files).length > 0 ? { files: validated.files } : {}),
+        verdictSchemaVersion: 1,
+        source: 'mine',
+        sourceRef: `mine:${validated.slug}`,
+        version: null,
+        createdAt:
+          target.kind === 'update'
+            ? (clashMine?.createdAt ?? now)
+            : now,
+        updatedAt: now,
+      }
+      await store.insertSkill(skill)
+
+      // ── git 版本管理（可用性开关：没有 git = 版本管理关闭，沉淀照常）──
+      let versioning: { enabled: boolean; note?: string } = { enabled: false }
+      const probe = await probeGit()
+      if (!probe.available) {
+        versioning = {
+          enabled: false,
+          note: '版本管理未启用（系统无 git），沉淀照常、无历史回退',
+        }
+      } else {
+        const ensure = await ensureMineRepo(skillsMineRoot)
+        if (!ensure.ok) {
+          versioning = { enabled: false, note: `版本管理未启用：${ensure.reason}` }
+        } else {
+          const message =
+            target.kind === 'update'
+              ? `skill ${skill.slug} 进化（更新）`
+              : `skill ${skill.slug} 沉淀（新建）`
+          const committed = await commitMine(skillsMineRoot, message)
+          if (committed.ok) {
+            versioning = { enabled: true }
+          } else {
+            // 降级兜底：有 git 但坏了 → note 降级，沉淀照常（设计 §7.3.1）。
+            versioning = { enabled: false, note: `git 提交失败（已降级）：${committed.reason}` }
+          }
+        }
+      }
+
+      sendJson(res, 201, { skill, versioning })
+      return
+    }
+
     // ── 技能（审核模板与自建）──
     //
     // 2026-10 起这条接口**只读、无副作用**：不再对账。以前它读列表时会顺手把
@@ -5897,6 +6205,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     store,
     workRoot,
     skillsRoot,
+    skillsMineRoot,
     async close() {
       // 先断开所有连接：`server.close()` 会等现有连接自然结束，而页面的
       // keep-alive 与 SSE 长连接可能挂很久——那会让"停止 daemon"看起来卡住。
@@ -6118,9 +6427,20 @@ function issueIdOfSubject(run: Run): Issue['id'] | null {
 async function loadAgentSkills(store: Store, agent: Agent): Promise<Skill[]> {
   const all = await store.listSkills(agent.workspaceId)
   const byId = new Map(all.map((s) => [s.id as string, s]))
-  return agent.skillIds.flatMap((id) => {
+  const resolved = agent.skillIds.flatMap((id) => {
     const skill = byId.get(id as string)
     return skill ? [skill] : []
+  })
+  // ★ 同 slug 遮蔽（D80，设计 §1.1）：提炼的（mine）优先于安装的。
+  //   使用者挂的是安装版的 id，但库里已有他提炼的同 slug 版本——注入的是
+  //   提炼版（那是他的资产；安装版被遮蔽，列表里标注）。
+  const mineBySlug = new Map(
+    all.filter((s) => s.source === 'mine').map((s) => [s.slug, s]),
+  )
+  return resolved.map((skill) => {
+    if (skill.source === 'mine') return skill
+    const mine = mineBySlug.get(skill.slug)
+    return mine ?? skill
   })
 }
 

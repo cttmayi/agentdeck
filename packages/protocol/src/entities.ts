@@ -229,9 +229,14 @@ export const Skill = z.object({
    * 老数据里这个键还在（整条记录以 JSON 存、读取路径上没有 zod 校验），
    * 读取方按"没有"处理即可——不需要数据迁移。
    */
-  /** 来源：本地自有 / 从远端下载。 */
-  source: z.enum(['local', 'remote']),
-  /** 下载来源标识（source 为 remote 时）。 */
+  /** 来源：本地自有 / 从远端下载 / 使用者提炼（D80）。 */
+  source: z.enum(['local', 'remote', 'mine']),
+  /**
+   * 下载来源标识（source 为 remote 时）。
+   *
+   * ⚠️ `mine`（使用者提炼，D80）的来源标识是 `mine:<slug>`——不依赖远端目录，
+   *    版本号由 git 历史提供（skills-mine 根是 git 仓库，见设计文档 §7.3）。
+   */
   sourceRef: z.string().nullable(),
   /**
    * 这份内容的**版本**（远端目录给的那个）。没版本时为 null。
@@ -775,7 +780,7 @@ export const SubjectRef = z.object({
    * 都按 subject 走——不认它，聊天就只能显式传一个 workDir，而那会让
    * "默认给个专属目录"这件事从平台默认退化成调用方的责任。
    */
-  type: z.enum(['issue', 'report', 'run', 'conversation']),
+  type: z.enum(['issue', 'report', 'run', 'conversation', 'skill-draft']),
   id: z.string(),
 })
 export type SubjectRef = z.infer<typeof SubjectRef>
@@ -784,7 +789,8 @@ export type SubjectRef = z.infer<typeof SubjectRef>
 export const SkillRef = z.object({
   id: SkillId,
   slug: z.string(),
-  source: z.enum(['local', 'remote']),
+  /** 含 `'mine'`（D80）：提炼的 skill 同样可以被注入，来源要如实带过去。 */
+  source: z.enum(['local', 'remote', 'mine']),
 })
 export type SkillRef = z.infer<typeof SkillRef>
 

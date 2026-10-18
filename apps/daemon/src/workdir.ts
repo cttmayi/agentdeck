@@ -51,6 +51,9 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   //   用 `chat-` 而不是 `conversation-`：目录名是给人 `ls` 看的，
   //   短的那个一眼认得出，而且它和界面上那三个字（「聊天」）对得上。
   conversation: 'chat',
+  // ★ 起草 run（D80）：`<workRoot>/skill-draft-<run id>`。草稿 run 是
+  //   一条普通 execute run，工作目录按 subject 自动分配一间专用小屋。
+  'skill-draft': 'skill-draft',
 }
 
 /**
@@ -254,6 +257,18 @@ export function fallbackWorkRoot(dataDir: string): string {
  */
 export function defaultSkillsRoot(): string {
   return join(homedir(), '.agentdeck', 'skills')
+}
+
+/**
+ * 使用者提炼技能（D80）的**可见默认根**：`~/.agentdeck/skills-mine`。
+ *
+ * 与安装根 `~/.agentdeck/skills` **物理分离**（设计定稿——"不应该把安装的 skill
+ * 和我自己提炼的 skill 混在一起"），并且这个根是 git 仓库（平台自动 commit，
+ * 可回退）。CLI 在 `startDaemon` 时显式传它，核心层的兜底是数据目录内的
+ * `skills-mine/`。
+ */
+export function defaultSkillsMineRoot(): string {
+  return join(homedir(), '.agentdeck', 'skills-mine')
 }
 
 /**
