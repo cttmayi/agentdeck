@@ -236,6 +236,36 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 
 **状态**：设计已定（2026-10-19），**未实作**——列入 §8 实现范围。
 
+#### 4.1.2 未来扩展：沉淀 Agent（同流程页，产出类型维度，2026-10-19 使用者提出）
+
+> 使用者："类似沉淀 skill 一样，通过对话或者任务来更新 Agent 的 prompt。"
+> ——**反向沉淀**：把对话/任务里的经验结晶回**智能体指令**（`Agent.instructions`），
+> 与沉淀 skill（SKILL.md）并列的第二种产出类型。**未来需求，未实作**，这里只记
+> 流程页的复用口子，保证将来加它不改页面骨架。
+
+**复用结论**：流程页骨架（① 定目标 → ② 起草 run → ③ 审阅入库）与"产出类型"解耦，
+沉淀 Agent = 同一流程页 + 产出类型 = agent prompt。三处差异、其余照用：
+
+| | 沉淀 Skill | 沉淀 Agent（未来） |
+|---|---|---|
+| ① 目标 | 新建 / 更新**本次加载的 skill** | 新建 / 更新**本次对话/任务实际涉及的 agent**（执行者、审核者） |
+| ② 起草 run | 产出 SKILL.md 草稿（subject `skill-draft`） | 产出指令草稿（subject `agent-draft` 变体）；素材不变（events + 反馈 + 判决） |
+| ③ 审阅入库 | frontmatter + 正文 → `skills-mine` + git | 指令文本 → 更新 `Agent.instructions`（无 frontmatter） |
+
+**共享**：步骤条、素材摘要、RunLog 常驻、失败/完成态、恢复进行中的起草
+（`activeDraft` 按 sourceRunId 泛化，不区分产出类型）。
+
+**复用口子（设计上现在就成立，成本极低）**
+1. subject 类型已是独立枚举——`skill-draft` 旁加 `agent-draft` 变体；起草 run 机制
+   （executor 复用、reviewerAgentId:null、不挂 issue）一字不动。
+2. draft 接口支持显式 `agentId`（缺省 = 源 agent）——agent 沉淀的起草者/目标者都明确，
+   接口天然兼容。
+3. 审阅分节按产出类型渲染——skill 版是 slug/name/description/正文；agent 版是纯指令文本。
+
+**将来单独定的点**：agent prompt 的版本管理——skill 有 `skills-mine` git 根，agent 指令
+没有对应 git 根；将来更新 agent prompt 要么在 agent 记录留历史/审计，要么也 git 化。
+不影响流程页复用。
+
 ### 4.2 信号建议（辅触发）——⏸️ 暂缓，首版不做（2026-10-18 使用者定）
 
 使用者："**4.2 信号建议（辅触发）先不做，这部分还没考虑清楚**"。设计方向（借
