@@ -260,6 +260,19 @@
     switch (event['t']) {
       case 'message': {
         const m = event['message'] as RunMessage
+        // ★ 折叠**连续重复的 status**（2026-10-18）：claude 2.1.302 的
+        //   `thinking_tokens` 流式事件曾被旧解析器当成"会话已启动"落库——
+        //   一次审核 run 积了 3914 条一模一样的 status（54R25G6R），渲染
+        //   4000 个 DOM 节点让浏览器直接卡死（parser 已修，新 run 不再产生；
+        //   这一层兜住**存量** run，打开不卡）。
+        //
+        //   折叠条件只碰"**与上一条完全相同**"的 status：平台 note 也走
+        //   status 通道，但它的内容不会自己连续重复——真正的重复信息
+        //   没有任何信息量，留一条就够。seq 照常推进，重连去重不受影响。
+        const last = rows[rows.length - 1]
+        if (m.type === 'status' && last?.kind === 'status' && last.text === m.content) {
+          break
+        }
         // ★ 把 input / output 一起带上——它们本来就在消息里，只是原来被丢掉了
         push(m.type, m.content, {
           tool: m.tool,

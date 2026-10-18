@@ -148,6 +148,15 @@ export class ClaudeStreamParser {
 
   /** `{"type":"system","subtype":"init","session_id":...,"model":...,"tools":[...]}` */
   #handleSystem(event: Record<string, unknown>): boolean {
+    const subtype = typeof event['subtype'] === 'string' ? event['subtype'] : null
+    // ★ 2.1.302+：claude 会流式发 `system/subtype=thinking_tokens`（每次思考
+    //   进度一条——实测一次"hi"对话就有 34 条，长的审核会话会到几千条）。
+    //   它不是"会话启动"，不该产生 status 消息：否则 run 日志会积累几千条
+    //   一模一样的"会话已启动"（54R25G6R 实测 3914 条），日志膨胀、前端
+    //   渲染完整日志直接卡死。**只有 init（或旧版无 subtype）才是会话启动。**
+    //   其它 subtype 识别但不产生消息——将来上游加新 system 事件不会污染日志。
+    if (subtype !== null && subtype !== 'init') return true
+
     if (typeof event['session_id'] === 'string') this.#sessionId = event['session_id']
     if (typeof event['model'] === 'string') this.#model = event['model']
 

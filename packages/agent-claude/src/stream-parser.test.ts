@@ -32,6 +32,38 @@ describe('Claude stream-json 解析 —— 正常路径', () => {
     assert.match(messages[0]?.content ?? '', /2 个工具/)
   })
 
+  test('system/thinking_tokens（2.1.302+）不产生消息——它不是"会话启动"', () => {
+    // ★ 2026-10-18 事故回归：claude 升级 2.1.302 后每条思考进度发一条
+    //   `system/subtype=thinking_tokens`（无 tools 字段）。旧解析把所有
+    //   system 事件都当"会话启动"→ 一次审核 run 积了 3914 条一模一样的
+    //   status（54R25G6R），日志膨胀、前端「完整日志」渲染卡死。
+    //   这条钉住：thinking_tokens 被识别但不产生任何消息。
+    const { parser, messages } = collect()
+    parser.push(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'thinking_tokens',
+        estimated_tokens: 1,
+        estimated_tokens_delta: 1,
+        session_id: 'sess-1',
+        uuid: 'u-1',
+      }),
+    )
+    assert.equal(messages.length, 0, 'thinking_tokens 不得产生消息')
+    // 后续真正的 init 仍正常报一条启动（确认拦截只针对非 init subtype）
+    parser.push(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'init',
+        session_id: 'sess-1',
+        tools: ['Read'],
+      }),
+    )
+    assert.equal(messages.length, 1, 'init 仍应产生一条启动状态')
+    assert.match(messages[0]?.content ?? '', /1 个工具/)
+    assert.equal(parser.sessionId, 'sess-1', 'init 的 session_id 仍要提取')
+  })
+
   test('assistant 的 text / thinking / tool_use 分别归一化', () => {
     const { parser, messages } = collect()
     parser.push(
