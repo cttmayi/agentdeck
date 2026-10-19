@@ -463,6 +463,36 @@ describe('listCrystallizeDrafts：沉淀任务列表', () => {
     assert.equal(items[1]!.source?.label, conv.title)
   })
 
+  test('放弃的（discarded: true）不出现——没入库的草稿要能收尾，否则左栏只增不减', async () => {
+    const agent = await seedAgent({ id: 'exec3c' })
+    const conv = makeConversation({ id: 'conv-3c', workspaceId: WS })
+    await store.insertConversation(conv)
+    const convRun = await seedRun({
+      id: 'run-conv3c',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'conversation', id: conv.id },
+    })
+    await store.insertRun(
+      makeRun({
+        id: 'draft-discarded',
+        agentId: agent.id as string,
+        kind: 'execute',
+        status: 'completed',
+        workspaceId: WS,
+        subject: { type: 'skill-draft', id: 'draft-discarded', sourceRunId: 'run-conv3c' },
+        crystallizeTarget: { kind: 'new' },
+        discarded: true,
+        queuedAt: 400,
+      }),
+    )
+    const items = await listCrystallizeDrafts(store, convRun.workspaceId as string)
+    assert.ok(
+      !items.some((i) => i.runId === 'draft-discarded'),
+      '放弃过的那条不该再出现在沉淀列表里',
+    )
+  })
+
   test('源 run 已丢失：source 为 null，行仍列出（靠 runId 兜底）', async () => {
     const agent = await seedAgent({ id: 'exec3b' })
     const orphan = makeRun({

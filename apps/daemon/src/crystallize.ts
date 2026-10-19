@@ -187,7 +187,7 @@ async function findActiveDraft(
 
   const matched = drafts
     .filter((r) => {
-      if (r.crystallized === true) return false
+      if (r.crystallized === true || r.discarded === true) return false
       const src = r.subject.sourceRunId
       return src !== undefined && sourceRunIds.includes(src)
     })
@@ -433,7 +433,11 @@ export async function listCrystallizeDrafts(
 ): Promise<CrystallizeDraftRow[]> {
   const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
   const drafts = page.items.filter(
-    (r) => r.kind === 'execute' && r.subject.type === 'skill-draft' && r.crystallized !== true,
+    (r) =>
+      r.kind === 'execute' &&
+      r.subject.type === 'skill-draft' &&
+      r.crystallized !== true &&
+      r.discarded !== true,
   )
   drafts.sort((a, b) => b.queuedAt - a.queuedAt)
   const out: CrystallizeDraftRow[] = []

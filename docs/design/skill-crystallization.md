@@ -297,6 +297,40 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 **归属不变**：沉淀仍然**不是任务**（起草 run 不挂 issue、不进任务列表）；这一页的列表
 是沉淀自己的列表，与任务列表互不影响。
 
+**状态语义：待审阅 ≠ 已完成（2026-10-19 使用者："很多沉淀任务标注'已完成'，实际没有完成"）**
+
+初版左栏直接把**起草 run 的 status** 当任务状态显示，于是 run 一跑完列表就写「已完成」。
+可 run 完成只意味着**草稿写出来了**——沉淀的完成线是**入库**（写 skills-mine + git commit）。
+真实数据核对：当时 5 条草稿里 3 条显示「已完成」，而 `~/.agentdeck/skills-mine` **一条都没有**
+（仓库都没建），也就是说这 3 条一条都没沉淀完。**标签在撒谎。**
+
+现在中间加一层任务状态（`apps/web/src/lib/crystallize-state.ts`）：
+
+| 起草 run | 列表徽标 | 颜色档 |
+|---|---|---|
+| queued / dispatched / deferred / waiting_local_directory / running | 起草中 | `in_progress` |
+| completed（未入库） | **待审阅** | `in_review` |
+| failed | 起草失败 | `failed` |
+| cancelled | 已停止 | `cancelled` |
+| crystallized: true / discarded: true | 不进列表 | — |
+
+流程页「完成态」（绿框 + 已沉淀 + git 状态）**只在 commit 成功之后**出现，所以那才是"真完成"。
+恢复提示里的状态词也用任务状态（"有一条草稿还没收尾（待审阅）"），不再说「已完成」。
+
+**放弃：给没入库的草稿一个出口（同一次返工）**
+
+发现的问题：旧版流程页的「放弃」只重置本地界面状态，草稿仍在库里、仍在左栏——于是
+"很多沉淀任务"永远停在那儿，列表只增不减（`abandonReview` 的注释都写着"回目标态重新来过"，
+可它什么也没删）。现在：
+
+- `POST /api/crystallize/discard { draftRunId }`：校验是起草 run 且属于本工作区；还在跑就先
+  `cancel`；然后打 `discarded: true`。已入库的返回 409 `already_crystallized`（那是已发生的事实，
+  该去技能页删）。幂等：再放弃一次仍是 200。
+- `listCrystallizeDrafts` 与 `findActiveDraft` 都跳过 `discarded`——列表干净了，
+  重开流程页也不会再把放弃的草稿"继续"一遍。
+- 入口两处：左栏行右侧的「×」（与聊天/任务列表的删除钮同一格同一款，带确认框）、
+  流程页审阅步的「放弃」（同样是真删除，完成后回列表并刷新）。
+
 **控件纪律（2026-10-19 使用者指出"UI 风格和任务差很多"之后的返工）**
 
 使用者原话："UI 风格和任务差很多，怀疑你没有用同一控件，请确认。"——确认结果是**确实没用**：

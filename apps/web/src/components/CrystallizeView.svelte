@@ -28,7 +28,9 @@
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { go } from '../lib/view.ts'
+  import { askConfirm } from '../lib/confirm.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
+  import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
 
@@ -62,6 +64,8 @@
   export let onback: () => void = () => {}
   /** 入库成功后的回调（父组件刷新技能列表）。 */
   export let ondone: () => void = () => {}
+  /** 放弃了一条起草的回调（父组件刷新沉淀列表）。 */
+  export let ondiscarded: () => void = () => {}
 
   let step: 'target' | 'drafting' | 'review' | 'done' = 'target'
   let targets: CrystallizeTargets | null = null
@@ -295,8 +299,36 @@
     error = ''
   }
 
-  /** 放弃草稿：回目标态重新来过（退出用栏头返回）。 */
-  function abandonReview(): void {
+  /**
+   * 放弃草稿：**真的**把它从列表里去掉，然后回目标态。
+   *
+   * ★ 三轮修：原来这里只重置本地状态——草稿仍在库里、仍在左栏（使用者看到"很多
+   * 沉淀任务标注已完成、实际没完成"）。现在打 `/api/crystallize/discard`（服务端
+   * 记 `discarded: true`，还在跑会先停），列表那边的「×」走同一条路。
+   */
+  async function abandonReview(): Promise<void> {
+    if (draftRunId !== '') {
+      if (
+        !(await askConfirm({
+          title: $t('crystallize.abandon'),
+          message: $t('crystallize.discardConfirm', { label: sourceLabel }),
+          confirmLabel: $t('crystallize.abandon'),
+          danger: true,
+        }))
+      )
+        return
+      try {
+        await api('/api/crystallize/discard', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ draftRunId }),
+        })
+        ondiscarded()
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e)
+        return
+      }
+    }
     step = 'target'
     draftRunId = ''
     draftStatus = null
@@ -488,7 +520,7 @@
         <button class="ghost" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
       {/if}
     {:else if step === 'review'}
-      <button class="ghost" onclick={abandonReview}>{$t('crystallize.abandon')}</button>
+      <button class="ghost" onclick={() => void abandonReview()}>{$t('crystallize.abandon')}</button>
       <button class="primary" disabled={saving || !reviewValid} onclick={() => void save()}>
         {$t('crystallize.confirm')}
       </button>
@@ -522,7 +554,9 @@
         <div class="notice resume">
           <div class="resume-text">
             <strong>
-              {$t('crystallize.resumeNotice', { status: statusLabel(targets.activeDraft.status) })}
+              {$t('crystallize.resumeNotice', {
+                status: $t(crystallizeStateKey(crystallizeState(targets.activeDraft.status))),
+              })}
             </strong>
             <span class="faint small">run {targets.activeDraft.runId.slice(0, 4)}…</span>
           </div>

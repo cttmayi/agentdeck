@@ -44,6 +44,17 @@ export const crystallizeText = {
     zh: '在聊天/任务页点「沉淀成 skill」/「优化 skill」，或点右上角「新建沉淀」',
     en: 'Click "Crystallize" in a chat or "Optimize skill" in a task, or use "New" at the top right',
   },
+  // ── 沉淀任务的状态（不是起草 run 的状态） ──
+  'crystallize.state.drafting': { zh: '起草中', en: 'Drafting' },
+  'crystallize.state.review': { zh: '待审阅', en: 'Awaiting review' },
+  'crystallize.state.failed': { zh: '起草失败', en: 'Draft failed' },
+  'crystallize.state.stopped': { zh: '已停止', en: 'Stopped' },
+  'crystallize.discard': { zh: '放弃这条沉淀', en: 'Discard this crystallization' },
+  'crystallize.discardConfirm': {
+    zh: '放弃「{label}」这条沉淀？草稿会从列表移除，已入库的技能不受影响。',
+    en: 'Discard the crystallization of "{label}"? The draft leaves the list; committed skills are untouched.',
+  },
+  'crystallize.discarded': { zh: '已放弃', en: 'Discarded' },
   'crystallize.listLoadingError': { zh: '读取沉淀列表失败', en: 'Failed to load crystallizations' },
   'crystallize.sourceUnknown': { zh: '来源未知', en: 'Unknown source' },
   'crystallize.rowNew': { zh: '新建', en: 'New' },
@@ -108,9 +119,11 @@ export const crystallizeText = {
   },
 
   // ── 恢复进行中的起草（§4.1.1） ──
+  // ★ 状态词用**任务状态**（起草中 / 待审阅），不是起草 run 的「已完成」——
+  //   这里说"已完成"会让人以为沉淀本身完事了。
   'crystallize.resumeNotice': {
-    zh: '有进行中的起草（{status}）',
-    en: 'An in-progress draft exists ({status})',
+    zh: '有一条草稿还没收尾（{status}）',
+    en: 'A draft is still unfinished ({status})',
   },
   'crystallize.resumeContinue': { zh: '继续', en: 'Continue' },
   'crystallize.resumeNew': { zh: '新起草', en: 'New draft' },

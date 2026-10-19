@@ -4058,6 +4058,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   · GET  /api/crystallize/drafts           沉淀任务列表（未入库的起草 run + 来源标签）
     //   · GET  /api/crystallize/sources          新建沉淀的来源选择器（对话/达标任务 + 源 runId）
     //   · POST /api/crystallize/draft            打包素材 → 起草 run → 返回 draftRunId
+    //   · POST /api/crystallize/discard          放弃一条没入库的起草（列表只增不减的出口）
     //   · POST /api/crystallize/commit           审阅确认 → 落 skills-mine + git commit
     if (req.method === 'GET' && path === '/api/crystallize/drafts') {
       sendJson(res, 200, { items: await listCrystallizeDrafts(store, workspaceId) })
@@ -4065,6 +4066,44 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
     if (req.method === 'GET' && path === '/api/crystallize/sources') {
       sendJson(res, 200, { items: await listCrystallizeSources(store, workspaceId) })
+      return
+    }
+    /**
+     * 放弃一条起草（沉淀任务）。
+     *
+     * ★ 三轮：起草 run 完成 ≠ 沉淀完成——没入库的草稿会一直躺在左栏（"很多沉淀任务
+     * 标注已完成、实际没完成"），而旧版的「放弃」只重置了界面状态，草稿仍在库里。
+     * 这里给它一个真实的出口：还在跑就先停，然后打 `discarded: true`，两个列表
+     * （沉淀列表、恢复进行中的起草）都不再理它。
+     *
+     * 已入库的（`crystallized: true`）不给放弃——那是已经发生的事实，应该去技能页删。
+     */
+    if (req.method === 'POST' && path === '/api/crystallize/discard') {
+      const body = (await readJsonBody(req)) as { draftRunId?: unknown }
+      const draftRunId = typeof body.draftRunId === 'string' ? body.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (
+        !draftRun ||
+        draftRun.workspaceId !== workspaceId ||
+        draftRun.subject.type !== 'skill-draft'
+      ) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (draftRun.crystallized === true) {
+        sendJson(res, 409, { error: '这条已经入库，不能放弃', code: 'already_crystallized' })
+        return
+      }
+      // 还在跑就先停掉（否则它跑完又会出现在列表里）
+      if (!['completed', 'failed', 'cancelled'].includes(draftRun.status)) {
+        await executor.cancel(draftRunId as RunId).catch(() => {})
+      }
+      await store.insertRun({ ...draftRun, discarded: true })
+      sendJson(res, 200, { ok: true })
       return
     }
     if (req.method === 'GET' && path === '/api/crystallize/targets') {

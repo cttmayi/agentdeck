@@ -989,6 +989,12 @@ export const Run = z.object({
    */
   crystallized: z.boolean().optional(),
   /**
+   * 使用者**放弃**这条起草（沉淀任务）——三轮：起草 run 完成≠沉淀完成，没入库的
+   * 草稿要能收尾，否则左栏只增不减。放弃后不进沉淀列表、也不再算「恢复进行中」。
+   * 与 `crystallized`（成功入库）互斥语义上是两条路，但都只是"这条不用再管了"。
+   */
+  discarded: z.boolean().optional(),
+  /**
    * D80（2026-10-19）：`skill-draft` 起草 run 的**沉淀目标**（新建 / 更新哪条），
    * 起草时随 `SubmitRunRequest.crystallizeTarget` 落库。恢复进行中的起草时
    * 按它还原目标，见 `CrystallizeTargetRef`。

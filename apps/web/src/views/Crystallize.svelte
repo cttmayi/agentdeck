@@ -27,9 +27,11 @@
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
-  import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
+  import { crystallizeState, crystallizeStateClass, crystallizeStateKey } from '../lib/crystallize-state.ts'
   import { crystallize, go, goCrystallize } from '../lib/view.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
+  import { askConfirm } from '../lib/confirm.ts'
+  import { showToast } from '../lib/view.ts'
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
@@ -71,6 +73,11 @@
       : $t('crystallize.rowUpdate', { slug: row.target.skillId })
   }
 
+  /** 起草 run → 沉淀任务状态（待审阅 ≠ 已完成，见 lib/crystallize-state.ts）。 */
+  function stateOf(row: DraftRow): ReturnType<typeof crystallizeState> {
+    return crystallizeState(row.status)
+  }
+
   /** 列表行来源摘要：来源类型 + 标题（源 run 丢了时兜底）。 */
   function sourceLabel(row: DraftRow): string {
     if (row.source === null) return $t('crystallize.sourceUnknown')
@@ -105,6 +112,39 @@
       sourcesError = String(e instanceof Error ? e.message : e)
     } finally {
       sourcesLoading = false
+    }
+  }
+
+  /**
+   * 放弃一条起草（沉淀任务）。
+   *
+   * ★ 三轮：起草 run 完成 ≠ 沉淀完成，没入库的草稿原来**没有出口**——旧版流程页的
+   * 「放弃」只重置本地状态，草稿仍在库里、仍在左栏（使用者看到"很多沉淀任务标注
+   * 已完成、实际没完成"）。这里给列表一个真出口：先确认，再让服务端打
+   * `discarded`（还在跑会先停），然后刷新列表。
+   */
+  async function discard(row: DraftRow): Promise<void> {
+    if (
+      !(await askConfirm({
+        title: $t('crystallize.discard'),
+        message: $t('crystallize.discardConfirm', { label: sourceLabel(row) }),
+        confirmLabel: $t('crystallize.discard'),
+        danger: true,
+      }))
+    )
+      return
+    try {
+      await api('/api/crystallize/discard', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: row.runId }),
+      })
+      // 正开着的那条被放弃了 ⇒ 右栏回到空态（地址也回列表）
+      if ($crystallize?.runId === row.runId) go('crystallize')
+      showToast($t('crystallize.discarded'))
+      void refresh()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -186,12 +226,29 @@
               <!-- 标题单行省略 + `title` 兜底（与聊天/任务列表同一条：列表是用来扫的） -->
               <span class="crystal-title" title={sourceLabel(row)}>{sourceLabel(row)}</span>
               <span class="crystal-meta">
-                <span class="badge {runStatusClass(row.status)}">{$t(runStatusKey(row.status))}</span>
+                <!-- ★ 这一格是**沉淀任务**的状态，不是起草 run 的状态：
+                     run 跑完只说明草稿写出来了，活还没完（要审阅、要入库）——
+                     显示 run 的「已完成」会让使用者以为已经沉淀完了（见
+                     lib/crystallize-state.ts 顶部那段）。 -->
+                <span class="badge {crystallizeStateClass(stateOf(row))}">{$t(crystallizeStateKey(stateOf(row)))}</span>
                 <span class="faint small">{targetLabel(row)}</span>
                 <span class="faint small" title={absoluteTime(row.queuedAt)}
                   >{relativeTime(row.queuedAt, now)}</span
                 >
               </span>
+            {/snippet}
+            {#snippet action()}
+              <!-- 右侧动作钮：与聊天/任务的删除钮同一格同一款（默认几乎不可见，
+                   hover 才露出）。没入库的草稿要能收尾，否则左栏只增不减。 -->
+              <button
+                type="button"
+                class="list-row-action"
+                title={$t('crystallize.discard')}
+                aria-label={$t('crystallize.discard')}
+                onclick={() => void discard(row)}
+              >
+                ×
+              </button>
             {/snippet}
           </ListRow>
         {/each}
@@ -206,6 +263,10 @@
       sourceLabel={selectedLabel}
       onback={() => go('crystallize')}
       ondone={() => reloadQuiet()}
+      ondiscarded={() => {
+        go('crystallize')
+        void refresh()
+      }}
     />
   {:else}
     <MainArea empty={true} emptyTitle={$t('crystallize.pickHint')} emptyHint={$t('crystallize.listEmptyHint')}>

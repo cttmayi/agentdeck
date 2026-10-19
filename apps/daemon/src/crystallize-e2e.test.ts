@@ -420,3 +420,73 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.match(log, /进化（更新）/)
   })
 })
+
+  test('★ 放弃：没入库的草稿打个标记就从列表消失（列表只增不减的出口）', async () => {
+    const runId = await runReviewed('写个会留在列表里的草稿')
+    const draftRunId = await draftAndWait({
+      runId,
+      target: { kind: 'new', purpose: '这条会被放弃' },
+    })
+
+    const before = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
+      items: Array<{ runId: string }>
+    }
+    assert.ok(before.items.some((i) => i.runId === draftRunId), '放弃前在列表里')
+
+    const res = await fetch(`${daemon.url}/api/crystallize/discard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(res.status, 200, '放弃受理')
+
+    const after = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
+      items: Array<{ runId: string }>
+    }
+    assert.ok(!after.items.some((i) => i.runId === draftRunId), '放弃后不在列表里')
+
+    // 恢复进行中的起草也不再挂它（不然重开流程页又会把放弃的草稿"继续"一遍）
+    const t = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
+      activeDraft: unknown
+    }
+    assert.equal(t.activeDraft, null, '放弃过的草稿不再算「进行中的起草」')
+
+    // 幂等：再放弃一次也不报错（列表里本来就没有它）
+    const again = await fetch(`${daemon.url}/api/crystallize/discard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(again.status, 200, '重复放弃是幂等的')
+
+    // 不是起草 run / 不存在 ⇒ 404
+    const bogus = await fetch(`${daemon.url}/api/crystallize/discard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: '01M2NOTADRAFT0000000000000' }),
+    })
+    assert.equal(bogus.status, 404)
+  })
+
+  test('★ 已入库的不许放弃（那是已经发生的事实，该去技能页删）', async () => {
+    const runId = await runReviewed('写一份入库后不能放弃的')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new', purpose: '入库后用' } })
+    const { status } = await commit({
+      draftRunId,
+      target: { kind: 'new' },
+      slug: 'no-discard',
+      name: '不能放弃的技能',
+      description: '入库后不许放弃',
+      body: '# 不能放弃\n## When to Use\n时。\n## Procedure\n1. 做。',
+    })
+    assert.equal(status, 201)
+
+    const res = await fetch(`${daemon.url}/api/crystallize/discard`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(res.status, 409, '已入库 ⇒ 409 already_crystallized')
+    const body = (await res.json()) as { code?: string }
+    assert.equal(body.code, 'already_crystallized')
+  })
