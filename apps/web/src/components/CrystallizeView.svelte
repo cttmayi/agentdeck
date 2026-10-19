@@ -12,8 +12,10 @@
    *     （对话/任务实际注入的；提炼的=进化、安装的=存为你的版本并遮蔽）；
    *     素材统计（N 轮 · M 次工具调用）**起草前就可见**，空素材直接禁用开始；
    *   ② drafting：复用 RunLog 显示起草 run 的实时日志（现成能力），可停止；
-   *   ③ review：草稿预览/编辑（slug/name/description/body）→ 确认入库
-   *     （skills-mine 根 + git commit）；新建撞提炼根同 slug → 提示切"更新"。
+   *   ③ review（四轮重做）：产出是**文件集合**——文件树 + 选中文件编辑/预览。
+   *     name/description/slug **从 SKILL.md 的 frontmatter 解析**（不再手填：
+   *     同一份内容两个出处必然漂）；入库只传 files，服务端复算。
+   *     顶部给校验结论与变更集（新增/修改/删除）；多文件产物不再是"一段大文本"。
    *
    * 恢复进行中的起草（§4.1.1）：targets 给 activeDraft（最近的、未入库的草稿，
    * 含起草时落库的目标）——顶部提示「继续 / 新起草」；「继续」把草稿挂回本页
@@ -90,14 +92,33 @@
   // ── 恢复进行中的起草 ──
   let attached = false
 
-  // ── 审阅 ──
-  let slug = ''
-  let name = ''
-  let description = ''
-  let skillBody = ''
+  // ── 审阅（四轮：产出 = 文件集合）──
+  /** `GET /api/crystallize/artifacts` 的返回（服务端已解析 + 已校验）。 */
+  let artifacts: Artifacts | null = null
+  /** 当前选中的文件（相对 skill/ 目录）。 */
+  let selectedFile = 'SKILL.md'
+  /** 编辑区内容（与 selectedFile 联动；写入即回写 artifacts.files）。 */
+  let editText = ''
+  /** 每次编辑 +1：让"从文件里解析出的 frontmatter 摘要"能重算（普通对象不触发响应）。 */
+  let filesVersion = 0
   let saving = false
+  /** 入库用的 slug：默认取 SKILL.md 的 name，新建时可改（更新不允许改，服务端会拦）。 */
+  let slug = ''
   /** 审阅里的冲突提示（新建撞提炼根同 slug）。 */
   let clash: { slug: string; name: string; id: string } | null = null
+
+  /** 草稿产出的接口形状（与 `apps/daemon/src/crystallize-artifacts.ts` 对齐）。 */
+  interface Artifacts {
+    status: string
+    mode: 'files' | 'text' | 'refused'
+    refusalReason?: string
+    files: Record<string, string>
+    skillMd: { name: string; description: string; body: string; raw: string }
+    validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
+    target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
+    baseline: { slug: string; files: Record<string, string> } | null
+    materialDir: string
+  }
 
   // ── 完成态 ──
   let doneSkillName = ''
@@ -134,8 +155,18 @@
     //   二轮只拦在「任务」页的按钮上；三轮导航页「新建沉淀」能选任意任务，门必须
     //   在流程页自己也拦一道（后端 draft 路由同样拦，见 server.ts 的 task_gate）。
     (targets.scope !== 'task' || targets.reviewed || targets.hasUserFeedback) &&
-    (targetKind === 'new' ? purpose.trim() !== '' : selectedSkillId !== '')
-  $: reviewValid = slug.trim() !== '' && name.trim() !== '' && skillBody.trim() !== ''
+    // 新建不再要求「作用描述」（四轮定稿：留空则由 skill 从素材推断，审阅时确认）；
+    // 更新仍然要求选一个目标技能。
+    (targetKind === 'new' || selectedSkillId !== '')
+
+  /**
+   * 审阅是否可入库：**校验通过**才行。
+   *
+   * ★ 改之前这里是 `slug/name/body 都非空`——那是"四个输入框"时代的口径。
+   *   现在前端不再自己拼正文：文件集合与问题清单都来自服务端，前端只负责显示与
+   *   "编辑哪个文件"。所以可入库的条件换成"服务端说没问题"，并且 slug 有值。
+   */
+  $: reviewValid = artifacts !== null && artifacts.validation.ok && slug.trim() !== ''
 
   /** 开始沉淀按钮的悬停解释：素材为空 / 任务门槛不过，分开说清。 */
   $: startDisabledReason =
@@ -180,10 +211,11 @@
     materialStats = null
     handledTerminal = false
     attached = false
+    artifacts = null
+    selectedFile = 'SKILL.md'
+    editText = ''
+    filesVersion = 0
     slug = ''
-    name = ''
-    description = ''
-    skillBody = ''
     saving = false
     clash = null
     doneSkillName = ''
@@ -241,10 +273,6 @@
   async function startDraft(): Promise<void> {
     error = ''
     attached = true // 点了开始 = 放弃旧的提示
-    if (targetKind === 'new' && purpose.trim() === '') {
-      error = $t('crystallize.purposeLabel')
-      return
-    }
     if (targetKind === 'update' && selectedSkillId === '') {
       error = $t('crystallize.targetUpdate')
       return
@@ -333,10 +361,10 @@
     draftRunId = ''
     draftStatus = null
     handledTerminal = false
+    artifacts = null
+    selectedFile = 'SKILL.md'
+    editText = ''
     slug = ''
-    name = ''
-    description = ''
-    skillBody = ''
     clash = null
     error = ''
   }
@@ -364,27 +392,29 @@
     }
   }
 
-  /** 取草稿产出 = 起草 run 最后一条非空 text 消息（与任务详情页同一口径）。 */
+  /**
+   * 取草稿产出（四轮：`GET /api/crystallize/artifacts`）。
+   *
+   * ★ 改之前这里自己拉 run 的消息、自己拆 frontmatter——解析规则被复制到前端，
+   *   而且 `===== FILE: xxx =====` 那段多文件约定**从来没被解析**（多文件产物被
+   *   塞进正文丢掉）。现在服务端读 `skill/` 目录、解析 frontmatter、跑校验，前端只画。
+   */
   async function loadDraftOutput(): Promise<void> {
     try {
-      const res = await api<{ messages: Array<{ type: string; content: string }> }>(
-        `/api/runs/${draftRunId}/messages`,
+      const res = await api<Artifacts>(
+        `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(draftRunId)}`,
       )
-      let candidate = ''
-      for (const m of res.messages) {
-        if (m.type === 'text' && m.content.trim() !== '') candidate = m.content
+      artifacts = res
+      // 目标以**落库的目标**为准（恢复的草稿按它还原）；界面上的 targetKind 跟着走
+      if (res.target?.kind === 'update') {
+        targetKind = 'update'
+        selectedSkillId = res.target.skillId
       }
-      if (candidate.trim() === '') {
-        step = 'target'
-        error = $t('crystallize.errEmptyMaterial')
-        return
-      }
-      // 拆 frontmatter：name / description 直接进编辑框，正文可改。
-      const parsed = parseFrontmatter(candidate)
-      slug = parsed.name ?? defaultSlug(parsed.name ?? '')
-      name = parsed.name ?? ''
-      description = parsed.description ?? ''
-      skillBody = parsed.body
+      slug = res.skillMd.name
+      const first = pickDefaultFile(res)
+      selectedFile = first
+      editText = res.files[first] ?? ''
+      filesVersion += 1
       clash = null
       error = ''
       step = 'review'
@@ -394,31 +424,72 @@
     }
   }
 
-  /** 极简 frontmatter 拆解：`---` 头块里的 `name:` / `description:`。 */
-  function parseFrontmatter(text: string): { name: string; description: string; body: string } {
-    const trimmed = text.trimStart()
-    if (!trimmed.startsWith('---')) return { name: '', description: '', body: text }
-    const end = trimmed.indexOf('\n---', 3)
-    if (end < 0) return { name: '', description: '', body: text }
-    const head = trimmed.slice(3, end)
-    const bodyText = trimmed.slice(end + 4)
-    let name = ''
-    let description = ''
-    for (const line of head.split('\n')) {
-      const mName = line.match(/^name\s*:\s*(.+)$/)
-      if (mName) name = (mName[1] ?? '').trim()
-      const mDesc = line.match(/^description\s*:\s*(.+)$/)
-      if (mDesc) description = (mDesc[1] ?? '').trim()
-    }
-    return { name, description, body: bodyText }
+  /** 默认选中 SKILL.md；没有就选第一个文件（起草者写歪时也别给空白页）。 */
+  function pickDefaultFile(res: Artifacts): string {
+    if (res.files['SKILL.md'] !== undefined) return 'SKILL.md'
+    const first = Object.keys(res.files).sort()[0]
+    return first ?? ''
   }
 
-  function defaultSlug(n: string): string {
-    return n
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 63)
+  /** 切换选中文件：把编辑区内容换过去（当前文件的编辑已经回写进 files）。 */
+  function selectFile(rel: string): void {
+    selectedFile = rel
+    editText = artifacts?.files[rel] ?? ''
+  }
+
+  /** 编辑回写：入库传的就是这份 files（服务端还会再校验一遍）。 */
+  function onEditInput(): void {
+    if (artifacts === null || selectedFile === '') return
+    artifacts.files[selectedFile] = editText
+    filesVersion += 1
+    // 改的就是 SKILL.md → slug 跟着 frontmatter 的 name 走（新建时才允许改）
+    if (selectedFile === 'SKILL.md') {
+      const name = parseFrontmatterName(editText)
+      if (name !== '' && slug !== '') slug = name
+    }
+  }
+
+  /** 极简 frontmatter 取 name（只用于"改 SKILL.md 时 slug 跟着变"）。 */
+  function parseFrontmatterName(text: string): string {
+    const m = text.match(/^name\s*:\s*(.+)$/m)
+    return m?.[1] ? m[1].trim().replace(/^["']|["']$/g, '') : ''
+  }
+
+  /** 变更集：新增 / 修改 / 删除（对着更新场景的当前版本算；新建 = 全新增）。 */
+  $: fileRows = (() => {
+    const a = artifacts
+    if (a === null) return [] as Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }>
+    void filesVersion
+    const base = a.baseline?.files ?? null
+    const rows = Object.keys(a.files)
+      .sort((a, b) => (a === 'SKILL.md' ? -1 : b === 'SKILL.md' ? 1 : a < b ? -1 : 1))
+      .map((rel) => {
+        const text = a.files[rel] ?? ''
+        const old = base?.[rel]
+        const change: '' | 'A' | 'M' = old === undefined ? 'A' : old === text ? '' : 'M'
+        return { rel, change, bytes: new TextEncoder().encode(text).length }
+      })
+    // 草稿里没有、当前版本里有的 → 删除（更新 = 整目录替换，必须看得见）。
+    // ⚠️ **只有多文件产出（files）才这么算**：文本兜底草稿本来就没抓到支持文件，
+    //    入库时服务端会把当前的保留下来（不是"决定了要删"）。这里若也标 D，等于
+    //    对着一条没能力写文件的草稿吓唬使用者"要删 3 个文件"。
+    if (a.mode !== 'files') return rows
+    const deleted = Object.keys(base ?? {})
+      .filter((rel) => a.files[rel] === undefined)
+      .sort()
+      .map((rel) => ({ rel, change: 'D' as const, bytes: 0 }))
+    return [...rows, ...deleted]
+  })()
+
+  $: fileCount = artifacts === null ? 0 : Object.keys(artifacts.files).length
+  $: totalBytes = fileRows.reduce((sum, r) => sum + r.bytes, 0)
+
+  /** 变更徽标的文案（A/M/D → 中文；空串 = 未改动）。 */
+  function changeLabel(change: '' | 'A' | 'M' | 'D'): string {
+    if (change === 'A') return $t('crystallize.changeAdded')
+    if (change === 'M') return $t('crystallize.changeModified')
+    if (change === 'D') return $t('crystallize.changeDeleted')
+    return ''
   }
 
   /** 更新目标摘要里的技能名（可能已不在 loadedSkills 里，回退 id）。 */
@@ -432,7 +503,10 @@
     error = ''
     clash = null
     try {
+      if (artifacts === null) return
       const target = targetKind === 'new' ? { kind: 'new' as const } : { kind: 'update' as const, skillId: selectedSkillId }
+      // 四轮：只传整份文件 + 确认过的 slug。name / description 由服务端从 SKILL.md
+      // 的 frontmatter 现解析——前端不再"拆出来再传回去"（那是两个出处的根源）。
       const res = await api<{ skill: Skill; versioning: { enabled: boolean; note?: string } }>(
         '/api/crystallize/commit',
         {
@@ -441,10 +515,8 @@
           body: JSON.stringify({
             draftRunId,
             target,
-            slug: slug.trim(),
-            name: name.trim(),
-            description: description.trim(),
-            skillBody,
+            ...(slug.trim() !== '' ? { slug: slug.trim() } : {}),
+            files: artifacts.files,
           }),
         },
       )
@@ -740,28 +812,107 @@
               <div class="notice bad">{error}</div>
             {/if}
 
-            <div class="grid-2">
-              <label class="field">
-                <span class="faint small">{$t('crystallize.slugLabel')}</span>
-                <input bind:value={slug} autocomplete="off" />
-              </label>
-              <label class="field">
-                <span class="faint small">{$t('crystallize.nameLabel')}</span>
-                <input bind:value={name} autocomplete="off" />
-              </label>
-            </div>
-            <label class="field">
-              <span class="faint small">{$t('crystallize.descriptionLabel')}</span>
-              <textarea bind:value={description} rows="2"></textarea>
-            </label>
-            <label class="field">
-              <span class="faint small">{$t('crystallize.bodyLabel')}</span>
-              <textarea bind:value={skillBody} rows="14" class="mono"></textarea>
-            </label>
+            <!-- 起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃 -->
+            {#if artifacts && artifacts.mode === 'refused'}
+              <div class="notice warn">
+                <strong>{$t('crystallize.refusedTitle')}</strong>
+                <p>{artifacts.refusalReason ?? ''}</p>
+                <div class="row-end">
+                  <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+                  <button class="ghost small" onclick={() => void abandonReview()}>
+                    {$t('crystallize.abandon')}
+                  </button>
+                </div>
+              </div>
+            {:else if artifacts}
+              <!-- 结论优先：校验通过 / 不通过，永远在最上面 -->
+              {#if artifacts.validation.ok}
+                <p class="faint small">
+                  ✓ {fileCount} {$t('crystallize.filesUnit')} · {Math.max(1, Math.round(totalBytes / 1024))} KB
+                  {#if artifacts.mode === 'text'}
+                    · {$t('crystallize.textModeHint')}
+                  {/if}
+                </p>
+              {:else}
+                <div class="notice bad">
+                  <strong>{$t('crystallize.problemsTitle')}</strong>
+                  <ul class="problem-list">
+                    {#each artifacts.validation.problems as p (p.file + p.message)}
+                      <li>
+                        {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
+                      </li>
+                    {/each}
+                  </ul>
+                </div>
+              {/if}
 
-            <FoldSection title={$t('crystallize.previewTitle')}>
-              <div class="preview markdown">{@html renderMarkdown(skillBody)}</div>
-            </FoldSection>
+              <!-- slug：唯一需要人确认的字段（默认 = SKILL.md 的 name） -->
+              <label class="field">
+                <span class="faint small">{$t('crystallize.slugLabel')} · {$t('crystallize.slugFromFrontmatter')}</span>
+                <input bind:value={slug} autocomplete="off" class="mono" />
+              </label>
+
+              <!-- frontmatter 摘要：只读，来自 SKILL.md 本身（要改就改文件） -->
+              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
+                <p class="faint small frontmatter-line">
+                  <span>{$t('crystallize.nameLabel')}：<code>{artifacts.skillMd.name}</code></span>
+                  {#if artifacts.skillMd.description !== ''}
+                    <span>{$t('crystallize.descriptionLabel')}：{artifacts.skillMd.description}</span>
+                  {/if}
+                </p>
+              {/if}
+
+              <!-- 文件树 + 选中文件：多文件产物的呈现 -->
+              <div class="file-pane">
+                <ul class="file-tree">
+                  {#each fileRows as row (row.rel)}
+                    <li>
+                      <button
+                        type="button"
+                        class="file-row"
+                        class:active={row.rel === selectedFile}
+                        onclick={() => selectFile(row.rel)}
+                      >
+                        <span class="file-name mono">{row.rel}</span>
+                        {#if row.change !== ''}
+                          <span
+                            class="change-tag"
+                            class:add={row.change === 'A'}
+                            class:mod={row.change === 'M'}
+                            class:del={row.change === 'D'}
+                          >{changeLabel(row.change)}</span>
+                        {/if}
+                        {#if row.change !== 'D'}
+                          <span class="faint small">{Math.max(1, Math.round(row.bytes / 1024))} KB</span>
+                        {/if}
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+                <div class="file-body">
+                  {#if selectedFile === ''}
+                    <p class="faint small">{$t('crystallize.noFiles')}</p>
+                  {:else if fileRows.find((r) => r.rel === selectedFile)?.change === 'D'}
+                    <p class="faint small">{$t('crystallize.deletedHint')}</p>
+                  {:else}
+                    <textarea
+                      bind:value={editText}
+                      oninput={onEditInput}
+                      rows="16"
+                      class="mono"
+                      spellcheck="false"
+                    ></textarea>
+                  {/if}
+                </div>
+              </div>
+
+              {#if selectedFile.endsWith('.md') && editText.trim() !== '' &&
+                fileRows.find((r) => r.rel === selectedFile)?.change !== 'D'}
+                <FoldSection title={$t('crystallize.previewTitle')}>
+                  <div class="preview markdown">{@html renderMarkdown(editText)}</div>
+                </FoldSection>
+              {/if}
+            {/if}
           </div>
         </section>
       {/if}
@@ -1028,17 +1179,6 @@
     background: var(--bg);
     color: var(--text);
   }
-  .field textarea.mono {
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    line-height: 1.5;
-  }
-
-  .grid-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-3);
-  }
   .row-end {
     display: flex;
     justify-content: flex-end;
@@ -1060,6 +1200,110 @@
   }
   .mono {
     font-family: var(--font-mono);
+  }
+
+  /* ══════════ 审阅：文件树 + 编辑区（四轮）══════════
+     ★ 只用全局变量与既有观感（--panel/--line/--radius/--font-mono），不自造卡片：
+     这一块是"多文件产物的呈现"，不是另一套设计语言。 */
+  .frontmatter-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .file-pane {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .file-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  /* 文件行是真按钮（tab 能到、读屏器能读）——与列表行同一纪律，只是密度更高 */
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .file-tree li:last-child .file-row {
+    border-bottom: 0;
+  }
+
+  .file-row:hover {
+    background: var(--hover);
+  }
+
+  .file-row.active {
+    background: var(--active, var(--hover));
+    font-weight: 600;
+  }
+
+  .file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+  }
+
+  /* 变更标记：A/M/D 用 git 的说法，颜色靠全局 badge 的语义色 */
+  .change-tag {
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 0.6875rem;
+    line-height: 1.5;
+    border: 1px solid var(--line);
+  }
+
+  .change-tag.add {
+    color: var(--good);
+    border-color: var(--good);
+  }
+
+  .change-tag.mod {
+    color: var(--warn);
+    border-color: var(--warn);
+  }
+
+  .change-tag.del {
+    color: var(--bad);
+    border-color: var(--bad);
+  }
+
+  .file-body textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+
+  .problem-list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+
+  .problem-list li + li {
+    margin-top: 4px;
   }
 
   /* ══════════ 完成态 ══════════

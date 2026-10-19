@@ -16,6 +16,8 @@
  */
 
 import type { Store } from '@agentdeck/domain'
+import { formatRunMessages, lastTextOf } from './run-text.ts'
+import { collectMaterial, isMaterialEmpty } from './crystallize-material.ts'
 
 /** 与 `server.ts` 的 `TERMINAL_RUN_STATUSES` 同一份清单（crystallize 不 import server）。 */
 const TERMINAL_EXEC_STATUSES = ['completed', 'failed', 'cancelled']
@@ -62,15 +64,6 @@ export interface CrystallizeTargets {
    * `null` = 没有进行中的起草。
    */
   activeDraft: { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null
-}
-
-/** 素材打包结果。 */
-export interface CrystallizeMaterial {
-  text: string
-  stats: {
-    turns: number
-    toolCalls: number
-  }
 }
 
 /**
@@ -131,12 +124,10 @@ export async function crystallizeTargets(
   const loadedSkills = await resolveLoadedSkills(store, agentId, extraSkillIds)
 
   // ── 素材统计（起草前可见，§4.1.1）──
-  // 与 /draft 同一份打包：空素材 = null（前端据此早失败）。
-  const material = await buildMaterial(store, run)
-  const materialStats =
-    material.text.trim() === ''
-      ? null
-      : { turns: material.stats.turns, toolCalls: material.stats.toolCalls }
+  // 与 /draft 调用**同一个** `collectMaterial`（四轮起素材落盘，包里已经没有
+  // "一整块文本"了）：空素材 = null（前端据此早失败，不必跑完才发现）。
+  const collected = await collectMaterial(store, run)
+  const materialStats = isMaterialEmpty(collected) ? null : collected.stats
 
   // ── 恢复进行中的起草（§4.1.1）──
   // 找该来源最近一条**未入库**（crystallized 不是 true）的 skill-draft run。
@@ -228,182 +219,55 @@ async function resolveLoadedSkills(
   return out
 }
 
-/**
- * 把一条 run 的消息流格式化成素材文本（消息 + 工具调用 + 输入输出）。
- */
-function formatRunMessages(runId: RunId, messages: Array<{ seq: number; type: string; tool: string | null; content: string; input: Record<string, unknown> | null; output: string | null }>): string {
-  const lines: string[] = []
-  for (const m of messages) {
-    switch (m.type) {
-      case 'text':
-        lines.push(`[消息] ${m.content}`)
-        break
-      case 'tool_use':
-        lines.push(`[工具调用] ${m.tool ?? '(未知)'}`)
-        if (m.input && Object.keys(m.input).length > 0) {
-          lines.push(`  入参：${JSON.stringify(m.input)}`)
-        }
-        break
-      case 'tool_result':
-        lines.push(`[工具结果] ${m.content}`)
-        if (m.output && m.output !== m.content) lines.push(`  输出：${m.output}`)
-        break
-      case 'thinking':
-        // 思考过程对"怎么做"有价值，但噪音大——压缩成一行说明存在。
-        lines.push(`[思考] ${m.content.slice(0, 200)}${m.content.length > 200 ? '…' : ''}`)
-        break
-      default:
-        // status/error/log：过程信息，保留简短内容（错误可能是重要线索）。
-        if (m.type === 'error') lines.push(`[错误] ${m.content}`)
-        break
-    }
-  }
-  return lines.join('\n')
-}
 
-/** 一条 run 的产出 = **最后一条**非空 text 消息（与任务详情页同一口径）。 */
-export function lastTextOf(
-  messages: Array<{ type: string; content: string }>,
-): string | null {
-  let last: string | null = null
-  for (const m of messages) {
-    if (m.type === 'text' && m.content.trim() !== '') last = m.content
-  }
-  return last
-}
 
 /**
- * 打包沉淀素材。
+ * 起草 run 的指令（进第一句话的「任务」块）。
  *
- * - conversation：整个会话**所有轮次** run 的消息（设计：整体提炼、不选细节）。
- * - task：任务 run 的消息 + 审核判决（有则带）+ 用户反馈（有则带）。
+ * 2026-10-19 四轮重写：这里**只留"这一轮要做什么"**，不再教"怎么写 skill"——
+ * 那套知识搬进了内置技能 `writing-skills`（随 run 注入，agent 按需加载正文与参考）。
+ * 素材也不再内联：落盘成 `material/` 目录，这里只给指针与契约。
+ *
+ * 为什么第一句话要这么短：它整块进 prompt，写多长 agent 都得通读；把"读什么"
+ * 变成可选择的动作（progressive disclosure），长对话才不会被一刀截断。
  */
-export async function buildMaterial(
-  store: Store,
-  run: Run,
-  userFeedback?: string,
-): Promise<CrystallizeMaterial> {
-  const parts: string[] = []
-  let turns = 0
-  let toolCalls = 0
-
-  const countTools = (messages: Array<{ type: string }>): number =>
-    messages.filter((m) => m.type === 'tool_use').length
-
-  if (run.subject.type === 'conversation') {
-    const conversationId = run.subject.id as Conversation['id']
-    const turns_ = await store.listChatTurns(conversationId)
-    turns = turns_.length
-    for (const turn of turns_) {
-      if (!turn.runId) {
-        parts.push(`【第 ${turn.seq} 轮（未跑起来）】${turn.userText}`)
-        continue
-      }
-      parts.push(`【第 ${turn.seq} 轮｜使用者说：${turn.userText}】`)
-      const messages = await store.listRunMessages(turn.runId)
-      toolCalls += countTools(messages)
-      const body = formatRunMessages(turn.runId, messages)
-      if (body) parts.push(body)
-    }
-  } else {
-    turns = 1
-    const messages = await store.listRunMessages(run.id)
-    toolCalls += countTools(messages)
-    const body = formatRunMessages(run.id, messages)
-    if (body) parts.push(body)
-    // 审核判决（有则带）：找 completed 的 review run，把它的产出（判决文本）附上。
-    // 产出 = 该 review run 的**最后一条 text 消息**（`Run` 上没有 output 字段，
-    // 与任务详情页取产出的口径一致——取最后一条 text，不拼接）。
-    const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
-    const review = page.items
-      .filter(
-        (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === run.id,
-      )
-      .sort((a, b) => b.queuedAt - a.queuedAt)[0]
-    if (review && review.status === 'completed') {
-      const reviewMessages = await store.listRunMessages(review.id)
-      const verdictOutput = lastTextOf(reviewMessages)
-      if (verdictOutput) {
-        parts.push(`【审核判决】\n${verdictOutput}`)
-      }
-    }
-    if (userFeedback && userFeedback.trim() !== '') {
-      parts.push(`【使用者的反馈】\n${userFeedback.trim()}`)
-    }
-  }
-
-  return {
-    text: parts.join('\n\n'),
-    stats: { turns, toolCalls },
-  }
-}
-
-/** 起草 run 的指令（进第一句话的「任务」块）。 */
 export function buildDraftPrompt(opts: {
-  material: string
-  /** 新建必填的作用描述（防 agent 总结偏离；description 以它为基底）。 */
-  purpose?: string
-  /** 更新/基于安装时带上的现有 SKILL.md（进化基线）。 */
-  existingSkill?: { name: string; body: string; description: string | null } | null
-  /** 现有技能列表（避免重复 + 判断 FOLD_INTO）。 */
-  existingSkills: Array<{ slug: string; name: string; description: string | null }>
   scope: 'conversation' | 'task'
+  /** 素材目录（相对工作目录，固定 `material`）。 */
+  materialDir: string
+  /** 产出目录（相对工作目录，固定 `skill`）。 */
+  outputDir: string
+  target: 'new' | 'update'
 }): string {
-  const {
-    material,
-    purpose,
-    existingSkill,
-    existingSkills,
-    scope,
-  } = opts
+  const { scope, materialDir, outputDir, target } = opts
+  return `你是 skill 起草者。本次素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已经落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
 
-  const purposeBlock =
-    purpose && purpose.trim() !== ''
-      ? `【使用者的作用描述】\n${purpose.trim()}\n\n这是使用者对这个 skill 的定位。frontmatter 的 description **以它为基底**（可以微调措辞，不许改变含义）。`
-      : ''
+【先做这三件事】
+1. 读 \`${materialDir}/00-README.md\`——它是索引：来源、规模、本次目标、该读哪些文件、怎么用。
+2. 按需读 \`${materialDir}/\` 里真正需要的文件，**不要一次全读**。写 Procedure 之前，
+   回查 \`${materialDir}/turns/*.md\`（或 \`task-run.md\`）里的**原始命令与参数**——
+   命令必须能直接复制就跑，不许凭印象重写。
+3. 你加载了 \`writing-skills\` 技能：先看它的 description 判断要不要读正文；
+   写结构、拆支持文件、交付自检都以它为准（\`.claude/skills/writing-skills/\` 下有正文与 references）。
 
-  const existingBlock =
-    existingSkill && existingSkill.body !== ''
-      ? `【要更新的现有 skill：${existingSkill.name}】\n下面是它的当前全文。请结合本次素材**修订**它——保留仍然正确的部分，修正与素材冲突的部分，补上素材里暴露出的缺失。\n\n${existingSkill.body}`
-      : ''
+【产出契约】
+- \`${outputDir}/SKILL.md\` **必须存在**；支持文件放 \`${outputDir}/references/\`、
+  \`${outputDir}/scripts/\`、\`${outputDir}/templates/\`。
+- 只写 UTF-8 文本；不写隐藏文件、二进制、\`..\` 或绝对路径。
+- \`SKILL.md\` 的 frontmatter 必须有 \`name\`（kebab-case）与 \`description\`（含触发条件）——
+  平台从它读名字和描述，**不需要你另外输出**任何材料。
+- 支持文件要真的被正文引用；正文里出现的每个路径都必须存在。
 
-  const listBlock =
-    existingSkills.length > 0
-      ? `【现有技能列表】（避免重复造轮子；若素材明显属于某个现有技能，在输出的开头注明"应并入：<slug>"，但不要因此省略完整产出）\n${existingSkills
-          .map((s) => `- ${s.slug}（${s.name}）${s.description ? `：${s.description}` : ''}`)
-          .join('\n')}`
-      : ''
+【额外交代】
+${
+  target === 'new'
+    ? '- 素材索引里写了使用者给的作用描述（如果有）：frontmatter 的 description 以它为基底，可以调措辞，不许改含义。'
+    : '- 要更新的技能当前全文在 `material/existing-skill/`：请**修订**它（保留仍然正确的部分），不要从零重写，也不要省略完整产出。'
+}
+- 如果素材里确实没有可复用做法（全是不结晶清单里的东西），**不要写 SKILL.md**，
+  改为写一个 \`${outputDir}/REFUSED.md\`，用两三句话说明为什么不可沉淀。
 
-  return `你是 skill 起草者。下面是使用者从${scope === 'conversation' ? '一次聊天' : '一个任务'}中选出的沉淀素材——含消息、工具调用及其结果。提炼"怎么做"依赖真实的命令/脚本，只给对话文本会写出幻觉步骤。
-
-${purposeBlock}
-${existingBlock}
-
-【素材】
-${material}
-
-【产出要求】产出一份完整的 SKILL.md：
-1. frontmatter 必须有 name（kebab-case）与 description。description 是一句话说明"什么时候该用这个 skill"（**必须含触发条件**）——模型靠它决定何时加载正文，这是渐进式披露的第一层。
-2. 正文用以下结构：
-   ## When to Use   ← 触发条件展开
-   ## Procedure     ← 可操作步骤（步骤里引用的命令/脚本要**原样可复制**，不要缩写）
-   ## Pitfalls      ← 注意事项与边界（含"别在什么情况下用"）
-   ## Verification  ← 怎么验证这步做对了
-3. 如果有脚本/模板，作为支持文件附在末尾，格式：
-   ===== FILE: scripts/xxx.sh =====
-   内容
-
-【不结晶清单】以下内容**不要**写进 skill：
-- 环境依赖的失败（缺依赖/网络问题/权限问题——换个环境就消失）
-- 对工具的负面评价（"这个工具不好用"不是可复用步骤）
-- 瞬时的重试错误（一次性的重试成功不是流程）
-- 一次性任务的叙述（"这次做了 X"不是"怎么做 X"）
-如果素材里只有上述内容、没有可复用的做法，只输出一行："无可沉淀内容"。
-
-【现有技能列表】
-${listBlock || '（无）'}
-
-直接输出 SKILL.md 全文（含 frontmatter）。`
+直接开始：先读索引，再动手写文件。`
 }
 
 /**

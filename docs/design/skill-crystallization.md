@@ -577,7 +577,8 @@ description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / 
 
 #### 5.0.8 分期
 
-- **P0（本轮）**：素材落盘 + 内置 writing-skills + 多文件产出/文件树审阅 + 免填 frontmatter。
+- **P0（已实作，2026-10-19）**：素材落盘 + 内置 writing-skills + 多文件产出/文件树审阅 +
+  免填 frontmatter。实作清单见 §5.0.10。
 - **P1**：新建/更新变更集（A/M/D + diff）+ 校验问题定位 + 「素材」分节 +
   **「按意见改一版」**（审阅页给 agent 一句反馈再起草一轮，复用同一份 `material/`，新旧并列）。
 - **P2**：git 历史 list + 版本对比（mine）。
@@ -642,6 +643,44 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
 
 支持多文件（脚本/模板放同目录，如 `scripts/`、`templates/`），与现库 skill 结构一致
 （如 `browser-use/` 是 `SKILL.md + LICENSE.txt + templates/`）。
+
+#### 5.0.10 P0 实作（2026-10-19，含实作中发现的三个坑）
+
+**新增模块**
+
+| 文件 | 职责 |
+|---|---|
+| `apps/daemon/src/crystallize-material.ts` | `collectMaterial`（一轮一文件）+ `writeMaterial`（索引 / meta / 技能清单 / 更新基线）+ `draftRoot` |
+| `apps/daemon/src/crystallize-artifacts.ts` | 读 `skill/` 目录、拆 frontmatter、校验（含限额与路径安全）、三种形态（files / text / refused） |
+| `apps/daemon/src/builtin-skills.ts` | 读内置技能（`apps/daemon/assets/builtin-skills/<slug>/`）→ `SkillPayload` |
+| `apps/daemon/src/run-text.ts` | 消息渲染（`formatRunMessages` / `lastTextOf`）——从 `crystallize.ts` 抽出，避免与素材模块成环 |
+| `apps/daemon/assets/builtin-skills/writing-skills/` | 内置「写 skill 的 skill」：`SKILL.md` + `references/{structure,files,checklist}.md` |
+
+**接口**：`POST /api/crystallize/draft` 改为先落盘素材、注入内置技能、`workDir` = 草稿目录；
+新增 `GET /api/crystallize/artifacts`、`GET /api/crystallize/material`；`POST /api/crystallize/commit`
+入参改成 `{draftRunId, target, slug?, files}`，name/description 一律由服务端从 frontmatter 解析。
+`buildMaterial` / `CrystallizeMaterial` 删除（文本内联时代结束，留着就是死接口）。
+
+**界面**：审阅 = 校验结论 + slug（默认取 name）+ 只读 frontmatter 摘要 + 文件树（A/M/D 徽标）+
+选中文件编辑 + Markdown 预览；起草者拒绝沉淀时显示原因并只给「重新起草 / 放弃」。
+
+**实作中发现的三个坑（都修了，测试钉住）**
+
+1. **文本兜底 + 更新会删文件**：`writeSkillFiles` 是"清空目录再写"，所以提交一份只有
+   SKILL.md 的文件集合 = 把目标技能的支持文件全删掉。产出形态改用**磁盘**判（`skill/`
+   目录在不在），文本模式的更新**合并**现有支持文件；界面也只在 files 模式才标「删除」。
+   （e2e「文本兜底草稿更新时不删支持文件」）
+2. **旧草稿的 frontmatter 不在第一行**：老 prompt 让 agent 在开头写「应并入：xxx」，
+   于是真实数据里有草稿的首行不是 `---`。校验消息改成**引出当前首行**，使用者一眼知道
+   删哪一行（不是只丢一句"缺少 frontmatter"）。
+3. **素材必须在 workDir 里**：claude 的 PreToolUse 隔离 hook 会 deny 越界路径——素材
+   落到别处 agent 根本读不到。这条写进了模块头注释，防止以后有人"顺手"挪走。
+
+**验证**（真浏览器冒烟，临时 data 副本 + 夹具草稿，跑完即清理）：
+多文件草稿 → 文件树 2 项都标「新增」、frontmatter 摘要只读显示、只有 slug 一个输入框、
+两栏布局实测 `260px 409px`、切换文件编辑区跟着换；文本兜底草稿（更新目标）→ 校验红条
+点名首行、文件树只有 SKILL.md「修改」（**没有**假的「删除 LICENSE.txt」）、入库按钮禁用。
+`pnpm run check` 1942 全绿（新增 20 条：素材落盘 / 产出读取与校验 / 内置技能 / e2e 五条）。
 
 ## 6. 审阅 → 入库（提炼根 `~/.agentdeck/skills-mine/`）
 

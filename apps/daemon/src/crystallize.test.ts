@@ -5,12 +5,16 @@
  * 覆盖：
  *   · targets：conversation 场景的加载 skill（执行者挂的 ∪ 对话额外带的）；
  *     task 场景的 reviewed 判定（有 completed 审核 run 才算）。
- *   · material：conversation 多轮拼接（保留工具调用）；task 附审核判决 + 用户反馈。
- *   · draft prompt：含作用描述 / 现有 SKILL.md 基线 / 不结晶清单 / 现有技能列表。
+ *   · material（四轮起落盘成目录）：conversation 一轮一文件且保留工具调用；task 的
+ *     判决与反馈各一份；writeMaterial 的索引 / meta / 更新基线。
+ *   · draft prompt（四轮起是指针式）：只给素材目录、产出契约与本次目标，"怎么写 skill"
+ *     交给内置技能 writing-skills。
  */
 
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { FileStore } from '@agentdeck/store-file'
 import {
   makeAgent,
@@ -23,12 +27,12 @@ import {
 import type { Agent, Run } from '@agentdeck/protocol'
 import {
   buildDraftPrompt,
-  buildMaterial,
   crystallizeTargets,
   listCrystallizeDrafts,
   listCrystallizeSources,
   resolveSourceRun,
 } from './crystallize.ts'
+import { collectMaterial, writeMaterial } from './crystallize-material.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 let dir: string
@@ -280,8 +284,8 @@ describe('crystallizeTargets：目标面板信息', () => {
   })
 })
 
-describe('buildMaterial：素材打包', () => {
-  test('conversation：多轮拼接，保留工具调用与结果', async () => {
+describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
+  test('conversation：一轮一个文件，保留工具调用与结果', async () => {
     const agent = await seedAgent({ id: 'exec3' })
     await store.insertConversation({
       id: 'conv-2' as never,
@@ -323,16 +327,20 @@ describe('buildMaterial：素材打包', () => {
     await appendMessage('run-t2', { type: 'text', content: '用 tar 打包' })
 
     const run = await store.getRun('run-t2' as never)
-    const material = await buildMaterial(store, run!)
-    assert.equal(material.stats.turns, 2, '两轮都进素材')
-    assert.equal(material.stats.toolCalls, 1, '工具调用计数')
-    assert.match(material.text, /第 1 轮｜使用者说：帮我打包这个脚本/)
-    assert.match(material.text, /\[工具调用\] Bash/)
-    assert.match(material.text, /\[工具结果\] a\.sh b\.sh/, '工具结果原样保留')
-    assert.match(material.text, /第 2 轮｜使用者说：加个参数/)
+    const collected = await collectMaterial(store, run!)
+    assert.equal(collected.stats.turns, 2, '两轮都进素材')
+    assert.equal(collected.stats.toolCalls, 1, '工具调用计数')
+
+    const round1 = collected.pieces.find((p) => p.relPath === 'turns/001.md')
+    assert.ok(round1, '一轮一个文件（agent 可以只读某轮）')
+    assert.match(round1.text, /帮我打包这个脚本/, '使用者原话')
+    assert.match(round1.text, /\[工具调用\] Bash/, '工具调用在')
+    assert.match(round1.text, /\[工具结果\] a\.sh b\.sh/, '工具结果原样保留')
+    const round2 = collected.pieces.find((p) => p.relPath === 'turns/002.md')
+    assert.match(round2!.text, /加个参数/)
   })
 
-  test('task：附审核判决 + 用户反馈', async () => {
+  test('task：审核判决与用户反馈各成一份文件', async () => {
     const agent = await seedAgent({ id: 'exec4' })
     const taskRun = await seedRun({
       id: 'run-task2',
@@ -350,42 +358,79 @@ describe('buildMaterial：素材打包', () => {
     await store.insertRun(reviewRun)
     await appendMessage('run-review2', { type: 'text', content: '结论：fail\n理由码：no_evidence' })
 
-    const material = await buildMaterial(store, taskRun, '第 3 步不对，应该先校验')
-    assert.match(material.text, /产出报告/)
-    assert.match(material.text, /【审核判决】/)
-    assert.match(material.text, /结论：fail/, '判决文本进素材')
-    assert.match(material.text, /【使用者的反馈】/)
-    assert.match(material.text, /第 3 步不对/, '用户反馈进素材')
+    const collected = await collectMaterial(store, taskRun, '第 3 步不对，应该先校验')
+    const byPath = new Map(collected.pieces.map((p) => [p.relPath, p.text]))
+    assert.match(byPath.get('task-run.md')!, /产出报告/)
+    assert.match(byPath.get('verdict.md')!, /结论：fail/, '判决单独一份')
+    assert.match(byPath.get('feedback.md')!, /第 3 步不对/, '反馈单独一份')
+  })
+
+  test('writeMaterial：索引 + meta + 现有技能清单都落盘，更新场景带基线', async () => {
+    const materialDir = join(dir, 'material-ctx')
+    const written = await writeMaterial(
+      materialDir,
+      {
+        pieces: [{ relPath: 'task-run.md', text: '# 任务执行记录\n\n[消息] 干活' }],
+        stats: { turns: 1, toolCalls: 3 },
+      },
+      {
+        scope: 'task',
+        sourceLabel: '修复构建',
+        target: {
+          kind: 'update',
+          skill: {
+            slug: 'my-flow',
+            name: '我的流程',
+            description: '旧描述',
+            body: '---\nname: my-flow\n---\n旧版全文',
+            files: { 'references/x.md': '参考' },
+          },
+        },
+        existingSkills: [{ slug: 'general-review', name: '通用审核', description: '审报告' }],
+      },
+    )
+    assert.ok(written.includes('00-README.md'), '索引在')
+    assert.ok(written.includes('meta.json'), '元信息在')
+    assert.ok(written.includes('skills-index.md'), '现有技能清单在')
+    assert.ok(written.includes('existing-skill/SKILL.md'), '更新基线（正文）在')
+    assert.ok(written.includes('existing-skill/references/x.md'), '更新基线（支持文件）也在')
+
+    const read = async (rel: string): Promise<string> => readFile(join(materialDir, rel), 'utf8')
+    const index = await read('00-README.md')
+    assert.match(index, /修复构建/, '索引里有来源标题')
+    assert.match(index, /更新现有 skill「my-flow」/, '索引里说明本次是更新')
+    assert.match(index, /skill\/SKILL\.md/, '索引里说明产出写在哪（与素材目录同级）')
+    assert.match(await read('meta.json'), /"turns": 1/)
+    assert.match(await read('skills-index.md'), /general-review/)
   })
 })
 
-describe('buildDraftPrompt：起草指令', () => {
-  test('新建：含作用描述、不结晶清单、现有技能列表', () => {
+describe('buildDraftPrompt：起草指令（四轮：只留本次任务）', () => {
+  test('指针式：给素材目录与产出契约，不再内联素材正文', () => {
     const prompt = buildDraftPrompt({
-      material: '素材正文',
-      purpose: '用来审核 xx 类报告',
-      existingSkill: null,
-      existingSkills: [{ slug: 'general-review', name: '通用审核', description: '审报告' }],
       scope: 'conversation',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: 'new',
     })
-    assert.match(prompt, /【使用者的作用描述】/)
-    assert.match(prompt, /用来审核 xx 类报告/)
-    assert.match(prompt, /【不结晶清单】/, '质量门在')
-    assert.match(prompt, /general-review/, '现有技能列表在')
-    assert.match(prompt, /## When to Use/, 'SKILL.md 结构约束在')
-    assert.match(prompt, /素材正文/)
+    assert.match(prompt, /material\/00-README\.md/, '先读索引')
+    assert.match(prompt, /skill\/SKILL\.md/, '产出契约')
+    assert.match(prompt, /writing-skills/, '"怎么写 skill"交给内置技能')
+    assert.match(prompt, /不结晶清单/, '不结晶清单由内置技能承载（提示里点了名）')
+    assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
+    assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
   })
 
-  test('更新：带现有 SKILL.md 基线，作用描述可缺', () => {
+  test('更新：指向 existing-skill/，不再塞全文', () => {
     const prompt = buildDraftPrompt({
-      material: '新经验',
-      existingSkill: { name: 'my-flow', body: '旧版全文', description: '旧描述' },
-      existingSkills: [],
       scope: 'task',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: 'update',
     })
-    assert.match(prompt, /【要更新的现有 skill：my-flow】/)
-    assert.match(prompt, /旧版全文/, '旧 SKILL.md 进素材作基线')
-    assert.doesNotMatch(prompt, /【使用者的作用描述】/, '更新时没有作用描述块')
+    assert.match(prompt, /material\/existing-skill\//, '更新基线在素材里')
+    assert.match(prompt, /修订/, '要求修订而不是重写')
+    assert.doesNotMatch(prompt, /作用描述/, '更新时没有作用描述那段')
   })
 })
 

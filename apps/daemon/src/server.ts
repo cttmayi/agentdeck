@@ -81,13 +81,29 @@ import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
 import {
   buildDraftPrompt,
-  buildMaterial,
   crystallizeTargets,
   listCrystallizeDrafts,
   listCrystallizeSources,
   resolveSourceRun,
 } from './crystallize.ts'
+import { lastTextOf } from './run-text.ts'
 import { commitMine, ensureMineRepo, probeGit } from './run-hooks/skill-mine.ts'
+import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
+import {
+  collectMaterial,
+  draftRoot,
+  isMaterialEmpty,
+  listMaterialFiles,
+  sourceLabelOf,
+  writeMaterial,
+  type ExistingSkillSnapshot,
+} from './crystallize-material.ts'
+import {
+  assembleArtifacts,
+  parseSkillMd,
+  readDraftSkillDir,
+  validateArtifactFiles,
+} from './crystallize-artifacts.ts'
 import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
@@ -4056,12 +4072,94 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 三个端点：
     //   · GET  /api/crystallize/targets?runId=…  目标面板信息（加载的 skill、任务是否审核过）
     //   · GET  /api/crystallize/drafts           沉淀任务列表（未入库的起草 run + 来源标签）
+    //   · GET  /api/crystallize/artifacts        草稿产出（多文件 + frontmatter 解析 + 校验）
+    //   · GET  /api/crystallize/material         素材文件清单与预览（审阅时核对来源）
     //   · GET  /api/crystallize/sources          新建沉淀的来源选择器（对话/达标任务 + 源 runId）
     //   · POST /api/crystallize/draft            打包素材 → 起草 run → 返回 draftRunId
     //   · POST /api/crystallize/discard          放弃一条没入库的起草（列表只增不减的出口）
     //   · POST /api/crystallize/commit           审阅确认 → 落 skills-mine + git commit
     if (req.method === 'GET' && path === '/api/crystallize/drafts') {
       sendJson(res, 200, { items: await listCrystallizeDrafts(store, workspaceId) })
+      return
+    }
+
+    // 草稿产出（2026-10-19 四轮）。界面不再从"最后一条 text 消息"里拆 frontmatter：
+    // 那既丢了多文件，也把"解析规则"复制到了前端。这里给一份**已解析 + 已校验**的结构，
+    // 前端只负责画。
+    if (req.method === 'GET' && path === '/api/crystallize/artifacts') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const draftDir = draftRoot(workRoot, draftRunId)
+      const dirFiles = await readDraftSkillDir(join(draftDir, 'skill'))
+      // 只有目录里没有产出时才回退文本（有目录就一定是目录——文本兜底不该抢戏）
+      let textFallback: string | null = null
+      if (dirFiles === null) {
+        textFallback = lastTextOf(await store.listRunMessages(draftRun.id))
+      }
+      const artifacts = assembleArtifacts(dirFiles, textFallback)
+
+      // 更新场景带上"当前版本"，界面才能算 A/M/D 与对比（P1 的 diff 也吃这份）
+      const draftTarget = draftRun.crystallizeTarget
+      let baseline: { slug: string; files: Record<string, string> } | null = null
+      if (draftTarget?.kind === 'update') {
+        const mine = await store.listSkills(workspaceId)
+        const current = mine.find((s) => (s.id as string) === draftTarget.skillId)
+        if (current) {
+          baseline = {
+            slug: current.slug,
+            files: { 'SKILL.md': current.body, ...((current.files ?? {}) as Record<string, string>) },
+          }
+        }
+      }
+
+      sendJson(res, 200, {
+        status: draftRun.status,
+        mode: artifacts.mode,
+        ...(artifacts.refusalReason === undefined ? {} : { refusalReason: artifacts.refusalReason }),
+        files: artifacts.files,
+        skillMd: artifacts.skillMd,
+        validation: artifacts.validation,
+        target: draftTarget ?? null,
+        baseline,
+        materialDir: join(draftDir, 'material'),
+      })
+      return
+    }
+
+    // 素材预览：审阅时能核"这句话是从哪一轮来的"。使用者定稿素材永久保留，
+    // 所以这里也顺带把目录路径给界面（想自己清理时找得到）。
+    if (req.method === 'GET' && path === '/api/crystallize/material') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const materialDir = join(draftRoot(workRoot, draftRunId), 'material')
+      const all = await listMaterialFiles(materialDir)
+      // 单个文件封顶：一轮对话的消息可能很长，整包塞给浏览器没有意义
+      const PER_FILE_CAP = 100 * 1024
+      sendJson(res, 200, {
+        dir: materialDir,
+        items: all.map((f) => {
+          const bytes = Buffer.byteLength(f.text, 'utf8')
+          return bytes > PER_FILE_CAP
+            ? { relPath: f.relPath, bytes, truncated: true, text: f.text.slice(0, PER_FILE_CAP) }
+            : { relPath: f.relPath, bytes, truncated: false, text: f.text }
+        }),
+      })
       return
     }
     if (req.method === 'GET' && path === '/api/crystallize/sources') {
@@ -4147,11 +4245,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         | { kind: 'update'; skillId: string }
       const t = raw?.target as Record<string, unknown> | undefined
       if (t?.kind === 'new') {
+        // 作用描述**可选**（2026-10-19 四轮定稿）：留空则由内置技能从素材推断，
+        // 审阅时把推断出的 description 摆最上面让人否定。必填的时候每次新建都要
+        // 先想一句话，而多数人其实想不清——那反而让 description 变成走过场。
         const purpose = typeof t['purpose'] === 'string' ? t['purpose'].trim() : ''
-        if (purpose === '') {
-          sendJson(res, 400, { error: '新建需要「作用描述」（防 agent 总结偏离）', code: 'purpose_required' })
-          return
-        }
         target = { kind: 'new', purpose }
       } else if (t?.kind === 'update') {
         const skillId = typeof t['skillId'] === 'string' ? t['skillId'] : ''
@@ -4165,10 +4262,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      // ── 素材打包 ──
+      // ── 素材落盘（2026-10-19 四轮：不再把一个巨型文本塞进第一句话）──
+      //
+      // 顺序很重要：**先落盘再起 run**。素材目录在起草 run 的工作目录里，agent 一启动
+      // 就能读；而且落盘失败时我们还没起 run，不会留下一条"素材是空的"的草稿。
       const userFeedback = typeof raw?.userFeedback === 'string' ? raw.userFeedback : undefined
-      const material = await buildMaterial(store, sourceRun, userFeedback)
-      if (material.text.trim() === '') {
+      const collected = await collectMaterial(store, sourceRun, userFeedback)
+      if (isMaterialEmpty(collected)) {
         sendJson(res, 400, { error: '这个 run 没有可沉淀的内容（消息为空）', code: 'empty_material' })
         return
       }
@@ -4190,7 +4290,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name: s.name,
         description: s.description,
       }))
-      let existingSkill: { name: string; body: string; description: string | null } | null = null
+      // 更新基线：把现有技能**整份**（正文 + 支持文件）摆进素材，agent 才能"修订"
+      // 而不是重写。只给正文的话，它会把 references/ 里的东西当不存在。
+      let updateSnapshot: ExistingSkillSnapshot | null = null
       if (target.kind === 'update') {
         const mine = await store.listSkills(workspaceId)
         const skill = mine.find((s) => (s.id as string) === target.skillId)
@@ -4198,23 +4300,54 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           sendJson(res, 404, { error: `skill 不存在（${target.skillId}）`, code: 'skill_not_found' })
           return
         }
-        existingSkill = {
+        updateSnapshot = {
+          slug: skill.slug,
           name: skill.name,
-          body: skill.body,
           description: skill.description,
+          body: skill.body,
+          files: (skill.files ?? {}) as Record<string, string>,
         }
       }
 
-      const prompt = buildDraftPrompt({
-        material: material.text,
-        ...(target.kind === 'new' ? { purpose: target.purpose } : {}),
-        existingSkill,
-        existingSkills,
+      const draftRunId = ulid() as RunId
+      const draftDir = draftRoot(workRoot, draftRunId)
+      try {
+        await writeMaterial(join(draftDir, 'material'), collected, {
+          scope: targets.scope,
+          sourceLabel: await sourceLabelOf(store, sourceRun),
+          target:
+            updateSnapshot === null
+              ? { kind: 'new', purpose: target.kind === 'new' ? target.purpose : '' }
+              : { kind: 'update', skill: updateSnapshot },
+          existingSkills,
+        })
+      } catch (err) {
+        sendJson(res, 500, {
+          error: `素材落盘失败：${err instanceof Error ? err.message : String(err)}`,
+          code: 'material_write_failed',
+        })
+        return
+      }
+
+      const draftPrompt = buildDraftPrompt({
         scope: targets.scope,
+        materialDir: 'material',
+        outputDir: 'skill',
+        target: updateSnapshot === null ? 'new' : 'update',
       })
 
+      // 内置写作技能读不到 = 打包坏了。**不让它静默退化成"没有规范的起草"**：
+      // 那样写出来的 skill 会质量不稳，而使用者只会觉得"这功能不好用"。
+      const writingSkill = await loadBuiltinSkill(WRITING_SKILLS)
+      if (writingSkill === null) {
+        sendJson(res, 500, {
+          error: '平台内置技能 writing-skills 读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        })
+        return
+      }
+
       // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
-      const draftRunId = ulid() as RunId
       const sourceAgent = await store.getAgent(sourceRun.agentId)
       if (!sourceAgent) {
         sendJson(res, 400, { error: '发起 run 的执行者已不存在', code: 'agent_not_found' })
@@ -4228,15 +4361,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           name: sourceAgent.name,
           instructions: sourceAgent.instructions,
         },
-        // 起草 run 不注入任何 skill——素材里已含现有技能列表（文本），
-        // 注入会干扰"提炼"这件事本身。
-        skills: [],
+        // ★ 注入**唯一**一个技能：平台内置的「写 skill 的 skill」（2026-10-19 四轮）。
+        //   改之前这里是 `skills: []`，注释写着"注入会干扰提炼"——事实证明干扰的不是
+        //   "有 skill"，而是"注入了业务 skill"：写作规范恰恰是起草者最需要的。
+        //   它随代码走、不进使用者的技能列表，也不能被删除（删了没人知道为什么写不好）。
+        skills: [writingSkill],
         // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
         //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
         //   `sourceRunId` = 它从哪条 run 发起（对话 = 那一轮 run，任务 =
         //   任务执行 run）——"恢复进行中的起草"按它找回这条草稿（§4.1.1）。
         subject: { type: 'skill-draft', id: draftRunId, sourceRunId: runId },
-        prompt,
+        prompt: draftPrompt,
         limits: { maxTurns: null, timeoutMs: null },
         // 起草 run **绝不自动审**（评审在人——审阅界面是它唯一的大门）。
         reviewerAgentId: null,
@@ -4244,15 +4379,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ⚠️ purpose 不落库——它只影响起草 prompt，提交时用不到。
         crystallizeTarget:
           target.kind === 'new' ? { kind: 'new' } : { kind: 'update', skillId: target.skillId },
-        // 起草的产出是文本草稿，进 run 的 result；工作目录给它一间专用小屋，
+        // 工作目录 = 草稿小屋（2026-10-19 四轮）：`material/` 是素材（平台写）、
+        // `skill/` 是产出（agent 写）。素材必须在工作目录里——claude 的
+        // PreToolUse 隔离 hook 会 deny 越界路径，放别处 agent 读不到。
         // 不碰源 run 的目录（草稿不进任何工作目录，设计 §5）。
-        workDir: join(workRoot, `skill-draft-${draftRunId}`),
+        workDir: draftDir,
       })
       if (outcome.kind === 'rejected') {
         sendJson(res, 503, { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' })
         return
       }
-      sendJson(res, 202, { draftRunId, materialStats: material.stats })
+      sendJson(res, 202, { draftRunId, materialStats: collected.stats })
       return
     }
 
@@ -4261,9 +4398,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         draftRunId?: unknown
         target?: unknown
         slug?: unknown
-        name?: unknown
-        description?: unknown
-        body?: unknown
+        /** 整份产出（相对路径 → 文本）。2026-10-19 四轮：**只有这一个内容入口**。 */
         files?: unknown
       }
       const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
@@ -4293,12 +4428,45 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
-      const slug = typeof raw?.slug === 'string' ? raw.slug.trim() : ''
-      const name = typeof raw?.name === 'string' ? raw.name.trim() : ''
-      const body = typeof raw?.body === 'string' ? raw.body : ''
-      const description = typeof raw?.description === 'string' ? raw.description.trim() : ''
-      if (slug === '' || name === '' || body.trim() === '') {
-        sendJson(res, 400, { error: '需要 slug / name / body', code: 'fields_required' })
+      // ── 入库只认产出文件本身（2026-10-19 四轮）──
+      //
+      // 改之前：前端把 name / description / slug / body 从草稿文本里"拆"出来重传，
+      // 于是同一份内容有两个出处（框里的和文件里的），改一处就漂。现在只传 files，
+      // name/description 由服务端从 SKILL.md 的 frontmatter 现解析——客户端的界面
+      // 只是展示，说的不算。
+      const filesIn = raw?.files
+      if (typeof filesIn !== 'object' || filesIn === null) {
+        sendJson(res, 400, { error: '需要 files（整份产出）', code: 'files_required' })
+        return
+      }
+      const files = filesIn as Record<string, unknown>
+      const normalizedFiles: Record<string, string> = {}
+      for (const [rel, value] of Object.entries(files)) {
+        if (typeof value !== 'string') {
+          sendJson(res, 400, { error: `文件 ${rel} 的内容不是字符串`, code: 'invalid_files' })
+          return
+        }
+        normalizedFiles[rel] = value
+      }
+      const skillMdRaw = normalizedFiles['SKILL.md']
+      if (skillMdRaw === undefined || skillMdRaw.trim() === '') {
+        sendJson(res, 400, { error: '缺少 SKILL.md', code: 'skill_md_required' })
+        return
+      }
+      // 与界面同一套规则再算一遍（界面画对了、请求被手工改过也拦得住）
+      const check = validateArtifactFiles(normalizedFiles)
+      if (!check.ok) {
+        sendJson(res, 400, {
+          error: check.problems.map((p) => (p.file === '' ? p.message : `${p.file}：${p.message}`)).join('；'),
+          code: 'invalid_artifacts',
+          problems: check.problems,
+        })
+        return
+      }
+      const parsed = parseSkillMd(skillMdRaw)
+      const slug = (typeof raw?.slug === 'string' && raw.slug.trim() !== '' ? raw.slug.trim() : parsed.name).toLowerCase()
+      if (slug === '') {
+        sendJson(res, 400, { error: '需要 slug（SKILL.md 的 name 为空）', code: 'slug_required' })
         return
       }
 
@@ -4307,8 +4475,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       try {
         validated = resolvePayloadEntry({
           slug,
-          body,
-          files: typeof raw?.files === 'object' && raw.files !== null ? (raw.files as Record<string, string>) : null,
+          body: skillMdRaw,
+          files: normalizedFiles,
           sourceRef: `mine:${slug}`,
         })
       } catch (err) {
@@ -4317,6 +4485,27 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           code: 'invalid_skill',
         })
         return
+      }
+
+      // ── 文本兜底草稿：不做"整目录替换"（2026-10-19）──
+      //
+      // 产出形态按**磁盘**判（`skill/` 目录在不在），不信客户端说的：目录在 = 多文件，
+      // 目录不在 = 只有一段文本（generic 之类的 runtime 写不出文件）。
+      //
+      // 为什么这条要紧：`writeSkillFiles` 是"清空目录再写"，所以更新时提交一份只有
+      // SKILL.md 的文件集合 = **把目标技能的支持文件全删掉**。文本草稿本来就没抓到
+      // 支持文件，那不是"决定了要删"，而是"没看见"——两者不能混为一谈。
+      const dirArtifacts = await readDraftSkillDir(join(draftRoot(workRoot, draftRunId), 'skill'))
+      const textMode = dirArtifacts === null
+      let incomingFiles = { ...validated.files }
+      if (textMode && target.kind === 'update') {
+        const targetNow = (await store.listSkills(workspaceId)).find(
+          (s) => (s.id as string) === target.skillId,
+        )
+        const kept = (targetNow?.files ?? {}) as Record<string, string>
+        for (const [rel, text] of Object.entries(kept)) {
+          if (incomingFiles[rel] === undefined) incomingFiles[rel] = text
+        }
       }
 
       const existing = await store.listSkills(workspaceId)
@@ -4381,10 +4570,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         id: targetId,
         workspaceId,
         slug: validated.slug,
-        name,
-        description: description !== '' ? description : null,
+        // name / description 一律来自 SKILL.md 的 frontmatter（上面现解析的 parsed）
+        name: parsed.name !== '' ? parsed.name : validated.slug,
+        description: parsed.description !== '' ? parsed.description : null,
         body: validated.body,
-        ...(Object.keys(validated.files).length > 0 ? { files: validated.files } : {}),
+        ...(Object.keys(incomingFiles).length > 0 ? { files: incomingFiles } : {}),
         verdictSchemaVersion: 1,
         source: 'mine',
         sourceRef: `mine:${validated.slug}`,

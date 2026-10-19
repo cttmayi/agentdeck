@@ -76,14 +76,14 @@ export const crystallizeText = {
     zh: '本次对话没有加载 skill，只能新建',
     en: 'No skill loaded here — only "new" is available',
   },
-  'crystallize.purposeLabel': { zh: '作用描述（必填）', en: 'Purpose (required)' },
+  'crystallize.purposeLabel': { zh: '作用描述（可选）', en: 'Purpose (optional)' },
   'crystallize.purposePlaceholder': {
     zh: '这个 skill 是做什么的？什么时候用？',
     en: 'What does this skill do? When to use it?',
   },
   'crystallize.purposeHint': {
-    zh: '会作为草稿 description 的基底——"干什么用"这层是你自己的话，不会偏',
-    en: 'Becomes the base of the draft description — the "what it does" layer stays your own words',
+    zh: '留空则由 skill 从素材推断——审阅时会把推断出的 description 摆在最上面，你一眼就能否定',
+    en: 'Leave empty and the skill infers it from the material — the inferred description is shown at the top of the review for you to reject',
   },
   'crystallize.badgeMine': { zh: '你的', en: 'yours' },
   'crystallize.badgeInstalled': { zh: '安装的', en: 'installed' },
@@ -140,11 +140,30 @@ export const crystallizeText = {
 
   // ── 草稿审阅 ──
   'crystallize.reviewTitle': { zh: '审阅草稿', en: 'Review draft' },
-  'crystallize.slugLabel': { zh: 'slug（kebab-case）', en: 'slug (kebab-case)' },
+  'crystallize.slugLabel': { zh: 'slug', en: 'slug' },
+  'crystallize.slugFromFrontmatter': {
+    zh: '默认取 SKILL.md 的 name',
+    en: 'defaults to the name in SKILL.md',
+  },
   'crystallize.nameLabel': { zh: '名称', en: 'Name' },
-  'crystallize.descriptionLabel': { zh: 'description（含触发条件）', en: 'description (with trigger condition)' },
+  'crystallize.descriptionLabel': { zh: '描述', en: 'description' },
   'crystallize.previewTitle': { zh: '预览', en: 'Preview' },
-  'crystallize.bodyLabel': { zh: '正文（SKILL.md）', en: 'Body (SKILL.md)' },
+  // ── 四轮：产出是文件集合（文件树 / 变更集 / 校验 / 兜底形态）──
+  'crystallize.filesUnit': { zh: '个文件', en: 'files' },
+  'crystallize.changeAdded': { zh: '新增', en: 'added' },
+  'crystallize.changeModified': { zh: '修改', en: 'modified' },
+  'crystallize.changeDeleted': { zh: '删除', en: 'deleted' },
+  'crystallize.textModeHint': {
+    zh: '（文本产物：这条起草没有写出文件，只有单文件 SKILL.md）',
+    en: '(text artifact: this draft wrote no files, only a single SKILL.md)',
+  },
+  'crystallize.problemsTitle': { zh: '校验未通过', en: 'Validation failed' },
+  'crystallize.noFiles': { zh: '没有产出任何文件', en: 'No files were produced' },
+  'crystallize.deletedHint': {
+    zh: '这个文件在草稿里没有，入库时会被删掉（更新 = 整目录替换）',
+    en: 'This file is missing from the draft and will be deleted on save (update replaces the whole directory)',
+  },
+  'crystallize.refusedTitle': { zh: '起草者判定：这里没有可沉淀的内容', en: 'The drafter found nothing crystallizable' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {
