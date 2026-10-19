@@ -172,14 +172,26 @@ const CHECKS = [
   //    "选中即编辑"（没有查看态）、栏头交给 `MainArea` 渲染，而智能体页没给它
   //    `backLabel`。窄屏的出口与任务页同一个：**侧边栏那一项**（全屏常驻、最容易
   //    点到）。判据因此换成"真的出得去"，而不是"某个按钮在不在"。
-  { view: '智能体', key: 'agents.narrowExitFound', label: '★ 窄屏的出口在（侧边栏「智能体」那一项）', ok: (v) => v === true },
-  { view: '智能体', key: 'agents.afterExitClass', label: '★ 点侧边栏「智能体」后 with-detail 撤掉（回到列表）', ok: (v) => !String(v).includes('with-detail') },
+  { view: '智能体', key: 'agents.narrowExitFound', label: '★ 窄屏的出口在（底部「取消」：放弃草稿 + 退出这一栏）', ok: (v) => v === true },
+  { view: '智能体', key: 'agents.afterExitClass', label: '★★ 点出口之后 with-detail 撤掉（真的回到列表，不是"按钮在但走不掉"）', ok: (v) => !String(v).includes('with-detail') },
   { view: '智能体', key: 'agents.afterExitListDisplay', label: '★ 出口之后左栏回来', ok: (v) => v === 'flex' },
-  { view: '智能体', key: 'agents.afterExitDetailDisplay', label: '★ 窄屏下出口之后详情栏消失', ok: (v) => v === 'none' },
+  { view: '智能体', key: 'agents.afterExitDetailDisplay', label: '★★ 窄屏下出口之后详情栏消失（否则使用者卡在一张表单里）', ok: (v) => v === 'none' },
   {
     view: '智能体',
-    key: 'agents.editButtonFound',
-    label: '详情里有「编辑」（下面那条要在编辑态里量）',
+    key: 'agents.detailNoHero',
+    label: '★ 选中即编辑：右栏**没有 hero 头**（2026-10 使用者拍板去掉预览页，与智能体组页同款）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.detailNoEditButton',
+    label: '★★ 也没有「编辑」按钮——**没有查看/编辑两态**（两个态是"改了没保存"最容易被误会的地方）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.detailEditableInPlace',
+    label: '★ 而卡片里就是能改的控件（角色卡 + 指令框）——"选中即编辑"要真的落成能改，不是换了个空壳',
     ok: (v) => v === true,
   },
   {
@@ -334,17 +346,23 @@ const CHECKS = [
     label: '★ 聊天标题顶在栏头行首（D69.15.2：改名按钮不再把标题顶低 7px）',
     ok: (v) => v === true,
   },
+  // ⚠️ 智能体页 2026-10 起**没有 hero**（选中即编辑，没有预览页头）。D69.15 的
+  //    "栏头标题/副题统一"由任务与聊天那两条继续钉着；这两条在智能体页只能认
+  //    `NO-HERO` / `NO-HINT`——留着它们是为了**继续钉住"这一页不该长出 hero"**
+  //    （真想加回预览页时，这两条会红，提醒同步那条决定）。
   {
     view: '智能体',
     key: 'heads.agentsHeroFullBleed',
-    label: '★ 智能体 hero 通栏（D69.15.2：分隔线横贯整栏、与任务/聊天同位置）',
-    ok: (v) => v === true,
+    label: '智能体页**没有**栏头 hero（`NO-HERO` 才是对的：选中即编辑；D69.15.2 的通栏由任务/聊天钉着）',
+    ok: (v) => v === true || v === 'NO-HERO',
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '智能体',
     key: 'heads.agentsRoleHintFs',
-    label: '★ 智能体角色提示小字 14px（D69.15.2：与任务/聊天副题同号）',
-    ok: (v) => v === true,
+    label: '智能体页**没有** hero ⇒ 也没有角色的 hero 副题（`NO-HINT` 才是对的）',
+    ok: (v) => v === true || v === 'NO-HINT',
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '任务',
@@ -355,8 +373,9 @@ const CHECKS = [
   {
     view: '智能体',
     key: 'heads.agentsHeadTitleFs',
-    label: '★ 智能体栏头标题字号 fs-lg 17px（D69.15 标题统一）',
-    ok: (v) => v === true,
+    label: '智能体栏头标题字号 fs-lg 17px——这一页已经没有栏头了，所以也只认 `NO-HERO`',
+    ok: (v) => v === true || v === 'NO-HERO',
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '聊天',

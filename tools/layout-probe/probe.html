@@ -169,14 +169,32 @@
         facts['agents.activeCardClass'] = need('选中态', () =>
           d().querySelector('.agent-row.active')?.className.replace(/ svelte-\w+/, ''),
         )
-        facts['agents.detailRendered'] = need('右栏是否渲染出详情', () =>
-          !!d().querySelector('.detail-pane .detail'),
+        // ⚠️ 2026-10（使用者拍板）：智能体**没有预览页了**——选中即编辑，右栏
+        //    进来就是一张可编辑卡片（与智能体组页同款）。原来这里认的是
+        //    `.detail-pane .detail`（查看态那套 DOM），那一整套随改造删掉了。
+        facts['agents.detailRendered'] = need('右栏是否渲染出详情（可编辑卡片）', () =>
+          !!d().querySelector('.detail-pane .card.agent-card'),
+        )
+        // ★ 这三条钉的就是"没有查看/编辑两态"这个决定：右栏没有 hero 头、
+        //   页面上没有「编辑」按钮、卡片里就是能改的控件。
+        facts['agents.detailNoHero'] = need('没有 hero 头', () =>
+          !d().querySelector('.detail-pane .hero'),
+        )
+        facts['agents.detailNoEditButton'] = need('没有「编辑」按钮', () =>
+          ![...d().querySelectorAll('.detail-pane button')].some(
+            (b) => text(b).trim() === '编辑',
+          ),
+        )
+        facts['agents.detailEditableInPlace'] = need('卡片里就是可编辑的控件', () =>
+          !!d().querySelector('.detail-pane #agent-instructions') &&
+          !!d().querySelector('.detail-pane .role-picker .role-card'),
         )
         facts['agents.detailHeading'] = need('右栏标题', () =>
           text(d().querySelector('.detail-pane h2')),
         )
-        // ── D69.15 标题统一：智能体栏头标题字号必须 fs-lg（原来全局 h2 的
-        //    fs-xl 22px，比聊天/列表栏头大一圈）
+        // ── D69.15 标题统一（**只对还有栏头 hero 的页面成立**）：智能体页
+        //    2026-10 起没有预览页头了，这条在智能体页退化成"没有 hero"这一事实
+        //    （栏头标题的统一由任务/聊天那两条继续钉着）。
         facts['heads.agentsHeadTitleFs'] = need('智能体栏头标题字号 fs-lg', () => {
           const h2 = d().querySelector('.detail-pane .hero h2')
           return h2 ? cs(h2).fontSize === '17px' : 'NO-HERO'
@@ -203,13 +221,12 @@
         //   加一个 runtime = 描述表一行 + 适配器包 + 装配表一行。若界面写死
         //   选项，那个 runtime 就**只有直接调接口才选得到**——"接口支持、界面
         //   没有入口"是这个仓库最常见的那类缺陷。
-        const editBtn = [...d().querySelectorAll('button')].find(
-          (b) => b.textContent.trim() === '编辑',
-        )
+        // ⚠️ 这一段原来要**先点「编辑」**才量得到 runtime 选择器。2026-10 起
+        //    没有两态了 ⇒ 选择器直接在卡片里，不需要任何前置点击（点了也点不到，
+        //    「编辑」按钮已经不存在——那正是上面 `detailNoEditButton` 量的事）。
+        const editBtn = null
         facts['agents.editButtonFound'] = !!editBtn
-        if (editBtn) {
-          click(editBtn)
-          await until(() => d().querySelector('select#agent-runtime'))
+        {
           const sel = d().querySelector('select#agent-runtime')
           facts['agents.runtimeOptions'] = sel ? [...sel.options].map((o) => o.value).sort() : null
           // ── 未接真实 CLI 的 runtime（evidence 非 verified）不进 runtimes 数组 ──
@@ -232,12 +249,9 @@
             facts['agents.noProvisionalRuntime'] = null
           }
 
-          // 别把状态留在编辑态：后面的断言按只读态写的
-          const cancel = [...d().querySelectorAll('button')].find(
-            (b) => b.textContent.trim() === '取消',
-          )
-          if (cancel) click(cancel)
-          await wait(200)
+          // ⚠️ 这里原来要"别把状态留在编辑态"（后面的断言按只读态写的）。现在
+          //    只有一个态，**不要**点取消：那会退出这一栏（`onclose`），后面的
+          //    窄屏出口那几条需要"有一条被选中"的现场。
         }
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
@@ -266,16 +280,31 @@
           cs(d().querySelector('.detail-pane')).display,
         )
 
-        // ── 窄屏出口：点侧边栏「智能体」⇒ 回到列表（详情让位）──
-        //    ⚠️ 这一条与任务页那条同一个道理：把返回按钮去掉之后，出口就落在
-        //       **全屏常驻的侧边栏那一项**上，而它走通用导航。
+        // ── 窄屏出口 ⇒ 回到列表（详情让位）──
+        //    ⚠️ 2026-10 实测：**点侧边栏「智能体」那一项是空操作**（导航到同一个
+        //       视图不改变 `selectedId` 这个组件状态）⇒ 窄屏下左栏被详情顶掉之后，
+        //       靠侧边栏回不去。当前真正有的出口是底部那颗「取消」
+        //       （`cancelEdit()` = 放弃草稿 + 退出这一栏）。
+        //    ★ 两种口径分开记：`sidebarNoOp` 是一条**事实**（它是个真缺陷，
+        //       但不是这一批要改的东西——改界面与对齐探针是两件事），
+        //       `narrowExit*` 量的是**真的出得去**。
         const navAgentsBtn = [...d().querySelectorAll('.nav-item')].find((b) =>
           text(b)?.includes('智能体'),
         )
-        facts['agents.narrowExitFound'] = !!navAgentsBtn
         if (navAgentsBtn) {
           click(navAgentsBtn)
           await wait(500)
+        }
+        facts['agents.sidebarNavNoOpWhenSelected'] = need('点侧边栏「智能体」是不是空操作', () =>
+          layout()?.className.includes('with-detail') === true,
+        )
+        const cancelBtn = [...d().querySelectorAll('.detail-pane .form-actions button')].find(
+          (b) => text(b).trim() === '取消',
+        )
+        facts['agents.narrowExitFound'] = !!cancelBtn
+        if (cancelBtn) {
+          click(cancelBtn)
+          await until(() => !layout()?.className.includes('with-detail'), 60)
         }
         facts['agents.afterExitClass'] = need('出口之后 class', () => layout()?.className)
         facts['agents.afterExitListDisplay'] = need('出口之后左栏', () =>
