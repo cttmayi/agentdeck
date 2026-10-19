@@ -870,6 +870,16 @@ export const Run = z.object({
    */
   groupId: AgentGroupId.optional(),
   /**
+   * 这条起草 run 是"按意见再改一版"来的，值是**上一版草稿的 run id**（2026-10-19 四轮 P1）。
+   *
+   * 为什么记在 run 上：审阅时要能"新旧并列对比"——知道上一版是哪个 run，才能把它的
+   * 产出（`skill/` 目录）读出来做 diff。不记的话只能靠时间戳猜，而"哪一版是基于哪一版
+   * 改的"恰恰是这个功能唯一的语义。
+   *
+   * 只有起草 run（`subject.type === 'skill-draft'`）会有它。
+   */
+  revisedFrom: RunId.optional(),
+  /**
    * 这条 run 的**审核者覆盖**（见 `SubmitRunRequest.reviewerAgentId`）。
    *
    * 三态，缺一不可：

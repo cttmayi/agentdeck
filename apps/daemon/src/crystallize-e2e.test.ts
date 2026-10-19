@@ -693,3 +693,205 @@ describe('四轮：文本兜底草稿更新时不删支持文件', () => {
     assert.match(await readFile(join(mineRoot, 'keep-refs', 'SKILL.md'), 'utf8'), /保留 v2/)
   })
 })
+
+describe('五轮：变更集 diff（P1）', () => {
+  test('新建草稿：全部文件是 A，行数统计与 hunk 对得上，SKILL.md 排第一', async () => {
+    const runId = await runReviewed('diff 新建')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as {
+      against: string
+      baselineLabel: string
+      files: Array<{ rel: string; change: string; added: number; hunks: unknown[] }>
+      totals: { changed: number }
+    }
+    assert.equal(body.against, 'current')
+    assert.equal(body.baselineLabel, '空（新建）')
+    assert.ok(body.files.length >= 2, JSON.stringify(body.files.map((f) => f.rel)))
+    assert.equal(body.files[0]!.rel, 'SKILL.md')
+    assert.equal(
+      body.files.every((f) => f.change === 'A'),
+      true,
+    )
+    assert.ok(body.totals.changed >= 2)
+  })
+
+  test('★ 更新草稿：只有改动的那几行算 +/−，其余是上下文（LCS 真生效）', async () => {
+    const runId = await runReviewed('diff 更新')
+    const first = await draftAndWait({ runId, target: { kind: 'new' } })
+    const created = await commit({
+      draftRunId: first,
+      target: { kind: 'new' },
+      slug: 'diff-target',
+      files: {
+        'SKILL.md':
+          '---\nname: diff-target\ndescription: 差异目标\n---\n\n# 标题\n\n## When to Use\n- 第一行\n\n' +
+          '## Procedure\n1. 第二行\n2. 第三行\n',
+        'references/a.md': '# a\n',
+      },
+    })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+    const skillId = (created.body['skill'] as { id: string }).id
+
+    const runId2 = await runReviewed('diff 更新二')
+    const second = await draftAndWait({ runId: runId2, target: { kind: 'update', skillId } })
+    // 只改 SKILL.md 的一行，并把 references/a.md 换个名字 → 一个 M、一个 A、一个 D
+    const res = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftRunId: second,
+        files: {
+          'SKILL.md':
+            '---\nname: diff-target\ndescription: 差异目标\n---\n\n# 标题\n\n## When to Use\n- 第一行\n\n' +
+            '## Procedure\n1. 第二行改过了\n2. 第三行\n',
+          'references/b.md': '# b\n',
+        },
+      }),
+    })
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as {
+      files: Array<{ rel: string; change: string; added: number; removed: number }>
+    }
+    const byRel = new Map(body.files.map((f) => [f.rel, f]))
+    assert.equal(byRel.get('SKILL.md')!.change, 'M')
+    assert.equal(byRel.get('SKILL.md')!.added, 1, '只改一行 ⇒ 只有一个 +')
+    assert.equal(byRel.get('SKILL.md')!.removed, 1)
+    assert.equal(byRel.get('references/b.md')!.change, 'A')
+    assert.equal(byRel.get('references/a.md')!.change, 'D')
+    // 删除的排在最后（核对时最该一眼看到）
+    assert.equal(body.files[body.files.length - 1]!.rel, 'references/a.md')
+  })
+
+  test('diff 也吃"当次编辑后的文件"：传什么算什么，不回读磁盘', async () => {
+    const runId = await runReviewed('diff 用编辑内容')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, files: { 'SKILL.md': '---\nname: x\ndescription: y\n---\n' } }),
+    })
+    const body = (await res.json()) as { files: Array<{ rel: string }> }
+    assert.deepEqual(
+      body.files.map((f) => f.rel),
+      ['SKILL.md'],
+      '传一份只含 SKILL.md 的集合 ⇒ 差异里也只有它',
+    )
+  })
+
+  test('缺 draftRunId / 不存在的草稿 ⇒ 400 / 404（不猜）', async () => {
+    const bad = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(bad.status, 400)
+    const missing = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: '01NOPE00000000000000000000' }),
+    })
+    assert.equal(missing.status, 404)
+  })
+})
+
+describe('五轮：按意见改一版（P1）', () => {
+  test('★ 新 run 复用同一份素材 + 上一版产出进 previous-draft/ + 意见进 feedback.md', async () => {
+    const runId = await runReviewed('改一版')
+    const first = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: first, feedback: 'Procedure 要写全命令参数' }),
+    })
+    assert.equal(res.status, 202, JSON.stringify(await res.clone().text()))
+    const created = (await res.json()) as { draftRunId: string; revisedFrom: string }
+    assert.equal(created.revisedFrom, first)
+
+    // 等新 run 终态
+    const draftRun = await fetch(`${daemon.url}/api/runs/${created.draftRunId}`)
+    const run = (await draftRun.json()) as { status: string; revisedFrom?: string }
+    assert.equal(run.revisedFrom, first, 'revisedFrom 要随 run 落库（对比上一版靠它）')
+
+    // 素材：上一版素材被复制过来 + previous-draft/ + feedback.md
+    const mat = (await (
+      await fetch(`${daemon.url}/api/crystallize/material?draftRunId=${created.draftRunId}`)
+    ).json()) as { items: Array<{ relPath: string; text: string }> }
+    const rels = mat.items.map((i) => i.relPath)
+    assert.ok(rels.includes('00-README.md'))
+    assert.ok(rels.includes('feedback.md'), JSON.stringify(rels))
+    assert.ok(rels.some((r) => r.startsWith('previous-draft/')), JSON.stringify(rels))
+    assert.match(mat.items.find((i) => i.relPath === 'feedback.md')!.text, /写全命令参数/)
+    assert.match(
+      mat.items.find((i) => i.relPath === '00-README.md')!.text,
+      /按意见改一版/,
+      '索引要告诉起草者这一版在改上一版',
+    )
+    // 上一版自己的 feedback.md / previous-draft 不会被一层层套进来
+    assert.equal(rels.filter((r) => r === 'feedback.md').length, 1)
+    assert.equal(rels.filter((r) => r.startsWith('previous-draft/previous-draft/')).length, 0)
+  })
+
+  test('「对比上一版」：against=previous 用上一版草稿当基线', async () => {
+    const runId = await runReviewed('对比上一版')
+    const first = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: first, feedback: '改一句' }),
+    })
+    const created = (await res.json()) as { draftRunId: string }
+    for (let i = 0; i < 40; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${created.draftRunId}`)).json()) as {
+        status: string
+      }
+      if (r.status === 'completed') break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    // 假后端两版写的内容一样 ⇒ 对比上一版应当全部"没变"
+    const diff = (await (
+      await fetch(`${daemon.url}/api/crystallize/diff`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: created.draftRunId, against: 'previous' }),
+      })
+    ).json()) as { against: string; baselineLabel: string; files: Array<{ change: string }> }
+    assert.equal(diff.against, 'previous')
+    assert.equal(diff.baselineLabel, '上一版草稿')
+    assert.ok(diff.files.length > 0)
+    assert.equal(
+      diff.files.every((f) => f.change === 'same'),
+      true,
+      JSON.stringify(diff.files),
+    )
+
+    // artifacts 里带着 revisedFrom，界面据此才显示"对比上一版"
+    const art = (await (
+      await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${created.draftRunId}`)
+    ).json()) as { revisedFrom: string | null }
+    assert.equal(art.revisedFrom, first)
+  })
+
+  test('意见为空 ⇒ 400；不是起草 run ⇒ 400（不静默再起草一版）', async () => {
+    const runId = await runReviewed('意见为空')
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    const empty = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, feedback: '   ' }),
+    })
+    assert.equal(empty.status, 400)
+    const notDraft = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: runId, feedback: '改一下' }),
+    })
+    assert.equal(notDraft.status, 400)
+  })
+})

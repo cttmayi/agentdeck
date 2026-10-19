@@ -290,6 +290,11 @@ export const SubmitRunRequest = z.object({
    */
   crystallizeTarget: CrystallizeTargetRef.optional(),
   /**
+   * D80 四轮 P1（2026-10-19）：这一版起草是"按意见改一版"来的，值是上一版草稿的
+   * run id。随 run 落库（`Run.revisedFrom`），审阅时据此读上一版的产出做对比。
+   */
+  revisedFrom: RunId.optional(),
+  /**
    * `review` run 的审核对象内容。
    *
    * execute run 不带这个字段——它的输入是 prompt 与工作目录。

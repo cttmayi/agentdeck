@@ -676,6 +676,41 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
 3. **素材必须在 workDir 里**：claude 的 PreToolUse 隔离 hook 会 deny 越界路径——素材
    落到别处 agent 根本读不到。这条写进了模块头注释，防止以后有人"顺手"挪走。
 
+#### 5.0.11 P1 实作（2026-10-19）
+
+| 文件 | 职责 |
+|---|---|
+| `apps/daemon/src/text-diff.ts` | 行级 diff（LCS + hunk 上下文 + 大文件退化）+ `diffFileSets`（A/M/D/same） |
+| `apps/daemon/src/crystallize-material.ts` | 新增 `copyMaterial`（改版时复制上一版素材，跳过 `previous-draft/`、`feedback.md`） |
+| `Run.revisedFrom` / `SubmitRunRequest.revisedFrom` | 改版草稿指向上一版 run（对比上一版靠它找回产出） |
+
+**接口**
+
+- `POST /api/crystallize/diff {draftRunId, files?, against?}`
+  · `files` = **当次编辑后的内容**（人在审阅里改了一行，diff 就得反映改完的样子；不传则读磁盘）；
+  · `against` = `current`（对已入库版本，即"入库会改什么"）| `previous`（对上一版草稿）；
+  · 返回 `{against, baselineLabel, files:[{rel,change,added,removed,hunks,coarse}], totals}`。
+- `POST /api/crystallize/revise {draftRunId, feedback}` → `202 {draftRunId, revisedFrom}`
+  · 新 run 的 `material/` = 上一版素材**复制**（同一份证据）＋ `previous-draft/`（上一版产出）
+    ＋ `feedback.md`（意见，优先级最高）＋ 索引页追加"这一版是按意见改一版"；
+  · 为什么复制而不是共用目录：起草 run 的素材在它自己的 workDir 里（隔离 hook 只放行 workDir），
+    跨 run 指过去 agent 读不到；而且直接改旧目录会把上一版的证据篡改掉。
+  · 跳过上一版自己的 `feedback.md` / `previous-draft/`：不跳的话改到第五版会层层嵌套。
+
+**界面**：文件树的「新增/修改/删除」与 `+n −m` **都来自 diff**（一处判据）；改版草稿默认
+对比上一版，可切回对比当前版本；「素材」分节列目录 + 文件清单 + 预览（起草中也能看）；
+审阅底部一句意见 + 「重新起草」。
+
+**实作中发现的坑**
+
+1. **同一行两个说法**：文件树徽标原本对"入库基线"算、旁边的 `+n −m` 来自 diff——切到
+   "对比上一版"时同一行显示「新增 +1 −1」。现在徽标也走 diff；只有 diff 还没到（未拉/拉失败）
+   才退回入库基线。
+2. **两版草稿共用来源 run** 时，"继续"永远挂到新的那条（按来源找 activeDraft）——断言与冒烟
+   夹具要分别喂不同的来源 run，否则看到的是另一版。
+3. 末尾换行 / CRLF：行内容一样但文本不同，LCS 会说"没变"，而入库写下去的字节确实变了——
+   显式记成"改了一行"（宁可多一行噪音，不要一份内容两个说法）。
+
 **验证**（真浏览器冒烟，临时 data 副本 + 夹具草稿，跑完即清理）：
 多文件草稿 → 文件树 2 项都标「新增」、frontmatter 摘要只读显示、只有 slug 一个输入框、
 两栏布局实测 `260px 409px`、切换文件编辑区跟着换；文本兜底草稿（更新目标）→ 校验红条

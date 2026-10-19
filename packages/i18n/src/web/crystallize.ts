@@ -164,6 +164,29 @@ export const crystallizeText = {
     en: 'This file is missing from the draft and will be deleted on save (update replaces the whole directory)',
   },
   'crystallize.refusedTitle': { zh: '起草者判定：这里没有可沉淀的内容', en: 'The drafter found nothing crystallizable' },
+  // ── 四轮 P1：变更集 diff / 素材分节 / 按意见改一版 ──
+  'crystallize.diffVsCurrent': { zh: '对比当前版本', en: 'vs current' },
+  'crystallize.diffVsPrevious': { zh: '对比上一版草稿', en: 'vs previous draft' },
+  'crystallize.diffCoarse': {
+    zh: '（文件较大，按整文件差异显示）',
+    en: '(large file: shown as whole-file diff)',
+  },
+  'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
+  'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
+  'crystallize.materialTitle': { zh: '素材', en: 'Material' },
+  'crystallize.materialDir': { zh: '目录', en: 'Directory' },
+  'crystallize.materialEmpty': { zh: '没有素材文件', en: 'No material files' },
+  'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
+  'crystallize.reviseTitle': {
+    zh: '按意见再改一版',
+    en: 'Ask for another version',
+  },
+  'crystallize.revisePlaceholder': {
+    zh: '比如：Procedure 第 2 步要写全命令参数；Pitfalls 里那条环境问题删掉',
+    en: 'e.g. spell out the full command in step 2; drop the environment issue from Pitfalls',
+  },
+  'crystallize.reviseSubmit': { zh: '重新起草', en: 'Draft again' },
+  'crystallize.revisedFrom': { zh: '（改自上一版）', en: '(revised from the previous draft)' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {

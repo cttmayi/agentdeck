@@ -238,8 +238,10 @@ export function buildDraftPrompt(opts: {
   /** 产出目录（相对工作目录，固定 `skill`）。 */
   outputDir: string
   target: 'new' | 'update'
+  /** 这一版是"按意见改一版"（素材里有 previous-draft/ 与 feedback.md）。 */
+  revised?: boolean
 }): string {
-  const { scope, materialDir, outputDir, target } = opts
+  const { scope, materialDir, outputDir, target, revised = false } = opts
   return `你是 skill 起草者。本次素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已经落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
 
 【先做这三件事】
@@ -260,6 +262,13 @@ export function buildDraftPrompt(opts: {
 
 【额外交代】
 ${
+  revised
+    ? '- 这一版是**在上一版基础上按意见改**：上一版全文在 `material/previous-draft/`，' +
+      '使用者的意见在 `material/feedback.md`（优先级最高）。照意见改，意见没提到的地方不要动；' +
+      '但仍然要输出**整份**产出，不是补丁。\n'
+    : ''
+}${
+  revised ? '' : ''}${
   target === 'new'
     ? '- 素材索引里写了使用者给的作用描述（如果有）：frontmatter 的 description 以它为基底，可以调措辞，不许改含义。'
     : '- 要更新的技能当前全文在 `material/existing-skill/`：请**修订**它（保留仍然正确的部分），不要从零重写，也不要省略完整产出。'

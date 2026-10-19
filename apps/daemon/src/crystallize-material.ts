@@ -20,7 +20,7 @@
  * ⚠️ 目录必须落在**起草 run 的工作目录里**：claude run 有 PreToolUse 隔离 hook，
  *    越界路径直接 deny（见 executor.ts 那段注释）。放别处 agent 根本读不到。
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Store } from '@agentdeck/domain'
 import type { Conversation, Issue, Run, RunId } from '@agentdeck/protocol'
@@ -244,11 +244,45 @@ export async function writeMaterial(
   return written
 }
 
+/**
+ * 复制一份素材目录（"按意见改一版"用）。
+ *
+ * 为什么要**复制**而不是让新 run 直接指旧目录：起草 run 的素材目录就在它自己的工作
+ * 目录里（隔离 hook 只放行 workDir），跨 run 指过去 agent 读不到；而且下一版要往里加
+ * `previous-draft/` 与新的 `feedback.md`——直接改旧目录会把上一版的证据篡改掉。
+ *
+ * `skip` 用来避开上一版自己塞进去的东西（`previous-draft` / `feedback.md`），
+ * 否则改到第五版时素材里会套着四层历史。
+ */
+export async function copyMaterial(
+  from: string,
+  to: string,
+  opts: { skip?: string[] } = {},
+): Promise<void> {
+  const skip = new Set(opts.skip ?? [])
+  const walk = async (src: string, dst: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(src, { withFileTypes: true })
+    } catch {
+      return
+    }
+    await mkdir(dst, { recursive: true })
+    for (const entry of entries) {
+      if (skip.has(entry.name)) continue
+      const srcPath = join(src, entry.name)
+      const dstPath = join(dst, entry.name)
+      if (entry.isDirectory()) await walk(srcPath, dstPath)
+      else if (entry.isFile()) await copyFile(srcPath, dstPath)
+    }
+  }
+  await walk(from, to)
+}
+
 /** 素材目录里已有哪些文件（界面「素材」分节 / 测试用）。 */
 export async function listMaterialFiles(
   dir: string,
 ): Promise<Array<{ relPath: string; text: string }>> {
-  const { readdir } = await import('node:fs/promises')
   const out: Array<{ relPath: string; text: string }> = []
   const walk = async (current: string, prefix: string): Promise<void> => {
     let entries
@@ -262,7 +296,6 @@ export async function listMaterialFiles(
       const full = join(current, entry.name)
       if (entry.isDirectory()) await walk(full, rel)
       else if (entry.isFile()) {
-        const { readFile } = await import('node:fs/promises')
         out.push({ relPath: rel, text: await readFile(full, 'utf8') })
       }
     }

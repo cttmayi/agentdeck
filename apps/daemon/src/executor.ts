@@ -409,6 +409,11 @@ export class RunExecutor {
       ...(req.crystallizeTarget === undefined
         ? {}
         : { crystallizeTarget: req.crystallizeTarget as Run['crystallizeTarget'] }),
+      // ★ D80 四轮 P1：这一版是"按意见改一版"来的 ⇒ 记上一版草稿的 run id。
+      //   审阅要"新旧并列对比"，靠它找回上一版的产出；缺字段 = 不是改版草稿。
+      ...(req.revisedFrom === undefined
+        ? {}
+        : { revisedFrom: req.revisedFrom as Run['revisedFrom'] }),
       // ★ 任务级返工次数（D45）。缺字段 = 不返工（`fail` 直接交给人）。
       //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
       //   所以不需要区分三态，落一个数即可。

@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   ALL_KINDS,
   buildBlocks,
@@ -87,10 +87,12 @@ import {
   resolveSourceRun,
 } from './crystallize.ts'
 import { lastTextOf } from './run-text.ts'
+import { diffFileSets } from './text-diff.ts'
 import { commitMine, ensureMineRepo, probeGit } from './run-hooks/skill-mine.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import {
   collectMaterial,
+  copyMaterial,
   draftRoot,
   isMaterialEmpty,
   listMaterialFiles,
@@ -4074,6 +4076,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //   · GET  /api/crystallize/drafts           沉淀任务列表（未入库的起草 run + 来源标签）
     //   · GET  /api/crystallize/artifacts        草稿产出（多文件 + frontmatter 解析 + 校验）
     //   · GET  /api/crystallize/material         素材文件清单与预览（审阅时核对来源）
+    //   · POST /api/crystallize/diff             变更集差异（对当前版本 / 上一版草稿）
+    //   · POST /api/crystallize/revise           按意见再起草一版（复用同一来源素材）
     //   · GET  /api/crystallize/sources          新建沉淀的来源选择器（对话/达标任务 + 源 runId）
     //   · POST /api/crystallize/draft            打包素材 → 起草 run → 返回 draftRunId
     //   · POST /api/crystallize/discard          放弃一条没入库的起草（列表只增不减的出口）
@@ -4130,11 +4134,94 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         target: draftTarget ?? null,
         baseline,
         materialDir: join(draftDir, 'material'),
+        // 「按意见改一版」产出的草稿：带着上一版 run id，界面据此给"对比上一版"
+        revisedFrom: draftRun.revisedFrom ?? null,
       })
       return
     }
 
-    // 素材预览：审阅时能核"这句话是从哪一轮来的"。使用者定稿素材永久保留，
+    // 变更集 diff（P1）：对着"当前已入库的版本"或"上一版草稿"算逐文件差异。
+    //
+    // 前后端谁算的取舍见 `text-diff.ts` 头注释（只此一份）。这里传 `files` 是**当次
+    // 编辑后的内容**——使用者在审阅里改了 SKILL.md，diff 必须反映他改完的样子，而不是
+    // 磁盘上的原稿。
+    if (req.method === 'POST' && path === '/api/crystallize/diff') {
+      const raw = (await readJsonBody(req)) as {
+        draftRunId?: unknown
+        files?: unknown
+        against?: unknown
+      }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+
+      // 草稿这边：优先用客户端传的（含编辑），否则读磁盘
+      let draftFiles: Record<string, string> | null = null
+      const filesIn = raw?.files
+      if (typeof filesIn === 'object' && filesIn !== null) {
+        const out: Record<string, string> = {}
+        for (const [rel, text] of Object.entries(filesIn as Record<string, unknown>)) {
+          if (typeof text === 'string') out[rel] = text
+        }
+        draftFiles = out
+      } else {
+        draftFiles = await readDraftSkillDir(join(draftRoot(workRoot, draftRunId), 'skill'))
+        if (draftFiles === null) {
+          const text = lastTextOf(await store.listRunMessages(draftRun.id))
+          draftFiles = text === null ? {} : { 'SKILL.md': text }
+        }
+      }
+
+      // 基线这边：`previous` = 上一版草稿（"按意见改一版"的对比），否则 = 当前已入库版本
+      const against = raw?.against === 'previous' ? 'previous' : 'current'
+      let baselineFiles: Record<string, string> = {}
+      let baselineLabel = ''
+      if (against === 'previous' && draftRun.revisedFrom !== undefined) {
+        const previousFiles = await readDraftSkillDir(
+          join(draftRoot(workRoot, draftRun.revisedFrom as string), 'skill'),
+        )
+        baselineFiles = previousFiles ?? {}
+        baselineLabel = '上一版草稿'
+      } else {
+        const t = draftRun.crystallizeTarget
+        if (t?.kind === 'update') {
+          const current = (await store.listSkills(workspaceId)).find(
+            (sk) => (sk.id as string) === t.skillId,
+          )
+          if (current) {
+            baselineFiles = {
+              'SKILL.md': current.body,
+              ...((current.files ?? {}) as Record<string, string>),
+            }
+            baselineLabel = `${current.slug} 的当前版本`
+          }
+        } else {
+          baselineLabel = '空（新建）'
+        }
+      }
+
+      const diffs = diffFileSets(baselineFiles, draftFiles)
+      sendJson(res, 200, {
+        against,
+        baselineLabel,
+        files: diffs,
+        totals: {
+          added: diffs.reduce((sum, d) => sum + d.added, 0),
+          removed: diffs.reduce((sum, d) => sum + d.removed, 0),
+          changed: diffs.filter((d) => d.change !== 'same').length,
+        },
+      })
+      return
+    }
+
+    // 素材预览：审阅时能核"这句话是从哪一轮来的"。
     // 所以这里也顺带把目录路径给界面（想自己清理时找得到）。
     if (req.method === 'GET' && path === '/api/crystallize/material') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
@@ -4390,6 +4477,138 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
       sendJson(res, 202, { draftRunId, materialStats: collected.stats })
+      return
+    }
+
+    // 按意见再起草一版（P1）。
+    //
+    // 设计要点（2026-10-19 定稿：审阅页写一句意见 → 用同一份素材再起草一轮，新旧并列对比）：
+    //   · **不重跑素材收集**：新 run 的 `material/` = 上一版的素材目录（直接复制），
+    //     所以"同一份证据"对两版都成立，diff 才有意义；
+    //   · 上一版的产出原样放进 `material/previous-draft/`——让起草者知道"上一版长什么样、
+    //     要改哪里"，而不是从零再来一遍；
+    //   · 使用者的意见单独成 `material/feedback.md`，优先级最高；
+    //   · 新 run 记 `revisedFrom`（对比上一版靠它找回产出）。
+    if (req.method === 'POST' && path === '/api/crystallize/revise') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; feedback?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      const feedback = typeof raw?.feedback === 'string' ? raw.feedback.trim() : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      if (feedback === '') {
+        sendJson(res, 400, { error: '需要一句意见（改成什么样）', code: 'feedback_required' })
+        return
+      }
+      const previous = await store.getRun(draftRunId as RunId)
+      if (!previous || previous.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (previous.subject.type !== 'skill-draft') {
+        sendJson(res, 400, { error: '这条 run 不是起草 run', code: 'not_a_draft' })
+        return
+      }
+      const sourceRunId = previous.subject.sourceRunId
+      if (sourceRunId === undefined) {
+        sendJson(res, 409, { error: '这条草稿没记来源，无法再起草', code: 'no_source' })
+        return
+      }
+      const sourceRun = await store.getRun(sourceRunId as RunId)
+      if (!sourceRun) {
+        sendJson(res, 404, { error: '来源 run 已不存在', code: 'source_run_not_found' })
+        return
+      }
+      const sourceAgent = await store.getAgent(sourceRun.agentId)
+      if (!sourceAgent) {
+        sendJson(res, 400, { error: '发起 run 的执行者已不存在', code: 'agent_not_found' })
+        return
+      }
+      const writingSkill = await loadBuiltinSkill(WRITING_SKILLS)
+      if (writingSkill === null) {
+        sendJson(res, 500, {
+          error: '平台内置技能 writing-skills 读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        })
+        return
+      }
+
+      const previousDir = draftRoot(workRoot, draftRunId)
+      const previousSkill = await readDraftSkillDir(join(previousDir, 'skill'))
+
+      const newRunId = ulid() as RunId
+      const newDir = draftRoot(workRoot, newRunId)
+      try {
+        const materialDir = join(newDir, 'material')
+        // 复制上一版素材（同一份证据），但要避开它自己的 previous-draft/ 与反馈，
+        // 否则重写几版会层层嵌套、上下文越滚越大。
+        await copyMaterial(join(previousDir, 'material'), materialDir, {
+          skip: ['previous-draft', 'feedback.md'],
+        })
+        if (previousSkill !== null) {
+          for (const [rel, text] of Object.entries(previousSkill)) {
+            const full = join(materialDir, 'previous-draft', rel)
+            await mkdir(dirname(full), { recursive: true })
+            await writeFile(full, text, 'utf8')
+          }
+        }
+        await mkdir(materialDir, { recursive: true })
+        await writeFile(
+          join(materialDir, 'feedback.md'),
+          `# 使用者对上一版的意见（这一版必须照它改）\n\n${feedback}\n`,
+          'utf8',
+        )
+        // 索引页追加一段"这是第 N 版"，让起草者一进来就知道自己在改上一版
+        const index = await readFile(join(materialDir, '00-README.md'), 'utf8').catch(() => '')
+        await writeFile(
+          join(materialDir, '00-README.md'),
+          `${index.trimEnd()}\n\n## 这一版是「按意见改一版」\n\n` +
+            '- 上一版的完整产出在 `previous-draft/`（含 SKILL.md 与支持文件）。\n' +
+            '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方不要乱动。\n' +
+            '- 再次强调：输出仍然写到同级的 `skill/`（整份产出，不是补丁）。\n',
+          'utf8',
+        )
+      } catch (err) {
+        sendJson(res, 500, {
+          error: `素材准备失败：${err instanceof Error ? err.message : String(err)}`,
+          code: 'material_write_failed',
+        })
+        return
+      }
+
+      const revisePrompt = buildDraftPrompt({
+        scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+        materialDir: 'material',
+        outputDir: 'skill',
+        target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+        revised: true,
+      })
+
+      const outcome = await executor.submit({
+        runId: newRunId,
+        kind: 'execute',
+        agentRef: {
+          id: sourceAgent.id,
+          name: sourceAgent.name,
+          instructions: sourceAgent.instructions,
+        },
+        skills: [writingSkill],
+        subject: { type: 'skill-draft', id: newRunId, sourceRunId },
+        prompt: revisePrompt,
+        limits: { maxTurns: null, timeoutMs: null },
+        reviewerAgentId: null,
+        ...(previous.crystallizeTarget === undefined
+          ? {}
+          : { crystallizeTarget: previous.crystallizeTarget }),
+        revisedFrom: draftRunId as RunId,
+        workDir: newDir,
+      })
+      if (outcome.kind === 'rejected') {
+        sendJson(res, 503, { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' })
+        return
+      }
+      sendJson(res, 202, { draftRunId: newRunId, revisedFrom: draftRunId })
       return
     }
 

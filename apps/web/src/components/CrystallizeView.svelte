@@ -101,6 +101,25 @@
   let editText = ''
   /** 每次编辑 +1：让"从文件里解析出的 frontmatter 摘要"能重算（普通对象不触发响应）。 */
   let filesVersion = 0
+  /** 变更集 diff（后端算）：对当前已入库版本，或对比上一版草稿。 */
+  let diff: DiffResult | null = null
+  let diffLoading = false
+  /** 对比对象：对当前版本（入库会产生的变化）或上一版草稿（改版对比）。 */
+  let diffAgainst: 'current' | 'previous' = 'current'
+  /** 素材分节（文件清单 + 预览）。 */
+  let material: {
+    dir: string
+    items: Array<{ relPath: string; bytes: number; text: string; truncated: boolean }>
+  } | null = null
+  let materialPick = ''
+  let materialLoading = false
+  /** 「按意见改一版」的意见输入。 */
+  let reviseFeedback = ''
+  let revising = false
+  /** 这一版是基于哪条草稿改的（界面显示"改自上一版"用；真值在 run.revisedFrom 上）。 */
+  let previousDraftId = ''
+  /** 编辑 → diff 的防抖计时器。 */
+  let diffTimer: ReturnType<typeof setTimeout> | null = null
   let saving = false
   /** 入库用的 slug：默认取 SKILL.md 的 name，新建时可改（更新不允许改，服务端会拦）。 */
   let slug = ''
@@ -118,6 +137,28 @@
     target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
     baseline: { slug: string; files: Record<string, string> } | null
     materialDir: string
+    /** 「按意见改一版」来的草稿：上一版 run id（有它才给"对比上一版"）。 */
+    revisedFrom: string | null
+  }
+
+  /** 变更集（`POST /api/crystallize/diff` 的返回，后端算好、这里只画）。 */
+  interface DiffFile {
+    rel: string
+    change: 'A' | 'M' | 'D' | 'same'
+    added: number
+    removed: number
+    hunks: Array<{
+      oldStart: number
+      newStart: number
+      lines: Array<{ kind: ' ' | '+' | '-'; text: string; oldNo: number | null; newNo: number | null }>
+    }>
+    coarse: boolean
+  }
+  interface DiffResult {
+    against: 'current' | 'previous'
+    baselineLabel: string
+    files: DiffFile[]
+    totals: { added: number; removed: number; changed: number }
   }
 
   // ── 完成态 ──
@@ -215,6 +256,13 @@
     selectedFile = 'SKILL.md'
     editText = ''
     filesVersion = 0
+    diff = null
+    diffAgainst = 'current'
+    material = null
+    materialPick = ''
+    reviseFeedback = ''
+    revising = false
+    previousDraftId = ''
     slug = ''
     saving = false
     clash = null
@@ -238,6 +286,8 @@
     attached = true
     draftRunId = ad.runId
     handledTerminal = false
+    // 素材在起草开始前就已经落盘：起草中也让使用者能翻同一份（而不是等审阅）
+    void loadMaterial()
     // 还原起草时的目标（commit 按它走：更新 = 复用原 id 进化）
     if (ad.target.kind === 'new') {
       targetKind = 'new'
@@ -411,6 +461,10 @@
         selectedSkillId = res.target.skillId
       }
       slug = res.skillMd.name
+      // 改版草稿默认对比上一版（那才是使用者此刻在问的问题）；否则对比当前版本
+      diffAgainst = res.revisedFrom !== null ? 'previous' : 'current'
+      void loadDiff(diffAgainst)
+      void loadMaterial()
       const first = pickDefaultFile(res)
       selectedFile = first
       editText = res.files[first] ?? ''
@@ -442,6 +496,12 @@
     if (artifacts === null || selectedFile === '') return
     artifacts.files[selectedFile] = editText
     filesVersion += 1
+    // diff 跟着内容走，但**不要每敲一个字发一次请求**：停下来 500ms 再算
+    if (diffTimer !== null) clearTimeout(diffTimer)
+    diffTimer = setTimeout(() => {
+      diffTimer = null
+      void loadDiff()
+    }, 500)
     // 改的就是 SKILL.md → slug 跟着 frontmatter 的 name 走（新建时才允许改）
     if (selectedFile === 'SKILL.md') {
       const name = parseFrontmatterName(editText)
@@ -455,19 +515,121 @@
     return m?.[1] ? m[1].trim().replace(/^["']|["']$/g, '') : ''
   }
 
+  /**
+   * 拉变更集 diff（后端算，`text-diff.ts`）。
+   *
+   * 传的是**当前编辑后的文件**：使用者在审阅里改了一行，diff 就得反映改完的样子，
+   * 而不是磁盘上的原稿。`against` = 对当前已入库版本（入库会发生什么）或上一版草稿
+   * （"按意见改一版"后新旧对比）。
+   */
+  async function loadDiff(against: 'current' | 'previous' = diffAgainst): Promise<void> {
+    if (artifacts === null) return
+    diffAgainst = against
+    diffLoading = true
+    try {
+      diff = await api<DiffResult>('/api/crystallize/diff', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          draftRunId,
+          files: artifacts.files,
+          against,
+        }),
+      })
+    } catch {
+      // diff 是辅助信息，拉不到不挡入库（校验与文件本身才是硬门槛）
+      diff = null
+    } finally {
+      diffLoading = false
+    }
+  }
+
+  /** 当前选中文件在变更集里的那一项（没有就是"没变/无基线"）。 */
+  $: selectedDiff = diff === null ? null : (diff.files.find((f) => f.rel === selectedFile) ?? null)
+  /** 文件树上的 +n −m 从 diff 来（与详情面板同一份数字，不会两处对不上）。 */
+  $: diffByRel = new Map((diff?.files ?? []).map((f) => [f.rel, f]))
+
+  /** 拉素材清单（"素材"分节用：能核"这句话是从哪一轮来的"）。 */
+  async function loadMaterial(): Promise<void> {
+    if (draftRunId === '' || materialLoading) return
+    materialLoading = true
+    try {
+      material = await api<{
+        dir: string
+        items: Array<{ relPath: string; bytes: number; text: string; truncated: boolean }>
+      }>(`/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}`)
+      materialPick = material.items[0]?.relPath ?? ''
+    } catch {
+      material = null
+    } finally {
+      materialLoading = false
+    }
+  }
+
+  /** 按意见再起草一版：新 run 复用同一份素材 + 把上一版产出放进 material/previous-draft/。 */
+  async function reviseDraft(): Promise<void> {
+    if (reviseFeedback.trim() === '' || draftRunId === '') return
+    revising = true
+    error = ''
+    try {
+      const res = await api<{ draftRunId: string }>('/api/crystallize/revise', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId, feedback: reviseFeedback.trim() }),
+      })
+      const previous = draftRunId
+      draftRunId = res.draftRunId
+      draftStatus = null
+      draftFailedReason = ''
+      handledTerminal = false
+      artifacts = null
+      diff = null
+      material = null
+      reviseFeedback = ''
+      step = 'drafting'
+      // 记下"上一版是哪个 run"——它已经随新 run 落库（revisedFrom），这里只是让
+      // 起草中的界面能说清"这是在改第几版"
+      previousDraftId = previous
+    } catch (err) {
+      error = $t('crystallize.errDraftRejected', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      revising = false
+    }
+  }
+
   /** 变更集：新增 / 修改 / 删除（对着更新场景的当前版本算；新建 = 全新增）。 */
+  /**
+   * 文件树的行 = 文件清单 + **变更徽标**。
+   *
+   * ⚠️ 徽标的判据跟着 `diff` 走（也就是跟着"对比当前版本 / 对比上一版草稿"的切换），
+   *    不自己另算一套：曾经这里对着"入库基线"算，而旁边的 +n −m 来自 diff——切到
+   *    "对比上一版"时同一行就变成「新增 +1 −1」，自相矛盾。现在只有一处判据：
+   *    diff 有就用 diff 的 change，diff 没到（还没拉/拉失败）才退回入库基线。
+   */
   $: fileRows = (() => {
     const a = artifacts
     if (a === null) return [] as Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }>
     void filesVersion
+    const byteLen = (text: string): number => new TextEncoder().encode(text).length
+    if (diff !== null) {
+      // 文本兜底草稿不认"删除"（服务端入库时合并保留），与下面的基线分支同一口径
+      const rows = diff.files.filter((f) => a.mode === 'files' || f.change !== 'D')
+      return rows.map((f) => ({
+        rel: f.rel,
+        change: (f.change === 'same' ? '' : f.change) as '' | 'A' | 'M' | 'D',
+        bytes: a.files[f.rel] === undefined ? 0 : byteLen(a.files[f.rel] as string),
+      }))
+    }
     const base = a.baseline?.files ?? null
     const rows = Object.keys(a.files)
-      .sort((a, b) => (a === 'SKILL.md' ? -1 : b === 'SKILL.md' ? 1 : a < b ? -1 : 1))
+      .sort((x, y) => (x === 'SKILL.md' ? -1 : y === 'SKILL.md' ? 1 : x < y ? -1 : 1))
       .map((rel) => {
         const text = a.files[rel] ?? ''
         const old = base?.[rel]
         const change: '' | 'A' | 'M' = old === undefined ? 'A' : old === text ? '' : 'M'
-        return { rel, change, bytes: new TextEncoder().encode(text).length }
+        return { rel, change, bytes: byteLen(text) }
       })
     // 草稿里没有、当前版本里有的 → 删除（更新 = 整目录替换，必须看得见）。
     // ⚠️ **只有多文件产出（files）才这么算**：文本兜底草稿本来就没抓到支持文件，
@@ -767,6 +929,52 @@
         </div>
       </section>
 
+      <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份 ── -->
+      {#if draftRunId !== '' && material !== null}
+        <section class="drawer-section">
+          <h3>
+            {$t('crystallize.materialTitle')}
+            <span class="faint small">{material.items.length} {$t('crystallize.filesUnit')}</span>
+          </h3>
+          <div class="section-body">
+            <p class="faint small mono material-dir">
+              {$t('crystallize.materialDir')}：{material.dir}
+            </p>
+            {#if material.items.length === 0}
+              <p class="faint small">{$t('crystallize.materialEmpty')}</p>
+            {:else}
+              <div class="material-pane">
+                <ul class="file-tree">
+                  {#each material.items as item (item.relPath)}
+                    <li>
+                      <button
+                        type="button"
+                        class="file-row"
+                        class:active={materialPick === item.relPath}
+                        onclick={() => (materialPick = item.relPath)}
+                      >
+                        <span class="file-name mono">{item.relPath}</span>
+                        <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+                <div class="file-body">
+                  {#each material.items as item (item.relPath)}
+                    {#if item.relPath === materialPick}
+                      <pre class="material-text mono">{item.text}</pre>
+                      {#if item.truncated}
+                        <p class="faint small">{$t('crystallize.materialTruncated')}</p>
+                      {/if}
+                    {/if}
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </div>
+        </section>
+      {/if}
+
       <!-- ── 起草 run：日志常驻（审阅时也看得见）；失败/停止 = 失败态 + 重新起草 ── -->
       {#if draftRunId !== '' && step !== 'done'}
         <section class="drawer-section">
@@ -883,7 +1091,13 @@
                           >{changeLabel(row.change)}</span>
                         {/if}
                         {#if row.change !== 'D'}
-                          <span class="faint small">{Math.max(1, Math.round(row.bytes / 1024))} KB</span>
+                          {@const d = diffByRel.get(row.rel)}
+                          {#if d && (d.added > 0 || d.removed > 0)}
+                            <span class="num-tag add">+{d.added}</span>
+                            <span class="num-tag del">−{d.removed}</span>
+                          {:else}
+                            <span class="faint small">{Math.max(1, Math.round(row.bytes / 1024))} KB</span>
+                          {/if}
                         {/if}
                       </button>
                     </li>
@@ -912,7 +1126,75 @@
                   <div class="preview markdown">{@html renderMarkdown(editText)}</div>
                 </FoldSection>
               {/if}
+
+              <!-- 变更集：逐文件 diff（后端算）+ 对比对象切换 -->
+              {#if artifacts.revisedFrom !== null}
+                <div class="diff-switch">
+                  <button
+                    type="button"
+                    class="ghost small"
+                    class:active={diffAgainst === 'current'}
+                    onclick={() => void loadDiff('current')}
+                  >{$t('crystallize.diffVsCurrent')}</button>
+                  <button
+                    type="button"
+                    class="ghost small"
+                    class:active={diffAgainst === 'previous'}
+                    onclick={() => void loadDiff('previous')}
+                  >{$t('crystallize.diffVsPrevious')}</button>
+                </div>
+              {/if}
+              {#if diff !== null}
+                <p class="faint small">
+                  {diff.baselineLabel} · {diff.totals.changed} {$t('crystallize.filesUnit')}
+                  · <span class="num-tag add">+{diff.totals.added}</span>
+                  <span class="num-tag del">−{diff.totals.removed}</span>
+                  {#if diff.files.some((f) => f.coarse)}
+                    · {$t('crystallize.diffCoarse')}
+                  {/if}
+                </p>
+              {:else if diffLoading}
+                <p class="faint small">{$t('crystallize.diffLoading')}</p>
+              {/if}
+              {#if selectedDiff && selectedDiff.hunks.length > 0}
+                <div class="diff-box mono">
+                  {#each selectedDiff.hunks as hunk (hunk.oldStart + ':' + hunk.newStart)}
+                    <div class="hunk-head">
+                      @@ −{hunk.oldStart} +{hunk.newStart} @@
+                    </div>
+                    {#each hunk.lines as line (line.oldNo + '/' + line.newNo + '/' + line.kind)}
+                      <div class="diff-line {line.kind === '+' ? 'add' : line.kind === '-' ? 'del' : ''}">
+                        <span class="gutter">{line.oldNo ?? ''}</span>
+                        <span class="gutter">{line.newNo ?? ''}</span>
+                        <span class="sign">{line.kind === ' ' ? ' ' : line.kind}</span>
+                        <span class="text">{line.text}</span>
+                      </div>
+                    {/each}
+                  {/each}
+                </div>
+              {:else if selectedDiff && selectedFile !== '' && selectedDiff.change === 'same'}
+                <p class="faint small">{$t('crystallize.diffUnchanged')}</p>
+              {/if}
             {/if}
+
+            <!-- 按意见改一版（P1）：意见 → 同一份素材再起草一轮 → 新旧并列对比 -->
+            <div class="revise-box">
+                <label class="field">
+                  <span class="faint small">{$t('crystallize.reviseTitle')}</span>
+                  <textarea
+                    bind:value={reviseFeedback}
+                    rows="2"
+                    placeholder={$t('crystallize.revisePlaceholder')}
+                  ></textarea>
+                </label>
+              <div class="row-end">
+                <button
+                  class="ghost small"
+                  disabled={revising || reviseFeedback.trim() === ''}
+                  onclick={() => void reviseDraft()}
+                >{$t('crystallize.reviseSubmit')}</button>
+              </div>
+            </div>
           </div>
         </section>
       {/if}
@@ -1205,6 +1487,110 @@
   /* ══════════ 审阅：文件树 + 编辑区（四轮）══════════
      ★ 只用全局变量与既有观感（--panel/--line/--radius/--font-mono），不自造卡片：
      这一块是"多文件产物的呈现"，不是另一套设计语言。 */
+  /* ── 素材分节（P1）：左清单右预览，与审阅的文件树同一套观感 ── */
+  .material-dir {
+    margin: 0 0 0.5rem;
+    word-break: break-all;
+  }
+  .material-pane {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+  }
+  .material-text {
+    margin: 0;
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-sunken, #fafafa);
+    max-height: 22rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  /* ── 变更集 diff（P1）：行号 gutter + 符号 + 文本，三色只区分增删 ── */
+  .diff-switch {
+    display: flex;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0.25rem;
+  }
+  .diff-switch button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .num-tag {
+    font-size: 11px;
+    padding: 0 4px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .num-tag.add {
+    color: #1a7f37;
+    background: rgba(26, 127, 55, 0.1);
+  }
+  .num-tag.del {
+    color: #b42318;
+    background: rgba(180, 35, 24, 0.1);
+  }
+  .diff-box {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-height: 26rem;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .hunk-head {
+    padding: 0.15rem 0.5rem;
+    color: var(--fg-faint);
+    background: var(--bg-sunken, #f6f6f6);
+    border-top: 1px solid var(--border);
+    user-select: none;
+  }
+  .hunk-head:first-child {
+    border-top: 0;
+  }
+  .diff-line {
+    display: grid;
+    grid-template-columns: 3rem 3rem 1rem minmax(0, 1fr);
+    gap: 0.25rem;
+    padding: 0 0.5rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .diff-line.add {
+    background: rgba(26, 127, 55, 0.08);
+  }
+  .diff-line.del {
+    background: rgba(180, 35, 24, 0.08);
+  }
+  .diff-line .gutter {
+    color: var(--fg-faint);
+    text-align: right;
+    user-select: none;
+  }
+  .diff-line .sign {
+    color: var(--fg-faint);
+    user-select: none;
+  }
+  .diff-line.add .sign {
+    color: #1a7f37;
+  }
+  .diff-line.del .sign {
+    color: #b42318;
+  }
+
+  /* ── 按意见改一版（P1）── */
+  .revise-box {
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px dashed var(--border);
+  }
+
   .frontmatter-line {
     display: flex;
     flex-wrap: wrap;
