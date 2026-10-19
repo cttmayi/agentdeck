@@ -1229,20 +1229,12 @@ const CHECKS = [
     label: '★ 审核者的详情里**也没有**工具那一段（只判断不动手；现在两边都没有了）',
     ok: (v) => v === true,
   },
-  {
-    view: '工具（D40）',
-    key: 'standard.formToolActions',
-    label: '★ 「行动权限」里能勾到**已装工具的动作**（值是 `<slug>.<动作名>`）',
-    ok: (v) => Array.isArray(v) && v.includes('probe-tool.append-note'),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '工具（D40）',
-    key: 'standard.formToolSummaryShown',
-    label: '★ 工具动作旁边带着它的 `summary`（不然勾选变成对着一串机器名猜）',
-    ok: (v) => typeof v === 'string' && v.length > 4,
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 24)}…"`),
-  },
+  // ⚠️ 这里原来有两条："新建表单的「行动权限」里能勾到已装工具的动作" 与
+  //    "那个动作旁边带着它的 `summary`"。两者量的都是 `ActionPicker` 里的
+  //    `.ap-ck` / `.action-summary`，而那个控件 **2026-10 从 agent 上整个撤掉了**
+  //    （动作属于"这条链"，唯一权威是智能体组页的 ③ 行动）⇒ 这里没有宿主了。
+  //    ⚠️ 这两件事**必须继续有人看着**（勾不到第三方动作 ⇒ 装了工具也永远用不上），
+  //    它们搬到**智能体组页**去量——见 `docs/README.md` 的探针待办；不是取消。
 
   // ── 新建表单 / 设置：右侧抽屉（D32）──
   //
@@ -1593,474 +1585,301 @@ const CHECKS = [
   //   ② 老数据那份正文与"并进来"的入口**都在「指令」那一栏里**（否则就是
   //      "删干净了，顺手把依据也删没了"）。
   //   ⚠️ 只量一半都会假绿：只量①，正文没了也绿；只量②，段还在也绿。
+    // ══════════════════════════════════════════════════════════════════
+  // 智能体详情的判断依据（2026-10 对齐：只有一张可编辑卡片）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 这一族原来钉的是**查看态**：只读那一行里的正文、`.std-name-badge`、
+  //    点「编辑」进编辑态、只读 chips 逐字等于接口的 `allowedActions`、
+  //    "在详情里勾一个动作再保存真的写进去"……**那一整套随查看态一起删了**
+  //    （`AgentDetail.svelte` 开头写着"使用者拍板：没有预览页了"），而
+  //    agent 上的行动权限也整个搬去了**智能体组页的 ③ 行动**。
+  //    ⇒ 这里删掉的条目不是"放宽"，是**那件事已经没有宿主**：
+  //      · "勾一个动作 → 保存 → 接口上真的变了" → 搬去组页（下一批补，那里才是宿主）
+  //      · "编辑态/只读态两态" → 概念不存在了
+  //    留下的判据全部改量**单态卡片**（`.card.agent-card` 的 `.cell-label`）。
   {
     view: '审核标准',
     key: 'standard.detailHasNoNameBadge',
-    label: '★ 审核者详情里**没有**"标准的名字"徽标了（那个字段已删：平台侧没人读它、'
-      + '一个审核者只有一份标准所以区分不了什么、默认值又是常量）',
+    label: '★ 审核者详情里**没有**"标准的名字"徽标（那个字段已删）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.detailShowsBody',
-    label: '★ 老数据那份判断依据正文现在显示在「指令」那一栏里（不用去 Skills 页对着 slug 猜）',
+    label: '★★ 判断依据写在「指令」那一格里，而且**就在能改的地方**（从只看改为可编辑：它现在是唯一的出处）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.noStandardRowLabel',
-    label: '★★ 详情里**没有任何一行**叫「审核标准」了（使用者的要求：「移除审核智能体的『审核标准』」）',
+    label: '★★ 卡片里**没有任何一格**叫「审核标准」（使用者的要求：「移除审核智能体的『审核标准』」）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.noStandardSectionTitle',
-    label: '★★ 也没有「用什么标准」那一段的标题（删的是整段，不是把标签换个说法）',
+    label: '★★ 也没有「用什么标准」那个小标题（删的是整段，不是把标签换个说法）',
     ok: (v) => v === true,
-    show: (v, facts) => `${v}　实测各段标题：${JSON.stringify(facts['standard.detailSectionTitles'] ?? null)}`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.foldInButtonInInstructionsRow',
-    label: '★★ 而"把这份判断依据并进「指令」"的入口在「指令」那一栏里（内联老标准原本只能手抄，现在也给了入口）',
-    ok: (v) => v === true,
+    show: (v, f) => `${v}　实测各格标题：${JSON.stringify(f['standard.detailCellLabels'] ?? null)}`,
   },
   {
     view: '审核标准',
     key: 'standard.skillsSectionStillThere',
-    label: '★ 「技能」那一段还在（删的是"标准"，不是"挂载"——skill 的勾选/展示一条都没少）',
+    label: '★ 「技能」那一格还在（删的是"标准"，不是"挂载"——skill 的勾选一条都没少）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
-    key: 'standard.detailHasActionsSection',
-    label: '★ 审核者详情里有**独立**的「行动权限」那一段（D40 收口：不再长在审核标准里）',
+    key: 'standard.detailHasActionsCell',
+    label: '★★ 审核者卡片里**有**「行动权限…」那一格（动作权限这件事仍然要在界面上有个去处，哪怕只是一句指路）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
-    key: 'standard.detailActionsSectionTitle',
-    label: '★ 那一段的标题就是「行动权限…」（靠它认出容器，后面几条都在容器里量）',
-    ok: (v) => typeof v === 'string' && v.startsWith('行动权限'),
-    show: (v) => `"${String(v)}"`,
+    key: 'standard.detailActionsCellTitle',
+    label: '★★ 那一格的小标题自己说了**由谁决定**（「行动权限：由智能体组决定」）——只写"行动权限"会让人以为就在这儿配',
+    ok: (v) => typeof v === 'string' && v.includes('智能体组'),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '审核标准',
-    key: 'standard.executorHasNoActionsSection',
-    label: '★ 执行者的详情里**没有**「行动权限」段（它的能力是工具，不给必然失败的勾选）',
+    key: 'standard.actionsPointerOnly',
+    label: '★★★ 那一格里**只有一句话、一个可操作控件都没有**（不复用 `ActionPicker`：两处长得一模一样、只有一处生效，是最坏的一种界面）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
-    key: 'standard.executorEditHasNoActionsSection',
-    label: '★ 执行者**点「编辑」之后**也没有「行动权限」段（编辑态走 draft.role，是另一条判据）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.executorEditSectionHeadings',
-    label: '编辑态实际渲染出来的段落标题（它必须先有内容，上面那条才作数）',
-    ok: (v) => Array.isArray(v) && v.length > 0,
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '审核标准',
-    key: 'standard.switchWhileEditingName',
-    label:
-      '★ 编辑到一半换 agent ⇒ **退出编辑态**（输入框里不会再留着上一个人的草稿；留在编辑态会让人以为还在改 A）',
-    ok: (v) => v === '(不在编辑态)',
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.switchWhileEditingTitle',
-    label: '★ 换过去之后右栏标题是**新的那个人**（不是上一个人的名字）',
-    ok: (v) => v === '探针用的执行者',
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.switchWhileEditingNoActions',
-    label: '★ 编辑到一半换成执行者 ⇒ 不再显示「行动权限」（草稿的 role 是上一个人的时候会露出来）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.switchWhileEditingHeadings',
-    label: '换 agent 之后实际渲染出来的段落标题',
-    ok: (v) => Array.isArray(v) && v.length > 0,
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailActionChips',
-    label: '★ 它判完能触发哪些动作在**「行动权限」那一段里**看得见（"允许触发的动作"那一行）',
-    ok: (v) => Array.isArray(v),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') || '(空)' : String(v)),
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailActionSource',
-    label:
-      '★ 界面上那一行显示的**逐字等于**接口回给它的 `allowedActions`（契约值原样显示，不翻译也不改写）',
-    // ⚠️ D41 换掉了原来的判据（"chips 里有 `comment.create`"）：内置动作整组
-    //    被移除之后，那个名字量的是旧现实，而它的红绿取决于夹具里存着什么。
-    //    现在量的是**两份事实的关系**：页面上那些 chip 的集合 = 库里那份白名单。
-    //    这仍然是一条硬判据（少一个、多一个、被翻译过都会红），而且不依赖
-    //    "我期待某一个具体的动作名"。
-    ok: (v, facts) => {
-      const src = facts['standard.detailActionSource']
-      const chips = facts['standard.detailActionChips']
-      if (!Array.isArray(src) || !Array.isArray(chips)) return false
-      return JSON.stringify([...chips].sort()) === JSON.stringify([...src].sort())
-    },
-    show: (v, facts) =>
-      `${JSON.stringify(v)} vs 接口 ${JSON.stringify(facts['standard.detailActionSource'])}`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailActionsOutOfStandard',
-    label: '★ 那份动作清单**不在**承载判断依据的那一栏（现在是「指令」）里——同一件事只有一个出处',
-    ok: (v) => v === true,
+    key: 'standard.actionsPointerText',
+    label: '★★★ 那句话给出了**可照做的下一步**（说清"动作属于这条链"、"去智能体组页的 ③ 行动里勾"）',
+    ok: (v) => typeof v === 'string' && v.includes('智能体组') && v.includes('行动'),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '审核标准',
     key: 'standard.actionsHintAbsentWhenSet',
-    label: '★ 它自己已经有动作权限时，**不**说"动作来自那些 skill"（那句话会变假）',
+    label: '★ 那一格**不**说"动作也来自这些技能"（那是给另一种情形解释出处的句子，混进来就是假话）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
-    key: 'standard.emptyWarning',
-    label: '有判断依据的审核者不该显示"审不了任何东西"那条警告',
+    key: 'standard.executorHasNoActionsSection',
+    label: '★★ 执行者的卡片里**没有**「行动权限」那一格（它的能力是工具，不给一个必然失败的勾选）',
     ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.emptyReviewerFixtureFound',
-    label: '★ 夹具里有一个"什么都没写"的审核者（否则下面那条正向断言空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.emptyReviewerSwitched',
-    label: '★ 右栏真的换成了那个夹具（否则量到的是上一个审核者的头部）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.headlineWhenNoIdentity',
-    label:
-      '★★ 真的没有依据时那条警告**要出现**（"它审不了任何东西…"）——没有这一半，上面那条负向断言靠"警告永远不显示"也能绿',
-    ok: (v) => typeof v === 'string' && v.includes('审不了任何东西'),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.headlineWordingUpdated',
-    label:
-      '★★ 而且那句话说的是**「没有写「指令」」**，不再说「没有审核标准」——那个字段界面上已经没有了（使用者报的就是这句）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formHasEditorForExecutor',
-    label: '新建表单：执行角色下**不**出现标准栏',
-    ok: (v) => v === false,
+    show: (v, f) => `实测各格：${JSON.stringify(f['standard.executorSectionHeadings'] ?? null)}`,
   },
   {
     view: '审核标准',
     key: 'standard.formActionsAbsentForExecutor',
-    label: '★ 执行角色下**连行动权限那一栏都没有**（更不会预勾；它的能力是工具）',
+    label: '★ 新建表单里执行者那一档也没有行动权限那一段',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.formStandardEditorRemoved',
-    label:
-      '★★ 切到审核角色 ⇒ **不再有标准编辑框**（2026-09：标准并进「指令」，不再单独设置）',
+    label: '★ 新建表单里没有「审核标准」编辑器（依据写在「指令」里）',
     ok: (v) => v === true,
   },
   {
     view: '审核标准',
     key: 'standard.formHasMergedHint',
-    label:
-      '★★ 那一栏**说明还在**：「身份与判断依据写在「指令」里，标准不再单独设置」——只说"框没了"会让使用者以为标准凭空消失',
+    label: '★★ 而给了那句话（"判断依据写在上面那条「指令」里"）——删掉一栏必须留下它的去处',
     ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formActionsBlockLabel',
-    label: '★ 动作勾选长在**「行动权限」那一栏的容器里**（不是靠数字巧合）',
-    ok: (v) => typeof v === 'string' && v.startsWith('行动权限'),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formNoBuiltinGroup',
-    label: '★ D41：那一栏里**没有**内置动作那一组（它的容器 `.action-picker` 一处都不该有）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formActionOptions',
-    label:
-      '★ 那一栏里的勾选项**全部**是已装工具包的动作（`<slug>.<动作名>`，slug 取自接口回的已装列表）',
-    // ⚠️ 这条才是"动作只能来自工具包"在界面上的落点：只量"没有内置动作那一组"
-    //    的话，把那一组换个类名重新长出来照样绿。
-    ok: (v, facts) => {
-      const slugs = facts['standard.installedSlugs']
-      if (!Array.isArray(v) || v.length === 0 || !Array.isArray(slugs)) return false
-      return v.every(
-        (x) => typeof x === 'string' && slugs.some((s) => x.startsWith(`${s}.`)),
-      )
-    },
-    show: (v, facts) =>
-      `${Array.isArray(v) ? v.join(' | ') : String(v)}（已装 slug：${JSON.stringify(facts['standard.installedSlugs'])}）`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formDefaultAction',
-    label: '★ 一个都不**预勾**（内置动作没得勾了，工具动作由使用者自己决定）',
-    ok: (v) => v === '',
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formToolTickBoxFound',
-    label: '★ 那一栏里勾得到夹具工具的动作（否则下面那条退化成空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formTickSurvivesTyping',
-    label: '★ 写下标准正文之后勾着的那一个**还在**（标准与权限是两份草稿，互不覆盖）',
-    ok: (v) => v === 'probe-tool.append-note',
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formStandardEditorGone',
-    label:
-      '★★ 那个编辑容器（`.standard`）**整个不在了**（它连同"正文"一起并进了「指令」）',
-    ok: (v) => v === true,
-  },
-  // ⚠️ 原来这里有一条"标准编辑器容器里没有动作勾选"。2026-09 标准并进「指令」之后
-  //    **那个容器整个不存在了** ⇒ 这条失去主语，删掉而不是留一个永远量不到的键。
-  //    "动作勾选只在「行动权限」段"这件事仍由下面 `standard.formActionsBlockLabel`
-  //    与 `standard.formNoBuiltinGroup` 两条钉着。
-  // ⚠️ 原来这里有一条"标准栏与父组件是通的（写下正文后徽章变「已写」）"。
-  //    2026-09 标准并进「指令」之后，**那个徽章与那个框都不存在了** ⇒ 这条删掉，
-  //    而不是留着量一个 null（探针里"空过"等于永远绿）。同一件事现在由
-  //    「指令那一栏与父组件是通的」承担（见下面那组 instructions 的检查）。
-
-  {
-    view: '审核标准',
-    key: 'standard.actionEditSaved',
-    label:
-      '★ 在详情里勾一个**工具动作**（`probe-tool.append-note`）、保存之后真的多出那一条（写入口走通了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.actionSummaryAfterSave',
-    label: '★ 只读态那一条 chip 旁边带着它的 `summary`（契约值 + 清单里那句话）',
-    ok: (v) => v === '把一句话追加到工作目录的 NOTES.md',
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.actionSavedOnServer',
-    label: '★ 而且**接口上**也真的变了（不是只把界面画对了）',
-    ok: (v) => v === true,
-    show: (v, facts) => `${v}（接口回：${JSON.stringify(facts['standard.serverAllowedActions'])}）`,
   },
   {
     view: '审核标准',
     key: 'standard.formMentionsNoSkillNeeded',
-    label: '界面说清了"判断依据是标准，不是 skill"',
+    label: '★★ 那句话说的是**「指令」**（不是"上面那条审核标准"——那个字段界面上已经没有了）',
     ok: (v) => v === true,
   },
+  {
+    view: '审核标准',
+    key: 'standard.formActionsPointerOnly',
+    label: '★★★ 新建表单里「行动权限」那一段也**只剩一句话**：没有 `ActionPicker`、没有勾选框、没有按钮（两处各画一个只有一处生效的选择器是最坏的界面）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.formHasNoPickerAnywhere',
+    label: '★★ 整张新建表单里**一个 `ActionPicker` 都没有**（不是"挪到别处去了"——是这类控件不该在 agent 上）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.emptyReviewerFixtureFound',
+    label: '夹具：那个"没写指令"的审核者卡片在（没它的话下面的缺口记录会空过）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.emptyReviewerSwitched',
+    label: '★ 右栏真的换成了它（否则量到的是上一个人）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '审核标准',
+    key: 'standard.noCriteriaExplanationAnywhere',
+    label: '⚠️ **事实（当前是个真缺口）**：没写「指令」的审核者，界面上**一句解释都没有**了——'
+      + '那句"它审不了任何东西…"原来住在被删掉的查看态上，'
+      + '`agents.headlineNoInstructions` 现在全仓库没有任何代码引用（死词条）。'
+      + '这条只如实记下现状，供报告点名；要修就是加回一句提示（那时这条会红，提醒同步）。',
+    ok: (v) => typeof v === 'boolean',
+    show: (v) => (v === true ? '现在：没有任何解释（缺口）' : '现在：有解释'),
+  },
 
-  // ── 迁移：把挂载的 skill 里的判断依据并进「指令」（D38）──
+  // ══════════════════════════════════════════════════════════════════
+  // 老形态依据（来自挂载的 skill）：现在还有没有出路
+  // ══════════════════════════════════════════════════════════════════
   //
-  // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且标准正来自它。
-  // 这一步就是那个出口，所以必须端到端量（按钮 → 标准出现、挂载清空）。
+  // ⚠️ 使用者当年的处境：删不掉 `general-review`，因为审核者还挂着它、依据正来自它。
+  //    当时的出路是**只读态里那颗「并进」按钮**（正文并进「指令」+ 同时摘挂载）。
+  //    查看态删掉之后那颗按钮也没有了 ⇒ 这一族从"按钮点了会发生什么"改成：
+  //    ① 依据有没有丢（服务端不变量）；② 界面上还剩什么出路（挂载可以在卡片里取消）
+  //    + 一条**缺口事实**（老形态的提示与按钮都没了、词条成了死词条）。
   {
     view: '迁移（D38）',
     key: 'migrate.legacyFixtureFound',
-    label: '★ 夹具里有一个"只挂 skill、没有内联标准"的审核者（否则下面会空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.buttonFound',
-    label: '★ 老形态审核者的详情页有「把这份判断依据并进「指令」」',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.noInstructionsBefore',
-    label: '★ 搬移**之前**那一栏说"没有写「指令」 ⇒ 拿不到审核任务"（就是这句在搬完之后不许再说）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.detailSwitched',
-    label: '★ 右栏真的换成了那个老形态审核者（否则下面读到的是上一个 agent）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyHintBefore',
-    label: '点之前那一段显示的是"沿用挂载的 skill"',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyHintGone',
-    label: '点之后那句提示消失（不再是老形态了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.adopted',
-    label: '★ 点完之后标准真的固化到它身上了（详情里出现了那份正文）',
+    label: '夹具：那个"依据来自挂载 skill"的审核者卡片在（没它的话这一族全空过）',
     ok: (v) => v === true,
   },
   {
     view: '迁移（D38）',
     key: 'migrate.legacyAgentFound',
-    label: '夹具 agent 的 id 拿到了（下面那条要按 id 问接口）',
+    label: '夹具：接口上也读得到它（下面的挂载判据以接口为准，不扫页面文字）',
     ok: (v) => v === true,
   },
   {
     view: '迁移（D38）',
-    key: 'migrate.mountCleared',
-    label: '★ 挂载同时被摘掉（于是那条 skill 才卸得掉）——**按接口上的 skillIds 判**，不扫页面文字',
+    key: 'migrate.skillCellShowsMount',
+    label: '★★ 「技能」那一格里**看得见那个挂载**（`general-review`）——它是拆掉这条老依据的唯一入口，看不见就等于拆不掉',
     ok: (v) => v === true,
   },
   {
     view: '迁移（D38）',
-    key: 'migrate.legacyActionsHintShown',
-    label: '★ 老数据（动作写在**挂载的 skill** 里）时「行动权限」段说清了出处：一个都没勾也能触发',
+    key: 'migrate.skillCellMountUncheckable',
+    label: '★★ 那个挂载的勾选框是**勾着的**（使用者能自己取消它——手工把正文抄进「指令」再取消，是现在唯一剩下的路）',
     ok: (v) => v === true,
   },
   {
     view: '迁移（D38）',
-    key: 'migrate.legacyBothHintsTogether',
-    label:
-      '★★ 老形态下**两条提示在同一屏上一起看得见**（"标准沿用挂载的 skill" + "动作也来自这些 skill"——"都还是老形态"只有合起来才说得清）',
+    key: 'migrate.noFalseAdoptClaim',
+    label: '★★★ 界面上**不许出现**指向不存在按钮的话（原句"下面那颗按钮"——按钮随查看态删掉了，这句话现在只会在词条表里，一旦有人把它渲染出来就是骗人）',
     ok: (v) => v === true,
   },
   {
     view: '迁移（D38）',
-    key: 'migrate.legacyActionsNoFalseClaim',
-    label: '★ 同一段里**没有**同时说"只报告、不动作"（列表空是因为白名单住在 skill 里）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyActionsHintGone',
-    label: '★ 固化（挂载被摘掉）之后那句提示跟着消失（再说就是假话）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.instructionsRowNoFalseClaim',
-    label:
-      '★★ 搬完之后「指令」那一栏**不再**是"没有写「指令」"那个空态——正文刚刚并进来，那句话此刻是假的（与上面 `noInstructionsBefore` 成对：搬之前真、搬之后假）',
-    ok: (v) => v === true,
-    show: (v, facts) => `${v}　实测：「${String(facts['migrate.instructionsRowAfterText'] ?? '')}」`,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyNoticeGone',
-    label:
-      '★★ 老形态的提示与那颗「并进」按钮也跟着消失（留着的话，界面会在搬完之后继续暗示"你还有一份老标准没处理"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.noFalseHeadlineAfterAdopt',
-    label:
-      '★★★ 搬完之后（依据在「指令」里、老字段清空、没有挂载）顶上那条"审不了任何东西"的红警告**不许出现**——这就是使用者报的那条假警报',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.noStandardRowAfter',
-    label: '★ 搬完之后整个详情里仍然没有「审核标准」那一行（那一段是被删掉的，不是被藏起来的）',
-    ok: (v) => v === true,
+    key: 'migrate.skillSourcedNoticeOrButtonGone',
+    label: '⚠️ **事实（当前是个真缺口）**：老形态（依据来自挂载 skill）那一句提示**与**那颗「并进」按钮都没有了——'
+      + '`agents.standardLegacyNoticeFromSkill` 这句词条已无人引用。'
+      + '后果：这种 agent 的判断依据与挂载绑在一起，而界面既不说明也不给一键拆开（只剩"自己抄 + 取消勾选"）。'
+      + '这条只记录现状，供报告点名。',
+    ok: (v) => typeof v === 'boolean',
+    show: (v) => (v === true ? '现在：提示与按钮都没了（缺口）' : '现在：还在'),
   },
 
-  // ── 保存一次就把"老的信息"清掉（2026-09）──
+  // ══════════════════════════════════════════════════════════════════
+  // 保存一次就把"老的信息"清掉（2026-09）
+  // ══════════════════════════════════════════════════════════════════
   //
-  // 使用者说「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
-  // 这一组的判据是**两半**：提示消失（老字段清掉）＋ **身份那段文字一字未变**。
-  // 只量前一半，把老字段直接删掉也能绿，而那是丢了一段判断依据。
+  // 判据仍然是**两半**（只量"提示没了"会把"顺手丢掉一段判断依据"判成绿）：
+  // ① 老字段真的清掉了；② 投递出去的那段文字**逐字节相同**。
+  // ⚠️ 动作变了：原来要"进编辑态 → 保存"，现在只有一张卡片（选中即编辑），
+  //    所以是"改个别的字段 → 保存"，等的是**那句老提示消失**（不是"退出编辑态"）。
   {
     view: '老信息清理（保存时）',
     key: 'fold.fixtureFound',
-    label: '★ 夹具里有一个带内联老标准的审核者（否则下面整组空过）',
+    label: '夹具：那个"内联老标准"的审核者卡片在（没它的话这一族全空过）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.detailSwitched',
-    label: '★ 右栏真的换成了这个夹具（否则下面量到的是上一个 agent）',
+    label: '★ 右栏真的换成了它（判据是卡片里名字框的值，不是"详情在不在"——后者立刻成立会量错人）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.noticeBefore',
-    label: '★ 前提：保存**之前**那条"还带着老的字段"的提示确实在（不然"它消失了"没法量）',
+    label: '前提：保存**之前**那条"还带着老的字段"的提示确实在（不然"它消失了"没法量）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.editHintWarns',
-    label: '★ 编辑态**提前说清**保存会发生什么（"我的指令怎么多了一段"不该是没预告的改动）',
+    label: '★★ 那句提示**提前说清**保存会发生什么（"我的指令怎么多了一段"不该是一次没预告的改动）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
-    key: 'fold.leftEditing',
-    label: '★ 保存之后真的退出了编辑（等的是"输入框消失"，不是固定 sleep）',
+    key: 'fold.saveButtonFound',
+    label: '★ 卡片底部有「保存」（单态卡片里它就是唯一的写入口）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.noticeCleared',
+    label: '★★ 保存之后那条老提示**消失了**（使用者要的正是这一条：重新编辑保存后旧资讯就该没了）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.reviewStandardAfter',
-    label:
-      '★★ 老字段真的清掉了（问接口：`reviewStandard` 是 null；界面「no-agent」= 接口根本没读到，那也不算通过）',
+    label: '★★★ 老字段真的清掉了（问接口：`reviewStandard` 是 `null`；界面「no-agent」= 接口根本没读到，那也不算通过）',
     ok: (v) => v === null,
     show: (v) => JSON.stringify(v),
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.instructionsGotBody',
-    label: '★ 老标准的正文并进了「指令」（不是被删掉）',
+    label: '★★★ 老标准的正文**进了「指令」**（不是被删掉）',
     ok: (v) => v === true,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.identityUnchanged',
-    label:
-      '★★★ 而**投递出去的那段文字逐字节相同**（前后各自按 `[指令, 老标准]` 拼一遍比）——"顺手清理"不许变成"顺手丢一段判断依据"',
+    label: '★★★ 而**投递出去的那段文字逐字节相同**（前后各自按 `[指令, 老标准]` 拼一遍比）——"顺手清理"不许变成"顺手丢一段判断依据"',
     ok: (v) => v === true,
-    show: (v, facts) =>
-      `${v}　前：${JSON.stringify(facts['fold.identityBefore'])}　后：${JSON.stringify(facts['fold.identityAfter'])}`,
   },
   {
     view: '老信息清理（保存时）',
     key: 'fold.noticeAfter',
-    label: '★★ 保存之后那条老提示**消失了**（使用者要的正是这一条：重新编辑保存后旧资讯就该没了）',
+    label: '★ 界面上那条老提示也没了（不是只把库改了）',
     ok: (v) => v === false,
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '老信息清理（保存时）',
-    key: 'fold.readOnlyShowsMerged',
-    label: '★ 而且只读态「指令」那一栏里现在就是那段合并后的文字（界面上看得见"依据还在"）',
+    key: 'fold.editorShowsMerged',
+    label: '⚠️⚠️ **真缺陷（这条是红的，别去弱化它）**：保存之后卡片里「指令」那一格**没有**跟着变成合并后的文字——'
+      + '服务端把老正文并进了 `instructions`，而组件的草稿只在"换了人"（`agent.id` 变）时才作废，'
+      + '于是刚并进去的那段正文在界面上看不见。要修就是"保存成功后，服务端改写过的那几个字段以返回值为准"。',
     ok: (v) => v === true,
+    show: (v, f) => `${v}　实测指令框开头：${JSON.stringify(f['fold.editorTextAfterSave'] ?? null)}`,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.editAfterSaveLanded',
+    label: '★ 前提：保存之后那次改动真的落库了（等的是接口里那段文字，不是输入框里的字）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.editAfterSaveKeepsCriteria',
+    label: '★★★ 保存之后再改「指令」并保存一次 ⇒ 投递出去的那段文字里**判断依据还在**'
+      + '（在 `instructions` 里还是在老字段里是"住在哪"的问题，住哪儿都不许丢——`identityFrom` 存在的理由）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.editAfterSaveResurrectsLegacy',
+    label: '⚠️⚠️ **真缺陷（这条是红的）**：那一轮保存把**刚清掉的老字段又写回来了**——'
+      + '组件持有的草稿在保存成功后没有跟着服务端的结果走（`draft.reviewStandard` 还是老对象，'
+      + '服务端已清成 `null`），于是 `buildPatch()` 把整份老字段 PATCH 回去：'
+      + '界面上那条老提示重新出现、库里的形状在两版之间来回跳。'
+      + '这一次没丢正文是侥幸（正文被拆在两个字段里投递）；"清理老数据"被界面自动撤销这件事本身是错的。'
+      + '要修就是"保存成功后，服务端改写过的字段以返回值为准"（同 `fold.editorShowsMerged` 那一条的病根）。',
+    ok: (v) => v === false,
+    show: (v, f) => `${v}　老字段：${JSON.stringify(f['fold.instructionsAfterEdit'] ?? null)?.slice(0, 40)}`,
   },
 
   // ── 默认智能体（D36）──
@@ -2330,13 +2149,10 @@ const CHECKS = [
     label: '顶栏那个按钮也变成 Settings',
     ok: (v) => v === 'Settings',
   },
-  {
-    view: '语言切换',
-    key: 'lang.contractValuesUntranslated',
-    label:
-      '★ 契约值（`probe-tool.append-note` 这类机器值）**不翻译**（探针刚走真实写入口把它勾上去）',
-    ok: (v) => v === true,
-  },
+  // ⚠️ 这里原来是"详情里那串契约值 `probe-tool.append-note` 切英文时不翻译"。
+  //    它量的是审核者详情里的动作 chip，而**那一栏已经不在 agent 上了**
+  //    （动作权限搬到智能体组页）⇒ 在 agent 详情上写这条就是空过。
+  //    同一件事（契约值原样显示、不翻译）搬到**智能体组页的选择器**上去量。
   {
     view: '列表栏骨架（D61）',
     key: 'skeleton.headH',

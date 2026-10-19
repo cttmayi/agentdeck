@@ -72,6 +72,31 @@
         return f.contentWindow.getComputedStyle(el)
       }
 
+      /**
+       * 智能体详情**卡片里每一格的小标题**。
+       *
+       * ⚠️ 2026-10 起智能体详情只有**一个态、一张卡片**（选中即编辑）：旧的
+       *    `.detail .section h3`（查看态的段落标题）与 `.detail .field-row .row-label`
+       *    都不存在了，段落身份由 `.cell > .cell-label` 表示。多处断言要问"这一页
+       *    有哪些段"，所以只在这里定义一次——各段各写一遍选择器，改一次界面就要
+       *    改十几处（而且会漏）。
+       */
+      function agentCellLabels(root) {
+        const scope = root ?? d()
+        return [...scope.querySelectorAll('.card.agent-card .cell')].map((cell) => {
+          // ⚠️ 有的格用小标题元素（`<div class="cell"><span class="cell-label">…`），
+          //    有的是 `<label class="cell">标题<textarea …>`（「指令」那一格就是）。
+          //    只认 `.cell-label` 会把「指令」这一格整个漏掉——它恰恰是判断依据的
+          //    唯一出处，漏掉它会让"这一页有哪些格"这件事量错（踩过）。
+          const label = cell.querySelector('.cell-label')
+          if (label) return text(label)
+          const own = [...cell.childNodes].find(
+            (n) => n.nodeType === 3 && (n.textContent ?? '').trim() !== '',
+          )
+          return own ? (own.textContent ?? '').trim() : null
+        })
+      }
+
       function publish(done) {
         document.getElementById('out').textContent = JSON.stringify({ errors, facts, done }, null, 1)
       }
@@ -189,8 +214,8 @@
           !!d().querySelector('.detail-pane #agent-instructions') &&
           !!d().querySelector('.detail-pane .role-picker .role-card'),
         )
-        facts['agents.detailHeading'] = need('右栏标题', () =>
-          text(d().querySelector('.detail-pane h2')),
+        facts['agents.detailHeading'] = need('右栏标题（单态卡片里就是名字输入框的值）', () =>
+          String(d().querySelector('.detail-pane #agent-name')?.value ?? ''),
         )
         // ── D69.15 标题统一（**只对还有栏头 hero 的页面成立**）：智能体页
         //    2026-10 起没有预览页头了，这条在智能体页退化成"没有 hero"这一事实
@@ -1625,10 +1650,10 @@
          *    按类名找会在"标题还在、勾选栏没了"的中间态上误判成通过。
          */
         const probeToolsHeading = () =>
-          [...d().querySelectorAll('.detail .section h3')].find((h) =>
+          [...d().querySelectorAll('.card.agent-card .cell-label')].find((h) =>
             text(h).includes('工具包'),
           ) ?? null
-        const probeDetailText = () => text(d().querySelector('.detail')) ?? ''
+        const probeDetailText = () => text(d().querySelector('.detail-pane')) ?? ''
 
         const probeExecRow = [...d().querySelectorAll('.agent-row')].find((row) =>
           (row.textContent ?? '').includes('探针用的执行者'),
@@ -1639,7 +1664,7 @@
           click(probeExecRow.querySelector('.list-row-main'))
           // ⚠️ 必须等右栏**换成了这个 agent**：前面的段落已经选过别的 agent 了
           const probeSwitched = await until(
-            () => text(d().querySelector('.detail h2')) === '探针用的执行者',
+            () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的执行者',
             60,
           )
           if (!probeSwitched) errors.push('点开夹具执行者之后右栏没换成它')
@@ -1648,7 +1673,7 @@
           //   判据不能只是"找不到标题"——整页空白也成立，所以先要一个**必须先有**
           //   的东西：这一页的段落标题得是真的渲染出来了。
           facts['tools.executorHasNoToolsSection'] = need('执行者详情里的段落标题', () => {
-            const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+            const headings = [...d().querySelectorAll('.card.agent-card .cell-label')].map((h) => text(h))
             return headings.length > 0 && probeToolsHeading() === null
           })
           facts['tools.executorNoPickLabel'] = !probeDetailText().includes('可挂载的工具组')
@@ -1659,10 +1684,11 @@
           //   服务端对"执行者带动作"是 400。同理，界面上给出一个必然失败的勾选
           //   比没有更糟（使用者会以为是权限问题）。
           //   判据与那一条一样：段落标题得**先有**，否则整页空白也能通过。
+          // ⚠️ 段落身份从 `.section h3`（查看态）换成卡片的 `.cell-label`（单态卡片）。
           facts['standard.executorHasNoActionsSection'] = need('执行者详情里的段落标题', () => {
-            const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+            const headings = agentCellLabels()
             facts['standard.executorSectionHeadings'] = headings
-            return headings.length > 0 && !headings.some((h) => h.includes('行动权限'))
+            return headings.length > 0 && !headings.some((h) => (h ?? '').startsWith('行动权限'))
           })
 
           // ── 编辑态：也要查一遍"没有那一段" ──
@@ -1670,105 +1696,11 @@
           //   使用者的要求（原话）：「执行智能体不支持"行动"，去掉」。他去「智能体」
           //   页选了「助手」、点「编辑」，看到的就是那一栏里的「可挂载的工具组」。
           //
-          //   ⚠️ 编辑态走的是**另一条判据**（见下面那条注释），所以只查只读态等于
-          //      另一条没人管。这一段撤了两次：先撤勾选栏、再整段撤，所以这里查的是
-          //      **整段不在**，而不是"勾选栏不在"——中间态（标题还在、控件没了）
-          //      也算过的话，就等于没查。
-          const probeEditBtn = [...d().querySelectorAll('.detail button')].find(
-            (b) => text(b) === '编辑',
-          )
-          if (!probeEditBtn) {
-            errors.push('详情里找不到「编辑」按钮')
-          } else {
-            click(probeEditBtn)
-            await until(() => !!d().querySelector('#agent-name'))
-            await wait(400)
-
-            // ★ **编辑态也要查一遍**（使用者的原话：「智能体详情，点『编辑』就可以看见」）。
-            //
-            //   上面那条查的是**只读态**，而编辑态走的是**另一条判据**：
-            //   只读态看 `isReviewer`（= `agent.role`），编辑态看 `draft.role`。
-            //   两条判据是两段代码，只查一条等于另一条没人管 —— 而"改到一半的角色"
-            //   正是这里最容易出错的地方（`draft` 是进编辑态时才拷的一份）。
-            facts['standard.executorEditHasNoActionsSection'] = need('执行者编辑态的段落标题', () => {
-              const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
-              facts['standard.executorEditSectionHeadings'] = headings
-              return headings.length > 0 && !headings.some((h) => h.includes('行动权限'))
-            })
-
-            const probeCancelBtn = () =>
-              [...d().querySelectorAll('.detail button')].find((b) => text(b) === '取消')
-            if (probeCancelBtn()) click(probeCancelBtn())
-            await wait(400)
-          }
+          // ⚠️ 2026-10：**编辑态没有了**（选中即编辑）⇒ 原来"点「编辑」之后再查一遍"
+          //    这一步整段删掉。这一条不变量（执行者不给行动权限）现在由上面那条
+          //    卡片级断言守着；那一段在编辑态里会"露出来"的那种缺陷，在单态卡片上
+          //    也不可能再出现（没有第二个态可露）。
         }
-
-        // ── ★ 编辑到一半**换一个 agent**：草稿必须跟着作废 ──
-        //
-        //   使用者的原话：「智能体详情，点『编辑』就可以看见[行动权限]」。
-        //
-        //   根因不在那条 `{#if}`（它是对的），而在**草稿的归属**：`draft` 是进编辑态
-        //   时从 `agent` 拷的一份，而 `Agents.svelte` 是
-        //   `{#if selected}<AgentDetail agent={selected}/>{/if}` —— 换一个 agent 时
-        //   组件实例被**复用**，`editing` 还是 true、`draft` 还是**上一个人**的。
-        //
-        //   两个后果，第二个比第一个严重得多：
-        //     ① 执行者的详情里冒出「行动权限」（判据 `draft.role === 'reviewer'`
-        //        读的是上一个审核者的草稿）；
-        //     ② 点「保存」会把**上一个人的**名字/指令/角色 PATCH 到这个人身上
-        //        —— `buildPatch()` 拿 `draft.*` 与新 `agent.*` 比，于是这些字段
-        //        全都"变了"。
-        //
-        //   所以这条查的是**输入框里的值**，而不只是段落标题：标题只是症状。
-        {
-          const probeSwitchReviewer = [...d().querySelectorAll('.agent-row')].find((row) =>
-            row.querySelector('.badge.in_review'),
-          )
-          const probeSwitchExec = [...d().querySelectorAll('.agent-row')].find((row) =>
-            (row.textContent ?? '').includes('探针用的执行者'),
-          )
-          if (!probeSwitchReviewer || !probeSwitchExec) {
-            errors.push('换 agent 那条查不了：找不到夹具审核者或执行者')
-          } else {
-            click(probeSwitchReviewer.querySelector('.list-row-main'))
-            await until(() => !!d().querySelector('.detail .section h3'), 60)
-            await wait(300)
-            const probeEditForSwitch = [...d().querySelectorAll('.detail button')].find(
-              (b) => text(b) === '编辑',
-            )
-            if (!probeEditForSwitch) {
-              errors.push('换 agent 那条查不了：审核者详情里没有「编辑」')
-            } else {
-              click(probeEditForSwitch)
-              await wait(400)
-              // **在编辑态里**换成执行者
-              click(probeSwitchExec.querySelector('.list-row-main'))
-              const probeSwitched = await until(
-                () => text(d().querySelector('.detail h2')) === '探针用的执行者',
-                60,
-              )
-              await wait(500)
-              facts['standard.switchWhileEditingTitle'] = text(d().querySelector('.detail h2'))
-              facts['standard.switchWhileEditingName'] = (() => {
-                const input = d().querySelector('#agent-name')
-                return input ? input.value : '(不在编辑态)'
-              })()
-              const probeSwitchHeadings = [...d().querySelectorAll('.detail .section h3')].map((h) =>
-                text(h),
-              )
-              facts['standard.switchWhileEditingHeadings'] = probeSwitchHeadings
-              facts['standard.switchWhileEditingNoActions'] =
-                probeSwitched && !probeSwitchHeadings.some((h) => h.includes('行动权限'))
-              // 收尾：别把状态留在编辑态
-              const probeSwitchCancel = [...d().querySelectorAll('.detail button')].find(
-                (b) => text(b) === '取消',
-              )
-              if (probeSwitchCancel) click(probeSwitchCancel)
-              await wait(300)
-            }
-          }
-        }
-
         // ── 审核者：**没有**工具那一段 ──
         //
         //    ★ 审核者只判断、不动手，服务端也会 400 拒掉"给审核者挂工具"。
@@ -1781,13 +1713,13 @@
         } else {
           click(probeReviewerRow.querySelector('.list-row-main'))
           const probeReviewerSwitched = await until(
-            () => !!d().querySelector('.detail .badge.in_review'),
+            () => !!d().querySelector('.detail-pane .badge.in_review'),
             60,
           )
           if (!probeReviewerSwitched) errors.push('点开审核者之后右栏没换过去')
           await wait(300)
           facts['tools.reviewerHasNoToolsSection'] = need('审核者详情里的段落标题', () => {
-            const headings = [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
+            const headings = [...d().querySelectorAll('.card.agent-card .cell-label')].map((h) => text(h))
             // 行必须先有（否则"没有工具段"会**空过**：整页空白也能通过）。
             // ⚠️ 按**包含**判断，不按等于：D42 之后执行者那段的标题是
             //   「干活时能用的工具包」，若它漏到审核者身上，`includes('工具')`
@@ -2205,202 +2137,110 @@
         )
         if (reviewerRow) {
           click(reviewerRow.querySelector('.list-row-main'))
-          await until(() => !!d().querySelector('.detail'))
+          // ⚠️ 等的是**可编辑卡片**（`.card.agent-card`），不是 `.detail`——2026-10
+          //    起智能体没有预览页了（选中即编辑）。原来等 `.detail` 会白等 15 秒
+          //    虚拟时间（那个元素不再存在），把后面的段落一起拖累。
+          await until(() => !!d().querySelector('.card.agent-card'))
           await wait(400)
-          // ⚠️ 这里原来量的是"标准那一行里有一个显示名字的徽标"（`.std-name-badge`）。
-          //    `ReviewStandard.name` 整个字段删掉之后，那条量的东西**已经不存在**
-          //    了——留着它只会变成一条永远红的检查。换成**反向**断言：那个徽标
-          //    不该再出现在详情里。反向断言才守得住这次删除：以后谁把"名字"加回来
-          //    （比如觉得"给标准起个名"是个好主意），这里会立刻红。
-          facts['standard.detailHasNoNameBadge'] = !d().querySelector('.detail .std-name-badge')
-          const labelRows = () =>
-            [...d().querySelectorAll('.detail .field-row')].map((r) =>
-              text(r.querySelector('.row-label')),
-            )
-          const sectionTitles = () =>
-            [...d().querySelectorAll('.detail .section h3')].map((h) => text(h))
-          // ★ 那个字段名一个字都不许剩（行标签、段标题两处都要看）
-          facts['standard.noStandardRowLabel'] = !labelRows().some((l) => l === '审核标准')
-          facts['standard.noStandardSectionTitle'] = !sectionTitles().some((t) =>
+          const agentCard = () => d().querySelector('.detail-pane .card.agent-card')
+          /**
+           * 卡片里每一格的标题。
+           * ⚠️ 必须用共用助手：自己再写一遍 `.cell-label` 会把「指令」那一格漏掉
+           *    （它是 `<label class="cell">标题<textarea>`，没有 `.cell-label` 元素），
+           *    而它正是判断依据唯一的出处——踩过：`detailCellLabels` 只回了
+           *    角色/挂载的技能/行动权限三项。
+           */
+          const cellLabels = () => agentCellLabels()
+
+          // ⚠️ 这一段原来量的是"标准那一行里有一个显示名字的徽标"（`.std-name-badge`）、
+          //    "只读那一行里有 `pre` 正文"、"那一栏里有「并进」按钮"——它们全在
+          //    **查看态**里，而查看态 2026-10 整个删掉了。负向断言留着（`.std-name-badge`
+          //    不该回来），正向的那几条改成量**卡片里那一格**。
+          facts['standard.detailHasNoNameBadge'] = !d().querySelector(
+            '.detail-pane .card.agent-card .std-name-badge',
+          )
+          // ★ 字段名一个字都不许剩：「审核标准」那一格、那个小节标题都不该有。
+          facts['standard.noStandardRowLabel'] = !cellLabels().some((l) => l === '审核标准')
+          facts['standard.noStandardSectionTitle'] = !cellLabels().some((t) =>
             (t ?? '').includes('用什么标准'),
           )
-          facts['standard.detailSectionTitles'] = sectionTitles()
-          const instructionsRow = () =>
-            [...d().querySelectorAll('.detail .field-row')].find(
-              (r) => text(r.querySelector('.row-label')) === '指令',
-            ) ?? null
+          /** 卡片里每一格的小标题（新的"段落标题"就是它）。 */
+          facts['standard.detailCellLabels'] = cellLabels()
+          // ★ 判断依据的**唯一出处**是「指令」那一格，而它是**能改的**（textarea）：
+          //   所以判据从"只读那一行里有一段正文"改成"指令框里有那段正文"。
           facts['standard.detailShowsBody'] = (() => {
-            const pre = instructionsRow()?.querySelector('pre')
-            return pre ? (pre.textContent ?? '').trim().length > 20 : false
+            const box = d().querySelector('.detail-pane #agent-instructions')
+            facts['standard.instructionsBoxFound'] = !!box
+            facts['standard.instructionsLen'] = box ? String(box.value ?? '').trim().length : null
+            // ⚠️ 判据原来量的是只读行里的 `<pre>`，阈值 >20 是**投递出去的那份
+            //    （指令 + 老字段合并后）**的长度。现在这一格显示的是**指令字段本身**
+            //    （老字段还在提示里、保存时才并进来），所以夹具那 9 个字的指令
+            //    本来就量不到 20 ⇒ 阈值改成"这一格里有那段指令的正文"，而
+            //    "合并后的那份一字不少"由「老信息清理」那一族的 `identityUnchanged` 守
+            //    （那一条才是真正的不变量，且不依赖界面长相）。
+            return box ? String(box.value ?? '').includes('你是严格的审核者') : false
           })()
-          // ★ 老形态那一栏里要给出**并进来**的入口（原来只有"正文来自挂载 skill"
-          //   那一种有按钮；内联老标准只能手抄——而现在连那一段都没有了）
-          facts['standard.foldInButtonInInstructionsRow'] = !!(
-            instructionsRow() &&
-            [...instructionsRow().querySelectorAll('button')].some((b) =>
-              (text(b) ?? '').includes('并进'),
-            )
+          // ★ 技能那一格还在（删的是"标准"，不是"挂载"）。
+          facts['standard.skillsSectionStillThere'] = cellLabels().some((t) =>
+            (t ?? '').includes('技能'),
           )
-          // ★ 技能那一段还在（删的是"标准"，不是"挂载"）
-          facts['standard.skillsSectionStillThere'] = sectionTitles().some(
-            (t) => t === '技能',
-          )
-          // ★ D40 收口：行动权限是审核者自己的**一段**（不在「审核标准」那一行里了）。
-          //   原来这两条读的都是"审核标准"那一行里的文字；现在读的是那一段本身
-          //   ——位置变了，断言跟着改（改的是"它现在在哪一段"，不是放宽判据）。
-          //
-          //   ⚠️ 先把**那一段的容器**取出来再在里面量：只把选择器换到另一个地方，
-          //      "动作清单到底在不在「行动权限」段里"就没人看着了，而那是这次搬家的
-          //      全部内容。容器靠段落标题认（`h3` 就是那一段的名字）。
-          const actionsSection =
-            [...d().querySelectorAll('.detail .section')].find((s) =>
-              (text(s.querySelector('h3')) ?? '').includes('行动权限'),
-            ) ?? null
-          facts['standard.detailActionsSectionTitle'] = need('行动权限那一段的标题', () =>
-            actionsSection ? text(actionsSection.querySelector('h3')) : null,
-          )
-          facts['standard.detailHasActionsSection'] = actionsSection !== null
-          // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
-          publish(false)
-          // ══════════════════════════════════════════════════════════════
-          // 只读态那一行里显示的**契约值**（D41 之后判据换了，而且是收窄）
-          // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
-          publish(false)
-          // ══════════════════════════════════════════════════════════════
-          //
-          // 原来这里量的是"chips 里有 `comment.create`"。D41 把内置动作整组移除
-          // 之后，那个名字**不再是任何动作**（动作只能是 `<包 slug>.<动作名>`），
-          // 留着它就等于把断言钉在旧现实上——而它是绿的还是红的，取决于夹具里
-          // 那个 agent 当年存了什么，与新现实无关。
-          //
-          // 现在量两份事实，由 run.mjs 判：
-          //   ① 那一行里 chip 的**值**（契约值原样显示，不是翻译、也不是别的什么）；
-          //   ② 接口回给这个 agent 的 `allowedActions`——判据是"界面上显示的逐字
-          //      等于库里那份"，而不是"显示了我期待的那一个名字"。
-          const reviewerName = text(d().querySelector('.detail h2'))
-          const detailActionRow = () =>
-            [...(actionsSection?.querySelectorAll('.field-row') ?? [])].find((r) =>
-              text(r.querySelector('.row-label')) === '允许触发的动作',
-            )
-          facts['standard.detailActionChips'] = (() => {
-            const row = detailActionRow()
-            return row ? [...row.querySelectorAll('.chip code')].map((c) => text(c)) : null
-          })()
-          facts['standard.detailActionSource'] = await f.contentWindow
-            .fetch('/api/agents')
-            .then((r) => r.json())
-            .then((payload) => {
-              const a = (payload.agents ?? []).find((x) => x.name === reviewerName)
-              if (!a) return null
-              // ⚠️ 按**界面那条显示规则**取：自己的那份为空时回退到老字段
-              //    （`reviewStandard.allowedActions`，见 `lib/agent-actions.ts`）。
-              //    照 `allowedActions` 一个字段硬比的话，老工作区里那种"动作写在
-              //    标准里"的 agent 会把这条检查骗成红的——而界面上显示的正是那份。
-              const own = a.allowedActions ?? []
-              return own.length > 0 ? own : (a.reviewStandard?.allowedActions ?? [])
-            })
-            .catch(() => null)
-          // ★ 反向（老数据那条提示的**负例**）：这个审核者**自己**有动作权限，
-          //   所以"动作也来自那些 skill"那句不该出现——它一出现就是在说假话
-          //   （列表明明是满的）。只读与编辑两种形态都不该有。
-          facts['standard.actionsHintAbsentWhenSet'] = !String(
-            text(actionsSection) ?? '',
-          ).includes('也来自这些技能')
-          // 反向：动作清单**不在**承载判断依据的那一栏里（同一件事只有一个出处）。
-          // ⚠️ 判据不能是"那一行的文字里有没有 comment.create"——判断依据的**正文**本身
-          //    就提到了这个动作名（内置标准里那句"纯提示用 `comment.create`"），
-          //    于是"正文提到过"会把这条检查骗成红的。动作在界面上是 `.chip`，
-          //    所以按结构判：那一栏里不该有任何 chip。
-          // ★ 2026-09：判据的容器从「审核标准」那一行换成了**「指令」那一行**——
-          //   那一段被删掉之后，"依据在哪一栏、动作在哪一栏"这件事仍然要有人看着；
-          //   写成"那一行不存在 ⇒ 通过"会让这条断言在段被删掉之后**空过**。
-          facts['standard.detailActionsOutOfStandard'] = (() => {
-            const row = [...d().querySelectorAll('.detail .field-row')].find((r) =>
-              text(r.querySelector('.row-label')) === '指令',
-            )
-            return row ? row.querySelector('.chip') === null : false
-          })()
           /**
-           * 顶上那条红警告：**这一条现在必须不在**（打开的审核者有依据 —— 它有内联
-           * 老标准、也写了指令）。
+           * 「行动权限」那一格：**只留一句指路**。
            *
-           * ⚠️ 判据原来是 `!reviewStandard && skillIds.length === 0`（两半都在看老形态），
-           *   于是"只写了「指令」"的正常审核者被误报成"审不了任何东西"。这条负向断言
-           *   只守得住一半：**正向**（真的没依据时要出现）由下面那一段量。
+           * ⚠️ 2026-10：`ActionPicker`（允许触发的动作 + 固定参数 + 调试）**整个能力
+           *    从 agent 上撤掉了**——动作属于**这条链**，唯一权威是智能体组
+           *    （组页 ③ 行动）。详情里现在只有一句 `agents.actionsMovedToGroup`，
+           *    而且**刻意不复用那个选择器**（设计注释：两处长得一模一样、只有一处
+           *    生效，是最坏的一种界面）。
+           *    ⇒ 所以这一格的判据是"**只有一句话、没有任何可操作的东西**"。
+           *    原来那一族断言（chips 逐字等于接口 `allowedActions`、"勾一个动作再保存
+           *    真的写进去"）描述的是**已经不存在的写入口**，从这里删掉了；
+           *    它们要守的东西搬到了**智能体组页的 ③ 行动**（下一批补那里）。
            */
-          const headlineText = () =>
-            text(d().querySelector('.detail .headline')) ?? ''
-          facts['standard.emptyWarning'] = !headlineText().includes('审不了任何东西')
-
-          // ── 端到端：在详情里勾一个动作 → 保存 → **以接口为准**真的变了 ──
-          //
-          //   ★ 这是这一组里唯一一条走完整写入口的检查（`PATCH /api/agents/:id` 的
-          //     `allowedActions`）：段落、勾选栏、草稿、patch、刷新少一环都会红。
-          //     少一条的话，"界面画得对"与"真的写得进去"之间就没人看着（这个仓库里
-          //     "接口支持、界面没有入口"以及反过来的情况都出现过）。
-          //
-          //   ⚠️ 勾的是夹具工具的那个动作（`probe-tool.append-note`）：后面那条
-          //      "切英文时契约值不翻译"靠的正是详情里的这个动作名，所以两条量的是
-          //      同一个动作名，不会互相踩。
-          const stdEditBtn = [...d().querySelectorAll('.detail button')].find(
-            (b) => text(b) === '编辑',
-          )
-          if (stdEditBtn) {
-            click(stdEditBtn)
-            // ⚠️ D41：勾选栏里**只剩**已装工具的动作（内置动作那一组连同
-            //    `.action-picker` 那个容器一起没有了），所以等一下的是工具动作
-            //    的勾选框。勾的是夹具工具的一个动作——`probe-tool.append-note`：
-            //    它正是这条端到端链路的**唯一**合法取值（旧的 `notify.emit` 已经
-            //    不是一个动作了，提交它会被服务端 400 拒在保存那一刻）。
-            await until(() => !!d().querySelector('.action-perms .ap-ck'), 60)
-            const notifyBox = [
-              ...d().querySelectorAll('.action-perms .ap-ck'),
-            ].find((i) => i.value === 'probe-tool.append-note')
-            facts['standard.actionEditBoxFound'] = !!notifyBox
-            if (notifyBox) {
-              notifyBox.checked = true
-              notifyBox.dispatchEvent(new Event('change', { bubbles: true }))
-              await wait(200)
-            }
-            const saveBtn = [...d().querySelectorAll('.detail button')].find((b) =>
-              text(b).startsWith('保存'),
+          const actionsCell = () => {
+            const label = [...d().querySelectorAll('.detail-pane .card.agent-card .cell')].find(
+              (c) =>
+                (text(c.querySelector('.cell-label')) ?? '').startsWith('行动权限'),
             )
-            facts['standard.actionSaveButtonFound'] = !!saveBtn
-            if (saveBtn) {
-              click(saveBtn)
-              // 保存成功 ⇒ 退出编辑态（勾选栏消失）；否则等超时再往下走
-              await until(() => !d().querySelector('.action-perms .ap-ck'), 60)
-              await wait(300)
-            }
-            facts['standard.actionChipsAfterSave'] = [
-              ...d().querySelectorAll('.detail .field-row .chip code'),
-            ].map((c) => text(c))
-            facts['standard.actionEditSaved'] =
-              facts['standard.actionChipsAfterSave'].includes('probe-tool.append-note')
-            // ★ 契约值旁边**带着它的 `summary`**（工具作者写的那一句话）。
-            //   只显示机器名的话，"它允许的到底是什么"就只能靠猜——所以这一条与
-            //   上面那条一起量：值对了、说明也在。
-            facts['standard.actionSummaryAfterSave'] = need('动作 chip 旁边的说明', () => {
-              const row = detailActionRow()
-              const chip = [...(row?.querySelectorAll('.chip') ?? [])].find((c) =>
-                text(c.querySelector('code')) === 'probe-tool.append-note',
-              )
-              return chip ? text(chip.querySelector('.chip-sub')) : null
-            })
-            // ★ 界面显示的不算数，**接口回的那份**才算数（免得"只画对了"也算通过）
-            facts['standard.actionSavedOnServer'] = await f.contentWindow
-              .fetch('/api/agents')
-              .then((r) => r.json())
-              .then((payload) => {
-                const rev = (payload.agents ?? []).find((a) => a.name === reviewerName)
-                facts['standard.serverAllowedActions'] = rev ? rev.allowedActions : null
-                return (
-                  Array.isArray(rev?.allowedActions) &&
-                  rev.allowedActions.includes('probe-tool.append-note')
-                )
-              })
-              .catch(() => false)
+            return label ?? null
           }
+          facts['standard.detailActionsCellTitle'] = need('行动权限那一格的小标题', () =>
+            actionsCell() ? text(actionsCell().querySelector('.cell-label')) : null,
+          )
+          facts['standard.detailHasActionsCell'] = actionsCell() !== null
+          facts['standard.actionsPointerText'] = actionsCell() ? text(actionsCell()) : null
+          facts['standard.actionsPointerOnly'] = (() => {
+            const cell = actionsCell()
+            if (!cell) return false
+            return (
+              cell.querySelector('.action-picker') === null &&
+              cell.querySelector('input') === null &&
+              cell.querySelector('button') === null &&
+              cell.querySelector('.chip') === null
+            )
+          })()
+          // ★ 负向：那一格里**不说"动作也来自这些技能"**（那句话是给"没有权限"的
+          //   审核者解释出处的，而这一格现在只说"去组里配"）。
+          facts['standard.actionsHintAbsentWhenSet'] = !String(
+            text(actionsCell()) ?? '',
+          ).includes('也来自这些技能')
+          /**
+           * ⚠️ **事实（当前是个真缺口）**：`agents.headlineNoInstructions`
+           *    （"它审不了任何东西：没有写「指令」…点「编辑」写一段"）这句警告
+           *    **在界面里一处都没有了**——它原来住在被删掉的查看态 headline 上，
+           *    现在全仓库没有任何代码用这个键（`grep -rn headlineNoInstructions
+           *    apps/` 为空）。所以"没写指令的审核者会看到一句解释"这件事**没了**：
+           *    使用者只会看到它一直不接活。这里如实记一条事实，供报告点名。
+           */
+          const headlineText = () => text(d().querySelector('.detail-pane .headline')) ?? ''
+          facts['standard.headlineElementGone'] = d().querySelector('.detail-pane .headline') === null
+          facts['standard.emptyWarning'] = !headlineText().includes('审不了任何东西')
+          // ⚠️ **老标准"一键并进"的入口也没有了**：它原来在查看态里（`standardLegacyNoticeFromSkill`
+          //    那句还写着"下面那颗按钮"），查看态删掉之后没有任何界面路径能触发它
+          //    ——编辑态只留一句提示（`standardFoldInEditHint`）。如实记事实。
+          facts['standard.legacyFoldInButtonGone'] = ![...d().querySelectorAll('.detail-pane button')].some(
+            (b) => (text(b) ?? '').includes('并进'),
+          )
         } else {
           errors.push('找不到审核者的卡片')
         }
@@ -2453,15 +2293,28 @@
           //
           //   ⚠️ 两个容器分开取，别用一个 `.agent-form` 兜底：以后两边各自演化
           //      （标准加字段、行动权限加分组）时，混在一个根上的断言会互相牵连。
-          const formFieldWithLabel = (needle) =>
-            [...(form2?.querySelectorAll('.field') ?? [])].find((f) =>
-              (text(f.querySelector('.field-label')) ?? '').includes(needle),
+          // ⚠️ 2026-10：agent 的表单里**没有"行动权限"那一栏了**（整段撤掉，
+          //    只剩一句指路），所以原来按字段标题找宿主的 `formFieldWithLabel('行动权限')`
+          //    永远找不到——那一族断言会全部空过。现在按**那句话**认宿主：
+          //    `agents.actionsMovedToGroup` 那句住在「指令」下面的一个 `.cell` 里。
+          const pointerCell = () =>
+            [...(form2?.querySelectorAll('.cell, .field') ?? [])].find((f) =>
+              (text(f) ?? '').includes('动作属于这条链'),
             ) ?? null
-          // 「行动权限」那一栏的宿主容器（它的字段标题就是那一段的名字）
-          const actionsHost = formFieldWithLabel('行动权限')
-          facts['standard.formActionsBlockLabel'] = need('行动权限那一栏的标题', () =>
-            actionsHost ? text(actionsHost.querySelector('.field-label')) : null,
-          )
+          facts['standard.formActionsPointerText'] = pointerCell() ? text(pointerCell()) : null
+          facts['standard.formActionsPointerOnly'] = (() => {
+            const cell = pointerCell()
+            if (!form2 || !cell) return false
+            return (
+              cell.querySelector('.action-picker') === null &&
+              cell.querySelector('input') === null &&
+              cell.querySelector('button') === null &&
+              cell.querySelector('select') === null
+            )
+          })()
+          facts['standard.formHasNoPickerAnywhere'] =
+            form2?.querySelector('.action-picker') === null
+
           // 标准编辑器容器（**只有正文**）
           //
           // ⚠️ 这条原来量的是"容器里既有 input（名字）又有 textarea（正文）"。
@@ -2477,103 +2330,26 @@
 
           // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
           publish(false)
-          // ══════════════════════════════════════════════════════════════
-          // D41：这一栏里**没有**内置动作那一组，而且一个都不预勾
-          // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
-          publish(false)
-          // ══════════════════════════════════════════════════════════════
-          //
-          // 原来这里量的是"内置动作那一组里有六个复选框、默认预勾 `comment.create`"。
-          // 内置动作整组被移除之后，那两条量的是**已经不存在的东西**——而且危险的是
-          // 它们还能碰巧绿（容器类名没删干净、或者老数据里恰好留着那个名字）。
-          //
-          // 换成三条，都是"现在是什么"：
-          //   ① 这一栏里**没有** `.action-picker`（内置动作那一组当年的骨架容器）；
-          //   ② **一个都不预勾**：没有任何内置动作可以预勾，而工具动作要不要授权
-          //      是使用者自己决定的（协议 schema 的默认就是空数组）；
-          //   ③ 这一栏里出现的**每一个**勾选项都必须是已装工具包的动作
-          //      （`<slug>.<动作名>`，slug 取自接口回的已装列表）——这一条才是
-          //      "动作只能来自工具包"在界面上的落点：只有 ① 的话，把内置动作那一组
-          //      换个类名重新长出来仍然绿。
-          facts['standard.formNoBuiltinGroup'] = actionsHost
-            ? actionsHost.querySelector('.action-picker') === null
-            : false
-          const formActionBoxes = () => [
-            ...(actionsHost?.querySelectorAll('input[type=checkbox]') ?? []),
-          ]
-          facts['standard.formActionOptions'] = formActionBoxes().map((i) => i.value)
-          facts['standard.installedSlugs'] = await f.contentWindow
-            .fetch('/api/tools')
-            .then((r) => r.json())
-            .then((payload) => (payload.tools ?? []).map((x) => x.slug))
-            .catch(() => null)
-          facts['standard.formDefaultAction'] = need('默认勾选的动作', () => {
-            const checked = formActionBoxes()
-              .filter((i) => i.checked)
-              .map((i) => i.value)
-            return checked.join(',')
-          })
+          // ⚠️ D41 那一族（"这一栏里没有内置动作那一组、一个都不预勾、出现的每个
+          //    勾选项都必须是已装工具包的动作"）**整族删掉了**：它所依托的
+          //    `ActionPicker` 与勾选框 2026-10 从 agent 表单里撤走了（动作属于这条链，
+          //    唯一权威是智能体组页的 ③ 行动）⇒ 在 agent 表单里量这些只会空过。
+          //    ⚠️ "动作只能来自工具包、不许有内置组、不许预勾" 这几条**已经搬到**
+          //    智能体组页的 ③ 行动去量——那里才是它现在的宿主（见 `docs/README.md`
+          //    的探针待办），不是取消。
           // ⚠️ 2026-09：这句话跟着「指令」那一栏的改动改了口径——判断依据写在
           //   「指令」里（原来写的是"上面那条**审核标准**"，而那个字段已经没有了）。
           facts['standard.formMentionsNoSkillNeeded'] = (form2?.textContent ?? '').includes(
             '判断依据写在上面那条',
           )
-          // ★ D40：行动权限里也要能勾到**已装工具的动作**（它原来在标准那一栏里）。
-          //   两者管的是两件事——"挂载"回答"这个执行者能触发什么"（住在 agent
-          //   上，单位是组），"行动权限"回答"判完之后允许触发什么"（住在 agent 上，
-          //   判决按它校验）。勾不到第三方动作 ⇒ 装了工具也永远用不上。
-          facts['standard.formToolActions'] = actionsHost
-            ? [...actionsHost.querySelectorAll('.ap-ck')].map((i) => i.value)
-            : []
-          facts['standard.formToolSummaryShown'] = need('工具动作旁边的 summary', () => {
-            const el = actionsHost?.querySelector('.ap-row .action-summary')
-            return el ? text(el) : null
-          })
-          // ★ 选中的动作/标准**真的回到父组件**了吗（不是只画了勾选框）。
-          //
-          //   判据是标准那一栏头部的状态徽章：写正文之后它必须从「没有标准」变成
-          //   「已写」——那个徽章读的是**父组件传下来的 `value`**，所以它一变就说明
-          //   "子组件 → 父组件 → 再传回来"这一圈是通的。
-          //
-          //   ⚠️ 这一条守的是一类**看不见的**错：Svelte 5 里组件的 `bind:value`
-          //      不是"子组件调 onchange 就算"，子组件必须**写自己的那个 prop** 才会
-          //      通知父组件。只调 `onchange` 的组件配 `bind:value` 用，写进抽屉里的
-          //      东西会**一个字都没到父组件**——界面上一切正常，创建出来的却是空的。
-          //
-          // ★ 顺便把这一栏的**草稿**在真实交互之后再看一次：在标准那一栏写下正文
-          //   之后，行动权限里勾着的那一个工具动作不该被抖掉（两个字段的草稿是
-          //   分开的：标准归标准、权限归权限）。
-          //
-          //   ⚠️ D41 之前这里量的是"预勾的那一档还在"。预勾没有了之后，若还照着
-          //      原样量"空的还是空的"，这条就退化成**空过**（两个字段确实分开时
-          //      它也是空的）。所以先**真的勾一个**工具动作，再看它经受住那次输入
-          //      没有——这才是同一条判断在新现实下的形态。
-          const tickBox = formActionBoxes().find((i) => i.value === 'probe-tool.append-note')
-          facts['standard.formToolTickBoxFound'] = !!tickBox
-          if (tickBox) {
-            tickBox.checked = true
-            tickBox.dispatchEvent(new Event('change', { bubbles: true }))
-            await wait(200)
-          }
-          /**
-           * ⚠️ 2026-09：标准框没了 ⇒ 这里改成往**「指令」**里打字。
-           *
-           * 这条检查要钉的是"两份草稿互不覆盖"（写着字的时候勾选还在）。标准并进
-           * 指令之后，与勾选并存的那份草稿就是「指令」，所以主语换成它，
-           * 判断一模一样。
-           */
-          const insBox = form2?.querySelector('textarea.instructions')
-          if (insBox) {
-            insBox.value = '探针写的指令与判断依据'
-            insBox.dispatchEvent(new Event('input', { bubbles: true }))
-            await wait(250)
-          }
-          facts['standard.formTickSurvivesTyping'] = need('写下正文之后仍勾着的动作', () => {
-            const checked = formActionBoxes()
-              .filter((i) => i.checked)
-              .map((i) => i.value)
-            return checked.join(',')
-          })
+          // ⚠️ 2026-10：**行动权限整个能力从 agent 上撤掉了**（挂在人身上只能共用
+          //    一份，而"判完允许动什么"属于**这条链**）。所以这一段原来那一整套
+          //    （`ActionPicker` 的 `.ap-ck` 勾选框、`.ap-row .action-summary`、
+          //    预勾的那一条、以及"写下正文之后勾选还在"的草稿隔离）**都没有宿主
+          //    了**——agent 的表单里只剩一句指路。
+          //    ⇒ 判据换成"**只有一句话、没有任何可操作的控件**"；而选择器本身那
+          //    一族断言（含 `summary` 逐字、勾选与草稿隔离、保存走通）搬到
+          //    **智能体组页的 ③ 行动**去量（那一页才是它现在的宿主）。
           const cancel2 = [...form2.querySelectorAll('button')].find(
             (b) => b.textContent.trim() === '取消',
           )
@@ -2581,13 +2357,15 @@
           await wait(250)
         }
 
-        // ── 顶上那条红警告的**两半**：真的没依据 ⇒ 必须出现；只写了指令 ⇒ 不许出现 ──
+        // ── 顶上那条红警告：**它已经不在了**（如实记录，不当成通过）──
         //
-        // ★ 使用者原话：「这个提示有问题」——他看到的就是"只写了「指令」的审核者被挂上
-        //   『它审不了任何东西：没有审核标准…』"。判据原来只看老字段，所以两个方向都要量。
-        //
-        // ⚠️ 放在这一段的**最后**：上面那几条端到端检查量的是**播下的审核员**，中途把右栏
-        //   换到别的 agent 就会让它们量错人（这里第一版就是放在中间的，两条端到端当场红了）。
+        // 使用者当年报过「这个提示有问题」（只写了「指令」的审核者被挂上"它审不了
+        // 任何东西：没有审核标准…"）。判据当时是两半：真的没依据 ⇒ 出现；只写了指令
+        // ⇒ 不许出现。**两半都随着查看态一起删掉了**——`agents.headlineNoInstructions`
+        // 这句词条现在全仓库没有任何代码引用（`grep -rn headlineNoInstructions apps/`
+        // 为空），所以"没写指令的审核者会有一句解释"这件事**在界面上没有了**。
+        // ⇒ 不再对这一页写正/负断言（写了就是空过），改成记录事实 + 由报告点名：
+        //    没写指令的审核者现在**没有任何提示**，使用者只会看到它一直不接活。
         {
           const emptyRow = [...d().querySelectorAll('.agent-row')].find((row) =>
             (row.textContent ?? '').includes('探针用的没写指令的审核者'),
@@ -2595,34 +2373,42 @@
           facts['standard.emptyReviewerFixtureFound'] = !!emptyRow
           if (emptyRow) {
             click(emptyRow.querySelector('.list-row-main'))
-            // ⚠️ 等右栏**真的换成它**：只等 `.detail` 会立刻返回，读到上一个
             facts['standard.emptyReviewerSwitched'] = await until(
-              () => text(d().querySelector('.detail h2')) === '探针用的没写指令的审核者',
+              () =>
+                String(d().querySelector('#agent-name')?.value ?? '') ===
+                '探针用的没写指令的审核者',
               60,
             )
             await wait(300)
-            const headline = text(d().querySelector('.detail .headline')) ?? ''
-            facts['standard.headlineWhenNoIdentity'] = headline
-            // ★ 措辞也必须跟上：界面上已经没有「审核标准」这个字段了
-            facts['standard.headlineWordingUpdated'] =
-              headline.includes('没有写「指令」') && !headline.includes('没有审核标准')
+            facts['standard.headlineWhenNoIdentity'] =
+              text(d().querySelector('.detail-pane .headline')) ?? ''
+            facts['standard.noCriteriaExplanationAnywhere'] = !(
+              text(d().querySelector('.detail-pane')) ?? ''
+            ).includes('审不了任何东西')
           }
         }
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
-        // ══════════════ 迁移：把挂载的 skill 里的判断依据并进「指令」（D38）══════════════
+        // ══════════════ 老形态依据（来自挂载的 skill）：现在还有没有出路 ══════════════
         //
-        // 使用者的真实处境：他删不掉 general-review，因为审核者还挂着它、而且判断依据
-        // 正来自它。这条路要端到端量：详情页那个按钮 → 正文并进「指令」、挂载清空 →
-        // 那条 skill 才卸得掉。
+        // 使用者当年的处境：他删不掉 `general-review`，因为审核者还挂着它、而判断依据
+        // 正来自它。当时的出路是**详情只读态里那颗「并进」按钮**：正文并进「指令」、
+        // 挂载同时摘掉（摘挂载得使用者自己点，因为"改个名字顺手摘掉别人的挂载"是
+        // 没同意的改动）。
+        //
+        // ⚠️ 2026-10：**只读态整个删掉了**（选中即编辑）⇒ 那颗按钮也没有了。所以
+        //    这一段的问题从"按钮点了会发生什么"变成两件事，分开量：
+        //      ① **依据有没有丢**（服务端那条不变量：投递出去的 ② = 指令 + 老字段
+        //         + 挂载 skill 的正文，一字不少）；
+        //      ② **界面上还剩什么出路**——挂载可以在卡片的「技能」那一格里自己取消
+        //         （这是唯一剩下的手工路径），而原来那句"下面那颗按钮"的说法还在
+        //         词条里（`agents.standardLegacyNoticeFromSkill`），**全仓库已经没有
+        //         任何代码用它** ⇒ 如实记成一条事实，供报告点名。
         const legacyRow = [...d().querySelectorAll('.agent-row')].find((row) =>
           (row.textContent ?? '').includes('探针用的老形态审核者'),
         )
         facts['migrate.legacyFixtureFound'] = !!legacyRow
-        // ★ 拿到这个夹具 agent 的 id：下面"挂载有没有被摘掉"要**问接口**，
-        //   而不是扫页面文字（页面上另有一处「挂载的 skill」是编辑态的选择器标签，
-        //   它与"这个 agent 当前挂着什么"无关，扫全文的断言必然空过或误报）。
         const agentsBefore = await f.contentWindow
           .fetch('/api/agents')
           .then((r) => r.json())
@@ -2634,159 +2420,66 @@
         facts['migrate.legacyAgentFound'] = legacyAgentId !== null
         if (legacyRow) {
           click(legacyRow.querySelector('.list-row-main'))
-          // ⚠️ 必须等右栏**换成了这个 agent**——前面的段落已经选过别的 agent 了，
-          //    只等 `.detail` 存在会立刻返回，读到的是上一个 agent 的详情
-          //    （又一次"看早"，这次被 `legacyHintBefore` 那条断言抓到）
-          facts['migrate.detailSwitched'] = await until(
-            () => text(d().querySelector('.detail h2')) === '探针用的老形态审核者',
-            60,
-          )
+          await until(() => !!d().querySelector('.card.agent-card'))
           await wait(300)
-          const adoptBtn = [...d().querySelectorAll('.detail button')].find(
-            (b) => b.textContent.trim() === '把这份判断依据并进「指令」',
-          )
-          facts['migrate.buttonFound'] = !!adoptBtn
-          if (adoptBtn) {
-            /**
-             * ⚠️ 判据从「审核标准」那一行换到了**「指令」那一行**（2026-09）：
-             *   那一段已经被删掉（判断依据并进 ② 身份），老数据那份正文与"并进来"
-             *   的入口都搬到了「指令」栏里。**判据本身一个字没放宽**——原来量的是
-             *   "承载这件事实的那一栏说了什么"，现在承载它的换成了「指令」。
-             */
-            const instructionsRow = () =>
-              [...d().querySelectorAll('.detail .field-row')].find(
-                (r) => text(r.querySelector('.row-label')) === '指令',
-              ) ?? null
-            // 固化之前：那一栏显示的是"沿用挂载的 skill"那句提示
-            facts['migrate.stdRowText'] = need('「指令」那一行的文字', () => {
-              const row = instructionsRow()
-              return row ? text(row).slice(0, 160) : null
-            })
-            facts['migrate.legacyHintBefore'] = String(facts['migrate.stdRowText'] ?? '').includes(
-              '沿用挂载',
-            )
-            // ★ 这个夹具**没有写「指令」**（`run.mjs` 造它时只挂了 skill），所以那一段
-            //   此刻必须说清后果。这条同时是下面 `instructionsRowNoFalseClaim` 的**前提**：
-            //   句子在搬移**之前**是真的，才有"搬移之后不该再说"这回事。
-            facts['migrate.noInstructionsBefore'] = !!instructionsRow()?.querySelector(
-              '[data-no-instructions]',
-            )
 
-            // ★ 老数据的**更早一层**：这个夹具只挂了 skill、agent 上没有动作权限，
-            //   所以「行动权限」那一行是空的，而它**仍然**能触发 skill 里那些动作
-            //   （服务端的解析链：agent → 标准 → 挂载 skill）。界面上必须说出来，
-            //   否则"一个都没勾"看着就像勾选坏了。
-            //
-            //   ⚠️ 两条判据一起量：① 那段里确实有那句"动作来自这些 skill"的提示；
-            //      ② 空态**没有**同时说"只报告、不动作"——列表空是因为白名单住在
-            //      skill 里，那句话说出口就是假的（自相矛盾的一对最容易被当成 bug）。
-            const legacyActionsSection =
-              [...d().querySelectorAll('.detail .section')].find((s) =>
-                (text(s.querySelector('h3')) ?? '').includes('行动权限'),
-              ) ?? null
-            facts['migrate.legacyActionsHintShown'] = String(
-              text(legacyActionsSection) ?? '',
-            ).includes('也来自这些技能')
-            facts['migrate.legacyActionsNoFalseClaim'] = !String(
-              text(legacyActionsSection) ?? '',
-            ).includes('只报告、不动作')
-            // ★ **两条提示要在同一屏上一起看得见**（"标准与动作都还是老形态"这件事
-            //   两句话合起来才说得清）：
-            //     ① 标准那一行说"沿用挂载的 skill 当标准（老配置）"；
-            //     ② 行动权限那一段说"能触发的动作也来自这些 skill（老配置）"。
-            //   ⚠️ 判据是**同一次渲染里两条都在**（不是分别出现过）：这正是使用者
-            //      说的"两条一起看"，也是这一组唯一守得住它的地方——两条提示分属
-            //      两段，任何一条被挪走/被条件挡掉，界面就只剩半句话。
-            facts['migrate.legacyBothHintsTogether'] =
-              facts['migrate.legacyHintBefore'] === true &&
-              facts['migrate.legacyActionsHintShown'] === true
+          // ① 依据没丢：服务端那一条不变量照旧量（它与界面形态无关）
+          facts['migrate.legacyAgentSkillCount'] = legacyAgent
+            ? (legacyAgent.skillIds ?? []).length
+            : null
 
-            click(adoptBtn)
-            // 固化之后：正文出现在**「指令」那一栏**里（`.detail .prose` 就是只读态的
-            // 指令正文，全页唯一一处）。原来等的是 `.tpl-text`（`reviewStandard`
-            // 的正文折叠块）——搬移的落点改成「指令」之后，那里不再有东西，等它就
-            // 永远超时。判据用的是夹具 skill 的正文（`run.mjs` 里造的 `probe-skill`：
-            // `# 探针\n\n夹具。`）——并进「指令」的就是它。
-            facts['migrate.adopted'] = await until(
-              () => (text(d().querySelector('.detail .prose')) ?? '').includes('夹具。'),
-              60,
+          // ② 界面上的出路：挂载在「技能」那一格里看得见、也能取消
+          const skillsCell = () => {
+            const cell = [...d().querySelectorAll('.card.agent-card .cell')].find((c) =>
+              (text(c.querySelector('.cell-label')) ?? '').includes('技能'),
             )
-            // ⚠️ 这三条原来写的是 `d().textContent`——而 `d()` 是**文档**，
-            //    按 DOM 规范 `Document.textContent` 恒为 `null`，于是 `?? ''`
-            //    让它永远变成"不含那句话"，这三条**否定**断言因此**不可能红**。
-            //    （发现它的是 D41 那次改动：新加的检查用了同样的写法，表现为
-            //    "永远 false"，才回头看出这三条一直在空过。）
-            //    改成读**页面主区**的文字。
-            const mainText = () => text(d().querySelector('.main')) ?? ''
-            facts['migrate.legacyHintGone'] = !mainText().includes('沿用挂载的技能')
-            // ★ 固化会把挂载摘掉（`skillIds: []`）⇒ 动作不再可能来自 skill，
-            //   那句提示必须跟着消失（否则它开始说假话）。
-            facts['migrate.legacyActionsHintGone'] = !mainText().includes('也来自这些技能')
-
-            /**
-             * ★★ 搬完之后「指令」那一栏必须**改口**：正文已经并进来、那句提示也没了。
-             *
-             * ⚠️ 这三条一起量的是同一件事的三面，缺一面就有一种"看起来对"的假绿：
-             *   ① `adopted`（上面）——正文真的进来了；
-             *   ② `instructionsRowNoFalseClaim`——**不再**说"没有写「指令」"（那句话
-             *      在搬之前是真的，`noInstructionsBefore` 是它的对照组）；
-             *   ③ `legacyNoticeGone`——老形态的提示与入口都跟着消失（`data-legacy-standard`
-             *      与"并进来"那颗按钮都不该再在），否则界面会在搬完之后继续暗示
-             *      "你还有一份老标准没处理"。
-             */
-            const insRowAfter = instructionsRow()
-            facts['migrate.instructionsRowAfterText'] = text(
-              insRowAfter?.querySelector('div') ?? null,
-            )
-            facts['migrate.instructionsRowNoFalseClaim'] =
-              !insRowAfter?.querySelector('[data-no-instructions]')
-            facts['migrate.legacyNoticeGone'] =
-              !insRowAfter?.querySelector('[data-legacy-standard]') &&
-              ![...(insRowAfter?.querySelectorAll('button') ?? [])].some((b) =>
-                (text(b) ?? '').includes('并进'),
-              )
-            // ★ 顺便钉死"那一段真的没了"：整个详情里不该再出现「审核标准」这个字段名
-            //   （使用者的要求就是这一条；它原来是一整段，包括那一行标签）
-            /**
-             * ★★ 搬完之后这个审核者就是"只有「指令」"的形态（依据并进来了、老字段清空、
-             *    也没有挂载）——**顶上那条红警告必须在此时消失**。
-             *
-             * ⚠️ 这条是使用者报的那个问题的正向复现：判据原来只看老字段，于是这种
-             *    （完全正常的）审核者会被挂上「它审不了任何东西：没有审核标准…」。
-             */
-            facts['migrate.noFalseHeadlineAfterAdopt'] = !(
-              text(d().querySelector('.detail .headline')) ?? ''
-            ).includes('审不了任何东西')
-            facts['migrate.noStandardRowAfter'] =
-              ![...d().querySelectorAll('.detail .field-row')].some(
-                (r) => text(r.querySelector('.row-label')) === '审核标准',
-              )
-
-            // ★ "挂载被摘掉"问接口，而不是扫页面文字（见上）
-            const agentsAfter = await f.contentWindow
-              .fetch('/api/agents')
-              .then((r) => r.json())
-              .catch(() => null)
-            const adoptedAgent = (agentsAfter?.agents ?? []).find(
-              (a) => a.id === legacyAgentId,
-            )
-            facts['migrate.mountCleared'] = adoptedAgent
-              ? (adoptedAgent.skillIds ?? []).length === 0
-              : null
+            return cell ?? null
           }
+          // ⚠️ 判据不能写"格子里看得见 `general-review`"：卡片刻意显示技能的**名字**
+          //    （slug 只在名字与 slug 不同时才补一行），而夹具那条挂载的名字与 slug
+          //    不一定相同 ⇒ 按名字判会把"看得见"误判成红。按结构判：格子里有
+          //    **勾着的**技能项，而且它旁边给出了名字。
+          facts['migrate.skillCellShowsMount'] = (() => {
+            const cell = skillsCell()
+            if (!cell) return false
+            const checked = [...cell.querySelectorAll('.skill-option input[type=checkbox]')].some(
+              (b) => b.checked === true,
+            )
+            return checked && (text(cell) ?? '').trim().length > 4
+          })()
+          facts['migrate.skillCellMountUncheckable'] = (() => {
+            const cell = skillsCell()
+            if (!cell) return false
+            const boxes = [...cell.querySelectorAll('.skill-option input[type=checkbox]')]
+            return boxes.some((b) => b.checked === true)
+          })()
+
+          // ⚠️ 事实（**当前是个真缺口**）：老形态（依据来自挂载 skill）那一句提示
+          //    + 那颗「并进」按钮**都没有了**——词条还在、代码里一处都不引用。
+          facts['migrate.skillSourcedNoticeOrButtonGone'] =
+            d().querySelector('.card.agent-card [data-legacy-standard]') === null &&
+            ![...d().querySelectorAll('.card.agent-card button')].some((b) =>
+              (text(b) ?? '').includes('并进'),
+            )
+          // 反向：也不许**假装**还有这条路（页面上不该出现一句指向不存在按钮的话）
+          facts['migrate.noFalseAdoptClaim'] = !(
+            text(d().querySelector('.card.agent-card')) ?? ''
+          ).includes('下面那颗按钮')
+        } else {
+          facts['migrate.skillCellShowsMount'] = null
+          facts['migrate.skillCellMountUncheckable'] = null
+          errors.push('找不到"探针用的老形态审核者"这张卡片，老形态那一段量不了')
         }
 
-        // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
-        publish(false)
         // ══════════════ 保存一次就把"老的信息"清掉（2026-09）══════════════
         //
         // 使用者的原话：「还留着老的信息…建议我重新编辑保存后 就应该去掉这些旧资讯」。
-        // 这条走的是**完整那条路**：详情页进编辑 → 保存 → 老提示消失、老正文进了「指令」，
-        // 而且**投递出去的那段文字一字未变**（拿接口返回的前后两份自己拼一遍比）。
+        // 当年走的是"进编辑态 → 保存"，而现在**只有一个态**（选中即编辑），所以
+        // 动作变成：卡片里改一个别的字段 → 保存。
         //
-        // ⚠️ 只量"提示没了"是不够的：把老字段直接删掉也能让它消失，而那会**丢掉
-        //   一段判断依据**（投递出去的 ② 短了一截，界面上看不出任何异常）。所以
-        //   这条的判据是两半：提示消失 + 身份那段文字逐字节相同。
+        // ⚠️ 判据仍然是**两半**（只量"提示没了"会把"顺手丢掉一段判断依据"判成绿）：
+        //      ① 老字段真的清掉了（问接口：`reviewStandard` 是 null）；
+        //      ② **投递出去的那段文字逐字节相同**（前后各自按 `[指令, 老字段]` 拼一遍比）。
         const foldRow = [...d().querySelectorAll('.agent-row')].find((row) =>
           (row.textContent ?? '').includes('探针用的内联老标准审核者'),
         )
@@ -2794,12 +2487,14 @@
         if (foldRow) {
           click(foldRow.querySelector('.list-row-main'))
           facts['fold.detailSwitched'] = await until(
-            () => text(d().querySelector('.detail h2')) === '探针用的内联老标准审核者',
+            () =>
+              !!d().querySelector('.card.agent-card') &&
+              String(d().querySelector('#agent-name')?.value ?? '').startsWith(
+                '探针用的内联老标准审核者',
+              ),
             60,
           )
           await wait(300)
-          // 前提：此刻确实是"老形态"（提示在、正文也在）
-          facts['fold.noticeBefore'] = !!d().querySelector('.detail [data-legacy-standard]')
           const readAgent = async () =>
             await f.contentWindow
               .fetch('/api/agents')
@@ -2814,58 +2509,105 @@
               .filter((x) => x !== '')
               .join('\n\n')
           facts['fold.identityBefore'] = beforeAgent ? identityFrom(beforeAgent) : null
-          const editBtn = [...d().querySelectorAll('.detail button')].find(
-            (b) => text(b) === '编辑',
-          )
-          if (editBtn) {
-            click(editBtn)
-            await until(() => !!d().querySelector('.detail textarea.instructions'), 60)
-            await wait(200)
-            // ★ 编辑态必须**提前说清**保存会发生什么（否则"我的指令怎么多了一段"
-            //   就是一次没预告的改动）
-            facts['fold.editHintWarns'] = (text(d().querySelector('.detail')) ?? '').includes(
-              '并进上面这段',
+          // ★ 前提：此刻确实是"老形态"——编辑态那句提示在（`[data-legacy-standard]`
+          //   只在有老字段时渲染）。原来它在查看态，现在在卡片里。
+          facts['fold.noticeBefore'] = !!d().querySelector('.card.agent-card [data-legacy-standard]')
+          // ★ 那句提示必须**提前说清保存会发生什么**（"我的指令怎么多了一段"不该
+          //   是一次没预告的改动）。
+          facts['fold.editHintWarns'] = (
+            text(d().querySelector('.card.agent-card [data-legacy-standard]')) ?? ''
+          ).includes('并进')
+          // 改个**别的字段**（名字）：这正是"我什么都没配、保存一下提示该没了"的场景，
+          // 而且指令不动 ⇒ 前后身份必须逐字节相同，断言最干净
+          const nameBox = d().querySelector('#agent-name')
+          if (nameBox) {
+            nameBox.value = '探针用的内联老标准审核者（改过）'
+            nameBox.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(150)
+          }
+          const saveBtn = [...d().querySelectorAll('.card.agent-card ~ .form-actions button')].find(
+            (b) => text(b) === '保存',
+          ) ?? [...d().querySelectorAll('.form-actions button')].find((b) => text(b) === '保存')
+          facts['fold.saveButtonFound'] = !!saveBtn
+          if (saveBtn) {
+            click(saveBtn)
+            // ⚠️ 等的是**那句老提示消失**（保存成功的可见后果），不是固定 sleep，
+            //    也不是"退出编辑态"——现在没有第二个态可退。
+            facts['fold.noticeCleared'] = await until(
+              () => !d().querySelector('.card.agent-card [data-legacy-standard]'),
+              80,
             )
-            // 改个**别的字段**（名字）：这正是"我什么都没配、保存一下提示该没了"的场景，
-            // 而且指令不动 ⇒ 前后身份必须逐字节相同，断言最干净
-            const nameBox = d().querySelector('#agent-name')
-            if (nameBox) {
-              nameBox.value = '探针用的内联老标准审核者（改过）'
-              nameBox.dispatchEvent(new Event('input', { bubbles: true }))
-              await wait(150)
-            }
-            const saveBtn = [...d().querySelectorAll('.detail button')].find(
-              (b) => text(b) === '保存',
+            await wait(300)
+            const afterAgent = await readAgent()
+            // ⚠️ 三态：'no-agent'（接口没读到）不许与"清掉了"混成同一个值——
+            //    `afterAgent && ...` 写法的表现是"读不到 ⇒ 断言通过"，那是空过。
+            facts['fold.reviewStandardAfter'] =
+              afterAgent === null ? 'no-agent' : afterAgent.reviewStandard ? 'still-there' : null
+            facts['fold.instructionsGotBody'] = !!(
+              afterAgent && (afterAgent.instructions ?? '').includes('只看证据。')
             )
-            facts['fold.saveButtonFound'] = !!saveBtn
-            if (saveBtn) {
+            facts['fold.identityUnchanged'] =
+              beforeAgent && afterAgent
+                ? identityFrom(afterAgent) === identityFrom(beforeAgent)
+                : null
+            facts['fold.identityAfter'] = afterAgent ? identityFrom(afterAgent) : null
+            // 界面上：老提示没了……
+            facts['fold.noticeAfter'] = !!d().querySelector('.card.agent-card [data-legacy-standard]')
+            // ⚠️⚠️ **真缺陷（探针在这里量到了它）**：保存之后**界面那一格并没有跟着
+            //    变成合并后的文字**——卡片只在自己持有的草稿上，而草稿只在"换了人"
+            //    （`agent.id` 变）时才作废，所以服务端刚并进去的那段正文，界面上看不见。
+            //    这不是"显示不一致"那么轻：下面那条第二轮保存会把**判断依据丢一半**。
+            const editorText = String(d().querySelector('#agent-instructions')?.value ?? '')
+            facts['fold.editorShowsMerged'] = editorText.includes('只看证据。')
+            facts['fold.editorTextAfterSave'] = editorText.slice(0, 60)
+            // ★ 真实使用者的下一步：**在「指令」那一格里再改一个字**再保存。
+            //   ⚠️ 为什么量这一下：第一轮保存之后，服务端那份 `instructions` 已经是
+            //     "指令 + 老正文"（并进来了），而**界面上那一格还是旧的指令**
+            //     （见上一条）。使用者看不到那段正文，就会在旧文字上继续改——
+            //     那一刻 `buildPatch()` 判成"指令变了"，把**不带正文**的那份写回去，
+            //     而老字段已经被清空（`reviewStandard = null`）⇒ 那段判断依据
+            //     **再也回不来**。这正是"保存一次顺手清理"最怕的后果，所以必须量。
+            const box2 = d().querySelector('#agent-instructions')
+            if (box2 && saveBtn) {
+              box2.value = box2.value + '\n（探针在保存之后又改了一个字）'
+              box2.dispatchEvent(new Event('input', { bubbles: true }))
+              await wait(200)
               click(saveBtn)
-              // 等真的退出编辑（textarea 消失）再读——固定 sleep 在虚拟时间下会看早
-              facts['fold.leftEditing'] = await until(
-                () => !d().querySelector('.detail textarea.instructions'),
-                80,
+              // 等接口上那段文字真的变了（不是等输入框——它在点保存前就是了）
+              let after2 = null
+              for (let i = 0; i < 40; i++) {
+                const a = await readAgent()
+                if (a && (a.instructions ?? '').includes('探针在保存之后又改了一个字')) {
+                  after2 = a
+                  break
+                }
+                await wait(150)
+              }
+              facts['fold.editAfterSaveLanded'] = after2 !== null
+              // ★ 真正要守的不变量：**投递出去的那段文字里，那段判断依据还在**
+              //   （它在 `instructions` 里还是在老字段里，是"住在哪"的问题；
+              //   住哪儿都不许丢——这是 `identityFrom` 存在的理由）。
+              facts['fold.editAfterSaveKeepsCriteria'] = !!(
+                after2 && identityFrom(after2).includes('只看证据。')
               )
-              await wait(300)
-              const afterAgent = await readAgent()
-              // ⚠️ 三态：'no-agent'（接口没读到）不许与"清掉了"混成同一个值——
-              //    `afterAgent && ...` 写法的表现是"读不到 ⇒ 断言通过"，那是空过。
-              facts['fold.reviewStandardAfter'] =
-                afterAgent === null ? 'no-agent' : afterAgent.reviewStandard ? 'still-there' : null
-              facts['fold.instructionsGotBody'] = !!(
-                afterAgent && (afterAgent.instructions ?? '').includes('只看证据。')
+              // ⚠️ **真缺陷**：这一轮保存把**老字段写回来了**。原因：组件手里的草稿
+              //   在保存成功后没有跟着服务端的结果走——`draft.reviewStandard` 还是
+              //    那个老对象，而服务端已经把它清成 `null`，于是 `buildPatch()` 判成
+              //    "老字段变了"、把它整份 PATCH 回去（界面上那条老提示也会重新出现，
+              //    库里的形状在两版之间来回跳）。这一次**没有丢正文**纯属侥幸
+              //    （正文被拆在两个字段里投递），但"保存把刚清掉的老字段又写回来"
+              //    本身就是错的：清理老数据这件事会被界面自动撤销。
+              facts['fold.editAfterSaveResurrectsLegacy'] = !!(
+                after2 && after2.reviewStandard !== null
               )
-              facts['fold.identityUnchanged'] =
-                beforeAgent && afterAgent
-                  ? identityFrom(afterAgent) === identityFrom(beforeAgent)
-                  : null
-              facts['fold.identityAfter'] = afterAgent ? identityFrom(afterAgent) : null
-              // 界面上：那条老提示没了，而「指令」那一栏里现在就是那段文字
-              facts['fold.noticeAfter'] = !!d().querySelector('.detail [data-legacy-standard]')
-              facts['fold.readOnlyShowsMerged'] = (
-                text(d().querySelector('.detail .prose')) ?? ''
-              ).includes('只看证据。')
+              facts['fold.instructionsAfterEdit'] = after2 ? (after2.instructions ?? '') : null
+              facts['fold.identityAfterEdit'] = after2 ? identityFrom(after2) : null
             }
           }
+        } else {
+          facts['fold.detailSwitched'] = false
+          facts['fold.saveButtonFound'] = null
+          errors.push('找不到"探针用的内联老标准审核者"那张卡片')
         }
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
@@ -3278,12 +3020,12 @@
             (row.textContent ?? '').includes('探针用的老标准详情审核者'),
           )
           if (reviewerRowEn) click(reviewerRowEn.querySelector('.list-row-main'))
-          await until(() => !!d().querySelector('.detail'), 60)
+          await until(() => !!d().querySelector('.card.agent-card'), 60)
           await wait(300)
           // 先记一个"详情真的渲染出来了"的基数（否则下面那条会空过）
-          facts['lang.detailRowsInEn'] = d().querySelectorAll('.detail .field-row').length
+          facts['lang.detailRowsInEn'] = d().querySelectorAll('.card.agent-card .cell').length
           facts['lang.contractValuesUntranslated'] = (() => {
-            const detail = d().querySelector('.detail')
+            const detail = d().querySelector('.card.agent-card')
             if (!detail) return false
             const codes = [...detail.querySelectorAll('.field-row code')].map((c) => text(c))
             return codes.includes('probe-tool.append-note')
@@ -4463,12 +4205,12 @@
             if (!row) return null
             click(row.querySelector('.list-row-main'))
             const switched = await until(
-              () => text(d().querySelector('.detail h2')) === '探针用的三步链审核者',
+              () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的三步链审核者',
               60,
             )
             if (!switched) return null
             await wait(200)
-            const chip = [...d().querySelectorAll('.detail .chip-sub.fixed')]
+            const chip = [...d().querySelectorAll('.card.agent-card .chip-sub.fixed')]
               .map((c) => text(c))
               .join(' | ')
             // ⚠️ 这里原来写的是 `#/newtask`（**一个不存在的地址**）——它能"用"纯属
@@ -5043,12 +4785,12 @@
             )
             if (!row) return false
             click(row.querySelector('.list-row-main'))
-            return until(() => text(d().querySelector('.detail h2')) === name, 40)
+            return until(() => String(d().querySelector('#agent-name')?.value ?? '') === name, 40)
           }
           const detailButton = (label) =>
-            [...d().querySelectorAll('.detail button')].find((b) => text(b) === label)
+            [...d().querySelectorAll('.detail-pane button')].find((b) => text(b) === label)
           const saveButton = () =>
-            [...d().querySelectorAll('.detail button')].find((b) => text(b).startsWith('保存'))
+            [...d().querySelectorAll('.detail-pane button')].find((b) => text(b).startsWith('保存'))
           const allowedActionsOf = (name) =>
             f.contentWindow
               .fetch('/api/agents')
@@ -5137,9 +4879,9 @@
               facts['noTools.staleSaveButton'] = !!staleSaveBtn
               if (staleSaveBtn) {
                 click(staleSaveBtn)
-                await until(() => !!d().querySelector('.detail .notice.bad'), 40)
+                await until(() => !!d().querySelector('.detail-pane .notice.bad'), 40)
                 await wait(250)
-                const shownError = text(d().querySelector('.detail .notice.bad'))
+                const shownError = text(d().querySelector('.detail-pane .notice.bad'))
                 facts['noTools.staleErrorShown'] = shownError
                 // ★ ① **原样显示**：页面上那句与接口回的那句**逐字相同**
                 //   （不吞掉、也不自己编一句概括——服务端那句里已经说了是哪一条、
@@ -5244,12 +4986,12 @@
             click(migratedRow.querySelector('.list-row-main'))
             // ⚠️ 等右栏真的换成**这个** agent：只等 `.detail` 会立刻返回，读到上一个
             facts['noTools.detailSwitched'] = await until(
-              () => text(d().querySelector('.detail h2')) === '探针用的老形态审核者',
+              () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的老形态审核者',
               60,
             )
             await wait(300)
             const roSection =
-              [...d().querySelectorAll('.detail .section')].find((s) =>
+              [...d().querySelectorAll('.card.agent-card .cell')].find((s) =>
                 (text(s.querySelector('h3')) ?? '').includes('行动权限'),
               ) ?? null
             const roRow = [...(roSection?.querySelectorAll('.field-row') ?? [])].find((r) =>
@@ -5268,7 +5010,7 @@
             )
 
             // ── 编辑态：那一栏由 `ActionPermissions.svelte` 画 ──
-            const editBtnNoTools = [...d().querySelectorAll('.detail button')].find(
+            const editBtnNoTools = [...d().querySelectorAll('.detail-pane button')].find(
               (b) => text(b) === '编辑',
             )
             if (editBtnNoTools) {
@@ -5350,12 +5092,12 @@
             if (holderRow) {
               click(holderRow.querySelector('.list-row-main'))
               facts['noTools.deadDetailSwitched'] = await until(
-                () => text(d().querySelector('.detail h2')) === holder.name,
+                () => String(d().querySelector('#agent-name')?.value ?? '') === holder.name,
                 60,
               )
               await wait(300)
               const deadSection =
-                [...d().querySelectorAll('.detail .section')].find((s) =>
+                [...d().querySelectorAll('.card.agent-card .cell')].find((s) =>
                   (text(s.querySelector('h3')) ?? '').includes('行动权限'),
                 ) ?? null
               const deadRow = [...(deadSection?.querySelectorAll('.field-row') ?? [])].find((r) =>
@@ -5382,7 +5124,7 @@
               facts['noTools.deadHintNextStepReadOnly'] =
                 deadHintText.includes('点「编辑」') && deadHintText.includes('移除')
               // 编辑态：列得出来 + 有「移除」入口
-              const deadEditBtn = [...d().querySelectorAll('.detail button')].find(
+              const deadEditBtn = [...d().querySelectorAll('.detail-pane button')].find(
                 (b) => text(b) === '编辑',
               )
               if (deadEditBtn) {
@@ -5417,15 +5159,15 @@
                 if (dropBtn) {
                   click(dropBtn)
                   await wait(250)
-                  const partialSaveBtn = [...d().querySelectorAll('.detail button')].find((b) =>
+                  const partialSaveBtn = [...d().querySelectorAll('.detail-pane button')].find((b) =>
                     text(b).startsWith('保存'),
                   )
                   if (partialSaveBtn) {
                     click(partialSaveBtn)
-                    await until(() => !!d().querySelector('.detail .notice.bad'), 40)
+                    await until(() => !!d().querySelector('.detail-pane .notice.bad'), 40)
                     await wait(250)
                     facts['noTools.deadPartialStillRefused'] =
-                      !!d().querySelector('.detail .notice.bad')
+                      !!d().querySelector('.detail-pane .notice.bad')
                   }
                   // 剩下的逐条去掉（每点一次就少一条，最多循环几轮兜住）
                   for (let i = 0; i < 6; i++) {
@@ -5437,7 +5179,7 @@
                   facts['noTools.deadAllRemoved'] = !/probe-tool\.[a-z-]+/.test(
                     text(permsNow()) ?? '',
                   )
-                  const finalSaveBtn = [...d().querySelectorAll('.detail button')].find((b) =>
+                  const finalSaveBtn = [...d().querySelectorAll('.detail-pane button')].find((b) =>
                     text(b).startsWith('保存'),
                   )
                   if (finalSaveBtn) {
