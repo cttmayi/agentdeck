@@ -21,6 +21,7 @@
   import { creating, goCreate, goCrystallize, selectedIssueId, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
+  import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
   import { finalResultText } from '../lib/final-output.ts'
   import {
     PIPELINE_COLUMNS as COLUMNS,
@@ -78,31 +79,8 @@
    * ⚠️ id 是 ULID（自带时间序），按 id 倒序 = 按创建时间新的在前。
    */
 
-  /**
-   * run 状态 → 徽标颜色类。
-   *
-   * ★ 协议里的 `RunStatus` 有 8 个值，而 `app.css` 的状态色只覆盖了
-   *   `completed`/`failed`/`cancelled` 三个——`running`/`queued`/`dispatched`/
-   *   `deferred`/`waiting_local_directory` **原来一个颜色都没有**（徽标落回
-   *   `currentColor`，看起来"没有状态"）。这里映射到已有的那批语义色，
-   *   不新增 CSS 变量：`queued`/`deferred`/`waiting_local_directory` 都表示
-   *   "还没轮到它"，与看板的待办同色。
-   */
-  const RUN_STATUS_CLASS: Record<string, string> = {
-    queued: 'backlog',
-    deferred: 'backlog',
-    waiting_local_directory: 'backlog',
-    dispatched: 'in_progress',
-    running: 'in_progress',
-    completed: 'done',
-    failed: 'failed',
-    cancelled: 'cancelled',
-  }
-
-  /** 状态徽标里的字：走词表（`term.runStatus.*`），**不显示协议英文值**。 */
-  function runStatusLabel(status: string): WebTextId {
-    return `term.runStatus.${status}` as WebTextId
-  }
+  // run 状态 → 徽标颜色 / 词条：共享在 lib/run-status.ts（沉淀页左栏也用同一份，
+  // 两处各抄一份就会"同一个 run 在两个页面颜色不一样"）。
 
   /** 相对时间的「现在」——每次响应式更新重算一遍。 */
   $: now = Date.now()
@@ -1141,8 +1119,8 @@
             class:active={activeRun?.runId === run.runId}
             onclick={() => selectRun(run)}
           >
-            <span class="badge {RUN_STATUS_CLASS[run.status] ?? ''}"
-              >{$t(runStatusLabel(run.status))}</span
+            <span class="badge {runStatusClass(run.status)}"
+              >{$t(runStatusKey(run.status))}</span
             >
             <!-- ★ 类型与时间必须显示：只给状态和 runId 的话，使用者**看不出
                  哪个先哪个后**——他只能凭感觉，于是会觉得"顺序不对"。 -->

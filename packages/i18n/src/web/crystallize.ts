@@ -41,8 +41,8 @@ export const crystallizeText = {
   'crystallize.searchPlaceholder': { zh: '搜来源…', en: 'Search sources…' },
   'crystallize.listEmptyTitle': { zh: '还没有沉淀', en: 'No crystallizations yet' },
   'crystallize.listEmptyHint': {
-    zh: '在聊天/任务页点「沉淀成 skill」/「优化 skill」，或从这里新建',
-    en: 'Click "Crystallize" in a chat or "Optimize skill" in a task, or start one here',
+    zh: '在聊天/任务页点「沉淀成 skill」/「优化 skill」，或点右上角「新建沉淀」',
+    en: 'Click "Crystallize" in a chat or "Optimize skill" in a task, or use "New" at the top right',
   },
   'crystallize.listLoadingError': { zh: '读取沉淀列表失败', en: 'Failed to load crystallizations' },
   'crystallize.sourceUnknown': { zh: '来源未知', en: 'Unknown source' },
@@ -130,6 +130,7 @@ export const crystallizeText = {
   'crystallize.slugLabel': { zh: 'slug（kebab-case）', en: 'slug (kebab-case)' },
   'crystallize.nameLabel': { zh: '名称', en: 'Name' },
   'crystallize.descriptionLabel': { zh: 'description（含触发条件）', en: 'description (with trigger condition)' },
+  'crystallize.previewTitle': { zh: '预览', en: 'Preview' },
   'crystallize.bodyLabel': { zh: '正文（SKILL.md）', en: 'Body (SKILL.md)' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },

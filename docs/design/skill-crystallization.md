@@ -297,6 +297,28 @@ procedures, but most of that knowledge stays trapped in the conversation"（知�
 **归属不变**：沉淀仍然**不是任务**（起草 run 不挂 issue、不进任务列表）；这一页的列表
 是沉淀自己的列表，与任务列表互不影响。
 
+**控件纪律（2026-10-19 使用者指出"UI 风格和任务差很多"之后的返工）**
+
+使用者原话："UI 风格和任务差很多，怀疑你没有用同一控件，请确认。"——确认结果是**确实没用**：
+初版左栏是手写的 `li > button` + 一整套行样式，状态徽标自造 `.status-tag`，来源选择器是
+手搓的遮罩浮层，"新建沉淀"还在列表顶上自插了一条按钮。任务页/聊天页的行、浮层、主操作位置
+都不是那样。返工按"同一控件"逐项收口：
+
+| 位置 | 别处用什么 | 本页改用 |
+|---|---|---|
+| 列表行壳 | `ListRow`（`list-row` 骨架：hover / 选中框 / `--list-row-min-h`） | `ListRow`（`rowClass="crystal-row"`） |
+| 状态徽标 | 全局 `.badge {status}` + `lib/run-status.ts` 的 `RUN_STATUS_CLASS` 映射 | 同一份（映射从任务页搬到那个 lib，**不再两处各一份**） |
+| 来源选择器 | `@agentdeck/ui/components` 的 `Modal`（遮罩 / Esc / 关闭钮做一次） | `Modal`（行也复用 `ListRow`） |
+| 主操作位置 | 顶栏 `setPageActions`（聊天「新对话」、任务「新建任务」） | 顶栏 primary + `plus` 图标 |
+| 折叠区 | `FoldSection`（D69.9，真按钮 + `aria-expanded`） | `FoldSection`（审阅步的「预览」，去掉原生 `<details>`） |
+| 分节 | 任务详情的朴素 `<section class="drawer-section"><h3>…</h3>` | 同一形态；**不再把全局 `.drawer-section` 改写成卡片**（那会让任务页与沉淀页各长一套） |
+| 完成态 | 全局 `.notice`（`.good`/`.bad` 那档） | `.notice good` + 只补纵向排布 |
+
+量出来的证据（冒烟里 `getComputedStyle` 逐项比对）：沉淀行与任务行的 `min-height` /
+`border-radius` / `padding` / 主按钮 `flex` 完全相同；流程页分节与任务详情分节的
+`margin-bottom` / 边框 / 底色 / `h3` 字号与边距完全相同。**"同一控件"不能靠眼看，
+要拿计算样式对齐。**
+
 #### 4.1.3 未来扩展：沉淀 Agent（同流程页，产出类型维度，2026-10-19 使用者提出）
 
 > 使用者："类似沉淀 skill 一样，通过对话或者任务来更新 Agent 的 prompt。"

@@ -23,11 +23,12 @@
    *   skill-draft + 无 issueId），进度只在这页，关页即离场、重开按 source 找回。
    */
 
-  import type { WebTextId } from '@agentdeck/i18n'
+  import { FoldSection } from '@agentdeck/ui/components'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { go } from '../lib/view.ts'
+  import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
 
@@ -142,8 +143,9 @@
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
 
+  /** 状态徽标的字（共享词表，与任务详情的 run 徽标同一份）。 */
   function statusLabel(status: string): string {
-    return $t(`term.runStatus.${status}` as WebTextId)
+    return $t(runStatusKey(status))
   }
 
   async function loadTargets(): Promise<void> {
@@ -512,7 +514,7 @@
       </ol>
 
       {#if error && targets === null}
-        <div class="notice bad" style="margin-bottom:var(--sp-3)">{error}</div>
+        <div class="notice bad crystal-notice">{error}</div>
       {/if}
 
       <!-- ── 恢复进行中的起草（§4.1.1）：继续 / 新起草 ── -->
@@ -533,7 +535,7 @@
 
       <!-- ── 素材摘要：起草前就可见（§4.1.1），空素材 = 无法开始 ── -->
       <section class="drawer-section">
-        <h3><span>{$t('crystallize.materialSection')}</span></h3>
+        <h3>{$t('crystallize.materialSection')}</h3>
         <div class="section-body">
           {#if loading}
             <div class="skeleton" style="height:1.1rem"></div>
@@ -663,13 +665,11 @@
       {#if draftRunId !== '' && step !== 'done'}
         <section class="drawer-section">
           <h3>
-            <span>{$t('crystallize.draftSection')}</span>
-            <span class="section-meta">
+            {$t('crystallize.draftSection')}
+            <span class="faint small">
               run {runShort}…
               {#if draftStatus}
-                <span class="badge {draftStatus === 'completed' ? 'done' : draftStatus === 'cancelled' ? 'cancelled' : 'failed'}">
-                  {statusLabel(draftStatus)}
-                </span>
+                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
               {/if}
             </span>
           </h3>
@@ -693,7 +693,7 @@
       <!-- ── 草稿审阅 ── -->
       {#if step === 'review'}
         <section class="drawer-section">
-          <h3><span>{$t('crystallize.reviewTitle')}</span></h3>
+          <h3>{$t('crystallize.reviewTitle')}</h3>
           <div class="section-body">
             {#if clash}
               <div class="notice">
@@ -725,17 +725,16 @@
               <textarea bind:value={skillBody} rows="14" class="mono"></textarea>
             </label>
 
-            <details>
-              <summary class="faint small">{$t('crystallize.reviewTitle')} · {$t('crystallize.bodyLabel')}</summary>
+            <FoldSection title={$t('crystallize.previewTitle')}>
               <div class="preview markdown">{@html renderMarkdown(skillBody)}</div>
-            </details>
+            </FoldSection>
           </div>
         </section>
       {/if}
 
       <!-- ── 完成态：已沉淀 + git 状态 + 查看技能 ── -->
       {#if step === 'done'}
-        <section class="done-box">
+        <section class="notice good done-box">
           <strong>{$t('crystallize.doneTitle')}</strong>
           <p>{$t('crystallize.doneText', { name: doneSkillName })}</p>
           {#if doneVersioningNote !== ''}
@@ -752,10 +751,11 @@
 </MainArea>
 
 <style>
+  /* ★ 纵向间距**只有一个来源**：`.drawer-section` 的全局 `margin-bottom`（任务
+     详情就是这么排的）。这里若再给 `gap`，两种间距会叠加成双倍——所以用
+     `display: block` 的普通流，非分节块（步骤条 / 恢复条 / 完成态 / 提示条）
+     各自带下边距。 */
   .crystal-flow {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-5);
     max-width: 56rem;
   }
 
@@ -764,7 +764,8 @@
     display: flex;
     align-items: center;
     list-style: none;
-    margin: 0;
+    /* 分节靠 margin，步骤条同理：给下一块留出与分节之间一样的间距 */
+    margin: 0 0 var(--sp-4);
     padding: 0;
     font-size: var(--fs-sm);
   }
@@ -833,40 +834,19 @@
     color: var(--bg);
   }
 
-  /* ══════════ 分节卡片：栏头行（标题 + 右侧状态）+ 正文块 ══════════ */
-  .drawer-section {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    overflow: hidden;
-  }
-  .drawer-section > h3 {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-3);
-    margin: 0;
-    padding: var(--sp-2) var(--sp-4);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--text);
-    border-bottom: 1px solid var(--line);
-    line-height: 1.6;
-  }
-  .section-meta {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-2);
-    font-weight: 400;
-    color: var(--text-faint);
-    min-width: 0;
-    white-space: nowrap;
-  }
+  /* ★ 分节**不重定义** `.drawer-section`（那是全局的：边距 + h3 边距）——
+     任务详情的分节就是朴素 `<section class="drawer-section"><h3>…</h3>`，
+     流程页照抄同一个壳，别再自己长成"卡片"。
+     `.section-body` 只负责这一步内容的纵向节奏，不是新的容器样式。 */
   .section-body {
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
-    padding: var(--sp-4);
+  }
+
+  /* 读失败提示条：与分节之间留一格（原来是行内 style，这里收成类） */
+  .crystal-notice {
+    margin-bottom: var(--sp-3);
   }
 
   /* ══════════ 恢复提示（继续 / 新起草） ══════════ */
@@ -876,6 +856,7 @@
     justify-content: space-between;
     gap: var(--sp-3);
     flex-wrap: wrap;
+    margin-bottom: var(--sp-4);
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface);
@@ -1047,14 +1028,13 @@
     font-family: var(--font-mono);
   }
 
-  /* ══════════ 完成态 ══════════ */
+  /* ══════════ 完成态 ══════════
+     ★ 底色/描边/内距吃全局 `.notice`（`.good` 那档），这里只管"竖着排"——
+     再自造一张卡片就又多一套边距，是使用者说的"和任务不一样"的来源之一。 */
   .done-box {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    padding: var(--sp-5) var(--sp-4);
-    display: flex;
     flex-direction: column;
+    align-items: stretch;
     gap: var(--sp-2);
+    padding: var(--sp-4);
   }
 </style>
