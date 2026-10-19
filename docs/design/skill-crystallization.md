@@ -439,6 +439,155 @@ skill（更新目标 = 任务 run 实际注入的 skill；反馈指向的 skill 
 
 ## 5. 提炼——「skill 起草 run」
 
+> ⚠️ **机制部分已由 §5.0 取代**（2026-10-19 四轮）：素材不再内联进第一句话、起草不再只靠
+> 一段散文指令、产出不再是单个 SKILL.md。§5 余下的**语义**（不结晶清单、SKILL.md 结构、
+> 支持文件与本库一致）仍然有效，且**搬进了内置 skill**（§5.0.2）——一处维护。
+
+### 5.0 生成流程重设计（2026-10-19 四轮，使用者提的五点 + 补充）
+
+使用者的原话与要求：
+
+1. 对话素材是保存在文件中的，让 Agent 去读取。
+2. "沉淀 skill"用一个优秀的 skill 去生成。
+3. 生成的 skill 可能是多个文件，呈现上需要优化。
+4. 审阅草稿时，SKILL.md 明明有 name 和 description，应该不需要填空。
+5. 有可能是新建或者是更新，是否可能有对比的形式去显示，考虑 git 历史 list，选中看文件对比。
+（并明确"不限于这几项"。）
+
+#### 5.0.1 现状的五个病灶（逐条对应）
+
+| # | 现在怎么做的 | 为什么不行 |
+|---|---|---|
+| 1 | `buildMaterial` 把全部轮次的消息 + 工具调用 + 判决拼成**一整块文本**，塞进第一句话 | 长对话直接撑爆 prompt；agent 只能"通读一遍"，不能按需回查某一步；证据也无法在界面里核对 |
+| 2 | 起草要求写在 `buildDraftPrompt` 的一段散文里，且起草 run 的 `skills: []`（注释还写着"注入会干扰"） | 不可迭代、不可评估、不可复用；每个细节都要改代码 |
+| 3 | 产出契约是单文件 SKILL.md + 末尾 `===== FILE: scripts/xxx.sh =====` 尾巴 | 前端**只解析 frontmatter，从不解析 files**——多文件产物被塞进正文丢掉；界面没有文件树 |
+| 4 | 审阅把 slug / name / description / body 摆成四个输入框 | 与 SKILL.md 的 frontmatter 重复，容易改出一份"框里是 A、文件里是 B" |
+| 5 | 更新场景只显示最终正文；skills-mine 的 git 历史没有入口 | 看不出"改了什么"，进化等于盲签；已有 git 历史白白浪费 |
+
+顺带发现的两个能力现状（决定改造成本）：`Skill.files`（相对路径 → 文本）与
+`resolvePayloadEntry`（安装/入库共用的规范化与限额）**本来就支持多文件**，只是没人喂它；
+`synchronizeInjectedSkills` 会把 `skills:` 传进来的技能**写成工作目录里的真文件**
+（`.claude/skills/<slug>/`），所以"用一个 skill 去生成"零新机制。
+
+#### 5.0.2 (1) 素材落盘：material/ 目录，agent 自己去读
+
+起草 run 的工作目录里分两块：
+
+```
+<workRoot>/skill-draft-<draftRunId>/
+├── material/                 ← 平台写，agent 只读
+│   ├── 00-README.md            索引：来源、轮数、工具调用数、每轮一句话摘要、
+│   │                           "怎么用这些文件"、"别照抄素材原话"的提醒
+│   ├── meta.json               结构化元信息（scope / turns / toolCalls / source / target）
+│   ├── turns/001.md …          每轮一个文件：使用者原话 + 该轮 text / tool_use / tool_result
+│   ├── task-run.md             （任务场景）执行 run 的完整消息
+│   ├── verdict.md              （有则）审核判决
+│   ├── feedback.md             （有则）使用者反馈
+│   ├── skills-index.md         现有技能清单（slug / name / description）——判重与 FOLD_INTO
+│   └── existing-skill/         （更新场景）现有 SKILL.md + 支持文件原样
+└── skill/                    ← agent 写，平台校验后读（产出）
+```
+
+- **为什么必须在 workDir 里**：claude run 有 PreToolUse 隔离 hook，越界路径直接 deny
+  （`executor.ts` 那段注释记着实测）。素材放在 dataDir 别处 agent 根本读不到——
+  所以这不是风格选择，是硬约束。
+- 第一句话只给**指针 + 契约**：素材在 `material/`（先读 `00-README.md`）、产出写到
+  `skill/`、以及本次特有约束。全文不再内联。
+- 素材同时是**审计料**：这份 skill 是根据什么生成的，事后能翻；界面里可预览
+  （§6.1 的「素材」分节）。
+- 保留：随 run 目录清理（与 run 日志同一条规则），草稿入库后不额外删——它是证据。
+
+#### 5.0.3 (2) 用一套"写 skill 的 skill"来生成
+
+新增**平台内置 skill**（随代码走，不落 store、不进使用者技能列表）：
+
+```
+apps/daemon/assets/builtin-skills/writing-skills/
+├── SKILL.md            ← 渐进式披露第一层：何时用、怎么写
+├── references/structure.md    章节模板 + 好坏对照示例
+├── references/files.md        什么时候拆支持文件、目录布局与命名
+└── references/checklist.md    交付前自检清单
+```
+
+`SKILL.md` 里承载的全部是原来散文里的知识，且更细：frontmatter 规则（name kebab、
+description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / Verification` 的写法、
+"步骤里的命令必须原样可复制"、多文件拆分门槛、不结晶清单（§5.1 原文搬入）、
+反模式（环境失败 / 工具吐槽 / 一次性叙述 / 幻觉命令）。
+
+起草 run 改为 `skills: [writing-skills]`——注入后它成为草稿工作目录里的真技能，agent 用
+自己的技能发现机制加载（渐进式披露：先只看 frontmatter+描述，需要时再读 references）。
+`buildDraftPrompt` 随之瘦身成**任务块**：来源与目标、素材指针、产出契约、本次两条特有约束
+（作用描述 / 更新基线），不再教"怎么写 skill"。
+
+#### 5.0.4 (3) 多文件产物：写目录，读目录，树形呈现
+
+产出契约（写进内置 skill 与任务块）：
+
+- `skill/SKILL.md` **必须存在**，frontmatter 含 `name` 与 `description`；
+- 允许并鼓励 `skill/references/*.md`、`skill/scripts/*`、`skill/templates/*`；
+- 只写文本（UTF-8）；单文件与总量受限额（复用 `resolvePayloadEntry` 那一套），
+  建议上限：单文件 256 KB、总量 1 MB、文件数 64；
+- 不写 `.git`、隐藏文件、`..` 或绝对路径（与安装同一关）。
+
+平台读取：递归读 `skill/`（跳过隐藏文件）→ `files: Record<relPath, text>`，
+`SKILL.md` 单独解析 frontmatter。**兜底**：目录为空（generic 等没有写文件能力的 runtime）
+→ 回退旧口径（解析最后一条 text 消息），并在审阅界面明说"这条是文本产物，没有支持文件"。
+
+界面（§6.1）：文件树 + 选中文件内容；SKILL.md 排第一；每个文件带 新增 / 修改 / 删除
+徽标；顶部显示文件数、总大小、校验结果。
+
+#### 5.0.5 (4) 审阅不再手填 name / description
+
+- `name` / `description` / `slug` 全部**从 SKILL.md frontmatter 解析**，界面只读展示
+  （slug 默认 = name 的 kebab 化）；要改就改 SKILL.md 本身——**一处真相**。
+- 唯一的人填项是**作用描述（purpose）**，它是给起草者的定位输入、不是产物字段；
+  且改为**可选**：留空则由 skill 从素材推断，审阅时把推断出的 description 摆在最上面让使用者
+  一眼否定或接受。
+- 校验（frontmatter 合法 / description 含触发条件 / 正文有 When to Use / slug 合法）失败
+  → 审阅顶部红条 + 定位到文件；不允许"仍要入库"，先改。
+- 入库请求不再传 `name` / `description` / `body`，只传 `files` + 确认过的 `slug`，
+  服务端按 SKILL.md 复算一遍（客户端说的不算）。
+
+#### 5.0.6 (5) 新建 / 更新：对比视图 + git 历史
+
+- **新建**：对比 = 对着空目录全部新增（树里标 `+`）。
+- **更新（mine / installed）**：草稿 vs 当前版本（installed = 安装根那份；mine = skills-mine
+  最新提交）逐文件 unified diff，可切换"只看改动 / 看全文"；草稿里没有的文件标删除
+  （更新 = 整目录替换，面板必须把删除列出来）。
+- **git 历史（仅 `source: mine` 且 git 可用）**：右栏「历史」分节，`git log --follow -- <slug>/`
+  的列表（时间 / 短 hash / 提交消息）；选中一条 → 该提交相对上一版的 diff（文件树 + 逐文件）。
+- diff 在后端算（`git diff`/`git show` 或单文件 LCS），前端只渲染——两边各写一套必然漂。
+- git 不可用：`history` 返回 `available:false` + 原因，界面照既有降级叙事显示"版本管理未启用"
+  （沉淀与历史回退都不是核心功能，§7.3.1）。
+
+#### 5.0.7 接口变更清单
+
+| 接口 | 变更 |
+|---|---|
+| `POST /api/crystallize/draft` | 服务端写 `material/`、注入内置 `writing-skills`、`workDir` = 草稿目录；返回加 `materialDir` |
+| `GET /api/crystallize/artifacts?draftRunId=` | **新增**：`{mode:'files'|'text', files, skillMd:{name,slug,description,body}, validation:{ok,problems[]}, baseline?}` |
+| `GET /api/crystallize/material?draftRunId=` | **新增**：素材文件清单 + 预览（审阅界面「素材」分节） |
+| `POST /api/crystallize/commit` | 入参改 `{draftRunId, target, slug, files}`；name/description 从 SKILL.md 解析，服务端复算 |
+| `GET /api/skills/:id/history` | **新增**：`{available, reason?, entries:[{rev, short, when, message}]}` |
+| `GET /api/skills/:id/revision?rev=` | **新增**：该版本的文件树 |
+| `GET /api/skills/:id/compare?from=current&to=draft:<draftRunId>` | **新增**：逐文件 diff（后端算） |
+
+#### 5.0.8 分期
+
+- **P0（本轮）**：素材落盘 + 内置 writing-skills + 多文件产出/文件树审阅 + 免填 frontmatter。
+- **P1**：新建/更新 diff 视图 + 校验问题定位 + 「素材」分节。
+- **P2**：git 历史 list + 版本对比（mine）；「按意见改一版」（审阅页给 agent 一句反馈再起草
+  一轮，复用同一草稿目录的 `material/`）。
+
+#### 5.0.9 待确认（写在这里等你拍）
+
+1. 素材保留期限：跟 run 目录同规则（建议 30 天清理），还是入库后即格里移？
+2. 更新是否整目录替换（草稿里没出现的文件删掉）？建议是，且面板必须列出要删的文件。
+3. "写文件为准、文本兜底"是否接受 generic runtime 退化为单文件？
+4. purpose 是否同意改为可选（skill 从素材推断、审阅时确认）？
+5. 「按意见改一版」是否要进 P1（现在是 P2）？
+
+
 平台起一个**专门的 run（kind 建议 `skill-draft`）**，runtime 用当前 workspace 默认的
 claude/codex，复用现有执行管道（第一句话投递、日志、审核收口——全部现成，零新机制）。
 
@@ -490,6 +639,29 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
   「沉淀入库」写入，落 `~/.agentdeck/skills-mine/<slug>/`，store 记录 `source: 'mine'`，
   写完 `git add` + `commit`（§7.3）。**平台永不自动覆盖安装根**。
 
+### 6.1 审阅界面重设计（2026-10-19 四轮，对应 §5.0.5 / §5.0.6）
+
+```
+┌ 审阅 ─────────────────────────────────────────────────────────┐
+│ ✓ 校验通过 · 4 个文件 · 18.2 KB            [确认入库]  [放弃]   │ ← 顶部：结论优先
+├───────────────── 文件树 ─────────────────┬─── 预览 / 对比 ─────┤
+│ SKILL.md            M   +12 −4            │  ▸ 只看改动 | 看全文 │
+│ references/writing.md +                  │   …unified diff…     │
+│ scripts/check.sh     +                    │                      │
+│ references/old.md    D                    │                      │
+├───────────────────────────────────────────┴──────────────────────┤
+│ ▸ 素材（折叠）：本轮对话 3 轮 · 工具 25 次 · verdict · 打开目录    │
+│ ▸ 起草日志（RunLog 常驻）                                        │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- **name / description / slug 是只读摘要**（从 SKILL.md frontmatter 解析），点「改」直接编辑
+  SKILL.md 文本——不再有第二处可以改它们（§5.0.5）。
+- **文件树**是主视图：新增 / 修改 / 删除一眼可见；选中文件出内容或 diff。
+- 草稿只有一个文件（文本兜底）时，界面退化成单个 SKILL.md 编辑 + 提示，**不做假的多文件树**。
+- 「素材」分节：列 material/ 的文件与大小，可预览——审阅时能核"这句话是从哪一轮来的"。
+- 校验失败不显示"确认入库"，只显示问题清单。
+
 ## 7. 进化（覆盖 + git 版本管理）
 
 ### 7.1 触发
@@ -536,6 +708,19 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
   造出来是假的），从恢复那一刻起记录；note 里说明这一点。
 - 另在 skills-mine 仓库配 **per-repo 兜底身份**（`agentdeck <agentdeck@localhost>`），
   防"有 git 但没全局身份"时 commit 挂掉（这是降级兜底层的一部分）。
+
+### 7.4 历史与版本对比（2026-10-19 四轮，对应 §5.0.6）
+
+- `skills-mine` 已经是 git 仓库（每次沉淀/进化一条 commit），历史**不需要新造**，只是没有入口。
+- 新增三个只读接口（§5.0.7）：`history` / `revision` / `compare`。都走
+  `run-hooks/skill-mine.ts` 现有的 `runGit`（`gitPath` 可注入 → 测试不依赖真 git，
+  与 NFR-T-01 同一理由）。
+- `git log --follow -- <slug>/` 取该技能目录的历史；`git show <rev>:<slug>/<file>` 取某版
+  文件；`git diff <rev1> <rev2> -- <slug>/` 算逐文件差异。
+- 界面：技能页/审阅页的「历史」分节，选一条看那一版的文件树与 diff；安装的 skill
+  （非 mine）没有 git 历史，只有"草稿 vs 安装版本"的对比。
+- git 不可用 = 正常状态（§7.3.1）：`available:false` + 原因，界面显示"版本管理未启用"，
+  其余功能不受影响。
 
 ## 8. 实现范围（要开做时的六项）
 
