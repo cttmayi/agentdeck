@@ -5,7 +5,6 @@
   import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
-  import CrystallizeView from '../components/CrystallizeView.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -18,7 +17,7 @@
     skillsHeldBackByDaemon,
     type DraftPick,
   } from '../lib/chat.ts'
-  import { crystallize, go, goCrystallize, showToast } from '../lib/view.ts'
+  import { goCrystallize, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -141,8 +140,8 @@
   // ── 沉淀成 skill（D80）──
   // 设计 §4.1：会话级按钮，**至少有一轮已结束**即可用（素材 = 已落库的部分）。
   // 源 run = 最后一轮有 runId 的轮次（其 subject 是对话，素材打包会扫全部轮）。
-  // 流程页不是组件开关：`$crystallize` 是地址（`#/chat/crystallize/<runId>`）的投影，
-  // 切走再回来 / 刷新都还在（D80 改版——局部开关一卸载就丢，使用者反馈过）。
+  // ★ 三轮：点按钮**跳到沉淀页**（`#/crystallize/<runId>`，导航列工具之下的一页）——
+  //   沉淀的整个过程在那里进行，聊天页只留入口。切走再回来 / 刷新都还在。
   $: crystallizeRunId = [...activeTurns].reverse().find((turn) => turn.runId && !turn.error)?.runId ?? ''
   $: crystallizeEnabled = activeConversation !== null && activeTurns.some((turn) => turn.runId && !isTurnRunning(turn))
   $: executors = $agents.filter((agent) => agent.role === 'executor')
@@ -222,13 +221,6 @@
   onMount(() => {
     void (async () => {
       if ($conversations.length === 0) await loadConversations()
-      // 带着流程页地址（`#/chat/crystallize/<runId>`）进来（切页回来 / 刷新 /
-      // 分享链接）：把来源对话选上——流程页背后的列表高亮它，关闭/返回后
-      // 直接回到那条对话（设计 §4.1.1「返回键回到来源视图」）。
-      if ($crystallize !== null) {
-        await resolveFlowConversation($crystallize.runId)
-        return
-      }
       const current = $activeConversationId
       if (current && $conversations.some((c) => c.id === current)) {
         await openConversation(current)
@@ -240,23 +232,7 @@
     })()
   })
 
-  /** 流程页源 run 的 subject 是 `{type:'conversation', id}`——据此找回来源对话。 */
-  async function resolveFlowConversation(runId: string): Promise<void> {
-    try {
-      const run = await api<{ subject: { type: string; id?: string } }>(`/api/runs/${runId}`)
-      if (run.subject?.type === 'conversation' && run.subject.id) {
-        await openConversation(run.subject.id)
-      }
-    } catch {
-      // run 已不存在（被清理过）：流程页照常显示（activeDraft 可能还在），
-      // 只是列表没有可高亮的那一条——不把"找不到"演成错误。
-    }
-  }
-
   function startDrafting(): void {
-    // 顶栏「新对话」在流程页打开时仍可点：先关流程页（回普通聊天地址）——否则
-    // 草稿表单会被流程页盖在下面，看起来"点了没反应"。
-    if ($crystallize !== null) go('chat')
     drafting = true
     errorText = ''
     input = ''
@@ -427,8 +403,6 @@
       showToast($t('chat.deleted'))
       // 删的是当前正在看的对话：落到列表第一个，或直接开始新对话
       if (id === $activeConversationId) {
-        // 沉淀流程页挂的是这个对话的 runId——对话没了，流程页也得关（D80）。
-        if ($crystallize !== null) go('chat')
         if ($conversations.length > 0) await openConversation($conversations[0]!.id)
         else startDrafting()
       }
@@ -439,10 +413,6 @@
 
   async function select(id: string): Promise<void> {
     if (id === $activeConversationId && !drafting) return
-    // 切对话时关掉沉淀流程页：它挂的是**上一个**对话的 runId，留着会显示
-    // 别人的流程（D80 界面改版后流程页替换右主区，列表仍可点）。关 = 回到
-    // 普通右栏地址（`#/chat`）——地址是唯一出处，不能只改组件状态。
-    if ($crystallize !== null) go('chat')
     drafting = false
     pendingText = ''
     errorText = ''
@@ -517,25 +487,12 @@
     {/snippet}
   </ListPane>
 
-  <!-- ══════════ 右：消息流 / 沉淀流程（互相替换） ══════════ -->
-  {#if $crystallize !== null}
-    <!-- D80 沉淀成 skill（设计 §4.1.1 界面改版）：任务详情式**全页**流程，
-         替换聊天主区；栏头返回 = 回对话。沉淀不是任务——起草 run 不在任务
-         列表，进度只在这页。流程页是一条地址（`#/chat/crystallize/<runId>`）：
-         切页回来 / 刷新 / 分享链接都还在，返回 = 回普通聊天地址。 -->
-    <CrystallizeView
-      runId={$crystallize.runId}
-      sourceLabel={activeConversation?.title ?? ''}
-      backLabel={$t('crystallize.backToChat')}
-      onback={() => go('chat')}
-      ondone={() => void refresh()}
-    />
-  {:else}
-    <!-- ★ 右主区（D69.15）：壳 / 栏头 / 空态统一在 MainArea。
-         聊天三态：草稿（简单栏头+表单）/ 没选中（空态）/ 对话（chat-head 改名形态
-         + 工作目录 + 消息流 + 文件树 + 输入条）。栏头与输入条都是**特殊情况**：
-         · 栏头走 head snippet（改名输入要替换 h2、pane-actions 是兄弟元素，塞不进
-           结构化 back/title/sub/actions）；
+  <!-- ══════════ 右：消息流（沉淀已搬到独立一页，聊天只留入口按钮） ══════════ -->
+  <!-- ★ 右主区（D69.15）：壳 / 栏头 / 空态统一在 MainArea。
+       聊天三态：草稿（简单栏头+表单）/ 没选中（空态）/ 对话（chat-head 改名形态
+       + 工作目录 + 消息流 + 文件树 + 输入条）。栏头与输入条都是**特殊情况**：
+       · 栏头走 head snippet（改名输入要替换 h2、pane-actions 是兄弟元素，塞不进
+         结构化 back/title/sub/actions）；
          · 输入条在草稿与对话**两支都在**（D46/D58 的教训：新对话选完执行者必须
            能说第一句话），走 foot snippet 且在空态不渲染。 -->
     <MainArea
@@ -588,7 +545,7 @@
             class="ghost"
             disabled={!crystallizeEnabled}
             title={crystallizeEnabled ? '' : $t('chat.crystallizeDisabledHint')}
-            onclick={() => goCrystallize('chat', crystallizeRunId)}
+            onclick={() => goCrystallize(crystallizeRunId)}
           >
             {$t('crystallize.title')}
           </button>
@@ -823,7 +780,6 @@
         {/if}
       {/snippet}
     </MainArea>
-  {/if}
 </div>
 
 <style>

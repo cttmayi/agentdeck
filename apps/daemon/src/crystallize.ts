@@ -16,7 +16,18 @@
  */
 
 import type { Store } from '@agentdeck/domain'
-import type { Agent, Conversation, CrystallizeTargetRef, Run, RunId, Skill } from '@agentdeck/protocol'
+
+/** 与 `server.ts` 的 `TERMINAL_RUN_STATUSES` 同一份清单（crystallize 不 import server）。 */
+const TERMINAL_EXEC_STATUSES = ['completed', 'failed', 'cancelled']
+import type {
+  Agent,
+  Conversation,
+  CrystallizeTargetRef,
+  Issue,
+  Run,
+  RunId,
+  Skill,
+} from '@agentdeck/protocol'
 
 /** 沉淀目标面板需要的信息（§4.1 第 1 步 + §4.3 触发前置）。 */
 export interface CrystallizeTargets {
@@ -63,6 +74,24 @@ export interface CrystallizeMaterial {
 }
 
 /**
+ * ★ 三轮：入参可能是**起草 run 自己**（沉淀页左栏列的是草稿，点一条进来的
+ * 地址就是 `#/crystallize/<draftRunId>`）。起草 run 不是素材来源——它自己的
+ * 事件是产出的 SKILL.md，拿它当素材会"用草稿沉淀草稿"。所以认出 skill-draft
+ * 就顺着 `subject.sourceRunId` 换回源 run，之后一切照旧（activeDraft 里
+ * 正好能找回这条草稿 → 流程页直接进「继续」恢复）。
+ *
+ * 这一处收口让**所有入口**都成立：左栏点草稿、旧书签里存的是草稿 runId、
+ * 以后别的地方再冒出草稿 id，都不用各自记得先解析一次。
+ * 源 run 已被清理时原样返回（调用方自己会走到"素材为空/找不到"的正常分支）。
+ */
+export async function resolveSourceRun(store: Store, run: Run): Promise<Run> {
+  if (run.subject.type !== 'skill-draft') return run
+  const sourceId = run.subject.sourceRunId
+  if (sourceId === undefined) return run
+  return (await store.getRun(sourceId as RunId)) ?? run
+}
+
+/**
  * 目标信息：本次对话/任务加载了哪些 skill、任务有没有审核过。
  *
  * 加载的 skill = **执行者挂的 ∪ 对话额外带的**（与 `chat.ts` 的注入口径一致——
@@ -72,6 +101,8 @@ export async function crystallizeTargets(
   store: Store,
   run: Run,
 ): Promise<CrystallizeTargets> {
+  run = await resolveSourceRun(store, run)
+
   let agentId: string = run.agentId as string
   let extraSkillIds: string[] = []
   let scope: 'conversation' | 'task' = 'task'
@@ -374,3 +405,132 @@ ${listBlock || '（无）'}
 
 直接输出 SKILL.md 全文（含 frontmatter）。`
 }
+
+/**
+ * 沉淀任务列表（导航页「沉淀」的左栏，2026-10-19 三轮）。
+ *
+ * 只列**未入库**的起草 run（`crystallized: true` 的跳过——使用者定稿：
+ * "已入库的不显示，列表永远干净"）；倒序（最新在前）。每条带来源标签
+ * （对话标题 / 任务标题），供列表行显示与切换。
+ *
+ * 来源解析：起草 run 的 `subject.sourceRunId` 指向源 run（对话轮次 =
+ * subject conversation / 任务执行 run = subject issue），再取其标题。
+ * 源 run 已不存在（被清理）时标签为空串——行仍显示，靠 run id 兜底。
+ */
+export interface CrystallizeDraftRow {
+  runId: string
+  status: Run['status']
+  queuedAt: number
+  /** 沉淀目标（新建 / 更新哪条）——列表行可显示"更新 <skill>"。 */
+  target: CrystallizeTargetRef | null
+  /** 来源：conversation = 对话；issue = 任务。null = 源 run 丢了。 */
+  source: { kind: 'conversation' | 'issue'; label: string } | null
+}
+
+export async function listCrystallizeDrafts(
+  store: Store,
+  workspaceId: string,
+): Promise<CrystallizeDraftRow[]> {
+  const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
+  const drafts = page.items.filter(
+    (r) => r.kind === 'execute' && r.subject.type === 'skill-draft' && r.crystallized !== true,
+  )
+  drafts.sort((a, b) => b.queuedAt - a.queuedAt)
+  const out: CrystallizeDraftRow[] = []
+  for (const d of drafts) {
+    let source: CrystallizeDraftRow['source'] = null
+    const srcId = d.subject.sourceRunId
+    if (srcId !== undefined) {
+      const srcRun = await store.getRun(srcId as RunId)
+      if (srcRun) {
+        if (srcRun.subject.type === 'conversation') {
+          const conv = await store.getConversation(srcRun.subject.id as Conversation['id'])
+          source = { kind: 'conversation', label: conv?.title ?? '' }
+        } else if (srcRun.subject.type === 'issue') {
+          const issue = await store.getIssue(srcRun.subject.id as Issue['id'])
+          source = { kind: 'issue', label: issue?.title ?? '' }
+        }
+      }
+    }
+    out.push({
+      runId: d.id as string,
+      status: d.status,
+      queuedAt: d.queuedAt,
+      target: d.crystallizeTarget ?? null,
+      source,
+    })
+  }
+  return out
+}
+
+/**
+ * 新建沉淀的**来源选择器**（导航页「沉淀」的「新建沉淀」，2026-10-19 三轮）。
+ *
+ * 使用者定稿：本页可新建——选来源对话/任务再进入目标步骤。来源要带**源 run id**
+ * （`/targets` 与 `/draft` 都吃 runId），所以这里一次算齐，前端不用 N 次拉取、
+ * 也不用依赖 `GET /api/runs`（它 limit 100，多了会漏）。
+ *
+ * 两个来源的口径：
+ *   · **对话**：有轮次带 runId 且最后一轮没报错（与聊天页「沉淀成 skill」的
+ *     可用判据一致——素材从已落库的轮次打包）。轮数随行（素材统计预览）。
+ *   · **任务**：有**终态**执行 run 且**审核过**（§4.3 门槛：有用户反馈 或 审核过；
+ *     `hasUserFeedback` 当前恒 false，所以门槛 = 有 completed 审核 run）。
+ *     未达门槛的任务**不列出**——列出来也是一条"点了进不去"的死路。
+ */
+export interface CrystallizeSource {
+  kind: 'conversation' | 'task'
+  id: string
+  label: string
+  /** 源 run（对话 = 最后一轮；任务 = 最近一条终态执行 run）。 */
+  runId: string
+  /** 对话轮数（素材统计预览）；任务无此概念 = null。 */
+  turns: number | null
+}
+
+export async function listCrystallizeSources(
+  store: Store,
+  workspaceId: string,
+): Promise<CrystallizeSource[]> {
+  const ws = workspaceId as never
+  const out: CrystallizeSource[] = []
+
+  // ── 对话 ──
+  const conversations = await store.listConversations(workspaceId as Conversation['workspaceId'])
+  for (const conv of conversations) {
+    const turns = await store.listChatTurns(conv.id)
+    // 与聊天页同一判据：最后一轮带 runId 且没报错（报错轮没有可沉淀素材）。
+    const runId = [...turns].reverse().find((t) => t.runId && !t.error)?.runId
+    if (runId) {
+      out.push({ kind: 'conversation', id: conv.id, label: conv.title, runId, turns: turns.length })
+    }
+  }
+
+  // ── 任务（终态 + 审核过）──
+  const issues = await store.listIssues({ workspaceId: workspaceId as never, limit: 10_000 })
+  const runs = (await store.listRuns({ workspaceId: ws, limit: 10_000 })).items
+  for (const issue of issues.items) {
+    const execRuns = runs.filter(
+      (r) =>
+        r.kind === 'execute' &&
+        r.subject.type === 'issue' &&
+        r.subject.id === issue.id &&
+        TERMINAL_EXEC_STATUSES.includes(r.status),
+    )
+    if (execRuns.length === 0) continue
+    const latest = execRuns.sort((a, b) => b.queuedAt - a.queuedAt)[0]!
+    // 门槛：有 completed 审核 run（subject 指向该任务**任何一条**执行 run——
+    // 审核挂在哪条执行上都可以，与 crystallizeTargets 同一语义）。
+    const reviewed = runs.some(
+      (r) =>
+        r.kind === 'review' &&
+        r.status === 'completed' &&
+        r.subject.type === 'run' &&
+        execRuns.some((e) => e.id === r.subject.id),
+    )
+    if (!reviewed) continue
+    out.push({ kind: 'task', id: issue.id, label: issue.title, runId: latest.id as string, turns: null })
+  }
+
+  return out
+}
+

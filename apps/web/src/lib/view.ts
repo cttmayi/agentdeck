@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store'
 import type { WebTextId } from '@agentdeck/i18n'
-import { CREATE_HASH, VIEWS, hashFor, parseHash, type ViewName } from './route.ts'
+import { CREATE_HASH, LEGACY_CRYSTALLIZE_RE, VIEWS, hashFor, parseHash, type ViewName } from './route.ts'
 
 export { VIEWS }
 export type { ViewName }
@@ -53,6 +53,8 @@ export const VIEW_TITLE_KEYS = {
   groups: 'shell.navGroups',
   skills: 'shell.navSkills',
   tools: 'tools.navTitle',
+  // ★ D80 三轮：沉淀是第七个视图（导航列工具之下），词条在 crystallize 的 i18n 里。
+  crystallize: 'crystallize.navTitle',
 } as const satisfies Record<ViewName, WebTextId>
 
 /**
@@ -73,9 +75,9 @@ export const view = writable<ViewName>(parseHash(location.hash).view)
 export const creating = writable<boolean>(parseHash(location.hash).creating)
 
 /**
- * 沉淀流程页（D80 §4.1.1 界面改版）：非空 = 聊天/任务视图的右主区在流程页。
+ * 沉淀页（`crystallize` 视图）此刻选中了哪条沉淀。
  *
- * ★ 与 `creating` 同构、同一个理由：它是**地址**（`#/chat/crystallize/<runId>`）
+ * ★ 与 `creating` 同构、同一个理由：它是**地址**（`#/crystallize/<runId>`）
  *   而不是组件里的开关——流程页是"切走还能回来、刷新还在、能分享链接"的一页。
  *   放组件里一卸载就丢，使用者反馈过"切到其他页面就回不来了"。
  */
@@ -83,6 +85,15 @@ export const crystallize = writable<{ runId: string } | null>(parseHash(location
 
 /** 读地址 → 写三个 store。地址是唯一出处，三个 store 只是它的三个投影。 */
 function syncRoute(): void {
+  // 旧子路由重定向（D80 三轮）：`#/chat/crystallize/<runId>` 与 `#/tasks/crystallize/<runId>`
+  // 解析成沉淀视图的同一状态，但地址本身要写回正规形态——地址是唯一出处，不能让
+  // "两个地址同时活着"（迟早有人在别处贴旧链接，而刷新后它又跳回旧样子）。
+  // `location.replace` 只换当前这一格（不污染后退栈），且会再触发一次 hashchange
+  // → syncRoute 读到的是**正规**地址，重定向只发生一次，不会死循环。
+  const legacy = LEGACY_CRYSTALLIZE_RE.exec(location.hash.replace(/^#\/?/, ''))
+  if (legacy) {
+    location.replace(`#/crystallize/${legacy[2]!}`)
+  }
   const route = parseHash(location.hash)
   view.set(route.view)
   creating.set(route.creating)
@@ -113,14 +124,18 @@ export function goCreate(): void {
 }
 
 /**
- * 进沉淀流程页（`#/chat/crystallize/<runId>` / `#/tasks/crystallize/<runId>`）。
+ * 进沉淀页并选中一条（`#/crystallize/<runId>`）。
  *
- * ★ 与 `goCreate()` 同构：流程页是"某视图右栏的一个位置"，地址读起来也是那样
- *   （`chat/crystallize/<runId>` 而不是 `crystallize/<runId>`——来源视图是第一层）。
- *   关掉流程页 = `go('chat')` / `go('tasks')`（回到普通右栏），不必另开一个函数。
+ * ★ 与 `goCreate()` 同构：选中是"沉淀页右栏的一个位置"，地址读起来也是那样
+ *   （`crystallize/<runId>`——视图自己就是沉淀，来源已在列表里，不用再写一层）。
+ *   取消选中 = `go('crystallize')`（回列表空态），不必另开一个函数。
+ *
+ * ⚠️ D80 二轮的旧签名是 `goCrystallize('chat'|'tasks', runId)`——流程页当时住在
+ *   聊天/任务右栏。三轮把它挪成独立视图，入口只剩"沉淀页 + runId"；旧地址
+ *   （`#/chat/crystallize/<runId>`）由 `syncRoute` 重定向，链接不作废。
  */
-export function goCrystallize(view: 'chat' | 'tasks', runId: string): void {
-  location.hash = hashFor(view, { crystallize: { runId } })
+export function goCrystallize(runId: string): void {
+  location.hash = hashFor('crystallize', { crystallize: { runId } })
   syncRoute()
 }
 

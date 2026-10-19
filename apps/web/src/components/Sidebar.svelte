@@ -43,6 +43,9 @@
     // ★ D40 第五项。词条在 `tools.ts`（导航那两条本该在 `shell.ts`，理由写在
     //   那份文件顶部：这一轮的交界不让动 shell.ts，D40 收口时归位）。
     { id: 'tools', title: 'tools.navTitle', hint: 'tools.navHint' },
+    // ★ D80 三轮第七项：沉淀（排工具之下——使用者在导航列点名的位置）。
+    //   沉淀的整个过程在此页进行（左栏列表切沉淀任务，右栏流程页）。
+    { id: 'crystallize', title: 'crystallize.navTitle', hint: 'crystallize.navHint' },
   ]
 
   /**

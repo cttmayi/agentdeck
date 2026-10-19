@@ -74,6 +74,7 @@ let workRoot: string
 let mineRoot: string
 let daemon: DaemonHandle
 let agentId: string
+let reviewerId: string
 let issueId: string
 
 /** 在 skills-mine 仓库里跑 git 命令（验证真提交）。 */
@@ -111,6 +112,7 @@ before(async () => {
     await fetch(`${daemon.url}/api/agents`)
   ).json() as { agents: Array<{ id: string; role: string }> }
   agentId = agents.agents.find((a) => a.role === 'executor')!.id
+  reviewerId = agents.agents.find((a) => a.role === 'reviewer')!.id
 
   const issueRes = await fetch(`${daemon.url}/api/issues`, {
     method: 'POST',
@@ -150,6 +152,47 @@ async function runOnce(prompt: string): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error('源 run 未在限时内终态')
+}
+
+/**
+ * 提交一个任务 run 并**补一条已完成的审核 run**，返回 runId。
+ *
+ * ★ 三轮：后端 draft 路由按设计 §4.3 拦"没审核过的任务"（`task_gate`）。
+ *   这些 e2e 测的是起草/入库机制，不是门槛本身，所以夹具要走**过门**的那条路；
+ *   门槛的负例（没审核 ⇒ reviewed:false）由上面那条 targets 测试钉着。
+ */
+async function runReviewed(prompt: string): Promise<string> {
+  const runId = await runOnce(prompt)
+  await reviewOnce(runId)
+  return runId
+}
+
+/** 给一条任务 run 起一条审核 run 并等它终态（假后端立刻完成）。 */
+async function reviewOnce(executeRunId: string): Promise<void> {
+  const runId = ulid() as RunId
+  const res = await fetch(`${daemon.url}/api/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      runId,
+      kind: 'review',
+      agentRef: { id: reviewerId, name: '审核者', instructions: '' },
+      subject: { type: 'run', id: executeRunId },
+      prompt: '审一下',
+      limits: { maxTurns: null, timeoutMs: null },
+      review: { kind: 'k', title: 't', body: 'b', inputBlobRef: null, relatedIssueId: issueId },
+    }),
+  })
+  assert.equal(res.status, 202, '审核 run 受理')
+  for (let i = 0; i < 40; i += 1) {
+    const r = (await (await fetch(`${daemon.url}/api/runs/${runId}`)).json()) as { status: string }
+    if (['completed', 'failed', 'cancelled'].includes(r.status)) {
+      assert.equal(r.status, 'completed', '假后端的审核 run 应完成')
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('审核 run 未在限时内终态')
 }
 
 /** 起草一个 run 并等终态，返回 draftRunId。 */
@@ -199,7 +242,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
   })
 
   test('draft：受理返回 draftRunId + 素材统计，subject 是 skill-draft', async () => {
-    const runId = await runOnce('再做一次任务（素材源）')
+    const runId = await runReviewed('再做一次任务（素材源）')
     const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -230,7 +273,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
   })
 
   test('★ 新建入库：落 skills-mine（真文件 + 列表 source:mine + git 提交）', async () => {
-    const runId = await runOnce('产出一份可复用的流程')
+    const runId = await runReviewed('产出一份可复用的流程')
     const draftRunId = await draftAndWait({
       runId,
       target: { kind: 'new', purpose: '把这份流程沉淀成 skill' },
@@ -281,7 +324,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
   })
 
   test('★ 撞 slug：同一 slug 再新建 ⇒ 409 clash_mine + existing 指回旧那条', async () => {
-    const runId = await runOnce('又一个流程任务')
+    const runId = await runReviewed('又一个流程任务')
     const draftRunId = await draftAndWait({
       runId,
       target: { kind: 'new', purpose: '再沉淀一份' },
@@ -319,7 +362,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.notEqual(installed.source, 'mine', '装出来的是安装来源')
 
     // 以"安装的"为目标起草 + 入库（设计 §4.1 第 1 步：选中安装的 = 基于它创建你的版本）
-    const runId = await runOnce('流程任务（矫正安装版）')
+    const runId = await runReviewed('流程任务（矫正安装版）')
     const draftRunId = await draftAndWait({ runId, target: { kind: 'update', skillId: installed.id } })
     const { status, body } = await commit({
       draftRunId,
@@ -349,7 +392,7 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
   })
 
   test('★ 更新（进化）：复用原 id、正文覆盖、git 再提交一条', async () => {
-    const runId = await runOnce('流程被纠正过一次')
+    const runId = await runReviewed('流程被纠正过一次')
     const skillId = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
       skills: Array<{ id: string; slug: string }>
     }

@@ -3,9 +3,9 @@ import { describe, it } from 'node:test'
 import { CREATE_HASH, VIEWS, hashFor, parseHash } from './route.ts'
 
 /**
- * 路由：地址 ↔ (视图, 建模式)。
+ * 路由：地址 ↔ (视图, 建模式, 沉淀页选中)。
  *
- * ⚠️ 这一组测试存在的理由很具体：这两条分支**错了不会报错**——它只是把人送到
+ * ⚠️ 这一组测试存在的理由很具体：这几条分支**错了不会报错**——它只是把人送到
  *    另一个页面上。D58 之前没有任何测试碰过这段判据（`view.ts` 里有 `window`，
  *    `node --test` import 不了），所以"未知地址回落哪儿"这种改动只能靠探针隔着
  *    浏览器看，而探针自己也会写错地址（见 D58 那条记录里的 8 条红）。
@@ -29,19 +29,32 @@ describe('parseHash', () => {
     assert.deepEqual(parseHash('#/tasks'), { view: 'tasks', creating: false, crystallize: null })
   })
 
-  it('★ 沉淀流程页：`#/chat/crystallize/<runId>` 落在聊天视图、带 runId', () => {
-    assert.deepEqual(parseHash('#/chat/crystallize/01M57WHC'), {
-      view: 'chat',
+  it('★ 沉淀页：`#/crystallize/<runId>` 落在沉淀视图、带 runId（三轮的正规地址）', () => {
+    assert.deepEqual(parseHash('#/crystallize/01M57WHC'), {
+      view: 'crystallize',
       creating: false,
       crystallize: { runId: '01M57WHC' },
     })
   })
 
-  it('★ 沉淀流程页：任务侧同样认得', () => {
-    assert.deepEqual(parseHash('#/tasks/crystallize/01M57WHC'), {
-      view: 'tasks',
+  it('★★ 旧子路由（`#/chat/crystallize/<runId>`）解析成沉淀视图同一状态（syncRoute 会重定向地址）', () => {
+    assert.deepEqual(parseHash('#/chat/crystallize/01M57WHC'), {
+      view: 'crystallize',
       creating: false,
       crystallize: { runId: '01M57WHC' },
+    })
+    assert.deepEqual(parseHash('#/tasks/crystallize/01M57WHC'), {
+      view: 'crystallize',
+      creating: false,
+      crystallize: { runId: '01M57WHC' },
+    })
+  })
+
+  it('★ `#/crystallize` 只是沉淀页列表，没选中任何一条', () => {
+    assert.deepEqual(parseHash('#/crystallize'), {
+      view: 'crystallize',
+      creating: false,
+      crystallize: null,
     })
   })
 
@@ -73,11 +86,13 @@ describe('hashFor', () => {
     })
   })
 
-  it('★ 沉淀流程页地址与 parseHash 是一对（刷新还在、能分享链接的那一页）', () => {
-    for (const v of ['chat', 'tasks'] as const) {
-      const round = parseHash(hashFor(v, { crystallize: { runId: '01M57WHC' } }))
-      assert.deepEqual(round, { view: v, creating: false, crystallize: { runId: '01M57WHC' } }, v)
-    }
+  it('★ 沉淀页选中地址与 parseHash 是一对（刷新还在、能分享链接的那一页）', () => {
+    const round = parseHash(hashFor('crystallize', { crystallize: { runId: '01M57WHC' } }))
+    assert.deepEqual(round, {
+      view: 'crystallize',
+      creating: false,
+      crystallize: { runId: '01M57WHC' },
+    })
   })
 
   it('建模式只吐正规那个地址（老地址只进不出）', () => {
@@ -88,8 +103,10 @@ describe('hashFor', () => {
     assert.equal(hashFor('agents', { creating: true }), '#/agents')
   })
 
-  it('★ `crystallize` 只对「聊天 / 任务」成立（别的视图没有这个状态）', () => {
+  it('★ `crystallize` 只对沉淀视图成立（别的视图没有这个状态）', () => {
     assert.equal(hashFor('agents', { crystallize: { runId: 'X' } }), '#/agents')
+    assert.equal(hashFor('chat', { crystallize: { runId: 'X' } }), '#/chat')
+    assert.equal(hashFor('tasks', { crystallize: { runId: 'X' } }), '#/tasks')
     assert.equal(hashFor('skills', { crystallize: { runId: 'X' } }), '#/skills')
   })
 })

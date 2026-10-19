@@ -13,14 +13,46 @@ import type { TextCatalog } from '../text.ts'
 export const crystallizeText = {
   'crystallize.title': { zh: '沉淀成 skill', en: 'Crystallize into a skill' },
 
+  // ── 导航（三轮：沉淀是独立一页，导航列工具之下） ──
+  'crystallize.navTitle': { zh: '沉淀', en: 'Crystallize' },
+  'crystallize.navHint': {
+    zh: '把对话/任务的经验沉淀成 skill（起草不占任务列表）',
+    en: 'Turn chats & tasks into skills (drafts live here, not in the task list)',
+  },
+  'crystallize.newEntry': { zh: '新建沉淀', en: 'New' },
+  'crystallize.pickTitle': { zh: '选择来源', en: 'Choose a source' },
+  'crystallize.pickHint': {
+    zh: '来源 = 对话或任务；任务需有审核结论或用户反馈（设计 §4.3）',
+    en: 'Source = a conversation or a task; tasks need a review verdict or feedback (§4.3)',
+  },
+  'crystallize.pickNoConversations': {
+    zh: '还没有可沉淀的对话（至少要有已结束的一轮）',
+    en: 'No crystallizable conversations yet (need at least one finished turn)',
+  },
+  'crystallize.pickNoTasks': {
+    zh: '还没有可沉淀的任务（需已结束且有审核/反馈）',
+    en: 'No crystallizable tasks yet (need a finished one with review/feedback)',
+  },
+  'crystallize.cancel': { zh: '取消', en: 'Cancel' },
+  'crystallize.pickTurns': { zh: '{turns} 轮', en: '{turns} turns' },
+
+  // ── 沉淀任务列表（左栏） ──
+  'crystallize.listCount': { zh: '{n} 条沉淀', en: '{n} crystallizations' },
+  'crystallize.searchPlaceholder': { zh: '搜来源…', en: 'Search sources…' },
+  'crystallize.listEmptyTitle': { zh: '还没有沉淀', en: 'No crystallizations yet' },
+  'crystallize.listEmptyHint': {
+    zh: '在聊天/任务页点「沉淀成 skill」/「优化 skill」，或从这里新建',
+    en: 'Click "Crystallize" in a chat or "Optimize skill" in a task, or start one here',
+  },
+  'crystallize.listLoadingError': { zh: '读取沉淀列表失败', en: 'Failed to load crystallizations' },
+  'crystallize.sourceUnknown': { zh: '来源未知', en: 'Unknown source' },
+  'crystallize.rowNew': { zh: '新建', en: 'New' },
+  'crystallize.rowUpdate': { zh: '更新 {slug}', en: 'Update {slug}' },
+
   // ── 步骤条 ──
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
   'crystallize.stepDraft': { zh: '起草 run', en: 'Draft run' },
   'crystallize.stepReview': { zh: '审阅入库', en: 'Review & save' },
-
-  // ── 栏头返回 ──
-  'crystallize.backToChat': { zh: '返回对话', en: 'Back to chat' },
-  'crystallize.backToTask': { zh: '返回任务', en: 'Back to task' },
 
   // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },

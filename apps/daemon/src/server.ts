@@ -79,7 +79,14 @@ import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/w
 import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
-import { buildDraftPrompt, buildMaterial, crystallizeTargets } from './crystallize.ts'
+import {
+  buildDraftPrompt,
+  buildMaterial,
+  crystallizeTargets,
+  listCrystallizeDrafts,
+  listCrystallizeSources,
+  resolveSourceRun,
+} from './crystallize.ts'
 import { commitMine, ensureMineRepo, probeGit } from './run-hooks/skill-mine.ts'
 import { RunExecutor } from './executor.ts'
 import {
@@ -4048,8 +4055,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // 三个端点：
     //   · GET  /api/crystallize/targets?runId=…  目标面板信息（加载的 skill、任务是否审核过）
+    //   · GET  /api/crystallize/drafts           沉淀任务列表（未入库的起草 run + 来源标签）
+    //   · GET  /api/crystallize/sources          新建沉淀的来源选择器（对话/达标任务 + 源 runId）
     //   · POST /api/crystallize/draft            打包素材 → 起草 run → 返回 draftRunId
     //   · POST /api/crystallize/commit           审阅确认 → 落 skills-mine + git commit
+    if (req.method === 'GET' && path === '/api/crystallize/drafts') {
+      sendJson(res, 200, { items: await listCrystallizeDrafts(store, workspaceId) })
+      return
+    }
+    if (req.method === 'GET' && path === '/api/crystallize/sources') {
+      sendJson(res, 200, { items: await listCrystallizeSources(store, workspaceId) })
+      return
+    }
     if (req.method === 'GET' && path === '/api/crystallize/targets') {
       const url2 = new URL(req.url ?? '/', 'http://localhost')
       const runId = url2.searchParams.get('runId') ?? ''
@@ -4077,11 +4094,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: '需要 runId', code: 'run_id_required' })
         return
       }
-      const sourceRun = await store.getRun(runId as RunId)
-      if (!sourceRun || sourceRun.workspaceId !== workspaceId) {
+      const requestedRun = await store.getRun(runId as RunId)
+      if (!requestedRun || requestedRun.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: `run 不存在（${runId}）`, code: 'run_not_found' })
         return
       }
+      // 传进来的可能是起草 run 自己（草稿列表点进来）——归一成源 run，
+      // 绝不拿草稿的产出当素材（见 crystallize.ts 的 resolveSourceRun）。
+      const sourceRun = await resolveSourceRun(store, requestedRun)
       // 目标：新建（必填作用描述）或 更新本次加载的 skill。
       let target:
         | { kind: 'new'; purpose: string }
@@ -4116,6 +4136,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       // ── 现有 skill 列表 + 更新基线 ──
       const targets = await crystallizeTargets(store, sourceRun)
+      // ── 任务场景的门槛（设计 §4.3）：有用户反馈 或 审核过才可沉淀 ──
+      // 前端在任务按钮 / 流程页都拦（本页「新建沉淀」能选任意任务，不能只靠按钮）；
+      // 这里再拦一道——界面画对了而忘了带，这条就是兜底（门是设计规则，不是 UI 细节）。
+      if (targets.scope === 'task' && !(targets.reviewed || targets.hasUserFeedback)) {
+        sendJson(res, 400, {
+          error: '任务沉淀需要有审核结论或用户反馈（设计 §4.3）',
+          code: 'task_gate',
+        })
+        return
+      }
       const existingSkills = targets.loadedSkills.map((s) => ({
         slug: s.slug,
         name: s.name,

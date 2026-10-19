@@ -12,6 +12,7 @@
   import Groups from './views/Groups.svelte'
   import Skills from './views/Skills.svelte'
   import Tools from './views/Tools.svelte'
+  import Crystallize from './views/Crystallize.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
@@ -123,6 +124,10 @@
       <Groups />
     {:else if $view === 'skills'}
       <Skills />
+    {:else if $view === 'crystallize'}
+      <!-- ★ D80 三轮：沉淀页（导航列工具之下）——沉淀的整个过程在此页进行，
+           左栏 = 沉淀任务列表，右栏 = 流程页 / 空态。 -->
+      <Crystallize />
     {:else}
       <!-- ★ D40：最后一项。`$view` 的取值来自 `VIEWS`，每一支都写明了是哪个；
            最后这个 `{:else}` 不再兼作别的视图（写死成"剩下的都是 Skills"

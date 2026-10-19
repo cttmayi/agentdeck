@@ -14,12 +14,21 @@ import assert from 'node:assert/strict'
 import { FileStore } from '@agentdeck/store-file'
 import {
   makeAgent,
+  makeConversation,
+  makeIssue,
   makeRun,
   makeSkill,
   wsId,
 } from '@agentdeck/domain/testing'
 import type { Agent, Run } from '@agentdeck/protocol'
-import { buildDraftPrompt, buildMaterial, crystallizeTargets } from './crystallize.ts'
+import {
+  buildDraftPrompt,
+  buildMaterial,
+  crystallizeTargets,
+  listCrystallizeDrafts,
+  listCrystallizeSources,
+  resolveSourceRun,
+} from './crystallize.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 let dir: string
@@ -377,5 +386,246 @@ describe('buildDraftPrompt：起草指令', () => {
     assert.match(prompt, /【要更新的现有 skill：my-flow】/)
     assert.match(prompt, /旧版全文/, '旧 SKILL.md 进素材作基线')
     assert.doesNotMatch(prompt, /【使用者的作用描述】/, '更新时没有作用描述块')
+  })
+})
+
+describe('listCrystallizeDrafts：沉淀任务列表', () => {
+  test('只列未入库的起草 run，倒序，带来源标签', async () => {
+    const agent = await seedAgent({ id: 'exec3' })
+    // 来源 1：对话
+    const conv = makeConversation({ id: 'conv-3' })
+    await store.insertConversation(conv)
+    const convRun = await seedRun({
+      id: 'run-conv3',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'conversation', id: conv.id },
+    })
+    // 来源 2：任务（带标题）
+    const issue = makeIssue({ id: 'issue-3' })
+    await store.insertIssue(issue)
+    const taskRun = await seedRun({
+      id: 'run-task3',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'issue', id: issue.id },
+    })
+
+    // 起草 run：对话来源（旧）、任务来源（新）、已入库（跳过）
+    await store.insertRun(
+      makeRun({
+        id: 'draft-old',
+        agentId: agent.id as string,
+        kind: 'execute',
+        status: 'completed',
+        workspaceId: WS,
+        subject: { type: 'skill-draft', id: 'draft-old', sourceRunId: 'run-conv3' },
+        crystallizeTarget: { kind: 'new' },
+        queuedAt: 100,
+      }),
+    )
+    await store.insertRun(
+      makeRun({
+        id: 'draft-new',
+        agentId: agent.id as string,
+        kind: 'execute',
+        status: 'running',
+        workspaceId: WS,
+        subject: { type: 'skill-draft', id: 'draft-new', sourceRunId: 'run-task3' },
+        crystallizeTarget: { kind: 'update', skillId: 's1' },
+        queuedAt: 300,
+      }),
+    )
+    await store.insertRun(
+      makeRun({
+        id: 'draft-committed',
+        agentId: agent.id as string,
+        kind: 'execute',
+        status: 'completed',
+        workspaceId: WS,
+        subject: { type: 'skill-draft', id: 'draft-committed', sourceRunId: 'run-task3' },
+        crystallizeTarget: { kind: 'new' },
+        crystallized: true,
+        queuedAt: 200,
+      }),
+    )
+
+    const items = await listCrystallizeDrafts(store, taskRun.workspaceId as string)
+    assert.deepEqual(
+      items.map((i) => i.runId),
+      ['draft-new', 'draft-old'],
+      '倒序（最新在前），已入库的不出现',
+    )
+    assert.equal(items[0]!.source?.kind, 'issue')
+    assert.equal(items[0]!.source?.label, issue.title)
+    assert.deepEqual(items[0]!.target, { kind: 'update', skillId: 's1' })
+    assert.equal(items[1]!.source?.kind, 'conversation')
+    assert.equal(items[1]!.source?.label, conv.title)
+  })
+
+  test('源 run 已丢失：source 为 null，行仍列出（靠 runId 兜底）', async () => {
+    const agent = await seedAgent({ id: 'exec3b' })
+    const orphan = makeRun({
+      id: 'draft-orphan',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'failed',
+      workspaceId: WS,
+      subject: { type: 'skill-draft', id: 'draft-orphan', sourceRunId: 'run-gone' },
+      crystallizeTarget: { kind: 'new' },
+      queuedAt: 50,
+    })
+    await store.insertRun(orphan)
+    const items = await listCrystallizeDrafts(store, orphan.workspaceId as string)
+    const row = items.find((i) => i.runId === 'draft-orphan')
+    assert.ok(row, '失败的草稿也列出（未入库）')
+    assert.equal(row!.source, null, '源 run 没了 → source null，不硬编标题')
+  })
+})
+
+describe('listCrystallizeSources：新建沉淀的来源选择器', () => {
+  test('对话=最后一轮没报错；任务=终态且审核过（未审核不列出）', async () => {
+    const agent = await seedAgent({ id: 'exec4' })
+    // 对话 A：最后一轮正常 → 列出
+    const convA = makeConversation({ id: 'conv-4a', workspaceId: WS })
+    await store.insertConversation(convA)
+    const convARun = makeRun({
+      id: 'run-4a1',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'conversation', id: convA.id },
+      queuedAt: 10,
+    })
+    await store.insertRun(convARun)
+    await store.insertChatTurn({
+      id: 'turn-4a1' as never,
+      workspaceId: WS,
+      conversationId: convA.id,
+      seq: 1,
+      userText: '聊了',
+      runId: 'run-4a1' as never,
+      createdAt: 1,
+      error: null,
+    })
+    // 对话 B：最后一轮带 error → 不列出（与聊天页「沉淀成 skill」同一判据）
+    const convB = makeConversation({ id: 'conv-4b', workspaceId: WS })
+    await store.insertConversation(convB)
+    await store.insertRun(
+      makeRun({
+        id: 'run-4b1',
+        agentId: agent.id as string,
+        workspaceId: WS,
+        subject: { type: 'conversation', id: convB.id },
+        queuedAt: 20,
+      }),
+    )
+    await store.insertChatTurn({
+      id: 'turn-4b1' as never,
+      workspaceId: WS,
+      conversationId: convB.id,
+      seq: 1,
+      userText: '聊了但报错',
+      runId: 'run-4b1' as never,
+      createdAt: 1,
+      error: 'boom',
+    })
+    await store.appendRunMessage('run-4b1' as never, {
+      seq: 1,
+      type: 'error',
+      content: 'x',
+      tool: null,
+      input: null,
+      output: null,
+      outputTruncated: false,
+      at: 1,
+    })
+
+    // 任务 X：终态 + 审核过 → 列出
+    const issueX = makeIssue({ id: 'issue-4x', workspaceId: WS })
+    await store.insertIssue(issueX)
+    await store.insertRun(
+      makeRun({
+        id: 'run-4x',
+        agentId: agent.id as string,
+        workspaceId: WS,
+        status: 'completed',
+        subject: { type: 'issue', id: issueX.id },
+        queuedAt: 30,
+      }),
+    )
+    await store.insertRun(
+      makeRun({
+        id: 'rev-4x',
+        agentId: agent.id as string,
+        workspaceId: WS,
+        kind: 'review',
+        status: 'completed',
+        subject: { type: 'run', id: 'run-4x' },
+        queuedAt: 40,
+      }),
+    )
+    // 任务 Y：终态但没审核 → 不列出（点了进不去）
+    const issueY = makeIssue({ id: 'issue-4y', workspaceId: WS })
+    await store.insertIssue(issueY)
+    await store.insertRun(
+      makeRun({
+        id: 'run-4y',
+        agentId: agent.id as string,
+        workspaceId: WS,
+        status: 'completed',
+        subject: { type: 'issue', id: issueY.id },
+        queuedAt: 50,
+      }),
+    )
+
+    const items = await listCrystallizeSources(store, WS)
+    const convRows = items.filter((i) => i.kind === 'conversation')
+    const taskRows = items.filter((i) => i.kind === 'task')
+    const conv4a = convRows.find((i) => i.id === 'conv-4a')
+    assert.ok(conv4a, '正常轮出的对话列出')
+    assert.equal(conv4a!.runId, 'run-4a1')
+    assert.equal(conv4a!.turns, 1, '轮数 = 对话的 ChatTurn 条数（1 条）——仍然列出，素材统计会早失败')
+    assert.ok(!convRows.some((i) => i.id === 'conv-4b'), '最后一轮报错的对话不列出')
+    const taskX = taskRows.find((i) => i.id === 'issue-4x')
+    assert.ok(taskX, '审核过的终态任务列出')
+    assert.equal(taskX!.runId, 'run-4x')
+    assert.ok(!taskRows.some((i) => i.id === 'issue-4y'), '未审核的任务不列出（§4.3 门槛）')
+  })
+})
+
+describe('resolveSourceRun：起草 run 归一成源 run（三轮）', () => {
+  test('草稿 id → 它的 sourceRunId；源 run 丢了就原样返回', async () => {
+    const agent = await seedAgent({ id: 'exec5' })
+    const conv = makeConversation({ id: 'conv-5', workspaceId: WS })
+    await store.insertConversation(conv)
+    const source = makeRun({
+      id: 'run-5src',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'conversation', id: conv.id },
+    })
+    await store.insertRun(source)
+    const draft = makeRun({
+      id: 'draft-5',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'skill-draft', id: 'draft-5', sourceRunId: 'run-5src' },
+    })
+    await store.insertRun(draft)
+
+    const resolved = await resolveSourceRun(store, draft)
+    assert.equal(resolved.id, 'run-5src', '草稿归一成源 run（不拿草稿产出当素材）')
+    // 源 run 不是草稿时原样返回
+    assert.equal((await resolveSourceRun(store, source)).id, 'run-5src')
+
+    // 源 run 已被清理：原样返回（调用方走"素材为空"的正常分支）
+    const orphan = makeRun({
+      id: 'draft-5b',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'skill-draft', id: 'draft-5b', sourceRunId: 'run-gone-5' },
+    })
+    await store.insertRun(orphan)
+    assert.equal((await resolveSourceRun(store, orphan)).id, 'draft-5b')
   })
 })

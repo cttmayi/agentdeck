@@ -125,8 +125,20 @@
   $: canStart =
     targets !== null &&
     targets.materialStats !== null &&
+    // ★ 任务场景的门槛（设计 §4.3）：有用户反馈 或 审核过才可沉淀。聊天场景无门槛。
+    //   二轮只拦在「任务」页的按钮上；三轮导航页「新建沉淀」能选任意任务，门必须
+    //   在流程页自己也拦一道（后端 draft 路由同样拦，见 server.ts 的 task_gate）。
+    (targets.scope !== 'task' || targets.reviewed || targets.hasUserFeedback) &&
     (targetKind === 'new' ? purpose.trim() !== '' : selectedSkillId !== '')
   $: reviewValid = slug.trim() !== '' && name.trim() !== '' && skillBody.trim() !== ''
+
+  /** 开始沉淀按钮的悬停解释：素材为空 / 任务门槛不过，分开说清。 */
+  $: startDisabledReason =
+    targets !== null && targets.materialStats === null
+      ? $t('crystallize.noMaterial')
+      : targets !== null && targets.scope === 'task' && !(targets.reviewed || targets.hasUserFeedback)
+        ? $t('crystallize.taskGated')
+        : undefined
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
 
@@ -462,7 +474,7 @@
       <button
         class="primary"
         disabled={!canStart || loading}
-        title={!canStart && targets?.materialStats === null ? $t('crystallize.noMaterial') : undefined}
+        title={startDisabledReason}
         onclick={() => void startDraft()}
       >
         {$t('crystallize.start')}
