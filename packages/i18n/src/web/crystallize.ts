@@ -165,7 +165,15 @@ export const crystallizeText = {
   },
   'crystallize.refusedTitle': { zh: '起草者判定：这里没有可沉淀的内容', en: 'The drafter found nothing crystallizable' },
   // ── 四轮 P1：变更集 diff / 素材分节 / 按意见改一版 ──
+  'crystallize.tabContent': { zh: '内容', en: 'Content' },
+  'crystallize.tabDiff': { zh: '差异', en: 'Diff' },
+  'crystallize.moreProblems': {
+    zh: '还有 {count} 条（先改这几条再看）',
+    en: 'and {count} more (fix these first)',
+  },
   'crystallize.diffVsCurrent': { zh: '对比当前版本', en: 'vs current' },
+  'crystallize.vsPreviousShort': { zh: '对比上一版', en: 'vs previous' },
+  'crystallize.vsCurrentShort': { zh: '对比当前版本', en: 'vs current' },
   'crystallize.diffVsPrevious': { zh: '对比上一版草稿', en: 'vs previous draft' },
   'crystallize.diffCoarse': {
     zh: '（文件较大，按整文件差异显示）',

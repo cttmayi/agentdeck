@@ -109,8 +109,14 @@
   /** 素材分节（文件清单 + 预览）。 */
   let material: {
     dir: string
+    /** 目录短名（只显示末两级，整条路径放进 title）——折叠行摘要里不能塞绝对路径。 */
+    dirLabel: string
     items: Array<{ relPath: string; bytes: number; text: string; truncated: boolean }>
   } | null = null
+  /** 主区窗格的分段：内容 / 差异（同一位置切换，见 markup 里的三条规矩）。 */
+  let reviewTab: 'content' | 'diff' = 'content'
+  /** 「按意见改一版」的输入框是否展开（不常驻，见结论条）。 */
+  let reviseOpen = false
   let materialPick = ''
   let materialLoading = false
   /** 「按意见改一版」的意见输入。 */
@@ -260,6 +266,8 @@
     diffAgainst = 'current'
     material = null
     materialPick = ''
+    reviewTab = 'content'
+    reviseOpen = false
     reviseFeedback = ''
     revising = false
     previousDraftId = ''
@@ -487,6 +495,8 @@
 
   /** 切换选中文件：把编辑区内容换过去（当前文件的编辑已经回写进 files）。 */
   function selectFile(rel: string): void {
+    // 点文件 = 想看内容；留在「差异」标签会让人以为点错了
+    reviewTab = 'content'
     selectedFile = rel
     editText = artifacts?.files[rel] ?? ''
   }
@@ -554,10 +564,16 @@
     if (draftRunId === '' || materialLoading) return
     materialLoading = true
     try {
-      material = await api<{
+      const res = await api<{
         dir: string
         items: Array<{ relPath: string; bytes: number; text: string; truncated: boolean }>
       }>(`/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}`)
+      material = {
+        ...res,
+        // 折叠行只有一行：绝对路径塞进去会把"8 个文件"挤没。末段够用
+        // （固定叫 material，前面那截是 30 字符的草稿目录名，是噪音）。
+        dirLabel: res.dir.split('/').filter((x) => x !== '').slice(-1)[0] ?? '',
+      }
       materialPick = material.items[0]?.relPath ?? ''
     } catch {
       material = null
@@ -801,7 +817,10 @@
         </div>
       {/if}
 
-      <!-- ── 素材摘要：起草前就可见（§4.1.1），空素材 = 无法开始 ── -->
+      <!-- ── 素材摘要：只在目标态显示——那是"能不能开始"的判据。
+             起草/审阅态有「素材」折叠分节（同一件事的可展开版本），
+             两处都常驻就是白占高度（实测 87px）。── -->
+      {#if step === 'target'}
       <section class="drawer-section">
         <h3>{$t('crystallize.materialSection')}</h3>
         <div class="section-body">
@@ -828,8 +847,11 @@
           {/if}
         </div>
       </section>
+      {/if}
 
-      <!-- ── 沉淀目标：目标态可编辑；起草后收成只读摘要 ── -->
+      <!-- ── 沉淀目标：目标/起草态可编辑；审阅态并入结论条（那一行已经写了
+             "更新 release-check"，再单占 68px 就是重复）── -->
+      {#if step !== 'review'}
       <section class="drawer-section">
         <h3><span>{$t('crystallize.stepTarget')}</span></h3>
         <div class="section-body">
@@ -928,240 +950,230 @@
         {/if}
         </div>
       </section>
-
-      <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份 ── -->
-      {#if draftRunId !== '' && material !== null}
-        <section class="drawer-section">
-          <h3>
-            {$t('crystallize.materialTitle')}
-            <span class="faint small">{material.items.length} {$t('crystallize.filesUnit')}</span>
-          </h3>
-          <div class="section-body">
-            <p class="faint small mono material-dir">
-              {$t('crystallize.materialDir')}：{material.dir}
-            </p>
-            {#if material.items.length === 0}
-              <p class="faint small">{$t('crystallize.materialEmpty')}</p>
-            {:else}
-              <div class="material-pane">
-                <ul class="file-tree">
-                  {#each material.items as item (item.relPath)}
-                    <li>
-                      <button
-                        type="button"
-                        class="file-row"
-                        class:active={materialPick === item.relPath}
-                        onclick={() => (materialPick = item.relPath)}
-                      >
-                        <span class="file-name mono">{item.relPath}</span>
-                        <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
-                      </button>
-                    </li>
-                  {/each}
-                </ul>
-                <div class="file-body">
-                  {#each material.items as item (item.relPath)}
-                    {#if item.relPath === materialPick}
-                      <pre class="material-text mono">{item.text}</pre>
-                      {#if item.truncated}
-                        <p class="faint small">{$t('crystallize.materialTruncated')}</p>
-                      {/if}
-                    {/if}
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </div>
-        </section>
       {/if}
 
-      <!-- ── 起草 run：日志常驻（审阅时也看得见）；失败/停止 = 失败态 + 重新起草 ── -->
-      {#if draftRunId !== '' && step !== 'done'}
-        <section class="drawer-section">
-          <h3>
-            {$t('crystallize.draftSection')}
-            <span class="faint small">
-              run {runShort}…
-              {#if draftStatus}
-                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-              {/if}
-            </span>
-          </h3>
-          <div class="section-body">
-            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-              <div class="notice bad small">
-                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
-                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-              </div>
-            {:else}
-              <p class="faint small">{$t('crystallize.drafting')}</p>
-            {/if}
-            <div class="log-box">
-              <RunLog runId={draftRunId} onterminal={(s) => void onDraftTerminal(s)} />
-            </div>
-          </div>
-        </section>
-      {/if}
+      <!-- ══════════════════ 草稿审阅 ══════════════════
 
-      <!-- ── 草稿审阅 ── -->
+           排版的三条规矩（2026-10-19 重排）：
+
+           ① **结论常驻，明细折叠**（本仓库 D69.9 的既有纪律）：一行结论条说完
+              "能不能入库 + 改了哪些 + 目标是什么"，问题列表与"按意见改一版"的
+              输入框都收进这条里，点开才占高度。
+           ② **主区自己滚，页面不整页滚**：树 + 窗格固定高度，编辑/文件多了在窗格
+              内部滚。改之前整页 2030px 高、审阅起点在 932px——首屏看不到要动手的地方。
+           ③ **编辑与差异同位置切换**：785px 的正文列放不下"树 + 编辑 + 差异"三块并排
+              （每块 240px 没法读），所以用分段控件在同一个窗格里切；两者都吃满宽度，
+              而且切换不滚动（改之前 diff 在编辑器下方 519px 处）。
+      -->
       {#if step === 'review'}
-        <section class="drawer-section">
-          <h3>{$t('crystallize.reviewTitle')}</h3>
-          <div class="section-body">
-            {#if clash}
-              <div class="notice">
-                {error}
-                <button class="ghost small" onclick={() => void switchToUpdate()}>
-                  {$t('crystallize.switchToUpdate')}
+        {#if clash}
+          <div class="notice">
+            {error}
+            <button class="ghost small" onclick={() => void switchToUpdate()}>
+              {$t('crystallize.switchToUpdate')}
+            </button>
+          </div>
+        {:else if error}
+          <div class="notice bad">{error}</div>
+        {/if}
+
+        <!-- 起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃 -->
+        {#if artifacts && artifacts.mode === 'refused'}
+          <section class="drawer-section">
+            <h3>{$t('crystallize.reviewTitle')}</h3>
+            <div class="notice warn">
+              <strong>{$t('crystallize.refusedTitle')}</strong>
+              <p>{artifacts.refusalReason ?? ''}</p>
+              <div class="row-end">
+                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+                <button class="ghost small" onclick={() => void abandonReview()}>
+                  {$t('crystallize.abandon')}
                 </button>
               </div>
-            {:else if error}
-              <div class="notice bad">{error}</div>
-            {/if}
-
-            <!-- 起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃 -->
-            {#if artifacts && artifacts.mode === 'refused'}
-              <div class="notice warn">
-                <strong>{$t('crystallize.refusedTitle')}</strong>
-                <p>{artifacts.refusalReason ?? ''}</p>
-                <div class="row-end">
-                  <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-                  <button class="ghost small" onclick={() => void abandonReview()}>
-                    {$t('crystallize.abandon')}
-                  </button>
-                </div>
-              </div>
-            {:else if artifacts}
-              <!-- 结论优先：校验通过 / 不通过，永远在最上面 -->
-              {#if artifacts.validation.ok}
-                <p class="faint small">
-                  ✓ {fileCount} {$t('crystallize.filesUnit')} · {Math.max(1, Math.round(totalBytes / 1024))} KB
+            </div>
+          </section>
+        {:else if artifacts}
+          <!-- ── 结论条：一行说完"能不能入库 / 改了什么 / 目标是谁" ── -->
+          <section class="review-bar-block">
+            <div class="review-bar" class:bad={!artifacts.validation.ok}>
+              <span class="bar-mark" aria-hidden="true">{artifacts.validation.ok ? '✓' : '✗'}</span>
+              <span class="bar-text">
+                {#if artifacts.validation.ok}
+                  {fileCount} {$t('crystallize.filesUnit')}
+                  {#if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
+                    · {diffAgainst === 'previous'
+                      ? $t('crystallize.vsPreviousShort')
+                      : $t('crystallize.vsCurrentShort')}
+                    <span class="num-tag add">+{diff.totals.added}</span>
+                    <span class="num-tag del">−{diff.totals.removed}</span>
+                  {:else}
+                    · {Math.max(1, Math.round(totalBytes / 1024))} KB
+                  {/if}
                   {#if artifacts.mode === 'text'}
                     · {$t('crystallize.textModeHint')}
                   {/if}
-                </p>
-              {:else}
-                <div class="notice bad">
-                  <strong>{$t('crystallize.problemsTitle')}</strong>
-                  <ul class="problem-list">
-                    {#each artifacts.validation.problems as p (p.file + p.message)}
-                      <li>
-                        {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
-                      </li>
-                    {/each}
-                  </ul>
-                </div>
-              {/if}
+                {:else}
+                  {$t('crystallize.problemsTitle')}（{artifacts.validation.problems.length}）
+                {/if}
+                · {#if targetKind === 'new'}
+                  {$t('crystallize.targetNew')}
+                {:else}
+                  {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
+                {/if}
+              </span>
+              <span class="bar-actions">
+                <button
+                  class="ghost small"
+                  class:active={reviseOpen}
+                  onclick={() => (reviseOpen = !reviseOpen)}
+                >{$t('crystallize.reviseTitle')}</button>
+              </span>
+            </div>
 
-              <!-- slug：唯一需要人确认的字段（默认 = SKILL.md 的 name） -->
-              <label class="field">
-                <span class="faint small">{$t('crystallize.slugLabel')} · {$t('crystallize.slugFromFrontmatter')}</span>
-                <input bind:value={slug} autocomplete="off" class="mono" />
-              </label>
+            <!-- 问题列表：只在不过时说，最多 4 条（再多就该先改了） -->
+            {#if !artifacts.validation.ok}
+              <ul class="problem-list">
+                {#each artifacts.validation.problems.slice(0, 4) as p (p.file + p.message)}
+                  <li>
+                    {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
+                  </li>
+                {/each}
+                {#if artifacts.validation.problems.length > 4}
+                  <li class="faint">
+                    {$t('crystallize.moreProblems', { count: String(artifacts.validation.problems.length - 4) })}
+                  </li>
+                {/if}
+              </ul>
+            {/if}
 
-              <!-- frontmatter 摘要：只读，来自 SKILL.md 本身（要改就改文件） -->
-              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
-                <p class="faint small frontmatter-line">
-                  <span>{$t('crystallize.nameLabel')}：<code>{artifacts.skillMd.name}</code></span>
-                  {#if artifacts.skillMd.description !== ''}
-                    <span>{$t('crystallize.descriptionLabel')}：{artifacts.skillMd.description}</span>
-                  {/if}
-                </p>
-              {/if}
-
-              <!-- 文件树 + 选中文件：多文件产物的呈现 -->
-              <div class="file-pane">
-                <ul class="file-tree">
-                  {#each fileRows as row (row.rel)}
-                    <li>
-                      <button
-                        type="button"
-                        class="file-row"
-                        class:active={row.rel === selectedFile}
-                        onclick={() => selectFile(row.rel)}
-                      >
-                        <span class="file-name mono">{row.rel}</span>
-                        {#if row.change !== ''}
-                          <span
-                            class="change-tag"
-                            class:add={row.change === 'A'}
-                            class:mod={row.change === 'M'}
-                            class:del={row.change === 'D'}
-                          >{changeLabel(row.change)}</span>
-                        {/if}
-                        {#if row.change !== 'D'}
-                          {@const d = diffByRel.get(row.rel)}
-                          {#if d && (d.added > 0 || d.removed > 0)}
-                            <span class="num-tag add">+{d.added}</span>
-                            <span class="num-tag del">−{d.removed}</span>
-                          {:else}
-                            <span class="faint small">{Math.max(1, Math.round(row.bytes / 1024))} KB</span>
-                          {/if}
-                        {/if}
-                      </button>
-                    </li>
-                  {/each}
-                </ul>
-                <div class="file-body">
-                  {#if selectedFile === ''}
-                    <p class="faint small">{$t('crystallize.noFiles')}</p>
-                  {:else if fileRows.find((r) => r.rel === selectedFile)?.change === 'D'}
-                    <p class="faint small">{$t('crystallize.deletedHint')}</p>
-                  {:else}
-                    <textarea
-                      bind:value={editText}
-                      oninput={onEditInput}
-                      rows="16"
-                      class="mono"
-                      spellcheck="false"
-                    ></textarea>
-                  {/if}
+            <!-- 按意见改一版：输入框点开才展开（它属于"这版不行"的动作，不常驻） -->
+            {#if reviseOpen}
+              <div class="revise-row">
+                <textarea
+                  bind:value={reviseFeedback}
+                  rows="2"
+                  placeholder={$t('crystallize.revisePlaceholder')}
+                ></textarea>
+                <div class="row-end">
+                  <button
+                    class="ghost small"
+                    disabled={revising || reviseFeedback.trim() === ''}
+                    onclick={() => void reviseDraft()}
+                  >{$t('crystallize.reviseSubmit')}</button>
                 </div>
               </div>
+            {/if}
 
-              {#if selectedFile.endsWith('.md') && editText.trim() !== '' &&
-                fileRows.find((r) => r.rel === selectedFile)?.change !== 'D'}
-                <FoldSection title={$t('crystallize.previewTitle')}>
-                  <div class="preview markdown">{@html renderMarkdown(editText)}</div>
-                </FoldSection>
-              {/if}
-
-              <!-- 变更集：逐文件 diff（后端算）+ 对比对象切换 -->
-              {#if artifacts.revisedFrom !== null}
-                <div class="diff-switch">
-                  <button
-                    type="button"
-                    class="ghost small"
-                    class:active={diffAgainst === 'current'}
-                    onclick={() => void loadDiff('current')}
-                  >{$t('crystallize.diffVsCurrent')}</button>
-                  <button
-                    type="button"
-                    class="ghost small"
-                    class:active={diffAgainst === 'previous'}
-                    onclick={() => void loadDiff('previous')}
-                  >{$t('crystallize.diffVsPrevious')}</button>
-                </div>
-              {/if}
-              {#if diff !== null}
-                <p class="faint small">
-                  {diff.baselineLabel} · {diff.totals.changed} {$t('crystallize.filesUnit')}
-                  · <span class="num-tag add">+{diff.totals.added}</span>
-                  <span class="num-tag del">−{diff.totals.removed}</span>
-                  {#if diff.files.some((f) => f.coarse)}
-                    · {$t('crystallize.diffCoarse')}
+            <!-- slug：唯一需要人确认的字段（默认 = SKILL.md 的 name）；
+                 name/description 只读展示——要改就改文件，一处真相 -->
+            <div class="review-meta">
+              <label class="slug-inline">
+                <span class="faint small">{$t('crystallize.slugLabel')}</span>
+                <input bind:value={slug} autocomplete="off" class="mono" />
+              </label>
+              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
+                <span class="faint small frontmatter-line">
+                  <code>{artifacts.skillMd.name}</code>
+                  {#if artifacts.skillMd.description !== ''}
+                    <span class="desc-clip">{artifacts.skillMd.description}</span>
                   {/if}
-                </p>
-              {:else if diffLoading}
-                <p class="faint small">{$t('crystallize.diffLoading')}</p>
+                </span>
               {/if}
-              {#if selectedDiff && selectedDiff.hunks.length > 0}
+            </div>
+          </section>
+
+          <!-- ── 主区：树 + 窗格（内容 / 差异 同位置切换） ── -->
+          <div class="review-pane">
+            <ul class="file-tree">
+              {#each fileRows as row (row.rel)}
+                <li>
+                  <button
+                    type="button"
+                    class="file-row"
+                    class:active={row.rel === selectedFile}
+                    title={row.rel}
+                    onclick={() => selectFile(row.rel)}
+                  >
+                    {#if row.change !== ''}
+                      <span
+                        class="change-tag"
+                        class:add={row.change === 'A'}
+                        class:mod={row.change === 'M'}
+                        class:del={row.change === 'D'}
+                      >{changeLabel(row.change)}</span>
+                    {/if}
+                    <span class="file-name mono">{row.rel}</span>
+                    {#if row.change !== 'D'}
+                      {@const d = diffByRel.get(row.rel)}
+                      {#if d && (d.added > 0 || d.removed > 0)}
+                        <span class="num-tag add">+{d.added}</span>
+                        <span class="num-tag del">−{d.removed}</span>
+                      {/if}
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+
+            <div class="file-body">
+              <div class="pane-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={reviewTab === 'content'}
+                  class:tabs-active={reviewTab === 'content'}
+                  onclick={() => (reviewTab = 'content')}
+                >{$t('crystallize.tabContent')}</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={reviewTab === 'diff'}
+                  class:tabs-active={reviewTab === 'diff'}
+                  onclick={() => (reviewTab = 'diff')}
+                >{$t('crystallize.tabDiff')}</button>
+                {#if reviewTab === 'diff'}
+                  <span class="tabs-right">
+                    {#if selectedDiff && (selectedDiff.added > 0 || selectedDiff.removed > 0)}
+                      <span class="num-tag add">+{selectedDiff.added}</span>
+                      <span class="num-tag del">−{selectedDiff.removed}</span>
+                    {/if}
+                    {#if artifacts.revisedFrom !== null}
+                      <button
+                        type="button"
+                        class="ghost small"
+                        class:active={diffAgainst === 'current'}
+                        onclick={() => void loadDiff('current')}
+                      >{$t('crystallize.diffVsCurrent')}</button>
+                      <button
+                        type="button"
+                        class="ghost small"
+                        class:active={diffAgainst === 'previous'}
+                        onclick={() => void loadDiff('previous')}
+                      >{$t('crystallize.diffVsPrevious')}</button>
+                    {/if}
+                  </span>
+                {/if}
+              </div>
+
+              {#if reviewTab === 'content'}
+                {#if selectedFile === ''}
+                  <p class="faint small">{$t('crystallize.noFiles')}</p>
+                {:else if fileRows.find((r) => r.rel === selectedFile)?.change === 'D'}
+                  <p class="faint small pad">{$t('crystallize.deletedHint')}</p>
+                {:else}
+                  <textarea
+                    bind:value={editText}
+                    oninput={onEditInput}
+                    class="mono editor"
+                    spellcheck="false"
+                  ></textarea>
+                {/if}
+              {:else if diffLoading}
+                <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
+              {:else if selectedDiff && selectedDiff.hunks.length > 0}
                 <div class="diff-box mono">
                   {#each selectedDiff.hunks as hunk (hunk.oldStart + ':' + hunk.newStart)}
-                    <div class="hunk-head">
-                      @@ −{hunk.oldStart} +{hunk.newStart} @@
-                    </div>
+                    <div class="hunk-head">@@ −{hunk.oldStart} +{hunk.newStart} @@</div>
                     {#each hunk.lines as line (line.oldNo + '/' + line.newNo + '/' + line.kind)}
                       <div class="diff-line {line.kind === '+' ? 'add' : line.kind === '-' ? 'del' : ''}">
                         <span class="gutter">{line.oldNo ?? ''}</span>
@@ -1172,31 +1184,103 @@
                     {/each}
                   {/each}
                 </div>
-              {:else if selectedDiff && selectedFile !== '' && selectedDiff.change === 'same'}
-                <p class="faint small">{$t('crystallize.diffUnchanged')}</p>
+              {:else if diff === null}
+                <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
+              {:else}
+                <p class="faint small pad">{$t('crystallize.diffUnchanged')}</p>
               {/if}
-            {/if}
-
-            <!-- 按意见改一版（P1）：意见 → 同一份素材再起草一轮 → 新旧并列对比 -->
-            <div class="revise-box">
-                <label class="field">
-                  <span class="faint small">{$t('crystallize.reviseTitle')}</span>
-                  <textarea
-                    bind:value={reviseFeedback}
-                    rows="2"
-                    placeholder={$t('crystallize.revisePlaceholder')}
-                  ></textarea>
-                </label>
-              <div class="row-end">
-                <button
-                  class="ghost small"
-                  disabled={revising || reviseFeedback.trim() === ''}
-                  onclick={() => void reviseDraft()}
-                >{$t('crystallize.reviseSubmit')}</button>
-              </div>
             </div>
           </div>
-        </section>
+
+          {#if selectedFile.endsWith('.md') && editText.trim() !== '' &&
+            fileRows.find((r) => r.rel === selectedFile)?.change !== 'D'}
+            <FoldSection title={$t('crystallize.previewTitle')}>
+              <div class="preview markdown">{@html renderMarkdown(editText)}</div>
+            </FoldSection>
+          {/if}
+        {/if}
+      {/if}
+
+      <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份。
+             折叠行常驻（一行摘要），展开后是"清单 + 预览"——与审阅的文件树同一套观感。 ── -->
+      {#if draftRunId !== '' && material !== null}
+        <FoldSection
+          title={$t('crystallize.materialTitle')}
+          summary={`${material.items.length} ${$t('crystallize.filesUnit')} · ${material.dirLabel}`}
+        >
+          {#if material.items.length === 0}
+            <p class="faint small">{$t('crystallize.materialEmpty')}</p>
+          {:else}
+            <div class="file-pane">
+              <ul class="file-tree">
+                {#each material.items as item (item.relPath)}
+                  <li>
+                    <button
+                      type="button"
+                      class="file-row"
+                      class:active={materialPick === item.relPath}
+                      onclick={() => (materialPick = item.relPath)}
+                    >
+                      <span class="file-name mono">{item.relPath}</span>
+                      <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+              <div class="file-body">
+                {#each material.items as item (item.relPath)}
+                  {#if item.relPath === materialPick}
+                    <pre class="file-pre mono">{item.text}</pre>
+                    {#if item.truncated}
+                      <p class="faint small">{$t('crystallize.materialTruncated')}</p>
+                    {/if}
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </FoldSection>
+      {/if}
+
+      <!-- ── 起草 run：起草中常驻展开（那时它是唯一的信息）；审阅态折成一行
+             （那时它只是历史，占 129px 只为了让审阅沉到第二屏以下）── -->
+      {#if draftRunId !== '' && step !== 'done'}
+        {#if step === 'review'}
+          <FoldSection
+            title={$t('crystallize.draftSection')}
+            summary={`run ${runShort}…${draftStatus ? ` · ${statusLabel(draftStatus)}` : ''}${statsLine ? ` · ${statsLine}` : ''}`}
+          >
+            <div class="log-box">
+              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+            </div>
+          </FoldSection>
+        {:else}
+          <section class="drawer-section">
+            <h3>
+              {$t('crystallize.draftSection')}
+              <span class="faint small">
+                run {runShort}…
+                {#if draftStatus}
+                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
+                {/if}
+              </span>
+            </h3>
+            <div class="section-body">
+              {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
+                <div class="notice bad small">
+                  {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
+                  {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
+                  <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+                </div>
+              {:else}
+                <p class="faint small">{$t('crystallize.drafting')}</p>
+              {/if}
+              <div class="log-box">
+                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+              </div>
+            </div>
+          </section>
+        {/if}
       {/if}
 
       <!-- ── 完成态：已沉淀 + git 状态 + 查看技能 ── -->
@@ -1451,8 +1535,7 @@
     gap: var(--sp-1);
     margin: 0;
   }
-  .field textarea,
-  .field input {
+  .field textarea {
     font: inherit;
     margin-top: 0;
     padding: var(--sp-1) var(--sp-2);
@@ -1487,41 +1570,7 @@
   /* ══════════ 审阅：文件树 + 编辑区（四轮）══════════
      ★ 只用全局变量与既有观感（--panel/--line/--radius/--font-mono），不自造卡片：
      这一块是"多文件产物的呈现"，不是另一套设计语言。 */
-  /* ── 素材分节（P1）：左清单右预览，与审阅的文件树同一套观感 ── */
-  .material-dir {
-    margin: 0 0 0.5rem;
-    word-break: break-all;
-  }
-  .material-pane {
-    display: grid;
-    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-    gap: 0.75rem;
-    align-items: start;
-  }
-  .material-text {
-    margin: 0;
-    padding: 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg-sunken, #fafafa);
-    max-height: 22rem;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
   /* ── 变更集 diff（P1）：行号 gutter + 符号 + 文本，三色只区分增删 ── */
-  .diff-switch {
-    display: flex;
-    gap: 0.4rem;
-    margin: 0.5rem 0 0.25rem;
-  }
-  .diff-switch button.active {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
   .num-tag {
     font-size: 11px;
     padding: 0 4px;
@@ -1537,9 +1586,8 @@
     background: rgba(180, 35, 24, 0.1);
   }
   .diff-box {
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    max-height: 26rem;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: auto;
     font-size: 12px;
     line-height: 1.5;
@@ -1584,24 +1632,116 @@
     color: #b42318;
   }
 
-  /* ── 按意见改一版（P1）── */
-  .revise-box {
-    margin-top: 0.75rem;
-    padding-top: 0.6rem;
-    border-top: 1px dashed var(--border);
+  /* ══════════ 审阅重排（2026-10-19）：结论条 + 主区 + 折叠 ══════════
+
+     三条规矩写在 markup 的注释里（结论常驻 / 主区自己滚 / 编辑与差异同位置切换）。
+     这里只落尺寸：树 240px 固定、窗格吃满剩下的、主区高度跟窗口走但**不整页滚**。 */
+
+  .review-bar-block {
+    margin-bottom: var(--sp-4);
+  }
+
+  /* 结论条：一行说完"能不能入库 / 改了什么 / 目标是谁"。 */
+  .review-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--good);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+  }
+
+  .review-bar.bad {
+    border-left-color: var(--bad);
+  }
+
+  .bar-mark {
+    flex: 0 0 auto;
+    color: var(--good);
+    font-weight: 600;
+  }
+
+  .review-bar.bad .bar-mark {
+    color: var(--bad);
+  }
+
+  .bar-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bar-actions {
+    flex: 0 0 auto;
+  }
+
+  /* slug + frontmatter 摘要：都只占一行（描述超长就省略，要看全文点文件名看文件） */
+  .review-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+    min-width: 0;
+  }
+
+  .slug-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    flex: 0 0 auto;
+  }
+
+  .slug-inline input {
+    width: 12rem;
+    padding: 2px 6px;
+    font-size: var(--fs-sm);
   }
 
   .frontmatter-line {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
+    align-items: baseline;
+    gap: var(--sp-2);
+    min-width: 0;
   }
 
+  .frontmatter-line .desc-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 32rem;
+  }
+
+  /* 按意见改一版：展开的那一行 */
+  .revise-row {
+    margin-top: var(--sp-2);
+  }
+
+  .revise-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* ── 主区：树 240px + 窗格 ──
+     高度跟窗口走（min 420 保证编辑器不至于只有几行；max 与窗口高对齐），
+     两个子块各自 overflow: auto——页面**不因为文件多而整页变长**。 */
+  .review-pane,
   .file-pane {
     display: grid;
-    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--sp-2);
+    height: clamp(22rem, 58vh, 40rem);
+    margin-top: var(--sp-1);
+  }
+
+  /* 素材折叠区里的那份不需要整屏高（`.fold-body` 在 FoldSection 组件内部，
+     scoped 样式够不到，必须用 :global 打洞） */
+  :global(.fold-body) .file-pane {
+    height: clamp(16rem, 38vh, 26rem);
   }
 
   .file-tree {
@@ -1610,7 +1750,8 @@
     padding: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    overflow: hidden;
+    overflow-y: auto;
+    background: var(--panel);
   }
 
   /* 文件行是真按钮（tab 能到、读屏器能读）——与列表行同一纪律，只是密度更高 */
@@ -1676,11 +1817,78 @@
     border-color: var(--bad);
   }
 
-  .file-body textarea {
+  /* 窗格：分段控件常驻，下面那一块自己滚 */
+  .file-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .pane-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-1);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+
+  .pane-tabs > button {
+    padding: 3px 10px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-soft);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+
+  .pane-tabs > button.tabs-active {
+    background: var(--panel-sunken, rgba(0, 0, 0, 0.05));
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  .tabs-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+
+  .file-body textarea.editor {
+    flex: 1 1 auto;
+    min-height: 0;
     width: 100%;
     box-sizing: border-box;
+    border: 0;
+    border-radius: 0;
+    resize: none;
+    padding: var(--sp-2) var(--sp-3);
     font-size: 0.8125rem;
     line-height: 1.55;
+  }
+
+  .file-pre {
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .file-body .pad {
+    padding: var(--sp-3);
+    margin: 0;
   }
 
   .problem-list {
