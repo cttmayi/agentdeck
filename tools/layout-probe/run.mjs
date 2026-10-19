@@ -122,6 +122,10 @@ const CHAIN_REVIEWER = '探针用的三步链审核者'
 const CHAIN_EMPTY_REVIEWER = '探针用的空权限审核者'
 /** 那个审核者的动作权限：**已装**工具包里的一个动作（契约值 `<slug>.<动作名>`）。 */
 const CHAIN_ACTION = 'probe-tool.clean-notes'
+/**
+ * 三步链夹具那个**组**的名字（2026-10 起长期行动权限的唯一权威是组）。
+ */
+const CHAIN_GROUP = '探针用的三步链编队'
 
 const CHECKS = [
   // ── 智能体：主从布局 ──
@@ -3879,6 +3883,183 @@ const CHECKS = [
     label: '★★★ 而点「放弃」之后**真的回到列表**（上面那条只证明它会问；"问了但走不掉"同样是个坏掉的出口）',
     ok: (v) => v === true,
   },
+  // ══════════════════════════════════════════════════════════════════
+  // 沉淀审阅页排版（D80 四轮重排，设计 §6.1 的三条规矩）
+  // ══════════════════════════════════════════════════════════════════
+  {
+    view: '沉淀',
+    key: 'crystal.attached',
+    label: '夹具：那条已完成草稿真的挂上了（「继续」之后进到审阅态）——不成立的话下面一整组都空过',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.barText',
+    label: '★ 结论条一行说完"能不能入库 / 改了几个文件 / 目标是谁"（这里是新建目标）',
+    ok: (v) => typeof v === 'string' && /3 个文件/.test(v) && /新建 skill/.test(v),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.barAboveFold',
+    label: '★★ 结论条**在首屏**（改前结论在 y=932，900 高的窗口首屏根本看不到审阅）',
+    ok: (v) => v === true,
+    show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.pageFitsViewport',
+    label: '★★ 页面**不整页滚**（改前内容 ~2030px：素材与日志把整页撑长，主区反而被挤出首屏）',
+    ok: (v) => v === true,
+    show: (v, f) => `文档 ${f['crystal.scrollH']}px / 视口 ${f['crystal.viewportH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.paneTreeBodySideBySide',
+    label: '★ 主区是**真的并排**两列（树固定窄栏 + 窗格），不是上下叠着（布局类缺陷只有量得出来）',
+    ok: (v) => v === true,
+    show: (v, f) => `树 ${f['crystal.treeW']}px　窗格高 ${f['crystal.paneH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.paneH',
+    label: '★★ 窗格高度落在 `clamp(22rem, 58vh, 40rem)` 那一档里（352–640px；写死小高会让编辑器只有几行）',
+    ok: (v) => typeof v === 'number' && v >= 350 && v <= 641,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.treeHasSkillMd',
+    label: '树的每一行是「徽标 + 文件名（+ 行数）」——SKILL.md 在',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.treeTagTexts',
+    label: '★★ 树行的徽标与 `+n −m` **同源**（都来自那一版对比）：改版草稿里没动的 `references/notes.md` 不许标成"新增"',
+    ok: (v) => Array.isArray(v) && v.length >= 2,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.reviewInputCount',
+    label: '★★ 审阅区**只有一个输入框**（slug）——四轮第 ④ 点：SKILL.md 里已经有 name/description，不该再让人填空',
+    ok: (v) => v === 1,
+    show: (v, f) => `${v} 个（slug ${f['crystal.slugInputCount']}）`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.frontmatterLine',
+    label: 'name / description 以**只读摘要**呈现（从 SKILL.md frontmatter 解析出来的那一行）',
+    ok: (v) => typeof v === 'string' && v.includes('probe-crystal'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.editorInContentTab',
+    label: '默认标签是「内容」：编辑器在（审阅的第一件事是看字）',
+    ok: (v) => v === true,
+    show: (v, f) => `标签 ${JSON.stringify(f['crystal.tabTexts'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.diffTabSwapsEditor',
+    label: '★★★ 点「差异」⇒ 编辑区**让位**、diff 出现（同一个窗格换内容，不是并排挤成两半）',
+    ok: (v) => v === true,
+    show: (v, f) => `diff 行 ${f['crystal.diffLineCount']}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.diffSamePlaceAsEditor',
+    label: '★★★ diff 出现在**编辑器原来那块窗格里**（改前 diff 在编辑器下方 519px 处，改一行要上下滚）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.nonRevisedHasNoBaselineSwitch',
+    label: '★ 基线切换按钮只在**差异**标签下、且只在**改版草稿**上出现——这一条量的是"新建目标的草稿不给一个永远空的切换"',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.materialFoldClosed',
+    label: '★★ 素材默认**折叠**（改前常驻 345px 压在审阅之上；摘要里给文件数）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.materialFoldSummary']),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.materialBelowPane',
+    label: '★★ 素材与起草日志在主区**下方**（参考信息不抢"唯一要动手的地方"的位置）',
+    ok: (v) => v === true,
+    show: (v, f) =>
+      (f['crystal.foldHeads'] ?? []).map((h) => `${h.label}:${h.y}`).join('　'),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.materialFoldOpens',
+    label: '★ 展开素材能列出文件与预览（`material/` 里那份索引够 agent 自己读）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.materialRows']),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.materialPaneCols',
+    label: '★ 素材清单复用**同一套**观感（也是"窄栏 + 正文"两列，不是另画一套单列列表）',
+    ok: (v) => typeof v === 'string' && v.split(' ').filter(Boolean).length === 2,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.reviseRowHiddenInitially',
+    label: '★★「按意见改一版」的输入框**默认不占高度**（点开才出现——它是"有时要用"的动作，不是常驻表单）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.reviseRowAppearsOnDemand',
+    label: '★ 点它之后输入框真的出现（按钮在、点了不开是这类改动最容易出的错）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedAttached',
+    label: '夹具：改版草稿（`revisedFrom`）也挂得上（下面两条量的是它的对比基线）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedApiRevisedFrom',
+    label: '夹具：改版草稿的 `revisedFrom` 从**接口**读得到（页面与接口分开量：读不到就得先查接口，别先怀疑界面）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedEditorHasMarker',
+    label: '★ 换到改版草稿之后编辑器里是**这一版**的字（防止量到上一条草稿的现场——探针在这里踩过一次）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.revisedEditorHead']),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedDefaultBaselineActive',
+    label: '★★★ 改版草稿默认停在**「对比上一版草稿」**——"按意见改一版"出来的那一版，使用者此刻问的就是"比上一版改了哪"',
+    ok: (v) => v === '对比上一版草稿',
+    show: (v, f) => `停在 ${JSON.stringify(v)}　按钮 ${JSON.stringify(f['crystal.revisedSwitchButtons'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedHasBaselineSwitch',
+    label: '★ 改版草稿能切到"对比当前版本"（已经入库的那份才是"当前版本"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedDiffLineCount',
+    label: '★★ 默认那一份对比量到的是**与上一版草稿的差**（真差：两版只差一行 ⇒ 行数是个位数，而不是"整份都算新增"）',
+    ok: (v) => typeof v === 'number' && v > 0 && v < 10,
+    show: (v, f) => `diff 行 ${v}　结论条 ${JSON.stringify(f['crystal.revisedBarText'])}`,
+  },
   {
     view: '任务',
     key: 'tasks.leaveCreateCancelKeepsDraft',
@@ -4125,23 +4306,70 @@ const port = await freePort()
 const base = `http://127.0.0.1:${port}`
 log(dim(`一次性 daemon：${base}（数据在 .cache/layout-probe/，不碰 ~/.agentdeck）`))
 
-const daemon = spawn(
-  process.execPath,
-  [
-    path.join(ROOT, 'apps', 'daemon', 'src', 'cli.ts'),
-    '--port',
-    String(port),
-    '--no-open',
-    '--data-dir',
-    dataDir,
-    '--work-root',
-    workRoot,
-  ],
-  { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
-)
+// ⚠️ `--skills-root` / `--skills-mine-root` **必须显式传**，否则它们回落到
+//    `~/.agentdeck/skills`（`defaultSkillsRoot()`）——而这一行的头注释写着
+//    "数据与工作目录都在 .cache/layout-probe/ 下，绝不碰 ~/.agentdeck"。
+//    实测撞到过：造夹具 skill 时 daemon 去 unlink
+//    `~/.agentdeck/skills/probe-skill/SKILL.md`（在受限沙箱里是 EPERM ⇒
+//    夹具 skill HTTP 500 ⇒ Skills 那几条静默变成"量到空态"）。在不受限的
+//    机器上后果更糟：探针会**真的往使用者的技能根里装东西**。
+const skillsRoot = path.join(SCRATCH, 'skills')
+const skillsMineRoot = path.join(SCRATCH, 'skills-mine')
+for (const d of [skillsRoot, skillsMineRoot]) fs.mkdirSync(d, { recursive: true })
+
+/** 起 daemon（同一个数据目录、同一个端口，可能起两次——见下面"为什么起两次"）。 */
+let daemon = null
 let daemonLog = ''
-daemon.stdout.on('data', (b) => (daemonLog += b))
-daemon.stderr.on('data', (b) => (daemonLog += b))
+function startDaemon() {
+  const child = spawn(
+    process.execPath,
+    [
+      path.join(ROOT, 'apps', 'daemon', 'src', 'cli.ts'),
+      '--port',
+      String(port),
+      '--no-open',
+      '--data-dir',
+      dataDir,
+      '--work-root',
+      workRoot,
+      '--skills-root',
+      skillsRoot,
+      '--skills-mine-root',
+      skillsMineRoot,
+    ],
+    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  child.stdout.on('data', (b) => (daemonLog += b))
+  child.stderr.on('data', (b) => (daemonLog += b))
+  return child
+}
+
+daemon = startDaemon()
+
+/**
+ * 停掉 daemon 并**等它真的把 store 的锁放开**。
+ *
+ * ⚠️ 不能只 `kill()` 就接着开 FileStore：store 是**带锁的单写者**（`LockHeldError`），
+ *    进程还没退干净时开它会直接抛。所以这里轮询"真的能打开"为止，
+ *    而且把每次失败都咽掉（那正是"还没退干净"的正常表现）。
+ */
+async function stopDaemon() {
+  if (!daemon) return
+  daemon.kill('SIGTERM')
+  const deadline = Date.now() + 10_000
+  const { FileStore } = await import(path.join(ROOT, 'packages', 'store-file', 'src', 'index.ts'))
+  while (Date.now() < deadline) {
+    try {
+      const probe = await FileStore.open({ dataDir, fsync: false })
+      await probe.close?.()
+      daemon = null
+      return
+    } catch {
+      await sleep(200)
+    }
+  }
+  throw new Error('daemon 没能在 10s 内停干净（store 锁一直占着）')
+}
 
 let chromeChild = null
 let exitCode = 1
@@ -4185,6 +4413,8 @@ try {
   // ★ 造**两条**：一条长标题、一条短标题。行高"与标题长度无关"这条性质，
   //   只能靠两者对比来断言——写一个魔法阈值（"不超过 64px"）既容易被无关的
   //   间距调整弄红，又挡不住"两个都是 100px"这种真问题。
+  // 记下第一条的 id：沉淀夹具那条源 run 要挂在它上面（`subject: {type:'issue'}`）。
+  let issueFixtureId = ''
   try {
     for (const title of [seedTitle, '短标题']) {
       const res = await fetch(`${base}/api/issues`, {
@@ -4192,7 +4422,12 @@ try {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ title, description: '由 tools/layout-probe 造的夹具。' }),
       })
-      if (!res.ok) log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
+      if (!res.ok) {
+        log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
+        continue
+      }
+      const created = await res.json().catch(() => null)
+      if (issueFixtureId === '' && created?.issue?.id) issueFixtureId = String(created.issue.id)
     }
   } catch (err) {
     log(yellow(`⚠ 造夹具任务时出错：${err}`))
@@ -4617,8 +4852,8 @@ try {
   //   · `CHAIN_EMPTY_REVIEWER`：带标准、**一个动作都没有**。③ 的空态有两档
   //     （"没有审核者" / "有审核者但没动作"），后者只有这么一个 agent 才量得到，
   //     而它说的那句后果（"判决只会给出结论，不会触发任何操作"）是另一档没有的；
-  //   · `CHAIN_EXECUTOR`：`reviewerAgentId` 指向第一个审核者 —— 于是 ② 的
-  //     "跟随"那一项**真的跟得到一个人**（"跟随但没配"是另一档）。
+  //   · `CHAIN_EXECUTOR`：执行者（2026-10 起不再有"长期由谁审"这个字段，
+  //     配对改由**组**给出——见下面 `CHAIN_GROUP`）；
   //
   // ⚠️ **顺序**：必须在上面那次 `POST /api/tools` **之后**。
   //    `POST /api/agents` 保存时会拿 `allowedActions` 对着**已安装的工具包**校验
@@ -4633,7 +4868,7 @@ try {
   //
   // ⚠️ 三个都**不抢"默认"**（默认是播种的那个执行者）：`defaultAgent.*` 那一组
   //    量的是徽章只有一个、预选的是设过的那个。
-  const chainFixture = { executorId: '', reviewerId: '', emptyReviewerId: '' }
+  const chainFixture = { executorId: '', reviewerId: '', emptyReviewerId: '', groupId: '' }
   try {
     const createAgent = async (body) => {
       const res = await fetch(`${base}/api/agents`, {
@@ -4663,10 +4898,11 @@ try {
         name: '三步链夹具标准',
         body: '# 三步链夹具标准\n\n只看结论有没有依据。',
       },
-      allowedActions: [CHAIN_ACTION],
-      // ★ D43：这个审核者长期钉了一份固定参数——新建任务 ③ 的编辑器默认值
-      //   就是它，改过才算"这一次的覆盖"。
-      actionParams: { [CHAIN_ACTION]: { text: '长期钉的' } },
+      // ⚠️ 2026-10 起 **agent 上不再有 `allowedActions` / `actionParams`**：
+      //    "判完允许动什么"的唯一权威是**智能体组**（组页 ③ 行动）。这两个键
+      //    现在会被 POST /api/agents 当"不认识的字段"400 拒掉——夹具因此
+      //    静默没造出来，三步链那一组全量到空值（这一条是实测撞到的漂移）。
+      //    长期权限改用下面那个**组**来给（见 `CHAIN_GROUP`）。
     })
     const emptyReviewer = await createAgent({
       name: CHAIN_EMPTY_REVIEWER,
@@ -4681,13 +4917,44 @@ try {
       name: CHAIN_EXECUTOR,
       role: 'executor',
       runtimeKey: 'generic',
-      ...(reviewer ? { reviewerAgentId: reviewer.id } : {}),
+      // ⚠️ 这里原来传 `reviewerAgentId`（"这个执行者长期由谁审"）——2026-10 起
+      //    这个概念**整个移除**（协议里字段都删了），"谁审"的唯一出处是
+      //    **智能体组**。所以那一段不再设：② 的「跟随」在 agent 档下跟不到人，
+      //    长期权限那一族判据改由上面那个组承担（`chainGroup`）。
+      //    ⚠️ 传了就 400（"不认识的字段"）⇒ 整个链夹具造不出来 ⇒ 那一组全空过。
     })
+
+    // ★ 长期行动权限现在挂在**组**上：新建任务页选「智能体组」时，① ② ③ 的
+    //   默认值由这个组展开（`groupChainDefaults`）——③ 里那两个"跟随之"的
+    //   判据（胶囊逐字等于接口回给它的值、固定参数的默认值）量的就是它。
+    let chainGroup = null
+    if (reviewer && executor) {
+      const res = await fetch(`${base}/api/agent-groups`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: CHAIN_GROUP,
+          members: [String(executor.id), String(reviewer.id)],
+          allowedActions: [CHAIN_ACTION],
+          actionParams: { [CHAIN_ACTION]: { text: '长期钉的' } },
+        }),
+      })
+      if (!res.ok) {
+        const detail = await res
+          .json()
+          .then((p) => p.error ?? '')
+          .catch(() => '')
+        log(yellow(`⚠ 造三步链夹具组失败（HTTP ${res.status}${detail ? `：${detail}` : ''}）`))
+      } else {
+        chainGroup = await res.json()
+      }
+    }
 
     if (reviewer && emptyReviewer && executor) {
       chainFixture.executorId = String(executor.id)
       chainFixture.reviewerId = String(reviewer.id)
       chainFixture.emptyReviewerId = String(emptyReviewer.id)
+      if (chainGroup) chainFixture.groupId = String(chainGroup.group.id)
     } else {
       log(yellow('⚠ 三步链夹具没造全——新建任务那一组会量到空值'))
     }
@@ -4729,6 +4996,161 @@ try {
     log(yellow(`⚠ 造本地技能目录夹具时出错：${err}`))
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // 造**沉淀草稿**夹具（D80 审阅页的排版）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ★ 为什么这一组夹具要**停一次 daemon 再起**：
+  //
+  //   审阅页要量的东西（结论条、树、编辑/差异切换、素材折叠）全都长在一条
+  //   **已完成的起草 run** 上，而这条 run 只能直接写进 store：
+  //     · 走 `POST /api/crystallize/draft` 会去 spawn 真 CLI（NFR-T-01 禁止）；
+  //     · 而 store 是**带锁的单写者**，daemon 开着的时候打不开（`LockHeldError`）。
+  //   所以顺序是：起一次（把工作区与播种的 agent 建出来、把 HTTP 夹具都造好）
+  //   → 停 → 直接写这条草稿 run 与它的 `skill/`、`material/` → 再起 → 量。
+  //
+  //   ⚠️ 播种（工作区 + 那对 agent）**只在首启**发生（`bootstrap` 见到已有工作区
+  //      就直接返回），所以数据目录不能自己造——必须让 daemon 先建一遍。
+  const crystalFixture = { draftRunId: '', revisedRunId: '', sourceRunId: '' }
+  try {
+    await stopDaemon()
+    const { FileStore } = await import(path.join(ROOT, 'packages', 'store-file', 'src', 'index.ts'))
+    const { ulid } = await import(path.join(ROOT, 'packages', 'protocol', 'src', 'ids.ts'))
+    const store = await FileStore.open({ dataDir, fsync: false })
+    try {
+      const workspaceId = (await store.listWorkspaceIds())[0]
+      const agents = await store.listAgents(workspaceId)
+      const executor = agents.find((a) => a.role === 'executor') ?? agents[0]
+      if (!workspaceId || !executor) {
+        log(yellow('⚠ 找不到播种的 workspace / 执行者——沉淀那几条会空过'))
+      } else {
+        const now = Date.now()
+        /**
+         * 造一条**源 run**（起草页拿它算素材与目标）。
+         *
+         * ⚠️ 不派发、不 spawn——只是 store 里的一条记录。
+         */
+        const makeSource = async () => {
+          const id = ulid()
+          await store.insertRun({
+            id,
+            workspaceId,
+            kind: 'execute',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            subject: { type: 'issue', id: issueFixtureId },
+            prompt: '探针夹具：沉淀的来源任务',
+            queuedAt: now - 60_000,
+            startedAt: now - 59_000,
+            finishedAt: now - 58_000,
+          })
+          return id
+        }
+        /**
+         * ★★ 两条草稿**各挂一个源 run**（不是共用一个）。
+         *
+         * 为什么：`找进行中的起草`（`findActiveDraft`）按源 run 找**最新那条**未入库
+         * 草稿——两条草稿共用一个源时，**旧的那条永远挂不上**（界面上「继续」一定
+         * 恢复新的那条，这是对的行为）。于是"量第一版草稿"的那一段实际量到的是
+         * 第二版的现场（实测：`revisedFrom` 有值 ⇒ 基线切换按钮在、树行标着"修改"、
+         * 全量都算"新增"的判据全红）。两条各一个源，两条才都挂得上。
+         */
+        const sourceRunId = await makeSource()
+        const revisedSourceRunId = await makeSource()
+
+        /**
+         * 造一条**已完成的起草 run** + 它的产出目录。
+         *
+         * `files` 会真的写到 `<workRoot>/skill-draft-<id>/skill/` 下——审阅页读的是
+         * 磁盘（`readDraftSkillDir`），不是 run 记录。
+         */
+        // ⚠️ `queuedAt` **必须两条不同**：`findActiveDraft`（daemon 侧"恢复进行中的
+        //    起草"）按 `queuedAt` 降序取最新那条，而**相等时排序退化成插入序** ⇒
+        //    界面上的「继续」会挂到**旧的那条**，后面所有"改版草稿"的判据都量到上
+        //    一版的数字（实测踩过：结论条显示"+24 −0 · 对比当前版本"，而那一版根本
+        //    没有 `revisedFrom`）。真机上两条草稿之间隔着一次 LLM 起草，不可能同毫秒；
+        //    夹具里用一个共享的 `now` 就极易撞上，所以这里按序号递增。
+        let draftSeq = 0
+        const makeDraft = async (id, files, extra = {}) => {
+          const { sourceRunId: draftSourceId = sourceRunId, ...rest } = extra
+          const dir = path.join(workRoot, `skill-draft-${id}`)
+          for (const [rel, text] of Object.entries(files)) {
+            const full = path.join(dir, 'skill', rel)
+            fs.mkdirSync(path.dirname(full), { recursive: true })
+            fs.writeFileSync(full, text)
+          }
+          // 素材也要有几份：素材折叠行的摘要量与预览量都指着它
+          for (const [rel, text] of [
+            ['00-README.md', '# 素材索引（探针夹具）\n\n先读这份，再按需读下面几份。\n'],
+            ['meta.json', '{ "turns": 1, "toolCalls": 3 }\n'],
+            ['turns/001.md', '# 第一轮\n\n探针夹具的一轮。\n'],
+          ]) {
+            const full = path.join(dir, 'material', rel)
+            fs.mkdirSync(path.dirname(full), { recursive: true })
+            fs.writeFileSync(full, text)
+          }
+          draftSeq += 1
+          await store.insertRun({
+            id,
+            workspaceId,
+            kind: 'execute',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            subject: { type: 'skill-draft', id, sourceRunId: draftSourceId },
+            prompt: '探针夹具：起草',
+            queuedAt: now - 30_000 + draftSeq * 1_000,
+            startedAt: now - 29_000,
+            finishedAt: now - 28_000,
+            crystallizeTarget: { kind: 'new' },
+            ...rest,
+          })
+          return id
+        }
+
+        const skillMd = (step2) =>
+          '---\n' +
+          'name: probe-crystal\n' +
+          'description: 探针夹具：给沉淀审阅页量排版用。\n' +
+          '---\n\n' +
+          '# 探针提炼流程\n\n' +
+          '## When to Use\n\n- 探针量排版时\n\n' +
+          '## Procedure\n\n' +
+          `1. 第一步\n2. ${step2}\n\n` +
+          '## Verification\n\n- 探针全绿\n'
+
+        // 第一版：三个文件（多文件产出）
+        crystalFixture.sourceRunId = sourceRunId
+        crystalFixture.draftRunId = await makeDraft(ulid(), {
+          'SKILL.md': skillMd('第二步'),
+          'references/notes.md': '# 说明\n\n第一版。\n',
+          'scripts/check.sh': '#!/bin/sh\necho probe\n',
+        })
+        // 第二版：`revisedFrom` 指着第一版（界面据此给「对比上一版」）
+        crystalFixture.revisedRunId = await makeDraft(
+          ulid(),
+          {
+            'SKILL.md': skillMd('第二步（已按意见改）'),
+            'references/notes.md': '# 说明\n\n第一版。\n',
+            'scripts/check.sh': '#!/bin/sh\necho probe\n',
+          },
+          { revisedFrom: crystalFixture.draftRunId, sourceRunId: revisedSourceRunId },
+        )
+      }
+    } finally {
+      await store.close()
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造沉淀草稿夹具时出错：${err}`))
+  }
+  daemon = startDaemon()
+  if (!(await waitFor(base, 20_000))) {
+    log(red('✗ 第二次 daemon 没起来。它的输出：'))
+    for (const l of daemonLog.split('\n').slice(-12)) log('  ' + l)
+    throw new DaemonDown()
+  }
+
   const outFd = fs.openSync(dumpPath, 'w')
   const errFd = fs.openSync(path.join(SCRATCH, 'chrome.err'), 'w')
   // `--virtual-time-budget` 决定了 dump 的时机：给它足够长，让探针把四步都跑完
@@ -4764,6 +5186,9 @@ try {
         `&chainReviewer=${encodeURIComponent(chainFixture.reviewerId)}` +
         `&chainEmptyReviewer=${encodeURIComponent(chainFixture.emptyReviewerId)}` +
         `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
+        `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
+        `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
+        `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : ''),
     ],
@@ -4847,14 +5272,14 @@ try {
   if (chromeChild) killChrome(profile, chromeChild)
   if (KEEP) {
     log()
-    log(yellow(`--keep：daemon 还开着（PID ${daemon.pid}）→ ${base}/#/agents`))
+    log(yellow(`--keep：daemon 还开着（PID ${daemon?.pid}）→ ${base}/#/agents`))
     log(yellow(`  自己拿浏览器看，用完：kill ${daemon.pid}`))
-    daemon.unref()
+    daemon?.unref()
   } else {
-    daemon.kill('SIGTERM')
+    daemon?.kill('SIGTERM')
     await sleep(600)
     try {
-      daemon.kill('SIGKILL')
+      daemon?.kill('SIGKILL')
     } catch {}
   }
   // dist 是构建产物，探针页不该留在那儿（下次 build 也会清掉，但别指望它）

@@ -5434,6 +5434,258 @@
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
+        // ★★ 这一段**故意排在前面**（紧接着工具空态、在聊天与列表骨架那几段之前）：
+        //    探针页的虚拟时间预算会被**前面那些失败的 `until()`** 吃掉（每次 15s
+        //    虚拟时间），排在最后的话，前面一有夹具造不出来，这一段就整段量不到
+        //    （实测：`crystal.*` 一个事实都没有，dump 里最后一个事实停在 noTools）。
+        //    它自己会导航到沉淀页，与前后段落的现场互不依赖。
+        // ══════════════ 沉淀：审阅页排版（D80 四轮重排）══════════════
+        //
+        // 这一组量的是**排版**（类型检查看不见的那一类），判据全部来自
+        // `docs/design/skill-crystallization.md` §6.1 的三条规矩：
+        //
+        //   ① 结论常驻：结论条在首屏，且一行说完"能不能入库 / 改了什么 / 目标是谁"；
+        //   ② 主区自己滚：页面**不整页滚**（页面高 ≈ 视口高），树与窗格各自滚；
+        //   ③ 编辑与差异同位置切换：默认在「内容」标签，点「差异」后编辑器让位、
+        //      diff 出现——而不是像改之前那样 diff 在编辑器下方 519px 处。
+        //
+        // ⚠️ 夹具是**直接写进 store** 的一条已完成起草 run（见 run.mjs 里
+        //    "为什么这一组夹具要停一次 daemon 再起"）：走接口会 spawn 真 CLI。
+        {
+          const cyQuery = new URLSearchParams(location.search)
+          const cyDraft = cyQuery.get('crystalDraft')
+          const cyRevised = cyQuery.get('crystalRevised')
+          facts['crystal.fixture'] = { draft: cyDraft, revised: cyRevised }
+
+          /**
+           * 进沉淀页并把那条草稿挂起来（「继续」→ 审阅态）。
+           *
+           * ⚠️ **先整页离开沉淀视图再回来**（`#/tasks` → `#/crystallize/<id>`），
+           *    不能只在沉淀视图内部换 `runId`：实测撞到过——换过去之后读到的结论条
+           *    还是**上一条草稿**的（"对比当前版本 +24 −0"，而那一条草稿根本没有
+           *    `revisedFrom`）。原因是"继续 → 审阅"这条路会**接管**组件状态
+           *    （`draftRunId` / `diffAgainst` / `editing`），而 `until()` 对"结论条
+           *    在不在"的等待在上一条草稿的现场里**立刻就成立**，于是这一条量到的
+           *    是别人的数字。与「新建任务」那一段同一个坑（那边也写了同样的话）。
+           */
+          const cyEnter = async (cyRunId) => {
+            if (!cyRunId) return false
+            f.contentWindow.location.hash = '#/tasks'
+            await until(() => !d().querySelector('.review-bar'), 40)
+            f.contentWindow.location.hash = `#/crystallize/${cyRunId}`
+            const attached = await until(
+              () =>
+                [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
+              60,
+            )
+            if (!attached) return false
+            const cont = [...d().querySelectorAll('button')].find((b) => text(b).includes('继续'))
+            click(cont)
+            // 审阅态的标志：结论条（`.review-bar`）出现
+            return await until(() => !!d().querySelector('.review-bar'), 120)
+          }
+
+          const cyOk = await cyEnter(cyDraft)
+          facts['crystal.attached'] = cyOk
+
+          const cyRect = (el) => {
+            if (!el) return null
+            const r = el.getBoundingClientRect()
+            return { x: r.left, y: r.top, w: r.width, h: r.height }
+          }
+
+          // ① 结论条：在、而且**在首屏**（改前审阅的结论在 y=932，900 高的窗口看不到）
+          const cyBar = d().querySelector('.review-bar')
+          const cyBarRect = cyRect(cyBar)
+          facts['crystal.barPresent'] = !!cyBar
+          facts['crystal.barText'] = cyBar ? text(cyBar) : null
+          facts['crystal.barY'] = cyBarRect ? Math.round(cyBarRect.y) : null
+          facts['crystal.viewportH'] = f.contentWindow.innerHeight
+          facts['crystal.barAboveFold'] =
+            cyBarRect !== null && cyBarRect.y < f.contentWindow.innerHeight * 0.5
+
+          // ② 不整页滚：文档高 ≈ 视口高（改前内容 ~2030px，整页滚）
+          const cyScrollH = d().documentElement.scrollHeight
+          facts['crystal.scrollH'] = cyScrollH
+          facts['crystal.pageFitsViewport'] =
+            cyScrollH <= f.contentWindow.innerHeight + 4
+
+          // 主区：两列（树固定 240 + 窗格更宽）、高度在 clamp 区间内
+          const cyPane = d().querySelector('.review-pane')
+          const cyTree = d().querySelector('.review-pane .file-tree')
+          const cyBody = d().querySelector('.review-pane .file-body')
+          const cyPaneRect = cyRect(cyPane)
+          const cyTreeRect = cyRect(cyTree)
+          const cyBodyRect = cyRect(cyBody)
+          facts['crystal.paneCols'] = cyPane ? cs(cyPane).gridTemplateColumns : null
+          facts['crystal.treeW'] = cyTreeRect ? Math.round(cyTreeRect.w) : null
+          facts['crystal.paneH'] = cyPaneRect ? Math.round(cyPaneRect.h) : null
+          facts['crystal.paneTreeBodySideBySide'] =
+            cyTreeRect !== null &&
+            cyBodyRect !== null &&
+            cyBodyRect.x > cyTreeRect.x &&
+            Math.abs(cyTreeRect.y - cyBodyRect.y) < 2
+
+          // 树行：徽标 + 名字 + `+n −m`；徽标与行数**同源**（都来自 diff）
+          facts['crystal.treeRows'] = [...d().querySelectorAll('.review-pane .file-row')].map(
+            (b) => text(b),
+          )
+          facts['crystal.treeHasSkillMd'] = facts['crystal.treeRows'].some((t) =>
+            t.includes('SKILL.md'),
+          )
+          facts['crystal.treeTagTexts'] = [
+            ...d().querySelectorAll('.review-pane .change-tag'),
+          ].map((e) => text(e))
+
+          // 只读 frontmatter + slug 是唯一输入框（四轮第 ④ 点：审阅不再填空）
+          const cySlugInputs = [...d().querySelectorAll('.slug-inline input')]
+          const cyAllTextInputs = [...d().querySelectorAll('.review-bar-block input')]
+          facts['crystal.slugInputCount'] = cySlugInputs.length
+          facts['crystal.reviewInputCount'] = cyAllTextInputs.length
+          facts['crystal.frontmatterLine'] =
+            (d().querySelector('.frontmatter-line') &&
+              text(d().querySelector('.frontmatter-line'))) ||
+            null
+
+          // ③ 编辑与差异同位置切换
+          const cyTabs = [...d().querySelectorAll('.pane-tabs > button')]
+          facts['crystal.tabTexts'] = cyTabs.map((b) => text(b))
+          facts['crystal.editorInContentTab'] = !!d().querySelector('.file-body textarea.editor')
+          facts['crystal.diffVisibleInContentTab'] =
+            d().querySelectorAll('.diff-line').length > 0
+          const cyDiffTab = cyTabs.find((b) => text(b) === '差异')
+          if (cyDiffTab) click(cyDiffTab)
+          const cySwapped = await until(
+            () => !d().querySelector('textarea.editor') && d().querySelectorAll('.diff-line').length > 0,
+            60,
+          )
+          facts['crystal.diffTabSwapsEditor'] = cySwapped
+          facts['crystal.diffLineCount'] = d().querySelectorAll('.diff-line').length
+          const cyEditorRectBefore = cyBodyRect
+          const cyDiffBox = d().querySelector('.diff-box')
+          const cyDiffRect = cyRect(cyDiffBox)
+          // "同位置"：diff 那块在**编辑器原来那块窗格里**（同一个 x / 宽），
+          // 而不是像改之前那样跑到窗格下面 519px
+          facts['crystal.diffSamePlaceAsEditor'] =
+            cyDiffRect !== null &&
+            cyEditorRectBefore !== null &&
+            Math.abs(cyDiffRect.x - cyEditorRectBefore.x) < 4 &&
+            cyDiffRect.y < cyEditorRectBefore.y + cyEditorRectBefore.h
+          // ★ 基线切换按钮**只有改版草稿才有**（`{#if artifacts.revisedFrom !== null}`）：
+          //   这一条量的正是"这条不是改版 ⇒ 不给一个永远空的切换"。
+          facts['crystal.nonRevisedHasNoBaselineSwitch'] = ![
+            ...d().querySelectorAll('.pane-tabs button'),
+          ].some((b) => text(b).includes('对比'))
+          // 回到内容标签，后面的检查在编辑态里量
+          const cyContentTab = [...d().querySelectorAll('.pane-tabs > button')].find(
+            (b) => text(b) === '内容',
+          )
+          if (cyContentTab) click(cyContentTab)
+          await until(() => !!d().querySelector('textarea.editor'), 60)
+
+          // 折叠：素材与起草日志**默认收起**，且都在审阅主区**下方**
+          const cyFolds = [...d().querySelectorAll('.fold-section')]
+          const cyFoldHeads = cyFolds.map((el) => ({
+            label: text(el.querySelector('.fold-head')),
+            open: el.querySelector('.fold-head')?.getAttribute('aria-expanded') === 'true',
+            y: Math.round(el.getBoundingClientRect().top),
+          }))
+          facts['crystal.foldHeads'] = cyFoldHeads
+          const cyMaterialFold = cyFolds.find((el) =>
+            text(el.querySelector('.fold-head')).includes('素材'),
+          )
+          facts['crystal.materialFoldPresent'] = !!cyMaterialFold
+          facts['crystal.materialFoldClosed'] =
+            cyMaterialFold?.querySelector('.fold-head')?.getAttribute('aria-expanded') === 'false'
+          facts['crystal.materialFoldSummary'] = cyMaterialFold
+            ? text(cyMaterialFold.querySelector('.fold-summary'))
+            : null
+          facts['crystal.materialBelowPane'] =
+            !!cyMaterialFold &&
+            cyPaneRect !== null &&
+            cyMaterialFold.getBoundingClientRect().top >= cyPaneRect.y + cyPaneRect.h - 2
+
+          // 展开素材：清单 + 预览（与审阅的文件树**同一套**观感）
+          if (cyMaterialFold) {
+            click(cyMaterialFold.querySelector('.fold-head'))
+            const cyOpened = await until(
+              () => !!d().querySelector('.fold-section .file-pane .file-row'),
+              60,
+            )
+            facts['crystal.materialFoldOpens'] = cyOpened
+            facts['crystal.materialRows'] = [
+              ...d().querySelectorAll('.fold-section .file-pane .file-row'),
+            ].map((b) => text(b))
+            const cyMatPane = d().querySelector('.fold-section .file-pane')
+            facts['crystal.materialPaneCols'] = cyMatPane ? cs(cyMatPane).gridTemplateColumns : null
+            facts['crystal.materialPreviewLen'] = (
+              d().querySelector('.fold-section .file-pre')?.textContent ?? ''
+            ).length
+            // 收回去，别让后面的检查量到展开态
+            click(d().querySelector('.fold-head'))
+            await wait(120)
+          } else {
+            facts['crystal.materialFoldOpens'] = null
+            facts['crystal.materialRows'] = null
+            facts['crystal.materialPaneCols'] = null
+            facts['crystal.materialPreviewLen'] = null
+          }
+
+          // 「按意见改一版」：输入框**默认不在**（点开才占一行）
+          const cyReviseBtn = [...d().querySelectorAll('.bar-actions button')].find((b) =>
+            text(b).includes('按意见'),
+          )
+          facts['crystal.reviseButtonPresent'] = !!cyReviseBtn
+          facts['crystal.reviseRowHiddenInitially'] = !d().querySelector('.revise-row textarea')
+          if (cyReviseBtn) {
+            click(cyReviseBtn)
+            const cyReviseShown = await until(() => !!d().querySelector('.revise-row textarea'), 40)
+            facts['crystal.reviseRowAppearsOnDemand'] = cyReviseShown
+            click(cyReviseBtn)
+            await wait(120)
+          } else {
+            facts['crystal.reviseRowAppearsOnDemand'] = null
+          }
+
+          // ★ 改版草稿（`revisedFrom`）：默认对比**上一版草稿**，且能切回"对比当前版本"
+          const cyRevisedOk = await cyEnter(cyRevised)
+          facts['crystal.revisedAttached'] = cyRevisedOk
+          // 先认现场：编辑器里是不是**这一版**的字（否则下面量的是上一条草稿的数字）
+          // ⚠️ 要**整份**拿去判：那一句差异在正文第 100 个字符之后，截前 60 个字符
+          //    时两版长得一模一样（第一版就是这么写的 ⇒ 这条断言永远红，而现场其实
+          //    是对的）。
+          facts['crystal.revisedEditorHasMarker'] = (
+            d().querySelector('textarea.editor')?.value ?? ''
+          ).includes('已按意见改')
+          facts['crystal.revisedEditorHead'] = (
+            d().querySelector('textarea.editor')?.value ?? ''
+          ).slice(0, 60)
+          facts['crystal.revisedBarText'] = cyRevisedOk
+            ? text(d().querySelector('.review-bar'))
+            : null
+          // 接口那一份也读一次：分清"接口没给 revisedFrom"与"页面没换现场"
+          facts['crystal.revisedApiRevisedFrom'] = await f.contentWindow
+            .fetch(`/api/crystallize/artifacts?draftRunId=${encodeURIComponent(cyRevised ?? '')}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((p) => (p ? p.revisedFrom !== null : null))
+            .catch(() => null)
+          const cyDiffTabB = [...d().querySelectorAll('.pane-tabs > button')].find(
+            (b) => text(b) === '差异',
+          )
+          if (cyDiffTabB) click(cyDiffTabB)
+          await until(() => !!d().querySelector('.diff-box'), 60)
+          const cySwitchButtons = [...d().querySelectorAll('.pane-tabs button')].map((b) => text(b))
+          facts['crystal.revisedSwitchButtons'] = cySwitchButtons
+          facts['crystal.revisedHasBaselineSwitch'] = cySwitchButtons.includes('对比上一版草稿')
+          facts['crystal.revisedDefaultBaselineActive'] = (() => {
+            const btns = [...d().querySelectorAll('.pane-tabs .tabs-right button')]
+            const active = btns.find((b) => b.classList.contains('active'))
+            return active ? text(active) : null
+          })()
+          facts['crystal.revisedDiffLineCount'] = d().querySelectorAll('.diff-line').length
+        }
+
+
         // ══════════════ 聊天（闭环的旁路）══════════════
         //
         // 这一组刻意**不造对话、不发消息**：发一条就会起一条真 run，而这个探针

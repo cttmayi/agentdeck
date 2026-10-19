@@ -120,7 +120,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | `pnpm run build:web` | 构建**两个**前端：daemon 界面 → `apps/web/dist/`、远端管理页 → `apps/remote/web/dist/`（都已 gitignore） |
 | `pnpm run build:remote-web` | 只构建远端管理页（`apps/remote/web/dist/`） |
 | `pnpm run dev:web` | 界面开发模式（5173 → 代理到 4517） |
-| `pnpm run probe:layout` | **daemon 界面的布局检查**（约 470 项）：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
+| `pnpm run probe:layout` | **daemon 界面的布局检查**（568 项）：用真浏览器量布局并断言。改过界面布局时跑；需要先 `build:web`，**不在 `check` 里**（它要真 Chrome + 真 daemon）——见 `../tools/layout-probe/README.md` |
 | `pnpm run probe:remote` | **远端管理页的界面检查**（21 项）：起一次性远端服务（夹具数据、假同步工具、不联网）用真 Chrome 量。改过远端页时跑，**不在 `check` 里**——见 `../tools/remote-ui-probe/README.md` |
 | `node apps/daemon/src/cli.ts --verify-runtime all` | 查看 CLI 版本验证状态（FR-CLI-07），不起服务。⚠️ 所有 `pnpm run <入口>` 命令都先过 `scripts/node-entry.mjs` 那层版本守卫（上面"开发环境"一节），直接敲 `node apps/…/cli.ts` 则**绕过**它 |
 | `pnpm run sync-skills` | **推荐技能目录的同步工具**：抓清单里的 GitHub 技能写进公共目录（跑一次就退出，**不是**服务；参数 `--dry-run` / `--out` / `--manifest`）。⚠️ 要联网、会撞 GitHub 匿名限额（60 次/小时；**实测一条大技能就 11 次**——`pptx` 52 个文件、9 个目录 ⇒ 列目录 10 次 + 取版本 1 次，所以 12 条在匿名下装不下一整轮）。**第一条失败就停**、**1 小时内抓过的不再下载**、已抓到的进**断点目录**。**记不住选项就敲 `pnpm run sync-skills --help`**（只读、无副作用）——见 `../tools/skill-catalog-sync/README.md` |
@@ -152,10 +152,21 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 改前审阅起点 y=932、页面 2030px 高（整页滚）；改后 y=225、页面高 = 视口（不整页滚），编辑器 509→539 宽。
 细节与量到的数字见 `./design/skill-crystallization.md` §6.1。
 
-⚠️ **`pnpm run probe:layout` 目前是红的（与本次改动无关）**：夹具与接口漂了两处——① 探针给
-`POST /api/agents` 传 `allowedActions` / `actionParams`（2026-10 起 agent 上已无这两个字段，权限归智能体组）
-⇒ 400；② 探针的一次性 daemon 没传 `--skills-root`，夹具 skill 会装进**真实的** `~/.agentdeck/skills`
-（与它自己头注释里"绝不碰 ~/.agentdeck"矛盾）。修好之前，"改布局跑探针"这条纪律无法执行。设计见 `./design/skill-crystallization.md` §5.0，P0 实作与三个坑见 §5.0.10；此前 1–10 已实作**（1–6 见下一条；7–10 界面，2026-10-19）：沉淀面板从**设置式抽屉**改成**任务详情式全页**——右主区切换成沉淀流程页（MainArea 壳：返回+标题+来源副题+**随流程变的栏头操作**：开始沉淀/停止/确认入库），页面 = **步骤条（①目标 → ②起草 run → ③审阅入库）+ 分节渐进展开**（素材摘要/目标/起草日志常驻/草稿审阅/完成态，失败态红徽标+失败原因+重新起草）；**沉淀是独立一页**（三轮，2026-10-19 使用者定：导航列「工具」之下的 TAB）：左栏 = 沉淀任务列表（未入库的起草 run，可切换；已入库的不显示），右栏 = 流程页；列表上方「新建沉淀」→ 选来源（对话 / 达标的任务）再进目标步骤。地址 `#/crystallize/<runId>`（`#/chat|crystallize/<runId>` 保留并重定向），切页/刷新/浏览器后退都找得回；**状态语义**（三轮修：左栏原来把起草 run 的「已完成」当任务状态，实际 run 跑完≠沉淀完成——5 条里 3 条标「已完成」而 skills-mine 一条都没有；现在按任务状态显示 起草中/待审阅/起草失败/已停止，「已沉淀」只在 commit 成功后）：**放弃**由 `POST /api/crystallize/discard` 真落地（`discarded: true`，还在跑先停；左栏「×」与流程页「放弃」两处入口），没入库的草稿终于能收尾；**控件与任务页同一套**（三轮返工：`ListRow` 行壳 / `Modal` 浮层 / 顶栏 `setPageActions` 主操作 / 全局 `.badge` + `lib/run-status.ts` 状态映射 / `FoldSection` 折叠 / 分节就是任务详情那种朴素 `drawer-section`——不再自造行样式、`.status-tag`、遮罩层或卡片分节）；`GET /api/crystallize/targets` 加 `materialStats`（素材起草前可见、空素材早失败）+ **沉淀不是任务**（起草 run 不挂 issue、不进任务列表）且**可恢复进行中的起草**（起草 run 记 `subject.sourceRunId` + 沉淀目标 `crystallizeTarget`，重开流程页「继续」挂回——起草中看日志、已完成直接进审阅，对话按全部轮次匹配）。设计语义不变：**提炼的落独立根 `~/.agentdeck/skills-mine/`（git 化 + 自动 commit），与安装根 `~/.agentdeck/skills/` 物理分离**；触发只有用户主动；git 可用性保护；新建必填「作用描述」；任务场景需有用户反馈或审核过才可用 | `./design/skill-crystallization.md` §4.1.1 / §4.1.2 / **§5.0（四轮重设计）** / §6.1 / §7.4 / §8.1；`./srs/requirements.md` §16 的 **D80** |
+**沉淀审阅页已进布局探针（2026-10-19）**：新增 23 条 `[沉淀]` 检查（`probe.html` 的沉淀那一段 +
+`run.mjs` 的 CHECKS），钉住的正是这次重排的三条规矩：结论条在首屏（改前 y=932）、页面不整页滚、
+编辑/差异同位置切换、素材与日志折叠且在主区下方、改版草稿默认「对比上一版草稿」。**这 23 条全绿。**
+
+⚠️ **布局探针整体仍是红的（206 / 568，先于本次改动就红）**：那两处夹具漂移已经修好——
+① agent 上已无 `allowedActions`/`actionParams`/`reviewerAgentId`（2026-10 起权限归智能体组），
+夹具改成造一个**组**并去掉那两个字段；② 探针的一次性 daemon 原来没传 `--skills-root`，夹具 skill
+会装进**真实的** `~/.agentdeck/skills`（被文件沙箱挡成 EPERM 才暴露），现在两个技能根都钉在
+`.cache/layout-probe/` 里。修完之后探针**能跑完**了（改前虚拟预算被前面失败的等待烧光，
+dump 里连 `done` 都没有），剩余红项分布在 13 个视图：新建任务的三步链 49 · 审核标准 26 ·
+配过但不可用 23 · 技能 18 · 新建任务 17 · 迁移 15 · 智能体 12 · 行动权限空态 10 等。
+它们描述的是**已经改掉的世界**（agent 的「行动权限」段、Skills 页的「设置」入口、老标准迁移入口……），
+需要对整个探针做一遍"与当前界面重新对齐"——那是一条独立的工作流，不是一处漂移。
+
+设计见 `./design/skill-crystallization.md` §5.0，P0 实作与三个坑见 §5.0.10；此前 1–10 已实作**（1–6 见下一条；7–10 界面，2026-10-19）：沉淀面板从**设置式抽屉**改成**任务详情式全页**——右主区切换成沉淀流程页（MainArea 壳：返回+标题+来源副题+**随流程变的栏头操作**：开始沉淀/停止/确认入库），页面 = **步骤条（①目标 → ②起草 run → ③审阅入库）+ 分节渐进展开**（素材摘要/目标/起草日志常驻/草稿审阅/完成态，失败态红徽标+失败原因+重新起草）；**沉淀是独立一页**（三轮，2026-10-19 使用者定：导航列「工具」之下的 TAB）：左栏 = 沉淀任务列表（未入库的起草 run，可切换；已入库的不显示），右栏 = 流程页；列表上方「新建沉淀」→ 选来源（对话 / 达标的任务）再进目标步骤。地址 `#/crystallize/<runId>`（`#/chat|crystallize/<runId>` 保留并重定向），切页/刷新/浏览器后退都找得回；**状态语义**（三轮修：左栏原来把起草 run 的「已完成」当任务状态，实际 run 跑完≠沉淀完成——5 条里 3 条标「已完成」而 skills-mine 一条都没有；现在按任务状态显示 起草中/待审阅/起草失败/已停止，「已沉淀」只在 commit 成功后）：**放弃**由 `POST /api/crystallize/discard` 真落地（`discarded: true`，还在跑先停；左栏「×」与流程页「放弃」两处入口），没入库的草稿终于能收尾；**控件与任务页同一套**（三轮返工：`ListRow` 行壳 / `Modal` 浮层 / 顶栏 `setPageActions` 主操作 / 全局 `.badge` + `lib/run-status.ts` 状态映射 / `FoldSection` 折叠 / 分节就是任务详情那种朴素 `drawer-section`——不再自造行样式、`.status-tag`、遮罩层或卡片分节）；`GET /api/crystallize/targets` 加 `materialStats`（素材起草前可见、空素材早失败）+ **沉淀不是任务**（起草 run 不挂 issue、不进任务列表）且**可恢复进行中的起草**（起草 run 记 `subject.sourceRunId` + 沉淀目标 `crystallizeTarget`，重开流程页「继续」挂回——起草中看日志、已完成直接进审阅，对话按全部轮次匹配）。设计语义不变：**提炼的落独立根 `~/.agentdeck/skills-mine/`（git 化 + 自动 commit），与安装根 `~/.agentdeck/skills/` 物理分离**；触发只有用户主动；git 可用性保护；新建必填「作用描述」；任务场景需有用户反馈或审核过才可用 | `./design/skill-crystallization.md` §4.1.1 / §4.1.2 / **§5.0（四轮重设计）** / §6.1 / §7.4 / §8.1；`./srs/requirements.md` §16 的 **D80** |
 | **沉淀 skill（D80 实作）**（2026-10） | ✅ **已实作**（后端 951417a + 前端 16e8dcd + e2e）：双根 `skills-mine`（git 化 + per-repo 兜底身份 + 自动 commit）；`POST /api/crystallize/{targets,draft,commit}`；起草 run（`skill-draft` subject，复用执行管道，绝不自动审）；Chat 标题栏「沉淀成 skill」+ Tasks「优化 skill」（有反馈或审核过才可用）+ 三态面板（目标→起草→审阅→入库，撞 slug 409 切更新）+ 技能列表分组/遮蔽标注。**真机验证**：codex runtime 走 two-api 的 `/responses` 流式仍 502（另一条线的已知问题），起草 run 会因此失败——**非本功能缺陷**；happy path 由 `crystallize-e2e.test.ts`（假后端 + 真 git）全链钉住 | `./design/skill-crystallization.md`；`./srs/requirements.md` §16 的 **D80** |
 
 > ⚠️ **提交与分发**：本文件早前写着"这台开发机连不上 github.com"——**2026-10 复核时它通了**
