@@ -1118,3 +1118,26 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 - **不进任务列表**：与起草 run 同一条（`subject.type` 不是任务类；`reviewerAgentId: null`）。
 - **收口**：`kind` 别写成报告类（那会被当成业务报告流），且审核者的 `reviewStandard` 是 null
   ——平台不会把业务产出交给它，这条已经由角色 `'skill-reviewer'` 保证（§10.1 ④ 的修正）。
+
+### 10.7 第 3 步（自动返工）的勘察结论（2026-10-20）
+
+读 `apps/daemon/src/review.ts` 得到的**判决落点**（比原方案准得多）：
+
+- `ReviewCoordinator.handle(input)` 的入参是 `{ run, workspaceId, output, allowedActions,
+  tools?, fixedParams?, invalidAttempts?, maxReworks?, usedReworks? }` ——
+  也就是说**额度（`maxReworks` / `usedReworks`）本来就是它的参数**，D45 那套是现成的接缝。
+- 解析在 domain 的 `decideReview({ output, ... })`：**判决是从 run 的产出文本里读的**，
+  不是读某个文件 ⇒ 我们那条审核 run 要产出**它认识的形状**，否则会被判成不合规并
+  **诚实降级**成 `conclusion='needs_human'` + `reasonCode='internal_error'`
+  （`review.ts:35-39` 的注释：这样"这条判决不合规"在数据里看得见，而不是伪装成正常判决）。
+- executor 在**每个 review run 收尾时**都会调它（`executor.ts:1730`）⇒ 我们那条 run
+  **已经会自动拿到一条判决记录**，第 3 步要做的不是"造判决"，而是：
+  1. **查 `decideReview` 期望的产出口径**，让我们给审核者的 prompt 产出它就是能认的形状
+     （现在 prompt 里写的是 `review.json` —— 那是我没查就写的，很可能要改成"按判决格式回复"）；
+  2. 拿到判决后**按结论分流**：`fail` ⇒ 用现成的返工额度起一条 revise（feedback = 结论 + 问题），
+     额度用完或 `needs_human` ⇒ 停在"审核未通过"态交给人。
+  3. ⚠️ 动作那一路**不需要也不该开**：我们这条链的 `allowedActions` 是空的（executor 的注释：
+     "报告审核那条路上它是空的 ⇒ 判决只能给结论"），所以判决不会触发任何动作——这正是要的。
+
+**一句话**：第 3 步的活落在**两处**——审核 prompt 的产出口径（对齐 `decideReview`）+ 判决后的分流
+（复用额度与 revise），而不是我原来设计的 `review.json` 与自造计数器。
