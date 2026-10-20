@@ -1104,9 +1104,17 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
   `createReviewRun`）。**起草审核应当复用它**——那是"执行/审核两次同构"的落点，不要另起一套
   submit：`reviewer` = 内置审核者、`subject` = `{type:'skill-draft-review', id: draftRunId}`、
   `prompt` 给草稿小屋的 `skill/` 与 `material/` 两个目录（指针式，与起草 prompt 同一风格）。
-- **结论落盘**：审核 run 不进闭环（不走 `ReportIngestor`），所以结论得由**平台读它写下的文件**
-  （建议约定 `review.json`：结论 + 问题清单 + 证据，与 §10.3 说的 verdict 形状一致），
-  落在草稿小屋，起草 run 与审核 run 通过 subject 互相指得到。
+- **结论落盘（⚠️ 这一条我一开始写错了，勘察后改正）**：原文写的是"平台读审核者写下的
+  `review.json`"——那是**没查就写的方案**。实际上判决的落点是现成的：
+  `apps/daemon/src/review.ts` 的 `ReviewCoordinator`（"把一个 review run 的产出变成判决、
+  动作与审计"），而它在**审核 run 收尾时**由 executor 调用（`executor.ts:1730`，
+  `this.#deps.reviewCoordinator`）——**每一种 review run 都走这里**，不需要我们另造一个
+  文件约定。所以"结论怎么读"的正确问题是：**`ReviewCoordinator` 期望从哪读判决**
+  （它的解析口径），下一轮先读 `review.ts` 再写代码。
+- **返工轮次限制也已经存在**：`executor.ts` 的返工额度（D45）——"额度是任务级的，住在被审的
+  那条执行 run 上；已经用了几次就是那条 run 的 `chainDepth`"，`#reworkBudgetFor(run)` 一比就
+  知道还有没有额度。**所以 §10.1 ② 的"限 N 轮"不该自己造计数器**，要用这套（自造的话会有
+  两个真相：重启、重试、人工返工都可能让它们不一致）。
 - **不进任务列表**：与起草 run 同一条（`subject.type` 不是任务类；`reviewerAgentId: null`）。
 - **收口**：`kind` 别写成报告类（那会被当成业务报告流），且审核者的 `reviewStandard` 是 null
   ——平台不会把业务产出交给它，这条已经由角色 `'skill-reviewer'` 保证（§10.1 ④ 的修正）。
