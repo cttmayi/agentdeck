@@ -235,9 +235,12 @@ describe('★ 角色（原来还管"由谁审我"，2026-10 起那件事只有�
 })
 
 describe('★ runtime 可以选，但必须是装了的那个', () => {
-  test('不指定时缺省 claude', async () => {
+  test('不指定时缺省 `default`（跟随全局默认，而不是把当时的默认值烙进记录）', async () => {
+    // ★ 2026-10（定稿第 ⑦ 条）改了这条断言：从前缺省写死 `'claude'`，于是使用者后来
+    //   改了全局 runtime 默认值，这些 agent **不会跟着变**——而"默认"这个词就成了谎话，
+    //   且没人会去怀疑一条已经存好的记录。现在记的是 `'default'`，由 executor 三级解析。
     await withDaemon(async (url) => {
-      assert.equal((await create(url, { name: 'x' })).body['runtimeKey'], 'claude')
+      assert.equal((await create(url, { name: 'x' })).body['runtimeKey'], 'default')
     })
   })
 

@@ -87,7 +87,9 @@ export async function ensureBuiltinDrafter(
       name: DRAFTER_NAME,
       instructions: DRAFTER_INSTRUCTIONS,
       model: null,
-      runtimeKey: 'claude',
+      // 跟随全局默认（第 ⑦ 条）：不把它烙成某个 CLI——否则使用者改了全局默认，
+      // 内置起草者反而不跟着变，而"内置"恰恰应当是最跟随平台设置的那一条。
+      runtimeKey: 'default',
       workDir: null,
       // ★ 不挂任何 skill：按定稿第 ③ 条，起草 run 的技能集合是写死的，与它挂什么无关；
       //   给它挂业务技能只会让人以为那些技能会影响起草（它们不会）。

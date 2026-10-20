@@ -123,6 +123,11 @@ export interface ExecutorDeps {
    * 现在按 run 解析：一个 run 用哪个 CLI，由它所属 agent 的 runtimeKey 决定。
    */
   resolveRuntime?: (runtimeKey: string) => { backend: AgentBackend; descriptor: RuntimeDescriptor }
+  /**
+   * 启动时**侦测到的**那个 runtime（`'default'` 的最后一级兜底）。
+   * 缺省 = daemon 自己那条 backend（它就是启动时探测/选中的那个）。
+   */
+  defaultRuntimeKey?: string
   registry: RunRegistry
   backend: AgentBackend
   descriptor: RuntimeDescriptor
@@ -587,11 +592,22 @@ export class RunExecutor {
     const agent = await this.#deps.store.getAgent(run.agentId as never)
     if (!agent) return fallback
 
+    // ★ `'default'` = **跟随全局默认**（2026-10）。三级解析：
+    //   agent 的值 ⇒ workspace.defaultRuntimeKey ⇒ 启动时侦测到的那个（`#deps` 里带的）。
+    //   ⚠️ workspace 那层**每次现读**（不缓存）：它是使用者随时能改的设定，缓存住的
+    //      表现是"改了不生效、重启才生效"，而界面上看不出来。
+    let key = agent.runtimeKey
+    if (key === 'default') {
+      const ws = await this.#deps.store.getWorkspace(agent.workspaceId)
+      const configured = ws?.defaultRuntimeKey?.trim() ?? ''
+      key = configured !== '' ? configured : (this.#deps.defaultRuntimeKey ?? this.#deps.descriptor.key)
+    }
+
     try {
-      return this.#deps.resolveRuntime(agent.runtimeKey)
+      return this.#deps.resolveRuntime(key)
     } catch (err) {
       this.#deps.onWarn?.(
-        `agent ${agent.name} 的 runtimeKey（${agent.runtimeKey}）无法解析，` +
+        `agent ${agent.name} 的 runtimeKey（${key}）无法解析，` +
           `本次回退到 ${this.#deps.descriptor.key}：${err instanceof Error ? err.message : String(err)}`,
       )
       return fallback

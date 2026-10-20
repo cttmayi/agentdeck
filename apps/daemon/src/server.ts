@@ -1991,6 +1991,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ★ 按 agent 的 runtimeKey 解析 backend（D28）。
     //   在此之前 agent.runtimeKey 是个没人读的字段——界面上能选、审计里会记，
     //   行为上所有 agent 都跑同一个 CLI。那正是"接口接受了、行为上不存在"。
+    // 启动时**侦测到的**那个（= daemon 自己选中的 backend）：`'default'` 的最后一级兜底
+    defaultRuntimeKey: runtimeKey,
     resolveRuntime: (key) => {
       const adapter = knownRuntimeAdapters()[key]
       if (!adapter) {
@@ -3241,6 +3243,36 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // 存在 workspace 上，因为 daemon 也要用它渲染第一句话里的语言指令——
     // 浏览器偏好的话，"界面英文、模型仍被要求中文回答"就成了默认结果。
+    // ── 全局 runtime 默认值（2026-10，定稿第 ⑦ 条）──
+    //
+    // 空串 = **跟随侦测**（启动时选中的那个），不是"没设"的错误：使用者想回到
+    // "自动"就得能表达它，否则他只能猜一个值填进去。校验收在"已知 runtime ∪ 空串"上：
+    // 收到一个拼错的键若静默存下，故障会推迟到某个 run 启动时，表现是"某个 agent
+    // 突然回退到了别的 CLI"。
+    if (req.method === 'PUT' && path === '/api/workspace/default-runtime') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['runtimeKey']
+      if (typeof raw !== 'string') {
+        sendJson(res, 400, { error: `runtimeKey 必须是字符串（收到 ${JSON.stringify(raw)}）` })
+        return
+      }
+      const trimmed = raw.trim()
+      if (trimmed !== '' && !(trimmed in knownRuntimeAdapters())) {
+        sendJson(res, 400, {
+          error: `未知的 runtime：${trimmed}。可用的：${Object.keys(knownRuntimeAdapters()).join(', ')}（空串 = 跟随自动侦测）`,
+        })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, defaultRuntimeKey: trimmed, updatedAt: Date.now() })
+      sendJson(res, 200, { runtimeKey: trimmed, detected: runtimeKey })
+      return
+    }
+
     if (req.method === 'PUT' && path === '/api/workspace/locale') {
       const body = (await readJsonBody(req)) as Record<string, unknown>
       const raw = body['locale']
@@ -6972,8 +7004,13 @@ async function resolveRuntimeKey(
 ): Promise<{ ok: true; runtimeKey: string } | { ok: false; error: string }> {
   const adapters = knownRuntimeAdapters()
   if (raw === undefined || raw === null || raw === '') {
-    return { ok: true, runtimeKey: 'claude' }
+    // ★ 缺省从写死的 `'claude'` 改成 `'default'`（2026-10）：新 agent/导入的 agent
+    //   一律"跟随全局默认"，而不是把当时的默认值**烙**进记录里。烙进去的话，
+    //   使用者后来改了全局默认，这些 agent 不会跟着变——而"默认"这个词就变成了谎话。
+    return { ok: true, runtimeKey: 'default' }
   }
+  // `'default'` 是合法值（= 跟随全局默认，由 executor 三级解析），不是未知 runtime
+  if (raw === 'default') return { ok: true, runtimeKey: 'default' }
   if (typeof raw !== 'string' || !(raw in adapters)) {
     return {
       ok: false,

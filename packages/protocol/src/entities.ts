@@ -119,6 +119,20 @@ export const Workspace = z.object({
   defaultAgentId: AgentId.nullable().default(null),
 
   /**
+   * **全局 runtime 默认值**（2026-10）：agent 的 `runtimeKey` 写 `'default'` 时用它。
+   *
+   * 三级解析：`agent 的值 ⇒ 这个 ⇒ 启动时侦测到的第一个可用`。为什么要三级：
+   *   · 使用者想"默认都用 claude"时不必逐个 agent 去改（一次设定，处处生效）；
+   *   · 但某个 agent 要例外时必须能就地覆盖（所以 agent 的值优先）；
+   *   · 而没设过的人不该被迫先做一次选择（所以缺省跟随侦测）。
+   *
+   * ⚠️ **空串/缺省 = 跟随侦测**，不是一个具体值。不要把侦测结果写进来：
+   *    写进来的话，使用者换了一台机器（侦测结果变了）这份记录就成了**过期的**，
+   *    而表现是"它还在用那个没装的 CLI"，看不出原因。
+   */
+  defaultRuntimeKey: z.string().optional(),
+
+  /**
    * 界面语言（D39）。`'zh' | 'en'`，缺省 `'zh'`。
    *
    * ⚠️ 它存在 workspace 上而不是浏览器里，理由是**服务端也要知道**：第一句话模版
