@@ -100,6 +100,7 @@ import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import {
   DRAFTER_INSTRUCTIONS,
   DRAFTER_NAME,
+  ensureBuiltinAgents,
   ensureBuiltinDrafter,
 } from './builtin-drafter.ts'
 import {
@@ -2262,11 +2263,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    下次启动要回来）与"自愈"（内置标记丢了、指令被清空了要补回默认）。幂等由
   //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
   //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
-  const drafter = await ensureBuiltinDrafter(store, workspaceId)
-  if (drafter.action === 'created') {
-    info(`已建立内置起草者（沉淀这条链的执行者，可在「智能体」页查看与编辑）`)
-  } else if (drafter.action === 'healed') {
-    warn(`内置起草者被修复：${drafter.why}（已恢复成默认，使用者改过的内容不会被动）`)
+  const builtin = await ensureBuiltinAgents(store, workspaceId)
+  for (const [label, r] of [
+    ['内置起草者', builtin.drafter],
+    ['内置 skill 审核者', builtin.reviewer],
+  ] as const) {
+    if (r.action === 'created') {
+      info(`已建立${label}（沉淀这条链用的，可在「智能体」页查看与编辑）`)
+    } else if (r.action === 'healed') {
+      warn(`${label}被修复：${r.why}（已恢复成默认，使用者改过的内容不会被动）`)
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════

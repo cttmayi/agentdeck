@@ -18,7 +18,11 @@ import type { Agent } from '@agentdeck/protocol'
 import {
   DRAFTER_INSTRUCTIONS,
   DRAFTER_NAME,
+  SKILL_REVIEWER_INSTRUCTIONS,
+  SKILL_REVIEWER_NAME,
+  ensureBuiltinAgents,
   ensureBuiltinDrafter,
+  ensureBuiltinReviewer,
 } from './builtin-drafter.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -93,6 +97,49 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     const drafters = (await store.listAgents(WS)).filter((a) => a.role === 'drafter')
     assert.equal(drafters.length, 1, '起草者只该有一条')
     assert.equal(drafters[0]!.builtin, true)
+  })
+
+  test('★★ 内置的 skill 审核者：角色是 `skill-reviewer`（**不是** `reviewer`）', async () => {
+    const result = await ensureBuiltinReviewer(store, WS)
+    assert.equal(result.action, 'created')
+    const reviewer = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')
+    assert.ok(reviewer)
+    assert.equal(reviewer.builtin, true)
+    assert.equal(reviewer.name, SKILL_REVIEWER_NAME)
+    assert.equal(reviewer.instructions, SKILL_REVIEWER_INSTRUCTIONS)
+    assert.equal(reviewer.runtimeKey, 'default')
+    assert.deepEqual(reviewer.skillIds, [])
+    // ★ 这一条是**为什么不能用 'reviewer'** 的判据：业务报告的路由按
+    //   `role === 'reviewer'`（`packages/domain/src/routing/kind.ts`）挑人 ——
+    //   给它 `'reviewer'` 它就会去审业务报告（进了闭环），而它的指令是"审 skill"。
+    assert.notEqual(reviewer.role, 'reviewer')
+  })
+
+  test('★ 审核者同样：使用者改过的指令活过下一次对账、指令空 ⇒ 自愈', async () => {
+    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    await store.insertAgent({ ...mine, instructions: '我们团队审 skill 的额外要求。' })
+    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'left-alone')
+    assert.equal(
+      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
+      '我们团队审 skill 的额外要求。',
+    )
+
+    const emptied = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    await store.insertAgent({ ...emptied, instructions: '  ' })
+    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'healed')
+    assert.equal(
+      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
+      SKILL_REVIEWER_INSTRUCTIONS,
+    )
+  })
+
+  test('★★ `ensureBuiltinAgents` 两个都建，且**各一条**（不会按 `builtin` 一把抓）', async () => {
+    const out = await ensureBuiltinAgents(store, WS)
+    assert.equal(out.drafter.action, 'left-alone')
+    assert.equal(out.reviewer.action, 'left-alone')
+    const builtins = (await store.listAgents(WS)).filter((a) => a.builtin === true)
+    assert.equal(builtins.filter((a) => a.role === 'drafter').length, 1)
+    assert.equal(builtins.filter((a) => a.role === 'skill-reviewer').length, 1)
   })
 
   test('别的 agent（普通执行者/审核者）不受影响，也不会被当成起草者', async () => {

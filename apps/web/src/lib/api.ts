@@ -167,7 +167,18 @@ export interface Issue {
  *   `'reviewer'` 这种**等值**判断，所以新成员天然被排除；谁把它改成 `!==`，
  *   起草者就会漏进选择器。
  */
-export type AgentRole = 'executor' | 'reviewer' | 'drafter'
+export type AgentRole =
+  | 'executor'
+  | 'reviewer'
+  /** 平台内置的起草者（沉淀那条链）。 */
+  | 'drafter'
+  /**
+   * 平台内置的 **skill 审核者**（审起草出来的 skill，§10）。
+   *
+   * ⚠️ 它不是业务审核者 `'reviewer'`：业务报告的路由按 `role === 'reviewer'` 挑人，
+   * 给它那个角色它就会去审业务报告。两者**不能合并**。
+   */
+  | 'skill-reviewer'
 
 export interface Agent {
   id: string

@@ -51,6 +51,32 @@ export const DRAFTER_INSTRUCTIONS = [
   '5. **产出是文件**：写到工作目录里约定的产出目录，而不是只在回复里贴一段文字。',
 ].join('\n')
 
+/** 内置 skill 审核者的默认名字。 */
+export const SKILL_REVIEWER_NAME = 'Skill 审核者（内置）'
+
+/**
+ * 默认指令（§10 第 ④ 条：审起草出来的 skill）。
+ *
+ * ⚠️ 第 ③ 条（**脚本真执行**）还没实作、那个"总开关"也还没定，所以这份指令现在
+ *    **不含"去把脚本跑一遍"**——先立住"审什么"，等开关定了再加那一条。
+ */
+export const SKILL_REVIEWER_INSTRUCTIONS = [
+  '你是 skill 审核者：审一条刚起草出来的 skill **能不能用**，而不是重写它。',
+  '',
+  '## 你审什么',
+  '',
+  '1. **结构与契约**：正文是否有 `## When to Use` 与 `## Procedure`；frontmatter 的 `name` 是否 kebab-case、`description` 是否含触发条件。',
+  '2. **可复现性**：Procedure 里的命令是否带够参数、路径是否真的存在、引用的支持文件是否都在。',
+  '3. **依据**：正文的每一步是否能在素材里找到出处（素材里没有的东西不许出现）。',
+  '4. **脚本**：`scripts/` 下的脚本是否语法完整、是否声明了依赖、引用的路径是否存在。',
+  '5. **可复用性**：是不是只把这一次的任务抄了一遍（那样不算一条可复用的 skill）。',
+  '',
+  '## 你的产出',
+  '',
+  '一条结论 + 问题清单：**结论**（通过 / 不通过）、每条问题的**具体位置与理由**、以及**证据**。',
+  '不要重写正文，也不要给"更好的版本"——重写是起草者的事，你只指出哪里不合格。',
+].join('\n')
+
 /** 一次对账的结果（给日志与测试：说得出这次做了什么、为什么）。 */
 export type EnsureDrafterResult =
   | { action: 'created'; agentId: string }
@@ -64,6 +90,73 @@ export type EnsureDrafterResult =
  * 只在三种情况下动手：**没有**（建）、**内置标记丢了或指令空了**（补）、
  * **正常**（一字不动）。使用者改过的指令永远不动。
  */
+/**
+ * 确保这个工作区有一条可用的内置 **skill 审核者**（§10 第 ④ 条）。
+ *
+ * 与起草者同一套纪律（幂等 / 自愈 / 不覆盖使用者改动），只有角色与默认指令不同。
+ * ⚠️ 角色是 `'skill-reviewer'` 而**不是** `'reviewer'`：业务报告的路由按
+ *    `role === 'reviewer'` 挑人，给它那个角色它会去审业务报告（见 `entities.ts` 的注释）。
+ */
+export async function ensureBuiltinReviewer(
+  store: Store,
+  workspaceId: WorkspaceId,
+): Promise<EnsureDrafterResult> {
+  const all = await store.listAgents(workspaceId)
+  // 认 `builtin` + **这个角色**：起草者也是 `builtin`，不能按标记一把抓。
+  const found = all.find((a) => a.builtin === true && a.role === 'skill-reviewer')
+  if (!found) {
+    const byRole = all.find((a) => a.role === 'skill-reviewer')
+    if (byRole) {
+      await store.insertAgent({ ...byRole, builtin: true, updatedAt: Date.now() })
+      return { action: 'healed', agentId: byRole.id as string, why: '内置标记丢了（按角色认出来）' }
+    }
+    const now = Date.now()
+    const agent: Agent = {
+      id: ulid() as Agent['id'],
+      workspaceId,
+      name: SKILL_REVIEWER_NAME,
+      instructions: SKILL_REVIEWER_INSTRUCTIONS,
+      model: null,
+      runtimeKey: 'default',
+      workDir: null,
+      skillIds: [],
+      env: {},
+      role: 'skill-reviewer',
+      builtin: true,
+      // 它不审业务报告 ⇒ 不需要业务审核标准；没有标准，平台也不会把产出交给它审
+      reviewStandard: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await store.insertAgent(agent)
+    return { action: 'created', agentId: agent.id as string }
+  }
+  if (found.instructions.trim() === '') {
+    await store.insertAgent({
+      ...found,
+      instructions: SKILL_REVIEWER_INSTRUCTIONS,
+      updatedAt: Date.now(),
+    })
+    return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  return { action: 'left-alone', agentId: found.id as string }
+}
+
+/**
+ * 确保**内置的那一对**（起草者 + skill 审核者）都在。
+ *
+ * 为什么合成一个入口：启动时只调一次、日志只写一处，而且两个的自愈理由一样
+ * （幂等 / 补标记 / 补空指令）。分开调的话"只补了一个"这种半坏状态没人会发现。
+ */
+export async function ensureBuiltinAgents(
+  store: Store,
+  workspaceId: WorkspaceId,
+): Promise<{ drafter: EnsureDrafterResult; reviewer: EnsureDrafterResult }> {
+  const drafter = await ensureBuiltinDrafter(store, workspaceId)
+  const reviewer = await ensureBuiltinReviewer(store, workspaceId)
+  return { drafter, reviewer }
+}
+
 export async function ensureBuiltinDrafter(
   store: Store,
   workspaceId: WorkspaceId,

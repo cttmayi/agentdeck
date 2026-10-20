@@ -342,7 +342,12 @@ export type ReviewStandard = z.infer<typeof ReviewStandard>
 //    "你是 skill 作者"），而各处"选执行者/审核者"的判据写的都是 `role === 'executor'`
 //    / `role === 'reviewer'` 这种**等值**判断 ⇒ 新成员天然被排除在外（这正是要的）。
 //    反过来说：**谁要是把这类判据改成 `role !== 'reviewer'`，起草者就会漏进选择器**。
-export const AgentRole = z.enum(['executor', 'reviewer', 'drafter'])
+//   `skill-reviewer` = **平台内置的 skill 审核者**（审起草出来的 skill，2026-10 §10）。
+//   ⚠️ 为什么**不**用 `'reviewer'`：业务报告的路由判据是
+//   `packages/domain/src/routing/kind.ts` 的 `a.role === 'reviewer' && hasReviewIdentity(a)`
+//   ——给它 `'reviewer'` 的话它会**开始接收业务报告去审**（进了闭环），而它的指令是
+//   "审 skill 的质量与脚本"。独立成员靠上面那条等值判断天然落在外面。
+export const AgentRole = z.enum(['executor', 'reviewer', 'drafter', 'skill-reviewer'])
 export type AgentRole = z.infer<typeof AgentRole>
 
 /**
