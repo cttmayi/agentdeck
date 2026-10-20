@@ -38,6 +38,12 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 let dir: string
 let store: FileStore
 
+/**
+ * 夹具里的"写作规范"正文（真身是内置 `writing-skills`，这里只要一段**可辨认的**文字，
+ * 用来断言"规范真的进了 prompt"）。
+ */
+const SPEC = '## 写 skill 的规范（探针夹具）\n\n- 正文必须有 When to Use 与 Procedure 两节。\n'
+
 const WS = wsId('ws-crystal')
 
 before(async () => {
@@ -412,10 +418,19 @@ describe('buildDraftPrompt：起草指令（四轮：只留本次任务）', () 
       materialDir: 'material',
       outputDir: 'skill',
       target: 'new',
+      writingSpec: SPEC,
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
     assert.match(prompt, /skill\/SKILL\.md/, '产出契约')
-    assert.match(prompt, /writing-skills/, '"怎么写 skill"交给内置技能')
+    // ★ 2026-10（定稿第 ③ 条）：**规范改成进 prompt**，不再靠"注入技能 + 提示里点名
+    //   writing-skills"。判据也跟着换：既要**真的见到规范正文**，又不能再说
+    //   "你去读那个技能文件"（那句话现在指向一个不存在的东西——技能不再注入了）。
+    assert.match(prompt, /写 skill 的规范（探针夹具）/, '规范正文进了 prompt')
+    assert.doesNotMatch(
+      prompt,
+      /你加载了 \`writing-skills\` 技能/,
+      '不许再让起草者去找技能文件（第 ③ 条之后它没有被注入）',
+    )
     assert.match(prompt, /不结晶清单/, '不结晶清单由内置技能承载（提示里点了名）')
     assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
@@ -427,6 +442,7 @@ describe('buildDraftPrompt：起草指令（四轮：只留本次任务）', () 
       materialDir: 'material',
       outputDir: 'skill',
       target: 'update',
+      writingSpec: SPEC,
     })
     assert.match(prompt, /material\/existing-skill\//, '更新基线在素材里')
     assert.match(prompt, /修订/, '要求修订而不是重写')

@@ -240,8 +240,18 @@ export function buildDraftPrompt(opts: {
   target: 'new' | 'update'
   /** 这一版是"按意见改一版"（素材里有 previous-draft/ 与 feedback.md）。 */
   revised?: boolean
+  /**
+   * 写作规范正文（平台内置的 `writing-skills`，**随代码走**）。
+   *
+   * ★ 2026-10（定稿第 ③ 条）：从"注入技能"改为**直接进 prompt**。为什么改：
+   *   技能注入落在**runtime 相关**的目录（claude 是 `.claude/skills/`、codex 是
+   *   `.codex/skills/`，generic 这类适配器未必有通道）⇒ 同一份规范在换 CLI 之后
+   *   可能**根本送不到**，而表现是"这个 CLI 起草出来的 skill 结构不对"，没人会想到
+   *   是通道问题。prompt 是每个 CLI 都必然读到的东西。
+   */
+  writingSpec: string
 }): string {
-  const { scope, materialDir, outputDir, target, revised = false } = opts
+  const { scope, materialDir, outputDir, target, revised = false, writingSpec } = opts
   return `你是 skill 起草者。本次素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已经落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
 
 【先做这三件事】
@@ -249,8 +259,11 @@ export function buildDraftPrompt(opts: {
 2. 按需读 \`${materialDir}/\` 里真正需要的文件，**不要一次全读**。写 Procedure 之前，
    回查 \`${materialDir}/turns/*.md\`（或 \`task-run.md\`）里的**原始命令与参数**——
    命令必须能直接复制就跑，不许凭印象重写。
-3. 你加载了 \`writing-skills\` 技能：先看它的 description 判断要不要读正文；
-   写结构、拆支持文件、交付自检都以它为准（\`.claude/skills/writing-skills/\` 下有正文与 references）。
+3. **写作规范就在下面这一段里**（不需要去别处找技能文件）：写结构、拆支持文件、
+   交付自检都以它为准。
+
+【写作规范】
+${writingSpec}
 
 【产出契约】
 - \`${outputDir}/SKILL.md\` **必须存在**；支持文件放 \`${outputDir}/references/\`、

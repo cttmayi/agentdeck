@@ -83,8 +83,13 @@ async function runGit(
  * spawn 探测，找不到/超时/非零 → 不可用。**不抛异常**——"没有 git"是设计
  * 里定义的正常状态，抛异常会把它伪装成错误。
  */
-export async function probeGit(gitPath = 'git'): Promise<GitProbe> {
-  const result = await runGit(gitPath, ['--version'], process.cwd(), 3_000)
+export async function probeGit(gitPath = 'git', timeoutMs = 3_000): Promise<GitProbe> {
+  // ⚠️ `timeoutMs` 可注入是给**满载**留的余量：实测整包测试并行时，连"起一个 shell
+  //    脚本"本身都偶尔要 3 秒以上（脚本在外部卷上、机器同时在跑别的 daemon 测试），
+  //    于是 `有 git ⇒ 可用并带版本` 那条偶发超时（单独跑必过、全量跑偶发红）。
+  //    产品里保持 3 秒（探测要快，卡住就当不可用）；测试传更大的值——
+  //    **断言一个字没松**（还是"可用 + 带版本"），只是不给它一个不公平的截止时间。
+  const result = await runGit(gitPath, ['--version'], process.cwd(), timeoutMs)
   if (!result.ok) return { available: false, version: null }
   return { available: true, version: result.stdout.trim() }
 }

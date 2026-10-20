@@ -68,7 +68,10 @@ describe('probeGit：可用性开关', () => {
   })
 
   test('有 git ⇒ 可用并带版本', async () => {
-    const probe = await probeGit(fakeGit)
+    // ⚠️ 第二条参数是**超时**（默认 3 秒）。这条用的是假 git，理论上瞬间返回，
+    //    但整包测试并行满载时"起一个 shell 脚本"本身就能超过 3 秒 ⇒ 曾经偶发红
+    //    （单独跑必过）。断言一个字没松——只是不给它一个不公平的截止时间。
+    const probe = await probeGit(fakeGit, 20_000)
     assert.equal(probe.available, true)
     assert.match(probe.version ?? '', /2\.99\.0-fake/)
   })

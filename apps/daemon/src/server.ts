@@ -4507,43 +4507,58 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // 写作规范正文要在 prompt 里（第 ③ 条）⇒ 先读它，再组装 prompt。
+      // 「读不到」仍然是 500（安装不完整），但**不再**是"技能注入失败"——
+      // 现在它的用途是"进 prompt 的那段文字"，所以文案也照实说。
+      const writingSpec = await loadBuiltinSkill(WRITING_SKILLS)
+      if (writingSpec === null) {
+        sendJson(res, 500, {
+          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        })
+        return
+      }
       const draftPrompt = buildDraftPrompt({
         scope: targets.scope,
         materialDir: 'material',
         outputDir: 'skill',
         target: updateSnapshot === null ? 'new' : 'update',
+        writingSpec: writingSpec.body,
       })
 
-      // 内置写作技能读不到 = 打包坏了。**不让它静默退化成"没有规范的起草"**：
-      // 那样写出来的 skill 会质量不稳，而使用者只会觉得"这功能不好用"。
-      const writingSkill = await loadBuiltinSkill(WRITING_SKILLS)
-      if (writingSkill === null) {
-        sendJson(res, 500, {
-          error: '平台内置技能 writing-skills 读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
-        })
-        return
-      }
-
       // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
-      const sourceAgent = await store.getAgent(sourceRun.agentId)
-      if (!sourceAgent) {
-        sendJson(res, 400, { error: '发起 run 的执行者已不存在', code: 'agent_not_found' })
-        return
+      // ★ 起草者 = **平台内置的那条**（2026-10 定稿 §9），不再借来源 run 的执行者：
+      //   从前借它的后果是"起草质量取决于你从哪条 run 发起沉淀"——同一个人同一件事，
+      //   从聊天发起与从任务发起，写出来的 skill 结构可能不一样。
+      //   找不到（理论上不该发生：启动时对过账）就地补一条并使用默认指令，**不是** 500
+      //   ——它是平台自己的东西，自愈比拦下使用者更对。
+      const existingDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
+      let drafter = existingDrafter
+      if (!drafter) {
+        await ensureBuiltinDrafter(store, workspaceId)
+        drafter =
+          (await store.listAgents(workspaceId)).find((a) => a.builtin === true) ?? undefined
+      }
+      const drafterAgent = {
+        id: drafter?.id ?? (ulid() as Agent['id']),
+        name: drafter?.name ?? DRAFTER_NAME,
+        instructions: drafter?.instructions ?? DRAFTER_INSTRUCTIONS,
       }
       const outcome = await executor.submit({
         runId: draftRunId,
         kind: 'execute',
         agentRef: {
-          id: sourceAgent.id,
-          name: sourceAgent.name,
-          instructions: sourceAgent.instructions,
+          id: drafterAgent.id,
+          name: drafterAgent.name,
+          instructions: drafterAgent.instructions,
         },
         // ★ 注入**唯一**一个技能：平台内置的「写 skill 的 skill」（2026-10-19 四轮）。
         //   改之前这里是 `skills: []`，注释写着"注入会干扰提炼"——事实证明干扰的不是
         //   "有 skill"，而是"注入了业务 skill"：写作规范恰恰是起草者最需要的。
         //   它随代码走、不进使用者的技能列表，也不能被删除（删了没人知道为什么写不好）。
-        skills: [writingSkill],
+        // ★ 第 ③ 条：**不注入技能**——写作规范进了 prompt（见下面的 buildDraftPrompt）。
+        //   注入只对"有技能通道的 runtime"生效，而这份规范是每次起草都必须被读到的。
+        skills: [],
         // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
         //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
         //   `sourceRunId` = 它从哪条 run 发起（对话 = 那一轮 run，任务 =
@@ -4611,18 +4626,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 404, { error: '来源 run 已不存在', code: 'source_run_not_found' })
         return
       }
-      const sourceAgent = await store.getAgent(sourceRun.agentId)
-      if (!sourceAgent) {
-        sendJson(res, 400, { error: '发起 run 的执行者已不存在', code: 'agent_not_found' })
-        return
+      // ★ 与起草那条路同源：起草者是**平台内置的那条**，不是来源 run 的执行者
+      //   （「按意见改一版」如果还借来源执行者，就等于"重写一版"与"改一版"
+      //   用的不是同一个身份——两版的风格会分叉，而使用者只看到"改完反而不像同一条"）。
+      const reviseDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
+      if (!reviseDrafter) {
+        await ensureBuiltinDrafter(store, workspaceId)
       }
-      const writingSkill = await loadBuiltinSkill(WRITING_SKILLS)
-      if (writingSkill === null) {
-        sendJson(res, 500, {
-          error: '平台内置技能 writing-skills 读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
-        })
-        return
+      const reviseDrafterAgent = reviseDrafter ?? {
+        id: ulid() as Agent['id'],
+        name: DRAFTER_NAME,
+        instructions: DRAFTER_INSTRUCTIONS,
       }
 
       const previousDir = draftRoot(workRoot, draftRunId)
@@ -4668,23 +4682,35 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
 
+      // 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
+      // 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）
+      const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
+      if (reviseSpec === null) {
+        sendJson(res, 500, {
+          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        })
+        return
+      }
       const revisePrompt = buildDraftPrompt({
         scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
         materialDir: 'material',
         outputDir: 'skill',
         target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
         revised: true,
+        writingSpec: reviseSpec.body,
       })
 
       const outcome = await executor.submit({
         runId: newRunId,
         kind: 'execute',
         agentRef: {
-          id: sourceAgent.id,
-          name: sourceAgent.name,
-          instructions: sourceAgent.instructions,
+          id: reviseDrafterAgent.id,
+          name: reviseDrafterAgent.name,
+          instructions: reviseDrafterAgent.instructions,
         },
-        skills: [writingSkill],
+        // 第 ③ 条：不注入技能（规范在 prompt 里）
+        skills: [],
         subject: { type: 'skill-draft', id: newRunId, sourceRunId },
         prompt: revisePrompt,
         limits: { maxTurns: null, timeoutMs: null },
