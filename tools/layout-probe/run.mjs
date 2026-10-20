@@ -819,6 +819,82 @@ const CHECKS = [
     label: '★ 每行有「卸载」（D38 补齐：原来"装了要删只有改库"）',
     ok: (v) => v === true,
   },
+  // ── P2：历史（git）那一节（只有 source:'mine' 才有）──────────────
+  //
+  // 夹具是真入库的 `probe-mine`（daemon 真打了一条 commit）。这一族量四件事：它在
+  // mine 出现、**不在安装来的技能上出现**、默认选中最新那条、界面上列的文件数与
+  // **后端算的那一份**一一对上（前端只渲染，不许自己算）。
+  {
+    view: '技能',
+    key: 'skills.historyMineRowFound',
+    label: '★ 夹具「probe-mine」（真入库 ⇒ 有 git 历史）那一行在表里——这一族判据全靠它',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.historySectionOnMine',
+    label: '★★★ 展开「我提炼的」那一行 ⇒ 里面有「历史（git）」这一节',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyFoldTag',
+    label: '折叠入口是**真按钮**（tab 能到、读屏器能读）——不是标题文字假装的',
+    ok: (v) => v === 'BUTTON',
+  },
+  {
+    view: '技能',
+    key: 'skills.historyAbsentOnInstalled',
+    label: '★★★ 安装来的技能**没有**这一节（外部内容重新装就行；点开看到"版本管理未启用"是噪音）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyEntryCount',
+    label: '★★★ 历史列表里**真的**列出了提交（≥1 条；0 = 接口或夹具没通）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 条`,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyTopActive',
+    label: '★★★ 默认选中**最新**那条（打开这一节想问的是"最近改了什么"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyFirstVersionBadge',
+    label: '★ 只有一条提交时标出「首次入库（全部新增）」——否则最早那条会被读成"改了什么"',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyDiffFileCount',
+    label: '★★★ 选中之后**真的**渲染出逐文件差异（≥1 个文件块）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个文件`,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyDiffHunkCount',
+    label: '★ 差异里有 hunk 头（@@ … @@）——不是只列了文件名',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个 hunk`,
+  },
+  {
+    view: '技能',
+    key: 'skills.historyDiffChangeBadges',
+    label: '★★★ 首次入库那一版全是「新增」——对着空目录比，不该出现修改/删除',
+    ok: (v) => Array.isArray(v) && v.length >= 1 && v.every((x) => x === '新增'),
+    show: (v) => (Array.isArray(v) ? v.join(' / ') : String(v)),
+  },
+  {
+    view: '技能',
+    key: 'skills.historyDiffMatchesApi',
+    label: '★★★ 界面列出的文件数 == 后端 /compare 算出来的"非 same"文件数（前端只渲染、不自己算）',
+    ok: (v) => !!v && v.界面上 === v.后端算的,
+    show: (v) => (v ? `界面 ${v.界面上} / 后端 ${v.后端算的}` : '没量到这个值'),
+  },
   {
     view: '技能',
     key: 'skills.filesCellFormat',
@@ -3497,73 +3573,6 @@ try {
     throw new DaemonDown()
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // 造**一条任务**——但绝不造 run
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ★ 这条是必需的，不是装饰：任务页的"重复字样"检查最初是**空过**的
-  //   ——没有任务时表格一行都不渲染，于是把「等待审核」这句话塞回模板
-  //   也照样全绿（变异测试抓到的：变异 3 退出码 0）。表格里必须有行，
-  //   那条检查才真的在检查。
-  //
-  // ★ 只 POST /api/issues，**不建 run**：建 run 就会去调真的 CLI
-  //   （NFR-T-01 的底线）。这条路由只 `insertIssue`，不派发执行——所以
-  //   它是安全的，而"不派 assignee"是第二道保险。
-  // ★ 标题**故意很长**：任务清单是表格，标题是使用者输入的任意文本。
-  //   这条夹具用来量"一行能被拉多高"——原先没有上限，一个长标题就能把
-  //   整行撑成好几行，列表的节奏全乱。
-  const seedTitle =
-    '探针用的任务（别动它）：这个标题故意写得非常长，长到足以在列表里换行很多次，' +
-    '因为使用者的标题可以是任意长度的一段话，而列表的行高不该由它决定。'
-  //
-  // ★ 造**两条**：一条长标题、一条短标题。行高"与标题长度无关"这条性质，
-  //   只能靠两者对比来断言——写一个魔法阈值（"不超过 64px"）既容易被无关的
-  //   间距调整弄红，又挡不住"两个都是 100px"这种真问题。
-  // 记下第一条的 id：沉淀夹具那条源 run 要挂在它上面（`subject: {type:'issue'}`）。
-  let issueFixtureId = ''
-  try {
-    for (const title of [seedTitle, '短标题']) {
-      const res = await fetch(`${base}/api/issues`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title, description: '由 tools/layout-probe 造的夹具。' }),
-      })
-      if (!res.ok) {
-        log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
-        continue
-      }
-      const created = await res.json().catch(() => null)
-      if (issueFixtureId === '' && created?.issue?.id) issueFixtureId = String(created.issue.id)
-    }
-  } catch (err) {
-    log(yellow(`⚠ 造夹具任务时出错：${err}`))
-  }
-
-  // ★ 造一条 **skill** 当夹具（D38 之后首启不再播种 skill，技能库是空的）：
-  //   探针的 Skills 那一段要量列表、抽屉与卸载按钮，没有内容就只能量到空态。
-  try {
-    const res = await fetch(`${base}/api/skills`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        skills: [
-          {
-            slug: 'probe-skill',
-            name: '探针技能',
-            // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
-            //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
-            //   断言认的是正文里那句）。
-            body: '---\nname: probe-skill\ndescription: 探针夹具的说明\n---\n\n# 探针\n\n夹具。',
-            source: 'local',
-          },
-        ],
-      }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
-  } catch (err) {
-    log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
-  }
-
   // ★ 再造一个**老形态的审核者**（D38 的迁移夹具）：只挂 skill、没有内联标准。
   //   探针要走一遍"把判断依据并进「指令」→ 那条 skill 才卸得掉"。
   try {
@@ -4122,6 +4131,13 @@ try {
   //
   //   ⚠️ 播种（工作区 + 那对 agent）**只在首启**发生（`bootstrap` 见到已有工作区
   //      就直接返回），所以数据目录不能自己造——必须让 daemon 先建一遍。
+  // ⚠️ 声明必须**在注入 phase 之前**：下面造源 run 的 `subject: {id: issueFixtureId}`
+  //    用它，而这个 `let` 从前写在 4360（phase 之后）⇒ `let` 的暂时性死区让整段注入
+  //    抛 `Cannot access 'issueFixtureId' before initialization`，被那一句 catch 吞成
+  //    一句 ⚠ ⇒ 沉淀草稿夹具**从来没造出来**，而相关判据在量空态还报绿（2026-10 实测：
+  //    探针日志里那句 ⚠ 就是它）。
+  let issueFixtureId = ''
+
   const crystalFixture = { draftRunId: '', revisedRunId: '', sourceRunId: '' }
   try {
     await stopDaemon()
@@ -4261,6 +4277,138 @@ try {
     for (const l of daemonLog.split('\n').slice(-12)) log('  ' + l)
     throw new DaemonDown()
   }
+
+  // ⚠️ 这一段必须在这里，不能写在 HTTP 夹具那一段（第一版就是那样，探针日志里报
+  //    `ReferenceError: Cannot access 'crystalFixture' before initialization`）：
+  //    夹具草稿是**上面直写 store** 造的（那时 daemon 停着），`crystalFixture` 到
+  //    这一刻才有值；而入库又只能走 HTTP（git 由 daemon 自己 spawn）。
+  // ══════════════ P2 夹具：一条**真有 git 历史**的 mine 技能 ══════════════
+  //
+  // 「历史（git）」那一节只对 `source: 'mine'` 出现，而且它的内容**真的来自 git**
+  // ——注入一条 `source:'mine'` 的技能只能量到「还没有历史」（那也是一种状态，但
+  // 量不到列表与 diff）。所以这里走**真接口**把它入库：
+  //
+  //   POST /api/crystallize/commit  ⇒ daemon 自己 ensureMineRepo + commitMine
+  //   （skills-mine 落在探针的 scratch 数据目录里，不碰真家目录）
+  //
+  // 用 `crystalFixture.draftRunId` 那份草稿（它的 `crystallizeTarget` 是 `new`，
+  // 而且 `skill/` 里已经有三个文件）——`files` 也照传，正文必须是**能过入库校验**
+  // 的最小合法形状（缺 `## When to Use` / `## Procedure` 会 400，而那条错看起来像
+  // 历史接口坏了）。
+  //
+  // ⚠️ 第二次入库（进化）会多一条 commit，但探针只需要"有一条历史 + 它是首次入库"
+  //    这两件事：一条提交就能把这一节的列表、首次入库标记、全部新增的 diff 都量到。
+  try {
+    const skillMd =
+      '---\n' +
+      'name: probe-mine\n' +
+      'description: 探针夹具：给「历史（git）」那一节量排版用。\n' +
+      '---\n\n' +
+      '# 探针提炼的\n\n' +
+      '## When to Use\n\n- 探针量历史那一节时\n\n' +
+      '## Procedure\n\n1. 第一步\n2. 第二步\n\n' +
+      '## Verification\n\n- 探针全绿\n'
+    const res = await fetch(`${base}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftRunId: crystalFixture.draftRunId,
+        target: { kind: 'new' },
+        slug: 'probe-mine',
+        files: { 'SKILL.md': skillMd, 'references/notes.md': '# 说明\n\n第一版。\n' },
+      }),
+    })
+    if (!res.ok) {
+      // ⚠️ 必须把**响应体**打出来：第一版只打了状态码，看到 400 却不知道是
+      //    `invalid_artifacts`（校验不过）/ `slug_required` / `skill_md_required`…
+      //    而这条路由的 400 有六种理由，白跑一轮探针只为猜一个。
+      log(
+        yellow(
+          `⚠ 造 mine 夹具（真入库）失败（HTTP ${res.status}）：${(await res.text()).slice(0, 300)}`,
+        ),
+      )
+    } else {
+      const body = await res.json()
+      // git 不可用是**正常状态**（§7.3.1）：这一节会显示"版本管理未启用"，
+      // 那几条判据届时是红的——但理由如实打在日志里，不会被读成界面坏了。
+      if (body?.versioning?.enabled === false) {
+        log(yellow(`⚠ 版本管理未启用（${body.versioning.note ?? '没有理由'}）——历史那几条会红`))
+      }
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造 mine 夹具时出错：${err}`))
+  }
+
+
+
+  // ══════════════════════════════════════════════════════════════════
+  // 造**一条任务**——但绝不造 run
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ★ 这条是必需的，不是装饰：任务页的"重复字样"检查最初是**空过**的
+  //   ——没有任务时表格一行都不渲染，于是把「等待审核」这句话塞回模板
+  //   也照样全绿（变异测试抓到的：变异 3 退出码 0）。表格里必须有行，
+  //   那条检查才真的在检查。
+  //
+  // ★ 只 POST /api/issues，**不建 run**：建 run 就会去调真的 CLI
+  //   （NFR-T-01 的底线）。这条路由只 `insertIssue`，不派发执行——所以
+  //   它是安全的，而"不派 assignee"是第二道保险。
+  // ★ 标题**故意很长**：任务清单是表格，标题是使用者输入的任意文本。
+  //   这条夹具用来量"一行能被拉多高"——原先没有上限，一个长标题就能把
+  //   整行撑成好几行，列表的节奏全乱。
+  const seedTitle =
+    '探针用的任务（别动它）：这个标题故意写得非常长，长到足以在列表里换行很多次，' +
+    '因为使用者的标题可以是任意长度的一段话，而列表的行高不该由它决定。'
+  //
+  // ★ 造**两条**：一条长标题、一条短标题。行高"与标题长度无关"这条性质，
+  //   只能靠两者对比来断言——写一个魔法阈值（"不超过 64px"）既容易被无关的
+  //   间距调整弄红，又挡不住"两个都是 100px"这种真问题。
+  // 记下第一条的 id：沉淀夹具那条源 run 要挂在它上面（`subject: {type:'issue'}`）。
+
+  try {
+    for (const title of [seedTitle, '短标题']) {
+      const res = await fetch(`${base}/api/issues`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, description: '由 tools/layout-probe 造的夹具。' }),
+      })
+      if (!res.ok) {
+        log(yellow(`⚠ 造夹具任务失败（HTTP ${res.status}）——任务页那几条检查会空过`))
+        continue
+      }
+      const created = await res.json().catch(() => null)
+      if (issueFixtureId === '' && created?.issue?.id) issueFixtureId = String(created.issue.id)
+    }
+  } catch (err) {
+    log(yellow(`⚠ 造夹具任务时出错：${err}`))
+  }
+
+  // ★ 造一条 **skill** 当夹具（D38 之后首启不再播种 skill，技能库是空的）：
+  //   探针的 Skills 那一段要量列表、抽屉与卸载按钮，没有内容就只能量到空态。
+  try {
+    const res = await fetch(`${base}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [
+          {
+            slug: 'probe-skill',
+            name: '探针技能',
+            // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
+            //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
+            //   断言认的是正文里那句）。
+            body: '---\nname: probe-skill\ndescription: 探针夹具的说明\n---\n\n# 探针\n\n夹具。',
+            source: 'local',
+          },
+        ],
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
+  } catch (err) {
+    log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
+  }
+
+
 
   const outFd = fs.openSync(dumpPath, 'w')
   const errFd = fs.openSync(path.join(SCRATCH, 'chrome.err'), 'w')

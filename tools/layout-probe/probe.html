@@ -1061,6 +1061,98 @@
           return el ? cs(el).flexWrap : null
         })()
 
+        // ══════════════ ★ P2：历史（git）那一节 ══════════════
+        //
+        // ⚠️ 必须**在打开安装面板之前**量：面板一开，列表就被从 DOM 里换掉了
+        //    （下面那条 `skills.panelReplacesList` 钉的正是这件事）。
+        //
+        // 夹具是 run.mjs 里**真入库**的那条 `probe-mine`（走
+        // POST /api/crystallize/commit ⇒ daemon 在 skills-mine 里打了真 commit）。
+        // 为什么非得真入库：这一节的内容来自 git，注入一条 `source:'mine'` 的技能
+        // 只能量到「还没有历史」，列表、首次入库标记、全部新增的 diff 一条都量不到。
+        const mineRow = rowOfSlug('probe-mine')
+        const installRow = rowOfSlug('probe-skill')
+        facts['skills.historyMineRowFound'] = !!mineRow
+        /** 展开某一行并等它里面的内容（点首格 chevron，与工具页同一做法）。 */
+        const expandRow = async (row) => {
+          const toggle = row?.querySelector('.expand-toggle')
+          if (!toggle) return false
+          click(toggle)
+          await until(() => !!row?.parentElement?.querySelector('td[colspan]'))
+          return true
+        }
+        /** 展开行的内容格（表格里展开的内容挂在下一行的 `td[colspan]` 上）。 */
+        const expandedCell = (row) =>
+          row?.nextElementSibling?.querySelector('td[colspan]') ??
+          row?.parentElement?.querySelector('td[colspan]') ??
+          null
+        if (mineRow) {
+          await expandRow(mineRow)
+          const cell = expandedCell(mineRow)
+          const foldTitle = () =>
+            [...(cell?.querySelectorAll('button, summary') ?? [])].find((b) =>
+              (text(b) ?? '').includes('历史（git）'),
+            ) ?? null
+          facts['skills.historySectionOnMine'] = !!foldTitle()
+          // 折叠入口必须是**真按钮**（tab 能到、读屏器能读）——与全站折叠区块同一纪律
+          facts['skills.historyFoldTag'] = foldTitle()?.tagName ?? null
+          const fold = foldTitle()
+          if (fold) {
+            click(fold)
+            // 打开 ⇒ 组件挂载 ⇒ 取历史 ⇒ 默认选中最新那条（都要等异步回来）
+            await until(() => !!d().querySelector('.history-row'))
+          }
+          const rows = [...d().querySelectorAll('.history-row')]
+          facts['skills.historyEntryCount'] = rows.length
+          // 默认选中**最新**那条（打开这一节想问的是"最近改了什么"）
+          facts['skills.historyTopActive'] =
+            rows.length > 0 ? rows[0].classList.contains('active') : null
+          facts['skills.historyRowText'] = rows.length > 0 ? (text(rows[0]) ?? '').slice(0, 80) : null
+          // 只有一条提交时，它就是"首次入库"——那条标记要看得见（否则最早那条会被
+          // 读成"相对上一版改了什么"，而它其实是对着空目录）
+          facts['skills.historyFirstVersionBadge'] =
+            rows.length === 1 ? (text(rows[0]) ?? '').includes('首次入库') : null
+          const diffs = [...d().querySelectorAll('.rev-diff .file-diff')]
+          facts['skills.historyDiffFileCount'] = diffs.length
+          facts['skills.historyDiffChangeBadges'] = [
+            ...d().querySelectorAll('.rev-diff .change'),
+          ].map((el) => (text(el) ?? '').trim())
+          facts['skills.historyDiffHunkCount'] = d().querySelectorAll('.rev-diff .hunk-head').length
+          // ★ 界面上的文件数必须与**后端算的那一份**对得上（前端只渲染，不自己算）：
+          //   比 DOM 行数与 `/compare` 返回的"非 same 文件数"，多一个少一个都要红。
+          facts['skills.historyDiffMatchesApi'] = await (async () => {
+            try {
+              const list = await f.contentWindow.fetch('/api/skills').then((r) => r.json())
+              const mine = (list.skills ?? []).find((sk) => sk.slug === 'probe-mine')
+              if (!mine) return null
+              const hist = await f.contentWindow
+                .fetch(`/api/skills/${encodeURIComponent(mine.id)}/history`)
+                .then((r) => r.json())
+              if (!hist.available || (hist.entries ?? []).length === 0) return null
+              const rev = hist.entries[0].rev
+              const cmp = await f.contentWindow
+                .fetch(
+                  `/api/skills/${encodeURIComponent(mine.id)}/compare?from=empty&to=${encodeURIComponent(rev)}`,
+                )
+                .then((r) => r.json())
+              if (!cmp.available) return null
+              const changed = (cmp.files ?? []).filter((x) => x.change !== 'same').length
+              return { 界面上: diffs.length, 后端算的: changed }
+            } catch {
+              return null
+            }
+          })()
+          // 安装来的技能**不该**有这一节（那是外部内容，重新装就行；点开看到
+          // "版本管理未启用"是纯噪音）
+          if (installRow) {
+            await expandRow(installRow)
+            const installCell = expandedCell(installRow)
+            facts['skills.historyAbsentOnInstalled'] = ![
+              ...(installCell?.querySelectorAll('button, summary') ?? []),
+            ].some((b) => (text(b) ?? '').includes('历史（git）'))
+          }
+        }
+
         const openBtn = [...d().querySelectorAll('button')].find(
           (b) => b.textContent.trim() === '安装技能',
         )
