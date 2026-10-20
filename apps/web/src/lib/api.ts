@@ -118,6 +118,11 @@ export interface Identity {
   locale?: string
   /** D77：claude 的 WebSearch/WebFetch 开关（默认开）。设置页据此渲染那个开关。 */
   webSearchEnabled?: boolean
+  /**
+   * 全局 runtime 默认值（2026-10 第 ⑦ 条）：agent 的 `runtimeKey` 写 `'default'` 时用它。
+   * **空串 = 跟随侦测**（`currentRuntime` 那个），不是一个具体值。
+   */
+  defaultRuntimeKey?: string
   runtimes: RuntimeView[]
   /**
    * daemon 的能力标志（`apps/daemon/src/server.ts` 的 `GET /api/identity`）。
@@ -153,7 +158,16 @@ export interface Issue {
   createdAt: number
 }
 
-export type AgentRole = 'executor' | 'reviewer'
+/**
+ * 角色（D28）。
+ *
+ * ★ 2026-10 加 `'drafter'`：平台内置的**起草者**（沉淀那条链的执行者）。
+ *   界面上它出现在「智能体」页可查看与编辑，但**不出现在任何"选执行者/选审核者"
+ *   的地方**——它绝不参与业务闭环。⚠️ 各处过滤用的是 `role === 'executor'` /
+ *   `'reviewer'` 这种**等值**判断，所以新成员天然被排除；谁把它改成 `!==`，
+ *   起草者就会漏进选择器。
+ */
+export type AgentRole = 'executor' | 'reviewer' | 'drafter'
 
 export interface Agent {
   id: string
@@ -162,9 +176,24 @@ export interface Agent {
   workDir: string | null
   skillIds: string[]
   model: string | null
+  /**
+   * 用哪个 agent CLI。
+   *
+   * ★ 2026-10：`'default'` = **跟随全局默认**（三级解析：agent ⇒ 全局设定 ⇒ 启动时
+   *   侦测到的那个）。它不再是"某个具体 CLI 的名字"——所以界面上这一项选它时，
+   *   别把它显示成一个叫 default 的 CLI。
+   */
   runtimeKey: string
   /** 干活的还是审的（D28）。 */
   role: AgentRole
+  /**
+   * 平台**内置**的 agent（2026-10：沉淀的起草者）。
+   *
+   * 界面上它意味着三件事：**没有删除按钮**、**不给挂载 skill**、**多一个「恢复成
+   * 默认值」**。接口层同样拒绝（`builtin_agent_not_deletable` /
+   * `builtin_agent_field_locked`）——界面是第一道，不是唯一一道。
+   */
+  builtin?: boolean
   /**
    * ⚠️ 2026-10：这里原来有 `reviewerAgentId: string | null`（"由谁来审**这个执行
    *    agent** 的产出"）。那个字段连同概念一起撤掉了：**谁审由智能体组决定**

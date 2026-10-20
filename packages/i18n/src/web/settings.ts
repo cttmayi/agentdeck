@@ -30,6 +30,15 @@ export const settingsText = {
   },
 
   // ── claude 的 WebSearch / WebFetch 开关（D77）──
+  // ★ 2026-10（定稿第 ⑦ 条）：全局 runtime 默认值。文案要说清"自动侦测"是一个**能选的
+  //   值**（空串），否则使用者会以为"没设过"就是"没有默认值"。
+  'settings.defaultRuntime': { zh: 'Agent CLI（runtime）', en: 'Agent CLI (runtime)' },
+  'settings.defaultRuntimeLabel': { zh: '默认用哪个', en: 'Default CLI' },
+  'settings.defaultRuntimeAuto': { zh: '自动侦测（当前 {key}）', en: 'Auto-detect (now {key})' },
+  'settings.defaultRuntimeHint': {
+    zh: '新建的智能体默认「跟随全局默认」，所以这里改一次就处处生效；某个智能体要例外，在它的编辑页里单独选。',
+    en: 'New agents follow this global default, so one change applies everywhere; pick per agent when one needs an exception.',
+  },
   'settings.webSearch': { zh: '联网搜索', en: 'Web search' },
   'settings.webSearchLabel': {
     zh: '允许 claude 使用 WebSearch / WebFetch',

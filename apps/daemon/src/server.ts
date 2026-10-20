@@ -1143,6 +1143,8 @@ async function readWorkspaceSettings(
   locale: Locale
   /** D77：claude 的 WebSearch/WebFetch 开关。老数据没有这个键 ⇒ 默认开。 */
   webSearchEnabled: boolean
+  /** 全局 runtime 默认值（2026-10 第 ⑦ 条）：空串 = 跟随启动时侦测到的那个。 */
+  defaultRuntimeKey: string
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1160,6 +1162,7 @@ async function readWorkspaceSettings(
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
     webSearchEnabled: workspace?.webSearchEnabled ?? true,
+    defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
   }
 }
 
@@ -2923,6 +2926,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         //   那个开关——"界面显示的"与"executor 真的用的"走同一份读（上面的
         //   readWorkspaceSettings），不许分叉。
         webSearchEnabled: (await readWorkspaceSettings(store, workspaceId)).webSearchEnabled,
+        // ★ 全局 runtime 默认值（第 ⑦ 条）。设置页要显示"当前设的是哪个"，而
+        //   空串的语义是**跟随侦测**——界面必须能把这句话说出来，否则使用者会以为
+        //   "没设过"等于"没有默认值"。
+        defaultRuntimeKey: (await readWorkspaceSettings(store, workspaceId)).defaultRuntimeKey,
         /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *

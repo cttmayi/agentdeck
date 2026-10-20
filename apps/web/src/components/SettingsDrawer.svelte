@@ -17,6 +17,16 @@
   import { showToast } from '../lib/view.ts'
   import { LOCALES, LOCALE_LABEL, isLocale, type Locale } from '@agentdeck/i18n'
   import { locale, setLocale, t, tx } from '../lib/i18n.ts'
+  /** 设定页要列出的 runtime（身份接口给的那份清单） */
+  $: runtimeOptions = $identity?.runtimes.map((r) => r.key) ?? []
+  /**
+   * **启动时侦测到的**那个（探测有结论、且是当前那条）。
+   * 拿不到就退化成 `$identity?.currentRuntime`——界面上宁可说"未知"，
+   * 也不要显示一个猜的值（猜错的话使用者会照它去理解 agent 的行为）。
+   */
+  // ⚠️ `RuntimeView` 里**没有** `isCurrent` 这种字段（我第一版按"应该有"写，类型检查当场
+  //    拦下）。判据用 `currentRuntime`——它就是 daemon 启动时选中/侦测到的那个 key。
+  $: detectedRuntime = $identity?.currentRuntime ?? '?'
   import { setThemePref, themePref, type ThemePref } from '@agentdeck/ui'
 
   /** 主题三档：**存键、不存渲染好的句子**（切语言时标签要跟着变，渲染交给 $t）。 */
@@ -174,6 +184,44 @@
         {$t('settings.webSearchLabel')}
       </label>
       <p class="hint">{$t('settings.webSearchHint')}</p>
+    </section>
+
+    <!--
+      ★ 全局 runtime 默认值（2026-10，定稿第 ⑦ 条）。
+
+      agent 的 `runtimeKey` 记 `'default'` 时用它，**三级解析**：
+      `agent 的值 ⇒ 这一项 ⇒ 启动时侦测到的那个`。所以"自动侦测"必须是**一个能选的
+      选项**（空串），而不是"没设过"——不给这一项的话，使用者想回到自动就只能猜一个
+      具体 CLI 填进去，而那不是他想要的。
+
+      ⚠️ 侦测到的那个是**启动时**定的（`currentRuntime`）。所以这里如实说"当前 X"，
+      不假装实时。
+    -->
+    <section class="drawer-section" data-default-runtime>
+      <h3>{$t('settings.defaultRuntime')}</h3>
+      <label>
+        {$t('settings.defaultRuntimeLabel')}
+        <select
+          value={$identity?.defaultRuntimeKey ?? ''}
+          onchange={(e) => {
+            const v = (e.currentTarget as HTMLSelectElement).value
+            void api('/api/workspace/default-runtime', {
+              method: 'PUT',
+              body: JSON.stringify({ runtimeKey: v }),
+            })
+              .then(() => void loadIdentity())
+              .catch((err) =>
+                showToast(err instanceof Error ? err.message : String(err)),
+              )
+          }}
+        >
+          <option value="">{$t('settings.defaultRuntimeAuto', { key: detectedRuntime })}</option>
+          {#each runtimeOptions as key (key)}
+            <option value={key}>{key}</option>
+          {/each}
+        </select>
+      </label>
+      <p class="hint">{$t('settings.defaultRuntimeHint')}</p>
     </section>
 
     <!--

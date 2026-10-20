@@ -8,6 +8,7 @@
     skills,
     tools,
     deleteAgent,
+    loadAgents,
     updateAgent,
   } from '../lib/stores.ts'
   import { showToast } from '../lib/view.ts'
@@ -254,6 +255,37 @@
     }
   }
 
+  /**
+   * 「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）：把内置 agent 的指令/名字/技能集合
+   * 恢复成平台默认。
+   *
+   * 为什么必须有这个按钮：平台升级**不覆盖**使用者改过的指令（那是他的资产），
+   * 所以"改坏了想回原样"必须有一条路——没有它的话，唯一的办法是删了重建，而它**删不掉**。
+   */
+  async function restoreDefault(): Promise<void> {
+    const ok = await askConfirm({
+      title: tx('agents.restoreDefaultTitle'),
+      message: tx('agents.restoreDefaultBody', { name: agent.name }),
+      confirmLabel: tx('agents.restoreDefault'),
+    })
+    if (!ok) return
+    error = ''
+    busy = true
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/restore-default`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error(await res.text())
+      // 拉回最新记录：草稿里可能还留着被改过的指令，不刷新的话界面上看着"恢复没生效"
+      await loadAgents()
+      onclose()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = false
+    }
+  }
+
   $: attached = $skills.filter((s) => agent.skillIds.includes(s.id))
   /**
    * 能挂上去的 skill。
@@ -347,6 +379,12 @@
   {/if}
 
   <section class="card agent-card">
+    {#if agent.builtin}
+      <!-- 内置徽标：让人一眼看出"这条不是他建的、删不掉、只能恢复默认"。
+           不给徽标的话，使用者会去点删除，然后被 400 拒绝——那是一条
+           莫名其妙的失败（他并不知道有"内置"这回事）。 -->
+      <p class="builtin-badge">{$t('agents.builtinBadge')}</p>
+    {/if}
     <!-- ★ 角色是智能体比「新建私有」多出的一维（私有表单由槽位决定角色），
          占一整行。 -->
     <div class="cell role-cell">
@@ -379,6 +417,10 @@
         <label class="cell">
           {$t('agents.runtimeRowLabel')}
           <select id="agent-runtime" bind:value={draft.runtimeKey}>
+            <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
+                 agent 记的就是它，不给这一项的话下拉会落到第一个具体 runtime ——
+                 那等于"打开编辑页什么都没做，保存就把它的默认改掉了"。 -->
+            <option value="default">{$t('agents.runtimeFollowDefault')}</option>
             {#each runtimeOptions as key (key)}
               <option value={key}>{key}</option>
             {/each}
@@ -409,9 +451,14 @@
           {/if}
         </label>
 
-        <div class="cell skills-cell">
+        <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
-          {#if $skills.length === 0}
+          {#if agent.builtin}
+            <!-- ★ 内置的不给挂载入口：起草 run 的技能集合是**写死的**（第 ③ 条），
+                 挂了也不生效；给出入口只会让人以为"挂上就影响起草"。接口层也拒绝
+                 （`builtin_agent_field_locked`），这里是第一道。 -->
+            <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
+          {:else if $skills.length === 0}
             <p class="empty-value">{$t('agents.noSkillsYet')}</p>
           {:else if pickableSkills.length === 0}
             <!-- 库非空、但一条都不能挂：不能复用上面那句"还没有任何 skill" -->
@@ -466,14 +513,33 @@
     <button type="submit" class="primary" disabled={busy}>
       {busy ? $t('common.saving') : $t('common.save')}
     </button>
-    <button type="button" class="ghost danger" onclick={() => void remove()}>
-      {$t('agents.deleteButton')}
-    </button>
+    {#if agent.builtin}
+      <!-- 内置的**没有删除按钮**（它删不掉，服务端也拒绝）。留一个"点了会被拒"的
+           按钮比没有按钮更坏：那是把平台的一条规则变成一次莫名其妙的失败。 -->
+      <button type="button" class="ghost" onclick={() => void restoreDefault()} disabled={busy}>
+        {$t('agents.restoreDefault')}
+      </button>
+    {:else}
+      <button type="button" class="ghost danger" onclick={() => void remove()}>
+        {$t('agents.deleteButton')}
+      </button>
+    {/if}
     <button type="button" class="ghost" onclick={cancelEdit}>{$t('common.cancel')}</button>
   </div>
 </form>
 
 <style>
+  /* 内置徽标：一条**常驻**的说明（不是折叠的明细），因为它解释了"为什么这里
+     没有删除按钮、为什么技能挂不上"——删掉它，那两处"缺失"就变成莫名其妙的缺失。 */
+  .builtin-badge {
+    margin: 0 0 var(--space-3, 12px);
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--surface-2, #f0f0f3);
+    color: var(--text-muted, #555);
+    font-size: 12px;
+  }
+  .skills-cell.locked { opacity: 0.85; }
   /* ══════════════════════════════════════════════════════════════════
      布局
      ══════════════════════════════════════════════════════════════════

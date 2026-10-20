@@ -366,6 +366,23 @@ export const agentsText = {
   // ★ 2026-11：编辑页底部新增「删除」（保存 / 删除 / 取消，与组页同款）。
   //   历史 run 不删（那是执行时的快照）；被智能体组引用 / 是默认智能体时，
   //   服务端会 400 并说明下一步，这里原样展示。
+  // ★ 2026-10：内置智能体（沉淀的起草者）。它删不掉、挂不上 skill、只能「恢复成默认值」，
+  //   所以这三条文案要**解释那个"缺失"**——不然使用者只会看到"这里没有删除按钮"。
+  'agents.builtinBadge': {
+    zh: '平台内置：删不掉，只能「恢复成默认值」（沉淀这条链的起草者）',
+    en: 'Built in: cannot be deleted, only restored to default (the crystallize drafter)',
+  },
+  'agents.builtinNoSkills': {
+    zh: '内置智能体不挂 skill（起草用的写作规范随平台走，与挂载无关）',
+    en: 'Built-in agents mount no skills (the writing spec ships with the platform)',
+  },
+  'agents.restoreDefault': { zh: '恢复成默认值', en: 'Restore default' },
+  'agents.restoreDefaultTitle': { zh: '恢复成默认值？', en: 'Restore default?' },
+  'agents.restoreDefaultBody': {
+    zh: '「{name}」的指令与名字会恢复成平台默认。你改过的内容会丢失——平台升级本来不会动它，这一步是你主动按的。',
+    en: '"{name}" will go back to the platform default. Your edits are lost — upgrades never touch them, this is your own click.',
+  },
+  'agents.runtimeFollowDefault': { zh: '跟随全局默认', en: 'Follow global default' },
   'agents.deleteButton': { zh: '删除', en: 'Delete' },
   'agents.confirmDeleteTitle': { zh: '删除智能体', en: 'Delete agent' },
   'agents.confirmDeleteBody': {
