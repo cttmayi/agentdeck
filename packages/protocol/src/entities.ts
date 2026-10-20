@@ -323,7 +323,12 @@ export type ReviewStandard = z.infer<typeof ReviewStandard>
  * 每个 agent 有**自己的** skill 子集与 tool 子集（FR-AGENT-03/12/17）。
  */
 /** agent 的角色（D28）。 */
-export const AgentRole = z.enum(['executor', 'reviewer'])
+// ⚠️ `drafter` = **平台内置的起草者**（沉淀/skill 起草那条链用它，2026-10 定稿）。
+//    加它的理由不只是"多一种角色"：起草者**绝不能被选去干业务活**（它的指令是
+//    "你是 skill 作者"），而各处"选执行者/审核者"的判据写的都是 `role === 'executor'`
+//    / `role === 'reviewer'` 这种**等值**判断 ⇒ 新成员天然被排除在外（这正是要的）。
+//    反过来说：**谁要是把这类判据改成 `role !== 'reviewer'`，起草者就会漏进选择器**。
+export const AgentRole = z.enum(['executor', 'reviewer', 'drafter'])
 export type AgentRole = z.infer<typeof AgentRole>
 
 /**
@@ -342,6 +347,18 @@ export const Agent = z.object({
   name: z.string().min(1).max(100),
   instructions: z.string(),
   model: z.string().nullable(),
+  /**
+   * 平台**内置**的 agent（2026-10：沉淀的起草者）。
+   *
+   * 内置的含义有两条，缺一不可：**不许删**（只允许「恢复成默认值」）、以及
+   * **不参与业务选择**。为什么用标记而不是按名字/按 id 认：名字使用者能改，
+   * 按名字认会在改名后失效，而失效的表现是"它又能被删/被选去跑业务任务"——
+   * 一种**静默**且查起来很远的故障。
+   *
+   * ⚠️ 可选字段（老记录里没有）：老 data 目录读进来必须是"不是内置"，
+   *    而不是读崩——所以它有默认值 `false`，不能写成必填。
+   */
+  builtin: z.boolean().optional(),
   /** runtime 描述表键（首版恒为 'claude'）。 */
   runtimeKey: z.string().min(1),
   /** 默认工作目录。使用者指定；平台不做仓库检出（D20）。 */
