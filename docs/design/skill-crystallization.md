@@ -1087,3 +1087,20 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 4. 脚本真执行（**先定 10.2 的那个开关**）；
 5. 界面：步骤条加 ②.5、审核结论与问题清单摆在审阅界面上（常驻结论、明细折叠），未通过态给"重新起草 / 明知未通过仍入库"；
 6. 判据：审核 run 真的起来且结论落盘、不通过的返工真的发生且轮次有上限、**「改一版」的产出也过审**、审核失败 ≠ 通过、审核者不进任何选择器、探针量界面（步骤条 + 结论区）。
+
+### 10.6 第 2 步的接线点（勘察过，下一轮照这个接）
+
+- **subject 枚举**：`packages/protocol/src/entities.ts:819`
+  `type: z.enum(['issue','report','run','conversation','skill-draft'])` ⇒ 加 `'skill-draft-review'`。
+  同处 822-835 是 `skill-draft` 带 `sourceRunId` / `crystallizeTarget` 的写法（照它加）。
+- **审核 run 怎么起**：现成的是 `server.ts:2459` 的 `createRunForReviewer({ reviewer, kind, title,
+  body, subject, prompt, chainDepth, inputBlobRef })`（报告审核走的就是它，见 2460-2471 的
+  `createReviewRun`）。**起草审核应当复用它**——那是"执行/审核两次同构"的落点，不要另起一套
+  submit：`reviewer` = 内置审核者、`subject` = `{type:'skill-draft-review', id: draftRunId}`、
+  `prompt` 给草稿小屋的 `skill/` 与 `material/` 两个目录（指针式，与起草 prompt 同一风格）。
+- **结论落盘**：审核 run 不进闭环（不走 `ReportIngestor`），所以结论得由**平台读它写下的文件**
+  （建议约定 `review.json`：结论 + 问题清单 + 证据，与 §10.3 说的 verdict 形状一致），
+  落在草稿小屋，起草 run 与审核 run 通过 subject 互相指得到。
+- **不进任务列表**：与起草 run 同一条（`subject.type` 不是任务类；`reviewerAgentId: null`）。
+- **收口**：`kind` 别写成报告类（那会被当成业务报告流），且审核者的 `reviewStandard` 是 null
+  ——平台不会把业务产出交给它，这条已经由角色 `'skill-reviewer'` 保证（§10.1 ④ 的修正）。
