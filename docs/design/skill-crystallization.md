@@ -587,8 +587,9 @@ description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / 
   `compareMineRevisions`），`gitPath` 可注入、差异用 `text-diff.ts` **在后端算**（与 P1 同一份实现）。
   ⚠️ 三条边界都在路由注释里：非 `mine` 的技能返回 `available:false` + 理由（**不是** 404——技能在，
   只是没有"版本"这个概念）；git 不可用同样 `available:false` + 理由（§7.3.1 的正常状态）；
-  草稿 vs 当前版本**不在这里**（那是 `/api/crystallize/diff`，P1）。界面（技能页展开行的「历史」分节）
-  是紧接着的下一刀。
+  草稿 vs 当前版本**不在这里**（那是 `/api/crystallize/diff`，P1）。界面已落地（2026-10-20）：技能页展开行的 `SkillHistory.svelte`（只有 `source: 'mine'` 出现），
+  列出提交 → 默认选中最新那条 → 它的**相对上一版**逐文件 `A`/`M`/`D` + hunk；最早那条用
+  `from=empty`（空目录）当基线。⚠️ 探针覆盖还没做（夹具里只有草稿 run，没有已入库的 mine 技能）。
 
 #### 5.0.9 使用者定稿（2026-10-19 逐条确认）
 

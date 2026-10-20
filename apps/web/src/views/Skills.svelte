@@ -19,6 +19,7 @@
   import { fetchSkillList, type SkillListEntry, type SkillListResult } from '../lib/skill-list.ts'
   import { t, tx } from '../lib/i18n.ts'
   import { Table, SourceRef, ExpandToggle } from '@agentdeck/ui/components'
+  import SkillHistory from '../components/SkillHistory.svelte'
   import {
     InstallError,
     describeInstallMessages,
@@ -1211,6 +1212,14 @@
               <!-- 7 列：动作那一列随"skill 不再带动作"一起去掉了 -->
               <td colspan="7">
                 <pre class="skill-body">{s.body}</pre>
+                <!-- 历史（git）只对「我提炼的」有意义：安装来的是外部内容，重新装就行
+                     （设计 §「版本管理」那一行）。所以 non-mine 连这一节都不出现——
+                     点开一条装来的技能看到"版本管理未启用"是纯噪音。
+                     ★ 2026-10：这一节就是 P2 的界面（历史一直躺在 skills-mine 的 git 里，
+                       从前没有入口 ⇒ "更新之后看不出改了什么"，进化等于盲签）。 -->
+                {#if s.source === 'mine'}
+                  <SkillHistory skill={{ id: s.id, slug: s.slug, source: s.source }} />
+                {/if}
                 {#if fileCount > 0}
                   <details class="support">
                     <summary>{$t('skills.supportFiles', { count: fileCount })}</summary>

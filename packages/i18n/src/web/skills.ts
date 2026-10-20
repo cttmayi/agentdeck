@@ -244,6 +244,28 @@ export const skillsText = {
   },
 
   // ── 列表里"这条是从本地目录来的" ──
+  // ── 历史（git 版本管理，P2）────────────────────────────────────────
+  //
+  // 只有「我提炼的」技能有历史（安装来的是外部内容，重新装就行）；系统没有 git
+  // 也是**正常状态**（设计 §7.3.1）——所以"没有历史"与"版本管理没启用"是两句
+  // 必须分开的话：合成一句会让使用者去装 git，而他的技能其实只是还没沉淀过。
+  'skills.historyTitle': { zh: '历史（git）', en: 'History (git)' },
+  'skills.historyLoading': { zh: '正在读历史…', en: 'Reading history…' },
+  'skills.historyEmpty': {
+    zh: '还没有历史——这条技能入库之后，每次沉淀/进化都会记一条',
+    en: 'No history yet — each crystallize/evolve records a commit',
+  },
+  'skills.historyOff': { zh: '版本管理未启用：{reason}', en: 'Versioning off: {reason}' },
+  'skills.historyPickHint': {
+    zh: '选一条看那一版改了什么（对比它的上一版）',
+    en: 'Pick a commit to see what changed in it',
+  },
+  'skills.historyFirstVersion': { zh: '这一版是首次入库（全部新增）', en: 'First commit (all added)' },
+  'skills.historyNoChanges': { zh: '与上一版一字不差', en: 'Identical to the previous version' },
+  'skills.historyChanges': { zh: '相对上一版：{n} 个文件', en: 'vs previous: {n} files' },
+  'skills.historyFilesInRev': { zh: '这一版里的文件', en: 'Files in this version' },
+  'skills.historyRevisionFailed': { zh: '这一版读不出来：{reason}', en: 'Cannot read this version: {reason}' },
+  'skills.historyCompareFailed': { zh: '对比没算出来：{reason}', en: 'Compare failed: {reason}' },
   'skills.fromDir': { zh: '来自 {dir}', en: 'From {dir}' },
 
   // ── 命令式文案：toast / confirm / 就地错误（事件回调里用 `tx`）──

@@ -5154,7 +5154,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: '需要 from 与 to（各自是 commit 或 current）', code: 'range_required' })
         return
       }
-      const side = (raw: string) => (raw === 'current' ? { current: currentFiles } : { rev: raw })
+      // `empty` = 空目录：**首次入库那一版**的对比基线（"对着空目录全部新增"）。
+      // 没有它，最早那条提交只能显示成"没有上一版"——而"新建了什么"恰恰是
+      // 最该看得见的一眼。
+      const side = (raw: string) =>
+        raw === 'current' ? { current: currentFiles } : raw === 'empty' ? { current: {} } : { rev: raw }
       sendJson(
         res,
         200,
