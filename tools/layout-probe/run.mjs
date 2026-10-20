@@ -4166,7 +4166,11 @@ try {
   //    探针日志里那句 ⚠ 就是它）。
   let issueFixtureId = ''
 
-  const crystalFixture = { draftRunId: '', revisedRunId: '', sourceRunId: '' }
+  // ⚠️ `mineDraftRunId` 必须是**独立的一条**：下面 P2 那段会把它**入库**，而入库路由会给
+  //    它打 `crystallized: true` ⇒ `findActiveDraft` 从此跳过它（见 crystallize.ts:181）——
+  //    第一次用 `draftRunId` 去入库，直接把「沉淀」那一族 17 条判据打成红（它要的就是
+  //    "那条未入库的草稿挂得上"）。夹具之间**不许互相消费**。
+  const crystalFixture = { draftRunId: '', revisedRunId: '', sourceRunId: '', mineDraftRunId: '' }
   try {
     await stopDaemon()
     const { FileStore } = await import(path.join(ROOT, 'packages', 'store-file', 'src', 'index.ts'))
@@ -4213,6 +4217,8 @@ try {
          */
         const sourceRunId = await makeSource()
         const revisedSourceRunId = await makeSource()
+        // 第三条源 + 第三条草稿：**只给 P2 的入库夹具用**（它会被 crystallized，见上）
+        const mineSourceRunId = await makeSource()
 
         /**
          * 造一条**已完成的起草 run** + 它的产出目录。
@@ -4292,6 +4298,12 @@ try {
           },
           { revisedFrom: crystalFixture.draftRunId, sourceRunId: revisedSourceRunId },
         )
+        // 专供 P2：一条**会被入库**的草稿（它自己一个源 run ⇒ 不影响上面两条）
+        crystalFixture.mineDraftRunId = await makeDraft(
+          ulid(),
+          { 'SKILL.md': skillMd('第二步') },
+          { sourceRunId: mineSourceRunId },
+        )
       }
     } finally {
       await store.close()
@@ -4340,7 +4352,7 @@ try {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        draftRunId: crystalFixture.draftRunId,
+        draftRunId: crystalFixture.mineDraftRunId,
         target: { kind: 'new' },
         slug: 'probe-mine',
         files: { 'SKILL.md': skillMd, 'references/notes.md': '# 说明\n\n第一版。\n' },
