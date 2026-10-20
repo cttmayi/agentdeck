@@ -173,9 +173,28 @@ git 不可用 → 同样 `available:false` + 理由（§7.3.1 的正常状态）
 `t` 是 store（模板用 `$t`）、`tx` 是命令式（脚本用），`relativeTime(at, now)` 要两个参数——
 两处都让 svelte-check 报过错，注释里写了。
 
-**⚠️ 还没做的**：这一节的**探针覆盖**（探针的夹具里只有草稿 run，没有"已入库的 mine 技能"，
-要能真量到这一节得先在探针里造一条带 git 历史的 mine 夹具）。所以目前它只有 `svelte-check`
-与接口层的测试撑着，**布局本身还没有被真浏览器量过**。
+**⚠️ 还没做的：这一节的探针覆盖（2026-10-20 试了一刀，卡住并停在这里）**
+
+探针的夹具里只有**草稿 run**，没有"已入库的 mine 技能"，而这一节的内容真的来自 git ⇒
+要量它必须先在探针里造一条有历史的 mine 夹具。两次尝试的结论（**都已修掉**，别再踩）：
+
+1. 入库那一段一开始写在 HTTP 夹具那一段 ⇒ 探针日志报
+   `ReferenceError: Cannot access 'crystalFixture' before initialization`：夹具草稿是**上面直写
+   store** 造的（那时 daemon 停着），`crystalFixture` 到第二次 daemon 起来才有值；而入库只能走
+   HTTP（git 由 daemon 自己 spawn）。⇒ **必须放在第二次 `startDaemon()` + `waitFor` 之后**。
+   ⚠️ 注意文件里 `throw new DaemonDown()` 有**两处**，第一版插到了第一次启动那个后面，于是又落在
+   `crystalFixture` 定义之前（判据：它后面紧跟 `const outFd = fs.openSync(...)` 的那个才是第二次）。
+2. 位置修对之后，`POST /api/crystallize/commit` 返回 **HTTP 400**，夹具没造出来 ⇒
+   **下一步就是把这句的响应体打出来**（夹具那条 `log(yellow(...))` 现在没带 body，看不见是
+   `invalid_artifacts` / `slug_required` / `skill_md_required` 里的哪一个），照理由修即可。
+
+那两次尝试的探针改动（事实 + 11 条判据 + 真入库夹具）**存在 stash 里**：
+`git stash list` → `stash@{0}: P2 探针覆盖（未完成…）`（只有 `tools/layout-probe/{run.mjs,probe.html}`
+两个文件）。恢复：`git stash pop`。判据本身已经写好（这一节在 mine 出现 / **不在安装来的技能上出现** /
+默认选中最新 / 首次入库标记 / 文件数与**后端 `/compare`** 一一对上），只差夹具那一步。
+
+在那之前，这一节只有 `svelte-check` + 接口层测试撑着，**布局本身还没有被真浏览器量过**——
+`probe32` 那次全绿（442 项）只证明 `Skills.svelte` 这一改**没有回归**。
 
 **审阅页排版已重排（2026-10-19）**：结论条常驻（能不能入库 / 改了什么 / 目标是谁 + 「按意见改一版」），
 主区 = 文件树 240px + 窗格（`[内容]｜[差异]` 同位置切换），素材与起草日志折成一行摘要放到审阅**下方**。
