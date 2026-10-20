@@ -97,6 +97,7 @@ import {
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
+import { ensureBuiltinDrafter } from './builtin-drafter.ts'
 import {
   collectMaterial,
   copyMaterial,
@@ -2228,6 +2229,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const probe2 = await backend.probe()
 
   const workspaceId = await bootstrap(store, info)
+
+  // ══════════════════════════════════════════════════════════════════
+  // 内置起草者（2026-10 定稿 §9）：每次启动对一次账
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ **每次启动**都跑，不是"首启播种一次"：它要满足"不许删"（使用者绕过界面删掉，
+  //    下次启动要回来）与"自愈"（内置标记丢了、指令被清空了要补回默认）。幂等由
+  //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
+  //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
+  const drafter = await ensureBuiltinDrafter(store, workspaceId)
+  if (drafter.action === 'created') {
+    info(`已建立内置起草者（沉淀这条链的执行者，可在「智能体」页查看与编辑）`)
+  } else if (drafter.action === 'healed') {
+    warn(`内置起草者被修复：${drafter.why}（已恢复成默认，使用者改过的内容不会被动）`)
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // ★ 启动时把老 agent 记录里**已撤下的字段**从磁盘上摘掉（2026-10）
