@@ -984,3 +984,19 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 它不出现在任何选执行者/审核者的地方；删不掉；改了之后能恢复、恢复后与默认**一字不差**；平台升级后使用者的改动**还在**；起草 run 的第一句话里是**它的**指令且含规范正文；**换 CLI 也必须读到规范**（③ 的目的）；CLI 不可用时报可照做的错；全局 runtime 默认为 `default` 时新 agent 跟随全局。
 
 ⚠️ 决策编号待补进 `docs/srs/requirements.md` §16（不要乱填号）。
+
+### 9.5 施工单（照着改，路径与锚点都已核对）
+
+| 步 | 文件（本仓库实测路径） | 具体改什么 |
+|---|---|---|
+| 1 | `packages/protocol`（Agent 类型）→ `packages/domain`（端口/校验）→ `packages/store-file` | Agent 加**内置标记**；角色枚举加**起草者**。⚠️ 字段名照现有风格取，`erasableSyntaxOnly` 禁 enum/namespace |
+| 2 | `apps/daemon/src/server.ts` 首启播种处（`insertAgent` 那两处，~6944/6964） | 加第三次播种：内置起草者。**幂等**：已有就不覆盖（使用者改过的必须活过升级）；被改名/损坏时自愈到默认 |
+| 3 | 新建 `apps/daemon/src/builtin-drafter.ts`（仿 `builtin-skills.ts`） | 默认指令常量（身份 + 从 `writing-skills` 搬来的写作规范）+ `DRAFTER_NAME` + 「恢复默认」的纯函数（比较/重置） |
+| 4 | `apps/daemon/src/crystallize.ts` `buildDraftPrompt()`（~245）+ 起草路由（`server.ts` ~4436-4475） | 规范正文**从"注入技能"改为进 prompt**；`agentRef.instructions` 改用内置起草者的指令；`skills:` 不再传 `writingSkill`；CLI 取该 agent 的 runtime |
+| 5 | 全局设定 + 各 agent 的 runtime（⑦） | 设定项「runtime 默认值」+ 侦测第一个可用；解析顺序 `agent ⇒ 全局默认 ⇒ 侦测第一个可用`；新建/播种的 agent 一律写 `default`。前端落在 `WorkspaceSettings.svelte`（**它仍是抽屉**） |
+| 6 | `apps/web/src/views/Agents.svelte` + `NewAgentForm.svelte` | 内置徽标、指令可编辑、「恢复成默认值」（仅在"与默认不同"时可点）、**不给挂载技能/删除入口**、CLI 可设 |
+| 7 | 过滤：`NewTaskForm.svelte`（执行者下拉）、`MemberSlotForm.svelte` / 智能体组页（成员槽）、任何"选审核者"的地方 | 排除起草者角色。**这是最容易漏、后果最远的一步**（漏了就会有人拿它跑业务任务） |
+| 8 | 判据 | `crystallize.test.ts`（prompt 里有规范正文）、`crystallize-e2e.test.ts`（起草 run 的第一句话是它的指令）、`agents-create.test.ts`（播种幂等/不可删/恢复默认）、`runtime-agnostic.test.ts`（不许假设 claude）、探针「智能体页」那几族 + 新判据（徽标、恢复按钮、下拉里没有它） |
+
+**顺序理由**：1→3 是数据与常量（没它们后面都得返工）；4 是行为切换（这一步之后起草质量才固定）；5→6 是可见性；7 是防误用；8 是收口。
+**每步都要能单独提交**（这个仓库的习惯：一批一次提交），且每步跑 `pnpm run check`。
