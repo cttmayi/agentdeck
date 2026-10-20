@@ -3575,6 +3575,34 @@ try {
 
   // ★ 再造一个**老形态的审核者**（D38 的迁移夹具）：只挂 skill、没有内联标准。
   //   探针要走一遍"把判断依据并进「指令」→ 那条 skill 才卸得掉"。
+  // ⚠️ 这条 `POST /api/skills` 必须在**下面这次查找之前**执行：第一版把它写在文件
+  //    后半（3800 行之外，第二次 daemon 起来之后），而迁移（D38）那一族在这里就
+  //    `skills.find(s => s.slug === 'probe-skill')` —— 找不到就只打一句 ⚠、整族
+  //    空过，于是判据量着空态还报绿（2026-10 掀出来的假绿，与 `issueFixtureId`
+  //    那处 TDZ 同一类病：**夹具被用在它存在之前**）。
+  try {
+    const res = await fetch(`${base}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [
+          {
+            slug: 'probe-skill',
+            name: '探针技能',
+            // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
+            //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
+            //   断言认的是正文里那句）。
+            body: '---\nname: probe-skill\ndescription: 探针夹具的说明\n---\n\n# 探针\n\n夹具。',
+            source: 'local',
+          },
+        ],
+      }),
+    })
+    if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
+  } catch (err) {
+    log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
+  }
+
   try {
     const skills = (await (await fetch(`${base}/api/skills`)).json()).skills
     const probeSkill = skills.find((s) => s.slug === 'probe-skill')
@@ -4385,28 +4413,6 @@ try {
 
   // ★ 造一条 **skill** 当夹具（D38 之后首启不再播种 skill，技能库是空的）：
   //   探针的 Skills 那一段要量列表、抽屉与卸载按钮，没有内容就只能量到空态。
-  try {
-    const res = await fetch(`${base}/api/skills`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        skills: [
-          {
-            slug: 'probe-skill',
-            name: '探针技能',
-            // ★ 带 frontmatter 的 description：探针据此量"名称列有没有把作者
-            //   写的说明显示出来"（正文仍是 `# 探针\n\n夹具。`——上面那条迁移
-            //   断言认的是正文里那句）。
-            body: '---\nname: probe-skill\ndescription: 探针夹具的说明\n---\n\n# 探针\n\n夹具。',
-            source: 'local',
-          },
-        ],
-      }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造夹具 skill 失败（HTTP ${res.status}）——Skills 那几条会量到空态`))
-  } catch (err) {
-    log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
-  }
 
 
 
