@@ -102,6 +102,7 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
+  ensureBuiltinReviewer,
 } from './builtin-drafter.ts'
 import {
   collectMaterial,
@@ -2348,6 +2349,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     subject: SubmitRunRequest['subject']
     prompt: string
     chainDepth: number
+    /**
+     * 这一次审核**在哪跑**（缺省 = 审核者自己的 `workDir`）。
+     *
+     * ⚠️ 加它的理由很具体：审一条**起草出来的 skill** 时，审核者必须在**草稿小屋**里跑
+     *    ——它要读的 `skill/`（产出）与 `material/`（依据）都在那里。缺省路径是"审核者
+     *    自己的目录"，于是它读不到 `skill/SKILL.md`，而那个报错看起来像"起草没产出"。
+     */
+    workDirOverride?: string
     inputBlobRef?: BlobRef | null
     relatedIssueId?: string | null
     /**
@@ -2424,7 +2433,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       })),
       subject: input.subject,
       prompt: input.prompt,
-      agentDefaultWorkDir: reviewer.workDir ?? undefined,
+      agentDefaultWorkDir: input.workDirOverride ?? reviewer.workDir ?? undefined,
       limits: { maxTurns: null, timeoutMs: null },
       chainDepth: input.chainDepth,
       // ★ 任务级白名单**原样带下去**（D42）：它是"这一次允许触发什么"这个决定在
@@ -3707,6 +3716,94 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 用 PATCH 语义：**只改传了的字段**。整体替换会让"只想改个名字"的请求
     // 顺手把没传的字段清空——那是个很容易踩且很难发现的坑（保存之后
     // 发现指令没了）。
+    // ── 起草之后的**审核 run**（§10 第 ②.5 步）──
+    //
+    // 为什么复用 `createRunForReviewer` 而不是另写一次 submit：执行与审核两次本来就同构
+    // （同一套 argv 组装、工作目录规则、收尾），差别只有"谁发起/用哪个目录/第一句话装什么"。
+    // 另起一套的表现是两边的行为慢慢分叉——比如审核侧后来支持了某个开关，这条链上没有。
+    //
+    // ⚠️ 它的产出**不进闭环**：subject 不是业务报告类、`reviewerAgentId: null`、不挂 issue。
+    //    结论由平台读草稿小屋里它写下的 `review.json`（见设计 §10.6）。
+    if (req.method === 'POST' && path === '/api/crystallize/review') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draft = await store.getRun(draftRunId as Run['id'])
+      if (!draft) {
+        sendJson(res, 404, { error: `起草 run 不存在：${draftRunId}`, code: 'draft_not_found' })
+        return
+      }
+      // 只有起草 run 才审得动：传一条别的 run 进来会拿它的工作目录去读 `skill/`，
+      // 结果是"审核了一条不存在的草稿"，而错误信息会指向"文件读不到"。
+      if (draft.subject.type !== 'skill-draft') {
+        sendJson(res, 400, {
+          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可审的草稿`,
+          code: 'not_a_draft',
+        })
+        return
+      }
+      if (draft.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，没有可审的产出',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
+      // 自愈比拦下使用者更对——与起草路由同一判据）。
+      await ensureBuiltinReviewer(store, workspaceId)
+      const reviewer = (await store.listAgents(workspaceId)).find(
+        (a) => a.builtin === true && a.role === 'skill-reviewer',
+      )
+      if (!reviewer) {
+        sendJson(res, 500, {
+          error: '内置的 skill 审核者建不出来（数据目录不可写？）',
+          code: 'builtin_reviewer_missing',
+        })
+        return
+      }
+      const draftHut = draftRoot(workRoot, draft.id as string)
+      const reviewRunId = await createRunForReviewer({
+        reviewer,
+        // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
+        // 它只影响日志与列表里的显示，路由看的是 subject.type）
+        kind: 'skill-draft-review',
+        title: '审核起草出来的 skill',
+        body: `草稿在 ${draftHut}/skill，素材在 ${draftHut}/material`,
+        subject: { type: 'skill-draft-review', id: draft.id },
+        // ★ 审核者必须**在草稿小屋里**跑：它要读的 `skill/`（产出）与 `material/`（依据）
+        //   都在那里。不给这一项的话它落到审核者自己的 workDir，然后「读不到 skill/SKILL.md」
+        //   ——那个报错看起来像"起草没产出"，实际是审核者站错了地方。
+        workDirOverride: draftHut,
+        prompt: [
+          `审一条刚起草出来的 skill。草稿在 \`skill/\`（就在本工作目录里），它的依据是 \`material/\`。`,
+          '',
+          '【怎么做】',
+          '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
+          '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
+          '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
+          '',
+          '【产出】',
+          '把结论写到 `review.json`：`{ "verdict": "pass" | "fail", "issues": [{ "where", "why", "evidence" }] }`。',
+          '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
+        ].join('\n'),
+        chainDepth: 0,
+      })
+      if (reviewRunId === null) {
+        // `createRunForReviewer` 在"审核者没有身份"时返回 null（那条路是给报告审核的兜底）
+        sendJson(res, 500, {
+          error: '审核 run 起不来：内置审核者没有可用的「指令」',
+          code: 'reviewer_identity_missing',
+        })
+        return
+      }
+      sendJson(res, 202, { reviewRunId, reviewerAgentId: reviewer.id })
+      return
+    }
+
     // ── 内置 agent 的「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）──
     //
     // 只恢复**平台能保证的那部分**（指令 + 名字 + 技能集合 = 不挂）：使用者的改动

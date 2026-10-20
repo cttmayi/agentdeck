@@ -54,6 +54,11 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   // ★ 起草 run（D80）：`<workRoot>/skill-draft-<run id>`。草稿 run 是
   //   一条普通 execute run，工作目录按 subject 自动分配一间专用小屋。
   'skill-draft': 'skill-draft',
+  // ★ 审核起草的那条 run（§10 第 ②.5 步）：它的工作目录**就是草稿小屋**（模板见
+  //   下面的注释：`draftRoot()` 直接给出 `skill-draft-<draftRunId>`）——
+  //   审核者要读的 `skill/` 与 `material/` 都在那里，另开一间屋就什么都看不到。
+  //   这里的前缀只是"万一有人按 subject 分配"时的兜底，正常路径走 `draftRoot`。
+  'skill-draft-review': 'skill-draft-review',
 }
 
 /**

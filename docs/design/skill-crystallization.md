@@ -1077,7 +1077,13 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 
 第 1 步（确保内置那一对）已落地：`ensureBuiltinReviewer` + `ensureBuiltinAgents`（启动时一次对账、
 日志分两条），角色 `'skill-reviewer'`，默认指令先只立"审什么"（**不含真跑脚本**，等 10.2 的开关定），
-测试 +3（1999 通过）。
+测试 +3。
+
+**第 2 步（审核 run）也落地了**：`POST /api/crystallize/review {draftRunId}` ⇒ 复用
+`createRunForReviewer`（`kind: 'review'`）起一条 subject 为 `skill-draft-review` 的 run，
+执行者是内置审核者，**工作目录 = 草稿小屋**（为此给那个助手加了 `workDirOverride`）。
+测试 +3（2002 通过）：subject/agentRef/workDir 三条判据 + 不进任务列表 + 两种拒绝
+（不是起草 run ⇒ 400 `not_a_draft`、缺 draftRunId ⇒ 400）。
 
 ### 10.5 实作清单（顺序）
 

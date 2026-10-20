@@ -1011,3 +1011,104 @@ describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
     assert.equal(noRange.status, 400)
   })
 })
+
+/**
+ * §10 第 ②.5 步：起草之后的**审核 run**（内置的 skill 审核者）。
+ *
+ * 判据为什么要落在"那条 run 的 subject / agentRef / 工作目录"上，而不是"接口返回 202"：
+ *   · **subject 是纪律的落点**——`skill-draft-review` 不进任务列表、不挂 issue、不走
+ *     `ReportIngestor`。subject 写错（比如飘成报告类）会让它**混进业务闭环**，
+ *     而界面上只是"多了一条任务"，没人会去怀疑。
+ *   · **agentRef 必须是内置审核者**：写成来源 run 的执行者，等于"起草者自己审自己"，
+ *     而那正是这个审核步要防的。
+ *   · **工作目录必须是草稿小屋**：审核者要读的 `skill/` 与 `material/` 都在那里；
+ *     缺省目录下它读不到 `skill/SKILL.md`，报错看起来却像"起草没产出"。
+ */
+describe('§10：起草之后的审核 run', () => {
+  test('★★ 起了审核 run：subject=skill-draft-review、执行者是内置审核者、工作目录是草稿小屋', async () => {
+    // ⚠️ 用 `runReviewed` 不是 `runOnce`：起草路由对**任务** run 有 `task_gate`
+    //    （任务要先审过才允许沉淀），拿一条没审过的 run 去起草会被 400 拒，
+    //    而那条报错看起来像"接口坏了"。
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的依赖漏洞处置流程'),
+      target: { kind: 'new', purpose: '依赖漏洞处置流程' },
+    })
+
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    // ⚠️ 响应体**只能读一次**：先 `text()` 再 `JSON.parse`。写成
+    //    `assert.equal(res.status, 202, await res.text())` + `await res.json()`
+    //    会抛 `Body is unusable: Body has already been read` —— 而那条错看起来像
+    //    "接口坏了"。这个坑我在同一个会话里踩了四次，所以把它钉在注释里。
+    const draftText = await res.text()
+    assert.equal(res.status, 202, draftText)
+    const { reviewRunId, reviewerAgentId } = JSON.parse(draftText) as {
+      reviewRunId: string
+      reviewerAgentId: string
+    }
+
+    const run = (await (await fetch(`${daemon.url}/api/runs/${reviewRunId}`)).json()) as {
+      subject: { type: string; id: string }
+      agentId: string
+      workDir: string | null
+      kind: string
+    }
+    assert.equal(run.subject.type, 'skill-draft-review', 'subject 类型是纪律的落点')
+    assert.equal(run.subject.id, draftRunId, '指回被审的那条起草 run')
+    assert.equal(run.agentId, reviewerAgentId, '执行者是内置审核者，不是起草者自己')
+    assert.equal(run.kind, 'review', '走的是审核那一侧（执行/审核两次同构）')
+    assert.match(String(run.workDir), /skill-draft-/, '审核者在草稿小屋里跑')
+
+    // 内置审核者：角色是 skill-reviewer（**不是** reviewer，否则会去审业务报告）
+    const agent = (await (await fetch(`${daemon.url}/api/agents/${reviewerAgentId}`)).json()) as {
+      role: string
+      builtin?: boolean
+    }
+    assert.equal(agent.builtin, true)
+    assert.equal(agent.role, 'skill-reviewer')
+  })
+
+  test('★ 它**不进任务列表**（与起草 run 同一条纪律：不打扰任何人）', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的另一个流程'),
+      target: { kind: 'new', purpose: '依赖漏洞处置流程' },
+    })
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+    const { reviewRunId } = JSON.parse(text) as { reviewRunId: string }
+
+    const tasks = (await (await fetch(`${daemon.url}/api/tasks`)).json()) as unknown
+    assert.ok(
+      !JSON.stringify(tasks).includes(reviewRunId),
+      '审核 run 不许出现在任务列表里（它不在闭环里）',
+    )
+  })
+
+  test('★ 不是起草 run ⇒ 400；没跑完 ⇒ 409（两种拒绝都要说清是哪一种）', async () => {
+    const otherRunId = await runOnce('写一份关于依赖漏洞的报告')
+    const bad = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: otherRunId }),
+    })
+    assert.equal(bad.status, 400)
+    const badBody = (await bad.json()) as { code?: string }
+    assert.equal(badBody.code, 'not_a_draft')
+
+    const missing = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(missing.status, 400)
+    assert.equal(((await missing.json()) as { code?: string }).code, 'draft_run_id_required')
+  })
+})
