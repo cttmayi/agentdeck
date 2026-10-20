@@ -2050,41 +2050,109 @@
         if (!newAgentBtn) {
           errors.push('找不到「新建」按钮')
         } else {
+          // ══════════════════════════════════════════════════════════════
+          // 新建智能体：**右栏正文**里的表单（2026-10 起**不再是抽屉**）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // ⚠️ 这一族原来量的是"点「新建」弹右侧抽屉"（`.drawer` + `.drawer-head h2`
+          //    + `.drawer-foot`）。2026-10 使用者要求新建与**编辑态同款**（都在右栏
+          //    正文里），抽屉撤了——于是那些断言全量到 `null`，连带两条探针错误
+          //    （`抽屉标题` / `底部主操作` 的 `Cannot read properties of null`）。
+          //    撤到哪去了：`MainArea` 的 `{#if creating}` 里渲染 `NewAgentForm`。
+          //    ⚠️ **只有「设置」还是抽屉**（`WorkspaceSettings`，见下面那一段）——
+          //    "两个入口两种形态"正是最容易分叉的地方，所以这一条要成为判据。
+          /** 顶栏 + 侧边栏那两块：开表单**不许**动它们（2026-09 那次事故就是它们被撑坏）。 */
+          const chromeSnapshot = () =>
+            ['.topbar', '.sidebar']
+              .map((sel) => {
+                const el = d().querySelector(sel)
+                if (!el) return `${sel}:—`
+                const r = el.getBoundingClientRect()
+                return `${sel}:${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`
+              })
+              .join(' | ')
+          const chromeBefore = chromeSnapshot()
           click(newAgentBtn)
-          facts['template.formOpened'] = await until(() => !!d().querySelector('.drawer'))
-          const drawer = d().querySelector('.drawer')
-          const drawerBox = box(drawer)
-          facts['template.formDrawerTitle'] = need('抽屉标题', () =>
-            text(drawer.querySelector('.drawer-head h2')),
-          )
+          // 表单的根是 `#new-agent-form.agent-form`（钉一个 id：这一页有编辑态的表单，
+          // 按 class 认会匹到另一个）
+          const ntForm = () => d().querySelector('#new-agent-form')
+          facts['template.formOpened'] = await until(() => !!ntForm(), 60)
+          await wait(400)
+          const form = ntForm()
+          // ★★★ 新建**不是抽屉**（也不该有浮层/遮罩）：它与编辑态住在同一个位置，
+          //   否则同一件事有两种形态，改一边忘一边。
+          facts['template.formIsNotDrawer'] = !d().querySelector('.drawer')
           facts['template.formHasBackdrop'] = !!d().querySelector('.drawer-backdrop')
-          facts['template.formWidthPx'] = drawerBox ? Math.round(drawerBox.w) : null
-          // ★ 抽屉必须在**右边**（贴着视口右缘），而且是浮层
-          facts['template.formAtRight'] = !!(
-            drawerBox && Math.abs(drawerBox.x + drawerBox.w - f.contentWindow.innerWidth) <= 1
+          // ⚠️ `paneEl`（`.pane` 的第一个）是**左栏清单**——右栏是 `.detail-pane`。
+          //    第一版拿左栏判"表单在不在右栏里"：当然不在 ⇒ 红，而界面是对的。
+          const mainPane = () =>
+            d().querySelector('.detail-pane') ?? d().querySelector('.pane.detail-pane')
+          facts['template.formInsidePane'] = !!(mainPane() && form && mainPane().contains(form))
+          // ⚠️ 记 `position` 的**原文**（不是布尔）：这一条要的是"它不是浮层"，
+          //    而"它到底是什么"在报告里要看得见（第一版记成布尔，判据却按字符串比 ⇒ 假红）
+          facts['template.formPosition'] = form ? getComputedStyle(form).position : null
+          facts['template.listStaysVisible'] = !!d().querySelector('.list-row-main')
+          // 宽度：右栏正文是"填满栏"的，不是某个固定抽屉宽度（416 / 480 那种）
+          const formBox = form ? box(form) : null
+          facts['template.formWidthPx'] = formBox ? Math.round(formBox.w) : null
+          // ★ 与**编辑态同一个宽度**：填满右栏正文（不是某个固定抽屉宽度 416/480）
+          facts['template.formFillsPane'] = (() => {
+            const pane = mainPane()
+            const body = pane && pane.querySelector('.pane-body')
+            if (!formBox || !body) return null
+            const w = box(body)
+            return w && w.w > 0 ? formBox.w / w.w : null
+          })()
+          facts['template.formOverflowX'] = form ? form.scrollWidth - form.clientWidth : null
+          // ★ 第一件事是**选角色**（执行者 / 审核者）——新建表单的核心问题
+          facts['template.formRoleCards'] = form
+            ? [...form.querySelectorAll('.role-picker .role-card')].map((b) => text(b))
+            : null
+          // ★★★ 表单里**没有**行动权限选择器（2026-10 搬到**智能体组**了）：
+          //   这里留着它的话就有两个入口，而"判完允许动什么"的权威只有一个。
+          facts['template.formActionPickerCount'] = form
+            ? form.querySelectorAll('.action-perms').length
+            : null
+          facts['template.formMentionsMovedToGroup'] = form
+            ? (text(form) ?? '').includes('智能体组')
+            : null
+          // ★ 底部主操作：是「创建」，而且**常驻视口内**（表单长也不用先滚到底）
+          facts['template.footPrimaryLabel'] = need('底部主操作', () =>
+            text(form.querySelector('.form-actions button[type=submit]')),
           )
-          facts['template.formInsidePane'] = !!(paneEl && drawer && paneEl.contains(drawer))
-          facts['template.layoutBeforeDrawer'] = layoutBefore
-          facts['template.layoutAfterDrawer'] = layoutSnapshot()
-          facts['template.drawerLeavesLayoutAlone'] =
-            facts['template.layoutAfterDrawer'] === facts['template.layoutBeforeDrawer']
-          facts['template.formOverflowX'] = drawer ? drawer.scrollWidth - drawer.clientWidth : null
-          facts['template.formHasNoTemplateField'] = !(
-            drawer && drawer.querySelector('.agent-form .tpl-text')
-          )
+          facts['template.footSecondaryLabel'] = form
+            ? text([...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button'))
+            : null
           facts['template.footVisible'] = (() => {
-            const foot = drawer && drawer.querySelector('.drawer-foot button')
+            const foot = form && form.querySelector('.form-actions button')
             if (!foot) return false
             const r = foot.getBoundingClientRect()
             return r.top >= 0 && r.bottom <= f.contentWindow.innerHeight + 1
           })()
-          facts['template.footPrimaryLabel'] = need('底部主操作', () =>
-            text(drawer.querySelector('.drawer-foot button')),
-          )
+          facts['template.formHasNoTemplateField'] = !(form && form.querySelector('.tpl-text'))
+          // ★★★ 开表单**不许**动顶栏与侧边栏（2026-09 那次事故：表单被渲染进栏头，
+          //   栏头从 167px 被撑到 1070px，整垮主从布局——那时这条是靠"抽屉是浮层"
+          //   守住的；现在表单就住在正文里，所以改成直接量那两块有没有动）
+          facts['template.chromeStaysPut'] = chromeSnapshot() === chromeBefore
+          // ⚠️ 这一页的右栏**没有栏头**（没有标题：页名在顶栏一字不差）⇒ 如实记 null，
+          //    别记 0（0 会被读成"量到了、高度是 0"，那是**假通过**）
+          facts['template.detailHeadHeight'] = (() => {
+            const head = d().querySelector('.detail-head, .detail-pane .pane-head')
+            return head ? Math.round(box(head).h) : null
+          })()
 
-          // Esc 关掉（Esc 在 Drawer 组件里统一处理）
-          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-          facts['template.formGoneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
+          // Esc 关掉（抽屉由 Drawer 组件统一处理）——表单在正文里，走自己的「取消」
+          const ntCancel = form
+            ? [...form.querySelectorAll('.form-actions button')].find((b) => b.type === 'button')
+            : null
+          if (ntCancel) {
+            click(ntCancel)
+          } else {
+            f.contentWindow.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+            )
+          }
+          facts['template.formGoneAfterEsc'] = await until(() => !ntForm(), 40)
           facts['template.listBackAfterEsc'] = !!d().querySelector('.list-row-main')
         }
 
@@ -5330,16 +5398,35 @@
             .map((b) => JSON.stringify(text(b).slice(0, 40)))
             .join(', ')}]`
 
-        const fvWaitPlayable = async (selector, timeoutMs = 4000) => {
+        /**
+         * 等浏览器**真的解出元数据**。
+         *
+         * ⚠️ 判据是 `readyState >= 1`（HAVE_METADATA）——"接口那一层通了"的唯一证据
+         *    （类型对、字节取得到、Range 能用）。这一条**不放宽**。
+         *
+         * ⚠️ 但"怎么等"踩过坑：探针跑在 `--virtual-time-budget` 下，`setTimeout` 与
+         *    `Date.now()` 都是**虚拟**的，一轮 `wait(200) × 20` 在真实时间里几乎是
+         *    瞬间烧完，而媒体请求还在飞——于是量到 `readyState=0`，报告写成"接口那一层
+         *    没通"，**而同一份报告里 `chat.fileViewerVideoRange206` 是绿的**（真发一个
+         *    Range 请求拿回了 206）。两条判据互相打脸，就是探针等错了的证据。
+         *    每次循环发一个**真**请求（同源、便宜），让真实时间真的往前走；
+         *    这样 20 次与 400 次的区别才是真的区别。
+         */
+        const fvWaitPlayable = async (selector, tries = 300) => {
           const el = d().querySelector(selector)
           if (el === null) return null
-          const deadline = Date.now() + timeoutMs
-          while (Date.now() < deadline) {
-            // readyState >= 1 = HAVE_METADATA：浏览器解出了时长/尺寸。**这一条**
-            // 才是"接口那一层通了"的证据（类型对、字节取得到、Range 能用）。
-            if (el.readyState >= 1) return el
-            if (el.error !== null) return el
-            await wait(200)
+          // 有的路径下元素刚建好、还没进 DOM，`load()` 不会自己开始
+          if (el.readyState === 0 && el.networkState === 0) {
+            try {
+              el.load()
+            } catch {
+              /* 打不开就算了：下面按 readyState 如实报 */
+            }
+          }
+          for (let i = 0; i < tries; i++) {
+            if (el.readyState >= 1 || el.error !== null) return el
+            await f.contentWindow.fetch('/api/identity').catch(() => null)
+            await wait(20)
           }
           return el
         }
