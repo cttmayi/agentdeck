@@ -97,7 +97,11 @@ import {
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
-import { ensureBuiltinDrafter } from './builtin-drafter.ts'
+import {
+  DRAFTER_INSTRUCTIONS,
+  DRAFTER_NAME,
+  ensureBuiltinDrafter,
+} from './builtin-drafter.ts'
 import {
   collectMaterial,
   copyMaterial,
@@ -3643,6 +3647,39 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 用 PATCH 语义：**只改传了的字段**。整体替换会让"只想改个名字"的请求
     // 顺手把没传的字段清空——那是个很容易踩且很难发现的坑（保存之后
     // 发现指令没了）。
+    // ── 内置 agent 的「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）──
+    //
+    // 只恢复**平台能保证的那部分**（指令 + 名字 + 技能集合 = 不挂）：使用者的改动
+    // 是他自己的资产，所以升级不覆盖（第 ⑥ 条）——但"改坏了想回原样"必须有一条路，
+    // 否则那条"使用者改了指令 ⇒ 起草质量变差"的故障就永远只能靠删了重建。
+    const agentRestoreMatch = /^\/api\/agents\/([^/]+)\/restore-default$/.exec(path)
+    if (agentRestoreMatch && req.method === 'POST') {
+      const agentId = decodeURIComponent(agentRestoreMatch[1]!) as Agent['id']
+      const current = await store.getAgent(agentId)
+      if (!current) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      if (current.builtin !== true) {
+        // 非内置的 agent 没有"默认值"可言（他的指令就是他写的）
+        sendJson(res, 400, {
+          error: `「${current.name}」不是平台内置的智能体，没有默认值可恢复。`,
+          code: 'not_builtin_agent',
+        })
+        return
+      }
+      const restored: Agent = {
+        ...current,
+        name: DRAFTER_NAME,
+        instructions: DRAFTER_INSTRUCTIONS,
+        skillIds: [],
+        updatedAt: Date.now(),
+      }
+      await store.insertAgent(restored)
+      sendJson(res, 200, { agent: restored })
+      return
+    }
+
     const agentMatch = /^\/api\/agents\/([^/]+)$/.exec(path)
     if (agentMatch) {
       const agentId = decodeURIComponent(agentMatch[1]!) as Agent['id']
@@ -3664,6 +3701,26 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           return
         }
         const body = (await readJsonBody(req)) as Record<string, unknown>
+
+        // ★ 平台内置的 agent（起草者）：只允许改**身份与运行参数**（名字、指令、CLI、
+        //   环境变量），不允许改角色/内置标记/挂载的技能。理由不是洁癖：
+        //   · 角色一改它就可能被选去干业务活（指令是"你是 skill 作者"）；
+        //   · 内置标记一改它就变成"可删的"——而删了沉淀这条链就没有起草者了；
+        //   · 技能挂载对起草**没有任何作用**（起草 run 的技能集合是写死的，第 ③ 条），
+        //     允许挂只会让人以为挂了就生效。拒绝比静默忽略好：静默忽略会让人
+        //     以为"配上去了"，而他的配置永远不会生效。
+        if (current.builtin === true) {
+          const forbidden = ['role', 'builtin', 'skillIds'].filter((k) => body[k] !== undefined)
+          if (forbidden.length > 0) {
+            sendJson(res, 400, {
+              error:
+                `「${current.name}」是平台内置的：改不了 ${forbidden.join('、')}（可以改名字、指令、CLI；` +
+                `要恢复原样用「恢复成默认值」）。`,
+              code: 'builtin_agent_field_locked',
+            })
+            return
+          }
+        }
 
         // 只认识这些字段——未知字段**明确拒绝**而不是静默忽略：
         // 拼错 `instructions` 为 `instruction` 时，静默忽略会让人以为保存成功了
@@ -3883,6 +3940,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const current = await store.getAgent(agentId)
         if (!current) {
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+          return
+        }
+        // ★ 平台内置的（沉淀的起草者）**不许删**（定稿第 ② 条）：沉淀这条路必须永远
+        //   有起草者，所以不留"删了之后怎么办"这种静默分支——想恢复原样有
+        //   「恢复成默认值」那个按钮。这里要**明确拒绝**，而不是删了再偷偷重建：
+        //   偷偷重建的表现是"删了它过一会儿又回来了"，比直接拒绝更难懂。
+        if (current.builtin === true) {
+          sendJson(res, 400, {
+            error: `「${current.name}」是平台内置的（沉淀这条链的起草者），不能删——要恢复原样请用「恢复成默认值」。`,
+            code: 'builtin_agent_not_deletable',
+          })
           return
         }
         const refGroups = await store.listGroupsByAgent(agentId)
