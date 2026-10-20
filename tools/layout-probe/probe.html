@@ -1005,9 +1005,28 @@
         // ★ 2026-10：「说明」列要真的显示出来。夹具的 SKILL.md frontmatter 里写着
         //   `description: 探针夹具的说明`——它必须出现在**名称列**（那一格是
         //   名称 + 说明两行），否则这一列就是永远空着的装饰。
-        facts['skills.descriptionShown'] = need('技能表名称列里的说明', () => {
+        // ⚠️ 这条一直红，所以补两个诊断（**不是**放宽断言）：那一行到底在不在、原文
+        //    长什么样、当时面板开着没有（`.main` 里既有技能列表、也有面板里那些表格，
+        //    量错地方会把"面板里那张表"当成技能列表）。
+        // ⚠️ 找那一行要按 **slug 那一格**比，不能按整行文字 `includes('probe-skill')`：
+        //    夹具里还有一条 `chat-probe-skill`，它把 `probe-skill` 当子串包住了 ⇒
+        //    先匹到的是**别人**，那条没有说明 ⇒ 这条断言一直红，而界面其实是对的
+        //    （诊断实测：匹到的那行原文是「chat-probe-skill聊天夹具技能 本机 …」）。
+        const rowOfSlug = (slug) =>
+          [...d().querySelectorAll('.main table tbody tr')].find((r) =>
+            [...r.querySelectorAll('code, .skill-slug')].some((c) => text(c) === slug),
+          ) ?? null
+        facts['skills.descriptionDiag'] = (() => {
           const rows = [...d().querySelectorAll('.main table tbody tr')]
-          const row = rows.find((r) => text(r).includes('probe-skill'))
+          const row = rowOfSlug('probe-skill')
+          return {
+            面板开着: !!d().querySelector('.main-panel'),
+            行数: rows.length,
+            那行原文: row ? (text(row) ?? '').slice(0, 140) : null,
+          }
+        })()
+        facts['skills.descriptionShown'] = need('技能表名称列里的说明', () => {
+          const row = rowOfSlug('probe-skill')
           return !!row && text(row).includes('探针夹具的说明')
         })
         // 卸载入口：README 里"没有卸载"那个缺口补上了
@@ -1192,191 +1211,325 @@
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
-        // ══════════════ 本地技能目录（Skills 页 →「设置」）══════════════
+        // ══════════════ 从本地安装：扫描已知目录 ⇒ 逐条装 ⇒ 能挂给智能体 ══════════════
         //
-        // 使用者要的是一条链：**勾上一个别的 AI 工具的目录 ⇒ skill 出现在这一页
-        // ⇒ 能挂给智能体**。三件事各自"看起来对"而中间断了，是最容易漏的那种，
-        // 所以这里一路量到底，而且用的是**真实点击 + 真实打字**。
+        // ══════════════════════════════════════════════════════════════════
+        // 这一段原来量的是**抽屉 + 勾目录**那一套（2026-10 之前）
+        // ══════════════════════════════════════════════════════════════════
+        // 原来是：Skills 页顶栏「设置」按钮 → `.drawer` → 四个候选目录（每个一个勾选框）
+        // → 还能自己填一个路径加进去 → 勾上之后"每次读列表自动对账读进库"，然后量
+        // "本地目录来的那条技能在表里、徽标里带路径、卸载按钮置灰"。
         //
-        // ⚠️ 夹具目录由 `run.mjs` 造、路径从 URL 传进来：探针跑在
-        //    `--virtual-time-budget` 下，不可能自己编出 `.cache/layout-probe/…`
-        //    这个绝对路径。
-        const ldsDir = new URLSearchParams(location.search).get('localSkillsDir')
-
-        const ldsSettingsBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
-          (b) => b.textContent.trim() === '设置',
-        )
-        facts['skills.settingsButtonFound'] = !!ldsSettingsBtn
-        if (!ldsSettingsBtn) {
-          errors.push('Skills 页找不到「设置」按钮')
-        } else {
-          click(ldsSettingsBtn)
-          const opened = await until(() => d().querySelector('.drawer'))
-          if (!opened) errors.push('点了「设置」之后没有出现 .drawer')
-        }
-
-        const ldsDrawer = d().querySelector('.drawer')
-        if (ldsDrawer) {
-          // 内置候选：四个目录，每个都要有路径与"里面几个 skill"
-          const ldsRows = [...ldsDrawer.querySelectorAll('.dir-row')]
-          facts['skills.dirsCandidateCount'] = ldsRows.length
-          facts['skills.dirsCandidateLabels'] = ldsRows.map((r) => text(r.querySelector('strong')))
-          facts['skills.dirsAllHavePath'] = ldsRows.every((r) => !!r.querySelector('.dir-path'))
-          facts['skills.dirsAllHaveCheckbox'] = ldsRows.every((r) => !!r.querySelector('input[type=checkbox]'))
-          // ⚠️ 只量"勾选框在不在"是不够的：全局那条 `input { width: 100% }` 会让
-          //    勾选框**撑满整行**（实测 480px），把右边的路径挤成 0 宽——勾选框
-          //    明明"在"，而整行变成 837px 高、抽屉横向溢出。所以宽度与溢出都要量。
-          const ldsRect = (el) => Math.round(el.getBoundingClientRect().width)
-          facts['skills.dirsCheckboxWidth'] = ldsRows[0]
-            ? ldsRect(ldsRows[0].querySelector('input[type=checkbox]'))
-            : null
-          facts['skills.dirsPathWidth'] = ldsRows[0]?.querySelector('.dir-path')
-            ? ldsRect(ldsRows[0].querySelector('.dir-path'))
-            : null
-          facts['skills.dirsRowWidth'] = ldsRows[0] ? ldsRect(ldsRows[0]) : null
-          const ldsBody = ldsDrawer.querySelector('.drawer-body')
-          facts['skills.dirsBodyOverflowX'] = ldsBody ? ldsBody.scrollWidth - ldsBody.clientWidth : null
-          facts['skills.dirsRowHeights'] = ldsRows.map((r) => Math.round(r.getBoundingClientRect().height))
-          // 「取消勾选不会删掉什么」必须写在抽屉里：不写使用者就不敢勾
-          facts['skills.dirsUncheckNote'] = need('取消勾选的说明', () =>
-            text(ldsDrawer.querySelector('.notice')),
-          )
-          // 真实打字 + 真实点击：把夹具目录勾上
-          const ldsInput = ldsDrawer.querySelector('.dir-add input')
-          const ldsAddBtn = ldsDrawer.querySelector('.dir-add button')
-          facts['skills.dirsAddInputFound'] = !!ldsInput && !!ldsAddBtn
-          if (ldsInput && ldsAddBtn && ldsDir) {
-            ldsInput.value = ldsDir
-            ldsInput.dispatchEvent(new Event('input', { bubbles: true }))
-            await wait(120)
-            click(ldsAddBtn)
-            // 等对账回来 + 列表刷新（真的发了一次 PUT 与两次 GET）
-            await until(
-              () => [...d().querySelectorAll('.main table tbody td')].some((td) =>
-                td.textContent.includes('probe-local-a'),
-              ),
-              120,
-            )
-          } else if (!ldsDir) {
-            errors.push('URL 里没有 localSkillsDir，勾选那一半量不了')
-          }
-        }
-
-        // 关掉抽屉，看列表
-        const ldsClose = d().querySelector('.drawer header button')
-        if (ldsClose) {
-          click(ldsClose)
-          await until(() => !d().querySelector('.drawer'), 40)
-        }
-
-        const ldsRowOf = (slug) =>
-          [...d().querySelectorAll('.main table tbody tr')].find((tr) =>
-            tr.querySelector('code')?.textContent.trim() === slug,
-          )
-
-        facts['skills.localSkillARow'] = !!ldsRowOf('probe-local-a')
-        facts['skills.localSkillBRow'] = !!ldsRowOf('probe-local-b')
-        facts['skills.localSkillCount'] = ['probe-local-a', 'probe-local-b'].filter((slug) =>
-          ldsRowOf(slug),
-        ).length
-        facts['skills.localBadge'] = need('本地目录那条的来源徽标', () =>
-          text(ldsRowOf('probe-local-a')?.querySelector('.badge')),
-        )
-        // 来源徽标要写成**那个目录**，而不是笼统的"本机自建"
-        facts['skills.localBadgeHasPath'] = need('徽标里有没有那个路径', () => {
-          const badge = ldsRowOf('probe-local-a')?.querySelector('.badge')
-          return !!badge && !!ldsDir && badge.textContent.includes(ldsDir)
-        })
-        // 来自本地目录的那条**不给卸载**：删了会被下次扫描带回来
-        facts['skills.localUninstallDisabled'] = need('本地目录那条的卸载按钮', () => {
-          const row = ldsRowOf('probe-local-a')
-          const btn = [...(row?.querySelectorAll('button') ?? [])].find(
-            (b) => b.textContent.trim() === '卸载',
-          )
-          return btn ? btn.disabled : null
-        })
-
-        // 再打开一次设置：跳过的那个空目录要如实说出来
-        const ldsSettingsBtn2 = [...d().querySelectorAll('.topbar .page-actions button')].find(
-          (b) => b.textContent.trim() === '设置',
-        )
-        if (ldsSettingsBtn2) {
-          click(ldsSettingsBtn2)
-          await until(() => d().querySelector('.drawer'), 60)
-          // ⚠️ 这里**必须等条件**，不能 `wait(300)`：探针跑在 `--virtual-time-budget`
-          //    下，`setTimeout` 是虚拟的而网络是真的——固定等 300ms 会在
-          //    "抽屉开了、设置还没读回来"的那一刻就往下量（第一版就是这么错的）
-          await until(
-            () =>
-              [...d().querySelectorAll('.dir-row')].some((r) =>
-                r.textContent.includes('fixture-local-skills'),
-              ),
-            80,
-          )
-          const ldsDrawer2 = d().querySelector('.drawer')
-          // ★ 用**夹具**那个空目录来量，不用机器上的真实目录：真实目录里有没有
-          //   空目录是随机的，拿它断言会让这条检查在某些机器上悄悄变成"空过"
-          facts['skills.dirsSkipNote'] = need('跳过说明', () => {
-            const skips = [...(ldsDrawer2?.querySelectorAll('.dir-skip') ?? [])]
-            return text(skips.find((el) => el.textContent.includes('probe-empty-dir')))
-          })
-          // ⚠️ `text()` 收的是**元素**：写成 `.map(r => r.textContent).find(...)`
-          //    会把一个字符串交给它，于是 `string.textContent.replace` 抛错，
-          //    而 `need()` 会把这条记成"拿不到值"——症状看起来像"界面上没有"，
-          //    其实是被自己的取值方式坑了（第一版就是这么错的）
-          facts['skills.dirsCustomRow'] = need('自己填的路径那一行', () =>
-            text(
-              [...(ldsDrawer2?.querySelectorAll('.dir-row') ?? [])].find((r) =>
-                r.textContent.includes('fixture-local-skills'),
-              ),
-            ),
-          )
-          const ldsClose2 = d().querySelector('.drawer header button')
-          if (ldsClose2) {
-            click(ldsClose2)
-            await until(() => !d().querySelector('.drawer'), 40)
-          }
-        }
-
-        // ── 能挂给智能体：去智能体页点开一个执行者，看选择器里有没有它 ──
-        f.contentWindow.location.hash = '#/agents'
-        await until(() => d().querySelectorAll('.list-row-main').length > 0)
-        await wait(400)
-        const ldsExecItem = [...d().querySelectorAll('.list-row-main')].find((el) =>
-          el.textContent.includes('执行'),
-        )
-        if (ldsExecItem) {
-          click(ldsExecItem)
-          await wait(400)
-          // ⚠️ 挂载选择器只在**编辑态**渲染（`{#if editing}` 里面），所以要先进编辑
-          const ldsEditBtn = [...d().querySelectorAll('.detail-pane button')].find(
-            (b) => b.textContent.trim() === '编辑',
-          )
-          facts['skills.pickerEditButtonFound'] = !!ldsEditBtn
-          if (ldsEditBtn) click(ldsEditBtn)
-          await until(() => d().querySelector('.skill-picker'), 80)
+        // ⚠️ **那一套已经撤了（D73）**：现在扫只负责"看现在有什么"（`GET
+        //    /api/skills/local-dirs`，只读、不写库），**装不装由使用者逐条点**；也没有
+        //    "自己加一个目录"——候选目录是**内置表**（Claude Code / Codex / Cursor /
+        //    AGENTS 约定目录），显示名在界面词表里。于是：
+        //      · 顶栏没有「设置」按钮了（原来这里会因为"找不到它"而 21 条断言全空过）；
+        //      · 那一栏也不是抽屉，而是 Skills 页的**一个页签**「从本地安装」；
+        //      · 目录行上**没有勾选框**（这条现在是**要钉住**的判据，不再是缺点了）；
+        //      · 夹具那个"自己填进去的目录"根本不会被扫到（候选表是内置的），
+        //        所以"表里有 probe-local-a/b"这条断言**没法再量**——改成量真的那条路：
+        //        扫到的目录里**挑一条真的技能装进来**，再看它是不是真的落库、能不能挂。
+        //
+        // ⚠️ 探针的 daemon 用 `--skills-root` 指向 `.cache/layout-probe/`，所以这次安装
+        //    只写进**临时库**（不碰 `~/.agentdeck`）；候选目录读的是本机家目录，**只读**。
+        //    机器上那几个目录里一个技能都没有时，如实上报（不许把"没东西可装"说成通过）。
+        {
+          f.contentWindow.location.hash = '#/skills'
+          await until(() => text(d().querySelector('.page-name')) === '技能', 60)
           await wait(300)
-          const ldsPicker = d().querySelector('.skill-picker')
-          facts['skills.pickerFound'] = !!ldsPicker
-          const ldsOptions = [...(ldsPicker?.querySelectorAll('.skill-option') ?? [])].map((l) =>
-            text(l),
-          )
-          facts['skills.pickerOptions'] = ldsOptions
-          facts['skills.pickerHasLocalSkill'] = ldsOptions.some((t) => t && t.includes('probe-local-a'))
-          // ★ 勾一个：这条链的最后一环——"选中"必须真的能被提交
-          const ldsTarget = [...(ldsPicker?.querySelectorAll('.skill-option') ?? [])].find((l) =>
-            l.textContent.includes('probe-local-a'),
-          )
-          const ldsBox = ldsTarget?.querySelector('input[type=checkbox]')
-          if (ldsBox) {
-            ldsBox.checked = true
-            ldsBox.dispatchEvent(new Event('change', { bubbles: true }))
+          // ⚠️ 「从本地安装」这几个页签住在**安装面板里**（`.main-panel .tabs`），不是
+          //    技能页列表上的页签——要先把面板打开（顶栏主操作「安装技能」）。第一版
+          //    直接找 `.tabs .tab`，量到 0 个，整段空过（教训：选择器要照着界面上
+          //    的真实结构写，别照着自己想象的页面结构写）。
+          const localInstallBtn = [
+            ...d().querySelectorAll('.topbar .page-actions button'),
+          ].find((b) => (text(b) ?? '').includes('安装技能'))
+          facts['skills.localPanelButtonFound'] = !!localInstallBtn
+          if (localInstallBtn) {
+            click(localInstallBtn)
+            await until(() => !!d().querySelector('.main-panel'), 40)
             await wait(300)
-            facts['skills.pickerCheckboxTook'] = !!d().querySelector('.skill-picker input:checked')
           }
-        } else {
-          errors.push('智能体页找不到执行者卡片，挂载那一环量不了')
+          facts['skills.tabTexts'] = [...d().querySelectorAll('.main-panel .tabs .tab')].map(
+            (b) => text(b),
+          )
+          // ⚠️ 用 **includes** 比，不用等号：页签里除了词条还可能带计数/角标，等号比
+          //    会在"文字对了但多一个角标"时判成"没找到"（第一版就是这么空过的）。
+          const localTab = [...d().querySelectorAll('.main-panel .tabs .tab')].find((b) =>
+            (text(b) ?? '').includes('从本地安装'),
+          )
+          facts['skills.localTabFound'] = !!localTab
+          if (!localTab) {
+            errors.push('Skills 页没有「从本地安装」页签（这一段全空过）')
+          } else {
+            click(localTab)
+            facts['skills.localTabActive'] = await until(
+              () =>
+                [...d().querySelectorAll('.main-panel .tabs .tab')].some(
+                  (b) => (text(b) ?? '').includes('从本地安装') && b.classList.contains('active'),
+                ),
+              40,
+            )
+            // 扫的是**本机**目录，要等接口回来（`$localSkillScan`）
+            await until(
+              () => d().querySelectorAll('.main-panel table tr.cat-row').length > 0,
+              60,
+            )
+            await wait(300)
+            const localGroups = () => [...d().querySelectorAll('.main-panel table tr.cat-row')]
+            facts['skills.localGroupCount'] = localGroups().length
+            facts['skills.localGroupLabels'] = localGroups().map(
+              (r) => text(r.querySelector('.cat-label')),
+            )
+            // ★ 每个目录都要把**路径**说清（"哪个目录"是这一页唯一的上下文）
+            facts['skills.localGroupsAllHavePath'] = localGroups().every(
+              (r) => (text(r.querySelector('.dir-group-path')) ?? '').length > 1,
+            )
+            facts['skills.localGroupPaths'] = localGroups().map((r) =>
+              text(r.querySelector('.dir-group-path')),
+            )
+            // ★★ D73 之后这里**一个勾选框都不该有**：装不装是逐条点的事，不再"勾目录
+            //    ⇒ 后台自动对账"。勾选框回来了就说明那条被撤的路又接上了。
+            // ⚠️ 只数**表里**的勾选框：面板里那颗「覆盖已存在的技能」是另一件事
+            //    （它管"同名要不要覆盖"，与"勾上目录就自动对账"无关）。第一版数了整
+            //    个面板 ⇒ 把覆盖开关也算进来 ⇒ 判据变红，而红的理由与 D73 无关。
+            facts['skills.localTabNoCheckbox'] =
+              d().querySelectorAll('.main-panel table input[type=checkbox]').length === 0
+            facts['skills.localTabNoCheckboxCount'] =
+              d().querySelectorAll('.main-panel table input[type=checkbox]').length
+            facts['skills.localPanelCheckboxCount'] =
+              d().querySelectorAll('.main-panel input[type=checkbox]').length
+            // ★ 目录行上要有「安装」/「已安装」的分寸：折叠着的时候先说"里面几个"，
+            //   展开之后逐条给按钮（不是整目录一键装——那会把使用者没看过的也装进来）
+            facts['skills.localGroupCounts'] = localGroups().map((r) =>
+              text(r.querySelector('.cat-count')),
+            )
+            const openFirstGroup = async (row) => {
+              click(row.querySelector('.cat-toggle'))
+              return until(
+                () => !!(row.nextElementSibling && row.nextElementSibling.querySelector('code')),
+                40,
+              )
+            }
+            let expanded = null
+            for (const row of localGroups()) {
+              if (await openFirstGroup(row)) {
+                expanded = row
+                break
+              }
+            }
+            facts['skills.localGroupExpands'] = !!expanded
+            const localSkillRows = () =>
+              [...d().querySelectorAll('.main-panel table tbody tr')].filter(
+                (r) =>
+                  !!r.querySelector('code') &&
+                  !!r.querySelector('button') &&
+                  !r.classList.contains('cat-row'),
+              )
+            facts['skills.localRowCount'] = localSkillRows().length
+            facts['skills.localRowsAllHaveInstallButton'] = localSkillRows().every((r) =>
+              [...r.querySelectorAll('button')].some((b) =>
+                ['安装', '已安装', '正在检查并安装…'].includes(text(b)),
+              ),
+            )
+            // ★ 真的装一条：挑第一条**还没装**的技能（已经装过的按钮是禁用的）
+            const firstInstall = [...d().querySelectorAll('.main-panel table tbody tr')]
+              .filter((r) => !!r.querySelector('code'))
+              .map((r) => ({
+                slug: text(r.querySelector('code')),
+                btn: [...r.querySelectorAll('button')].find((b) => text(b) === '安装'),
+              }))
+              .find((x) => x.btn)
+            facts['skills.localInstallCandidate'] = firstInstall ? firstInstall.slug : null
+            if (firstInstall && firstInstall.btn) {
+              const installedBefore = await f.contentWindow
+                .fetch('/api/skills')
+                .then((r) => r.json())
+                .then((p) => (p.skills ?? []).map((s) => s.slug))
+                .catch(() => null)
+              click(firstInstall.btn)
+              // ★ 等的是**接口上真的有了**（不是等按钮变灰——那可能只是本地状态）
+              let after = null
+              for (let i = 0; i < 60; i++) {
+                after = await f.contentWindow
+                  .fetch('/api/skills')
+                  .then((r) => r.json())
+                  .then((p) => (p.skills ?? []).map((s) => s.slug))
+                  .catch(() => null)
+                if (after && after.includes(firstInstall.slug)) break
+                await wait(200)
+              }
+              facts['skills.localInstallLandedOnServer'] = !!(
+                after && after.includes(firstInstall.slug)
+              )
+              facts['skills.localInstalledSlug'] = firstInstall.slug
+              facts['skills.localSlugWasNew'] = !!(
+                installedBefore && !installedBefore.includes(firstInstall.slug)
+              )
+              // ★ 那一条的来源徽标：本地目录来的要指回**它的来源目录**（不是一句
+              //   含糊的"本地"）——装进来的东西正文已经落在我们自己的 skills 目录下，
+              //   徽标是使用者唯一能追回去的线索。
+              const installedSkill = await f.contentWindow
+                .fetch('/api/skills')
+                .then((r) => r.json())
+                .then((p) => (p.skills ?? []).find((s) => s.slug === firstInstall.slug) ?? null)
+                .catch(() => null)
+              facts['skills.localInstallSourceKind'] = installedSkill
+                ? installedSkill.source
+                : null
+              // ⚠️ 界面那枚徽标认的是 **`localDir`**（不是 `source.path`——那个字段
+              //    在库里是 null，来源目录落在 `localDir` 上）。第一版读 `source.path`：
+              //    量到 null ⇒ 下面那条永远红，而界面其实是对的。
+              facts['skills.localInstallSourcePath'] = installedSkill
+                ? (installedSkill.localDir ?? null)
+                : null
+              // ★ 关掉面板回到列表，再看那一条：装进来的东西**必须在那张表里出现**，
+              //   而且来源徽标要带着**它的来源目录**（不是笼统的「本机自建」）。
+              const backToList = d().querySelector('.main-panel .panel-back')
+              if (backToList) {
+                click(backToList)
+              } else {
+                f.contentWindow.dispatchEvent(
+                  new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+                )
+              }
+              const listBack = await until(
+                () => !d().querySelector('.main-panel') && !!d().querySelector('.main table'),
+                40,
+              )
+              facts['skills.listBackAfterLocalInstall'] = listBack
+              const localRow = [...d().querySelectorAll('.main table tbody tr')].find((r) =>
+                (text(r) ?? '').includes(firstInstall.slug),
+              )
+              facts['skills.localRowInList'] = !!localRow
+              facts['skills.localBadgeHasPath'] = (() => {
+                if (!localRow) return false
+                // 那一行的来源列里要出现**来源目录的路径**（逐字，不截断成"本地"）
+                const wanted = installedSkill?.localDir ?? '@@'
+                return (text(localRow) ?? '').includes(wanted)
+              })()
+            } else {
+              facts['skills.localInstallCandidate'] = null
+              errors.push(
+                '「从本地安装」里没有一条**可装**的技能（本机那几个目录是空的？）——' +
+                  '"装进来 ⇒ 能挂给智能体"这条链这次量不到',
+              )
+            }
+            // ★ 跳过的东西要说清理由（没有 SKILL.md / 太深 / 解析不了…）——一直挂在
+            //   组里，不藏在折叠里。机器上没有被跳过的东西时如实记 null。
+            facts['skills.dirsSkipNote'] = need('「跳过」那一行', () => {
+              const note = d().querySelector('.main-panel .dir-skip')
+              return note ? (text(note) ?? '').includes('跳过') : null
+            })
+            // ★ 目录读不了要说读不了（不是一张空表）
+            facts['skills.dirReadErrorShown'] = !!d().querySelector('.main-panel .notice.warn')
+            // ★ 空目录要**如实说**「里面没有技能」（不是一行空白，也不是干脆不列这个目录）。
+            //   ⚠️ 这条得**展开每一组**才看得到，所以是异步的（`need()` 是同步的，量不了）。
+            const emptyGroupResults = []
+            for (const row of localGroups()) {
+              const count = Number((text(row.querySelector('.cat-count')) ?? '0').trim())
+              if (count !== 0) continue
+              const ok = await openFirstGroup(row)
+              const next = row.nextElementSibling
+              emptyGroupResults.push(
+                ok && !!next && (text(next) ?? '').includes('里面没有技能'),
+              )
+            }
+            facts['skills.dirEmptyGroupCount'] = emptyGroupResults.length
+            facts['skills.dirEmptyReported'] =
+              emptyGroupResults.length === 0 ? null : emptyGroupResults.every(Boolean)
+          }
         }
+
+          // ── 能挂给智能体：去智能体页点开一个执行者，看选择器里有没有它 ──
+          //
+          //   ★ 这一环是那条链的**终点**：装进来的本地技能必须能被挂到执行者身上
+          //     （"装进来"与"用得上"是两件事，中间断了是最容易漏的）。
+          //   ⚠️ 选择器里要出现的是**刚刚真的装进来的那个 slug**
+          //     （`facts['skills.localInstalledSlug']`）——原来钉的是夹具那两个名字
+          //     （`probe-local-a/b`），而那两个现在扫不到（候选目录是内置表）。
+          f.contentWindow.location.hash = '#/agents'
+          await until(() => d().querySelectorAll('.agent-row').length > 0, 60)
+          await wait(400)
+          const ldsExecItem = [...d().querySelectorAll('.list-row-main')].find((el) =>
+            (el.textContent ?? '').includes('探针用的执行者'),
+          )
+          const wantSlug = facts['skills.localInstalledSlug'] ?? null
+          if (ldsExecItem) {
+            click(ldsExecItem)
+            await until(
+              () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的执行者',
+              60,
+            )
+            await wait(300)
+            // 单态卡片：技能那一栏直接在卡片里（没有「编辑」这一步了）
+            const ldsPicker = d().querySelector('.skill-picker')
+            facts['skills.pickerFound'] = !!ldsPicker
+            const ldsOptions = [...d().querySelectorAll('.skill-picker input')].map(
+              (i) => i.value,
+            )
+            // ⚠️ 选择器的取值是**技能 id**，不是 slug（第一版拿 slug 比，永远 false）。
+            //    这里把 id 翻成 slug 一起记下来——判据要能读懂，也得能追到是哪一个。
+            const allSkills = await f.contentWindow
+              .fetch('/api/skills')
+              .then((r) => r.json())
+              .then((p) => p.skills ?? [])
+              .catch(() => [])
+            const slugOf = new Map(allSkills.map((sk) => [String(sk.id), sk.slug]))
+            facts['skills.pickerOptions'] = ldsOptions
+            facts['skills.pickerOptionSlugs'] = ldsOptions.map((v) => slugOf.get(v) ?? `?${v}`)
+            const wantId = wantSlug
+              ? String((allSkills.find((sk) => sk.slug === wantSlug) ?? {}).id ?? '')
+              : ''
+            facts['skills.pickerWantId'] = wantId || null
+            facts['skills.pickerHasLocalSkill'] = !!wantId && ldsOptions.includes(wantId)
+            // ★ 真的能勾上（不是"只有一行字"）：勾之后服务端那份要跟着变
+            const ldsBox = wantId
+              ? [...d().querySelectorAll('.skill-picker input')].find((i) => i.value === wantId)
+              : null
+            if (ldsBox && !ldsBox.checked) {
+              click(ldsBox)
+              await wait(200)
+              // ⚠️ 选择器是 `bind:group` 的**草稿**（只改本地状态）——落库要点保存。
+              //    第一版勾完就等接口：接口永远不动，于是"勾不上"变红，而其实只是少点
+              //    了一下保存（使用者走的正是"勾 ⇒ 保存"这条路）。
+              const pickerSave = [...d().querySelectorAll('.detail-pane button')].find((b) =>
+                (text(b) ?? '').startsWith('保存'),
+              )
+              facts['skills.pickerSaveButtonFound'] = !!pickerSave
+              if (pickerSave) {
+                click(pickerSave)
+                await wait(400)
+              }
+              let skillIds = null
+              for (let i = 0; i < 40; i++) {
+                skillIds = await f.contentWindow
+                  .fetch('/api/agents')
+                  .then((r) => r.json())
+                  .then(
+                    (p) =>
+                      (p.agents ?? []).find((a) => a.name === '探针用的执行者')?.skillIds ?? null,
+                  )
+                  .catch(() => null)
+                if (skillIds && skillIds.length > 0) break
+                await wait(200)
+              }
+              facts['skills.pickerCheckboxTook'] = !!(skillIds && skillIds.length > 0)
+            } else if (ldsBox) {
+              facts['skills.pickerCheckboxTook'] = true
+            }
+            facts['skills.pickerSkillIdsAfter'] = await f.contentWindow
+              .fetch('/api/agents')
+              .then((r) => r.json())
+              .then(
+                (p) =>
+                  (p.agents ?? []).find((a) => a.name === '探针用的执行者')?.skillIds ?? null,
+              )
+              .catch(() => null)
+          } else {
+            errors.push('智能体页找不到执行者卡片，挂载那一环量不了')
+          }
         f.contentWindow.location.hash = '#/skills'
         await until(() => text(d().querySelector('.page-name')) === '技能', 60)
 

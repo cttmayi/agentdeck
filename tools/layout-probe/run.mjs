@@ -471,6 +471,144 @@ const CHECKS = [
   },
 
   // ── Skills：安装面板在抽屉里 ──
+  // ══════════════════════════════════════════════════════════════════
+  // 「从本地安装」：D73 之后的形状（扫已知目录 ⇒ 逐条点装 ⇒ 能挂给智能体）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 原来这一族量的是**顶栏「设置」抽屉 + 勾目录**（那套 2026-10 撤了，见 probe.html
+  //    那一段开头的说明）：抽屉、勾选框、「自己填一个路径」、以及「表里出现夹具那两个
+  //    skill」。撤掉之后那些断言在界面上**没有宿主**（一直红），所以换成下面这些——
+  //    它们钉的是**现在的**形状，而且把"不再勾目录"这件事本身变成判据。
+  {
+    view: '技能',
+    key: 'skills.localPanelButtonFound',
+    label: '前提：Skills 页顶栏那颗「安装技能」在（「从本地安装」是**安装面板里的**一个页签，'
+      + '不是列表上的页签）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localTabFound',
+    label: '★★★ 「从本地安装」页签在（D73 之后本地安装就住在这儿；找不到它这一段全空过）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　四个页签：${JSON.stringify(f['skills.tabTexts'] ?? null)}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localTabActive',
+    label: '★ 点得动：点它之后它自己变成选中的那个页签',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localGroupCount',
+    label: '★★ 扫到的那几个目录**各自成组**（内置候选表：Claude Code / Codex / Cursor / '
+      + 'AGENTS 约定目录——一个都没扫到就说明这条链根本没通）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v, f) => `${v} 组：${JSON.stringify(f['skills.localGroupLabels'] ?? null)}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localGroupsAllHavePath',
+    label: '★★★ 每个目录都把**路径**写出来（"哪个目录"是这一页唯一的上下文；只说'
+      + '「Claude Code 里 3 个」等于让使用者自己去猜是哪个文件夹）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　实测：${JSON.stringify(f['skills.localGroupPaths'] ?? null)}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localTabNoCheckbox',
+    label: '★★★ D73 之后**目录那一栏里**一个勾选框都没有（只数表里的）：装不装是逐条点的事，'
+      + '不再"勾上目录 ⇒ 后台自动对账读进库"。⚠️ 面板里那颗「覆盖已存在的技能」是另一件事，'
+      + '不该被算进来',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　表里勾选框 ${f['skills.localTabNoCheckboxCount'] ?? '?'} 个`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localGroupCounts',
+    label: '★ 每个目录先说清里面**几个**技能（折叠着也要能给个数——不然使用者不知道要不要展开）',
+    ok: (v) => Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '技能',
+    key: 'skills.localGroupExpands',
+    label: '★★ 点目录那一行能**展开**（整行一个真按钮：点哪儿都能折）；展开之后露出里面的技能行',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localRowsAllHaveInstallButton',
+    label: '★★★ 展开后**每一条**都有自己的「安装」（不是整目录一键装——那会把使用者还没'
+      + '看过的也一起装进来）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localSlugWasNew',
+    label: '前提：挑中的那条**此前没装过**（否则"装上去了"是假的）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localInstallLandedOnServer',
+    label: '★★★ 点「安装」之后，**接口上**真的多出那条技能（`GET /api/skills`；不是只把'
+      + '按钮变灰——那是本地状态）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　实测装的是：${String(f['skills.localInstalledSlug'] ?? '')}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localInstallSourceKind',
+    // ⚠️ 从本地目录装进来的那条，库里的 `source` 是 **`local`**（不是 `path`——`path`
+    //    是**扫描**时那个 spec 的 kind），来源目录落在 `localDir` 上。第一版按 `path`
+    //    写：量到 `local` ⇒ 红，而界面其实是对的（判据写错了，不是界面错了）。
+    label: '★ 装进来的那条来源是**本地**（`source === "local"`，且 `localDir` 就是那个来源目录）'
+      + '——列表那枚徽标靠它才能指回来源目录',
+    ok: (v, f) => v === 'local' && typeof f['skills.localInstallSourcePath'] === 'string',
+    show: (v, f) => `${JSON.stringify(v)}　来源目录：${String(f['skills.localInstallSourcePath'] ?? '')}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.localRowInList',
+    label: '★★★ 关掉面板回到列表，装进来的那条**真的在那张表里**（列表与面板是两份渲染，'
+      + '中间断了就表现成"装完看不见"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '技能',
+    key: 'skills.localBadgeHasPath',
+    label: '★★★ 列表里那枚来源徽标里**带着来源目录的路径**（不是笼统的「本机自建」：装进来的'
+      + '正文已经落在我们自己的 skills 目录下，徽标是唯一能追回去的线索）',
+    ok: (v) => v === true,
+    show: (v, f) =>
+      `${v}　接口上的 localDir：${JSON.stringify(f['skills.localInstallSourcePath'] ?? null)}`,
+  },
+  {
+    view: '技能',
+    key: 'skills.dirsSkipNote',
+    label: '★ 看到了却没当成技能的东西「一直挂着说清理由」（没有 SKILL.md / 太深 / 解析不了…）'
+      + '——否则就是"少了一个"，还会让人去查权限、查扫描是不是坏了',
+    ok: (v) => v === true || v === null,
+    show: (v, f) =>
+      `${v}（本机没有被跳过的条目时如实记 null；实测 ${JSON.stringify(v)}）`,
+  },
+  {
+    view: '技能',
+    key: 'skills.dirEmptyReported',
+    label: '★★ 空目录要**如实说**「里面没有技能」（不是一行空白，也不是干脆不列这个目录）',
+    ok: (v) => v === true || v === null,
+    show: (v, f) => `${v}（本机 ${f['skills.dirEmptyGroupCount'] ?? '?'} 个空目录）`,
+  },
+  {
+    view: '技能',
+    key: 'skills.dirReadErrorShown',
+    label: '★ 目录读不了时说读不了（`notice.warn`，不是一张空表）——这一档要有"读不了的'
+      + '目录"才量得到，没造出来时如实记 false',
+    ok: (v) => typeof v === 'boolean',
+    show: (v) => `${v}（如实报，不假装通过）`,
+  },
   { view: '技能', key: 'skills.title', label: '技能页渲染（中文页名）', ok: (v) => v === '技能' },
   { view: '技能', key: 'skills.oldInlinePanel', label: '正文里不再有旧的内嵌安装面板（`.install-panel`）', ok: (v) => v === false },
   {
@@ -563,7 +701,16 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   { view: '技能', key: 'skills.footButtonText', label: '面板底部是主操作「检查并安装」', ok: (v) => v === '检查并安装' },
-  { view: '技能', key: 'skills.tabCount', label: '三个来源页签都在（路径/GitHub · 远端目录 · 本地清单）', ok: (v) => v === 3, show: (v) => `${v} 个` },
+  {
+    view: '技能',
+    key: 'skills.tabCount',
+    // ⚠️ 原来是 3（路径/GitHub · 远端目录 · 本地清单）——D73 之后多了「从本地安装」
+    //    那一档（勾目录那套撤了，改成一个页签）。**数目要跟着改，而不是把断言放宽成
+    //    ">=3"**：数目正是"有没有人多塞一个页签/少一个"的判据。
+    label: '四个来源页签都在（路径/GitHub · **从本地安装** · 远端目录 · 本地清单）',
+    ok: (v) => v === 4,
+    show: (v, f) => `${v} 个：${JSON.stringify(f['skills.tabTexts'] ?? null)}`,
+  },
   { view: '技能', key: 'skills.duplicateCloseInTabs', label: '页签条里没有与抽屉头重复的「关闭」', ok: (v) => v === false },
   {
     view: '技能',
@@ -592,89 +739,6 @@ const CHECKS = [
   },
 
   // ── 本地技能目录（勾一个别的 AI 工具的目录 ⇒ 看见 ⇒ 能挂）──
-  { view: '技能', key: 'skills.settingsButtonFound', label: '★ 页头有「设置」入口', ok: (v) => v === true },
-  {
-    view: '技能',
-    key: 'skills.dirsCandidateCount',
-    label: '内置候选目录都列出来了（claude / codex / cursor / agents）',
-    ok: (v) => v === 4,
-    show: (v) => `${v} 个`,
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsCandidateLabels',
-    label: '候选用的是工具名（不是路径或 id）',
-    ok: (v) => Array.isArray(v) && v.includes('Claude Code') && v.includes('Codex'),
-    show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
-  },
-  { view: '技能', key: 'skills.dirsAllHavePath', label: '每个候选都显示了完整路径（要能核对自己勾的是哪个）', ok: (v) => v === true },
-  { view: '技能', key: 'skills.dirsAllHaveCheckbox', label: '每个候选都有勾选框', ok: (v) => v === true },
-  {
-    view: '技能',
-    key: 'skills.dirsCheckboxWidth',
-    label: '★★ 勾选框是勾选框的大小（全局 `input { width: 100% }` 会把它撑成整行，实测 480px ⇒ 路径被挤成 0 宽）',
-    ok: (v) => typeof v === 'number' && v > 8 && v <= 24,
-    show: (v) => `${v}px`,
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsPathWidth',
-    label: '★ 路径占住了整行剩下的宽度（没被挤成 0）',
-    ok: (v, all) => typeof v === 'number' && typeof all['skills.dirsRowWidth'] === 'number' && v > all['skills.dirsRowWidth'] * 0.6,
-    show: (v) => `${v}px`,
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsBodyOverflowX',
-    label: '★ 抽屉内容不横向溢出',
-    ok: (v) => v === 0,
-    show: (v) => `溢出 ${v}px`,
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsRowHeights',
-    label: '★ 候选行没有被撑高（每行一两个文本行的高度）',
-    ok: (v) => Array.isArray(v) && v.every((h) => h > 0 && h < 110),
-    show: (v) => (Array.isArray(v) ? v.join('/') : String(v)),
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsUncheckNote',
-    label: '★ 写清了"取消勾选不会删掉什么、正在用的不会抽走"',
-    ok: (v) => typeof v === 'string' && v.includes('不会删掉') && v.includes('摘'),
-  },
-  { view: '技能', key: 'skills.dirsAddInputFound', label: '能自己填一个路径（内置表之外也要能勾）', ok: (v) => v === true },
-  {
-    view: '技能',
-    key: 'skills.localSkillCount',
-    label: '★★ 勾上夹具目录之后，那两个 skill 真的出现在列表里',
-    ok: (v) => v === 2,
-    show: (v) => `${v}/2 个`,
-  },
-  {
-    view: '技能',
-    key: 'skills.localBadgeHasPath',
-    label: '★ 来源徽标写的是那个目录（不是笼统的「本机自建」）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '技能',
-    key: 'skills.localUninstallDisabled',
-    label: '★ 来自本地目录的那条不给卸载（删了也会被下次扫描带回来）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsSkipNote',
-    label: '★ 空目录被如实报出来（"勾了却少一个"要能追到原因）',
-    ok: (v) => typeof v === 'string' && v.includes('probe-empty-dir') && v.includes('SKILL.md'),
-  },
-  {
-    view: '技能',
-    key: 'skills.dirsCustomRow',
-    label: '自己填的路径单独列出来（要能看见、能取消）',
-    ok: (v) => typeof v === 'string' && v.includes('fixture-local-skills'),
-  },
   {
     view: '智能体',
     key: 'skills.pickerHasLocalSkill',
