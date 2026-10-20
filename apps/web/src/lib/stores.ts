@@ -216,10 +216,22 @@ export async function saveGroup(input: {
   /** 第二轮：这次要新建的私有成员草稿（组是它们的创建入口）。 */
   createAgents?: GroupCreateAgentDraft[]
 }): Promise<AgentGroupView | null> {
-  const res = input.id
-    ? await api<{ group: AgentGroup }>(`/api/agent-groups/${encodeURIComponent(input.id)}`, {
+  /**
+   * ⚠️ **PATCH 的 body 里不许带 `id`**：id 已经在路径里了，而 daemon 对 body 的
+   *    未知字段是**严格拒收**的（"不认识的字段：id。可改的有：name, members, …"）。
+   *    这里原来是 `JSON.stringify(input)`（整份对象连 `id` 一起发）⇒ **界面里改任何
+   *    一个已有的组、点保存必然 400**，而新建组走的是 POST、一直是好的——所以
+   *    "新建能成、编辑永远存不进去"这个不对称在界面上看起来只是"保存没反应"
+   *    （红字在页面底部，列表里那一行也没变）。
+   *    发现方式：布局探针量"点「移除」→ 保存 ⇒ 接口上那条权限真的没了"时，
+   *    接口上那条一直在——于是把 `window.fetch` 包了一层看**真的发出去的那一份**，
+   *    才看到 400 与 body 里的 `id`（只量"接口有没有变"分不清"没发/被拒/发错"）。
+   */
+  const { id, ...patchBody } = input
+  const res = id
+    ? await api<{ group: AgentGroup }>(`/api/agent-groups/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        body: JSON.stringify(input),
+        body: JSON.stringify(patchBody),
       })
     : await api<{ group: AgentGroup }>('/api/agent-groups', {
         method: 'POST',

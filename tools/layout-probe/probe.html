@@ -1635,6 +1635,97 @@
         await until(() => probeToolRows().length >= 2, 60)
         facts['tools.rowsAfterUiInstall'] = probeToolRows().length
 
+        // ── ④.5 造「配过、但包已卸载」那个组（D41 那一族的夹具）──────────────
+        //
+        // ⚠️ **必须在这里造**（包刚装完、还没卸）：写入口拒收"来自还没装的包的动作"
+        //    （400 说得很清楚），所以"先配上、再把包卸掉"是造那个状态的唯一顺序。
+        //    第一版把这一步放在 `run.mjs` 的夹具里，那一刻 `probe-tool-ui` **还没装**
+        //    （它是上面这次抽屉安装装的）⇒ 组根本没造出来、整段空过（踩过）。
+        // ⚠️ 组页那一段在**包被卸掉之后**才量它（探针后面某一节会卸包）——
+        //    这正是"那条权限失去出处"的状态。
+        const deadGroupMembers = [
+          new URLSearchParams(location.search).get('chainExecutor'),
+          new URLSearchParams(location.search).get('chainReviewer'),
+        ].filter((x) => x)
+        if (deadGroupMembers.length === 2) {
+          const res = await f.contentWindow
+            .fetch('/api/agent-groups', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                name: '探针用的死权限组',
+                members: deadGroupMembers,
+                allowedActions: ['probe-tool-ui.ping'],
+              }),
+            })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+          facts['groups.fixtureCreated'] = !!res
+          if (!res) errors.push('造"探针用的死权限组"没成功（组页那一段会全空过）')
+
+          // ── 顺便量一遍：包都还装着时，组页 ③ 行动里那个选择器长什么样 ──────
+          //
+          // ⚠️ 为什么在这里量（而不是在下面"死权限"那一段）：那一段跑到时包已经
+          //    被卸掉了，选择器只剩"空态 / 死权限"两种形状——"框的条数 = 已装工具的
+          //    动作总数""勾着的 = 这个组在接口上的 `allowedActions`"这两条**必须**在
+          //    包装着的时候量，否则量到 0 = 0 这种空过的相等（踩过）。
+          f.contentWindow.location.hash = '#/groups'
+          await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
+          await wait(400)
+          const grpRefresh = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (b.textContent ?? '').includes('刷新'),
+          )
+          if (grpRefresh) {
+            click(grpRefresh)
+            await wait(600)
+          }
+          const chainGroupRow = [...d().querySelectorAll('.list-row-main')].find((r) =>
+            (r.textContent ?? '').includes('探针用的三步链编队'),
+          )
+          facts['groups.chainGroupRowFound'] = !!chainGroupRow
+          if (chainGroupRow) {
+            click(chainGroupRow)
+            await until(() => !!d().querySelector('.picker-wrap'), 60)
+            await wait(400)
+            const boxesNow = [...d().querySelectorAll('.picker-wrap .action-perms .ap-ck')]
+            facts['groups.pickerBoxValues'] = boxesNow.map((b) => b.value)
+            facts['groups.pickerBoxCount'] = boxesNow.length
+            facts['groups.pickerBoxAllContractValues'] = boxesNow.every((b) =>
+              /^[a-z0-9-]+\.[a-z0-9-]+$/.test(String(b.value ?? '')),
+            )
+            facts['groups.installedActionTotal'] = await f.contentWindow
+              .fetch('/api/tools')
+              .then((r) => r.json())
+              .then((p) =>
+                // ⚠️ 动作在 `tool.manifest.actions` 里（不是顶层 `actions`）——
+                //    数错字段的表现是"分母恒为 0"，而分子也是 0 时**看起来像通过**
+                //    （踩过；权威算法见 `apps/web/src/lib/tool-view.ts` 的
+                //    `installedActionCount`：两处各算一遍会分叉成同屏两个总数）。
+                (p.tools ?? []).reduce(
+                  (n, t) => n + ((t.manifest && t.manifest.actions) || []).length,
+                  0,
+                ),
+              )
+              .catch(() => null)
+            // ★★ 勾着的 = 这个组在**接口上**的 `allowedActions`（逐条比，不是"我期待
+            //    那一个名字"）：界面上显示的与库里那份必须是同一件事。
+            const serverGroup = await f.contentWindow
+              .fetch('/api/agent-groups')
+              .then((r) => r.json())
+              .then((p) => (p.groups ?? []).find((g) => g.name === '探针用的三步链编队') ?? null)
+              .catch(() => null)
+            const checkedNow = boxesNow.filter((b) => b.checked).map((b) => b.value).sort()
+            const allowedNow = [...((serverGroup && serverGroup.allowedActions) || [])].sort()
+            facts['groups.checkedBoxes'] = checkedNow
+            facts['groups.serverAllowedActions'] = allowedNow
+            facts['groups.checkedEqualsServerAllowed'] =
+              checkedNow.join('|') === allowedNow.join('|')
+          }
+        } else {
+          facts['groups.fixtureCreated'] = false
+          errors.push('没有夹具成员 id，造不出"探针用的死权限组"')
+        }
+
         // ── ⑤ 智能体详情：执行者有工具段（挂载能改），审核者没有那一段 ──
         f.contentWindow.location.hash = '#/agents'
         await until(() => d().querySelectorAll('.agent-row').length > 0)
@@ -2221,7 +2312,7 @@
             const cell = actionsCell()
             if (!cell) return false
             return (
-              cell.querySelector('.action-picker') === null &&
+              cell.querySelector('.action-perms') === null &&
               cell.querySelector('input') === null &&
               cell.querySelector('button') === null &&
               cell.querySelector('.chip') === null
@@ -2314,14 +2405,14 @@
             const cell = pointerCell()
             if (!form2 || !cell) return false
             return (
-              cell.querySelector('.action-picker') === null &&
+              cell.querySelector('.action-perms') === null &&
               cell.querySelector('input') === null &&
               cell.querySelector('button') === null &&
               cell.querySelector('select') === null
             )
           })()
           facts['standard.formHasNoPickerAnywhere'] =
-            form2?.querySelector('.action-picker') === null
+            form2?.querySelector('.action-perms') === null
 
           // 标准编辑器容器（**只有正文**）
           //
@@ -5236,6 +5327,199 @@
         //    虚拟时间），排在最后的话，前面一有夹具造不出来，这一段就整段量不到
         //    （实测：`crystal.*` 一个事实都没有，dump 里最后一个事实停在 noTools）。
         //    它自己会导航到沉淀页，与前后段落的现场互不依赖。
+        // ══════════════ 智能体组页 ③ 行动：D41 选择器的**新宿主** ══════════════
+        //
+        // ══════════════════════════════════════════════════════════════════
+        // 为什么这一段在组页，而不在智能体详情页
+        // ══════════════════════════════════════════════════════════════════
+        // 「行动权限」这一族（空态怎么说、配过的动作解析不出来怎么办、勾选项只能
+        // 来自已装的包、保存时服务端会拒什么）原来在 **agent 的详情/表单**上量。
+        // 2026-10 起那个能力**整个搬到了智能体组**（动作属于"这条链"，同一个人
+        // 在不同组里本来就该有不同权限），agent 上只剩一句指路 ⇒ 那一族在 agent
+        // 页上**没有宿主了**，在组页才量得到。搬到组页不是"换个地方写一遍"：
+        // 宿主换了，判据里"谁在持有这份权限"也跟着换（组的 `allowedActions`）。
+        //
+        // 夹具（`run.mjs` 造的，见那边的 `DEAD_GROUP`）：一个组，它的
+        // `allowedActions` 里有 `probe-tool-ui.ping`，而那个包**后来被卸载了**——
+        // 这正是"配过、但找不到出处"的状态。⚠️ 那个状态**只能这么造**：写入口拒
+        // "动作来自还没装的包"，所以先把配上、再卸包是唯一顺序（反了当场 400）。
+        {
+          f.contentWindow.location.hash = '#/groups'
+          await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
+          await wait(400)
+          const groupRow = [...d().querySelectorAll('.list-row-main')].find((r) =>
+            (r.textContent ?? '').includes('探针用的死权限组'),
+          )
+          facts['groups.deadFixtureFound'] = !!groupRow
+          if (!groupRow) {
+            errors.push('找不到"探针用的死权限组"（夹具没造出来 ⇒ 组页这一段全空过）')
+          } else {
+            click(groupRow)
+            facts['groups.detailShown'] = await until(
+              () => !!d().querySelector('.picker-wrap'),
+              60,
+            )
+            await wait(400)
+            /**
+             * ⚠️ 根元素类名是 **`.action-perms`**（`ActionPicker.svelte` 的第 205 行），
+             *    不是 `.action-picker`——第一版照着自己起的名字写，量到的全是
+             *    "没有这个元素"，整段 12 条红。选择器写在界面上（这里），别凭印象写。
+             */
+            const pickerEl = () => d().querySelector('.picker-wrap .action-perms')
+            // ★ 有权限的组**默认展开**「配动作」（`actionsOpen` 的初值看
+            //   `allowedActions.length > 0`）——不然下面量到的是一条收起来的壳。
+            facts['groups.pickerShown'] = !!pickerEl()
+            // ⚠️ 激活态是 `class:active`（不是 `.on`）：读错的话会把"不配动作"当成
+            //    当前档，看起来像"这个组没配动作"（踩过）。
+            facts['groups.pickerToggleText'] = text(
+              d().querySelector('.picker-wrap .slot-source-toggle button.active'),
+            )
+            // 装了包、又有可勾的动作 ⇒ 这一档**不该**是空态（空态是下面那一节的事）
+            facts['groups.emptyStateInNormalCase'] = !!d().querySelector(
+              '.picker-wrap .empty-state',
+            )
+            /**
+             * ★★ 「配过、但解析不出来」那一组：契约值**照原样留着** + 明说不可用 +
+             *    给一条能走的出路（「移除」）。
+             * ⚠️ 三条缺一条就是错：过滤掉它 = 抹掉"配过"这件事；不标不可用 = 让人
+             *    以为还能触发；没有「移除」= 一保存就被服务端拒，而错误里点名的那个
+             *    动作在界面上根本不存在（死胡同）。
+             */
+            const deadRows = () => [...d().querySelectorAll('.action-perms .ap-row.dead')]
+            const deadTypeRow = () =>
+              deadRows().find((r) => r.getAttribute('data-type') === 'probe-tool-ui.ping') ?? null
+            facts['groups.deadGroupShown'] = !!d().querySelector('.action-perms .ap-group.dead')
+            facts['groups.deadTypes'] = deadRows().map((r) => r.getAttribute('data-type'))
+            facts['groups.deadRowContractValue'] = deadTypeRow()
+              ? text(deadTypeRow().querySelector('code'))
+              : null
+            facts['groups.deadRowMarked'] = deadTypeRow()
+              ? text(deadTypeRow().querySelector('.action-summary'))
+              : null
+            const dropBtn = deadTypeRow()
+              ? [...deadTypeRow().querySelectorAll('button')].find((b) => text(b) === '移除')
+              : null
+            facts['groups.deadRowDropButton'] = !!dropBtn
+            facts['groups.deadHint'] = text(d().querySelector('.action-perms .dead-hint'))
+            /**
+             * ★ 选择器的**两条老不变量**（D41）在组页同样要成立：
+             *   ① 一个内置动作组都没有（动作只能是 `<包 slug>.<动作名>`）；
+             *   ② 条数 = 已装工具声明的**动作总数**（不是"那个人已有的那几条"）。
+             */
+            const boxes = () => [...d().querySelectorAll('.action-perms .ap-ck')]
+            facts['groups.pickerBoxValues'] = boxes().map((b) => b.value)
+            facts['groups.pickerBoxAllContractValues'] = boxes().every((b) =>
+              /^[a-z0-9-]+\.[a-z0-9-]+$/.test(String(b.value ?? '')),
+            )
+            // ⚠️ 框的条数/契约值形状那一组事实在上面"包装着时"已量过，
+            //    这里**不重复赋值**（这一段跑的时候包已经卸了，覆盖上去只会变成
+            //    0 = 0 的空过）。
+            // ★ 点「移除」⇒ 死权限当场清掉 ⇒ 保存 ⇒ **接口上**真的没了（不是死胡同）
+            if (dropBtn) {
+              click(dropBtn)
+              await wait(400)
+              facts['groups.deadClearedInUi'] = deadRows().length === 0
+              /**
+               * ★ 顺手看一眼**真的发出去的那一份**（探针里 established 的做法：把
+               *   `window.fetch` 包一层，见上面 `ntFailToolsFetch`）。
+               *   ⚠️ 为什么需要：只量"接口上有没有变"分不清三种失败——① 界面根本没
+               *   发请求（按钮点错了）② 发了但服务端拒（400 有它自己的理由）
+               *   ③ 发了、服务端也收了，但**发出去的那一份还是老的动作**（草稿没清）。
+               *   三种在"接口没变"这一个现象上是同一个样子。
+               */
+              const grpRealFetch = f.contentWindow.fetch
+              const grpSent = []
+              f.contentWindow.fetch = function (input, init) {
+                const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+                const method = (init && init.method) || 'GET'
+                if (String(url).includes('/api/agent-groups') && method !== 'GET') {
+                  grpSent.push({ url: String(url), method: String(method), body: init && init.body })
+                }
+                return grpRealFetch.call(f.contentWindow, input, init)
+              }
+              const saveBtn = [...d().querySelectorAll('.form-actions button')].find(
+                (b) => text(b) === '保存',
+              )
+              facts['groups.saveButtonFound'] = !!saveBtn
+              if (saveBtn) {
+                click(saveBtn)
+                // 等接口上真的变了（不是等界面——界面上的草稿早就干净了）
+                let after = null
+                for (let i = 0; i < 40; i++) {
+                  after = await f.contentWindow
+                    .fetch('/api/agent-groups')
+                    .then((r) => r.json())
+                    .then(
+                      (p) =>
+                        (p.groups ?? []).find((g) => g.name === '探针用的死权限组') ?? null,
+                    )
+                    .catch(() => null)
+                  if (after && !(after.allowedActions ?? []).includes('probe-tool-ui.ping')) break
+                  await wait(150)
+                }
+                facts['groups.deadDroppedOnServer'] = !!(
+                  after && !(after.allowedActions ?? []).includes('probe-tool-ui.ping')
+                )
+                facts['groups.allowedAfterDrop'] = after ? (after.allowedActions ?? []) : null
+                f.contentWindow.fetch = grpRealFetch
+                facts['groups.saveRequests'] = grpSent.map((x) => ({
+                  method: x.method,
+                  url: x.url,
+                  body: String(x.body ?? '').slice(0, 300),
+                }))
+                facts['groups.saveErrorNotice'] = text(d().querySelector('.notice.bad'))
+              }
+            }
+          }
+
+          // ── 一个包都没装：这一栏的空态（D41）──────────────────────────────
+          //
+          // ★ 判据还是那三条（说清为什么没有、下一步去哪、那个去处**真的通**），
+          //   但宿主换成了组页：空态的判据是"一个可勾的都没有"，所以先把剩下的包
+          //   真的卸掉，再让界面的 `$tools` 空掉（下面那个刷新按钮）。
+          const leftTools = await f.contentWindow
+            .fetch('/api/tools')
+            .then((r) => r.json())
+            .then((p) => p.tools ?? [])
+            .catch(() => null)
+          facts['groups.toolsBeforeUninstall'] = (leftTools ?? []).map((t) => t.slug)
+          for (const t of leftTools ?? []) {
+            await f.contentWindow
+              .fetch(`/api/tools/${encodeURIComponent(t.id)}`, { method: 'DELETE' })
+              .catch(() => null)
+          }
+          const refreshBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('刷新'),
+          )
+          facts['groups.refreshButtonFound'] = !!refreshBtn
+          if (refreshBtn) {
+            click(refreshBtn)
+            await wait(600)
+          }
+          facts['groups.toolsAfterUninstall'] = await f.contentWindow
+            .fetch('/api/tools')
+            .then((r) => r.json())
+            .then((p) => (p.tools ?? []).map((t) => t.slug))
+            .catch(() => null)
+          const emptyState = () => d().querySelector('.picker-wrap .empty-state')
+          facts['groups.emptyStateShown'] = !!emptyState()
+          facts['groups.emptyStateText'] = text(emptyState())
+          facts['groups.emptyStateNoCheckbox'] =
+            d().querySelectorAll('.picker-wrap .action-perms .ap-ck').length === 0
+          const goToolsBtn = emptyState()
+            ? [...emptyState().querySelectorAll('button')].find((b) => text(b).includes('工具'))
+            : null
+          facts['groups.emptyStateGoButton'] = goToolsBtn ? text(goToolsBtn) : null
+          // ★ 那个去处**真的通**：点一下落到「工具」页（画一个按钮不通是最坏的一种）
+          if (goToolsBtn) {
+            click(goToolsBtn)
+            facts['groups.emptyStateLinkNavigates'] = await until(
+              () => f.contentWindow.location.hash.startsWith('#/tools'),
+              40,
+            )
+          }
+        }
+
         // ══════════════ 沉淀：审阅页排版（D80 四轮重排）══════════════
         //
         // 这一组量的是**排版**（类型检查看不见的那一类），判据全部来自

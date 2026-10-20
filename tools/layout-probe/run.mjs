@@ -126,6 +126,16 @@ const CHAIN_ACTION = 'probe-tool.clean-notes'
  * 三步链夹具那个**组**的名字（2026-10 起长期行动权限的唯一权威是组）。
  */
 const CHAIN_GROUP = '探针用的三步链编队'
+/**
+ * 「配过、但包已经卸载」那条权限的**宿主组**（D41 那一族的夹具）。
+ *
+ * ⚠️ 必须在这里造（真实时间、包还装着的时候）：写入口**会拒**"动作来自还没装的
+ *    工具包"（`POST /api/agent-groups` 的 400 说得很清楚），所以"先配上、再把包卸掉"
+ *    是造这个状态的唯一路径——顺序反了就造不出来（curl 试过：先传 `nope.missing`
+ *    当场被拒）。当年这条状态住在 **agent** 上，2026-10 起动作权限只属于组。
+ */
+// （那个夹具组由探针页自己造，见 `probe.html` 的 ④.5；名字与动作名写在那一边，
+//   因为造它的那一刻才装好 `probe-tool-ui`。）
 
 const CHECKS = [
   // ── 智能体：主从布局 ──
@@ -2328,6 +2338,149 @@ const CHECKS = [
   //   页那个刷新）：夹具里装着 `probe-tool`，"没有工具包"这个状态本来不存在。
   //   所以它排在最后（卸载之后前面那些检查就量不到了），而且每一步都如实上报
   //   ——这一组绿的意思是"空态真的被看到过"，不是"这一段没跑到"。
+  // ══════════════════════════════════════════════════════════════════
+  // 智能体组页 ③ 行动：D41 那一族的**新宿主**（动作权限 2026-10 从 agent 搬到组）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 这一段是**新增的覆盖**，不是把旧断言改个选择器：宿主换了，"谁持有这份权限"
+  //    也跟着换（组的 `allowedActions`）。旧的（agent 详情/表单上那些）在同一批里
+  //    按"宿主不在了"处理——见下面 `行动权限空态（D41）` 那一段开头的说明。
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.chainGroupRowFound',
+    label: '前提：三步链那个组在列表里（它身上配着一条权限、还钉了固定参数）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.checkedEqualsServerAllowed',
+    label: '★★★ 组页 ③ 行动里**勾着的那些**逐条等于**接口上这个组的 `allowedActions`**'
+      + '（不是"我期待那一个名字"：界面上显示的与库里那份必须是同一件事）',
+    ok: (v) => v === true,
+    show: (v, f) =>
+      `${v}　界面：${JSON.stringify(f['groups.checkedBoxes'] ?? null)} / 接口：${JSON.stringify(f['groups.serverAllowedActions'] ?? null)}`,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadFixtureFound',
+    label: '夹具：「配过、但包已卸载」那个组在（它的 `allowedActions` 里有一条已经没有出处的动作；'
+      + '⚠️ 只能"先配上、再卸包"造出来——写入口拒收来自没装的包的动作）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.detailShown',
+    label: '★ 点那一行之后组的详情真的出来了（`picker-wrap`）——不然下面量到的是上一个组',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.pickerShown',
+    label: '★★ ③ 行动里就是那个共用选择器（组页与智能体页同一套判据：动作只能来自已装的包）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.emptyStateInNormalCase',
+    label: '★ 装了包、也有可勾的动作时**不是**空态（空态那一档由下面单独造，两档不能混成一个）',
+    ok: (v) => v === false,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadGroupShown',
+    label: '★★★ 「配过、但解析不出来」那一组**出现在组页上**（同一条欠债在 agent 上已经无处安放）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadTypes',
+    label: '★★★ 那一组里就是那条**没有出处的契约值**（按 `data-type` 逐字比：'
+      + '不静默过滤掉——"配过"这件事不能抹，也不能换成别的名字）',
+    ok: (v) => Array.isArray(v) && v.includes('probe-tool-ui.ping'),
+    show: (v) => (Array.isArray(v) ? v.join(' | ') || '(空)' : String(v)),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadRowContractValue',
+    label: '★★ 那一行的契约值**原样显示**（`<包 slug>.<动作名>`，不翻译、不概括）',
+    ok: (v) => v === 'probe-tool-ui.ping',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadRowMarked',
+    label: '★★★ 旁边明说它**当前不可用**（不能与一条真的能触发的动作长得一模一样——'
+      + '否则使用者以为它还在生效）',
+    ok: (v) => typeof v === 'string' && v.includes('不可用'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadRowDropButton',
+    label: '★★★ 那一行有「移除」（否则一保存就被服务端 400 拒，而错误里点名的动作在界面上不存在——死胡同）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadHint',
+    label: '★★ 那一组下面说清了**为什么**（找不到出处）与**下一步**（点「移除」；'
+      + '只是包被卸了的话也可以先去「工具」页把包装回来）',
+    ok: (v) => typeof v === 'string' && v.includes('移除') && v.includes('工具'),
+    show: (v) => JSON.stringify(String(v ?? '').slice(0, 80)),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.pickerBoxAllContractValues',
+    label: '★★★ 选择器里**每一个**勾选项都是契约值形状（`<包 slug>.<动作名>`）——'
+      + 'D41 把内置动作整组移除之后，裸名不许再出现在这一栏里',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　实测：${JSON.stringify(f['groups.pickerBoxValues'] ?? null)}`,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.pickerBoxCount',
+    label: '★★ 框的条数 = 已装工具声明的**动作总数**（不是"这个组已有的那几条"——'
+      + '写成只画已配的那几条就只能减不能加）',
+    ok: (v, f) => typeof v === 'number' && v === f['groups.installedActionTotal'],
+    show: (v, f) =>
+      `${v} 个框 / 已装工具共 ${f['groups.installedActionTotal']} 个动作`,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.deadDroppedOnServer',
+    label: '★★★ 点「移除」→ 保存 ⇒ **接口上**那条权限真的没了（不是个死胡同：'
+      + '界面干净了、库里还留着，下次打开又出现）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　移除后：${JSON.stringify(f['groups.allowedAfterDrop'] ?? null)}`,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.emptyStateShown',
+    label: '★★★ 一个工具包都没装 ⇒ 组页这一栏也走**空态**（说清"为什么没有"，不是画一条空的清单）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　实测：「${String(f['groups.emptyStateText'] ?? '').slice(0, 60)}」`,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.emptyStateNoCheckbox',
+    label: '★★★ 空态里**一个复选框都没有**（没有可勾的东西就别画勾选框）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.emptyStateGoButton',
+    label: '★★★ 空态**指向「工具」页**（一个可点的去处，不是一句干话）',
+    ok: (v) => typeof v === 'string' && v.includes('工具'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '组页 ③ 行动（D41）',
+    key: 'groups.emptyStateLinkNavigates',
+    label: '★★★ 而且那个去处**真的通**：点一下落到「工具」页（画一个点不动的按钮是最坏的一种）',
+    ok: (v) => v === true,
+  },
+
   {
     view: '行动权限空态（D41）',
     key: 'noTools.slugsBefore',
@@ -4796,6 +4949,11 @@ try {
       }
     }
 
+    // ⚠️ 「配过、但包已经卸载」那个夹具组**不在这里造**：`probe-tool-ui` 是探针
+    //    在界面里那次真实安装装进来的（下面那个 slug 只登记了目录项），所以
+    //    "先配上、再卸包"这个顺序只能在**探针页里、那次安装之后**做——见
+    //    `probe.html` 的「④.5 造『配过、但包已卸载』那个组」。第一版写在这里，
+    //    那一刻包还没装 ⇒ POST 400、组没造出来、整段空过（踩过）。
     if (reviewer && emptyReviewer && executor) {
       chainFixture.executorId = String(executor.id)
       chainFixture.reviewerId = String(reviewer.id)
