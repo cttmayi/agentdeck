@@ -138,6 +138,194 @@ const CHAIN_GROUP = '探针用的三步链编队'
 //   因为造它的那一刻才装好 `probe-tool-ui`。）
 
 const CHECKS = [
+  // ══════════════════════════════════════════════════════════════════
+  // 新建任务（2026-10 简化版）：一句话 ⇒ 交给谁（智能体 / 智能体组）⇒ 只读摘要 ⇒ 提交
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 原来这里量的是**三步链**（① 执行 / ② 审核 / ③ 行动 + ③ 里的左选右配选择器 +
+  //    D44 固定参数编辑器 + D43 开关 + 「这一次」三态覆盖），那 66 条在重做之后
+  //    **界面上没有宿主**（一直红）。权威搬到**智能体组**，这一页只问两件事、给一张
+  //    只读摘要。所以判据也换了——**红得久了，真坏了也看不出来**（前三批的教训）。
+  {
+    view: '新建任务',
+    key: 'newtask.pageOpened',
+    label: '前提：新建任务页打开了（`#/new` 有「交给谁」那张卡片）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.titleAbovePick',
+    label: '★「要做什么」在「交给谁」**上面**（先说要做什么、再决定谁做；顺序反过来就成了"先指派一个不认识任务的人"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.pickCardTitle',
+    label: '★ 那张卡片问的是「交给谁」（一句话 + 一张卡片 = 这一页的全部问题）',
+    ok: (v) => typeof v === 'string' && v.includes('交给'),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.sourceToggleFound',
+    label: '★★★ 有「智能体 / 智能体组」互斥两档——组是"执行→审核→行动"的**默认配置**，'
+      + '没有这一档，「谁审、判完能做什么」就没有入口（实验过：只有智能体那一档时，'
+      + '这条任务的审核标准只能靠人另外再去组页配）',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　两档：${JSON.stringify(f['newtask.sourceToggleLabels'] ?? null)}`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentSummaryTitle',
+    label: '★ 摘要标题随选中对象走（智能体 ⇒「智能体摘要」，组 ⇒「智能体组摘要」）：'
+      + '同一张卡在两档里说的事不一样，标题不说清就读不懂那几行是谁的配置',
+    ok: (v) => v === '智能体摘要',
+    show: (v, f) => `${JSON.stringify(v)}　行：${JSON.stringify(f['newtask.agentSummaryKeys'] ?? null)}`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentNoReviewerText',
+    label: '★★★ 选**单个智能体**时摘要必须说出「**没有**——选单个智能体不会自动审核」'
+      + '（2026-10 起 agent 上那条「由谁来审它」撤了 ⇒ 这一档谁也不审）。'
+      + '画成一行"未配置"或干脆不画，都会让人以为还是有人审',
+    ok: (v) => typeof v === 'string' && v.includes('不会自动审核'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentFootSummary',
+    label: '★★ 提交栏那一行说清"我即将提交的是什么"（交给谁 · 谁审 · 允许几个动作）——'
+      + '滚下去看高级选项时它是唯一还在的上下文',
+    ok: (v) => typeof v === 'string' && v.includes('交给') && v.includes('不自动审核'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.summaryControlCount',
+    label: '★★★ 摘要里**没有任何控件**（input/select/textarea/button 全为 0）：这一页是'
+      + '**只读**的——"这次怎么走"全部来自长期配置或组。原来说好的"这一次覆盖"整块撤了，'
+      + '所以"摘要不能改"这条本身要成为判据（否则哪天又长出半个编辑态，谁也不记得它不该在）',
+    ok: (v) => v === 0,
+    show: (v) => `${v} 个控件`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.pickerOrParamsOnPage',
+    label: '★★★ 整页**没有**动作选择器 / 勾选框 / 固定参数编辑器 / 浮层：'
+      + '那几个东西搬去了智能体组页的 ③ 行动（同一件事只有一个入口——'
+      + '两个入口必然分叉），这一页只剩摘要与提交',
+    ok: (v) =>
+      !!v &&
+      v['选择器'] === 0 &&
+      v['勾选框'] === 0 &&
+      v['固定参数'] === 0 &&
+      v['对话框'] === 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.groupTabFound',
+    label: '前提：切到「智能体组」那一档（夹具里有一个启用的组）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.groupSelectApplied',
+    label: '前提：真的选中了夹具那个组（占位项不可选 ⇒ 必须显式选一个）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupSummaryTitle',
+    label: '★ 组那一档的摘要标题是「智能体组摘要」',
+    ok: (v) => v === '智能体组摘要',
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupSummaryMatchesGroup',
+    label: '★★★ 摘要上那几行**逐项等于组上的配置**（审核者有人名 / 允许的动作数 = 组配的条数 / '
+      + '返工 = 组的默认）——这一页显示的必须是组那一份，不是"第一个审核者"之类的猜测',
+    ok: (v) => v === true,
+    show: (v, f) =>
+      `${v}　摘要：${JSON.stringify(f['newtask.groupSummaryRows'] ?? null)}　` +
+      `组：${JSON.stringify(f['newtask.groupRecordRead'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupFootSummary',
+    label: '★★ 组那一档的提交栏同样说清"交给谁 · 谁审 · 允许几个动作"（与智能体那一档同一口径）',
+    ok: (v) => typeof v === 'string' && v.includes('交给') && !v.includes('不自动审核'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.agentSubmitReachedTasks',
+    label: '★★★ 端到端 A：选**单个智能体**、写上一句话就能提交，而且那条 run 真的出现在接口上'
+      + '（这一段最贵的错误是"界面上选的"与"发出去的请求体"不是同一件事，只有走完真入口才看得见）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.agentRunAgentId',
+    label: '★★★ 端到端 A：接口上那条 run 的执行者**就是**界面上选的那个人（不是默认执行者）',
+    ok: (v, f) => v !== null && v === f['newtask.fixtureExecutorId'],
+    show: (v, f) => `${JSON.stringify(v)}　界面选的：${JSON.stringify(f['newtask.fixtureExecutorId'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.agentRunHasAllowedActionsKey',
+    label: '★★★ 端到端 A：接口上那条 run **没有** `allowedActions` 这个键——选智能体这条路不给动作。'
+      + '（键在且为空数组是**另一件事**：那是"这一次一个都不许动"的显式决定。省略 ≠ 空数组，'
+      + '上一版探针就是靠这对差别钉死三态纪律的，这里保留同一条口径）',
+    ok: (v) => v === false,
+    show: (v, f) => `${v}　值：${JSON.stringify(f['newtask.agentRunAllowedActions'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.agentRunReviewerMode',
+    label: '★★★ 端到端 A：接口上那条 run 的 `reviewer.mode` 是 **`none`**（"这条任务没人审"'
+      + '要是一个**说得出口的状态**，而不是一个读不出意思的 `null`）',
+    ok: (v) => v === 'none',
+    show: (v, f) => `${JSON.stringify(v)}　有 reviewerAgentId 吗：${f['newtask.agentRunHasReviewerId']}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupRunReviewerMode',
+    label: '★★★ 端到端 B：接口上那条 run 的 `reviewer.mode` 是 **`assigned`**（有审核者，'
+      + '而且它是**组**给的 ⇒ 配合下面那条 `groupId` 就能回答"审核者从哪来"）',
+    ok: (v) => v === 'assigned',
+    show: (v, f) => `${JSON.stringify(v)}　groupId：${JSON.stringify(f['newtask.groupRunGroupId'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupSubmitReachedTasks',
+    label: '★★★ 端到端 B：选**智能体组**提交，那条 run 也真的出现在接口上',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupRunGroupId',
+    label: '★★★ 端到端 B：落库那条 run 上带着 **`groupId`**（记录用：判过之后要能回答'
+      + '"这条链的配置是从哪个组来的"）',
+    ok: (v, f) => v !== null && v === f['newtask.fixtureGroupId'],
+    show: (v, f) => `${JSON.stringify(v)}　夹具那个组：${JSON.stringify(f['newtask.fixtureGroupId'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupRunReviewerId',
+    label: '★★★ 端到端 B：审核者由**组展开**而来（接口上的 `reviewerAgentId` = 组里那个审核者）——'
+      + '这一条与上面那条一起钉住"摘要上说的、发出去的、落库的是同一件事"',
+    ok: (v, f) => v !== null && v === f['newtask.fixtureReviewerId'],
+    show: (v, f) => `${JSON.stringify(v)}　组里的审核者：${JSON.stringify(f['newtask.fixtureReviewerId'] ?? null)}`,
+  },
+  {
+    view: '新建任务 · 链',
+    key: 'newtask.groupRunAllowedActions',
+    label: '★★★ 端到端 B：允许的动作由组展开（那一条 `probe-tool.clean-notes`）——'
+      + '选组这条路**不给动作**就等于"组配了但从来不会动"',
+    ok: (v, f) =>
+      Array.isArray(v) && v.length === 1 && v[0] === f['newtask.fixtureAction'],
+    show: (v, f) => `${JSON.stringify(v)}　夹具那条：${JSON.stringify(f['newtask.fixtureAction'] ?? null)}`,
+  },
   // ── 智能体：主从布局 ──
   { view: '智能体', key: 'agents.gotData', label: 'agent 数据到得了界面（列表不是空的）', ok: (v) => v === true },
   { view: '智能体', key: 'agents.cardCount', label: '渲染出 agent 卡片', ok: (v) => v >= 1, show: (v) => `${v} 张` },
@@ -2591,7 +2779,7 @@ const CHECKS = [
   //    三个 id 与那个动作名经 URL 传给探针页：`POST /api/agents` 在保存时会校验
   //    `allowedActions` 里的动作来自**已安装**的工具包，装之前建必然 400。
   {
-    view: '新建任务的三步链',
+    view: '新建任务 · 链',
     key: 'newtask.fixtureExecutorId',
     label: '★ 夹具：三个 agent 的 id 与那个动作名都从 URL 到位了（否则下面一整组都会空过）',
     ok: (v, facts) =>
@@ -2606,367 +2794,22 @@ const CHECKS = [
       `执行者 ${String(v).slice(-6)} / 审核者 ${String(facts['newtask.fixtureReviewerId']).slice(-6)} / 空权限 ${String(facts['newtask.fixtureEmptyReviewerId']).slice(-6)} / 动作 ${String(facts['newtask.fixtureAction'])}`,
   },
   {
-    view: '新建任务的三步链',
-    key: 'newtask.stepTitles',
-    label: '★ 三步的标题都在，而且顺序就是 ① 执行 → ② 审核 → ③ 行动（少一步 = 有一件事没问）',
-    ok: (v) => JSON.stringify(v) === JSON.stringify(['① 执行', '② 审核', '③ 行动']),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.pageReady',
-    label: '★ 夹具执行者真的选上了（②③ 是 `{#if chosen}` 里的：这一步不成立，下面量到的就是两段空气）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
+    view: '新建任务 · 链',
     key: 'newtask.executorSelectApplied',
-    label: '① 选中的确实是夹具那个执行者（不是列表里的第一个）',
-    ok: (v, facts) => v === facts['newtask.fixtureExecutorId'],
-    show: (v) => `${String(v).slice(-6)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.reviewerOptionValues',
-    label:
-      '★ ② 的三档都在：跟随 / 每个审核者 / 不自动审核（这一次）——后两档都要使用者显式点',
-    ok: (v, facts) =>
-      Array.isArray(v) &&
-      v.includes('follow') &&
-      v.includes('none') &&
-      v.includes(`pick:${facts['newtask.fixtureReviewerId']}`),
-    show: (v) => (Array.isArray(v) ? `${v.length} 项：${v.join(' | ')}` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.reviewerDefaultPick',
-    label: '★★ ② **默认是「跟随」**（默认不替使用者做决定：选择"不审"必须是他点出来的）',
-    ok: (v) => v === 'follow',
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followOptionText',
-    label: '★ 「跟随」那一项带上了**执行者的名字**（否则"跟随谁"要靠猜）',
-    ok: (v) => typeof v === 'string' && v.includes(`跟随「${CHAIN_EXECUTOR}」的设置`),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followOptionText',
-    label:
-      '★★ 并且带上了它**实际会跟到的那个审核者**（D28 的长期安排在提交前就看得见）',
-    ok: (v) => typeof v === 'string' && v.includes(CHAIN_REVIEWER),
-    show: (v) => `"${String(v)}"`,
+    label: '① 前提：真的把下拉选成了**夹具那个执行者**（不是列表里的第一个）——'
+      + '②③ 那几条都以它为基准，选错人时它们量的是别人的配置',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　夹具执行者：${String(f['newtask.fixtureExecutorId'] ?? '').slice(-6)}`
   },
   // ══════════════════════════════════════════════════════════════════
   // ★ 版面：三步排成一行 + 首屏看得见三个问题
   // ══════════════════════════════════════════════════════════════════
-  {
-    view: '新建任务',
-    key: 'newtask.layoutLead',
-    label: '★★★「要做什么」在**三步上面**（它在 DOM 里一直是最前面一个，却被网格挪走过：'
-      + '`.step-exec` 写了显式 `grid-row: 1 / span 2`，它只定了列、行交给自动排布，'
-      + '而 CSS Grid 先放"行列都确定"的——于是输入框掉到三步下面。看代码看不出来）',
-    ok: (v) =>
-      !!v?.lead &&
-      !!v?.firstStep &&
-      v.lead.top < v.firstStep.top &&
-      // 输入框整条都在三步上面（不是"标签在上面、框在下面"）
-      (v.textarea ? v.textarea.top + v.textarea.h <= v.firstStep.top + 1 : false),
-    show: (v) =>
-      v?.lead
-        ? `「要做什么」top=${v.lead.top} 高=${v.lead.h}　输入框 top=${v.textarea?.top} 高=${v.textarea?.h}　三步第一块 top=${v.firstStep.top}`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.layoutFlushAfterConfig',
-    label: '★★ ① **被要求拉满**（`align-self: stretch`）且两列齐平——`layoutSteps` 那条'
-      + '在进页面时量，夹具里两列恰好一样高，**怎么都是齐的**，测不出拉伸有没有生效，'
-      + '所以这里另量一次并直接断言那条 CSS 属性。'
-      + '⚠️ 夹具的右列（128+16+231）与 ① 的自然高度一样，这一条仍偏弱；'
-      + '真正拉开差距的是真实数据（③ 有两枚胶囊时 ① 483px vs 自然 375px）',
-    ok: (v) =>
-      !!v &&
-      v.alignSelf === 'stretch' &&
-      v.actionsH > 0 &&
-      Math.abs(v.execBottom - v.actionsBottom) <= 2,
-    show: (v) =>
-      v
-        ? `① 高=${v.execH} 底=${v.execBottom}　③ 高=${v.actionsH} 底=${v.actionsBottom}　align-self=${v.alignSelf}`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.chipRadius',
-    label: '★ 胶囊的圆角是**普通圆角**（8px），不是"胶囊"造型的 100px——一枚里有 3~4 行字时，'
-      + '100px 在那么高的框上会变成两段夸张的弧，左右两条直边几乎没了',
-    ok: (v) => !!v && Number.parseFloat(v.radius) <= 12,
-    show: (v) => (v ? `圆角 ${v.radius}（框高 ${v.height}px）` : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.layoutSteps',
-    label: '★★ 两列：**左列 ① 执行，右列 ② 审核在上、③ 行动在下**（③ 与 ② 同列同一条线：'
-      + '先判、再动），且 ① **拉到与右列齐平**（不拉平的话左列第二格会空出一个洞）',
-    ok: (v) => {
-      const a = v?.exec
-      const b = v?.review
-      const c = v?.actions
-      if (!a || !b || !c) return false
-      const ntSameRow = a.top === b.top
-      const ntOtherCol = a.left !== b.left
-      const ntStacked = b.left === c.left && c.top > b.top
-      const ntFlush = Math.abs(a.top + a.h - (c.top + c.h)) <= 2
-      return ntSameRow && ntOtherCol && ntStacked && ntFlush
-    },
-    show: (v) =>
-      v?.exec
-        ? `① top=${v.exec.top} left=${v.exec.left} 高=${v.exec.h}　② top=${v.review?.top} left=${v.review?.left}　③ top=${v.actions?.top} left=${v.actions?.left} 高=${v.actions?.h}`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.titleAutoGrow',
-    label: '★★「要做什么」**默认 3 行、随输入长高、15 行封顶**（判据是量出来的高度，'
-      + '不是"它有个 rows 属性"——写死的 rows 与"真的会跟着长"在属性上看不出区别）',
-    ok: (v) =>
-      // 1 行与 3 行一样高 ⇒ 起步就是 3 行
-      v?.h1 === v?.h3 &&
-      // 超过 3 行开始长
-      v?.h6 > v?.h3 &&
-      // 一直长到 15 行
-      v?.h15 > v?.h6 &&
-      // 15 行之后封顶（30 行不再变高；留 4px 余量——`scrollHeight` 是整数、
-      // 行高是小数，卡死在"完全相等"上会因为一两像素的取整假红），并且改成自己滚
-      v?.h30 <= v?.h15 + 4 &&
-      v?.overflowAt30 === 'auto' &&
-      // 清空之后回到起步高度（程序化改值也要重新量）
-      v?.hAfterClear === v?.h3,
-    show: (v) =>
-      v
-        ? `rows=${v.rows}　1行=${v.h1} 3行=${v.h3} 6行=${v.h6} 15行=${v.h15} 30行=${v.h30}（${v.overflowAt30}）清空后=${v.hAfterClear}`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.titleFullWidth',
-    label: '★ 那个框**占满整行宽度**（这一页唯一要写的东西就是它，原来只用了 544px / 1096px，'
-      + '右边一半是空的）',
-    ok: (v) => !!v && v.width > v.formWidth * 0.9,
-    show: (v) => (v ? `${v.width}px / 整行 ${v.formWidth}px` : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigParamLines',
-    label: '★★ 每个动作的**钉死的固定值 `name=value` 与契约值同一行**（同一句"模拟关闭单据"，'
-      + '钉了 `reason=巡检` 与没钉是两回事），且胶囊上**没有**多余的参数行',
-    ok: (v) =>
-      Array.isArray(v) &&
-      v.length > 0 &&
-      v.every((c) => typeof c?.type === 'string') &&
-      // 夹具那个动作钉了 `text=长期钉的` ⇒ 它的固定值必须在**第一行**（head）里
-      v.some((c) => (c.head ?? '').includes('已固定')) &&
-      // ⚠️ 而且**不许**多出别的参数行：曾经多过"由模型填 / 平台注入"两行机器名，
-      //    使用者没法据它们做任何决定（开放参数本来就会由模型填、平台注入的值
-      //    他也改不了）。一枚胶囊最多两行字：契约值+固定值、说明。
-      v.every((c) => (c.subCount ?? 0) <= 2),
-    show: (v) =>
-      Array.isArray(v)
-        ? v.map((c) => `${c.type} → [${c.subs.join(' | ')}]`).join('　')
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.layoutFirstScreen',
-    label: '★★ 首屏（不滚动）里三个问题的**标题与主控件**都在——这一页要回答的就是这三个问题，'
-      + '看不到就等于要滚下去猜',
-    ok: (v) =>
-      Array.isArray(v) &&
-      v.length === 3 &&
-      v.every((x) => x.titleVisible === true && x.controlVisible === true),
-    show: (v) =>
-      Array.isArray(v)
-        ? v.map((x) => `${x.title}:标题${x.titleVisible ? '✓' : '✗'}控件${x.controlVisible ? '✓' : '✗'}`).join('　')
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigInCard',
-    label: '★★ 允许的动作那几枚胶囊**在 ③ 那张卡片里面**（不是页面上另一处的一条）——'
-      + '挪出去之后那一块读起来是"另一件事"：使用者问"这些是什么"时，答案在 ③ 里，不在外面',
-    ok: (v) => v?.detailInsideCard === true && v?.chipsInCard > 0 && v?.chipsOutside === 0,
-    show: (v) =>
-      v
-        ? `在卡片里=${v.detailInsideCard}　卡片内 ${v.chipsInCard} 枚 / 卡片外 ${v.chipsOutside} 枚`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigOnePerLine',
-    label: '★ 那几枚胶囊**一枚一行**（③ 只有一列宽，横排会折成"契约值半行、说明挤到下一行、'
-      + '下一枚又从半路接上"的乱条）',
-    ok: (v) =>
-      Array.isArray(v?.tops) && v.tops.length > 0 && new Set(v.tops).size === v.tops.length,
-    show: (v) =>
-      Array.isArray(v?.tops)
-        ? `${v.count} 枚，${new Set(v.tops).size} 个不同顶边　高 ${v.heights?.join('/')}px`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.footSummaryText',
-    label: '★★ 提交栏那一行说清"我即将提交的是什么"（交给谁 · 谁审 · 允许几个动作）——'
-      + '滚下去看高级选项时，它是唯一还在的上下文',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes(CHAIN_EXECUTOR) &&
-      v.includes(CHAIN_REVIEWER) &&
-      /\d/.test(v),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.footStickyAtBottom',
-    label: '★★ 滚到页面最底下时提交栏**还在视口里**（判据是"滚了之后还在"，不是"它有个 sticky 声明"）',
-    ok: (v) => v?.visible === true,
-    show: (v) => (v ? `可见=${v.visible}　横贯=${v.spansPane}（${v.footW}px vs 可滚区 ${v.paneW}px）` : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.footSpansPane',
-    label: '★ 提交栏**横贯整块可滚区**（`.main` 自己有左右留白，不留负边距它会缩在那圈留白里，'
-      + '滚过去的内容从两侧露出来）',
-    ok: (v) => v?.spansPane === true,
-    show: (v) => (v ? `${v.footW}px vs 可滚区 ${v.paneW}px` : String(v)),
-  },
   // ══════════════════════════════════════════════════════════════════
   // ★「要做什么」：两个字段合并成一个多行框
   // ══════════════════════════════════════════════════════════════════
-  {
-    view: '新建任务',
-    key: 'newtask.titleField',
-    label: '★「要做什么」是**一个多行框**（单行 `input` 装不下真正要说的东西：一按回车就提交、'
-      + '写得长只能横着滚）',
-    ok: (v) => v?.count === 1 && v?.multiline === true && v?.required === true,
-    show: (v) => (v ? `${v.tag} · 多行=${v.multiline} · 必填=${v.required} · 这一栏共 ${v.count} 个控件` : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.hasDescriptionField',
-    label: '★「补充说明」那一栏**没有了**（"标题 + 补充说明"是记录格式的分法，不是使用者的；'
-      + '切分交给 `lib/request-text.ts`，他不必先做一次分类）',
-    ok: (v) => v === false,
-  },
   // ══════════════════════════════════════════════════════════════════
   // ★ ③ 行动：从"铺一整段选择器"改成"一个按钮 + 居中对话框"
   // ══════════════════════════════════════════════════════════════════
-  {
-    view: '新建任务',
-    key: 'newtask.actionsSectionHeight',
-    label: '★ ③ 行动那一段**收起来了**（原来选择器直接铺在里面，实测 537px、在 700px 高的视口里'
-      + '从 y=670 开始——等于下半屏全是这一栏，提交按钮被推到两屏之外）',
-    // ⚠️ 判据改过：③ 现在**理应**装下"配置细节"（胶囊 + 出处句），比原来高是对的
-    //    ——拿一个像素上限守它，只会逼着人把配置挪到别处去（那正是被否掉的那一版）。
-    //    这里守的是**那一整块选择器没有铺回来**：铺回来时这一段会是 700px 以上，
-    //    而 `actionsPickerNotInline` 只管 `.action-perms` 在不在、管不到"是不是又
-    //    变成一整屏"。两条一起才封得住。
-    ok: (v) => typeof v === 'number' && v > 0 && v < 640,
-    show: (v, facts) => {
-      const ntParts = facts['newtask.actionsSectionParts']
-      const ntBreak = Array.isArray(ntParts)
-        ? '　[' + ntParts.map((x) => `${String(x.cls).split(' ')[0]} ${x.h}px`).join(' + ') + ']'
-        : ''
-      return `${v}px（改之前 537px）${ntBreak}`
-    },
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsPickerNotInline',
-    label: '★ 选择器**不在页面上**了（它住进对话框；留在页面里就会把这一栏重新撑回几百像素）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigChips',
-    label: '★★ ③ 上画的是**当前的配置细节**（每个允许的动作一枚胶囊：契约值 + 它的 `summary`），'
-      + '不是一个计数——选择器进对话框之后，这一行是**不点开就唯一能看见配置的地方**',
-    ok: (v) =>
-      Array.isArray(v) &&
-      v.length > 0 &&
-      v.every((c) => typeof c?.type === 'string' && c.type.includes('.') && !!c?.summary),
-    show: (v) => (Array.isArray(v) ? v.map((c) => c.type).join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigFixedText',
-    label: '★★ 钉死的固定值在页面上**看得见**（`已固定: text=长期钉的`）——不写出来的话，'
-      + '使用者以为这次会带着他上次钉的值去执行，而实际发出去的是另一个值',
-    ok: (v) => typeof v === 'string' && v.includes('已固定') && v.includes('text='),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsConfigMatchesPicks',
-    label: '★★ 页面上的胶囊 == 对话框里勾着的框（同一个事实的两种画法）——两处各算一遍就会分叉，'
-      + '而分叉的表现是"页面上写着允许 A、点开对话框里勾的是 B"，且没有任何报错',
-    ok: (v) =>
-      Array.isArray(v?.chips) && Array.isArray(v?.picks) && v.chips.join() === v.picks.join(),
-    show: (v) =>
-      Array.isArray(v?.chips)
-        ? `胶囊 ${v.chips.join(' | ') || '（空）'}　勾着 ${v.picks.join(' | ') || '（空）'}`
-        : String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsDialogClosedInitially',
-    label: '一进页面 ③ 的对话框是**关着**的（默认状态不该有浮层盖着表单）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsChooseButtonText',
-    label: '★ 那颗按钮的字回答"点开能干什么"（`选择动作…`），不是"这里是什么"'
-      + '（后者与上面那行标签重复，同一件事两个出处）',
-    ok: (v) => typeof v === 'string' && v.includes('选择动作'),
-    show: (v) => String(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsDialogOpens',
-    label: '★★ 点那颗按钮**真的打开**了浮层（按钮在、点了不开是这次改动最容易出的错，'
-      + '而它的症状是后面所有勾选框断言一起红）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsDialogHasPicker',
-    label: '★ 对话框里就是那个**左选右配**的选择器（搬进去的是同一个组件，不是另画一个）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsDialogBox',
-    label: '★ 对话框**一屏放得下**（装不下就会出现"浮层自己套一层滚动条"，'
-      + '而两栏挑选器在里面滚最难受：左栏滚走了、右栏还在）',
-    ok: (v) => v?.fits === true,
-    show: (v) => (v ? `高 ${v.h}px · 顶边 ${v.top}px · 视口内=${v.fits}` : String(v)),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.actionsCountMatchesPicker',
-    label: '★★ 按钮旁的计数与选择器状态条**同一个分母**（两处各算一遍就会在"装了什么包"变化时'
-      + '分叉，症状是同一屏上两个不同的总数——实测踩过"已允许 2 / 1 个动作"）',
-    ok: (v) => v !== null && v.button[0] === v.picker[0] && v.button[1] === v.picker[1],
-    show: (v) => (v ? `按钮 ${v.button.join('/')} · 状态条 ${v.picker.join('/')}` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsSectionFound',
-    label: '★ ③ 那一段真的画出来了（否则"里面没有控件"是一条空过的断言）',
-    ok: (v) => v === true,
-  },
   // ── ★ 改写之一：`newtask.actionChips`（③ 只读 ⇒ 契约值画在 `.chip` 里）──
   //
   // 为什么原来那条不再成立：③ 从**只读**改成了**可勾**（智能体页「行动权限」那个
@@ -2975,644 +2818,24 @@ const CHECKS = [
   // 契约值"变成"**框里那个动作**就是它、而且框旁边逐字写着它的 `summary`"。
   // ⚠️ 它**不是被放松**：原来只要求"字符串在页面上出现过"，现在要求"框的
   //    `value` / 旁边的 `code` / 旁边的 `summary` 三样都对上接口里那一份"。
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.fixtureReviewerActions',
-    label:
-      '★ 夹具：那个审核者**当前生效的动作**从接口读到了（它是"默认该勾着谁"的基准；读不到的话下面几条会空过）',
-    ok: (v) => sameSet(v, [CHAIN_ACTION]),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.fixtureSourcesRead',
-    label:
-      '★ 工具清单与 agent 名单都从接口读到了（"框该有几个"与"默认该勾什么"都拿它当基准）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.installedActionTotal',
-    label: '★ 已装工具包一共声明了几个动作（> 0，否则"框的条数"那条会空过）',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v, facts) => `${v} 个：${(facts['newtask.installedActions'] ?? []).join(' | ')}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.fixtureActionSummary',
-    label: '★ 夹具那个动作在工具清单里的 `summary` 读到了（下面"逐字相同"那条的基准）',
-    ok: (v) => typeof v === 'string' && v.length > 0,
-    show: (v) => (v === null ? 'null' : `"${String(v)}"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionBoxValues',
-    label:
-      '★★★ ③ 可勾那一档的勾选框 = **已装工具包声明的全部动作**（含那个审核者当前没有的那些）——只画它已有的那几条就只能减不能加，而"这一次允许一个它长期没有的动作"正是这份覆盖的意义',
-    ok: (v, facts) => sameSet(v, facts['newtask.installedActions']),
-    show: (v, facts) =>
-      `${Array.isArray(v) ? v.join(' | ') : String(v)}　（接口里已装工具的 ${facts['newtask.installedActionTotal']} 个 / 那个审核者当前 ${(facts['newtask.fixtureReviewerActions'] ?? []).length} 个）`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionCheckedCount',
-    label:
-      '★★★ ③ 上**勾着的**数量 = 那个审核者当前生效的动作数（夹具里 1 条：`probe-tool.clean-notes`）——这是新的默认口径：勾选框不是"随便画几个"，它预勾的就是 ② 那个人现在真能触发的那些',
-    ok: (v, facts) =>
-      typeof v === 'number' &&
-      v > 0 &&
-      v === (facts['newtask.fixtureReviewerActions'] ?? []).length,
-    show: (v, facts) =>
-      `${v} 个勾着 / 那个审核者有 ${(facts['newtask.fixtureReviewerActions'] ?? []).length} 个　勾着的：${(facts['newtask.actionCheckedValues'] ?? []).join(' | ')}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionCheckedValues',
-    label:
-      '★★★ 而且勾着的**就是那个审核者当前生效的那几条**（集合相等）——差一条就意味着"默认状态"已经偷偷成了一次覆盖',
-    ok: (v, facts) => sameSet(v, facts['newtask.fixtureReviewerActions']),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionBoxCount',
-    label:
-      '★★ 框的条数与"已装工具的动作总数"一致（不是"那个审核者的条数"——两者在夹具里是 3 vs 1）；写成只画审核者那几条的实现会红',
-    ok: (v, facts) =>
-      facts['newtask.installedActionTotal'] > 0 && v === facts['newtask.installedActionTotal'],
-    show: (v, facts) => `${v} 个框 / 已装工具共 ${facts['newtask.installedActionTotal']} 个动作`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionFixtureBox',
-    label:
-      '★★★ 那个动作的勾选框里**契约值原样显示**（不翻译、不概括），旁边是工具清单里的 `summary`（**逐字相同**），而且它默认就是勾着的',
-    ok: (v, facts) =>
-      !!v &&
-      v.code === CHAIN_ACTION &&
-      typeof facts['newtask.fixtureActionSummary'] === 'string' &&
-      v.summary === facts['newtask.fixtureActionSummary'] &&
-      v.checked === true,
-    show: (v, facts) =>
-      v
-        ? `code=${JSON.stringify(v.code)} / checked=${v.checked} / summary=${JSON.stringify(v.summary)}（接口里是 ${JSON.stringify(facts['newtask.fixtureActionSummary'])}）`
-        : '找不到那个动作的勾选框',
-  },
 
   // ── ★ 新不变量：那句「只对这一次任务生效」**只在改过之后**出现 ──
   //
   // 默认状态（一下都没碰过）出现它 = 对使用者说"你改了它的长期权限"——假话；
   // 动一下（取消一个勾）不出现它 = 他这一次的收紧会被当成长期安排。
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.untickDispatched',
-    label: '★ 探针真的把那个勾**取消**了（否则下面两条量的是"没动过"的现场）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsOnceOnlyWhenDefault',
-    label:
-      '★★★ 默认（一下都没碰过）**没有**那句「只对这一次任务生效」——它在默认态出现就是一句假话（长期那一份还好好的，这一页只是准备了一次覆盖）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsOnceOnlyAfterUntick',
-    label:
-      '★★★ 取消一个勾之后**必须**出现那句（少了它，这一次的收紧会被当成"改了那个审核者的长期行动权限"，下一条任务又变回老样子）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedCheckedValues',
-    label: '★ 取消之后**一个勾都没有**了（下面那句"一个都不勾"必须对应这个状态）',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsClearedHint',
-    label:
-      '★ 一个都不勾时说的是**"这一次一个动作都不勾"**（"它本来就没有"是另一件事，两句不能合成一句：后者会让使用者以为平台没听懂他刚才的操作）',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes('这一次一个动作都不勾') &&
-      v.includes('不会触发任何操作'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 56)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.retickSettled',
-    label: '★ 探针把那个勾**又勾回来**了（等这一次重渲染落地；下面那条量的是落地之后的样子）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsOnceOnlyAfterRetick',
-    label:
-      '★★★ 勾回来之后那句必须**消失**（勾选结果又与审核者那份一致了 = 没改）：判据是"改没改"（集合相等），不是"碰没碰过"——写成"碰过就一直显示"的实现会把"其实没改"报成改了，于是**多带一份覆盖**出去',
-    ok: (v) => v === false,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramEditorForFixture',
-    label:
-      '★★★ 固定参数编辑器（D44）长在「左选右配」的**右栏**：默认选中夹具动作（`probe-tool.clean-notes`）、编辑器在、绑定参数区写着"平台注入"',
-    ok: (v) =>
-      v !== null &&
-      v.selected === CHAIN_ACTION &&
-      v.hasEditor === true &&
-      v.hasBoundNote === true,
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramEditorDefault',
-    label:
-      '★★★ 编辑器默认值 = 审核者**长期那份**（夹具里钉的 `text=长期钉的`）——不是空白："跟随"被画成"这次没设"就会诱导人把长期配置冻成一次覆盖',
-    ok: (v) => v === '长期钉的',
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramFixedPairSwitch',
-    label:
-      '★★★ 字符串参数有**显式**的「不固定（模型填）/ 固定」开关（D43 界面反馈）：不能只靠输入框 placeholder 暗示——否则使用者看到的就只有"不固定（模型填）"，看不出哪里能设固定值；审核者已固定时开关停在「固定」',
-    ok: (v) =>
-      v !== null &&
-      v.options.includes('不固定（模型填）') &&
-      v.options.includes('固定') &&
-      v.mode === 'fixed',
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramFixedInputAlwaysVisible',
-    label:
-      '★★★ 输入框**常驻**（D43 界面反馈第二轮）：开关切到「不固定」时输入框仍然在（空）——"直接写值 = 固定"是主路径，不能先选「固定」才冒出输入框，否则使用者会问"平台会传入什么"；且这次切换真的改了参数（"固定参数改了"出现，不是只动了开关）',
-    ok: (v) =>
-      v !== null && v.mode === 'open' && v.inputVisible === true && v.inputValue === '' && v.dirty === true,
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramFixedPendingHint',
-    label:
-      '★★★ 选了「固定」但没填值 ⇒ 明确提示"还没填值"（不许静默当没设——使用者会以为钉上了，其实什么都没存）',
-    ok: (v) => v !== null && v.hintShown === true,
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramFixedPendingGone',
-    label:
-      '★★★ 填上值 ⇒ 提示消失、开关停在「固定」、输入框里就是那个值——"平台会传入什么" = 你填的这个，没有第二份值',
-    ok: (v) =>
-      v !== null && v.pendingGone === true && v.mode === 'fixed' && v.inputValue === '临时钉一下',
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramDirtyShown',
-    label:
-      '★★★ 改过一个固定参数 ⇒ "固定参数改了"那句出现（与白名单"只对这一次任务生效"同一条口径：改的只是这一次，审核者的长期配置没动）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.paramDirtyGone',
-    label:
-      '★★★ 改回来 ⇒ 那句消失（"其实没改"不许带一次覆盖出去：那会把长期配置冻成一次性决定）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.agentDetailFixedChip',
-    label:
-      '★★★ 智能体详情**只读**那一档：契约值 chip 旁边带「已固定: text=长期钉的」（固定值在界面上看得见，别让使用者忘了自己钉过什么）',
-    ok: (v) =>
-      v !== null &&
-      // ★ 还要求"读完之后真的回到了新建任务页"（`landed`）：这一条原来只认 chip，
-      //   而 chip 是在**智能体页**读的 ⇒ 回程那一步即使失败也照样绿（D58 之前它
-      //   写着一个不存在的地址 `#/newtask`，靠"未知 hash 回落"才碰巧有效）。
-      v.landed === true &&
-      typeof v.chip === 'string' &&
-      v.chip.includes('已固定') &&
-      v.chip.includes('text=长期钉的'),
-    show: (v) => (v === null ? 'null' : JSON.stringify(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.actionsMentionsReviewer',
-    label:
-      '★ ③ 说得出**默认勾的那一份来自谁**（它是那个审核者的能力）',
-    ok: (v) => typeof v === 'string' && v.includes(CHAIN_REVIEWER),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 46)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.onceOnlyAfterPick',
-    label:
-      '★ 在 ② 上**指名换一个人**之后出现"只对这一次生效"那句（范围：这一次 ≠ 长期安排）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.emptyPermsActionsText',
-    label:
-      '★★ 有审核者、但它一个动作都没配 ⇒ ③ 必须说清后果（**它的判决只会给出结论，不会触发任何操作**）',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes('现在没有一个能用的动作') &&
-      v.includes('判决') &&
-      v.includes('不会触发任何操作'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 50)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.emptyPermsChips',
-    label:
-      '★ 那一档**不画 chip**（③ 可勾时契约值画在勾选框旁边，chip 是"旧 daemon 兑现不了覆盖"那一档的形状）——这一条现在只说明"形状没串档"，真正的判据是下面那两条：**框在、全空**',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.emptyPermsBoxValues',
-    label:
-      '★★★ 有审核者、但它**一个动作都没有** ⇒ 勾选框**照画**，条数仍是已装工具的动作总数——这一档要的是"全空但可勾"（一个框都不画的实现等于说"这一栏没救了"，而它其实能加）',
-    ok: (v, facts) =>
-      facts['newtask.installedActionTotal'] > 0 &&
-      sameSet(v, facts['newtask.installedActions']),
-    show: (v, facts) =>
-      `${Array.isArray(v) ? v.length : String(v)} 个框 / 已装工具共 ${facts['newtask.installedActionTotal']} 个动作`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.emptyPermsCheckedValues',
-    label:
-      '★★★ 而且**一个都没勾**（那个审核者当前生效的动作就是空的：默认勾选是把它的现状**照实**画出来，不是替它预勾一条）',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个：${v.join(' | ')}` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneApplied',
-    label: '② 切到「不自动审核（这一次）」这一步本身成功了（下面几条的前提）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.onceOnlyAfterNone',
-    label: '★ 这一档同样带着"只对这一次生效"那句（它也是"这一次"的决定，不是长期安排）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneActionsText',
-    label:
-      '★★ 选了"不自动审核"之后 ③ 改说**没有审核者**这件事：这次既不会有判决，也不会有任何动作',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes('这次没有审核者') &&
-      v.includes('既不会有判决') &&
-      v.includes('也不会有任何动作'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 50)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneActionsText',
-    label:
-      '★★ 而且**没有**照抄另一档那句"判决只会给出结论，不会触发任何操作"——这一档连判决都不会有，说它就是假话',
-    ok: (v) => typeof v === 'string' && !v.includes('不会触发任何操作'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 50)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneActionsControlCount',
-    label:
-      '★ "不审"这一档的 ③ 里**一个旋钮都没有**（没有审核者就没有动作可谈——它不是"这一页只读"，而是"这一档根本没有可勾的东西"）',
-    ok: (v, facts) => facts['newtask.actionsSectionFound'] === true && v === 0,
-    show: (v) => `${v} 个控件`,
-  },
 
   // ── ★ 档三：工具清单没到 ⇒ **一个勾选框都不画** ──
   //
   // 现场是"让 `/api/tools` 真的失败"再造出来的（`$tools` 那一刻还留着上一次取到的
   // 清单 ⇒ 与"一个包都没装"长得一样，而这一栏必须说"说不准"）。
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownPatched',
-    label: '★ 现场真的被造成了那个样子：`/api/tools` 在这一次刷新里失败（patch 装上了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownViewError',
-    label:
-      '★★ 失败走的是**界面自己那条路**（「工具」页显示的就是 store 里记下的那条错误，逐字带探针编的那句话）——不是探针替它改状态',
-    ok: (v) => typeof v === 'string' && v.includes('/api/tools 取失败'),
-    show: (v) => (v === null ? 'null' : `"${String(v)}"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownBoxesBefore',
-    label:
-      '★★ 前提：这一次失败**之前**界面手里是有清单的（框有若干个）——否则下面量到的是"真的一个包都没装"，那是另一档',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v) => `${v} 个框`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownBoxValues',
-    label:
-      '★★★ 清单没到 ⇒ ③ 里**一个勾选框都不画**（不知道有哪些动作时，画出来的框就是在替使用者猜）',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个：${v.join(' | ')}` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownText',
-    label:
-      '★★★ 而且说的是"**工具清单还没到**"，**不是**"现在没有一个能用的动作"——后者是关于**他自己的权限**的一句假话（那一刻清单只是没取到，不是空的），而这正是最初把这一档加进来的原因',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes('工具清单还没到') &&
-      !v.includes('现在没有一个能用的动作'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 52)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownChips',
-    label: '★ 这一档也**不画 chip**（chip 属于"退回只读"那一档，不是"不知道"这一档）',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.toolsUnknownRestored',
-    label:
-      '★ 收尾：还原之后 ③ 的框又回来了（否则后面那三条端到端量的是"清单还没到"的残局）',
-    ok: (v) => v === true,
-  },
 
   // ── ★ 档四：这个 daemon **兑现不了这一栏的覆盖** ⇒ 退回只读（画 chip）──
   //
   // 现场是把 `/api/identity` 的 `capabilities` 里 `task-action-whitelist` **只去掉
   // 这一个**（`reviewer-override` 留着）：这正是"只重建了一半"的中间态，也是
   // 那两个标志**必须分开**的理由。
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonPatched',
-    label: '★ 现场真的被造成了那个样子：身份那一份被打成了"没有 `task-action-whitelist`"（patch 装上了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonCapsAfterPatch',
-    label:
-      '★★ 而且 patch 之后那份身份**确实少了这一个标志、其它照旧**（`reviewer-override` 还在）——否则下面量到的不是"旧 daemon"那一档',
-    ok: (v) =>
-      Array.isArray(v) &&
-      !v.includes('task-action-whitelist') &&
-      v.includes('reviewer-override'),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonBoxValues',
-    label:
-      '★★★ 兑现不了这一栏的覆盖 ⇒ ③ **退回只读**：一个勾选框都不画（画了就是在撒谎：那份覆盖发过去会被对面静默忽略，而两边都不报错）',
-    ok: (v) => Array.isArray(v) && v.length === 0,
-    show: (v) => (Array.isArray(v) ? `${v.length} 个：${v.join(' | ')}` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonControlCount',
-    label:
-      '★★★ 并且那一段里**一个旋钮都没有**（input / select / textarea / button === 0）——"只读"这条老口径在**这一档**仍然成立，所以它留在这里量',
-    ok: (v) => v === 0,
-    show: (v) => `${v} 个控件`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonChips',
-    label:
-      '★★★ 退回只读之后契约值**原样出现**（`<包 slug>.<动作名>`，不翻译、不概括）——原来那条 `actionChips` 的判据搬到了这一档（chip 才是这一档的形状）',
-    ok: (v) => Array.isArray(v) && v.includes(CHAIN_ACTION),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonChipSummary',
-    label:
-      '★★ 契约值旁边是工具清单里那句 `summary`，而且**逐字相同**（原来那条只要求"长度大于 4"，现在拿接口里那一份比）',
-    ok: (v, facts) =>
-      typeof v === 'string' &&
-      typeof facts['newtask.fixtureActionSummary'] === 'string' &&
-      v === facts['newtask.fixtureActionSummary'],
-    show: (v, facts) =>
-      v === null ? 'null' : `"${String(v)}"（接口里是 "${String(facts['newtask.fixtureActionSummary'])}"）`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonText',
-    label:
-      '★★ 并且说清了**这一次改不了 + 补救动作是重启 daemon**（与 ② 那条同一个口径；不说的话使用者只会以为界面坏了）',
-    ok: (v) =>
-      typeof v === 'string' && v.includes('这一栏这一次改不了') && v.includes('重启 daemon'),
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 52)}…"`),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonReviewerOptions',
-    label:
-      '★★★ 而 ② 那一栏**没有跟着只读**（跟随 / 换人 / 不审三档都在）——两个能力标志是**两份契约**：合成一个的话，这个中间态下 ② 会跟着退化，而"这一次换个人审"本来是兑现得了的',
-    ok: (v, facts) =>
-      Array.isArray(v) &&
-      v.includes('follow') &&
-      v.includes('none') &&
-      v.includes(`pick:${facts['newtask.fixtureReviewerId']}`),
-    show: (v) => (Array.isArray(v) ? `${v.length} 项` : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.oldDaemonRestored',
-    label: '★ 收尾：身份还原之后 ③ 的勾选框又回来了（否则后面那三条端到端量的是"退回只读"的残局）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followSubmitReachedTasks',
-    label:
-      '★ 提交①（跟随）之后**界面自己走完了**（两次 POST 都 await 过才切视图）——否则接口那两条读到的是别的 run',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followSubmitPick',
-    label:
-      '★ 提交①之前 ② 上**真的停在「跟随」**（这一条只观察、不设置：它若不是，下面那条量到的就是别的状态）',
-    ok: (v) => v === 'follow',
-    show: (v) => `② = ${JSON.stringify(v)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followRunAgentId',
-    label: '★ 那条新 run 真的挂在夹具执行者上（不然下面那条量的可能是别人的 run）',
-    ok: (v, facts) => v !== null && v === facts['newtask.fixtureExecutorId'],
-    show: (v) => String(v).slice(-6),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followRunMode',
-    label:
-      '★★★ 端到端：② 停在「跟随」时提交 ⇒ 接口上 `reviewer.mode === "follow"`（**不是** `none`：跟随绝不能写成 `null`）',
-    ok: (v) => v === 'follow',
-    show: (v) => `reviewer.mode = ${JSON.stringify(v)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneSubmitReachedTasks',
-    label: '★ 提交②（不自动审核）后界面同样走完了',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneRunAgentId',
-    label: '★ 那一条新 run 也挂在夹具执行者上',
-    ok: (v, facts) => v !== null && v === facts['newtask.fixtureExecutorId'],
-    show: (v) => String(v).slice(-6),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.noneRunMode',
-    label:
-      '★★★ 端到端：在 ② 上选「不自动审核（这一次）」再点「创建并派发」⇒ 接口上 `reviewer.mode === "none"`（界面上选的与发出去的请求体是同一件事）',
-    ok: (v) => v === 'none',
-    show: (v) => `reviewer.mode = ${JSON.stringify(v)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.fetchRestored',
-    label:
-      '★ 上面那两处 patch（失败的工具清单 / 少了标志的身份）**都还原了** —— 三条端到端量的必须是恢复正常之后的现场，不能踩在残局上',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followSubmitChecked',
-    label:
-      '★ E1 的前提：提交之前 ③ 上确实**一下都没碰过**（勾着的仍是那个审核者当前那份）——它若不是，下面那条量到的就是别的状态',
-    ok: (v, facts) => sameSet(v, facts['newtask.fixtureReviewerActions']),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followRunRecordRead',
-    label:
-      '★ E1 的前提：那条新 run 的**落库原文**真的读回来了（`GET /api/runs/<id>`；读不到时下面那条会是 null 而红，不会静默通过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.followRunHasAllowedActionsKey',
-    label:
-      '★★★ E1 端到端：**没碰 ③ 就提交** ⇒ 那条 run 的落库原文里**根本没有 `allowedActions` 这个 key**（= 跟随那个审核者的长期「行动权限」）。写成 `...(x ?? [])` 那种"总是带"的实现会给出 `[]` ⇒ 红：使用者什么都没做，却把这个审核者的权限**冻死在这一条任务上**（以后在智能体页给它加动作，从这一页建的任务仍然按老那份跑）',
-    ok: (v) => v === false,
-    show: (v, facts) =>
-      `键在吗：${JSON.stringify(v)}　值：${JSON.stringify(facts['newtask.followRunAllowedActions'])}（null = 没有那个键或者值是 null，看左边那一位）`,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.deliveryModeRecorded',
-    label:
-      '★★ 投递档**落在 run 上**：探针的 run 走 generic（没有系统提示通道）⇒ 该是 **B**（三块合成一段）。这条钉住 A 档的另一侧——换个 runtime 投递形状真的变了，而且**说得出来**',
-    ok: (v) => v === 'B',
-    show: (v) => String(v),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedSubmitUntick',
-    label: '★ E2 的前提：探针真的把 ③ 上那个勾**取消**了',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedSubmitChecked',
-    label:
-      '★ E2 的前提：提交之前 ③ 上**一个勾都没有**（这个状态就是发出去那个 `[]` 的含义，只观察、不设置）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedSubmitReachedTasks',
-    label: '★ 提交（一个动作都不勾）之后界面同样走完了（两次 POST 都 await 过才切视图）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedRunAgentId',
-    label: '★ 那一条新 run 也挂在夹具执行者上（不然下面那条量的可能是别人的 run）',
-    ok: (v, facts) => v !== null && v === facts['newtask.fixtureExecutorId'],
-    show: (v) => String(v).slice(-6),
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedRunRecordRead',
-    label: '★ E2 的前提：那一条新 run 的落库原文读回来了',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedRunHasAllowedActionsKey',
-    label:
-      '★★★ E2 端到端：**一个都不勾**再提交 ⇒ 那个 key **在**（在才是对的：这一次是一条决定，不是"没配"）',
-    ok: (v) => v === true,
-    show: (v) => `键在吗：${JSON.stringify(v)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.clearedRunAllowedActions',
-    label:
-      '★★★ E2 端到端：而且它是**空数组 `[]`**（键在、值空）= "这一次一个动作都不许触发"。它与 E1 一起钉死"**省略 ≠ 空数组**"：靠"数组是空的就省掉"来偷懒的实现会让使用者的收紧**静默失效**，而那条任务看起来一切正常结束',
-    ok: (v, facts) =>
-      facts['newtask.clearedRunHasAllowedActionsKey'] === true &&
-      Array.isArray(v) &&
-      v.length === 0,
-    show: (v) => JSON.stringify(v),
-  },
 
   // ── D45：返工次数（界面 ↔ 请求体 ↔ 落库）──
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.reworkDefault',
-    label:
-      '★ D45：进页面时「审核不通过时返工」默认是 **0**（不返工）——返工要花钱，不能替使用者决定多跑几轮',
-    ok: (v) => v === '0',
-    show: (v) => `默认 ${JSON.stringify(v)}`,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.setRework',
-    label: '★ D45 的前提：探针真的把那个下拉拧到了 2（拧不动的话下面量到的就是默认值）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.reworkRunRecordRead',
-    label: '★ D45 的前提：那条新 run 的落库原文读回来了（读不到时下面那条会是 null 而红，不静默通过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务的三步链',
-    key: 'newtask.reworkRunMaxReworks',
-    label:
-      '★★★ D45 端到端：界面上拧到 **2** 再提交 ⇒ 落库原文里 `maxReworks === 2`（界面上选的与落库的是同一件事；断在这里的表现是"配了返工却一次都不返"，而界面上看不出任何异常）',
-    ok: (v) => v === 2,
-    show: (v) => `maxReworks = ${JSON.stringify(v)}`,
-  },
 
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '建任务那一栏渲染出来了（表单在右栏里 + 左边清单还在）', ok: (v) => v === true },
