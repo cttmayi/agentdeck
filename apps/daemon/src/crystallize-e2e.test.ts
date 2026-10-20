@@ -895,3 +895,119 @@ describe('五轮：按意见改一版（P1）', () => {
     assert.equal(notDraft.status, 400)
   })
 })
+
+describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
+  /**
+   * 造一条「我提炼的」技能并拿到它的 id（历史与对比都要一条 mine 的技能）。
+   *
+   * ⚠️ 复用 P1 那条真实路径（起草 → 入库），不直接往 store 里塞：这一组要量的
+   *    正是"沉淀时真的打了 commit ⇒ 历史里真的有一条"——绕过入库就量不到它。
+   */
+  async function makeMineSkill(slug: string, marker: string): Promise<string> {
+    const runId = await runReviewed(`历史夹具 ${slug}`)
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    // ⚠️ 正文必须过**入库校验**（`## When to Use` / `## Procedure` 两节）：少了它
+    //    入库路由会 400 `invalid_artifacts`，而那条错看起来像"历史接口坏了"。
+    //    所以夹具按最小合法形状写，内容用 marker 区分。
+    const created = await commit({
+      draftRunId,
+      target: { kind: 'new' },
+      slug,
+      files: {
+        'SKILL.md':
+          `---\nname: ${slug}\ndescription: 历史夹具 ${slug}\n---\n\n# ${slug}\n\n` +
+          `## When to Use\n- ${marker}\n\n## Procedure\n1. ${marker}\n`,
+      },
+    })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+    return (created.body['skill'] as { id: string }).id
+  }
+
+  test('★★★ history：我提炼的技能历史里**真的有**那条沉淀提交（git 可用时）', async () => {
+    const skillId = await makeMineSkill('hist-one', '历史一')
+    const res = await fetch(`${daemon.url}/api/skills/${skillId}/history`)
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as
+      | { available: true; entries: Array<{ rev: string; short: string; when: string; message: string }> }
+      | { available: false; reason: string }
+    // ⚠️ 两种都合法：**没有 git 是正常状态**（§7.3.1）。但"不可用"必须带理由——
+    //    否则界面只能说一句"版本管理未启用"，而使用者不知道是没 git 还是坏了。
+    if (!body.available) {
+      assert.ok(body.reason.length > 0, 'available:false 必须带理由')
+      return
+    }
+    assert.ok(body.entries.length >= 1, JSON.stringify(body.entries))
+    const top = body.entries[0]!
+    assert.match(top.message, /hist-one/)
+    assert.ok(top.rev.length >= 7)
+    assert.ok(top.when.includes('T'), `when 要是 ISO 时间，量到 ${top.when}`)
+  })
+
+  test('★★★ compare：最新提交 vs 库里现在这份 —— 差异由**后端**算出来', async () => {
+    const skillId = await makeMineSkill('hist-two', '历史二')
+    const hist = (await (
+      await fetch(`${daemon.url}/api/skills/${skillId}/history`)
+    ).json()) as { available: boolean; entries?: Array<{ rev: string }> }
+    if (!hist.available) return // 没 git：正常状态，上面那条已经量过"带理由"
+    const rev = hist.entries?.[0]?.rev ?? 'current'
+    const res = await fetch(
+      `${daemon.url}/api/skills/${skillId}/compare?from=${rev}&to=current`,
+    )
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as
+      | { available: true; files: Array<{ rel: string; change: string }> }
+      | { available: false; reason: string }
+    assert.equal(body.available, true, JSON.stringify(body))
+    if (!body.available) return
+    // 刚沉淀完，工作区与最新提交一字不差 ⇒ 每个文件都是 `same`（不是"没有差异就没文件"）
+    assert.ok(body.files.length >= 1)
+    assert.equal(
+      body.files.every((f) => f.change === 'same'),
+      true,
+      JSON.stringify(body.files),
+    )
+  })
+
+  test('★ 安装来的技能：history 说清"外部内容没有历史"，**不是** 404', async () => {
+    // 夹具走**公开接口**造（`POST /api/skills` 支持 `source: 'local'` = 安装来的）：
+    // 这个测试文件没有 store 句柄（daemon 自己持有），而且"装一条技能"本来就是
+    // 使用者做过的事——用接口造比戳库更接近真实状态。
+    const created = await fetch(`${daemon.url}/api/skills`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        skills: [
+          {
+            slug: 'hist-installed',
+            name: 'hist-installed',
+            body: '---\nname: hist-installed\n---\n\n装来的\n',
+            source: 'local',
+          },
+        ],
+      }),
+    })
+    // ⚠️ 正文只能读一次：`assert.equal(…, await created.text())` 那个失败消息参数是
+    //    **无条件求值**的，读完之后 `.json()` 就报 "Body is unusable"。
+    const createdText = await created.text()
+    // `POST /api/skills` 成功是 **201**（创建），不是 200——第一版按读接口的习惯写成 200
+    assert.equal(created.status, 201, createdText)
+    const installedId = (JSON.parse(createdText) as { installed: Array<{ id: string }> })
+      .installed[0]!.id
+    const res = await fetch(`${daemon.url}/api/skills/${installedId}/history`)
+    assert.equal(res.status, 200)
+    const body = (await res.json()) as { available: boolean; reason?: string }
+    assert.equal(body.available, false)
+    assert.match(body.reason ?? '', /安装/)
+  })
+
+  test('★ 缺参数与找不到技能：各自的错说各自的（不混成一句"失败了"）', async () => {
+    const missing = await fetch(`${daemon.url}/api/skills/01NOPE/history`)
+    assert.equal(missing.status, 404)
+
+    const skillId = await makeMineSkill('hist-three', '历史三')
+    const noRev = await fetch(`${daemon.url}/api/skills/${skillId}/revision`)
+    assert.equal(noRev.status, 400)
+    const noRange = await fetch(`${daemon.url}/api/skills/${skillId}/compare?from=current`)
+    assert.equal(noRange.status, 400)
+  })
+})

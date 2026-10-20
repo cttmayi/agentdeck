@@ -32,6 +32,7 @@
 import { spawn } from 'node:child_process'
 import { mkdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { diffFileSets, type FileDiff } from '../text-diff.ts'
 
 /** 探测结果：git 是否可用。不可用是**正常状态**（设计定稿），不是错误。 */
 export interface GitProbe {
@@ -148,4 +149,149 @@ export async function commitMine(
     return { ok: false, reason: `git commit 失败：${commit.reason}` }
   }
   return { ok: true, commit: commit.stdout.trim() }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 只读查询：历史 / 某一版的文件树 / 两版之间的差异（P2，§7.4）
+// ══════════════════════════════════════════════════════════════════════
+//
+// `skills-mine` 从 D80 起就是一个 git 仓库（每次沉淀/进化一条 commit），
+// **历史不需要新造**——只是从前没有入口。这三个函数就是那三个入口的后端。
+//
+// 三条纪律：
+//   · **只读**：不 add、不 commit、不 checkout。看历史不该动到工作区
+//     （`git checkout` 回退是**另一件事**，要单独设计确认流程，见 §7.4 的边界）。
+//   · **git 不可用是正常状态**（§7.3.1）：返回 `{available:false, reason}`，
+//     界面照既有降级叙事显示"版本管理未启用"，不抛异常、不影响别的功能。
+//   · **差异在后端算**（`text-diff.ts` 同一份实现）：前端只渲染。两边各写一套
+//     必然漂——而"漂"的表现是同一份改动在两处显示成不同的行数，最难查。
+
+/** 历史里的一条提交。 */
+export interface MineHistoryEntry {
+  /** 完整 hash：回退/对比都要用它（短 hash 只给界面看）。 */
+  rev: string
+  short: string
+  /** ISO-8601（`--date=iso-strict`）——界面自己本地化，后端不猜时区。 */
+  when: string
+  message: string
+}
+
+export type MineHistory =
+  | { available: true; entries: MineHistoryEntry[] }
+  | { available: false; reason: string }
+
+/**
+ * 某条技能在 `skills-mine` 里的提交历史。
+ *
+ * - `--follow`：技能目录被改名/搬家之后历史不该断（设计里点名要它）。
+ * - 字段用 `%x1f`（不可打印分隔符）切：提交消息里出现 `|` / `:` 会把字段切歪，
+ *   而切歪的表现是"消息那一列显示成了半截 hash"——看起来像 git 坏了。
+ */
+export async function listMineHistory(
+  mineRoot: string,
+  slug: string,
+  gitPath = 'git',
+): Promise<MineHistory> {
+  const result = await runGit(
+    gitPath,
+    ['log', '--follow', '--date=iso-strict', '--format=%H%x1f%h%x1f%cI%x1f%s', '--', `${slug}/`],
+    mineRoot,
+  )
+  if (!result.ok) {
+    // ⚠️ **空仓库**（还没有任何提交）是正常状态：`git log` 以 128 退出并说
+    //    "does not have any commits yet"。那不是"git 坏了"，是"还没有历史"——
+    //    报成 available:false 会让界面说"版本管理未启用"，而其实只是还没沉淀过。
+    if (
+      result.reason.includes('does not have any commits yet') ||
+      result.reason.includes('unknown revision') ||
+      result.reason.includes('bad default revision')
+    ) {
+      return { available: true, entries: [] }
+    }
+    return { available: false, reason: result.reason }
+  }
+  const entries: MineHistoryEntry[] = []
+  for (const line of result.stdout.split('\n')) {
+    if (line.trim() === '') continue
+    const [rev, short, when, message] = line.split('\x1f')
+    if (!rev || !short) continue
+    entries.push({
+      rev,
+      short,
+      when: when ?? '',
+      message: (message ?? '').trim() === '' ? '(没有提交消息)' : (message ?? '').trim(),
+    })
+  }
+  return { available: true, entries }
+}
+
+export type MineRevision =
+  | { available: true; rev: string; files: Record<string, string> }
+  | { available: false; reason: string }
+
+/**
+ * 取某一版（某个 commit）里这条技能的全部文件。
+ *
+ * 两趟 git：先 `ls-tree` 列出这一版里属于这个技能目录的文件，再逐文件 `show`。
+ * 文件的 key 是**相对技能目录**的路径（`SKILL.md`、`reference/x.md`），与 store 里
+ * `files` 的键同一套口径——否则界面按路径找不到对应文件，只能整棵树重列。
+ */
+export async function readMineRevision(
+  mineRoot: string,
+  slug: string,
+  rev: string,
+  gitPath = 'git',
+): Promise<MineRevision> {
+  const listed = await runGit(
+    gitPath,
+    ['ls-tree', '-r', '--name-only', rev, '--', `${slug}/`],
+    mineRoot,
+  )
+  if (!listed.ok) return { available: false, reason: listed.reason }
+  const files: Record<string, string> = {}
+  for (const full of listed.stdout.split('\n')) {
+    const path = full.trim()
+    if (path === '') continue
+    const rel = path.startsWith(`${slug}/`) ? path.slice(slug.length + 1) : path
+    const shown = await runGit(gitPath, ['show', `${rev}:${path}`], mineRoot)
+    // 单个文件取不到不该让整棵树失败：如实留一句在正文里，界面看得见是哪个文件
+    files[rel] = shown.ok ? shown.stdout : `（这一版里读不到它：${shown.reason}）`
+  }
+  return { available: true, rev, files }
+}
+
+export type MineCompare =
+  | { available: true; from: string; to: string; files: FileDiff[] }
+  | { available: false; reason: string }
+
+/**
+ * 两版之间的逐文件差异（后端算，前端只渲染）。
+ *
+ * `from` / `to` 既可以是 commit，也可以是字面量 `current`（= 库里现在这条技能的内容）
+ * ——"最新提交 vs 现在"是回退前最该看的那一眼（工作区改过、还没提交时两者不同）。
+ */
+export async function compareMineRevisions(
+  mineRoot: string,
+  slug: string,
+  from: { rev: string } | { current: Record<string, string> },
+  to: { rev: string } | { current: Record<string, string> },
+  gitPath = 'git',
+): Promise<MineCompare> {
+  const load = async (
+    side: { rev: string } | { current: Record<string, string> },
+  ): Promise<{ ok: true; files: Record<string, string> } | { ok: false; reason: string }> => {
+    if ('current' in side) return { ok: true, files: side.current }
+    const got = await readMineRevision(mineRoot, slug, side.rev, gitPath)
+    return got.available ? { ok: true, files: got.files } : { ok: false, reason: got.reason }
+  }
+  const before = await load(from)
+  if (!before.ok) return { available: false, reason: before.reason }
+  const after = await load(to)
+  if (!after.ok) return { available: false, reason: after.reason }
+  return {
+    available: true,
+    from: 'rev' in from ? from.rev : 'current',
+    to: 'rev' in to ? to.rev : 'current',
+    files: diffFileSets(before.files, after.files),
+  }
 }

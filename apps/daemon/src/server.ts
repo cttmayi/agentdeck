@@ -88,7 +88,14 @@ import {
 } from './crystallize.ts'
 import { lastTextOf } from './run-text.ts'
 import { diffFileSets } from './text-diff.ts'
-import { commitMine, ensureMineRepo, probeGit } from './run-hooks/skill-mine.ts'
+import {
+  commitMine,
+  compareMineRevisions,
+  ensureMineRepo,
+  listMineHistory,
+  probeGit,
+  readMineRevision,
+} from './run-hooks/skill-mine.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import {
   collectMaterial,
@@ -5081,6 +5088,78 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         agent: updated,
         adopted: { fromSkills: mounted.map((s) => s.slug) },
       })
+      return
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 我提炼的技能的 git 历史（P2，§7.4）：三条**只读**接口
+    // ══════════════════════════════════════════════════════════════════
+    //
+    //   GET /api/skills/:id/history                → {available, reason?, entries:[…]}
+    //   GET /api/skills/:id/revision?rev=          → 那一版的文件树
+    //   GET /api/skills/:id/compare?from=&to=      → 逐文件差异（**后端算**）
+    //
+    // ⚠️ 三处边界，都是设计里定过的：
+    //   ① 只有 `source: 'mine'`（我提炼的）有历史——安装来的技能是**外部内容**，
+    //      重新装就行（§「版本管理」那一行）。非 mine 返回 `available:false` +
+    //      理由，**不是** 404：这条技能确实在，只是它没有版本这个概念。
+    //   ② git 不可用是**正常状态**（§7.3.1）⇒ 同样 `available:false` + 理由，
+    //      界面照既有降级叙事显示"版本管理未启用"，其余功能不受影响。
+    //   ③ 草稿 vs 当前版本**不在这里**：那条是 `/api/crystallize/diff`（P1），
+    //      差异只有一份实现。这里只比 git 里的版本与"库里现在这份"（`current`）。
+    const skillSubMatch = /^\/api\/skills\/([^/]+)\/(history|revision|compare)$/.exec(path)
+    if (skillSubMatch && req.method === 'GET') {
+      const skillId = decodeURIComponent(skillSubMatch[1]!) as Skill['id']
+      const sub = skillSubMatch[2]
+      const all = await store.listSkills(workspaceId)
+      const skill = all.find((sk) => (sk.id as string) === (skillId as string))
+      if (!skill) {
+        sendJson(res, 404, { error: `技能不存在：${skillId}`, code: 'skill_not_found' })
+        return
+      }
+      if (skill.source !== 'mine') {
+        sendJson(res, 200, {
+          available: false,
+          reason: `「${skill.slug}」是安装来的技能（外部内容，重新装就行）——只有「我提炼的」才有 git 历史`,
+        })
+        return
+      }
+      if (sub === 'history') {
+        sendJson(res, 200, await listMineHistory(skillsMineRoot, skill.slug))
+        return
+      }
+      const currentFiles: Record<string, string> = {
+        'SKILL.md': skill.body,
+        ...((skill.files ?? {}) as Record<string, string>),
+      }
+      if (sub === 'revision') {
+        const rev = (url.searchParams.get('rev') ?? '').trim()
+        if (rev === '') {
+          sendJson(res, 400, { error: '需要 rev（哪一版）', code: 'rev_required' })
+          return
+        }
+        // `current` = 库里现在这份（界面上的"这一版"有两种来源：git 里的某个提交
+        // 与库里此刻的内容——工作区改过还没提交时它们不同，所以两条都要能取）
+        if (rev === 'current') {
+          sendJson(res, 200, { available: true, rev: 'current', files: currentFiles })
+          return
+        }
+        sendJson(res, 200, await readMineRevision(skillsMineRoot, skill.slug, rev))
+        return
+      }
+      // compare
+      const fromRaw = (url.searchParams.get('from') ?? '').trim()
+      const toRaw = (url.searchParams.get('to') ?? '').trim()
+      if (fromRaw === '' || toRaw === '') {
+        sendJson(res, 400, { error: '需要 from 与 to（各自是 commit 或 current）', code: 'range_required' })
+        return
+      }
+      const side = (raw: string) => (raw === 'current' ? { current: currentFiles } : { rev: raw })
+      sendJson(
+        res,
+        200,
+        await compareMineRevisions(skillsMineRoot, skill.slug, side(fromRaw), side(toRaw)),
+      )
       return
     }
 

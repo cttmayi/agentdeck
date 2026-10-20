@@ -136,7 +136,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | 展示页面支持音视频 | 已做完（daemon 认 `video/*`/`audio/*` + 支持 `Range`；查看器就地播放） | `./design/design.md` §15.58 |
 | 远端管理页（技能 / 工具目录） | 已做完（含常驻探针 `pnpm run probe:remote`，21 项） | `./srs/requirements.md` §16 的 D51–D55 |
 | **文档对账**（2026-10） | 已做完（只改文档、没动代码）：把「链路深度上限与环检测」被说成硬不变量的两处 README 改回实情；给 `architecture.md` 的「完整路由表」补上**整段漏掉的 `/api/agent-groups` 5 条**并修掉 `POST /api/agents` 的过时字段；术语表的「行动权限」落点从 agent 改到**智能体组**；§14 补上本轮新查到的几处开口 | `./design/architecture.md` §4.3 / §7.2 / §13 / §14；本文件下面那节「架构与不变量」 |
-| **布局探针重对齐** | 🔄 **进行中（分批，一批一次提交）**：第 1 批 `4417a47` 智能体详情（12 → 2 红）、第 2 批 `9c944eb` 判断依据 / 老形态依据 / 保存清理（审核标准 26 → 0、迁移 15 → 0、老信息清理 9 → 2）、第 3 批 D41 权限那一族搬到**智能体组页**（那一页探针从前完全没覆盖）。全局 194 → **0 红 / 442 条**（六批；一共量到 3 个真缺陷并全部当场修掉）：① 保存后草稿没跟服务端走（界面看不见并进来的正文）② 同一次保存把刚清掉的老字段写回来 ③ **改已有的组保存必然 400**（`id` 混进 PATCH body）。探针**全绿**（442 项）⇒ 下一步回到功能：P2（git 历史 + 两版对比，见 `docs/design/skill-crystallization.md`）| `tools/layout-probe/README.md`；本文件下面「布局探针正在与当前界面重新对齐」 |
+| **布局探针重对齐** | 🔄 **进行中（分批，一批一次提交）**：第 1 批 `4417a47` 智能体详情（12 → 2 红）、第 2 批 `9c944eb` 判断依据 / 老形态依据 / 保存清理（审核标准 26 → 0、迁移 15 → 0、老信息清理 9 → 2）、第 3 批 D41 权限那一族搬到**智能体组页**（那一页探针从前完全没覆盖）。全局 194 → **0 红 / 442 条**（六批；一共量到 3 个真缺陷并全部当场修掉）：① 保存后草稿没跟服务端走（界面看不见并进来的正文）② 同一次保存把刚清掉的老字段写回来 ③ **改已有的组保存必然 400**（`id` 混进 PATCH body）。探针**全绿**（442 项）⇒ 回到功能：**P2 后端已落地**（`5970592`，三条只读接口 + 12 条测试），**界面是下一刀**（技能页展开行的「历史」分节）| `tools/layout-probe/README.md`；本文件下面「布局探针正在与当前界面重新对齐」 |
 | **从「本地清单」安装技能**（2026-10） | 已做完：安装面板第三个页签，读仓库自带的一份 JSON（`apps/daemon/catalog/skills.json`），点一下由 daemon 现去取——**不用远端服务 / 同步工具 / 登录**（`--skills-catalog` 可换一份） | `./srs/requirements.md` §16 的 **D71**；`./reference/skills.md` §3；`./design/architecture.md` §7.2 / §13 |
 | **技能内容落盘**（2026-10） | 已做完：技能正文与支持文件存成**真文件**放在 `~/.agentdeck/skills/<slug>/`（`--skills-root` 可覆盖），**磁盘为准**（改文件就生效）；`log/skill.jsonl` 退化成索引（**所有来源都是这样，没有例外**——`localdir:` 那条例外随 D73 撤掉了） | `./srs/requirements.md` §16 的 **D72**；`./reference/skills.md` §2；`./design/architecture.md` §5.1 / §13 |
 | **本地技能目录改成显式安装**（2026-10） | 已做完：原来勾选目录 ⇒ 每次读列表自动对账读入；现在改成安装面板的第四个页签「从本地安装」——扫内置的那几个目录（claude / codex / cursor / agents），**逐条装**，装完落 `~/.agentdeck/skills/<slug>/`、带 `localdir:<根目录>` 标记。`Workspace.localSkillDirs` 与 `PUT /api/skills/local-dirs` 删掉，`FileStore` 的 `localdir:` 例外也撤了 | `./srs/requirements.md` §16 的 **D73**；`./reference/skills.md` §6；`./design/architecture.md` §5.1 / §7.2 |
@@ -145,7 +145,25 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 | **聊天沉淀 skill（chat-to-skill）**（2026-10） | 🔄 **四轮重设计：P0 已实作（2026-10-19）**——使用者提五点（素材落盘让 agent 读 / 用一套优秀 skill 去生成 / 多文件产物与呈现 / 审阅免填 frontmatter / 新建-更新对比 + git 历史）。P0 = 素材落盘成 `material/` 目录（agent 按需读，不再内联进第一句话）+ 平台内置技能 `writing-skills`（随 run 注入，正文与 references 承载“怎么写 skill”）+ 产出写 `skill/` 目录（多文件、树形呈现、文本兜底给不会写文件的 runtime）+ 审阅只从 SKILL.md 的 frontmatter 取 name/description（不再手填）、slug 可确认、校验问题定位到文件；入库入参改成 `{files}`，服务端复算。**P1 也已实作（2026-10-19）**：变更集 diff（后端 `text-diff.ts` 算 LCS，逐文件 hunks，
 界面画 +n −m 与逐行差异，可切"对比当前版本 / 对比上一版草稿"）、素材分节（清单 + 预览 + 目录）、
 「按意见改一版」（同源素材 + 上一版产出进 `previous-draft/` + 意见进 `feedback.md`，新 run 记
-`revisedFrom`）。P2 待做：git 历史 list + 选中两版对比。
+`revisedFrom`）。
+
+**P2（git 历史 + 版本对比，2026-10-20）后端已落地**：`skills-mine` 从 D80 起就是 git 仓库，历史一直在那儿，
+只是**没有入口**（于是"更新之后看不出改了什么"，进化等于盲签）。三个入口做出来了，都是**只读**
+（不 add / 不 commit / 不 checkout）：
+
+| 接口 | 给什么 |
+|---|---|
+| `GET /api/skills/:id/history` | `{available, reason?, entries:[{rev, short, when, message}]}` |
+| `GET /api/skills/:id/revision?rev=` | 那一版的文件树（键 = **相对技能目录**的路径，与 store 的 `files` 同一口径） |
+| `GET /api/skills/:id/compare?from=&to=` | 逐文件 `A`/`M`/`D` + hunk（**后端算**，用 `text-diff.ts` 同一份实现） |
+
+三处边界：非 `mine` 的技能 → `available:false` + 理由（**不是** 404——技能在，只是没有"版本"这个概念）；
+git 不可用 → 同样 `available:false` + 理由（§7.3.1 的正常状态）；草稿 vs 当前版本仍在
+`/api/crystallize/diff`（P1）——同一件事只有一个实现。`from`/`to` 既可以是 commit 也可以是 `current`
+（库里现在这份）。踩过的坑写在代码注释里：字段分隔符必须用不可打印的 `\x1f`（提交消息里会出现 `|`）、
+空仓库的 128 要报成"还没有历史"而不是"版本管理未启用"。
+
+**下一刀 = 界面**：技能页展开行的「历史」分节（列出提交 → 选中看那一版的文件树与逐文件 diff）。
 
 **审阅页排版已重排（2026-10-19）**：结论条常驻（能不能入库 / 改了什么 / 目标是谁 + 「按意见改一版」），
 主区 = 文件树 240px + 窗格（`[内容]｜[差异]` 同位置切换），素材与起草日志折成一行摘要放到审阅**下方**。

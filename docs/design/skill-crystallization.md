@@ -581,7 +581,14 @@ description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / 
   免填 frontmatter。实作清单见 §5.0.10。
 - **P1**：新建/更新变更集（A/M/D + diff）+ 校验问题定位 + 「素材」分节 +
   **「按意见改一版」**（审阅页给 agent 一句反馈再起草一轮，复用同一份 `material/`，新旧并列）。
-- **P2**：git 历史 list + 版本对比（mine）。
+- **P2（后端已实作，2026-10-20；界面待做）**：git 历史 list + 版本对比（mine）。
+  三条只读接口已落地：`GET /api/skills/:id/history`、`/revision?rev=`、`/compare?from=&to=`
+  ——都走 `run-hooks/skill-mine.ts` 新加的三个函数（`listMineHistory` / `readMineRevision` /
+  `compareMineRevisions`），`gitPath` 可注入、差异用 `text-diff.ts` **在后端算**（与 P1 同一份实现）。
+  ⚠️ 三条边界都在路由注释里：非 `mine` 的技能返回 `available:false` + 理由（**不是** 404——技能在，
+  只是没有"版本"这个概念）；git 不可用同样 `available:false` + 理由（§7.3.1 的正常状态）；
+  草稿 vs 当前版本**不在这里**（那是 `/api/crystallize/diff`，P1）。界面（技能页展开行的「历史」分节）
+  是紧接着的下一刀。
 
 #### 5.0.9 使用者定稿（2026-10-19 逐条确认）
 
