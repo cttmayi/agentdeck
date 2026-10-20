@@ -2482,99 +2482,21 @@ const CHECKS = [
   },
 
   {
-    view: '行动权限空态（D41）',
-    key: 'noTools.slugsBefore',
-    label: '★ 卸载之前确实装着工具（否则下面的空态是碰巧看到的）',
-    ok: (v) => Array.isArray(v) && v.length > 0,
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '行动权限空态（D41）',
+    view: '工具页空态（D41）',
     key: 'noTools.refusals',
     label: '★ 摘挂与卸载都没被拒（被拒的话下面的空态根本没造出来）',
     ok: (v) => v === 0,
   },
   {
-    view: '行动权限空态（D41）',
+    view: '工具页空态（D41）',
     key: 'noTools.refreshButtonFound',
     label: '「工具」页有那个刷新按钮（探针靠它让界面的 `$tools` 真的空掉）',
     ok: (v) => v === true,
   },
   {
-    view: '行动权限空态（D41）',
+    view: '工具页空态（D41）',
     key: 'noTools.viewEmptyState',
     label: '工具页自己显示的是空态（列表确实空了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.detailSwitched',
-    label: '★ 右栏真的换成了那个"没有工具包可授权"的审核者（否则下面读到的是上一个）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.readOnlyHasEmptyState',
-    label:
-      '★ 只读态的「行动权限」那一行说的是"还没有装工具包 ⇒ 没有任何动作可授权"（不是一片空白）',
-    ok: (v) => v === true,
-    show: (v, facts) => `${v}　实测：「${String(facts['noTools.readOnlyText'] ?? '')}」`,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.readOnlyHasChip',
-    label: '★ 只读态那一行里**没有**动作 chip（空就是空，不编一条出来）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.readOnlyGoButton',
-    label: '★ 只读态那个空态**指向「工具」页**（一个可点的去处，不是一句干话）',
-    ok: (v) => typeof v === 'string' && v.includes('工具'),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formHasEmptyState',
-    label: '★ 编辑态那一栏说的是同一句话（两个地方一个口径）',
-    ok: (v) => v === true,
-    show: (v, facts) => `${v}　实测：「${String(facts['noTools.formText'] ?? '')}」`,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formHasToolsHeading',
-    label: '★ 那一栏里**没有空的分组标题**（"已装工具的动作"下面什么都没有是最坏的一种画法）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formHasGroupBox',
-    label: '★ 也没有空的分组容器（按包分组的那一块整块不出现）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formPickerShown',
-    label: '★ 编辑态那一栏是「左选右配」的 ActionPicker，根容器在（空态画在组件内部）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formHasAnyCheckbox',
-    label: '★ 一个复选框都没有（没有可勾的东西就别画勾选框）',
-    ok: (v) => v === false,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.formGoButton',
-    label: '★ 编辑态的空态也指向「工具」页（按钮文案里写着"工具"）',
-    ok: (v) => typeof v === 'string' && v.includes('工具'),
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '行动权限空态（D41）',
-    key: 'noTools.linkNavigatesToTools',
-    label: '★ 而且那个去处**真的通**：点一下落到「工具」页（不是画了一个按钮）',
     ok: (v) => v === true,
   },
 
@@ -2590,149 +2512,6 @@ const CHECKS = [
   //      旧的内置动作名）在探针里**造不出来**：写入口按设计拒绝裸名、并刻意忽略
   //      那个老字段。所以这里覆盖的是同一段界面 + 同一条接口路径的等价状态；
   //      旧名字本身由 `apps/web/src/lib/agent-actions.test.ts` 钉住。
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleGrantOk',
-    label: '★ 夹具：先把 `probe-tool-ui.ping` 配到审核员身上（那个包装着，写入口收）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleUninstallOk',
-    label: '★ 夹具：再把那个包卸载（这条权限立刻变成"配过、但没有出处"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleListedInEdit',
-    label: '★ 编辑态里那条**看得见**（勾选框里没有它——但绝不能让它凭空消失）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleLiveBoxFound',
-    label: '★ 夹具：还有一个**可用**的动作可以勾（保存时那一份 patch 才带得上它）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleServerRefuses',
-    label: '★ 带着那条没有出处的名字保存 ⇒ **服务端真的拒了**（400，不是界面自己编的）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleErrorVerbatim',
-    label: '★★ 那句拒绝的话**原样显示在页面上**（与接口回的那句逐字相同：不吞掉、也不自己概括）',
-    ok: (v) => v === true,
-    show: (v, facts) =>
-      `${v}　实测显示：「${String(facts['noTools.staleErrorShown'] ?? '')}」`,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleStillEditing',
-    label: '★ 被拒之后界面**还停在编辑态**（没有假装保存成功）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleKeptAfterRefusal',
-    label: '★★ 那条名字**还在草稿里**（被拒之后不许静默剔除——"使用者没同意就改了权限"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleDropButton',
-    label: '★ 并且给了可操作的下一步：「移除」入口就在它那一行',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.staleFixedOnServer',
-    label: '★★ 点「移除」→ 再保存 ⇒ 这一次真的存进去了（接口上那条没了；不是死胡同）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadHolderFound',
-    label: '★ 夹具里有一个"配过、但包已卸载"的 agent（否则下面几条会空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadDetailSwitched',
-    label: '★ 右栏真的换成了它（否则下面读到的是上一个 agent）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadChipKept',
-    label: '★ 只读态里那条权限**照原样留着**（不静默过滤掉——"配过"这件事不能抹）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadChipMarked',
-    label: '★ 旁边明说它**当前不可用**（不能与一条真的能触发的动作长得一模一样）',
-    ok: (v) => v === '当前不可用',
-    show: (v) => `"${String(v)}"`,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadHintShown',
-    label: '★ 那一段下面说清了为什么（找不到出处 + 下一步）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadHintBothCauses',
-    label:
-      '★ 解释里**两个成因都说了**：平台的内置动作已整组移除（旧名字）/ 提供它的包被卸载（能装回来）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadHintNextStepReadOnly',
-    label: '★ 只读态给的下一步是**那一段里真的有的**（"点「编辑」…移除"）——不是编辑态那句',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadHintNextStepInEdit',
-    label: '★ 编辑态给的下一步是那一栏里真的有的（「移除」按钮 + 去「工具」页装包）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadListedInEdit',
-    label: '★ 编辑态把它**列出来**了（勾选框里没有它，不列就是"看不见"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadRemoveButton',
-    label: '★ 并且给了「移除」入口（否则一保存就被服务端拒，而错误点名的那条在界面上不存在）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadPartialStillRefused',
-    label:
-      '★ 只去掉一条就保存 ⇒ **仍然被拒**（服务端的规则是"名单里只要还有一条没出处的就不收"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadAllRemoved',
-    label: '★ 逐条点「移除」之后，那一栏里一条契约值都不剩了（草稿真的清了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '配过但不可用（D41）',
-    key: 'noTools.deadDroppedOnServer',
-    label: '★★ 点「移除」→ 保存之后，**接口上**那条权限真的没了（不是个死胡同）',
-    ok: (v) => v === true,
-  },
 
   // ── 新建任务的三步链（① 执行 → ② 审核 → ③ 行动）──
   //
