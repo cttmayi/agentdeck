@@ -156,8 +156,78 @@
     }
     busy = true
     error = ''
+    /**
+     * ⚠️⚠️ 这两个基准值必须在**发请求之前**取，不能在 `await` 之后取。
+     *
+     * `updateAgent()` 内部会 `loadAgents()`（见 `lib/stores.ts`），store 一刷新，
+     * 这个组件的 `agent` prop **当场就是服务端那一份**了——所以"服务端有没有改写"
+     * 这件事，用 `await` 之后的 `agent` 去比**永远比出来相等**（自己跟自己比）。
+     * 第一版就是这么写的：代码在、条件不成立、界面纹丝不动。探针把它量出来了
+     * （`fold.editorVsApiSamples`：接口那份有正文、输入框里没有），这是"断言写了、
+     * 但被比较的两边其实是同一个东西"那类缺陷的又一例。
+     */
+    const intendedInstructions =
+      (patch['instructions'] as string | undefined) ?? agent.instructions
+    const hadLegacyStandard = draft.reviewStandard !== null
     try {
-      await updateAgent(agent.id, patch)
+      const updated = await updateAgent(agent.id, patch)
+      /**
+       * ★★ 2026-10-19：**服务端会在保存时顺手改写两个字段，所以这里必须把它的返回值收下。**
+       *
+       * ══════════════════════════════════════════════════════════════════
+       * 它在改写什么（`apps/daemon/src/server.ts` 的 `foldInOnSave`）
+       * ══════════════════════════════════════════════════════════════════
+       * 老数据里"判断依据写在 `reviewStandard` 字段里"的审核者，保存一次就会被
+       * 并进「指令」（正文一字不变）、老字段清成 `null`。也就是说：**我们发出去的
+       * 是 `{name}`，回来的那一份里 `instructions` 已经变了**。
+       *
+       * ══════════════════════════════════════════════════════════════════
+       * 两轮代价（都是探针在真浏览器里量到的，不是推演）
+       * ══════════════════════════════════════════════════════════════════
+       * `draft` 是进详情时拍的一份快照，只在**换人**（`agent.id` 变）时作废——
+       * 保存同一个人不刷新它。于是：
+       *   ① 并进来的那段正文**在界面上看不见**（那一格还是旧的指令）——
+       *      使用者没法确认"我的判断依据还在"；
+       *   ② 更糟：他在那格旧文字上接着改一个字再保存 ⇒ `buildPatch()` 判成
+       *      "指令变了"，把**不带正文**的那份写回去，而老字段已经被清空 ⇒
+       *      并进来的那段判断依据**再也回不来**。第二轮的形状是"老字段又被整份
+       *      PATCH 回去"（`draft.reviewStandard` 还是老对象 ⇒ `buildPatch` 判成
+       *      它变了），界面上那条老提示重新出现——**平台刚做的清理被界面自动撤销**。
+       *
+       * ══════════════════════════════════════════════════════════════════
+       * 为什么这是"收下返回值"而不是"每次保存后重读一遍 agent"
+       * ══════════════════════════════════════════════════════════════════
+       * 重读会把**使用者正在改的东西**也一起覆盖（"改到一半被列表刷新清空"）。这里
+       * 只认**服务端改过的那两处**：判据是"回来的那份 ≠ 我们本来要它存的那份"，
+       * 普通保存回来的就是我们发出去的值 ⇒ 一个字段都不会被动。
+       * ⚠️ 以后服务端再加"保存时顺手改写"的字段，就要在这里多收一个——那条
+       *    `foldInOnSave` 的注释里写着"三个不收工的地方"，它是唯一一处保存期改写。
+       */
+      const adoptedInstructions =
+        updated.instructions !== intendedInstructions ? updated.instructions : draft.instructions
+      // 老字段被清掉（并进「指令」）⇒ 草稿里那个对象也得跟着清，否则下一次保存
+      // 会把刚清理掉的形状整份写回去（上面 ② 那条）。
+      // ⚠️ 只在"这次请求没带 `reviewStandard`"时收：带了就是使用者自己在写它
+      //    （服务端那种情况**刻意不并**，见那三个不收工的地方），回来的那份就是
+      //    他写的那份，草稿不该被它替掉。
+      const legacyCleared =
+        patch['reviewStandard'] === undefined &&
+        (updated.reviewStandard ?? null) === null &&
+        hadLegacyStandard
+      if (adoptedInstructions !== draft.instructions || legacyCleared) {
+        // ⚠️ **整份赋值**，不是逐字段改（`draft.instructions = …`）。本组件是
+        //    **legacy 模式**（`export let agent`，没有 runes），"给对象里的一个字段
+        //    赋值会不会让界面重渲染"取决于编译产物：第一版就是逐字段改的，
+        //    服务端那份被收进了草稿对象、**界面却纹丝不动**（探针量到
+        //    `fold.editorShowsMerged` 仍然红），而使用者接着在那格旧文字上打字会把
+        //    刚收下的那段正文**覆盖掉** ⇒ 再保存一次判断依据就没了。
+        //    整份赋值在任何模式下都作废草稿，用最不容易漂的那条路。
+        draft = {
+          ...draft,
+          instructions: adoptedInstructions,
+          reviewStandard: legacyCleared ? null : draft.reviewStandard,
+        }
+      }
       showToast(tx('agents.saved'))
       onchanged()
     } catch (err) {

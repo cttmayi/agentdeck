@@ -1850,11 +1850,25 @@ const CHECKS = [
   {
     view: '老信息清理（保存时）',
     key: 'fold.editorShowsMerged',
-    label: '⚠️⚠️ **真缺陷（这条是红的，别去弱化它）**：保存之后卡片里「指令」那一格**没有**跟着变成合并后的文字——'
-      + '服务端把老正文并进了 `instructions`，而组件的草稿只在"换了人"（`agent.id` 变）时才作废，'
-      + '于是刚并进去的那段正文在界面上看不见。要修就是"保存成功后，服务端改写过的那几个字段以返回值为准"。',
+    label: '★★★ 保存之后卡片里「指令」那一格**就是服务端那份**（并进来的正文看得见）——'
+      + '★ 这条曾经是红的（真缺陷）：服务端把老正文并进 `instructions`，而组件的草稿只在"换了人"时作废，'
+      + '于是界面看不见刚并进来的正文。修法是 `AgentDetail.save()` 收下返回值里被服务端改过的字段；'
+      + '⚠️ 基准值必须在 `await` **之前**取（`updateAgent` 内部会 `loadAgents()`，await 之后 `agent` 已经是服务端那份，'
+      + '自己跟自己比永远相等——第一版就是这么坏的）。',
     ok: (v) => v === true,
     show: (v, f) => `${v}　实测指令框开头：${JSON.stringify(f['fold.editorTextAfterSave'] ?? null)}`,
+  },
+  {
+    view: '老信息清理（保存时）',
+    key: 'fold.editorVsApiSamples',
+    label: '★★★ 保存之后连续的几次取样里，界面那一格与**接口那份逐字相同**（不是"最终会一致"——'
+      + '使用者可能立刻就在那一格里继续打字，差一瞬就等于把服务端刚并进来的正文覆盖掉）',
+    ok: (v) =>
+      Array.isArray(v) && v.length > 0 && v.every((x) => (x?.editor ?? '') === (x?.api ?? '')),
+    show: (v) =>
+      Array.isArray(v)
+        ? v.map((x) => `#${x.t} 界面${(x.editor ?? '').length}字/接口${(x.api ?? '').length}字`).join(' · ')
+        : String(v),
   },
   {
     view: '老信息清理（保存时）',
@@ -1872,12 +1886,9 @@ const CHECKS = [
   {
     view: '老信息清理（保存时）',
     key: 'fold.editAfterSaveResurrectsLegacy',
-    label: '⚠️⚠️ **真缺陷（这条是红的）**：那一轮保存把**刚清掉的老字段又写回来了**——'
-      + '组件持有的草稿在保存成功后没有跟着服务端的结果走（`draft.reviewStandard` 还是老对象，'
-      + '服务端已清成 `null`），于是 `buildPatch()` 把整份老字段 PATCH 回去：'
-      + '界面上那条老提示重新出现、库里的形状在两版之间来回跳。'
-      + '这一次没丢正文是侥幸（正文被拆在两个字段里投递）；"清理老数据"被界面自动撤销这件事本身是错的。'
-      + '要修就是"保存成功后，服务端改写过的字段以返回值为准"（同 `fold.editorShowsMerged` 那一条的病根）。',
+    label: '★★★ 那一轮保存**不许**把刚清掉的老字段写回来（`reviewStandard` 必须还是 `null`）——'
+      + '★ 这条曾经是红的（真缺陷）：草稿里那个老对象被 `buildPatch()` 判成"变了"、整份 PATCH 回去，'
+      + '界面上那条老提示重新出现、库里刚清理掉的形状被界面自动撤销（同 `fold.editorShowsMerged` 的病根）。',
     ok: (v) => v === false,
     show: (v, f) => `${v}　老字段：${JSON.stringify(f['fold.instructionsAfterEdit'] ?? null)?.slice(0, 40)}`,
   },

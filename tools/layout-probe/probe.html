@@ -1712,8 +1712,16 @@
           errors.push('找不到审核者的卡片')
         } else {
           click(probeReviewerRow.querySelector('.list-row-main'))
+          // ⚠️ 等的是"右栏换成了**这个人**"：判据从 `.detail .badge.in_review`
+          //    （查看态里那个角色徽标，2026-10 随查看态一起删了）改成卡片里名字框
+          //    的值等于**列表里那一行的名字**——只等"详情在不在"会立刻返回、
+          //    读到上一个人（这个坑在这里踩过两次，另一处是 `fold.detailSwitched`）。
+          const probeReviewerName = text(probeReviewerRow.querySelector('.list-row-main')) ?? ''
           const probeReviewerSwitched = await until(
-            () => !!d().querySelector('.detail-pane .badge.in_review'),
+            () =>
+              !!d().querySelector('.card.agent-card') &&
+              String(d().querySelector('#agent-name')?.value ?? '') !== '' &&
+              probeReviewerName.includes(String(d().querySelector('#agent-name')?.value ?? '')),
             60,
           )
           if (!probeReviewerSwitched) errors.push('点开审核者之后右栏没换过去')
@@ -2557,6 +2565,24 @@
             //    变成合并后的文字**——卡片只在自己持有的草稿上，而草稿只在"换了人"
             //    （`agent.id` 变）时才作废，所以服务端刚并进去的那段正文，界面上看不见。
             //    这不是"显示不一致"那么轻：下面那条第二轮保存会把**判断依据丢一半**。
+            // ⚠️ 诊断（保留：这几条量的是"界面上到底有几个卡片/几个指令框"，
+            //    以及"那一格有没有在保存之后跟上服务端"——判别"改的是不是同一个元素"
+            //    靠的就是它们，踩过一次"读数取到了另一个元素"的坑）
+            facts['fold.cardCount'] = d().querySelectorAll('.card.agent-card').length
+            facts['fold.instructionsElementCount'] =
+              d().querySelectorAll('#agent-instructions').length
+            const samples = []
+            for (let i = 0; i < 3; i++) {
+              samples.push({
+                t: i,
+                // ⚠️ 取**完整**文本（不截断）：这一族要判"界面那一格与接口那份逐字相同"，
+                //    截断之后"后面那半截没跟上"就没人看着了。
+                editor: String(d().querySelector('#agent-instructions')?.value ?? ''),
+                api: String((await readAgent())?.instructions ?? ''),
+              })
+              await wait(400)
+            }
+            facts['fold.editorVsApiSamples'] = samples
             const editorText = String(d().querySelector('#agent-instructions')?.value ?? '')
             facts['fold.editorShowsMerged'] = editorText.includes('只看证据。')
             facts['fold.editorTextAfterSave'] = editorText.slice(0, 60)
