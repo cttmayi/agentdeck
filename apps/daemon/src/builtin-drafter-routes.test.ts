@@ -129,6 +129,27 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
     })
   })
 
+  test('★★ 进不了智能体组（组决定谁执行谁审 = 业务闭环；它不参与）', async () => {
+    await withDaemon(async (url) => {
+      const drafter = await drafterOf(url)
+      // ⚠️ 路径是 `/api/agent-groups`（我第一版按界面上的"智能体组"猜成 `/api/groups`
+      //     —— 返回的是 404 `未知路径`，看起来像"这个接口不存在"，其实是路径写错了）。
+      const res = await fetch(`${url}/api/agent-groups`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '试图组', members: [drafter.id] }),
+      })
+      // ⚠️ 这条挡在 `parseGroupFields` 里，是**唯一**能挡住它的地方之一：界面上
+      //    「组」页的候选是 `role === 'executor'`（起草者天然落选），但接口是公开的，
+      //    而进组之后它就可能被派去执行任务或审别人的产出——它的自愈只在启动时做
+      //    （幂等/补标记），**不会自己退出组**。
+      // 响应体只能读一次（这一条我在本文件里已经踩过一次，见上面那句注释）
+      const text = await res.text()
+      assert.equal(res.status, 400, text)
+      assert.match((JSON.parse(text) as { error: string }).error, /不能进智能体组/)
+    })
+  })
+
   test('普通 agent 没有"默认值"可恢复（400 而不是假装成功）', async () => {
     await withDaemon(async (url) => {
       const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }

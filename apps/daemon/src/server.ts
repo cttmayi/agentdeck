@@ -1507,6 +1507,21 @@ async function parseGroupFields(
       if (unknownId !== undefined) {
         return { ok: false, error: `组员不存在：${unknownId}。它可能已经被删掉了，请重新选择成员。` }
       }
+      // ★ 平台内置的 agent（起草者）**不能进组**（2026-10 定稿第 ① 条）。
+      //
+      //   组的成员槽决定"谁执行、谁审"——那是**业务闭环**。起草者一旦进去，就可能被派去
+      //   执行任务、或去审别人的产出，而它的指令是"你是 skill 作者"。它的自愈只在启动时
+      //   做（幂等/补标记），**不会自己退出组**，所以这条必须在这里挡住。
+      const builtinMember = ids.find((id) => byId.get(id)?.builtin === true)
+      if (builtinMember !== undefined) {
+        const member = byId.get(builtinMember)!
+        return {
+          ok: false,
+          error:
+            `「${member.name}」是平台内置的（沉淀这条链的起草者），不能进智能体组：` +
+            `组决定谁执行、谁审，而它不参与业务闭环。`,
+        }
+      }
       out.members = ids as AgentGroup['members']
     }
   } else if (current === undefined && !hasDrafts) {
