@@ -89,6 +89,16 @@
   /** 已处理过终态（防 RunLog 重复触发 / 已手动处理过）。 */
   let handledTerminal = false
 
+  /**
+   * 审核区的**日志开关**（§10.5 第 ⑤ 步；2026-10-21 使用者："审核的过程看不到，
+   * 感觉一直没结束呢"）。
+   *
+   * 跑着的时候**不给**这个开关：那时日志必须直接铺开——"过程看不见"正是原来的毛病。
+   * 它只在跑完之后用，让人回看这一版是怎么被审的（与任务页「最后结果 / 完整日志」
+   * 同一个交互：换的是同一块位置里的内容）。
+   */
+  let auditLogOpen = false
+
   // ── 恢复进行中的起草 ──
   let attached = false
 
@@ -254,6 +264,40 @@
    * ⚠️ 与 `rework_requested` 分得清：那个状态表示**平台已经自动重新起草了一版**，
    *   这时再给"重新起草"按钮，等于把人又推进同一条自动流程（他刚看过的那一版已经作废）。
    */
+  /**
+   * 审核 run 还在跑吗。
+   *
+   * ⚠️ 判据是**状态**，不是"有没有判决"：判决只在收口那一刻落库，而 run 可能失败、
+   *    可能跑完却没留下判决。原来这里只判 `review === null`，于是**任何**非正常收尾
+   *    都永远显示"审核中…（跑完再看这里）"——使用者的原话正是"感觉一直没结束呢"。
+   */
+  const AUDIT_ACTIVE_STATUSES = [
+    'queued',
+    'deferred',
+    'waiting_local_directory',
+    'dispatched',
+    'running',
+  ]
+  $: auditStatus = reviewInfo?.reviewRunId === null ? null : (reviewInfo?.reviewRunStatus ?? null)
+  $: auditRunning =
+    reviewInfo !== null &&
+    reviewInfo.review === null &&
+    reviewInfo.reviewRunId !== null &&
+    AUDIT_ACTIVE_STATUSES.includes(auditStatus ?? '')
+  /** 审核 run 已经收尾（非进行中）——用来把"没跑成"与"还在跑"分开说。 */
+  $: auditSettled =
+    reviewInfo !== null &&
+    reviewInfo.review === null &&
+    reviewInfo.reviewRunId !== null &&
+    !auditRunning
+  /**
+   * "跑完了但没留下判决"：run 是 `completed`，可是判决没有落库。
+   *
+   * ⚠️ 这一格必须与"还在跑"分开：它意味着**审核这一步白跑了**（判决不合规、收口时
+   *    出错…），人得知道这件事，而不是继续等下去。
+   */
+  $: auditNoVerdict = auditSettled && auditStatus === 'completed'
+
   $: auditFailedStuck =
     reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
 
@@ -656,6 +700,25 @@
     } catch {
       // 读不到就如实留空（面板会显示"还没审过"）——**不要**把失败画成"通过"
       reviewInfo = null
+    }
+  }
+
+  /**
+   * 取消正在跑的审核 run（2026-10-21 使用者："感觉一直没结束呢"）。
+   *
+   * ⚠️ 必须 try/catch：取消失败（run 已经收尾、网络断了）时裸 await 会变成
+   *    **unhandled rejection** —— 界面上什么都不发生，使用者只会反复点。这条纪律
+   *    来自任务页 `cancelRun` 的一次真实踩坑，这里照抄。
+   */
+  async function cancelAudit(): Promise<void> {
+    const id = reviewInfo?.reviewRunId
+    if (id === null || id === undefined || id === '') return
+    error = ''
+    try {
+      await api(`/api/runs/${id}/cancel`, { method: 'POST' })
+      await loadReview()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
     }
   }
 
@@ -1112,29 +1175,77 @@
           ③ 不通过且额度用尽时才给「重新起草」按钮（自动返工还在跑时不该出现）。
         -->
         <section class="drawer-section audit-block">
-          <h3>{$t('crystallize.auditTitle')}</h3>
+          <h3>
+            {$t('crystallize.auditTitle')}
+            {#if auditRunning}
+              <span class="faint small">
+                run {reviewInfo?.reviewRunId?.slice(0, 4) ?? ''}…
+                <span class="badge {runStatusClass(auditStatus ?? '')}">
+                  {statusLabel(auditStatus ?? '')}
+                </span>
+              </span>
+            {/if}
+            {#if reviewInfo?.review}
+              <!--
+                ★ 跑完之后仍要能回看**过程**（2026-10-21 使用者："审核的过程看不到"）。
+                  结论常驻、日志按需展开——与任务页「最后结果 / 完整日志」同一套交互。
+              -->
+              <button
+                type="button"
+                class="ghost small"
+                style="margin-left:var(--sp-3)"
+                onclick={() => (auditLogOpen = !auditLogOpen)}
+              >
+                {auditLogOpen ? $t('crystallize.auditShowVerdict') : $t('crystallize.auditShowLog')}
+              </button>
+            {/if}
+          </h3>
           {#if reviewInfo === null}
             <p class="muted">…</p>
+          {:else if reviewInfo.review === null && auditRunning}
+            <!-- ── 进行中：**实时输出直接铺开**，并且跑完自动收口（RunLog 报终态 ⇒ 重读判决）── -->
+            <p class="faint small">{$t('crystallize.auditRunning')}</p>
+            <div class="log-box">
+              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+            </div>
+            <div class="row-end">
+              <button class="ghost small" onclick={() => void cancelAudit()}>
+                {$t('crystallize.auditCancel')}
+              </button>
+            </div>
+          {:else if reviewInfo.review === null && auditSettled}
+            <!-- ── 没跑成 / 跑完没判决：**明说**，并给重试（不许继续显示"审核中"）── -->
+            <div class="notice bad">
+              <p>
+                {auditNoVerdict
+                  ? $t('crystallize.auditNoVerdict')
+                  : $t('crystallize.auditRunFailed', { status: statusLabel(auditStatus ?? '') })}
+              </p>
+              <div class="row-end">
+                <button class="ghost small" disabled={reviewBusy} onclick={() => void startAudit()}>
+                  {$t('crystallize.auditRetry')}
+                </button>
+              </div>
+            </div>
+            <div class="log-box">
+              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+            </div>
           {:else if reviewInfo.review === null}
             <div class="notice">
               <p>{$t('crystallize.auditNotYet')}</p>
-              {#if reviewInfo.reviewRunId !== null}
-                <p class="muted">{$t('crystallize.auditRunning')}</p>
-              {/if}
               <div class="row-end">
                 <button class="ghost small" disabled={reviewBusy} onclick={() => void startAudit()}>
                   {$t('crystallize.auditStart')}
                 </button>
-                <button class="ghost small" onclick={() => void loadReview()}>
-                  {$t('crystallize.auditRefresh')}
-                </button>
               </div>
             </div>
+          {:else if auditLogOpen}
+            <!-- ── 有结论 + 人要回看过程 ⇒ 同一个位置换成日志 ── -->
+            <div class="log-box">
+              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+            </div>
           {:else}
-            <div
-              class="review-bar"
-              class:bad={reviewInfo.review.conclusion !== 'pass'}
-            >
+            <div class="review-bar" class:bad={reviewInfo.review.conclusion !== 'pass'}>
               <span class="bar-mark" aria-hidden="true">
                 {reviewInfo.review.conclusion === 'pass' ? '✓' : '✗'}
               </span>
@@ -1156,10 +1267,7 @@
                 {/if}
               </span>
               {#if reviewInfo.review.findings.length > 0}
-                <button
-                  class="ghost small"
-                  onclick={() => (auditDetailOpen = !auditDetailOpen)}
-                >
+                <button class="ghost small" onclick={() => (auditDetailOpen = !auditDetailOpen)}>
                   {auditDetailOpen
                     ? $t('crystallize.auditHideDetail')
                     : $t('crystallize.auditShowDetail', {

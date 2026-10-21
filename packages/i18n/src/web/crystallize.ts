@@ -73,7 +73,26 @@ export const crystallizeText = {
     en: 'This draft has not been audited yet. The audit is a built-in agent checking whether the skill is usable; it does not decide the save for you.',
   },
   'crystallize.auditStart': { zh: '开始审核', en: 'Start audit' },
-  'crystallize.auditRunning': { zh: '审核中…（跑完再看这里）', en: 'Auditing… (check back here)' },
+  // ⚠️ 2026-10-21 改文案：原来写的是"审核中…（跑完再看这里）"——而那时候界面上
+  //    **没有任何东西可看**（不显示日志、不显示状态、失败也不说），使用者的原话是
+  //    "审核的过程看不到，感觉一直没结束呢"。现在实时输出就在下面，所以这句话改成
+  //    **指路**（告诉人下面是什么），而不是让人去别处等。
+  'crystallize.auditRunning': {
+    zh: '审核正在进行，下面是它的实时输出（跑完这里会自动换成结论）。',
+    en: 'The audit is running; its live output is below (this switches to the verdict when it finishes).',
+  },
+  'crystallize.auditCancel': { zh: '取消审核', en: 'Cancel audit' },
+  'crystallize.auditRetry': { zh: '重新审核', en: 'Audit again' },
+  'crystallize.auditRunFailed': {
+    zh: '审核没跑成（状态：{status}）。下面是它的日志——看清原因再决定要不要重来。',
+    en: 'The audit run did not finish (status: {status}). Its log is below — read why before retrying.',
+  },
+  'crystallize.auditNoVerdict': {
+    zh: '审核跑完了，但没有留下可用的判决（判决不合规或收口时出错）。这一步等于白跑，请重来一次或看下面的日志。',
+    en: 'The audit finished but left no usable verdict (malformed verdict or a settle failure). This step was wasted — retry it, or read the log below.',
+  },
+  'crystallize.auditShowLog': { zh: '看审核日志', en: 'Show audit log' },
+  'crystallize.auditShowVerdict': { zh: '看审核结论', en: 'Show verdict' },
   'crystallize.auditRefresh': { zh: '刷新结论', en: 'Refresh result' },
   'crystallize.auditPass': { zh: '通过', en: 'Passed' },
   'crystallize.auditFail': { zh: '不通过', en: 'Failed' },
