@@ -1231,3 +1231,32 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 **结论**：第 4 步不是"加个提示词"那么轻 —— 它要动的是 **D76 的运行期钩子与 claude 的 argv/沙箱规划**，
 属于安全边界那条线上的改动。所以它应当在**第 3 步收口之后**单独做，并且做完要有一条
 "脚本真被执行过"的**实测证据**（不是"我们放开了权限"这句话）。
+
+### 10.12 第 3 步后半（自动返工）实作记录（2026-10-20）
+
+**挂点比原方案更省**：`ReviewCoordinator` 的 deps 里**本来就有**
+`createReworkRun?: (run, verdict) => Promise<string | null>`（D45：审核不通过 ⇒ 交回执行者重做），
+`decideReview` 也**本来就会**按额度把 `fail` 判成 `rework` 或 `escalate`。
+所以不需要我原方案里的 `onSkillDraftReviewed` 新回调 —— 只在 `createReworkRun` 的**开头**
+开一个窄口子（`subject.type === 'skill-draft-review'` ⇒ 调 `startReviseRun`，意见由
+`draftReviewFeedback()` 从 `findings` 拼），业务那条路一个字没动。
+
+⚠️ **踩到的第一个坑（否则这段就是死代码）**：`executor.ts` 的 `#reworkBudgetFor` 对
+`subject.type !== 'run'` 一律返回 `maxReworks: 0` ⇒ `decideReview` 判成"额度已用尽 ⇒ 交给人" ⇒
+`createReworkRun` **一次都不会被调用**。表现是"自动返工永远不触发"，而日志里连一句警告都没有
+（它压根没走到那一步）。修法：为 `skill-draft-review` 单独算额度——**同一份来源素材上已经起草过
+几版**就是已用轮次（`subject.sourceRunId` 指回同一个来源），上限 `SKILL_DRAFT_REWORK_LIMIT = 2`。
+用"版本数"而不是新加一个计数器：重装、重启、人工多改一版，这个数都对得上。
+
+⚠️ **踩到的第二个坑（测试 fixture）**：判决必须**完全合规**才算"不通过"。我第一版随手写了
+`reasonCode: 'missing_when_to_use'`、`severity: 'major'`，还漏了 `schemaVersion`/`confidence`
+⇒ `parseVerdict` 判成**结构性不合规** ⇒ 走 invalid 那一支、根本不返工。所以 fixture 现在照
+`packages/protocol/src/enums.ts` 的 `ReasonCode` 与合规形状写，并把这个教训写在测试注释里。
+
+⚠️ **踩到的第三个坑（判据选错）**：第一版用"起草 run 的**条数**"当判据，卡在"等不到第 27 条"
+——`/api/runs` 是**分页**的，条数会撞上限，"多了一条"看不见。改成两处更硬的证据：
+①判决状态 `rework_requested`（只在这条路上出现，派不出去是 `escalated`）；
+②文件系统里**新的一间草稿小屋**里有 `material/feedback.md`，且内容是审核者写的理由码/条目/位置。
+
+测试 +3（2005 通过）：fail ⇒ 派得出去且意见落进新一版素材、pass ⇒ 一版不多、判决不合规 ⇒
+不返工也不当通过。

@@ -297,6 +297,15 @@ const MAX_STDERR_LOG_LINES = 200
  * 放的东西"，一眼可辨、不会冒充 agent 的产出。
  */
 
+/**
+ * 起草审核不通过时自动返工的**轮次上限**（§10.1 ②：使用者定的是"建议 2"）。
+ *
+ * 为什么要有上限：没有上限时"起草 → 审不过 → 再起草"会一直转下去，而每一轮都是
+ * 真实的 CLI 调用（时间与额度）；使用者看到的是一条永远不结束的沉淀任务。
+ * 定成 2 的意思是：最多改两版，第三版还不通过就**交给人**（停在"审核未通过"态）。
+ */
+const SKILL_DRAFT_REWORK_LIMIT = 2
+
 export class RunExecutor {
   readonly #deps: ExecutorDeps
   readonly #now: () => number
@@ -1944,6 +1953,31 @@ export class RunExecutor {
    *    材料）才按 0 处理。
    */
   async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number | null; usedReworks: number }> {
+    // ★ 起草审核（`skill-draft-review`，§10.5 第 ③ 条）：不通过 ⇒ 自动返工，但**要有额度**。
+    //
+    // ⚠️ 为什么必须在这里开口子（2026-10，写第 ③ 条时踩到的）：下面那条 `!== 'run'` 的兜底
+    //    会给这类审核 `maxReworks: 0`，于是 `decideReview` 判成"额度已用尽 ⇒ 交给人"，
+    //    `createReworkRun` **一次都不会被调用** —— 我为此写的那段窄口子就成了死代码，
+    //    而表现是"自动返工永远不触发"，日志里连一句警告都没有（它压根没走到那一步）。
+    //
+    // 额度怎么算：**同一份来源素材上已经起草过几版**就是已用的轮次 —— 每一版都是一条
+    // `skill-draft` run，`subject.sourceRunId` 指回同一个来源。这比另加一个计数器诚实：
+    // 重装、重启、人工点多一版，这个数都对得上（计数器会与事实分叉）。
+    if (run.subject.type === 'skill-draft-review') {
+      const draft = await this.#deps.store.getRun(run.subject.id as RunId)
+      const sourceRunId =
+        draft?.subject.type === 'skill-draft' ? draft.subject.sourceRunId : undefined
+      if (sourceRunId === undefined) return { maxReworks: 0, usedReworks: 0 }
+      const page = await this.#deps.store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
+      const versions = page.items.filter(
+        (r) => r.subject.type === 'skill-draft' && r.subject.sourceRunId === sourceRunId,
+      ).length
+      return {
+        maxReworks: SKILL_DRAFT_REWORK_LIMIT,
+        // 已经起草过几版 - 1 = 已经返工过几次（第一版不算返工）
+        usedReworks: Math.max(0, versions - 1),
+      }
+    }
     if (run.subject.type !== 'run') return { maxReworks: 0, usedReworks: 0 }
     const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
     if (!executeRun) return { maxReworks: 0, usedReworks: 0 }

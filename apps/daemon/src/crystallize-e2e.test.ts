@@ -29,8 +29,9 @@ import {
   type AgentSession,
   type ExecOptions,
 } from '@agentdeck/agent-core'
-import { ulid, type Issue, type RunId } from '@agentdeck/protocol'
+import { VERDICT_FENCE_BEGIN, VERDICT_FENCE_END, ulid, type Issue, type RunId } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { deliveredText } from './testing/delivered.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -40,6 +41,14 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *   四轮之后产出是"文件集合"，只推一段文本就测不到多文件那条路。
  */
 class FakeBackend implements AgentBackend {
+  /**
+   * 「审起草出来的 skill」那一路的回答（§10.5 第 ③ 条：判决 ⇒ 自动返工）。
+   *
+   * ⚠️ 单独一个开关、不复用业务审核那一路：业务审核的判决形状被别的测试钉着
+   * （`runReviewed` 靠它过 `task_gate`）。用一个开关控制两种审核，会让"改这条链的假回答"
+   * 变成"改所有审核测试的前置条件"。
+   */
+  draftReviewVerdict: Record<string, unknown> | null = null
   readonly key = 'claude'
   readonly protocol = 'stream-json' as const
   readonly rejectDetectable = true
@@ -69,13 +78,22 @@ class FakeBackend implements AgentBackend {
     queue.push({ type: 'text', content: '我先看看任务。' })
     queue.push({ type: 'tool_use', tool: 'Read', content: '调用工具 Read', input: { file_path: 'a.ts' } })
     queue.push({ type: 'tool_result', tool: null, content: '文件内容', output: '文件内容', outputTruncated: false })
-    queue.push({ type: 'text', content: '报告：任务已完成。' })
+    // 判据用**投递出去的第一句话**，不用工作目录：起草 run 与审它的 run 用的是**同一间小屋**
+    // （`skill-draft-<id>`，这是设计的一部分：审核者要读同一份 `skill/` 与 `material/`），
+    // 所以"目录里带 skill-draft"分不出这两者。
+    const delivered = deliveredText(opts)
+    const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
+    const text =
+      isDraftReview && this.draftReviewVerdict !== null
+        ? `结论：\n${VERDICT_FENCE_BEGIN}\n${JSON.stringify(this.draftReviewVerdict)}\n${VERDICT_FENCE_END}\n`
+        : '报告：任务已完成。'
+    queue.push({ type: 'text', content: text })
     queue.close()
     return {
       messages: queue,
       result: Promise.resolve({
         status: 'completed' as const,
-        output: '报告：任务已完成。',
+        output: text,
         error: null,
         durationMs: 5,
         sessionId: 'fake-session-1',
@@ -1110,5 +1128,158 @@ describe('§10：起草之后的审核 run', () => {
     })
     assert.equal(missing.status, 400)
     assert.equal(((await missing.json()) as { code?: string }).code, 'draft_run_id_required')
+  })
+})
+
+/**
+ * §10.5 第 ③ 条：审核**不通过** ⇒ 自动返工（把审核意见交回内置起草者重改一版）。
+ *
+ * 挂点是现成的 `createReworkRun`（D45 那条"审核不通过 ⇒ 交回执行者重做"的路），
+ * 我们只在那条路的**开头**开了一个窄口子（`subject.type === 'skill-draft-review'`）。
+ * 所以这里要证的是三件事：**该返工时真的返工**、**不改返工时一次都不动**、
+ * **返工交下去的是审核者写的那几条意见**（不是一句"不通过"）。
+ *
+ * ⚠️ 判据不要用"起草 run 的条数"：`/api/runs` 是**分页**的，条数会撞上限，
+ *    于是"多了一条"看不见（我第一版就是这么写的，卡在"等不到第 27 条"）。
+ *    改用两处更硬的证据：①判决的状态（`rework_requested` 只在这条路上出现，
+ *    额度用尽/派不出去时是 `escalated`）②文件系统里**新的一间草稿小屋**里
+ *    确实有那份 `material/feedback.md`。
+ */
+describe('§10.5：审核不通过 ⇒ 自动返工', () => {
+  /** 起一条起草审核 run 并等它收口（判决落库发生在终态之后，所以等的是判决）。 */
+  async function reviewDraftAndWait(draftRunId: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+    const { reviewRunId } = JSON.parse(text) as { reviewRunId: string }
+    for (let i = 0; i < 80; i += 1) {
+      const vs = (await (
+        await fetch(`${daemon.url}/api/runs/${reviewRunId}/verdicts`)
+      ).json()) as { verdicts?: Record<string, unknown>[] }
+      const v = (vs.verdicts ?? [])[0]
+      if (v) return v
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核判决没在限时内落库')
+  }
+
+  /** 草稿小屋的目录名（`skill-draft-<run id>`）——返工会在旁边新开一间。 */
+  async function draftHuts(): Promise<string[]> {
+    const { readdir } = await import('node:fs/promises')
+    return (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
+  }
+
+  /** 等"多出来的一间小屋"出现（返工的表现），返回它。 */
+  async function waitForNewHut(before: string[]): Promise<string> {
+    for (let i = 0; i < 80; i += 1) {
+      const fresh = (await draftHuts()).filter((n) => !before.includes(n))
+      if (fresh.length > 0) return fresh[0]!
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('没有出现新的草稿小屋（自动返工没发生）')
+  }
+
+  test('★★ 判决 fail ⇒ 返工派得出去（判决状态 rework_requested）且意见落进新一版素材', async () => {
+    const sourceRunId = await runReviewed('审完的流程（要触发自动返工）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '自动返工流程' },
+    })
+    const before = await draftHuts()
+
+    // ⚠️ 这份判决必须**完全合规**，否则它连"不通过"都算不上：`reasonCode` 是平台枚举
+    //    （`packages/protocol/src/enums.ts` 的 `ReasonCode`），`severity` 也是。
+    //    我第一版随手写了 `reasonCode: 'missing_when_to_use'`、`severity: 'major'`、
+    //    还漏了 `schemaVersion`/`confidence` ⇒ 判决被判成**结构性不合规** ⇒ `decideReview`
+    //    走 invalid 那一支、**根本不会返工**。表现是"自动返工永远不触发"，而日志里
+    //    没有一句相关的话（它压根没走到返工那一步）——所以这份 fixture 照合规形状写。
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'fail',
+      reasonCode: 'style_violation',
+      confidence: 0.8,
+      findings: [
+        {
+          severity: 'high',
+          summary: '正文里没有 `## When to Use` 一节',
+          evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 依赖漏洞处置' }],
+          detail: {},
+        },
+      ],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(verdict.conclusion, 'fail')
+      // ★ 这个状态就是"派出去了一条返工 run"的落点：拿不到额度或派不出去时是 `escalated`
+      assert.equal(
+        verdict.status,
+        'rework_requested',
+        '不通过且有额度 ⇒ 必须真的派出一条返工 run（escalated 说明根本没派）',
+      )
+
+      const hut = await waitForNewHut(before)
+      const feedback = await readFile(join(workRoot, hut, 'material', 'feedback.md'), 'utf8')
+      assert.match(feedback, /style_violation/, '理由码要交下去')
+      assert.match(feedback, /正文里没有 `## When to Use` 一节/, '审核者的条目要交下去')
+      assert.match(feedback, /SKILL\.md/, '位置要交下去（否则起草者不知道改哪儿）')
+      // 返工是"再起草一版"，不是覆盖上一版
+      assert.ok(
+        (await draftHuts()).includes(`skill-draft-${draftRunId}`),
+        '被审的那一版不许消失',
+      )
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
+  test('★★ 判决 pass ⇒ 不返工（判决只是记录，一版都不多）', async () => {
+    const sourceRunId = await runReviewed('审完的流程（判决通过）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '通过就不返工' },
+    })
+    const before = await draftHuts()
+
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'pass',
+      reasonCode: 'meets_criteria',
+      confidence: 0.9,
+      findings: [],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(verdict.conclusion, 'pass')
+      assert.notEqual(verdict.status, 'rework_requested', '通过不该返工')
+      // 给返工足够的时间去犯错（如果它真会犯错）：判决落库之后还有异步的收尾
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      assert.deepEqual(await draftHuts(), before, '通过不该多出草稿小屋')
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
+  test('★★ 审核**没跑成**（产出里没有判决块）⇒ 不返工也不当通过', async () => {
+    const sourceRunId = await runReviewed('审完的流程（判决不合规）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '判决不合规' },
+    })
+    const before = await draftHuts()
+
+    // `draftReviewVerdict` 保持 null ⇒ 假后端给的是普通产出（没有判决围栏）
+    const verdict = await reviewDraftAndWait(draftRunId)
+    assert.equal(verdict.conclusion, 'needs_human', '不合规要如实降级，不许伪装成通过')
+    assert.notEqual(verdict.status, 'rework_requested', '审核没跑成不是"活没干好"，不返工')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    assert.deepEqual(await draftHuts(), before, '不合规时一版都不该多')
   })
 })
