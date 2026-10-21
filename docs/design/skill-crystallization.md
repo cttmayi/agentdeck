@@ -1162,3 +1162,28 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 （查过：`executor.ts` 没有 wait/settle 之类的方法），所以分流要么挂在收口那一刻（`review.ts` /
 `executor.ts:1730` 那条路），要么由 server 侧有界轮询草稿与审核两条 run 的终态——**下一轮先定这一条**，
 不要直接写。
+
+### 10.9 第 3 步后半的施工方案（**已选 A**：挂在收口那一刻，窄口子）
+
+使用者 2026-10-20 选了 A（不选 server 侧轮询）。照 A 的实作顺序，**先做前置重构再做挂点**：
+
+1. **前置重构（无行为变化）**：`POST /api/crystallize/revise`（`server.ts:4762` 起）那段路由体
+   现在**内联在路由里**（150+ 行的早返回 + `sendJson`），收口挂点没法复用它。所以要把它抽成
+   `startReviseRun(input): Promise<{ok:true, runId} | {ok:false, status, code, error}>`，
+   路由只做"调它 → 按结果 `sendJson`"。**判据：`crystallize-e2e` 那 28 条一个都不许变**（纯重构，
+   行为一字不改）——这也是这一步唯一需要证明的事。
+2. **挂点（窄口子）**：`ReviewHandlingDeps` 加一个**可选**回调
+   `onSkillDraftReviewed?: (input: { run: Run; draftRunId: string; verdict: VerdictRecord }) => Promise<void>`，
+   在 `review.ts` 里**只对 `run.subject.type === 'skill-draft-review'`** 调它（业务审核那条路
+   一个字不动）。server 在装配 `ReviewCoordinator` 的地方（`server.ts:1985`）提供实现。
+3. **分流实现**（回调里）：读判决 ⇒ `fail` 且额度未尽 ⇒ `startReviseRun({ draftRunId, feedback: 结论 + 问题清单 })`；
+   额度用尽或 `needs_human` ⇒ 什么都不做（停在"审核未通过"态，交给人）。
+   ⚠️ **额度用现成的**（D45：`ReviewCoordinator.handle` 的 `maxReworks` / `usedReworks`，
+   住在被审的那条 run 的 `chainDepth` 上），**不要自己造计数器**。
+   ⚠️ **不许静默当成通过**：审核没跑成（CLI 挂 / 超时 / 判决不合规）⇒ 只记状态，不返工、不入库。
+4. **判据**（下一轮写）：假装后端产出 `fail` 判决 ⇒ 真的起了一条 revise run 且 feedback 里带结论；
+   额度用尽 ⇒ **不再**起；`pass` ⇒ 不起；业务审核 run（subject 是报告/任务）⇒ 回调**不被调用**
+   （这条是"窄口子"的判据，最要紧——宽了就会动业务那条路）。
+
+⚠️ 我这一轮**没有开始写**：第 1 步那个重构要动 150+ 行早返回的路由体，第 2 步要动业务闭环的核心文件
+（`review.ts`）。在余量不足时硬上，最可能的结果是留下一个半重构的路由 —— 那比"没开始"坏得多。
