@@ -187,6 +187,37 @@
     </section>
 
     <!--
+      ★ §10.5 第 ③ 条：审核者**真执行**草稿脚本的总开关（默认开）。
+
+      ⚠️ 文案不说"更安全"，只说"允许它跑"以及"跑的范围只在那份草稿的工作目录里"：
+         这一跑是**在你自己机器上跑另一个 agent 刚写出来的代码**，而本项目不做沙箱隔离
+         （NG7 是明确的范围决定）。把它说小会让人以为关掉就"安全了"。
+    -->
+    <section class="drawer-section" data-reviewer-script-run>
+      <h3>{$t('settings.reviewerScriptRun')}</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={$identity?.allowReviewerScriptRun ?? true}
+          onchange={(e) => {
+            const next = (e.currentTarget as HTMLInputElement).checked
+            void api('/api/workspace/reviewer-script-run', {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ allow: next }),
+            })
+              .then(() => void loadIdentity())
+              .catch((err) =>
+                showToast(err instanceof Error ? err.message : String(err)),
+              )
+          }}
+        />
+        {$t('settings.reviewerScriptRunLabel')}
+      </label>
+      <p class="hint">{$t('settings.reviewerScriptRunHint')}</p>
+    </section>
+
+    <!--
       ★ 全局 runtime 默认值（2026-10，定稿第 ⑦ 条）。
 
       agent 的 `runtimeKey` 记 `'default'` 时用它，**三级解析**：

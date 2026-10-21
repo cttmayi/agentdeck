@@ -1147,6 +1147,8 @@ async function readWorkspaceSettings(
   webSearchEnabled: boolean
   /** 全局 runtime 默认值（2026-10 第 ⑦ 条）：空串 = 跟随启动时侦测到的那个。 */
   defaultRuntimeKey: string
+  /** 审核者能不能**真跑**草稿里的脚本（§10.5 第 ③ 条）。老数据 ⇒ 默认开。 */
+  allowReviewerScriptRun: boolean
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1165,6 +1167,8 @@ async function readWorkspaceSettings(
     locale: workspace?.locale ?? DEFAULT_LOCALE,
     webSearchEnabled: workspace?.webSearchEnabled ?? true,
     defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
+    // 老数据没有这个键 ⇒ 开（与 `webSearchEnabled` 同一条规矩）
+    allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
   }
 }
 
@@ -3136,6 +3140,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       // 环境问题也要进身份接口：界面据此在智能体页给出提示，
       // 而不是等使用者从 agent 输出里读一句 EPERM
+      // ★ 设置只读一次（原来这里每一行各读一次 `readWorkspaceSettings`；`settings` 只是
+      //   把那几次重复读收成一次——读的还是同一个函数，不许分叉）。
+      const settings = await readWorkspaceSettings(store, workspaceId)
       const env = await checkEnvironment([
         { descriptor, available: probe.available },
       ])
@@ -3147,15 +3154,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         deviceName: device?.name ?? 'unknown',
         // ★ 界面语言跟着身份一起给：页面启动时就要知道用哪种语言渲染，
         //   而不是先闪一下中文再切过来（D39）
-        locale: (await readWorkspaceSettings(store, workspaceId)).locale,
+        locale: settings.locale,
         // ★ D77：claude 的 WebSearch/WebFetch 开关（默认开）。设置页据此渲染
         //   那个开关——"界面显示的"与"executor 真的用的"走同一份读（上面的
         //   readWorkspaceSettings），不许分叉。
-        webSearchEnabled: (await readWorkspaceSettings(store, workspaceId)).webSearchEnabled,
+        webSearchEnabled: settings.webSearchEnabled,
         // ★ 全局 runtime 默认值（第 ⑦ 条）。设置页要显示"当前设的是哪个"，而
         //   空串的语义是**跟随侦测**——界面必须能把这句话说出来，否则使用者会以为
         //   "没设过"等于"没有默认值"。
-        defaultRuntimeKey: (await readWorkspaceSettings(store, workspaceId)).defaultRuntimeKey,
+        defaultRuntimeKey: settings.defaultRuntimeKey,
+        // §10.5 第 ③ 条：界面上要能看到并关掉"审核者真执行草稿脚本"
+        allowReviewerScriptRun: settings.allowReviewerScriptRun,
         /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
@@ -3482,6 +3491,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // "自动"就得能表达它，否则他只能猜一个值填进去。校验收在"已知 runtime ∪ 空串"上：
     // 收到一个拼错的键若静默存下，故障会推迟到某个 run 启动时，表现是"某个 agent
     // 突然回退到了别的 CLI"。
+    // ── 「审核者真执行草稿脚本」总开关（§10.5 第 ③ 条）──
+    //
+    // ⚠️ 它管的是**提示词里那一段**（跑 / 不要跑），不是权限：权限本来就有
+    //    （claude 一律 `bypassPermissions`，D76 的钩子只拦越界）。所以这个开关**不能**
+    //    当成"关掉就安全了"的保证 —— 它是"别让它去跑"的指示，真正的边界仍然是工作目录。
+    if (req.method === 'PUT' && path === '/api/workspace/reviewer-script-run') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['allow']
+      if (typeof raw !== 'boolean') {
+        sendJson(res, 400, { error: `allow 必须是布尔值（收到 ${JSON.stringify(raw)}）` })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, allowReviewerScriptRun: raw, updatedAt: Date.now() })
+      sendJson(res, 200, { allowReviewerScriptRun: raw })
+      return
+    }
+
     if (req.method === 'PUT' && path === '/api/workspace/default-runtime') {
       const body = (await readJsonBody(req)) as Record<string, unknown>
       const raw = body['runtimeKey']
@@ -3962,6 +3993,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
       const draftHut = draftRoot(workRoot, draft.id as string)
+      const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
       const reviewRunId = await createRunForReviewer({
         reviewer,
         // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
@@ -3981,6 +4013,25 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
           '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
           '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
+          // ★ §10.5 第 ③ 条：审核者可以**真的跑一遍**草稿里的脚本（这是这一整条链最有价值的
+          //   检查——"脚本能不能执行"看是看不出来的）。它跑得起来的地基有两层，都已存在：
+          //   ① claude 跑在 `--permission-mode bypassPermissions`（runtime 描述表的 baseArgs）；
+          //   ② D76 的运行期钩子只拦**越界**（`..` / `~` / 工作目录外的绝对路径），
+          //      小屋内部相对路径的 `bash skill/scripts/x.sh` 是允许的。
+          //   ⚠️ 关掉开关时要说"**不要执行**"，不能只是不写这一段 —— 权限还在，它可能照跑；
+          //      而如果它没跑却写下"已执行通过"，那份判决就是假证据。
+          ...(allowScriptRun
+            ? [
+                '4. **把 `skill/scripts/` 里的脚本真的跑一遍**（你可以执行命令，草稿就在当前工作目录里）：',
+                '   先用相对路径跑（例如 `bash skill/scripts/xxx.sh`），需要参数就给临时文件；',
+                '   **只在这个工作目录里活动**（不要 `cd ..`、不要碰家目录、不要写目录外的绝对路径）。',
+                '   结果如实写进判决的 `evidence`：命令、退出码、真实输出。跑不起来就说跑不起来，',
+                '   **不要猜它能跑**——"脚本能不能执行"正是这一步最有价值的结论。',
+              ]
+            : [
+                '4. **不要执行脚本**（这个工作区关掉了"审核者真执行草稿脚本"）：只做静态检查，',
+                '   并在判决里如实写明"脚本未被执行"——**不许**写"已执行通过"这类没发生过的结论。',
+              ]),
           '',
           '【产出】',
           // 判决格式**不在这里重复一遍**：围栏标记与键名由平台放在审核那一路的第一句话里
@@ -3994,6 +4045,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
         ].join('\n'),
         chainDepth: 0,
+        // ★ 不单独设上限：`timeoutMs: null` 时平台的**空闲看门狗**兜着
+        //   （`executor.ts` 的 `DEFAULT_IDLE_TIMEOUT_MS` = 30 分钟没有任何输出就判成
+        //   `idle_timeout` 收掉，并在 run 日志里写明"用的是平台默认"）。
+        //   ⚠️ 我第一版在这里写了 `timeoutMs: 10 分钟`，理由写的是"没有上限才是问题"——
+        //   **那是没查就写的**：上限一直有，而且那个 10 分钟比默认的 30 分钟**更紧**，
+        //   会误杀"合法但安静"的脚本（比如一次长时间构建）。用平台默认是对的。
       })
       if (reviewRunId === null) {
         // `createRunForReviewer` 在"审核者没有身份"时返回 null（那条路是给报告审核的兜底）

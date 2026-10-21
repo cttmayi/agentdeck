@@ -1283,3 +1283,38 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 
 `pnpm run build:web` 已重建；`pnpm run check` 2006 通过（新增读接口的测试 1 条）。
 ⚠️ 界面这几处**还没经过真浏览器验证**（7b 探针），与前面几轮的内置智能体界面一起量。
+
+### 10.14 第 ③ 条（脚本真执行）实作记录（2026-10-20）
+
+**权限本来就有**（勘察结论，不是假设）：
+- claude 一律跑在 `--permission-mode bypassPermissions`（`packages/agent-core/src/runtime-table.ts`
+  的 `baseArgs`，还有 `--disallowedTools AskUserQuestion`）⇒ Bash 对**每一次 run**都是通的；
+- D76 的运行期钩子（`apps/daemon/src/run-hooks/pre-tool-use.py`）只拦**越界**（`..` / `~` /
+  工作目录外的绝对路径），小屋内部相对路径的 `bash skill/scripts/x.sh` 是**放行**的。
+  ⇒ 所以这一条**不需要改权限**，缺的只是"让它去跑"这句指令。
+
+实作：
+- 审核 prompt 里加一段【把 `skill/scripts/` 里的脚本真的跑一遍】，含三条约束：只用相对路径、
+  **只在这个工作目录里活动**、**"跑不起来就说跑不起来，不要猜它能跑"**（后两条是这个功能的
+  价值所在：脚本能不能执行，看是看不出来的）。
+- **总开关** `Workspace.allowReviewerScriptRun`（缺省开）+ `PUT /api/workspace/reviewer-script-run`
+  + identity 暴露 + 设置抽屉里的一项。⚠️ 关掉时 prompt 那一段**换成"不要执行脚本"并要求如实写
+  "脚本未被执行"**，而不是删掉那一段 —— 权限还在，删掉的话它可能照跑；而如果它没跑却写下
+  "已执行通过"，那份判决就是**假证据**。
+- **上限**：**不单独设**。⚠️ 我第一版在这里写了 `timeoutMs: 10 分钟`，理由写的是"没有上限才是
+  问题"——**那是没查就写的**：`limits.timeoutMs` 是**空闲**上限，而平台**本来就有**
+  `DEFAULT_IDLE_TIMEOUT_MS` = 30 分钟（`executor.ts`，没有输出就判 `idle_timeout` 收掉，并在 run
+  日志里写明"用的是平台默认"）。我那个 10 分钟比默认**更紧**，会误杀"合法但安静"的脚本
+  （比如一次长时间构建）。所以撤掉，用平台默认，并把这句话写进代码注释。
+
+测试 +4（2010 通过）：开关开的 prompt 含"真的跑一遍"+越界约束；开关关的 prompt **不含**那一句
+且含"不要执行脚本/如实写未被执行"；**直接量 D76 钩子**（小屋里的 `bash skill/scripts/check.sh`
+⇒ `allow`，`bash ../../etc/passwd` ⇒ `deny`）；审核 run 的日志里说出**真正生效的空闲上限**（30 分钟）。
+
+⚠️ 两处踩坑（都写进注释了）：① 用 `promisify(execFile)` 喂 stdin —— `execFile` **没有** `input`
+选项，钩子等 stdin 等到测试整个挂住（60 秒无输出）；改 `execFileSync` + `timeout`。
+② 判据读"判决一出现"⇒ 读到收口**中间态** `validated`，断言 `rework_requested` 成了竞态：
+单跑绿、全量跑红（我第一次就是这么写的）。改成**等收口之后的状态**（`status !== 'validated'`），
+窗口也放宽。
+
+**仍未完成**：真机上的端到端证据（一次真实 CLI 的审核 run 把草稿里的脚本跑出痕迹）。

@@ -161,6 +161,17 @@ export const Workspace = z.object({
    * ⚠️ `optional()`：**后加**的字段，老 workspace 里根本没有它（缺省 = 开）。
    */
   webSearchEnabled: z.boolean().default(true).optional(),
+  /**
+   * ★ 审核起草出来的 skill 时，**允许审核者真的执行草稿里的脚本**（§10.5 第 ③ 条，2026-10）。
+   *
+   * 老数据没有这个键 ⇒ **默认开**（与 `webSearchEnabled` 同一条规矩）。
+   *
+   * ⚠️ 为什么要有这个开关：这一跑是**在你自己机器上跑另一个 agent 刚写出来的代码**，
+   *    而本项目不做沙箱隔离（NG7 是明确的范围决定）。出事时能一键关，比"改代码再重启"实际得多。
+   * ⚠️ 关掉时**不是"让它照写不跑"**：提示词里那一段会换成"不要执行脚本"。否则审核者
+   *    会以为自己跑过了，判决里会出现**没发生过的"已执行通过"**——那是假证据。
+   */
+  allowReviewerScriptRun: z.boolean().default(true).optional(),
 
   createdAt: EpochMs,
   updatedAt: EpochMs,

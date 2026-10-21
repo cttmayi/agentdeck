@@ -49,6 +49,9 @@ class FakeBackend implements AgentBackend {
    * 变成"改所有审核测试的前置条件"。
    */
   draftReviewVerdict: Record<string, unknown> | null = null
+
+  /** 投递出去的全部第一句话（审核那一路的提示词判据从这里读，与 run 日志互为对照）。 */
+  readonly prompts: string[] = []
   readonly key = 'claude'
   readonly protocol = 'stream-json' as const
   readonly rejectDetectable = true
@@ -82,6 +85,7 @@ class FakeBackend implements AgentBackend {
     // （`skill-draft-<id>`，这是设计的一部分：审核者要读同一份 `skill/` 与 `material/`），
     // 所以"目录里带 skill-draft"分不出这两者。
     const delivered = deliveredText(opts)
+    this.prompts.push(delivered)
     const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
     const text =
       isDraftReview && this.draftReviewVerdict !== null
@@ -1156,15 +1160,19 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     const text = await res.text()
     assert.equal(res.status, 202, text)
     const { reviewRunId } = JSON.parse(text) as { reviewRunId: string }
-    for (let i = 0; i < 80; i += 1) {
+    // ⚠️ 等的是**收口之后**的判决，不是"判决一出现"：收口分两步（先落库 `validated`，
+    //    再按决定 transition 成 `rework_requested` / `escalated`）。只等"有判决"会读到
+    //    中间态，于是断言 `=== 'rework_requested'` 变成一场竞态 —— 单跑这个文件时侥幸通过，
+    //    全量跑（机器忙、调度顺序变）就红。我第一次就是这么写的，全量跑时红了这一条。
+    for (let i = 0; i < 200; i += 1) {
       const vs = (await (
         await fetch(`${daemon.url}/api/runs/${reviewRunId}/verdicts`)
       ).json()) as { verdicts?: Record<string, unknown>[] }
       const v = (vs.verdicts ?? [])[0]
-      if (v) return v
+      if (v && v.status !== 'validated') return v
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    throw new Error('审核判决没在限时内落库')
+    throw new Error('审核判决没在限时内收口')
   }
 
   /** 草稿小屋的目录名（`skill-draft-<run id>`）——返工会在旁边新开一间。 */
@@ -1175,7 +1183,7 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
 
   /** 等"多出来的一间小屋"出现（返工的表现），返回它。 */
   async function waitForNewHut(before: string[]): Promise<string> {
-    for (let i = 0; i < 80; i += 1) {
+    for (let i = 0; i < 200; i += 1) {
       const fresh = (await draftHuts()).filter((n) => !before.includes(n))
       if (fresh.length > 0) return fresh[0]!
       await new Promise((resolve) => setTimeout(resolve, 50))
@@ -1321,5 +1329,154 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     assert.notEqual(verdict.status, 'rework_requested', '审核没跑成不是"活没干好"，不返工')
     await new Promise((resolve) => setTimeout(resolve, 400))
     assert.deepEqual(await draftHuts(), before, '不合规时一版都不该多')
+  })
+})
+
+/**
+ * §10.5 第 ③ 条：审核者**真执行**草稿脚本（含总开关）。
+ *
+ * 这一条最容易被做错成"加句话就完事"：权限其实**本来就有**（claude 跑在
+ * `--permission-mode bypassPermissions`；D76 的运行期钩子只拦越界——`..` / `~` /
+ * 工作目录外的绝对路径），缺的是**让它去跑**与**跑挂了要有上限**这两件事。
+ * 所以这里证的是：
+ *   ① 开关开 ⇒ 提示词里有一段"把脚本真的跑一遍"（含"只在小屋里活动"的约束与
+ *      "跑不起来就说跑不起来"）；开关关 ⇒ 那一段**换成**"不要执行脚本"，而不是消失
+ *      —— 消失的话它可能照跑（权限还在），或者没跑却写下"已执行通过"；
+ *   ② 审核 run 有**有界超时**（挂住的脚本不会把审核永远吊着）；
+ *   ③ D76 的钩子对"小屋内部相对路径跑脚本"真的是放行的（这是①能成立的地基，
+ *      所以直接量那个脚本，而不是相信"应该没问题"）。
+ */
+describe('§10.5：审核者真执行草稿脚本', () => {
+  /** 读开关当前值（界面上也用它渲染）。 */
+  async function scriptRunAllowed(): Promise<boolean> {
+    const id = (await (await fetch(`${daemon.url}/api/identity`)).json()) as {
+      allowReviewerScriptRun?: boolean
+    }
+    return id.allowReviewerScriptRun ?? true
+  }
+
+  async function setScriptRun(allow: boolean): Promise<void> {
+    const res = await fetch(`${daemon.url}/api/workspace/reviewer-script-run`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ allow }),
+    })
+    assert.equal(res.status, 200, await res.text())
+  }
+
+  /** 起一条审核并等它收口，返回审核那一路投递出去的第一句话。 */
+  async function auditAndReadPrompt(draftRunId: string): Promise<string> {
+    const before = fakeBackend.prompts.length
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+    const { reviewRunId } = JSON.parse(text) as { reviewRunId: string }
+    for (let i = 0; i < 80; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${reviewRunId}`)).json()) as {
+        status: string
+      }
+      if (['completed', 'failed', 'cancelled'].includes(r.status)) {
+        const prompts = fakeBackend.prompts.slice(before)
+        const auditPrompt = prompts.find((p) => p.includes('审一条刚起草出来的 skill'))
+        assert.ok(auditPrompt, '审核那一路必须真的被派了')
+        return auditPrompt
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核 run 未在限时内终态')
+  }
+
+  test('★★ 开关开（默认）⇒ 提示词要它**真的跑一遍**脚本，且只在小屋里活动', async () => {
+    assert.equal(await scriptRunAllowed(), true, '默认必须是开')
+    const sourceRunId = await runReviewed('审完的流程（真跑脚本）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '真跑脚本' },
+    })
+    const prompt = await auditAndReadPrompt(draftRunId)
+    assert.match(prompt, /把 `skill\/scripts\/` 里的脚本真的跑一遍/)
+    assert.match(prompt, /只在这个工作目录里活动/, '越界那条约束必须一起给（钩子会拦）')
+    assert.match(prompt, /不要猜它能跑/, '不许用"看着能跑"顶替"真的跑过"')
+  })
+
+  test('★★ 开关关 ⇒ 换成"不要执行脚本"，且要求如实写"未被执行"（不是静默不说）', async () => {
+    await setScriptRun(false)
+    try {
+      assert.equal(await scriptRunAllowed(), false, '开关要真的读得回来')
+      const sourceRunId = await runReviewed('审完的流程（不许跑脚本）')
+      const draftRunId = await draftAndWait({
+        runId: sourceRunId,
+        target: { kind: 'new', purpose: '不许跑脚本' },
+      })
+      const prompt = await auditAndReadPrompt(draftRunId)
+      assert.match(prompt, /不要执行脚本/)
+      assert.match(prompt, /如实写明"脚本未被执行"/)
+      // ★ 关掉之后**不许**再要它去跑 —— 只删掉那一段是不够的（权限还在，它可能照跑）
+      assert.doesNotMatch(prompt, /把 `skill\/scripts\/` 里的脚本真的跑一遍/)
+    } finally {
+      await setScriptRun(true)
+    }
+  })
+
+  test('★★ D76 的钩子：小屋内部相对路径跑脚本是**放行**的，越界的才拦', async () => {
+    // 这一条是"审核者真能跑脚本"的**地基**：钩子拦的是越界，不是"执行"这件事本身。
+    // 直接量那个脚本（不是相信"应该没问题"）——它是唯一决定 Bash 能不能落地的闸门。
+    const { execFileSync } = await import('node:child_process')
+    const hook = join(process.cwd(), 'apps/daemon/src/run-hooks/pre-tool-use.py')
+    // ⚠️ 必须用 `execFileSync`（它支持 `input`）而不是 `promisify(execFile)`：
+    //    `execFile` **没有** `input` 选项 ⇒ 钩子等 stdin 等到天荒地老，测试整个挂住
+    //    （我第一次就是这么写的，跑了 60 秒没有任何输出）。`timeout` 也一起给上，
+    //    免得以后再犯时表现为"测试卡住"而不是"这条测试失败"。
+    const decide = (command: string): string => {
+      const out = execFileSync('python3', [hook], {
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: workRoot }),
+        encoding: 'utf8',
+        timeout: 10_000,
+      })
+      return (JSON.parse(out) as { hookSpecificOutput: { permissionDecision: string } })
+        .hookSpecificOutput.permissionDecision
+    }
+
+    assert.equal(decide('bash skill/scripts/check.sh'), 'allow', '小屋里的脚本要放行')
+    assert.equal(decide('bash ../../etc/passwd'), 'deny', '越界仍然要拦')
+  })
+
+  test('★ 审核 run 的"卡住"有兜底：跑脚本的空闲上限走**平台默认**（30 分钟），且日志里说出来', async () => {
+    // ⚠️ 判据不是"我给审核设了多长"——我第一版就是这么写的，还写了个 10 分钟的值，
+    //    理由写的是"没有上限才是问题"。那是**没查就写的**：`limits.timeoutMs` 是**空闲**
+    //    上限，而平台**本来就有默认**（`executor.ts` 的 `DEFAULT_IDLE_TIMEOUT_MS` = 30 分钟
+    //    没有任何输出 ⇒ 判成 `idle_timeout` 收掉）。所以"脚本挂住会不会把审核永远吊着"
+    //    的答案一直是"不会"，而我自己那个 10 分钟反而比默认更紧、会误杀合法但安静的脚本。
+    //    这条测试量的是**真实生效的那个上限**：run 日志里那句"用平台默认"。
+    const sourceRunId = await runReviewed('审完的流程（卡住有兜底）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '卡住有兜底' },
+    })
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+    const { reviewRunId } = JSON.parse(text) as { reviewRunId: string }
+
+    for (let i = 0; i < 80; i += 1) {
+      const msgs = (await (
+        await fetch(`${daemon.url}/api/runs/${reviewRunId}/messages`)
+      ).json()) as { messages?: Array<{ content?: string }> }
+      const note = (msgs.messages ?? []).map((m) => m.content ?? '').join('\n')
+      if (note.includes('空闲上限')) {
+        assert.match(note, /空闲 30 分钟/, '日志要说出用的是哪个默认值（不是"没上限"）')
+        return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核 run 的日志里没有"空闲上限"那句（上限就说不清了）')
   })
 })
