@@ -394,13 +394,25 @@ const CHECKS = [
   },
   {
     view: '智能体',
-    key: 'agents.runtimeOptions',
-    label: 'runtime 选择器的选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
+    key: 'agents.runtimeOptionsNoDefault',
+    label:
+      'runtime 选择器的**具体 runtime** 选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
+    // ⚠️ 比的是**排掉 `default` 之后**的选项：`default` 是"跟随全局默认"的伪值，不是 runtime。
+    //    2026-10 加了那一项之后这条断言就红了（实测：DOM 是 claude | codex | default，
+    //    身份接口是 claude | codex）——**界面是对的，判据要跟上**。排掉它并不放松：
+    //    下面紧接着一条专门量 `default` 还在不在、是不是第一项。
     ok: (v, facts) =>
       Array.isArray(v) &&
       v.length > 0 &&
       JSON.stringify(v) === JSON.stringify(facts['agents.identityRuntimeKeys']),
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
+  {
+    view: '智能体',
+    key: 'agents.runtimeFollowDefaultFirst',
+    label:
+      '★★ 「跟随全局默认」（`default`）在选择器里、而且是**第一项**（少了它，打开编辑页什么都没做、保存就把这个 agent 的默认改掉了）',
+    ok: (v) => v === true,
   },
   {
     view: '智能体',
@@ -3072,6 +3084,36 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.attached',
     label: '夹具：那条已完成草稿真的挂上了（「继续」之后进到审阅态）——不成立的话下面一整组都空过',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stepLabels',
+    label:
+      '★★ 步骤条是**四步**且「审核」排在**第 3 位**（§10.5 第 ③ 条新加的一步：起草之后、入库之前）',
+    // ⚠️ 只量"文本里有审核"是不够的：顺序错了（审核排到入库之后）同样坏，而它在界面上
+    //    只差一个位置。所以同时量**顺位**。
+    ok: (v) => Array.isArray(v) && v.length === 4 && v[2] === '审核',
+    show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditPresent',
+    label: '★★ 审核区块**常驻**在审阅态里（结论与问题清单要有地方落，不能只在有结论时才出现）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditText',
+    label:
+      '★ 还没审核时它说清"这是预筛、不替你做入库决定"（这句是第 ① 条决定的界面形态：入库仍由人点）',
+    ok: (v) => typeof v === 'string' && v.includes('还没审核过') && v.includes('不替你做入库决定'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditStartButton',
+    label: '★ 未审核态给得出「开始审核」这个入口（少了它，这一步只能靠接口触发）',
     ok: (v) => v === true,
   },
   {

@@ -253,7 +253,17 @@
         facts['agents.editButtonFound'] = !!editBtn
         {
           const sel = d().querySelector('select#agent-runtime')
-          facts['agents.runtimeOptions'] = sel ? [...sel.options].map((o) => o.value).sort() : null
+          const runtimeOpts = sel ? [...sel.options].map((o) => o.value) : null
+          facts['agents.runtimeOptions'] = runtimeOpts ? [...runtimeOpts].sort() : null
+          // ★ `default` 是**伪值**（跟随全局默认，不是某个 runtime），所以它**不该**出现在
+          //   "与身份接口的 runtimes 一致"这条比较里 —— 不排掉的话，那条断言会因为
+          //   "选项多了一个 default"而红，而界面其实是对的（2026-10 实测就红在这里）。
+          //   排掉之后**另加一条**量"default 在不在、是不是第一项"：少了它，新建的 agent
+          //   会落到第一个具体 runtime，等于"打开编辑页什么都没做，保存就改了默认"。
+          facts['agents.runtimeOptionsNoDefault'] = runtimeOpts
+            ? runtimeOpts.filter((k) => k !== 'default').sort()
+            : null
+          facts['agents.runtimeFollowDefaultFirst'] = runtimeOpts ? runtimeOpts[0] === 'default' : null
           // ── 未接真实 CLI 的 runtime（evidence 非 verified）不进 runtimes 数组 ──
           //
           //   2026-10（使用者决定）：未验证的 runtime（generic）**不显示在 UI 上**，
@@ -4366,6 +4376,29 @@
             const r = el.getBoundingClientRect()
             return { x: r.left, y: r.top, w: r.width, h: r.height }
           }
+
+          // ★ 步骤条（§10.5 第 ③ 条新加的「审核」那一步）：量的是"这一步在不在、顺位对不对"。
+          //   ⚠️ 这里**不**用"文本包含审核"当唯一判据：顺序错了（审核排到入库之后）同样坏，
+          //      所以另外量"审核是第 3 项"。
+          const cySteps = [...d().querySelectorAll('.crystal-steps .step-label')].map((e) =>
+            (e.textContent ?? '').trim(),
+          )
+          facts['crystal.stepLabels'] = cySteps
+          facts['crystal.stepAuditIndex'] = cySteps.indexOf('审核')
+          // 审核那一格的类名：`current` / `done` / 空 —— 量"现在停在哪一步"
+          const cyAuditLi = d().querySelectorAll('.crystal-steps li')[2]
+          facts['crystal.stepAuditClass'] = cyAuditLi ? cyAuditLi.className : null
+
+          // ★ 审核区块（结论与问题清单常驻的那一块）
+          const cyAudit = d().querySelector('.audit-block')
+          facts['crystal.auditPresent'] = !!cyAudit
+          facts['crystal.auditText'] = cyAudit ? text(cyAudit) : null
+          facts['crystal.auditStartButton'] = !!(
+            cyAudit &&
+            [...cyAudit.querySelectorAll('button')].some((b) =>
+              (b.textContent ?? '').includes('开始审核'),
+            )
+          )
 
           // ① 结论条：在、而且**在首屏**（改前审阅的结论在 y=932，900 高的窗口看不到）
           const cyBar = d().querySelector('.review-bar')
