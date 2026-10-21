@@ -92,6 +92,34 @@
   // ── 恢复进行中的起草 ──
   let attached = false
 
+  /**
+   * `GET /api/crystallize/review` 的返回（服务端已把"两条 run 怎么对应"解析好）。
+   *
+   * 前端不自己去翻 run 列表找判决：那会把"审核 run 与起草 run 怎么对应"这条规则
+   * 复制到前端（后端改一处、前端漏一处）。
+   */
+  interface DraftReviewInfo {
+    review: {
+      reviewRunId: string
+      reviewRunStatus: string
+      /** `verdict.status`：`advisory` / `rework_requested` / `escalated` / `invalid` … */
+      status: string
+      conclusion: string
+      reasonCode: string
+      findings: Array<{
+        severity: string
+        summary: string
+        evidence: Array<{ locator: string | null; excerpt: string | null }>
+      }>
+      escalateReason: string | null
+      createdAt: number
+    } | null
+    reviewRunId: string | null
+    reviewRunStatus: string | null
+    /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2）。 */
+    versions: number
+  }
+
   // ── 审阅（四轮：产出 = 文件集合）──
   /** `GET /api/crystallize/artifacts` 的返回（服务端已解析 + 已校验）。 */
   let artifacts: Artifacts | null = null
@@ -117,6 +145,16 @@
   let reviewTab: 'content' | 'diff' = 'content'
   /** 「按意见改一版」的输入框是否展开（不常驻，见结论条）。 */
   let reviseOpen = false
+  /**
+   * 起草审核的结论（§10.5 第 ⑤ 步：界面上要看到"审核说了什么"）。
+   *
+   * `null` = 还没读回来（= 面板还在加载）；`review === null` = **还没审过** ——
+   * 这两件事必须分开：把"没审过"画成"不通过"，人会去改一份根本没被审过的稿子。
+   */
+  let reviewInfo: DraftReviewInfo | null = null
+  let reviewBusy = false
+  /** 问题清单是否展开（结论常驻、明细折叠，与全站其它地方同一条规矩）。 */
+  let auditDetailOpen = false
   let materialPick = ''
   let materialLoading = false
   /** 「按意见改一版」的意见输入。 */
@@ -194,6 +232,30 @@
     }
     return out
   })()
+
+  /**
+   * 「审核」那一步的态：`done`（通过了）/ `bad`（不通过或无法判定）/ `current` / `pending`。
+   *
+   * ⚠️ `needs_human`（判决不合规）也画成 `bad`，不画成 `done`：那一步**没有通过**，
+   *   而画成 ✓ 会让人以为"审核过了、可以入库了"。
+   */
+  $: auditState = (() => {
+    if (reviewInfo?.review) {
+      return reviewInfo.review.conclusion === 'pass' ? 'done' : 'bad'
+    }
+    if (reviewInfo?.reviewRunId) return 'current'
+    return draftStatus === 'completed' ? 'current' : 'pending'
+  })()
+
+  /**
+   * "不通过且**额度已用尽**"（判决状态是 `escalated`）——这是唯一该出现
+   * 「重新起草 / 明知未通过仍入库」两个按钮的时刻。
+   *
+   * ⚠️ 与 `rework_requested` 分得清：那个状态表示**平台已经自动重新起草了一版**，
+   *   这时再给"重新起草"按钮，等于把人又推进同一条自动流程（他刚看过的那一版已经作废）。
+   */
+  $: auditFailedStuck =
+    reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
 
   $: canStart =
     targets !== null &&
@@ -308,6 +370,7 @@
       draftStatus = 'completed'
       handledTerminal = true // RunLog 挂上会重放终态，别二次处理
       void loadDraftOutput()
+      void loadReview()
     } else if (ad.status === 'failed' || ad.status === 'cancelled') {
       draftStatus = ad.status
       step = 'drafting'
@@ -434,6 +497,7 @@
     if (status === 'completed') {
       draftStatus = 'completed'
       await loadDraftOutput()
+      void loadReview()
     } else {
       draftStatus = status === 'cancelled' ? 'cancelled' : 'failed'
       step = 'drafting'
@@ -580,6 +644,63 @@
     } finally {
       materialLoading = false
     }
+  }
+
+  /** 读审核结论（进入审阅时与每次审核 ran 之后调）。 */
+  async function loadReview(): Promise<void> {
+    if (draftRunId === '') return
+    try {
+      reviewInfo = await api<DraftReviewInfo>(
+        `/api/crystallize/review?draftRunId=${encodeURIComponent(draftRunId)}`,
+      )
+    } catch {
+      // 读不到就如实留空（面板会显示"还没审过"）——**不要**把失败画成"通过"
+      reviewInfo = null
+    }
+  }
+
+  /**
+   * 起一条起草审核 run（§10.5 第 ②.5 步）。
+   *
+   * 审核是**预筛**，不是入库的门：它给结论，入库仍然由人点。所以这里只负责起 run 与
+   * 把结论读回来；失败时如实报错，**不自动入库**。
+   */
+  async function startAudit(): Promise<void> {
+    if (draftRunId === '' || reviewBusy) return
+    reviewBusy = true
+    error = ''
+    try {
+      await api<{ reviewRunId: string }>('/api/crystallize/review', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId }),
+      })
+      // 审核 run 是异步的：先读一次（多半还没判决），面板会显示"审核中"。
+      // 之后由「刷新」或再次进入审阅时读到判决 —— 这里不装轮询：
+      // 一条审核 run 可能跑几分钟，前端轮询只会让"看起来在动"变成假象。
+      await loadReview()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      reviewBusy = false
+    }
+  }
+
+  /**
+   * 审核额度用尽后的「按意见重新起草」：把审核意见**原文**填进"按意见改一版"的输入框，
+   * 再走那条现成的路（同一份素材、同一条链、同一套落盘规则）。
+   *
+   * 为什么不另写一份提交：那是同一个动作的两种实现，迟早分叉 —— 而使用者只会看到
+   * "自动返工改的那版"与"我点的那版"结果不一样。
+   */
+  async function redraftFromAudit(): Promise<void> {
+    const r = reviewInfo?.review
+    if (!r) return
+    reviseFeedback = [
+      `审核不通过（理由码：${r.reasonCode}）。请按下面每一条改：`,
+      ...r.findings.map((f, i) => `${i + 1}. [${f.severity}] ${f.summary}`),
+    ].join('\n')
+    await reviseDraft()
   }
 
   /** 按意见再起草一版：新 run 复用同一份素材 + 把上一版产出放进 material/previous-draft/。 */
@@ -789,8 +910,16 @@
           <span class="step-no" aria-hidden="true">{stepStates[1] === 'done' ? '✓' : 2}</span>
           <span class="step-label">{$t('crystallize.stepDraft')}</span>
         </li>
+        <!--
+          「审核」是 §10.5 新加的一步（②.5）：起草完之后由**内置审核者**先过一遍。
+          ⚠️ 它**不是入库的门**：结论是"预筛"，入库仍然由人点（评审在人是这条链的前提）。
+        -->
+        <li class={auditState}>
+          <span class="step-no" aria-hidden="true">{auditState === 'done' ? '✓' : 3}</span>
+          <span class="step-label">{$t('crystallize.stepAudit')}</span>
+        </li>
         <li class={stepStates[2]}>
-          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 3}</span>
+          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 4}</span>
           <span class="step-label">{$t('crystallize.stepReview')}</span>
         </li>
       </ol>
@@ -976,6 +1105,100 @@
         {:else if error}
           <div class="notice bad">{error}</div>
         {/if}
+
+        <!--
+          ── 审核结论（§10.5 第 ⑤ 步）──
+          三条规矩：① 结论常驻（一行）+ 问题清单折叠 ② "还没审过"与"审过但没判决"分开说
+          ③ 不通过且额度用尽时才给「重新起草」按钮（自动返工还在跑时不该出现）。
+        -->
+        <section class="drawer-section audit-block">
+          <h3>{$t('crystallize.auditTitle')}</h3>
+          {#if reviewInfo === null}
+            <p class="muted">…</p>
+          {:else if reviewInfo.review === null}
+            <div class="notice">
+              <p>{$t('crystallize.auditNotYet')}</p>
+              {#if reviewInfo.reviewRunId !== null}
+                <p class="muted">{$t('crystallize.auditRunning')}</p>
+              {/if}
+              <div class="row-end">
+                <button class="ghost small" disabled={reviewBusy} onclick={() => void startAudit()}>
+                  {$t('crystallize.auditStart')}
+                </button>
+                <button class="ghost small" onclick={() => void loadReview()}>
+                  {$t('crystallize.auditRefresh')}
+                </button>
+              </div>
+            </div>
+          {:else}
+            <div
+              class="review-bar"
+              class:bad={reviewInfo.review.conclusion !== 'pass'}
+            >
+              <span class="bar-mark" aria-hidden="true">
+                {reviewInfo.review.conclusion === 'pass' ? '✓' : '✗'}
+              </span>
+              <span class="bar-text">
+                <strong>
+                  {reviewInfo.review.conclusion === 'pass'
+                    ? $t('crystallize.auditPass')
+                    : reviewInfo.review.conclusion === 'fail'
+                      ? $t('crystallize.auditFail')
+                      : $t('crystallize.auditNeedsHuman')}
+                </strong>
+                <span class="muted">{reviewInfo.review.reasonCode}</span>
+                {#if reviewInfo.review.status === 'rework_requested'}
+                  <span class="muted">
+                    {$t('crystallize.auditReworked', { n: String(reviewInfo.versions) })}
+                  </span>
+                {:else if auditFailedStuck}
+                  <span class="muted">{$t('crystallize.auditExhausted')}</span>
+                {/if}
+              </span>
+              {#if reviewInfo.review.findings.length > 0}
+                <button
+                  class="ghost small"
+                  onclick={() => (auditDetailOpen = !auditDetailOpen)}
+                >
+                  {auditDetailOpen
+                    ? $t('crystallize.auditHideDetail')
+                    : $t('crystallize.auditShowDetail', {
+                        n: String(reviewInfo.review.findings.length),
+                      })}
+                </button>
+              {/if}
+            </div>
+            {#if reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
+              <p class="muted">
+                {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
+              </p>
+            {/if}
+            {#if auditDetailOpen}
+              <ul class="audit-findings">
+                {#each reviewInfo.review.findings as f}
+                  <li>
+                    <span class="sev">{f.severity}</span>
+                    <span>{f.summary}</span>
+                    {#each f.evidence as e}
+                      {#if e.locator !== null || e.excerpt !== null}
+                        <div class="muted audit-evidence">
+                          {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
+                        </div>
+                      {/if}
+                    {/each}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            {#if auditFailedStuck}
+              <div class="row-end">
+                <button class="ghost small" onclick={() => void redraftFromAudit()}>
+                  {$t('crystallize.auditRedraft')}
+                </button>
+              </div>
+            {/if}
+          {/if}
+        </section>
 
         <!-- 起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃 -->
         {#if artifacts && artifacts.mode === 'refused'}
@@ -1648,6 +1871,44 @@
   }
 
   /* 结论条：一行说完"能不能入库 / 改了什么 / 目标是谁"。 */
+  /*
+   * 审核那一段的样式（§10.5 第 ⑤ 步）。
+   *
+   * ⚠️ 这里刻意**不设 max-width**：这一页在 D80 之后是整页宽，宽度约束写在别处会
+   *    变成"只有这一块窄"的布局缺陷（`svelte-check` 看不见这类问题，只有浏览器量得出来）。
+   *    结论条复用 `.review-bar`（同一位置、同一个视觉语言），只补问题清单的样式。
+   */
+  .audit-block .bar-text {
+    /* 结论 + 理由码 + "额度用完"这句会变长：让它换行而不是把按钮挤出面板 */
+    flex-wrap: wrap;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .audit-findings {
+    margin: var(--sp-2) 0 0;
+    padding-left: var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+
+  .audit-findings .sev {
+    display: inline-block;
+    margin-right: var(--sp-2);
+    padding: 0 var(--sp-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+  }
+
+  .audit-evidence {
+    font-size: var(--fs-xs);
+    padding-left: var(--sp-3);
+  }
+
   .review-bar {
     display: flex;
     align-items: center;

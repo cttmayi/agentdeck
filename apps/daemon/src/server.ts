@@ -4541,6 +4541,65 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 草稿产出（2026-10-19 四轮）。界面不再从"最后一条 text 消息"里拆 frontmatter：
     // 那既丢了多文件，也把"解析规则"复制到了前端。这里给一份**已解析 + 已校验**的结构，
     // 前端只负责画。
+    // ── 起草审核的结果（§10.5 第 ⑤ 步：界面上要能看到"审核说了什么"）──
+    //
+    // 为什么要有这条读接口：判决挂在**审核 run** 上，而界面手上只有**起草 run** 的 id。
+    // 让前端自己去 `GET /api/runs` 里翻 subject 再翻 verdicts，等于把"这两条 run 怎么对应"
+    // 这件规则复制到前端（改一处漏一处）；这里给一份已解析好的结论。
+    if (req.method === 'GET' && path === '/api/crystallize/review') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      // 这条草稿的审核 run：subject 是 `skill-draft-review` 且 `id` 指回它。取**最后一条**
+      // （人工可以再点一次审核；界面上要显示的是最近一次的结论）。
+      const page = await store.listRuns({ workspaceId, limit: 10_000 })
+      const reviewRuns = page.items.filter(
+        (r) => r.subject.type === 'skill-draft-review' && r.subject.id === draftRunId,
+      )
+      const reviewRun = reviewRuns[reviewRuns.length - 1]
+      const verdicts = reviewRun ? await store.listVerdictsByRun(reviewRun.id) : []
+      const v = verdicts[verdicts.length - 1]
+      sendJson(res, 200, {
+        /**
+         * `null` = **还没审过**（或审核 run 还没收口）。
+         *
+         * ⚠️ 它与"审核跑完但判决不合规"是**两件不同的事**：后者有 verdict（结论
+         * `needs_human`、状态 `invalid`）。界面必须分开说 —— 把"没审过"显示成"不通过"
+         * 会让人去改一份根本没被审过的稿子。
+         */
+        review: v
+          ? {
+              reviewRunId: reviewRun!.id,
+              reviewRunStatus: reviewRun!.status,
+              status: v.status,
+              conclusion: v.conclusion,
+              reasonCode: v.reasonCode,
+              findings: v.findings,
+              escalateReason: v.escalateReason,
+              createdAt: v.createdAt,
+            }
+          : null,
+        /** 审核 run 在不在这件事，界面靠它区分"还没点过审核"与"审过但没判决"。 */
+        reviewRunId: reviewRun?.id ?? null,
+        reviewRunStatus: reviewRun?.status ?? null,
+        /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2，见 executor）。 */
+        versions: page.items.filter(
+          (r) =>
+            r.subject.type === 'skill-draft' &&
+            draftRun.subject.type === 'skill-draft' &&
+            r.subject.sourceRunId === draftRun.subject.sourceRunId,
+        ).length,
+      })
+      return
+    }
+
     if (req.method === 'GET' && path === '/api/crystallize/artifacts') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {

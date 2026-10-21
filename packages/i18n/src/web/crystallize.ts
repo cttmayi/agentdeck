@@ -63,6 +63,33 @@ export const crystallizeText = {
   // ── 步骤条 ──
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
   'crystallize.stepDraft': { zh: '起草 run', en: 'Draft run' },
+  // §10.5 第 ⑤ 步：起草之后多了一步「审核」（内置审核者的预筛）。
+  //  ⚠️ 文案要区分"审核"与"审阅入库"：前者是平台的预筛（结论），后者是人拍板入库。
+  //     两个都叫"审"时，使用者会以为"审核通过了就是入库了"。
+  'crystallize.stepAudit': { zh: '审核', en: 'Audit' },
+  'crystallize.auditTitle': { zh: '审核结论（预筛）', en: 'Audit result (pre-screen)' },
+  'crystallize.auditNotYet': {
+    zh: '这份草稿还没审核过。审核是一个内置智能体按"能不能用"过一遍，给出结论与问题清单；它不替你做入库决定。',
+    en: 'This draft has not been audited yet. The audit is a built-in agent checking whether the skill is usable; it does not decide the save for you.',
+  },
+  'crystallize.auditStart': { zh: '开始审核', en: 'Start audit' },
+  'crystallize.auditRunning': { zh: '审核中…（跑完再看这里）', en: 'Auditing… (check back here)' },
+  'crystallize.auditRefresh': { zh: '刷新结论', en: 'Refresh result' },
+  'crystallize.auditPass': { zh: '通过', en: 'Passed' },
+  'crystallize.auditFail': { zh: '不通过', en: 'Failed' },
+  'crystallize.auditNeedsHuman': { zh: '无法判定（判决不合规）', en: 'Undecided (malformed verdict)' },
+  'crystallize.auditShowDetail': { zh: '看 {n} 条问题', en: 'Show {n} issue(s)' },
+  'crystallize.auditHideDetail': { zh: '收起问题清单', en: 'Hide issues' },
+  'crystallize.auditRedraft': { zh: '按意见重新起草', en: 'Re-draft with feedback' },
+  'crystallize.auditReworked': {
+    zh: '已按上面的意见自动重新起草（第 {n} 版）',
+    en: 'Auto re-drafted with the feedback above (version {n})',
+  },
+  'crystallize.auditExhausted': {
+    zh: '自动返工的次数已用完 —— 要不要再来一版、或者就这样入库，由你决定。',
+    en: 'Automatic re-drafts are used up — decide whether to try another version or save as is.',
+  },
+  'crystallize.auditNotRun': { zh: '审核没有跑成：{reason}', en: 'The audit did not run: {reason}' },
   'crystallize.stepReview': { zh: '审阅入库', en: 'Review & save' },
 
   // ── 沉淀目标（目标态） ──

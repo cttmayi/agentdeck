@@ -1267,6 +1267,46 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     }
   })
 
+  test('★ 读结论的接口：没审过 ⇒ review=null（**不是**"不通过"）；审过 ⇒ 带回条目与版本数', async () => {
+    const sourceRunId = await runReviewed('审完的流程（读结论）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '读结论' },
+    })
+    const before = await (
+      await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
+    ).json() as { review: unknown; reviewRunId: unknown; versions: number }
+    // ★ 这条判据是给界面用的：`review === null` 与"结论 needs_human"必须分得开，
+    //   否则界面会把"还没审过"画成"不通过"，人会去改一份根本没被审过的稿子。
+    assert.equal(before.review, null, '还没审过 ⇒ review 必须是 null')
+    assert.equal(before.reviewRunId, null)
+    assert.equal(before.versions, 1, '刚起草完是第 1 版')
+
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'pass',
+      reasonCode: 'meets_criteria',
+      confidence: 0.9,
+      findings: [],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      await reviewDraftAndWait(draftRunId)
+      const after = (await (
+        await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
+      ).json()) as {
+        review: { conclusion: string; reasonCode: string; status: string } | null
+        versions: number
+      }
+      assert.equal(after.review?.conclusion, 'pass')
+      assert.equal(after.review?.reasonCode, 'meets_criteria')
+      assert.equal(after.versions, 1, '通过 ⇒ 没有返工 ⇒ 还是一版')
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
   test('★★ 审核**没跑成**（产出里没有判决块）⇒ 不返工也不当通过', async () => {
     const sourceRunId = await runReviewed('审完的流程（判决不合规）')
     const draftRunId = await draftAndWait({
