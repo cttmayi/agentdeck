@@ -1362,6 +1362,16 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 | 审阅两列真的并排 | 树 **240px** / 窗格高 **510px**（落在 `clamp(22rem,58vh,40rem)`） |
 | 智能体页 runtime 选项 | `["claude","codex"]`（与身份接口一致）且 `runtimeFollowDefaultFirst = true` |
 
+**「审核未通过」那一屏的实测数字（同一轮，夹具直写 store：判决 `fail` + `escalated` = 配额用尽）**：
+
+| 量到的东西 | 实测值 |
+|---|---|
+| 审核区块全文 | `审核结论（预筛） ✗ 不通过 style_violation 自动返工的次数已用完 —— 要不要再来一版、或者就这样入库，由你决定。 看 3 条问题 按意见重新起草` |
+| 问题清单入口 | `看 3 条问题` → 点开**真有 3 条**（`auditFailFindingCount = 3`） |
+| 严重度原样给出 | `["high","medium","low"]` |
+| 出口一：重新起草 | `auditRedraftButton = true` |
+| 出口二：确认入库**没被灰掉** | `auditFailSavePresent = true` / `auditFailSaveDisabled = **false**`（第 ① 条决策的界面形态：审核是预筛，不替人做决定） |
+
 ⚠️ **探针这轮红过一次、是真红**：`[智能体] runtime 选择器的选项与身份接口一致` 实测
 `claude | codex | default` —— D81 给选择器加了「跟随全局默认」那一项之后，这条**判据没跟上**
 （界面是对的，`default` 是伪值不是 runtime）。**没有改弱它**：把比较改成"排掉 `default` 之后

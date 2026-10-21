@@ -3118,6 +3118,57 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.auditFailEntered',
+    label:
+      '夹具：判决 `fail` + 配额用尽那条草稿挂得上（下面四条量的是"审核未通过"那一屏）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailText',
+    label:
+      '★★ 未通过时结论条说清三件事：**不通过** + 理由码 + **配额已用尽**（人要知道为什么停在它这儿）',
+    ok: (v) =>
+      typeof v === 'string' && v.includes('不通过') && v.includes('style_violation') && v.includes('重新起草'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailFindingsButton',
+    label: '★★ 问题清单**数得出来**（"看 N 条问题"——判决里几条，这里就该是几条）',
+    ok: (v) => typeof v === 'string' && /看 3 条问题/.test(v),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailFindingCount',
+    label: '★★ 点开之后**真的列出 3 条**问题（按钮在、点了什么都没有是这类改动最容易出的错）',
+    ok: (v) => v === 3,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailSeverities',
+    label: '★ 每条带**严重度**（high/medium/low 原样给出来，不折叠成一个"有问题"）',
+    ok: (v) => Array.isArray(v) && v.join(',') === 'high,medium,low',
+    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditRedraftButton',
+    label:
+      '★★ 停在未通过态时给得出「按意见重新起草」（第 ② 条决定的出口；少了它，人只能自己重走一遍）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailSaveDisabled',
+    label:
+      '★★★ 审核不通过**也没有**把「确认入库」灰掉（第 ① 条决定：审核是**预筛**，入库仍由人按——按钮一灰就等于把预筛变成了闸）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.barText',
     label: '★ 结论条一行说完"能不能入库 / 改了几个文件 / 目标是谁"（这里是新建目标）',
     ok: (v) => typeof v === 'string' && /3 个文件/.test(v) && /新建 skill/.test(v),
@@ -4212,7 +4263,13 @@ try {
   //    它打 `crystallized: true` ⇒ `findActiveDraft` 从此跳过它（见 crystallize.ts:181）——
   //    第一次用 `draftRunId` 去入库，直接把「沉淀」那一族 17 条判据打成红（它要的就是
   //    "那条未入库的草稿挂得上"）。夹具之间**不许互相消费**。
-  const crystalFixture = { draftRunId: '', revisedRunId: '', sourceRunId: '', mineDraftRunId: '' }
+  const crystalFixture = {
+    draftRunId: '',
+    revisedRunId: '',
+    sourceRunId: '',
+    mineDraftRunId: '',
+    auditFailRunId: '',
+  }
   try {
     await stopDaemon()
     const { FileStore } = await import(path.join(ROOT, 'packages', 'store-file', 'src', 'index.ts'))
@@ -4346,6 +4403,73 @@ try {
           { 'SKILL.md': skillMd('第二步') },
           { sourceRunId: mineSourceRunId },
         )
+
+        /**
+         * ★ 第四条草稿：**只给"审核未通过"那一屏用**（§10.5 第 ③ 条的界面形态）。
+         *
+         * ⚠️ 为什么要单独一条草稿：审核结论会**改写结论条与审核区块**，挂在上面那两条
+         *    草稿上会把"新建 / 改版"那两组判据的现场改掉（它们的结论条数字是量过的）。
+         * ⚠️ 判决是**直写 store**（与这一组夹具同一个理由：走接口会 spawn 真 CLI，而探针
+         *    的边界是"基本不造 run"）。状态取 `escalated` = **配额用尽**，也就是
+         *    "停在未通过态等人"那一支——正是第 ② 条决定里最需要看得见的一屏。
+         */
+        crystalFixture.auditFailRunId = await makeDraft(
+          ulid(),
+          { 'SKILL.md': skillMd('第三步') },
+          { sourceRunId: await makeSource() },
+        )
+        {
+          const auditRunId = ulid()
+          await store.insertRun({
+            id: auditRunId,
+            workspaceId,
+            kind: 'review',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            // ⚠️ `subject.id` 必须是**那条起草 run 的 id**：读接口就是按它找审核 run 的
+            //    （`subject.type === 'skill-draft-review' && subject.id === draftRunId`）。
+            subject: { type: 'skill-draft-review', id: crystalFixture.auditFailRunId },
+            prompt: '探针夹具：审核',
+            queuedAt: now - 20_000,
+            startedAt: now - 19_000,
+            finishedAt: now - 18_000,
+          })
+          await store.insertVerdict({
+            id: ulid(),
+            workspaceId,
+            runId: auditRunId,
+            subject: { type: 'skill-draft-review', id: crystalFixture.auditFailRunId },
+            status: 'escalated',
+            conclusion: 'fail',
+            reasonCode: 'style_violation',
+            confidence: 0.8,
+            findings: [
+              {
+                severity: 'high',
+                summary: '「Procedure」第 2 步没有说明命令从哪个目录跑',
+                evidence: [{ blobRef: null, locator: 'skill/SKILL.md:12', excerpt: '运行 marker.sh' }],
+              },
+              {
+                severity: 'medium',
+                summary: '脚本没有退出码检查，失败时会被当成成功',
+                evidence: [{ blobRef: null, locator: 'skill/scripts/marker.sh:4', excerpt: null }],
+              },
+              {
+                severity: 'low',
+                summary: 'description 里没有说清适用边界',
+                evidence: [],
+              },
+            ],
+            action: null,
+            escalateReason: null,
+            invalidResolution: null,
+            skillRefs: [],
+            modelId: null,
+            promptHash: null,
+            createdAt: now - 18_000,
+          })
+        }
       }
     } finally {
       await store.close()
@@ -4508,6 +4632,7 @@ try {
         `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
+        `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : ''),
     ],
