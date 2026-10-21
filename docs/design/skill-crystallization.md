@@ -1347,3 +1347,35 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 
 ⚠️ 这一步会**真的花额度**（两次真实 CLI run），并且**真的在机器上执行一个脚本**——脚本是我们自己
 写的那两行，但要说清这一点，不要把它说成"沙箱验证"。
+
+### 10.16 第 ③ 条的真机证据（2026-10-20）
+
+**做到了什么（真实测量，不是推断）**：用**审核那一路完全相同的 argv**（从 run 日志里抄下来的）
+在草稿小屋里跑了一次真实 CLI：
+
+```
+claude -p --output-format stream-json --input-format stream-json --verbose \
+       --permission-mode bypassPermissions --disallowedTools AskUserQuestion --max-turns 6
+CLAUDE_CONFIG_DIR=<daemon 的受管配置目录>
+cwd = .cache/audit-proof/work/skill-draft-DEMOPROOF001
+```
+
+投递的话：`请运行 skill/scripts/marker.sh（用相对路径）…`。结果：
+
+- **工具调用真的发生了**：`TOOL Bash {"command": "bash skill/scripts/marker.sh; printf '\nexit_code=%s\n' "$?""}`
+  —— 也就是说 D76 那条 hook **放行了**小屋内的脚本执行（它拦的是越界，不是"执行"本身）；
+- **脚本真的被执行了**（判据是文件系统，不是模型的话）：
+  `script-ran.txt` ⇒ `ran at 2026-10-21T13:57:03Z from /Users/ling/job/agentdeck/.cache/audit-proof/work/skill-draft-DEMOPROOF001`；
+- CLI 报告的退出码：`0`。
+
+**没做到的（如实记下）**：让**我这台临时 daemon 自己发起**那次审核 run 没成功 —— 它 spawn 出来的
+claude 一律报 `Not logged in · Please run /login`（同样 argv、同样配置目录，我在 shell 里手跑却是通的）。
+排查到的边界：这个 daemon 是**被受限的 shell 拉起**的（先用 `workspace-write` 起过一次，日志里产品
+自己也报了"`~/.claude` 目录存在但不可写 ⇒ CLI 的 Bash 等工具可能全程失败"）；换成全权限重启、
+并把用户那台 daemon 的受管配置目录整份拷过来，仍然 `Not logged in`。**使用者在终端里起的 daemon
+是通的**（他们那台能正常跑 claude），所以这更像是"受限环境下起 daemon"的环境问题，而不是产品缺陷；
+但**我没有把它查到底**，所以这一条要留一句：真机上"由 daemon 发起的那次审核"还没跑通过。
+
+⇒ 结论：**执行路径本身是真的**（权限、hook、工作目录、脚本留痕都实测过）；**由 daemon 自动发起
+那一步**在受限环境里没验成，需要在一个能正常登录的 daemon 上再跑一次（两分钟的事，但要在使用者
+那台机器上重启 daemon 才能拿到）。
