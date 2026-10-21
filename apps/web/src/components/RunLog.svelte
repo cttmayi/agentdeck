@@ -6,6 +6,18 @@
   export let runId: string
   export let onterminal: (status: string) => void = () => {}
   /**
+   * ★ run 的**状态变化**（2026-10-21 加，起因是一次实测）。
+   *
+   * 沉淀页的审核面板原来把状态写成"打开面板那一刻从接口读到的快照"：点「开始审核」时
+   * run 还是 `queued`，于是徽标**一直显示「排队中」**，而日志已经在流了——使用者的原话
+   * 是"审核的过程看不到，感觉一直没结束呢"，一张永远停在"排队中"的徽标正是这句话的
+   * 一半来源。探针量到了它（`crystal.auditLiveBadge` 实测 `排队中`）。
+   *
+   * 事件流本来就把每次状态变化送过来了（下面的 `case 'status'`），所以这里只需把它
+   * 转告调用方——**不装轮询**：轮询只会让"看起来在动"变成假象。
+   */
+  export let onstatus: (status: string) => void = () => {}
+  /**
    * ★ D69.11：日志吃满一屏（详情页主视图用）。
    *   默认 `max-height: 26rem`——聊天轮次里那是"一段辅助输出"，够了；任务详情里
    *   点「看完整日志」时日志就是**主内容**，26rem 是"固定高低"、浪费可用屏。
@@ -282,9 +294,11 @@
         })
         break
       }
-      case 'status':
+      case 'status': {
         push('status', tx('runs.logStatus', { status: String(event['status']) }))
+        onstatus(String(event['status']))
         break
+      }
       case 'progress':
         push(
           'status',

@@ -104,6 +104,15 @@
   let auditLogOpen = false
 
   /**
+   * 审核 run 的**实时**状态（来自事件流，见 `RunLog` 的 `onstatus`）。
+   *
+   * ⚠️ 为什么不能只用 `reviewInfo.reviewRunStatus`：那是"读接口那一刻"的快照。点「开始审核」
+   *    时 run 还在 `queued`，徽标就会**一直**显示「排队中」——而日志已经在流了。
+   *    实测（探针 `crystal.auditLiveBadge`）抓到过这一幕。
+   */
+  let auditLiveStatus: string | null = null
+
+  /**
    * 「起草 run」那一块的两态（2026-10-21 使用者："下面的起草run 的日志，应该类似任务中
    * 的最后结果和完整日志一样的切换方式"）。
    *
@@ -295,7 +304,10 @@
     'dispatched',
     'running',
   ]
-  $: auditStatus = reviewInfo?.reviewRunId === null ? null : (reviewInfo?.reviewRunStatus ?? null)
+  /** 徽标用的状态：事件流报过就用它，否则用接口快照。 */
+  $: auditStatus =
+    auditLiveStatus ??
+    (reviewInfo?.reviewRunId === null ? null : (reviewInfo?.reviewRunStatus ?? null))
   $: auditRunning =
     reviewInfo !== null &&
     reviewInfo.review === null &&
@@ -757,6 +769,19 @@
    *    **unhandled rejection** —— 界面上什么都不发生，使用者只会反复点。这条纪律
    *    来自任务页 `cancelRun` 的一次真实踩坑，这里照抄。
    */
+  /**
+   * 审核 run 收尾时的统一动作：**把实时状态设成终态，再重读判决**。
+   *
+   * ⚠️ 这里必须动 `auditLiveStatus`，不能只 `loadReview()`：徽标优先用实时状态（见它的注释），
+   *    如果收尾时只刷新接口快照而实时状态还停在 `running`，`auditRunning` 就永远为真
+   *    ——界面上表现为"取消了，但它还在说审核正在进行"，一个按钮按下去**界面纹丝不动**。
+   *    这是我自己改出来的缺陷，探针当场量到了（`crystal.auditAfterCancelStillRunning` 实测 true）。
+   */
+  async function onAuditTerminal(status: string): Promise<void> {
+    auditLiveStatus = status
+    await loadReview()
+  }
+
   async function cancelAudit(): Promise<void> {
     const id = reviewInfo?.reviewRunId
     if (id === null || id === undefined || id === '') return
@@ -778,6 +803,8 @@
   async function startAudit(): Promise<void> {
     if (draftRunId === '' || reviewBusy) return
     reviewBusy = true
+    // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始
+    auditLiveStatus = null
     error = ''
     try {
       await api<{ reviewRunId: string }>('/api/crystallize/review', {
@@ -1253,7 +1280,11 @@
             <!-- ── 进行中：**实时输出直接铺开**，并且跑完自动收口（RunLog 报终态 ⇒ 重读判决）── -->
             <p class="faint small">{$t('crystallize.auditRunning')}</p>
             <div class="log-box">
-              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+              <RunLog
+                runId={reviewInfo.reviewRunId ?? ''}
+                onterminal={(st) => void onAuditTerminal(st)}
+                onstatus={(st) => (auditLiveStatus = st)}
+              />
             </div>
             <div class="row-end">
               <button class="ghost small" onclick={() => void cancelAudit()}>
@@ -1275,7 +1306,10 @@
               </div>
             </div>
             <div class="log-box">
-              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+              <RunLog
+                runId={reviewInfo.reviewRunId ?? ''}
+                onterminal={(st) => void onAuditTerminal(st)}
+              />
             </div>
           {:else if reviewInfo.review === null}
             <div class="notice">
@@ -1289,7 +1323,10 @@
           {:else if auditLogOpen}
             <!-- ── 有结论 + 人要回看过程 ⇒ 同一个位置换成日志 ── -->
             <div class="log-box">
-              <RunLog runId={reviewInfo.reviewRunId ?? ''} onterminal={() => void loadReview()} />
+              <RunLog
+                runId={reviewInfo.reviewRunId ?? ''}
+                onterminal={(st) => void onAuditTerminal(st)}
+              />
             </div>
           {:else}
             <div class="review-bar" class:bad={reviewInfo.review.conclusion !== 'pass'}>
