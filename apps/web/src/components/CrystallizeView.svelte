@@ -28,10 +28,14 @@
   import { FoldSection } from '@agentdeck/ui/components'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
-  import { renderMarkdown } from '../lib/markdown.ts'
   import { go } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
+  // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
+  //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
+  //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
+  import { renderMarkdown } from '../lib/markdown.ts'
+  import { finalResultText } from '../lib/final-output.ts'
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
@@ -98,6 +102,19 @@
    * 同一个交互：换的是同一块位置里的内容）。
    */
   let auditLogOpen = false
+
+  /**
+   * 「起草 run」那一块的两态（2026-10-21 使用者："下面的起草run 的日志，应该类似任务中
+   * 的最后结果和完整日志一样的切换方式"）。
+   *
+   * 默认给**最后结果**：审阅这一屏人要看的是"它交了什么"，而原始流水是回查用的。
+   * 与任务详情页同一个交互与同一批措辞（`tasks.finalResult` / `tasks.showRawLog`…）。
+   */
+  let draftLogOpen = false
+  /** 起草 run 的最后一段正文（剥掉判决围栏后的那一段）。 */
+  let draftFinalText = ''
+  /** 最后结果取到了没有（`'loading'` 与"确实没有文字产出"必须分开说）。 */
+  let draftFinalState: 'loading' | 'ready' | 'empty' = 'loading'
 
   // ── 恢复进行中的起草 ──
   let attached = false
@@ -536,6 +553,8 @@
 
   /** 起草 run 到终态：completed → 取草稿进审阅；否则留在起草节显示失败态。 */
   async function onDraftTerminal(status: string): Promise<void> {
+    // 起草刚跑完：把「最后结果」也读回来（否则切到审阅态时那一段是空的）
+    if (status === 'completed') void loadDraftFinalText()
     if (handledTerminal || step === 'done') return
     handledTerminal = true
     if (status === 'completed') {
@@ -588,9 +607,37 @@
       clash = null
       error = ''
       step = 'review'
+      // 「最后结果」跟着一起读：这一屏默认显示的就是它（不读就会先闪一句"没有文字产出"）
+      void loadDraftFinalText()
     } catch (err) {
       step = 'drafting'
       error = $t('crystallize.errTargets', { error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  /**
+   * 读起草 run 的**最后结果**（最后一段正文）。
+   *
+   * 与任务页 `loadResult` 同一条规矩：取**最后一条** text 而不是拼接——中间那些
+   * "我先看一下目录"的过程话不属于结论。判决围栏由 `finalResultText` 剥掉
+   * （起草 run 不带判决，传 `false` ⇒ 原样；留这个参数是为了与任务页同源）。
+   */
+  async function loadDraftFinalText(): Promise<void> {
+    draftFinalState = 'loading'
+    try {
+      const out = await api<{ messages: Array<{ type: string; content: string }> }>(
+        `/api/runs/${encodeURIComponent(draftRunId)}/messages`,
+      )
+      const texts = (out.messages ?? []).filter(
+        (m) => m.type === 'text' && m.content.trim() !== '',
+      )
+      const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
+      draftFinalText = finalResultText(last, false)
+      draftFinalState = draftFinalText.trim() === '' ? 'empty' : 'ready'
+    } catch {
+      // 读不到就如实说"没有文字产出"（附带的提示里让人去看完整日志）——不要假装在加载
+      draftFinalText = ''
+      draftFinalState = 'empty'
     }
   }
 
@@ -1523,12 +1570,15 @@
             </div>
           </div>
 
-          {#if selectedFile.endsWith('.md') && editText.trim() !== '' &&
-            fileRows.find((r) => r.rel === selectedFile)?.change !== 'D'}
-            <FoldSection title={$t('crystallize.previewTitle')}>
-              <div class="preview markdown">{@html renderMarkdown(editText)}</div>
-            </FoldSection>
-          {/if}
+          <!--
+            ⚠️ 2026-10-21 使用者："不需要「预览」" —— 这里原来有一段折叠的 Markdown 预览
+               （`.preview`，20rem 高、还要往下滚）。删掉的理由不只是"多余"：
+               审阅这一屏要动手的只有**编辑器**（② 差异在同一个窗格里切），而预览是
+               同一份内容的**第二种渲染**——它离编辑器几百像素、还各自滚，读完预览
+               再回去改一个字要来回跳。删掉之后这一屏只剩"改 / 比"两件事。
+               （`.preview` 的 CSS 与 `renderMarkdown` 的 import 一并删了——留着就是死代码，
+               本仓库最防的就是"东西都在、就是没有路径让它发生"。）
+          -->
         {/if}
       {/if}
 
@@ -1577,14 +1627,47 @@
              （那时它只是历史，占 129px 只为了让审阅沉到第二屏以下）── -->
       {#if draftRunId !== '' && step !== 'done'}
         {#if step === 'review'}
-          <FoldSection
-            title={$t('crystallize.draftSection')}
-            summary={`run ${runShort}…${draftStatus ? ` · ${statusLabel(draftStatus)}` : ''}${statsLine ? ` · ${statsLine}` : ''}`}
-          >
-            <div class="log-box">
-              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-            </div>
-          </FoldSection>
+          <!--
+            ── 起草 run：默认**最后结果**，按需切到**完整日志**（2026-10-21 使用者）──
+
+            ⚠️ 这里原来是"折成一行 + 展开就全是原始流水"：人想知道"它交了什么"，得自己在
+              流水里找最后那段话。改成与任务详情页同一套：标题行说清是哪条 run、什么状态、
+              几个回合，右边一个按钮在两态之间换——**换的是同一块位置里的内容**。
+          -->
+          <section class="drawer-section">
+            <h3>
+              {$t('crystallize.draftSection')}
+              <span class="faint small">
+                run {runShort}…
+                {#if draftStatus}
+                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
+                {/if}
+                {statsLine !== '' ? ` · ${statsLine}` : ''}
+              </span>
+              <button
+                type="button"
+                class="ghost small"
+                style="margin-left:var(--sp-3)"
+                onclick={() => (draftLogOpen = !draftLogOpen)}
+              >
+                {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
+              </button>
+            </h3>
+            {#if draftLogOpen}
+              <div class="log-box">
+                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+              </div>
+            {:else if draftFinalState === 'loading'}
+              <div class="skeleton"></div>
+            {:else if draftFinalState === 'empty'}
+              <div class="empty">
+                <strong>{$t('tasks.noTextOutput')}</strong>
+                {$t('tasks.noTextOutputHint')}
+              </div>
+            {:else}
+              <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
+            {/if}
+          </section>
         {:else}
           <section class="drawer-section">
             <h3>
@@ -1893,11 +1976,20 @@
     max-height: 24rem;
     overflow: auto;
   }
-  .preview {
+  /*
+   * 起草 run 的「最后结果」。
+   *
+   * ⚠️ **必须限高自己滚**：这一页的纪律是"页面不整页滚、主区自己滚"，而一段没有上限的
+   *    Markdown 会把整页撑长、把审阅区挤出首屏——探针里 `crystal.pageFitsViewport`
+   *    正是钉这条的（改前实测整页 2030px）。它与 `.log-box` 用同一档高度，
+   *    切换两态时**不跳**。
+   */
+  .draft-final {
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
+    background: var(--panel);
     padding: var(--sp-3);
-    max-height: 20rem;
+    max-height: 24rem;
     overflow-y: auto;
   }
   .mono {

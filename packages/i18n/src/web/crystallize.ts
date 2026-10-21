@@ -193,7 +193,8 @@ export const crystallizeText = {
   },
   'crystallize.nameLabel': { zh: '名称', en: 'Name' },
   'crystallize.descriptionLabel': { zh: '描述', en: 'description' },
-  'crystallize.previewTitle': { zh: '预览', en: 'Preview' },
+  // ⚠️ 2026-10-21 删掉 `crystallize.previewTitle`：使用者说"不需要「预览」"，
+  //    那一段折叠预览连同它的 key 一起删了（留着 key 就是给下一个人一个假线索）。
   // ── 四轮：产出是文件集合（文件树 / 变更集 / 校验 / 兜底形态）──
   'crystallize.filesUnit': { zh: '个文件', en: 'files' },
   'crystallize.changeAdded': { zh: '新增', en: 'added' },
