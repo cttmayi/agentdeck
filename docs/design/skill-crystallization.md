@@ -1141,3 +1141,24 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 
 **一句话**：第 3 步的活落在**两处**——审核 prompt 的产出口径（对齐 `decideReview`）+ 判决后的分流
 （复用额度与 revise），而不是我原来设计的 `review.json` 与自造计数器。
+
+### 10.8 第 3 步的格式口径（勘察结果，已照它改 prompt）
+
+判决的产出**不是**我原先写的 `review.json`，而是平台的**判决围栏块**：
+
+- 标记：`packages/protocol/src/verdict.ts:273-274` 的 `VERDICT_FENCE_BEGIN` / `VERDICT_FENCE_END`
+  （`<<<ALPHA_VERDICT>>>` / `<<<END_ALPHA_VERDICT>>>`），提取由同文件的 `extractVerdictJson` 做，
+  校验由 `parseVerdict` 做，整条判定链在 `packages/domain/src/review/pipeline.ts` 的 `decideReview`。
+- **产出写坏不会静默通过**：`decideReview` 会给 `invalid`（结构性缺失 ⇒ 有重试意义；非结构性 ⇒
+  按 `invalidAttempts` 决定重试或降级），最终落库时是 `needs_human` + `internal_error`
+  （`review.ts:35-39` 的注释解释了为什么这样"诚实降级"）。
+- 已按此改掉审核 prompt：**不再重抄格式**（围栏标记唯一出处是 protocol 常量，重抄一份两边迟早分叉，
+  而分叉的表现是"判决块解析不了"），改成"按第一句话里给的格式写" + 给出 `reasonCode` / `evidence`
+  的填写要求。
+
+**还差的一件（第 3 步的实质）**：判决之后的**分流**——`fail` ⇒ 用现成的返工额度
+（`ReviewCoordinator.handle` 的 `maxReworks` / `usedReworks`，D45）起一条 revise（feedback = 结论 + 问题），
+额度用完或 `needs_human` ⇒ 停在"审核未通过"态交给人。executor 里**没有**"等一条 run 收尾"的 API
+（查过：`executor.ts` 没有 wait/settle 之类的方法），所以分流要么挂在收口那一刻（`review.ts` /
+`executor.ts:1730` 那条路），要么由 server 侧有界轮询草稿与审核两条 run 的终态——**下一轮先定这一条**，
+不要直接写。

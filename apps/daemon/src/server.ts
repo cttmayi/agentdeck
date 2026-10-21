@@ -3787,7 +3787,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
           '',
           '【产出】',
-          '把结论写到 `review.json`：`{ "verdict": "pass" | "fail", "issues": [{ "where", "why", "evidence" }] }`。',
+          // 判决格式**不在这里重复一遍**：围栏标记与键名由平台放在审核那一路的第一句话里
+          // （`VERDICT_FENCE_BEGIN` 是唯一出处）。这里重抄一份的话，两边迟早会分叉，
+          // 而分叉的表现是"判决块解析不了 ⇒ 记成 needs_human"，看不出是提示词不一致。
+          '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
+          '`reasonCode` 用一条简短的理由码（比如 `missing_when_to_use`、`script_broken`、`no_evidence`）；',
+          '`evidence` 里写**具体位置**（哪一节、哪个文件）与为什么不合格。',
+          '⚠️ 判决块缺了或 JSON 写坏，平台只会记一条"判决不合规"（`needs_human` + `internal_error`）',
+          '——那个状态看起来像"审核没做"，看不出是格式问题，所以宁可多花一步把格式写对。',
           '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
         ].join('\n'),
         chainDepth: 0,
