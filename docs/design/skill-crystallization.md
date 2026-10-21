@@ -1318,3 +1318,32 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 窗口也放宽。
 
 **仍未完成**：真机上的端到端证据（一次真实 CLI 的审核 run 把草稿里的脚本跑出痕迹）。
+
+### 10.15 真机端到端证据的施工单（第 ③ 条最后一件，下一轮照这个做）
+
+**要证的那一句话**：审核者**真的把草稿里的脚本跑了一遍**（不是"我们放开了权限"）。
+
+为什么不能用测试证：NFR-T-01 禁止测试里跑真 CLI。所以这一步在**测试之外**做一次真机演示，
+但**用平台自己的接口**（不要手搓 prompt —— 那只能证明"claude 收到这句话会跑脚本"，证不到
+"我们这条路会这么派"）。
+
+步骤（都不改产品代码）：
+1. 起一台**另外的 daemon**（不碰使用者在跑的那台）：`node scripts/node-entry.mjs apps/daemon/src/cli.ts
+   --port 4599 --data-dir .cache/audit-proof`（后台作业，最后 kill 掉）。
+   ⚠️ 不要用 `pnpm run daemon -- --port`：pnpm 会把 `--` 一起传进去，选项**静默失效**（CLAUDE.md 记着这条）。
+2. 手搓一间草稿小屋：`.cache/audit-proof/work/skill-draft-<id>/skill/SKILL.md`（含 `## When to Use`／
+   `## Procedure`，让审核有东西可读）+ `skill/scripts/marker.sh`（内容：把时间戳写进
+   `$PWD/script-ran.txt`）。**脚本要留痕迹**——"跑过"与"没跑过"的差别只有文件系统说得清。
+3. 用 API 造一条"起草 run"（这条是**真跑一次 CLI**，很便宜：prompt 写"什么都不用做"）：
+   `POST /api/runs` `kind: 'execute'` + `workDir` = 那间小屋 + `subject: {type:'skill-draft', id: <draftId>,
+   sourceRunId: <任意>`。⚠️ 审核路由只要求"run 存在、subject 是 skill-draft、状态 completed"，
+   不要求它真从起草路由来 —— 这正是这条捷径成立的原因（也是这台一次性 daemon 能用的原因）。
+4. `POST /api/crystallize/review {draftRunId}` ⇒ 平台自己组装审核 prompt、派**内置的 skill 审核者**
+   （真 claude）在那间小屋里跑。
+5. 取证：① `script-ran.txt` 存在且时间戳落在审核 run 的时间窗内；② `GET /api/runs/<reviewRunId>/messages`
+   里有 Bash 工具调用与它的输出；③ 判决（`/api/runs/<reviewRunId>/verdicts`）里的 `evidence` 提到
+   脚本与退出码。三条一起才叫"真的跑过"。
+6. 关掉那台 daemon（后台作业 kill），把④的结果贴进提交说明。
+
+⚠️ 这一步会**真的花额度**（两次真实 CLI run），并且**真的在机器上执行一个脚本**——脚本是我们自己
+写的那两行，但要说清这一点，不要把它说成"沙箱验证"。
