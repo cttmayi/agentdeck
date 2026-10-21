@@ -3129,6 +3129,114 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.previewFoldGone',
+    label: '★★ 审阅屏**没有**「预览」折叠段了（2026-10-21 使用者："不需要「预览」"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.previewElementGone',
+    label:
+      '★★ 页面上也没有 `.preview` 元素（与上一条一起判：只判折叠段的话，把预览换个名字/搬个位置照样过）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftSectionFound',
+    label: '夹具：审阅屏里找得到「起草 run」那一块（下面四条量的是它的两态）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftFinalText',
+    label:
+      '★★★ 「起草 run」默认显示**最后结果**（那条 run 的最后一段正文）——改之前展开全是原始流水，人得自己在里面找最后那段话',
+    ok: (v) => typeof v === 'string' && v.includes('探针夹具的最后结果'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftLogAfterToggle',
+    label: '★★★ 点按钮之后**换成完整日志**（与任务页「最后结果 / 完整日志」同一个交互：同一块位置换内容）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftBackToFinal',
+    label: '★ 再点一次能切回最后结果（两态都要走得通，不能单程）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveStartButton',
+    label:
+      '夹具：审阅屏上有「开始审核」——下面几条要**点它**，让 daemon 真的 spawn 一条审核 run（假 `agent-cli`，不花额度）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveLogBox',
+    label:
+      '★★★ 审核**真跑起来**的时候，实时输出就铺在面板里（使用者："审核的过程看不到，感觉一直没结束呢"——原来只有一句"审核中…跑完再看这里"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveLogText',
+    label: '★★★ 而且那日志**真有内容**（不是铺了个空的框就算过——假 CLI 吐的那句话必须在里面）',
+    ok: (v) => typeof v === 'string' && v.includes('正在跑'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveBadge',
+    label: '★★ 跑着的时候有 run **状态徽标**（"它到底在跑还是在等"要一眼看得出来）',
+    ok: (v) => v === '运行中',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveCancelButton',
+    label: '★★ 跑着的时候给得出「取消审核」（"感觉一直没结束"的另一半：得有一条退出路）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditAfterCancelStillRunning',
+    label:
+      '★★★ 点了「取消审核」之后**不许**还在说"审核正在进行"（这条量的是真的取消：run 落到终态、界面跟着改口）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditAfterCancelRetry',
+    label: '★★ 取消之后给得出「重新审核」（取消了就是没审成，得能再来一次）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditDeadEntered',
+    label: '夹具：审核"没跑成"那条草稿挂得上（patch 前它永远显示"审核中"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditDeadSaysRunning',
+    label:
+      '★★★ 审核 run **失败**时**不许**再说"审核正在进行 / 跑完再看这里"（这就是使用者"感觉一直没结束"的根因：判据只看"有没有判决"）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditDeadText',
+    label: '★★★ 它要**明说没跑成**并给「重新审核」（失败必须说出来，而不是让人继续等）',
+    ok: (v) => typeof v === 'string' && v.includes('审核没跑成') && v.includes('重新审核'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.stepLabels',
     label:
       '★★ 步骤条是**四步**且「审核」排在**第 3 位**（§10.5 第 ③ 条新加的一步：起草之后、入库之前）',
@@ -3633,6 +3741,69 @@ const skillsRoot = path.join(SCRATCH, 'skills')
 const skillsMineRoot = path.join(SCRATCH, 'skills-mine')
 for (const d of [skillsRoot, skillsMineRoot]) fs.mkdirSync(d, { recursive: true })
 
+/**
+ * ★★ 假 `agent-cli`（2026-10-21）——为了量"**审核跑着的时候**界面长什么样"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么不能再用"夹具插一条 running 的 run"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 试过了，量出来的是**假的绿**：夹具注入发生在 daemon 停机的那一段，而 daemon 起来时
+ * `reconcileInterruptedRuns`（FR-RUNTIME-11）会把所有非终态 run 收口成 `failed`
+ * ——"数据里写着正在进行、其实没人在进行"正是它要消灭的东西。于是那一屏量到的
+ * 其实是"没跑成"那一屏，两条判据（有日志、日志有内容）**碰巧**都成立：
+ * 假的绿比红更危险。
+ *
+ * 所以这里反过来：**让一条真的 run 跑起来**——把 PATH 前面塞一个叫 `agent-cli` 的
+ * 假可执行文件（通用 runtime 的命令名），它吐一行 NDJSON 然后**挂着不退出**。
+ * 于是：
+ *   · 探针点界面上真的「开始审核」⇒ daemon 真的 spawn 一个进程 ⇒ run 真的是 `running`；
+ *   · 实时输出、状态徽标、取消按钮量的都是**真现场**；
+ *   · 点「取消审核」真的把它杀掉 —— 顺带把"daemon 自己发起的审核 run"这条
+ *     以前只能在真机上做（要花真额度）的证据，在假 CLI 上补上。
+ *
+ * ⚠️ 假 CLI **只回答 `--version` 并吐一行就睡**：它不读 prompt、不改文件、不花额度。
+ *    （与 `packages/agent-generic/src/testing/fake-cli.ts` 同一个立场：NFR-T-01。）
+ */
+const stubBinDir = path.join(SCRATCH, 'bin')
+function writeFakeGenericCli() {
+  fs.mkdirSync(stubBinDir, { recursive: true })
+  const script = path.join(stubBinDir, 'agent-cli')
+  fs.writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      '# 探针夹具：假装成通用 runtime 的 CLI。',
+      '#',
+      '# ★ 只对**审核那条 run** 挂着不退出（量"审核跑着的时候界面长什么样"）；',
+      '#   别的 run 一律立刻失败退出——探针里那几条夹具（对话第一句话 / 三步链派发）',
+      '#   本来就是靠"`agent-cli` 不存在 ⇒ 立刻 ENOENT 失败"来避免真跑 CLI 的。',
+      '#   ⚠️ 第一版假 CLI 对**谁都**挂 600 秒，于是那几条 run 一直"运行中"、任务页与',
+      '#   聊天页的 RunLog 一直开着 SSE —— 而 Chrome 的虚拟时钟在 fetch 没结束时**完全',
+      '#   不走**（实测 `setInterval` 的 tick 是 0、dump 永远写不出来），整个探针挂到超时。',
+      '#   这个坑花了两轮才定位：症状（探针超时、dump 空）离原因（假 CLI）隔了三层。',
+      'if [ "$1" = "--version" ]; then echo "agent-cli 0.0-probe"; exit 0; fi',
+      'case "$*" in',
+      `  *${PROBE_AUDIT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_LINE}"}\n'; sleep 600 ;;`,
+      '  *) echo "agent-cli: 探针假 CLI 只服务审核那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  fs.chmodSync(script, 0o755)
+}
+/** 假 CLI 吐的那一行（`probe.html` 里按它判"日志真有内容"）。 */
+const PROBE_STUB_LINE = '探针夹具：审核 run 正在跑（假 CLI 的一条输出）。'
+/**
+ * 假 CLI 凭什么认出"这是审核那条 run"：**内置 skill 审核者的身份里塞了这个记号**
+ * （见下面那次 PATCH），而审核 run 的第一句话里带审核者的身份。
+ *
+ * 为什么不用 prompt 里的中文（"审核"/"脚本"之类）判：那是实现细节，改一句文案这条链
+ * 就悄悄断了——而断了的表现是"审核 run 秒退"，看起来像"审核跑不起来"。
+ */
+const PROBE_AUDIT_MARKER = 'PROBE-STUB-AUDIT-ONLY'
+
 /** 起 daemon（同一个数据目录、同一个端口，可能起两次——见下面"为什么起两次"）。 */
 let daemon = null
 let daemonLog = ''
@@ -3653,13 +3824,20 @@ function startDaemon() {
       '--skills-mine-root',
       skillsMineRoot,
     ],
-    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // ★ 把假 `agent-cli` 垫在 PATH 最前面（见 `writeFakeGenericCli`）：daemon 只在
+      //   **启动时**读一次 PATH，所以要在这里给，不能等起来之后再改。
+      env: { ...process.env, PATH: `${stubBinDir}:${process.env.PATH ?? ''}` },
+    },
   )
   child.stdout.on('data', (b) => (daemonLog += b))
   child.stderr.on('data', (b) => (daemonLog += b))
   return child
 }
 
+writeFakeGenericCli()
 daemon = startDaemon()
 
 /**
@@ -3685,6 +3863,13 @@ async function stopDaemon() {
     }
   }
   throw new Error('daemon 没能在 10s 内停干净（store 锁一直占着）')
+}
+
+/** 收尾：把假 `agent-cli` 的残留进程杀掉（取消没成功时它会一直 sleep 着）。 */
+function killFakeCli() {
+  try {
+    spawnSync('pkill', ['-f', path.join(stubBinDir, 'agent-cli')], { stdio: 'ignore' })
+  } catch {}
 }
 
 let chromeChild = null
@@ -4245,6 +4430,45 @@ try {
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // 把内置 skill 审核者改挂 `generic`（探针这台一次性 daemon 上的临时改动）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 为什么：`probe.html` 要**点界面上真的「开始审核」**，量"审核跑着的时候"那一屏。
+  // 内置审核者的 `runtimeKey` 是 `default`（跟随全局默认 ⇒ 这台机器上侦测到的是
+  // claude），照原样点下去会**真的拉起一个模型**——探针不许花使用者的额度（NFR-T-01）。
+  // 改成 `generic` 之后，daemon spawn 的是 PATH 最前面那个假 `agent-cli`
+  // （见 `writeFakeGenericCli`）：真 spawn、真 running、真日志、真取消，一个额度不花。
+  //
+  // ⚠️ 只改这一个 agent、只改这一个 runtime 字段，而且探针的 daemon 用完就整目录删掉；
+  //    没有任何判据依赖这个内置审核者的 runtimeKey（`agents.*` 那组量的是徽标与
+  //    选择器的**选项**），所以不会污染别的断言。
+  try {
+    const agentsRes = await fetch(`${base}/api/agents`)
+    const agentsPage = await agentsRes.json()
+    const skillReviewer = (agentsPage.items ?? agentsPage.agents ?? []).find(
+      (a) => a.role === 'skill-reviewer',
+    )
+    if (!skillReviewer) {
+      log(yellow('⚠ 没找到内置的 skill 审核者——"审核跑着"那一屏会量不到'))
+    } else {
+      const patchRes = await fetch(`${base}/api/agents/${encodeURIComponent(skillReviewer.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runtimeKey: 'generic',
+          // ★ 身份里带一个记号：假 CLI 只对**带这个记号的 run** 挂着不退出（见 PROBE_AUDIT_MARKER）。
+          instructions: `${PROBE_AUDIT_MARKER}\n探针夹具：这条内置审核者的身份在探针的一次性 daemon 上被临时改过。`,
+        }),
+      })
+      if (!patchRes.ok) {
+        log(yellow(`⚠ 内置 skill 审核者改挂 generic 失败：HTTP ${patchRes.status}`))
+      }
+    }
+  } catch (err) {
+    log(yellow(`⚠ 内置 skill 审核者改挂 generic 时出错：${err}`))
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // 造**本地技能目录夹具**（Skills 页 →「设置」）
   // ══════════════════════════════════════════════════════════════════
   //
@@ -4310,6 +4534,7 @@ try {
     sourceRunId: '',
     mineDraftRunId: '',
     auditFailRunId: '',
+    auditDeadRunId: '',
   }
   try {
     await stopDaemon()
@@ -4511,6 +4736,58 @@ try {
             createdAt: now - 18_000,
           })
         }
+
+        /**
+         * ★ 审核**没跑成**那一条 —— 这是本节最要紧的一条判据。
+         *
+         * run 状态是 `failed`、**没有判决**。改之前审核区只判"有没有判决"，于是这一格
+         * 永远显示"审核中…（跑完再看这里）"：使用者对着一条**早就失败**的审核 run 一直等。
+         */
+        crystalFixture.auditDeadRunId = await makeDraft(
+          ulid(),
+          { 'SKILL.md': skillMd('第五步') },
+          { sourceRunId: await makeSource() },
+        )
+        {
+          const deadReviewRunId = ulid()
+          await store.insertRun({
+            id: deadReviewRunId,
+            workspaceId,
+            kind: 'review',
+            status: 'failed',
+            agentId: executor.id,
+            agentName: executor.name,
+            subject: { type: 'skill-draft-review', id: crystalFixture.auditDeadRunId },
+            prompt: '探针夹具：审核（失败）',
+            queuedAt: now - 7_000,
+            startedAt: now - 6_000,
+            finishedAt: now - 5_000,
+            failureReason: '探针夹具：假装审核跑挂了',
+          })
+          await store.appendRunMessage(deadReviewRunId, {
+            seq: 1,
+            type: 'text',
+            tool: null,
+            content: '探针夹具：审核 run 失败现场。',
+            input: null,
+            output: null,
+            outputTruncated: false,
+            at: now - 5_500,
+          })
+        }
+
+        // ★ 给**第一条草稿**一段文字产出：审阅态那块默认要显示的就是它（"最后结果"）。
+        //   没有这条消息，量到的只会是"这次起草没有留下文字产出"那个空态。
+        await store.appendRunMessage(crystalFixture.draftRunId, {
+          seq: 1,
+          type: 'text',
+          tool: null,
+          content: '探针夹具的最后结果：我把这段做法写成了 skill，产出在 skill/ 目录里。',
+          input: null,
+          output: null,
+          outputTruncated: false,
+          at: now - 27_000,
+        })
       }
     } finally {
       await store.close()
@@ -4674,6 +4951,7 @@ try {
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
+        `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : ''),
     ],
@@ -4755,6 +5033,9 @@ try {
   exitCode = 2
 } finally {
   if (chromeChild) killChrome(profile, chromeChild)
+  // ★ 假 `agent-cli` 的残留：取消那一步成功的话它早就被杀掉了；没成功时它会 sleep 到底，
+  //   所以这里无条件清一遍（探针不许在机器上留下自己拉的进程）。
+  killFakeCli()
   if (KEEP) {
     log()
     log(yellow(`--keep：daemon 还开着（PID ${daemon?.pid}）→ ${base}/#/agents`))

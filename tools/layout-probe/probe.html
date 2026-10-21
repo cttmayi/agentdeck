@@ -112,6 +112,66 @@
         return false
       }
 
+      /**
+       * ★★★ 不用时钟的等待（2026-10-21，踩过一次大坑）。
+       *
+       * ══════════════════════════════════════════════════════════════════
+       * 为什么"跑着"那一屏不能用 `until()` 等
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 探针是拿 `chrome --virtual-time-budget` 跑完之后 --dump-dom 收结果的。实测（三组
+       * 对照实验，`/tmp/sse*.mjs`）：**只要页面里有一个没结束的 fetch（SSE 就是），
+       * Chrome 的虚拟时钟就完全不走** —— 连 `setInterval` 的 tick 都是 0，
+       * 而虚拟时间预算因此永不到期：dump **永远写不出来**，整个探针挂到超时。
+       *
+       * 而"审核跑着"那一屏恰恰就是"开着一条 SSE"（`RunLog` 订阅 run 事件流）。
+       * 所以那一段的等待只能靠**DOM 变化**（MutationObserver 在微任务里回调，
+       * 不依赖时钟），等完之后还必须让这条流**关掉**（点取消 ⇒ run 落终态 ⇒ 流自己结束；
+       * 再兜一层：切换路由把这个组件卸载掉），否则后面整页都醒不过来。
+       *
+       * `maxEvents` 是**故意的上界**：真等到没有变化了也不无限等——宁可让判据变红，
+       * 也不要一个挂十分钟、什么都看不出来的探针。
+       */
+      /**
+       * ★★★ 时钟冻结时的"心跳"：用一次**真网络往返**代替 `wait()`。
+       *
+       * 上面解释了"SSE 开着时虚拟时钟不走"。但**网络请求照样完成**——所以拿一次轻量
+       * 的 GET 当节拍器，就能在流开着的时候做有上界的轮询（既不挂死，也不会无限等）。
+       */
+      async function untilNet(fn, tries = 60) {
+        for (let i = 0; i < tries; i++) {
+          try {
+            if (fn()) return true
+          } catch {}
+          try {
+            await fetch('/api/agents', { cache: 'no-store' })
+          } catch {}
+        }
+        return false
+      }
+
+      async function untilDom(fn, maxEvents = 80) {
+        for (let i = 0; i < maxEvents; i++) {
+          try {
+            if (fn()) return true
+          } catch {}
+          const changed = await new Promise((resolve) => {
+            const target = d().documentElement
+            if (!target) {
+              resolve(false)
+              return
+            }
+            const mo = new MutationObserver(() => {
+              mo.disconnect()
+              resolve(true)
+            })
+            mo.observe(target, { subtree: true, childList: true, characterData: true })
+          })
+          if (!changed) return false
+        }
+        return false
+      }
+
       function click(el) {
         if (!el) {
           note('click：目标元素不存在（选择器可能改了）')
@@ -4458,6 +4518,39 @@
           const cyOk = await cyEnter(cyDraft)
           facts['crystal.attached'] = cyOk
 
+          // ★★ 「预览」那一段必须**不在**了（2026-10-21 使用者："不需要「预览」"）。
+          //    判据两条一起用：折叠段里没有叫"预览"的，且页面上没有 `.preview` 元素——
+          //    只判其一的话，把预览搬个位置、换个名字都算通过。
+          facts['crystal.previewFoldGone'] = ![...d().querySelectorAll('.fold-section')].some((el) =>
+            (el.querySelector('.fold-head')?.textContent ?? '').includes('预览'),
+          )
+          facts['crystal.previewElementGone'] = !d().querySelector('.preview')
+
+          // ★★ 「起草 run」默认显示**最后结果**，一点就换成**完整日志**（使用者第三条：
+          //    "应该类似任务中的最后结果和完整日志一样的切换方式"）。
+          {
+            const draftSection = [...d().querySelectorAll('.drawer-section')].find((el) =>
+              (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
+            )
+            facts['crystal.draftSectionFound'] = !!draftSection
+            const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
+            facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
+            const toggle = draftSection
+              ? [...draftSection.querySelectorAll('h3 button')][0] ?? null
+              : null
+            facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
+            if (toggle) {
+              click(toggle)
+              await until(() => !!draftSection?.querySelector('.log-box'), 60)
+              facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
+              facts['crystal.draftToggleLabelAfter'] = text(toggle)
+              // 切回去：后面还有别的判据要在这个现场上量
+              click(toggle)
+              await until(() => !!draftSection?.querySelector('.draft-final'), 60)
+              facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
+            }
+          }
+
           const cyRect = (el) => {
             if (!el) return null
             const r = el.getBoundingClientRect()
@@ -4713,6 +4806,83 @@
             )
             facts['crystal.auditFailSaveDisabled'] = cySave ? cySave.disabled : null
             facts['crystal.auditFailSavePresent'] = !!cySave
+          }
+
+          // ══════════════════════════════════════════════════════════════
+          // ★★★ 审核**真的跑起来**那一屏（2026-10-21 使用者："审核的过程看不到，
+          //      感觉一直没结束呢"）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 这里**点界面上真的「开始审核」**：daemon 会真的 spawn 一个进程（PATH 前面那个
+          // 假 `agent-cli`，见 run.mjs 的 `writeFakeGenericCli`），它吐一行就挂着。
+          // 之所以非要真跑，是因为"插一条 running 的夹具 run"量到的是**假的绿**：
+          // daemon 重启时 `reconcileInterruptedRuns` 会把非终态 run 收口成 failed，
+          // 于是那一屏其实是"没跑成"那一屏，两条判据碰巧都成立。
+          facts['crystal.auditLiveEntered'] = await cyEnter(cyQuery.get('crystalDraft'))
+          if (facts['crystal.auditLiveEntered']) {
+            const startBtn = [...d().querySelectorAll('.audit-block button')].find((b) =>
+              text(b).includes('开始审核'),
+            )
+            facts['crystal.auditLiveStartButton'] = !!startBtn
+            if (startBtn) {
+              click(startBtn)
+              // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
+              await untilNet(() => !!d().querySelector('.audit-block .log-box'))
+              let block = d().querySelector('.audit-block')
+              facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
+              // ⚠️ 两件事都要**等到**，不能量一次就算：
+              //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
+              //      量到的是"排队中"，判据红了，而界面没错（真现场就是还在排队）。
+              //   ② 假 CLI 吐的那行要经 daemon 解析、再经 SSE 送到页面。
+              //   等待全部走 `untilNet`（SSE 开着时时钟不走，`until` 会挂死）。
+              await untilNet(() => text(d().querySelector('.audit-block .badge')) === '运行中', 400)
+              await untilNet(
+                () =>
+                  (d().querySelector('.audit-block .log-box')?.textContent ?? '').includes('正在跑'),
+                400,
+              )
+              block = d().querySelector('.audit-block')
+              facts['crystal.auditLiveText'] = block ? text(block) : null
+              facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
+              facts['crystal.auditLiveBadge'] = block ? text(block.querySelector('.badge')) : null
+              const cancelBtn = block
+                ? [...block.querySelectorAll('button')].find((b) => text(b).includes('取消审核'))
+                : null
+              facts['crystal.auditLiveCancelButton'] = !!cancelBtn
+              if (cancelBtn) {
+                click(cancelBtn)
+                // 取消是**异步**的（要等进程真的死掉、run 落到终态）⇒ 等界面改口（走 DOM，不走时钟）
+                await untilNet(
+                  () => !(d().querySelector('.audit-block')?.textContent ?? '').includes('审核正在进行'),
+                  300,
+                )
+                const after = d().querySelector('.audit-block')
+                facts['crystal.auditAfterCancelText'] = after ? text(after) : null
+                facts['crystal.auditAfterCancelStillRunning'] = (after?.textContent ?? '').includes(
+                  '审核正在进行',
+                )
+                facts['crystal.auditAfterCancelRetry'] = !!(after &&
+                  [...after.querySelectorAll('button')].some((b) => text(b).includes('重新审核')))
+              }
+              // ★ 兜底：**保证这条 SSE 关掉**，否则后面整页的时钟都不走
+              //   （取消没成功、或 240 次 DOM 变化都没等到，就靠切路由把组件卸载掉）。
+              f.contentWindow.location.hash = '#/tasks'
+              // 等这次路由切换真的生效（用网络往返当节拍：此刻时钟还是冻着的）
+              await untilNet(() => !d().querySelector('.audit-block'), 20)
+            }
+          }
+
+          // ★★★ 审核**没跑成**那一屏 —— 这一节最要紧的一条（原来它永远显示"审核中"）。
+          const cyDead = cyQuery.get('crystalAuditDead')
+          facts['crystal.auditDeadEntered'] = await cyEnter(cyDead)
+          if (facts['crystal.auditDeadEntered']) {
+            const block = d().querySelector('.audit-block')
+            facts['crystal.auditDeadText'] = block ? text(block) : null
+            facts['crystal.auditDeadSaysRunning'] = block
+              ? /审核正在进行|跑完再看这里/.test(text(block))
+              : null
+            facts['crystal.auditDeadRetry'] = !!(block &&
+              [...block.querySelectorAll('button')].some((b) => text(b).includes('重新审核')))
           }
         }
 
