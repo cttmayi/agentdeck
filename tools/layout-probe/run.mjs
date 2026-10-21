@@ -394,6 +394,33 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.drafterRowFound',
+    label: '夹具：内置起草者那一行在列表里（下面两条量的是它的角色徽标）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.drafterRowBadge',
+    label:
+      '★★★ 内置起草者的徽标说「起草」而**不是「执行」**（2026-10 实修：列表原先只会说 执行/审核，加了两个内置角色后它们被标成执行者）',
+    ok: (v) => v === '起草',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '智能体',
+    key: 'agents.skillAuditorRowFound',
+    label: '夹具：内置 skill 审核者那一行在列表里（§10 第 ④ 条新建的第二个内置智能体）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
+    key: 'agents.skillAuditorRowBadge',
+    label: '★★★ 它的徽标说「审核沉淀」——两个内置角色的徽标要**分得开**，不能都叫"审核"',
+    ok: (v) => v === '审核沉淀',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '智能体',
     key: 'agents.runtimeOptionsNoDefault',
     label:
       'runtime 选择器的**具体 runtime** 选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
@@ -1707,6 +1734,20 @@ const CHECKS = [
 
   // ── 设置抽屉 ──
   { view: '新建表单 / 设置', key: 'settings.panelOpened', label: '点「设置」后出现抽屉', ok: (v) => v === true },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.defaultRuntimePresent',
+    label:
+      '★★ 设置抽屉里有「全局 runtime 默认值」那一段（§9/D81 第 ⑤ 条：只能改接口 = 这条决定在界面上没有落点）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.defaultRuntimeFirstIsAuto',
+    label:
+      '★★★ 它的第一项是**「自动侦测」**且值为**空串**（空串 = 跟随启动时侦测到的那个——这条语义只有界面上说出来才算落地）',
+    ok: (v) => v === true,
+  },
   { view: '新建表单 / 设置', key: 'settings.drawerTitle', label: '★ 抽屉标题就是「设置」（不是"第一句话设置"）', ok: (v) => v === '设置' },
   { view: '新建表单 / 设置', key: 'settings.hasBackdrop', label: '设置有遮罩', ok: (v) => v === true },
   { view: '新建表单 / 设置', key: 'settings.isWide', label: '设置用的是宽抽屉（46rem）', ok: (v) => v === true },

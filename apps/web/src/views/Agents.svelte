@@ -235,6 +235,23 @@
         {#each visibleAgents as a (a.id)}
           {@const reviewer =
             a.role === 'reviewer' ? $t('agents.reviewsOthers') : ''}
+          <!--
+            ★ 2026-10（D81/D82）：角色从两个变成四个（`drafter` / `skill-reviewer` 是内置的
+              那两个），而这里原先写的是 `role === 'reviewer' ? 审核 : 执行` —— 于是内置起草者
+              与内置 skill 审核者在列表上被标成**「执行」**：一个永远不会接任务的 agent
+              看起来像执行者，使用者会去问"它为什么不干活"，而答案是"它压根不是"。
+              ⚠️ 判据是**角色**，不是 agent 名字/是否 builtin：名字可以改，角色不能。
+          -->
+          {@const roleLabel =
+            a.role === 'reviewer'
+              ? $t('agents.roleReviewer')
+              : a.role === 'drafter'
+                ? $t('agents.roleDrafter')
+                : a.role === 'skill-reviewer'
+                  ? $t('agents.roleSkillReviewer')
+                  : $t('agents.roleExecutor')}
+          {@const roleBadgeClass =
+            a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'}
           <ListRow
             rowClass="agent-row"
             active={a.id === selectedId}
@@ -248,9 +265,7 @@
             {#snippet children()}
               <span class="agent-line">
                 <strong>{a.name}</strong>
-                <span class="badge {a.role === 'reviewer' ? 'in_review' : 'in_progress'}">
-                  {a.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}
-                </span>
+                <span class="badge {roleBadgeClass}">{roleLabel}</span>
                 <!--
                   ⚠️ 这里原来有一个「未挂 skill」徽标（`a.role === 'reviewer' &&
                      a.skillIds.length === 0` 时显示）。**整段删掉了**，理由是它

@@ -1372,6 +1372,31 @@ draft/mine 夹具的注入阶段），别在 HTTP 阶段抢跑；跑法是
 | 出口一：重新起草 | `auditRedraftButton = true` |
 | 出口二：确认入库**没被灰掉** | `auditFailSavePresent = true` / `auditFailSaveDisabled = **false**`（第 ① 条决策的界面形态：审核是预筛，不替人做决定） |
 
+**智能体页与设置抽屉的实测数字（同一轮）**：
+
+| 量到的东西 | 实测值 |
+|---|---|
+| 内置起草者的角色徽标 | `起草` |
+| 内置 skill 审核者的角色徽标 | `审核沉淀` |
+| 内置智能体详情页徽标 | `平台内置：删不掉，只能「恢复成默认值」（沉淀这条链的起草者）` |
+| 恢复默认按钮 | `builtinHasRestore = true` |
+| 删除按钮 | `builtinHasDelete = **false**`（留一个点了会被服务端拒的按钮比没有按钮更坏） |
+| 技能挂载被锁 | `builtinSkillsLocked = true` |
+| 设置抽屉「全局 runtime 默认值」 | 在，且第一项是 `{ value: "", label: "自动侦测（当前 ?）" }` —— 空串语义在界面上说出来了 |
+
+⚠️ **这一轮修掉一个真缺陷（徽标）**：`Agents.svelte` 的列表徽标原先写的是
+`role === 'reviewer' ? 审核 : 执行`，角色从两个变成四个之后（`drafter` / `skill-reviewer` 是新增的
+两个内置角色），**内置起草者与内置 skill 审核者在列表上被标成「执行」** —— 一个永远不会接任务的
+agent 看起来像执行者，使用者会去问"它为什么不干活"，而答案是"它压根不是执行者"。
+修法是按**角色**取标签（角色不能改，名字可以改），并补 `agents.roleDrafter` / `agents.roleSkillReviewer`。
+
+⚠️ **探针这轮红过一次、是假红（我量错了对象）**：设置抽屉有**两份**（`SettingsDrawer` 按
+`$openDrawer` 决定 `focus`）：模板设置抽屉（页级动作条里的「设置」）与 **App 设置抽屉**（顶栏那个
+设置图标 ⇒ `focus='all'`）。`SettingsDrawer` 把 ①..④ 段包在 `{#if focus === 'all'}` 里，而全局
+runtime 默认值那一段就在其中。我第一次把它塞在上一个面板里量 ⇒ `defaultRuntimePresent = false`，
+**差一点就写成"界面上没有入口"**。改成另开一次 App 设置抽屉才量到（`true` + 选项 `["", "claude",
+"codex"]`）。教训与前面那条一样：**判据没错，是我量错了对象**——探针的"红"要先问清量的是哪一个现场。
+
 ⚠️ **探针这轮红过一次、是真红**：`[智能体] runtime 选择器的选项与身份接口一致` 实测
 `claude | codex | default` —— D81 给选择器加了「跟随全局默认」那一项之后，这条**判据没跟上**
 （界面是对的，`default` 是伪值不是 runtime）。**没有改弱它**：把比较改成"排掉 `default` 之后

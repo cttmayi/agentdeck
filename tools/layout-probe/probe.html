@@ -148,6 +148,28 @@
         if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .list-row-main（数据没到或列表没渲染）')
 
         facts['agents.cardCount'] = cards().length
+
+        // ★★ 内置起草者 / 内置 skill 审核者那一行：角色徽标要说出它们是谁（§9/D81、§10/D82）。
+        //    ⚠️ 这一条是**改出来才发现**的：列表原先写的是 `role === 'reviewer' ? 审核 : 执行`，
+        //    加了 `drafter` / `skill-reviewer` 之后，它们被标成**「执行」**——一个永远不会
+        //    接任务的 agent 看起来像执行者。判据用**名字**定位那一行（内置 agent 的名字由
+        //    平台给，使用者能改的是指令不是名字的用途），再量徽标文字。
+        {
+          const rowOf = (needle) =>
+            cards().find(
+              (c) => (c.querySelector('strong')?.textContent ?? '').includes(needle),
+            ) ?? null
+          const drafterRow = rowOf('起草者')
+          facts['agents.drafterRowFound'] = !!drafterRow
+          facts['agents.drafterRowBadge'] = drafterRow
+            ? (drafterRow.querySelector('.badge')?.textContent ?? '').trim()
+            : null
+          const skillAuditorRow = rowOf('Skill 审核者')
+          facts['agents.skillAuditorRowFound'] = !!skillAuditorRow
+          facts['agents.skillAuditorRowBadge'] = skillAuditorRow
+            ? (skillAuditorRow.querySelector('.badge')?.textContent ?? '').trim()
+            : null
+        }
         // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
         // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
         //   使用者要求合并成一行——所以这里改量 `.agent-notes` 里的两个子 span。
@@ -2258,6 +2280,31 @@
           facts['template.listBackAfterEsc'] = !!d().querySelector('.list-row-main')
         }
 
+        // ★★ 内置智能体的**详情页**（§9/D81 第 6 步）：徽标 / 恢复成默认值 / **没有删除按钮** /
+        //    技能挂载被锁。⚠️ 放在智能体这一段的**最后**：它会切换选中项，放前面会把别的判据
+        //    量到错的现场（这个探针在沉淀那一段已经因为同一个原因踩过一次）。
+        {
+          const rowOf = (needle) =>
+            cards().find(
+              (c) => (c.querySelector('strong')?.textContent ?? '').includes(needle),
+            ) ?? null
+          const drafterRow2 = rowOf('起草者')
+          if (drafterRow2) {
+            click(drafterRow2)
+            await until(() => !!d().querySelector('.builtin-badge'), 60)
+          }
+          const badge = d().querySelector('.builtin-badge')
+          facts['agents.builtinBadgeText'] = badge ? text(badge) : null
+          const detailBtns = [...d().querySelectorAll('.form-actions button')].map((b) => text(b))
+          facts['agents.builtinDetailButtons'] = detailBtns
+          facts['agents.builtinHasRestore'] = detailBtns.some((t) => t.includes('恢复成默认值'))
+          // ⚠️ 判据是"**没有**删除按钮"：留一个点了会被服务端拒的按钮，比没有按钮更坏
+          facts['agents.builtinHasDelete'] = detailBtns.some((t) => t.includes('删除'))
+          const skillsCell = d().querySelector('.skills-cell')
+          facts['agents.builtinSkillsLocked'] = !!(skillsCell && skillsCell.className.includes('locked'))
+          facts['agents.builtinSkillsText'] = skillsCell ? text(skillsCell) : null
+        }
+
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
         // ══════════════ 设置抽屉 ══════════════
@@ -2527,6 +2574,46 @@
                 new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
               )
               facts['settings.goneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
+            }
+          }
+        }
+
+        // ★★ 「全局 runtime 默认值」那一段（§9/D81 第 ⑤ 条）。
+        //
+        // ⚠️ **必须另开一次抽屉**，而且必须开 **App 设置抽屉**（顶栏那个设置图标 ⇒
+        //    `openDrawer.set('settings')` ⇒ `focus='all'`）。上面那一段量的是**模板设置抽屉**
+        //    （页级动作条里的「设置」，里面是执行/审核/聊天三档），两者都是 `.drawer`。
+        //    我第一次就把这几条塞在上面的面板里量，实测 `defaultRuntimePresent = false` ——
+        //    `SettingsDrawer` 把 ①..④ 段包在 `{#if focus === 'all'}` 里，而上面那份的
+        //    focus 不是 'all'，于是那几段**根本不渲染**。当时差一点就写成"界面上没有入口"，
+        //    那会是**假红**（判据没错、我量错了对象）。
+        facts['settings.defaultRuntimePresent'] = null
+        facts['settings.defaultRuntimeFirstIsAuto'] = null
+        {
+          const settingsIcon = [...d().querySelectorAll('.topbar button')].find(
+            (b) => (b.getAttribute('aria-label') ?? '') === '设置',
+          )
+          if (!settingsIcon) {
+            // 顶栏那个图标按钮是唯一"focus='all'"的入口；找不到就说清楚，不要静默跳过
+            errors.push('顶栏找不到 aria-label=设置 的按钮 ⇒ 量不到全局 runtime 默认值那一段')
+          } else {
+            click(settingsIcon)
+            const opened = await until(() => !!d().querySelector('.drawer'), 60)
+            const panel2 = d().querySelector('.drawer')
+            const drSection = panel2 ? panel2.querySelector('[data-default-runtime]') : null
+            facts['settings.defaultRuntimePresent'] = !!drSection
+            const drSelect = drSection ? drSection.querySelector('select') : null
+            facts['settings.defaultRuntimeOptions'] = drSelect
+              ? [...drSelect.options].map((o) => ({ value: o.value, label: o.textContent.trim() }))
+              : null
+            facts['settings.defaultRuntimeFirstIsAuto'] = drSelect
+              ? drSelect.options[0]?.value === '' && /自动侦测/.test(drSelect.options[0].textContent)
+              : null
+            if (opened) {
+              f.contentWindow.dispatchEvent(
+                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+              )
+              await until(() => !d().querySelector('.drawer'), 40)
             }
           }
         }

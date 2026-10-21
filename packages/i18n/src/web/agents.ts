@@ -17,6 +17,11 @@ export const agentsText = {
   // ── 两个以上文件共用的角色词 ──
   'agents.roleExecutor': { zh: '执行', en: 'Execute' },
   'agents.roleReviewer': { zh: '审核', en: 'Review' },
+  // ★ 2026-10（D81/D82）：内置起草者与内置 skill 审核者也是角色，列表徽标要能说出它们是谁。
+  //   ⚠️ 少了这两条，列表上它们会显示成「执行」——一个**永远不会接任务**的 agent
+  //   被标成执行者，使用者会去问"它为什么不干活"。
+  'agents.roleDrafter': { zh: '起草', en: 'Draft' },
+  'agents.roleSkillReviewer': { zh: '审核沉淀', en: 'Audit drafts' },
   'agents.roleExecutorHint': { zh: '接到任务后动手干活', en: 'Takes on tasks and does the work' },
   'agents.roleReviewerHint': {
     zh: '按你给它写的判断依据审别人的产出，给判决',
