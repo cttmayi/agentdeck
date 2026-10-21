@@ -4759,137 +4759,155 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //     要改哪里"，而不是从零再来一遍；
     //   · 使用者的意见单独成 `material/feedback.md`，优先级最高；
     //   · 新 run 记 `revisedFrom`（对比上一版靠它找回产出）。
+  /**
+   * 按意见再起草一版（把 `POST /api/crystallize/revise` 的路由体抽出来）。
+   *
+   * ★ 为什么要抽成函数（§10.9）：审核判决**不通过**时要自动返工，而自动返工发生在收口那一刻
+   *   （`ReviewCoordinator`）——那里**没有 HTTP 请求**可发，路由体里内联的这段逻辑它拿不到。
+   *   两条路各写一遍的话，"人工点重新起草"与"自动返工"会慢慢分叉，而使用者只会看到
+   *   "自动改的那版少了什么"。
+   *
+   * ⚠️ 纯重构：status/body 与原来的 `sendJson` 一一对应，行为一字不改。判据是
+   *   `crystallize-e2e` 那几十条一个都不许变。
+   */
+  async function startReviseRun(input: {
+    draftRunId: string
+    feedback: string
+  }): Promise<{ status: number; body: Record<string, unknown> }> {
+    const draftRunId = input.draftRunId
+    const feedback = input.feedback.trim()
+    if (draftRunId === '') {
+      return { status: 400, body: { error: '需要 draftRunId', code: 'draft_run_id_required' } }
+    }
+    if (feedback === '') {
+      return { status: 400, body: { error: '需要一句意见（改成什么样）', code: 'feedback_required' } }
+    }
+    const previous = await store.getRun(draftRunId as RunId)
+    if (!previous || previous.workspaceId !== workspaceId) {
+      return { status: 404, body: { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' } }
+    }
+    if (previous.subject.type !== 'skill-draft') {
+      return { status: 400, body: { error: '这条 run 不是起草 run', code: 'not_a_draft' } }
+    }
+    const sourceRunId = previous.subject.sourceRunId
+    if (sourceRunId === undefined) {
+      return { status: 409, body: { error: '这条草稿没记来源，无法再起草', code: 'no_source' } }
+    }
+    const sourceRun = await store.getRun(sourceRunId as RunId)
+    if (!sourceRun) {
+      return { status: 404, body: { error: '来源 run 已不存在', code: 'source_run_not_found' } }
+    }
+    // ★ 与起草那条路同源：起草者是**平台内置的那条**，不是来源 run 的执行者
+    //   （「按意见改一版」如果还借来源执行者，就等于"重写一版"与"改一版"
+    //   用的不是同一个身份——两版的风格会分叉，而使用者只看到"改完反而不像同一条"）。
+    const reviseDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
+    if (!reviseDrafter) {
+      await ensureBuiltinDrafter(store, workspaceId)
+    }
+    const reviseDrafterAgent = reviseDrafter ?? {
+      id: ulid() as Agent['id'],
+      name: DRAFTER_NAME,
+      instructions: DRAFTER_INSTRUCTIONS,
+    }
+
+    const previousDir = draftRoot(workRoot, draftRunId)
+    const previousSkill = await readDraftSkillDir(join(previousDir, 'skill'))
+
+    const newRunId = ulid() as RunId
+    const newDir = draftRoot(workRoot, newRunId)
+    try {
+      const materialDir = join(newDir, 'material')
+      // 复制上一版素材（同一份证据），但要避开它自己的 previous-draft/ 与反馈，
+      // 否则重写几版会层层嵌套、上下文越滚越大。
+      await copyMaterial(join(previousDir, 'material'), materialDir, {
+        skip: ['previous-draft', 'feedback.md'],
+      })
+      if (previousSkill !== null) {
+        for (const [rel, text] of Object.entries(previousSkill)) {
+          const full = join(materialDir, 'previous-draft', rel)
+          await mkdir(dirname(full), { recursive: true })
+          await writeFile(full, text, 'utf8')
+        }
+      }
+      await mkdir(materialDir, { recursive: true })
+      await writeFile(
+        join(materialDir, 'feedback.md'),
+        `# 使用者对上一版的意见（这一版必须照它改）\n\n${feedback}\n`,
+        'utf8',
+      )
+      // 索引页追加一段"这是第 N 版"，让起草者一进来就知道自己在改上一版
+      const index = await readFile(join(materialDir, '00-README.md'), 'utf8').catch(() => '')
+      await writeFile(
+        join(materialDir, '00-README.md'),
+        `${index.trimEnd()}\n\n## 这一版是「按意见改一版」\n\n` +
+          '- 上一版的完整产出在 `previous-draft/`（含 SKILL.md 与支持文件）。\n' +
+          '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方不要乱动。\n' +
+          '- 再次强调：输出仍然写到同级的 `skill/`（整份产出，不是补丁）。\n',
+        'utf8',
+      )
+    } catch (err) {
+      return {
+        status: 500,
+        body: {
+          error: `素材准备失败：${err instanceof Error ? err.message : String(err)}`,
+          code: 'material_write_failed',
+        },
+      }
+    }
+
+    // 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
+    // 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）
+    const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
+    if (reviseSpec === null) {
+      return {
+        status: 500,
+        body: {
+          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        },
+      }
+    }
+    const revisePrompt = buildDraftPrompt({
+      scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+      revised: true,
+      writingSpec: reviseSpec.body,
+    })
+
+    const outcome = await executor.submit({
+      runId: newRunId,
+      kind: 'execute',
+      agentRef: {
+        id: reviseDrafterAgent.id,
+        name: reviseDrafterAgent.name,
+        instructions: reviseDrafterAgent.instructions,
+      },
+      // 第 ③ 条：不注入技能（规范在 prompt 里）
+      skills: [],
+      subject: { type: 'skill-draft', id: newRunId, sourceRunId },
+      prompt: revisePrompt,
+      limits: { maxTurns: null, timeoutMs: null },
+      reviewerAgentId: null,
+      ...(previous.crystallizeTarget === undefined
+        ? {}
+        : { crystallizeTarget: previous.crystallizeTarget }),
+      revisedFrom: draftRunId as RunId,
+      workDir: newDir,
+    })
+    if (outcome.kind === 'rejected') {
+      return { status: 503, body: { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' } }
+    }
+    return { status: 202, body: { draftRunId: newRunId, revisedFrom: draftRunId } }
+  }
+
     if (req.method === 'POST' && path === '/api/crystallize/revise') {
       const raw = (await readJsonBody(req)) as { draftRunId?: unknown; feedback?: unknown }
       const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
-      const feedback = typeof raw?.feedback === 'string' ? raw.feedback.trim() : ''
-      if (draftRunId === '') {
-        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
-        return
-      }
-      if (feedback === '') {
-        sendJson(res, 400, { error: '需要一句意见（改成什么样）', code: 'feedback_required' })
-        return
-      }
-      const previous = await store.getRun(draftRunId as RunId)
-      if (!previous || previous.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
-        return
-      }
-      if (previous.subject.type !== 'skill-draft') {
-        sendJson(res, 400, { error: '这条 run 不是起草 run', code: 'not_a_draft' })
-        return
-      }
-      const sourceRunId = previous.subject.sourceRunId
-      if (sourceRunId === undefined) {
-        sendJson(res, 409, { error: '这条草稿没记来源，无法再起草', code: 'no_source' })
-        return
-      }
-      const sourceRun = await store.getRun(sourceRunId as RunId)
-      if (!sourceRun) {
-        sendJson(res, 404, { error: '来源 run 已不存在', code: 'source_run_not_found' })
-        return
-      }
-      // ★ 与起草那条路同源：起草者是**平台内置的那条**，不是来源 run 的执行者
-      //   （「按意见改一版」如果还借来源执行者，就等于"重写一版"与"改一版"
-      //   用的不是同一个身份——两版的风格会分叉，而使用者只看到"改完反而不像同一条"）。
-      const reviseDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
-      if (!reviseDrafter) {
-        await ensureBuiltinDrafter(store, workspaceId)
-      }
-      const reviseDrafterAgent = reviseDrafter ?? {
-        id: ulid() as Agent['id'],
-        name: DRAFTER_NAME,
-        instructions: DRAFTER_INSTRUCTIONS,
-      }
-
-      const previousDir = draftRoot(workRoot, draftRunId)
-      const previousSkill = await readDraftSkillDir(join(previousDir, 'skill'))
-
-      const newRunId = ulid() as RunId
-      const newDir = draftRoot(workRoot, newRunId)
-      try {
-        const materialDir = join(newDir, 'material')
-        // 复制上一版素材（同一份证据），但要避开它自己的 previous-draft/ 与反馈，
-        // 否则重写几版会层层嵌套、上下文越滚越大。
-        await copyMaterial(join(previousDir, 'material'), materialDir, {
-          skip: ['previous-draft', 'feedback.md'],
-        })
-        if (previousSkill !== null) {
-          for (const [rel, text] of Object.entries(previousSkill)) {
-            const full = join(materialDir, 'previous-draft', rel)
-            await mkdir(dirname(full), { recursive: true })
-            await writeFile(full, text, 'utf8')
-          }
-        }
-        await mkdir(materialDir, { recursive: true })
-        await writeFile(
-          join(materialDir, 'feedback.md'),
-          `# 使用者对上一版的意见（这一版必须照它改）\n\n${feedback}\n`,
-          'utf8',
-        )
-        // 索引页追加一段"这是第 N 版"，让起草者一进来就知道自己在改上一版
-        const index = await readFile(join(materialDir, '00-README.md'), 'utf8').catch(() => '')
-        await writeFile(
-          join(materialDir, '00-README.md'),
-          `${index.trimEnd()}\n\n## 这一版是「按意见改一版」\n\n` +
-            '- 上一版的完整产出在 `previous-draft/`（含 SKILL.md 与支持文件）。\n' +
-            '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方不要乱动。\n' +
-            '- 再次强调：输出仍然写到同级的 `skill/`（整份产出，不是补丁）。\n',
-          'utf8',
-        )
-      } catch (err) {
-        sendJson(res, 500, {
-          error: `素材准备失败：${err instanceof Error ? err.message : String(err)}`,
-          code: 'material_write_failed',
-        })
-        return
-      }
-
-      // 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
-      // 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）
-      const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
-      if (reviseSpec === null) {
-        sendJson(res, 500, {
-          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
-        })
-        return
-      }
-      const revisePrompt = buildDraftPrompt({
-        scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
-        materialDir: 'material',
-        outputDir: 'skill',
-        target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
-        revised: true,
-        writingSpec: reviseSpec.body,
-      })
-
-      const outcome = await executor.submit({
-        runId: newRunId,
-        kind: 'execute',
-        agentRef: {
-          id: reviseDrafterAgent.id,
-          name: reviseDrafterAgent.name,
-          instructions: reviseDrafterAgent.instructions,
-        },
-        // 第 ③ 条：不注入技能（规范在 prompt 里）
-        skills: [],
-        subject: { type: 'skill-draft', id: newRunId, sourceRunId },
-        prompt: revisePrompt,
-        limits: { maxTurns: null, timeoutMs: null },
-        reviewerAgentId: null,
-        ...(previous.crystallizeTarget === undefined
-          ? {}
-          : { crystallizeTarget: previous.crystallizeTarget }),
-        revisedFrom: draftRunId as RunId,
-        workDir: newDir,
-      })
-      if (outcome.kind === 'rejected') {
-        sendJson(res, 503, { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' })
-        return
-      }
-      sendJson(res, 202, { draftRunId: newRunId, revisedFrom: draftRunId })
+      const feedback = typeof raw?.feedback === 'string' ? raw.feedback : ''
+      const result = await startReviseRun({ draftRunId, feedback })
+      sendJson(res, result.status, result.body)
       return
     }
 
