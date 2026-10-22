@@ -5005,6 +5005,68 @@
           }
 
           // ══════════════════════════════════════════════════════════════
+          // ★★★ 目标态那一屏（2026-10-21 第 5 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 它是这一屏的**入口**（从任务/对话点「沉淀成 skill」进来的第一眼），却一直是
+          // 探针的空白：夹具都挂在"已完成草稿"上，`step === 'target'` 没有任何判据。
+          // 夹具用一条**永远不起草**的源 run（挂上草稿这一屏就不再是目标态了）。
+          //
+          // 这一节量的是使用者确认过的第 ③ 条决定：**目标态不做 tab**（表单 + 一行素材判据
+          // 常驻，素材清单那时还没落盘 ⇒ 不许画一行空的折叠出来）。
+          {
+            const cyTarget = cyQuery.get('crystalTarget')
+            facts['crystal.targetFixtureId'] = cyTarget || null
+            if (cyTarget) {
+              f.contentWindow.location.hash = '#/tasks'
+              await untilNet(() => !d().querySelector('.review-tabs'), 20)
+              f.contentWindow.location.hash = `#/crystallize/${cyTarget}`
+              // 目标态的标志：那张表单（radio 行 + 作用描述框）**当场**就在，不用点「继续」
+              facts['crystal.targetAttached'] = await untilNet(
+                () => !!d().querySelector('.radio-row input[type="radio"]'),
+                90,
+              )
+              if (facts['crystal.targetAttached']) {
+                facts['crystal.targetStepText'] = text(d().querySelector('.crystal-steps'))
+                // ③ 的决定：这一屏**不做 tab**（`review-tabs` 是审阅/起草两屏的东西）
+                facts['crystal.targetTabCount'] = d().querySelectorAll('.review-tabs').length
+                facts['crystal.targetMaterialLine'] = text(
+                  d().querySelector('.crystal-material-line'),
+                )
+                facts['crystal.targetFormRows'] = d().querySelectorAll(
+                  '.detail-scroll .section-body .radio-row',
+                ).length
+                const cyStartBtn = [...d().querySelectorAll('button')].find((b) =>
+                  text(b).includes('开始沉淀'),
+                )
+                facts['crystal.targetStartButton'] = cyStartBtn ? text(cyStartBtn) : null
+                // ★ 按钮的悬停解释：素材为空 / 门槛不过要分开说清（第 ① 条那个"点了没反应"）
+                facts['crystal.targetStartButtonTitle'] = cyStartBtn
+                  ? (cyStartBtn.getAttribute('title') ?? '')
+                  : null
+                // ★ 起草前**不许**出现素材折叠：那一刻 `material/` 还没落盘（素材是起草
+                //   请求时 `collectMaterial` 写的），画一行"0 个文件"的折叠就是一格死 UI
+                facts['crystal.targetFoldCount'] = d().querySelectorAll('.fold-section').length
+                const cyTFold = d().querySelector('.fold-section')
+                facts['crystal.targetFoldHead'] = cyTFold ? text(cyTFold.querySelector('.fold-head')) : null
+                facts['crystal.targetFoldClosed'] =
+                  cyTFold?.querySelector('.fold-head')?.getAttribute('aria-expanded') === 'false'
+                facts['crystal.targetScrollH'] = d().documentElement.scrollHeight
+                facts['crystal.targetPageFits'] =
+                  facts['crystal.targetScrollH'] <= facts['crystal.viewportH'] + 1
+                const cyTBox = cyRect(d().querySelector('.detail-scroll .section-body'))
+                facts['crystal.targetFormBox'] = cyTBox
+                // 表单不许越过主区右边界（布局类缺陷只有量得出来）
+                const cyTPaneBox = cyRect(d().querySelector('.detail-pane'))
+                facts['crystal.targetFormInsidePane'] =
+                  cyTBox !== null &&
+                  cyTPaneBox !== null &&
+                  cyTBox.x + cyTBox.w <= cyTPaneBox.x + cyTPaneBox.w + 1
+              }
+            }
+          }
+
+          // ══════════════════════════════════════════════════════════════
           // ★★★ 起草中那一屏（2026-10-21 第 4 批）
           // ══════════════════════════════════════════════════════════════
           //

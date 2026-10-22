@@ -3477,6 +3477,76 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
   },
+  // ══════════════ 目标态那一屏（2026-10-21 第 5 批）══════════════
+  //
+  // 它是这一屏的**入口**，却一直是探针的空白（夹具都挂在"已完成草稿"上）。
+  // 这一节钉的是使用者确认过的第 ③ 条决定：目标态**不做 tab**（表单 + 一行素材判据）。
+  {
+    view: '沉淀',
+    key: 'crystal.targetAttached',
+    label:
+      '夹具：目标态那一屏挂得上（源任务没有草稿 ⇒ 进来就是表单，不用点「继续」）——不成立的话下面一整组都空过',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetStepText',
+    label: '★★ 目标态停在**第 1 步**（"沉淀目标"是当前步）',
+    ok: (v) => typeof v === 'string' && v.includes('沉淀目标'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetTabCount',
+    label:
+      '★★★ 目标态**不做 tab**（2026-10-21 使用者确认的第 ③ 条：这一屏是"填一句话就动手"，tab 反而把唯一的动作藏起来）',
+    ok: (v) => v === 0,
+    show: (v) => `tab 条 ${v} 个`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetFormRows',
+    label: '★★ 目标态那两个目标选项（新建 / 更新）都在表单里',
+    ok: (v) => typeof v === 'number' && v === 2,
+    show: (v) => `${v} 行`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetMaterialLine',
+    label:
+      '★★★ 素材判据**就一行**（来源是对话还是任务 / 有没有审核结论）——改前它是一个分节（h3 + 外壳白占 87px），而那行字在副标题里已经写过一遍',
+    ok: (v) => typeof v === 'string' && v.length > 0 && !v.includes('\n'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetStartButton',
+    label: '★★ 「开始沉淀」在，而且悬停就说得清判据（素材为空 / 门槛不过要分开说——第 ① 条"点了没反应"的常见形态）',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    show: (v, f) => `${JSON.stringify(v)}　title ${JSON.stringify((f['crystal.targetStartButtonTitle'] ?? '').slice(0, 40))}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetFoldCount',
+    label:
+      '★★ 起草**之前**不画素材折叠：那一刻 `material/` 还没落盘（素材是起草请求时写的），画一行"0 个文件"就是一格死 UI',
+    ok: (v) => v === 0,
+    show: (v, f) => `${v} 个${f['crystal.targetFoldHead'] ? `（${f['crystal.targetFoldHead']}）` : ''}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetPageFits',
+    label: '★★ 目标态不整页滚（表单 + 那一行判据都在首屏里）',
+    ok: (v) => v === true,
+    show: (v, f) => `文档 ${f['crystal.targetScrollH']}px / 视口 ${f['crystal.viewportH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetFormInsidePane',
+    label: '★★ 表单**没有越过主区右边界**（布局类缺陷只有量得出来：改前新建智能体的表单就横着盖住过右栏）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.targetFormBox']),
+  },
   // ══════════════ 起草中那一屏（2026-10-21 第 4 批）══════════════
   //
   // 这一屏以前**没有任何判据**（夹具都是已完成草稿），所以下面这几条是新地面的第一批桩：
@@ -4794,6 +4864,7 @@ try {
     //   写进去的"running"夹具量到的是"没跑成"那一屏（这个坑审核那一节踩过一次）。
     draftingRunId: '',
     draftingSourceRunId: '',
+    targetSourceRunId: '',
   }
   try {
     await stopDaemon()
@@ -4859,6 +4930,35 @@ try {
          */
         const draftingSourceRunId = await makeSource()
         crystalFixture.draftingSourceRunId = draftingSourceRunId
+
+        /**
+         * ★ 第五条源：**只给"目标态"那一屏用**（2026-10-21 第 5 批）。
+         *
+         * 为什么另起一条、不共用上面那条：`POST /api/crystallize/draft` 会给源 run
+         * **挂上一条草稿**，挂上之后这一屏就不是"目标态"了（会变成审阅态/继续态）
+         * ——夹具之间不许互相消费（这个仓库的老规矩，见 `findActiveDraft` 那段注释）。
+         * 这一条源**永远不起草**，所以它进页面时停在目标态：表单 + 那一行素材判据。
+         * 同样要过 §4.3 门槛（否则「开始沉淀」按不动、点下去 400），所以也配一条
+         * completed 的 review run。
+         */
+        const targetSourceRunId = await makeSource()
+        crystalFixture.targetSourceRunId = targetSourceRunId
+        {
+          const gateRunId = ulid()
+          await store.insertRun({
+            id: gateRunId,
+            workspaceId,
+            kind: 'review',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            subject: { type: 'run', id: targetSourceRunId },
+            prompt: '探针夹具：为了让"目标态"那一屏的源任务过门槛而写的审核 run',
+            queuedAt: now - 36_000,
+            startedAt: now - 35_000,
+            finishedAt: now - 34_000,
+          })
+        }
         {
           const gateRunId = ulid()
           await store.insertRun({
@@ -5329,6 +5429,7 @@ try {
         `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
         `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
+        `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
