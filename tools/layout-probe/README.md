@@ -274,7 +274,7 @@ node tools/layout-probe/check-facts.mjs                 # 拿 dump 里的事实�
 3. **只写仓库内**：数据、工作目录、Chrome profile、抓回来的 DOM 全在
    `.cache/layout-probe/` 下（跑完留 `report.json` 与 `dump.html` 供排查）。
 
-## 四个坑
+## 五个坑
 
 - **探针要收拾自己的现场。** 界面上有些状态**存在 `localStorage` 里**（任务视图的列表/看板
   模式就是），它会带到同一轮的后面、甚至带到下一轮。D39 那次就踩了：语言那一节按
@@ -293,8 +293,22 @@ node tools/layout-probe/check-facts.mjs                 # 拿 dump 里的事实�
 - **探针里的 `const` 不能重名**。整个内联脚本是一个作用域，重复声明会让**整段脚本**
   语法错误——而症状看起来完完全全是"Chrome 超时"：`dump.html` 里 `#out` 还是
   `pending`，一条 error 都没有（`main()` 里的 catch 根本没机会跑，因为脚本没被解析）。
-  加检查时用 `node --check` 过一遍提取出来的脚本，比读 dump 快得多：
+  **现在这一步是自动的**：`run.mjs` 起 Chrome 之前先把探针页里的脚本交给 `new vm.Script()`
+  解析（`assertProbeScriptParses`），语法错就当场打出"第几行、哪个标识符"并 `exit 2`。
+  这道兜底是 2026-10-21 补的——那天给"编辑窗格起点"加测量时把 `cyPaneRect` 又声明了一遍，
+  探针连着两次跑满超时、`#out` 停在 `pending`，我先**误判**成"虚拟时钟下 iframe 的 load
+  事件会错过"（还写了个补丁，后来撤回了），绕了 20 分钟才回去看脚本本身。
+  手工复核仍然可以（读 dump 之前先做，比读 dump 快得多）：
   `python3 -c "import re;s=open('tools/layout-probe/probe.html').read();open('/tmp/p.js','w').write(re.search(r'<script>(.*?)</script>',s,re.S).group(1))" && node --check /tmp/p.js`
+- **等待条件要挂在"结构事实"上，不要挂在某句文案上。** 2026-10-21 撞到：审核取消之后，
+  断言等的是"结论条里不再出现「审核正在进行」"。可第 2 批把那半句搬进了「过程」里的说明段、
+  条上改写成「审核运行中」⇒ 那个条件**恒真**，于是量早了一拍，量到一个"还在取消中"的现场，
+  判据红了而界面没错。改成等**取消按钮消失**之后就稳了。
+  同理，`text(tab) === '过程'` 也不稳：tab 上会挂问题数徽标（读到「过程3」）⇒ 用 `startsWith`。
+- **删/挪判据时数一遍条数。** 同一天我给审阅屏加判据时，用"从 A 的 key 切到 B 的 key"
+  这种索引切片删旧的 4 条，结果把夹在中间**刚加的 10 条**一起删了——探针照样全绿
+  （少判据不会红，只会"没人问"）。复核办法就一句：
+  `grep -c "key: 'crystal\." tools/layout-probe/run.mjs`（改前 61 → 改后应等于 61−4+12=69）。
 
 ## 加一条检查
 

@@ -1588,3 +1588,63 @@ claude 一律报 `Not logged in · Please run /login`（同样 argv、同样配�
 （`产出` / `依据`）。tab 只切"不必同时看"的那部分，结论条**不动**——它是常驻的那一层。
 探针要新增：tab 存在、默认停在 `草稿`、切到 `依据` 后目标/素材在首屏、切到 `过程` 后审核日志与
 问题清单在首屏。状态记在 `docs/README.md` 的「当前进行中的工作」。
+
+### 10.19 审阅屏三个 tab：草稿 / 依据 / 过程（2026-10-21，分批第 3 批）
+
+第 2 批把三条横条并成一条结论条，编辑器从 y=490 提到 323。但**主区下面还摞着两块参照信息**：
+素材（折在 y≈842）与起草 run（y≈1002）——它们只在"我要追过去"时才看，却占着"要动手的地方"
+下面的整片地方。这一批按使用者的轴把它们切成 tab：
+
+| tab | 内容 | 原来在哪 |
+|---|---|---|
+| **草稿**（默认） | 主区：文件树 + 编辑器 / 差异（内层还有"内容 / 差异"） | 原地 |
+| **依据** | 起草者读过的素材（清单 + 只读正文，`material/`） | 折在编辑器下方 y≈842 |
+| **过程** | 审核问题清单 + 审核日志 + 起草 run（最后结果 / 完整日志 两态） | 问题清单折在结论条下；日志在结论条下；起草 run 在主区下方 y≈1002 |
+
+三条设计约束（这一批最容易做错的地方）：
+
+1. **常驻的那一层不许动**：结论条（过没过 / 能不能入库 / 目标是谁 / slug / 能做什么）仍在 tab 之上，
+   它不属于任何 tab——"这一版能不能入库"是这一屏的**问题**，三个 tab 是三个**回答的角度**。
+2. **结论条上的两个按钮改成"切到过程 tab"**，不再是各自的折叠开关（`auditDetailOpen` /
+   `auditLogOpen` 删掉、i18n 的 `auditHideDetail` / `auditShowVerdict` 也删）。理由是本仓库的
+   老规矩：一个东西只有一个开关——留着折叠开关，就会出现"折起来的问题清单"与"tab 里的问题清单"
+   两套并存，人分不清哪个是真的。
+3. **点「开始审核」自动切到「过程」**（`startAudit()` 里一行）。日志住在那个 tab 里，
+   不切过去就等于"点了没反应"——正好回到第 ① 条那个毛病（"审核的过程看不到，感觉一直没结束"）。
+   审核跑着时 tab 上还有一个点（切去草稿改字也不会忘了它在跑）。
+
+**实测数字**（真 Chrome + 真 daemon，`pnpm run probe:layout`，**503 项全绿**）
+
+  · `crystal.reviewTabTexts = ["草稿","依据","过程"]`、`crystal.reviewTabDefault = "草稿"`、
+    `crystal.defaultTabIsDraft = true`（默认就停在要动手的那一屏，编辑器当场可用）
+  · `crystal.tabStripBox = {y: 323.5, w: 565, h: 31.8}`（tab 条只占一行）、
+    `crystal.paneTopY = 363`（第 2 批是 323，加上这 32px 的导航行；改前 490）、`crystal.paneH = 510`
+  · `crystal.belowPaneBlocks = []`——**主区下面什么都没有了**（改前：素材折在 y≈842、
+    起草 run 在 y≈1002）。旧判据 `crystal.materialBelowPane` 换成了这条：纪律没变
+    （参照信息不抢"要动手的位置"），换的是实现（从"摞在下面"改成"切过去看"）。
+  · 依据：`crystal.evidenceOpens = true`、`evidenceRows` 列出 3 个素材文件、
+    `evidencePaneCols = "240px 317px"`（与主区同一套两列观感）、`evidencePreviewLen > 0`（正文真的渲染）、
+    `evidenceNoFold = true`（搬进 tab 就不再折一层）、`evidenceInFirstScreen = true`
+  · 过程：`crystal.processOpens = true`；起草 run 的两态断言原样保留（`draftFinalText` /
+    `draftLogAfterToggle` / `draftBackToFinal`），只是量之前要先切到「过程」
+  · 审核：`crystal.auditAutoSwitchedToProcess = true`（点开始审核自动切过去）、
+    `crystal.auditFailFindingsTab = true`（点「看 3 条问题」真的切过去并列出 3 条）
+  · `crystal.pageFitsViewport = true` 照旧
+
+**起草中那一屏**（这一批顺手验了，它是第 4 批的对象）：探针的夹具都是"已完成草稿"，
+**它根本没覆盖 `step === 'drafting'`**，而这一批重写了那一段标记 ⇒ 用真 run 亲自量了一次
+（临时 daemon + PATH 垫一个挂住的假 `agent-cli`，把内置起草者的 runtime 改成 `generic`，
+再 `POST /api/crystallize/draft`）：步骤条 ✓沉淀目标 / **2 起草 run** / 3 审阅入库、
+`起草 run` 段落里实时日志真的在流、素材折叠在（4 个文件）、`scrollH = viewport`（页面不整页滚）。
+**下一批（第 4 批）**：起草中 ⇒ 2 个 tab（`产出` / `依据`），把那个素材折叠收进 `依据`；
+探针要**补上起草中那一屏的夹具**（现在它一片空白，任何针对它的改动都没有判据兜着）。
+
+**两条探针 harness 的教训**（都写进了 `tools/layout-probe/README.md` 的「五个坑」）
+
+1. **等待条件不许挂在文案上**：取消审核那条断言原来等的是"结论条里不再出现「审核正在进行」"，
+   而第 2 批把那半句搬进了「过程」的说明段、条上改成「审核运行中」⇒ 条件**恒真**、量早了一拍，
+   判据红了而界面没错。改成等**取消按钮消失**（结构事实）。
+   同类：`text(tab) === '过程'` 会被问题数徽标破坏（读到「过程3」）⇒ 用 `startsWith`。
+2. **删/挪判据时要数条数**：我用"从 A 的 key 到 B 的 key"这种索引切片删 4 条旧判据，
+   把夹在中间**刚加的 10 条**一起删了——探针照样"全绿"（少判据不会红，只会没人问）。
+   复核：`grep -c "key: 'crystal\." tools/layout-probe/run.mjs`（61 − 4 + 12 = 69）。

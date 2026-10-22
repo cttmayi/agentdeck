@@ -3130,6 +3130,74 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.reviewTabTexts',
+    label: '★★★ 审阅屏是**三个 tab**：草稿 / 依据 / 过程（2026-10-21 第 3 批决定的信息分层）',
+    ok: (v) =>
+      Array.isArray(v) && JSON.stringify(v.slice(0, 3)) === JSON.stringify(['草稿', '依据', '过程']),
+    show: (v, f) => `${JSON.stringify(v)}　默认停在 ${JSON.stringify(f['crystal.reviewTabDefault'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.defaultTabIsDraft',
+    label: '★★★ 默认停在**草稿**、而且编辑器当场可用（这一屏要动手的就是它，不该先点一下）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.tabStripBox',
+    label: '★★ tab 条只占**一行**（高 ≤ 40px）：它是导航，不该再吃掉半个首屏',
+    ok: (v) => v !== null && typeof v === 'object' && v.h <= 40,
+    show: (v) => (v ? `${Math.round(v.w)}×${Math.round(v.h)}` : 'null'),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.belowPaneBlocks',
+    label:
+      '★★★ 主区下面**不再有任何参照信息**（改前：素材折在 y≈842、起草 run 在 y≈1002——纪律"参照信息不抢要动手的位置"没变，实现从"摞在下面"改成"切过去看"）',
+    ok: (v) => Array.isArray(v) && v.length === 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.evidenceOpens',
+    label: '★★ 「依据」tab 里看得到起草者读过的素材（清单真的列出来）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.evidenceRows']),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.evidencePreviewLen',
+    label: '★★ 素材正文真的渲染出来（只列文件名不叫"依据"）',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${v} 字`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.evidenceNoFold',
+    label: '★ 依据 tab 里**没有**折叠段了：搬进 tab 之后再折一层等于多一次点击',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.evidenceInFirstScreen',
+    label: '★★ 依据那一屏**整个**落在首屏里（改前素材折在 y≈842，展开后还要在下面滚）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.evidencePaneCols',
+    label: '★ 依据 tab 也是**真并排**两列（清单 + 正文），与审阅主区同一套观感',
+    ok: (v) => typeof v === 'string' && v.split(' ').filter(Boolean).length >= 2,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.processOpens',
+    label: '★★ 「过程」tab 打得开（审核日志与起草 run 都住在这里）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.previewFoldGone',
     label: '★★ 审阅屏**没有**「预览」折叠段了（2026-10-21 使用者："不需要「预览」"）',
     ok: (v) => v === true,
@@ -3144,7 +3212,8 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.draftSectionFound',
-    label: '夹具：审阅屏里找得到「起草 run」那一块（下面四条量的是它的两态）',
+    label:
+      '夹具：切到「过程」tab 后找得到「起草 run」那一块（下面四条量的是它的两态；第 3 批把它从主区下方搬进了这里）',
     ok: (v) => v === true,
   },
   {
@@ -3165,6 +3234,20 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.draftBackToFinal',
     label: '★ 再点一次能切回最后结果（两态都要走得通，不能单程）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditAutoSwitchedToProcess',
+    label:
+      '★★★ 点「开始审核」界面**自动切到「过程」**——日志住在那个 tab 里，不切过去就等于"点了没反应"（第 ① 条"审核的过程看不到"就靠这一下守住）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditFailFindingsTab',
+    label:
+      '★★ 结论条上的「看 N 条问题」**切到「过程」并且真的列出问题**（第 3 批把它从"展开折叠"改成"切 tab"——切不过去就是个摆设）',
     ok: (v) => v === true,
   },
   {
@@ -3281,8 +3364,8 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.paneTopY',
     label:
-      '★★★ 编辑窗格起点 y ≤ 340（改前实测 490：上面摞着三条横条，首屏只剩 ~280px 能编辑）',
-    ok: (v) => typeof v === 'number' && v <= 340,
+      '★★★ 编辑窗格起点 y ≤ 380（第 2 批把三条横条并成一条之后是 323；第 3 批的 tab 条是**必须占**的一行 32px ⇒ 363。改前：490）',
+    ok: (v) => typeof v === 'number' && v <= 380,
     show: (v) => `y=${v}`,
   },
   {
@@ -3467,35 +3550,6 @@ const CHECKS = [
     key: 'crystal.nonRevisedHasNoBaselineSwitch',
     label: '★ 基线切换按钮只在**差异**标签下、且只在**改版草稿**上出现——这一条量的是"新建目标的草稿不给一个永远空的切换"',
     ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.materialFoldClosed',
-    label: '★★ 素材默认**折叠**（改前常驻 345px 压在审阅之上；摘要里给文件数）',
-    ok: (v) => v === true,
-    show: (v, f) => JSON.stringify(f['crystal.materialFoldSummary']),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.materialBelowPane',
-    label: '★★ 素材与起草日志在主区**下方**（参考信息不抢"唯一要动手的地方"的位置）',
-    ok: (v) => v === true,
-    show: (v, f) =>
-      (f['crystal.foldHeads'] ?? []).map((h) => `${h.label}:${h.y}`).join('　'),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.materialFoldOpens',
-    label: '★ 展开素材能列出文件与预览（`material/` 里那份索引够 agent 自己读）',
-    ok: (v) => v === true,
-    show: (v, f) => JSON.stringify(f['crystal.materialRows']),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.materialPaneCols',
-    label: '★ 素材清单复用**同一套**观感（也是"窄栏 + 正文"两列，不是另画一套单列列表）',
-    ok: (v) => typeof v === 'string' && v.split(' ').filter(Boolean).length === 2,
-    show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',

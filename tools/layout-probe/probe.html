@@ -4526,31 +4526,6 @@
           )
           facts['crystal.previewElementGone'] = !d().querySelector('.preview')
 
-          // ★★ 「起草 run」默认显示**最后结果**，一点就换成**完整日志**（使用者第三条：
-          //    "应该类似任务中的最后结果和完整日志一样的切换方式"）。
-          {
-            const draftSection = [...d().querySelectorAll('.drawer-section')].find((el) =>
-              (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
-            )
-            facts['crystal.draftSectionFound'] = !!draftSection
-            const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
-            facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
-            const toggle = draftSection
-              ? [...draftSection.querySelectorAll('h3 button')][0] ?? null
-              : null
-            facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
-            if (toggle) {
-              click(toggle)
-              await until(() => !!draftSection?.querySelector('.log-box'), 60)
-              facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
-              facts['crystal.draftToggleLabelAfter'] = text(toggle)
-              // 切回去：后面还有别的判据要在这个现场上量
-              click(toggle)
-              await until(() => !!draftSection?.querySelector('.draft-final'), 60)
-              facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
-            }
-          }
-
           const cyRect = (el) => {
             if (!el) return null
             const r = el.getBoundingClientRect()
@@ -4731,52 +4706,112 @@
           if (cyContentTab) click(cyContentTab)
           await until(() => !!d().querySelector('textarea.editor'), 60)
 
-          // 折叠：素材与起草日志**默认收起**，且都在审阅主区**下方**
-          const cyFolds = [...d().querySelectorAll('.fold-section')]
-          const cyFoldHeads = cyFolds.map((el) => ({
-            label: text(el.querySelector('.fold-head')),
-            open: el.querySelector('.fold-head')?.getAttribute('aria-expanded') === 'true',
-            y: Math.round(el.getBoundingClientRect().top),
-          }))
-          facts['crystal.foldHeads'] = cyFoldHeads
-          const cyMaterialFold = cyFolds.find((el) =>
-            text(el.querySelector('.fold-head')).includes('素材'),
-          )
-          facts['crystal.materialFoldPresent'] = !!cyMaterialFold
-          facts['crystal.materialFoldClosed'] =
-            cyMaterialFold?.querySelector('.fold-head')?.getAttribute('aria-expanded') === 'false'
-          facts['crystal.materialFoldSummary'] = cyMaterialFold
-            ? text(cyMaterialFold.querySelector('.fold-summary'))
-            : null
-          facts['crystal.materialBelowPane'] =
-            !!cyMaterialFold &&
-            cyPaneRect !== null &&
-            cyMaterialFold.getBoundingClientRect().top >= cyPaneRect.y + cyPaneRect.h - 2
+          // ══════════════════════════════════════════════════════════════
+          // ★ 审阅屏的三个 tab：草稿 / 依据 / 过程（2026-10-21 第 3 批，使用者确认的信息分层）
+          //
+          // 原来的纪律是"参照信息折在主区**下方**"（`crystal.materialBelowPane`）。纪律没变，
+          // 换的是实现：从"摞在下面"改成"切过去看"——量法于是也从"折叠头在主区下方"
+          // 换成"主区下面**什么参照信息都没有了**，它们各自在一个 tab 里"。
+          // ⚠️ 别把这条判据删掉当成"设计变了"：不变的是"参照信息不抢'要动手'的位置"。
+          // ══════════════════════════════════════════════════════════════
+          const cyReviewTabs = () => [...d().querySelectorAll('.review-tabs > button')]
+          const cyTabButton = (name) => cyReviewTabs().find((b) => text(b).startsWith(name)) ?? null
+          facts['crystal.reviewTabTexts'] = cyReviewTabs().map((b) => text(b))
+          const cySelectedTab = () => {
+            const b = cyReviewTabs().find((x) => x.getAttribute('aria-selected') === 'true')
+            return b ? text(b) : null
+          }
+          facts['crystal.reviewTabDefault'] = cySelectedTab()
+          facts['crystal.tabStripBox'] = cyRect(d().querySelector('.review-tabs'))
+          facts['crystal.defaultTabIsDraft'] =
+            facts['crystal.reviewTabDefault'] === '草稿' &&
+            !!d().querySelector('.review-pane textarea.editor, .review-pane .file-body')
 
-          // 展开素材：清单 + 预览（与审阅的文件树**同一套**观感）
-          if (cyMaterialFold) {
-            click(cyMaterialFold.querySelector('.fold-head'))
-            const cyOpened = await until(
-              () => !!d().querySelector('.fold-section .file-pane .file-row'),
-              60,
-            )
-            facts['crystal.materialFoldOpens'] = cyOpened
-            facts['crystal.materialRows'] = [
-              ...d().querySelectorAll('.fold-section .file-pane .file-row'),
+          // 主区下面不许再摞参照信息（改前：素材折在 y≈842、起草 run 在 y≈1002，
+          // 两块把"要动手的地方"顶到第二屏）
+          const cyPaneBottom = cyPaneRect === null ? null : cyPaneRect.y + cyPaneRect.h
+          facts['crystal.belowPaneBlocks'] =
+            cyPaneBottom === null
+              ? null
+              : [
+                  ...d().querySelectorAll(
+                    '.detail-scroll > .drawer-section, .detail-scroll > .fold-section',
+                  ),
+                ]
+                  .filter((el) => el.getBoundingClientRect().top >= cyPaneBottom - 2)
+                  .map((el) => text(el.querySelector('h3, .fold-head') ?? el).slice(0, 20))
+
+          // ── 依据 tab：起草者读过的素材（原来折在编辑器下面 y≈842，要先滚再展开）──
+          const cyEvidenceTab = cyTabButton('依据')
+          if (cyEvidenceTab) {
+            click(cyEvidenceTab)
+            const cyEvOk = await until(() => !!d().querySelector('.evidence-pane .file-row'), 60)
+            facts['crystal.evidenceOpens'] = cyEvOk
+            facts['crystal.evidenceRows'] = [
+              ...d().querySelectorAll('.evidence-pane .file-row'),
             ].map((b) => text(b))
-            const cyMatPane = d().querySelector('.fold-section .file-pane')
-            facts['crystal.materialPaneCols'] = cyMatPane ? cs(cyMatPane).gridTemplateColumns : null
-            facts['crystal.materialPreviewLen'] = (
-              d().querySelector('.fold-section .file-pre')?.textContent ?? ''
+            const cyEvPane = d().querySelector('.evidence-pane')
+            facts['crystal.evidencePaneCols'] = cyEvPane ? cs(cyEvPane).gridTemplateColumns : null
+            facts['crystal.evidencePreviewLen'] = (
+              d().querySelector('.evidence-pane .file-pre')?.textContent ?? ''
             ).length
-            // 收回去，别让后面的检查量到展开态
-            click(d().querySelector('.fold-head'))
-            await wait(120)
+            // 搬进 tab 就不该再折一层：`依据` 里点开才有的折叠段是"多一次点击"
+            facts['crystal.evidenceNoFold'] = !d().querySelector('.evidence-pane .fold-section')
+            const cyEvBox = cyRect(cyEvPane)
+            facts['crystal.evidenceInFirstScreen'] =
+              cyEvBox !== null && cyEvBox.y + cyEvBox.h <= facts['crystal.viewportH'] + 1
+            // 切回草稿：后面的检查在草稿那一屏上量
+            const cyBackToDraft = cyTabButton('草稿')
+            if (cyBackToDraft) click(cyBackToDraft)
+            await until(() => !!d().querySelector('.review-pane .file-body'), 60)
           } else {
-            facts['crystal.materialFoldOpens'] = null
-            facts['crystal.materialRows'] = null
-            facts['crystal.materialPaneCols'] = null
-            facts['crystal.materialPreviewLen'] = null
+            facts['crystal.evidenceOpens'] = null
+            facts['crystal.evidenceRows'] = null
+            facts['crystal.evidencePaneCols'] = null
+            facts['crystal.evidencePreviewLen'] = null
+            facts['crystal.evidenceNoFold'] = null
+            facts['crystal.evidenceInFirstScreen'] = null
+          }
+
+          // ── 过程 tab：审核日志 + 起草 run（两态：最后结果 / 完整日志）──
+          const cyProcessTab = cyTabButton('过程')
+          if (cyProcessTab) {
+            click(cyProcessTab)
+            const cyProcOk = await until(() => !!d().querySelector('.process-pane'), 60)
+            facts['crystal.processOpens'] = cyProcOk
+
+            // ★★ 起草 run：默认**最后结果**，一点换成**完整日志**（使用者第三条：
+            //    "应该类似任务中的最后结果和完整日志一样的切换方式"）。
+            //    这一块随第 3 批搬进「过程」tab，断言不变、只是要先切过来。
+            const draftSection = [...d().querySelectorAll('.process-pane .drawer-section')].find(
+              (el) => (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
+            )
+            facts['crystal.draftSectionFound'] = !!draftSection
+            const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
+            facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
+            const toggle = draftSection
+              ? ([...draftSection.querySelectorAll('h3 button')][0] ?? null)
+              : null
+            facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
+            if (toggle) {
+              click(toggle)
+              await until(() => !!draftSection?.querySelector('.log-box'), 60)
+              facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
+              facts['crystal.draftToggleLabelAfter'] = text(toggle)
+              click(toggle)
+              await until(() => !!draftSection?.querySelector('.draft-final'), 60)
+              facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
+            }
+
+            const cyBackToDraft2 = cyTabButton('草稿')
+            if (cyBackToDraft2) click(cyBackToDraft2)
+            await until(() => !!d().querySelector('.review-pane .file-body'), 60)
+          } else {
+            facts['crystal.processOpens'] = null
+            facts['crystal.draftSectionFound'] = null
+            facts['crystal.draftFinalText'] = null
+            facts['crystal.draftLogAfterToggle'] = null
+            facts['crystal.draftBackToFinal'] = null
           }
 
           // 「按意见改一版」：输入框**默认不在**（点开才占一行）
@@ -4852,7 +4887,14 @@
             facts['crystal.auditFailFindingsButton'] = cyFindingsBtn ? text(cyFindingsBtn) : null
             if (cyFindingsBtn) {
               click(cyFindingsBtn)
-              await until(() => !!d().querySelector('.audit-findings li'), 40)
+              // ★ 第 3 批：这个按钮不再是"展开折叠"，而是**切到「过程」tab**
+              //   ——断言它真的切过去了（不然按钮就成了摆设：点一下什么都不动）
+              facts['crystal.auditFailFindingsTab'] = await until(
+                () =>
+                  (text(d().querySelector('.review-tabs > button[aria-selected="true"]')) ?? '').startsWith('过程') &&
+                  !!d().querySelector('.audit-findings li'),
+                40,
+              )
             }
             facts['crystal.auditFailFindingCount'] = d().querySelectorAll('.audit-findings li').length
             facts['crystal.auditFailSeverities'] = [
@@ -4888,9 +4930,14 @@
             facts['crystal.auditLiveStartButton'] = !!startBtn
             if (startBtn) {
               click(startBtn)
+              // ★ 第 3 批：日志住在「过程」tab 里，所以点「开始审核」必须**自动切过去**
+              //   ——否则人停在"草稿"上看到的是"什么都没发生"，正好回到第 ① 条那个毛病。
+              facts['crystal.auditAutoSwitchedToProcess'] = await untilNet(
+                () => (text(d().querySelector('.review-tabs > button[aria-selected="true"]')) ?? '').startsWith('过程'),
+              )
               // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
-              await untilNet(() => !!d().querySelector('.conclusion-block .log-box'))
-              let block = d().querySelector('.conclusion-block')
+              await untilNet(() => !!d().querySelector('.process-pane .log-box'))
+              let block = d().querySelector('.process-pane')
               facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
               // ⚠️ 两件事都要**等到**，不能量一次就算：
               //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
@@ -4900,31 +4947,41 @@
               await untilNet(() => text(d().querySelector('.conclusion-block .badge')) === '运行中', 400)
               await untilNet(
                 () =>
-                  (d().querySelector('.conclusion-block .log-box')?.textContent ?? '').includes('正在跑'),
+                  (d().querySelector('.process-pane .log-box')?.textContent ?? '').includes('正在跑'),
                 400,
               )
-              block = d().querySelector('.conclusion-block')
-              facts['crystal.auditLiveText'] = block ? text(block) : null
+              block = d().querySelector('.process-pane')
+              const liveBar = d().querySelector('.conclusion-block')
+              facts['crystal.auditLiveText'] = liveBar ? text(liveBar) : null
               facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
-              facts['crystal.auditLiveBadge'] = block ? text(block.querySelector('.badge')) : null
-              const cancelBtn = block
-                ? [...block.querySelectorAll('button')].find((b) => text(b).includes('取消审核'))
+              facts['crystal.auditLiveBadge'] = liveBar ? text(liveBar.querySelector('.badge')) : null
+              const cancelBtn = liveBar
+                ? [...liveBar.querySelectorAll('button')].find((b) => text(b).includes('取消审核'))
                 : null
               facts['crystal.auditLiveCancelButton'] = !!cancelBtn
               if (cancelBtn) {
                 click(cancelBtn)
-                // 取消是**异步**的（要等进程真的死掉、run 落到终态）⇒ 等界面改口（走 DOM，不走时钟）
+                // 取消是**异步**的（要等进程真的死掉、run 落到终态）⇒ 等界面改口（走 DOM，不走时钟）。
+                // ⚠️ 这里**不许赌某句文案**：第一版等的是「审核正在进行」，而第 2 批把结论条上
+                //    那句改成了「审核运行中」（"审核正在进行"那半句搬进了「过程」里的说明段）
+                //    ⇒ 等待条件**恒真**、量早了一拍，量到一个"还在取消中"的现场，判据红了而界面没错。
+                //    改成等**取消按钮消失**：它才是"这一轮审核结束了"的界面事实。
                 await untilNet(
-                  () => !(d().querySelector('.conclusion-block')?.textContent ?? '').includes('审核正在进行'),
+                  () =>
+                    ![...(d().querySelector('.conclusion-block')?.querySelectorAll('button') ?? [])].some(
+                      (b) => text(b).includes('取消审核'),
+                    ),
                   300,
                 )
                 const after = d().querySelector('.conclusion-block')
+                const afterButtons = after ? [...after.querySelectorAll('button')].map(text) : []
                 facts['crystal.auditAfterCancelText'] = after ? text(after) : null
-                facts['crystal.auditAfterCancelStillRunning'] = (after?.textContent ?? '').includes(
-                  '审核正在进行',
+                facts['crystal.auditAfterCancelStillRunning'] = afterButtons.some((t) =>
+                  t.includes('取消审核'),
                 )
-                facts['crystal.auditAfterCancelRetry'] = !!(after &&
-                  [...after.querySelectorAll('button')].some((b) => text(b).includes('重新审核')))
+                facts['crystal.auditAfterCancelRetry'] = afterButtons.some((t) =>
+                  t.includes('重新审核'),
+                )
               }
               // ★ 兜底：**保证这条 SSE 关掉**，否则后面整页的时钟都不走
               //   （取消没成功、或 240 次 DOM 变化都没等到，就靠切路由把组件卸载掉）。

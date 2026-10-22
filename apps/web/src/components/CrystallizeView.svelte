@@ -101,7 +101,20 @@
    * 它只在跑完之后用，让人回看这一版是怎么被审的（与任务页「最后结果 / 完整日志」
    * 同一个交互：换的是同一块位置里的内容）。
    */
-  let auditLogOpen = false
+  /**
+   * 审阅屏的三个 tab：`草稿` / `依据` / `过程`（2026-10-21 使用者确认的信息分层）。
+   * ⚠️ 名字不能叫 `reviewTab`——那个名字已经被下面"内容 / 差异"的内层切换占了
+   *    （`js_parse_error: Identifier 'reviewTab' has already been declared`，svelte-check 当场报）。
+   *    两层各叫各的：外层 `reviewSection`（草稿/依据/过程）、内层 `reviewTab`（内容/差异）。
+   *
+   * 常驻的只有结论条那一块；这三块互不"同时要看"——
+   *   · 草稿 = 要动手的那一屏（树 + 编辑器 / 差异），默认停在这里；
+   *   · 依据 = 起草者读过的素材（原来折在编辑器**下面** y≈842 处：要滚下去，
+   *     还要先展开一层折叠；现在一进来点一下就有）；
+   *   · 过程 = 审核问题清单 + 审核日志 + 起草 run（两态：最后结果 / 完整日志）。
+   * ⚠️ 原来这三块是竖着摞的，其中"过程"那两块（日志、起草 run）还把编辑器往下推。
+   */
+  let reviewSection: 'draft' | 'evidence' | 'process' = 'draft'
 
   /**
    * 审核 run 的**实时**状态（来自事件流，见 `RunLog` 的 `onstatus`）。
@@ -190,7 +203,8 @@
   let reviewInfo: DraftReviewInfo | null = null
   let reviewBusy = false
   /** 问题清单是否展开（结论常驻、明细折叠，与全站其它地方同一条规矩）。 */
-  let auditDetailOpen = false
+  // （`auditDetailOpen` / `auditLogOpen` 随第 3 批删掉了：问题清单与审核日志现在住在
+  //   「过程」tab 里，结论条上那两个按钮改成**切到那个 tab**——不再各有一个折叠开关。）
   let materialPick = ''
   let materialLoading = false
   /** 「按意见改一版」的意见输入。 */
@@ -408,6 +422,7 @@
     material = null
     materialPick = ''
     reviewTab = 'content'
+    reviewSection = 'draft'
     reviseOpen = false
     reviseFeedback = ''
     revising = false
@@ -670,6 +685,7 @@
   function selectFile(rel: string): void {
     // 点文件 = 想看内容；留在「差异」标签会让人以为点错了
     reviewTab = 'content'
+    reviewSection = 'draft'
     selectedFile = rel
     editText = artifacts?.files[rel] ?? ''
   }
@@ -809,6 +825,9 @@
   async function startAudit(): Promise<void> {
     if (draftRunId === '' || reviewBusy) return
     reviewBusy = true
+    // ★ 2026-10-21（第 3 批）：日志住在「过程」tab 里，所以**点开始审核就切过去**——
+    //   否则人会停在"草稿"上，看不到任何输出，正好回到第 ① 条那个毛病（"感觉一直没结束"）。
+    reviewSection = 'process'
     // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始
     auditLiveStatus = null
     error = ''
@@ -1003,6 +1022,93 @@
     go('skills')
   }
 </script>
+
+  <!--
+    ── 素材正文（只读）：清单 + 预览，两处共用 ──
+    ① 审阅屏的「依据」tab（2026-10-21 第 3 批新增）；
+    ② 其他状态的折叠行「素材」（原来是唯一一处，标记就写在那里）。
+    抽成片段是为了"同一份标记只有一份"：两处各写一遍，早晚改成一处忘一处。
+  -->
+  <!--
+    ── 审阅态的起草 run（最后结果 / 完整日志 两态）──
+    2026-10-21 第 3 批：从页面下半部搬进「过程」tab。它和审核日志是同一类东西
+    （"这一版是怎么做出来的"），而对"能不能入库"这个当场的决定没有直接作用。
+  -->
+  {#snippet draftRunPane()}
+          <section class="drawer-section">
+            <h3>
+              {$t('crystallize.draftSection')}
+              <span class="faint small">
+                run {runShort}…
+                {#if draftStatus}
+                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
+                {/if}
+                <!--
+                  ⚠️ 2026-10-21 删掉了这里的 `· {statsLine}`（原来是 `· 1 轮 · 0 次工具调用`）。
+                  两宗罪：① 它和副标题里那句是**同一个变量**——同一份数字在一屏里写两遍
+                  （探针 `crystal.statsHits` 实测 2 次）；② 更要紧的是**错标**：`statsLine` 来自
+                  `collectMaterial`，说的是**素材**有多少轮/多少次工具调用，摆在 `run 01M5…`
+                  旁边会被读成"这条 run 干了多少活"。要显示 run 自己的统计，得取 run 记录里的
+                  数（那属于「过程」tab 的事），不能拿素材的数顶上。
+                -->
+              </span>
+              <button
+                type="button"
+                class="ghost small"
+                style="margin-left:var(--sp-3)"
+                onclick={() => (draftLogOpen = !draftLogOpen)}
+              >
+                {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
+              </button>
+            </h3>
+            {#if draftLogOpen}
+              <div class="log-box">
+                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+              </div>
+            {:else if draftFinalState === 'loading'}
+              <div class="skeleton"></div>
+            {:else if draftFinalState === 'empty'}
+              <div class="empty">
+                <strong>{$t('tasks.noTextOutput')}</strong>
+                {$t('tasks.noTextOutputHint')}
+              </div>
+            {:else}
+              <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
+            {/if}
+          </section>
+  {/snippet}
+
+  {#snippet materialPane()}
+    {#if material === null || material.items.length === 0}
+      <p class="faint small">{$t('crystallize.materialEmpty')}</p>
+    {:else}
+      <ul class="file-tree">
+        {#each material.items as item (item.relPath)}
+          <li>
+            <button
+              type="button"
+              class="file-row"
+              class:active={materialPick === item.relPath}
+              onclick={() => (materialPick = item.relPath)}
+            >
+              <span class="file-name mono">{item.relPath}</span>
+              <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+      <div class="file-body">
+        {#each material.items as item (item.relPath)}
+          {#if item.relPath === materialPick}
+            <pre class="file-pre mono">{item.text}</pre>
+            {#if item.truncated}
+              <p class="faint small">{$t('crystallize.materialTruncated')}</p>
+            {/if}
+          {/if}
+        {/each}
+      </div>
+    {/if}
+  {/snippet}
 
 <MainArea
   headClass="detail-head"
@@ -1347,22 +1453,22 @@
               {/if}
             </span>
             <span class="bar-actions">
+              <!--
+                ⚠️ 2026-10-21（第 3 批）：这两个按钮原来是**各自的折叠开关**
+                   （`auditDetailOpen` / `auditLogOpen`）。问题清单与审核日志搬进「过程」tab 之后，
+                   它们改成**切到那个 tab**——一个东西只有一个开关，否则"折起来的问题清单"
+                   与"tab 里的问题清单"会同时存在，人分不清哪个是真的。
+              -->
               {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
-                <button class="ghost small" onclick={() => (auditDetailOpen = !auditDetailOpen)}>
-                  {auditDetailOpen
-                    ? $t('crystallize.auditHideDetail')
-                    : $t('crystallize.auditShowDetail', {
-                        n: String(reviewInfo.review.findings.length),
-                      })}
+                <button class="ghost small" onclick={() => (reviewSection = 'process')}>
+                  {$t('crystallize.auditShowDetail', {
+                    n: String(reviewInfo.review.findings.length),
+                  })}
                 </button>
               {/if}
               {#if reviewInfo?.review}
-                <button
-                  type="button"
-                  class="ghost small"
-                  onclick={() => (auditLogOpen = !auditLogOpen)}
-                >
-                  {auditLogOpen ? $t('crystallize.auditShowVerdict') : $t('crystallize.auditShowLog')}
+                <button type="button" class="ghost small" onclick={() => (reviewSection = 'process')}>
+                  {$t('crystallize.auditShowLog')}
                 </button>
               {/if}
               {#if reviewInfo !== null && reviewInfo.review === null && auditRunning}
@@ -1418,51 +1524,13 @@
             </div>
           {/if}
 
-          {#if reviewInfo !== null && reviewInfo.review === null && (auditRunning || auditSettled)}
-            <!-- 进行中 / 没跑成：日志就在结论条下面铺开（跑着的时候它是唯一的实时信息） -->
-            {#if auditRunning}
-              <p class="faint small">{$t('crystallize.auditRunning')}</p>
-            {/if}
-            <div class="log-box">
-              <RunLog
-                runId={reviewInfo.reviewRunId ?? ''}
-                onterminal={(st) => void onAuditTerminal(st)}
-                onstatus={(st) => (auditLiveStatus = st)}
-              />
-            </div>
-          {:else if reviewInfo?.review && auditLogOpen}
-            <!-- 有结论 + 人要回看过程 ⇒ 同一个位置换成日志 -->
-            <div class="log-box">
-              <RunLog
-                runId={reviewInfo.reviewRunId ?? ''}
-                onterminal={(st) => void onAuditTerminal(st)}
-              />
-            </div>
-          {/if}
-
-          {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
-            <p class="muted">
-              {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
-            </p>
-          {/if}
-
-          {#if reviewInfo?.review && auditDetailOpen}
-            <ul class="audit-findings">
-              {#each reviewInfo.review.findings as f}
-                <li>
-                  <span class="sev">{f.severity}</span>
-                  <span>{f.summary}</span>
-                  {#each f.evidence as e}
-                    {#if e.locator !== null || e.excerpt !== null}
-                      <div class="muted audit-evidence">
-                        {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
-                      </div>
-                    {/if}
-                  {/each}
-                </li>
-              {/each}
-            </ul>
-          {/if}
+          <!--
+            ⚠️ 2026-10-21（第 3 批）：这里原来还有两样——**审核日志**（跑着的时候铺开）
+               与**问题清单**（折起来）。它们搬进了「过程」tab（见下面的 `process-pane`）：
+               这一块的常驻纪律是"一行结论 + 一行入库信息"，日志和问题清单都属于"要看过程
+               才看"的东西。跑起来时界面会**自动切到过程 tab**（`startAudit()` 里改），
+               所以第 ① 条"审核的过程看不到"不会被这次搬家推翻。
+          -->
 
           <!-- 问题定位列表：只在不过时说，最多 4 条（再多就该先改了） -->
           {#if artifacts && !artifacts.validation.ok}
@@ -1521,7 +1589,50 @@
         {/if}
 
         {#if artifacts && artifacts.mode !== 'refused'}
-          <!-- ── 主区：树 + 窗格（内容 / 差异 同位置切换） ── -->
+          <!--
+            ── ★ 审阅屏的三个 tab（2026-10-21 第 3 批）──
+
+            使用者的轴："哪些必须一起显示、哪些可以切 tab。"这一屏的裁定：
+              · 常驻（结论条那一块）：过没过 / 能不能入库 / 目标是谁 / slug / 能做什么；
+              · 切 tab：**要动手的**（草稿）、**起草者读过什么**（依据）、
+                **怎么走到这一步的**（过程 = 问题清单 + 审核日志 + 起草 run）。
+            三块原来竖着摞：编辑器在 y≈490 起、素材折在 y≈842、起草 run 在 y≈1002——
+            "过程"那两块把编辑器往下推了 300 多像素，而它们只在"我要追过程"时才看。
+          -->
+          <div class="review-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewSection === 'draft'}
+              class:tabs-active={reviewSection === 'draft'}
+              onclick={() => (reviewSection = 'draft')}
+            >{$t('crystallize.tabDraft')}</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewSection === 'evidence'}
+              class:tabs-active={reviewSection === 'evidence'}
+              onclick={() => (reviewSection = 'evidence')}
+            >{$t('crystallize.tabEvidence')}</button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewSection === 'process'}
+              class:tabs-active={reviewSection === 'process'}
+              onclick={() => (reviewSection = 'process')}
+            >
+              {$t('crystallize.tabProcess')}
+              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
+                <span class="tab-count">{reviewInfo.review.findings.length}</span>
+              {:else if reviewInfo !== null && reviewInfo.review === null && auditRunning}
+                <!-- 跑着的时候在 tab 上留一个点：人切到草稿去改字，也不会"忘了它还在跑" -->
+                <span class="tab-dot" aria-hidden="true"></span>
+              {/if}
+            </button>
+          </div>
+
+          {#if reviewSection === 'draft'}
+          <!-- ── 草稿：树 + 窗格（内容 / 差异 同位置切换） ── -->
           <div class="review-pane">
             <ul class="file-tree">
               {#each fileRows as row (row.rel)}
@@ -1640,129 +1751,141 @@
                （`.preview` 的 CSS 与 `renderMarkdown` 的 import 一并删了——留着就是死代码，
                本仓库最防的就是"东西都在、就是没有路径让它发生"。）
           -->
+          {:else if reviewSection === 'evidence'}
+            <!-- ── 依据：起草者读过的素材（只读）。原来折在编辑器下面 y≈842 处 ── -->
+            <div class="file-pane evidence-pane">
+              <div class="evi-head">
+                <code>material/</code>
+                <span class="grow faint small">{$t('crystallize.evidenceHead')}</span>
+                {#if material !== null}
+                  <span class="faint small">
+                    {material.items.length} {$t('crystallize.filesUnit')} · {material.dirLabel}
+                  </span>
+                {/if}
+              </div>
+              {#if material === null}
+                <div class="skeleton"></div>
+              {:else}
+                {@render materialPane()}
+              {/if}
+            </div>
+          {:else}
+            <!--
+              ── 过程：怎么走到这一步的 ──
+              审核问题清单（有判决时）+ 审核日志 + 起草 run（最后结果 / 完整日志 两态）。
+              跑起来的时候界面会**自动切到这里**（见 `startAudit()`）——这一 tab 就是第 ① 条
+              "审核的过程看不到"的落点。
+            -->
+            <div class="process-pane">
+              {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
+                <p class="muted">
+                  {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
+                </p>
+              {/if}
+
+              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
+                <div class="proc-block">
+                  <div class="proc-head">{$t('crystallize.auditFindingsTitle')}</div>
+                  <ul class="audit-findings">
+                    {#each reviewInfo.review.findings as f}
+                      <li>
+                        <span class="sev">{f.severity}</span>
+                        <span>{f.summary}</span>
+                        {#each f.evidence as e}
+                          {#if e.locator !== null || e.excerpt !== null}
+                            <div class="muted audit-evidence">
+                              {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
+                            </div>
+                          {/if}
+                        {/each}
+                      </li>
+                    {/each}
+                  </ul>
+                </div>
+              {/if}
+
+              {#if reviewInfo?.review || (reviewInfo !== null && (auditRunning || auditSettled))}
+                <div class="proc-block">
+                  <div class="proc-head">
+                    {$t('crystallize.auditShowLog')}
+                    {#if auditRunning}
+                      <span class="badge {runStatusClass(auditLiveStatus ?? auditStatus ?? '')}">
+                        {statusLabel(auditLiveStatus ?? auditStatus ?? '')}
+                      </span>
+                    {/if}
+                  </div>
+                  {#if auditRunning}
+                    <p class="faint small">{$t('crystallize.auditRunning')}</p>
+                  {/if}
+                  {#if reviewInfo.reviewRunId !== null}
+                    <div class="log-box">
+                      <RunLog
+                        runId={reviewInfo.reviewRunId ?? ''}
+                        onterminal={(st) => void onAuditTerminal(st)}
+                        onstatus={(st) => (auditLiveStatus = st)}
+                      />
+                    </div>
+                  {/if}
+                </div>
+              {:else if reviewInfo !== null}
+                <p class="faint small">{$t('crystallize.processNoAuditYet')}</p>
+              {/if}
+
+              {#if draftRunId !== ''}
+                {@render draftRunPane()}
+              {/if}
+            </div>
+          {/if}
         {/if}
       {/if}
 
       <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份。
-             折叠行常驻（一行摘要），展开后是"清单 + 预览"——与审阅的文件树同一套观感。 ── -->
-      {#if draftRunId !== '' && material !== null}
+             ⚠️ 2026-10-21（第 3 批）：审阅态不再把它折在编辑器下面——它成了「依据」tab 的
+                内容（点一下就看，不必滚到 y≈842 再展开一层）。所以这里排掉 review，
+                而内容本身抽成片段 `materialPane`，两处共用一份标记（不许复制两份）。 ── -->
+      {#if draftRunId !== '' && material !== null && step !== 'review'}
         <FoldSection
           title={$t('crystallize.materialTitle')}
           summary={`${material.items.length} ${$t('crystallize.filesUnit')} · ${material.dirLabel}`}
         >
-          {#if material.items.length === 0}
-            <p class="faint small">{$t('crystallize.materialEmpty')}</p>
-          {:else}
-            <div class="file-pane">
-              <ul class="file-tree">
-                {#each material.items as item (item.relPath)}
-                  <li>
-                    <button
-                      type="button"
-                      class="file-row"
-                      class:active={materialPick === item.relPath}
-                      onclick={() => (materialPick = item.relPath)}
-                    >
-                      <span class="file-name mono">{item.relPath}</span>
-                      <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-              <div class="file-body">
-                {#each material.items as item (item.relPath)}
-                  {#if item.relPath === materialPick}
-                    <pre class="file-pre mono">{item.text}</pre>
-                    {#if item.truncated}
-                      <p class="faint small">{$t('crystallize.materialTruncated')}</p>
-                    {/if}
-                  {/if}
-                {/each}
-              </div>
-            </div>
-          {/if}
+          <div class="file-pane">
+            {@render materialPane()}
+          </div>
         </FoldSection>
       {/if}
 
-      <!-- ── 起草 run：起草中常驻展开（那时它是唯一的信息）；审阅态折成一行
-             （那时它只是历史，占 129px 只为了让审阅沉到第二屏以下）── -->
-      {#if draftRunId !== '' && step !== 'done'}
-        {#if step === 'review'}
-          <!--
-            ── 起草 run：默认**最后结果**，按需切到**完整日志**（2026-10-21 使用者）──
-
-            ⚠️ 这里原来是"折成一行 + 展开就全是原始流水"：人想知道"它交了什么"，得自己在
-              流水里找最后那段话。改成与任务详情页同一套：标题行说清是哪条 run、什么状态、
-              几个回合，右边一个按钮在两态之间换——**换的是同一块位置里的内容**。
-          -->
-          <section class="drawer-section">
-            <h3>
-              {$t('crystallize.draftSection')}
-              <span class="faint small">
-                run {runShort}…
-                {#if draftStatus}
-                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-                {/if}
-                <!--
-                  ⚠️ 2026-10-21 删掉了这里的 `· {statsLine}`（原来是 `· 1 轮 · 0 次工具调用`）。
-                  两宗罪：① 它和副标题里那句是**同一个变量**——同一份数字在一屏里写两遍
-                  （探针 `crystal.statsHits` 实测 2 次）；② 更要紧的是**错标**：`statsLine` 来自
-                  `collectMaterial`，说的是**素材**有多少轮/多少次工具调用，摆在 `run 01M5…`
-                  旁边会被读成"这条 run 干了多少活"。要显示 run 自己的统计，得取 run 记录里的
-                  数（那属于「过程」tab 的事），不能拿素材的数顶上。
-                -->
-              </span>
-              <button
-                type="button"
-                class="ghost small"
-                style="margin-left:var(--sp-3)"
-                onclick={() => (draftLogOpen = !draftLogOpen)}
-              >
-                {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
-              </button>
-            </h3>
-            {#if draftLogOpen}
-              <div class="log-box">
-                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-              </div>
-            {:else if draftFinalState === 'loading'}
-              <div class="skeleton"></div>
-            {:else if draftFinalState === 'empty'}
-              <div class="empty">
-                <strong>{$t('tasks.noTextOutput')}</strong>
-                {$t('tasks.noTextOutputHint')}
+      <!--
+        ── 起草 run：起草中**常驻展开**（那时它是唯一的信息）──
+        ⚠️ 2026-10-21（第 3 批）：审阅态的那一支**搬进「过程」tab** 了（片段 `draftRunPane`）。
+           它属于"这一步是怎么走过来的"，与"这一版能不能入库"无关；留在这里就是又一次
+           把编辑器往下推（改前它占 y≈1002 一整段）。
+      -->
+      {#if draftRunId !== '' && step !== 'done' && step !== 'review'}
+        <section class="drawer-section">
+          <h3>
+            {$t('crystallize.draftSection')}
+            <span class="faint small">
+              run {runShort}…
+              {#if draftStatus}
+                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
+              {/if}
+            </span>
+          </h3>
+          <div class="section-body">
+            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
+              <div class="notice bad small">
+                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
+                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
+                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
               </div>
             {:else}
-              <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
+              <p class="faint small">{$t('crystallize.drafting')}</p>
             {/if}
-          </section>
-        {:else}
-          <section class="drawer-section">
-            <h3>
-              {$t('crystallize.draftSection')}
-              <span class="faint small">
-                run {runShort}…
-                {#if draftStatus}
-                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-                {/if}
-              </span>
-            </h3>
-            <div class="section-body">
-              {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-                <div class="notice bad small">
-                  {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-                  {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
-                  <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-                </div>
-              {:else}
-                <p class="faint small">{$t('crystallize.drafting')}</p>
-              {/if}
-              <div class="log-box">
-                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-              </div>
+            <div class="log-box">
+              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
             </div>
-          </section>
-        {/if}
+          </div>
+        </section>
       {/if}
 
       <!-- ── 完成态：已沉淀 + git 状态 + 查看技能 ── -->
@@ -2148,6 +2271,103 @@
    * 现在一块两行 ~76px。宽度按内容排（结论那一行**不许换行**——原来「开始审核」按钮在
    * 69px 宽里折成 3 行，高 54px，就是这里没管住 `flex` 的结果）。
    */
+  /*
+   * ── 审阅屏的外层三个 tab：草稿 / 依据 / 过程（2026-10-21 第 3 批）──
+   * 观感与窗格内的「内容 / 差异」同一套（同字号、同 hover），差别只在它是**下划线式**
+   * 而不是底色块：这两层是嵌套的，都用底色块会分不清"我现在在切哪一层"。
+   */
+  .review-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    margin: 0 0 var(--sp-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .review-tabs > button {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 4px 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--fg-soft);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .review-tabs > button:hover {
+    color: var(--fg);
+  }
+  .review-tabs > button.tabs-active {
+    color: var(--fg);
+    font-weight: 600;
+    border-bottom-color: var(--fg);
+  }
+  .tab-count {
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--panel-sunken, rgba(0, 0, 0, 0.06));
+    font-size: var(--fs-xs);
+  }
+  /* 审核跑着时 tab 上的点：切到草稿去改字也不会忘了它还在跑 */
+  .tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+  }
+
+  /*
+   * ── 依据 tab（素材）──
+   * 复用 `.file-pane` 的两栏网格，只多一行 head：head **跨两列**（grid-column: 1/-1）。
+   * ⚠️ 第一版把 head 当成第三个网格项塞进两栏网格里，它会自己占掉"第二行第一列"，
+   *    把文件树挤到下面去——这类错 svelte-check 看不见，只有量位置才发现。
+   */
+  .evidence-pane {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .evidence-pane > .evi-head {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .evidence-pane .grow {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /*
+   * ── 过程 tab（问题清单 + 审核日志 + 起草 run）──
+   * 高度与草稿窗格同档（`clamp(22rem, 58vh, 40rem)`）：两个 tab 换的是同一块地方，
+   * 换过去时页面不该跳高跳矮（这一页的纪律是"页面不整页滚"，`crystal.pageFitsViewport` 钉着）。
+   * 内容多的时候**在块内滚**。
+   */
+  .process-pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    height: clamp(22rem, 58vh, 40rem);
+    margin-top: var(--sp-1);
+    overflow: auto;
+  }
+  .proc-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .proc-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+
   .conclusion-block {
     display: flex;
     flex-direction: column;

@@ -236,6 +236,19 @@ export const crystallizeText = {
   },
   'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
   'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
+  // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──
+  'crystallize.tabDraft': { zh: '草稿', en: 'Draft' },
+  'crystallize.tabEvidence': { zh: '依据', en: 'Evidence' },
+  'crystallize.tabProcess': { zh: '过程', en: 'Process' },
+  'crystallize.auditFindingsTitle': { zh: '审核问题清单', en: 'Audit findings' },
+  'crystallize.processNoAuditYet': {
+    zh: '还没审核过，所以这里只有起草 run。',
+    en: 'Not audited yet, so only the draft run is here.',
+  },
+  'crystallize.evidenceHead': {
+    zh: '起草者读过的素材（它按需读的就是这些文件）',
+    en: 'The material the drafter read (it reads these on demand)',
+  },
   'crystallize.materialTitle': { zh: '素材', en: 'Material' },
   'crystallize.materialDir': { zh: '目录', en: 'Directory' },
   'crystallize.materialEmpty': { zh: '没有素材文件', en: 'No material files' },
