@@ -22,8 +22,10 @@ export const crystallizeText = {
   'crystallize.newEntry': { zh: '新建沉淀', en: 'New' },
   'crystallize.pickTitle': { zh: '选择来源', en: 'Choose a source' },
   'crystallize.pickHint': {
-    zh: '来源 = 对话或任务；任务需有审核结论或用户反馈（设计 §4.3）',
-    en: 'Source = a conversation or a task; tasks need a review verdict or feedback (§4.3)',
+    // ⚠️ 2026-10-21：原文案末尾写着「（设计 §4.3）」——**内部文档编号漏进了界面**。
+    //    使用者看到的是一个他无法查证的编号（探针里量到过），那句话本身也已经说清了规则。
+    zh: '来源 = 对话或任务；任务要有审核结论或你给的反馈',
+    en: 'Source = a conversation or a task; tasks need a review verdict or your feedback',
   },
   'crystallize.pickNoConversations': {
     zh: '还没有可沉淀的对话（至少要有已结束的一轮）',
@@ -66,7 +68,6 @@ export const crystallizeText = {
   // §10.5 第 ⑤ 步：起草之后多了一步「审核」（内置审核者的预筛）。
   //  ⚠️ 文案要区分"审核"与"审阅入库"：前者是平台的预筛（结论），后者是人拍板入库。
   //     两个都叫"审"时，使用者会以为"审核通过了就是入库了"。
-  'crystallize.stepAudit': { zh: '审核', en: 'Audit' },
   'crystallize.auditTitle': { zh: '审核结论（预筛）', en: 'Audit result (pre-screen)' },
   'crystallize.auditNotYet': {
     zh: '这份草稿还没审核过。审核是一个内置智能体按"能不能用"过一遍，给出结论与问题清单；它不替你做入库决定。',
@@ -149,7 +150,6 @@ export const crystallizeText = {
   'crystallize.start': { zh: '开始沉淀', en: 'Start' },
 
   // ── 素材摘要（起草前就可见，§4.1.1） ──
-  'crystallize.materialSection': { zh: '素材摘要', en: 'Material' },
   'crystallize.materialSummary': {
     zh: '{turns} 轮 · {tools} 次工具调用',
     en: '{turns} turns · {tools} tool calls',

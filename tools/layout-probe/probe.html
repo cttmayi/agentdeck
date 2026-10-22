@@ -4557,17 +4557,21 @@
             return { x: r.left, y: r.top, w: r.width, h: r.height }
           }
 
-          // ★ 步骤条（§10.5 第 ③ 条新加的「审核」那一步）：量的是"这一步在不在、顺位对不对"。
-          //   ⚠️ 这里**不**用"文本包含审核"当唯一判据：顺序错了（审核排到入库之后）同样坏，
-          //      所以另外量"审核是第 3 项"。
+          // ★ 步骤条：量"是哪几步、顺序对不对"。
+          //   ⚠️ 2026-10-21 改：这里原来量的是**四步**且「审核」排第 3 位——那条判据跟着旧的
+          //      界面形态走，而形态本身被判定是错的（审核不是入库的门，画成一步会让人以为
+          //      必须等它 ⇒ "感觉一直没结束"）。现在量的是**三步**且审核**不占一格**。
+          //   ⚠️ 也**不**用"文本包含审核"当判据：那样"审核被画成第 4 步"同样能通过。
           const cySteps = [...d().querySelectorAll('.crystal-steps .step-label')].map((e) =>
             (e.textContent ?? '').trim(),
           )
           facts['crystal.stepLabels'] = cySteps
-          facts['crystal.stepAuditIndex'] = cySteps.indexOf('审核')
-          // 审核那一格的类名：`current` / `done` / 空 —— 量"现在停在哪一步"
-          const cyAuditLi = d().querySelectorAll('.crystal-steps li')[2]
-          facts['crystal.stepAuditClass'] = cyAuditLi ? cyAuditLi.className : null
+          facts['crystal.stepAuditNotAStep'] = !cySteps.includes('审核')
+          // 步骤条占多宽/多高：原来 4 步各 `flex:1`，被拉到横跨整行（实测 735px、间距还不均）
+          facts['crystal.stepBarBox'] = cyRect(d().querySelector('.crystal-steps'))
+          // ★ 同一份"轮次 · 工具调用"统计在一屏里出现几次：原来副标题一次 + 素材摘要分节一次
+          const cyStatsHits = ((d().body.innerText ?? '').match(/次工具调用/g) ?? []).length
+          facts['crystal.statsHits'] = cyStatsHits
 
           // ★ 审核区块（结论与问题清单常驻的那一块）
           const cyAudit = d().querySelector('.audit-block')

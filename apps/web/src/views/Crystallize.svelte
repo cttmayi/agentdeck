@@ -78,10 +78,21 @@
     return crystallizeState(row.status)
   }
 
-  /** 列表行来源摘要：来源类型 + 标题（源 run 丢了时兜底）。 */
+  /**
+   * 列表行来源摘要：来源类型 + 标题（源 run 丢了时兜底）。
+   *
+   * ⚠️ 2026-10-21 修：标签是空串时原来的写法会渲染成「任务 **·**」——分隔符后面什么都没有，
+   *    一行标题就剩一个孤零零的点（探针夹具里量到过；真实场景＝来源 run 被删、标题取不到）。
+   *    分隔符**只在真有标题时**才拼。
+   */
   function sourceLabel(row: DraftRow): string {
     if (row.source === null) return $t('crystallize.sourceUnknown')
-    return `${row.source.kind === 'conversation' ? $t('crystallize.scopeConversation') : $t('crystallize.scopeTask')} · ${row.source.label}`
+    const kind =
+      row.source.kind === 'conversation'
+        ? $t('crystallize.scopeConversation')
+        : $t('crystallize.scopeTask')
+    const label = row.source.label.trim()
+    return label === '' ? kind : `${kind} · ${label}`
   }
 
   async function refresh(): Promise<void> {

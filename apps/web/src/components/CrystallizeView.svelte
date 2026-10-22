@@ -269,19 +269,12 @@
     return out
   })()
 
-  /**
-   * 「审核」那一步的态：`done`（通过了）/ `bad`（不通过或无法判定）/ `current` / `pending`。
-   *
-   * ⚠️ `needs_human`（判决不合规）也画成 `bad`，不画成 `done`：那一步**没有通过**，
-   *   而画成 ✓ 会让人以为"审核过了、可以入库了"。
+  /*
+   * ⚠️ 这里原来有一个 `auditState`（把审核画成步骤条的第 3 步：✓ / ✗ / 进行中）。
+   *    2026-10-21 步骤条回到 3 步之后它没有使用者了，**直接删掉**——本仓库最不缺的
+   *    就是"字段还在、就是没有代码路径让它发生"（规则 5）。审核的态由审核块自己说
+   *    （`auditStatus` / `auditRunning` / `auditSettled`），同一件事只有一个判据。
    */
-  $: auditState = (() => {
-    if (reviewInfo?.review) {
-      return reviewInfo.review.conclusion === 'pass' ? 'done' : 'bad'
-    }
-    if (reviewInfo?.reviewRunId) return 'current'
-    return draftStatus === 'completed' ? 'current' : 'pending'
-  })()
 
   /**
    * "不通过且**额度已用尽**"（判决状态是 `escalated`）——这是唯一该出现
@@ -1006,8 +999,14 @@
   bodyClass="detail-scroll"
 >
   {#snippet sub()}
-    <span class="faint">
-      {sourceLabel} · {runId.slice(0, 8)}…{statsLine !== '' ? ` · ${statsLine}` : ''}
+    <!--
+      ★ 2026-10-21 布局重排：run id（`01M5HYG3…`）从这一行**撤下来**。
+      这一行是使用者第一眼看的地方，而他在这里问的是"这条沉淀在做什么"——run id 对
+      这个决定没有价值，还会把来源标题挤进省略号。id 没丢：收进 `title`，要查日志
+      对账时悬停就有。
+    -->
+    <span class="faint" title={`run ${runId}`}>
+      {sourceLabel}{statsLine !== '' ? ` · ${statsLine}` : ''}
     </span>
   {/snippet}
 
@@ -1037,7 +1036,16 @@
 
   {#snippet body()}
     <div class="crystal-flow">
-      <!-- ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ── -->
+      <!--
+        ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ──
+
+        ⚠️ 2026-10-21 从 4 步改回 3 步：中间那一步「审核」撤掉了。
+        理由正是使用者自己说的那个心理效果——「审核」**不是入库的门**（结论只是预筛，
+        入库永远由人点），可一旦画成"第 3 步"，人就会以为必须等它；它跑着、或者跑挂了，
+        看起来就是"卡在第三步不动"（他的原话："审核的过程看不到，感觉一直没结束呢"）。
+        现在审核是**审阅屏里的一个动作**（结论条：开始审核 / 看日志 / 重试）、
+        与「按意见重新起草」同级：随时可用、不挡入库。
+      -->
       <ol class="crystal-steps" aria-label="流程步骤">
         <li class={stepStates[0]}>
           <span class="step-no" aria-hidden="true">{stepStates[0] === 'done' ? '✓' : 1}</span>
@@ -1047,16 +1055,8 @@
           <span class="step-no" aria-hidden="true">{stepStates[1] === 'done' ? '✓' : 2}</span>
           <span class="step-label">{$t('crystallize.stepDraft')}</span>
         </li>
-        <!--
-          「审核」是 §10.5 新加的一步（②.5）：起草完之后由**内置审核者**先过一遍。
-          ⚠️ 它**不是入库的门**：结论是"预筛"，入库仍然由人点（评审在人是这条链的前提）。
-        -->
-        <li class={auditState}>
-          <span class="step-no" aria-hidden="true">{auditState === 'done' ? '✓' : 3}</span>
-          <span class="step-label">{$t('crystallize.stepAudit')}</span>
-        </li>
         <li class={stepStates[2]}>
-          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 4}</span>
+          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 3}</span>
           <span class="step-label">{$t('crystallize.stepReview')}</span>
         </li>
       </ol>
@@ -1083,36 +1083,31 @@
         </div>
       {/if}
 
-      <!-- ── 素材摘要：只在目标态显示——那是"能不能开始"的判据。
-             起草/审阅态有「素材」折叠分节（同一件事的可展开版本），
-             两处都常驻就是白占高度（实测 87px）。── -->
-      {#if step === 'target'}
-      <section class="drawer-section">
-        <h3>{$t('crystallize.materialSection')}</h3>
-        <div class="section-body">
-          {#if loading}
-            <div class="skeleton" style="height:1.1rem"></div>
-          {:else if targets}
-            {#if targets.materialStats}
-              <p class="faint">
-                {$t('crystallize.materialSummary', {
-                  turns: String(targets.materialStats.turns),
-                  tools: String(targets.materialStats.toolCalls),
-                })}
-                · {targets.scope === 'conversation'
-                  ? $t('crystallize.scopeConversation')
-                  : $t('crystallize.scopeTask')}
-                {#if targets.scope === 'task'}
-                  · {targets.reviewed ? $t('crystallize.reviewedYes') : $t('crystallize.reviewedNo')}
-                  · {$t('crystallize.feedbackNo')}
-                {/if}
-              </p>
-            {:else}
-              <div class="notice bad small">{ $t('crystallize.noMaterial') }</div>
+      <!--
+        ── 素材那一行：目标态才显示（它是"能不能开始"的判据）──
+
+        ★ 2026-10-21 重排：这里原来是一个**分节**（h3「素材摘要」+ 一节内容），
+        可它那行字（`1 轮 · 0 次工具调用 · 对话`）在副标题里**已经写过一遍**
+        （实测同一句话在一屏里出现两次），而分节外壳（h3 + 上下间距）白占 87px。
+        现在降成一行：判据还在，外壳不要。
+      -->
+      {#if step === 'target' && !loading && targets}
+        {#if targets.materialStats}
+          <p class="faint small crystal-material-line">
+            <!-- ⚠️ 这里**不再**写轮次/工具调用数：副标题已经写过一遍（实测同一句话
+                 在一屏里出现两次）。这一行只留副标题没有的"判据"部分：来源是对话还是
+                 任务、任务有没有审核结论与反馈。 -->
+            {targets.scope === 'conversation'
+              ? $t('crystallize.scopeConversation')
+              : $t('crystallize.scopeTask')}
+            {#if targets.scope === 'task'}
+              · {targets.reviewed ? $t('crystallize.reviewedYes') : $t('crystallize.reviewedNo')}
+              · {$t('crystallize.feedbackNo')}
             {/if}
-          {/if}
-        </div>
-      </section>
+          </p>
+        {:else}
+          <div class="notice bad small">{$t('crystallize.noMaterial')}</div>
+        {/if}
       {/if}
 
       <!-- ── 沉淀目标：目标/起草态可编辑；审阅态并入结论条（那一行已经写了
@@ -1679,7 +1674,14 @@
                 {#if draftStatus}
                   <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
                 {/if}
-                {statsLine !== '' ? ` · ${statsLine}` : ''}
+                <!--
+                  ⚠️ 2026-10-21 删掉了这里的 `· {statsLine}`（原来是 `· 1 轮 · 0 次工具调用`）。
+                  两宗罪：① 它和副标题里那句是**同一个变量**——同一份数字在一屏里写两遍
+                  （探针 `crystal.statsHits` 实测 2 次）；② 更要紧的是**错标**：`statsLine` 来自
+                  `collectMaterial`，说的是**素材**有多少轮/多少次工具调用，摆在 `run 01M5…`
+                  旁边会被读成"这条 run 干了多少活"。要显示 run 自己的统计，得取 run 记录里的
+                  数（那属于「过程」tab 的事），不能拿素材的数顶上。
+                -->
               </span>
               <button
                 type="button"
@@ -1768,6 +1770,9 @@
      以为"这里本该有点什么"。 */
 
   /* ══════════ 步骤条：圆点 + 连线（走过 = 着强调色；当前步高亮；完成打勾） ══════════ */
+  .crystal-material-line {
+    margin: 0 0 var(--sp-4);
+  }
   .crystal-steps {
     display: flex;
     align-items: center;
@@ -1777,8 +1782,13 @@
     padding: 0;
     font-size: var(--fs-sm);
   }
+  /*
+   * ★ 2026-10-21：`flex: 1` 去掉了。原来每一步都 `flex:1`（连线也 `flex:1`），
+   *   四个词就被拉到横跨 735px、间距还随字数变成 279/205/155——信息量只有四个词，
+   *   却占了整行宽度、还把下面整体推低一档。现在步与步按内容排、连线定宽 2rem。
+   */
   .crystal-steps li {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: var(--sp-2);
@@ -1789,7 +1799,7 @@
      它到下一步的那一段仍是虚的（与"建任务三步链"那套同一个语义）。 */
   .crystal-steps li + li::before {
     content: '';
-    flex: 1;
+    flex: 0 0 2rem;
     height: 2px;
     border-radius: 1px;
     background: var(--line);
