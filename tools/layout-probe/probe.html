@@ -4913,6 +4913,61 @@
           }
 
           // ══════════════════════════════════════════════════════════════
+          // ★★★ 人改草稿：保存改动 → 结论标过期 → 重新审核（2026-10-21 分批第 8 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 起因是使用者的原话：「缺少一个可以改的地方」。编辑器一直都在（这一屏的文件树
+          // 每个文本文件都能改），缺的是**改完算不算数**：改动原来只活在浏览器内存里，
+          // 而审核者读的是磁盘上的 `skill/`。
+          //
+          // 这一节量四件事（缺任何一条，"改了算数"就只是句口号）：
+          //   ① 刚进这一屏（没改过）**没有**「保存改动」、也**没有**过期标记；
+          //   ② 在编辑器里打字 ⇒ 出现「保存改动」（只在有未保存改动时出现）；
+          //   ③ 点它 ⇒ 标记出现「内容已改 —— 这个结论是改之前的」+ 出现「重新审核」；
+          //   ④ 保存真的写到了磁盘/接口上（重读 artifacts，正文是新写的）。
+          {
+            const cyManual = cyQuery.get('crystalAuditFail')
+            facts['crystal.manualEntered'] = await cyEnter(cyManual)
+            if (facts['crystal.manualEntered']) {
+              const cyHasText = (needle) =>
+                [...d().querySelectorAll('.conclusion-block button')].some((b) =>
+                  text(b).includes(needle),
+                )
+              facts['crystal.manualBeforeButtons'] = [
+                ...d().querySelectorAll('.conclusion-block button'),
+              ].map((b) => text(b))
+              facts['crystal.manualStaleBefore'] = !!d().querySelector('.stale-tag')
+
+              // 在编辑器里"打字"：Svelte 的 bind:value 听的是 input 事件
+              const ta = d().querySelector('textarea.editor')
+              if (ta) {
+                ta.value = `${ta.value}\n\n（人手加的一行：${cyManual.slice(-6)}）`
+                ta.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+              await until(() => cyHasText('保存改动'), 40)
+              facts['crystal.manualDirtySaveButton'] = cyHasText('保存改动')
+
+              const saveBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
+                text(b).includes('保存改动'),
+              )
+              if (saveBtn) click(saveBtn)
+              const staleShown = await until(() => !!d().querySelector('.stale-tag'), 120)
+              facts['crystal.manualStaleAfterSave'] = staleShown
+              facts['crystal.manualStaleText'] = text(d().querySelector('.stale-tag'))
+              facts['crystal.manualRetryAfterSave'] = cyHasText('重新审核')
+              // 保存按钮自己应该**消失**了（没有未保存改动 ⇒ 它不该继续挂着）
+              facts['crystal.manualSaveButtonGone'] = !cyHasText('保存改动')
+              // ④ 真的写到了磁盘：重读 artifacts（它读的就是草稿小屋里的 `skill/`）
+              const cyAfters = await fetch(
+                `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(cyManual)}`,
+              ).then((r) => r.json())
+              facts['crystal.manualOnDiskHasEdit'] = String(
+                (cyAfters?.files ?? {})['SKILL.md'] ?? '',
+              ).includes('人手加的一行')
+            }
+          }
+
+          // ══════════════════════════════════════════════════════════════
           // ★★★ 审核**真的跑起来**那一屏（2026-10-21 使用者："审核的过程看不到，
           //      感觉一直没结束呢"）
           // ══════════════════════════════════════════════════════════════

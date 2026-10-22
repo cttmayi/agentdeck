@@ -30,6 +30,7 @@
   import { t } from '../lib/i18n.ts'
   import { go } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
+  import { showToast } from '../lib/view.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
   //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
@@ -176,6 +177,12 @@
     } | null
     reviewRunId: string | null
     reviewRunStatus: string | null
+    /**
+     * 这个结论是不是"改之前的"（服务端拿"审核时钉下的指纹"与"此刻磁盘内容"比出来的）。
+     * `null` = 判不出来（旧数据没有指纹 / 这条草稿还没审过）——**不显示任何提示**，
+     * 因为编一个"没过期"会让界面安静地把可能对不上的结论当成有效结论。
+     */
+    stale: boolean | null
     /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2）。 */
     versions: number
   }
@@ -189,6 +196,16 @@
   let editText = ''
   /** 每次编辑 +1：让"从文件里解析出的 frontmatter 摘要"能重算（普通对象不触发响应）。 */
   let filesVersion = 0
+  /**
+   * 有未保存的改动（分批第 8 批：人改草稿要能落盘）。
+   *
+   * ⚠️ `artifacts.files` 是**就地改**的（`onEditInput` 直接写它），所以"改过没有"这件事
+   *    没有任何现成的信号——必须自己记。第一版我打算用"与磁盘上那版比 diff"来推，
+   *    但 diff 是**异步**拉的（停 500ms 才算），保存按钮的状态会跟着它一跳一跳的。
+   */
+  let dirty = false
+  /** 正在保存改动（防连点：保存是写盘，连点会让"最后一次"变得不确定）。 */
+  let savingDraft = false
   /** 变更集 diff（后端算）：对当前已入库版本，或对比上一版草稿。 */
   let diff: DiffResult | null = null
   let diffLoading = false
@@ -650,6 +667,9 @@
       selectedFile = first
       editText = res.files[first] ?? ''
       filesVersion += 1
+      // 刚读到的就是磁盘上的那一份 ⇒ 没有未保存的改动（换版/重读之后必须清，
+      // 否则「保存改动」会挂着一个上一版留下的状态，点下去写的是同一份内容）
+      dirty = false
       clash = null
       error = ''
       step = 'review'
@@ -708,6 +728,7 @@
     if (artifacts === null || selectedFile === '') return
     artifacts.files[selectedFile] = editText
     filesVersion += 1
+    dirty = true
     // diff 跟着内容走，但**不要每敲一个字发一次请求**：停下来 500ms 再算
     if (diffTimer !== null) clearTimeout(diffTimer)
     diffTimer = setTimeout(() => {
@@ -876,6 +897,38 @@
       ...r.findings.map((f, i) => `${i + 1}. [${f.severity}] ${f.summary}`),
     ].join('\n')
     await reviseDraft()
+  }
+
+  /**
+   * 把编辑器里的改动**写回**草稿小屋（分批第 8 批）。
+   *
+   * 为什么要这一步（使用者原话：「缺少一个可以改的地方」）：编辑器一直都在，但改动只活在
+   * 内存里，而审核者读的是磁盘 ⇒ 改完直接入库，入库的是改后的内容、结论却是磁盘上那一版的，
+   * 没人知道这两件事已经不是一个东西。写回之后：审核能看到你改的，指纹一比就知道结论过期了。
+   *
+   * ⚠️ 保存之后**不自动重审**：重审要花钱（真机一轮 ≈ $1.32），这笔钱该由人决定。
+   *    界面给的是「重新审核」按钮，不是自动跑。
+   */
+  async function saveDraftEdits(): Promise<void> {
+    if (artifacts === null || draftRunId === '' || savingDraft) return
+    savingDraft = true
+    error = ''
+    try {
+      await api('/api/crystallize/save-draft', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId, files: artifacts.files }),
+      })
+      dirty = false
+      // 结论条上的"已过期"由服务端算 ⇒ 保存完重读一次审核信息（这一屏的判据都从它来）
+      await loadReview()
+      void loadDiff()
+      showToast($t('crystallize.saveDraftDone'))
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      savingDraft = false
+    }
   }
 
   /** 按意见再起草一版：新 run 复用同一份素材 + 把上一版产出放进 material/previous-draft/。 */
@@ -1448,6 +1501,15 @@
                   <span class="muted">{$t('crystallize.auditExhausted')}</span>
                 {/if}
               {/if}
+              <!--
+                ★ 分批第 8 批：「这个结论是改之前的」。
+                判据在服务端（审核时钉下的指纹 vs 此刻磁盘内容），界面只负责**说出来**：
+                一个过期的结论如果安静地留在那儿，人就会照它决定入库。
+              -->
+              {#if reviewInfo?.stale === true}
+                <span class="bar-sep">·</span>
+                <span class="stale-tag">{$t('crystallize.auditStale')}</span>
+              {/if}
               {#if artifacts}
                 <span class="bar-sep">·</span>
                 {#if artifacts.validation.ok}
@@ -1513,6 +1575,34 @@
                 >
                   {auditSettled ? $t('crystallize.auditRetry') : $t('crystallize.auditStart')}
                 </button>
+              {/if}
+              <!--
+                ★ 分批第 8 批：「保存改动」。
+                只在**有未保存改动**时出现（`dirty`）：没有改动时它是个不该被点的按钮，
+                而"点不动的按钮"比"没有按钮"更让人困惑。
+              -->
+              {#if artifacts && dirty}
+                <button
+                  class="ghost small primary-ghost"
+                  disabled={savingDraft}
+                  title={$t('crystallize.saveDraftHint')}
+                  onclick={() => void saveDraftEdits()}
+                >{$t('crystallize.saveDraft')}</button>
+              {/if}
+              <!--
+                ★ 分批第 8 批：「重新审核」。
+                原来这个按钮只在**还没判决**时出现（`review === null`）⇒ 一旦审出结论，
+                同一版再也审不了。现在改成"只要有判决就能再审"：改完草稿要它算数、
+                或只是想让审核者再看一遍，都走这里。
+                ⚠️ 不自动重审：真机一轮审核 ≈ $1.32，这笔钱由人决定（自动返工那条链另算）。
+              -->
+              {#if reviewInfo?.review !== null && reviewInfo !== null}
+                <button
+                  class="ghost small"
+                  disabled={reviewBusy || dirty}
+                  title={dirty ? $t('crystallize.auditRetryNeedsSave') : $t('crystallize.auditNotYet')}
+                  onclick={() => void startAudit()}
+                >{$t('crystallize.auditRetry')}</button>
               {/if}
               {#if artifacts}
                 <button
@@ -2740,6 +2830,20 @@
     display: flex;
     align-items: center;
     gap: var(--sp-1);
+  }
+
+  /*
+   * 「结论已过期」这个标记：**要显眼**，因为它是"别照这个结论做决定"的提示。
+   * 用告警色（与失败结论同一个色系），不用灰色——灰色在这里等于"可以不看"。
+   */
+  .conclusion-bar .stale-tag {
+    color: var(--warn, #b45309);
+    font-weight: 600;
+  }
+  /* 「保存改动」比同排的其他 ghost 按钮重要一点：它是"你刚做的事还没算数"的出口。 */
+  .conclusion-bar .primary-ghost {
+    border-color: var(--accent, #2563eb);
+    color: var(--accent, #2563eb);
   }
 
   .file-body textarea.editor {

@@ -107,7 +107,20 @@ export const crystallizeText = {
   'crystallize.auditFail': { zh: '不通过', en: 'Failed' },
   'crystallize.auditNeedsHuman': { zh: '无法判定（判决不合规）', en: 'Undecided (malformed verdict)' },
   'crystallize.auditShowDetail': { zh: '看 {n} 条问题', en: 'Show {n} issue(s)' },
-  'crystallize.auditHideDetail': { zh: '收起问题清单', en: 'Hide issues' },
+  'crystallize.saveDraft': { zh: '保存改动', en: 'Save changes' },
+  'crystallize.saveDraftDone': { zh: '已保存到草稿（审核还没看到它）', en: 'Saved (the audit has not seen this yet)' },
+  'crystallize.saveDraftHint': {
+    zh: '把改动写回草稿目录——审核者读的是磁盘上那一份，不保存它看不到',
+    en: 'Write the edits back to the draft directory — the reviewer reads that file',
+  },
+  'crystallize.auditRetryNeedsSave': {
+    zh: '先保存改动：现在重审的是磁盘上那一版，会把你没保存的改动漏掉',
+    en: 'Save first: re-running now would audit the version on disk, not your edits',
+  },
+  'crystallize.auditStale': {
+    zh: '内容已改 —— 这个结论是改之前的，要它算数得重新审一轮。',
+    en: 'Content changed — this result is from before the change; re-run the audit to make it count.',
+  },
   'crystallize.auditRedraft': { zh: '按意见重新起草', en: 'Re-draft with feedback' },
   'crystallize.auditReworked': {
     zh: '已按上面的意见自动重新起草（第 {n} 版）',

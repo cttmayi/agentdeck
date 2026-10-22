@@ -9,13 +9,19 @@
  */
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   assembleArtifacts,
+  hashDraftDir,
+  hashDraftFiles,
+  isSafeDraftRelPath,
   parseSkillMd,
+  readAuditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
+  writeAuditStamp,
+  writeDraftSkillFiles,
 } from './crystallize-artifacts.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -28,6 +34,107 @@ before(async () => {
 
 after(async () => {
   await cleanup(dir)
+})
+
+/**
+ * 人改草稿这条路（2026-10-21 分批第 8 批）。
+ *
+ * 覆盖三类：**路径守卫**（不许写出 `skill/` 之外）、**只写不删**（保存不是"整目录替换"）、
+ * **指纹**（内容变没变判得准，且两组不同文件不许撞同一个指纹）。
+ */
+describe('人改草稿：写回、路径守卫、指纹', () => {
+  test('★ 路径守卫：`..` / 绝对路径 / 反斜杠 / 空段一律不安全', () => {
+    for (const bad of [
+      '../x.md',
+      'a/../../x.md',
+      '/etc/passwd',
+      'C:\\x.md',
+      'a\\\\b.md',
+      'a//b.md',
+      '',
+      './a.md',
+      'a/./b.md',
+    ]) {
+      assert.equal(isSafeDraftRelPath(bad), false, `${JSON.stringify(bad)} 应该被拒`)
+    }
+    for (const good of ['SKILL.md', 'references/notes.md', 'scripts/check-inline-js.js']) {
+      assert.equal(isSafeDraftRelPath(good), true, `${JSON.stringify(good)} 应该放行`)
+    }
+  })
+
+  test('★ 有任何一个路径不安全 ⇒ 整单拒绝，一个文件都不写', async () => {
+    const hut = join(dir, 'hut-reject')
+    const skillDir = join(hut, 'skill')
+    await mkdir(skillDir, { recursive: true })
+    const res = await writeDraftSkillFiles(skillDir, {
+      'SKILL.md': '# 好文件\n',
+      '../escape.md': '# 想跑出去\n',
+    })
+    assert.deepEqual(res.written, [], '整单拒：不半写')
+    assert.deepEqual(res.rejected, ['../escape.md'])
+    // 磁盘上不该出现任何东西（连合法的那个也没写）
+    const files = await readDraftSkillDir(skillDir)
+    assert.equal(files, null, '目录里什么都没写')
+  })
+
+  test('★★ 只写不删：保存 `SKILL.md` 不许动别人没看见的文件', async () => {
+    // ⚠️ 这条是"保存"这条路的**要害**，理由与入库那条路同源（见 server.ts 里那段
+    //    注释）：那种写法是"清空目录再写"，于是"只改了一个字"会顺手删掉点文件、
+    //    二进制、以及任何 `readTree` 看不见的东西。第一版我打算照抄入库的写法
+    //    （整目录替换），写到一半发现"没看见 ≠ 决定删"这件事在保存这条路上更贵。
+    const hut = join(dir, 'hut-keep')
+    const skillDir = join(hut, 'skill')
+    await mkdir(join(skillDir, 'references'), { recursive: true })
+    await writeFile(join(skillDir, 'SKILL.md'), '# 旧正文\n', 'utf8')
+    await writeFile(join(skillDir, 'references', 'notes.md'), '# 我改不到的东西\n', 'utf8')
+    // 点文件：`readTree` 会跳过它 ⇒ 编辑器里根本没有它 ⇒ 保存不许碰它
+    await writeFile(join(skillDir, '.hidden'), '别动我\n', 'utf8')
+
+    const res = await writeDraftSkillFiles(skillDir, { 'SKILL.md': '# 新正文\n' })
+    assert.deepEqual(res.written, ['SKILL.md'])
+    assert.equal(await readFile(join(skillDir, 'SKILL.md'), 'utf8'), '# 新正文\n')
+    assert.equal(
+      await readFile(join(skillDir, 'references', 'notes.md'), 'utf8'),
+      '# 我改不到的东西\n',
+      '没在请求里的文件必须原样留着',
+    )
+    assert.equal(await readFile(join(skillDir, '.hidden'), 'utf8'), '别动我\n', '点文件也不许删')
+  })
+
+  test('★ 指纹：内容变了就变，且两组不同文件不许撞同一个指纹', async () => {
+    const a = hashDraftFiles({ 'SKILL.md': 'x\n', 'references/n.md': 'y\n' })
+    assert.equal(a, hashDraftFiles({ 'references/n.md': 'y\n', 'SKILL.md': 'x\n' }), '顺序无关')
+    assert.notEqual(a, hashDraftFiles({ 'SKILL.md': 'x\n', 'references/n.md': 'y2\n' }))
+    assert.notEqual(a, hashDraftFiles({ 'SKILL.md': 'x\n' }), '少一个文件要变')
+    // ⚠️ 用分隔符拼会在这里撞车：`{a: '1\n2'}` 与 `{a: '1', b: '2'}` 拼出来一样。
+    //    长度前缀就是为它加的（撞车的表现是"改了内容却判为没过期"）。
+    assert.notEqual(
+      hashDraftFiles({ 'SKILL.md': '1\n2\n' }),
+      hashDraftFiles({ 'SKILL.md': '1\n', 'x.md': '2\n' }),
+      '内容里带换行也不许撞',
+    )
+  })
+
+  test('★ 指纹与"审核时钉下的那份"对得上：写回改变了目录指纹', async () => {
+    const hut = join(dir, 'hut-stamp')
+    const skillDir = join(hut, 'skill')
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(join(skillDir, 'SKILL.md'), '# 一审时\n', 'utf8')
+    const audited = await hashDraftDir(skillDir)
+    await writeAuditStamp(hut, { reviewRunId: 'run-1', hash: audited, at: 1 })
+    assert.deepEqual(await readAuditStamp(hut), { reviewRunId: 'run-1', hash: audited, at: 1 })
+
+    assert.equal(await hashDraftDir(skillDir), audited, '没改 ⇒ 指纹一致（结论不算过期）')
+    await writeDraftSkillFiles(skillDir, { 'SKILL.md': '# 人改过\n' })
+    assert.notEqual(await hashDraftDir(skillDir), audited, '改了 ⇒ 指纹不同（结论过期）')
+
+    // 读不到 / 坏文件 ⇒ null（"判不出来"），不许编成"没过期"
+    const empty = join(dir, 'hut-no-stamp')
+    await mkdir(empty, { recursive: true })
+    assert.equal(await readAuditStamp(empty), null)
+    await writeFile(join(empty, '.audited.json'), '{ 这不是 json', 'utf8')
+    assert.equal(await readAuditStamp(empty), null)
+  })
 })
 
 const GOOD_SKILL_MD = `---

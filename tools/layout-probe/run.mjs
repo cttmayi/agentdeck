@@ -3477,6 +3477,60 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
   },
+  // ══════════════ 人改草稿（2026-10-21 分批第 8 批）══════════════
+  {
+    view: '沉淀',
+    key: 'crystal.manualBeforeButtons',
+    label:
+      '★ 刚进审阅屏（没动过编辑器）时**没有**「保存改动」——没有未保存改动就不该挂一个点不动的按钮',
+    ok: (v) => Array.isArray(v) && !v.some((b) => b.includes('保存改动')),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualStaleBefore',
+    label:
+      '★ 没改过内容时**没有**「结论已过期」标记（夹具里的指纹就是按当前内容钉的）——只在真改过时出现',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualDirtySaveButton',
+    label: '★★ 在编辑器里打字 ⇒ 出现「保存改动」（改动只活在内存里，得有个出口把它落盘）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualStaleAfterSave',
+    label:
+      '★★★ 保存之后结论条出现「内容已改 —— 这个结论是改之前的」（使用者原话："缺少一个可以改的地方"；改完不算数等于没得改）',
+    ok: (v) => v === true,
+    show: (v, f) => `${String(v)}　标记文案 ${JSON.stringify((f['crystal.manualStaleText'] ?? '').slice(0, 30))}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualRetryAfterSave',
+    label: '★★ 出现「重新审核」——原来这个按钮只在**还没判决**时才有，一旦审出结论同一版再也审不了',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualSaveButtonGone',
+    label: '★ 保存之后「保存改动」自己收起来（没有未保存改动了）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.manualOnDiskHasEdit',
+    label:
+      '★★★ 保存**真的写到了磁盘**：重读 artifacts（它读的就是草稿小屋的 `skill/`）里能看到那句手写的改动',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
   // ══════════════ 深链语义（2026-10-21 第 7 批：真机上量出来的缺陷）══════════════
   {
     view: '沉淀',
@@ -5210,6 +5264,26 @@ try {
             promptHash: null,
             createdAt: now - 18_000,
           })
+          // ★ 分批第 8 批：补上"审核当时钉下的指纹"。
+          //
+          // 真链路上这个文件是**审核路由**写的（`writeAuditStamp`）；夹具直写 store ⇒
+          // 没有路由 ⇒ 没有指纹 ⇒ 界面判不出"过期"（`stale` 恒为 null）。
+          // 而那一节量的是"改完之后出现过期标记"——没有指纹时它**永远不出现**，
+          // 看起来就像"没改过"，正是"假绿"的样子。所以夹具必须把指纹补齐。
+          //
+          // ⚠️ 这里**不能**手写 hash：抄一份算法就有两个出处，哪天算法改了探针还在给旧指纹。
+          //    直接引 daemon 的那份实现（探针脚本是 Node 跑的，能 import .ts）。
+          {
+            const { hashDraftDir, writeAuditStamp } = await import(
+              '../../apps/daemon/src/crystallize-artifacts.ts'
+            )
+            const failHut = path.join(workRoot, `skill-draft-${crystalFixture.auditFailRunId}`)
+            await writeAuditStamp(failHut, {
+              reviewRunId: auditRunId,
+              hash: await hashDraftDir(path.join(failHut, 'skill')),
+              at: now - 18_000,
+            })
+          }
         }
 
         /**

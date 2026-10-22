@@ -64,12 +64,41 @@ class FakeBackend implements AgentBackend {
     'references/checklist.md': '# 自检\n- 每条结论都有证据\n',
   }
 
+  /**
+   * 让**起草** run 卡在"跑完之前"（分批第 8 批加）。
+   *
+   * 为什么需要它：有一条判据是"起草没跑完不许保存"（409），假后端默认立刻完成 ⇒
+   * 那条分支根本来不及被看见。第一版我打算靠"POST 起草之后抢在完成前再 POST 保存"
+   * 去撞，那是把一条纪律押在调度顺序上——机器一忙就红。
+   */
+  draftGate: Promise<void> | null = null
+
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
   }
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    if (opts.workDir.includes('skill-draft-')) {
+    // 判据用**投递出去的第一句话**，不用工作目录：起草 run 与审它的 run 用的是**同一间小屋**
+    // （`skill-draft-<id>`，这是设计的一部分：审核者要读同一份 `skill/` 与 `material/`），
+    // 所以"目录里带 skill-draft"分不出这两者。
+    const delivered = deliveredText(opts)
+    this.prompts.push(delivered)
+    const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
+
+    if (opts.workDir.includes('skill-draft-') && this.draftGate !== null) {
+      await this.draftGate
+    }
+    /**
+     * ⚠️ **只有起草 run 写文件**（2026-10-21 分批第 8 批修）。
+     *
+     * 原来这里的条件是"工作目录是草稿小屋就写"——而审核 run 用的**就是同一间小屋**
+     * （设计如此）⇒ 审核者一跑就把 `skill/` 重写回夹具内容。第 8 批那条"人改 → 落盘"
+     * 的用例因此变成一场竞态：**单跑通过**（审核先跑完，之后才保存），全量跑时机器忙、
+     * 审核 run 收尾晚于保存 ⇒ 人手改的内容被审核 run 盖回去，红的却是"磁盘上真的换了内容"。
+     *
+     * 真链路上审核者**不写 skill**（它只读、指出问题），假后端不许比真链路多干一件事。
+     */
+    if (opts.workDir.includes('skill-draft-') && !isDraftReview) {
       for (const [rel, text] of Object.entries(this.draftFiles)) {
         const full = join(opts.workDir, 'skill', rel)
         await mkdir(dirname(full), { recursive: true })
@@ -81,12 +110,6 @@ class FakeBackend implements AgentBackend {
     queue.push({ type: 'text', content: '我先看看任务。' })
     queue.push({ type: 'tool_use', tool: 'Read', content: '调用工具 Read', input: { file_path: 'a.ts' } })
     queue.push({ type: 'tool_result', tool: null, content: '文件内容', output: '文件内容', outputTruncated: false })
-    // 判据用**投递出去的第一句话**，不用工作目录：起草 run 与审它的 run 用的是**同一间小屋**
-    // （`skill-draft-<id>`，这是设计的一部分：审核者要读同一份 `skill/` 与 `material/`），
-    // 所以"目录里带 skill-draft"分不出这两者。
-    const delivered = deliveredText(opts)
-    this.prompts.push(delivered)
-    const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
     const text =
       isDraftReview && this.draftReviewVerdict !== null
         ? `结论：\n${VERDICT_FENCE_BEGIN}\n${JSON.stringify(this.draftReviewVerdict)}\n${VERDICT_FENCE_END}\n`
@@ -1346,6 +1369,208 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
  *   ③ D76 的钩子对"小屋内部相对路径跑脚本"真的是放行的（这是①能成立的地基，
  *      所以直接量那个脚本，而不是相信"应该没问题"）。
  */
+/**
+ * §10.6 人改草稿（2026-10-21 分批第 8 批）。
+ *
+ * 使用者原话：「缺少一个可以改的地方」。编辑器一直都在（草稿 tab 每个文本文件都能改），
+ * 缺的是**改完算不算数**：改动只活在浏览器内存里，而审核者读的是磁盘上的 `skill/`。
+ * 这一块钉住补上的那条路：**写回落盘 → 指纹变化 → 结论标过期 → 重新审核**。
+ */
+describe('§10.6 人改草稿：落盘 + 结论过期 + 重新审核', () => {
+  /** 读一次 review 接口（界面上那条结论条就是从它来的）。 */
+  async function reviewInfo(draftRunId: string): Promise<{
+    review: { conclusion?: string; status?: string } | null
+    reviewRunId: string | null
+    reviewRunStatus: string | null
+    stale: boolean | null
+    versions: number
+  }> {
+    const res = await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
+    const text = await res.text()
+    assert.equal(res.status, 200, text)
+    return JSON.parse(text) as never
+  }
+
+  /** 起一轮审核（不等判决：`stale` 的判据只看"有没有审核 run + 有没有指纹"）。 */
+  async function startAudit(draftRunId: string): Promise<string> {
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+    return (JSON.parse(text) as { reviewRunId: string }).reviewRunId
+  }
+
+  /** 等 `stale` 变成期望值（指纹文件是审核路由写的，理论上立刻就好；等一等不押调度顺序）。 */
+  async function waitStale(draftRunId: string, want: boolean | null): Promise<boolean | null> {
+    for (let i = 0; i < 200; i += 1) {
+      const info = await reviewInfo(draftRunId)
+      if (info.stale === want) return info.stale
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    return (await reviewInfo(draftRunId)).stale
+  }
+
+  test('★★ 人改 → 落盘 → 结论过期 → 重审：四步都真的发生在磁盘与接口上', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的流程（人要手改一版）'),
+      target: { kind: 'new', purpose: '人改草稿流程' },
+    })
+    await startAudit(draftRunId)
+    assert.equal(await waitStale(draftRunId, false), false, '刚审完、没改过 ⇒ 不过期')
+
+    /**
+     * ★★ 这里必须**同时**钉住"重试"那种情形（第一版就是在这里红的）。
+     *
+     * 这一轮的假后端不吐判决块 ⇒ 平台判定"判决不合规" ⇒ 它会**自动重试**一次
+     * （`createRetryRun`，同 subject、同内容、相隔几毫秒），于是同一条草稿上有了**两条**
+     * 审核 run，而接口报的是**最后**那条。第一版把指纹绑在"报出来的那条审核 run"上
+     * ⇒ 恰恰在"审核出问题、重试了"的时候，`stale` 变成"判不出来"（null）——
+     * 也就是人最需要知道"结论还算不算数"的那一刻，界面反而什么都不说。
+     *
+     * 所以这里等**报出来的审核 run 换了一条**（= 重试真的发生了），再断言 stale 仍然是
+     * 一个**判得出来**的布尔值。只断言"不过期"会漏掉这条——重试前它也是 false。
+     */
+    const firstReviewRunId = (await reviewInfo(draftRunId)).reviewRunId
+    let retried = false
+    for (let i = 0; i < 200 && !retried; i += 1) {
+      const info = await reviewInfo(draftRunId)
+      retried = info.reviewRunId !== null && info.reviewRunId !== firstReviewRunId
+      if (!retried) await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    assert.equal(retried, true, '这一轮应该触发一次自动重试（假后端不吐判决块 ⇒ 判决不合规）')
+    assert.equal(
+      (await reviewInfo(draftRunId)).stale,
+      false,
+      '重试之后 stale 仍必须判得出来（第一版绑在"报出来那条 run"上 ⇒ 这里变成 null）',
+    )
+
+    const before = await reviewInfo(draftRunId)
+    assert.equal(typeof before.stale, 'boolean', 'stale 必须是"判得出来"的（不是 null）')
+
+    // ① 保存改动：写的是**磁盘**，不是浏览器内存
+    const edited = `---\nname: hand-edited\ndescription: 人手改过的描述\n---\n\n# 人手改过的正文\n\n## When to Use\n- 手改\n\n## Procedure\n1. 手改\n`
+    const saved = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, files: { 'SKILL.md': edited } }),
+    })
+    const savedText = await saved.text()
+    assert.equal(saved.status, 200, savedText)
+    assert.deepEqual((JSON.parse(savedText) as { written: string[] }).written, ['SKILL.md'])
+
+    const hut = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
+    assert.equal(await readFile(join(hut, 'SKILL.md'), 'utf8'), edited, '磁盘上真的换了内容')
+    assert.equal(
+      await readFile(join(hut, 'references', 'checklist.md'), 'utf8'),
+      '# 自检\n- 每条结论都有证据\n',
+      '只写不删：没在请求里的支持文件必须原样留着',
+    )
+
+    // ② 结论标记成"改之前的"
+    assert.equal(
+      await waitStale(draftRunId, true),
+      true,
+      '内容变了 ⇒ 那个结论不能继续算数（界面据此标「结论已过期」并给「重新审核」）',
+    )
+
+    // ③ 人改**不算一版**：额度按"同一来源起草过几版"算，人改不起新 run ⇒ 不吃额度
+    assert.equal((await reviewInfo(draftRunId)).versions, before.versions, '人改不该被算成返工一版')
+
+    // ④ 重审 ⇒ 指纹钉在新内容上 ⇒ 不再过期
+    await startAudit(draftRunId)
+    assert.equal(await waitStale(draftRunId, false), false, '重审之后钉的是改后的内容')
+  })
+
+  test('★ 保存的守卫：逃逸路径整单拒、非起草 run 拒、缺 id 拒、没跑完拒', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的流程（保存守卫）'),
+      target: { kind: 'new', purpose: '保存守卫' },
+    })
+
+    // 逃逸：整单拒（一个文件都不写），并且真的没写到小屋外面
+    const escape = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftRunId,
+        files: { 'SKILL.md': '# 好的\n', '../../../escaped.md': '# 想跑出去\n' },
+      }),
+    })
+    const escapeText = await escape.text()
+    assert.equal(escape.status, 400, escapeText)
+    assert.equal((JSON.parse(escapeText) as { code?: string }).code, 'unsafe_path')
+    assert.equal(
+      await readFile(join(workRoot, 'escaped.md'), 'utf8').catch(() => null),
+      null,
+      '逃逸文件不许出现在工作根上',
+    )
+    assert.equal(
+      await readFile(join(workRoot, `skill-draft-${draftRunId}`, 'skill', 'SKILL.md'), 'utf8').then(
+        (t) => t.includes('想跑出去'),
+      ),
+      false,
+      '整单拒之后，连合法的那份也不许被写',
+    )
+
+    // 非起草 run
+    const otherRunId = await runOnce('写一份关于保存守卫的报告')
+    const notDraft = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: otherRunId, files: { 'SKILL.md': '# x\n' } }),
+    })
+    assert.equal(notDraft.status, 400)
+    assert.equal(((await notDraft.json()) as { code?: string }).code, 'not_a_draft')
+
+    // 缺 draftRunId / files 不是一组字符串
+    const missing = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(missing.status, 400)
+    assert.equal(((await missing.json()) as { code?: string }).code, 'draft_run_id_required')
+
+    // ★ 起草没跑完 ⇒ 409。用 `draftGate` 把起草卡在"跑完之前"——
+    //   ⚠️ 第一版我打算"POST 起草之后抢在它完成前再 POST 保存"，那是把纪律押在调度顺序上。
+    // ⚠️ 写成 `let release: (() => void) | null = null` 再 `release?.()` 会被 tsc 判成
+    //    "not callable"：赋值发生在 Promise 执行器**里面**，控制流分析看不见它，于是在
+    //    `finally` 那一处 `release` 的类型被收窄成 `null`。而 `node --test`（只擦类型、
+    //    不做检查）跑得好好的——正是 `pnpm run check` 里那一步 typecheck 才能抓到的形状。
+    //    执行器是**同步**跑的，所以这里用确定赋值断言是安全的。
+    let release!: () => void
+    fakeBackend.draftGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: await runReviewed('审过的流程（起草中保存）'),
+          target: { kind: 'new', purpose: '起草中保存' },
+        }),
+      })
+      const draftText = await res.text()
+      assert.equal(res.status, 202, draftText)
+      const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
+      const tooEarly = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: runningDraftId, files: { 'SKILL.md': '# 抢写\n' } }),
+      })
+      assert.equal(tooEarly.status, 409, await tooEarly.text())
+    } finally {
+      fakeBackend.draftGate = null
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  })
+})
+
 describe('§10.5：审核者真执行草稿脚本', () => {
   /** 读开关当前值（界面上也用它渲染）。 */
   async function scriptRunAllowed(): Promise<boolean> {

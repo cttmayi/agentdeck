@@ -116,9 +116,13 @@ import {
 } from './crystallize-material.ts'
 import {
   assembleArtifacts,
+  hashDraftDir,
   parseSkillMd,
+  readAuditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
+  writeAuditStamp,
+  writeDraftSkillFiles,
 } from './crystallize-artifacts.ts'
 import { RunExecutor } from './executor.ts'
 import {
@@ -3993,6 +3997,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
       const draftHut = draftRoot(workRoot, draft.id as string)
+      // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
+      //
+      // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
+      // 而人在审核期间（或审核之后）改一下编辑器就能让"结论"与"内容"分叉——那份分叉
+      // 只有指纹能发现。写早了没用（内容还没定），写晚了会把人改后的内容当成被审内容。
+      //
+      // ⚠️ 指纹与审核 run 一一对应（存 reviewRunId）：重审一轮就覆盖一次，
+      //    于是"最新那条审核的指纹"永远对得上 review 接口报的那条判决。
+      const stampHash = await hashDraftDir(join(draftHut, 'skill'))
       const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
       const reviewRunId = await createRunForReviewer({
         reviewer,
@@ -4060,6 +4073,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
+      // 指纹写在这里（不是上面算的时候）：`createRunForReviewer` 会 await 一段，
+      // 期间人可能正在保存改动——写"起审核时那一刻"的指纹才是这次审核的对象。
+      // ⚠️ 代价是：审核**期间**的保存不会被判成过期（那一段里审的确实是老内容，
+      //    但指纹也已经钉在老内容上）。这个窗口留着是有意的：把它关掉就得在审核结束时
+      //    再比一次内容，而"审核者在读目录"与"内容有没有变"之间没有可靠的时间点。
+      await writeAuditStamp(draftHut, { reviewRunId, hash: stampHash, at: Date.now() })
+
       sendJson(res, 202, { reviewRunId, reviewerAgentId: reviewer.id })
       return
     }
@@ -4623,6 +4643,36 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const reviewRun = reviewRuns[reviewRuns.length - 1]
       const verdicts = reviewRun ? await store.listVerdictsByRun(reviewRun.id) : []
       const v = verdicts[verdicts.length - 1]
+      /**
+       * ★ 分批第 8 批：这个结论是不是"改之前的"。
+       *
+       * 判据只在两样东西上：**审核时钉下的指纹**（审核路由写的）与**此刻磁盘上的内容**。
+       * 不一致 ⇒ 内容在审完之后被改过（人手改保存、或另一次返工写了同一间小屋）⇒ 结论过期。
+       *
+       * ══════════════════════════════════════════════════════════════════
+       * ⚠️ 为什么**不**要求指纹属于"报出来的那条审核 run"（第一版就是这么写的，红了）
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 第一版写的是 `stamp.reviewRunId === reviewRun.id`——理由听起来很对："指纹与审核 run
+       * 一一对应"。它错在一个**判决不合规时 daemon 会自动重试**的事上（`createRetryRun`）：
+       * 一次「开始审核」于是留下**两条**审核 run（同 subject、同内容、相隔几毫秒），
+       * 而接口报的是**最后**那条 ⇒ 指纹那条永远不是"报出来的那条" ⇒ `stale` 变成
+       * "判不出来"（null）。也就是说：**恰恰在审核出问题（判决不合规、重试）的时候，
+       * "人改过没有"这件事反而看不见了**——而那时人最需要知道结论还算不算数。
+       *
+       * 现在的口径：指纹是"**最近一次「开始审核」时那份内容**"，与它比即可。重试审的是
+       * 同一份内容 ⇒ 同一条指纹照样成立。`stamp.reviewRunId` 保留在文件里**只作记录**
+       * （排查时要知道这条指纹是哪一次点出来的）。
+       *
+       * ⚠️ 另一种"判不出来"仍然给 `null`，不给 `false`：没有审核 run、或没有指纹文件
+       *    （旧数据）。把"判不出来"显示成"没过期"，会让界面安静地把一份可能对不上的
+       *    结论当成有效结论。
+       */
+      const stamp = reviewRun ? await readAuditStamp(draftRoot(workRoot, draftRunId)) : null
+      const staleForReview =
+        reviewRun && stamp
+          ? (await hashDraftDir(join(draftRoot(workRoot, draftRunId), 'skill'))) !== stamp.hash
+          : null
       sendJson(res, 200, {
         /**
          * `null` = **还没审过**（或审核 run 还没收口）。
@@ -4646,6 +4696,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         /** 审核 run 在不在这件事，界面靠它区分"还没点过审核"与"审过但没判决"。 */
         reviewRunId: reviewRun?.id ?? null,
         reviewRunStatus: reviewRun?.status ?? null,
+        /**
+         * 这个结论是不是"改之前的"（内容被改过 ⇒ 结论过期）。
+         *
+         * `null` = **判不出来**（旧数据里没有指纹文件，或这条草稿一条审核 run 都没有）。
+         * 不编成 `false`：那会让"判不出来"看起来像"没过期"，而界面据此就会安静地
+         * 把一份可能已经对不上的结论当成有效结论显示。
+         */
+        stale: staleForReview,
         /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2，见 executor）。 */
         versions: page.items.filter(
           (r) =>
@@ -4653,6 +4711,76 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             draftRun.subject.type === 'skill-draft' &&
             r.subject.sourceRunId === draftRun.subject.sourceRunId,
         ).length,
+      })
+      return
+    }
+
+    // ── 人改草稿：把编辑器里的内容**写回**草稿小屋（分批第 8 批）──
+    //
+    // 为什么需要一个新路由：编辑器一直都在，但改动只活在浏览器内存里，而审核者读的是
+    // 磁盘上的 `skill/` ⇒ 使用者改完点「确认入库」，入库的是改后的内容，而结论条显示的
+    // 是磁盘上那一版的判决，谁都不知道这两件事已经不是一个东西了。
+    //
+    // 这个路由是"人改"这条路的**落盘**那一半；另一半是审核路由写的指纹 + 界面上的
+    // 「内容已改、结论已过期」与「重新审核」。
+    //
+    // ⚠️ 故意**没有**"人改不占自动返工额度"这回事要写：额度是按"同一来源起草过几版"
+    //    算的（`executor.ts`），人手改草稿**不起新 run** ⇒ 天然不占额度。这是选"写回同一版"
+    //    而不是"人改也算一版"的原因之一。
+    if (req.method === 'POST' && path === '/api/crystallize/save-draft') {
+      const raw = (await readJsonBody(req)) as {
+        draftRunId?: unknown
+        files?: unknown
+      }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const files = raw?.files
+      if (typeof files !== 'object' || files === null || Array.isArray(files)) {
+        sendJson(res, 400, { error: 'files 必须是一组"相对路径 → 文本"', code: 'files_required' })
+        return
+      }
+      const draft = await store.getRun(draftRunId as RunId)
+      if (!draft || draft.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_not_found' })
+        return
+      }
+      if (draft.subject.type !== 'skill-draft') {
+        sendJson(res, 400, {
+          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可存的草稿`,
+          code: 'not_a_draft',
+        })
+        return
+      }
+      // 只有跑完的草稿才有"产出"可改。跑完之前落盘会与起草者抢同一批文件——
+      // 那种"谁最后写谁赢"的结果没法解释，直接拒掉更诚实。
+      if (draft.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，没有可存的产出',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      const skillDir = join(draftRoot(workRoot, draftRunId), 'skill')
+      const result = await writeDraftSkillFiles(skillDir, files as Record<string, string>)
+      if (result.rejected.length > 0) {
+        // 整单拒（一份都不写）：半写会让磁盘进入使用者没要求过的中间状态，
+        // 而审核紧接着看到的就是它。
+        sendJson(res, 400, {
+          error: `这些路径不许写在草稿里：${result.rejected.join('、')}`,
+          code: 'unsafe_path',
+          rejected: result.rejected,
+        })
+        return
+      }
+      sendJson(res, 200, {
+        ok: true,
+        written: result.written,
+        // 回一份新指纹：界面拿它与审核指纹比，立刻能标"结论已过期"，
+        // 不用等下一次 GET（少一次往返，也少一个"界面停在旧状态"的窗口）。
+        hash: await hashDraftDir(skillDir),
       })
       return
     }
