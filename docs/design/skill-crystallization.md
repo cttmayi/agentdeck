@@ -1648,3 +1648,58 @@ claude 一律报 `Not logged in · Please run /login`（同样 argv、同样配�
 2. **删/挪判据时要数条数**：我用"从 A 的 key 到 B 的 key"这种索引切片删 4 条旧判据，
    把夹在中间**刚加的 10 条**一起删了——探针照样"全绿"（少判据不会红，只会没人问）。
    复核：`grep -c "key: 'crystal\." tools/layout-probe/run.mjs`（61 − 4 + 12 = 69）。
+
+### 10.20 起草中那一屏：两个 tab（产出 / 依据）+ 给探针补上这一屏的夹具（2026-10-21，分批第 4 批）
+
+上一批把审阅屏切成三 tab 时，探针**完全没有覆盖 `step === 'drafting'`**（它的夹具全是"已完成草稿"），
+所以第 3 批改那一段标记只能靠手工起一条真 run 验。这一批把这一屏按同一条轴切完，并把夹具补上。
+
+| tab | 内容 | 原来在哪 |
+|---|---|---|
+| **产出**（默认） | 那条 run 的状态 + **实时日志**（跑完自动进审阅态，这里不需要两态） | 主区中间那一段 |
+| **依据** | **目标摘要**（新建 / 更新谁）+ **素材**（起草者按需读的文件，不折叠） | 目标摘要一节在它上面、素材折在它下面 |
+
+两条设计约束：
+
+1. **默认停在产出**：跑着的时候实时输出是唯一的信息（第 ① 条那个毛病"审核的过程看不到"
+   在起草这一屏的同构形态就是"起草跑着却看不见它在干嘛"）。新起草一律重置回产出。
+2. **"依据"在两个屏里内容不同，但同一条规矩**：审阅屏的「依据」只有素材——因为那边
+   "目标是谁"已经在**结论条**上了（`新建 skill` / `更新 x`）；起草中这一屏没有结论条，
+   于是目标摘要归到「依据」里。**同一件事不在两处重复，也不凭空消失**。
+3. 目标态那一节（`{#if step === 'target'}`）从"目标/起草态"收窄到**只在目标态**：
+   起草态的只读摘要搬进「依据」；审阅态早先已并进结论条。
+
+**实测数字**（真 Chrome + 真 daemon，`pnpm run probe:layout`，**514 项全绿** = 上一批 503 + 新增 11）
+
+  · `crystal.draftingStepText = "✓ 沉淀目标 2 起草 run 3 审阅入库"`（当前步就是第 2 步）
+  · `crystal.draftingTabTexts = ["产出","依据"]`、`draftingTabDefault = "产出"`、
+    `draftingTabStripBox = {y:225.5, w:575, h:31.8}`（起草这一屏没有结论条 ⇒ tab 条比审阅屏高一截位置）
+  · `crystal.draftingLogText` 里**真有假 CLI 那一行**（`draftingLogLive = true`）——
+    经 daemon 解析、再经 SSE 落到页面；`draftingLogBox = {y:342.5, h:384}`
+  · `crystal.draftingTargetSectionGone = true`、`draftingPaneCount = 0`（主区里一节都没有了）
+  · 依据：`draftingEvidenceBlocks = ["沉淀目标","素材"]`、目标 `新建 skill`、
+    素材 4 行（`00-README.md` / `meta.json` / `skills-index.md` / `task-run.md`）、
+    `draftingEvidenceNoFold = true`、`draftingEvidenceFits = true`
+  · `draftingScrollH = 880 = viewportH`（不整页滚）
+
+**探针夹具怎么起这一屏**（`run.mjs`）
+
+  这一屏的判据全是"跑着的时候"的样子 ⇒ 夹具必须是**真在跑的 run**（写一条 `running` 的
+  夹具 run 会假绿：daemon 起时 `reconcileInterruptedRuns` 把它收成 `failed`，量到的是
+  "起草没跑成"那一屏）。做法与审核那一节同构：内置起草者改挂 `generic` + 身份里塞
+  `PROBE-STUB-DRAFT-ONLY` 记号（假 `agent-cli` 认出记号就吐一行、挂 1800 秒）+
+  `POST /api/crystallize/draft`。
+
+  素材源**必须过任务门槛**（§4.3：有用户反馈或**审核过**）⇒ 夹具阶段多造一条源 run +
+  一条 `subject: {type:'run', id: 源run}` 的 **completed review run**。
+
+  三个坑（都写进了代码注释）：
+
+  1. **位置**：这一段必须写在**第二次起 daemon 之后**——第一版写进了那段 HTTP 夹具，
+     `crystalFixture` 那一刻还不可见 ⇒ `ReferenceError: Cannot access 'crystalFixture'
+     before initialization`（同一个坑这份文件里早有一条注释记着，我还是踩了）。
+  2. **别拿对话当素材源**：对话场景没有那道门槛，看着省事；但探针那一屏的对话是
+     **探针页在浏览器里**造的（聊天那一节跑在沉淀之后），Node 侧这一刻数据目录还干净；
+     而我改成"运行时造一条对话"之后，**聊天那一节整片红了**——它依赖"列表里就是它自己造的那几条"。
+  3. **日志要等那一行落地**：只等 `.log-box` 出现会量到"· 等待输出…"（那时 run 刚 dispatch），
+     判据红了而界面没错。等文本出现再量（审核那一节早就记着这条）。

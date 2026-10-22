@@ -117,6 +117,17 @@
   let reviewSection: 'draft' | 'evidence' | 'process' = 'draft'
 
   /**
+   * 起草中那一屏的两个 tab：`产出` / `依据`（2026-10-21 第 4 批）。
+   *
+   * 裁定与审阅屏同一条轴——哪些必须同时看到：
+   *   · 产出 = 那条 run 的**实时输出**（跑着的时候它是唯一的实时信息，所以默认停在这里）；
+   *   · 依据 = 起草者据以干活的东西：**目标摘要**（新建 / 更新谁）+ **素材**（它按需读的文件）。
+   * ⚠️ 审阅屏的「依据」只有素材——因为那边"目标是谁"已经在结论条上了（`新建 skill` / `更新 x`）。
+   *    起草中这一屏**没有结论条**，所以目标摘要归到依据里：同一件事不在两处重复，也不凭空消失。
+   */
+  let draftTab: 'run' | 'evidence' = 'run'
+
+  /**
    * 审核 run 的**实时**状态（来自事件流，见 `RunLog` 的 `onstatus`）。
    *
    * ⚠️ 为什么不能只用 `reviewInfo.reviewRunStatus`：那是"读接口那一刻"的快照。点「开始审核」
@@ -515,6 +526,8 @@
       draftFailedReason = ''
       handledTerminal = false
       step = 'drafting'
+      // 新起草一律从「产出」开始：跑起来的时候实时输出是唯一的信息（依据是"回头再看"的）
+      draftTab = 'run'
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       error = $t('crystallize.errDraftRejected', { error: msg })
@@ -1078,6 +1091,18 @@
           </section>
   {/snippet}
 
+  <!-- 目标摘要（只读）：起草态的「依据」里用它——"这一版是照着什么做的" -->
+  {#snippet targetSummary()}
+    <p class="faint">
+      {#if targetKind === 'new'}
+        {$t('crystallize.targetNew')}
+        {#if purpose.trim() !== ''}· {purpose.trim()}{/if}
+      {:else}
+        {$t('crystallize.targetUpdate')} · {skillNameFor(selectedSkillId)}
+      {/if}
+    </p>
+  {/snippet}
+
   {#snippet materialPane()}
     {#if material === null || material.items.length === 0}
       <p class="faint small">{$t('crystallize.materialEmpty')}</p>
@@ -1229,9 +1254,13 @@
         {/if}
       {/if}
 
-      <!-- ── 沉淀目标：目标/起草态可编辑；审阅态并入结论条（那一行已经写了
-             "更新 release-check"，再单占 68px 就是重复）── -->
-      {#if step !== 'review'}
+      <!--
+        ── 沉淀目标：**只在目标态**（可编辑的表单）──
+        ⚠️ 2026-10-21（第 4 批）：起草态的只读摘要搬进了「依据」tab（它与素材是同一件事：
+           "这一版是照着什么做的"）；审阅态早先就并进了结论条（那一行写着"新建 skill"）。
+           于是这一节只在目标态出现——起草中那一屏现在整块地方都归 tab。
+      -->
+      {#if step === 'target'}
       <section class="drawer-section">
         <h3><span>{$t('crystallize.stepTarget')}</span></h3>
         <div class="section-body">
@@ -1843,7 +1872,7 @@
              ⚠️ 2026-10-21（第 3 批）：审阅态不再把它折在编辑器下面——它成了「依据」tab 的
                 内容（点一下就看，不必滚到 y≈842 再展开一层）。所以这里排掉 review，
                 而内容本身抽成片段 `materialPane`，两处共用一份标记（不许复制两份）。 ── -->
-      {#if draftRunId !== '' && material !== null && step !== 'review'}
+      {#if draftRunId !== '' && material !== null && step === 'target'}
         <FoldSection
           title={$t('crystallize.materialTitle')}
           summary={`${material.items.length} ${$t('crystallize.filesUnit')} · ${material.dirLabel}`}
@@ -1855,12 +1884,52 @@
       {/if}
 
       <!--
-        ── 起草 run：起草中**常驻展开**（那时它是唯一的信息）──
-        ⚠️ 2026-10-21（第 3 批）：审阅态的那一支**搬进「过程」tab** 了（片段 `draftRunPane`）。
-           它属于"这一步是怎么走过来的"，与"这一版能不能入库"无关；留在这里就是又一次
-           把编辑器往下推（改前它占 y≈1002 一整段）。
+        ── ★ 起草中那一屏：两个 tab（产出 / 依据），2026-10-21 第 4 批 ──
+
+        原来这一屏是"目标摘要 + 起草 run + 素材折叠"竖着摞；素材折在下面、目标摘要在上面，
+        而"跑着的时候唯一的实时信息"（run 的输出）被夹在中间。现在：
+          · 产出（默认）= 那条 run 的状态 + 实时输出（跑完自动进审阅态，这里不用两态）；
+          · 依据 = 目标摘要（新建 / 更新谁）+ 素材（不折叠：进了 tab 再折一层就是多一次点击）。
       -->
-      {#if draftRunId !== '' && step !== 'done' && step !== 'review'}
+      {#if step === 'drafting'}
+        <div class="review-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={draftTab === 'run'}
+            class:tabs-active={draftTab === 'run'}
+            onclick={() => (draftTab = 'run')}
+          >{$t('crystallize.tabOutput')}</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={draftTab === 'evidence'}
+            class:tabs-active={draftTab === 'evidence'}
+            onclick={() => (draftTab = 'evidence')}
+          >{$t('crystallize.tabEvidence')}</button>
+        </div>
+
+        {#if draftTab === 'evidence'}
+          <div class="process-pane">
+            <div class="proc-block">
+              <div class="proc-head">{$t('crystallize.stepTarget')}</div>
+              {@render targetSummary()}
+            </div>
+            <div class="proc-block">
+              <div class="proc-head">{$t('crystallize.materialTitle')}</div>
+              {#if material === null}
+                <div class="skeleton"></div>
+              {:else}
+                <div class="file-pane">
+                  {@render materialPane()}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      {/if}
+
+      {#if draftRunId !== '' && step === 'drafting' && draftTab === 'run'}
         <section class="drawer-section">
           <h3>
             {$t('crystallize.draftSection')}

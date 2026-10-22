@@ -3477,6 +3477,87 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
   },
+  // ══════════════ 起草中那一屏（2026-10-21 第 4 批）══════════════
+  //
+  // 这一屏以前**没有任何判据**（夹具都是已完成草稿），所以下面这几条是新地面的第一批桩：
+  // 夹具在 Node 侧真发起一条起草 run（假 `agent-cli`），量的是真 running / 真日志。
+  {
+    view: '沉淀',
+    key: 'crystal.draftingAttached',
+    label:
+      '夹具：起草中那一屏挂得上（点「继续」接到那条真在跑的起草 run 上）——不成立的话下面一整组都空过',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingStepText',
+    label: '★★ 起草中停在**第 2 步**（"起草 run"是当前步；第 1 步已打勾）',
+    ok: (v) => typeof v === 'string' && v.includes('起草 run'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingTabTexts',
+    label: '★★★ 起草中是**两个 tab**：产出 / 依据（2026-10-21 第 4 批；原来这块是"目标摘要 + 起草 run + 素材折叠"竖着摞，实时输出夹在中间）',
+    ok: (v) => Array.isArray(v) && JSON.stringify(v) === JSON.stringify(['产出', '依据']),
+    show: (v, f) => `${JSON.stringify(v)}　默认停在 ${JSON.stringify(f['crystal.draftingTabDefault'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingTabDefault',
+    label: '★★★ 默认停在**产出**——跑着的时候它是唯一的实时信息，不该先点一下才看得到',
+    ok: (v) => v === '产出',
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingLogLive',
+    label:
+      '★★★ 产出里那行日志是**真的流下来的**（假 CLI 吐的一行，经 daemon 解析再经 SSE 落到页面）——这一条量的是"跑着的时候人看得到东西"',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify((f['crystal.draftingLogText'] ?? '').slice(0, 60)),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingTargetSectionGone',
+    label:
+      '★★ 目标那一块**表单**不再占主区（它进了「依据」tab）——起草中要动手的只有"停止"，剩下地方全归产出',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingPageFits',
+    label: '★★ 起草中那一屏也不整页滚',
+    ok: (v) => v === true,
+    show: (v, f) => `文档 ${f['crystal.draftingScrollH']}px / 视口 ${f['crystal.viewportH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingEvidenceOpens',
+    label: '★★「依据」tab 里打得开：**目标摘要 + 素材**两块',
+    ok: (v) => v === true,
+    show: (v, f) =>
+      `${JSON.stringify(f['crystal.draftingEvidenceBlocks'])}　目标 ${JSON.stringify(f['crystal.draftingEvidenceTarget'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingEvidenceRows',
+    label: '★「依据」里的素材清单真的列出来（起草者按需读的就是这些）',
+    ok: (v) => Array.isArray(v) && v.length >= 1,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingEvidenceNoFold',
+    label: '★ 依据里**没有**折叠段：进了 tab 再折一层就是多一次点击',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingEvidenceFits',
+    label: '★ 依据那一屏整个落在首屏里',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.draftingEvidenceBox']),
+  },
   {
     view: '沉淀',
     key: 'crystal.pageFitsViewport',
@@ -3946,6 +4027,10 @@ function writeFakeGenericCli() {
       'if [ "$1" = "--version" ]; then echo "agent-cli 0.0-probe"; exit 0; fi',
       'case "$*" in',
       `  *${PROBE_AUDIT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_LINE}"}\n'; sleep 600 ;;`,
+      // ★ 第 4 批加的第二条：**起草中那一屏**。它比审核那条更早被点着（夹具在起 Chrome
+      //   之前就发起），所以挂得久一些（1800s）——不然跑到沉淀那一节时它已经自己退出了，
+      //   量到的就是"起草 run 跑完了"，而那正是这一批要量的那一屏的**反例**。
+      `  *${PROBE_DRAFT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_DRAFT_LINE}"}\n'; sleep 1800 ;;`,
       '  *) echo "agent-cli: 探针假 CLI 只服务审核那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
       'esac',
       '',
@@ -3956,6 +4041,14 @@ function writeFakeGenericCli() {
 }
 /** 假 CLI 吐的那一行（`probe.html` 里按它判"日志真有内容"）。 */
 const PROBE_STUB_LINE = '探针夹具：审核 run 正在跑（假 CLI 的一条输出）。'
+/**
+ * 起草中那一屏的假 CLI 输出行 + 记号。
+ *
+ * ⚠️ 这两条**必须分开**：只用一个记号的话，量"审阅屏里审核跑着"那一节会连带把起草
+ *    那条 run 也点着/或反过来，于是两屏互相污染（夹具之间不许互相消费，这个仓库踩过）。
+ */
+const PROBE_STUB_DRAFT_LINE = '探针夹具：起草 run 正在跑（假 CLI 的一条输出）。'
+const PROBE_DRAFT_MARKER = 'PROBE-STUB-DRAFT-ONLY'
 /**
  * 假 CLI 凭什么认出"这是审核那条 run"：**内置 skill 审核者的身份里塞了这个记号**
  * （见下面那次 PATCH），而审核 run 的第一句话里带审核者的身份。
@@ -4696,6 +4789,11 @@ try {
     mineDraftRunId: '',
     auditFailRunId: '',
     auditDeadRunId: '',
+    // ★ 第 4 批：**真跑起来**的起草 run（量"起草中那一屏"）——它不能是写进去的夹具：
+    //   daemon 起的时候 `reconcileInterruptedRuns` 会把非终态 run 收成 failed，
+    //   写进去的"running"夹具量到的是"没跑成"那一屏（这个坑审核那一节踩过一次）。
+    draftingRunId: '',
+    draftingSourceRunId: '',
   }
   try {
     await stopDaemon()
@@ -4745,6 +4843,40 @@ try {
         const revisedSourceRunId = await makeSource()
         // 第三条源 + 第三条草稿：**只给 P2 的入库夹具用**（它会被 crystallized，见上）
         const mineSourceRunId = await makeSource()
+
+        /**
+         * ★★ 第四条源：**只给"起草中"那一屏用**（2026-10-21 第 4 批）。
+         *
+         * 它必须满足任务场景的门槛（设计 §4.3：有用户反馈 或 **审核过**）——否则
+         * `POST /api/crystallize/draft` 直接 400 `task_gate`，那一屏的夹具就起不来。
+         * `hasUserFeedback` 当前恒 false，所以门槛 = 该源 run 有一条 **completed 的
+         * review run**（`subject: {type:'run', id: 源run}`，见 `crystallizeTargets`）。
+         *
+         * ⚠️ 为什么不拿一条**对话**当源（那样就没有门槛）：探针那一屏的对话是**探针页
+         *    在浏览器里**造的，Node 侧这一刻数据目录还干净；而我第一版改成"运行时造一条
+         *    对话"之后，聊天那一节**整片红了**——它依赖"列表里就是它自己造的那几条"。
+         *    （那次的症状记在这里，免得下次又图省事去造对话。）
+         */
+        const draftingSourceRunId = await makeSource()
+        crystalFixture.draftingSourceRunId = draftingSourceRunId
+        {
+          const gateRunId = ulid()
+          await store.insertRun({
+            id: gateRunId,
+            workspaceId,
+            kind: 'review',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            // ⚠️ `subject.id` 必须是**源执行 run 的 id**、`type` 必须是 `run`
+            //    （`crystallizeTargets` 就按这两个字段判"审核过"）。
+            subject: { type: 'run', id: draftingSourceRunId },
+            prompt: '探针夹具：为了让"起草中"那一屏的源任务过门槛而写的审核 run',
+            queuedAt: now - 40_000,
+            startedAt: now - 39_000,
+            finishedAt: now - 38_000,
+          })
+        }
 
         /**
          * 造一条**已完成的起草 run** + 它的产出目录。
@@ -4963,6 +5095,92 @@ try {
     throw new DaemonDown()
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // ★ 起一条**真的在跑**的起草 run（量"起草中那一屏"，2026-10-21 第 4 批）
+  //
+  // ⚠️ 位置有讲究：必须**在第二次起 daemon 之后**。第一版我把这一段写进了上面那段
+  //    HTTP 夹具里，`crystalFixture` 那一刻还不可见 ⇒ `ReferenceError: Cannot access
+  //    'crystalFixture' before initialization`（同一个坑这份文件里早有一条注释记着，
+  //    我还是踩了——所以这次把理由写在这里）。
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 为什么要真跑：这一屏的判据全是"跑着的时候"的样子（实时日志、产出/依据两个 tab、
+  // 默认停在产出）。写一条 `running` 的夹具 run 会**假绿**——daemon 起的时候
+  // `reconcileInterruptedRuns`（FR-RUNTIME-11）把非终态 run 收成 `failed`，
+  // 于是界面上是"起草没跑成"那一屏，两条判据碰巧都成立（审核那一节踩过同一个坑）。
+  //
+  // 做法与审核那一节完全同构：
+  //   ① 内置起草者的身份里塞记号 + 改挂 `generic`（探针的一次性 daemon 上，用完即删）；
+  //   ② 假 `agent-cli` 认出这个记号就吐一行、然后挂住（不读 prompt、不改文件、不花额度）；
+  //   ③ **用一条已有对话的 run 当素材源**（对话场景没有"审核过才算数"那道门槛，
+  //      见设计 §4.3 的 task_gate：任务场景要审核结论或用户反馈，对话场景不用）。
+  //
+  // ⚠️ 素材源用**夹具对话**（`conversation.jsonl` 里那条，它的 run 因为假 CLI 立刻
+  //    127 而 failed）——起草只读对话的轮次，源 run 成没成功不影响（实测：turns = 1）。
+  try {
+    const agentsPage = await (await fetch(`${base}/api/agents`)).json()
+    const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.role === 'drafter')
+    if (!drafter) {
+      log(yellow('⚠ 没找到内置起草者——"起草中"那一屏会量不到'))
+    } else {
+      const patchRes = await fetch(`${base}/api/agents/${encodeURIComponent(drafter.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runtimeKey: 'generic',
+          instructions: `${PROBE_DRAFT_MARKER}\n探针夹具：这条内置起草者的身份在探针的一次性 daemon 上被临时改过。`,
+        }),
+      })
+      if (!patchRes.ok) log(yellow(`⚠ 内置起草者改挂 generic 失败：HTTP ${patchRes.status}`))
+
+      // ── 素材源：夹具阶段造的那条**已审核过**的执行 run（过 §4.3 的任务门槛）──
+      const sourceRun = crystalFixture.draftingSourceRunId
+        ? { runId: crystalFixture.draftingSourceRunId }
+        : null
+      if (!sourceRun) {
+        // 什么都不做：那一节会以"没量到"的形式点名自己（不许静默空过）
+        log(yellow('⚠ 没有"起草中"那一屏的素材源 run——那一节会量不到（见夹具阶段的注释）'))
+      } else {
+        const draftRes = await fetch(`${base}/api/crystallize/draft`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            runId: sourceRun.runId,
+            target: { kind: 'new', purpose: '探针夹具：量起草中那一屏' },
+          }),
+        })
+        const draftBody = await draftRes.json().catch(() => ({}))
+        if (!draftRes.ok || typeof draftBody.draftRunId !== 'string') {
+          log(yellow(`⚠ 发起起草夹具失败：HTTP ${draftRes.status} ${JSON.stringify(draftBody)}`))
+        } else {
+          crystalFixture.draftingRunId = draftBody.draftRunId
+          // ★ 确认它**真的是 running**（不是秒退）：这一屏的判据全指着这一点。
+          //   秒退说明假 CLI 没认出记号（比如 PATCH 没生效 / 记号拼错），
+          //   而那种情况下量到的是"起草没跑成"，不是"起草中"。
+          let status = ''
+          for (let i = 0; i < 40; i += 1) {
+            const one = await (await fetch(`${base}/api/runs/${crystalFixture.draftingRunId}`)).json()
+            status = String(one.status ?? '')
+            if (status !== 'queued' && status !== 'dispatched') break
+            await sleep(50)
+          }
+          if (status !== 'running') {
+            log(
+              yellow(
+                `⚠ 起草夹具 run 不是 running（实测 ${status || '(取不到)'}）——` +
+                  '"起草中"那一屏的判据会红，而且红得有道理（先查假 CLI 记号）',
+              ),
+            )
+          } else {
+            log(`  起草夹具：一条真在跑的起草 run（${crystalFixture.draftingRunId}）`)
+          }
+        }
+      }
+    }
+  } catch (err) {
+    log(yellow(`⚠ 起起草夹具时出错：${err}`))
+  }
+
   // ⚠️ 这一段必须在这里，不能写在 HTTP 夹具那一段（第一版就是那样，探针日志里报
   //    `ReferenceError: Cannot access 'crystalFixture' before initialization`）：
   //    夹具草稿是**上面直写 store** 造的（那时 daemon 停着），`crystalFixture` 到
@@ -5110,6 +5328,7 @@ try {
         `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
         `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
+        `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +

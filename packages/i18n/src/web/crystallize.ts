@@ -240,6 +240,8 @@ export const crystallizeText = {
   'crystallize.tabDraft': { zh: '草稿', en: 'Draft' },
   'crystallize.tabEvidence': { zh: '依据', en: 'Evidence' },
   'crystallize.tabProcess': { zh: '过程', en: 'Process' },
+  // 起草中那一屏只有两个 tab：产出（run 的实时输出）/ 依据（目标 + 素材）
+  'crystallize.tabOutput': { zh: '产出', en: 'Output' },
   'crystallize.auditFindingsTitle': { zh: '审核问题清单', en: 'Audit findings' },
   'crystallize.processNoAuditYet': {
     zh: '还没审核过，所以这里只有起草 run。',

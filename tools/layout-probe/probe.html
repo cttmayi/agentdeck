@@ -5003,6 +5003,115 @@
             facts['crystal.auditDeadRetry'] = !!(block &&
               [...block.querySelectorAll('button')].some((b) => text(b).includes('重新审核')))
           }
+
+          // ══════════════════════════════════════════════════════════════
+          // ★★★ 起草中那一屏（2026-10-21 第 4 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 这一节以前**完全是空白**：探针的夹具都是"已完成草稿"，`step === 'drafting'`
+          // 没有任何判据兜着（第 3 批改那一段标记时只能靠手工起一条真 run 验）。
+          // 现在夹具在 Node 侧真的发起一条起草 run（假 `agent-cli` 吐一行就挂着），
+          // 于是这一屏的判据量的是**真现场**：真 running、真日志、真 SSE。
+          //
+          // ⚠️ 全节必须走 `untilNet`：起草 run 的日志流（SSE）开着 ⇒ Chrome 的虚拟
+          //    时钟**不走**，`until()` 里的 `setTimeout` 永远不触发（这条在审核那一节
+          //    已经踩过一次，症状是"探针跑满超时、dump 里 done 不是 true"）。
+          // ⚠️ 结尾必须**切走路由**把组件卸载掉：不关掉这条 SSE，后面每一节的时钟都是冻的。
+          {
+            const cyDrafting = cyQuery.get('crystalDrafting')
+            facts['crystal.draftingFixtureId'] = cyDrafting || null
+            const cyEnterDrafting = async () => {
+              if (!cyDrafting) return false
+              f.contentWindow.location.hash = '#/tasks'
+              await untilNet(() => !d().querySelector('.review-tabs'), 20)
+              f.contentWindow.location.hash = `#/crystallize/${cyDrafting}`
+              // 未收尾的草稿挂的是「继续」（与审阅态同一条路：点它才接到那条 run 上）
+              const attached = await untilNet(
+                () => [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
+                60,
+              )
+              if (!attached) return false
+              click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
+              // 起草中的标志：tab 条 + 那个 run 的日志框（**不**是结论条——那时还没审核）
+              return await untilNet(
+                () => !!d().querySelector('.review-tabs') && !!d().querySelector('.log-box'),
+                120,
+              )
+            }
+            facts['crystal.draftingAttached'] = await cyEnterDrafting()
+            if (facts['crystal.draftingAttached']) {
+              facts['crystal.draftingStepText'] = text(d().querySelector('.crystal-steps'))
+              const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
+              facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
+              facts['crystal.draftingTabDefault'] =
+                text(cyDTabs().find((b) => b.getAttribute('aria-selected') === 'true')) ?? null
+              facts['crystal.draftingTabStripBox'] = cyRect(d().querySelector('.review-tabs'))
+              // 产出：日志真的在流（假 CLI 那一行经 daemon 解析、再经 SSE 落到页面上）
+              //
+              // ⚠️ 必须**等那一行真的落地**再量，不能只等 `.log-box` 出现：日志框一挂上
+              //    就先显示"· 等待输出…"，而那一行要经 daemon 解析、再经 SSE 送过来。
+              //    第一版只等了 `.log-box`，量到的是"· 等待输出…"，判据红了——而界面没错
+              //    （那时 run 刚被 dispatch，确实还没输出）。审核那一节早就记着这条教训。
+              await untilNet(
+                () =>
+                  (d().querySelector('.log-box')?.textContent ?? '').includes(
+                    '起草 run 正在跑',
+                  ),
+                400,
+              )
+              const cyDLog = d().querySelector('.log-box')
+              facts['crystal.draftingLogText'] = cyDLog ? text(cyDLog) : null
+              facts['crystal.draftingLogLive'] = (cyDLog?.textContent ?? '').includes(
+                '起草 run 正在跑',
+              )
+              // ★ 目标那块**表单**不该再出现（它搬进了「依据」tab）：判据是"页面上没有
+              //   `.section-body` 里的可编辑表单"，而不是"某段文案不见了"。
+              facts['crystal.draftingTargetSectionGone'] =
+                !d().querySelector('.detail-scroll > .drawer-section .section-body')
+              facts['crystal.draftingPaneCount'] = d().querySelectorAll(
+                '.detail-scroll > .drawer-section',
+              ).length
+              const cyDraftBox = cyRect(d().querySelector('.log-box'))
+              facts['crystal.draftingLogBox'] = cyDraftBox
+              facts['crystal.draftingScrollH'] = d().documentElement.scrollHeight
+              facts['crystal.draftingPageFits'] =
+                facts['crystal.draftingScrollH'] <= facts['crystal.viewportH'] + 1
+
+              // ── 切到「依据」：目标摘要 + 素材，且**不折叠** ──
+              const cyEvTab2 = cyDTabs().find((b) => text(b) === '依据')
+              if (cyEvTab2) {
+                click(cyEvTab2)
+                const cyEvOk2 = await untilNet(
+                  () => !!d().querySelector('.process-pane .file-row'),
+                  60,
+                )
+                facts['crystal.draftingEvidenceOpens'] = cyEvOk2
+                facts['crystal.draftingEvidenceBlocks'] = [
+                  ...d().querySelectorAll('.process-pane .proc-head'),
+                ].map((h) => text(h))
+                facts['crystal.draftingEvidenceRows'] = [
+                  ...d().querySelectorAll('.process-pane .file-row'),
+                ].map((r) => text(r))
+                facts['crystal.draftingEvidenceTarget'] = text(
+                  d().querySelector('.process-pane .faint'),
+                )
+                facts['crystal.draftingEvidenceNoFold'] = !d().querySelector(
+                  '.process-pane .fold-section',
+                )
+                const cyEvPane2 = cyRect(d().querySelector('.process-pane'))
+                facts['crystal.draftingEvidenceBox'] = cyEvPane2
+                facts['crystal.draftingEvidenceFits'] =
+                  cyEvPane2 !== null &&
+                  cyEvPane2.y + cyEvPane2.h <= facts['crystal.viewportH'] + 1
+              } else {
+                facts['crystal.draftingEvidenceOpens'] = null
+              }
+            }
+            // ★ 兜底：**保证那条 SSE 关掉**（这一屏的 run 是 Node 侧起的，探针不取消它，
+            //   它由 run.mjs 收尾时连假 CLI 一起杀）。
+            f.contentWindow.location.hash = '#/tasks'
+            await untilNet(() => !d().querySelector('.review-tabs'), 20)
+          }
         }
 
 
