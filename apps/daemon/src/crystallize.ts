@@ -62,6 +62,9 @@ export interface CrystallizeTargets {
    * 该来源**最近一条未入库**的 skill-draft 起草 run（恢复进行中的起草）。
    * 起草中（非终态）与已完成待审阅都算；`crystallized: true`（已入库）的跳过。
    * `null` = 没有进行中的起草。
+   *
+   * ⚠️ 2026-10-21 加了一个例外：**进来的 run 本身就是一条草稿时，就挂它**
+   * （见 `crystallizeTargets` 里的 `requested`）——URL 指名了哪条草稿就是哪条。
    */
   activeDraft: { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null
 }
@@ -94,6 +97,23 @@ export async function crystallizeTargets(
   store: Store,
   run: Run,
 ): Promise<CrystallizeTargets> {
+  // ══════════════════════════════════════════════════════════════════
+  // ★★ URL 指名的那条草稿优先（2026-10-21，真机量出来的缺陷）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 原来这里把"进来的 run 是不是草稿"这个信息**丢掉了**：先解析成来源、再一律取
+  // 「该来源最新那条草稿」。后果在真机上很实在——同一个来源下有几条草稿时，
+  // 「沉淀」列表里是**几行、点开却是同一条**（实测：同一个对话来源下 4 条草稿，
+  // 只有最新那条能看；其余几条**花钱审核出来的判决与问题清单在界面上打不开**，
+  // 那条 `#/crystallize/<草稿id>` 深链等于失效）。
+  //
+  // 现在的口径：
+  //   · 进来的 run 是草稿 ⇒ **就挂它**（含已入库的：点它进来要看到的就是"这条已经入库了"
+  //     与那次入库的 git 历史，这正是"回看"该有的行为）；
+  //   · 已丢弃（`discarded`）的不复活——丢弃是列表里一个明确的动作，
+  //     深链不该把它拉回界面上（回到"取最新那条"的老口径）；
+  //   · 进来的 run 是来源 ⇒ 老口径不变（最近一条未入库的）。
+  const requested = draftInfo(run)
   run = await resolveSourceRun(store, run)
 
   let agentId: string = run.agentId as string
@@ -133,7 +153,7 @@ export async function crystallizeTargets(
   // 找该来源最近一条**未入库**（crystallized 不是 true）的 skill-draft run。
   // 口径：任务 = 源 run id 精确匹配；对话 = 会话所有轮次的 runId 都算
   // （一个会话多条 run，流程页从哪一轮进都可能）。
-  const activeDraft = await findActiveDraft(store, run)
+  const activeDraft = requested ?? (await findActiveDraft(store, run))
 
   return {
     loadedSkills,
@@ -183,9 +203,28 @@ async function findActiveDraft(
       return src !== undefined && sourceRunIds.includes(src)
     })
     .sort((a, b) => b.queuedAt - a.queuedAt)
-  const latest = matched[0]
-  if (!latest || !latest.crystallizeTarget) return null
-  return { runId: latest.id as string, status: latest.status, target: latest.crystallizeTarget }
+  return draftInfo(matched[0])
+}
+
+/**
+ * 一条 run ⇒ 「进行中的起草」那份信息（`activeDraft` 的形状）。
+ *
+ * 抽出来是因为有**两个**调用方：`findActiveDraft`（最新那条）与 `crystallizeTargets`
+ * 里"URL 指名的那条"——两处必须同一种形状、同一套判据（`crystallizeTarget` 有没有落库），
+ * 抄两份早晚会漂。
+ *
+ * ⚠️ `discarded` 在这里也判：已丢弃的草稿**不复活**（丢弃是列表里明确的动作；
+ * 深链拿着旧 URL 回来不该把它拉回界面上）。
+ */
+function draftInfo(
+  draft: Run | undefined,
+): { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null {
+  if (!draft) return null
+  if (draft.kind !== 'execute' || draft.subject.type !== 'skill-draft') return null
+  if (draft.discarded === true) return null
+  const target = draft.crystallizeTarget
+  if (!target) return null
+  return { runId: draft.id as string, status: draft.status, target }
 }
 
 /**

@@ -288,6 +288,73 @@ describe('crystallizeTargets：目标面板信息', () => {
       '取最近一条，目标随行',
     )
   })
+  /**
+   * ★ 2026-10-21（真机量出来的缺陷）：`#/crystallize/<草稿runId>` 里那个 id 原来被丢掉，
+   * 一律挂"该来源最新那条"——同一个来源下几条草稿在「沉淀」列表里是**几行、点开却是同一条**，
+   * 旧那条**花钱审出来的判决与问题清单在界面上打不开**。
+   *
+   * 这一条钉两件事：① 深链指名的那条**就是**那条（哪怕它不是最新的）；
+   * ② 从**来源**进来时老口径不变（仍取最近一条未入库的）——两个入口不许互相串。
+   */
+  test('★ 深链指名的那条草稿优先（不再是"该来源最新那条"）；来源入口仍取最新', async () => {
+    const agent = await seedAgent({ id: 'exec2c' })
+    const taskRun = await seedRun({
+      id: 'run-task2c',
+      agentId: agent.id as string,
+      subject: { type: 'issue', id: 'issue-2c' },
+    })
+    await appendMessage('run-task2c', { type: 'text', content: '有内容' })
+
+    // 同一个来源下的**两条**草稿：旧的那条已完成待审阅、新的那条还在跑
+    const older = makeRun({
+      id: 'draft-older',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'completed',
+      subject: { type: 'skill-draft', id: 'draft-older', sourceRunId: 'run-task2c' },
+      crystallizeTarget: { kind: 'new' },
+      queuedAt: 100,
+    })
+    await store.insertRun(older)
+    const newer = makeRun({
+      id: 'draft-newer2c',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'running',
+      subject: { type: 'skill-draft', id: 'draft-newer2c', sourceRunId: 'run-task2c' },
+      crystallizeTarget: { kind: 'new' },
+      queuedAt: 300,
+    })
+    await store.insertRun(newer)
+
+    // ① 从来源进来 ⇒ 最近那条（老口径）
+    const bySource = await crystallizeTargets(store, taskRun)
+    assert.equal(bySource.activeDraft?.runId, 'draft-newer2c', '来源入口取最近一条')
+
+    // ② 拿**旧那条草稿自己**进来 ⇒ 就是它（不是最新的那条）——这是这一条判据的全部意义
+    const byDraft = await crystallizeTargets(store, older)
+    assert.equal(
+      byDraft.activeDraft?.runId,
+      'draft-older',
+      'URL 指名了旧草稿 ⇒ 必须挂旧那条（挂最新的就等于深链失效、旧草稿的判决打不开）',
+    )
+    assert.equal(byDraft.activeDraft?.status, 'completed', '状态随行（界面据此决定进哪一屏）')
+
+    // ⚠️ ③④ 这两步必须**从 store 重新读那条 run**再传进去：传本地那个 `older` 对象的话，
+    //    它身上没有刚写下去的 `crystallized`/`discarded` 标记 ⇒ 量到的是过期现场。
+    //    （第一版就是这么写的，第 ④ 步红了而代码是对的——真链路上 run 一律来自 store。）
+    const reread = async (): Promise<Run> => (await store.getRun('draft-older' as never))!
+
+    // ③ 已入库的草稿：深链**照样**能打开（"回看这条已入库的"要看到它自己）
+    await store.insertRun({ ...older, crystallized: true })
+    const crystallized = await crystallizeTargets(store, await reread())
+    assert.equal(crystallized.activeDraft?.runId, 'draft-older', '已入库的深链仍然指它自己')
+
+    // ④ 已丢弃的**不复活**（丢弃是列表里明确的动作，旧 URL 不该把它拉回界面）
+    await store.insertRun({ ...older, discarded: true, crystallized: false })
+    const discarded = await crystallizeTargets(store, await reread())
+    assert.equal(discarded.activeDraft?.runId, 'draft-newer2c', '已丢弃的深链回落到最新那条')
+  })
 })
 
 describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {

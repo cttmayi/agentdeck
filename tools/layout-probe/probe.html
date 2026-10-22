@@ -5005,6 +5005,50 @@
           }
 
           // ══════════════════════════════════════════════════════════════
+          // ★★★ 深链语义：URL 指名的草稿**就是**那一条（2026-10-21 第 7 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 真机上量出来的缺陷：`#/crystallize/<草稿id>` 里那个 id 原来被后端丢掉、
+          // 一律挂"该来源最新那条"⇒ 同一来源下的几条草稿在「沉淀」列表里是**几行、
+          // 点开却是同一条**（实测：同一对话来源下 4 条草稿只有最新那条能看，其余几条
+          // 花钱审出来的判决在界面上打不开）。
+          //
+          // 这一节量两件事，缺一不可（只量前者会把"来源入口也变成深链"这种改坏当成通过）：
+          //   ① 深链点**旧的那条** ⇒ 挂上的就是旧的（兄妹草稿只有 1 个文件）；
+          //   ② 从**来源**进来 ⇒ 仍然是"最近那条"（3 个文件）。
+          {
+            const cySibling = cyQuery.get('crystalSibling')
+            const cySource = cyQuery.get('crystalSource')
+            const cyReadDraft = async (id) => {
+              if (!id) return null
+              f.contentWindow.location.hash = '#/tasks'
+              await until(() => !d().querySelector('.review-tabs'), 40)
+              f.contentWindow.location.hash = `#/crystallize/${id}`
+              const cont = await until(
+                () =>
+                  [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
+                120,
+              )
+              if (!cont) return null
+              click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
+              const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+              if (!attached) return null
+              return {
+                rows: [...d().querySelectorAll('.review-pane .file-row')].map((r) => text(r)),
+                bar: text(d().querySelector('.conclusion-bar')),
+              }
+            }
+            const cySiblingView = await cyReadDraft(cySibling)
+            facts['crystal.deepLinkSiblingRows'] = cySiblingView ? cySiblingView.rows : null
+            facts['crystal.deepLinkSiblingBar'] = cySiblingView ? cySiblingView.bar : null
+            const cySourceView = await cyReadDraft(cySource)
+            facts['crystal.sourceEntryRows'] = cySourceView ? cySourceView.rows : null
+            // 收尾：切走路由（后面的小节自己会进它要的页面）
+            f.contentWindow.location.hash = '#/tasks'
+            await until(() => !d().querySelector('.review-tabs'), 40)
+          }
+
+          // ══════════════════════════════════════════════════════════════
           // ★★★ 目标态那一屏（2026-10-21 第 5 批）
           // ══════════════════════════════════════════════════════════════
           //

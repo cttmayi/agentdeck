@@ -3477,6 +3477,31 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
   },
+  // ══════════════ 深链语义（2026-10-21 第 7 批：真机上量出来的缺陷）══════════════
+  {
+    view: '沉淀',
+    key: 'crystal.deepLinkSiblingRows',
+    label:
+      '★★★ 深链 `#/crystallize/<草稿id>` 打开的就是**那一条**草稿（夹具里那条兄妹草稿只有 1 个文件；改前这个 id 被丢掉、一律挂"该来源最新那条"）',
+    ok: (v) => Array.isArray(v) && v.length === 1,
+    show: (v, f) => `${JSON.stringify(v)}　结论条 ${JSON.stringify((f['crystal.deepLinkSiblingBar'] ?? '').slice(0, 40))}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.deepLinkSiblingBar',
+    label:
+      '★★ 深链打开的那条**判决也是它自己的**（兄妹草稿没审过 ⇒ 结论条说"还没审核过"）——改前显示的是最新那条的判决，真机上"花钱审出来的结论在界面上打不开"就是这么来的',
+    ok: (v) => typeof v === 'string' && v.includes('还没审核过'),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 60)),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.sourceEntryRows',
+    label:
+      '★★ 从**来源**进来（URL 给的是来源 run）仍然是"最近那条未入库的草稿"（3 个文件）——与上一条配对：修"深链失效"不许把来源入口也改坏',
+    ok: (v) => Array.isArray(v) && v.length === 3,
+    show: (v) => JSON.stringify(v),
+  },
   // ══════════════ 目标态那一屏（2026-10-21 第 5 批）══════════════
   //
   // 它是这一屏的**入口**，却一直是探针的空白（夹具都挂在"已完成草稿"上）。
@@ -4900,6 +4925,11 @@ try {
     draftingRunId: '',
     draftingSourceRunId: '',
     targetSourceRunId: '',
+    // ★ 第 7 批：**同来源**的第二条草稿（"兄妹草稿"）——只给"深链指名哪条就是哪条"那一组用。
+    //   它必须**比 draftRunId 旧**：来源入口取的是"最近那条"，旧了才不会动上面那一大族判据
+    //   （它们量的是 draftRunId 的现场）。queuedAt 由 extra 覆盖（makeDraft 里 `...rest`
+    //   在后面展开，见那段注释）。
+    siblingDraftRunId: '',
   }
   try {
     await stopDaemon()
@@ -5081,6 +5111,23 @@ try {
           'references/notes.md': '# 说明\n\n第一版。\n',
           'scripts/check.sh': '#!/bin/sh\necho probe\n',
         })
+        /**
+         * ★★ 第 7 批：**同来源**的第二条草稿（"兄妹草稿"）。
+         *
+         * 为什么需要它：真机上量出一个缺陷——`#/crystallize/<草稿id>` 里那个 id 原来被丢掉，
+         * 一律挂"该来源最新那条"⇒ 同一个来源下几条草稿在「沉淀」列表里是几行、点开却是同一条
+         * （真机上：同一对话来源下 4 条草稿，只有最新那条能看，其余几条**花钱审出来的判决
+         * 在界面上打不开**）。修法是"深链指名的那条优先"。这一对夹具就是为那条判据造的：
+         * 兄妹草稿只有 1 个文件、草稿本体有 3 个 ⇒ 量文件数就能分辨挂上的是哪一条。
+         *
+         * ⚠️ 它必须**旧**（queuedAt 更小）：来源入口取"最近那条"，旧了才不影响上面那一族
+         *    判据（它们量的都是 draftRunId 的现场）。
+         */
+        crystalFixture.siblingDraftRunId = await makeDraft(
+          ulid(),
+          { 'SKILL.md': skillMd('兄妹版') },
+          { sourceRunId: crystalFixture.sourceRunId, queuedAt: now - 90_000 },
+        )
         // 第二版：`revisedFrom` 指着第一版（界面据此给「对比上一版」）
         crystalFixture.revisedRunId = await makeDraft(
           ulid(),
@@ -5465,6 +5512,8 @@ try {
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
         `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
+        `&crystalSibling=${encodeURIComponent(crystalFixture.siblingDraftRunId)}` +
+        `&crystalSource=${encodeURIComponent(crystalFixture.sourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
