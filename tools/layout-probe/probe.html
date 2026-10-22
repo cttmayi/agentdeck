@@ -4501,7 +4501,7 @@
           const cyEnter = async (cyRunId) => {
             if (!cyRunId) return false
             f.contentWindow.location.hash = '#/tasks'
-            await until(() => !d().querySelector('.review-bar'), 40)
+            await until(() => !d().querySelector('.conclusion-bar'), 40)
             f.contentWindow.location.hash = `#/crystallize/${cyRunId}`
             const attached = await until(
               () =>
@@ -4512,7 +4512,7 @@
             const cont = [...d().querySelectorAll('button')].find((b) => text(b).includes('继续'))
             click(cont)
             // 审阅态的标志：结论条（`.review-bar`）出现
-            return await until(() => !!d().querySelector('.review-bar'), 120)
+            return await until(() => !!d().querySelector('.conclusion-bar'), 120)
           }
 
           const cyOk = await cyEnter(cyDraft)
@@ -4574,7 +4574,7 @@
           facts['crystal.statsHits'] = cyStatsHits
 
           // ★ 审核区块（结论与问题清单常驻的那一块）
-          const cyAudit = d().querySelector('.audit-block')
+          const cyAudit = d().querySelector('.conclusion-block')
           facts['crystal.auditPresent'] = !!cyAudit
           facts['crystal.auditText'] = cyAudit ? text(cyAudit) : null
           facts['crystal.auditStartButton'] = !!(
@@ -4584,8 +4584,66 @@
             )
           )
 
+          // ★ 编辑窗格（树 + 窗格那一块）的起点：这次重排争的就是它。
+          //   改前三条横条摞在它上面，起点落在 y≈490；探针按 y 钉住"首屏能直接动手"。
+          // ⚠️ 变量名不许与下面已有的 `cyPaneRect`（量窗格尺寸那条）重名——**重名是
+          //    脚本级的 SyntaxError**，而 probe.html 不经过 typecheck/svelte-check，
+          //    于是整个探针一个字都发不出来（外面只看到"没在超时前给出结果"）。
+          //    实测撞过一次；现在 run.mjs 起 Chrome 之前会先给这份脚本做语法检查。
+          const cyPaneTopRect = cyRect(d().querySelector('.review-pane'))
+          facts['crystal.paneTopY'] = cyPaneTopRect ? Math.round(cyPaneTopRect.y) : null
+
+          // ★「开始审核」按钮的盒子：改前它在 69px 宽里折成 3 行（实测 69×54）。
+          const cyStartBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
+            (b.textContent ?? '').includes('开始审核'),
+          )
+          facts['crystal.auditStartButtonBox'] = cyRect(cyStartBtn)
+          // ★ 2026-10-21：那句"这是预筛、不替你做入库决定"从**段落**搬进了这个按钮的
+          //   `title`（段落占 42px 两行，而它是解释不是结论）。判据跟着搬——不是删掉它：
+          //   要证明这句话还在，而且还能被看到（悬停），而不是被顺手删干净。
+          facts['crystal.auditStartButtonTitle'] = cyStartBtn?.getAttribute('title') ?? null
+
+          /*
+           * ★ 窄窗口：结论条**不许换行、不许把按钮挤出条外**。
+           *
+           * 这条判据的来源是一个真缺陷：「开始审核」原来只有 69px 宽、被折成 **3 行**（高 54px），
+           * 因为它所在的横条没有管住 `flex`（`white-space` 与 `flex-shrink` 都没写）。而这个
+           * 条件**只在窄的时候出现**——1400px 的窗口下量不出来。所以这里把 iframe 收窄再量一次，
+           * 量完立刻复原：后面每一段都依赖 1280×880 这个首屏尺寸。
+           */
+          const cyIframeW = f.style.width
+          f.style.width = '1000px'
+          await untilNet(() => {
+            const b = d().querySelector('.conclusion-bar')
+            return !!b && Math.round(b.getBoundingClientRect().width) < 800
+          }, 60)
+          const cyNarrowBar = d().querySelector('.conclusion-bar')
+          if (cyNarrowBar) {
+            const nb = cyNarrowBar.getBoundingClientRect()
+            const act = cyNarrowBar.querySelector('.bar-actions')
+            const ab = act ? act.getBoundingClientRect() : null
+            facts['crystal.barNarrowBox'] = {
+              w: Math.round(nb.width),
+              h: Math.round(nb.height),
+              buttonsInside: ab !== null && ab.right <= nb.right + 1 && ab.left >= nb.left - 1,
+            }
+          } else {
+            facts['crystal.barNarrowBox'] = null
+          }
+          f.style.width = cyIframeW
+          await untilNet(() => {
+            const b = d().querySelector('.conclusion-bar')
+            return !!b && Math.round(b.getBoundingClientRect().width) > 800
+          }, 60)
+
           // ① 结论条：在、而且**在首屏**（改前审阅的结论在 y=932，900 高的窗口看不到）
-          const cyBar = d().querySelector('.review-bar')
+          // ★ 2026-10-21：结论条**只有一条**（原来是三条横条竖着摞：审核块 + 校验条 + frontmatter 摘要）
+          const cyBars = [...d().querySelectorAll('.conclusion-bar')]
+          facts['crystal.conclusionBarCount'] = cyBars.length
+          facts['crystal.legacyBarsGone'] =
+            d().querySelector('.review-bar-block') === null && d().querySelector('.audit-block') === null
+
+          const cyBar = d().querySelector('.conclusion-bar')
           const cyBarRect = cyRect(cyBar)
           facts['crystal.barPresent'] = !!cyBar
           facts['crystal.barText'] = cyBar ? text(cyBar) : null
@@ -4629,7 +4687,7 @@
 
           // 只读 frontmatter + slug 是唯一输入框（四轮第 ④ 点：审阅不再填空）
           const cySlugInputs = [...d().querySelectorAll('.slug-inline input')]
-          const cyAllTextInputs = [...d().querySelectorAll('.review-bar-block input')]
+          const cyAllTextInputs = [...d().querySelectorAll('.conclusion-meta input')]
           facts['crystal.slugInputCount'] = cySlugInputs.length
           facts['crystal.reviewInputCount'] = cyAllTextInputs.length
           facts['crystal.frontmatterLine'] =
@@ -4751,7 +4809,7 @@
             d().querySelector('textarea.editor')?.value ?? ''
           ).slice(0, 60)
           facts['crystal.revisedBarText'] = cyRevisedOk
-            ? text(d().querySelector('.review-bar'))
+            ? text(d().querySelector('.conclusion-bar'))
             : null
           // 接口那一份也读一次：分清"接口没给 revisedFrom"与"页面没换现场"
           facts['crystal.revisedApiRevisedFrom'] = await f.contentWindow
@@ -4784,7 +4842,7 @@
           facts['crystal.auditFailFixture'] = cyFail
           facts['crystal.auditFailEntered'] = await cyEnter(cyFail)
           if (facts['crystal.auditFailEntered']) {
-            const cyAuditBlock = d().querySelector('.audit-block')
+            const cyAuditBlock = d().querySelector('.conclusion-block')
             facts['crystal.auditFailText'] = cyAuditBlock ? text(cyAuditBlock) : null
             const cyFindingsBtn = cyAuditBlock
               ? [...cyAuditBlock.querySelectorAll('button')].find((b) =>
@@ -4824,28 +4882,28 @@
           // 于是那一屏其实是"没跑成"那一屏，两条判据碰巧都成立。
           facts['crystal.auditLiveEntered'] = await cyEnter(cyQuery.get('crystalDraft'))
           if (facts['crystal.auditLiveEntered']) {
-            const startBtn = [...d().querySelectorAll('.audit-block button')].find((b) =>
+            const startBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
               text(b).includes('开始审核'),
             )
             facts['crystal.auditLiveStartButton'] = !!startBtn
             if (startBtn) {
               click(startBtn)
               // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
-              await untilNet(() => !!d().querySelector('.audit-block .log-box'))
-              let block = d().querySelector('.audit-block')
+              await untilNet(() => !!d().querySelector('.conclusion-block .log-box'))
+              let block = d().querySelector('.conclusion-block')
               facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
               // ⚠️ 两件事都要**等到**，不能量一次就算：
               //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
               //      量到的是"排队中"，判据红了，而界面没错（真现场就是还在排队）。
               //   ② 假 CLI 吐的那行要经 daemon 解析、再经 SSE 送到页面。
               //   等待全部走 `untilNet`（SSE 开着时时钟不走，`until` 会挂死）。
-              await untilNet(() => text(d().querySelector('.audit-block .badge')) === '运行中', 400)
+              await untilNet(() => text(d().querySelector('.conclusion-block .badge')) === '运行中', 400)
               await untilNet(
                 () =>
-                  (d().querySelector('.audit-block .log-box')?.textContent ?? '').includes('正在跑'),
+                  (d().querySelector('.conclusion-block .log-box')?.textContent ?? '').includes('正在跑'),
                 400,
               )
-              block = d().querySelector('.audit-block')
+              block = d().querySelector('.conclusion-block')
               facts['crystal.auditLiveText'] = block ? text(block) : null
               facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
               facts['crystal.auditLiveBadge'] = block ? text(block.querySelector('.badge')) : null
@@ -4857,10 +4915,10 @@
                 click(cancelBtn)
                 // 取消是**异步**的（要等进程真的死掉、run 落到终态）⇒ 等界面改口（走 DOM，不走时钟）
                 await untilNet(
-                  () => !(d().querySelector('.audit-block')?.textContent ?? '').includes('审核正在进行'),
+                  () => !(d().querySelector('.conclusion-block')?.textContent ?? '').includes('审核正在进行'),
                   300,
                 )
-                const after = d().querySelector('.audit-block')
+                const after = d().querySelector('.conclusion-block')
                 facts['crystal.auditAfterCancelText'] = after ? text(after) : null
                 facts['crystal.auditAfterCancelStillRunning'] = (after?.textContent ?? '').includes(
                   '审核正在进行',
@@ -4872,7 +4930,7 @@
               //   （取消没成功、或 240 次 DOM 变化都没等到，就靠切路由把组件卸载掉）。
               f.contentWindow.location.hash = '#/tasks'
               // 等这次路由切换真的生效（用网络往返当节拍：此刻时钟还是冻着的）
-              await untilNet(() => !d().querySelector('.audit-block'), 20)
+              await untilNet(() => !d().querySelector('.conclusion-block'), 20)
             }
           }
 
@@ -4880,7 +4938,7 @@
           const cyDead = cyQuery.get('crystalAuditDead')
           facts['crystal.auditDeadEntered'] = await cyEnter(cyDead)
           if (facts['crystal.auditDeadEntered']) {
-            const block = d().querySelector('.audit-block')
+            const block = d().querySelector('.conclusion-block')
             facts['crystal.auditDeadText'] = block ? text(block) : null
             facts['crystal.auditDeadSaysRunning'] = block
               ? /审核正在进行|跑完再看这里/.test(text(block))

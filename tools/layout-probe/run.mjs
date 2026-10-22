@@ -45,6 +45,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import vm from 'node:vm'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -3264,6 +3265,44 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.conclusionBarCount',
+    label:
+      '★★★ 审阅态只有**一条**结论条（原来三条横条竖着摞：审核块 + 草稿校验条 + frontmatter 摘要，实测共 ~240px）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 条`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.legacyBarsGone',
+    label: '★★ 两条老横条的结构都不在了（`.review-bar-block` / `.audit-block`——留着就是两套并存）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.paneTopY',
+    label:
+      '★★★ 编辑窗格起点 y ≤ 340（改前实测 490：上面摞着三条横条，首屏只剩 ~280px 能编辑）',
+    ok: (v) => typeof v === 'number' && v <= 340,
+    show: (v) => `y=${v}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditStartButtonBox',
+    label:
+      '★★「开始审核」按钮**不许折行**：高 ≤ 40（改前实测 69×54——文案在 69px 宽里折成 3 行）',
+    ok: (v) => v !== null && typeof v === 'object' && v.h <= 40,
+    show: (v) => (v ? `${Math.round(v.w)}×${Math.round(v.h)}` : 'null'),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.barNarrowBox',
+    label:
+      '★★ 把窗口收窄到 1000px 再量一次：结论条仍是**一条**（高不变）且按钮没有被挤出条外——「开始审核」曾经在 69px 里折成 3 行、高 54px，而那个条件**只在窄的时候出现**',
+    ok: (v) => v !== null && typeof v === 'object' && v.h <= 46 && v.buttonsInside === true,
+    show: (v) => (v ? `${v.w}×${v.h} 按钮在条内=${v.buttonsInside}` : 'null'),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.auditPresent',
     label: '★★ 审核区块**常驻**在审阅态里（结论与问题清单要有地方落，不能只在有结论时才出现）',
     ok: (v) => v === true,
@@ -3272,8 +3311,16 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.auditText',
     label:
-      '★ 还没审核时它说清"这是预筛、不替你做入库决定"（这句是第 ① 条决定的界面形态：入库仍由人点）',
-    ok: (v) => typeof v === 'string' && v.includes('还没审核过') && v.includes('不替你做入库决定'),
+      '★ 还没审核时条上就四个字「还没审核过」——**不是 ✓ 也不是 ✗**（既没通过也没被否，画对勾是撒谎）',
+    ok: (v) => typeof v === 'string' && v.includes('还没审核过') && v.includes('○'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditStartButtonTitle',
+    label:
+      '★★ 那句"这是预筛、不替你做入库决定"搬进了「开始审核」的悬停提示——**它必须还在**（2026-10-21 把它从 42px 的段落里挪走，是为了让编辑器上移，不是把话删掉）',
+    ok: (v) => typeof v === 'string' && v.includes('预筛') && v.includes('入库决定'),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3741,7 +3788,50 @@ for (const d of [dataDir, workRoot, profile]) fs.mkdirSync(d, { recursive: true 
 
 const probeSrc = path.join(HERE, 'probe.html')
 const probeDst = path.join(WEB_DIST, PROBE_NAME)
-fs.copyFileSync(probeSrc, probeDst)
+const probeHtml = fs.readFileSync(probeSrc, 'utf8')
+
+/**
+ * ★ 起 Chrome 之前，先给探针页里的脚本做一次**语法检查**。
+ *
+ * 为什么非要有这一步：`probe.html` 里的脚本**不经过 typecheck / svelte-check**
+ * （它不是 `.ts`、也不是 `.svelte`），所以里面一个语法错会让**整个脚本解析失败**——
+ * 一个 fact 都发不出来，`#out` 停在 `pending`，外面只看到"探针没在超时前给出结果
+ * （dump 里没有 done:true）"，而真正的原因（"变量名写重了"）离这条消息隔了三层。
+ *
+ * 实测代价：2026-10-21 给"编辑窗格起点"加测量时把 `cyPaneRect`（下面已有同名变量）
+ * 又声明了一遍，探针连着两次跑满超时、一个字都没发出来，我先误判成
+ * "虚拟时钟下 iframe 的 load 事件会错过"，绕了 20 分钟才回到这里。**这一层就是为了
+ * 让下一次不必绕**：错在第几行、错在哪个标识符，当场打出来。
+ */
+function assertProbeScriptParses(html) {
+  const m = /<script\b[^>]*>([\s\S]*?)<\/script>/.exec(html)
+  if (!m) {
+    log(red('✗ 探针页里找不到 <script> 段——探针不会跑，先修 probe.html'))
+    process.exit(2)
+  }
+  const src = m[1]
+  const scriptStartLine = html.slice(0, m.index).split('\n').length
+  try {
+    new vm.Script(src, { filename: 'probe.html(script)' })
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err)
+    // 尽力把"脚本内的行号"换回"HTML 里的行号"：报错行在源里找得到就找它
+    const hit = /^(.*?):(\d+)$/m.exec((err && err.stack ? err.stack : '').split('\n')[1] ?? '')
+    const innerLine = hit ? Number(hit[2]) : null
+    log(red('✗ 探针脚本有语法错，整份探针一个字都发不出来：'))
+    log('  ' + msg)
+    if (innerLine !== null) {
+      const htmlLine = scriptStartLine + innerLine - 1
+      log('  probe.html 第 ' + htmlLine + ' 行附近：')
+      log('    ' + (html.split('\n')[htmlLine - 1] ?? '').trim())
+    }
+    log(dim('  （probe.html 不受 typecheck / svelte-check 覆盖，所以这一步是唯一的兜底）'))
+    process.exit(2)
+  }
+}
+
+assertProbeScriptParses(probeHtml)
+fs.writeFileSync(probeDst, probeHtml)
 
 const port = await freePort()
 const base = `http://127.0.0.1:${port}`

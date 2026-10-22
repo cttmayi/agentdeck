@@ -68,9 +68,17 @@ export const crystallizeText = {
   // §10.5 第 ⑤ 步：起草之后多了一步「审核」（内置审核者的预筛）。
   //  ⚠️ 文案要区分"审核"与"审阅入库"：前者是平台的预筛（结论），后者是人拍板入库。
   //     两个都叫"审"时，使用者会以为"审核通过了就是入库了"。
-  'crystallize.auditTitle': { zh: '审核结论（预筛）', en: 'Audit result (pre-screen)' },
+  // ★ 2026-10-21：原来的 `auditTitle`（「审核结论（预筛）」）没有使用者了——结论条上直接写
+  //   「审核通过（预筛）」，标题那层壳去掉（它自占一行 h3 + 上下间距）。删键不留死词条。
+  'crystallize.auditPrescreen': { zh: '预筛', en: 'pre-screen' },
+  'crystallize.auditRunningShort': { zh: '审核运行中', en: 'Audit running' },
+  // 2026-10-21：说明段收进按钮悬停，条上只留四个字（原来那段占 42px 两行）
+  'crystallize.auditNotYetBrief': { zh: '还没审核过', en: 'Not audited yet' },
+  // 2026-10-21：这段从**条上的段落**搬进了「开始审核」的悬停提示（段落占 42px 两行，
+  // 而它是解释不是结论）。搬运时把"预筛"这个词补了进来——原来段落里只有"不替你做入库
+  // 决定"，而结论条上写的是「审核通过（预筛）」：两处说的得是同一件事。
   'crystallize.auditNotYet': {
-    zh: '这份草稿还没审核过。审核是一个内置智能体按"能不能用"过一遍，给出结论与问题清单；它不替你做入库决定。',
+    zh: '这份草稿还没审核过。审核是一个内置智能体按"能不能用"过一遍，给出结论与问题清单——它是预筛，不替你做入库决定。',
     en: 'This draft has not been audited yet. The audit is a built-in agent checking whether the skill is usable; it does not decide the save for you.',
   },
   'crystallize.auditStart': { zh: '开始审核', en: 'Start audit' },

@@ -255,6 +255,19 @@
           tools: String(stats.toolCalls),
         })
 
+  /**
+   * 结论条的标记（一个字符说清"能不能入库"）：
+   * `✗` 草稿自己不过校验（它**先**挡住入库，比审核结论更要紧）；否则看审核结论；
+   * 没有审核结论时是 `○`——"还没审过"既不是通过也不是被否，画 ✓ 或 ✗ 都是撒谎。
+   */
+  $: conclusionMark =
+    artifacts === null || !artifacts.validation.ok
+      ? '✗'
+      : reviewInfo?.review
+        ? (reviewInfo.review.conclusion === 'pass' ? '✓' : '✗')
+        : '○'
+  $: conclusionBad = conclusionMark === '✗'
+
   /** 步骤条三态：done / current / bad / pending（按 step 与起草终态推）。 */
   $: stepStates = (() => {
     const idx = step === 'target' ? 0 : step === 'drafting' ? 1 : step === 'review' ? 2 : 3
@@ -1239,96 +1252,49 @@
         {/if}
 
         <!--
-          ── 审核结论（§10.5 第 ⑤ 步）──
-          三条规矩：① 结论常驻（一行）+ 问题清单折叠 ② "还没审过"与"审过但没判决"分开说
-          ③ 不通过且额度用尽时才给「重新起草」按钮（自动返工还在跑时不该出现）。
+          ── ★ 一条结论条（2026-10-21 布局重排）──
+
+          这一块原来是把**三条横条**竖着摞起来（实测加起来 ~240px 高）：
+          ① 审核结论块（h3「审核结论（预筛）」+ 42px 说明段 + 结论条 / 日志 / 按钮）
+          ② 草稿校验条（`✓ 3 个文件 · 对比上一版 · 新建 skill` + 按意见再改一版）
+          ③ frontmatter 摘要（slug 输入 + name + description）
+          结果编辑器从 y≈490 才开始，首屏能编辑的只有 ~280px。
+
+          现在合成**一块两行**（~76px 高），判据就是使用者给的轴——"哪些必须同时看到"：
+            · 常驻（必须同时看到）：过没过（审核结论 + 草稿校验合成一句话）、目标是谁、
+              slug（入库前唯一要确认的字段）、以及"这一步能做什么"的按钮；
+            · 折叠（不必同时看）：审核问题清单、审核日志、问题定位列表、按意见改一版的输入框。
+          规矩没变：① 结论常驻 + 明细折叠 ② "还没审过"与"审过但没判决"分开说
+          ③ 不通过且额度用尽才给「重新起草」。
         -->
-        <section class="drawer-section audit-block">
-          <h3>
-            {$t('crystallize.auditTitle')}
-            {#if auditRunning}
-              <span class="faint small">
-                run {reviewInfo?.reviewRunId?.slice(0, 4) ?? ''}…
+        <section class="conclusion-block">
+          <div class="conclusion-bar" class:bad={conclusionBad}>
+            <span class="bar-mark" aria-hidden="true">{conclusionMark}</span>
+            <span class="bar-text">
+              {#if reviewInfo === null}
+                <span class="muted">…</span>
+              {:else if reviewInfo.review === null && auditRunning}
+                <strong>{$t('crystallize.auditRunningShort')}</strong>
                 <span class="badge {runStatusClass(auditStatus ?? '')}">
                   {statusLabel(auditStatus ?? '')}
                 </span>
-              </span>
-            {/if}
-            {#if reviewInfo?.review}
-              <!--
-                ★ 跑完之后仍要能回看**过程**（2026-10-21 使用者："审核的过程看不到"）。
-                  结论常驻、日志按需展开——与任务页「最后结果 / 完整日志」同一套交互。
-              -->
-              <button
-                type="button"
-                class="ghost small"
-                style="margin-left:var(--sp-3)"
-                onclick={() => (auditLogOpen = !auditLogOpen)}
-              >
-                {auditLogOpen ? $t('crystallize.auditShowVerdict') : $t('crystallize.auditShowLog')}
-              </button>
-            {/if}
-          </h3>
-          {#if reviewInfo === null}
-            <p class="muted">…</p>
-          {:else if reviewInfo.review === null && auditRunning}
-            <!-- ── 进行中：**实时输出直接铺开**，并且跑完自动收口（RunLog 报终态 ⇒ 重读判决）── -->
-            <p class="faint small">{$t('crystallize.auditRunning')}</p>
-            <div class="log-box">
-              <RunLog
-                runId={reviewInfo.reviewRunId ?? ''}
-                onterminal={(st) => void onAuditTerminal(st)}
-                onstatus={(st) => (auditLiveStatus = st)}
-              />
-            </div>
-            <div class="row-end">
-              <button class="ghost small" onclick={() => void cancelAudit()}>
-                {$t('crystallize.auditCancel')}
-              </button>
-            </div>
-          {:else if reviewInfo.review === null && auditSettled}
-            <!-- ── 没跑成 / 跑完没判决：**明说**，并给重试（不许继续显示"审核中"）── -->
-            <div class="notice bad">
-              <p>
-                {auditNoVerdict
-                  ? $t('crystallize.auditNoVerdict')
-                  : $t('crystallize.auditRunFailed', { status: statusLabel(auditStatus ?? '') })}
-              </p>
-              <div class="row-end">
-                <button class="ghost small" disabled={reviewBusy} onclick={() => void startAudit()}>
-                  {$t('crystallize.auditRetry')}
-                </button>
-              </div>
-            </div>
-            <div class="log-box">
-              <RunLog
-                runId={reviewInfo.reviewRunId ?? ''}
-                onterminal={(st) => void onAuditTerminal(st)}
-              />
-            </div>
-          {:else if reviewInfo.review === null}
-            <div class="notice">
-              <p>{$t('crystallize.auditNotYet')}</p>
-              <div class="row-end">
-                <button class="ghost small" disabled={reviewBusy} onclick={() => void startAudit()}>
-                  {$t('crystallize.auditStart')}
-                </button>
-              </div>
-            </div>
-          {:else if auditLogOpen}
-            <!-- ── 有结论 + 人要回看过程 ⇒ 同一个位置换成日志 ── -->
-            <div class="log-box">
-              <RunLog
-                runId={reviewInfo.reviewRunId ?? ''}
-                onterminal={(st) => void onAuditTerminal(st)}
-              />
-            </div>
-          {:else}
-            <div class="review-bar" class:bad={reviewInfo.review.conclusion !== 'pass'}>
-              <span class="bar-mark" aria-hidden="true">
-                {reviewInfo.review.conclusion === 'pass' ? '✓' : '✗'}
-              </span>
-              <span class="bar-text">
+                <span class="muted">run {reviewInfo.reviewRunId?.slice(0, 4) ?? ''}…</span>
+              {:else if reviewInfo.review === null && auditSettled}
+                <strong>
+                  {auditNoVerdict
+                    ? $t('crystallize.auditNoVerdict')
+                    : $t('crystallize.auditRunFailed', { status: statusLabel(auditStatus ?? '') })}
+                </strong>
+              {:else if reviewInfo.review === null}
+                <!--
+                  ★ "还没审核过"：原来这里是一整段说明（"审核是一个内置智能体按'能不能用'
+                    过一遍，给出结论与问题清单；它不替你做入库决定"，42px 两行）。按确认的
+                    设计，说明收进**按钮的悬停提示**，条上只留四个字。
+                -->
+                <strong title={$t('crystallize.auditNotYet')}
+                  >{$t('crystallize.auditNotYetBrief')}</strong
+                >
+              {:else}
                 <strong>
                   {reviewInfo.review.conclusion === 'pass'
                     ? $t('crystallize.auditPass')
@@ -1336,6 +1302,8 @@
                       ? $t('crystallize.auditFail')
                       : $t('crystallize.auditNeedsHuman')}
                 </strong>
+                <!-- "（预筛）"留着：它说的是"这不是入库的门"，是这条链的前提，不是修饰 -->
+                <span class="faint small">（{$t('crystallize.auditPrescreen')}）</span>
                 <span class="muted">{reviewInfo.review.reasonCode}</span>
                 {#if reviewInfo.review.status === 'rework_requested'}
                   <span class="muted">
@@ -1344,8 +1312,42 @@
                 {:else if auditFailedStuck}
                   <span class="muted">{$t('crystallize.auditExhausted')}</span>
                 {/if}
-              </span>
-              {#if reviewInfo.review.findings.length > 0}
+              {/if}
+              {#if artifacts}
+                <span class="bar-sep">·</span>
+                {#if artifacts.validation.ok}
+                  <span class="muted">
+                    {fileCount} {$t('crystallize.filesUnit')}
+                    {#if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
+                      · {diffAgainst === 'previous'
+                        ? $t('crystallize.vsPreviousShort')
+                        : $t('crystallize.vsCurrentShort')}
+                      <span class="num-tag add">+{diff.totals.added}</span>
+                      <span class="num-tag del">−{diff.totals.removed}</span>
+                    {:else}
+                      · {Math.max(1, Math.round(totalBytes / 1024))} KB
+                    {/if}
+                    {#if artifacts.mode === 'text'}
+                      · {$t('crystallize.textModeHint')}
+                    {/if}
+                  </span>
+                {:else}
+                  <span class="muted">
+                    {$t('crystallize.problemsTitle')}（{artifacts.validation.problems.length}）
+                  </span>
+                {/if}
+                <span class="bar-sep">·</span>
+                <span class="muted">
+                  {#if targetKind === 'new'}
+                    {$t('crystallize.targetNew')}
+                  {:else}
+                    {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
+                  {/if}
+                </span>
+              {/if}
+            </span>
+            <span class="bar-actions">
+              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
                 <button class="ghost small" onclick={() => (auditDetailOpen = !auditDetailOpen)}>
                   {auditDetailOpen
                     ? $t('crystallize.auditHideDetail')
@@ -1354,40 +1356,154 @@
                       })}
                 </button>
               {/if}
-            </div>
-            {#if reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
-              <p class="muted">
-                {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
-              </p>
-            {/if}
-            {#if auditDetailOpen}
-              <ul class="audit-findings">
-                {#each reviewInfo.review.findings as f}
-                  <li>
-                    <span class="sev">{f.severity}</span>
-                    <span>{f.summary}</span>
-                    {#each f.evidence as e}
-                      {#if e.locator !== null || e.excerpt !== null}
-                        <div class="muted audit-evidence">
-                          {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
-                        </div>
-                      {/if}
-                    {/each}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            {#if auditFailedStuck}
-              <div class="row-end">
+              {#if reviewInfo?.review}
+                <button
+                  type="button"
+                  class="ghost small"
+                  onclick={() => (auditLogOpen = !auditLogOpen)}
+                >
+                  {auditLogOpen ? $t('crystallize.auditShowVerdict') : $t('crystallize.auditShowLog')}
+                </button>
+              {/if}
+              {#if reviewInfo !== null && reviewInfo.review === null && auditRunning}
+                <button class="ghost small" onclick={() => void cancelAudit()}>
+                  {$t('crystallize.auditCancel')}
+                </button>
+              {:else if reviewInfo !== null && reviewInfo.review === null}
+                <button
+                  class="ghost small"
+                  disabled={reviewBusy}
+                  title={$t('crystallize.auditNotYet')}
+                  onclick={() => void startAudit()}
+                >
+                  {auditSettled ? $t('crystallize.auditRetry') : $t('crystallize.auditStart')}
+                </button>
+              {/if}
+              {#if artifacts}
+                <button
+                  class="ghost small"
+                  class:active={reviseOpen}
+                  onclick={() => (reviseOpen = !reviseOpen)}
+                >{$t('crystallize.reviseTitle')}</button>
+              {/if}
+              {#if auditFailedStuck}
                 <button class="ghost small" onclick={() => void redraftFromAudit()}>
                   {$t('crystallize.auditRedraft')}
                 </button>
-              </div>
+              {/if}
+            </span>
+          </div>
+
+          <!--
+            第二行：入库前唯一要人确认的字段（slug）+ 只读的 name/描述。
+            它属于"这条结论"的一部分（能不能入库），所以与结论同块；但不占结论那一行——
+            结论那一行要留给"过没过"，那是人第一眼要找的东西。
+          -->
+          {#if artifacts}
+            <div class="conclusion-meta">
+              <label class="slug-inline">
+                <span class="faint small">{$t('crystallize.slugLabel')}</span>
+                <input bind:value={slug} autocomplete="off" class="mono" />
+              </label>
+              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
+                <span class="faint small frontmatter-line">
+                  <code>{artifacts.skillMd.name}</code>
+                  {#if artifacts.skillMd.description !== ''}
+                    <span class="desc-clip" title={artifacts.skillMd.description}
+                      >{artifacts.skillMd.description}</span
+                    >
+                  {/if}
+                </span>
+              {/if}
+            </div>
+          {/if}
+
+          {#if reviewInfo !== null && reviewInfo.review === null && (auditRunning || auditSettled)}
+            <!-- 进行中 / 没跑成：日志就在结论条下面铺开（跑着的时候它是唯一的实时信息） -->
+            {#if auditRunning}
+              <p class="faint small">{$t('crystallize.auditRunning')}</p>
             {/if}
+            <div class="log-box">
+              <RunLog
+                runId={reviewInfo.reviewRunId ?? ''}
+                onterminal={(st) => void onAuditTerminal(st)}
+                onstatus={(st) => (auditLiveStatus = st)}
+              />
+            </div>
+          {:else if reviewInfo?.review && auditLogOpen}
+            <!-- 有结论 + 人要回看过程 ⇒ 同一个位置换成日志 -->
+            <div class="log-box">
+              <RunLog
+                runId={reviewInfo.reviewRunId ?? ''}
+                onterminal={(st) => void onAuditTerminal(st)}
+              />
+            </div>
+          {/if}
+
+          {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
+            <p class="muted">
+              {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
+            </p>
+          {/if}
+
+          {#if reviewInfo?.review && auditDetailOpen}
+            <ul class="audit-findings">
+              {#each reviewInfo.review.findings as f}
+                <li>
+                  <span class="sev">{f.severity}</span>
+                  <span>{f.summary}</span>
+                  {#each f.evidence as e}
+                    {#if e.locator !== null || e.excerpt !== null}
+                      <div class="muted audit-evidence">
+                        {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
+                      </div>
+                    {/if}
+                  {/each}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+
+          <!-- 问题定位列表：只在不过时说，最多 4 条（再多就该先改了） -->
+          {#if artifacts && !artifacts.validation.ok}
+            <ul class="problem-list">
+              {#each artifacts.validation.problems.slice(0, 4) as p (p.file + p.message)}
+                <li>
+                  {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
+                </li>
+              {/each}
+              {#if artifacts.validation.problems.length > 4}
+                <li class="faint">
+                  {$t('crystallize.moreProblems', { count: String(artifacts.validation.problems.length - 4) })}
+                </li>
+              {/if}
+            </ul>
+          {/if}
+
+          <!-- 按意见改一版：输入框点开才展开（它属于"这版不行"的动作，不常驻） -->
+          {#if reviseOpen}
+            <div class="revise-row">
+              <textarea
+                bind:value={reviseFeedback}
+                rows="2"
+                placeholder={$t('crystallize.revisePlaceholder')}
+              ></textarea>
+              <div class="row-end">
+                <button
+                  class="ghost small"
+                  disabled={revising || reviseFeedback.trim() === ''}
+                  onclick={() => void reviseDraft()}
+                >{$t('crystallize.reviseSubmit')}</button>
+              </div>
+            </div>
           {/if}
         </section>
 
-        <!-- 起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃 -->
+        <!--
+          起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃。
+          ⚠️ 2026-10-21：它原来是上面那条 if-chain 的第一支；结论条不再属于那条链
+          （结论条在 artifacts 还没到时也要能显示审核那部分），所以这里单独成一个 if。
+        -->
         {#if artifacts && artifacts.mode === 'refused'}
           <section class="drawer-section">
             <h3>{$t('crystallize.reviewTitle')}</h3>
@@ -1402,96 +1518,9 @@
               </div>
             </div>
           </section>
-        {:else if artifacts}
-          <!-- ── 结论条：一行说完"能不能入库 / 改了什么 / 目标是谁" ── -->
-          <section class="review-bar-block">
-            <div class="review-bar" class:bad={!artifacts.validation.ok}>
-              <span class="bar-mark" aria-hidden="true">{artifacts.validation.ok ? '✓' : '✗'}</span>
-              <span class="bar-text">
-                {#if artifacts.validation.ok}
-                  {fileCount} {$t('crystallize.filesUnit')}
-                  {#if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
-                    · {diffAgainst === 'previous'
-                      ? $t('crystallize.vsPreviousShort')
-                      : $t('crystallize.vsCurrentShort')}
-                    <span class="num-tag add">+{diff.totals.added}</span>
-                    <span class="num-tag del">−{diff.totals.removed}</span>
-                  {:else}
-                    · {Math.max(1, Math.round(totalBytes / 1024))} KB
-                  {/if}
-                  {#if artifacts.mode === 'text'}
-                    · {$t('crystallize.textModeHint')}
-                  {/if}
-                {:else}
-                  {$t('crystallize.problemsTitle')}（{artifacts.validation.problems.length}）
-                {/if}
-                · {#if targetKind === 'new'}
-                  {$t('crystallize.targetNew')}
-                {:else}
-                  {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
-                {/if}
-              </span>
-              <span class="bar-actions">
-                <button
-                  class="ghost small"
-                  class:active={reviseOpen}
-                  onclick={() => (reviseOpen = !reviseOpen)}
-                >{$t('crystallize.reviseTitle')}</button>
-              </span>
-            </div>
+        {/if}
 
-            <!-- 问题列表：只在不过时说，最多 4 条（再多就该先改了） -->
-            {#if !artifacts.validation.ok}
-              <ul class="problem-list">
-                {#each artifacts.validation.problems.slice(0, 4) as p (p.file + p.message)}
-                  <li>
-                    {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
-                  </li>
-                {/each}
-                {#if artifacts.validation.problems.length > 4}
-                  <li class="faint">
-                    {$t('crystallize.moreProblems', { count: String(artifacts.validation.problems.length - 4) })}
-                  </li>
-                {/if}
-              </ul>
-            {/if}
-
-            <!-- 按意见改一版：输入框点开才展开（它属于"这版不行"的动作，不常驻） -->
-            {#if reviseOpen}
-              <div class="revise-row">
-                <textarea
-                  bind:value={reviseFeedback}
-                  rows="2"
-                  placeholder={$t('crystallize.revisePlaceholder')}
-                ></textarea>
-                <div class="row-end">
-                  <button
-                    class="ghost small"
-                    disabled={revising || reviseFeedback.trim() === ''}
-                    onclick={() => void reviseDraft()}
-                  >{$t('crystallize.reviseSubmit')}</button>
-                </div>
-              </div>
-            {/if}
-
-            <!-- slug：唯一需要人确认的字段（默认 = SKILL.md 的 name）；
-                 name/description 只读展示——要改就改文件，一处真相 -->
-            <div class="review-meta">
-              <label class="slug-inline">
-                <span class="faint small">{$t('crystallize.slugLabel')}</span>
-                <input bind:value={slug} autocomplete="off" class="mono" />
-              </label>
-              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
-                <span class="faint small frontmatter-line">
-                  <code>{artifacts.skillMd.name}</code>
-                  {#if artifacts.skillMd.description !== ''}
-                    <span class="desc-clip">{artifacts.skillMd.description}</span>
-                  {/if}
-                </span>
-              {/if}
-            </div>
-          </section>
-
+        {#if artifacts && artifacts.mode !== 'refused'}
           <!-- ── 主区：树 + 窗格（内容 / 差异 同位置切换） ── -->
           <div class="review-pane">
             <ul class="file-tree">
@@ -2113,25 +2142,112 @@
      三条规矩写在 markup 的注释里（结论常驻 / 主区自己滚 / 编辑与差异同位置切换）。
      这里只落尺寸：树 240px 固定、窗格吃满剩下的、主区高度跟窗口走但**不整页滚**。 */
 
-  .review-bar-block {
-    margin-bottom: var(--sp-4);
-  }
-
-  /* 结论条：一行说完"能不能入库 / 改了什么 / 目标是谁"。 */
   /*
-   * 审核那一段的样式（§10.5 第 ⑤ 步）。
-   *
-   * ⚠️ 这里刻意**不设 max-width**：这一页在 D80 之后是整页宽，宽度约束写在别处会
-   *    变成"只有这一块窄"的布局缺陷（`svelte-check` 看不见这类问题，只有浏览器量得出来）。
-   *    结论条复用 `.review-bar`（同一位置、同一个视觉语言），只补问题清单的样式。
+   * ── 一条结论条（2026-10-21）──
+   * 原来是三条横条竖着摞（审核块 + 校验条 + frontmatter 摘要），加起来 ~240px；
+   * 现在一块两行 ~76px。宽度按内容排（结论那一行**不许换行**——原来「开始审核」按钮在
+   * 69px 宽里折成 3 行，高 54px，就是这里没管住 `flex` 的结果）。
    */
-  .audit-block .bar-text {
-    /* 结论 + 理由码 + "额度用完"这句会变长：让它换行而不是把按钮挤出面板 */
-    flex-wrap: wrap;
+  .conclusion-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-4);
+  }
+  .conclusion-bar {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--line);
+    /* 左边一条强调色：沿用原来那条结论条的视觉语言（过 = 绿、不过 = 红） */
+    border-left: 3px solid var(--good);
+    border-radius: var(--radius);
+    background: var(--panel);
+    font-size: var(--fs-sm);
   }
+  .conclusion-bar.bad {
+    border-left-color: var(--bad);
+    border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  }
+  .conclusion-bar .bar-mark {
+    flex: 0 0 auto;
+    color: var(--good);
+    font-weight: 600;
+  }
+  .conclusion-bar.bad .bar-mark {
+    color: var(--bad);
+  }
+  .conclusion-bar .bar-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .conclusion-bar .bar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    flex-shrink: 0;
+  }
+  /* 按钮里的字**不许折行**（这是上面那个 69×54 的直接病因） */
+  .conclusion-bar .bar-actions button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    /*
+     * 纵向收紧：站里 `.small` 按钮是 35px 高（padding 6+6 + 行高），而结论条是**常驻的
+     * 摘要行**——它高 53px 就为了托住按钮的 35px，把编辑器又往下推。改成 3px 之后
+     * 按钮 ~29px、条 ~47px（实测 y 从 345 往回收，见探针 `crystal.paneTopY`）。
+     * ⚠️ 只在这一条上收紧，不动站里 `.small` 的通用定义：别处按钮是"动作"，这里是"摘要上的动作"。
+     */
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  .bar-sep {
+    color: var(--line-strong);
+  }
+  .conclusion-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 0 var(--sp-1);
+    font-size: var(--fs-sm);
+  }
+  /*
+   * slug 是入库前唯一要人确认的字段，但它在这一行里只需要"看得清、点得中"。
+   * 站里输入框是 33px 高（padding 6+6），这一行因此 43px——比结论条还高。
+   * 收到 3px ⇒ ~26px，整块从 120px 降到 ~97px（实测见探针 `crystal.paneTopY`）。
+   */
+  .conclusion-meta input {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  /*
+   * ⚠️ 这一条是**量出来才发现**的：`.conclusion-meta` 明明只有 label(30.8) 和
+   *    frontmatter(20.8) 两个子元素，行高却是 42.8。逐个子元素藏掉才看出是 label——
+   *    它自己量着 30.8，但**全局 `label` 规则带着下边距**，占位是 42.8。
+   *    （只看高度差永远猜不到：差值 12 刚好等于 `--sp-3`，很容易误判成 gap。）
+   */
+  .conclusion-meta .slug-inline {
+    margin: 0;
+  }
+  .conclusion-meta .frontmatter-line {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /*
+   * ⚠️ 这里刻意**不设 max-width**：这一页在 D80 之后是整页宽，宽度约束写在别处会
+   *    变成"只有这一块窄"的布局缺陷（`svelte-check` 看不见这类问题，只有浏览器量得出来）。
+   *
+   * ⚠️ 2026-10-21：`review-bar-block` / `.review-bar` / `.audit-block .bar-text` 这几条
+   *    随"三条横条"一起退休了。**是 svelte-check 的 `Unused CSS selector` 当场点名的**
+   *    （警告数从 12 涨到 14）——留着的死样式比死字段更难发现，因为界面上看不出差别。
+   */
 
   .audit-findings {
     margin: var(--sp-2) 0 0;
@@ -2154,44 +2270,6 @@
   .audit-evidence {
     font-size: var(--fs-xs);
     padding-left: var(--sp-3);
-  }
-
-  .review-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: var(--sp-2) var(--sp-3);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--good);
-    border-radius: var(--radius-sm);
-    background: var(--panel);
-  }
-
-  .review-bar.bad {
-    border-left-color: var(--bad);
-  }
-
-  .bar-mark {
-    flex: 0 0 auto;
-    color: var(--good);
-    font-weight: 600;
-  }
-
-  .review-bar.bad .bar-mark {
-    color: var(--bad);
-  }
-
-  .bar-text {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: var(--fs-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .bar-actions {
-    flex: 0 0 auto;
   }
 
   /* slug + frontmatter 摘要：都只占一行（描述超长就省略，要看全文点文件名看文件） */
