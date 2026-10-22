@@ -1,0 +1,1238 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>沉淀成 skill · 布局静态稿</title>
+    <!--
+      ══════════════════════════════════════════════════════════════════
+      「沉淀成 skill」布局重排的**静态稿**（2026-10-21）
+
+      这不是产品代码，也**不参与构建**：双击就能在浏览器里看，用来确认"哪些
+      常驻、哪些用 tab 切、哪些折叠"再动真代码。
+
+      为什么要做成能点开的东西：布局类问题**只有真看/真量才说得清**。文字描述
+      "把结论条合并"没人能判断好不好，但把三屏摆出来、能切 tab 对着看，一眼就
+      知道哪一块该跟哪一块同屏。
+
+      ★ 稿里的尺寸是照**真测量**来的（真 Chrome + 真 daemon，主区 784px、首屏
+        800px），不是随手画的：侧栏 15rem=240 / 列表 26rem=416 / 顶栏 3.25rem=52
+        都取自 `packages/ui/src/styles/app.css` 的真实令牌，颜色也整套抄了那份
+        令牌（亮/暗两套）。所以稿子的横向比例与产品一致，纵向位置可以当参考。
+
+      ★ 「标注」开关打开会画两条虚线：**红**=现状里编辑器从 y≈520 才开始
+        （上面压着 4 层横条），**绿**=重排后从 y≈250 开始。那两条线就是这个
+        设计要争的东西：首屏 270px。
+      ══════════════════════════════════════════════════════════════════
+    -->
+    <style>
+      /* ── 设计令牌：整套抄自 packages/ui/src/styles/app.css（改一处就够） ── */
+      :root {
+        --sp-1: 0.25rem;
+        --sp-2: 0.5rem;
+        --sp-3: 0.75rem;
+        --sp-4: 1rem;
+        --sp-5: 1.5rem;
+        --sp-6: 2rem;
+        --sp-8: 3rem;
+        --fs-xs: 0.75rem;
+        --fs-sm: 0.8125rem;
+        --fs-base: 0.875rem;
+        --fs-md: 0.9375rem;
+        --fs-lg: 1.0625rem;
+        --fs-xl: 1.375rem;
+        --radius-sm: 4px;
+        --radius: 8px;
+        --radius-lg: 12px;
+        --sidebar-w: 15rem;
+        --list-w: 26rem;
+        --topbar-h: 3.25rem;
+        --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+          'Microsoft YaHei', sans-serif;
+        --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+        color-scheme: light;
+        --bg: #f6f7f9;
+        --surface: #ffffff;
+        --surface-2: #eef0f4;
+        --surface-hover: #e6e9ef;
+        --panel: #eceef2;
+        --line: #e2e5ea;
+        --line-strong: #c9cfd8;
+        --text: #1d232c;
+        --text-dim: #5a6472;
+        --text-faint: #8a93a2;
+        --accent: #2b6fd0;
+        --good: #1f9d73;
+        --bad: #d64545;
+        --warn: #b7791f;
+        --status-review: #7a5fd0;
+        --status-done: #1f9d73;
+        --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.08);
+        --shadow-2: 0 12px 32px rgba(16, 24, 40, 0.16);
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --surface: #161920;
+        --surface-2: #1c2029;
+        --surface-hover: #222733;
+        --panel: #0b0d11;
+        --line: #262b36;
+        --line-strong: #333a49;
+        --text: #e6e9ef;
+        --text-dim: #a2abbb;
+        --text-faint: #6d7686;
+        --accent: #5aa9f5;
+        --good: #4ec9a0;
+        --bad: #f2716a;
+        --warn: #e0b04a;
+        --status-review: #b48ef0;
+        --status-done: #4ec9a0;
+        --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+        --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: var(--fs-base);
+        line-height: 1.6;
+      }
+
+      /* ── 稿子自己的工具条（不属于产品界面） ── */
+      .mock-bar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: var(--sp-4);
+        flex-wrap: wrap;
+        padding: var(--sp-3) var(--sp-4);
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+        box-shadow: var(--shadow-1);
+      }
+      .mock-bar strong {
+        font-size: var(--fs-md);
+      }
+      .mock-bar .seg {
+        display: inline-flex;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .mock-bar .seg button {
+        border: 0;
+        background: var(--surface);
+        color: var(--text-dim);
+        font: inherit;
+        font-size: var(--fs-sm);
+        padding: var(--sp-1) var(--sp-3);
+        cursor: pointer;
+      }
+      .mock-bar .seg button[aria-pressed='true'] {
+        background: var(--accent);
+        color: #fff;
+      }
+      .mock-bar label {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--sp-2);
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+        cursor: pointer;
+      }
+      .mock-hint {
+        margin: 0;
+        padding: var(--sp-3) var(--sp-4) 0;
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+        max-width: 60rem;
+      }
+
+      /* ── 产品外框：与产品同宽（1440），高度取首屏 800 ── */
+      .app {
+        width: 1440px;
+        max-width: 100%;
+        height: 800px;
+        margin: var(--sp-4) auto var(--sp-8);
+        display: grid;
+        grid-template-rows: var(--topbar-h) 1fr;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        overflow: hidden;
+        position: relative;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 var(--sp-4);
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .topbar-left {
+        display: flex;
+        align-items: baseline;
+        gap: var(--sp-3);
+      }
+      .brand {
+        font-weight: 700;
+      }
+      .page-name {
+        font-size: var(--fs-md);
+        font-weight: 600;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: var(--sidebar-w) var(--list-w) 1fr;
+        min-height: 0;
+      }
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+        padding: var(--sp-3) var(--sp-2);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-1);
+      }
+      .nav-item {
+        padding: var(--sp-2) var(--sp-3);
+        border-radius: var(--radius-sm);
+        font-size: var(--fs-sm);
+      }
+      .nav-item .nav-title {
+        font-weight: 600;
+        font-size: var(--fs-base);
+        display: block;
+      }
+      .nav-item .nav-hint {
+        color: var(--text-faint);
+        font-size: var(--fs-xs);
+      }
+      .nav-item.active {
+        background: var(--surface-2);
+      }
+
+      /* 沉淀列表 */
+      .list-pane {
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .list-toolbar {
+        height: 3.1875rem;
+        display: flex;
+        align-items: center;
+        padding: 0 var(--sp-4);
+        color: var(--text-faint);
+        font-size: var(--fs-xs);
+        border-bottom: 1px solid var(--line);
+      }
+      .list-row {
+        display: grid;
+        gap: var(--sp-1);
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+      .list-row.active {
+        background: var(--surface-2);
+      }
+      .row-title {
+        font-size: var(--fs-base);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .row-meta {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        color: var(--text-faint);
+        font-size: var(--fs-xs);
+      }
+
+      /* 徽标 */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        height: 1.5rem;
+        padding: 0 var(--sp-2);
+        border-radius: 999px;
+        font-size: var(--fs-xs);
+        border: 1px solid var(--line-strong);
+        color: var(--text-dim);
+        background: var(--surface);
+      }
+      .badge.review {
+        color: var(--status-review);
+        border-color: color-mix(in srgb, var(--status-review) 45%, transparent);
+        background: color-mix(in srgb, var(--status-review) 10%, transparent);
+      }
+      .badge.done {
+        color: var(--status-done);
+        border-color: color-mix(in srgb, var(--status-done) 45%, transparent);
+        background: color-mix(in srgb, var(--status-done) 10%, transparent);
+      }
+      .badge.run {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+      }
+
+      /* ── 流程页 ── */
+      .flow {
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+      }
+      .flow-head {
+        padding: var(--sp-4) var(--sp-4) var(--sp-3);
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+      }
+      .flow-head-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: var(--sp-4);
+      }
+      .flow-title {
+        margin: 0;
+        font-size: var(--fs-xl);
+        font-weight: 650;
+        line-height: 1.3;
+      }
+      .flow-sub {
+        margin: var(--sp-1) 0 0;
+        color: var(--text-faint);
+        font-size: var(--fs-sm);
+      }
+      .actions {
+        display: flex;
+        gap: var(--sp-2);
+        flex-shrink: 0;
+      }
+      button.act {
+        font: inherit;
+        font-size: var(--fs-sm);
+        height: 2rem;
+        padding: 0 var(--sp-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.act.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      button.act.small {
+        height: 1.75rem;
+        font-size: var(--fs-xs);
+        padding: 0 var(--sp-2);
+      }
+      button.act:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* 步骤条：3 步、左对齐、定宽（★ 改动点：原来 4 步 flex:1 拉满整行） */
+      .steps {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        list-style: none;
+        margin: var(--sp-3) 0 0;
+        padding: 0;
+        font-size: var(--fs-sm);
+        color: var(--text-faint);
+      }
+      .steps li {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        white-space: nowrap;
+      }
+      .steps li + li::before {
+        content: '';
+        width: 2rem;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--line);
+        margin-right: var(--sp-2);
+      }
+      .steps li.done + li::before {
+        background: var(--accent);
+      }
+      .step-no {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 50%;
+        border: 1.5px solid var(--line-strong);
+        font-size: 0.8em;
+        font-weight: 600;
+      }
+      .steps li.done {
+        color: var(--status-done);
+      }
+      .steps li.done .step-no {
+        background: var(--status-done);
+        border-color: var(--status-done);
+        color: var(--surface);
+      }
+      .steps li.current {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .steps li.current .step-no {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* 结论条：★ 改动点——原来 3 条（审核块 + 校验条 + frontmatter 摘要）+ 一段说明，现在 1 条 */
+      .conclusion {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        margin: 0 var(--sp-4) var(--sp-3);
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        font-size: var(--fs-sm);
+        white-space: nowrap;
+      }
+      .conclusion .mark {
+        color: var(--good);
+        font-weight: 700;
+      }
+      .conclusion .mark.bad {
+        color: var(--bad);
+      }
+      .conclusion .sep {
+        color: var(--line-strong);
+      }
+      .conclusion .grow {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .conclusion .faint {
+        color: var(--text-faint);
+      }
+
+      /* tab 组：★ 改动点——下半部从"纵向堆叠"改成"三选一" */
+      .flow-body {
+        min-height: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 0 var(--sp-4) var(--sp-4);
+      }
+      .tabs {
+        display: flex;
+        gap: var(--sp-1);
+        border-bottom: 1px solid var(--line);
+      }
+      .tabs button {
+        font: inherit;
+        font-size: var(--fs-sm);
+        border: 0;
+        background: transparent;
+        color: var(--text-dim);
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+      }
+      .tabs button[aria-selected='true'] {
+        color: var(--text);
+        font-weight: 600;
+        border-bottom-color: var(--accent);
+      }
+      .pane {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-top: 0;
+        border-radius: 0 0 var(--radius) var(--radius);
+        background: var(--surface);
+      }
+      .pane[hidden] {
+        display: none;
+      }
+
+      /* 草稿 tab：文件树 + 内容/差异 */
+      .draft-split {
+        display: grid;
+        grid-template-columns: 16rem 1fr;
+        height: 100%;
+        min-height: 0;
+      }
+      .file-tree {
+        border-right: 1px solid var(--line);
+        padding: var(--sp-2) 0;
+        overflow: auto;
+      }
+      .file-row {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-1) var(--sp-3);
+        font-size: var(--fs-sm);
+      }
+      .file-row.active {
+        background: var(--surface-2);
+      }
+      .file-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--font-mono);
+        font-size: var(--fs-xs);
+      }
+      .change {
+        font-size: var(--fs-xs);
+        font-weight: 700;
+      }
+      .change.M {
+        color: var(--warn);
+      }
+      .change.A {
+        color: var(--good);
+      }
+      .num {
+        font-family: var(--font-mono);
+        font-size: var(--fs-xs);
+      }
+      .num.add {
+        color: var(--good);
+      }
+      .num.del {
+        color: var(--bad);
+      }
+      .editor {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .editor-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-1);
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .seg2 {
+        display: inline-flex;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .seg2 button {
+        font: inherit;
+        font-size: var(--fs-xs);
+        border: 0;
+        background: var(--surface);
+        color: var(--text-dim);
+        padding: 0 var(--sp-3);
+        height: 1.6rem;
+        cursor: pointer;
+      }
+      .seg2 button[aria-pressed='true'] {
+        background: var(--surface-hover);
+        color: var(--text);
+        font-weight: 600;
+      }
+      .code {
+        margin: 0;
+        padding: var(--sp-3) var(--sp-4);
+        font-family: var(--font-mono);
+        font-size: var(--fs-xs);
+        line-height: 1.75;
+        color: var(--text-dim);
+        white-space: pre-wrap;
+      }
+      .code .k {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      /* 依据 tab */
+      .evi-head {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--line);
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+      }
+      .evi-head .grow {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* 过程 tab */
+      .proc {
+        padding: var(--sp-3) var(--sp-4);
+        display: grid;
+        gap: var(--sp-2);
+      }
+      .finding {
+        display: flex;
+        gap: var(--sp-2);
+        align-items: baseline;
+        font-size: var(--fs-sm);
+      }
+      .sev {
+        font-size: var(--fs-xs);
+        font-weight: 700;
+        min-width: 3.6rem;
+      }
+      .sev.high {
+        color: var(--bad);
+      }
+      .sev.medium {
+        color: var(--warn);
+      }
+      .sev.low {
+        color: var(--text-faint);
+      }
+      .fold {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: var(--sp-2) 0;
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+        border-top: 1px solid var(--line);
+        cursor: pointer;
+      }
+      .logbox {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: var(--sp-2) var(--sp-3);
+        font-family: var(--font-mono);
+        font-size: var(--fs-xs);
+        color: var(--text-dim);
+        max-height: 12rem;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+
+      /* 目标 tab */
+      .form {
+        padding: var(--sp-4);
+        display: grid;
+        gap: var(--sp-3);
+        max-width: 42rem;
+      }
+      .opt {
+        display: flex;
+        gap: var(--sp-3);
+        padding: var(--sp-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+      .opt.on {
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 6%, transparent);
+      }
+      .opt .dot {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        border: 1.5px solid var(--line-strong);
+        flex-shrink: 0;
+        margin-top: 0.25rem;
+      }
+      .opt.on .dot {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 9px var(--accent);
+      }
+      .field {
+        display: grid;
+        gap: var(--sp-1);
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+      }
+      .field input,
+      .field textarea {
+        font: inherit;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-sm);
+        padding: var(--sp-2) var(--sp-3);
+      }
+      .inline-note {
+        margin: 0;
+        color: var(--text-faint);
+        font-size: var(--fs-sm);
+      }
+
+      /* 起草中 */
+      .runbar {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: var(--sp-2) var(--sp-3);
+        border-bottom: 1px solid var(--line);
+        font-size: var(--fs-sm);
+        color: var(--text-dim);
+      }
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        margin: 0 var(--sp-4) var(--sp-3);
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius);
+        background: var(--surface-2);
+        font-size: var(--fs-sm);
+      }
+      .notice .grow {
+        flex: 1;
+      }
+
+      /* ── 标注层（稿子专用，不是产品的一部分） ── */
+      .anno {
+        position: absolute;
+        display: none;
+      }
+      body[data-anno='on'] .anno {
+        display: block;
+      }
+      .anno-tag {
+        position: absolute;
+        right: var(--sp-2);
+        transform: translateY(-50%);
+        font-size: var(--fs-xs);
+        padding: 1px var(--sp-2);
+        border-radius: 999px;
+        border: 1px dashed var(--line-strong);
+        background: var(--surface-2);
+        color: var(--text-dim);
+      }
+      /* 「现状（旧版）」的投影：红色虚线框，标出这次要拿掉的四层横条 */
+      .anno-ghosts .ghost-box {
+        position: absolute;
+        left: var(--sp-4);
+        right: var(--sp-4);
+        border: 1px dashed var(--bad);
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--bad) 7%, transparent);
+        color: var(--bad);
+        font-size: var(--fs-xs);
+        padding: 0 var(--sp-2);
+        display: flex;
+        align-items: center;
+      }
+      /* 旧版终点线用红、新版起点线用绿（两条线的 y 都由脚本量） */
+      .anno-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        border-top: 1px dashed var(--bad);
+      }
+      .anno-line.old {
+        border-color: var(--bad);
+      }
+      .anno-line.good {
+        border-color: var(--good);
+      }
+      .anno-tag {
+        white-space: nowrap;
+      }
+      .anno-line span {
+        position: absolute;
+        right: var(--sp-2);
+        top: -0.9rem;
+        font-size: var(--fs-xs);
+        color: var(--bad);
+        background: var(--bg);
+        padding: 0 var(--sp-1);
+      }
+      .anno-line.good span {
+        color: var(--good);
+      }
+      /*
+       * ⚠️ 这里踩过一次：最初写的是 `.screen.on { display: contents }`——
+       *    而 `.screen` 与 `.flow` 是**同一个元素**（`<main class="flow screen">`），
+       *    `display: contents` 会把元素**自己的盒子抹掉**，于是 `.flow` 的
+       *    `display:flex` 列布局整个失效（首屏会散架）。量出来才发现。
+       *    现在显式给回它本来该有的盒子。
+       */
+      .screen {
+        display: none;
+      }
+      .screen.on {
+        display: flex;
+      }
+    </style>
+  </head>
+  <body data-anno="off">
+    <div class="mock-bar">
+      <strong>沉淀成 skill · 布局静态稿</strong>
+      <span class="mock-bar-seg"></span>
+      <div class="seg" role="group" aria-label="切换屏幕">
+        <button data-screen="review" aria-pressed="true">审阅入库</button>
+        <button data-screen="target" aria-pressed="false">目标</button>
+        <button data-screen="drafting" aria-pressed="false">起草中</button>
+      </div>
+      <label><input type="checkbox" id="anno" /> 标注（常驻 / TAB / 折叠 + 首屏对照）</label>
+      <label><input type="checkbox" id="theme" /> 暗色</label>
+      <span style="flex: 1"></span>
+      <span style="font-size: var(--fs-sm); color: var(--text-faint)">
+        尺寸取自真测量：侧栏 240 · 列表 416 · 主区 784 · 首屏 800
+      </span>
+    </div>
+
+    <p class="mock-hint">
+      tab 都能点（<b>草稿 / 依据 / 过程</b>、<b>内容 / 差异</b>、<b>目标 / 依据</b>）。打开「标注」会画出两条虚线:
+      <span style="color: var(--bad)">红</span>=现状里编辑器从 y≈520 才开始、<span style="color: var(--good)">绿</span>=重排后的 y≈250。
+    </p>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="topbar-left">
+          <span class="brand">AgentDeck</span>
+          <span class="page-name">沉淀</span>
+        </div>
+        <button class="act primary">新建沉淀</button>
+      </header>
+
+      <div class="shell">
+        <nav class="sidebar">
+          <div class="nav-item">
+            <span class="nav-title">聊天</span><span class="nav-hint">先聊清楚这件事</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-title">任务</span><span class="nav-hint">看 + 建 · 看板 / 列表</span>
+          </div>
+          <div class="nav-item">
+            <span class="nav-title">智能体</span><span class="nav-hint">指令 · 用哪个 CLI</span>
+          </div>
+          <div class="nav-item active">
+            <span class="nav-title">沉淀</span><span class="nav-hint">把对话/任务的经验沉淀成 skill</span>
+          </div>
+        </nav>
+
+        <section class="list-pane">
+          <div class="list-toolbar">4 条沉淀</div>
+          <div class="list-row active">
+            <div class="row-title">这条对话用来看工作目录那一栏</div>
+            <div class="row-meta">
+              <span class="badge review">待审阅</span><span>新建</span><span>4 分钟前</span>
+            </div>
+          </div>
+          <div class="list-row">
+            <div class="row-title">给报告加一条兜底说明</div>
+            <div class="row-meta">
+              <span class="badge run">起草中</span><span>新建</span><span>9 分钟前</span>
+            </div>
+          </div>
+          <div class="list-row">
+            <div class="row-title">release-check</div>
+            <div class="row-meta">
+              <span class="badge done">已入库</span><span>更新</span><span>1 小时前</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ══════════════ 屏幕一：审阅入库 ══════════════ -->
+        <main class="flow screen on" data-name="review">
+          <div class="flow-head">
+            <div class="flow-head-top">
+              <div>
+                <h1 class="flow-title">沉淀成 skill</h1>
+                <p class="flow-sub" title="run 01M5HYG3DNZN5V77WENPV2E43T">
+                  这条对话用来看工作目录那一栏 · 1 轮 · 0 次工具调用
+                </p>
+              </div>
+              <div class="actions">
+                <button class="act">放弃</button>
+                <button class="act primary">确认入库</button>
+              </div>
+            </div>
+            <ol class="steps">
+              <li class="done"><span class="step-no">✓</span><span>沉淀目标</span></li>
+              <li class="done"><span class="step-no">✓</span><span>起草 run</span></li>
+              <li class="current"><span class="step-no">3</span><span>审阅入库</span></li>
+            </ol>
+          </div>
+
+          <div class="conclusion">
+            <span class="mark">✓</span>
+            <span>审核通过</span>
+            <span class="sep">·</span>
+            <span class="faint">3 个文件</span>
+            <span class="sep">·</span>
+            <span class="faint">对比上一版 +1 −1</span>
+            <span class="sep">·</span>
+            <span class="grow">probe-crystal — 给沉淀审阅页量排版用</span>
+            <button class="act small">3 条问题</button>
+            <button class="act small">看审核日志</button>
+            <button class="act small">重新审核</button>
+          </div>
+
+          <div class="flow-body">
+            <div class="tabs" role="tablist" data-group="review">
+              <button role="tab" data-tab="draft" aria-selected="true">草稿</button>
+              <button role="tab" data-tab="evidence" aria-selected="false">依据</button>
+              <button role="tab" data-tab="process" aria-selected="false">过程</button>
+            </div>
+
+            <!-- 草稿 -->
+            <div class="pane" data-pane="draft">
+              <div class="draft-split">
+                <div class="file-tree">
+                  <div class="file-row active">
+                    <span class="change M">M</span><span class="file-name">SKILL.md</span>
+                    <span class="num add">+1</span><span class="num del">−1</span>
+                  </div>
+                  <div class="file-row">
+                    <span class="change A">A</span><span class="file-name">references/notes.md</span>
+                  </div>
+                  <div class="file-row">
+                    <span class="change A">A</span><span class="file-name">scripts/check.sh</span>
+                  </div>
+                </div>
+                <div class="editor">
+                  <div class="editor-bar">
+                    <div class="seg2" data-group="editor">
+                      <button data-tab="content" aria-pressed="true">内容</button>
+                      <button data-tab="diff" aria-pressed="false">差异</button>
+                    </div>
+                    <span style="flex: 1"></span>
+                    <span style="font-size: var(--fs-xs); color: var(--text-faint)">SKILL.md</span>
+                  </div>
+                  <pre class="code" data-pane="content" data-in="editor"><span class="k">---
+name: probe-crystal
+description: 给沉淀审阅页量排版用
+---</span>
+
+# probe-crystal
+
+## 什么时候用
+当你要确认「沉淀成 skill」这一屏的排版是否成立时……
+
+## 怎么做
+1. 打开沉淀列表，选中一条待审阅的草稿
+2. 在文件树里点 SKILL.md
+3. 对照右边的结论条确认审核结论
+
+<span class="k">（右侧留白 = 重排后首屏能看到的编辑高度 ~450px）</span></pre>
+                  <pre class="code" data-pane="diff" data-in="editor" hidden>@@ -1,6 +1,6 @@
+ name: probe-crystal
+-description: 给审阅页量排版
++description: 给沉淀审阅页量排版用
+ ---
+
+ # probe-crystal</pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- 依据 -->
+            <div class="pane" data-pane="evidence" hidden>
+              <div class="evi-head">
+                <code>material/</code>
+                <span class="grow">这一轮对话的全部素材（agent 起草时按需读的就是它）</span>
+                <span class="faint">3 个文件</span>
+              </div>
+              <div class="draft-split">
+                <div class="file-tree">
+                  <div class="file-row active"><span class="file-name">index.md</span></div>
+                  <div class="file-row"><span class="file-name">conversation.md</span></div>
+                  <div class="file-row"><span class="file-name">workspace-settings.json</span></div>
+                </div>
+                <div class="editor">
+                  <div class="editor-bar"><span style="font-size: var(--fs-xs)">素材正文（只读）</span></div>
+                  <pre class="code"># 素材索引
+
+- conversation.md —— 这一轮对话的全文（1 轮 · 0 次工具调用）
+- workspace-settings.json —— 当时的工作目录设置
+
+<span class="k">★ 原来这一块折叠在最下面：要滚到 y≈968 才看得见。放进 tab 之后一进来看。</span></pre>
+                </div>
+              </div>
+            </div>
+
+            <!-- 过程 -->
+            <div class="pane" data-pane="process" hidden>
+              <div class="proc">
+                <div class="finding"><span class="sev high">high</span><span>缺少失败时的兜底说明——脚本挂了要怎么办没写</span></div>
+                <div class="finding"><span class="sev medium">medium</span><span>没写触发条件，执行者不知道什么时候该用它</span></div>
+                <div class="finding"><span class="sev low">low</span><span>description 太长，选择器里会被截断</span></div>
+                <div class="fold">▸ 审核日志（run 01M5…，1 轮 · 5 次工具调用）</div>
+                <div class="runbar" style="border: 0; padding-left: 0">
+                  <span class="badge done">已完成</span>
+                  <span style="flex: 1"></span>
+                  <div class="seg2" data-group="draftrun">
+                    <button data-tab="final" aria-pressed="true">最后结果</button>
+                    <button data-tab="log" aria-pressed="false">完整日志</button>
+                  </div>
+                </div>
+                <pre class="code" data-pane="final" data-in="draftrun">我把这段做法写成了 skill，产出在 skill/ 目录里：SKILL.md +
+references/notes.md + scripts/check.sh。审核建议补一条失败兜底。</pre>
+                <div class="logbox" data-pane="log" data-in="draftrun" hidden>12:04  Read material/index.md
+12:04  Write skill/SKILL.md
+12:05  Bash bash skill/scripts/check.sh
+12:05  完成 · 1 轮 · 5 次工具调用</div>
+              </div>
+            </div>
+          </div>
+
+          <!--
+            标注层：位置**全部由稿子自己量出来**（见脚本 `drawAnnotations`），
+            不写死——写死的标注一定会和稿子漂开，那比没有更误导。
+
+            ⚠️ 那四条"现状（旧版）"的幽灵框是**真实测量值**（真 Chrome + 真 daemon
+               量出来的 y 区间），不是估的：审核块 225–380（含 42px 说明段）、
+               草稿校验条 381–416、frontmatter 摘要 439–464、内容/差异 495。
+               它们就是这次要拿掉的东西——四条加起来把编辑器压到 y≈490。
+          -->
+          <div class="anno anno-ghosts">
+            <div class="ghost-box" style="top: 225px; height: 155px">现状① 审核结论块（含 42px 说明段）</div>
+            <div class="ghost-box" style="top: 381px; height: 35px">现状② 草稿校验条</div>
+            <div class="ghost-box" style="top: 439px; height: 25px">现状③ frontmatter 摘要</div>
+            <div class="ghost-box" style="top: 490px; height: 27px">现状④ 内容 / 差异</div>
+          </div>
+          <div class="anno anno-line old" data-anno-line="old">
+            <span>现状：编辑器从这里开始</span>
+          </div>
+          <div class="anno anno-line good" data-anno-line="new">
+            <span>重排后：编辑器从这里开始</span>
+          </div>
+          <div class="anno anno-tag" data-anno-tag="conclusion">常驻：状态（一条结论条）</div>
+          <div class="anno anno-tag" data-anno-tag="steps">常驻：3 步 · 左对齐 · 定宽</div>
+          <div class="anno anno-tag" data-anno-tag="tabs">TAB：草稿 / 依据 / 过程</div>
+        </main>
+
+        <!-- ══════════════ 屏幕二：目标 ══════════════ -->
+        <main class="flow screen" data-name="target">
+          <div class="flow-head">
+            <div class="flow-head-top">
+              <div>
+                <h1 class="flow-title">沉淀成 skill</h1>
+                <p class="flow-sub">这条对话用来看工作目录那一栏 · 1 轮 · 0 次工具调用</p>
+              </div>
+              <div class="actions"><button class="act primary">开始沉淀</button></div>
+            </div>
+            <ol class="steps">
+              <li class="current"><span class="step-no">1</span><span>沉淀目标</span></li>
+              <li><span class="step-no">2</span><span>起草 run</span></li>
+              <li><span class="step-no">3</span><span>审阅入库</span></li>
+            </ol>
+          </div>
+
+          <p class="inline-note" style="padding: 0 var(--sp-4) var(--sp-3)">
+            1 轮 · 0 次工具调用 · 对话 —— <span class="k">能不能开始的判据，一行说完（原来它自占一节 87px）</span>
+          </p>
+
+          <div class="flow-body">
+            <div class="tabs" role="tablist" data-group="target">
+              <button role="tab" data-tab="form" aria-selected="true">目标</button>
+              <button role="tab" data-tab="evidence" aria-selected="false">依据</button>
+            </div>
+            <div class="pane" data-pane="form">
+              <div class="form">
+                <div class="opt on">
+                  <span class="dot"></span>
+                  <span>
+                    <strong>新建 skill</strong>
+                    <div class="inline-note">留空则由 skill 从素材推断——审阅时会把推断出的 description 摆在最上面，你一眼就能否定</div>
+                  </span>
+                </div>
+                <div class="opt">
+                  <span class="dot"></span>
+                  <span>
+                    <strong>更新本次加载的 skill</strong>
+                    <div class="inline-note">对话/任务是在矫正正在用的 skill——更新目标就是它（提炼的=进化；安装的=存为你的版本并遮蔽）</div>
+                  </span>
+                </div>
+                <label class="field">
+                  作用描述（可选）
+                  <input placeholder="一句话说清它什么时候该被用上" />
+                </label>
+              </div>
+            </div>
+            <div class="pane" data-pane="evidence" hidden>
+              <div class="evi-head">
+                <code>material/</code><span class="grow">这一轮对话的全部素材</span><span class="faint">3 个文件</span>
+              </div>
+              <pre class="code">index.md · conversation.md · workspace-settings.json</pre>
+            </div>
+          </div>
+        </main>
+
+        <!-- ══════════════ 屏幕三：起草中 ══════════════ -->
+        <main class="flow screen" data-name="drafting">
+          <div class="flow-head">
+            <div class="flow-head-top">
+              <div>
+                <h1 class="flow-title">沉淀成 skill</h1>
+                <p class="flow-sub">给报告加一条兜底说明 · 3 轮 · 12 次工具调用</p>
+              </div>
+              <div class="actions"><button class="act">停止</button></div>
+            </div>
+            <ol class="steps">
+              <li class="done"><span class="step-no">✓</span><span>沉淀目标</span></li>
+              <li class="current"><span class="step-no">2</span><span>起草 run</span></li>
+              <li><span class="step-no">3</span><span>审阅入库</span></li>
+            </ol>
+          </div>
+
+          <div class="flow-body">
+            <div class="tabs" role="tablist" data-group="drafting">
+              <button role="tab" data-tab="run" aria-selected="true">产出</button>
+              <button role="tab" data-tab="evidence" aria-selected="false">依据</button>
+            </div>
+            <div class="pane" data-pane="run">
+              <div class="runbar">
+                <span class="badge run">运行中</span><span>3 轮 · 12 次工具调用</span>
+                <span style="flex: 1"></span>
+                <div class="seg2" data-group="draftrun2">
+                  <button data-tab="final" aria-pressed="true">最后结果</button>
+                  <button data-tab="log" aria-pressed="false">完整日志</button>
+                </div>
+              </div>
+              <pre class="code" data-pane="final" data-in="draftrun2">（还没结束——跑完之后这里就是它的最后一段产出，不必在流水里翻）
+<span class="k">★ 跑着的时候日志是唯一的实时信息，所以它常驻，不折叠。</span></pre>
+              <div class="logbox" data-pane="log" data-in="draftrun2" hidden style="margin: 0 var(--sp-3) var(--sp-3)">
+12:04  Read material/index.md
+12:04  Write skill/SKILL.md
+12:05  Bash bash skill/scripts/check.sh
+12:05  Read references/notes.md
+12:06  …（实时流，通过 SSE 一条条落下）</div>
+            </div>
+            <div class="pane" data-pane="evidence" hidden>
+              <div class="evi-head"><code>material/</code><span class="grow">起草时 agent 读的就是它</span></div>
+              <pre class="code">index.md · conversation.md · feedback.md</pre>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      // 屏幕切换
+      const screens = [...document.querySelectorAll('.screen')]
+      for (const btn of document.querySelectorAll('.mock-bar [data-screen]')) {
+        btn.onclick = () => {
+          document.body.dataset.screen = btn.dataset.screen
+          for (const b of document.querySelectorAll('.mock-bar [data-screen]'))
+            b.setAttribute('aria-pressed', String(b === btn))
+          for (const s of screens) s.classList.toggle('on', s.dataset.name === btn.dataset.screen)
+          drawAnnotations()
+        }
+      }
+
+      /**
+       * 两级切换，靠 `data-group` / `data-tab` / `data-in` 三个约定：
+       *   · 外层（草稿·依据·过程 / 目标·依据 / 产出·依据）：按钮带 `role="tab"`，
+       *     窗格是 `.flow-body` 的**直接子节点** ⇒ 换的是整块窗格；
+       *   · 内层（内容·差异 / 最后结果·完整日志）：窗格带 `data-in="<组名>"`
+       *     ⇒ **只动这一组**。
+       *
+       * ⚠️ 这里踩过一次：第一版把"当前屏里所有 `[data-pane]`"当做一个池子，
+       *    于是切「完整日志」会把草稿 tab 里的「内容/差异」一起藏掉，切「差异」
+       *    又会把过程 tab 的状态清掉——两组互相踩。量出来才发现（`inner` 一栏同时
+       *    变 hidden）。作用域必须落到"组"上。
+       */
+      for (const bar of document.querySelectorAll('[data-group]')) {
+        const group = bar.dataset.group
+        const scope = bar.closest('.flow-body') ?? document.body
+        const outer = [...bar.querySelectorAll('[data-tab]')].every(
+          (b) => b.getAttribute('role') === 'tab',
+        )
+        for (const btn of bar.querySelectorAll('[data-tab]')) {
+          btn.onclick = () => {
+            for (const b of bar.querySelectorAll('[data-tab]')) {
+              if (outer) b.setAttribute('aria-selected', String(b === btn))
+              else b.setAttribute('aria-pressed', String(b === btn))
+            }
+            const panes = outer
+              ? [...scope.querySelectorAll('.pane')].filter((p) => p.parentElement === scope)
+              : [...scope.querySelectorAll('[data-in="' + group + '"]')]
+            for (const p of panes) p.hidden = p.dataset.pane !== btn.dataset.tab
+            drawAnnotations()
+          }
+        }
+      }
+
+      /**
+       * 标注的两条线**从稿子自己量**：绿线 = 草稿窗格真实顶部，红线 = 现状里编辑器
+       * 的起点（常量 490，来自真 Chrome + 真 daemon 的实测：内容/差异在 y=495、
+       * 文件树第一行 y≈499，窗格顶部就在 490 附近；**不是估的**）。
+       * 标签位置同样量着放（结论条 / 步骤条 / tab 条的顶边）。
+       */
+      function drawAnnotations() {
+        const app = document.querySelector('.screen.on')
+        if (!app) return
+        const appRect = document.querySelector('.app').getBoundingClientRect()
+        const rel = (sel) => {
+          const e = [...document.querySelectorAll(sel)].find((x) => x.getBoundingClientRect().height > 0)
+          return e ? Math.round(e.getBoundingClientRect().top - appRect.top) : null
+        }
+        const pane = [...app.querySelectorAll('.pane')].find((p) => !p.hidden)
+        const newTop = pane ? Math.round(pane.getBoundingClientRect().top - appRect.top) : null
+        const oldTop = 490
+        const line = (attr, top, text) => {
+          const el = document.querySelector('[data-anno-line="' + attr + '"]')
+          if (!el || top === null) return
+          el.style.top = top + 'px'
+          el.querySelector('span').textContent = text
+        }
+        line('old', oldTop, '现状：编辑器从这里开始（实测 y≈' + oldTop + '）')
+        line('new', newTop, '重排后：编辑器从这里开始（稿子实测 y≈' + newTop + '，首屏多出 ~' + (oldTop - newTop) + 'px）')
+        const tag = (attr, top, suffix) => {
+          const el = document.querySelector('[data-anno-tag="' + attr + '"]')
+          if (el && top !== null) el.style.top = top + 'px'
+        }
+        tag('conclusion', rel('.conclusion'))
+        tag('steps', rel('.steps'))
+        tag('tabs', rel('.tabs'))
+      }
+      drawAnnotations()
+
+      document.getElementById('anno').onchange = (e) => {
+        document.body.dataset.anno = e.target.checked ? 'on' : 'off'
+      }
+      document.getElementById('theme').onchange = (e) => {
+        document.documentElement.dataset.theme = e.target.checked ? 'dark' : 'light'
+      }
+    </script>
+  </body>
+</html>
