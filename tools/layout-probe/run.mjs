@@ -3623,6 +3623,41 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.stoppedBackToTarget',
+    label:
+      '★★★ 起草中点「停止」⇒ **回到目标态**（表单又在、tab 条不在）——这是真会发生的路：起草跑歪了，停下，回头看看素材',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stoppedTabCount',
+    label: '★★ 回到目标态之后**没有 tab 条**（与"目标态不做 tab"同一条：这一屏是表单，不是分层浏览）',
+    ok: (v) => v === 0,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stoppedFoldHead',
+    label:
+      '★★★ 停止之后**素材折叠在这儿**、且默认收起——★ 这一条钉的是一个**只在这条路径上才到达**的分支：第 4 批把它的条件收窄成"有草稿且停在目标态"，不量的话那支标记就是"看着在、其实没人能到达"的疑似死代码',
+    ok: (v, f) => typeof v === 'string' && v.includes('素材') && f['crystal.stoppedFoldClosed'] === true,
+    show: (v, f) => `${JSON.stringify(v)}　默认收起 ${f['crystal.stoppedFoldClosed']}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stoppedFoldOpens',
+    label: '★ 展开它真的列出素材（起草过一版 ⇒ `material/` 已在磁盘上，不是一行空壳）',
+    ok: (v) => v === true,
+    show: (v, f) => JSON.stringify(f['crystal.stoppedFoldRows']),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stoppedStartButtonDisabled',
+    label: '★★ 停下来之后「开始沉淀」是**可按的**（不是灰着让人对着它发呆）',
+    ok: (v) => v === false,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftingEvidenceFits',
     label: '★ 依据那一屏整个落在首屏里',
     ok: (v) => v === true,

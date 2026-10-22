@@ -1738,3 +1738,28 @@ completed 的 review run 过 §4.3 的门槛（否则「开始沉淀」按不动
 **这一轮（第 1–5 批）的总账**：`490 → 363`（编辑窗格起点 y，中间 323 是第 2 批、363 是加了
 一行 tab 导航）、主区下方参照信息 `2 块 → 0 块`、文档高 `~2030 → 880`（不整页滚）、
 探针 `458 → 523` 项（沉淀一族 40 → 89 条）。
+
+### 10.22 复核：把"疑似死分支"量一遍（2026-10-21，分批第 6 批）
+
+第 4 批把素材折叠的条件收窄成 `draftRunId !== '' && material !== null && step === 'target'`。
+收窄条件时最容易留下的缺陷不是"画错"，而是**"看着在、其实没人能到达"的死标记**（本仓库
+第 5 条硬约束就是这个）。所以这一批不新增界面，只回答一个问题：**那一支还有路走得通吗？**
+
+读代码的答案是"有，而且只有一条"：`stopDraft()`（起草中点「停止」）保留 `draftRunId`、
+把 `step` 拨回 `'target'`——于是目标态 + 素材折叠同时成立。其它路径都不行：
+`attachDraft` 挂上已完成草稿 ⇒ 直接进审阅态；起草中 ⇒ `step === 'drafting'`（折叠在「依据」tab 里）；
+`retryDraft()` 会把 `draftRunId` 清空 ⇒ 条件第一项就不成立。
+
+但"读代码觉得有路"不算证据（这一轮已经吃过两次"断言挂错东西"的亏），于是在探针里**真的点下去**
+（起草中那一节末尾，点「停止」，等表单回来）：
+
+  · `crystal.draftingStopButton = "停止"` → 点它
+  · `crystal.stoppedBackToTarget = true`（表单又在）、`stoppedTabCount = 0`（这一屏没有 tab 条）
+  · `crystal.stoppedFoldHead = "▸ 素材 4 个文件 · material"`、`stoppedFoldClosed = true`（默认收起）
+  · `crystal.stoppedFoldOpens = true`、`stoppedFoldRows = ["00-README.md 1 KB","meta.json 1 KB",
+    "skills-index.md 1 KB","task-run.md 1 KB"]`（展开真列得出来——起草过一版 ⇒ `material/` 在磁盘上）
+  · `crystal.stoppedStartButtonDisabled = false`（停下来之后按钮是可按的，不是灰着让人发呆）
+
+`pnpm run probe:layout` **528 项全绿**（第 5 批 523 + 5）。结论：那一支**不是死代码**，
+而且它是使用者真会走的路（起草跑歪了 → 停下 → 回头看看素材）——所以判据留在这儿守着，
+而不是把那支标记删掉。

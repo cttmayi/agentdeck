@@ -5169,8 +5169,60 @@
                 facts['crystal.draftingEvidenceOpens'] = null
               }
             }
-            // ★ 兜底：**保证那条 SSE 关掉**（这一屏的 run 是 Node 侧起的，探针不取消它，
-            //   它由 run.mjs 收尾时连假 CLI 一起杀）。
+              // ── ★★ 起草中点「停止」⇒ 回目标态（素材折叠在这里，2026-10-21 第 6 批）──
+              //
+              // 为什么专门量这一下：第 4 批把素材折叠的条件收窄成
+              // `draftRunId !== '' && material !== null && step === 'target'`——而
+              // **只有这条路径**（停止 ⇒ `stopDraft` 保留 draftRunId、step 回 target）
+              // 才会走到它。不量的话，那一支标记就是"看着在、其实没人能到达"的疑似死代码；
+              // 顺带这一屏也是使用者真会遇到的（起草跑歪了，停下，回头看看素材）。
+              {
+                const cyStop = [...d().querySelectorAll('button')].find((b) =>
+                  text(b).includes('停止'),
+                )
+                facts['crystal.draftingStopButton'] = cyStop ? text(cyStop) : null
+                if (cyStop) {
+                  click(cyStop)
+                  // 停止是异步的（要等进程真的死掉）；回到目标态的标志是那张表单又在了
+                  facts['crystal.stoppedBackToTarget'] = await untilNet(
+                    () => !!d().querySelector('.radio-row input[type="radio"]'),
+                    200,
+                  )
+                  facts['crystal.stoppedTabCount'] = d().querySelectorAll('.review-tabs').length
+                  const cyStoppedFold = d().querySelector('.fold-section')
+                  facts['crystal.stoppedFoldHead'] = cyStoppedFold
+                    ? text(cyStoppedFold.querySelector('.fold-head'))
+                    : null
+                  facts['crystal.stoppedFoldClosed'] =
+                    cyStoppedFold?.querySelector('.fold-head')?.getAttribute('aria-expanded') ===
+                    'false'
+                  if (cyStoppedFold) {
+                    click(cyStoppedFold.querySelector('.fold-head'))
+                    const cyOpened2 = await untilNet(
+                      () => !!d().querySelector('.fold-section .file-pane .file-row'),
+                      60,
+                    )
+                    facts['crystal.stoppedFoldOpens'] = cyOpened2
+                    facts['crystal.stoppedFoldRows'] = [
+                      ...d().querySelectorAll('.fold-section .file-pane .file-row'),
+                    ].map((r) => text(r))
+                    click(d().querySelector('.fold-head'))
+                    await untilNet(() => !d().querySelector('.fold-section .file-row'), 40)
+                  } else {
+                    facts['crystal.stoppedFoldOpens'] = null
+                    facts['crystal.stoppedFoldRows'] = null
+                  }
+                  const cyStartAgain = [...d().querySelectorAll('button')].find((b) =>
+                    text(b).includes('开始沉淀'),
+                  )
+                  facts['crystal.stoppedStartButtonDisabled'] = cyStartAgain
+                    ? cyStartAgain.disabled
+                    : null
+                }
+              }
+
+            // ★ 兜底：**保证那条 SSE 关掉**（这一屏的 run 是 Node 侧起的，探针刚把它停了，
+            //   真停不掉就靠切路由卸载组件；假 CLI 的残留进程由 run.mjs 收尾时一起杀）。
             f.contentWindow.location.hash = '#/tasks'
             await untilNet(() => !d().querySelector('.review-tabs'), 20)
           }
