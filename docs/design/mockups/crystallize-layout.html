@@ -1061,11 +1061,12 @@ references/notes.md + scripts/check.sh。审核建议补一条失败兜底。</p
             1 轮 · 0 次工具调用 · 对话 —— <span class="k">能不能开始的判据，一行说完（原来它自占一节 87px）</span>
           </p>
 
+          <!--
+            ★ 目标态**不做 tab**（2026-10-21 确认）：表单常驻，素材清单折叠在下面。
+            原因：目标态只有一件事要做（选目标 + 写作用描述），没有"另一件事"需要切换；
+            硬加 tab 反而多一次点击。素材清单是"我选得对不对"的依据，折起来随时可翻。
+          -->
           <div class="flow-body">
-            <div class="tabs" role="tablist" data-group="target">
-              <button role="tab" data-tab="form" aria-selected="true">目标</button>
-              <button role="tab" data-tab="evidence" aria-selected="false">依据</button>
-            </div>
             <div class="pane" data-pane="form">
               <div class="form">
                 <div class="opt on">
@@ -1087,15 +1088,11 @@ references/notes.md + scripts/check.sh。审核建议补一条失败兜底。</p
                   <input placeholder="一句话说清它什么时候该被用上" />
                 </label>
               </div>
-            </div>
-            <div class="pane" data-pane="evidence" hidden>
-              <div class="evi-head">
-                <code>material/</code><span class="grow">这一轮对话的全部素材</span><span class="faint">3 个文件</span>
+                <div class="fold" style="margin-top: var(--sp-2)">▸ 素材清单（material/ · 3 个文件）</div>
               </div>
-              <pre class="code">index.md · conversation.md · workspace-settings.json</pre>
             </div>
-          </div>
         </main>
+
 
         <!-- ══════════════ 屏幕三：起草中 ══════════════ -->
         <main class="flow screen" data-name="drafting">
