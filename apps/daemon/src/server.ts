@@ -133,6 +133,12 @@ import {
   writeAuditStamp,
   writeDraftSkillFiles,
 } from './crystallize-artifacts.ts'
+// ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
+import {
+  renderExecCheckMarkdown,
+  runSkillExecCheck,
+  summarizeExecCheck,
+} from './skill-exec-check.ts'
 import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
@@ -2410,6 +2416,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       '',
       '【怎么做】',
       '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
+      // ★ 分批第 20 批：可机械判定的那部分由**平台**先跑完了（确定性、不花额度），
+      //   审核者拿到的是一份事实清单。不指名它的后果是"两方各查一遍"：既浪费额度，
+      //   又会出现"平台说通过、审核者按自己的落脚点报不通过"这种自相矛盾的判决。
+      //   ⚠️ 必须一起说清"没查 ≠ 通过"，否则机器缺 python3 时它会以为语法没问题。
+      '1b. 平台已经在起这次审核之前跑过一轮**定检**，结果在 `material/exec-check.md`：' +
+        '脚本语法（只解析，不执行）、引用的文件在不在、骨架、占位符有没有解释过、有没有吞掉错误的写法。' +
+        '**先读它，把它当已知事实**，不要重复查那几项；你的力气留给它查不出来的地方：' +
+        '命令块的参数与输入形态、反规避（为了跑通而让命令不再做那件事）、步骤衔接。' +
+        '标「没查」的项**没有结论**，不许当成通过。',
       '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
       // ★ 分批第 10 批：位置要**能直接找到**。返工那一版拿这份意见去改上一版，
       //   而"改哪儿"只有两样东西说得清：位置（文件 + 行号/小节）+ 那一处的原文。
@@ -2540,6 +2555,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
     }
     const draftHut = await draftTaskDir(draft.id as string)
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 20 批：起审核之前，先跑一轮**平台定检**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 为什么把这件事从审核者手里拿过来：使用者那条真实链（10 版 / $29.81）里，第 4 版
+    // 同一份内容被审出「通过 · 通过 · 不通过」，而 `SKILL.md` 在三审之间**一个字节都没动**
+    // （修改时间 11:41:01，三审在 11:44 / 12:36 / 13:09）；第 8 版更极端，3 分钟内
+    // needs_human → 通过 → 不通过。"脚本语法对不对、引用的文件在不在、骨架齐不齐"
+    // **本来是确定性的**——由判断给出就会抖，且随轮次变贵（单轮 $0.98 → $6.11）。
+    //
+    // 结果写进 `material/exec-check.md`，**每轮覆盖**：上一轮的定检结论不该被这一轮引用
+    // （退一万步，两份定检混在一份文件里，判决就说不清"我引的是哪一次的"）。
+    // ⚠️ 定检本身失败**不拦**起审核：它只是少一份事实，而"审一下"这件事不该因此变得不可能。
+    // ⚠️ 也不写给起草者看（`00-README.md` 不提名它）：起草者的输入是**使用者的意见**
+    //    （`material/feedback.md`），平台定检是审核者的原料，塞给起草者等于换了任务书。
+    const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
+    if (execReport !== null) {
+      await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
+      await writeFile(
+        join(draftHut, 'material', 'exec-check.md'),
+        renderExecCheckMarkdown(execReport),
+        'utf8',
+      ).catch(() => undefined)
+      info(`起草审核定检（${draft.id as string}）：${summarizeExecCheck(execReport)}`)
+    }
     // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
     //
     // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，

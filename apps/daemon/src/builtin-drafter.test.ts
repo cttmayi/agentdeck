@@ -19,6 +19,7 @@ import {
   DRAFTER_INSTRUCTIONS,
   DRAFTER_NAME,
   SKILL_REVIEWER_INSTRUCTIONS,
+  SKILL_REVIEWER_INSTRUCTIONS_V1,
   SKILL_REVIEWER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
@@ -130,6 +131,36 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(
       (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
       SKILL_REVIEWER_INSTRUCTIONS,
+  SKILL_REVIEWER_INSTRUCTIONS_V1,
+    )
+  })
+
+  test('★★ 平台换了审核方向：**老默认**逐字在 ⇒ 升级；使用者自己写的 ⇒ 一个字都不动', async () => {
+    // 为什么这两条必须成对测：升级与"不覆盖使用者改动"只差一个判据——"是不是**平台自己的**
+    // 老文本"。写成"与当前默认不同就升级"，每次启动都会把使用者写的判据换成平台的
+    // （表现："我改的指令过一会儿就变回去了"，很像界面没保存）；写成"只比对新旧常量"，
+    // 老工作区又永远升不上来（表现："判据明明改了，审起来还是老样子"，而日志一个字都不提）。
+    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+
+    // ① 老默认 ⇒ 升级，且说清为什么
+    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V1 })
+    const upgraded = await ensureBuiltinReviewer(store, WS)
+    assert.equal(upgraded.action, 'healed')
+    if (upgraded.action === 'healed') assert.match(upgraded.why, /旧版/)
+    assert.equal(
+      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
+      SKILL_REVIEWER_INSTRUCTIONS,
+  SKILL_REVIEWER_INSTRUCTIONS_V1,
+    )
+
+    // ② 使用者在老默认上改过一个地方 ⇒ 从此不再动它（连升级也不许）
+    const edited = SKILL_REVIEWER_INSTRUCTIONS_V1.replace('你只指出哪里不合格', '你还要给出改法')
+    assert.notEqual(edited, SKILL_REVIEWER_INSTRUCTIONS_V1, '这个用例依赖"真的改了一个地方"')
+    await store.insertAgent({ ...mine, instructions: edited })
+    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'left-alone')
+    assert.equal(
+      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
+      edited,
     )
   })
 

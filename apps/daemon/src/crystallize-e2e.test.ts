@@ -33,6 +33,9 @@ import { VERDICT_FENCE_BEGIN, VERDICT_FENCE_END, ulid, type Issue, type RunId } 
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { deliveredText } from './testing/delivered.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
+// ★ 分批第 21 批：假后端靠"审核者身份的第一句"认出审核 run ⇒ 必须用**常量**，
+//   不能把文案抄一份进测试（抄一份的话，判据一改它就悄悄失效，见 `isDraftReview` 的注释）。
+import { SKILL_REVIEWER_INSTRUCTIONS } from './builtin-drafter.ts'
 
 /**
  * 最小假后端：普通 run 立刻推一段文本产出并 completed。
@@ -116,7 +119,18 @@ class FakeBackend implements AgentBackend {
     const delivered = deliveredText(opts)
     this.prompts.push(delivered)
     this.resumeRequests.push(opts.resumeSessionId ?? null)
-    const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
+    /**
+     * "这是审核 run 吗"的判据：**审核者身份里的第一句**（用常量，不用短语）。
+     *
+     * ⚠️ 这里踩过一次，值得记下来：原来写的是 `delivered.includes('审一条刚起草出来的 skill')`，
+     *    那句短语当时活在**审核者的身份**（旧判据第一行）里。分批第 21 批把身份改写成
+     *    「只审这条 skill **能不能被照着执行**」之后，短语没了 ⇒ **审核的重试轮**
+     *    （`上一次你的输出没能通过格式校验…`，它的 prompt 里没有任务说明）就被当成了**起草 run**
+     *    ⇒ 假后端顺手把 `skill/` 重写回夹具 ⇒ 人手工保存的内容被抹掉 ⇒
+     *    红的是"返工起点不对"，而真正的原因是这条判据认不出审核者。
+     *    ⇒ 判据必须钉在**平台常量**上：身份文案怎么改都跟着走，改不动就不会静默失效。
+     */
+    const isDraftReview = delivered.includes(SKILL_REVIEWER_INSTRUCTIONS.split('\n')[0] ?? '\u0000')
 
     if (opts.workDir.includes('skill-draft-') && this.draftGate !== null) {
       await this.draftGate
@@ -1297,6 +1311,36 @@ describe('§10：起草之后的审核 run', () => {
     }
     assert.equal(agent.builtin, true)
     assert.equal(agent.role, 'skill-reviewer')
+  })
+
+  test('★★ 起审核之前平台先跑了**定检**：`material/exec-check.md` 落盘，且措辞不把"没查"说成"通过"', async () => {
+    // 为什么值得钉在 e2e 而不是只测 `skill-exec-check.ts`：定检的**位置**与**时机**才是
+    // 这一批的重点——它必须在"起审核之前"写进**草稿小屋**的 `material/`（审核者读那里），
+    // 而且**每轮覆盖**。放错地方（比如写进审核者自己的工作目录）时，单元测试全绿，
+    // 审核者却永远读不到它——那正是本仓库第 5 条纪律说的"字段都在，就是没有路径让它发生"。
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的定检流程'),
+      target: { kind: 'new', purpose: '定检流程' },
+    })
+    const draftRun = (await (await fetch(`${daemon.url}/api/runs/${draftRunId}`)).json()) as {
+      workDir: string
+    }
+    const checkPath = join(draftRun.workDir, 'material', 'exec-check.md')
+
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    const text = await res.text()
+    assert.equal(res.status, 202, text)
+
+    const md = await readFile(checkPath, 'utf8')
+    assert.match(md, /平台定检/, '定检报告落在草稿小屋的 material/ 里（审核者读得到的地方）')
+    assert.match(md, /SKILL\.md/, '定检至少看了骨架（SKILL.md 的 frontmatter 与两节标题）')
+    // 这两句是"不许含糊"的落点：机器上缺 python3 时，它必须说"没查"，而不是沉默或算通过。
+    assert.match(md, /没有结论/, '标"没查"的项必须写明它没有结论')
+    assert.match(md, /不要把"没查"当成"通过"/, '读到它的人（审核者）必须被告知这个坑')
   })
 
   test('★ 它**不进任务列表**（与起草 run 同一条纪律：不打扰任何人）', async () => {
