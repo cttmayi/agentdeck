@@ -31,7 +31,14 @@ after(async () => {
   await cleanup(tmp)
 })
 
-function makeBackend(overrides: { scenario?: string; extraEnv?: Record<string, string> } = {}) {
+function makeBackend(
+  overrides: {
+    scenario?: string
+    extraEnv?: Record<string, string>
+    /** 后端级别的告警出口（`onWarn` 是**构造**参数，不是 ExecOptions 的）。 */
+    onWarn?: (message: string) => void
+  } = {},
+) {
   const echoFile = join(fake.dataDir, `rpc-${Math.random().toString(36).slice(2)}.json`)
   return {
     echoFile,
@@ -43,6 +50,7 @@ function makeBackend(overrides: { scenario?: string; extraEnv?: Record<string, s
       rpcTimeoutMs: 5000,
       rpcMaxRetries: 0,
       rpcRetryDelayMs: 0,
+      ...(overrides.onWarn === undefined ? {} : { onWarn: overrides.onWarn }),
     }),
     env: {
       ...fake.env(overrides.scenario ?? 'ok', { FAKE_RPC_ECHO_FILE: echoFile }),
@@ -123,6 +131,9 @@ describe('CodexBackend（codex app-server 适配器，假 server 上整链跑通
       // ★ 实测（0.144.0-alpha.4）：恢复的线程 approvalPolicy 会退回 on-request，
       //   所以 turn/start 也必须显式传 never（不只是 thread/start）
       assert.equal((turnStart!.params as Record<string, unknown>)['approvalPolicy'], 'never')
+      // ★ 每一轮都显式给 cwd（分批第 15 批）：thread 的 cwd 只在创建时定、resume 改不了它，
+      //   所以"thread 已带"不成立——不带的话，这一轮在哪执行取决于服务端怎么取舍（没量过）。
+      assert.equal((turnStart!.params as Record<string, unknown>)['cwd'], workDir)
       const input = (turnStart!.params as { input?: Array<{ type: string; text: string }> })['input']
       assert.equal(input?.[0]?.type, 'text')
       assert.equal(input?.[0]?.text, '把 a.txt 读完', 'prompt 原样作为 text input（B 档三段已合成）')
@@ -144,11 +155,53 @@ describe('CodexBackend（codex app-server 适配器，假 server 上整链跑通
       assert.ok(!methods.includes('thread/start'), '不应再开新线程')
       const resume = echo.requests.find((r) => r.method === 'thread/resume')!
       assert.equal((resume.params as Record<string, unknown>)['threadId'], 'thr_fake-1')
+      // ★★ resume 那一路才是 cwd 的要害：线程是**别处**建的（沉淀返工：resume 的是上一版的
+      //    线程，而这一版在自己的新小屋里干活）。thread/resume 改不了线程的 cwd（参数只有
+      //    threadId）⇒ 只能靠本轮显式指定。这条断言就是"别把 cwd 省掉"的钉子。
+      const turnStartOnResume = echo.requests.find((r) => r.method === 'turn/start')!
+      assert.equal(
+        (turnStartOnResume.params as Record<string, unknown>)['cwd'],
+        workDir,
+        'resume 的那一轮必须显式带 cwd（线程带的可能是旧目录）',
+      )
       // thread/resume 响应不带 model ⇒ CLI 未报告 ⇒ null（不拿请求值顶替）
       assert.equal(result.model, null)
       assert.equal(result.sessionId, 'thr_fake-1')
     } finally {
       await cleanup(workDir)
+    }
+  })
+
+  test('★★ resume 的线程带着**别的**工作目录 ⇒ 告警说清楚，且本轮仍用本轮的目录', async () => {
+    // 这一条是**使用者提问量出来的**：他看到日志里"工作目录已切换到新任务"，问"这说明工作目录
+    // 有变化？为什么需要变化呢"。查下来发现 `turn/start` 一直没带 cwd，而 resume 的线程带的 cwd
+    // 是它**创建时**那个（沉淀返工就是这样：v2 在自己的小屋里干活，resume 的是 v1 的线程）。
+    // 两条一起量：① 说清楚"两者不一致"；② 本轮显式用**本轮**的目录。
+    const otherDir = await makeTempDir('codex-other-work')
+    const workDir = await makeTempDir('codex-work')
+    const warnings: string[] = []
+    const { backend, env, echoFile } = makeBackend({
+      scenario: 'ok',
+      extraEnv: { FAKE_RESUME_CWD: otherDir },
+      onWarn: (m) => warnings.push(m),
+    })
+    try {
+      const { result } = await run(backend, execOpts({ workDir, env, resumeSessionId: 'thr_fake-1' }))
+      assert.equal(result.status, 'completed')
+      assert.ok(
+        warnings.some((w) => w.includes(otherDir) && w.includes(workDir)),
+        `该告警说清"线程的目录 vs 本轮的目录"，实际：${JSON.stringify(warnings)}`,
+      )
+      const echo = await readRpcEcho(echoFile)
+      const turnStart = echo.requests.find((r) => r.method === 'turn/start')!
+      assert.equal(
+        (turnStart.params as Record<string, unknown>)['cwd'],
+        workDir,
+        '本轮必须在**本轮**的目录里执行（不是线程带的那个）',
+      )
+    } finally {
+      await cleanup(workDir)
+      await cleanup(otherDir)
     }
   })
 

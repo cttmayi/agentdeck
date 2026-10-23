@@ -18,7 +18,7 @@
 
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -2244,6 +2244,50 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     )
     assert.match(index, /全新.*会话/, '索引页要说明这是全新会话')
     assert.match(index, /SKILL\.md/, '要点出哪几份是人改过的')
+  })
+
+  test('★★ 每版一间小屋：返工**不动**上一版（这就是"工作目录为什么要变"的理由）', async () => {
+    // 使用者看到日志里那句"工作目录已切换到新任务"，问「这说明工作目录有变化？为什么需要变化呢」。
+    // 答案不是"顺手换个地方"，而是**版本不可变**：每版一间小屋 ⇒ 上一版能当基线对比
+    // （`/api/crystallize/diff?against=previous`）、审核指纹（`.audited.json`）指的是"那一版看过的
+    // 那些文件"、人改过的痕迹（`.human-edits.json`）也挂在那一版上。原地改会把这三样一起毁掉。
+    // 这条用例把它钉成不变量：返工之后，上一版小屋里的产出**一字未动**。
+    const sourceRunId = await runReviewed('审完的流程（量目录不变）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '目录不变' },
+    })
+    const v1Hut = join(workRoot, `skill-draft-${v1}`)
+    const before = await readFile(join(v1Hut, 'skill', 'SKILL.md'), 'utf8')
+
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '改一句' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const created = (await res.json()) as { draftRunId: string }
+
+    // ① 两条 run 的 workDir 各是各的小屋（不是同一间）
+    const v2Run = (await (await fetch(`${daemon.url}/api/runs/${created.draftRunId}`)).json()) as {
+      workDir: string
+    }
+    assert.ok(
+      v2Run.workDir.endsWith(`skill-draft-${created.draftRunId}`),
+      `这一版该在自己的小屋里干活，实际 ${v2Run.workDir}`,
+    )
+    assert.notEqual(v2Run.workDir, v1Hut, '两版不能共用一间小屋')
+
+    // ② 上一版一字未动（这是 diff 能算、审核指纹还有意义、人改的痕迹还在的前提）
+    assert.equal(
+      await readFile(join(v1Hut, 'skill', 'SKILL.md'), 'utf8'),
+      before,
+      '返工不许改上一版小屋里的产出——那不是"顺手"，是版本不可变',
+    )
+    assert.ok(
+      (await readdir(v1Hut)).includes('material'),
+      '上一版的小屋整个还在（能翻回去看它当时长什么样）',
+    )
   })
 
   test('★ 会话被拒（线程没了）⇒ 这一版仍然改得对：回退新线程 + 说清缺了上文', async () => {

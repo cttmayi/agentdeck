@@ -250,6 +250,26 @@ export class CodexBackend implements AgentBackend {
           threadId = asString(asRecord(asRecord(res)?.['thread'])?.['id']) ?? opts.resumeSessionId
           activeModel = asString(asRecord(res)?.['model']) ?? null
           resumeRejected = false
+          // ══════════════════════════════════════════════════════════════════
+          // ⚠️ 线程带着**它自己**的工作目录（`thread/start` 时定的），而本次 run 的目录
+          //    可能不是同一个（沉淀返工就是这样：v2 在自己的小屋里干活，而 resume 的是
+          //    v1 的线程）。`thread/resume` **改不了**线程的 cwd（参数只有 threadId），
+          //    所以只能：① 本轮显式把 cwd 传下去（见下面 `turn/start`）；
+          //    ② 对不上时**说出来**——不然"它到底在哪个目录里干活"只能靠猜。
+          //
+          //    这一段是**使用者提问量出来的**：他看到日志里那句"工作目录已切换到新任务"，
+          //    问"这说明工作目录有变化？为什么需要变化呢"。查下来发现 `turn/start` 一直
+          //    没带 cwd（文档里它标着"可选，thread 已带"——而"thread 已带"恰恰是 resume
+          //    这一路上的坑：带的是**旧**目录）。
+          const resumedCwd = asString(asRecord(res)?.['cwd'])
+          if (resumedCwd !== null && resumedCwd !== opts.workDir) {
+            this.#options.onWarn?.(
+              `会话 ${opts.resumeSessionId} 的工作目录是 ${resumedCwd}，` +
+                `本次 run 的目录是 ${opts.workDir}——` +
+                `已在本轮的 turn 里显式指定 ${opts.workDir}（线程里的上文来自另一个目录，` +
+                `它的记忆里可能有那边的路径）。`,
+            )
+          }
         } catch (err) {
           if (!(err instanceof JsonRpcServerError)) throw err
           this.#options.onWarn?.(
@@ -293,6 +313,14 @@ export class CodexBackend implements AgentBackend {
         // ★ 实测：恢复的线程 approvalPolicy 会退回 on-request——turn/start 也必须
         //   显式传 never，否则无人值守策略不成立（§7 清单第 2 条的补充结论）。
         approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
+        // ★★ 每一轮都显式给 cwd（分批第 15 批补的）。
+        //
+        //    文档里这个参数标着"可选，thread 已带"——**"thread 已带"在 resume 那一路上是错的**：
+        //    线程带的是它自己创建时的目录，而本次 run 的目录可能不同（沉淀返工的 v2 在自己的
+        //    小屋里干活，resume 的却是 v1 的线程）。不显式给，这一轮到底在哪个目录里执行就
+        //    取决于服务端如何取舍"线程的 cwd"与"进程的 cwd"——那是**没量过**的行为，
+        //    而它决定了起草者读到的 `skill/` 是哪一版、写回去的文件又落在哪间小屋。
+        cwd: opts.workDir,
         // prompt 已是 B 档三段合成的一段（deliveryModeFor 在 daemon 侧判定）
         input: [{ type: 'text', text: opts.prompt }],
       }, { timeoutMs })

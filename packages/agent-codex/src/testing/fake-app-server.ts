@@ -30,6 +30,14 @@ import { writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 const SCENARIO = process.env['FAKE_SCENARIO'] ?? 'ok'
+/**
+ * `thread/resume` 响应里带的工作目录（分批第 15 批加的开关）。
+ *
+ * 真机上这个字段是**有**的（文档 §2.3：resume 的响应里带 thread + cwd），而线程带的 cwd
+ * 是它**创建时**那个——沉淀返工正好是"resume 的是别处的线程、本轮的目录在另一间小屋"。
+ * 不给这个开关，适配器里"两者不一致就告警"那段就没有任何东西量得到。
+ */
+const RESUME_CWD = process.env['FAKE_RESUME_CWD'] ?? ''
 const echoFile = process.env['FAKE_RPC_ECHO_FILE']
 
 // 版本探测（`probe()` 会调 detectVersion）必须**早返回**：否则剧本的帧会
@@ -382,7 +390,10 @@ rl.on('line', (line) => {
         if (SCENARIO === 'resume-missing' && params['threadId'] === 'thr_missing') {
           respondError(id, { code: -32600, message: 'no rollout found for thread id thr_missing' })
         } else {
-          respond(id, { thread: { id: params['threadId'] ?? THREAD_ID } })
+          respond(id, {
+            thread: { id: params['threadId'] ?? THREAD_ID },
+            ...(RESUME_CWD === '' ? {} : { cwd: RESUME_CWD }),
+          })
         }
         break
       case 'turn/start':
