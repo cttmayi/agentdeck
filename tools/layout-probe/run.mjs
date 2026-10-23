@@ -3423,9 +3423,16 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.auditFailText',
     label:
-      '★★ 未通过时结论条说清三件事：**不通过** + 理由码 + **配额已用尽**（人要知道为什么停在它这儿）',
+      '★★ 未通过时结论条说清三件事：**不通过** + 理由码 + **配额已用尽**（人要知道为什么停在它这儿），并且两个出口都在（按意见再改一版 / 填入审核问题）',
     ok: (v) =>
-      typeof v === 'string' && v.includes('不通过') && v.includes('style_violation') && v.includes('重新起草'),
+      typeof v === 'string' &&
+      v.includes('不通过') &&
+      v.includes('style_violation') &&
+      // ⚠️ 分批第 12 批：这里原来查的是「重新起草」——那是被**改名**的那个按钮
+      //    （「按意见重新起草」⇒「填入审核问题」）。判据的意图是"两个出口都在"，
+      //    所以改成查两个出口各自的现名，**强度不变**（少了任何一个出口仍然是红）。
+      v.includes('按意见再改一版') &&
+      v.includes('填入审核问题'),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3452,8 +3459,76 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.auditRedraftButton',
     label:
-      '★★ 停在未通过态时给得出「按意见重新起草」（第 ② 条决定的出口；少了它，人只能自己重走一遍）',
+      '★★ 停在未通过态时给得出「填入审核问题」（第 ② 条决定的出口；少了它，人只能自己重走一遍）',
     ok: (v) => v === true,
+  },
+  // ══════════════════════════════════════════════════════════════════
+  // ★★★ 审核问题清单**填进意见框**，由人点提交（2026-10-21 分批第 12 批）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 使用者原话：「审核不过后，是否可以将"审核问题清单"直接填入"按意见重新起草"的框中，
+  // **让用户点反馈**」。改之前那个按钮**填完立刻提交**（人连自己要发出去的话都没看见），
+  // 而且只填 `[严重度] 一句话`（位置与原文都丢了）。这一族判据钉住四件事：
+  //   ① 点它 ⇒ 意见框出现且**已填**；② 填进去的带位置与原文；③ 光标落在框里；
+  //   ④ **没有自己跑起来**（框与提交按钮仍然在，这一屏没切到"起草中"）。
+  {
+    view: '沉淀',
+    key: 'crystal.redraftBoxOpened',
+    label: '★★★ 点「填入审核问题」⇒ 意见框打开（不再"点了就悄悄开始起草"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftHasReasonCode',
+    label: '★ 填进去的话里带**理由码**（起草者要知道"为什么不合格"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftHasLocator',
+    label:
+      '★★★ 填进去的话里带**位置**（`SKILL.md` 这类）——没有位置，起草者只能猜着改（第 10 批把返工改成"基于上一版改"之后这条更要紧）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftHasExcerpt',
+    label: '★★ 填进去的话里带**原文摘录**（行号是软信息，原文才让人找得准）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftFocused',
+    label: '★ 光标落在意见框里（让人一眼看到"要发出去的是这些"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftSubmitEnabled',
+    label: '★★ 填完「重新起草」可点（最终决定权在人手里）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftStillEditing',
+    label:
+      '★★★ 点了「填入审核问题」**没有**自己开始起草：意见框与提交按钮都还在（真跑起来这一屏会切到"起草中"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditRedraftHint',
+    label:
+      '★ 按钮的提示说清"只填不提交"（改名之后最怕的是人以为点了就开始了——原来正是那样）',
+    ok: (v) => typeof v === 'string' && v.includes('只填') && v.includes('不会直接开始起草'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.redraftFilled',
+    label: '★ 填进去的是一整份清单（不是一个空框或一句占位）',
+    ok: (v) => typeof v === 'string' && v.split('\n').length >= 4,
+    show: (v) => JSON.stringify(String(v).split('\n').slice(0, 6)),
   },
   {
     view: '沉淀',

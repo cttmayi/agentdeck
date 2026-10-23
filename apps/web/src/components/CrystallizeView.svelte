@@ -35,6 +35,8 @@
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
   //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
   //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
+  import { tick } from 'svelte'
+  import { buildFeedbackDraft } from '../lib/crystallize-feedback.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { finalResultText } from '../lib/final-output.ts'
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
@@ -222,6 +224,15 @@
   let reviewTab: 'content' | 'diff' = 'content'
   /** 「按意见改一版」的输入框是否展开（不常驻，见结论条）。 */
   let reviseOpen = false
+  /**
+   * 「按意见改一版」的意见框（填清单后把光标放进去，见 `fillFeedbackFromAudit`）。
+   *
+   * ⚠️ 这里**不能**写 `$state`：本组件用的是 `export let`（legacy 模式），混进 `$state`
+   *    会被 Svelte 判成 runes 模式而整个组件报 `Cannot use 'export let' in runes mode`，
+   *    连带着 `views/Crystallize.svelte` 传进来的 props 全变成 `never`（一堆看不懂的错误）。
+   *    `bind:this` 只需要一个普通变量——它不需要驱动渲染。
+   */
+  let feedbackBox: HTMLTextAreaElement | null = null
   /**
    * 起草审核的结论（§10.5 第 ⑤ 步：界面上要看到"审核说了什么"）。
    *
@@ -883,20 +894,37 @@
   }
 
   /**
-   * 审核额度用尽后的「按意见重新起草」：把审核意见**原文**填进"按意见改一版"的输入框，
-   * 再走那条现成的路（同一份素材、同一条链、同一套落盘规则）。
+   * 把**审核问题清单**填进「按意见改一版」的意见框（分批第 12 批）。
    *
-   * 为什么不另写一份提交：那是同一个动作的两种实现，迟早分叉 —— 而使用者只会看到
-   * "自动返工改的那版"与"我点的那版"结果不一样。
+   * 使用者原话：「审核不过后，是否可以将"审核问题清单"直接填入"按意见重新起草"的框中，
+   * **让用户点反馈**」。原来这个按钮做错了两件事：
+   *   ① `await reviseDraft()` —— 填完**立刻提交**，人连自己要发出去的话都没看见（更别说改）；
+   *   ② 只填了 `[严重度] 一句话`，**位置与原文都丢了**。
+   *
+   * 现在它只做"填"这一件事：打开意见框、把清单放进去、光标落在里面。**提交永远由人点**
+   * （「重新起草」那个按钮）——这也是这一屏"平台不替使用者决定"的一贯口径：真机一轮起草
+   * 要花钱，而"这段意见到底对不对"只有人知道（第 10 批刚把返工改成"基于上一版改"，
+   * 意见里没有位置，起草者只能猜着改）。
+   *
+   * 为什么不在这里自己拼字符串：拼法在 `lib/crystallize-feedback.ts`，那里有测试钉住形状
+   * （形状要与 daemon 那份一致——两份文本都会进同一个 feedback.md）。
    */
-  async function redraftFromAudit(): Promise<void> {
+  async function fillFeedbackFromAudit(): Promise<void> {
     const r = reviewInfo?.review
     if (!r) return
-    reviseFeedback = [
-      `审核不通过（理由码：${r.reasonCode}）。请按下面每一条改：`,
-      ...r.findings.map((f, i) => `${i + 1}. [${f.severity}] ${f.summary}`),
-    ].join('\n')
-    await reviseDraft()
+    reviseFeedback = buildFeedbackDraft(r.reasonCode, r.findings, {
+      intro: (code) => $t('crystallize.feedbackIntro', { code }),
+      where: $t('crystallize.feedbackWhere'),
+      quote: $t('crystallize.feedbackQuote'),
+      noEvidence: $t('crystallize.feedbackNoEvidence'),
+      emptyFindings: $t('crystallize.feedbackEmptyFindings'),
+      outro: $t('crystallize.feedbackOutro'),
+    })
+    reviseOpen = true
+    // 光标落在框里：让人一眼看到"要发出去的是这些"，而不是先找它在哪儿
+    await tick()
+    feedbackBox?.focus()
+    showToast($t('crystallize.auditRedraftFilled'))
   }
 
   /**
@@ -1612,9 +1640,11 @@
                 >{$t('crystallize.reviseTitle')}</button>
               {/if}
               {#if auditFailedStuck}
-                <button class="ghost small" onclick={() => void redraftFromAudit()}>
-                  {$t('crystallize.auditRedraft')}
-                </button>
+                <button
+                  class="ghost small"
+                  title={$t('crystallize.auditRedraftHint')}
+                  onclick={() => void fillFeedbackFromAudit()}
+                >{$t('crystallize.auditRedraft')}</button>
               {/if}
             </span>
           </div>
@@ -1671,6 +1701,7 @@
           {#if reviseOpen}
             <div class="revise-row">
               <textarea
+                bind:this={feedbackBox}
                 bind:value={reviseFeedback}
                 rows="2"
                 placeholder={$t('crystallize.revisePlaceholder')}
