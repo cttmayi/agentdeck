@@ -3431,7 +3431,8 @@ const CHECKS = [
       // ⚠️ 分批第 12 批：这里原来查的是「重新起草」（那个按钮点了**立刻提交**，已撤掉），
       //    中途一度改查「填入审核问题」（我第一版把"填"做成独立按钮，多要了人一次点击，
       //    也被使用者否掉了）。现在的口径是"开框即填好"⇒ 结论条上只需要**一个**出口。
-      v.includes('按意见再改一版'),
+      // ★ 分批第 17 批：按钮改名「反馈」（见 probe.html 同一条的注释）
+    v.includes('反馈'),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3458,7 +3459,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.reviseToggleButton',
     label:
-      '★★ 停在未通过态时给得出「按意见再改一版」（第 ② 条决定的出口；少了它，人只能自己重走一遍）',
+      '★★ 停在未通过态时给得出「反馈」（第 ② 条决定的出口；第 17 批改名前叫「按意见再改一版」）',
     ok: (v) => v === true,
   },
   {
@@ -3481,7 +3482,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.redraftBoxOpened',
     label:
-      '★★★ 点「按意见再改一版」⇒ 意见框打开，而且**里面已经有审核者的反馈**（使用者要的形状："一开就有"）',
+      '★★★ 点「反馈」⇒ 意见框打开，而且**里面已经有审核者的反馈**（使用者要的形状："一开就有"）',
     ok: (v) => v === true,
   },
   {
@@ -3512,14 +3513,14 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.redraftSubmitEnabled',
-    label: '★★ 填完「重新起草」可点（最终决定权在人手里）',
+    label: '★★ 填完「提交反馈」可点（最终决定权在人手里）',
     ok: (v) => v === true,
   },
   {
     view: '沉淀',
     key: 'crystal.redraftStillEditing',
     label:
-      '★★★ 点了「填入审核问题」**没有**自己开始起草：意见框与提交按钮都还在（真跑起来这一屏会切到"起草中"）',
+      '★★★ 点了「反馈」**没有**自己开始起草：意见框与提交按钮都还在（真跑起来这一屏会切到"起草中"）',
     ok: (v) => v === true,
   },
   {
@@ -3527,7 +3528,7 @@ const CHECKS = [
     key: 'crystal.revisePrefilledHint',
     label:
       '★★ 意见框里有一句说清"这段是哪来的"（框里凭空有内容，人得知道它是审核者的反馈）',
-    ok: (v) => typeof v === 'string' && v.includes('审核者') && v.includes('重新起草'),
+    ok: (v) => typeof v === 'string' && v.includes('审核者') && v.includes('反馈'),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3911,6 +3912,12 @@ const CHECKS = [
     key: 'crystal.reviseRowHiddenInitially',
     label: '★★「按意见改一版」的输入框**默认不占高度**（点开才出现——它是"有时要用"的动作，不是常驻表单）',
     ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.reviseButtonName',
+    label: '★★ 入口规规矩矩叫「反馈」（使用者定稿："原则上，应该叫反馈，在原任务中执行"——名字与行为要对上）',
+    ok: (v) => v === '反馈',
   },
   {
     view: '沉淀',
@@ -5282,48 +5289,55 @@ try {
         // 第二版：`revisedFrom` 指着第一版（界面据此给「对比上一版」）
         // ══════════════════════════════════════════════════════════════════
         //
-        // ⚠️ 分批第 16 批改了这个夹具的形状，**不是**为了让判据变绿：
-        //    "一个沉淀任务 = 一个目录"之后，第 2 版**没有自己的小屋**——它在首版那间小屋里原地改，
-        //    首版的内容进 `history/<首版 runId>/skill/`（快照），当前内容 = 第 2 版。
-        //    夹具还照老形状搭（第 2 版自己一间小屋）的话，探针量出来的现场其实是**首版**的
-        //    （实测：编辑器里是"第二步"而不是"第二步（已按意见改）"、结论条掉回「对比当前版本」），
-        //    那是夹具错，不是产品错——判据本身（"改版屏显示的必须是这一版的字"）没变。
+        // ⚠️ 夹具的形状**必须**跟着产品走，否则量到的是假的现场。这里踩过两次：
+        //    ① 第 16 批改成"一个任务一个目录"时，夹具还按老形状（第 2 版自己一间小屋）
+        //       ⇒ 改版那一屏量到的是**首版**的字（编辑器里是"第二步"而不是"第二步（已按意见改）"）；
+        //    ② 我一度想"两屏各占一个任务"来绕开审核守卫，结果 `revisedFrom` 跨了任务 ⇒
+        //       解析不到任务目录（`.versions.json` 与快照都不在）⇒ 两屏都量错。
+        //    现在就是真形状：**同一个任务目录**，首版进 `history/<首版>/skill/`，当前内容 = 第 2 版。
+        //    而"审核真跑起来"那一屏另用一条**独立单版**夹具（`auditLiveRunId`）——审核只对
+        //    当前版本成立（第 17 批的守卫），首版在这里已经是历史版本了。
+        /**
+         * ★ 第 16/17 批：「改版草稿」那一屏（量基线切换、"编辑器里是这一版的字"）用**任务 B**。
+         *
+         * 为什么另起一个任务：这一屏要的两块内容（首版 3 个文件 vs 改版"已按意见改"）与任务 A
+         * 已经不一样了——一个任务目录只能有一份"当前内容"，两个夹具抢同一个目录就会互相覆盖
+         * （实测踩过：改版那一屏量到的是兄妹那一版的 1 个文件）。
+         * 任务 B 自己一把尺：基线草稿（3 个文件）+ 改版那一版（同目录、差一行）⇒ 版本表两版。
+         */
+        const revisedBaseId = await makeDraft(
+          ulid(),
+          {
+            'SKILL.md': skillMd('第二步'),
+            'references/notes.md': '# 说明\n\n第一版。\n',
+            'scripts/check.sh': '#!/bin/sh\necho probe\n',
+          },
+          { sourceRunId: revisedSourceRunId },
+        )
         const revisedId = ulid()
         {
-          const taskDir = path.join(workRoot, `skill-draft-${crystalFixture.draftRunId}`)
-          // ① 首版内容快照（不可变）——「对比上一版」读的就是它
-          const snapDir = path.join(taskDir, 'history', crystalFixture.draftRunId)
+          const taskDir = path.join(workRoot, `skill-draft-${revisedBaseId}`)
+          const snapDir = path.join(taskDir, 'history', revisedBaseId, 'skill')
           for (const [rel, text] of Object.entries({
             'SKILL.md': skillMd('第二步'),
             'references/notes.md': '# 说明\n\n第一版。\n',
             'scripts/check.sh': '#!/bin/sh\necho probe\n',
           })) {
-            const full = path.join(snapDir, 'skill', rel)
+            const full = path.join(snapDir, rel)
             fs.mkdirSync(path.dirname(full), { recursive: true })
             fs.writeFileSync(full, text)
           }
-          // ② 第 2 版的产出写进**同一个**任务目录
           writeSkillInto(taskDir, {
             'SKILL.md': skillMd('第二步（已按意见改）'),
             'references/notes.md': '# 说明\n\n第一版。\n',
             'scripts/check.sh': '#!/bin/sh\necho probe\n',
           })
           fs.writeFileSync(
-            path.join(taskDir, 'material', 'feedback.md'),
-            '# 使用者对上一版的意见（这一版必须照它改）\n\n把第二步说清。\n',
-          )
-          // ③ 版本表：上一版在快照里、第 2 版就是任务目录里的内容
-          fs.writeFileSync(
             path.join(taskDir, '.versions.json'),
             `${JSON.stringify(
               {
                 versions: [
-                  {
-                    runId: crystalFixture.draftRunId,
-                    at: now - 30_000,
-                    humanEdited: false,
-                    snapshot: `history/${crystalFixture.draftRunId}`,
-                  },
+                  { runId: revisedBaseId, at: now - 30_000, humanEdited: false, snapshot: `history/${revisedBaseId}` },
                   { runId: revisedId, at: now - 20_000, humanEdited: false, snapshot: null },
                 ],
                 healedAt: null,
@@ -5337,11 +5351,19 @@ try {
           revisedId,
           {},
           {
-            revisedFrom: crystalFixture.draftRunId,
+            revisedFrom: revisedBaseId,
             sourceRunId: revisedSourceRunId,
-            // 第 2 版的工作目录 = 任务目录（真机就是这样：返工 run 的 workDir 指回首版小屋）
-            workDir: path.join(workRoot, `skill-draft-${crystalFixture.draftRunId}`),
+            workDir: path.join(workRoot, `skill-draft-${revisedBaseId}`),
           },
+        )
+        crystalFixture.auditLiveRunId = await makeDraft(
+          ulid(),
+          {
+            'SKILL.md': skillMd('第二步'),
+            'references/notes.md': '# 说明\n\n第一版。\n',
+            'scripts/check.sh': '#!/bin/sh\necho probe\n',
+          },
+          { sourceRunId: await makeSource() },
         )
         // 专供 P2：一条**会被入库**的草稿（它自己一个源 run ⇒ 不影响上面两条）
         crystalFixture.mineDraftRunId = await makeDraft(
@@ -5735,6 +5757,7 @@ try {
         `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
         `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
+        `&crystalAuditLive=${encodeURIComponent(crystalFixture.auditLiveRunId)}` +
         `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
         `&crystalSibling=${encodeURIComponent(crystalFixture.siblingDraftRunId)}` +

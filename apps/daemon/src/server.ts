@@ -2507,6 +2507,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         code: 'draft_not_completed',
       }
     }
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 17 批：审核**只对当前那一版**成立
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 审核者读的是任务目录里的 `skill/`（= **最新**那一版），而界面可以停在**旧**版本上
+    // （深链指名的就是旧版）。不停这一步的话，"停在 v1 上点开始审核"会审到 v3 的内容，
+    // 而屏上显示的是 v1 ⇒ 结论与现场错配，且没有任何地方提示。
+    // 与"内容按你问的那一版给"（artifacts 那条）成对：一个是不给错的，一个是不审错的。
+    const auditVersions = await readDraftVersions(await draftTaskDir(draft.id as string))
+    const currentVersion = auditVersions?.versions.find((v) => v.snapshot === null)
+    if (currentVersion !== undefined && currentVersion.runId !== (draft.id as string)) {
+      return {
+        ok: false,
+        status: 409,
+        error: '这一版已经不是最新的了（审核审的是最新那一版的内容）——请切到最新一版再审',
+        code: 'draft_not_current',
+      }
+    }
     // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
     // 自愈比拦下使用者更对——与起草路由同一判据）。
     await ensureBuiltinReviewer(store, workspaceId)
@@ -5074,7 +5092,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return
       }
       const draftDir = await draftTaskDir(draftRunId)
-      const dirFiles = await readDraftSkillDir(join(draftDir, 'skill'))
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 分批第 17 批：**按你问的那一版**给内容
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 第 16 批改成"一个任务一个目录"之后，目录里躺着的是**最新**那一版；而深链/版本列表可以
+      // 指名**旧**的那一版 ⇒ 如果一律读任务目录，界面就会"标题写着第 1 版、内容却是第 3 版"
+      // （第 16 批留下的不一致，量到它的方式：`?draftRunId=<v1>` 返回的内容与 v3 相同）。
+      // 旧版的内容在快照里（`history/<那一版 runId>/skill/`）⇒ 版本表里查得到就读它。
+      //
+      // ⚠️ 只有 `snapshot !== null`（= 不是当前版本）时才换：当前版本读任务目录，与"人工保存
+      //    落盘即所见"那条路一致（保存写的就是任务目录，读快照会让刚保存的改动看不见）。
+      const versionsForRead = await readDraftVersions(draftDir)
+      const askedVersion = versionsForRead?.versions.find((v) => v.runId === draftRunId)
+      const skillDirOfVersion =
+        askedVersion === undefined || askedVersion.snapshot === null
+          ? join(draftDir, 'skill')
+          : draftVersionSkillDir(draftDir, askedVersion)
+      const dirFiles = await readDraftSkillDir(skillDirOfVersion)
       // 只有目录里没有产出时才回退文本（有目录就一定是目录——文本兜底不该抢戏）
       let textFallback: string | null = null
       if (dirFiles === null) {
@@ -5270,12 +5305,30 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 409, { error: '这条已经入库，不能放弃', code: 'already_crystallized' })
         return
       }
-      // 还在跑就先停掉（否则它跑完又会出现在列表里）
-      if (!['completed', 'failed', 'cancelled'].includes(draftRun.status)) {
-        await executor.cancel(draftRunId as RunId).catch(() => {})
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 分批第 17 批：放弃的是**整个任务**（它的每一版），不是被点的那一版
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 列表已经是"一行一个任务"（同一来源 + 同一目标的一条链）⇒ 只在被点的那一版上打
+      // `discarded` 会留下**半死不活的链**：列表按"最新那一版"判可见性 ⇒ 行是没了，
+      // 但中间几版还活着、还挂在磁盘上，将来任何按链取数据的地方都会再次碰到它们。
+      // 而"放弃一个任务"在语义上本来就该是整个任务（使用者点的是那一行，不是那一版）。
+      const taskDirForDiscard = await draftTaskDir(draftRunId)
+      const versionsForDiscard = await readDraftVersions(taskDirForDiscard)
+      const chainIds =
+        versionsForDiscard === null
+          ? [draftRunId]
+          : versionsForDiscard.versions.map((v) => v.runId)
+      for (const id of chainIds) {
+        const run = id === draftRunId ? draftRun : await store.getRun(id as RunId)
+        if (run === null || run === undefined) continue
+        // 还在跑就先停掉（否则它跑完又会出现在列表里）
+        if (!['completed', 'failed', 'cancelled'].includes(run.status)) {
+          await executor.cancel(id as RunId).catch(() => {})
+        }
+        await store.insertRun({ ...run, discarded: true })
       }
-      await store.insertRun({ ...draftRun, discarded: true })
-      sendJson(res, 200, { ok: true })
+      sendJson(res, 200, { ok: true, discarded: chainIds.length })
       return
     }
     if (req.method === 'GET' && path === '/api/crystallize/targets') {

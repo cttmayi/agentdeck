@@ -37,9 +37,21 @@
   import MainArea from '../components/MainArea.svelte'
   import CrystallizeView from '../components/CrystallizeView.svelte'
 
-  /** GET /api/crystallize/drafts 的行。 */
+  /**
+   * GET /api/crystallize/drafts 的行 —— ★ 分批第 17 批起**一行一个沉淀任务**（不是一版一行）。
+   *
+   * 使用者判定：「给意见后点重新起草，新增加了一个沉淀任务，而不是在原沉淀任务中执行」。
+   * 服务端按"同一来源 + 同一目标"分好组，这里只负责显示版本数与"点进去落在最新那一版"。
+   */
   interface DraftRow {
+    /** 最新那一版的 run id（点进去落在它上面）。 */
     runId: string
+    /** 这个任务的第一版那条 run（任务目录以它命名）。 */
+    taskRunId: string
+    /** 最新那一版是第几版（1 起）。 */
+    version: number
+    /** 这个任务的全部版本 run id（停在历史版本上也能认出"这是哪一行"）。 */
+    versionRunIds: string[]
     status: string
     queuedAt: number
     target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
@@ -165,7 +177,10 @@
   }
 
   /** 当前选中条目的来源标签（流程页副题）。 */
-  $: selectedLabel = drafts.find((d) => d.runId === $crystallize?.runId)?.source?.label ?? ''
+  // ⚠️ 按**任务**匹配，不是按"最新那一版"匹配：深链可以停在历史版本上（那一条 id 不是任何行的
+  //    `runId`）⇒ 只比 `runId` 会读不到来源标签、那一行也不高亮。
+  $: viewedRow = drafts.find((d) => d.versionRunIds.includes($crystallize?.runId ?? ''))
+  $: selectedLabel = viewedRow?.source?.label ?? ''
 
   // ★ 顶栏主操作：与聊天「新对话」、任务「新建任务」同一格、同一款（primary）。
   //   标签读 `$t(...)` 放在 `$:` 里 ⇒ 切语言时自动重新登记（setPageActions 是整体覆盖）。
@@ -230,7 +245,7 @@
         {#each filtered as row (row.runId)}
           <ListRow
             rowClass="crystal-row"
-            active={$crystallize?.runId === row.runId}
+            active={row.versionRunIds.includes($crystallize?.runId ?? '')}
             onclick={() => goCrystallize(row.runId)}
           >
             {#snippet children()}
@@ -242,6 +257,10 @@
                      显示 run 的「已完成」会让使用者以为已经沉淀完了（见
                      lib/crystallize-state.ts 顶部那段）。 -->
                 <span class="badge {crystallizeStateClass(stateOf(row))}">{$t(crystallizeStateKey(stateOf(row)))}</span>
+                <!-- ★ 第 2 版起才显示"第 N 版"：第一版不显示，免得每行都挂一句没信息量的话 -->
+                {#if row.version > 1}
+                  <span class="faint small">{$t('crystallize.rowVersion', { n: String(row.version) })}</span>
+                {/if}
                 <span class="faint small">{targetLabel(row)}</span>
                 <span class="faint small" title={absoluteTime(row.queuedAt)}
                   >{relativeTime(row.queuedAt, now)}</span

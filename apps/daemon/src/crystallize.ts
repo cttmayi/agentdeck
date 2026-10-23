@@ -356,8 +356,29 @@ ${
  * 源 run 已不存在（被清理）时标签为空串——行仍显示，靠 run id 兜底。
  */
 export interface CrystallizeDraftRow {
+  /**
+   * ★ 分批第 17 批：这一行是**一个沉淀任务**（同一来源 + 同一目标的一条链），不是"一版草稿"。
+   *
+   * 查出来的是使用者的判断：「给意见后点重新起草，新增加了一个沉淀任务，而不是在原沉淀任务中执行」
+   * ——原来这里一条 run 一行，他自己机器上有一条 7 版的链 ⇒ 列表里 7 个条目、看起来像 7 个任务。
+   */
+  /** 点进去落在哪一版：**最新那一版**的 run id（界面深链、`CrystallizeView` 都用它）。 */
   runId: string
+  /** 这个任务的第一版那条 run（任务在磁盘上的目录就是以它命名的）；排查/日志里用它当"任务 id"。 */
+  taskRunId: string
+  /** 最新那一版是第几版（1 起）。 */
+  version: number
+  /**
+   * 这个任务的全部版本 run id（按先后）。
+   *
+   * 为什么需要：界面靠它判"当前看的那一版属于哪一行"。深链可以停在**历史版本**上，
+   * 只按 `runId`（最新那一版）匹配的话，停在旧版时左栏那一行不高亮、副题也读不到来源标签
+   * ——"我看的这一版是哪一行"答不出来。
+   */
+  versionRunIds: string[]
+  /** 最新那一版的 run 状态（起草中 / 已完成 / 失败）。 */
   status: Run['status']
+  /** 最新那一版排队的时间（列表按它排、也用它显示"多久之前"）。 */
   queuedAt: number
   /** 沉淀目标（新建 / 更新哪条）——列表行可显示"更新 <skill>"。 */
   target: CrystallizeTargetRef | null
@@ -370,18 +391,31 @@ export async function listCrystallizeDrafts(
   workspaceId: string,
 ): Promise<CrystallizeDraftRow[]> {
   const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
-  const drafts = page.items.filter(
-    (r) =>
-      r.kind === 'execute' &&
-      r.subject.type === 'skill-draft' &&
-      r.crystallized !== true &&
-      r.discarded !== true,
-  )
-  drafts.sort((a, b) => b.queuedAt - a.queuedAt)
+  const all = page.items.filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+
+  // ── 分组：同一个来源 + 同一个目标 = 一个任务（与 daemon 侧 `draftTaskDir` 的链条口径一致）──
+  const groups = new Map<string, Run[]>()
+  for (const r of all) {
+    const key = `${String(r.subject.sourceRunId ?? '')}|${JSON.stringify(r.crystallizeTarget ?? null)}`
+    const list = groups.get(key) ?? []
+    list.push(r)
+    groups.set(key, list)
+  }
+
   const out: CrystallizeDraftRow[] = []
-  for (const d of drafts) {
+  for (const list of groups.values()) {
+    // 按时间排：第一版 = 链的根（`revisedFrom` 为空），最新一版 = 最后一个
+    list.sort((a, b) => a.queuedAt - b.queuedAt)
+    const latest = list[list.length - 1]
+    if (latest === undefined) continue
+    // ⚠️ 可见性按**最新那一版**判，不是"逐版过滤"。
+    //    原来一版一行时，逐版过滤等于"哪版入库/放弃就少哪行"；现在一行是一个任务，若还逐版过滤，
+    //    就会出现"同一任务里旧版还在、最新版已入库"⇒ 行留着但内容已经入库了（点进去是个死现场）。
+    //    反过来也修掉一个旧毛病：任务里**旧版**被放弃、最新版还活着时，任务照样该在列表里。
+    if (latest.crystallized === true || latest.discarded === true) continue
+
     let source: CrystallizeDraftRow['source'] = null
-    const srcId = d.subject.sourceRunId
+    const srcId = latest.subject.sourceRunId
     if (srcId !== undefined) {
       const srcRun = await store.getRun(srcId as RunId)
       if (srcRun) {
@@ -395,13 +429,17 @@ export async function listCrystallizeDrafts(
       }
     }
     out.push({
-      runId: d.id as string,
-      status: d.status,
-      queuedAt: d.queuedAt,
-      target: d.crystallizeTarget ?? null,
+      runId: latest.id as string,
+      taskRunId: list[0]!.id as string,
+      version: list.length,
+      versionRunIds: list.map((r) => r.id as string),
+      status: latest.status,
+      queuedAt: latest.queuedAt,
+      target: latest.crystallizeTarget ?? null,
       source,
     })
   }
+  out.sort((a, b) => b.queuedAt - a.queuedAt)
   return out
 }
 

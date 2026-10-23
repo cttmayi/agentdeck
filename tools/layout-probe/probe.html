@@ -4815,9 +4815,13 @@
           }
 
           // 「按意见改一版」：输入框**默认不在**（点开才占一行）
+          // ★ 分批第 17 批：按钮改名「按意见再改一版」→「反馈」，这里跟着改。
+          //   ⚠️ 我第一版只改了"点开框"那一处，漏了这一处 ⇒ 判据 `点它之后输入框真的出现`
+          //   量到 null（按钮没找到，整条 else 分支），红的是探测脚本不是界面。
           const cyReviseBtn = [...d().querySelectorAll('.bar-actions button')].find((b) =>
-            text(b).includes('按意见'),
+            text(b).includes('反馈'),
           )
+          facts['crystal.reviseButtonName'] = cyReviseBtn ? text(cyReviseBtn) : null
           facts['crystal.reviseButtonPresent'] = !!cyReviseBtn
           facts['crystal.reviseRowHiddenInitially'] = !d().querySelector('.revise-row textarea')
           if (cyReviseBtn) {
@@ -4915,7 +4919,13 @@
 
             // 换句话要派发 `input`：`bind:value` 靠它（只改 value 不生效）
             const cyToggle = [...d().querySelectorAll('button')].find((b) =>
-              text(b).includes('按意见再改一版'),
+              // ★ 分批第 17 批改名：「按意见再改一版」→「反馈」（使用者定稿"原则上应该叫反馈"）。
+              //   判据量的是**那一个入口在不在**，所以跟着名字走；旧名字留在下面那条"不许存在"里。
+              //
+              // ⚠️ 这里**故意**用宽匹配「反馈」而不是「提交反馈」（我改成后者时这一片 12 条判据当场红）：
+              //    此刻意见框还没开，页面上只有"开框"那一个按钮；等框开了之后再找"提交"才需要收紧
+              //    （下面那个 finder 是在 `.revise-row` 里找的，`提交反馈` 是它唯一的匹配）。
+              text(b).includes('反馈'),
             )
             facts['crystal.reviseToggleButton'] = !!cyToggle
             // 「按意见重新起草」/「填入审核问题」这两个按钮都**不该**存在：
@@ -4947,7 +4957,7 @@
             const cyPrefillHint = d().querySelector('.revise-row .faint')
             facts['crystal.revisePrefilledHint'] = cyPrefillHint ? text(cyPrefillHint) : null
             const cySubmit = [...d().querySelectorAll('.revise-row button')].find((b) =>
-              text(b).includes('重新起草'),
+              text(b).includes('反馈'),
             )
             facts['crystal.redraftSubmitEnabled'] = cySubmit ? !cySubmit.disabled : null
             // 提交按钮**仍然在**、框**仍然在** ⇒ 说明开框只是填，没有自己跑起来
@@ -5046,7 +5056,11 @@
           // 之所以非要真跑，是因为"插一条 running 的夹具 run"量到的是**假的绿**：
           // daemon 重启时 `reconcileInterruptedRuns` 会把非终态 run 收口成 failed，
           // 于是那一屏其实是"没跑成"那一屏，两条判据碰巧都成立。
-          facts['crystal.auditLiveEntered'] = await cyEnter(cyQuery.get('crystalDraft'))
+          // ★ 分批第 17 批：这一屏换用**独立单版**夹具 `crystalAuditLive`。
+          //   原来用 `crystalDraft`（首版）——首版现在是一个任务的历史版本，而"审核只对当前那一版
+          //   成立"的守则会（正确地）拒绝它 ⇒ 这一屏整片量不到。夹具内容与首版逐字相同，
+          //   所以这里量到的结论条数字不变。
+          facts['crystal.auditLiveEntered'] = await cyEnter(cyQuery.get('crystalAuditLive'))
           if (facts['crystal.auditLiveEntered']) {
             const startBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
               text(b).includes('开始审核'),

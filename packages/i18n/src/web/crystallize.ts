@@ -122,8 +122,8 @@ export const crystallizeText = {
   //   现在点「按意见再改一版」开框时，框里**默认就填好**审核者的反馈（见
   //   `CrystallizeView.svelte` 的 `toggleReviseBox`）。同一个动作不再有两个入口。
   'crystallize.revisePrefilledHint': {
-    zh: '已按审核者的反馈填好（带位置与原文）—— 可以改，改完点「重新起草」。',
-    en: 'Prefilled from the reviewer’s findings (with locations and source text). Edit it, then click “Draft again”.',
+    zh: '已按审核者的反馈填好（带位置与原文）—— 可以改，改完点「反馈」。',
+    en: 'Prefilled from the reviewer’s findings (with locations and source text). Edit it, then click “Give feedback”.',
   },
   // ★ 填进意见框的那段话（结构与 daemon 的 `draftReviewFeedback` 对齐，见
   //   `apps/web/src/lib/crystallize-feedback.ts` 顶部的说明）。
@@ -284,15 +284,25 @@ export const crystallizeText = {
   'crystallize.materialTitle': { zh: '素材', en: 'Material' },
   'crystallize.materialEmpty': { zh: '没有素材文件', en: 'No material files' },
   'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
+  // 列表行上的"第几版"（分批第 17 批）：一行是一个**任务**，版本数是它的属性。
+  // 不带 markdown 记号（界面文案守卫）。
+  'crystallize.rowVersion': { zh: '第 {n} 版', en: 'v{n}' },
   'crystallize.reviseTitle': {
-    zh: '按意见再改一版',
-    en: 'Ask for another version',
+    zh: '反馈',
+    en: 'Give feedback',
   },
   'crystallize.revisePlaceholder': {
     zh: '比如：Procedure 第 2 步要写全命令参数；Pitfalls 里那条环境问题删掉',
     en: 'e.g. spell out the full command in step 2; drop the environment issue from Pitfalls',
   },
-  'crystallize.reviseSubmit': { zh: '重新起草', en: 'Draft again' },
+  // ★ 分批第 17 批改文案：使用者定稿「原则上，应该叫"反馈"，在原任务中执行」。
+  //   原来叫「重新起草」——那个词把这件事说成了"另起一版"，而它实际是**把意见交回同一个任务**
+  //   （第 16 批已经让它在原目录里执行）。名字与行为要对上：叫"重新起草"，使用者就会预期
+  //   多出来一个任务（他也确实是这么理解的，并且判定那样不好）。
+  // ⚠️ 提交按钮必须与开框那个（`crystallize.reviseTitle` = 「反馈」）**不同名**：两个按钮同名时
+  //    "点一下"这类判据分不清点的是哪个（探针当场红：`点它之后输入框真的出现` 量到 null，
+  //    因为它找到了提交钮、而提交钮在框里、框还没开）。开框 = 「反馈」，发出 = 「提交反馈」。
+  'crystallize.reviseSubmit': { zh: '提交反馈', en: 'Submit feedback' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {

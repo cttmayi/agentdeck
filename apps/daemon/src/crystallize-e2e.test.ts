@@ -376,16 +376,38 @@ async function getJsonFile<T>(path: string): Promise<T> {
  *    那种绿比红更坏。判据必须是**这条链自己**的关系：run 记录里的 `revisedFrom`。
  */
 async function waitRevisedFrom(parentId: string, budgetMs = 120_000): Promise<string> {
+  // ⚠️ 分批第 17 批改实现（历史上这是**第二次**改它）：原来翻 `/api/crystallize/drafts`
+  //    找"哪条 run 的 `revisedFrom` 指着我"，那在当时是对的（一版一行）。列表按**任务**聚合之后，
+  //    每行给的是**最新那一版**的 id ⇒ 链中间那些版本压根不在列表里 ⇒ 这条等待永远等不到
+  //    （表现是超时 120 秒，而不是一条清楚的断言失败——又一次"判据读错了地方"）。
+  //    现在读**版本表**（`.versions.json`）：它就是这个任务的账，链的先后关系写在那里。
+  //    扫全部任务目录而不是拼路径：`parentId` 可能是链中间的某一版，而任务目录以**首版**命名。
   const deadline = Date.now() + budgetMs
   while (Date.now() < deadline) {
-    const list = await getJsonFile<{ items: Array<{ runId: string }> }>('/api/crystallize/drafts')
-    for (const item of list.items) {
-      const run = await getJsonFile<{ revisedFrom?: string }>(`/api/runs/${item.runId}`)
-      if (run.revisedFrom === parentId) return item.runId
+    for (const name of await readdir(workRoot)) {
+      if (!name.startsWith('skill-draft-')) continue
+      const raw = await readFile(join(workRoot, name, '.versions.json'), 'utf8').catch(() => null)
+      if (raw === null) continue
+      const parsed = JSON.parse(raw) as { versions: Array<{ runId: string }> }
+      const ids = parsed.versions.map((v) => v.runId)
+      const at = ids.indexOf(parentId)
+      if (at >= 0 && at + 1 < ids.length) return ids[at + 1]!
     }
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error(`没等到"按 ${parentId.slice(-6)} 改出来的下一版"`)
+}
+
+/**
+ * 这个任务目录里的版本表（按顺序的 run id 列表）。
+ *
+ * 分批第 16 批之后，"一个任务的第几版"只在这里有账（`listCrystallizeDrafts` 的行给的是聚合后的
+ * 一行，`/api/runs/<id>` 也只说单条 run 的事）。
+ */
+async function readDraftVersionsFor(firstRunId: string): Promise<string[]> {
+  const raw = await readFile(join(workRoot, `skill-draft-${firstRunId}`, '.versions.json'), 'utf8')
+  const parsed = JSON.parse(raw) as { versions: Array<{ runId: string }> }
+  return parsed.versions.map((v) => v.runId)
 }
 
 /**
@@ -651,6 +673,14 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     })
     assert.equal(res.status, 200, '放弃受理')
 
+    // ★ 分批第 17 批：放弃的是**整个任务**（列表一行 = 一个任务，只打被点那一版会留下半死不活的链）
+    const versionsAfterDiscard = await readDraftVersionsFor(draftRunId).catch(() => [draftRunId])
+    if (versionsAfterDiscard.length > 1) {
+      for (const id of versionsAfterDiscard) {
+        const r = await daemon.store.getRun(id as RunId)
+        assert.equal(r?.discarded, true, `链上第 ${id.slice(-6)} 版也要一起放弃（否则它还能被别处捡起来）`)
+      }
+    }
     const after = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
       items: Array<{ runId: string }>
     }
@@ -2382,6 +2412,118 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
         [v2, null],
       ],
       '版本表要记着"上一版在快照里、当前版就在任务目录里"',
+    )
+  })
+
+  test('★★ 沉淀列表：一个任务**一行**（行上带第 N 版），不再是一版一行', async () => {
+    // 使用者的原话：「给意见后，点"重新起草"，逻辑不好。新增加了一个沉淀任务，而不是在原沉淀任务中执行。」
+    // 列表原来是**一条 run 一行**（他自己机器上有一条 7 版的链 ⇒ 7 个条目、像 7 个任务）。
+    // 这条用例量两件事：① 这条链在列表里只有**一行**；② 那一行说的是"第几版"+ 点进去落在最新那一版。
+    const sourceRunId = await runReviewed('审完的流程（量列表聚合）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '列表聚合' },
+    })
+    for (let i = 0; i < 2; i += 1) {
+      const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: i === 0 ? v1 : await waitRevisedFrom(i === 0 ? v1 : v1), feedback: `第 ${i + 2} 次反馈` }),
+      })
+      assert.equal(res.status, 202, await res.clone().text())
+      const created = (await res.json()) as { draftRunId: string }
+      await waitRunStatus(created.draftRunId, ['completed', 'failed'])
+    }
+    const v3 = (await readDraftVersionsFor(v1)).at(-1)!
+    assert.equal((await readDraftVersionsFor(v1)).length, 3, '这条链该有三版（首版 + 两次反馈）')
+
+    const rows = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
+      items: Array<{ runId: string; taskRunId: string; version: number; source: { label: string } | null }>
+    }
+    const mine = rows.items.filter((r) => r.taskRunId === v1)
+    assert.equal(
+      mine.length,
+      1,
+      `一个任务在列表里该只有一行（实际 ${mine.length} 行：${JSON.stringify(mine.map((r) => r.runId.slice(-6)))}）——多于一行就是"多出来几个沉淀任务"`,
+    )
+    assert.equal(mine[0]!.version, 3, '那一行要说清这是第几版')
+    assert.equal(mine[0]!.runId, v3, '那一行点进去要落在**最新**那一版（否则点开看到的是旧内容）')
+    assert.equal(mine[0]!.taskRunId, v1, '任务身份 = 第一版那条 run（磁盘上的目录以它命名）')
+  })
+
+  test('★★ 内容按"你问的那一版"给：问旧版拿到旧版（快照），问最新版拿到最新版', async () => {
+    // 第 16 批把"一版一间小屋"改成"一个任务一个目录"之后，目录里躺着的是**最新**那一版；
+    // 而界面可以停在旧版本上（深链指名）⇒ 一律读任务目录就会"标题写着第 1 版、内容是第 3 版"。
+    // 这是第 16 批留下的不一致，**量出来**才发现（`?draftRunId=<v1>` 与 `<v3>` 返回一样）。
+    const sourceRunId = await runReviewed('审完的流程（量版本内容）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '版本内容' },
+    })
+    const v1Skill = await readFile(join(workRoot, `skill-draft-${v1}`, 'skill', 'SKILL.md'), 'utf8')
+    // ⚠️ 这一条必须让两版**内容真的不同**：假后端默认每次写同一份夹具 ⇒ 我第一版断言"两版内容
+    //    不同"时当场红，而红的原因是夹具没差异、不是产品读错了地方。用它的"只改一行"开关造差异。
+    fakeBackend.minimalEditOnRevise = true
+    let v2 = ''
+    try {
+      const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v1, feedback: '改一句' }),
+      })
+      assert.equal(res.status, 202, await res.clone().text())
+      v2 = ((await res.json()) as { draftRunId: string }).draftRunId
+      await waitRunStatus(v2, ['completed', 'failed'])
+    } finally {
+      fakeBackend.minimalEditOnRevise = false
+    }
+
+    const ask = async (id: string): Promise<Record<string, string>> =>
+      ((await (await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${id}`)).json()) as {
+        files: Record<string, string>
+      }).files
+    const snapshot = await readFile(
+      join(workRoot, `skill-draft-${v1}`, 'history', v1, 'skill', 'SKILL.md'),
+      'utf8',
+    )
+    assert.equal((await ask(v1))['SKILL.md'], v1Skill, '问旧版 ⇒ 必须是**旧版**的内容（来自快照）')
+    assert.equal(
+      snapshot,
+      v1Skill,
+      '快照里就是首版那一刻的产出（下面那条"两版不同"才有意义：比的是两版，不是同一份内容）',
+    )
+    const latest = await readFile(join(workRoot, `skill-draft-${v1}`, 'skill', 'SKILL.md'), 'utf8')
+    assert.notEqual(latest, v1Skill, '假后端这次确实改了一行（否则这条用例测不出"按版本给内容"）')
+    assert.equal((await ask(v2))['SKILL.md'], latest, '问最新版 ⇒ 任务目录里的当前内容')
+  })
+
+  test('★ 审核只对当前那一版成立：停在旧版点审核 ⇒ 明确拒绝（不审错东西）', async () => {
+    // 审核者读的是任务目录（= 最新那一版）⇒ 允许"停在旧版上点审核"就会审到别的内容，
+    // 而屏上显示的是旧版 ⇒ 结论与现场错配、还没有任何提示。与"内容按你问的那一版给"成对。
+    const sourceRunId = await runReviewed('审完的流程（量审核版本守卫）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '审核守卫' },
+    })
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '改一句' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const v2 = ((await res.json()) as { draftRunId: string }).draftRunId
+    await waitRunStatus(v2, ['completed', 'failed'])
+
+    const stale = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1 }),
+    })
+    assert.equal(stale.status, 409, '旧版本不许审')
+    assert.equal(
+      ((await stale.json()) as { code: string }).code,
+      'draft_not_current',
+      '要给出可判别的理由码（不是笼统的 409）',
     )
   })
 
