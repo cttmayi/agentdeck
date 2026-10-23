@@ -106,7 +106,7 @@ import {
 } from './builtin-drafter.ts'
 import {
   collectMaterial,
-  copyMaterial,
+  draftDirName,
   draftRoot,
   isMaterialEmpty,
   listMaterialFiles,
@@ -116,10 +116,17 @@ import {
 } from './crystallize-material.ts'
 import {
   assembleArtifacts,
+  draftVersionSkillDir,
   hashDraftDir,
   parseSkillMd,
   readAuditStamp,
+  readDraftVersions,
+  clearHumanEditStamp,
   readHumanEditStamp,
+  recordDraftVersion,
+  resolveDraftTaskDir,
+  snapshotDraftSkill,
+  writeDraftVersions,
   writeHumanEditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
@@ -2070,6 +2077,66 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   - **回路边界**（INV-14）：链路深度超限就不再派生，避免
    *     "改 → 审 → 再改 → 再审" 无限循环烧 token。
    */
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * 一个沉淀任务 = 一个目录（分批第 16 批）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 使用者的判断：「给意见后点"重新起草"逻辑不好：新增加了一个沉淀任务，而不是在原沉淀任务中执行。
+   * 原则上应该叫"反馈"，在原任务中执行；skill 差异对比也应该是原 skill 变化。」
+   *
+   * 原来是一条 run 一间小屋（`draftRoot(workRoot, runId)`）⇒ 每次反馈都换目录、列表里也多一条。
+   * 现在：**首版那条 run 的小屋就是这条链的任务目录**，之后每一版都在同一个目录里改。
+   *
+   * ⚠️ "每一次反馈仍然起一条新 run"这一点改不掉：run 是终态机（completed/failed/cancelled
+   *    不能再开，见 `packages/protocol` 的状态枚举）。变的是"任务"落在哪个目录——使用者看到的
+   *    任务 = 目录 + 这条链，不是某一条 run。
+   *
+   * ⚠️ 老数据（第 16 批之前建的链）最新一版的内容在**它自己**的小屋里，而任务目录里躺着首版 ⇒
+   *    读取当前内容/审核/人保存/差异会集体看错一版。`resolveDraftTaskDir` 里做了自愈迁移
+   *    （把最新一版搬进任务目录 + 给各版记快照 + 写 `.versions.json`），只做一次。
+   */
+  async function draftTaskDir(draftRunId: string): Promise<string> {
+    return await resolveDraftTaskDir({
+      workRoot,
+      draftRunId,
+      draftDirName,
+      now: Date.now(),
+      getRun: async (id) => {
+        const run = await store.getRun(id as RunId)
+        return run === null
+          ? null
+          : {
+              id: run.id as string,
+              revisedFrom: run.revisedFrom ?? null,
+              queuedAt: run.queuedAt,
+            }
+      },
+      // 同一条链 = 同一个来源 + 同一个目标（"新增"和"更新到某个技能"是两件事，不能混成一条链）
+      listChain: async (rootRunId) => {
+        const root = await store.getRun(rootRunId as RunId)
+        if (root === null || root.subject.type !== 'skill-draft') return []
+        const sourceRunId = root.subject.sourceRunId
+        const target = JSON.stringify(root.crystallizeTarget ?? null)
+        const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
+        return page.items
+          .filter(
+            (r) =>
+              r.kind === 'execute' &&
+              r.subject.type === 'skill-draft' &&
+              r.subject.sourceRunId === sourceRunId &&
+              JSON.stringify(r.crystallizeTarget ?? null) === target,
+          )
+          .sort((a, b) => a.queuedAt - b.queuedAt)
+          .map((r) => ({
+            id: r.id as string,
+            revisedFrom: r.revisedFrom ?? null,
+            queuedAt: r.queuedAt,
+          }))
+      },
+    })
+  }
+
   async function autoChainReview(input: {
     executeRun: Run
     executorAgentId: string
@@ -2098,6 +2165,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // ⚠️ 放在这个函数的最前面（不是另开一个回调）：两个入口都是"跑完之后要不要接着审"，
     //    拆成两处的话，将来任何一处改判据都会让另一处静默地不生效。
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 16 批：起草 run 跑完 ⇒ 把这一版登记成"当前版本"
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 一个任务一个目录之后，"当前内容是谁写的"不能靠数目录了（目录只有一个），得有一份账：
+    // `.versions.json` 里每一版记 runId / 时间 / 有没有人改过 / 快照在哪。返工开工前记的是
+    // **上一版**（补快照），这里记的是**刚跑完的这一版**（`snapshot: null` = 它就在任务目录里）。
+    //
+    // 同时抹掉 `.human-edits.json`：那份标记说的是"任务目录里的内容被人手改过"，而现在的内容
+    // 已经被这一版覆盖掉了。⚠️ 抹的时机是**落盘之后**（这里），不是返工开工时——中途失败的话
+    // 内容还是人改过的那份，提前抹会让下一次反馈走 resume，起草者按记忆把人改的改回去
+    // （第 14 批要挡的正是这件事）。抹之前先把标记读出来记进版本表，痕迹不丢。
+    if (input.executeRun.subject.type === 'skill-draft') {
+      const dir = await draftTaskDir(input.executeRun.id as string)
+      const human = await readHumanEditStamp(dir)
+      await recordDraftVersion(dir, {
+        runId: input.executeRun.id as string,
+        at: Date.now(),
+        // ⚠️ 标记在 ⇒ 记 `true`：这一版的生命周期里有人动过任务目录。语义上略保守
+        //    （动的可能是上一版），但保守在**安全**那一侧：它只会让下一次反馈少接一次会话。
+        humanEdited: human !== null,
+        snapshot: null,
+      })
+      if (human !== null) await clearHumanEditStamp(dir)
+    }
     if (input.executeRun.subject.type === 'skill-draft' && input.executeRun.revisedFrom !== undefined) {
       const started = await startDraftAudit(input.executeRun, { completed: true })
       if (!started.ok) {
@@ -2429,7 +2521,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         code: 'builtin_reviewer_missing',
       }
     }
-    const draftHut = draftRoot(workRoot, draft.id as string)
+    const draftHut = await draftTaskDir(draft.id as string)
     // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
     //
     // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
@@ -2921,44 +3013,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       instructions: DRAFTER_INSTRUCTIONS,
     }
 
-    const previousDir = draftRoot(workRoot, draftRunId)
-    const previousSkill = await readDraftSkillDir(join(previousDir, 'skill'))
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 16 批：**在原任务里改**（同一个目录），改之前留一份快照
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 原来每一版都自己一间小屋（`draftRoot(workRoot, newRunId)`），于是同一件事在磁盘上是
+    // 一堆并列的目录、"差异对比"也只能是"这间小屋 vs 那间小屋"；使用者的判断是"应该在原任务中
+    // 执行"。现在：任务目录 = **首版那条 run 的小屋**，这一版也在里面改。
+    //
+    // 变与不变：
+    //   · 变：产出目录 `skill/` 里就是**上一版的当前内容**（因为原地改，它本来就在那儿——不再需要
+    //     第 10 批那套"把上一版复制进新小屋"的搬运，那一整段随之删掉）；
+    //   · 不变：**每一次反馈仍然起一条新 run**（run 是终态机，完成的 run 不能再开），
+    //     上一版也**仍然完整可查**——改之前先把 `skill/` 快照到 `history/<上一版 runId>/skill/`，
+    //     差异对比、审核指纹、回退看到的都是它。
+    //
+    // ⚠️ 快照必须**先于**本次反馈的素材准备（同一个 try 里，第一件事就是快照）：起草者是异步跑的，
+    //    它一旦开始写 `skill/`，再快照就晚了——快照会变成"改了一半的中间态"，而它是唯一能回答
+    //    "上一版长什么样"的东西。第一版我就是在写索引页之后才快照的，e2e 里量到快照里已经
+    //    混进了新内容（起草者在假后端里是立刻完成的）——顺序反了的后果是**静默**的。
+    const taskDir = await draftTaskDir(draftRunId)
     // ★ 接不接上一版的会话，**在进 try 之前就定下来**：submit 那一侧要用它，而 submit
     //   在 try 之外（素材准备失败就不该提交任何东西）。判断依据见下面的长注释。
-    const humanEdits = await readHumanEditStamp(previousDir)
+    const humanEdits = await readHumanEditStamp(taskDir)
     const resumePrevious = humanEdits === null
 
     const newRunId = ulid() as RunId
-    const newDir = draftRoot(workRoot, newRunId)
     try {
-      const materialDir = join(newDir, 'material')
-      // 复制上一版素材（同一份证据），但要避开它自己的 previous-draft/ 与反馈，
-      // 否则重写几版会层层嵌套、上下文越滚越大。
-      await copyMaterial(join(previousDir, 'material'), materialDir, {
-        skip: ['previous-draft', 'feedback.md'],
+      const materialDir = join(taskDir, 'material')
+      // ① 快照上一版（不可变、只写一次；已有就复用），并把它记进版本表
+      const snapshot = await snapshotDraftSkill(taskDir, draftRunId)
+      await recordDraftVersion(taskDir, {
+        runId: draftRunId,
+        at: previous.queuedAt,
+        humanEdited: humanEdits !== null,
+        snapshot,
       })
-      // ══════════════════════════════════════════════════════════════════
-      // ★ 分批第 10 批：上一版的产出**放进产出目录**（不再塞进 material/previous-draft/）
-      // ══════════════════════════════════════════════════════════════════
-      //
-      // 使用者问的是「为什么是按意见重新起草呢，而不是基于意见修改」——查下来返工这条路
-      // 一直是"重写一版"：上一版被放进 `material/previous-draft/`（只作为**参考材料**），
-      // 而产出契约明写「整份产出，不是补丁」⇒ 起草者每次都得从头把整份重新写一遍。
-      // 真机上的表现就是返工版的差异是 `+80 −25`（几乎整份重写）——贵、慢，而且**上一版里
-      // 已经对的地方有被顺手改坏的风险**（每次重写都是一次重新掷骰子）。
-      //
-      // 现在的语义：`skill/` 里**就是上一版**，起草者做的是**在它上面改**。
-      // 于是"基于意见修改"第一次在物理上成为可能（之前做不到——产出目录是空的）。
-      // 同一份内容不再放两处（`material/previous-draft/` 撤掉）：两处放同一份东西，
-      // 改了一处另一处就是旧的，而"哪一份算数"迟早要靠猜。
-      const newSkillDir = join(newDir, 'skill')
-      if (previousSkill !== null) {
-        for (const [rel, text] of Object.entries(previousSkill)) {
-          const full = join(newSkillDir, rel)
-          await mkdir(dirname(full), { recursive: true })
-          await writeFile(full, text, 'utf8')
-        }
-      }
+      // ② 反馈写进**同一个** material/（原来那份反馈已经不是这一版要考虑的了）
       await mkdir(materialDir, { recursive: true })
       await writeFile(
         join(materialDir, 'feedback.md'),
@@ -2981,6 +3072,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //
       // 两种情况都写进索引页：起草者必须知道"这一版的依据是什么"——尤其 resume 的那一种
       // （它记忆里的内容和磁盘上的可能不同，要以磁盘为准；不说清，它可能拿记忆去覆盖人改过的文件）。
+      //
+      // ⚠️ 分批第 16 批之后还有一句必须说清：**这是同一个任务目录，上一版在同一间屋里**。
+      //    不改的话，起草者会以为"改一版"是新开一间小屋（那是它前几版的记忆），去找一个
+      //    已经不存在的新目录——而真正的产出目录就在它脚下。
       const basisNote = resumePrevious
         ? '## 这一版的依据（注意：你会记得上一版，但**以磁盘为准**）\n\n' +
           '- 这一版**接上了你上次写这一版的会话**（所以你记得素材、规范与当时为什么这么组织）。\n' +
@@ -2993,10 +3088,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       // 索引页追加一段"这是第 N 版"，让起草者一进来就知道自己在改上一版
       const index = await readFile(join(materialDir, '00-README.md'), 'utf8').catch(() => '')
+      const versionsNow = await readDraftVersions(taskDir)
+      const versionNo = (versionsNow?.versions.length ?? 1) + (versionsNow === null ? 0 : 1)
       await writeFile(
         join(materialDir, '00-README.md'),
-        `${index.trimEnd()}\n\n## 这一版是「按意见改一版」\n\n` +
-          '- **产出目录 `skill/` 里已经是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
+        `${index.trimEnd()}\n\n## 这一版是「按意见改一版」（第 ${versionNo} 版，仍在**同一个任务目录**里）\n\n` +
+          '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
+          '- ⚠️ 这一版**不是**新开的小屋：`material/`、`skill/` 与前几版是同一个任务目录，路径没变。\n' +
           '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
           '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
           '- ⚠️ 上一版里有支持文件（`references/`、`scripts/` 等）：除非意见点到它们，否则不许删、不许改名。\n\n' +
@@ -3058,7 +3156,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //   ⚠️ 人改过这一版就不带（见上面 `resumePrevious` 那段）：否则起草者会按记忆
       //   把人的改动覆盖回去。
       ...(resumePrevious ? { resumeFromRunId: draftRunId as RunId } : {}),
-      workDir: newDir,
+      // ★ 分批第 16 批：工作目录 = **任务目录**（首版小屋），不是新目录
+      workDir: taskDir,
     })
     if (outcome.kind === 'rejected') {
       return { status: 503, body: { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' } }
@@ -4839,10 +4938,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
        *    （旧数据）。把"判不出来"显示成"没过期"，会让界面安静地把一份可能对不上的
        *    结论当成有效结论。
        */
-      const stamp = reviewRun ? await readAuditStamp(draftRoot(workRoot, draftRunId)) : null
+      const stamp = reviewRun ? await readAuditStamp((await draftTaskDir(draftRunId))) : null
       const staleForReview =
         reviewRun && stamp
-          ? (await hashDraftDir(join(draftRoot(workRoot, draftRunId), 'skill'))) !== stamp.hash
+          ? (await hashDraftDir(join(await draftTaskDir(draftRunId), 'skill'))) !== stamp.hash
           : null
       sendJson(res, 200, {
         /**
@@ -4934,7 +5033,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
-      const skillDir = join(draftRoot(workRoot, draftRunId), 'skill')
+      const skillDir = join(await draftTaskDir(draftRunId), 'skill')
       const result = await writeDraftSkillFiles(skillDir, files as Record<string, string>)
       if (result.rejected.length > 0) {
         // 整单拒（一份都不写）：半写会让磁盘进入使用者没要求过的中间状态，
@@ -4949,7 +5048,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // ★ 分批第 14 批：记下"这一版被人手改过"。返工要不要**接上一版的 CLI 会话**就看它
       //   （详见 `crystallize-artifacts.ts` 里 `HumanEditStamp` 那段说明：人改过的草稿一旦
       //   走 resume，起草者会按记忆里的内容去改，把人改的地方改回去，而且没人会提示这件事）。
-      await writeHumanEditStamp(draftRoot(workRoot, draftRunId), {
+      await writeHumanEditStamp(await draftTaskDir(draftRunId), {
         at: Date.now(),
         files: result.written,
       })
@@ -4974,7 +5073,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
         return
       }
-      const draftDir = draftRoot(workRoot, draftRunId)
+      const draftDir = await draftTaskDir(draftRunId)
       const dirFiles = await readDraftSkillDir(join(draftDir, 'skill'))
       // 只有目录里没有产出时才回退文本（有目录就一定是目录——文本兜底不该抢戏）
       let textFallback: string | null = null
@@ -5045,7 +5144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }
         draftFiles = out
       } else {
-        draftFiles = await readDraftSkillDir(join(draftRoot(workRoot, draftRunId), 'skill'))
+        draftFiles = await readDraftSkillDir(join(await draftTaskDir(draftRunId), 'skill'))
         if (draftFiles === null) {
           const text = lastTextOf(await store.listRunMessages(draftRun.id))
           draftFiles = text === null ? {} : { 'SKILL.md': text }
@@ -5057,10 +5156,25 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       let baselineFiles: Record<string, string> = {}
       let baselineLabel = ''
       if (against === 'previous' && draftRun.revisedFrom !== undefined) {
-        const previousFiles = await readDraftSkillDir(
-          join(draftRoot(workRoot, draftRun.revisedFrom as string), 'skill'),
-        )
-        baselineFiles = previousFiles ?? {}
+        // ★ 分批第 16 批：上一版不再住在"它自己那间小屋"里，而是任务目录里的**快照**
+        //   （`history/<上一版 runId>/skill/`）。做事顺序：先看版本表；表里还没有（比如自愈迁移
+        //   刚写完、或者这一版还在跑）就退回"上一版的 runId 当快照目录"，最后才退回老形状的
+        //   独立小屋——三层都是**真实存在**的存放位置，不猜。
+        const taskDir = await draftTaskDir(draftRunId)
+        const versions = await readDraftVersions(taskDir)
+        const prevId = draftRun.revisedFrom as string
+        const record = versions?.versions.find((v) => v.runId === prevId)
+        const candidates =
+          record === undefined
+            ? [join(taskDir, `history/${prevId}`, 'skill'), join(draftRoot(workRoot, prevId), 'skill')]
+            : [draftVersionSkillDir(taskDir, record)]
+        for (const dir of candidates) {
+          const files = await readDraftSkillDir(dir)
+          if (files !== null) {
+            baselineFiles = files
+            break
+          }
+        }
         baselineLabel = '上一版草稿'
       } else {
         const t = draftRun.crystallizeTarget
@@ -5107,7 +5221,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
         return
       }
-      const materialDir = join(draftRoot(workRoot, draftRunId), 'material')
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
       const all = await listMaterialFiles(materialDir)
       // 单个文件封顶：一轮对话的消息可能很长，整包塞给浏览器没有意义
       const PER_FILE_CAP = 100 * 1024
@@ -5270,7 +5384,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
 
       const draftRunId = ulid() as RunId
-      const draftDir = draftRoot(workRoot, draftRunId)
+      const draftDir = await draftTaskDir(draftRunId)
       try {
         await writeMaterial(join(draftDir, 'material'), collected, {
           scope: targets.scope,
@@ -5488,7 +5602,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 为什么这条要紧：`writeSkillFiles` 是"清空目录再写"，所以更新时提交一份只有
       // SKILL.md 的文件集合 = **把目标技能的支持文件全删掉**。文本草稿本来就没抓到
       // 支持文件，那不是"决定了要删"，而是"没看见"——两者不能混为一谈。
-      const dirArtifacts = await readDraftSkillDir(join(draftRoot(workRoot, draftRunId), 'skill'))
+      const dirArtifacts = await readDraftSkillDir(join(await draftTaskDir(draftRunId), 'skill'))
       const textMode = dirArtifacts === null
       let incomingFiles = { ...validated.files }
       if (textMode && target.kind === 'update') {

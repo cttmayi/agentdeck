@@ -245,39 +245,13 @@ export async function writeMaterial(
 }
 
 /**
- * 复制一份素材目录（"按意见改一版"用）。
+ * ⚠️ 这里原来有一个 `copyMaterial`（"按意见改一版"时把上一版的素材复制到新小屋）。
  *
- * 为什么要**复制**而不是让新 run 直接指旧目录：起草 run 的素材目录就在它自己的工作
- * 目录里（隔离 hook 只放行 workDir），跨 run 指过去 agent 读不到；而且下一版要往里加
- * `previous-draft/` 与新的 `feedback.md`——直接改旧目录会把上一版的证据篡改掉。
- *
- * `skip` 用来避开上一版自己塞进去的东西（`previous-draft` / `feedback.md`），
- * 否则改到第五版时素材里会套着四层历史。
+ * 分批第 16 批删掉它的**原因**值得留着：那个函数存在的唯一理由是"每一版都自己一间小屋"——
+ * 素材在起草 run 自己的工作目录里（隔离 hook 只放行 workDir），所以换小屋就得复制一份。
+ * 现在一个任务一个目录、返工在原地改，素材本来就在那儿 ⇒ 没有东西可复制。
+ * 留着它就是一条**死接口**（本仓库最常见的缺陷），而它还会误导后来的人以为"改一版"要换目录。
  */
-export async function copyMaterial(
-  from: string,
-  to: string,
-  opts: { skip?: string[] } = {},
-): Promise<void> {
-  const skip = new Set(opts.skip ?? [])
-  const walk = async (src: string, dst: string): Promise<void> => {
-    let entries
-    try {
-      entries = await readdir(src, { withFileTypes: true })
-    } catch {
-      return
-    }
-    await mkdir(dst, { recursive: true })
-    for (const entry of entries) {
-      if (skip.has(entry.name)) continue
-      const srcPath = join(src, entry.name)
-      const dstPath = join(dst, entry.name)
-      if (entry.isDirectory()) await walk(srcPath, dstPath)
-      else if (entry.isFile()) await copyFile(srcPath, dstPath)
-    }
-  }
-  await walk(from, to)
-}
 
 /** 素材目录里已有哪些文件（界面「素材」分节 / 测试用）。 */
 export async function listMaterialFiles(

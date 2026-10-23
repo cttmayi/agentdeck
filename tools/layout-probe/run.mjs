@@ -5200,14 +5200,18 @@ try {
         //    没有 `revisedFrom`）。真机上两条草稿之间隔着一次 LLM 起草，不可能同毫秒；
         //    夹具里用一个共享的 `now` 就极易撞上，所以这里按序号递增。
         let draftSeq = 0
-        const makeDraft = async (id, files, extra = {}) => {
-          const { sourceRunId: draftSourceId = sourceRunId, ...rest } = extra
-          const dir = path.join(workRoot, `skill-draft-${id}`)
+        /** 把一份产出写进某个小屋的 `skill/` 下（分批第 16 批抽出来：改版的那一间是**同一个目录**）。 */
+        const writeSkillInto = (dir, files) => {
           for (const [rel, text] of Object.entries(files)) {
             const full = path.join(dir, 'skill', rel)
             fs.mkdirSync(path.dirname(full), { recursive: true })
             fs.writeFileSync(full, text)
           }
+        }
+        const makeDraft = async (id, files, extra = {}) => {
+          const { sourceRunId: draftSourceId = sourceRunId, workDir: draftWorkDir, ...rest } = extra
+          const dir = path.join(workRoot, `skill-draft-${id}`)
+          writeSkillInto(dir, files)
           // 素材也要有几份：素材折叠行的摘要量与预览量都指着它
           for (const [rel, text] of [
             ['00-README.md', '# 素材索引（探针夹具）\n\n先读这份，再按需读下面几份。\n'],
@@ -5232,6 +5236,8 @@ try {
             startedAt: now - 29_000,
             finishedAt: now - 28_000,
             crystallizeTarget: { kind: 'new' },
+            // 工作目录：默认 = 这一版自己的小屋；分批第 16 批起"改版"那一版要显式指回**任务目录**
+            workDir: draftWorkDir ?? dir,
             ...rest,
           })
           return id
@@ -5272,15 +5278,70 @@ try {
           { 'SKILL.md': skillMd('兄妹版') },
           { sourceRunId: crystalFixture.sourceRunId, queuedAt: now - 90_000 },
         )
+        // ══════════════════════════════════════════════════════════════════
         // 第二版：`revisedFrom` 指着第一版（界面据此给「对比上一版」）
-        crystalFixture.revisedRunId = await makeDraft(
-          ulid(),
-          {
+        // ══════════════════════════════════════════════════════════════════
+        //
+        // ⚠️ 分批第 16 批改了这个夹具的形状，**不是**为了让判据变绿：
+        //    "一个沉淀任务 = 一个目录"之后，第 2 版**没有自己的小屋**——它在首版那间小屋里原地改，
+        //    首版的内容进 `history/<首版 runId>/skill/`（快照），当前内容 = 第 2 版。
+        //    夹具还照老形状搭（第 2 版自己一间小屋）的话，探针量出来的现场其实是**首版**的
+        //    （实测：编辑器里是"第二步"而不是"第二步（已按意见改）"、结论条掉回「对比当前版本」），
+        //    那是夹具错，不是产品错——判据本身（"改版屏显示的必须是这一版的字"）没变。
+        const revisedId = ulid()
+        {
+          const taskDir = path.join(workRoot, `skill-draft-${crystalFixture.draftRunId}`)
+          // ① 首版内容快照（不可变）——「对比上一版」读的就是它
+          const snapDir = path.join(taskDir, 'history', crystalFixture.draftRunId)
+          for (const [rel, text] of Object.entries({
+            'SKILL.md': skillMd('第二步'),
+            'references/notes.md': '# 说明\n\n第一版。\n',
+            'scripts/check.sh': '#!/bin/sh\necho probe\n',
+          })) {
+            const full = path.join(snapDir, 'skill', rel)
+            fs.mkdirSync(path.dirname(full), { recursive: true })
+            fs.writeFileSync(full, text)
+          }
+          // ② 第 2 版的产出写进**同一个**任务目录
+          writeSkillInto(taskDir, {
             'SKILL.md': skillMd('第二步（已按意见改）'),
             'references/notes.md': '# 说明\n\n第一版。\n',
             'scripts/check.sh': '#!/bin/sh\necho probe\n',
+          })
+          fs.writeFileSync(
+            path.join(taskDir, 'material', 'feedback.md'),
+            '# 使用者对上一版的意见（这一版必须照它改）\n\n把第二步说清。\n',
+          )
+          // ③ 版本表：上一版在快照里、第 2 版就是任务目录里的内容
+          fs.writeFileSync(
+            path.join(taskDir, '.versions.json'),
+            `${JSON.stringify(
+              {
+                versions: [
+                  {
+                    runId: crystalFixture.draftRunId,
+                    at: now - 30_000,
+                    humanEdited: false,
+                    snapshot: `history/${crystalFixture.draftRunId}`,
+                  },
+                  { runId: revisedId, at: now - 20_000, humanEdited: false, snapshot: null },
+                ],
+                healedAt: null,
+              },
+              null,
+              2,
+            )}\n`,
+          )
+        }
+        crystalFixture.revisedRunId = await makeDraft(
+          revisedId,
+          {},
+          {
+            revisedFrom: crystalFixture.draftRunId,
+            sourceRunId: revisedSourceRunId,
+            // 第 2 版的工作目录 = 任务目录（真机就是这样：返工 run 的 workDir 指回首版小屋）
+            workDir: path.join(workRoot, `skill-draft-${crystalFixture.draftRunId}`),
           },
-          { revisedFrom: crystalFixture.draftRunId, sourceRunId: revisedSourceRunId },
         )
         // 专供 P2：一条**会被入库**的草稿（它自己一个源 run ⇒ 不影响上面两条）
         crystalFixture.mineDraftRunId = await makeDraft(

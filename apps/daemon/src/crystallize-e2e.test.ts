@@ -51,12 +51,17 @@ class FakeBackend implements AgentBackend {
   draftReviewVerdict: Record<string, unknown> | null = null
 
   /**
-   * 起草 run **开工那一刻**产出目录里的内容（按工作目录存；分批第 10 批加）。
+   * 起草 run **开工那一刻**产出目录里的内容（分批第 10 批加）。
    *
    * 为什么非要在"开工那一刻"拍：跑完之后 `skill/` 里当然有文件（起草者写的），
    * 那样量不出"这一版是从上一版开始改的"还是"从空的开始重写"。
+   *
+   * ⚠️ 分批第 16 批改成**按目录存一个列表**：一个任务一个目录之后，同一个目录会开工好几次
+   *    （每一版一次），按目录存单个值会被后一版覆盖——我第一版就是这么量错的：读到的其实是
+   *    第三版开工时的内容（它已经含着第二版补的那一行），于是断言"等于上一版"当场红，
+   *    而红的原因是**假后端存错了**，不是产品错了。
    */
-  readonly draftStartSkill: Record<string, Record<string, string>> = {}
+  readonly draftStartSkill: Record<string, Array<Record<string, string>>> = {}
 
   /** 改版这一路只动一行（模拟"按意见只改点到的地方"的起草者）。 */
   minimalEditOnRevise = false
@@ -131,7 +136,9 @@ class FakeBackend implements AgentBackend {
       //   这是"改版是从上一版开始改的"唯一的证据——跑完之后 `skill/` 里当然有文件
       //   （起草者写的），看不出它开始时是不是空的。
       const started = await readDirRecursive(join(opts.workDir, 'skill'))
-      this.draftStartSkill[opts.workDir] = started
+      const log = this.draftStartSkill[opts.workDir] ?? []
+      log.push(started)
+      this.draftStartSkill[opts.workDir] = log
       // `minimalEditOnRevise`：模拟"只改意见点到的地方"的起草者（改版时在上一版末尾加一行）。
       // 不给它设开关的话，假后端每次都把整份夹具重写一遍 ⇒ 返工版的差异永远是"整份重写"，
       // 而那正是这一批要改掉的行为 ⇒ 断言就测不出"差异变小了"。
@@ -1007,10 +1014,18 @@ describe('五轮：按意见改一版（P1）', () => {
     )
     assert.match(
       mat.items.find((i) => i.relPath === '00-README.md')!.text,
-      /产出目录 `skill\/` 里已经是上一版/,
+      /产出目录 `skill\/` 里就是上一版/,
       '索引要告诉起草者"在产出目录里改"（不是"参考一下再重写"）',
     )
-    const revisedSkill = await readDirRecursive(join(workRoot, `skill-draft-${created.draftRunId}`, 'skill'))
+    // ★ 分批第 16 批加：这一版**不是新开的小屋**（原来每版一间）。不写清的话，起草者会按
+    //   前几版的记忆去找一个"新目录"，而真正的产出目录就在它脚下。
+    assert.match(
+      mat.items.find((i) => i.relPath === '00-README.md')!.text,
+      /仍在\*\*同一个任务目录\*\*里/,
+      '索引要说清"这是同一个任务目录，路径没变"',
+    )
+    // ★ 分批第 16 批：产出在**任务目录**里（= 首版那间小屋），不再是"新一版自己的小屋"
+    const revisedSkill = await readDirRecursive(join(workRoot, `skill-draft-${first}`, 'skill'))
     assert.deepEqual(
       Object.keys(revisedSkill).sort(),
       Object.keys(fakeBackend.draftFiles).sort(),
@@ -1336,30 +1351,33 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     throw new Error('审核判决没在限时内收口')
   }
 
-  /** 草稿小屋的目录名（`skill-draft-<run id>`）——返工会在旁边新开一间。 */
-  async function draftHuts(): Promise<string[]> {
-    const { readdir } = await import('node:fs/promises')
-    return (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
+  /**
+   * 这个任务的版本表（runId 列表）——"多出一版"现在的表现。
+   *
+   * 分批第 16 批之前"多一版" = 多一间小屋（`skill-draft-<新 runId>`），所以判据是数目录；
+   * 一个任务一个目录之后目录数**永远不会变**，再数它就是一条永远绿的判据（最坏的那种测试）。
+   */
+  async function draftVersionIds(firstRunId: string): Promise<string[]> {
+    const file = join(workRoot, `skill-draft-${firstRunId}`, '.versions.json')
+    const raw = await readFile(file, 'utf8').catch(() => null)
+    if (raw === null) return []
+    const parsed = JSON.parse(raw) as { versions: Array<{ runId: string }> }
+    return parsed.versions.map((v) => v.runId)
   }
 
-  /** 等"多出来的一间小屋"出现（返工的表现），返回它。 */
-  async function waitForNewHut(before: string[]): Promise<string> {
-    for (let i = 0; i < 200; i += 1) {
-      const fresh = (await draftHuts()).filter((n) => !before.includes(n))
-      if (fresh.length > 0) return fresh[0]!
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    throw new Error('没有出现新的草稿小屋（自动返工没发生）')
-  }
-
+  /**
+   * 分批第 16 批删掉了两个 helper（`draftHuts` / `waitForNewHut`）。
+   *
+   * 它们量的是"返工会在旁边**多开一间小屋**"——那正是使用者判定为错的行为（"给意见后点重新起草，
+   * 新增加了一个沉淀任务，而不是在原沉淀任务中执行"）。现在一个任务一个目录，"返工发生了没"
+   * 的信号是**多了一条 `revisedFrom` 指过来的新 run**（`waitRevisedFrom`），不是多了一个目录。
+   */
   test('★★ 判决 fail ⇒ 返工派得出去（判决状态 rework_requested）且意见落进新一版素材', async () => {
     const sourceRunId = await runReviewed('审完的流程（要触发自动返工）')
     const draftRunId = await draftAndWait({
       runId: sourceRunId,
       target: { kind: 'new', purpose: '自动返工流程' },
     })
-    const before = await draftHuts()
-
     // ⚠️ 这份判决必须**完全合规**，否则它连"不通过"都算不上：`reasonCode` 是平台枚举
     //    （`packages/protocol/src/enums.ts` 的 `ReasonCode`），`severity` 也是。
     //    我第一版随手写了 `reasonCode: 'missing_when_to_use'`、`severity: 'major'`、
@@ -1392,16 +1410,36 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
         '不通过且有额度 ⇒ 必须真的派出一条返工 run（escalated 说明根本没派）',
       )
 
-      const hut = await waitForNewHut(before)
-      const feedback = await readFile(join(workRoot, hut, 'material', 'feedback.md'), 'utf8')
+      // ★ 分批第 16 批：返工的信号是**新一条 run**（`revisedFrom` 指过来），不是新一间小屋——
+      //   产出仍在同一个任务目录里改（使用者要的"在原任务中执行"）。
+      const v2 = await waitRevisedFrom(draftRunId)
+      const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
+      const feedback = await readFile(join(taskDir, 'material', 'feedback.md'), 'utf8')
       assert.match(feedback, /style_violation/, '理由码要交下去')
       assert.match(feedback, /正文里没有 `## When to Use` 一节/, '审核者的条目要交下去')
       assert.match(feedback, /SKILL\.md/, '位置要交下去（否则起草者不知道改哪儿）')
-      // 返工是"再起草一版"，不是覆盖上一版
-      assert.ok(
-        (await draftHuts()).includes(`skill-draft-${draftRunId}`),
-        '被审的那一版不许消失',
+      // 被审的那一版**不许消失**：它的内容进了任务目录里的快照（`history/<runId>/skill/`）
+      const snapshot = await readFile(join(taskDir, 'history', draftRunId, 'skill', 'SKILL.md'), 'utf8')
+      assert.ok(snapshot.length > 0, '被审的那一版必须有快照（差异对比与回退都读它）')
+      const versions = JSON.parse(await readFile(join(taskDir, '.versions.json'), 'utf8')) as {
+        versions: Array<{ runId: string }>
+      }
+      // 前两版必须在表里、且按时间排好（这条链会继续自动往下跑：判决 fail + 有额度 ⇒ 还要返工，
+      // 所以表里后面可能还有第三、四版——判据只钉前两版，别把"链会自己往下走"当成失败）
+      assert.deepEqual(
+        versions.versions.slice(0, 2).map((v) => v.runId),
+        [draftRunId, v2],
+        '版本表要按顺序记着这两版（同一个任务的两版，不是两个任务）',
       )
+      // ★★ 使用者的原话就是这条：**不许再多出一个沉淀任务**。返工的那几版**不能**有自己的小屋。
+      const huts = (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
+      for (const v of versions.versions) {
+        if (v.runId === draftRunId) continue
+        assert.ok(
+          !huts.includes(`skill-draft-${v.runId}`),
+          `第 ${v.runId.slice(-6)} 版不该有自己的小屋（那就是"多出来一个沉淀任务"）：${JSON.stringify(huts.filter((h) => h.includes(v.runId.slice(-6))))}`,
+        )
+      }
     } finally {
       fakeBackend.draftReviewVerdict = null
     }
@@ -1413,7 +1451,9 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       runId: sourceRunId,
       target: { kind: 'new', purpose: '通过就不返工' },
     })
-    const before = await draftHuts()
+    // ★ 分批第 16 批改判据（**不是**放宽）：在新模型里"多出一版"的表现是**版本表被追加**，
+    //   而不再可能"多出一间小屋"（一个任务一个目录）——只数小屋的话，这条判据会永远绿。
+    const before = await draftVersionIds(draftRunId)
 
     fakeBackend.draftReviewVerdict = {
       schemaVersion: 1,
@@ -1430,7 +1470,7 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       assert.notEqual(verdict.status, 'rework_requested', '通过不该返工')
       // 给返工足够的时间去犯错（如果它真会犯错）：判决落库之后还有异步的收尾
       await new Promise((resolve) => setTimeout(resolve, 400))
-      assert.deepEqual(await draftHuts(), before, '通过不该多出草稿小屋')
+      assert.deepEqual(await draftVersionIds(draftRunId), before, '通过不该多出草稿小屋')
     } finally {
       fakeBackend.draftReviewVerdict = null
     }
@@ -1482,14 +1522,16 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       runId: sourceRunId,
       target: { kind: 'new', purpose: '判决不合规' },
     })
-    const before = await draftHuts()
+    // ★ 分批第 16 批改判据（**不是**放宽）：在新模型里"多出一版"的表现是**版本表被追加**，
+    //   而不再可能"多出一间小屋"（一个任务一个目录）——只数小屋的话，这条判据会永远绿。
+    const before = await draftVersionIds(draftRunId)
 
     // `draftReviewVerdict` 保持 null ⇒ 假后端给的是普通产出（没有判决围栏）
     const verdict = await reviewDraftAndWait(draftRunId)
     assert.equal(verdict.conclusion, 'needs_human', '不合规要如实降级，不许伪装成通过')
     assert.notEqual(verdict.status, 'rework_requested', '审核没跑成不是"活没干好"，不返工')
     await new Promise((resolve) => setTimeout(resolve, 400))
-    assert.deepEqual(await draftHuts(), before, '不合规时一版都不该多')
+    assert.deepEqual(await draftVersionIds(draftRunId), before, '不合规时一版都不该多')
   })
 })
 
@@ -1556,19 +1598,42 @@ describe('§10.8 返工契约：基于上一版改（不是重写一版）', () 
 
       // 等"按 v1 改出来的那一版"（**不是**"目录里多了一间小屋"——那会认到别条链的产物）
       const v2 = await waitRevisedFrom(v1)
-      const hut = `skill-draft-${v2}`
+      // ★ 分批第 16 批：任务目录是**首版**那间小屋（v2 没有自己的小屋了）
+      const hut = `skill-draft-${v1}`
+      assert.ok(
+        !(await readdir(workRoot)).includes(`skill-draft-${v2}`),
+        '第 2 版不许另开一间小屋（使用者要的"在原任务中执行"）',
+      )
 
       // ① 开工那一刻产出目录里**已经是上一版**（含支持文件）——这是"能在上面改"的前提
-      const atStart = fakeBackend.draftStartSkill[join(workRoot, hut)] ?? {}
+      const starts = fakeBackend.draftStartSkill[join(workRoot, hut)] ?? []
       assert.ok(
-        Object.keys(atStart).includes('SKILL.md'),
-        `改版开工时 skill/ 里就该有上一版的 SKILL.md（实际：${JSON.stringify(Object.keys(atStart))}）`,
+        starts.length >= 2,
+        `这个任务目录该开工至少两次（首版 + 至少一版返工），实际 ${starts.length} 次`,
       )
-      assert.ok(
-        Object.keys(atStart).includes('references/checklist.md'),
-        '支持文件也要在（上一版有的东西不许凭空消失）',
+      // 首版开工时目录是**空的**（它是从零起草的）——先量这一条，后面那条"有内容"才有意义：
+      // 不量的话，"开工时有文件"可能只是因为上一版恰好没被清掉（那时候判据是空的）
+      assert.deepEqual(
+        Object.keys(starts[0]!),
+        [],
+        `首版开工时 skill/ 该是空的，实际 ${JSON.stringify(Object.keys(starts[0]!))}`,
       )
-      assert.equal(atStart['SKILL.md'], base['SKILL.md'], '开工时那一份必须就是上一版的内容')
+      for (const atStart of starts.slice(1)) {
+        assert.ok(
+          Object.keys(atStart).includes('SKILL.md'),
+          `改版开工时 skill/ 里就该有上一版的 SKILL.md（实际：${JSON.stringify(Object.keys(atStart))}）`,
+        )
+        assert.ok(
+          Object.keys(atStart).includes('references/checklist.md'),
+          '支持文件也要在（上一版有的东西不许凭空消失）',
+        )
+      }
+      // 第一次返工开工时那一份 = 首版的内容（原样，逐字）
+      assert.equal(
+        starts[1]!['SKILL.md'],
+        base['SKILL.md'],
+        '第一次返工开工时，产出目录里必须**逐字**就是上一版',
+      )
 
       // ② 上一版**不再**在素材里出现第二份（同一份内容放两处 ⇒ 改了一处另一处就是旧的）
       const material = await readdir(join(workRoot, hut, 'material'))
@@ -2169,7 +2234,7 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     // ①b 起草者读到的那份索引页要说明"这一版接上了会话 + 以磁盘为准"
     //     （判据读它而不是读接口字段：字段只有测试在看，而索引页是起草者真读的东西）
     const indexForResume = await readFile(
-      join(workRoot, `skill-draft-${created.draftRunId}`, 'material', '00-README.md'),
+      join(workRoot, `skill-draft-${v1}`, 'material', '00-README.md'),
       'utf8',
     )
     assert.match(indexForResume, /接上了你上次写这一版的会话/)
@@ -2230,35 +2295,48 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
       !fakeBackend.resumeRequests.includes('fake-session-1'),
       '人改过还接会话 ⇒ 起草者会按记忆把人改的地方改回去',
     )
-    // ③ 而"依据"仍然在磁盘上：新小屋开工时产出目录里就是我改过的那一份
-    const v2Hut = join(workRoot, `skill-draft-${created.draftRunId}`, 'skill')
+    // ③ 而"依据"仍然在磁盘上：**开工那一刻**产出目录里就是我改过的那一份。
+    //    ⚠️ 分批第 16 批改判据（**不是**放宽）：原来量的是"新小屋里的 SKILL.md"——那时每一版
+    //    自己一间小屋、上一版被复制过去；现在原地改 ⇒ 跑完之后那份内容**应该**被这一版覆盖
+    //    （那才是"改一版"本来的意思）。真正要保证的是**起草者开工时看到的**就是人改过的那份：
+    //    这正是"不接会话"要达到的效果——它读磁盘，读到的就是人的改动。
+    //    ⚠️ 也正因为改成了"读捕获"，这里必须**等这一版跑完**再读：原来读目录时，daemon 在
+    //    submit 之前就把上一版复制进新小屋了（同步可见），而捕获要等假后端真被调起来才有
+    //    ——我第一版没等，读到 `undefined`，于是红的原因变成了"判据读早了"，而不是产品不对。
+    await waitRunStatus(created.draftRunId, ['completed', 'failed'])
+    const starts = fakeBackend.draftStartSkill[join(workRoot, `skill-draft-${v1}`)] ?? []
     assert.equal(
-      await readFile(join(v2Hut, 'SKILL.md'), 'utf8'),
+      (starts[starts.length - 1] ?? {})['SKILL.md'],
       '# 报告流程（人手改过）\n\n## Procedure\n1. 我改的\n',
       '人改过的内容必须是新一版的起点（不接会话，但内容照样带过去）',
     )
     // ④ 索引页要说清这一版为什么是全新会话（起草者得知道"以磁盘为准"）
     const index = await readFile(
-      join(workRoot, `skill-draft-${created.draftRunId}`, 'material', '00-README.md'),
+      join(workRoot, `skill-draft-${v1}`, 'material', '00-README.md'),
       'utf8',
     )
     assert.match(index, /全新.*会话/, '索引页要说明这是全新会话')
     assert.match(index, /SKILL\.md/, '要点出哪几份是人改过的')
   })
 
-  test('★★ 每版一间小屋：返工**不动**上一版（这就是"工作目录为什么要变"的理由）', async () => {
-    // 使用者看到日志里那句"工作目录已切换到新任务"，问「这说明工作目录有变化？为什么需要变化呢」。
-    // 答案不是"顺手换个地方"，而是**版本不可变**：每版一间小屋 ⇒ 上一版能当基线对比
-    // （`/api/crystallize/diff?against=previous`）、审核指纹（`.audited.json`）指的是"那一版看过的
-    // 那些文件"、人改过的痕迹（`.human-edits.json`）也挂在那一版上。原地改会把这三样一起毁掉。
-    // 这条用例把它钉成不变量：返工之后，上一版小屋里的产出**一字未动**。
-    const sourceRunId = await runReviewed('审完的流程（量目录不变）')
+  test('★★ 一个沉淀任务 = 一个目录：返工在同目录里改，上一版进不可变快照', async () => {
+    // 这一批（第 16 批）**推翻**了上一批的"每版一间小屋"，所以这条用例是重写的：
+    // 使用者判定"给意见后点重新起草，新增加了一个沉淀任务，而不是在原沉淀任务中执行"，
+    // 而且他自己机器上真有一条 7 版的链（`9D67DN → … → B3R0ST`）＝列表里 7 个条目。
+    //
+    // 新模型下要同时成立三件事，缺一条都算没做到：
+    //   ① 目录不变：返工 run 的 workDir = 任务目录（首版那间小屋），且**没有**多出新目录；
+    //   ② 上一版不丢：它的内容进了 `history/<上一版 runId>/skill/`（不可变、只写一次）；
+    //   ③ 版本有账：`.versions.json` 按顺序记着每一版（谁跑的、有没有人改过、快照在哪）。
+    //     ⚠️ ②③ 是 ① 的**代价**：原地改会覆盖上一版，不把这三样补上就是"改一版丢一版"。
+    const sourceRunId = await runReviewed('审完的流程（量一个任务一个目录）')
     const v1 = await draftAndWait({
       runId: sourceRunId,
-      target: { kind: 'new', purpose: '目录不变' },
+      target: { kind: 'new', purpose: '同目录返工' },
     })
-    const v1Hut = join(workRoot, `skill-draft-${v1}`)
-    const before = await readFile(join(v1Hut, 'skill', 'SKILL.md'), 'utf8')
+    const taskDir = join(workRoot, `skill-draft-${v1}`)
+    const v1Skill = await readFile(join(taskDir, 'skill', 'SKILL.md'), 'utf8')
+    const hutsBefore = (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
 
     const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
       method: 'POST',
@@ -2267,26 +2345,121 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     })
     assert.equal(res.status, 202, await res.clone().text())
     const created = (await res.json()) as { draftRunId: string }
+    const v2 = created.draftRunId
+    await waitRunStatus(v2, ['completed', 'failed'])
 
-    // ① 两条 run 的 workDir 各是各的小屋（不是同一间）
-    const v2Run = (await (await fetch(`${daemon.url}/api/runs/${created.draftRunId}`)).json()) as {
+    // ① 目录不变 + 不多出小屋
+    const v2Run = (await (await fetch(`${daemon.url}/api/runs/${v2}`)).json()) as {
       workDir: string
     }
-    assert.ok(
-      v2Run.workDir.endsWith(`skill-draft-${created.draftRunId}`),
-      `这一版该在自己的小屋里干活，实际 ${v2Run.workDir}`,
-    )
-    assert.notEqual(v2Run.workDir, v1Hut, '两版不能共用一间小屋')
-
-    // ② 上一版一字未动（这是 diff 能算、审核指纹还有意义、人改的痕迹还在的前提）
     assert.equal(
-      await readFile(join(v1Hut, 'skill', 'SKILL.md'), 'utf8'),
-      before,
-      '返工不许改上一版小屋里的产出——那不是"顺手"，是版本不可变',
+      v2Run.workDir,
+      taskDir,
+      `返工必须在**原任务目录**里干活，实际 ${v2Run.workDir}（那就是"多出来一个沉淀任务"）`,
+    )
+    const hutsAfter = (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
+    assert.deepEqual(hutsAfter.sort(), hutsBefore.sort(), '返工不该多出任何小屋')
+
+    // ② 上一版进快照，且逐字等于它当时的产出
+    assert.equal(
+      await readFile(join(taskDir, 'history', v1, 'skill', 'SKILL.md'), 'utf8'),
+      v1Skill,
+      '上一版的内容必须原样进快照（差异对比与回退都读它）',
     )
     assert.ok(
-      (await readdir(v1Hut)).includes('material'),
-      '上一版的小屋整个还在（能翻回去看它当时长什么样）',
+      (await readdir(join(taskDir, 'history', v1, 'skill'))).includes('references'),
+      '支持文件也要一起快照（不然"上一版"只剩半份）',
+    )
+
+    // ③ 版本表：两版按顺序、当前那一版没有快照（它就是任务目录里的内容）
+    const versions = JSON.parse(await readFile(join(taskDir, '.versions.json'), 'utf8')) as {
+      versions: Array<{ runId: string; snapshot: string | null }>
+    }
+    assert.deepEqual(
+      versions.versions.map((v) => [v.runId, v.snapshot]),
+      [
+        [v1, `history/${v1}`],
+        [v2, null],
+      ],
+      '版本表要记着"上一版在快照里、当前版就在任务目录里"',
+    )
+  })
+
+  test('★★ 老数据（一版一间小屋）自愈：问老的那一版，读到的必须是**它自己**的内容', async () => {
+    // 为什么要这条：分批第 16 批改成"一个任务一个目录"之后，**使用者机器上已经存在**的链还是老形状
+    // ——他自己那条 7 版的链（`9D67DN → … → B3R0ST`）每一版都住在自己的小屋里（真机上量的）。
+    // 不自愈的话：问 v7 的产出，daemon 会把首版那间小屋当成"任务目录"⇒ 静默返回 **v1 的内容**。
+    // 那种错最坏：目录在、文件在、接口 200，只是内容旧了七版。
+    //
+    // 这条用例按老形状**手工造**一条链（v1 走真接口，v2 直接写 run 记录 + 小屋目录），
+    // 然后量四件：① 问 v2 得到 v2 的内容；② 迁移动过的东西都在（首版快照 + 版本表 + healedAt）；
+    // ③ 迁移只做一次（再问一次，磁盘不变）。
+    const sourceRunId = await runReviewed('审完的流程（老数据自愈）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '老链自愈' },
+    })
+    const taskDir = join(workRoot, `skill-draft-${v1}`)
+    const v1Content = await readFile(join(taskDir, 'skill', 'SKILL.md'), 'utf8')
+
+    // ── 造一条"老形状"的第 2 版：run 记录 + 自己那间小屋（分批第 16 批之前就是这么落的）──
+    const v1Run = await daemon.store.getRun(v1 as RunId)
+    assert.ok(v1Run, '首版 run 得在（下面照它复制一份）')
+    const legacyId = ulid() as string
+    const legacyDir = join(workRoot, `skill-draft-${legacyId}`)
+    const legacyContent = '# 报告流程（老形状的第 2 版）\n\n## Procedure\n1. 老链写的\n'
+    await mkdir(join(legacyDir, 'skill'), { recursive: true })
+    await writeFile(join(legacyDir, 'skill', 'SKILL.md'), legacyContent, 'utf8')
+    await mkdir(join(legacyDir, 'material'), { recursive: true })
+    await writeFile(join(legacyDir, 'material', '00-README.md'), '# 老版的索引\n', 'utf8')
+    await daemon.store.insertRun({
+      ...v1Run!,
+      id: legacyId as RunId,
+      revisedFrom: v1 as RunId,
+      queuedAt: v1Run!.queuedAt + 1000,
+      workDir: legacyDir,
+    })
+
+    // ── ① 问老的那一版 ⇒ 得到它自己的内容（而不是首版那间小屋里的旧内容）──
+    const res = (await (
+      await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${legacyId}`)
+    ).json()) as { files: Record<string, string>; status: string }
+    assert.equal(
+      res.files['SKILL.md'],
+      legacyContent,
+      '问到老的那一版时，读到的必须是**它自己**的内容（自愈没做的话这里会是首版的内容）',
+    )
+
+    // ── ② 迁移的四样都在 ──
+    assert.equal(
+      await readFile(join(taskDir, 'skill', 'SKILL.md'), 'utf8'),
+      legacyContent,
+      '任务目录里的"当前内容"要变成最新那一版',
+    )
+    assert.equal(
+      await readFile(join(taskDir, 'history', v1, 'skill', 'SKILL.md'), 'utf8'),
+      v1Content,
+      '首版的内容要先被快照下来再覆盖（它的名字还在版本表里，内容不能丢）',
+    )
+    const versions = JSON.parse(await readFile(join(taskDir, '.versions.json'), 'utf8')) as {
+      versions: Array<{ runId: string; snapshot: string | null }>
+      healedAt: number | null
+    }
+    assert.deepEqual(
+      versions.versions.map((v) => v.runId),
+      [v1, legacyId],
+      '版本表要按时间记着老链的两版',
+    )
+    assert.equal(versions.versions[1]!.snapshot, null, '最新那一版就是任务目录里的内容')
+    assert.equal(typeof versions.healedAt, 'number', '迁移要留痕（改过使用者的目录，必须能查）')
+
+    // ── ③ 只做一次：再问一次，磁盘不变（`healedAt` 与版本表都不动）──
+    const versionsBefore = await readFile(join(taskDir, '.versions.json'), 'utf8')
+    await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${legacyId}`)
+    assert.equal(
+      await readFile(join(taskDir, '.versions.json'), 'utf8'),
+      versionsBefore,
+      '自愈是幂等的：第二次问不许再动一次目录',
     )
   })
 
@@ -2309,7 +2482,7 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
       const status = await waitRunStatus(created.draftRunId, ['completed', 'failed'])
       assert.equal(status, 'completed', '会话丢了不该让这一版跑不完')
       const produced = await readFile(
-        join(workRoot, `skill-draft-${created.draftRunId}`, 'skill', 'SKILL.md'),
+        join(workRoot, `skill-draft-${v1}`, 'skill', 'SKILL.md'),
         'utf8',
       ).catch(() => null)
       assert.ok(produced !== null, '产出目录里仍然有 SKILL.md（依据在磁盘上，不在会话里）')

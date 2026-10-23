@@ -19,7 +19,7 @@
  * 而且界面要能**定位**到是哪个文件哪一条不满足。
  */
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 /** SKILL.md 的解析结果（frontmatter 拆出来的三个字段 + 全文）。 */
@@ -518,4 +518,267 @@ export async function writeHumanEditStamp(
     'utf8',
   )
   return merged
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════════════
+ * 一个沉淀任务 = 一个目录（分批第 16 批）
+ * ══════════════════════════════════════════════════════════════════════
+ *
+ * 使用者给的判断：「给意见后点"重新起草"逻辑不好：新增加了一个沉淀任务，而不是在原沉淀任务中执行。
+ * 原则上应该叫"反馈"，在原任务中执行；skill 差异对比也应该是原 skill 变化。」
+ *
+ * 查下来他说的两件都成立：
+ *   · 列表 `listCrystallizeDrafts` 是**一条 run 一行** ⇒ 一条 7 版的链在沉淀列表里是 7 个条目
+ *     （他自己机器上真有一条 7 版的链：`9D67DN → … → B3R0ST`）；
+ *   · 一条 run 一间小屋（`draftRoot(workRoot, runId)`）⇒ "差异对比"天然是"v2 vs v1"，
+ *     而不是"这份 skill 变成什么样了"。
+ *
+ * 现在的模型：**首次起草的那一刻定下任务目录**（= 首版那条 run 的小屋，`skill-draft-<首版 runId>`），
+ * 之后每一版都在**同一个目录里改**——这就是"在原任务中执行"。每改一版之前，把当前 `skill/`
+ * **快照**一份到 `history/<那一版的 runId>/skill/`，于是：
+ *   · 差异对比 = 当前 vs 快照（"这份 skill 的变化"）；
+ *   · 上一版**仍然完整可查**（快照是不可变的：只写一次、之后只读）；
+ *   · 审核指纹（`.audited.json`）与"人改过的痕迹"（`.human-edits.json`）语义不变——它们本来就
+ *     回答"和某一次审核时相比变没变"，而"当前内容"现在只有一个地方，反而更清楚。
+ *
+ * ⚠️ 一条 run 仍然是**终态机**（completed/failed/cancelled 不能再开）⇒ 每一次反馈依然起一条新 run
+ *    （新进程）；变的只是"任务"落到哪个目录。使用者看到的"任务"是**目录 + 这条链**，不是某一条 run。
+ */
+export interface DraftVersionRecord {
+  /** 这一版是哪条 run 跑出来的。 */
+  runId: string
+  at: number
+  /** 这一版产出之后，有没有被人手改过（保留下来：resume 决策与溯源都要用）。 */
+  humanEdited: boolean
+  /**
+   * 这一版的内容快照在哪。
+   *
+   * `null` = 它**就是任务目录里的当前内容**（只有最新一版是这样）；
+   * 相对路径 = 任务目录里的 `history/<runId>`；
+   * 绝对路径 = 老数据留下的"自己那间小屋"（见下面的自愈迁移）——本期不改写老目录。
+   */
+  snapshot: string | null
+}
+
+export interface DraftVersions {
+  /** 这个任务的目录（= 首版那条 run 的小屋）。 */
+  versions: DraftVersionRecord[]
+  /**
+   * 老形状自愈时记一笔（`null` = 没发生过）。
+   *
+   * 为什么要记：迁移会**改动使用者的目录**（把最新一版的内容搬进任务目录），这种事必须留下痕迹，
+   * 否则以后看到"任务目录里的内容和首版小屋的名字对不上"，没人说得清是怎么来的。
+   */
+  healedAt: number | null
+}
+
+export const DRAFT_VERSIONS_FILE = '.versions.json'
+export const DRAFT_HISTORY_DIR = 'history'
+
+export async function readDraftVersions(taskDir: string): Promise<DraftVersions | null> {
+  try {
+    const raw = JSON.parse(await readFile(join(taskDir, DRAFT_VERSIONS_FILE), 'utf8')) as unknown
+    if (typeof raw !== 'object' || raw === null) return null
+    const obj = raw as Record<string, unknown>
+    const list = obj['versions']
+    if (!Array.isArray(list)) return null
+    return {
+      versions: list
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map((v) => ({
+          runId: typeof v['runId'] === 'string' ? v['runId'] : '',
+          at: typeof v['at'] === 'number' ? v['at'] : 0,
+          humanEdited: v['humanEdited'] === true,
+          snapshot: typeof v['snapshot'] === 'string' ? v['snapshot'] : null,
+        }))
+        .filter((v) => v.runId !== ''),
+      healedAt: typeof obj['healedAt'] === 'number' ? obj['healedAt'] : null,
+    }
+  } catch {
+    // 没有这个文件 = 这个任务还没有第二版（最常见）⇒ null，调用方按"当前内容就在任务目录里"处理。
+    return null
+  }
+}
+
+export async function writeDraftVersions(taskDir: string, versions: DraftVersions): Promise<void> {
+  await mkdir(taskDir, { recursive: true })
+  await writeFile(
+    join(taskDir, DRAFT_VERSIONS_FILE),
+    `${JSON.stringify(versions, null, 2)}\n`,
+    'utf8',
+  )
+}
+
+/** 把当前 `skill/` 快照到 `history/<runId>/skill/`（**只写一次**：已经存在就不动）。 */
+export async function snapshotDraftSkill(
+  taskDir: string,
+  versionRunId: string,
+): Promise<string | null> {
+  const from = join(taskDir, 'skill')
+  const rel = `${DRAFT_HISTORY_DIR}/${versionRunId}`
+  const to = join(taskDir, rel, 'skill')
+  const current = await readDraftSkillDir(from)
+  if (current === null) return null
+  // 已经快照过 ⇒ 不动它。快照是**不可变**的：重写会让"上一版到底是什么"随最后一次调用而变。
+  const existing = await readDraftSkillDir(to)
+  if (existing !== null) return rel
+  for (const [relPath, text] of Object.entries(current)) {
+    const full = join(to, relPath)
+    await mkdir(dirname(full), { recursive: true })
+    await writeFile(full, text, 'utf8')
+  }
+  return rel
+}
+
+/** 解析一版内容的位置（`snapshot` 为 null 时就是任务目录自己）。 */
+export function draftVersionSkillDir(taskDir: string, version: DraftVersionRecord): string {
+  if (version.snapshot === null) return join(taskDir, 'skill')
+  return isAbsolute(version.snapshot)
+    ? join(version.snapshot, 'skill')
+    : join(taskDir, version.snapshot, 'skill')
+}
+
+/** 老数据（一版一间小屋）在磁盘上的形状：`skill-draft-<runId>`，由调用方拼好传进来。 */
+export interface DraftRunLine {
+  id: string
+  revisedFrom?: string | null
+  queuedAt?: number
+}
+
+/**
+ * 把一条起草 run 归到它**所属任务的目录**上。
+ *
+ * 规则：沿着 `revisedFrom` 往回走到**首版**，首版那条 run 的小屋就是任务目录
+ * （新数据全是这个形状；老数据的第一版小屋就是首版小屋，也一样）。
+ *
+ * ⚠️ 老数据要**自愈**：分批第 16 批之前"一版一间小屋"，所以老链的最新一版内容在**它自己**的小屋里，
+ *    而任务目录里躺着的是首版。不自愈的话，读取当前内容、审核、人保存、差异对比会**集体看错一版**
+ *    （而且是静默的：目录在、文件在、只是内容旧了）。自愈做四件事，只做一次（`.versions.json` 是锁）：
+ *    ① 把首版小屋的 `skill/` 抄进 `history/<首版 runId>/skill/`（首版内容要留在原地当快照前先备份）；
+ *    ② 中间各版记成"快照 = 它自己那间小屋"（绝对路径，**不搬**——老目录保持原样，只是被指向）；
+ *    ③ 把**最新一版**小屋的 `skill/` 抄进任务目录（它才是当前内容）；
+ *    ④ 写 `.versions.json`，并把 `healedAt` 记上。
+ *
+ * 判据读的是结果，不是过程：自愈之后，问**任何一版** run 都得到同一个任务目录，而"当前内容"
+ * 就是最新那一版的内容（e2e 里拿老形状的假数据量）。
+ */
+export async function resolveDraftTaskDir(input: {
+  workRoot: string
+  draftRunId: string
+  draftDirName: (runId: string) => string
+  getRun: (runId: string) => Promise<DraftRunLine | null>
+  listChain: (rootRunId: string) => Promise<DraftRunLine[]>
+  now: number
+}): Promise<string> {
+  const rootId = await findRootDraftRunId(input.draftRunId, input.getRun)
+  const taskDir = join(input.workRoot, input.draftDirName(rootId))
+  if (rootId === input.draftRunId) return taskDir
+  // ⚠️ 自愈的门是"**表里没有这一版**"，不是"表不存在"。
+  //
+  //    第一版我把门写成"`.versions.json` 不存在就自愈"，结果**永远不自愈**：那张表在 v1 一跑完
+  //    就被完成钩子写下了（登记"当前版本"），所以表总是存在 ⇒ 老形状的链（每一版自己的小屋）
+  //    压根进不了自愈分支。表现是最坏的那种：问 v7 的产出，接口 200、文件都在、内容是 **v1 的**
+  //    ——e2e 里把这条钉住了（造一条老形状的链，问老那一版）。
+  //    反过来，表里**已有这一版** ⇒ 要么是新形状（每版都登记），要么已经迁过了 ⇒ 直接返回，
+  //    不做链条扫描（这是一条会被频繁调用的路径）。
+  const versions = await readDraftVersions(taskDir)
+  if (versions !== null && versions.versions.some((v) => v.runId === input.draftRunId)) {
+    return taskDir
+  }
+  await healLegacyChain(input, rootId, taskDir)
+  return taskDir
+}
+
+async function findRootDraftRunId(
+  draftRunId: string,
+  getRun: (runId: string) => Promise<DraftRunLine | null>,
+): Promise<string> {
+  let current = draftRunId
+  // 上限 50：链再长也够（真机上最长的一条是 7 版），同时挡住"环"把守护进程转死。
+  for (let i = 0; i < 50; i += 1) {
+    const run = await getRun(current)
+    const prev = run?.revisedFrom ?? null
+    if (prev === null || prev === '') return current
+    current = prev
+  }
+  return current
+}
+
+async function healLegacyChain(
+  input: {
+    workRoot: string
+    draftDirName: (runId: string) => string
+    listChain: (rootRunId: string) => Promise<DraftRunLine[]>
+    now: number
+  },
+  rootId: string,
+  taskDir: string,
+): Promise<void> {
+  const chain = await input.listChain(rootId)
+  if (chain.length === 0) return
+  const latest = chain[chain.length - 1]
+  if (latest === undefined || latest.id === rootId) return
+  const latestDir = join(input.workRoot, input.draftDirName(latest.id))
+  // 最新那一版本来就在任务目录里 ⇒ 没有"搬家"这回事（新形状的链随时会走到这儿，
+  // 比如返工 run 刚提交、还没跑完：这时表里还没有它，但它的小屋就是任务目录）。
+  if (resolve(latestDir) === resolve(taskDir)) return
+  const latestSkill = await readDraftSkillDir(join(latestDir, 'skill'))
+  if (latestSkill === null) return
+  const versions: DraftVersionRecord[] = []
+  for (const run of chain) {
+    const hut = join(input.workRoot, input.draftDirName(run.id))
+    const human = (await readHumanEditStamp(hut)) !== null
+    if (run.id === rootId) {
+      const snapshot = await snapshotDraftSkill(taskDir, run.id)
+      versions.push({ runId: run.id, at: run.queuedAt ?? 0, humanEdited: human, snapshot })
+    } else if (run.id === latest.id) {
+      versions.push({ runId: run.id, at: run.queuedAt ?? 0, humanEdited: human, snapshot: null })
+    } else {
+      versions.push({
+        runId: run.id,
+        at: run.queuedAt ?? 0,
+        humanEdited: human,
+        snapshot: hut,
+      })
+    }
+  }
+  // ③ 最新一版的内容搬进任务目录（它才是"当前内容"）
+  for (const [relPath, text] of Object.entries(latestSkill)) {
+    const full = join(taskDir, 'skill', relPath)
+    await mkdir(dirname(full), { recursive: true })
+    await writeFile(full, text, 'utf8')
+  }
+  await writeDraftVersions(taskDir, { versions, healedAt: input.now })
+}
+
+/**
+ * 记一笔版本（同 runId 就覆盖，否则追加，按 `at` 排序）。
+ *
+ * 两个写入时机（都在 server.ts 里，注释写在那儿）：
+ *   · **返工开工前**：给"当前这一版"补上快照与 `humanEdited`；
+ *   · **起草 run 跑完**：把新产出登记成"当前版本"（`snapshot: null`）。
+ */
+export async function recordDraftVersion(
+  taskDir: string,
+  version: DraftVersionRecord,
+): Promise<DraftVersions> {
+  const existing = await readDraftVersions(taskDir)
+  const versions = (existing?.versions ?? []).filter((v) => v.runId !== version.runId)
+  versions.push(version)
+  versions.sort((a, b) => a.at - b.at)
+  const next: DraftVersions = { versions, healedAt: existing?.healedAt ?? null }
+  await writeDraftVersions(taskDir, next)
+  return next
+}
+
+/**
+ * 抹掉"人改过"的标记：新一版产出**并落盘之后**才做。
+ *
+ * 为什么不在返工开工时就抹：开工到跑完这段时间里，这一版的内容**还是**人改过的那份，
+ * 中途失败（CLI 崩了、超时）之后它依然是 ⇒ 提前抹掉会让下一次反馈走 resume，
+ * 于是起草者按记忆去改人改过的文件（第 14 批要挡的正是这件事）。
+ */
+export async function clearHumanEditStamp(taskDir: string): Promise<void> {
+  await rm(join(taskDir, HUMAN_EDIT_STAMP_FILE), { force: true })
 }
