@@ -4900,18 +4900,30 @@
             facts['crystal.auditFailSeverities'] = [
               ...d().querySelectorAll('.audit-findings li .sev'),
             ].map((e) => text(e))
-            // 出口一：把审核问题清单填进意见框（分批第 12 批改文案：它**只填不提交**）
-            const cyRedraft = [...d().querySelectorAll('button')].find((b) =>
-              text(b).includes('填入审核问题'),
+            // ══════════════════════════════════════════════════════════════
+            // ★★★ 意见框**打开时默认就填好审核者的反馈**（分批第 12 批，使用者纠正过一次）
+            // ══════════════════════════════════════════════════════════════
+            //
+            // 期望的形状（使用者原话）：「点"按意见重新起草"后，我期待**意见框里面默认填充了
+            // 审核者审核的反馈**」。所以这里的判据是"**一开框就有内容**"，而不是
+            // "先点一个专门用来填的按钮"——我第一版做成独立按钮（还改了名），
+            // 那多要了人一次点击，是错的形状，已经撤掉。
+            //
+            // 量四件事：① 开框即有内容（带理由码/位置/原文）；② 光标在框里；
+            // ③ 提交由人点（按钮在、可点）；④ **没有自己跑起来**（框与按钮都还在）。
+            // 外加一条最容易做错的：⑤ 人改过的字**不许**被覆盖。
+
+            // 换句话要派发 `input`：`bind:value` 靠它（只改 value 不生效）
+            const cyToggle = [...d().querySelectorAll('button')].find((b) =>
+              text(b).includes('按意见再改一版'),
             )
-            facts['crystal.auditRedraftButton'] = !!cyRedraft
-            // ★★★ 点它 ⇒ 清单填进意见框；**不许**因此开始起草（这正是使用者说的"让用户点反馈"）
-            // ⚠️ `title` 要**等一拍**再读：Svelte 5 把属性写进 DOM 是在微任务里冲洗的，
-            //    而这一段原来是找到按钮就立刻读 ⇒ 量到空字符串（我会先去怀疑界面没挂上）。
-            //    实测（临时诊断事实）证明属性是挂好的：`attrs: class,title`，值就是那句提示。
-            await wait(150)
-            facts['crystal.auditRedraftHint'] = cyRedraft ? cyRedraft.title : null
-            cyRedraft?.click()
+            facts['crystal.reviseToggleButton'] = !!cyToggle
+            // 「按意见重新起草」/「填入审核问题」这两个按钮都**不该**存在：
+            // 同一个动作只有一个入口（多一个入口，迟早两边不一样）
+            facts['crystal.redraftOldButtonsGone'] = ![
+              ...d().querySelectorAll('button'),
+            ].some((b) => text(b).includes('按意见重新起草') || text(b).includes('填入审核问题'))
+            cyToggle?.click()
             // ⚠️ `until` 返回的是**布尔**（它只回答"等到了没有"），不是元素——
             //    第一版把它当元素用（`cyBox.value.includes(...)`）⇒ 探针当场抛
             //    `TypeError: Cannot read properties of undefined`，而**一次异常会把后面
@@ -4929,13 +4941,38 @@
             // ⚠️ 焦点要问**它所在的文档**（`d()` 是 iframe 的 document）——第一版问的是顶层
             //    `document.activeElement`，量出来永远是 false（焦点在 iframe 里）
             facts['crystal.redraftFocused'] = cyBox ? d().activeElement === cyBox : null
+            // 这句话要说清"这段是哪来的"，不然人不知道框里为什么有东西
+            // ⚠️ 等一拍再读：Svelte 5 属性/文本写进 DOM 是在微任务里冲洗的（`title` 那次踩过）
+            await wait(150)
+            const cyPrefillHint = d().querySelector('.revise-row .faint')
+            facts['crystal.revisePrefilledHint'] = cyPrefillHint ? text(cyPrefillHint) : null
             const cySubmit = [...d().querySelectorAll('.revise-row button')].find((b) =>
               text(b).includes('重新起草'),
             )
             facts['crystal.redraftSubmitEnabled'] = cySubmit ? !cySubmit.disabled : null
-            // 提交按钮**仍然在**、框**仍然在** ⇒ 说明点了只是填，没有自己跑起来
+            // 提交按钮**仍然在**、框**仍然在** ⇒ 说明开框只是填，没有自己跑起来
             // （真跑起来这一屏会切到"起草中"，框和按钮一起消失）
             facts['crystal.redraftStillEditing'] = !!cyBox && !!cySubmit
+            // ── ⑤ 人改过的字不许被覆盖：改完收起、再打开，还是我改的那句 ──
+            if (cyBox) {
+              cyBox.value = '我自己写的意见'
+              cyBox.dispatchEvent(new Event('input', { bubbles: true }))
+              cyToggle?.click() // 收起
+              await wait(150)
+              cyToggle?.click() // 再打开
+              await wait(200)
+              const cyAgain = d().querySelector('.revise-row textarea')
+              facts['crystal.reviseKeepsHumanEdit'] = cyAgain ? cyAgain.value : null
+              // 收拾干净：把框收起来、内容清掉，别影响后面几节
+              if (cyAgain) {
+                cyAgain.value = ''
+                cyAgain.dispatchEvent(new Event('input', { bubbles: true }))
+              }
+              cyToggle?.click()
+              await wait(150)
+            } else {
+              facts['crystal.reviseKeepsHumanEdit'] = null
+            }
             // 出口二：确认入库**没有**被判决灰掉（第 ① 条决定：审核不替代人）
             const cySave = [...d().querySelectorAll('button.primary')].find((b) =>
               text(b).includes('确认入库'),

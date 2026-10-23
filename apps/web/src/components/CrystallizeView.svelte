@@ -894,25 +894,23 @@
   }
 
   /**
-   * 把**审核问题清单**填进「按意见改一版」的意见框（分批第 12 批）。
+   * 上次**自动填**进去的那段话（分批第 12 批）。
    *
-   * 使用者原话：「审核不过后，是否可以将"审核问题清单"直接填入"按意见重新起草"的框中，
-   * **让用户点反馈**」。原来这个按钮做错了两件事：
-   *   ① `await reviseDraft()` —— 填完**立刻提交**，人连自己要发出去的话都没看见（更别说改）；
-   *   ② 只填了 `[严重度] 一句话`，**位置与原文都丢了**。
-   *
-   * 现在它只做"填"这一件事：打开意见框、把清单放进去、光标落在里面。**提交永远由人点**
-   * （「重新起草」那个按钮）——这也是这一屏"平台不替使用者决定"的一贯口径：真机一轮起草
-   * 要花钱，而"这段意见到底对不对"只有人知道（第 10 批刚把返工改成"基于上一版改"，
-   * 意见里没有位置，起草者只能猜着改）。
-   *
-   * 为什么不在这里自己拼字符串：拼法在 `lib/crystallize-feedback.ts`，那里有测试钉住形状
-   * （形状要与 daemon 那份一致——两份文本都会进同一个 feedback.md）。
+   * 用来判断"框里现在这段是不是我们填的"：是 ⇒ 可以随判决更新；不是（人改过）⇒ **一个字都不动**。
+   * 界面替人改过的字，比界面少填一点严重得多。
    */
-  async function fillFeedbackFromAudit(): Promise<void> {
+  let lastAutoFill = ''
+
+  /**
+   * 审核者的反馈整理成意见框里的默认内容（`fail` 才有意义，其它一律返回空串 ⇒ 不填）。
+   *
+   * 拼法在 `lib/crystallize-feedback.ts`（纯函数 + 单测）：**位置与原文都要有**——只有结论没有
+   * 位置的清单，起草者只能猜着改，而猜错的表现是"改完了问题还在"。
+   */
+  function feedbackFromReview(): string {
     const r = reviewInfo?.review
-    if (!r) return
-    reviseFeedback = buildFeedbackDraft(r.reasonCode, r.findings, {
+    if (!r || r.conclusion !== 'fail') return ''
+    return buildFeedbackDraft(r.reasonCode, r.findings, {
       intro: (code) => $t('crystallize.feedbackIntro', { code }),
       where: $t('crystallize.feedbackWhere'),
       quote: $t('crystallize.feedbackQuote'),
@@ -920,11 +918,33 @@
       emptyFindings: $t('crystallize.feedbackEmptyFindings'),
       outro: $t('crystallize.feedbackOutro'),
     })
-    reviseOpen = true
-    // 光标落在框里：让人一眼看到"要发出去的是这些"，而不是先找它在哪儿
+  }
+
+  /**
+   * 开/收「按意见改一版」的意见框。
+   *
+   * ★★ 开的时候**默认就把审核者的反馈填好**（分批第 12 批，使用者第二次纠正过的形状）。
+   *
+   * 这一块改过两版，两版都错在同一个地方——**多要了人一次点击**：
+   *   ① 最早：点了「按意见重新起草」就**直接提交**（人连要发出去的话都没看见，更不能改）；
+   *   ② 第一版修正：把这个按钮改成"只填不提交"（还改了名）——但人还是得先点它、
+   *      再点「按意见再改一版」才看得到框里的东西，而使用者的预期是一句话说完的：
+   *      「我期待意见框里面默认填充了审核者的反馈」。**打开框就该已经有内容**，
+   *      那就不需要一个专门用来"填"的按钮了（同一个动作两个入口，迟早两边不一样）。
+   *
+   * ⚠️ 人改过的字**一个字都不覆盖**：只有框里是空的、或者还是我们上次填的那段，才跟着判决更新。
+   */
+  async function toggleReviseBox(): Promise<void> {
+    reviseOpen = !reviseOpen
+    if (!reviseOpen) return
+    const filled = feedbackFromReview()
+    if (filled !== '' && (reviseFeedback.trim() === '' || reviseFeedback === lastAutoFill)) {
+      reviseFeedback = filled
+      lastAutoFill = filled
+    }
+    // 光标落在框里：人点开这个框就是要改意见（而不是只看看）
     await tick()
     feedbackBox?.focus()
-    showToast($t('crystallize.auditRedraftFilled'))
   }
 
   /**
@@ -1633,18 +1653,12 @@
                 >{$t('crystallize.auditRetry')}</button>
               {/if}
               {#if artifacts}
+                <!-- ★ 点它 ⇒ 意见框打开，里面**默认已经填好**审核者的反馈（见 `toggleReviseBox`）。 -->
                 <button
                   class="ghost small"
                   class:active={reviseOpen}
-                  onclick={() => (reviseOpen = !reviseOpen)}
+                  onclick={() => void toggleReviseBox()}
                 >{$t('crystallize.reviseTitle')}</button>
-              {/if}
-              {#if auditFailedStuck}
-                <button
-                  class="ghost small"
-                  title={$t('crystallize.auditRedraftHint')}
-                  onclick={() => void fillFeedbackFromAudit()}
-                >{$t('crystallize.auditRedraft')}</button>
               {/if}
             </span>
           </div>
@@ -1707,6 +1721,9 @@
                 placeholder={$t('crystallize.revisePlaceholder')}
               ></textarea>
               <div class="row-end">
+                {#if lastAutoFill !== '' && reviseFeedback === lastAutoFill}
+                  <span class="faint small">{$t('crystallize.revisePrefilledHint')}</span>
+                {/if}
                 <button
                   class="ghost small"
                   disabled={revising || reviseFeedback.trim() === ''}

@@ -118,13 +118,12 @@ export const crystallizeText = {
     zh: '内容已改 —— 这个结论是改之前的，要它算数得重新审一轮。',
     en: 'Content changed — this result is from before the change; re-run the audit to make it count.',
   },
-  // ★ 分批第 12 批改文案：这个按钮**不再直接提交**（原来点了立刻起一条新 run，人连自己
-  //   要发出去的话都没看见）。它现在只做一件事：把审核问题清单填进下面的意见框，由人改完再点。
-  //   文案必须说清"它只填不提交"，否则人会以为点了就开始了（原来正是那样）。
-  'crystallize.auditRedraft': { zh: '填入审核问题', en: 'Fill in the findings' },
-  'crystallize.auditRedraftHint': {
-    zh: '把审核者的问题清单填进下面的意见框（带位置与原文）——只填，不会直接开始起草；你可以改完再点「重新起草」。',
-    en: 'Fills the feedback box below with the reviewer’s findings (with locations and source text). It only fills — it does not start drafting; edit it, then click “Draft again”.',
+  // ★ 分批第 12 批：原来那个「按意见重新起草」按钮（点了**立刻提交**）**已撤掉** ——
+  //   现在点「按意见再改一版」开框时，框里**默认就填好**审核者的反馈（见
+  //   `CrystallizeView.svelte` 的 `toggleReviseBox`）。同一个动作不再有两个入口。
+  'crystallize.revisePrefilledHint': {
+    zh: '已按审核者的反馈填好（带位置与原文）—— 可以改，改完点「重新起草」。',
+    en: 'Prefilled from the reviewer’s findings (with locations and source text). Edit it, then click “Draft again”.',
   },
   // ★ 填进意见框的那段话（结构与 daemon 的 `draftReviewFeedback` 对齐，见
   //   `apps/web/src/lib/crystallize-feedback.ts` 顶部的说明）。
@@ -149,10 +148,6 @@ export const crystallizeText = {
   'crystallize.feedbackOutro': {
     zh: '改完把改过的文件写回 skill/ 目录（完整文件，不是补丁）；没改的文件不必重写。',
     en: 'Write the changed files back to the skill/ directory (complete files, not patch fragments); unchanged files need not be rewritten.',
-  },
-  'crystallize.auditRedraftFilled': {
-    zh: '审核问题已填进意见框 —— 改完点「重新起草」才会开始。',
-    en: 'Findings filled into the feedback box — nothing starts until you click “Draft again”.',
   },
   'crystallize.auditReworked': {
     zh: '已按上面的意见自动重新起草（第 {n} 版）',
