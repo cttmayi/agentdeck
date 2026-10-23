@@ -2078,3 +2078,75 @@ describe('§10.5：审核者真执行草稿脚本', () => {
     throw new Error('审核 run 的日志里没有"空闲上限"那句（上限就说不清了）')
   })
 })
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * 返工起的是**全新进程**，不是接上一版的会话（分批第 13 批）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者问过一句：「我点"重新起草"后，是重新启动一个 codex，还是 resume 一个 codex 来执行呢」。
+ * 查代码的答案是**全新起一个**：`startReviseRun` 生成新的 run id、调 `executor.submit` 时**不带**
+ * `resumeFromRunId` ⇒ 执行器 `#resolveResume` 直接返回「这不是重试，没有可恢复的上文」⇒
+ * run 日志里写的是「会话：全新开始」。
+ *
+ * 那么"基于上一版改"靠什么？靠**磁盘**：新小屋的 `skill/` 里就是上一版（第 10 批）、
+ * `material/feedback.md` 是那条意见、索引页写着"这一版是按意见改一版"。
+ * 也就是说**产出契约以文件为准，不依赖任何会话记忆**——这一点很重要：会话记忆不在磁盘上、
+ * 人也看不见，一旦"改一版"开始依赖它，返工的结果就有一半是**无法复查**的。
+ *
+ * ⚠️ 为什么这条必须量两件事（只量"没接会话"是空的）：codex 描述表里 `sessionState: 'stateful'`，
+ *    而起草 run **确实留下了** `sessionId`（假后端如实报 `fake-session-1`）⇒ 真相是
+ *    "接得上，但我们选择不接"。少量前一件，这条用例在"根本接不上"的实现上也会绿。
+ *
+ * 对照：**任务**那条链的返工（`createReworkRun`，D45）**会** resume（`resumeFromRunId: target.id`，
+ * 注释写的是"执行者上次干过这活，让它接着上下文改"）。两种返工在"接不接上文"上**有意不同**：
+ * 任务那条链要重做的是**同一件活**（上下文就是它自己干过的事），而沉淀这条链要改的是
+ * **一个目录里的文件**（上下文是文件本身）。
+ */
+describe('返工：全新起进程，不接上一版的会话', () => {
+  test('★ 按意见改一版 ⇒ 新 run 日志「全新开始」（上一版的会话还在库里，是我们选择不接）', async () => {
+    const sourceRunId = await runReviewed('审完的流程（量会话接不接）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '量会话' },
+    })
+    // ① 先量清"接得上"：上一版自己留下了会话 id（假后端与真 codex 一样如实上报）
+    const v1Run = await daemon.store.getRun(v1 as RunId)
+    assert.equal(
+      v1Run?.sessionId,
+      'fake-session-1',
+      '上一版必须留下 sessionId——不留的话，"没接会话"只是因为没得接，这条用例就测不出东西',
+    )
+
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '把第一步的命令说全' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const created = (await res.json()) as { draftRunId: string; revisedFrom: string }
+    assert.equal(created.revisedFrom, v1, '新 run 要记着"它是从哪一版改出来的"')
+
+    // ② 等那句"会话"日志落盘（它在 run 派发时就写，但派发本身要等前台把那句话说完）
+    const want = '会话：全新开始——这不是重试，没有可恢复的上文'
+    let logged = ''
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
+      const messages = await daemon.store.listRunMessages(created.draftRunId as RunId, -1)
+      logged = messages.map((m) => m.content).join('\n')
+      if (logged.includes('会话：')) break
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    assert.ok(logged.includes(want), `run 日志里该说清"全新开始"，实际：\n${logged.slice(0, 400)}`)
+    assert.ok(
+      !/恢复\s*fake-session-1/.test(logged),
+      '不许接上一版的会话（要接的话，返工的结果就有一半在会话记忆里，人复查不到）',
+    )
+
+    // ③ "基于上一版改"靠的是目录里的文件（第 10 批），不是会话：新小屋开工时产出目录里就是上一版。
+    //    这里只量"两个版本的会话 id 不同 ⇒ 确实是两个进程"，文件内容那条 §10.8 已经量过。
+    const v2Run = await daemon.store.getRun(created.draftRunId as RunId)
+    assert.equal(v2Run?.revisedFrom, v1, 'revisedFrom 是这条链的"上一版是谁"')
+    assert.notEqual(v2Run?.id, v1Run?.id, '两个版本必须是两条 run（各自的进程、各自的工作目录）')
+  })
+})

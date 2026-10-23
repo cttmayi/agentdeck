@@ -2137,3 +2137,50 @@ completed 的 review run 过 §4.3 的门槛（否则「开始沉淀」按不动
 
 注意第 3 条：那条判决**自己没给位置**，清单就**如实说"没给位置"**，不编一个（`noEvidence`）。
 另外「位置」是 `skill/` 开头的**草稿小屋内路径**——起草者要照着改，路径必须是它自己能打开的。
+
+### 10.29 返工起的是**全新 codex**，不是接上一版的会话（2026-10-21，分批第 13 批）
+
+使用者问：「我点"重新起草"后，是重新启动一个 codex，还是 resume 一个 codex 来执行呢」。
+查代码量出来的答案：**全新起一个**。
+
+链路（`apps/daemon/src/server.ts` 的 `startReviseRun`）：
+
+1. 新 run id（`ulid()`）+ 新工作目录（`draftRoot(workRoot, newRunId)`）；
+2. `executor.submit({ runId: newRunId, kind: 'execute', … , revisedFrom: draftRunId })`
+   ——**不带** `resumeFromRunId`；
+3. `executor.ts` 的 `#resolveResume`：没有 `resumeFromRunId` ⇒ 直接返回
+   `{ sessionId: null, reason: '这不是重试，没有可恢复的上文' }`；
+4. run 日志第一段就写着：`会话：全新开始——这不是重试，没有可恢复的上文`。
+
+**那"基于上一版改"靠什么？靠磁盘，不靠会话记忆**（这也是第 10 批做的事）：
+
+| 起草者进新小屋时看到的东西 | 来自哪 |
+| --- | --- |
+| 产出目录 `skill/` 里**已经是上一版**（含 SKILL.md 与支持文件） | 上一版小屋拷过来的（第 10 批） |
+| `material/feedback.md` = 那条意见 | 人点的 / 自动返工给的（第 10 批把形状对齐了） |
+| `material/00-README.md` 末尾写"这一版是按意见改一版" | 同一次写入 |
+| 同一份素材 | 上一版 `material/` 拷过来（跳过 `previous-draft`/`feedback.md`） |
+
+为什么这件事**值得钉住**（而不是"碰巧如此"）：会话记忆不在磁盘上、人也看不见。一旦"改一版"开始
+依赖它，返工的结果就有一半**无法复查**——你能看到的只有最终文件，看不到"它为什么这么改"。
+把连续性放在目录里，任何一次返工都能拿两版目录直接对比（`/api/crystallize/diff` 就是这么量的）。
+
+#### 判据（`crystallize-e2e.test.ts`）
+
+★ 必须量**两件事**，只量"没接会话"是空的：codex 描述表里 `sessionState: 'stateful'`，
+而起草 run **确实留下了** `sessionId`（假后端如实报 `fake-session-1`）⇒ 真相是
+**"接得上，但我们选择不接"**。所以用例先断言上一版有 `sessionId`，再断言新 run 的日志是
+「全新开始」且**不出现**「恢复 fake-session-1」。
+**并且真跑了一次红**：临时给 `startReviseRun` 加上 `resumeFromRunId: draftRunId` ⇒ 用例当场红
+（日志变成「恢复 fake-session-1」）；撤掉 ⇒ 绿。判据会咬。
+
+#### 一处**有意**的不一致：任务那条链的返工是 resume
+
+`createReworkRun`（D45，跑在**任务**链上）**会**带 `resumeFromRunId: target.id`，注释写的是
+"执行者上次干过这活，让它接着上下文改"。两条链在"接不接上文"上不同，是有理由的：
+
+* **任务**返工要重做的是**同一件活**，上下文就是它自己刚干过的事（会话记忆是主要依据）；
+* **沉淀**返工要改的是**一个目录里的文件**，上下文就是文件本身（会话记忆反而不可复查）。
+
+⚠️ 所以「返工」这个词在本仓库指两件不同的事：**任务返工**（resume、链深 +1）与
+**沉淀返工**（全新进程、靠目录）。看到"返工"先去确认是哪一条链。
