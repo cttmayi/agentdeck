@@ -273,6 +273,10 @@ export const crystallizeText = {
   // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──
   'crystallize.tabDraft': { zh: '草稿', en: 'Draft' },
   'crystallize.tabEvidence': { zh: '依据', en: 'Evidence' },
+  // ★ 分批第 19 批：「过程」那一格原来把**审核问题清单 + 审核日志 + 起草 run** 竖着摞在一起
+  //   （使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"）⇒ 劈成两个子 tab。
+  'crystallize.tabProcessDraft': { zh: '草稿过程', en: 'Drafting' },
+  'crystallize.tabProcessAudit': { zh: '审核过程', en: 'Audit' },
   'crystallize.tabProcess': { zh: '过程', en: 'Process' },
   // 起草中那一屏只有两个 tab：产出（run 的实时输出）/ 依据（目标 + 素材）
   'crystallize.tabOutput': { zh: '产出', en: 'Output' },

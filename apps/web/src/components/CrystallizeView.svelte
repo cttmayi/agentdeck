@@ -223,6 +223,22 @@
   } | null = null
   /** 主区窗格的分段：内容 / 差异（同一位置切换，见 markup 里的三条规矩）。 */
   let reviewTab: 'content' | 'diff' = 'content'
+  /**
+   * ★ 分批第 19 批：「过程」那一格里的**子 tab**。
+   *
+   * 使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"——原来那三块（审核问题清单、
+   * 审核日志、起草 run）竖着摞在同一个 `process-pane` 里：想看"起草者当时怎么写的"得先
+   * 划过一整份审核日志，反过来也一样。
+   *
+   * 默认停哪一格：**有审核（在跑/跑过/有判决）⇒ 审核过程，否则草稿过程**。
+   * 为什么不是"永远停在草稿过程"：点「开始审核」会自动切到「过程」那一格——如果子 tab
+   * 还停在草稿过程，人落回起草日志、看不到任何审核输出，正好回到第 ③ 批那条
+   * "审核的过程看不到，感觉一直没结束"的老毛病。反过来，从来没审过还停在审核过程，
+   * 那一格是空的（一句"还没审过"），也不对。
+   */
+  let processTab: 'draft' | 'audit' = 'draft'
+  /** 使用者自己点过子 tab 没有——点过就不再被"读回结论"时的默认规则改掉他的选择。 */
+  let processTabTouched = false
   /** 「按意见改一版」的输入框是否展开（不常驻，见结论条）。 */
   let reviseOpen = false
   /**
@@ -831,6 +847,11 @@
       reviewInfo = await api<DraftReviewInfo>(
         `/api/crystallize/review?draftRunId=${encodeURIComponent(draftRunId)}`,
       )
+      // 默认子 tab：有审核（在跑 / 跑过 / 有判决）就停在审核过程。手动点过就不动它。
+      if (!processTabTouched) {
+        processTab =
+          reviewInfo.review !== null || reviewInfo.reviewRunId !== null ? 'audit' : 'draft'
+      }
     } catch {
       // 读不到就如实留空（面板会显示"还没审过"）——**不要**把失败画成"通过"
       reviewInfo = null
@@ -881,6 +902,10 @@
     // ★ 2026-10-21（第 3 批）：日志住在「过程」tab 里，所以**点开始审核就切过去**——
     //   否则人会停在"草稿"上，看不到任何输出，正好回到第 ① 条那个毛病（"感觉一直没结束"）。
     reviewSection = 'process'
+    // ★ 第 19 批：子 tab 也必须跟到**审核过程**——只切外层的话人落回"草稿过程"那一格，
+    //   看到的还是起草日志、审核输出一个字都没有（见 `processTab` 的注释）。
+    processTab = 'audit'
+    processTabTouched = true
     // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始
     auditLiveStatus = null
     error = ''
@@ -1609,14 +1634,32 @@
                    与"tab 里的问题清单"会同时存在，人分不清哪个是真的。
               -->
               {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
-                <button class="ghost small" onclick={() => (reviewSection = 'process')}>
+                <!-- ⚠️ 分批第 19 批：这两个出口原来只切外层 tab（那时过程里只有一格）；
+                     劈成两个子 tab 之后必须**一起**把子 tab 指到审核过程，否则点了「看 N 条问题」
+                     会落到"草稿过程"、什么问题都看不到——一个出口指向别处，比没有出口更坏。 -->
+                <button
+                  class="ghost small"
+                  onclick={() => {
+                    reviewSection = 'process'
+                    processTab = 'audit'
+                    processTabTouched = true
+                  }}
+                >
                   {$t('crystallize.auditShowDetail', {
                     n: String(reviewInfo.review.findings.length),
                   })}
                 </button>
               {/if}
               {#if reviewInfo?.review}
-                <button type="button" class="ghost small" onclick={() => (reviewSection = 'process')}>
+                <button
+                  type="button"
+                  class="ghost small"
+                  onclick={() => {
+                    reviewSection = 'process'
+                    processTab = 'audit'
+                    processTabTouched = true
+                  }}
+                >
                   {$t('crystallize.auditShowLog')}
                 </button>
               {/if}
@@ -1969,6 +2012,39 @@
               跑起来的时候界面会**自动切到这里**（见 `startAudit()`）——这一 tab 就是第 ① 条
               "审核的过程看不到"的落点。
             -->
+            <!--
+              ★ 分批第 19 批：格子里的两个子 tab（使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"）。
+
+              内容怎么分（按"谁产生的"分，不按时间顺序堆）：
+                · 审核过程 = 审核问题清单（有判决时）+ 审核日志（含实时输出）；
+                · 草稿过程 = 起草 run（最后结果 / 完整日志 两态）。
+              ⚠️ 顺序上"草稿在前、审核在后"（事情就是按这个顺序发生的），但默认可能停在后者
+                 （有审核时）——见 `processTab` 的注释。
+            -->
+            <div class="pane-tabs process-subtabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={processTab === 'draft'}
+                class:tabs-active={processTab === 'draft'}
+                onclick={() => {
+                  processTab = 'draft'
+                  processTabTouched = true
+                }}
+              >{$t('crystallize.tabProcessDraft')}</button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={processTab === 'audit'}
+                class:tabs-active={processTab === 'audit'}
+                onclick={() => {
+                  processTab = 'audit'
+                  processTabTouched = true
+                }}
+              >{$t('crystallize.tabProcessAudit')}</button>
+            </div>
+
+            {#if processTab === 'audit'}
             <div class="process-pane">
               {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
                 <p class="muted">
@@ -2023,11 +2099,15 @@
               {:else if reviewInfo !== null}
                 <p class="faint small">{$t('crystallize.processNoAuditYet')}</p>
               {/if}
-
+            </div>
+            {:else}
+            <!-- ── 草稿过程：起草那条 run（默认"最后结果"，一点换"完整日志"） ── -->
+            <div class="process-pane">
               {#if draftRunId !== ''}
                 {@render draftRunPane()}
               {/if}
             </div>
+            {/if}
           {/if}
         {/if}
       {/if}
@@ -2580,6 +2660,19 @@
    * 换过去时页面不该跳高跳矮（这一页的纪律是"页面不整页滚"，`crystal.pageFitsViewport` 钉着）。
    * 内容多的时候**在块内滚**。
    */
+  /*
+   * 「过程」那一格的子 tab 行（分批第 19 批）。
+   *
+   * ⚠️ `.pane-tabs` 自己带 `flex: 0 0 auto` 与 `padding: 2px`，那是给文件窗格里的
+   *    内容/差异切换用的（那里外面是固定高度的 `file-body`）；这里上面贴着**页面级**的
+   *    `.review-tabs`、下面贴着 `.process-pane`，两行 tab 直接相邻时容易被当成同一个
+   *    tablist（外层选"看哪一格"、内层选"看这格里的哪一半"，是两层不同的选择）
+   *    ⇒ 给子 tab 行加一点上间距，把两层分开。
+   */
+  .process-subtabs {
+    margin-top: var(--sp-2);
+    padding-bottom: 0;
+  }
   .process-pane {
     display: flex;
     flex-direction: column;

@@ -4780,6 +4780,54 @@
             const cyProcOk = await until(() => !!d().querySelector('.process-pane'), 60)
             facts['crystal.processOpens'] = cyProcOk
 
+            // ══════════════════════════════════════════════════════════════
+            // ★ 分批第 19 批：「过程」劈成两个子 tab（草稿过程 / 审核过程）
+            // ══════════════════════════════════════════════════════════════
+            //
+            // 这一屏的夹具是**没审过**的那条草稿 ⇒ 默认该停在「草稿过程」（停审核过程的话
+            // 那一格只有一句"还没审过"，等于把唯一的实时信息藏起来）。
+            // 量四件：① 两个子 tab 都在；② 默认停在草稿过程；③ 草稿过程里有「起草 run」；
+            //        ④ ★ 切到审核过程之后，「起草 run」那一块**不在页面上**——这条才是"真劈开了"，
+            //           只量"两个 tab 存在"的话，把两块摞在同一个 pane 里照样过。
+            const cySubTabs = [...d().querySelectorAll('.process-subtabs button')].map((b) => text(b))
+            facts['crystal.processSubTabs'] = cySubTabs
+            facts['crystal.processDefaultTab'] = (() => {
+              const active = [...d().querySelectorAll('.process-subtabs button')].find((b) =>
+                b.classList.contains('tabs-active'),
+              )
+              return active ? text(active) : null
+            })()
+            const cySubDraft = [...d().querySelectorAll('.process-subtabs button')].find(
+              (b) => text(b) === '草稿过程',
+            )
+            const cySubAudit = [...d().querySelectorAll('.process-subtabs button')].find(
+              (b) => text(b) === '审核过程',
+            )
+            facts['crystal.processDraftHasRunBlock'] = !!(
+              [...d().querySelectorAll('.process-pane .drawer-section')].find((el) =>
+                (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
+              )
+            )
+            if (cySubAudit) {
+              click(cySubAudit)
+              await until(() => !!d().querySelector('.process-pane'), 40)
+              await wait(150)
+              facts['crystal.processAuditPaneHasNoDraftBlock'] = ![
+                ...d().querySelectorAll('.process-pane .drawer-section'),
+              ].some((el) => (el.querySelector('h3')?.textContent ?? '').includes('起草 run'))
+              // 上面「起草 run」两态那一段量的是**草稿过程**那一格 ⇒ 切回去，别让它量到空 pane
+              if (cySubDraft) {
+                click(cySubDraft)
+                await until(
+                  () =>
+                    !![...d().querySelectorAll('.process-pane .drawer-section')].find((el) =>
+                      (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
+                    ),
+                  40,
+                )
+              }
+            }
+
             // ★★ 起草 run：默认**最后结果**，一点换成**完整日志**（使用者第三条：
             //    "应该类似任务中的最后结果和完整日志一样的切换方式"）。
             //    这一块随第 3 批搬进「过程」tab，断言不变、只是要先切过来。
@@ -5099,6 +5147,16 @@
               facts['crystal.auditAutoSwitchedToProcess'] = await untilNet(
                 () => (text(d().querySelector('.review-tabs > button[aria-selected="true"]')) ?? '').startsWith('过程'),
               )
+              // ★ 分批第 19 批：外层切到「过程」还不够——「过程」里有两个子 tab，必须落在
+              //   **审核过程**。只切外层的话人会看到"草稿过程"那一格（起草日志），审核输出
+              //   一个字都没有 ⇒ 正好回到第 ③ 批那条"审核的过程看不到，感觉一直没结束"的老毛病。
+              await untilNet(() => !!d().querySelector('.process-subtabs button'))
+              facts['crystal.auditLiveSubTab'] = (() => {
+                const active = [...d().querySelectorAll('.process-subtabs button')].find((b) =>
+                  b.classList.contains('tabs-active'),
+                )
+                return active ? text(active) : null
+              })()
               // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
               await untilNet(() => !!d().querySelector('.process-pane .log-box'))
               let block = d().querySelector('.process-pane')

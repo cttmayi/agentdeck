@@ -3211,6 +3211,34 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.processSubTabs',
+    label:
+      '★★★ 「过程」那一格是**两个子 tab**：「草稿过程」/「审核过程」（使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"——原来三块竖着摞在同一个 pane 里）',
+    ok: (v) => Array.isArray(v) && v[0] === '草稿过程' && v[1] === '审核过程',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.processDefaultTab',
+    label:
+      '★★ 没审过的草稿默认停在**「草稿过程」**（停在审核过程的话那一格只有一句"还没审过"，唯一的实时信息被藏起来）',
+    ok: (v) => v === '草稿过程',
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.processDraftHasRunBlock',
+    label: '★ 「草稿过程」里有「起草 run」那一块（它才是起草过程的内容）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.processAuditPaneHasNoDraftBlock',
+    label:
+      '★★★ ★ 切到「审核过程」之后，页面上**没有**「起草 run」那一块——这条才是"真劈开了"：只量"两个 tab 存在"的话，把三块摞在同一个 pane 里照样过',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftSectionFound',
     label:
       '夹具：切到「过程」tab 后找得到「起草 run」那一块（下面四条量的是它的两态；第 3 批把它从主区下方搬进了这里）',
@@ -3256,6 +3284,14 @@ const CHECKS = [
     label:
       '夹具：审阅屏上有「开始审核」——下面几条要**点它**，让 daemon 真的 spawn 一条审核 run（假 `agent-cli`，不花额度）',
     ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.auditLiveSubTab',
+    label:
+      '★★★ 点「开始审核」之后**子 tab 也切到「审核过程」**——只切外层的话人落回"草稿过程"，审核输出一个字都看不到（第 ③ 批那条"感觉一直没结束"就是这样复发的）',
+    ok: (v) => v === '审核过程',
+    show: (v, f) => JSON.stringify(v),
   },
   {
     view: '沉淀',
