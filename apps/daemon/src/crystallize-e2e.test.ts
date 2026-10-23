@@ -1370,6 +1370,152 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
  *      所以直接量那个脚本，而不是相信"应该没问题"）。
  */
 /**
+ * §10.7 自动再审：**改版来的新草稿跑完 ⇒ 自动接一轮审核**（2026-10-21 分批第 9 批）。
+ *
+ * 起因是使用者的一句话：「为什么是按意见重新起草呢，而不是基于意见修改」——顺着查"返工"这条链
+ * 时发现：**自动返工只做到"产一版新的"就停了**，新版停在待审核等人点一次「开始审核」。
+ * 也就是"自动返工"是半截链子，与使用者心里的"自动改进直到过审"差着一整轮审核。
+ *
+ * 这一条钉的是**整条链跑到头**：初版不自动审 → 人点一次 → fail ⇒ 返工 ⇒ 新版**自动**审
+ * ⇒ fail ⇒ 返工 ⇒ 新版自动审 ⇒ 额度用尽（escalated）才停，且**不许多产一版**。
+ * 终止性靠返工额度（`SKILL_DRAFT_REWORK_LIMIT` = 2），不是靠这个钩子——所以这条用例
+ * 同时是"这条链不会无限烧钱"的证明。
+ */
+describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核', () => {
+  async function huts(): Promise<string[]> {
+    const { readdir } = await import('node:fs/promises')
+    return (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
+  }
+
+  /**
+   * ⚠️ 小屋是**整份文件共用**一个 `workRoot`：第一版我用"小屋总数"数版本，单跑这条用例时是 2、3，
+   *    全量跑时数出来 **37**（别的用例留下的）⇒ 断言 `37 !== 2`。所以只数**这条链自己新开的**：
+   *    开链前先拍一张快照，之后只认快照里没有的。ULID 单调 ⇒ 字典序 = 时间序，用它定第 2/3 版。
+   */
+  const newHuts = (base: readonly string[], all: readonly string[]): string[] =>
+    all.filter((h) => !base.includes(h)).sort()
+
+  /** 读一条草稿的审核现场（判决没落库时 `review` 是 null）。 */
+  async function draftReview(draftRunId: string): Promise<{
+    review: { status?: string; conclusion?: string } | null
+    reviewRunId: string | null
+    versions: number
+  }> {
+    const res = await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
+    const text = await res.text()
+    assert.equal(res.status, 200, text)
+    return JSON.parse(text) as never
+  }
+
+  /**
+   * 等一条草稿的判决走到**某个终态**（返回它）。
+   *
+   * ⚠️ 第一版是"判决行一出现就返回"，全量跑时读到的是**半成品**：那条判决的 `status` 是
+   *    `validated`，而 `conclusion` 已经是 `fail`——判决行先落、返工决定后落，这是
+   *    `decideReview` 内部的中间态。表现是断言"该返工"却拿到 `validated`
+   *    （单跑这条用例时窗口没撞上，全量跑才撞上——同一个"全量才红"的坑）。
+   *    所以等**预期的那个终态**，不等"有判决了"。
+   */
+  async function waitSettled(
+    draftRunId: string,
+    wanted: readonly string[],
+  ): Promise<{ status?: string; conclusion?: string }> {
+    for (let i = 0; i < 400; i += 1) {
+      const info = await draftReview(draftRunId)
+      const st = info.review?.status
+      if (st !== undefined && wanted.includes(st)) return info.review as { status?: string }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    throw new Error(`草稿 ${draftRunId.slice(-6)} 的判决没在限时内走到 ${wanted.join('/')}`)
+  }
+
+  test('★★ 整条链跑到头：初版等人点，之后每一版都自动接着审，额度用尽才停', async () => {
+    // 这份判决照合规形状写（理由码与严重度都是平台枚举）——不合规的判决不会返工，
+    // 那条坑 §10.5 已经记过（第一版随手写的 reasonCode/severity 让整条链一次都没触发）。
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'fail',
+      reasonCode: 'style_violation',
+      confidence: 0.8,
+      findings: [
+        {
+          severity: 'high',
+          summary: '正文里没有 `## When to Use` 一节',
+          evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 自动再审流程' }],
+          detail: {},
+        },
+      ],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      // ★ 快照必须在**起草第 1 版之前**拍：第一版写的是"起草之后"拍，
+      //   于是 v1 自己在 base 里 ⇒ "这条链新开的"只数出 v2/v3 两间 ⇒ 后面等第 3 版永远不等不到
+      //   （量出来的现象是 `2 !== 3`，而链本身是对的、三版的 revisedFrom 一条不缺）。
+      const base = await huts()
+      const sourceRunId = await runReviewed('审完的流程（自动再审链）')
+      const v1 = await draftAndWait({
+        runId: sourceRunId,
+        target: { kind: 'new', purpose: '自动再审流程' },
+      })
+
+      // ① **初版不自动审**：第一次审核是"要不要花这笔钱"的决定，该由人做
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const first = await draftReview(v1)
+      assert.equal(first.reviewRunId, null, '初版跑完不许自己起审核（那笔钱要人决定）')
+      assert.equal(first.versions, 1)
+
+      // ② 人点一次「开始审核」⇒ fail ⇒ 返工 ⇒ 第 2 版
+      const started = await fetch(`${daemon.url}/api/crystallize/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v1 }),
+      })
+      assert.equal(started.status, 202, await started.text())
+      const verdict1 = await waitSettled(v1, ['rework_requested'])
+      assert.equal(verdict1.status, 'rework_requested', '有额度 ⇒ 返工派得出去')
+
+      let mine = newHuts(base, await huts())
+      for (let i = 0; i < 400 && mine.length < 2; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+        mine = newHuts(base, await huts())
+      }
+      // ⚠️ 只断言"至少 2"：这条链在整份文件里跑得很快，等到 `>= 2` 时第 3 版可能也开出来了
+      //    （第一版写的是 `assert.equal(mine.length, 2)` ⇒ 全量跑时拿到 3 而红——又一个
+      //    "单跑绿、全量红"的时序断言）。版本数最终会由 ⑤ 那一步按额度钉住。
+      assert.ok(mine.length >= 2, `第 2 版应该被开出来（实际新开 ${mine.length} 间小屋）`)
+      const v2 = mine.map((h) => h.replace('skill-draft-', '')).find((id) => id !== v1)!
+
+      // ③ ★★ 第 2 版**没有人点过审核**，它必须自己接上——这一条就是这一批的全部意义
+      const second = await waitSettled(v2, ['rework_requested'])
+      assert.equal(
+        second.conclusion,
+        'fail',
+        '第 2 版的判决来自"自动接上的那一轮审核"（没人点过任何按钮）',
+      )
+      assert.equal(second.status, 'rework_requested', '还有额度（已用 1 / 上限 2）⇒ 再返工一版')
+
+      // ④ 第 3 版同样自动审；此时额度用尽 ⇒ escalated ⇒ 链停在这里
+      for (let i = 0; i < 400 && newHuts(base, await huts()).length < 3; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+      const mine3 = newHuts(base, await huts())
+      assert.equal(mine3.length, 3, '第 3 版应该被开出来（额度上限 2 次返工）')
+      const v3 = mine3.map((h) => h.replace('skill-draft-', '')).find((id) => id !== v1 && id !== v2)!
+      const third = await waitSettled(v3, ['escalated'])
+      assert.equal(third.status, 'escalated', '额度用尽 ⇒ 交给人（不再返工）')
+
+      // ⑤ 停下来之后**不许再产第 4 版**（这条链不会自己烧下去）
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      assert.equal(newHuts(base, await huts()).length, 3, '额度用尽之后不许再自动开新版')
+      assert.equal((await draftReview(v3)).versions, 3, '版本数停在 3')
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+})
+
+/**
  * §10.6 人改草稿（2026-10-21 分批第 8 批）。
  *
  * 使用者原话：「缺少一个可以改的地方」。编辑器一直都在（草稿 tab 每个文本文件都能改），

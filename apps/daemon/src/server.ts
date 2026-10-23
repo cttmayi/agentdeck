@@ -2079,6 +2079,36 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
      */
     materialRefs: { taskPath: string; resultPath: string } | null
   }): Promise<{ runId: RunId | null; note: string }> {
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 9 批：**改版来的新草稿跑完 ⇒ 自动接一轮审核**
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 起因是使用者的一句话：「为什么是按意见重新起草呢，而不是基于意见修改」，顺着查
+    // "返工"这条链时发现的：**自动返工只做到"产一版新的"就停了**——新版停在"待审核"，
+    // 等使用者自己点一次「开始审核」。也就是说"自动返工"是**半截链子**，而它与使用者
+    // 心里的"自动改进直到过审"差着一整轮（真机上一轮审核 ≈ $1.32，一次都没接上就白等）。
+    //
+    // 判据只有一条：**这一版是改版来的**（`revisedFrom` 有值 ⇒ 它存在的理由就是"修掉上一条
+    // 审核意见"）。第一版草稿**不**自动审——第一次审核是"要不要花这笔钱"的决定，该由人做
+    // （他可能想先自己看一遍）。进了这条环之后每一版都该被审，于是链条能自己跑到头：
+    //   fail + 有额度 ⇒ 返工 ⇒ 新版 ⇒ 自动审 ⇒ … ⇒ 过审，或额度用尽（`escalated`）才停。
+    // 终止性靠的是**返工额度**（`SKILL_DRAFT_REWORK_LIMIT`，见 executor），不是这条钩子。
+    //
+    // ⚠️ 放在这个函数的最前面（不是另开一个回调）：两个入口都是"跑完之后要不要接着审"，
+    //    拆成两处的话，将来任何一处改判据都会让另一处静默地不生效。
+    if (input.executeRun.subject.type === 'skill-draft' && input.executeRun.revisedFrom !== undefined) {
+      const started = await startDraftAudit(input.executeRun, { completed: true })
+      if (!started.ok) {
+        // 起不来就如实说（这个 note 会进 run 日志）——静默返回 null 会让"没接上审核"
+        // 变成日志里一句"没有串接审核"，看不出是"这一版不该审"还是"审不起来"。
+        return { runId: null, note: `这一版是按意见改出来的，但审核没起来：${started.error}（${started.code}）` }
+      }
+      return {
+        runId: started.reviewRunId as RunId,
+        note: '这一版是按意见改出来的 ⇒ 自动接了一轮审核（分批第 9 批：原来停在"产一版新的"等人点）',
+      }
+    }
+
     const agents = await store.listAgents(workspaceId)
     const executor = agents.find((a) => (a.id as string) === input.executorAgentId)
     if (!executor) {
@@ -2263,6 +2293,173 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const probe2 = await backend.probe()
 
   const workspaceId = await bootstrap(store, info)
+
+  // ══════════════════════════════════════════════════════════════════
+  // 「起一轮审核」的唯一实现（分批第 9 批抽出来）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ 必须放在**这一层**（与 `autoChainReview` 同层），不能留在请求处理函数里：
+  //    自动再审那个入口在 `autoChainReview` 里，它看不见更深那一层的声明——第一版我把它
+  //    写在原来路由的位置（处理函数内），tsc 当场报 `Cannot find name 'startDraftAudit'`。
+  //    内层能看见外层，反之不行。
+
+  /**
+   * 起草审核的第一句话（分批第 9 批从路由里抽出来）。
+   *
+   * 抽出来的原因很具体：**起一轮审核**这件事现在有两个入口——使用者点「开始审核」（HTTP 路由）
+   * 与"改版来的新草稿跑完"（`autoChainReview` 里的自动再审）。两处各写一份提示词，
+   * 迟早分叉，而分叉的表现是"自动审的那轮没有说'真的跑一遍脚本'"这类**看不见的降级**。
+   */
+  function draftAuditPrompt(allowScriptRun: boolean): string {
+    return [
+      `审一条刚起草出来的 skill。草稿在 \`skill/\`（就在本工作目录里），它的依据是 \`material/\`。`,
+      '',
+      '【怎么做】',
+      '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
+      '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
+      '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
+      // ★ §10.5 第 ③ 条：审核者可以**真的跑一遍**草稿里的脚本（这是这一整条链最有价值的
+      //   检查——"脚本能不能执行"看是看不出来的）。它跑得起来的地基有两层，都已存在：
+      //   ① claude 跑在 `--permission-mode bypassPermissions`（runtime 描述表的 baseArgs）；
+      //   ② D76 的运行期钩子只拦**越界**（`..` / `~` / 工作目录外的绝对路径），
+      //      小屋内部相对路径的 `bash skill/scripts/x.sh` 是允许的。
+      //   ⚠️ 关掉开关时要说"**不要执行**"，不能只是不写这一段 —— 权限还在，它可能照跑；
+      //      而如果它没跑却写下"已执行通过"，那份判决就是假证据。
+      ...(allowScriptRun
+        ? [
+            '4. **把 `skill/scripts/` 里的脚本真的跑一遍**（你可以执行命令，草稿就在当前工作目录里）：',
+            '   先用相对路径跑（例如 `bash skill/scripts/xxx.sh`），需要参数就给临时文件；',
+            '   **只在这个工作目录里活动**（不要 `cd ..`、不要碰家目录、不要写目录外的绝对路径）。',
+            '   结果如实写进判决的 `evidence`：命令、退出码、真实输出。跑不起来就说跑不起来，',
+            '   **不要猜它能跑**——"脚本能不能执行"正是这一步最有价值的结论。',
+          ]
+        : [
+            '4. **不要执行脚本**（这个工作区关掉了"审核者真执行草稿脚本"）：只做静态检查，',
+            '   并在判决里如实写明"脚本未被执行"——**不许**写"已执行通过"这类没发生过的结论。',
+          ]),
+      '',
+      '【产出】',
+      // 判决格式**不在这里重复一遍**：围栏标记与键名由平台放在审核那一路的第一句话里
+      // （`VERDICT_FENCE_BEGIN` 是唯一出处）。这里重抄一份的话，两边迟早会分叉，
+      // 而分叉的表现是"判决块解析不了 ⇒ 记成 needs_human"，看不出是提示词不一致。
+      '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
+      '`reasonCode` 用一条简短的理由码（比如 `missing_when_to_use`、`script_broken`、`no_evidence`）；',
+      '`evidence` 里写**具体位置**（哪一节、哪个文件）与为什么不合格。',
+      '⚠️ 判决块缺了或 JSON 写坏，平台只会记一条"判决不合规"（`needs_human` + `internal_error`）',
+      '——那个状态看起来像"审核没做"，看不出是格式问题，所以宁可多花一步把格式写对。',
+      '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
+    ].join('\n')
+  }
+
+  /** 起一轮审核的结果（路由与自动再审共用；用联合而不是抛异常：两种入口要的错误处置不同）。 */
+  type DraftAuditStart =
+    | { ok: true; reviewRunId: string; reviewerAgentId: string }
+    | { ok: false; status: number; error: string; code: string }
+
+  /**
+   * 给一条**跑完的草稿**起一轮审核（内置审核者 + 钉下内容指纹）。
+   *
+   * 这是"开始审核"这件事的唯一实现，两个入口都走它：
+   *   · `POST /api/crystallize/review`（人点的）；
+   *   · `autoChainReview` —— 这条草稿是**改版来的**（`revisedFrom` 有值）且刚跑完
+   *     （分批第 9 批：使用者问「为什么是按意见重新起草而不是基于意见修改」时顺手发现
+   *     "自动返工"原来只做到"产一版新的"就停了，新版停在待审核等人点一次 —— 半截链子）。
+   *
+   * ⚠️ **第一版草稿不自动审**：第一次审核是"要不要花这笔钱（真机一轮 ≈ $1.32）"的决定，
+   *    该由人做（他可能想先自己看一遍草稿）。进了审核/返工这条环之后，每一版新草稿都是
+   *    "为了修掉上一条意见"才存在的，自动接着审才是这条链该有的样子。
+   */
+  async function startDraftAudit(
+    draft: Run | null | undefined,
+    /**
+     * `completed: true` = **调用方刚确认它跑完了**，而 run 记录还没落库。
+     *
+     * ⚠️ 这个开关是量出来的，不是想出来的：自动再审这条钩子挂在执行器的"跑完之后要不要接着审"
+     * 那个回调上，而那个回调发生在 `#finish(runId, 'completed', …)` **之前**（执行器的既定顺序：
+     * 先串接、后收口）。于是同一个 run，执行器手里是"completed"，而 store 里还是 `running`——
+     * 第一版没有这个开关，链上第 2 版永远起不来审核，日志里只有一句
+     * 「起草还没跑完，没有可审的产出」（409 draft_not_completed），
+     * 而那条草稿**明明已经跑完了**（e2e §10.7 把它钉出来了）。
+     *
+     * HTTP 那条路**不带**这个开关：使用者点「开始审核」时，跑没跑完只有 store 说了算。
+     */
+    opts?: { completed?: boolean },
+  ): Promise<DraftAuditStart> {
+    if (!draft) {
+      return { ok: false, status: 404, error: '起草 run 不存在', code: 'draft_not_found' }
+    }
+    // 只有起草 run 才审得动：传一条别的 run 进来会拿它的工作目录去读 `skill/`，
+    // 结果是"审核了一条不存在的草稿"，而错误信息会指向"文件读不到"。
+    if (draft.subject.type !== 'skill-draft') {
+      return {
+        ok: false,
+        status: 400,
+        error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可审的草稿`,
+        code: 'not_a_draft',
+      }
+    }
+    if (draft.status !== 'completed' && opts?.completed !== true) {
+      return {
+        ok: false,
+        status: 409,
+        error: '起草还没跑完，没有可审的产出',
+        code: 'draft_not_completed',
+      }
+    }
+    // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
+    // 自愈比拦下使用者更对——与起草路由同一判据）。
+    await ensureBuiltinReviewer(store, workspaceId)
+    const reviewer = (await store.listAgents(workspaceId)).find(
+      (a) => a.builtin === true && a.role === 'skill-reviewer',
+    )
+    if (!reviewer) {
+      return {
+        ok: false,
+        status: 500,
+        error: '内置的 skill 审核者建不出来（数据目录不可写？）',
+        code: 'builtin_reviewer_missing',
+      }
+    }
+    const draftHut = draftRoot(workRoot, draft.id as string)
+    // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
+    //
+    // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
+    // 而人在审核期间（或审核之后）改一下编辑器就能让"结论"与"内容"分叉——那份分叉
+    // 只有指纹能发现。写早了没用（内容还没定），写晚了会把人改后的内容当成被审内容。
+    const stampHash = await hashDraftDir(join(draftHut, 'skill'))
+    const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
+    const reviewRunId = await createRunForReviewer({
+      reviewer,
+      // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
+      // 它只影响日志与列表里的显示，路由看的是 subject.type）
+      kind: 'skill-draft-review',
+      title: '审核起草出来的 skill',
+      body: `草稿在 ${draftHut}/skill，素材在 ${draftHut}/material`,
+      subject: { type: 'skill-draft-review', id: draft.id },
+      // ★ 审核者必须**在草稿小屋里**跑：它要读的 `skill/`（产出）与 `material/`（依据）
+      //   都在那里。不给这一项的话它落到审核者自己的 workDir，然后「读不到 skill/SKILL.md」
+      //   ——那个报错看起来像"起草没产出"，实际是审核者站错了地方。
+      workDirOverride: draftHut,
+      prompt: draftAuditPrompt(allowScriptRun),
+      chainDepth: 0,
+    })
+    if (reviewRunId === null) {
+      // `createRunForReviewer` 在"审核者没有身份"时返回 null（那条路是给报告审核的兜底）
+      return {
+        ok: false,
+        status: 500,
+        error: '审核 run 起不来：内置审核者没有可用的「指令」',
+        code: 'reviewer_identity_missing',
+      }
+    }
+    // 指纹写在这里（不是上面算的时候）：`createRunForReviewer` 会 await 一段，
+    // 期间人可能正在保存改动——写"起审核时那一刻"的指纹才是这次审核的对象。
+    // ⚠️ 代价是：审核**期间**的保存不会被判成过期（那一段里审的确实是老内容，
+    //    但指纹也已经钉在老内容上）。这个窗口留着是有意的：把它关掉就得在审核结束时
+    //    再比一次内容，而"审核者在读目录"与"内容有没有变"之间没有可靠的时间点。
+    await writeAuditStamp(draftHut, { reviewRunId, hash: stampHash, at: Date.now() })
+    return { ok: true, reviewRunId, reviewerAgentId: reviewer.id }
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // 内置起草者（2026-10 定稿 §9）：每次启动对一次账
@@ -3955,6 +4152,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // ⚠️ 它的产出**不进闭环**：subject 不是业务报告类、`reviewerAgentId: null`、不挂 issue。
     //    结论由平台读草稿小屋里它写下的 `review.json`（见设计 §10.6）。
+
+
     if (req.method === 'POST' && path === '/api/crystallize/review') {
       const raw = (await readJsonBody(req)) as { draftRunId?: unknown }
       const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
@@ -3962,125 +4161,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
         return
       }
-      const draft = await store.getRun(draftRunId as Run['id'])
-      if (!draft) {
-        sendJson(res, 404, { error: `起草 run 不存在：${draftRunId}`, code: 'draft_not_found' })
+      // 校验与"起这一轮审核"都在 `startDraftAudit` 里——自动再审走的是同一个函数
+      // （一个东西只有一处实现，否则两条路的行为会慢慢分叉）。
+      const started = await startDraftAudit(await store.getRun(draftRunId as Run['id']))
+      if (!started.ok) {
+        sendJson(res, started.status, { error: started.error, code: started.code })
         return
       }
-      // 只有起草 run 才审得动：传一条别的 run 进来会拿它的工作目录去读 `skill/`，
-      // 结果是"审核了一条不存在的草稿"，而错误信息会指向"文件读不到"。
-      if (draft.subject.type !== 'skill-draft') {
-        sendJson(res, 400, {
-          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可审的草稿`,
-          code: 'not_a_draft',
-        })
-        return
-      }
-      if (draft.status !== 'completed') {
-        sendJson(res, 409, {
-          error: '起草还没跑完，没有可审的产出',
-          code: 'draft_not_completed',
-        })
-        return
-      }
-      // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
-      // 自愈比拦下使用者更对——与起草路由同一判据）。
-      await ensureBuiltinReviewer(store, workspaceId)
-      const reviewer = (await store.listAgents(workspaceId)).find(
-        (a) => a.builtin === true && a.role === 'skill-reviewer',
-      )
-      if (!reviewer) {
-        sendJson(res, 500, {
-          error: '内置的 skill 审核者建不出来（数据目录不可写？）',
-          code: 'builtin_reviewer_missing',
-        })
-        return
-      }
-      const draftHut = draftRoot(workRoot, draft.id as string)
-      // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
-      //
-      // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
-      // 而人在审核期间（或审核之后）改一下编辑器就能让"结论"与"内容"分叉——那份分叉
-      // 只有指纹能发现。写早了没用（内容还没定），写晚了会把人改后的内容当成被审内容。
-      //
-      // ⚠️ 指纹与审核 run 一一对应（存 reviewRunId）：重审一轮就覆盖一次，
-      //    于是"最新那条审核的指纹"永远对得上 review 接口报的那条判决。
-      const stampHash = await hashDraftDir(join(draftHut, 'skill'))
-      const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
-      const reviewRunId = await createRunForReviewer({
-        reviewer,
-        // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
-        // 它只影响日志与列表里的显示，路由看的是 subject.type）
-        kind: 'skill-draft-review',
-        title: '审核起草出来的 skill',
-        body: `草稿在 ${draftHut}/skill，素材在 ${draftHut}/material`,
-        subject: { type: 'skill-draft-review', id: draft.id },
-        // ★ 审核者必须**在草稿小屋里**跑：它要读的 `skill/`（产出）与 `material/`（依据）
-        //   都在那里。不给这一项的话它落到审核者自己的 workDir，然后「读不到 skill/SKILL.md」
-        //   ——那个报错看起来像"起草没产出"，实际是审核者站错了地方。
-        workDirOverride: draftHut,
-        prompt: [
-          `审一条刚起草出来的 skill。草稿在 \`skill/\`（就在本工作目录里），它的依据是 \`material/\`。`,
-          '',
-          '【怎么做】',
-          '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
-          '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
-          '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
-          // ★ §10.5 第 ③ 条：审核者可以**真的跑一遍**草稿里的脚本（这是这一整条链最有价值的
-          //   检查——"脚本能不能执行"看是看不出来的）。它跑得起来的地基有两层，都已存在：
-          //   ① claude 跑在 `--permission-mode bypassPermissions`（runtime 描述表的 baseArgs）；
-          //   ② D76 的运行期钩子只拦**越界**（`..` / `~` / 工作目录外的绝对路径），
-          //      小屋内部相对路径的 `bash skill/scripts/x.sh` 是允许的。
-          //   ⚠️ 关掉开关时要说"**不要执行**"，不能只是不写这一段 —— 权限还在，它可能照跑；
-          //      而如果它没跑却写下"已执行通过"，那份判决就是假证据。
-          ...(allowScriptRun
-            ? [
-                '4. **把 `skill/scripts/` 里的脚本真的跑一遍**（你可以执行命令，草稿就在当前工作目录里）：',
-                '   先用相对路径跑（例如 `bash skill/scripts/xxx.sh`），需要参数就给临时文件；',
-                '   **只在这个工作目录里活动**（不要 `cd ..`、不要碰家目录、不要写目录外的绝对路径）。',
-                '   结果如实写进判决的 `evidence`：命令、退出码、真实输出。跑不起来就说跑不起来，',
-                '   **不要猜它能跑**——"脚本能不能执行"正是这一步最有价值的结论。',
-              ]
-            : [
-                '4. **不要执行脚本**（这个工作区关掉了"审核者真执行草稿脚本"）：只做静态检查，',
-                '   并在判决里如实写明"脚本未被执行"——**不许**写"已执行通过"这类没发生过的结论。',
-              ]),
-          '',
-          '【产出】',
-          // 判决格式**不在这里重复一遍**：围栏标记与键名由平台放在审核那一路的第一句话里
-          // （`VERDICT_FENCE_BEGIN` 是唯一出处）。这里重抄一份的话，两边迟早会分叉，
-          // 而分叉的表现是"判决块解析不了 ⇒ 记成 needs_human"，看不出是提示词不一致。
-          '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
-          '`reasonCode` 用一条简短的理由码（比如 `missing_when_to_use`、`script_broken`、`no_evidence`）；',
-          '`evidence` 里写**具体位置**（哪一节、哪个文件）与为什么不合格。',
-          '⚠️ 判决块缺了或 JSON 写坏，平台只会记一条"判决不合规"（`needs_human` + `internal_error`）',
-          '——那个状态看起来像"审核没做"，看不出是格式问题，所以宁可多花一步把格式写对。',
-          '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
-        ].join('\n'),
-        chainDepth: 0,
-        // ★ 不单独设上限：`timeoutMs: null` 时平台的**空闲看门狗**兜着
-        //   （`executor.ts` 的 `DEFAULT_IDLE_TIMEOUT_MS` = 30 分钟没有任何输出就判成
-        //   `idle_timeout` 收掉，并在 run 日志里写明"用的是平台默认"）。
-        //   ⚠️ 我第一版在这里写了 `timeoutMs: 10 分钟`，理由写的是"没有上限才是问题"——
-        //   **那是没查就写的**：上限一直有，而且那个 10 分钟比默认的 30 分钟**更紧**，
-        //   会误杀"合法但安静"的脚本（比如一次长时间构建）。用平台默认是对的。
+      sendJson(res, 202, {
+        reviewRunId: started.reviewRunId,
+        reviewerAgentId: started.reviewerAgentId,
       })
-      if (reviewRunId === null) {
-        // `createRunForReviewer` 在"审核者没有身份"时返回 null（那条路是给报告审核的兜底）
-        sendJson(res, 500, {
-          error: '审核 run 起不来：内置审核者没有可用的「指令」',
-          code: 'reviewer_identity_missing',
-        })
-        return
-      }
-      // 指纹写在这里（不是上面算的时候）：`createRunForReviewer` 会 await 一段，
-      // 期间人可能正在保存改动——写"起审核时那一刻"的指纹才是这次审核的对象。
-      // ⚠️ 代价是：审核**期间**的保存不会被判成过期（那一段里审的确实是老内容，
-      //    但指纹也已经钉在老内容上）。这个窗口留着是有意的：把它关掉就得在审核结束时
-      //    再比一次内容，而"审核者在读目录"与"内容有没有变"之间没有可靠的时间点。
-      await writeAuditStamp(draftHut, { reviewRunId, hash: stampHash, at: Date.now() })
-
-      sendJson(res, 202, { reviewRunId, reviewerAgentId: reviewer.id })
       return
     }
 
