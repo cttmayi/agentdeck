@@ -48,10 +48,6 @@ export const remoteSkillsText = {
     zh: '正在同步…（已跑 {seconds} 秒）',
     en: 'Syncing… ({seconds}s)',
   },
-  'remote.syncAlreadyRunning': {
-    zh: '已经有一次同步在跑（本页一次只允许一个）。',
-    en: 'A sync is already running (one at a time).',
-  },
   'remote.syncNever': { zh: '这一进程里还没触发过同步。', en: 'No sync triggered in this process yet.' },
   'remote.syncOk': { zh: '上次同步成功：{time}', en: 'Last sync succeeded: {time}' },
   'remote.syncFailed': { zh: '上次同步失败：{reason}', en: 'Last sync failed: {reason}' },
@@ -85,7 +81,4 @@ export const remoteSkillsText = {
     zh: '这一条来自推荐清单：要删就把它从清单里去掉，再点「按推荐清单重新抓取」。',
     en: 'This one comes from the recommended list: remove it there and re-fetch.',
   },
-  'remote.verifiedAt': { zh: '核对于 {date}', en: 'verified {date}' },
-  'remote.syncedAt': { zh: '同步于 {time}', en: 'synced {time}' },
-  'remote.neverSynced': { zh: '还没同步过', en: 'never synced' },
 } as const satisfies TextCatalog

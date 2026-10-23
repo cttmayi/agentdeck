@@ -129,7 +129,6 @@ export const toolsText = {
   'tools.paramTypeEnum': { zh: '枚举', en: 'enum' },
   'tools.paramOptional': { zh: '可选', en: 'Optional' },
   // ── 固定参数（D43）──
-  'tools.paramFixedHeading': { zh: '固定参数', en: 'Fixed parameters' },
   'tools.paramFixedUnset': { zh: '不固定（模型填）', en: 'Unset (model fills)' },
   'tools.paramFixedHint': {
     zh: '设了固定值的参数：执行时由平台注入，模型不许写（写了会被判不合规）。留空 = 模型在判决时填。',
@@ -139,8 +138,6 @@ export const toolsText = {
     zh: '这个动作没有开放参数，没有可固定的东西（绑定参数由平台按事实注入）。',
     en: 'This action has no open parameters to fix (bound parameters are injected by the platform).',
   },
-  'tools.paramFixedCollapse': { zh: '参数固定', en: 'Fix parameters' },
-  'tools.paramFixedChip': { zh: '已固定', en: 'fixed' },
   // ★ D43（界面反馈）：字符串/整数参数的"固定"必须是一个**显式开关**，不能只靠
   //   输入框 placeholder 暗示——否则使用者看到的就只有"不固定（模型填）"。
   'tools.paramFixedYes': { zh: '固定', en: 'Fixed' },

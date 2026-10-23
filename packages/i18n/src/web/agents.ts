@@ -141,11 +141,6 @@ export const agentsText = {
    */
   'agents.newTitle': { zh: '新建智能体', en: 'New agent' },
   /** 提交按钮置灰时的 `title`。 */
-  'agents.createNeedsName': { zh: '先给它起个名字', en: 'Give it a name first' },
-  'agents.newSubtitle': {
-    zh: '这一段就是它的「指令」：它干活时按它做，别人审它时也看它。',
-    en: 'This section is the agent’s “instructions”: it works by them, and its reviewer reads them too.',
-  },
   'agents.namePlaceholder': { zh: '例如：安全审核员', en: 'e.g. Security reviewer' },
   'agents.roleFieldLabel': { zh: '它是做什么的', en: 'What it does' },
   'agents.instructionsPlaceholderExecutor': {
@@ -230,10 +225,6 @@ export const agentsText = {
    *        的挂载是没同意的改动），所以那一种仍然要他自己点按钮。
    *    合成一句的代价是：那句话对着两种情形都只说对一半。
    */
-  'agents.standardLegacyNoticeInline': {
-    zh: '⚠️ 判断依据还写在老的字段里——它与「指令」本来就合成一段一起投递，编辑保存一次就会并进「指令」（正文一字不变）。',
-    en: '⚠️ The judging criteria still live in the old field — they are delivered merged with Instructions anyway, and one save from the editor folds them into Instructions (the text is unchanged).',
-  },
   'agents.standardLegacyNoticeFromSkill': {
     zh: '⚠️ 它的判断依据还来自挂载的技能——并进「指令」会连挂载一起摘掉，所以那一步要你自己点（下面那颗按钮）。',
     en: '⚠️ Its judging criteria still come from an attached skill — folding them into Instructions also removes the attachment, so that step is yours to take (the button below).',
@@ -265,7 +256,6 @@ export const agentsText = {
     zh: '动作属于这条链（这队人的活判过之后允许做什么），所以不在这里配：请到「智能体组」页，在组的 ③ 行动里勾。同一个人在不同组里可以有不同的权限——挂在人身上就只能共用一份。',
     en: 'Actions belong to the chain (what this crew may do after a verdict), so they are not configured here: open the Agents-group page and tick them under ③ Actions. The same person can have different permissions in different groups — tied to a person, they can only share one set.',
   },
-  'agents.actionsLabel': { zh: '允许触发的动作', en: 'Actions it may trigger' },
   /**
    * 调试勾选（2026-09）：给这个动作勾上之后，判决引用它时**不跑脚本**，
    * 在任务时间线里显示成「调试 · 未执行」并列出解析后的完整参数——用来确认
@@ -340,23 +330,7 @@ export const agentsText = {
     en: 'Click “Remove” on a row to drop it; if the package was merely uninstalled, you can also reinstall it from the Tools page first.',
   },
   /** 下一步（只读态：先点「编辑」才有那些按钮）。 */
-  'agents.actionsUnresolvedFixReadOnly': {
-    zh: '点「编辑」之后可以逐条把它们移除；如果只是那个包被卸载了，也可以先去「工具」页把包装回来。',
-    en: 'Click “Edit” to remove them one by one; if the package was merely uninstalled, you can also reinstall it from the Tools page first.',
-  },
   'agents.actionsGoTools': { zh: '去「工具」页装一个', en: 'Install one on the Tools page' },
-  'agents.actionsHintBefore': {
-    zh: '判决里出现的动作必须在这里面：',
-    en: 'Actions that appear in a verdict must be among these: ',
-  },
-  'agents.actionsHintStrong': {
-    zh: '一个都不勾 = 只报告、不动作',
-    en: 'None ticked = report only, no action',
-  },
-  'agents.actionsHintAfter': {
-    zh: '。动作是判完之后由平台执行的——审核者自己只判断。',
-    en: '. The platform performs these actions after a verdict — the reviewer itself only judges.',
-  },
   // ⚠️ 2026-10：这里原来有一对 `agents.actionsLegacyNote` /
   //    `agents.actionsLegacyNoteUnresolved`（"这些动作来自老配置（写在审核标准里的
   //    那一份）…保存时会写到行动权限上，之后它就不再依赖标准了"）。两条一起删了：
@@ -365,8 +339,6 @@ export const agentsText = {
   //    见 `agent-legacy-cleanup.ts`）。留着这两条只会指向一个不存在的操作。
 
   // ── AgentDetail.svelte ──
-  'agents.backToList': { zh: '← 智能体列表', en: '← Agents' },
-  'agents.saveWithCount': { zh: '保存 {count} 处改动', en: 'Save {count} change(s)' },
   'agents.saved': { zh: '已保存', en: 'Saved' },
   // ★ 2026-11：编辑页底部新增「删除」（保存 / 删除 / 取消，与组页同款）。
   //   历史 run 不删（那是执行时的快照）；被智能体组引用 / 是默认智能体时，
@@ -403,10 +375,6 @@ export const agentsText = {
    *   现在两处用的是**同一组**词（`instructionsHintBefore` / `instructionsFieldStrong`
    *   / `instructionsHintAfter`）——同一个字段在两处说同一件事，没有理由两套话。
    */
-  'agents.noInstructionsHint': {
-    zh: '没有写指令 —— 它只会拿到任务的标题与说明。',
-    en: 'No instructions written — it only gets the task title and description.',
-  },
   /**
    * 技能那一段的标题（2026-09）。它原来是和「审核标准」挤在同一段里的
    * （那段叫「用什么标准」）——标准并进「指令」、那一段被删掉之后，
@@ -424,10 +392,6 @@ export const agentsText = {
    *    而它实际能动的动作仍然来自 skill。不说清的话，使用者会看到
    *    "行动权限一个都没勾"却能触发动作，进而以为界面坏了。
    */
-  'agents.legacySkillActionsBefore': {
-    zh: '它现在能触发的动作也来自这些技能（老配置）——勾选上面那一段「行动权限」即可取而代之：',
-    en: 'The actions it may trigger also come from those skills (legacy setup) — ticking them under “Action permissions” above replaces that:',
-  },
   'agents.noSkillsYet': { zh: '还没有任何技能。', en: 'No skills yet.' },
   /**
    * ⚠️ 选择器里**必须**带上来源目录：同 slug 可以有好几条（每个来源目录各一条
@@ -446,29 +410,13 @@ export const agentsText = {
     en: 'The library currently has no attachable skills. The ones from local directories only appear here once their directories are ticked in Skills → Settings.',
   },
   /** 行动权限为空时的说明（在「行动权限」那一段里，与标准无关）。 */
-  'agents.noActionsStrong': { zh: '一个都没有', en: 'None at all' },
-  'agents.noActionsHint': { zh: '（只报告、不动作）', en: ' (report only, no action)' },
   /**
    * 顿号：一串 skill slug 之间的列表分隔符（老数据那两句提示里用）。
    *
    * ⚠️ 原来这条还管"动作名之间的顿号"，那一列随《动作权限》收口与内置动作的
    *    移除一起没有了——现在这里只服务 skill slug。
    */
-  'agents.listSeparator': { zh: '、', en: ', ' },
-  'agents.standardBodySummary': { zh: '看这份老标准的正文', en: 'Show the old standard’s body' },
-  'agents.legacyInlineBefore': {
-    zh: '它的判断依据还没有并进「指令」，当前',
-    en: 'Its judging criteria are not merged into Instructions yet; it currently uses ',
-  },
-  'agents.legacyInlineStrong': { zh: '沿用挂载的技能', en: 'the attached skills' },
-  'agents.legacyInlineAfter': { zh: '当标准：', en: ' as its standard: ' },
   /** 上面那句末尾的句号（它排在 `{#each}` 后面，是一个独立的文本节点）。 */
-  'agents.legacyInlineEnd': { zh: '。', en: '.' },
-  'agents.standardAdopted': {
-    zh: '判断依据已并进「指令」（原先的挂载也一起摘掉了，那条技能现在可以卸载）',
-    en: 'The judging criteria are merged into Instructions (any attachment was removed too, so that skill can now be uninstalled)',
-  },
-  'agents.adopting': { zh: '搬移中…', en: 'Moving…' },
   /**
    * ★★ 编辑态：**保存就会并进来**（服务端 `PATCH` 里做的），所以不用按钮。
    *
@@ -488,31 +436,7 @@ export const agentsText = {
    *    措辞跟着改——按钮上写着"转成内联标准"而标准已经不是一个单独的东西，会让人
    *    去找一个不存在的框。
    */
-  'agents.adoptStandard': {
-    zh: '把这份判断依据并进「指令」',
-    en: 'Move this judging criteria into Instructions',
-  },
-  'agents.adoptHintBefore': { zh: '搬移是', en: 'The move is ' },
-  'agents.adoptHintStrong': { zh: '原样', en: 'verbatim' },
-  'agents.adoptHintAfter': {
-    zh: '的（正文与允许的动作都不变），之后它不依赖技能也能审；那条技能也就能卸载了。',
-    en: ' (body and allowed actions unchanged); afterwards it can review without depending on the skill, and that skill can be uninstalled.',
-  },
   // 判据已经是"身份非空"（指令 ＋ 老数据的标准）⇒ 措辞跟着改成「指令」
-  'agents.noStandardBefore': { zh: '没有写「指令」 —— ', en: 'No Instructions written — ' },
-  'agents.noStandardStrong': { zh: '它拿不到审核任务', en: 'it gets no review tasks' },
-  'agents.noStandardAfter': {
-    zh: '（审核者的身份与判断依据都写在那里面）。点「编辑」写一段。',
-    en: ' (a reviewer’s identity and judging criteria both live there). Click “Edit” to write some.',
-  },
-  'agents.reviewerNoSkills': {
-    zh: '一个都没挂 —— 这没问题：判断依据写在「指令」里，技能对审核者只是可选的参考。',
-    en: 'None attached — that is fine: the judging criteria live in Instructions; a skill is only an optional reference for a reviewer.',
-  },
-  'agents.executorNoSkills': {
-    zh: '没有挂（执行者可以不挂，产出由审核者按自己的判断依据来判）。',
-    en: 'None attached (an executor can go without; its output is judged by the reviewer against the reviewer’s own criteria).',
-  },
   // ⚠️ 2026-10（使用者的决定）：`sectionRelations` 一节及其全部词条
   // （`reviewerHintDetail` / `reviewerNotApplicable*` / `reviewsWhoLabel` /
   // `noExecutorsPointing` / `reviewerChosenHint` / `reviewerGoneWithId` /

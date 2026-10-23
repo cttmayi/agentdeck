@@ -57,7 +57,6 @@ export const crystallizeText = {
     en: 'Discard the crystallization of "{label}"? The draft leaves the list; committed skills are untouched.',
   },
   'crystallize.discarded': { zh: '已放弃', en: 'Discarded' },
-  'crystallize.listLoadingError': { zh: '读取沉淀列表失败', en: 'Failed to load crystallizations' },
   'crystallize.sourceUnknown': { zh: '来源未知', en: 'Unknown source' },
   'crystallize.rowNew': { zh: '新建', en: 'New' },
   'crystallize.rowUpdate': { zh: '更新 {slug}', en: 'Update {slug}' },
@@ -101,8 +100,6 @@ export const crystallizeText = {
     en: 'The audit finished but left no usable verdict (malformed verdict or a settle failure). This step was wasted — retry it, or read the log below.',
   },
   'crystallize.auditShowLog': { zh: '看审核日志', en: 'Show audit log' },
-  'crystallize.auditShowVerdict': { zh: '看审核结论', en: 'Show verdict' },
-  'crystallize.auditRefresh': { zh: '刷新结论', en: 'Refresh result' },
   'crystallize.auditPass': { zh: '通过', en: 'Passed' },
   'crystallize.auditFail': { zh: '不通过', en: 'Failed' },
   'crystallize.auditNeedsHuman': { zh: '无法判定（判决不合规）', en: 'Undecided (malformed verdict)' },
@@ -208,12 +205,6 @@ export const crystallizeText = {
   // ── 草稿审阅 ──
   'crystallize.reviewTitle': { zh: '审阅草稿', en: 'Review draft' },
   'crystallize.slugLabel': { zh: 'slug', en: 'slug' },
-  'crystallize.slugFromFrontmatter': {
-    zh: '默认取 SKILL.md 的 name',
-    en: 'defaults to the name in SKILL.md',
-  },
-  'crystallize.nameLabel': { zh: '名称', en: 'Name' },
-  'crystallize.descriptionLabel': { zh: '描述', en: 'description' },
   // ⚠️ 2026-10-21 删掉 `crystallize.previewTitle`：使用者说"不需要「预览」"，
   //    那一段折叠预览连同它的 key 一起删了（留着 key 就是给下一个人一个假线索）。
   // ── 四轮：产出是文件集合（文件树 / 变更集 / 校验 / 兜底形态）──
@@ -243,10 +234,6 @@ export const crystallizeText = {
   'crystallize.vsPreviousShort': { zh: '对比上一版', en: 'vs previous' },
   'crystallize.vsCurrentShort': { zh: '对比当前版本', en: 'vs current' },
   'crystallize.diffVsPrevious': { zh: '对比上一版草稿', en: 'vs previous draft' },
-  'crystallize.diffCoarse': {
-    zh: '（文件较大，按整文件差异显示）',
-    en: '(large file: shown as whole-file diff)',
-  },
   'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
   'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
   // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──
@@ -265,7 +252,6 @@ export const crystallizeText = {
     en: 'The material the drafter read (it reads these on demand)',
   },
   'crystallize.materialTitle': { zh: '素材', en: 'Material' },
-  'crystallize.materialDir': { zh: '目录', en: 'Directory' },
   'crystallize.materialEmpty': { zh: '没有素材文件', en: 'No material files' },
   'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
   'crystallize.reviseTitle': {
@@ -277,7 +263,6 @@ export const crystallizeText = {
     en: 'e.g. spell out the full command in step 2; drop the environment issue from Pitfalls',
   },
   'crystallize.reviseSubmit': { zh: '重新起草', en: 'Draft again' },
-  'crystallize.revisedFrom': { zh: '（改自上一版）', en: '(revised from the previous draft)' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {
@@ -301,10 +286,6 @@ export const crystallizeText = {
     zh: '该任务没有反馈、也未审核，无法据此优化 skill',
     en: 'No feedback or review on this task — cannot optimize a skill from it',
   },
-  'crystallize.taskGatedHint': {
-    zh: '先给任务加反馈，或让它走完审核',
-    en: 'Add feedback to the task, or let it finish review first',
-  },
   'crystallize.optimize': { zh: '优化 skill', en: 'Optimize skill' },
   'crystallize.shadowed': { zh: '被你的版本遮蔽', en: 'shadowed by yours' },
   'crystallize.groupMine': { zh: '我提炼的', en: 'Mine' },
@@ -314,6 +295,5 @@ export const crystallizeText = {
   // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },
   'crystallize.errDraftRejected': { zh: '起草未受理：{error}', en: 'Draft not accepted: {error}' },
-  'crystallize.errEmptyMaterial': { zh: '这个 run 没有可沉淀的内容', en: 'This run has nothing to crystallize' },
   'crystallize.errSave': { zh: '入库失败：{error}', en: 'Save failed: {error}' },
 } satisfies TextCatalog

@@ -15,7 +15,6 @@ export const tasksText = {
    *    （`tasks.pickOneHint`）——那句话说的正是"没选中任何东西时右边是什么"，
    *    放在空态里比压在清单上面更贴题，而且只在真的需要它的时候出现。
    */
-  'tasks.boardHint1': { zh: '按实际进行到哪一步分列', en: 'Columns are where a task actually got to' },
   'tasks.boardHintBefore': { zh: '按', en: 'Columns show ' },
   'tasks.boardHintStrong': { zh: '实际进行到哪一步', en: 'where a task actually got to' },
   'tasks.boardHintAfter': {
@@ -123,7 +122,6 @@ export const tasksText = {
   },
   'tasks.unassigned': { zh: '未指派', en: 'Unassigned' },
   'tasks.agentGone': { zh: '这条执行用的智能体已经不在了，无法继续。请新建任务并指定一个智能体。', en: 'The agent for this run no longer exists, so it cannot continue. Create a task and pick an agent.' },
-  'tasks.autoWorkDir': { zh: '（自动分配）', en: '(auto-assigned)' },
 
   // ── 阶段：看板列头、表格短标签、行内提示 ─────────────────────────────
   // ⚠️ 列头（`tasks.col.*`）与表格里的短标签（`term.stage.*`）**分开**：

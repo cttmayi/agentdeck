@@ -48,9 +48,6 @@ export const shellText = {
   'shell.neverSynced': { zh: '尚未同步', en: 'Not synced yet' },
 
   'shell.inbox': { zh: '通知', en: 'Inbox' },
-  'shell.inboxEmpty': { zh: '没有未读通知', en: 'No unread notifications' },
-  'shell.inboxMarkAllRead': { zh: '全部标记为已读', en: 'Mark all as read' },
-  'shell.login': { zh: '登录', en: 'Sign in' },
   'shell.settings': { zh: '设置', en: 'Settings' },
   'shell.signedIn': { zh: '已登录', en: 'Signed in' },
   'shell.signIn': { zh: '登录', en: 'Sign in' },

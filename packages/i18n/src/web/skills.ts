@@ -263,8 +263,6 @@ export const skillsText = {
   'skills.historyFirstVersion': { zh: '这一版是首次入库（全部新增）', en: 'First commit (all added)' },
   'skills.historyNoChanges': { zh: '与上一版一字不差', en: 'Identical to the previous version' },
   'skills.historyChanges': { zh: '相对上一版：{n} 个文件', en: 'vs previous: {n} files' },
-  'skills.historyFilesInRev': { zh: '这一版里的文件', en: 'Files in this version' },
-  'skills.historyRevisionFailed': { zh: '这一版读不出来：{reason}', en: 'Cannot read this version: {reason}' },
   'skills.historyCompareFailed': { zh: '对比没算出来：{reason}', en: 'Compare failed: {reason}' },
   'skills.fromDir': { zh: '来自 {dir}', en: 'From {dir}' },
 

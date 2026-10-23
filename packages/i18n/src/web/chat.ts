@@ -48,7 +48,6 @@ export const chatText = {
     zh: '对话绑定一个执行者，中途不换——上文的延续是那个 CLI 的会话，换人接不上。要换就新建对话。',
     en: "A conversation is bound to one executor and it can't be switched mid-way: the context lives in that CLI's session. Start a new conversation to switch.",
   },
-  'chat.pickAgent': { zh: '选执行者', en: 'Choose an executor' },
   'chat.agentGroup': { zh: '执行者', en: 'Executors' },
   'chat.skillGroup': {
     zh: '或者按技能选（装着几条就有几条）',
@@ -101,10 +100,6 @@ export const chatText = {
     zh: '{skills} 现在选不到：这个对话自带技能的功能要重启本机的 daemon 之后才有（现在跑着的那个还不认识它）。',
     en: '{skills} cannot be picked right now: per-conversation skills need a restart of the local daemon — the one running now does not know about them yet.',
   },
-  'chat.reviewerCannotChat': {
-    zh: '审核者不能用来聊天：聊天不产出判决，让它闲聊会让人以为它说的话有判决的分量。',
-    en: "A reviewer can't be used for chat: chat produces no verdict, and chatting with one makes its words look like a decision.",
-  },
 
   'chat.workDirLabel': { zh: '工作目录', en: 'Working directory' },
   // 「新对话」界面上的设定（2026-10 起工作目录只在这里设；详情页只读）。
@@ -133,7 +128,6 @@ export const chatText = {
   'chat.enterHint': { zh: 'Enter 发送 · Shift+Enter 换行', en: 'Enter to send · Shift+Enter for a new line' },
   'chat.sending': { zh: '发送中…', en: 'Sending…' },
   'chat.stop': { zh: '停止', en: 'Stop' },
-  'chat.stopping': { zh: '正在停…', en: 'Stopping…' },
   'chat.you': { zh: '你', en: 'You' },
   'chat.toolsUsed': { zh: '用了 {count} 个工具', en: '{count} tool call(s)' },
   'chat.running': { zh: '正在跑', en: 'Running' },

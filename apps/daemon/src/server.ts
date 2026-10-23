@@ -2317,7 +2317,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       '【怎么做】',
       '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
       '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
-      '3. 问题要给**具体位置**（哪一节、哪个文件）与**理由**，不要只说"不够好"。',
+      // ★ 分批第 10 批：位置要**能直接找到**。返工那一版拿这份意见去改上一版，
+      //   而"改哪儿"只有两样东西说得清：位置（文件 + 行号/小节）+ 那一处的原文。
+      //   ⚠️ 行号是**软**信息（模型数出来的可能差一两行）⇒ 摘录必须一起给：
+      //   位置 + 原文才是可执行的（只有位置会找错行，只有原文不好定位）。
+      '3. 问题要给**具体位置**与**理由**，不要只说"不够好"。位置写成 `文件:行号`' +
+        '（例如 `SKILL.md:12`）或 `文件#小节标题`（例如 `SKILL.md#When to Use`），' +
+        '并在 `evidence.excerpt` 里附上**那一处的原文**（照抄，不要转述）。',
       // ★ §10.5 第 ③ 条：审核者可以**真的跑一遍**草稿里的脚本（这是这一整条链最有价值的
       //   检查——"脚本能不能执行"看是看不出来的）。它跑得起来的地基有两层，都已存在：
       //   ① claude 跑在 `--permission-mode bypassPermissions`（runtime 描述表的 baseArgs）；
@@ -2344,7 +2350,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 而分叉的表现是"判决块解析不了 ⇒ 记成 needs_human"，看不出是提示词不一致。
       '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
       '`reasonCode` 用一条简短的理由码（比如 `missing_when_to_use`、`script_broken`、`no_evidence`）；',
-      '`evidence` 里写**具体位置**（哪一节、哪个文件）与为什么不合格。',
+      '`evidence.locator` 写 `文件:行号` 或 `文件#小节`；`evidence.excerpt` 写那一处的原文。' +
+        '（拿不准行号就给小节标题——位置 + 原文一起，人才改得对。）',
       '⚠️ 判决块缺了或 JSON 写坏，平台只会记一条"判决不合规"（`needs_human` + `internal_error`）',
       '——那个状态看起来像"审核没做"，看不出是格式问题，所以宁可多花一步把格式写对。',
       '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
@@ -2924,9 +2931,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       await copyMaterial(join(previousDir, 'material'), materialDir, {
         skip: ['previous-draft', 'feedback.md'],
       })
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 分批第 10 批：上一版的产出**放进产出目录**（不再塞进 material/previous-draft/）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 使用者问的是「为什么是按意见重新起草呢，而不是基于意见修改」——查下来返工这条路
+      // 一直是"重写一版"：上一版被放进 `material/previous-draft/`（只作为**参考材料**），
+      // 而产出契约明写「整份产出，不是补丁」⇒ 起草者每次都得从头把整份重新写一遍。
+      // 真机上的表现就是返工版的差异是 `+80 −25`（几乎整份重写）——贵、慢，而且**上一版里
+      // 已经对的地方有被顺手改坏的风险**（每次重写都是一次重新掷骰子）。
+      //
+      // 现在的语义：`skill/` 里**就是上一版**，起草者做的是**在它上面改**。
+      // 于是"基于意见修改"第一次在物理上成为可能（之前做不到——产出目录是空的）。
+      // 同一份内容不再放两处（`material/previous-draft/` 撤掉）：两处放同一份东西，
+      // 改了一处另一处就是旧的，而"哪一份算数"迟早要靠猜。
+      const newSkillDir = join(newDir, 'skill')
       if (previousSkill !== null) {
         for (const [rel, text] of Object.entries(previousSkill)) {
-          const full = join(materialDir, 'previous-draft', rel)
+          const full = join(newSkillDir, rel)
           await mkdir(dirname(full), { recursive: true })
           await writeFile(full, text, 'utf8')
         }
@@ -2942,9 +2964,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       await writeFile(
         join(materialDir, '00-README.md'),
         `${index.trimEnd()}\n\n## 这一版是「按意见改一版」\n\n` +
-          '- 上一版的完整产出在 `previous-draft/`（含 SKILL.md 与支持文件）。\n' +
-          '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方不要乱动。\n' +
-          '- 再次强调：输出仍然写到同级的 `skill/`（整份产出，不是补丁）。\n',
+          '- **产出目录 `skill/` 里已经是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
+          '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
+          '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
+          '- ⚠️ 上一版里有支持文件（`references/`、`scripts/` 等）：除非意见点到它们，否则不许删、不许改名。\n',
         'utf8',
       )
     } catch (err) {
@@ -3035,7 +3058,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * 人工意见是同一个形状（同一类输入走同一个格式，起草者不必分辨是谁提的）。
    */
   function draftReviewFeedback(verdict: VerdictRecord): string {
-    const lines = [`审核不通过（理由码：${verdict.reasonCode}）。请按下面每一条改，改完仍要整份写到 skill/：`]
+    // ★ 分批第 10 批：把"改哪儿"交成**能直接照做**的形状。
+    //
+    // 原来一行写成 `locator：excerpt`（位置与原文挤在一行），审核者的条目一旦带上多个证据
+    // 就连成一串，读的人得自己拆。现在每条拆成 `位置：` / `原文：` 两行——起草者要的是
+    // "哪一节哪一行现在写的是什么"，而不是一串冒号。
+    //
+    // ⚠️ 行号来自审核者（`locator` 写成 `SKILL.md:12` 或 `SKILL.md#小节`）——它是**软**信息
+    //    （模型数出来的行号可能差一两行），所以原文摘录必须一起给：位置 + 原文才是可执行的，
+    //    只有位置会让人找错行，只有原文又不好定位。
+    const lines = [
+      `审核不通过（理由码：${verdict.reasonCode}）。这一版请**逐条**对着下面每一条改：` +
+        '产出目录 `skill/` 里已经是上一版，只改下面点到的地方，没提到的部分原样留着。',
+    ]
     verdict.findings.forEach((f, i) => {
       const where = f.evidence
         .map((e) => [e.locator, e.excerpt].filter((x): x is string => Boolean(x)).join('：'))
@@ -3043,6 +3078,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         .join('；')
       lines.push(`${i + 1}. [${f.severity}] ${f.summary}${where === '' ? '' : `\n   位置/摘录：${where}`}`)
     })
+    lines.push('改完把**改过的文件**写回 `skill/`（完整文件，不是补丁）；没改的文件不必重写。')
     if (verdict.findings.length === 0) {
       // 判决里没有条目 ⇒ 如实说明，不要编一条。理由码本身就是唯一线索。
       lines.push('（审核者没有给出条目清单，请按上面的理由码判断该改什么；不要动无关部分。）')
@@ -5517,13 +5553,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }
       }
 
-      sendJson(res, 201, { skill, versioning })
-
       // ★ 标记这条起草 run 已入库（`crystallized: true`）——"恢复进行中的
       //   起草"（targets 的 activeDraft）要跳过已入库的草稿，不然每次重开
       //   流程页都会把上一条沉淀完的草稿再"继续"一遍（§4.1.1）。
-      //   放在 sendJson 之后：入库成功是唯一事实，git 降级不影响它。
+      //
+      // ══════════════════════════════════════════════════════════════════
+      // ⚠️ 必须在 `sendJson` **之前**写（2026-10-21 分批第 11 批修；原来是之后）
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 原来它写在 `sendJson(201)` 之后，注释的理由是"入库成功是唯一事实，git 降级
+      // 不影响它"——那句话本身没错（`versioning` 只是附带信息），但**顺序**错出一个
+      // 真实竞态：`sendJson` 一返回客户端就能发下一个请求，而那之后我们才写标记 ⇒
+      // **刚入库就点「放弃」能赢过这次写入**（`/api/crystallize/discard` 读到的还是
+      // "没入库"⇒ 200 放弃成功），表现是"入库了的东西被放弃掉"，而技能库里那份还在。
+      //
+      // 量出来的经过：全量跑（`pnpm run check` 并行跑所有测试文件）时
+      // 「已入库的不许放弃」这条用例偶发红——`expected 409, actual 200`，
+      // 而单跑那条用例、甚至单跑整份文件都是绿的。那是**竞态窗口在负载下变宽**的
+      // 典型形状，不是"用例不稳"。（按这个形状（`sendJson` 之后还 `await` 且不 return）扫了一遍
+      // 全仓库，只有这一处——不是"大概还有别处"。）
+      //
+      // 写在这里的代价为零：`versioning` 那几行（git 提交）在它上面，早就跑完了；
+      // 而"入库成功"这件事与 `crystallized` 标记本来就该是同一个瞬间。
       await store.insertRun({ ...draftRun, crystallized: true })
+
+      sendJson(res, 201, { skill, versioning })
       return
     }
 

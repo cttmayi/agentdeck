@@ -21,7 +21,6 @@ export const commonText = {
   'common.create': { zh: '创建', en: 'Create' },
   'common.creating': { zh: '创建中…', en: 'Creating…' },
   'common.refresh': { zh: '刷新', en: 'Refresh' },
-  'common.edit': { zh: '编辑', en: 'Edit' },
   'common.uninstall': { zh: '卸载', en: 'Uninstall' },
   'common.uninstalling': { zh: '卸载中…', en: 'Uninstalling…' },
   'common.preview': { zh: '预览', en: 'Preview' },

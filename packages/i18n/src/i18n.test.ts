@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { LOCALES, LOCALE_LABEL, isLocale } from './locale.ts'
 import { placeholdersOf, renderText, type TextCatalog } from './text.ts'
@@ -204,5 +204,142 @@ describe('D39：界面词表', () => {
     assert.equal(isLocale('en'), true)
     assert.equal(isLocale('fr'), false)
     assert.equal(isLocale(null), false)
+  })
+})
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * 词条的**死活**：每个词条都要有使用者（分批第 11 批）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 为什么要有这一条：本仓库最常见的缺陷是"字段/接口/界面都在，就是没有代码路径让它发生"。
+ * 词表是它最 slippery 的一种——删了界面上一句话，词条留在词典里，**没有任何东西会红**：
+ * 类型还在、zh/en 还齐、占位符还对。下一个读代码的人看到 `crystallize.auditRefresh`
+ * 会以为"有个刷新按钮"，而那个按钮早就没了。
+ *
+ * ⚠️ 判据必须**两条**（第一版只有第 ① 条，量出 184 个"死词条"，其中约 120 个是假的）：
+ *   ① 源码里出现这个名字（字面量用法）；
+ *   ② 或者它落在**动态拼出来的命名空间**里——界面上有
+ *      `` $t(`term.conclusion.${v.conclusion}`) `` 这种写法（状态 / 枚举值直接拼），
+ *      这类词条**没有字面量**，是"扫不到"而不是"没人用"。把两者混为一谈，
+ *      结果是删掉一批正在界面上的词条（那比留着死词条严重得多）。
+ *   另一处假阳性来自**只扫了一个前端**：远端管理页的界面源码在 `apps/remote/web/src/`
+ *   （不在 `apps/remote/src/`），只扫后者会把整个 `remote.*` 判死。
+ */
+
+/** 扫出来的源码全文 + 由它推出的动态命名空间前缀。 */
+interface DeadKeyScan {
+  dead: string[]
+  dynamicPrefixes: string[]
+}
+
+/**
+ * 纯函数：给定"全部词条键"与"全部源码全文"，返回**没有任何使用者**的那些。
+ *
+ * 抽成纯函数是为了能用夹具单独量它准不准（见下一条用例）——
+ * 一个判据如果在真仓库上跑绿，可能只是因为它什么都没扫到。
+ */
+export function findDeadKeys(input: {
+  keys: readonly string[]
+  sources: readonly string[]
+  /**
+   * 允许"暂时没有使用者"的键（**每一条都要写清为什么**）。
+   *
+   * 现在为空。留着这个口子是因为将来可能出现"界面还没接、但词条先定稿"的正当情况；
+   * 一旦有人往这里加东西，他必须写下理由，而理由会出现在 review 里。
+   */
+  allowed?: readonly string[]
+}): DeadKeyScan {
+  const body = input.sources.join('\n')
+  // `` `ns.prefix.${x}` ``：动态拼接的命名空间（只取"名字里带点的前缀"）
+  const dynamicPrefixes = [
+    ...new Set([...body.matchAll(/`([A-Za-z0-9_.]+\.)\$\{/g)].map((m) => m[1] as string)),
+  ]
+  const allowed = new Set(input.allowed ?? [])
+  const dead = input.keys.filter(
+    (k) =>
+      !allowed.has(k) &&
+      !body.includes(k) &&
+      !dynamicPrefixes.some((prefix) => k.startsWith(prefix)),
+  )
+  return { dead, dynamicPrefixes }
+}
+
+/** 扫仓库源码（**不含**词典自身、测试、构建产物）。 */
+function collectSources(): { files: string[]; texts: string[] } {
+  const ROOTS = ['apps', 'packages', 'tools']
+  const EXTS = ['.ts', '.svelte', '.mjs', '.js']
+  const root = process.cwd()
+  const files: string[] = []
+  const texts: string[] = []
+  const walk = (dir: string): void => {
+    let entries: Array<{ name: string; isDirectory(): boolean }>
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const full = `${dir}/${e.name}`
+      if (e.isDirectory()) {
+        // 构建产物与依赖目录里的副本会把**每一个**词条都扫成"有人用"⇒ 判据失效
+        if (['node_modules', 'dist', '.cache', '.git', 'build'].includes(e.name)) continue
+        walk(full)
+        continue
+      }
+      if (!EXTS.some((x) => e.name.endsWith(x))) continue
+      if (e.name.includes('.test.')) continue
+      // 词典自身（含本文件所在的包）不算使用者：它的 zh/en 正文里当然有这个名字
+      if (full.startsWith(`${root}/packages/i18n/`)) continue
+      files.push(full.slice(root.length + 1))
+      texts.push(readFileSync(full, 'utf8'))
+    }
+  }
+  for (const r of ROOTS) walk(`${root}/${r}`)
+  return { files, texts }
+}
+
+describe('词条死活：每个词条都要有使用者（分批第 11 批）', () => {
+  test('★ 判据本身准不准：夹具里"用到的 / 动态拼的 / 真没用的"三种', () => {
+    const { dead, dynamicPrefixes } = findDeadKeys({
+      keys: ['a.used', 'a.alsoUsed', 'b.byStatus.queued', 'b.byStatus.running', 'c.dead'],
+      sources: ["$t('a.used')", '$t(`b.byStatus.${status}` as WebTextId)', "// a.alsoUsed 只在注释里出现也算" ],
+    })
+    assert.deepEqual(dead, ['c.dead'], '只有 c.dead 该被判死')
+    assert.deepEqual(dynamicPrefixes, ['b.byStatus.'], '动态命名空间要被认出来（它没有字面量）')
+    // ⚠️ 这条是"判据会不会全判死"的自检：一个都没用过的源码 ⇒ 全死
+    const all = findDeadKeys({ keys: ['a.used', 'c.dead'], sources: ['const x = 1'] })
+    assert.deepEqual(all.dead, ['a.used', 'c.dead'], '扫不到就是全死（这才是"没扫到"的样子）')
+    // 白名单要生效（否则那个口子是个摆设）
+    const allowed = findDeadKeys({ keys: ['c.dead'], sources: [], allowed: ['c.dead'] })
+    assert.deepEqual(allowed.dead, [])
+  })
+
+  test('★ 仓库里没有死词条（每个键都能找到使用者，含动态拼接的命名空间）', async () => {
+    const sources = collectSources()
+    assert.ok(sources.files.length > 100, `源码文件扫得太少（${sources.files.length} 个）⇒ 扫描逻辑坏了`)
+    assert.equal(
+      sources.files.filter((f) => f.includes('/dist/')).length,
+      0,
+      '构建产物必须排除（它含全部词条 ⇒ 判据会变成永远绿）',
+    )
+
+    const keys: string[] = []
+    for (const ns of NAMESPACES) {
+      const catalog = await loadCatalogs(ns.dir)
+      for (const { catalog: table } of catalog) keys.push(...Object.keys(table))
+    }
+    assert.ok(keys.length > 1000, `词条只扫到 ${keys.length} 个 ⇒ 词表没读全`)
+
+    const { dead, dynamicPrefixes } = findDeadKeys({ keys, sources: sources.texts })
+    assert.ok(
+      dynamicPrefixes.length >= 5,
+      `动态命名空间只认出 ${dynamicPrefixes.length} 个 ⇒ 动态那一半判据失效了（会误报一片）`,
+    )
+    assert.deepEqual(
+      dead,
+      [],
+      '这些词条没有任何代码引用它们——要么把界面接上、要么删掉：\n' + dead.join('\n'),
+    )
   })
 })

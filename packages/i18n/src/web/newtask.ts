@@ -77,10 +77,6 @@ export const newtaskText = {
     zh: '组里那个审核者已不存在，这次不会自动审',
     en: 'The group’s reviewer no longer exists; this task won’t be auto-reviewed',
   },
-  'newtask.summaryNoReviewer': {
-    zh: '未配置（这次不自动审）',
-    en: 'Not configured (no auto review)',
-  },
   /**
    * ★ 选了**单个智能体**那一档的摘要（2026-10 新增，必须画出来）。
    *
