@@ -442,3 +442,80 @@ export function assembleArtifacts(
     validation: validateArtifactFiles({ 'SKILL.md': text }),
   }
 }
+
+/**
+ * 「这一版被人手改过」的标记（分批第 14 批，落在 `<草稿小屋>/.human-edits.json`）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要一个标记：返工要不要**接上一版的 CLI 会话**（resume）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者的判断是"resume 更合适"（对：起草者刚写过这一版，材料、规范、为什么这么组织都在它的
+ * 上下文里；接上就省一遍重读，风格也连得上）。但有一条真实风险必须**结构上**挡住，而不是
+ * 指望模型听话：
+ *
+ *   第 8 批开始，人可以在编辑器里改草稿并**落盘**（`POST /api/crystallize/save-draft`）。
+ *   那条被改过的草稿如果走 resume，起草者脑子里的"上一版"和人手上的"上一版"**不是一个东西**
+ *   ——它按记忆里的内容去"改"，就会把人改的地方**改回去**，而且没有任何地方会提示这件事。
+ *
+ * 所以：**人改过 ⇒ 不接会话**，走全新进程 + 以磁盘里的文件为准（那是今天已经验证过的行为）；
+ * 没改过 ⇒ 接会话（连续性 + 省一遍重读）。两种情况在索引页里都写清"这一版的依据是什么"。
+ *
+ * ⚠️ 为什么是"标记文件"而不是"比指纹"：指纹只能回答"和某一次审核时相比变没变"，而这里要问的是
+ *    "**在起草者写完这一版之后**，有没有人动过它"——起草时根本没有指纹可比（审核可能还没跑）。
+ *    标记由 `save-draft` 落，语义直接：这个文件在 ⇒ 有人动过。
+ */
+export interface HumanEditStamp {
+  /** 第一次被改的时间（人可能改好几次，保留最早的，便于回答"这版从什么时候起不是起草者写的了"）。 */
+  firstAt: number
+  lastAt: number
+  /** 改过哪些文件（进日志/索引页，让起草者知道"哪几份不是它写的那份"）。 */
+  files: string[]
+}
+
+export const HUMAN_EDIT_STAMP_FILE = '.human-edits.json'
+
+export async function readHumanEditStamp(draftDir: string): Promise<HumanEditStamp | null> {
+  try {
+    const raw = JSON.parse(await readFile(join(draftDir, HUMAN_EDIT_STAMP_FILE), 'utf8')) as unknown
+    if (typeof raw !== 'object' || raw === null) return null
+    const obj = raw as Record<string, unknown>
+    const firstAt = obj['firstAt']
+    const lastAt = obj['lastAt']
+    const files = obj['files']
+    return {
+      firstAt: typeof firstAt === 'number' ? firstAt : 0,
+      lastAt: typeof lastAt === 'number' ? lastAt : 0,
+      files: Array.isArray(files) ? files.filter((f): f is string => typeof f === 'string') : [],
+    }
+  } catch {
+    // 没有这个文件是**最常见**的情况（从没人手改过）⇒ 返回 null，调用方按"没改过"处理。
+    // 坏了（JSON 不完整）也返回 null：那种情况下"接会话"的风险是把人改的改回去，
+    // 而"不接会话"最坏只是少省一遍重读——方向相反的两个错，选后果轻的那个。
+    return null
+  }
+}
+
+/**
+ * 记下"这一版被人改过"。**合并写**：已有标记时保留最早的 `firstAt`，并把文件并起来
+ * （人可能改两次、改不同文件；覆盖写会把第一次的痕迹抹掉，日志里就说不清"这版从什么时候
+ * 起不是起草者写的了"）。
+ */
+export async function writeHumanEditStamp(
+  draftDir: string,
+  edit: { at: number; files: string[] },
+): Promise<HumanEditStamp> {
+  const previous = await readHumanEditStamp(draftDir)
+  const merged: HumanEditStamp = {
+    firstAt: previous?.firstAt ?? edit.at,
+    lastAt: edit.at,
+    files: [...new Set([...(previous?.files ?? []), ...edit.files])].sort(),
+  }
+  await mkdir(draftDir, { recursive: true })
+  await writeFile(
+    join(draftDir, HUMAN_EDIT_STAMP_FILE),
+    `${JSON.stringify(merged, null, 2)}\n`,
+    'utf8',
+  )
+  return merged
+}

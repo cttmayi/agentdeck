@@ -63,6 +63,22 @@ class FakeBackend implements AgentBackend {
 
   /** 投递出去的全部第一句话（审核那一路的提示词判据从这里读，与 run 日志互为对照）。 */
   readonly prompts: string[] = []
+
+  /**
+   * 每次执行时要求的"接哪个会话"（分批第 14 批：返工默认接上一版的会话）。
+   *
+   * 为什么要记这个：resume 是**请求侧**的决定，run 日志里那句"恢复自 run X"只有在真的恢复时
+   * 才出现；而"daemon 到底有没有把 resumeSessionId 传下来"只有后端看得见。两处都要量。
+   */
+  readonly resumeRequests: Array<string | null> = []
+
+  /**
+   * 模拟"恢复被拒"（真机上的形状已实测：`thread/resume` 对不存在的线程回 JSON-RPC error）。
+   *
+   * 为什么要能模拟：被拒之后**这一版仍然要能正确地改出来**（依据是磁盘上的上一版）。
+   * 只测"恢复成功"这条顺路，等于把"会话丢了怎么办"留给线上。
+   */
+  rejectResume = false
   readonly key = 'claude'
   readonly protocol = 'stream-json' as const
   readonly rejectDetectable = true
@@ -94,6 +110,7 @@ class FakeBackend implements AgentBackend {
     // 所以"目录里带 skill-draft"分不出这两者。
     const delivered = deliveredText(opts)
     this.prompts.push(delivered)
+    this.resumeRequests.push(opts.resumeSessionId ?? null)
     const isDraftReview = delivered.includes('审一条刚起草出来的 skill')
 
     if (opts.workDir.includes('skill-draft-') && this.draftGate !== null) {
@@ -149,6 +166,8 @@ class FakeBackend implements AgentBackend {
         sessionId: 'fake-session-1',
         usage: null,
         exitCode: 0,
+        // 被要求接会话、又被拒 ⇒ 如实上报（真机上适配器就是这个语义：回退新线程 + rejected）
+        ...(this.rejectResume && opts.resumeSessionId ? { resumeRejected: true } : {}),
       }),
       async cancel() {
         queue.close()
@@ -360,6 +379,28 @@ async function waitRevisedFrom(parentId: string, budgetMs = 120_000): Promise<st
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
   throw new Error(`没等到"按 ${parentId.slice(-6)} 改出来的下一版"`)
+}
+
+/**
+ * 等一条 run 走到终态，返回它的 status。
+ *
+ * 为什么单独写一个：会话被拒那条用例要量的是"**这一版照样跑完**"——而它不是审核链的一环
+ * （不产判决），所以 `waitSettled`（等判决状态）用不上。
+ */
+async function waitRunStatus(
+  runId: string,
+  wanted: readonly string[],
+  budgetMs = 60_000,
+): Promise<string> {
+  const deadline = Date.now() + budgetMs
+  let last = ''
+  while (Date.now() < deadline) {
+    const run = await getJsonFile<{ status?: string }>(`/api/runs/${runId}`)
+    last = String(run.status)
+    if (run.status !== undefined && wanted.includes(run.status)) return run.status
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error(`run ${runId.slice(-6)} 没在限时内走到 ${wanted.join('/')}（最后看到：${last}）`)
 }
 
 async function commit(payload: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -2081,31 +2122,29 @@ describe('§10.5：审核者真执行草稿脚本', () => {
 
 /**
  * ══════════════════════════════════════════════════════════════════
- * 返工起的是**全新进程**，不是接上一版的会话（分批第 13 批）
+ * 返工：**默认接上一版的会话**，但人改过就不接（分批第 14 批）
  * ══════════════════════════════════════════════════════════════════
  *
- * 使用者问过一句：「我点"重新起草"后，是重新启动一个 codex，还是 resume 一个 codex 来执行呢」。
- * 查代码的答案是**全新起一个**：`startReviseRun` 生成新的 run id、调 `executor.submit` 时**不带**
- * `resumeFromRunId` ⇒ 执行器 `#resolveResume` 直接返回「这不是重试，没有可恢复的上文」⇒
- * run 日志里写的是「会话：全新开始」。
+ * 这一块改过一次，两次的差别值得记下来：
  *
- * 那么"基于上一版改"靠什么？靠**磁盘**：新小屋的 `skill/` 里就是上一版（第 10 批）、
- * `material/feedback.md` 是那条意见、索引页写着"这一版是按意见改一版"。
- * 也就是说**产出契约以文件为准，不依赖任何会话记忆**——这一点很重要：会话记忆不在磁盘上、
- * 人也看不见，一旦"改一版"开始依赖它，返工的结果就有一半是**无法复查**的。
+ *   · **第 13 批**（我做的）：返工起全新进程、不接会话。理由是"产出契约以文件为准"——
+ *     而文件确实是依据（第 10 批把上一版放进了产出目录）。但我把这条当成"必须全新进程"，
+ *     其实它只说明"不需要会话"。
+ *   · **第 14 批**（使用者判断"resume 更合适"，我复核后同意）：接上一版的会话。
+ *     起草者刚写过这一版——素材、规范、为什么这么组织都在它的上下文里，接上就省一遍重读，
+ *     风格也连得上；而且这条能力平台本来就有（codex 走 app-server 的 `thread/resume`，
+ *     已实测；被拒时适配器回退新线程 + `resumeRejected=true`，daemon 落一条 inbox 提醒）。
  *
- * ⚠️ 为什么这条必须量两件事（只量"没接会话"是空的）：codex 描述表里 `sessionState: 'stateful'`，
- *    而起草 run **确实留下了** `sessionId`（假后端如实报 `fake-session-1`）⇒ 真相是
- *    "接得上，但我们选择不接"。少量前一件，这条用例在"根本接不上"的实现上也会绿。
+ * ⚠️ 但有一个**真实风险**必须结构上挡住，而不是指望模型听话：第 8 批起人可以在编辑器里改草稿
+ *    并落盘（`save-draft`）。那条被改过的草稿如果走 resume，起草者记忆里的"上一版"和人手上的
+ *    "上一版"不是一个东西 ⇒ 它按记忆去改，会把人改的地方**改回去**，且没有任何提示。
+ *    ⇒ **人改过（`.human-edits.json` 在）就不接会话**：全新进程 + 以磁盘为准。
  *
- * 对照：**任务**那条链的返工（`createReworkRun`，D45）**会** resume（`resumeFromRunId: target.id`，
- * 注释写的是"执行者上次干过这活，让它接着上下文改"）。两种返工在"接不接上文"上**有意不同**：
- * 任务那条链要重做的是**同一件活**（上下文就是它自己干过的事），而沉淀这条链要改的是
- * **一个目录里的文件**（上下文是文件本身）。
+ * 所以下面三条用例是一组：① 没人改过 ⇒ 接；② 人改过 ⇒ 不接；③ 被拒 ⇒ 仍然改得对。
  */
-describe('返工：全新起进程，不接上一版的会话', () => {
-  test('★ 按意见改一版 ⇒ 新 run 日志「全新开始」（上一版的会话还在库里，是我们选择不接）', async () => {
-    const sourceRunId = await runReviewed('审完的流程（量会话接不接）')
+describe('返工：默认接上一版的会话，人改过就不接', () => {
+  test('★ 没人改过 ⇒ 接上一版的会话（run 日志「恢复自 run …」+ 后端真收到 resumeSessionId）', async () => {
+    const sourceRunId = await runReviewed('审完的流程（量接不接会话）')
     const v1 = await draftAndWait({
       runId: sourceRunId,
       target: { kind: 'new', purpose: '量会话' },
@@ -2115,9 +2154,10 @@ describe('返工：全新起进程，不接上一版的会话', () => {
     assert.equal(
       v1Run?.sessionId,
       'fake-session-1',
-      '上一版必须留下 sessionId——不留的话，"没接会话"只是因为没得接，这条用例就测不出东西',
+      '上一版必须留下 sessionId——不留的话，"接上了"这句话是空的',
     )
 
+    fakeBackend.resumeRequests.length = 0
     const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2126,9 +2166,17 @@ describe('返工：全新起进程，不接上一版的会话', () => {
     assert.equal(res.status, 202, await res.clone().text())
     const created = (await res.json()) as { draftRunId: string; revisedFrom: string }
     assert.equal(created.revisedFrom, v1, '新 run 要记着"它是从哪一版改出来的"')
+    // ①b 起草者读到的那份索引页要说明"这一版接上了会话 + 以磁盘为准"
+    //     （判据读它而不是读接口字段：字段只有测试在看，而索引页是起草者真读的东西）
+    const indexForResume = await readFile(
+      join(workRoot, `skill-draft-${created.draftRunId}`, 'material', '00-README.md'),
+      'utf8',
+    )
+    assert.match(indexForResume, /接上了你上次写这一版的会话/)
+    assert.match(indexForResume, /以磁盘上的内容为准/, 'resume 的那一版必须点明"记忆可能过时，以磁盘为准"')
 
-    // ② 等那句"会话"日志落盘（它在 run 派发时就写，但派发本身要等前台把那句话说完）
-    const want = '会话：全新开始——这不是重试，没有可恢复的上文'
+    // ② run 日志要说清"接的是哪一条 run 的会话"（出问题时这是唯一线索）
+    const want = `会话：恢复 fake-session-1——恢复自 run ${v1}`
     let logged = ''
     const deadline = Date.now() + 60_000
     while (Date.now() < deadline) {
@@ -2137,16 +2185,101 @@ describe('返工：全新起进程，不接上一版的会话', () => {
       if (logged.includes('会话：')) break
       await new Promise((resolve) => setTimeout(resolve, 200))
     }
-    assert.ok(logged.includes(want), `run 日志里该说清"全新开始"，实际：\n${logged.slice(0, 400)}`)
-    assert.ok(
-      !/恢复\s*fake-session-1/.test(logged),
-      '不许接上一版的会话（要接的话，返工的结果就有一半在会话记忆里，人复查不到）',
-    )
+    assert.ok(logged.includes(want), `run 日志该说清接的是谁的会话，实际：\n${logged.slice(0, 400)}`)
 
-    // ③ "基于上一版改"靠的是目录里的文件（第 10 批），不是会话：新小屋开工时产出目录里就是上一版。
-    //    这里只量"两个版本的会话 id 不同 ⇒ 确实是两个进程"，文件内容那条 §10.8 已经量过。
-    const v2Run = await daemon.store.getRun(created.draftRunId as RunId)
-    assert.equal(v2Run?.revisedFrom, v1, 'revisedFrom 是这条链的"上一版是谁"')
-    assert.notEqual(v2Run?.id, v1Run?.id, '两个版本必须是两条 run（各自的进程、各自的工作目录）')
+    // ③ 后端那一侧要真收到（日志是"平台以为"，这条是"真传下去了"）
+    assert.ok(
+      fakeBackend.resumeRequests.includes('fake-session-1'),
+      `后端没收到 resumeSessionId（收到的是 ${JSON.stringify(fakeBackend.resumeRequests)}）⇒ 日志会说谎`,
+    )
+  })
+
+  test('★★ 人改过这一版 ⇒ **不接**会话（免得按记忆把人改的覆盖回去）', async () => {
+    const sourceRunId = await runReviewed('审完的流程（人改过再返工）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '人改过' },
+    })
+    // ① 模拟人在编辑器里改一句并保存（第 8 批那条路）
+    const saved = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftRunId: v1,
+        files: { 'SKILL.md': '# 报告流程（人手改过）\n\n## Procedure\n1. 我改的\n' },
+      }),
+    })
+    assert.equal(saved.status, 200, await saved.clone().text())
+    // 标记真的落盘了（不然下面"不接"只是因为别的原因）
+    const stamp = JSON.parse(
+      await readFile(join(workRoot, `skill-draft-${v1}`, '.human-edits.json'), 'utf8'),
+    ) as { files: string[] }
+    assert.deepEqual(stamp.files, ['SKILL.md'], '人改过哪些文件要记下来（进索引页，起草者要知道）')
+
+    fakeBackend.resumeRequests.length = 0
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '再改一处' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const created = (await res.json()) as { draftRunId: string }
+
+    // ② 确实没把上一版的会话传下去
+    assert.ok(
+      !fakeBackend.resumeRequests.includes('fake-session-1'),
+      '人改过还接会话 ⇒ 起草者会按记忆把人改的地方改回去',
+    )
+    // ③ 而"依据"仍然在磁盘上：新小屋开工时产出目录里就是我改过的那一份
+    const v2Hut = join(workRoot, `skill-draft-${created.draftRunId}`, 'skill')
+    assert.equal(
+      await readFile(join(v2Hut, 'SKILL.md'), 'utf8'),
+      '# 报告流程（人手改过）\n\n## Procedure\n1. 我改的\n',
+      '人改过的内容必须是新一版的起点（不接会话，但内容照样带过去）',
+    )
+    // ④ 索引页要说清这一版为什么是全新会话（起草者得知道"以磁盘为准"）
+    const index = await readFile(
+      join(workRoot, `skill-draft-${created.draftRunId}`, 'material', '00-README.md'),
+      'utf8',
+    )
+    assert.match(index, /全新.*会话/, '索引页要说明这是全新会话')
+    assert.match(index, /SKILL\.md/, '要点出哪几份是人改过的')
+  })
+
+  test('★ 会话被拒（线程没了）⇒ 这一版仍然改得对：回退新线程 + 说清缺了上文', async () => {
+    const sourceRunId = await runReviewed('审完的流程（会话丢了）')
+    const v1 = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '会话丢了' },
+    })
+    fakeBackend.rejectResume = true
+    try {
+      const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v1, feedback: '改一句' }),
+      })
+      assert.equal(res.status, 202, await res.clone().text())
+      const created = (await res.json()) as { draftRunId: string }
+      // ① 这一版照样跑完、产出照样在（依据是磁盘上的上一版，不是会话）
+      const status = await waitRunStatus(created.draftRunId, ['completed', 'failed'])
+      assert.equal(status, 'completed', '会话丢了不该让这一版跑不完')
+      const produced = await readFile(
+        join(workRoot, `skill-draft-${created.draftRunId}`, 'skill', 'SKILL.md'),
+        'utf8',
+      ).catch(() => null)
+      assert.ok(produced !== null, '产出目录里仍然有 SKILL.md（依据在磁盘上，不在会话里）')
+      // ② 平台要把"这次缺了上文"说出来（FR-CLI-06：被拒与"测不出来"必须分开报）
+      const inbox = (await (await fetch(`${daemon.url}/api/inbox`)).json()) as {
+        items: Array<{ type: string; title: string; runId: string | null }>
+      }
+      const hit = inbox.items.find(
+        (i) => i.runId === created.draftRunId && i.type === 'run.resume_rejected',
+      )
+      assert.ok(hit, `没落"恢复被拒"的提醒（inbox 里 ${JSON.stringify(inbox.items.slice(0, 5))}）`)
+      assert.match(hit.title, /恢复/)
+    } finally {
+      fakeBackend.rejectResume = false
+    }
   })
 })

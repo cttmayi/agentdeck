@@ -119,6 +119,8 @@ import {
   hashDraftDir,
   parseSkillMd,
   readAuditStamp,
+  readHumanEditStamp,
+  writeHumanEditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
   writeAuditStamp,
@@ -2921,6 +2923,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     const previousDir = draftRoot(workRoot, draftRunId)
     const previousSkill = await readDraftSkillDir(join(previousDir, 'skill'))
+    // ★ 接不接上一版的会话，**在进 try 之前就定下来**：submit 那一侧要用它，而 submit
+    //   在 try 之外（素材准备失败就不该提交任何东西）。判断依据见下面的长注释。
+    const humanEdits = await readHumanEditStamp(previousDir)
+    const resumePrevious = humanEdits === null
 
     const newRunId = ulid() as RunId
     const newDir = draftRoot(workRoot, newRunId)
@@ -2959,6 +2965,32 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         `# 使用者对上一版的意见（这一版必须照它改）\n\n${feedback}\n`,
         'utf8',
       )
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 分批第 14 批：接不接上一版的会话（resume），由"有没有人改过"决定
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 使用者问过「是重新启动一个 codex，还是 resume 一个 codex」、并判断 **resume 更合适**
+      // （对：起草者刚写过这一版，材料/规范/为什么这么组织都在它的上下文里，接上就省一遍重读，
+      // 风格也连得上）。这条能力平台本来就有（codex 走 app-server 的 `thread/resume`，已实测；
+      // 被拒时适配器回退新线程 + `resumeRejected=true`，daemon 会落一条 inbox 提醒）。
+      //
+      // ⚠️ 但有**一个真实风险**必须结构上挡住，而不是指望模型听话：第 8 批起人可以在编辑器里
+      //    改草稿并落盘。那条被改过的草稿如果走 resume，起草者记忆里的"上一版"和人手上的
+      //    "上一版"不是一个东西 ⇒ 它按记忆去改，会把人改的地方**改回去**，且没有任何提示。
+      //    ⇒ 人改过（`.human-edits.json` 在）就**不接会话**，走全新进程 + 以磁盘为准。
+      //
+      // 两种情况都写进索引页：起草者必须知道"这一版的依据是什么"——尤其 resume 的那一种
+      // （它记忆里的内容和磁盘上的可能不同，要以磁盘为准；不说清，它可能拿记忆去覆盖人改过的文件）。
+      const basisNote = resumePrevious
+        ? '## 这一版的依据（注意：你会记得上一版，但**以磁盘为准**）\n\n' +
+          '- 这一版**接上了你上次写这一版的会话**（所以你记得素材、规范与当时为什么这么组织）。\n' +
+          '- ⚠️ 但 `skill/` 里的文件**可能与你记忆里的不一样**（使用者保存过改动，或者中间过了一轮审核）。\n' +
+          '  **动手前先把 `skill/` 里相关文件读一遍**，一切以磁盘上的内容为准；不要凭记忆直接改。\n'
+        : `## 这一版的依据（这是**全新**的一次会话）\n\n` +
+          `- 上一版被人手改过（${humanEdits.files.join('、') || '若干文件'}），所以这一版**没有接**上次的会话：\n` +
+          '  避免"按记忆改"把你没看见的改动覆盖掉。\n' +
+          '- 你看到的 `skill/` 就是现在的真实内容（包含人改过的部分）——**以它为准**。\n'
+
       // 索引页追加一段"这是第 N 版"，让起草者一进来就知道自己在改上一版
       const index = await readFile(join(materialDir, '00-README.md'), 'utf8').catch(() => '')
       await writeFile(
@@ -2967,7 +2999,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           '- **产出目录 `skill/` 里已经是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
           '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
           '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
-          '- ⚠️ 上一版里有支持文件（`references/`、`scripts/` 等）：除非意见点到它们，否则不许删、不许改名。\n',
+          '- ⚠️ 上一版里有支持文件（`references/`、`scripts/` 等）：除非意见点到它们，否则不许删、不许改名。\n\n' +
+          basisNote,
         'utf8',
       )
     } catch (err) {
@@ -3019,11 +3052,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         ? {}
         : { crystallizeTarget: previous.crystallizeTarget }),
       revisedFrom: draftRunId as RunId,
+      // ★ 分批第 14 批：**接上一版的会话**（`resumeFromRunId`）。executor 按描述表的
+      //   `sessionState` 决定真不真恢复（codex 是 stateful ⇒ 走 `thread/resume`），
+      //   拿不到会话/被拒时回退新线程并在 run 日志与 inbox 里说清楚（FR-CLI-06）。
+      //   ⚠️ 人改过这一版就不带（见上面 `resumePrevious` 那段）：否则起草者会按记忆
+      //   把人的改动覆盖回去。
+      ...(resumePrevious ? { resumeFromRunId: draftRunId as RunId } : {}),
       workDir: newDir,
     })
     if (outcome.kind === 'rejected') {
       return { status: 503, body: { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' } }
     }
+    // ⚠️ "接没接会话"**不进响应体**（也不进界面）：那是起草者的上下文状态，人看不见、界面上
+    //   也没什么可做的——放一个没人用的字段就是死接口。它记录在三处**能查的地方**：
+    //    ① run 日志的「会话：恢复 …／全新开始——…」（平台自己写的，含原因）；
+    //    ② 新小屋的 `material/00-README.md`（**起草者真读的那份**：这一版的依据是什么）；
+    //    ③ `.human-edits.json`（人改过的痕迹，返工时的判断依据）。
     return { status: 202, body: { draftRunId: newRunId, revisedFrom: draftRunId } }
   }
 
@@ -4902,6 +4946,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
+      // ★ 分批第 14 批：记下"这一版被人手改过"。返工要不要**接上一版的 CLI 会话**就看它
+      //   （详见 `crystallize-artifacts.ts` 里 `HumanEditStamp` 那段说明：人改过的草稿一旦
+      //   走 resume，起草者会按记忆里的内容去改，把人改的地方改回去，而且没人会提示这件事）。
+      await writeHumanEditStamp(draftRoot(workRoot, draftRunId), {
+        at: Date.now(),
+        files: result.written,
+      })
       sendJson(res, 200, {
         ok: true,
         written: result.written,
