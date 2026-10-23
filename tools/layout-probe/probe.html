@@ -4864,12 +4864,38 @@
           const cySwitchButtons = [...d().querySelectorAll('.pane-tabs button')].map((b) => text(b))
           facts['crystal.revisedSwitchButtons'] = cySwitchButtons
           facts['crystal.revisedHasBaselineSwitch'] = cySwitchButtons.includes('对比上一版草稿')
+          // ★ 分批第 18 批：第三条基线「对比原 skill」必须常驻（新建场景 = 第一版、更新场景 = 库里那一份）
+          facts['crystal.revisedHasOriginalSwitch'] = cySwitchButtons.includes('对比原 skill')
           facts['crystal.revisedDefaultBaselineActive'] = (() => {
             const btns = [...d().querySelectorAll('.pane-tabs .tabs-right button')]
             const active = btns.find((b) => b.classList.contains('active'))
             return active ? text(active) : null
           })()
           facts['crystal.revisedDiffLineCount'] = d().querySelectorAll('.diff-line').length
+          // ★ 分批第 18 批：结论条上那个 `+N` 才是"改动了几行"（`.diff-line` 数的是**渲染出来的**
+          //   行，含上下文 ⇒ 夹具里改 1 行也会量到 8 行；我第一版拿它当"改动行数"断言 === 2，红了）。
+          const cyAdded = (t) => {
+            const m = /\+(\d+)/.exec(t ?? '')
+            return m ? Number(m[1]) : null
+          }
+          facts['crystal.revisedDiffAdded'] = cyAdded(facts['crystal.revisedBarText'])
+          // 再点一次「对比上一版草稿」：同一屏、同一份草稿，只换基线 ⇒ 数字必须**变小**
+          // （这是"默认到底停在哪条基线"唯一咬得住的量法；只量一次的话两条基线的值可能撞在一起）
+          const cyPrevBtn = [...d().querySelectorAll('.pane-tabs .tabs-right button')].find(
+            (b) => text(b) === '对比上一版草稿',
+          )
+          if (cyPrevBtn) {
+            click(cyPrevBtn)
+            await untilNet(() => /对比上一版/.test(text(d().querySelector('.conclusion-bar')) ?? ''))
+            await wait(200)
+            facts['crystal.revisedDiffAddedPrevious'] = cyAdded(text(d().querySelector('.conclusion-bar')))
+            // 切回默认那条，后面的判据看到的还是默认现场
+            const cyOrigBtn = [...d().querySelectorAll('.pane-tabs .tabs-right button')].find(
+              (b) => text(b) === '对比原 skill',
+            )
+            if (cyOrigBtn) click(cyOrigBtn)
+            await wait(200)
+          }
 
           // ★★ 「审核未通过」那一屏（§10.5 第 ③ 条，判决 `fail` + `escalated` = 配额用尽）。
           //    判据三条，缺一条这一屏就不成立：

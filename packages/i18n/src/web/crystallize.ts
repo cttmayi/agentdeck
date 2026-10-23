@@ -264,6 +264,10 @@ export const crystallizeText = {
   'crystallize.vsPreviousShort': { zh: '对比上一版', en: 'vs previous' },
   'crystallize.vsCurrentShort': { zh: '对比当前版本', en: 'vs current' },
   'crystallize.diffVsPrevious': { zh: '对比上一版草稿', en: 'vs previous draft' },
+  // ★ 分批第 18 批：第三条基线——"原 skill 的变化"（使用者定稿：「skill 差异对比也应该是原 skill 变化」）。
+  //   简称给结论条用（它那一行有字数压力），全称给切换钮用。
+  'crystallize.diffVsOriginal': { zh: '对比原 skill', en: 'vs original skill' },
+  'crystallize.vsOriginalShort': { zh: '对比原 skill', en: 'vs original' },
   'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
   'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
   // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──

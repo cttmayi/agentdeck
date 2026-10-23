@@ -212,7 +212,8 @@
   let diff: DiffResult | null = null
   let diffLoading = false
   /** 对比对象：对当前版本（入库会产生的变化）或上一版草稿（改版对比）。 */
-  let diffAgainst: 'current' | 'previous' = 'current'
+  /** 当前停在哪条基线：原 skill / 上一版草稿 / 当前已入库版本（分批第 18 批起三条）。 */
+  let diffAgainst: 'current' | 'previous' | 'original' = 'current'
   /** 素材分节（文件清单 + 预览）。 */
   let material: {
     dir: string
@@ -288,7 +289,7 @@
     coarse: boolean
   }
   interface DiffResult {
-    against: 'current' | 'previous'
+    against: 'current' | 'previous' | 'original'
     baselineLabel: string
     files: DiffFile[]
     totals: { added: number; removed: number; changed: number }
@@ -671,7 +672,11 @@
       }
       slug = res.skillMd.name
       // 改版草稿默认对比上一版（那才是使用者此刻在问的问题）；否则对比当前版本
-      diffAgainst = res.revisedFrom !== null ? 'previous' : 'current'
+      // ★ 分批第 18 批把默认从「上一版」翻成「原 skill」：这是使用者的定稿
+    //    （"skill 差异对比也应该是原 skill 变化"）。"上一版"只回答"我这轮反馈改了什么"，
+    //    而"相对原来那一份变成了什么样"才是他盯着一个新版本时要判断的事。
+    //    ⚠️ 这翻掉了第 14 批"默认停在对比上一版草稿"那条决定（连探针判据一起改，见 §10.34）。
+    diffAgainst = res.revisedFrom !== null ? 'original' : 'current'
       void loadDiff(diffAgainst)
       void loadMaterial()
       const first = pickDefaultFile(res)
@@ -764,9 +769,12 @@
    *
    * 传的是**当前编辑后的文件**：使用者在审阅里改了一行，diff 就得反映改完的样子，
    * 而不是磁盘上的原稿。`against` = 对当前已入库版本（入库会发生什么）或上一版草稿
-   * （"按意见改一版"后新旧对比）。
+   * （"按意见改一版"后新旧对比）、`original` = **这个任务开始时的那一份**
+   * （"这份 skill 相对原来那一份变了什么"，使用者的原话是"差异对比也应该是原 skill 变化"）。
    */
-  async function loadDiff(against: 'current' | 'previous' = diffAgainst): Promise<void> {
+  async function loadDiff(
+    against: 'current' | 'previous' | 'original' = diffAgainst,
+  ): Promise<void> {
     if (artifacts === null) return
     diffAgainst = against
     diffLoading = true
@@ -1564,9 +1572,11 @@
                   <span class="muted">
                     {fileCount} {$t('crystallize.filesUnit')}
                     {#if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
-                      · {diffAgainst === 'previous'
+                      · {diff.against === 'previous'
                         ? $t('crystallize.vsPreviousShort')
-                        : $t('crystallize.vsCurrentShort')}
+                        : diff.against === 'original'
+                          ? $t('crystallize.vsOriginalShort')
+                          : $t('crystallize.vsCurrentShort')}
                       <span class="num-tag add">+{diff.totals.added}</span>
                       <span class="num-tag del">−{diff.totals.removed}</span>
                     {:else}
@@ -1853,6 +1863,22 @@
                     {#if selectedDiff && (selectedDiff.added > 0 || selectedDiff.removed > 0)}
                       <span class="num-tag add">+{selectedDiff.added}</span>
                       <span class="num-tag del">−{selectedDiff.removed}</span>
+                    {/if}
+                    <!--
+                      「对比原 skill」什么时候给：
+                        · 改版草稿（`revisedFrom !== null`）⇒ 原 skill = **第一版的快照**，比得出东西；
+                        · 更新场景（`baseline !== null`）⇒ 原 skill = 任务开始时库里那一份。
+                      ⚠️ 我第一版让它**常驻**，探针那条"新建目标的草稿不给一个永远空的切换"当场红：
+                        新建目标的**首版**没有"原来那一份"（服务端会退回当前版本 = 空）⇒ 这个按钮
+                        点了什么都不会变，正是这条判据要挡的死接口。判据在探针里，别在这里放宽。
+                    -->
+                    {#if artifacts.revisedFrom !== null || artifacts.baseline !== null}
+                      <button
+                        type="button"
+                        class="ghost small"
+                        class:active={diffAgainst === 'original'}
+                        onclick={() => void loadDiff('original')}
+                      >{$t('crystallize.diffVsOriginal')}</button>
                     {/if}
                     {#if artifacts.revisedFrom !== null}
                       <button

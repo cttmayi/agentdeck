@@ -1167,6 +1167,13 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 18 批**（差异基线补「原 skill」，见 §10.34）：`POST /api/crystallize/diff` 的 `against` 三值
+（`previous` / `original` / `current`）。`original` = **这个任务开始时的那一份**：更新场景取
+`material/existing-skill/`、新建场景取**第一版快照**；都取不到时**如实回退**到当前版本并把响应里的 `against`
+改成实际用的那条（`againstResolved`）。**默认 `original`**（⚠️ 翻掉第 14 批"默认对比上一版"的决定，探针判据同改）。
+UI：按钮只在 `revisedFrom !== null || baseline !== null` 时出现（新建首版给它 = 死接口，探针挡着）。
+**验证**：e2e 三版链（`original` 2 行 / `previous` 1 行，两条基线必须量得出差别）、更新场景（有删除行 ⇒ 基线非空）、
+回退如实回报；探针 `+N` 成对（2 / 1）+ 夹具三版改到不同行。`check` 2037 全绿、探针 552 全绿。
 **第 17 批**（按钮「反馈」+ 列表按任务聚合，见 §10.33）：① 文案「重新起草」→「反馈」（发出那一下「提交反馈」；
 两个按钮不许同名）；② `listCrystallizeDrafts` 按"同一来源 + 同一目标"聚合成**一行一个任务**（`runId` = 最新那一版、
 `taskRunId` = 第一版、`version`、`versionRunIds`），可见性按最新那一版判，**放弃 = 放弃整条链**（

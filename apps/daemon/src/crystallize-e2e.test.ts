@@ -2415,6 +2415,98 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     )
   })
 
+  test('★★ 差异基线「原 skill」= 这个任务开始时的那一份（新建场景 = 第一版快照）', async () => {
+    // 使用者的定稿：「skill 差异对比也应该是**原 skill** 变化」。这条判据必须能**分得开**两条基线，
+    // 否则"改成 original"这种改动测不出来：造三版，每版按意见在末尾补一行 ⇒
+    //   上一版（v2）vs 现在 = 1 行；原 skill（v1）vs 现在 = 2 行。
+    const sourceRunId = await runReviewed('审完的流程（量原 skill 基线）')
+    const v1 = await draftAndWait({ runId: sourceRunId, target: { kind: 'new' } })
+    fakeBackend.minimalEditOnRevise = true
+    let v3 = ''
+    try {
+      let prev = v1
+      for (let i = 0; i < 2; i += 1) {
+        const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ draftRunId: prev, feedback: `第 ${i + 2} 次反馈` }),
+        })
+        assert.equal(res.status, 202, await res.clone().text())
+        prev = ((await res.json()) as { draftRunId: string }).draftRunId
+        await waitRunStatus(prev, ['completed', 'failed'])
+      }
+      v3 = prev
+    } finally {
+      fakeBackend.minimalEditOnRevise = false
+    }
+    assert.equal((await readDraftVersionsFor(v1)).length, 3, '这条链该有三版')
+
+    const ask = async (against: string): Promise<{ against: string; baselineLabel: string; totals: { added: number; removed: number } }> =>
+      (await (
+        await fetch(`${daemon.url}/api/crystallize/diff`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ draftRunId: v3, against }),
+        })
+      ).json()) as never
+    const original = await ask('original')
+    assert.equal(original.against, 'original', '请求原 skill 基线时不该被悄悄换成别的')
+    assert.match(original.baselineLabel, /第一版/, `新建场景的原 skill = 第一版（实际标签 ${original.baselineLabel}）`)
+    assert.equal(original.totals.added, 2, '两版之间各补了一行 ⇒ 相对第一版该量到 2 行')
+    const previous = await ask('previous')
+    assert.equal(previous.totals.added, 1, '相对上一版只有 1 行——两条基线必须量得出差别，否则这条判据是空的')
+  })
+
+  test('★ 差异基线「原 skill」在更新场景 = 任务开始时库里那一份（`material/existing-skill/`）', async () => {
+    const runId = await runReviewed('更新基线任务（原 skill）')
+    const firstDraft = await draftAndWait({ runId, target: { kind: 'new' } })
+    const created = await commit({
+      draftRunId: firstDraft,
+      target: { kind: 'new' },
+      slug: 'original-baseline',
+      files: {
+        'SKILL.md':
+          '---\nname: original-baseline\ndescription: 原 skill 基线用\n---\n\n# 原来的标题\n\n' +
+          '## When to Use\n- 量原 skill 基线时\n\n## Procedure\n1. 原来的一步\n',
+
+      },
+    })
+    assert.equal(created.status, 201, JSON.stringify(created.body))
+    const skillId = (created.body['skill'] as { id: string }).id
+
+    const runId2 = await runReviewed('基于它起草更新（原 skill）')
+    const draft = await draftAndWait({ runId: runId2, target: { kind: 'update', skillId } })
+    const res = (await (
+      await fetch(`${daemon.url}/api/crystallize/diff`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: draft, against: 'original' }),
+      })
+    ).json()) as { against: string; baselineLabel: string; totals: { removed: number } }
+    assert.equal(res.against, 'original')
+    assert.match(res.baselineLabel, /原 skill/, `标签要说清这是原 skill（实际 ${res.baselineLabel}）`)
+    assert.ok(
+      res.totals.removed > 0,
+      '原 skill 的正文与草稿不同 ⇒ 该有删除行（量到 0 说明基线取空了，而"取空"会让界面显示"整份新增"）',
+    )
+  })
+
+  test('★ 取不到「原 skill」时退回当前版本，并且**如实回报**实际用了哪条基线', async () => {
+    // 首版（还没有历史版本）请求 original ⇒ 没有"原来那一份"可比。这时不能假装比过了：
+    // 若 `against` 还回 'original'，结论条会写着"对比原 skill"、数字却来自另一条基线
+    // ——第 8 批"结论与内容分叉"那类毛病。
+    const runId = await runReviewed('审完的流程（量基线回退）')
+    const draft = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = (await (
+      await fetch(`${daemon.url}/api/crystallize/diff`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: draft, against: 'original' }),
+      })
+    ).json()) as { against: string; baselineLabel: string }
+    assert.equal(res.against, 'current', '取不到就如实退回当前版本（不能假装是原 skill）')
+  })
+
   test('★★ 沉淀列表：一个任务**一行**（行上带第 N 版），不再是一版一行', async () => {
     // 使用者的原话：「给意见后，点"重新起草"，逻辑不好。新增加了一个沉淀任务，而不是在原沉淀任务中执行。」
     // 列表原来是**一条 run 一行**（他自己机器上有一条 7 版的链 ⇒ 7 个条目、像 7 个任务）。

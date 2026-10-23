@@ -3947,9 +3947,16 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.revisedDefaultBaselineActive',
-    label: '★★★ 改版草稿默认停在**「对比上一版草稿」**——"按意见改一版"出来的那一版，使用者此刻问的就是"比上一版改了哪"',
-    ok: (v) => v === '对比上一版草稿',
+    label:
+      '★★★ 改版草稿默认停在**「对比原 skill」**——使用者定稿："skill 差异对比也应该是原 skill 变化"（第 14 批曾定"默认对比上一版"，第 18 批按这句话翻过来）',
+    ok: (v) => v === '对比原 skill',
     show: (v, f) => `停在 ${JSON.stringify(v)}　按钮 ${JSON.stringify(f['crystal.revisedSwitchButtons'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedHasOriginalSwitch',
+    label: '★★ 「对比原 skill」这条基线常驻（新建 = 第一版；更新 = 任务开始时库里那一份）',
+    ok: (v) => v === true,
   },
   {
     view: '沉淀',
@@ -3957,12 +3964,25 @@ const CHECKS = [
     label: '★ 改版草稿能切到"对比当前版本"（已经入库的那份才是"当前版本"）',
     ok: (v) => v === true,
   },
+  // ⚠️ 分批第 18 批**删掉**了这里的一条旧判据（`crystal.revisedDiffLineCount`：DOM 里 `.diff-line`
+  //    小于 10 行）。不是放宽，是它已经量不动它想量的事了：`.diff-line` 数的是**渲染出来的**行
+  //    （含上下文），夹具里改 2 行也会渲染 10 行 ⇒ 它无法区分"真差"与"整份都算新增"。
+  //    同一件事现在由下面两条精确量（`+N` 等于 2 / 切到上一版后等于 1），量的是结论条上那个数字。
   {
     view: '沉淀',
-    key: 'crystal.revisedDiffLineCount',
-    label: '★★ 默认那一份对比量到的是**与上一版草稿的差**（真差：两版只差一行 ⇒ 行数是个位数，而不是"整份都算新增"）',
-    ok: (v) => typeof v === 'number' && v > 0 && v < 10,
-    show: (v, f) => `diff 行 ${v}　结论条 ${JSON.stringify(f['crystal.revisedBarText'])}`,
+    key: 'crystal.revisedDiffAdded',
+    label:
+      '★★★ 默认停在原 skill ⇒ 结论条上的 `+N` 是**第一版到现在**的改动（夹具那条链三版，每版差一行 ⇒ 应是 2 行）',
+    ok: (v) => v === 2,
+    show: (v, f) => `+${v}　条上 ${JSON.stringify(f['crystal.revisedBarText'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revisedDiffAddedPrevious',
+    label:
+      '★★★ 切到「对比上一版草稿」之后 `+N` 变成 1——★ 这条与上面那条成对：只量一次的话两条基线的值可能一样，"默认到底是哪条"就测不出来',
+    ok: (v) => v === 1,
+    show: (v, f) => `+${v}`,
   },
   {
     view: '任务',
@@ -5314,30 +5334,51 @@ try {
           },
           { sourceRunId: revisedSourceRunId },
         )
+        // ★ 分批第 18 批把任务 B 加成**三版**。为什么非加不可：两版链里"第一版"就是"上一版"，
+        //   "对比原 skill"与"对比上一版"量出来的行数一模一样 ⇒ 那条判据分不开两条基线，
+        //   把默认从 previous 改成 original 也照样绿（判据就成了摆设）。
+        //   三版各差一行 ⇒ 相对第一版 2 行、相对上一版 1 行，判据才咬得住。
+        const revisedV2Id = ulid()
         const revisedId = ulid()
+        const revisedTaskDir = path.join(workRoot, `skill-draft-${revisedBaseId}`)
         {
-          const taskDir = path.join(workRoot, `skill-draft-${revisedBaseId}`)
-          const snapDir = path.join(taskDir, 'history', revisedBaseId, 'skill')
-          for (const [rel, text] of Object.entries({
-            'SKILL.md': skillMd('第二步'),
-            'references/notes.md': '# 说明\n\n第一版。\n',
-            'scripts/check.sh': '#!/bin/sh\necho probe\n',
-          })) {
-            const full = path.join(snapDir, rel)
+          const put = (rel, text) => {
+            const full = path.join(revisedTaskDir, rel)
             fs.mkdirSync(path.dirname(full), { recursive: true })
             fs.writeFileSync(full, text)
           }
-          writeSkillInto(taskDir, {
-            'SKILL.md': skillMd('第二步（已按意见改）'),
+          const v1Files = {
+            'SKILL.md': skillMd('第二步'),
             'references/notes.md': '# 说明\n\n第一版。\n',
             'scripts/check.sh': '#!/bin/sh\necho probe\n',
-          })
-          fs.writeFileSync(
-            path.join(taskDir, '.versions.json'),
+          }
+          const v2Files = { ...v1Files, 'SKILL.md': skillMd('第二步（已按意见改）') }
+          // ⚠️ 第三版必须改到**另一行**（第一版 → 第二版改的是 Procedure 第 2 步，这里改 Verification）：
+          //    我第一版让三版都改同一行 ⇒ 相对第一版与相对上一版都量到 "+1 −1"，
+          //    判据就算我把默认基线说反了也照样绿（实测就是这么红的：`+1` vs 期望 `2`）。
+          const v3Skill = v2Files['SKILL.md'].replace('- 探针全绿', '- 探针全绿（已按意见补一条）')
+          // 快照：第一版（"原 skill"读它）、第二版（"上一版"读它）
+          for (const [rel, text] of Object.entries(v1Files)) put(`history/${revisedBaseId}/skill/${rel}`, text)
+          for (const [rel, text] of Object.entries(v2Files)) put(`history/${revisedV2Id}/skill/${rel}`, text)
+          // 当前（第三版）：比第二版又多改一行
+          writeSkillInto(revisedTaskDir, { ...v1Files, 'SKILL.md': v3Skill })
+          put(
+            '.versions.json',
             `${JSON.stringify(
               {
                 versions: [
-                  { runId: revisedBaseId, at: now - 30_000, humanEdited: false, snapshot: `history/${revisedBaseId}` },
+                  {
+                    runId: revisedBaseId,
+                    at: now - 30_000,
+                    humanEdited: false,
+                    snapshot: `history/${revisedBaseId}`,
+                  },
+                  {
+                    runId: revisedV2Id,
+                    at: now - 25_000,
+                    humanEdited: false,
+                    snapshot: `history/${revisedV2Id}`,
+                  },
                   { runId: revisedId, at: now - 20_000, humanEdited: false, snapshot: null },
                 ],
                 healedAt: null,
@@ -5347,15 +5388,17 @@ try {
             )}\n`,
           )
         }
+        await makeDraft(revisedV2Id, {}, {
+          revisedFrom: revisedBaseId,
+          sourceRunId: revisedSourceRunId,
+          workDir: revisedTaskDir,
+        })
         crystalFixture.revisedRunId = await makeDraft(
           revisedId,
           {},
-          {
-            revisedFrom: revisedBaseId,
-            sourceRunId: revisedSourceRunId,
-            workDir: path.join(workRoot, `skill-draft-${revisedBaseId}`),
-          },
+          { revisedFrom: revisedV2Id, sourceRunId: revisedSourceRunId, workDir: revisedTaskDir },
         )
+
         crystalFixture.auditLiveRunId = await makeDraft(
           ulid(),
           {

@@ -5186,11 +5186,61 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }
       }
 
-      // 基线这边：`previous` = 上一版草稿（"按意见改一版"的对比），否则 = 当前已入库版本
-      const against = raw?.against === 'previous' ? 'previous' : 'current'
+      // 基线这边：`previous` = 上一版草稿；`original` = **这个任务开始时的那一份**；
+      // 其余 = 当前已入库版本。
+      //
+      // ★ 分批第 18 批加 `original`：使用者定稿「skill 差异对比也应该是**原 skill** 变化」。
+      //   "上一版"只回答"我这轮反馈改了什么"，而人盯着一个新版本时，真正要判断的是
+      //   "这份 skill 相对**原来那一份**变成了什么样"（尤其更新场景：原 skill 是库里那一版）。
+      const against =
+        raw?.against === 'previous'
+          ? 'previous'
+          : raw?.against === 'original'
+            ? 'original'
+            : 'current'
       let baselineFiles: Record<string, string> = {}
       let baselineLabel = ''
-      if (against === 'previous' && draftRun.revisedFrom !== undefined) {
+      /** 实际用上的是哪一条基线——请求里写 `original` 但取不到时，回给界面的必须是**真的那一条**。 */
+      let againstResolved: 'previous' | 'original' | 'current' = against
+      if (against === 'original') {
+        const taskDir = await draftTaskDir(draftRunId)
+        const versions = await readDraftVersions(taskDir)
+        const target = draftRun.crystallizeTarget
+        // 三个候选，按"这一份到底指什么"排：
+        //   ① 更新场景：任务开始时抓的 `material/existing-skill/`（要改的那一份的原文）
+        //   ② 新建场景：**第一版**的快照（`history/<第一版 runId>/skill/`）——这份 skill 最初的样子
+        //   ③ 都没有（首版还没有历史版本、老数据没迁过）⇒ 退回"当前已入库版本"，并如实改标签
+        const firstRecord = versions?.versions[0]
+        const candidateDirs: Array<{ dir: string; label: string }> = []
+        if (target?.kind === 'update') {
+          const slug = (await store.listSkills(workspaceId)).find(
+            (sk) => (sk.id as string) === target.skillId,
+          )?.slug
+          candidateDirs.push({
+            dir: join(taskDir, 'material', 'existing-skill'),
+            label: slug === undefined ? '原 skill（要改的那一份）' : `原 skill（${slug}）`,
+          })
+        }
+        if (firstRecord !== undefined && firstRecord.snapshot !== null) {
+          candidateDirs.push({
+            dir: draftVersionSkillDir(taskDir, firstRecord),
+            label: '原 skill（第一版）',
+          })
+        }
+        for (const candidate of candidateDirs) {
+          const files = await readDraftSkillDir(candidate.dir)
+          if (files !== null && Object.keys(files).length > 0) {
+            baselineFiles = files
+            baselineLabel = candidate.label
+            break
+          }
+        }
+        // 一个候选都没取到 ⇒ 别假装比过了：退回当前版本那条路，标签与 `against` 都说实话
+        if (baselineLabel === '') {
+          againstResolved = 'current'
+        }
+      }
+      if (baselineLabel === '' && against === 'previous' && draftRun.revisedFrom !== undefined) {
         // ★ 分批第 16 批：上一版不再住在"它自己那间小屋"里，而是任务目录里的**快照**
         //   （`history/<上一版 runId>/skill/`）。做事顺序：先看版本表；表里还没有（比如自愈迁移
         //   刚写完、或者这一版还在跑）就退回"上一版的 runId 当快照目录"，最后才退回老形状的
@@ -5211,7 +5261,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           }
         }
         baselineLabel = '上一版草稿'
-      } else {
+      } else if (baselineLabel === '') {
         const t = draftRun.crystallizeTarget
         if (t?.kind === 'update') {
           const current = (await store.listSkills(workspaceId)).find(
@@ -5231,7 +5281,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       const diffs = diffFileSets(baselineFiles, draftFiles)
       sendJson(res, 200, {
-        against,
+        // ⚠️ 回的是**实际用上的**那一条（`againstResolved`），不是请求里写的那一条：
+        //    请求 `original` 但三个候选都取不到时会退回当前版本，界面得跟着改口，
+        //    否则结论条会写着"对比原 skill"、数字却是另一条基线的（第 8 批"结论与内容分叉"那类毛病）。
+        against: againstResolved,
         baselineLabel,
         files: diffs,
         totals: {
