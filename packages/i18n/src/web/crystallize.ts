@@ -134,6 +134,8 @@ export const crystallizeText = {
   // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
   'crystallize.newVersionHint': { zh: '自动返工已经出了新一版（你正在编辑，没有自动切过去）', en: 'Auto-rework produced a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
+  // 分批第 29 批：草稿这一版还在跑 ⇒ 显示实时日志（原来默认显示"最后结果"= 上一版的旧文本）
+  'crystallize.draftLiveHint': { zh: '这一版还在跑，下面是实时日志', en: 'This version is still running; live log below' },
   'crystallize.auditRunningShort': { zh: '审核运行中', en: 'Audit running' },
   // 2026-10-21：说明段收进按钮悬停，条上只留四个字（原来那段占 42px 两行）
   'crystallize.auditNotYetBrief': { zh: '还没审核过', en: 'Not audited yet' },

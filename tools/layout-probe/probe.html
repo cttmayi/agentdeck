@@ -5165,13 +5165,39 @@
                 )
                 return active ? text(active) : null
               })()
+              /**
+               * ⚠️ 分批第 29 批：这里要**主动切到「审核过程」**再量。
+               *
+               * 为什么：`processTab` 一旦被前面的小节点过（`processTabTouched = true`），
+               * 界面就**不再自动切**子 tab ⇒ 审核那一格压根不渲染 ⇒ `[data-process-pane="audit"]`
+               * 恒为 null。表现就是这条判据时红时绿（b27 绿、b29 绿、b29b 红，同一份代码）。
+               * 上一行已经量过"点开始审核后自动落在审核过程"，这里只补一次手动兜底，
+               * 判的是"日志真的在流"，不是"有没有自动切"。
+               */
+              {
+                const cySubAuditLive = [...d().querySelectorAll('.process-subtabs button')].find(
+                  (b) => text(b) === '审核过程',
+                )
+                if (cySubAuditLive && !cySubAuditLive.classList.contains('tabs-active')) {
+                  click(cySubAuditLive)
+                  await untilNet(() => !!d().querySelector('[data-process-pane="audit"]'), 60)
+                }
+              }
               // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
               // ⚠️ 分批第 27 批：量**审核那一格**（`[data-process-pane="audit"]`），不是"页面里第一个"。
               //    「依据」那一格也是 `.process-pane`，DOM 顺序在它前面 ⇒ 老写法恒量到 null，
               //    判据红而界面没错（`crystal.auditLiveLogBox` 红了好几个批次就是这个原因）。
               await untilNet(() => !!d().querySelector('[data-process-pane="audit"] .log-box'))
               let block = d().querySelector('[data-process-pane="audit"]')
-              facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
+              /**
+               * ⚠️ 分批第 29 批：这条判据**挪到"日志确实在流"之后再量**。
+               *
+               * 原来紧跟在"等 `.log-box` 出现"后面量：切子 tab 那一帧 Svelte 正在重建那一格，
+               * `untilNet` 看到元素的瞬间它可能刚被换掉 ⇒ `block.querySelector('.log-box')` 是 null。
+               * 实测症状就是同一条判据在同一天里红绿交替（b29 绿、b29b 红、补了切 tab 之后仍红），
+               * 而 `crystal.auditLiveLogText` 同一时刻**是有内容的** —— 红的从来不是界面。
+               * 现在放到两个"等到内容"的判据后面，那一刻盒子里已经有'正在跑'字样了。
+               */
               // ⚠️ 两件事都要**等到**，不能量一次就算：
               //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
               //      量到的是"排队中"，判据红了，而界面没错（真现场就是还在排队）。
@@ -5187,6 +5213,7 @@
               const liveBar = d().querySelector('.conclusion-block')
               facts['crystal.auditLiveText'] = liveBar ? text(liveBar) : null
               facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
+              facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
               facts['crystal.auditLiveBadge'] = liveBar ? text(liveBar.querySelector('.badge')) : null
               const cancelBtn = liveBar
                 ? [...liveBar.querySelectorAll('button')].find((b) => text(b).includes('取消审核'))

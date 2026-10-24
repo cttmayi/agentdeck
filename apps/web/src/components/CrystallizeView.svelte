@@ -39,6 +39,7 @@
   import { tick, onDestroy, onMount } from 'svelte'
   import { buildFeedbackDraft } from '../lib/crystallize-feedback.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { draftIsLive } from '../lib/draft-live.ts'
   import { finalResultText } from '../lib/final-output.ts'
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
   import MainArea from './MainArea.svelte'
@@ -479,6 +480,17 @@
               ? 'running'
               : 'idle'
 
+  /**
+   * 起草那一版是不是**还在跑**（分批第 29 批）。
+   *
+   * `draftStatus === null` = 还没收到终态（`resumeDraft` 接上在跑的 run、或者刚跟到新版），
+   * 这与"跑完/失败/取消"必须分开：前者要显示**实时日志**，后者才有"最后结果"可看。
+   * 判据里不写死某个状态名，而是"没进终态即在跑"——状态机加一个非终态值不会让这里失准。
+   */
+  // 判据抽到 `lib/draft-live.ts`：组件里的行为要真浏览器夹具才量得到，
+  // 而这条判据（状态未知/非终态 ⇒ 显示实时日志）在单测里就能钉死。
+  $: draftLiveNow = draftIsLive(draftStatus)
+
   $: auditFailedStuck =
     reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
 
@@ -614,11 +626,25 @@
     pendingNewVersion = ''
     draftRunId = nextRunId
     handledTerminal = false
+    /**
+     * ★ 分批第 29 批：**必须把上一版的状态清掉**。
+     *
+     * 使用者报的：「在草稿-审核的循环中，只能看到审核过程，草稿的日志在UI上一直没有更新」。
+     *
+     * 我就是在这儿漏的：跟到新一版时只换了 `draftRunId`，`draftStatus` 还留着上一版的
+     * `completed` ⇒ 草稿那一格走"最后结果"分支（上一版的旧文本），永远不会挂实时日志；
+     * 而审核那一格有自己的日志流 ⇒ 表现正是"只看得到审核过程"。
+     * 现在按"这一版状态未知（= 在跑）"重置，草稿格就会自动显示实时日志。
+     */
+    draftStatus = null
+    draftFinalText = ''
+    draftFinalState = 'loading'
     reviewInfo = null
     artifacts = null
     diff = null
     void loadMaterial()
     void loadDraftOutput()
+    void loadDraftFinalText()
     void loadReview()
   }
 
@@ -1373,16 +1399,32 @@
                   数（那属于「过程」tab 的事），不能拿素材的数顶上。
                 -->
               </span>
-              <button
-                type="button"
-                class="ghost small"
-                style="margin-left:var(--sp-3)"
-                onclick={() => (draftLogOpen = !draftLogOpen)}
-              >
-                {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
-              </button>
+              <!--
+                ★ 分批第 29 批：在跑的时候不给这个按钮——那一格已经是实时日志了，
+                按钮点下去什么都不会变，只会让人以为"点了才有日志"。
+              -->
+              {#if !draftLiveNow}
+                <button
+                  type="button"
+                  class="ghost small"
+                  style="margin-left:var(--sp-3)"
+                  onclick={() => (draftLogOpen = !draftLogOpen)}
+                >
+                  {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
+                </button>
+              {/if}
             </h3>
-            {#if draftLogOpen}
+            {#if draftLiveNow}
+              <!--
+                ★ 分批第 29 批：这一版还在跑 ⇒ **直接显示实时日志**。
+                原来这里只有「完整日志」按钮后面才有 `RunLog`，默认显示的是"最后结果"
+                （= 上一版写下的最后一段文本）⇒ 循环中草稿那一格一动不动，人只能去看审核。
+              -->
+              <p class="faint small">{$t('crystallize.draftLiveHint')}</p>
+              <div class="log-box">
+                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+              </div>
+            {:else if draftLogOpen}
               <div class="log-box">
                 <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
               </div>
