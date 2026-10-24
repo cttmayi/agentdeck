@@ -204,7 +204,46 @@ async function findActiveDraft(
       return src !== undefined && sourceRunIds.includes(src)
     })
     .sort((a, b) => b.queuedAt - a.queuedAt)
-  return draftInfo(matched[0])
+
+  /**
+   * ★ 分批第 28 批：**链上有任何一版已入库/已放弃 ⇒ 整条链都不算"进行中的起草"**。
+   *
+   * 为什么逐版判不够（使用者报的"被重新拉出来了"）：入库原来只给**最新那一版**打
+   * `crystallized`，同一任务里更早的版本没有标记 ⇒ 它们会被当成"进行中的起草"复活。
+   * 真机 store 里就有两个这样的链：`1SJ4XF`（5 版，最新已入库，4 版漏标）与
+   * `SXFQP8`（2 版，最新已入库，1 版漏标）。
+   *
+   * 写侧已经改成"入库标记整条链"（见 `server.ts` 的 save-draft 路由），这里是**读侧兜底**：
+   * 那两个链的标记已经写在盘上了，不该等下次入库才修好。
+   */
+  const settledByChain = new Set<string>()
+  const byId = new Map(drafts.map((r) => [r.id as string, r]))
+  for (const r of drafts) {
+    if (r.crystallized !== true && r.discarded !== true) continue
+    // 沿 `revisedFrom` 上溯到根，再向下把所有同根的都算进去
+    let cur = r
+    let hops = 0
+    while (cur.revisedFrom !== undefined && cur.revisedFrom !== null && hops < 60) {
+      const parent = byId.get(cur.revisedFrom as string)
+      if (parent === undefined) break
+      cur = parent
+      hops += 1
+    }
+    settledByChain.add(cur.id as string)
+  }
+  const rootOfDraft = (r: (typeof drafts)[number]): string => {
+    let cur = r
+    let hops = 0
+    while (cur.revisedFrom !== undefined && cur.revisedFrom !== null && hops < 60) {
+      const parent = byId.get(cur.revisedFrom as string)
+      if (parent === undefined) break
+      cur = parent
+      hops += 1
+    }
+    return cur.id as string
+  }
+  const alive = matched.filter((r) => !settledByChain.has(rootOfDraft(r)))
+  return draftInfo(alive[0])
 }
 
 /**

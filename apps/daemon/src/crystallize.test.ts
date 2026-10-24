@@ -195,6 +195,57 @@ describe('crystallizeTargets：目标面板信息', () => {
     )
   })
 
+  /**
+   * ★★★ 分批第 28 批：盘上已有的旧数据（只标了最新那一版）也要被读侧兜住。
+   *
+   * 使用者报的：「沉淀任务没有了…但没有被完全删除。我重新沉淀的时候，被重新拉出来了」。
+   * 真机 store 里现成两个这样的链：`1SJ4XF`（5 版，最新已入库、4 版漏标）与
+   * `SXFQP8`（2 版，最新已入库、1 版漏标）。
+   *
+   * 写侧已经改成"入库标记整条链"，这条用例钉的是**读侧**：链上任何一版已入库/已放弃
+   * ⇒ 整条链都不算"进行中的起草"。没有这一半，那两个链要等下次入库才修好。
+   */
+  test('★★★ 链上有一版已入库 ⇒ 整条链都不算"进行中的起草"（旧数据兜底）', async () => {
+    const agent = await seedAgent({ id: 'exec-chain' })
+    const taskRun = await seedRun({
+      id: 'run-chain',
+      agentId: agent.id as string,
+      subject: { type: 'issue', id: 'issue-chain' },
+    })
+    await appendMessage('run-chain', { type: 'text', content: '产出' })
+    const v1 = makeRun({
+      id: 'draft-chain-v1',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'completed',
+      queuedAt: 1,
+      subject: { type: 'skill-draft', id: 'draft-chain-v1', sourceRunId: 'run-chain' },
+      crystallizeTarget: { kind: 'new' },
+    })
+    const v2 = makeRun({
+      id: 'draft-chain-v2',
+      agentId: agent.id as string,
+      kind: 'execute',
+      status: 'completed',
+      queuedAt: 2,
+      revisedFrom: 'draft-chain-v1' as never,
+      subject: { type: 'skill-draft', id: 'draft-chain-v2', sourceRunId: 'run-chain' },
+      crystallizeTarget: { kind: 'new' },
+      // 只给最新那一版打标记 —— 这就是旧数据的样子
+      crystallized: true,
+    })
+    await store.insertRun(v1)
+    await store.insertRun(v2)
+
+    const run = await store.getRun('run-chain' as never)
+    const targets = await crystallizeTargets(store, run!)
+    assert.equal(
+      targets.activeDraft,
+      null,
+      'v1 没标记也不算"进行中"：同一条链已经入库了（否则会把它拉回界面）',
+    )
+  })
+
   test('task：activeDraft = 最近一条未入库的 skill-draft run（已入库的跳过）', async () => {
     const agent = await seedAgent({ id: 'exec2' })
     const taskRun = await seedRun({

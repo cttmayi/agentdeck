@@ -3064,3 +3064,45 @@ rewrite/bloat/off-target 时**直接写停止标记、停掉自动循环**，等
 | `crystallize-e2e` ★★★「只标注、不停循环」 | 重写 ⇒ `rework-guard.json` 有判定、`.auto-rework.json` **不存在**、第 3 版照常自动起来、review 接口 `stopped=false` 且 `guard` 非空 | 把停止标记加回去 ⇒ 红 ✓ |
 | `crystallize-e2e` ★★「遗留 regressed 标记忽略」 | 盘上放着 `stoppedBy:regressed` 也照样派返工 | — |
 | probe `crystal.loopState`（真 Chrome） | 有判决的草稿上挂着循环状态，取值 ∈ {running,passed,exhausted,stopped} | 量错屏 ⇒ 红 ✓（已修正） |
+
+### 10.43 入库只标最新一版 ⇒ 旧版在"重新沉淀"时被拉回来（2026-10-25，分批第 28 批）
+
+使用者：「在沉淀页面中沉淀任务没有了（比如删除或者提交了），但没有被完全删除。我重新沉淀的时候，
+被重新拉出来了。」
+
+#### 先说：这不是"删除没删干净"，是**两条路不对称**
+
+- 「放弃」（`/api/crystallize/discard`）从分批第 17 批起就按**整条链**打 `discarded`（那时就发现
+  "只标被点的那一版会留下半死不活的链"）；
+- 而「入库」（`/api/crystallize/save-draft`）只给**被入库的那一版**打 `crystallized`；
+- 「恢复进行中的起草」（`findActiveDraft`）是**逐版**判标记的 ⇒ 同一任务里更早的版本还"活着"
+  ⇒ 从同一来源再进沉淀页，它们被当成"进行中的起草"拉回界面。
+
+#### 真机数据（直接读 store 的 `log/run.jsonl` 量的，不是推的）
+
+| 链 | 版数 | 最新 | 漏标（还活着）的版本 |
+| --- | --- | --- | --- |
+| `1SJ4XF` | 5 版 | 已入库 | **4 版**：`1SJ4XF`、`17NJGB`、`NQWYZN`、`JXQF8B` |
+| `SXFQP8` | 2 版 | 已入库 | **1 版**：`SXFQP8` |
+
+（放弃的那 8 条链全部 0 漏标 —— 与"只有入库这一路有洞"完全吻合。）
+
+#### 改了两处（写侧 + 读侧）
+
+1. **写侧**：入库时按 `readDraftVersions(taskDir)` 拿到整条链，把 `crystallized` 打到**每一版**上
+   （已经 `discarded` 的不回填——可见性由最新那版判，回填只会制造噪音）。
+2. **读侧兜底**：`findActiveDraft` 里，只要**链上任何一版**已入库/已放弃，整条链都不算"进行中的起草"。
+   ⚠️ 这一半不是为了新数据：那两个链的标记**已经写在盘上了**，不该等下次入库才修好。
+   （`revisedFrom` 上溯的跳数上限 60，与别处一致——防环。）
+
+#### 为什么之前的用例没抓到
+
+已经有一条「入库后 → `activeDraft` 清空」的用例，但它只造了**单版**任务 ⇒ 单版时"最新那一版"
+就是整条链，两条路看起来一样。这次补的是**多版**（`revise` 造 v2、入库 v2、断言 v1 也被标记）。
+
+#### 验证
+
+| 用例 | 断言什么 | 红检 |
+| --- | --- | --- |
+| `crystallize-e2e` ★★★「入库要标记整条链」 | 入库 v2 之后：v1 的 `crystallized === true`；`targets.activeDraft === null`；列表里没有这一行 | — |
+| `crystallize.test.ts` ★★★「链上有一版已入库 ⇒ 整条链都不算进行中」 | 模拟旧数据（只标最新那版）⇒ `activeDraft` 仍是 `null` | 关掉读侧兜底 ⇒ 红，`actual` 正是 `draft-chain-v1` ✓ |

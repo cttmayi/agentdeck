@@ -588,6 +588,64 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     assert.equal(t2.activeDraft, null, '入库后不恢复')
   })
 
+  test('★★★ 入库要标记**整条链**：多版任务的旧版不许在"重新沉淀"时被拉回来', async () => {
+    /**
+     * 使用者报的：「在沉淀页面中沉淀任务没有了（比如删除或者提交了），但没有被完全删除。
+     * 我重新沉淀的时候，被重新拉出来了」。
+     *
+     * 量到的根因：入库原来只给**被入库的那一版**打 `crystallized`，而「恢复进行中的起草」
+     * 是**逐版**判标记的 ⇒ 同一任务里更早的版本还活着 ⇒ 从同一来源再进沉淀页，它们被当成
+     * "进行中的起草"复活。真机 store 里现成两个受害者：链 `1SJ4XF`（5 版，最新已入库、
+     * **4 版漏标**）与 `SXFQP8`（2 版，最新已入库、**1 版漏标**）。
+     *
+     * 「放弃」那条路早就按整条链标（分批第 17 批），只有入库这一路有洞。
+     */
+    const runId = await runReviewed('多版任务入库')
+    const v1 = await draftAndWait({ runId, target: { kind: 'new', purpose: '链入库' } })
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '把 Procedure 补全' }),
+    })
+    assert.equal(res.status, 202, JSON.stringify(await res.clone().text()))
+    const v2 = ((await res.json()) as { draftRunId: string }).draftRunId
+    await waitRunStatus(v2, ['completed', 'failed', 'cancelled'])
+
+    // 入库**最新那一版**
+    const done = await commit({
+      draftRunId: v2,
+      target: { kind: 'new' },
+      slug: 'chain-commit',
+      files: {
+        'SKILL.md':
+          '---\nname: chain-commit\ndescription: 链入库\n---\n\n# 链入库\n\n## When to Use\nX。\n\n## Procedure\n1. Y。\n',
+      },
+    })
+    assert.equal(done.status, 201, JSON.stringify(done.body))
+
+    // ① 旧版也被标成已入库（写侧修复）
+    const old = (await (await fetch(`${daemon.url}/api/runs/${v1}`)).json()) as {
+      crystallized?: boolean
+    }
+    assert.equal(old.crystallized, true, '整条链都要标：旧版还活着就会被"重新沉淀"拉回来')
+
+    // ② 从来源进沉淀页 ⇒ 没有"进行中的起草"
+    const t2 = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
+      activeDraft: { runId: string } | null
+    }
+    assert.equal(t2.activeDraft, null, '入库后该来源不该再冒出任何一版')
+
+    // ③ 列表里也没有这一行
+    const list = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
+      items: Array<{ taskRunId: string }>
+    }
+    assert.equal(
+      list.items.some((r) => r.taskRunId === v1),
+      false,
+      '已入库的任务不许留在沉淀列表里',
+    )
+  })
+
   test('★ 撞 slug：同一 slug 再新建 ⇒ 409 clash_mine + existing 指回旧那条', async () => {
     const runId = await runReviewed('又一个流程任务')
     const draftRunId = await draftAndWait({

@@ -6560,7 +6560,41 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //
       // 写在这里的代价为零：`versioning` 那几行（git 提交）在它上面，早就跑完了；
       // 而"入库成功"这件事与 `crystallized` 标记本来就该是同一个瞬间。
-      await store.insertRun({ ...draftRun, crystallized: true })
+      /**
+       * ══════════════════════════════════════════════════════════════════
+       * ★ 分批第 28 批：入库标记要打在**整条链**上（使用者报"被重新拉出来了"）
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 原来只标 `draftRun`（被入库的那一版）。而「恢复进行中的起草」
+       * （`findActiveDraft`）是**逐版**判 `crystallized` 的 ⇒ 同一任务里更早的版本
+       * 还"活着"⇒ 从同一来源再进沉淀页时，那些旧版被当成"进行中的起草"拉回界面。
+       * 使用者的原话就是这个：「沉淀任务没有了…但没有被完全删除。我重新沉淀的时候，
+       * 被重新拉出来了」。
+       *
+       * 真机上现成的两个受害者（直接读 store 量出来的）：
+       *   · 链 `1SJ4XF` 共 5 版、最新已入库，**4 版漏标**；
+       *   · 链 `SXFQP8` 共 2 版、最新已入库，**1 版漏标**。
+       *
+       * 「放弃」那条路早就按整条链标了（分批第 17 批），所以只有**入库**这一路有这个洞。
+       * 口径与放弃对齐：入库的是这个**任务**，不是那一版的孤本。
+       */
+      const taskDirForCommit = await draftTaskDir(draftRun.id as string)
+      const versionsForCommit = await readDraftVersions(taskDirForCommit)
+      const commitChainIds =
+        versionsForCommit === null
+          ? [draftRun.id as string]
+          : versionsForCommit.versions.map((v) => v.runId)
+      for (const id of commitChainIds) {
+        if (id === (draftRun.id as string)) {
+          await store.insertRun({ ...draftRun, crystallized: true })
+          continue
+        }
+        const run = await store.getRun(id as RunId)
+        if (run === null || run === undefined) continue
+        // 已经放弃过的不改口径：那条链的可见性由"最新那一版"决定，回填只会制造噪音
+        if (run.discarded === true) continue
+        await store.insertRun({ ...run, crystallized: true })
+      }
 
       sendJson(res, 201, { skill, versioning })
       return

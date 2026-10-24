@@ -1167,6 +1167,9 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 28 批**（入库标记整条链，见 §10.43）：`save-draft` 路由按 `readDraftVersions` 拿整条链、
+把 `crystallized` 打到每一版（`discarded` 的不回填）；`findActiveDraft` 增加读侧兜底——
+沿 `revisedFrom` 上溯到根，链上任何一版已入库/已放弃 ⇒ 整条链都不算"进行中的起草"。
 **第 27 批**（界面不更新 + 闸门只标注，见 §10.42）：`CrystallizeView.svelte` 加 5 秒轮询
 （`onMount`/`onDestroy` + `pollOnce`）、自动跟随链上新版（编辑中只提示 `data-new-version-hint`）、
 结论条挂 `data-auto-rework-state`（running/passed/exhausted/stopped/idle）与 `data-rework-guard`；
