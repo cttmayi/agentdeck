@@ -3888,14 +3888,29 @@ const CHECKS = [
     key: 'crystal.paneTreeBodySideBySide',
     label: '★ 主区是**真的并排**两列（树固定窄栏 + 窗格），不是上下叠着（布局类缺陷只有量得出来）',
     ok: (v) => v === true,
-    show: (v, f) => `树 ${f['crystal.treeW']}px　窗格高 ${f['crystal.paneH']}px`,
+    show: (v, f) => `树 ${f['crystal.treeW']}px　窗格高 ${f['crystal.paneH']}px（底边差 ${f['crystal.paneBottomGap']}px）`,
   },
   {
     view: '沉淀',
     key: 'crystal.paneH',
-    label: '★★ 窗格高度落在 `clamp(22rem, 58vh, 40rem)` 那一档里（352–640px；写死小高会让编辑器只有几行）',
-    ok: (v) => typeof v === 'number' && v >= 350 && v <= 641,
-    show: (v) => `${v}px`,
+    label:
+      '★★ 窗格高度 ≥ 22rem（352px）——保底：窗口再矮也不把编辑器压到只剩几行（分批第 30 批取消了 58vh 与 640px 上限，改由"吃剩余高度"决定）',
+    ok: (v) => typeof v === 'number' && v >= 351,
+    show: (v, f) => `${v}px（视口 ${f['crystal.viewportH']}）`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.paneBottomGap',
+    label:
+      '★★★ 主区底边**贴着视口底**（差 ≤ 1% 视口高）——「沉淀页要自适应高度」：改之前格子按 `58vh` 估，窗口一高就留白（1600 高时差 277px）、窗口一矮就整页滚',
+    // 两档都算过：① 填满了（差 0±1%视口高）；② 窗口太矮、`.pane-body` 真在滚（主区压到 22rem 保底，
+    // 底边被推到视口外是对的——不这么留后手，判据会把"窗口太小时的合理退化"判成缺陷）
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      ((v >= 0 && v <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01))) ||
+        (v < 0 && f['crystal.paneBodyScrollable'] === true)),
+    show: (v, f) =>
+      `差 ${v}px（视口 ${f['crystal.viewportH']}${f['crystal.paneBodyScrollable'] ? '，主区在滚' : ''}）`,
   },
   {
     view: '沉淀',
@@ -5852,7 +5867,12 @@ try {
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
-        (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : ''),
+        (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : '') +
+        // 分批第 30 批：`PROBE_IFRAME_H` 换 iframe 高度，用来量"窗口高/矮时界面是否自适应"。
+        // ⚠️ `--window-size` 在这里**没有用**（探针量的是 iframe 视口）；第一版改的是它，
+        //    两档跑出来都是一模一样的 880 才发现量错了对象。
+        (process.env['PROBE_IFRAME_H'] ? `&h=${encodeURIComponent(process.env['PROBE_IFRAME_H'])}` : '') +
+        (process.env['PROBE_IFRAME_W'] ? `&w=${encodeURIComponent(process.env['PROBE_IFRAME_W'])}` : ''),
     ],
     { stdio: ['ignore', outFd, errFd] },
   )

@@ -32,9 +32,28 @@
          runtime 是 `generic`（命令 `agent-cli` 不存在）⇒ 它们会立刻失败，**不会**
          拉起任何一个真实的模型去干活（见 `run.mjs` 里造那个夹具 agent 的说明）。
     -->
+    <!--
+      ⚠️ 高度/宽度可被 URL 参数覆盖（默认 1280×880，与以前逐像素一致）。
+      分批第 30 批加这个口子是为了**换窗口高度量同一批判据**：界面自适应高低的缺陷
+      只在"窗口高/矮"时暴露（`58vh` 时代大屏留白、小屏整页滚），而 `--window-size`
+      对 iframe 里的页面无效（量的是 iframe 视口，不是浏览器视口）——这一点我第一版
+      以为是 Chrome 参数没生效，跑了两档都是一模一样的 880 才发现量错了对象。
+    -->
     <iframe id="f" src="/#/agents"></iframe>
     <pre id="out">pending</pre>
     <script>
+// ★ 分批第 30 批：iframe 尺寸可由 URL 覆盖（`?w=1280&h=1200`）——"自适应高度"必须
+//   在**不同窗口高度**下各量一遍，否则只能证明默认那一档而已。
+;(() => {
+  const q = new URLSearchParams(location.search)
+  const w = Number(q.get('w') ?? '')
+  const h = Number(q.get('h') ?? '')
+  const fr = document.getElementById('f')
+  if (!fr) return
+  if (w > 0) fr.style.width = `${w}px`
+  if (h > 0) fr.style.height = `${h}px`
+})()
+
       const f = document.getElementById('f')
       const facts = {}
       const errors = []
@@ -4643,6 +4662,36 @@
           facts['crystal.paneCols'] = cyPane ? cs(cyPane).gridTemplateColumns : null
           facts['crystal.treeW'] = cyTreeRect ? Math.round(cyTreeRect.w) : null
           facts['crystal.paneH'] = cyPaneRect ? Math.round(cyPaneRect.h) : null
+          /**
+           * ★★ 分批第 30 批：主区底边到视口底还差多少（界面自适应高度）。
+           *
+           * 使用者：「沉淀成 skill 的页面需要自适应高度」。改之前格子高度是
+           * `clamp(22rem, 58vh, 40rem)`——按视口的固定比例估，和"上面吃掉多少"无关。
+           * 实测这一屏（视口 880）：主区起点 363、高 510、底边 873 ⇒ 只差 7px 是**运气**，
+           * 不是布局：窗口一高就留一片空白（1600 高时差 277px），窗口一矮就整页滚。
+           * 判据要求"贴着视口底"（差值 ≤ 1% 视口高）：填满才算自适应。
+           */
+          // 量的是"到**内容盒**底边"的距离：`.pane-body` 自带下内边距（--sp-4 = 16px），
+          // 拿视口底去减会把那段 padding 算成"没填满"，判据会永远差 16px（第一次就踩了）
+          const cyPaneBodyEl = d().querySelector('.pane-body.detail-scroll')
+          const cyPaneBodyRect = cyRect(cyPaneBodyEl)
+          const cyPaneBodyPadBottom = cyPaneBodyEl
+            ? parseFloat(cs(cyPaneBodyEl).paddingBottom || '0')
+            : 0
+          // 矮窗口下 `.pane-body` 会真的滚动（主区被压到 22rem 保底）——那时"底边差"为负是正确的，
+          // 所以判据要能区分"填满了"与"页面在滚"。
+          facts['crystal.paneBodyScrollable'] = cyPaneBodyEl
+            ? cyPaneBodyEl.scrollHeight > cyPaneBodyEl.clientHeight + 1
+            : null
+          facts['crystal.paneBottomGap'] =
+            cyPaneRect === null || cyPaneBodyRect === null
+              ? null
+              : Math.round(
+                  cyPaneBodyRect.y +
+                    cyPaneBodyRect.h -
+                    cyPaneBodyPadBottom -
+                    (cyPaneRect.y + cyPaneRect.h),
+                )
           facts['crystal.paneTreeBodySideBySide'] =
             cyTreeRect !== null &&
             cyBodyRect !== null &&

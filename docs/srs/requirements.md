@@ -1167,6 +1167,11 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 30 批**（沉淀页自适应高度，见 §10.45）：`.crystal-flow` 改可伸缩列（`min-height:100%`），
+`.process-pane`/`.review-pane`/`.file-pane` 由 `height: clamp(22rem,58vh,40rem)` 改为
+`flex: 1 1 0; min-height: 22rem`，素材折叠区那份保持固定（`flex:0 0 auto` + 原 clamp）；
+探针新增 `crystal.paneBottomGap`、`crystal.paneBodyScrollable`，`crystal.paneH` 撤掉 641 上限；
+探针 iframe 尺寸可用 `PROBE_IFRAME_H`/`PROBE_IFRAME_W` 覆盖（`--window-size` 对 iframe 无效）。
 **第 29 批**（循环里草稿日志不更新，见 §10.44）：新增 `apps/web/src/lib/draft-live.ts`
 （`draftIsLive(status)`：`null`/非终态 ⇒ true，三个终态 ⇒ false）+ 4 条单测；
 `CrystallizeView` 的草稿格改为"在跑即显示实时日志"、完成才回到最后结果两态（在跑时不给那个按钮）；
