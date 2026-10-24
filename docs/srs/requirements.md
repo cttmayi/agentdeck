@@ -1167,6 +1167,11 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 21 批**（反馈之后界面误报"白跑"，见 §10.37）：结论条判定整块拎成纯函数 `apps/web/src/lib/audit-bar.ts`
+（`resolveAuditBar`），**实时状态只在 `live.runId === reviewRunId` 时采信**——「反馈」由平台自动起审核、
+不经过手动「开始审核」那条清空路径，缓存里上一版的终态 `completed` 曾被算到新一版头上，导致"刚起"被显示成
+「审核跑完了但没留下判决……这一步等于白跑」。单测 6 条（★★ = 你报的场景，**红检过**；另钉住"跑完但没判决
+仍要报""失败/取消说没跑成""没审过不许说没跑成"三条不能一起盖掉的真话）。`check` 2062 全绿。
 **第 20 批**（审核方向收窄到可执行性，见 §10.36）：① **平台定检** `apps/daemon/src/skill-exec-check.ts`——
 脚本语法（python `ast.parse`/`node --check`/`bash -n`，**只解析不执行**）、引用文件是否都在、占位符是否在代码块外解释过、
 骨架（frontmatter/两节标题）、吞掉错误的写法（**只列事实**）；四种状态 `ok`/`fail`/`skipped`/`note` 不许互相顶替

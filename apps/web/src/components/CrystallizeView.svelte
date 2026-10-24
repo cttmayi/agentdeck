@@ -30,6 +30,7 @@
   import { t } from '../lib/i18n.ts'
   import { go } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
+  import { resolveAuditBar } from '../lib/audit-bar.ts'
   import { showToast } from '../lib/view.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
@@ -136,8 +137,17 @@
    * ⚠️ 为什么不能只用 `reviewInfo.reviewRunStatus`：那是"读接口那一刻"的快照。点「开始审核」
    *    时 run 还在 `queued`，徽标就会**一直**显示「排队中」——而日志已经在流了。
    *    实测（探针 `crystal.auditLiveBadge`）抓到过这一幕。
+   *
+   * ⚠️⚠️ 必须**连着 runId 一起存**（2026-10-23 使用者报的缺陷）：
+   *    原来只存一个字符串。点「反馈」之后，新一版草稿由**平台自动**起审核，那一刻还没有判决，
+   *    而缓存里还留着**上一版审核的终态** `completed` ⇒ `auditNoVerdict` 成立 ⇒ 结论条一口
+   *    咬定「审核跑完了，但没有留下可用的判决……**这一步等于白跑**」。使用者原话正是
+   *    「点反馈后，开始执行，但在其审核执行阶段，提示……」——那时审核**刚刚开始**。
+   *    只在「开始审核」那里清空（`startAudit`）治不了这条路：反馈不经过它；而"再找几个地方
+   *    补清空"是按下葫芦起了瓢 ⇒ 真正该钉的是**这条状态属于哪条 run**：runId 对不上就一律
+   *    不采信，无论谁忘了清。
    */
-  let auditLiveStatus: string | null = null
+  let auditLive: { runId: string; status: string } | null = null
 
   /**
    * 「起草 run」那一块的两态（2026-10-21 使用者："下面的起草run 的日志，应该类似任务中
@@ -373,35 +383,32 @@
    *    可能跑完却没留下判决。原来这里只判 `review === null`，于是**任何**非正常收尾
    *    都永远显示"审核中…（跑完再看这里）"——使用者的原话正是"感觉一直没结束呢"。
    */
-  const AUDIT_ACTIVE_STATUSES = [
-    'queued',
-    'deferred',
-    'waiting_local_directory',
-    'dispatched',
-    'running',
-  ]
+  /**
+   * 结论条的判定（在跑 / 收尾没判决 / 没跑成 / 有判决）**整块交给纯函数**。
+   *
+   * ⚠️ 原来这几条 `$:` 就写在这里，于是它错了一次没人发现：点「反馈」后新一版审核刚起，
+   *    界面报的却是"审核跑完了……这一步等于白跑"（缓存里留着上一版的终态）。
+   *    写进组件里的规则测不了（svelte-check 只管类型），拎到 `lib/audit-bar.ts` 才有单测
+   *    钉住"上一版的终态不认"。见那个文件顶上的注释。
+   */
+  $: auditBar = resolveAuditBar({
+    live: auditLive,
+    reviewRunId: reviewInfo?.reviewRunId ?? null,
+    reviewRunStatus: reviewInfo?.reviewRunStatus ?? null,
+    hasVerdict: reviewInfo !== null && reviewInfo.review !== null,
+  })
   /** 徽标用的状态：事件流报过就用它，否则用接口快照。 */
-  $: auditStatus =
-    auditLiveStatus ??
-    (reviewInfo?.reviewRunId === null ? null : (reviewInfo?.reviewRunStatus ?? null))
-  $: auditRunning =
-    reviewInfo !== null &&
-    reviewInfo.review === null &&
-    reviewInfo.reviewRunId !== null &&
-    AUDIT_ACTIVE_STATUSES.includes(auditStatus ?? '')
+  $: auditStatus = auditBar.status
+  $: auditRunning = auditBar.running
   /** 审核 run 已经收尾（非进行中）——用来把"没跑成"与"还在跑"分开说。 */
-  $: auditSettled =
-    reviewInfo !== null &&
-    reviewInfo.review === null &&
-    reviewInfo.reviewRunId !== null &&
-    !auditRunning
+  $: auditSettled = auditBar.settled
   /**
    * "跑完了但没留下判决"：run 是 `completed`，可是判决没有落库。
    *
    * ⚠️ 这一格必须与"还在跑"分开：它意味着**审核这一步白跑了**（判决不合规、收口时
    *    出错…），人得知道这件事，而不是继续等下去。
    */
-  $: auditNoVerdict = auditSettled && auditStatus === 'completed'
+  $: auditNoVerdict = auditBar.noVerdict
 
   $: auditFailedStuck =
     reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
@@ -868,13 +875,16 @@
   /**
    * 审核 run 收尾时的统一动作：**把实时状态设成终态，再重读判决**。
    *
-   * ⚠️ 这里必须动 `auditLiveStatus`，不能只 `loadReview()`：徽标优先用实时状态（见它的注释），
+   * ⚠️ 这里必须动实时状态，不能只 `loadReview()`：徽标优先用实时状态（见它的注释），
    *    如果收尾时只刷新接口快照而实时状态还停在 `running`，`auditRunning` 就永远为真
    *    ——界面上表现为"取消了，但它还在说审核正在进行"，一个按钮按下去**界面纹丝不动**。
    *    这是我自己改出来的缺陷，探针当场量到了（`crystal.auditAfterCancelStillRunning` 实测 true）。
    */
   async function onAuditTerminal(status: string): Promise<void> {
-    auditLiveStatus = status
+    // 连着 runId 记（见 `auditLive` 的注释）：收尾事件说的永远是"这条 run"的终态，
+    // 记到别的 runId 上就等于凭空造一个终态出来。
+    const runId = reviewInfo?.reviewRunId ?? null
+    auditLive = runId === null ? null : { runId, status }
     await loadReview()
   }
 
@@ -906,8 +916,10 @@
     //   看到的还是起草日志、审核输出一个字都没有（见 `processTab` 的注释）。
     processTab = 'audit'
     processTabTouched = true
-    // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始
-    auditLiveStatus = null
+    // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始。
+    // （⚠️ 光靠这句是不够的——「反馈」那条路不经过这里。真正兜住的是 `auditLive` 的
+    //   runId 比对：对不上一律不采信。这句只是让状态干净一点。）
+    auditLive = null
     error = ''
     try {
       await api<{ reviewRunId: string }>('/api/crystallize/review', {
@@ -2078,8 +2090,8 @@
                   <div class="proc-head">
                     {$t('crystallize.auditShowLog')}
                     {#if auditRunning}
-                      <span class="badge {runStatusClass(auditLiveStatus ?? auditStatus ?? '')}">
-                        {statusLabel(auditLiveStatus ?? auditStatus ?? '')}
+                      <span class="badge {runStatusClass(auditStatus ?? '')}">
+                        {statusLabel(auditStatus ?? '')}
                       </span>
                     {/if}
                   </div>
@@ -2091,7 +2103,12 @@
                       <RunLog
                         runId={reviewInfo.reviewRunId ?? ''}
                         onterminal={(st) => void onAuditTerminal(st)}
-                        onstatus={(st) => (auditLiveStatus = st)}
+                        onstatus={(st) =>
+                          (auditLive =
+                            reviewInfo?.reviewRunId === null ||
+                            reviewInfo?.reviewRunId === undefined
+                              ? null
+                              : { runId: reviewInfo.reviewRunId, status: st })}
                       />
                     </div>
                   {/if}
