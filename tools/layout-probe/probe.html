@@ -5063,6 +5063,14 @@
             )
             facts['crystal.auditFailSaveDisabled'] = cySave ? cySave.disabled : null
             facts['crystal.auditFailSavePresent'] = !!cySave
+            // ★ 分批第 27 批：使用者报「多轮起草-审核过程中界面没有更新，看不出来是否已经结束了」。
+            //   这一屏**有判决**（就是刚判 fail 的那条），所以结论条上必须挂着"循环状态"——
+            //   那是人判断"结束了没有"唯一的一眼可见的东西。
+            //   ⚠️ 第一版我把它量在了深链那屏（那条草稿没判决）⇒ 量到 null、判据红，
+            //      而界面没错：没判决时本来就不该有"循环"这回事。**量错地方比没有量更坏**。
+            facts['crystal.loopState'] =
+              d().querySelector('[data-auto-rework-state]')?.getAttribute('data-auto-rework-state') ??
+              null
           }
 
           // ══════════════════════════════════════════════════════════════
@@ -5158,8 +5166,11 @@
                 return active ? text(active) : null
               })()
               // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
-              await untilNet(() => !!d().querySelector('.process-pane .log-box'))
-              let block = d().querySelector('.process-pane')
+              // ⚠️ 分批第 27 批：量**审核那一格**（`[data-process-pane="audit"]`），不是"页面里第一个"。
+              //    「依据」那一格也是 `.process-pane`，DOM 顺序在它前面 ⇒ 老写法恒量到 null，
+              //    判据红而界面没错（`crystal.auditLiveLogBox` 红了好几个批次就是这个原因）。
+              await untilNet(() => !!d().querySelector('[data-process-pane="audit"] .log-box'))
+              let block = d().querySelector('[data-process-pane="audit"]')
               facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
               // ⚠️ 两件事都要**等到**，不能量一次就算：
               //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
@@ -5169,10 +5180,10 @@
               await untilNet(() => text(d().querySelector('.conclusion-block .badge')) === '运行中', 400)
               await untilNet(
                 () =>
-                  (d().querySelector('.process-pane .log-box')?.textContent ?? '').includes('正在跑'),
+                  (d().querySelector('[data-process-pane="audit"] .log-box')?.textContent ?? '').includes('正在跑'),
                 400,
               )
-              block = d().querySelector('.process-pane')
+              block = d().querySelector('[data-process-pane="audit"]')
               const liveBar = d().querySelector('.conclusion-block')
               facts['crystal.auditLiveText'] = liveBar ? text(liveBar) : null
               facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
@@ -5263,6 +5274,7 @@
             const cySiblingView = await cyReadDraft(cySibling)
             facts['crystal.deepLinkSiblingRows'] = cySiblingView ? cySiblingView.rows : null
             facts['crystal.deepLinkSiblingBar'] = cySiblingView ? cySiblingView.bar : null
+
             const cySourceView = await cyReadDraft(cySource)
             facts['crystal.sourceEntryRows'] = cySourceView ? cySourceView.rows : null
             // 收尾：切走路由（后面的小节自己会进它要的页面）

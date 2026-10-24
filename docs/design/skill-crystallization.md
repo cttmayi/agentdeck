@@ -3013,3 +3013,54 @@ agent 自己去读"，而不是靠提示词把清单怼到它眼前。
 #### 遗留（下一步）
 
 - 沉淀目标面板加一栏「必须遵守的约定」（手填优先级最高）。
+
+### 10.42 多轮过程中界面不更新；闸门只标注不早停（2026-10-25，分批第 27 批）
+
+使用者：「发现一个问题，在多轮 起草-审核 过程中，界面没有更新，看不出来是否已经结束了。」
+
+#### 量到的两个事实
+
+| 事实 | 证据 |
+| --- | --- |
+| 详情页**根本不刷新** | `CrystallizeView.svelte` 里 `grep setInterval` **为空**：只在"进页面 / 点按钮 / RunLog 报终态"时读一次。列表页（`Crystallize.svelte`）有 6 秒轮询 ⇒ **列表变了、详情没变**，看起来更像卡死 |
+| 轮询代价可忽略 | `GET /api/crystallize/targets` 实测 **25ms** |
+| 那条链其实早结束了 | `status=escalated`、`autoRework.stopped=true`，而界面什么都不说 |
+| **我的闸门在误伤** | `.auto-rework.json`：`stoppedBy=regressed`、`reason=rewrite`、「改动量 68 增 / 19 删，占上一版 212 行的 **41%**（阈值 40%）」 |
+
+#### 使用者纠正了我一个**口径**错误
+
+我问"40% 阈值要不要放宽"，使用者答：「**没搞懂，不是要 PASS 才停止吗**」。
+
+对——而且分批第 23 批他就定过「无进展**不早停**，只标注」。我上一批（第 25 批）却让闸门在判成
+rewrite/bloat/off-target 时**直接写停止标记、停掉自动循环**，等于自己加了第三个停止条件。
+真机后果可量：那条链第 4 版改 41% 就被停，既没 PASS 也没用完轮数，人看到的是"这轮明明还在跑，怎么就不动了"。
+
+**现在的停止条件只有三个**：审核 PASS / 轮数用完 / 人点「停止循环」。
+
+#### 改法
+
+1. **闸门改成只标注**：仍写 `material/rework-guard.md`（人可读）+ `material/rework-guard.json`（界面读），
+   **不写** `.auto-rework.json`；日志从「自动循环已停」改成「只标注，不停循环」。
+2. **遗留标记作废**：`readAutoReworkStopped` 读到 `stoppedBy==='regressed'` ⇒ 按"没停"处理
+   （不删使用者的文件，也不让一个作废的判据继续拦着循环；真机上已经误停两条链）。
+3. **详情页自己轮询**（5 秒）：拉 `targets` + `review`。链上冒出新版 ⇒ **自动跟过去**；
+   ⚠️ 正在编辑正文（`dirty`）时**不抢**，只挂一条「已出新版，点这里看」——自动切会丢没保存的字。
+4. **状态一眼可见**：结论条加 `data-auto-rework-state`（`running / passed / exhausted / stopped`）
+   与闸门标注 `data-rework-guard`（文案写明"循环仍在继续"）。
+5. review 接口多两个字段：`autoRework.stopBy`（谁停的）、`autoRework.guard`（这轮被判什么）。
+
+#### 踩到的坑
+
+- **我重新定义了一个已在用的变量**：轮询要判"正在编辑"，我写了 `$: dirty = editText !== diskText`——
+  而组件里本来就有 `dirty`（读盘清、输入置 true），另加一个 `diskText` 恒为 `''` ⇒ 等于永远"在编辑"、
+  自动跟随永远不生效。删掉自算的那行，用现成的 `dirty`。
+- **probe 量错了地方**：第一版把"循环状态"量在深链那屏（那条草稿**没有判决**）⇒ 量到 `null`、判据红，
+  而界面没错——没判决时本来就不该有"循环"这回事。挪到"刚判 fail 的那一屏"才成立。
+
+#### 验证
+
+| 用例 | 断言什么 | 红检 |
+| --- | --- | --- |
+| `crystallize-e2e` ★★★「只标注、不停循环」 | 重写 ⇒ `rework-guard.json` 有判定、`.auto-rework.json` **不存在**、第 3 版照常自动起来、review 接口 `stopped=false` 且 `guard` 非空 | 把停止标记加回去 ⇒ 红 ✓ |
+| `crystallize-e2e` ★★「遗留 regressed 标记忽略」 | 盘上放着 `stoppedBy:regressed` 也照样派返工 | — |
+| probe `crystal.loopState`（真 Chrome） | 有判决的草稿上挂着循环状态，取值 ∈ {running,passed,exhausted,stopped} | 量错屏 ⇒ 红 ✓（已修正） |

@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 27 批**（界面不更新 + 闸门只标注，见 §10.42）：`CrystallizeView.svelte` 加 5 秒轮询
+（`onMount`/`onDestroy` + `pollOnce`）、自动跟随链上新版（编辑中只提示 `data-new-version-hint`）、
+结论条挂 `data-auto-rework-state`（running/passed/exhausted/stopped/idle）与 `data-rework-guard`；
+三个 `.process-pane` 打 `data-process-pane` 身份（probe 量对地方）；`server.ts` 的闸门**不再写**
+`.auto-rework.json`（只写 `rework-guard.md` + `rework-guard.json`），`readAutoReworkStopped` 把已作废的
+`stoppedBy:'regressed'` 按"没停"处理；review 接口 `autoRework` 增加 `stopBy` 与 `guard`。
 **第 26 批**（使用者的要求 ⇒ 长期约定，见 §10.41）：新增 `apps/daemon/src/user-requirements.ts`
 （`extractRequirements`/`looksLikeRequirement`/`requirementTerms`/`checkTermCoverage`/`renderUserRequirements`；
 提问不算要求）；素材多出 `user-requirements.md`、`00-README.md` 的"怎么用"拆成"要求 ⇒ 约定"/"执行细节 ⇒ 做法"两条；

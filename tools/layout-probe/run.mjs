@@ -3295,6 +3295,13 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.loopState',
+    label:
+      '★★★ 有判决的草稿上要挂着「循环状态」（running/passed/exhausted/stopped）——使用者原话「看不出来是否已经结束了」，这一格就是他看的那一眼',
+    ok: (v) => ['running', 'passed', 'exhausted', 'stopped', 'idle'].includes(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.auditLiveLogBox',
     label:
       '★★★ 审核**真跑起来**的时候，实时输出就铺在面板里（使用者："审核的过程看不到，感觉一直没结束呢"——原来只有一句"审核中…跑完再看这里"）',

@@ -112,6 +112,28 @@ export const crystallizeText = {
     zh: '这一处已连续 {rounds} 轮没解决：{locator}',
     en: 'Unresolved for {rounds} rounds: {locator}',
   },
+  /**
+   * 分批第 27 批：**循环现在是什么状态**。
+   *
+   * 使用者原话：「在多轮 起草-审核 过程中，界面没有更新，看不出来是否已经结束了。」
+   * 所以这四条说的都是"结束没有/为什么结束"，而不是解释产品怎么工作。
+   */
+  'crystallize.reworkRunning': { zh: '· 还会自动起草下一版', en: '· next version will be drafted automatically' },
+  'crystallize.reworkPassed': { zh: '· 已通过，循环停了', en: '· passed, loop stopped' },
+  'crystallize.reworkExhausted': { zh: '· 轮数用完，交给你决定', en: '· rounds used up, your call' },
+  'crystallize.reworkStoppedByHuman': { zh: '· 你已停止循环', en: '· you stopped the loop' },
+  /**
+   * 返工收敛闸门的标注（只标注、**不停**）：
+   * 上一批我让它直接停循环，违背了"无进展不早停"的口径，第 27 批改回标注。
+   * 措辞里必须写明"仍在继续"，否则人看到"被判重写"会以为已经停了。
+   */
+  'crystallize.reworkGuardLabel': {
+    zh: '这一轮被判「{kind}」（改动过大或没动点名处）—— 已在 material/rework-guard.md 记录，循环仍在继续',
+    en: 'This round was flagged as "{kind}" (too large a rewrite, or the named spots untouched) — recorded in material/rework-guard.md; the loop continues',
+  },
+  // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
+  'crystallize.newVersionHint': { zh: '自动返工已经出了新一版（你正在编辑，没有自动切过去）', en: 'Auto-rework produced a new version (not switched automatically while you are editing)' },
+  'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
   'crystallize.auditRunningShort': { zh: '审核运行中', en: 'Audit running' },
   // 2026-10-21：说明段收进按钮悬停，条上只留四个字（原来那段占 42px 两行）
   'crystallize.auditNotYetBrief': { zh: '还没审核过', en: 'Not audited yet' },

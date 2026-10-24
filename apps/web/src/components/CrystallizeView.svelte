@@ -36,7 +36,7 @@
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
   //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
   //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
-  import { tick } from 'svelte'
+  import { tick, onDestroy, onMount } from 'svelte'
   import { buildFeedbackDraft } from '../lib/crystallize-feedback.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { finalResultText } from '../lib/final-output.ts'
@@ -210,6 +210,21 @@
       max: number
       spentUsdMicros: number
       stopped: boolean
+      /**
+       * 谁按的停止（分批第 27 批）：`human` = 人点「停止循环」，`null` = 没停。
+       *
+       * ⚠️ 为什么界面要知道"谁停的"：使用者报的是「多轮起草-审核过程中界面没有更新，
+       *    看不出来是否已经结束了」。光一个 `stopped: true` 说不清是"跑完了"、
+       *    "你按的"、还是"出问题了"——而这三件事人要做的事完全不同。
+       */
+      stopBy?: 'human' | null
+      /**
+       * 返工收敛闸门的**标注**（分批第 25 批，第 27 批起只标注不早停）：
+       * 这一版被判"整篇重写 / 正文变胖 / 没动点名处"时，`kind` 不为 ok。
+       * 循环**照常继续**（使用者定过：无进展不早停、只标注）——界面要写明这一点，
+       * 否则人会以为"被判重写了怎么还在跑"。
+       */
+      guard?: { kind: string; reasons: string[] } | null
       stalled: Array<{ locator: string; rounds: number }> | null
     }
   }
@@ -442,6 +457,28 @@
    */
   $: auditNoVerdict = auditBar.noVerdict
 
+  /**
+   * 自动循环此刻的状态（分批第 27 批）。
+   *
+   * `running` = 还会自动起草下一版；`passed` = 审核通过、循环该停了；
+   * `exhausted` = 轮数用完；`stopped` = 人按了「停止循环」。
+   *
+   * ⚠️ 顺序有讲究：`passed` 排在最前——通过之后即使轮数没满也不该再跑，
+   *    而界面若显示"还在跑"就是说了反话。
+   */
+  $: autoReworkState =
+    reviewInfo?.review?.conclusion === 'pass'
+      ? 'passed'
+      : reviewInfo?.autoRework?.stopped
+        ? 'stopped'
+        : reviewInfo?.review?.status === 'escalated'
+          ? 'exhausted'
+          : reviewInfo?.review?.status === 'rework_requested'
+            ? 'running'
+            : reviewInfo?.review === null && auditRunning
+              ? 'running'
+              : 'idle'
+
   $: auditFailedStuck =
     reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
 
@@ -537,6 +574,75 @@
     resetFlow()
     void loadTargets()
   }
+
+  /**
+   * ★ 分批第 27 批：**详情页自己轮询**，链上出现新版就自动跟过去。
+   *
+   * 使用者原话：「在多轮 起草-审核 过程中，界面没有更新，看不出来是否已经结束了。」
+   *
+   * 根子是可量的：这个组件里**一个定时器都没有**（`grep setInterval` 为空），只在
+   * 「进页面 / 点按钮 / RunLog 报终态」时读一次。于是自动返工起第 N+1 版、审核跑完、
+   * 循环停掉——界面全都不动，人只能靠切页面撞运气。列表页（`Crystallize.svelte`）
+   * 有 6 秒轮询，所以**列表变了、详情没变**，看起来就更像"卡住了"。
+   *
+   * `GET /api/crystallize/targets` 实测 25ms，5 秒一次完全不心疼。
+   *
+   * ⚠️ 正在编辑正文（`dirty`）时不抢：自动切走会把没保存的字丢掉。这时候只挂一条
+   *    「已经有新版」的提示，点一下再过去。
+   */
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  /** 轮询发现链上出现新版、但因为正在编辑而没自动切过去。 */
+  let pendingNewVersion = ''
+  // ⚠️ 不自己算"改没改"：组件里本来就有 `dirty`（读盘时清、输入时置 true）。
+  //    我第一版在这写了 `$: dirty = editText !== diskText`，等于把一个**已经在用**的
+  //    变量重新定义了——它会让「保存改动」按钮的显示条件跟着一个不存在的 `diskText` 走。
+
+  function stopPolling(): void {
+    if (pollTimer !== null) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  /** 链上出现了比我现在看的更新的一版 ⇒ 跟过去（除非正在编辑）。 */
+  function followNewVersion(nextRunId: string): void {
+    if (nextRunId === '' || nextRunId === draftRunId) return
+    if (dirty) {
+      pendingNewVersion = nextRunId
+      return
+    }
+    pendingNewVersion = ''
+    draftRunId = nextRunId
+    handledTerminal = false
+    reviewInfo = null
+    artifacts = null
+    diff = null
+    void loadMaterial()
+    void loadDraftOutput()
+    void loadReview()
+  }
+
+  async function pollOnce(): Promise<void> {
+    try {
+      const t2 = await api<CrystallizeTargets>(
+        `/api/crystallize/targets?runId=${encodeURIComponent(runId)}`,
+      )
+      targets = t2
+      // ① 链上冒出新版（自动返工）⇒ 跟过去，别让界面停在上一版
+      const ad = t2.activeDraft
+      if (attached && ad) followNewVersion(ad.runId)
+      // ② 状态本身也要重读：审核跑完 / 循环停掉 / 判决出来了，全靠它
+      if (attached) await loadReview()
+    } catch {
+      // 轮询失败不打扰人（网络抖一下很常见）：下一次再试
+    }
+  }
+
+  onMount(() => {
+    void loadTargets()
+    pollTimer = setInterval(() => void pollOnce(), 5000)
+  })
+  onDestroy(stopPolling)
 
   /** 「继续」挂回进行中的起草（§4.1.1）。 */
   function resumeDraft(): void {
@@ -1604,6 +1710,24 @@
           规矩没变：① 结论常驻 + 明细折叠 ② "还没审过"与"审过但没判决"分开说
           ③ 不通过且额度用尽才给「重新起草」。
         -->
+        {#if pendingNewVersion !== ''}
+          <!--
+            ★ 分批第 27 批：链上冒出了新版，但你正在改正文 ⇒ **不抢**，只挂一条提示。
+            自动切走会把没保存的字丢掉（那比"没跟上"严重得多）；而完全不提，人就以为
+            界面卡住了——这正是使用者报的那个问题的一半。
+          -->
+          <div class="new-version-bar" data-new-version-hint>
+            <span>{$t('crystallize.newVersionHint')}</span>
+            <button
+              type="button"
+              class="linkish"
+              onclick={() => {
+                dirty = false
+                followNewVersion(pendingNewVersion)
+              }}>{$t('crystallize.newVersionGo')}</button
+            >
+          </div>
+        {/if}
         <section class="conclusion-block">
           <div class="conclusion-bar" class:bad={conclusionBad}>
             <span class="bar-mark" aria-hidden="true">{conclusionMark}</span>
@@ -1651,6 +1775,17 @@
                     })}{reviewInfo.autoRework.stopped ? $t('crystallize.autoReworkStopped') : ''}
                   </span>
                 {/if}
+                {#if reviewInfo.autoRework?.guard}
+                  <!--
+                    ★ 分批第 27 批：返工收敛闸门的标注要看得见，而且要写明**循环照常继续**。
+                    真机上它就是没显示，使用者只看到"这一轮到底跑完没有"。
+                  -->
+                  <span class="hint small" data-rework-guard={reviewInfo.autoRework.guard.kind}>
+                    {$t('crystallize.reworkGuardLabel', {
+                      kind: reviewInfo.autoRework.guard.kind,
+                    })}
+                  </span>
+                {/if}
                 {#if reviewInfo.autoRework?.stalled?.[0]}
                   <!--
                     ★ 分批第 23 批：「没进展」只**标注**、不停（使用者的选择）。
@@ -1665,6 +1800,21 @@
                   </span>
                 {/if}
                 <span class="muted">{reviewInfo.review.reasonCode}</span>
+                {#if reviewInfo.autoRework && reviewInfo.autoRework.max > 0}
+                  <!--
+                    ★ 分批第 27 批：**循环活着还是结束了**必须一眼看见。
+                    这是一句"状态"而不是"解释"——使用者原话就是"看不出来是否已经结束了"。
+                  -->
+                  <span class="muted small" data-auto-rework-state={autoReworkState}>
+                    {autoReworkState === 'running'
+                      ? $t('crystallize.reworkRunning')
+                      : autoReworkState === 'stopped'
+                        ? $t('crystallize.reworkStoppedByHuman')
+                        : autoReworkState === 'exhausted'
+                          ? $t('crystallize.reworkExhausted')
+                          : $t('crystallize.reworkPassed')}
+                  </span>
+                {/if}
                 {#if reviewInfo.review.status === 'rework_requested'}
                   <span class="muted">
                     {$t('crystallize.auditReworked', { n: String(reviewInfo.versions) })}
@@ -2151,7 +2301,10 @@
             </div>
 
             {#if processTab === 'audit'}
-            <div class="process-pane">
+            <!-- 分批第 27 批：打上身份，probe 才不会量到"页面里第一个 process-pane"
+                 （那可能是「依据」那一格 —— 实测这样量出来的 log-box 恒为 false，
+                 判据红而界面没错，正是这类"量错地方"的老毛病） -->
+            <div class="process-pane" data-process-pane="audit">
               {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
                 <p class="muted">
                   {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
@@ -2213,7 +2366,7 @@
             </div>
             {:else}
             <!-- ── 草稿过程：起草那条 run（默认"最后结果"，一点换"完整日志"） ── -->
-            <div class="process-pane">
+            <div class="process-pane" data-process-pane="draft">
               {#if draftRunId !== ''}
                 {@render draftRunPane()}
               {/if}
@@ -2265,7 +2418,7 @@
         </div>
 
         {#if draftTab === 'evidence'}
-          <div class="process-pane">
+          <div class="process-pane" data-process-pane="evidence">
             <div class="proc-block">
               <div class="proc-head">{$t('crystallize.stepTarget')}</div>
               {@render targetSummary()}
@@ -2331,6 +2484,29 @@
 </MainArea>
 
 <style>
+  /* ★ 分批第 27 批：「链上出了新版，但你正在改」的提示条。
+     做得比结论条**轻**（一行、无边框强调）：它是提示，不是状态本身。 */
+  .new-version-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--surface-2, #f4f4f5);
+    font-size: 12px;
+  }
+  .new-version-bar .linkish {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--accent, #2563eb);
+    cursor: pointer;
+    font-size: 12px;
+    text-decoration: underline;
+  }
+
   /* ★ 纵向间距**只有一个来源**：`.drawer-section` 的全局 `margin-bottom`（任务
      详情就是这么排的）。这里若再给 `gap`，两种间距会叠加成双倍——所以用
      `display: block` 的普通流，非分节块（步骤条 / 恢复条 / 完成态 / 提示条）

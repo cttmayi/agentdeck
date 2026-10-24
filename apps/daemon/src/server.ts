@@ -2348,7 +2348,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         warn(`${taskDir} 的 ${AUTO_REWORK_STOP_FILE} 里没有 stoppedAt，按"没停"处理`)
         return null
       }
-      return { stoppedAt: at, stoppedBy: typeof raw['stoppedBy'] === 'string' ? raw['stoppedBy'] : 'human' }
+      const by = typeof raw['stoppedBy'] === 'string' ? raw['stoppedBy'] : 'human'
+      /**
+       * ⚠️ `regressed` 是**我上一版写错的停止理由**（闸门自动停），2026-10-25 已作废：
+       *    使用者定过"无进展不早停、只标注"。真机上已经有两条链被它误停（那条链路
+       *    第 4 版改了 41% 就停了），所以**读到就按"没停"处理**——不删人的文件，
+       *    但也不让一个作废的判据继续拦着循环。
+       */
+      if (by === 'regressed') {
+        warn(
+          `${taskDir} 的 ${AUTO_REWORK_STOP_FILE} 是已作废的 \`regressed\`（闸门自动停）⇒ 按"没停"处理`,
+        )
+        return null
+      }
+      return { stoppedAt: at, stoppedBy: by }
     } catch {
       // 文件不存在 = 正常路径（绝大多数情况）
       return null
@@ -2382,6 +2395,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     max: number
     spentUsdMicros: number
     stopped: boolean
+    /**
+     * 谁按的停止：`human` = 人点「停止循环」；`exhausted` = 轮数用完（那是 `escalated`，
+     * 不走这个字段）；`null` = 没停。界面据此说清"为什么不再自动跑"。
+     */
+    stopBy: 'human' | null
+    /**
+     * ★ 返工收敛闸门的**标注**（分批第 25 批加的，第 27 批起只标注不早停）：
+     * 这一版被判成整篇重写 / 正文变胖 / 没动点名处时，界面要能看见"这一轮白改了"，
+     * 但循环**照常继续**（使用者定过：无进展不早停、只标注）。
+     */
+    guard: { kind: string; reasons: string[] } | null
     stalled: Array<{ locator: string; rounds: number }> | null
   }> {
     const chain = chainOfRun(chainRuns, draftRunId)
@@ -2393,14 +2417,38 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         return r === undefined ? [] : [r]
       }),
     )
-    if (!reviewSettled) return { current, max, spentUsdMicros, stopped: false, stalled: null }
+    if (!reviewSettled) {
+      return { current, max, spentUsdMicros, stopped: false, stopBy: null, guard: null, stalled: null }
+    }
     const taskDir = await draftTaskDir(draftRunId)
+    const stop = await readAutoReworkStopped(taskDir)
     return {
       current,
       max,
       spentUsdMicros,
-      stopped: (await readAutoReworkStopped(taskDir)) !== null,
+      stopped: stop !== null,
+      stopBy: stop === null ? null : 'human',
+      guard: await readReworkGuard(taskDir),
       stalled: await stalledFindings(taskDir, true),
+    }
+  }
+
+  /** 读上一轮定检写的闸门标注（`material/rework-guard.json`）；没有 ⇒ null。 */
+  async function readReworkGuard(
+    taskDir: string,
+  ): Promise<{ kind: string; reasons: string[] } | null> {
+    try {
+      const raw = JSON.parse(
+        await readFile(join(taskDir, 'material', 'rework-guard.json'), 'utf8'),
+      ) as Record<string, unknown>
+      const kind = typeof raw['kind'] === 'string' ? raw['kind'] : ''
+      if (kind === '' || kind === 'ok') return null
+      const reasons = Array.isArray(raw['reasons'])
+        ? raw['reasons'].filter((r): r is string => typeof r === 'string')
+        : []
+      return { kind, reasons }
+    } catch {
+      return null
     }
   }
 
@@ -2954,27 +3002,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ⚠️ 判完之后**照样起审核**（不拦）：使用者要看到判决，"停"只停"下一轮自动化"。
     //    只写标记不审的话，界面会退化成"还没审核过"，人反而更不知道发生了什么。
     const guard = await inspectReworkOrNull(draft)
-    if (guard !== null && guard.kind !== 'ok') {
+    if (guard !== null) {
       await writeReworkGuardReport(draftHut, draft, guard)
+      if (guard.kind !== 'ok') {
+        /**
+         * ★ 2026-10-25 使用者纠正：**只有 PASS / 轮数用完 / 人点停止 才停**。
+         *
+         * 我第一版（配合 `inspectRework`）在判成 rewrite/bloat/off-target 时直接写
+         * `.auto-rework.json` 把循环停掉 —— 那违背了使用者在分批第 23 批已经定过的一条：
+         * 「无进展**不早停**，只标注」。真机上的后果是可量的：那条链第 4 版只改了 41%
+         * （阈值 40%）就被停掉，而它既没有 PASS、也没用完轮数 —— 使用者看到的是
+         * 「这轮明明还在跑，怎么就不动了」，而我给不出正当理由。
+         *
+         * 所以现在：**标注**（写 `material/rework-guard.md` + 落一份 json 给界面读）
+         * 但**不停**。循环继续，直到 PASS、额度用完，或人按「停止循环」。
+         */
+        warn(
+          `返工版 ${(draft.id as string).slice(-8)} 被判「${guard.kind}」（只标注，不停循环）：` +
+            guard.reasons.join('；'),
+        )
+      }
       await writeFile(
-        join(draftHut, AUTO_REWORK_STOP_FILE),
-        `${JSON.stringify(
-          {
-            stoppedAt: Date.now(),
-            stoppedBy: 'regressed',
-            reason: guard.kind,
-            reasons: guard.reasons,
-            draftRunId: draft.id,
-          },
-          null,
-          2,
-        )}\n`,
+        join(draftHut, 'material', 'rework-guard.json'),
+        `${JSON.stringify({ kind: guard.kind, reasons: guard.reasons, facts: guard.facts }, null, 2)}\n`,
         'utf8',
       ).catch(() => undefined)
-      warn(
-        `返工版 ${(draft.id as string).slice(-8)} 被判「${guard.kind}」⇒ 自动循环已停：` +
-          guard.reasons.join('；'),
-      )
     }
 
     /**
