@@ -408,6 +408,21 @@
    *    写进组件里的规则测不了（svelte-check 只管类型），拎到 `lib/audit-bar.ts` 才有单测
    *    钉住"上一版的终态不认"。见那个文件顶上的注释。
    */
+  /**
+   * 循环是不是**真的还在自己往下走**（决定要不要给「停止循环」）。
+   *
+   * ⚠️ 第一版只判 `autoRework.max > 1 && !stopped` ⇒ 探针量到"还没审核过"的草稿上也挂着
+   *    一个「停止循环」按钮（`○ 还没审核过 · 3 个文件 · … 停止循环 开始审核`）。
+   *    那不是"停止"而是"关掉设置"，而设置项在设置页里 —— 放在这里会让人以为
+   *    点了它就能停掉一个并不存在的循环。
+   */
+  $: canStopLoop =
+    reviewInfo?.autoRework !== undefined &&
+    reviewInfo.autoRework.max > 1 &&
+    !reviewInfo.autoRework.stopped &&
+    reviewInfo.review === null &&
+    (auditRunning || reviewInfo.autoRework.current > 1)
+
   $: auditBar = resolveAuditBar({
     live: auditLive,
     reviewRunId: reviewInfo?.reviewRunId ?? null,
@@ -1739,7 +1754,7 @@
                   {$t('crystallize.auditShowLog')}
                 </button>
               {/if}
-              {#if reviewInfo?.autoRework && reviewInfo.autoRework.max > 1 && !reviewInfo.autoRework.stopped}
+              {#if canStopLoop}
                 <!--
                   ★ 分批第 23 批：循环进行中唯一的人工入口（使用者定的口径）。
                   「停止循环」与「取消审核」是两件事：后者只停这一次 run，

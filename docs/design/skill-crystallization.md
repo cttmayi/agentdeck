@@ -2851,3 +2851,25 @@ e2e 里那条用例（造一条老形状的链、问老那一版）当场红，�
    而不是去放宽断言——它们量的是"返工契约"和"跑满就停"，与默认值无关。
    ⚠️ 那个 helper 第一版写在 §10.5 的 `describe` 里 ⇒ 另一块 `ReferenceError`，
    挪到模块级才对（被两个 describe 用）。
+
+#### 第 23 批收尾（补一个提交，同一批的内容）
+
+1. **审核进行中的接口开销**：`GET /api/crystallize/review` 是界面轮询的热路径。
+   第一版每轮都调 `draftTaskDir()`（会做链条自愈、读版本表）+ `stalledFindings()`
+   （按版本读判决）⇒ 真浏览器探针量到"审核真跑起来时实时输出迟迟不出现"。
+   改成 `autoReworkSummary()`：**审核在跑时只算内存里的字段**（`current/max/spent`），
+   `stopped`/`stalled` 只在收口后算（它们本来就是"给人看的结论"，不是实时量）；
+   花费也不再逐条 `getRun`——链上那几条 run 本来就在 `listRuns` 的结果里。
+2. **「停止循环」的出现条件**：第一版只判 `max > 1 && !stopped` ⇒ 探针量到"还没审核过"的
+   草稿上也挂着这个按钮（`○ 还没审核过 · 3 个文件 · … 停止循环 开始审核`）。
+   那不是"停止"而是"改设置"，而设置项在设置页里。改成派生值 `canStopLoop`：
+   只在"审核在跑"或"链上已经不止一版"且还没停、也没有判决时出现。
+3. **探针 557 项里仍有 1 项红**（如实记下，没有放宽）：`crystal.auditLiveLogBox`
+   （"审核真跑起来时实时输出铺在面板里"）。同一时刻的**四条同级信号都是绿的**：
+   `auditLiveLogText`（日志真有内容，含假 CLI 那句话）、`auditLiveBadge='运行中'`、
+   `auditLiveCancelButton=true`、`auditAfterCancel*`（取消真的落地）。
+   即"日志铺出来了"是**成立**的，红的是探针取元素的方式：它 `querySelector('.process-pane')`
+   取到的是**第一个** pane，而那一刻 DOM 里"草稿过程"那一格还在（切子 tab 的时序），
+   所以同一个表达式在它后面几行再查一次就有内容了（`auditLiveLogText` 非空、`auditLiveLogBox` 空）。
+   下一步：把探针改成按子 tab 定位到**审核过程**那一格（`[data-process-tab=audit] .process-pane`），
+   而不是"第一个 .process-pane"——**改测量口径、不改判据**。

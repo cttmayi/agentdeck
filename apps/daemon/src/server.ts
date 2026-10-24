@@ -2212,13 +2212,57 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * ⚠️ 不在这里重算"按 token 估钱"：`costUsdMicros` 已经由适配器/估算器给出，
    *    再估一遍就会出现两个数（结论条一个、账单一个）。
    */
-  async function autoReworkSpentMicros(
-    chain: readonly { id: string }[],
-  ): Promise<number> {
+  /**
+   * 自动循环的可见面（`current/max/spent/stopped/stalled`）。
+   *
+   * ⚠️ **审核还在跑的时候只算廉价字段**（全在内存里，零额外 I/O）：
+   *    这个接口是界面轮询的热路径，而 `draftTaskDir()` 第一次调用会做链条自愈、
+   *    读版本表，`stalledFindings()` 还要按版本读判决。第一版无条件算这些 ⇒
+   *    真浏览器探针量到"审核真跑起来时实时输出迟迟不出现"
+   *    （`crystal.auditLiveLogBox` 红：轮询被拖慢，页面拿不到新的 `reviewRunId`）。
+   *    `stopped`/`stalled` 只在**收口之后**才有意义：循环已经不在跑时，"停没停"和
+   *    "卡在哪一处"是给人看的结论，不是实时量。
+   */
+  async function autoReworkSummary(
+    chainRuns: readonly { id: string; queuedAt: number; revisedFrom: string | null }[],
+    draftRunId: string,
+    reviewSettled: boolean,
+    usageById: ReadonlyMap<string, { usage?: unknown }>,
+  ): Promise<{
+    current: number
+    max: number
+    spentUsdMicros: number
+    stopped: boolean
+    stalled: Array<{ locator: string; rounds: number }> | null
+  }> {
+    const chain = chainOfRun(chainRuns, draftRunId)
+    const current = chain.length === 0 ? 1 : chain.length
+    const max = (await readWorkspaceSettings(store, workspaceId)).autoReworkRounds
+    const spentUsdMicros = autoReworkSpentMicros(
+      chain.flatMap((c) => {
+        const r = usageById.get(c.id)
+        return r === undefined ? [] : [r]
+      }),
+    )
+    if (!reviewSettled) return { current, max, spentUsdMicros, stopped: false, stalled: null }
+    const taskDir = await draftTaskDir(draftRunId)
+    return {
+      current,
+      max,
+      spentUsdMicros,
+      stopped: (await readAutoReworkStopped(taskDir)) !== null,
+      stalled: await stalledFindings(taskDir, true),
+    }
+  }
+
+  function autoReworkSpentMicros(runs: ReadonlyArray<{ usage?: unknown }>): number {
+    // ⚠️ 用**调用方已经读到的** run 列表，不要逐条 `getRun`：
+    //    这个接口是界面轮询的热路径（审核进行中每几秒一次），第一版逐条读存储
+    //    ⇒ 探针量到"实时输出晚出来"（`crystal.auditLiveLogBox` 在那一版红了）。
     let total = 0
-    for (const c of chain) {
-      const run = await store.getRun(c.id as RunId)
-      total += run?.usage?.costUsdMicros ?? 0
+    for (const r of runs) {
+      const usage = r.usage as { costUsdMicros?: number } | null | undefined
+      total += usage?.costUsdMicros ?? 0
     }
     return total
   }
@@ -2234,13 +2278,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    */
   async function stalledFindings(
     taskDir: string,
+    reviewSettled: boolean,
   ): Promise<Array<{ locator: string; rounds: number }> | null> {
+    /**
+     * ⚠️ 只在**审核已经收口**时算：这一项要按版本读判决（O(版本数) 次存储读），
+     *    而审核进行中界面每几秒轮询一次这个接口——放在热路径上会把实时输出的
+     *    推送挤慢（探针的红就是这么来的：`crystal.auditLiveLogBox` 那一条）。
+     *    收口之后轮询就停了，多花几毫秒没有代价。
+     * 另外只看**最近 4 版**：再往前的老版本对"现在卡在哪"没有信息量，
+     *    而链可以很长（真机上有一条 14 版的）。
+     */
+    if (!reviewSettled) return null
     const versions = await readDraftVersions(taskDir)
     if (versions === null || versions.versions.length < 2) return null
+    const recent = versions.versions.slice(-4)
     // 每条版本对应的审核 run（取最新一条判决）
     const page = await store.listRuns({ workspaceId, limit: 10_000 })
     const locatorsPerRound: string[][] = []
-    for (const v of versions.versions) {
+    for (const v of recent) {
       const review = page.items
         .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === v.runId)
         .sort((a, b) => a.queuedAt - b.queuedAt)
@@ -5318,13 +5373,15 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
          * `stalled`：同一处（`locator`）在**连续两轮**判决里都被点名 ⇒ 标出来，
          * 但**不停**（使用者明确选了"标注意、继续跑到 N 轮"）。
          */
-        autoRework: {
-          current: chainOfRun(chainRuns, draftRunId).length,
-          max: (await readWorkspaceSettings(store, workspaceId)).autoReworkRounds,
-          spentUsdMicros: await autoReworkSpentMicros(chainOfRun(chainRuns, draftRunId)),
-          stopped: (await readAutoReworkStopped(await draftTaskDir(draftRunId))) !== null,
-          stalled: await stalledFindings(await draftTaskDir(draftRunId)),
-        },
+        autoRework: await autoReworkSummary(
+          chainRuns,
+          draftRunId,
+          reviewRun !== undefined &&
+            !['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(
+              reviewRun.status,
+            ),
+          new Map(page.items.map((r) => [r.id as string, r])),
+        ),
       })
       return
     }
