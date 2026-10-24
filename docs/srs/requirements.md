@@ -1171,7 +1171,7 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 `PUT /api/workspace/auto-rework` 写入口校验；`resolveAutoReworkRounds()` 归一（`0` 原样、脏值夹范围、NaN 退回默认）；
 `#reworkBudgetFor` 的上限改读设置；`POST /api/crystallize/stop-loop` 落 `.auto-rework.json` 并取消在跑的审核，
 `createReworkRun` 认这个标记；审核接口新增 `autoRework{current,max,spentUsdMicros,stopped,stalled}`
-（`stalled` = 相邻两轮同一 `locator` 都被点名，**只标注不停**）；设置页加「沉淀自动返工」数字框，
+（`stalled` = 相邻两轮同一 `locator` 都被点名，**只标注不停**）；沉淀页顶栏加「自动返工 N 轮」入口（按使用者意见不放在通用设置里），
 结论条显示 `第 k/N 轮 · 已花 $x` 与「停止循环」。口径全部是使用者的选择：一次 PASS 即停、默认 10、无进展不早停、循环中只给停止。
 **第 22 批**（混链缺陷，见 §10.38）：链条口径统一到 `apps/daemon/src/draft-chain.ts`——**只认 `revisedFrom`**
 （`rootOf`/`groupByChain`/`chainOfRun`），`listCrystallizeDrafts`、`listChain`、`#reworkBudgetFor`、

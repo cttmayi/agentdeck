@@ -80,6 +80,29 @@ export const crystallizeText = {
     en: '· spent ${usd}',
   },
   'crystallize.autoReworkStopped': { zh: '· 已停止', en: '· stopped' },
+  // ── 沉淀自己的设置：自动返工轮数（分批第 23 批）──
+  //     ⚠️ 这几条**不在**通用设置里：使用者原话「应该在沉淀的设置，而不是通用设置里面」。
+  //     入口是沉淀页顶栏那个「自动返工 N 轮」（点开是小面板）。
+  'crystallize.autoReworkSetting': {
+    zh: '自动返工 {rounds} 轮',
+    en: 'Auto-rework: {rounds}',
+  },
+  'crystallize.autoReworkTitle': { zh: '沉淀自动返工', en: 'Automatic skill rework' },
+  'crystallize.autoReworkRoundsLabel': { zh: '轮数（0–99，0 = 关）', en: 'Rounds (0–99, 0 = off)' },
+  'crystallize.autoReworkInvalid': {
+    zh: '轮数只能是 0–99 的整数（0 = 关）',
+    en: 'Rounds must be an integer from 0 to 99 (0 = off)',
+  },
+  'crystallize.autoReworkExplain': {
+    zh: '一轮 = 起草 → 定检 → 审核 → 判决。判决不通过就自动再起草一版（起草意见由判决的条目生成），通过即停；0 = 关，每轮判完交给你。',
+    en: 'One round = draft → platform check → audit → verdict. On a failing verdict the next version is drafted automatically (the rework prompt is built from the verdict findings), and it stops as soon as it passes; 0 = off (each round handed back to you).',
+  },
+  'crystallize.autoReworkCost': {
+    zh: '它是唯一的花钱闸门：实测一条链 10 轮约花 $30，而且每轮更贵（上下文越滚越大）。循环中点「停止循环」可以随时叫停。',
+    en: 'This is the only spending gate: measured, a 10-round chain costs ≈ $30 and each round costs more than the last (the context keeps growing). Press “Stop loop” at any time.',
+  },
+  'crystallize.autoReworkSave': { zh: '保存', en: 'Save' },
+  'crystallize.autoReworkSaved': { zh: '已保存：{rounds} 轮', en: 'Saved: {rounds} round(s)' },
   'crystallize.autoReworkStop': { zh: '停止循环', en: 'Stop loop' },
   'crystallize.autoReworkStopHint': {
     zh: '停掉自动循环：这一轮跑完就交给你，不再自动起草下一版（正在跑的审核会一起取消）',

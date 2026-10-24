@@ -32,6 +32,7 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { showToast } from '../lib/view.ts'
+  import { identity, loadIdentity } from '../lib/stores.ts'
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
@@ -182,9 +183,59 @@
   $: viewedRow = drafts.find((d) => d.versionRunIds.includes($crystallize?.runId ?? ''))
   $: selectedLabel = viewedRow?.source?.label ?? ''
 
+  /**
+   * 沉淀自己的设置：自动返工轮数（分批第 23 批）。
+   *
+   * 使用者原话：「应该在沉淀的设置，而不是通用设置里面」——所以入口在**这一页的顶栏**
+   * （`setPageActions`，与「新建沉淀」同一格），不在通用设置抽屉里。
+   * 它是工作区级的一个数（`Workspace.autoReworkRounds`，默认 10、允许 0–99、
+   * 0 = 关），旋钮在这里，存到同一个地方。
+   */
+  let reworkOpen = false
+  let reworkDraft = 10
+  let reworkSaving = false
+
+  /** 当前生效的轮数（工作区设置；`$identity` 没到之前按默认 10 显示）。 */
+  $: reworkRounds = $identity?.autoReworkRounds ?? 10
+
+  async function saveReworkRounds(): Promise<void> {
+    const next = reworkDraft
+    if (!Number.isInteger(next) || next < 0 || next > 99) {
+      showToast($t('crystallize.autoReworkInvalid'))
+      return
+    }
+    reworkSaving = true
+    try {
+      await api('/api/workspace/auto-rework', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rounds: next }),
+      })
+      // 存完**重新拉 identity**：设置页与这里的显示都以服务端为准，
+      // 不拿本地变量假装成功（存失败时界面会保持旧值 + toast）。
+      await loadIdentity()
+      reworkOpen = false
+      showToast($t('crystallize.autoReworkSaved', { rounds: String(next) }))
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    } finally {
+      reworkSaving = false
+    }
+  }
+
   // ★ 顶栏主操作：与聊天「新对话」、任务「新建任务」同一格、同一款（primary）。
   //   标签读 `$t(...)` 放在 `$:` 里 ⇒ 切语言时自动重新登记（setPageActions 是整体覆盖）。
   $: setPageActions('crystallize', [
+    {
+      id: 'auto-rework',
+      label: $t('crystallize.autoReworkSetting', { rounds: String(reworkRounds) }),
+      kind: 'ghost',
+      title: $t('crystallize.autoReworkExplain'),
+      onActivate: () => {
+        reworkDraft = reworkRounds
+        reworkOpen = true
+      },
+    },
     {
       id: 'new',
       label: $t('crystallize.newEntry'),
@@ -307,6 +358,33 @@
   {/if}
 </div>
 
+<!-- ══════════════════ 沉淀设置：自动返工轮数（共享 Modal） ══════════════════ -->
+<Modal
+  open={reworkOpen}
+  title={$t('crystallize.autoReworkTitle')}
+  subtitle={$t('crystallize.autoReworkExplain')}
+  closeLabel={$t('crystallize.cancel')}
+  onclose={() => (reworkOpen = false)}
+>
+  <label class="rework-row">
+    <span>{$t('crystallize.autoReworkRoundsLabel')}</span>
+    <input
+      type="number"
+      min="0"
+      max="99"
+      step="1"
+      bind:value={reworkDraft}
+      data-auto-rework-rounds
+    />
+  </label>
+  <p class="hint">{$t('crystallize.autoReworkCost')}</p>
+  <div class="rework-actions">
+    <button type="button" class="primary" disabled={reworkSaving} onclick={() => void saveReworkRounds()}>
+      {$t('crystallize.autoReworkSave')}
+    </button>
+  </div>
+</Modal>
+
 <!-- ══════════════════ 新建沉淀：来源选择器（共享 Modal） ══════════════════ -->
 <Modal
   open={pickOpen}
@@ -369,6 +447,24 @@
 </Modal>
 
 <style>
+  /* 沉淀设置面板：一行"标签 + 数字框"，下面说明，按钮右对齐（与来源选择器同款） */
+  .rework-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-2);
+  }
+
+  .rework-row input {
+    width: 6rem;
+  }
+
+  .rework-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--sp-2);
+  }
+
   /* ── 行内容（壳不在这里：hover / 选中框 / 行高下限归 ListRow） ── */
   .crystal-list {
     list-style: none;

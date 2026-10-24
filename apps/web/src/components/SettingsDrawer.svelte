@@ -217,47 +217,6 @@
       <p class="hint">{$t('settings.reviewerScriptRunHint')}</p>
     </section>
 
-    <!--
-      ★ 自动返工轮数（分批第 23 批，使用者：「设定可以 N 次，直到 PASS」）。
-
-      「一轮 = 起草 → 定检 → 审核 → 判决」，判决不通过就自动再起草一版，通过即停。
-      0 = 关（每一轮判完交给人 = 老行为）。
-
-      ⚠️ 这个数字**是唯一的花钱闸门**：使用者明确选了"无进展不早停"，所以除了
-         "审核没跑成/变差/人按停止"之外没有别的刹车。实测一条链 10 轮 ≈ $30 且每轮递增，
-         所以提示里把代价写清楚，而不是只写"最大轮数"。
-    -->
-    <section class="drawer-section" data-auto-rework>
-      <h3>{$t('settings.autoRework')}</h3>
-      <label class="row">
-        <input
-          type="number"
-          min="0"
-          max="99"
-          step="1"
-          value={$identity?.autoReworkRounds ?? 10}
-          onchange={(e) => {
-            const el = e.currentTarget as HTMLInputElement
-            const next = Number.parseInt(el.value, 10)
-            if (!Number.isInteger(next) || next < 0 || next > 99) {
-              // 不合法就退回原值（别把 400 留在界面上装成"设成功了"）
-              el.value = String($identity?.autoReworkRounds ?? 10)
-              showToast($t('settings.autoReworkInvalid'))
-              return
-            }
-            void api('/api/workspace/auto-rework', {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ rounds: next }),
-            })
-              .then(() => void loadIdentity())
-              .catch((err) => showToast(err instanceof Error ? err.message : String(err)))
-          }}
-        />
-        <span class="hint">{$t('settings.autoReworkUnit')}</span>
-      </label>
-      <p class="hint">{$t('settings.autoReworkHint')}</p>
-    </section>
 
     <!--
       ★ 全局 runtime 默认值（2026-10，定稿第 ⑦ 条）。

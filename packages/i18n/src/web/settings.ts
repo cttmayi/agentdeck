@@ -59,18 +59,6 @@ export const settingsText = {
     en: 'On: the auditor runs the scripts under skill/scripts/ (commands stay inside that draft work directory; out-of-bounds ones are blocked), so "does it run" gets a real answer. Off: the prompt switches to "do not execute" and the verdict states scripts were not run. Note this executes agent-written code on your machine — this project does not sandbox runs.',
   },
 
-  // ── 自动返工轮数（分批第 23 批）──
-  'settings.autoRework': { zh: '沉淀自动返工', en: 'Automatic skill rework' },
-  'settings.autoReworkUnit': { zh: '轮', en: 'round(s)' },
-  'settings.autoReworkInvalid': {
-    zh: '轮数只能是 0–99 的整数（0 = 关）',
-    en: 'Rounds must be an integer from 0 to 99 (0 = off)',
-  },
-  'settings.autoReworkHint': {
-    zh: '一轮 = 起草 → 定检 → 审核 → 判决。判决不通过就自动再起草一版（起草意见由判决的条目生成），通过即停；0 = 关，每一轮判完交给你。注意这是唯一的花钱闸门：实测一条链 10 轮约花 $30，而且每轮成本递增（上下文越滚越大）。循环中可以随时点「停止循环」。',
-    en: 'One round = draft → platform check → audit → verdict. On a failing verdict the platform drafts the next version automatically (the rework prompt is built from the verdict findings) and stops as soon as it passes; 0 = off (each round is handed back to you). ⚠️ This is the only spending gate: measured, a 10-round chain costs ≈ $30 and each round costs more than the last (the context keeps growing). You can press “Stop loop” at any time.',
-  },
-
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },
   'settings.themeLight': { zh: '亮色', en: 'Light' },
