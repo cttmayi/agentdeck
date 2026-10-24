@@ -25,6 +25,12 @@ import { dirname, join } from 'node:path'
 import type { Store } from '@agentdeck/domain'
 import type { Conversation, Issue, Run, RunId } from '@agentdeck/protocol'
 import { formatRunMessages, lastTextOf } from './run-text.ts'
+// ★ 分批第 26 批：从素材里机械抽出"使用者的要求"（见该文件头注与 §10.41）
+import {
+  extractRequirements,
+  renderUserRequirements,
+  requirementTerms,
+} from './user-requirements.ts'
 
 /** 一片素材 = 一个文件。 */
 export interface MaterialPiece {
@@ -122,6 +128,30 @@ export async function collectMaterial(
     }
   }
 
+  /**
+   * ★ 分批第 26 批：把「使用者在素材里提出的要求」**机械**抽出来，单独成一份。
+   *
+   * 为什么必须单独一份、而不是指望起草者从 turns 里认出来：真机上它没认出来——
+   * 使用者在素材里写了「使用 ASD-STE100 的方式写成一篇文章」和「参考《金字塔原理》」，
+   * 产出却写成「**如果**用户要求 STE100 / 金字塔原理…」（可选开关）⇒ 使用者的原话
+   * 「这些要求就是我对此部分的习惯…这才有沉淀的意义」。
+   * 根子就在本文件下面那段指令：它把"使用者的话"和"这一次的执行细节"归成了一类。
+   */
+  const requirements = extractRequirements(
+    pieces
+      .filter((p) => p.relPath.startsWith('turns/') || p.relPath === 'task-run.md')
+      .map((p) => ({ relPath: p.relPath, text: p.text })),
+  )
+  if (requirements.length > 0) {
+    const terms = [...new Set(requirements.flatMap((r) => requirementTerms(r.quote)))]
+    pieces.push({
+      relPath: 'user-requirements.md',
+      // 落点检查此刻还没法做（skill/ 还没写出来）⇒ 先只渲染清单，覆盖率在起审核前补
+      text: renderUserRequirements(requirements, []),
+    })
+    void terms
+  }
+
   return { pieces, stats: { turns, toolCalls } }
 }
 
@@ -165,15 +195,23 @@ ${targetLine}
 ${turnList}
 ${ctx.scope === 'task' && pieces.some((p) => p.relPath === 'verdict.md') ? '- `verdict.md` — 审核判决（哪些做对了、哪些要改，这是最可信的判据）\n' : ''}${pieces.some((p) => p.relPath === 'feedback.md') ? '- `feedback.md` — 使用者的反馈\n' : ''}- \`meta.json\` — 结构化元信息（轮数/工具调用数/目标）
 - \`skills-index.md\` — 现有技能清单（判重：素材明显属于某个已有技能时，在结论里说明并给出依据）
+${pieces.some((p) => p.relPath === 'user-requirements.md') ? '- \`user-requirements.md\` — **使用者在素材里提出来的要求**（平台机械抽取，原文照抄）——每一条都要有落点\n' : ''}
 ${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当前全文（含支持文件）\n' : ''}
 ## 怎么用这些文件
 
 1. **先读这一页**，再决定要读哪些文件——不要一次性把全部素材读进上下文。
 2. 写 Procedure 之前，回查**原始命令与参数**（在 \`turns/*.md\` 的「工具调用」里），
    不要凭印象重写；命令要能直接复制就跑。
-3. **不要照抄素材里的叙述**。素材是证据，skill 是做法：把"这次我做了 X"改写成
-   "当需要 X 时，先……再……"。
+3. **分清两类东西**（2026-10-25 改，使用者："这些要求就是我对此部分的习惯…这才有沉淀的意义"）：
+   - **使用者的要求**（\`## 使用者\` 段里的话，清单见 \`user-requirements.md\`）⇒ 这是**约定的来源**：
+     默认写进 \`skill/SKILL.md\` 的「约定」一节，**无条件生效**。**只有**素材里明确写了
+     "这次/本次/临时/就这一篇"，才允许写成"如果用户要求…"的条件分支。
+   - **这一次的执行细节**（\`## 执行记录\` 段里的命令、顺序、试错）⇒ 素材是证据、skill 是做法：
+     把"这次我做了 X"改写成"当需要 X 时，先……再……"。
+   ⚠️ 旧版这里只有第二条，于是"使用者要求 STE100"被当成一次性细节抽象成了可选开关
+     —— 使用者原话就是那次投诉。不要再用一条规则同时处理这两类东西。
 4. 素材里凡是**环境依赖的失败、工具吐槽、一次性重试**，不要写进 skill（不结晶清单）。
+   这条**只针对执行细节**，不针对使用者的要求。
 
 ## 产出写在哪
 

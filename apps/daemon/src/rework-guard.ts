@@ -111,7 +111,16 @@ function lineKeys(text: string | null | undefined): string[] {
  */
 export function locatorFile(locator: string): string {
   const cut = locator.search(/[:#]/)
-  return (cut < 0 ? locator : locator.slice(0, cut)).trim()
+  const path = (cut < 0 ? locator : locator.slice(0, cut)).trim()
+  /**
+   * ⚠️ 去掉开头的 `skill/`：审核者写的是 `skill/SKILL.md:183`（它眼里的路径），
+   * 而收敛闸门比的是**产出目录内部**的相对路径（`SKILL.md`）。不去掉两边永远对不上。
+   *
+   * 这是上线后第一次真跑就现形的 bug：`material/rework-guard.md` 里出现了自相矛盾的判定——
+   * 「上一轮点名的文件（skill/SKILL.md、references/research-commands.md）这一版**一个都没动**
+   * （改的是 SKILL.md、references/research-commands.md）」⇒ 误判 `off-target` ⇒ **误停自动循环**。
+   */
+  return path.replace(/^(\.\/)?(skill\/)+/i, '')
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {

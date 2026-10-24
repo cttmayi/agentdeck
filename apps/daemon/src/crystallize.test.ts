@@ -438,6 +438,82 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
     assert.match(byPath.get('feedback.md')!, /第 3 步不对/, '反馈单独一份')
   })
 
+  /**
+   * ★ 分批第 26 批：素材里使用者的要求要**单独成一份**，并且索引要用新的两条规则。
+   *
+   * 真机现场（使用者原话）：「我沉淀了 research-and-write-article…我要求了 ASD-STE100 和
+   * 金字塔原理，完全没有在 skill 中有记录。这些要求就是我对此部分的习惯…这才有沉淀的意义。」
+   * 量到的根子：`00-README.md` 旧的第 3 条把"使用者的话"和"这一次的执行细节"归成一类，
+   * 于是 STE100 被抽象成"如果用户要求…"。
+   */
+  test('★★★ 素材里使用者的要求 ⇒ 单独出 user-requirements.md，索引区分"要求"与"执行细节"', async () => {
+    const agent = await seedAgent({ id: 'exec-req' })
+    await store.insertConversation({
+      id: 'conv-ste' as never,
+      workspaceId: WS,
+      agentId: agent.id,
+      skillIds: [],
+      title: '调查 Memento 3',
+      workDir: null,
+      createdAt: 1,
+      updatedAt: 1,
+      lastTurnAt: null,
+      turnCount: 3,
+    })
+    const userTexts = [
+      '使用 ASD-STE100 的方式 写成一篇文章',
+      '你的写作结构是什么思路',
+      '我觉得麦肯锡的《金字塔原理》这本书的表达不错，请参考做调整呢。也需要符合ASD-STE100的表达',
+    ]
+    // 四个 run 都要先建出来：chat turn 挂着 runId，消息流必须挂在已知 run 上
+    for (let i = 1; i <= 3; i += 1) {
+      await seedRun({
+        id: `run-ste-${i}`,
+        agentId: agent.id as string,
+        subject: { type: 'conversation', id: 'conv-ste' },
+      })
+    }
+    for (const [i, t] of userTexts.entries()) {
+      await store.insertChatTurn({
+        id: `turn-ste-${i + 1}` as never,
+        workspaceId: WS,
+        conversationId: 'conv-ste' as never,
+        seq: i + 1,
+        userText: t,
+        runId: `run-ste-${i + 1}` as never,
+        createdAt: i + 1,
+        error: null,
+      })
+    }
+    await appendMessage('run-ste-3', { type: 'text', content: '已按金字塔原理重排' })
+    await new Promise((r) => setTimeout(r, 5))
+
+    const run = await store.getRun('run-ste-3' as never)
+    const collected = await collectMaterial(store, run!)
+    const req = collected.pieces.find((p) => p.relPath === 'user-requirements.md')
+    assert.ok(req, '要求清单必须单独成一份（不靠起草者从 turns 里自己认）')
+    assert.match(req.text, /ASD-STE100/, '第一轮的要求要在')
+    assert.match(req.text, /金字塔原理/, '第三轮的要求要在')
+    assert.ok(!/写作结构是什么思路/.test(req.text), '提问不许被当成要求')
+
+    const materialDir = join(dir, 'material-req')
+    const written = await writeMaterial(
+      materialDir,
+      { pieces: collected.pieces, stats: collected.stats },
+      {
+        scope: 'conversation',
+        sourceLabel: '调查 Memento 3',
+        target: { kind: 'new', purpose: '调研并写文章' },
+        existingSkills: [],
+      },
+    )
+    assert.ok(written.includes('user-requirements.md'))
+    const index = await readFile(join(materialDir, '00-README.md'), 'utf8')
+    assert.match(index, /user-requirements\.md/, '索引要登记这份清单')
+    assert.match(index, /使用者的要求/, '索引要讲清"要求 ⇒ 约定"这条规则')
+    assert.match(index, /默认写进/, '而且要写清默认生效，不是可选开关')
+  })
+
   test('writeMaterial：索引 + meta + 现有技能清单都落盘，更新场景带基线', async () => {
     const materialDir = join(dir, 'material-ctx')
     const written = await writeMaterial(

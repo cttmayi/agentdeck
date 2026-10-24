@@ -27,6 +27,14 @@ test('locatorFile：三种写法都能归一成文件（行号/小节都切掉�
   assert.equal(locatorFile('scripts/find-pdf-url.py'), 'scripts/find-pdf-url.py')
 })
 
+test('★★ `skill/` 前缀要归一（真机第一次跑就误判了 off-target、误停循环）', () => {
+  // 审核者写 `skill/SKILL.md:183`，闸门比的是产出目录内部的 `SKILL.md`
+  assert.equal(locatorFile('skill/SKILL.md:183'), 'SKILL.md')
+  assert.equal(locatorFile('skill/references/research-commands.md:12'), 'references/research-commands.md')
+  // 已经不带前缀的不要被误伤
+  assert.equal(locatorFile('SKILL.md:183'), 'SKILL.md')
+})
+
 test('countLines：空行不算（模型爱加空行"整理版式"，那不算变胖）', () => {
   assert.equal(countLines('a\n\nb\n  \nc\n'), 3)
   assert.equal(countLines(''), 0)

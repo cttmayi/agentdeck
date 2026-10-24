@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 26 批**（使用者的要求 ⇒ 长期约定，见 §10.41）：新增 `apps/daemon/src/user-requirements.ts`
+（`extractRequirements`/`looksLikeRequirement`/`requirementTerms`/`checkTermCoverage`/`renderUserRequirements`；
+提问不算要求）；素材多出 `user-requirements.md`、`00-README.md` 的"怎么用"拆成"要求 ⇒ 约定"/"执行细节 ⇒ 做法"两条；
+`DRAFTER_INSTRUCTIONS` 新增 3b；`SKILL_REVIEWER_INSTRUCTIONS` 由四项判据变五项（第 5 项"要求有没有落点"），
+⚠️ 冻结的 `SKILL_REVIEWER_INSTRUCTIONS_V1` **一个字都没动**；`startDraftAudit` 起审核前做专名落点检查并追加进
+`material/exec-check.md`。同时修掉第 25 批的 `off-target` 误判（locator 带 `skill/` 前缀没归一 ⇒ 误停自动循环）。
 **第 25 批**（返工收敛，见 §10.40）：新增 `apps/daemon/src/rework-guard.ts`（纯确定性：`inspectRework`/
 `locatorFile`/`countLines`，阈值 `REWRITE_RATIO=0.4`、`BLOAT_RATIO=1.3`、`MIN_LINES_FOR_RATIO=20`）；
 `draftReviewFeedback` 加回归清单（按文件聚合历轮点名、最多 12 条）+ 三条硬约束；

@@ -150,6 +150,7 @@ import {
   type GuardFile,
   type GuardResult,
 } from './rework-guard.ts'
+import { checkTermCoverage, requirementTerms } from './user-requirements.ts'
 // ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
 import {
   renderExecCheckMarkdown,
@@ -2190,6 +2191,44 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * ⚠️ 为什么敢删：被删的条目对应的 run 都还在 store 里（版本列表从 chain 现算），
    *    删的只是"这条链记了别人的版本"这份**错记录**。日志里写清删了哪几条，可回查。
    */
+  /**
+   * 专名落点检查：把使用者要求里的专名与 `skill/` 全文对一遍，渲染成一段 Markdown
+   * （追加到 `material/exec-check.md` 末尾）。没有要求清单 ⇒ 返回空串（不加噪音）。
+   */
+  async function checkRequirementTerms(taskDir: string): Promise<string> {
+    const raw = await readFileSafe(join(taskDir, 'material', 'user-requirements.md'))
+    if (raw === null || raw.trim() === '') return ''
+    // 清单里每条原文都写成 `1. （turns/002.md）原话` —— 直接从这些行里抽专名
+    const quotes = raw
+      .split('\n')
+      .filter((l) => /^\d+\. （/.test(l))
+      .map((l) => l.replace(/^\d+\. （[^）]*）/, ''))
+    if (quotes.length === 0) return ''
+    const terms = [...new Set(quotes.flatMap((q) => requirementTerms(q)))]
+    if (terms.length === 0) return ''
+    const texts: string[] = []
+    for (const rel of await listSkillFiles(join(taskDir, 'skill')).catch(() => [] as string[])) {
+      const t = await readFileSafe(join(taskDir, 'skill', rel))
+      if (t !== null) texts.push(t)
+    }
+    const coverage = checkTermCoverage(terms, texts)
+    const missing = coverage.filter((c) => !c.found)
+    const lines = [
+      '',
+      '## 使用者要求里的专名落点（平台检查）',
+      '',
+      missing.length === 0
+        ? '全部专名都在 `skill/` 里出现过。'
+        : `⚠️ 这些专名在 \`skill/\` 里**还没出现**：${missing.map((m) => m.term).join('、')}`,
+      '',
+      ...coverage.map((c) => `- ${c.found ? '通过' : '失败'} ${c.term}`),
+      '',
+      '⚠️ 只查"有没有出现"：出现了不等于落实对了（那由审核者判），但没出现就一定没落地。',
+      '',
+    ]
+    return lines.join('\n')
+  }
+
   /** 递归列出 `root` 下的相对路径（读不到 ⇒ 抛错，由调用方决定"不判"）。 */
   async function listSkillFiles(root: string): Promise<string[]> {
     const out: string[] = []
@@ -2938,12 +2977,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       )
     }
 
+    /**
+     * ★ 分批第 26 批：专名落点检查（机械，不花额度）。
+     *
+     * 把 `material/user-requirements.md` 里抽到的专名（`ASD-STE100`、`《金字塔原理》`…）
+     * 在 `skill/` 全文里查一遍，结果**追加**到定检报告里——审核者按第 5 项判据核对时
+     * 有机械结论可依，而不是自己去 grep。
+     *
+     * ⚠️ 只查"有没有出现"：出现了不等于落实对了（那仍由审核者判），但没出现就一定没落地。
+     *    这是**诚实边界**，写进报告里说明。
+     */
+    const termCoverage = await checkRequirementTerms(draftHut)
     const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
     if (execReport !== null) {
       await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
       await writeFile(
         join(draftHut, 'material', 'exec-check.md'),
-        renderExecCheckMarkdown(execReport),
+        `${renderExecCheckMarkdown(execReport)}${termCoverage}`,
         'utf8',
       ).catch(() => undefined)
       info(`起草审核定检（${draft.id as string}）：${summarizeExecCheck(execReport)}`)
