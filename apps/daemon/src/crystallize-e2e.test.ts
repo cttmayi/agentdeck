@@ -1570,6 +1570,74 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     }
   })
 
+  test('★★★ 返工版被判「没动点名处/重写」⇒ 自动循环当场停（真机 15 版仍在震荡的止血）', async () => {
+    /**
+     * 真机现场：15 版 / $62.27，第 14 轮点名 A、第 15 轮点名 B（B 是修 A 时撞出来的新伤），
+     * 正文 188 → 473 行只增不减。这一批的做法是：返工版一落地**先量**，判成
+     * 重写 / 变胖 / 没动点名处 ⇒ 停掉自动循环、把原因写成人能读的文件，然后照常审核
+     * （人要看判决，"停"只停"下一轮自动化"）。
+     *
+     * 这条用例里假后端**不改产出**（返工那一路写回同一份夹具）⇒ 判据应当是
+     * `off-target`（点名的地方一个都没动）——这正是"改不好"里最便宜也最常见的一种：
+     * 它压根没改。
+     */
+    const sourceRunId = await runReviewed('审完的流程（返工收敛闸门）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '返工收敛闸门' },
+    })
+    fakeBackend.draftReviewVerdict = failVerdict()
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(verdict.conclusion, 'fail')
+      // ★ 先钉"返工到底派出去没有"：只等 `.versions.json` 出第二版的话，
+      //   万一派不出去，等到的是一条 120 秒的超时（而不是一句能读懂的原因）。
+      assert.equal(
+        verdict.status,
+        'rework_requested',
+        '第一版有额度 ⇒ 必须真的起第 2 版（escalated 说明返工没派出去）',
+      )
+      const v2 = await waitRevisedFrom(draftRunId, 45_000)
+      // 等第 2 版起审核（闸门就在起审核之前跑）
+      const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
+      const stopFile = join(taskDir, '.auto-rework.json')
+      let stopped: { stoppedBy?: string; reason?: string; reasons?: string[] } | null = null
+      const deadline = Date.now() + 30_000
+      while (Date.now() < deadline) {
+        try {
+          stopped = JSON.parse(await readFile(stopFile, 'utf8')) as { stoppedBy?: string }
+          break
+        } catch {
+          await new Promise((r) => setTimeout(r, 200))
+        }
+      }
+      assert.ok(stopped, '闸门必须落下停止标记（没有它，下一轮还会自动起一版、继续花钱）')
+      assert.equal(stopped.stoppedBy, 'regressed', '停的原因必须写清楚是"被判变差/重写"，不是人按的')
+      assert.ok(
+        ['rewrite', 'bloat', 'off-target'].includes(String(stopped.reason)),
+        `reason 必须是三种之一，实际 ${String(stopped.reason)}`,
+      )
+      // 人可读的说明也要落盘：不然界面只看到"停了"，不知道为什么
+      const report = await readFile(join(taskDir, 'material', 'rework-guard.md'), 'utf8')
+      assert.match(report, /返工收敛判定/)
+      assert.match(report, /量到的事实/)
+      // 停止之后**不许**再自动开下一版
+      await new Promise((r) => setTimeout(r, 1500))
+      const list = await getJsonFile<{ items: Array<{ runId: string; versionRunIds: string[] }> }>(
+        '/api/crystallize/drafts',
+      )
+      for (const row of list.items) {
+        for (const id of row.versionRunIds) {
+          if (id === v2) continue
+          const run = await getJsonFile<{ revisedFrom?: string }>(`/api/runs/${id}`)
+          assert.notEqual(run.revisedFrom, v2, '循环已停 ⇒ 不许再有以 v2 为父的新版本')
+        }
+      }
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
   test('★★★ 邻链有很多版**不许**吃掉本链的返工额度（真机上因此一次都没自动返工）', async () => {
     /**
      * 真机现场（2026-10-23）：来源 run `Q2SQ16` 下挂着两条不相干的链
@@ -2038,6 +2106,16 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
   test('★★ 整条链跑到头：初版等人点，之后每一版都自动接着审，额度用尽才停', async () => {
     // 分批第 23 批起上限来自设置（默认 10）⇒ 这条"跑满就停"的用例把轮数钉成 2
     const restoreRounds = await useReworkRounds(2)
+    /**
+     * ★ 分批第 25 批：这条必须让假后端**只改点到的地方**。
+     *
+     * 假后端默认把整份夹具重写一遍 ⇒ 返工版和上一版几乎完全不同 ⇒ 新加的收敛闸门
+     * 会判 `rewrite` 并**停掉自动循环**（那正是闸门的职责）⇒ 这条用例等第 3 版会等到超时
+     * （第一次全量 check 里就是它红：「没等到"按 0SF1XX 改出来的下一版"」）。
+     * ⚠️ 所以改的是**夹具的起草者行为**，不是放宽闸门：真机上"收敛"的起草者本来就是
+     *    只改点名处（第 15 批量过：整篇重写的那条链 15 版还在震荡）。
+     */
+    fakeBackend.minimalEditOnRevise = true
     // 这份判决照合规形状写（理由码与严重度都是平台枚举）——不合规的判决不会返工，
     // 那条坑 §10.5 已经记过（第一版随手写的 reasonCode/severity 让整条链一次都没触发）。
     fakeBackend.draftReviewVerdict = {
@@ -2123,6 +2201,7 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
       assert.equal((await draftReview(v3)).versions, 3, '版本数停在 3')
     } finally {
       fakeBackend.draftReviewVerdict = null
+      fakeBackend.minimalEditOnRevise = false
       await restoreRounds()
     }
   })

@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 25 批**（返工收敛，见 §10.40）：新增 `apps/daemon/src/rework-guard.ts`（纯确定性：`inspectRework`/
+`locatorFile`/`countLines`，阈值 `REWRITE_RATIO=0.4`、`BLOAT_RATIO=1.3`、`MIN_LINES_FOR_RATIO=20`）；
+`draftReviewFeedback` 加回归清单（按文件聚合历轮点名、最多 12 条）+ 三条硬约束；
+`startDraftAudit` 在起审核**之前**跑闸门，判成 `rewrite`/`bloat`/`off-target` ⇒ 写
+`.auto-rework.json`（`stoppedBy:'regressed'`）+ `material/rework-guard.md` ⇒ 停掉自动循环（仍照常审核）。
+同时确认：`locator` 带行号**不能**当"同一处问题"的身份（第 23 批的 `stalled` 因此恒为 null）。
 **第 23 批**（自动返工循环，见 §10.39）：新增 `Workspace.autoReworkRounds`（默认 10，0–99，`0` = 关）；
 `PUT /api/workspace/auto-rework` 写入口校验；`resolveAutoReworkRounds()` 归一（`0` 原样、脏值夹范围、NaN 退回默认）；
 `#reworkBudgetFor` 的上限改读设置；`POST /api/crystallize/stop-loop` 落 `.auto-rework.json` 并取消在跑的审核，

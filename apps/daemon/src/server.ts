@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import { dirname, join } from 'node:path'
@@ -141,6 +141,15 @@ import {
 //   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
 //   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
 import { chainOf, chainOfRun } from './draft-chain.ts'
+// ★ 分批第 25 批：返工收敛闸门（量"这一版到底改了什么"，拦重写/变胖/没动点名处）
+import {
+  BLOAT_RATIO,
+  REWRITE_RATIO,
+  inspectRework,
+  locatorFile,
+  type GuardFile,
+  type GuardResult,
+} from './rework-guard.ts'
 // ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
 import {
   renderExecCheckMarkdown,
@@ -2181,6 +2190,107 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * ⚠️ 为什么敢删：被删的条目对应的 run 都还在 store 里（版本列表从 chain 现算），
    *    删的只是"这条链记了别人的版本"这份**错记录**。日志里写清删了哪几条，可回查。
    */
+  /** 递归列出 `root` 下的相对路径（读不到 ⇒ 抛错，由调用方决定"不判"）。 */
+  async function listSkillFiles(root: string): Promise<string[]> {
+    const out: string[] = []
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      for (const ent of await readdir(dir, { withFileTypes: true })) {
+        const rel = prefix === '' ? ent.name : `${prefix}/${ent.name}`
+        if (ent.isDirectory()) await walk(join(dir, ent.name), rel)
+        else if (ent.isFile()) out.push(rel)
+      }
+    }
+    await walk(root, '')
+    return out.sort()
+  }
+
+  /** 读文本文件；读不到 ⇒ `null`（"这一侧没有内容"，不是错误）。 */
+  async function readFileSafe(path: string): Promise<string | null> {
+    try {
+      return await readFile(path, 'utf8')
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 给返工版做收敛判定：拿"上一版快照"和"这一版"逐文件比。
+   *
+   * 上一版从 `history/<上一版 runId>/skill/` 读（返工开始时平台会先快照，见
+   * `recordDraftVersion` 那条路）；拿不到 ⇒ 返回 `null`（**不判**，而不是判成 ok：
+   * 少一份事实不该变成"这一版合格"）。
+   */
+  async function inspectReworkOrNull(draft: Run): Promise<GuardResult | null> {
+    const prevId = draft.revisedFrom
+    if (!prevId) return null
+    const taskDir = await draftTaskDir(draft.id as string)
+    const prevRoot = join(taskDir, 'history', prevId as string, 'skill')
+    const nextRoot = join(taskDir, 'skill')
+    let prevFiles: string[]
+    try {
+      prevFiles = await listSkillFiles(prevRoot)
+    } catch {
+      warn(`返工版 ${(draft.id as string).slice(-8)} 的上一版快照读不到（${prevRoot}）⇒ 不做收敛判定`)
+      return null
+    }
+    const nextFiles = await listSkillFiles(nextRoot).catch(() => [] as string[])
+    const files: GuardFile[] = []
+    for (const rel of [...new Set([...prevFiles, ...nextFiles])].sort()) {
+      files.push({
+        path: rel,
+        prev: prevFiles.includes(rel) ? await readFileSafe(join(prevRoot, rel)) : null,
+        next: nextFiles.includes(rel) ? await readFileSafe(join(nextRoot, rel)) : null,
+      })
+    }
+    // 上一轮判决点名到哪儿：返工是照着**那条判决**改的，所以拿它的 findings 做禁区
+    const page = await store.listRuns({ workspaceId, limit: 10_000 })
+    const prevReview = page.items
+      .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === (prevId as string))
+      .sort((a, b) => a.queuedAt - b.queuedAt)
+      .pop()
+    const locators: string[] = []
+    if (prevReview) {
+      const verdicts = await store.listVerdictsByRun(prevReview.id)
+      const verdict = verdicts[verdicts.length - 1]
+      for (const f of verdict?.findings ?? []) {
+        for (const ev of f.evidence) if (typeof ev.locator === 'string') locators.push(ev.locator)
+      }
+    }
+    return inspectRework({ files, targetLocators: locators })
+  }
+
+  /** 把闸门的判定写成任务目录里的一份人可读文件（`material/rework-guard.md`）。 */
+  async function writeReworkGuardReport(
+    taskDir: string,
+    draft: Run,
+    guard: GuardResult,
+  ): Promise<void> {
+    const lines = [
+      `# 返工收敛判定：${guard.kind}`,
+      '',
+      `判定对象：返工版 \`${draft.id as string}\`（上一版 \`${(draft.revisedFrom ?? '') as string}\`）`,
+      '',
+      '## 为什么这样判',
+      ...guard.reasons.map((r) => `- ${r}`),
+      '',
+      '## 量到的事实',
+      `- 上一版 ${guard.facts.prevLines} 行 ⇒ 这一版 ${guard.facts.nextLines} 行`,
+      `- 改动：${guard.facts.added} 行新增 / ${guard.facts.removed} 行删除（占上一版 ${Math.round(guard.facts.changedRatio * 100)}%）`,
+      `- 这一版碰过的文件：${guard.facts.touchedFiles.join('、') === '' ? '（没改任何文件）' : guard.facts.touchedFiles.join('、')}`,
+      `- 上一轮判决点名的文件：${guard.facts.targetFiles.join('、') === '' ? '（判决里没有位置）' : guard.facts.targetFiles.join('、')}`,
+      '',
+      '## 这意味着什么',
+      '自动循环已经**停了**（`' + AUTO_REWORK_STOP_FILE + '`）。这一版仍然会被审核，但不会再自动起草下一版——',
+      '因为继续自动改下去只会重复同一个形态（真机上跑了 15 版、$62.27 仍在震荡）。',
+      '要接着跑：等这一版判决出来后点「反馈」交一句人意见，或在沉淀页顶栏把轮数调大后重新审核。',
+      '',
+    ]
+    await mkdir(join(taskDir, 'material'), { recursive: true }).catch(() => undefined)
+    await writeFile(join(taskDir, 'material', 'rework-guard.md'), lines.join('\n'), 'utf8').catch(
+      () => undefined,
+    )
+  }
+
   /**
    * 读「停止自动循环」的标记；没有 ⇒ `null`。
    *
@@ -2791,6 +2901,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ⚠️ 定检本身失败**不拦**起审核：它只是少一份事实，而"审一下"这件事不该因此变得不可能。
     // ⚠️ 也不写给起草者看（`00-README.md` 不提名它）：起草者的输入是**使用者的意见**
     //    （`material/feedback.md`），平台定检是审核者的原料，塞给起草者等于换了任务书。
+    // ══════════════════════════════════════════════════════════════════
+    // ★ 分批第 25 批：返工版先过**收敛闸门**，再起审核
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // 为什么放在起审核之前：真机上那条链 15 版 / $62.27 还在震荡——第 14 轮点名 A、
+    // 第 15 轮点名 B，而 B 是"修 A 撞出来的新伤"；正文 188 → 473 行只增不减。
+    // 每一轮审核都是**真金白银**（单轮最高 $6.11），先花几十毫秒量一下"这版是不是重写"
+    // 比直接审划算得多；判成重写/变胖/没动点名处 ⇒ **停掉自动循环**，交给人。
+    //
+    // ⚠️ 只在**返工版**（有 `revisedFrom`）上判：初版没有"上一版"可比，
+    //    而且初版本来就该由起草者自己决定写多少。
+    // ⚠️ 判完之后**照样起审核**（不拦）：使用者要看到判决，"停"只停"下一轮自动化"。
+    //    只写标记不审的话，界面会退化成"还没审核过"，人反而更不知道发生了什么。
+    const guard = await inspectReworkOrNull(draft)
+    if (guard !== null && guard.kind !== 'ok') {
+      await writeReworkGuardReport(draftHut, draft, guard)
+      await writeFile(
+        join(draftHut, AUTO_REWORK_STOP_FILE),
+        `${JSON.stringify(
+          {
+            stoppedAt: Date.now(),
+            stoppedBy: 'regressed',
+            reason: guard.kind,
+            reasons: guard.reasons,
+            draftRunId: draft.id,
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      ).catch(() => undefined)
+      warn(
+        `返工版 ${(draft.id as string).slice(-8)} 被判「${guard.kind}」⇒ 自动循环已停：` +
+          guard.reasons.join('；'),
+      )
+    }
+
     const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
     if (execReport !== null) {
       await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
@@ -3479,7 +3626,52 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * 所以这里只抽这三样，并保持"每条一行、带序号"的形状——它和 revise 路由给的那句
    * 人工意见是同一个形状（同一类输入走同一个格式，起草者不必分辨是谁提的）。
    */
-  function draftReviewFeedback(verdict: VerdictRecord): string {
+  /**
+   * 这条链上**之前几轮**判决点名过的位置（按文件聚合，越常被点名越靠前）。
+   *
+   * 只取文件级：行号每轮都漂（详见 `rework-guard.ts` 里 `locatorFile` 的注释）。
+   * `summary` 取**最近一轮**那条的说法，用来说明"这里反复出问题的是什么"。
+   */
+  async function regressionChecklist(
+    draftRunId: string,
+  ): Promise<Array<{ file: string; rounds: number; summary: string }>> {
+    const page = await store.listRuns({ workspaceId, limit: 10_000 })
+    const chain = chainOfRun(
+      page.items
+        .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+        .map((r) => ({ id: r.id as string, revisedFrom: r.revisedFrom ?? null, queuedAt: r.queuedAt })),
+      draftRunId,
+    )
+    const byFile = new Map<string, { rounds: number; summary: string }>()
+    for (const v of chain) {
+      const review = page.items
+        .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === v.id)
+        .sort((a, b) => a.queuedAt - b.queuedAt)
+        .pop()
+      if (!review) continue
+      const verdicts = await store.listVerdictsByRun(review.id)
+      const verdict = verdicts[verdicts.length - 1]
+      if (!verdict) continue
+      const seen = new Set<string>()
+      for (const f of verdict.findings) {
+        for (const ev of f.evidence) {
+          const file = typeof ev.locator === 'string' ? locatorFile(ev.locator) : ''
+          if (file === '' || seen.has(file)) continue
+          seen.add(file)
+          const cur = byFile.get(file) ?? { rounds: 0, summary: '' }
+          byFile.set(file, { rounds: cur.rounds + 1, summary: f.summary })
+        }
+      }
+    }
+    return [...byFile.entries()]
+      .map(([file, v]) => ({ file, rounds: v.rounds, summary: v.summary }))
+      .sort((a, b) => b.rounds - a.rounds)
+  }
+
+  function draftReviewFeedback(
+    verdict: VerdictRecord,
+    checklist: ReadonlyArray<{ file: string; rounds: number; summary: string }> = [],
+  ): string {
     // ★ 分批第 10 批：把"改哪儿"交成**能直接照做**的形状。
     //
     // 原来一行写成 `locator：excerpt`（位置与原文挤在一行），审核者的条目一旦带上多个证据
@@ -3500,6 +3692,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         .join('；')
       lines.push(`${i + 1}. [${f.severity}] ${f.summary}${where === '' ? '' : `\n   位置/摘录：${where}`}`)
     })
+    /**
+     * ★ 分批第 25 批：把"这条链上之前几轮点过的问题"一起交下去，并加**硬约束**。
+     *
+     * 真机上量到 15 版 / $62.27 还在震荡：第 14 轮点名 A、第 15 轮点名 B，
+     * 而 B 是"修 A 时撞出来的新伤"；正文 188 → 473 行只增不减（每轮都在重写整篇）。
+     * 光把"这一轮的条目"交下去，起草者没有"这些不能改坏"的约束。
+     *
+     * ⚠️ 清单里的 `locator` **只到文件级**（行号会漂，见 `rework-guard.ts` 的注释），
+     *    所以这里的措辞是"这些文件里已经改过的东西"而不是"第 183 行"。
+     */
+    if (checklist.length > 0) {
+      lines.push('')
+      lines.push('## 这条链上之前几轮已经改过的地方（不许改坏）')
+      lines.push(
+        '下面是前几轮审核点名过的文件与问题。它们要么已经改好、要么还在反复出现——' +
+          '这一版**只许在你被点名的位置改**，上面这些地方一个字节都不要动' +
+          '（要动必须在「怎么改的」里说明为什么非动不可）。',
+      )
+      for (const item of checklist.slice(0, 12)) {
+        lines.push(
+          `- ${item.file}（近 ${item.rounds} 轮被点名）${item.summary === '' ? '' : `：${item.summary}`}`,
+        )
+      }
+      if (checklist.length > 12) {
+        lines.push(`- …还有 ${checklist.length - 12} 条（同一批文件，按下面对文件清单处理）`)
+      }
+    }
+    lines.push('')
+    lines.push('## 硬约束（违反会被平台判成「重写 / 变胖 / 没动点名处」，自动循环会停）')
+    lines.push('1. 只改上面点到的地方；其它段落**原样保留**，不要"顺手优化"。')
+    lines.push(
+      `2. 不许重写整篇：改动（增+删）不得超过上一版的 ${Math.round(REWRITE_RATIO * 100)}%。`,
+    )
+    lines.push(
+      `3. 正文不得比上一版长超过 ${Math.round((BLOAT_RATIO - 1) * 100)}%（这条链已经因为重写从 188 行长到 473 行）。`,
+    )
+    lines.push('4. 改完自己过一遍：上一节清单里的每一处，现在是否仍然成立？')
     lines.push('改完把**改过的文件**写回 `skill/`（完整文件，不是补丁）；没改的文件不必重写。')
     if (verdict.findings.length === 0) {
       // 判决里没有条目 ⇒ 如实说明，不要编一条。理由码本身就是唯一线索。
@@ -3537,7 +3766,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       const result = await startReviseRun({
         draftRunId: run.subject.id as string,
-        feedback: draftReviewFeedback(verdict),
+        feedback: draftReviewFeedback(verdict, await regressionChecklist(run.subject.id as string)),
       })
       if (result.status !== 202) {
         const detail = (result.body as { error?: unknown }).error
