@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 23 批**（自动返工循环，见 §10.39）：新增 `Workspace.autoReworkRounds`（默认 10，0–99，`0` = 关）；
+`PUT /api/workspace/auto-rework` 写入口校验；`resolveAutoReworkRounds()` 归一（`0` 原样、脏值夹范围、NaN 退回默认）；
+`#reworkBudgetFor` 的上限改读设置；`POST /api/crystallize/stop-loop` 落 `.auto-rework.json` 并取消在跑的审核，
+`createReworkRun` 认这个标记；审核接口新增 `autoRework{current,max,spentUsdMicros,stopped,stalled}`
+（`stalled` = 相邻两轮同一 `locator` 都被点名，**只标注不停**）；设置页加「沉淀自动返工」数字框，
+结论条显示 `第 k/N 轮 · 已花 $x` 与「停止循环」。口径全部是使用者的选择：一次 PASS 即停、默认 10、无进展不早停、循环中只给停止。
 **第 22 批**（混链缺陷，见 §10.38）：链条口径统一到 `apps/daemon/src/draft-chain.ts`——**只认 `revisedFrom`**
 （`rootOf`/`groupByChain`/`chainOfRun`），`listCrystallizeDrafts`、`listChain`、`#reworkBudgetFor`、
 审查接口 `versions` 四处全部改用它；断父自成一根、成环取环上最早一版（与入口无关）。`.versions.json` 里

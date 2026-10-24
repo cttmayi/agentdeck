@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 // ★ 分批第 22 批：返工额度按**链**数（原来按"同一来源"，在真机上被邻链撑爆 ⇒ 自动返工从没触发）
 import { chainOfRun } from './draft-chain.ts'
+import type { Workspace } from '@agentdeck/protocol'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -307,6 +308,35 @@ const MAX_STDERR_LOG_LINES = 200
  * 定成 2 的意思是：最多改两版，第三版还不通过就**交给人**（停在"审核未通过"态）。
  */
 const SKILL_DRAFT_REWORK_LIMIT = 2
+/**
+ * 老的**硬编码**上限，只在"读不到工作区设置"时兜底（分批第 23 批起，轮次由
+ * `Workspace.autoReworkRounds` 决定，默认 10）。
+ *
+ * 为什么保留 2 而不是 10 作兜底：读不到工作区（数据被删/半初始化）时按**保守**的来 —
+ * 少跑几轮最多是"又要人点一次"，多跑几轮是**真金白银**（实测 10 轮 ≈ $30）。
+ */
+/**
+ * 轮次上限的默认值（使用者 2026-10-23 定：默认 10，允许 0–99）。
+ *
+ * 与协议里的 `Workspace.autoReworkRounds` 同一个数：这里只是"没设过时读什么"。
+ */
+export const DEFAULT_AUTO_REWORK_ROUNDS = 10
+
+/**
+ * 从一个工作区记录解析出轮次上限。
+ *
+ * ⚠️ 单独一个函数是为了**能被测**：这段逻辑有两条容易写错的边界——
+ *   · `0` 必须原样返回"关"（写成 `|| DEFAULT` 会把 0 变成 10，使用者以为关了，其实在烧钱）；
+ *   · 越界/非整数一律夹到范围内（老数据、手工改过的 store 都可能有怪值）。
+ */
+export function resolveAutoReworkRounds(
+  workspace: Partial<Pick<Workspace, 'autoReworkRounds'>> | null | undefined,
+): number {
+  const raw = workspace?.autoReworkRounds
+  if (raw === undefined) return DEFAULT_AUTO_REWORK_ROUNDS
+  if (!Number.isFinite(raw)) return DEFAULT_AUTO_REWORK_ROUNDS
+  return Math.min(99, Math.max(0, Math.trunc(raw)))
+}
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -1991,8 +2021,12 @@ export class RunExecutor {
       )
       // 自己一定在链上；真读不到（极端：查询中途被删）就当只有这一版，别把额度一次性清零
       const versions = chain.length === 0 ? 1 : chain.length
+      // ★ 分批第 23 批：上限来自**工作区设置**（默认 10，允许 0–99，`0` = 关）。
+      //   原来是硬编码 2 ⇒ 使用者手动跑了 10 轮，而自动循环到第 3 版就"额度用尽"。
+      const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
+      const limit = resolveAutoReworkRounds(workspace ?? null)
       return {
-        maxReworks: SKILL_DRAFT_REWORK_LIMIT,
+        maxReworks: limit === 0 ? 0 : limit,
         // 已经起草过几版 - 1 = 已经返工过几次（第一版不算返工）
         usedReworks: Math.max(0, versions - 1),
       }

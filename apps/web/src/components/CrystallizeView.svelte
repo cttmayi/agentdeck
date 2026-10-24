@@ -195,8 +195,23 @@
      * 因为编一个"没过期"会让界面安静地把可能对不上的结论当成有效结论。
      */
     stale: boolean | null
-    /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2）。 */
+    /** 这条**链**上已经起草过几版（⛔ 2026-10-23 之前这里数的是"同来源"，混链时会虚高）。 */
     versions: number
+    /**
+     * 自动循环的可见面（分批第 23 批）。
+     *
+     * ⚠️ 为什么界面必须显示 `current/max` 与 `spentUsdMicros`：使用者定的是"默认 10 轮、
+     *    无进展不早停"，而实测一条链 10 轮 ≈ $30 且每轮递增。"跑 N 轮"如果不带成本显示，
+     *    就等于让人闭着眼睛花钱。
+     * `stalled` = 同一处问题连续两轮被点名（只标注**不停**，使用者定的口径）。
+     */
+    autoRework?: {
+      current: number
+      max: number
+      spentUsdMicros: number
+      stopped: boolean
+      stalled: Array<{ locator: string; rounds: number }> | null
+    }
   }
 
   // ── 审阅（四轮：产出 = 文件集合）──
@@ -268,6 +283,8 @@
    */
   let reviewInfo: DraftReviewInfo | null = null
   let reviewBusy = false
+  /** 「停止循环」正在发请求（防连点：它要写文件 + 可能取消一条 run）。 */
+  let loopBusy = false
   /** 问题清单是否展开（结论常驻、明细折叠，与全站其它地方同一条规矩）。 */
   // （`auditDetailOpen` / `auditLogOpen` 随第 3 批删掉了：问题清单与审核日志现在住在
   //   「过程」tab 里，结论条上那两个按钮改成**切到那个 tab**——不再各有一个折叠开关。）
@@ -886,6 +903,30 @@
     const runId = reviewInfo?.reviewRunId ?? null
     auditLive = runId === null ? null : { runId, status }
     await loadReview()
+  }
+
+  /**
+   * 停止自动循环（分批第 23 批）。
+   *
+   * 两件事一起做：**落标记**（下一轮不再自动起草）+ **取消正在跑的审核**
+   * （否则人点完还得等这一轮跑完，几分钟、真金白银）。
+   * 与 `cancelAudit` 分开：那个只停"这一次 run"，循环还会继续。
+   */
+  async function stopLoop(): Promise<void> {
+    if (draftRunId === '' || loopBusy) return
+    loopBusy = true
+    try {
+      await api('/api/crystallize/stop-loop', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId }),
+      })
+      await loadReview()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      loopBusy = false
+    }
   }
 
   async function cancelAudit(): Promise<void> {
@@ -1585,6 +1626,29 @@
                 </strong>
                 <!-- "（预筛）"留着：它说的是"这不是入库的门"，是这条链的前提，不是修饰 -->
                 <span class="faint small">（{$t('crystallize.auditPrescreen')}）</span>
+                {#if reviewInfo.autoRework && reviewInfo.autoRework.max > 0}
+                  <span class="muted small">
+                    {$t('crystallize.autoReworkRound', {
+                      current: String(reviewInfo.autoRework.current),
+                      max: String(reviewInfo.autoRework.max),
+                    })}{$t('crystallize.autoReworkSpent', {
+                      usd: (reviewInfo.autoRework.spentUsdMicros / 1e6).toFixed(2),
+                    })}{reviewInfo.autoRework.stopped ? $t('crystallize.autoReworkStopped') : ''}
+                  </span>
+                {/if}
+                {#if reviewInfo.autoRework?.stalled?.[0]}
+                  <!--
+                    ★ 分批第 23 批：「没进展」只**标注**、不停（使用者的选择）。
+                    同一处（locator）在相邻两轮判决里都被点名 ⇒ 说明起草者改不动它，
+                    这件事值得人看一眼；但产品不替人决定"到此为止"。
+                  -->
+                  <span class="hint small" data-auto-rework-stalled>
+                    {$t('crystallize.autoReworkStalled', {
+                      rounds: String(reviewInfo.autoRework.stalled[0].rounds),
+                      locator: reviewInfo.autoRework.stalled[0].locator,
+                    })}
+                  </span>
+                {/if}
                 <span class="muted">{reviewInfo.review.reasonCode}</span>
                 {#if reviewInfo.review.status === 'rework_requested'}
                   <span class="muted">
@@ -1673,6 +1737,21 @@
                   }}
                 >
                   {$t('crystallize.auditShowLog')}
+                </button>
+              {/if}
+              {#if reviewInfo?.autoRework && reviewInfo.autoRework.max > 1 && !reviewInfo.autoRework.stopped}
+                <!--
+                  ★ 分批第 23 批：循环进行中唯一的人工入口（使用者定的口径）。
+                  「停止循环」与「取消审核」是两件事：后者只停这一次 run，
+                  循环下一轮还会自动起草；前者是真的叫停整条自动流程。
+                -->
+                <button
+                  class="ghost small"
+                  disabled={loopBusy}
+                  title={$t('crystallize.autoReworkStopHint')}
+                  onclick={() => void stopLoop()}
+                >
+                  {$t('crystallize.autoReworkStop')}
                 </button>
               {/if}
               {#if reviewInfo !== null && reviewInfo.review === null && auditRunning}

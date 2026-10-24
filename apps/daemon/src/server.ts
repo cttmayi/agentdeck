@@ -123,6 +123,8 @@ import {
   readDraftVersions,
   // ★ 分批第 22 批：剔掉版本表里"别的链"的条目（真机上 `9D67DN` 的目录里混着 `H5YM0E` 的 4 条）
   dropForeignVersions,
+  // ★ 分批第 23 批：「停止自动循环」的标记文件
+  AUTO_REWORK_STOP_FILE,
   clearHumanEditStamp,
   readHumanEditStamp,
   recordDraftVersion,
@@ -145,7 +147,7 @@ import {
   runSkillExecCheck,
   summarizeExecCheck,
 } from './skill-exec-check.ts'
-import { RunExecutor } from './executor.ts'
+import { DEFAULT_AUTO_REWORK_ROUNDS, RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
   ThirdPartyItemSchema,
@@ -1174,6 +1176,13 @@ async function readWorkspaceSettings(
   defaultRuntimeKey: string
   /** 审核者能不能**真跑**草稿里的脚本（§10.5 第 ③ 条）。老数据 ⇒ 默认开。 */
   allowReviewerScriptRun: boolean
+  /**
+   * 起草 ↔ 审核自动循环的轮次上限（分批第 23 批，使用者定：默认 10，允许 0–99，0 = 关）。
+   *
+   * 界面上就是「自动返工轮数」一个数字框。它同时也是**唯一的花钱闸门**：使用者选了
+   * "无进展不早停"，所以没有别的刹车（除了"审核没跑成""变差""人按停止"）。
+   */
+  autoReworkRounds: number
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1194,6 +1203,9 @@ async function readWorkspaceSettings(
     defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
     // 老数据没有这个键 ⇒ 开（与 `webSearchEnabled` 同一条规矩）
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
+    // 老数据没有这个键 ⇒ 默认轮数（10）。⚠️ `0` 必须原样返回"关"，
+    // 不能写成 `|| DEFAULT`：那会把使用者刚关掉的循环又打开，而它每一轮都在花钱。
+    autoReworkRounds: workspace?.autoReworkRounds ?? DEFAULT_AUTO_REWORK_ROUNDS,
   }
 }
 
@@ -2169,6 +2181,97 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * ⚠️ 为什么敢删：被删的条目对应的 run 都还在 store 里（版本列表从 chain 现算），
    *    删的只是"这条链记了别人的版本"这份**错记录**。日志里写清删了哪几条，可回查。
    */
+  /**
+   * 读「停止自动循环」的标记；没有 ⇒ `null`。
+   *
+   * ⚠️ 读不出来（文件坏了/权限）也按"没停"处理并**报警**：把损坏当成"停止"会让循环
+   *    静默地永远不再自动跑，而使用者只会觉得"自动返工又坏了"——那是更难查的错。
+   */
+  async function readAutoReworkStopped(
+    taskDir: string,
+  ): Promise<{ stoppedAt: number; stoppedBy: string } | null> {
+    try {
+      const raw = JSON.parse(
+        await readFile(join(taskDir, AUTO_REWORK_STOP_FILE), 'utf8'),
+      ) as Record<string, unknown>
+      const at = raw['stoppedAt']
+      if (typeof at !== 'number') {
+        warn(`${taskDir} 的 ${AUTO_REWORK_STOP_FILE} 里没有 stoppedAt，按"没停"处理`)
+        return null
+      }
+      return { stoppedAt: at, stoppedBy: typeof raw['stoppedBy'] === 'string' ? raw['stoppedBy'] : 'human' }
+    } catch {
+      // 文件不存在 = 正常路径（绝大多数情况）
+      return null
+    }
+  }
+
+  /**
+   * 这条链一共花了多少（微美元）。数据来自每条 run 的 `usage`（CLI 报告或本地估算）。
+   *
+   * ⚠️ 不在这里重算"按 token 估钱"：`costUsdMicros` 已经由适配器/估算器给出，
+   *    再估一遍就会出现两个数（结论条一个、账单一个）。
+   */
+  async function autoReworkSpentMicros(
+    chain: readonly { id: string }[],
+  ): Promise<number> {
+    let total = 0
+    for (const c of chain) {
+      const run = await store.getRun(c.id as RunId)
+      total += run?.usage?.costUsdMicros ?? 0
+    }
+    return total
+  }
+
+  /**
+   * 同一处问题**连续两轮**都被点名 ⇒ 返回它（只报不停，使用者定的口径）。
+   *
+   * 判据用 `locator`（`SKILL.md:12` 这种）而不是整条 summary：审核者的措辞每轮都会变，
+   * 只能靠"指向同一个位置"认出是同一处。实测（10 版链）同一节被点名最多 **6 轮**，
+   * 所以这个数很有信息量：它说明"起草者改不动这里"，值得人看一眼。
+   *
+   * 只比**相邻两轮**：跨轮的重复不算（中间有一轮没提到，说明真的改过一段）。
+   */
+  async function stalledFindings(
+    taskDir: string,
+  ): Promise<Array<{ locator: string; rounds: number }> | null> {
+    const versions = await readDraftVersions(taskDir)
+    if (versions === null || versions.versions.length < 2) return null
+    // 每条版本对应的审核 run（取最新一条判决）
+    const page = await store.listRuns({ workspaceId, limit: 10_000 })
+    const locatorsPerRound: string[][] = []
+    for (const v of versions.versions) {
+      const review = page.items
+        .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === v.runId)
+        .sort((a, b) => a.queuedAt - b.queuedAt)
+        .pop()
+      if (!review) {
+        locatorsPerRound.push([])
+        continue
+      }
+      const vs = await store.listVerdictsByRun(review.id)
+      const verdict = vs[vs.length - 1]
+      locatorsPerRound.push(
+        (verdict?.findings ?? [])
+          .flatMap((f) => f.evidence.map((e) => e.locator))
+          .filter((l): l is string => typeof l === 'string' && l !== ''),
+      )
+    }
+    const stalled = new Map<string, number>()
+    for (let i = 1; i < locatorsPerRound.length; i += 1) {
+      const prev = locatorsPerRound[i - 1] ?? []
+      const cur = locatorsPerRound[i] ?? []
+      for (const locator of cur) {
+        if (!prev.includes(locator)) continue
+        stalled.set(locator, (stalled.get(locator) ?? 1) + 1)
+      }
+    }
+    if (stalled.size === 0) return null
+    return [...stalled.entries()]
+      .map(([locator, rounds]) => ({ locator, rounds }))
+      .sort((a, b) => b.rounds - a.rounds)
+  }
+
   async function repairForeignVersions(taskDir: string, draftRunId: string): Promise<void> {
     if (repairedVersionDirs.has(taskDir)) return
     repairedVersionDirs.add(taskDir)
@@ -3366,6 +3469,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         warn(`起草审核的结论是 ${verdict.conclusion}（不是 fail），不自动返工`)
         return null
       }
+      // ★ 分批第 23 批：人按过「停止循环」⇒ 不再自动起下一版（交给人）。
+      //   为什么在**这里**判而不是在预算里判：预算管"还能跑几轮"，这里管"使用者叫停"，
+      //   两件事的来由不同；混在一起会让日志里分不清"是跑满了还是人停的"。
+      const stopped = await readAutoReworkStopped(await draftTaskDir(run.subject.id as string))
+      if (stopped !== null) {
+        info(
+          `草稿 ${run.subject.id.slice(-8)} 的自动循环已被人工停止` +
+            `（${new Date(stopped.stoppedAt).toLocaleString('zh-CN')}）⇒ 这一轮交给人`,
+        )
+        return null
+      }
       const result = await startReviseRun({
         draftRunId: run.subject.id as string,
         feedback: draftReviewFeedback(verdict),
@@ -3666,6 +3780,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         defaultRuntimeKey: settings.defaultRuntimeKey,
         // §10.5 第 ③ 条：界面上要能看到并关掉"审核者真执行草稿脚本"
         allowReviewerScriptRun: settings.allowReviewerScriptRun,
+        // ★ 分批第 23 批：自动返工轮数（设置页那个数字框读它）
+        autoReworkRounds: settings.autoReworkRounds,
         /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
@@ -4011,6 +4127,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       await store.insertWorkspace({ ...workspace, allowReviewerScriptRun: raw, updatedAt: Date.now() })
       sendJson(res, 200, { allowReviewerScriptRun: raw })
+      return
+    }
+
+    if (req.method === 'PUT' && path === '/api/workspace/auto-rework') {
+      // ★ 分批第 23 批：自动返工轮数（使用者：「设定可以 N 次，直到 PASS」）。
+      //   校验放在写入口，而不是读的时候夹：写进库里的值与界面显示的值必须一致，
+      //   否则使用者设了 200 却按 99 跑，而界面上写着 200（"它到底跑几轮"会变成谜）。
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['rounds']
+      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 99) {
+        sendJson(res, 400, {
+          error: `rounds 必须是 0–99 的整数（收到 ${JSON.stringify(raw)}）`,
+          code: 'invalid_rounds',
+        })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, autoReworkRounds: raw, updatedAt: Date.now() })
+      sendJson(res, 200, { autoReworkRounds: raw })
       return
     }
 
@@ -5014,6 +5153,63 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 为什么要有这条读接口：判决挂在**审核 run** 上，而界面手上只有**起草 run** 的 id。
     // 让前端自己去 `GET /api/runs` 里翻 subject 再翻 verdicts，等于把"这两条 run 怎么对应"
     // 这件规则复制到前端（改一处漏一处）；这里给一份已解析好的结论。
+    if (req.method === 'POST' && path === '/api/crystallize/stop-loop') {
+      /**
+       * ★ 分批第 23 批：「停止循环」——循环进行中唯一的人工入口（使用者定的口径）。
+       *
+       * 落点是一份**文件**（`.auto-rework.json`，在任务目录里），不是 run 上的新字段：
+       *   · run 记录是协议实体，加一个"只对这一条链有意义"的字段会把协议搅浑；
+       *   · 这个标记是**任务级**的（"这个沉淀任务别再自动改下去了"），跟目录里的
+       *     `.versions.json`、`.human-edits.json` 是同一族；
+       *   · 放在目录里，使用者自己也能看见（`cat .auto-rework.json` 就知道它是怎么停的）。
+       *
+       * 同时把正在跑的那条审核 run 取消掉——"停止"如果只是"下一轮不再起"，
+       * 人点完还得等这一轮自己跑完（几分钟、真金白银），那不叫停止。
+       */
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draft = await store.getRun(draftRunId as RunId)
+      if (!draft || draft.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const taskDir = await draftTaskDir(draftRunId)
+      await writeFile(
+        join(taskDir, AUTO_REWORK_STOP_FILE),
+        `${JSON.stringify({ stoppedAt: Date.now(), stoppedBy: 'human', draftRunId }, null, 2)}\n`,
+        'utf8',
+      )
+      // 正在跑的审核 run（subject 指回这一版）也要停：否则"点了停止还在烧"
+      const page = await store.listRuns({ workspaceId, limit: 10_000 })
+      const running = page.items.find(
+        (r) =>
+          r.subject.type === 'skill-draft-review' &&
+          r.subject.id === draftRunId &&
+          ['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(
+            r.status,
+          ),
+      )
+      let cancelled: string | null = null
+      if (running) {
+        try {
+          await executor.cancel(running.id)
+          cancelled = running.id
+        } catch (err) {
+          warn(`停止循环时取消审核 run ${running.id.slice(-8)} 失败：${String(err)}`)
+        }
+      }
+      info(
+        `自动循环已停止（草稿 ${draftRunId.slice(-8)}）` +
+          (cancelled === null ? '；没有正在跑的审核 run' : `；已取消审核 run ${cancelled.slice(-8)}`),
+      )
+      sendJson(res, 200, { stopped: true, cancelledReviewRunId: cancelled })
+      return
+    }
+
     if (req.method === 'GET' && path === '/api/crystallize/review') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {
@@ -5032,6 +5228,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         (r) => r.subject.type === 'skill-draft-review' && r.subject.id === draftRunId,
       )
       const reviewRun = reviewRuns[reviewRuns.length - 1]
+      // 这条链的全部起草 run（`versions` 与"第几轮"共用一份，别再算两遍）
+      const chainRuns = page.items
+        .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+        .map((r) => ({
+          id: r.id as string,
+          revisedFrom: r.revisedFrom ?? null,
+          queuedAt: r.queuedAt,
+        }))
       const verdicts = reviewRun ? await store.listVerdictsByRun(reviewRun.id) : []
       const v = verdicts[verdicts.length - 1]
       /**
@@ -5102,16 +5306,25 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
          *    显示成 18 版（实际这条链只有 10 版），而且自动返工按这个数算额度 ⇒
          *    已用 17 > 上限 2 ⇒ **一次都没自动返工过**。轮次只认链（`revisedFrom`）。
          */
-        versions: chainOfRun(
-          page.items
-            .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
-            .map((r) => ({
-              id: r.id as string,
-              revisedFrom: r.revisedFrom ?? null,
-              queuedAt: r.queuedAt,
-            })),
-          draftRunId,
-        ).length,
+        versions: chainOfRun(chainRuns, draftRunId).length,
+        /**
+         * ★ 分批第 23 批：自动循环的**可见面**——现在第几轮 / 上限几轮 / 已经花了多少 / 有没有卡住。
+         *
+         * 为什么必须给界面这些数（使用者定的是"默认 10 轮、无进展不早停"）：
+         * 一条始终不通过的链实测 **10 轮 ≈ $29.81**，每轮成本还在递增（$0.98 → $6.11，
+         * 上下文越滚越大）。所以"第 k/N · 已花 $x"必须一直在结论条上，否则
+         * "跑 N 轮"就成了一件看不见成本的事。
+         *
+         * `stalled`：同一处（`locator`）在**连续两轮**判决里都被点名 ⇒ 标出来，
+         * 但**不停**（使用者明确选了"标注意、继续跑到 N 轮"）。
+         */
+        autoRework: {
+          current: chainOfRun(chainRuns, draftRunId).length,
+          max: (await readWorkspaceSettings(store, workspaceId)).autoReworkRounds,
+          spentUsdMicros: await autoReworkSpentMicros(chainOfRun(chainRuns, draftRunId)),
+          stopped: (await readAutoReworkStopped(await draftTaskDir(draftRunId))) !== null,
+          stalled: await stalledFindings(await draftTaskDir(draftRunId)),
+        },
       })
       return
     }

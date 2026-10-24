@@ -345,6 +345,28 @@ async function readDirRecursive(dir: string, prefix = ''): Promise<Record<string
   return out
 }
 
+/**
+ * 把自动返工轮数设成 n，返回"恢复默认"的函数。
+ *
+ * 为什么要有：分批第 23 批把上限从**硬编码 2** 改成了工作区设置（默认 10）。
+ * 那之后"额度用尽才停"这类用例必须**显式**把轮数钉成 2，否则它会按 10 跑——
+ * 第一次全量 `check` 里那条链跑了 76 分钟才收头，而 `+10 行` 那个断言等的其实是第 10 版。
+ *
+ * ⚠️ 必须是模块级：它被两个不同的 `describe` 用（§10.7、§10.8）。第一版写在 §10.5 的
+ *    describe 里 ⇒ 另一块里 `ReferenceError: useReworkRounds is not defined`。
+ */
+const useReworkRounds = async (rounds: number): Promise<(() => Promise<void>)> => {
+  const put = async (n: number): Promise<void> => {
+    await fetch(`${daemon.url}/api/workspace/auto-rework`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rounds: n }),
+    })
+  }
+  await put(rounds)
+  return () => put(10)
+}
+
 async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
   const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
     method: 'POST',
@@ -1446,6 +1468,108 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
    * 新增加了一个沉淀任务，而不是在原沉淀任务中执行"）。现在一个任务一个目录，"返工发生了没"
    * 的信号是**多了一条 `revisedFrom` 指过来的新 run**（`waitRevisedFrom`），不是多了一个目录。
    */
+  /**
+   * 自动返工的两道闸门（分批第 23 批，使用者：「设定可以 N 次，直到 PASS」）。
+   *
+   * 这两条量的是"闸门真的拦得住"：
+   *   · 轮数设成 0 ⇒ 一轮都不自动起（`escalated`，交给人）；
+   *   · 循环中点「停止循环」⇒ 这一轮之后不再自动起，且**正在跑的审核也取消**。
+   */
+
+  const failVerdict = (): Record<string, unknown> => ({
+    schemaVersion: 1,
+    conclusion: 'fail',
+    reasonCode: 'style_violation',
+    confidence: 0.8,
+    findings: [
+      {
+        severity: 'high',
+        summary: '正文里没有 `## When to Use` 一节',
+        evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 报告流程' }],
+        detail: {},
+      },
+    ],
+    action: null,
+    escalateReason: null,
+  })
+
+  test('★★ 轮数设成 0 ⇒ 不通过也不自动起下一版（"关"必须是真的关）', async () => {
+    // ⚠️ 设置不在 `/api/workspace/settings`（那个路径不存在），而是随 `/api/identity` 一起发的
+    const settings = (await (
+      await fetch(`${daemon.url}/api/identity`)
+    ).json()) as { autoReworkRounds: number }
+    assert.equal(settings.autoReworkRounds, 10, '默认必须是使用者定的 10')
+    const put = await fetch(`${daemon.url}/api/workspace/auto-rework`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rounds: 0 }),
+    })
+    assert.equal(put.status, 200, await put.clone().text())
+    const sourceRunId = await runReviewed('审完的流程（关掉自动返工）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '关掉自动返工' },
+    })
+    fakeBackend.draftReviewVerdict = failVerdict()
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(verdict.conclusion, 'fail')
+      assert.equal(
+        verdict.status,
+        'escalated',
+        '轮数 0 ⇒ 额度为 0 ⇒ 必须交给人（rework_requested 说明它还是自动起了下一版）',
+      )
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+      // 恢复默认，别影响后面的用例（这个 daemon 是共享的）
+      await fetch(`${daemon.url}/api/workspace/auto-rework`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rounds: 10 }),
+      })
+    }
+  })
+
+  test('★★★ 点「停止循环」⇒ 落标记文件、下一轮不再自动起（使用者:循环中唯一的入口）', async () => {
+    const sourceRunId = await runReviewed('审完的流程（停止循环）')
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '停止循环' },
+    })
+    const stop = await fetch(`${daemon.url}/api/crystallize/stop-loop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(stop.status, 200, await stop.clone().text())
+    // 标记文件真的落盘（不然"停止"只是个界面状态）
+    const stamp = JSON.parse(
+      await readFile(join(workRoot, `skill-draft-${draftRunId}`, '.auto-rework.json'), 'utf8'),
+    ) as { stoppedAt: number; stoppedBy: string }
+    assert.equal(stamp.stoppedBy, 'human')
+    assert.ok(stamp.stoppedAt > 0)
+
+    fakeBackend.draftReviewVerdict = failVerdict()
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(verdict.conclusion, 'fail')
+      assert.equal(
+        verdict.status,
+        'escalated',
+        '人按过停止 ⇒ 这一轮必须交给人（rework_requested 说明它又自动起了一版）',
+      )
+      // 接口要如实报"停了"（界面据此不再显示"自动循环中"）
+      const info = (await (
+        await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
+      ).json()) as { autoRework: { stopped: boolean; current: number; max: number } }
+      assert.equal(info.autoRework.stopped, true)
+      assert.equal(info.autoRework.current, 1, '这条链只起草过 1 版')
+      assert.equal(info.autoRework.max, 10, '上限就是设置里那个数')
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
   test('★★★ 邻链有很多版**不许**吃掉本链的返工额度（真机上因此一次都没自动返工）', async () => {
     /**
      * 真机现场（2026-10-23）：来源 run `Q2SQ16` 下挂着两条不相干的链
@@ -1713,6 +1837,8 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
  */
 describe('§10.8 返工契约：基于上一版改（不是重写一版）', () => {
   test('★★ 改版开工时 skill/ 里已是上一版、意见带位置与原文、差异是一行', async () => {
+    // 这条量的是"返工契约"（改哪里、意见带没带位置），与跑几轮无关 ⇒ 钉成 2 轮图个快
+    const restoreRounds = await useReworkRounds(2)
     const base = fakeBackend.draftFiles
     fakeBackend.minimalEditOnRevise = true
     fakeBackend.draftReviewVerdict = {
@@ -1823,6 +1949,7 @@ describe('§10.8 返工契约：基于上一版改（不是重写一版）', () 
     } finally {
       fakeBackend.minimalEditOnRevise = false
       fakeBackend.draftReviewVerdict = null
+      await restoreRounds()
     }
   })
 })
@@ -1909,6 +2036,8 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
   }
 
   test('★★ 整条链跑到头：初版等人点，之后每一版都自动接着审，额度用尽才停', async () => {
+    // 分批第 23 批起上限来自设置（默认 10）⇒ 这条"跑满就停"的用例把轮数钉成 2
+    const restoreRounds = await useReworkRounds(2)
     // 这份判决照合规形状写（理由码与严重度都是平台枚举）——不合规的判决不会返工，
     // 那条坑 §10.5 已经记过（第一版随手写的 reasonCode/severity 让整条链一次都没触发）。
     fakeBackend.draftReviewVerdict = {
@@ -1994,6 +2123,7 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
       assert.equal((await draftReview(v3)).versions, 3, '版本数停在 3')
     } finally {
       fakeBackend.draftReviewVerdict = null
+      await restoreRounds()
     }
   })
 })

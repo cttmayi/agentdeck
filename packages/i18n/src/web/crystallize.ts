@@ -70,6 +70,25 @@ export const crystallizeText = {
   // ★ 2026-10-21：原来的 `auditTitle`（「审核结论（预筛）」）没有使用者了——结论条上直接写
   //   「审核通过（预筛）」，标题那层壳去掉（它自占一行 h3 + 上下间距）。删键不留死词条。
   'crystallize.auditPrescreen': { zh: '预筛', en: 'pre-screen' },
+  // ── 自动循环（分批第 23 批）──
+  'crystallize.autoReworkRound': {
+    zh: '第 {current} / {max} 轮',
+    en: 'Round {current} / {max}',
+  },
+  'crystallize.autoReworkSpent': {
+    zh: '· 已花 ${usd}',
+    en: '· spent ${usd}',
+  },
+  'crystallize.autoReworkStopped': { zh: '· 已停止', en: '· stopped' },
+  'crystallize.autoReworkStop': { zh: '停止循环', en: 'Stop loop' },
+  'crystallize.autoReworkStopHint': {
+    zh: '停掉自动循环：这一轮跑完就交给你，不再自动起草下一版（正在跑的审核会一起取消）',
+    en: 'Stop the automatic loop: this round is handed back to you and no further version is drafted automatically (a running audit is cancelled too)',
+  },
+  'crystallize.autoReworkStalled': {
+    zh: '这一处已连续 {rounds} 轮没解决：{locator}',
+    en: 'Unresolved for {rounds} rounds: {locator}',
+  },
   'crystallize.auditRunningShort': { zh: '审核运行中', en: 'Audit running' },
   // 2026-10-21：说明段收进按钮悬停，条上只留四个字（原来那段占 42px 两行）
   'crystallize.auditNotYetBrief': { zh: '还没审核过', en: 'Not audited yet' },

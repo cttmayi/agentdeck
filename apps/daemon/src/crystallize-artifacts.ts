@@ -574,6 +574,13 @@ export interface DraftVersions {
 }
 
 export const DRAFT_VERSIONS_FILE = '.versions.json'
+/**
+ * 「停止自动循环」的标记文件（分批第 23 批）。
+ *
+ * 放在任务目录里而不是 run 字段上：它是**任务级**的决定（"这个沉淀任务别再自动改下去了"），
+ * 与 `.versions.json` / `.human-edits.json` 同一族；而且使用者 `cat` 一眼就能看出它是怎么停的。
+ */
+export const AUTO_REWORK_STOP_FILE = '.auto-rework.json'
 export const DRAFT_HISTORY_DIR = 'history'
 
 export async function readDraftVersions(taskDir: string): Promise<DraftVersions | null> {
