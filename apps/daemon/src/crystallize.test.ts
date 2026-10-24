@@ -591,6 +591,70 @@ describe('listCrystallizeDrafts：沉淀任务列表', () => {
     assert.equal(items[1]!.source?.label, conv.title)
   })
 
+  test('★★ 同一来源下的两条链 = 两行（真机上被并成了一行 18 版）', async () => {
+    const agent = await seedAgent({ id: 'exec-mix' })
+    const taskRun = await seedRun({
+      id: 'run-src-mix',
+      agentId: agent.id as string,
+      workspaceId: WS,
+      subject: { type: 'issue', id: 'issue-mix' },
+    })
+    /**
+     * 真机的形状（2026-10-23 量到的）：
+     *   来源 run `Q2SQ16` 下有两个根 —— `H5YM0E`（讲 HTML 报告）与 `9D67DN`（讲追溯原始文献），
+     *   两者 `sourceRunId` 相同、`crystallizeTarget` **都是 `{"kind":"new"}`**。
+     * 旧的"同来源 + 同目标"口径把它们并成一条 ⇒ 列表一行 18 版、返工额度被邻链撑爆。
+     */
+    const seedDraft = async (
+      id: string,
+      revisedFrom: string | null,
+      queuedAt: number,
+    ): Promise<void> => {
+      await store.insertRun(
+        makeRun({
+          id,
+          agentId: agent.id as string,
+          kind: 'execute',
+          status: 'completed',
+          workspaceId: WS,
+          subject: { type: 'skill-draft', id, sourceRunId: 'run-src-mix' },
+          crystallizeTarget: { kind: 'new' },
+          ...(revisedFrom === null ? {} : { revisedFrom: revisedFrom as never }),
+          queuedAt,
+        }),
+      )
+    }
+    // 链 A：4 版
+    await seedDraft('mix-a1', null, 100)
+    await seedDraft('mix-a2', 'mix-a1', 110)
+    await seedDraft('mix-a3', 'mix-a2', 120)
+    await seedDraft('mix-a4', 'mix-a3', 130)
+    // 链 B：3 版（**另一个根**，同来源、同目标）
+    await seedDraft('mix-b1', null, 200)
+    await seedDraft('mix-b2', 'mix-b1', 210)
+    await seedDraft('mix-b3', 'mix-b2', 220)
+
+    const all = await listCrystallizeDrafts(store, taskRun.workspaceId as string)
+    // ⚠️ 这个文件里的 store 是**跨用例共享**的（其它用例也往同一个工作区塞了草稿），
+    //    所以只能看"我这 7 版被分成了几行"，不能断言"整页正好 2 行"。
+    //    第一版就是这么写的 ⇒ 单跑通过、全量跑红（4 !== 2），红的原因是我的判据，不是产品。
+    const items = all.filter((i) => i.taskRunId === 'mix-a1' || i.taskRunId === 'mix-b1')
+    assert.equal(items.length, 2, '两条链必须是两行（旧口径会并成一行 7 版）')
+    const byRoot = new Map(items.map((i) => [i.taskRunId, i]))
+    const chainA = byRoot.get('mix-a1')
+    const chainB = byRoot.get('mix-b1')
+    assert.ok(chainA, 'A 链的根必须是 mix-a1')
+    assert.ok(chainB, 'B 链的根必须是 mix-b1')
+    assert.equal(chainA.version, 4)
+    assert.equal(chainB.version, 3)
+    assert.deepEqual(
+      chainB.versionRunIds,
+      ['mix-b1', 'mix-b2', 'mix-b3'],
+      'B 链里不许混进 A 链的任何一版',
+    )
+    assert.deepEqual(chainA.versionRunIds, ['mix-a1', 'mix-a2', 'mix-a3', 'mix-a4'])
+  })
+
   test('放弃的（discarded: true）不出现——没入库的草稿要能收尾，否则左栏只增不减', async () => {
     const agent = await seedAgent({ id: 'exec3c' })
     const conv = makeConversation({ id: 'conv-3c', workspaceId: WS })

@@ -601,6 +601,28 @@ export async function readDraftVersions(taskDir: string): Promise<DraftVersions 
   }
 }
 
+/**
+ * 把版本表里**不属于这条链**的条目剔掉。
+ *
+ * 为什么会有：`9D67DN` 的任务目录里，`.versions.json` 记着 14 条，其中 4 条属于同一来源下的
+ * **另一条链** `H5YM0E`（旧口径"同来源 + 同目标"在自愈时写进去的）⇒ 目录里"这一任务有几版"
+ * 与磁盘实际不符，界面的"第几版"也跟着错。
+ *
+ * 只剔不补：缺的条目由老形状自愈那条路补（它会连快照一起补），这里凭空加一条会让
+ * "有没有人改过 / 快照在哪"变成编出来的。
+ */
+export function dropForeignVersions(
+  versions: DraftVersions,
+  chainIds: ReadonlySet<string>,
+): { kept: DraftVersions; dropped: string[] } {
+  const dropped = versions.versions.filter((v) => !chainIds.has(v.runId)).map((v) => v.runId)
+  if (dropped.length === 0) return { kept: versions, dropped: [] }
+  return {
+    kept: { ...versions, versions: versions.versions.filter((v) => chainIds.has(v.runId)) },
+    dropped,
+  }
+}
+
 export async function writeDraftVersions(taskDir: string, versions: DraftVersions): Promise<void> {
   await mkdir(taskDir, { recursive: true })
   await writeFile(

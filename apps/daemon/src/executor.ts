@@ -1,5 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+// ★ 分批第 22 批：返工额度按**链**数（原来按"同一来源"，在真机上被邻链撑爆 ⇒ 自动返工从没触发）
+import { chainOfRun } from './draft-chain.ts'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -1960,18 +1962,35 @@ export class RunExecutor {
     //    `createReworkRun` **一次都不会被调用** —— 我为此写的那段窄口子就成了死代码，
     //    而表现是"自动返工永远不触发"，日志里连一句警告都没有（它压根没走到那一步）。
     //
-    // 额度怎么算：**同一份来源素材上已经起草过几版**就是已用的轮次 —— 每一版都是一条
-    // `skill-draft` run，`subject.sourceRunId` 指回同一个来源。这比另加一个计数器诚实：
-    // 重装、重启、人工点多一版，这个数都对得上（计数器会与事实分叉）。
+    // 额度怎么算：**这条链上已经起草过几版**就是已用的轮次 —— 每一版都是一条
+    // `skill-draft` run，沿 `revisedFrom` 上溯到同一个根（见 `draft-chain.ts`）。这比另加一个
+    // 计数器诚实：重装、重启、人工点多一版，这个数都对得上（计数器会与事实分叉）。
+    //
+    // ⚠️⚠️ 这里原来数的是"同一份**来源素材**下有几版"（`subject.sourceRunId` 相同就算）。
+    //    真机（2026-10-23）撞到反例：来源 run `Q2SQ16` 下挂着**两条不相干的链**
+    //    （`H5YM0E` 4 版 + `9D67DN` 10 版，目标都是 `{"kind":"new"}`）⇒ 数出 18 版 ⇒
+    //    `usedReworks = 17 > 上限 2` ⇒ **每一轮都被判"额度已用尽 ⇒ 交给人"** ⇒
+    //    `createReworkRun` 一次都没被调用过。使用者的体感是"自动返工根本不存在"，
+    //    于是手动点了 10 次「反馈」（$29.81）。轮次只认链。
     if (run.subject.type === 'skill-draft-review') {
       const draft = await this.#deps.store.getRun(run.subject.id as RunId)
-      const sourceRunId =
-        draft?.subject.type === 'skill-draft' ? draft.subject.sourceRunId : undefined
-      if (sourceRunId === undefined) return { maxReworks: 0, usedReworks: 0 }
+      if (!draft || draft.subject.type !== 'skill-draft') {
+        // 被审的起草 run 已经不在了 ⇒ 没有链可数，不返工（不编一个额度出来）
+        return { maxReworks: 0, usedReworks: 0 }
+      }
       const page = await this.#deps.store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
-      const versions = page.items.filter(
-        (r) => r.subject.type === 'skill-draft' && r.subject.sourceRunId === sourceRunId,
-      ).length
+      const chain = chainOfRun(
+        page.items
+          .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+          .map((r) => ({
+            id: r.id as string,
+            revisedFrom: r.revisedFrom ?? null,
+            queuedAt: r.queuedAt,
+          })),
+        draft.id as string,
+      )
+      // 自己一定在链上；真读不到（极端：查询中途被删）就当只有这一版，别把额度一次性清零
+      const versions = chain.length === 0 ? 1 : chain.length
       return {
         maxReworks: SKILL_DRAFT_REWORK_LIMIT,
         // 已经起草过几版 - 1 = 已经返工过几次（第一版不算返工）

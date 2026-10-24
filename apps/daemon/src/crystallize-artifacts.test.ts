@@ -22,6 +22,7 @@ import {
   validateArtifactFiles,
   writeAuditStamp,
   writeDraftSkillFiles,
+  dropForeignVersions,
 } from './crystallize-artifacts.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -298,4 +299,40 @@ describe('内置写作技能', () => {
   test('读不存在的内置技能返回 null（调用方据此报安装不完整）', async () => {
     assert.equal(await loadBuiltinSkill('no-such-builtin'), null)
   })
+})
+
+/**
+ * 真机现场（2026-10-23）：`9D67DN` 的任务目录里 `.versions.json` 记着 14 条，其中 4 条属于
+ * 同一来源下的另一条链 `H5YM0E`。旧的"同来源+同目标"口径在自愈时写进去的 ⇒ "这一任务有几版"
+ * 与磁盘实际不符，界面的"第几版"也跟着错。
+ */
+test('★★ 版本表里"别的链"的条目要被剔掉（真机上混进过另一条链的 4 条）', () => {
+  const versions = {
+    healedAt: null,
+    versions: [
+      { runId: 'a1', at: 1, humanEdited: false, snapshot: null },
+      { runId: 'b1', at: 2, humanEdited: true, snapshot: 'history/b1' },
+      { runId: 'a2', at: 3, humanEdited: false, snapshot: null },
+      { runId: 'b2', at: 4, humanEdited: false, snapshot: null },
+    ],
+  }
+  const { kept, dropped } = dropForeignVersions(versions, new Set(['b1', 'b2']))
+  assert.deepEqual(dropped, ['a1', 'a2'], '剔掉的必须是**别的链**那几条，顺序照原表')
+  assert.deepEqual(
+    kept.versions.map((v) => v.runId),
+    ['b1', 'b2'],
+    '本链的条目一条不动（含 humanEdited / 快照记录——那是人改过的证据）',
+  )
+  assert.equal(kept.versions[0]?.humanEdited, true)
+  assert.equal(kept.versions[0]?.snapshot, 'history/b1')
+})
+
+test('表里全是本链的 ⇒ 一个字都不改（不写回，避免每次刷新都动使用者的目录）', () => {
+  const versions = {
+    healedAt: 7,
+    versions: [{ runId: 'b1', at: 1, humanEdited: false, snapshot: null }],
+  }
+  const { kept, dropped } = dropForeignVersions(versions, new Set(['b1', 'b2']))
+  assert.deepEqual(dropped, [])
+  assert.equal(kept, versions, '没东西可剔时返回**同一个对象**：调用方据此跳过写盘')
 })

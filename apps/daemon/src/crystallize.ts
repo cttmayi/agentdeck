@@ -17,6 +17,7 @@
 
 import type { Store } from '@agentdeck/domain'
 import { formatRunMessages, lastTextOf } from './run-text.ts'
+import { groupByChain } from './draft-chain.ts'
 import { collectMaterial, isMaterialEmpty } from './crystallize-material.ts'
 
 /** 与 `server.ts` 的 `TERMINAL_RUN_STATUSES` 同一份清单（crystallize 不 import server）。 */
@@ -216,6 +217,18 @@ async function findActiveDraft(
  * ⚠️ `discarded` 在这里也判：已丢弃的草稿**不复活**（丢弃是列表里明确的动作；
  * 深链拿着旧 URL 回来不该把它拉回界面上）。
  */
+/**
+ * 链上的 run 记录少了几条：只可能在两次查询之间被删掉。
+ *
+ * 为什么只报一句、不改口径：这里没法凭空补出一条 run。"少一条就少一条"是诚实的结果；
+ * 悄悄按剩下的算会让"第几版"对不上磁盘上的快照。
+ */
+function warnIfIncompleteChain(rootId: string, chainLength: number, found: number): void {
+  console.warn(
+    `[crystallize] 链 ${rootId} 的 run 记录只读到 ${found}/${chainLength} 条（期间被删过？）`,
+  )
+}
+
 function draftInfo(
   draft: Run | undefined,
 ): { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null {
@@ -393,19 +406,31 @@ export async function listCrystallizeDrafts(
   const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
   const all = page.items.filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
 
-  // ── 分组：同一个来源 + 同一个目标 = 一个任务（与 daemon 侧 `draftTaskDir` 的链条口径一致）──
-  const groups = new Map<string, Run[]>()
-  for (const r of all) {
-    const key = `${String(r.subject.sourceRunId ?? '')}|${JSON.stringify(r.crystallizeTarget ?? null)}`
-    const list = groups.get(key) ?? []
-    list.push(r)
-    groups.set(key, list)
-  }
+  // ── 分组：**一条链 = 一个任务**，链只认 `revisedFrom`（见 draft-chain.ts）──
+  //
+  // ⚠️ 原来这里是"同一个来源 + 同一个目标"。真机上撞到过反例：来源 run `Q2SQ16` 下有
+  //    两个根（`H5YM0E` 讲 HTML 报告、`9D67DN` 讲追溯原始文献），`sourceRunId` 相同、
+  //    `crystallizeTarget` 都是 `{"kind":"new"}` ⇒ 两条不相干的任务被显示成**一行 18 版**。
+  //    副作用不止难看：那个"一行"里的邻链把返工额度撑爆，自动返工一次都没触发过。
+  const chainGroups = groupByChain(
+    all.map((r) => ({
+      id: r.id as string,
+      revisedFrom: r.revisedFrom ?? null,
+      queuedAt: r.queuedAt,
+    })),
+  )
+  const byRunId = new Map(all.map((r) => [r.id as string, r]))
 
   const out: CrystallizeDraftRow[] = []
-  for (const list of groups.values()) {
-    // 按时间排：第一版 = 链的根（`revisedFrom` 为空），最新一版 = 最后一个
-    list.sort((a, b) => a.queuedAt - b.queuedAt)
+  for (const [rootId, chain] of chainGroups) {
+    // 链上的 run 记录（`groupByChain` 已按时间升序：第一版在前、最新一版在最后）
+    const list = chain
+      .map((c) => byRunId.get(c.id))
+      .filter((r): r is Run => r !== undefined)
+    if (list.length !== chain.length) {
+      // 只可能发生在"两次查询之间 run 被删了"。少一条就少一条，不编造占位。
+      warnIfIncompleteChain(rootId, chain.length, list.length)
+    }
     const latest = list[list.length - 1]
     if (latest === undefined) continue
     // ⚠️ 可见性按**最新那一版**判，不是"逐版过滤"。
@@ -430,7 +455,7 @@ export async function listCrystallizeDrafts(
     }
     out.push({
       runId: latest.id as string,
-      taskRunId: list[0]!.id as string,
+      taskRunId: rootId,
       version: list.length,
       versionRunIds: list.map((r) => r.id as string),
       status: latest.status,

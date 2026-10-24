@@ -121,6 +121,8 @@ import {
   parseSkillMd,
   readAuditStamp,
   readDraftVersions,
+  // ★ 分批第 22 批：剔掉版本表里"别的链"的条目（真机上 `9D67DN` 的目录里混着 `H5YM0E` 的 4 条）
+  dropForeignVersions,
   clearHumanEditStamp,
   readHumanEditStamp,
   recordDraftVersion,
@@ -133,6 +135,10 @@ import {
   writeAuditStamp,
   writeDraftSkillFiles,
 } from './crystallize-artifacts.ts'
+// ★ 分批第 22 批：链条只认 `revisedFrom`（四处口径统一到一个地方）。
+//   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
+//   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
+import { chainOf, chainOfRun } from './draft-chain.ts'
 // ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
 import {
   renderExecCheckMarkdown,
@@ -2102,8 +2108,16 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *    读取当前内容/审核/人保存/差异会集体看错一版。`resolveDraftTaskDir` 里做了自愈迁移
    *    （把最新一版搬进任务目录 + 给各版记快照 + 写 `.versions.json`），只做一次。
    */
+  /**
+   * 已经查过并（必要时）修过 `.versions.json` 的任务目录。
+   *
+   * 放在闭包里而不是模块级：每个 daemon 实例一份（测试里同进程会起多个 daemon，
+   * 模块级的集合会让第二个实例"以为已经修过了"而跳过——那是测试之间的互相污染）。
+   */
+  const repairedVersionDirs = new Set<string>()
+
   async function draftTaskDir(draftRunId: string): Promise<string> {
-    return await resolveDraftTaskDir({
+    const dir = await resolveDraftTaskDir({
       workRoot,
       draftRunId,
       draftDirName,
@@ -2118,29 +2132,78 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
               queuedAt: run.queuedAt,
             }
       },
-      // 同一条链 = 同一个来源 + 同一个目标（"新增"和"更新到某个技能"是两件事，不能混成一条链）
+      // 同一条链 = 沿 `revisedFrom` 上溯到同一个根（见 `draft-chain.ts`）。
+      //
+      // ⚠️ 原来这里是"同一个来源 + 同一个目标"。真机上撞到过：来源 run `Q2SQ16` 下有两个根，
+      //    目标都是 `{"kind":"new"}` ⇒ 两条不相干的任务算成一条链 ⇒ 任务目录的自愈会把
+      //    邻链的最新版当成"这一版自己"搬进来（目录里出现别的 skill 的内容）。
       listChain: async (rootRunId) => {
         const root = await store.getRun(rootRunId as RunId)
         if (root === null || root.subject.type !== 'skill-draft') return []
-        const sourceRunId = root.subject.sourceRunId
-        const target = JSON.stringify(root.crystallizeTarget ?? null)
         const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
-        return page.items
-          .filter(
-            (r) =>
-              r.kind === 'execute' &&
-              r.subject.type === 'skill-draft' &&
-              r.subject.sourceRunId === sourceRunId &&
-              JSON.stringify(r.crystallizeTarget ?? null) === target,
-          )
-          .sort((a, b) => a.queuedAt - b.queuedAt)
+        const drafts = page.items
+          .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
           .map((r) => ({
             id: r.id as string,
             revisedFrom: r.revisedFrom ?? null,
             queuedAt: r.queuedAt,
           }))
+        return chainOf(drafts, rootRunId)
       },
     })
+    // ★ 分批第 22 批：清掉"邻链混进来的版本记录"。
+    //
+    // 真机现场：`9D67DN`（讲追溯原始文献那条链）的任务目录里，`.versions.json` 记着 **14 条**，
+    // 其中 4 条属于同一来源下的另一条链 `H5YM0E`（讲 HTML 报告）。那是旧的"同来源+同目标"
+    // 口径在自愈时写进去的 ⇒ 目录里"这一任务有几版"与磁盘实际不符，界面的"第几版"也会跟着错。
+    // 这里只**删**不属于这条链的条目（缺的条目由老形状自愈那条路补，不在这里编）。
+    await repairForeignVersions(dir, draftRunId)
+    return dir
+  }
+
+  /**
+   * 把 `.versions.json` 里**不属于这条链**的条目清掉（每个目录每个进程只查一次）。
+   *
+   * ⚠️ 为什么要"只查一次"：`draftTaskDir` 在审阅页每次刷新都会被调用，这里每版都要读 run
+   *    才能判归属 ⇒ 不能挂在热路径上每回都扫。一次就够：清过之后文件就对了。
+   * ⚠️ 为什么敢删：被删的条目对应的 run 都还在 store 里（版本列表从 chain 现算），
+   *    删的只是"这条链记了别人的版本"这份**错记录**。日志里写清删了哪几条，可回查。
+   */
+  async function repairForeignVersions(taskDir: string, draftRunId: string): Promise<void> {
+    if (repairedVersionDirs.has(taskDir)) return
+    repairedVersionDirs.add(taskDir)
+    const versions = await readDraftVersions(taskDir)
+    if (versions === null) return
+    const rootId = await findRootDraftRunIdLoose(draftRunId)
+    const page = await store.listRuns({ workspaceId: workspaceId as never, limit: 10_000 })
+    const drafts = page.items
+      .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+      .map((r) => ({
+        id: r.id as string,
+        revisedFrom: r.revisedFrom ?? null,
+        queuedAt: r.queuedAt,
+      }))
+    const chainIds = new Set(chainOf(drafts, rootId).map((r) => r.id))
+    const { kept, dropped } = dropForeignVersions(versions, chainIds)
+    if (dropped.length === 0) return
+    await writeDraftVersions(taskDir, kept)
+    warn(
+      `草稿目录 ${taskDir} 的 .versions.json 记了 ${dropped.length} 条**别的链**的版本` +
+        `（${dropped.map((id) => id.slice(-6)).join('、')}）——已清掉，这条链现在 ${kept.versions.length} 条。` +
+        `原因：旧口径把"同来源 + 同目标"当成同一条链。`,
+    )
+  }
+
+  /** 沿 `revisedFrom` 找到根（与 `resolveDraftTaskDir` 内部同一规则，但它不外露）。 */
+  async function findRootDraftRunIdLoose(draftRunId: string): Promise<string> {
+    let current = draftRunId
+    for (let i = 0; i < 50; i += 1) {
+      const run = await store.getRun(current as RunId)
+      const prev = run?.revisedFrom ?? null
+      if (prev === null || prev === '') return current
+      current = prev
+    }
+    return current
   }
 
   async function autoChainReview(input: {
@@ -5032,12 +5095,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
          * 把一份可能已经对不上的结论当成有效结论显示。
          */
         stale: staleForReview,
-        /** 同一份来源素材上已经起草过几版（自动返工的轮次上限是 2，见 executor）。 */
-        versions: page.items.filter(
-          (r) =>
-            r.subject.type === 'skill-draft' &&
-            draftRun.subject.type === 'skill-draft' &&
-            r.subject.sourceRunId === draftRun.subject.sourceRunId,
+        /**
+         * 这条**链**上已经起草过几版（自动返工的轮次上限见 executor 的 `SKILL_DRAFT_REWORK_LIMIT`）。
+         *
+         * ⚠️ 原来数的是"同一来源素材下有几版"。真机上同一来源下挂着两条不相干的链 ⇒
+         *    显示成 18 版（实际这条链只有 10 版），而且自动返工按这个数算额度 ⇒
+         *    已用 17 > 上限 2 ⇒ **一次都没自动返工过**。轮次只认链（`revisedFrom`）。
+         */
+        versions: chainOfRun(
+          page.items
+            .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
+            .map((r) => ({
+              id: r.id as string,
+              revisedFrom: r.revisedFrom ?? null,
+              queuedAt: r.queuedAt,
+            })),
+          draftRunId,
         ).length,
       })
       return

@@ -1446,6 +1446,82 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
    * 新增加了一个沉淀任务，而不是在原沉淀任务中执行"）。现在一个任务一个目录，"返工发生了没"
    * 的信号是**多了一条 `revisedFrom` 指过来的新 run**（`waitRevisedFrom`），不是多了一个目录。
    */
+  test('★★★ 邻链有很多版**不许**吃掉本链的返工额度（真机上因此一次都没自动返工）', async () => {
+    /**
+     * 真机现场（2026-10-23）：来源 run `Q2SQ16` 下挂着两条不相干的链
+     * （`H5YM0E` 4 版 + `9D67DN` 10 版，目标都是 `{"kind":"new"}`）。额度原来按
+     * "**同一来源**下已起草几版"算 ⇒ `usedReworks = 17` > 上限 2 ⇒ 每一轮都判"额度用尽
+     * ⇒ 交给人"、`createReworkRun` 一次都没被调用 —— 使用者的体感就是"自动返工不存在"，
+     * 于是手动点了 10 次「反馈」（$29.81）。
+     *
+     * 这条用例造一条**邻链**（同来源、同目标，但 `revisedFrom` 自成一根），再让本链第 1 版
+     * 被判 fail：额度必须只数本链（= 0），所以返工必须真的派出去。
+     */
+    const sourceRunId = await runReviewed('审完的流程（邻链撑额度）')
+    const srcRun = await daemon.store.getRun(sourceRunId as RunId)
+    assert.ok(srcRun, '来源 run 得在（下面照它复制出邻链的几版）')
+    // 邻链：3 版，根是 sib1（`revisedFrom` 为空 ⇒ 自成一根）
+    let prev: string | null = null
+    for (let i = 1; i <= 3; i += 1) {
+      const sibId = ulid() as string
+      await daemon.store.insertRun({
+        ...srcRun!,
+        id: sibId as RunId,
+        kind: 'execute',
+        status: 'completed',
+        subject: {
+          type: 'skill-draft',
+          id: sibId,
+          // 同来源（这就是旧口径会数进来的原因）
+          sourceRunId: sourceRunId as never,
+        },
+        crystallizeTarget: { kind: 'new' },
+        revisedFrom: (prev ?? null) as never,
+        queuedAt: srcRun!.queuedAt + 100 * i,
+        workDir: join(workRoot, `skill-draft-${sibId}`),
+        finishedAt: srcRun!.queuedAt + 100 * i,
+      })
+      prev = sibId
+    }
+
+    const draftRunId = await draftAndWait({
+      runId: sourceRunId,
+      target: { kind: 'new', purpose: '本站额度的流程' },
+    })
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'fail',
+      reasonCode: 'style_violation',
+      confidence: 0.8,
+      findings: [
+        {
+          severity: 'high',
+          summary: '正文里没有 `## When to Use` 一节',
+          evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 报告流程' }],
+          detail: {},
+        },
+      ],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      const verdict = await reviewDraftAndWait(draftRunId)
+      assert.equal(
+        verdict.status,
+        'rework_requested',
+        '本链只起草过 1 版 ⇒ 额度是满的；邻链那 3 版不许把额度吃掉（否则这里是 escalated）',
+      )
+      // 落点：真的多出一版（`revisedFrom` 指回被审的那一版）
+      const v2 = await waitRevisedFrom(draftRunId)
+      assert.notEqual(v2, draftRunId, '返工必须真的产出一版新的')
+      // 而且这一版属于**本链**：它的根仍然是被审的那一版
+      const v2Run = await daemon.store.getRun(v2 as RunId)
+      assert.equal(v2Run?.revisedFrom, draftRunId, '新版的父必须是本链那一版（不是邻链）')
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
   test('★★ 判决 fail ⇒ 返工派得出去（判决状态 rework_requested）且意见落进新一版素材', async () => {
     const sourceRunId = await runReviewed('审完的流程（要触发自动返工）')
     const draftRunId = await draftAndWait({

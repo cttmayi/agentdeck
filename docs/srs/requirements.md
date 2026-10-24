@@ -1167,6 +1167,11 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 22 批**（混链缺陷，见 §10.38）：链条口径统一到 `apps/daemon/src/draft-chain.ts`——**只认 `revisedFrom`**
+（`rootOf`/`groupByChain`/`chainOfRun`），`listCrystallizeDrafts`、`listChain`、`#reworkBudgetFor`、
+审查接口 `versions` 四处全部改用它；断父自成一根、成环取环上最早一版（与入口无关）。`.versions.json` 里
+不属于这条链的条目由 `dropForeignVersions` 剔掉（每目录每进程一次；**只剔不补**）。真机预演：18 → 14 条。
+修的是一个"功能在代码里、行为上不存在"的缺陷：**返工额度被邻链撑爆 ⇒ 自动返工从没触发**。`check` 2072 全绿。
 **第 21 批**（反馈之后界面误报"白跑"，见 §10.37）：结论条判定整块拎成纯函数 `apps/web/src/lib/audit-bar.ts`
 （`resolveAuditBar`），**实时状态只在 `live.runId === reviewRunId` 时采信**——「反馈」由平台自动起审核、
 不经过手动「开始审核」那条清空路径，缓存里上一版的终态 `completed` 曾被算到新一版头上，导致"刚起"被显示成
