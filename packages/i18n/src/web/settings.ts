@@ -59,6 +59,23 @@ export const settingsText = {
     en: 'On: the auditor runs the scripts under skill/scripts/ (commands stay inside that draft work directory; out-of-bounds ones are blocked), so "does it run" gets a real answer. Off: the prompt switches to "do not execute" and the verdict states scripts were not run. Note this executes agent-written code on your machine — this project does not sandbox runs.',
   },
 
+  /**
+   * ★ 分批第 41 批：运行时个人配置隔离（默认开）。
+   *
+   * 说明必须写"关掉会失去什么"——那是这个开关唯一的代价，也是 D78 存在的理由：
+   * 隔离开着时 agent 看不到你个人的 skill / MCP / 端点配置；关掉就全都能看到。
+   * ⚠️ 不提"更安全/更快"这类评价词：这里没有安全选项，只有两种取舍。
+   */
+  'settings.runtimeConfig': { zh: '运行时配置', en: 'Runtime config' },
+  'settings.runtimeConfigLabel': {
+    zh: '把 CLI 的配置复制到受管目录（关掉 = 直接用原路径）',
+    en: 'Copy CLI config into a managed dir (off = use your own path)',
+  },
+  'settings.runtimeConfigHint': {
+    zh: '开（默认）：平台把 CLAUDE_CONFIG_DIR / CODEX_HOME 指到自己的受管目录，各复制一份配置进去——agent 因此看不到你个人的 skill / MCP / 端点配置。关：不复制、不重定向，claude / codex 直接用你自己的 ~/.claude、~/.codex；代价是 agent 能看到并使用那里的个人 skill / MCP / 端点配置，好处是你的环境原样生效（Windows 上复制这条路出过问题就用它）。每次 run 的运行日志都会写明这一次是哪种。',
+    en: 'On (default): the platform points CLAUDE_CONFIG_DIR / CODEX_HOME at its own managed dirs and copies your config into them, so agents cannot see your personal skills / MCP / endpoint config. Off: nothing is copied or redirected — claude / codex use your own ~/.claude and ~/.codex directly. You trade isolation for your environment working exactly as-is (use it when copying misbehaves on Windows); agents can then see personal skills / MCP / endpoint config. Every run log states which mode it used.',
+  },
+
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },
   'settings.themeLight': { zh: '亮色', en: 'Light' },

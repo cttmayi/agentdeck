@@ -932,6 +932,29 @@ export class RunExecutor {
         }
       }
 
+      /**
+       * ★ 分批第 41 批：workspace 的读**提前到这里**了。
+       *
+       * 它原来在下面（第一句话模版那一段）才读，而"运行时要怎么拿配置"（隔离开关）
+       * 与"WebSearch 开关"都挂在 workspace 上、都要在**起进程之前**知道：
+       * 早读一次与晚读一次拿到的是同一行数据，两个读点迟早会分叉（一个用新值、
+       * 一个用旧值），而分叉的表现是"设置改了，run 的行为只变一半"。
+       */
+      const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
+
+      /**
+       * ★ 分批第 41 批：运行时个人配置**隔离**开关（`false` = 不复制、直接用原路径）。
+       *
+       * 使用者原话：「我想在 Settings 里面增加一个开关，不 copy 配置，直接用原路径配置」——
+       * 他在 Windows 上撞到的正是 D78 那套复制本身（文件锁 / BOM 或 UTF-16 存法的
+       * config.toml / codex 自己占着 auth.json）。他要的不是"我们把复制修好"，而是
+       * "**别复制**，按我原本的环境跑"。
+       *
+       * ⚠️ 关掉之后 agent 能看见并使用使用者的个人 skill / MCP / 端点配置——那正是
+       *    D78 要挡的东西，所以每次 run 都写一条 note（**不许静默**），界面上也有说明。
+       */
+      const isolateRuntimeConfig = workspace?.runtimeConfigIsolation !== false
+
       // ── 注入任务隔离 hook（2026-10）──
       //
       // claude 会把 Bash/Read 跑到工作目录之外（实测会 `ls ..` 看兄弟任务目录、
@@ -964,7 +987,13 @@ export class RunExecutor {
       //
       // ⚠️ 失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
       //    隔离（与 hook 注入同一原则，静默缺能力比报错糟）。
-      if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir) {
+      if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir && !isolateRuntimeConfig) {
+        await this.#note(
+          runId,
+          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你的 ~/.claude，' +
+            'agent 能看到并使用你个人的 skill / MCP / 端点配置。',
+        )
+      } else if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir) {
         const sync = await syncClaudeConfigDir(
           this.#deps.claudeConfigDir,
           this.#deps.claudeSettingsSource ?? join(homedir(), '.claude', 'settings.json'),
@@ -995,7 +1024,13 @@ export class RunExecutor {
       //
       // ⚠️ 失败不失败 run：与 claude 版同一原则（隔离是增强不是核心，
       //    静默缺能力比报错糟）。
-      if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir) {
+      if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir && !isolateRuntimeConfig) {
+        await this.#note(
+          runId,
+          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你的 ~/.codex，' +
+            '不复制 auth.json / config.toml，agent 能看到并使用你个人的 skill / 端点配置。',
+        )
+      } else if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir) {
         const sync = await syncCodexConfigDir(
           this.#deps.codexConfigDir,
           this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
@@ -1106,7 +1141,9 @@ export class RunExecutor {
       //   所以在 `?? ''` 这一层补齐——**与界面上显示的那份走同一段代码**
       //   （`readFirstSentenceTemplates` 也这么读），否则"界面显示的"与
       //   "真的投递的"会分叉。
-      const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
+      //
+      // ⚠️ `workspace` 本身在上面就读了（分批第 41 批把它提前到隔离块之前）——
+      //    这里**不要**再读一次：两个读点会分别拿到不同时刻的设定。
       // ★ 2026-10：每条链路三块模版各一份（① 框架 / ② 身份 / ③ 任务）。
       //   `executeTemplate` / `reviewTemplate` / `chatTemplate` 这三个老键就是
       //   **框架框**（改名会弄丢老 workspace 里已存的内容）；身份/任务框是后加的
@@ -1442,10 +1479,13 @@ export class RunExecutor {
         //   ★ codex 的 `CODEX_HOME` 同款注入（D78 的 codex 版）。
         env: {
           ...(agentConfig?.env ?? {}),
-          ...(runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
+          // ★ 分批第 41 批：设置里关掉隔离时**不注入**——CLI 就用它自己的原路径
+          //   （`~/.claude` / `~/.codex`）。开关"改了却不生效"是这个仓库最常见的缺陷，
+          //   所以这两行与上面那两个 note 分支读的是**同一个** `isolateRuntimeConfig`。
+          ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
             ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
             : {}),
-          ...(runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir
+          ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir
             ? { CODEX_HOME: this.#deps.codexConfigDir }
             : {}),
         },

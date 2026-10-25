@@ -123,6 +123,11 @@ export interface Identity {
   /** 分批第 23 批：起草 ↔ 审核自动循环的轮次上限（0 = 关，默认 10）。 */
   autoReworkRounds?: number
   /**
+   * 分批第 41 批：运行时个人配置隔离（`false` = 不复制、直接用原路径）。
+   * 设置页那个开关读它；**缺省当开**（老 daemon 不带这个键时不许把开关画成"关"）。
+   */
+  runtimeConfigIsolation?: boolean
+  /**
    * 全局 runtime 默认值（2026-10 第 ⑦ 条）：agent 的 `runtimeKey` 写 `'default'` 时用它。
    * **空串 = 跟随侦测**（`currentRuntime` 那个），不是一个具体值。
    */

@@ -219,6 +219,41 @@
 
 
     <!--
+      ★ 分批第 41 批：运行时个人配置隔离开关（默认开）。
+
+      使用者原话：「我想在 Settings 里面增加一个开关，不 copy 配置，直接用原路径配置」——
+      他在 Windows 上撞到的是 D78 那套复制本身，要的是"按我原本的环境跑"。
+
+      ⚠️ 文案只陈述取舍（关掉之后看得见个人 skill/MCP/端点配置），不说"更安全"：
+         这里没有安全选项，只有两种明确的代价。
+      ⚠️ 界面上**不缓存**这个值：读 `$identity`（服务端的那一份），存完重新拉 identity。
+         本地变量假装成功的话，开关会显示"关了"而 run 里照旧复制——那是这一族的老缺陷。
+    -->
+    <section class="drawer-section" data-runtime-config>
+      <h3>{$t('settings.runtimeConfig')}</h3>
+      <label>
+        <input
+          type="checkbox"
+          checked={$identity?.runtimeConfigIsolation ?? true}
+          onchange={(e) => {
+            const next = (e.currentTarget as HTMLInputElement).checked
+            void api('/api/workspace/runtime-config-isolation', {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ enabled: next }),
+            })
+              .then(() => void loadIdentity())
+              .catch((err) =>
+                showToast(err instanceof Error ? err.message : String(err)),
+              )
+          }}
+        />
+        {$t('settings.runtimeConfigLabel')}
+      </label>
+      <p class="hint">{$t('settings.runtimeConfigHint')}</p>
+    </section>
+
+    <!--
       ★ 全局 runtime 默认值（2026-10，定稿第 ⑦ 条）。
 
       agent 的 `runtimeKey` 记 `'default'` 时用它，**三级解析**：

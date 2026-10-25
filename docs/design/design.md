@@ -5371,3 +5371,54 @@ A 级修完，接着把"能跑但会误导人或掉功能"那几条做完。三�
   ~~不动探针（D 级）~~：这三条在第二刀里做完了（见上）。
 - **仍然不做的**：给 Windows 装 sandbox、给探针做 Windows 上的回归（那边要真机）、
   以及审计文档"C 级"清单里那些**已经是对的**东西（那些不用动）。
+
+### 4.3.2 分批第 41 批：运行时配置隔离的开关
+
+使用者（Windows 上撞到 codex 执行失败之后）：
+
+> 「我想在 Settings 里面增加一个开关，不 copy 配置，直接用原路径配置」
+
+D78 / D79 的隔离是**平台主动改写运行环境**：把 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 指到受管目录，
+再把使用者的配置复制进去。它挡住的是"任务里的 agent 能看见你个人 skill / MCP / 端点配置"，
+代价是**平台替使用者决定了他用哪份配置**——而这份配置是从别人的格式里搬出来的，一旦搬运
+在这台机器上出问题（Windows 的文件锁、BOM/UTF-16 存法的 `config.toml`、codex 自己占着
+`auth.json`），表现是"codex 起不来"，而错误发生在 CLI 里、不指向搬运。
+
+#### 落地
+
+`Workspace.runtimeConfigIsolation`（`optional`，**缺省 `true`** = 现状），设置页「运行时配置」
+一个勾。关掉时执行器让**三件事一起变**：
+
+| # | 变化 | 为什么缺一不可 |
+| --- | --- | --- |
+| ① | 不再调 `syncClaudeConfigDir` / `syncCodexConfigDir` | 一个文件都不复制（这正是 Windows 上出问题的那一步） |
+| ② | 不再注入 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` | 只停复制不停重定向 ⇒ CLI 拿着一个**没人维护的受管目录**跑——最坏的"半生效" |
+| ③ | 每次 run 写一条 note | 关掉意味着失去隔离（agent 能看到个人 skill / MCP / 端点配置），**不许静默** |
+
+界面文案只陈述取舍，不写"更安全 / 更快"：这里没有安全选项，只有两种明确的代价。
+
+#### 验证
+
+`apps/daemon/src/runtime-config-isolation.test.ts`（4 条，真 daemon + 假后端）：
+
+- 接口 / 身份往返：缺省读回 `true`（升级不许悄悄关掉隔离）、`false` 能写能读、非布尔 400 `invalid_enabled`；
+- claude 两态：开 ⇒ 注入 `CLAUDE_CONFIG_DIR` + 写出受管 `settings.json` + note「已启用」；
+  关 ⇒ **不注入**、**不写文件**、note「已关闭」；
+- codex 两态：开 ⇒ 注入 `CODEX_HOME` + `auth.json`/`config.toml` 真的复制过去；
+  关 ⇒ **不注入**、受管目录里那两份**不会被重新创建**（先删掉再跑一轮）、note「已关闭」。
+
+**红检**：把执行器里那行短路成 `isolateRuntimeConfig = true`（假装开关没接上）⇒
+两条关键断言（`CLAUDE_CONFIG_DIR` / `CODEX_HOME` 不许注入）立刻变红。
+
+布局探针（真 Chrome + 真 daemon）新增 4 条，量的是**这一次真勾一下**：
+
+| 事实 | 实测 |
+| --- | --- |
+| `settings.runtimeConfigSectionTitle` | `运行时配置` |
+| `settings.runtimeConfigChecked` | `true`（默认开） |
+| `settings.runtimeConfigAfterClick` | `false` —— 勾掉后读 `/api/identity`，服务端的值真的变了 |
+| `settings.runtimeConfigRestored` | `true` —— 再勾回去也真的回到 `true` |
+
+⚠️ 为什么要在浏览器里量这一步：只测接口（`PUT` 之后读回 `false`）证明不了"界面上那个勾连着接口"；
+只量 DOM（`checkbox.checked` 变了）证明不了"接口真的被调了"。这两条都是这个仓库踩过的形状，
+所以两条一起量。`pnpm run probe:layout` **575 项全绿**（571 → 575）。

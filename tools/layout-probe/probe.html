@@ -3561,6 +3561,54 @@
         facts['lang.switchPresent'] = !!langSelect
         facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
         /**
+         * ★ 分批第 41 批：设置抽屉里的「运行时配置」开关（不复制配置、直接用原路径）。
+         *
+         * 为什么在这里量、为什么这么量：这条开关唯一的危害是「勾了但没生效」。
+         * 所以不只是看那一段在不在——**勾一下 → 读服务端的 `/api/identity` → 值真的变了
+         * → 再勾回来**。只量 DOM（`checkbox.checked` 变了）会放过"界面变了、接口没调"
+         * 那种半生效，而这一族缺陷正是这个仓库最常见的形状。
+         */
+        {
+          const section = d().querySelector('.drawer [data-runtime-config]')
+          facts['settings.runtimeConfigSectionTitle'] = section
+            ? text(section.querySelector('h3'))
+            : null
+          const box = section?.querySelector('input[type="checkbox"]') ?? null
+          facts['settings.runtimeConfigChecked'] = box ? box.checked : null
+          const identityFlag = async () => {
+            try {
+              const res = await f.contentWindow.fetch('/api/identity')
+              const body = await res.json()
+              return body.runtimeConfigIsolation
+            } catch {
+              return 'fetch-failed'
+            }
+          }
+          if (box) {
+            box.click()
+            let after = 'timeout'
+            for (let i = 0; i < 40; i += 1) {
+              await wait(100)
+              after = await identityFlag()
+              if (after === false) break
+            }
+            facts['settings.runtimeConfigAfterClick'] = after
+            // 勾回默认（后面的判据都按"隔离开着"的默认状态写的）
+            box.click()
+            let back = 'timeout'
+            for (let i = 0; i < 40; i += 1) {
+              await wait(100)
+              back = await identityFlag()
+              if (back === true) break
+            }
+            facts['settings.runtimeConfigRestored'] = back === true
+          } else {
+            facts['settings.runtimeConfigAfterClick'] = 'no-checkbox'
+            facts['settings.runtimeConfigRestored'] = false
+          }
+        }
+
+        /**
          * ⚠️ 量的是**「新建任务」那一项**，不是"第一项"。
          *
          * 原来这里写的是 `.sidebar .nav-title` 的**第一个**——加「聊天」之后

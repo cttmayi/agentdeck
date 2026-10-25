@@ -188,6 +188,29 @@ export const Workspace = z.object({
    */
   allowReviewerScriptRun: z.boolean().default(true).optional(),
 
+  /**
+   * ★ 运行时个人配置**隔离**开关（2026-10，分批第 41 批）。
+   *
+   * 默认 `true` = 现状（D78）：平台把 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 指向受管目录，
+   * 各复制一份配置进去 —— 于是 agent 看不到使用者的个人 skill / MCP / 端点配置。
+   *
+   * `false` = **不复制、不重定向**：CLI 直接用它自己的原路径（`~/.claude`、`~/.codex`）。
+   *
+   * ⚠️ 为什么要有这个开关：使用者原话「我想在 Settings 里面增加一个开关，不 copy 配置，
+   *    直接用原路径配置」。他在 Windows 上撞到的正是**复制这条路本身**（D78 的 codex 版
+   *    把 `auth.json` + `config.toml` 按字节搬进受管目录；Windows 上有文件锁、
+   *    有 BOM/UTF-16 存法的 config.toml，还有 codex 自己的并发占用）。
+   *    他需要的不是"我们修好复制"，而是"**别复制**，按我原本的配置跑"——
+   *    那是一个正当的取舍：隔离换来的整洁 vs. 用自己环境的确定性。
+   *
+   * ⚠️ 代价必须说清（界面上也说了）：关掉之后 agent **能看见并使用**使用者的个人
+   *    skill / MCP / 端点配置（那正是 D78 想挡的东西）。
+   *
+   * ⚠️ `optional()`：后加字段，老 workspace 里没有 ⇒ 缺省 = 开（与 `webSearchEnabled`
+   *    同一条规矩：**不能**让升级悄悄改变既有行为）。
+   */
+  runtimeConfigIsolation: z.boolean().default(true).optional(),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })

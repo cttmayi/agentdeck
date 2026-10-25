@@ -171,6 +171,13 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 `agent?.runtimeKey ?? 'claude'` 去算"哪些目录是平台注入的"，而 `'default'` 是合法值。
 修法与验证见 `./design/architecture.md` §4.3.1。
 
+**分批第 41 批（使用者在 Windows 上要求的一个开关）**：设置抽屉里新增「运行时配置」——
+关掉就**不复制配置、不重定向**，claude / codex 直接用 `~/.claude`、`~/.codex` 的原路径
+（每次 run 的运行日志会写明这一次是哪种）。默认仍开（= D78/D79 的隔离）。
+落点：`Workspace.runtimeConfigIsolation` → `PUT /api/workspace/runtime-config-isolation` →
+`executor.ts` 的 `isolateRuntimeConfig`（三件事一起变：不复制、不注入、写 note）。
+验证见 `./design/design.md` §4.3.2（单测 4 条 + 探针 4 条，575 项全绿）。
+
 **还没做的（沉淀线）**
 
 - 真机上一轮完整试点（真 claude 起草 + 审核 + 入库 + 恢复）——所有验证目前是**假后端 + 真 git + 真浏览器**；

@@ -1788,6 +1788,33 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
+    key: 'settings.runtimeConfigSectionTitle',
+    label:
+      '★ 设置抽屉里有「运行时配置」这一段（分批第 41 批：不复制配置、直接用原路径的开关；使用者原话"我想在 Settings 里面增加一个开关，不 copy 配置"）',
+    ok: (v) => v === '运行时配置',
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.runtimeConfigChecked',
+    label: '★ 它默认是**开的**（= 保持 D78/D79 的隔离，升级不许悄悄改变既有行为）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.runtimeConfigAfterClick',
+    label:
+      '★★ 勾掉之后**服务端**的值真的变 false（不只 DOM 变了——只看 checkbox 会放过"界面变了、接口没调"）',
+    ok: (v) => v === false,
+    show: (v) => JSON.stringify(v ?? null),
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.runtimeConfigRestored',
+    label: '★ 再勾回去，服务端回到 true（这条开关是可逆的设定，不是一次性动作）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
     key: 'settings.sectionTitles',
     label: '现在这一段叫「第一句话模版」',
     ok: (v) => Array.isArray(v) && v.includes('第一句话模版'),

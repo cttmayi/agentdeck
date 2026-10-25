@@ -1193,6 +1193,8 @@ async function readWorkspaceSettings(
   defaultRuntimeKey: string
   /** 审核者能不能**真跑**草稿里的脚本（§10.5 第 ③ 条）。老数据 ⇒ 默认开。 */
   allowReviewerScriptRun: boolean
+  /** 运行时个人配置隔离（分批第 41 批）：`false` = 不复制、不重定向，CLI 用原路径。 */
+  runtimeConfigIsolation: boolean
   /**
    * 起草 ↔ 审核自动循环的轮次上限（分批第 23 批，使用者定：默认 10，允许 0–99，0 = 关）。
    *
@@ -1220,6 +1222,8 @@ async function readWorkspaceSettings(
     defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
     // 老数据没有这个键 ⇒ 开（与 `webSearchEnabled` 同一条规矩）
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
+    // 老数据没有这个键 ⇒ 开（隔离是 D78 的默认行为，升级不该悄悄关掉它）
+    runtimeConfigIsolation: workspace?.runtimeConfigIsolation ?? true,
     // 老数据没有这个键 ⇒ 默认轮数（10）。⚠️ `0` 必须原样返回"关"，
     // 不能写成 `|| DEFAULT`：那会把使用者刚关掉的循环又打开，而它每一轮都在花钱。
     autoReworkRounds: workspace?.autoReworkRounds ?? DEFAULT_AUTO_REWORK_ROUNDS,
@@ -4398,6 +4402,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ★ 分批第 23 批：自动返工轮数（设置页那个数字框读它）
         autoReworkRounds: settings.autoReworkRounds,
         /**
+         * ★ 分批第 41 批：运行时个人配置隔离（设置页那个开关读它）。
+         *
+         * 与 `webSearchEnabled` 同一条规矩：**界面显示的与 executor 真的用的必须是同一份读**
+         * （都走 `readWorkspaceSettings`）——否则开关看起来关了、run 里还在复制配置，
+         * 而这个仓库踩过太多次"字段在、行为不在"。
+         */
+        runtimeConfigIsolation: settings.runtimeConfigIsolation,
+        /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
          * 添加它的理由是一次真实误判：使用者报"聊天页不工作、任务页正常"，查下来
@@ -4828,6 +4840,33 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // WebSearch/WebFetch 并进 claude 的 `--disallowedTools`（退化为 Bash+curl
     // 调研）。校验收在**布尔字面量**上：收到字符串 "false" 不算关（前端传
     // JSON 布尔，不会出现那种情况；但接口自己别把"假值"当"关了"）。
+    /**
+     * ★ 分批第 41 批：运行时个人配置隔离的开关（`false` = 不复制、直接用原路径）。
+     *
+     * 为什么是一个 workspace 级布尔值而不是每 agent 一个：它决定的是**平台怎么把配置
+     * 交给 CLI**，跟"这条 agent 干什么活"无关；而且使用者报的场景是"我这台机器上
+     * codex 的配置复制不好使"，那是一台机器的属性，不是某个 agent 的。
+     */
+    if (req.method === 'PUT' && path === '/api/workspace/runtime-config-isolation') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['enabled']
+      if (typeof raw !== 'boolean') {
+        sendJson(res, 400, {
+          error: `enabled 必须是布尔值（收到 ${JSON.stringify(raw)}）`,
+          code: 'invalid_enabled',
+        })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, runtimeConfigIsolation: raw, updatedAt: Date.now() })
+      sendJson(res, 200, { runtimeConfigIsolation: raw })
+      return
+    }
+
     if (req.method === 'PUT' && path === '/api/workspace/web-search') {
       const body = (await readJsonBody(req)) as Record<string, unknown>
       if (typeof body['enabled'] !== 'boolean') {
