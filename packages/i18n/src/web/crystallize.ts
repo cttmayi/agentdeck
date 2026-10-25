@@ -228,6 +228,32 @@ export const crystallizeText = {
 
   // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },
+  /**
+   * ★ 分批第 37 批：「沉淀成 Agent」= 优化**一条已有智能体**的指令。
+   *
+   * 文案里刻意不出现"新建"二字（使用者定过：不新建 agent，只更新当前这一条），
+   * 也不用 `**` 与反引号（D39）。
+   */
+  'crystallize.targetAgent': { zh: '优化一条智能体的指令', en: "Improve an agent's instructions" },
+  'crystallize.targetAgentHint': {
+    zh: '这次是它干的活（或它审的活）没干对——改的是它自己的指令，不动它挂的技能，也不新建智能体',
+    en: 'The task this agent ran (or reviewed) went wrong — this rewrites its instructions only; its skills stay untouched and no new agent is created',
+  },
+  'crystallize.agentCandidateExecutor': { zh: '执行者（这次干活的那条）', en: 'Executor (ran this task)' },
+  'crystallize.agentCandidateReviewer': { zh: '审核者（这次审判的那条）', en: 'Reviewer (judged this task)' },
+  'crystallize.agentCharsHint': { zh: '当前 {chars} 字符 / 上限 6000', en: 'Currently {chars} chars / limit 6000' },
+  'crystallize.agentNoReviewer': {
+    zh: '这条 run 没有审核者（审核是单独的 run，选过审核者的任务才有这一项）',
+    en: 'This run had no reviewer (reviewing is a separate run; only tasks with a reviewer have this candidate)',
+  },
+  'crystallize.agentBuiltinHint': {
+    zh: '平台内置：指令是平台的默认值，改它等于改默认（随时可恢复上一版）',
+    en: 'Built-in: these are the platform defaults; editing changes the default (you can always restore the previous version)',
+  },
+  'crystallize.doneAgentSnapshot': {
+    zh: '旧指令已留成一代快照——在智能体页点「恢复上一版」随时退回去',
+    en: 'Previous instructions were saved as a snapshot — use Restore previous version on the agent page to roll back',
+  },
   'crystallize.targetUpdate': { zh: '更新本次加载的 skill', en: 'Update a loaded skill' },
   'crystallize.targetUpdateHint': {
     zh: '对话/任务是在矫正正在用的 skill——更新目标就是它（提炼的=进化；安装的=存为你的版本并遮蔽）',

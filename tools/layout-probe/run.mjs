@@ -3740,9 +3740,19 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.targetFormRows',
-    label: '★★ 目标态那两个目标选项（新建 / 更新）都在表单里',
-    ok: (v) => typeof v === 'number' && v === 2,
-    show: (v) => `${v} 行`,
+    label:
+      '★★ 目标态的三个目标选项（新建 / 更新 / 优化一条智能体的指令）都在表单里——分批第 37 批加了第三个，**按文案核对**而不是只数行数',
+    ok: (v, f) => {
+      const labels = Array.isArray(f['crystal.targetFormLabels']) ? f['crystal.targetFormLabels'] : []
+      return (
+        typeof v === 'number' &&
+        v === 3 &&
+        labels.some((l) => String(l).includes('新建')) &&
+        labels.some((l) => String(l).includes('更新')) &&
+        labels.some((l) => String(l).includes('优化') && String(l).includes('指令'))
+      )
+    },
+    show: (v, f) => `${v} 行　${JSON.stringify(f['crystal.targetFormLabels'] ?? [])}`,
   },
   {
     view: '沉淀',

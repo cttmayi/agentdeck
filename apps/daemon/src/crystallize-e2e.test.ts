@@ -3442,6 +3442,53 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     assert.equal(runNow.crystallized, true)
   })
 
+  test('★★★ 界面那一路：产出接口给 agent 形状（含基线），手改指令经 save-draft 落到 agent/instructions.md', async () => {
+    const draft = await agentDraftWith('# 身份\n\n你是对账执行者。\n')
+    const before = await agentById(agentId)
+
+    const art = (await (
+      await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${draft}`)
+    ).json()) as {
+      mode: string
+      files: Record<string, string>
+      validation: { ok: boolean; problems: unknown[] }
+      baseline: { files: Record<string, string> } | null
+      target: { kind: string } | null
+    }
+    assert.equal(art.mode, 'agent', '界面按 mode 判"这是优化指令的草稿"')
+    assert.ok(art.files['instructions.md']?.includes('你是对账执行者'), '产出要能读出来')
+    assert.equal(art.validation.ok, true)
+    assert.equal(
+      art.baseline?.files['instructions.md'],
+      before.instructions,
+      '基线 = 这条智能体**现在**的指令（界面据此算 A/M/D 与 diff）',
+    )
+    assert.equal(art.target?.kind, 'agent')
+
+    // 手改一段再保存：必须落到 agent/instructions.md（写错目录 = 界面上改了、入库时被忽略）
+    const edited = '# 身份\n\n你是对账执行者（人改过这一句）。\n'
+    const saved = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft, files: { 'instructions.md': edited } }),
+    })
+    assert.equal(saved.status, 200, await saved.clone().text())
+    const onDisk = await readFile(
+      join(workRoot, `skill-draft-${draft}`, 'agent', 'instructions.md'),
+      'utf8',
+    )
+    assert.equal(onDisk, edited)
+
+    // 入库读的就是它
+    const commit = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(commit.status, 201, await commit.clone().text())
+    assert.equal((await agentById(agentId)).instructions, edited.trim())
+  })
+
   test('★★★ 超长的指令：入库直接拦（400），且那条智能体一个字都不动', async () => {
     const before = await agentById(agentId)
     const tooLong = `# 身份\n\n${'撑到超限的一行。\n'.repeat(800)}`
@@ -3460,6 +3507,64 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
 
     const after = await agentById(agentId)
     assert.equal(after.instructions, before.instructions, '拦下的时候不许改到智能体')
+  })
+
+  test('★★★ 恢复上一版：把旧指令写回去，并且"恢复也能被恢复"（当前值再存一代）', async () => {
+    const before = await agentById(agentId)
+    const draft = await agentDraftWith('# 身份\n\n你是改过的对账执行者。\n')
+    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(res.status, 201, await res.clone().text())
+    const committed = (await res.json()) as { snapshot: { id: string | null } }
+
+    // 列表里能看到这一代
+    const list = (await (
+      await fetch(`${daemon.url}/api/agents/${agentId}/instruction-snapshots`)
+    ).json()) as {
+      snapshots: Array<{ id: string; previousChars: number; nextChars: number }>
+      currentChars: number
+    }
+    const mine = list.snapshots.find((sn) => sn.id === committed.snapshot.id)
+    assert.ok(mine, '入库那一代要出现在列表里')
+    assert.equal(mine.previousChars, before.instructions.length)
+
+    // 恢复
+    const restore = await fetch(`${daemon.url}/api/agents/${agentId}/restore-instructions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(restore.status, 200, await restore.clone().text())
+    const restored = await agentById(agentId)
+    assert.equal(restored.instructions, before.instructions, '恢复 = 把旧指令写回去')
+
+    // "恢复也能被恢复"：当前值（刚才那版改过的）已经又存了一代
+    const list2 = (await (
+      await fetch(`${daemon.url}/api/agents/${agentId}/instruction-snapshots`)
+    ).json()) as { snapshots: Array<{ id: string; previousChars: number }> }
+    assert.ok(
+      list2.snapshots.some((sn) => sn.previousChars === '# 身份\n\n你是改过的对账执行者。'.length),
+      '恢复时要把被覆盖掉的那版也存一代，否则"手滑两次"救不回来',
+    )
+  })
+
+  test('★★ 没有历史快照时恢复 ⇒ 404 说清"它还没被沉淀改过"', async () => {
+    // 用一个从没被沉淀改过的 agent（内置起草者）
+    const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+      agents: Array<{ id: string; role: string }>
+    }
+    const drafter = all.agents.find((a) => a.role === 'drafter')!
+    const res = await fetch(`${daemon.url}/api/agents/${drafter.id}/restore-instructions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(res.status, 404)
+    const body = (await res.json()) as { code: string }
+    assert.equal(body.code, 'no_instruction_snapshot')
   })
 
   test('★★ 空指令：入库也拦（空指令会把这条智能体变成废物）', async () => {

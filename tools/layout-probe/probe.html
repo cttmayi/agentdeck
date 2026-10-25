@@ -5478,6 +5478,15 @@
                 facts['crystal.targetFormRows'] = d().querySelectorAll(
                   '.detail-scroll .section-body .radio-row',
                 ).length
+                /**
+                 * ★ 分批第 37 批：第三个目标（优化智能体指令）必须**真的在表单里**。
+                 *
+                 * 只数量行数的判据会被"多了个空壳 radio"骗过；这里把三行的标题一起记下来，
+                 * 判据按**文案**核对（新建 / 更新 / 优化…指令）。
+                 */
+                facts['crystal.targetFormLabels'] = [
+                  ...d().querySelectorAll('.detail-scroll .section-body .radio-row strong'),
+                ].map((el) => text(el))
                 const cyStartBtn = [...d().querySelectorAll('button')].find((b) =>
                   text(b).includes('开始沉淀'),
                 )

@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 37 批**（沉淀成 Agent 的界面与退路，见 §10.50.7）：目标卡片加第三项「优化一条智能体的指令」
+（候选只有这条 run 上真实用到的执行者 / 审核者）；`artifacts` 对 agent 草稿返回 `mode:'agent'` +
+`files['instructions.md']` + `baseline`（智能体现指令）+ 三条机械校验；`save-draft` 按目标写进 `agent/`；
+可入库条件改成"agent 模式只看服务端校验"（没有 slug）；新增 `GET /api/agents/<id>/instruction-snapshots`
+与 `POST /api/agents/<id>/restore-instructions`（恢复前先给当前值存一代 ⇒ 恢复也能被恢复），
+智能体详情页加「恢复上一版指令」按钮（无快照时不摆按钮而是说明原因）。
 **第 36 批**（沉淀成 Agent 的入库，见 §10.50.6）：`POST /api/crystallize/commit` 认出
 `crystallizeTarget.kind === 'agent'` ⇒ 只读磁盘 `agent/instructions.md`、只覆盖 `instructions`
 （名字/技能/工具/模型/角色原样带过）、空与超长各一道 400（`instructions_empty` /

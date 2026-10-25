@@ -143,7 +143,10 @@ import {
 // ★ 分批第 22 批：链条只认 `revisedFrom`（四处口径统一到一个地方）。
 //   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
 //   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
-import { saveInstructionsSnapshot } from './agent-instructions-snapshots.ts'
+import {
+  listInstructionsSnapshots,
+  saveInstructionsSnapshot,
+} from './agent-instructions-snapshots.ts'
 import { chainOf, chainOfRun } from './draft-chain.ts'
 // ★ 分批第 25 批：返工收敛闸门（量"这一版到底改了什么"，拦重写/变胖/没动点名处）
 import {
@@ -5180,6 +5183,86 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
+    /**
+     * ══════════════════════════════════════════════════════════════════
+     * ★ 分批第 37 批：智能体指令的「恢复上一版」（沉淀成 Agent 的退路）
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 为什么必须有：入库那一刻做的是**覆盖一条正在生产用的指令**。没有退路的话，
+     * 一次不满意的沉淀就变成手工重贴——而使用者压根不知道旧指令长什么样了。
+     *
+     * 两代之间可以来回：恢复时会把**当前**值再存一代，所以"恢复完发现还是原来好"
+     * 也退得回去（只增不删的代价是几个 KB 文本，换来的是"手滑两次也能救"）。
+     */
+    const snapshotsMatch = /^\/api\/agents\/([^/]+)\/instruction-snapshots$/.exec(path)
+    if (snapshotsMatch && req.method === 'GET') {
+      const agentId = decodeURIComponent(snapshotsMatch[1]!) as Agent['id']
+      const agent = await store.getAgent(agentId)
+      if (!agent || agent.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      const snaps = await listInstructionsSnapshots(options.dataDir, agentId)
+      sendJson(res, 200, {
+        // 列表只给"有哪几代、各多少字"，正文按 id 取（避免列表把几百 KB 塞给界面）
+        snapshots: snaps.map((sn) => ({
+          id: sn.id,
+          at: sn.at,
+          runId: sn.runId,
+          previousChars: sn.previous.length,
+          nextChars: sn.nextChars,
+        })),
+        currentChars: agent.instructions.length,
+      })
+      return
+    }
+
+    const restoreMatch = /^\/api\/agents\/([^/]+)\/restore-instructions$/.exec(path)
+    if (restoreMatch && req.method === 'POST') {
+      const agentId = decodeURIComponent(restoreMatch[1]!) as Agent['id']
+      const agent = await store.getAgent(agentId)
+      if (!agent || agent.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      const body = (await readJsonBody(req).catch(() => ({}))) as { snapshotId?: unknown }
+      const wantId = typeof body.snapshotId === 'string' ? body.snapshotId : ''
+      const all = await listInstructionsSnapshots(options.dataDir, agentId)
+      if (all.length === 0) {
+        sendJson(res, 404, {
+          error: '这条智能体没有可恢复的历史指令（它还没被"沉淀成 Agent"改过）',
+          code: 'no_instruction_snapshot',
+        })
+        return
+      }
+      const picked = wantId === '' ? all[0]! : all.find((sn) => sn.id === wantId)
+      if (picked === undefined) {
+        sendJson(res, 404, { error: `没有这一代快照：${wantId}`, code: 'snapshot_not_found' })
+        return
+      }
+      const nowRestore = Date.now()
+      // 先给**当前**值存一代（这就是"恢复也能被恢复"）
+      const keep = await saveInstructionsSnapshot(options.dataDir, {
+        agentId,
+        agentName: agent.name,
+        previous: agent.instructions,
+        nextChars: picked.previous.length,
+        runId: picked.runId,
+        at: nowRestore,
+      })
+      await store.insertAgent({ ...agent, instructions: picked.previous, updatedAt: nowRestore })
+      info(
+        `智能体「${agent.name}」的指令已恢复上一版：${agent.instructions.length} → ${picked.previous.length} 字符` +
+          (keep.ok ? '' : `（当前那版没存下来：${keep.reason}）`),
+      )
+      sendJson(res, 200, {
+        agent: { id: agentId, name: agent.name, instructionsChars: picked.previous.length },
+        restoredFrom: picked.id,
+        previousChars: agent.instructions.length,
+      })
+      return
+    }
+
     // ── 内置 agent 的「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）──
     //
     // 只恢复**平台能保证的那部分**（指令 + 名字 + 技能集合 = 不挂）：使用者的改动
@@ -5945,7 +6028,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
-      const skillDir = join(await draftTaskDir(draftRunId), 'skill')
+      /**
+       * ★ 分批第 37 批：智能体草稿的产出目录是 `agent/`（只有一个 `instructions.md`）。
+       *
+       * 不分支的后果不是 400，而更坏：手改的指令被写进 `skill/SKILL.md`，入库读的是
+       * `agent/instructions.md` ⇒ **界面上改的东西入库时被静默忽略**。
+       */
+      const draftOutRel = draft.crystallizeTarget?.kind === 'agent' ? 'agent' : 'skill'
+      const skillDir = join(await draftTaskDir(draftRunId), draftOutRel)
       const result = await writeDraftSkillFiles(skillDir, files as Record<string, string>)
       if (result.rejected.length > 0) {
         // 整单拒（一份都不写）：半写会让磁盘进入使用者没要求过的中间状态，
@@ -5997,6 +6087,55 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //
       // ⚠️ 只有 `snapshot !== null`（= 不是当前版本）时才换：当前版本读任务目录，与"人工保存
       //    落盘即所见"那条路一致（保存写的就是任务目录，读快照会让刚保存的改动看不见）。
+      /**
+       * ★ 分批第 37 批：智能体草稿的产出是**一个文件**（`agent/instructions.md`），
+       * 校验也只有三条能机械判：不为空、不超 6000、文件在。
+       *
+       * 基线给"这条智能体**现在**的指令"——界面据此算 A/M/D 与 diff，
+       * 于是"改了什么"一眼可见（与 skill 的"更新"完全同一套展示）。
+       */
+      if (draftRun.crystallizeTarget?.kind === 'agent') {
+        const agentId = draftRun.crystallizeTarget.agentId
+        const agentNow = await store.getAgent(agentId as Agent['id'])
+        const versionsA = await readDraftVersions(draftDir)
+        const askedA = versionsA?.versions.find((v) => v.runId === draftRunId)
+        const agentDirOfVersion =
+          askedA === undefined || askedA.snapshot === null
+            ? join(draftDir, 'agent')
+            : draftVersionSkillDir(draftDir, askedA)
+        const text = await readFileSafe(join(agentDirOfVersion, 'instructions.md'))
+        const problems: Array<{ file: string; message: string }> = []
+        if (text === null) {
+          problems.push({ file: 'instructions.md', message: '还没有产出（起草者没写 instructions.md）' })
+        } else {
+          if (text.trim() === '') problems.push({ file: 'instructions.md', message: '指令是空的' })
+          if (text.trim().length > AGENT_INSTRUCTIONS_MAX_CHARS) {
+            problems.push({
+              file: 'instructions.md',
+              message: `超长：${text.trim().length} 字符，上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}`,
+            })
+          }
+        }
+        sendJson(res, 200, {
+          status: draftRun.status,
+          mode: 'agent',
+          files: text === null ? {} : { 'instructions.md': text },
+          // 形状与 skill 那支保持一致（空壳）：界面的 slug/name 推导在 agent 模式下整段跳过
+          skillMd: { name: '', description: '', body: '', raw: '' },
+          validation: { ok: problems.length === 0, problems },
+          target: draftRun.crystallizeTarget,
+          baseline:
+            agentNow === null || agentNow === undefined
+              ? null
+              : { slug: 'instructions.md', files: { 'instructions.md': agentNow.instructions } },
+          materialDir: join(draftDir, 'material'),
+          ...(askedA !== undefined && askedA.snapshot !== null
+            ? { historic: { runId: askedA.runId, at: askedA.at } }
+            : {}),
+        })
+        return
+      }
+
       const versionsForRead = await readDraftVersions(draftDir)
       const askedVersion = versionsForRead?.versions.find((v) => v.runId === draftRunId)
       const skillDirOfVersion =

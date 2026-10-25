@@ -3546,3 +3546,58 @@ skill 的五项原样保留（标题改成「审 skill 时你审的五件事」�
 ⚠️ 又踩了一个夹具坑：`repeat(500)` 的"撑到超限的一行"只有 4500 字，**压根没超**——
 用例断言"必须拦"却拿到 201。现在夹具里明写 `assert.ok(tooLong.length > 6000)`，
 让"夹具本身成立"也成为断言的一部分。
+
+### 10.50.7 第 37 批：界面 + 「恢复上一版」
+
+#### 目标卡片从两项变三项
+
+```
+○ 新建一个 skill
+○ 更新本次加载的 skill
+○ 优化一条智能体的指令          ← 新增
+      ○ 执行者（这次干活的那条）  当前 462 字符 / 上限 6000
+      ○ 审核者（这次审判的那条）  当前 1048 字符 / 上限 6000   （没有审核者时明说为什么）
+```
+
+候选只有**这条 run 上真实用到的那两条**（`agentTargets.executor` / `.reviewer`）——
+这不是"挑一个新建"，而是"这次谁的指令不够用"；把没参与的 agent 列出来只会让人选错。
+内置的那两条会多一个提示：改它等于改平台默认（随时可恢复上一版）。
+
+#### 界面这一路的三处接线（缺一处就"看起来能用其实不生效"）
+
+| 位置 | 不改的后果 |
+| --- | --- |
+| `POST /api/crystallize/artifacts` | 读 `skill/` ⇒ 优化指令的草稿永远是"空产出"，审阅屏一片空白 |
+| `POST /api/crystallize/save-draft` | 手改的指令写进 `skill/SKILL.md` ⇒ **界面上改了，入库时被静默忽略** |
+| `confirm` 的可点条件 | `artifacts.validation.ok && slug !== ''` ⇒ 智能体草稿没有 slug，按钮永远灰 |
+
+现在：artifacts 对 agent 草稿返回 `mode:'agent'` + `files['instructions.md']` +
+`baseline`（= **这条智能体现在的指令**，界面据此算 A/M/D 与 diff）+ 三条机械校验
+（文件在 / 不空 / 不超 6000）；`save-draft` 按目标写进 `agent/`；可点条件改成
+"agent 模式只看服务端校验"。
+
+#### 参数化痕迹的教训
+
+`artifacts` 对 agent 草稿返回的 `skillMd` 是**空壳对象**（不是字符串）：界面里
+`slug = res.skillMd.name` 那一行在 agent 模式下必须还是合法的对象访问，
+否则一个 `undefined.name` 就把整屏打崩。形状对齐比"少写一个字段"重要。
+
+#### 「恢复上一版」
+
+`GET /api/agents/<id>/instruction-snapshots`（列表，只给代数与字数）
+`POST /api/agents/<id>/restore-instructions`（`{}` = 最新那一代，或指定 `snapshotId`）
+
+- 恢复前**先给当前值存一代** ⇒ "恢复也能被恢复"，手滑两次也救得回来；
+- 没有快照 ⇒ 404 `no_instruction_snapshot`，文案说清"它还没被『沉淀成 Agent』改过"；
+- 智能体详情页多一个「恢复上一版指令」按钮（**只在有快照时出现**——没有退路的按钮
+  比没有按钮更坏）。它与「恢复成默认值」是两件事：那个回平台默认，这个回上一次沉淀之前。
+
+#### 验证
+
+| 用例 / 判据 | 断言什么 |
+| --- | --- |
+| ★★★「界面那一路」e2e | `mode:'agent'`、`files['instructions.md']`、`baseline` = 智能体现指令、`save-draft` 落 `agent/instructions.md`、入库读的就是它 |
+| ★★★「恢复上一版」e2e | 恢复 = 写回旧指令；且当前那版又存了一代（列表里查得到） |
+| ★★「没有快照 ⇒ 404」e2e | `no_instruction_snapshot` |
+| 探针 `crystal.targetFormRows` | 三行**按文案核对**（新建 / 更新 / 优化…指令）——只数行数会被空壳 radio 骗过 |
+| 探针其余 564 项 | 全绿（改界面没碰坏别处） |

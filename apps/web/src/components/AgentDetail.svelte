@@ -286,6 +286,67 @@
     }
   }
 
+  /**
+   * ★ 分批第 37 批：「恢复上一版指令」。
+   *
+   * 与「恢复成默认值」是两件事，别混：
+   *   · 恢复成默认值 = 回**平台默认**（只有内置那两条有）；
+   *   · 恢复上一版 = 回**上一次「沉淀成 Agent」之前**那一版（任何被沉淀改过的 agent 都有）。
+   *
+   * 为什么需要后者：那次沉淀是**覆盖**一条正在生产用的指令。没有退路的话，一次不满意的
+   * 沉淀就变成手工重贴，而使用者压根不记得旧指令长什么样了。
+   */
+  let snapshots: Array<{ id: string; at: number; previousChars: number }> = []
+  $: void loadSnapshots(agent.id)
+
+  async function loadSnapshots(agentId: string): Promise<void> {
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/instruction-snapshots`)
+      if (!res.ok) {
+        snapshots = []
+        return
+      }
+      const body = (await res.json()) as { snapshots?: Array<{ id: string; at: number; previousChars: number }> }
+      snapshots = body.snapshots ?? []
+    } catch {
+      snapshots = []
+    }
+  }
+
+  async function restoreInstructions(): Promise<void> {
+    const latest = snapshots[0]
+    if (latest === undefined) return
+    const ok = await askConfirm({
+      title: tx('agents.restoreInstructionsTitle'),
+      message: tx('agents.restoreInstructionsBody', {
+        name: agent.name,
+        chars: String(latest.previousChars),
+      }),
+      confirmLabel: tx('agents.restoreInstructions'),
+    })
+    if (!ok) return
+    error = ''
+    busy = true
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/restore-instructions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const body = (await res.json()) as { agent: { instructionsChars: number } }
+      await loadAgents()
+      showToast(
+        tx('agents.restoreInstructionsDone', { chars: String(body.agent.instructionsChars) }),
+      )
+      onclose()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = false
+    }
+  }
+
   $: attached = $skills.filter((s) => agent.skillIds.includes(s.id))
   /**
    * 能挂上去的 skill。
@@ -513,6 +574,26 @@
     <button type="submit" class="primary" disabled={busy}>
       {busy ? $t('common.saving') : $t('common.save')}
     </button>
+    {#if snapshots.length > 0}
+      <!-- ★ 分批第 37 批：被「沉淀成 Agent」改过的 agent 才有这一版可退 -->
+      <button
+        type="button"
+        class="ghost"
+        title={$t('agents.restoreInstructions')}
+        onclick={() => void restoreInstructions()}
+        disabled={busy}
+      >
+        {$t('agents.restoreInstructions')}
+      </button>
+    {:else}
+      <!--
+        没有快照时**不摆按钮**（没有退路的按钮比没有按钮更坏），但要把"为什么没有"
+        说出来：使用者刚做完一次沉淀、却发现这里没东西可点，会以为沉淀没生效。
+      -->
+      <span class="faint small" title={$t('agents.restoreInstructionsNone')}>
+        {$t('agents.restoreInstructionsNone')}
+      </span>
+    {/if}
     {#if agent.builtin}
       <!-- 内置的**没有删除按钮**（它删不掉，服务端也拒绝）。留一个"点了会被拒"的
            按钮比没有按钮更坏：那是把平台的一条规则变成一次莫名其妙的失败。 -->
