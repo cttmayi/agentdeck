@@ -3739,6 +3739,47 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.agentAttached',
+    label:
+      '★★★ 「优化一条智能体的指令」的草稿能挂上审阅屏（这一族夹具原来是清一色 skill 草稿，这条屏在真浏览器里一次都没量过）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.agentFileRows',
+    label:
+      '★★★ 智能体草稿的文件行就是 instructions.md（改前 artifacts 只读 skill/ ⇒ 这一屏是空的）',
+    ok: (v) =>
+      Array.isArray(v) && v.length === 1 && v.some((r) => String(r).includes('instructions.md')),
+    show: (v) => JSON.stringify(v ?? []),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.agentBar',
+    label:
+      '★★ 结论条说清"这次改的是什么"（智能体的指令），而不是套用 skill 那套口径',
+    ok: (v) => typeof v === 'string' && v.includes('指令'),
+    show: (v) => JSON.stringify(v ?? ''),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.agentConfirmDisabled',
+    label:
+      '★★★ 「确认入库」可点——改前它要求 slug，而智能体草稿没有 slug ⇒ 那个按钮永远是灰的（看起来"做完了却入不了库"）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.agentDiffLines',
+    label:
+      '★★★ 差异面板有行——改前 diff 路由只读 skill/，点「对比」是空的，而人正好在这一屏判断"它改了哪儿"',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.targetFormRows',
     label:
       '★★ 目标态的三个目标选项（新建 / 更新 / 优化一条智能体的指令）都在表单里——分批第 37 批加了第三个，**按文案核对**而不是只数行数',
@@ -5239,6 +5280,14 @@ try {
     //   （它们量的是 draftRunId 的现场）。queuedAt 由 extra 覆盖（makeDraft 里 `...rest`
     //   在后面展开，见那段注释）。
     siblingDraftRunId: '',
+    /**
+     * ★ 分批第 38 批：「优化一条智能体的指令」那条草稿（`crystallizeTarget.kind === 'agent'`）。
+     *
+     * 为什么需要它：上面这一族夹具全是 skill 草稿 ⇒ 智能体草稿的审阅屏（有没有 diff、
+     * 「确认入库」是不是可点）**在真浏览器里一次都没量过**。而它正是四批新代码的落点。
+     */
+    agentDraftRunId: '',
+    agentId: '',
   }
   try {
     await stopDaemon()
@@ -5420,6 +5469,44 @@ try {
           '## Verification\n\n- 探针全绿\n'
 
         // 第一版：三个文件（多文件产出）
+        /**
+         * ★ 分批第 38 批：一条"优化执行者指令"的草稿。
+         *
+         * 产出目录是 `agent/instructions.md`（不是 `skill/`），目标落在 run 记录上——
+         * 与真机入库后的形状一致（`crystallizeTarget.kind === 'agent'`）。
+         */
+        {
+          const agentDraftId = ulid()
+          const agentDir = path.join(workRoot, `skill-draft-${agentDraftId}`)
+          fs.mkdirSync(path.join(agentDir, 'agent'), { recursive: true })
+          fs.writeFileSync(
+            path.join(agentDir, 'agent', 'instructions.md'),
+            '# 身份\n\n你是探针用的对账执行者。\n\n# 边界\n\n只读文件，不写。\n',
+          )
+          fs.mkdirSync(path.join(agentDir, 'material'), { recursive: true })
+          fs.writeFileSync(
+            path.join(agentDir, 'material', '00-README.md'),
+            '# 素材索引（探针夹具：优化指令）\n',
+          )
+          await store.insertRun({
+            id: agentDraftId,
+            workspaceId,
+            kind: 'execute',
+            status: 'completed',
+            agentId: executor.id,
+            agentName: executor.name,
+            subject: { type: 'skill-draft', id: agentDraftId, sourceRunId },
+            prompt: '探针夹具：优化指令',
+            queuedAt: now - 40_000,
+            startedAt: now - 39_000,
+            finishedAt: now - 38_000,
+            crystallizeTarget: { kind: 'agent', agentId: executor.id },
+            workDir: agentDir,
+          })
+          crystalFixture.agentDraftRunId = agentDraftId
+          crystalFixture.agentId = executor.id
+        }
+
         crystalFixture.sourceRunId = sourceRunId
         crystalFixture.draftRunId = await makeDraft(ulid(), {
           'SKILL.md': skillMd('第二步'),
@@ -5946,6 +6033,7 @@ try {
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
         `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
+        `&crystalAgentDraft=${encodeURIComponent(crystalFixture.agentDraftRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : '') +
         // 分批第 30 批：`PROBE_IFRAME_H` 换 iframe 高度，用来量"窗口高/矮时界面是否自适应"。

@@ -2071,6 +2071,10 @@
                 <span class="muted">
                   {#if targetKind === 'new'}
                     {$t('crystallize.targetNew')}
+                  {:else if targetKind === 'agent'}
+                    <!-- ★ 分批第 38 批：结论条原来只有"新建 / 更新 <slug>"两支 ⇒
+                         智能体草稿在这里显示成「更新本次加载的 skill」（探针量到的原话） -->
+                    {$t('crystallize.targetAgent')} {agentNameFor(selectedAgentId)}
                   {:else}
                     {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
                   {/if}

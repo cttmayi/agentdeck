@@ -3794,10 +3794,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
     }
 
-    // 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
-    // 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）
-    const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
-    if (reviseSpec === null) {
+    /**
+     * 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
+     * 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）。
+     *
+     * ★ 分批第 38 批：「沉淀成 Agent」的返工**不吃这份规范**（它写的是指令，不是 skill），
+     * 所以只在 skill 那支才要求它必须在——否则内置规范读不到时，一条**跟它无关**的
+     * 智能体返工也会 500（错误信息还会指向"安装不完整"，把人带到错的地方）。
+     */
+    const needsWritingSpec = previous.crystallizeTarget?.kind !== 'agent'
+    const reviseSpec = needsWritingSpec ? await loadBuiltinSkill(WRITING_SKILLS) : null
+    if (needsWritingSpec && reviseSpec === null) {
       return {
         status: 500,
         body: {
@@ -3828,7 +3835,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             outputDir: 'skill',
             target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
             revised: true,
-            writingSpec: reviseSpec.body,
+            writingSpec: reviseSpec?.body ?? '',
           })
 
     const outcome = await executor.submit({
@@ -6100,9 +6107,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const versionsA = await readDraftVersions(draftDir)
         const askedA = versionsA?.versions.find((v) => v.runId === draftRunId)
         const agentDirOfVersion =
-          askedA === undefined || askedA.snapshot === null
-            ? join(draftDir, 'agent')
-            : draftVersionSkillDir(draftDir, askedA)
+          askedA === undefined ? join(draftDir, 'agent') : draftVersionSkillDir(draftDir, askedA, 'agent')
         const text = await readFileSafe(join(agentDirOfVersion, 'instructions.md'))
         const problems: Array<{ file: string; message: string }> = []
         if (text === null) {
@@ -6128,6 +6133,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             agentNow === null || agentNow === undefined
               ? null
               : { slug: 'instructions.md', files: { 'instructions.md': agentNow.instructions } },
+          /**
+           * ⚠️ 必须**显式给 null**：界面的默认对比是
+           * `res.revisedFrom !== null ? 'original' : 'current'`——少给这个字段时它是
+           * `undefined`，而 `undefined !== null` 成立 ⇒ 一条**没改过版**的 agent 草稿
+           * 会被当成"改版草稿"，结论条上写着「对比原 skill」（探针量到的原话）。
+           */
+          revisedFrom: draftRun.revisedFrom ?? null,
           materialDir: join(draftDir, 'material'),
           ...(askedA !== undefined && askedA.snapshot !== null
             ? { historic: { runId: askedA.runId, at: askedA.at } }
@@ -6199,6 +6211,77 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const draftRun = await store.getRun(draftRunId as RunId)
       if (!draftRun || draftRun.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+
+      /**
+       * ══════════════════════════════════════════════════════════════════
+       * ★ 分批第 38 批：「沉淀成 Agent」的对比
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 量出来的缺陷：这条路由原来只认 `skill/`（要改的那份 skill 的原文、`history/<版本>/skill/`、
+       * `material/existing-skill/`），而 agent 草稿的产出在 `agent/instructions.md` ⇒ 界面上点
+       * 「对比」拿到的是**空的**——使用者正好在这一屏判断"它改了哪儿"，而这一屏什么都没有。
+       *
+       * 三条基线的口径（与 skill 那支对齐，按"这一份指什么"排）：
+       *   · `current`  = 这条智能体**现在**的指令（= 上一次沉淀的结果，或原本那条）
+       *   · `previous` = 上一版草稿的 `agent/instructions.md`（不在就退回 current）
+       *   · `original` = agent 草稿没有"原 skill"这回事 ⇒ 与 current 同义，标签如实说
+       */
+      if (draftRun.crystallizeTarget?.kind === 'agent') {
+        const agentId = draftRun.crystallizeTarget.agentId
+        const agentNow = await store.getAgent(agentId as Agent['id'])
+        const filesInAgent = raw?.files
+        let agentDraftFiles: Record<string, string> = {}
+        if (typeof filesInAgent === 'object' && filesInAgent !== null) {
+          for (const [rel, text] of Object.entries(filesInAgent as Record<string, unknown>)) {
+            if (typeof text === 'string') agentDraftFiles[rel] = text
+          }
+        } else {
+          const onDisk = await readFileSafe(
+            join(await draftTaskDir(draftRunId), 'agent', 'instructions.md'),
+          )
+          if (onDisk !== null) agentDraftFiles = { 'instructions.md': onDisk }
+        }
+        const wantAgainst =
+          raw?.against === 'previous' ? 'previous' : raw?.against === 'original' ? 'original' : 'current'
+        let agentBaseline: Record<string, string> = {}
+        let agentLabel = ''
+        let agentAgainst: 'previous' | 'original' | 'current' = wantAgainst
+        if (wantAgainst === 'previous' && draftRun.revisedFrom !== undefined) {
+          const taskDirA = await draftTaskDir(draftRunId)
+          const prevId = draftRun.revisedFrom as string
+          const versionsA = await readDraftVersions(taskDirA)
+          const recordA = versionsA?.versions.find((v) => v.runId === prevId)
+          const prevDir =
+            recordA === undefined
+              ? join(taskDirA, `history/${prevId}`, 'agent')
+              : draftVersionSkillDir(taskDirA, recordA, 'agent')
+          const prevText = await readFileSafe(join(prevDir, 'instructions.md'))
+          if (prevText !== null) {
+            agentBaseline = { 'instructions.md': prevText }
+            agentLabel = '上一版草稿'
+          }
+        }
+        if (agentLabel === '' && agentNow !== null && agentNow !== undefined) {
+          agentBaseline = { 'instructions.md': agentNow.instructions }
+          agentLabel =
+            wantAgainst === 'original'
+              ? `「${agentNow.name}」当前的指令（优化指令没有"原 skill"这份基线，这里就是那条智能体的现状）`
+              : `「${agentNow.name}」当前的指令`
+          agentAgainst = wantAgainst === 'previous' ? 'current' : wantAgainst
+        }
+        const agentDiffs = diffFileSets(agentBaseline, agentDraftFiles)
+        sendJson(res, 200, {
+          against: agentAgainst,
+          baselineLabel: agentLabel,
+          files: agentDiffs,
+          totals: {
+            added: agentDiffs.reduce((sum, d) => sum + d.added, 0),
+            removed: agentDiffs.reduce((sum, d) => sum + d.removed, 0),
+            changed: agentDiffs.filter((d) => d.change !== 'same').length,
+          },
+        })
         return
       }
 

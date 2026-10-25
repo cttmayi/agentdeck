@@ -1167,6 +1167,11 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 38 批**（沉淀成 Agent 的补齐，见 §10.50.8）：`/api/crystallize/diff` 认出 agent 草稿
+（基线 = 智能体现指令 / 上一版草稿 / original 同 current）；`draftVersionSkillDir` 的产出目录
+参数化（`skill` / `agent`）；artifacts 显式回 `revisedFrom: null`（少这个字段会让界面把
+"没改过版"当"改版"，结论条谎报「对比原 skill」）；结论条目标摘要与沉淀列表行补 agent 支；
+返工的写作规范只在 skill 支要求。探针新增智能体草稿夹具与五项判据。
 **第 37 批**（沉淀成 Agent 的界面与退路，见 §10.50.7）：目标卡片加第三项「优化一条智能体的指令」
 （候选只有这条 run 上真实用到的执行者 / 审核者）；`artifacts` 对 agent 草稿返回 `mode:'agent'` +
 `files['instructions.md']` + `baseline`（智能体现指令）+ 三条机械校验；`save-draft` 按目标写进 `agent/`；

@@ -59,6 +59,11 @@ export const crystallizeText = {
   'crystallize.discarded': { zh: '已放弃', en: 'Discarded' },
   'crystallize.sourceUnknown': { zh: '来源未知', en: 'Unknown source' },
   'crystallize.rowNew': { zh: '新建', en: 'New' },
+  /**
+   * ★ 分批第 38 批：「沉淀成 Agent」的草稿行。只用 id 尾段——列表接口只给 id，
+   * 而为了一个名字把整张智能体表带进列表接口（或反过来在列表里 N+1 查）都不划算。
+   */
+  'crystallize.rowAgent': { zh: '优化指令 · {id}', en: 'Improve instructions · {id}' },
   'crystallize.rowUpdate': { zh: '更新 {slug}', en: 'Update {slug}' },
 
   // ── 步骤条 ──

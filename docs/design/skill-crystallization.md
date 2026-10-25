@@ -3601,3 +3601,63 @@ skill 的五项原样保留（标题改成「审 skill 时你审的五件事」�
 | ★★「没有快照 ⇒ 404」e2e | `no_instruction_snapshot` |
 | 探针 `crystal.targetFormRows` | 三行**按文案核对**（新建 / 更新 / 优化…指令）——只数行数会被空壳 radio 骗过 |
 | 探针其余 564 项 | 全绿（改界面没碰坏别处） |
+
+### 10.50.8 第 38 批：把四批留下的四处洞补上（都在真浏览器/真接口里量出来）
+
+第 37 批交付后做了一次"这功能在真界面上到底成不成立"的复盘，四处**看起来做完了其实没生效**的地方：
+
+#### ① diff 路由只认 `skill/` ⇒ 智能体草稿的「对比」是空的
+
+`POST /api/crystallize/diff` 的三条基线全在 skill 那套目录上（`material/existing-skill/`、
+`history/<版本>/skill/`、库里的 `SKILL.md`）。智能体草稿的产出在 `agent/instructions.md`，
+于是**使用者判断"它改了哪儿"的那一屏什么都没有**。现在按类分叉：
+
+| 基线 | 智能体草稿的取法 |
+| --- | --- |
+| `current` | 这条智能体**现在**的指令 |
+| `previous` | 上一版草稿的 `agent/instructions.md`（取不到就退回 current，`against` 也改口） |
+| `original` | 没有"原 skill"这回事 ⇒ 与 current 同义，标签如实写 |
+
+顺带修掉一个**写死目录**的根：`draftVersionSkillDir(taskDir, version)` 里 `join(..., 'skill')`
+是硬编码 ⇒ 智能体的历史版本一律读不到（第 37 批的 artifacts 也踩这个）。现在第三参数
+`outRel: 'skill' | 'agent'`。
+
+#### ② `revisedFrom` 少给一个字段 ⇒ 结论条谎报「对比原 skill」
+
+界面默认对比是 `res.revisedFrom !== null ? 'original' : 'current'`。artifacts 的 agent 分支
+第一版**没写这个字段** ⇒ `undefined !== null` 为真 ⇒ 一条没改过版的 agent 草稿被当成"改版草稿"，
+结论条上写着「对比原 skill +7 −1」（探针量到的原话）。现在显式给 `revisedFrom: … ?? null`。
+
+#### ③ 结论条的目标摘要只有"新建 / 更新 <slug>"两支
+
+智能体草稿在这一行显示成「更新本次加载的 skill」（探针量到的原话）。补第三支：
+「优化一条智能体的指令 · <名字>」。
+
+#### ④ 沉淀列表行的 `target` 类型没有 `agent` 成员
+
+`targetLabel` 于是走进 `rowUpdate` 分支、把 `undefined` 当 slug 印出来（「更新 undefined」）。
+补 `{kind:'agent', agentId}` 与 `rowAgent` 词条（`优化指令 · <id 尾段>`）。
+
+#### 顺带：返工链路上与 agent 无关的硬门槛
+
+`startReviseRun` 原来**无条件**要求 `loadBuiltinSkill(WRITING_SKILLS)` 能在——那份规范是
+"怎么写 skill"，智能体返工压根不吃它。读不到时它会把一条**跟它无关**的返工 500 掉，
+错误信息还指向"安装不完整"。现在只在 skill 那支要求。
+
+#### 验证
+
+| 用例 / 判据 | 断言什么 | 红检 |
+| --- | --- | --- |
+| ★★★ e2e「对比：agent 草稿的基线」 | `against: current`、基线标签含「当前」、`files` 里有 `instructions.md` 且新增 > 0 | 短路 diff 的 agent 分支 ⇒ 红（`空（新建）`）✓ |
+| ★★★ e2e「自动返工循环在优化指令的草稿上也成立」 | 判不通过 ⇒ `rework_requested` + 起了下一版；下一版任务书仍要求 `agent/instructions.md`、**不含** `skill/SKILL.md`；`.versions.json` 里 ≥ 2 版 | 让返工任务书回到 skill 支 ⇒ 红 ✓ |
+| ★★★ e2e「按意见改一版」 | 手点返工版同样只写 `agent/`，索引页写「`agent/` 里就是上一版」 | 同上 |
+| 探针 `crystal.agentAttached` / `agentFileRows` / `agentBar` / `agentConfirmDisabled` / `agentDiffLines` | 智能体草稿能挂上审阅屏；文件行就是 `instructions.md`；结论条说「优化一条智能体的指令」；**确认入库可点**；差异面板 8 行 | 改前：文件行空、按钮恒灰、diff 0 行、结论条写「更新本次加载的 skill」 |
+
+探针这一族夹具原来**清一色 skill 草稿** ⇒ 智能体草稿的审阅屏在真浏览器里一次都没量过。
+现在 `run.mjs` 播一条 `crystallizeTarget: {kind:'agent'}` 的草稿（目录 `agent/instructions.md`），
+经 URL 参数 `&crystalAgentDraft=` 进 `probe.html`，五项判据分别钉住上面这四个洞。
+
+⚠️ 两个探针自己的坑，记下来免得下次再踩：
+· 「内容 / 差异」是**内层** tab（`button[role="tab"]`），不是外层 `.review-tabs`（草稿/依据/过程）——
+  按外层找永远是 `no-tab`；
+· 差异行的类名是 `.diff-box .diff-line`（`.diff-pane` 不是本仓库的类名）。

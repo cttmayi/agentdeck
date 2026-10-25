@@ -661,11 +661,22 @@ export async function snapshotDraftSkill(
 }
 
 /** 解析一版内容的位置（`snapshot` 为 null 时就是任务目录自己）。 */
-export function draftVersionSkillDir(taskDir: string, version: DraftVersionRecord): string {
-  if (version.snapshot === null) return join(taskDir, 'skill')
+export function draftVersionSkillDir(
+  taskDir: string,
+  version: DraftVersionRecord,
+  /**
+   * ★ 分批第 38 批：产出目录名（`skill` / `agent`）。
+   *
+   * 原来写死 `skill`——而「沉淀成 Agent」那一版的快照在 `history/<runId>/agent/`。
+   * 写死的后果不是报错，而是**读不到**：历史版本的内容一律为空，
+   * 界面看着像"那一版没有产出"（第 37 批的 artifacts 与第 38 批的 diff 都踩过）。
+   */
+  outRel: 'skill' | 'agent' = 'skill',
+): string {
+  if (version.snapshot === null) return join(taskDir, outRel)
   return isAbsolute(version.snapshot)
-    ? join(version.snapshot, 'skill')
-    : join(taskDir, version.snapshot, 'skill')
+    ? join(version.snapshot, outRel)
+    : join(taskDir, version.snapshot, outRel)
 }
 
 /** 老数据（一版一间小屋）在磁盘上的形状：`skill-draft-<runId>`，由调用方拼好传进来。 */

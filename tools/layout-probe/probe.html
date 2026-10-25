@@ -5402,6 +5402,70 @@
           }
 
           // ══════════════════════════════════════════════════════════════
+          // ══════════════════════════════════════════════════════════════
+          // ★★★ 「优化一条智能体的指令」的审阅屏（2026-10-25 第 38 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 这一族夹具原来全是 skill 草稿 ⇒ 智能体草稿的审阅屏在真浏览器里**一次都没量过**，
+          // 而它正是分批第 34–38 批新代码的落点。量三件最要紧的事：
+          //   ① diff 面板**有内容**（改前只读 skill/ ⇒ 这一屏是空的，而人正好在这一屏判断"改了哪儿"）；
+          //   ② 基线标签说清比的是"这条智能体现有的指令"；
+          //   ③ 「确认入库」**可点**（改前它要求 slug，智能体草稿没有 slug ⇒ 永远灰）。
+          {
+            const cyAgentDraft = cyQuery.get('crystalAgentDraft')
+            facts['crystal.agentFixtureId'] = cyAgentDraft || null
+            if (cyAgentDraft) {
+              f.contentWindow.location.hash = '#/tasks'
+              await until(() => !d().querySelector('.review-tabs'), 40)
+              f.contentWindow.location.hash = `#/crystallize/${cyAgentDraft}`
+              const cont = await until(
+                () =>
+                  [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
+                120,
+              )
+              if (cont) {
+                click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
+              }
+              facts['crystal.agentAttached'] = await until(
+                () => !!d().querySelector('.conclusion-bar'),
+                120,
+              )
+              if (facts['crystal.agentAttached']) {
+                facts['crystal.agentBar'] = text(d().querySelector('.conclusion-bar'))
+                facts['crystal.agentFileRows'] = [
+                  ...d().querySelectorAll('.review-pane .file-row'),
+                ].map((r) => text(r))
+                // 「确认入库」可点 = 这一屏有"能入库"这件事（改前恒灰）
+                const confirmBtn = [...d().querySelectorAll('button')].find(
+                  (b) => text(b).includes('确认入库'),
+                )
+                facts['crystal.agentConfirmDisabled'] = confirmBtn
+                  ? confirmBtn.disabled
+                  : 'no-button'
+                // 差异面板：切到「差异」标签后有没有行
+                /**
+                 * ⚠️ 「内容 / 差异」是**内层**的 tab（`.editor-tabs` 里那两个），
+                 * 不是外层 `.review-tabs`（草稿/依据/过程/审核）——按外层找永远 no-tab。
+                 */
+                const diffTab = [...d().querySelectorAll('button[role="tab"]')].find(
+                  (b) => text(b).trim() === '差异',
+                )
+                if (diffTab) {
+                  click(diffTab)
+                  await until(() => !!d().querySelector('.diff-box .diff-line'), 60)
+                  // 差异行的真实类名是 `.diff-box .diff-line`（`.diff-pane` 不是本仓库的类名）
+                  facts['crystal.agentDiffLines'] = d().querySelectorAll(
+                    '.diff-box .diff-line',
+                  ).length
+                } else {
+                  facts['crystal.agentDiffLines'] = 'no-tab'
+                }
+              }
+              f.contentWindow.location.hash = '#/tasks'
+              await until(() => !d().querySelector('.conclusion-bar'), 40)
+            }
+          }
+
           // ★★★ 深链语义：URL 指名的草稿**就是**那一条（2026-10-21 第 7 批）
           // ══════════════════════════════════════════════════════════════
           //

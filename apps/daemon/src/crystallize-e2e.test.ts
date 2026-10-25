@@ -3381,6 +3381,73 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     return draft
   }
 
+  /**
+   * 起审核并等**收口之后**的判决（结论 + 状态）。
+   *
+   * ⚠️ 与 §10.5 的 `reviewDraftAndWait` 同一套轮询纪律，但那个函数在另一个 describe 里、
+   *    这里拿不到；两处都保留是刻意的（各测各的状态机分支，不互相依赖）。
+   */
+  async function agentReviewVerdict(draftRunId: string): Promise<{
+    conclusion: unknown
+    status: unknown
+  }> {
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const { reviewRunId } = (await res.json()) as { reviewRunId: string }
+    let settled: { conclusion: unknown; status: unknown } | null = null
+    for (let i = 0; i < 200; i += 1) {
+      const vs = (await (
+        await fetch(`${daemon.url}/api/runs/${reviewRunId}/verdicts`)
+      ).json()) as { verdicts?: Array<{ conclusion?: unknown; status?: unknown }> }
+      const v = (vs.verdicts ?? [])[0]
+      if (v && v.status !== 'validated') {
+        settled = { conclusion: v.conclusion, status: v.status }
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    if (settled === null) throw new Error('审核判决没在限时内收口')
+    // 判决收口 ≠ run 终态（第 31 批的教训）：等 run 也落终态再返回
+    for (let i = 0; i < 200; i += 1) {
+      const run = (await (await fetch(`${daemon.url}/api/runs/${reviewRunId}`)).json()) as {
+        status?: string
+      }
+      if (
+        !['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(
+          String(run.status),
+        )
+      ) {
+        return settled
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核 run 没在限时内落终态')
+  }
+
+  /** 设自动返工轮数（同一个文件里别的用例改过它，这里要显式摆回想要的档位）。 */
+  async function setReworkRounds(rounds: number): Promise<void> {
+    const res = await fetch(`${daemon.url}/api/workspace/auto-rework`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rounds }),
+    })
+    assert.equal(res.status, 200, await res.clone().text())
+  }
+
+  /** 等假后端收到**下一段**投递（第 `index` 段），最多 10 秒。 */
+  async function waitForPromptAt(index: number): Promise<string> {
+    for (let i = 0; i < 200; i += 1) {
+      const got = fakeBackend.prompts[index]
+      if (got !== undefined && got !== '') return got
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error(`假后端没有收到第 ${index + 1} 段投递`)
+  }
+
   async function agentById(id: string): Promise<{
     name: string
     instructions: string
@@ -3551,6 +3618,72 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     )
   })
 
+  test('★★★ 自动返工循环在"优化指令"的草稿上也成立：判不通过 ⇒ 起下一版，且下一版仍写 agent/', async () => {
+    const runId = await runWithReviewer()
+    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: agentId } })
+    const taskDir = join(workRoot, `skill-draft-${draft}`)
+    await mkdir(join(taskDir, 'agent'), { recursive: true })
+    await writeFile(join(taskDir, 'agent', 'instructions.md'), '# 身份\n\n你是对账执行者。\n', 'utf8')
+    // 轮数回到默认（同一个文件里前面的用例把它改成过 0/1）
+    await setReworkRounds(10)
+    const before = fakeBackend.prompts.length
+    // 判不通过（理由写"指令口径"那条：边界太软）——与 skill 那支的 failVerdict 同形，
+    // 但这个 describe 里拿不到它（定义在另一个 describe 作用域里）
+    fakeBackend.draftReviewVerdict = {
+      schemaVersion: 1,
+      conclusion: 'fail',
+      // ⚠️ 必须是协议里的取值（我第一次写了 'requirement_missed' ⇒ 判决不合规 ⇒
+      //    conclusion 变成 needs_human，看起来像"循环没起"）
+      reasonCode: 'style_violation',
+      confidence: 0.8,
+      findings: [
+        {
+          severity: 'high',
+          summary: '边界那一段是软的（"尽量不要…"），等于没有边界',
+          evidence: [{ blobRef: null, locator: 'instructions.md', excerpt: '尽量不要改文件' }],
+          detail: {},
+        },
+      ],
+      action: null,
+      escalateReason: null,
+    }
+    try {
+      const verdict = await agentReviewVerdict(draft)
+      assert.equal(verdict.conclusion, 'fail')
+      assert.equal(
+        verdict.status,
+        'rework_requested',
+        '判不通过且还有额度 ⇒ 必须自动起下一版（skills 那条路的老行为，agent 草稿不许例外）',
+      )
+      /**
+       * 返工版真的起来了，而且任务书还是"改指令"。
+       *
+       * ⚠️ 第一版这里取 `waitForPromptAt(before)` —— 拿到的是**紧接着**那一段，
+       * 也就是**审核**那一轮的任务书（它同样含 `agent/instructions.md`、同样不含 SKILL.md）。
+       * 于是"把返工任务书改回 skill 那支"这个红检**照样绿**（量出来的：红检时 pass 1）。
+       * 现在按**返工版的特征**在后续投递里找：返工任务书带「按意见改」+ `agent/instructions.md`。
+       */
+      let revised = ''
+      for (let i = 0; i < 200; i += 1) {
+        revised =
+          fakeBackend.prompts
+            .slice(before)
+            .find((p) => p.includes('agent/instructions.md') && p.includes('按意见改一版')) ?? ''
+        if (revised !== '') break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.ok(revised !== '', '返工版的任务书要真的投递出来（按"返工"这个特征找，别抓到审核那一段）')
+      assert.ok(!revised.includes('skill/SKILL.md'), '不许退化成写 SKILL.md')
+      // 整条链的版本表要记着两版
+      const versionsRaw = await readFile(join(taskDir, '.versions.json'), 'utf8').catch(() => null)
+      assert.ok(versionsRaw !== null, '版本表要落盘（整链的东西都靠它）')
+      const versions = JSON.parse(versionsRaw) as { versions: Array<{ runId: string }> }
+      assert.ok(versions.versions.length >= 2, `返工版要进版本表，实际 ${versions.versions.length} 版`)
+    } finally {
+      fakeBackend.draftReviewVerdict = null
+    }
+  })
+
   test('★★ 没有历史快照时恢复 ⇒ 404 说清"它还没被沉淀改过"', async () => {
     // 用一个从没被沉淀改过的 agent（内置起草者）
     const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
@@ -3565,6 +3698,52 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     assert.equal(res.status, 404)
     const body = (await res.json()) as { code: string }
     assert.equal(body.code, 'no_instruction_snapshot')
+  })
+
+  test('★★★ 对比：agent 草稿的基线与 diff 是"这条智能体现在的指令"（不是空面板）', async () => {
+    const before = await agentById(agentId)
+    const draft = await agentDraftWith(
+      `${before.instructions.trim()}\n\n## 边界\n\n不许改文件。\n`,
+    )
+    const res = await fetch(`${daemon.url}/api/crystallize/diff`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(res.status, 200, await res.clone().text())
+    const body = (await res.json()) as {
+      against: string
+      baselineLabel: string
+      files: Array<{ rel: string; change: string; added: number }>
+      totals: { added: number; removed: number; changed: number }
+    }
+    assert.equal(body.against, 'current')
+    assert.ok(body.baselineLabel.includes('当前'), `基线标签要说清比的是哪一份：${body.baselineLabel}`)
+    const file = body.files.find((f) => f.rel === 'instructions.md')
+    assert.ok(file, 'diff 里必须有 instructions.md（第一版这里是空的——只读 skill/ 的后果）')
+    assert.ok(file.change !== 'same' && body.totals.added > 0, '加了一节 ⇒ 必须量出新增行')
+  })
+
+  test('★★★ 按意见改一版：返工版的任务书还是"改指令"，索引页也指 agent/', async () => {
+    const draft = await agentDraftWith('# 身份\n\n你是对账执行者。\n')
+    const before = fakeBackend.prompts.length
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft, feedback: '边界那段太软，写死' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const body = (await res.json()) as { draftRunId: string; revisedFrom: string }
+    // 投递是异步的（202 先回、run 才起来）⇒ 等它真的出现再断言，别拿空串去判"没有要求"
+    const delivered = await waitForPromptAt(before)
+    assert.ok(delivered.includes('agent/instructions.md'), '返工版必须仍要求写 agent/instructions.md')
+    assert.ok(!delivered.includes('skill/SKILL.md'), '不许要求它去写 SKILL.md（产出会凭空变成 skill）')
+    const index = await readFile(
+      join(workRoot, `skill-draft-${draft}`, 'material', '00-README.md'),
+      'utf8',
+    )
+    assert.ok(index.includes('`agent/` 里就是上一版'), '索引页要指对产出目录')
+    assert.equal(body.revisedFrom, draft, '返工版记着它是从哪一版改的')
   })
 
   test('★★ 空指令：入库也拦（空指令会把这条智能体变成废物）', async () => {
