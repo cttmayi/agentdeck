@@ -3371,6 +3371,111 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     assert.ok(delivered.includes(String(tooLong.length)), '要把量到的字符数交给审核者')
   })
 
+  /** 起草一条"优化执行者指令"的草稿，并把 `agent/instructions.md` 写成给定内容。 */
+  async function agentDraftWith(text: string): Promise<string> {
+    const runId = await runWithReviewer()
+    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: agentId } })
+    const taskDir = join(workRoot, `skill-draft-${draft}`)
+    await mkdir(join(taskDir, 'agent'), { recursive: true })
+    await writeFile(join(taskDir, 'agent', 'instructions.md'), text, 'utf8')
+    return draft
+  }
+
+  async function agentById(id: string): Promise<{
+    name: string
+    instructions: string
+    skillIds: string[]
+    toolIds: string[]
+    role: string
+  }> {
+    const list = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+      agents: Array<{
+        id: string
+        name: string
+        instructions: string
+        skillIds: string[]
+        toolIds: string[]
+        role: string
+      }>
+    }
+    return list.agents.find((a) => a.id === id)!
+  }
+
+  test('★★★ 入库 = 只覆盖那条智能体的 instructions（名字/技能/工具一字不动），旧指令留成一代快照', async () => {
+    const before = await agentById(agentId)
+    const next = '# 身份\n\n你是对账执行者，只为财务对账服务。\n\n# 边界\n\n只读，不写文件。\n'
+    const draft = await agentDraftWith(next)
+
+    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(res.status, 201, await res.clone().text())
+    const body = (await res.json()) as {
+      agent: { id: string; instructionsChars: number }
+      previousInstructionsChars: number
+      snapshot: { id: string | null; restorable: boolean }
+    }
+    assert.equal(body.agent.id, agentId)
+    assert.equal(body.agent.instructionsChars, next.trim().length)
+    assert.equal(body.previousInstructionsChars, before.instructions.length)
+    assert.equal(body.snapshot.restorable, true, '入库必须留退路')
+
+    const after = await agentById(agentId)
+    assert.equal(after.instructions, next.trim(), '指令被覆盖成草稿那一版')
+    assert.equal(after.name, before.name, '名字不许被改（使用者：只优化其指令）')
+    assert.deepEqual(after.skillIds, before.skillIds, '它挂的技能不许被改')
+    assert.deepEqual(after.toolIds, before.toolIds, '工具不许被改')
+    assert.equal(after.role, before.role)
+
+    // 快照里是**旧指令**（恢复上一版就靠它）
+    const snapPath = join(dataDir, 'agent-instructions', agentId, `${body.snapshot.id}.json`)
+    const snap = JSON.parse(await readFile(snapPath, 'utf8')) as { previous: string; runId: string }
+    assert.equal(snap.previous, before.instructions, '快照存的必须是旧的那份')
+    assert.equal(snap.runId, draft)
+
+    // 入库标记打在整条链上（否则「沉淀任务」会被重新拉出来）
+    const runNow = (await (await fetch(`${daemon.url}/api/runs/${draft}`)).json()) as {
+      crystallized?: boolean
+    }
+    assert.equal(runNow.crystallized, true)
+  })
+
+  test('★★★ 超长的指令：入库直接拦（400），且那条智能体一个字都不动', async () => {
+    const before = await agentById(agentId)
+    const tooLong = `# 身份\n\n${'撑到超限的一行。\n'.repeat(800)}`
+    assert.ok(tooLong.trim().length > 6000, '夹具本身要真的超限（第一版只 repeat(500) ⇒ 4500 字，压根没超）')
+    const draft = await agentDraftWith(tooLong)
+    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(res.status, 400)
+    const body = (await res.json()) as { code: string; chars: number; max: number }
+    assert.equal(body.code, 'instructions_too_long')
+    assert.equal(body.max, 6000)
+    assert.ok(body.chars > 6000, '要如实报量到的字符数')
+
+    const after = await agentById(agentId)
+    assert.equal(after.instructions, before.instructions, '拦下的时候不许改到智能体')
+  })
+
+  test('★★ 空指令：入库也拦（空指令会把这条智能体变成废物）', async () => {
+    const before = await agentById(agentId)
+    const draft = await agentDraftWith('   \n\n  ')
+    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: draft }),
+    })
+    assert.equal(res.status, 400)
+    const body = (await res.json()) as { code: string }
+    assert.equal(body.code, 'instructions_empty')
+    assert.equal((await agentById(agentId)).instructions, before.instructions)
+  })
+
   test('★★ 指向这次没参与的智能体 ⇒ 400（素材与它无关，改出来的指令只会按别人的错误改自己的规矩）', async () => {
     const runId = await runWithReviewer()
     const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {

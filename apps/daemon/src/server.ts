@@ -143,6 +143,7 @@ import {
 // ★ 分批第 22 批：链条只认 `revisedFrom`（四处口径统一到一个地方）。
 //   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
 //   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
+import { saveInstructionsSnapshot } from './agent-instructions-snapshots.ts'
 import { chainOf, chainOfRun } from './draft-chain.ts'
 // ★ 分批第 25 批：返工收敛闸门（量"这一版到底改了什么"，拦重写/变胖/没动点名处）
 import {
@@ -6599,6 +6600,115 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 起草 run 必须跑完（completed）才能确认入库——草稿都没出来就入库是幻觉。
       if (draftRun.status !== 'completed') {
         sendJson(res, 409, { error: `起草 run 尚未完成（${draftRun.status}）`, code: 'draft_not_completed' })
+        return
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // ★ 分批第 36 批：「沉淀成 Agent」的入库 = 覆盖**一条已有智能体的指令**
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // 与 skill 那条路的三点不同，都是使用者定过的：
+      //   ① **只改 instructions**：名字、技能、工具、模型、审核标准一个字不动
+      //      （原话："只优化其指令，不包括优化它包含的skill"）；
+      //   ② **不新建**：目标来自 run 上落库的 `crystallizeTarget`，不认客户端再传一份
+      //      （原话："不新建 agent，只更新当前 agent"）；
+      //   ③ 有**退路**：入库前把旧指令存成一代快照（`/api/agents/<id>/restore-instructions`）。
+      //
+      // ⚠️ 内容只认磁盘上的 `agent/instructions.md`（与 skill 那条"入库只认产出文件本身"
+      //    同一条纪律）：界面传什么内容都不算。
+      if (draftRun.crystallizeTarget?.kind === 'agent') {
+        const taskDirForAgent = await draftTaskDir(draftRunId)
+        const instructionsPath = join(taskDirForAgent, 'agent', 'instructions.md')
+        const nextInstructions = await readFile(instructionsPath, 'utf8').catch(() => null)
+        if (nextInstructions === null) {
+          sendJson(res, 400, {
+            error: '草稿里没有 agent/instructions.md（起草者没产出指令）',
+            code: 'instructions_missing',
+          })
+          return
+        }
+        const trimmed = nextInstructions.trim()
+        if (trimmed === '') {
+          sendJson(res, 400, {
+            error: 'agent/instructions.md 是空的（空指令会把这条智能体变成废物）',
+            code: 'instructions_empty',
+          })
+          return
+        }
+        /**
+         * 长度的**第二道**闸门（第一道在审核的任务书里）。
+         *
+         * 为什么这里还要拦：审核者可能判通过（它判的是内容），而超限是**使用者定的硬线**；
+         * 只靠模型遵守一条数字纪律，迟早会被一次"它觉得还行"放过。这里量的是字符数，
+         * 确定性判断，不花额度。
+         */
+        if (trimmed.length > AGENT_INSTRUCTIONS_MAX_CHARS) {
+          sendJson(res, 400, {
+            error:
+              `指令超长：${trimmed.length} 字符，上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}。` +
+              '先让起草者删到上限内再入库（指令整份进每次 run 的第一句话，太长会挤掉任务本身）。',
+            code: 'instructions_too_long',
+            chars: trimmed.length,
+            max: AGENT_INSTRUCTIONS_MAX_CHARS,
+          })
+          return
+        }
+        const targetAgent = await store.getAgent(draftRun.crystallizeTarget.agentId as Agent['id'])
+        if (!targetAgent || targetAgent.workspaceId !== workspaceId) {
+          sendJson(res, 404, {
+            error: `要更新的智能体不在了（${draftRun.crystallizeTarget.agentId}）`,
+            code: 'agent_not_found',
+          })
+          return
+        }
+        const nowAgent = Date.now()
+        // 退路：把**旧指令**存成一代（写失败不拦入库，但要在响应里说清没有退路）
+        const snapshot = await saveInstructionsSnapshot(options.dataDir, {
+          agentId: targetAgent.id as string,
+          agentName: targetAgent.name,
+          previous: targetAgent.instructions,
+          nextChars: trimmed.length,
+          runId: draftRunId,
+          at: nowAgent,
+        })
+        await store.insertAgent({
+          ...targetAgent,
+          // 只覆盖这一个字段
+          instructions: trimmed,
+          updatedAt: nowAgent,
+        })
+        // 入库标记打整条链（与 skill 那条路同一口径，分批第 28 批的教训）
+        const agentTaskDir = await draftTaskDir(draftRunId)
+        const agentVersions = await readDraftVersions(agentTaskDir)
+        const agentChainIds =
+          agentVersions === null ? [draftRun.id as string] : agentVersions.versions.map((v) => v.runId)
+        for (const id of agentChainIds) {
+          if (id === (draftRun.id as string)) {
+            await store.insertRun({ ...draftRun, crystallized: true })
+            continue
+          }
+          const run = await store.getRun(id as RunId)
+          if (run === null || run === undefined || run.discarded === true) continue
+          await store.insertRun({ ...run, crystallized: true })
+        }
+        info(
+          `智能体「${targetAgent.name}」的指令已更新：` +
+            `${targetAgent.instructions.length} → ${trimmed.length} 字符` +
+            (snapshot.ok ? '' : `（旧指令没存下来：${snapshot.reason}）`),
+        )
+        sendJson(res, 201, {
+          agent: {
+            id: targetAgent.id,
+            name: targetAgent.name,
+            instructionsChars: trimmed.length,
+          },
+          previousInstructionsChars: targetAgent.instructions.length,
+          snapshot: snapshot.ok
+            ? { id: snapshot.id, restorable: true }
+            : { id: null, restorable: false, note: `旧指令没存下来（${snapshot.reason}），这一版没有退路` },
+          // 与 skill 的响应保持同一形状：没有 git 版本管理这回事，如实说
+          versioning: { enabled: false, note: '智能体指令不走 git 版本管理（退路是入库前的快照）' },
+        })
         return
       }
 

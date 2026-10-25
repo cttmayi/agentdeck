@@ -1167,6 +1167,11 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 36 批**（沉淀成 Agent 的入库，见 §10.50.6）：`POST /api/crystallize/commit` 认出
+`crystallizeTarget.kind === 'agent'` ⇒ 只读磁盘 `agent/instructions.md`、只覆盖 `instructions`
+（名字/技能/工具/模型/角色原样带过）、空与超长各一道 400（`instructions_empty` /
+`instructions_too_long`）、入库前把旧指令存一代快照（`<dataDir>/agent-instructions/<agentId>/`），
+入库标记照样打整条链。新增 `apps/daemon/src/agent-instructions-snapshots.ts`。
 **第 35 批**（沉淀成 Agent 的审核口径，见 §10.50.5）：审核者身份改成**对象无关**
 （「按任务书给的那套判据」，判据随任务书走，D29 三块分工），旧默认冻成 `SKILL_REVIEWER_INSTRUCTIONS_V3`
 （1048 字）进历史表；新增 `agentDraftAuditPrompt`（指令五项 + 6000 硬闸门 + 无证据只许收敛措辞 +
