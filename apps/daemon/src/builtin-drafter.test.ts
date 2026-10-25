@@ -17,9 +17,11 @@ import { ulid } from '@agentdeck/protocol'
 import type { Agent } from '@agentdeck/protocol'
 import {
   DRAFTER_INSTRUCTIONS,
+  DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
   SKILL_REVIEWER_INSTRUCTIONS,
   SKILL_REVIEWER_INSTRUCTIONS_V1,
+  SKILL_REVIEWER_INSTRUCTIONS_V2,
   SKILL_REVIEWER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
@@ -61,6 +63,30 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(result.action, 'left-alone')
     const after = (await store.listAgents(WS)).filter((a) => a.builtin === true)
     assert.equal(after.length, before.length, '不许越跑越多')
+  })
+
+  /**
+   * ★★★ 分批第 31 批：使用者问「当前是不是没有使用 智能体『起草者（内置）』」。
+   *
+   * 量下来不是"没用它"，是**它带的规则还停在旧版**：代码默认 462 字、盘上 288 字，
+   * 逐字等于"当前默认去掉 3b 那条"——第 26 批加的「使用者的要求是默认约定」从没进过
+   * 起草者的身份块。而起草者的升级只处理"指令被清空"，没有"还停在旧默认"这一支，
+   * 所以它看起来一切正常（没坏、不报错、连自愈都不触发）。
+   *
+   * 审核者那一侧早在第 21 批就有这套（`REVIEWER_INSTRUCTIONS_HISTORY`），起草者漏了。
+   */
+  test('★★★ 盘上还是**旧默认**指令 ⇒ 升级成当前默认（否则新规则永远进不了起草者）', async () => {
+    const mine = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    await store.insertAgent({ ...mine, instructions: DRAFTER_INSTRUCTIONS_V1 })
+
+    const result = await ensureBuiltinDrafter(store, WS)
+    assert.equal(result.action, 'healed', '旧默认必须被认出来并升级')
+    const after = (await store.listAgents(WS)).filter((a) => a.builtin === true)[0]!
+    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS, '升级后必须等于当前默认')
+    assert.ok(
+      after.instructions.includes('默认约定'),
+      '当前默认里那条「使用者的要求是默认约定」必须真的在里面（它就是这次升级的目的）',
+    )
   })
 
   test('★★★ 使用者改过的指令**必须活过**下一次对账（第 ⑥ 条：升级不许覆盖他的改动）', async () => {
@@ -190,5 +216,28 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(result.action, 'left-alone')
     const after = (await store.listAgents(WS)).find((a) => a.id === plain.id)!
     assert.equal(after.builtin, undefined, '普通 agent 不该被塞内置标记')
+  })
+})
+
+describe('ensureBuiltinReviewer：同一套纪律 + 历史默认升级', () => {
+  /**
+   * ★★★ 分批第 31 批：审核者同一类陈旧（真机 838 字 = 第 20 批默认，不是使用者改的）。
+   *
+   * 这条用例钉的是"历史表要把**每一个**旧默认都记着"：只记 V1 的话，
+   * 第 20 批之后的默认就成了"谁也认不出来的孤儿"，第 26 批加的第五件事永远到不了审核者。
+   */
+  test('★★★ 审核者停在**第 20 批默认** ⇒ 也要升级（历史表缺一个旧默认就等于永远不升级）', async () => {
+    const all = await store.listAgents(WS)
+    const reviewer = all.find((a) => a.role === 'skill-reviewer')
+    if (!reviewer) {
+      await ensureBuiltinReviewer(store, WS)
+    }
+    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V2 })
+
+    const result = await ensureBuiltinReviewer(store, WS)
+    assert.equal(result.action, 'healed', '第 20 批默认必须是已知历史版本')
+    const after = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    assert.equal(after.instructions, SKILL_REVIEWER_INSTRUCTIONS)
   })
 })

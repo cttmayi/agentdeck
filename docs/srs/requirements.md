@@ -1167,6 +1167,10 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 31 批**（内置指令的升级路径，见 §10.46）：新增 `DRAFTER_INSTRUCTIONS_V1`（288 字，第 26 批之前的默认）
+与 `SKILL_REVIEWER_INSTRUCTIONS_V2`（838 字，第 20 批默认，源码由 `git show 342c4a5` 还原并逐字比对通过），
+两者进 `*_INSTRUCTIONS_HISTORY`；`ensureBuiltinDrafter` 补上「逐字等于历史默认 ⇒ 升级」这一支
+（与审核者同构，仍不覆盖使用者自己写的指令）。另修 `crystallize-e2e` 等待器的竞态（判决收口 ≠ run 落终态）。
 **第 30 批**（沉淀页自适应高度，见 §10.45）：`.crystal-flow` 改可伸缩列（`min-height:100%`），
 `.process-pane`/`.review-pane`/`.file-pane` 由 `height: clamp(22rem,58vh,40rem)` 改为
 `flex: 1 1 0; min-height: 22rem`，素材折叠区那份保持固定（`flex:0 0 auto` + 原 clamp）；

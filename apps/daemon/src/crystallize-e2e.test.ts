@@ -1494,15 +1494,38 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     //    再按决定 transition 成 `rework_requested` / `escalated`）。只等"有判决"会读到
     //    中间态，于是断言 `=== 'rework_requested'` 变成一场竞态 —— 单跑这个文件时侥幸通过，
     //    全量跑（机器忙、调度顺序变）就红。我第一次就是这么写的，全量跑时红了这一条。
+    let settled: Record<string, unknown> | null = null
     for (let i = 0; i < 200; i += 1) {
       const vs = (await (
         await fetch(`${daemon.url}/api/runs/${reviewRunId}/verdicts`)
       ).json()) as { verdicts?: Record<string, unknown>[] }
       const v = (vs.verdicts ?? [])[0]
-      if (v && v.status !== 'validated') return v
+      if (v && v.status !== 'validated') {
+        settled = v
+        break
+      }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    throw new Error('审核判决没在限时内收口')
+    if (settled === null) throw new Error('审核判决没在限时内收口')
+    /**
+     * ★ 分批第 31 批：还要等**审核 run 自己**走到终态。
+     *
+     * 判决收口与 run 落终态是**两步**（先落库 `validated`，再 transition）。接口那侧有个
+     * 刻意的廉价分支：审核还没收口时不算 `stopped`/`stalled`（那是结论，不是实时量，
+     * 见 `autoReworkSummary` 的注释）。只等判决就回来读，会读到"审核还没收口"那一支
+     * ⇒ `stopped` 读到 false。**单跑这个文件时侥幸通过，全量跑就红**（机器忙、两步之间的
+     * 窗口变宽）——第 31 批全量跑时红了两条（「停止循环」「只标注不停循环」），单跑全绿。
+     */
+    for (let i = 0; i < 200; i += 1) {
+      const run = (await (await fetch(`${daemon.url}/api/runs/${reviewRunId}`)).json()) as {
+        status?: string
+      }
+      if (!['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(String(run.status))) {
+        return settled
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核 run 没在限时内落终态')
   }
 
   /**
