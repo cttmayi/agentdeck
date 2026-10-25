@@ -1,7 +1,7 @@
 import { spawn as spawnChildProcess, type ChildProcess } from 'node:child_process'
 import { access, constants, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { resolveSpawnTarget } from '@agentdeck/agent-core'
+import { resolveSpawnTarget, spawnPlanFor } from '@agentdeck/agent-core'
 import type { ToolRuntime } from '@agentdeck/protocol'
 
 /**
@@ -142,7 +142,11 @@ export function nodeSpawn(): SpawnScript {
     //   spawn `.cmd`（CVE-2024-27980 之后的行为）。判断只有一处实现，
     //   见 `@agentdeck/agent-core` 的 spawn-target.ts。
     const target = resolveSpawnTarget({ command: input.command, args: input.args })
-    const child = spawnChildProcess(target.command, target.args, {
+    // ★ 分批第 43 批：把 `windowsVerbatimArguments` 一起带上（`via: 'cmd'` 时必须有，
+    //   否则我们拼好的那条命令行会被 Node 再转义一遍 ⇒ 真 Windows 上起不来）。
+    //   工具包里的解释器可能是 `.cmd`（npm 装的 python/node 包装），这条路一样会撞。
+    const plan = spawnPlanFor(target)
+    const child = spawnChildProcess(plan.command, plan.args, {
       cwd: input.cwd,
       env: input.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -151,6 +155,7 @@ export function nodeSpawn(): SpawnScript {
       //   孤儿——它们继续占着端口、改着文件，而使用者以为动作已经停了。
       detached: process.platform !== 'win32',
       windowsHide: true,
+      ...plan.options,
     })
 
     child.stdout?.setEncoding('utf8')

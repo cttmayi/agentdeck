@@ -16,11 +16,12 @@
 |---|---|
 | 装依赖、构建界面、起 daemon、开界面、看数据 | **可以**（无原生编译依赖，锁文件里 win32 产物齐全）——审计当时就是可以的 |
 | **真跑一条任务**（拉起 agent CLI） | **已修**（A1）：npm 装的 `.cmd` 垫片会被解开成 `<node> <cli.js> <真实参数>`，参数不经 shell |
+| `.cmd` / `.bat` 走 `cmd.exe` 兜底那条路 | **已修**（A4，**2026-10-26 使用者在真机上量到**）：`via: 'cmd'` 必须 `windowsVerbatimArguments: true`，且命令路径永远加引号 |
 | 探测 CLI 在哪 | **已修**（A2）：候选扩展名读机器的 `PATHEXT`，`.ps1` 不再出现（Node 起不了它） |
 | 跑测试 | **已修**（A3）：假 CLI 的包装在 Windows 上是 npm 垫片形状的 `.cmd`，那 61 条不再会红 |
 | 起的命令（`pnpm run daemon` 等） | **已修**（B1）：入口前面有一层 `.mjs` 版本守卫，Node 不够时给的是一句能照做的话，不是 `ERR_UNKNOWN_FILE_EXTENSION` |
 | 布局探针 | **已修**（D）：Windows 上也找得到浏览器（含 Edge 兜底），收尾用 `taskkill /T /F` |
-| ⚠️ **真机上量过一次** | **还没**。本机是 macOS，没有 Windows 机器/容器/虚拟机 —— 见下面「下一步」 |
+| ✅ **真机上量过一次** | **量过了（2026-10-26，使用者自己的 Windows 机器）**：量到的是 **A4**（`.cmd`/`.bat` 起不来的那一格，见下）。其余 `[判断]` 项仍需在真机上逐条确认——见「没量到的」 |
 
 > **一句话**：审计当时"会拦住真跑任务"的三条（A 级）与"能跑但会误导人"的八条（B 级）
 > 都已经改完，改动随四份提交进库；**剩下的唯一一件事是在真 Windows 上跑一遍**，
@@ -119,6 +120,48 @@ pnpm run cli --doctor codex
 ---
 
 ## A 级：会拦住"真跑任务"
+
+### A4. `.cmd` / `.bat` 在真 Windows 上起不来：缺 `windowsVerbatimArguments`（2026-10-26 真机量到）
+
+**使用者原话**：
+
+> 「我在 windows 查到了问题，问题是 .cmd/.bat 启动失败的问题，包括 spawn-target 中文件路径
+> 需要加引号，另外在 process-tree 中，调用 `cmd /d /s /c` 时，需要设置
+> `VerbatimArguments: true`，避免转义」
+
+**这是 A1 没修完的那半截**。A1 让 `.cmd` 能被"起起来"（解开垫片，或者走 `cmd.exe /d /s /c`），
+但**选项那一层**漏了一格：
+
+| 缺口 | 后果 |
+| --- | --- |
+| 没有 `windowsVerbatimArguments: true` | `via: 'cmd'` 时，`args` 的最后一项是**我们自己拼好的整条命令行**（带引号）。Node 默认会再替每个参数加一遍引号/转义 ⇒ cmd.exe 收到 `"\"C:\…\codex.cmd\" app-server"` ⇒ 引号错位，**起不来** |
+| 命令路径只在"含空格"时才加引号 | `C:\Users\张三\…`（中文用户名）、`C:\work\a&b\…` 这类**不含空格却照样会被 cmd 拆开/改写**的路径直接中招 |
+
+**修法（三条）**：
+
+1. `SpawnTarget` 多一个 `verbatimArguments: boolean`：`via: 'cmd'` ⇒ `true`，
+   `direct` / `shim` ⇒ **必须** `false`（这两条路的参数是独立 argv，含空格的路径全靠 Node 加引号；
+   全开会把 `C:\Program Files\nodejs\node.exe` 拆成两个参数）。
+2. `buildCmdLine` 里命令路径**永远**加引号：`/s` 会剥掉最外层那一对引号，内层这对正好落在命令上。
+3. 新增 `spawnPlanFor(target)`：**"决定起什么"与"怎么起"之间只有一条通道**。
+   原来 `process-tree` 与 `script-executor` 各拼一份 spawn 选项，两份都漏了这个旗标——
+   所以修法不是各补一行，而是让它们都走同一个出口（`codex-doctor` 的 `runCapture` 也改了）。
+
+**为什么这条必须靠"真机"才发现**：macOS 上没有 `cmd.exe`，也没有 `windowsVerbatimArguments`
+这个概念。之前的判据只钉到"拼出来的字符串对不对"（`buildCmdLine` 是纯函数，全绿），
+而"这个字符串有没有被再转义一遍"发生在 `spawn` 里面——纯函数看不见。
+
+**验证**：
+
+| 判据 | 在哪 |
+| --- | --- |
+| `via` 三档的 `verbatimArguments` 取值 | `spawn-target.test.ts` |
+| `buildCmdLine` **永远**给命令路径加引号 + `/s` 剥完之后的真实命令行 | `spawn-target.test.ts`（判据从"逐字比字符串"改成"比 cmd 实际收到什么"） |
+| `spawnPlanFor` 的映射与 args 拷贝 | `spawn-target.test.ts` |
+| **选项真的传进 `spawn`**（注入假 `spawn` + 注入 `via: 'cmd'` 目标），以及 `direct` 时**不能**开 | `process-tree.test.ts` |
+| **仓库级**：凡是生产代码里调 `resolveSpawnTarget(` 的文件也必须用 `spawnPlanFor(` | `tests/test-safety.test.ts`（红检：把 `script-executor` 退回自拼选项 ⇒ 立刻红） |
+
+
 
 > ✅ **这三条已经修完了**（2026-10，改动见上面那张"已经修掉的"表）。下面保留的是
 > **当时的现场与判断依据**——为什么它必须这么修、以及哪些方案被否掉了。

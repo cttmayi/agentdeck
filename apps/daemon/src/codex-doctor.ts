@@ -32,7 +32,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CODEX_DESCRIPTOR, CODEX_SERVER_FACTS, JsonRpcTransport } from '@agentdeck/agent-codex'
-import { probeCommand, resolveSpawnTarget, spawnProcessTree } from '@agentdeck/agent-core'
+import { probeCommand, resolveSpawnTarget, spawnPlanFor, spawnProcessTree } from '@agentdeck/agent-core'
 import { knownRuntimeAdapters } from './runtime-registry.ts'
 import { syncCodexConfigDir } from './run-hooks/codex-config.ts'
 
@@ -149,15 +149,18 @@ async function runCapture(
    *    （CVE-2024-27980 之后 Node 不再隐式经 cmd.exe）。自检如果自己另起一条路，
    *    "自检起不来"就会变成假警报——而它恰恰是用来判断"到底能不能起"的。
    */
-  let target: { command: string; args: string[] }
+  let plan: ReturnType<typeof spawnPlanFor>
   try {
-    const resolved = resolveSpawnTarget({ command, args })
-    target = { command: resolved.command, args: [...resolved.args] }
+    plan = spawnPlanFor(resolveSpawnTarget({ command, args }))
   } catch (err) {
     return { stdout: Buffer.alloc(0), stderr: Buffer.from(String(err), 'utf8'), exitCode: null }
   }
   return await new Promise((resolve) => {
-    const child = spawn(target.command, target.args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    const child = spawn(plan.command, plan.args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      ...plan.options,
+    })
     const out: Buffer[] = []
     const err: Buffer[] = []
     let settled = false

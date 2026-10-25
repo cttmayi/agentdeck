@@ -53,6 +53,24 @@ export interface SpawnTarget {
   args: string[]
   /** 走的是哪条路——诊断与测试要看它。 */
   via: 'direct' | 'shim' | 'cmd'
+  /**
+   * ★ 传给 `spawn` 的 `windowsVerbatimArguments`（分批第 43 批，**真机量出来的**）。
+   *
+   * 使用者「我在 windows 查到了问题，问题是 .cmd/.bat 启动失败」——根因就在这里：
+   *
+   *   · `via: 'cmd'` 时，`args` 里的**最后一项**是我们自己拼好的整条命令
+   *     （`"C:\…\codex.cmd" app-server --stdio`，带引号、带空格）。
+   *   * 而 Node 默认会**再**替每个参数加一遍引号/转义（`"\"C:\…\""`）——
+   *     cmd.exe 收到的是被转义过一遍的字符串，引号规则当场错位 ⇒ **起不来**。
+   *   ⇒ 只有这一档必须 `windowsVerbatimArguments: true`：**我们拼的，就别再动它**。
+   *
+   *   · `via: 'direct'` / `'shim'` 时参数是一个个独立的 argv（垫片已解开成
+   *     `<node> <script> <真实参数>`），**必须让 Node 照常加引号**——路径里有空格
+   *     （`C:\Program Files\nodejs\node.exe`、`C:\Users\张三\…`）全靠它。
+   *     ⚠️ 所以这个旗标**绝对不能**对所有情况都打开：那样 `shim` 那条路的脚本路径
+   *     不会被加引号，含空格的路径会当场被拆成两个参数。
+   */
+  verbatimArguments: boolean
 }
 
 export class UnspawnableCommandError extends Error {
@@ -320,14 +338,23 @@ export function quoteForCmd(arg: string): string | null {
  * 兜底时更需要一句能照做的话。
  */
 export function buildCmdLine(command: string, args: readonly string[]): string {
-  const quotedCommand = quoteForCmd(command)
-  if (quotedCommand === null) {
+  // 先过一遍规则：路径里有 cmd 表达不了的字符就明确拒绝（不是改写）
+  const checked = quoteForCmd(command)
+  if (checked === null) {
     throw new UnspawnableCommandError(
       `这条命令的路径里有 cmd 解析不了、也无法如实转义的字符：${command}。` +
         `把它挪到一个路径里不含 " 或 % 的位置，或者改用原生安装器装的 CLI（那种给的是 .exe）。`,
     )
   }
-  const parts = [quotedCommand]
+  /**
+   * ★ 命令路径**永远**加引号（分批第 43 批，使用者真机量的）：
+   *
+   * 原来只在"含空格"时才加。但 Windows 上的路径还可能是 `C:\Users\张三\…`
+   * （中文用户名）、`C:\work\a&b\…`——这些**不含空格却照样会被 cmd 拆开或改写**。
+   * 加引号是安全的：`cmd /d /s /c` 的 `/s` 会剥掉**最外层**那一对引号（下面整条再包一层），
+   * 内层这对正好落在命令路径上。不加的代价是"有时能起、有时起不来"，最难查。
+   */
+  const parts = [`"${command}"`]
   for (const arg of args) {
     const quoted = quoteForCmd(arg)
     if (quoted === null) {
@@ -343,6 +370,30 @@ export function buildCmdLine(command: string, args: readonly string[]): string {
   // ⚠️ 整条再包一层引号：`/s` 之后 cmd 会把首尾那一对引号剥掉，
   //    所以"包一层"是**必须**的（不包的话，命令路径里有空格时 cmd 会把它拆开）。
   return `"${parts.join(' ')}"`
+}
+
+/**
+ * `SpawnTarget` ⇒ 真正交给 `spawn` 的三样东西。
+ *
+ * 为什么要抽成一个函数：`windowsVerbatimArguments` 是**唯一**一个"漏掉就起不来、
+ * 而且只在 Windows 上才起不来"的选项。让每个调用点自己写一份，等于每次新增一条
+ * 起进程的路就埋一个 Windows 专属坑（分批第 43 批就是这么漏的：`process-tree` 与
+ * `script-executor` 各写了一份 spawn 选项，两份都没这个旗标）。
+ */
+export interface SpawnPlan {
+  command: string
+  args: string[]
+  /** 直接展开进 `spawn(..., options)`。 */
+  options: { windowsVerbatimArguments: boolean }
+}
+
+export function spawnPlanFor(target: SpawnTarget): SpawnPlan {
+  return {
+    command: target.command,
+    args: [...target.args],
+    // ⚠️ 非 Windows 上 Node 忽略这个键；写上不会有害，只在 win32 + `via: 'cmd'` 时起作用。
+    options: { windowsVerbatimArguments: target.verbatimArguments },
+  }
 }
 
 export interface ResolveSpawnInput {
@@ -374,7 +425,13 @@ export interface ResolveSpawnInput {
  */
 export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
   const platform = input.platform ?? process.platform
-  const direct: SpawnTarget = { command: input.command, args: [...input.args], via: 'direct' }
+  // direct / shim：argv 是**真参数**，让 Node 照常加引号（含空格的路径全靠它）
+  const direct: SpawnTarget = {
+    command: input.command,
+    args: [...input.args],
+    via: 'direct',
+    verbatimArguments: false,
+  }
   if (platform !== 'win32') return direct
 
   const ext = win32.extname(input.command).toLowerCase()
@@ -398,13 +455,21 @@ export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
         command: input.nodePath ?? process.execPath,
         args: [shim.script, ...input.args],
         via: 'shim',
+        // 同上：`<node> <script> …` 是独立 argv，路径含空格要靠 Node 加引号
+        verbatimArguments: false,
       }
     }
   }
 
   const comspec = (input.env ?? process.env)['COMSPEC'] ?? 'cmd.exe'
   // `/d` 跳过 AutoRun、`/s` 让 cmd 按"最外层引号"处理整条命令行（见 buildCmdLine）
-  return { command: comspec, args: ['/d', '/s', '/c', buildCmdLine(input.command, [...input.args])], via: 'cmd' }
+  return {
+    command: comspec,
+    args: ['/d', '/s', '/c', buildCmdLine(input.command, [...input.args])],
+    via: 'cmd',
+    // ★ 最后那一项已经是拼好的整条命令行 ⇒ 不许 Node 再转义一遍（否则引号错位、起不来）
+    verbatimArguments: true,
+  }
 }
 
 /**

@@ -138,3 +138,60 @@ describe('★ 测试安全：不许递归删除危险目录', () => {
     )
   })
 })
+
+/**
+ * ★ 分批第 43 批：`windowsVerbatimArguments` 不许再漏（真 Windows 上起不来的那一格）。
+ *
+ * 背景是使用者真机报的："`.cmd`/`.bat` 启动失败……在 process-tree 中，调用
+ * `cmd /d /s /c` 时，需要设置 `VerbatimArguments: true`，避免转义"。
+ * 当时的写法是**每个 spawn 路自己拼一份选项**（`process-tree` 一份、
+ * `script-executor` 一份），两份都漏了这个旗标——纯函数测试全绿，Windows 上全挂。
+ *
+ * 修法不是"各补一行"，而是让"决定起什么"与"怎么起"之间只有一条通道
+ * （`spawnPlanFor`）。这条检查守的就是那个通道：
+ *
+ *   凡是生产代码里调 `resolveSpawnTarget(` 的文件，也必须用 `spawnPlanFor(`。
+ *
+ * 为什么用"文件级"而不是"行级"：行级要写解析器，而这里真正想禁止的是
+ * "新增了一条起进程的路、但忘了那一个旗标"。文件级就够——新增一条路必然要在
+ * 同一个文件里解析 target，于是它也必然会被要求带上 plan。
+ */
+describe('★ Windows 起进程：verbatim 旗标只有一个出口（spawnPlanFor）', () => {
+  async function collectProdFiles(dir: string, out: string[] = []): Promise<string[]> {
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return out
+    }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'ref') continue
+      if (entry.name === 'dist' || entry.name === 'web') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) await collectProdFiles(full, out)
+      else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(full)
+    }
+    return out
+  }
+
+  test('★ 用了 resolveSpawnTarget 的生产文件，必须同时用 spawnPlanFor', async () => {
+    const files = [
+      ...(await collectProdFiles(join(REPO_ROOT, 'apps'))),
+      ...(await collectProdFiles(join(REPO_ROOT, 'packages'))),
+    ]
+    const offenders: string[] = []
+    for (const file of files) {
+      const source = await readFile(file, 'utf8')
+      if (!source.includes('resolveSpawnTarget(')) continue
+      // 定义它的那个文件自己不算（它同时导出两个函数）
+      if (file.endsWith(join('agent-core', 'spawn-target.ts'))) continue
+      if (!source.includes('spawnPlanFor(')) offenders.push(relative(REPO_ROOT, file))
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `这些文件解析了 spawn target 却没走 spawnPlanFor（= windowsVerbatimArguments 会漏，` +
+        `真 Windows 上 .cmd/.bat 起不来）：${offenders.join('、')}`,
+    )
+  })
+})

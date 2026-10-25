@@ -1687,3 +1687,51 @@ daemon 主体里新增两个函数，与执行器同口径：
 **红检**：把"字节是否合法"与"注入 `CODEX_HOME`"两处短路 ⇒ 对应两条用例变红。
 
 本机真跑（macOS + codex 0.157.1）：五项全过，握手 **206ms**，响应里 `codexHome` 正是演练目录。
+
+### 4.3.4 分批第 43 批：`.cmd`/`.bat` 起不来 —— `windowsVerbatimArguments` 与"一个出口"
+
+使用者（真 Windows 机器上量到的，附了修法）：
+
+> 「我在 windows 查到了问题，问题是 .cmd/.bat 启动失败的问题，包括 spawn-target 中文件路径需要加引号，
+> 另外在 process-tree 中，调用 cmd /d /s /c 时，需要设置 VerbatimArguments: true，避免转义」
+
+这是 A1 的**未修完那半截**。A1 保证 `.cmd` **能**被起（解开 npm 垫片，或走 `cmd.exe /d /s /c`），
+但**选项这一层**漏了一格：
+
+| 缺口 | 后果 |
+| --- | --- |
+| 没有 `windowsVerbatimArguments: true` | `via: 'cmd'` 时 `args` 最后一项是**我们拼好的整条命令行**；Node 默认会再替每个参数加一遍引号/转义 ⇒ cmd 收到引号错位的字符串 ⇒ **起不来** |
+| 命令路径只在含空格时加引号 | `C:\Users\张三\…`（中文用户名）、`C:\work\a&b\…` 这类**不含空格却会被 cmd 拆开/改写**的路径中招 |
+
+#### 为什么之前的测试全绿也没发现
+
+`buildCmdLine` 是纯函数，过去的判据是"拼出来的**字符串**对不对"——全绿。
+而"这个字符串会不会被 Node **再转义一遍**"发生在 `spawn` 里面，纯函数看不见；
+再加上 macOS 没有 `cmd.exe`，这一格只能靠真机（这一次就是使用者量到的）。
+
+#### 修法：不是各补一行，而是让旗标只有一个出口
+
+1. `SpawnTarget` 增 `verbatimArguments: boolean`：
+   - `via: 'cmd'` ⇒ `true`（我们拼的，别再动它）；
+   - `direct` / `shim` ⇒ **必须** `false`（argv 是真参数，`C:\Program Files\nodejs\node.exe`
+     这种路径全靠 Node 加引号；全开会把它拆成两个参数）。
+2. `buildCmdLine`：命令路径**永远**加引号。`cmd /d /s /c` 的 `/s` 会剥掉最外层那一对（整条再包一层），
+   内层这对正好落在命令上——所以"永远加"是安全的，而"只在含空格时加"是碰运气。
+3. 新增 `spawnPlanFor(target)`：**"决定起什么"与"怎么起"之间只有一条通道**。
+   此前 `process-tree` 与 `script-executor` **各拼一份** spawn 选项，两份都漏了这个旗标；
+   `codex-doctor` 的 `runCapture` 现在也走它。
+
+#### 验证（三层，最后一层是仓库级守卫）
+
+| 判据 | 在哪 |
+| --- | --- |
+| 三档 `verbatimArguments` 的取值 | `spawn-target.test.ts` |
+| 命令路径永远加引号；判据改成"按 `/s` 剥完比 **cmd 实际收到什么**" | 同上（比"逐字比字符串"更接近真相） |
+| `spawnPlanFor` 的映射 + `args` 是拷贝 | 同上 |
+| **选项真的进了 `spawn`**（注入假 `spawn` + 注入 `via: 'cmd'` 目标）；`direct` 时**不能**开 | `process-tree.test.ts` |
+| **仓库级**：凡生产代码调 `resolveSpawnTarget(` 的文件必须用 `spawnPlanFor(` | `tests/test-safety.test.ts` |
+
+**红检**：把 `script-executor` 退回"自己拼选项（不带 plan）" ⇒ 仓库级守卫与 `direct` 那条用例立刻变红。
+
+> 教训（可复用）：一个"漏了只在某个平台上才炸"的选项，不要指望每个调用点自己记住——
+> 把它塞进一个**唯一的出口**（`spawnPlanFor`），再加一条 grep 级守卫，比在文档里写三遍都有效。

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
-import { resolveSpawnTarget } from './spawn-target.ts'
+import { resolveSpawnTarget, spawnPlanFor } from './spawn-target.ts'
 
 /**
  * 进程树管理（NFR-P-05）。
@@ -45,6 +45,16 @@ export interface SpawnInput {
   onStderrLine?: (line: string) => void
   /** 任何输出都调用——用于活性判定（FR-RUN-08 的判据）。 */
   onActivity?: () => void
+  /**
+   * 测试缝：换成别的 `spawn`（默认 `node:child_process` 的）。
+   * 用来在 macOS 上断言"我们真的把 `windowsVerbatimArguments` 传下去了"。
+   */
+  spawnImpl?: typeof spawn
+  /**
+   * 测试缝：换成别的"决定 exec 什么"（默认 `resolveSpawnTarget`）。
+   * 同样是为了在 macOS 上把 Windows 的 `via: 'cmd'` 那一档跑出来。
+   */
+  resolveTarget?: typeof resolveSpawnTarget
 }
 
 export interface ExitInfo {
@@ -92,15 +102,24 @@ const DEFAULT_GRACE_MS = 5_000
 export function spawnProcessTree(input: SpawnInput): ProcessHandle {
   const isWindows = process.platform === 'win32'
 
-  const target = resolveSpawnTarget({ command: input.command, args: input.args })
+  const target = (input.resolveTarget ?? resolveSpawnTarget)({
+    command: input.command,
+    args: input.args,
+  })
+  // ★ 分批第 43 批：`spawnPlanFor` 里带着 `windowsVerbatimArguments`——
+  //   漏了它，`via: 'cmd'` 那条路在真 Windows 上**起不来**（我们拼好的命令行被
+  //   Node 又转义了一遍，引号当场错位）。使用者就是这么量出来的。
+  const plan = spawnPlanFor(target)
+  const doSpawn = input.spawnImpl ?? spawn
 
-  const child: ChildProcess = spawn(target.command, target.args, {
+  const child: ChildProcess = doSpawn(plan.command, plan.args, {
     cwd: input.cwd,
     env: input.env,
     stdio: ['pipe', 'pipe', 'pipe'],
     // Unix：新进程组，便于整组终止
     detached: !isWindows,
     windowsHide: true,
+    ...plan.options,
   })
 
   let lastActivity = Date.now()

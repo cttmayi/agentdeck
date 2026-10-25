@@ -10,6 +10,7 @@ import {
   parseNpmShim,
   quoteForCmd,
   resolveSpawnTarget,
+  spawnPlanFor,
 } from './spawn-target.ts'
 
 /**
@@ -115,7 +116,12 @@ describe('★ resolveSpawnTarget：平台差异只有这一处', () => {
         return null
       },
     })
-    assert.deepEqual(out, { command: '/usr/local/bin/claude', args: ['--version'], via: 'direct' })
+    assert.deepEqual(out, {
+      command: '/usr/local/bin/claude',
+      args: ['--version'],
+      via: 'direct',
+      verbatimArguments: false,
+    })
     assert.equal(read, 0, 'Unix 上不该去读什么垫片')
   })
 
@@ -129,6 +135,8 @@ describe('★ resolveSpawnTarget：平台差异只有这一处', () => {
       command: 'C:\\Users\\ling\\.local\\bin\\claude.exe',
       args: ['--version'],
       via: 'direct',
+      // ★ 分批第 43 批：`.exe` 是独立 argv，**不能**开 verbatim（含空格的路径靠 Node 加引号）
+      verbatimArguments: false,
     })
   })
 
@@ -174,7 +182,19 @@ describe('★ resolveSpawnTarget：平台差异只有这一处', () => {
     assert.equal(out.via, 'cmd')
     assert.equal(out.command, 'C:\\Windows\\System32\\cmd.exe')
     assert.deepEqual(out.args.slice(0, 3), ['/d', '/s', '/c'])
-    assert.equal(out.args[3], `"${SHIM_PATH} --flag "C:\\a b\\x.txt""`)
+    /**
+     * ★ 分批第 43 批（使用者真机量的）：命令路径**永远**加引号。
+     *
+     * 判据从"逐字比字符串"改成"比 **cmd 实际会看到的那条命令行**"——
+     * `cmd /d /s /c` 的 `/s` 会剥掉最外层那一对引号，剥完才是真相。
+     * 这样即使以后外层包装的写法变了，这条判据量的仍然是"cmd 收到什么"。
+     */
+    const raw = out.args[3] ?? ''
+    assert.ok(raw.startsWith('"') && raw.endsWith('"'), `整条要包一层引号：${raw}`)
+    const forCmd = raw.slice(1, -1)
+    assert.equal(forCmd, `"${SHIM_PATH}" --flag "C:\\a b\\x.txt"`)
+    // ★ verbatim：那一整条是**我们拼的**，不许 Node 再转义一遍（否则引号错位、起不来）
+    assert.equal(out.verbatimArguments, true)
   })
 
   test('读不到垫片（文件没了）⇒ 也走 cmd.exe，而不是抛', () => {
@@ -323,5 +343,46 @@ describe('★ describeSpawnError：把所有 spawn 失败都翻成人话', () =>
   test('没见过的错误 ⇒ 原样带上，不吞细节', () => {
     assert.match(describeSpawnError(new Error('莫名其妙'), 'claude', '/x/claude'), /莫名其妙/)
     assert.match(describeSpawnError(null, 'claude', '/x/claude'), /启动 claude 失败/)
+  })
+})
+
+/**
+ * ★ 分批第 43 批：`spawnPlanFor` —— "漏一处就起不来"的那个旗标只有一个出口。
+ *
+ * 为什么值得单独立几条：`windowsVerbatimArguments` 漏掉的症状是**只在 Windows 上**
+ * 起不来，而且报的是引号/命令找不到之类的二手错误。这一批之前，`process-tree` 与
+ * `script-executor` 各写了一份 spawn 选项，两份都没有它——修法不是各补一行，
+ * 而是让"决定起什么"与"怎么起"之间只有一条通道（`spawnPlanFor`）。
+ */
+describe('★ 分批第 43 批：spawnPlanFor（三条 spawn 路共用的那一个出口）', () => {
+  test('via: cmd ⇒ windowsVerbatimArguments 打开', () => {
+    const plan = spawnPlanFor({
+      command: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/s', '/c', '"C:\\npm\\x.cmd" a'],
+      via: 'cmd',
+      verbatimArguments: true,
+    })
+    assert.deepEqual(plan.options, { windowsVerbatimArguments: true })
+    assert.equal(plan.command, 'C:\\Windows\\System32\\cmd.exe')
+    assert.deepEqual(plan.args, ['/d', '/s', '/c', '"C:\\npm\\x.cmd" a'])
+  })
+
+  test('via: direct / shim ⇒ 关（argv 是真参数，空格靠 Node 加引号）', () => {
+    for (const via of ['direct', 'shim'] as const) {
+      const plan = spawnPlanFor({
+        command: 'C:\\Program Files\\nodejs\\node.exe',
+        args: ['C:\\a b\\cli.js'],
+        via,
+        verbatimArguments: false,
+      })
+      assert.equal(plan.options.windowsVerbatimArguments, false, `${via} 不许开 verbatim`)
+    }
+  })
+
+  test('★ args 是**拷贝**：调用方改了 plan 不会污染原 target（假 CLI 的 argv 必须是真 argv）', () => {
+    const target = { command: 'x', args: ['a'], via: 'direct' as const, verbatimArguments: false }
+    const plan = spawnPlanFor(target)
+    plan.args.push('b')
+    assert.deepEqual(target.args, ['a'], 'target 不该被就地改掉')
   })
 })
