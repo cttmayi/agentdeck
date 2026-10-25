@@ -42,6 +42,8 @@ interface CliOptions {
    * 用 `'all'` 表示列出全部 runtime 的验证状态。
    */
   verifyRuntime: string | null
+  /** `--doctor <key>`：只读自检（目前只有 codex），不起服务。 */
+  doctor: string | null
   /**
    * 覆盖 CLI 可执行文件路径。
    *
@@ -109,6 +111,7 @@ export const CLI_OPTIONS = {
   'serve-only': { type: 'boolean' },
   sandbox: { type: 'string' },
   'verify-runtime': { type: 'string' },
+  doctor: { type: 'string' },
   executable: { type: 'string' },
   'runtime-key': { type: 'string' },
   'work-root': { type: 'string' },
@@ -202,6 +205,7 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     serveOnly: values['serve-only'] === true,
     sandboxMode,
     verifyRuntime: typeof verifyRaw === 'string' ? verifyRaw : null,
+    doctor: typeof values['doctor'] === 'string' ? values['doctor'] : null,
     executablePath: typeof values['executable'] === 'string' ? values['executable'] : null,
     runtimeKey: typeof values['runtime-key'] === 'string' ? values['runtime-key'] : null,
     workRoot: typeof values['work-root'] === 'string' ? values['work-root'] : null,
@@ -257,6 +261,13 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
+      --doctor <key>
+                        这台机器上这个 runtime 到不到底能不能通（目前只有 codex）：
+                        打印环境与代码页、可执行文件与起法、CLI 版本输出的**原始字节**
+                        （UTF-8 / GBK 两种读法，乱码就看这个）、~/.codex 两个配置文件的
+                        编码（BOM / UTF-16）、真跑一遍复制逻辑（落临时目录）、
+                        再起一次「codex app-server」做 initialize 握手。
+                        **只读、免费**：不跑 turn、不改你的配置、不碰受管目录。
   -h, --help            显示本帮助
 
 说明：
@@ -375,6 +386,39 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       //   用退出码宣称"验证通过"会让 CI 里一条命令就假装完成了人工验证。
       const probed = reports.every((r) => r.found)
       return probed ? 0 : 1
+    } catch (err) {
+      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
+      return 2
+    }
+  }
+
+  /**
+   * ★ 分批第 42 批：`--doctor codex` —— "这台机器上 codex 到底通不通"。
+   *
+   * 使用者在 Windows 上报了「codex 执行失败」与「输出乱码」两件事，这两件在我这台
+   * macOS 上都复现不了，而自动化测试禁止调真实 CLI（NFR-T-01）。于是给它一个
+   * **人工入口**：只读、免费（不跑 turn）、可整段复制粘贴。
+   */
+  if (options.doctor !== null) {
+    if (options.doctor !== 'codex') {
+      process.stderr.write(
+        `--doctor 目前只做了 codex（收到：${options.doctor}）。` +
+          `claude / generic 的同类自检还没写——不要假装它支持。\n`,
+      )
+      return 2
+    }
+    const { cleanupDoctorReport, renderCodexDoctorReport, runCodexDoctor } = await import(
+      './codex-doctor.ts'
+    )
+    try {
+      const report = await runCodexDoctor({
+        ...(options.executablePath ? { executablePath: options.executablePath } : {}),
+      })
+      process.stdout.write(renderCodexDoctorReport(report))
+      await cleanupDoctorReport(report)
+      // 退出码 = "自检是否全部通过"。它**不**代表"codex 已在你的任务里验证过"
+      // （那要真跑一条任务），所以帮助里说清楚了这两件事的区别。
+      return report.checks.every((c) => c.ok) ? 0 : 1
     } catch (err) {
       process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
       return 2

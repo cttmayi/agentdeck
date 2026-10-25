@@ -44,6 +44,34 @@ pnpm run test                        # 期望 1855/0
 pnpm run daemon
 ```
 
+### 一条命令量出"codex 通不通"：`--doctor codex`
+
+2026-10 使用者在 Windows 上报了两件事——**codex 执行失败**、**codex 的输出乱码**——
+而这两件在我这台 macOS 上都复现不了，自动化测试又禁止调真实 CLI（NFR-T-01）。
+于是有了这条**只读、免费、可整段复制粘贴**的自检：
+
+```powershell
+pnpm run cli --doctor codex
+```
+
+它依次量六件事（**不跑 turn**，所以不花额度；**不碰**你的 `~/.codex` 与受管目录）：
+
+| 段 | 量什么 | 不通时说明什么 |
+| --- | --- | --- |
+| 环境 | 平台 / 架构 / Node / **`chcp` 的代码页** | 不是 65001 ⇒ 那个窗口里中文本来就显示不对（先 `chcp 65001`） |
+| 可执行文件 | 用**生产同一条**探测路径找到 codex，并报 `resolveSpawnTarget` 的起法（`direct`/`shim`/`cmd`） | 找不到 ⇒ PATH/安装问题；`cmd` ⇒ 参数可能被代码页吃掉 |
+| **原始字节** | 真跑 `codex --version`，把字节同时按 **UTF-8 与 GBK** 解出来（含 hex） | `UTF-8 读法里有 �` + `GBK 读法能解出中文` ⇒ 这就是乱码的来源 |
+| 配置 | `~/.codex/auth.json`、`config.toml` 存在性 + **BOM / UTF-16 判定** | UTF-16 ⇒ PowerShell `>` 重定向写的，codex 读不了（给转换命令） |
+| 复制演练 | 真跑一遍 `syncCodexConfigDir`（落临时目录）并**逐字节比对** | 失败 ⇒ 就是"执行失败"的常见来源（受管目录里没有 auth.json） |
+| 握手 | 真起 `codex app-server` 做 `initialize`，`CODEX_HOME` 指向演练目录（**生产的形状**） | 失败 ⇒ 故障在"起进程/协议"层，与配置内容无关 |
+
+⚠️ 两个刻意的设计（都踩过）：
+1. **握手不能用 `~/.codex`**：codex 要在 `CODEX_HOME` 下建 sqlite 状态库，拿使用者的家目录试
+   "能不能起"，量到的常常是**权限**（本机实测 `failed to initialize sqlite state runtime`），
+   而生产从来不是这么跑的。
+2. **起进程必须走解析后的绝对路径**：适配器的 `probe()` 返回的是描述表里的**命令名**（`codex`），
+   拿它去 spawn 会起 PATH 上那个真的 codex（测试里就真的调了一回真 CLI —— 当场改成绝对路径）。
+
 **真出问题时按这个顺序定位**（都是"看到什么 ⇒ 说明什么"）：
 
 | 现象 | 先看哪里 |

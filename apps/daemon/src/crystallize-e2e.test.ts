@@ -1710,9 +1710,23 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       assert.ok(v3 !== '', '被判重写之后循环必须继续')
 
       // ④ 界面读得到这条标注
-      const info = (await (
-        await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${v3}`)
-      ).json()) as { autoRework: { stopped: boolean; guard: { kind: string } | null } }
+      //
+      // ⚠️ 这里**必须等**，不能取一次就断言（2026-10 全量跑时红过一次）：
+      //    `waitRevisedFrom(v2)` 一返回就说明 **v3 的 run 记录已经存在**，但闸门标注
+      //    是 v3 **判完**之后才落盘的——两件事之间隔着一整轮审核。单跑这个文件时
+      //    中间那点时间够用，全量并行跑时不够，于是这条会偶发变红。
+      //    等的写法不是放宽：`guard === null` 与 `kind !== 'ok'` 两条断言一个字没改。
+      const readReview = async (): Promise<{
+        autoRework: { stopped: boolean; guard: { kind: string } | null }
+      }> =>
+        (await (await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${v3}`)).json()) as {
+          autoRework: { stopped: boolean; guard: { kind: string } | null }
+        }
+      let info = await readReview()
+      for (let i = 0; i < 300 && info.autoRework.guard === null; i += 1) {
+        await new Promise((r) => setTimeout(r, 100))
+        info = await readReview()
+      }
       assert.equal(info.autoRework.stopped, false, '循环没有停')
       assert.ok(info.autoRework.guard !== null, '闸门标注要能被界面读到')
       assert.notEqual(info.autoRework.guard.kind, 'ok')

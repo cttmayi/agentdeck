@@ -1638,3 +1638,52 @@ daemon 主体里新增两个函数，与执行器同口径：
 | ★★「agent = default 且工作区默认设成 codex」 | `.codex` 标注入、`.claude` **不**标（写死 claude 的版本刚好反过来） | 同上 ⇒ 红 |
 
 全量 `pnpm run check` 2127 全绿（2125 + 2）。
+
+### 4.3.3 分批第 42 批：`--doctor codex`（"这台机器上 codex 到底通不通"）
+
+使用者（Windows 上报 codex 执行失败 + 输出乱码之后）：
+
+> 「有没有什么 test case 来测试 codex 是否通的，我在 windows 跑跑看」
+
+#### 为什么必须是"命令"而不是"测试"
+
+两件事在我这台 macOS 上都复现不了；而本仓库的自动化测试**禁止调用真实 CLI**
+（NFR-T-01：会花使用者的额度、还可能让 agent 改文件）。两条约束叠起来只有一个结论：
+这件事需要一个**人工入口**——只读、免费、能整段复制粘贴回来。
+
+#### 六段检查（全部不跑 turn）
+
+| 段 | 量什么 | 不通过说明什么 |
+| --- | --- | --- |
+| 环境 | 平台 / 架构 / Node / **`chcp` 代码页** | 不是 65001 ⇒ 那个窗口里中文本来就显示不对 |
+| 可执行文件 | **生产同一条**探测路径找到 codex + `resolveSpawnTarget` 的起法 | `cmd` ⇒ 参数可能被代码页吃掉 |
+| **原始字节** | `codex --version` 的 hex + UTF-8 + GBK 三种读法 | `UTF-8 有 �` 且 `GBK 能解出中文` ⇒ 乱码来源确认 |
+| 配置 | `auth.json` / `config.toml` 存在性 + BOM / UTF-16 判定 | UTF-16 ⇒ PowerShell `>` 写的，codex 读不了 |
+| 复制演练 | 真跑 `syncCodexConfigDir` 到临时目录 + **逐字节比对** | 失败 ⇒ 受管目录里没有 auth ⇒ codex 认证不了 |
+| 握手 | 真起 `codex app-server` 做 `initialize` | 失败 ⇒ 故障在起进程/协议层，与配置内容无关 |
+
+#### 两个当场踩到的坑（都写进注释了）
+
+1. **握手不能用 `~/.codex`**：codex 要在 `CODEX_HOME` 下建 sqlite 状态库；本机第一版就是这么跑的，
+   于是量到 `failed to initialize sqlite state runtime under ~/.codex`——那是**权限**，不是 codex 本身。
+   生产从来不是这么跑的（受管目录可写），所以握手改用**复制演练那个目录**当 `CODEX_HOME`。
+2. **起进程必须用解析后的绝对路径**：适配器的 `probe()` 返回的是描述表里的**命令名**（`codex`），
+   第一版拿它去 spawn，`--version` 量到的是 PATH 上那个**真实** codex —— 既有损测试意义，
+   也等于在测试里调了真实 CLI（NFR-T-01）。改成 `--executable 优先，否则 probeCommand 解析`。
+
+#### 验证
+
+`apps/daemon/src/codex-doctor.test.ts`（7 条，全部用**假 codex**：一个 `executableWrapper` 包出来的
+脚本，对 `--version` 吐我们指定的字节、对 `app-server` 回一个 `initialize`）：
+
+- 正常一台机器：五项全过；
+- **GBK 字节** ⇒ 判成"不是合法 UTF-8"，并给出 GBK 读法与原意的对照 + `chcp 65001` 的下一步；
+- **UTF-16 配置**（PS 5.1 的 `>` 产物）⇒ 判成 `utf16le`，并给出转换写法；
+- **缺 auth.json** ⇒ 判失败，并给"把设置里那个勾取消"这条临时路；
+- **握手用演练目录当 `CODEX_HOME`**（假 codex 把看到的 `CODEX_HOME` 落盘，测试逐字比对）；
+- **不回 `initialize`** ⇒ 判失败，并指到"起进程/协议"这一层；
+- `digestBytes` 的四种 BOM 与"非法 UTF-8"各判对。
+
+**红检**：把"字节是否合法"与"注入 `CODEX_HOME`"两处短路 ⇒ 对应两条用例变红。
+
+本机真跑（macOS + codex 0.157.1）：五项全过，握手 **206ms**，响应里 `codexHome` 正是演练目录。
