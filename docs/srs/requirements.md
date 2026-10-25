@@ -1167,6 +1167,9 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 32 批**（起草者的身份，见 §10.47）：不改角色划分（使用者选"保持现状"），只修
+`server.ts` 设置默认执行者时的拒绝文案——原来不论角色都说"是审核者"，现在按角色说，
+并补一句"它是起草者、不接业务任务"（`roleRejectionLabel`）。
 **第 31 批**（内置指令的升级路径，见 §10.46）：新增 `DRAFTER_INSTRUCTIONS_V1`（288 字，第 26 批之前的默认）
 与 `SKILL_REVIEWER_INSTRUCTIONS_V2`（838 字，第 20 批默认，源码由 `git show 342c4a5` 还原并逐字比对通过），
 两者进 `*_INSTRUCTIONS_HISTORY`；`ensureBuiltinDrafter` 补上「逐字等于历史默认 ⇒ 升级」这一支

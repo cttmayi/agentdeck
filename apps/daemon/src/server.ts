@@ -3091,6 +3091,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
 
   // ══════════════════════════════════════════════════════════════════
+  /**
+   * 拒绝文案里的角色说法（分批第 32 批）。
+   *
+   * 为什么单独一个函数：这类"一句话解释为什么不行"最容易被写死在某一支里
+   * （原来一律说"是审核者"），而**错方向的解释比没有解释更费人**——使用者会照着它
+   * 去改错地方。以后加角色就在上面补一行，别再写嵌套三元。
+   */
+  function roleRejectionLabel(role: string): string {
+    if (role === 'reviewer') return '「审核」'
+    if (role === 'drafter') return '「起草」（平台内置的 skill 起草者）'
+    if (role === 'skill-reviewer') return '「skill 审核」'
+    return `「${role}」`
+  }
+
   // 内置起草者（2026-10 定稿 §9）：每次启动对一次账
   // ══════════════════════════════════════════════════════════════════
   //
@@ -4452,9 +4466,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //   指过去），把任务交给它执行是配置错误——这种错误在"任务已经派出去"
       //   之后才发现，而那时它已经跑了一轮。
       if (agent.role !== 'executor') {
+        /**
+         * ⚠️ 分批第 32 批：这句话原来一律说「…是**审核者**」。
+         *
+         * 角色从两个变成四个之后（`drafter` / `skill-reviewer`），对起草者与 skill 审核者
+         * 说"它是审核者"是**错的解释**——使用者按这句话去改配置会改错方向
+         * （去找"谁把它的审核关掉"，而它根本不是审核者）。现在按角色给对应说法。
+         */
         sendJson(res, 400, {
-          error: `只有「执行」角色的智能体能当默认——「${agent.name}」是审核者。` +
-            `审核者是别人产出交给它的那一方，不会接任务。`,
+          error:
+            `只有「执行」角色的智能体能当默认——「${agent.name}」的角色是${roleRejectionLabel(agent.role)}。` +
+            (agent.role === 'drafter'
+              ? '它是沉淀那条链里"把经验写成 skill"的那一方，不接业务任务。'
+              : agent.role === 'skill-reviewer'
+                ? '它只审起草出来的 skill，不接任务。'
+                : '审核者是别人产出交给它的那一方，不会接任务。'),
         })
         return
       }

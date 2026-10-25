@@ -470,6 +470,40 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
     })
   })
 
+  /**
+   * ★★ 分批第 32 批：使用者问「起草智能体不是一个标准的执行智能体吗？」
+   *
+   * 管道上它是（同一个 `executor.submit`、同一套日志与收口），但身份标签是 `drafter`，
+   * 而所有"选执行者"的判据都是**等值** `role === 'executor'` ⇒ 它天然落在业务选择之外。
+   * 这条用例钉的是**拒绝时说的话**：原来一律说"…是审核者"，对起草者是错方向的解释
+   * （使用者会去找"谁把它的审核关掉"，而它根本不是审核者）。
+   */
+  test('★★ 起草者（内置）也不能当默认，且理由要**按角色说**（不许一律说是审核者）', async () => {
+    await withDaemon(async (url) => {
+      // 内置起草者由启动对账建出来，不必自己造
+      const list = (await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; name: string; role: string }>
+      }
+      const drafter = list.agents.find((a) => a.role === 'drafter')
+      assert.ok(drafter, '启动对账应该已经建出内置起草者')
+
+      const res = await fetch(`${url}/api/agents/default`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: drafter.id }),
+      })
+      assert.equal(res.status, 400)
+      const body = (await res.json()) as { error: string }
+      assert.match(body.error, /只有「执行」角色/)
+      assert.match(body.error, /起草/, '要说它是起草者（这是它真实的角色）')
+      assert.doesNotMatch(
+        body.error,
+        /是审核者/,
+        '对起草者说"它是审核者"是错方向的解释——使用者会照着去改错地方',
+      )
+    })
+  })
+
   test('★ 没有「取消默认」：必须有一个默认（要换就设成另一个）', async () => {
     await withDaemon(async (url) => {
       const res = await fetch(`${url}/api/agents/default`, {
