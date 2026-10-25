@@ -18,7 +18,7 @@
 
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -3284,6 +3284,91 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
       delivered.includes('existing-agent.md'),
       '要指名让起草者读"它现在的指令"',
     )
+  })
+
+  /**
+   * 起一轮审核，返回审核 run 的 id，并**把投递给审核者的那段话取出来**。
+   *
+   * 为什么要取那段话：这一批改的正是"判据"，而判据只以**任务书**的形式存在——
+   * 断言服务端某个变量等于什么，改坏了判据也测不出来。
+   */
+  async function auditAgentDraft(draftRunId: string): Promise<string> {
+    // ⚠️ 必须记下"审核开始前"投递了几段：假后端这次的回答不合判决格式 ⇒ 执行器会**重试**
+    //    一轮，而重试那一轮的 prompt 里只有"格式纠正"、没有任务书（`at(-1)` 会拿到它，
+    //    于是"任务书里有没有判据"这条断言永远假——我第一次就是这么写的）。
+    const before = fakeBackend.prompts.length
+    const res = await fetch(`${daemon.url}/api/crystallize/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const { reviewRunId } = (await res.json()) as { reviewRunId: string }
+    for (let i = 0; i < 60; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${reviewRunId}`)).json()) as {
+        status: string
+      }
+      if (!['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(r.status)) {
+        return fakeBackend.prompts[before] ?? ''
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('审核 run 没在限时内收口')
+  }
+
+  test('★★★ 审核一条指令草稿：判据换成"指令五项"、6000 是硬闸门、无证据时只许收敛措辞', async () => {
+    const runId = await runWithReviewer()
+    // 假后端在起草时写的是 `skill/SKILL.md`；这里手动补一份 `agent/instructions.md`
+    // （第 36 批会把它变成入库的唯一来源，本批先用来量"审核者读的是哪一种产出"）
+    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: reviewerId } })
+    const taskDir = join(workRoot, `skill-draft-${draft}`)
+    await mkdir(join(taskDir, 'agent'), { recursive: true })
+    await writeFile(
+      join(taskDir, 'agent', 'instructions.md'),
+      '# 身份\n\n你是对账执行者。\n\n# 边界\n\n只读文件，不写。\n',
+      'utf8',
+    )
+    /**
+     * ★ 这一条测的是**无证据**那支：任务来源的素材里本来有判决（`verdict.md`），
+     * 把判决与反馈都拿掉，才等于"这次跑得很顺、没有可改的证据"。
+     * （任务门槛要求"审核过或有反馈"才允许沉淀 ⇒ 无证据只在**素材被清掉**这种情形出现，
+     *  但契约必须为它准备好——使用者选的是"允许，但审核更保守"。）
+     */
+    await rm(join(taskDir, 'material', 'verdict.md'), { force: true })
+    await rm(join(taskDir, 'material', 'feedback.md'), { force: true })
+
+    const delivered = await auditAgentDraft(draft)
+    assert.ok(delivered.includes('审一条**智能体的指令**'), '任务书要说清这次审的是指令')
+    assert.ok(delivered.includes('6000'), '长度上限要进任务书（使用者定的硬闸门）')
+    assert.ok(delivered.includes('material/instructions-check.md'), '要指名机械定检那一页')
+    assert.ok(
+      delivered.includes('只许**收敛措辞**') && delivered.includes('没有证据支撑的重构'),
+      '无证据时的保守口径必须写进任务书：只许收敛措辞，重构口径要判不通过',
+    )
+    assert.ok(
+      delivered.includes('不要重写这份指令'),
+      '审核者只指出问题，不重写（重写是起草者的事）',
+    )
+    assert.ok(
+      !delivered.includes('读 `skill/SKILL.md`'),
+      '审指令时不该再让审核者去读 skill——第一版就是照抄了 skill 的任务书，两个对象会打架',
+    )
+  })
+
+  test('★★ 超限的指令：机械定检明写"必须判不通过"，任务书里带上超了几个字', async () => {
+    const runId = await runWithReviewer()
+    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: reviewerId } })
+    const taskDir = join(workRoot, `skill-draft-${draft}`)
+    await mkdir(join(taskDir, 'agent'), { recursive: true })
+    const tooLong = `# 身份\n\n${'这一行是为了把指令撑到超限。\n'.repeat(400)}`
+    assert.ok(tooLong.length > 6000, '夹具本身要真的超限')
+    await writeFile(join(taskDir, 'agent', 'instructions.md'), tooLong, 'utf8')
+
+    const delivered = await auditAgentDraft(draft)
+    const check = await readFile(join(taskDir, 'material', 'instructions-check.md'), 'utf8')
+    assert.match(check, /\*\*是，超 \d+ 字符\*\*/, '定检要量出超了多少')
+    assert.ok(delivered.includes('必须判不通过'), '超限是硬闸门，任务书要这么说')
+    assert.ok(delivered.includes(String(tooLong.length)), '要把量到的字符数交给审核者')
   })
 
   test('★★ 指向这次没参与的智能体 ⇒ 400（素材与它无关，改出来的指令只会按别人的错误改自己的规矩）', async () => {

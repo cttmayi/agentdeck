@@ -1167,6 +1167,10 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 35 批**（沉淀成 Agent 的审核口径，见 §10.50.5）：审核者身份改成**对象无关**
+（「按任务书给的那套判据」，判据随任务书走，D29 三块分工），旧默认冻成 `SKILL_REVIEWER_INSTRUCTIONS_V3`
+（1048 字）进历史表；新增 `agentDraftAuditPrompt`（指令五项 + 6000 硬闸门 + 无证据只许收敛措辞 +
+不许碰技能/工具）；起审核前平台量事实写 `material/instructions-check.md`；专名落点检查支持指定产出目录。
 **第 34 批**（沉淀成 Agent 的起草前半段，见 §10.50）：`CrystallizeTargetRef` 加
 `{kind:'agent', agentId}`；目标面板给 `agentTargets`（executor/reviewer + 指令长度）；
 素材落 `existing-agent.md`（当前指令全文）；新增契约 `buildAgentInstructionsPrompt`

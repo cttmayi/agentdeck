@@ -2198,7 +2198,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * 专名落点检查：把使用者要求里的专名与 `skill/` 全文对一遍，渲染成一段 Markdown
    * （追加到 `material/exec-check.md` 末尾）。没有要求清单 ⇒ 返回空串（不加噪音）。
    */
-  async function checkRequirementTerms(taskDir: string): Promise<string> {
+  /**
+   * 专名落点检查（机械）。
+   *
+   * `outRel`：产出目录名。skill 草稿是 `skill/`，「沉淀成 Agent」的草稿是 `agent/`
+   * （分批第 35 批加的参数）——"使用者的要求有没有落点"这条判据对两者同样成立。
+   */
+  async function checkRequirementTerms(taskDir: string, outRel = 'skill'): Promise<string> {
     const raw = await readFileSafe(join(taskDir, 'material', 'user-requirements.md'))
     if (raw === null || raw.trim() === '') return ''
     // 清单里每条原文都写成 `1. （turns/002.md）原话` —— 直接从这些行里抽专名
@@ -2210,8 +2216,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const terms = [...new Set(quotes.flatMap((q) => requirementTerms(q)))]
     if (terms.length === 0) return ''
     const texts: string[] = []
-    for (const rel of await listSkillFiles(join(taskDir, 'skill')).catch(() => [] as string[])) {
-      const t = await readFileSafe(join(taskDir, 'skill', rel))
+    for (const rel of await listSkillFiles(join(taskDir, outRel)).catch(() => [] as string[])) {
+      const t = await readFileSafe(join(taskDir, outRel, rel))
       if (t !== null) texts.push(t)
     }
     const coverage = checkTermCoverage(terms, texts)
@@ -2221,8 +2227,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       '## 使用者要求里的专名落点（平台检查）',
       '',
       missing.length === 0
-        ? '全部专名都在 `skill/` 里出现过。'
-        : `⚠️ 这些专名在 \`skill/\` 里**还没出现**：${missing.map((m) => m.term).join('、')}`,
+        ? `全部专名都在 \`${outRel}/\` 里出现过。`
+        : `⚠️ 这些专名在 \`${outRel}/\` 里**还没出现**：${missing.map((m) => m.term).join('、')}`,
       '',
       ...coverage.map((c) => `- ${c.found ? '通过' : '失败'} ${c.term}`),
       '',
@@ -2888,6 +2894,75 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     ].join('\n')
   }
 
+  /**
+   * 起草审核的第一句话——**审一条智能体的指令**那一套（分批第 35 批）。
+   *
+   * 使用者 2026-10-25 定的口径：沉淀成 Agent = 只优化那条智能体的指令，判据也换成
+   * "这份指令能不能让它下次把这类活干对"。所以判据与 skill 那一套**完全不同**，
+   * 而且有三条是这条链独有的：
+   *
+   *   ① **6000 字符硬闸门**（使用者选的"超了就判不通过"）：不是因为写得长就是错，
+   *      而是指令会整份进这条智能体每次 run 的第一句话（D29）——太长会挤掉任务本身、
+   *      稀释重点、让每次 run 更贵更慢；
+   *   ② **无证据时只许收敛措辞**（使用者选的"允许，但审核更保守"）：这次没有失败、
+   *      没有审核不通过、也没有明确反馈时，任何"重构口径/加流程/改判断标准"都必须判不通过；
+   *   ③ **不许碰它挂的 skill、不许新建 agent**：素材里的 `skills-index.md` 只是只读背景。
+   *
+   * ⚠️ 判据写在这里（任务书）而不是审核者的身份里：同一条审核者两种对象都审，
+   *    身份只负责"你是谁、按任务书那套判据判"（D29 的三块分工）。
+   */
+  function agentDraftAuditPrompt(input: {
+    allowScriptRun: boolean
+    /** 这一版指令的字符数（平台量的，机械事实）。 */
+    instructionsChars: number
+    maxChars: number
+    /** 素材里有没有失败证据（审核判决 / 使用者反馈）。 */
+    hasEvidence: boolean
+  }): string {
+    const overLimit = input.instructionsChars > input.maxChars
+    return [
+      '审一条**智能体的指令**（不是 skill）。要改的那条智能体是谁、它现在的指令、以及它这次的表现，都在 `material/`；',
+      '起草者写的新版指令在 `agent/instructions.md`（就在本工作目录里）。',
+      '',
+      '【这次审的五件事（只有这五项能让你判不通过）】',
+      '',
+      '1. **能不能照着干**：这份指令交给一个 CLI agent，它能不能按里面的步骤把这类活干完——' +
+        '该读什么、按什么顺序、用什么命令/工具、交出来是什么样，都要说得清。含糊到"视情况而定"而没有判据 ⇒ 不通过。',
+      '2. **边界清不清**：明确写了**不做什么**（不改哪些文件、不碰哪些目录、超出范围就停）。' +
+        '没有边界、或边界写成"尽量不要"这种软的 ⇒ 不通过。',
+      '3. **痕迹/证据对得上**：指令里每条改动都要能在素材里找到依据（哪一步错了、审核者点了哪一条、使用者说了什么）。' +
+        '凭空加的新流程/新口径、或与素材里的事实冲突 ⇒ 不通过。',
+      '4. **长度与密度**：见下面【硬闸门】。',
+      '5. **是不是只动了指令**：它挂的 skill、工具、模型、名字都不该被这份指令重写或"顺手优化"；' +
+        '指令里出现"请先创建/安装…"这类要求使用者的动作 ⇒ 不通过（那不是它的活）。',
+      '',
+      '【硬闸门（机械事实，不用你再数）】',
+      `- 这一版指令 **${input.instructionsChars} 字符**，上限 **${input.maxChars}**。`,
+      `- 详见 ` + '`material/instructions-check.md`（平台量的：字符数、是否为空、有没有 frontmatter 残留、有没有整篇代码围栏）。',
+      overLimit
+        ? `- ⚠️ **已经超限 ${input.instructionsChars - input.maxChars} 字符 ⇒ 必须判不通过**，理由写清"超长"以及超在哪几处（能删哪些）。`
+        : `- 没超限：但接近上限（>${Math.round(input.maxChars * 0.9)}）时要在 findings 里点出来，返工那一版才有机会瘦下来。`,
+      '',
+      `【证据强度】${
+        input.hasEvidence
+          ? '这次有失败/不通过/反馈证据 ⇒ 按证据判它改得对不对。'
+          : '⚠️ 这次**没有**失败证据（跑得顺、没审核不通过、也没明确反馈）⇒ 只许**收敛措辞**：删冗余、把含糊说清、把重复合并都不算问题；一旦发现它**重构了口径、加了新流程、改了判断标准** ⇒ 判不通过，理由写"没有证据支撑的重构"。'
+      }`,
+      '',
+      '【怎么做】',
+      '1. 读 `material/existing-agent.md`（它现在的指令，也就是"上一版"）与 `agent/instructions.md`（新版）。',
+      '2. 再按需读素材里的执行记录与判决（`task-run.md` / `turns/*.md` / `verdict.md` / `feedback.md`）。',
+      '3. 逐节对照：新版**保留了什么**、**改了什么**、每处改动的依据是哪条。仍然正确的段落被删改掉，也算问题（写清哪一段、为什么该留）。',
+      '4. 问题必须给**具体位置**与**原文摘录**：位置写 `agent/instructions.md:行号` 或 `agent/instructions.md#小节标题`' +
+        '（例：`agent/instructions.md#边界`），`evidence.excerpt` 照抄那一处原文；`evidence.reason` 写"为什么不合格"。',
+      '',
+      '【产出】',
+      '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
+      '`reasonCode` 用短码（比如 `over_length`、`no_boundary`、`no_evidence_for_change`、`touches_skill`）；',
+      '**不要重写这份指令**——重写是起草者的事，你只指出哪里不合格、该往哪个方向改。',
+    ].join('\n')
+  }
+
   /** 起一轮审核的结果（路由与自动再审共用；用联合而不是抛异常：两种入口要的错误处置不同）。 */
   type DraftAuditStart =
     | { ok: true; reviewRunId: string; reviewerAgentId: string }
@@ -3042,37 +3117,94 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
      * ⚠️ 只查"有没有出现"：出现了不等于落实对了（那仍由审核者判），但没出现就一定没落地。
      *    这是**诚实边界**，写进报告里说明。
      */
-    const termCoverage = await checkRequirementTerms(draftHut)
-    const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
-    if (execReport !== null) {
+    /**
+     * ★ 分批第 35 批：草稿有两类——`skill/`（沉淀成 skill）与 `agent/`（沉淀成 Agent）。
+     *
+     * 判据、定检、指纹、标题全都要按类分。判据的分叉在这一处收口：**起审核只有一个实现**，
+     * 两个入口（人点「开始审核」/ 改版跑完自动再审）都走它，所以分叉只能放在这里，
+     * 放进路由的话自动再审那条路会拿到 skill 的判据去审指令。
+     */
+    const isAgentDraft = draft.crystallizeTarget?.kind === 'agent'
+    const outRel = isAgentDraft ? 'agent' : 'skill'
+    const termCoverage = await checkRequirementTerms(draftHut, outRel)
+    const instructionsChars = isAgentDraft
+      ? await readFileSafe(join(draftHut, 'agent', 'instructions.md')).then((t) =>
+          t === null ? 0 : t.length,
+        )
+      : 0
+    if (isAgentDraft) {
+      /**
+       * 智能体指令的**机械定检**：能机械判定的先量出来，审核者不必自己数。
+       *
+       * 为什么这一份只放事实不放结论：结论（通过/不通过）只能由审核者下——
+       * 平台一旦自己判，两个判据就会打架，而打架时人只会看到"平台说通过、审核者说不通过"。
+       * 唯一例外是**超限**：那是使用者定的硬闸门，量出来的数比判断更权威，所以在这里
+       * 明写"必须判不通过"，同时入库时还会再拦一道（第 36 批）。
+       */
+      const text = await readFileSafe(join(draftHut, 'agent', 'instructions.md'))
+      const overLimit = instructionsChars > AGENT_INSTRUCTIONS_MAX_CHARS
+      const checks = [
+        `# 智能体指令定检（平台量的事实，不是判决）`,
+        '',
+        `- 产出文件：\`agent/instructions.md\`（${text === null ? '**不存在**' : `${instructionsChars} 字符`}）`,
+        `- 长度上限：${AGENT_INSTRUCTIONS_MAX_CHARS}`,
+        `- 是否超限：${text === null ? '无法判断（文件不存在）' : overLimit ? `**是，超 ${instructionsChars - AGENT_INSTRUCTIONS_MAX_CHARS} 字符**` : '否'}`,
+        `- 是否为空：${text === null || text.trim() === '' ? '**是**（空产出必须判不通过）' : '否'}`,
+        `- 是否有 frontmatter 残留：${text !== null && /^---\s*$/m.test(text.slice(0, 200)) ? '**有**（指令不该带 frontmatter）' : '没有'}`,
+        `- 是否整篇被代码围栏包住：${text !== null && /^\s*```/.test(text) ? '**是**（应写指令正文，不要整篇围栏）' : '没有'}`,
+        '',
+        '⚠️ 这一页只给事实：**通过与否由你判**。唯一例外是"超限"——那是使用者定的硬闸门，超了就判不通过。',
+        '',
+      ].join('\n')
       await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
       await writeFile(
-        join(draftHut, 'material', 'exec-check.md'),
-        `${renderExecCheckMarkdown(execReport)}${termCoverage}`,
+        join(draftHut, 'material', 'instructions-check.md'),
+        `${checks}${termCoverage}`,
         'utf8',
       ).catch(() => undefined)
-      info(`起草审核定检（${draft.id as string}）：${summarizeExecCheck(execReport)}`)
+      info(`智能体指令定检（${(draft.id as string).slice(-8)}）：${instructionsChars} 字 / 上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}${overLimit ? '（超限）' : ''}`)
+    } else {
+      const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
+      if (execReport !== null) {
+        await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
+        await writeFile(
+          join(draftHut, 'material', 'exec-check.md'),
+          `${renderExecCheckMarkdown(execReport)}${termCoverage}`,
+          'utf8',
+        ).catch(() => undefined)
+        info(`起草审核定检（${draft.id as string}）：${summarizeExecCheck(execReport)}`)
+      }
     }
     // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
     //
     // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
     // 而人在审核期间（或审核之后）改一下编辑器就能让"结论"与"内容"分叉——那份分叉
     // 只有指纹能发现。写早了没用（内容还没定），写晚了会把人改后的内容当成被审内容。
-    const stampHash = await hashDraftDir(join(draftHut, 'skill'))
+    const stampHash = await hashDraftDir(join(draftHut, outRel))
     const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
+    const hasDraftEvidence =
+      (await readFileSafe(join(draftHut, 'material', 'verdict.md'))) !== null ||
+      (await readFileSafe(join(draftHut, 'material', 'feedback.md'))) !== null
     const reviewRunId = await createRunForReviewer({
       reviewer,
       // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
       // 它只影响日志与列表里的显示，路由看的是 subject.type）
       kind: 'skill-draft-review',
-      title: '审核起草出来的 skill',
-      body: `草稿在 ${draftHut}/skill，素材在 ${draftHut}/material`,
+      title: isAgentDraft ? '审核改过的智能体指令' : '审核起草出来的 skill',
+      body: `草稿在 ${draftHut}/${outRel}，素材在 ${draftHut}/material`,
       subject: { type: 'skill-draft-review', id: draft.id },
       // ★ 审核者必须**在草稿小屋里**跑：它要读的 `skill/`（产出）与 `material/`（依据）
       //   都在那里。不给这一项的话它落到审核者自己的 workDir，然后「读不到 skill/SKILL.md」
       //   ——那个报错看起来像"起草没产出"，实际是审核者站错了地方。
       workDirOverride: draftHut,
-      prompt: draftAuditPrompt(allowScriptRun),
+      prompt: isAgentDraft
+        ? agentDraftAuditPrompt({
+            allowScriptRun,
+            instructionsChars,
+            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
+            hasEvidence: hasDraftEvidence,
+          })
+        : draftAuditPrompt(allowScriptRun),
       chainDepth: 0,
     })
     if (reviewRunId === null) {

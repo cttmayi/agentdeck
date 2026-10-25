@@ -22,6 +22,7 @@ import {
   SKILL_REVIEWER_INSTRUCTIONS,
   SKILL_REVIEWER_INSTRUCTIONS_V1,
   SKILL_REVIEWER_INSTRUCTIONS_V2,
+  SKILL_REVIEWER_INSTRUCTIONS_V3,
   SKILL_REVIEWER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
@@ -226,6 +227,26 @@ describe('ensureBuiltinReviewer：同一套纪律 + 历史默认升级', () => {
    * 这条用例钉的是"历史表要把**每一个**旧默认都记着"：只记 V1 的话，
    * 第 20 批之后的默认就成了"谁也认不出来的孤儿"，第 26 批加的第五件事永远到不了审核者。
    */
+  /**
+   * ★★ 分批第 35 批：历史表的第三个版本（1048 字，第 26 批之后那版）。
+   *
+   * 这条钉的是"每改一次默认指令都要把旧的那份记下来"这个纪律本身——第 31 批漏了 V2，
+   * 结果真机上那 838 字的审核者永远升不上来。V3 是第 35 批改身份首句时冻进来的。
+   */
+  test('★★ 审核者停在**第 26 批默认**（1048 字）⇒ 也要升级（历史表要一路记着）', async () => {
+    const all = await store.listAgents(WS)
+    if (!all.some((a) => a.role === 'skill-reviewer')) {
+      await ensureBuiltinReviewer(store, WS)
+    }
+    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V3 })
+
+    const result = await ensureBuiltinReviewer(store, WS)
+    assert.equal(result.action, 'healed', '1048 字那版必须是已知历史版本')
+    const after = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
+    assert.equal(after.instructions, SKILL_REVIEWER_INSTRUCTIONS)
+  })
+
   test('★★★ 审核者停在**第 20 批默认** ⇒ 也要升级（历史表缺一个旧默认就等于永远不升级）', async () => {
     const all = await store.listAgents(WS)
     const reviewer = all.find((a) => a.role === 'skill-reviewer')
