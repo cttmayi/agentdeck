@@ -4886,6 +4886,25 @@
             facts['crystal.draftSectionFound'] = !!draftSection
             const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
             facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
+            /**
+             * ★★★ 分批第 33 批：这一屏的草稿**有**最后结果 ⇒ 正好用来量"草稿过程那一格
+             * 的内容有没有吃满"。审核过程那一档在 fail-verdict 那屏量（那边有日志框）。
+             * 两屏合起来才是使用者说的"两个 tab 都要自适应"。
+             */
+            {
+              const pane = d().querySelector('[data-process-pane="draft"]')
+              const paneRect = cyRect(pane)
+              const box = d().querySelector('.pane-body.detail-scroll')
+              const boxRect = cyRect(box)
+              const padB = box ? parseFloat(cs(box).paddingBottom || '0') : 0
+              const finalRect = cyRect(finalEl)
+              facts['crystal.procFinalPaneH'] = paneRect ? Math.round(paneRect.h) : null
+              facts['crystal.procFinalContentH'] = finalRect ? Math.round(finalRect.h) : null
+              facts['crystal.procFinalGap'] =
+                paneRect === null || boxRect === null
+                  ? null
+                  : Math.round(boxRect.y + boxRect.h - padB - (paneRect.y + paneRect.h))
+            }
             const toggle = draftSection
               ? ([...draftSection.querySelectorAll('h3 button')][0] ?? null)
               : null
@@ -5120,6 +5139,75 @@
             facts['crystal.loopState'] =
               d().querySelector('[data-auto-rework-state]')?.getAttribute('data-auto-rework-state') ??
               null
+
+            /**
+             * ★★★ 分批第 33 批：使用者报「草稿过程和审核过程的高度没有适应」。
+             *
+             * 先量两个子 tab 各自的格子：高度是多少、底边离内容盒底还差多少、
+             * 格子里的日志框有没有把格子填起来（日志框自己有 `max-height`）。
+             */
+            const cyProcTab = (name) =>
+              [...d().querySelectorAll('.process-subtabs button')].find(
+                (b) => text(b) === name,
+              )
+            const cyProcTabOuter = [...d().querySelectorAll('.review-tabs > button')].find(
+              (b) => text(b).startsWith('过程'),
+            )
+            if (cyProcTabOuter) click(cyProcTabOuter)
+            await untilNet(() => !!d().querySelector('.process-subtabs button'), 60)
+            const cyBodyBox = d().querySelector('.pane-body.detail-scroll')
+            const cyBodyBoxRect = cyRect(cyBodyBox)
+            const cyBodyPadB = cyBodyBox ? parseFloat(cs(cyBodyBox).paddingBottom || '0') : 0
+            const cyProbePane = async (name, paneSel) => {
+              const btn = cyProcTab(name)
+              if (btn && !btn.classList.contains('tabs-active')) {
+                click(btn)
+                await untilNet(() => !!d().querySelector(paneSel), 60)
+              }
+              const pane = d().querySelector(paneSel)
+              const rect = cyRect(pane)
+              // 日志框与「最后结果」是同一条规矩的两种形态（在跑 = 日志；跑完 = 最后结果），
+              // 两个都要量：只量 `.log-box` 的话，已完成草稿那一档永远是 null、判据无从落。
+              const logBox =
+                (pane ? pane.querySelector('.log-box') : null) ??
+                (pane ? pane.querySelector('.draft-final') : null)
+              const logRect = cyRect(logBox)
+              return {
+                paneH: rect ? Math.round(rect.h) : null,
+                gap:
+                  rect === null || cyBodyBoxRect === null
+                    ? null
+                    : Math.round(
+                        cyBodyBoxRect.y + cyBodyBoxRect.h - cyBodyPadB - (rect.y + rect.h),
+                      ),
+                logBoxH: logRect ? Math.round(logRect.h) : null,
+              }
+            }
+            const cyDraftProc = await cyProbePane('草稿过程', '[data-process-pane="draft"]')
+            facts['crystal.procDraftPaneH'] = cyDraftProc.paneH
+            // 草稿过程那一格有三种合法形态：实时日志 / 最后结果 / 空态（这条 run 没有文字产出）。
+            // 空态不该被要求"填满格子"——它本身就是一句话；判据按形态分开（见 run.mjs）。
+            {
+              const pane = d().querySelector('[data-process-pane="draft"]')
+              facts['crystal.procDraftState'] = !pane
+                ? null
+                : pane.querySelector('.log-box')
+                  ? 'log'
+                  : pane.querySelector('.draft-final')
+                    ? 'final'
+                    : pane.querySelector('.skeleton')
+                      ? 'skeleton'
+                      : pane.querySelector('.empty')
+                        ? 'empty'
+                        : 'nothing'
+            }
+            facts['crystal.procDraftGap'] = cyDraftProc.gap
+            facts['crystal.procDraftLogBoxH'] = cyDraftProc.logBoxH
+            const cyAuditProc = await cyProbePane('审核过程', '[data-process-pane="audit"]')
+            facts['crystal.procAuditPaneH'] = cyAuditProc.paneH
+            facts['crystal.procAuditGap'] = cyAuditProc.gap
+            facts['crystal.procAuditLogBoxH'] = cyAuditProc.logBoxH
+            facts['crystal.procViewportH'] = facts['crystal.viewportH']
           }
 
           // ══════════════════════════════════════════════════════════════

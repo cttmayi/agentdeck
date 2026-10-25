@@ -3254,6 +3254,27 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.procFinalContentH',
+    label:
+      '★★★ 草稿过程那一格的「最后结果」也吃到格子的一半以上（这一屏的草稿**有**文字产出；改之前它只有内容高、格子却是 400+）',
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      typeof f['crystal.procFinalPaneH'] === 'number' &&
+      v >= Number(f['crystal.procFinalPaneH']) * 0.5,
+    show: (v, f) => `内容 ${v}px / 格子 ${f['crystal.procFinalPaneH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.procFinalGap',
+    label: '★★ 草稿过程那一格同样贴着内容盒底（差 ≤ 1% 视口高）',
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      v >= 0 &&
+      v <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
+    show: (v) => `差 ${v}px`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftLogAfterToggle',
     label: '★★★ 点按钮之后**换成完整日志**（与任务页「最后结果 / 完整日志」同一个交互：同一块位置换内容）',
     ok: (v) => v === true,
@@ -3897,6 +3918,55 @@ const CHECKS = [
       '★★ 窗格高度 ≥ 22rem（352px）——保底：窗口再矮也不把编辑器压到只剩几行（分批第 30 批取消了 58vh 与 640px 上限，改由"吃剩余高度"决定）',
     ok: (v) => typeof v === 'number' && v >= 351,
     show: (v, f) => `${v}px（视口 ${f['crystal.viewportH']}）`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.procAuditGap',
+    label:
+      '★★★ 过程格的**审核过程**那一档也贴着内容盒底（差 ≤ 1% 视口高）——分批第 30 批只改了格子本身，这条钉住"格子里真的用满了"',
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      v >= 0 &&
+      v <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
+    show: (v, f) => `差 ${v}px（格子 ${f['crystal.procAuditPaneH']}px / 视口 ${f['crystal.procViewportH']}）`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.procDraftGap',
+    label: '★★★ 过程格的**草稿过程**那一档同样贴着内容盒底',
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      v >= 0 &&
+      v <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
+    show: (v, f) => `差 ${v}px（格子 ${f['crystal.procDraftPaneH']}px）`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.procAuditLogBoxH',
+    label:
+      '★★★ 审核过程里的**日志框**吃掉格子的一半以上——改之前日志框 51px、格子 457px（一条细条），这就是"高度没适应"的真身',
+    ok: (v, f) =>
+      typeof v === 'number' &&
+      typeof f['crystal.procAuditPaneH'] === 'number' &&
+      v >= Number(f['crystal.procAuditPaneH']) * 0.5,
+    show: (v, f) => `日志 ${v}px / 格子 ${f['crystal.procAuditPaneH']}px`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.procDraftLogBoxH',
+    label:
+      '★★ 草稿过程的「最后结果 / 实时日志」同样吃到格子的一半以上（空态除外：那条 run 本来就没有文字产出，一句话不该被拉满）',
+    ok: (v, f) => {
+      const st = f['crystal.procDraftState']
+      // 空态/骨架不是"内容"，不该被要求填满；有内容（日志或最后结果）就必须吃到一半以上
+      if (st === 'empty' || st === 'skeleton') return true
+      return (
+        typeof v === 'number' &&
+        typeof f['crystal.procDraftPaneH'] === 'number' &&
+        v >= Number(f['crystal.procDraftPaneH']) * 0.5
+      )
+    },
+    show: (v, f) => `内容 ${v}px / 格子 ${f['crystal.procDraftPaneH']}px（形态 ${f['crystal.procDraftState']}）`,
   },
   {
     view: '沉淀',

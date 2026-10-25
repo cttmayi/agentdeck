@@ -1676,7 +1676,23 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
 
       // ① 标注必须落盘（人可读 + 机器可读）
-      const report = await readFile(join(taskDir, 'material', 'rework-guard.md'), 'utf8')
+      //
+      // ⚠️ 分批第 33 批：这里原来**直接读**，于是全量跑时偶发 ENOENT。
+      //    原因不是闸门没写，是**等错了对象**：`waitRevisedFrom` 只等"v2 这条 run 出现了"，
+      //    而闸门报告是 v2 **开始审核**那一刻才算出来的（`startDraftAudit` 里数改动量）。
+      //    两者之间有一个窗口，机器一忙就露出来。改成等文件出现（30s 预算，够跑一轮审核）。
+      const reportPath = join(taskDir, 'material', 'rework-guard.md')
+      const guardDeadline = Date.now() + 30_000
+      let report = ''
+      while (Date.now() < guardDeadline) {
+        const got = await readFile(reportPath, 'utf8').catch(() => null)
+        if (got !== null) {
+          report = got
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.notEqual(report, '', `闸门报告没在限时内落盘：${reportPath}`)
       assert.match(report, /返工收敛判定/)
       const json = JSON.parse(
         await readFile(join(taskDir, 'material', 'rework-guard.json'), 'utf8'),

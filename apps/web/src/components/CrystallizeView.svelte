@@ -691,6 +691,15 @@
       draftStatus = 'completed'
       handledTerminal = true // RunLog 挂上会重放终态，别二次处理
       void loadDraftOutput()
+      /**
+       * ★ 分批第 33 批：这里原来**漏了**读"最后结果"。
+       *
+       * `draftFinalState` 的初值是 `'loading'`，只有 `loadDraftFinalText()` 会把它改掉；
+       * 接上一条**已完成**的草稿走的是这一支，它只读了产出与审核 ⇒ 「过程 → 草稿过程」
+       * 那一格**永远停在骨架**（探针量到 `.draft-final` 是 null 才发现的：格子 457px、
+       * 内容 0px）。这条路径是审阅屏的默认入口，所以不是边缘情况。
+       */
+      void loadDraftFinalText()
       void loadReview()
     } else if (ad.status === 'failed' || ad.status === 'cancelled') {
       draftStatus = ad.status
@@ -2375,7 +2384,9 @@
               {/if}
 
               {#if reviewInfo?.review || (reviewInfo !== null && (auditRunning || auditSettled))}
-                <div class="proc-block">
+                <!-- 分批第 33 批：这一块**带日志**，是格子里唯一该吃掉剩余高度的东西
+                     （`proc-log` 在样式中被分开对待；问题清单那块的封顶是 50%）。 -->
+                <div class="proc-block proc-log">
                   <div class="proc-head">
                     {$t('crystallize.auditShowLog')}
                     {#if auditRunning}
@@ -2835,6 +2846,49 @@
     border-radius: var(--radius-sm);
     max-height: 24rem;
     overflow: auto;
+  }
+  /* ══════════════════════════════════════════════════════════════════
+     ★ 分批第 33 批：过程格里的内容要**跟着格子长**（使用者："草稿过程和审核过程
+       的高度没有适应"）
+     ══════════════════════════════════════════════════════════════════
+
+     第 30 批已经把**格子本身**改成吃剩余高度（实测：视口 880 时两个格子都是 457px、
+     底边差 0 ✓），但格子**里面**的东西没跟上——日志框只有一句「max-height: 24rem」，
+     内容少就是 51px（实测），于是 457px 的格子里躺着一条 51px 的细条，看起来就是
+     "高度没适应"。
+
+     口径：日志框吃格子的剩余高度（`flex: 1 1 0`），上面的问题清单按内容高、
+     但最多占一半（`max-height: 50%`，自己滚）——判决条目多时不能让日志被挤没。
+  */
+  .process-pane > .drawer-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    /* 折叠区那套下边距是为了文档流里的分节；在格子里它会把日志框往下推 */
+    margin-bottom: 0;
+  }
+  .process-pane .log-box,
+  .process-pane .draft-final {
+    flex: 1 1 0;
+    min-height: 8rem;
+    max-height: none;
+  }
+  .process-pane > .proc-block {
+    flex: 0 1 auto;
+    min-height: 0;
+    /* 问题清单：按内容高，但**最多占一半**——判决条目多时不许把日志挤没 */
+    max-height: 50%;
+    overflow: auto;
+  }
+  /* 带日志的那一块：吃剩余高度（它是这个格子里唯一"越长越好"的东西） */
+  .process-pane > .proc-log {
+    flex: 1 1 0;
+    max-height: none;
+    min-height: 8rem;
+  }
+  .process-pane > .proc-log > .log-box {
+    min-height: 0;
   }
   /*
    * 起草 run 的「最后结果」。
