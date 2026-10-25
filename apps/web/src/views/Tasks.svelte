@@ -299,7 +299,7 @@
   // ── 任务详情 ──
 
   let activeRun: RunSummary | null = null
-  // ── D80：任务「优化 skill」的置灰门（有用户反馈 或 审核过）──
+  // ── D80：任务「沉淀技能&智能体」的置灰门（有用户反馈 或 审核过）──
   let optimizeGate: { reviewed: boolean; hasUserFeedback: boolean } | null = null
   let optimizeGateRunId = ''
   $: canOptimizeSkill =
@@ -1021,7 +1021,10 @@
          建任务 / 任务详情 / 没选中 都走同一个壳；栏头（返回+标题+副题）由
          MainArea 的结构化 props 渲染——从此详情栏头固定在上方、不再跟着滚走
          （与聊天的 chat-head 同一形态，这正是统一的意义）。
-         ★ 三轮：沉淀已搬到独立一页（导航列工具之下），任务页只留「优化 skill」
+         ★ 三轮：沉淀已搬到独立一页（导航列工具之下），任务页只留这一格入口
+         ★ 分批第 39 批：名字改成「沉淀技能&智能体」——分批第 34–38 批之后它也能改
+           智能体的指令，名字只提 skill 等于把那条路从名字上藏起来（使用者原话：
+           「之前的名字以为只有 skill」）
            入口按钮；这里不再有流程页分支。 -->
     <MainArea
       empty={!$creating && !selected}
@@ -1050,7 +1053,7 @@
       {#snippet actions()}
         {#if selected && !$creating}
           <!--
-            D80：任务「优化 skill」按钮（§4.3）——按钮可用 ⟺ 任务 run 终态
+            D80：任务「沉淀技能&智能体」按钮（§4.3）——按钮可用 ⟺ 任务 run 终态
             且（有用户反馈 或 审核过）。置灰时 title 说明"为什么灰"。
             ★ 三轮：点按钮**跳到沉淀页**（`#/crystallize/<runId>`），流程在那里进行。
           -->

@@ -683,6 +683,18 @@
         facts['tasks.detailHasTimestamp'] = need('右栏有没有完整时间戳', () =>
           /\d{1,2}:\d{2}/.test(text(d().querySelector('.detail-pane .detail-sub')) ?? ''),
         )
+        /**
+         * ★ 分批第 39 批：任务页栏头那个入口的名字。
+         *
+         * 为什么值得钉：分批第 34–38 批之后它还能改智能体的指令，而名字一直只提 skill
+         * ⇒ 使用者原话「之前的名字以为只有 skill」——**他没找到这条路**。
+         * 这不是"文案偏好"，是入口的可发现性；名字再退回只提 skill，这里就红。
+         */
+        facts['tasks.crystallizeActionLabel'] = need('任务页栏头的沉淀入口', () =>
+          [...d().querySelectorAll('.detail-pane header button')]
+            .map((b) => text(b))
+            .find((t0) => t0.includes('沉淀')) ?? null,
+        )
 
         // ── D69.9：任务详情重排——"重要资讯直接展示、非重要资讯折叠" ──
         // 夹具第一行是**从没跑过**的任务（见上面 firstRowStageCell 的注释）。

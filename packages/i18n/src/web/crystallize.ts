@@ -2,7 +2,7 @@ import type { TextCatalog } from '../text.ts'
 
 /**
  * 聊天/任务沉淀 skill（D80）——`views/Chat.svelte` 与 `views/Tasks.svelte`
- * 的「沉淀成 skill / 优化 skill」入口 + `components/CrystallizeView.svelte`
+ * 的「沉淀技能&智能体」入口 + `components/CrystallizeView.svelte`
  * 全页流程（设计 §4.1.1 界面改版：任务详情式全页 + 步骤条 + 分节渐进展开）。
  *
  * 流程：选目标（新建必填作用描述 / 更新本次加载的）→ 起草 run → 草稿审阅 →
@@ -11,12 +11,22 @@ import type { TextCatalog } from '../text.ts'
  * ⚠️ zh / en 两边都要有，占位符要一致（`i18n.test.ts` 逐条守着）。
  */
 export const crystallizeText = {
-  'crystallize.title': { zh: '沉淀成 skill', en: 'Crystallize into a skill' },
+  /**
+   * ★ 分批第 39 批：入口名字改成「沉淀技能&智能体」。
+   *
+   * 使用者的原话：「改一下名称吧，『沉淀技能&智能体』，之前的名字以为只有 skill」——
+   * 分批第 34–38 批加了"优化一条已有智能体的指令"之后，名字还只提 skill，
+   * 那条路等于**从名字上就不存在**（他没找到入口）。
+   *
+   * 口径：这一格同时用于**页面标题**与**对话页那个按钮**，两处必须是同一个名字
+   * （同一个功能在两个地方叫两个名字，是这一族缺陷的老来源）。
+   */
+  'crystallize.title': { zh: '沉淀技能&智能体', en: 'Crystallize skill or agent' },
 
   // ── 导航（三轮：沉淀是独立一页，导航列工具之下） ──
   'crystallize.navTitle': { zh: '沉淀', en: 'Crystallize' },
   'crystallize.navHint': {
-    zh: '把对话/任务的经验沉淀成 skill（起草不占任务列表）',
+    zh: '把对话/任务的经验沉淀成 skill，或优化一条智能体的指令（起草不占任务列表）',
     en: 'Turn chats & tasks into skills (drafts live here, not in the task list)',
   },
   'crystallize.newEntry': { zh: '新建沉淀', en: 'New' },
@@ -426,12 +436,12 @@ export const crystallizeText = {
   'crystallize.viewSkill': { zh: '查看技能', en: 'View skill' },
   'crystallize.backToSource': { zh: '返回', en: 'Back' },
 
-  // ── 任务页「优化 skill」按钮的触发前置（Skills 列表也在用下面四个） ──
+  // ── 任务页「沉淀技能&智能体」按钮的触发前置（Skills 列表也在用下面四个） ──
   'crystallize.taskGated': {
-    zh: '该任务没有反馈、也未审核，无法据此优化 skill',
-    en: 'No feedback or review on this task — cannot optimize a skill from it',
+    zh: '该任务没有反馈、也未审核，无法据此沉淀技能或智能体',
+    en: 'No feedback or review on this task — nothing to crystallize a skill or agent from',
   },
-  'crystallize.optimize': { zh: '优化 skill', en: 'Optimize skill' },
+  'crystallize.optimize': { zh: '沉淀技能&智能体', en: 'Crystallize' },
   'crystallize.shadowed': { zh: '被你的版本遮蔽', en: 'shadowed by yours' },
   'crystallize.groupMine': { zh: '我提炼的', en: 'Mine' },
   'crystallize.groupInstalled': { zh: '安装的', en: 'Installed' },

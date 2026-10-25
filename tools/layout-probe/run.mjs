@@ -3738,6 +3738,14 @@ const CHECKS = [
     show: (v) => `tab 条 ${v} 个`,
   },
   {
+    view: '任务',
+    key: 'tasks.crystallizeActionLabel',
+    label:
+      '★★ 任务页栏头那个入口的名字必须**同时提技能与智能体**（分批第 39 批：原来叫「优化 skill」，使用者原话"以为只有 skill"——于是那条路从名字上就不存在）',
+    ok: (v) => typeof v === 'string' && v.includes('技能') && v.includes('智能体'),
+    show: (v) => JSON.stringify(v ?? null),
+  },
+  {
     view: '沉淀',
     key: 'crystal.agentAttached',
     label:

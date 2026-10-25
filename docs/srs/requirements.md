@@ -1167,6 +1167,9 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 39 批**（入口改名，见 §10.50.9）：任务页/对话页/页标题三处入口统一叫「沉淀技能&智能体」
+（旧名「优化 skill / 沉淀成 skill」让人以为只支持 skill——功能做完了却没人找得到）；探针新增
+`tasks.crystallizeActionLabel` 判据做反悔保护。
 **第 38 批**（沉淀成 Agent 的补齐，见 §10.50.8）：`/api/crystallize/diff` 认出 agent 草稿
 （基线 = 智能体现指令 / 上一版草稿 / original 同 current）；`draftVersionSkillDir` 的产出目录
 参数化（`skill` / `agent`）；artifacts 显式回 `revisedFrom: null`（少这个字段会让界面把

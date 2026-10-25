@@ -137,7 +137,7 @@
   $: liveTurn = activeTurns.find((turn) => turn.runId === $chatLiveRunId) ?? null
   $: runningTurn =
     activeTurns.find((turn) => isTurnRunning(turn)) ?? null
-  // ── 沉淀成 skill（D80）──
+  // ── 沉淀技能&智能体（D80；名字分批第 39 批改的，与任务页那一格同名）──
   // 设计 §4.1：会话级按钮，**至少有一轮已结束**即可用（素材 = 已落库的部分）。
   // 源 run = 最后一轮有 runId 的轮次（其 subject 是对话，素材打包会扫全部轮）。
   // ★ 三轮：点按钮**跳到沉淀页**（`#/crystallize/<runId>`，导航列工具之下的一页）——
@@ -540,7 +540,9 @@
           </span>
         </div>
         <div class="pane-actions">
-          <!-- D80：会话级「沉淀成 skill」——至少有一轮已结束才可用 -->
+          <!-- D80：会话级「沉淀技能&智能体」——至少有一轮已结束才可用。
+               它与任务页那一格读**同一个词条**（`crystallize.title` / `crystallize.optimize`
+               各一处，但文案一致）：同一个功能在两处叫两个名字是这一族缺陷的老来源。 -->
           <button
             class="ghost"
             disabled={!crystallizeEnabled}
