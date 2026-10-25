@@ -53,13 +53,33 @@ export interface ExistingSkillSnapshot {
   files: Record<string, string>
 }
 
+/**
+ * ★ 分批第 34 批：要**优化指令**的那条智能体（沉淀成 Agent 的“上一版”）。
+ *
+ * 和 `ExistingSkillSnapshot` 同一个用途、同一个理由：不在素材里摆出"它现在的指令全文"，
+ * 起草者就只能重写一份——而使用者要的是"在这条指令上改"，改坏一处都可能让它下次干错活。
+ */
+export interface ExistingAgentSnapshot {
+  id: string
+  name: string
+  /** `executor` / `reviewer` / 平台内置的两条。指令的写法跟角色有关（审核者要判事、执行者要干活）。 */
+  role: string
+  instructions: string
+}
+
 /** 落盘时的上下文（这些进 `00-README.md` 与 `meta.json`）。 */
 export interface MaterialContext {
   scope: 'conversation' | 'task'
   /** 来源标题（对话标题 / 任务标题）。 */
   sourceLabel: string
-  /** 本次目标：新建（可带作用描述）或更新某个技能。 */
-  target: { kind: 'new'; purpose: string } | { kind: 'update'; skill: ExistingSkillSnapshot }
+  /**
+   * 本次目标：新建 skill（可带作用描述）/ 更新某个 skill / **优化某条智能体的指令**。
+   * 三者共用同一套素材（会话/任务记录），差别只在"上一版"摆不摆、契约指向哪个目录。
+   */
+  target:
+    | { kind: 'new'; purpose: string }
+    | { kind: 'update'; skill: ExistingSkillSnapshot }
+    | { kind: 'agent'; agent: ExistingAgentSnapshot }
   /** 现有技能清单（判重与 FOLD_INTO）。 */
   existingSkills: Array<{ slug: string; name: string; description: string | null }>
 }
@@ -167,8 +187,12 @@ function buildIndex(ctx: MaterialContext, stats: MaterialStats, pieces: Material
       ? ctx.target.purpose.trim() === ''
         ? '新建一个 skill（使用者没有给作用描述——由你从素材推断定位）'
         : `新建一个 skill。使用者的作用描述（description 以它为基底）：${ctx.target.purpose.trim()}`
-      : `更新现有 skill「${ctx.target.skill.slug}」（${ctx.target.skill.name}）——它的当前全文在 ` +
-        '`existing-skill/`，请**修订**而不是重写：保留仍然正确的部分，只改与素材冲突或缺失的部分。'
+      : ctx.target.kind === 'agent'
+        ? `**优化智能体「${ctx.target.agent.name}」的指令（角色：${ctx.target.agent.role}）**——` +
+          '它现在这份指令的全文在 `existing-agent.md`。产出是**改好的整份指令**（`agent/instructions.md`），' +
+          '不是 skill：名字、技能、工具、模型都不归你定，也不要新建任何智能体。'
+        : `更新现有 skill「${ctx.target.skill.slug}」（${ctx.target.skill.name}）——它的当前全文在 ` +
+          '`existing-skill/`，请**修订**而不是重写：保留仍然正确的部分，只改与素材冲突或缺失的部分。'
 
   const turnList =
     ctx.scope === 'conversation'
@@ -196,7 +220,7 @@ ${turnList}
 ${ctx.scope === 'task' && pieces.some((p) => p.relPath === 'verdict.md') ? '- `verdict.md` — 审核判决（哪些做对了、哪些要改，这是最可信的判据）\n' : ''}${pieces.some((p) => p.relPath === 'feedback.md') ? '- `feedback.md` — 使用者的反馈\n' : ''}- \`meta.json\` — 结构化元信息（轮数/工具调用数/目标）
 - \`skills-index.md\` — 现有技能清单（判重：素材明显属于某个已有技能时，在结论里说明并给出依据）
 ${pieces.some((p) => p.relPath === 'user-requirements.md') ? '- \`user-requirements.md\` — **使用者在素材里提出来的要求**（平台机械抽取，原文照抄）——每一条都要有落点\n' : ''}
-${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当前全文（含支持文件）\n' : ''}
+${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当前全文（含支持文件）\n' : ''}${ctx.target.kind === 'agent' ? '- `existing-agent.md` — **要优化的那条智能体的当前指令全文**（这就是"上一版"，在它上面改）\n' : ''}
 ## 怎么用这些文件
 
 1. **先读这一页**，再决定要读哪些文件——不要一次性把全部素材读进上下文。
@@ -259,6 +283,19 @@ export async function writeMaterial(
       await put(`existing-skill/${rel}`, text)
     }
   }
+  if (ctx.target.kind === 'agent') {
+    const snap = ctx.target.agent
+    // 只落**指令正文**（外加名字与角色两行元信息）：入库只覆盖 instructions 一个字段，
+    // 素材里多摆技能/工具清单会诱导起草者去改那些（使用者明确说过不碰、不新建）。
+    await put(
+      'existing-agent.md',
+      `# 要优化的智能体
+
+- 名字：${snap.name}\n- 角色：${snap.role}\n\n` +
+        `## 它当前的指令（全文，共 ${snap.instructions.length} 字符）\n\n` +
+        `${snap.instructions.trim() === '' ? '（当前指令是空的——这条智能体还没有任何指令）' : snap.instructions}\n`,
+    )
+  }
 
   await put(
     'meta.json',
@@ -271,7 +308,9 @@ export async function writeMaterial(
         target:
           ctx.target.kind === 'new'
             ? { kind: 'new', purpose: ctx.target.purpose }
-            : { kind: 'update', slug: ctx.target.skill.slug, name: ctx.target.skill.name },
+            : ctx.target.kind === 'agent'
+              ? { kind: 'agent', agentId: ctx.target.agent.id, name: ctx.target.agent.name, role: ctx.target.agent.role }
+              : { kind: 'update', slug: ctx.target.skill.slug, name: ctx.target.skill.name },
         existingSkills: ctx.existingSkills.map((s) => s.slug),
       },
       null,

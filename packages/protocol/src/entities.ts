@@ -874,6 +874,17 @@ export type SubjectRef = z.infer<typeof SubjectRef>
 export const CrystallizeTargetRef = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('new') }),
   z.object({ kind: z.literal('update'), skillId: z.string() }),
+  /**
+   * ★ 分批第 34 批：「沉淀成 Agent」= 更新**某一条已有智能体的指令**。
+   *
+   * 使用者的口径（2026-10-25）：agent 指执行者或审核者；**只优化它的指令**，
+   * 不碰它挂的 skill；**不新建 agent，只更新当前这一条**。
+   *
+   * 所以这里只记 `agentId`——没有"新建"的分支，也就没有名字/技能/工具子集要定：
+   * 入库时只覆盖 `Agent.instructions` 一个字段，`name`/`skillIds`/`toolIds`/`model`/
+   * `reviewStandard` 一个字都不动（这条纪律写在 commit 路由里）。
+   */
+  z.object({ kind: z.literal('agent'), agentId: z.string() }),
 ])
 export type CrystallizeTargetRef = z.infer<typeof CrystallizeTargetRef>
 

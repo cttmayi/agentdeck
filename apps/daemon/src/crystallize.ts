@@ -68,6 +68,31 @@ export interface CrystallizeTargets {
    * （见 `crystallizeTargets` 里的 `requested`）——URL 指名了哪条草稿就是哪条。
    */
   activeDraft: { runId: string; status: Run['status']; target: CrystallizeTargetRef } | null
+  /**
+   * ★ 分批第 34 批：「沉淀成 Agent」的**候选智能体**——这条来源 run 上有资格被优化的那两条。
+   *
+   * 使用者的口径：agent 指执行者或审核者，**只更新当前这一条**、只改指令。
+   * 所以候选就是 run 上真实用到的那两个：`run.agentId`（干这次活的执行者）与
+   * `run.reviewerAgentId`（审这次产出的审核者，可能是 `null`/缺字段）。
+   *
+   * ⚠️ 为什么不像 skill 那样给"所有可选对象"：这不是"新建一个"的选择题，
+   *    而是"这次谁的指令不够用"——把没参与这次 run 的 agent 列出来只会让人选错。
+   */
+  agentTargets: {
+    executor: AgentTargetBrief
+    reviewer: AgentTargetBrief | null
+  }
+}
+
+/** 「沉淀成 Agent」的候选（界面按钮上要说的那句话所需的最少信息）。 */
+export interface AgentTargetBrief {
+  id: string
+  name: string
+  role: string
+  /** 当前指令长度（字符）——界面据此提示"指令已经 5.8k/6k"这类风险。 */
+  instructionsChars: number
+  /** 平台内置的那两条（起草者 / skill 审核者）：可优化，但要提醒"改的是平台的默认"。 */
+  builtin: boolean
 }
 
 /**
@@ -156,6 +181,25 @@ export async function crystallizeTargets(
   // （一个会话多条 run，流程页从哪一轮进都可能）。
   const activeDraft = requested ?? (await findActiveDraft(store, run))
 
+  // ── 「沉淀成 Agent」的候选：run 上真实用到的那两条 ──
+  // 对话场景的审核者字段同样有意义（对话可以被审），所以两支都按 run 上有没有字段算，
+  // 不按 scope 分支——少一条分支就少一处会让两者不一致的地方。
+  const allAgents = await store.listAgents(run.workspaceId)
+  const briefOf = (id: string | null | undefined): AgentTargetBrief | null => {
+    if (typeof id !== 'string' || id === '') return null
+    const agent = allAgents.find((a) => (a.id as string) === id)
+    if (!agent) return null
+    return {
+      id: agent.id as string,
+      name: agent.name,
+      role: agent.role,
+      instructionsChars: agent.instructions.length,
+      builtin: agent.builtin === true,
+    }
+  }
+  const executorBrief = briefOf(agentId)
+  const reviewerBrief = briefOf(run.reviewerAgentId ?? null)
+
   return {
     loadedSkills,
     reviewed,
@@ -163,6 +207,18 @@ export async function crystallizeTargets(
     scope,
     materialStats,
     activeDraft,
+    agentTargets: {
+      // 执行者一定存在（run 上没有它就是数据坏了）；退化成一条跑不通的占位不如直接报清楚
+      executor:
+        executorBrief ?? {
+          id: agentId,
+          name: '（找不到这条执行者）',
+          role: 'executor',
+          instructionsChars: 0,
+          builtin: false,
+        },
+      reviewer: reviewerBrief,
+    },
   }
 }
 
@@ -394,6 +450,83 @@ ${
   改为写一个 \`${outputDir}/REFUSED.md\`，用两三句话说明为什么不可沉淀。
 
 直接开始：先读索引，再动手写文件。`
+}
+
+/**
+ * 智能体指令的**硬上限**（字符）。
+ *
+ * 为什么要有：指令会整份进这条智能体每次 run 的第一句话（D29），太长会①挤掉任务本身、
+ * ②稀释重点、③让每次 run 都更贵更慢。6000 是使用者 2026-10-25 定的数（起草时提示、
+ * 审核时硬闸门）。
+ */
+export const AGENT_INSTRUCTIONS_MAX_CHARS = 6000
+
+/**
+ * 「沉淀成 Agent」的起草契约（分批第 34 批）。
+ *
+ * 使用者 2026-10-25 的口径：agent = 执行者或审核者；**只优化它的指令**，
+ * 不碰它挂的 skill；**不新建 agent，只更新当前这一条**。
+ *
+ * 所以这份 prompt 与 `buildDraftPrompt` 是**同一件事的另一种产出**：
+ * 素材、证据、循环、返工都不变，只有「产出什么」变了——一份改好的**整份指令**。
+ *
+ * ⚠️ 三条容易写错的：
+ *   1. 产出必须是**整份**指令（不是 diff 片段）：入库是覆盖 `Agent.instructions` 一个字段，
+ *      片段没法用。
+ *   2. 不许出现"新建/另起一条"的口径：使用者的原话是"不新建 agent，只更新当前 agent"。
+ *   3. 不许动技能与工具：素材里给了它们（只读）是为了避免写出跟现有技能打架的指令。
+ */
+export function buildAgentInstructionsPrompt(opts: {
+  scope: 'conversation' | 'task'
+  materialDir: string
+  outputDir: string
+  /** 这一版是"按意见改一版"（产出目录里已经是上一版，意见在 feedback.md）。 */
+  revised?: boolean
+  /**
+   * 这次有没有"失败证据"（审核不通过 / 使用者反馈 / 命令报错）。
+   *
+   * 没有的时候契约要更紧：只许收敛措辞，不许重构口径——否则会出现"这次跑得很顺，
+   * 指令却被改成另一个人的写法"，而那种改动没有任何证据支撑。
+   */
+  hasEvidence: boolean
+  /** 指令长度上限（字符）。入库前会被硬闸门再卡一次（见审核口径）。 */
+  maxChars: number
+}): string {
+  const { scope, materialDir, outputDir, revised = false, hasEvidence, maxChars } = opts
+  return `你是一位 agent 设计师：**优化一条已有智能体的指令**，让它下次干这类活时更稳。素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已落盘到 \`${materialDir}/\`。
+
+【先做三件事】
+1. 读 \`${materialDir}/00-README.md\`（索引：来源、规模、目标、该读哪些文件）。
+2. 读 \`${materialDir}/existing-agent.md\`——**这条智能体现在的指令全文**。这是你的"上一版"：你改的是它，不是另写一份。
+3. 按需读素材里真正需要的文件（\`turns/*.md\` 或 \`task-run.md\`、\`verdict.md\`、\`feedback.md\`）。
+   **证据是这次它的实际表现**：它下了哪些命令、用了哪些工具、哪里卡住、产出被审核者挑了哪里。
+
+【产出契约】
+- **只产出一个文件**：\`${outputDir}/instructions.md\`——改好的**整份指令正文**（纯文本/Markdown，不要 frontmatter，不要代码围栏包整篇）。
+- 长度上限 **${maxChars} 字符**（超过就判不通过）：指令会整份进这条智能体每次 run 的第一句话，太长会稀释重点、也会挤掉任务本身。
+- **只改指令**。名字、它挂的技能、工具、模型、审核标准都不归你定——素材里的 \`skills-index.md\` 只是**只读背景**，用来避免写出跟现有技能冲突的指令。
+- **不许新建智能体**，也不许在指令里写"请你先创建/安装…"这类要求（那是使用者的动作，不是它的）。
+
+【怎么写】
+- **建议分节、不强制**：身份（它是谁、只为哪类活服务）/ 边界（明确不做什么）/ 流程（按什么顺序、用什么命令）/ 产出契约（交出来必须成什么样）/ 失败处理（卡住时怎么办）。保留它原本的写法与用词习惯，不要改风格。
+- **在这条指令上改**：仍然正确的段落**原样留着**；只改与证据冲突、缺失、含糊的地方。逐字保留：使用者原话里的专有名词、路径、命令、参数。
+- 每条改动都要能在素材里找到对应证据（哪一步错了、审核者点了哪条）。没有证据支撑的"重写"不算改进。
+
+【证据强度】
+${
+  hasEvidence
+    ? '- 这次有明确的失败/不通过/反馈证据 ⇒ 可以按证据改口径与结构。改完在正文里让"该做/不该做"一眼可查。'
+    : '- ⚠️ 这次**没有**失败证据（跑得顺、没有审核不通过、也没有明确反馈）⇒ **只许收敛措辞**：删冗余、把含糊的话说清、把重复的合并。**不许**重构口径、不许加新流程、不许改变它的判断标准——那些改动没有任何证据支撑。'
+}
+
+【额外交代】
+${
+  revised
+    ? `- 这一版是**按意见改一版**：\`${outputDir}/instructions.md\` 里已经是上一版，意见在 \`${materialDir}/feedback.md\`（优先级最高）。只改意见点到的地方，其余原样留着。\n- 产出仍然是**整份**指令（覆盖写这一个文件）。`
+    : '- 这是第一版：产出目录是空的，你写的就是它的新指令全文。'
+}
+
+直接开始：先读索引与 \`existing-agent.md\`，再动手写 \`${outputDir}/instructions.md\`。`
 }
 
 /**

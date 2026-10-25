@@ -3181,3 +3181,124 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
     }
   })
 })
+
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * ★ 分批第 34 批：「沉淀成 Agent」的起草前半段（目标 + 素材 + 契约）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者的口径（2026-10-25）：agent 指执行者或审核者；**只优化它的指令**、
+ * 不碰它挂的 skill、**不新建 agent，只更新当前这一条**。
+ *
+ * 这一批只做到"起草能跑、素材摆对、契约指向 agent/instructions.md"；
+ * 审核口径（第 35 批）与入库覆盖指令（第 36 批）各自单独一批。
+ */
+describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批第 34 批）', () => {
+  /** 起一条**带审核者**的任务 run 并审过（过 task_gate），返回 runId。 */
+  async function runWithReviewer(): Promise<string> {
+    const runId = ulid() as RunId
+    const res = await fetch(`${daemon.url}/api/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId,
+        kind: 'execute',
+        agentRef: { id: agentId, name: '助手', instructions: '' },
+        skills: [],
+        subject: { type: 'issue', id: issueId },
+        prompt: '把这次的活干完',
+        limits: { maxTurns: null, timeoutMs: null },
+        // ★ 这条 run 上要有审核者，`agentTargets.reviewer` 才不是 null
+        reviewerAgentId: reviewerId,
+      }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    for (let i = 0; i < 40; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${runId}`)).json()) as { status: string }
+      if (['completed', 'failed', 'cancelled'].includes(r.status)) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    await reviewOnce(runId)
+    return runId as string
+  }
+
+  test('★★★ 目标面板给出「执行者 / 审核者」两个候选（就是这条 run 上真实用过的那两条）', async () => {
+    const runId = await runWithReviewer()
+    const targets = (await (
+      await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)
+    ).json()) as {
+      agentTargets: {
+        executor: { id: string; name: string; role: string; instructionsChars: number }
+        reviewer: { id: string; role: string } | null
+      }
+    }
+    assert.equal(targets.agentTargets.executor.id, agentId, '执行者 = 这条 run 的执行者')
+    assert.equal(targets.agentTargets.executor.role, 'executor')
+    assert.ok(
+      targets.agentTargets.executor.instructionsChars >= 0,
+      '要带当前指令长度——界面据此提示"已经 5.8k/6k"的风险',
+    )
+    assert.equal(targets.agentTargets.reviewer?.id, reviewerId, '审核者 = 这条 run 的审核者')
+  })
+
+  test('★★★ 起草一条「优化审核者指令」的草稿：素材里有它现在的指令全文，契约写的是 agent/instructions.md', async () => {
+    const runId = await runWithReviewer()
+    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId, target: { kind: 'agent', agentId: reviewerId } }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const { draftRunId } = (await res.json()) as { draftRunId: string }
+
+    // ① 素材里必须是**它现在的指令全文**（没有这份，"在它上面改"无从谈起）
+    const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
+    const existing = await readFile(join(taskDir, 'material', 'existing-agent.md'), 'utf8')
+    const reviewerNow = (await (
+      await fetch(`${daemon.url}/api/agents`)
+    ).json()) as { agents: Array<{ id: string; name: string; instructions: string }> }
+    const reviewer = reviewerNow.agents.find((a) => a.id === reviewerId)!
+    assert.ok(existing.includes(reviewer.instructions.trim().slice(0, 60)), '指令正文要摆进素材')
+    assert.match(existing, /角色：reviewer/, '要写清它是审核者（写法与执行者不同）')
+
+    // ② 沉淀目标随 run 落库（恢复/返工/入库都按它走）
+    for (let i = 0; i < 40; i += 1) {
+      const run = (await (await fetch(`${daemon.url}/api/runs/${draftRunId}`)).json()) as {
+        status: string
+        crystallizeTarget?: { kind: string; agentId?: string }
+      }
+      if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+        assert.deepEqual(run.crystallizeTarget, { kind: 'agent', agentId: reviewerId })
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    // ③ 投递给起草者的契约：产出 agent/instructions.md、有 6000 字符上限、不许新建 agent
+    const delivered = fakeBackend.prompts.at(-1) ?? ''
+    assert.ok(delivered.includes('agent/instructions.md'), '产出路径必须是 agent/instructions.md')
+    assert.ok(delivered.includes('6000'), '指令长度上限要写进契约')
+    assert.ok(delivered.includes('不许新建智能体'), '使用者定过：不新建 agent，只更新当前这条')
+    assert.ok(
+      delivered.includes('existing-agent.md'),
+      '要指名让起草者读"它现在的指令"',
+    )
+  })
+
+  test('★★ 指向这次没参与的智能体 ⇒ 400（素材与它无关，改出来的指令只会按别人的错误改自己的规矩）', async () => {
+    const runId = await runWithReviewer()
+    const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
+      agents: Array<{ id: string; role: string }>
+    }
+    const drafter = all.agents.find((a) => a.role === 'drafter')!
+    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId, target: { kind: 'agent', agentId: drafter.id } }),
+    })
+    assert.equal(res.status, 400)
+    const body = (await res.json()) as { code: string }
+    assert.equal(body.code, 'agent_not_in_run')
+  })
+})

@@ -3379,3 +3379,61 @@ rewrite/bloat/off-target 时**直接写停止标记、停掉自动循环**，等
 改成等文件出现（30s 预算，够跑一轮审核），**断言没动**。
 第 31 批修的是同一个文件里"等判决 ≠ 等 run 落终态"，第 33 批是"等 run 出现 ≠ 等审核开始"——
 两处都是把"某个东西看起来已经到了"当成"下一步要的东西已经就绪"。
+
+---
+
+## 10.50 「沉淀成 Agent」——优化一条已有智能体的指令（2026-10-25，分批第 34 批起）
+
+使用者：「和功能"沉淀成skill"一样，增加一个功能"沉淀成Agent"」，随后明确了口径：
+
+> agent 指的是执行者或者审核者，比如执行者，只优化其指令，不包括优化它包含的 skill。
+> 不新建 agent，只更新当前 agent。
+
+### 10.50.1 定稿口径（七问七答）
+
+| 项 | 决定 |
+| --- | --- |
+| 入口 | 沉淀页，来源 run 上二选一：**执行者**（`run.agentId`）/ **审核者**（`run.reviewerAgentId`） |
+| 目标 | **只更新**，不新建；只改 `instructions`，`name`/`skillIds`/`toolIds`/`model`/`reviewStandard` 一字不动 |
+| 素材 | 现有素材 + 该 agent 当前完整指令（当"上一版"）+ 它挂的 skill **正文（只读）** + 这次的真实表现 + 审核意见 |
+| 审核 | 复用「Skill 审核者（内置）」，换成**指令口径**五件事（第 35 批） |
+| 长度 | **硬上限 6000 字符**，超了判不通过 |
+| 结构 | 建议分节（身份/边界/流程/产出/失败处理），不强制 |
+| 无证据 | 允许，但只许批"收敛措辞"，不许批"重构改口径" |
+| 退路 | 入库时另存快照，界面给「恢复上一版」（第 36 批） |
+| 循环 | 沿用现有那条链（10 轮、基于上一版改、停止循环、闸门标注、整链入库标记） |
+
+### 10.50.2 为什么**不**新开一条链
+
+第 23–30 批把那条循环修了七次（返工额度、停止循环、闸门只标注、整链入库标记、
+草稿日志不更新、恢复上一版会话…）。新功能如果另起一条"agent 草稿链"，等于把这七次
+修的东西再走一遍，而且两条链迟早走形。
+
+所以复用到底：**subject 仍是 `skill-draft`**、起草者仍是「起草者（内置）」、
+素材收集仍是 `collectMaterial`、工作目录仍是 `skill-draft-<id>`、返工/停止/闸门/入库标记全不动。
+唯一的差异是**沉淀目标多了一种**（`CrystallizeTargetRef` 加 `{kind:'agent', agentId}`）
+与**产出契约换成另一份**（`buildAgentInstructionsPrompt`）。命名上"skill-draft"这个词
+现在名不副实——记在第 34 批的取舍里：改名的代价是**已经落库的历史 run 的 subject 值
+也要跟着认**（`'skill-draft'` 存在使用者的 store 里），那是净增复杂度换一个名字。
+
+### 10.50.3 本批落地（第 34 批：目标 + 素材 + 起草能跑）
+
+| 改动 | 位置 |
+| --- | --- |
+| `CrystallizeTargetRef` 加 `{kind:'agent', agentId}`（无"新建"分支） | `packages/protocol/src/entities.ts` |
+| 目标面板给出 `agentTargets.executor` / `agentTargets.reviewer`（带 `instructionsChars` 与 `builtin`） | `apps/daemon/src/crystallize.ts` |
+| 素材落 `material/existing-agent.md`（名字、角色、**当前指令全文**）+ `meta.json` 记 `kind:'agent'` | `apps/daemon/src/crystallize-material.ts` |
+| `/api/crystallize/draft` 认 `target.kind === 'agent'`，且**必须校验它参与了这条 run**（否则 400 `agent_not_in_run`） | `apps/daemon/src/server.ts` |
+| 新契约 `buildAgentInstructionsPrompt`：产出 `agent/instructions.md`、整份覆盖、6000 上限、不许新建、无证据只收敛措辞 | `apps/daemon/src/crystallize.ts` |
+| 返工（`startReviseRun`）按**当初的目标**分叉（否则返工版会被要求去写 `skill/SKILL.md`） | `apps/daemon/src/server.ts` |
+
+### 10.50.4 验证（3 条 e2e，真 daemon + 假后端）
+
+| 用例 | 断言什么 | 红检 |
+| --- | --- | --- |
+| ★★★「目标面板给出执行者/审核者两个候选」 | `agentTargets.executor.id === run.agentId`、`reviewer.id === run.reviewerAgentId`、带指令长度 | — |
+| ★★★「起草优化审核者指令的草稿」 | 202；`material/existing-agent.md` 含**当前指令正文**与 `角色：reviewer`；`run.crystallizeTarget === {kind:'agent',agentId}`；投递的契约含 `agent/instructions.md`、`6000`、「不许新建智能体」、`existing-agent.md` | 短路契约分支（`false &&`）⇒ 红 ✓ |
+| ★★「指向没参与的 agent ⇒ 400」 | `code === 'agent_not_in_run'` | — |
+
+⚠️ 第二条的红检说明了一件事：契约分支一旦不生效，测试是**立刻**红的——因为它断言的是
+"投递给起草者的那段话"，而不是"服务端某个变量等于什么"。

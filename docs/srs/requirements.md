@@ -1167,6 +1167,12 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 34 批**（沉淀成 Agent 的起草前半段，见 §10.50）：`CrystallizeTargetRef` 加
+`{kind:'agent', agentId}`；目标面板给 `agentTargets`（executor/reviewer + 指令长度）；
+素材落 `existing-agent.md`（当前指令全文）；新增契约 `buildAgentInstructionsPrompt`
+（产出 `agent/instructions.md`、整份覆盖、`AGENT_INSTRUCTIONS_MAX_CHARS = 6000`、不许新建 agent、
+无证据只收敛措辞）；`/api/crystallize/draft` 校验该 agent **参与了这条 run**（`agent_not_in_run`）；
+返工按当初目标分叉。3 条 e2e，其中一条红检过。
 **第 33 批**（过程格内容自适应，见 §10.48）：`.process-pane` 内的日志框/最后结果改为 `flex: 1 1 0`，
 问题清单封顶 50% 自带滚动；补 `loadDraftFinalText()`（接上已完成草稿时漏调，那一格永远停在骨架）；
 探针新增 6 项判据（两格底边差、日志框占格比例、草稿格形态），563 → 565 项全绿。

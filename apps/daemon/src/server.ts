@@ -80,6 +80,8 @@ import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
 import {
+  AGENT_INSTRUCTIONS_MAX_CHARS,
+  buildAgentInstructionsPrompt,
   buildDraftPrompt,
   crystallizeTargets,
   listCrystallizeDrafts,
@@ -112,6 +114,7 @@ import {
   listMaterialFiles,
   sourceLabelOf,
   writeMaterial,
+  type ExistingAgentSnapshot,
   type ExistingSkillSnapshot,
 } from './crystallize-material.ts'
 import {
@@ -3635,7 +3638,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       await writeFile(
         join(materialDir, '00-README.md'),
         `${index.trimEnd()}\n\n## 这一版是「按意见改一版」（第 ${versionNo} 版，仍在**同一个任务目录**里）\n\n` +
-          '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
+          (previous.crystallizeTarget?.kind === 'agent'
+            ? '- **产出目录 `agent/` 里就是上一版**（`instructions.md`）——你要做的是在它上面改。\n'
+            : '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n') +
           '- ⚠️ 这一版**不是**新开的小屋：`material/`、`skill/` 与前几版是同一个任务目录，路径没变。\n' +
           '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
           '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
@@ -3665,14 +3670,30 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         },
       }
     }
-    const revisePrompt = buildDraftPrompt({
-      scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
-      materialDir: 'material',
-      outputDir: 'skill',
-      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
-      revised: true,
-      writingSpec: reviseSpec.body,
-    })
+    /**
+     * ★ 分批第 34 批：返工也要按**当初的目标**分叉，否则「沉淀成 Agent」的返工版会被
+     * 要求去写 `skill/SKILL.md`——产出凭空变成一个 skill，而入库只认 `agent/instructions.md`。
+     *
+     * 返工一定有证据（审核不通过的意见，或使用者手写的意见），所以 `hasEvidence` 恒 true。
+     */
+    const revisePrompt =
+      previous.crystallizeTarget?.kind === 'agent'
+        ? buildAgentInstructionsPrompt({
+            scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+            materialDir: 'material',
+            outputDir: 'agent',
+            revised: true,
+            hasEvidence: true,
+            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
+          })
+        : buildDraftPrompt({
+            scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+            materialDir: 'material',
+            outputDir: 'skill',
+            target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+            revised: true,
+            writingSpec: reviseSpec.body,
+          })
 
     const outcome = await executor.submit({
       runId: newRunId,
@@ -6159,10 +6180,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 传进来的可能是起草 run 自己（草稿列表点进来）——归一成源 run，
       // 绝不拿草稿的产出当素材（见 crystallize.ts 的 resolveSourceRun）。
       const sourceRun = await resolveSourceRun(store, requestedRun)
-      // 目标：新建（必填作用描述）或 更新本次加载的 skill。
+      // 目标：新建 skill（可带作用描述）/ 更新本次加载的 skill / **优化某条智能体的指令**。
       let target:
         | { kind: 'new'; purpose: string }
         | { kind: 'update'; skillId: string }
+        | { kind: 'agent'; agentId: string }
       const t = raw?.target as Record<string, unknown> | undefined
       if (t?.kind === 'new') {
         // 作用描述**可选**（2026-10-19 四轮定稿）：留空则由内置技能从素材推断，
@@ -6177,8 +6199,36 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           return
         }
         target = { kind: 'update', skillId }
+      } else if (t?.kind === 'agent') {
+        /**
+         * ★ 分批第 34 批：「沉淀成 Agent」= 优化**某一条已有智能体**的指令。
+         *
+         * 使用者的口径（2026-10-25）：agent 指执行者或审核者；只优化它的指令、
+         * 不碰它挂的 skill、**不新建 agent**。所以这里只有 `agentId`，没有"新建"那一支。
+         *
+         * ⚠️ 必须校验它**在这次 run 上真的用过**：`agentId` 来自前端，手改请求就能指向
+         *    任意一条 agent。指向本次没参与的 agent 时，素材（这次的表现）和它无关，
+         *    改出来的指令只会是"按别人的错误改自己的规矩"。
+         */
+        const agentId = typeof t['agentId'] === 'string' ? t['agentId'] : ''
+        if (agentId === '') {
+          sendJson(res, 400, { error: '优化智能体需要 agentId', code: 'agent_id_required' })
+          return
+        }
+        const usedIds = [sourceRun.agentId as string, sourceRun.reviewerAgentId ?? null]
+        if (!usedIds.includes(agentId)) {
+          sendJson(res, 400, {
+            error: '这条智能体没有参与这次的 run（只能优化实际参与的那条执行者或审核者）',
+            code: 'agent_not_in_run',
+          })
+          return
+        }
+        target = { kind: 'agent', agentId }
       } else {
-        sendJson(res, 400, { error: '需要 target（{kind:"new"} 或 {kind:"update"}）', code: 'target_required' })
+        sendJson(res, 400, {
+          error: '需要 target（{kind:"new"} / {kind:"update"} / {kind:"agent"}）',
+          code: 'target_required',
+        })
         return
       }
 
@@ -6213,6 +6263,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 更新基线：把现有技能**整份**（正文 + 支持文件）摆进素材，agent 才能"修订"
       // 而不是重写。只给正文的话，它会把 references/ 里的东西当不存在。
       let updateSnapshot: ExistingSkillSnapshot | null = null
+      /**
+       * ★ 分批第 34 批：优化指令要把**它现在的指令全文**摆进素材（同一条理由：
+       * 不给"上一版"，起草者只能重写一份，而使用者要的是在这条上改）。
+       */
+      let agentSnapshot: ExistingAgentSnapshot | null = null
+      if (target.kind === 'agent') {
+        const all = await store.listAgents(workspaceId)
+        const agent = all.find((a) => (a.id as string) === target.agentId)
+        if (!agent) {
+          sendJson(res, 404, {
+            error: `智能体不存在（${target.agentId}）`,
+            code: 'agent_not_found',
+          })
+          return
+        }
+        agentSnapshot = {
+          id: agent.id as string,
+          name: agent.name,
+          role: agent.role,
+          instructions: agent.instructions,
+        }
+      }
       if (target.kind === 'update') {
         const mine = await store.listSkills(workspaceId)
         const skill = mine.find((s) => (s.id as string) === target.skillId)
@@ -6236,9 +6308,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           scope: targets.scope,
           sourceLabel: await sourceLabelOf(store, sourceRun),
           target:
-            updateSnapshot === null
-              ? { kind: 'new', purpose: target.kind === 'new' ? target.purpose : '' }
-              : { kind: 'update', skill: updateSnapshot },
+            agentSnapshot !== null
+              ? { kind: 'agent', agent: agentSnapshot }
+              : updateSnapshot === null
+                ? { kind: 'new', purpose: target.kind === 'new' ? target.purpose : '' }
+                : { kind: 'update', skill: updateSnapshot },
           existingSkills,
         })
       } catch (err) {
@@ -6260,13 +6334,35 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
-      const draftPrompt = buildDraftPrompt({
-        scope: targets.scope,
-        materialDir: 'material',
-        outputDir: 'skill',
-        target: updateSnapshot === null ? 'new' : 'update',
-        writingSpec: writingSpec.body,
-      })
+      /**
+       * ★ 分批第 34 批：目标是"优化智能体指令"时换成另一份契约（`agent/instructions.md`）。
+       *
+       * 契约分叉只有这一处：素材、执行管道、返工循环、审核收口全都同一个。
+       * 这也是为什么没有为新功能另写一条链——那条链（10 轮预算、停止循环、闸门标注、
+       * 整链入库标记）刚修过三批，第二套必然走形。
+       *
+       * `hasEvidence`：这次有没有"失败证据"（审核判决 / 使用者反馈）。没有证据时
+       * 契约要求**只收敛措辞**（审核口径同一条，见第 35 批）。
+       */
+      const hasDraftEvidence = collected.pieces.some(
+        (p) => p.relPath === 'verdict.md' || p.relPath === 'feedback.md',
+      )
+      const draftPrompt =
+        agentSnapshot !== null
+          ? buildAgentInstructionsPrompt({
+              scope: targets.scope,
+              materialDir: 'material',
+              outputDir: 'agent',
+              hasEvidence: hasDraftEvidence,
+              maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
+            })
+          : buildDraftPrompt({
+              scope: targets.scope,
+              materialDir: 'material',
+              outputDir: 'skill',
+              target: updateSnapshot === null ? 'new' : 'update',
+              writingSpec: writingSpec.body,
+            })
 
       // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
       // ★ 起草者 = **平台内置的那条**（2026-10 定稿 §9），不再借来源 run 的执行者：
@@ -6313,7 +6409,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // 沉淀目标随 run 落库：恢复进行中的起草时按它还原（§4.1.1）。
         // ⚠️ purpose 不落库——它只影响起草 prompt，提交时用不到。
         crystallizeTarget:
-          target.kind === 'new' ? { kind: 'new' } : { kind: 'update', skillId: target.skillId },
+          target.kind === 'new'
+            ? { kind: 'new' }
+            : target.kind === 'agent'
+              ? { kind: 'agent', agentId: target.agentId }
+              : { kind: 'update', skillId: target.skillId },
         // 工作目录 = 草稿小屋（2026-10-19 四轮）：`material/` 是素材（平台写）、
         // `skill/` 是产出（agent 写）。素材必须在工作目录里——claude 的
         // PreToolUse 隔离 hook 会 deny 越界路径，放别处 agent 读不到。
