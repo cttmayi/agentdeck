@@ -1591,3 +1591,50 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **数据目录** | `~/.agentdeck/data`，程序内部状态（SQLite/JSONL、锁、blob 日志）。刻意隐藏 |
 | **invalid** | 判决**没按格式输出**（≠ 执行失败）。有独立的三条出口：retry / 降级 / 升级 |
 | **rework** | 判决说"这活不行"（`fail`）⇒ 交回**执行者**重做。与 `retry`（重做**审核者**）方向相反 |
+
+### 4.3.1 分批第 40 批：「哪些是平台注入的」要认得 `default`
+
+使用者报的故障（真机）：
+
+> 「当我给智能体选择 CLI 是 Default 的时候，不能预览工作目录，提示『取不到工作目录的文件
+> Error: 未知的 runtime：default。当前支持：claude, generic, codex』」
+
+#### 根因
+
+工作目录那两条只读路由（`GET /api/conversations/:id/files`、`GET /api/runs/:id/files`）
+各自写了一句：
+
+```ts
+const managed = managedPathsFor(getRuntimeDescriptor(agent?.runtimeKey ?? 'claude'))
+```
+
+它要回答的本来只是「哪些目录是平台注入的，列目录时要把它们标出来」，但这一句一次犯了四个错：
+
+| # | 错 | 后果 |
+| --- | --- | --- |
+| ① | 不认识 `'default'` | 那是**合法值**（协议：agent 写 `'default'` 时用全局默认），而**新建的 agent 记的就是它** ⇒ 最常见的那一档直接抛 |
+| ② | 忽略 `Workspace.defaultRuntimeKey` | 三级解析的第二级没走 ⇒ 标错的注入物（写死 claude 时把 `.claude` 当注入、把 `.codex` 当产出） |
+| ③ | agent 取不到时**写死 `'claude'`** | 没有 claude 的机器上必抛 |
+| ④ | 抛出去 = 500 | 一个纯元数据（"标哪些是注入物"）的失败，把整栏**文件预览**打死 |
+
+执行器 `executor.ts` 里早就做对了同一件事（三级解析 + try/catch 降级 + `onWarn`）。
+两份实现迟早分叉，而分叉的表现就是这次这个形状：**run 跑得起来，界面上却看不到它干了什么**。
+
+#### 修法（一处实现，两处调用）
+
+daemon 主体里新增两个函数，与执行器同口径：
+
+- `effectiveRuntimeKeyOf(agent)`：`agent.runtimeKey` ⇒（为 `'default'` 时）`Workspace.defaultRuntimeKey`
+  ⇒（空）本机侦测到的 `runtimeKey`。workspace 那层**现读不缓存**（它随时能改，缓存住的表现是
+  "改了不生效、重启才生效"）。
+- `managedPathsOf(agent)`：拿它调 `managedPathsFor`；**解析不出来就降级到本机侦测到的那个**并
+  `warn` 一句——这一栏的用途是"分清哪些是 agent 的产出"，标错一格远好过什么都看不到。
+
+#### 验证
+
+| 用例 | 断言什么 | 红检 |
+| --- | --- | --- |
+| ★★★「agent 的 CLI = Default ⇒ 列目录照样 200」 | 200；`.claude` 仍标成注入；`产出.md` 不是 | 换回旧写法 ⇒ 红，错误消息与使用者报的**逐字相同**：`{"error":"Error: 未知的 runtime：default。当前支持：claude, generic, codex"}` |
+| ★★「agent = default 且工作区默认设成 codex」 | `.codex` 标注入、`.claude` **不**标（写死 claude 的版本刚好反过来） | 同上 ⇒ 红 |
+
+全量 `pnpm run check` 2127 全绿（2125 + 2）。

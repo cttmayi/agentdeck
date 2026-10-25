@@ -2000,6 +2000,57 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // ★ runtime 的选择从"写死 claude"变成"查装配表"（FR-CLI-47）。
   //   表里有几个 runtime，这里就能跑几个——本文件不再认识任何具体 CLI。
   const runtimeKey = options.runtimeKey ?? 'claude'
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * ★ 分批第 40 批：这个 agent **实际**用哪个 runtime —— 三级解析，与执行器同一口径
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 为什么要抽出来：使用者报了真机上的一处故障——「给智能体选择 CLI 是 Default 的时候，
+   * 不能预览工作目录」，报错是 `未知的 runtime：default。当前支持：claude, generic, codex`。
+   *
+   * 根因是两处列目录的路由各自写了一句 **`agent?.runtimeKey ?? 'claude'`**，那句快捷写法
+   * 一次犯了四个错（每一个都单独够坏）：
+   *   ① 不认识 `'default'`——那是**合法值**（协议里写着"agent 写 'default' 时用全局默认"），
+   *      新建的 agent 记的就是它 ⇒ 恰好是最常见的那一档直接抛；
+   *   ② 忽略 `Workspace.defaultRuntimeKey`（三级解析的第二级）；
+   *   ③ agent 取不到时**写死 'claude'**——在没有 claude 的机器上直接抛；
+   *   ④ 抛出去就是 500，而这条路由只是**读文件列表**：一个用于"标记哪些是平台注入物"的
+   *      元数据失败，把整栏文件预览打死。
+   *
+   * ⚠️ 执行器 `executor.ts` 里早就做对了同一件事（三级 + try/catch 降级 + warn）。两份实现
+   *    迟早分叉——分叉的表现就是"run 跑得起来、界面上却看不到它干了什么"。
+   */
+  async function effectiveRuntimeKeyOf(agent: Agent | null | undefined): Promise<string> {
+    let key = agent?.runtimeKey ?? 'default'
+    if (key === 'default') {
+      // workspace 那层**现读**（不缓存）：它随时能改，缓存住的表现是"改了不生效、重启才生效"
+      const ws = agent ? await store.getWorkspace(agent.workspaceId) : null
+      const configured = ws?.defaultRuntimeKey?.trim() ?? ''
+      key = configured !== '' ? configured : runtimeKey
+    }
+    return key
+  }
+
+  /**
+   * 这个 agent 的工作目录里，哪些是**平台注入的**（列目录时要把它们标出来）。
+   *
+   * 解析不出来就**降级到本机侦测到的那个 runtime**，而不是把整条路由打成 500：
+   * 这一栏的用途是"分清哪些是 agent 的产出"，标错一格远好过什么都看不到。
+   */
+  async function managedPathsOf(agent: Agent | null | undefined): Promise<ManagedPaths> {
+    const want = await effectiveRuntimeKeyOf(agent)
+    try {
+      return managedPathsFor(getRuntimeDescriptor(want))
+    } catch (err) {
+      warn(
+        `agent ${agent?.name ?? '（未知）'} 的 runtimeKey（${want}）解析不出来，` +
+          `工作目录里"平台注入物"按本机侦测到的 ${runtimeKey} 标记：` +
+          (err instanceof Error ? err.message : String(err)),
+      )
+      return managedPathsFor(getRuntimeDescriptor(runtimeKey))
+    }
+  }
   const selected = createRuntimeBackend(runtimeKey, {
     ...(options.executablePath ? { executablePath: options.executablePath } : {}),
     onWarn: warn,
@@ -8015,7 +8066,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }).path
       if (sub === 'files') {
         const agent = await store.getAgent(conversation.agentId as Agent['id'])
-        const managed = managedPathsFor(getRuntimeDescriptor(agent?.runtimeKey ?? 'claude'))
+        // ★ 分批第 40 批：三级解析 + 降级（原来 `agent?.runtimeKey ?? 'claude'` ⇒ 'default' 直接 500）
+        const managed = await managedPathsOf(agent)
         await sendWorkDirListing(res, dir, url.searchParams.get('dir') ?? '', managed)
         return
       }
@@ -8932,7 +8984,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ★ "哪些是平台注入的"按**这个 run 用的 runtime** 算。
         //   写死 `.claude/` 的版本对别的 CLI 会把注入物当成 agent 的产出显示。
         const owner = await store.getAgent(run.agentId as never)
-        const managed = managedPathsFor(getRuntimeDescriptor(owner?.runtimeKey ?? 'claude'))
+        // ★ 分批第 40 批：同上（任务详情右边那一栏与聊天右栏底部那一栏是同一条判据）
+        const managed = await managedPathsOf(owner)
         await sendWorkDirListing(res, run.workDir, dir, managed)
         return
       }

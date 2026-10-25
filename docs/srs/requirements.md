@@ -1167,6 +1167,10 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 > 结论摘要保留在本文件 §2，行为证据由 `ref/` 承担；本表不再列不存在的文件。
 
 > **重要**：以上仅为**思路参考**。Multica 的许可禁止对外托管与商业嵌入，实现必须 clean-room，**不得复制其源码**（FR-LIC-03）。
+**第 40 批**（修使用者报的缺陷，见 architecture §4.3.1）：工作目录预览在 `agent.runtimeKey = 'default'`
+（= 跟随全局默认，新建 agent 的默认值）时 500「未知的 runtime：default」。修法是 daemon 里补一对
+与执行器同口径的解析函数（`effectiveRuntimeKeyOf` / `managedPathsOf`：三级解析 + 解析不出来降级到
+本机侦测值 + warn），两条列目录路由改用它。
 **第 39 批**（入口改名，见 §10.50.9）：任务页/对话页/页标题三处入口统一叫「沉淀技能&智能体」
 （旧名「优化 skill / 沉淀成 skill」让人以为只支持 skill——功能做完了却没人找得到）；探针新增
 `tasks.crystallizeActionLabel` 判据做反悔保护。

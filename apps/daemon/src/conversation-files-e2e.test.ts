@@ -160,6 +160,78 @@ after(async () => {
   await cleanup(workRoot)
 })
 
+describe('★ 分批第 40 批：「平台注入物」的判定要认得 `default`（真机上报的那个 500）', () => {
+  /**
+   * 使用者的原话：「当我给智能体选择 CLI 是 Default 的时候，不能预览工作目录，提示
+   * 『取不到工作目录的文件 Error: 未知的 runtime：default。当前支持：claude, generic, codex』」。
+   *
+   * 根因不是"文件预览坏了"，而是**这一栏顺带用 runtime 决定"哪些是平台注入的"**，
+   * 而那句 `agent?.runtimeKey ?? 'claude'` 不认识 `'default'`（它是**合法值**，新建的
+   * agent 记的就是它）。于是"列文件"这么一件与 runtime 无关的事被一个元数据抛死。
+   */
+  const patchAgent = async (id: string, body: Record<string, unknown>) =>
+    json(`/api/agents/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  const putWorkspaceDefault = async (runtimeKey: string) =>
+    json('/api/workspace/default-runtime', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runtimeKey }),
+    })
+
+  test('★★★ agent 的 CLI = Default（`default`）⇒ 列目录照样 200，且按本机侦测到的 runtime 标注入物', async () => {
+    const res = await patchAgent(agentId, { runtimeKey: 'default' })
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    const conv = await makeConversation()
+    await mkdir(join(conv.dir, '.claude/skills/x'), { recursive: true })
+    await writeFile(join(conv.dir, '.claude/skills/x/SKILL.md'), '# skill\n')
+    await writeFile(join(conv.dir, '产出.md'), '# 好\n')
+
+    const listing = await json(`/api/conversations/${conv.id}/files`)
+    assert.equal(
+      listing.status,
+      200,
+      `CLI=Default 时列目录不许 500（真机上报过「未知的 runtime：default」）：${JSON.stringify(listing.body)}`,
+    )
+    const body = listing.body as Listing
+    const injected = body.entries.find((e) => e.name === '.claude')
+    const produced = body.entries.find((e) => e.name === '产出.md')
+    assert.equal(injected?.managed, true, '侦测到 claude ⇒ .claude 仍要标成平台注入')
+    assert.equal(produced?.managed, false)
+  })
+
+  test('★★ agent = default 且工作区默认设成 codex ⇒ 按 codex 标（三级解析的第二级要真的生效）', async () => {
+    await patchAgent(agentId, { runtimeKey: 'default' })
+    const put = await putWorkspaceDefault('codex')
+    assert.equal(put.status, 200, JSON.stringify(put.body))
+    try {
+      const conv = await makeConversation()
+      await mkdir(join(conv.dir, '.codex/skills/y'), { recursive: true })
+      await writeFile(join(conv.dir, '.codex/skills/y/SKILL.md'), '# skill\n')
+      await mkdir(join(conv.dir, '.claude'), { recursive: true })
+      const listing = await json(`/api/conversations/${conv.id}/files`)
+      assert.equal(listing.status, 200)
+      const body = listing.body as Listing
+      assert.equal(
+        body.entries.find((e) => e.name === '.codex')?.managed,
+        true,
+        '工作区默认是 codex ⇒ .codex 是注入物',
+      )
+      assert.equal(
+        body.entries.find((e) => e.name === '.claude')?.managed,
+        false,
+        '这时 .claude 就是 agent 自己的东西——写死 claude 的版本会把它误标成注入物',
+      )
+    } finally {
+      await putWorkspaceDefault('')
+    }
+  })
+})
+
 describe('D49 ⑩：对话的工作目录（聊天右栏底部那一栏）', () => {
   test('★ 身份里认领了这条接口（界面据此决定画不画那一栏）', async () => {
     const { body } = await json('/api/identity')
