@@ -71,7 +71,6 @@ describe('★ 分批第 44 批：发给 CLI 的正文与日志里那份的比对
     const text = '===== 任务 =====\n\n把 a.txt 读完\n'
     const v = verifySentText(text, text)
     assert.equal(v.identical, true)
-    assert.equal(v.body, undefined, '一致时不许再打一遍原文（同一段出现两次会造成新的误解）')
     assert.match(v.headline, /逐字相同/)
     assert.match(v.headline, new RegExp(String(text.length)), '长度要写出来，便于一眼核对')
   })
@@ -81,8 +80,8 @@ describe('★ 分批第 44 批：发给 CLI 的正文与日志里那份的比对
     const sent = '把 a.txt 读完了（多了两个字）'
     const v = verifySentText(declared, sent)
     assert.equal(v.identical, false)
-    assert.equal(v.body, sent, '正文必须是**线上**那一份，不是日志里那份')
     assert.match(v.headline, /不一致/)
+    assert.match(v.headline, /以\*\*上面那份原文\*\*为准/, '要指明哪一份是可信的（它真收到的那份）')
     // `declared` 是 `sent` 的前缀 ⇒ 不同的位置就是 declared 的末尾之后那一格。
     // 「把 a.txt 读完」= 10 个 JS 字符（汉字算一个），所以是第 11 个字符起不同。
     assert.match(v.headline, /第 11 个字符/, '要指出第一个不同的位置')
@@ -156,6 +155,14 @@ describe('★ 分批第 44 批：帧摘要真的进了运行日志（不是死�
         /逐字相同/u,
         '★ 必须有一行把"日志里的第一句话"与"线上真的发出去的"钉在一起',
       )
+      /**
+       * ★ 分批第 45 批：**原文本身**必须进日志。
+       *
+       * 上一批只打了"逐字相同"这一行结论，使用者当场说「我还是没有看到第一个命令
+       * 到底是什么给到 codex 的」——结论行是给校对用的，他要的是内容。
+       */
+      assert.match(text, /===== 发给 CLI 的原文（turn\/start，/u, '原文要带标题打出来')
+      assert.match(text, /把 a\.txt 读完/u, '★ 送出去的**那一段正文**要真的在日志里')
     } finally {
       await daemon.close()
       await cleanup(dataDir)

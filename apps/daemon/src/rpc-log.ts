@@ -15,9 +15,9 @@
  *
  *   ① 把 `turn/start` 的 input 原文**再打印一遍** —— 直白，但同一段几十 KB 的
  *      第一句话会在日志里出现两次，"哪一份是真的"立刻变成新的误解源。
- *   ② **逐字比对**：拿帧里真的发出去的那段 `sentText` 与日志里已经记下的
- *      "第一句话 user 部分"比。一致就一行话说清；**不一致才把原文打出来**
- *      （那才是异常现场，也正是必须看见全文的时候）。
+ *   **③（最终采用）**：正文**总是**打出来（分批第 45 批：使用者要的就是"内容本身"），
+ *      再用本函数做一次**逐字比对**，把"日志里读到的"与"CLI 真收到的"钉在一起。
+ *      ⇒ 正文可见 + 校对结论，两件事分开、各司其职。
  *
  * 这就是本函数的全部逻辑。它的价值在于把"日志"与"线上"钉在一起：
  * 以后任何一次"我明明写了它却没照做"的争论，都可以先看这一行。
@@ -28,8 +28,6 @@ export interface SentTextVerdict {
   identical: boolean
   /** 要进日志的那一行结论。 */
   headline: string
-  /** 不一致时的原文（一致时为 undefined：不重复打印）。 */
-  body?: string
 }
 
 /**
@@ -63,7 +61,6 @@ export function verifySentText(declared: string, sent: string): SentTextVerdict 
     headline:
       `⚠️ 发给 CLI 的内容与上面「第一句话」**不一致**（日志 ${String(declared.length)} 字符 / ` +
       `线上 ${String(sent.length)} 字符，第 ${String(firstDiff + 1)} 个字符起不同）` +
-      '——下面这一份是**真的送出去**的原文：',
-    body: sent,
+      '——以**上面那份原文**为准（那才是它真收到的）：',
   }
 }

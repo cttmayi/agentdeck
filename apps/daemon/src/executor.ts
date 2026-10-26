@@ -1504,9 +1504,27 @@ export class RunExecutor {
         onRpcFrame: (note) => {
           void this.#note(runId, note.headline)
           if (note.sentText === undefined) return
+          /**
+           * ★ 分批第 45 批：**把它原文打出来**。
+           *
+           * 分批第 44 批只打了"与第一句话逐字相同"这一行结论，使用者当场反馈
+           * 「我还是没有看到第一个命令到底是什么给到 codex 的」——他说得对：
+           * 结论行是给"校对"用的，而他要的是**内容本身**。而且 claude 那条路上
+           * 内容就明明白白在 `命令行：` 里，凭什么叫 codex 的使用者去上面翻三块模版？
+           *
+           * ⚠️ 代价是这一段在日志里出现两次（三块模版 + 这里）。选择仍然倾向"看得见"：
+           *    上一批担心的"哪一份是真的"由下面那行**逐字比对**回答，
+           *    而"内容根本看不见"没有任何替代品。
+           * ⚠️ 只有 service 形状会走到这里（`sentText` 只由 codex 后端给），
+           *    claude / generic 的日志一个字都不变。
+           */
+          void this.#note(
+            runId,
+            `===== 发给 CLI 的原文（${note.method}，${String(note.sentText.length)} 字符）=====\n\n` +
+              note.sentText,
+          )
           const verdict = verifySentText(delivery.user, note.sentText)
           void this.#note(runId, verdict.headline)
-          if (verdict.body !== undefined) void this.#note(runId, verdict.body)
         },
         onCommandLine: ({ argv, sandboxDescription }) => {
           actualArgv = argv
