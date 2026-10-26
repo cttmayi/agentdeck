@@ -503,6 +503,8 @@
                指令是一份几百到上千字的文档，不是一行备注。 -->
           <textarea id="agent-instructions" class="instructions" bind:value={draft.instructions} rows="6"></textarea>
           <p class="row-hint">{$t('agents.instructionsHintBefore')}<strong>{$t('agents.instructionsFieldStrong')}</strong>{$t('agents.instructionsHintAfter')}</p>
+          <!-- ★ 分批第 53 批：点明「指令」= 第一句话的 ② 身份（使用者报的命名困惑）。 -->
+          <p class="row-hint" data-instructions-identity>{$t('agents.instructionsIdentityHint')}</p>
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。 -->

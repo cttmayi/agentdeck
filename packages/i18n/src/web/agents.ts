@@ -53,6 +53,23 @@ export const agentsText = {
   'agents.roleLabel': { zh: '角色', en: 'Role' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
+  /**
+   * ★ 分批第 53 批：在「指令」下面说明它进第一句话的哪一块。
+   *
+   * 使用者报的困惑：智能体页叫「指令」、模版页叫「② 身份」，看不出是同一份。
+   * 这句把它钉死：**内容在这里编辑，位置在模版页决定**。
+   */
+  /**
+   * ★ 分批第 53 批：新建表单里那个**一行版**（完整说明在详情页，见上一条）。
+   */
+  'agents.instructionsIdentityTag': {
+    zh: '= 第一句话的 ② 身份',
+    en: '= block ② identity',
+  },
+  'agents.instructionsIdentityHint': {
+    zh: '这一段会作为第一句话的 ② 身份，每次 run 都发给 CLI（审核者还会把「审核标准」接在同一块里）。它出现在哪一块、包什么标题，由设置里的「第一句话模版」决定。',
+    en: 'This text becomes block ② identity of the first sentence, sent to the CLI on every run (for reviewers the review standard is merged into the same block). Where it appears and what heading wraps it is decided by the first-sentence template in Settings.',
+  },
   // ⚠️ 2026-10（使用者的决定）：`reviewerFieldLabel`（由谁来审它）、
   // `noAutoReview`、`workDirLabel`（默认工作目录）、`workDirPlaceholder` 随设置
   // 一起删了——审核走智能体组；工作目录是任务级的。协议字段原样保留。

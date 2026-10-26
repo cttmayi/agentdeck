@@ -177,10 +177,18 @@ export const templatesText = {
     zh: '这个智能体是谁',
     en: 'who this agent is',
   },
+  /**
+   * ★ 分批第 53 批：点明「② 身份」就是智能体页里的**「指令」**。
+   *
+   * 使用者报：「配置智能体的时候叫『指令』，模版里面叫『身份』，这样不明确」。
+   * 两个名字说的是同一份文本（`Agent.instructions`），只是两个页面各叫各的。
+   * 这里不改词，而是**每处点明对应关系**——改名会让界面词与字段名（instructions）、
+   * 已有文档与日志全部不一致，代价比一句说明大得多。
+   */
   'tpl.settings.hint.identity.after': {
     // ⚠️ 反引号去掉（同上：纯文本渲染，记号会原样显示）
-    zh: '——放一个 {{identity}} 就行（审核者会自动接上它的审核标准，合成同一块）。',
-    en: ' — place {{identity}} once (for reviewers it also merges in their review standard).',
+    zh: '——放一个 {{identity}} 就行。它就是智能体页里那条「指令」（审核者会自动接上它的「审核标准」，合成同一块）；这一段在智能体页编辑，这里只决定它出现在哪儿、包什么标题。',
+    en: ' — place {{identity}} once. It is the agent’s “instructions” field (for reviewers their review standard is merged in); you edit the text on the agent page, this only decides where it appears and what heading wraps it.',
   },
   'tpl.settings.hint.task.before': { zh: '这一块是任务：', en: 'This block is the task: ' },
   'tpl.settings.hint.task.strong': {
