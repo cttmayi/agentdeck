@@ -1520,7 +1520,7 @@ export class RunExecutor {
            */
           void this.#note(
             runId,
-            `===== 发给 CLI 的原文（${note.method}，${String(note.sentText.length)} 字符）=====\n\n` +
+            `===== 已写入 CLI stdin 的原文（${note.method}，${String(note.sentText.length)} 字符）=====\n\n` +
               note.sentText,
           )
           const verdict = verifySentText(delivery.user, note.sentText)

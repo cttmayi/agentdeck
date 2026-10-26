@@ -15,6 +15,7 @@ import {
   type AgentSession,
   type ExecOptions,
   type ProcessHandle,
+  type RpcDeliveryNote,
   type RuntimeDescriptor,
 } from '@agentdeck/agent-core'
 import type { RuntimeProtocol } from '@agentdeck/protocol'
@@ -68,6 +69,66 @@ function asString(value: unknown): string | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * ★ 分批第 46 批：从**真的写进 stdin 的那一行**里，把发出去的正文抠出来上报。
+ *
+ * 使用者原话：「还是需要把给 CLI 的内容打印出来，尽量在发送的位置直接打，保证真实性」。
+ *
+ * 为什么不能直接用 `opts.prompt`：那是"我们打算发的那份"。这一整条日志存在的意义，
+ * 恰恰是要证明"它收到的 == 日志里写的"。所以这里坚持两步：
+ *
+ *   ① `JSON.stringify` 出**要写进 stdin 的那一行**（调用方先写，再把这一行交进来）；
+ *   ② 只从**这一行**里 `JSON.parse` 出 `params.input[...].text` 上报。
+ *
+ * 抠不出来（帧形状变了、不是 `turn/start`、input 里有多段）就**不说**——
+ * 宁可少一行，也不写一句没有字节支撑的话。
+ *
+ * ⚠️ 多段 input 时只报"段数"，不拼起来：拼起来就是我们在**造**一份没被发出去的内容。
+ */
+function reportSentTurnInput(
+  frame: unknown,
+  line: string,
+  opts: { onRpcFrame?: (note: RpcDeliveryNote) => void },
+): void {
+  if (opts.onRpcFrame === undefined) return
+  const method = (frame as { method?: unknown } | null)?.method
+  if (method !== 'turn/start') return
+  let parsed: { params?: { input?: unknown } }
+  try {
+    // ⚠️ 解析的是**写出去的那一行**，不是 `frame` 对象本身（后者只证明"想发什么"）
+    parsed = JSON.parse(line) as { params?: { input?: unknown } }
+  } catch {
+    return
+  }
+  const input = parsed.params?.input
+  if (!Array.isArray(input)) return
+  const texts = input
+    .map((item) => (item as { type?: unknown; text?: unknown } | null))
+    .filter((item): item is { type: string; text: string } =>
+      item !== null && item.type === 'text' && typeof item.text === 'string',
+    )
+    .map((item) => item.text)
+  if (texts.length !== 1) {
+    opts.onRpcFrame({
+      direction: 'out',
+      method: 'turn/start',
+      headline:
+        `↓ 已写入 codex stdin（turn/start，${String(Buffer.byteLength(line, 'utf8'))} 字节）：` +
+        `input 有 ${String(input.length)} 段，只有 1 段时才会把正文打出来`,
+    })
+    return
+  }
+  const text = texts[0] ?? ''
+  opts.onRpcFrame({
+    direction: 'out',
+    method: 'turn/start',
+    headline:
+      `↓ 已写入 codex stdin：整帧 ${String(Buffer.byteLength(line, 'utf8'))} 字节，` +
+      `其中 input[0].text 共 ${String(text.length)} 字符（下面这段是**从写出去的那一行里抠出来的**）`,
+    sentText: text,
+  })
 }
 
 export class CodexBackend implements AgentBackend {
@@ -190,7 +251,23 @@ export class CodexBackend implements AgentBackend {
           ? { retryDelayMs: this.#options.rpcRetryDelayMs }
           : {}),
       },
-      (frame) => handle?.writeStdin(`${JSON.stringify(frame)}\n`),
+      /**
+       * ★ 分批第 46 批：**在发送点**把正文报出去（使用者的要求：「尽量在发送的位置直接打，
+       * 保证真实性」）。
+       *
+       * 45 批那一版是在 `rpc('turn/start', …)` 返回**之后**拿 `opts.prompt` 报的——
+       * 内容是"我们打算发的那份"，不是"字节里实际写着的那份"。两者一般情况下相同，
+       * 但"一般情况下相同"正是日志最不该依赖的东西：要证明的恰恰是"它收到的就是我看到的"。
+       *
+       * 所以改成：**先序列化、写进 stdin，再从写出去的那一行里把正文抠出来上报**。
+       * 于是日志里的那段文字，与 CLI 在 stdin 上读到的字节是同一份（同一行 JSON 里的
+       * `params.input[0].text`）——真实性由"读回来的那一行"保证，而不是由"我记得发的是它"。
+       */
+      (frame) => {
+        const line = `${JSON.stringify(frame)}\n`
+        handle?.writeStdin(line)
+        reportSentTurnInput(frame, line, opts)
+      },
     )
 
     try {
@@ -379,18 +456,7 @@ export class CodexBackend implements AgentBackend {
         `→ turn/start（threadId=${threadId}，input 1 项 / ${String(opts.prompt.length)} 字符，` +
           `cwd=${opts.workDir}）`,
       )
-      /**
-       * ★ 分批第 44 批：把**真正发出去的那段正文**单独交出去。
-       *
-       * 上面那条 headline 里只有长度；内容本身在 `sentText` 里——调用方（executor）
-       * 拿它与"第一句话"**逐字比对**，于是日志能回答"我看到的输入是不是它真收到的输入"。
-       */
-      opts.onRpcFrame?.({
-        direction: 'out',
-        method: 'turn/start',
-        headline: '（turn/start 的 input 原文见下一行——那是本次真正发给 codex 的内容）',
-        sentText: opts.prompt,
-      })
+
       const turnObj = asRecord(asRecord(turnRes)?.['turn'])
       const tId = asString(turnObj?.['id'])
       if (!tId) {

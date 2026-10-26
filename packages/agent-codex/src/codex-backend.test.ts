@@ -119,6 +119,17 @@ describe('★ 分批第 44 批：JSON-RPC 摘要要报给调用方（service 形
       assert.equal(sent.length, 1, `只该有 turn/start 带正文，实际 ${String(sent.length)} 条`)
       assert.equal(sent[0]?.method, 'turn/start')
       assert.equal(sent[0]?.sentText, '把 a.txt 读完', 'sentText 必须是**原样**的 input 文本')
+      /**
+       * ★ 分批第 46 批（使用者：「尽量在发送的位置直接打，保证真实性」）：
+       * 正文必须是**从写进 stdin 的那一行字节里**抠出来的，而不是"我们打算发的那份"。
+       * 报出来的标题要说清这一点，并带上整帧的字节数（能对上"发出去的确实是这一帧"）。
+       */
+      assert.match(
+        sent[0]?.headline ?? '',
+        /已写入 codex stdin/u,
+        `标题要说明它是从写出去的那一行里取的：${sent[0]?.headline ?? ''}`,
+      )
+      assert.match(sent[0]?.headline ?? '', /字节/u, '要带上整帧字节数')
     } finally {
       await cleanup(workDir)
     }

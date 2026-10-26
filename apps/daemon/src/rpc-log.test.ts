@@ -161,7 +161,11 @@ describe('★ 分批第 44 批：帧摘要真的进了运行日志（不是死�
        * 上一批只打了"逐字相同"这一行结论，使用者当场说「我还是没有看到第一个命令
        * 到底是什么给到 codex 的」——结论行是给校对用的，他要的是内容。
        */
-      assert.match(text, /===== 发给 CLI 的原文（turn\/start，/u, '原文要带标题打出来')
+      assert.match(
+        text,
+        /===== 已写入 CLI stdin 的原文（turn\/start，/u,
+        '原文要带标题打出来，而且标题要说明**它是从写进 stdin 的那一行里抠出来的**',
+      )
       assert.match(text, /把 a\.txt 读完/u, '★ 送出去的**那一段正文**要真的在日志里')
     } finally {
       await daemon.close()
