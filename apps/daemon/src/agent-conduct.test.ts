@@ -97,6 +97,37 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     assert.ok(SKILL_REVIEWER_INSTRUCTIONS.startsWith('你是平台内置的审核者'))
   })
 
+  test('★★★ 起草者的身份**不再单薄**：岗位专属 ≥ 7 条，且搬进来的都是"岗位长期做法"', () => {
+    /**
+     * 使用者的两次反馈：「发现有很多原则放在了框架和任务中。但我想尽量往身份去放」
+     * → ��47 批搬了通用守则；然后「我看起草者的身份内容还是很少呢」→ 第 48 批把
+     * 任务书里那几条**岗位长期做法**也搬了进来。
+     *
+     * 这条判据钉的就是"别再缩回去"：身份里必须能数出这七件事，而且每一件的措辞都得在
+     * （它们各自对应一个真实的失败面：读法不对=贵且抓不住重点、凭印象写命令=照敲跑不起来、
+     * 不写两节=入库被拒、不自检=带着坏引用交上去、硬凑=垃圾技能冻结错误行为）。
+     */
+    const must = [
+      '只写可复用的步骤',
+      '先看素材索引，再按需读',
+      '写 Procedure 前回查原始命令',
+      '交付要过入库闸门',
+      '写法以任务书给的写作规范为准',
+      '交付前自检一遍',
+      '使用者的要求是默认约定',
+      '不值得沉淀就说出来',
+    ]
+    const missing = must.filter((k) => !DRAFTER_INSTRUCTIONS.includes(k))
+    assert.deepEqual(missing, [], `起草者身份里缺这些岗位规矩：${missing.join('、')}`)
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.length >= 700,
+      `身份不能又缩回单薄形态（现在 ${String(DRAFTER_INSTRUCTIONS.length)} 字符）——` +
+        '上一批缩到 419 时使用者立刻发现了',
+    )
+    // 数字型闸门（6000）**不进身份**：它属于任务书里的契约，两处写会漂
+    assert.ok(!DRAFTER_INSTRUCTIONS.includes('6000'), '6000 上限留在任务书里，身份里不许重复')
+  })
+
   test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes('起草者专属'), '起草者的专属三条要有明确小标题')
     assert.ok(DRAFTER_INSTRUCTIONS.includes('不值得沉淀就说出来'))

@@ -401,13 +401,12 @@ export function buildDraftPrompt(opts: {
   const { scope, materialDir, outputDir, target, revised = false, writingSpec } = opts
   return `你是 skill 起草者。本次素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已经落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
 
-【先做这三件事】
-1. 读 \`${materialDir}/00-README.md\`——它是索引：来源、规模、本次目标、该读哪些文件、怎么用。
-2. 按需读 \`${materialDir}/\` 里真正需要的文件，**不要一次全读**。写 Procedure 之前，
-   回查 \`${materialDir}/turns/*.md\`（或 \`task-run.md\`）里的**原始命令与参数**——
-   命令必须能直接复制就跑，不许凭印象重写。
-3. **写作规范就在下面这一段里**（不需要去别处找技能文件）：写结构、拆支持文件、
-   交付自检都以它为准。
+【这次的材料在哪】
+- 索引：\`${materialDir}/00-README.md\`（来源、规模、本次目标、该读哪些文件、怎么用）。
+- 原始的对话轮次/任务记录：\`${materialDir}/turns/*.md\`（或 \`task-run.md\`）——写 Procedure 前
+  回查原始命令与参数就到这里取。
+- **怎么读、怎么自查、能不能入库**这些规矩在你自己的身份里（本任务不重复说）；
+  下面这段写作规范是**写法**的唯一权威。
 
 【写作规范】
 ${writingSpec}
