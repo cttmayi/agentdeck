@@ -55,12 +55,7 @@ const EXECUTE_FRAME = `# 任务
 
 能用到的技能：algorithmic-art、writing-notes
 
-请用简体中文回答。
-
-## 护栏
-
-- 只做这件事描述的事，不要扩大范围。
-- 完成后给出一份**报告**：做了什么、结论是什么、还有哪些不确定的地方。`
+请用简体中文回答。`
 
 const EXECUTE_IDENTITY = '你是一个严谨的协作者。先理解任务，再动手。'
 const EXECUTE_TASK = `冒泡排序

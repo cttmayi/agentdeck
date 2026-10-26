@@ -118,6 +118,8 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
     // ★ 这两个 id 要在**重启之后**接着用（结论那几步），所以声明在两次 boot 之外
     let executorId: string
     let reviewerId: string
+    /** 重启之前那一格「指令」的原值（分批第 47 批：清理前后必须一致）。 */
+    let instructionsBefore = ''
     try {
       executorId = await createAgent(d1.url, {
         name: '老执行者',
@@ -145,6 +147,7 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
       const rawExecutor = await rawAgent(d1, executorId)
       assert.equal(rawExecutor['reviewerAgentId'], reviewerId, '前提：老键真的写进去了')
       const rawReviewer = await rawAgent(d1, reviewerId)
+      instructionsBefore = String(rawReviewer['instructions'] ?? '')
       for (const key of ['allowedActions', 'debugActions', 'actionParams']) {
         assert.equal(key in rawReviewer, true, `前提：${key} 真的写进去了`)
       }
@@ -195,7 +198,17 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
       // ── ⑤ 而**在用的字段一个都没丢**（清理越界是最贵的那种错） ──
       assert.equal(rawReviewer2['name'], '老审核者')
       assert.equal(rawReviewer2['role'], 'reviewer')
-      assert.equal(rawReviewer2['instructions'], '')
+      /**
+       * ⚠️ 分批第 47 批：这条原来断言 `instructions === ''`——那是"新建时指令为空"的
+       * 副作用。现在新建会**预填默认工作守则**（使用者的要求），所以"空"不再是
+       * 新 agent 的自然状态。改成**前后对比**：清理不许改动这一格（这才是本段的意图：
+       * "在用的字段一个都没丢"，与它是空还是守则无关）。
+       */
+      assert.equal(
+        rawReviewer2['instructions'],
+        instructionsBefore,
+        '★ 清理不许碰「指令」（前后必须一模一样）',
+      )
       const std2 = rawReviewer2['reviewStandard'] as Record<string, unknown>
       assert.equal(std2['name'], '老标准', '★ 标准的正文与名字一个字都不能动')
       assert.equal(std2['body'], '# 老标准\n\n只看有没有写测试。')

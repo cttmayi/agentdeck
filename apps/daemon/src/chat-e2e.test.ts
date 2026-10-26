@@ -271,8 +271,14 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     const sent = backend.seen[before]!
     const sysBefore = backend.seenSystem[before] ?? ''
     const all = [sysBefore, sent].filter((x) => x !== '').join('\n\n')
-    // ★ 任务那条路走 A 档：① 框架（含护栏）在**系统提示**里；聊天那条路没有它。
-    assert.match(sysBefore, /## 护栏/, '任务那条路必须还是有模版的（① 框架走系统提示）')
+    /**
+     * ★ 任务那条路走 A 档：① 框架在**系统提示**里；聊天那条路没有它。
+     *
+     * ⚠️ 分批第 47 批：判据从 `## 护栏` 换成 `# 任务` —— 护栏那两条已经搬进
+     *    ② 身份的通用工作守则（与岗位无关的工作纪律），① 只剩包装。
+     *    "这条 run 用的是任务那份框架、走的 A 档"这件事由标题 + 位置一起证明。
+     */
+    assert.match(sysBefore, /# 任务/, '任务那条路必须还是有模版的（① 框架走系统提示）')
     assert.match(all, /# 任务/, '有框架那一段标题')
     assert.match(sent, /写一份关于依赖漏洞的报告/, '任务正文要在（③ 走用户消息）')
   })

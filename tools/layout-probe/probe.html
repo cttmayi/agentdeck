@@ -3561,6 +3561,20 @@
         facts['lang.switchPresent'] = !!langSelect
         facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
         /**
+         * ★ 分批第 47 批：设置抽屉里的「默认工作守则」（新建智能体时预填）。
+         *
+         * 量两件事：① 这一段在（使用者能找到）；② **框里已经有内容**（=identity 里那份
+         * 默认守则真的填进去了）。只量①会放过"框是空的、保存后才发现没预填"。
+         */
+        {
+          const section = d().querySelector('.drawer [data-agent-conduct]')
+          facts['settings.agentConductTitle'] = section ? text(section.querySelector('h3')) : null
+          const box = section?.querySelector('textarea')
+          facts['settings.agentConductChars'] = box ? box.value.length : null
+          facts['settings.agentConductHasRule'] = box ? box.value.includes('只做被要求的事') : null
+        }
+
+        /**
          * ★ 分批第 41 批：设置抽屉里的「运行时配置」开关（不复制配置、直接用原路径）。
          *
          * 为什么在这里量、为什么这么量：这条开关唯一的危害是「勾了但没生效」。

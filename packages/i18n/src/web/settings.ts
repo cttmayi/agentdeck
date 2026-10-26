@@ -76,6 +76,29 @@ export const settingsText = {
     en: 'On (default): the platform points CLAUDE_CONFIG_DIR / CODEX_HOME at its own managed dirs and copies your config into them, so agents cannot see your personal skills / MCP / endpoint config. Off: nothing is copied or redirected — claude / codex use your own ~/.claude and ~/.codex directly. You trade isolation for your environment working exactly as-is (use it when copying misbehaves on Windows); agents can then see personal skills / MCP / endpoint config. Every run log states which mode it used.',
   },
 
+  /**
+   * ★ 分批第 47 批：「默认工作守则」（新建智能体时预填到它的指令里）。
+   *
+   * 说明必须讲清"预填"这个语义——它不是"所有 agent 共享的一条规则"：
+   * 改这里不会回头改已存在的 agent（否则使用者改过的身份会被悄悄覆盖）。
+   */
+  'settings.agentConduct': { zh: '默认工作守则', en: 'Default working conduct' },
+  'settings.agentConductLabel': {
+    zh: '新建智能体时，预填到它的「指令」里',
+    en: 'Prefilled into a new agent’s instructions',
+  },
+  'settings.agentConductPlaceholder': {
+    zh: '留空 = 新建的智能体不带守则（指令框留空，自己写）',
+    en: 'Empty = new agents start without conduct',
+  },
+  'settings.agentConductReload': { zh: '重新载入', en: 'Reload' },
+  'settings.agentConductSave': { zh: '保存守则', en: 'Save' },
+  'settings.agentConductSaved': { zh: '守则已保存', en: 'Saved' },
+  'settings.agentConductHint': {
+    zh: '这几条是与岗位无关的工作纪律（只做被要求的事、依据来自素材、产出落到文件里……），内置的起草者与审核者已经在用同一份。存下来之后只影响以后新建的智能体：它会作为指令的初值填进去，之后归那条智能体自己（改这里不会改动已有的智能体）。留空 = 新建时不预填。',
+    en: 'These are job-agnostic working rules (do only what was asked, ground everything in the material, put output in files…). The built-in drafter and reviewer already use the same text. Saving only affects agents created later: it becomes the initial value of their instructions, and afterwards belongs to that agent (this does not rewrite existing ones). Empty = no prefill.',
+  },
+
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },
   'settings.themeLight': { zh: '亮色', en: 'Light' },

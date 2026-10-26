@@ -73,6 +73,7 @@ import {
 } from '@agentdeck/protocol'
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
+import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
 import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
@@ -1195,6 +1196,8 @@ async function readWorkspaceSettings(
   allowReviewerScriptRun: boolean
   /** 运行时个人配置隔离（分批第 41 批）：`false` = 不复制、不重定向，CLI 用原路径。 */
   runtimeConfigIsolation: boolean
+  /** 新建智能体时预填的「默认工作守则」（分批第 47 批）；空串 = 不预填。 */
+  defaultAgentConduct: string
   /**
    * 起草 ↔ 审核自动循环的轮次上限（分批第 23 批，使用者定：默认 10，允许 0–99，0 = 关）。
    *
@@ -1224,6 +1227,8 @@ async function readWorkspaceSettings(
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
     // 老数据没有这个键 ⇒ 开（隔离是 D78 的默认行为，升级不该悄悄关掉它）
     runtimeConfigIsolation: workspace?.runtimeConfigIsolation ?? true,
+    // 老数据没有这个键 ⇒ 平台默认守则（与"什么都不改"同义）
+    defaultAgentConduct: workspace?.defaultAgentConduct ?? GENERAL_WORK_CONDUCT,
     // 老数据没有这个键 ⇒ 默认轮数（10）。⚠️ `0` 必须原样返回"关"，
     // 不能写成 `|| DEFAULT`：那会把使用者刚关掉的循环又打开，而它每一轮都在花钱。
     autoReworkRounds: workspace?.autoReworkRounds ?? DEFAULT_AUTO_REWORK_ROUNDS,
@@ -4410,6 +4415,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
          */
         runtimeConfigIsolation: settings.runtimeConfigIsolation,
         /**
+         * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
+         * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
+         */
+        defaultAgentConduct: settings.defaultAgentConduct,
+        /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
          * 添加它的理由是一次真实误判：使用者报"聊天页不工作、任务页正常"，查下来
@@ -4841,6 +4851,39 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 调研）。校验收在**布尔字面量**上：收到字符串 "false" 不算关（前端传
     // JSON 布尔，不会出现那种情况；但接口自己别把"假值"当"关了"）。
     /**
+     * ★ 分批第 47 批：「默认工作守则」的写入口（新建智能体时预填）。
+     *
+     * 允许**空串**（= 不预填，使用者要的就是空身份），不允许超长——它会整份进入
+     * 每条新建 agent 的身份块，而身份块每次都随第一句话发出去（D29）。
+     */
+    if (req.method === 'PUT' && path === '/api/workspace/agent-conduct') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['conduct']
+      if (typeof raw !== 'string') {
+        sendJson(res, 400, {
+          error: `conduct 必须是字符串（收到 ${JSON.stringify(raw)}）`,
+          code: 'invalid_conduct',
+        })
+        return
+      }
+      if (raw.length > CONDUCT_MAX_CHARS) {
+        sendJson(res, 400, {
+          error: `守则太长了（${String(raw.length)} 字符，上限 ${String(CONDUCT_MAX_CHARS)}）`,
+          code: 'conduct_too_long',
+        })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, defaultAgentConduct: raw, updatedAt: Date.now() })
+      sendJson(res, 200, { defaultAgentConduct: raw })
+      return
+    }
+
+    /**
      * ★ 分批第 41 批：运行时个人配置隔离的开关（`false` = 不复制、直接用原路径）。
      *
      * 为什么是一个 workspace 级布尔值而不是每 agent 一个：它决定的是**平台怎么把配置
@@ -5213,12 +5256,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
 
 
+      /**
+       * ★ 分批第 47 批：**新建时预填默认工作守则**（只在指令为空时）。
+       *
+       * 使用者要的是「让它尽量和执行者通用」：内置起草者/审核者已经带上了守则
+       * （`GENERAL_WORK_CONDUCT`），但使用者自己新建的执行者不该"什么规矩都没有"。
+       *
+       * 三条边界（与协议里的注释同一份口径）：
+       *   · **预填 = 文本拷贝**：写进这一条 agent 的 `instructions`，此后归它自己；
+       *     改设置不会回头改已存在的 agent（那会悄悄覆盖使用者改过的身份）；
+       *   · **非空不覆盖**：请求里给了 instructions（哪怕是使用者手打的一段）就用他的；
+       *   · **设置为空串 = 不预填**（他要的就是"空身份"）。
+       */
+      const givenInstructions = typeof body['instructions'] === 'string' ? body['instructions'] : ''
+      const conduct = (await readWorkspaceSettings(store, workspaceId)).defaultAgentConduct.trim()
+      const prefilledInstructions =
+        givenInstructions.trim() === '' && conduct !== '' ? conduct : givenInstructions
+
       const now = Date.now()
       const agent: Agent = {
         id: ulid() as Agent['id'],
         workspaceId,
         name,
-        instructions: typeof body['instructions'] === 'string' ? body['instructions'] : '',
+        instructions: prefilledInstructions,
         model: typeof body['model'] === 'string' && body['model'] !== '' ? body['model'] : null,
         // D28：runtime 可由使用者选（它现在真的会被消费，见 executor）
         runtimeKey: runtimeCheck.runtimeKey,

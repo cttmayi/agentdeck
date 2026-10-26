@@ -128,6 +128,10 @@ export interface Identity {
    */
   runtimeConfigIsolation?: boolean
   /**
+   * 分批第 47 批：新建智能体时预填的「默认工作守则」。缺省 = 平台默认（老 daemon 不带这个键）。
+   */
+  defaultAgentConduct?: string
+  /**
    * 全局 runtime 默认值（2026-10 第 ⑦ 条）：agent 的 `runtimeKey` 写 `'default'` 时用它。
    * **空串 = 跟随侦测**（`currentRuntime` 那个），不是一个具体值。
    */

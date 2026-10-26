@@ -211,6 +211,25 @@ export const Workspace = z.object({
    */
   runtimeConfigIsolation: z.boolean().default(true).optional(),
 
+  /**
+   * ★ 默认工作守则（分批第 47 批）：新建智能体时**预填**到它的指令里。
+   *
+   * 使用者原话：「我想尽量往身份去放，让它尽量和执行者通用」，且在两个选项（A 只让内置
+   * agent 共用常量 / B 让新建 agent 也带上）里选的是「A、B 都做」。
+   *
+   * 语义边界（三条，缺一条就会变成"看不见的魔法"）：
+   *   ① **预填 = 文本拷贝**：新建那一刻把守则写进 `Agent.instructions`，此后它属于那条
+   *      agent——改这个设置**不会**回头改已存在的 agent（否则使用者改过的身份会被悄悄覆盖，
+   *      那是第 ⑥ 条一路禁止的事）；
+   *   ② **空串 = 不预填**（新建的 agent 指令框留空，使用者自己写）；
+   *   ③ **内置 agent（起草者/审核者）不读它**：它们的身份是平台常量 + 这份守则的**代码默认值**
+   *      （`GENERAL_WORK_CONDUCT`）。让它们跟随这个设置的话，"存着的指令 === 已知历史"
+   *      这条升级判据永远不成立 ⇒ 内置指令再也升不上来（审核者那边踩过三次）。
+   *
+   * ⚠️ `optional()`：后加字段，老 workspace 没有 ⇒ 缺省 = 平台默认守则。
+   */
+  defaultAgentConduct: z.string().optional(),
+
   createdAt: EpochMs,
   updatedAt: EpochMs,
 })

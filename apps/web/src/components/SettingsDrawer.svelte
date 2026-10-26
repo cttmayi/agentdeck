@@ -29,6 +29,39 @@
   $: detectedRuntime = $identity?.currentRuntime ?? '?'
   import { setThemePref, themePref, type ThemePref } from '@agentdeck/ui'
 
+  /**
+   * ★ 分批第 47 批：「默认工作守则」的草稿与保存。
+   *
+   * ⚠️ 与"运行时配置"那个开关同一套纪律：**不拿本地变量假装成功**——
+   *    存完重新拉 identity，界面显示永远以服务端为准（存失败时保持旧值 + toast）。
+   */
+  let conductDraft = ''
+  let conductSaving = false
+  // identity 到了就填草稿；使用者正在编辑时不被覆盖（`draftTouched` 守这一条）
+  let conductTouched = false
+  // ⚠️ Svelte 5：这里**不能**写成 `$conductTouched`（那是 store 语法，会报
+  //    "needs to be an object with a subscribe method"）；`conductTouched` 是普通变量。
+  $: if (!conductTouched && $identity?.defaultAgentConduct !== undefined) {
+    conductDraft = $identity.defaultAgentConduct
+  }
+  async function saveConduct(): Promise<void> {
+    conductSaving = true
+    try {
+      await api('/api/workspace/agent-conduct', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conduct: conductDraft }),
+      })
+      await loadIdentity()
+      conductTouched = false
+      showToast(tx('settings.agentConductSaved'))
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    } finally {
+      conductSaving = false
+    }
+  }
+
   /** 主题三档：**存键、不存渲染好的句子**（切语言时标签要跟着变，渲染交给 $t）。 */
   const THEME_CHOICES = [
     { value: 'light', labelId: 'settings.themeLight' },
@@ -251,6 +284,48 @@
         {$t('settings.runtimeConfigLabel')}
       </label>
       <p class="hint">{$t('settings.runtimeConfigHint')}</p>
+    </section>
+
+    <!--
+      ★ 分批第 47 批：「默认工作守则」——新建智能体时预填到它的指令里。
+
+      使用者要的是「让它尽量和执行者通用」：内置起草者/审核者已经带上那段守则，
+      使用者自己新建的执行者也不该"什么规矩都没有"。
+
+      ⚠️ 语义必须写在界面上：这是**预填**（文本拷贝），不是"所有 agent 共享的一条规则"。
+         改这里**不会**回头改已存在的 agent——否则使用者改过的身份会被悄悄覆盖。
+      ⚠️ 允许存空（= 不预填）：`emptyHint` 会把这件事说出来，不然"存了空的"看起来像没保存。
+    -->
+    <section class="drawer-section" data-agent-conduct>
+      <h3>{$t('settings.agentConduct')}</h3>
+      <label class="block-label" for="agent-conduct">
+        {$t('settings.agentConductLabel')}
+      </label>
+      <textarea
+        id="agent-conduct"
+        rows="7"
+        bind:value={conductDraft}
+        oninput={() => {
+          conductTouched = true
+        }}
+        placeholder={$t('settings.agentConductPlaceholder')}
+      ></textarea>
+      <div class="conduct-actions">
+        <button
+          type="button"
+          class="ghost small"
+          onclick={() => {
+            conductDraft = $identity?.defaultAgentConduct ?? ''
+            conductTouched = false
+          }}
+        >
+          {$t('settings.agentConductReload')}
+        </button>
+        <button type="button" class="primary small" disabled={conductSaving} onclick={saveConduct}>
+          {$t('settings.agentConductSave')}
+        </button>
+      </div>
+      <p class="hint">{$t('settings.agentConductHint')}</p>
     </section>
 
     <!--

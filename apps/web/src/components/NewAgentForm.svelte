@@ -46,7 +46,15 @@
 
   let name = ''
   let role: AgentRole = 'executor'
-  let instructions = ''
+  /**
+   * ★ 分批第 47 批：**初值 = 工作区里的「默认工作守则」**（设置页那个框）。
+   *
+   * 为什么不在服务端"偷偷补"就完事：那样使用者看到的是**空输入框**，保存后
+   * 再打开才发现里面多了一段——"我什么都没写，它自己长出了规矩"是最难接受的一类。
+   * 服务端 `POST /api/agents` 确实也会在"指令为空"时预填（那是给别的客户端兜底），
+   * 但界面上必须**先看见**，才能改、才能删。
+   */
+  let instructions = $identity?.defaultAgentConduct ?? ''
   /**
    * 审核标准（D37）——只对审核者有意义。
    *
@@ -99,7 +107,8 @@
         //    「不认识的字段」——所以整段删掉，而不是送空数组。
       })
       name = ''
-      instructions = ''
+      // 建完回到"默认守则"，而不是空串——下一次新建不该是空身份
+      instructions = $identity?.defaultAgentConduct ?? ''
       reviewStandard = null
       // 回到表单的默认值
       selectedSkills = []

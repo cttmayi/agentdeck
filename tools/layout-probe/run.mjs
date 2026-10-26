@@ -1788,6 +1788,25 @@ const CHECKS = [
   },
   {
     view: '新建表单 / 设置',
+    key: 'settings.agentConductTitle',
+    label: '★ 设置抽屉里有「默认工作守则」这段（分批第 47 批：新建智能体时预填，使用者要的"让执行者也通用"）',
+    ok: (v) => v === '默认工作守则',
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.agentConductChars',
+    label: '★★ 框里**已经有内容**（不是空框）——否则使用者看不到预填，保存后才发现多了规矩',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${String(v ?? 0)} 字符`,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.agentConductHasRule',
+    label: '★ 内容确实是平台的通用守则（含「只做被要求的事」这条）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
     key: 'settings.runtimeConfigSectionTitle',
     label:
       '★ 设置抽屉里有「运行时配置」这一段（分批第 41 批：不复制配置、直接用原路径的开关；使用者原话"我想在 Settings 里面增加一个开关，不 copy 配置"）',

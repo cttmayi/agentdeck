@@ -1171,6 +1171,12 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
           instructions: '',
           reviewStandard: { body: '## 判定\n\n只看证据。' },
         })
+        /**
+         * ⚠️ 分批第 47 批：`POST /api/agents` 现在会在"指令为空"时**预填默认工作守则**
+         * （使用者要的"新建的执行者也带规矩"）。而这条用例要的样本是**指令真的为空**的老
+         * 审核者，所以显式清一次——不清的话它会被预填，这条用例量到的就不是它本来要量的东西。
+         */
+        assert.equal((await patchAgent(url, reviewer.id, { instructions: '' })).status, 200)
         assert.equal((await patchAgent(url, reviewer.id, { name: '还是没写指令' })).status, 200)
         const after = await getAgent(url, reviewer.id)
         assert.equal(
