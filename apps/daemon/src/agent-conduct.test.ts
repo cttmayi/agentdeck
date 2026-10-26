@@ -11,6 +11,7 @@ import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT, withConduct } from './agent-conduct.ts'
 import { DRAFTER_INSTRUCTIONS, SKILL_REVIEWER_INSTRUCTIONS } from './builtin-drafter.ts'
+import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 
 /** 这份测试不跑 run（只读 identity / 建 agent），后端给个立刻成功的假货即可。 */
 class QuietBackend implements AgentBackend {
@@ -126,6 +127,50 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     )
     // 数字型闸门（6000）**不进身份**：它属于任务书里的契约，两处写会漂
     assert.ok(!DRAFTER_INSTRUCTIONS.includes('6000'), '6000 上限留在任务书里，身份里不许重复')
+  })
+
+  test('★★★ 写作规范全文**不许**粘进身份（它只对"写 skill"这一件事成立）', async () => {
+    /**
+     * 使用者的疑问：「『写作规范全文 1731 字』什么不放『身份』里面呢」。
+     *
+     * 答案在代码里，而且很硬：**同一条起草者还要干另一件事**——沉淀成 Agent
+     * （`buildAgentInstructionsPrompt`，判据是"指令五项 + 6000 上限"）。
+     * 写作规范只对"写 skill"成立；放进身份的话，每一条"改智能体指令"的 run 都会
+     * 带上 1731 字完全无关的 skill 写法规范，还会跟指令五项抢注意力。
+     *
+     * 另外两条：① 规范是**随代码走的内置 skill**（`writing-skills`），③ 每次拿最新的；
+     * 而身份是**每条 agent 的私人副本**（可编辑、"存着 === 已知历史"才升级）⇒
+     * 粘进去就是第二份，规范一改它就跟不上（"内置指令停在旧版"那族缺陷）；
+     * ② 身份使用者可以删改（第 ⑥ 条），规范是平台权威，不该被手滑改掉。
+     *
+     * 所以这条判据盯的是：**别把规范正文搬进身份**（片段比对，不用整篇相等）。
+     */
+    const spec = await loadBuiltinSkill(WRITING_SKILLS)
+    assert.ok(spec !== null, '内置写作规范必须加载得到（它随代码走）')
+    if (spec === null) return
+    /**
+     * ⚠️ 第一版按固定字符位置切片（0/600/1200）→ **红检时没抓到**：粘进去的那句
+     * 恰好落在切片的缝里（切片头是 frontmatter 与空行）。按**行**取探针才不会漏：
+     * 规范里的每一行只要够长，就当作一个"这段文字属于规范"的指纹。
+     */
+    const probes = spec.body
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length >= 40)
+      .map((line) => line.slice(0, 40))
+    assert.ok(probes.length >= 5, `写作规范里长行太少（${String(probes.length)}），探针不够用`)
+    const hit = probes.find((needle) => DRAFTER_INSTRUCTIONS.includes(needle))
+    assert.equal(
+      hit,
+      undefined,
+      `起草者身份里出现了写作规范的原文片段（"${hit ?? ''}"）——` +
+        '规范必须在任务书那一处（`buildDraftPrompt` 的【写作规范】），身份里只留"以它为准"',
+    )
+    // 但"以它为准"这句话要在（身份不是完全不提规范）
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.includes('写作规范为准'),
+      '身份里要有一句"写法以任务书给的写作规范为准"（否则它不知道规范在哪）',
+    )
   })
 
   test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
