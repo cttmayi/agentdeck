@@ -206,10 +206,22 @@ describe('★ 分批第 40 批：「平台注入物」的判定要认得 `defaul
 
   test('★★ agent = default 且工作区默认设成 codex ⇒ 按 codex 标（三级解析的第二级要真的生效）', async () => {
     await patchAgent(agentId, { runtimeKey: 'default' })
+    /**
+     * ⚠️ **先建对话、再切工作区默认**（分两批之间量到的一次挂起）。
+     *
+     * `makeConversation()` 会真跑一轮——而这一轮的 runtime 是三级解析出来的：
+     * `agent=default ⇒ workspace.defaultRuntimeKey`。如果**先把默认设成 codex**，
+     * 这一轮就会去起**真的 codex CLI**（注入的假后端只绑定在 `claude` 上）：
+     *   · 违反 NFR-T-01（测试不许调真实 CLI）；
+     *   · 表现是这条用例偶发"run 一直没到终态"（真 CLI 起得来但没人喂它）。
+     *
+     * 这条用例要量的其实只有**列目录时**的解析结果（`managedPathsOf` 当场读工作区默认），
+     * 与"这一轮跑在哪个 runtime 上"无关 ⇒ 所以先跑完这一轮，再切默认。
+     */
+    const conv = await makeConversation()
     const put = await putWorkspaceDefault('codex')
     assert.equal(put.status, 200, JSON.stringify(put.body))
     try {
-      const conv = await makeConversation()
       await mkdir(join(conv.dir, '.codex/skills/y'), { recursive: true })
       await writeFile(join(conv.dir, '.codex/skills/y/SKILL.md'), '# skill\n')
       await mkdir(join(conv.dir, '.claude'), { recursive: true })

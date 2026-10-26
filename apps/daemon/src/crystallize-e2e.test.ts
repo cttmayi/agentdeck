@@ -2405,7 +2405,13 @@ describe('§10.6 人改草稿：落盘 + 结论过期 + 重新审核', () => {
      */
     const firstReviewRunId = (await reviewInfo(draftRunId)).reviewRunId
     let retried = false
-    for (let i = 0; i < 200 && !retried; i += 1) {
+    /**
+     * ⚠️ 等待上限从 200 次（5s）提到 600 次（15s）：全量并行跑时量到过一次偶发红
+     * （"这一轮应该触发一次自动重试"），单跑这个文件永远绿。重试要等上一轮审核 run
+     * **跑完 + 判定不合规 + 起新 run**，机器一忙就可能超过 5 秒。
+     * 等的写法不是放宽断言：`retried === true` 这条一个字没改。
+     */
+    for (let i = 0; i < 600 && !retried; i += 1) {
       const info = await reviewInfo(draftRunId)
       retried = info.reviewRunId !== null && info.reviewRunId !== firstReviewRunId
       if (!retried) await new Promise((resolve) => setTimeout(resolve, 25))

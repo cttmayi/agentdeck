@@ -94,7 +94,11 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes(GENERAL_WORK_CONDUCT), '起草者身份要含守则原文')
     assert.ok(SKILL_REVIEWER_INSTRUCTIONS.includes(GENERAL_WORK_CONDUCT), '审核者身份要含守则原文')
     // 两份身份的第一段都是"一句话岗位"，第二段起是同一份守则 —— 顺序也必须一致
-    assert.ok(DRAFTER_INSTRUCTIONS.startsWith('你是 skill 起草者'))
+    // ★ 分批第 51 批：起草者的第一句**不再写死 skill**（同一条身份也干"改智能体指令"）
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.startsWith('你是平台内置的起草者'),
+      '第一句要对象无关：它同时服务"写 skill"与"改智能体指令"两件事',
+    )
     assert.ok(SKILL_REVIEWER_INSTRUCTIONS.startsWith('你是平台内置的审核者'))
   })
 
@@ -109,14 +113,14 @@ describe('★ 分批第 47 批：通用工作守则', () => {
      * 不写两节=入库被拒、不自检=带着坏引用交上去、硬凑=垃圾技能冻结错误行为）。
      */
     const must = [
-      '只写可复用的步骤',
+      '只写可复用的东西',
       '先看素材索引，再按需读',
-      '写 Procedure 前回查原始命令',
+      '写具体做法之前回查原始命令',
       '交付要过入库闸门',
       '写法以任务书给的写作规范为准',
       '交付前自检一遍',
       '使用者的要求是默认约定',
-      '不值得沉淀就说出来',
+      '不值得就说出来',
     ]
     const missing = must.filter((k) => !DRAFTER_INSTRUCTIONS.includes(k))
     assert.deepEqual(missing, [], `起草者身份里缺这些岗位规矩：${missing.join('、')}`)
@@ -173,6 +177,26 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     )
   })
 
+  test('★★★ 第一句必须**对象无关**：两个对象都点出来，且不再写死「skill 起草者」', () => {
+    /**
+     * 使用者原话：「如果是同一个 那身份第一句话『你是 skill 起草者：把一段真实的经验，写成一条
+     * 以后能被复用的 skill。』，就不合理」。
+     *
+     * 判据三条：① 不再是"你是 skill 起草者"；② 明确点出两个可能的产出；
+     * ③ 权限归属清楚——"产出什么"由**任务书**定（与第 35 批审核者是同一招）。
+     */
+    assert.ok(
+      !DRAFTER_INSTRUCTIONS.startsWith('你是 skill 起草者'),
+      '第一句不许再写死 skill——同一条身份也服务"改智能体指令"',
+    )
+    assert.ok(DRAFTER_INSTRUCTIONS.includes('一条 skill'), '要点出"可能是一条 skill"')
+    assert.ok(DRAFTER_INSTRUCTIONS.includes('智能体的指令'), '也要点出"也可能是一条智能体的指令"')
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.includes('任务书给的'),
+      '要说明产出契约由任务书给（否则身份与任务书会互相打脸）',
+    )
+  })
+
   test('★★★ 同一个起草者服务「写 skill」与「改智能体指令」两个任务 ⇒ 专属条款必须带限定语', () => {
     /**
      * 事实（使用者问「起草者 是 起草skill 和起草agent 通用的吗？」）：**同一个 agent、
@@ -198,14 +222,16 @@ describe('★ 分批第 47 批：通用工作守则', () => {
       '★ 「使用者的要求是默认约定」这条也要说明在改指令时怎么落',
     )
     // 通用的那几条**不需要**限定语（两个任务都成立），所以它们保持原样：
-    for (const generic of ['先看素材索引，再按需读', '写 Procedure 前回查原始命令']) {
+    for (const generic of ['先看素材索引，再按需读', '写具体做法之前回查原始命令']) {
       assert.ok(DRAFTER_INSTRUCTIONS.includes(generic), `通用条款不该被改坏：${generic}`)
     }
   })
 
   test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes('起草者专属'), '起草者的专属三条要有明确小标题')
-    assert.ok(DRAFTER_INSTRUCTIONS.includes('不值得沉淀就说出来'))
+    // ★ 分批第 51 批：措辞从「不值得沉淀就说出来」放宽成对象无关的「不值得就说出来」
+    //   （同一个起草者还要改智能体指令，"沉淀"这个词对那件事不成立）
+    assert.ok(DRAFTER_INSTRUCTIONS.includes('不值得就说出来'))
     assert.ok(SKILL_REVIEWER_INSTRUCTIONS.includes('审 skill 时你审的五件事'))
     assert.ok(SKILL_REVIEWER_INSTRUCTIONS.includes('脚本能不能跑'))
   })
