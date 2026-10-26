@@ -1993,3 +1993,50 @@ assert.match(text, /把 a\.txt 读完/u, '★ 送出去的**那一段正文**要
 ⚠️ 这第一条判据**第一版是错的**：我按固定字符位置切片（0/600/1200），红检时把规范原文
 整行粘进身份却**没抓到**——粘进去那句恰好落在切片的缝里（切片头是 frontmatter 与空行）。
 改成按行取探针后红检成立。教训：**指纹式判据要按"内容的分块单位"取，不要按固定偏移。**
+
+### 4.3.11 起草者是**同一个 agent**，服务两个任务（分批第 50 批）
+
+使用者问：「起草者 是 起草 skill 和起草 agent 通用的吗？」
+
+**是。** 不是"两个内置 agent"，是**同一个**「起草者（内置）」+ 两份任务书：
+
+| | 起草 skill | 起草（改）智能体指令 |
+| --- | --- | --- |
+| 身份 ② | **同一份** `drafter.instructions`（`server.ts` 起 run 时只读一份） | 同左 |
+| 任务书 ③ | `buildDraftPrompt`（素材路径 + **写作规范全文 1731** + 产出契约 SKILL.md） | `buildAgentInstructionsPrompt`（existing-agent.md + **指令五项** + **6000 上限** + instructions.md） |
+| 产出目录 | `skill/` | `agent/` |
+| 审核者 | 「Skill 审核者（内置）」 | **同一个**（分批第 35 批把它的第一句改成"按任务书给的判据判"，两份任务书都喂得进去） |
+| run 类型 | `skill-draft` | `skill-draft`（同一条链，`crystallizeTarget.kind === 'agent'` 区分） |
+
+#### 这带来的一个真问题（这一批修的）
+
+分批第 48 批我把「交付要过入库闸门（`SKILL.md` 两节 + frontmatter）」和「使用者的要求写进 `## 约定`」
+搬进了身份——它们**只对"写 skill"成立**。而身份是共用的 ⇒ 在"改智能体指令"的 run 上，
+这两条会诱导模型产出 skill 结构（那边的产出其实是 `instructions.md`，纯文本 + 字符上限）。
+
+**修法**：加限定语，而不是退回任务书（退回会让身份重新变薄，那正是使用者两次提醒过的事）：
+
+- 第 4 条：「**写 skill 时**，交付要过入库闸门……（**改智能体指令时**不看这一条：那边交付什么由任务书定）」
+- 第 7 条：「……**写 skill 时**写进正文 `## 约定` 一节，**改智能体指令时**把它落成指令里的硬约束」
+
+通用的那几条（先读素材索引、回查原始命令、自检）不需要限定语——两个任务都成立。
+
+身份 **876 → 970 字符**；48 批那份逐字冻结成 `DRAFTER_INSTRUCTIONS_V4` 进历史表。
+
+#### 验证
+
+`agent-conduct.test.ts` 新增「同一个起草者服务两个任务 ⇒ 专属条款必须带限定语」：三条措辞必须在、
+两条通用条款不许被改坏。
+
+#### 顺带记一个**还没修**的隐患（留给下一批）
+
+`server.ts` 起起草 run 时找内置 agent 用的是：
+
+```ts
+const existingDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
+```
+
+**没有按 role 过滤**。现在平台有两个内置 agent（`drafter` / `skill-reviewer`），
+一旦 `listAgents` 的返回顺序让审核者排前面，起草 run 会拿到**审核者的身份**——
+而它不会报错，只会让起草"性格变了一个人"。同一写法在 `ensureBuiltinDrafter` 与
+`POST /api/crystallize/review` 的取审核者处也出现过（后者已经带了 `role === 'skill-reviewer'`）。

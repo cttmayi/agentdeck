@@ -173,6 +173,36 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     )
   })
 
+  test('★★★ 同一个起草者服务「写 skill」与「改智能体指令」两个任务 ⇒ 专属条款必须带限定语', () => {
+    /**
+     * 事实（使用者问「起草者 是 起草skill 和起草agent 通用的吗？」）：**同一个 agent、
+     * 同一份身份**。两次的差别只在任务书（`buildDraftPrompt` vs `buildAgentInstructionsPrompt`）
+     * 与产出目录（`skill/` vs `agent/`）——`server.ts` 起起草 run 时只用一份
+     * `drafter.instructions`。
+     *
+     * 于是身份里那些**只对 skill 成立**的条款（`## When to Use` 两节、frontmatter、
+     * `## 约定` 一节）在"改智能体指令"时是错的：那边的产出是 `instructions.md`
+     * （纯文本、有字符上限），没有 frontmatter 也没有那两节。
+     * 加了限定语，模型才不会拿 skill 的结构去套指令。
+     */
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.includes('写 skill 时，交付要过入库闸门'),
+      '★ 入库闸门那条必须限定"写 skill 时"（改指令没有 frontmatter / 两节）',
+    )
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.includes('改智能体指令时'),
+      '★ 要明说改指令时交付什么由任务书定（instructions.md + 字符上限）',
+    )
+    assert.ok(
+      DRAFTER_INSTRUCTIONS.includes('改智能体指令时把它落成指令里的硬约束'),
+      '★ 「使用者的要求是默认约定」这条也要说明在改指令时怎么落',
+    )
+    // 通用的那几条**不需要**限定语（两个任务都成立），所以它们保持原样：
+    for (const generic of ['先看素材索引，再按需读', '写 Procedure 前回查原始命令']) {
+      assert.ok(DRAFTER_INSTRUCTIONS.includes(generic), `通用条款不该被改坏：${generic}`)
+    }
+  })
+
   test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes('起草者专属'), '起草者的专属三条要有明确小标题')
     assert.ok(DRAFTER_INSTRUCTIONS.includes('不值得沉淀就说出来'))
