@@ -2076,3 +2076,45 @@ const existingDrafter = (await store.listAgents(workspaceId)).find((a) => a.buil
    于是起了真 CLI（违反 NFR-T-01，表现为"run 一直没到终态"）。修法：**先建对话再切默认**
    ——这条用例要量的是"列目录时的解析"，与"这一轮跑在哪"无关。
 2. `crystallize-e2e` 里等"自动重试"的上限 5s → 15s（全量并行时量到偶发超时；断言没动）。
+
+### 4.3.13 Skill 审核者也是同一个，服务两个对象（分批第 52 批）
+
+使用者接着问：「Skill 审核者，它和审核 Agent 的是同一个吗？」
+
+**是。** 与起草者同构：一条内置审核者（`role === 'skill-reviewer'`），`server.ts` 的
+`startDraftAudit` 对两类草稿都用它，差别只在任务书与平台定检：
+
+| | 审 skill | 审（改过的）智能体指令 |
+| --- | --- | --- |
+| 身份 ② | **同一份** `SKILL_REVIEWER_INSTRUCTIONS` | 同左 |
+| 任务书 ③ | `draftAuditPrompt`（五项：脚本/命令块/反规避/步骤衔接/使用者要求） | `agentDraftAuditPrompt`（**指令五项**：该做什么/边界/流程命令/产出契约/失败处理） |
+| 平台定检 | `material/exec-check.md`（脚本、引用、骨架、占位符） | `material/instructions-check.md`（字符数、空、frontmatter 残留、整篇代码围栏） |
+| 产出 | `review.json` | 同左（`outRel` 不同） |
+
+#### 查出来的一处真问题（这一批修的）
+
+身份的判据 1 里写着：**「平台已经跑过定检（`material/exec-check.md`）」** —— 那是**审 skill**
+的文件名。审指令那一轮平台写的是 `material/instructions-check.md`，于是它去找一个不存在的文件；
+而"标「没查」的项没有结论、不许当成通过"这条纪律会让它把定检那几项判成"没查到"
+（用户看到的就是"审了但没说清跑没跑"）。
+
+**修法**（与第 51 批起草者同一招）：身份不写死对象相关的东西，**文件名由任务书点名**：
+
+> 语法/引用文件/骨架/占位符这些**平台已经跑过定检**（文件名见任务书：审 skill 是
+> `material/exec-check.md`，审指令是 `material/instructions-check.md`；起审核之前生成）
+
+身份 **1207 → 1263 字符**；47 批之后那份逐字冻结成 `SKILL_REVIEWER_INSTRUCTIONS_V5` 进历史表。
+
+#### 验证
+
+`agent-conduct.test.ts` 新增「审核者也服务两个对象：定检的文件名不许写死」：两个文件名都要在、
+且要有"文件名见任务书"这句（以后再出现第三个对象时不至于又漏）。
+
+**红检**：把定检文件名退回只写 `exec-check.md` ⇒ 立刻红。
+
+#### 两个审核者身份里**没有**跟着改的两处（如实记）
+
+- 「你不审的」里那句「这条 **skill** 该不该这么长、该不该拆」是 skill 专属的排除项；
+  审指令时对应排除项由任务书写。这段是"排除"表述，误导风险低，这次没动。
+- 第 3 条「反规避」里的 `|| true` / `2>/dev/null` 同样是命令类对象的例子；
+  审指令时仍成立（指令里也可能出现这类规避），保留。

@@ -227,6 +227,33 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     }
   })
 
+  test('★★★ 审核者也服务两个对象：定检的**文件名**不许写死（skill 是 exec-check，指令是 instructions-check）', () => {
+    /**
+     * 使用者问「Skill 审核者 和审核 Agent 的是同一个吗？」时查到的：**是同一个**
+     * （`role === 'skill-reviewer'`，`server.ts` 的 `startDraftAudit` 两类草稿都用它）。
+     *
+     * 而平台定检落在两个不同文件里：
+     *   · 审 skill ⇒ `material/exec-check.md`
+     *   · 审指令 ⇒ `material/instructions-check.md`
+     * 身份原来只写了前者 ⇒ 审指令那一轮它去找一个不存在的文件（找不到时它只能"没查到"，
+     * 而那些项恰恰是不许当通过的）。这与起草者第一句写死 skill 是同一类毛病。
+     */
+    assert.ok(
+      SKILL_REVIEWER_INSTRUCTIONS.includes('exec-check.md'),
+      '审 skill 的定检文件名要在',
+    )
+    assert.ok(
+      SKILL_REVIEWER_INSTRUCTIONS.includes('instructions-check.md'),
+      '★ 审指令的定检文件名也要在（否则那一轮它找不到定检结论）',
+    )
+    assert.ok(
+      SKILL_REVIEWER_INSTRUCTIONS.includes('文件名见任务书'),
+      '并且要说明"由任务书点名"，避免以后再有第三个对象时又漏',
+    )
+    // 第一句仍然是对象无关的（第 35 批定的调子），这次没有回退
+    assert.ok(SKILL_REVIEWER_INSTRUCTIONS.startsWith('你是平台内置的审核者'))
+  })
+
   test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes('起草者专属'), '起草者的专属三条要有明确小标题')
     // ★ 分批第 51 批：措辞从「不值得沉淀就说出来」放宽成对象无关的「不值得就说出来」
