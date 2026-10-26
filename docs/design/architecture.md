@@ -1735,3 +1735,50 @@ daemon 主体里新增两个函数，与执行器同口径：
 
 > 教训（可复用）：一个"漏了只在某个平台上才炸"的选项，不要指望每个调用点自己记住——
 > 把它塞进一个**唯一的出口**（`spawnPlanFor`），再加一条 grep 级守卫，比在文档里写三遍都有效。
+
+### 4.3.5 分批第 44 批：service 形状的 runtime 要把"发了什么"报进日志
+
+使用者（看运行日志时发现）：
+
+> 「我在日志中有看到『命令行：/opt/homebrew/bin/codex app-server --stdio』，后面应该有发给它的命令，没有打印出来」
+
+#### 为什么 claude 有、codex 没有
+
+| runtime 形状 | 第一句话去哪 | 日志里能看到什么 |
+| --- | --- | --- |
+| **cli**（claude / generic） | 拼进 argv（`claude -p "<第一句话>"`） | 「命令行：…」那一行**顺带**把内容也显示了 |
+| **service**（codex） | 走 stdin 的 JSON-RPC 帧（`initialize` / `thread/start` / `turn/start`） | 「命令行」只有启动参数 `app-server --stdio`，**内容一个字节都看不见** |
+
+这不是"少看一行"：排查 codex 起不来时，看不到帧就分不清**没发出去 / 发出去形状不对 / 服务端拒了哪一个**，只能猜。
+
+#### 落法（两条路里选了第二条）
+
+| 方案 | 代价 |
+| --- | --- |
+| ① 把 `turn/start` 的 input 原文**再打印一遍** | 同一段可能几十 KB 的第一句话在日志里出现两次，"哪一份是真的"变成新的误解源 |
+| ② **逐字比对**（采用）：帧里真的发出去的 `sentText` 与日志里记下的第一句话比 | 一致 ⇒ 一行话钉住；**不一致才打全文**（那才是需要全文的异常现场） |
+
+落地：
+
+1. `ExecOptions.onRpcFrame?: (note: RpcDeliveryNote) => void`（`agent-core`）——
+   `{direction:'out'|'in', method, headline, sentText?}`。
+2. `codex-backend` 用一个 `rpc()` helper 包住每一次请求：出站报方法名与关键字段
+   （`cwd` / `model` / `approvalPolicy` / `input` 项数），入站报**成功或失败 + 耗时**
+   （失败带 JSON-RPC `code`）；`turn/start` 额外把 `input[0].text` 作为 `sentText` 交出。
+   ⚠️ 帧层（`JsonRpcTransport`）**不动**：它只管帧的编解码，业务摘要属于后端。
+3. `executor` 把摘要写成 note；对 `sentText` 调 `verifySentText(delivery.user, sent)`
+   （`apps/daemon/src/rpc-log.ts`）：
+   - 一致 ⇒ `✓ 发给 CLI 的内容 = 上面「第一句话」的 user 部分（逐字相同，N 字符）`
+   - 不一致 ⇒ 指出第几个字符起不同，**并打出线上那一份的全文**
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 比对函数：一致不打全文 / 不一致打**线上**那份并指出位置 / 前缀相同的情况 / 空串 | `apps/daemon/src/rpc-log.test.ts` |
+| 后端真的报帧：`initialize` 在最前、`thread/start`、`turn/start` 都在，`sentText` **只有一条且原样** | `packages/agent-codex/src/codex-backend.test.ts` |
+| 服务端拒绝时入站摘要带 `code`（分得清"没回"与"回了错"） | 同上（用假 server 的 `resume-missing` 剧本） |
+| **执行器真把摘要写进了 run 日志**（假后端报帧 → 读 `/api/runs/:id/messages` 能看到） | `apps/daemon/src/rpc-log.test.ts` |
+
+**红检**：把 executor 里那段 `onRpcFrame` 接线注释掉 ⇒ 最后一条立刻红
+（报的正是"日志里要有出站帧摘要"，与使用者原话同义）。

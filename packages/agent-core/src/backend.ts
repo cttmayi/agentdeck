@@ -26,6 +26,23 @@ export interface AgentMessage {
   outputTruncated?: boolean
 }
 
+/**
+ * 一帧 JSON-RPC 的**可读摘要**（分批第 44 批）。
+ *
+ * `headline` 进日志一行；`sentText` 只有"真的把内容发出去了"的那一帧才有
+ * （目前是 `turn/start` 的 `input[0].text`）——调用方拿它跟"第一句话"逐字比对，
+ * 于是"日志里看到的"与"CLI 收到的"成了同一件事，而不是两个都可能是真的说法。
+ */
+export interface RpcDeliveryNote {
+  direction: 'out' | 'in'
+  /** 方法名（入站时是它回应的那个方法）。 */
+  method: string
+  /** 一行摘要，直接进运行日志。 */
+  headline: string
+  /** 这一帧携带的**正文**（`turn/start` 的 input）；其余帧没有。 */
+  sentText?: string
+}
+
 export interface ExecOptions {
   /**
    * 用户消息（③ 任务那一块）。
@@ -119,6 +136,30 @@ export interface ExecOptions {
    * 排查时就不用去猜"它当时到底说了什么"。
    */
   onStderrLine?: (line: string) => void
+
+  /**
+   * ★ 分批第 44 批：**service 形状**的 runtime 要把"这次真的发了什么"报上来。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么需要它（使用者报的原话）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 「我在日志中有看到『命令行：/opt/homebrew/bin/codex app-server --stdio』，
+   *   后面应该有发给它的命令，没有打印出来」。
+   *
+   * 一句话都不假：claude / generic 是 **cli 形状**，第一句话就拼在 argv 里
+   *（`claude -p "<第一句话>"`），于是"命令行"那一行**顺带**把"发了什么"也显示了。
+   * codex 是 **service 形状**：命令行只有启动参数（`app-server --stdio`），
+   * 真正的内容（`initialize` / `thread/start` / `turn/start` 的 JSON-RPC 帧）
+   * 走 stdin——**日志里一个字节都看不见**。
+   *
+   * 后果不是"少看一行"：Windows 上排查"codex 起不来"时，看不到 frame 就分不清
+   * "没发出去""发出去的形状不对""服务端拒了哪一个"，只能靠猜。
+   *
+   * ⚠️ 只报**帧层的摘要**（方法名、id、耗时、关键字段），不做全量参数 dump：
+   *    `turn/start` 的 `input` 单独用 `sentText` 报（那是"发给它的内容"本身）。
+   */
+  onRpcFrame?: (note: RpcDeliveryNote) => void
 
   /**
    * 可选沙箱（M4）。缺省 = 不做任何包装。

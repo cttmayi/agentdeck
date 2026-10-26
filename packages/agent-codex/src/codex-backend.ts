@@ -235,10 +235,46 @@ export class CodexBackend implements AgentBackend {
     //   被拒回退新线程 ⇒ true。
     let resumeRejected: boolean | undefined
 
+    /**
+     * ★ 分批第 44 批：**service 形状的 runtime 必须把"发了什么"报进日志**。
+     *
+     * 使用者报过：「日志里有『命令行：/opt/homebrew/bin/codex app-server --stdio』，
+     * 后面应该有发给它的命令，没有打印出来」。他说得对：cli 形状（claude / generic）
+     * 的第一句话拼在 argv 里，所以"命令行"那一行顺带把内容也显示了；而 codex 的
+     * 内容全在 JSON-RPC 帧里，走 stdin ⇒ 日志里一个字节都没有。
+     *
+     * 这里只报**摘要**（方法名 + 关键字段 + 耗时），`turn/start` 额外把 `input` 原文
+     * 用 `sentText` 交出去——由调用方（executor）与"第一句话"逐字比对，于是
+     * "日志里看到的"与"CLI 收到的"是同一件事。
+     */
+    const rpc = async <T>(method: string, params: unknown, headline: string): Promise<T> => {
+      opts.onRpcFrame?.({ direction: 'out', method, headline })
+      const startedAt = Date.now()
+      try {
+        const res = await transport.request<T>(method, params, { timeoutMs })
+        opts.onRpcFrame?.({
+          direction: 'in',
+          method,
+          headline: `← ${method} 成功（${String(Date.now() - startedAt)}ms）`,
+        })
+        return res
+      } catch (err) {
+        const msg = err instanceof JsonRpcServerError ? `code ${String(err.code)}：${err.message}` : String(err)
+        opts.onRpcFrame?.({
+          direction: 'in',
+          method,
+          headline: `← ${method} 失败（${String(Date.now() - startedAt)}ms）：${msg}`,
+        })
+        throw err
+      }
+    }
+
     try {
-      await transport.request('initialize', {
-        clientInfo: { name: CODEX_SERVER_FACTS.clientName, title: 'agentdeck', version: '0.0.0' },
-      }, { timeoutMs })
+      await rpc(
+        'initialize',
+        { clientInfo: { name: CODEX_SERVER_FACTS.clientName, title: 'agentdeck', version: '0.0.0' } },
+        `→ initialize（clientInfo.name=${CODEX_SERVER_FACTS.clientName}，version=0.0.0）`,
+      )
       transport.notify('initialized')
 
       if (opts.resumeSessionId) {
@@ -246,7 +282,11 @@ export class CodexBackend implements AgentBackend {
         // JSON-RPC error（-32600）。被拒时回退**新线程**继续跑 + resumeRejected=true：
         // 与 claude 的语义一致（FR-CLI-06：继续跑了但没有上文，要大声说，不能悄悄跑偏）。
         try {
-          const res = await transport.request('thread/resume', { threadId: opts.resumeSessionId }, { timeoutMs })
+          const res = await rpc<Record<string, unknown>>(
+            'thread/resume',
+            { threadId: opts.resumeSessionId },
+            `→ thread/resume（threadId=${opts.resumeSessionId}）`,
+          )
           threadId = asString(asRecord(asRecord(res)?.['thread'])?.['id']) ?? opts.resumeSessionId
           activeModel = asString(asRecord(res)?.['model']) ?? null
           resumeRejected = false
@@ -277,12 +317,17 @@ export class CodexBackend implements AgentBackend {
               `回退到新线程继续本次 run——它缺少上文，产出可能接不上（FR-CLI-06）。`,
           )
           resumeRejected = true
-          const res = await transport.request('thread/start', {
-            model: opts.model ?? undefined,
-            cwd: opts.workDir,
-            approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
-            sandbox: CODEX_SERVER_FACTS.sandbox,
-          }, { timeoutMs })
+          const res = await rpc<Record<string, unknown>>(
+            'thread/start',
+            {
+              model: opts.model ?? undefined,
+              cwd: opts.workDir,
+              approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
+              sandbox: CODEX_SERVER_FACTS.sandbox,
+            },
+            `→ thread/start（cwd=${opts.workDir}，model=${opts.model ?? '（CLI 默认）'}，` +
+              `approvalPolicy=${CODEX_SERVER_FACTS.approvalPolicy}）`,
+          )
           const t = asRecord(res)
           const tId = asString(asRecord(t?.['thread'])?.['id'])
           if (!tId) {
@@ -292,12 +337,17 @@ export class CodexBackend implements AgentBackend {
           activeModel = asString(t?.['model']) ?? null
         }
       } else {
-        const res = await transport.request('thread/start', {
-          model: opts.model ?? undefined,
-          cwd: opts.workDir,
-          approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
-          sandbox: CODEX_SERVER_FACTS.sandbox,
-        }, { timeoutMs })
+        const res = await rpc<Record<string, unknown>>(
+          'thread/start',
+          {
+            model: opts.model ?? undefined,
+            cwd: opts.workDir,
+            approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
+            sandbox: CODEX_SERVER_FACTS.sandbox,
+          },
+          `→ thread/start（cwd=${opts.workDir}，model=${opts.model ?? '（CLI 默认）'}，` +
+            `approvalPolicy=${CODEX_SERVER_FACTS.approvalPolicy}）`,
+        )
         const t = asRecord(res)
         const tId = asString(asRecord(t?.['thread'])?.['id'])
         if (!tId) {
@@ -308,22 +358,39 @@ export class CodexBackend implements AgentBackend {
         activeModel = asString(t?.['model']) ?? null
       }
 
-      const turnRes = await transport.request('turn/start', {
-        threadId,
-        // ★ 实测：恢复的线程 approvalPolicy 会退回 on-request——turn/start 也必须
-        //   显式传 never，否则无人值守策略不成立（§7 清单第 2 条的补充结论）。
-        approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
-        // ★★ 每一轮都显式给 cwd（分批第 15 批补的）。
-        //
-        //    文档里这个参数标着"可选，thread 已带"——**"thread 已带"在 resume 那一路上是错的**：
-        //    线程带的是它自己创建时的目录，而本次 run 的目录可能不同（沉淀返工的 v2 在自己的
-        //    小屋里干活，resume 的却是 v1 的线程）。不显式给，这一轮到底在哪个目录里执行就
-        //    取决于服务端如何取舍"线程的 cwd"与"进程的 cwd"——那是**没量过**的行为，
-        //    而它决定了起草者读到的 `skill/` 是哪一版、写回去的文件又落在哪间小屋。
-        cwd: opts.workDir,
-        // prompt 已是 B 档三段合成的一段（deliveryModeFor 在 daemon 侧判定）
-        input: [{ type: 'text', text: opts.prompt }],
-      }, { timeoutMs })
+      const turnRes = await rpc<Record<string, unknown>>(
+        'turn/start',
+        {
+          threadId,
+          // ★ 实测：恢复的线程 approvalPolicy 会退回 on-request——turn/start 也必须
+          //   显式传 never，否则无人值守策略不成立（§7 清单第 2 条的补充结论）。
+          approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
+          // ★★ 每一轮都显式给 cwd（分批第 15 批补的）。
+          //
+          //    文档里这个参数标着"可选，thread 已带"——**"thread 已带"在 resume 那一路上是错的**：
+          //    线程带的是它自己创建时的目录，而本次 run 的目录可能不同（沉淀返工的 v2 在自己的
+          //    小屋里干活，resume 的却是 v1 的线程）。不显式给，这一轮到底在哪个目录里执行就
+          //    取决于服务端如何取舍"线程的 cwd"与"进程的 cwd"——那是**没量过**的行为，
+          //    而它决定了起草者读到的 `skill/` 是哪一版、写回去的文件又落在哪间小屋。
+          cwd: opts.workDir,
+          // prompt 已是 B 档三段合成的一段（deliveryModeFor 在 daemon 侧判定）
+          input: [{ type: 'text', text: opts.prompt }],
+        },
+        `→ turn/start（threadId=${threadId}，input 1 项 / ${String(opts.prompt.length)} 字符，` +
+          `cwd=${opts.workDir}）`,
+      )
+      /**
+       * ★ 分批第 44 批：把**真正发出去的那段正文**单独交出去。
+       *
+       * 上面那条 headline 里只有长度；内容本身在 `sentText` 里——调用方（executor）
+       * 拿它与"第一句话"**逐字比对**，于是日志能回答"我看到的输入是不是它真收到的输入"。
+       */
+      opts.onRpcFrame?.({
+        direction: 'out',
+        method: 'turn/start',
+        headline: '（turn/start 的 input 原文见下一行——那是本次真正发给 codex 的内容）',
+        sentText: opts.prompt,
+      })
       const turnObj = asRecord(asRecord(turnRes)?.['turn'])
       const tId = asString(turnObj?.['id'])
       if (!tId) {

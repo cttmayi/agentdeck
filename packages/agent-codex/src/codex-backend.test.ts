@@ -80,6 +80,69 @@ async function run(backend: CodexBackend, opts: ExecOptions) {
   return { messages, result }
 }
 
+describe('★ 分批第 44 批：JSON-RPC 摘要要报给调用方（service 形状的"发了什么"）', () => {
+  /**
+   * 使用者报过：「日志里有『命令行：/opt/homebrew/bin/codex app-server --stdio』，
+   * 后面应该有发给它的命令，没有打印出来」。
+   *
+   * 这条用例量的是**后端有没有把这些帧交出去**（日志怎么落地是 executor 的事，
+   * 那一条在 `apps/daemon/src/rpc-log.test.ts` 与 e2e 里）。
+   */
+  test('★★★ initialize / thread/start / turn/start 的出场顺序与内容都对，且 turn/start 带 sentText', async () => {
+    const { backend, env } = makeBackend({ scenario: 'ok' })
+    const workDir = await makeTempDir('codex-rpc-log')
+    try {
+      const notes: Array<{ direction: string; method: string; headline: string; sentText?: string }> = []
+      const opts = execOpts({
+        workDir,
+        env,
+        onRpcFrame: (n) => notes.push(n),
+      })
+      await run(backend, opts)
+
+      const outMethods = notes.filter((n) => n.direction === 'out').map((n) => n.method)
+      assert.ok(outMethods.includes('initialize'), `出站要有 initialize：${outMethods.join(',')}`)
+      assert.ok(outMethods.includes('thread/start'), `出站要有 thread/start：${outMethods.join(',')}`)
+      assert.ok(outMethods.includes('turn/start'), `出站要有 turn/start：${outMethods.join(',')}`)
+      // ★ 顺序：initialize 一定在最前（协议要求握手先来）
+      assert.equal(outMethods[0], 'initialize')
+
+      const inMethods = notes.filter((n) => n.direction === 'in').map((n) => n.method)
+      assert.ok(inMethods.includes('initialize'), '入站也要有（失败时"是它没回"要看得出来）')
+      assert.ok(
+        notes.some((n) => n.direction === 'in' && n.method === 'turn/start' && n.headline.includes('成功')),
+        '入站摘要要带上成功/失败与耗时——排查时要分清"没回"与"回了错"',
+      )
+
+      // ★★ 真正发出去的正文必须交给调用方（它是"我看到的输入是不是它收到的输入"的唯一凭据）
+      const sent = notes.filter((n) => n.sentText !== undefined)
+      assert.equal(sent.length, 1, `只该有 turn/start 带正文，实际 ${String(sent.length)} 条`)
+      assert.equal(sent[0]?.method, 'turn/start')
+      assert.equal(sent[0]?.sentText, '把 a.txt 读完', 'sentText 必须是**原样**的 input 文本')
+    } finally {
+      await cleanup(workDir)
+    }
+  })
+
+  test('★★ 服务端拒绝时，入站摘要要写明是哪个方法 + code（不然只剩一句"对话阶段失败"）', async () => {
+    // 用假 server 真有的剧本：`resume-missing` 对 `thread/resume` 回 -32600
+    const { backend, env } = makeBackend({ scenario: 'resume-missing' })
+    const workDir = await makeTempDir('codex-rpc-fail')
+    try {
+      const notes: Array<{ direction: string; method: string; headline: string }> = []
+      await run(
+        backend,
+        execOpts({ workDir, env, resumeSessionId: 'thr_missing', onRpcFrame: (n) => notes.push(n) }),
+      )
+      const failed = notes.filter((n) => n.direction === 'in' && n.headline.includes('失败'))
+      assert.ok(failed.length > 0, `要有一条"失败"的入站摘要：${JSON.stringify(notes)}`)
+      assert.match(failed[0]?.headline ?? '', /code [0-9-]+/, '要带上 JSON-RPC 错误码')
+    } finally {
+      await cleanup(workDir)
+    }
+  })
+})
+
 describe('CodexBackend（codex app-server 适配器，假 server 上整链跑通）', () => {
   test('★ ok：completed、流式消息、CLI 报告的模型、用量、会话 id、命令行如实上报', async () => {
     const { backend, env, echoFile } = makeBackend({ scenario: 'ok' })

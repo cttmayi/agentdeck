@@ -65,6 +65,7 @@ const LANGUAGE_NAME: Record<'zh' | 'en', string> = {
 }
 import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
+import { verifySentText } from './rpc-log.ts'
 import type { RunRegistry } from './registry.ts'
 import type { ReviewCoordinator } from './review.ts'
 import type { Semaphore } from './semaphore.ts'
@@ -1488,6 +1489,24 @@ export class RunExecutor {
           ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir
             ? { CODEX_HOME: this.#deps.codexConfigDir }
             : {}),
+        },
+        /**
+         * ★ 分批第 44 批：把 service 形状 runtime 的 JSON-RPC 摘要写进运行日志。
+         *
+         * 使用者报过「日志里有『命令行：/opt/homebrew/bin/codex app-server --stdio』，
+         * 后面应该有发给它的命令，没有打印出来」——cli 形状的"命令行"顺带把第一句话
+         * 显示出来了，而 codex 的内容全在 JSON-RPC 帧里、走 stdin，日志里一个字节都没有。
+         *
+         * 这里只落两件事：① 帧摘要（方法名 + 关键字段 + 耗时）；
+         * ② `turn/start` 的**正文**与上面「第一句话」逐字比对的结果。
+         * 一致就一行话；**不一致才打全文**——那才是需要全文的异常现场。
+         */
+        onRpcFrame: (note) => {
+          void this.#note(runId, note.headline)
+          if (note.sentText === undefined) return
+          const verdict = verifySentText(delivery.user, note.sentText)
+          void this.#note(runId, verdict.headline)
+          if (verdict.body !== undefined) void this.#note(runId, verdict.body)
         },
         onCommandLine: ({ argv, sandboxDescription }) => {
           actualArgv = argv
