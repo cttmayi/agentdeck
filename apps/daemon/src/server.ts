@@ -2,8 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import {
   ALL_KINDS,
   buildBlocks,
@@ -254,6 +255,66 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024
  * 只有"有限次数越界"才按越界拒。
  */
 const MAX_REWORKS = 100
+
+// ══════════════════════════════════════════════════════════════════════
+// 一次性任务接口（`POST /api/task`，分批第 71 批）的边界值
+// ══════════════════════════════════════════════════════════════════════
+
+/**
+ * 这些字段**只有**这些——是**白名单**，不是黑名单。
+ *
+ * 为什么不把 `systemPrompt` / `env` / `skills` / `customArgs` 一个个列进"禁止"：
+ * 黑名单的失效方式是**忘记加**（新加一个能改写 agent 行为的字段，这个接口默默就
+ * 跟着放行了），而白名单的失效方式是"新字段用不了"——后者当场报错，前者静默。
+ * 所以判据是"只认识这几个"，别的全拒。
+ */
+const TASK_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  'prompt',
+  'workDir',
+  'agent',
+  'groupId',
+  'maxTurns',
+  'wait',
+])
+
+/** `wait` 的默认与上限（秒）。默认 30：短任务一次拿到结果，长任务转 202。 */
+const TASK_WAIT_DEFAULT_SEC = 30
+const TASK_WAIT_MAX_SEC = 120
+/** 提示词长度上限：挡住"整个文件塞进 query"那类误用，也给日志一个上限。 */
+const TASK_PROMPT_MAX_CHARS = 100_000
+/** `maxTurns` 上限（与返工上限同一个量级：防的是"跑飞了"）。 */
+const TASK_MAX_TURNS_MAX = 100
+/** 自动建的任务标题取提示词前多少字。 */
+const TASK_ISSUE_TITLE_CHARS = 60
+
+/**
+ * 幂等键 ⇒ **确定的 runId**。
+ *
+ * 为什么要确定：幂等键的全部意义是"同一个键第二次来时**不要**再跑一次"。最直接的
+ * 做法是"存一张 键→runId 的映射表"，但那是**又多一份状态**（会丢、要清理、要迁移）。
+ * 改成从键**派生** id，判据就变成一句话：`getRun(派生的 id)` 有东西 ⇒ 这次是重放。
+ *
+ * ⚠️ 代价：派生出来的 id **不是 ULID**，读不出时间、也不是时间序（列表本来就按
+ *    `queuedAt` 排，所以不影响排序；`runs/<runId>/` 目录名同样只是名字）。
+ *   前缀 `task-` 让 `ls` 一眼看出这是 API 建的任务。
+ *
+ * ⚠️ 键在**工作区范围内**唯一（哈希里带了 workspaceId）：两个工作区各自用 `k1`
+ *   互不干扰。
+ */
+function taskRunIdFromKey(workspaceId: string, key: string): RunId {
+  const digest = createHash('sha256')
+    .update(`${workspaceId}\u0000${key}`)
+    .digest('hex')
+    .slice(0, 26)
+  return `task-${digest}` as RunId
+}
+
+/** 提示词 ⇒ 自动建的任务标题（折行/连续空白压成一个空格，太长截断）。 */
+function taskIssueTitle(prompt: string): string {
+  const flat = prompt.replace(/\s+/g, ' ').trim()
+  const cut = flat.length > TASK_ISSUE_TITLE_CHARS ? `${flat.slice(0, TASK_ISSUE_TITLE_CHARS)}…` : flat
+  return `[API] ${cut}`
+}
 
 /**
  * run 的终态。
@@ -8452,13 +8513,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
-    if (req.method === 'POST' && path === '/api/runs') {
-      const body = (await readJsonBody(req)) as SubmitRunRequest
+  /**
+   * ★ 分批第 71 批：`POST /api/runs` 的那一整套校验与提交抽成**只返回结果、不写 HTTP**
+   * 的函数——因为新加的 `POST /api/task` 必须走**同一套**判据（组展开、INV-1、审核者、
+   * 动作白名单、skill 解析）。复制一份的话两条路迟早分叉，而分叉的表现是
+   * 「页面上被拦住、API 这边放过去了」。
+   *
+   * 改动方式是刻意的**零逻辑改动**：原来写 `res` 的两处改成记录，判断顺序、
+   * 状态码、每一句文案全部原封不动（那些文案都是踩过坑才写出来的）。
+   */
+  async function submitRunRequest(body: SubmitRunRequest): Promise<{
+    status: number
+    body: unknown
+    headers: Array<[string, string]>
+  }> {
+    const out = { status: 202, body: undefined as unknown, headers: [] as Array<[string, string]> }
+    const reply = (status: number, payload: unknown): void => {
+      out.status = status
+      out.body = payload
+    }
+    await (async (): Promise<void> => {
       // `workDir` 从 D27 起是**可选**的：缺省由 daemon 按任务自动分配。
       // 这个校验漏改过一次，症状是"页面不填目录就提交不了"——而那正是 D27
       // 要消除的动作。
       if (typeof body?.runId !== 'string' || body.runId === '') {
-        sendJson(res, 400, { error: '缺少 runId' })
+        reply(400, { error: '缺少 runId' })
         return
       }
 
@@ -8491,7 +8570,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //   实测过：错误信息字面上在说 `reviewerAgentId`，而请求体里没有这个键，
       //   排查方向直接被带偏。所以这里单独拒，并且点名 `groupId`。
       if (body.groupId !== undefined && body.kind !== 'execute') {
-        sendJson(res, 400, {
+        reply(400, {
           error:
             `groupId 只对执行 run（kind:'execute'）有意义，而这条 run 的 kind 是` +
             `「${body.kind}」。组描述的是"谁执行 → 谁审 → 判完能做什么"这条链，` +
@@ -8504,14 +8583,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (body.groupId !== undefined) {
         const group = await store.getGroup(body.groupId as AgentGroup['id'])
         if (!group) {
-          sendJson(res, 400, {
+          reply(400, {
             error: `智能体组不存在：${body.groupId}。它可能已经被删掉了，请重新选一个。`,
             code: 'group_not_found',
           })
           return
         }
         if (!group.enabled) {
-          sendJson(res, 400, {
+          reply(400, {
             error: `智能体组「${group.name}」已停用。在智能体组页把它启用后再选。`,
             code: 'group_disabled',
           })
@@ -8526,7 +8605,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           //   没有主语，而使用者库里有好几个组时，他不知道自己该去改哪一个。
           //   实测过：报错说"组里没有审核者"，而使用者第一反应是"我哪来的组"。所以
           //   前面挂上组名与组 id（点名的那个 id 正是他要打开的那条记录）。
-          sendJson(res, 400, {
+          reply(400, {
             error:
               `智能体组「${group.name}」（${group.id}）的形态不合法，不能用来派活：` +
               shape.issues.join('；'),
@@ -8535,7 +8614,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           return
         }
         if (body.agentRef.id !== (shape.executor.id as string)) {
-          sendJson(res, 400, {
+          reply(400, {
             error:
               `选了智能体组「${group.name}」，但请求里的执行者是「${body.agentRef.name}」` +
               `（id ${body.agentRef.id}）——组的执行者是「${shape.executor.name}」。` +
@@ -8577,7 +8656,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           try {
             assertReviewerDistinct(body.agentRef.id as Agent['id'], { type: 'run', run: target })
           } catch (err) {
-            sendJson(res, 400, {
+            reply(400, {
               error: err instanceof Error ? err.message : String(err),
               code: 'reviewer_must_differ',
             })
@@ -8602,7 +8681,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //   审核 run 自己不会再被审一次，收下它就是收下一个永远不会生效的设置——
       //   而"设了但没生效"在这里是最贵的一类错（使用者以为换人审了）。
       if (body.reviewerAgentId !== undefined && body.kind !== 'execute') {
-        sendJson(res, 400, {
+        reply(400, {
           error:
             `reviewerAgentId 只对执行 run（kind:'execute'）有意义，` +
             `而这条 run 的 kind 是「${body.kind}」。审核 run 不会再被审一次。`,
@@ -8614,7 +8693,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const wanted = body.reviewerAgentId
         const picked = await store.getAgent(wanted as Agent['id'])
         if (!picked) {
-          sendJson(res, 400, {
+          reply(400, {
             error: `指定的审核者不存在（${wanted}）。它可能已经被删掉了，请重新选一个。`,
             code: 'reviewer_not_found',
           })
@@ -8635,7 +8714,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
               run: { agentId: body.agentRef.id } as Run,
             })
           } catch (err) {
-            sendJson(res, 400, {
+            reply(400, {
               error: err instanceof Error ? err.message : String(err),
               code: 'reviewer_must_differ',
             })
@@ -8643,7 +8722,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           }
         }
         if (picked.role !== 'reviewer') {
-          sendJson(res, 400, {
+          reply(400, {
             error:
               `agent「${picked.name}」的角色是「${picked.role}」，不能当审核者。` +
               `审核者必须是一个 role 为 reviewer 的 agent。`,
@@ -8684,7 +8763,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         const n = body.maxReworks
         // `null` = 无限（合法值）；只有"给了有限数却越界 / 不是整数"才拒。
         if (n !== null && (!Number.isInteger(n) || n < 0 || n > MAX_REWORKS)) {
-          sendJson(res, 400, {
+          reply(400, {
             error: `返工次数必须是 0 到 ${MAX_REWORKS} 之间的整数，或 null（无限返工）`,
             code: 'max_reworks_out_of_range',
           })
@@ -8694,7 +8773,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
       if (body.allowedActions !== undefined || body.actionParams !== undefined) {
         if (body.kind !== 'execute') {
-          sendJson(res, 400, {
+          reply(400, {
             error:
               `allowedActions / actionParams 只对执行 run（kind:'execute'）有意义，` +
               `而这条 run 的 kind 是「${body.kind}」——审核 run 的动作配置来自` +
@@ -8727,7 +8806,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
                   '要么把动作白名单/固定参数去掉。',
               }
         if (!reviewerCheck.ok) {
-          sendJson(res, 400, {
+          reply(400, {
             error: reviewerCheck.error,
             code: 'allowed_actions_without_reviewer',
           })
@@ -8744,7 +8823,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             await store.listTools(workspaceId),
           )
           if (!parsed.ok) {
-            sendJson(res, 400, { error: parsed.error, code: 'allowed_actions_unresolvable' })
+            reply(400, { error: parsed.error, code: 'allowed_actions_unresolvable' })
             return
           }
           body.allowedActions = parsed.value
@@ -8759,7 +8838,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             await store.listTools(workspaceId),
           )
           if (!paramsParsed.ok) {
-            sendJson(res, 400, { error: paramsParsed.error, code: 'action_params_unresolvable' })
+            reply(400, { error: paramsParsed.error, code: 'action_params_unresolvable' })
             return
           }
           body.actionParams = paramsParsed.value
@@ -8803,11 +8882,443 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const outcome = await executor.submit({ ...body, skills })
       if (outcome.kind === 'rejected') {
         // 取不到槽位就不返回 202——让页面稍后重试（FR-RUNTIME-04）
-        res.setHeader('retry-after', String(Math.ceil(outcome.retryAfterMs / 1000)))
-        sendJson(res, 429, outcome)
+        out.headers.push(['retry-after', String(Math.ceil(outcome.retryAfterMs / 1000))])
+        reply(429, outcome)
         return
       }
-      sendJson(res, 202, outcome)
+      reply(202, outcome)
+      return
+    })()
+    return out
+  }
+
+  /**
+   * 等到这条 run 到终态（最多 `waitSec` 秒），然后**重新读一遍库**。
+   *
+   * 为什么不是只靠订阅：`wait` 的语义是"我最多等这么久"，而不是"我一定等到底"。
+   * 到期就返回当前状态（调用方拿 202 自己收口），这比让 HTTP 连接一直挂着好——
+   * 挂着的每一条都占着 daemon 的并发与连接资源，而"客户端 30 秒超时"是常态。
+   *
+   * ⚠️ 订阅之后再查一次库：run 可能在 `getRun` 与 `subscribe` 之间就结束了，
+   *    那时事件早已发完，死等只会白等到超时（这是一个真的会偶发出现的窗口）。
+   */
+  async function awaitRunTerminal(runId: RunId, waitSec: number): Promise<Run | null> {
+    const first = await store.getRun(runId)
+    if (first === null) return null
+    if (TERMINAL_RUN_STATUSES.includes(first.status)) return first
+    if (waitSec <= 0) return first
+
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        unsubscribe()
+        resolve()
+      }
+      const timer = setTimeout(finish, waitSec * 1000)
+      const unsubscribe = registry.subscribe(runId, (event) => {
+        if (event.t === 'terminal') finish()
+      })
+      // 订阅完再补一次检查（见上面那条注释）
+      void store.getRun(runId).then((again) => {
+        if (again !== null && TERMINAL_RUN_STATUSES.includes(again.status)) finish()
+      })
+    })
+    return await store.getRun(runId)
+  }
+
+  /**
+   * 一条 run ⇒ 这个接口的返回体。
+   *
+   * 事实来源**只有两个**：run 记录本身（状态/用量/失败原因/工作目录）与它的消息流
+   * （`output` / `transcript`）。不另造字段、不缓存——否则 API 返的和界面看到会变成
+   * 两份事实，而"哪份才是真的"这种问题在这个项目里已经吃过一次了。
+   *
+   * `output` 与任务详情页**同一口径**（`lastTextOf`：最后一段非空 text）。
+   * `transcript` 是全部 text 消息按顺序拼起来——两者都从同一条消息流来。
+   */
+  async function taskPayloadOf(runId: RunId): Promise<Record<string, unknown>> {
+    const run = await store.getRun(runId)
+    if (run === null) {
+      return { runId, status: 'unknown', error: '这条 run 不存在（可能已经被删掉了）' }
+    }
+    const messages = await store.listRunMessages(runId)
+    const texts = messages
+      .filter((m) => m.type === 'text' && m.content.trim() !== '')
+      .map((m) => m.content)
+    const owner = await store.getAgent(run.agentId as Agent['id'])
+
+    // 产物 = 工作目录**顶层**的文件（`listWorkDir` 与任务详情右栏同一条判据：
+    // 平台注入物不算产出，所以 `managed` 的要排除）。
+    // ⚠️ 只列顶层：目录内部靠 `GET /api/runs/{id}/files?dir=` 逐层取，
+    //    一次把整棵树拉回来会把"这次到底产出了什么"淹掉。
+    let files: Array<{ relPath: string; bytes: number }> = []
+    if (run.workDir !== null && run.workDir !== undefined) {
+      const managed = await managedPathsOf(owner)
+      const listing = await listWorkDir(run.workDir, '', managed).catch(() => null)
+      if (listing !== null) {
+        files = listing.entries
+          .filter((e) => e.kind === 'file' && !e.managed)
+          .map((e) => ({ relPath: e.path, bytes: e.sizeBytes }))
+      }
+    }
+
+    // 判决住在**审核 run** 上，不是执行 run（`review.ts` 的 `#recordFrom` 用的是
+    // `input.run.id`，而 `#finishReview(run, …)` 收到的 `run` 是审核那条）。
+    // 我第一版按"判决挂在执行 run 上"去读 `listVerdictsByRun(runId)`，量到的是**空数组**
+    // ——于是「传了组却没审」这个假象把排查方向带偏了一整轮（真相是：判决在另一条 run 上）。
+    // 复核处：`apps/daemon/src/server.ts` 里草稿详情那条路也是"先找到审核 run，再读它的判决"。
+    //
+    // ⚠️ 代价：store 没有"按 subject 查 run"的索引，只能拉一页再筛（与草稿详情那条路
+    //    同样的做法）。这里给一个足够大的上限并说明：查不到就退回 `null`，不猜。
+    const runsPage = await store.listRuns({ workspaceId, limit: 10_000 })
+    const reviewRuns = runsPage.items.filter(
+      (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === runId,
+    )
+    const reviewRun = reviewRuns[reviewRuns.length - 1] ?? null
+    const verdicts = reviewRun === null ? [] : await store.listVerdictsByRun(reviewRun.id)
+    const lastVerdict = verdicts[verdicts.length - 1] ?? null
+
+    return {
+      runId,
+      status: run.status,
+      output: lastTextOf(messages),
+      transcript: texts.join('\n\n'),
+      /**
+       * 让它归属的那条任务（自动建的那条）。调用方拿它能在界面里找到这次跑。
+       */
+      issueId: run.subject.type === 'issue' ? run.subject.id : null,
+      workDir: run.workDir ?? null,
+      sessionId: run.sessionId ?? null,
+      usage: run.usage ?? null,
+      failureReason: run.failureReason ?? null,
+      files,
+      review:
+        lastVerdict === null
+          ? null
+          : {
+              verdictId: lastVerdict.id,
+              status: lastVerdict.status,
+              conclusion: lastVerdict.conclusion,
+              reasonCode: lastVerdict.reasonCode,
+              findings: lastVerdict.findings.map((f) => ({
+                severity: f.severity,
+                summary: f.summary,
+              })),
+              action: lastVerdict.action,
+            },
+      /** 要实时跟（或 202 之后收口）就用它。 */
+      events: `/api/runs/${runId}/events`,
+    }
+  }
+
+    if (req.method === 'POST' && path === '/api/runs') {
+      const body = (await readJsonBody(req)) as SubmitRunRequest
+      const submitted = await submitRunRequest(body)
+      for (const [name, value] of submitted.headers) res.setHeader(name, value)
+      sendJson(res, submitted.status, submitted.body)
+      return
+    }
+    // ══════════════════════════════════════════════════════════════════════
+    // ── 一次性任务接口：`POST /api/task` / `GET /api/task/{runId}`（分批第 71 批）──
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // 一句话：**给一句提示词，跑一次 agent，把结果返回给调用方**。
+    //
+    // 为什么它可以存在（而不违反 §7.4 那条「不提供提交任意 run」）：
+    //   ① 这条面**只能从回环够到**（daemon 只 listen 127.0.0.1 + 上面的 Host 校验），
+    //      而回环上任何本机进程本来就能 `POST /api/runs`——**它没有新增执行能力**，
+    //      新增的只是"好用"。
+    //   ② §7.4 那条边界真正守的是**不给 CLI / MCP**（那两处是 agent 会自己调的东西）。
+    //      所以这两条路由**不进 MCP、不加 CLI 命令**，测试里钉着。
+    //   ③ 输入是**白名单**：身份、环境变量、技能、系统提示、CLI 参数一律不收——
+    //      调用方改不了 agent 的行为，只能说"干什么"。
+    //
+    // ⚠️ 一旦有人把 daemon 挂到隧道/内网穿透上，这个路由就是**远程代码执行**。
+    //    要对外暴露必须先加 token + 单次预算上限，那是另一次决定（D91）。
+    if (req.method === 'POST' && path === '/api/task') {
+      const raw = (await readJsonBody(req)) as unknown
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+        sendJson(res, 400, { error: '请求体必须是一个 JSON 对象', code: 'task_body_invalid' })
+        return
+      }
+      const input = raw as Record<string, unknown>
+
+      // ── 白名单（判据见 `TASK_ALLOWED_KEYS` 的注释）──
+      const unknownKeys = Object.keys(input).filter((k) => !TASK_ALLOWED_KEYS.has(k))
+      if (unknownKeys.length > 0) {
+        sendJson(res, 400, {
+          error:
+            `这个接口不接受这些字段：${unknownKeys.join('、')}。` +
+            `它只接受 ${[...TASK_ALLOWED_KEYS].join('、')}——身份、环境变量、技能、` +
+            `系统提示、CLI 参数都由平台决定，调用方只能说"干什么"，不能说"用谁、怎么跑"。`,
+          code: 'task_field_not_allowed',
+          fields: unknownKeys,
+        })
+        return
+      }
+
+      const prompt = input['prompt']
+      if (typeof prompt !== 'string' || prompt.trim() === '') {
+        sendJson(res, 400, { error: 'prompt 必填，且不能是空白字符串', code: 'task_prompt_missing' })
+        return
+      }
+      if (prompt.length > TASK_PROMPT_MAX_CHARS) {
+        sendJson(res, 400, {
+          error: `prompt 太长了（${prompt.length} 字符，上限 ${TASK_PROMPT_MAX_CHARS}）`,
+          code: 'task_prompt_too_long',
+        })
+        return
+      }
+
+      const workDirInput = input['workDir']
+      if (workDirInput !== undefined) {
+        if (typeof workDirInput !== 'string' || workDirInput.trim() === '') {
+          sendJson(res, 400, { error: 'workDir 必须是字符串（留空就别传这个字段）', code: 'task_workdir_invalid' })
+          return
+        }
+        // 只收绝对路径：相对路径是**相对 daemon 进程的 cwd**，那是使用者的目录，
+        // 不是他以为的那个。要"随便给我一块地"就不传这个字段（D27 自动分配）。
+        if (!isAbsolute(workDirInput)) {
+          sendJson(res, 400, {
+            error: `workDir 必须是绝对路径（收到 ${JSON.stringify(workDirInput)}）。不想指定就别传这个字段，daemon 会分配一间。`,
+            code: 'task_workdir_not_absolute',
+          })
+          return
+        }
+      }
+
+      const agentInput = input['agent']
+      const groupInput = input['groupId']
+      if (agentInput !== undefined && typeof agentInput !== 'string') {
+        sendJson(res, 400, { error: 'agent 必须是字符串 id', code: 'task_agent_invalid' })
+        return
+      }
+      if (groupInput !== undefined && typeof groupInput !== 'string') {
+        sendJson(res, 400, { error: 'groupId 必须是字符串 id', code: 'task_group_invalid' })
+        return
+      }
+      if (agentInput !== undefined && groupInput !== undefined) {
+        sendJson(res, 400, {
+          error: 'agent 与 groupId 只能给一个：组已经决定了谁执行，再指定一个人就是两个互相矛盾的意图。',
+          code: 'task_identity_ambiguous',
+        })
+        return
+      }
+
+      const maxTurnsInput = input['maxTurns']
+      if (maxTurnsInput !== undefined) {
+        if (
+          typeof maxTurnsInput !== 'number' ||
+          !Number.isInteger(maxTurnsInput) ||
+          maxTurnsInput < 1 ||
+          maxTurnsInput > TASK_MAX_TURNS_MAX
+        ) {
+          sendJson(res, 400, {
+            error: `maxTurns 必须是 1 到 ${TASK_MAX_TURNS_MAX} 之间的整数`,
+            code: 'task_max_turns_invalid',
+          })
+          return
+        }
+      }
+
+      const waitInput = input['wait']
+      if (waitInput !== undefined) {
+        if (
+          typeof waitInput !== 'number' ||
+          !Number.isFinite(waitInput) ||
+          waitInput < 0 ||
+          waitInput > TASK_WAIT_MAX_SEC
+        ) {
+          sendJson(res, 400, {
+            error: `wait 必须是 0 到 ${TASK_WAIT_MAX_SEC} 之间的秒数（0 = 立刻返回 runId）`,
+            code: 'task_wait_invalid',
+          })
+          return
+        }
+      }
+      const waitSec = typeof waitInput === 'number' ? waitInput : TASK_WAIT_DEFAULT_SEC
+
+      // ── 幂等：同键 ⇒ 同一条 run（连 issue 都不再建）──
+      const rawKey = req.headers['idempotency-key']
+      const idempotencyKey = Array.isArray(rawKey) ? rawKey[0] : rawKey
+      if (idempotencyKey !== undefined && idempotencyKey.trim() === '') {
+        sendJson(res, 400, { error: 'Idempotency-Key 头不能是空白', code: 'task_key_empty' })
+        return
+      }
+      if (idempotencyKey !== undefined && idempotencyKey.length > 200) {
+        sendJson(res, 400, { error: 'Idempotency-Key 太长了（上限 200 字符）', code: 'task_key_too_long' })
+        return
+      }
+      if (idempotencyKey !== undefined) {
+        const derived = taskRunIdFromKey(workspaceId as string, idempotencyKey)
+        const existing = await store.getRun(derived)
+        if (existing !== null) {
+          // ★ 同一个键配**不同的内容** ⇒ 409，而不是把上一次的结果当这一次的给你。
+          //
+          //   这是幂等键最容易出的错法：脚本里把键写死成常量，于是第二次的请求
+          //   拿到第一次的产出、还被告知"成功了"。判据用**派生的任务标题**
+          //   （它就是 prompt 前 60 字的规范化）——弱，但足以挡住这一类。
+          //   任务被删过就跳过这条（那时没有第二份内容可对照）。
+          const existingIssue =
+            existing.subject.type === 'issue' ? await store.getIssue(existing.subject.id as Issue['id']) : null
+          if (existingIssue !== null && existingIssue.title !== taskIssueTitle(prompt)) {
+            sendJson(res, 409, {
+              error:
+                `Idempotency-Key 已经被用在另一次任务上了（run ${derived as string}）。` +
+                `同一个键不能配不同的内容——要么换一个键，要么把键做成随内容变化（比如哈希）。`,
+              code: 'task_key_conflict',
+            })
+            return
+          }
+          const payload = await taskPayloadOf(derived)
+          const settled = TERMINAL_RUN_STATUSES.includes(existing.status)
+          sendJson(res, settled ? 200 : 202, { ...payload, deduplicated: true })
+          return
+        }
+      }
+
+      // ── 归属：自动建一条任务（判据见 D91）──
+      //
+      // 为什么不复用某条已存在的任务：一次 API 调用就是一个独立的一次性任务，
+      // 它需要自己的工作目录（D27 按 subject 分）、自己的历史、自己的删除入口。
+      const now = Date.now()
+      const issue: Issue = {
+        id: ulid(now) as Issue['id'],
+        workspaceId,
+        title: taskIssueTitle(prompt),
+        description: `由 POST /api/task 创建（分批第 71 批）：一次性任务，结果直接返回给调用方。`,
+        status: 'todo',
+        priority: 'none',
+        assignee: null,
+        labels: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      // ── 身份：agent / groupId / 默认执行者 ──
+      //
+      // ⚠️ 身份快照（name/instructions）**从库里取**，不接受调用方内联——
+      //    `SubmitRunRequest.agentRef` 本来带着这两项，那是给页面的用法（它手里
+      //    有同一份数据）。让 API 也接受内联，这个接口立刻变成"改写 agent 人格"的入口。
+      let agentRef: SubmitRunRequest['agentRef'] | null = null
+      if (typeof groupInput === 'string') {
+        const group = await store.getGroup(groupInput as AgentGroup['id'])
+        if (group === null) {
+          sendJson(res, 404, {
+            error: `智能体组不存在：${groupInput}`,
+            code: 'task_group_not_found',
+          })
+          return
+        }
+        // 组形态与"谁是执行者"由 `checkGroupShape` 回答（与 POST /api/runs 同一份判据）。
+        // 真正的合法性由 `submitRunRequest` 再查一遍——这里只为了把 agentRef 填对，
+        // 两处都查不是重复：那边是权威，这边是"填得进去"。
+        const members = (
+          await Promise.all(group.members.map((id) => store.getAgent(id as Agent['id'])))
+        ).filter((a): a is Agent => a !== null)
+        const shape = checkGroupShape(group, members)
+        if (!shape.ok) {
+          sendJson(res, 400, {
+            error: `智能体组「${group.name}」（${group.id}）的形态不合法，不能用来派活：${shape.issues.join('；')}`,
+            code: 'task_group_shape_invalid',
+          })
+          return
+        }
+        agentRef = {
+          id: shape.executor.id,
+          name: shape.executor.name,
+          instructions: shape.executor.instructions,
+        }
+      } else if (typeof agentInput === 'string') {
+        const agent = await store.getAgent(agentInput as Agent['id'])
+        if (agent === null) {
+          sendJson(res, 404, { error: `agent 不存在：${agentInput}`, code: 'task_agent_not_found' })
+          return
+        }
+        if (agent.role !== 'executor') {
+          sendJson(res, 400, {
+            error:
+              `agent「${agent.name}」的角色是「${agent.role}」，这个接口只接受执行者（role: executor）。` +
+              `审核者/起草者不干执行类的活。`,
+            code: 'task_agent_not_executor',
+          })
+          return
+        }
+        agentRef = { id: agent.id, name: agent.name, instructions: agent.instructions }
+      } else {
+        // 缺省 = 现有的默认执行者。两条路：工作区设的默认 agent，或唯一的那一个执行者。
+        const workspace = await store.getWorkspace(workspaceId)
+        const preferred =
+          workspace?.defaultAgentId != null
+            ? await store.getAgent(workspace.defaultAgentId as Agent['id'])
+            : null
+        const usable =
+          preferred !== null && preferred.role === 'executor'
+            ? preferred
+            : (await store.listAgents(workspaceId)).filter((a) => a.role === 'executor')[0]
+        if (usable === undefined) {
+          sendJson(res, 400, {
+            error:
+              '没有可用的执行者：工作区里一个 role 为 executor 的 agent 都没有。' +
+              '先在「智能体」页建一个，或者在这个请求里用 agent 指定一个。',
+            code: 'task_no_executor',
+          })
+          return
+        }
+        agentRef = { id: usable.id, name: usable.name, instructions: usable.instructions }
+      }
+      const runId = (
+        idempotencyKey !== undefined ? taskRunIdFromKey(workspaceId as string, idempotencyKey) : ulid(now)
+      ) as RunId
+
+      // ── 走**同一个**提交流程（组展开、INV-1、审核者、动作白名单、skill 解析都在里面）──
+      const submitBody: SubmitRunRequest = {
+        runId,
+        kind: 'execute',
+        agentRef,
+        subject: { type: 'issue', id: issue.id },
+        prompt,
+        ...(typeof workDirInput === 'string' ? { workDir: workDirInput } : {}),
+        limits: {
+          maxTurns: typeof maxTurnsInput === 'number' ? maxTurnsInput : null,
+          timeoutMs: null,
+        },
+        ...(typeof groupInput === 'string' ? { groupId: groupInput as AgentGroup['id'] } : {}),
+      }
+      // 先落任务、再提交：提交要读 `subject`（工作目录按它分配），而"跑起来了
+      // 却没有归属任务"会造出一条查不到出处的 run。所以顺序反过来，被拒就把任务删掉
+      // ——拒绝的请求不该在任务列表里留下一条空任务。
+      await store.insertIssue(issue)
+      const submitted = await submitRunRequest(submitBody)
+      if (submitted.status !== 202) {
+        // 组/身份那一套判据在 `submitRunRequest` 里还有一遍（权威）。它拒了就照它的说。
+        await store.deleteIssue(issue.id).catch(() => {})
+        for (const [name, value] of submitted.headers) res.setHeader(name, value)
+        sendJson(res, submitted.status, submitted.body)
+        return
+      }
+
+      await awaitRunTerminal(runId, waitSec)
+      const payload = await taskPayloadOf(runId)
+      const settled = TERMINAL_RUN_STATUSES.includes(String(payload['status']))
+      sendJson(res, settled ? 200 : 202, settled ? payload : { ...payload, poll: `/api/task/${runId}` })
+      return
+    }
+
+    const taskMatch = /^\/api\/task\/([^/]+)$/.exec(path)
+    if (taskMatch && req.method === 'GET') {
+      const runId = decodeURIComponent(taskMatch[1]!) as RunId
+      const run = await store.getRun(runId)
+      if (run === null) {
+        sendJson(res, 404, { error: `没有这条任务：${runId}`, code: 'task_not_found' })
+        return
+      }
+      const payload = await taskPayloadOf(runId)
+      const settled = TERMINAL_RUN_STATUSES.includes(run.status)
+      sendJson(res, settled ? 200 : 202, settled ? payload : { ...payload, poll: `/api/task/${runId}` })
       return
     }
 
