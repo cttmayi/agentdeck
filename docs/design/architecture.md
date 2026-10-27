@@ -2688,3 +2688,35 @@ generic 覆盖成 `isRunnableFile`。也就是说"起进程前先问能不能跑
 **generic 独有**变成了**基类的流程**——以后谁再写 cli 形状的适配器，自动带上。
 
 验证：claude 19 条 + generic 64 条适配器测试全绿；全量 2189 全绿（行为一条没变）。
+
+### 4.3.26 分批第 66 批：service 形状基类 + 把"能不能跑"的检查变成默认（第 2 步）
+
+#### 做了什么
+
+1. **`ServiceBackendBase`**（`packages/agent-core/src/service-backend.ts`）——只收 service 形状**真正一样**的几段：
+   解析可执行文件、`probe()`、找不到时的措辞钩子（`missingExecutableMessage()` + `evidenceNote()`）、
+   "能不能当程序跑"、以及 `planSandbox` + "CLI 状态目录必须放行"这条规则（`extraWritableDirs()` 钩子）。
+   `CodexBackend extends ServiceBackendBase`：**握手 / turn / 取消语义 / 终态判定仍留在子类**
+   ——service 的协议时序与 cli 差得太远，硬塞进模板方法会得到一个"到处是钩子"的基类，比两份实现更难读。
+2. **`executable-check.ts`**：`isRunnableFile` / `describeMissingCommand` 原来是 **generic 与 codex 各一份**
+   （注释还写着"改的时候要一起改"）⇒ 收到 agent-core 一处；generic 保留 re-export 不让既有 import 断掉。
+3. **行为统一（这次真正的收益）**：`LineStreamBackendBase.assertRunnable()` 的**默认实现改成"查"**
+   （第 65 批我在文档里写了"从 generic 独有变成基类流程"，当时只做到"基类有这个方法"、默认还是空实现）。
+   现在 claude 与 generic 都会在起进程前问"这个路径真的能跑吗"，证据等级说明由 `evidenceNote()` 提供。
+
+#### 量到的变化
+
+| 文件 | 前 | 后 |
+| --- | --- | --- |
+| `codex-backend.ts` | 671 | **658**（少了本地 `#resolveExecutable` / `probe` / 重复的 `planSandbox`） |
+| `service-backend.ts`（新） | — | 136 |
+| `executable-check.ts`（新，替代两份） | — | 62 |
+| `generic-backend.ts` | 300 | 292（少了两份本地实现） |
+
+改动量不大，但**结构意义**在于：三个适配器现在各有自己的基类（`LineStreamBackendBase` ×2、
+`ServiceBackendBase` ×1），差异全部是 override；同一件事（"能不能跑"）只有一处实现。
+
+#### 验证
+
+claude 19 + generic 64 + codex 45 条适配器测试全绿（含"可执行文件不存在 ⇒ 抛错且指出未验证"
+那条——它正好要求 `evidenceNote()` 生效）；全量 **2189 全绿**，行为一条没变。

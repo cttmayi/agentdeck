@@ -3,6 +3,7 @@ import { access, stat } from 'node:fs/promises'
 import {
   AsyncQueue,
   detectVersion,
+  ServiceBackendBase,
   loadRuntimeDescriptor,
   probeCommand,
   cliStateDir,
@@ -131,62 +132,59 @@ function reportSentTurnInput(
   })
 }
 
-export class CodexBackend implements AgentBackend {
-  readonly key: string
-  readonly protocol: RuntimeProtocol = 'jsonrpc'
+export class CodexBackend extends ServiceBackendBase {
   /**
    * ★ 已实测（0.144.0-alpha.4）：`thread/resume` 对不存在的线程（格式非法 /
    *    rollout 不存在 / 已归档）一律回 JSON-RPC error（code=-32600）。
    *   "恢复被拒"**可检测** ⇒ true（设计稿 §5.4 / §7 清单第 5 条，已核对）。
    *   被拒时后端回退新线程继续 + resumeRejected=true（FR-CLI-06 语义）。
+   *
+   * ⚠️ service 基类默认给 `false`（"这类运行时不靠恢复探测"），codex 是**例外**，
+   *    所以在这里显式覆盖——差异写在子类里，不是基类里的 if。
    */
-  readonly rejectDetectable = true
+  override readonly rejectDetectable = true
 
   readonly #descriptor: RuntimeDescriptor
   readonly #options: CodexBackendOptions
 
   constructor(options: CodexBackendOptions) {
-    this.#options = options
+    super(options)
     // service 形状：`loadRuntimeDescriptor` 只要求 baseArgs（启动参数）非空，
     // cli-only 字段缺省即合法（见 `RuntimeDescriptor.kind`）。
     this.#descriptor = loadRuntimeDescriptor(options.descriptor)
-    this.key = this.#descriptor.key
+    this.#options = options
   }
 
-  async #resolveExecutable(): Promise<string | null> {
-    if (this.#options.executablePath) return this.#options.executablePath
-    const probe = await probeCommand(this.#descriptor.command, {
-      useCache: this.#options.useProbeCache ?? true,
-    })
-    return probe.available ? probe.path : null
+  /** 找不到可执行文件时怎么说（codex 的措辞：点了 evidence 等级与 `--executable`）。 */
+  protected override missingExecutableMessage(): string {
+    return (
+      `找不到 ${this.#descriptor.command} 可执行文件。` +
+      `本 runtime 已在 0.144.0-alpha.4 上实测（verified），` +
+      `若你确认已安装，很可能是描述表里的命令名与该 CLI 实际的名字不一致，` +
+      `或它不在 PATH 里（可用 --executable 指定路径）。`
+    )
   }
 
-  async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
-    const path = await this.#resolveExecutable()
-    if (!path) {
-      return { available: false, command: this.#descriptor.command, cliVersion: null }
-    }
-    return {
-      available: true,
-      command: this.#descriptor.command,
-      cliVersion: await detectVersion(path),
-    }
+  /** 证据等级（拼进"跑不了"的诊断）。 */
+  protected override evidenceNote(): string {
+    return '本 runtime 已在 0.144.0-alpha.4 上实测（verified）。'
   }
+
+  /**
+   * ★ codex 的差异点（分批第 66 批）：沙箱里除 CLI 状态目录外，还要放行
+   *   `CODEX_HOME`（平台注入的受管配置目录）——codex 要往那里写线程 rollout / 日志，
+   *   不放行时平台沙箱会把它的会话状态写挡掉。
+   */
+  protected override extraWritableDirs(opts: ExecOptions): string[] {
+    return [
+      ...super.extraWritableDirs(opts),
+      ...(typeof opts.env?.['CODEX_HOME'] === 'string' ? [opts.env['CODEX_HOME']] : []),
+    ]
+  }
+
+
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
-    const executablePath = await this.#resolveExecutable()
-    if (!executablePath) {
-      throw new Error(
-        `找不到 ${this.#descriptor.command} 可执行文件。` +
-          `本 runtime 已在 0.144.0-alpha.4 上实测（verified），` +
-          `若你确认已安装，很可能是描述表里的命令名与该 CLI 实际的名字不一致，` +
-          `或它不在 PATH 里（可用 --executable 指定路径）。`,
-      )
-    }
-    if (!(await isRunnableFile(executablePath))) {
-      throw new Error(await describeMissingCommand(executablePath))
-    }
-
     // ★ service 形状：没有 run 级 argv，不拼 buildArgv——baseArgs 就是启动参数。
     const launchArgs = [...this.#descriptor.baseArgs]
 
@@ -212,23 +210,12 @@ export class CodexBackend implements AgentBackend {
     let spawnError: unknown = null
     const startedAt = Date.now()
 
-    // ★ 可选沙箱：与 claude / generic 走**同一段**代码、同一条规则。
-    //   planSandbox 不可用时抛异常，这里刻意不 catch（同前两份的理由）。
-    const plan = await planSandbox({
-      mode: opts.sandbox?.mode ?? 'none',
-      command: executablePath,
-      args: launchArgs,
-      workDir: opts.workDir,
-      // CLI 自己的状态目录必须放行：codex 要往 ~/.codex 写线程 rollout / 日志。
-      // ★ 2026-10（D78 的 codex 版）：平台注入 `CODEX_HOME` 指向受管目录时，
-      //   codex 改往那里写（用户级配置隔离，见 apps/daemon run-hooks/codex-config.ts）
-      //   ——受管目录同样必须放行，否则平台沙箱会把 codex 的会话状态写挡掉。
-      extraWritableDirs: [
-        ...(opts.sandbox?.extraWritableDirs ?? []),
-        ...cliStateDir(this.#descriptor),
-        ...(typeof opts.env?.CODEX_HOME === 'string' ? [opts.env.CODEX_HOME] : []),
-      ],
-    })
+    /**
+     * ★ 分批第 66 批：解析可执行文件 → "真能跑吗" → 沙箱规划，收进基类的 `prepareLaunch()`
+     *   （与 generic 共用同一份 `isRunnableFile` / `describeMissingCommand`）。
+     *   codex 的差异只有"沙箱里还要放行 CODEX_HOME"，由 `extraWritableDirs()` 覆盖表达。
+     */
+    const { executablePath, plan } = await this.prepareLaunch(opts, launchArgs)
 
     let handle: ProcessHandle | null = null
     const transport = new JsonRpcTransport(

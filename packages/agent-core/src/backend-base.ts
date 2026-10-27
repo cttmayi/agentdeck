@@ -38,6 +38,7 @@ import {
   type RuntimeDescriptor,
 } from './index.ts'
 import { buildArgv } from './argv.ts'
+import { describeMissingCommand, isRunnableFile } from './executable-check.ts'
 import { describeDropped, type DroppedArg } from './blocked-args.ts'
 import { describeSpawnError } from './spawn-target.ts'
 import { detectVersion, probeCommand } from './probe.ts'
@@ -239,8 +240,24 @@ export abstract class LineStreamBackendBase<P extends LineStreamParserLike>
   /** 找不到可执行文件时说什么（各自的措辞不同：generic 要提 provisional）。 */
   protected abstract missingExecutableMessage(): Promise<string> | string
 
-  /** "这个路径能不能当程序跑"——默认不查（claude 的老行为），generic 覆盖它。 */
-  protected async assertRunnable(_path: string): Promise<void> {}
+  /**
+   * "这个路径能不能当程序跑"。
+   *
+   * ★ 分批第 66 批：默认实现就是**查**（`isRunnableFile` + `describeMissingCommand`）——
+   *   这条纪律原来只有 generic 有（第 65 批我在文档里写"从 generic 独有变成基类流程"，
+   *   当时只做到了"基类有这个方法"，默认还是空实现）。现在两个 cli 形状 runtime 都查。
+   *   证据等级说明由 `evidenceNote()` 提供（generic 的措辞要提 provisional）。
+   */
+  protected async assertRunnable(path: string): Promise<void> {
+    if (!(await isRunnableFile(path))) {
+      throw new Error(await describeMissingCommand(path, this.evidenceNote()))
+    }
+  }
+
+  /** 拼进"找不到/跑不了"诊断里的证据等级说明（默认不说）。 */
+  protected evidenceNote(): string {
+    return ''
+  }
 
   /** 额外要放行的可写目录（默认没有）。 */
   protected extraWritableDirs(_opts: ExecOptions): string[] {
