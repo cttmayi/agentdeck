@@ -56,6 +56,7 @@ import {
   pruneRuntimeConfigHomes,
   syncRuntimeConfig,
 } from './run-hooks/runtime-config.ts'
+import { defaultIsolationDeps, isolationRootFor, profileFor } from './run-hooks/runtime-profile.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -883,7 +884,8 @@ export class RunExecutor {
 
       // 任务隔离 hook 的收尾（幂等）：摘掉平台写的 `.claude/settings.json`
       // 与 `.agentdeck/hooks/`——它们不是 agent 的产出。失败只警告，不阻断。
-      if (runtime.descriptor.key === 'claude') {
+      // ★ 分批第 67 批：与注入同一判据（问 profile），避免"注入了却不摘"。
+      if (profileFor(runtime.descriptor.key)?.injectsRunHooks() === true) {
         try {
           await removeRunHooks(run.workDir!)
         } catch (err) {
@@ -987,7 +989,11 @@ export class RunExecutor {
       //
       // ⚠️ 注入失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
       //    隔离（静默缺能力比报错糟——那是这个仓库的原则）。
-      if (runtime.descriptor.key === 'claude') {
+      /**
+       * ★ 分批第 67 批：要不要注入任务隔离 hook，**问 profile**（只有 claude 有 hook 机制）。
+       *   原来这里是 `descriptor.key === 'claude'`——新增 runtime 时得记得改这里。
+       */
+      if (profileFor(runtime.descriptor.key)?.injectsRunHooks() === true) {
         try {
           await injectRunHooks(run.workDir!)
         } catch (err) {
@@ -1011,20 +1017,36 @@ export class RunExecutor {
        */
       if (isolateRuntimeConfig && isIsolatedRuntime(runtime.descriptor.key)) {
         const runtimeKey = runtime.descriptor.key
-        const rootDir =
-          runtimeKey === 'claude' ? this.#deps.claudeConfigDir : this.#deps.codexConfigDir
-        if (rootDir !== undefined) {
-          const sourcePath =
-            runtimeKey === 'claude'
-              ? (this.#deps.claudeSettingsSource ?? join(homedir(), '.claude', 'settings.json'))
-              : (this.#deps.codexConfigSource ?? join(homedir(), '.codex'))
+        /**
+         * ★ 分批第 67 批：受管根 / 源路径的差异放在 `RuntimeProfile` 子类里
+         *   （`isolationPlanOf` 问 profile），executor 这里只剩"取依赖、交下去"。
+         */
+        const deps = defaultIsolationDeps({
+          runtimeKey,
+          // ★ 分批第 67 批：受管根按 runtime 取的逻辑只有一处（`isolationRootFor`）
+          rootDir: isolationRootFor(runtimeKey, {
+            claude: this.#deps.claudeConfigDir ?? null,
+            codex: this.#deps.codexConfigDir ?? null,
+          }),
+          ...(this.#deps.claudeSettingsSource !== undefined
+            ? { settingsSource: this.#deps.claudeSettingsSource }
+            : {}),
+          ...(this.#deps.codexConfigSource !== undefined
+            ? { codexSource: this.#deps.codexConfigSource }
+            : {}),
+          ...(this.#deps.hostSkillRoots !== undefined
+            ? { hostSkillRoots: this.#deps.hostSkillRoots }
+            : {}),
+        })
+        const plan = profileFor(runtimeKey)?.isolation(deps) ?? null
+        const rootDir = plan?.rootDir ?? null
+        if (rootDir !== null) {
+          const sourcePath = plan?.sourcePath ?? ''
           /**
-           * 宿主级技能（`$HOME/.agents/skills`，跨 agent 的全局目录）——只有 codex 会扫它
-           * （claude 实测不读），`hostSkillsFor()` 按 runtime 决定要不要扫。
+           * 宿主级技能（`$HOME/.agents/skills`，跨 agent 的全局目录）——要不要扫由 profile 决定
+           * （codex 扫、claude 实测不读），`hostSkillsFor()` 只是执行那个决定。
            */
-          const hostSkills = await hostSkillsFor(runtimeKey, [
-            ...(this.#deps.hostSkillRoots ?? [join(homedir(), '.agents', 'skills')]),
-          ])
+          const hostSkills = await hostSkillsFor(runtimeKey, deps.hostSkillRoots)
           const sync = await syncRuntimeConfig({ runtimeKey, rootDir, workDir: run.workDir ?? null, sourcePath, hostSkills })
           runtimeConfigEnv = sync.env
           for (const note of sync.notes) await this.#note(runId, note)

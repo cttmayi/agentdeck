@@ -2720,3 +2720,52 @@ generic 覆盖成 `isRunnableFile`。也就是说"起进程前先问能不能跑
 
 claude 19 + generic 64 + codex 45 条适配器测试全绿（含"可执行文件不存在 ⇒ 抛错且指出未验证"
 那条——它正好要求 `evidenceNote()` 生效）；全量 **2189 全绿**，行为一条没变。
+
+### 4.3.27 分批第 67 批：平台侧的差异收进 `RuntimeProfile` 子类（第 3 步）
+
+#### 起因
+
+第 64 批把配置隔离的流程收成了一条，但**差异仍然是 `if (key === 'claude')`**：受管根从哪来、
+源是哪份文件、要不要按工作目录分、要不要扫宿主级技能——四个问题写在两个分支里。
+再加上 executor 里两处 `descriptor.key === 'claude'`（任务隔离 hook 的注入与摘除），
+**新增一个 runtime 得在四个地方记得改**。
+
+#### 现在的形状
+
+```
+run-hooks/runtime-profile.ts
+  RuntimeProfile（基类：默认值 + 公共方法）
+    ├── ClaudeProfile   不按工作目录分、不扫宿主级、**有**任务隔离 hook、写入器 = settings.json
+    ├── CodexProfile    按工作目录分、扫宿主级、无 hook、写入器 = config.toml
+    └── GenericProfile  显式"不做隔离"（以前是 executor 里没写它 ⇒ 隐式的"漏了"）
+```
+
+`runtime-config.ts` 于是退化成**薄委托**（167 行，只剩类型与转发）：
+
+```ts
+syncRuntimeConfig()  → profile.syncIsolation()   // 写入 + notes + env 都在子类里
+forgetRuntimeConfigHome() → profile.forgetHome()
+pruneRuntimeConfigHomes() → profile.pruneHomes()
+hostSkillsFor()      → profile.hostSkills()
+isIsolatedRuntime()  → profile.isolated
+```
+
+executor 里两处 hook 判断改成 `profileFor(key)?.injectsRunHooks() === true`；
+受管根的映射（claude/codex 各一个路径）收成 `isolationRootFor()` 一处。
+
+#### 遗留的两处"按名字"（如实记）
+
+| 位置 | 为什么留着 |
+| --- | --- |
+| `isolationRootFor()` 里 `roots[runtimeKey]` 取名 | 装配时就是给了两个路径（claude / codex），查表是**取值**不是**行为分支** |
+| `defaultIsolationDeps()` 里 `input.runtimeKey === 'claude' ? settingsSource : codexSource` | 那是"测试注入的覆盖值"归哪个字段——同样是一次取值；真正的默认值已经交给 `profile.defaultSourcePath()` |
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 三个 runtime 各是一个子类、都继承同一个基类、未知 runtime ⇒ null | `runtime-profile.test.ts` |
+| **差异全在 `isolation()` 的返回里**（claude 全局一份不扫宿主级 / codex 按工作目录分且要扫 / generic 明确 null） | 同上 |
+| 任务隔离 hook 只有 claude 有；**基类默认 false**（新 runtime 不会因为漏写而多做一件事） | 同上 |
+| 每条差异都有 `why`（说不出理由的差异不许存在） | 同上 |
+| 原有行为一条不变 | 全量 **2193 全绿** |

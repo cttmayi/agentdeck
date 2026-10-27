@@ -74,7 +74,12 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
-import { forgetRuntimeConfigHome } from './run-hooks/runtime-config.ts'
+import { forgetRuntimeConfigHome, isIsolatedRuntime } from './run-hooks/runtime-config.ts'
+import {
+  isolationRootFor as isolationRootForShared,
+  knownProfileKeys,
+  profileFor,
+} from './run-hooks/runtime-profile.ts'
 import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
@@ -2020,6 +2025,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * 安全边界：只认我们自己命名的目录（16 位十六进制，见 `removeCodexHomeFor`），
    * 删不掉只记一条 info（删除实体的路由不该因为清理失败回 500）。
    */
+  /** 受管根（claude/codex 各一份；其它 runtime = null）。 */
+  const runtimeRoots = {
+    claude: options.claudeConfigDir ?? join(options.dataDir, 'claude-config'),
+    codex: options.codexConfigDir ?? join(options.dataDir, 'codex-config'),
+  }
+  const isolationRootFor = (runtimeKey: string): string | null =>
+    isolationRootForShared(runtimeKey, runtimeRoots)
+
   const forgetRuntimeConfig = async (workDir: string | null | undefined): Promise<void> => {
     if (workDir === null || workDir === undefined || workDir === '') return
     /**
@@ -2029,10 +2042,17 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
      *   以后谁把策略改成 perWorkDir，这里自动跟上。
      */
     const cleared: string[] = []
-    for (const [runtimeKey, root] of [
-      ['claude', options.claudeConfigDir ?? join(options.dataDir, 'claude-config')],
-      ['codex', options.codexConfigDir ?? join(options.dataDir, 'codex-config')],
-    ] as const) {
+    /**
+     * ★ 分批第 67 批：要清哪些 runtime 由 **profile** 派生（不再手写两个名字）——
+     *   加一个"按工作目录分"的 runtime 时，这里自动跟上。
+     */
+    for (const runtimeKey of knownProfileKeys()) {
+      if (!isIsolatedRuntime(runtimeKey)) continue
+      const profile = profileFor(runtimeKey)
+      const root = isolationRootFor(runtimeKey)
+      if (root === null) continue
+      const plan = profile?.isolation({ rootDir: root, sourcePath: '', hostSkillRoots: [] }) ?? null
+      if (plan?.perWorkDir !== true) continue
       if (await forgetRuntimeConfigHome(runtimeKey, root, workDir)) cleared.push(runtimeKey)
     }
     if (cleared.length > 0) info(`已清掉 ${cleared.join('、')} 的受管配置目录（对应的实体被删了）`)

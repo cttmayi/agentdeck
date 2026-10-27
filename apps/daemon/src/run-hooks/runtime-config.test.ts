@@ -4,13 +4,8 @@ import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
 import { codexHomeFor } from './codex-config.ts'
-import {
-  forgetRuntimeConfigHome,
-  managedHomeFor,
-  POLICY,
-  pruneRuntimeConfigHomes,
-  syncRuntimeConfig,
-} from './runtime-config.ts'
+import { forgetRuntimeConfigHome, managedHomeFor, pruneRuntimeConfigHomes, syncRuntimeConfig } from './runtime-config.ts'
+import { profileFor } from './runtime-profile.ts'
 
 /**
  * ★ 分批第 64 批：claude 与 codex 的配置隔离走**同一条**逻辑。
@@ -23,11 +18,18 @@ import {
  *   ③ 按策略派生出来的行为（删目录、清旧目录）也自动跟着走（claude 无操作、codex 真删）。
  */
 describe('★ 分批第 64 批：两个 runtime 一条逻辑', () => {
-  test('★★★ 受管目录的差异在**策略表**里，不在两段实现里', () => {
-    assert.equal(POLICY.claude.perWorkDir, false, 'claude：全局一份（resume 要稳定的会话状态）')
-    assert.equal(POLICY.codex.perWorkDir, true, 'codex：按工作目录分（trust 段每轮不同）')
+  test('★★★ 受管目录的差异在 **profile 子类**里，不在两段实现里', () => {
+    const claudeProfile = profileFor('claude')
+    const codexProfile = profileFor('codex')
+    assert.ok(claudeProfile !== null && codexProfile !== null)
+    const claudePlan = claudeProfile.isolation({ rootDir: '/root', sourcePath: '', hostSkillRoots: [] })
+    const codexPlan = codexProfile.isolation({ rootDir: '/root', sourcePath: '', hostSkillRoots: [] })
+    assert.equal(claudePlan.perWorkDir, false, 'claude：全局一份（resume 要稳定的会话状态）')
+    assert.equal(codexPlan.perWorkDir, true, 'codex：按工作目录分（trust 段每轮不同）')
+    assert.equal(claudePlan.scanHostSkills, false, 'claude 实测不读 ~/.agents/skills')
+    assert.equal(codexPlan.scanHostSkills, true, 'codex 会扫，要逐条禁用')
     for (const key of ['claude', 'codex'] as const) {
-      assert.ok(POLICY[key].why.length > 10, `${key} 的策略必须写清"为什么"`)
+      assert.ok((profileFor(key)?.why.length ?? 0) > 10, `${key} 的 profile 必须写清"为什么"`)
     }
     assert.equal(managedHomeFor('claude', '/root', '/ws/a'), '/root', 'claude 不按工作目录分')
     assert.equal(managedHomeFor('codex', '/root', '/ws/a'), codexHomeFor('/root', '/ws/a'))
