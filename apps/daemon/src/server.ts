@@ -74,6 +74,7 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
+import { removeCodexHomeFor } from './run-hooks/codex-config.ts'
 import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
@@ -2009,6 +2010,22 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // ★ runtime 的选择从"写死 claude"变成"查装配表"（FR-CLI-47）。
   //   表里有几个 runtime，这里就能跑几个——本文件不再认识任何具体 CLI。
   const runtimeKey = options.runtimeKey ?? 'claude'
+
+  /**
+   * ★ 分批第 61 批：实体被删时，把它那份 `CODEX_HOME` 一起清掉（使用者提的）。
+   *
+   * 为什么必须：那份目录里有 `auth.json` 的**真实 key 副本**。任务/对话都删了还留着，
+   * 就是"看不见、但一直在"的残留；而且目录名是工作目录路径的哈希，工作目录没了它也对不上号。
+   *
+   * 安全边界：只认我们自己命名的目录（16 位十六进制，见 `removeCodexHomeFor`），
+   * 删不掉只记一条 info（删除实体的路由不该因为清理失败回 500）。
+   */
+  const forgetCodexHome = async (workDir: string | null | undefined): Promise<void> => {
+    if (workDir === null || workDir === undefined || workDir === '') return
+    const root = options.codexConfigDir ?? join(options.dataDir, 'codex-config')
+    const { removed, path } = await removeCodexHomeFor(root, workDir)
+    if (removed) info(`已清掉 ${path}（对应的实体被删了）`)
+  }
 
   /**
    * ══════════════════════════════════════════════════════════════════
@@ -5782,12 +5799,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       // ★ 先取消还在跑的 run，再删（与 abandon 同一处副作用、同一句解释）。
       const page = await store.listRuns({ workspaceId, limit: 10_000 })
+      const issueWorkDirs = new Set<string>()
       for (const run of page.items) {
-        if (TERMINAL_RUN_STATUSES.includes(run.status)) continue
         if (!(await runBelongsToIssue(store, run, issueId))) continue
+        // ★ 分批第 61 批：删之前把这条任务用到的目录都记下来（删完 run 就查不到了）
+        if (run.workDir !== null && run.workDir !== undefined) issueWorkDirs.add(run.workDir)
+        if (TERMINAL_RUN_STATUSES.includes(run.status)) continue
         await executor.cancel(run.id)
       }
+      // 一条 run 都没跑过时目录也可能已经建出来了（`ensureWorkDir` 在受理时就建）
+      issueWorkDirs.add(
+        resolveWorkDir({ subject: { type: 'issue', id: issueId }, fallbackId: issueId, workRoot }).path,
+      )
       await store.deleteIssue(issueId)
+      for (const dir of issueWorkDirs) await forgetCodexHome(dir)
       sendJson(res, 200, { ok: true })
       return
     }
@@ -8294,7 +8319,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
 
       if (req.method === 'DELETE') {
+        /**
+         * ★ 分批第 61 批：删之前**先把工作目录算出来**（对话记录里可能没存 workDir，
+         * 走与出 run 时同一个 `resolveWorkDir`），删完再顺手清掉它那份 CODEX_HOME
+         * ——那份目录里有 auth.json 的真实 key 副本，实体删了不该留着。
+         */
+        const chatDir = resolveWorkDir({
+          requested: conversation.workDir,
+          subject: { type: 'conversation', id: conversation.id },
+          fallbackId: conversation.id,
+          workRoot,
+        }).path
         const done = await store.deleteConversation(id)
+        if (done) await forgetCodexHome(chatDir)
         // ★ 说清"本来就没有"，而不是回 200 假装删成功：界面据此刷新列表，
         //   而一个静默成功的空操作会让人以为刚才那次点击没生效。
         sendJson(res, done ? 200 : 404, done ? { ok: true } : { error: '对话不存在' })
@@ -8918,6 +8955,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           return
         }
         await store.deleteRun(runId)
+        // ★ 分批第 61 批：这条 run 的工作目录对应的 CODEX_HOME 也一起清（里面有 key 副本）
+        await forgetCodexHome(run.workDir)
         sendJson(res, 200, { ok: true })
         return
       }

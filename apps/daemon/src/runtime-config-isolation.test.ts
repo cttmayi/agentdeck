@@ -332,3 +332,74 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
     }
   })
 })
+
+/**
+ * ★ 分批第 61 批：**删对话/任务时把它那份 CODEX_HOME 一起清掉**（真 daemon 验证）。
+ *
+ * 为什么必须（使用者提的）：那份目录里有 `auth.json` 的真实 key 副本——实体删了还留着，
+ * 就是"看不见、但一直在"的残留。
+ *
+ * 这一条走真 HTTP：建对话（会真跑一轮 ⇒ 真的写出那份 CODEX_HOME）→ 删对话 → 那份目录要没了，
+ * 而且**别的目录那份不许被牵连**。
+ */
+describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () => {
+  test('★★★ 删对话 ⇒ 它那份 CODEX_HOME 没了，别的那份还在', async () => {
+    const h = await makeHarness('codex')
+    try {
+      // ① 建两个对话（各自一个工作目录 ⇒ 各自一份 CODEX_HOME）
+      //    ⚠️ agentId 要用**播种出来的那条**（假 id 会 404 `agent_not_found`——第一次就这么红的）
+      const agentsRes = await json(h, '/api/agents')
+      const seeded = (agentsRes.body as { agents: Array<{ id: string; role: string }> }).agents
+      const execId = seeded.find((a) => a.role === 'executor')?.id ?? ''
+      assert.notEqual(execId, '', '要先拿到播种出来的执行者')
+      /**
+       * ⚠️ 必须把这条执行者改成 `default`（= 跟随全局 ⇒ 落到 daemon 侦测到的 codex）：
+       *    播种出来的 agent 记的是 `claude`，那样这条对话会跑 **claude**，
+       *    根本不会写出 CODEX_HOME（我第一版就这么写的，红了才发现）。
+       */
+      const patched = await putJson(h, `/api/agents/${execId}`, { runtimeKey: 'default' })
+      assert.equal(patched.status, 200, JSON.stringify(patched.body))
+      const makeConv = async (): Promise<{ id: string; dir: string }> => {
+        const created = await json(h, '/api/conversations', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ agentId: execId, text: '看看目录', workDir: null }),
+        })
+        assert.equal(created.status, 201, JSON.stringify(created.body))
+        const body = created.body as { conversation: { id: string }; turn: { runId: string } }
+        for (let i = 0; i < 200; i += 1) {
+          const r = await json(h, `/api/runs/${body.turn.runId}`)
+          const status = (r.body as { status?: string }).status
+          if (status !== undefined && ['completed', 'failed', 'cancelled'].includes(status)) break
+          await new Promise((res) => setTimeout(res, 25))
+        }
+        const run = await json(h, `/api/runs/${body.turn.runId}`)
+        return { id: body.conversation.id, dir: (run.body as { workDir: string }).workDir }
+      }
+      const one = await makeConv()
+      const two = await makeConv()
+      assert.notEqual(one.dir, two.dir, '两个对话各自一个目录')
+
+      const root = h.configDir
+      const { codexHomeFor } = await import('./run-hooks/codex-config.ts')
+      const homeOne = codexHomeFor(root, one.dir)
+      const homeTwo = codexHomeFor(root, two.dir)
+      assert.equal(await exists(homeOne), true, '前提：跑过一轮之后那份 CODEX_HOME 真的写出来了')
+      assert.equal(await exists(join(homeOne, 'auth.json')), true, '里面有 auth.json（key 副本）')
+      assert.equal(await exists(homeTwo), true)
+
+      // ② 删掉其中一个对话
+      const del = await json(h, `/api/conversations/${one.id}`, { method: 'DELETE' })
+      assert.equal(del.status, 200, JSON.stringify(del.body))
+
+      // ③ 它那份没了、另一份还在
+      assert.equal(await exists(homeOne), false, '★ 对话删了，它那份 CODEX_HOME（含 key 副本）必须一起没了')
+      assert.equal(await exists(homeTwo), true, '★ 别的对话那份不许被牵连')
+      await cleanup(two.dir)
+      await cleanup(one.dir)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})

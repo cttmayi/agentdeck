@@ -25,6 +25,7 @@ const exists = (path: string): Promise<boolean> =>
 import {
   codexHomeFor,
   findSkillFiles,
+  removeCodexHomeFor,
   pruneCodexHomes,
   syncCodexConfigDir,
   withBundledSkillsDisabled,
@@ -450,5 +451,39 @@ describe('★ 分批第 60 批：按工作目录分 CODEX_HOME', () => {
     assert.equal(await exists(join(root, '0000000000000003')), true, '最近一份要留着')
     assert.equal(await exists(current), true, '当前这份永不删')
     assert.equal(await exists(join(root, '别人的目录')), true, '不是我们建的目录一律不碰')
+  })
+})
+
+/**
+ * ★ 分批第 61 批：实体被删时，把它那份 `CODEX_HOME` 一起清掉。
+ *
+ * 使用者提的：「删除聊天和任务的时候，这个目录需要同步删除」。
+ *
+ * 为什么必须：那份目录里有 `auth.json` 的**真实 key 副本** —— 任务都删了还留着一份 key，
+ * 是那种"看不见、但一直在"的残留。
+ */
+describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () => {
+  test('★★★ removeCodexHomeFor：删掉指的那一份、别的一概不碰、不存在也算成功', async () => {
+    const dataDir = await makeTempDir('codex-remove')
+    const root = join(dataDir, 'codex-home')
+    const ws1 = join(dataDir, 'issue-1')
+    const ws2 = join(dataDir, 'issue-2')
+    const home1 = codexHomeFor(root, ws1)
+    const home2 = codexHomeFor(root, ws2)
+    await mkdir(home1, { recursive: true })
+    await mkdir(home2, { recursive: true })
+    await writeFile(join(home1, 'auth.json'), '{"OPENAI_API_KEY":"sk-x"}\n', 'utf8')
+    await mkdir(join(root, '别人的目录'), { recursive: true })
+
+    const result = await removeCodexHomeFor(root, ws1)
+    assert.equal(result.removed, true)
+    assert.equal(result.path, home1)
+    assert.equal(await exists(home1), false, '这一份要真的没了（里面的 key 副本一起走）')
+    assert.equal(await exists(home2), true, '别的工作目录那份不许被牵连')
+    assert.equal(await exists(join(root, '别人的目录')), true, '不是我们命名的目录一律不碰')
+
+    // 已经不在了 ⇒ 也算"删好了"（force 语义），调用方不必区分
+    const again = await removeCodexHomeFor(root, ws1)
+    assert.equal(again.removed, true)
   })
 })

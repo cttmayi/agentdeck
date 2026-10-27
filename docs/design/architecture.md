@@ -2450,3 +2450,38 @@ enabled = false
 | **两条并行的 run（不同工作目录）各自的信任段都在、且互相不含对方** | 同上（这就是全局一份时那个 bug 的回归守卫） |
 | `pruneCodexHomes`：只清自己命名的、保留最近 N、当前份不删、别人的目录不碰 | 同上 |
 | `CODEX_HOME` 真注入到后端且指向那份哈希目录 | `e2e.test.ts`（D78 三条）/ `runtime-config-isolation.test.ts` |
+
+### 4.3.21 分批第 61 批：删掉对话/任务时，它那份 `CODEX_HOME` 一起清
+
+使用者提的：「删除聊天和任务的时候，这个目录需要同步删除」。
+
+#### 为什么必须清
+
+- 那份目录里有 `auth.json` 的**真实 key 副本** —— 任务/对话都删了，还留着一份 key，是那种
+  "看不见、但一直在"的残留；
+- 目录名是工作目录路径的哈希 ⇒ 工作目录没了/被复用之后，这份永远对不上号。
+
+#### 落点（三处删除路由）
+
+| 入口 | 清哪一份 |
+| --- | --- |
+| `DELETE /api/conversations/:id` | 删之前先用 `resolveWorkDir` 算出对话目录（对话记录里可能没存 `workDir`），删完清 |
+| `DELETE /api/issues/:id` | 删之前**收集**这条任务所有 run 的 `workDir`（删完就查不到了）+ 按 subject 算出来的那个目录（没跑过 run 时 `ensureWorkDir` 也已经建了），删完逐个清 |
+| `DELETE /api/runs/:id` | 这条 run 的 `workDir` |
+
+共同助手 `removeCodexHomeFor(root, workDir)`：
+- 只认**我们自己命名的目录**（名字是 16 位十六进制）——传进来任何怪路径都不会误删别的东西；
+- `force` 语义：已经不在了也算成功；
+- 失败只记一条 `info`（删除实体的路由不该因为清理失败回 500）。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| `removeCodexHomeFor`：删掉指的那份、别的不碰、不存在也算成功 | `codex-config.test.ts` |
+| **真 HTTP**：建两个对话（各自一份 CODEX_HOME）→ 删其中一个 → **它那份没了、另一份还在** | `runtime-config-isolation.test.ts` |
+| 红检：把删除后的清理注释掉 ⇒ 立刻红 | 同上 |
+
+> ⚠️ 写这条用例时踩了一个坑，值得记：新对话用的是**播种出来的执行者**（记的是 `claude`），
+> 于是那一轮跑的是 **claude**、根本没写 CODEX_HOME（第一次红就是这个）。必须先把那条执行者
+> 改成 `runtimeKey: 'default'`（= 跟随全局 ⇒ codex），才量得到"删了之后目录没了"。

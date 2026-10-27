@@ -374,6 +374,34 @@ export async function pruneCodexHomes(
   return removed
 }
 
+/**
+ * ★ 分批第 61 批：删掉某个工作目录对应的那份 `CODEX_HOME`（对话/任务/run 被删时）。
+ *
+ * 为什么必须删（使用者提的）：
+ *   · 那份目录里有 `auth.json`——**真实 API key 的副本**。任务都删了还留着一份 key，
+ *     是那种"看不见、但一直在"的残留；
+ *   · 目录名是工作目录路径的哈希，工作目录本身如果被删/被复用，这份就永远对不上号了。
+ *
+ * 安全边界（与 `pruneCodexHomes` 同一条纪律）：
+ *   · 只认**我们自己命名的目录**（16 位十六进制）——传进来一个奇怪的路径也不会去删别的东西；
+ *   · 删不掉只忽略（调用方是"删除实体"的路由，不该因为清理失败而回 500）；
+ *   · 返回是否真的删了，便于日志与测试。
+ */
+export async function removeCodexHomeFor(
+  rootDir: string,
+  workDir: string,
+): Promise<{ removed: boolean; path: string }> {
+  const path = codexHomeFor(rootDir, workDir)
+  if (!/^[0-9a-f]{16}$/u.test(path.slice(path.lastIndexOf('/') + 1))) {
+    return { removed: false, path }
+  }
+  const removed = await rm(path, { recursive: true, force: true }).then(
+    () => true,
+    () => false,
+  )
+  return { removed, path }
+}
+
 export async function syncCodexConfigDir(
   configDir: string,
   sourceHomeDir: string,
