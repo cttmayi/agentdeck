@@ -1888,7 +1888,18 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       //   产出仍在同一个任务目录里改（使用者要的"在原任务中执行"）。
       const v2 = await waitRevisedFrom(draftRunId)
       const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
-      const feedback = await readFile(join(taskDir, 'material', 'feedback.md'), 'utf8')
+      /**
+       * ⚠️ 这里**要等**，不能读一次就断言（全量并行跑时量到过一次偶发红）：
+       *    `waitRevisedFrom` 一返回只说明"版本表里多了一行"，而 `material/feedback.md`
+       *    是**那一版开工时**由返工流程写进小屋的——两步之间有间隔。单跑够用，并行跑会抢跑。
+       *    等的写法不是放宽：断言还是"理由码要交下去"。
+       */
+      let feedback = ''
+      for (let i = 0; i < 400; i += 1) {
+        feedback = (await readFile(join(taskDir, 'material', 'feedback.md'), 'utf8').catch(() => '')) ?? ''
+        if (feedback.includes('style_violation')) break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
       assert.match(feedback, /style_violation/, '理由码要交下去')
       assert.match(feedback, /正文里没有 `## When to Use` 一节/, '审核者的条目要交下去')
       assert.match(feedback, /SKILL\.md/, '位置要交下去（否则起草者不知道改哪儿）')

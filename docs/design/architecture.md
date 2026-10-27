@@ -2485,3 +2485,63 @@ enabled = false
 > ⚠️ 写这条用例时踩了一个坑，值得记：新对话用的是**播种出来的执行者**（记的是 `claude`），
 > 于是那一轮跑的是 **claude**、根本没写 CODEX_HOME（第一次红就是这个）。必须先把那条执行者
 > 改成 `runtimeKey: 'default'`（= 跟随全局 ⇒ codex），才量得到"删了之后目录没了"。
+
+### 4.3.22 分批第 62 批：claude 侧同样要关掉**自带**的 skills
+
+使用者：「同步检查一下 claude，也有类似 skill 的问题」。
+
+#### 怎么量的（不花 token）
+
+claude 没有 codex 那种 `debug prompt-input`，但有更好的办法：**把 `ANTHROPIC_BASE_URL` 指向一个假的
+本地端点**，它就会把**真正要发给模型的请求体**（含 system prompt 里的技能段）POST 过来，我们存下来看。
+这样量到的是"模型真正看到的"，而不是猜。
+
+#### 量到的（claude 2.1.302，`CLAUDE_CONFIG_DIR` 指向空目录 + 工作目录注入 1 条探针技能）
+
+| 情形 | 模型可见技能 |
+| --- | --- |
+| 基线 | **14 条** = 我们注入的 `probe-injected` + **claude 自带 13 条**（dataviz / code-review / security-review / init / run / loop / claude-api / update-config / keybindings-help / simplify / fewer-permission-prompts / workflow-authoring / plugin-authoring） |
+| `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` | **2 条** = 注入的 + `plugin-authoring`（它是 claude 内置的**插件**技能，目前没有开关） |
+| `--disable-slash-commands` | **整个技能段消失**（连我们注入的一起）⇒ 不能用 |
+| `~/.agents/skills`（codex 的宿主级那 3 个） | **claude 根本不读** ⇒ 这一侧没有 codex 那个漏洞 |
+| `~/.claude/skills`（个人技能） | 被 `CLAUDE_CONFIG_DIR` 挡住 ✅ |
+
+#### 落地
+
+executor 的 env 组装里（与 `CLAUDE_CONFIG_DIR` 同一处、同一条件）：
+
+```ts
+...(isolateRuntimeConfig && runtime.descriptor.key === 'claude'
+  ? { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' }
+  : {}),
+```
+
+- **只在隔离开启时**注入（关掉隔离 = 使用者要看自己的东西，那时不替他关）；
+- 平台**最后写** ⇒ agent 想用自定义 env 把它设成 `0` 也覆盖不了（有 e2e 钉着）；
+- 运行日志说清结果，并**如实交代**还剩 `plugin-authoring`：
+  「claude 自带的 skills：已关闭（…=1）——这次的技能清单只剩平台注入的（以及 claude 内置插件技能 plugin-authoring，它没有开关）。」
+
+#### 两侧对照（现在是一致的）
+
+| | codex | claude |
+| --- | --- | --- |
+| 平台注入的 | `<workDir>/.codex/skills`（每轮对账） | `<workDir>/.claude/skills`（每轮对账） |
+| 自带 skills | `[skills.bundled] enabled = false` | `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` |
+| 用户级 | `CODEX_HOME` 重定向 | `CLAUDE_CONFIG_DIR` 重定向 |
+| 宿主级（`~/.agents/skills`） | 逐条 `[[skills.config]]` 禁用 | **不读**，无需处理 |
+| 剩余 | 无 | `plugin-authoring`（内置插件技能，暂无开关） |
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 隔离开 ⇒ `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS === '1'`，且日志说明含"还剩 plugin-authoring" | `runtime-config-isolation.test.ts` |
+| 关掉隔离 ⇒ **不注入**（不替使用者关） | 同上 |
+| agent 自定义同名 env（设成 `0`）被平台覆盖 | 同上 |
+| 红检：不注入 ⇒ 两条断言立刻红 | 同上 |
+
+#### 顺带修的一条偶发红
+
+`crystallize-e2e` 里"理由码要交下去"这条：`waitRevisedFrom()` 一返回只说明**版本表多了一行**，
+而 `material/feedback.md` 是那一版**开工时**才写的 ⇒ 读一次就断言会抢跑。改成等文件里出现理由码
+（断言没动）。

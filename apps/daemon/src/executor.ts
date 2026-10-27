@@ -1030,6 +1030,11 @@ export class RunExecutor {
             `claude 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
               `用户级 skill/MCP 不可见，env ${sync.envCount} 项已同步。`,
           )
+          await this.#note(
+            runId,
+            'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1）——' +
+              '这次的技能清单只剩平台注入的（以及 claude 内置插件技能 plugin-authoring，它没有开关）。',
+          )
         }
       }
 
@@ -1584,6 +1589,24 @@ export class RunExecutor {
           //   所以这两行与上面那两个 note 分支读的是**同一个** `isolateRuntimeConfig`。
           ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
             ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
+            : {}),
+          /**
+           * ★ 分批第 62 批：关掉 claude **自带**的 bundled skills（与 codex 侧
+           * `[skills.bundled] enabled = false` 是同一个目标）。
+           *
+           * 实测（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）：不关的时候模型能看到
+           * **14 条**技能（1 条我们注入的 + **13 条 claude 自带**：dataviz / code-review /
+           * security-review / init / run / loop / claude-api / update-config / keybindings-help /
+           * simplify / fewer-permission-prompts / workflow-authoring / plugin-authoring）；
+           * 加上这个环境变量之后只剩 **2 条**（我们注入的 + `plugin-authoring`——那是内置插件技能，
+           * 目前没有开关）。
+           *
+           * ⚠️ 不用 `--disable-slash-commands`：实测它把**整个技能段**都去掉（连我们注入的一起），
+           *    那是"全关"，不适用。
+           * ⚠️ 与 CODEX_HOME 同一条边界：只在**隔离开启**时注入（关掉隔离 = 使用者要看自己的东西）。
+           */
+          ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude'
+            ? { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' }
             : {}),
           // ★ 分批第 60 批：按**工作目录**分的那一份（与上面 sync 的目标同一个值）
           ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && codexHomeEnv !== null

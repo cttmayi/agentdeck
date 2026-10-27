@@ -403,3 +403,92 @@ describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () 
     }
   })
 })
+
+/**
+ * ★ 分批第 62 批：claude 侧也要关掉**自带**的 skills（与 codex 那个 `[skills.bundled]` 同一个目标）。
+ *
+ * 实测依据（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）：
+ *   · 不关：模型能看到 **14 条**技能（1 条我们注入的 + 13 条自带：dataviz / code-review /
+ *     security-review / init / run / loop / claude-api / update-config / keybindings-help /
+ *     simplify / fewer-permission-prompts / workflow-authoring / plugin-authoring）；
+ *   · `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` ⇒ 只剩 **2 条**（注入的 + plugin-authoring）；
+ *   · `--disable-slash-commands` ⇒ **整个技能段消失**（连注入的一起）⇒ 不能用；
+ *   · `~/.agents/skills` 那三个宿主级技能 **claude 根本不读**（与 codex 不同），
+ *     `~/.claude/skills` 的个人技能被 CLAUDE_CONFIG_DIR 挡住了。
+ */
+describe('★ 分批第 62 批：claude 也关掉自带 skills', () => {
+  test('★★★ 隔离开着 ⇒ 注入 CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1；关掉隔离 ⇒ 不注入', async () => {
+    const h = await makeHarness('claude')
+    try {
+      const work = await makeTempDir('claude-bundled-on-work')
+      const on = await runOnce(h, work)
+      assert.equal(
+        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        '1',
+        '★ 隔离开着时必须关掉 claude 自带的 13 条 skills（否则它们混进模型清单）',
+      )
+      assert.ok(
+        on.notes.some((n) => n.includes('claude 自带的 skills：已关闭')),
+        `日志要说清这件事（含"还剩 plugin-authoring"）：${on.notes.join(' | ')}`,
+      )
+
+      const off = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
+      assert.equal(off.status, 200, JSON.stringify(off.body))
+      const work2 = await makeTempDir('claude-bundled-off-work')
+      await runOnce(h, work2)
+      assert.equal(
+        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        undefined,
+        '★ 关掉隔离 = 使用者要看自己的东西，这时不许替他关 claude 自带的 skills',
+      )
+      await cleanup(work)
+      await cleanup(work2)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+
+  test('★★ agent 自定义同名 env 被平台覆盖（不能由 agent 把自带的 skills 开回来）', async () => {
+    const h = await makeHarness('claude')
+    try {
+      const agentsRes = await json(h, '/api/agents')
+      const seeded = (agentsRes.body as { agents: Array<{ id: string; role: string }> }).agents
+      const execId = seeded.find((a) => a.role === 'executor')?.id ?? ''
+      const patched = await putJson(h, `/api/agents/${execId}`, {
+        env: { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '0' },
+      })
+      assert.equal(patched.status, 200, JSON.stringify(patched.body))
+      const runId = `run-claude-env-${String(Date.now())}`
+      const createRes = await json(h, '/api/runs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: execId, name: '助手', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i-claude-env' },
+          prompt: '干活',
+          workDir: await makeTempDir('claude-env-work'),
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+      assert.equal(createRes.status, 202, JSON.stringify(createRes.body))
+      for (let i = 0; i < 200; i += 1) {
+        const r = await json(h, `/api/runs/${runId}`)
+        const status = (r.body as { status?: string }).status
+        if (status !== undefined && ['completed', 'failed', 'cancelled'].includes(status)) break
+        await new Promise((res) => setTimeout(res, 25))
+      }
+      assert.equal(
+        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        '1',
+        '★ 平台最后写 ⇒ agent 想设成 0 也不生效（隔离不能由 agent 关掉）',
+      )
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})
