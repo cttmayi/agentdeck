@@ -50,7 +50,12 @@ import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
 import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
-import { findSkillFiles, syncCodexConfigDir } from './run-hooks/codex-config.ts'
+import {
+  codexHomeFor,
+  findSkillFiles,
+  pruneCodexHomes,
+  syncCodexConfigDir,
+} from './run-hooks/codex-config.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -812,6 +817,14 @@ export class RunExecutor {
      * 在 domain 里）；日志那一行用同一份实现脱敏后显示。
      */
     let actualArgv: readonly string[] = []
+    /**
+     * ★ 分批第 60 批：这次 run 的 `CODEX_HOME`（**按工作目录分**的那一份），null = 不注入。
+     *
+     * 声明在 `try` 外面：设置它的是上面的"配置隔离"块，读它的是下面的 env 组装，
+     * 两处都在同一个 `#run` 里但分属不同分支——放里面会遮蔽（这一族坑踩过：
+     * `injectedSkills` 那条注释记着同款）。
+     */
+    let codexHomeEnv: string | null = null
 
     /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
@@ -1055,16 +1068,28 @@ export class RunExecutor {
          * `[[skills.config]] path=… enabled=false`。
          * ⚠️ 这是**平台策略**（哪些目录算宿主级），所以由 executor 决定、库只负责写。
          */
+        /**
+         * ★ 分批第 60 批：**每个工作目录一份 CODEX_HOME**。
+         *
+         * 全局一份时，两条不同工作目录的 codex run 会同时重建同一份 config.toml ⇒ 后写赢
+         * ⇒ 先写那条的 `[projects."<它的目录>"]` 信任段被抹掉（项目级配置静默失效）。
+         * 按工作目录分之后，同一 workdir 的 run 由工作目录锁串行、跨 workdir 互不相干。
+         * ⚠️ 目录放在数据目录下（**绝不放进工作目录**：里面有 auth.json 的真实 key）。
+         */
+        const codexHome = codexHomeFor(this.#deps.codexConfigDir, run.workDir ?? runId)
+        codexHomeEnv = codexHome
         const hostSkills =
           this.#deps.hostSkillRoots === undefined
             ? await findSkillFiles([join(homedir(), '.agents', 'skills')])
             : await findSkillFiles(this.#deps.hostSkillRoots)
         const sync = await syncCodexConfigDir(
-          this.#deps.codexConfigDir,
+          codexHome,
           this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
           run.workDir ?? undefined,
           hostSkills,
         )
+        // 顺手清理太旧的（codex 会在每个 CODEX_HOME 里生成 sessions/sqlite，不清就一直长）
+        await pruneCodexHomes(this.#deps.codexConfigDir, codexHome).catch(() => [])
         if (!sync.ok) {
           await this.#note(
             runId,
@@ -1560,8 +1585,9 @@ export class RunExecutor {
           ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
             ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
             : {}),
-          ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir
-            ? { CODEX_HOME: this.#deps.codexConfigDir }
+          // ★ 分批第 60 批：按**工作目录**分的那一份（与上面 sync 的目标同一个值）
+          ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && codexHomeEnv !== null
+            ? { CODEX_HOME: codexHomeEnv }
             : {}),
         },
         /**

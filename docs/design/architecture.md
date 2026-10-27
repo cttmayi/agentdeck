@@ -2407,3 +2407,46 @@ enabled = false
 > 顺带记一条方法论：这条 bug 是**使用者问出来的**，不是测出来的——上一批的判据只验了
 > "name 能关掉宿主那份"，没验"关掉的范围是不是恰好只有它"。以后写这类"关闭/过滤"实现，
 > 判据要同时钉住**该关的关了**与**不该关的还在**。
+
+### 4.3.20 分批第 60 批：每个工作目录一份 `CODEX_HOME`（把竞争从结构上消除）
+
+#### 起因：一个"不报错、只是没生效"的竞争
+
+`CODEX_HOME/config.toml` 原来是**全局一份**，而它是每轮 run 从源重建的。问题是：
+
+- 工作目录锁是**按目录**的（`executor.ts:745`）⇒ 两条**不同工作目录**的 codex run 可以并行；
+- 于是两条 run 同时重建同一份 `config.toml`，**后写赢**；
+- 先写那条 run 的 `[projects."<它的目录>"]` 信任段被抹掉 ⇒ 它那一轮的项目级
+  `.codex/config.toml` / hooks **静默不生效**。
+
+这跟"按 name 关技能会误伤同名技能"是同一类缺陷：不报错、只是没按预期发生。
+
+#### 落法（使用者选的 B 方案）
+
+```
+~/.agentdeck/data/codex-config/<工作目录路径的 sha256 前 16 位>/   ← 每个工作目录一份 CODEX_HOME
+```
+
+- `codexHomeFor(root, workDir)`：同一 workdir ⇒ 同一份（resume 与状态稳定），不同 workdir ⇒ 不同份；
+- ⚠️ **绝不放进工作目录本身**：里面是 `auth.json`（真实 key），而 agent 能读自己的工作目录（D78 的硬约束）；
+- `pruneCodexHomes(root, current, keep = 8)`：codex 会在每个 home 里生成 `sessions/`、`*.sqlite`、
+  `skills/.system/` ⇒ 按 mtime 保留最近 8 份；**只删名字形如 16 位十六进制**的目录（我们自己的命名），
+  当前这份永不删，别人的目录一律不碰；
+- executor：`codexHomeEnv` 在 run 级声明（声明在 `try` 外面——里面声明会遮蔽，`injectedSkills` 那条注释记着同款坑）。
+
+#### 已知代价（如实记）
+
+1. **磁盘**：每份 home 都有 codex 的状态文件与 `.system` 技能 ⇒ 靠 `pruneCodexHomes` 兜底（保留 8 份）。
+2. **跨目录 `thread/resume` 会断**：现在没有这种用法（沉淀返工在同一个小屋、聊天在同一对话目录、
+   审核继承被执行 run 的目录），但以后写新功能要记住：**换目录 = 换 CODEX_HOME = 丢会话**。
+3. 旧的全局 `data/codex-config/config.toml` 从此只作为**根目录**存在，里面那份不再被使用；
+   已有的 `skills/.system` 等状态留在原地（不自动删，避免动使用者数据）。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| `codexHomeFor`：同目录同份、异目录异份、**不落在工作目录里** | `codex-config.test.ts` |
+| **两条并行的 run（不同工作目录）各自的信任段都在、且互相不含对方** | 同上（这就是全局一份时那个 bug 的回归守卫） |
+| `pruneCodexHomes`：只清自己命名的、保留最近 N、当前份不删、别人的目录不碰 | 同上 |
+| `CODEX_HOME` 真注入到后端且指向那份哈希目录 | `e2e.test.ts`（D78 三条）/ `runtime-config-isolation.test.ts` |

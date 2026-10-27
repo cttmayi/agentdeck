@@ -277,14 +277,25 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
     try {
       const workOn = await makeTempDir('iso-codex-on-work')
       const on = await runOnce(h, workOn)
-      assert.equal(
-        h.backend.seenEnv['CODEX_HOME'],
-        h.configDir,
-        '★ 隔离开着时 CODEX_HOME 必须指向受管目录',
+      /**
+       * ★ 分批第 60 批：`CODEX_HOME` 从"全局一份"改成"**按工作目录分**一份"——
+       * 原因见 `codex-config.ts` 的 `codexHomeFor`：全局一份时两条不同工作目录的 run
+       * 会同时重建同一份 config.toml，后写赢 ⇒ 先写那条的 trust 段被抹掉。
+       * 所以判据是"**在受管根下面、且与本轮工作目录绑定**"，不是"等于受管根"。
+       */
+      const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
+      assert.ok(
+        codexHome.startsWith(`${h.configDir}/`),
+        `★ 隔离开着时 CODEX_HOME 必须在受管根下面：${codexHome}`,
       )
-      const copiedAuth = await readFile(join(h.configDir, 'auth.json'), 'utf8')
+      assert.match(codexHome, /\/[0-9a-f]{16}$/u, '目录名是工作目录路径的哈希（保证同一目录复用同一份）')
+      const copiedAuth = await readFile(join(h.backend.seenEnv['CODEX_HOME'] ?? '', 'auth.json'), 'utf8')
       assert.match(copiedAuth, /OPENAI_API_KEY/, '★ auth.json 必须真的被复制过去（否则 codex 认证不了）')
-      assert.equal(await exists(join(h.configDir, 'config.toml')), true, 'config.toml 同样要复制')
+      assert.equal(
+        await exists(join(h.backend.seenEnv['CODEX_HOME'] ?? '', 'config.toml')),
+        true,
+        'config.toml 同样要复制',
+      )
       assert.ok(
         on.notes.some((n) => n.includes('codex 个人配置隔离') && n.includes('已启用')),
         `运行日志要写明这次启用了隔离：${on.notes.join(' | ')}`,
@@ -292,8 +303,10 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
 
       const offRes = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
       assert.equal(offRes.status, 200, JSON.stringify(offRes.body))
-      // 把受管目录里那两份删掉：只有真的不再复制，它们才不会回来
-      await cleanup(h.configDir)
+      // 把这份 per-workdir 目录整个删掉：只有真的不再复制，它们才不会回来
+      const codexHomeOn = h.backend.seenEnv['CODEX_HOME'] ?? ''
+      assert.notEqual(codexHomeOn, '', '前提：开的时候真的注入了 CODEX_HOME')
+      await cleanup(codexHomeOn)
       const workOff = await makeTempDir('iso-codex-off-work')
       const off = await runOnce(h, workOff)
       assert.equal(
@@ -302,7 +315,7 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
         '★ 关掉之后不许再注入 CODEX_HOME —— codex 就用它自己的 ~/.codex',
       )
       assert.equal(
-        await exists(join(h.configDir, 'auth.json')),
+        await exists(join(codexHomeOn, 'auth.json')),
         false,
         '★ 关掉之后不许再复制 auth.json（这正是 Windows 上出问题的那一步）',
       )

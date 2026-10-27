@@ -38,7 +38,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** 受管配置目录里 codex 读的文件（相对 configDir）。 */
@@ -315,6 +315,63 @@ async function readSkillName(skillFile: string): Promise<string | null> {
   if (match === null) return null
   const name = (match[1] ?? '').trim().replace(/^["']|["']$/g, '')
   return name === '' ? null : name
+}
+
+/**
+ * ★ 分批第 60 批：**每个工作目录一份 CODEX_HOME**（从"全局一份"改成"按任务分"）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么改（使用者选的方案）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 全局一份时有个隐蔽缺陷：`CODEX_HOME/config.toml` 是全平台共享的，而两条**不同工作目录**
+ * 的 codex run 可以并行（工作目录锁是按目录的）⇒ 两条 run 同时从源重建这份文件，
+ * 后写的那条赢 ⇒ **先写那条 run 的 `[projects."<它的目录>"]` 信任段被抹掉**，它的项目级
+ * 配置于是静默不生效。这种"不报错、只是没生效"正是这个仓库最贵的一类缺陷。
+ *
+ * 按工作目录分目录之后：同一 workdir 的 run 之间本来就由工作目录锁串行，跨 workdir 互不相干
+ * ⇒ 竞争从结构上消失。
+ *
+ * ⚠️ **绝不能放进工作目录本身**：里面有 `auth.json`（真实 key），而 agent 能读自己的工作目录
+ *    （D78 的硬约束）。所以放数据目录下，用工作目录路径的哈希当目录名。
+ * ⚠️ 跨目录 `thread/resume` 会因此断——现在没有这种用法（沉淀返工在同一个小屋里、
+ *    聊天在同一对话目录、审核继承被执行 run 的目录），但以后写新功能要记住这条。
+ */
+export function codexHomeFor(rootDir: string, workDir: string): string {
+  const key = createHash('sha256').update(workDir).digest('hex').slice(0, 16)
+  return join(rootDir, key)
+}
+
+/**
+ * 清掉太旧的 per-workdir CODEX_HOME（codex 会在里面生成 `sessions/`、`*.sqlite`、
+ * `skills/.system/`，不清理就会一直长）。
+ *
+ * 只删**名字形如 16 位十六进制**的目录（我们自己的命名），`keepDir` 永不删，
+ * 最多保留 `keep` 个（按 mtime）。失败只忽略——清理失败不该让 run 失败。
+ */
+export async function pruneCodexHomes(
+  rootDir: string,
+  keepDir: string,
+  keep = 8,
+): Promise<string[]> {
+  const entries = await readdir(rootDir, { withFileTypes: true }).catch(() => null)
+  if (entries === null) return []
+  const ours: Array<{ path: string; at: number }> = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^[0-9a-f]{16}$/u.test(entry.name)) continue
+    const path = join(rootDir, entry.name)
+    if (path === keepDir) continue
+    const info = await stat(path).catch(() => null)
+    ours.push({ path, at: info?.mtimeMs ?? 0 })
+  }
+  ours.sort((a, b) => b.at - a.at)
+  const removed: string[] = []
+  for (const stale of ours.slice(Math.max(0, keep - 1))) {
+    if (await rm(stale.path, { recursive: true, force: true }).then(() => true, () => false)) {
+      removed.push(stale.path)
+    }
+  }
+  return removed
 }
 
 export async function syncCodexConfigDir(

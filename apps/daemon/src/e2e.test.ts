@@ -1551,16 +1551,24 @@ describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_
       })
       await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
 
-      assert.equal(
-        b.seenEnv['CODEX_HOME'],
-        configDir,
-        '★ CODEX_HOME 必须传给后端（codex 靠它隔离用户级 skill）',
+      /**
+       * ★ 分批第 60 批：`CODEX_HOME` 从"全局一份"改成"**按工作目录分**一份"
+       * （见 `codex-config.ts` 的 `codexHomeFor`）⇒ 判据是"在受管根下面、名字是工作目录的哈希"，
+       * 而不是"等于受管根"。
+       */
+      const codexHome = b.seenEnv['CODEX_HOME'] ?? ''
+      assert.ok(
+        codexHome.startsWith(`${configDir}/`),
+        `★ CODEX_HOME 必须在受管根下面（codex 靠它隔离用户级 skill）：${codexHome}`,
       )
-      const auth = JSON.parse(await readFile(join(configDir, 'auth.json'), 'utf8')) as { OPENAI_API_KEY: string }
+      assert.match(codexHome, /\/[0-9a-f]{16}$/u, '目录名 = 工作目录路径的哈希')
+      const auth = JSON.parse(await readFile(join(codexHome, 'auth.json'), 'utf8')) as {
+        OPENAI_API_KEY: string
+      }
       assert.equal(auth.OPENAI_API_KEY, 'sk-fake', '受管 auth.json 必须带着源认证（key 不丢）')
-      const toml = await readFile(join(configDir, 'config.toml'), 'utf8')
+      const toml = await readFile(join(codexHome, 'config.toml'), 'utf8')
       assert.match(toml, /model_providers\.local/, '受管 config.toml 必须整份 copy（端点不丢）')
-      assert.equal((await stat(join(configDir, 'auth.json'))).mode & 0o777, 0o600, '有 key 的文件只给属主读')
+      assert.equal((await stat(join(codexHome, 'auth.json'))).mode & 0o777, 0o600, '有 key 的文件只给属主读')
     } finally {
       await d.close()
       await cleanup(work)
@@ -1622,11 +1630,12 @@ describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_
       })
       await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
 
-      assert.equal(
-        b.seenEnv['CODEX_HOME'],
-        configDir,
+      const codexHome = b.seenEnv['CODEX_HOME'] ?? ''
+      assert.ok(
+        codexHome.startsWith(`${configDir}/`),
         '★ 平台注入的 CODEX_HOME 必须覆盖 agent 自定义的同名 env——隔离是平台强制的',
       )
+      assert.notEqual(codexHome, '/evil/user-config', 'agent 想指到别处不许得逞')
     } finally {
       await d.close()
       await cleanup(work)
@@ -1677,9 +1686,8 @@ describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_
         notes.some((n) => n.includes('codex 个人配置隔离未生效')),
         `日志里要有"隔离未生效"的说明，实际：\n${notes.join('\n')}`,
       )
-      assert.equal(
-        b.seenEnv['CODEX_HOME'],
-        join(dataDir, 'codex-config'),
+      assert.ok(
+        (b.seenEnv['CODEX_HOME'] ?? '').startsWith(`${join(dataDir, 'codex-config')}/`),
         'CODEX_HOME 仍应注入（失败的是配置同步，不是隔离本身）',
       )
     } finally {

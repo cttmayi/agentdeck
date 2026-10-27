@@ -11,12 +11,21 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
+
+/** 这个文件里多次要用"在不在"，补一个小助手（`node:fs/promises` 没有 exists）。 */
+const exists = (path: string): Promise<boolean> =>
+  stat(path).then(
+    () => true,
+    () => false,
+  )
 import {
+  codexHomeFor,
   findSkillFiles,
+  pruneCodexHomes,
   syncCodexConfigDir,
   withBundledSkillsDisabled,
   withHostSkillsDisabled,
@@ -367,5 +376,79 @@ describe('★ 分批第 57/58 批：宿主级技能禁用（skills.config）', (
     )
     // 与"关掉自带 system skills"那一条并存
     assert.match(written, /\[skills\.bundled\]\nenabled = false/u)
+  })
+})
+
+/**
+ * ★ 分批第 60 批：每个工作目录一份 CODEX_HOME。
+ *
+ * 为什么（使用者选的 B 方案）：全局一份时，`CODEX_HOME/config.toml` 是全平台共享的，
+ * 而两条**不同工作目录**的 codex run 可以并行（工作目录锁是按目录的）⇒ 两条 run 同时
+ * 从源重建同一份文件，后写赢 ⇒ 先写那条的 `[projects."<它的目录>"]` 信任段被抹掉，
+ * 项目级配置静默失效。按工作目录分之后竞争从结构上消失。
+ *
+ * ⚠️ 目录必须放数据目录下（里面有 auth.json 的真实 key，agent 能读自己的工作目录）。
+ */
+describe('★ 分批第 60 批：按工作目录分 CODEX_HOME', () => {
+  test('★★★ codexHomeFor：同一工作目录给同一份，不同目录给不同份，且都在根下面', () => {
+    const a1 = codexHomeFor('/data/codex-home', '/ws/issue-1')
+    const a2 = codexHomeFor('/data/codex-home', '/ws/issue-1')
+    const b = codexHomeFor('/data/codex-home', '/ws/issue-2')
+    assert.equal(a1, a2, '同一目录必须复用同一份（resume 与状态都靠它稳定）')
+    assert.notEqual(a1, b, '不同目录必须分开——这就是竞争被结构性消除的原因')
+    assert.ok(a1.startsWith('/data/codex-home/'), a1)
+    assert.match(a1.slice('/data/codex-home/'.length), /^[0-9a-f]{16}$/u)
+    // 绝不放进工作目录本身（那里 agent 能读，会漏 auth.json 的 key）
+    assert.ok(!a1.startsWith('/ws/'), 'CODEX_HOME 不许落在工作目录里面')
+  })
+
+  test('★★★ 两条并行的 run（不同工作目录）各自有信任段，互不覆盖', async () => {
+    const dataDir = await makeTempDir('codex-perwork')
+    const source = join(dataDir, 'user-codex')
+    const root = join(dataDir, 'codex-home')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
+
+    const ws1 = join(dataDir, 'issue-1')
+    const ws2 = join(dataDir, 'issue-2')
+    const home1 = codexHomeFor(root, ws1)
+    const home2 = codexHomeFor(root, ws2)
+    assert.notEqual(home1, home2)
+
+    await syncCodexConfigDir(home1, source, ws1, [{ name: null, path: '/h/x/SKILL.md' }])
+    await syncCodexConfigDir(home2, source, ws2, [{ name: null, path: '/h/x/SKILL.md' }])
+
+    const one = await readFile(join(home1, 'config.toml'), 'utf8')
+    const two = await readFile(join(home2, 'config.toml'), 'utf8')
+    assert.ok(one.includes(ws1), '第一份里要有它自己的信任段')
+    assert.ok(!one.includes(ws2), '第一份里不许出现别人的目录（这正是全局一份时的 bug）')
+    assert.ok(two.includes(ws2))
+    assert.ok(!two.includes(ws1))
+  })
+
+  test('★★ pruneCodexHomes：只清自己命名的目录、保留最近 N 份、当前这份永不删', async () => {
+    const dataDir = await makeTempDir('codex-prune')
+    const root = join(dataDir, 'codex-home')
+    await mkdir(root, { recursive: true })
+    const names = ['0000000000000001', '0000000000000002', '0000000000000003', '0000000000000004']
+    for (const [i, name] of names.entries()) {
+      await mkdir(join(root, name), { recursive: true })
+      // 让 mtime 有先后（越小越旧）
+      await writeFile(join(root, name, 'config.toml'), 'model = "x"\n', 'utf8')
+      const when = new Date(Date.now() - (names.length - i) * 1000)
+      await utimes(join(root, name), when, when)
+    }
+    // 不是我们命名的目录：不许碰
+    await mkdir(join(root, '别人的目录'), { recursive: true })
+    const current = join(root, names[3] as string)
+    const removed = await pruneCodexHomes(root, current, 2)
+    assert.deepEqual(removed.sort(), [
+      join(root, '0000000000000001'),
+      join(root, '0000000000000002'),
+    ])
+    assert.equal(await exists(join(root, '0000000000000003')), true, '最近一份要留着')
+    assert.equal(await exists(current), true, '当前这份永不删')
+    assert.equal(await exists(join(root, '别人的目录')), true, '不是我们建的目录一律不碰')
   })
 })
