@@ -2286,3 +2286,52 @@ enabled = false
 | 使用者已配 ⇒ 回报 `already-configured`（日志据此说真话） | 同上 |
 | 红检：不写回 ⇒ 立刻红 | 同上 |
 | doctor 的复制判据从"逐字节相同"改成"**源内容逐字保留**"（平台会追加自己的段） | `codex-doctor.test.ts` |
+
+### 4.3.17 分批第 57 批：宿主级技能逐条禁用（`skills.config`）——使用者实测挖出来的机制
+
+使用者：「我在 `~/temp` 下执行 codex，通过其命令 `/skills` 将 `find_skill` 关闭了，你查一下它设定了什么」。
+
+答案在 `~/.codex/config.toml`：
+
+```toml
+[[skills.config]]
+path = "/Users/ling/.agents/skills/find-skills/SKILL.md"
+enabled = false
+```
+
+也就是说 codex 有**按 `SKILL.md` 绝对路径逐条开关**的机制（`skills.config` 数组表，`path` + `enabled`）。
+
+#### 我复核的四条（`codex debug prompt-input`）
+
+| 情形 | 结果 |
+| --- | --- |
+| 单文件 `enabled = false` | 该 skill **从模型可见清单消失** ✅ |
+| **目录**当 `path`（`…/.agents/skills`） | **无效**（技能照旧全在）⇒ 必须逐条列 `SKILL.md` |
+| 对 codex 自带的 `.system` 技能 | 单文件禁用同样有效（但我们用 `[skills.bundled]` 一处关更省） |
+| 使用者自己写过开关 | 我们不覆盖他的取值（他可能故意开回来） |
+
+#### 落地
+
+- `withHostSkillsDisabled(configText, skillFiles)`：逐条追加 `[[skills.config]] path=… enabled = false`；
+  **幂等**（已有同 path 就跳过）、**不动使用者的既有开关**（回 `alreadyListed`）。
+- `findSkillFiles(roots, maxDepth=4)`：递归找 `SKILL.md`（codex 也认嵌套那份——真机上
+  `fireworks-tech-graph` 有两层，它把两份都列出来了）；目录不存在返回空数组，不抛。
+- `syncCodexConfigDir(…, hostSkillFiles)`：在主流程里接上，结果回 `hostSkillsDisabled` / `hostSkillsAlreadyListed`。
+- executor：`codex` run 时扫 `$HOME/.agents/skills` 并交下去；**只在隔离开启时做**
+  （隔离关掉 = 使用者明确要看个人配置，那时不该禁用任何东西）；日志逐条说明。
+
+#### 端到端复核（真 codex）
+
+受管 config 写成「`[skills.bundled] enabled=false` + 4 条 `[[skills.config]] enabled=false`」之后，
+模型的可见技能清单只剩 **1 个**：我们自己注入的 `probe-injected`。
+
+> 三条路合起来，平台第一次**完全控制**了 codex 的可见技能：注入的（workdir）+ 自带（bundled）+ 宿主级（逐条）。
+> 不需要重定向 `HOME`（B 案的 `~/.ssh` / `~/.config` 代价因此不必付）。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 逐条追加 / 幂等 / 不覆盖使用者开关 | `codex-config.test.ts` |
+| `findSkillFiles` 递归（含嵌套） / 目录不存在返回空 | 同上 |
+| 同步后受管 config 里真有那些 `[[skills.config]]`，且与 `[skills.bundled]` 并存 | 同上 |

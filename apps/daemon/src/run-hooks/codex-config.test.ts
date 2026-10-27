@@ -15,7 +15,13 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
-import { syncCodexConfigDir, withBundledSkillsDisabled, withTrustedProject } from './codex-config.ts'
+import {
+  findSkillFiles,
+  syncCodexConfigDir,
+  withBundledSkillsDisabled,
+  withHostSkillsDisabled,
+  withTrustedProject,
+} from './codex-config.ts'
 
 test('syncCodexConfigDir：把源 ~/.codex 的 auth.json 与 config.toml copy 进受管目录', async () => {
   const root = await makeTempDir('ccd-codex')
@@ -254,5 +260,82 @@ describe('★ 分批第 56 批：关掉 codex 自带的 system skills', () => {
     )
     const written = await readFile(join(configDir, 'config.toml'), 'utf8')
     assert.equal(written, '[skills.bundled]\nenabled = true\n')
+  })
+})
+
+/**
+ * ★ 分批第 57 批：宿主级技能（`$HOME/.agents/skills`）逐条禁用。
+ *
+ * 机制是使用者实测出来的：他在 `~/temp` 里用 codex 的 `/skills` 关掉了 find-skills，
+ * 结果写在 `~/.codex/config.toml`：
+ *
+ *     [[skills.config]]
+ *     path = "/Users/ling/.agents/skills/find-skills/SKILL.md"
+ *     enabled = false
+ *
+ * 我复核过（`codex debug prompt-input`）：单文件禁用 ⇒ 该 skill 从模型清单消失；
+ * **目录当 path 无效** ⇒ 必须逐条列 SKILL.md；对 codex 自带的 `.system` 同样有效。
+ */
+describe('★ 分批第 57 批：宿主级技能逐条禁用（skills.config）', () => {
+  test('★★★ withHostSkillsDisabled：逐条追加、幂等、不覆盖使用者自己的开关', () => {
+    const one = withHostSkillsDisabled('model = "gpt-5"\n', [
+      '/h/.agents/skills/find-skills/SKILL.md',
+      '/h/.agents/skills/manim/SKILL.md',
+    ])
+    assert.equal(one.disabled.length, 2)
+    assert.match(
+      one.text,
+      /\[\[skills\.config\]\]\npath = "\/h\/\.agents\/skills\/find-skills\/SKILL\.md"\nenabled = false/u,
+    )
+    assert.ok(one.text.startsWith('model = "gpt-5"'), '使用者那份配置一个字都不动')
+
+    const twice = withHostSkillsDisabled(one.text, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.equal(twice.disabled.length, 0)
+    assert.deepEqual(twice.alreadyListed, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.equal(twice.text, one.text, '重复追加会让 config.toml 里出现两条一样的表')
+
+    // 使用者自己关过（或在 /skills 里点过）⇒ 我们不碰他的取值（他可能故意开回来）
+    const theirs =
+      '[[skills.config]]\npath = "/h/.agents/skills/find-skills/SKILL.md"\nenabled = true\n'
+    const kept = withHostSkillsDisabled(theirs, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.deepEqual(kept.disabled, [])
+    assert.deepEqual(kept.alreadyListed, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.equal(kept.text, theirs)
+  })
+
+  test('★★ findSkillFiles：递归找 SKILL.md（codex 也认嵌套那份），找不到就是空数组', async () => {
+    const dir = await makeTempDir('host-skills')
+    const root = join(dir, 'agents-skills')
+    await mkdir(join(root, 'alpha'), { recursive: true })
+    await writeFile(join(root, 'alpha', 'SKILL.md'), '# a\n', 'utf8')
+    // 嵌套那份（真机上的 fireworks-tech-graph 就是这样，codex 把两份都列出来了）
+    await mkdir(join(root, 'beta', 'skills', 'beta'), { recursive: true })
+    await writeFile(join(root, 'beta', 'skills', 'beta', 'SKILL.md'), '# b\n', 'utf8')
+    await writeFile(join(root, 'beta', 'README.md'), 'no\n', 'utf8')
+
+    const found = await findSkillFiles([root])
+    assert.equal(found.length, 2, `实际：${found.join('、')}`)
+    assert.ok(found.every((p) => p.endsWith('SKILL.md')))
+
+    const none = await findSkillFiles([join(dir, '不存在的目录')])
+    assert.deepEqual(none, [], '目录不存在是正常情况（没装这类技能），不该抛')
+  })
+
+  test('★★★ 同步时给了宿主级技能 ⇒ 受管 config.toml 里逐条写上了 enabled=false', async () => {
+    const dataDir = await makeTempDir('host-skills-sync')
+    const source = join(dataDir, 'user-codex')
+    const configDir = join(dataDir, 'managed')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
+
+    const result = await syncCodexConfigDir(configDir, source, undefined, [
+      '/h/.agents/skills/find-skills/SKILL.md',
+    ])
+    assert.deepEqual(result.hostSkillsDisabled, ['/h/.agents/skills/find-skills/SKILL.md'])
+    const written = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.match(written, /path = "\/h\/\.agents\/skills\/find-skills\/SKILL\.md"\nenabled = false/u)
+    // 与"关掉自带 system skills"那一条并存
+    assert.match(written, /\[skills\.bundled\]\nenabled = false/u)
   })
 })

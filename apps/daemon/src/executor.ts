@@ -50,7 +50,7 @@ import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
 import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
-import { syncCodexConfigDir } from './run-hooks/codex-config.ts'
+import { findSkillFiles, syncCodexConfigDir } from './run-hooks/codex-config.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -200,6 +200,12 @@ export interface ExecutorDeps {
    * 使用者的真实配置。缺省 = 使用者主目录。
    */
   codexConfigSource?: string
+  /**
+   * 宿主级技能根的覆盖（测试注入用；缺省 `$HOME/.agents/skills`）。
+   *
+   * 与 `claudeSettingsSource` / `codexConfigSource` 同一条规矩：测试绝不读使用者的真实家目录。
+   */
+  hostSkillRoots?: string[]
 }
 
 /**
@@ -1041,10 +1047,23 @@ export class RunExecutor {
          * ⚠️ trusted 是**打包开关**：它同时放开项目级 hooks 与 exec policies。所以这条
          *    必须在运行日志里说出来（下面那行 note），不许在后台悄悄发生。
          */
+        /**
+         * ★ 分批第 57 批：把 `$HOME/.agents/skills`（跨 agent 的全局技能目录）逐条禁用。
+         *
+         * 为什么是**逐条**：codex 的 `skills.config` 数组表按 `SKILL.md` 绝对路径开关，
+         * 目录当 path 不行（实测）。所以先扫出这些文件，再把它们交给 sync 去写
+         * `[[skills.config]] path=… enabled=false`。
+         * ⚠️ 这是**平台策略**（哪些目录算宿主级），所以由 executor 决定、库只负责写。
+         */
+        const hostSkillFiles =
+          this.#deps.hostSkillRoots === undefined
+            ? await findSkillFiles([join(homedir(), '.agents', 'skills')])
+            : await findSkillFiles(this.#deps.hostSkillRoots)
         const sync = await syncCodexConfigDir(
           this.#deps.codexConfigDir,
           this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
           run.workDir ?? undefined,
+          hostSkillFiles,
         )
         if (!sync.ok) {
           await this.#note(
@@ -1067,6 +1086,21 @@ export class RunExecutor {
               `\`CODEX_HOME\` 下的用户级 skill 不可见，已同步 ${sync.copied.join('、')}；` +
               `⚠️ \`$HOME/.agents/skills\`（跨 agent 的全局目录）**不在隔离范围内**，那些技能仍然可见。`,
           )
+          if (sync.hostSkillsDisabled.length > 0) {
+            await this.#note(
+              runId,
+              `宿主级技能：已逐条禁用 ${String(sync.hostSkillsDisabled.length)} 个` +
+                `（\`$HOME/.agents/skills\` 下的 SKILL.md；它们不属于平台，但 codex 会扫到）——` +
+                `${sync.hostSkillsDisabled.map((p) => p.split('/.agents/skills/')[1] ?? p).join('、')}`,
+            )
+          }
+          if (sync.hostSkillsAlreadyListed.length > 0) {
+            await this.#note(
+              runId,
+              `宿主级技能：${String(sync.hostSkillsAlreadyListed.length)} 个你已经在 config 里写过开关，` +
+                '平台**不覆盖**你的取值。',
+            )
+          }
           await this.#note(
             runId,
             sync.bundledSkills === 'disabled'

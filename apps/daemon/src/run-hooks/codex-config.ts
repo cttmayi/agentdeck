@@ -38,7 +38,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** 受管配置目录里 codex 读的文件（相对 configDir）。 */
@@ -72,6 +72,15 @@ export interface CodexConfigSyncResult {
    *   所以它到底开没开由他那份决定——日志里要说清，否则"以为关了其实没关"）。
    */
   bundledSkills: 'disabled' | 'already-configured'
+  /**
+   * 这次**逐条禁用**的宿主级技能（`$HOME/.agents/skills` 那些）。
+   *
+   * 为什么需要它出现在结果里：这些技能不属于平台、也不在任何受管目录里，
+   * 它们**本来会**出现在模型的技能清单里。禁用是有副作用的动作，日志必须说出来。
+   */
+  hostSkillsDisabled: string[]
+  /** 使用者自己在 config 里已经写过开关的（我们不碰他的取值）。 */
+  hostSkillsAlreadyListed: string[]
 }
 
 /**
@@ -179,6 +188,82 @@ export function withBundledSkillsDisabled(configText: string): {
   }
 }
 
+/**
+ * ★ 分批第 57 批：把**宿主级（跨 agent）技能**逐个禁用 —— 这是使用者实测出来的机制。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 怎么发现的
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者在自己机器的 `~/temp` 里跑 codex，用它的 `/skills` 命令关掉了 `find-skills`，
+ * 然后问"它到底写了什么"。答案在 `~/.codex/config.toml`：
+ *
+ *     [[skills.config]]
+ *     path = "/Users/ling/.agents/skills/find-skills/SKILL.md"
+ *     enabled = false
+ *
+ * 也就是 codex 有**按 SKILL.md 绝对路径逐条开关**的机制（`skills.config` 数组表）。
+ * 实测（`codex debug prompt-input` 复核）：
+ *   · 单文件禁用 ⇒ 该 skill 立刻从"模型可见清单"里消失 ✅
+ *   · **目录当 path 不行**（`path = "…/.agents/skills"` 无效）⇒ 必须逐条列 SKILL.md
+ *   · 对 codex 自带的 `.system` 技能同样有效（但我们用 `[skills.bundled]` 一处关掉更省）
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要它（隔离的真实缺口）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `$HOME/.agents/skills` 是一条**跨 agent 的全局技能目录**（vercel-labs/skills 那套装进去的），
+ * `CODEX_HOME` 重定向**管不到它**（上游 issue #46414 还开着）。于是"执行者与审核者能看到
+ * 彼此之外的技能"这件事，只能靠这个逐条禁用机制堵住。
+ */
+export function withHostSkillsDisabled(
+  configText: string,
+  skillFiles: readonly string[],
+): { text: string; disabled: string[]; alreadyListed: string[] } {
+  const disabled: string[] = []
+  const alreadyListed: string[] = []
+  let text = configText
+  for (const file of skillFiles) {
+    const escaped = escapeTomlBasicString(file)
+    // 使用者自己那条（比如在 `/skills` 里关掉过）已经存在 ⇒ 不重复追加，
+    // 也不改他的取值（他可能故意开回来）。
+    if (text.includes(`path = "${escaped}"`)) {
+      alreadyListed.push(file)
+      continue
+    }
+    const trimmed = text.endsWith('\n') ? text : `${text}\n`
+    text = `${trimmed}\n[[skills.config]]\npath = "${escaped}"\nenabled = false\n`
+    disabled.push(file)
+  }
+  return { text, disabled, alreadyListed }
+}
+
+/**
+ * 在若干**宿主级技能根**下递归找出 `SKILL.md`（codex 也认嵌套的那一份：
+ * `fireworks-tech-graph` 就有两层，实测它把两份都列出来了）。
+ *
+ * 只读、深度有限（默认 4 层）：技能目录不该更深，而无限递归会在使用者的
+ * 家目录里乱翻。找不到就返回空数组——**不抛**，那是正常情况（没装这类技能）。
+ */
+export async function findSkillFiles(
+  roots: readonly string[],
+  maxDepth = 4,
+): Promise<string[]> {
+  const out: string[] = []
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > maxDepth) return
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
+    if (entries === null) return
+    for (const entry of entries) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(full, depth + 1)
+      else if (entry.name === 'SKILL.md') out.push(full)
+    }
+  }
+  for (const root of roots) await walk(root, 0)
+  return out.sort()
+}
+
 export async function syncCodexConfigDir(
   configDir: string,
   sourceHomeDir: string,
@@ -191,6 +276,15 @@ export async function syncCodexConfigDir(
    * 要么在复制那一刻被覆盖掉。
    */
   trustProjectDir?: string,
+  /**
+   * 要逐条禁用的宿主级 `SKILL.md` 绝对路径（缺省 = 不禁用）。
+   *
+   * 调用方（executor）拿 `findSkillFiles([$HOME/.agents/skills])` 的结果传进来——
+   * 为什么不在这个函数里自己扫：这个模块不该知道"哪些目录算宿主级"，
+   * 那是**平台策略**（`$HOME/.agents/skills` 是跨 agent 的全局目录），
+   * 写在这里会让"再加一个宿主根"变成改底层库。
+   */
+  hostSkillFiles?: readonly string[],
 ): Promise<CodexConfigSyncResult> {
   await mkdir(configDir, { recursive: true })
   const copied: string[] = []
@@ -217,6 +311,8 @@ export async function syncCodexConfigDir(
       trustedProject: null,
       trustedProjectConfigHash: null,
       bundledSkills: 'already-configured',
+      hostSkillsDisabled: [],
+      hostSkillsAlreadyListed: [],
     }
   }
 
@@ -250,5 +346,26 @@ export async function syncCodexConfigDir(
     bundledSkills = patched.added ? 'disabled' : 'already-configured'
   }
 
-  return { ok: true, copied, configDir, trustedProject, trustedProjectConfigHash, bundledSkills }
+  // ── 宿主级技能：逐条禁用（`$HOME/.agents/skills` 那些，见上面那段说明）──
+  let hostSkillsDisabled: string[] = []
+  let hostSkillsAlreadyListed: string[] = []
+  if (hostSkillFiles !== undefined && hostSkillFiles.length > 0) {
+    const configPath = join(configDir, 'config.toml')
+    const current = await readFile(configPath, 'utf8')
+    const patched = withHostSkillsDisabled(current, hostSkillFiles)
+    if (patched.disabled.length > 0) await writeFile(configPath, patched.text, 'utf8')
+    hostSkillsDisabled = patched.disabled
+    hostSkillsAlreadyListed = patched.alreadyListed
+  }
+
+  return {
+    ok: true,
+    copied,
+    configDir,
+    trustedProject,
+    trustedProjectConfigHash,
+    bundledSkills,
+    hostSkillsDisabled,
+    hostSkillsAlreadyListed,
+  }
 }
