@@ -2156,3 +2156,67 @@ const existingDrafter = (await store.listAgents(workspaceId)).find((a) => a.buil
 
 - `pnpm run probe:layout` **578 项全绿**（`template.footVisible` 这条正好说明探针在守"表单变长也不许把主操作顶出视口"）。
 - 词条侧：`D39` 的"词条里不许出现 markdown 记号"把新文案里的 `**` 拦下来了（两处 en/zh 各一次）——已去掉。
+
+### 4.3.15 分批第 55 批：让工作目录里的 `.codex/config.toml` 真的生效（项目 trusted）
+
+使用者（想用配置管"哪些 skill 可见"）：「我们先解决 `<workDir>/.codex/config.toml` 不工作的问题」。
+
+#### 真机上量到的事实（本机 codex 0.157.1 实测，不是推断）
+
+在工作目录里放一份 `.codex/config.toml`，启动 `codex app-server` 时它**压根不读**：
+
+```
+ERROR codex_app_server: Project-local config, hooks, and exec policies are disabled in the following
+folders until the project is trusted, but skills still load.
+  1. <workDir>/.codex
+     To load project-local config, hooks, and exec policies, add <workDir> as a trusted project
+     in <CODEX_HOME>/config.toml.
+```
+
+注意这半句：**but skills still load** —— 技能照旧加载，被忽略的只有项目级配置。这就是为什么
+从前"跑完删技能"会被当成隔离手段。
+
+实测修法：在受管 `CODEX_HOME/config.toml` 里加
+
+```toml
+[projects."<workDir>"]
+trust_level = "trusted"
+```
+
+之后同一份项目级 `.codex/config.toml` **立刻被读**。验证方式（可复现）：往项目 config 里塞一个
+不存在的键 —— 未 trusted 时一声不响；trusted 后 codex 会报
+`project (…/.codex/config.toml): this_key_does_not_exist is ignored`（它读了才谈得上"忽略"）。
+
+#### 落法
+
+- `withTrustedProject(configText, dir)`（纯函数，`run-hooks/codex-config.ts`）：
+  补一段 `[projects."<dir>"]` + `trust_level = "trusted"`，**幂等**（同名段已存在就不追加——
+  TOML 重复定义同一个表是错误，追加两次会让 codex 直接起不来），路径按 TOML 基本字符串转义
+  （Windows 的 `C:\…` 必须写成 `C:\\…`）。
+- `syncCodexConfigDir(configDir, source, trustProjectDir?)`：复制完使用者的配置后按需追加，
+  并把 `trustedProject` + **项目 config 的指纹**（sha256 前 12 位，内容不进日志）交回调用方。
+- executor：codex run 时把 `run.workDir` 传进去，并**每轮写一条 note**：
+
+```
+codex 项目级配置：已把工作目录标为 trusted（<workDir>）——项目级 config / hooks / exec policies **会加载**；
+那份 .codex/config.toml 的指纹是 abcdef123456。
+```
+
+#### ⚠️ 必须说清的代价（trusted 是**打包开关**）
+
+codex 这一道门同时放开三样：项目级 **config**、**hooks**、**exec policies**。而工作目录里的文件
+**agent 自己也能写** ⇒ 理论上存在一条通道：agent 在目录里写一份带 hooks 的 `.codex/config.toml`，
+下一次在**同一目录**里跑的 run（重试 / 下一轮 / 继承同一目录的审核 run）就会执行它。
+
+这就是为什么这条 note 必须出现在每次 run 的日志里（不许悄悄发生），以及为什么把项目的 config
+指纹记下来（可审计）。**后续可选的收紧**（还没做，记在这里）：只在"目录里没有项目 config"时开门，
+或者对项目 config 的内容做白名单；这两条都会让"使用者自己放一份配置"这条诉求打折，需要单独拍板。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| `withTrustedProject`：补段 / 幂等 / Windows 路径转义 / 原内容一个字节不动 | `codex-config.test.ts` |
+| 同步时给了目录 ⇒ 受管 config.toml 真的多出信任段、指纹算得出来、连跑两轮只有一段 | 同上 |
+| 不给目录 ⇒ **一个字都不多写**（默认行为不变） | 同上 |
+| 红检：不写回 trust 段 ⇒ 立刻红 | 同上 |

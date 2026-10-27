@@ -13,9 +13,9 @@
 import assert from 'node:assert/strict'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { test } from 'node:test'
+import { describe, test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
-import { syncCodexConfigDir } from './codex-config.ts'
+import { syncCodexConfigDir, withTrustedProject } from './codex-config.ts'
 
 test('syncCodexConfigDir：把源 ~/.codex 的 auth.json 与 config.toml copy 进受管目录', async () => {
   const root = await makeTempDir('ccd-codex')
@@ -102,4 +102,89 @@ test('syncCodexConfigDir：源目录不存在 → ok:false 带原因', async () 
   } finally {
     await cleanup(root)
   }
+})
+
+/**
+ * ★ 分批第 55 批：让工作目录里的 `.codex/config.toml` 真的被读。
+ *
+ * 真机上量到（不是推断）：项目未 trusted 时 codex 只吐一句
+ * `Project-local config, hooks, and exec policies are disabled … but skills still load`，
+ * 项目级配置文件当场被忽略；在受管 `CODEX_HOME/config.toml` 里补上
+ * `[projects."<workDir>"] trust_level = "trusted"` 之后，同一份文件立刻被读
+ * （实测：往里塞一个不存在的键，trusted 前一声不响，trusted 后 codex 报
+ * `project (…/.codex/config.toml): xxx is ignored`）。
+ */
+describe('★ 分批第 55 批：项目级配置的门（trusted）', () => {
+  test('★★★ withTrustedProject：补一段、幂等、按 TOML 规则转义路径', () => {
+    const text = 'model = "gpt-5"\n'
+    const one = withTrustedProject(text, '/Users/ling/agentdeck-workspace/issue-1')
+    assert.equal(one.added, true)
+    assert.match(one.text, /\[projects\."\/Users\/ling\/agentdeck-workspace\/issue-1"\]\ntrust_level = "trusted"\n/u)
+    assert.ok(one.text.startsWith('model = "gpt-5"'), '原有内容一个字都不许动')
+
+    // 幂等：再来一次不追加（TOML 重复定义同一个表是错误，追加两次 codex 直接起不来）
+    const twice = withTrustedProject(one.text, '/Users/ling/agentdeck-workspace/issue-1')
+    assert.equal(twice.added, false)
+    assert.equal(twice.text, one.text)
+
+    // Windows 路径：反斜杠必须转义，否则 config.toml 解析失败（而报错只说"配置坏了"）。
+    // ⚠️ 这里用字符串拼而不是正则：正则里"匹配两个反斜杠"要写四个，读起来全是噪声，
+    //    而这条判据的意图是"TOML 里应该写成两个反斜杠"——写清楚比压缩表达式重要。
+    const winDir = 'C:\\Users\\ling\\agentdeck-workspace\\issue-2'
+    const winEscaped = winDir.replace(/\\/g, '\\\\')
+    const win = withTrustedProject('', winDir)
+    assert.ok(
+      win.text.includes(`[projects."${winEscaped}"]`),
+      `Windows 路径要按 TOML 转义，实际：${win.text}`,
+    )
+  })
+
+  test('★★★ 同步时给 trustProjectDir ⇒ 受管 config.toml 里真的多了那一段', async () => {
+    const dataDir = await makeTempDir('codex-trust-sync')
+    const source = join(dataDir, 'user-codex')
+    const configDir = join(dataDir, 'managed')
+    const workDir = join(dataDir, 'issue-trust-me')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{"OPENAI_API_KEY":"sk-fake"}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
+    // 项目级 config（这次要它生效的那一份）
+    await mkdir(join(workDir, '.codex'), { recursive: true })
+    await writeFile(join(workDir, '.codex', 'config.toml'), 'project_setting = 1\n', 'utf8')
+
+    const result = await syncCodexConfigDir(configDir, source, workDir)
+    assert.equal(result.ok, true, result.reason ?? '')
+    assert.equal(result.trustedProject, workDir, 'note 要知道信任了哪个目录')
+    assert.ok(
+      typeof result.trustedProjectConfigHash === 'string' &&
+        result.trustedProjectConfigHash.length === 12,
+      '项目级 config 的指纹要记下来（audit 用，内容不进日志）',
+    )
+    const written = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.match(written, /trust_level = "trusted"/u)
+    assert.ok(written.includes(workDir), '受管 config.toml 里要指向这次的工作目录')
+    assert.ok(written.startsWith('model = "gpt-5"'), '使用者那份配置要在（复制语义不变）')
+
+    // 再来一轮同一个目录 ⇒ 不许出现第二段（否则 codex 起不来）
+    const again = await syncCodexConfigDir(configDir, source, workDir)
+    assert.equal(again.ok, true)
+    const serialized = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.equal(
+      serialized.split(`[projects."${workDir}"]`).length - 1,
+      1,
+      '同一个项目的 trust 段只能有一段',
+    )
+  })
+
+  test('★★ 不给 trustProjectDir ⇒ 不写任何 trust（默认行为不变）', async () => {
+    const dataDir = await makeTempDir('codex-trust-none')
+    const source = join(dataDir, 'user-codex')
+    const configDir = join(dataDir, 'managed')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
+    const result = await syncCodexConfigDir(configDir, source)
+    assert.equal(result.trustedProject, null)
+    const written = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.equal(written, 'model = "gpt-5"\n', '不传就一个字都不多写')
+  })
 })

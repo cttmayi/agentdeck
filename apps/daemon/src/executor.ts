@@ -1032,9 +1032,19 @@ export class RunExecutor {
             '不复制 auth.json / config.toml，agent 能看到并使用你个人的 skill / 端点配置。',
         )
       } else if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir) {
+        /**
+         * ★ 分批第 55 批：把**这次的工作目录**标成 trusted —— 否则项目级
+         * `.codex/config.toml` / hooks / exec policies 一律不被读（真机 stderr：
+         * `Project-local config, hooks, and exec policies are disabled … until the project is
+         * trusted, but skills still load`）。使用者要的正是"让工作目录里那份配置生效"。
+         *
+         * ⚠️ trusted 是**打包开关**：它同时放开项目级 hooks 与 exec policies。所以这条
+         *    必须在运行日志里说出来（下面那行 note），不许在后台悄悄发生。
+         */
         const sync = await syncCodexConfigDir(
           this.#deps.codexConfigDir,
           this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
+          run.workDir ?? undefined,
         )
         if (!sync.ok) {
           await this.#note(
@@ -1048,6 +1058,16 @@ export class RunExecutor {
             `codex 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
               `用户级 skill 不可见，已同步 ${sync.copied.join('、')}。`,
           )
+          if (sync.trustedProject !== null) {
+            await this.#note(
+              runId,
+              `codex 项目级配置：已把工作目录标为 trusted（${sync.trustedProject}）——` +
+                `项目级 config / hooks / exec policies **会加载**` +
+                (sync.trustedProjectConfigHash === null
+                  ? '；这个目录里没有 `.codex/config.toml`（只开了门、没装东西）。'
+                  : `；那份 \`.codex/config.toml\` 的指纹是 ${sync.trustedProjectConfigHash}。`),
+            )
+          }
         }
       }
 

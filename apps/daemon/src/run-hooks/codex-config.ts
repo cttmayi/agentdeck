@@ -37,7 +37,8 @@
  * 但调用方要记一条 note 让使用者知道这次没有隔离。
  */
 
-import { chmod, copyFile, mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { chmod, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /** 受管配置目录里 codex 读的文件（相对 configDir）。 */
@@ -51,6 +52,18 @@ export interface CodexConfigSyncResult {
   copied: string[]
   /** 受管目录（进 note，使用者可自查）。 */
   configDir: string
+  /**
+   * ★ 分批第 55 批：这次把哪个**工作目录**标成了 trusted（没有就是 null）。
+   *
+   * 为什么要它：codex 对项目级 `.codex/config.toml` / hooks / exec policies 有一道
+   * "项目未 trusted 就整个不读"的门（真机 stderr 原话：
+   * `Project-local config, hooks, and exec policies are disabled … until the project is trusted,
+   *  but skills still load`）。所以"项目级配置有没有生效"必须**可见**——它改变的是
+   * 这一轮到底读了什么，不是内部细节。
+   */
+  trustedProject: string | null
+  /** trusted 那个项目里的 `.codex/config.toml` 指纹（文件不存在 = null）。 */
+  trustedProjectConfigHash: string | null
 }
 
 /**
@@ -63,9 +76,67 @@ export interface CodexConfigSyncResult {
  *
  * 源文件缺失时返回 `ok: false`（带原因），不抛异常。
  */
+/**
+ * ★ 分批第 55 批：往 `config.toml` 文本里补一段"信任这个项目"。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 真机上量到的事实（不是猜的）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 在工作目录里放一份 `.codex/config.toml`，启动 `codex app-server` 时它压根不读，
+ * 只吐一句 error：
+ *
+ *     Project-local config, hooks, and exec policies are disabled in the following folders
+ *     until the project is trusted, but skills still load.
+ *     To load project-local config … add <workDir> as a trusted project in <CODEX_HOME>/config.toml.
+ *
+ * 而**技能照旧加载**（所以从前"删技能"才被当成隔离手段）。实测：在受管
+ * `CODEX_HOME/config.toml` 里加
+ *
+ *     [projects."<workDir>"]
+ *     trust_level = "trusted"
+ *
+ * 之后，同一个项目级 `.codex/config.toml` 立刻被读（实测方式：往里塞一个不存在的键，
+ * 未 trusted 时一声不响，trusted 后 codex 会报 `project (…/.codex/config.toml): xxx is ignored`）。
+ *
+ * ⚠️ **trusted 是打包开关**：它同时启用项目级 **hooks 与 exec policies**，不只是 config。
+ *    也就是说工作目录里那份文件从"没人看"变成"会被执行"。这件事必须在 run 日志里说出来
+ *    （调用方负责），不能在后台悄悄发生。
+ * ⚠️ 幂等：已经存在同名 `[projects."…"]` 段就不再追加——TOML 里重复定义同一个表是**错误**，
+ *    追加两次会让 codex 直接起不来。
+ * ⚠️ 路径要按 TOML 基本字符串转义（Windows 的 `C:\…` 必须写成 `C:\\…`，否则 config.toml
+ *    直接解析失败，而失败信息只说"配置坏了"）。
+ */
+export function withTrustedProject(
+  configText: string,
+  projectDir: string,
+): { text: string; added: boolean } {
+  const key = `[projects."${escapeTomlBasicString(projectDir)}"]`
+  if (configText.includes(key)) return { text: configText, added: false }
+  const trimmed = configText.endsWith('\n') ? configText : `${configText}\n`
+  return {
+    text: `${trimmed}\n${key}\ntrust_level = "trusted"\n`,
+    added: true,
+  }
+}
+
+/** TOML 基本字符串的转义：`\` 与 `"` 两个字符就够（其余原样）。 */
+function escapeTomlBasicString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 export async function syncCodexConfigDir(
   configDir: string,
   sourceHomeDir: string,
+  /**
+   * 要标成 trusted 的**工作目录**（缺省不标）。
+   *
+   * 为什么是"每次 run 现算"而不是写死在受管 config 里：受管 config.toml 每轮都从
+   * 使用者的 `~/.codex/config.toml` **重新复制**（幂等覆盖 ⇒ 改 key 即时生效），
+   * 所以 trust 段也必须每轮重写；否则要么攒成几十条（使用者那份文件里已经攒了一屏），
+   * 要么在复制那一刻被覆盖掉。
+   */
+  trustProjectDir?: string,
 ): Promise<CodexConfigSyncResult> {
   await mkdir(configDir, { recursive: true })
   const copied: string[] = []
@@ -89,7 +160,30 @@ export async function syncCodexConfigDir(
       reason: `源配置缺 ${missing.join('、')}（在 ${sourceHomeDir}）`,
       copied,
       configDir,
+      trustedProject: null,
+      trustedProjectConfigHash: null,
     }
   }
-  return { ok: true, copied, configDir }
+
+  // ── 项目级配置的门：把这次的工作目录标成 trusted ──
+  let trustedProject: string | null = null
+  let trustedProjectConfigHash: string | null = null
+  if (trustProjectDir !== undefined && trustProjectDir.trim() !== '') {
+    const configPath = join(configDir, 'config.toml')
+    const original = await readFile(configPath, 'utf8')
+    const patched = withTrustedProject(original, trustProjectDir)
+    if (patched.added) await writeFile(configPath, patched.text, 'utf8')
+    trustedProject = trustProjectDir
+    // 记项目级 config 的指纹：它是"agent 写的、还是使用者写的"的唯一线索，
+    // 也是"这一轮 trusted 之后到底会加载什么"的可审计证据（内容不进日志）。
+    const projectConfig = await readFile(join(trustProjectDir, '.codex', 'config.toml')).catch(
+      () => null,
+    )
+    trustedProjectConfigHash =
+      projectConfig === null
+        ? null
+        : createHash('sha256').update(projectConfig).digest('hex').slice(0, 12)
+  }
+
+  return { ok: true, copied, configDir, trustedProject, trustedProjectConfigHash }
 }
