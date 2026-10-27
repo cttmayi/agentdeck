@@ -1032,8 +1032,8 @@ export class RunExecutor {
           )
           await this.#note(
             runId,
-            'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1）——' +
-              '这次的技能清单只剩平台注入的（以及 claude 内置插件技能 plugin-authoring，它没有开关）。',
+            'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1 + 受管 settings 里的 ' +
+              'enabledPlugins.plugin-authoring@builtin=false）——这次的技能清单只剩平台注入的那些。',
           )
         }
       }

@@ -131,3 +131,37 @@ test('syncClaudeConfigDir：源缺失/JSON 坏/无 env → ok:false 带原因（
   }
 })
 
+
+/**
+ * ★ 分批第 63 批：受管 settings 里关掉 claude 自带的那个**插件技能**（`plugin-authoring`）。
+ *
+ * 实测依据（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）：
+ *   · 只给 `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` 时，技能清单里还剩 `plugin-authoring`
+ *     （它来自 claude **内置插件**，不是 bundled skill）；
+ *   · 受管 settings.json 里写 `enabledPlugins: {"plugin-authoring@builtin": false}`
+ *     ⇒ 清单里只剩平台注入的那些；
+ *   · ⚠️ 键必须带 `@builtin`：只写 `"plugin-authoring": false` 实测**不生效**。
+ */
+test('syncClaudeConfigDir：受管 settings 关掉 plugin-authoring@builtin', async () => {
+  const root = await makeTempDir('ccd-plugin')
+  try {
+    const source = join(root, 'settings.json')
+    await writeFile(source, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'sk-x' } }), 'utf8')
+    const configDir = join(root, 'managed')
+    const result = await syncClaudeConfigDir(configDir, source)
+    assert.equal(result.ok, true, result.reason ?? '')
+
+    const written = JSON.parse(
+      await readFile(join(configDir, MANAGED_SETTINGS_REL), 'utf8'),
+    ) as { env: Record<string, string>; enabledPlugins?: Record<string, boolean> }
+    assert.deepEqual(
+      written.enabledPlugins,
+      { 'plugin-authoring@builtin': false },
+      '★ 要关掉 claude 内置插件贡献的那个技能（键必须带 @builtin，实测不带不生效）',
+    )
+    // 认证 env 照旧在（这一项是**额外**写的，不是替换）
+    assert.deepEqual(written.env, { ANTHROPIC_AUTH_TOKEN: 'sk-x' })
+  } finally {
+    await cleanup(root)
+  }
+})

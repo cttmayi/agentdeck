@@ -2545,3 +2545,48 @@ executor 的 env 组装里（与 `CLAUDE_CONFIG_DIR` 同一处、同一条件）
 `crystallize-e2e` 里"理由码要交下去"这条：`waitRevisedFrom()` 一返回只说明**版本表多了一行**，
 而 `material/feedback.md` 是那一版**开工时**才写的 ⇒ 读一次就断言会抢跑。改成等文件里出现理由码
 （断言没动）。
+
+### 4.3.23 分批第 63 批：`plugin-authoring` 也有开关（`enabledPlugins` + `@builtin`）
+
+使用者：「我测试了，有发现 plugin-authoring，请检查」。
+
+上一批（62）我只关到了 bundled skills，剩下的 `plugin-authoring` 记成了"没有开关"。这一批找到了：
+
+#### 实测（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）
+
+夹具：`CLAUDE_CONFIG_DIR` 指向空目录 + 工作目录注入 1 条探针技能 + `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1`。
+
+| 受管 `settings.json` 里的内容 | 清单里剩什么 |
+| --- | --- |
+| （不写 `enabledPlugins`） | 2 条：`probe-injected` + **`plugin-authoring`** |
+| `{"enabledPlugins":{"plugin-authoring@builtin":false}}` | **1 条：只剩 `probe-injected`** ✅ |
+| `{"enabledPlugins":{"plugin-authoring":false}}`（不带 `@builtin`） | 2 条 —— **不生效** |
+
+⇒ 键必须带 **`@builtin`**（那是 claude 内置插件所在的 marketplace 标识）。
+
+#### 落地
+
+`syncClaudeConfigDir` 写受管 `settings.json` 时，在 `env` 旁边多写一项：
+
+```json
+{ "env": { … }, "enabledPlugins": { "plugin-authoring@builtin": false } }
+```
+
+- **只写这一项**：使用者自己的 `enabledPlugins` / marketplaces **不复制**（D78 的边界：用户级行为配置不进任务）；
+- `env` 照旧整份同步（认证不丢）；文件仍 `chmod 600`；
+- 运行日志改成：「claude 自带的 skills：已关闭（`CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` + 受管 settings 里的
+  `enabledPlugins.plugin-authoring@builtin=false`）——这次的技能清单只剩平台注入的那些。」
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 受管 settings 里 `enabledPlugins === {'plugin-authoring@builtin': false}` | `claude-config.test.ts` |
+| `env` 照旧整份写入（这一项是**额外**的，不是替换） | 同上 |
+| 红检：不写 `enabledPlugins` ⇒ 立刻红 | 同上 |
+
+#### 现在 claude 侧的全貌
+
+注入的 + 自带（`CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1`）+ 内置插件技能（`enabledPlugins`）
+—— 三条都关掉之后，**模型看到的技能 = 平台注入的那些**（实测 1 条）。
+`~/.agents/skills` 与 `~/.claude/skills` 这两条用户级路径本来就进不来（claude 不读前者、后者被 `CLAUDE_CONFIG_DIR` 挡住）。

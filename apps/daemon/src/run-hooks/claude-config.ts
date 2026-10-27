@@ -104,7 +104,26 @@ export async function syncClaudeConfigDir(
   }
   const settingsPath = join(configDir, MANAGED_SETTINGS_REL)
   await mkdir(configDir, { recursive: true })
-  await writeFile(settingsPath, JSON.stringify({ env: clean }, null, 2) + '\n', 'utf8')
+  /**
+   * ★ 分批第 63 批：受管 settings 里**多写一项** `enabledPlugins`，把 claude 自带的
+   * 那一个插件技能也关掉。
+   *
+   * 实测（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）：
+   *   · 只有 `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1` 时，技能清单里还留着 `plugin-authoring`
+   *     （它是 claude **内置插件**贡献的技能，不是 bundled skill）；
+   *   · 在受管 settings.json 里加 `{"enabledPlugins":{"plugin-authoring@builtin":false}}`
+   *     ⇒ 清单里只剩**平台注入的那些**（实测 1 条 = 我们注入的那条）；
+   *   · ⚠️ 键必须带 `@builtin`——只写 `"plugin-authoring": false` **不生效**（实测过）。
+   *
+   * ⚠️ 为什么不把使用者自己的 `enabledPlugins` 抄过来：D78 的边界——用户级行为配置
+   *    （plugins / marketplaces）不复制进任务，任务里只看项目级与平台注入。
+   */
+  await writeFile(
+    settingsPath,
+    JSON.stringify({ env: clean, enabledPlugins: { 'plugin-authoring@builtin': false } }, null, 2) +
+      '\n',
+    'utf8',
+  )
   // ★ settings.json 里有真实 key（ANTHROPIC_AUTH_TOKEN 等），只给属主读。
   await chmod(settingsPath, 0o600)
   return { ok: true, envCount: Object.keys(clean).length, configDir }
