@@ -218,22 +218,28 @@ export function withBundledSkillsDisabled(configText: string): {
  */
 export function withHostSkillsDisabled(
   configText: string,
-  skillFiles: readonly string[],
+  skills: readonly HostSkill[],
 ): { text: string; disabled: string[]; alreadyListed: string[] } {
   const disabled: string[] = []
   const alreadyListed: string[] = []
   let text = configText
-  for (const file of skillFiles) {
-    const escaped = escapeTomlBasicString(file)
-    // 使用者自己那条（比如在 `/skills` 里关掉过）已经存在 ⇒ 不重复追加，
-    // 也不改他的取值（他可能故意开回来）。
-    if (text.includes(`path = "${escaped}"`)) {
-      alreadyListed.push(file)
+  for (const skill of skills) {
+    /**
+     * ⚠️ 优先按 **`name`** 关（实测有效，比 path 省：真机上 `fireworks-tech-graph` 那份
+     *    嵌套副本一条 name 就一起关掉）。读不到 name 的技能退回按**绝对路径**关。
+     * ⚠️ **没有通配符**：`name` 写星号、`path` 写带星号的路径，实测都**不生效**
+     *    （按字面量匹配），所以只能一条条列——这条写进注释，免得下一个人再试一遍。
+     */
+    const useName = skill.name !== null
+    const key = useName ? `name = "${escapeTomlBasicString(skill.name as string)}"` : `path = "${escapeTomlBasicString(skill.path)}"`
+    const label = useName ? (skill.name as string) : skill.path
+    if (text.includes(key)) {
+      alreadyListed.push(label)
       continue
     }
     const trimmed = text.endsWith('\n') ? text : `${text}\n`
-    text = `${trimmed}\n[[skills.config]]\npath = "${escaped}"\nenabled = false\n`
-    disabled.push(file)
+    text = `${trimmed}\n[[skills.config]]\n${key}\nenabled = false\n`
+    disabled.push(label)
   }
   return { text, disabled, alreadyListed }
 }
@@ -245,11 +251,24 @@ export function withHostSkillsDisabled(
  * 只读、深度有限（默认 4 层）：技能目录不该更深，而无限递归会在使用者的
  * 家目录里乱翻。找不到就返回空数组——**不抛**，那是正常情况（没装这类技能）。
  */
-export async function findSkillFiles(
-  roots: readonly string[],
-  maxDepth = 4,
-): Promise<string[]> {
-  const out: string[] = []
+export interface HostSkill {
+  /** frontmatter 里的 `name`（读不到就是 null）。 */
+  name: string | null
+  /** `SKILL.md` 的绝对路径（兜底用）。 */
+  path: string
+}
+
+/**
+ * 在若干**宿主级技能根**下递归找出技能（`SKILL.md`），并读出它的 `name`。
+ *
+ * ⚠️ 为什么要 `name`：codex 的 `skills.config` 既能按 `path` 也能按 **`name`** 关（实测，
+ *    见 `withHostSkillsDisabled`）。按 name 更省——真机上 `fireworks-tech-graph` 有两份
+ *    嵌套的 `SKILL.md`，按 name 一条就同时关掉两份；按 path 要列两条。
+ * ⚠️ 只读、深度有限（默认 4 层）：技能目录不该更深，无限递归会在家目录里乱翻。
+ *    找不到就返回空数组——**不抛**，那是正常情况（没装这类技能）。
+ */
+export async function findSkillFiles(roots: readonly string[], maxDepth = 4): Promise<HostSkill[]> {
+  const found: string[] = []
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > maxDepth) return
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
@@ -257,11 +276,28 @@ export async function findSkillFiles(
     for (const entry of entries) {
       const full = join(dir, entry.name)
       if (entry.isDirectory()) await walk(full, depth + 1)
-      else if (entry.name === 'SKILL.md') out.push(full)
+      else if (entry.name === 'SKILL.md') found.push(full)
     }
   }
   for (const root of roots) await walk(root, 0)
-  return out.sort()
+  const out: HostSkill[] = []
+  for (const path of found.sort()) {
+    out.push({ name: await readSkillName(path), path })
+  }
+  return out
+}
+
+/** 从 `SKILL.md` 的 frontmatter 里取 `name:`（取不到 = null，调用方退回按 path 关）。 */
+async function readSkillName(skillFile: string): Promise<string | null> {
+  const text = await readFile(skillFile, 'utf8').catch(() => null)
+  if (text === null) return null
+  // 只看 frontmatter（第一个 --- 到第二个 --- 之间），避免正文里那种同名行误命中
+  const end = text.indexOf('\n---', 3)
+  const head = end === -1 ? text.slice(0, 400) : text.slice(0, end)
+  const match = /^name:\s*(.+)$/m.exec(head)
+  if (match === null) return null
+  const name = (match[1] ?? '').trim().replace(/^["']|["']$/g, '')
+  return name === '' ? null : name
 }
 
 export async function syncCodexConfigDir(
@@ -284,7 +320,7 @@ export async function syncCodexConfigDir(
    * 那是**平台策略**（`$HOME/.agents/skills` 是跨 agent 的全局目录），
    * 写在这里会让"再加一个宿主根"变成改底层库。
    */
-  hostSkillFiles?: readonly string[],
+  hostSkills?: readonly HostSkill[],
 ): Promise<CodexConfigSyncResult> {
   await mkdir(configDir, { recursive: true })
   const copied: string[] = []
@@ -349,10 +385,10 @@ export async function syncCodexConfigDir(
   // ── 宿主级技能：逐条禁用（`$HOME/.agents/skills` 那些，见上面那段说明）──
   let hostSkillsDisabled: string[] = []
   let hostSkillsAlreadyListed: string[] = []
-  if (hostSkillFiles !== undefined && hostSkillFiles.length > 0) {
+  if (hostSkills !== undefined && hostSkills.length > 0) {
     const configPath = join(configDir, 'config.toml')
     const current = await readFile(configPath, 'utf8')
-    const patched = withHostSkillsDisabled(current, hostSkillFiles)
+    const patched = withHostSkillsDisabled(current, hostSkills)
     if (patched.disabled.length > 0) await writeFile(configPath, patched.text, 'utf8')
     hostSkillsDisabled = patched.disabled
     hostSkillsAlreadyListed = patched.alreadyListed

@@ -1055,7 +1055,7 @@ export class RunExecutor {
          * `[[skills.config]] path=… enabled=false`。
          * ⚠️ 这是**平台策略**（哪些目录算宿主级），所以由 executor 决定、库只负责写。
          */
-        const hostSkillFiles =
+        const hostSkills =
           this.#deps.hostSkillRoots === undefined
             ? await findSkillFiles([join(homedir(), '.agents', 'skills')])
             : await findSkillFiles(this.#deps.hostSkillRoots)
@@ -1063,7 +1063,7 @@ export class RunExecutor {
           this.#deps.codexConfigDir,
           this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
           run.workDir ?? undefined,
-          hostSkillFiles,
+          hostSkills,
         )
         if (!sync.ok) {
           await this.#note(
@@ -1091,7 +1091,7 @@ export class RunExecutor {
               runId,
               `宿主级技能：已逐条禁用 ${String(sync.hostSkillsDisabled.length)} 个` +
                 `（\`$HOME/.agents/skills\` 下的 SKILL.md；它们不属于平台，但 codex 会扫到）——` +
-                `${sync.hostSkillsDisabled.map((p) => p.split('/.agents/skills/')[1] ?? p).join('、')}`,
+                `${sync.hostSkillsDisabled.join('、')}`,
             )
           }
           if (sync.hostSkillsAlreadyListed.length > 0) {

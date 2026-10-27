@@ -2335,3 +2335,47 @@ enabled = false
 | 逐条追加 / 幂等 / 不覆盖使用者开关 | `codex-config.test.ts` |
 | `findSkillFiles` 递归（含嵌套） / 目录不存在返回空 | 同上 |
 | 同步后受管 config 里真有那些 `[[skills.config]]`，且与 `[skills.bundled]` 并存 | 同上 |
+
+### 4.3.18 分批第 58 批：`skills.config` 到底支持什么（通配符？按 name？）
+
+使用者：「你先网络上查一下 `[skills.config]` 配置，或许有通配符的写法，或者其他做法」。
+
+#### 网络调查
+
+| 线索 | 得到什么 |
+| --- | --- |
+| [commit ad8bf59](https://github.com/openai/codex/commit/ad8bf59cbfb6edbc1dd54626b23fa35c2a94a688) 「Support enable/disable skill via config/api (#9328)」 | 这个机制的出处：`skills.config` 是**数组表**，条目形如 `{path, enabled}` |
+| [PR #15378](https://github.com/openai/codex/pull/15378) 「support disable skills by **name**」 | 后来又加了**按 `name` 关** |
+| [issue #20210](https://github.com/openai/codex/issues/20210) 「Support skill filtering for project-local `skills.config` entries」 | 想按**过滤条件**批量关，还只是 issue |
+| [issue #24237](https://github.com/openai/codex/issues/24237) / [#46414](https://github.com/openai/codex/issues/46414) | 想按"全局/用户级"整类关，也还开着 ⇒ **没有通配符或整类开关** |
+
+#### 我在本机 0.157.1 上实测的（`codex debug prompt-input` 复核）
+
+| 写法 | 结果 |
+| --- | --- |
+| `[[skills.config]] path = "<abs>/SKILL.md"` + `enabled = false` | ✅ 生效（第 57 批用的就是这个） |
+| **`[[skills.config]] name = "find-skills"`** + `enabled = false` | ✅ **生效** —— 而且是**更好的写法** |
+| `name = "fireworks-tech-graph"` | ✅ 一份 name 把**两份嵌套副本一起关掉** |
+| `name = "imagegen"` | ✅ 对 codex 自带（`.system`）技能同样有效 |
+| `path = "…/<星号>/SKILL.md"`（通配） | ❌ 不生效（按字面量匹配） |
+| `name = "<星号>"` | ❌ 不生效（又不是"全关"的开关） |
+| `name = "find<string>"`（前缀通配） | ❌ 不生效 |
+| `path = "<目录>"`（第 57 批试过） | ❌ 不生效 |
+
+**结论：没有通配符；但按 `name` 关是真有，而且比按 `path` 省**（嵌套副本一条就够）。
+
+#### 落地（把第 57 批的实现改成 name 优先）
+
+- `findSkillFiles()` 现在返回 `HostSkill { name, path }`：递归找 `SKILL.md` 并读 frontmatter 的 `name`。
+- `withHostSkillsDisabled()`：**有 name 就用 `name`，读不到 name 才退回 `path`**；幂等；不覆盖使用者的既有开关。
+- 端到端复核（真 codex 0.157.1）：受管 config 写成
+  「`[skills.bundled] enabled = false` + 三条 `name` 禁用」之后，可见技能只剩我们自己注入的那 1 个。
+
+#### 顺带修掉的坑（这条会坑到写注释的人）
+
+我在注释里写「通配写法 `path = "…/*/SKILL.md"` 不生效」时，`*/` **提前闭合了块注释** ⇒ tsc 报了一串
+`TS1005/TS1002/TS1127`。教训：**注释里不要原样写出 `*/` 这个组合**（哪怕它出现在示例路径里）。
+
+#### 顺带修掉一条偶发红
+
+`crystallize-e2e` 里等"返工版任务书"的上限 10s → 30s（全量并行时偶发超时；断言没动）。

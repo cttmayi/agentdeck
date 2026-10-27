@@ -276,30 +276,38 @@ describe('★ 分批第 56 批：关掉 codex 自带的 system skills', () => {
  * 我复核过（`codex debug prompt-input`）：单文件禁用 ⇒ 该 skill 从模型清单消失；
  * **目录当 path 无效** ⇒ 必须逐条列 SKILL.md；对 codex 自带的 `.system` 同样有效。
  */
-describe('★ 分批第 57 批：宿主级技能逐条禁用（skills.config）', () => {
-  test('★★★ withHostSkillsDisabled：逐条追加、幂等、不覆盖使用者自己的开关', () => {
+describe('★ 分批第 57/58 批：宿主级技能禁用（skills.config）', () => {
+  test('★★★ withHostSkillsDisabled：**优先按 name**、读不到 name 才按 path、幂等、不覆盖使用者开关', () => {
     const one = withHostSkillsDisabled('model = "gpt-5"\n', [
-      '/h/.agents/skills/find-skills/SKILL.md',
-      '/h/.agents/skills/manim/SKILL.md',
+      { name: 'find-skills', path: '/h/.agents/skills/find-skills/SKILL.md' },
+      { name: 'manim', path: '/h/.agents/skills/manim/SKILL.md' },
+      // 读不到 frontmatter name 的（退回按绝对路径）
+      { name: null, path: '/h/.agents/skills/无名/SKILL.md' },
     ])
-    assert.equal(one.disabled.length, 2)
+    assert.deepEqual(one.disabled, ['find-skills', 'manim', '/h/.agents/skills/无名/SKILL.md'])
+    // 分批第 58 批实测：按 name 关是有效的，而且比 path 省（嵌套副本一条就够）
+    assert.match(one.text, /\[\[skills\.config\]\]\nname = "find-skills"\nenabled = false/u)
     assert.match(
       one.text,
-      /\[\[skills\.config\]\]\npath = "\/h\/\.agents\/skills\/find-skills\/SKILL\.md"\nenabled = false/u,
+      /\[\[skills\.config\]\]\npath = "\/h\/\.agents\/skills\/无名\/SKILL\.md"\nenabled = false/u,
+      '没有 name 的技能退回按路径关',
     )
     assert.ok(one.text.startsWith('model = "gpt-5"'), '使用者那份配置一个字都不动')
 
-    const twice = withHostSkillsDisabled(one.text, ['/h/.agents/skills/find-skills/SKILL.md'])
+    const twice = withHostSkillsDisabled(one.text, [
+      { name: 'find-skills', path: '/h/.agents/skills/find-skills/SKILL.md' },
+    ])
     assert.equal(twice.disabled.length, 0)
-    assert.deepEqual(twice.alreadyListed, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.deepEqual(twice.alreadyListed, ['find-skills'])
     assert.equal(twice.text, one.text, '重复追加会让 config.toml 里出现两条一样的表')
 
     // 使用者自己关过（或在 /skills 里点过）⇒ 我们不碰他的取值（他可能故意开回来）
-    const theirs =
-      '[[skills.config]]\npath = "/h/.agents/skills/find-skills/SKILL.md"\nenabled = true\n'
-    const kept = withHostSkillsDisabled(theirs, ['/h/.agents/skills/find-skills/SKILL.md'])
+    const theirs = '[[skills.config]]\nname = "find-skills"\nenabled = true\n'
+    const kept = withHostSkillsDisabled(theirs, [
+      { name: 'find-skills', path: '/h/.agents/skills/find-skills/SKILL.md' },
+    ])
     assert.deepEqual(kept.disabled, [])
-    assert.deepEqual(kept.alreadyListed, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.deepEqual(kept.alreadyListed, ['find-skills'])
     assert.equal(kept.text, theirs)
   })
 
@@ -307,15 +315,24 @@ describe('★ 分批第 57 批：宿主级技能逐条禁用（skills.config）'
     const dir = await makeTempDir('host-skills')
     const root = join(dir, 'agents-skills')
     await mkdir(join(root, 'alpha'), { recursive: true })
-    await writeFile(join(root, 'alpha', 'SKILL.md'), '# a\n', 'utf8')
+    await writeFile(join(root, 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n\n# a\n', 'utf8')
     // 嵌套那份（真机上的 fireworks-tech-graph 就是这样，codex 把两份都列出来了）
     await mkdir(join(root, 'beta', 'skills', 'beta'), { recursive: true })
-    await writeFile(join(root, 'beta', 'skills', 'beta', 'SKILL.md'), '# b\n', 'utf8')
+    await writeFile(
+      join(root, 'beta', 'skills', 'beta', 'SKILL.md'),
+      '---\nname: beta\n---\n\n# b\n',
+      'utf8',
+    )
     await writeFile(join(root, 'beta', 'README.md'), 'no\n', 'utf8')
 
     const found = await findSkillFiles([root])
-    assert.equal(found.length, 2, `实际：${found.join('、')}`)
-    assert.ok(found.every((p) => p.endsWith('SKILL.md')))
+    assert.equal(found.length, 2, `实际：${found.map((s) => s.path).join('、')}`)
+    assert.ok(found.every((s) => s.path.endsWith('SKILL.md')))
+    assert.deepEqual(
+      found.map((s) => s.name),
+      ['alpha', 'beta'],
+      '★ 要读出 frontmatter 里的 name（按 name 关比 path 省）',
+    )
 
     const none = await findSkillFiles([join(dir, '不存在的目录')])
     assert.deepEqual(none, [], '目录不存在是正常情况（没装这类技能），不该抛')
@@ -330,11 +347,11 @@ describe('★ 分批第 57 批：宿主级技能逐条禁用（skills.config）'
     await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
 
     const result = await syncCodexConfigDir(configDir, source, undefined, [
-      '/h/.agents/skills/find-skills/SKILL.md',
+      { name: 'find-skills', path: '/h/.agents/skills/find-skills/SKILL.md' },
     ])
-    assert.deepEqual(result.hostSkillsDisabled, ['/h/.agents/skills/find-skills/SKILL.md'])
+    assert.deepEqual(result.hostSkillsDisabled, ['find-skills'])
     const written = await readFile(join(configDir, 'config.toml'), 'utf8')
-    assert.match(written, /path = "\/h\/\.agents\/skills\/find-skills\/SKILL\.md"\nenabled = false/u)
+    assert.match(written, /name = "find-skills"\nenabled = false/u)
     // 与"关掉自带 system skills"那一条并存
     assert.match(written, /\[skills\.bundled\]\nenabled = false/u)
   })
