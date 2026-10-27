@@ -2,24 +2,16 @@ import { constants, existsSync } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import {
   AsyncQueue,
-  buildArgv,
-  describeDropped,
+  LineStreamBackendBase,
   describeSpawnError,
-  detectVersion,
-  loadCliRuntimeDescriptor,
-  probeCommand,
-  cliStateDir,
-  planSandbox,
-  spawnProcessTree,
-  type AgentBackend,
   type AgentMessage,
   type AgentResult,
-  type AgentSession,
-  type CliRuntimeDescriptor,
+  type DroppedArg,
   type ExecOptions,
   type RuntimeDescriptor,
+  type LineStreamLaunch,
+  type LineStreamResultContext,
 } from '@agentdeck/agent-core'
-import type { RuntimeProtocol } from '@agentdeck/protocol'
 import {
   GenericStreamParser,
   buildGenericInput,
@@ -134,212 +126,61 @@ function describeFailure(
   )
 }
 
-export class GenericBackend implements AgentBackend {
-  readonly key: string
-  readonly protocol: RuntimeProtocol
-  readonly rejectDetectable: boolean
-
-  readonly #descriptor: CliRuntimeDescriptor
-  readonly #options: GenericBackendOptions
-
+export class GenericBackend extends LineStreamBackendBase<GenericStreamParser> {
   constructor(options: GenericBackendOptions) {
-    this.#options = options
-    // generic 是 cli 形状：`loadCliRuntimeDescriptor` 校验 managedFlags/resume 在位
-    // 并收窄类型（cli-only 字段已可选化——见 `RuntimeDescriptor.kind`）。
-    this.#descriptor = loadCliRuntimeDescriptor(options.descriptor)
-    this.key = this.#descriptor.key
-    this.protocol = this.#descriptor.protocol
-    this.rejectDetectable = this.#descriptor.resume.rejectDetectable
+    super(options)
   }
 
-  async #resolveExecutable(): Promise<string | null> {
-    if (this.#options.executablePath) return this.#options.executablePath
-    const probe = await probeCommand(this.#descriptor.command, {
-      useCache: this.#options.useProbeCache ?? true,
-    })
-    return probe.available ? probe.path : null
+  /**
+   * 找不到可执行文件时怎么说。
+   *
+   * ⚠️ 与 claude 的措辞**故意不同**：本 runtime 的描述符是 `provisional`
+   *    （字段名未对照真实 CLI 验证），所以要提这一点；chmod/目录那种更具体的
+   *    诊断由下面的 `assertRunnable()` 负责（它拿到的是具体路径）。
+   */
+  protected override missingExecutableMessage(): string {
+    return (
+      `找不到 ${this.descriptor.command} 可执行文件。` +
+      `本 runtime 的描述符尚未对照真实 CLI 验证（provisional），` +
+      `若你确认已安装，很可能是描述表里的命令名与该 CLI 实际的名字不一致。`
+    )
   }
 
-  async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
-    const path = await this.#resolveExecutable()
-    if (!path) {
-      return { available: false, command: this.#descriptor.command, cliVersion: null }
-    }
-    return {
-      available: true,
-      command: this.#descriptor.command,
-      cliVersion: await detectVersion(path),
-    }
+  /**
+   * ★ generic 的差异点（分批第 65 批从 claude 那份里学来的，现在两处都做）：
+   *   起进程**之前**先问"这个路径真的能跑吗"。
+   *
+   * 踩过一次：只在 spawn 之后看结果，于是"路径写错了"与"路径指到一个目录"
+   * 都变成「exit=null + 输出不可解析」，错误文本里只有 Node 的 `spawn EACCES`。
+   *
+   * ⚠️ 这里**不能**复用 `findOnPath` 做判断：它查的是 `X_OK`，而**目录也有执行位**，
+   *    所以 `findOnPath(tmpDir)` 会返回成功，然后在 spawn 处以 EACCES 失败。
+   *    判断"能不能当程序跑"必须看**普通文件 + 执行权限**两件事。
+   */
+  protected override async assertRunnable(path: string): Promise<void> {
+    if (!(await isRunnableFile(path))) throw new Error(await describeMissingCommand(path))
   }
 
-  async execute(opts: ExecOptions): Promise<AgentSession> {
-    const executablePath = await this.#resolveExecutable()
-    if (!executablePath) {
-      // 探测失败的措辞与下面那条路径**故意分开**：
-      // 这里连"该找哪个名字"都不知道（PATH 里没有这个命令），而下面的
-      // `describeMissingCommand` 拿的是具体路径，能区分"没装 / 是目录 /
-      // 缺执行权限"。合成一句话会把三种原因糊成一种。
-      throw new Error(
-        `找不到 ${this.#descriptor.command} 可执行文件。` +
-          `本 runtime 的描述符尚未对照真实 CLI 验证（provisional），` +
-          `若你确认已安装，很可能是描述表里的命令名与该 CLI 实际的名字不一致。`,
-      )
-    }
-
-    // ★ "这个可执行文件真的能跑吗" 必须**在起进程之前**问清楚。
-    //
-    // 踩过一次：只在 spawn 之后看结果，于是"路径写错了"与"路径指到一个目录"
-    // 都变成「exit=null + 输出不可解析」，错误文本里只有 Node 的 `spawn EACCES`。
-    // 使用者拿到一句关于解析器的话，而真正的问题是路径。
-    //
-    // ⚠️ 这里**不能**复用 `findOnPath` 做判断：它查的是 `X_OK`，而
-    //    **目录也有执行位**，所以 `findOnPath(tmpDir)` 会返回成功，
-    //    然后在 spawn 处以 EACCES 失败——又回到了"错误文本指向错地方"。
-    //    判断"能不能当程序跑"必须看**普通文件 + 执行权限**两件事。
-    if (!(await isRunnableFile(executablePath))) {
-      throw new Error(await describeMissingCommand(executablePath))
-    }
-
-    const { argv, dropped } = buildArgv({
-      runtime: this.#descriptor,
-      model: opts.model ?? null,
-      maxTurns: opts.maxTurns ?? null,
-      resumeSessionId: opts.resumeSessionId ?? null,
-      userArgs: opts.customArgs ?? [],
-    })
-
-    if (dropped.length > 0) {
-      this.#options.onWarn?.(
-        `忽略了会破坏通信协议的自定义参数：${describeDropped(dropped)}`,
-      )
-    }
-
-    const queue = new AsyncQueue<AgentMessage>()
-    const parser = new GenericStreamParser({ onMessage: (m) => queue.push(m) })
-
-    let stderrTail = ''
-    let spawnError: unknown = null
-    const startedAt = Date.now()
-
-    const env: NodeJS.ProcessEnv = { ...process.env, ...(opts.env ?? {}) }
-
-    // prompt 的投递方式由描述表决定。`argv` 模式下**追加在末尾**而不是插进
-    // 中间：使用者参数之后、平台受管参数之后的位置已经被 argv.ts 的四段式
-    // 占满，把 prompt 插进去会破坏"最后写的赢"。
-    const usesStdin = this.#descriptor.promptDelivery === 'stdin-ndjson'
+  protected override buildLaunch(opts: ExecOptions): LineStreamLaunch & {
+    dropped: readonly DroppedArg[]
+  } {
+    const { argv, dropped } = this.buildArgvFor(opts)
+    /**
+     * prompt 的投递方式由描述表决定。`argv` 模式下**追加在末尾**而不是插进中间：
+     * 使用者参数之后、平台受管参数之后的位置已经被 argv 的四段式占满，
+     * 把 prompt 插进去会破坏"最后写的赢"。
+     */
+    const usesStdin = this.descriptor.promptDelivery === 'stdin-ndjson'
     if (!usesStdin) argv.push(opts.prompt)
-
-    // ★ 可选沙箱：与 claude 适配器走**同一段**代码、同一条规则。
-    //   planSandbox 不可用时抛异常，这里刻意不 catch（同 claude 那份的理由）。
-    const plan = await planSandbox({
-      mode: opts.sandbox?.mode ?? 'none',
-      command: executablePath,
-      args: argv,
-      workDir: opts.workDir,
-      // ★ CLI 自己的状态目录**必须**放行，否则沙箱会让它没法工作：
-      //   Claude Code 建不了 ~/.claude/session-env/ 时，Bash 工具全程 EPERM。
-      //   这个故障很难归因——daemon 在沙箱外，环境预检会说"一切正常"。
-      extraWritableDirs: [
-        ...(opts.sandbox?.extraWritableDirs ?? []),
-        ...cliStateDir(this.#descriptor),
-      ],
-    })
-
-    try {
-      // 如实的**最终**命令行与**沙箱状态**（脱敏逻辑只能有一份，见 ExecOptions）
-      opts.onCommandLine?.({
-        argv: [plan.command, ...plan.args],
-        sandboxDescription: plan.appliedDescription,
-      })
-
-      const handle = spawnProcessTree({
-        command: plan.command,
-        args: plan.args,
-        cwd: opts.workDir,
-        env,
-        onStdoutLine: (line) => parser.push(line),
-        onStderrLine: (line) => {
-          stderrTail = `${stderrTail}\n${line}`.slice(-4000)
-          opts.onStderrLine?.(line)
-        },
-        onActivity: opts.onActivity ?? (() => {}),
-      })
-
-      // ⚠️ 两个错误出口都要接住，漏一个就会出现"失败原因指向错地方"：
-      //
-      //  1. **同步抛**（ENOENT / EACCES 在部分平台上直接抛）→ 下面的 catch；
-      //  2. **异步 `'error'` 事件**（Node 的常规路径）→ `spawnProcessTree`
-      //     把它吞成了 `{code: null}`，于是失败会伪装成"输出不可解析"。
-      //
-      // 第 2 条是真正的坑：错误信息在 `'error'` 事件的参数里，而 `exited`
-      // 只给一个 null 退出码。所以这里自己挂一个 listener 把它捞回来，
-      // 交给 `#buildResult` 生成"为什么起不来"的错误文本。
-      // `handle` 上再挂 listener 不会与 `spawnProcessTree` 内部的
-      // `once('error')` 冲突——EventEmitter 允许任意多个监听者。
-      handle.process.once('error', (err: Error) => {
-        spawnError = err
-      })
-
-      if (usesStdin) {
-        handle.writeStdin(buildGenericInput(opts.prompt))
-      }
-      handle.endStdin()
-
-      const abortListener = (): void => {
-        void handle.terminate()
-      }
-      opts.signal?.addEventListener('abort', abortListener, { once: true })
-
-      const result: Promise<AgentResult> = handle.exited.then((exit) => {
-        opts.signal?.removeEventListener('abort', abortListener)
-        queue.close()
-
-        return this.#buildResult({
-          parser,
-          exit,
-          startedAt,
-          stderrTail,
-          opts,
-          spawnError,
-          executablePath,
-        })
-      })
-
-      return {
-        messages: queue,
-        result,
-        async cancel() {
-          await handle.terminate()
-        },
-        lastActivityAt: () => handle.lastActivityAt(),
-      }
-    } catch (err) {
-      // ★ 起进程这一步**必须**在这里翻译成可读错误并抛出。
-      //
-      //   为什么不在 `#buildResult` 里处理：`execute()` 抛错 = "这次 run 根本
-      //   没开始"（daemon 按 infra 错误处理），返回 failed 结果 = "agent 跑起来
-      //   但失败了"。把"程序都起不来"混进后者，会让失败原因从"CLI 装坏了"
-      //   漂移成"agent 输出不可解析"——两者要采取的动作完全不同。
-      //
-      //   为什么捕获范围只有起进程这几行：`spawnProcessTree` 之后的
-      //   `result` 是**已 resolve 的 Promise 链**，不会被这里吞掉异常。
-      spawnError = err
-      queue.close()
-      throw new Error(describeSpawnError(err, this.#descriptor.command, executablePath))
-    }
+    return { argv, stdin: usesStdin ? buildGenericInput(opts.prompt) : null, dropped }
   }
 
-  #buildResult(input: {
-    parser: GenericStreamParser
-    exit: { code: number | null; signal: NodeJS.Signals | null }
-    startedAt: number
-    stderrTail: string
-    opts: ExecOptions
-    /** 起进程失败时的原始错误（异步 `'error'` 事件捞回来的）。 */
-    spawnError: unknown
-    executablePath: string
-  }): AgentResult {
-    const { parser, exit, startedAt, stderrTail, opts, spawnError, executablePath } = input
+  protected override createParser(queue: AsyncQueue<AgentMessage>): GenericStreamParser {
+    return new GenericStreamParser({ onMessage: (m) => queue.push(m) })
+  }
+
+  protected override buildResult(ctx: LineStreamResultContext<GenericStreamParser>): AgentResult {
+    const { parser, exit, startedAt, stderrTail, opts, spawnError, executablePath } = ctx
     const durationMs = Date.now() - startedAt
 
     const failure = classifyGenericFailure({
@@ -354,9 +195,9 @@ export class GenericBackend implements AgentBackend {
       durationMs,
       sessionId: parser.sessionId,
       usage: parser.usage,
-        model: parser.model,
+      model: parser.model,
       exitCode: exit.code,
-      resumeRejected: this.#resumeRejected(parser, stderrTail, opts),
+      resumeRejected: this.resumeRejected(parser, stderrTail, opts),
     }
 
     if (failure !== null) {
@@ -368,9 +209,9 @@ export class GenericBackend implements AgentBackend {
         //   顺序反过来的话，一份被外部删掉的 CLI 会被报成"输出格式变了"，
         //   使用者会去核对描述表——而真正的问题是那个文件没了。
         error: spawnError
-          ? describeSpawnError(spawnError, this.#descriptor.command, executablePath)
+          ? describeSpawnError(spawnError, this.descriptor.command, executablePath)
           : describeFailure(failure, {
-              command: this.#descriptor.command,
+              command: this.descriptor.command,
               exitCode: exit.code,
               unparsableLines: parser.unparsableLines,
               stderrTail,
@@ -391,26 +232,18 @@ export class GenericBackend implements AgentBackend {
   /**
    * 会话恢复是否被拒（FR-CLI-06）。
    *
-   * ★ 这里有一个**必须显式处理**的语义陷阱：本 runtime 的
-   *   `rejectDetectable` 是 `false`（没有真实样本，测不出拒绝）。
-   *
-   *   那就必须返回 `undefined`（= 无法判断），**不能**返回探测结果。
-   *   理由：`detectResumeRejection` 的模式是从别家 CLI 推导的，它的
-   *   `false` 既可能是"没被拒"也可能是"措辞不一样所以没认出来"。
-   *   把后者当成前者上报，会让恢复失败悄悄变成"新开一个会话"，
-   *   而使用者以为上下文还在。宁可承认测不出来。
-   *
-   *   等真实样本到手、把描述符升成 `verified`，这条分支自动开始生效——
-   *   也就是说探测逻辑本身不必改写，只需改一行数据。
+   * ★ 语义陷阱：本 runtime 的 `rejectDetectable` 是 `false`（没有真实样本，测不出拒绝）。
+   *   那就必须返回 `undefined`（= 无法判断），**不能**返回探测结果——否则恢复失败会
+   *   悄悄变成"新开一个会话"，而使用者以为上下文还在。
+   *   等真实样本到手、把描述符升成 `verified`，这条分支自动开始生效。
    */
-  #resumeRejected(
+  protected override resumeRejected(
     parser: GenericStreamParser,
     stderrTail: string,
     opts: ExecOptions,
   ): boolean | undefined {
     if (opts.resumeSessionId === null || opts.resumeSessionId === undefined) return undefined
-    if (!this.#descriptor.resume.rejectDetectable) return undefined
-
+    if (!this.descriptor.resume.rejectDetectable) return undefined
     const combined = `${parser.errorText ?? ''}\n${stderrTail}`
     return detectResumeRejection(combined)
   }
@@ -465,4 +298,3 @@ export async function describeMissingCommand(path: string): Promise<string> {
     `若你确认已安装，很可能是描述表里的命令名与该 CLI 实际的名字不一致。`
   )
 }
-

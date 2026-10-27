@@ -2639,3 +2639,52 @@ export const POLICY = {
 | **同一个函数**产出两个 runtime 的 `notes + env`（claude 有 `CLAUDE_CONFIG_DIR` + 关自带技能；codex 有 `CODEX_HOME` + 宿主级禁用说明） | 同上 |
 | 清理/剪枝按策略走：**codex 真删**、**claude 无操作** | 同上 |
 | 原有行为全部不变 | 全量 2189 全绿 |
+
+### 4.3.25 分批第 65 批：cli 形状适配器的公共基类（第 1 步）
+
+使用者：「尽量还是用公共类，通过继承来实现它们之间的差异」。
+
+#### 量到的现状（改造前）
+
+| 包 | 文件 | `execute()` |
+| --- | --- | --- |
+| agent-claude | 237 行 | **156 行** |
+| agent-generic | 468 行 | **294 行** |
+| agent-codex | 671 行 | 495 行（service 形状，另说） |
+
+claude 与 generic 的骨架逐行几乎一样：解析可执行 → `buildArgv` → 警告被丢弃的参数 →
+`planSandbox` → 建队列+解析器 → `spawnProcessTree` → 投递 stdin → abort 监听 →
+`handle.exited` 里拼 `AgentResult`。**约 90–110 行重复**，而且已经漂了：
+generic 补了 `isRunnableFile`（"能起吗"必须先问）与 `spawnError` 双出口，claude 那份没有——
+**而 claude 是主力 runtime**。
+
+#### 落法
+
+`packages/agent-core/src/backend-base.ts` 新增 `LineStreamBackendBase<P>`：**模板方法**写一次骨架，
+差异全是子类 override：
+
+| 差异 | 谁 override | 方法 |
+| --- | --- | --- |
+| 拼 argv / prompt 怎么投递 | 两个都 | `buildLaunch()` |
+| 系统提示通道（`--append-system-prompt`） | claude | `buildLaunch()` 里 |
+| "这个文件能不能当程序跑" | generic | `assertRunnable()` |
+| 协议解析 | 各自 | `createParser()` |
+| 终态判定 | 各自 | `buildResult()` |
+| 找不到可执行文件怎么说 | 各自 | `missingExecutableMessage()` |
+| 会话恢复被拒怎么判 | 各自 | `resumeRejected()` |
+
+改造后：
+
+| 文件 | 行数 |
+| --- | --- |
+| `claude-backend.ts` | 237 → **129** |
+| `generic-backend.ts` | 468 → **300** |
+| `backend-base.ts`（新增） | 291（骨架 + 注释） |
+
+#### 顺带修掉一处**行为不一致**（这是这次重构真正的收益）
+
+`assertRunnable()` 现在在基类里**每次都会调**：claude 用默认空实现（老行为不变），
+generic 覆盖成 `isRunnableFile`。也就是说"起进程前先问能不能跑"这条纪律从
+**generic 独有**变成了**基类的流程**——以后谁再写 cli 形状的适配器，自动带上。
+
+验证：claude 19 条 + generic 64 条适配器测试全绿；全量 2189 全绿（行为一条没变）。
