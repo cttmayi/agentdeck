@@ -2828,3 +2828,37 @@ CodexBackend   : CodexBackend → ServiceBackendBase → AgentBackendBase
 - 三条链必须**逐字**等于上面那三行（顺序也算）；
 - **两族互不串门**：claude/generic 的链里不出现 `ServiceBackendBase`；codex 的链里不出现 `LineStreamBackendBase`；
 - 红检：把"不出现"翻成"必须出现" ⇒ 立刻红（证明这两条断言不是摆设）。
+
+### 4.3.30 分批第 70 批：内置的判据是 `builtin` **+ `role``，不是 `builtin` 一个标记
+
+第 50 批记下过一条未修的隐患（「起起草 run 时按 `builtin === true` 找内置、没按 role 过滤」）。
+这一批把它连同**同一个判据的其余三处**一起修掉了。
+
+**根因**：`find((a) => a.builtin === true)` 写在只有起草者一条内置的时候是对的。第 34–38 批
+加进 skill 审核者（也是 `builtin: true`）之后，这句话的语义悄悄变成「列表里**先出现的那条内置**」
+——而列表顺序是**日志里的写入顺序**，没有任何东西保证起草者在前。
+
+**先用探针量（顺序反过来：审核者先入库），四种坏法全部复现**：
+
+| # | 状态 | 改之前 | 后果 |
+|---|---|---|---|
+| ① | 起草者 `builtin` 标记丢了 + 审核者在前 | `ensureBuiltinDrafter` 返回 `left-alone`，`agentId` = **审核者** | 起草者的标记**永远修不回来**（「按角色认出来补标记」那条自愈成了死代码），而它从此**可删、可进组** |
+| ② | 审核者指令被清空 + 审核者在前 | 起草者指令被写进**审核者** | 审核者带着「你是 skill 作者」去审；随后它自己的对账看到「非空且不在历史里」⇒ `left-alone`，**永久静默损坏** |
+| ③ | 对审核者按「恢复成默认值」 | 200，名字变「起草者（内置）」、指令变起草者文本 | 角色还是 `skill-reviewer`：既不是审核者也不是起草者；界面上那个按钮对**两条内置都出现**（`AgentDetail.svelte` 的 `{#if agent.builtin}`） |
+| ④ | 把审核者塞进智能体组 / 删它 / 改它的角色 | 文案写「沉淀这条链的**起草者**」 | 对审核者是事实错误，使用者会照着去改**错的那条** |
+
+**落法**（`apps/daemon/src/builtin-drafter.ts`）：
+
+- `builtinKindOf(agent)` → `'drafter' | 'skill-reviewer' | null`。挂着 `builtin` 但角色既不是
+  起草者也不是 `skill-reviewer` 时返回 **null**——**不猜**（猜错的方向见 ②）；
+- `findBuiltinAgent(agents, kind)`：所有「取内置」的地方都走它；
+- `builtinDefaultsOf(kind)`：两条各一套默认值（名字/指令/给人听的叫法）。「恢复成默认值」
+  按它取，角色不明时 400 `builtin_role_unknown` 并说出实际角色，**一个字段都不写**；
+- `describeBuiltinAgent(agent)`：三处拒绝文案（不能进组 / 字段被锁 / 不能删）拼它。
+
+**判据**：`builtin` 只说「是平台的」，`role` 才说「是哪一条」。角色使用者改不了（接口层锁着），
+标记会丢（所以保留「按角色认出来」的自愈），两者一起才唯一确定。
+
+**验证**：新 `builtin-role-identity.test.ts` 7 条；**红检**：把 `findBuiltinAgent` 退回按标记挑、
+`restore-default` 退回一律起草者 ⇒ **5/7 立刻红**（其中一条的失败信息直接把「一条 `role: reviewer`
+的 agent 被写成『起草者（内置）』」摆在面前）。全套 2203 全绿。

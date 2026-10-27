@@ -52,7 +52,7 @@ interface AgentRow {
 
 async function drafterOf(url: string): Promise<AgentRow> {
   const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }
-  const found = body.agents.find((a) => a.builtin === true)
+  const found = body.agents.find((a) => a.role === 'drafter')
   assert.ok(found, '启动之后必须有一条内置起草者（每次启动对账）')
   return found
 }

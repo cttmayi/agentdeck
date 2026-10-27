@@ -211,11 +211,16 @@ export interface Agent {
   /** 干活的还是审的（D28）。 */
   role: AgentRole
   /**
-   * 平台**内置**的 agent（2026-10：沉淀的起草者）。
+   * 平台**内置**的 agent（2026-10：起草者 + skill 审核者，**两条**）。
    *
    * 界面上它意味着三件事：**没有删除按钮**、**不给挂载 skill**、**多一个「恢复成
    * 默认值」**。接口层同样拒绝（`builtin_agent_not_deletable` /
    * `builtin_agent_field_locked`）——界面是第一道，不是唯一一道。
+   *
+   * ⚠️ 分批第 70 批：这个标记**只说"是平台的"，不说"是哪一条"**。要挑出起草者，
+   *    判据是 `builtin && role === 'drafter'`（审核者也是 `builtin`，而列表顺序是
+   *    写入顺序、不保证起草者在前）。「恢复成默认值」也按**角色**取默认值，
+   *    否则对审核者按一下会把它变成第二个起草者（角色还是 `skill-reviewer`）。
    */
   builtin?: boolean
   /**

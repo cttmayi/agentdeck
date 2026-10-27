@@ -30,7 +30,50 @@ import { ulid } from '@agentdeck/protocol'
 import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
 
-/** 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin`）。 */
+// ════════════════════════════════════════════════════════════════════════
+// ★ 分批第 70 批：内置的有**两条**，`builtin` 只说明"是平台的"，不说明是哪一条
+// ════════════════════════════════════════════════════════════════════════
+//
+// 这一批之前的判据是 `all.find((a) => a.builtin === true)`——只有起草者一条时是对的，
+// 加了 skill 审核者之后它变成"列表里**先出现的那条内置**"，而列表顺序是**写入顺序**，
+// 不是"起草者一定在前"。量出来的三种坏法（全都静默）：
+//   ① 起草者的 `builtin` 标记丢了（历史迁移过、盘上被改过）⇒ 撞上的却是审核者，
+//      于是走 `left-alone` 返回审核者、**起草者的标记永远修不回来**——那条自愈分支
+//      变成死代码，而那条起草者从此可以被删、可以进智能体组。
+//   ② 审核者的指令被清空 ⇒ 起草者指令被写进**审核者**，随后审核者自己的对账看到
+//      "非空且不在历史里" ⇒ `left-alone`，永久静默损坏。
+//   ③ 对审核者按「恢复成默认值」⇒ 名字与指令都变成起草者的，角色却还是审核者。
+//
+// 所以判据只能是 **`builtin` 标记 + `role`**：角色使用者改不了（接口层锁着），
+// 标记会丢（所以保留"按角色认出来"的自愈）。
+
+/** 平台内置的两类智能体。 */
+export type BuiltinKind = 'drafter' | 'skill-reviewer'
+
+/**
+ * 这条 agent 是内置的哪一条？**不是内置的返回 null**。
+ *
+ * ⚠️ 不认名字：名字使用者能改（第 ⑥ 条允许他改），按名字认会在改名后失效，
+ *    而失效的表现是"它又能被删/被选去跑业务任务"——静默且查起来很远。
+ */
+export function builtinKindOf(agent: Pick<Agent, 'builtin' | 'role'>): BuiltinKind | null {
+  if (agent.builtin !== true) return null
+  if (agent.role === 'drafter') return 'drafter'
+  if (agent.role === 'skill-reviewer') return 'skill-reviewer'
+  // 挂着内置标记但角色不是这两条之一：老记录/被手改过。返回 null 让调用方说话，
+  // 而不是替它猜一套默认值（猜错就是把起草者指令写进审核者，见上面 ②）。
+  return null
+}
+
+/** 从列表里挑出指定的那一条内置（找不到返回 undefined，由调用方决定建还是报错）。 */
+export function findBuiltinAgent(
+  agents: readonly Agent[],
+  kind: BuiltinKind,
+): Agent | undefined {
+  return agents.find((a) => builtinKindOf(a) === kind)
+}
+
+/** 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin` + `role`）。 */
 export const DRAFTER_NAME = '起草者（内置）'
 
 /**
@@ -494,6 +537,43 @@ const REVIEWER_INSTRUCTIONS_HISTORY: readonly string[] = [
 ]
 
 /**
+ * 内置智能体的**默认值表**：一条内置该恢复成什么样，必须按它的**角色**查这张表。
+ *
+ * 为什么不是"恢复成起草者的默认值"：`restore-default` 从前对所有内置都写起草者的
+ * 名字与指令，于是「Skill 审核者」按一下那个按钮就变成「起草者（内置）」——而它的
+ * 角色还是 `skill-reviewer`，两边都不像人。使用者点的是"恢复成**默认**"，
+ * 他期待的是**这条自己**的默认，不是另一条的。
+ */
+export function builtinDefaultsOf(kind: BuiltinKind): {
+  name: string
+  instructions: string
+  /** 说给人听的叫法（拼在错误信息里：不能进组、不能删、字段被锁） */
+  label: string
+} {
+  if (kind === 'drafter') {
+    return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS, label: '平台内置的起草者（沉淀这条链的作者）' }
+  }
+  return {
+    name: SKILL_REVIEWER_NAME,
+    instructions: SKILL_REVIEWER_INSTRUCTIONS,
+    label: '平台内置的 skill 审核者（沉淀这条链的审核）',
+  }
+}
+
+/**
+ * 这条 agent 说给人听的叫法（用于错误信息）。
+ *
+ * ⚠️ 从前三处错误信息（不能进组 / 字段被锁 / 不能删）都硬写"沉淀这条链的起草者"，
+ *    加进审核者之后那句话对它是**事实错误**——使用者看到"起草者"三个字会去改错的
+ *    那条，而真正被拦下的那条他没意识到。
+ */
+export function describeBuiltinAgent(agent: Pick<Agent, 'builtin' | 'role'>): string {
+  const kind = builtinKindOf(agent)
+  if (kind === null) return '平台内置的智能体'
+  return builtinDefaultsOf(kind).label
+}
+
+/**
  * ══════════════════════════════════════════════════════════════════
  * 起草者默认指令的**历史版本**（分批第 31 批）
  * ══════════════════════════════════════════════════════════════════
@@ -588,8 +668,9 @@ export async function ensureBuiltinReviewer(
   workspaceId: WorkspaceId,
 ): Promise<EnsureDrafterResult> {
   const all = await store.listAgents(workspaceId)
-  // 认 `builtin` + **这个角色**：起草者也是 `builtin`，不能按标记一把抓。
-  const found = all.find((a) => a.builtin === true && a.role === 'skill-reviewer')
+  // 认 `builtin` + **这个角色**：起草者也是 `builtin`，不能按标记一把抓
+  // （这条判据第 38 批就有了；第 70 批把它抽成 `builtinKindOf` 并给起草者那侧补上同一份）。
+  const found = findBuiltinAgent(all, 'skill-reviewer')
   if (!found) {
     const byRole = all.find((a) => a.role === 'skill-reviewer')
     if (byRole) {
@@ -669,9 +750,10 @@ export async function ensureBuiltinDrafter(
   workspaceId: WorkspaceId,
 ): Promise<EnsureDrafterResult> {
   const all = await store.listAgents(workspaceId)
-  // 认的是 `builtin` 标记（不是名字）：名字使用者能改，按名字认会在改名后失效，
-  // 而失效的表现是"它又能被删/被选去跑业务任务"——静默且查起来很远。
-  const found = all.find((a) => a.builtin === true)
+  // 认 `builtin` + **这个角色**（第 70 批）：`builtin` 只说明"是平台的"，审核者也是。
+  // 只按标记找的话，起草者标记丢了时撞上的是审核者，于是返回"left-alone"、起草者的
+  // 标记**永远修不回来**（下面那条按角色认的自愈分支成了死代码）。
+  const found = findBuiltinAgent(all, 'drafter')
   if (!found) {
     // ⚠️ 也认 `role: 'drafter'`：标记丢了但角色还在 ⇒ 那是"损坏"，补标记而不是再造一条
     //    （否则每次启动都会多出一条起草者，而列表里看起来只是"又有了一条"）。

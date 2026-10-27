@@ -66,9 +66,11 @@ describe('全局 runtime 默认值：入口缺省是 default、设定可改、�
   test('★ 内置起草者也记 `default`（它应当最跟随平台设置）', async () => {
     await withDaemon(async (url) => {
       const body = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: { runtimeKey: string; builtin?: boolean }[]
+        agents: { runtimeKey: string; role: string; builtin?: boolean }[]
       }
-      const drafter = body.agents.find((a) => a.builtin === true)
+      // ⚠️ 判据是**角色**：内置有两条（起草者 + skill 审核者），按 `builtin` 挑会挑到
+      //    先出现的那条（第 70 批量的），于是这条用例可能在测审核者的 runtimeKey。
+      const drafter = body.agents.find((a) => a.role === 'drafter')
       assert.ok(drafter)
       assert.equal(drafter.runtimeKey, 'default')
     })

@@ -107,11 +107,15 @@ import {
 } from './run-hooks/skill-mine.ts'
 import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import {
+  builtinDefaultsOf,
+  builtinKindOf,
+  describeBuiltinAgent,
   DRAFTER_INSTRUCTIONS,
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
   ensureBuiltinReviewer,
+  findBuiltinAgent,
 } from './builtin-drafter.ts'
 import {
   collectMaterial,
@@ -1582,18 +1586,21 @@ async function parseGroupFields(
       if (unknownId !== undefined) {
         return { ok: false, error: `组员不存在：${unknownId}。它可能已经被删掉了，请重新选择成员。` }
       }
-      // ★ 平台内置的 agent（起草者）**不能进组**（2026-10 定稿第 ① 条）。
+      // ★ 平台内置的 agent（起草者 / skill 审核者）**都不能进组**（2026-10 定稿第 ① 条）。
       //
-      //   组的成员槽决定"谁执行、谁审"——那是**业务闭环**。起草者一旦进去，就可能被派去
-      //   执行任务、或去审别人的产出，而它的指令是"你是 skill 作者"。它的自愈只在启动时
-      //   做（幂等/补标记），**不会自己退出组**，所以这条必须在这里挡住。
+      //   组的成员槽决定"谁执行、谁审"——那是**业务闭环**。它们一旦进去，就可能被派去
+      //   执行任务、或去审别人的产出，而它们的指令是"你是 skill 作者 / 你只审 skill"。
+      //   它们的自愈只在启动时做（幂等/补标记），**不会自己退出组**，所以这条必须在这里挡住。
+      //
+      //   ⚠️ 文案按**这条自己的角色**说（`describeBuiltinAgent`）：从前三处都硬写
+      //   "沉淀这条链的起草者"，加进审核者之后那句话对它是事实错误——使用者会去改错的那条。
       const builtinMember = ids.find((id) => byId.get(id)?.builtin === true)
       if (builtinMember !== undefined) {
         const member = byId.get(builtinMember)!
         return {
           ok: false,
           error:
-            `「${member.name}」是平台内置的（沉淀这条链的起草者），不能进智能体组：` +
+            `「${member.name}」是${describeBuiltinAgent(member)}，不能进智能体组：` +
             `组决定谁执行、谁审，而它不参与业务闭环。`,
         }
       }
@@ -3151,9 +3158,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
     // 自愈比拦下使用者更对——与起草路由同一判据）。
     await ensureBuiltinReviewer(store, workspaceId)
-    const reviewer = (await store.listAgents(workspaceId)).find(
-      (a) => a.builtin === true && a.role === 'skill-reviewer',
-    )
+    const reviewer = findBuiltinAgent(await store.listAgents(workspaceId), 'skill-reviewer')
     if (!reviewer) {
       return {
         ok: false,
@@ -3794,7 +3799,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ★ 与起草那条路同源：起草者是**平台内置的那条**，不是来源 run 的执行者
     //   （「按意见改一版」如果还借来源执行者，就等于"重写一版"与"改一版"
     //   用的不是同一个身份——两版的风格会分叉，而使用者只看到"改完反而不像同一条"）。
-    const reviseDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
+    //   判据是 **`builtin` + `role: drafter`**（第 70 批）：只按标记挑会挑到审核者
+    //   （列表顺序是写入顺序，不保证起草者在前），于是"改一版"用的是审核者的身份。
+    const reviseDrafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
     if (!reviseDrafter) {
       await ensureBuiltinDrafter(store, workspaceId)
     }
@@ -5491,10 +5498,30 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
+      // ★ 分批第 70 批：恢复成**这条自己**的默认值，不是"一律起草者的那一套"。
+      //
+      //   量出来的坏法：对「Skill 审核者」按这个按钮 ⇒ 名字变「起草者（内置）」、指令
+      //   变起草者文本，角色却还是 `skill-reviewer`；而它自己的对账随后看到"非空且不在
+      //   历史里"⇒ `left-alone`，永久静默损坏。按钮在界面上对**两条内置都出现**
+      //   （`AgentDetail.svelte`：`{#if agent.builtin}`），所以这是一点就中的坑。
+      const kind = builtinKindOf(current)
+      if (kind === null) {
+        // 挂着内置标记但角色既不是起草者也不是审核者（老记录/被手改过）：
+        // 这时候"默认值"到底是哪一套没人知道，**说清楚**比猜一套写进去好。
+        sendJson(res, 400, {
+          error:
+            `「${current.name}」挂着内置标记，但角色是「${current.role}」——` +
+            `不是起草者也不是 skill 审核者，不知道该恢复成哪一套默认值。` +
+            `如果是新版本加的内置条目，请升级后重启（启动时会按角色补齐）。`,
+          code: 'builtin_role_unknown',
+        })
+        return
+      }
+      const defaults = builtinDefaultsOf(kind)
       const restored: Agent = {
         ...current,
-        name: DRAFTER_NAME,
-        instructions: DRAFTER_INSTRUCTIONS,
+        name: defaults.name,
+        instructions: defaults.instructions,
         skillIds: [],
         updatedAt: Date.now(),
       }
@@ -5525,19 +5552,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         }
         const body = (await readJsonBody(req)) as Record<string, unknown>
 
-        // ★ 平台内置的 agent（起草者）：只允许改**身份与运行参数**（名字、指令、CLI、
-        //   环境变量），不允许改角色/内置标记/挂载的技能。理由不是洁癖：
+        // ★ 平台内置的 agent（起草者 / skill 审核者）：只允许改**身份与运行参数**（名字、
+        //   指令、CLI、环境变量），不允许改角色/内置标记/挂载的技能。理由不是洁癖：
         //   · 角色一改它就可能被选去干业务活（指令是"你是 skill 作者"）；
-        //   · 内置标记一改它就变成"可删的"——而删了沉淀这条链就没有起草者了；
-        //   · 技能挂载对起草**没有任何作用**（起草 run 的技能集合是写死的，第 ③ 条），
-        //     允许挂只会让人以为挂了就生效。拒绝比静默忽略好：静默忽略会让人
-        //     以为"配上去了"，而他的配置永远不会生效。
+        //   · 内置标记一改它就变成"可删的"——而删了沉淀这条链就没有起草者/审核者了；
+        //   · 技能挂载对它们**没有任何作用**（起草 run 的技能集合是写死的，第 ③ 条；
+        //     审核者按角色挑），允许挂只会让人以为挂了就生效。拒绝比静默忽略好：静默忽略
+        //     会让人以为"配上去了"，而他的配置永远不会生效。
         if (current.builtin === true) {
           const forbidden = ['role', 'builtin', 'skillIds'].filter((k) => body[k] !== undefined)
           if (forbidden.length > 0) {
             sendJson(res, 400, {
               error:
-                `「${current.name}」是平台内置的：改不了 ${forbidden.join('、')}（可以改名字、指令、CLI；` +
+                `「${current.name}」是${describeBuiltinAgent(current)}：改不了 ${forbidden.join('、')}（可以改名字、指令、CLI；` +
                 `要恢复原样用「恢复成默认值」）。`,
               code: 'builtin_agent_field_locked',
             })
@@ -5771,7 +5798,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         //   偷偷重建的表现是"删了它过一会儿又回来了"，比直接拒绝更难懂。
         if (current.builtin === true) {
           sendJson(res, 400, {
-            error: `「${current.name}」是平台内置的（沉淀这条链的起草者），不能删——要恢复原样请用「恢复成默认值」。`,
+            error: `「${current.name}」是${describeBuiltinAgent(current)}，不能删——要恢复原样请用「恢复成默认值」。`,
             code: 'builtin_agent_not_deletable',
           })
           return
@@ -6933,12 +6960,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       //   从聊天发起与从任务发起，写出来的 skill 结构可能不一样。
       //   找不到（理论上不该发生：启动时对过账）就地补一条并使用默认指令，**不是** 500
       //   ——它是平台自己的东西，自愈比拦下使用者更对。
-      const existingDrafter = (await store.listAgents(workspaceId)).find((a) => a.builtin === true)
-      let drafter = existingDrafter
+      //   判据是 **`builtin` + `role: drafter`**（第 70 批）：只按标记挑会挑到审核者，
+      //   于是起草 run 拿到的身份是审核者的指令（"你只审 skill"），产出结构就跑了。
+      let drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
       if (!drafter) {
         await ensureBuiltinDrafter(store, workspaceId)
-        drafter =
-          (await store.listAgents(workspaceId)).find((a) => a.builtin === true) ?? undefined
+        drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
       }
       const drafterAgent = {
         id: drafter?.id ?? (ulid() as Agent['id']),

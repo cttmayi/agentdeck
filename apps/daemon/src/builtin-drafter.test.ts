@@ -16,6 +16,10 @@ import { wsId } from '@agentdeck/domain/testing'
 import { ulid } from '@agentdeck/protocol'
 import type { Agent } from '@agentdeck/protocol'
 import {
+  // ⚠️ 这里用 `builtinKindOf`（`builtin` + 角色）而不是 `builtin === true`：
+  //    第 70 批量出来"按标记一把抓"会抓到**先出现的那条内置**（起草者/审核者都有标记），
+  //    于是用例在"审核者排在前面"时测的根本不是起草者——而它照样是绿的。
+  builtinKindOf,
   DRAFTER_INSTRUCTIONS,
   DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
@@ -48,7 +52,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'created')
     const agents = await store.listAgents(WS)
-    const drafter = agents.find((a) => a.builtin === true)
+    const drafter = agents.find((a) => builtinKindOf(a) === 'drafter')
     assert.ok(drafter, '建完必须能在列表里按内置标记找到它')
     assert.equal(drafter.role, 'drafter')
     assert.equal(drafter.name, DRAFTER_NAME)
@@ -59,10 +63,10 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
   })
 
   test('★ 再跑一次 ⇒ 一字不动（幂等；否则每次启动都是"新建一条"）', async () => {
-    const before = (await store.listAgents(WS)).filter((a) => a.builtin === true)
+    const before = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS)).filter((a) => a.builtin === true)
+    const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
     assert.equal(after.length, before.length, '不许越跑越多')
   })
 
@@ -77,12 +81,12 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
    * 审核者那一侧早在第 21 批就有这套（`REVIEWER_INSTRUCTIONS_HISTORY`），起草者漏了。
    */
   test('★★★ 盘上还是**旧默认**指令 ⇒ 升级成当前默认（否则新规则永远进不了起草者）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     await store.insertAgent({ ...mine, instructions: DRAFTER_INSTRUCTIONS_V1 })
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed', '旧默认必须被认出来并升级')
-    const after = (await store.listAgents(WS)).filter((a) => a.builtin === true)[0]!
+    const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')[0]!
     assert.equal(after.instructions, DRAFTER_INSTRUCTIONS, '升级后必须等于当前默认')
     assert.ok(
       after.instructions.includes('默认约定'),
@@ -91,7 +95,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
   })
 
   test('★★★ 使用者改过的指令**必须活过**下一次对账（第 ⑥ 条：升级不许覆盖他的改动）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     const edited: Agent = { ...mine, instructions: '我们团队的规范：每条 skill 都要带一个检查清单。' }
     await store.insertAgent(edited)
 
@@ -100,21 +104,21 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     //    写成"与默认不同 ⇒ 恢复默认"的话，这里会量到 healed，而使用者看到的是
     //    "我改的指令过一会儿自己变回去了"（像界面没保存）。
     assert.equal(result.action, 'left-alone')
-    const after = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     assert.equal(after.instructions, '我们团队的规范：每条 skill 都要带一个检查清单。')
   })
 
   test('指令被清空 ⇒ 自愈回默认（那是"损坏"，起草 run 否则会拿到空身份）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     await store.insertAgent({ ...mine, instructions: '   ' })
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed')
-    const after = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)
   })
 
   test('内置标记丢了但角色还在 ⇒ 补标记，**不是**再造一条（否则每次启动多一条）', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => a.builtin === true)!
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     const { builtin: _dropped, ...withoutFlag } = mine
     await store.insertAgent(withoutFlag as Agent)
 
@@ -195,6 +199,9 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     const out = await ensureBuiltinAgents(store, WS)
     assert.equal(out.drafter.action, 'left-alone')
     assert.equal(out.reviewer.action, 'left-alone')
+    // ⚠️ 这一行要的是**所有内置**（标记为判据），再按角色分类数数——不是"挑起草者"，
+    //    所以这里保留 `builtin === true`（我批量改成按角色时把这条也改了，红检当场抓到：
+    //    `builtin` 只剩起草者 ⇒ 审核者那行数到 0）。
     const builtins = (await store.listAgents(WS)).filter((a) => a.builtin === true)
     assert.equal(builtins.filter((a) => a.role === 'drafter').length, 1)
     assert.equal(builtins.filter((a) => a.role === 'skill-reviewer').length, 1)

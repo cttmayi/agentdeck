@@ -389,15 +389,21 @@ export const agentsText = {
   // ★ 2026-11：编辑页底部新增「删除」（保存 / 删除 / 取消，与组页同款）。
   //   历史 run 不删（那是执行时的快照）；被智能体组引用 / 是默认智能体时，
   //   服务端会 400 并说明下一步，这里原样展示。
-  // ★ 2026-10：内置智能体（沉淀的起草者）。它删不掉、挂不上 skill、只能「恢复成默认值」，
+  // ★ 2026-10：内置智能体。它删不掉、挂不上 skill、只能「恢复成默认值」，
   //   所以这三条文案要**解释那个"缺失"**——不然使用者只会看到"这里没有删除按钮"。
+  //
+  // ⚠️ 分批第 70 批：文案里不再写"沉淀这条链的**起草者**"。内置现在有**两条**
+  //    （起草者 + skill 审核者），而这个徽标对**任意** `builtin` 都显示
+  //    （`AgentDetail.svelte` 的 `{#if agent.builtin}`）——审核者那一页也在说
+  //    "（沉淀这条链的起草者）"，是事实错误，使用者会照着它去改错的那条。
+  //    所以这里只说**两条都成立**的话；具体是哪一条由「角色」那一栏说。
   'agents.builtinBadge': {
-    zh: '平台内置：删不掉，只能「恢复成默认值」（沉淀这条链的起草者）',
-    en: 'Built in: cannot be deleted, only restored to default (the crystallize drafter)',
+    zh: '平台内置：删不掉，只能「恢复成默认值」',
+    en: 'Built in: cannot be deleted, only restored to default',
   },
   'agents.builtinNoSkills': {
-    zh: '内置智能体不挂 skill（起草用的写作规范随平台走，与挂载无关）',
-    en: 'Built-in agents mount no skills (the writing spec ships with the platform)',
+    zh: '内置智能体不挂 skill（它们做什么由平台随版本给，与挂载无关）',
+    en: 'Built-in agents mount no skills (what they do ships with the platform)',
   },
   'agents.restoreDefault': { zh: '恢复成默认值', en: 'Restore default' },
   'agents.restoreDefaultTitle': { zh: '恢复成默认值？', en: 'Restore default?' },
