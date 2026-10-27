@@ -2769,3 +2769,38 @@ executor 里两处 hook 判断改成 `profileFor(key)?.injectsRunHooks() === tru
 | 任务隔离 hook 只有 claude 有；**基类默认 false**（新 runtime 不会因为漏写而多做一件事） | 同上 |
 | 每条差异都有 `why`（说不出理由的差异不许存在） | 同上 |
 | 原有行为一条不变 | 全量 **2193 全绿** |
+
+### 4.3.28 分批第 68 批：按**交互方式**分族，公共部分在根上
+
+使用者：「或许可以按交互方式再提炼一层类——claude 和 generic 类似，可以是基于一个类，codex 基于另外一个类」。
+
+我在前两批已经按这个分了（`LineStreamBackendBase` / `ServiceBackendBase`），但当时**两族各自复制了根上的东西**：
+`resolveExecutable()`、`probe()`、"能不能跑"、`key/protocol/rejectDetectable` 字段、证据等级说明 —— 逐份躺在两个文件里。
+这一批把**族之上那一层**补出来：
+
+```
+AgentBackendBase                    描述符、key/protocol/rejectDetectable、probe、
+  │                                 解析可执行文件、"能不能跑"、证据等级说明
+  ├── LineStreamBackendBase<P>      cli 形状：喂一次 stdin + 逐行 stdout（claude、generic）
+  └── ServiceBackendBase            service 形状：常驻进程 + 帧协议（codex 的 app-server）
+```
+
+- `ServiceBackendOptions` 干脆**复用根类的选项类型**（字段完全一样），不再重复声明一遍；
+- `ServiceBackendBase` 的 94 行里只剩 `prepareLaunch()`（沙箱规划 + 放行项）与抽象钩子；
+- 两族**不该合成一个类**：协议时序差太远（一次 stdin vs 握手→turn→帧），硬合会得到"到处是钩子"的基类。
+  分族的界线就在**交互方式**上，这也正是使用者说的那件事。
+
+#### 加了一条**结构判据**（防止两族又各自长回一份）
+
+`runtime-profile.test.ts` 里读源码断言：
+① 两个族都 `extends AgentBackendBase`；② **两族都不许再自己实现 `resolveExecutable` / `probe`**。
+——继承结构靠人记不住，靠判据能记住。
+
+#### 量到的变化
+
+| 文件 | 前 | 后 |
+| --- | --- | --- |
+| `backend-base.ts`（根类 + cli 族） | 308 | 336（含根类） |
+| `service-backend.ts`（service 族） | 136 | **94** |
+
+全量 **2194 全绿**，行为一条没变。

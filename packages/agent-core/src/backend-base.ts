@@ -91,27 +91,39 @@ export interface LineStreamBackendOptions {
   useProbeCache?: boolean
 }
 
-export abstract class LineStreamBackendBase<P extends LineStreamParserLike>
-  implements AgentBackend
-{
+/**
+ * ★ 分批第 68 批：**按交互方式分成两族，但共享一个根类**。
+ *
+ * ```
+ * AgentBackendBase                     ← 交互方式无关的部分（下面这些）
+ *   ├── CliStreamBackendBase<P>        ← cli 形状：一次 stdin + 逐行 stdout（claude、generic）
+ *   └── ServiceBackendBase             ← service 形状：常驻进程 + 帧协议（codex 的 app-server）
+ * ```
+ *
+ * 根类里只放**两族都一样**的东西：描述符与 `key/protocol/rejectDetectable`、
+ * 解析可执行文件、`probe()`、"这个文件能不能跑"、证据等级说明、以及"沙箱里要放行
+ * CLI 状态目录"这条规则。
+ *
+ * ⚠️ 这两族**不该**合成一个类：它们的协议时序差得太远（line-stream 是"喂一次 stdin、
+ *    逐行解析"；service 是"握手 → turn → 收到帧"）。硬合的话会得到一个到处是钩子的基类，
+ *    读起来比两份实现还糟——所以差异在**族的层次**上分叉，公共部分在根上共享。
+ */
+export abstract class AgentBackendBase {
   readonly key: string
   readonly protocol: RuntimeProtocol
+  /** service 形状固定 false（没有 `resume` 段）；cli 形状由描述表给。 */
   readonly rejectDetectable: boolean
-
-  protected readonly descriptor: CliRuntimeDescriptor
+  protected readonly descriptor: RuntimeDescriptor
   protected readonly options: LineStreamBackendOptions
 
   constructor(options: LineStreamBackendOptions) {
     this.options = options
-    // 两个适配器都是 cli 形状：校验 managedFlags/resume 在位并收窄类型
-    // （cli-only 字段已可选化——见 `RuntimeDescriptor.kind`）。
-    this.descriptor = (options.descriptor as CliRuntimeDescriptor)
+    this.descriptor = options.descriptor
     this.key = this.descriptor.key
     this.protocol = this.descriptor.protocol
-    this.rejectDetectable = this.descriptor.resume.rejectDetectable
+    // 默认 false（service 形状没有 resume 段）；cli 形状的子类会覆盖成描述表里的值。
+    this.rejectDetectable = false
   }
-
-  // ── 模板方法：骨架只写这一份 ──
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     const path = await this.resolveExecutable()
@@ -124,6 +136,53 @@ export abstract class LineStreamBackendBase<P extends LineStreamParserLike>
       cliVersion: await detectVersion(path),
     }
   }
+
+  /** 解析可执行文件（注入路径优先，否则探测 PATH）。两族一样。 */
+  protected async resolveExecutable(): Promise<string | null> {
+    if (this.options.executablePath) return this.options.executablePath
+    const probe = await probeCommand(this.descriptor.command, {
+      useCache: this.options.useProbeCache ?? true,
+    })
+    return probe.available ? probe.path : null
+  }
+
+  /** 找不到可执行文件时说什么（各 runtime 的证据等级不同）。 */
+  protected abstract missingExecutableMessage(): Promise<string> | string
+
+  /** 拼进"找不到/跑不了"诊断里的证据等级说明（默认不说）。 */
+  protected evidenceNote(): string {
+    return ''
+  }
+
+  /**
+   * "这个路径能不能当程序跑"。
+   *
+   * ★ 分批第 66 批：默认实现就是**查**——这条纪律原来只有 generic 有。
+   * ★ 分批第 68 批：挪到根类，两族共用同一份（codex 也走它）。
+   */
+  protected async assertRunnable(path: string): Promise<void> {
+    if (!(await isRunnableFile(path))) {
+      throw new Error(await describeMissingCommand(path, this.evidenceNote()))
+    }
+  }
+}
+
+export abstract class LineStreamBackendBase<P extends LineStreamParserLike>
+  extends AgentBackendBase
+  implements AgentBackend
+{
+  protected declare readonly descriptor: CliRuntimeDescriptor
+  override readonly rejectDetectable: boolean
+
+  constructor(options: LineStreamBackendOptions) {
+    super(options)
+    // 两个适配器都是 cli 形状：校验 managedFlags/resume 在位并收窄类型
+    // （cli-only 字段已可选化——见 `RuntimeDescriptor.kind`）。
+    this.descriptor = (options.descriptor as CliRuntimeDescriptor)
+    this.rejectDetectable = this.descriptor.resume.rejectDetectable
+  }
+
+  // ── 模板方法：骨架只写这一份（根类已给 probe/resolveExecutable/assertRunnable）──
 
   async execute(opts: ExecOptions): Promise<AgentSession> {
     const executablePath = await this.resolveExecutable()
@@ -227,37 +286,6 @@ export abstract class LineStreamBackendBase<P extends LineStreamParserLike>
   }
 
   // ── 子类要实现的差异点（默认实现 = "claude 这种最朴素的情形"）──
-
-  /** 解析可执行文件（探测或注入路径）。两个适配器完全一样，所以这里给默认实现。 */
-  protected async resolveExecutable(): Promise<string | null> {
-    if (this.options.executablePath) return this.options.executablePath
-    const probe = await probeCommand(this.descriptor.command, {
-      useCache: this.options.useProbeCache ?? true,
-    })
-    return probe.available ? probe.path : null
-  }
-
-  /** 找不到可执行文件时说什么（各自的措辞不同：generic 要提 provisional）。 */
-  protected abstract missingExecutableMessage(): Promise<string> | string
-
-  /**
-   * "这个路径能不能当程序跑"。
-   *
-   * ★ 分批第 66 批：默认实现就是**查**（`isRunnableFile` + `describeMissingCommand`）——
-   *   这条纪律原来只有 generic 有（第 65 批我在文档里写"从 generic 独有变成基类流程"，
-   *   当时只做到了"基类有这个方法"，默认还是空实现）。现在两个 cli 形状 runtime 都查。
-   *   证据等级说明由 `evidenceNote()` 提供（generic 的措辞要提 provisional）。
-   */
-  protected async assertRunnable(path: string): Promise<void> {
-    if (!(await isRunnableFile(path))) {
-      throw new Error(await describeMissingCommand(path, this.evidenceNote()))
-    }
-  }
-
-  /** 拼进"找不到/跑不了"诊断里的证据等级说明（默认不说）。 */
-  protected evidenceNote(): string {
-    return ''
-  }
 
   /** 额外要放行的可写目录（默认没有）。 */
   protected extraWritableDirs(_opts: ExecOptions): string[] {

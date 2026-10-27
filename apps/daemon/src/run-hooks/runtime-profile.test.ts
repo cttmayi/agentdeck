@@ -65,3 +65,40 @@ describe('★ 分批第 67 批：RuntimeProfile（平台侧差异的唯一定义
     }
   })
 })
+
+/**
+ * ★ 分批第 68 批：适配器侧按**交互方式**分族、公共部分在根上。
+ *
+ * 这一类判据不在运行时（它是继承结构），所以在源码层面钉住层次，别让"两族又各自长一份"。
+ */
+describe('★ 分批第 68 批：适配器的类层次（按交互方式分族）', () => {
+  test('★★★ 两个族都继承同一个根类；两族各自只有一个类', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const root = new URL('../../../../packages/agent-core/src/', import.meta.url)
+    const baseSrc = await readFile(new URL('backend-base.ts', root), 'utf8')
+    const serviceSrc = await readFile(new URL('service-backend.ts', root), 'utf8')
+
+    assert.match(baseSrc, /export abstract class AgentBackendBase/, '根类在')
+    assert.match(
+      baseSrc,
+      /export abstract class LineStreamBackendBase<P extends LineStreamParserLike>\s*\n\s*extends AgentBackendBase/,
+      '✦ cli 族必须继承根类（否则 probe/解析可执行文件又各写一份）',
+    )
+    assert.match(
+      serviceSrc,
+      /export abstract class ServiceBackendBase extends AgentBackendBase/,
+      '✦ service 族必须继承根类',
+    )
+    // 两族都不许再各自实现 resolveExecutable / probe（那是根类的事）
+    for (const [name, src] of [
+      ['backend-base.ts 的 cli 族', baseSrc.slice(baseSrc.indexOf('class LineStreamBackendBase'))],
+      ['service-backend.ts', serviceSrc],
+    ] as const) {
+      assert.ok(
+        !/protected async resolveExecutable\(/.test(src),
+        `${name} 不该再自己实现 resolveExecutable（第 68 批把它收进根类了）`,
+      )
+      assert.ok(!/^\s*async probe\(\)/m.test(src), `${name} 不该再自己实现 probe()`)
+    }
+  })
+})
