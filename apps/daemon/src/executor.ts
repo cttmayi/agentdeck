@@ -51,11 +51,11 @@ import { reviewerIdentity } from './review-standard.ts'
 import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
 import {
-  codexHomeFor,
-  findSkillFiles,
-  pruneCodexHomes,
-  syncCodexConfigDir,
-} from './run-hooks/codex-config.ts'
+  hostSkillsFor,
+  isIsolatedRuntime,
+  pruneRuntimeConfigHomes,
+  syncRuntimeConfig,
+} from './run-hooks/runtime-config.ts'
 import { DEFAULT_LOCALE } from '@agentdeck/i18n'
 
 /**
@@ -818,13 +818,16 @@ export class RunExecutor {
      */
     let actualArgv: readonly string[] = []
     /**
-     * ★ 分批第 60 批：这次 run 的 `CODEX_HOME`（**按工作目录分**的那一份），null = 不注入。
+     * ★ 分批第 64 批：这次 run 要注入的"运行时配置环境变量"（claude 是 CLAUDE_CONFIG_DIR +
+     * CLAUDE_CODE_DISABLE_BUNDLED_SKILLS，codex 是 CODEX_HOME），null = 不注入。
+     * 由 `syncRuntimeConfig()` **一处**算出来——原来 claude / codex 各有一行 env，
+     * 加了新变量就容易只加一边。
      *
      * 声明在 `try` 外面：设置它的是上面的"配置隔离"块，读它的是下面的 env 组装，
      * 两处都在同一个 `#run` 里但分属不同分支——放里面会遮蔽（这一族坑踩过：
      * `injectedSkills` 那条注释记着同款）。
      */
-    let codexHomeEnv: string | null = null
+    let runtimeConfigEnv: Record<string, string> | null = null
 
     /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
@@ -996,163 +999,44 @@ export class RunExecutor {
         }
       }
 
-      // ── claude 个人配置隔离（2026-10，D78）──
-      //
-      // 把 `CLAUDE_CONFIG_DIR` 指向平台受管的干净目录：用户级 skill/MCP
-      // 从此不加载（实测 `mcp_servers: []`、只剩内置 skill），任务里只剩
-      // 项目级——含上面注入的 hook 与技能注入的 `.claude/skills/`。
-      // 认证从 `~/.claude/settings.json` 的 env 每次 run 现读 copy（见
-      // `run-hooks/claude-config.ts` 头注释：为什么是它、目录放哪、为什么
-      // 全局复用一个）。
-      //
-      // ⚠️ 失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
-      //    隔离（与 hook 注入同一原则，静默缺能力比报错糟）。
-      if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir && !isolateRuntimeConfig) {
-        await this.#note(
-          runId,
-          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你的 ~/.claude，' +
-            'agent 能看到并使用你个人的 skill / MCP / 端点配置。',
-        )
-      } else if (runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir) {
-        const sync = await syncClaudeConfigDir(
-          this.#deps.claudeConfigDir,
-          this.#deps.claudeSettingsSource ?? join(homedir(), '.claude', 'settings.json'),
-        )
-        if (!sync.ok) {
-          await this.#note(
-            runId,
-            `⚠️ claude 个人配置隔离未生效（${sync.reason}）——` +
-              `本次 run 会看到用户级 skill/MCP（如 rea、个人 skill）。`,
-          )
-        } else {
-          await this.#note(
-            runId,
-            `claude 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
-              `用户级 skill/MCP 不可见，env ${sync.envCount} 项已同步。`,
-          )
-          await this.#note(
-            runId,
-            'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1 + 受管 settings 里的 ' +
-              'enabledPlugins.plugin-authoring@builtin=false）——这次的技能清单只剩平台注入的那些。',
-          )
-        }
-      }
-
-      // ── codex 个人配置隔离（2026-10，D78 的 codex 版）──
-      //
-      // 与 claude 同机制、同原则：把 `CODEX_HOME` 指向平台受管的干净目录，
-      // 用户级 skill（`~/.codex/skills/`）从此不加载，任务里只剩项目级
-      // （thread cwd = 工作目录，`.codex/skills/` 照常自动发现——含技能注入
-      // 写进去的）。认证与端点从 `~/.codex/` 每次 run 现读 copy（auth.json +
-      // config.toml，见 `run-hooks/codex-config.ts` 头注释：为什么整份 copy、
-      // 目录放哪、为什么全局复用一个）。
-      //
-      // ⚠️ 失败不失败 run：与 claude 版同一原则（隔离是增强不是核心，
-      //    静默缺能力比报错糟）。
-      if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir && !isolateRuntimeConfig) {
-        await this.#note(
-          runId,
-          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你的 ~/.codex，' +
-            '不复制 auth.json / config.toml，agent 能看到并使用你个人的 skill / 端点配置。',
-        )
-      } else if (runtime.descriptor.key === 'codex' && this.#deps.codexConfigDir) {
-        /**
-         * ★ 分批第 55 批：把**这次的工作目录**标成 trusted —— 否则项目级
-         * `.codex/config.toml` / hooks / exec policies 一律不被读（真机 stderr：
-         * `Project-local config, hooks, and exec policies are disabled … until the project is
-         * trusted, but skills still load`）。使用者要的正是"让工作目录里那份配置生效"。
-         *
-         * ⚠️ trusted 是**打包开关**：它同时放开项目级 hooks 与 exec policies。所以这条
-         *    必须在运行日志里说出来（下面那行 note），不许在后台悄悄发生。
-         */
-        /**
-         * ★ 分批第 57 批：把 `$HOME/.agents/skills`（跨 agent 的全局技能目录）逐条禁用。
-         *
-         * 为什么是**逐条**：codex 的 `skills.config` 数组表按 `SKILL.md` 绝对路径开关，
-         * 目录当 path 不行（实测）。所以先扫出这些文件，再把它们交给 sync 去写
-         * `[[skills.config]] path=… enabled=false`。
-         * ⚠️ 这是**平台策略**（哪些目录算宿主级），所以由 executor 决定、库只负责写。
-         */
-        /**
-         * ★ 分批第 60 批：**每个工作目录一份 CODEX_HOME**。
-         *
-         * 全局一份时，两条不同工作目录的 codex run 会同时重建同一份 config.toml ⇒ 后写赢
-         * ⇒ 先写那条的 `[projects."<它的目录>"]` 信任段被抹掉（项目级配置静默失效）。
-         * 按工作目录分之后，同一 workdir 的 run 由工作目录锁串行、跨 workdir 互不相干。
-         * ⚠️ 目录放在数据目录下（**绝不放进工作目录**：里面有 auth.json 的真实 key）。
-         */
-        const codexHome = codexHomeFor(this.#deps.codexConfigDir, run.workDir ?? runId)
-        codexHomeEnv = codexHome
-        const hostSkills =
-          this.#deps.hostSkillRoots === undefined
-            ? await findSkillFiles([join(homedir(), '.agents', 'skills')])
-            : await findSkillFiles(this.#deps.hostSkillRoots)
-        const sync = await syncCodexConfigDir(
-          codexHome,
-          this.#deps.codexConfigSource ?? join(homedir(), '.codex'),
-          run.workDir ?? undefined,
-          hostSkills,
-        )
-        // 顺手清理太旧的（codex 会在每个 CODEX_HOME 里生成 sessions/sqlite，不清就一直长）
-        await pruneCodexHomes(this.#deps.codexConfigDir, codexHome).catch(() => [])
-        if (!sync.ok) {
-          await this.#note(
-            runId,
-            `⚠️ codex 个人配置隔离未生效（${sync.reason}）——` +
-              `本次 run 会看到用户级 skill（如 browser-use）。`,
-          )
-        } else {
+      /**
+       * ── 运行时配置隔离（分批第 64 批：claude 与 codex 走**同一条**逻辑）──
+       *
+       * 这里原来是一段 claude + 一段 codex 的并列 if，各自拼 note、各自注入 env——
+       * 两份实现迟早不同步（这个仓库踩过好几次同款）。现在流程收进
+       * `run-hooks/runtime-config.ts` 的 `syncRuntimeConfig()`：
+       * 「解析受管目录 → 同步 → 产出 notes + env」，两个 runtime 的差异退化成策略表里的数据。
+       *
+       * ⚠️ 唯一的差异是"受管目录按不按工作目录分"（codex 按、claude 不按，理由写在那张表上）。
+       */
+      if (isolateRuntimeConfig && isIsolatedRuntime(runtime.descriptor.key)) {
+        const runtimeKey = runtime.descriptor.key
+        const rootDir =
+          runtimeKey === 'claude' ? this.#deps.claudeConfigDir : this.#deps.codexConfigDir
+        if (rootDir !== undefined) {
+          const sourcePath =
+            runtimeKey === 'claude'
+              ? (this.#deps.claudeSettingsSource ?? join(homedir(), '.claude', 'settings.json'))
+              : (this.#deps.codexConfigSource ?? join(homedir(), '.codex'))
           /**
-           * ⚠️ 这句话原来写的是「用户级 skill 不可见」——**不准确**（分批第 56 批改正）。
-           *
-           * 实测（`codex debug prompt-input`）：隔离只把 `CODEX_HOME` 顶掉了，
-           * 而 codex 还会扫 **`$HOME/.agents/skills`**（跨 agent 的全局目录，装它的
-           * 是 vercel-labs/skills 那套）。所以"用户级不可见"只对 CODEX_HOME 之内成立。
-           * 说准这件事比说得漂亮重要：使用者正是因为看到"能看见 9 个 skill"才发现不对。
+           * 宿主级技能（`$HOME/.agents/skills`，跨 agent 的全局目录）——只有 codex 会扫它
+           * （claude 实测不读），`hostSkillsFor()` 按 runtime 决定要不要扫。
            */
-          await this.#note(
-            runId,
-            `codex 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
-              `\`CODEX_HOME\` 下的用户级 skill 不可见，已同步 ${sync.copied.join('、')}；` +
-              `⚠️ \`$HOME/.agents/skills\`（跨 agent 的全局目录）**不在隔离范围内**，那些技能仍然可见。`,
-          )
-          if (sync.hostSkillsDisabled.length > 0) {
-            await this.#note(
-              runId,
-              `宿主级技能：已逐条禁用 ${String(sync.hostSkillsDisabled.length)} 个` +
-                `（\`$HOME/.agents/skills\` 下的 SKILL.md；它们不属于平台，但 codex 会扫到）——` +
-                // 日志里用**相对名字**（绝对路径太长），但要能看出是哪些
-                `${sync.hostSkillsDisabled
-                  .map((p) => p.replace(/^.*\.agents\/skills\//u, ''))
-                  .join('、')}`,
-            )
-          }
-          if (sync.hostSkillsAlreadyListed.length > 0) {
-            await this.#note(
-              runId,
-              `宿主级技能：${String(sync.hostSkillsAlreadyListed.length)} 个你已经在 config 里写过开关，` +
-                '平台**不覆盖**你的取值。',
-            )
-          }
-          await this.#note(
-            runId,
-            sync.bundledSkills === 'disabled'
-              ? 'codex 自带的 system skills：已关闭（受管 config 里写了 [skills.bundled] enabled = false）——' +
-                '这次的技能清单只剩平台注入的 + $HOME/.agents/skills。'
-              : '⚠️ codex 自带的 system skills：**没有关掉**（你自己的 config.toml 里已经有 ' +
-                '[skills.bundled] 段，平台不覆盖你的配置）——它们会出现在这次的技能清单里。',
-          )
-          if (sync.trustedProject !== null) {
-            await this.#note(
-              runId,
-              `codex 项目级配置：已把工作目录标为 trusted（${sync.trustedProject}）——` +
-                `项目级 config / hooks / exec policies **会加载**` +
-                (sync.trustedProjectConfigHash === null
-                  ? '；这个目录里没有 `.codex/config.toml`（只开了门、没装东西）。'
-                  : `；那份 \`.codex/config.toml\` 的指纹是 ${sync.trustedProjectConfigHash}。`),
-            )
-          }
+          const hostSkills = await hostSkillsFor(runtimeKey, [
+            ...(this.#deps.hostSkillRoots ?? [join(homedir(), '.agents', 'skills')]),
+          ])
+          const sync = await syncRuntimeConfig({ runtimeKey, rootDir, workDir: run.workDir ?? null, sourcePath, hostSkills })
+          runtimeConfigEnv = sync.env
+          for (const note of sync.notes) await this.#note(runId, note)
+          // 顺手清理太旧的受管目录（只有"按工作目录分"的策略才有意义）
+          await pruneRuntimeConfigHomes(runtimeKey, rootDir, sync.home).catch(() => [])
         }
+      } else if (isIsolatedRuntime(runtime.descriptor.key)) {
+        await this.#note(
+          runId,
+          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你自己的配置' +
+            '（~/.claude 或 ~/.codex），不复制、不重定向；agent 能看到并使用你个人的 skill / MCP / 端点配置。',
+        )
       }
 
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
@@ -1584,34 +1468,11 @@ export class RunExecutor {
         //   ★ codex 的 `CODEX_HOME` 同款注入（D78 的 codex 版）。
         env: {
           ...(agentConfig?.env ?? {}),
-          // ★ 分批第 41 批：设置里关掉隔离时**不注入**——CLI 就用它自己的原路径
-          //   （`~/.claude` / `~/.codex`）。开关"改了却不生效"是这个仓库最常见的缺陷，
-          //   所以这两行与上面那两个 note 分支读的是**同一个** `isolateRuntimeConfig`。
-          ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude' && this.#deps.claudeConfigDir
-            ? { CLAUDE_CONFIG_DIR: this.#deps.claudeConfigDir }
-            : {}),
           /**
-           * ★ 分批第 62 批：关掉 claude **自带**的 bundled skills（与 codex 侧
-           * `[skills.bundled] enabled = false` 是同一个目标）。
-           *
-           * 实测（假 Anthropic 端点抓请求体，不花 token；claude 2.1.302）：不关的时候模型能看到
-           * **14 条**技能（1 条我们注入的 + **13 条 claude 自带**：dataviz / code-review /
-           * security-review / init / run / loop / claude-api / update-config / keybindings-help /
-           * simplify / fewer-permission-prompts / workflow-authoring / plugin-authoring）；
-           * 加上这个环境变量之后只剩 **2 条**（我们注入的 + `plugin-authoring`——那是内置插件技能，
-           * 目前没有开关）。
-           *
-           * ⚠️ 不用 `--disable-slash-commands`：实测它把**整个技能段**都去掉（连我们注入的一起），
-           *    那是"全关"，不适用。
-           * ⚠️ 与 CODEX_HOME 同一条边界：只在**隔离开启**时注入（关掉隔离 = 使用者要看自己的东西）。
+           * ★ 分批第 64 批：**一份**取值（`syncRuntimeConfig()` 算出来的），不再按 runtime 各写一行——
+           * 两行分开写时的失败模式是"claude 加了新 env、codex 那行忘了加"。
            */
-          ...(isolateRuntimeConfig && runtime.descriptor.key === 'claude'
-            ? { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' }
-            : {}),
-          // ★ 分批第 60 批：按**工作目录**分的那一份（与上面 sync 的目标同一个值）
-          ...(isolateRuntimeConfig && runtime.descriptor.key === 'codex' && codexHomeEnv !== null
-            ? { CODEX_HOME: codexHomeEnv }
-            : {}),
+          ...(runtimeConfigEnv ?? {}),
         },
         /**
          * ★ 分批第 44 批：把 service 形状 runtime 的 JSON-RPC 摘要写进运行日志。

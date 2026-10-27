@@ -2590,3 +2590,52 @@ executor 的 env 组装里（与 `CLAUDE_CONFIG_DIR` 同一处、同一条件）
 注入的 + 自带（`CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1`）+ 内置插件技能（`enabledPlugins`）
 —— 三条都关掉之后，**模型看到的技能 = 平台注入的那些**（实测 1 条）。
 `~/.agents/skills` 与 `~/.claude/skills` 这两条用户级路径本来就进不来（claude 不读前者、后者被 `CLAUDE_CONFIG_DIR` 挡住）。
+
+### 4.3.24 分批第 64 批：两个 runtime 的配置隔离收成**一条逻辑**
+
+使用者：「我还是建议同一逻辑，代码尽量复用」。
+
+#### 原来的形状（问题）
+
+executor 里是**两段并列的 if**：claude 一段、codex 一段，各自拼 note、各自往 env 里塞变量、
+各自处理失败。行为确实一样（"把配置搬进受管目录，再把 CLI 指过去"），但代码是两份——
+加一条规则就得写两遍，而**只写一遍**的表现是"claude 关了、codex 没关"，这个仓库踩过好几次同款
+（起草者/审核者各一份、`resolveSpawnTarget` 的 spawn 选项两份）。
+
+#### 现在的形状
+
+新模块 `apps/daemon/src/run-hooks/runtime-config.ts`，流程只有一条：
+
+```
+managedHomeFor(runtime)   →   syncRuntimeConfig({runtimeKey, rootDir, workDir, sourcePath, hostSkills})
+                          →   { ok, home, env, notes }
+```
+
+- executor 里**一段** `if`：调它、把 `notes` 逐条写进日志、把 `env` 交给后端；
+- server 的"删实体时清理"也走 `forgetRuntimeConfigHome(runtimeKey, root, workDir)`——
+  **按策略**决定要不要真删，而不是按 runtime 名写 if；
+- 老的两个模块（`claude-config.ts` / `codex-config.ts`）保留为**写入器**（它们各自知道
+  怎么写自己那份文件），只是不再被 executor 直接调用。
+
+#### 唯一的差异 = 策略表里的一行
+
+```ts
+export const POLICY = {
+  claude: { perWorkDir: false, why: '每轮内容完全一样；CLAUDE_CONFIG_DIR/projects 是会话状态，--resume 要它全局稳定' },
+  codex:  { perWorkDir: true,  why: '每轮要写 [projects."<本次工作目录>"] trust ⇒ 内容每轮不同，全局一份会被并行覆盖' },
+}
+```
+
+- `managedHomeFor()` 按这个布尔值算目录；
+- `forgetRuntimeConfigHome()` / `pruneRuntimeConfigHomes()` 按它决定"要不要真动手"
+  ⇒ 以后若把 claude 也改成 perWorkDir，改的是**那个布尔值**，三处行为一起跟上；
+- 新增 runtime（如果有第三种隔离形态）只需在表里加一行 + 一个写入器。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| 策略表就是差异本身（`claude.perWorkDir === false` / `codex.perWorkDir === true`，且都有 `why`） | `runtime-config.test.ts` |
+| **同一个函数**产出两个 runtime 的 `notes + env`（claude 有 `CLAUDE_CONFIG_DIR` + 关自带技能；codex 有 `CODEX_HOME` + 宿主级禁用说明） | 同上 |
+| 清理/剪枝按策略走：**codex 真删**、**claude 无操作** | 同上 |
+| 原有行为全部不变 | 全量 2189 全绿 |
