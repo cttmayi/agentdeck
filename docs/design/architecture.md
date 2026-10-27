@@ -840,6 +840,8 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | **摄取与执行** | | |
 | POST | `/api/reports` | 投递第三方报告（逐条 zod 校验，报告 `items[i]` 哪个字段不合法） |
 | POST | `/api/runs` | 提交 run（**INV-1 在这里、写入之前强制校验**） |
+| POST | `/api/task` | **一次性任务接口（D91，分批第 71 批）**：一句话进去、结果出来。**只接受白名单字段**（`prompt` / `workDir` / `agent` / `groupId` / `maxTurns` / `wait`），身份/env/skills/系统提示/CLI 参数一律 400；自动建一条 `[API]` 任务当归属；`wait` 秒内跑完 ⇒ `200` + 结果，超时 ⇒ `202` + `runId`；`Idempotency-Key` 同键不重跑。**只给回环、不进 MCP/CLI**，见 §7.4 |
+| GET | `/api/task/{runId}` | 上面那条的收口：同一份返回体（未终态 ⇒ `202` + `poll`） |
 | GET | `/api/runs` | run 列表（**故意不含 `lastSeq`**） |
 | GET | `/api/runs/{id}` | 单条 run |
 | GET | `/api/runs/{id}/events` | **SSE 流**（`?since=N` 补齐） |
@@ -929,6 +931,19 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 **都不提供"提交任意 run"**——那接受任意 `workDir` 并在其中启动子进程，
 等于一条现成的代码执行入口。
 
+⚠️ **这句话 2026-10 修准了（分批第 71 批）**：原文读起来像"整个 HTTP 面都没有这条路"，
+实际不是——`POST /api/runs` 一直在，而且**回环上任何本机进程都能调**（只挡 Host 头，
+没有鉴权）。那条边界真正守的是**两件具体的事**：
+
+1. **不把它交给 tooling**：CLI 与 MCP 是 agent 会自己调的东西，给它们一条"提交 run"
+   的命令，等于 agent 给自己授权执行代码。所以 MCP 只暴露 7 个只读工具 + `submit_report`。
+2. **不出回环**：daemon 只 `listen 127.0.0.1`，Host 头白名单挡住 DNS rebinding。
+
+D91 的 `POST /api/task` 就是按这两条划出来的：它**只从回环可达**（因此没有新增执行
+能力，只增加了"好用"），**不进 MCP、不加 CLI 命令**（测试钉着），输入是**白名单**。
+不修这句原文的话，下一个读文档的人会以为这一面也关了，然后要么重复实现一遍，
+要么把 `POST /api/task` 当成"破坏了一条不变量"去删掉。
+
 MCP 的暴露面是**刻意窄**的（`apps/mcp/src/server.ts` 开头那段）：
 
 | 暴露（7 个工具） | 不暴露 | 为什么 |
@@ -957,6 +972,45 @@ MCP 与 CLI 都是 **daemon 的客户端**：不 import daemon 的任何模块�
 错误分两层：协议层（未知方法/未知工具名）走 JSON-RPC `error`；
 工具层（daemon 连不上、业务失败）走 `result.content[0].text` + **`isError: true`**——
 让调用它的模型能看见失败原因。
+
+### 7.4.1 一次性任务接口（`POST /api/task`，D91）
+
+一句话：**给一句提示词，跑一次 agent，把结果返回给调用方**。它是"把 AgentDeck 当本地
+能力用"的那条路——脚本、定时任务、别的程序里的一步，不必先开界面建任务。
+
+```http
+POST /api/task                       # 只回环
+Idempotency-Key: <任意串>             # 可选；同键 ⇒ 同一条 run，不重跑
+{ "prompt": "…", "workDir": "/abs", "agent": "01M…", "groupId": "01M…",
+  "maxTurns": 8, "wait": 30 }
+```
+
+**字段是白名单**（`TASK_ALLOWED_KEYS`）：只认这六个，多一个 400 并点名。为什么不写成
+黑名单——黑名单的失效方式是"新加一个能改写 agent 行为的字段，接口默默跟着放行"，
+白名单的失效方式是"新字段用不了"，后者当场报错。
+`systemPrompt` / `env` / `skills` / `customArgs` / `reviewerAgentId` / `agentRef`
+全部属于"改写 agent 行为"，一律不收：这个接口让调用方说**干什么**，不说**用谁、怎么跑**。
+
+**几个语义**（都是与使用者逐条确认过的）：
+
+| 决定 | 落点 |
+|---|---|
+| 混合同步 | `wait`（默认 30s、上限 120s）；到期未终态 ⇒ `202` + `runId` + `poll` |
+| 归属 | 自动建一条 `[API] <prompt 前 60 字>` 的任务（run 必须有 subject，而工作目录按 subject 分配，D27） |
+| 身份 | 可选 `agent`（必须是 `role: executor`）**或** `groupId`（与 agent 互斥）；缺省 = 工作区默认执行者 |
+| 审不审 | **不传组就不审**（`review: null`）；传组则**完全按组走**——组展开、审核者、动作权限、返工次数全生效 |
+| 失败 | run 失败也回 `200` + `status: "failed"`；HTTP 只表达"受理/参数/容量"（与 CLI 退出码语义一致） |
+| 结果 | `output` = 最后一段 text（与任务详情页同一口径 `lastTextOf`）、`transcript` = 全部 text 拼接、`files` = 工作目录**顶层**文件清单（内容另取 `GET /api/runs/{id}/file`） |
+| 幂等 | 键**派生** `runId`（`task-<sha256(ws+key) 前 26 位>`），`getRun` 命中即重放；同键换内容 ⇒ **409** |
+
+**已知边界**：`wait` 只跟**执行那条** run。传了组时审核 run 是执行完成之后才派生的，
+所以返回体的 `review` 可能在那一刻还是 `null`——用 `GET /api/task/{runId}` 继续收口
+（这也是它为什么要存在）。返工链同理：它会在后台继续往下跑，`events` 是跟它的路。
+
+**为什么它没有成为"远程代码执行入口"**：三个条件同时成立——只回环、白名单输入、
+不进 MCP/CLI。**少任何一个都成立不了**，所以这三条各自都有测试钉着
+（`apps/daemon/src/task-api.test.ts`：非回环 Host ⇒ 403；六个字段逐个 400；
+MCP/CLI 源码里不出现 `/api/task`）。
 
 ### 7.5 并发与串行化
 
