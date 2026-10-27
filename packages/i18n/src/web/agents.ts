@@ -40,7 +40,17 @@ export const agentsText = {
     zh: '指令已恢复上一版（{chars} 字符）',
     en: 'Instructions restored ({chars} chars)',
   },
-  'agents.roleSkillReviewer': { zh: '审核沉淀', en: 'Audit drafts' },
+  /**
+   * ★ 分批第 54 批：**同一个东西只留一个词**。
+   *
+   * 它在三处被叫过三个名字：角色徽标「审核沉淀」、设置里的开关「沉淀审核」、
+   * 服务端拒绝文案「skill 审核」。使用者看的是同一件事，三个词只会让人怀疑
+   * "是不是三种不同的东西"（与上一批「指令 / 身份」同一类毛病）。
+   *
+   * 统一成「沉淀审核」——与 `settings.reviewerScriptRun` 那个开关一致。
+   * 判据见 `tests/i18n-terms.test.ts`（术语一致检查）。
+   */
+  'agents.roleSkillReviewer': { zh: '沉淀审核', en: 'Audit drafts' },
   'agents.roleExecutorHint': { zh: '接到任务后动手干活', en: 'Takes on tasks and does the work' },
   'agents.roleReviewerHint': {
     zh: '按你给它写的判断依据审别人的产出，给判决',

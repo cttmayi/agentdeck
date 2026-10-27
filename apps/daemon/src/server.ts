@@ -3300,7 +3300,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   function roleRejectionLabel(role: string): string {
     if (role === 'reviewer') return '「审核」'
     if (role === 'drafter') return '「起草」（平台内置的 skill 起草者）'
-    if (role === 'skill-reviewer') return '「skill 审核」'
+    // ★ 分批第 54 批：角色叫法与界面统一成「沉淀审核」（原来是「skill 审核」——
+    //   同一个角色三个词，使用者会以为它们不是一回事）
+    if (role === 'skill-reviewer') return '「沉淀审核」'
     return `「${role}」`
   }
 

@@ -299,6 +299,75 @@ function collectSources(): { files: string[]; texts: string[] } {
   return { files, texts }
 }
 
+/**
+ * ★ 分批第 54 批：**同一个东西只许有一个词**。
+ *
+ * 使用者按「沉淀审核 / 审核沉淀 / skill 审核」三个名字看同一件事，会以为它们是
+ * 三样不同的东西（与上一批「指令 / 身份」同一类毛病）。这一组把它钉死：
+ *
+ *   · 角色徽标（界面）= 「沉淀审核」
+ *   · 设置里那个开关          = 「沉淀审核」
+ *   · 服务端拒绝文案          = 「沉淀审核」  ← 它在 `apps/daemon/src/server.ts`，
+ *     不是词条，所以只能读源码比对；两处一旦漂开，使用者看到的解释和界面就对不上。
+ *
+ * ⚠️ 只钉**角色叫法**，不钉 agent 的名字：内置那条 agent 的名字是「Skill 审核者（内置）」，
+ *    那是**它是谁**（和「起草者（内置）」一对），与"这个角色叫什么"是两件事。
+ */
+describe('术语一致：同一个角色只许有一个叫法（分批第 54 批）', () => {
+  const ROLE_WORD = '沉淀审核'
+
+  test('★★ 角色徽标与设置里的开关用同一个词', () => {
+    assert.equal(
+      webText['agents.roleSkillReviewer'].zh,
+      ROLE_WORD,
+      '角色徽标要与设置开关同词（推荐「沉淀审核」）',
+    )
+    assert.equal(webText['settings.reviewerScriptRun'].zh, ROLE_WORD, '设置开关也要是这个词')
+  })
+
+  test('★★★ 服务端拒绝文案里的角色叫法必须与界面一致（两处漂开就说不到一起）', () => {
+    // ⚠️ 路径要从**仓库根**算：`import.meta.url` 在 `packages/i18n/src/` 下，
+    //    第一版写成 `../../apps/...` 指到了 `packages/apps/...`（ENOENT，红了才发现）。
+    const source = readFileSync(new URL('../../../apps/daemon/src/server.ts', import.meta.url), 'utf8')
+    assert.ok(
+      source.includes(`if (role === 'skill-reviewer') return '「${ROLE_WORD}」'`),
+      `server.ts 的 roleRejectionLabel 必须用「${ROLE_WORD}」，与界面同一个词`,
+    )
+    // 判据只针对**代码里真的返回的那一句**：注释里记"原来是 skill 审核"是历史，留着有用
+    assert.ok(
+      !source.includes("return '「skill 审核」'"),
+      '旧的「skill 审核」不许再作为拒绝文案返回（同一个角色三个词就是这么来的）',
+    )
+  })
+
+  test('★★ 旧词「审核沉淀」在生产代码里不许再出现（文档里的历史记录除外）', () => {
+    const old = '审核沉淀'
+    const offenders: string[] = []
+    const walk = (dir: URL): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'web') continue
+        const child = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, dir)
+        if (entry.isDirectory()) {
+          if (entry.name === 'web') continue
+          walk(child)
+          continue
+        }
+        if (!/\.[cm]?tsx?$|\.svelte$/.test(entry.name)) continue
+        const text = readFileSync(child, 'utf8')
+        if (text.includes(old)) offenders.push(child.pathname)
+      }
+    }
+    // 仓库根的 `apps/` 与 `packages/`（i18n 自己在 packages/i18n/src 下，往上三层）
+    walk(new URL('../../../apps/', import.meta.url))
+    walk(new URL('../', import.meta.url))
+    assert.deepEqual(
+      offenders.filter((f) => !f.endsWith('i18n.test.ts')),
+      [],
+      `这些文件里还有旧词「${old}」：${offenders.join('、')}`,
+    )
+  })
+})
+
 describe('词条死活：每个词条都要有使用者（分批第 11 批）', () => {
   test('★ 判据本身准不准：夹具里"用到的 / 动态拼的 / 真没用的"三种', () => {
     const { dead, dynamicPrefixes } = findDeadKeys({
