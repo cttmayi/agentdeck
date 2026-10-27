@@ -288,6 +288,19 @@ const TASK_MAX_TURNS_MAX = 100
 const TASK_ISSUE_TITLE_CHARS = 60
 
 /**
+ * `GET /api/runs` 一次给多少条（分批第 72 批）。
+ *
+ * 为什么不是 100：任务看板的阶段推导要**每条任务自己的 run**，而那个接口是它唯一的
+ * 数据来源（`apps/web/src/lib/pipeline.ts`）。截短了就会让"run 掉出这一页"的任务
+ * 一律显示成「执行中」——那是**不报错的谎报**，比慢严重得多。
+ *
+ * 10_000 与 `/api/costs`、`deleteIssue` 里那几处"把 run 全读出来"用同一个量级：
+ * 本地单用户看板里这是一次几十 KB 的响应。真到上万条 run 时，正确的做法是给看板
+ * 一个"按 subject 查 run"的接口，而不是把这一页悄悄截短。
+ */
+const RUNS_LIST_LIMIT = 10_000
+
+/**
  * 幂等键 ⇒ **确定的 runId**。
  *
  * 为什么要确定：幂等键的全部意义是"同一个键第二次来时**不要**再跑一次"。最直接的
@@ -8973,7 +8986,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     //
     // ⚠️ 代价：store 没有"按 subject 查 run"的索引，只能拉一页再筛（与草稿详情那条路
     //    同样的做法）。这里给一个足够大的上限并说明：查不到就退回 `null`，不猜。
-    const runsPage = await store.listRuns({ workspaceId, limit: 10_000 })
+    const runsPage = await store.listRuns({ workspaceId, limit: 10_000, order: 'desc' })
     const reviewRuns = runsPage.items.filter(
       (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === runId,
     )
@@ -9324,7 +9337,43 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
     // ── GET /api/runs ──
     if (req.method === 'GET' && path === '/api/runs') {
-      const page = await store.listRuns({ workspaceId, limit: 100 })
+      // ★ 分批第 72 批：这个列表必须**同时**满足两件事——最近的在里面，**老的也在**。
+      //
+      //   起因是使用者报的一个 bug：「用 URL 启动的任务在任务列表里一直显示『执行中』」。
+      //   量下来的根因：这里原来是 `listRuns({ limit: 100 })`，而翻页实现是
+      //   "按 id 升序取前 100 条"——run 的 id 是 ULID（字典序 = 时间序），于是返回的是
+      //   **最老的 100 条**（本机那份数据：接口给的最新一条是 45 天前的）。
+      //
+      //   ⚠️ 只把顺序翻成"最近 100 条"是不够的，我第一版就是这么改的，随后用真实数据
+      //   副本量出来：**19/19 条任务的阶段全变**——老的变成了「执行中」（它们的 run
+      //   掉出了最近 100 条），新的对了。也就是说截断本身才是病：任务看板的阶段推导
+      //   （`apps/web/src/lib/pipeline.ts` 的 `deriveStage`）**每条任务都要看它自己的
+      //   run**，而这里给的是全局一页。任何"只给一部分 run"的页都会让另一部分任务说谎。
+      //
+      //   所以判据改成：**给全**（上限取 10_000，与 `/api/costs`、删任务那几处同一个
+      //   数量级），并按 `queuedAt` 新→旧排（新的在前更符合"最近发生了什么事"）。
+      //   本机实测 197 条 run 的整份列表 ≈ 60KB，本地单用户看板完全可以接受；
+      //   真到上万条再谈游标——那时该做的是给看板一个"按 subject 查 run"的接口，
+      //   而不是把这一页悄悄截短。
+      //
+      // ★ 顺带修一个**死接口**：CLI 的 `runs --limit N` 一直在发 `?limit=N`
+      //   （`apps/cli/src/commands.ts`），而这条路由从来没读过它——参数被静默忽略，
+      //   永远按写死的数返回。这正是本仓库最怕的那类缺陷（"配置得上，永远不会生效"），
+      //   既然这一行要改，就把它接上：越界/非整数 ⇒ 400（不静默夹到边界）。
+      const limitRaw = url.searchParams.get('limit')
+      let limit = RUNS_LIST_LIMIT
+      if (limitRaw !== null) {
+        const n = Number(limitRaw)
+        if (!Number.isInteger(n) || n < 1 || n > RUNS_LIST_LIMIT) {
+          sendJson(res, 400, {
+            error: `limit 必须是 1 到 ${RUNS_LIST_LIMIT} 之间的整数（收到 ${JSON.stringify(limitRaw)}）`,
+            code: 'runs_limit_invalid',
+          })
+          return
+        }
+        limit = n
+      }
+      const page = await store.listRuns({ workspaceId, limit, order: 'desc' })
       const runs = await Promise.all(
         page.items.map(async (run) => ({
           runId: run.id,

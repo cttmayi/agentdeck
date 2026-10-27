@@ -109,6 +109,36 @@ export interface RunQuery extends PageQuery {
   workspaceId: WorkspaceId
   status?: readonly RunStatus[]
   agentId?: AgentId
+  /**
+   * 排序方向（2026-10，分批第 72 批）。
+   *
+   * - `'asc'`（默认）= **老 → 新**，游标翻页（`PageQuery.cursor`，现状不变）；
+   * - `'desc'` = **新 → 旧的一页**：按 `queuedAt` 排（同一个毫秒再按 id），
+   *   `nextCursor` **恒为 null**——这个方向不做游标翻页。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 为什么必须加这个（一个真 bug，量出来的）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 翻页实现是"按 id 升序 + 取前 limit 条"，而 run 的 id 是 ULID（字典序 = 时间序）。
+   * 于是 `GET /api/runs`（`limit: 100`）拿到的是**最老的 100 条**。本机实测：某个
+   * 工作区有 **445 条 run**，接口返回的最"新"一条是 45 天前的——**最近 45 天的 run
+   * 一条都返回不到**。
+   *
+   * 任务看板正是靠这个列表把 run 归到任务上（`apps/web/src/lib/pipeline.ts` 的
+   * `deriveStage`）。看不到 run ⇒ 落到"一条执行 run 都还没有"那一档 ⇒ 于是最近建的
+   * 任务**一直显示「执行中」**，哪怕它早就 failed/completed 了。刷新一次就复现，
+   * 而接口一个错都不报。
+   *
+   * 所以"最近的一页"必须是**明确要来的**，不能靠调用方猜 limit 够不够大。
+   *
+   * ⚠️ 为什么 desc **不支持游标**：游标的位置是用 id 比较出来的（`id > cursor`），
+   *    而 desc 的序是 `queuedAt`——两套键混用会得到"翻页翻到最老"的那种假象
+   *    （而 `PageQuery.cursor` 的注释里写着：游标失效时**不许回头**）。
+   *    与其发明一个"复合游标"再让两个存储实现比着写对，不如把这条方向的语义
+   *    收成一句话：**只看最近 N 条，不翻页**。要翻旧数据就用 asc。
+   */
+  order?: 'asc' | 'desc'
 }
 
 export interface ReportQuery extends PageQuery {

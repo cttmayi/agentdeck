@@ -365,6 +365,90 @@ describe('工具包（D40）：CRUD 与卸载', () => {
   })
 })
 
+describe('★ 分批第 72 批：listRuns 的 order（"最近的一页"）', () => {
+  /*
+   * 这个方向是**被一个真 bug 逼出来的**：翻页是"按 id 升序取前 limit 条"，而 run 的
+   * id 是 ULID（字典序 = 时间序）⇒ `GET /api/runs`（limit 100）拿到的是**最老的**
+   * 100 条。本机实测某工作区 445 条 run：接口返回的最新一条是 45 天前的，最近 45 天
+   * 一条都没有；任务看板因此把最近建的任务一律显示成「执行中」。
+   *
+   * 判据只钉两件事：① desc 给的是**新的那几条**；② desc **不给游标**（它的序是
+   * queuedAt，而游标的语义建立在 id 上——混用就会"翻页翻到最老"）。
+   */
+  const W = wsId('ws-order')
+
+  test('★★★ desc = 新→旧（而 asc 默认仍是老→新，两种都在）', async () => {
+    const dir = await makeTempDir('order-desc')
+    try {
+      const s = await FileStore.open({ dataDir: dir, fsync: false })
+      await s.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: W,
+        name: 'W',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      // 故意让 id 与 queuedAt 的顺序**相反**：只按 id 排的实现会把 r-3 当成最新的
+      await s.insertRun(makeRun({ id: 'r-1', workspaceId: W, agentId: 'a1', queuedAt: 300 }))
+      await s.insertRun(makeRun({ id: 'r-2', workspaceId: W, agentId: 'a1', queuedAt: 200 }))
+      await s.insertRun(makeRun({ id: 'r-3', workspaceId: W, agentId: 'a1', queuedAt: 100 }))
+
+      const desc = await s.listRuns({ workspaceId: W, limit: 2, order: 'desc' })
+      assert.deepEqual(
+        desc.items.map((r) => r.id),
+        ['r-1', 'r-2'],
+        'desc 必须按 queuedAt 取最新的两条',
+      )
+      assert.equal(desc.nextCursor, null, 'desc 不翻页（理由见 RunQuery.order）')
+
+      const asc = await s.listRuns({ workspaceId: W, limit: 2 })
+      assert.deepEqual(
+        asc.items.map((r) => r.id),
+        ['r-1', 'r-2'],
+        'asc 是 id 升序（现有翻页语义不变）——它与 desc 的差别是判据，不是巧合',
+      )
+      await s.close()
+    } finally {
+      await cleanup(dir)
+    }
+  })
+
+  test('★★ 超过 limit 时 desc 给的是**最近的**那几条（这正是 bug 的形状）', async () => {
+    const dir = await makeTempDir('order-trunc')
+    try {
+      const s = await FileStore.open({ dataDir: dir, fsync: false })
+      await s.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: W,
+        name: 'W',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      for (let i = 0; i < 150; i += 1) {
+        // id 递增 = 时间递增（ULID 的样子），最老的是 r-000
+        const id = `r-${String(i).padStart(3, '0')}`
+        await s.insertRun(makeRun({ id, workspaceId: W, agentId: 'a1', queuedAt: 1000 + i }))
+      }
+      const desc = await s.listRuns({ workspaceId: W, limit: 100, order: 'desc' })
+      assert.equal(desc.items.length, 100)
+      assert.equal(desc.items[0]!.id, 'r-149', '第一条必须是最新的那条')
+      assert.ok(
+        !desc.items.some((r) => r.id === 'r-000'),
+        '★ 最老的那条不该在"最近 100 条"里——旧实现恰恰相反：它只给最老的那些',
+      )
+      await s.close()
+    } finally {
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('CAS 状态转移（端口的支点）', () => {
   const RID = runId('run-cas')
 

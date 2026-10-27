@@ -569,6 +569,25 @@ const NAMED_SQL = {
        AND id > ?4
      ORDER BY id`,
 
+  /**
+   * ★ 分批第 72 批：`order: 'desc'` 用这一条（**最近的一页**，不带游标）。
+   *
+   * 与 `runList` 的差别只有三处，都是有意的：
+   *   · 没有 `id > ?4`（那个条件是"从哪之后翻页"，而这一方向不翻页）；
+   *   · `ORDER BY queuedAt DESC`（不是 id——run 的 id 是 ULID，字典序等于时间序，
+   *     但派生出来的 id 不一定，所以排序键要说清楚是 `queuedAt`）；
+   *   · `LIMIT` 由调用方给，配合端口里"desc 恒为 null 的 nextCursor"。
+   *
+   * ⚠️ `json_extract` 与 `json_each` 同属 SQLite 的 JSON1 扩展，本文件已经在用后者，
+   *    所以不是新增依赖。
+   */
+  runListDesc: `SELECT json FROM run
+     WHERE workspace_id = ?1
+       AND (?2 IS NULL OR status IN (SELECT value FROM json_each(?2)))
+       AND (?3 IS NULL OR agent_id = ?3)
+     ORDER BY json_extract(json, '$.queuedAt') DESC, id DESC
+     LIMIT ?4`,
+
   // ── Report 去重 ──
   reportDedup: `SELECT json FROM report WHERE dedup_key = ? ORDER BY rowid LIMIT 1`,
   /**
@@ -1479,6 +1498,16 @@ export class SqliteStore implements Store {
   }
 
   async listRuns(q: RunQuery): Promise<Page<Run>> {
+    // ★ 分批第 72 批：`order: 'desc'` = 最近的一页（见 `RunQuery.order`）。
+    if (q.order === 'desc') {
+      const rows = this.#named('runListDesc').all({
+        1: q.workspaceId as string,
+        2: q.status?.length ? JSON.stringify(q.status) : null,
+        3: q.agentId ? (q.agentId as string) : null,
+        4: q.limit ?? 50,
+      }) as { json: string }[]
+      return { items: rows.map((r) => JSON.parse(r.json) as Run), nextCursor: null }
+    }
     // 与 listIssues 同一条规矩：`?1..?N` 按名字绑（见那里的注释）
     const rows = this.#named('runList').all({
       1: q.workspaceId as string,

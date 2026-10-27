@@ -1735,6 +1735,45 @@ describe('打开期校验与关闭', () => {
     }
   })
 
+  test('★★★ 分批第 72 批：`order: \'desc\'` 给的是**最近的一页**（SQL 侧同一条判据）', async () => {
+    /*
+     * 文件适配器与 SQL 适配器必须**同一套语义**，否则"用哪个存储"会改变界面行为。
+     * 这条与 `file-store.test.ts` 里那两条成对：按 `queuedAt` 取最新、不给游标、
+     * 超过 limit 时也不许退回最老那批。
+     */
+    const d = await makeTempDir('order-desc')
+    try {
+      const s = await SqliteStore.open({ dataDir: d, fsync: false })
+      const W = wsId('ws-order')
+      await s.insertWorkspace({
+        executeTemplate: '',
+        reviewTemplate: '',
+        chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        id: W,
+        name: 'W',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      for (let i = 0; i < 5; i += 1) {
+        await s.insertRun(
+          makeRun({ id: `r-${String(i).padStart(3, '0')}`, workspaceId: W, agentId: 'a1', queuedAt: 1000 + i }),
+        )
+      }
+      const desc = await s.listRuns({ workspaceId: W, limit: 2, order: 'desc' })
+      assert.deepEqual(
+        desc.items.map((r) => r.id),
+        ['r-004', 'r-003'],
+        'desc 必须按 queuedAt 取最新的两条（不是 id 最小的两条）',
+      )
+      assert.equal(desc.nextCursor, null, 'desc 不翻页')
+      await s.close()
+    } finally {
+      await cleanup(d)
+    }
+  })
+
   test('close() 是幂等的；关闭后再用会给出可读错误', async () => {
     const d = await makeTempDir('close')
     try {

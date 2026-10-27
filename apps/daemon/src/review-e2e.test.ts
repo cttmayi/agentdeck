@@ -1938,9 +1938,21 @@ describe('S2：任务/结果落盘，审核引用文件（§3.3b）', () => {
 
       const reviewRuns = (
         (await (await fetch(`${d.url}/api/runs`)).json()) as {
-          runs: Array<{ runId: string; kind: string }>
+          runs: Array<{ runId: string; kind: string; queuedAt: number }>
         }
-      ).runs.filter((r) => r.kind === 'review')
+      )
+        .runs.filter((r) => r.kind === 'review')
+        /*
+         * ⚠️ 分批第 72 批：**显式按时间排**，不要靠数组下标。
+         *
+         * `/api/runs` 从"最老的在前"改成了"最近的在前"（那个改动修的是任务看板把新任务
+         * 显示成「执行中」的 bug），于是 `reviewRuns[0]` 从"第一条审核"变成了"第二条"——
+         * 这条用例当场红了（断言'第一条判决必须不合规'，量到的是第二条的 advisory）。
+         *
+         * 这不是断言放松：用例真正依赖的是**时间上的第一条**，而"数组下标 0"只是碰巧
+         * 等于它。把这条依赖写出来，接口以后再调整顺序也不会骗过这条用例。
+         */
+        .sort((a, b) => a.queuedAt - b.queuedAt)
 
       // 第一条审核：判决不合规 ⇒ invalid + 处置方式是重试
       const verdicts1 = ((await (

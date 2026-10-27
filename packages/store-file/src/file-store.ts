@@ -1085,6 +1085,17 @@ export class FileStore implements Store {
       items = items.filter((r) => wanted.has(r.status))
     }
     if (q.agentId) items = items.filter((r) => r.agentId === q.agentId)
+    // ★ 分批第 72 批：`order: 'desc'` = **最近的一页**（见 `RunQuery.order` 的注释）。
+    //   按 `queuedAt` 排（同一毫秒再按 id 反序），**不给游标**——理由写在端口那边。
+    //
+    //   ⚠️ 这里不能复用 `paginate`：它按 id 升序、并用 id 当游标。把 desc 硬塞进去
+    //     就会得到"id 最小的那几条"（恰恰是最老的）。
+    if (q.order === 'desc') {
+      const sorted = [...items].sort(
+        (a, b) => b.queuedAt - a.queuedAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+      )
+      return { items: sorted.slice(0, q.limit ?? 50), nextCursor: null }
+    }
     return paginate(items, q)
   }
 
