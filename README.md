@@ -172,6 +172,8 @@ pnpm run cli status
 
 更多细节见 [`docs/reference/skills.md`](./docs/reference/skills.md) 与 [`docs/reference/tools.md`](./docs/reference/tools.md)（含一份可以照抄的工具范例 `examples/tools/example-note/`）。
 
+想把它当本地能力用（脚本 / 定时任务 / 别的程序里的一步）？见 [`examples/task-api/`](./examples/task-api/)：`curl` 与 node 两种写法，含幂等、异步收口、带组的例子。
+
 ### 跑完之后看的是「最后结果」
 
 执行**中**显示「实时输出」（原始流水）；跑完自动切成「**最后结果**」：
