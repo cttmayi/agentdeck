@@ -2804,3 +2804,27 @@ AgentBackendBase                    描述符、key/protocol/rejectDetectable、
 | `service-backend.ts`（service 族） | 136 | **94** |
 
 全量 **2194 全绿**，行为一条没变。
+
+### 4.3.29 分批第 69 批：把**真实原型链**也钉住（因为我把图画错了）
+
+使用者看第 68 批的说明后问：
+
+> 「为什么 `ClaudeBackend` 也在 `ServiceBackendBase` 下面呢，它是同时继承 2 个类？」
+
+**代码没错，是那张 ASCII 图的缩进把分支挂错了**（标注写着 `extends LineStreamBackendBase`，却缩在
+`ServiceBackendBase` 底下）。真实原型链（读运行时打出来的）：
+
+```
+ClaudeBackend  : ClaudeBackend → LineStreamBackendBase → AgentBackendBase
+GenericBackend : GenericBackend → LineStreamBackendBase → AgentBackendBase
+CodexBackend   : CodexBackend → ServiceBackendBase → AgentBackendBase
+```
+
+单继承，TS 也不支持多继承。
+
+**教训**：这类"谁继承谁"的问题靠看图和记忆防不住 —— 图会画错，注释会过期。
+所以第 69 批加了**运行时原型链判据**（`runtime-profile.test.ts`）：
+
+- 三条链必须**逐字**等于上面那三行（顺序也算）；
+- **两族互不串门**：claude/generic 的链里不出现 `ServiceBackendBase`；codex 的链里不出现 `LineStreamBackendBase`；
+- 红检：把"不出现"翻成"必须出现" ⇒ 立刻红（证明这两条断言不是摆设）。

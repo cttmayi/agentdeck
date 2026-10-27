@@ -71,6 +71,52 @@ describe('★ 分批第 67 批：RuntimeProfile（平台侧差异的唯一定义
  *
  * 这一类判据不在运行时（它是继承结构），所以在源码层面钉住层次，别让"两族又各自长一份"。
  */
+/**
+ * ★ 分批第 69 批：**真实原型链**也要钉住。
+ *
+ * 起因是使用者问「为什么 ClaudeBackend 也在 ServiceBackendBase 下面呢，它是同时继承 2 个类？」
+ * ——代码没错（单继承），是**我画的图**把分支挂错了。这种事靠看图和记忆防不住，
+ * 所以直接把运行时原型链读出来断言。
+ */
+describe('★ 分批第 69 批：适配器的真实原型链（单继承、各在各的族里）', () => {
+  const chainOf = (ctor: unknown): string[] => {
+    const out: string[] = []
+    let proto: object | null | undefined = (ctor as { prototype?: object }).prototype
+    while (proto && proto !== Object.prototype) {
+      const name = (proto as { constructor?: { name?: string } }).constructor?.name
+      if (name !== undefined) out.push(name)
+      proto = Object.getPrototypeOf(proto) as object | null
+    }
+    return out
+  }
+
+  test('★★★ claude / generic 在 cli 族、codex 在 service 族；两条链都汇到 AgentBackendBase', async () => {
+    const { ClaudeBackend } = await import('@agentdeck/agent-claude')
+    const { GenericBackend } = await import('@agentdeck/agent-generic')
+    const { CodexBackend } = await import('@agentdeck/agent-codex')
+
+    assert.deepEqual(chainOf(ClaudeBackend), ['ClaudeBackend', 'LineStreamBackendBase', 'AgentBackendBase'])
+    assert.deepEqual(chainOf(GenericBackend), ['GenericBackend', 'LineStreamBackendBase', 'AgentBackendBase'])
+    assert.deepEqual(chainOf(CodexBackend), ['CodexBackend', 'ServiceBackendBase', 'AgentBackendBase'])
+  })
+
+  test('★★★ 两族互不串门：claude/generic 的链里没有 ServiceBackendBase，codex 的没有 LineStreamBackendBase', async () => {
+    const { ClaudeBackend } = await import('@agentdeck/agent-claude')
+    const { GenericBackend } = await import('@agentdeck/agent-generic')
+    const { CodexBackend } = await import('@agentdeck/agent-codex')
+    for (const cli of [ClaudeBackend, GenericBackend]) {
+      assert.ok(
+        !chainOf(cli).includes('ServiceBackendBase'),
+        `★ ${cli.name} 不该出现在 service 族里——它是单继承，只认 cli 族`,
+      )
+    }
+    assert.ok(
+      !chainOf(CodexBackend).includes('LineStreamBackendBase'),
+      '★ CodexBackend 不该继承 cli 族的基类（它的协议时序不是 line-stream）',
+    )
+  })
+})
+
 describe('★ 分批第 68 批：适配器的类层次（按交互方式分族）', () => {
   test('★★★ 两个族都继承同一个根类；两族各自只有一个类', async () => {
     const { readFile } = await import('node:fs/promises')
