@@ -1091,7 +1091,10 @@ export class RunExecutor {
               runId,
               `宿主级技能：已逐条禁用 ${String(sync.hostSkillsDisabled.length)} 个` +
                 `（\`$HOME/.agents/skills\` 下的 SKILL.md；它们不属于平台，但 codex 会扫到）——` +
-                `${sync.hostSkillsDisabled.join('、')}`,
+                // 日志里用**相对名字**（绝对路径太长），但要能看出是哪些
+                `${sync.hostSkillsDisabled
+                  .map((p) => p.replace(/^.*\.agents\/skills\//u, ''))
+                  .join('、')}`,
             )
           }
           if (sync.hostSkillsAlreadyListed.length > 0) {

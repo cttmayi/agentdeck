@@ -2379,3 +2379,31 @@ enabled = false
 #### 顺带修掉一条偶发红
 
 `crystallize-e2e` 里等"返工版任务书"的上限 10s → 30s（全量并行时偶发超时；断言没动）。
+
+### 4.3.19 分批第 59 批：**不能按 name 关**——同名会把平台注入的那份一起关掉
+
+使用者提问（问到了要害）：「如果只写名字，如果我加载的 skill 重名，是否会有问题」。
+
+#### 实测（受控 HOME，`codex debug prompt-input`）
+
+夹具：`$HOME/.agents/skills/find-skills`（宿主级）与 `<workDir>/.codex/skills/find-skills`（平台注入）**同名**。
+
+| 情形 | 清单里的 find-skills |
+| --- | --- |
+| 基线 | **两条**（r0 平台注入 + r1 宿主级）—— codex **不按名字去重** |
+| `[[skills.config]] name = "find-skills" enabled = false` | **0 条** —— 连平台注入的那份也**一起消失** |
+| `[[skills.config]] path = "<宿主那份 SKILL.md>" enabled = false` | **只剩 r0** ✅ 精确 |
+
+也就是说：**上一批（58）改成 name 优先是个错**，而且错得很隐蔽——它只在"用户恰好装过同名技能"时
+发作，发作时**没有任何报错**，只是平台自己注入的技能悄悄不见了。
+
+#### 修法
+
+- `withHostSkillsDisabled()` **只用 `path`**（回到 57 批的做法），`HostSkill.name` 只为日志/诊断保留。
+- 代价：嵌套副本要列两条（真机上 `fireworks-tech-graph` 两层）——正确性优先。
+- 判据里加死一条：写出来的 config **不许出现 `name =`**（`codex-config.test.ts`），
+  并在注释里写明"按 name 关不安全"的实测依据，免得下一次又有人图省事改回去。
+
+> 顺带记一条方法论：这条 bug 是**使用者问出来的**，不是测出来的——上一批的判据只验了
+> "name 能关掉宿主那份"，没验"关掉的范围是不是恰好只有它"。以后写这类"关闭/过滤"实现，
+> 判据要同时钉住**该关的关了**与**不该关的还在**。

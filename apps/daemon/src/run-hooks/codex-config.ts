@@ -225,21 +225,18 @@ export function withHostSkillsDisabled(
   let text = configText
   for (const skill of skills) {
     /**
-     * ⚠️ 优先按 **`name`** 关（实测有效，比 path 省：真机上 `fireworks-tech-graph` 那份
-     *    嵌套副本一条 name 就一起关掉）。读不到 name 的技能退回按**绝对路径**关。
-     * ⚠️ **没有通配符**：`name` 写星号、`path` 写带星号的路径，实测都**不生效**
-     *    （按字面量匹配），所以只能一条条列——这条写进注释，免得下一个人再试一遍。
+     * ⚠️ **按路径关**（不是按 name）——理由见 `HostSkill` 上面那段实测：
+     *    按 name 关会把**同名**的平台注入技能一起关掉，而那种失效没有报错。
+     * ⚠️ **没有通配符**：`path` 写星号、写目录都不生效（实测），只能一条条列。
      */
-    const useName = skill.name !== null
-    const key = useName ? `name = "${escapeTomlBasicString(skill.name as string)}"` : `path = "${escapeTomlBasicString(skill.path)}"`
-    const label = useName ? (skill.name as string) : skill.path
+    const key = `path = "${escapeTomlBasicString(skill.path)}"`
     if (text.includes(key)) {
-      alreadyListed.push(label)
+      alreadyListed.push(skill.path)
       continue
     }
     const trimmed = text.endsWith('\n') ? text : `${text}\n`
     text = `${trimmed}\n[[skills.config]]\n${key}\nenabled = false\n`
-    disabled.push(label)
+    disabled.push(skill.path)
   }
   return { text, disabled, alreadyListed }
 }
@@ -251,21 +248,39 @@ export function withHostSkillsDisabled(
  * 只读、深度有限（默认 4 层）：技能目录不该更深，而无限递归会在使用者的
  * 家目录里乱翻。找不到就返回空数组——**不抛**，那是正常情况（没装这类技能）。
  */
+/**
+ * ★ 分批第 59 批：宿主级技能**只能按路径关，不能按 name 关**（实测出来的坑）。
+ *
+ * 使用者的提问值一条实测：「如果只写名字，如果我加载的 skill 重名，是否会有问题」。
+ *
+ * 用受控 `HOME`（`$HOME/.agents/skills` = 夹具目录）+ 工作目录注入**同名**技能，实测：
+ *
+ *   · 基线：清单里出现**两条**同名条目（r0 平台注入、r1 宿主级），codex 不按名字去重；
+ *   · `[[skills.config]] name = "find-skills" enabled = false`
+ *     ⇒ **两条一起消失**（连平台注入的那份也被关掉了）；
+ *   · `[[skills.config]] path = "<宿主那份 SKILL.md>" enabled = false`
+ *     ⇒ 只剩平台注入的那条 ✅ 精确。
+ *
+ * 所以实现**只用 path**。代价是同名之外的"嵌套副本"要列两条（真机上
+ * `fireworks-tech-graph` 有两层），但正确性优先——name 那条会让"用户恰好装过同名技能"
+ * 这种无辜场景把平台自己注入的技能悄悄关掉，而那种失效**没有任何报错**。
+ */
 export interface HostSkill {
-  /** frontmatter 里的 `name`（读不到就是 null）。 */
+  /** frontmatter 里的 `name`（**只用于日志/诊断**，不写进 config）。 */
   name: string | null
-  /** `SKILL.md` 的绝对路径（兜底用）。 */
+  /** `SKILL.md` 的绝对路径 —— 写进 config 的就是它。 */
   path: string
 }
 
+
 /**
- * 在若干**宿主级技能根**下递归找出技能（`SKILL.md`），并读出它的 `name`。
+ * 在若干**宿主级技能根**下递归找出技能（`SKILL.md`）。
  *
- * ⚠️ 为什么要 `name`：codex 的 `skills.config` 既能按 `path` 也能按 **`name`** 关（实测，
- *    见 `withHostSkillsDisabled`）。按 name 更省——真机上 `fireworks-tech-graph` 有两份
- *    嵌套的 `SKILL.md`，按 name 一条就同时关掉两份；按 path 要列两条。
+ * ⚠️ 递归是必须的：codex 认嵌套那份（真机上 `fireworks-tech-graph` 有两层，
+ *    它把两份都列出来了）。
  * ⚠️ 只读、深度有限（默认 4 层）：技能目录不该更深，无限递归会在家目录里乱翻。
  *    找不到就返回空数组——**不抛**，那是正常情况（没装这类技能）。
+ * ⚠️ `name` 只为日志/诊断而读，**不参与禁用**（按 name 关不安全，见 `HostSkill` 那段实测）。
  */
 export async function findSkillFiles(roots: readonly string[], maxDepth = 4): Promise<HostSkill[]> {
   const found: string[] = []
@@ -281,13 +296,15 @@ export async function findSkillFiles(roots: readonly string[], maxDepth = 4): Pr
   }
   for (const root of roots) await walk(root, 0)
   const out: HostSkill[] = []
-  for (const path of found.sort()) {
-    out.push({ name: await readSkillName(path), path })
-  }
+  for (const path of found.sort()) out.push({ name: await readSkillName(path), path })
   return out
 }
 
-/** 从 `SKILL.md` 的 frontmatter 里取 `name:`（取不到 = null，调用方退回按 path 关）。 */
+/**
+ * 从 `SKILL.md` 的 frontmatter 里取 `name:`（取不到 = null）。
+ *
+ * ⚠️ **只用于日志/诊断**，不写进 config（按 name 关不安全，见 `HostSkill` 那段实测）。
+ */
 async function readSkillName(skillFile: string): Promise<string | null> {
   const text = await readFile(skillFile, 'utf8').catch(() => null)
   if (text === null) return null
