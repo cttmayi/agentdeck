@@ -2220,3 +2220,69 @@ codex 这一道门同时放开三样：项目级 **config**、**hooks**、**exec
 | 同步时给了目录 ⇒ 受管 config.toml 真的多出信任段、指纹算得出来、连跑两轮只有一段 | 同上 |
 | 不给目录 ⇒ **一个字都不多写**（默认行为不变） | 同上 |
 | 红检：不写回 trust 段 ⇒ 立刻红 | 同上 |
+
+### 4.3.16 分批第 56 批：关掉 codex 自带的 system skills（9 → 3）
+
+使用者：「我通过聊天的方式和助手沟通，问它『能看见几个 skill』，它告诉我能看见 9 个。应该不对」。
+
+#### 先量清楚「9」从哪来
+
+`codex debug prompt-input`（codex 自带的"模型可见输入"导出器）在**干净的 CODEX_HOME + 临时工作目录**下，
+列出三个技能根：
+
+| 根 | 路径 | 内容 |
+| --- | --- | --- |
+| r0 | `<workDir>/.codex/skills` | 平台注入的（这次 0 个 —— 日志原话「本次没有注入任何 skill」） |
+| **r1** | **`$HOME/.agents/skills`** | 跨 agent 全局目录（3 个：find-skills / fireworks-tech-graph / reverse-engineer-anything） |
+| r2 | `<CODEX_HOME>/skills/.system` | codex **自带** 6 个（imagegen / openai-docs / plugin-creator / review-agent / skill-creator / skill-installer） |
+
+3 + 6 = **9**，与助手报的数字对上。顺带一个副作用发现：`~/.codex/skills`（个人 skill）**确实被隔离挡住了**，
+不在任何根里 ⇒ 隔离对 `CODEX_HOME` 之内是有效的。
+
+#### 网络调查（都是 openai/codex 官方仓库）
+
+| 线索 | 状态 |
+| --- | --- |
+| [#46414](https://github.com/openai/codex/issues/46414) 「Config option to skip the `~/.agents/skills` root for an isolated `CODEX_HOME`」 | **还开着** ⇒ 目前没有配置项能关 r1 |
+| [#24237](https://github.com/openai/codex/issues/24237) 项目级配置关掉全局/用户级 skill | 还开着 |
+| [#56659](https://github.com/openai/codex/issues/56659) 允许隔离客户端排除个人 skill 根 | 还开着 |
+| [PR #13792](https://github.com/openai/codex/pull/13792) 支持关闭 bundled system skills | **已实现**（键名见下） |
+| [PR #11289](https://github.com/openai/codex/pull/11289) `AGENTS_HOME` 支持 | 0.157.1 **未生效**（实测无效） |
+
+#### 本批落地的（A 案）
+
+受管 `CODEX_HOME/config.toml` 追加：
+
+```toml
+[skills.bundled]
+enabled = false
+```
+
+实测效果（本机 0.157.1，`debug prompt-input` 复核）：**r2 那 6 个消失**，r0（平台注入）与 r1
+（`$HOME/.agents/skills`）不变 ⇒ 每次 run 的可见技能从 9 收到 3（且自有注入的技能仍然可见）。
+
+⚠️ 幂等：使用者自己的 `config.toml` 里**已经有** `[skills.bundled]` 段时不追加（TOML 重复定义同一个表
+会让 codex 起不来），此时如实回报 `already-configured`，run 日志写「**没有关掉**（你自己的配置里已经有了，
+平台不覆盖你的配置）」——不许说"已关闭"。
+
+#### 顺带修掉一句**不准确的日志**
+
+原来那句「codex 个人配置隔离：……用户级 skill 不可见」——**不准确**：隔离只顶掉了 `CODEX_HOME`，
+而 `$HOME/.agents/skills` 照旧被扫。改成：
+「`CODEX_HOME` 下的用户级 skill 不可见……⚠️ `$HOME/.agents/skills`（跨 agent 的全局目录）**不在隔离范围内**」。
+
+#### 还没做的（B 案，要单独评估）
+
+要彻底断掉 r1 只能重定向 `HOME`。实测 `GIT_CONFIG_GLOBAL` 补偿后 `git config user.name` 仍正常，
+但 `~/.ssh` 与 `~/.config` 会一起不可达 ⇒ agent 用 SSH 做 git / 用 gh 会受影响。上游 #46414 合并后
+就能用配置项解决，先挂待办。
+
+#### 验证
+
+| 判据 | 在哪 |
+| --- | --- |
+| `withBundledSkillsDisabled`：追加 / 幂等 / **不覆盖使用者自己那段** | `codex-config.test.ts` |
+| 同步后受管 config 里真有 `[skills.bundled] enabled = false` | 同上 |
+| 使用者已配 ⇒ 回报 `already-configured`（日志据此说真话） | 同上 |
+| 红检：不写回 ⇒ 立刻红 | 同上 |
+| doctor 的复制判据从"逐字节相同"改成"**源内容逐字保留**"（平台会追加自己的段） | `codex-doctor.test.ts` |

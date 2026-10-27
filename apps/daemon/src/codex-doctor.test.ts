@@ -152,7 +152,9 @@ describe('★ 分批第 42 批：--doctor codex 自检（Windows 上"codex 通�
       assert.equal(report.version.bytes?.utf8HasReplacement, false)
       assert.equal(report.config.files.every((f) => f.exists), true)
       assert.equal(report.copy.ok, true, `复制应该成功：${report.copy.reason ?? ''}`)
-      assert.equal(report.copy.bytesIdentical, true, '复制是字节搬运，必须逐字节相同')
+      // 分批第 56 批：平台会在复制之后追加自己的段（trust / skills.bundled），
+      // 所以判据从"逐字节相同"改成"**源内容逐字保留**（受管那份以源为前缀）"
+      assert.equal(report.copy.contentPreserved, true, '源内容必须完整保留（复制是字节搬运）')
       assert.equal(report.handshake.ok, true, `握手应该成功：${report.handshake.error ?? ''}`)
       // 报告要能整段复制粘贴：几个关键段落都得在
       const text = renderCodexDoctorReport(report)

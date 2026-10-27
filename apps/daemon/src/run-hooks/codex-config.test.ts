@@ -15,7 +15,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
-import { syncCodexConfigDir, withTrustedProject } from './codex-config.ts'
+import { syncCodexConfigDir, withBundledSkillsDisabled, withTrustedProject } from './codex-config.ts'
 
 test('syncCodexConfigDir：把源 ~/.codex 的 auth.json 与 config.toml copy 进受管目录', async () => {
   const root = await makeTempDir('ccd-codex')
@@ -175,7 +175,7 @@ describe('★ 分批第 55 批：项目级配置的门（trusted）', () => {
     )
   })
 
-  test('★★ 不给 trustProjectDir ⇒ 不写任何 trust（默认行为不变）', async () => {
+  test('★★ 不给 trustProjectDir ⇒ 不写 trust 段（但 system skills 照关——那是与项目无关的一条）', async () => {
     const dataDir = await makeTempDir('codex-trust-none')
     const source = join(dataDir, 'user-codex')
     const configDir = join(dataDir, 'managed')
@@ -183,8 +183,76 @@ describe('★ 分批第 55 批：项目级配置的门（trusted）', () => {
     await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
     await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
     const result = await syncCodexConfigDir(configDir, source)
-    assert.equal(result.trustedProject, null)
+    assert.equal(result.trustedProject, null, '不传就不该信任任何项目')
     const written = await readFile(join(configDir, 'config.toml'), 'utf8')
-    assert.equal(written, 'model = "gpt-5"\n', '不传就一个字都不多写')
+    assert.ok(!written.includes('[projects."'), '不传 trustProjectDir 就不许出现信任段')
+    // ★ 分批第 56 批：`[skills.bundled]` 与项目无关，属于"每次 run 都要关"的那一条
+    assert.match(written, /\[skills\.bundled\]\nenabled = false/u)
+  })
+})
+
+/**
+ * ★ 分批第 56 批：关掉 codex **自带**的 system skills。
+ *
+ * 实测依据（本机 0.157.1，`codex debug prompt-input`）：干净 CODEX_HOME 下有三个技能根 ——
+ * 工作目录的 `.codex/skills`（我们注入的）、`$HOME/.agents/skills`（跨 agent 全局目录）、
+ * `CODEX_HOME/skills/.system`（codex 自带 6 个）。使用者看到"9 个"就是后两个相加。
+ *
+ * 关掉自带那 6 个的键（上游 PR #13792 的落地名）实测有效：
+ *
+ *     [skills.bundled]
+ *     enabled = false
+ *
+ * 留下 `~/.agents/skills` 是因为**没有任何配置键能关它**（上游 issue #46414 / #24237 / #56659
+ * 都还开着），只能靠改 HOME ——那会连带丢 `~/.ssh` 与 `~/.config`，不在这一步做。
+ */
+describe('★ 分批第 56 批：关掉 codex 自带的 system skills', () => {
+  test('★★★ withBundledSkillsDisabled：追加一段、幂等、不覆盖使用者自己那段', () => {
+    const one = withBundledSkillsDisabled('model = "gpt-5"\n')
+    assert.equal(one.added, true)
+    assert.ok(one.text.endsWith('[skills.bundled]\nenabled = false\n'), one.text)
+    assert.ok(one.text.startsWith('model = "gpt-5"'), '使用者那份配置一个字不动')
+
+    const twice = withBundledSkillsDisabled(one.text)
+    assert.equal(twice.added, false)
+    assert.equal(twice.alreadyConfigured, true, '再来一次要认出已经配过了')
+
+    // 使用者自己写过这一段 ⇒ **不改**（TOML 重复定义同一个表会让 codex 起不来）
+    const theirs = '[skills.bundled]\nenabled = true\n'
+    const kept = withBundledSkillsDisabled(theirs)
+    assert.equal(kept.added, false)
+    assert.equal(kept.text, theirs, '使用者的配置不许被平台改写')
+  })
+
+  test('★★★ 同步之后受管 config.toml 里真有这一段，且我们注入的技能不受影响', async () => {
+    const dataDir = await makeTempDir('codex-bundled')
+    const source = join(dataDir, 'user-codex')
+    const configDir = join(dataDir, 'managed')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), 'model = "gpt-5"\n', 'utf8')
+
+    const result = await syncCodexConfigDir(configDir, source)
+    assert.equal(result.bundledSkills, 'disabled')
+    const written = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.match(written, /\[skills\.bundled\]\nenabled = false/u)
+  })
+
+  test('★★ 使用者自己配了 [skills.bundled] ⇒ 如实回报"没被我们改写"（日志要说出来）', async () => {
+    const dataDir = await makeTempDir('codex-bundled-theirs')
+    const source = join(dataDir, 'user-codex')
+    const configDir = join(dataDir, 'managed')
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, 'auth.json'), '{}\n', 'utf8')
+    await writeFile(join(source, 'config.toml'), '[skills.bundled]\nenabled = true\n', 'utf8')
+
+    const result = await syncCodexConfigDir(configDir, source)
+    assert.equal(
+      result.bundledSkills,
+      'already-configured',
+      '这时平台没关掉那一组，"已关闭"的话会说谎 ⇒ 交给调用方如实说',
+    )
+    const written = await readFile(join(configDir, 'config.toml'), 'utf8')
+    assert.equal(written, '[skills.bundled]\nenabled = true\n')
   })
 })

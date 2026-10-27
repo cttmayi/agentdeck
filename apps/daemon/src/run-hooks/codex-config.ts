@@ -64,6 +64,14 @@ export interface CodexConfigSyncResult {
   trustedProject: string | null
   /** trusted 那个项目里的 `.codex/config.toml` 指纹（文件不存在 = null）。 */
   trustedProjectConfigHash: string | null
+  /**
+   * 这次有没有把 codex **自带**的 system skills 关掉（分批第 56 批）。
+   *
+   * `'disabled'` = 我们写了 `[skills.bundled] enabled = false`；
+   * `'already-configured'` = 使用者自己的配置里已经有这一段（**我们没改**，
+   *   所以它到底开没开由他那份决定——日志里要说清，否则"以为关了其实没关"）。
+   */
+  bundledSkills: 'disabled' | 'already-configured'
 }
 
 /**
@@ -125,6 +133,52 @@ function escapeTomlBasicString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
+/**
+ * ★ 分批第 56 批：关掉 codex **自带**的 system skills（`CODEX_HOME/skills/.system`）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么（实测，不是推断）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * `codex debug prompt-input`（codex 自带的"模型可见输入"导出器）在一个干净的
+ * CODEX_HOME 里会列出**三个**技能根：
+ *
+ *   r0 = <workDir>/.codex/skills          ← 我们注入的（平台控制）
+ *   r1 = $HOME/.agents/skills             ← 跨 agent 的全局目录（**隔离挡不住**，见下面）
+ *   r2 = <CODEX_HOME>/skills/.system      ← codex 自带的 6 个（imagegen / openai-docs /
+ *                                            plugin-creator / review-agent / skill-creator /
+ *                                            skill-installer）
+ *
+ * 使用者当时看到"能看见 9 个 skill"，就是 3（r1）+ 6（r2）。r2 那 6 个**与任务无关**，
+ * 却每次都在模型的技能清单里——它既稀释"平台给了什么技能"这个信号，也让每次 run 的提示词更长。
+ *
+ * 实测关法（上游 PR #13792 的落地键名，本机 0.157.1 验证过）：
+ *
+ *     [skills.bundled]
+ *     enabled = false
+ *
+ * ⚠️ 只关 r2。`r0`（我们注入的）与 `r1`（`$HOME/.agents/skills`）照旧——
+ *    r1 目前**没有任何配置键能关**（上游 issue #46414 / #24237 / #56659 都还开着），
+ *    只能靠改 HOME，那会连带丢 `~/.ssh` 与 `~/.config`，不在这一步里做。
+ * ⚠️ 幂等：使用者自己的 config.toml 里已经有 `[skills.bundled]` 段时**不追加**
+ *    （TOML 重复定义同一个表是错误 ⇒ codex 直接起不来），而是如实回报"没被我们改写"。
+ */
+export function withBundledSkillsDisabled(configText: string): {
+  text: string
+  added: boolean
+  alreadyConfigured: boolean
+} {
+  if (configText.includes('[skills.bundled]')) {
+    return { text: configText, added: false, alreadyConfigured: true }
+  }
+  const trimmed = configText.endsWith('\n') ? configText : `${configText}\n`
+  return {
+    text: `${trimmed}\n[skills.bundled]\nenabled = false\n`,
+    added: true,
+    alreadyConfigured: false,
+  }
+}
+
 export async function syncCodexConfigDir(
   configDir: string,
   sourceHomeDir: string,
@@ -162,6 +216,7 @@ export async function syncCodexConfigDir(
       configDir,
       trustedProject: null,
       trustedProjectConfigHash: null,
+      bundledSkills: 'already-configured',
     }
   }
 
@@ -185,5 +240,15 @@ export async function syncCodexConfigDir(
         : createHash('sha256').update(projectConfig).digest('hex').slice(0, 12)
   }
 
-  return { ok: true, copied, configDir, trustedProject, trustedProjectConfigHash }
+  // ── codex 自带的 system skills：一律关掉（与项目 trust 那一步无关）──
+  let bundledSkills: CodexConfigSyncResult['bundledSkills'] = 'already-configured'
+  {
+    const configPath = join(configDir, 'config.toml')
+    const current = await readFile(configPath, 'utf8')
+    const patched = withBundledSkillsDisabled(current)
+    if (patched.added) await writeFile(configPath, patched.text, 'utf8')
+    bundledSkills = patched.added ? 'disabled' : 'already-configured'
+  }
+
+  return { ok: true, copied, configDir, trustedProject, trustedProjectConfigHash, bundledSkills }
 }

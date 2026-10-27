@@ -1053,10 +1053,27 @@ export class RunExecutor {
               `本次 run 会看到用户级 skill（如 browser-use）。`,
           )
         } else {
+          /**
+           * ⚠️ 这句话原来写的是「用户级 skill 不可见」——**不准确**（分批第 56 批改正）。
+           *
+           * 实测（`codex debug prompt-input`）：隔离只把 `CODEX_HOME` 顶掉了，
+           * 而 codex 还会扫 **`$HOME/.agents/skills`**（跨 agent 的全局目录，装它的
+           * 是 vercel-labs/skills 那套）。所以"用户级不可见"只对 CODEX_HOME 之内成立。
+           * 说准这件事比说得漂亮重要：使用者正是因为看到"能看见 9 个 skill"才发现不对。
+           */
           await this.#note(
             runId,
             `codex 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
-              `用户级 skill 不可见，已同步 ${sync.copied.join('、')}。`,
+              `\`CODEX_HOME\` 下的用户级 skill 不可见，已同步 ${sync.copied.join('、')}；` +
+              `⚠️ \`$HOME/.agents/skills\`（跨 agent 的全局目录）**不在隔离范围内**，那些技能仍然可见。`,
+          )
+          await this.#note(
+            runId,
+            sync.bundledSkills === 'disabled'
+              ? 'codex 自带的 system skills：已关闭（受管 config 里写了 [skills.bundled] enabled = false）——' +
+                '这次的技能清单只剩平台注入的 + $HOME/.agents/skills。'
+              : '⚠️ codex 自带的 system skills：**没有关掉**（你自己的 config.toml 里已经有 ' +
+                '[skills.bundled] 段，平台不覆盖你的配置）——它们会出现在这次的技能清单里。',
           )
           if (sync.trustedProject !== null) {
             await this.#note(

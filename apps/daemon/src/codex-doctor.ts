@@ -124,8 +124,17 @@ export interface CodexDoctorReport {
     ok: boolean
     reason: string | null
     copied: string[]
-    /** 复制过去的字节与源**逐字节相同**（我们只做字节搬运，不改编码）。 */
-    bytesIdentical: boolean
+    /**
+     * 源内容在受管目录里**逐字保留**（复制是字节搬运，不改编码）。
+     *
+     * ⚠️ 分批第 56 批改的语义：平台现在会在复制之后**追加**自己的段
+     * （`[projects."…"]` 的 trust、`[skills.bundled] enabled = false`），
+     * 所以"与源逐字节相同"不再成立，也不该成立——要量的是
+     * **源内容一份不少**（受管那份以源为前缀），而不是"完全相同"。
+     */
+    contentPreserved: boolean
+    /** 平台追加了多少字节（0 = 没有追加）。 */
+    appendedBytes: number
   }
   handshake: {
     ok: boolean
@@ -427,7 +436,8 @@ export async function runCodexDoctor(options: CodexDoctorOptions = {}): Promise<
     ok: false,
     reason: null as string | null,
     copied: [] as string[],
-    bytesIdentical: false,
+    contentPreserved: false,
+    appendedBytes: 0,
   }
   try {
     await mkdir(targetDir, { recursive: true })
@@ -435,19 +445,24 @@ export async function runCodexDoctor(options: CodexDoctorOptions = {}): Promise<
     copy.ok = result.ok
     copy.reason = result.reason ?? null
     copy.copied = [...result.copied]
-    let identical = result.copied.length > 0
+    let preserved = result.copied.length > 0
+    let appended = 0
     for (const name of result.copied) {
       try {
-        const [a, b] = await Promise.all([
+        const [source, target] = await Promise.all([
           readFile(join(sourceDir, name)),
           readFile(join(targetDir, name)),
         ])
-        if (!a.equals(b)) identical = false
+        // 平台会往 config.toml 追加自己的段（trust / skills.bundled）⇒ 判据是
+        // "受管那份以源内容为前缀、且多出来的只有平台追加的部分"。
+        if (!target.subarray(0, source.length).equals(source)) preserved = false
+        appended += Math.max(0, target.length - source.length)
       } catch {
-        identical = false
+        preserved = false
       }
     }
-    copy.bytesIdentical = identical
+    copy.contentPreserved = preserved
+    copy.appendedBytes = appended
   } catch (err) {
     copy.reason = err instanceof Error ? err.message : String(err)
   }
@@ -455,8 +470,11 @@ export async function runCodexDoctor(options: CodexDoctorOptions = {}): Promise<
     id: 'copy-works',
     ok: copy.ok,
     detail: copy.ok
-      ? `复制成功（${copy.copied.join('、')}），且与源**逐字节相同**` +
-        (copy.bytesIdentical ? '' : ' ⚠️ 字节不一致')
+      ? `复制成功（${copy.copied.join('、')}）——源内容逐字保留` +
+        (copy.appendedBytes === 0
+          ? '，没有追加任何东西'
+          : `，平台另外追加了 ${String(copy.appendedBytes)} 字节（trust / skills.bundled 那些段）`) +
+        (copy.contentPreserved ? '' : ' ⚠️ 源内容没有完整保留')
       : `复制失败：${copy.reason ?? '未知原因'}（这就是"执行失败"的一个常见来源：` +
         '受管目录里没有 auth.json ⇒ codex 起得来但认证不了）',
   })
@@ -581,7 +599,8 @@ export function renderCodexDoctorReport(report: CodexDoctorReport): string {
   lines.push('【复制演练（临时目录，不碰受管目录）】')
   lines.push(`  ${mark(report.copy.ok)} ${report.copy.targetDir}`)
   lines.push(
-    `    copied=${report.copy.copied.join('、') || '（无）'}  逐字节相同=${String(report.copy.bytesIdentical)}` +
+    `    copied=${report.copy.copied.join('、') || '（无）'}  源内容保留=${String(report.copy.contentPreserved)}` +
+      `  平台追加=${String(report.copy.appendedBytes)} 字节` +
       (report.copy.reason ? `  reason=${report.copy.reason}` : ''),
   )
   lines.push('')
