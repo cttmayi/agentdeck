@@ -1807,7 +1807,20 @@ export class RunExecutor {
           message: idleTimedOut
             ? `已空闲超过 ${Math.round((req.limits.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS) / 1000)} 秒没有任何输出，判定卡住并终止`
             : (result.error ?? '运行失败'),
-        })
+        },
+          // ★ 分批第 73 批：失败也把**用量与会话 id** 记下来。
+          //
+          //   这两个参数原来只有成功分支传，于是失败 run 的 `sessionId` 恒为 null——
+          //   而"接着上次说"（聊天下一轮 / 任务重试 / 返工）全部靠
+          //   `resumeFromRunId` → 上一条 run 的 `sessionId`。后果：**一次失败就把
+          //   上下文永久切断**，下一轮从零开始，日志只写"上一次 run 没有留下
+          //   sessionId，无从恢复"——像是 CLI 的问题，其实是平台把 CLI 已经报给
+          //   我们的 id 丢了。（Windows 上先被发现，因为那边 run 更容易失败。）
+          //
+          //   用量同理：失败不等于没花钱，CLI 报了就记账（不报就是 undefined，不编）。
+          result.usage ?? undefined,
+          result.sessionId ?? undefined,
+        )
       }
     } catch (err) {
       // ⚠️ 这里原来**一律**记 `infra_error`。而"注入失败"（同名技能撞车、

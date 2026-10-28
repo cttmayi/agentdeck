@@ -257,6 +257,31 @@ await chmod(wrapperPath, 0o755)
 
 ---
 
+### B11. Windows 上「不能 resume」：失败的那一次没有把 sessionId 存下来 `[量到（逻辑）+ 使用者真机报告]`
+
+**使用者原话**：「在 windows 发现一个问题，不能 resume，发现的问题是 id 没有保存下来」。
+
+追下去发现这条缺口**与平台无关**，只是 Windows 上先被看见（那边的 run 更容易失败：
+编码、垫片、网关）：
+
+- `RunExecutor.#finish()` 的**成功分支**把 `result.sessionId` 写进 run 记录，
+  **失败分支**只写原因码 ⇒ 失败 run 的 `sessionId` 恒为 null；
+- 而"接着上次说"（聊天下一轮 / 任务重试 / 返工）全部靠
+  `resumeFromRunId` → 上一条 run 的 `sessionId`；
+- 于是**一次失败就把上下文永久切断**：下一轮从零开始，日志只写
+  「上一次 run 没有留下 sessionId，无从恢复」——看着像 CLI 的问题，其实是平台把
+  CLI 已经报给我们的 id 丢了。
+
+判定"失败也该存"的理由：CLI 在**对话阶段已经建立**之后才失败时（工具报错、中途 5xx），
+那个会话是真实存在的，下一次 `--resume <id>` 仍然可用。丢掉它等于白扔上文，
+代价是使用者重新交代一遍。用量同理——失败不等于没花钱。
+
+**修法**：失败分支同样把 `result.sessionId` / `result.usage` 传进 `#finish`
+（`apps/daemon/src/executor.ts`，分批第 73 批）。判据在
+`apps/daemon/src/resume-after-failure.test.ts`：① 失败 run 记录里有 sessionId 与用量；
+② 失败之后的下一条 run，CLI **真的收到**那个 id（`seenResume = [null, 'sess-from-cli']`）。
+红检：把两个参数退回 `undefined` ⇒ 两条立刻红。
+
 ## B 级：能跑，但会误导人或掉功能
 
 ### B1. `engines: >=22` 与"直接跑 `.ts`"矛盾 —— 我在 Node 22.17 上量到了 `[量到]`
