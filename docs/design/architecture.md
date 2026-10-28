@@ -660,10 +660,14 @@ interface AgentSession {
 ```
 
 - **怎么送**是另一件事，两个档（`deliveryModeFor(runtime)` 决定，**记在 `Run.deliveryMode` 上**）：
-  **A** = ①② 走系统提示通道（`--append-system-prompt`），③ 是用户消息；
-  **B** = 三块合成一段、块边界显式（没有那个通道的 runtime 走这里）。
-  ★ 实测两条：系统提示**活不过 `--resume`** ⇒ A 档每轮都带；每条 stdin 用户消息各换来一个
-  模型回合 ⇒"三块拆成三条消息"被否掉。
+  **A** = ①② 与 ③ **分开投递**（①② 走"系统级"通道），③ 是用户消息；
+  **B** = 三块合成一段、块边界显式（两条通道都没有的 runtime 走这里）。
+  ★ A 档的"系统级通道"有**两条**（2026-10，分批第 74 批）：
+  - **命令行旗标**（claude：`--append-system-prompt`）——**每轮都要重发**，因为系统提示
+    **活不过 `--resume`**（实测 2.0.14）；
+  - **线程级指令**（codex：`thread/start.baseInstructions`）——**建线程时发一次**，恢复后
+    线程带着它（实测 0.157.1，用暗号验过），所以每轮只发 ③。详见 §4.3.32。
+  ★ 另有一条实测：每条 stdin 用户消息各换来一个模型回合 ⇒"三块拆成三条消息"被否掉。
 - 顺序与位置都有理由：**判决契约在 ① 框架的最末**（长跑里上下文会被压缩，最后读到的最不容易被摘要掉）（它是"输出要求"，离生成位置最近）；
   材料**必须留在 ③**——它是第三方内容，进系统提示那一层就是提示注入的靶子。
 - ~~同一份文本另存一份副本 `<workDir>/.agentdeck/context/<runId>.md`（带注释说明哪块走哪个
@@ -2954,3 +2958,43 @@ CodexBackend   : CodexBackend → ServiceBackendBase → AgentBackendBase
 `reviewRuns[0]` = 「第一条审核」）：顺序一翻，它量到的成了第二条。修法不是放松断言，
 而是把那条隐含依赖写出来（**按 `queuedAt` 显式排序**）——用例真正依赖的是时间顺序，
 不是数组位置。
+
+### 4.3.32 分批第 74 批：codex 的 ①② 挂到线程上，每轮只发 ③
+
+使用者报：「在 codex CLI 情况下，每次沟通，都会发送完整的『框架+身份+任务』」。
+
+**量到的**（真实 run 日志，一条聊天）：① 框架 120 字符 + ② 身份 37 字符 + ③ 任务 7 字符
+= 271 字符，**96% 是每轮重复**；而那条 run 的日志里明明写着「会话：恢复 01a17e70…」——
+会话已经接着了，①② 还在每轮重发。根因是 `deliveryModeFor` 只看 `systemPrompt` 旗标：
+codex 没有旗标（`systemPrompt: null`）⇒ 退回 B 档 ⇒ 三块合成一段塞进 `turn/start` 的
+input（`runtime-table.ts` 那句注释当时还写着「B 档下的 ①② 随每轮走、恢复后仍在」——
+后半句自己就把问题写出来了）。
+
+**先量再改**（`codex app-server` 0.157.1，用**暗号**判：暗号只出现在 instructions 里）：
+
+| 做法 | 问「暗号是什么」的回答 | 结论 |
+|---|---|---|
+| `thread/start` 带 `baseInstructions` | `ZEBRA-7731` | **指令真的进了模型** |
+| 同一线程 `thread/resume` 之后**不再发**指令再问 | `ZEBRA-7731` | **线程带着它，重发是冗余** |
+| 对照：不给指令 | `UNKNOWN` | 暗号不是从别处漏进来的 |
+
+**改法**（方案 A，使用者选定）：
+
+- `RuntimeDescriptor` 新增 `threadInstructions: { param } | null`——与 `systemPrompt` 是**两条
+  不同的通道**（一个每轮重发、一个挂线程），CLAUDE 只声明前者，codex 只声明后者；
+- `deliveryModeFor` 的判据从"有没有命令行旗标"改成"**有没有任意一条系统级通道**"。
+  于是 codex 也走 A 档：①② 单独送、③ 逐字留在 prompt；
+- `CodexBackend` 的建线程参数抽成**唯一出处** `threadStartParams()`（首建与"恢复被拒后重建"
+  两处共用），把 ①② 挂上去；**恢复那一跳不重发**；被拒回退建新线程时**同样带上**——
+  上文没了不等于身份也没了。传了系统提示而这个 runtime 没有线程级通道 ⇒ **抛错**（不静默丢）；
+- 日志头行区分两条通道：`投递档 A：①② 走系统提示（…，每轮重发）` /
+  `①② 走线程级指令（…，建线程时一次）`。
+
+**验证**：`codex-backend.test.ts` 3 条（建线程带 `baseInstructions` 且 `turn/start` 只有 ③；
+恢复不重发 + 恢复被拒重建仍带；没有系统提示时不塞空字段）+ `codex-thread-instructions.test.ts`
+2 条（daemon 级：`ExecOptions.systemPrompt` 是 ①②、`prompt` 逐字是 ③、`Run.deliveryMode === 'A'`、
+日志说"线程级指令"；反向钉子：claude 那条仍是"每轮重发"）。红检两次都生效：退回
+`deliveryModeFor` ⇒ 1 红；不在 `thread/start` 挂指令 ⇒ 2 红。全量 2225 全绿。
+
+⚠️ **兼容性**：本次之前建的 codex 线程里，①② 是**作为每轮 turn 文本**存在的（旧行为），
+所以恢复老线程时不重发也不会丢——历史里本来就有。新线程则挂在线程级指令上。

@@ -9,6 +9,7 @@ import {
   type ExecOptions,
   type AgentSession,
   CLAUDE_DESCRIPTOR,
+  CODEX_DESCRIPTOR,
   CLAUDE_BLOCKED_ARGS,
   GENERIC_DESCRIPTOR,
   deliveryModeFor,
@@ -2640,11 +2641,18 @@ describe('2026-09：投递档记在 run 上', () => {
     }
   })
 
-  test('★ 不支持系统提示的 runtime ⇒ 落库的是 B（兜底那一档）', () => {
-    // 只看判据本身：描述表里没有 systemPrompt 就是 B。通用 runtime 就是这样。
+  test('★ 两条通道（系统提示旗标 / 线程级指令）都算 A；都没有才是 B', () => {
+    // 分批第 74 批：A 档不再等于"有系统提示旗标"，而是"①② 能与 ③ 分开投递"。
+    //   · claude：`--append-system-prompt`（每轮重发）；
+    //   · codex ：`thread/start.baseInstructions`（建线程时一次）。
+    // generic 两条都没有 ⇒ B（三块合成一段）。
     assert.equal(deliveryModeFor(CLAUDE_DESCRIPTOR), 'A')
+    assert.equal(deliveryModeFor(CODEX_DESCRIPTOR), 'A')
+    assert.equal(CODEX_DESCRIPTOR.systemPrompt, null, 'codex 没有命令行旗标，走的是线程级通道')
+    assert.deepEqual(CODEX_DESCRIPTOR.threadInstructions, { param: 'baseInstructions' })
     assert.equal(deliveryModeFor(GENERIC_DESCRIPTOR), 'B')
     assert.equal(GENERIC_DESCRIPTOR.systemPrompt, null)
+    assert.equal(GENERIC_DESCRIPTOR.threadInstructions ?? null, null)
   })
 
   test('★ 禁改表挡住了系统提示旗标（使用者的自定义参数覆盖不了它）', () => {

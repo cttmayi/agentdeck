@@ -287,6 +287,52 @@ export class CodexBackend extends ServiceBackendBase {
       throw new Error(describeSpawnError(err, this.#descriptor.command, executablePath))
     }
 
+    /**
+     * 建线程的参数（**唯一出处**：首建与"恢复被拒后重建"两处共用）。
+     *
+     * ★ 分批第 74 批：①② 挂在线程上（`thread/start.baseInstructions`），不是每轮塞进
+     *   `turn/start` 的 input。
+     *
+     *   为什么（实测 0.157.1，用**暗号**判）：建线程时给 `baseInstructions`，问模型
+     *   「暗号是什么」答得出；`thread/resume` 之后**不再发指令**再问，仍答得出（线程带
+     *   着它）；对照组（不给指令）答 "UNKNOWN"。所以恢复过的轮次重发 ①② 是纯冗余
+     *   ——原先 B 档每轮把三块合成一段塞进 input，聊天里 ①② 占了 96%（实测
+     *   120 + 37 字符 vs ③ 的 7 字符）。
+     *
+     * ⚠️ 恢复**被拒**时走的是这条路的第二个调用点：新线程同样带上 ①②，所以
+     *   "上下文没了"不等于"连身份都没了"。
+     *
+     * ⚠️ 传了系统提示而这个 runtime 没有线程级通道 ⇒ **抛错**，不静默丢
+     *   （与 claude 那边 `--append-system-prompt` 缺失旗标时的处置一致：
+     *   "规则与身份没送到，而两边都不报错"是这个仓库反复在防的形状）。
+     */
+    const threadStartParams = (opts: ExecOptions): Record<string, unknown> => {
+      const instructions = opts.systemPrompt !== undefined && opts.systemPrompt !== '' ? opts.systemPrompt : null
+      const param = this.#descriptor.threadInstructions?.param ?? null
+      if (instructions !== null && param === null) {
+        throw new Error(
+          `runtime「${this.#descriptor.key}」没有线程级指令通道（描述表里 threadInstructions 是 null），` +
+            `所以不能把 ①② 两块挂到线程上。调用方该退回 B 档（三块合成一段）。`,
+        )
+      }
+      return {
+        model: opts.model ?? undefined,
+        cwd: opts.workDir,
+        approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
+        sandbox: CODEX_SERVER_FACTS.sandbox,
+        ...(instructions !== null && param !== null ? { [param]: instructions } : {}),
+      }
+    }
+    /** 建线程那一行的日志尾巴：要说清指令有没有挂上去、多大。 */
+    const threadStartNote = (opts: ExecOptions): string => {
+      const n = opts.systemPrompt !== undefined ? opts.systemPrompt.length : 0
+      return (
+        `cwd=${opts.workDir}，model=${opts.model ?? '（CLI 默认）'}，` +
+        `approvalPolicy=${CODEX_SERVER_FACTS.approvalPolicy}` +
+        (n > 0 ? `，线程级指令 ${n} 字符` : '，没有线程级指令')
+      )
+    }
+
     // ── 对话阶段：握手 → 线程 → turn ─────────────────────────────
     // ★ 这里的失败**不是** "run 没开始"：server 已经起来了，只是对话失败。
     //   统一收成 failed run（agent_error），让结果流正常走完、审计有真相。
@@ -383,14 +429,8 @@ export class CodexBackend extends ServiceBackendBase {
           resumeRejected = true
           const res = await rpc<Record<string, unknown>>(
             'thread/start',
-            {
-              model: opts.model ?? undefined,
-              cwd: opts.workDir,
-              approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
-              sandbox: CODEX_SERVER_FACTS.sandbox,
-            },
-            `→ thread/start（cwd=${opts.workDir}，model=${opts.model ?? '（CLI 默认）'}，` +
-              `approvalPolicy=${CODEX_SERVER_FACTS.approvalPolicy}）`,
+            threadStartParams(opts),
+            `→ thread/start（重新建线程：${threadStartNote(opts)}）`,
           )
           const t = asRecord(res)
           const tId = asString(asRecord(t?.['thread'])?.['id'])
@@ -403,14 +443,8 @@ export class CodexBackend extends ServiceBackendBase {
       } else {
         const res = await rpc<Record<string, unknown>>(
           'thread/start',
-          {
-            model: opts.model ?? undefined,
-            cwd: opts.workDir,
-            approvalPolicy: CODEX_SERVER_FACTS.approvalPolicy,
-            sandbox: CODEX_SERVER_FACTS.sandbox,
-          },
-          `→ thread/start（cwd=${opts.workDir}，model=${opts.model ?? '（CLI 默认）'}，` +
-            `approvalPolicy=${CODEX_SERVER_FACTS.approvalPolicy}）`,
+          threadStartParams(opts),
+          `→ thread/start（${threadStartNote(opts)}）`,
         )
         const t = asRecord(res)
         const tId = asString(asRecord(t?.['thread'])?.['id'])

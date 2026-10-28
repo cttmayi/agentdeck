@@ -475,7 +475,7 @@ error **`-32600`**（三种形态：`invalid session id` / `no rollout found for
 
 | 文件 | 为什么 |
 |---|---|
-| `apps/daemon/src/executor.ts` | 恢复与否看 `descriptor.sessionState`（`'stateful'` 走恢复路径，已有）；maxTurns 只是透传（service 下适配器警告）；`deliveryModeFor` 见 `systemPrompt:null` 自动 B 档 |
+| `apps/daemon/src/executor.ts` | 恢复与否看 `descriptor.sessionState`（`'stateful'` 走恢复路径，已有）；maxTurns 只是透传（service 下适配器警告）；**投递档：见下方 B 段（2026-10 起是 A 档，走线程级指令）** |
 | `packages/agent-core/src/skill-injection.ts` | 读 `descriptor.skills.dir`，`'.codex/skills'` 直接可用 |
 | `packages/agent-core/src/sandbox.ts` | `cliStateDir()` 读 `stateDir`，`~/.codex` 自动放行 |
 | `packages/agent-core/src/first-sentence.ts` | B 档合成与投递档判定不用改 |
@@ -531,3 +531,22 @@ error **`-32600`**（三种形态：`invalid session id` / `no rollout found for
 5. **审批防御**：✅ `approvalPolicy:'never'` 下仍收到审批请求 ⇒ 回 `decline` + 大声日志。
 
 设计已定稿。实施顺序见 §11。
+
+#### 投递档：①② 挂在线程上（2026-10，分批第 74 批，D93）
+
+原先的判断是「codex 没有系统提示参数 ⇒ 退回 B 档，三块合成一段塞进 `turn/start` 的
+input」。这个判断**不完整**，而且后果是每轮重发：一条聊天 271 字符里 ① 120 + ② 37、
+③ 只有 7——**96% 是重复**，而恢复之后线程里本来就有那两块。
+
+实测（0.157.1，用暗号 `ZEBRA-7731` 判）：
+
+| 做法 | 问「暗号是什么」 | 结论 |
+|---|---|---|
+| `thread/start` 带 `baseInstructions` | `ZEBRA-7731` | 指令进模型 |
+| `thread/resume` 后**不发**指令再问 | `ZEBRA-7731` | 线程带着，重发是冗余 |
+| 对照组（不给指令） | `UNKNOWN` | 不是从别处漏的 |
+
+实现：`RuntimeDescriptor.threadInstructions = { param: 'baseInstructions' }`（与 claude 的
+`systemPrompt.flag` 是并列的两条通道）；建线程参数在 `threadStartParams()` 一处组装，
+首建与"恢复被拒后重建"都挂 ①②，恢复那一跳不重发；`turn/start` 的 input 只放 ③。
+传了系统提示却像没有线程级通道那样配 ⇒ 抛错（不静默丢）。

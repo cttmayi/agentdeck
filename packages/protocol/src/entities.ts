@@ -962,6 +962,12 @@ export type TokenUsage = z.infer<typeof TokenUsage>
  *
  * 名字取 A/B 而不是语义名（`system-prompt` / `one-block`）是刻意的：这两个档的
  * 差别**只在投递形状**，用名字描述形状反而会让人以为内容也不同。
+ *
+ * ★ 2026-10（分批第 74 批）：A 档的"系统级通道"有**两条**——命令行旗标
+ *   （claude `--append-system-prompt`，每轮重发，因为系统提示活不过 `--resume`）与
+ *   **线程级指令**（codex `thread/start.baseInstructions`，建线程时一次）。
+ *   所以看到 `'A'` 只说明"①② 与 ③ 分开送"，**送法**要看那个 runtime 的适配器日志
+ *   （executor 的头行会写明"走系统提示（每轮重发）"还是"走线程级指令（建线程时一次）"）。
  */
 export const RunDeliveryMode = z.enum(['A', 'B'])
 export type RunDeliveryMode = z.infer<typeof RunDeliveryMode>

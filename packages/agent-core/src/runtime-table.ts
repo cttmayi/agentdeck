@@ -283,6 +283,22 @@ export interface RuntimeDescriptor {
    */
   systemPrompt: { flag: string } | null
 
+  /**
+   * **线程级指令**那个参数名（2026-10，分批第 74 批）。`null` = 这个 runtime 没有这个概念。
+   *
+   * ★ 与 `systemPrompt` 的区别（两条**不同**的通道，别混）：
+   *   · `systemPrompt.flag`：**每轮**都要在命令行上重发（claude：`--append-system-prompt`），
+   *     因为它活不过 `--resume`（实测 2.0.14）；
+   *   · `threadInstructions.param`：**挂在线程上**，建线程时发一次，恢复时不需要重发
+   *     （codex：`thread/start` 的 `baseInstructions`，实测见
+   *     `docs/runtime/codex-runtime-design.md`）。
+   *
+   * 为什么要区分：A 档的语义是"①② 与 ③ 分开投递"，但**怎么送**由 runtime 决定。
+   * 不区分的话，codex 只能退回 B 档（三块合成一段塞进 `turn/start` 的 input），
+   * 于是**每一轮都把 ①② 重发一遍**——而线程里本来就有（实测：② 恢复后仍在）。
+   */
+  threadInstructions?: { param: string } | null
+
   /** prompt 怎么送进去。**cli-only**：service 形态走协议 input，不填。 */
   promptDelivery?: PromptDelivery
 
@@ -651,9 +667,18 @@ export const CODEX_DESCRIPTOR: RuntimeDescriptor = {
     reason:
       '首版不做技能禁用策略；service 形态的对应注入位未验证（设计稿 §8 后续扩展）。',
   },
-  // systemPrompt: null ⇒ 调用方自动退回 B 档（三块合成一段，作为 turn/start 的
-  // text input）。app-server 没有系统提示参数，B 档下的 ①② 随每轮走、恢复后仍在。
+  // ★ 分批第 74 批：这里原来写的是「systemPrompt: null ⇒ 退回 B 档（三块合成一段，
+  //   作为 turn/start 的 text input）…B 档下的 ①② 随每轮走、恢复后仍在」。
+  //   后半句自己就把问题写出来了：**恢复后仍在，却还每轮重发**。
+  //
+  //   app-server 确实**没有**命令行式的系统提示旗标（`systemPrompt: null` 不变），
+  //   但 `thread/start` 有 `baseInstructions`——用**暗号**实测（0.157.1）：
+  //     · 建线程时给 `baseInstructions`，问「暗号是什么」⇒ 答得出；
+  //     · `thread/resume` 之后不再发指令再问 ⇒ **仍答得出**（线程带着它）；
+  //     · 对照组（不给指令）⇒ 答 "UNKNOWN"。
+  //   所以 ①② 走**线程级**通道：A 档，建线程时发一次，每轮只发 ③。
   systemPrompt: null,
+  threadInstructions: { param: 'baseInstructions' },
   // service 语义：这是 `codex app-server` 的**启动参数**，不是 run 的 argv。
   // `--stdio` 等价于 `--listen stdio://`（默认已是它，显式写出来免得依赖缺省）。
   baseArgs: ['app-server', '--stdio'],

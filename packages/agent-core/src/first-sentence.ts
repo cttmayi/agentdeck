@@ -1138,8 +1138,16 @@ export type DeliveryMode = 'A' | 'B'
  * ⚠️ 选出来的档必须**记在这条 run 上**：同一个模版在两个 runtime 上投递形状不同，
  *    而"两边都不报错"是这个仓库被咬过三次的形状（能力标志、旧前端、以及这次）。
  */
-export function deliveryModeFor(runtime: { systemPrompt: { flag: string } | null }): DeliveryMode {
-  return runtime.systemPrompt === null ? 'B' : 'A'
+export function deliveryModeFor(runtime: {
+  systemPrompt: { flag: string } | null
+  /** 线程级指令通道（`RuntimeDescriptor.threadInstructions`，分批第 74 批）。 */
+  threadInstructions?: { param: string } | null
+}): DeliveryMode {
+  // ★ A 档 = "①② 与 ③ **分开**投递"，**不**规定 ①② 走哪条通道：
+  //   · claude：`--append-system-prompt`，**每轮**重发（系统提示活不过 `--resume`，实测 2.0.14）；
+  //   · codex ：`thread/start.baseInstructions`，**建线程时一次**（线程带着，恢复后仍在，实测 0.157.1）。
+  //   两者都是 A；只要声明了任意一条通道就够了。两条都没有（generic）⇒ B 档。
+  return runtime.systemPrompt === null && (runtime.threadInstructions ?? null) === null ? 'B' : 'A'
 }
 
 export interface Delivery {

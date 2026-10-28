@@ -1396,9 +1396,14 @@ export class RunExecutor {
        * ★ 日志要说清**用哪一档投递的**（同一个模版在两个 runtime 上形状不同，
        *   而"两边都不报错"是这个仓库被咬过三次的形状）。
        */
+      // ★ 分批第 74 批：A 档有**两条**通道，日志必须说清走的是哪条——
+      //   否则"①② 到底每轮重发还是挂在线程上"只能靠翻适配器代码才知道。
+      const threadChannel = runtime.descriptor.threadInstructions?.param ?? null
       const modeLabel =
         delivery.mode === 'A'
-          ? `投递档 A：①② 走系统提示（${delivery.system.length} 字符），③ 走用户消息`
+          ? threadChannel === null
+            ? `投递档 A：①② 走系统提示（${delivery.system.length} 字符，每轮重发），③ 走用户消息`
+            : `投递档 A：①② 走线程级指令（${delivery.system.length} 字符，建线程时一次），③ 走用户消息`
           : `投递档 B：三块合成一段（${delivery.user.length} 字符）`
       await this.#note(
         runId,
