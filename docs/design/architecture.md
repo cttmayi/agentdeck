@@ -3162,3 +3162,52 @@ hook 脚本在 `<home>/agentdeck-hooks/` 里。
 
 ⚠️ **未做（要不要做需要拍板）**：命中 `empty_response` 时**自动改用新会话重跑一次**
 （不 resume）——那能让"历史里带图片的会话"不至于卡死，但会多花一次钱，所以先留着不做。
+
+
+### 4.3.37 分批第 79 批：把根因修在网关上（two-API 0.7.1）
+
+第 78 批（§4.3.36）只修了平台那一半——"空轮不许记成成功"。但使用者追问了一句
+**「你是通过去掉一个功能来避开？」**，这一问是对的：判失败不等于反馈被执行。于是把根因
+（`~/.two-api` 的 responses→chat 翻译层）修掉。
+
+⚠️ **它不在本仓库里**：源码在 `/Volumes/J.ZAO_SSD/workspace/MyProject/two-API`，本仓库只记
+结论与证据链，别再回头在本仓库里找那段代码。
+
+**两个真 bug（第一个看得见，第二个要真历史才露头）**
+
+| # | 位置 | 现象 |
+|---|---|---|
+| ① | `function_call_output` 那条路径把 `context.output` **原样**塞进 chat 的 tool 消息 | codex 的 `view_image` 结果是一条 `{type:'input_image', image_url:'data:image/png;base64,…', detail:'high'}` ⇒ 上游 serde **422** `unknown variant input_image, expected one of text, image_url, file` |
+| ② | assistant 的线性化逐条产出 | codex 历史里**旁白夹在调用与结果之间**：`function_call, function_call, message(旁白), function_call_output, …` ⇒ 中间插进一条 assistant 消息 ⇒ 上游 **400** `An assistant message with 'tool_calls' must be followed by tool messages…` |
+
+②只有在**真实体量**的历史上才会出现：1x1 的替身图在修完①之后就 200 了。这是本批最值得
+记住的一条——**替身测不出真缺陷，验证要贴近真实输入规模**。
+
+**改法**（`src/transforms/openai_responses.py`）
+
+- 内容块统一过一层映射：`input_text/output_text/text → text`、`input_image/image_url →
+  image_url`（`image_url` 是字符串时包成 `{"url": …}`，`detail` 跟着带）、`input_file/file → file`，
+  未知块丢弃；纯文本仍拼成一个字符串（旧行为不变）。
+- assistant 侧改成**整轮暂存**（`_AssistantTurn`）：结清时产出「assistant(旁白 + tool_calls) →
+  N 条 tool 消息」；**一对「调用 + 结果」各自结清成一轮**（否则整段历史会被压成一条 57 个
+  tool_calls 的巨型消息）；缺结果的调用补一条空 tool 消息（配对不齐的代价是整条会话无法
+  resume，比少一段内容严重得多）。
+- `reasoning` 之类不认识的条目**跳过但不结清**——codex 的 reasoning 常常正好夹在
+  `function_call` 与它的结果之间，提前结清会补一串空 tool 消息、把这次真实结果整段丢掉。
+
+**验证（全部是打真东西）**
+
+| 步骤 | 结果 |
+|---|---|
+| 补丁前，8080 | `HTTP 422 unknown variant input_image`（与使用者那次的 `messages[100]` 同一类） |
+| 补丁①后，8080 | `HTTP 200`，模型真说出图的颜色「浅珊瑚粉色」——图片是被理解，不是被丢成占位文本 |
+| 补丁①②后，真实 rollout 699KB → transform → 上游 | `HTTP 200`，81396 prompt tokens，请求体里 `input_image` 残留 **0** |
+| 重启网关后，8080 **流式**重放真实 710KB 历史 | `HTTP 200`，`response.output_text.delta ×61`，输出准确复述该线程做过的事（克隆 distilly、通读 `SKILL.md`、渲染架构图初稿、正文未写） |
+| two-API `pytest` 全量 | **154 passed**（含 7 条新增回归测试：图片两路径、配对、整轮不合并、reasoning 不结清、未知块变空串） |
+
+**刻意不做的**：平台侧"命中 `empty_response` 就自动换新会话重跑一次"。理由三条：会丢上下文、
+多花一次钱，而且会把网关的真故障降级成"平台悄悄换条路"。`empty_response` 继续作为**兜底**
+（§4.3.36）——网关修好后它不该再触发，但不能没有。
+
+**留给大家的教训**：我给的第一版答复把"根因在网关"与"平台该修什么"揉成一句话，读起来就像
+"这不是我的问题"。使用者那句反问把它点破了：**分清根因归属与自己的缺陷，两边都要落成动作**。
