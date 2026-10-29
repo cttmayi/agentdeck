@@ -38,8 +38,9 @@
  * 核心），但调用方要记一条 note 让使用者知道这次没有隔离。
  */
 
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readConfigText } from './config-file.ts'
 
 /** 受管配置目录里的 claude settings 落点（claude 读它）。 */
 export const MANAGED_SETTINGS_REL = 'settings.json'
@@ -70,7 +71,10 @@ export async function syncClaudeConfigDir(
 ): Promise<ClaudeConfigSyncResult> {
   let source: string
   try {
-    source = await readFile(sourceSettingsPath, 'utf8')
+    // ★ 分批第 75 批：按 BOM 判真实编码再解（Windows 上 PowerShell `>` 会写成
+    //   UTF-16LE；原来一律按 UTF-8 读 ⇒ JSON.parse 报"不是合法 JSON"，
+    //   使用者看到的是"配置坏了"，其实是编码没认出来）。
+    source = (await readConfigText(sourceSettingsPath)).text
   } catch {
     return {
       ok: false,

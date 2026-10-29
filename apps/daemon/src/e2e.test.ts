@@ -1476,12 +1476,17 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
         notes.some((n) => n.includes('claude 个人配置隔离未生效')),
         `日志里要有"隔离未生效"的说明，实际：\n${notes.join('\n')}`,
       )
-      // 受管目录 env 没同步成，但 CLAUDE_CONFIG_DIR 仍要指向它（claude 拿不到
-      // 认证会自己报错，但至少不会偷偷用用户的个人配置——两种失败都可见）
+      // ★ 分批第 75 批：**同步失败就不重定向**。
+      //
+      //   这一条原来断言的是反面（"CLAUDE_CONFIG_DIR 仍应注入——失败的是 env 同步，
+      //   不是隔离本身"）。那个推理看起来对，后果是：CLI 拿着一个**没有
+      //   settings.json** 的受管目录跑 ⇒ 拿不到 ANTHROPIC_* ⇒ 认证失败。也就是说
+      //   "隔离做一半"比"不隔离"更糟：后者还能跑通（只是没了隔离），前者直接跑挂。
+      //   现在失败即退回——用使用者自己的 ~/.claude，并如实说。
       assert.equal(
         b.seenEnv['CLAUDE_CONFIG_DIR'],
-        join(dataDir, 'claude-config'),
-        'CLAUDE_CONFIG_DIR 仍应注入（失败的是 env 同步，不是隔离本身）',
+        undefined,
+        '★ 复制不来时不许再把 CLAUDE_CONFIG_DIR 指向受管目录（半生效比不生效更糟）',
       )
     } finally {
       await d.close()
@@ -1687,9 +1692,13 @@ describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_
         notes.some((n) => n.includes('codex 个人配置隔离未生效')),
         `日志里要有"隔离未生效"的说明，实际：\n${notes.join('\n')}`,
       )
-      assert.ok(
-        (b.seenEnv['CODEX_HOME'] ?? '').startsWith(`${join(dataDir, 'codex-config')}/`),
-        'CODEX_HOME 仍应注入（失败的是配置同步，不是隔离本身）',
+      // ★ 分批第 75 批：同步失败 ⇒ **不重定向**（与 claude 那条同一个理由）。
+      //   原来这里断言"CODEX_HOME 仍应注入"，后果是 codex 拿着缺 auth.json 的
+      //   受管目录起来 ⇒ 认证失败：把一个"少一层隔离但能跑"的 run 变成"跑不起来"。
+      assert.equal(
+        b.seenEnv['CODEX_HOME'],
+        undefined,
+        '★ 复制不来时不许再把 CODEX_HOME 指向受管目录',
       )
     } finally {
       await d.close()
@@ -2004,7 +2013,9 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
       /已注入 1 个 skill：general-review/,
       '★ 日志里必须说清注入了什么——否则使用者只能靠猜，而他会猜错',
     )
-    assert.match(text, /写入 \.claude\/skills\//, '也要说清写到哪儿了')
+    // ★ 分批第 75 批：措辞变成"写入工作目录的 `.claude/skills/`"（技能落点现在要看
+    //   隔离是否生效——claude 没有受管 home 这条通道，所以它永远写工作目录）。
+    assert.match(text, /写入工作目录的 \.claude\/skills\//, '也要说清写到哪儿了')
   })
 
   test('★ 支持文件也要真的落到工作目录里（只写 SKILL.md 就是坏技能）', async () => {

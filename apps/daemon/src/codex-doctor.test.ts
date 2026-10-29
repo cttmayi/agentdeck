@@ -220,7 +220,7 @@ describe('★ 分批第 42 批：--doctor codex 自检（Windows 上"codex 通�
     }
   })
 
-  test('★★ 缺 auth.json ⇒ 判失败，并提示"设置里取消那个勾"这条临时路', async () => {
+  test('★★ 缺 auth.json ⇒ 判失败，并说明"现在会自动退回、先查编码与占用"', async () => {
     const codex = await fake('missing')
     const configHome = await makeTempDir('doctor-home-missing')
     fakes.push(configHome)
@@ -230,9 +230,11 @@ describe('★ 分批第 42 批：--doctor codex 自检（Windows 上"codex 通�
       const check = report.checks.find((c) => c.id === 'config-present')
       assert.equal(check?.ok, false)
       assert.match(check?.detail ?? '', /缺 auth\.json/u)
+      // ★ 分批第 75 批：那个开关删了（复制失败改成**自动退回**），所以指引也要跟着变——
+      //   否则文档/命令会把使用者送到一个已经不存在的设置项上（"照它做，找不到"最伤人）。
       assert.ok(
-        report.nextSteps.some((s) => s.includes('运行时配置')),
-        '复制失败时要告诉使用者"把设置里那个勾取消"这条临时路',
+        report.nextSteps.some((s) => s.includes('自动退回')),
+        `复制失败时要说明现在的行为是自动退回：${report.nextSteps.join(' | ')}`,
       )
     } finally {
       await cleanupDoctorReport(report)

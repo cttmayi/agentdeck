@@ -231,7 +231,11 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     await waitForTerminal(body.turn.runId)
     const { body: log } = await json(`/api/runs/${body.turn.runId}/messages`)
     const messages = (log as { messages: Array<{ type: string; content: string | null }> }).messages
-    const line = messages.find((m) => (m.content ?? '').includes('skill'))
+    // ★ 分批第 75 批：判据收紧成"**注入说明那一行**"，不再是"第一条含 skill 字样的行"。
+    //   隔离那一段的 note 里也有 "skill"（"用户级 skill/MCP 不可见"），而且它现在
+    //   排在注入说明**之前**（隔离块被前移了）⇒ 旧写法抓到的是隔离那条，报的却是
+    //   "那一行没点名 skill"——一条会把排查方向带偏的假失败。
+    const line = messages.find((m) => (m.content ?? '').includes('已注入'))
     assert.ok(line !== undefined, '日志里要有说明注入了哪些 skill 的那一行')
     assert.match(line.content!, /chat-e2e-carried/, `那一行要点名这条 skill，实际：${line.content}`)
   })

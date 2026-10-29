@@ -3006,3 +3006,56 @@ claude 的 `systemPrompt.flag` 是并列两条通道）；`CodexBackend` 的建�
 "老版本 codex / CLI 模式 / 忽略 `baseInstructions` 的第三方服务"这类没有线程级参数的情形。
 但它**不该做主通道**——两份 AGENTS.md 冲突时谁赢**不稳定**（同一场景两次跑答案不同），
 而线程级指令稳定压过它。**绝不写 `<workDir>/AGENTS.md`**（D29：不碰使用者的文件）。
+
+### 4.3.33 分批第 75 批："运行时配置"那个开关删了（改成自动退回）+ 技能搬到 `<CODEX_HOME>/skills`
+
+**起因**：使用者说「我之前加了一个 Setting 开关『运行时配置』不要了，这样可以简化开发吗？」
+
+**先看清楚它现在在替什么背锅**。那个开关（`Workspace.runtimeConfigIsolation`，分批第 41 批）是
+为 Windows 上撞到的两件事准备的退路：`config.toml` 是 PowerShell `>` 写出的 **UTF-16**、
+`auth.json` 被 codex 占着复制不了。但**复制失败时的代码照样把 `CODEX_HOME` 指向受管目录**
+（`runtime-profile.ts` 的 `CodexProfile.syncIsolation` 在 `ok:false` 时仍然返回那个 env）⇒
+codex 拿着一个缺 `auth.json` 的空目录起来 ⇒ 认证失败。也就是说：**开关替一段坏逻辑背了锅**。
+
+所以这一批先把机器修好，再把开关删掉：
+
+| 修什么 | 怎么修 |
+|---|---|
+| **编码** | 新 `run-hooks/config-file.ts` 的 `readConfigText()`：按 BOM 判 `utf16le`/`utf16be`/`utf8-bom`/`utf8` 再解码；受管副本一律以 UTF-8 写回（**使用者的原文件一个字节都不动**，D29） |
+| **文件占用** | `copyWithRetry()`：`EPERM/EACCES/EBUSY` 在 win32 上退避重试（20/40/80/160ms，与 `store-file` 的 `renameWithRetry` 同一套判据与理由） |
+| **失败语义** | `syncIsolation` 不成功 ⇒ **不注入重定向**（claude 的 `CLAUDE_CONFIG_DIR` / codex 的 `CODEX_HOME` 都不传）+ 一条明确 note ⇒ 直接用使用者自己的配置。**等价于原来那个开关，但不需要人操心** |
+| 开关本身 | 删：`Workspace.runtimeConfigIsolation`、`PUT /api/workspace/runtime-config-isolation`、`/api/identity` 里的字段、设置页那一段、i18n 三个键、探针四条判据、doctor 里把它当 workaround 的两处文案 |
+
+**顺带**：`codex-config.ts` 的同步原来"读三次、写三次"（trust / bundled / 宿主级技能各一轮，
+且每次都 `readFile(..., 'utf8')`）⇒ 收成"**解码读一次 → 内存里改三处 → UTF-8 写一次**"。
+
+**技能搬到受管 home**（使用者提的："skill 和配置都在 workdir 下，能不能挪到 `<CODEX_HOME>`"）：
+
+- 描述表新增 `SkillDelivery.runtimeHomeSubdir`：codex 声明 `'skills'`（实测 0.157.1：
+  `<CODEX_HOME>/skills/<slug>/SKILL.md` 会被当成技能，`codex debug prompt-input` 里技能根是
+  `r0 = <CODEX_HOME>/skills`；app-server 模式下模型能抄出它的 description）；
+- 注入点：**隔离生效 ⇒ 写 `<受管 home>/skills`，工作目录一个字不写；隔离没生效 ⇒ 退回
+  工作目录的 `.codex/skills`**（绝不写使用者真实的 `~/.codex`）；
+- 收尾必须照着**注入时那个落点**删（原来恒用 `run.workDir`，隔离生效时会去一个空目录里
+  "删技能"，受管 home 里那份一直留着）；
+- claude **不搬**：它的 `CLAUDE_CONFIG_DIR` 是全局一份（resume 需要稳定的会话状态），多个
+  工作目录/多个 agent 各挂不同技能会互相顶掉 ⇒ 仍写工作目录。
+
+三个附带好处（都真的）：① 工作目录里不再出现平台自己的东西；② **agent 改不到自己的技能
+正文**（受管目录在数据目录里，agent 隔离在外）；③ 消掉一类失败——使用者仓库里若有同名
+`.codex/skills/<slug>`，原来的 `SkillCollisionError` 会让**整条 run 失败**，现在不存在了。
+
+**过程中撞出一个真 bug（不是这一批引入的，但被它顶到必现）**：`GET /api/runs/{id}/events`
+的顺序是"先补历史、再挂订阅"，两者之间是一个真实时间窗（`await store.listRunMessages(...)`
+→ `registry.subscribe(...)`），**窗口里的事件会丢**。第 75 批把隔离那条 note 挪到紧跟
+"工作目录"之后，于是它正好落进窗口：全量跑时那条 note 十次有十次丢（`e2e.test.ts` 那条
+"日志里要有'隔离未生效'的说明"就是这么红的）。修法：**订阅 → 缓冲 → 补历史 → 回放缓冲
+（按 seq 去重）**。判据：`sse-replay-gap.test.ts`（连开 8 条流，每次都要求 seq 从 0 连续无洞）；
+红检：把顺序退回旧的 ⇒ 立刻红。
+
+**验证**：`runtime-config-isolation.test.ts` 11 条（隔离生效照旧复制/重定向、两个 runtime 的
+"复制失败 ⇒ 不重定向"、UTF-16 规范化且原文件不动、技能落点两态、`copyWithRetry` 三条判据）+
+`sse-replay-gap.test.ts` 1 条 + `runtime-agnostic.test.ts` / `e2e.test.ts` / `chat-e2e.test.ts`
+相应更新（其中 `runtime-agnostic` 补了假的 codex 配置源——它原来会去读使用者真实的 `~/.codex`，
+NFR-T-01）。真机一条 codex run：技能写在 `<CODEX_HOME>/skills`、工作目录只有 `.agentdeck/`、
+模型答出了技能里的暗号（`ZEBRA-HOME-9`）。全量 2230 全绿；`probe:layout` 574 项全绿。

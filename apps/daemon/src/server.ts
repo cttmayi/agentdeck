@@ -58,6 +58,7 @@ import {
   type Run,
   type RunId,
   type RunMessage,
+  type RunEvent,
   type Conversation,
   type ConversationId,
   type Skill,
@@ -1278,8 +1279,6 @@ async function readWorkspaceSettings(
   defaultRuntimeKey: string
   /** 审核者能不能**真跑**草稿里的脚本（§10.5 第 ③ 条）。老数据 ⇒ 默认开。 */
   allowReviewerScriptRun: boolean
-  /** 运行时个人配置隔离（分批第 41 批）：`false` = 不复制、不重定向，CLI 用原路径。 */
-  runtimeConfigIsolation: boolean
   /** 新建智能体时预填的「默认工作守则」（分批第 47 批）；空串 = 不预填。 */
   defaultAgentConduct: string
   /**
@@ -1309,8 +1308,6 @@ async function readWorkspaceSettings(
     defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
     // 老数据没有这个键 ⇒ 开（与 `webSearchEnabled` 同一条规矩）
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
-    // 老数据没有这个键 ⇒ 开（隔离是 D78 的默认行为，升级不该悄悄关掉它）
-    runtimeConfigIsolation: workspace?.runtimeConfigIsolation ?? true,
     // 老数据没有这个键 ⇒ 平台默认守则（与"什么都不改"同义）
     defaultAgentConduct: workspace?.defaultAgentConduct ?? GENERAL_WORK_CONDUCT,
     // 老数据没有这个键 ⇒ 默认轮数（10）。⚠️ `0` 必须原样返回"关"，
@@ -4538,14 +4535,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         // ★ 分批第 23 批：自动返工轮数（设置页那个数字框读它）
         autoReworkRounds: settings.autoReworkRounds,
         /**
-         * ★ 分批第 41 批：运行时个人配置隔离（设置页那个开关读它）。
-         *
-         * 与 `webSearchEnabled` 同一条规矩：**界面显示的与 executor 真的用的必须是同一份读**
-         * （都走 `readWorkspaceSettings`）——否则开关看起来关了、run 里还在复制配置，
-         * 而这个仓库踩过太多次"字段在、行为不在"。
-         */
-        runtimeConfigIsolation: settings.runtimeConfigIsolation,
-        /**
          * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
          * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
          */
@@ -5011,33 +5000,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       await store.insertWorkspace({ ...workspace, defaultAgentConduct: raw, updatedAt: Date.now() })
       sendJson(res, 200, { defaultAgentConduct: raw })
-      return
-    }
-
-    /**
-     * ★ 分批第 41 批：运行时个人配置隔离的开关（`false` = 不复制、直接用原路径）。
-     *
-     * 为什么是一个 workspace 级布尔值而不是每 agent 一个：它决定的是**平台怎么把配置
-     * 交给 CLI**，跟"这条 agent 干什么活"无关；而且使用者报的场景是"我这台机器上
-     * codex 的配置复制不好使"，那是一台机器的属性，不是某个 agent 的。
-     */
-    if (req.method === 'PUT' && path === '/api/workspace/runtime-config-isolation') {
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const raw = body['enabled']
-      if (typeof raw !== 'boolean') {
-        sendJson(res, 400, {
-          error: `enabled 必须是布尔值（收到 ${JSON.stringify(raw)}）`,
-          code: 'invalid_enabled',
-        })
-        return
-      }
-      const workspace = await store.getWorkspace(workspaceId)
-      if (!workspace) {
-        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
-        return
-      }
-      await store.insertWorkspace({ ...workspace, runtimeConfigIsolation: raw, updatedAt: Date.now() })
-      sendJson(res, 200, { runtimeConfigIsolation: raw })
       return
     }
 
@@ -9819,11 +9781,65 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     req.on('close', cleanup)
     res.on('close', cleanup)
 
-    // ① 先补齐历史（已落盘的消息是权威）
+    /**
+     * ★ 分批第 75 批：**先挂订阅、把事件先缓冲起来，再补历史。**
+     *
+     * 原来的顺序是"先补历史、再挂订阅"，注释里写着"先订阅再补齐的话，补齐过程中
+     * 新产生的消息会重复"。防重复是对的，但那条路的代价是**这段时间里的事件全丢**
+     * ——`await store.listRunMessages(...)` 与 `registry.subscribe(...)` 之间是一个
+     * 真实的时间窗。
+     *
+     * 这个洞一直在：它不报错、不告警，只是偶尔少一两条日志。第 75 批把它顶到了
+     * 必现的位置——隔离那条 note 现在紧跟在"工作目录"之后发出，正好落在这个窗口里，
+     * 于是全量跑时那条 note 十次有十次丢（页面/测试都看不到"隔离未生效"）。
+     *
+     * 现在的顺序：**订阅 → 缓冲 → 补历史 → 回放缓冲（按 seq 去重）**。
+     * 既不会丢，也不会重复。
+     */
+    let replaying = true
+    const buffered: RunEvent[] = []
+    let ended = false
+    /** 历史走到哪一条了：缓冲里的 message 用它去重。 */
+    let replayedTo = since
+
+    const finish = (): void => {
+      if (ended) return
+      ended = true
+      res.end()
+      cleanup()
+    }
+    const handle = (event: RunEvent): void => {
+      if (event.t === 'terminal') {
+        write(event)
+        finish()
+        return
+      }
+      if (event.seq > replayedTo) write(event)
+    }
+
+    // ① 先挂订阅（事件先进缓冲）
+    unsubscribe = registry.subscribe(runId, (event) => {
+      if (replaying) {
+        buffered.push(event)
+        return
+      }
+      handle(event)
+    })
+
+    // ② 再补齐历史（已落盘的消息是权威）
     const persisted = await store.listRunMessages(runId, since)
     for (const message of replayMessagesSince(persisted, since)) {
+      replayedTo = Math.max(replayedTo, message.seq)
       write({ t: 'message', seq: message.seq, message })
     }
+
+    // ③ 回放缓冲：与历史重叠的 message 丢掉（防重复），其余照发
+    replaying = false
+    for (const event of buffered.splice(0)) {
+      if (event.t === 'message' && event.seq <= replayedTo) continue
+      handle(event)
+    }
+    if (ended) return
 
     // ══════════════════════════════════════════════════════════════════
     // ② 已经结束的 run：补发一个 terminal 并**立刻结束流**
@@ -9856,32 +9872,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       cleanup()
       return
     }
-
-    // ③ 再挂实时订阅
-    const fromSeq =
-      persisted.length > 0 ? Math.max(since, persisted[persisted.length - 1]!.seq) : since
-    unsubscribe = registry.subscribe(runId, (event) => {
-      // ══════════════════════════════════════════════════════════════
-      // ★ 收到终态：写出去，然后**主动结束这条流**
-      // ══════════════════════════════════════════════════════════════
-      //
-      // 原来这里只把事件写出去就完事，连接一直挂着。客户端确实会自己
-      // `close()`，但那只是把问题藏起来了：
-      //
-      //   - 客户端没关（旧页面、后台标签页、或者将来别的接入方）时，
-      //     这条连接、它的心跳定时器、以及 registry 里的订阅**永远不释放**；
-      //   - 对使用者来说，日志看着像"还连着"，其实早就跑完了。
-      //
-      // 终态之后再没有任何消息可发，所以此时 `end()` 是明确的：
-      // 流结束 = 这条 run 结束了。客户端据此停掉重连（见 RunLog.svelte）。
-      if (event.t === 'terminal') {
-        write(event)
-        res.end()
-        cleanup()
-        return
-      }
-      if (event.seq > fromSeq) write(event)
-    })
 
     // ══════════════════════════════════════════════════════════════════
     // 订阅与请求之间有个 await，使用者可能**在这中间就走了**

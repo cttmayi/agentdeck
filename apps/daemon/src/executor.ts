@@ -829,6 +829,10 @@ export class RunExecutor {
      * `injectedSkills` 那条注释记着同款）。
      */
     let runtimeConfigEnv: Record<string, string> | null = null
+    /** 这次 run 的受管运行时 home（隔离成功才有）；技能落点要用它。 */
+    let managedRuntimeHome: string | null = null
+    /** 这次 run 技能写到了哪（注入时定，收尾照着它删）。 */
+    let injectedSkillTarget: { base: string; sub: string } | null = null
 
     /**
      * 清理注入物。**幂等**——正常路径与 finally 都会调它。
@@ -863,11 +867,15 @@ export class RunExecutor {
         //   "注入了东西"时才收尾，会在一个没挂技能的 run 之后留下一份空清单
         //   （`.claude/skills/.agentdeck-managed.json`）——工作目录里于是
         //   多出一个不是产出的东西，正是这次改动要清掉的那类残留。
+        // ★ 分批第 75 批：收尾必须用**注入时那个落点**（技能可能写进了受管 home）。
+        //   恒用 `run.workDir` 的话，隔离生效时这里会去一个空目录里"删技能"——
+        //   看起来什么都没删，而受管 home 里那一份一直留着（下一轮由 sync 对账，
+        //   于是"这次用了什么"就说不清了）。
         const swept =
-          runtime.descriptor.skills.kind === 'directory'
+          injectedSkillTarget !== null
             ? await removeInjectedSkills(
-                run.workDir!,
-                runtime.descriptor.skills.dir,
+                injectedSkillTarget.base,
+                injectedSkillTarget.sub,
                 injectedSkills,
               )
             : { removed: [] as string[], kept: [] as string[] }
@@ -875,7 +883,9 @@ export class RunExecutor {
           await this.#note(
             runId,
             `已移除本次注入的 skill：${swept.removed.join('、')}` +
-              `（工作目录里只留 agent 的产出；本次用了什么标准见上面的注入记录）`,
+              (injectedSkillTarget !== null && injectedSkillTarget.base !== run.workDir
+                ? `（技能在受管运行时目录里，跑完同样收走；本次用了什么标准见上面的注入记录）`
+                : `（工作目录里只留 agent 的产出；本次用了什么标准见上面的注入记录）`),
           )
         }
       } catch (err) {
@@ -900,6 +910,69 @@ export class RunExecutor {
       // 环境预检放在注入之前：如果 CLI 连自己的状态目录都写不了，
       // 这次 run 的产出是不可信的，越早说越好（而清理注入物的开销也省下了）
       const envCheck = await checkEnvironment([{ descriptor: runtime.descriptor, available: true }])
+
+      /**
+       * ── 运行时配置隔离（分批第 64 批：claude 与 codex 走**同一条**逻辑）──
+       *
+       * 这里原来是一段 claude + 一段 codex 的并列 if，各自拼 note、各自注入 env——
+       * 两份实现迟早不同步（这个仓库踩过好几次同款）。现在流程收进
+       * `run-hooks/runtime-config.ts` 的 `syncRuntimeConfig()`：
+       * 「解析受管目录 → 同步 → 产出 notes + env」，两个 runtime 的差异退化成策略表里的数据。
+       *
+       * ⚠️ 唯一的差异是"受管目录按不按工作目录分"（codex 按、claude 不按，理由写在那张表上）。
+       */
+      if (isIsolatedRuntime(runtime.descriptor.key)) {
+        const runtimeKey = runtime.descriptor.key
+        /**
+         * ★ 分批第 67 批：受管根 / 源路径的差异放在 `RuntimeProfile` 子类里
+         *   （`isolationPlanOf` 问 profile），executor 这里只剩"取依赖、交下去"。
+         */
+        const deps = defaultIsolationDeps({
+          runtimeKey,
+          // ★ 分批第 67 批：受管根按 runtime 取的逻辑只有一处（`isolationRootFor`）
+          rootDir: isolationRootFor(runtimeKey, {
+            claude: this.#deps.claudeConfigDir ?? null,
+            codex: this.#deps.codexConfigDir ?? null,
+          }),
+          ...(this.#deps.claudeSettingsSource !== undefined
+            ? { settingsSource: this.#deps.claudeSettingsSource }
+            : {}),
+          ...(this.#deps.codexConfigSource !== undefined
+            ? { codexSource: this.#deps.codexConfigSource }
+            : {}),
+          ...(this.#deps.hostSkillRoots !== undefined
+            ? { hostSkillRoots: this.#deps.hostSkillRoots }
+            : {}),
+        })
+        const plan = profileFor(runtimeKey)?.isolation(deps) ?? null
+        const rootDir = plan?.rootDir ?? null
+        if (rootDir === null) {
+          // ★ 分批第 75 批：**跳过也要说一声**。原来这里静默不做，于是"隔离没生效"
+          //   与"隔离生效但复制失败"在日志里长得一样（都只剩别的 note），排查时
+          //   第一件事就是怀疑这条通道到底跑没跑。
+          await this.#note(
+            runId,
+            `运行时配置隔离：跳过——\`${runtimeKey}\` 没有受管目录（daemon 没给 ${runtimeKey}ConfigDir）`,
+          )
+        }
+        if (rootDir !== null) {
+          const sourcePath = plan?.sourcePath ?? ''
+          /**
+           * 宿主级技能（`$HOME/.agents/skills`，跨 agent 的全局目录）——要不要扫由 profile 决定
+           * （codex 扫、claude 实测不读），`hostSkillsFor()` 只是执行那个决定。
+           */
+          const hostSkills = await hostSkillsFor(runtimeKey, deps.hostSkillRoots)
+          const sync = await syncRuntimeConfig({ runtimeKey, rootDir, workDir: run.workDir ?? null, sourcePath, hostSkills })
+          runtimeConfigEnv = sync.env
+          // ★ 分批第 75 批：隔离成功时记下受管 home——**技能要写到它下面**
+          //   （`<CODEX_HOME>/skills`，见 `skillTargetOf`）。失败时保持 null ⇒
+          //   技能退回工作目录（绝不写使用者真实的 ~/.codex）。
+          if (sync.ok) managedRuntimeHome = sync.home
+          for (const note of sync.notes) await this.#note(runId, note)
+          // 顺手清理太旧的受管目录（只有"按工作目录分"的策略才有意义）
+          await pruneRuntimeConfigHomes(runtimeKey, rootDir, sync.home).catch(() => [])
+        }
+      }
 
       // ── 注入技能（按 agent 求解的**子集**，D22）──
       //
@@ -928,9 +1001,23 @@ export class RunExecutor {
         // ⚠️ 注入失败要让 run 失败——静默的缺能力比报错糟得多。
         //    同名撞上使用者自己的技能也会在这里抛（`SkillCollisionError`）：
         //    覆盖它等于改写使用者的文件，所以宁可这次 run 失败并说清楚。
+        // ★ 分批第 75 批：技能落点 = 隔离生效时的**受管 home**，否则退回工作目录。
+        //
+        //   `runtimeHomeSubdir` 是描述表声明的（目前只有 codex 有：`<CODEX_HOME>/skills`
+        //   实测会被当成技能根）。不声明它的 runtime（claude：全局一份配置目录，
+        //   多工作目录会互相顶掉）继续写工作目录。
+        //
+        //   ⚠️ 为什么不能无条件写受管 home：隔离**没生效**时根本没有受管 home
+        //   （复制失败 ⇒ 自动退回，`managedRuntimeHome` 保持 null），那时若硬写
+        //   `~/.codex/skills` 就是写**使用者的文件**（D29 禁止）。
+        const skillTarget =
+          managedRuntimeHome !== null && skillDelivery.runtimeHomeSubdir !== undefined
+            ? { base: managedRuntimeHome, sub: skillDelivery.runtimeHomeSubdir }
+            : { base: run.workDir!, sub: skillDelivery.dir }
+        injectedSkillTarget = skillTarget
         const skillSync = await syncInjectedSkills(
-          run.workDir!,
-          skillDelivery.dir,
+          skillTarget.base,
+          skillTarget.sub,
           mountedSkills.map((skill) => ({
             slug: skill.slug,
             content: skill.body,
@@ -967,19 +1054,6 @@ export class RunExecutor {
        */
       const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
 
-      /**
-       * ★ 分批第 41 批：运行时个人配置**隔离**开关（`false` = 不复制、直接用原路径）。
-       *
-       * 使用者原话：「我想在 Settings 里面增加一个开关，不 copy 配置，直接用原路径配置」——
-       * 他在 Windows 上撞到的正是 D78 那套复制本身（文件锁 / BOM 或 UTF-16 存法的
-       * config.toml / codex 自己占着 auth.json）。他要的不是"我们把复制修好"，而是
-       * "**别复制**，按我原本的环境跑"。
-       *
-       * ⚠️ 关掉之后 agent 能看见并使用使用者的个人 skill / MCP / 端点配置——那正是
-       *    D78 要挡的东西，所以每次 run 都写一条 note（**不许静默**），界面上也有说明。
-       */
-      const isolateRuntimeConfig = workspace?.runtimeConfigIsolation !== false
-
       // ── 注入任务隔离 hook（2026-10）──
       //
       // claude 会把 Bash/Read 跑到工作目录之外（实测会 `ls ..` 看兄弟任务目录、
@@ -1003,62 +1077,6 @@ export class RunExecutor {
               `只靠第一句话里的「任务边界」引导。`,
           )
         }
-      }
-
-      /**
-       * ── 运行时配置隔离（分批第 64 批：claude 与 codex 走**同一条**逻辑）──
-       *
-       * 这里原来是一段 claude + 一段 codex 的并列 if，各自拼 note、各自注入 env——
-       * 两份实现迟早不同步（这个仓库踩过好几次同款）。现在流程收进
-       * `run-hooks/runtime-config.ts` 的 `syncRuntimeConfig()`：
-       * 「解析受管目录 → 同步 → 产出 notes + env」，两个 runtime 的差异退化成策略表里的数据。
-       *
-       * ⚠️ 唯一的差异是"受管目录按不按工作目录分"（codex 按、claude 不按，理由写在那张表上）。
-       */
-      if (isolateRuntimeConfig && isIsolatedRuntime(runtime.descriptor.key)) {
-        const runtimeKey = runtime.descriptor.key
-        /**
-         * ★ 分批第 67 批：受管根 / 源路径的差异放在 `RuntimeProfile` 子类里
-         *   （`isolationPlanOf` 问 profile），executor 这里只剩"取依赖、交下去"。
-         */
-        const deps = defaultIsolationDeps({
-          runtimeKey,
-          // ★ 分批第 67 批：受管根按 runtime 取的逻辑只有一处（`isolationRootFor`）
-          rootDir: isolationRootFor(runtimeKey, {
-            claude: this.#deps.claudeConfigDir ?? null,
-            codex: this.#deps.codexConfigDir ?? null,
-          }),
-          ...(this.#deps.claudeSettingsSource !== undefined
-            ? { settingsSource: this.#deps.claudeSettingsSource }
-            : {}),
-          ...(this.#deps.codexConfigSource !== undefined
-            ? { codexSource: this.#deps.codexConfigSource }
-            : {}),
-          ...(this.#deps.hostSkillRoots !== undefined
-            ? { hostSkillRoots: this.#deps.hostSkillRoots }
-            : {}),
-        })
-        const plan = profileFor(runtimeKey)?.isolation(deps) ?? null
-        const rootDir = plan?.rootDir ?? null
-        if (rootDir !== null) {
-          const sourcePath = plan?.sourcePath ?? ''
-          /**
-           * 宿主级技能（`$HOME/.agents/skills`，跨 agent 的全局目录）——要不要扫由 profile 决定
-           * （codex 扫、claude 实测不读），`hostSkillsFor()` 只是执行那个决定。
-           */
-          const hostSkills = await hostSkillsFor(runtimeKey, deps.hostSkillRoots)
-          const sync = await syncRuntimeConfig({ runtimeKey, rootDir, workDir: run.workDir ?? null, sourcePath, hostSkills })
-          runtimeConfigEnv = sync.env
-          for (const note of sync.notes) await this.#note(runId, note)
-          // 顺手清理太旧的受管目录（只有"按工作目录分"的策略才有意义）
-          await pruneRuntimeConfigHomes(runtimeKey, rootDir, sync.home).catch(() => [])
-        }
-      } else if (isIsolatedRuntime(runtime.descriptor.key)) {
-        await this.#note(
-          runId,
-          '运行时配置隔离：已关闭（设置里关的）——本次 run 直接用你自己的配置' +
-            '（~/.claude 或 ~/.codex），不复制、不重定向；agent 能看到并使用你个人的 skill / MCP / 端点配置。',
-        )
       }
 
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
@@ -1121,7 +1139,12 @@ export class RunExecutor {
           ? `本次没有注入任何 skill（该 agent 没挂 skill）——agent 将按它自己的默认行为工作`
           : skillDelivery.kind === 'directory'
             ? `已注入 ${mountedSkills.length} 个 skill：${mountedSkills.map((s) => s.slug).join('、')}` +
-              `（写入 ${skillDelivery.dir}/，CLI 会自己扫这个目录）`
+              // ★ 分批第 75 批：写进哪儿要说实话——隔离生效时它写的是**受管运行时目录**
+              //   （codex 的 `<CODEX_HOME>/skills`），工作目录里一个字都不写；
+              //   隔离没生效时才退回描述表声明的那个工作目录子目录。
+              (injectedSkillTarget !== null && injectedSkillTarget.base !== run.workDir
+                ? `（写入受管运行时目录的 ${injectedSkillTarget.sub}/——工作目录里不写平台的东西，CLI 会自己扫它）`
+                : `（写入工作目录的 ${skillDelivery.dir}/，CLI 会自己扫这个目录）`)
             : `⚠️ 挂了 ${mountedSkills.length} 个 skill 但一个都没写下去：` +
               `runtime \`${runtime.descriptor.key}\` 没有技能发现机制（原因见上一行）——` +
               `本次它们只作为「审核标准 / 参考」出现在上下文里`,

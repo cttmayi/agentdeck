@@ -1,6 +1,6 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir } from 'node:fs/promises'
+import { readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AsyncQueue,
@@ -314,6 +314,8 @@ class CodexServiceBackend implements AgentBackend {
    *    在 execute 时当场快照来证明。
    */
   skillsDirsAtExecute: string[] = []
+  /** 这一次技能实际写到的目录（受管 home 或工作目录）——判据用它而不是写死路径。 */
+  skillsTargetAtExecute = ''
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'codex', cliVersion: '0.0.0-fake' }
@@ -322,9 +324,13 @@ class CodexServiceBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     this.calls += 1
     opts.onCommandLine?.({ argv: this.argv, sandboxDescription: '未启用沙箱（测试）' })
-    this.skillsDirsAtExecute = await readdir(join(opts.workDir, '.codex', 'skills')).catch(
-      () => [] as string[],
-    )
+    // ★ 分批第 75 批：技能落点不再恒是工作目录——隔离生效时它写在
+    //   `<CODEX_HOME>/skills`（实测 codex 把它当技能根）。所以快照要看**这一次
+    //   真的把 CODEX_HOME 指到哪**：有它就照它找，没有（隔离退回）才看工作目录。
+    const codexHome = opts.env?.['CODEX_HOME']
+    this.skillsTargetAtExecute =
+      codexHome === undefined ? join(opts.workDir, '.codex', 'skills') : join(codexHome, 'skills')
+    this.skillsDirsAtExecute = await readdir(this.skillsTargetAtExecute).catch(() => [] as string[])
 
     const text = [
       '我的审核结论如下：',
@@ -380,6 +386,15 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
     dataDir = await makeTempDir('service-data')
     workRoot = await makeTempDir('service-work')
     backend = new CodexServiceBackend()
+    /**
+     * ⚠️ 分批第 75 批补的：这里原来**没有**给 codex 配置源 ⇒ 隔离会去复制使用者真实的
+     * `~/.codex`（NFR-T-01 明令测试不许读真实配置）。以前它只是"多读了一份文件"、
+     * 看不出来；现在技能落点跟着受管 home 走，这个洞就变成了断言依赖。
+     * 所以给一份临时的假源：auth.json + config.toml 由测试自己写。
+     */
+    const codexSource = await makeTempDir('service-codex-source')
+    await writeFile(join(codexSource, 'auth.json'), '{"OPENAI_API_KEY":"sk-fake"}\n', 'utf8')
+    await writeFile(join(codexSource, 'config.toml'), 'model = "fake"\n', 'utf8')
     daemon = await startDaemon({
       dataDir,
       port: 0,
@@ -388,6 +403,8 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
       // ★ daemon 级 runtime 就是 codex：注入的假后端因此对它生效
       runtimeKey: 'codex',
       workRoot,
+      codexConfigDir: join(dataDir, 'codex-config'),
+      codexConfigSource: codexSource,
       onWarn: () => {},
       onInfo: () => {},
     })
@@ -506,10 +523,22 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
         return r && r.status === 'completed' ? r : null
       })
 
-      // ① 注入发生在 execute 之前：假后端当场快照到了 `.codex/skills/<slug>/`
+      // ① 注入发生在 execute 之前：假后端当场快照到了 `<CODEX_HOME>/skills/<slug>/`
       assert.ok(
         backend.skillsDirsAtExecute.includes(skill.slug),
-        `★ execute 时 .codex/skills/ 里应该有 ${skill.slug}（实际：${backend.skillsDirsAtExecute.join('、')}）`,
+        `★ execute 时技能目录里应该有 ${skill.slug}（实际 ${backend.skillsTargetAtExecute}：` +
+          `${backend.skillsDirsAtExecute.join('、')}）`,
+      )
+      // ★ 分批第 75 批：隔离生效时技能**不写工作目录**（这正是使用者要的那件事）
+      assert.match(
+        backend.skillsTargetAtExecute,
+        /codex-config\/[0-9a-f]{16}\/skills$/u,
+        `★ 技能该写进受管 CODEX_HOME：${backend.skillsTargetAtExecute}`,
+      )
+      assert.deepEqual(
+        await readdir(join(dir, '.codex', 'skills')).catch(() => [] as string[]),
+        [],
+        '★ 工作目录里不许出现平台写的 .codex/skills',
       )
       // ② 日志明说完整生命周期：注入到哪（CLI 自己会扫）、跑完收掉
       const { messages } = await api<{ messages: Array<{ content: string }> }>(
@@ -517,14 +546,18 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
       )
       const text = messages.map((m) => m.content ?? '').join('\n')
       assert.match(text, /已注入 1 个 skill/, '★ 写下去了就要在日志里说清楚')
-      assert.match(text, /写入 \.codex\/skills\//, '★ 说清写进哪个目录（来自描述表，不是写死的 .claude）')
+      assert.match(
+        text,
+        /写入受管运行时目录的 skills\//,
+        '★ 说清写进哪个目录（现在是受管 CODEX_HOME，不是写死的工作目录）',
+      )
       assert.match(text, new RegExp(skill.slug), '并点名是哪个 skill')
       assert.match(text, /已移除本次注入的 skill/, '★ 跑完要收掉：工作目录只留 agent 的产出')
-      // ③ 收尾之后盘上是干净的（这是"跑完即清"的设计，不是没写）
+      // ③ 收尾之后受管目录里那份也收干净了（"跑完即清"的设计，不是没写）
       assert.deepEqual(
-        await readdir(join(dir, '.codex', 'skills')).catch(() => [] as string[]),
+        await readdir(backend.skillsTargetAtExecute).catch(() => [] as string[]),
         [],
-        '★ 清理后 .codex/skills/ 应为空（清的理由在日志里）',
+        '★ 清理后技能目录应为空（收尾要照着**注入时那个落点**删，不能恒看工作目录）',
       )
     } finally {
       await cleanup(dir)

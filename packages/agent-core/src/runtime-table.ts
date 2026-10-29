@@ -118,7 +118,29 @@ export type PromptDelivery = 'stdin-ndjson' | 'argv'
  * 见 `RuntimeDescriptor.skills` 的说明）。这时一个文件都不写。
  */
 export type SkillDelivery =
-  | { kind: 'directory'; dir: string }
+  | {
+      kind: 'directory'
+      /** 工作目录里的落点（隔离**没**生效时的兜底位置）。 */
+      dir: string
+      /**
+       * 受管运行时 home 里的子目录（分批第 75 批）。有它 ⇒ **隔离生效时技能写到
+       * `<受管 home>/<这个>`**，工作目录里一个字都不写。
+       *
+       * 为什么要搬（使用者提的：别影响工作目录）：技能现在落在 `<workDir>/.codex/skills`，
+       * 于是（a）工作目录里多出平台自己的东西；（b）agent 有写权限，能改写自己下一轮
+       * 要遵守的规则；（c）使用者仓库里若有同名 `.codex/skills/<slug>`，`SkillCollisionError`
+       * 会让整条 run 失败。
+       *
+       * 实测（0.157.1）：`<CODEX_HOME>/skills/<slug>/SKILL.md` 会被 codex 当成一条技能，
+       * `codex debug prompt-input` 里技能根是 `r0 = <CODEX_HOME>/skills`，模型能抄出它的
+       * description；app-server 模式下同样可见。
+       *
+       * ⚠️ 只有"按工作目录分"的受管 home（codex）适合挂技能：claude 的
+       * `CLAUDE_CONFIG_DIR` 是**全局一份**，多个工作目录/多个 agent 各挂不同技能会互相顶掉，
+       * 所以 claude 不声明这个字段（仍写工作目录）。
+       */
+      runtimeHomeSubdir?: string
+    }
   | { kind: 'none'; reason: string }
 
 /** 会话状态三态——见 `RuntimeDescriptor.sessionState` 的说明。 */
@@ -655,7 +677,9 @@ export const CODEX_DESCRIPTOR: RuntimeDescriptor = {
   stateDir: '.codex',
   // 技能走项目作用域：thread 的 cwd = 工作目录，codex 自动扫 `{cwd}/.codex/skills/`。
   // 这与 claude/generic 是**同一套注入机制**，只是目录名来自这一行（设计稿 §2.7 路 A）。
-  skills: { kind: 'directory', dir: '.codex/skills' },
+  // ★ 分批第 75 批：隔离生效时技能写 `<CODEX_HOME>/skills`（见 `SkillDelivery` 的说明）；
+  //   隔离没生效（复制失败 ⇒ 自动退回）时才退回工作目录的 `.codex/skills`。
+  skills: { kind: 'directory', dir: '.codex/skills', runtimeHomeSubdir: 'skills' },
   toolConfig: {
     enabled: false,
     reason:

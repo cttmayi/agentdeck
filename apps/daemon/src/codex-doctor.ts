@@ -480,8 +480,10 @@ export async function runCodexDoctor(options: CodexDoctorOptions = {}): Promise<
   })
   if (!copy.ok) {
     nextSteps.push(
-      '复制这一步失败了。临时办法：设置里把「运行时配置」那个勾**取消**（= 不复制、直接用原路径），' +
-        '再跑一次任务；如果这样能跑通，就确认是复制这条路的问题，把这行输出发我。',
+      '复制这一步失败了。**现在的行为是自动退回**：那次 run 不会用受管目录，' +
+        '而是直接用你自己的 ~/.codex（日志里会写「个人配置隔离未生效」）。' +
+        '先把上面 ③ 的编码/占用判据看清楚（UTF-16 的 config.toml 与 codex 占着 auth.json 是最常见的两个原因），' +
+        '再把这一行输出发我。',
     )
   }
 
@@ -532,8 +534,8 @@ export async function runCodexDoctor(options: CodexDoctorOptions = {}): Promise<
     node: process.version,
     codePage,
     isolationNote:
-      '平台是否注入 CODEX_HOME 由设置里的「运行时配置」开关决定；本命令**不读**那个设定，' +
-      '只做只读演练（落临时目录）。',
+      '平台默认会注入 CODEX_HOME（受管目录）；**只有复制失败时才自动退回**用你自己的 ~/.codex。' +
+      '本命令**不做**那个判断（它是只读演练，落临时目录）。',
   }
 
   return {

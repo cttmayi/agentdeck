@@ -48,9 +48,18 @@ describe('runtime 描述表（FR-CLI-47 —— 把"支持新 runtime"变成填�
     assert.equal(codex.protocol, 'jsonrpc')
     assert.equal(codex.family, 'codex-app-server-jsonrpc')
     assert.equal(codex.sessionState, 'stateful')
-    assert.equal(codex.systemPrompt, null, 'app-server 没有系统提示参数 ⇒ B 档')
+    assert.equal(codex.systemPrompt, null, 'app-server 没有命令行式系统提示 ⇒ 走 thread 级通道')
+    assert.deepEqual(
+      codex.threadInstructions,
+      { param: 'developerInstructions' },
+      '①② 挂在 thread/start 上（分批第 74 批，实测 0.157.1）',
+    )
     assert.deepEqual([...codex.baseArgs], ['app-server', '--stdio'], 'baseArgs 是启动参数')
-    assert.deepEqual(codex.skills, { kind: 'directory', dir: '.codex/skills' })
+    assert.deepEqual(
+      codex.skills,
+      { kind: 'directory', dir: '.codex/skills', runtimeHomeSubdir: 'skills' },
+      '技能优先写 <CODEX_HOME>/skills（分批第 75 批），隔离不成时才退回工作目录',
+    )
     assert.equal(codex.evidence, 'verified')
     assert.deepEqual([...codex.versions!.verifiedWith], ['0.144.0-alpha.4', '0.157.1'], '实测过的版本要如实填')
     assert.equal(codex.versions!.range, '>=0.144.0-alpha.4 <0.158.0')

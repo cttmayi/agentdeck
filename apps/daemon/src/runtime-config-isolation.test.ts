@@ -14,32 +14,33 @@ import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
- * ★ 分批第 41 批：Settings 里的「运行时配置隔离」开关。
+ * 运行时个人配置隔离的**失败语义**与**技能落点**（分批第 75 批）。
  *
  * ══════════════════════════════════════════════════════════════════
- * 为什么要有这个开关（使用者原话）
+ * 这一批改了什么，为什么
  * ══════════════════════════════════════════════════════════════════
  *
- * 「我想在 Settings 里面增加一个开关，不 copy 配置，直接用原路径配置」——他在 Windows 上
- * 撞到的正是 D78 那套**复制**本身（把 `auth.json` + `config.toml` 搬进受管目录；
- * Windows 上有文件锁、有 BOM/UTF-16 存法的 config.toml、还有 codex 自己占着文件）。
- * 他要的不是"我们把复制修好"，而是"别复制，按我原本的环境跑"。
+ * 原来有一个 Settings 开关「运行时配置」（`Workspace.runtimeConfigIsolation`）。
+ * 它当初是为 Windows 上撞到的两个真问题准备的退路：`config.toml` 是 PowerShell `>`
+ * 写出的 **UTF-16**、`auth.json` 被 codex 占着复制不了。
  *
- * ══════════════════════════════════════════════════════════════════
- * 这份测试钉的是什么（以及为什么必须用真 daemon + 假后端）
- * ══════════════════════════════════════════════════════════════════
+ * 但开关并不解决那两个问题——它只是让使用者**手动**退回"用我自己的配置"。更糟的是
+ * 复制失败时代码**照样**把 `CODEX_HOME` 指向受管目录 ⇒ codex 拿到一个缺 auth.json 的
+ * 空目录 ⇒ 认证失败。也就是说：开关替那段坏逻辑背了锅。
  *
- * 这条开关的要害不是"界面上有个勾"，而是**三件事必须同时跟着变**：
- *   ① 不复制配置文件（受管目录里不许出现新文件）；
- *   ② 不注入重定向（`CLAUDE_CONFIG_DIR` / `CODEX_HOME` 不许传给后端）；
- *   ③ 运行日志里写清这一次是哪种（关掉会失去隔离，不许静默）。
+ * 这一批把机器修好、把开关删掉：
+ *   · **编码**：`readConfigText()` 按 BOM 判 UTF-16 / UTF-8+ BOM 再解码，受管副本
+ *     一律以 UTF-8 写回（**使用者的原文件一个字节都不动**）；
+ *   · **占用**：`copyWithRetry()` 对 `EPERM/EACCES/EBUSY` 在 win32 上退避重试；
+ *   · **失败语义**：同步失败 ⇒ **不注入重定向**（`CLAUDE_CONFIG_DIR` / `CODEX_HOME`
+ *     都不传给后端）+ 一条明确 note ⇒ 直接用使用者自己的配置。等价于原来那个开关，
+ *     但不需要人操心；
+ *   · **技能落点**：隔离生效时技能写 `<CODEX_HOME>/skills`（实测 codex 会把它当技能根），
+ *     工作目录里不再出现 `.codex/skills`；隔离失败时退回工作目录（**绝不写使用者真实的
+ *     `~/.codex`**）。
  *
- * 只验其中一条的话，最容易出现的坏结果是"开关关了、复制还在"或"复制停了、
- * 环境变量还在"——两种都表现为"设置没生效"，而那正是这个仓库最常见的缺陷形状。
- *
- * NFR-T-01：注入假后端，绝不启动真 CLI（这里连 claude/codex 的可执行文件都不需要）。
+ * NFR-T-01：注入假后端，绝不启动真 CLI。
  */
-
 /** 只记录"后端收到了什么"的假后端：这份测试不关心 agent 说了什么。 */
 class EnvRecordingBackend implements AgentBackend {
   readonly key = 'codex-recorded'
@@ -110,7 +111,11 @@ const putJson = (h: Harness, path: string, payload: unknown) =>
   })
 
 /** 起一条 execute run 并等它到终态（只看终态，不看内容）。 */
-async function runOnce(h: Harness, workDir: string): Promise<{ runId: string; notes: string[] }> {
+async function runOnce(
+  h: Harness,
+  workDir: string,
+  skills: Array<Record<string, unknown>> = [],
+): Promise<{ runId: string; notes: string[] }> {
   const runId = `run-iso-${String(Date.now())}-${String(Math.floor(Math.random() * 1e6))}`
   const created = await json(h, '/api/runs', {
     method: 'POST',
@@ -120,7 +125,7 @@ async function runOnce(h: Harness, workDir: string): Promise<{ runId: string; no
       kind: 'execute',
       // runtimeKey 留空 ⇒ 新 agent 的默认值 'default' ⇒ 三级解析落到 daemon 侦测的那个
       agentRef: { id: `a-iso-${runId}`, name: '助手', instructions: '' },
-      skills: [],
+      skills,
       subject: { type: 'issue', id: `i-iso-${runId}` },
       prompt: '干活',
       workDir,
@@ -183,37 +188,8 @@ async function makeHarness(runtimeKey: string): Promise<Harness> {
   return { daemon, backend, dataDir, configDir }
 }
 
-describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关（codex 与 claude 同一个开关）', () => {
-  test('★★ 接口与身份：写进去的值必须原样读回来（含"老数据缺省 = 开"）', async () => {
-    const h = await makeHarness('claude')
-    try {
-      // 缺省：老 workspace 里没有这个键 ⇒ 开（升级不许悄悄改变既有行为）
-      const before = await json(h, '/api/identity')
-      assert.equal(
-        (before.body as { runtimeConfigIsolation?: boolean }).runtimeConfigIsolation,
-        true,
-        '没设过的时候必须是"开"——否则升级会把所有人的隔离悄悄关掉',
-      )
-
-      const off = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
-      assert.equal(off.status, 200, JSON.stringify(off.body))
-      const afterOff = await json(h, '/api/identity')
-      assert.equal(
-        (afterOff.body as { runtimeConfigIsolation?: boolean }).runtimeConfigIsolation,
-        false,
-        '★ 开关的值必须从服务端读回来（界面上那个勾读的就是它）',
-      )
-
-      const bad = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: 'no' })
-      assert.equal(bad.status, 400, 'enabled 必须是布尔值')
-      assert.equal((bad.body as { code?: string }).code, 'invalid_enabled')
-    } finally {
-      await h.daemon.close()
-      await cleanup(h.dataDir)
-    }
-  })
-
-  test('★★★ 开（默认）：claude 侧复制配置 + 注入 CLAUDE_CONFIG_DIR', async () => {
+describe('★ 分批第 75 批：隔离生效时照旧复制 + 重定向（默认行为不变）', () => {
+  test('★★★ claude：复制 settings.json 并注入 CLAUDE_CONFIG_DIR', async () => {
     const h = await makeHarness('claude')
     try {
       const work = await makeTempDir('iso-claude-on-work')
@@ -221,12 +197,12 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
       assert.equal(
         h.backend.seenEnv['CLAUDE_CONFIG_DIR'],
         h.configDir,
-        '★ 隔离开着时必须把 CLAUDE_CONFIG_DIR 指向受管目录',
+        '★ 隔离生效时必须把 CLAUDE_CONFIG_DIR 指向受管目录',
       )
       assert.equal(
         await exists(join(h.configDir, 'settings.json')),
         true,
-        '★ 隔离开着时必须真的写出一份受管 settings.json',
+        '★ 隔离生效时必须真的写出一份受管 settings.json',
       )
       assert.ok(
         notes.some((n) => n.includes('claude 个人配置隔离') && n.includes('已启用')),
@@ -239,31 +215,54 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
     }
   })
 
-  test('★★★ 关：claude 侧**不复制、不重定向**，并在日志里说清楚（使用者要的就是这个）', async () => {
-    const h = await makeHarness('claude')
+  test('★★★ codex：复制 auth.json/config.toml，CODEX_HOME 按工作目录分', async () => {
+    const h = await makeHarness('codex')
     try {
-      const off = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
-      assert.equal(off.status, 200, JSON.stringify(off.body))
-      const work = await makeTempDir('iso-claude-off-work')
-      // 受管目录里预先放一个"上一轮留下的"文件：用来证明"关掉"不是"清空"
-      await mkdir(h.configDir, { recursive: true })
-      await writeFile(join(h.configDir, 'stale.txt'), 'old\n', 'utf8')
+      const work = await makeTempDir('iso-codex-on-work')
+      const on = await runOnce(h, work)
+      const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
+      assert.ok(codexHome.startsWith(`${h.configDir}/`), `★ CODEX_HOME 必须在受管根下面：${codexHome}`)
+      assert.match(codexHome, /\/[0-9a-f]{16}$/u, '目录名是工作目录路径的哈希（同一目录复用同一份）')
+      assert.match(
+        await readFile(join(codexHome, 'auth.json'), 'utf8'),
+        /OPENAI_API_KEY/u,
+        '★ auth.json 必须真的被复制过去（否则 codex 认证不了）',
+      )
+      assert.equal(await exists(join(codexHome, 'config.toml')), true, 'config.toml 同样要复制')
+      assert.ok(
+        on.notes.some((n) => n.includes('codex 个人配置隔离') && n.includes('已启用')),
+        `运行日志要写明这次启用了隔离：${on.notes.join(' | ')}`,
+      )
+      await cleanup(work)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})
 
+describe('★ 分批第 75 批：复制不成 ⇒ **自动退回**（开关删了，退路变成自动的）', () => {
+  /**
+   * 判据是"**不重定向**"，不是"报了个错"。
+   *
+   * 原来失败时仍然返回 `env = { CODEX_HOME: 受管目录 }`：codex 拿着一个可能缺
+   * `auth.json` 的目录起来 ⇒ 认证失败。那不是隔离，是把能跑的 run 变成跑不起来的 run。
+   */
+  test('★★★ codex：源缺 auth.json ⇒ 不注入 CODEX_HOME，日志说明"直接用你自己的"', async () => {
+    const h = await makeHarness('codex')
+    try {
+      // 让源配置"缺一个文件"：复制这一步失败
+      await cleanup(join(h.dataDir, 'user-codex/auth.json'))
+      const work = await makeTempDir('iso-codex-fallback-work')
       const { notes } = await runOnce(h, work)
       assert.equal(
-        h.backend.seenEnv['CLAUDE_CONFIG_DIR'],
+        h.backend.seenEnv['CODEX_HOME'],
         undefined,
-        '★★ 关掉之后**不许**再注入 CLAUDE_CONFIG_DIR —— 否则复制停了、重定向还在，' +
-          'CLI 会拿着一个没人维护的目录跑（这是最坏的那种"半生效"）',
-      )
-      assert.equal(
-        await exists(join(h.configDir, 'settings.json')),
-        false,
-        '★ 关掉之后不许再往受管目录里写 settings.json',
+        '★ 复制失败时**不许**再把 CODEX_HOME 指向受管目录（那是最坏的半生效）',
       )
       assert.ok(
-        notes.some((n) => n.includes('运行时配置隔离：已关闭')),
-        `关掉必须在运行日志里说清楚（不许静默丢掉隔离）：${notes.join(' | ')}`,
+        notes.some((n) => n.includes('codex 个人配置隔离未生效') && n.includes('直接用你自己的')),
+        `要在日志里说清"这次没有隔离、用的是你自己的配置"：${notes.join(' | ')}`,
       )
       await cleanup(work)
     } finally {
@@ -272,64 +271,179 @@ describe('★ 分批第 41 批：Settings 的「运行时配置隔离」开关�
     }
   })
 
-  test('★★★ codex：开 → 复制 auth.json/config.toml 且注入 CODEX_HOME；关 → 两个都不做', async () => {
-    const h = await makeHarness('codex')
+  test('★★★ claude：源 settings.json 缺失 ⇒ 不注入 CLAUDE_CONFIG_DIR（但自带 skills 照样关）', async () => {
+    const h = await makeHarness('claude')
     try {
-      const workOn = await makeTempDir('iso-codex-on-work')
-      const on = await runOnce(h, workOn)
-      /**
-       * ★ 分批第 60 批：`CODEX_HOME` 从"全局一份"改成"**按工作目录分**一份"——
-       * 原因见 `codex-config.ts` 的 `codexHomeFor`：全局一份时两条不同工作目录的 run
-       * 会同时重建同一份 config.toml，后写赢 ⇒ 先写那条的 trust 段被抹掉。
-       * 所以判据是"**在受管根下面、且与本轮工作目录绑定**"，不是"等于受管根"。
-       */
-      const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
-      assert.ok(
-        codexHome.startsWith(`${h.configDir}/`),
-        `★ 隔离开着时 CODEX_HOME 必须在受管根下面：${codexHome}`,
-      )
-      assert.match(codexHome, /\/[0-9a-f]{16}$/u, '目录名是工作目录路径的哈希（保证同一目录复用同一份）')
-      const copiedAuth = await readFile(join(h.backend.seenEnv['CODEX_HOME'] ?? '', 'auth.json'), 'utf8')
-      assert.match(copiedAuth, /OPENAI_API_KEY/, '★ auth.json 必须真的被复制过去（否则 codex 认证不了）')
+      await cleanup(join(h.dataDir, 'user-claude/settings.json'))
+      const work = await makeTempDir('iso-claude-fallback-work')
+      const { notes } = await runOnce(h, work)
       assert.equal(
-        await exists(join(h.backend.seenEnv['CODEX_HOME'] ?? '', 'config.toml')),
-        true,
-        'config.toml 同样要复制',
-      )
-      assert.ok(
-        on.notes.some((n) => n.includes('codex 个人配置隔离') && n.includes('已启用')),
-        `运行日志要写明这次启用了隔离：${on.notes.join(' | ')}`,
-      )
-
-      const offRes = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
-      assert.equal(offRes.status, 200, JSON.stringify(offRes.body))
-      // 把这份 per-workdir 目录整个删掉：只有真的不再复制，它们才不会回来
-      const codexHomeOn = h.backend.seenEnv['CODEX_HOME'] ?? ''
-      assert.notEqual(codexHomeOn, '', '前提：开的时候真的注入了 CODEX_HOME')
-      await cleanup(codexHomeOn)
-      const workOff = await makeTempDir('iso-codex-off-work')
-      const off = await runOnce(h, workOff)
-      assert.equal(
-        h.backend.seenEnv['CODEX_HOME'],
+        h.backend.seenEnv['CLAUDE_CONFIG_DIR'],
         undefined,
-        '★ 关掉之后不许再注入 CODEX_HOME —— codex 就用它自己的 ~/.codex',
+        '★ 复制失败时不许再注入 CLAUDE_CONFIG_DIR',
       )
       assert.equal(
-        await exists(join(codexHomeOn, 'auth.json')),
-        false,
-        '★ 关掉之后不许再复制 auth.json（这正是 Windows 上出问题的那一步）',
+        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        '1',
+        '★ 但"关掉 claude 自带 skills"与复制成败无关（它只是一个 env）⇒ 仍然要注入',
       )
       assert.ok(
-        off.notes.some((n) => n.includes('运行时配置隔离：已关闭')),
-        `关掉必须在运行日志里说清楚：${off.notes.join(' | ')}`,
+        notes.some((n) => n.includes('claude 个人配置隔离未生效') && n.includes('直接用你自己的')),
+        `日志要说清这次的退路：${notes.join(' | ')}`,
       )
-
-      await cleanup(workOn)
-      await cleanup(workOff)
+      await cleanup(work)
     } finally {
       await h.daemon.close()
       await cleanup(h.dataDir)
     }
+  })
+
+  test('★★★ UTF-16 的 config.toml ⇒ 受管副本规范化成 UTF-8（原文件不动），日志说明', async () => {
+    const h = await makeHarness('codex')
+    try {
+      // PowerShell 5.1 的 `>` 产物：UTF-16LE + BOM
+      const utf16 = Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('model = "fake"\n[model_providers.local]\nbase_url = "http://127.0.0.1:8080"\n', 'utf16le'),
+      ])
+      await writeFile(join(h.dataDir, 'user-codex/config.toml'), utf16)
+
+      const work = await makeTempDir('iso-codex-utf16-work')
+      const { notes } = await runOnce(h, work)
+      const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
+      assert.notEqual(codexHome, '', '前提：这次隔离是生效的')
+      const managed = await readFile(join(codexHome, 'config.toml'))
+      assert.equal(
+        managed[0] === 0xff && managed[1] === 0xfe,
+        false,
+        '★ 受管副本不许再是 UTF-16（否则我们后续按 UTF-8 读它又是乱码）',
+      )
+      const text = managed.toString('utf8')
+      assert.match(text, /model = "fake"/u, '★ 内容必须是**解码后**的真文本，不是乱码夹 NUL')
+      assert.equal(text.includes('\u0000'), false, '不许有 NUL')
+      assert.ok(
+        notes.some((n) => n.includes('UTF-16') || n.includes('utf16le')),
+        `日志要说明"你的 config.toml 是 UTF-16，已解码写进受管副本"：${notes.join(' | ')}`,
+      )
+      // 使用者的原文件一个字节都不能动
+      const source = await readFile(join(h.dataDir, 'user-codex/config.toml'))
+      assert.equal(source[0], 0xff, '★ 源文件必须还是原来的 UTF-16（D29：不碰使用者的文件）')
+      await cleanup(work)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})
+
+describe('★ 分批第 75 批：技能落点（隔离生效 ⇒ 受管 home；失败 ⇒ 退回工作目录）', () => {
+  const oneSkill = (slug: string): Array<Record<string, unknown>> => [
+    {
+      ref: { id: `sk-${slug}`, slug, source: 'builtin' },
+      slug,
+      name: `技能 ${slug}`,
+      body: `# ${slug}\n\n正文。\n`,
+      description: `探针技能 ${slug}`,
+    },
+  ]
+
+  test('★★★ codex：隔离生效 ⇒ 技能写进 <CODEX_HOME>/skills，工作目录里没有 .codex/skills', async () => {
+    const h = await makeHarness('codex')
+    try {
+      const work = await makeTempDir('iso-codex-skill-work')
+      await runOnce(h, work, oneSkill('probe-alpha'))
+      const codexHome = h.backend.seenEnv['CODEX_HOME'] ?? ''
+      assert.notEqual(codexHome, '', '前提：隔离生效')
+      /**
+       * 实测（0.157.1）：`<CODEX_HOME>/skills/<slug>/SKILL.md` 会被 codex 当成一条技能，
+       * `codex debug prompt-input` 里技能根是 `r0 = <CODEX_HOME>/skills`，
+       * app-server 模式下模型能抄出它的 description。
+       *
+       * ⚠️ 这里只能验"写到了哪"（真 CLI 的可见性由真机跑过一次确认）；跑完之后
+       *    平台会把自己的注入物收走（工作目录/受管目录都回到"只有 agent 的产出"），
+       *    所以断言用**注入那一刻的 note**：它既证明了落点，也证明了我们没写工作目录。
+       */
+      const { notes } = await runOnce(h, work, oneSkill('probe-beta'))
+      assert.ok(
+        notes.some((n) => n.includes('写入受管运行时目录的 skills/') && n.includes('probe-beta')),
+        `日志要说清技能写进了受管 home：${notes.join(' | ')}`,
+      )
+      assert.equal(
+        await exists(join(work, '.codex', 'skills')),
+        false,
+        '★ 工作目录里不该出现平台写的 .codex/skills（这正是使用者要的效果）',
+      )
+      await cleanup(work)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+
+  test('★★ 隔离失败 ⇒ 技能退回工作目录的 .codex/skills（绝不写使用者真实的 ~/.codex）', async () => {
+    const h = await makeHarness('codex')
+    try {
+      await cleanup(join(h.dataDir, 'user-codex/auth.json'))
+      const work = await makeTempDir('iso-codex-skill-fallback')
+      const { notes } = await runOnce(h, work, oneSkill('probe-gamma'))
+      assert.equal(h.backend.seenEnv['CODEX_HOME'], undefined, '前提：这次隔离没生效')
+      assert.ok(
+        notes.some((n) => n.includes('写入工作目录的 .codex/skills/') && n.includes('probe-gamma')),
+        `没有受管 home 时技能必须退回工作目录：${notes.join(' | ')}`,
+      )
+      await cleanup(work)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})
+
+describe('★ 分批第 75 批：copyWithRetry（Windows 占用重试）', () => {
+  test('★★★ win32 上 EPERM 会退避重试；非 win32 一次就放弃；非瞬时错误立刻抛', async () => {
+    const { copyWithRetry } = await import('./run-hooks/config-file.ts')
+    const sleep = async (): Promise<void> => {}
+    const eperm = (): NodeJS.ErrnoException => Object.assign(new Error('locked'), { code: 'EPERM' })
+
+    // ① win32：前两次 EPERM，第三次成功
+    let calls = 0
+    await copyWithRetry('a', 'b', {
+      platform: 'win32',
+      sleep,
+      copy: async () => {
+        calls += 1
+        if (calls < 3) throw eperm()
+      },
+    })
+    assert.equal(calls, 3, '★ win32 上"文件被占用"要重试（codex 常开着 auth.json）')
+
+    // ② 非 win32：一次就抛（POSIX 上重试只会让真错误晚 300ms 报出来）
+    let calls2 = 0
+    await assert.rejects(
+      copyWithRetry('a', 'b', {
+        platform: 'darwin',
+        sleep,
+        copy: async () => {
+          calls2 += 1
+          throw eperm()
+        },
+      }),
+    )
+    assert.equal(calls2, 1, 'POSIX 上不许重试')
+
+    // ③ 非瞬时错误（比如 ENOENT）立刻抛，不浪费四次退避
+    let calls3 = 0
+    await assert.rejects(
+      copyWithRetry('a', 'b', {
+        platform: 'win32',
+        sleep,
+        copy: async () => {
+          calls3 += 1
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+        },
+      }),
+    )
+    assert.equal(calls3, 1, 'ENOENT 不是"被占用"，重试没有意义')
   })
 })
 
@@ -417,7 +531,7 @@ describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () 
  *     `~/.claude/skills` 的个人技能被 CLAUDE_CONFIG_DIR 挡住了。
  */
 describe('★ 分批第 62 批：claude 也关掉自带 skills', () => {
-  test('★★★ 隔离开着 ⇒ 注入 CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1；关掉隔离 ⇒ 不注入', async () => {
+  test('★★★ 隔离生效 ⇒ 注入 CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1；退回时也注入（与复制无关）', async () => {
     const h = await makeHarness('claude')
     try {
       const work = await makeTempDir('claude-bundled-on-work')
@@ -425,21 +539,27 @@ describe('★ 分批第 62 批：claude 也关掉自带 skills', () => {
       assert.equal(
         h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
         '1',
-        '★ 隔离开着时必须关掉 claude 自带的 13 条 skills（否则它们混进模型清单）',
+        '★ 隔离生效时必须关掉 claude 自带的 13 条 skills（否则它们混进模型清单）',
       )
       assert.ok(
         on.notes.some((n) => n.includes('claude 自带的 skills：已关闭')),
         `日志要说清这件事（含"还剩 plugin-authoring"）：${on.notes.join(' | ')}`,
       )
 
-      const off = await putJson(h, '/api/workspace/runtime-config-isolation', { enabled: false })
-      assert.equal(off.status, 200, JSON.stringify(off.body))
-      const work2 = await makeTempDir('claude-bundled-off-work')
+      // ★ 分批第 75 批：开关删了。等价情形是"复制失败 ⇒ 自动退回"——
+      //   那时**仍然**要关 claude 自带 skills：它只是一个 env，与复制成败无关。
+      await cleanup(join(h.dataDir, 'user-claude/settings.json'))
+      const work2 = await makeTempDir('claude-bundled-fallback-work')
       await runOnce(h, work2)
       assert.equal(
-        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        h.backend.seenEnv['CLAUDE_CONFIG_DIR'],
         undefined,
-        '★ 关掉隔离 = 使用者要看自己的东西，这时不许替他关 claude 自带的 skills',
+        '前提：复制失败时不再重定向',
+      )
+      assert.equal(
+        h.backend.seenEnv['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS'],
+        '1',
+        '★ 退回用你自己的配置时，claude 自带 skills 照样该关（那条 env 不依赖复制）',
       )
       await cleanup(work)
       await cleanup(work2)

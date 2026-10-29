@@ -172,23 +172,38 @@ export class ClaudeProfile extends RuntimeProfile {
 
   override async syncIsolation(ctx: IsolationSyncContext): Promise<IsolationSyncOutcome> {
     const sync = await syncClaudeConfigDir(ctx.home, ctx.sourcePath)
-    const env = { CLAUDE_CONFIG_DIR: ctx.home, CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' }
+    // ★ 分批第 75 批：**同步失败就不重定向**（env 里没有 CLAUDE_CONFIG_DIR）。
+    //
+    //   原来失败时照样把 CLAUDE_CONFIG_DIR 指到受管目录，于是"复制失败"变成
+    //   "CLI 拿着一个没人维护的目录跑"——最坏的半生效。现在退回"直接用你自己的
+    //   配置"，并在日志里说清（下面那条 note）。
+    //
+    //   `CLAUDE_CODE_DISABLE_BUNDLED_SKILLS` 仍然注入：它只是一个 env，
+    //   与复制成败无关，且关掉 claude 自带技能在任何情况下都是我们要的。
+    if (!sync.ok) {
+      return {
+        ok: false,
+        reason: sync.reason ?? null,
+        home: ctx.home,
+        env: { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' },
+        notes: [
+          `⚠️ claude 个人配置隔离未生效（${sync.reason ?? '未知原因'}）——` +
+            '本次 run **直接用你自己的 ~/.claude 配置**（不复制、不重定向）；' +
+            '代价是 agent 能看到并使用你的用户级 skill / MCP。',
+        ],
+      }
+    }
     return {
-      ok: sync.ok,
-      reason: sync.reason ?? null,
+      ok: true,
+      reason: null,
       home: ctx.home,
-      env,
-      notes: sync.ok
-        ? [
-            `claude 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
-              `用户级 skill/MCP 不可见，env ${String(sync.envCount ?? 0)} 项已同步。`,
-            'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1 + 受管 settings 里的 ' +
-              'enabledPlugins.plugin-authoring@builtin=false）——这次的技能清单只剩平台注入的那些。',
-          ]
-        : [
-            `⚠️ claude 个人配置隔离未生效（${sync.reason ?? '未知原因'}）——` +
-              '本次 run 会看到用户级 skill/MCP（如 rea、个人 skill）。',
-          ],
+      env: { CLAUDE_CONFIG_DIR: ctx.home, CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1' },
+      notes: [
+        `claude 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
+          `用户级 skill/MCP 不可见，env ${String(sync.envCount ?? 0)} 项已同步。`,
+        'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1 + 受管 settings 里的 ' +
+          'enabledPlugins.plugin-authoring@builtin=false）——这次的技能清单只剩平台注入的那些。',
+      ],
     }
   }
 }
@@ -225,16 +240,28 @@ export class CodexProfile extends RuntimeProfile {
       ctx.workDir ?? undefined,
       ctx.hostSkills,
     )
-    const env = { CODEX_HOME: ctx.home }
     const notes: string[] = []
     if (!sync.ok) {
+      // ★ 分批第 75 批：失败**不重定向**（与 claude 那边同一条纪律）。
+      //   原来这里照样返回 `env = { CODEX_HOME: ctx.home }`，于是"没复制成功"
+      //   变成"codex 拿着一个可能缺 auth.json 的空目录跑"——那不是隔离，
+      //   那是把一次能跑通的 run 变成认证失败。现在退回"用你自己的 ~/.codex"。
       notes.push(
         `⚠️ codex 个人配置隔离未生效（${sync.reason ?? '未知原因'}）——` +
-          '本次 run 会看到用户级 skill（如 browser-use）。',
+          '本次 run **直接用你自己的 ~/.codex 配置**（不复制、不重定向）；' +
+          '代价是 agent 能看到并使用你的用户级 skill（如 browser-use）。',
       )
-      return { ok: false, reason: sync.reason ?? null, home: ctx.home, env, notes }
+      return { ok: false, reason: sync.reason ?? null, home: ctx.home, env: {}, notes }
     }
+    const env = { CODEX_HOME: ctx.home }
 
+    if (sync.normalizedConfigFrom !== undefined && sync.normalizedConfigFrom !== null) {
+      notes.push(
+        `你的 config.toml 是 ${sync.normalizedConfigFrom}（PowerShell \`>\` 重定向的产物）——` +
+          `已解码并以 UTF-8 写进受管副本（**你的原文件没动**）；` +
+          `你的配置在被我们改写之前是**读不出来的**，这次的端点是按解码后的内容用的。`,
+      )
+    }
     notes.push(
       `codex 个人配置隔离：已启用受管配置目录（${sync.configDir}）——` +
         '`CODEX_HOME` 下的用户级 skill 不可见，' +

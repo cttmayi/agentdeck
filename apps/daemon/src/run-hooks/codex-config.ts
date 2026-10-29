@@ -40,11 +40,20 @@
 import { createHash } from 'node:crypto'
 import { chmod, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { copyWithRetry, readConfigText, writeConfigTextUtf8 } from './config-file.ts'
 
 /** 受管配置目录里 codex 读的文件（相对 configDir）。 */
 export const CODEX_CONFIG_FILES = ['auth.json', 'config.toml'] as const
 
 export interface CodexConfigSyncResult {
+  /**
+   * 源 `config.toml` 不是 UTF-8（UTF-16 / 带 BOM）时，这里记下**原始编码**。
+   *
+   * 非 null 表示：我们把它**解码成正常文本再以 UTF-8 写进受管副本**了。
+   * 这是分批第 75 批补的——PowerShell 5.1 的 `>` 会产出 UTF-16LE，
+   * 原来一律按 UTF-8 读 ⇒ 读到乱码再改再写，受管副本直接坏掉。
+   */
+  normalizedConfigFrom?: string | null
   ok: boolean
   /** ok=false 时的原因（进 note，让人知道为什么这次没有隔离）。 */
   reason?: string
@@ -431,7 +440,7 @@ export async function syncCodexConfigDir(
     const source = join(sourceHomeDir, name)
     const target = join(configDir, name)
     try {
-      await copyFile(source, target)
+      await copyWithRetry(source, target)
       // ★ 两个文件里都有真实 key（auth.json 的 OPENAI_API_KEY、config.toml
       //   的 model_providers api_key），只给属主读。
       await chmod(target, 0o600)
@@ -446,6 +455,7 @@ export async function syncCodexConfigDir(
       reason: `源配置缺 ${missing.join('、')}（在 ${sourceHomeDir}）`,
       copied,
       configDir,
+      normalizedConfigFrom: null,
       trustedProject: null,
       trustedProjectConfigHash: null,
       bundledSkills: 'already-configured',
@@ -454,14 +464,30 @@ export async function syncCodexConfigDir(
     }
   }
 
+  // ── 读一次（按真实编码解）、改三处、写一次（UTF-8）──
+  //
+  // ★ 分批第 75 批：原来是**读三次、写三次**（trust / bundled / 宿主级技能各一轮），
+  //   而且每次都是 `readFile(path, 'utf8')`。两个问题都被这一刀收掉：
+  //     · 读三次 ⇒ 三处各自解析一遍，某一次写失败会让另外两处的改动半途而废；
+  //     · 一律按 UTF-8 读 ⇒ PowerShell `>` 产出的 UTF-16LE `config.toml` 被读成乱码，
+  //       再"改一改写回去"就把受管副本写坏（`codex-doctor` 能诊断、却挡不住这条路）。
+  //   现在：`readConfigText` 按 BOM 解出**正常文本**，改动都在内存里合成，
+  //   需要规范化时以 UTF-8 写回受管副本（**使用者的原文件一个字节都不动**）。
+  const configPath = join(configDir, 'config.toml')
+  const loaded = await readConfigText(configPath)
+  let text = loaded.text
+  let dirty = loaded.needsNormalize
+  const normalizedConfigFrom = loaded.needsNormalize ? loaded.encoding : null
+
   // ── 项目级配置的门：把这次的工作目录标成 trusted ──
   let trustedProject: string | null = null
   let trustedProjectConfigHash: string | null = null
   if (trustProjectDir !== undefined && trustProjectDir.trim() !== '') {
-    const configPath = join(configDir, 'config.toml')
-    const original = await readFile(configPath, 'utf8')
-    const patched = withTrustedProject(original, trustProjectDir)
-    if (patched.added) await writeFile(configPath, patched.text, 'utf8')
+    const patched = withTrustedProject(text, trustProjectDir)
+    if (patched.added) {
+      text = patched.text
+      dirty = true
+    }
     trustedProject = trustProjectDir
     // 记项目级 config 的指纹：它是"agent 写的、还是使用者写的"的唯一线索，
     // 也是"这一轮 trusted 之后到底会加载什么"的可审计证据（内容不进日志）。
@@ -477,10 +503,11 @@ export async function syncCodexConfigDir(
   // ── codex 自带的 system skills：一律关掉（与项目 trust 那一步无关）──
   let bundledSkills: CodexConfigSyncResult['bundledSkills'] = 'already-configured'
   {
-    const configPath = join(configDir, 'config.toml')
-    const current = await readFile(configPath, 'utf8')
-    const patched = withBundledSkillsDisabled(current)
-    if (patched.added) await writeFile(configPath, patched.text, 'utf8')
+    const patched = withBundledSkillsDisabled(text)
+    if (patched.added) {
+      text = patched.text
+      dirty = true
+    }
     bundledSkills = patched.added ? 'disabled' : 'already-configured'
   }
 
@@ -488,18 +515,22 @@ export async function syncCodexConfigDir(
   let hostSkillsDisabled: string[] = []
   let hostSkillsAlreadyListed: string[] = []
   if (hostSkills !== undefined && hostSkills.length > 0) {
-    const configPath = join(configDir, 'config.toml')
-    const current = await readFile(configPath, 'utf8')
-    const patched = withHostSkillsDisabled(current, hostSkills)
-    if (patched.disabled.length > 0) await writeFile(configPath, patched.text, 'utf8')
+    const patched = withHostSkillsDisabled(text, hostSkills)
+    if (patched.disabled.length > 0) {
+      text = patched.text
+      dirty = true
+    }
     hostSkillsDisabled = patched.disabled
     hostSkillsAlreadyListed = patched.alreadyListed
   }
+
+  if (dirty) await writeConfigTextUtf8(configPath, text)
 
   return {
     ok: true,
     copied,
     configDir,
+    normalizedConfigFrom,
     trustedProject,
     trustedProjectConfigHash,
     bundledSkills,
