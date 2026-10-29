@@ -177,6 +177,19 @@ function runScenario(): void {
       break
     }
 
+    case 'empty-turn': {
+      /**
+       * ★ 分批第 78 批的现场形状：模型端什么都没返回（网关 422 之类），
+       * codex 仍然发 `turn/completed`（status completed、items 空、没有 last_agent_message）。
+       * 平台必须把它判成**失败**（`empty_response`），而不是"成功但没有产出"。
+       */
+      notify('turn/completed', {
+        threadId: THREAD_ID,
+        turn: { id: TURN_ID, status: 'completed', items: [], error: null },
+      })
+      break
+    }
+
     case 'failed-turn': {
       notify('item/started', {
         threadId: THREAD_ID,

@@ -123,9 +123,24 @@ export class CodexStreamParser {
   #interruptRequested = false
 
   // 条目级累积：delta 通知只带 itemId 与片段，权威文本在 item/completed。
+  /**
+   * ★ 分批第 78 批：这一轮到底有没有**产出**（一句话 或 一次工具调用）。
+   *
+   * 为什么必须记：codex 会把"模型端点什么都没返回"的情况报成 `turn/completed`（status
+   * completed、`last_agent_message: null`、用量全 0）。那种 run 在平台侧看起来是
+   * **成功且没有产出**——使用者看到的是"任务立刻结束、什么都没干"。
+   * 实测现场（2026-10-29）：会话历史里有一张 `input_image`，网关（responses→chat 翻译层）
+   * 回 422 `unknown variant input_image`，codex 把这当成空响应收下并正常结束。
+   *
+   * 所以"完成但没有产出"要显式判成失败（见 `classifyCodexFailure`）。
+   */
+  #sawAssistantOutput = false
   #itemTexts = new Map<string, string>()
   #reasoningTexts = new Map<string, string>()
   #toolOutputs = new Map<string, string>()
+
+  /** 终止帧的状态（`completed` / `interrupted` / `failed`）；还没结束就是 null。 */
+  #turnEndStatus: CodexTurnEnd['status'] | null = null
 
   #turnEndResolve!: (end: CodexTurnEnd) => void
   /** 等到 `turn/completed`（或 `markFailed`）——后端的"终止事件"。 */
@@ -156,6 +171,14 @@ export class CodexStreamParser {
   }
   get usage(): TokenUsage | null {
     return this.#usage
+  }
+  /** 这一轮有没有任何助手产出（agentMessage 文本 或 工具调用）。 */
+  get sawAssistantOutput(): boolean {
+    return this.#sawAssistantOutput
+  }
+  /** 终止帧的状态（null = 还没收到）。 */
+  get turnEndStatus(): CodexTurnEnd['status'] | null {
+    return this.#turnEndStatus
   }
   get unparsableLines(): number {
     return this.#unparsableLines
@@ -250,6 +273,8 @@ export class CodexStreamParser {
     if (!item) return
     const type = asString(item['type'])
     if (type === 'commandExecution') {
+      // 工具调用同样算"这一轮有产出"（空轮的特征是**一个 item 都没有**）。
+      this.#sawAssistantOutput = true
       // ★ 实测（0.157.1）：字段在 item 顶层（item.command / item.cwd / …），
       //   不是嵌套的 item.commandExecution。旧嵌套形状留作防御降级。
       const ce = asRecord(item['commandExecution'])
@@ -271,6 +296,9 @@ export class CodexStreamParser {
     const itemId = asString(item['id'])
     switch (type) {
       case 'agentMessage': {
+        // 只要出现过 agentMessage（哪怕文本为空），也算"模型答过话"；
+        // 真正要抓的是**一个 item 都没有**的那种空轮。
+        this.#sawAssistantOutput = true
         const am = asRecord(item['agentMessage'])
         // ★ 实测（0.144.0-alpha.4）：权威文本在 `item.text`（不是 `item.agentMessage.content`）。
         //   保留后者与累积 delta 作防御降级（别的 app-server 版本可能用嵌套形状）。
@@ -420,10 +448,10 @@ export class CodexStreamParser {
         : 'turn 失败'
       this.#emit({ type: 'error', content: this.#errorText })
     }
-    this.#turnEndResolve({
-      status: rawStatus === 'completed' ? 'completed' : rawStatus === 'interrupted' ? 'interrupted' : 'failed',
-      error,
-    })
+    const status: CodexTurnEnd['status'] =
+      rawStatus === 'completed' ? 'completed' : rawStatus === 'interrupted' ? 'interrupted' : 'failed'
+    this.#turnEndStatus = status
+    this.#turnEndResolve({ status, error })
   }
 
   #onTokenUsage(params: unknown): void {
@@ -461,7 +489,7 @@ export class CodexStreamParser {
 /**
  * 失败分级的结果（与 generic 同一套判据与优先级，见 `classifyGenericFailure`）。
  */
-export type CodexFailure = 'cli_unparsable_output' | 'agent_error' | null
+export type CodexFailure = 'cli_unparsable_output' | 'agent_error' | 'empty_response' | null
 
 /**
  * 判定一次运行的终态是不是失败（FR-CLI-41）。
@@ -476,11 +504,26 @@ export function classifyCodexFailure(input: {
   resultSeen: boolean
   parserIsError: boolean
   exitCode: number | null
+  /**
+   * 这一轮有没有**任何助手产出**（一句话 或 一次工具调用）。
+   *
+   * ★ 分批第 78 批：没有产出但 `turn/completed` 报的是 completed ⇒ **判失败**。
+   *   实测现场（2026-10-29）：会话历史里有一张 `input_image`，网关回
+   *   422 `unknown variant input_image`，codex 把这当成"模型什么都没说"，
+   *   仍然正常结束 ⇒ 平台记成 completed、界面上"任务立刻结束、什么都没干"。
+   *   这类"成功但没有产出"比报错更难查，所以它是**明确失败**。
+   */
+  sawAssistantOutput: boolean
+  /** 终止帧的状态（null = 没收到终止帧）。取消/失败不走"零产出"那条判据。 */
+  turnEndStatus: CodexTurnEnd['status'] | null
 }): CodexFailure {
   const exitedNonZero = input.exitCode !== null && input.exitCode !== 0
 
   if (input.recognizedEvents === 0) return 'cli_unparsable_output'
   if (!input.resultSeen) return 'cli_unparsable_output'
   if (input.parserIsError || exitedNonZero) return 'agent_error'
+  // ★ 只对**正常完成**的一轮套"零产出"判据：取消（interrupted）本来就可能一个字没说，
+  //   失败那一档已经有自己的原因码——混进来会把一次正常的取消记成失败。
+  if (input.turnEndStatus === 'completed' && !input.sawAssistantOutput) return 'empty_response'
   return null
 }

@@ -373,35 +373,78 @@ describe('CodexStreamParser（通知 → AgentMessage + 终态）', () => {
 describe('classifyCodexFailure（失败分级，与 generic 同构）', () => {
   test('★ 没有任何可识别通知 → 不可解析', () => {
     assert.equal(
-      classifyCodexFailure({ recognizedEvents: 0, resultSeen: false, parserIsError: false, exitCode: 0 }),
+      classifyCodexFailure({ recognizedEvents: 0, resultSeen: false, parserIsError: false, exitCode: 0, sawAssistantOutput: false, turnEndStatus: 'completed' }),
       'cli_unparsable_output',
     )
   })
 
   test('★ 有事件但没有终止帧 → 不可解析（"说完了"与"卡住了"无法区分）', () => {
     assert.equal(
-      classifyCodexFailure({ recognizedEvents: 3, resultSeen: false, parserIsError: false, exitCode: 0 }),
+      classifyCodexFailure({ recognizedEvents: 3, resultSeen: false, parserIsError: false, exitCode: 0, sawAssistantOutput: false, turnEndStatus: 'completed' }),
       'cli_unparsable_output',
     )
   })
 
   test('★ 解析器自报错误 → agent_error', () => {
     assert.equal(
-      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: true, exitCode: 0 }),
+      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: true, exitCode: 0, sawAssistantOutput: true, turnEndStatus: 'completed' }),
       'agent_error',
     )
   })
 
   test('★ 非零退出码 → agent_error', () => {
     assert.equal(
-      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: false, exitCode: 1 }),
+      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: false, exitCode: 1, sawAssistantOutput: true, turnEndStatus: 'completed' }),
       'agent_error',
     )
   })
 
   test('★ 正常 → null', () => {
     assert.equal(
-      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: false, exitCode: 0 }),
+      classifyCodexFailure({
+        recognizedEvents: 3,
+        resultSeen: true,
+        parserIsError: false,
+        exitCode: 0,
+        sawAssistantOutput: true,
+        turnEndStatus: 'completed',
+      }),
+      null,
+    )
+  })
+
+  test('★★★ 完成但**零产出** ⇒ empty_response（不是成功、也不是 agent_error）', () => {
+    /*
+     * 现场（2026-10-29）：使用者的任务里有三次"反馈"，每次 2 秒就结束、一个字没有，
+     * 平台上显示 completed。查下来是会话历史里有一张 `input_image`，网关回
+     * 422 `unknown variant input_image`，codex 把这当成空响应**照常报完成**。
+     *
+     * 这类"成功但没有产出"比报错更难查：界面上"完成"、日志里 0 条产出、
+     * 使用者只能说"感觉没执行"。所以它是**明确失败**。
+     */
+    assert.equal(
+      classifyCodexFailure({
+        recognizedEvents: 6,
+        resultSeen: true,
+        parserIsError: false,
+        exitCode: 0,
+        sawAssistantOutput: false,
+        turnEndStatus: 'completed',
+      }),
+      'empty_response',
+    )
+  })
+
+  test('★★ 取消（interrupted）零产出**不算**失败（那是正常的取消，不是空响应）', () => {
+    assert.equal(
+      classifyCodexFailure({
+        recognizedEvents: 3,
+        resultSeen: true,
+        parserIsError: false,
+        exitCode: 0,
+        sawAssistantOutput: false,
+        turnEndStatus: 'interrupted',
+      }),
       null,
     )
   })

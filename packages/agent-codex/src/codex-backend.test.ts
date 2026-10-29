@@ -198,6 +198,35 @@ describe('★ 分批第 74 批：线程级指令（thread/start.developerInstruc
 })
 
 
+/**
+ * ★ 分批第 78 批：完成但**零产出** ⇒ failed（`empty_response`）。
+ *
+ * 现场（2026-10-29，使用者报「反馈没有被执行，都是立刻结束」）：他的任务第一轮跑了 223 秒、
+ * 期间用 `view_image` 看过一张自己生成的 PNG ⇒ 会话历史里留下了 `input_image` 条目；
+ * 之后每次「反馈」都会 `thread/resume` 并把整段历史重放给模型，而网关（responses→chat
+ * 翻译层）不支持这个条目，回 **422 `unknown variant input_image`**；codex 把这当成
+ * "模型什么都没说"，仍然发 `turn/completed`（status completed、`last_agent_message: null`、
+ * 用量全 0）。平台原来据此记成 **completed** —— 界面上"完成"、一个字没有，
+ * 使用者只能说"感觉没执行"。
+ *
+ * 判据：零产出的"完成"必须是 failed，且文案要指向网关的 HTTP 状态。
+ */
+describe('★ 分批第 78 批：空响应（完成但零产出）', () => {
+  test('★★★ 判 failed，文案说清"不算跑完"并指向网关', async () => {
+    const { backend, env } = makeBackend({ scenario: 'empty-turn' })
+    const workDir = await makeTempDir('codex-empty-turn')
+    try {
+      const { result } = await run(backend, execOpts({ workDir, env }))
+      assert.equal(result.status, 'failed', '零产出的"完成"不能算成功')
+      assert.match(result.error ?? '', /没有任何产出/u, `文案要说清零产出：${result.error ?? ''}`)
+      assert.match(result.error ?? '', /网关/u, '要给出排查方向（网关/代理的 HTTP 状态）')
+    } finally {
+      await cleanup(workDir)
+    }
+  })
+})
+
+
 describe('★ 分批第 44 批：JSON-RPC 摘要要报给调用方（service 形状的"发了什么"）', () => {
   /**
    * 使用者报过：「日志里有『命令行：/opt/homebrew/bin/codex app-server --stdio』，

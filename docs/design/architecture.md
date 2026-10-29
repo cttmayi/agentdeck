@@ -3128,3 +3128,37 @@ claude 自己建的**空** `.claude/`。
 答出 `PINEAPPLE`，`ls ..` 被自己按任务边界否掉；工作目录两轮之后只有 `.agentdeck/`。
 受管根下只有一份哈希目录，`settings.json` 带 `env` / `enabledPlugins` / `hooks`，
 hook 脚本在 `<home>/agentdeck-hooks/` 里。
+
+### 4.3.36 分批第 78 批：codex 的"完成但零产出"判失败（`empty_response`）
+
+使用者报：「https://github.com/titanwings/distilly 任务，我的反馈感觉没有被执行，都是立刻结束」。
+
+**顺着三层日志查出来的链子**（这本身就是一次值得记的排查）：
+
+| 层 | 证据 |
+|---|---|
+| 平台 run 日志 | 第一轮 execute **223 秒**（真干了活）；随后三次"反馈"分别 **2.6/1.9/1.9 秒**结束，`status=completed`、**一个字产出都没有**；三次的 ③ 任务块逐字是「文章没生成呢， 请生成」「生成文章」——**反馈投递是对的** |
+| codex rollout（`sessions/…jsonl`） | 三次都是 `task_complete` + `last_agent_message: null` + `last_token_usage={0,0,0}`：**259ms** 内结束、模型端什么都没返回 |
+| 网关日志（`~/.two-api/logs/…`） | `17:32:39.752Z status 422`：`Failed to deserialize … messages[100]: unknown variant 'input_image'` |
+
+**根因**：第一轮里 agent 用 `view_image` 看过自己生成的 PNG ⇒ 会话历史里留下一条
+`function_call_output { output: [{type:'input_image', …}] }`；每次「反馈」都
+`thread/resume` 并把整段历史重放给模型，而网关的 responses→chat 翻译层不支持这个条目
+⇒ 422 ⇒ codex 把这当成"模型什么都没说"，仍然发 `turn/completed`。
+
+**平台那一半的缺陷**：`classifyCodexFailure` 当时只判"有没有可识别通知 / 有没有终止帧 /
+错误标志 / 退出码"，于是"完成但零产出"落进 `null` ⇒ **completed**。界面上"完成"、日志里
+0 条产出，使用者只能说"感觉没执行"。
+
+**修法**：`CodexStreamParser` 记 `sawAssistantOutput`（出现过 `agentMessage` 或工具调用）
+与 `turnEndStatus`；`classifyCodexFailure` 新增 `empty_response`，且**只对
+`turnEndStatus === 'completed'`** 生效（取消是 `interrupted`，本来就可能一个字没说——混进来
+会把正常取消记成失败，红检当场抓到过）。文案给出排查方向（网关/代理的 HTTP 状态）与那个
+已知具体情形（历史里的图片）。
+
+**验证**：假 app-server 新增 `empty-turn` 剧本；`codex-backend.test.ts` 判 failed + 文案；
+`stream-parser.test.ts` 三条（空产出 / 取消不误判 / 正常不算）。红检：去掉判据 ⇒ 立刻红。
+全量 2234 全绿。
+
+⚠️ **未做（要不要做需要拍板）**：命中 `empty_response` 时**自动改用新会话重跑一次**
+（不 resume）——那能让"历史里带图片的会话"不至于卡死，但会多花一次钱，所以先留着不做。

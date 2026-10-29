@@ -582,6 +582,9 @@ export class CodexBackend extends ServiceBackendBase {
       resultSeen: parser.resultSeen,
       parserIsError: parser.isError,
       exitCode: exit.code,
+      // ★ 分批第 78 批：这一轮有没有任何产出（话或工具调用），以及终止帧的状态
+      sawAssistantOutput: parser.sawAssistantOutput,
+      turnEndStatus: parser.turnEndStatus,
     })
 
     const base = {
@@ -646,6 +649,20 @@ function describeCodexFailure(
       `常见原因：codex 版本升级改了协议形状，或该可执行文件根本不是 app-server。` +
       `本 runtime 在 0.144.0-alpha.4 上实测过（verified），升级 codex 前请先` +
       `核对 unverifiedFields() 里的残余未验证项。` +
+      suffix
+    )
+  }
+
+  if (failure === 'empty_response') {
+    return (
+      `codex 报告这一轮**已完成**，但**没有任何产出**（一句话也没有、也没有工具调用）——` +
+      `所以这次不算跑完。` +
+      `最常见的原因：模型端点拒绝了这次请求并回了一个空响应。` +
+      `实测过的一种具体情形（2026-10-29）：会话历史里带了一张图片（\`input_image\`），` +
+      `而网关（responses→chat 翻译层）不支持这种条目 ⇒ 422 \`unknown variant input_image\`，` +
+      `codex 把这当成"模型什么都没说"照常结束。` +
+      `排查方向：看 codex 的网关/代理日志（HTTP 状态与错误体），` +
+      `或先**新开一个对话/任务**（不带那段含图片的历史）再跑一次。` +
       suffix
     )
   }
