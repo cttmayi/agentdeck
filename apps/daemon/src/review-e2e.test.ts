@@ -75,7 +75,12 @@ class ScriptedReviewBackend implements AgentBackend {
       .join('\n\n')
 
     this.seenSkillFiles = {}
-    const skillsRoot = join(opts.workDir, '.claude', 'skills')
+    // ★ 分批第 77 批：claude 的技能住在受管 home 里（`<CLAUDE_CONFIG_DIR>/skills`），
+    //   不再写工作目录 ⇒ 快照按"这一次真的把 CLAUDE_CONFIG_DIR 指到哪"找；
+    //   没有它（隔离退回）才看工作目录。
+    const claudeHome = opts.env?.['CLAUDE_CONFIG_DIR']
+    const skillsRoot =
+      claudeHome === undefined ? join(opts.workDir, '.claude', 'skills') : join(claudeHome, 'skills')
     const walk = async (dir: string, slug: string, prefix: string): Promise<void> => {
       for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
         const full = join(dir, entry.name)

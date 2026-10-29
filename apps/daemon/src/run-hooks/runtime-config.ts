@@ -21,7 +21,7 @@
  * | runtime | 受管目录 | 为什么 |
  * | --- | --- | --- |
  * | codex | **按工作目录分**（`<root>/<workDir 的哈希>`） | 每轮要写 `[projects."<本次工作目录>"] trust` ⇒ 内容每轮不同；全局一份时两条不同目录的 run 并行会互相覆盖（分批第 60 批量到过） |
- * | claude | **全局一份**（`<root>`） | 每轮写出来的内容**完全一样**（env + 固定的 enabledPlugins），没有"这次"的变量；而且 `CLAUDE_CONFIG_DIR/projects/` 是**会话状态**，`--resume` 要靠它全局稳定 |
+ * | claude | **按工作目录分**（分批第 77 批；原来是全局一份） | 技能与任务隔离 hook 都写在这份 home 里，而技能集按 agent 变 ⇒ 全局一份时并发会互相顶掉。会话状态按 cwd 索引（实测 2.1.302），per-workdir 下 `--resume` 照样成立 |
  *
  * 所以"不按工作目录分"不是漏了，而是策略表里明写的一条（`perWorkDir` + `why`）：
  * 想统一成一种形态时，改的是表里那个布尔值，**不是**再写一段代码。
@@ -29,7 +29,8 @@
 
 import type { Agent } from '@agentdeck/protocol'
 import { profileFor } from './runtime-profile.ts'
-import { codexHomeFor, type HostSkill } from './codex-config.ts'
+import type { HostSkill } from './codex-config.ts'
+import { workDirHomeFor } from './managed-home.ts'
 
 /**
  * 支持"配置隔离"的 runtime（其它 runtime 没有这个概念）。
@@ -47,7 +48,8 @@ export function managedHomeFor(
 ): string {
   const profile = profileFor(runtimeKey)
   if (profile === null || !profile.isolationPerWorkDir()) return rootDir
-  return codexHomeFor(rootDir, workDir ?? rootDir)
+  // ★ 分批第 77 批：命名规则只有一份（`managed-home.ts`）——claude 现在也按工作目录分
+  return workDirHomeFor(rootDir, workDir ?? rootDir)
 }
 
 export interface RuntimeConfigSyncInput {
@@ -113,8 +115,9 @@ export async function syncRuntimeConfig(
  * 实体被删时，清掉对应的工作目录状态（分批第 61 批）。
  *
  * · codex：那份 `CODEX_HOME` 里有 `auth.json` 的真实 key 副本 ⇒ 必须删；
- * · claude：**全局一份**，删实体不影响它（会话状态在 `projects/` 下、不含 key）⇒ 无操作。
- *   ——这就是"按策略"而不是"按 runtime 名写 if"的好处：以后谁改成 perWorkDir，这里自动跟上。
+ * · claude：分批第 77 批起**也按工作目录分**（那份 home 里有 `settings.json` 的
+ *   `ANTHROPIC_*` 副本）⇒ 删实体同样要清；这一点靠 profile 的 `perWorkDir` 自动跟上
+ *   （"按策略"而不是"按 runtime 名写 if"）。
  */
 export async function forgetRuntimeConfigHome(
   runtimeKey: IsolatedRuntimeKey,

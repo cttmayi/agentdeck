@@ -135,9 +135,9 @@ export type SkillDelivery =
        * `codex debug prompt-input` 里技能根是 `r0 = <CODEX_HOME>/skills`，模型能抄出它的
        * description；app-server 模式下同样可见。
        *
-       * ⚠️ 只有"按工作目录分"的受管 home（codex）适合挂技能：claude 的
-       * `CLAUDE_CONFIG_DIR` 是**全局一份**，多个工作目录/多个 agent 各挂不同技能会互相顶掉，
-       * 所以 claude 不声明这个字段（仍写工作目录）。
+       * ⚠️ 前提是这个 runtime 的受管 home **按工作目录分**（codex 自第 60 批起、claude 自
+       * 第 77 批起）：全局一份时，多个工作目录/多个 agent 各挂不同技能会互相顶掉。
+       * 现在两个 runtime 都声明了它；generic 没有技能发现机制（`kind:'none'`）。
        */
       runtimeHomeSubdir?: string
     }
@@ -451,7 +451,10 @@ export const CLAUDE_DESCRIPTOR: CliRuntimeDescriptor = {
     onMismatch: 'warn',
   },
   stateDir: '.claude',
-  skills: { kind: 'directory', dir: '.claude/skills' },
+  // ★ 分批第 77 批：技能优先写 `<CLAUDE_CONFIG_DIR>/skills`（实测 2.1.302：init 事件的
+  //   `skills` 清单里会出现它）——工作目录里不再出现 `.claude/skills/`。
+  //   隔离没生效（复制失败 ⇒ 自动退回）时才退回工作目录那个 `dir`。
+  skills: { kind: 'directory', dir: '.claude/skills', runtimeHomeSubdir: 'skills' },
   toolConfig: {
     enabled: false,
     reason: '首版不做 MCP 工具配置（范围决策）；启用时需追加受管参数并生成受管配置文件',

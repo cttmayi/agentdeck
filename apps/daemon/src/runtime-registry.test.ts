@@ -83,9 +83,12 @@ describe('runtime 装配表（FR-CLI-47 的第 2 段）', () => {
 
   test('缺省路径仍然是 claude（首版行为不变）', () => {
     assert.equal(createRuntimeBackend('claude').descriptor.key, 'claude')
+    // ★ 分批第 77 批：claude 的技能也优先写受管 home（`<CLAUDE_CONFIG_DIR>/skills`），
+    //   工作目录里不再出现 `.claude/skills/`；隔离没生效时才退回那个 `dir`。
     assert.deepEqual(createRuntimeBackend('claude').descriptor.skills, {
       kind: 'directory',
       dir: '.claude/skills',
+      runtimeHomeSubdir: 'skills',
     })
   })
 

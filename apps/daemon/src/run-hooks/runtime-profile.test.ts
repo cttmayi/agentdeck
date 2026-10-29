@@ -26,14 +26,16 @@ describe('★ 分批第 67 批：RuntimeProfile（平台侧差异的唯一定义
     assert.deepEqual(knownProfileKeys().sort(), ['claude', 'codex', 'generic'])
   })
 
-  test('★★★ 差异全在 plan 里：claude 全局一份不扫宿主级、codex 按工作目录分且要扫', () => {
+  test('★★★ 差异全在 plan 里：两个 runtime 都按工作目录分，差别只剩"扫不扫宿主级"', () => {
     const deps = { rootDir: '/root', sourcePath: '/src', hostSkillRoots: ['/host'] }
     const claude = profileFor('claude')!.isolation(deps)
     const codex = profileFor('codex')!.isolation(deps)
+    // ★ 分批第 77 批：claude 也按工作目录分了（技能与 hook 都住那份 home 里，
+    //   而技能集按 agent 变；会话按 cwd 索引 ⇒ resume 不受影响，实测过）。
     assert.deepEqual(claude, {
       rootDir: '/root',
       sourcePath: '/src',
-      perWorkDir: false,
+      perWorkDir: true,
       scanHostSkills: false,
     })
     assert.deepEqual(codex, {

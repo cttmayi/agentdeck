@@ -194,13 +194,16 @@ describe('★ 分批第 75 批：隔离生效时照旧复制 + 重定向（默�
     try {
       const work = await makeTempDir('iso-claude-on-work')
       const { notes } = await runOnce(h, work)
+      // ★ 分批第 77 批：受管目录**按工作目录分**（`<root>/<sha256(workDir)[0..16]>`）
+      const { workDirHomeFor } = await import('./run-hooks/managed-home.ts')
+      const home = workDirHomeFor(h.configDir, work)
       assert.equal(
         h.backend.seenEnv['CLAUDE_CONFIG_DIR'],
-        h.configDir,
-        '★ 隔离生效时必须把 CLAUDE_CONFIG_DIR 指向受管目录',
+        home,
+        '★ 隔离生效时必须把 CLAUDE_CONFIG_DIR 指向**这个工作目录那份**受管目录',
       )
       assert.equal(
-        await exists(join(h.configDir, 'settings.json')),
+        await exists(join(home, 'settings.json')),
         true,
         '★ 隔离生效时必须真的写出一份受管 settings.json',
       )
@@ -328,6 +331,64 @@ describe('★ 分批第 75 批：复制不成 ⇒ **自动退回**（开关删�
       // 使用者的原文件一个字节都不能动
       const source = await readFile(join(h.dataDir, 'user-codex/config.toml'))
       assert.equal(source[0], 0xff, '★ 源文件必须还是原来的 UTF-16（D29：不碰使用者的文件）')
+      await cleanup(work)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+})
+
+describe('★ 分批第 77 批：claude 也按工作目录分（技能与 hook 都住那份 home 里）', () => {
+  test('★★★ 两个工作目录 ⇒ 两份 claude home；同一目录永远是同一份（resume 靠它）', async () => {
+    const h = await makeHarness('claude')
+    try {
+      const { workDirHomeFor } = await import('./run-hooks/managed-home.ts')
+      const a = await makeTempDir('claude-home-a')
+      const b = await makeTempDir('claude-home-b')
+      await runOnce(h, a)
+      const homeA = h.backend.seenEnv['CLAUDE_CONFIG_DIR']
+      await runOnce(h, b)
+      const homeB = h.backend.seenEnv['CLAUDE_CONFIG_DIR']
+
+      assert.equal(homeA, workDirHomeFor(h.configDir, a))
+      assert.equal(homeB, workDirHomeFor(h.configDir, b))
+      assert.notEqual(homeA, homeB, '★ 两个工作目录必须分开（否则并发 run 会互相顶掉技能/hook）')
+
+      // 同一目录再跑一次 ⇒ 还是同一份（`--resume` 要求"同一条会话的目录稳定"）
+      await runOnce(h, a)
+      assert.equal(h.backend.seenEnv['CLAUDE_CONFIG_DIR'], homeA, '同一工作目录必须映射到同一份 home')
+      await cleanup(a)
+      await cleanup(b)
+    } finally {
+      await h.daemon.close()
+      await cleanup(h.dataDir)
+    }
+  })
+
+  test('★★★ claude 的技能也写进受管 home（工作目录里没有 .claude/skills）', async () => {
+    const h = await makeHarness('claude')
+    try {
+      const work = await makeTempDir('claude-skill-work')
+      const skills = [
+        {
+          ref: { id: 'sk-claude', slug: 'probe-claude', source: 'builtin' },
+          slug: 'probe-claude',
+          name: '探针技能',
+          body: '# probe-claude\n',
+          description: '探针',
+        },
+      ]
+      const { notes } = await runOnce(h, work, skills)
+      assert.ok(
+        notes.some((n) => n.includes('写入受管运行时目录的 skills/') && n.includes('probe-claude')),
+        `技能该写进受管 home 的 skills/：${notes.join(' | ')}`,
+      )
+      assert.equal(
+        await exists(join(work, '.claude', 'skills')),
+        false,
+        '★ 工作目录里不该出现技能目录',
+      )
       await cleanup(work)
     } finally {
       await h.daemon.close()

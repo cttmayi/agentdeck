@@ -2679,7 +2679,7 @@ managedHomeFor(runtime)   →   syncRuntimeConfig({runtimeKey, rootDir, workDir,
 
 ```ts
 export const POLICY = {
-  claude: { perWorkDir: false, why: '每轮内容完全一样；CLAUDE_CONFIG_DIR/projects 是会话状态，--resume 要它全局稳定' },
+  claude: { perWorkDir: true, why: '技能与任务隔离 hook 都住这份 home 里，而技能集按 agent 变；会话按 cwd 索引 ⇒ per-workdir 下 --resume 照样成立（分批第 77 批，实测）' },
   codex:  { perWorkDir: true,  why: '每轮要写 [projects."<本次工作目录>"] trust ⇒ 内容每轮不同，全局一份会被并行覆盖' },
 }
 ```
@@ -3038,8 +3038,9 @@ codex 拿着一个缺 `auth.json` 的空目录起来 ⇒ 认证失败。也就�
   工作目录的 `.codex/skills`**（绝不写使用者真实的 `~/.codex`）；
 - 收尾必须照着**注入时那个落点**删（原来恒用 `run.workDir`，隔离生效时会去一个空目录里
   "删技能"，受管 home 里那份一直留着）；
-- claude **不搬**：它的 `CLAUDE_CONFIG_DIR` 是全局一份（resume 需要稳定的会话状态），多个
-  工作目录/多个 agent 各挂不同技能会互相顶掉 ⇒ 仍写工作目录。
+- claude **当时没搬**（分批第 77 批补上）：那时 `CLAUDE_CONFIG_DIR` 是全局一份，多个工作目录/
+  多个 agent 各挂不同技能会互相顶掉。第 77 批把它也改成按工作目录分（实测 resume 不受影响，
+  见 §4.3.35），技能于是同样写 `<CLAUDE_CONFIG_DIR>/skills`。
 
 三个附带好处（都真的）：① 工作目录里不再出现平台自己的东西；② **agent 改不到自己的技能
 正文**（受管目录在数据目录里，agent 隔离在外）；③ 消掉一类失败——使用者仓库里若有同名
@@ -3093,3 +3094,37 @@ claude 自己建的**空** `.claude/`。
 
 **下一步（未做，已记在案）**：把 claude 的 `CLAUDE_CONFIG_DIR` 改成**按工作目录分**
 （实测 resume 不受影响），技能才能像 codex 一样搬出工作目录——那是阶段 2。
+### 4.3.35 分批第 77 批：claude 的 `CLAUDE_CONFIG_DIR` 也改成按工作目录分（技能随之搬出工作目录）
+
+上一批（§4.3.34）把任务隔离 hook 搬出了工作目录，剩下唯一一样平台痕迹是
+`.claude/skills/`。要搬它就得先解决粒度问题：**`CLAUDE_CONFIG_DIR` 原来是全局一份**，
+而技能集按 agent 变 ⇒ 两条不同工作目录、不同技能集的 run 并发时会互相顶掉。
+
+**原来的判断错在哪**（`ClaudeProfile.why` 的原话：「每轮内容完全一样；`projects/` 是会话状态，
+`--resume` 要它全局稳定」）：前半句对，后半句结论错了——resume 要的是**同一条会话**的目录稳定，
+而会话是按 cwd 索引的（`<CONFIG_DIR>/projects/<转义后的 cwd>/<session>.jsonl`）。
+实测（claude 2.1.302）：per-workdir home 下同一 session 的 `--resume` 正常续上。
+
+**改法**：
+- `ClaudeProfile.isolation()` 的 `perWorkDir` 从 `false` 改成 `true`，`why` 改准；
+- 目录命名/剪枝/删除抽成 **`run-hooks/managed-home.ts`**（`workDirHomeFor` /
+  `pruneWorkDirHomes` / `removeWorkDirHome`），codex 侧的 `codexHomeFor` /
+  `pruneCodexHomes` / `removeCodexHomeFor` 改成从它 re-export——**命名、剪枝、删除三条
+  都是"删文件"的逻辑，只能有一份**（正则一边改一边没改的后果是删到使用者的目录，或者该删的
+  含 key 副本的那份没删）；
+- claude 描述表加 `runtimeHomeSubdir: 'skills'`：隔离生效 ⇒ 技能写
+  `<CLAUDE_CONFIG_DIR>/skills`（实测 2.1.302：init 事件的 `skills` 清单里会出现），
+  工作目录里连 `.claude/skills/` 都没了；隔离没生效 ⇒ 退回工作目录那个 `dir`；
+- 删实体时的清理自动跟上（`perWorkDir` 现在两个 runtime 都是 true）——那份 home 里有
+  `settings.json` 的 `ANTHROPIC_*` 副本，必须删。
+
+**验证**：`runtime-config-isolation.test.ts` 13 条（新增：两个工作目录两份 home、同一目录
+永远是同一份、claude 技能写受管 home 且工作目录没有 `.claude/skills`）+ `runtime-config.test.ts` /
+`runtime-profile.test.ts` / `runtime-registry.test.ts` / `e2e.test.ts` / `review-e2e.test.ts` 相应更新
+（几处 FakeBackend 的技能快照改成"按这次真的 `CLAUDE_CONFIG_DIR` 找"——那才是它该量的东西）。
+
+**真机两轮（真 claude）**：第一轮问技能里的暗号 ⇒ 答 `ZEBRA-CLAUDE-7`（技能从受管 home 生效），
+并让它记住 `PINEAPPLE`；第二轮**同一 sessionId** 续上（`--resume` 在 per-workdir home 下成立），
+答出 `PINEAPPLE`，`ls ..` 被自己按任务边界否掉；工作目录两轮之后只有 `.agentdeck/`。
+受管根下只有一份哈希目录，`settings.json` 带 `env` / `enabledPlugins` / `hooks`，
+hook 脚本在 `<home>/agentdeck-hooks/` 里。

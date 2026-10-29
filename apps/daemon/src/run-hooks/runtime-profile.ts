@@ -30,14 +30,8 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { syncClaudeConfigDir } from './claude-config.ts'
-import {
-  codexHomeFor,
-  findSkillFiles,
-  pruneCodexHomes,
-  removeCodexHomeFor,
-  syncCodexConfigDir,
-  type HostSkill,
-} from './codex-config.ts'
+import { pruneWorkDirHomes, removeWorkDirHome } from './managed-home.ts'
+import { findSkillFiles, syncCodexConfigDir, type HostSkill } from './codex-config.ts'
 
 /** 配置隔离要用到的几个路径（由 daemon 装配时注入，测试可覆盖）。 */
 export interface IsolationDeps {
@@ -111,14 +105,14 @@ export abstract class RuntimeProfile {
   async forgetHome(rootDir: string, workDir: string | null): Promise<boolean> {
     if (!this.isolationPerWorkDir()) return false
     if (workDir === null || workDir === '') return false
-    const result = await removeCodexHomeFor(rootDir, workDir)
+    const result = await removeWorkDirHome(rootDir, workDir)
     return result.removed
   }
 
   /** 清理太旧的受管目录（同样只有 `perWorkDir` 才有意义）。 */
   async pruneHomes(rootDir: string, keepHome: string, keep = 8): Promise<string[]> {
     if (!this.isolationPerWorkDir()) return []
-    return await pruneCodexHomes(rootDir, keepHome, keep)
+    return await pruneWorkDirHomes(rootDir, keepHome, keep)
   }
 
   /** 扫宿主级技能（要不要扫由 `scanHostSkills` 决定）。 */
@@ -149,14 +143,30 @@ export abstract class RuntimeProfile {
  */
 export class ClaudeProfile extends RuntimeProfile {
   override readonly isolated = true
+  /**
+   * ★ 分批第 77 批：从"全局一份"改成**按工作目录分**。
+   *
+   * 原来写的是「每轮内容完全一样（env + 固定 enabledPlugins）；`CLAUDE_CONFIG_DIR/projects`
+   * 是会话状态，`--resume` 要它全局稳定」——前半句对，后半句**结论错了**：
+   * resume 要的是"**同一条会话**的目录稳定"，而会话是按 cwd 索引的
+   * （`<CONFIG_DIR>/projects/<转义后的 cwd>/<session>.jsonl`，实测 2.1.302）。
+   * 按工作目录分之后，同一个工作目录永远映射到同一份 home ⇒ resume 照样成立
+   * （实测：per-workdir home 下 `--resume` 正常续上）；不同工作目录互不相干。
+   *
+   * 为什么必须改：**技能与 task 隔离 hook 都写在这份 home 里**（分批第 76/77 批），
+   * 而技能集按 agent 变。全局一份时，两条不同工作目录、不同技能集的 run 并发会互相
+   * 顶掉（每次 run 都会 sync/prune）。
+   */
   readonly why =
-    '每轮内容完全一样（env + 固定 enabledPlugins）；CLAUDE_CONFIG_DIR/projects 是会话状态，--resume 要它全局稳定'
+    '按工作目录分：技能与 hook 都写在这份 home 里，而技能集按 agent 变——全局一份时并发会互相顶掉；' +
+    '会话状态按 cwd 索引（实测），per-workdir 下 --resume 照样成立'
 
   override isolation(deps: IsolationDeps): IsolationPlan {
     return {
       rootDir: deps.rootDir,
       sourcePath: deps.sourcePath,
-      perWorkDir: false,
+      // ★ 分批第 77 批：**按工作目录分**（理由见上面 `why`）
+      perWorkDir: true,
       // claude 实测**不读** `$HOME/.agents/skills`（假端点抓请求体验过）⇒ 不用扫
       scanHostSkills: false,
     }

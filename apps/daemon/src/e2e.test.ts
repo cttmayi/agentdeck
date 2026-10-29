@@ -16,6 +16,7 @@ import {
 } from '@agentdeck/agent-core'
 import { ulid, type Issue, type RunId, type RunEvent } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
+import { workDirHomeFor } from './run-hooks/managed-home.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -134,8 +135,14 @@ class FakeBackend implements AgentBackend {
     this.seenUserFile = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
+    //
+    // ★ 分批第 77 批：claude 的受管 home 变成**按工作目录分**，技能也随之写进
+    //   `<CLAUDE_CONFIG_DIR>/skills`（不再写工作目录）⇒ 快照要看**这一次真的把
+    //   CLAUDE_CONFIG_DIR 指到哪**；只有它不存在（隔离退回）时才看工作目录。
     this.seenSkillFiles = {}
-    const skillsRoot = join(opts.workDir, '.claude', 'skills')
+    const claudeHome = opts.env?.['CLAUDE_CONFIG_DIR']
+    const skillsRoot =
+      claudeHome === undefined ? join(opts.workDir, '.claude', 'skills') : join(claudeHome, 'skills')
     for (const slug of await readdir(skillsRoot).catch(() => [] as string[])) {
       const walk = async (dir: string, prefix: string): Promise<void> => {
         for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
@@ -1351,13 +1358,16 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
       })
       await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
 
+      // ★ 分批第 77 批：受管目录**按工作目录分**（`<root>/<sha256(workDir)[0..16]>`）——
+      //   claude 的技能与 hook 都住这份 home 里，而技能集按 agent 变，全局一份会互相顶掉。
+      const claudeHome = workDirHomeFor(configDir, work)
       assert.equal(
         b.seenEnv['CLAUDE_CONFIG_DIR'],
-        configDir,
-        '★ CLAUDE_CONFIG_DIR 必须传给后端（claude 靠它隔离用户级 skill/MCP）',
+        claudeHome,
+        '★ CLAUDE_CONFIG_DIR 必须指向**这个工作目录那份**受管目录',
       )
       const written = JSON.parse(
-        await readFile(join(configDir, 'settings.json'), 'utf8'),
+        await readFile(join(claudeHome, 'settings.json'), 'utf8'),
       ) as {
         env: Record<string, string>
         hooks?: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }> }
@@ -1378,7 +1388,7 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
         hookEntry.hooks[0]!.command.includes(join('agentdeck-hooks', 'pre-tool-use.py')),
         `hook 命令要指向受管目录里的脚本：${hookEntry.hooks[0]!.command}`,
       )
-      await stat(join(configDir, 'agentdeck-hooks', 'pre-tool-use.py')).then(
+      await stat(join(claudeHome, 'agentdeck-hooks', 'pre-tool-use.py')).then(
         () => undefined,
         () => assert.fail('hook 脚本本体也要在受管目录里'),
       )
@@ -1448,7 +1458,7 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
 
       assert.equal(
         b.seenEnv['CLAUDE_CONFIG_DIR'],
-        configDir,
+        workDirHomeFor(configDir, work),
         '★ 平台注入的 CLAUDE_CONFIG_DIR 必须覆盖 agent 自定义的同名 env——隔离是平台强制的',
       )
     } finally {
@@ -2038,9 +2048,9 @@ describe('★ 执行日志必须**看得出**用了哪些 skill', () => {
       /已注入 1 个 skill：general-review/,
       '★ 日志里必须说清注入了什么——否则使用者只能靠猜，而他会猜错',
     )
-    // ★ 分批第 75 批：措辞变成"写入工作目录的 `.claude/skills/`"（技能落点现在要看
-    //   隔离是否生效——claude 没有受管 home 这条通道，所以它永远写工作目录）。
-    assert.match(text, /写入工作目录的 \.claude\/skills\//, '也要说清写到哪儿了')
+    // ★ 分批第 77 批：claude 的受管 home 也按工作目录分了，技能因此写进
+    //   `<CLAUDE_CONFIG_DIR>/skills`（工作目录里不再出现 `.claude/skills/`）。
+    assert.match(text, /写入受管运行时目录的 skills\//, '也要说清写到哪儿了')
   })
 
   test('★ 支持文件也要真的落到工作目录里（只写 SKILL.md 就是坏技能）', async () => {
@@ -2265,9 +2275,13 @@ describe('★ 失败原因码要说对人该去哪儿查', () => {
       onWarn: () => {}, onInfo: () => {},
     })
     try {
-      // 使用者自己的同名技能放在工作目录里 —— 平台拒绝覆盖它，这次 run 失败
-      await mkdir(join(dir, '.claude', 'skills', 'mine'), { recursive: true })
-      await writeFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), '我的标准', 'utf8')
+      // ★ 分批第 77 批：技能不再写工作目录，所以"同名撞车"只可能发生在**受管 home 的
+      //   `skills/`** 里（那目录里若有不是我们建的条目 ⇒ `SkillCollisionError`）。
+      //   daemon 没给 claudeConfigDir 时默认是 `<dataDir>/claude-config`，home 名是
+      //   工作目录路径的哈希 ⇒ 测试可以自己算出来并先放一份"别人的"技能。
+      const managedHome = workDirHomeFor(join(dataDir, 'claude-config'), dir)
+      await mkdir(join(managedHome, 'skills', 'mine'), { recursive: true })
+      await writeFile(join(managedHome, 'skills', 'mine', 'SKILL.md'), '我的标准', 'utf8')
 
       const runId = ulid() as RunId
       await fetch(`${d.url}/api/runs`, {
@@ -2295,10 +2309,18 @@ describe('★ 失败原因码要说对人该去哪儿查', () => {
         'injection_failed',
         '★ 撞车是使用者能自己修的，不该报成"环境坏了"',
       )
-      // 使用者的技能一个字都没变
+      // 被撞的那份一个字都没变（它在受管 home 里；工作目录里现在根本没有技能目录）
       assert.equal(
-        await readFile(join(dir, '.claude', 'skills', 'mine', 'SKILL.md'), 'utf8'),
+        await readFile(join(managedHome, 'skills', 'mine', 'SKILL.md'), 'utf8'),
         '我的标准',
+      )
+      assert.equal(
+        await stat(join(dir, '.claude', 'skills')).then(
+          () => true,
+          () => false,
+        ),
+        false,
+        '★ 工作目录里不该出现技能目录（这正是分批第 77 批要的效果）',
       )
     } finally {
       await d.close()

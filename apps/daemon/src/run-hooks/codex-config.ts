@@ -346,70 +346,24 @@ async function readSkillName(skillFile: string): Promise<string | null> {
  * ⚠️ 跨目录 `thread/resume` 会因此断——现在没有这种用法（沉淀返工在同一个小屋里、
  *    聊天在同一对话目录、审核继承被执行 run 的目录），但以后写新功能要记住这条。
  */
-export function codexHomeFor(rootDir: string, workDir: string): string {
-  const key = createHash('sha256').update(workDir).digest('hex').slice(0, 16)
-  return join(rootDir, key)
-}
+/**
+ * ★ 分批第 77 批：**实现搬到了 `managed-home.ts`**（claude 也要按工作目录分，
+ * 同一套命名/剪枝/清除规则只能有一份——那三条都是"删文件"的逻辑，两份实现迟早一边
+ * 改了正则、另一边没改 ⇒ 删到使用者的目录，或者该删的（含 key 副本）没删）。
+ *
+ * 这里保留 `codexHomeFor` 这个名字：它是"codex 的受管目录"，读代码时比
+ * `workDirHomeFor` 更说明用途。
+ */
+export { workDirHomeFor as codexHomeFor } from './managed-home.ts'
 
 /**
- * 清掉太旧的 per-workdir CODEX_HOME（codex 会在里面生成 `sessions/`、`*.sqlite`、
- * `skills/.system/`，不清理就会一直长）。
- *
- * 只删**名字形如 16 位十六进制**的目录（我们自己的命名），`keepDir` 永不删，
- * 最多保留 `keep` 个（按 mtime）。失败只忽略——清理失败不该让 run 失败。
+ * 剪枝与"删实体时清掉"也搬到了 `managed-home.ts`（同上一条理由）。
+ * 保留 `codex*` 这两个名字：调用方读起来还是"codex 的受管目录"。
  */
-export async function pruneCodexHomes(
-  rootDir: string,
-  keepDir: string,
-  keep = 8,
-): Promise<string[]> {
-  const entries = await readdir(rootDir, { withFileTypes: true }).catch(() => null)
-  if (entries === null) return []
-  const ours: Array<{ path: string; at: number }> = []
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !/^[0-9a-f]{16}$/u.test(entry.name)) continue
-    const path = join(rootDir, entry.name)
-    if (path === keepDir) continue
-    const info = await stat(path).catch(() => null)
-    ours.push({ path, at: info?.mtimeMs ?? 0 })
-  }
-  ours.sort((a, b) => b.at - a.at)
-  const removed: string[] = []
-  for (const stale of ours.slice(Math.max(0, keep - 1))) {
-    if (await rm(stale.path, { recursive: true, force: true }).then(() => true, () => false)) {
-      removed.push(stale.path)
-    }
-  }
-  return removed
-}
-
-/**
- * ★ 分批第 61 批：删掉某个工作目录对应的那份 `CODEX_HOME`（对话/任务/run 被删时）。
- *
- * 为什么必须删（使用者提的）：
- *   · 那份目录里有 `auth.json`——**真实 API key 的副本**。任务都删了还留着一份 key，
- *     是那种"看不见、但一直在"的残留；
- *   · 目录名是工作目录路径的哈希，工作目录本身如果被删/被复用，这份就永远对不上号了。
- *
- * 安全边界（与 `pruneCodexHomes` 同一条纪律）：
- *   · 只认**我们自己命名的目录**（16 位十六进制）——传进来一个奇怪的路径也不会去删别的东西；
- *   · 删不掉只忽略（调用方是"删除实体"的路由，不该因为清理失败而回 500）；
- *   · 返回是否真的删了，便于日志与测试。
- */
-export async function removeCodexHomeFor(
-  rootDir: string,
-  workDir: string,
-): Promise<{ removed: boolean; path: string }> {
-  const path = codexHomeFor(rootDir, workDir)
-  if (!/^[0-9a-f]{16}$/u.test(path.slice(path.lastIndexOf('/') + 1))) {
-    return { removed: false, path }
-  }
-  const removed = await rm(path, { recursive: true, force: true }).then(
-    () => true,
-    () => false,
-  )
-  return { removed, path }
-}
+export {
+  pruneWorkDirHomes as pruneCodexHomes,
+  removeWorkDirHome as removeCodexHomeFor,
+} from './managed-home.ts'
 
 export async function syncCodexConfigDir(
   configDir: string,
