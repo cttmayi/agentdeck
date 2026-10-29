@@ -3713,3 +3713,108 @@ skill 的五项原样保留（标题改成「审 skill 时你审的五件事」�
 
 **教训**（可复用）：e2e 里凡是"读某个派生状态"的断言，都要问一句"这个状态是在**哪一步之后**
 才出现的"。`waitForX()` 通常只等到**实体存在**，而不是等到**所有附属写入完成**。
+
+## 11 下一代沉淀：从 distilly 借什么（2026-10-30，**草案 · 未实施**，待拍板）
+
+使用者：「我准备用 https://github.com/titanwings/distilly 的项目重新设计"沉淀"，你有什么想法」。
+按惯例先把两边都读到能举例的程度：distilly 的 `SKILL.md`、`prompts/flows/create.md`、
+`prompts/flows/evolve.md`、`prompts/shared/work_analyzer.md`、`tools/`；我们自己的
+`crystallize.ts`、`crystallize-artifacts.ts`、`builtin-drafter.ts`。
+
+> 本节是**提案**，不落决策编号（D99 留给拍板之后）。三处取舍里标「推荐」的是我的判断，
+> 拍板与否是使用者的。
+
+### 11.1 先看清我们现在是什么（都核过代码行）
+
+| 维度 | 现状 | 证据 |
+|---|---|---|
+| 素材 | **比 distilly 强**：一条 run 的 `messages.jsonl` + 工作目录产物 + 审核判决，落成 `material/task-run.md`、`turns/*.md`、`verdict.md`、`feedback.md`、`existing-agent.md` | `crystallize-material.ts` |
+| 产出 | **比 distilly 弱**：起草者用 `Write` **直接写** `skill/SKILL.md`（自由形态），契约只有一句「必须存在」+ 三个可选目录 | `crystallize.ts:415-416` |
+| 校验 | `validateDraftArtifacts` 在**交卷之后**给出 `problems`，且只**呈现**在界面；真正的修复手段是 `startReviseRun` **整份返工** | `crystallize-artifacts.ts:185`、`server.ts:6401/6456` |
+| 语义规则 | 「引用的文件都在」「命令能照着跑」**只写在 prompt 里**当自检要求，没有任何代码路径校验 | `builtin-drafter.ts:112/296` |
+| 目标 | skill 草稿 / agent 指令**二选一**（平行两条，不是双轨） | `crystallize.ts` 的 `buildSkillPrompt` / `buildAgentInstructionsPrompt` |
+
+一句话：**我们素材强、产物契约弱**。distilly 刚好相反（素材靠用户丢文件，产物有唯一写入者）。
+
+### 11.2 distilly 的内核（值得看的部分，逐条带位置）
+
+| 做法 | 位置 |
+|---|---|
+| 路由表分族、**按需读**流程文件（不一次把十几个 prompt 塞进上下文） | `SKILL.md` 的 Route 表 → `prompts/flows/*.md` |
+| **work / persona 双轨**：能力（analyzer + builder）与风格分开提炼 | `prompts/shared/work_analyzer.md`、`prompts/<族>/persona_analyzer.md` |
+| **唯一写入者**：模型只写 3 个 `/tmp` 临时文件，目录结构 / frontmatter / manifest / 安装全归 `tools/skill_writer.py` | `create.md` Step 5、`evolve.md` |
+| 契约随产物走：`meta.json`（`classification.language`、`knowledge_sources`）+ `manifest.json` | writer 生成 |
+| 进化**补丁化**：`--work-patch`（可替换的 `##` 节）、persona 纠错结构化成 `{scene, wrong, correct}` | `evolve.md` |
+| 反幻觉硬规则：不许拿站点首页冒充 grounded URL、没证据写 "insufficient source material"、`quality_check.py` 有 FAIL 态 | `create.md` Step 6/7 |
+| 版本：`version_manager.py backup` | `tools/` |
+
+⚠️ 它的定位是 **skill-as-instructions**：流程活在 `SKILL.md` 里，由宿主 agent 自律执行。
+
+### 11.3 三条取舍
+
+#### 11.3.1 编排归属：流程进 daemon，不进 `SKILL.md`（推荐）
+
+「把 distilly 整包当技能装进来、让 agent 照着走」的具体风险有三条，都不是假想：
+
+1. **它的流程是交互式的，我们的 run 没有中途喂输入的通道**。distilly 的 Step 1 要提问（intake）、
+   Step 4 要问「Confirm generation? Or need adjustments?」。而我们的 run 是**一次性**的：
+   `executor.ts` 不写 CLI 的 stdin，也没有 `/api/runs/:id/input` 这类路由（D29：交给 CLI 的只有
+   第一句话）。照抄成指令 ⇒ agent 要么**自己编答案跳过**（我们看不到它编了什么），要么**干等到
+   超时**；平台两种情况下都会看到 `completed` + 一份**没人确认过**的草稿。
+2. **「规则只在 prompt 里」在本仓库有前科**。`injectsRunHooks` 曾是一个没人调用的接口（第 74 批
+   删掉）；「运行时配置」开关曾是一个不改变任何行为的开关（第 75 批删掉）。现在「引用的文件都在」
+   同样只写在 `builtin-drafter.ts` 的 prompt 里——**没有代码路径拦它，测试也抓不到**（用例断言的是
+   最终产物，不是过程）。把新流程也放进去，等于再造一个同类。
+3. **可量性**：编排在 daemon 里，每一步都有 run 事件 / SSE / `material/` 留痕，出问题能定位到
+   「第几步、输入是什么」；编排在 `SKILL.md` 里，出问题只有一份成品，排查只能靠猜。
+
+⇒ **可复用的是它的 prompt 片段与产物契约，不是它的流程外壳。**
+
+#### 11.3.2 产出契约化：起草者交 `draft.json`，由 daemon 落盘（P0）
+
+用意三条：
+
+1. **校验从"交卷后打分"变成"落盘前按字段体检 + 问题清单直接当返工输入"**。今天 `problems` 只
+   显示在界面上，真正的修复是 `startReviseRun` **整份重写**——`name` 写错一个字符也要为此真
+   spawn 一次 CLI、跑几分钟，还可能把已经写对的段落改坏（第 23–30 批修过七次的那条链正是这类）。
+   结构化之后，返工指令是「只改 `name` 字段」。
+2. **让语义规则变成可执行检查**：`uncovered[]` 必填（没覆盖到哪些维度必须显式列出）、
+   `Procedure` 里引用的 `scripts/…` 必须真的存在、`description` 必须含触发条件——这些今天全是
+   prompt 里的「自检一遍」。
+3. **可测 + 可红检**：`writeSkillDraft(draft)` 是纯函数，测试喂假 draft（NFR-T-01：不 spawn 真
+   CLI），把校验关掉用例立刻红。这也是 P1/P2 的**地基**：没有结构化中间物，补丁没有可替换单位，
+   双轨也没有共同载体。
+
+#### 11.3.3 双轨与补丁（P1 / P2）
+
+- **双轨**落点正好是我们已有的两个目标：`work` → `skill/SKILL.md`；`persona` →
+  `agent/instructions.md`（已有 6000 上限与「五件事」审核口径）。一次沉淀可以同时出两份，由人
+  决定入库哪份——「沉淀成 Agent」于是不再是平行复制品，而是同一条流水线的另一轨。
+- **补丁式返工**：`##` 节级 patch + persona `{scene, wrong, correct}`，可 diff、可回滚、可审计。
+
+### 11.4 明确不抄（连理由一起记，免得以后有人重新提案）
+
+| 不抄 | 理由 |
+|---|---|
+| 采集器（飞书 / 邮箱 / 凭据 / OAuth） | 与我们「凭证不进会话、不做数据采集」的边界直接冲突；素材我们自己有 |
+| 多宿主安装矩阵（claude / codex / hermes / dsh / pi / grok / opencode） | D71/D73 已有落盘与安装（`<CODEX_HOME>/skills`、`<CLAUDE_CONFIG_DIR>/skills` 刚落地），再加一套必分叉 |
+| intake 提问流当主路径 | 我们的证据来自轨迹；提问只该作为「缺证据」时的一步补救 |
+| `version_manager.py` 的备份目录 | 我们这条线已经是 git 版本管理（§7.3），两套并存等于两套"上一版" |
+
+### 11.5 分批与判据（真做的时候照这个走）
+
+| 批 | 做什么 | 怎么量（判据） | 红检 |
+|---|---|---|---|
+| **P0** | `buildSkillPrompt` 改为要求交 `draft.json`；daemon 加 `writeSkillDraft(draft) → {files, problems}`；`problems` 回流成返工输入 | 用例：假 draft ⇒ 生成合法 `SKILL.md`；`name` 带空格 ⇒ problems 精确到字段；缺 `## Verification` ⇒ problems 点名；引用不存在的 `scripts/x.py` ⇒ problems 点名 | 关掉某项校验 ⇒ 对应用例变红 |
+| **P1** | persona 轨接入（`work` / `persona` 双产出，复用 6000 上限与五件事口径） | 一次沉淀可产 `skill/` 与 `agent/instructions.md` 两份，入库二选一；素材里出现 persona 轨的独立材料 | 把 persona 轨关掉 ⇒ 双产出的用例变红 |
+| **P2** | 补丁式返工（`##` 节级 patch、`{scene,wrong,correct}`） | 反馈指向某一节 ⇒ 只有那一节变，其他节字节级不变 | 让 patch 误伤其它节 ⇒ 用例变红 |
+
+### 11.6 开放问题（要拍板的四件）
+
+1. 编排归属：按 11.3.1 进 daemon（推荐），还是仍让 agent 照着 `SKILL.md` 自己走？
+2. 界面形状：保留「一次沉淀二选一」，把双轨只作为「起草者可以同时给出、由人挑」（推荐）；
+   还是改成"直接出两份、入库要各点一次"？
+3. 入库闸门语义是否跟着变严（例如 `uncovered[]` 必填会让**存量草稿**的入库条件变严，需要
+   决定"新规则只对新草稿生效"还是"存量也不再通过"）。
+4. 起草者 prompt 与校验必须**同批**改——否则契约与闸门分叉，而分叉的表现是「页面上被拦住、
+   API 这边放过去了」（D91 踩过一次）。
