@@ -671,14 +671,25 @@ export const CODEX_DESCRIPTOR: RuntimeDescriptor = {
   //   作为 turn/start 的 text input）…B 档下的 ①② 随每轮走、恢复后仍在」。
   //   后半句自己就把问题写出来了：**恢复后仍在，却还每轮重发**。
   //
-  //   app-server 确实**没有**命令行式的系统提示旗标（`systemPrompt: null` 不变），
-  //   但 `thread/start` 有 `baseInstructions`——用**暗号**实测（0.157.1）：
-  //     · 建线程时给 `baseInstructions`，问「暗号是什么」⇒ 答得出；
-  //     · `thread/resume` 之后不再发指令再问 ⇒ **仍答得出**（线程带着它）；
-  //     · 对照组（不给指令）⇒ 答 "UNKNOWN"。
-  //   所以 ①② 走**线程级**通道：A 档，建线程时发一次，每轮只发 ③。
+  //   app-server 没有命令行式的系统提示旗标（`systemPrompt: null` 不变），但
+  //   `thread/start` 有两条指令参数。用**暗号**实测（0.157.1，暗号只出现在指令里）：
+  //     · `developerInstructions` 建线程时给 ⇒ 问「暗号是什么」答得出（`DEV-FINAL-77`）；
+  //     · `thread/resume` **不重发**再问 ⇒ 仍答得出（线程带着它）；
+  //     · `thread/resume` **想换新值** ⇒ **被忽略**（还是建线程时那个）——
+  //       二进制里也有一条对应的提示串「…override was provided and ignored while running」；
+  //     · 与 `<workDir>/AGENTS.md` 冲突时**它赢**（稳定）；对照（都不给）⇒ "UNKNOWN"。
+  //
+  //   为什么选 `developerInstructions` 而不是 `baseInstructions`：后者是**基础槽**
+  //   （codex 内部 `base_instructions`，"You are Codex, an OpenAI general-purpose
+  //   agentic assistant…" 那段住的地方），用它有**顶掉 codex 自身基础提示**的风险；
+  //   前者是**开发者层**（追加语义），正是"平台追加的身份与框架"该待的位置。
+  //   两条通道的其余性质实测一致（都只在建线程时生效、都能压过 AGENTS.md）。
+  //
+  //   ⚠️ **这条通道是"建线程时冻结"的**：恢复时改不了。所以使用者改了 agent 的
+  //   「指令」（= ②）或聊天框架（= ①）之后，**已存在的对话线程不会跟着变**，要新开
+  //   对话。见 `docs/design/architecture.md` §4.3.32 的边界一节。
   systemPrompt: null,
-  threadInstructions: { param: 'baseInstructions' },
+  threadInstructions: { param: 'developerInstructions' },
   // service 语义：这是 `codex app-server` 的**启动参数**，不是 run 的 argv。
   // `--stdio` 等价于 `--listen stdio://`（默认已是它，显式写出来免得依赖缺省）。
   baseArgs: ['app-server', '--stdio'],

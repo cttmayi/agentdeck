@@ -665,7 +665,7 @@ interface AgentSession {
   ★ A 档的"系统级通道"有**两条**（2026-10，分批第 74 批）：
   - **命令行旗标**（claude：`--append-system-prompt`）——**每轮都要重发**，因为系统提示
     **活不过 `--resume`**（实测 2.0.14）；
-  - **线程级指令**（codex：`thread/start.baseInstructions`）——**建线程时发一次**，恢复后
+  - **线程级指令**（codex：`thread/start.developerInstructions`）——**建线程时发一次**，恢复后
     线程带着它（实测 0.157.1，用暗号验过），所以每轮只发 ③。详见 §4.3.32。
   ★ 另有一条实测：每条 stdin 用户消息各换来一个模型回合 ⇒"三块拆成三条消息"被否掉。
 - 顺序与位置都有理由：**判决契约在 ① 框架的最末**（长跑里上下文会被压缩，最后读到的最不容易被摘要掉）（它是"输出要求"，离生成位置最近）；
@@ -2964,37 +2964,45 @@ CodexBackend   : CodexBackend → ServiceBackendBase → AgentBackendBase
 使用者报：「在 codex CLI 情况下，每次沟通，都会发送完整的『框架+身份+任务』」。
 
 **量到的**（真实 run 日志，一条聊天）：① 框架 120 字符 + ② 身份 37 字符 + ③ 任务 7 字符
-= 271 字符，**96% 是每轮重复**；而那条 run 的日志里明明写着「会话：恢复 01a17e70…」——
-会话已经接着了，①② 还在每轮重发。根因是 `deliveryModeFor` 只看 `systemPrompt` 旗标：
-codex 没有旗标（`systemPrompt: null`）⇒ 退回 B 档 ⇒ 三块合成一段塞进 `turn/start` 的
-input（`runtime-table.ts` 那句注释当时还写着「B 档下的 ①② 随每轮走、恢复后仍在」——
-后半句自己就把问题写出来了）。
+= 271 字符，**96% 是每轮重复**；而那条 run 的日志里明明写着「会话：恢复 01a17e70…」。
+根因是 `deliveryModeFor` 只看 `systemPrompt` 旗标：codex 没有旗标 ⇒ 退回 B 档 ⇒ 三块合成
+一段塞进 `turn/start` 的 input。
 
-**先量再改**（`codex app-server` 0.157.1，用**暗号**判：暗号只出现在 instructions 里）：
+**先量再改**：`thread/start` 有两条指令参数（`thread/start` 结构体 27 个字段里有
+`baseInstructions` 与 `developerInstructions`）。用**暗号**判（暗号只出现在指令里，
+答得出就证明收到了；对照组答 `UNKNOWN`），选 `developerInstructions`：
 
-| 做法 | 问「暗号是什么」的回答 | 结论 |
-|---|---|---|
-| `thread/start` 带 `baseInstructions` | `ZEBRA-7731` | **指令真的进了模型** |
-| 同一线程 `thread/resume` 之后**不再发**指令再问 | `ZEBRA-7731` | **线程带着它，重发是冗余** |
-| 对照：不给指令 | `UNKNOWN` | 暗号不是从别处漏进来的 |
+| 性质 | 实测（0.157.1） |
+|---|---|
+| 建线程时给 ⇒ 模型看得到 | ✅ 答出 `DEV-FINAL-77` |
+| `thread/resume` **不重发** ⇒ 还在 | ✅ 仍答 `DEV-FINAL-77`（线程带着） |
+| `thread/resume` **想换新值** ⇒ | ❌ **被忽略**（还是建线程时那个）。二进制里也有对应提示串「…override was provided and ignored while running」 |
+| 与 `<workDir>/AGENTS.md` 冲突 ⇒ 谁赢 | ✅ **它赢**（`DEV-WINS-55` 压过 `AGENTS-ZEBRA-99`） |
 
-**改法**（方案 A，使用者选定）：
+**为什么是 `developerInstructions` 而不是 `baseInstructions`**：后者是**基础槽**
+（codex 内部 `base_instructions`——"You are Codex, an OpenAI general-purpose agentic
+assistant…" 那段住的地方），用它有顶掉 codex 自身基础提示的风险；前者是**开发者层**
+（追加语义），正是"平台追加的身份与框架"该待的位置。两条通道其余性质实测一致。
 
-- `RuntimeDescriptor` 新增 `threadInstructions: { param } | null`——与 `systemPrompt` 是**两条
-  不同的通道**（一个每轮重发、一个挂线程），CLAUDE 只声明前者，codex 只声明后者；
-- `deliveryModeFor` 的判据从"有没有命令行旗标"改成"**有没有任意一条系统级通道**"。
-  于是 codex 也走 A 档：①② 单独送、③ 逐字留在 prompt；
-- `CodexBackend` 的建线程参数抽成**唯一出处** `threadStartParams()`（首建与"恢复被拒后重建"
-  两处共用），把 ①② 挂上去；**恢复那一跳不重发**；被拒回退建新线程时**同样带上**——
-  上文没了不等于身份也没了。传了系统提示而这个 runtime 没有线程级通道 ⇒ **抛错**（不静默丢）；
-- 日志头行区分两条通道：`投递档 A：①② 走系统提示（…，每轮重发）` /
-  `①② 走线程级指令（…，建线程时一次）`。
+**改法**：`RuntimeDescriptor.threadInstructions = { param: 'developerInstructions' }`（与
+claude 的 `systemPrompt.flag` 是并列两条通道）；`CodexBackend` 的建线程参数抽成唯一出处
+`threadStartParams()`（首建与"恢复被拒后重建"共用），挂 ①②；**恢复那一跳不带任何指令参数**；
+`turn/start` 的 input 只放 ③；传了系统提示却没有线程级通道 ⇒ **抛错**（不静默丢）。
+日志头行区分两条通道：`走系统提示（…，每轮重发）` / `走线程级指令（…，建线程时一次）`。
 
-**验证**：`codex-backend.test.ts` 3 条（建线程带 `baseInstructions` 且 `turn/start` 只有 ③；
-恢复不重发 + 恢复被拒重建仍带；没有系统提示时不塞空字段）+ `codex-thread-instructions.test.ts`
-2 条（daemon 级：`ExecOptions.systemPrompt` 是 ①②、`prompt` 逐字是 ③、`Run.deliveryMode === 'A'`、
-日志说"线程级指令"；反向钉子：claude 那条仍是"每轮重发"）。红检两次都生效：退回
-`deliveryModeFor` ⇒ 1 红；不在 `thread/start` 挂指令 ⇒ 2 红。全量 2225 全绿。
+**验证**：`codex-backend.test.ts` 3 条（建线程带指令且 input 只有 ③；恢复不带指令参数
++ 恢复被拒重建仍带；没有系统提示时不塞空字段）+ `codex-thread-instructions.test.ts` 2 条
+（daemon 级：`systemPrompt` 是 ①②、`prompt` 逐字是 ③、`Run.deliveryMode === 'A'`、
+日志说"线程级指令"；反向钉子：claude 那条仍是"每轮重发"）。真跑两轮：第一轮
+`thread/start`（线程级指令 159 字符）+ input 11 字符，第二轮 `thread/resume` + input 11 字符
+（原来要 271 字符），两轮回答都对。
 
-⚠️ **兼容性**：本次之前建的 codex 线程里，①② 是**作为每轮 turn 文本**存在的（旧行为），
-所以恢复老线程时不重发也不会丢——历史里本来就有。新线程则挂在线程级指令上。
+⚠️ **已知边界（重要，别当成 bug 查）**：线程级指令**在建线程那一刻冻结**，恢复时改不了。
+所以使用者改了 agent 的「指令」（②）或聊天框架（①）之后，**已经存在的对话线程不会跟着变**
+——要**新开一个对话**才生效。本条改动的判据只钉住"resume 不带指令参数"（防止变回每轮重发），
+"改身份对老线程不生效"目前只写在文档里，**没有界面提示**（要不要加是下一个决定）。
+
+⚠️ **`$CODEX_HOME/AGENTS.md` 也是候选兜底**（实测会被读、且不碰使用者工作目录）：留给
+"老版本 codex / CLI 模式 / 忽略 `baseInstructions` 的第三方服务"这类没有线程级参数的情形。
+但它**不该做主通道**——两份 AGENTS.md 冲突时谁赢**不稳定**（同一场景两次跑答案不同），
+而线程级指令稳定压过它。**绝不写 `<workDir>/AGENTS.md`**（D29：不碰使用者的文件）。

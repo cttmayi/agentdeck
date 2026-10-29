@@ -81,7 +81,7 @@ async function run(backend: CodexBackend, opts: ExecOptions) {
 }
 
 /**
- * ★ 分批第 74 批：①② 挂在线程上（`thread/start.baseInstructions`），每轮只发 ③。
+ * ★ 分批第 74 批：①② 挂在线程上（`thread/start.developerInstructions`），每轮只发 ③。
  *
  * 起因：使用者报「在 codex CLI 情况下，每次沟通，都会发送完整的『框架+身份+任务』」。
  * 量下来一句聊天是 271 字符，其中 ① 120 + ② 37、③ 只有 7 —— 96% 是每轮重复。
@@ -89,16 +89,16 @@ async function run(backend: CodexBackend, opts: ExecOptions) {
  * 所以恢复过的轮次重发它们是纯冗余。
  *
  * 判据落在**协议参数**上（假 app-server 会把收到的请求原样回显到文件）：
- *   · 建线程那次 `thread/start` 必须带 `baseInstructions` = ①②；
+ *   · 建线程那次 `thread/start` 必须带 `developerInstructions` = ①②；
  *   · 每轮 `turn/start` 的 input 必须**只有** ③（不含 ①）；
  *   · 恢复那次 `thread/resume` 不重发指令（线程带着）；
- *   · 恢复被拒后**重建线程**时**也要**带 `baseInstructions`（上文没了 ≠ 身份也没了）。
+ *   · 恢复被拒后**重建线程**时**也要**带 `developerInstructions`（上文没了 ≠ 身份也没了）。
  */
-describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions）', () => {
+describe('★ 分批第 74 批：线程级指令（thread/start.developerInstructions）', () => {
   const INSTR =
     '===== ① 框架 =====\n\n你在一个聊天窗口里和一个人说话。\n\n===== ② 身份 =====\n\n你是一个严谨的协作者。'
 
-  test('★★★ 建线程带 baseInstructions；这一轮的 input 只有 ③', async () => {
+  test('★★★ 建线程带 developerInstructions；这一轮的 input 只有 ③', async () => {
     const { backend, env, echoFile } = makeBackend({ scenario: 'ok' })
     const workDir = await makeTempDir('codex-instr')
     try {
@@ -109,7 +109,7 @@ describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions
       const echo = await readRpcEcho(echoFile)
       const start = echo.requests.find((r) => r.method === 'thread/start')
       assert.ok(start, '要发出 thread/start')
-      assert.equal(start!.params['baseInstructions'], INSTR, '★ ①② 必须作为线程级指令送进去')
+      assert.equal(start!.params['developerInstructions'], INSTR, '★ ①② 必须作为线程级指令送进去')
       const turn = echo.requests.find((r) => r.method === 'turn/start')
       const input = turn!.params['input'] as Array<{ text: string }>
       assert.equal(
@@ -123,7 +123,7 @@ describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions
   })
 
   test('★★★ 恢复时不重发指令（线程带着）；恢复被拒后重建线程**仍带**', async () => {
-    // ① 恢复成功：thread/resume 的参数里不许出现 baseInstructions
+    // ① 恢复成功：thread/resume 的参数里不许出现 developerInstructions
     {
       const { backend, env, echoFile } = makeBackend({ scenario: 'ok' })
       const workDir = await makeTempDir('codex-instr-resume')
@@ -141,11 +141,14 @@ describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions
         const echo = await readRpcEcho(echoFile)
         const resume = echo.requests.find((r) => r.method === 'thread/resume')
         assert.ok(resume, '要发出 thread/resume')
-        assert.equal(
-          'baseInstructions' in resume!.params,
-          false,
-          '★ 恢复那一跳不该重发指令——线程里本来就有（这正是这一批省掉的那部分）',
-        )
+        for (const key of ['developerInstructions', 'baseInstructions']) {
+          assert.equal(
+            key in resume!.params,
+            false,
+            `★ 恢复那一跳不该带 ${key}：线程里本来就有；而且实测 resume 上带这两个参数` +
+              `**会被 codex 忽略**（0.157.1），发出去只会让人以为"改了身份"。`,
+          )
+        }
         assert.equal(echo.requests.some((r) => r.method === 'thread/start'), false, '恢复成功就不该建新线程')
       } finally {
         await cleanup(workDir)
@@ -170,7 +173,7 @@ describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions
         const start = echo.requests.find((r) => r.method === 'thread/start')
         assert.ok(start, '恢复被拒要回退建新线程')
         assert.equal(
-          start!.params['baseInstructions'],
+          start!.params['developerInstructions'],
           INSTR,
           '★ 上文没了不等于身份也没了——重建线程同样要带上 ①②',
         )
@@ -187,7 +190,7 @@ describe('★ 分批第 74 批：线程级指令（thread/start.baseInstructions
       await run(backend, execOpts({ workDir, env }))
       const echo = await readRpcEcho(echoFile)
       const start = echo.requests.find((r) => r.method === 'thread/start')
-      assert.equal('baseInstructions' in start!.params, false, '没给 ①② 就不要凭空塞一个空字段')
+      assert.equal('developerInstructions' in start!.params, false, '没给 ①② 就不要凭空塞一个空字段')
     } finally {
       await cleanup(workDir)
     }

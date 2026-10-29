@@ -2649,7 +2649,7 @@ describe('2026-09：投递档记在 run 上', () => {
     assert.equal(deliveryModeFor(CLAUDE_DESCRIPTOR), 'A')
     assert.equal(deliveryModeFor(CODEX_DESCRIPTOR), 'A')
     assert.equal(CODEX_DESCRIPTOR.systemPrompt, null, 'codex 没有命令行旗标，走的是线程级通道')
-    assert.deepEqual(CODEX_DESCRIPTOR.threadInstructions, { param: 'baseInstructions' })
+    assert.deepEqual(CODEX_DESCRIPTOR.threadInstructions, { param: 'developerInstructions' })
     assert.equal(deliveryModeFor(GENERIC_DESCRIPTOR), 'B')
     assert.equal(GENERIC_DESCRIPTOR.systemPrompt, null)
     assert.equal(GENERIC_DESCRIPTOR.threadInstructions ?? null, null)
