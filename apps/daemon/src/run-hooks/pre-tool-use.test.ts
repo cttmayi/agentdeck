@@ -1,5 +1,10 @@
 /**
- * 任务隔离 hook（2026-10）：`pre-tool-use.py` 的决策矩阵 + `inject.ts` 的注入/清理。
+ * 任务隔离 hook（2026-10 / 分批第 76 批）：`pre-tool-use.py` 的决策矩阵 + 它在**受管
+ * 配置目录**里的落点与 `settings.json` 片段。
+ *
+ * 分批第 76 批把落点从"任务工作目录"改成"受管 `CLAUDE_CONFIG_DIR`"（使用者：
+ * 「别在 workdir 里留平台的东西」）——所以"写进工作目录"那两条判据随之作废，
+ * 换成"写进受管目录、且工作目录里什么都不留"。
  *
  * ⚠️ 临时目录一律走 `makeTempDir`（`.cache/test-tmp`），**不用 `os.tmpdir()`**。
  * 测试里 spawn 的是**平台自己的** `pre-tool-use.py`（python3），不是真实 agent CLI
@@ -8,11 +13,11 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { makeTempDir } from '../testing/tmp.ts'
-import { injectRunHooks, removeRunHooks } from './inject.ts'
+import { cleanup, makeTempDir } from '../testing/tmp.ts'
+import { installManagedRunHook, MANAGED_HOOK_SCRIPT_REL } from './inject.ts'
 
 const hookScript = new URL('./pre-tool-use.py', import.meta.url).pathname
 
@@ -85,7 +90,7 @@ test('hook 决策矩阵：结构化路径工具（Read/Edit/Write/Glob/Grep）',
       assert.equal((await decide('Grep', { path: '.' }, root)).decision, 'allow')
     }
   } finally {
-    await removeRunHooks(root)
+    // 决策矩阵不涉及落点：临时目录由 cleanup 在外面删
   }
 })
 
@@ -109,42 +114,50 @@ test('hook 决策矩阵：Bash 只拦明显越界', async () => {
       assert.equal(decision, want, `Bash ${JSON.stringify(cmd)} 应 ${want}`)
     }
   } finally {
-    await removeRunHooks(root)
+    // 决策矩阵不涉及落点：临时目录由 cleanup 在外面删
   }
 })
 
-test('inject：写 .claude/settings.json + hook 脚本；remove：清干净', async () => {
-  const root = await makeTempDir('run-hooks')
+test('★★★ 分批第 76 批：hook 写进**受管配置目录**，不再写工作目录', async () => {
+  const configDir = await makeTempDir('run-hooks-managed')
+  const workDir = await makeTempDir('run-hooks-workdir')
   try {
-    await injectRunHooks(root)
-    const settings = JSON.parse(
-      await readFile(join(root, '.claude', 'settings.json'), 'utf8'),
+    const hook = await installManagedRunHook(configDir)
+
+    // ① 脚本落在受管目录里，**不在**工作目录里
+    const script = await readFile(join(configDir, MANAGED_HOOK_SCRIPT_REL), 'utf8')
+    assert.match(script, /PreToolUse|permissionDecision/u, '写进去的确实是那个 hook 脚本')
+    assert.equal(hook.scriptPath, join(configDir, MANAGED_HOOK_SCRIPT_REL))
+    assert.deepEqual(
+      await readdir(workDir).catch(() => [] as string[]),
+      [],
+      '★ 工作目录里**什么都不许留**（这正是这一批的目的）',
     )
-    const hook = settings.hooks.PreToolUse[0]
-    assert.ok(hook.matcher.includes('Bash'))
-    assert.ok(hook.matcher.includes('Read'))
-    assert.equal(hook.hooks[0].type, 'command')
-    assert.ok(hook.hooks[0].command.includes('pre-tool-use.py'))
-    assert.ok(hook.hooks[0].timeout > 0)
-    await stat(join(root, '.agentdeck', 'hooks', 'pre-tool-use.py'))
-    // 清理：两个落点都消失
-    await removeRunHooks(root)
-    await assert.rejects(stat(join(root, '.agentdeck', 'hooks', 'pre-tool-use.py')))
-    await assert.rejects(stat(join(root, '.claude', 'settings.json')))
+
+    // ② settings 片段形状：matcher 覆盖那几类工具、命令指向受管脚本、有超时
+    const entry = hook.hooks.PreToolUse[0]!
+    for (const tool of ['Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep']) {
+      assert.ok(entry.matcher.includes(tool), `matcher 要含 ${tool}`)
+    }
+    assert.equal(entry.hooks[0]!.type, 'command')
+    assert.ok(entry.hooks[0]!.command.includes(MANAGED_HOOK_SCRIPT_REL), '命令指向受管目录里的脚本')
+    assert.ok(entry.hooks[0]!.timeout > 0)
   } finally {
-    await removeRunHooks(root)
+    await cleanup(configDir)
+    await cleanup(workDir)
   }
 })
 
-test('inject 幂等：跑两次结果一致', async () => {
-  const root = await makeTempDir('run-hooks')
+test('★★ 幂等：跑两次结果一致（每轮都会重写，不能抖）', async () => {
+  const configDir = await makeTempDir('run-hooks-idem')
   try {
-    await injectRunHooks(root)
-    const first = await readFile(join(root, '.claude', 'settings.json'), 'utf8')
-    await injectRunHooks(root)
-    const second = await readFile(join(root, '.claude', 'settings.json'), 'utf8')
-    assert.equal(first, second)
+    const first = await installManagedRunHook(configDir)
+    const firstScript = await readFile(join(configDir, MANAGED_HOOK_SCRIPT_REL), 'utf8')
+    const second = await installManagedRunHook(configDir)
+    const secondScript = await readFile(join(configDir, MANAGED_HOOK_SCRIPT_REL), 'utf8')
+    assert.equal(JSON.stringify(first.hooks), JSON.stringify(second.hooks))
+    assert.equal(firstScript, secondScript)
   } finally {
-    await removeRunHooks(root)
+    await cleanup(configDir)
   }
 })

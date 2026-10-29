@@ -41,6 +41,7 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readConfigText } from './config-file.ts'
+import { installManagedRunHook } from './inject.ts'
 
 /** 受管配置目录里的 claude settings 落点（claude 读它）。 */
 export const MANAGED_SETTINGS_REL = 'settings.json'
@@ -53,6 +54,13 @@ export interface ClaudeConfigSyncResult {
   envCount?: number
   /** 受管目录（进 note，使用者可自查）。 */
   configDir: string
+  /**
+   * 任务隔离 hook 的脚本路径（受管目录里）；`null` = 没装（理论上不会）。
+   *
+   * ★ 分批第 76 批：hook 从"写进工作目录"改成"常驻受管配置目录"——
+   *   它现在与 `env` / `enabledPlugins` 一起写进受管 `settings.json`。
+   */
+  hookScript?: string | null
 }
 
 /**
@@ -122,13 +130,32 @@ export async function syncClaudeConfigDir(
    * ⚠️ 为什么不把使用者自己的 `enabledPlugins` 抄过来：D78 的边界——用户级行为配置
    *    （plugins / marketplaces）不复制进任务，任务里只看项目级与平台注入。
    */
+  /**
+   * ★ 分批第 76 批：任务隔离的 PreToolUse hook **也在这份受管 settings 里**。
+   *
+   *   它原来写进任务工作目录（`.claude/settings.json` + `.agentdeck/hooks/`），
+   *   每次 run 注入、跑完摘掉。使用者要的是"别在工作目录里留平台的东西"，
+   *   而这份受管目录本来就是平台自己的（工作区外、agent 不可见）。
+   *
+   *   ⚠️ 三样**一起写**：`env`（认证/端点）、`enabledPlugins`（关 claude 自带的
+   *   plugin-authoring）、`hooks`（任务隔离）。分开写会互相覆盖——这正是
+   *   "同一份文件有多个写者"必踩的坑，所以这里只留一个写点。
+   */
+  const hook = await installManagedRunHook(configDir)
   await writeFile(
     settingsPath,
-    JSON.stringify({ env: clean, enabledPlugins: { 'plugin-authoring@builtin': false } }, null, 2) +
-      '\n',
+    JSON.stringify(
+      {
+        env: clean,
+        enabledPlugins: { 'plugin-authoring@builtin': false },
+        hooks: hook.hooks,
+      },
+      null,
+      2,
+    ) + '\n',
     'utf8',
   )
   // ★ settings.json 里有真实 key（ANTHROPIC_AUTH_TOKEN 等），只给属主读。
   await chmod(settingsPath, 0o600)
-  return { ok: true, envCount: Object.keys(clean).length, configDir }
+  return { ok: true, envCount: Object.keys(clean).length, configDir, hookScript: hook.scriptPath }
 }

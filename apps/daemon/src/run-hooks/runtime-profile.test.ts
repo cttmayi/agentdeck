@@ -46,18 +46,6 @@ describe('★ 分批第 67 批：RuntimeProfile（平台侧差异的唯一定义
     assert.equal(profileFor('generic')!.isolation(deps).rootDir, null)
   })
 
-  test('★★ 任务隔离 hook 只有 claude 有（注入与摘除读同一个判据）', () => {
-    assert.equal(profileFor('claude')!.injectsRunHooks(), true)
-    assert.equal(profileFor('codex')!.injectsRunHooks(), false)
-    assert.equal(profileFor('generic')!.injectsRunHooks(), false)
-    // 基类默认 false：新 runtime 不会因为漏写而"多做一件没人预期的事"
-    class NewRuntime extends RuntimeProfile {
-      readonly why = '新 runtime 的占位'
-    }
-    assert.equal(new NewRuntime().injectsRunHooks(), false)
-    assert.equal(new NewRuntime().isolation({ rootDir: '/x', sourcePath: '', hostSkillRoots: [] }).rootDir, null)
-  })
-
   test('★ 每一条差异都必须能说出理由（why 不能空）', () => {
     for (const key of knownProfileKeys()) {
       const why = profileFor(key)!.why

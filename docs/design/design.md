@@ -1184,7 +1184,7 @@ inject(file, block):
 | 环境变量顺序 | 任务级覆盖必须在**使用者自定义环境变量之后**应用 |
 | 临时目录 | 任务专属 |
 | 同目录串行化 | 同一工作目录同时只允许一个 run（§8.3） |
-| 越界访问（claude，D76） | **PreToolUse hook 硬拦截**：工作目录注入 `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`，`Bash / Read / Edit / Write / Glob / Grep` 的目标路径在工作目录外就 **deny**（结构化全拦、Bash 只拦明显越界：`..` / `~` / 工作目录外的绝对路径）；第一句话里另有「任务边界」引导层。⚠️ **不是沙箱**（NG7 不变）——Bash 是自由文本、解析不完美，绕过面仍在 |
+| 越界访问（claude，D76 / 分批第 76 批改落点） | **PreToolUse hook 硬拦截**：hook 随**受管 `CLAUDE_CONFIG_DIR/settings.json`** 一起装（`<受管目录>/agentdeck-hooks/pre-tool-use.py`），**不再写进任务工作目录**；`Bash / Read / Edit / Write / Glob / Grep` 的目标路径在工作目录外就 **deny**（结构化全拦、Bash 只拦明显越界：`..` / `~` / 工作目录外的绝对路径）；第一句话里另有「任务边界」引导层。⚠️ **不是沙箱**（NG7 不变）——Bash 是自由文本、解析不完美，绕过面仍在 |
 | ~~仓库缓存 / worktree~~ | **不做**（D20） |
 
 ### 9.7 失败分级（FR-CLI-41）

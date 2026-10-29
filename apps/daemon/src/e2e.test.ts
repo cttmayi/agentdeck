@@ -1358,12 +1358,37 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
       )
       const written = JSON.parse(
         await readFile(join(configDir, 'settings.json'), 'utf8'),
-      ) as { env: Record<string, string> }
+      ) as {
+        env: Record<string, string>
+        hooks?: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }> }
+      }
       assert.deepEqual(written.env, {
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:8080',
         ANTHROPIC_AUTH_TOKEN: 'sk-fake',
         MAX_THINKING_TOKENS: '16000',
       }, '受管 settings.json 必须带着源 env（认证不丢）')
+
+      // ★ 分批第 76 批：任务隔离 hook 也在这份受管 settings 里，且**工作目录里没有它**。
+      //   原来它写在工作目录（`.claude/settings.json` + `.agentdeck/hooks/`），
+      //   每次 run 注入、跑完摘掉——使用者要的是"工作目录里别留平台的东西"。
+      const hookEntry = written.hooks?.PreToolUse?.[0]
+      assert.ok(hookEntry, '受管 settings.json 必须带 PreToolUse hook（任务隔离靠它硬拦截）')
+      assert.match(hookEntry.matcher, /Bash/u, '要拦 Bash（实测它会 ls .. 看兄弟任务目录）')
+      assert.ok(
+        hookEntry.hooks[0]!.command.includes(join('agentdeck-hooks', 'pre-tool-use.py')),
+        `hook 命令要指向受管目录里的脚本：${hookEntry.hooks[0]!.command}`,
+      )
+      await stat(join(configDir, 'agentdeck-hooks', 'pre-tool-use.py')).then(
+        () => undefined,
+        () => assert.fail('hook 脚本本体也要在受管目录里'),
+      )
+      for (const rel of [join('.claude', 'settings.json'), join('.agentdeck', 'hooks')]) {
+        const present = await stat(join(work, rel)).then(
+          () => true,
+          () => false,
+        )
+        assert.equal(present, false, `★ 工作目录里不许再出现平台写的 ${rel}`)
+      }
     } finally {
       await d.close()
       await cleanup(work)

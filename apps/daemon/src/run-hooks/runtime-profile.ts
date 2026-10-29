@@ -10,13 +10,18 @@
  * 两个 if 分支里。这一批把它们挪进类：
  *
  *   RuntimeProfile（基类：默认值 + 公共方法）
- *     ├── ClaudeProfile（不按工作目录分、不扫宿主级、有任务隔离 hook）
+ *     ├── ClaudeProfile（不按工作目录分、不扫宿主级、受管 settings 里带任务隔离 hook）
  *     └── CodexProfile （按工作目录分、扫宿主级、无 hook 机制）
  *
  * executor 那边于是变成"问配置档"，而不是"按名字判断"：
  *
  *     const profile = profileFor(runtime.descriptor.key)
- *     if (profile?.injectsRunHooks()) await injectRunHooks(...)
+ *     const plan = profile?.isolation(deps)           // 受管目录、按不按工作目录分…
+ *
+ * ★ 分批第 76 批：`injectsRunHooks()` 删了。任务隔离 hook 现在跟着**受管
+ *   `CLAUDE_CONFIG_DIR`** 走（`ClaudeProfile.syncIsolation` 里装进 settings.json），
+ *   于是"这个 runtime 有没有 hook 机制"这件事不再需要一个单独的方法——
+ *   留着一个没有调用方的方法，只会让人以为别处还在用它。
  *
  * ⚠️ 新增第四个 runtime 时：写一个 profile 子类，**不动 executor**。
  * ⚠️ 默认值刻意选"最少副作用"的那一档（不注入 hook、不扫宿主级、不做隔离），
@@ -80,11 +85,6 @@ export abstract class RuntimeProfile {
    *   那就是又一处"新增 runtime 得记得改这里"。现在由 profile 自己声明。
    */
   readonly isolated: boolean = false
-
-  /** 这个 runtime 有没有"任务隔离 hook"这条机制（只有 claude 有 PreToolUse hook）。 */
-  injectsRunHooks(): boolean {
-    return false
-  }
 
   /**
    * 配置隔离怎么算。
@@ -152,10 +152,6 @@ export class ClaudeProfile extends RuntimeProfile {
   readonly why =
     '每轮内容完全一样（env + 固定 enabledPlugins）；CLAUDE_CONFIG_DIR/projects 是会话状态，--resume 要它全局稳定'
 
-  override injectsRunHooks(): boolean {
-    return true
-  }
-
   override isolation(deps: IsolationDeps): IsolationPlan {
     return {
       rootDir: deps.rootDir,
@@ -189,7 +185,8 @@ export class ClaudeProfile extends RuntimeProfile {
         notes: [
           `⚠️ claude 个人配置隔离未生效（${sync.reason ?? '未知原因'}）——` +
             '本次 run **直接用你自己的 ~/.claude 配置**（不复制、不重定向）；' +
-            '代价是 agent 能看到并使用你的用户级 skill / MCP。',
+            '代价是 agent 能看到并使用你的用户级 skill / MCP，' +
+            '而且**本次没有任务隔离拦截**（那套 PreToolUse hook 住在受管配置里，这轮没有它）。',
         ],
       }
     }
@@ -203,6 +200,9 @@ export class ClaudeProfile extends RuntimeProfile {
           `用户级 skill/MCP 不可见，env ${String(sync.envCount ?? 0)} 项已同步。`,
         'claude 自带的 skills：已关闭（CLAUDE_CODE_DISABLE_BUNDLED_SKILLS=1 + 受管 settings 里的 ' +
           'enabledPlugins.plugin-authoring@builtin=false）——这次的技能清单只剩平台注入的那些。',
+        // ★ 分批第 76 批：任务隔离 hook 也在这份受管 settings 里（不再写工作目录）
+        `任务隔离：PreToolUse hook 同在这份受管 settings 里（脚本 ${sync.hookScript ?? '（未知）'}）——` +
+          `越界路径会被 deny；工作目录里不写任何平台文件。`,
       ],
     }
   }

@@ -1567,7 +1567,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
 | runtime 描述表（加 runtime） | `packages/agent-core/src/runtime-table.ts` + `apps/daemon/src/runtime-registry.ts` |
 | 技能 / 工具注入与清理 | `packages/agent-core/src/skill-injection.ts` |
-| **任务隔离（引导 + 拦截，D76）** | 引导：`packages/agent-core/src/first-sentence.ts` 的 ③ 任务块无条件追加「任务边界」；拦截：`apps/daemon/src/run-hooks/inject.ts`（注入 / 清理 `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`，只在 `runtime.descriptor.key === 'claude'` 时）——hook 脚本 `apps/daemon/src/run-hooks/pre-tool-use.py`（PreToolUse：结构化路径全拦、Bash 只拦明显越界） |
+| **任务隔离（引导 + 拦截，D76）** | 引导：`packages/agent-core/src/first-sentence.ts` 的 ③ 任务块无条件追加「任务边界」；拦截：`apps/daemon/src/run-hooks/pre-tool-use.py` 的 PreToolUse hook（结构化路径全拦、Bash 只拦明显越界）。★ **2026-10 分批第 76 批：hook 不再写进任务工作目录**，而是由 `claude-config.ts` 随受管 `CLAUDE_CONFIG_DIR/settings.json` 一起装（`env` / `enabledPlugins` / `hooks` 同一个写点，脚本落 `<受管目录>/agentdeck-hooks/`）——工作目录里没有平台文件；隔离没生效（自动退回）时这轮就没有拦截，note 会明说。见 §4.3.34 |
 | **技能内容落盘 / 回读 / 迁移** | `packages/store-file/src/skill-files.ts`（`<skillsRoot>/<slug>/`）+ `file-store.ts` 的 `insertSkill` / `#hydrate` / `#migrateSkillsToDisk`；路径兜底 `apps/daemon/src/workdir.ts`（`defaultSkillsRoot` / `fallbackSkillsRoot`），CLI `--skills-root` 在 `apps/daemon/src/cli.ts` |
 | 沙箱 | `packages/agent-core/src/sandbox.ts` |
 | **一个进程怎么起**（探测到什么 / 该 exec 什么 / 起不来怎么解释） | `packages/agent-core/src/spawn-target.ts`（`.cmd` 垫片解开、`.ps1` 拒绝、`cmd.exe` 兜底、`describeSpawnError`）——**唯一一处**平台差异判断，接在 `process-tree.ts` 与 `apps/daemon/src/script-executor.ts` 上 |
@@ -2785,7 +2785,7 @@ claude 19 + generic 64 + codex 45 条适配器测试全绿（含"可执行文件
 
 第 64 批把配置隔离的流程收成了一条，但**差异仍然是 `if (key === 'claude')`**：受管根从哪来、
 源是哪份文件、要不要按工作目录分、要不要扫宿主级技能——四个问题写在两个分支里。
-再加上 executor 里两处 `descriptor.key === 'claude'`（任务隔离 hook 的注入与摘除），
+再加上 executor 里两处 `descriptor.key === 'claude'`（任务隔离 hook 的注入与摘除；**分批第 76 批起这两处已删**，hook 并入受管 settings），
 **新增一个 runtime 得在四个地方记得改**。
 
 #### 现在的形状
@@ -2793,7 +2793,7 @@ claude 19 + generic 64 + codex 45 条适配器测试全绿（含"可执行文件
 ```
 run-hooks/runtime-profile.ts
   RuntimeProfile（基类：默认值 + 公共方法）
-    ├── ClaudeProfile   不按工作目录分、不扫宿主级、**有**任务隔离 hook、写入器 = settings.json
+    ├── ClaudeProfile   不按工作目录分、不扫宿主级、受管 settings 里带任务隔离 hook、写入器 = settings.json
     ├── CodexProfile    按工作目录分、扫宿主级、无 hook、写入器 = config.toml
     └── GenericProfile  显式"不做隔离"（以前是 executor 里没写它 ⇒ 隐式的"漏了"）
 ```
@@ -2824,7 +2824,7 @@ executor 里两处 hook 判断改成 `profileFor(key)?.injectsRunHooks() === tru
 | --- | --- |
 | 三个 runtime 各是一个子类、都继承同一个基类、未知 runtime ⇒ null | `runtime-profile.test.ts` |
 | **差异全在 `isolation()` 的返回里**（claude 全局一份不扫宿主级 / codex 按工作目录分且要扫 / generic 明确 null） | 同上 |
-| 任务隔离 hook 只有 claude 有；**基类默认 false**（新 runtime 不会因为漏写而多做一件事） | 同上 |
+| 任务隔离 hook 只有 claude 有（分批第 76 批起随受管 settings 装，不再单独注入） | `runtime-config-isolation.test.ts` / `e2e.test.ts` |
 | 每条差异都有 `why`（说不出理由的差异不许存在） | 同上 |
 | 原有行为一条不变 | 全量 **2193 全绿** |
 
@@ -3059,3 +3059,37 @@ codex 拿着一个缺 `auth.json` 的空目录起来 ⇒ 认证失败。也就�
 相应更新（其中 `runtime-agnostic` 补了假的 codex 配置源——它原来会去读使用者真实的 `~/.codex`，
 NFR-T-01）。真机一条 codex run：技能写在 `<CODEX_HOME>/skills`、工作目录只有 `.agentdeck/`、
 模型答出了技能里的暗号（`ZEBRA-HOME-9`）。全量 2230 全绿；`probe:layout` 574 项全绿。
+### 4.3.34 分批第 76 批：claude 的任务隔离 hook 搬进受管 `CLAUDE_CONFIG_DIR`
+
+**起因**：使用者问「Claude Code 可以类似的改法吗？我 copy 的目的还是希望 claude code 干净一点，
+不要受到太多全局配置的影响」。上一批（§4.3.33）已经把 codex 的技能搬出工作目录，claude 侧
+工作目录里还留着平台写的两样：`.claude/settings.json`（hooks 段）与 `.agentdeck/hooks/pre-tool-use.py`。
+
+**先量再改**（真 claude 2.1.302）：
+
+| 问题 | 实测 |
+|---|---|
+| `<CLAUDE_CONFIG_DIR>/settings.json` 里的 `hooks` 生效吗？ | ✅ PreToolUse 真的被调用（脚本把环境与 stdin dump 出来验证） |
+| hook 能自己拿到"这次的工作目录"吗？ | ✅ 环境有 `CLAUDE_PROJECT_DIR=<workDir>`，stdin 有 `cwd`；而脚本本来就是按 `cwd` 判越界 |
+| 受管目录若按工作目录分，`--resume` 还灵吗？ | ✅ 会话语料在 `<CONFIG_DIR>/projects/<转义 cwd>/<session>.jsonl`，同一目录下正常续上 |
+
+**改法**：`claude-config.ts` 的 `syncClaudeConfigDir` 现在是**唯一写点**，一次写三样：
+`env`（认证/端点）、`enabledPlugins`（关 claude 自带的 plugin-authoring）、`hooks`（任务隔离，
+脚本复制到 `<受管目录>/agentdeck-hooks/pre-tool-use.py`）。executor 里那两处
+`injectRunHooks` / `removeRunHooks` 删掉；`RuntimeProfile.injectsRunHooks()` 也删了
+（没有调用方的方法留着就是死接口）。
+
+**语义变化（说清）**：hook 从"每轮注入、跑完摘掉"变成"随受管 settings 常驻"。
+常驻反而更稳（少一类"注入失败 ⇒ 这次没拦截"），而且不会串到别的任务——脚本按每次 run 的
+`cwd` 判越界。代价是：**隔离没生效时（复制失败 ⇒ 自动退回用使用者自己的配置）这套 hook
+也不存在**，那条 note 会明说"本次没有任务隔离拦截"。
+
+**验证**：`pre-tool-use.test.ts`（决策矩阵不变 + 两条改写成"写进受管目录、工作目录里什么都不留"
++ 幂等）、`e2e.test.ts`（受管 `settings.json` 里有 `hooks` 且脚本在受管目录、
+工作目录里没有 `.claude/settings.json` / `.agentdeck/hooks`）。**真机一条 claude run**：
+让它依次跑 `ls ..` 与 `cat /etc/hosts`，两条都被 deny（`PreToolUse:Bash hook error: 越界…`），
+模型如实复述拒绝理由；工作目录里只剩 `.agentdeck/rounds/`（审核材料，按设计必须留）与
+claude 自己建的**空** `.claude/`。
+
+**下一步（未做，已记在案）**：把 claude 的 `CLAUDE_CONFIG_DIR` 改成**按工作目录分**
+（实测 resume 不受影响），技能才能像 codex 一样搬出工作目录——那是阶段 2。

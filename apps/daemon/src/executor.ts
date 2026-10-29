@@ -48,7 +48,6 @@ import {
 } from '@agentdeck/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
 import { reviewerIdentity } from './review-standard.ts'
-import { injectRunHooks, removeRunHooks } from './run-hooks/inject.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
 import {
   hostSkillsFor,
@@ -892,16 +891,8 @@ export class RunExecutor {
         this.#deps.onWarn?.(`移除注入的技能失败：${String(err)}`)
       }
 
-      // 任务隔离 hook 的收尾（幂等）：摘掉平台写的 `.claude/settings.json`
-      // 与 `.agentdeck/hooks/`——它们不是 agent 的产出。失败只警告，不阻断。
-      // ★ 分批第 67 批：与注入同一判据（问 profile），避免"注入了却不摘"。
-      if (profileFor(runtime.descriptor.key)?.injectsRunHooks() === true) {
-        try {
-          await removeRunHooks(run.workDir!)
-        } catch (err) {
-          this.#deps.onWarn?.(`移除任务隔离 hook 失败：${String(err)}`)
-        }
-      }
+      // 任务隔离 hook 的收尾**没有了**（分批第 76 批）：它现在常驻在受管
+      // `CLAUDE_CONFIG_DIR/settings.json` 里，工作目录里从来没有它，自然也不用摘。
     }
 
     try {
@@ -1054,30 +1045,16 @@ export class RunExecutor {
        */
       const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
 
-      // ── 注入任务隔离 hook（2026-10）──
+      // ── 任务隔离 hook：**不再往工作目录注入**（分批第 76 批）──
       //
-      // claude 会把 Bash/Read 跑到工作目录之外（实测会 `ls ..` 看兄弟任务目录、
-      // 读其他 issue 的产出当参考）。第一句话里的「任务边界」是引导层，这里是
-      // 硬拦截：PreToolUse hook 在工具执行前校验目标路径，越界就 deny。
-      // 只对 claude runtime 注入（codex 是 service 形状，没有 hooks 机制）。
+      // 原来这里写 `.claude/settings.json` + `.agentdeck/hooks/pre-tool-use.py`，
+      // 每次 run 注入、跑完摘掉。两件坏事一起存在：注入失败就是"这次没有拦截"
+      // （静默降级的同款），而平台的东西又留在使用者的工作目录里。
       //
-      // ⚠️ 注入失败不失败 run：隔离是增强不是核心，但要让使用者知道这次没有
-      //    隔离（静默缺能力比报错糟——那是这个仓库的原则）。
-      /**
-       * ★ 分批第 67 批：要不要注入任务隔离 hook，**问 profile**（只有 claude 有 hook 机制）。
-       *   原来这里是 `descriptor.key === 'claude'`——新增 runtime 时得记得改这里。
-       */
-      if (profileFor(runtime.descriptor.key)?.injectsRunHooks() === true) {
-        try {
-          await injectRunHooks(run.workDir!)
-        } catch (err) {
-          await this.#note(
-            runId,
-            `⚠️ 任务隔离 hook 注入失败（${String(err)}）——本次 run 不拦截越界路径，` +
-              `只靠第一句话里的「任务边界」引导。`,
-          )
-        }
-      }
+      // 现在它跟着**受管 `CLAUDE_CONFIG_DIR`** 走：`syncClaudeConfigDir` 把
+      // `env` / `enabledPlugins` / `hooks` 一次写进受管 `settings.json`（唯一写点）。
+      // 代价说清：隔离没生效（复制失败 ⇒ 自动退回用你自己的配置）时，这套 hook
+      // 也不存在——那条 note 会明说"本次没有任务隔离拦截"。
 
       // 技能清单（进上下文块/第一句话）与"写没写文件"无关：它是**平台能控制的
       // 那一份**清单，即使这个 runtime 不扫目录也要告诉模型"有哪些标准可用"。
