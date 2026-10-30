@@ -109,6 +109,8 @@
   .mats .x { border: 0; background: transparent; color: var(--text-faint); padding: 0 0.25rem; }
   .mats .x:hover { color: var(--bad); }
   .add-mat { margin-bottom: 0.25rem; }
+  .dirty { font-size: var(--fs-xs); color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: var(--radius-sm); padding: 0.375rem 0.5rem; margin-top: 0.375rem; }
+  .choices button[data-primary] { border-color: var(--accent); background: var(--accent); color: #fff; }
   .check { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); }
   .check .ok { color: var(--good); }
   .check .bad { color: var(--bad); }
@@ -425,25 +427,28 @@ function setCurrentVersion(session, v) {
 }
 
 /**
- * 「续」的四个动作。共同点：**都是普通消息**（人一句 + 平台回执/结果一条），
- * 状态改动落在右栏。没有专门的界面控件，所以以后加新动作也不用改 UI 结构。
+ * 「续」的动作只产生**候选改动**（`pending`），**入库那一刻才落成一个版本**。
+ * 为什么：一次沉淀里再炼+纠错+手改可能有十几次微调，每次都占一个版本号，历史一周就淹了；
+ * 而"入库"才是使用者真正对外承诺的那一刻，也应该正好是能回滚的那一点。
  */
+function markDirty(session, note) {
+  session.pending = session.pending ?? [];
+  session.pending.push(note);
+  renderMain();
+}
+
 function actRework(reason) {
   const s = active;
   s.messages.push({ role: 'user', text: reason ?? '再炼一版' });
   s.messages.push({ role: 'system', text: '起草完成 · 1:05 · 只补了缺的那一项（没从头重写）' });
   s.artifact.checks = s.artifact.checks.map((c) =>
     c.ok ? c : { ...c, ok: true, text: '## Verification 里 `--seeds` 写了取值范围（1–8）' });
-  const nextV = `v${s.artifact.versions.length + 1}`;
-  s.artifact.versions.unshift({ v: nextV, note: '再炼：补 Verification 的 --seeds 说明', now: true });
-  setCurrentVersion(s, nextV);
   const ok = s.artifact.checks.filter((c) => c.ok).length;
   s.messages.push({
     role: 'assistant',
-    text: `**这一版改了什么**\n- Verification 补了 \`--seeds\` 的取值上限（1–8）\n- 其余 12 节未动\n\n体检现在 **${ok} 过 0 缺**，入库就是 ${nextV}。`,
+    text: `**这一版改了什么**\n- Verification 补了 \`--seeds\` 的取值上限（1–8）\n- 其余 12 节未动\n\n体检现在 **${ok} 过 0 缺**；这些改动还是候选，**入库那一刻才成为一个版本**。`,
   });
-  s.version = Number(nextV.slice(1));
-  renderMain();
+  return markDirty(s, '再炼：Verification 补 --seeds 取值范围');
 }
 
 function actAddMaterial(text) {
@@ -453,7 +458,7 @@ function actAddMaterial(text) {
   s.materials.push({ name, src: '外部', size: '1.2 千字' });
   s.messages.push({
     role: 'system',
-    text: `材料 +1（现在是 ${s.materials.length} 项）· 右边清单已更新 · 要重炼才进产物`,
+    text: `材料 +1（现在是 ${s.materials.length} 项）· 右边清单已更新 · 要重炼才进产物（不算改动）`,
   });
   renderMain();
 }
@@ -461,13 +466,31 @@ function actAddMaterial(text) {
 function actCorrect(text) {
   const s = active;
   s.messages.push({ role: 'user', text });
-  // 定性纠错只改目标那一节：这里把 Procedure 第 3 步替换掉，其余字节不动
   const sk = s.artifact.files.find((f) => f.path === 'SKILL.md');
-  if (sk) {
+  if (sk && !sk.body.includes('pnpm exec')) {
     sk.body = sk.body.replace('3. 无头 Chrome 渲染并读页面状态', '3. `pnpm exec node scripts/verify.mjs` 渲染并读页面状态');
   }
-  s.messages.push({ role: 'system', text: '定点纠错：只改 Procedure 第 3 步（−1 +1 行），其余 12 节字节未变' });
-  s.messages.push({ role: 'assistant', text: '改好了。右侧 SKILL.md 里能看到第 3 步；要看差异就点「差异 vs 上一版」。' });
+  s.messages.push({ role: 'system', text: '定点纠错：只改 Procedure 第 3 步（−1 +1 行），其余 12 节字节未变 · 候选改动，未入库' });
+  s.messages.push({ role: 'assistant', text: '改好了。右侧 SKILL.md 里能看到第 3 步；入库时才会成为新版本。' });
+  return markDirty(s, '纠错：Procedure 第 3 步改用 pnpm exec');
+}
+
+function actShip() {
+  const s = active;
+  const pending = s.pending ?? [];
+  const nextV = `v${s.artifact.versions.length + 1}`;
+  s.artifact.versions.unshift({
+    v: nextV,
+    note: pending.length ? pending.join('；') : '未改动的确认',
+    now: true,
+  });
+  setCurrentVersion(s, nextV);
+  s.pending = [];
+  s.version = Number(nextV.slice(1));
+  s.state = 'shipped';
+  s.stateText = '已入库';
+  s.messages.push({ role: 'user', text: '入库' });
+  s.messages.push({ role: 'system', text: `已入库 ${nextV}（只过了机械体检，没有评审这一步）· 可回滚到 ${s.artifact.versions[1]?.v ?? '—'}` });
   renderMain();
 }
 
@@ -476,7 +499,9 @@ function actRollback(v) {
   if (!s.artifact.versions.some((x) => x.v === v)) return;
   s.messages.push({ role: 'user', text: `回到 ${v}` });
   setCurrentVersion(s, v);
-  s.messages.push({ role: 'system', text: `已回到 ${v}（更新的版本留在历史里，随时可以再回去）` });
+  s.pending = [];
+  s.version = Number(v.slice(1));
+  s.messages.push({ role: 'system', text: `已回到 ${v}（更新的版本留在历史里，随时可以再回去；未入库的候选改动已丢弃）` });
   renderMain();
 }
 
@@ -553,12 +578,13 @@ function renderPane() {
     <div class="sec-title">体检 ${ok} 过 ${bad} 缺</div>
     <div class="check">${a.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('')}</div>
     ${a.versions.length ? `<div class="sec-title">版本</div><div class="versions">${a.versions.map((v) => `<div class="item"><span class="mono">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : `<button class="ghost" type="button" data-rollback="${esc(v.v)}">回滚</button>`}</div>`).join('')}</div>` : ''}
+    ${(active.pending ?? []).length ? `<div class="dirty">有 ${active.pending.length} 处未入库的候选改动：<br>${active.pending.map((x) => '· ' + esc(x)).join('<br>')}</div>` : ''}
     <div class="sec-title">动作（都会在对话里留一句）</div>
     <div class="choices">
+      <button class="ghost" type="button" data-act="ship"${(active.pending ?? []).length ? ' data-primary="1"' : ''}>入库为 v${active.artifact.versions.length + 1}</button>
       <button class="ghost" type="button" data-act="rework">再炼一版</button>
       <button class="ghost" type="button" data-act="add">追加材料</button>
       <button class="ghost" type="button" data-act="correct">定点纠错</button>
-      <button class="ghost" type="button" data-act="ship">${active.state === 'shipped' ? '再炼一版' : '入库'}</button>
     </div>`;
 }
 
@@ -644,7 +670,8 @@ el('pane-body').addEventListener('click', (e) => {
   const act = e.target.closest('[data-act]');
   if (act) {
     const kind = act.dataset.act;
-    if (kind === 'rework' || kind === 'ship') actRework();
+    if (kind === 'ship') actShip();
+    if (kind === 'rework') actRework();
     if (kind === 'add') actAddMaterial();
     if (kind === 'correct') actCorrect('这里不对：Procedure 第 3 步应该用 pnpm');
     return;
