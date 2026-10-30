@@ -3865,6 +3865,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.draftingLogInSystemMsg',
+    label:
+      '★★★ 起草中的日志挂在**一条系统消息**上（U3b）——它和"起草完成"从此是同一条时间线上的东西，而不是页面上一个抽屉分节',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.chatShellPresent',
     label:
       '★★★ 中间栏有消息流外壳，且**旧内容确实在一条消息里**（`.crystal-chat > .crystal-msg .crystal-flow`）——U3a 只加外壳不换内容，这条钉住"外壳真包住了旧流程页"',

@@ -5740,6 +5740,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               facts['crystal.draftingLogLive'] = (cyDLog?.textContent ?? '').includes(
                 '起草 run 正在跑',
               )
+              // U3b：起草日志挂在**一条系统消息**上（不再是页面上的抽屉分节）
+              facts['crystal.draftingLogInSystemMsg'] = !!d().querySelector(
+                '.crystal-msg[data-msg-role="system"] .log-box',
+              )
               // ★ 目标那块**表单**不该再出现（它搬进了「依据」tab）：判据是"页面上没有
               //   `.section-body` 里的可编辑表单"，而不是"某段文案不见了"。
               facts['crystal.draftingTargetSectionGone'] =

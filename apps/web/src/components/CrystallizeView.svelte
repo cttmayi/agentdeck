@@ -2521,6 +2521,10 @@
       {/if}
 
       {#if draftRunId !== '' && step === 'drafting' && draftTab === 'run'}
+      <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
+           日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
+           而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
+      <div class="crystal-msg" data-msg-role="system">
         <section class="drawer-section">
           <h3>
             {$t('crystallize.draftSection')}
@@ -2546,6 +2550,7 @@
             </div>
           </div>
         </section>
+      </div>
       {/if}
 
       <!-- ── 完成态：已沉淀 + git 状态 + 查看技能 ── -->
@@ -2642,6 +2647,11 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+  }
+
+  /* 系统消息（起草日志）：自然高度、不吃剩余空间；内部日志框自己滚 */
+  .crystal-msg[data-msg-role='system'] {
+    flex: 0 0 auto;
   }
 
   .crystal-composer {
