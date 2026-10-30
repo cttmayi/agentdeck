@@ -3804,6 +3804,14 @@ const CHECKS = [
   // 这一节钉的是使用者确认过的第 ③ 条决定：目标态**不做 tab**（表单 + 一行素材判据）。
   {
     view: '沉淀',
+    key: 'crystal.stepMarkerValue',
+    label:
+      '★★★ 详情栏带 `data-crystallize-step`（分批第 96 批：判据按**状态**定位，而不是按"旧表单里有没有某个控件"——后者一换界面形态就整组失效）',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.targetAttached',
     label:
       '夹具：目标态那一屏挂得上（源任务没有草稿 ⇒ 进来就是表单，不用点「继续」）——不成立的话下面一整组都空过',

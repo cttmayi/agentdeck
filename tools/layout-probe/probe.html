@@ -5554,11 +5554,19 @@
               await untilNet(() => !d().querySelector('.review-tabs'), 20)
               f.contentWindow.location.hash = `#/crystallize/${cyTarget}`
               // 目标态的标志：那张表单（radio 行 + 作用描述框）**当场**就在，不用点「继续」
+              // 分批第 96 批：先按**状态锚点**定位这一屏，再在它里面找控件。
+              // 断言没变（目标态那张表单在），变的只是"怎么找到这一屏"。
               facts['crystal.targetAttached'] = await untilNet(
-                () => !!d().querySelector('.radio-row input[type="radio"]'),
+                () =>
+                  !!d().querySelector(
+                    '[data-crystallize-step="target"] .radio-row input[type="radio"]',
+                  ),
                 90,
               )
               if (facts['crystal.targetAttached']) {
+                // 锚点在这一屏里读（早于进入这一屏读只会拿到 null）
+                facts['crystal.stepMarkerValue'] =
+                  d().querySelector('.crystal-flow')?.getAttribute('data-crystallize-step') ?? null
                 facts['crystal.targetStepText'] = text(d().querySelector('.crystal-steps'))
                 // ③ 的决定：这一屏**不做 tab**（`review-tabs` 是审阅/起草两屏的东西）
                 facts['crystal.targetTabCount'] = d().querySelectorAll('.review-tabs').length
@@ -5725,8 +5733,12 @@
                 if (cyStop) {
                   click(cyStop)
                   // 停止是异步的（要等进程真的死掉）；回到目标态的标志是那张表单又在了
+                  // 分批第 96 批：同样先按状态锚点定位（停止之后应该回到 target 那一屏）
                   facts['crystal.stoppedBackToTarget'] = await untilNet(
-                    () => !!d().querySelector('.radio-row input[type="radio"]'),
+                    () =>
+                      !!d().querySelector(
+                        '[data-crystallize-step="target"] .radio-row input[type="radio"]',
+                      ),
                     200,
                   )
                   facts['crystal.stoppedTabCount'] = d().querySelectorAll('.review-tabs').length

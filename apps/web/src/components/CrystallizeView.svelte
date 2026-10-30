@@ -1626,7 +1626,19 @@
   {/snippet}
 
   {#snippet body()}
-    <div class="crystal-flow">
+    <!--
+      ★ 分批第 96 批：**状态锚点**。这一层不加节点、不加样式——只是把"现在是哪一屏"
+      写进 DOM（`target | drafting | review | done`），探针据此定位。
+
+      为什么需要它：探针原来靠"旧表单里有没有某个控件"判断"现在哪一屏"
+      （`.radio-row input`、`.crystal-material-line`…）。界面一换形态，这些锚点就消失，
+      于是定位失败、跨屏判据连锁变红（试做时 87 项红，见 §12.22）。
+      换成状态锚点之后，跨屏判据与界面形态解耦。
+
+      ⚠️ **不要为了这个去多包一层 div**：上一版就是这么干的，结果打断了 `detail-scroll`
+      的高度链，过程格当场缩了 105–113px（探针量的）。挂在已有的 `.crystal-flow` 上就行。
+    -->
+    <div class="crystal-flow" data-crystallize-step={step}>
       <!--
         ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ──
 
