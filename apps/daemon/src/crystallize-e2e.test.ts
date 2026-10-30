@@ -2351,6 +2351,78 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
 })
 
 /**
+ * §10.10 评审下线（§12.15）：**改版草稿跑完不再自动接一轮审核**。
+ *
+ * 这一节钉的是"自动跑的那一半先停、手动入口照旧"：评审下线 ≠ 删掉审核——
+ * 「开始审核」这个入口（`POST /api/crystallize/review` + 界面上的按钮）**必须**还在，
+ * 否则使用者想审一条草稿时没有任何办法。
+ *
+ * ⚠️ 开关读的是 `process.env`，且在 `autoChainReview` 内部**每次调用时**读 ⇒ 一个 daemon 就够：
+ *    用例里临时置成 `off`、跑一次改版、断言没有新的审核 run，最后删掉复原。
+ *    这一半正是 §12.45 摸出来的写法（不重启 daemon、现成夹具、三件事一起断言）。
+ *
+ * ⚠️ 为什么"没自动审"要配一条**正**断言（手动入口 202）：负断言天生容易假绿——
+ *    如果我把"自动接审核"整支删掉、顺手也把审核入口删了，只断言"没有审核 run"
+ *    同样会绿，而使用者从今往后再也审不了任何草稿。
+ */
+describe('§10.10 评审下线：改版草稿不再自动接审核（手动入口仍在）', () => {
+  test('★★ 开关关掉 ⇒ 改版跑完不起审核 run，但「开始审核」照样能点', async () => {
+    // 复原放在 finally 里：中途断言失败也不许把这个环境变量留在进程里
+    // （留着的话后面每条用例都在"关"的状态下跑，一红一大片，而红因是上一节留下的脏）。
+    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
+    try {
+      const sourceRunId = await runReviewed('审完的流程（评审下线）')
+      const v1 = await draftAndWait({
+        runId: sourceRunId,
+        target: { kind: 'new', purpose: '评审下线' },
+      })
+      const revised = await fetch(`${daemon.url}/api/crystallize/revise`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v1, feedback: '这里不对：把第二步写清从哪个目录跑' }),
+      })
+      assert.equal(revised.status, 202, await revised.clone().text())
+      // 关系判据（不用"目录里多了什么"）：这一版就是按 v1 改出来的那条
+      const v2 = await waitRevisedFrom(v1)
+
+      // 自动接审核是**跑完之后**的钩子。给它一个真实机会去起 run，再断言"没有"。
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const runs = await getJsonFile<{
+        runs: Array<{ runId: string; kind: string; subject?: { type?: string; id?: string } }>
+      }>('/api/runs')
+      const audits = runs.runs.filter(
+        (r) => r.subject?.type === 'skill-draft-review' && r.subject?.id === v2,
+      )
+      assert.deepEqual(
+        audits.map((r) => r.runId),
+        [],
+        '改版草稿跑完不许自己起审核 run（评审下线：要审由人点）',
+      )
+      const review = await getJsonFile<{ reviewRunId: string | null }>(
+        `/api/crystallize/review?draftRunId=${v2}`,
+      )
+      assert.equal(review.reviewRunId, null, '没有人点过审核，就不该有审核 run')
+
+      // ★ 手动入口仍在：「评审下线」是"不自动跑"，不是"删掉审核"
+      const manual = await fetch(`${daemon.url}/api/crystallize/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v2 }),
+      })
+      const manualText = await manual.text()
+      assert.equal(manual.status, 202, manualText)
+      assert.equal(
+        typeof (JSON.parse(manualText) as { reviewRunId?: unknown }).reviewRunId,
+        'string',
+        '手动「开始审核」必须照旧起 run（否则这条负断言是假绿）',
+      )
+    } finally {
+      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
+    }
+  })
+})
+
+/**
  * §10.6 人改草稿（2026-10-21 分批第 8 批）。
  *
  * 使用者原话：「缺少一个可以改的地方」。编辑器一直都在（草稿 tab 每个文本文件都能改），
