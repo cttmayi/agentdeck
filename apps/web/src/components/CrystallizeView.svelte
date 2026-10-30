@@ -30,14 +30,12 @@
   import { t } from '../lib/i18n.ts'
   import { go } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
-  import { resolveAuditBar } from '../lib/audit-bar.ts'
   import { showToast } from '../lib/view.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
   //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
   //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
   import { tick, onDestroy, onMount } from 'svelte'
-  import { buildFeedbackDraft } from '../lib/crystallize-feedback.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
   import { draftIsLive } from '../lib/draft-live.ts'
   import { finalResultText } from '../lib/final-output.ts'
@@ -161,24 +159,6 @@
    */
 
   /**
-   * 审核 run 的**实时**状态（来自事件流，见 `RunLog` 的 `onstatus`）。
-   *
-   * ⚠️ 为什么不能只用 `reviewInfo.reviewRunStatus`：那是"读接口那一刻"的快照。点「开始审核」
-   *    时 run 还在 `queued`，徽标就会**一直**显示「排队中」——而日志已经在流了。
-   *    实测（探针 `crystal.auditLiveBadge`）抓到过这一幕。
-   *
-   * ⚠️⚠️ 必须**连着 runId 一起存**（2026-10-23 使用者报的缺陷）：
-   *    原来只存一个字符串。点「反馈」之后，新一版草稿由**平台自动**起审核，那一刻还没有判决，
-   *    而缓存里还留着**上一版审核的终态** `completed` ⇒ `auditNoVerdict` 成立 ⇒ 结论条一口
-   *    咬定「审核跑完了，但没有留下可用的判决……**这一步等于白跑**」。使用者原话正是
-   *    「点反馈后，开始执行，但在其审核执行阶段，提示……」——那时审核**刚刚开始**。
-   *    只在「开始审核」那里清空（`startAudit`）治不了这条路：反馈不经过它；而"再找几个地方
-   *    补清空"是按下葫芦起了瓢 ⇒ 真正该钉的是**这条状态属于哪条 run**：runId 对不上就一律
-   *    不采信，无论谁忘了清。
-   */
-  let auditLive: { runId: string; status: string } | null = null
-
-  /**
    * 「起草 run」那一块的两态（2026-10-21 使用者："下面的起草run 的日志，应该类似任务中
    * 的最后结果和完整日志一样的切换方式"）。
    *
@@ -193,40 +173,6 @@
 
   // ── 恢复进行中的起草 ──
   let attached = false
-
-  /**
-   * `GET /api/crystallize/review` 的返回（服务端已把"两条 run 怎么对应"解析好）。
-   *
-   * 前端不自己去翻 run 列表找判决：那会把"审核 run 与起草 run 怎么对应"这条规则
-   * 复制到前端（后端改一处、前端漏一处）。
-   */
-  interface DraftReviewInfo {
-    review: {
-      reviewRunId: string
-      reviewRunStatus: string
-      /** `verdict.status`：`advisory` / `rework_requested` / `escalated` / `invalid` … */
-      status: string
-      conclusion: string
-      reasonCode: string
-      findings: Array<{
-        severity: string
-        summary: string
-        evidence: Array<{ locator: string | null; excerpt: string | null }>
-      }>
-      escalateReason: string | null
-      createdAt: number
-    } | null
-    reviewRunId: string | null
-    reviewRunStatus: string | null
-    /**
-     * 这个结论是不是"改之前的"（服务端拿"审核时钉下的指纹"与"此刻磁盘内容"比出来的）。
-     * `null` = 判不出来（旧数据没有指纹 / 这条草稿还没审过）——**不显示任何提示**，
-     * 因为编一个"没过期"会让界面安静地把可能对不上的结论当成有效结论。
-     */
-    stale: boolean | null
-    /** 这条**链**上已经起草过几版（⛔ 2026-10-23 之前这里数的是"同来源"，混链时会虚高）。 */
-    versions: number
-  }
 
   // ── 审阅（四轮：产出 = 文件集合）──
   /** `GET /api/crystallize/artifacts` 的返回（服务端已解析 + 已校验）。 */
@@ -277,22 +223,6 @@
   let composerReceipt = ''
   /** 「追加材料」正在写（防连点：它会写盘 + 让右栏重读素材）。 */
   let appendingMaterial = false
-  /**
-   * ★ 分批第 19 批：「过程」那一格里的**子 tab**。
-   *
-   * 使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"——原来那三块（审核问题清单、
-   * 审核日志、起草 run）竖着摞在同一个 `process-pane` 里：想看"起草者当时怎么写的"得先
-   * 划过一整份审核日志，反过来也一样。
-   *
-   * 默认停哪一格：**有审核（在跑/跑过/有判决）⇒ 审核过程，否则草稿过程**。
-   * 为什么不是"永远停在草稿过程"：点「开始审核」会自动切到「过程」那一格——如果子 tab
-   * 还停在草稿过程，人落回起草日志、看不到任何审核输出，正好回到第 ③ 批那条
-   * "审核的过程看不到，感觉一直没结束"的老毛病。反过来，从来没审过还停在审核过程，
-   * 那一格是空的（一句"还没审过"），也不对。
-   */
-  let processTab: 'draft' | 'audit' = 'draft'
-  /** 使用者自己点过子 tab 没有——点过就不再被"读回结论"时的默认规则改掉他的选择。 */
-  let processTabTouched = false
   /** 「按意见改一版」的输入框是否展开（不常驻，见结论条）。 */
   let reviseOpen = false
   /**
@@ -304,14 +234,6 @@
    *    `bind:this` 只需要一个普通变量——它不需要驱动渲染。
    */
   let feedbackBox: HTMLTextAreaElement | null = null
-  /**
-   * 起草审核的结论（§10.5 第 ⑤ 步：界面上要看到"审核说了什么"）。
-   *
-   * `null` = 还没读回来（= 面板还在加载）；`review === null` = **还没审过** ——
-   * 这两件事必须分开：把"没审过"画成"不通过"，人会去改一份根本没被审过的稿子。
-   */
-  let reviewInfo: DraftReviewInfo | null = null
-  let reviewBusy = false
   /** 问题清单是否展开（结论常驻、明细折叠，与全站其它地方同一条规矩）。 */
   // （`auditDetailOpen` / `auditLogOpen` 随第 3 批删掉了：问题清单与审核日志现在住在
   //   「过程」tab 里，结论条上那两个按钮改成**切到那个 tab**——不再各有一个折叠开关。）
@@ -384,16 +306,14 @@
         })
 
   /**
-   * 结论条的标记（一个字符说清"能不能入库"）：
-   * `✗` 草稿自己不过校验（它**先**挡住入库，比审核结论更要紧）；否则看审核结论；
-   * 没有审核结论时是 `○`——"还没审过"既不是通过也不是被否，画 ✓ 或 ✗ 都是撒谎。
+   * 结论条的标记（一个字符说清"能不能入库"）：只看**机械体检**。
+   *
+   * ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删掉之后，结论条不再有"审核结论"，
+   * 剩下的唯一判据是 `validateArtifactFiles`（frontmatter / 必填节 / 引用 / 连线平衡…）。
+   * `○` 只在还没读到产出时出现——画 ✓ 或 ✗ 都是撒谎。
    */
   $: conclusionMark =
-    artifacts === null || !artifacts.validation.ok
-      ? '✗'
-      : reviewInfo?.review
-        ? (reviewInfo.review.conclusion === 'pass' ? '✓' : '✗')
-        : '○'
+    artifacts === null ? '○' : artifacts.validation.ok ? '✓' : '✗'
   $: conclusionBad = conclusionMark === '✗'
 
   /** 步骤条三态：done / current / bad / pending（按 step 与起草终态推）。 */
@@ -425,40 +345,6 @@
    *   这时再给"重新起草"按钮，等于把人又推进同一条自动流程（他刚看过的那一版已经作废）。
    */
   /**
-   * 审核 run 还在跑吗。
-   *
-   * ⚠️ 判据是**状态**，不是"有没有判决"：判决只在收口那一刻落库，而 run 可能失败、
-   *    可能跑完却没留下判决。原来这里只判 `review === null`，于是**任何**非正常收尾
-   *    都永远显示"审核中…（跑完再看这里）"——使用者的原话正是"感觉一直没结束呢"。
-   */
-  /**
-   * 结论条的判定（在跑 / 收尾没判决 / 没跑成 / 有判决）**整块交给纯函数**。
-   *
-   * ⚠️ 原来这几条 `$:` 就写在这里，于是它错了一次没人发现：点「反馈」后新一版审核刚起，
-   *    界面报的却是"审核跑完了……这一步等于白跑"（缓存里留着上一版的终态）。
-   *    写进组件里的规则测不了（svelte-check 只管类型），拎到 `lib/audit-bar.ts` 才有单测
-   *    钉住"上一版的终态不认"。见那个文件顶上的注释。
-   */
-  $: auditBar = resolveAuditBar({
-    live: auditLive,
-    reviewRunId: reviewInfo?.reviewRunId ?? null,
-    reviewRunStatus: reviewInfo?.reviewRunStatus ?? null,
-    hasVerdict: reviewInfo !== null && reviewInfo.review !== null,
-  })
-  /** 徽标用的状态：事件流报过就用它，否则用接口快照。 */
-  $: auditStatus = auditBar.status
-  $: auditRunning = auditBar.running
-  /** 审核 run 已经收尾（非进行中）——用来把"没跑成"与"还在跑"分开说。 */
-  $: auditSettled = auditBar.settled
-  /**
-   * "跑完了但没留下判决"：run 是 `completed`，可是判决没有落库。
-   *
-   * ⚠️ 这一格必须与"还在跑"分开：它意味着**审核这一步白跑了**（判决不合规、收口时
-   *    出错…），人得知道这件事，而不是继续等下去。
-   */
-  $: auditNoVerdict = auditBar.noVerdict
-
-  /**
    * 起草那一版是不是**还在跑**（分批第 29 批）。
    *
    * `draftStatus === null` = 还没收到终态（`resumeDraft` 接上在跑的 run、或者刚跟到新版），
@@ -468,9 +354,6 @@
   // 判据抽到 `lib/draft-live.ts`：组件里的行为要真浏览器夹具才量得到，
   // 而这条判据（状态未知/非终态 ⇒ 显示实时日志）在单测里就能钉死。
   $: draftLiveNow = draftIsLive(draftStatus)
-
-  $: auditFailedStuck =
-    reviewInfo?.review?.conclusion === 'fail' && reviewInfo.review.status === 'escalated'
 
   $: canStart =
     targets !== null &&
@@ -631,13 +514,11 @@
     draftStatus = null
     draftFinalText = ''
     draftFinalState = 'loading'
-    reviewInfo = null
     artifacts = null
     diff = null
     void loadMaterial()
     void loadDraftOutput()
     void loadDraftFinalText()
-    void loadReview()
   }
 
   async function pollOnce(): Promise<void> {
@@ -649,8 +530,7 @@
       // ① 链上冒出新版（自动返工）⇒ 跟过去，别让界面停在上一版
       const ad = t2.activeDraft
       if (attached && ad) followNewVersion(ad.runId)
-      // ② 状态本身也要重读：审核跑完 / 循环停掉 / 判决出来了，全靠它
-      if (attached) await loadReview()
+      // ★ 分批第 137 批：审核删掉之后，轮询只需要"链上冒出新版就跟过去"这一件事
     } catch {
       // 轮询失败不打扰人（网络抖一下很常见）：下一次再试
     }
@@ -695,7 +575,6 @@
        * 内容 0px）。这条路径是审阅屏的默认入口，所以不是边缘情况。
        */
       void loadDraftFinalText()
-      void loadReview()
     } else if (ad.status === 'failed' || ad.status === 'cancelled') {
       draftStatus = ad.status
       step = 'drafting'
@@ -878,7 +757,6 @@
     if (status === 'completed') {
       draftStatus = 'completed'
       await loadDraftOutput()
-      void loadReview()
     } else {
       draftStatus = status === 'cancelled' ? 'cancelled' : 'failed'
       step = 'drafting'
@@ -943,6 +821,23 @@
     } catch (err) {
       step = 'drafting'
       error = $t('crystallize.errTargets', { error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  /**
+   * 只重读「机械体检」那一份（保存改动之后用）。
+   *
+   * 为什么不是整份 `loadDraftOutput()`：那个会重置编辑现场（`editText` / `selectedFile` /
+   * `dirty`），而保存之后磁盘上现在就是使用者刚存的内容——他要看到的只是"体检还过不过"。
+   */
+  async function refreshValidation(): Promise<void> {
+    if (draftRunId === '') return
+    try {
+      artifacts = await api<Artifacts>(
+        `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(draftRunId)}`,
+      )
+    } catch {
+      // 读不到就保留上一次的体检结果（下次进入这一屏会重读）；不把失败画成"通过"
     }
   }
 
@@ -1074,146 +969,17 @@
   }
 
   /** 读审核结论（进入审阅时与每次审核 ran 之后调）。 */
-  async function loadReview(): Promise<void> {
-    if (draftRunId === '') return
-    try {
-      reviewInfo = await api<DraftReviewInfo>(
-        `/api/crystallize/review?draftRunId=${encodeURIComponent(draftRunId)}`,
-      )
-      // 默认子 tab：有审核（在跑 / 跑过 / 有判决）就停在审核过程。手动点过就不动它。
-      if (!processTabTouched) {
-        processTab =
-          reviewInfo.review !== null || reviewInfo.reviewRunId !== null ? 'audit' : 'draft'
-      }
-    } catch {
-      // 读不到就如实留空（面板会显示"还没审过"）——**不要**把失败画成"通过"
-      reviewInfo = null
-    }
-  }
-
-  /**
-   * 取消正在跑的审核 run（2026-10-21 使用者："感觉一直没结束呢"）。
-   *
-   * ⚠️ 必须 try/catch：取消失败（run 已经收尾、网络断了）时裸 await 会变成
-   *    **unhandled rejection** —— 界面上什么都不发生，使用者只会反复点。这条纪律
-   *    来自任务页 `cancelRun` 的一次真实踩坑，这里照抄。
-   */
-  /**
-   * 审核 run 收尾时的统一动作：**把实时状态设成终态，再重读判决**。
-   *
-   * ⚠️ 这里必须动实时状态，不能只 `loadReview()`：徽标优先用实时状态（见它的注释），
-   *    如果收尾时只刷新接口快照而实时状态还停在 `running`，`auditRunning` 就永远为真
-   *    ——界面上表现为"取消了，但它还在说审核正在进行"，一个按钮按下去**界面纹丝不动**。
-   *    这是我自己改出来的缺陷，探针当场量到了（`crystal.auditAfterCancelStillRunning` 实测 true）。
-   */
-  async function onAuditTerminal(status: string): Promise<void> {
-    // 连着 runId 记（见 `auditLive` 的注释）：收尾事件说的永远是"这条 run"的终态，
-    // 记到别的 runId 上就等于凭空造一个终态出来。
-    const runId = reviewInfo?.reviewRunId ?? null
-    auditLive = runId === null ? null : { runId, status }
-    await loadReview()
-  }
-
-  async function cancelAudit(): Promise<void> {
-    const id = reviewInfo?.reviewRunId
-    if (id === null || id === undefined || id === '') return
-    error = ''
-    try {
-      await api(`/api/runs/${id}/cancel`, { method: 'POST' })
-      await loadReview()
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    }
-  }
-
-  /**
-   * 起一条起草审核 run（§10.5 第 ②.5 步）。
-   *
-   * 审核是**预筛**，不是入库的门：它给结论，入库仍然由人点。所以这里只负责起 run 与
-   * 把结论读回来；失败时如实报错，**不自动入库**。
-   */
-  async function startAudit(): Promise<void> {
-    if (draftRunId === '' || reviewBusy) return
-    reviewBusy = true
-    // ★ 2026-10-21（第 3 批）：日志住在「过程」tab 里，所以**点开始审核就切过去**——
-    //   否则人会停在"草稿"上，看不到任何输出，正好回到第 ① 条那个毛病（"感觉一直没结束"）。
-    reviewSection = 'process'
-    // ★ 第 19 批：子 tab 也必须跟到**审核过程**——只切外层的话人落回"草稿过程"那一格，
-    //   看到的还是起草日志、审核输出一个字都没有（见 `processTab` 的注释）。
-    processTab = 'audit'
-    processTabTouched = true
-    // 新的一条 run：上一条的实时状态必须丢掉，否则徽标会带着旧状态开始。
-    // （⚠️ 光靠这句是不够的——「反馈」那条路不经过这里。真正兜住的是 `auditLive` 的
-    //   runId 比对：对不上一律不采信。这句只是让状态干净一点。）
-    auditLive = null
-    error = ''
-    try {
-      await api<{ reviewRunId: string }>('/api/crystallize/review', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId }),
-      })
-      // 审核 run 是异步的：先读一次（多半还没判决），面板会显示"审核中"。
-      // 之后由「刷新」或再次进入审阅时读到判决 —— 这里不装轮询：
-      // 一条审核 run 可能跑几分钟，前端轮询只会让"看起来在动"变成假象。
-      await loadReview()
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      reviewBusy = false
-    }
-  }
-
-  /**
-   * 上次**自动填**进去的那段话（分批第 12 批）。
-   *
-   * 用来判断"框里现在这段是不是我们填的"：是 ⇒ 可以随判决更新；不是（人改过）⇒ **一个字都不动**。
-   * 界面替人改过的字，比界面少填一点严重得多。
-   */
-  let lastAutoFill = ''
-
-  /**
-   * 审核者的反馈整理成意见框里的默认内容（`fail` 才有意义，其它一律返回空串 ⇒ 不填）。
-   *
-   * 拼法在 `lib/crystallize-feedback.ts`（纯函数 + 单测）：**位置与原文都要有**——只有结论没有
-   * 位置的清单，起草者只能猜着改，而猜错的表现是"改完了问题还在"。
-   */
-  function feedbackFromReview(): string {
-    const r = reviewInfo?.review
-    if (!r || r.conclusion !== 'fail') return ''
-    return buildFeedbackDraft(r.reasonCode, r.findings, {
-      intro: (code) => $t('crystallize.feedbackIntro', { code }),
-      where: $t('crystallize.feedbackWhere'),
-      quote: $t('crystallize.feedbackQuote'),
-      noEvidence: $t('crystallize.feedbackNoEvidence'),
-      emptyFindings: $t('crystallize.feedbackEmptyFindings'),
-      outro: $t('crystallize.feedbackOutro'),
-    })
-  }
-
   /**
    * 开/收「按意见改一版」的意见框。
    *
-   * ★★ 开的时候**默认就把审核者的反馈填好**（分批第 12 批，使用者第二次纠正过的形状）。
-   *
-   * 这一块改过两版，两版都错在同一个地方——**多要了人一次点击**：
-   *   ① 最早：点了「按意见重新起草」就**直接提交**（人连要发出去的话都没看见，更不能改）；
-   *   ② 第一版修正：把这个按钮改成"只填不提交"（还改了名）——但人还是得先点它、
-   *      再点「按意见再改一版」才看得到框里的东西，而使用者的预期是一句话说完的：
-   *      「我期待意见框里面默认填充了审核者的反馈」。**打开框就该已经有内容**，
-   *      那就不需要一个专门用来"填"的按钮了（同一个动作两个入口，迟早两边不一样）。
-   *
-   * ⚠️ 人改过的字**一个字都不覆盖**：只有框里是空的、或者还是我们上次填的那段，才跟着判决更新。
+   * ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的审核删掉之后，**没有"审核者的反馈"可预填**
+   * ——意见完全由人写（这也是 §12.15 定下的："人看、可就地改"）。以前那段"打开框就填好
+   * 审核意见"的逻辑随审核一起删除，连同它的单测（`lib/crystallize-feedback.ts`）。
    */
   async function toggleReviseBox(): Promise<void> {
     reviseOpen = !reviseOpen
     if (!reviseOpen) return
-    const filled = feedbackFromReview()
-    if (filled !== '' && (reviseFeedback.trim() === '' || reviseFeedback === lastAutoFill)) {
-      reviseFeedback = filled
-      lastAutoFill = filled
-    }
-    // 光标落在框里：人点开这个框就是要改意见（而不是只看看）
+    // 光标落在框里：人点开这个框就是要写意见
     await tick()
     feedbackBox?.focus()
   }
@@ -1239,8 +1005,8 @@
         body: JSON.stringify({ draftRunId, files: artifacts.files }),
       })
       dirty = false
-      // 结论条上的"已过期"由服务端算 ⇒ 保存完重读一次审核信息（这一屏的判据都从它来）
-      await loadReview()
+      // 保存之后重读一次产出（**只**为了刷新"机械体检"：人改完往往就是修体检问题）
+      void refreshValidation()
       void loadDiff()
       showToast($t('crystallize.saveDraftDone'))
     } catch (err) {
@@ -1851,54 +1617,13 @@
           <div class="conclusion-bar" class:bad={conclusionBad}>
             <span class="bar-mark" aria-hidden="true">{conclusionMark}</span>
             <span class="bar-text">
-              {#if reviewInfo === null}
+              {#if artifacts === null}
                 <span class="muted">…</span>
-              {:else if reviewInfo.review === null && auditRunning}
-                <strong>{$t('crystallize.auditRunningShort')}</strong>
-                <span class="badge {runStatusClass(auditStatus ?? '')}">
-                  {statusLabel(auditStatus ?? '')}
-                </span>
-                <span class="muted">run {reviewInfo.reviewRunId?.slice(0, 4) ?? ''}…</span>
-              {:else if reviewInfo.review === null && auditSettled}
-                <strong>
-                  {auditNoVerdict
-                    ? $t('crystallize.auditNoVerdict')
-                    : $t('crystallize.auditRunFailed', { status: statusLabel(auditStatus ?? '') })}
-                </strong>
-              {:else if reviewInfo.review === null}
-                <!--
-                  ★ "还没审核过"：原来这里是一整段说明（"审核是一个内置智能体按'能不能用'
-                    过一遍，给出结论与问题清单；它不替你做入库决定"，42px 两行）。按确认的
-                    设计，说明收进**按钮的悬停提示**，条上只留四个字。
-                -->
-                <strong title={$t('crystallize.auditNotYet')}
-                  >{$t('crystallize.auditNotYetBrief')}</strong
-                >
+              {:else if artifacts.validation.ok}
+                <strong>{$t('crystallize.checkPassed')}</strong>
+                <span class="faint small">（{$t('crystallize.checkTitle')}）</span>
               {:else}
-                <strong>
-                  {reviewInfo.review.conclusion === 'pass'
-                    ? $t('crystallize.auditPass')
-                    : reviewInfo.review.conclusion === 'fail'
-                      ? $t('crystallize.auditFail')
-                      : $t('crystallize.auditNeedsHuman')}
-                </strong>
-                <!-- "（预筛）"留着：它说的是"这不是入库的门"，是这条链的前提，不是修饰 -->
-                <span class="faint small">（{$t('crystallize.auditPrescreen')}）</span>
-                {#if auditFailedStuck}
-                  <!-- ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环删掉之后，"不通过"
-                       就是最终状态（交给人）——不再有"第 N 轮返工"那种会自己往下走的说法。 -->
-                  <span class="muted">{$t('crystallize.auditExhausted')}</span>
-                {/if}
-                <span class="muted">{reviewInfo.review.reasonCode}</span>
-              {/if}
-              <!--
-                ★ 分批第 8 批：「这个结论是改之前的」。
-                判据在服务端（审核时钉下的指纹 vs 此刻磁盘内容），界面只负责**说出来**：
-                一个过期的结论如果安静地留在那儿，人就会照它决定入库。
-              -->
-              {#if reviewInfo?.stale === true}
-                <span class="bar-sep">·</span>
-                <span class="stale-tag">{$t('crystallize.auditStale')}</span>
+                <strong>{$t('crystallize.checkProblems', { n: String(artifacts.validation.problems.length) })}</strong>
               {/if}
               {#if artifacts}
                 <span class="bar-sep">·</span>
@@ -1946,49 +1671,11 @@
                    它们改成**切到那个 tab**——一个东西只有一个开关，否则"折起来的问题清单"
                    与"tab 里的问题清单"会同时存在，人分不清哪个是真的。
               -->
-              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
-                <!-- ⚠️ 分批第 19 批：这两个出口原来只切外层 tab（那时过程里只有一格）；
-                     劈成两个子 tab 之后必须**一起**把子 tab 指到审核过程，否则点了「看 N 条问题」
-                     会落到"草稿过程"、什么问题都看不到——一个出口指向别处，比没有出口更坏。 -->
-                <button
-                  class="ghost small"
-                  onclick={() => {
-                    reviewSection = 'process'
-                    processTab = 'audit'
-                    processTabTouched = true
-                  }}
+              {#if artifacts !== null && !artifacts.validation.ok}
+                <!-- 体检不过：切到「过程」看明细（那里只有起草过程 + 体检问题清单） -->
+                <button class="ghost small" onclick={() => (reviewSection = 'process')}
+                  >{$t('crystallize.checkShowDetail')}</button
                 >
-                  {$t('crystallize.auditShowDetail', {
-                    n: String(reviewInfo.review.findings.length),
-                  })}
-                </button>
-              {/if}
-              {#if reviewInfo?.review}
-                <button
-                  type="button"
-                  class="ghost small"
-                  onclick={() => {
-                    reviewSection = 'process'
-                    processTab = 'audit'
-                    processTabTouched = true
-                  }}
-                >
-                  {$t('crystallize.auditShowLog')}
-                </button>
-              {/if}
-              {#if reviewInfo !== null && reviewInfo.review === null && auditRunning}
-                <button class="ghost small" onclick={() => void cancelAudit()}>
-                  {$t('crystallize.auditCancel')}
-                </button>
-              {:else if reviewInfo !== null && reviewInfo.review === null}
-                <button
-                  class="ghost small"
-                  disabled={reviewBusy}
-                  title={$t('crystallize.auditNotYet')}
-                  onclick={() => void startAudit()}
-                >
-                  {auditSettled ? $t('crystallize.auditRetry') : $t('crystallize.auditStart')}
-                </button>
               {/if}
               <!--
                 ★ 分批第 8 批：「保存改动」。
@@ -2002,21 +1689,6 @@
                   title={$t('crystallize.saveDraftHint')}
                   onclick={() => void saveDraftEdits()}
                 >{$t('crystallize.saveDraft')}</button>
-              {/if}
-              <!--
-                ★ 分批第 8 批：「重新审核」。
-                原来这个按钮只在**还没判决**时出现（`review === null`）⇒ 一旦审出结论，
-                同一版再也审不了。现在改成"只要有判决就能再审"：改完草稿要它算数、
-                或只是想让审核者再看一遍，都走这里。
-                ⚠️ 不自动重审：真机一轮审核 ≈ $1.32，这笔钱由人决定（自动返工那条链另算）。
-              -->
-              {#if reviewInfo?.review !== null && reviewInfo !== null}
-                <button
-                  class="ghost small"
-                  disabled={reviewBusy || dirty}
-                  title={dirty ? $t('crystallize.auditRetryNeedsSave') : $t('crystallize.auditNotYet')}
-                  onclick={() => void startAudit()}
-                >{$t('crystallize.auditRetry')}</button>
               {/if}
               {#if artifacts}
                 <!-- ★ 点它 ⇒ 意见框打开，里面**默认已经填好**审核者的反馈（见 `toggleReviseBox`）。 -->
@@ -2053,13 +1725,8 @@
             </div>
           {/if}
 
-          <!--
-            ⚠️ 2026-10-21（第 3 批）：这里原来还有两样——**审核日志**（跑着的时候铺开）
-               与**问题清单**（折起来）。它们搬进了「过程」tab（见下面的 `process-pane`）：
-               这一块的常驻纪律是"一行结论 + 一行入库信息"，日志和问题清单都属于"要看过程
-               才看"的东西。跑起来时界面会**自动切到过程 tab**（`startAudit()` 里改），
-               所以第 ① 条"审核的过程看不到"不会被这次搬家推翻。
-          -->
+          <!-- ★ 分批第 137 批：沉淀线的审核删掉后，这里只剩**机械体检的问题清单**
+               （能机器判的那几条）。语义层不判——由人看（§12.15）。 -->
 
           <!-- 问题定位列表：只在不过时说，最多 4 条（再多就该先改了） -->
           {#if artifacts && !artifacts.validation.ok}
@@ -2087,9 +1754,6 @@
                 placeholder={$t('crystallize.revisePlaceholder')}
               ></textarea>
               <div class="row-end">
-                {#if lastAutoFill !== '' && reviseFeedback === lastAutoFill}
-                  <span class="faint small">{$t('crystallize.revisePrefilledHint')}</span>
-                {/if}
                 <button
                   class="ghost small"
                   disabled={revising || reviseFeedback.trim() === ''}
@@ -2155,12 +1819,6 @@
               onclick={() => (reviewSection = 'process')}
             >
               {$t('crystallize.tabProcess')}
-              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
-                <span class="tab-count">{reviewInfo.review.findings.length}</span>
-              {:else if reviewInfo !== null && reviewInfo.review === null && auditRunning}
-                <!-- 跑着的时候在 tab 上留一个点：人切到草稿去改字，也不会"忘了它还在跑" -->
-                <span class="tab-dot" aria-hidden="true"></span>
-              {/if}
             </button>
           </div>
 
@@ -2327,116 +1985,16 @@
           {:else}
             <!--
               ── 过程：怎么走到这一步的 ──
-              审核问题清单（有判决时）+ 审核日志 + 起草 run（最后结果 / 完整日志 两态）。
-              跑起来的时候界面会**自动切到这里**（见 `startAudit()`）——这一 tab 就是第 ① 条
-              "审核的过程看不到"的落点。
+              ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删掉之后，这一格只剩
+                 **起草过程**（子 tab 随之退化成一座无用的开关，已删）。现在直接铺起草那条
+                 run 的过程（`draftRunPane`：最后结果 / 完整日志 两态）。
             -->
-            <!--
-              ★ 分批第 19 批：格子里的两个子 tab（使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"）。
-
-              内容怎么分（按"谁产生的"分，不按时间顺序堆）：
-                · 审核过程 = 审核问题清单（有判决时）+ 审核日志（含实时输出）；
-                · 草稿过程 = 起草 run（最后结果 / 完整日志 两态）。
-              ⚠️ 顺序上"草稿在前、审核在后"（事情就是按这个顺序发生的），但默认可能停在后者
-                 （有审核时）——见 `processTab` 的注释。
-            -->
-            <div class="pane-tabs process-subtabs" role="tablist">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={processTab === 'draft'}
-                class:tabs-active={processTab === 'draft'}
-                onclick={() => {
-                  processTab = 'draft'
-                  processTabTouched = true
-                }}
-              >{$t('crystallize.tabProcessDraft')}</button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={processTab === 'audit'}
-                class:tabs-active={processTab === 'audit'}
-                onclick={() => {
-                  processTab = 'audit'
-                  processTabTouched = true
-                }}
-              >{$t('crystallize.tabProcessAudit')}</button>
-            </div>
-
-            {#if processTab === 'audit'}
-            <!-- 分批第 27 批：打上身份，probe 才不会量到"页面里第一个 process-pane"
-                 （那可能是「依据」那一格 —— 实测这样量出来的 log-box 恒为 false，
-                 判据红而界面没错，正是这类"量错地方"的老毛病） -->
-            <div class="process-pane" data-process-pane="audit">
-              {#if reviewInfo?.review && reviewInfo.review.conclusion === 'needs_human' && reviewInfo.review.escalateReason}
-                <p class="muted">
-                  {$t('crystallize.auditNotRun', { reason: reviewInfo.review.escalateReason })}
-                </p>
-              {/if}
-
-              {#if reviewInfo?.review && reviewInfo.review.findings.length > 0}
-                <div class="proc-block">
-                  <div class="proc-head">{$t('crystallize.auditFindingsTitle')}</div>
-                  <ul class="audit-findings">
-                    {#each reviewInfo.review.findings as f}
-                      <li>
-                        <span class="sev">{f.severity}</span>
-                        <span>{f.summary}</span>
-                        {#each f.evidence as e}
-                          {#if e.locator !== null || e.excerpt !== null}
-                            <div class="muted audit-evidence">
-                              {e.locator ?? ''}{e.excerpt === null ? '' : `：${e.excerpt}`}
-                            </div>
-                          {/if}
-                        {/each}
-                      </li>
-                    {/each}
-                  </ul>
-                </div>
-              {/if}
-
-              {#if reviewInfo?.review || (reviewInfo !== null && (auditRunning || auditSettled))}
-                <!-- 分批第 33 批：这一块**带日志**，是格子里唯一该吃掉剩余高度的东西
-                     （`proc-log` 在样式中被分开对待；问题清单那块的封顶是 50%）。 -->
-                <div class="proc-block proc-log">
-                  <div class="proc-head">
-                    {$t('crystallize.auditShowLog')}
-                    {#if auditRunning}
-                      <span class="badge {runStatusClass(auditStatus ?? '')}">
-                        {statusLabel(auditStatus ?? '')}
-                      </span>
-                    {/if}
-                  </div>
-                  {#if auditRunning}
-                    <p class="faint small">{$t('crystallize.auditRunning')}</p>
-                  {/if}
-                  {#if reviewInfo.reviewRunId !== null}
-                    <div class="log-box">
-                      <RunLog
-                        runId={reviewInfo.reviewRunId ?? ''}
-                        onterminal={(st) => void onAuditTerminal(st)}
-                        onstatus={(st) =>
-                          (auditLive =
-                            reviewInfo?.reviewRunId === null ||
-                            reviewInfo?.reviewRunId === undefined
-                              ? null
-                              : { runId: reviewInfo.reviewRunId, status: st })}
-                      />
-                    </div>
-                  {/if}
-                </div>
-              {:else if reviewInfo !== null}
-                <p class="faint small">{$t('crystallize.processNoAuditYet')}</p>
-              {/if}
-            </div>
-            {:else}
             <!-- ── 草稿过程：起草那条 run（默认"最后结果"，一点换"完整日志"） ── -->
             <div class="process-pane" data-process-pane="draft">
               {#if draftRunId !== ''}
                 {@render draftRunPane()}
               {/if}
             </div>
-            {/if}
           {/if}
         {/if}
             </div>

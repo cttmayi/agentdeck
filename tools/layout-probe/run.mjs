@@ -409,23 +409,6 @@ const CHECKS = [
   },
   {
     view: '智能体',
-    key: 'agents.skillAuditorRowFound',
-    label: '夹具：内置 skill 审核者那一行在列表里（§10 第 ④ 条新建的第二个内置智能体）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '智能体',
-    key: 'agents.skillAuditorRowBadge',
-    // ⚠️ 分批第 54 批把**角色叫法**统一成「沉淀审核」（徽标 = 设置里那个开关 = 服务端文案），
-    //    而这条探针还停在旧词「审核沉淀」——它从第 47 批之后就没被改过，所以第 54 批
-    //    那条「全绿」是只跑了 `pnpm run check`（探针不在 check 里）。第 70 批跑探针时红在这里。
-    //    与旁边那条 runtime 选项的注释同一类：**界面是对的，判据要跟上**。
-    label: '★★★ 它的徽标说「沉淀审核」——两个内置角色的徽标要**分得开**，不能都叫"审核"',
-    ok: (v) => v === '沉淀审核',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '智能体',
     key: 'agents.runtimeOptionsNoDefault',
     label:
       'runtime 选择器的**具体 runtime** 选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
@@ -3219,13 +3202,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.processAuditPaneHasNoDraftBlock',
-    label:
-      '★★★ ★ 切到「审核过程」之后，页面上**没有**「起草 run」那一块——这条才是"真劈开了"：只量"两个 tab 存在"的话，把三块摞在同一个 pane 里照样过',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.draftSectionFound',
     label:
       '夹具：切到「过程」tab 后找得到「起草 run」那一块（下面四条量的是它的两态；第 3 批把它从主区下方搬进了这里）',
@@ -3276,97 +3252,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.auditAutoSwitchedToProcess',
-    label:
-      '★★★ 点「开始审核」界面**自动切到「过程」**——日志住在那个 tab 里，不切过去就等于"点了没反应"（第 ① 条"审核的过程看不到"就靠这一下守住）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailFindingsTab',
-    label:
-      '★★ 结论条上的「看 N 条问题」**切到「过程」并且真的列出问题**（第 3 批把它从"展开折叠"改成"切 tab"——切不过去就是个摆设）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveStartButton',
-    label:
-      '夹具：审阅屏上有「开始审核」——下面几条要**点它**，让 daemon 真的 spawn 一条审核 run（假 `agent-cli`，不花额度）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveSubTab',
-    label:
-      '★★★ 点「开始审核」之后**子 tab 也切到「审核过程」**——只切外层的话人落回"草稿过程"，审核输出一个字都看不到（第 ③ 批那条"感觉一直没结束"就是这样复发的）',
-    ok: (v) => v === '审核过程',
-    show: (v, f) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveLogBox',
-    label:
-      '★★★ 审核**真跑起来**的时候，实时输出就铺在面板里（使用者："审核的过程看不到，感觉一直没结束呢"——原来只有一句"审核中…跑完再看这里"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveLogText',
-    label: '★★★ 而且那日志**真有内容**（不是铺了个空的框就算过——假 CLI 吐的那句话必须在里面）',
-    ok: (v) => typeof v === 'string' && v.includes('正在跑'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveBadge',
-    label: '★★ 跑着的时候有 run **状态徽标**（"它到底在跑还是在等"要一眼看得出来）',
-    ok: (v) => v === '运行中',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditLiveCancelButton',
-    label: '★★ 跑着的时候给得出「取消审核」（"感觉一直没结束"的另一半：得有一条退出路）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditAfterCancelStillRunning',
-    label:
-      '★★★ 点了「取消审核」之后**不许**还在说"审核正在进行"（这条量的是真的取消：run 落到终态、界面跟着改口）',
-    ok: (v) => v === false,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditAfterCancelRetry',
-    label: '★★ 取消之后给得出「重新审核」（取消了就是没审成，得能再来一次）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditDeadEntered',
-    label: '夹具：审核"没跑成"那条草稿挂得上（patch 前它永远显示"审核中"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditDeadSaysRunning',
-    label:
-      '★★★ 审核 run **失败**时**不许**再说"审核正在进行 / 跑完再看这里"（这就是使用者"感觉一直没结束"的根因：判据只看"有没有判决"）',
-    ok: (v) => v === false,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditDeadText',
-    label: '★★★ 它要**明说没跑成**并给「重新审核」（失败必须说出来，而不是让人继续等）',
-    ok: (v) => typeof v === 'string' && v.includes('审核没跑成') && v.includes('重新审核'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
     key: 'crystal.stepLabels',
     label:
       '★★ 步骤条是**三步**（目标 → 起草 run → 审阅入库）——审核**不是**一步，它是审阅屏里的一个动作',
@@ -3379,26 +3264,11 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.stepAuditNotAStep',
-    label:
-      '★★ 步骤条里**没有**「审核」这一格（2026-10-21 确认：它不是入库的门，画成一步会让人以为必须等它）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.statsHits',
     label:
       '★ 同一份「…次工具调用」在一屏里只出现**一次**（原来副标题一次、素材摘要分节又一次：同一句话写两遍）',
     ok: (v) => v === 1,
     show: (v) => `${v} 次`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.conclusionBarCount',
-    label:
-      '★★★ 审阅态只有**一条**结论条（原来三条横条竖着摞：审核块 + 草稿校验条 + frontmatter 摘要，实测共 ~240px）',
-    ok: (v) => v === 1,
-    show: (v) => `${v} 条`,
   },
   {
     view: '沉淀',
@@ -3416,90 +3286,11 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.auditStartButtonBox',
-    label:
-      '★★「开始审核」按钮**不许折行**：高 ≤ 40（改前实测 69×54——文案在 69px 宽里折成 3 行）',
-    ok: (v) => v !== null && typeof v === 'object' && v.h <= 40,
-    show: (v) => (v ? `${Math.round(v.w)}×${Math.round(v.h)}` : 'null'),
-  },
-  {
-    view: '沉淀',
     key: 'crystal.barNarrowBox',
     label:
       '★★ 把窗口收窄到 1000px 再量一次：结论条仍是**一条**（高不变）且按钮没有被挤出条外——「开始审核」曾经在 69px 里折成 3 行、高 54px，而那个条件**只在窄的时候出现**',
     ok: (v) => v !== null && typeof v === 'object' && v.h <= 46 && v.buttonsInside === true,
     show: (v) => (v ? `${v.w}×${v.h} 按钮在条内=${v.buttonsInside}` : 'null'),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditPresent',
-    label: '★★ 审核区块**常驻**在审阅态里（结论与问题清单要有地方落，不能只在有结论时才出现）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditText',
-    label:
-      '★ 还没审核时条上就四个字「还没审核过」——**不是 ✓ 也不是 ✗**（既没通过也没被否，画对勾是撒谎）',
-    ok: (v) => typeof v === 'string' && v.includes('还没审核过') && v.includes('○'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditStartButtonTitle',
-    label:
-      '★★ 那句"这是预筛、不替你做入库决定"搬进了「开始审核」的悬停提示——**它必须还在**（2026-10-21 把它从 42px 的段落里挪走，是为了让编辑器上移，不是把话删掉）',
-    ok: (v) => typeof v === 'string' && v.includes('预筛') && v.includes('入库决定'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditStartButton',
-    label: '★ 未审核态给得出「开始审核」这个入口（少了它，这一步只能靠接口触发）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailEntered',
-    label:
-      '夹具：判决 `fail` + 配额用尽那条草稿挂得上（下面四条量的是"审核未通过"那一屏）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailText',
-    label:
-      '★★ 未通过时结论条说清三件事：**不通过** + 理由码 + **配额已用尽**（人要知道为什么停在它这儿），并且"按意见改一版"这个出口在',
-    ok: (v) =>
-      typeof v === 'string' &&
-      v.includes('不通过') &&
-      v.includes('style_violation') &&
-      // ⚠️ 分批第 12 批：这里原来查的是「重新起草」（那个按钮点了**立刻提交**，已撤掉），
-      //    中途一度改查「填入审核问题」（我第一版把"填"做成独立按钮，多要了人一次点击，
-      //    也被使用者否掉了）。现在的口径是"开框即填好"⇒ 结论条上只需要**一个**出口。
-      // ★ 分批第 17 批：按钮改名「反馈」（见 probe.html 同一条的注释）
-    v.includes('反馈'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailFindingsButton',
-    label: '★★ 问题清单**数得出来**（"看 N 条问题"——判决里几条，这里就该是几条）',
-    ok: (v) => typeof v === 'string' && /看 3 条问题/.test(v),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailFindingCount',
-    label: '★★ 点开之后**真的列出 3 条**问题（按钮在、点了什么都没有是这类改动最容易出的错）',
-    ok: (v) => v === 3,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailSeverities',
-    label: '★ 每条带**严重度**（high/medium/low 原样给出来，不折叠成一个"有问题"）',
-    ok: (v) => Array.isArray(v) && v.join(',') === 'high,medium,low',
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   {
     view: '沉淀',
@@ -3533,25 +3324,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.redraftHasReasonCode',
-    label: '★ 填进去的话里带**理由码**（起草者要知道"为什么不合格"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftHasLocator',
-    label:
-      '★★★ 填进去的话里带**位置**（`SKILL.md` 这类）——没有位置，起草者只能猜着改（第 10 批把返工改成"基于上一版改"之后这条更要紧）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftHasExcerpt',
-    label: '★★ 填进去的话里带**原文摘录**（行号是软信息，原文才让人找得准）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.redraftFocused',
     label: '★ 光标落在意见框里（让人一眼看到"要发出去的是这些"）',
     ok: (v) => v === true,
@@ -3559,8 +3331,11 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.redraftSubmitEnabled',
-    label: '★★ 填完「提交反馈」可点（最终决定权在人手里）',
-    ok: (v) => v === true,
+    // ★ 分批第 137 批：意见框默认是**空的** ⇒ 提交按钮应当是**禁用**的（有内容才能提交）。
+    //   判据从"可点"改成"存在且按内容启用"——按钮在、且空框时 disabled，才是"人能写、写完能提交"。
+    label: '★★ 「提交反馈」在、且按框里有没有内容启用（空框禁用：不许提交一句空意见）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
   },
   {
     view: '沉淀',
@@ -3568,37 +3343,6 @@ const CHECKS = [
     label:
       '★★★ 点了「反馈」**没有**自己开始起草：意见框与提交按钮都还在（真跑起来这一屏会切到"起草中"）',
     ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.revisePrefilledHint',
-    label:
-      '★★ 意见框里有一句说清"这段是哪来的"（框里凭空有内容，人得知道它是审核者的反馈）',
-    ok: (v) => typeof v === 'string' && v.includes('审核者') && v.includes('反馈'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviseKeepsHumanEdit',
-    label:
-      '★★★ 人改过之后收起再打开，**还是人改的那句**（界面替人改掉一个字，比少填一点严重得多）',
-    ok: (v) => v === '我自己写的意见',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftFilled',
-    label: '★ 填进去的是一整份清单（不是一个空框或一句占位）',
-    ok: (v) => typeof v === 'string' && v.split('\n').length >= 4,
-    show: (v) => JSON.stringify(String(v).split('\n').slice(0, 6)),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.auditFailSaveDisabled',
-    label:
-      '★★★ 审核不通过**也没有**把「确认入库」灰掉（第 ① 条决定：审核是**预筛**，入库仍由人按——按钮一灰就等于把预筛变成了闸）',
-    ok: (v) => v === false,
-    show: (v) => String(v),
   },
   {
     view: '沉淀',
@@ -3625,31 +3369,8 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.manualStaleBefore',
-    label:
-      '★ 没改过内容时**没有**「结论已过期」标记（夹具里的指纹就是按当前内容钉的）——只在真改过时出现',
-    ok: (v) => v === false,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
     key: 'crystal.manualDirtySaveButton',
     label: '★★ 在编辑器里打字 ⇒ 出现「保存改动」（改动只活在内存里，得有个出口把它落盘）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.manualStaleAfterSave',
-    label:
-      '★★★ 保存之后结论条出现「内容已改 —— 这个结论是改之前的」（使用者原话："缺少一个可以改的地方"；改完不算数等于没得改）',
-    ok: (v) => v === true,
-    show: (v, f) => `${String(v)}　标记文案 ${JSON.stringify((f['crystal.manualStaleText'] ?? '').slice(0, 30))}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.manualRetryAfterSave',
-    label: '★★ 出现「重新审核」——原来这个按钮只在**还没判决**时才有，一旦审出结论同一版再也审不了',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -3740,14 +3461,6 @@ const CHECKS = [
       '★★★ 深链 `#/crystallize/<草稿id>` 打开的就是**那一条**草稿（夹具里那条兄妹草稿只有 1 个文件；改前这个 id 被丢掉、一律挂"该来源最新那条"）',
     ok: (v) => Array.isArray(v) && v.length === 1,
     show: (v, f) => `${JSON.stringify(v)}　结论条 ${JSON.stringify((f['crystal.deepLinkSiblingBar'] ?? '').slice(0, 40))}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.deepLinkSiblingBar',
-    label:
-      '★★ 深链打开的那条**判决也是它自己的**（兄妹草稿没审过 ⇒ 结论条说"还没审核过"）——改前显示的是最新那条的判决，真机上"花钱审出来的结论在界面上打不开"就是这么来的',
-    ok: (v) => typeof v === 'string' && v.includes('还没审核过'),
-    show: (v) => JSON.stringify((v ?? '').slice(0, 60)),
   },
   {
     view: '沉淀',
@@ -3848,6 +3561,32 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.legacyBarText',
+    label:
+      '★★★ 老工作区（盘上有历史审核判决）进审阅屏：结论条**只说机械体检**、不再出现审核/判决内容——' +
+      '审核已整条删除（§12.42 第 ③ 步；§12.15 代价 ③：入库不许声称"审过"）',
+    ok: (v, f) =>
+      typeof v === 'string' && v.includes('体检') && f['crystal.legacyNoAuditContent'] === true,
+    show: (v) => String(v).slice(0, 80),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.legacyFindingsGone',
+    label:
+      '★★ 历史审核判决的**问题清单不再渲染**（审核删了，它的控件也该在上屏时消失——旧数据不该在界面上复活一个已删功能）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.reviseEmptyByDefault',
+    label:
+      '★★ 「反馈」的意见框默认是**空的**（没有审核者替人填意见：§12.15「人看、可就地改」）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.composerEnabled',
     label:
       '★★★ 栏脚输入条**能用**（输入框不是 disabled、且有「发送」）——U3d：它从占位变成真的动作入口',
@@ -3899,14 +3638,6 @@ const CHECKS = [
     key: 'crystal.blankNoTraceLine',
     label:
       '★★ 空白起**不许**出现"轨迹 N 轮"（没有来源 run 就没有轨迹——画一行假的素材统计比不画更坏）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviewInArtifactMsg',
-    label:
-      '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -4208,17 +3939,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.procAuditGap',
-    label:
-      '★★★ 过程格的**审核过程**那一档也贴着内容盒底（差 ≤ 1% 视口高）——分批第 30 批只改了格子本身，这条钉住"格子里真的用满了"',
-    ok: (v, f) =>
-      typeof v === 'number' &&
-      v >= 0 &&
-      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
-    show: (v, f) => `差 ${v}px（格子 ${f['crystal.procAuditPaneH']}px / 视口 ${f['crystal.procViewportH']}）`,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.procDraftGap',
     label: '★★★ 过程格的**草稿过程**那一档同样贴着内容盒底',
     ok: (v, f) =>
@@ -4226,17 +3946,6 @@ const CHECKS = [
       v >= 0 &&
       v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
     show: (v, f) => `差 ${v}px（格子 ${f['crystal.procDraftPaneH']}px）`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.procAuditLogBoxH',
-    label:
-      '★★★ 审核过程里的**日志框**吃掉格子的一半以上——改之前日志框 51px、格子 457px（一条细条），这就是"高度没适应"的真身',
-    ok: (v, f) =>
-      typeof v === 'number' &&
-      typeof f['crystal.procAuditPaneH'] === 'number' &&
-      v >= Number(f['crystal.procAuditPaneH']) * 0.5,
-    show: (v, f) => `日志 ${v}px / 格子 ${f['crystal.procAuditPaneH']}px`,
   },
   {
     view: '沉淀',

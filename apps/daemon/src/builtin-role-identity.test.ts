@@ -40,9 +40,17 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
-  SKILL_REVIEWER_INSTRUCTIONS,
-  SKILL_REVIEWER_NAME,
 } from './builtin-drafter.ts'
+
+/**
+ * ★ 分批第 137 批（§12.42 第 ③ 步）：内置审核者随沉淀线的评审一起**下线**。
+ *
+ * 老工作区里那条 `role: 'skill-reviewer'` 的智能体仍是使用者的数据（平台不悄悄删），
+ * 所以这一组用例仍然要覆盖"它还在盘上时会发生什么"——只是现在用本地常量造出它的旧形状，
+ * 不再从 `builtin-drafter.ts` 导出一份已经删掉的默认身份。
+ */
+const LEGACY_REVIEWER_NAME = 'Skill 审核者（内置）'
+const LEGACY_REVIEWER_INSTRUCTIONS = '你是平台内置的审核者：只指出哪里不合格，不要重写产出。'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -99,17 +107,16 @@ describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪�
     assert.equal(builtinKindOf({ builtin: true, role: 'executor' }), null)
   })
 
-  test('★ 两条内置的默认值**不是同一套**（否则"恢复成默认值"就是把一条变成另一条）', () => {
+  test('★ 审核者已下线 ⇒ **没有默认值可恢复**（指令是空串，界面/路由据此拒绝）', () => {
     const drafter = builtinDefaultsOf('drafter')
-    const reviewer = builtinDefaultsOf('skill-reviewer')
     assert.equal(drafter.name, DRAFTER_NAME)
     assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
-    assert.equal(reviewer.name, SKILL_REVIEWER_NAME)
-    assert.equal(reviewer.instructions, SKILL_REVIEWER_INSTRUCTIONS)
-    assert.notEqual(drafter.name, reviewer.name)
-    assert.notEqual(drafter.instructions, reviewer.instructions)
-    // 说给人听的叫法也得分开：三处错误信息（不能进组/字段被锁/不能删）都拼它
-    assert.notEqual(drafter.label, reviewer.label)
+    const retired = builtinDefaultsOf('skill-reviewer')
+    // ★ 分批第 137 批：它的默认身份已随评审删除。"恢复成默认值"若拿空串写库，
+    //   那条智能体会被清空——比不恢复更坏，所以路由层（下一组用例）直接拒绝。
+    assert.equal(retired.instructions, '', '已下线的内置不该有可写的默认指令')
+    assert.match(retired.label, /已下线/, '说给人听的叫法要如实说我下线了')
+    assert.match(retired.label, /不再评审/)
   })
 })
 
@@ -117,7 +124,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
   test('★★★ 起草者的 `builtin` 标记丢了、而审核者排在前面 ⇒ 补的是**起草者**的标记', async () => {
     await withStore(async (store) => {
       // 顺序就是这条用例的全部意义：审核者先入库 ⇒ 从前 `find(builtin)` 直接撞上它
-      const reviewer = mkAgent('skill-reviewer', SKILL_REVIEWER_NAME, SKILL_REVIEWER_INSTRUCTIONS, true)
+      const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, LEGACY_REVIEWER_INSTRUCTIONS, true)
       const drafter = mkAgent('drafter', DRAFTER_NAME, DRAFTER_INSTRUCTIONS, false)
       await store.insertAgent(reviewer)
       await store.insertAgent(drafter)
@@ -132,7 +139,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
       assert.equal(after.find((a) => a.id === drafter.id)!.builtin, true, '起草者的标记要真的补上')
       assert.equal(
         after.find((a) => a.id === reviewer.id)!.instructions,
-        SKILL_REVIEWER_INSTRUCTIONS,
+        LEGACY_REVIEWER_INSTRUCTIONS,
         '审核者的指令一个字都不许动',
       )
       assert.equal(after.length, 2, '不许"补不出来就再建一条"（那样每次启动多一条）')
@@ -141,7 +148,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
 
   test('★★★ 审核者指令被清空 ⇒ 起草者的自愈**不许**把起草者指令写进审核者', async () => {
     await withStore(async (store) => {
-      const reviewer = mkAgent('skill-reviewer', SKILL_REVIEWER_NAME, '   ', true)
+      const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, '   ', true)
       await store.insertAgent(reviewer)
 
       const result = await ensureBuiltinDrafter(store, WS)
@@ -158,12 +165,14 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
       assert.ok(drafter, '起草者必须被建出来')
       assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
 
-      // 然后两条对账各修各的：审核者回到**它自己**的默认
+      // 然后内置对账再跑一遍：★ 分批第 137 批之后**只剩起草者**那条——
+      //   已下线的审核者**不会**再被"修"（它的默认身份已删；平台也不悄悄删/改使用者数据）。
       await ensureBuiltinAgents(store, WS)
       const final = await store.listAgents(WS)
       assert.equal(
         final.find((a) => a.role === 'skill-reviewer')!.instructions,
-        SKILL_REVIEWER_INSTRUCTIONS,
+        '   ',
+        '已下线的审核者不该被内置对账重新填指令（它没有默认指令了）',
       )
       assert.equal(final.find((a) => a.role === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS)
     })
@@ -215,47 +224,56 @@ async function agentsOf(url: string): Promise<AgentRow[]> {
   return body.agents
 }
 
-describe('接口层：内置的两条各按各的角色回答', () => {
-  test('★★★ 「恢复成默认值」按在那条**审核者**上 ⇒ 回到审核者的默认（不是变成起草者）', async () => {
-    await withDaemon(null, async (url) => {
-      const before = await agentsOf(url)
-      const reviewer = before.find((a) => a.role === 'skill-reviewer')
-      const drafter = before.find((a) => a.role === 'drafter')
-      assert.ok(reviewer && drafter, '启动之后两条内置都该在')
+describe('接口层：内置条目各按各的角色回答（审核者已下线）', () => {
+  /** 造一个带"老审核者"的工作区目录（模拟从旧版本升上来的使用者）。 */
+  async function seedLegacyReviewer(): Promise<{ dir: string; id: string }> {
+    const dir = await makeTempDir('builtin-role-retired')
+    const seed = await FileStore.open({ dataDir: dir, fsync: false })
+    const now = Date.now()
+    await seed.insertWorkspace({
+      id: WS as Workspace['id'],
+      name: '老工作区',
+      executeTemplate: '',
+      reviewTemplate: '',
+      chatTemplate: '',
+      defaultAgentId: null,
+      locale: 'zh',
+      createdAt: now,
+      updatedAt: now,
+    })
+    const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, LEGACY_REVIEWER_INSTRUCTIONS, true)
+    await seed.insertAgent(reviewer)
+    await seed.close()
+    return { dir, id: reviewer.id }
+  }
 
-      // 使用者把审核者的名字和指令都改坏了（第 ⑥ 条允许他改）
-      const patched = await fetch(`${url}/api/agents/${reviewer.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '我自己改的审核者', instructions: '改坏了' }),
-      })
-      assert.equal(patched.status, 200, await patched.text())
-
-      const res = await fetch(`${url}/api/agents/${reviewer.id}/restore-default`, { method: 'POST' })
+  test('★★★ 「恢复成默认值」按在**已下线的审核者**上 ⇒ 409 说清它下线了，一个字节都不写', async () => {
+    const seeded = await seedLegacyReviewer()
+    await withDaemon(seeded.dir, async (url) => {
+      const res = await fetch(`${url}/api/agents/${seeded.id}/restore-default`, { method: 'POST' })
       const text = await res.text()
-      assert.equal(res.status, 200, text)
-      const body = JSON.parse(text) as { agent: AgentRow }
-      assert.equal(body.agent.role, 'skill-reviewer', '角色不许被这条路由改掉')
-      assert.equal(body.agent.name, SKILL_REVIEWER_NAME, '恢复成**它自己**的默认名字')
-      assert.equal(body.agent.instructions, SKILL_REVIEWER_INSTRUCTIONS)
-      assert.notEqual(
-        body.agent.instructions,
-        DRAFTER_INSTRUCTIONS,
-        '恢复成起草者的指令 = 把审核者变成第二个起草者，而角色还写着 skill-reviewer',
-      )
-
-      // 起草者那边一个字都不该动
-      assert.equal((await agentsOf(url)).find((a) => a.role === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS)
+      // ★ 分批第 137 批：它的默认身份已随评审删除。"恢复成默认值"若写空串就是清空它——
+      //   那比不恢复更坏，所以如实拒绝并给出去处（可在智能体页删掉）。
+      assert.equal(res.status, 409, text)
+      const body = JSON.parse(text) as { code?: string; error: string }
+      assert.equal(body.code, 'builtin_retired')
+      assert.match(body.error, /已下线/)
+      assert.match(body.error, /不再评审/)
+      // 指令与名字一个字都没动
+      const after = (await agentsOf(url)).find((a) => a.id === seeded.id)!
+      assert.equal(after.instructions, LEGACY_REVIEWER_INSTRUCTIONS)
+      assert.equal(after.name, LEGACY_REVIEWER_NAME)
     })
   })
 
-  test('★★ 拒绝文案按**这条自己**的角色说（从前两处都硬写"起草者"）', async () => {
-    await withDaemon(null, async (url) => {
+  test('★★ 拒绝文案按**这条自己**的角色说（起草者 / 已下线的审核者各说各的）', async () => {
+    const seeded = await seedLegacyReviewer()
+    await withDaemon(seeded.dir, async (url) => {
       const agents = await agentsOf(url)
-      const reviewer = agents.find((a) => a.role === 'skill-reviewer')!
+      const reviewer = agents.find((a) => a.id === seeded.id)!
       const drafter = agents.find((a) => a.role === 'drafter')!
+      assert.ok(drafter, '启动时内置起草者要被建出来')
 
-      // ① 进智能体组
       for (const [agent, mustSay, mustNotSay] of [
         [reviewer, /审核者/, /起草者/],
         [drafter, /起草者/, /审核者/],
@@ -272,13 +290,6 @@ describe('接口层：内置的两条各按各的角色回答', () => {
         assert.match(error, mustSay, `文案该说清拦下的是「${agent.role}」：${error}`)
         assert.doesNotMatch(error, mustNotSay, `不许把另一条的名字安在它身上：${error}`)
       }
-
-      // ② 删除
-      const del = await fetch(`${url}/api/agents/${reviewer.id}`, { method: 'DELETE' })
-      const delText = await del.text()
-      assert.equal(del.status, 400, delText)
-      assert.match((JSON.parse(delText) as { error: string }).error, /审核者/)
-      assert.doesNotMatch((JSON.parse(delText) as { error: string }).error, /起草者/)
     })
   })
 

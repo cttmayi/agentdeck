@@ -243,11 +243,10 @@
           facts['agents.drafterRowBadge'] = drafterRow
             ? (drafterRow.querySelector('.badge')?.textContent ?? '').trim()
             : null
-          const skillAuditorRow = rowOf('Skill 审核者')
-          facts['agents.skillAuditorRowFound'] = !!skillAuditorRow
-          facts['agents.skillAuditorRowBadge'] = skillAuditorRow
-            ? (skillAuditorRow.querySelector('.badge')?.textContent ?? '').trim()
-            : null
+          // ★ 分批第 137 批：内置 skill 审核者已下线（沉淀线不再评审）⇒ 启动时只播种起草者。
+          //   "那一行在不在 / 徽标说什么"的测量连同内置审核者一起删除（功能没了，判据也该没了）。
+          facts['agents.skillAuditorRowFound'] = null
+          facts['agents.skillAuditorRowBadge'] = null
         }
         // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
         // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
@@ -5056,6 +5055,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               (el) => (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
             )
             facts['crystal.draftSectionFound'] = !!draftSection
+            // ⚠️ 「最后结果」是异步读回来的（`loadDraftFinalText`）⇒ 等它出现再量，
+            //    否则会量到 null、把"内容没吃满"判成布局缺陷（这一节挪到主屏之后才暴露）。
+            await until(() => !!draftSection?.querySelector('.draft-final'), 60)
             const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
             facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
             /**
@@ -5191,47 +5193,23 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //      ② 问题清单**数得出来**（`看 N 条问题`，点开真有 N 条）；
           //      ③ 两个出口都在：**按意见重新起草**（第 ② 条）+ **确认入库仍然可按**
           //         （第 ① 条：审核是预筛，不替人做决定——按钮灰掉就等于把预筛变成了闸）。
+          // ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删除。这一屏的夹具仍然叫
+          //   `crystalAuditFail`（盘上有历史审核数据的老工作区就长这样），但现在要证的是**相反**的
+          //   事：历史判决**不再出现在界面上**，结论条只说机械体检。
           const cyFail = cyQuery.get('crystalAuditFail')
-          facts['crystal.auditFailFixture'] = cyFail
-          facts['crystal.auditFailEntered'] = await cyEnter(cyFail)
-          if (facts['crystal.auditFailEntered']) {
-            const cyAuditBlock = d().querySelector('.conclusion-block')
-            facts['crystal.auditFailText'] = cyAuditBlock ? text(cyAuditBlock) : null
-            const cyFindingsBtn = cyAuditBlock
-              ? [...cyAuditBlock.querySelectorAll('button')].find((b) =>
-                  /看 \d+ 条问题/.test(text(b)),
-                )
-              : null
-            facts['crystal.auditFailFindingsButton'] = cyFindingsBtn ? text(cyFindingsBtn) : null
-            if (cyFindingsBtn) {
-              click(cyFindingsBtn)
-              // ★ 第 3 批：这个按钮不再是"展开折叠"，而是**切到「过程」tab**
-              //   ——断言它真的切过去了（不然按钮就成了摆设：点一下什么都不动）
-              facts['crystal.auditFailFindingsTab'] = await until(
-                () =>
-                  (text(d().querySelector('.review-tabs > button[aria-selected="true"]')) ?? '').startsWith('过程') &&
-                  !!d().querySelector('.audit-findings li'),
-                40,
-              )
-            }
-            facts['crystal.auditFailFindingCount'] = d().querySelectorAll('.audit-findings li').length
-            facts['crystal.auditFailSeverities'] = [
-              ...d().querySelectorAll('.audit-findings li .sev'),
-            ].map((e) => text(e))
-            // ══════════════════════════════════════════════════════════════
-            // ★★★ 意见框**打开时默认就填好审核者的反馈**（分批第 12 批，使用者纠正过一次）
-            // ══════════════════════════════════════════════════════════════
-            //
-            // 期望的形状（使用者原话）：「点"按意见重新起草"后，我期待**意见框里面默认填充了
-            // 审核者审核的反馈**」。所以这里的判据是"**一开框就有内容**"，而不是
-            // "先点一个专门用来填的按钮"——我第一版做成独立按钮（还改了名），
-            // 那多要了人一次点击，是错的形状，已经撤掉。
-            //
-            // 量四件事：① 开框即有内容（带理由码/位置/原文）；② 光标在框里；
-            // ③ 提交由人点（按钮在、可点）；④ **没有自己跑起来**（框与按钮都还在）。
-            // 外加一条最容易做错的：⑤ 人改过的字**不许**被覆盖。
+          facts['crystal.legacyFixture'] = cyFail
+          facts['crystal.legacyEntered'] = await cyEnter(cyFail)
+          if (facts['crystal.legacyEntered']) {
+            const cyBarText = text(d().querySelector('.conclusion-bar'))
+            facts['crystal.legacyBarText'] = cyBarText
+            // 结论条上：说体检、**不说**审核/判决（§12.15 代价 ③：入库不许声称"审过"）
+            facts['crystal.legacySaysCheck'] = /体检/.test(cyBarText ?? '')
+            facts['crystal.legacyNoAuditContent'] = !/审核|不通过|style_violation|问题清单/.test(
+              cyBarText ?? '',
+            )
+            // 历史判决的条目**不再渲染**（问题清单是审核的东西，审核删了它就该消失）
+            facts['crystal.legacyFindingsGone'] = d().querySelectorAll('.conclusion-block .audit-findings, .conclusion-block .findings').length === 0
 
-            // 换句话要派发 `input`：`bind:value` 靠它（只改 value 不生效）
             const cyToggle = [...d().querySelectorAll('button')].find((b) =>
               // ★ 分批第 17 批改名：「按意见再改一版」→「反馈」（使用者定稿"原则上应该叫反馈"）。
               //   判据量的是**那一个入口在不在**，所以跟着名字走；旧名字留在下面那条"不许存在"里。
@@ -5256,47 +5234,22 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const cyBoxOpen = await until(() => !!d().querySelector('.revise-row textarea'), 40)
             const cyBox = cyBoxOpen ? d().querySelector('.revise-row textarea') : null
             facts['crystal.redraftBoxOpened'] = cyBox !== null
-            facts['crystal.redraftFilled'] = cyBox ? cyBox.value : null
-            facts['crystal.redraftHasReasonCode'] = cyBox ? cyBox.value.includes('style_violation') : null
-            facts['crystal.redraftHasLocator'] = cyBox ? cyBox.value.includes('SKILL.md') : null
-            // 原文串取自夹具那条判决自己写的摘录（第一版我猜了一个串 ⇒ 判据红，
-            // 红的是判据不是产品：`原文：运行 marker.sh` 才是它真的写的东西）
-            facts['crystal.redraftHasExcerpt'] = cyBox ? cyBox.value.includes('运行 marker.sh') : null
-            // ⚠️ 焦点要问**它所在的文档**（`d()` 是 iframe 的 document）——第一版问的是顶层
-            //    `document.activeElement`，量出来永远是 false（焦点在 iframe 里）
+            // ★ 分批第 137 批：没有审核者 ⇒ 意见框**默认是空的**（意见完全由人写）。
+            facts['crystal.reviseEmptyByDefault'] = cyBox ? cyBox.value.trim() === '' : null
+            // ★ 分批第 137 批：没有"审核者的反馈"可预填 ⇒ 原来那组"框里默认有理由码/
+            //   位置/原文、人改过还保留"的测量随审核一起删除（预填功能已不存在）。
+            //   这里只保留"开框就有焦点"，那是**人工写意见**这条路的判据。
+            // ⚠️ 焦点要问**它所在的文档**（`d()` 是 iframe 的 document）
             facts['crystal.redraftFocused'] = cyBox ? d().activeElement === cyBox : null
-            // 这句话要说清"这段是哪来的"，不然人不知道框里为什么有东西
-            // ⚠️ 等一拍再读：Svelte 5 属性/文本写进 DOM 是在微任务里冲洗的（`title` 那次踩过）
-            await wait(150)
-            const cyPrefillHint = d().querySelector('.revise-row .faint')
-            facts['crystal.revisePrefilledHint'] = cyPrefillHint ? text(cyPrefillHint) : null
             const cySubmit = [...d().querySelectorAll('.revise-row button')].find((b) =>
               text(b).includes('反馈'),
             )
             facts['crystal.redraftSubmitEnabled'] = cySubmit ? !cySubmit.disabled : null
-            // 提交按钮**仍然在**、框**仍然在** ⇒ 说明开框只是填，没有自己跑起来
-            // （真跑起来这一屏会切到"起草中"，框和按钮一起消失）
+            // 提交按钮**仍然在**、框**仍然在** ⇒ 开框只是写，没有自己跑起来
             facts['crystal.redraftStillEditing'] = !!cyBox && !!cySubmit
-            // ── ⑤ 人改过的字不许被覆盖：改完收起、再打开，还是我改的那句 ──
-            if (cyBox) {
-              cyBox.value = '我自己写的意见'
-              cyBox.dispatchEvent(new Event('input', { bubbles: true }))
-              cyToggle?.click() // 收起
-              await wait(150)
-              cyToggle?.click() // 再打开
-              await wait(200)
-              const cyAgain = d().querySelector('.revise-row textarea')
-              facts['crystal.reviseKeepsHumanEdit'] = cyAgain ? cyAgain.value : null
-              // 收拾干净：把框收起来、内容清掉，别影响后面几节
-              if (cyAgain) {
-                cyAgain.value = ''
-                cyAgain.dispatchEvent(new Event('input', { bubbles: true }))
-              }
-              cyToggle?.click()
-              await wait(150)
-            } else {
-              facts['crystal.reviseKeepsHumanEdit'] = null
-            }
+            // 收拾干净：把框收起来，别影响后面几节
+            cyToggle?.click()
+            await wait(150)
             // 出口二：确认入库**没有**被判决灰掉（第 ① 条决定：审核不替代人）
             const cySave = [...d().querySelectorAll('button.primary')].find((b) =>
               text(b).includes('确认入库'),
@@ -5386,14 +5339,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 logBoxH: logRect ? Math.round(logRect.h) : null,
               }
             }
+            // ★ 分批第 137 批：审核过程子 tab 已删 ⇒ 这里只剩**草稿过程**那一格
+            //   （它照样要"贴着内容盒底"，那组判据本来就是量草稿格的）。
             const cyDraftProc = await cyProbePane('草稿过程', '[data-process-pane="draft"]')
             facts['crystal.procDraftPaneH'] = cyDraftProc.paneH
-            // 草稿过程那一格有三种合法形态：实时日志 / 最后结果 / 空态（这条 run 没有文字产出）。
-            // 空态不该被要求"填满格子"——它本身就是一句话；判据按形态分开（见 run.mjs）。
+            // ⚠️ 形态要**无条件**量（第一版只在 paneH===0 时量 ⇒ 判据拿到 undefined，
+            //    把"空态"误判成"有内容但没吃满"。这一屏的草稿确实没有文字产出 ⇒ 空态是对的）。
             {
               const pane = d().querySelector('[data-process-pane="draft"]')
               facts['crystal.procDraftState'] = !pane
-                ? null
+                ? 'missing'
                 : pane.querySelector('.log-box')
                   ? 'log'
                   : pane.querySelector('.draft-final')
@@ -5406,10 +5361,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
             facts['crystal.procDraftGap'] = cyDraftProc.gap
             facts['crystal.procDraftLogBoxH'] = cyDraftProc.logBoxH
-            const cyAuditProc = await cyProbePane('审核过程', '[data-process-pane="audit"]')
-            facts['crystal.procAuditPaneH'] = cyAuditProc.paneH
-            facts['crystal.procAuditGap'] = cyAuditProc.gap
-            facts['crystal.procAuditLogBoxH'] = cyAuditProc.logBoxH
             facts['crystal.procViewportH'] = facts['crystal.viewportH']
           }
 
@@ -5437,7 +5388,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               facts['crystal.manualBeforeButtons'] = [
                 ...d().querySelectorAll('.conclusion-block button'),
               ].map((b) => text(b))
-              facts['crystal.manualStaleBefore'] = !!d().querySelector('.stale-tag')
+              // ★ 分批第 137 批：没有审核结论 ⇒ 不该有"结论已过期"标记（那条判据删了）
 
               // 在编辑器里"打字"：Svelte 的 bind:value 听的是 input 事件
               const ta = d().querySelector('textarea.editor')
@@ -5452,10 +5403,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 text(b).includes('保存改动'),
               )
               if (saveBtn) click(saveBtn)
-              const staleShown = await until(() => !!d().querySelector('.stale-tag'), 120)
-              facts['crystal.manualStaleAfterSave'] = staleShown
-              facts['crystal.manualStaleText'] = text(d().querySelector('.stale-tag'))
-              facts['crystal.manualRetryAfterSave'] = cyHasText('重新审核')
+              // ★ 分批第 137 批："结论已过期 / 重新审核"随审核一起删除——
+              //   没有审核结论，也就没有"过期"；保存之后只该看**保存按钮消失**与**磁盘真的变了**。
+              await until(() => !cyHasText('保存改动'), 120)
               // 保存按钮自己应该**消失**了（没有未保存改动 ⇒ 它不该继续挂着）
               facts['crystal.manualSaveButtonGone'] = !cyHasText('保存改动')
               // ④ 真的写到了磁盘：重读 artifacts（它读的就是草稿小屋里的 `skill/`）
@@ -5468,143 +5418,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           }
 
-          // ══════════════════════════════════════════════════════════════
-          // ★★★ 审核**真的跑起来**那一屏（2026-10-21 使用者："审核的过程看不到，
-          //      感觉一直没结束呢"）
-          // ══════════════════════════════════════════════════════════════
-          //
-          // 这里**点界面上真的「开始审核」**：daemon 会真的 spawn 一个进程（PATH 前面那个
-          // 假 `agent-cli`，见 run.mjs 的 `writeFakeGenericCli`），它吐一行就挂着。
-          // 之所以非要真跑，是因为"插一条 running 的夹具 run"量到的是**假的绿**：
-          // daemon 重启时 `reconcileInterruptedRuns` 会把非终态 run 收口成 failed，
-          // 于是那一屏其实是"没跑成"那一屏，两条判据碰巧都成立。
-          // ★ 分批第 17 批：这一屏换用**独立单版**夹具 `crystalAuditLive`。
-          //   原来用 `crystalDraft`（首版）——首版现在是一个任务的历史版本，而"审核只对当前那一版
-          //   成立"的守则会（正确地）拒绝它 ⇒ 这一屏整片量不到。夹具内容与首版逐字相同，
-          //   所以这里量到的结论条数字不变。
-          facts['crystal.auditLiveEntered'] = await cyEnter(cyQuery.get('crystalAuditLive'))
-          if (facts['crystal.auditLiveEntered']) {
-            const startBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
-              text(b).includes('开始审核'),
-            )
-            facts['crystal.auditLiveStartButton'] = !!startBtn
-            if (startBtn) {
-              click(startBtn)
-              // ★ 第 3 批：日志住在「过程」tab 里，所以点「开始审核」必须**自动切过去**
-              //   ——否则人停在"草稿"上看到的是"什么都没发生"，正好回到第 ① 条那个毛病。
-              facts['crystal.auditAutoSwitchedToProcess'] = await untilNet(
-                () => (text(d().querySelector('.review-tabs > button[aria-selected="true"]')) ?? '').startsWith('过程'),
-              )
-              // ★ 分批第 19 批：外层切到「过程」还不够——「过程」里有两个子 tab，必须落在
-              //   **审核过程**。只切外层的话人会看到"草稿过程"那一格（起草日志），审核输出
-              //   一个字都没有 ⇒ 正好回到第 ③ 批那条"审核的过程看不到，感觉一直没结束"的老毛病。
-              await untilNet(() => !!d().querySelector('.process-subtabs button'))
-              facts['crystal.auditLiveSubTab'] = (() => {
-                const active = [...d().querySelectorAll('.process-subtabs button')].find((b) =>
-                  b.classList.contains('tabs-active'),
-                )
-                return active ? text(active) : null
-              })()
-              /**
-               * ⚠️ 分批第 29 批：这里要**主动切到「审核过程」**再量。
-               *
-               * 为什么：`processTab` 一旦被前面的小节点过（`processTabTouched = true`），
-               * 界面就**不再自动切**子 tab ⇒ 审核那一格压根不渲染 ⇒ `[data-process-pane="audit"]`
-               * 恒为 null。表现就是这条判据时红时绿（b27 绿、b29 绿、b29b 红，同一份代码）。
-               * 上一行已经量过"点开始审核后自动落在审核过程"，这里只补一次手动兜底，
-               * 判的是"日志真的在流"，不是"有没有自动切"。
-               */
-              {
-                const cySubAuditLive = [...d().querySelectorAll('.process-subtabs button')].find(
-                  (b) => text(b) === '审核过程',
-                )
-                if (cySubAuditLive && !cySubAuditLive.classList.contains('tabs-active')) {
-                  click(cySubAuditLive)
-                  await untilNet(() => !!d().querySelector('[data-process-pane="audit"]'), 60)
-                }
-              }
-              // ⚠️ 全段用 `untilDom`（不能用 `until`）：此刻 RunLog 的 SSE 开着，时钟不走
-              // ⚠️ 分批第 27 批：量**审核那一格**（`[data-process-pane="audit"]`），不是"页面里第一个"。
-              //    「依据」那一格也是 `.process-pane`，DOM 顺序在它前面 ⇒ 老写法恒量到 null，
-              //    判据红而界面没错（`crystal.auditLiveLogBox` 红了好几个批次就是这个原因）。
-              await untilNet(() => !!d().querySelector('[data-process-pane="audit"] .log-box'))
-              let block = d().querySelector('[data-process-pane="audit"]')
-              /**
-               * ⚠️ 分批第 29 批：这条判据**挪到"日志确实在流"之后再量**。
-               *
-               * 原来紧跟在"等 `.log-box` 出现"后面量：切子 tab 那一帧 Svelte 正在重建那一格，
-               * `untilNet` 看到元素的瞬间它可能刚被换掉 ⇒ `block.querySelector('.log-box')` 是 null。
-               * 实测症状就是同一条判据在同一天里红绿交替（b29 绿、b29b 红、补了切 tab 之后仍红），
-               * 而 `crystal.auditLiveLogText` 同一时刻**是有内容的** —— 红的从来不是界面。
-               * 现在放到两个"等到内容"的判据后面，那一刻盒子里已经有'正在跑'字样了。
-               */
-              // ⚠️ 两件事都要**等到**，不能量一次就算：
-              //   ① run 从 `queued`/`dispatched` 走到 `running` 需要时间——第一版在这里
-              //      量到的是"排队中"，判据红了，而界面没错（真现场就是还在排队）。
-              //   ② 假 CLI 吐的那行要经 daemon 解析、再经 SSE 送到页面。
-              //   等待全部走 `untilNet`（SSE 开着时时钟不走，`until` 会挂死）。
-              await untilNet(() => text(d().querySelector('.conclusion-block .badge')) === '运行中', 400)
-              await untilNet(
-                () =>
-                  (d().querySelector('[data-process-pane="audit"] .log-box')?.textContent ?? '').includes('正在跑'),
-                400,
-              )
-              block = d().querySelector('[data-process-pane="audit"]')
-              const liveBar = d().querySelector('.conclusion-block')
-              facts['crystal.auditLiveText'] = liveBar ? text(liveBar) : null
-              facts['crystal.auditLiveLogText'] = block ? text(block.querySelector('.log-box')) : null
-              facts['crystal.auditLiveLogBox'] = !!(block && block.querySelector('.log-box'))
-              facts['crystal.auditLiveBadge'] = liveBar ? text(liveBar.querySelector('.badge')) : null
-              const cancelBtn = liveBar
-                ? [...liveBar.querySelectorAll('button')].find((b) => text(b).includes('取消审核'))
-                : null
-              facts['crystal.auditLiveCancelButton'] = !!cancelBtn
-              if (cancelBtn) {
-                click(cancelBtn)
-                // 取消是**异步**的（要等进程真的死掉、run 落到终态）⇒ 等界面改口（走 DOM，不走时钟）。
-                // ⚠️ 这里**不许赌某句文案**：第一版等的是「审核正在进行」，而第 2 批把结论条上
-                //    那句改成了「审核运行中」（"审核正在进行"那半句搬进了「过程」里的说明段）
-                //    ⇒ 等待条件**恒真**、量早了一拍，量到一个"还在取消中"的现场，判据红了而界面没错。
-                //    改成等**取消按钮消失**：它才是"这一轮审核结束了"的界面事实。
-                await untilNet(
-                  () =>
-                    ![...(d().querySelector('.conclusion-block')?.querySelectorAll('button') ?? [])].some(
-                      (b) => text(b).includes('取消审核'),
-                    ),
-                  300,
-                )
-                const after = d().querySelector('.conclusion-block')
-                const afterButtons = after ? [...after.querySelectorAll('button')].map(text) : []
-                facts['crystal.auditAfterCancelText'] = after ? text(after) : null
-                facts['crystal.auditAfterCancelStillRunning'] = afterButtons.some((t) =>
-                  t.includes('取消审核'),
-                )
-                facts['crystal.auditAfterCancelRetry'] = afterButtons.some((t) =>
-                  t.includes('重新审核'),
-                )
-              }
-              // ★ 兜底：**保证这条 SSE 关掉**，否则后面整页的时钟都不走
-              //   （取消没成功、或 240 次 DOM 变化都没等到，就靠切路由把组件卸载掉）。
-              f.contentWindow.location.hash = '#/tasks'
-              // 等这次路由切换真的生效（用网络往返当节拍：此刻时钟还是冻着的）
-              await untilNet(() => !d().querySelector('.conclusion-block'), 20)
-            }
-          }
+          // ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删除 ⇒
+          //   "审核真的跑起来"（实时日志/取消/重试）与"审核没跑成"（卡死兜底文案）这两屏
+          //   连同夹具（`crystalAuditLive` / `crystalAuditDead`）一起删除。
+          //   被删的是**功能本身**，它们的判据也一起删（§12.42 第 ③ 步）。
 
-          // ★★★ 审核**没跑成**那一屏 —— 这一节最要紧的一条（原来它永远显示"审核中"）。
-          const cyDead = cyQuery.get('crystalAuditDead')
-          facts['crystal.auditDeadEntered'] = await cyEnter(cyDead)
-          if (facts['crystal.auditDeadEntered']) {
-            const block = d().querySelector('.conclusion-block')
-            facts['crystal.auditDeadText'] = block ? text(block) : null
-            facts['crystal.auditDeadSaysRunning'] = block
-              ? /审核正在进行|跑完再看这里/.test(text(block))
-              : null
-            facts['crystal.auditDeadRetry'] = !!(block &&
-              [...block.querySelectorAll('button')].some((b) => text(b).includes('重新审核')))
-          }
-
-          // ══════════════════════════════════════════════════════════════
           // ══════════════════════════════════════════════════════════════
           // ★★★ 「优化一条智能体的指令」的审阅屏（2026-10-25 第 38 批）
           // ══════════════════════════════════════════════════════════════

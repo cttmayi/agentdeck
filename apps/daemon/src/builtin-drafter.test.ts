@@ -23,14 +23,8 @@ import {
   DRAFTER_INSTRUCTIONS,
   DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
-  SKILL_REVIEWER_INSTRUCTIONS,
-  SKILL_REVIEWER_INSTRUCTIONS_V1,
-  SKILL_REVIEWER_INSTRUCTIONS_V2,
-  SKILL_REVIEWER_INSTRUCTIONS_V3,
-  SKILL_REVIEWER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
-  ensureBuiltinReviewer,
 } from './builtin-drafter.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -131,80 +125,12 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(drafters[0]!.builtin, true)
   })
 
-  test('★★ 内置的 skill 审核者：角色是 `skill-reviewer`（**不是** `reviewer`）', async () => {
-    const result = await ensureBuiltinReviewer(store, WS)
-    assert.equal(result.action, 'created')
-    const reviewer = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')
-    assert.ok(reviewer)
-    assert.equal(reviewer.builtin, true)
-    assert.equal(reviewer.name, SKILL_REVIEWER_NAME)
-    assert.equal(reviewer.instructions, SKILL_REVIEWER_INSTRUCTIONS)
-    assert.equal(reviewer.runtimeKey, 'default')
-    assert.deepEqual(reviewer.skillIds, [])
-    // ★ 这一条是**为什么不能用 'reviewer'** 的判据：业务报告的路由按
-    //   `role === 'reviewer'`（`packages/domain/src/routing/kind.ts`）挑人 ——
-    //   给它 `'reviewer'` 它就会去审业务报告（进了闭环），而它的指令是"审 skill"。
-    assert.notEqual(reviewer.role, 'reviewer')
-  })
-
-  test('★ 审核者同样：使用者改过的指令活过下一次对账、指令空 ⇒ 自愈', async () => {
-    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    await store.insertAgent({ ...mine, instructions: '我们团队审 skill 的额外要求。' })
-    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'left-alone')
-    assert.equal(
-      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
-      '我们团队审 skill 的额外要求。',
-    )
-
-    const emptied = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    await store.insertAgent({ ...emptied, instructions: '  ' })
-    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'healed')
-    assert.equal(
-      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
-      SKILL_REVIEWER_INSTRUCTIONS,
-  SKILL_REVIEWER_INSTRUCTIONS_V1,
-    )
-  })
-
-  test('★★ 平台换了审核方向：**老默认**逐字在 ⇒ 升级；使用者自己写的 ⇒ 一个字都不动', async () => {
-    // 为什么这两条必须成对测：升级与"不覆盖使用者改动"只差一个判据——"是不是**平台自己的**
-    // 老文本"。写成"与当前默认不同就升级"，每次启动都会把使用者写的判据换成平台的
-    // （表现："我改的指令过一会儿就变回去了"，很像界面没保存）；写成"只比对新旧常量"，
-    // 老工作区又永远升不上来（表现："判据明明改了，审起来还是老样子"，而日志一个字都不提）。
-    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-
-    // ① 老默认 ⇒ 升级，且说清为什么
-    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V1 })
-    const upgraded = await ensureBuiltinReviewer(store, WS)
-    assert.equal(upgraded.action, 'healed')
-    if (upgraded.action === 'healed') assert.match(upgraded.why, /旧版/)
-    assert.equal(
-      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
-      SKILL_REVIEWER_INSTRUCTIONS,
-  SKILL_REVIEWER_INSTRUCTIONS_V1,
-    )
-
-    // ② 使用者在老默认上改过一个地方 ⇒ 从此不再动它（连升级也不许）
-    const edited = SKILL_REVIEWER_INSTRUCTIONS_V1.replace('你只指出哪里不合格', '你还要给出改法')
-    assert.notEqual(edited, SKILL_REVIEWER_INSTRUCTIONS_V1, '这个用例依赖"真的改了一个地方"')
-    await store.insertAgent({ ...mine, instructions: edited })
-    assert.equal((await ensureBuiltinReviewer(store, WS)).action, 'left-alone')
-    assert.equal(
-      (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!.instructions,
-      edited,
-    )
-  })
-
-  test('★★ `ensureBuiltinAgents` 两个都建，且**各一条**（不会按 `builtin` 一把抓）', async () => {
+  test('★★ `ensureBuiltinAgents` 建起草者（分批第 137 批起只剩这一条内置）', async () => {
     const out = await ensureBuiltinAgents(store, WS)
     assert.equal(out.drafter.action, 'left-alone')
-    assert.equal(out.reviewer.action, 'left-alone')
-    // ⚠️ 这一行要的是**所有内置**（标记为判据），再按角色分类数数——不是"挑起草者"，
-    //    所以这里保留 `builtin === true`（我批量改成按角色时把这条也改了，红检当场抓到：
-    //    `builtin` 只剩起草者 ⇒ 审核者那行数到 0）。
+    // ★ 分批第 137 批：内置审核者随沉淀线的评审一起删除 ⇒ 这里不再断言它被建出来。
     const builtins = (await store.listAgents(WS)).filter((a) => a.builtin === true)
     assert.equal(builtins.filter((a) => a.role === 'drafter').length, 1)
-    assert.equal(builtins.filter((a) => a.role === 'skill-reviewer').length, 1)
   })
 
   test('别的 agent（普通执行者/审核者）不受影响，也不会被当成起草者', async () => {
@@ -227,45 +153,6 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
   })
 })
 
-describe('ensureBuiltinReviewer：同一套纪律 + 历史默认升级', () => {
-  /**
-   * ★★★ 分批第 31 批：审核者同一类陈旧（真机 838 字 = 第 20 批默认，不是使用者改的）。
-   *
-   * 这条用例钉的是"历史表要把**每一个**旧默认都记着"：只记 V1 的话，
-   * 第 20 批之后的默认就成了"谁也认不出来的孤儿"，第 26 批加的第五件事永远到不了审核者。
-   */
-  /**
-   * ★★ 分批第 35 批：历史表的第三个版本（1048 字，第 26 批之后那版）。
-   *
-   * 这条钉的是"每改一次默认指令都要把旧的那份记下来"这个纪律本身——第 31 批漏了 V2，
-   * 结果真机上那 838 字的审核者永远升不上来。V3 是第 35 批改身份首句时冻进来的。
-   */
-  test('★★ 审核者停在**第 26 批默认**（1048 字）⇒ 也要升级（历史表要一路记着）', async () => {
-    const all = await store.listAgents(WS)
-    if (!all.some((a) => a.role === 'skill-reviewer')) {
-      await ensureBuiltinReviewer(store, WS)
-    }
-    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V3 })
-
-    const result = await ensureBuiltinReviewer(store, WS)
-    assert.equal(result.action, 'healed', '1048 字那版必须是已知历史版本')
-    const after = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    assert.equal(after.instructions, SKILL_REVIEWER_INSTRUCTIONS)
-  })
-
-  test('★★★ 审核者停在**第 20 批默认** ⇒ 也要升级（历史表缺一个旧默认就等于永远不升级）', async () => {
-    const all = await store.listAgents(WS)
-    const reviewer = all.find((a) => a.role === 'skill-reviewer')
-    if (!reviewer) {
-      await ensureBuiltinReviewer(store, WS)
-    }
-    const mine = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    await store.insertAgent({ ...mine, instructions: SKILL_REVIEWER_INSTRUCTIONS_V2 })
-
-    const result = await ensureBuiltinReviewer(store, WS)
-    assert.equal(result.action, 'healed', '第 20 批默认必须是已知历史版本')
-    const after = (await store.listAgents(WS)).find((a) => a.role === 'skill-reviewer')!
-    assert.equal(after.instructions, SKILL_REVIEWER_INSTRUCTIONS)
-  })
-})
+// ★ 分批第 137 批（§12.42 第 ③ 步）：`ensureBuiltinReviewer` 与审核者的默认指令一起删除
+//   （沉淀线不再评审）。这一整组"审核者自愈 / 历史默认升级"用例随之删掉——被删的代码路径
+//   留着测试只会变成"测一个不会发生的函数"。

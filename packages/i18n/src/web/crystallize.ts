@@ -79,101 +79,26 @@ export const crystallizeText = {
   // ── 步骤条 ──
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
   'crystallize.stepDraft': { zh: '起草 run', en: 'Draft run' },
-  // §10.5 第 ⑤ 步：起草之后多了一步「审核」（内置审核者的预筛）。
-  //  ⚠️ 文案要区分"审核"与"审阅入库"：前者是平台的预筛（结论），后者是人拍板入库。
-  //     两个都叫"审"时，使用者会以为"审核通过了就是入库了"。
-  // ★ 2026-10-21：原来的 `auditTitle`（「审核结论（预筛）」）没有使用者了——结论条上直接写
-  //   「审核通过（预筛）」，标题那层壳去掉（它自占一行 h3 + 上下间距）。删键不留死词条。
-  'crystallize.auditPrescreen': { zh: '预筛', en: 'pre-screen' },
+  // ── 机械体检（分批第 137 批：§12.15「不要评审，只要体检」的界面说法）──
+  //  ⚠️ 措辞不许说"审核/通过（审核意义上）"：入库时只能声称"只过了机械体检（N 项）"（§12.15 代价 ③）。
+  'crystallize.checkTitle': { zh: '机械体检', en: 'mechanical check' },
+  'crystallize.checkPassed': { zh: '体检通过', en: 'Check passed' },
+  'crystallize.checkProblems': {
+    zh: '体检发现 {n} 处问题',
+    en: 'Check found {n} problem(s)',
+  },
+  'crystallize.checkShowDetail': { zh: '看体检明细', en: 'See check details' },
   // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
   'crystallize.newVersionHint': { zh: '这条沉淀有了新一版（你正在编辑，没有自动切过去）', en: 'This crystallization has a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
   // 分批第 29 批：草稿这一版还在跑 ⇒ 显示实时日志（原来默认显示"最后结果"= 上一版的旧文本）
   'crystallize.draftLiveHint': { zh: '这一版还在跑，下面是实时日志', en: 'This version is still running; live log below' },
-  'crystallize.auditRunningShort': { zh: '审核运行中', en: 'Audit running' },
-  // 2026-10-21：说明段收进按钮悬停，条上只留四个字（原来那段占 42px 两行）
-  'crystallize.auditNotYetBrief': { zh: '还没审核过', en: 'Not audited yet' },
-  // 2026-10-21：这段从**条上的段落**搬进了「开始审核」的悬停提示（段落占 42px 两行，
-  // 而它是解释不是结论）。搬运时把"预筛"这个词补了进来——原来段落里只有"不替你做入库
-  // 决定"，而结论条上写的是「审核通过（预筛）」：两处说的得是同一件事。
-  'crystallize.auditNotYet': {
-    zh: '这份草稿还没审核过。审核是一个内置智能体按"能不能用"过一遍，给出结论与问题清单——它是预筛，不替你做入库决定。',
-    en: 'This draft has not been audited yet. The audit is a built-in agent checking whether the skill is usable; it does not decide the save for you.',
-  },
-  'crystallize.auditStart': { zh: '开始审核', en: 'Start audit' },
-  // ⚠️ 2026-10-21 改文案：原来写的是"审核中…（跑完再看这里）"——而那时候界面上
-  //    **没有任何东西可看**（不显示日志、不显示状态、失败也不说），使用者的原话是
-  //    "审核的过程看不到，感觉一直没结束呢"。现在实时输出就在下面，所以这句话改成
-  //    **指路**（告诉人下面是什么），而不是让人去别处等。
-  'crystallize.auditRunning': {
-    zh: '审核正在进行，下面是它的实时输出（跑完这里会自动换成结论）。',
-    en: 'The audit is running; its live output is below (this switches to the verdict when it finishes).',
-  },
-  'crystallize.auditCancel': { zh: '取消审核', en: 'Cancel audit' },
-  'crystallize.auditRetry': { zh: '重新审核', en: 'Audit again' },
-  'crystallize.auditRunFailed': {
-    zh: '审核没跑成（状态：{status}）。下面是它的日志——看清原因再决定要不要重来。',
-    en: 'The audit run did not finish (status: {status}). Its log is below — read why before retrying.',
-  },
-  'crystallize.auditNoVerdict': {
-    zh: '审核跑完了，但没有留下可用的判决（判决不合规或收口时出错）。这一步等于白跑，请重来一次或看下面的日志。',
-    en: 'The audit finished but left no usable verdict (malformed verdict or a settle failure). This step was wasted — retry it, or read the log below.',
-  },
-  'crystallize.auditShowLog': { zh: '看审核日志', en: 'Show audit log' },
-  'crystallize.auditPass': { zh: '通过', en: 'Passed' },
-  'crystallize.auditFail': { zh: '不通过', en: 'Failed' },
-  'crystallize.auditNeedsHuman': { zh: '无法判定（判决不合规）', en: 'Undecided (malformed verdict)' },
-  'crystallize.auditShowDetail': { zh: '看 {n} 条问题', en: 'Show {n} issue(s)' },
   'crystallize.saveDraft': { zh: '保存改动', en: 'Save changes' },
   'crystallize.saveDraftDone': { zh: '已保存到草稿（审核还没看到它）', en: 'Saved (the audit has not seen this yet)' },
   'crystallize.saveDraftHint': {
     zh: '把改动写回草稿目录——审核者读的是磁盘上那一份，不保存它看不到',
     en: 'Write the edits back to the draft directory — the reviewer reads that file',
   },
-  'crystallize.auditRetryNeedsSave': {
-    zh: '先保存改动：现在重审的是磁盘上那一版，会把你没保存的改动漏掉',
-    en: 'Save first: re-running now would audit the version on disk, not your edits',
-  },
-  'crystallize.auditStale': {
-    zh: '内容已改 —— 这个结论是改之前的，要它算数得重新审一轮。',
-    en: 'Content changed — this result is from before the change; re-run the audit to make it count.',
-  },
-  // ★ 分批第 12 批：原来那个「按意见重新起草」按钮（点了**立刻提交**）**已撤掉** ——
-  //   现在点「按意见再改一版」开框时，框里**默认就填好**审核者的反馈（见
-  //   `CrystallizeView.svelte` 的 `toggleReviseBox`）。同一个动作不再有两个入口。
-  'crystallize.revisePrefilledHint': {
-    zh: '已按审核者的反馈填好（带位置与原文）—— 可以改，改完点「反馈」。',
-    en: 'Prefilled from the reviewer’s findings (with locations and source text). Edit it, then click “Give feedback”.',
-  },
-  // ★ 填进意见框的那段话（结构与 daemon 的 `draftReviewFeedback` 对齐，见
-  //   `apps/web/src/lib/crystallize-feedback.ts` 顶部的说明）。
-  //
-  // ⚠️ 唯一有意的差别：这里**不带 markdown 记号**（`**` / 反引号）。界面文案不许带记号的守卫
-  //    是对的——它渲染在输入框里，`**逐条**` 会**原样**显示给人看。daemon 那份带记号是因为它
-  //    只进 `feedback.md` 给 agent 读。所以两边"结构逐条对齐、记号不必对齐"。
-  'crystallize.feedbackIntro': {
-    zh: '审核不通过（理由码：{code}）。这一版请逐条对着下面每一条改：',
-    en: 'The audit did not pass (reason code: {code}). For this version, fix each item below:',
-  },
-  'crystallize.feedbackWhere': { zh: '位置：', en: 'Where: ' },
-  'crystallize.feedbackQuote': { zh: '原文：', en: 'Source: ' },
-  'crystallize.feedbackNoEvidence': {
-    zh: '（审核者没给位置，请自己找：这一条只说了现象。）',
-    en: '(The reviewer gave no location — find it yourself; this item only names the symptom.)',
-  },
-  'crystallize.feedbackEmptyFindings': {
-    zh: '（审核者没有给出条目清单，请按上面的理由码判断该改什么；不要动无关部分。）',
-    en: '(The reviewer listed no items — judge from the reason code above what to change; leave the rest alone.)',
-  },
-  'crystallize.feedbackOutro': {
-    zh: '改完把改过的文件写回 skill/ 目录（完整文件，不是补丁）；没改的文件不必重写。',
-    en: 'Write the changed files back to the skill/ directory (complete files, not patch fragments); unchanged files need not be rewritten.',
-  },
-  'crystallize.auditExhausted': {
-    zh: '自动返工的次数已用完 —— 要不要再来一版、或者就这样入库，由你决定。',
-    en: 'Automatic re-drafts are used up — decide whether to try another version or save as is.',
-  },
-  'crystallize.auditNotRun': { zh: '审核没有跑成：{reason}', en: 'The audit did not run: {reason}' },
   'crystallize.stepReview': { zh: '审阅入库', en: 'Review & save' },
 
   // ── 沉淀目标（目标态） ──
@@ -305,17 +230,7 @@ export const crystallizeText = {
   // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──
   'crystallize.tabDraft': { zh: '草稿', en: 'Draft' },
   'crystallize.tabEvidence': { zh: '依据', en: 'Evidence' },
-  // ★ 分批第 19 批：「过程」那一格原来把**审核问题清单 + 审核日志 + 起草 run** 竖着摞在一起
-  //   （使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"）⇒ 劈成两个子 tab。
-  'crystallize.tabProcessDraft': { zh: '草稿过程', en: 'Drafting' },
-  'crystallize.tabProcessAudit': { zh: '审核过程', en: 'Audit' },
   'crystallize.tabProcess': { zh: '过程', en: 'Process' },
-  // 起草中那一屏只有两个 tab：产出（run 的实时输出）/ 依据（目标 + 素材）
-  'crystallize.auditFindingsTitle': { zh: '审核问题清单', en: 'Audit findings' },
-  'crystallize.processNoAuditYet': {
-    zh: '还没审核过，所以这里只有起草 run。',
-    en: 'Not audited yet, so only the draft run is here.',
-  },
   'crystallize.evidenceHead': {
     zh: '起草者读过的素材（它按需读的就是这些文件）',
     en: 'The material the drafter read (it reads these on demand)',

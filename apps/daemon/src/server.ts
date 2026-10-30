@@ -116,7 +116,6 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
-  ensureBuiltinReviewer,
   findBuiltinAgent,
 } from './builtin-drafter.ts'
 import {
@@ -137,9 +136,7 @@ import {
 import {
   assembleArtifacts,
   draftVersionSkillDir,
-  hashDraftDir,
   parseSkillMd,
-  readAuditStamp,
   readDraftVersions,
   // ★ 分批第 22 批：剔掉版本表里"别的链"的条目（真机上 `9D67DN` 的目录里混着 `H5YM0E` 的 4 条）
   dropForeignVersions,
@@ -152,7 +149,6 @@ import {
   writeHumanEditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
-  writeAuditStamp,
   writeDraftSkillFiles,
 } from './crystallize-artifacts.ts'
 // ★ 分批第 22 批：链条只认 `revisedFrom`（四处口径统一到一个地方）。
@@ -2537,9 +2533,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
      * **由人决定**，不由钩子替人决定。第 124 批先加开关（默认仍开）、第 127/128 批把用例
      * 改成新语义，本批翻默认并**删掉那个开关**——迁移脚手架留着就是死接口。
      *
-     * ⚠️ 短路的是"自动"，**手动入口一个字没动**：`POST /api/crystallize/review`（界面上
-     *    「开始审核」）照旧起审核，`startDraftAudit` 那条链（定检、指纹、闸门、返工）都还走它。
-     *    机械体检也不在这里（§12.15 是"不要评审，只要体检"——体检是替代品，不是被删对象）。
+     * ⚠️ 分批第 137 批（§12.42 第 ③ 步）**连手动入口一起删了**：沉淀线不再有评审
+     *    （`POST/GET /api/crystallize/review`、内置审核者、审核任务书全部删除），只剩
+     *    机械体检（§12.15："不要评审，只要体检"——体检是替代品，不是被删对象）。
      *
      * ⚠️ 为什么保留这个分支、不让它落到下面那段"谁审"逻辑：起草 run 的 `reviewerAgentId`
      *    是**显式 `null`**（起草路由里写死），落到下面会打一句「这次任务在新建时选择了
@@ -2739,365 +2735,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const workspaceId = await bootstrap(store, info)
 
   // ══════════════════════════════════════════════════════════════════
-  // 「起一轮审核」的唯一实现（分批第 9 批抽出来）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ 必须放在**这一层**（与 `autoChainReview` 同层），不能留在请求处理函数里：
-  //    自动再审那个入口在 `autoChainReview` 里，它看不见更深那一层的声明——第一版我把它
-  //    写在原来路由的位置（处理函数内），tsc 当场报 `Cannot find name 'startDraftAudit'`。
-  //    内层能看见外层，反之不行。
-
   /**
-   * 起草审核的第一句话（分批第 9 批从路由里抽出来）。
+   * ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的**评审**整条删除。
    *
-   * 抽出来的原因很具体：**起一轮审核**这件事现在有两个入口——使用者点「开始审核」（HTTP 路由）
-   * 与"改版来的新草稿跑完"（`autoChainReview` 里的自动再审）。两处各写一份提示词，
-   * 迟早分叉，而分叉的表现是"自动审的那轮没有说'真的跑一遍脚本'"这类**看不见的降级**。
+   * 这里原来放着「起一轮审核」的唯一实现（`startDraftAudit`）与两份审核任务书
+   * （`draftAuditPrompt` / `agentDraftAuditPrompt`）。§12.15 定的是"不要评审，只要机械体检"，
+   * 而机械体检（`validateArtifactFiles`，在 `/api/crystallize/artifacts` 里）一直在——
+   * 它是替代品，不在这批删除之列。
+   *
+   * 删除清单：`POST/GET /api/crystallize/review`（手动入口与结论读接口）、内置 `skill-reviewer`
+   * 智能体与它的沉淀专属契约、内容指纹（`writeAuditStamp` / `hashDraftDir` → 只服务"结论过期"）。
+   * **任务线**的审核（`createRunForReviewer` + `autoChainReview` 的 `reviewerAgentId` 分支）
+   * 一个字没动。
    */
-  function draftAuditPrompt(allowScriptRun: boolean): string {
-    return [
-      `审一条刚起草出来的 skill。草稿在 \`skill/\`（就在本工作目录里），它的依据是 \`material/\`。`,
-      '',
-      '【怎么做】',
-      '1. 读 `skill/SKILL.md` 与它引用的支持文件（`references/`、`scripts/`、`templates/`）。',
-      // ★ 分批第 20 批：可机械判定的那部分由**平台**先跑完了（确定性、不花额度），
-      //   审核者拿到的是一份事实清单。不指名它的后果是"两方各查一遍"：既浪费额度，
-      //   又会出现"平台说通过、审核者按自己的落脚点报不通过"这种自相矛盾的判决。
-      //   ⚠️ 必须一起说清"没查 ≠ 通过"，否则机器缺 python3 时它会以为语法没问题。
-      '1b. 平台已经在起这次审核之前跑过一轮**定检**，结果在 `material/exec-check.md`：' +
-        '脚本语法（只解析，不执行）、引用的文件在不在、骨架、占位符有没有解释过、有没有吞掉错误的写法。' +
-        '**先读它，把它当已知事实**，不要重复查那几项；你的力气留给它查不出来的地方：' +
-        '命令块的参数与输入形态、反规避（为了跑通而让命令不再做那件事）、步骤衔接。' +
-        '标「没查」的项**没有结论**，不许当成通过。',
-      '2. 需要判断"这一步有没有依据"时回查 `material/` 里的原始记录，**不要凭印象**。',
-      // ★ 分批第 10 批：位置要**能直接找到**。返工那一版拿这份意见去改上一版，
-      //   而"改哪儿"只有两样东西说得清：位置（文件 + 行号/小节）+ 那一处的原文。
-      //   ⚠️ 行号是**软**信息（模型数出来的可能差一两行）⇒ 摘录必须一起给：
-      //   位置 + 原文才是可执行的（只有位置会找错行，只有原文不好定位）。
-      '3. 问题要给**具体位置**与**理由**，不要只说"不够好"。位置写成 `文件:行号`' +
-        '（例如 `SKILL.md:12`）或 `文件#小节标题`（例如 `SKILL.md#When to Use`），' +
-        '并在 `evidence.excerpt` 里附上**那一处的原文**（照抄，不要转述）。',
-      // ★ §10.5 第 ③ 条：审核者可以**真的跑一遍**草稿里的脚本（这是这一整条链最有价值的
-      //   检查——"脚本能不能执行"看是看不出来的）。它跑得起来的地基有两层，都已存在：
-      //   ① claude 跑在 `--permission-mode bypassPermissions`（runtime 描述表的 baseArgs）；
-      //   ② D76 的运行期钩子只拦**越界**（`..` / `~` / 工作目录外的绝对路径），
-      //      小屋内部相对路径的 `bash skill/scripts/x.sh` 是允许的。
-      //   ⚠️ 关掉开关时要说"**不要执行**"，不能只是不写这一段 —— 权限还在，它可能照跑；
-      //      而如果它没跑却写下"已执行通过"，那份判决就是假证据。
-      ...(allowScriptRun
-        ? [
-            '4. **把 `skill/scripts/` 里的脚本真的跑一遍**（你可以执行命令，草稿就在当前工作目录里）：',
-            '   先用相对路径跑（例如 `bash skill/scripts/xxx.sh`），需要参数就给临时文件；',
-            '   **只在这个工作目录里活动**（不要 `cd ..`、不要碰家目录、不要写目录外的绝对路径）。',
-            '   结果如实写进判决的 `evidence`：命令、退出码、真实输出。跑不起来就说跑不起来，',
-            '   **不要猜它能跑**——"脚本能不能执行"正是这一步最有价值的结论。',
-          ]
-        : [
-            '4. **不要执行脚本**（这个工作区关掉了"审核者真执行草稿脚本"）：只做静态检查，',
-            '   并在判决里如实写明"脚本未被执行"——**不许**写"已执行通过"这类没发生过的结论。',
-          ]),
-      '',
-      '【产出】',
-      // 判决格式**不在这里重复一遍**：围栏标记与键名由平台放在审核那一路的第一句话里
-      // （`VERDICT_FENCE_BEGIN` 是唯一出处）。这里重抄一份的话，两边迟早会分叉，
-      // 而分叉的表现是"判决块解析不了 ⇒ 记成 needs_human"，看不出是提示词不一致。
-      '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
-      '`reasonCode` 用一条简短的理由码（比如 `missing_when_to_use`、`script_broken`、`no_evidence`）；',
-      '`evidence.locator` 写 `文件:行号` 或 `文件#小节`；`evidence.excerpt` 写那一处的原文。' +
-        '（拿不准行号就给小节标题——位置 + 原文一起，人才改得对。）',
-      '⚠️ 判决块缺了或 JSON 写坏，平台只会记一条"判决不合规"（`needs_human` + `internal_error`）',
-      '——那个状态看起来像"审核没做"，看不出是格式问题，所以宁可多花一步把格式写对。',
-      '**不要重写 skill 的正文**——重写是起草者的事，你只指出哪里不合格。',
-    ].join('\n')
-  }
-
-  /**
-   * 起草审核的第一句话——**审一条智能体的指令**那一套（分批第 35 批）。
-   *
-   * 使用者 2026-10-25 定的口径：沉淀成 Agent = 只优化那条智能体的指令，判据也换成
-   * "这份指令能不能让它下次把这类活干对"。所以判据与 skill 那一套**完全不同**，
-   * 而且有三条是这条链独有的：
-   *
-   *   ① **6000 字符硬闸门**（使用者选的"超了就判不通过"）：不是因为写得长就是错，
-   *      而是指令会整份进这条智能体每次 run 的第一句话（D29）——太长会挤掉任务本身、
-   *      稀释重点、让每次 run 更贵更慢；
-   *   ② **无证据时只许收敛措辞**（使用者选的"允许，但审核更保守"）：这次没有失败、
-   *      没有审核不通过、也没有明确反馈时，任何"重构口径/加流程/改判断标准"都必须判不通过；
-   *   ③ **不许碰它挂的 skill、不许新建 agent**：素材里的 `skills-index.md` 只是只读背景。
-   *
-   * ⚠️ 判据写在这里（任务书）而不是审核者的身份里：同一条审核者两种对象都审，
-   *    身份只负责"你是谁、按任务书那套判据判"（D29 的三块分工）。
-   */
-  function agentDraftAuditPrompt(input: {
-    allowScriptRun: boolean
-    /** 这一版指令的字符数（平台量的，机械事实）。 */
-    instructionsChars: number
-    maxChars: number
-    /** 素材里有没有失败证据（审核判决 / 使用者反馈）。 */
-    hasEvidence: boolean
-  }): string {
-    const overLimit = input.instructionsChars > input.maxChars
-    return [
-      '审一条**智能体的指令**（不是 skill）。要改的那条智能体是谁、它现在的指令、以及它这次的表现，都在 `material/`；',
-      '起草者写的新版指令在 `agent/instructions.md`（就在本工作目录里）。',
-      '',
-      '【这次审的五件事（只有这五项能让你判不通过）】',
-      '',
-      '1. **能不能照着干**：这份指令交给一个 CLI agent，它能不能按里面的步骤把这类活干完——' +
-        '该读什么、按什么顺序、用什么命令/工具、交出来是什么样，都要说得清。含糊到"视情况而定"而没有判据 ⇒ 不通过。',
-      '2. **边界清不清**：明确写了**不做什么**（不改哪些文件、不碰哪些目录、超出范围就停）。' +
-        '没有边界、或边界写成"尽量不要"这种软的 ⇒ 不通过。',
-      '3. **痕迹/证据对得上**：指令里每条改动都要能在素材里找到依据（哪一步错了、审核者点了哪一条、使用者说了什么）。' +
-        '凭空加的新流程/新口径、或与素材里的事实冲突 ⇒ 不通过。',
-      '4. **长度与密度**：见下面【硬闸门】。',
-      '5. **是不是只动了指令**：它挂的 skill、工具、模型、名字都不该被这份指令重写或"顺手优化"；' +
-        '指令里出现"请先创建/安装…"这类要求使用者的动作 ⇒ 不通过（那不是它的活）。',
-      '',
-      '【硬闸门（机械事实，不用你再数）】',
-      `- 这一版指令 **${input.instructionsChars} 字符**，上限 **${input.maxChars}**。`,
-      `- 详见 ` + '`material/instructions-check.md`（平台量的：字符数、是否为空、有没有 frontmatter 残留、有没有整篇代码围栏）。',
-      overLimit
-        ? `- ⚠️ **已经超限 ${input.instructionsChars - input.maxChars} 字符 ⇒ 必须判不通过**，理由写清"超长"以及超在哪几处（能删哪些）。`
-        : `- 没超限：但接近上限（>${Math.round(input.maxChars * 0.9)}）时要在 findings 里点出来，返工那一版才有机会瘦下来。`,
-      '',
-      `【证据强度】${
-        input.hasEvidence
-          ? '这次有失败/不通过/反馈证据 ⇒ 按证据判它改得对不对。'
-          : '⚠️ 这次**没有**失败证据（跑得顺、没审核不通过、也没明确反馈）⇒ 只许**收敛措辞**：删冗余、把含糊说清、把重复合并都不算问题；一旦发现它**重构了口径、加了新流程、改了判断标准** ⇒ 判不通过，理由写"没有证据支撑的重构"。'
-      }`,
-      '',
-      '【怎么做】',
-      '1. 读 `material/existing-agent.md`（它现在的指令，也就是"上一版"）与 `agent/instructions.md`（新版）。',
-      '2. 再按需读素材里的执行记录与判决（`task-run.md` / `turns/*.md` / `verdict.md` / `feedback.md`）。',
-      '3. 逐节对照：新版**保留了什么**、**改了什么**、每处改动的依据是哪条。仍然正确的段落被删改掉，也算问题（写清哪一段、为什么该留）。',
-      '4. 问题必须给**具体位置**与**原文摘录**：位置写 `agent/instructions.md:行号` 或 `agent/instructions.md#小节标题`' +
-        '（例：`agent/instructions.md#边界`），`evidence.excerpt` 照抄那一处原文；`evidence.reason` 写"为什么不合格"。',
-      '',
-      '【产出】',
-      '按平台规定的**判决格式**回复（第一句话里给了围栏标记与键名，照它写）。',
-      '`reasonCode` 用短码（比如 `over_length`、`no_boundary`、`no_evidence_for_change`、`touches_skill`）；',
-      '**不要重写这份指令**——重写是起草者的事，你只指出哪里不合格、该往哪个方向改。',
-    ].join('\n')
-  }
-
-  /** 起一轮审核的结果（路由与自动再审共用；用联合而不是抛异常：两种入口要的错误处置不同）。 */
-  type DraftAuditStart =
-    | { ok: true; reviewRunId: string; reviewerAgentId: string }
-    | { ok: false; status: number; error: string; code: string }
-
-  /**
-   * 给一条**跑完的草稿**起一轮审核（内置审核者 + 钉下内容指纹）。
-   *
-   * 这是"开始审核"这件事的唯一实现，两个入口都走它：
-   *   · `POST /api/crystallize/review`（人点的）；
-   *   · `autoChainReview` —— 这条草稿是**改版来的**（`revisedFrom` 有值）且刚跑完
-   *     （分批第 9 批：使用者问「为什么是按意见重新起草而不是基于意见修改」时顺手发现
-   *     "自动返工"原来只做到"产一版新的"就停了，新版停在待审核等人点一次 —— 半截链子）。
-   *
-   * ⚠️ **第一版草稿不自动审**：第一次审核是"要不要花这笔钱（真机一轮 ≈ $1.32）"的决定，
-   *    该由人做（他可能想先自己看一遍草稿）。进了审核/返工这条环之后，每一版新草稿都是
-   *    "为了修掉上一条意见"才存在的，自动接着审才是这条链该有的样子。
-   */
-  async function startDraftAudit(
-    draft: Run | null | undefined,
-    /**
-     * `completed: true` = **调用方刚确认它跑完了**，而 run 记录还没落库。
-     *
-     * ⚠️ 这个开关是量出来的，不是想出来的：自动再审这条钩子挂在执行器的"跑完之后要不要接着审"
-     * 那个回调上，而那个回调发生在 `#finish(runId, 'completed', …)` **之前**（执行器的既定顺序：
-     * 先串接、后收口）。于是同一个 run，执行器手里是"completed"，而 store 里还是 `running`——
-     * 第一版没有这个开关，链上第 2 版永远起不来审核，日志里只有一句
-     * 「起草还没跑完，没有可审的产出」（409 draft_not_completed），
-     * 而那条草稿**明明已经跑完了**（e2e §10.7 把它钉出来了）。
-     *
-     * HTTP 那条路**不带**这个开关：使用者点「开始审核」时，跑没跑完只有 store 说了算。
-     */
-    opts?: { completed?: boolean },
-  ): Promise<DraftAuditStart> {
-    if (!draft) {
-      return { ok: false, status: 404, error: '起草 run 不存在', code: 'draft_not_found' }
-    }
-    // 只有起草 run 才审得动：传一条别的 run 进来会拿它的工作目录去读 `skill/`，
-    // 结果是"审核了一条不存在的草稿"，而错误信息会指向"文件读不到"。
-    if (draft.subject.type !== 'skill-draft') {
-      return {
-        ok: false,
-        status: 400,
-        error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可审的草稿`,
-        code: 'not_a_draft',
-      }
-    }
-    if (draft.status !== 'completed' && opts?.completed !== true) {
-      return {
-        ok: false,
-        status: 409,
-        error: '起草还没跑完，没有可审的产出',
-        code: 'draft_not_completed',
-      }
-    }
-    // ══════════════════════════════════════════════════════════════════
-    // ★ 分批第 17 批：审核**只对当前那一版**成立
-    // ══════════════════════════════════════════════════════════════════
-    //
-    // 审核者读的是任务目录里的 `skill/`（= **最新**那一版），而界面可以停在**旧**版本上
-    // （深链指名的就是旧版）。不停这一步的话，"停在 v1 上点开始审核"会审到 v3 的内容，
-    // 而屏上显示的是 v1 ⇒ 结论与现场错配，且没有任何地方提示。
-    // 与"内容按你问的那一版给"（artifacts 那条）成对：一个是不给错的，一个是不审错的。
-    const auditVersions = await readDraftVersions(await draftTaskDir(draft.id as string))
-    const currentVersion = auditVersions?.versions.find((v) => v.snapshot === null)
-    if (currentVersion !== undefined && currentVersion.runId !== (draft.id as string)) {
-      return {
-        ok: false,
-        status: 409,
-        error: '这一版已经不是最新的了（审核审的是最新那一版的内容）——请切到最新一版再审',
-        code: 'draft_not_current',
-      }
-    }
-    // 审核者 = **内置的那条**（§10 第 ④ 条）。找不到就地补一条（它是平台自己的东西，
-    // 自愈比拦下使用者更对——与起草路由同一判据）。
-    await ensureBuiltinReviewer(store, workspaceId)
-    const reviewer = findBuiltinAgent(await store.listAgents(workspaceId), 'skill-reviewer')
-    if (!reviewer) {
-      return {
-        ok: false,
-        status: 500,
-        error: '内置的 skill 审核者建不出来（数据目录不可写？）',
-        code: 'builtin_reviewer_missing',
-      }
-    }
-    const draftHut = await draftTaskDir(draft.id as string)
-    // ══════════════════════════════════════════════════════════════════
-    // ★ 分批第 20 批：起审核之前，先跑一轮**平台定检**
-    // ══════════════════════════════════════════════════════════════════
-    //
-    // 为什么把这件事从审核者手里拿过来：使用者那条真实链（10 版 / $29.81）里，第 4 版
-    // 同一份内容被审出「通过 · 通过 · 不通过」，而 `SKILL.md` 在三审之间**一个字节都没动**
-    // （修改时间 11:41:01，三审在 11:44 / 12:36 / 13:09）；第 8 版更极端，3 分钟内
-    // needs_human → 通过 → 不通过。"脚本语法对不对、引用的文件在不在、骨架齐不齐"
-    // **本来是确定性的**——由判断给出就会抖，且随轮次变贵（单轮 $0.98 → $6.11）。
-    //
-    // 结果写进 `material/exec-check.md`，**每轮覆盖**：上一轮的定检结论不该被这一轮引用
-    // （退一万步，两份定检混在一份文件里，判决就说不清"我引的是哪一次的"）。
-    // ⚠️ 定检本身失败**不拦**起审核：它只是少一份事实，而"审一下"这件事不该因此变得不可能。
-    // ⚠️ 也不写给起草者看（`00-README.md` 不提名它）：起草者的输入是**使用者的意见**
-    //    （`material/feedback.md`），平台定检是审核者的原料，塞给起草者等于换了任务书。
-    /**
-     * ★ 分批第 26 批：专名落点检查（机械，不花额度）。
-     *
-     * 把 `material/user-requirements.md` 里抽到的专名（`ASD-STE100`、`《金字塔原理》`…）
-     * 在 `skill/` 全文里查一遍，结果**追加**到定检报告里——审核者按第 5 项判据核对时
-     * 有机械结论可依，而不是自己去 grep。
-     *
-     * ⚠️ 只查"有没有出现"：出现了不等于落实对了（那仍由审核者判），但没出现就一定没落地。
-     *    这是**诚实边界**，写进报告里说明。
-     */
-    /**
-     * ★ 分批第 35 批：草稿有两类——`skill/`（沉淀成 skill）与 `agent/`（沉淀成 Agent）。
-     *
-     * 判据、定检、指纹、标题全都要按类分。判据的分叉在这一处收口：**起审核只有一个实现**
-     * （现在就只剩人点「开始审核」这一个入口——改版跑完自动再审那一支已在分批第 129 批删掉），
-     * 所以分叉只能放在这里。
-     */
-    const isAgentDraft = draft.crystallizeTarget?.kind === 'agent'
-    const outRel = isAgentDraft ? 'agent' : 'skill'
-    const termCoverage = await checkRequirementTerms(draftHut, outRel)
-    const instructionsChars = isAgentDraft
-      ? await readFileSafe(join(draftHut, 'agent', 'instructions.md')).then((t) =>
-          t === null ? 0 : t.length,
-        )
-      : 0
-    if (isAgentDraft) {
-      /**
-       * 智能体指令的**机械定检**：能机械判定的先量出来，审核者不必自己数。
-       *
-       * 为什么这一份只放事实不放结论：结论（通过/不通过）只能由审核者下——
-       * 平台一旦自己判，两个判据就会打架，而打架时人只会看到"平台说通过、审核者说不通过"。
-       * 唯一例外是**超限**：那是使用者定的硬闸门，量出来的数比判断更权威，所以在这里
-       * 明写"必须判不通过"，同时入库时还会再拦一道（第 36 批）。
-       */
-      const text = await readFileSafe(join(draftHut, 'agent', 'instructions.md'))
-      const overLimit = instructionsChars > AGENT_INSTRUCTIONS_MAX_CHARS
-      const checks = [
-        `# 智能体指令定检（平台量的事实，不是判决）`,
-        '',
-        `- 产出文件：\`agent/instructions.md\`（${text === null ? '**不存在**' : `${instructionsChars} 字符`}）`,
-        `- 长度上限：${AGENT_INSTRUCTIONS_MAX_CHARS}`,
-        `- 是否超限：${text === null ? '无法判断（文件不存在）' : overLimit ? `**是，超 ${instructionsChars - AGENT_INSTRUCTIONS_MAX_CHARS} 字符**` : '否'}`,
-        `- 是否为空：${text === null || text.trim() === '' ? '**是**（空产出必须判不通过）' : '否'}`,
-        `- 是否有 frontmatter 残留：${text !== null && /^---\s*$/m.test(text.slice(0, 200)) ? '**有**（指令不该带 frontmatter）' : '没有'}`,
-        `- 是否整篇被代码围栏包住：${text !== null && /^\s*```/.test(text) ? '**是**（应写指令正文，不要整篇围栏）' : '没有'}`,
-        '',
-        '⚠️ 这一页只给事实：**通过与否由你判**。唯一例外是"超限"——那是使用者定的硬闸门，超了就判不通过。',
-        '',
-      ].join('\n')
-      await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
-      await writeFile(
-        join(draftHut, 'material', 'instructions-check.md'),
-        `${checks}${termCoverage}`,
-        'utf8',
-      ).catch(() => undefined)
-      info(`智能体指令定检（${(draft.id as string).slice(-8)}）：${instructionsChars} 字 / 上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}${overLimit ? '（超限）' : ''}`)
-    } else {
-      const execReport = await runSkillExecCheck(join(draftHut, 'skill')).catch(() => null)
-      if (execReport !== null) {
-        await mkdir(join(draftHut, 'material'), { recursive: true }).catch(() => undefined)
-        await writeFile(
-          join(draftHut, 'material', 'exec-check.md'),
-          `${renderExecCheckMarkdown(execReport)}${termCoverage}`,
-          'utf8',
-        ).catch(() => undefined)
-        info(`起草审核定检（${draft.id as string}）：${summarizeExecCheck(execReport)}`)
-      }
-    }
-    // ★ 分批第 8 批：钉下"这次审的是哪一版产出"的指纹。
-    //
-    // 为什么必须在**起审核 run 的这一刻**写：审核者接下来读的是磁盘上的 `skill/`，
-    // 而人在审核期间（或审核之后）改一下编辑器就能让"结论"与"内容"分叉——那份分叉
-    // 只有指纹能发现。写早了没用（内容还没定），写晚了会把人改后的内容当成被审内容。
-    const stampHash = await hashDraftDir(join(draftHut, outRel))
-    const allowScriptRun = (await readWorkspaceSettings(store, workspaceId)).allowReviewerScriptRun
-    const hasDraftEvidence =
-      (await readFileSafe(join(draftHut, 'material', 'verdict.md'))) !== null ||
-      (await readFileSafe(join(draftHut, 'material', 'feedback.md'))) !== null
-    const reviewRunId = await createRunForReviewer({
-      reviewer,
-      // `kind` 是**报告类**的那个 kind（这条链上没有报告，用它自己的 subject 名最诚实；
-      // 它只影响日志与列表里的显示，路由看的是 subject.type）
-      kind: 'skill-draft-review',
-      title: isAgentDraft ? '审核改过的智能体指令' : '审核起草出来的 skill',
-      body: `草稿在 ${draftHut}/${outRel}，素材在 ${draftHut}/material`,
-      subject: { type: 'skill-draft-review', id: draft.id },
-      // ★ 审核者必须**在草稿小屋里**跑：它要读的 `skill/`（产出）与 `material/`（依据）
-      //   都在那里。不给这一项的话它落到审核者自己的 workDir，然后「读不到 skill/SKILL.md」
-      //   ——那个报错看起来像"起草没产出"，实际是审核者站错了地方。
-      workDirOverride: draftHut,
-      prompt: isAgentDraft
-        ? agentDraftAuditPrompt({
-            allowScriptRun,
-            instructionsChars,
-            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
-            hasEvidence: hasDraftEvidence,
-          })
-        : draftAuditPrompt(allowScriptRun),
-      chainDepth: 0,
-    })
-    if (reviewRunId === null) {
-      // `createRunForReviewer` 在"审核者没有身份"时返回 null（那条路是给报告审核的兜底）
-      return {
-        ok: false,
-        status: 500,
-        error: '审核 run 起不来：内置审核者没有可用的「指令」',
-        code: 'reviewer_identity_missing',
-      }
-    }
-    // 指纹写在这里（不是上面算的时候）：`createRunForReviewer` 会 await 一段，
-    // 期间人可能正在保存改动——写"起审核时那一刻"的指纹才是这次审核的对象。
-    // ⚠️ 代价是：审核**期间**的保存不会被判成过期（那一段里审的确实是老内容，
-    //    但指纹也已经钉在老内容上）。这个窗口留着是有意的：把它关掉就得在审核结束时
-    //    再比一次内容，而"审核者在读目录"与"内容有没有变"之间没有可靠的时间点。
-    await writeAuditStamp(draftHut, { reviewRunId, hash: stampHash, at: Date.now() })
-    return { ok: true, reviewRunId, reviewerAgentId: reviewer.id }
-  }
 
   // ══════════════════════════════════════════════════════════════════
   /**
@@ -3124,10 +2774,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
   //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
   const builtin = await ensureBuiltinAgents(store, workspaceId)
-  for (const [label, r] of [
-    ['内置起草者', builtin.drafter],
-    ['内置 skill 审核者', builtin.reviewer],
-  ] as const) {
+  for (const [label, r] of [['内置起草者', builtin.drafter]] as const) {
     if (r.action === 'created') {
       info(`已建立${label}（沉淀这条链用的，可在「智能体」页查看与编辑）`)
     } else if (r.action === 'healed') {
@@ -4932,36 +4579,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 用 PATCH 语义：**只改传了的字段**。整体替换会让"只想改个名字"的请求
     // 顺手把没传的字段清空——那是个很容易踩且很难发现的坑（保存之后
     // 发现指令没了）。
-    // ── 起草之后的**审核 run**（§10 第 ②.5 步）──
-    //
-    // 为什么复用 `createRunForReviewer` 而不是另写一次 submit：执行与审核两次本来就同构
-    // （同一套 argv 组装、工作目录规则、收尾），差别只有"谁发起/用哪个目录/第一句话装什么"。
-    // 另起一套的表现是两边的行为慢慢分叉——比如审核侧后来支持了某个开关，这条链上没有。
-    //
-    // ⚠️ 它的产出**不进闭环**：subject 不是业务报告类、`reviewerAgentId: null`、不挂 issue。
-    //    结论由平台读草稿小屋里它写下的 `review.json`（见设计 §10.6）。
-
-
-    if (req.method === 'POST' && path === '/api/crystallize/review') {
-      const raw = (await readJsonBody(req)) as { draftRunId?: unknown }
-      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
-      if (draftRunId === '') {
-        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
-        return
-      }
-      // 校验与"起这一轮审核"都在 `startDraftAudit` 里——自动再审走的是同一个函数
-      // （一个东西只有一处实现，否则两条路的行为会慢慢分叉）。
-      const started = await startDraftAudit(await store.getRun(draftRunId as Run['id']))
-      if (!started.ok) {
-        sendJson(res, started.status, { error: started.error, code: started.code })
-        return
-      }
-      sendJson(res, 202, {
-        reviewRunId: started.reviewRunId,
-        reviewerAgentId: started.reviewerAgentId,
-      })
-      return
-    }
 
     /**
      * ══════════════════════════════════════════════════════════════════
@@ -5080,6 +4697,18 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             `不是起草者也不是 skill 审核者，不知道该恢复成哪一套默认值。` +
             `如果是新版本加的内置条目，请升级后重启（启动时会按角色补齐）。`,
           code: 'builtin_role_unknown',
+        })
+        return
+      }
+      if (kind === 'skill-reviewer') {
+        // ★ 分批第 137 批：沉淀线的评审已下线 ⇒ 这条内置审核者**没有默认值可恢复**
+        //   （它自己的默认身份已删）。老工作区里它仍是使用者的数据，平台不悄悄删——
+        //   但"恢复默认"会把空指令写进去，那比不恢复更坏，所以这里如实拒绝并给出去处。
+        sendJson(res, 409, {
+          error:
+            `「${current.name}」是已下线的内置审核者（沉淀线不再评审，§12.15）——` +
+            `它没有默认值可恢复。不需要它的话，可以在「智能体」页把它删掉（它已经不被任何链路使用）。`,
+          code: 'builtin_retired',
         })
         return
       }
@@ -5605,111 +5234,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 草稿产出（2026-10-19 四轮）。界面不再从"最后一条 text 消息"里拆 frontmatter：
     // 那既丢了多文件，也把"解析规则"复制到了前端。这里给一份**已解析 + 已校验**的结构，
     // 前端只负责画。
-    // ── 起草审核的结果（§10.5 第 ⑤ 步：界面上要能看到"审核说了什么"）──
-    //
-    // 为什么要有这条读接口：判决挂在**审核 run** 上，而界面手上只有**起草 run** 的 id。
-    // 让前端自己去 `GET /api/runs` 里翻 subject 再翻 verdicts，等于把"这两条 run 怎么对应"
-    // 这件规则复制到前端（改一处漏一处）；这里给一份已解析好的结论。
-    if (req.method === 'GET' && path === '/api/crystallize/review') {
-      const draftRunId = url.searchParams.get('draftRunId') ?? ''
-      if (draftRunId === '') {
-        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
-        return
-      }
-      const draftRun = await store.getRun(draftRunId as RunId)
-      if (!draftRun || draftRun.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
-        return
-      }
-      // 这条草稿的审核 run：subject 是 `skill-draft-review` 且 `id` 指回它。取**最后一条**
-      // （人工可以再点一次审核；界面上要显示的是最近一次的结论）。
-      const page = await store.listRuns({ workspaceId, limit: 10_000 })
-      const reviewRuns = page.items.filter(
-        (r) => r.subject.type === 'skill-draft-review' && r.subject.id === draftRunId,
-      )
-      const reviewRun = reviewRuns[reviewRuns.length - 1]
-      // 这条链的全部起草 run（`versions` 与"第几轮"共用一份，别再算两遍）
-      const chainRuns = page.items
-        .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
-        .map((r) => ({
-          id: r.id as string,
-          revisedFrom: r.revisedFrom ?? null,
-          queuedAt: r.queuedAt,
-        }))
-      const verdicts = reviewRun ? await store.listVerdictsByRun(reviewRun.id) : []
-      const v = verdicts[verdicts.length - 1]
-      /**
-       * ★ 分批第 8 批：这个结论是不是"改之前的"。
-       *
-       * 判据只在两样东西上：**审核时钉下的指纹**（审核路由写的）与**此刻磁盘上的内容**。
-       * 不一致 ⇒ 内容在审完之后被改过（人手改保存、或另一次返工写了同一间小屋）⇒ 结论过期。
-       *
-       * ══════════════════════════════════════════════════════════════════
-       * ⚠️ 为什么**不**要求指纹属于"报出来的那条审核 run"（第一版就是这么写的，红了）
-       * ══════════════════════════════════════════════════════════════════
-       *
-       * 第一版写的是 `stamp.reviewRunId === reviewRun.id`——理由听起来很对："指纹与审核 run
-       * 一一对应"。它错在一个**判决不合规时 daemon 会自动重试**的事上（`createRetryRun`）：
-       * 一次「开始审核」于是留下**两条**审核 run（同 subject、同内容、相隔几毫秒），
-       * 而接口报的是**最后**那条 ⇒ 指纹那条永远不是"报出来的那条" ⇒ `stale` 变成
-       * "判不出来"（null）。也就是说：**恰恰在审核出问题（判决不合规、重试）的时候，
-       * "人改过没有"这件事反而看不见了**——而那时人最需要知道结论还算不算数。
-       *
-       * 现在的口径：指纹是"**最近一次「开始审核」时那份内容**"，与它比即可。重试审的是
-       * 同一份内容 ⇒ 同一条指纹照样成立。`stamp.reviewRunId` 保留在文件里**只作记录**
-       * （排查时要知道这条指纹是哪一次点出来的）。
-       *
-       * ⚠️ 另一种"判不出来"仍然给 `null`，不给 `false`：没有审核 run、或没有指纹文件
-       *    （旧数据）。把"判不出来"显示成"没过期"，会让界面安静地把一份可能对不上的
-       *    结论当成有效结论。
-       */
-      const stamp = reviewRun ? await readAuditStamp((await draftTaskDir(draftRunId))) : null
-      const staleForReview =
-        reviewRun && stamp
-          ? (await hashDraftDir(join(await draftTaskDir(draftRunId), 'skill'))) !== stamp.hash
-          : null
-      sendJson(res, 200, {
-        /**
-         * `null` = **还没审过**（或审核 run 还没收口）。
-         *
-         * ⚠️ 它与"审核跑完但判决不合规"是**两件不同的事**：后者有 verdict（结论
-         * `needs_human`、状态 `invalid`）。界面必须分开说 —— 把"没审过"显示成"不通过"
-         * 会让人去改一份根本没被审过的稿子。
-         */
-        review: v
-          ? {
-              reviewRunId: reviewRun!.id,
-              reviewRunStatus: reviewRun!.status,
-              status: v.status,
-              conclusion: v.conclusion,
-              reasonCode: v.reasonCode,
-              findings: v.findings,
-              escalateReason: v.escalateReason,
-              createdAt: v.createdAt,
-            }
-          : null,
-        /** 审核 run 在不在这件事，界面靠它区分"还没点过审核"与"审过但没判决"。 */
-        reviewRunId: reviewRun?.id ?? null,
-        reviewRunStatus: reviewRun?.status ?? null,
-        /**
-         * 这个结论是不是"改之前的"（内容被改过 ⇒ 结论过期）。
-         *
-         * `null` = **判不出来**（旧数据里没有指纹文件，或这条草稿一条审核 run 都没有）。
-         * 不编成 `false`：那会让"判不出来"看起来像"没过期"，而界面据此就会安静地
-         * 把一份可能已经对不上的结论当成有效结论显示。
-         */
-        stale: staleForReview,
-        /**
-         * 这条**链**上已经起草过几版（自动返工的轮次上限见 executor 的 `SKILL_DRAFT_REWORK_LIMIT`）。
-         *
-         * ⚠️ 原来数的是"同一来源素材下有几版"。真机上同一来源下挂着两条不相干的链 ⇒
-         *    显示成 18 版（实际这条链只有 10 版），而且自动返工按这个数算额度 ⇒
-         *    已用 17 > 上限 2 ⇒ **一次都没自动返工过**。轮次只认链（`revisedFrom`）。
-         */
-        versions: chainOfRun(chainRuns, draftRunId).length,
-      })
-      return
-    }
+    // ★ 分批第 137 批（§12.42 第 ③ 步）：`GET /api/crystallize/review` 已删。
+    //   沉淀线不再有评审结论——结论条现在只显示**机械体检**（`GET /api/crystallize/artifacts`
+    //   的 `validation`，不花额度、不产生 run）。`stale`（结论过期）也随之消失：
+    //   没有"审核时钉下的指纹"，也就没有"过期"这件事。
 
     // ── 人改草稿：把编辑器里的内容**写回**草稿小屋（分批第 8 批）──
     //
@@ -5788,9 +5316,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       sendJson(res, 200, {
         ok: true,
         written: result.written,
-        // 回一份新指纹：界面拿它与审核指纹比，立刻能标"结论已过期"，
-        // 不用等下一次 GET（少一次往返，也少一个"界面停在旧状态"的窗口）。
-        hash: await hashDraftDir(skillDir),
       })
       return
     }
