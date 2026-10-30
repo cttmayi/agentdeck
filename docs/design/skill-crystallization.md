@@ -4093,6 +4093,11 @@ type CrystallizeMethod = {
 type Question = { id: string; ask: string; choices?: string[]; optional?: boolean }
 ```
 
+**必答清单（2026-10-30 定）**：**起点**与**作用描述**必答，**语言**与 **persona 轨**可跳过。
+理由：作用描述就是"靶子"——没有它，起草者只能凭素材猜这次要什么，而猜错的代价是一整轮起草。
+distilly 的 intake 几乎都能跳过，但它的"这次蒸馏谁"由选族（colleague/celebrity…）承担，
+我们没有那一步，靶子只能由作用描述提供。
+
 **demo 已按此更新**（`docs/design/demo/crystallize-chat-v2.html`，默认打开的是"新沉淀·提问中"）：
 答起点 → 问作用描述 → 问语言 → 问 persona → 材料行 + 「开始提炼」→ 起草中。真 Chrome 量到：
 

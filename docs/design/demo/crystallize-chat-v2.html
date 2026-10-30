@@ -310,7 +310,7 @@ const SESSIONS = [
     source: '从这次工作起 · 问题还没答完',
     intake: [
       { id: 'start', ask: '这次要沉淀什么？点一个，或者直接说。', choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有指令'] },
-      { id: 'purpose', ask: '一句话说清：这个技能在什么情况下被用到？', optional: true },
+      { id: 'purpose', ask: '一句话说清：这个技能在什么情况下被用到？（必答：没靶子不开跑）', optional: false },
       { id: 'language', ask: '用什么语言写？', choices: ['中文', 'English'], optional: true },
       { id: 'persona', ask: '要不要顺带提炼「风格」（persona）轨？', choices: ['不用，只要「怎么做」', '要，同时出风格'], optional: true },
     ],
