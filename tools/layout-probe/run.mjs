@@ -3804,6 +3804,21 @@ const CHECKS = [
   // 这一节钉的是使用者确认过的第 ③ 条决定：目标态**不做 tab**（表单 + 一行素材判据）。
   {
     view: '沉淀',
+    key: 'crystal.enterStepTarget',
+    label:
+      '★★★ 进入目标组时**确实是 target 那一屏**（状态锚点 = target）——这就是"入口断言"：入口漂了的话下面整组会空过，而空过报的是"没量到这个值"，很容易被误读成选择器坏了',
+    ok: (v) => v === 'target',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.enterStepReview',
+    label: '★★★ 进入审阅组时**确实是 review 那一屏**（状态锚点 = review）——同上，防入口漂',
+    ok: (v) => v === 'review',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.stepMarkerValue',
     label:
       '★★★ 详情栏带 `data-crystallize-step`（分批第 96 批：判据按**状态**定位，而不是按"旧表单里有没有某个控件"——后者一换界面形态就整组失效）',

@@ -4557,7 +4557,13 @@
             const cont = [...d().querySelectorAll('button')].find((b) => text(b).includes('继续'))
             click(cont)
             // 审阅态的标志：结论条（`.review-bar`）出现
-            return await until(() => !!d().querySelector('.conclusion-bar'), 120)
+            const enteredReview = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+            // 分批第 98 批：**入口断言**。各组是靠"送回 #/tasks → 再进 #/crystallize/<id> → 等某个
+            // 控件"进入目标屏的；那个控件一换形态就没了 ⇒ 入口漂、整组空过（§12.24 量到 86 项红）。
+            // 所以进入之后先确认状态锚点，再往下量。
+            facts['crystal.enterStepReview'] =
+              d().querySelector('.crystal-flow')?.getAttribute('data-crystallize-step') ?? null
+            return enteredReview
           }
 
           const cyOk = await cyEnter(cyDraft)
@@ -5563,6 +5569,9 @@
                   ),
                 90,
               )
+              // 分批第 98 批：目标组的**入口断言**——进这一组之前先确认"现在是 target 那一屏"
+              facts['crystal.enterStepTarget'] =
+                d().querySelector('.crystal-flow')?.getAttribute('data-crystallize-step') ?? null
               if (facts['crystal.targetAttached']) {
                 // 锚点在这一屏里读（早于进入这一屏读只会拿到 null）
                 facts['crystal.stepMarkerValue'] =
