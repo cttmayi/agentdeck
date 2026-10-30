@@ -4944,3 +4944,24 @@ process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] !== 'off'
 正是本仓库最防的东西。它只是这次迁移的临时脚手架，第 4 步做完就删。
 
 验证：`check` **2234 全绿**、探针 **595 全绿**、`typecheck` 0 错。
+
+### 12.45 第 ② 步的落地要点（2026-10-30，**写完就停**）
+
+next 会话要写的"开关有效"用例，三个要点已经摸清，照着写即可：
+
+1. **一个 daemon 就够，不用重启**：开关读的是 `process.env[...]`，在**每次调用时**读
+   （`autoChainReview` 内部），所以测试里可以 `process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'`
+   → 跑一次 revise → 断言没有新的审核 run → `delete process.env[...]` 复原。
+   `crystallize-e2e.test.ts` 的 `before()` 只起一次 daemon（`startDaemon({ … backend: fakeBackend })`），
+   正好适配这种"临时改环境变量"的写法。
+2. **现成夹具**：`runReviewed(prompt)`（起一条"审过"的源 run）→ `POST /api/crystallize/draft`（起草）→
+   等终态 → `POST /api/crystallize/revise`（改一版，**这条才会走 `revisedFrom` 那一支**）→
+   断言"改版之后没有自动出现审核 run"。
+3. **断言方式**：`GET /api/runs` 里在这条新草稿之后**没有** `kind === 'review'` 的 run；同时
+   **手动入口仍在**（`GET /api/crystallize/artifacts` 的 `reviewValid` / 结论条上的「开始审核」——
+   这条是 §12.15 里"保留手动入口"的可执行判据，别漏）。
+
+**写完这个用例，第 ③ 步（改 18 处断言）就有了样板**——它和那 18 处的差别只是"默认开 vs 显式关"。
+
+⚠️ 我这轮就停在这里：不是不想写，是写到一半没有余量跑 `check` 会是更坏的结果（测试写得像、但红着，
+下一轮第一步就得先猜它为什么红）。上面三点足以让下一次开工是机械的。
