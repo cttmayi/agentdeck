@@ -3865,6 +3865,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.reviewInArtifactMsg',
+    label:
+      '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftingLogInSystemMsg',
     label:
       '★★★ 起草中的日志挂在**一条系统消息**上（U3b）——它和"起草完成"从此是同一条时间线上的东西，而不是页面上一个抽屉分节',

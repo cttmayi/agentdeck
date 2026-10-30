@@ -1760,6 +1760,10 @@
               而且切换不滚动（改之前 diff 在编辑器下方 519px 处）。
       -->
       {#if step === 'review'}
+      <!-- ★ 分批第 109 批（U3c-1）：审阅态整体是**一条产物消息**（只包不删；删 review-tabs 是 U3c-2）。
+           边界用 Svelte 自己的 AST 量出来的（58328 → 89030），不是靠正则数块——
+           正则会被注释与字符串里的块标记污染，这个坑踩过两次。 -->
+      <div class="crystal-msg" data-msg-role="artifact">
         {#if clash}
           <div class="notice">
             {error}
@@ -2457,7 +2461,8 @@
             {/if}
           {/if}
         {/if}
-      {/if}
+            </div>
+{/if}
 
       <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份。
              ⚠️ 2026-10-21（第 3 批）：审阅态不再把它折在编辑器下面——它成了「依据」tab 的
@@ -2652,6 +2657,14 @@
   /* 系统消息（起草日志）：自然高度、不吃剩余空间；内部日志框自己滚 */
   .crystal-msg[data-msg-role='system'] {
     flex: 0 0 auto;
+  }
+
+  /* 产物消息（审阅态）：占满剩余高度，内部各块自己滚 */
+  .crystal-msg[data-msg-role='artifact'] {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .crystal-composer {

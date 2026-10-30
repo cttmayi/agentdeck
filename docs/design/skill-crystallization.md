@@ -4580,3 +4580,31 @@ U3d 才接线——先做一个"能按但没反应"的按钮就是死接口）�
 （在参数列表里插了一句赋值）⇒ **探针脚本语法错，整份探针一个字都发不出来**，报的是
 `missing ) after argument list`。好在 `run.mjs` 有这一步兜底（"探针脚本有语法错"专门报出来），
 所以这不是"判据红了"，而是"根本没跑"——这两件事必须分清。
+
+### 12.30 U3c-1 落地：审阅态成为一条产物消息（分批第 109 批，**已实作**）
+
+审阅态整体（结论条 / 问题清单 / 审查依据 / 文件树 / 编辑与差异 / 返工行）现在挂在
+`.crystal-msg[data-msg-role="artifact"]` 里。**这一批只包不删**：`review-tabs` 与内部的
+编辑/差异切换原样留着——删 tab 是 U3c-2，会牵动约 25 条判据。
+
+**关键教训：块边界只能问编译器，不能数文本。** 这一批我失败过两次：
+
+1. 靠文本锚点猜审阅块收尾 ⇒ `Unexpected block closing tag`；
+2. 改用"正则按 `{#if}` / `{/if}` 数深度" ⇒ 同样错——因为**注释与字符串里也出现块标记**，
+   深度计数被污染（我算出的 1762→2460 行是对的，但我把 `</div>` 插在了块**外面**）。
+
+第三次改用 **Svelte 自己的 AST**：`import { parse } from 'svelte/compiler'`，遍历 `IfBlock` 节点，
+断言 `test` 里含 `step === 'review'`，拿到 `start/end`（**58328 → 89030**），按字节位置插入。
+一次就过。工具留在 `.cache/find-block.mjs`（一次性，不进仓库），十行：
+
+```js
+const ast = parse(source, { modern: true })
+// 遍历找 IfBlock，且 source.slice(node.start, node.end).includes(needle)
+// ⇒ { start, end } 就是块的字节范围
+```
+
+⚠️ 另一个坑：**注释里不要出现花括号**。我在说明里写了 `{'{'}#if … {/if} …`，Svelte 把注释里的
+`{/if}` 当成模板标记 ⇒ 直接报块结构错。注释就写"从第 1762 行的 if 块起"，别写标记本身。
+
+新增判据 `crystal.reviewInArtifactMsg`（`.crystal-msg[data-msg-role=artifact] .conclusion-bar` 在），
+实测 `true`。验证：探针 **596 项全绿**、`check` 2234 全绿、`typecheck` 0 错。

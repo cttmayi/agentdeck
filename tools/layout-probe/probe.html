@@ -4629,6 +4629,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // ★ 审核区块（结论与问题清单常驻的那一块）
           const cyAudit = d().querySelector('.conclusion-block')
           facts['crystal.auditPresent'] = !!cyAudit
+          // U3c-1：审阅态整体挂在**一条产物消息**上（结论条也在里面）
+          facts['crystal.reviewInArtifactMsg'] = !!d().querySelector(
+            '.crystal-msg[data-msg-role="artifact"] .conclusion-bar',
+          )
           facts['crystal.auditText'] = cyAudit ? text(cyAudit) : null
           facts['crystal.auditStartButton'] = !!(
             cyAudit &&
