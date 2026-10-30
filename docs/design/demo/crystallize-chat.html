@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>沉淀页 demo · 对话式（§12 线框的可点版本）</title>
+<style>
+  /* 设计令牌直接抄 packages/ui/src/styles/app.css，避免"demo 好看、真页面两回事" */
+  :root {
+    --fs-xs: 0.75rem; --fs-sm: 0.8125rem; --fs-base: 0.875rem; --fs-md: 0.9375rem;
+    --fs-lg: 1.0625rem; --fs-xl: 1.375rem;
+    --lh-tight: 1.3; --lh-base: 1.6;
+    --radius-sm: 4px; --radius: 8px; --radius-lg: 12px;
+    --sidebar-w: 15rem; --topbar-h: 3.25rem;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f2f4f7; --surface-hover: #e6e9ef;
+    --panel: #eceef2; --line: #e2e5ea; --line-strong: #c9cfd8;
+    --text: #1d232c; --text-dim: #5a6472; --text-faint: #8a93a2;
+    --accent: #2b6fd0; --accent-dim: #2f6fd0; --good: #1f9d73; --bad: #d64545; --warn: #b7791f;
+    --status-todo: #8a93a2; --status-active: #2b6fd0; --status-review: #7a5fd0;
+    --status-done: #1f9d73; --status-blocked: #b7791f;
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #0f1115; --surface: #161920; --surface-2: #1c2029; --surface-hover: #222733;
+    --panel: #0b0d11; --line: #262b36; --line-strong: #333a49;
+    --text: #e6e9ef; --text-dim: #a2abbb; --text-faint: #6d7686;
+    --accent: #5aa9f5; --accent-dim: #2b5f92; --good: #4ec9a0; --bad: #f2716a; --warn: #e0b04a;
+    --status-todo: #6d7686; --status-active: #5aa9f5; --status-review: #b48ef0;
+    --status-done: #4ec9a0; --status-blocked: #e0b04a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font-family: var(--font); font-size: var(--fs-base); line-height: var(--lh-base);
+    color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  code, .mono { font-family: var(--font-mono); font-size: var(--fs-sm); }
+
+  /* ── 三列骨架：蒸馏台 / 消息流 / 产物栏 ── */
+  .app { display: grid; grid-template-columns: 15rem minmax(0, 1fr) 20rem; height: 100vh; }
+
+  /* 左栏 */
+  .rail { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .rail-head { padding: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+  .rail-title { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 600; flex: 1; }
+  .new-btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 0.25rem 0.5rem; font-size: var(--fs-xs); }
+  .new-btn:hover { background: var(--surface-hover); }
+  .rail-list { overflow: auto; padding: 0 0.5rem 0.75rem; }
+  .rail-group { font-size: var(--fs-xs); color: var(--text-faint); padding: 0.5rem 0.25rem 0.25rem; }
+  .row { width: 100%; text-align: left; border: 1px solid transparent; background: transparent; border-radius: var(--radius); padding: 0.5rem; margin-bottom: 0.25rem; display: block; }
+  .row:hover { background: var(--surface-hover); }
+  .row.on { background: var(--surface); border-color: var(--accent); }
+  .row-top { display: flex; align-items: center; gap: 0.375rem; }
+  .row-name { font-size: var(--fs-base); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { font-size: var(--fs-xs); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { font-size: 0.6875rem; padding: 0 0.375rem; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--text-dim); white-space: nowrap; }
+  .pill.skill { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .pill.agent { color: var(--status-review); border-color: color-mix(in srgb, var(--status-review) 40%, transparent); }
+
+  /* 主区 */
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+  .main-head { height: var(--topbar-h); display: flex; align-items: center; gap: 0.5rem; padding: 0 1rem; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .main-title { font-size: var(--fs-lg); font-weight: 600; }
+  .spacer { flex: 1; }
+  .state { font-size: var(--fs-xs); padding: 0.125rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
+  .state.drafting { color: var(--status-active); }
+  .state.reviewing { color: var(--status-review); }
+  .state.shipped { color: var(--status-done); }
+  .ghost { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 0.25rem 0.5rem; font-size: var(--fs-xs); }
+  .ghost:hover { background: var(--surface-hover); }
+
+  .stream { flex: 1; overflow: auto; padding: 1rem 1.25rem 1.5rem; min-height: 0; }
+  .stream-inner { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .msg-user { align-self: flex-end; max-width: 80%; background: var(--accent); color: #fff; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); padding: 0.5rem 0.75rem; font-size: var(--fs-base); }
+  .receipt { align-self: center; font-size: var(--fs-xs); color: var(--text-faint); background: var(--surface-2); border-radius: 999px; padding: 0.125rem 0.625rem; }
+
+  /* 卡片：六种，靠左色条区分；折叠后只剩一行结论 */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .card.folded .card-body { display: none; }
+  .card-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; cursor: pointer; user-select: none; }
+  .card-head:hover { background: var(--surface-2); }
+  .kind { font-size: var(--fs-xs); font-weight: 600; padding: 0 0.375rem; border-radius: var(--radius-sm); }
+  .kind.brief { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .kind.material { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .kind.progress { color: var(--status-active); background: color-mix(in srgb, var(--status-active) 12%, transparent); }
+  .kind.insight { color: var(--status-review); background: color-mix(in srgb, var(--status-review) 14%, transparent); }
+  .kind.artifact { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+  .kind.shipped { color: var(--status-done); background: color-mix(in srgb, var(--status-done) 12%, transparent); }
+  .card-summary { flex: 1; font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-body { padding: 0 0.75rem 0.75rem; border-top: 1px solid var(--line); }
+
+  .kv { display: grid; grid-template-columns: 6.5rem 1fr; gap: 0.25rem 0.75rem; font-size: var(--fs-sm); padding-top: 0.5rem; }
+  .kv dt { color: var(--text-faint); }
+  .kv dd { margin: 0; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 0.25rem; margin: 0.375rem 0; }
+  .tag { font-size: var(--fs-xs); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 0.5rem; color: var(--text-dim); }
+
+  .mat { display: flex; align-items: center; gap: 0.5rem; padding: 0.375rem 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm); }
+  .mat:last-child { border-bottom: 0; }
+  .mat .src { font-size: var(--fs-xs); color: var(--text-faint); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 0.25rem; }
+  .mat .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .x { border: 0; background: transparent; color: var(--text-faint); padding: 0 0.25rem; }
+  .x:hover { color: var(--bad); }
+
+  .log { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--panel); border-radius: var(--radius-sm); padding: 0.5rem; max-height: 9rem; overflow: auto; color: var(--text-dim); }
+  .log div { white-space: pre-wrap; }
+
+  .sec-title { font-size: var(--fs-xs); color: var(--text-faint); margin: 0.75rem 0 0.25rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  ul.slim { margin: 0; padding-left: 1.1rem; font-size: var(--fs-sm); }
+  ul.slim li { margin: 0.125rem 0; }
+  .line-fix { font-size: var(--fs-xs); color: var(--accent); border: 0; background: transparent; padding: 0 0.25rem; }
+  .uncovered { color: var(--warn); }
+
+  .conclusion { display: flex; align-items: center; gap: 0.5rem; font-size: var(--fs-sm); border-radius: var(--radius-sm); padding: 0.375rem 0.5rem; margin-top: 0.5rem; }
+  .conclusion.ok { background: color-mix(in srgb, var(--good) 10%, transparent); color: var(--good); }
+  .conclusion.warn { background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+  .conclusion.muted { background: var(--surface-2); color: var(--text-faint); }
+  .chips { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+
+  /* 右栏：常驻产物栏 */
+  .pane { background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .pane-head { height: var(--topbar-h); display: flex; align-items: center; gap: 0.5rem; padding: 0 0.75rem; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 600; }
+  .pane-body { overflow: auto; padding: 0.5rem 0.75rem 1rem; min-height: 0; }
+  .files { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); }
+  .files li { padding: 0.25rem 0.375rem; border-radius: var(--radius-sm); cursor: pointer; display: flex; gap: 0.375rem; align-items: center; }
+  .files li:hover { background: var(--surface-hover); }
+  .files li.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+  .files .dir { color: var(--text-faint); }
+  .files .w { margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); }
+  .check { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); }
+  .check .ok { color: var(--good); }
+  .check .bad { color: var(--bad); }
+  .diffbar { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-dim); }
+  .preview { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-top: 0.5rem; }
+  .preview pre { margin: 0; padding: 0.5rem; font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; color: var(--text-dim); max-height: 16rem; overflow: auto; }
+
+  /* 输入区：一句话 + 三个显式快捷动作 */
+  .composer { border-top: 1px solid var(--line); background: var(--surface); padding: 0.625rem 1.25rem 0.75rem; }
+  .composer-inner { max-width: 46rem; margin: 0 auto; }
+  .quick { display: flex; gap: 0.375rem; margin-bottom: 0.375rem; flex-wrap: wrap; }
+  .quick button { border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 999px; padding: 0.125rem 0.625rem; font-size: var(--fs-xs); color: var(--text-dim); }
+  .quick button:hover { border-color: var(--accent); color: var(--accent); }
+  .input-row { display: flex; gap: 0.5rem; }
+  .input-row input { flex: 1; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0.5rem 0.625rem; font: inherit; background: var(--surface); color: var(--text); }
+  .input-row input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
+  .send { background: var(--accent); color: #fff; border: 0; border-radius: var(--radius); padding: 0.5rem 0.875rem; font-size: var(--fs-sm); }
+
+  .demo-flag { font-size: var(--fs-xs); color: var(--text-faint); border: 1px dashed var(--line-strong); border-radius: 999px; padding: 0 0.5rem; }
+
+  /* 窄屏：三列放不下 ⇒ 产物栏收成抽屉（§12.10 已定） */
+  .pane-toggle { display: none; }
+  @media (max-width: 1280px) {
+    .app { grid-template-columns: 13rem minmax(0, 1fr); }
+    .pane {
+      position: fixed; top: 0; right: 0; bottom: 0; width: min(22rem, 84vw);
+      transform: translateX(100%); transition: transform 0.18s ease; z-index: 20;
+      box-shadow: -12px 0 32px rgba(16, 24, 40, 0.16);
+    }
+    body.pane-open .pane { transform: translateX(0); }
+    .pane-toggle { display: inline-flex; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- ══ 左栏：蒸馏台（一个蒸馏 = 一段对话，不是一次 run） ══ -->
+  <aside class="rail">
+    <div class="rail-head">
+      <span class="rail-title">蒸馏台</span>
+      <button class="new-btn" type="button" title="新蒸馏（demo 不实现）">+ 新蒸馏</button>
+    </div>
+    <div class="rail-list" id="rail"></div>
+  </aside>
+
+  <!-- ══ 主区：消息流 ══ -->
+  <main class="main">
+    <div class="main-head">
+      <span class="main-title" id="title">—</span>
+      <span class="pill" id="target-pill">skill</span>
+      <span class="state" id="state">—</span>
+      <span class="spacer"></span>
+      <span class="demo-flag" title="静态 demo：卡片的折叠、右栏文件预览、窄屏抽屉、意图路由都是真交互，但数据是假的">demo</span>
+      <button class="ghost pane-toggle" type="button" id="pane-toggle">产物</button>
+    </div>
+    <div class="stream">
+      <div class="stream-inner" id="stream"></div>
+    </div>
+    <div class="composer">
+      <div class="composer-inner">
+        <div class="quick">
+          <button type="button" data-quick="开始提炼">开始提炼</button>
+          <button type="button" data-quick="追加材料">追加材料</button>
+          <button type="button" data-quick="这里不对：">这里不对：…</button>
+        </div>
+        <form class="input-row" id="composer">
+          <input id="say" placeholder="跟这次蒸馏说一句话…（试试：这里不对：第 3 步应该用 pnpm）" autocomplete="off" />
+          <button class="send" type="submit">发送</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <!-- ══ 右栏：常驻产物栏 ══ -->
+  <aside class="pane" id="pane">
+    <div class="pane-head">
+      <span>当前产物</span>
+      <span class="spacer"></span>
+      <button class="ghost" type="button" id="pane-close">收起</button>
+    </div>
+    <div class="pane-body" id="pane-body"></div>
+  </aside>
+</div>
+
+<script>
+// ────────────────────────────────────────────────────────────────
+// 数据模型：一次蒸馏 = { id, name, target, version, state, source, cards[] }
+// 卡片六种：brief / material / progress / insight / artifact / shipped
+// 右栏从 artifact 卡取文件与体检结论——同一份数据，两个视图（这就是"对话 + 常驻产物栏"）
+// ────────────────────────────────────────────────────────────────
+const SESSIONS = [
+  {
+    id: 'build-verify-html',
+    name: 'build-verify-html',
+    target: 'skill',
+    version: 3,
+    state: 'shipped',
+    stateText: '已入库',
+    source: '来自「修复动画终态」· 12 轮 · 41 次工具调用',
+    files: [
+      { path: 'SKILL.md', w: '4.1 KB', body: '# 生成 HTML，并在真实浏览器里验证到可交付\n\n## When to Use\n- 需要产出单文件、内联 CSS/JS 的页面\n- 页面含 canvas 或动画，必须确认推进到终态\n\n## Procedure\n1. 先定状态契约（params / phase / regenerate）\n2. 写文件 → 语法检查\n3. 无头 Chrome 渲染并读页面状态\n4. 参数扫描标定默认值\n5. 交互回归\n\n## Verification\nnode scripts/verify.mjs <page> --seeds 1,2,3\n' },
+      { path: 'references/state-contract.md', w: '2.0 KB', body: '# 状态契约\n验证脚本要能读到：params、phase、model、maxSteps。只靠截图判断"动画动了"是不够的。\n' },
+      { path: 'scripts/verify.mjs', w: '6.4 KB', body: '// 无头 Chrome：渲染 → 读状态 → 断言终态\nimport { launch } from "./cdp.mjs"\n' },
+      { path: 'templates/page-skeleton.html', w: '1.8 KB', body: '<!doctype html>\n<html><body><canvas id="c"></canvas><script>window.params={seed:1}<\/script></body></html>\n' },
+    ],
+    checks: [
+      { ok: true, text: 'frontmatter 的 name 是 kebab-case' },
+      { ok: true, text: '## When to Use 存在' },
+      { ok: true, text: '## Procedure 存在' },
+      { ok: true, text: '正文引用的 scripts/、templates/ 都存在' },
+      { ok: false, text: '## Verification 里 `--seeds` 未说明取值上限' },
+    ],
+    diff: { added: 42, removed: 7 },
+    cards: [
+      {
+        kind: 'brief', folded: true,
+        summary: 'Brief：从一次工作沉淀 · skill · 中文 · 要「怎么做」，不要「谁在说」',
+        body: [
+          { k: '起点', v: '从一次工作（run「修复动画终态」）' },
+          { k: '产出', v: '技能（SKILL.md）· 不产 persona 轨' },
+          { k: '作用描述', v: '生成 HTML 并在真浏览器里验证到可交付' },
+          { k: '语言', v: 'zh-CN' },
+          { k: '跳过项', v: '别名（不填）' },
+        ],
+      },
+      {
+        kind: 'material', folded: true,
+        summary: '材料 5 项 · 约 3.2 万字 · 轨迹 4 / 外部 1',
+        materials: [
+          { src: '轨迹', name: 'task-run.md（这一轮 12 轮对话摘要）', size: '8.1 千字' },
+          { src: '轨迹', name: 'turns/*.md（41 次工具调用）', size: '2.3 万字' },
+          { src: '轨迹', name: 'verdict.md（审核判决：通过，附 2 条建议）', size: '412 字' },
+          { src: '产物', name: 'scratch/pages/*.html（3 个页面）', size: '—' },
+          { src: '外部', name: '我追加：cdp-cli 的 README 片段', size: '620 字' },
+        ],
+      },
+      {
+        kind: 'progress', folded: true,
+        summary: '起草完成 · 2:13 · 41 次工具调用 · 起草者（内置）',
+        log: [
+          '[00:03] 读 material/task-run.md',
+          '[00:11] 读 turns/*.md（41 条）',
+          '[00:38] 归纳 Procedure：5 步',
+          '[01:02] 写 skill/SKILL.md',
+          '[01:47] 写 scripts/verify.mjs、references/state-contract.md',
+          '[02:13] 完成：4 个文件',
+        ],
+      },
+      {
+        kind: 'insight', folded: false,
+        summary: '结论：Work 5 条 + 没覆盖 2 项',
+        work: [
+          '负责的是「HTML 交付物要在真浏览器里证明可用」，不是"写页面"本身',
+          '先定状态契约（params/phase/regenerate），验证脚本据此断言——先写页面再想怎么验证会返工',
+          '参数类效果必须扫描标定默认值，第一眼定稿会被换 seed 打脸',
+          '交付前跑一次无头 Chrome，读页面状态而不是截图判断',
+          '命令里的路径一律传绝对路径（相对路径在无头进程里会解析到别处）',
+        ],
+        persona: [],
+        personaSkipped: '这次不要 persona 轨（Brief 里选了"只要怎么做"）',
+        uncovered: [
+          'CI 里没有 Chrome 时的兜底（这次全程本机跑）',
+          '页面超过 2000 行时的一致性检查（素材里没出现）',
+        ],
+      },
+      {
+        kind: 'artifact', folded: false,
+        summary: '产物：4 个文件 · 体检 4 过 1 缺 · 差异 +42 −7',
+        audit: { tone: 'ok', text: '审核：通过（第 3 版）· 自动返工 1 轮后用尽' },
+        problems: ['## Verification 里 `--seeds` 未说明取值上限（机械体检）'],
+      },
+      {
+        kind: 'shipped', folded: true,
+        summary: 'v3 已入库 · 变更集 +42 −7 · 可回滚到 v2 / v1',
+        versions: [
+          { v: 'v3', note: '本次：补「状态契约」一节、加 scripts/verify.mjs', now: true },
+          { v: 'v2', note: '返工后：Procedure 拆成 5 步' },
+          { v: 'v1', note: '首版：只有 3 步，无 Verification' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'researcher',
+    name: 'researcher',
+    target: 'agent',
+    version: 1,
+    state: 'reviewing',
+    stateText: '待审',
+    source: '空白起（只有我追加的材料）',
+    files: [
+      { path: 'agent/instructions.md', w: '3.6 KB', body: '# 身份\n你是本机的研究员：把外部材料读薄，产出带出处的判断。\n\n# 边界\n- 不臆测；没有出处就写「素材不足」\n- 数字必须给来源\n\n# 流程\n1. 先列要回答的问题\n2. 每条结论后跟一行出处\n3. 最后给「我不知道」清单\n' },
+    ],
+    checks: [
+      { ok: true, text: '指令非空' },
+      { ok: true, text: `字符数 3621 / 上限 6000` },
+      { ok: false, text: '「五件事」里的失败处理一节未写' },
+    ],
+    diff: null,
+    cards: [
+      {
+        kind: 'brief', folded: true,
+        summary: 'Brief：从空白起 · agent 指令 · 中文 · 目标 agent researcher',
+        body: [
+          { k: '起点', v: '从空白/材料（没有来源 run）' },
+          { k: '产出', v: 'agent 指令（覆盖 researcher.instructions）' },
+          { k: '作用描述', v: '读外部材料，产出带出处的判断' },
+          { k: '语言', v: 'zh-CN' },
+        ],
+      },
+      {
+        kind: 'material', folded: false,
+        summary: '材料 2 项 · 约 4.6 千字 · 全是外部材料（轨迹 0）',
+        materials: [
+          { src: '外部', name: '我追加：3 篇评测文章（粘贴）', size: '4.1 千字' },
+          { src: '外部', name: '我追加：团队里现有的一份研究规范', size: '0.5 千字' },
+        ],
+      },
+      {
+        kind: 'progress', folded: true,
+        summary: '起草完成 · 0:47 · 9 次工具调用',
+        log: ['[00:02] 读 2 份外部材料', '[00:21] 归纳身份/边界/流程', '[00:40] 写 agent/instructions.md', '[00:47] 完成'],
+      },
+      {
+        kind: 'insight', folded: false,
+        summary: '结论：Persona 4 条（这份是指令，走的就是 persona 轨）',
+        work: [],
+        persona: [
+          '语气：先把结论放前面，再给出处——材料里的三篇文章都是这个结构',
+          '遇到证据不足时明确写「素材不足」，不绕过去（团队规范里点名要求）',
+          '数字必须带来源；没有来源的数字用「约」并标注不确定',
+          '拒绝在材料外补充事实，但允许指出材料之间的矛盾',
+        ],
+        uncovered: ['跨语言材料（只有中文材料）'],
+      },
+      {
+        kind: 'artifact', folded: false,
+        summary: '产物：agent/instructions.md · 3621 字符 · 体检 2 过 1 缺',
+        audit: { tone: 'muted', text: '评审：未运行（这次关掉了评审，入库会标「未经评审」）' },
+        problems: ['「五件事」里的失败处理一节未写（机械体检）'],
+      },
+    ],
+  },
+];
+
+const ROUTING = [
+  { test: (s) => /^这里不对|^不对|应该/.test(s), kind: '纠错', receipt: '我把这句当成「定点纠错」：只改你指的那一节，其余字节不动' },
+  { test: (s) => /^追加材料|^加材料/.test(s), kind: '材料', receipt: '我把这句当成「追加材料」：先挂进材料卡，等你确认再提炼' },
+  { test: (s) => /^开始提炼|^提炼|^开始/.test(s), kind: '起 run', receipt: '我把这句当成「开始提炼」：将起一次起草 run（本 demo 不真的起）' },
+  { test: () => true, kind: '补充', receipt: '我把这句当成「对 Brief 的补充」，确认后落进这次蒸馏的参数' },
+];
+
+let active = SESSIONS[0];
+let viewing = null;
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+function renderRail() {
+  const groups = [
+    { title: '进行中', test: (s) => s.state !== 'shipped' },
+    { title: '已入库', test: (s) => s.state === 'shipped' },
+  ];
+  el('rail').innerHTML = groups
+    .map((g) => {
+      const rows = SESSIONS.filter(g.test);
+      if (rows.length === 0) return '';
+      return `<div class="rail-group">${g.title}</div>` + rows
+        .map(
+          (s) => `<button class="row ${s.id === active.id ? 'on' : ''}" data-id="${s.id}" type="button">
+            <div class="row-top">
+              <span class="row-name">${esc(s.name)}</span>
+              <span class="pill ${s.target}">${s.target === 'skill' ? '技能' : '指令'}</span>
+              <span class="pill">v${s.version}</span>
+            </div>
+            <div class="row-sub">${esc(s.source)}</div>
+          </button>`
+        )
+        .join('');
+    })
+    .join('');
+}
+
+function renderCard(card) {
+  const head = `<div class="card-head" data-toggle><span class="kind ${card.kind}">${label(card.kind)}</span><span class="card-summary">${esc(card.summary)}</span><span class="card-chevron">${card.folded ? '▸' : '▾'}</span></div>`;
+  let body = '<div class="card-body">';
+  if (card.kind === 'brief') {
+    body += '<dl class="kv">' + card.body.map((r) => `<dt>${esc(r.k)}</dt><dd>${esc(r.v)}</dd>`).join('') + '</dl>';
+  }
+  if (card.kind === 'material') {
+    body += card.materials
+      .map(
+        (m) => `<div class="mat"><span class="src">${esc(m.src)}</span><span class="grow">${esc(m.name)}</span><span class="w mono">${esc(m.size)}</span><button class="x" type="button" title="移除（demo 不实现）">✕</button></div>`
+      )
+      .join('');
+    body += '<div class="tag-row"><span class="tag">+ 拖文件 / 粘贴文本 / 选目录 / 指仓库</span></div>';
+  }
+  if (card.kind === 'progress') {
+    body += `<div class="tag-row"><span class="tag">起草者（内置）</span><span class="tag">可停止</span><span class="tag">日志 41 行</span></div>`;
+    body += '<div class="log">' + card.log.map((l) => `<div>${esc(l)}</div>`).join('') + '</div>';
+  }
+  if (card.kind === 'insight') {
+    if (card.work.length) {
+      body += '<div class="sec-title">Work · 怎么做</div><ul class="slim">' +
+        card.work.map((w) => `<li>${esc(w)} <button class="line-fix" type="button" title="对这条起定点纠错（demo 只演示回执）">不对</button></li>`).join('') +
+        '</ul>';
+    }
+    if (card.persona && card.persona.length) {
+      body += '<div class="sec-title">Persona · 谁在说</div><ul class="slim">' +
+        card.persona.map((w) => `<li>${esc(w)}</li>`).join('') + '</ul>';
+    }
+    if (card.personaSkipped) {
+      body += `<div class="sec-title">Persona</div><div class="card-summary" style="white-space:normal">${esc(card.personaSkipped)}</div>`;
+    }
+    body += '<div class="sec-title">没覆盖到的（显式列出，不假装覆盖）</div><ul class="slim">' +
+      card.uncovered.map((w) => `<li class="uncovered">${esc(w)}</li>`).join('') + '</ul>';
+  }
+  if (card.kind === 'artifact') {
+    body += `<div class="tag-row">` + active.files.map((f) => `<span class="tag mono">${esc(f.path)}</span>`).join('') + '</div>';
+    body += `<div class="conclusion ${card.audit.tone}">${esc(card.audit.text)}</div>`;
+    body += '<div class="sec-title">机械体检（自动、逐项点名）</div><div class="check">' +
+      active.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('') + '</div>';
+    if (active.diff) {
+      body += `<div class="sec-title">差异</div><div class="diffbar">对比 v2：<span style="color:var(--good)">+${active.diff.added}</span> <span style="color:var(--bad)">−${active.diff.removed}</span> · 文件 4 个（新增 1 / 修改 3）</div>`;
+    }
+    body += '<div class="tag-row" style="margin-top:.5rem"><span class="tag">编辑</span><span class="tag">diff vs 原版</span><span class="tag">diff vs 上一版</span><span class="tag">只跑评审</span></div>';
+  }
+  if (card.kind === 'shipped') {
+    body += card.versions.map((v) => `<div class="mat"><span class="src">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : '<button class="ghost" type="button">回滚</button>'}</div>`).join('');
+  }
+  body += '</div>';
+  return `<div class="card ${card.folded ? 'folded' : ''}" data-kind="${card.kind}">${head}${body}</div>`;
+}
+
+function label(kind) {
+  return { brief: '提问', material: '材料', progress: '进度', insight: '结论', artifact: '产物', shipped: '入库' }[kind] ?? kind;
+}
+
+function renderPane() {
+  const files = active.files ?? [];
+  if (viewing === null && files.length) viewing = files[0].path;
+  const current = files.find((f) => f.path === viewing) ?? files[0];
+  el('pane-body').innerHTML = `
+    <div class="sec-title">文件 ${active.state === 'shipped' ? `（${esc(String(active.version))} 版）` : ''}</div>
+    <ul class="files">${files
+      .map(
+        (f) => `<li class="${f.path === current?.path ? 'on' : ''}" data-file="${esc(f.path)}"><span class="${f.path.includes('/') ? 'dir' : ''}">${esc(f.path)}</span><span class="w mono">${esc(f.w)}</span></li>`
+      )
+      .join('')}</ul>
+    <div class="sec-title">体检 ${active.checks.filter((c) => c.ok).length} 过 ${active.checks.filter((c) => !c.ok).length} 缺</div>
+    <div class="check">${active.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('')}</div>
+    ${active.diff ? `<div class="sec-title">差异</div><div class="diffbar">+${active.diff.added} −${active.diff.removed}</div>` : ''}
+    ${current ? `<div class="sec-title">${esc(current.path)}</div><div class="preview"><pre>${esc(current.body)}</pre></div>` : ''}
+    <div class="sec-title">动作</div>
+    <div class="chips">
+      <button class="ghost" type="button">${active.state === 'shipped' ? '再炼一版' : '入库'}</button>
+      <button class="ghost" type="button">追加材料</button>
+      <button class="ghost" type="button">定点纠错</button>
+    </div>`;
+}
+
+function renderMain() {
+  el('title').textContent = active.name;
+  el('target-pill').textContent = active.target === 'skill' ? '技能' : '指令';
+  el('state').textContent = active.stateText;
+  el('state').className = 'state ' + active.state;
+  el('stream').innerHTML = active.cards.map(renderCard).join('');
+  renderPane();
+  renderRail();
+}
+
+// ── 交互：折叠 / 切会话 / 右栏文件 / 窄屏抽屉 / 一句话的意图路由 ──
+el('rail').addEventListener('click', (e) => {
+  const btn = e.target.closest('.row');
+  if (!btn) return;
+  const next = SESSIONS.find((s) => s.id === btn.dataset.id);
+  if (next) { active = next; viewing = null; renderMain(); }
+});
+
+el('stream').addEventListener('click', (e) => {
+  if (e.target.closest('[data-toggle]')) {
+    const card = e.target.closest('.card');
+    card.classList.toggle('folded');
+    const chevron = card.querySelector('.card-chevron');
+    if (chevron) chevron.textContent = card.classList.contains('folded') ? '▸' : '▾';
+    return;
+  }
+  if (e.target.closest('.line-fix')) {
+    appendExchange('这里不对：这条要改', {
+      receipt: '我把这句当成「定点纠错」：只改这一条，其余字节不动（demo 不真的改）',
+    });
+  }
+});
+
+el('pane-body').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-file]');
+  if (!item) return;
+  viewing = item.dataset.file;
+  renderPane();
+});
+
+el('pane-toggle').addEventListener('click', () => document.body.classList.add('pane-open'));
+el('pane-close').addEventListener('click', () => document.body.classList.remove('pane-open'));
+
+document.querySelectorAll('[data-quick]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const text = b.dataset.quick === '这里不对：' ? '这里不对：' : b.dataset.quick;
+    el('say').value = text;
+    el('say').focus();
+  });
+});
+
+function route(text) {
+  return ROUTING.find((r) => r.test(text));
+}
+
+function appendExchange(text, override) {
+  const hit = override ?? route(text);
+  const stream = el('stream');
+  const user = document.createElement('div');
+  user.className = 'msg-user';
+  user.textContent = text;
+  const receipt = document.createElement('div');
+  receipt.className = 'receipt';
+  receipt.textContent = hit.receipt;
+  stream.appendChild(user);
+  stream.appendChild(receipt);
+  stream.parentElement.scrollTop = stream.parentElement.scrollHeight;
+}
+
+el('composer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = el('say');
+  const text = input.value.trim();
+  if (!text) return;
+  appendExchange(text);
+  input.value = '';
+});
+
+// demo 里的主题跟随系统，方便你在深色下也看一遍
+if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  document.documentElement.dataset.theme = 'dark';
+}
+
+renderMain();
+</script>
+</body>
+</html>
