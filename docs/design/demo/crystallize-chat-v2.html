@@ -60,6 +60,7 @@
   .main-title { font-size: var(--fs-lg); font-weight: 600; }
   .spacer { flex: 1; }
   .state { font-size: var(--fs-xs); padding: 0.125rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
+  .state.brief { color: var(--status-todo); }
   .state.drafting { color: var(--status-active); }
   .state.reviewing { color: var(--status-review); }
   .state.shipped { color: var(--status-done); }
@@ -92,6 +93,7 @@
   .pane { background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
   .pane-head { height: var(--topbar-h); display: flex; align-items: center; gap: 0.5rem; padding: 0 0.75rem; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 600; }
   .pane-body { overflow: auto; padding: 0.5rem 0.75rem 1rem; min-height: 0; }
+  .empty { font-size: var(--fs-sm); color: var(--text-faint); padding: 0.5rem 0.375rem; }
   .sec-title { font-size: var(--fs-xs); color: var(--text-faint); margin: 0.875rem 0 0.25rem; letter-spacing: 0.04em; }
   .files { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); }
   .files li { padding: 0.25rem 0.375rem; border-radius: var(--radius-sm); cursor: pointer; display: flex; gap: 0.375rem; align-items: center; }
@@ -179,10 +181,10 @@
 <script>
 // ─────────────────────────────────────────────────────────────
 // 只有三种东西（任何沉淀方法都落在这里，界面不为某一种方法特殊化）：
-//   session  = { id, title, target, version, state, messages[], artifact }
-//   message  = { role: 'user' | 'assistant' | 'system', text, choices?, attachments?, log? }
+//   session  = { id, title, target, version, state, messages[], artifact, intake[] }
+//   message  = { role: 'user' | 'assistant' | 'system', text, choices?, attachments?, log?, optional? }
 //   artifact = { files[{path,bytes,body}], checks[{ok,text}], versions[{v,note,now}] }
-// 提问 = 助手的 markdown + 一行选项；进度 = 一条带可展开日志的系统消息；
+// 提问 = 助手的 markdown + 一行可点的选项（逐个问）；进度 = 一条带可展开日志的系统消息；
 // 结论 = 助手的普通 markdown；入库 = 一条系统消息 + 右栏的版本列表。
 // ─────────────────────────────────────────────────────────────
 const SESSIONS = [
@@ -196,20 +198,17 @@ const SESSIONS = [
     source: '来自「修复动画终态」· 12 轮 · 41 次工具调用',
     messages: [
       { role: 'system', text: '本次沉淀接在 run「修复动画终态」后面（12 轮 · 41 次工具调用）' },
-      {
-        role: 'assistant',
-        text: '这次要沉淀什么？可以直接点，也可以直接说。',
-        choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有智能体指令'],
-      },
+      { role: 'assistant', text: '这次要沉淀什么？点一个，或者直接说。', choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有指令'] },
       { role: 'user', text: '从这次工作沉淀成技能' },
+      { role: 'assistant', text: '一句话说清：这个技能在什么情况下被用到？' },
+      { role: 'user', text: '生成 HTML 并在真浏览器里验证到可交付' },
+      { role: 'assistant', text: '用什么语言写？', choices: ['中文', 'English'] },
+      { role: 'user', text: '中文' },
+      { role: 'assistant', text: '要不要顺带提炼「风格」（persona）轨？', choices: ['不用，只要「怎么做」', '要，同时出风格'] },
+      { role: 'user', text: '不用，只要「怎么做」' },
       {
         role: 'assistant',
-        text: '好。还会问三件，**都能跳过**：\n- 作用描述：这个技能在什么情况下被用到\n- 语言\n- 要不要顺带提炼「风格」（persona）轨',
-      },
-      { role: 'user', text: '作用描述：生成 HTML 并在真浏览器里验证到可交付；语言中文；不要 persona 轨' },
-      {
-        role: 'assistant',
-        text: '收到。材料我按这次的轨迹自动带上，另外挂了你追加的一份。',
+        text: '好。材料我按这次的轨迹自动带上，另外挂了你追加的一份。',
         attachments: [
           { name: 'task-run.md', src: '轨迹 · 8.1 千字' },
           { name: 'turns/*.md', src: '轨迹 · 2.3 万字' },
@@ -217,12 +216,11 @@ const SESSIONS = [
           { name: 'scratch/pages/*.html', src: '产物 · 3 个' },
           { name: 'cdp-cli README 片段', src: '你追加 · 620 字' },
         ],
-        choices: ['开始提炼'],
       },
       { role: 'user', text: '开始提炼' },
       {
         role: 'system',
-        text: '起草中… 起草者（内置）',
+        text: '起草完成 · 2:13 · 41 次工具调用',
         log: [
           '[00:03] 读 material/task-run.md',
           '[00:11] 读 turns/*.md（41 条）',
@@ -232,7 +230,6 @@ const SESSIONS = [
           '[02:13] 完成：4 个文件',
         ],
       },
-      { role: 'system', text: '起草完成 · 2:13 · 41 次工具调用' },
       {
         role: 'assistant',
         text: '**提炼结果（Work 轨）**\n- 负责的是「HTML 交付物要在真浏览器里证明可用」，不是「写页面」本身\n- 先定状态契约（params / phase / regenerate），验证脚本据此断言\n- 参数类效果必须扫描标定默认值，第一眼定稿会被换 seed 打脸\n- 交付前跑一次无头 Chrome，读页面状态而不是截图判断\n- 命令里的路径一律传绝对路径\n\n**没覆盖到的**（显式列出，不假装覆盖）\n- 无头浏览器在 CI 里跑不了的兜底\n- 页面超过 2000 行时的一致性检查\n\n要改哪一条，直接说「这里不对：…」。',
@@ -273,10 +270,7 @@ const SESSIONS = [
       { role: 'system', text: '这次没有来源 run：从空白/材料起' },
       { role: 'assistant', text: '要优化哪条智能体的指令？还是新建一份？', choices: ['优化 researcher 的指令', '新建一份指令', '改成沉淀技能'] },
       { role: 'user', text: '优化 researcher 的指令' },
-      {
-        role: 'assistant',
-        text: '好，作用描述一句话就行：你希望它变成什么样？',
-      },
+      { role: 'assistant', text: '好，作用描述一句话就行：你希望它变成什么样？' },
       { role: 'user', text: '读外部材料，产出带出处的判断；材料不够就明说' },
       {
         role: 'assistant',
@@ -285,7 +279,6 @@ const SESSIONS = [
           { name: '3 篇评测文章（粘贴）', src: '你追加 · 4.1 千字' },
           { name: '团队研究规范', src: '你追加 · 0.5 千字' },
         ],
-        choices: ['开始提炼'],
       },
       { role: 'user', text: '开始提炼' },
       { role: 'system', text: '起草完成 · 0:47 · 9 次工具调用', log: ['[00:02] 读 2 份外部材料', '[00:21] 归纳身份/边界/流程', '[00:40] 写 agent/instructions.md', '[00:47] 完成'] },
@@ -307,6 +300,23 @@ const SESSIONS = [
       versions: [],
     },
   },
+  {
+    id: 'new-skill',
+    title: '新沉淀',
+    target: 'skill',
+    version: 0,
+    state: 'brief',
+    stateText: '提问中',
+    source: '从这次工作起 · 问题还没答完',
+    intake: [
+      { id: 'start', ask: '这次要沉淀什么？点一个，或者直接说。', choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有指令'] },
+      { id: 'purpose', ask: '一句话说清：这个技能在什么情况下被用到？', optional: true },
+      { id: 'language', ask: '用什么语言写？', choices: ['中文', 'English'], optional: true },
+      { id: 'persona', ask: '要不要顺带提炼「风格」（persona）轨？', choices: ['不用，只要「怎么做」', '要，同时出风格'], optional: true },
+    ],
+    messages: [{ role: 'system', text: '还没有来源 run：从这次对话起' }],
+    artifact: { files: [], checks: [], versions: [] },
+  },
 ];
 
 const ROUTING = [
@@ -316,8 +326,9 @@ const ROUTING = [
   { test: () => true, receipt: '我把这句当成「补充」，确认后落进这次沉淀的参数' },
 ];
 
-let active = SESSIONS[0];
+let active = SESSIONS.find((x) => x.id === 'new-skill') ?? SESSIONS[0];
 let viewing = null;
+
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -342,27 +353,76 @@ function md(text) {
   return out;
 }
 
+/**
+ * 「逐个问」：问题表跟着**沉淀方法**走（方法定义里带 questions、提示词与产物契约），
+ * daemon 按表一次问一个；答完一题落一个参数，再问下一题。
+ * demo 里把表挂在 session.intake 上，只是为了让历史沉淀不必重复贴一份。
+ */
+function ensureIntake(session) {
+  if (session.queue !== undefined) return;
+  session.queue = [...(session.intake ?? [])];
+  const first = session.queue.shift();
+  if (first) session.messages.push({ role: 'assistant', text: first.ask, choices: first.choices, optional: first.optional });
+}
+
+function materialMessage() {
+  return {
+    role: 'assistant',
+    text: '好。材料我按这次对话自动带上，也可以再追加。',
+    attachments: [
+      { name: 'task-run.md', src: '轨迹 · 8.1 千字' },
+      { name: 'turns/*.md', src: '轨迹 · 2.3 万字' },
+      { name: 'scratch/pages/*.html', src: '产物 · 3 个' },
+    ],
+    choices: ['开始提炼'],
+  };
+}
+
+function answerIntake(session, text) {
+  session.messages.push({ role: 'user', text });
+  const next = session.queue.shift();
+  if (next) {
+    session.messages.push({ role: 'assistant', text: next.ask, choices: next.choices, optional: next.optional });
+  } else {
+    session.messages.push(materialMessage());
+  }
+}
+
+function startDraft(session) {
+  session.messages.push({ role: 'user', text: '开始提炼' });
+  session.state = 'drafting';
+  session.stateText = '起草中';
+  session.messages.push({
+    role: 'system',
+    text: '起草中… 起草者（内置）',
+    log: ['[00:02] 读 material/（3 项）', '[00:18] 归纳 Procedure', '[—] demo 不真的起 run'],
+  });
+}
+
 function renderRail() {
   const groups = [
-    { title: '进行中', test: (s) => s.state !== 'shipped' },
-    { title: '已入库', test: (s) => s.state === 'shipped' },
+    { title: '进行中', test: (x) => x.state !== 'shipped' },
+    { title: '已入库', test: (x) => x.state === 'shipped' },
   ];
   el('rail').innerHTML = groups.map((g) => {
     const rows = SESSIONS.filter(g.test);
     if (!rows.length) return '';
-    return `<div class="rail-group">${g.title}</div>` + rows.map((s) => `
-      <button class="row ${s.id === active.id ? 'on' : ''}" data-id="${s.id}" type="button">
+    const body = rows.map((x) => `
+      <button class="row ${x.id === active.id ? 'on' : ''}" data-id="${x.id}" type="button">
         <div class="row-top">
-          <span class="row-name">${esc(s.title)}</span>
-          <span class="pill ${s.target}">${s.target === 'skill' ? '技能' : '指令'}</span>
-          ${s.version ? `<span class="pill">v${s.version}</span>` : ''}
+          <span class="row-name">${esc(x.title)}</span>
+          <span class="pill ${x.target}">${x.target === 'skill' ? '技能' : '指令'}</span>
+          ${x.version ? `<span class="pill">v${x.version}</span>` : ''}
         </div>
-        <div class="row-sub">${esc(s.source)}</div>
+        <div class="row-sub">${esc(x.source)}</div>
       </button>`).join('');
+    return `<div class="rail-group">${g.title}</div>` + body;
   }).join('');
 }
 
-function renderMessage(m) {
+function renderMessage(m, index, total) {
+  // 选项只在**最后一条**消息上可点：历史上的选项已经用掉了，再点就是假的交互
+  const live = index === total - 1;
   if (m.role === 'system') {
     const log = m.log
       ? `<div class="logbox"><details><summary>展开日志（${m.log.length} 行）</summary><div class="log">${m.log.map((l) => `<div>${esc(l)}</div>`).join('')}</div></details></div>`
@@ -372,8 +432,9 @@ function renderMessage(m) {
   const attach = m.attachments
     ? `<div class="attach">${m.attachments.map((a) => `<span class="item">${esc(a.name)}<span class="src">${esc(a.src)}</span></span>`).join('')}</div>`
     : '';
-  const choices = m.choices
-    ? `<div class="choices">${m.choices.map((c) => `<button type="button" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`
+  const skip = m.optional && live && m.choices ? '<button type="button" data-choice="跳过">跳过</button>' : '';
+  const choices = m.choices && live
+    ? `<div class="choices">${m.choices.map((c) => `<button type="button" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}${skip}</div>`
     : '';
   const body = m.role === 'assistant' ? md(m.text) : esc(m.text);
   return `<div class="msg ${m.role}">${body}${attach}${choices}</div>`;
@@ -381,42 +442,75 @@ function renderMessage(m) {
 
 function renderPane() {
   const a = active.artifact;
-  if (viewing === null && a.files.length) viewing = a.files[0].path;
+  const has = a.files.length > 0;
+  if (has && viewing === null) viewing = a.files[0].path;
   const current = a.files.find((f) => f.path === viewing) ?? a.files[0];
   const ok = a.checks.filter((c) => c.ok).length;
   const bad = a.checks.length - ok;
+  if (!has) {
+    el('pane-body').innerHTML =
+      '<div class="sec-title">产物</div><div class="empty">还没有产物。答完问题、点「开始提炼」之后，文件会出现在这里；过程与对话留在左边。</div>';
+    return;
+  }
   el('pane-body').innerHTML = `
     <div class="sec-title">文件</div>
     <ul class="files">${a.files.map((f) => `<li class="${f.path === current?.path ? 'on' : ''}" data-file="${esc(f.path)}"><span class="${f.path.includes('/') ? 'dir' : ''}">${esc(f.path)}</span><span class="w mono">${esc(f.bytes)}</span></li>`).join('')}</ul>
-    ${current ? `<div class="preview"><pre>${esc(current.body)}</pre></div>` : ''}
+    <div class="preview"><pre>${esc(current?.body ?? '')}</pre></div>
     <div class="sec-title">体检 ${ok} 过 ${bad} 缺</div>
     <div class="check">${a.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('')}</div>
     ${a.versions.length ? `<div class="sec-title">版本</div><div class="versions">${a.versions.map((v) => `<div class="item"><span class="mono">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : '<button class="ghost" type="button">回滚</button>'}</div>`).join('')}</div>` : ''}
     <div class="sec-title">动作</div>
-    <div class="choices">
-      <button class="ghost" type="button">${active.state === 'shipped' ? '再炼一版' : '入库'}</button>
-      <button class="ghost" type="button">追加材料</button>
-      <button class="ghost" type="button">定点纠错</button>
-    </div>`;
+    <div class="choices"><button class="ghost" type="button">${active.state === 'shipped' ? '再炼一版' : '入库'}</button><button class="ghost" type="button">追加材料</button><button class="ghost" type="button">定点纠错</button></div>`;
 }
 
 function renderMain() {
+  ensureIntake(active);
   el('title').textContent = active.title;
   el('target-pill').textContent = active.target === 'skill' ? '技能' : '指令';
   el('state').textContent = active.stateText;
   el('state').className = 'state ' + active.state;
-  el('stream').innerHTML = active.messages.map(renderMessage).join('');
+  el('stream').innerHTML = active.messages.map((m, i) => renderMessage(m, i, active.messages.length)).join('');
   renderPane();
   renderRail();
   const scroller = document.querySelector('.stream');
   scroller.scrollTop = scroller.scrollHeight;
 }
 
+function route(text) {
+  return ROUTING.find((r) => r.test(text));
+}
+
+/**
+ * 一句话怎么处理：**显式动作优先**，其次答题，最后才是「补充 + 回执」。
+ * ⚠️ 顺序错过一次：先判"提问中"的话，点「开始提炼」会被当成对下一个问题的回答，
+ *    结果材料消息又贴一遍、状态一直是"提问中"（真 Chrome 量到的，见 commit 记录）。
+ */
+function respond(text) {
+  if (text === '开始提炼') {
+    if (active.state === 'brief') active.queue = [];   // 还在提问就直接开始 ⇒ 剩下的问题算跳过
+    startDraft(active);
+    renderMain();
+    return;
+  }
+  if (active.state === 'brief') {
+    answerIntake(active, text);
+    renderMain();
+    return;
+  }
+  active.messages.push({ role: 'user', text });
+  active.messages.push({ role: 'system', text: route(text).receipt });
+  renderMain();
+}
+
 el('rail').addEventListener('click', (e) => {
   const btn = e.target.closest('.row');
   if (!btn) return;
-  const next = SESSIONS.find((s) => s.id === btn.dataset.id);
-  if (next) { active = next; viewing = null; renderMain(); }
+  const next = SESSIONS.find((x) => x.id === btn.dataset.id);
+  if (next) {
+    active = next;
+    viewing = null;
+    renderMain();
+  }
 });
 
 el('pane-body').addEventListener('click', (e) => {
@@ -426,11 +520,10 @@ el('pane-body').addEventListener('click', (e) => {
   renderPane();
 });
 
-// 选项按钮 = 替使用者说那句话（同一个形状，不引入新控件类型）
 el('stream').addEventListener('click', (e) => {
   const chip = e.target.closest('[data-choice]');
   if (!chip) return;
-  send(chip.dataset.choice);
+  respond(chip.dataset.choice);
 });
 
 el('pane-toggle').addEventListener('click', () => document.body.classList.add('pane-open'));
@@ -443,31 +536,12 @@ document.querySelectorAll('[data-quick]').forEach((b) => {
   });
 });
 
-function route(text) {
-  return ROUTING.find((r) => r.test(text));
-}
-
-/** 发一句话：人说的一条 + 平台解释的一条（回执）。两者都是普通消息。 */
-function send(text) {
-  const stream = el('stream');
-  const user = document.createElement('div');
-  user.className = 'msg user';
-  user.textContent = text;
-  const receipt = document.createElement('div');
-  receipt.className = 'msg system';
-  receipt.textContent = route(text).receipt;
-  stream.appendChild(user);
-  stream.appendChild(receipt);
-  const scroller = document.querySelector('.stream');
-  scroller.scrollTop = scroller.scrollHeight;
-}
-
 el('composer').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = el('say');
   const text = input.value.trim();
   if (!text) return;
-  send(text);
+  respond(text);
   input.value = '';
 });
 
