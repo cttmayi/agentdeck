@@ -379,7 +379,11 @@ async function resolveLoadedSkills(
  * 变成可选择的动作（progressive disclosure），长对话才不会被一刀截断。
  */
 export function buildDraftPrompt(opts: {
-  scope: 'conversation' | 'task'
+  /**
+   * ★ 分批第 133 批：「从空白/材料起」= `blank`——**没有来源 run**，素材只有使用者给的那几份
+   * （可能一份都没有）。任务书必须如实写这件事，否则起草者会去找 `turns/` 然后"创造"一份轨迹。
+   */
+  scope: 'conversation' | 'task' | 'blank'
   /** 素材目录（相对工作目录，固定 `material`）。 */
   materialDir: string
   /** 产出目录（相对工作目录，固定 `skill`）。 */
@@ -399,12 +403,17 @@ export function buildDraftPrompt(opts: {
   writingSpec: string
 }): string {
   const { scope, materialDir, outputDir, target, revised = false, writingSpec } = opts
-  return `你是 skill 起草者。本次素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已经落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
+  const origin =
+    scope === 'conversation'
+      ? '一次聊天'
+      : scope === 'task'
+        ? '一个任务'
+        : '**空白起**（这次没有来源 run）'
+  return `你是 skill 起草者。${scope === 'blank' ? '这一版是**从空白起**的：' : '本次素材来自'}${origin}，素材落盘到 \`${materialDir}/\`（就在本工作目录里）；你的产出写到 \`${outputDir}/\`。
 
 【这次的材料在哪】
 - 索引：\`${materialDir}/00-README.md\`（来源、规模、本次目标、该读哪些文件、怎么用）。
-- 原始的对话轮次/任务记录：\`${materialDir}/turns/*.md\`（或 \`task-run.md\`）——写 Procedure 前
-  回查原始命令与参数就到这里取。
+- ${scope === 'blank' ? '材料：\`appended/*.md\`（使用者给的材料，可能一份都没有）——**没有轨迹可回查**，索引页里写了"没有轨迹"，别去找 `turns/`。' : '原始的对话轮次/任务记录：\`' + materialDir + '/turns/*.md\`（或 \`task-run.md\`）——写 Procedure 前回查原始命令与参数就到这里取。'}
 - **怎么读、怎么自查、能不能入库**这些规矩在你自己的身份里（本任务不重复说）；
   下面这段写作规范是**写法**的唯一权威。
 
@@ -476,7 +485,8 @@ export const AGENT_INSTRUCTIONS_MAX_CHARS = 6000
  *   3. 不许动技能与工具：素材里给了它们（只读）是为了避免写出跟现有技能打架的指令。
  */
 export function buildAgentInstructionsPrompt(opts: {
-  scope: 'conversation' | 'task'
+  /** 与 `buildDraftPrompt` 同一套口径（`blank` = 没有来源 run；这一批暂不允许这种目标）。 */
+  scope: 'conversation' | 'task' | 'blank'
   materialDir: string
   outputDir: string
   /** 这一版是"按意见改一版"（产出目录里已经是上一版，意见在 feedback.md）。 */
@@ -492,7 +502,7 @@ export function buildAgentInstructionsPrompt(opts: {
   maxChars: number
 }): string {
   const { scope, materialDir, outputDir, revised = false, hasEvidence, maxChars } = opts
-  return `你是一位 agent 设计师：**优化一条已有智能体的指令**，让它下次干这类活时更稳。素材来自${scope === 'conversation' ? '一次聊天' : '一个任务'}，已落盘到 \`${materialDir}/\`。
+  return `你是一位 agent 设计师：**优化一条已有智能体的指令**，让它下次干这类活时更稳。素材来自${scope === 'conversation' ? '一次聊天' : scope === 'task' ? '一个任务' : '空白起（没有来源 run）'}，已落盘到 \`${materialDir}/\`。
 
 【先做三件事】
 1. 读 \`${materialDir}/00-README.md\`（索引：来源、规模、目标、该读哪些文件）。
@@ -568,6 +578,14 @@ export interface CrystallizeDraftRow {
   target: CrystallizeTargetRef | null
   /** 来源：conversation = 对话；issue = 任务。null = 源 run 丢了。 */
   source: { kind: 'conversation' | 'issue'; label: string } | null
+  /**
+   * ★ 分批第 133 批：「从空白/材料起」的草稿——**没有来源 run**（`subject.sourceRunId` 缺席）。
+   *
+   * 为什么单独给一个字段，而不是让界面从 `source === null` 推：`source === null` 还可能是
+   * "源 run 被删了"（那时该显示「来源未知」）。两件事在界面上是不同的说法，混在一起会让
+   * 使用者以为自己的沉淀"丢了来源"。
+   */
+  startFromBlank: boolean
 }
 
 export async function listCrystallizeDrafts(
@@ -631,6 +649,7 @@ export async function listCrystallizeDrafts(
       versionRunIds: list.map((r) => r.id as string),
       status: latest.status,
       queuedAt: latest.queuedAt,
+      startFromBlank: latest.subject.sourceRunId === undefined,
       target: latest.crystallizeTarget ?? null,
       source,
     })

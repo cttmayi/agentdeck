@@ -2614,6 +2614,126 @@ describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批�
 })
 
 /**
+ * §10.12 「从空白/材料起」：**无源 run 的草稿**（分批第 133 批，U3d 第三半）。
+ *
+ * 不是每次沉淀都有一条跑过的 run 可以当素材——"把我知道的做法写成一个技能"本来就没跑过。
+ * 这一节钉的是 daemon 侧那条新路：`startFrom: 'blank'` ⇒ 起草 run 的 `subject` **不带**
+ * `sourceRunId`、素材只有使用者给的那几份（可以零份）、索引页如实写"没有轨迹可回查"。
+ * 界面入口（目标屏的起点选项）是下一批的事——这一批先把"能造出来"钉住。
+ */
+describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批）', () => {
+  const blankDraft = async (
+    materials: Array<{ name?: string; text: string }>,
+    purpose = '空白起夹具',
+  ): Promise<string> =>
+    draftAndWait({
+      startFrom: 'blank',
+      target: { kind: 'new', purpose },
+      materials,
+    })
+
+  test('★★ 空白起 + 两份材料 ⇒ 没有来源 run、素材落在 appended/、索引如实说"空白起"', async () => {
+    const draftRunId = await blankDraft([
+      { name: '外部笔记', text: '# 笔记\n\n- 先看日志再动手\n' },
+      { text: '# 另一份\n\n没有名字的材料也要能落盘。\n' },
+    ])
+    const run = (await (await fetch(`${daemon.url}/api/runs/${draftRunId}`)).json()) as {
+      subject: { type: string; id: string; sourceRunId?: string }
+      crystallizeTarget?: { kind: string }
+    }
+    assert.equal(run.subject.type, 'skill-draft')
+    assert.equal(run.subject.sourceRunId, undefined, '空白起的草稿不许带来源 run')
+    assert.equal(run.crystallizeTarget?.kind, 'new')
+
+    const items = await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${draftRunId}`,
+    )
+    const appended = items.items.filter((i) => i.relPath.startsWith('appended/'))
+    assert.equal(appended.length, 2, '两份材料都要落在 appended/ 下')
+    assert.ok(appended.some((i) => i.text.includes('先看日志再动手')))
+    const index = items.items.find((i) => i.relPath === '00-README.md')
+    assert.ok(index, '索引页要在')
+    assert.match(index!.text, /空白起/, '索引必须说清这次没有来源 run')
+    assert.match(index!.text, /没有轨迹可回查/)
+
+    // 列表里这一行要能认出"空白起"（界面据此给不同的来源文案）
+    const list = await getJsonFile<{ items: Array<{ runId: string; startFromBlank: boolean }> }>(
+      '/api/crystallize/drafts',
+    )
+    assert.equal(list.items.find((r) => r.runId === draftRunId)?.startFromBlank, true)
+  })
+
+  test('★★ 一份材料都不给也能起（"先按作用描述写一版"是正常用法）', async () => {
+    const draftRunId = await blankDraft([], '什么都没有先写一版')
+    const items = await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${draftRunId}`,
+    )
+    assert.equal(items.items.filter((i) => i.relPath.startsWith('appended/')).length, 0)
+    const index = items.items.find((i) => i.relPath === '00-README.md')
+    assert.match(index!.text, /这次没有材料/, '索引要如实说"既没有来源 run，也没给材料"')
+  })
+
+  test('★★ 边界：空白起只许新建、不许同时带 runId、材料超限拒绝', async () => {
+    const withRun = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        startFrom: 'blank',
+        runId: await runOnce('不该被用上的 run'),
+        target: { kind: 'new', purpose: 'x' },
+      }),
+    })
+    assert.equal(withRun.status, 400, await withRun.clone().text())
+    assert.equal(((await withRun.json()) as { code?: string }).code, 'blank_with_run')
+
+    const updateTarget = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'update', skillId: 'x' } }),
+    })
+    assert.equal(updateTarget.status, 400, await updateTarget.clone().text())
+    assert.equal(((await updateTarget.json()) as { code?: string }).code, 'blank_requires_new')
+
+    const tooBig = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        startFrom: 'blank',
+        target: { kind: 'new', purpose: 'x' },
+        materials: [{ text: 'x'.repeat(100 * 1024 + 1) }],
+      }),
+    })
+    assert.equal(tooBig.status, 400, await tooBig.clone().text())
+    assert.equal(((await tooBig.json()) as { code?: string }).code, 'material_too_large')
+  })
+
+  test('★★ 空白起的草稿能「按意见改一版」：不再 409「没记来源」，素材跟着新版', async () => {
+    const v1 = await blankDraft([{ name: '材料', text: '这份材料要一直在。' }], '空白起再改一版')
+    const revised = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '这里不对：把第一步写清' }),
+    })
+    const revisedText = await revised.text()
+    assert.equal(revised.status, 202, revisedText)
+    const v2 = await waitRevisedFrom(v1)
+    const run2 = (await (await fetch(`${daemon.url}/api/runs/${v2}`)).json()) as {
+      subject: { sourceRunId?: string }
+      revisedFrom?: string
+    }
+    assert.equal(run2.revisedFrom, v1)
+    assert.equal(run2.subject.sourceRunId, undefined, '新版同样没有来源 run')
+    const items = await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${v2}`,
+    )
+    assert.ok(
+      items.items.some((i) => i.relPath === 'appended/材料.md'),
+      '改版之后素材（使用者一开始给的）必须还在',
+    )
+  })
+})
+
+/**
  * §10.6 人改草稿（2026-10-21 分批第 8 批）。
  *
  * 使用者原话：「缺少一个可以改的地方」。编辑器一直都在（草稿 tab 每个文本文件都能改），

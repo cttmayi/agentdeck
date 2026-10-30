@@ -121,6 +121,7 @@ import {
 } from './builtin-drafter.ts'
 import {
   appendMaterial,
+  collectBlankMaterial,
   collectMaterial,
   draftDirName,
   draftRoot,
@@ -130,6 +131,8 @@ import {
   writeMaterial,
   type ExistingAgentSnapshot,
   type ExistingSkillSnapshot,
+  type MaterialPiece,
+  type MaterialStats,
 } from './crystallize-material.ts'
 import {
   assembleArtifacts,
@@ -3874,12 +3877,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return { status: 400, body: { error: '这条 run 不是起草 run', code: 'not_a_draft' } }
     }
     const sourceRunId = previous.subject.sourceRunId
-    if (sourceRunId === undefined) {
-      return { status: 409, body: { error: '这条草稿没记来源，无法再起草', code: 'no_source' } }
-    }
-    const sourceRun = await store.getRun(sourceRunId as RunId)
-    if (!sourceRun) {
-      return { status: 404, body: { error: '来源 run 已不存在', code: 'source_run_not_found' } }
+    /**
+     * ★ 分批第 133 批：**空白起的草稿本来就没有来源 run**（「从空白/材料起」）。
+     *
+     * 以前这里一律 `409 no_source` ⇒ 空白起的草稿连"按意见改一版"都做不了：第一版写得不对，
+     * 使用者只能看着。现在"缺字段"就代表空白起，照常改——素材（使用者给的材料）本来就在
+     * 任务目录的 `material/` 里，返工不需要源 run 提供任何东西。
+     * 只有"记了来源但那条 run 真的没了"才是 404。
+     */
+    let sourceRun: Run | null = null
+    if (sourceRunId !== undefined) {
+      sourceRun = await store.getRun(sourceRunId as RunId)
+      if (!sourceRun) {
+        return { status: 404, body: { error: '来源 run 已不存在', code: 'source_run_not_found' } }
+      }
     }
     // ★ 与起草那条路同源：起草者是**平台内置的那条**，不是来源 run 的执行者
     //   （「按意见改一版」如果还借来源执行者，就等于"重写一版"与"改一版"
@@ -4024,7 +4035,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const revisePrompt =
       previous.crystallizeTarget?.kind === 'agent'
         ? buildAgentInstructionsPrompt({
-            scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+            scope:
+              sourceRun === null
+                ? 'blank'
+                : sourceRun.subject.type === 'conversation'
+                  ? 'conversation'
+                  : 'task',
             materialDir: 'material',
             outputDir: 'agent',
             revised: true,
@@ -4032,7 +4048,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
           })
         : buildDraftPrompt({
-            scope: sourceRun.subject.type === 'conversation' ? 'conversation' : 'task',
+            scope:
+              sourceRun === null
+                ? 'blank'
+                : sourceRun.subject.type === 'conversation'
+                  ? 'conversation'
+                  : 'task',
             materialDir: 'material',
             outputDir: 'skill',
             target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
@@ -4050,7 +4071,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       },
       // 第 ③ 条：不注入技能（规范在 prompt 里）
       skills: [],
-      subject: { type: 'skill-draft', id: newRunId, sourceRunId },
+      // 空白起的新版同样不带 `sourceRunId`（字段缺席 = 没有来源，与第一版一致）
+      subject: {
+        type: 'skill-draft',
+        id: newRunId,
+        ...(sourceRunId === undefined ? {} : { sourceRunId }),
+      },
       prompt: revisePrompt,
       limits: { maxTurns: null, timeoutMs: null },
       reviewerAgentId: null,
@@ -6880,27 +6906,67 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         runId?: unknown
         target?: unknown
         userFeedback?: unknown
+        /** ★ 分批第 133 批：`'blank'` = **没有来源 run**（「从空白/材料起」）。 */
+        startFrom?: unknown
+        /** ★ 分批第 133 批：空白起时使用者一开始就给的材料（`[{ name?, text }]`，可以零份）。 */
+        materials?: unknown
       }
+      /**
+       * ★ 分批第 133 批（U3d 第三半）：「从空白/材料起」= **无源 run 的草稿**。
+       *
+       * 为什么需要它：不是每次沉淀都有一条跑过的 run 可以当素材——"把我知道的做法写成
+       * 一个技能"这种事本来就没跑过（demo 里那条 `researcher` 就是"空白起 · 只有我追加的材料"）。
+       * 以前唯一的路是随便找一条 run 硬凑素材，那等于给起草者塞一堆无关证据。
+       *
+       * 边界（这一批刻意收窄的地方）：
+       *   · **只能新建**：更新/优化都要有一条已有的东西当"上一版"，空白起没有；
+       *   · **材料可以零份**：最常见的用法就是"什么都没有，先按作用描述写一版"——
+       *     这与 `empty_material` 不冲突（那条防的是"任务/对话根本没内容"）；
+       *   · 落点与「追加材料」同一档（`material/appended/`）：一开始给的、后来追加的，
+       *     是同一类东西，界面上也该聚在一起；后续「按意见改一版」天然带着它们。
+       */
+      const startFromBlank = raw?.startFrom === 'blank'
       const runId = typeof raw?.runId === 'string' ? raw.runId : ''
-      if (runId === '') {
-        sendJson(res, 400, { error: '需要 runId', code: 'run_id_required' })
+      if (startFromBlank) {
+        if (runId !== '') {
+          sendJson(res, 400, {
+            error: '「从空白/材料起」与 runId 只能二选一（有来源 run 就不用走空白起）',
+            code: 'blank_with_run',
+          })
+          return
+        }
+      } else if (runId === '') {
+        sendJson(res, 400, { error: '需要 runId（或 startFrom:"blank"）', code: 'run_id_required' })
         return
       }
-      const requestedRun = await store.getRun(runId as RunId)
-      if (!requestedRun || requestedRun.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `run 不存在（${runId}）`, code: 'run_not_found' })
-        return
+      let sourceRun: Run | null = null
+      if (!startFromBlank) {
+        const requestedRun = await store.getRun(runId as RunId)
+        if (!requestedRun || requestedRun.workspaceId !== workspaceId) {
+          sendJson(res, 404, { error: `run 不存在（${runId}）`, code: 'run_not_found' })
+          return
+        }
+        // 传进来的可能是起草 run 自己（草稿列表点进来）——归一成源 run，
+        // 绝不拿草稿的产出当素材（见 crystallize.ts 的 resolveSourceRun）。
+        sourceRun = await resolveSourceRun(store, requestedRun)
       }
-      // 传进来的可能是起草 run 自己（草稿列表点进来）——归一成源 run，
-      // 绝不拿草稿的产出当素材（见 crystallize.ts 的 resolveSourceRun）。
-      const sourceRun = await resolveSourceRun(store, requestedRun)
       // 目标：新建 skill（可带作用描述）/ 更新本次加载的 skill / **优化某条智能体的指令**。
       let target:
         | { kind: 'new'; purpose: string }
         | { kind: 'update'; skillId: string }
         | { kind: 'agent'; agentId: string }
       const t = raw?.target as Record<string, unknown> | undefined
-      if (t?.kind === 'new') {
+      if (startFromBlank) {
+        if (t?.kind !== 'new') {
+          sendJson(res, 400, {
+            error:
+              '「从空白/材料起」只能新建一份技能——更新/优化都要有一条已有的东西当"上一版"，而空白起没有',
+            code: 'blank_requires_new',
+          })
+          return
+        }
+        target = { kind: 'new', purpose: typeof t['purpose'] === 'string' ? t['purpose'].trim() : '' }
+      } else if (t?.kind === 'new') {
         // 作用描述**可选**（2026-10-19 四轮定稿）：留空则由内置技能从素材推断，
         // 审阅时把推断出的 description 摆最上面让人否定。必填的时候每次新建都要
         // 先想一句话，而多数人其实想不清——那反而让 description 变成走过场。
@@ -6929,7 +6995,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
           sendJson(res, 400, { error: '优化智能体需要 agentId', code: 'agent_id_required' })
           return
         }
-        const usedIds = [sourceRun.agentId as string, sourceRun.reviewerAgentId ?? null]
+        const usedIds = [sourceRun!.agentId as string, sourceRun!.reviewerAgentId ?? null]
         if (!usedIds.includes(agentId)) {
           sendJson(res, 400, {
             error: '这条智能体没有参与这次的 run（只能优化实际参与的那条执行者或审核者）',
@@ -6951,25 +7017,52 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       // 顺序很重要：**先落盘再起 run**。素材目录在起草 run 的工作目录里，agent 一启动
       // 就能读；而且落盘失败时我们还没起 run，不会留下一条"素材是空的"的草稿。
       const userFeedback = typeof raw?.userFeedback === 'string' ? raw.userFeedback : undefined
-      const collected = await collectMaterial(store, sourceRun, userFeedback)
-      if (isMaterialEmpty(collected)) {
-        sendJson(res, 400, { error: '这个 run 没有可沉淀的内容（消息为空）', code: 'empty_material' })
-        return
+      let collected: { pieces: MaterialPiece[]; stats: MaterialStats }
+      if (startFromBlank) {
+        // 空白起的材料由使用者一开始给（可以零份）。逐份校验，与 `POST /api/crystallize/material`
+        // 同一条上限（100 KiB）——两处写的是同一类东西，不该有两种规矩。
+        const list = Array.isArray(raw?.materials) ? raw.materials : []
+        const inputs: Array<{ name?: string; text: string }> = []
+        for (const entry of list) {
+          const m = entry as Record<string, unknown> | null
+          const text = typeof m?.['text'] === 'string' ? m['text'] : ''
+          if (text.trim() === '') continue
+          const bytes = Buffer.byteLength(text, 'utf8')
+          if (bytes > 100 * 1024) {
+            sendJson(res, 400, {
+              error: `这份材料太大（${bytes} 字节，上限 ${100 * 1024}）——请拆成几份`,
+              code: 'material_too_large',
+            })
+            return
+          }
+          inputs.push({ name: typeof m?.['name'] === 'string' ? (m['name'] as string) : '', text })
+        }
+        collected = collectBlankMaterial(inputs)
+      } else {
+        collected = await collectMaterial(store, sourceRun as Run, userFeedback)
+        if (isMaterialEmpty(collected)) {
+          sendJson(res, 400, { error: '这个 run 没有可沉淀的内容（消息为空）', code: 'empty_material' })
+          return
+        }
       }
 
       // ── 现有 skill 列表 + 更新基线 ──
-      const targets = await crystallizeTargets(store, sourceRun)
+      //
+      // ★ 分批第 133 批：空白起**没有来源 run**，也就没有"这次跑过什么"可算 ⇒ `targets` 为 null。
+      //   它同时意味着：任务门槛（task_gate）不适用（没有任务）、现有技能清单为空
+      //   （空白起本来就不判重，见索引页里那句"空白起"）。
+      const targets = startFromBlank ? null : await crystallizeTargets(store, sourceRun as Run)
       // ── 任务场景的门槛（设计 §4.3）：有用户反馈 或 审核过才可沉淀 ──
       // 前端在任务按钮 / 流程页都拦（本页「新建沉淀」能选任意任务，不能只靠按钮）；
       // 这里再拦一道——界面画对了而忘了带，这条就是兜底（门是设计规则，不是 UI 细节）。
-      if (targets.scope === 'task' && !(targets.reviewed || targets.hasUserFeedback)) {
+      if (targets !== null && targets.scope === 'task' && !(targets.reviewed || targets.hasUserFeedback)) {
         sendJson(res, 400, {
           error: '任务沉淀需要有审核结论或用户反馈（设计 §4.3）',
           code: 'task_gate',
         })
         return
       }
-      const existingSkills = targets.loadedSkills.map((s) => ({
+      const existingSkills = (targets?.loadedSkills ?? []).map((s) => ({
         slug: s.slug,
         name: s.name,
         description: s.description,
@@ -7019,8 +7112,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const draftDir = await draftTaskDir(draftRunId)
       try {
         await writeMaterial(join(draftDir, 'material'), collected, {
-          scope: targets.scope,
-          sourceLabel: await sourceLabelOf(store, sourceRun),
+          scope: targets === null ? 'blank' : targets.scope,
+          sourceLabel: sourceRun === null ? '' : await sourceLabelOf(store, sourceRun),
           target:
             agentSnapshot !== null
               ? { kind: 'agent', agent: agentSnapshot }
@@ -7064,14 +7157,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const draftPrompt =
         agentSnapshot !== null
           ? buildAgentInstructionsPrompt({
-              scope: targets.scope,
+              scope: targets === null ? 'blank' : targets.scope,
               materialDir: 'material',
               outputDir: 'agent',
               hasEvidence: hasDraftEvidence,
               maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
             })
           : buildDraftPrompt({
-              scope: targets.scope,
+              scope: targets === null ? 'blank' : targets.scope,
               materialDir: 'material',
               outputDir: 'skill',
               target: updateSnapshot === null ? 'new' : 'update',
@@ -7115,7 +7208,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
         //   `sourceRunId` = 它从哪条 run 发起（对话 = 那一轮 run，任务 =
         //   任务执行 run）——"恢复进行中的起草"按它找回这条草稿（§4.1.1）。
-        subject: { type: 'skill-draft', id: draftRunId, sourceRunId: runId },
+        // ⚠️ 空白起**不带** `sourceRunId`（字段缺席，不是空串）：列表/`resolveSourceRun`
+        //    都按"缺字段"判，编一个空串会让"来源 run 是空的"看起来像"跑过一条没内容的 run"。
+        subject: {
+          type: 'skill-draft',
+          id: draftRunId,
+          ...(startFromBlank ? {} : { sourceRunId: runId }),
+        },
         prompt: draftPrompt,
         limits: { maxTurns: null, timeoutMs: null },
         // 起草 run **绝不自动审**（评审在人——审阅界面是它唯一的大门）。

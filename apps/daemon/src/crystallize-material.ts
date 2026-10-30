@@ -69,8 +69,13 @@ export interface ExistingAgentSnapshot {
 
 /** 落盘时的上下文（这些进 `00-README.md` 与 `meta.json`）。 */
 export interface MaterialContext {
-  scope: 'conversation' | 'task'
-  /** 来源标题（对话标题 / 任务标题）。 */
+  /**
+   * ★ 分批第 133 批（「从空白/材料起」）：`blank` = **没有来源 run**——素材只有使用者
+   * 在开始提炼时给的那几份（可能一份都没有）。索引页要如实写"没有轨迹可回查"，
+   * 否则起草者会以为 `turns/` 只是它没找到。
+   */
+  scope: 'conversation' | 'task' | 'blank'
+  /** 来源标题（对话标题 / 任务标题；空白起为空串）。 */
   sourceLabel: string
   /**
    * 本次目标：新建 skill（可带作用描述）/ 更新某个 skill / **优化某条智能体的指令**。
@@ -203,12 +208,28 @@ function buildIndex(ctx: MaterialContext, stats: MaterialStats, pieces: Material
             return `- \`${p.relPath}\` — ${firstLine.replace(/^# /, '')}`
           })
           .join('\n')
-      : '- `task-run.md` — 这条任务的完整执行记录'
+      : ctx.scope === 'blank'
+        ? // ★ 分批第 133 批：空白起没有轨迹，索引里要**如实说**，并把使用者给的每份材料列出来
+          //   （"先读这一页"是起草者的第一条指令——不列在这儿，它们就等于不存在）。
+          pieces.length === 0
+          ? '- **这次没有材料**：既没有来源 run，使用者也没给材料。只按作用描述起草，并明说依据不足。'
+          : pieces.map((p) => `- \`${p.relPath}\` — 使用者给的材料（外部）`).join('\n')
+        : '- `task-run.md` — 这条任务的完整执行记录'
+
+  const sourceLine =
+    ctx.scope === 'blank'
+      ? '来源：**空白起**（没有来源 run）'
+      : `来源：${ctx.scope === 'conversation' ? '对话' : '任务'}「${ctx.sourceLabel}」`
+  const pieceCount = pieces.filter((p) => p.relPath.startsWith('appended/')).length
+  const scaleLine =
+    ctx.scope === 'blank'
+      ? `规模：使用者给的材料 ${pieceCount} 份（**没有轨迹可回查**）`
+      : `规模：${stats.turns} 轮 · ${stats.toolCalls} 次工具调用`
 
   return `# 素材索引
 
-来源：${ctx.scope === 'conversation' ? '对话' : '任务'}「${ctx.sourceLabel}」
-规模：${stats.turns} 轮 · ${stats.toolCalls} 次工具调用
+${sourceLine}
+${scaleLine}
 
 ## 本次要做什么
 
@@ -224,7 +245,11 @@ ${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当�
 ## 怎么用这些文件
 
 1. **先读这一页**，再决定要读哪些文件——不要一次性把全部素材读进上下文。
-2. 写 Procedure 之前，回查**原始命令与参数**（在 \`turns/*.md\` 的「工具调用」里），
+2. 写 Procedure 之前，${
+    ctx.scope === 'blank'
+      ? '**空白起没有轨迹可回查**：材料里没有的命令、路径、事实一律不要编，缺就如实写"没覆盖到"'
+      : '回查**原始命令与参数**（在 \`turns/*.md\` 的「工具调用」里）'
+  }，
    不要凭印象重写；命令要能直接复制就跑。
 3. **分清两类东西**（2026-10-25 改，使用者："这些要求就是我对此部分的习惯…这才有沉淀的意义"）：
    - **使用者的要求**（\`## 使用者\` 段里的话，清单见 \`user-requirements.md\`）⇒ 这是**约定的来源**：
@@ -413,6 +438,43 @@ function nameWithoutClash(existing: ReadonlySet<string>, asked: string): string 
   let name = asked
   for (let i = 2; existing.has(name); i += 1) name = `${stem}-${i}${ext}`
   return name
+}
+
+/**
+ * ★ 分批第 133 批（「从空白/材料起」）：把使用者**一开始就给**的那几份材料做成素材文件。
+ *
+ * 与 `collectMaterial` 的差别只有一个：**没有来源 run**（也就没有轨迹可切）。
+ * 落点与「追加材料」同一档（`material/appended/`）——一开始给的、后来追加的是同一类东西，
+ * 界面上也该聚在一起、后面「按意见改一版」也天然带着。
+ *
+ * ⚠️ **允许零份**：空白起最常见的用法就是"什么都没有，先按作用描述写一版"。空材料不是错误
+ * （与 `collectMaterial` 那条 `isMaterialEmpty` 不同——那条防的是"任务/对话根本没内容"，
+ * 而这里使用者明确选了从空白起）。
+ */
+export function collectBlankMaterial(
+  inputs: ReadonlyArray<{ name?: string; text: string }>,
+): { pieces: MaterialPiece[]; stats: MaterialStats } {
+  const used = new Set<string>()
+  const pieces: MaterialPiece[] = []
+  inputs.forEach((input, i) => {
+    const asked = safeMaterialName(input.name)
+    let name: string
+    if (asked === '') {
+      let n = i + 1
+      while (used.has(`appended-${n}.md`)) n += 1
+      name = `appended-${n}.md`
+    } else {
+      const dot = asked.lastIndexOf('.')
+      const stem = dot === -1 ? asked : asked.slice(0, dot)
+      const ext = dot === -1 ? '' : asked.slice(dot)
+      let candidate = asked
+      for (let k = 2; used.has(candidate); k += 1) candidate = `${stem}-${k}${ext}`
+      name = candidate
+    }
+    used.add(name)
+    pieces.push({ relPath: `${APPENDED_MATERIAL_DIR}/${name}`, text: input.text })
+  })
+  return { pieces, stats: { turns: 0, toolCalls: 0 } }
 }
 
 /** 索引页追加一段"使用者后来追加的材料"（起草者读的第一个文件）。 */
