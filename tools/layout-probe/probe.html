@@ -541,6 +541,7 @@
          *    "字数变了没有"：只有前者才是使用者那句话的意思。
          */
         facts['agents.settingsDraftDiscarded'] = await (async () => {
+facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents', wait: '.page-name 文本 = 智能体' }
           f.contentWindow.location.hash = '#/agents'
           // ⚠️ 2026-09 顶栏改版：页面标题从主区头部搬到了顶栏，所以"这一页出来了"
           //    这个信号跟着改量点（判据没变：仍然是**这一页的名字**出现在屏幕上）。
@@ -606,6 +607,7 @@
         // ══════════════ 任务：同样的主从 + 去重字样 ══════════════
         // ⚠️ 页名是「任务」（顶上那条 `shell.navTasks`——侧栏叫什么这里就叫什么，
         //    合并之后侧栏那一项改叫「任务」了；D58 之前这里等的是「任务清单」）。
+facts['entry.任务'] = { from: f.contentWindow.location.hash, to: '#/tasks', wait: '.page-name 文本 = 任务' }
         f.contentWindow.location.hash = '#/tasks'
         await until(() => text(d().querySelector('.page-name')) === '任务')
         // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
@@ -1109,6 +1111,7 @@
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
         // ══════════════ Skills：安装面板在**主区**里（2026-10 起不再是抽屉）══════════════
+facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', wait: '.page-name 文本 = 技能' }
         f.contentWindow.location.hash = '#/skills'
         await until(() => text(d().querySelector('.page-name')) === '技能')
         await wait(500)
@@ -1773,6 +1776,7 @@
         const badToolPath = probeQuery.get('badToolPath')
         const uiToolPath = probeQuery.get('uiToolPath')
 
+facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wait: '.page-name 文本 = 工具 + 工具行 > 0' }
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
         await until(() => d().querySelectorAll('.tool-table tbody tr.tool-row').length > 0)
@@ -2037,6 +2041,7 @@
           //    被卸掉了，选择器只剩"空态 / 死权限"两种形状——"框的条数 = 已装工具的
           //    动作总数""勾着的 = 这个组在接口上的 `allowedActions`"这两条**必须**在
           //    包装着的时候量，否则量到 0 = 0 这种空过的相等（踩过）。
+          facts['entry.智能体组'] = { from: f.contentWindow.location.hash, to: '#/groups', wait: '.list-row-main 数 > 0' }
           f.contentWindow.location.hash = '#/groups'
           await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
           await wait(400)
@@ -5846,6 +5851,11 @@
           }
         }
 
+
+        // 分批第 99 批：把"每组的入口"汇总成一个事实，供 `harness.entryRoutes` 判据读
+        facts['harness.entriesRecorded'] = ['任务', '技能', '工具', '智能体组', '智能体'].every(
+          (n) => typeof facts['entry.' + n]?.from === 'string',
+        )
 
         // ══════════════ 聊天（闭环的旁路）══════════════
         //
