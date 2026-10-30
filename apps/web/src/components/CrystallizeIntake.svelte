@@ -21,19 +21,33 @@
   }
   let {
     targets,
+    blank = false,
     onfinish,
   }: {
     targets: Targets | null
-    onfinish: (p: { kind: 'new' | 'update' | 'agent'; skillId: string; agentId: string; purpose: string; feedback: string }) => void
+    /** ★ 分批第 133 批：「从空白/材料起」——没有来源 run（起点已由入口选定，不再问）。 */
+    blank?: boolean
+    onfinish: (p: {
+      kind: 'new' | 'update' | 'agent'
+      skillId: string
+      agentId: string
+      purpose: string
+      feedback: string
+      blank?: boolean
+      material?: string
+    }) => void
   } = $props()
 
-  type Stage = 'start' | 'detail' | 'purpose' | 'ready'
-  let stage = $state<Stage>('start')
-  let kind = $state<'new' | 'update' | 'agent' | ''>('')
+  type Stage = 'start' | 'detail' | 'purpose' | 'blankMaterial' | 'ready'
+  // 空白起：起点已经定了（用户在「新建沉淀」里选了它），从这里直接问作用描述——不再多问一遍。
+  let stage = $state<Stage>(blank ? 'purpose' : 'start')
+  let kind = $state<'new' | 'update' | 'agent' | ''>(blank ? 'new' : '')
   let skillId = $state('')
   let agentId = $state('')
   let purpose = $state('')
   let feedback = $state('')
+  /** 空白起时使用者一开始给的材料（一段文本，可空）。 */
+  let materialText = $state('')
 
   const skills = $derived(targets?.loadedSkills ?? [])
   /**
@@ -70,7 +84,19 @@
     if (kind === '' || purposeMissing) return
     if (kind === 'update' && skillId === '') return
     if (kind === 'agent' && agentId === '') return
-    onfinish({ kind, skillId, agentId, purpose: purpose.trim(), feedback: feedback.trim() })
+    onfinish({
+      kind,
+      skillId,
+      agentId,
+      purpose: purpose.trim(),
+      feedback: feedback.trim(),
+      ...(blank ? { blank: true, material: materialText.trim() } : {}),
+    })
+  }
+
+  /** 作用描述之后：空白起再问一句材料（可跳过），其余直接进确认。 */
+  function afterPurpose(): void {
+    stage = blank ? 'blankMaterial' : 'ready'
   }
 
   const startLabel = $derived(kind === 'new' ? '新建一份技能' : kind === 'update' ? '优化已有技能' : kind === 'agent' ? '优化智能体指令' : '')
@@ -79,7 +105,7 @@
 
 <section class="intake">
   <h3 class="intake-title">沉淀目标</h3>
-  {#if targets === null}
+  {#if targets === null && !blank}
     <div class="skeleton" style="height:1.1rem"></div>
   {:else if stage === 'start'}
     <p class="intake-q">这次要沉淀成什么？</p>
@@ -157,15 +183,36 @@
       <p class="faint small">{$t('crystallize.purposeHint')}——这一条必答：没有靶子，起草者只能凭素材猜。</p>
     {/if}
     <div class="intake-actions">
-      <button type="button" class="primary" disabled={purposeMissing} onclick={() => (stage = 'ready')}>下一步</button>
+      <button type="button" class="primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
+    </div>
+  {:else if stage === 'blankMaterial'}
+    <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
+    <textarea
+      class="intake-input"
+      rows="4"
+      bind:value={materialText}
+      placeholder="比如：团队的规范、上次复盘的结论、要遵守的约定……没有就跳过，直接按作用描述写一版。"
+    ></textarea>
+    <p class="faint small">
+      这次没有来源 run：材料只有你给的这一段（可以不给）。追加更多材料可以在起草完之后用栏脚输入条。
+    </p>
+    <div class="intake-actions">
+      <button type="button" class="primary" onclick={() => (stage = 'ready')}>下一步</button>
+      <button type="button" class="ghost" onclick={() => { materialText = ''; stage = 'ready' }}>跳过</button>
     </div>
   {:else}
     <dl class="intake-summary">
       <dt>沉淀成</dt><dd>{startLabel}</dd>
+      {#if blank}<dt>起点</dt><dd>空白起（没有来源 run）</dd>{/if}
       {#if detailLabel !== ''}<dt>目标</dt><dd>{detailLabel}</dd>{/if}
       {#if purpose.trim() !== ''}<dt>作用</dt><dd>{purpose.trim()}</dd>{/if}
       {#if feedback.trim() !== ''}<dt>希望改</dt><dd>{feedback.trim()}</dd>{/if}
-      {#if stats !== null}<dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>{/if}
+      {#if blank}
+        <dt>材料</dt>
+        <dd>{materialText.trim() === '' ? '你这次没给材料（先按作用描述写一版）' : `你给的 1 份（${materialText.trim().length} 字符）`}</dd>
+      {:else if stats !== null}
+        <dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>
+      {/if}
     </dl>
     <div class="intake-actions">
       <button type="button" class="primary" onclick={finish}>开始提炼</button>

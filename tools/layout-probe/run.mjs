@@ -3877,6 +3877,40 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.blankEntryPresent',
+    label:
+      '★★ 「新建沉淀」的起点浮层里有「从空白/材料起」（第十三章 §12.3 的起点选项；没有来源 run 的那条路）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.blankLanded',
+    label:
+      '★★★ 点它真的落到空白起的目标屏（`#/crystallize/blank` 且画出 `.intake`）——' +
+      '能点但没反应是本仓库最防的那类入口（§12.41）',
+    ok: (v, f) => v === true && String(f['crystal.blankRoute'] ?? '').includes('/crystallize/blank'),
+    show: (v, f) => `${String(v)}　${String(f['crystal.blankRoute'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.blankIntakeQuestion',
+    label:
+      '★★ 空白起的目标屏**直接问作用描述**（起点已在入口选定，不再问"这次要沉淀成什么"），且必答输入框在',
+    ok: (v, f) =>
+      typeof v === 'string' && v.includes('作用') && f['crystal.blankHasPurposeBox'] === true,
+    show: (v, f) => `${String(v)}　输入框 ${String(f['crystal.blankHasPurposeBox'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.blankNoTraceLine',
+    label:
+      '★★ 空白起**不许**出现"轨迹 N 轮"（没有来源 run 就没有轨迹——画一行假的素材统计比不画更坏）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.reviewInArtifactMsg',
     label:
       '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',

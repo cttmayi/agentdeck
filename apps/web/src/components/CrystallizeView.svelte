@@ -583,6 +583,14 @@
   }
 
   async function loadTargets(): Promise<void> {
+    // ★ 分批第 133 批：空白起**没有来源 run** ⇒ 没有可算的目标面板（`GET /crystallize/targets`
+    //   按 runId 查，给它 `blank` 只会 404）。targets 保持 null，目标面板换成空白起的那一问。
+    if (blankMode) {
+      loading = false
+      targets = null
+      error = ''
+      return
+    }
     loading = true
     error = ''
     try {
@@ -778,18 +786,35 @@
   }
 
   /** 向导答完 → 落回原有目标状态 → 走原提交路径（`startDraft`）。 */
+  /**
+   * ★ 分批第 133 批（「从空白/材料起」）：「起点」是空白起时 `runId` prop 是哨兵值 `blank`，
+   * 这一批把"无来源 run 的草稿"接到界面上（daemon 那一半已在第 133 批里）。
+   *
+   * 为什么哨兵值而不是新开一个路由：`#/crystallize/<id>` 的 id 本来就可以是任何串（深链用），
+   * `blank` 不是合法 ULID ⇒ 与真 run id 不可能撞。新增一条路由会让"返回/刷新/分享"多一处要维护。
+   */
+  const BLANK_RUN_ID = 'blank'
+  $: blankMode = runId === BLANK_RUN_ID
+  let blankMaterialText = ''
+  let blankStart = false
+
   function applyIntake(payload: {
     kind: 'new' | 'update' | 'agent'
     skillId: string
     agentId: string
     purpose: string
     feedback: string
+    /** 空白起才有的两项（见 CrystallizeIntake 的 blank 流程）。 */
+    blank?: boolean
+    material?: string
   }): void {
     targetKind = payload.kind
     purpose = payload.purpose
     selectedSkillId = payload.skillId
     selectedAgentId = payload.agentId
     userFeedback = payload.feedback
+    blankStart = payload.blank === true
+    blankMaterialText = payload.material ?? ''
     void startDraft()
   }
 
@@ -811,16 +836,30 @@
           : targetKind === 'agent'
             ? { kind: 'agent' as const, agentId: selectedAgentId }
             : { kind: 'update' as const, skillId: selectedSkillId }
+      /**
+       * ★ 分批第 133 批：空白起走 `startFrom: 'blank'`——**没有来源 run**，素材是使用者
+       * 在提问里给的那一段（可空）。不带 `runId`（两者只能二选一，daemon 会 400）。
+       */
+      const body =
+        blankStart || blankMode
+          ? {
+              startFrom: 'blank' as const,
+              target: { kind: 'new' as const, purpose: purpose.trim() },
+              ...(blankMaterialText.trim() === ''
+                ? {}
+                : { materials: [{ text: blankMaterialText.trim() }] }),
+            }
+          : {
+              runId,
+              target,
+              ...(userFeedback.trim() !== '' ? { userFeedback: userFeedback.trim() } : {}),
+            }
       const res = await api<{ draftRunId: string; materialStats: { turns: number; toolCalls: number } }>(
         '/api/crystallize/draft',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            runId,
-            target,
-            ...(userFeedback.trim() !== '' ? { userFeedback: userFeedback.trim() } : {}),
-          }),
+          body: JSON.stringify(body),
         },
       )
       draftRunId = res.draftRunId
@@ -1832,8 +1871,10 @@
       -->
       {#if step === 'target'}
       <!-- ★ 分批第 103 批：目标表单换成**逐个问**（§12.13）。向导只负责问，发请求仍由
-           `applyIntake → startDraft` 做，目标状态所有权留在原处——不产生第二套入口。 -->
-      <CrystallizeIntake {targets} onfinish={applyIntake} />
+           `applyIntake → startDraft` 做，目标状态所有权留在原处——不产生第二套入口。
+           ★ 分批第 133 批：空白起（`blank`）没有 targets，但 intake 要照画——`blank` 告诉它
+           "不是还在加载，而是没有来源 run"。 -->
+      <CrystallizeIntake {targets} blank={blankMode} onfinish={applyIntake} />
       {/if}
 
       <!-- ══════════════════ 草稿审阅 ══════════════════

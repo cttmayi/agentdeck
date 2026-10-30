@@ -6010,6 +6010,45 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           (n) => typeof facts['entry.' + n]?.from === 'string',
         )
 
+        // ══════════════ 沉淀：从空白/材料起（分批第 133 批的界面入口）══════════════
+        //
+        // 「新建沉淀」多了第三种起点：**没有来源 run**（daemon 半边已在同一批里落地）。
+        // 判据只量**入口与落点**，**不点「开始提炼」**——那会起一条真起草 run，
+        // 而探针的边界是"基本不造 run"（唯一例外是新建任务那条三步链）。
+        //
+        // ⚠️ 入口断言的写法：先确认落到的屏（`.intake .intake-q` 出现）再量文案，
+        //    否则"没进去"会被读成一堆 null，看起来像界面坏了（§12.25 的入口纪律）。
+        {
+          f.contentWindow.location.hash = '#/crystallize'
+          await untilNet(() => !!d().querySelector('.list-pane'), 40)
+          const blankOpenBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            text(b).includes('新建沉淀'),
+          )
+          facts['crystal.blankEntryButton'] = !!blankOpenBtn
+          if (blankOpenBtn) {
+            click(blankOpenBtn)
+            await until(() => !!d().querySelector('.modal .crystal-pick-row'), 80)
+            const blankRowBtn = [...d().querySelectorAll('.modal .crystal-pick-row button')].find(
+              (b) => text(b).includes('从空白/材料起'),
+            )
+            facts['crystal.blankEntryPresent'] = !!blankRowBtn
+            if (blankRowBtn) {
+              click(blankRowBtn)
+              const blankLanded = await until(() => !!d().querySelector('.intake .intake-q'), 120)
+              facts['crystal.blankLanded'] = blankLanded
+              facts['crystal.blankRoute'] = f.contentWindow.location.hash
+              facts['crystal.blankIntakeQuestion'] = text(d().querySelector('.intake .intake-q'))
+              facts['crystal.blankHasPurposeBox'] =
+                !!d().querySelector('.intake textarea.intake-input')
+              // 空白起不该出现"轨迹 N 轮"那一行（没有来源 run，也就没有轨迹可带）
+              facts['crystal.blankNoTraceLine'] = !(d().body.innerText ?? '').includes('轨迹')
+            }
+          }
+          // 收尾：离开这一屏（后面的组自己进它要的页面）；也把可能开着的浮层关掉
+          f.contentWindow.location.hash = '#/tasks'
+          await untilNet(() => !d().querySelector('.intake'), 20)
+        }
+
         // ══════════════ 聊天（闭环的旁路）══════════════
         //
         // 这一组刻意**不造对话、不发消息**：发一条就会起一条真 run，而这个探针

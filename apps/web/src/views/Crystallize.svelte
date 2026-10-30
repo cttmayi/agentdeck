@@ -66,6 +66,11 @@
       | { kind: 'agent'; agentId: string }
       | null
     source: { kind: 'conversation' | 'issue'; label: string } | null
+    /**
+     * ★ 分批第 133 批：「从空白/材料起」的沉淀任务（**没有来源 run**）。
+     * 与 `source === null`（源 run 被删了）分开说——两件事在界面上是不同的说法。
+     */
+    startFromBlank?: boolean
   }
 
   /** GET /api/crystallize/sources 的行（新建沉淀的来源选择器）。 */
@@ -111,6 +116,7 @@
    *    分隔符**只在真有标题时**才拼。
    */
   function sourceLabel(row: DraftRow): string {
+    if (row.startFromBlank === true) return '空白起'
     if (row.source === null) return $t('crystallize.sourceUnknown')
     const kind =
       row.source.kind === 'conversation'
@@ -187,6 +193,17 @@
   function pick(row: SourceRow): void {
     pickOpen = false
     goCrystallize(row.runId)
+  }
+
+  /**
+   * ★ 分批第 133 批（「从空白/材料起」）：**没有来源 run** 的沉淀。
+   *
+   * 用哨兵 id 进流程页（`#/crystallize/blank`）——`blank` 不是合法 ULID，与真 run id 撞不上；
+   * 流程页据此走 blank 模式（不问 targets、目标面板只问作用描述 + 可选材料，见 `CrystallizeView`）。
+   */
+  function startBlank(): void {
+    pickOpen = false
+    goCrystallize('blank')
   }
 
   /** 当前选中条目的来源标签（流程页副题）。 */
@@ -425,6 +442,19 @@
     <p class="err-text">{$t('crystallize.errTargets', { error: sourcesError })}</p>
   {:else}
     <div class="crystal-pick-groups">
+      <section>
+        <h4>起点</h4>
+        <ul class="crystal-list">
+          <ListRow rowClass="crystal-pick-row" onclick={startBlank}>
+            {#snippet children()}
+              <span class="crystal-title">从空白/材料起</span>
+              <span class="crystal-meta">
+                <span class="faint small">没有来源 run，素材只有你给的</span>
+              </span>
+            {/snippet}
+          </ListRow>
+        </ul>
+      </section>
       <section>
         <h4>{$t('crystallize.scopeConversation')}</h4>
         {#if convSources.length === 0}

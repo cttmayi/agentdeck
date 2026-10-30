@@ -266,7 +266,9 @@ export const crystallizeText = {
     zh: '对话/任务是在矫正正在用的 skill——更新目标就是它（提炼的=进化；安装的=存为你的版本并遮蔽）',
     en: 'This conversation/task corrects the skills in use — those are the update targets (yours = evolve; installed = save as your version and shadow)',
   },
-  'crystallize.purposeLabel': { zh: '作用描述（可选）', en: 'Purpose (optional)' },
+  // ★ 分批第 133 批：这条标着"可选"，而 intake 里"新建"**必填**（`purposeMissing` 禁用下一步）、
+  //   §12.13 也定了"作用描述必答"——UI 自己前后矛盾。改成"必答"，与行为对上。
+  'crystallize.purposeLabel': { zh: '作用描述（必答）', en: 'Purpose (required)' },
   'crystallize.purposePlaceholder': {
     zh: '这个 skill 是做什么的？什么时候用？',
     en: 'What does this skill do? When to use it?',
