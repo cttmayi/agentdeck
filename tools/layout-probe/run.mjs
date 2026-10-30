@@ -4085,6 +4085,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.draftingEvidenceVisibleWithoutTab',
+    label:
+      '★★★ 起草态的依据**不用点任何 tab 就在页面上**（分批第 115 批删掉起草态 tab：它说的是"这一版照着什么做的"，属于看日志时正想知道的东西）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftingEvidenceOpens',
     label: '★★「依据」tab 里打得开：**目标摘要 + 素材**两块',
     ok: (v) => v === true,

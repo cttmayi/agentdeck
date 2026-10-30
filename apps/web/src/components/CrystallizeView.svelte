@@ -159,7 +159,6 @@
    * ⚠️ 审阅屏的「依据」只有素材——因为那边"目标是谁"已经在结论条上了（`新建 skill` / `更新 x`）。
    *    起草中这一屏**没有结论条**，所以目标摘要归到依据里：同一件事不在两处重复，也不凭空消失。
    */
-  let draftTab: 'run' | 'evidence' = 'run'
 
   /**
    * 审核 run 的**实时**状态（来自事件流，见 `RunLog` 的 `onstatus`）。
@@ -816,7 +815,6 @@
       handledTerminal = false
       step = 'drafting'
       // 新起草一律从「产出」开始：跑起来的时候实时输出是唯一的信息（依据是"回头再看"的）
-      draftTab = 'run'
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       error = $t('crystallize.errDraftRejected', { error: msg })
@@ -2488,25 +2486,11 @@
           · 依据 = 目标摘要（新建 / 更新谁）+ 素材（不折叠：进了 tab 再折一层就是多一次点击）。
       -->
       {#if step === 'drafting'}
-        <div class="review-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={draftTab === 'run'}
-            class:tabs-active={draftTab === 'run'}
-            onclick={() => (draftTab = 'run')}
-          >{$t('crystallize.tabOutput')}</button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={draftTab === 'evidence'}
-            class:tabs-active={draftTab === 'evidence'}
-            onclick={() => (draftTab = 'evidence')}
-          >{$t('crystallize.tabEvidence')}</button>
-        </div>
+        
 
-        {#if draftTab === 'evidence'}
-          <div class="process-pane" data-process-pane="evidence">
+        <!-- ★ 分批第 115 批（U3c-2 第 5 步·起草态）：依据不再分 tab —— 它就在日志下面。
+             原来要点头部的「依据」才看得到，而它说的是"这一版照着什么做的"，属于**看日志时正想知道的**。 -->
+        <div class="process-pane" data-process-pane="evidence">
             <div class="proc-block">
               <div class="proc-head">{$t('crystallize.stepTarget')}</div>
               {@render targetSummary()}
@@ -2522,10 +2506,9 @@
               {/if}
             </div>
           </div>
-        {/if}
       {/if}
 
-      {#if draftRunId !== '' && step === 'drafting' && draftTab === 'run'}
+      {#if draftRunId !== '' && step === 'drafting'}
       <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
            日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
            而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->

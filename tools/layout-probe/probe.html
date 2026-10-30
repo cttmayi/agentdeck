@@ -5732,9 +5732,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               )
               if (!attached) return false
               click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
-              // 起草中的标志：tab 条 + 那个 run 的日志框（**不**是结论条——那时还没审核）
+              // 起草中的标志：**状态锚点 = drafting** + 那个 run 的日志框（不是结论条——那时还没审核）。
+              // 分批第 115 批：起草态的 tab 条已经删了（依据改为直接跟在日志下面），所以这里**不能**
+              // 再等 `.review-tabs`——否则整组空过（探针当场红的就是这条：起草中那一屏挂不上）。
               return await untilNet(
-                () => !!d().querySelector('.review-tabs') && !!d().querySelector('.log-box'),
+                () =>
+                  d().querySelector('.crystal-flow')?.getAttribute('data-crystallize-step') ===
+                    'drafting' && !!d().querySelector('.log-box'),
                 120,
               )
             }
@@ -5781,14 +5785,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               facts['crystal.draftingPageFits'] =
                 facts['crystal.draftingScrollH'] <= facts['crystal.viewportH'] + 1
 
-              // ── 切到「依据」：目标摘要 + 素材，且**不折叠** ──
-              const cyEvTab2 = cyDTabs().find((b) => text(b) === '依据')
-              if (cyEvTab2) {
-                click(cyEvTab2)
-                const cyEvOk2 = await untilNet(
-                  () => !!d().querySelector('.process-pane .file-row'),
-                  60,
-                )
+              // ── 依据**不用点任何 tab**：先只量“它自己就在页面上”（分批第 115 批删掉了起草态的 tab）──
+              facts['crystal.draftingEvidenceVisibleWithoutTab'] = await untilNet(
+                () => !!d().querySelector('.process-pane[data-process-pane="evidence"] .file-row'),
+                60,
+              )
+              {
+                const cyEvOk2 = facts['crystal.draftingEvidenceVisibleWithoutTab']
                 facts['crystal.draftingEvidenceOpens'] = cyEvOk2
                 facts['crystal.draftingEvidenceBlocks'] = [
                   ...d().querySelectorAll('.process-pane .proc-head'),
@@ -5807,8 +5810,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 facts['crystal.draftingEvidenceFits'] =
                   cyEvPane2 !== null &&
                   cyEvPane2.y + cyEvPane2.h <= facts['crystal.viewportH'] + 1
-              } else {
-                facts['crystal.draftingEvidenceOpens'] = null
               }
             }
               // ── ★★ 起草中点「停止」⇒ 回目标态（素材折叠在这里，2026-10-21 第 6 批）──
