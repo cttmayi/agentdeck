@@ -4292,3 +4292,64 @@ U1 只搬骨架、不动能力：**沉淀页变成三列**——列表（不变�
 `targetKind / selectedSkillId / selectedAgentId / purpose / userFeedback` 这几个状态
 **现在归父组件所有**，换向导就得连所有权一起定，探针里那一组"目标面板"判据也要跟着改。
 所以单独一批做，避免"半换"——半换出来的界面是两套入口并存，比不改更糟。
+
+### 12.21 提问半的判据组重设计（2026-10-30，先于 UI 动）
+
+**为什么先设计判据**：我把目标面板换成向导试了一次，探针从 582 绿掉到 **87 项红**——红的不止
+"目标态"那 14 条，还有「停止后回目标态」「回目标态后没有 tab 条」「停止后素材折叠在这儿」
+「『依据』tab 打得开」这些**跨屏**判据。它们的共同点是：**用"旧表单里某个控件在不在"当作
+"现在是哪一屏"的判据**（`.radio-row input[type=radio]`、`.crystal-material-line`、
+`.detail-scroll .section-body`）。表单换成向导，这些锚点就全没了，于是**定位失败 → 连带判红**。
+
+⇒ 先修这个根，再换 UI。顺序反了就会一路被 87 条红牵着走，最后容易变成"为了让探针绿而改断言"。
+
+#### 第一步：给"现在是哪一屏"一个**不依赖控件**的锚点
+
+在详情栏根节点上加 `data-crystallize-step="target|drafting|review|done"`（值来自同一个
+`step` 状态）。判据从此写：
+
+```js
+buttonByStep('target', '开始提炼')   // 而不是 [...document.querySelectorAll('button')].find(…) 全页扫文本
+```
+
+好处：换界面形态（表单→向导→对话）时，**跨屏判据不用改**；要改的只有"这一屏里该有什么"。
+这一步不改变任何行为，只是把定位方式从"控件"换成"状态"。
+
+#### 第二步：14 条目标态判据逐条处置
+
+| 判据 | 现在量什么 | 处置 |
+|---|---|---|
+| `targetAttached` | `.radio-row input[type=radio]` 在不在 | **改写** → `.intake` 在 |
+| `targetStepText` | 步骤条文本含"沉淀目标" | **保留**（与形态无关） |
+| `targetTabCount` | `.review-tabs` 数量 = 0 | **保留**（"目标态不做 tab"这条决定没变） |
+| `targetFormRows` / `targetFormLabels` | 三行 radio 的文案 | **改写** → 第一问的选项数与文案（新建 / 优化…） |
+| `targetStartButton` | 文本「开始沉淀」 | **改写** → 确认步的「开始提炼」 |
+| `targetStartButtonTitle` | 按钮 title 说清判据 | **删**：向导把判据放在确认步的摘要里（比 title 更强），不再需要悬停 |
+| `targetMaterialLine` | `.crystal-material-line` 一行 | **改写** → 确认步摘要里含"轨迹 N 轮 · M 次工具调用" |
+| `targetFoldCount` / `targetFoldHead` / `targetFoldClosed` | 起草前不画素材折叠 | **保留**（`targetFoldHead`/`Closed` 恒为 null，可删） |
+| `targetPageFits` / `targetScrollH` | 不整页滚 | **保留**（换形态也要守） |
+| `targetFormInsidePane` / `targetFormBox` | 表单不越右边界 | **保留**，盒子换成 `.intake` |
+| `agentAttached` / `agentFileRows` / `agentBar` / `agentConfirmDisabled` / `agentDiffLines` | 智能体草稿那组 | **保留**（量的是审阅屏，与被换掉的目标面板无关） |
+
+#### 第三步：新增 5 条向导判据（这是换 UI 换来的新地面）
+
+| 新判据 | 量什么 | 为什么值得钉 |
+|---|---|---|
+| `intakeFirstQuestion` | 第一问文本含"要沉淀成什么" | 逐个问的起点；问错顺序=整个流程重心错 |
+| `intakeMandatoryBlocks` | 作用描述空着 ⇒「下一步」`disabled` | **必答规则的唯一执行点**（§12.13 已定） |
+| `intakeAdvances` | 答完一题 ⇒ 出现下一问、且上一问的选项消失 | "答了没反应"是这类向导最容易出的故障 |
+| `intakeSummary` | 确认步把答过的四行（沉淀成/目标/作用/素材）都摆出来 | 人在这步一眼核对自己的答案 |
+| `intakeSinglePath` | 目标态里 `.radio-row` 数量 = 0（旧表单真的没了） | 防"两套入口并存"——这正是我在试做时最担心的形态 |
+
+#### 第四步：跨屏那 7 条怎么改写（87 红的主因）
+
+统一改成"先按 `data-crystallize-step` 定位，再在这一屏里找控件"：
+
+- 「停止后回目标态」→ `step === 'target'` 且 `.intake` 在；
+- 「回目标态后没有 tab 条」→ 该屏 `.review-tabs` 数 0；
+- 「停止后素材折叠在这儿且默认收起」→ 这条**在新形态下要重新定义**：向导把素材放在确认步，
+  停止回到目标态时没有折叠段 —— 于是它不是"改写"而是**删除**，并在文档里写明为什么
+  （旧形态靠它证明"那支只在这条路径到达的分支没死"，新形态那条分支本身没了）。
+- 「停止后『开始沉淀』可按」→ 换成 `step === 'target'` 且「开始提炼」在（确认步）。
+
+**这一步的产出是判据表，不是代码**；下一步按表改 (`run.mjs` + `probe.html`)，再换 UI。
