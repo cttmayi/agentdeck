@@ -3804,6 +3804,41 @@ const CHECKS = [
   // 这一节钉的是使用者确认过的第 ③ 条决定：目标态**不做 tab**（表单 + 一行素材判据）。
   {
     view: '任务',
+    key: 'entry.任务.actual',
+    label: '★★ 进「任务」组之后**确实到了那一屏**（入口断言：`.page-name` 文本 = 任务）——入口漂了要直接说“没到那一屏”，而不是让下游报“没量到这个值”',
+    ok: (v) => v === '任务',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '任务',
+    key: 'entry.技能.actual',
+    label: '★★ 进「技能」组之后**确实到了那一屏**（入口断言：`.page-name` 文本 = 技能）——入口漂了要直接说“没到那一屏”，而不是让下游报“没量到这个值”',
+    ok: (v) => v === '技能',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '任务',
+    key: 'entry.工具.actual',
+    label: '★★ 进「工具」组之后**确实到了那一屏**（入口断言：`.page-name` 文本 = 工具）——入口漂了要直接说“没到那一屏”，而不是让下游报“没量到这个值”',
+    ok: (v) => v === '工具',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '任务',
+    key: 'entry.智能体.actual',
+    label: '★★ 进「智能体」组之后**确实到了那一屏**（`.page-name` 文本 = 智能体）',
+    ok: (v) => v === '智能体',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '任务',
+    key: 'entry.智能体组.actual',
+    label: '★★ 进「智能体组」组之后**确实到了那一屏**（列表行数 > 0）',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${v} 行`,
+  },
+  {
+    view: '任务',
     key: 'harness.entriesRecorded',
     label:
       '★★ 每组的入口都被记下来了（起点路由 / 目标路由 / 等待信号）——探针的组间耦合原来只活在代码顺序里，看不见；写出来之后，"上一组把页面留在哪儿"才有据可查（§12.25）',

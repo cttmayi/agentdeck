@@ -546,6 +546,7 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
           // ⚠️ 2026-09 顶栏改版：页面标题从主区头部搬到了顶栏，所以"这一页出来了"
           //    这个信号跟着改量点（判据没变：仍然是**这一页的名字**出现在屏幕上）。
           await until(() => text(d().querySelector('.page-name')) === '智能体', 60)
+          facts['entry.智能体.actual'] = text(d().querySelector('.page-name'))
           await wait(500)
           const openSettings = async () => {
             // 页面动作（「设置」等）2026-09 起在顶栏里、紧跟着页名：所有页面**同一个位置**
@@ -610,6 +611,8 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
 facts['entry.任务'] = { from: f.contentWindow.location.hash, to: '#/tasks', wait: '.page-name 文本 = 任务' }
         f.contentWindow.location.hash = '#/tasks'
         await until(() => text(d().querySelector('.page-name')) === '任务')
+
+facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         // 等表格真的出现行：run.mjs 会先造一条任务当夹具。等不到就是夹具没造上，
         // 下面那条"重复字样"的检查会**空过**——所以这里必须如实报出来。
         const gotRows = await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
@@ -1114,6 +1117,7 @@ facts['entry.任务'] = { from: f.contentWindow.location.hash, to: '#/tasks', wa
 facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', wait: '.page-name 文本 = 技能' }
         f.contentWindow.location.hash = '#/skills'
         await until(() => text(d().querySelector('.page-name')) === '技能')
+        facts['entry.技能.actual'] = text(d().querySelector('.page-name'))
         await wait(500)
         facts['skills.title'] = need('技能页标题', () => text(d().querySelector('.page-name')))
         // ⚠️ 两代老结构都不该再存在，各自是**不同**的一课：
@@ -1779,6 +1783,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
 facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wait: '.page-name 文本 = 工具 + 工具行 > 0' }
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
+        facts['entry.工具.actual'] = text(d().querySelector('.page-name'))
         await until(() => d().querySelectorAll('.tool-table tbody tr.tool-row').length > 0)
         await wait(400)
 
@@ -2044,6 +2049,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['entry.智能体组'] = { from: f.contentWindow.location.hash, to: '#/groups', wait: '.list-row-main 数 > 0' }
           f.contentWindow.location.hash = '#/groups'
           await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
+
+          facts['entry.智能体组.actual'] = d().querySelectorAll('.list-row-main').length
           await wait(400)
           const grpRefresh = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
             (b.textContent ?? '').includes('刷新'),
