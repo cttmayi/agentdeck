@@ -5217,6 +5217,28 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const cyBodyBox = d().querySelector('.pane-body.detail-scroll')
             const cyBodyBoxRect = cyRect(cyBodyBox)
             const cyBodyPadB = cyBodyBox ? parseFloat(cs(cyBodyBox).paddingBottom || '0') : 0
+            /**
+             * ★ 分批第 106 批（U3a）：中间栏多了**栏脚输入条**，所以"格子填满到哪儿"的参照线
+             * 从内容盒底上移了一个栏脚高度。这里只**量出**栏脚高（一条事实），
+             * 由判据那头自己减——不去改那几处 gap 计算（上一版改测量代码，一次 188 红、一次 185 红）。
+             */
+            facts['crystal.composerH'] = (() => {
+              const composer = d().querySelector('.crystal-composer')
+              return composer ? Math.round(composer.getBoundingClientRect().height) : 0
+            })()
+            // U3a 的形态判据：外壳在、旧内容确实在"一条消息"里、输入条贴在栏脚
+            facts['crystal.chatShellPresent'] =
+              !!d().querySelector('.crystal-chat > .crystal-msg .crystal-flow')
+            facts['crystal.composerAtFoot'] = (() => {
+              const chat = d().querySelector('.crystal-chat')
+              const composer = d().querySelector('.crystal-composer')
+              if (!chat || !composer) return null
+              const isLast = chat.lastElementChild === composer
+              const chatRect = chat.getBoundingClientRect()
+              const cRect = composer.getBoundingClientRect()
+              return isLast && Math.abs(chatRect.bottom - cRect.bottom) <= 2
+            })()
+
             const cyProbePane = async (name, paneSel) => {
               const btn = cyProcTab(name)
               if (btn && !btn.classList.contains('tabs-active')) {

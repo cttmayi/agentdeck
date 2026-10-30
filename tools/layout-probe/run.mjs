@@ -3293,7 +3293,7 @@ const CHECKS = [
     ok: (v, f) =>
       typeof v === 'number' &&
       v >= 0 &&
-      v <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
+      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
     show: (v) => `差 ${v}px`,
   },
   {
@@ -3865,6 +3865,22 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.chatShellPresent',
+    label:
+      '★★★ 中间栏有消息流外壳，且**旧内容确实在一条消息里**（`.crystal-chat > .crystal-msg .crystal-flow`）——U3a 只加外壳不换内容，这条钉住"外壳真包住了旧流程页"',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.composerAtFoot',
+    label:
+      '★★★ 输入条贴在**栏脚**（是 `.crystal-chat` 的最后一个子元素，且底边与容器底差 ≤ 2px）——放错位置的话它会把中间栏内容挤掉，而"看得见输入框"照样能过松散判据',
+    ok: (v) => v === true,
+    show: (v, f) => `${String(v)}　栏脚高 ${f['crystal.composerH']}px`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.stepMarkerValue',
     label:
       '★★★ 详情栏带 `data-crystallize-step`（分批第 96 批：判据按**状态**定位，而不是按"旧表单里有没有某个控件"——后者一换界面形态就整组失效）',
@@ -4148,7 +4164,7 @@ const CHECKS = [
     ok: (v, f) =>
       typeof v === 'number' &&
       v >= 0 &&
-      v <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
+      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
     show: (v, f) => `差 ${v}px（格子 ${f['crystal.procAuditPaneH']}px / 视口 ${f['crystal.procViewportH']}）`,
   },
   {
@@ -4158,7 +4174,7 @@ const CHECKS = [
     ok: (v, f) =>
       typeof v === 'number' &&
       v >= 0 &&
-      v <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
+      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
     show: (v, f) => `差 ${v}px（格子 ${f['crystal.procDraftPaneH']}px）`,
   },
   {
@@ -4198,7 +4214,7 @@ const CHECKS = [
     // 底边被推到视口外是对的——不这么留后手，判据会把"窗口太小时的合理退化"判成缺陷）
     ok: (v, f) =>
       typeof v === 'number' &&
-      ((v >= 0 && v <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01))) ||
+      ((v >= 0 && v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01))) ||
         (v < 0 && f['crystal.paneBodyScrollable'] === true)),
     show: (v, f) =>
       `差 ${v}px（视口 ${f['crystal.viewportH']}${f['crystal.paneBodyScrollable'] ? '，主区在滚' : ''}）`,

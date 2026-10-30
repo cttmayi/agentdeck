@@ -454,6 +454,12 @@ export const crystallizeText = {
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
+  // ── U3a 消息流外壳的栏脚（分批第 106 批：先占位，U3d 才接线） ──
+  'crystallize.chatPlaceholder': {
+    zh: '跟这次沉淀说一句话（下一批接上）',
+    en: 'Say something to this crystallization (wired in the next batch)',
+  },
+
   // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },
   'crystallize.errDraftRejected': { zh: '起草未受理：{error}', en: 'Draft not accepted: {error}' },

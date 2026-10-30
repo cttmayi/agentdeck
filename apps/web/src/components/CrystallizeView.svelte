@@ -1655,7 +1655,11 @@
       ⚠️ **不要为了这个去多包一层 div**：上一版就是这么干的，结果打断了 `detail-scroll`
       的高度链，过程格当场缩了 105–113px（探针量的）。挂在已有的 `.crystal-flow` 上就行。
     -->
-    <div class="crystal-flow" data-crystallize-step={step}>
+    <!-- ★ 分批第 106 批（U3a）：中间栏套上消息流外壳。这一批只加外壳、不换内容（§12.27）。
+         ⚠️ 外壳必须接住高度链：两层都显式写成 flex 列 + flex:1 + min-height:0。 -->
+    <div class="crystal-chat">
+      <div class="crystal-msg" data-msg-role="assistant">
+        <div class="crystal-flow" data-crystallize-step={step}>
       <!--
         ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ──
 
@@ -2558,6 +2562,18 @@
           </div>
         </section>
       {/if}
+        </div>
+      </div>
+      <!-- 栏脚输入条：U3d 才接线，先只占位（不做成能按但没反应的按钮） -->
+      <form class="crystal-composer" onsubmit={(e) => e.preventDefault()}>
+        <input
+          class="crystal-composer-input"
+          type="text"
+          disabled
+          placeholder={$t('crystallize.chatPlaceholder')}
+          aria-label={$t('crystallize.chatPlaceholder')}
+        />
+      </form>
     </div>
   {/snippet}
 </MainArea>
@@ -2613,6 +2629,41 @@
      `flex: 1 1 auto; min-height: 22rem` 吃掉**剩余**的那部分。窗口变大 ⇒ 主区跟着长；
      窗口太矮 ⇒ 先压到 22rem 保底，再不行才让 `.pane-body` 滚动（可接受的退化：
      顶栏/步骤条/结论条永远在视口里）。 */
+  /* U3a 消息流外壳：flex 列 + 撑满，接住原来的高度链（§12.22 踩过：多一层就缩 105px） */
+  .crystal-chat {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .crystal-msg {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .crystal-composer {
+    flex-shrink: 0;
+    display: flex;
+    gap: var(--sp-2);
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-2);
+    margin-top: var(--sp-2);
+  }
+
+  .crystal-composer-input {
+    flex: 1;
+    font: inherit;
+    font-size: var(--fs-base);
+    padding: var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+  }
+
   .crystal-flow {
     display: flex;
     flex-direction: column;
