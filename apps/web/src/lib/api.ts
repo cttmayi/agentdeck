@@ -120,8 +120,6 @@ export interface Identity {
   webSearchEnabled?: boolean
   /** §10.5 第 ③ 条：审核者能不能**真跑**草稿里的脚本（老数据 ⇒ 开）。 */
   allowReviewerScriptRun?: boolean
-  /** 分批第 23 批：起草 ↔ 审核自动循环的轮次上限（0 = 关，默认 10）。 */
-  autoReworkRounds?: number
   /** 分批第 47 批：新建智能体时预填的「默认工作守则」。缺省 = 平台默认（老 daemon 不带这个键）。 */
   defaultAgentConduct?: string
   /**

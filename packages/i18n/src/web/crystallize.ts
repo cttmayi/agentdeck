@@ -85,69 +85,8 @@ export const crystallizeText = {
   // ★ 2026-10-21：原来的 `auditTitle`（「审核结论（预筛）」）没有使用者了——结论条上直接写
   //   「审核通过（预筛）」，标题那层壳去掉（它自占一行 h3 + 上下间距）。删键不留死词条。
   'crystallize.auditPrescreen': { zh: '预筛', en: 'pre-screen' },
-  // ── 自动循环（分批第 23 批）──
-  'crystallize.autoReworkRound': {
-    zh: '第 {current} / {max} 轮',
-    en: 'Round {current} / {max}',
-  },
-  'crystallize.autoReworkSpent': {
-    zh: '· 已花 ${usd}',
-    en: '· spent ${usd}',
-  },
-  'crystallize.autoReworkStopped': { zh: '· 已停止', en: '· stopped' },
-  // ── 沉淀自己的设置：自动返工轮数（分批第 23 批）──
-  //     ⚠️ 这几条**不在**通用设置里：使用者原话「应该在沉淀的设置，而不是通用设置里面」。
-  //     入口是沉淀页顶栏那个「自动返工 N 轮」（点开是小面板）。
-  'crystallize.autoReworkSetting': {
-    zh: '自动返工 {rounds} 轮',
-    en: 'Auto-rework: {rounds}',
-  },
-  'crystallize.autoReworkTitle': { zh: '沉淀自动返工', en: 'Automatic skill rework' },
-  'crystallize.autoReworkRoundsLabel': { zh: '轮数（0–99，0 = 关）', en: 'Rounds (0–99, 0 = off)' },
-  'crystallize.autoReworkInvalid': {
-    zh: '轮数只能是 0–99 的整数（0 = 关）',
-    en: 'Rounds must be an integer from 0 to 99 (0 = off)',
-  },
-  'crystallize.autoReworkExplain': {
-    zh: '一轮 = 起草 → 定检 → 审核 → 判决。判决不通过就自动再起草一版（起草意见由判决的条目生成），通过即停；0 = 关，每轮判完交给你。',
-    en: 'One round = draft → platform check → audit → verdict. On a failing verdict the next version is drafted automatically (the rework prompt is built from the verdict findings), and it stops as soon as it passes; 0 = off (each round handed back to you).',
-  },
-  'crystallize.autoReworkCost': {
-    zh: '它是唯一的花钱闸门：实测一条链 10 轮约花 $30，而且每轮更贵（上下文越滚越大）。循环中点「停止循环」可以随时叫停。',
-    en: 'This is the only spending gate: measured, a 10-round chain costs ≈ $30 and each round costs more than the last (the context keeps growing). Press “Stop loop” at any time.',
-  },
-  'crystallize.autoReworkSave': { zh: '保存', en: 'Save' },
-  'crystallize.autoReworkSaved': { zh: '已保存：{rounds} 轮', en: 'Saved: {rounds} round(s)' },
-  'crystallize.autoReworkStop': { zh: '停止循环', en: 'Stop loop' },
-  'crystallize.autoReworkStopHint': {
-    zh: '停掉自动循环：这一轮跑完就交给你，不再自动起草下一版（正在跑的审核会一起取消）',
-    en: 'Stop the automatic loop: this round is handed back to you and no further version is drafted automatically (a running audit is cancelled too)',
-  },
-  'crystallize.autoReworkStalled': {
-    zh: '这一处已连续 {rounds} 轮没解决：{locator}',
-    en: 'Unresolved for {rounds} rounds: {locator}',
-  },
-  /**
-   * 分批第 27 批：**循环现在是什么状态**。
-   *
-   * 使用者原话：「在多轮 起草-审核 过程中，界面没有更新，看不出来是否已经结束了。」
-   * 所以这四条说的都是"结束没有/为什么结束"，而不是解释产品怎么工作。
-   */
-  'crystallize.reworkRunning': { zh: '· 还会自动起草下一版', en: '· next version will be drafted automatically' },
-  'crystallize.reworkPassed': { zh: '· 已通过，循环停了', en: '· passed, loop stopped' },
-  'crystallize.reworkExhausted': { zh: '· 轮数用完，交给你决定', en: '· rounds used up, your call' },
-  'crystallize.reworkStoppedByHuman': { zh: '· 你已停止循环', en: '· you stopped the loop' },
-  /**
-   * 返工收敛闸门的标注（只标注、**不停**）：
-   * 上一批我让它直接停循环，违背了"无进展不早停"的口径，第 27 批改回标注。
-   * 措辞里必须写明"仍在继续"，否则人看到"被判重写"会以为已经停了。
-   */
-  'crystallize.reworkGuardLabel': {
-    zh: '这一轮被判「{kind}」（改动过大或没动点名处）—— 已在 material/rework-guard.md 记录，循环仍在继续',
-    en: 'This round was flagged as "{kind}" (too large a rewrite, or the named spots untouched) — recorded in material/rework-guard.md; the loop continues',
-  },
   // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
-  'crystallize.newVersionHint': { zh: '自动返工已经出了新一版（你正在编辑，没有自动切过去）', en: 'Auto-rework produced a new version (not switched automatically while you are editing)' },
+  'crystallize.newVersionHint': { zh: '这条沉淀有了新一版（你正在编辑，没有自动切过去）', en: 'This crystallization has a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
   // 分批第 29 批：草稿这一版还在跑 ⇒ 显示实时日志（原来默认显示"最后结果"= 上一版的旧文本）
   'crystallize.draftLiveHint': { zh: '这一版还在跑，下面是实时日志', en: 'This version is still running; live log below' },
@@ -229,10 +168,6 @@ export const crystallizeText = {
   'crystallize.feedbackOutro': {
     zh: '改完把改过的文件写回 skill/ 目录（完整文件，不是补丁）；没改的文件不必重写。',
     en: 'Write the changed files back to the skill/ directory (complete files, not patch fragments); unchanged files need not be rewritten.',
-  },
-  'crystallize.auditReworked': {
-    zh: '已按上面的意见自动重新起草（第 {n} 版）',
-    en: 'Auto re-drafted with the feedback above (version {n})',
   },
   'crystallize.auditExhausted': {
     zh: '自动返工的次数已用完 —— 要不要再来一版、或者就这样入库，由你决定。',

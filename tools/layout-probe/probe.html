@@ -5308,9 +5308,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             //   那是人判断"结束了没有"唯一的一眼可见的东西。
             //   ⚠️ 第一版我把它量在了深链那屏（那条草稿没判决）⇒ 量到 null、判据红，
             //      而界面没错：没判决时本来就不该有"循环"这回事。**量错地方比没有量更坏**。
-            facts['crystal.loopState'] =
-              d().querySelector('[data-auto-rework-state]')?.getAttribute('data-auto-rework-state') ??
-              null
 
             /**
              * ★★★ 分批第 33 批：使用者报「草稿过程和审核过程的高度没有适应」。

@@ -226,36 +226,6 @@
     stale: boolean | null
     /** 这条**链**上已经起草过几版（⛔ 2026-10-23 之前这里数的是"同来源"，混链时会虚高）。 */
     versions: number
-    /**
-     * 自动循环的可见面（分批第 23 批）。
-     *
-     * ⚠️ 为什么界面必须显示 `current/max` 与 `spentUsdMicros`：使用者定的是"默认 10 轮、
-     *    无进展不早停"，而实测一条链 10 轮 ≈ $30 且每轮递增。"跑 N 轮"如果不带成本显示，
-     *    就等于让人闭着眼睛花钱。
-     * `stalled` = 同一处问题连续两轮被点名（只标注**不停**，使用者定的口径）。
-     */
-    autoRework?: {
-      current: number
-      max: number
-      spentUsdMicros: number
-      stopped: boolean
-      /**
-       * 谁按的停止（分批第 27 批）：`human` = 人点「停止循环」，`null` = 没停。
-       *
-       * ⚠️ 为什么界面要知道"谁停的"：使用者报的是「多轮起草-审核过程中界面没有更新，
-       *    看不出来是否已经结束了」。光一个 `stopped: true` 说不清是"跑完了"、
-       *    "你按的"、还是"出问题了"——而这三件事人要做的事完全不同。
-       */
-      stopBy?: 'human' | null
-      /**
-       * 返工收敛闸门的**标注**（分批第 25 批，第 27 批起只标注不早停）：
-       * 这一版被判"整篇重写 / 正文变胖 / 没动点名处"时，`kind` 不为 ok。
-       * 循环**照常继续**（使用者定过：无进展不早停、只标注）——界面要写明这一点，
-       * 否则人会以为"被判重写了怎么还在跑"。
-       */
-      guard?: { kind: string; reasons: string[] } | null
-      stalled: Array<{ locator: string; rounds: number }> | null
-    }
   }
 
   // ── 审阅（四轮：产出 = 文件集合）──
@@ -342,8 +312,6 @@
    */
   let reviewInfo: DraftReviewInfo | null = null
   let reviewBusy = false
-  /** 「停止循环」正在发请求（防连点：它要写文件 + 可能取消一条 run）。 */
-  let loopBusy = false
   /** 问题清单是否展开（结论常驻、明细折叠，与全站其它地方同一条规矩）。 */
   // （`auditDetailOpen` / `auditLogOpen` 随第 3 批删掉了：问题清单与审核日志现在住在
   //   「过程」tab 里，结论条上那两个按钮改成**切到那个 tab**——不再各有一个折叠开关。）
@@ -471,21 +439,6 @@
    *    写进组件里的规则测不了（svelte-check 只管类型），拎到 `lib/audit-bar.ts` 才有单测
    *    钉住"上一版的终态不认"。见那个文件顶上的注释。
    */
-  /**
-   * 循环是不是**真的还在自己往下走**（决定要不要给「停止循环」）。
-   *
-   * ⚠️ 第一版只判 `autoRework.max > 1 && !stopped` ⇒ 探针量到"还没审核过"的草稿上也挂着
-   *    一个「停止循环」按钮（`○ 还没审核过 · 3 个文件 · … 停止循环 开始审核`）。
-   *    那不是"停止"而是"关掉设置"，而设置项在设置页里 —— 放在这里会让人以为
-   *    点了它就能停掉一个并不存在的循环。
-   */
-  $: canStopLoop =
-    reviewInfo?.autoRework !== undefined &&
-    reviewInfo.autoRework.max > 1 &&
-    !reviewInfo.autoRework.stopped &&
-    reviewInfo.review === null &&
-    (auditRunning || reviewInfo.autoRework.current > 1)
-
   $: auditBar = resolveAuditBar({
     live: auditLive,
     reviewRunId: reviewInfo?.reviewRunId ?? null,
@@ -504,28 +457,6 @@
    *    出错…），人得知道这件事，而不是继续等下去。
    */
   $: auditNoVerdict = auditBar.noVerdict
-
-  /**
-   * 自动循环此刻的状态（分批第 27 批）。
-   *
-   * `running` = 还会自动起草下一版；`passed` = 审核通过、循环该停了；
-   * `exhausted` = 轮数用完；`stopped` = 人按了「停止循环」。
-   *
-   * ⚠️ 顺序有讲究：`passed` 排在最前——通过之后即使轮数没满也不该再跑，
-   *    而界面若显示"还在跑"就是说了反话。
-   */
-  $: autoReworkState =
-    reviewInfo?.review?.conclusion === 'pass'
-      ? 'passed'
-      : reviewInfo?.autoRework?.stopped
-        ? 'stopped'
-        : reviewInfo?.review?.status === 'escalated'
-          ? 'exhausted'
-          : reviewInfo?.review?.status === 'rework_requested'
-            ? 'running'
-            : reviewInfo?.review === null && auditRunning
-              ? 'running'
-              : 'idle'
 
   /**
    * 起草那一版是不是**还在跑**（分批第 29 批）。
@@ -1181,30 +1112,6 @@
     const runId = reviewInfo?.reviewRunId ?? null
     auditLive = runId === null ? null : { runId, status }
     await loadReview()
-  }
-
-  /**
-   * 停止自动循环（分批第 23 批）。
-   *
-   * 两件事一起做：**落标记**（下一轮不再自动起草）+ **取消正在跑的审核**
-   * （否则人点完还得等这一轮跑完，几分钟、真金白银）。
-   * 与 `cancelAudit` 分开：那个只停"这一次 run"，循环还会继续。
-   */
-  async function stopLoop(): Promise<void> {
-    if (draftRunId === '' || loopBusy) return
-    loopBusy = true
-    try {
-      await api('/api/crystallize/stop-loop', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId }),
-      })
-      await loadReview()
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      loopBusy = false
-    }
   }
 
   async function cancelAudit(): Promise<void> {
@@ -1977,63 +1884,12 @@
                 </strong>
                 <!-- "（预筛）"留着：它说的是"这不是入库的门"，是这条链的前提，不是修饰 -->
                 <span class="faint small">（{$t('crystallize.auditPrescreen')}）</span>
-                {#if reviewInfo.autoRework && reviewInfo.autoRework.max > 0}
-                  <span class="muted small">
-                    {$t('crystallize.autoReworkRound', {
-                      current: String(reviewInfo.autoRework.current),
-                      max: String(reviewInfo.autoRework.max),
-                    })}{$t('crystallize.autoReworkSpent', {
-                      usd: (reviewInfo.autoRework.spentUsdMicros / 1e6).toFixed(2),
-                    })}{reviewInfo.autoRework.stopped ? $t('crystallize.autoReworkStopped') : ''}
-                  </span>
-                {/if}
-                {#if reviewInfo.autoRework?.guard}
-                  <!--
-                    ★ 分批第 27 批：返工收敛闸门的标注要看得见，而且要写明**循环照常继续**。
-                    真机上它就是没显示，使用者只看到"这一轮到底跑完没有"。
-                  -->
-                  <span class="hint small" data-rework-guard={reviewInfo.autoRework.guard.kind}>
-                    {$t('crystallize.reworkGuardLabel', {
-                      kind: reviewInfo.autoRework.guard.kind,
-                    })}
-                  </span>
-                {/if}
-                {#if reviewInfo.autoRework?.stalled?.[0]}
-                  <!--
-                    ★ 分批第 23 批：「没进展」只**标注**、不停（使用者的选择）。
-                    同一处（locator）在相邻两轮判决里都被点名 ⇒ 说明起草者改不动它，
-                    这件事值得人看一眼；但产品不替人决定"到此为止"。
-                  -->
-                  <span class="hint small" data-auto-rework-stalled>
-                    {$t('crystallize.autoReworkStalled', {
-                      rounds: String(reviewInfo.autoRework.stalled[0].rounds),
-                      locator: reviewInfo.autoRework.stalled[0].locator,
-                    })}
-                  </span>
-                {/if}
-                <span class="muted">{reviewInfo.review.reasonCode}</span>
-                {#if reviewInfo.autoRework && reviewInfo.autoRework.max > 0}
-                  <!--
-                    ★ 分批第 27 批：**循环活着还是结束了**必须一眼看见。
-                    这是一句"状态"而不是"解释"——使用者原话就是"看不出来是否已经结束了"。
-                  -->
-                  <span class="muted small" data-auto-rework-state={autoReworkState}>
-                    {autoReworkState === 'running'
-                      ? $t('crystallize.reworkRunning')
-                      : autoReworkState === 'stopped'
-                        ? $t('crystallize.reworkStoppedByHuman')
-                        : autoReworkState === 'exhausted'
-                          ? $t('crystallize.reworkExhausted')
-                          : $t('crystallize.reworkPassed')}
-                  </span>
-                {/if}
-                {#if reviewInfo.review.status === 'rework_requested'}
-                  <span class="muted">
-                    {$t('crystallize.auditReworked', { n: String(reviewInfo.versions) })}
-                  </span>
-                {:else if auditFailedStuck}
+                {#if auditFailedStuck}
+                  <!-- ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环删掉之后，"不通过"
+                       就是最终状态（交给人）——不再有"第 N 轮返工"那种会自己往下走的说法。 -->
                   <span class="muted">{$t('crystallize.auditExhausted')}</span>
                 {/if}
+                <span class="muted">{reviewInfo.review.reasonCode}</span>
               {/if}
               <!--
                 ★ 分批第 8 批：「这个结论是改之前的」。
@@ -2118,21 +1974,6 @@
                   }}
                 >
                   {$t('crystallize.auditShowLog')}
-                </button>
-              {/if}
-              {#if canStopLoop}
-                <!--
-                  ★ 分批第 23 批：循环进行中唯一的人工入口（使用者定的口径）。
-                  「停止循环」与「取消审核」是两件事：后者只停这一次 run，
-                  循环下一轮还会自动起草；前者是真的叫停整条自动流程。
-                -->
-                <button
-                  class="ghost small"
-                  disabled={loopBusy}
-                  title={$t('crystallize.autoReworkStopHint')}
-                  onclick={() => void stopLoop()}
-                >
-                  {$t('crystallize.autoReworkStop')}
                 </button>
               {/if}
               {#if reviewInfo !== null && reviewInfo.review === null && auditRunning}

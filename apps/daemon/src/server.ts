@@ -143,8 +143,6 @@ import {
   readDraftVersions,
   // ★ 分批第 22 批：剔掉版本表里"别的链"的条目（真机上 `9D67DN` 的目录里混着 `H5YM0E` 的 4 条）
   dropForeignVersions,
-  // ★ 分批第 23 批：「停止自动循环」的标记文件
-  AUTO_REWORK_STOP_FILE,
   clearHumanEditStamp,
   readHumanEditStamp,
   recordDraftVersion,
@@ -165,15 +163,9 @@ import {
   saveInstructionsSnapshot,
 } from './agent-instructions-snapshots.ts'
 import { chainOf, chainOfRun } from './draft-chain.ts'
-// ★ 分批第 25 批：返工收敛闸门（量"这一版到底改了什么"，拦重写/变胖/没动点名处）
-import {
-  BLOAT_RATIO,
-  REWRITE_RATIO,
-  inspectRework,
-  locatorFile,
-  type GuardFile,
-  type GuardResult,
-} from './rework-guard.ts'
+// ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环已删，`rework-guard.ts` 随之删除
+//   （它只服务那条循环的"收敛闸门"）。任务线的审核返工（D45）用的是 executo r 里那套
+//   `maxReworks`，与这里无关。
 import { checkTermCoverage, requirementTerms } from './user-requirements.ts'
 // ★ 分批第 20 批：可执行性定检（平台侧、不花 LLM 额度，见 `skill-exec-check.ts` 头注）
 import {
@@ -181,7 +173,7 @@ import {
   runSkillExecCheck,
   summarizeExecCheck,
 } from './skill-exec-check.ts'
-import { DEFAULT_AUTO_REWORK_ROUNDS, RunExecutor } from './executor.ts'
+import { RunExecutor } from './executor.ts'
 import {
   ReportIngestor,
   ThirdPartyItemSchema,
@@ -1285,13 +1277,6 @@ async function readWorkspaceSettings(
   allowReviewerScriptRun: boolean
   /** 新建智能体时预填的「默认工作守则」（分批第 47 批）；空串 = 不预填。 */
   defaultAgentConduct: string
-  /**
-   * 起草 ↔ 审核自动循环的轮次上限（分批第 23 批，使用者定：默认 10，允许 0–99，0 = 关）。
-   *
-   * 界面上就是「自动返工轮数」一个数字框。它同时也是**唯一的花钱闸门**：使用者选了
-   * "无进展不早停"，所以没有别的刹车（除了"审核没跑成""变差""人按停止"）。
-   */
-  autoReworkRounds: number
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1314,9 +1299,6 @@ async function readWorkspaceSettings(
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
     // 老数据没有这个键 ⇒ 平台默认守则（与"什么都不改"同义）
     defaultAgentConduct: workspace?.defaultAgentConduct ?? GENERAL_WORK_CONDUCT,
-    // 老数据没有这个键 ⇒ 默认轮数（10）。⚠️ `0` 必须原样返回"关"，
-    // 不能写成 `|| DEFAULT`：那会把使用者刚关掉的循环又打开，而它每一轮都在花钱。
-    autoReworkRounds: workspace?.autoReworkRounds ?? DEFAULT_AUTO_REWORK_ROUNDS,
   }
 }
 
@@ -2455,278 +2437,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
   }
 
-  /**
-   * 给返工版做收敛判定：拿"上一版快照"和"这一版"逐文件比。
-   *
-   * 上一版从 `history/<上一版 runId>/skill/` 读（返工开始时平台会先快照，见
-   * `recordDraftVersion` 那条路）；拿不到 ⇒ 返回 `null`（**不判**，而不是判成 ok：
-   * 少一份事实不该变成"这一版合格"）。
-   */
-  async function inspectReworkOrNull(draft: Run): Promise<GuardResult | null> {
-    const prevId = draft.revisedFrom
-    if (!prevId) return null
-    const taskDir = await draftTaskDir(draft.id as string)
-    const prevRoot = join(taskDir, 'history', prevId as string, 'skill')
-    const nextRoot = join(taskDir, 'skill')
-    let prevFiles: string[]
-    try {
-      prevFiles = await listSkillFiles(prevRoot)
-    } catch {
-      warn(`返工版 ${(draft.id as string).slice(-8)} 的上一版快照读不到（${prevRoot}）⇒ 不做收敛判定`)
-      return null
-    }
-    const nextFiles = await listSkillFiles(nextRoot).catch(() => [] as string[])
-    const files: GuardFile[] = []
-    for (const rel of [...new Set([...prevFiles, ...nextFiles])].sort()) {
-      files.push({
-        path: rel,
-        prev: prevFiles.includes(rel) ? await readFileSafe(join(prevRoot, rel)) : null,
-        next: nextFiles.includes(rel) ? await readFileSafe(join(nextRoot, rel)) : null,
-      })
-    }
-    // 上一轮判决点名到哪儿：返工是照着**那条判决**改的，所以拿它的 findings 做禁区
-    const page = await store.listRuns({ workspaceId, limit: 10_000 })
-    const prevReview = page.items
-      .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === (prevId as string))
-      .sort((a, b) => a.queuedAt - b.queuedAt)
-      .pop()
-    const locators: string[] = []
-    if (prevReview) {
-      const verdicts = await store.listVerdictsByRun(prevReview.id)
-      const verdict = verdicts[verdicts.length - 1]
-      for (const f of verdict?.findings ?? []) {
-        for (const ev of f.evidence) if (typeof ev.locator === 'string') locators.push(ev.locator)
-      }
-    }
-    return inspectRework({ files, targetLocators: locators })
-  }
-
-  /** 把闸门的判定写成任务目录里的一份人可读文件（`material/rework-guard.md`）。 */
-  async function writeReworkGuardReport(
-    taskDir: string,
-    draft: Run,
-    guard: GuardResult,
-  ): Promise<void> {
-    const lines = [
-      `# 返工收敛判定：${guard.kind}`,
-      '',
-      `判定对象：返工版 \`${draft.id as string}\`（上一版 \`${(draft.revisedFrom ?? '') as string}\`）`,
-      '',
-      '## 为什么这样判',
-      ...guard.reasons.map((r) => `- ${r}`),
-      '',
-      '## 量到的事实',
-      `- 上一版 ${guard.facts.prevLines} 行 ⇒ 这一版 ${guard.facts.nextLines} 行`,
-      `- 改动：${guard.facts.added} 行新增 / ${guard.facts.removed} 行删除（占上一版 ${Math.round(guard.facts.changedRatio * 100)}%）`,
-      `- 这一版碰过的文件：${guard.facts.touchedFiles.join('、') === '' ? '（没改任何文件）' : guard.facts.touchedFiles.join('、')}`,
-      `- 上一轮判决点名的文件：${guard.facts.targetFiles.join('、') === '' ? '（判决里没有位置）' : guard.facts.targetFiles.join('、')}`,
-      '',
-      '## 这意味着什么',
-      '自动循环已经**停了**（`' + AUTO_REWORK_STOP_FILE + '`）。这一版仍然会被审核，但不会再自动起草下一版——',
-      '因为继续自动改下去只会重复同一个形态（真机上跑了 15 版、$62.27 仍在震荡）。',
-      '要接着跑：等这一版判决出来后点「反馈」交一句人意见，或在沉淀页顶栏把轮数调大后重新审核。',
-      '',
-    ]
-    await mkdir(join(taskDir, 'material'), { recursive: true }).catch(() => undefined)
-    await writeFile(join(taskDir, 'material', 'rework-guard.md'), lines.join('\n'), 'utf8').catch(
-      () => undefined,
-    )
-  }
-
-  /**
-   * 读「停止自动循环」的标记；没有 ⇒ `null`。
-   *
-   * ⚠️ 读不出来（文件坏了/权限）也按"没停"处理并**报警**：把损坏当成"停止"会让循环
-   *    静默地永远不再自动跑，而使用者只会觉得"自动返工又坏了"——那是更难查的错。
-   */
-  async function readAutoReworkStopped(
-    taskDir: string,
-  ): Promise<{ stoppedAt: number; stoppedBy: string } | null> {
-    try {
-      const raw = JSON.parse(
-        await readFile(join(taskDir, AUTO_REWORK_STOP_FILE), 'utf8'),
-      ) as Record<string, unknown>
-      const at = raw['stoppedAt']
-      if (typeof at !== 'number') {
-        warn(`${taskDir} 的 ${AUTO_REWORK_STOP_FILE} 里没有 stoppedAt，按"没停"处理`)
-        return null
-      }
-      const by = typeof raw['stoppedBy'] === 'string' ? raw['stoppedBy'] : 'human'
-      /**
-       * ⚠️ `regressed` 是**我上一版写错的停止理由**（闸门自动停），2026-10-25 已作废：
-       *    使用者定过"无进展不早停、只标注"。真机上已经有两条链被它误停（那条链路
-       *    第 4 版改了 41% 就停了），所以**读到就按"没停"处理**——不删人的文件，
-       *    但也不让一个作废的判据继续拦着循环。
-       */
-      if (by === 'regressed') {
-        warn(
-          `${taskDir} 的 ${AUTO_REWORK_STOP_FILE} 是已作废的 \`regressed\`（闸门自动停）⇒ 按"没停"处理`,
-        )
-        return null
-      }
-      return { stoppedAt: at, stoppedBy: by }
-    } catch {
-      // 文件不存在 = 正常路径（绝大多数情况）
-      return null
-    }
-  }
-
-  /**
-   * 这条链一共花了多少（微美元）。数据来自每条 run 的 `usage`（CLI 报告或本地估算）。
-   *
-   * ⚠️ 不在这里重算"按 token 估钱"：`costUsdMicros` 已经由适配器/估算器给出，
-   *    再估一遍就会出现两个数（结论条一个、账单一个）。
-   */
-  /**
-   * 自动循环的可见面（`current/max/spent/stopped/stalled`）。
-   *
-   * ⚠️ **审核还在跑的时候只算廉价字段**（全在内存里，零额外 I/O）：
-   *    这个接口是界面轮询的热路径，而 `draftTaskDir()` 第一次调用会做链条自愈、
-   *    读版本表，`stalledFindings()` 还要按版本读判决。第一版无条件算这些 ⇒
-   *    真浏览器探针量到"审核真跑起来时实时输出迟迟不出现"
-   *    （`crystal.auditLiveLogBox` 红：轮询被拖慢，页面拿不到新的 `reviewRunId`）。
-   *    `stopped`/`stalled` 只在**收口之后**才有意义：循环已经不在跑时，"停没停"和
-   *    "卡在哪一处"是给人看的结论，不是实时量。
-   */
-  async function autoReworkSummary(
-    chainRuns: readonly { id: string; queuedAt: number; revisedFrom: string | null }[],
-    draftRunId: string,
-    reviewSettled: boolean,
-    usageById: ReadonlyMap<string, { usage?: unknown }>,
-  ): Promise<{
-    current: number
-    max: number
-    spentUsdMicros: number
-    stopped: boolean
-    /**
-     * 谁按的停止：`human` = 人点「停止循环」；`exhausted` = 轮数用完（那是 `escalated`，
-     * 不走这个字段）；`null` = 没停。界面据此说清"为什么不再自动跑"。
-     */
-    stopBy: 'human' | null
-    /**
-     * ★ 返工收敛闸门的**标注**（分批第 25 批加的，第 27 批起只标注不早停）：
-     * 这一版被判成整篇重写 / 正文变胖 / 没动点名处时，界面要能看见"这一轮白改了"，
-     * 但循环**照常继续**（使用者定过：无进展不早停、只标注）。
-     */
-    guard: { kind: string; reasons: string[] } | null
-    stalled: Array<{ locator: string; rounds: number }> | null
-  }> {
-    const chain = chainOfRun(chainRuns, draftRunId)
-    const current = chain.length === 0 ? 1 : chain.length
-    const max = (await readWorkspaceSettings(store, workspaceId)).autoReworkRounds
-    const spentUsdMicros = autoReworkSpentMicros(
-      chain.flatMap((c) => {
-        const r = usageById.get(c.id)
-        return r === undefined ? [] : [r]
-      }),
-    )
-    if (!reviewSettled) {
-      return { current, max, spentUsdMicros, stopped: false, stopBy: null, guard: null, stalled: null }
-    }
-    const taskDir = await draftTaskDir(draftRunId)
-    const stop = await readAutoReworkStopped(taskDir)
-    return {
-      current,
-      max,
-      spentUsdMicros,
-      stopped: stop !== null,
-      stopBy: stop === null ? null : 'human',
-      guard: await readReworkGuard(taskDir),
-      stalled: await stalledFindings(taskDir, true),
-    }
-  }
-
-  /** 读上一轮定检写的闸门标注（`material/rework-guard.json`）；没有 ⇒ null。 */
-  async function readReworkGuard(
-    taskDir: string,
-  ): Promise<{ kind: string; reasons: string[] } | null> {
-    try {
-      const raw = JSON.parse(
-        await readFile(join(taskDir, 'material', 'rework-guard.json'), 'utf8'),
-      ) as Record<string, unknown>
-      const kind = typeof raw['kind'] === 'string' ? raw['kind'] : ''
-      if (kind === '' || kind === 'ok') return null
-      const reasons = Array.isArray(raw['reasons'])
-        ? raw['reasons'].filter((r): r is string => typeof r === 'string')
-        : []
-      return { kind, reasons }
-    } catch {
-      return null
-    }
-  }
-
-  function autoReworkSpentMicros(runs: ReadonlyArray<{ usage?: unknown }>): number {
-    // ⚠️ 用**调用方已经读到的** run 列表，不要逐条 `getRun`：
-    //    这个接口是界面轮询的热路径（审核进行中每几秒一次），第一版逐条读存储
-    //    ⇒ 探针量到"实时输出晚出来"（`crystal.auditLiveLogBox` 在那一版红了）。
-    let total = 0
-    for (const r of runs) {
-      const usage = r.usage as { costUsdMicros?: number } | null | undefined
-      total += usage?.costUsdMicros ?? 0
-    }
-    return total
-  }
-
-  /**
-   * 同一处问题**连续两轮**都被点名 ⇒ 返回它（只报不停，使用者定的口径）。
-   *
-   * 判据用 `locator`（`SKILL.md:12` 这种）而不是整条 summary：审核者的措辞每轮都会变，
-   * 只能靠"指向同一个位置"认出是同一处。实测（10 版链）同一节被点名最多 **6 轮**，
-   * 所以这个数很有信息量：它说明"起草者改不动这里"，值得人看一眼。
-   *
-   * 只比**相邻两轮**：跨轮的重复不算（中间有一轮没提到，说明真的改过一段）。
-   */
-  async function stalledFindings(
-    taskDir: string,
-    reviewSettled: boolean,
-  ): Promise<Array<{ locator: string; rounds: number }> | null> {
-    /**
-     * ⚠️ 只在**审核已经收口**时算：这一项要按版本读判决（O(版本数) 次存储读），
-     *    而审核进行中界面每几秒轮询一次这个接口——放在热路径上会把实时输出的
-     *    推送挤慢（探针的红就是这么来的：`crystal.auditLiveLogBox` 那一条）。
-     *    收口之后轮询就停了，多花几毫秒没有代价。
-     * 另外只看**最近 4 版**：再往前的老版本对"现在卡在哪"没有信息量，
-     *    而链可以很长（真机上有一条 14 版的）。
-     */
-    if (!reviewSettled) return null
-    const versions = await readDraftVersions(taskDir)
-    if (versions === null || versions.versions.length < 2) return null
-    const recent = versions.versions.slice(-4)
-    // 每条版本对应的审核 run（取最新一条判决）
-    const page = await store.listRuns({ workspaceId, limit: 10_000 })
-    const locatorsPerRound: string[][] = []
-    for (const v of recent) {
-      const review = page.items
-        .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === v.runId)
-        .sort((a, b) => a.queuedAt - b.queuedAt)
-        .pop()
-      if (!review) {
-        locatorsPerRound.push([])
-        continue
-      }
-      const vs = await store.listVerdictsByRun(review.id)
-      const verdict = vs[vs.length - 1]
-      locatorsPerRound.push(
-        (verdict?.findings ?? [])
-          .flatMap((f) => f.evidence.map((e) => e.locator))
-          .filter((l): l is string => typeof l === 'string' && l !== ''),
-      )
-    }
-    const stalled = new Map<string, number>()
-    for (let i = 1; i < locatorsPerRound.length; i += 1) {
-      const prev = locatorsPerRound[i - 1] ?? []
-      const cur = locatorsPerRound[i] ?? []
-      for (const locator of cur) {
-        if (!prev.includes(locator)) continue
-        stalled.set(locator, (stalled.get(locator) ?? 1) + 1)
-      }
-    }
-    if (stalled.size === 0) return null
-    return [...stalled.entries()]
-      .map(([locator, rounds]) => ({ locator, rounds }))
-      .sort((a, b) => b.rounds - a.rounds)
-  }
-
   async function repairForeignVersions(taskDir: string, draftRunId: string): Promise<void> {
     if (repairedVersionDirs.has(taskDir)) return
     repairedVersionDirs.add(taskDir)
@@ -3271,47 +2981,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // ⚠️ 定检本身失败**不拦**起审核：它只是少一份事实，而"审一下"这件事不该因此变得不可能。
     // ⚠️ 也不写给起草者看（`00-README.md` 不提名它）：起草者的输入是**使用者的意见**
     //    （`material/feedback.md`），平台定检是审核者的原料，塞给起草者等于换了任务书。
-    // ══════════════════════════════════════════════════════════════════
-    // ★ 分批第 25 批：返工版先过**收敛闸门**，再起审核
-    // ══════════════════════════════════════════════════════════════════
-    //
-    // 为什么放在起审核之前：真机上那条链 15 版 / $62.27 还在震荡——第 14 轮点名 A、
-    // 第 15 轮点名 B，而 B 是"修 A 撞出来的新伤"；正文 188 → 473 行只增不减。
-    // 每一轮审核都是**真金白银**（单轮最高 $6.11），先花几十毫秒量一下"这版是不是重写"
-    // 比直接审划算得多；判成重写/变胖/没动点名处 ⇒ **停掉自动循环**，交给人。
-    //
-    // ⚠️ 只在**返工版**（有 `revisedFrom`）上判：初版没有"上一版"可比，
-    //    而且初版本来就该由起草者自己决定写多少。
-    // ⚠️ 判完之后**照样起审核**（不拦）：使用者要看到判决，"停"只停"下一轮自动化"。
-    //    只写标记不审的话，界面会退化成"还没审核过"，人反而更不知道发生了什么。
-    const guard = await inspectReworkOrNull(draft)
-    if (guard !== null) {
-      await writeReworkGuardReport(draftHut, draft, guard)
-      if (guard.kind !== 'ok') {
-        /**
-         * ★ 2026-10-25 使用者纠正：**只有 PASS / 轮数用完 / 人点停止 才停**。
-         *
-         * 我第一版（配合 `inspectRework`）在判成 rewrite/bloat/off-target 时直接写
-         * `.auto-rework.json` 把循环停掉 —— 那违背了使用者在分批第 23 批已经定过的一条：
-         * 「无进展**不早停**，只标注」。真机上的后果是可量的：那条链第 4 版只改了 41%
-         * （阈值 40%）就被停掉，而它既没有 PASS、也没用完轮数 —— 使用者看到的是
-         * 「这轮明明还在跑，怎么就不动了」，而我给不出正当理由。
-         *
-         * 所以现在：**标注**（写 `material/rework-guard.md` + 落一份 json 给界面读）
-         * 但**不停**。循环继续，直到 PASS、额度用完，或人按「停止循环」。
-         */
-        warn(
-          `返工版 ${(draft.id as string).slice(-8)} 被判「${guard.kind}」（只标注，不停循环）：` +
-            guard.reasons.join('；'),
-        )
-      }
-      await writeFile(
-        join(draftHut, 'material', 'rework-guard.json'),
-        `${JSON.stringify({ kind: guard.kind, reasons: guard.reasons, facts: guard.facts }, null, 2)}\n`,
-        'utf8',
-      ).catch(() => undefined)
-    }
-
     /**
      * ★ 分批第 26 批：专名落点检查（机械，不花额度）。
      *
@@ -3325,9 +2994,9 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     /**
      * ★ 分批第 35 批：草稿有两类——`skill/`（沉淀成 skill）与 `agent/`（沉淀成 Agent）。
      *
-     * 判据、定检、指纹、标题全都要按类分。判据的分叉在这一处收口：**起审核只有一个实现**，
-     * 两个入口（人点「开始审核」/ 改版跑完自动再审）都走它，所以分叉只能放在这里，
-     * 放进路由的话自动再审那条路会拿到 skill 的判据去审指令。
+     * 判据、定检、指纹、标题全都要按类分。判据的分叉在这一处收口：**起审核只有一个实现**
+     * （现在就只剩人点「开始审核」这一个入口——改版跑完自动再审那一支已在分批第 129 批删掉），
+     * 所以分叉只能放在这里。
      */
     const isAgentDraft = draft.crystallizeTarget?.kind === 'agent'
     const outRel = isAgentDraft ? 'agent' : 'skill'
@@ -4125,167 +3794,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   同一次任务。不带下去的话，第二轮会悄悄退回 agent 的长期配置——表现是
    *   第一轮勾掉的动作在第二轮又活了，而没有任何地方会提示这件事。
    */
-  /**
-   * 把审核判决变成**给起草者看的一句意见**（§10.5 第 ③ 条：不通过 ⇒ 自动返工）。
-   *
-   * 为什么不直接把判决 JSON 丢进 feedback：收到它的是**起草者**（一个 agent），
-   * 它要做的是"按这些条目改正文"。判决 JSON 里大半字段（severity 的枚举、evidence 的
-   * blobRef、status）对它是噪声，而真正有用的三样是**条目、位置、摘录**。
-   * 所以这里只抽这三样，并保持"每条一行、带序号"的形状——它和 revise 路由给的那句
-   * 人工意见是同一个形状（同一类输入走同一个格式，起草者不必分辨是谁提的）。
-   */
-  /**
-   * 这条链上**之前几轮**判决点名过的位置（按文件聚合，越常被点名越靠前）。
-   *
-   * 只取文件级：行号每轮都漂（详见 `rework-guard.ts` 里 `locatorFile` 的注释）。
-   * `summary` 取**最近一轮**那条的说法，用来说明"这里反复出问题的是什么"。
-   */
-  async function regressionChecklist(
-    draftRunId: string,
-  ): Promise<Array<{ file: string; rounds: number; summary: string }>> {
-    const page = await store.listRuns({ workspaceId, limit: 10_000 })
-    const chain = chainOfRun(
-      page.items
-        .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
-        .map((r) => ({ id: r.id as string, revisedFrom: r.revisedFrom ?? null, queuedAt: r.queuedAt })),
-      draftRunId,
-    )
-    const byFile = new Map<string, { rounds: number; summary: string }>()
-    for (const v of chain) {
-      const review = page.items
-        .filter((r) => r.subject.type === 'skill-draft-review' && r.subject.id === v.id)
-        .sort((a, b) => a.queuedAt - b.queuedAt)
-        .pop()
-      if (!review) continue
-      const verdicts = await store.listVerdictsByRun(review.id)
-      const verdict = verdicts[verdicts.length - 1]
-      if (!verdict) continue
-      const seen = new Set<string>()
-      for (const f of verdict.findings) {
-        for (const ev of f.evidence) {
-          const file = typeof ev.locator === 'string' ? locatorFile(ev.locator) : ''
-          if (file === '' || seen.has(file)) continue
-          seen.add(file)
-          const cur = byFile.get(file) ?? { rounds: 0, summary: '' }
-          byFile.set(file, { rounds: cur.rounds + 1, summary: f.summary })
-        }
-      }
-    }
-    return [...byFile.entries()]
-      .map(([file, v]) => ({ file, rounds: v.rounds, summary: v.summary }))
-      .sort((a, b) => b.rounds - a.rounds)
-  }
-
-  function draftReviewFeedback(
-    verdict: VerdictRecord,
-    checklist: ReadonlyArray<{ file: string; rounds: number; summary: string }> = [],
-  ): string {
-    // ★ 分批第 10 批：把"改哪儿"交成**能直接照做**的形状。
-    //
-    // 原来一行写成 `locator：excerpt`（位置与原文挤在一行），审核者的条目一旦带上多个证据
-    // 就连成一串，读的人得自己拆。现在每条拆成 `位置：` / `原文：` 两行——起草者要的是
-    // "哪一节哪一行现在写的是什么"，而不是一串冒号。
-    //
-    // ⚠️ 行号来自审核者（`locator` 写成 `SKILL.md:12` 或 `SKILL.md#小节`）——它是**软**信息
-    //    （模型数出来的行号可能差一两行），所以原文摘录必须一起给：位置 + 原文才是可执行的，
-    //    只有位置会让人找错行，只有原文又不好定位。
-    const lines = [
-      `审核不通过（理由码：${verdict.reasonCode}）。这一版请**逐条**对着下面每一条改：` +
-        '产出目录 `skill/` 里已经是上一版，只改下面点到的地方，没提到的部分原样留着。',
-    ]
-    verdict.findings.forEach((f, i) => {
-      const where = f.evidence
-        .map((e) => [e.locator, e.excerpt].filter((x): x is string => Boolean(x)).join('：'))
-        .filter(Boolean)
-        .join('；')
-      lines.push(`${i + 1}. [${f.severity}] ${f.summary}${where === '' ? '' : `\n   位置/摘录：${where}`}`)
-    })
-    /**
-     * ★ 分批第 25 批：把"这条链上之前几轮点过的问题"一起交下去，并加**硬约束**。
-     *
-     * 真机上量到 15 版 / $62.27 还在震荡：第 14 轮点名 A、第 15 轮点名 B，
-     * 而 B 是"修 A 时撞出来的新伤"；正文 188 → 473 行只增不减（每轮都在重写整篇）。
-     * 光把"这一轮的条目"交下去，起草者没有"这些不能改坏"的约束。
-     *
-     * ⚠️ 清单里的 `locator` **只到文件级**（行号会漂，见 `rework-guard.ts` 的注释），
-     *    所以这里的措辞是"这些文件里已经改过的东西"而不是"第 183 行"。
-     */
-    if (checklist.length > 0) {
-      lines.push('')
-      lines.push('## 这条链上之前几轮已经改过的地方（不许改坏）')
-      lines.push(
-        '下面是前几轮审核点名过的文件与问题。它们要么已经改好、要么还在反复出现——' +
-          '这一版**只许在你被点名的位置改**，上面这些地方一个字节都不要动' +
-          '（要动必须在「怎么改的」里说明为什么非动不可）。',
-      )
-      for (const item of checklist.slice(0, 12)) {
-        lines.push(
-          `- ${item.file}（近 ${item.rounds} 轮被点名）${item.summary === '' ? '' : `：${item.summary}`}`,
-        )
-      }
-      if (checklist.length > 12) {
-        lines.push(`- …还有 ${checklist.length - 12} 条（同一批文件，按下面对文件清单处理）`)
-      }
-    }
-    lines.push('')
-    lines.push('## 硬约束（违反会被平台判成「重写 / 变胖 / 没动点名处」，自动循环会停）')
-    lines.push('1. 只改上面点到的地方；其它段落**原样保留**，不要"顺手优化"。')
-    lines.push(
-      `2. 不许重写整篇：改动（增+删）不得超过上一版的 ${Math.round(REWRITE_RATIO * 100)}%。`,
-    )
-    lines.push(
-      `3. 正文不得比上一版长超过 ${Math.round((BLOAT_RATIO - 1) * 100)}%（这条链已经因为重写从 188 行长到 473 行）。`,
-    )
-    lines.push('4. 改完自己过一遍：上一节清单里的每一处，现在是否仍然成立？')
-    lines.push('改完把**改过的文件**写回 `skill/`（完整文件，不是补丁）；没改的文件不必重写。')
-    if (verdict.findings.length === 0) {
-      // 判决里没有条目 ⇒ 如实说明，不要编一条。理由码本身就是唯一线索。
-      lines.push('（审核者没有给出条目清单，请按上面的理由码判断该改什么；不要动无关部分。）')
-    }
-    return lines.join('\n')
-  }
-
   async function createReworkRun(run: Run, verdict: VerdictRecord): Promise<string | null> {
-    // ★ 起草出来的 skill 被审**不通过** ⇒ 让内置起草者按意见再起草一版（§10.5 第 ③ 条，2026-10）。
+    // ★ 分批第 136 批（§12.42 第 ② 步）：**沉淀线的自动返工循环已删**。
+    //   这里原来给 `skill-draft-review` 开了一个窄口子（不通过 ⇒ 让内置起草者按意见再起草一版），
+    //   它连同轮数/闸门/停止标记一起撤掉——沉淀线不跑评审（§12.15），也就没有"自动再改一版"。
+    //   人想改一版仍然可以：审阅界面的「反馈」走 `startReviseRun`，与这条自动链无关。
     //
-    // 为什么挂在这个函数里、而不是另开一个回调：这条路本来就是"审核不通过 ⇒ 交回执行者重做"，
-    // 而**额度与"额度用尽 ⇒ 交给人"这两件事已经由 `decideReview` 判好了**（D45 的
-    // `maxReworks`/`usedReworks` 是 `handle()` 的入参）——它只在有额度时才走到 `rework` 这一支。
-    // 另开一套的话，"额度用尽"会有两种判法，而表现是**自动返工停不下来**。
-    //
-    // ⚠️ 窄口子：只有 `skill-draft-review` 走这里，业务那条路（subject 是 `run`）一个字不动。
-    if (run.subject.type === 'skill-draft-review') {
-      // `needs_human` / 判决不合规**不返工**：那不是"活没干好"，是"审核没跑成"。
-      // 把后者当成返工理由，会让一次 CLI 挂掉变成"重写一版"，而重写并不能修好 CLI。
-      if (verdict.conclusion !== 'fail') {
-        warn(`起草审核的结论是 ${verdict.conclusion}（不是 fail），不自动返工`)
-        return null
-      }
-      // ★ 分批第 23 批：人按过「停止循环」⇒ 不再自动起下一版（交给人）。
-      //   为什么在**这里**判而不是在预算里判：预算管"还能跑几轮"，这里管"使用者叫停"，
-      //   两件事的来由不同；混在一起会让日志里分不清"是跑满了还是人停的"。
-      const stopped = await readAutoReworkStopped(await draftTaskDir(run.subject.id as string))
-      if (stopped !== null) {
-        info(
-          `草稿 ${run.subject.id.slice(-8)} 的自动循环已被人工停止` +
-            `（${new Date(stopped.stoppedAt).toLocaleString('zh-CN')}）⇒ 这一轮交给人`,
-        )
-        return null
-      }
-      const result = await startReviseRun({
-        draftRunId: run.subject.id as string,
-        feedback: draftReviewFeedback(verdict, await regressionChecklist(run.subject.id as string)),
-      })
-      if (result.status !== 202) {
-        const detail = (result.body as { error?: unknown }).error
-        warn(`自动返工没起来（HTTP ${result.status}）：${String(detail ?? '')}`)
-        // 返回 null ⇒ 走"交给人"那条路（`rework_exhausted`），**不让判决悬着**
-        return null
-      }
-      return String((result.body as { draftRunId?: unknown }).draftRunId ?? '')
-    }
-
-    // ① 被审的那条执行 run：返工的对象是它，目录、会话、agent 都从它来。
+    //   ⚠️ 任务线（`subject.type === 'run'`，D45「审核不通过 ⇒ 交回执行者重做」）**一个字没动**。
     if (run.subject.type !== 'run') {
       warn(`返工只对"审一条 run"有意义，subject 是 ${run.subject.type}，这次不返工`)
       return null
@@ -4572,8 +4087,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         defaultRuntimeKey: settings.defaultRuntimeKey,
         // §10.5 第 ③ 条：界面上要能看到并关掉"审核者真执行草稿脚本"
         allowReviewerScriptRun: settings.allowReviewerScriptRun,
-        // ★ 分批第 23 批：自动返工轮数（设置页那个数字框读它）
-        autoReworkRounds: settings.autoReworkRounds,
         /**
          * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
          * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
@@ -4936,29 +4449,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       }
       await store.insertWorkspace({ ...workspace, allowReviewerScriptRun: raw, updatedAt: Date.now() })
       sendJson(res, 200, { allowReviewerScriptRun: raw })
-      return
-    }
-
-    if (req.method === 'PUT' && path === '/api/workspace/auto-rework') {
-      // ★ 分批第 23 批：自动返工轮数（使用者：「设定可以 N 次，直到 PASS」）。
-      //   校验放在写入口，而不是读的时候夹：写进库里的值与界面显示的值必须一致，
-      //   否则使用者设了 200 却按 99 跑，而界面上写着 200（"它到底跑几轮"会变成谜）。
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const raw = body['rounds']
-      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 99) {
-        sendJson(res, 400, {
-          error: `rounds 必须是 0–99 的整数（收到 ${JSON.stringify(raw)}）`,
-          code: 'invalid_rounds',
-        })
-        return
-      }
-      const workspace = await store.getWorkspace(workspaceId)
-      if (!workspace) {
-        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
-        return
-      }
-      await store.insertWorkspace({ ...workspace, autoReworkRounds: raw, updatedAt: Date.now() })
-      sendJson(res, 200, { autoReworkRounds: raw })
       return
     }
 
@@ -6120,63 +5610,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // 为什么要有这条读接口：判决挂在**审核 run** 上，而界面手上只有**起草 run** 的 id。
     // 让前端自己去 `GET /api/runs` 里翻 subject 再翻 verdicts，等于把"这两条 run 怎么对应"
     // 这件规则复制到前端（改一处漏一处）；这里给一份已解析好的结论。
-    if (req.method === 'POST' && path === '/api/crystallize/stop-loop') {
-      /**
-       * ★ 分批第 23 批：「停止循环」——循环进行中唯一的人工入口（使用者定的口径）。
-       *
-       * 落点是一份**文件**（`.auto-rework.json`，在任务目录里），不是 run 上的新字段：
-       *   · run 记录是协议实体，加一个"只对这一条链有意义"的字段会把协议搅浑；
-       *   · 这个标记是**任务级**的（"这个沉淀任务别再自动改下去了"），跟目录里的
-       *     `.versions.json`、`.human-edits.json` 是同一族；
-       *   · 放在目录里，使用者自己也能看见（`cat .auto-rework.json` 就知道它是怎么停的）。
-       *
-       * 同时把正在跑的那条审核 run 取消掉——"停止"如果只是"下一轮不再起"，
-       * 人点完还得等这一轮自己跑完（几分钟、真金白银），那不叫停止。
-       */
-      const raw = (await readJsonBody(req)) as { draftRunId?: unknown }
-      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
-      if (draftRunId === '') {
-        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
-        return
-      }
-      const draft = await store.getRun(draftRunId as RunId)
-      if (!draft || draft.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
-        return
-      }
-      const taskDir = await draftTaskDir(draftRunId)
-      await writeFile(
-        join(taskDir, AUTO_REWORK_STOP_FILE),
-        `${JSON.stringify({ stoppedAt: Date.now(), stoppedBy: 'human', draftRunId }, null, 2)}\n`,
-        'utf8',
-      )
-      // 正在跑的审核 run（subject 指回这一版）也要停：否则"点了停止还在烧"
-      const page = await store.listRuns({ workspaceId, limit: 10_000 })
-      const running = page.items.find(
-        (r) =>
-          r.subject.type === 'skill-draft-review' &&
-          r.subject.id === draftRunId &&
-          ['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(
-            r.status,
-          ),
-      )
-      let cancelled: string | null = null
-      if (running) {
-        try {
-          await executor.cancel(running.id)
-          cancelled = running.id
-        } catch (err) {
-          warn(`停止循环时取消审核 run ${running.id.slice(-8)} 失败：${String(err)}`)
-        }
-      }
-      info(
-        `自动循环已停止（草稿 ${draftRunId.slice(-8)}）` +
-          (cancelled === null ? '；没有正在跑的审核 run' : `；已取消审核 run ${cancelled.slice(-8)}`),
-      )
-      sendJson(res, 200, { stopped: true, cancelledReviewRunId: cancelled })
-      return
-    }
-
     if (req.method === 'GET' && path === '/api/crystallize/review') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {
@@ -6274,26 +5707,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
          *    已用 17 > 上限 2 ⇒ **一次都没自动返工过**。轮次只认链（`revisedFrom`）。
          */
         versions: chainOfRun(chainRuns, draftRunId).length,
-        /**
-         * ★ 分批第 23 批：自动循环的**可见面**——现在第几轮 / 上限几轮 / 已经花了多少 / 有没有卡住。
-         *
-         * 为什么必须给界面这些数（使用者定的是"默认 10 轮、无进展不早停"）：
-         * 一条始终不通过的链实测 **10 轮 ≈ $29.81**，每轮成本还在递增（$0.98 → $6.11，
-         * 上下文越滚越大）。所以"第 k/N · 已花 $x"必须一直在结论条上，否则
-         * "跑 N 轮"就成了一件看不见成本的事。
-         *
-         * `stalled`：同一处（`locator`）在**连续两轮**判决里都被点名 ⇒ 标出来，
-         * 但**不停**（使用者明确选了"标注意、继续跑到 N 轮"）。
-         */
-        autoRework: await autoReworkSummary(
-          chainRuns,
-          draftRunId,
-          reviewRun !== undefined &&
-            !['queued', 'deferred', 'waiting_local_directory', 'dispatched', 'running'].includes(
-              reviewRun.status,
-            ),
-          new Map(page.items.map((r) => [r.id as string, r])),
-        ),
       })
       return
     }

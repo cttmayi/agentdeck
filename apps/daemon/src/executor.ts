@@ -1,7 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 // ★ 分批第 22 批：返工额度按**链**数（原来按"同一来源"，在真机上被邻链撑爆 ⇒ 自动返工从没触发）
-import { chainOfRun } from './draft-chain.ts'
 import type { Workspace } from '@agentdeck/protocol'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -311,44 +310,6 @@ const MAX_STDERR_LOG_LINES = 200
  * `.agentdeck/` 下是与上下文副本（`.agentdeck/context/`）同一族的"平台
  * 放的东西"，一眼可辨、不会冒充 agent 的产出。
  */
-
-/**
- * 起草审核不通过时自动返工的**轮次上限**（§10.1 ②：使用者定的是"建议 2"）。
- *
- * 为什么要有上限：没有上限时"起草 → 审不过 → 再起草"会一直转下去，而每一轮都是
- * 真实的 CLI 调用（时间与额度）；使用者看到的是一条永远不结束的沉淀任务。
- * 定成 2 的意思是：最多改两版，第三版还不通过就**交给人**（停在"审核未通过"态）。
- */
-const SKILL_DRAFT_REWORK_LIMIT = 2
-/**
- * 老的**硬编码**上限，只在"读不到工作区设置"时兜底（分批第 23 批起，轮次由
- * `Workspace.autoReworkRounds` 决定，默认 10）。
- *
- * 为什么保留 2 而不是 10 作兜底：读不到工作区（数据被删/半初始化）时按**保守**的来 —
- * 少跑几轮最多是"又要人点一次"，多跑几轮是**真金白银**（实测 10 轮 ≈ $30）。
- */
-/**
- * 轮次上限的默认值（使用者 2026-10-23 定：默认 10，允许 0–99）。
- *
- * 与协议里的 `Workspace.autoReworkRounds` 同一个数：这里只是"没设过时读什么"。
- */
-export const DEFAULT_AUTO_REWORK_ROUNDS = 10
-
-/**
- * 从一个工作区记录解析出轮次上限。
- *
- * ⚠️ 单独一个函数是为了**能被测**：这段逻辑有两条容易写错的边界——
- *   · `0` 必须原样返回"关"（写成 `|| DEFAULT` 会把 0 变成 10，使用者以为关了，其实在烧钱）；
- *   · 越界/非整数一律夹到范围内（老数据、手工改过的 store 都可能有怪值）。
- */
-export function resolveAutoReworkRounds(
-  workspace: Partial<Pick<Workspace, 'autoReworkRounds'>> | null | undefined,
-): number {
-  const raw = workspace?.autoReworkRounds
-  if (raw === undefined) return DEFAULT_AUTO_REWORK_ROUNDS
-  if (!Number.isFinite(raw)) return DEFAULT_AUTO_REWORK_ROUNDS
-  return Math.min(99, Math.max(0, Math.trunc(raw)))
-}
 
 export class RunExecutor {
   readonly #deps: ExecutorDeps
@@ -2086,52 +2047,14 @@ export class RunExecutor {
    *    材料）才按 0 处理。
    */
   async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number | null; usedReworks: number }> {
-    // ★ 起草审核（`skill-draft-review`，§10.5 第 ③ 条）：不通过 ⇒ 自动返工，但**要有额度**。
+    // ★ 分批第 136 批（§12.42 第 ② 步）：**沉淀线的自动返工循环已删**。
     //
-    // ⚠️ 为什么必须在这里开口子（2026-10，写第 ③ 条时踩到的）：下面那条 `!== 'run'` 的兜底
-    //    会给这类审核 `maxReworks: 0`，于是 `decideReview` 判成"额度已用尽 ⇒ 交给人"，
-    //    `createReworkRun` **一次都不会被调用** —— 我为此写的那段窄口子就成了死代码，
-    //    而表现是"自动返工永远不触发"，日志里连一句警告都没有（它压根没走到那一步）。
+    // 以前这里给 `skill-draft-review` 开了一个口子：额度按"这条链起草过几版"算、
+    // 上限读工作区设置 `autoReworkRounds`，返工由 `createReworkRun` 派出去。
+    // 沉淀线不跑评审（§12.15 的决定）之后，这条循环连同它的轮数/闸门/停止标记一起撤掉：
+    // **起草草稿永远不自动返工**（"按意见改一版"仍然由人点，走 `startReviseRun`）。
     //
-    // 额度怎么算：**这条链上已经起草过几版**就是已用的轮次 —— 每一版都是一条
-    // `skill-draft` run，沿 `revisedFrom` 上溯到同一个根（见 `draft-chain.ts`）。这比另加一个
-    // 计数器诚实：重装、重启、人工点多一版，这个数都对得上（计数器会与事实分叉）。
-    //
-    // ⚠️⚠️ 这里原来数的是"同一份**来源素材**下有几版"（`subject.sourceRunId` 相同就算）。
-    //    真机（2026-10-23）撞到反例：来源 run `Q2SQ16` 下挂着**两条不相干的链**
-    //    （`H5YM0E` 4 版 + `9D67DN` 10 版，目标都是 `{"kind":"new"}`）⇒ 数出 18 版 ⇒
-    //    `usedReworks = 17 > 上限 2` ⇒ **每一轮都被判"额度已用尽 ⇒ 交给人"** ⇒
-    //    `createReworkRun` 一次都没被调用过。使用者的体感是"自动返工根本不存在"，
-    //    于是手动点了 10 次「反馈」（$29.81）。轮次只认链。
-    if (run.subject.type === 'skill-draft-review') {
-      const draft = await this.#deps.store.getRun(run.subject.id as RunId)
-      if (!draft || draft.subject.type !== 'skill-draft') {
-        // 被审的起草 run 已经不在了 ⇒ 没有链可数，不返工（不编一个额度出来）
-        return { maxReworks: 0, usedReworks: 0 }
-      }
-      const page = await this.#deps.store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
-      const chain = chainOfRun(
-        page.items
-          .filter((r) => r.kind === 'execute' && r.subject.type === 'skill-draft')
-          .map((r) => ({
-            id: r.id as string,
-            revisedFrom: r.revisedFrom ?? null,
-            queuedAt: r.queuedAt,
-          })),
-        draft.id as string,
-      )
-      // 自己一定在链上；真读不到（极端：查询中途被删）就当只有这一版，别把额度一次性清零
-      const versions = chain.length === 0 ? 1 : chain.length
-      // ★ 分批第 23 批：上限来自**工作区设置**（默认 10，允许 0–99，`0` = 关）。
-      //   原来是硬编码 2 ⇒ 使用者手动跑了 10 轮，而自动循环到第 3 版就"额度用尽"。
-      const workspace = await this.#deps.store.getWorkspace(run.workspaceId)
-      const limit = resolveAutoReworkRounds(workspace ?? null)
-      return {
-        maxReworks: limit === 0 ? 0 : limit,
-        // 已经起草过几版 - 1 = 已经返工过几次（第一版不算返工）
-        usedReworks: Math.max(0, versions - 1),
-      }
-    }
+    // ⚠️ 任务线（`subject.type === 'run'`，D45 的"审核不通过 ⇒ 交回执行者重做"）**一个字没动**。
     if (run.subject.type !== 'run') return { maxReworks: 0, usedReworks: 0 }
     const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
     if (!executeRun) return { maxReworks: 0, usedReworks: 0 }

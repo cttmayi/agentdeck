@@ -345,28 +345,6 @@ async function readDirRecursive(dir: string, prefix = ''): Promise<Record<string
   return out
 }
 
-/**
- * 把自动返工轮数设成 n，返回"恢复默认"的函数。
- *
- * 为什么要有：分批第 23 批把上限从**硬编码 2** 改成了工作区设置（默认 10）。
- * 那之后"额度用尽才停"这类用例必须**显式**把轮数钉成 2，否则它会按 10 跑——
- * 第一次全量 `check` 里那条链跑了 76 分钟才收头，而 `+10 行` 那个断言等的其实是第 10 版。
- *
- * ⚠️ 必须是模块级：它被两个不同的 `describe` 用（§10.7、§10.8）。第一版写在 §10.5 的
- *    describe 里 ⇒ 另一块里 `ReferenceError: useReworkRounds is not defined`。
- */
-const useReworkRounds = async (rounds: number): Promise<(() => Promise<void>)> => {
-  const put = async (n: number): Promise<void> => {
-    await fetch(`${daemon.url}/api/workspace/auto-rework`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rounds: n }),
-    })
-  }
-  await put(rounds)
-  return () => put(10)
-}
-
 async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
   const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
     method: 'POST',
@@ -1466,20 +1444,20 @@ describe('§10：起草之后的审核 run', () => {
 })
 
 /**
- * §10.5 第 ③ 条：审核**不通过** ⇒ 自动返工（把审核意见交回内置起草者重改一版）。
+ * §10.5：审核判决的收口（分批第 136 批改口径：**不通过 ⇒ 交给人**，不再自动返工）。
  *
- * 挂点是现成的 `createReworkRun`（D45 那条"审核不通过 ⇒ 交回执行者重做"的路），
- * 我们只在那条路的**开头**开了一个窄口子（`subject.type === 'skill-draft-review'`）。
- * 所以这里要证的是三件事：**该返工时真的返工**、**不改返工时一次都不动**、
- * **返工交下去的是审核者写的那几条意见**（不是一句"不通过"）。
+ * 历史：这里原来钉的是"不通过 ⇒ 自动交回内置起草者再改一版"（挂点是 `createReworkRun`
+ * 的 `skill-draft-review` 窄口子）。§12.42 第 ② 步把**沉淀线的自动返工循环**整个删掉
+ * （轮数/闸门/停止循环一起走），所以现在不通过的落点是 `escalated`——判决如实记录、
+ * 交给人；想改一版由人点「反馈」走 `startReviseRun`（与自动链无关）。
  *
- * ⚠️ 判据不要用"起草 run 的条数"：`/api/runs` 是**分页**的，条数会撞上限，
- *    于是"多了一条"看不见（我第一版就是这么写的，卡在"等不到第 27 条"）。
- *    改用两处更硬的证据：①判决的状态（`rework_requested` 只在这条路上出现，
- *    额度用尽/派不出去时是 `escalated`）②文件系统里**新的一间草稿小屋**里
- *    确实有那份 `material/feedback.md`。
+ * 剩下的判据：①不通过不许自动多起一版、也不许自动往素材里写返工任务书；
+ * ②通过不返工；③判决不合规不算通过；④读结论的接口分得开"没审过"与"审过"。
+ *
+ * ⚠️ 判据不用"起草 run 的条数"：`/api/runs` 是**分页**的，条数会撞上限，
+ *    于是"多了一条"看不见（第一版就是这么写的）。用**版本表**（`.versions.json`）。
  */
-describe('§10.5：审核不通过 ⇒ 自动返工', () => {
+describe('§10.5：判决收口（不通过 ⇒ 交给人，不再自动返工）', () => {
   /** 起一条起草审核 run 并等它收口（判决落库发生在终态之后，所以等的是判决）。 */
   async function reviewDraftAndWait(draftRunId: string): Promise<Record<string, unknown>> {
     const res = await fetch(`${daemon.url}/api/crystallize/review`, {
@@ -1574,310 +1552,13 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     escalateReason: null,
   })
 
-  test('★★ 轮数设成 0 ⇒ 不通过也不自动起下一版（"关"必须是真的关）', async () => {
-    // ⚠️ 设置不在 `/api/workspace/settings`（那个路径不存在），而是随 `/api/identity` 一起发的
-    const settings = (await (
-      await fetch(`${daemon.url}/api/identity`)
-    ).json()) as { autoReworkRounds: number }
-    assert.equal(settings.autoReworkRounds, 10, '默认必须是使用者定的 10')
-    const put = await fetch(`${daemon.url}/api/workspace/auto-rework`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rounds: 0 }),
-    })
-    assert.equal(put.status, 200, await put.clone().text())
-    const sourceRunId = await runReviewed('审完的流程（关掉自动返工）')
+  test('★★ 判决 fail ⇒ **交给人**（escalated），不自动多起一版、也不自动往素材里写返工意见', async () => {
+    const sourceRunId = await runReviewed('审完的流程（判决不通过）')
     const draftRunId = await draftAndWait({
       runId: sourceRunId,
-      target: { kind: 'new', purpose: '关掉自动返工' },
+      target: { kind: 'new', purpose: '判决不通过' },
     })
-    fakeBackend.draftReviewVerdict = failVerdict()
-    try {
-      const verdict = await reviewDraftAndWait(draftRunId)
-      assert.equal(verdict.conclusion, 'fail')
-      assert.equal(
-        verdict.status,
-        'escalated',
-        '轮数 0 ⇒ 额度为 0 ⇒ 必须交给人（rework_requested 说明它还是自动起了下一版）',
-      )
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-      // 恢复默认，别影响后面的用例（这个 daemon 是共享的）
-      await fetch(`${daemon.url}/api/workspace/auto-rework`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rounds: 10 }),
-      })
-    }
-  })
-
-  test('★★★ 点「停止循环」⇒ 落标记文件、下一轮不再自动起（使用者:循环中唯一的入口）', async () => {
-    const sourceRunId = await runReviewed('审完的流程（停止循环）')
-    const draftRunId = await draftAndWait({
-      runId: sourceRunId,
-      target: { kind: 'new', purpose: '停止循环' },
-    })
-    const stop = await fetch(`${daemon.url}/api/crystallize/stop-loop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId }),
-    })
-    assert.equal(stop.status, 200, await stop.clone().text())
-    // 标记文件真的落盘（不然"停止"只是个界面状态）
-    const stamp = JSON.parse(
-      await readFile(join(workRoot, `skill-draft-${draftRunId}`, '.auto-rework.json'), 'utf8'),
-    ) as { stoppedAt: number; stoppedBy: string }
-    assert.equal(stamp.stoppedBy, 'human')
-    assert.ok(stamp.stoppedAt > 0)
-
-    fakeBackend.draftReviewVerdict = failVerdict()
-    try {
-      const verdict = await reviewDraftAndWait(draftRunId)
-      assert.equal(verdict.conclusion, 'fail')
-      assert.equal(
-        verdict.status,
-        'escalated',
-        '人按过停止 ⇒ 这一轮必须交给人（rework_requested 说明它又自动起了一版）',
-      )
-      // 接口要如实报"停了"（界面据此不再显示"自动循环中"）
-      const info = (await (
-        await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${draftRunId}`)
-      ).json()) as { autoRework: { stopped: boolean; current: number; max: number } }
-      assert.equal(info.autoRework.stopped, true)
-      assert.equal(info.autoRework.current, 1, '这条链只起草过 1 版')
-      assert.equal(info.autoRework.max, 10, '上限就是设置里那个数')
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-    }
-  })
-
-  test('★★★ 返工版被判「重写」⇒ **只标注、不停循环**（使用者定过：无进展不早停）', async () => {
-    /**
-     * 真机现场：那条链第 4 版改了 41%（阈值 40%）就被判「重写」——而我上一版（分批第 25 批）
-     * 让它**直接停掉自动循环**：使用者看到的是「这轮明明还在跑，怎么就不动了」，
-     * 而它既没有 PASS、也没用完轮数。
-     *
-     * 使用者 2026-10-25 的纠正：「没搞懂，不是要 PASS 才停止吗」——对，分批第 23 批他早就定过
-     * 「无进展**不早停**，只标注」。所以闸门现在只写 `material/rework-guard.md` +
-     * `rework-guard.json` 给界面看，**循环照常继续**。
-     */
-    const restoreRounds = await useReworkRounds(2)
-    const sourceRunId = await runReviewed('审完的流程（闸门只标注）')
-    const draftRunId = await draftAndWait({
-      runId: sourceRunId,
-      target: { kind: 'new', purpose: '闸门只标注' },
-    })
-    fakeBackend.draftReviewVerdict = failVerdict()
-    fakeBackend.minimalEditOnRevise = false // 假后端整篇重写 ⇒ 必然被判 rewrite
-    /**
-     * ★ 分批第 129 批（评审下线，§12.15）：**改版草稿不再自动接审核**（默认即下线，
-     * 本批已删掉临时开关）。
-     *
-     * 这条用例量的是"闸门只标注、不停循环"，它的判据需要第 2 版**被审过**（闸门报告是在
-     * `startDraftAudit` 里量改动量算出来的）。自动那一半下线之后，这一轮审核改由**人点**
-     * 「开始审核」——也就是真机上使用者的动作（评审下线≠不能审）。
-     */
-    try {
-      const verdict = await reviewDraftAndWait(draftRunId)
-      assert.equal(verdict.status, 'rework_requested', '有额度就必须派返工')
-      const v2 = await waitRevisedFrom(draftRunId, 45_000)
-      const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
-
-      // ★ 评审下线后第 2 版**不会**自己接审核（那是 §10.10 钉的事）——这里由人点一次，
-      //   闸门报告要等这一刻才量得出来（它量的是"这一版相对上一版改了多少"）。
-      const startedV2 = await fetch(`${daemon.url}/api/crystallize/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId: v2 }),
-      })
-      assert.equal(startedV2.status, 202, await startedV2.clone().text())
-
-      // ① 标注必须落盘（人可读 + 机器可读）
-      //
-      // ⚠️ 分批第 33 批：这里原来**直接读**，于是全量跑时偶发 ENOENT。
-      //    原因不是闸门没写，是**等错了对象**：`waitRevisedFrom` 只等"v2 这条 run 出现了"，
-      //    而闸门报告是 v2 **开始审核**那一刻才算出来的（`startDraftAudit` 里数改动量）。
-      //    两者之间有一个窗口，机器一忙就露出来。改成等文件出现（30s 预算，够跑一轮审核）。
-      const reportPath = join(taskDir, 'material', 'rework-guard.md')
-      const guardDeadline = Date.now() + 30_000
-      let report = ''
-      while (Date.now() < guardDeadline) {
-        const got = await readFile(reportPath, 'utf8').catch(() => null)
-        if (got !== null) {
-          report = got
-          break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      assert.notEqual(report, '', `闸门报告没在限时内落盘：${reportPath}`)
-      assert.match(report, /返工收敛判定/)
-      const json = JSON.parse(
-        await readFile(join(taskDir, 'material', 'rework-guard.json'), 'utf8'),
-      ) as { kind: string; reasons: string[] }
-      assert.notEqual(json.kind, 'ok', `整篇重写必须被判出来，实际 ${json.kind}`)
-      assert.ok(json.reasons.length > 0)
-
-      // ② **不许**写停止标记：那是我上一版违背口径的做法
-      const stopFile = join(taskDir, '.auto-rework.json')
-      const wrote = await readFile(stopFile, 'utf8').catch(() => null)
-      assert.equal(wrote, null, '闸门只标注 ⇒ 不许落停止标记（否则循环就停了）')
-
-      // ③ 循环真的继续：第 2 版被判不通过之后仍然派得出第 3 版（轮数钉成 2 ⇒ 到这里刚好用完）
-      //
-      // ⚠️ 分批第 128 批（评审下线）之后这里**不再**"自动起第 3 版"那条链：第 2 版的审核是
-      //    人点的那一轮（上面那几行），它判不通过 ⇒ `decideReview` 派返工 ⇒ 第 3 版。
-      //    判据一个字没放宽：仍然是"被判重写之后不许停"。
-      const v3 = await waitRevisedFrom(v2, 45_000)
-      assert.ok(v3 !== '', '被判重写之后循环必须继续')
-
-      // ④ 界面读得到这条标注
-      //
-      // ⚠️ 读的是**第 2 版**（评审下线之前读的是 v3）：闸门报告是第 2 版**开始审核**那一刻
-      //    算出来落盘的，而 `autoReworkSummary` 只在"这一版有已收口的审核"时才给 guard。
-      //    评审下线后 v3 没有自己的审核 run ⇒ 读 v3 恒为 null，看起来就像"标注没写"。
-      //    （这不是放宽：读的是**算这份标注的那一版**，比原来更准。）
-      const readReview = async (): Promise<{
-        autoRework: { stopped: boolean; guard: { kind: string } | null }
-      }> =>
-        (await (await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${v2}`)).json()) as {
-          autoRework: { stopped: boolean; guard: { kind: string } | null }
-        }
-      let info = await readReview()
-      for (let i = 0; i < 300 && info.autoRework.guard === null; i += 1) {
-        await new Promise((r) => setTimeout(r, 100))
-        info = await readReview()
-      }
-      assert.equal(info.autoRework.stopped, false, '循环没有停')
-      assert.ok(info.autoRework.guard !== null, '闸门标注要能被界面读到')
-      assert.notEqual(info.autoRework.guard.kind, 'ok')
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-      fakeBackend.minimalEditOnRevise = false
-      await restoreRounds()
-    }
-  })
-
-  test('★★ 历史遗留的 `regressed` 停止标记一律忽略（那是被误停的两条链）', async () => {
-    /**
-     * 分批第 25 批我让闸门写 `stoppedBy: 'regressed'` 的停止标记，真机上已经误停了两条链。
-     * 第 27 批作废了那个理由，但**不删使用者的文件**：读到就按"没停"处理。
-     *
-     * 否则那两条链会永远起不来（标记还在盘上），而界面上什么都不会说。
-     */
-    const sourceRunId = await runReviewed('审完的流程（遗留标记）')
-    const draftRunId = await draftAndWait({
-      runId: sourceRunId,
-      target: { kind: 'new', purpose: '遗留标记' },
-    })
-    const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
-    await writeFile(
-      join(taskDir, '.auto-rework.json'),
-      `${JSON.stringify({ stoppedAt: Date.now(), stoppedBy: 'regressed', draftRunId }, null, 2)}\n`,
-      'utf8',
-    )
-    fakeBackend.draftReviewVerdict = failVerdict()
-    fakeBackend.minimalEditOnRevise = true
-    try {
-      const verdict = await reviewDraftAndWait(draftRunId)
-      assert.equal(
-        verdict.status,
-        'rework_requested',
-        '遗留的 regressed 标记不许再拦着循环（它已被作废）',
-      )
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-      fakeBackend.minimalEditOnRevise = false
-    }
-  })
-
-  test('★★★ 邻链有很多版**不许**吃掉本链的返工额度（真机上因此一次都没自动返工）', async () => {
-    /**
-     * 真机现场（2026-10-23）：来源 run `Q2SQ16` 下挂着两条不相干的链
-     * （`H5YM0E` 4 版 + `9D67DN` 10 版，目标都是 `{"kind":"new"}`）。额度原来按
-     * "**同一来源**下已起草几版"算 ⇒ `usedReworks = 17` > 上限 2 ⇒ 每一轮都判"额度用尽
-     * ⇒ 交给人"、`createReworkRun` 一次都没被调用 —— 使用者的体感就是"自动返工不存在"，
-     * 于是手动点了 10 次「反馈」（$29.81）。
-     *
-     * 这条用例造一条**邻链**（同来源、同目标，但 `revisedFrom` 自成一根），再让本链第 1 版
-     * 被判 fail：额度必须只数本链（= 0），所以返工必须真的派出去。
-     */
-    const sourceRunId = await runReviewed('审完的流程（邻链撑额度）')
-    const srcRun = await daemon.store.getRun(sourceRunId as RunId)
-    assert.ok(srcRun, '来源 run 得在（下面照它复制出邻链的几版）')
-    // 邻链：3 版，根是 sib1（`revisedFrom` 为空 ⇒ 自成一根）
-    let prev: string | null = null
-    for (let i = 1; i <= 3; i += 1) {
-      const sibId = ulid() as string
-      await daemon.store.insertRun({
-        ...srcRun!,
-        id: sibId as RunId,
-        kind: 'execute',
-        status: 'completed',
-        subject: {
-          type: 'skill-draft',
-          id: sibId,
-          // 同来源（这就是旧口径会数进来的原因）
-          sourceRunId: sourceRunId as never,
-        },
-        crystallizeTarget: { kind: 'new' },
-        revisedFrom: (prev ?? null) as never,
-        queuedAt: srcRun!.queuedAt + 100 * i,
-        workDir: join(workRoot, `skill-draft-${sibId}`),
-        finishedAt: srcRun!.queuedAt + 100 * i,
-      })
-      prev = sibId
-    }
-
-    const draftRunId = await draftAndWait({
-      runId: sourceRunId,
-      target: { kind: 'new', purpose: '本站额度的流程' },
-    })
-    fakeBackend.draftReviewVerdict = {
-      schemaVersion: 1,
-      conclusion: 'fail',
-      reasonCode: 'style_violation',
-      confidence: 0.8,
-      findings: [
-        {
-          severity: 'high',
-          summary: '正文里没有 `## When to Use` 一节',
-          evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 报告流程' }],
-          detail: {},
-        },
-      ],
-      action: null,
-      escalateReason: null,
-    }
-    try {
-      const verdict = await reviewDraftAndWait(draftRunId)
-      assert.equal(
-        verdict.status,
-        'rework_requested',
-        '本链只起草过 1 版 ⇒ 额度是满的；邻链那 3 版不许把额度吃掉（否则这里是 escalated）',
-      )
-      // 落点：真的多出一版（`revisedFrom` 指回被审的那一版）
-      const v2 = await waitRevisedFrom(draftRunId)
-      assert.notEqual(v2, draftRunId, '返工必须真的产出一版新的')
-      // 而且这一版属于**本链**：它的根仍然是被审的那一版
-      const v2Run = await daemon.store.getRun(v2 as RunId)
-      assert.equal(v2Run?.revisedFrom, draftRunId, '新版的父必须是本链那一版（不是邻链）')
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-    }
-  })
-
-  test('★★ 判决 fail ⇒ 返工派得出去（判决状态 rework_requested）且意见落进新一版素材', async () => {
-    const sourceRunId = await runReviewed('审完的流程（要触发自动返工）')
-    const draftRunId = await draftAndWait({
-      runId: sourceRunId,
-      target: { kind: 'new', purpose: '自动返工流程' },
-    })
-    // ⚠️ 这份判决必须**完全合规**，否则它连"不通过"都算不上：`reasonCode` 是平台枚举
-    //    （`packages/protocol/src/enums.ts` 的 `ReasonCode`），`severity` 也是。
-    //    我第一版随手写了 `reasonCode: 'missing_when_to_use'`、`severity: 'major'`、
-    //    还漏了 `schemaVersion`/`confidence` ⇒ 判决被判成**结构性不合规** ⇒ `decideReview`
-    //    走 invalid 那一支、**根本不会返工**。表现是"自动返工永远不触发"，而日志里
-    //    没有一句相关的话（它压根没走到返工那一步）——所以这份 fixture 照合规形状写。
+    // 这份判决照合规形状写（理由码与严重度都是平台枚举）；不合规的判决走 invalid 那一支。
     fakeBackend.draftReviewVerdict = {
       schemaVersion: 1,
       conclusion: 'fail',
@@ -1897,54 +1578,24 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     try {
       const verdict = await reviewDraftAndWait(draftRunId)
       assert.equal(verdict.conclusion, 'fail')
-      // ★ 这个状态就是"派出去了一条返工 run"的落点：拿不到额度或派不出去时是 `escalated`
+      // ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环删掉之后，不通过只**如实记录**并交给人。
       assert.equal(
         verdict.status,
-        'rework_requested',
-        '不通过且有额度 ⇒ 必须真的派出一条返工 run（escalated 说明根本没派）',
+        'escalated',
+        '不通过 ⇒ 交给人（rework_requested 说明它还在自动起下一版——那条循环应该已经删了）',
       )
 
-      // ★ 分批第 16 批：返工的信号是**新一条 run**（`revisedFrom` 指过来），不是新一间小屋——
-      //   产出仍在同一个任务目录里改（使用者要的"在原任务中执行"）。
-      const v2 = await waitRevisedFrom(draftRunId)
+      // 给"自动返工"足够的时间去犯错（如果它还在）：判决落库之后还有异步收尾
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      const ids = await draftVersionIds(draftRunId)
+      assert.deepEqual(ids, [draftRunId], '不通过不许自动多起一版（链停在这一版，等人）')
+
+      // 也不许往素材里写"审核不通过 ⇒ 照它改"的返工任务书（那是自动返工的产物）
       const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
-      /**
-       * ⚠️ 这里**要等**，不能读一次就断言（全量并行跑时量到过一次偶发红）：
-       *    `waitRevisedFrom` 一返回只说明"版本表里多了一行"，而 `material/feedback.md`
-       *    是**那一版开工时**由返工流程写进小屋的——两步之间有间隔。单跑够用，并行跑会抢跑。
-       *    等的写法不是放宽：断言还是"理由码要交下去"。
-       */
-      let feedback = ''
-      for (let i = 0; i < 400; i += 1) {
-        feedback = (await readFile(join(taskDir, 'material', 'feedback.md'), 'utf8').catch(() => '')) ?? ''
-        if (feedback.includes('style_violation')) break
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      assert.match(feedback, /style_violation/, '理由码要交下去')
-      assert.match(feedback, /正文里没有 `## When to Use` 一节/, '审核者的条目要交下去')
-      assert.match(feedback, /SKILL\.md/, '位置要交下去（否则起草者不知道改哪儿）')
-      // 被审的那一版**不许消失**：它的内容进了任务目录里的快照（`history/<runId>/skill/`）
-      const snapshot = await readFile(join(taskDir, 'history', draftRunId, 'skill', 'SKILL.md'), 'utf8')
-      assert.ok(snapshot.length > 0, '被审的那一版必须有快照（差异对比与回退都读它）')
-      const versions = JSON.parse(await readFile(join(taskDir, '.versions.json'), 'utf8')) as {
-        versions: Array<{ runId: string }>
-      }
-      // 前两版必须在表里、且按时间排好（这条链会继续自动往下跑：判决 fail + 有额度 ⇒ 还要返工，
-      // 所以表里后面可能还有第三、四版——判据只钉前两版，别把"链会自己往下走"当成失败）
-      assert.deepEqual(
-        versions.versions.slice(0, 2).map((v) => v.runId),
-        [draftRunId, v2],
-        '版本表要按顺序记着这两版（同一个任务的两版，不是两个任务）',
-      )
-      // ★★ 使用者的原话就是这条：**不许再多出一个沉淀任务**。返工的那几版**不能**有自己的小屋。
-      const huts = (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
-      for (const v of versions.versions) {
-        if (v.runId === draftRunId) continue
-        assert.ok(
-          !huts.includes(`skill-draft-${v.runId}`),
-          `第 ${v.runId.slice(-6)} 版不该有自己的小屋（那就是"多出来一个沉淀任务"）：${JSON.stringify(huts.filter((h) => h.includes(v.runId.slice(-6))))}`,
-        )
-      }
+      const feedback = (await readFile(join(taskDir, 'material', 'feedback.md'), 'utf8').catch(
+        () => '',
+      )) ?? ''
+      assert.equal(feedback, '', '没有自动返工，就没有自动写进去的意见（想改一版由人点「反馈」）')
     } finally {
       fakeBackend.draftReviewVerdict = null
     }
@@ -2066,335 +1717,6 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
  * 这一条钉两件事：① 改版小屋**开工那一刻**产出目录里已经是上一版（这是"能在上面改"的前提）；
  * ② 产出的差异因此是**一行**，不是整份。
  */
-describe('§10.8 返工契约：基于上一版改（不是重写一版）', () => {
-  test('★★ 改版开工时 skill/ 里已是上一版、意见带位置与原文、差异是一行', async () => {
-    // 这条量的是"返工契约"（改哪里、意见带没带位置），与跑几轮无关 ⇒ 钉成 2 轮图个快
-    const restoreRounds = await useReworkRounds(2)
-    const base = fakeBackend.draftFiles
-    fakeBackend.minimalEditOnRevise = true
-    fakeBackend.draftReviewVerdict = {
-      schemaVersion: 1,
-      conclusion: 'fail',
-      reasonCode: 'style_violation',
-      confidence: 0.8,
-      findings: [
-        {
-          severity: 'high',
-          summary: '正文里没有 `## When to Use` 一节',
-          evidence: [{ blobRef: null, locator: 'SKILL.md:12', excerpt: '# 报告流程' }],
-          detail: {},
-        },
-      ],
-      action: null,
-      escalateReason: null,
-    }
-    try {
-      const { readdir } = await import('node:fs/promises')
-      const sourceRunId = await runReviewed('审完的流程（返工契约）')
-      const v1 = await draftAndWait({
-        runId: sourceRunId,
-        target: { kind: 'new', purpose: '返工契约流程' },
-      })
-
-      const started = await fetch(`${daemon.url}/api/crystallize/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId: v1 }),
-      })
-      assert.equal(started.status, 202, await started.text())
-
-      // 等"按 v1 改出来的那一版"（**不是**"目录里多了一间小屋"——那会认到别条链的产物）
-      const v2 = await waitRevisedFrom(v1)
-      // ★ 分批第 16 批：任务目录是**首版**那间小屋（v2 没有自己的小屋了）
-      const hut = `skill-draft-${v1}`
-      assert.ok(
-        !(await readdir(workRoot)).includes(`skill-draft-${v2}`),
-        '第 2 版不许另开一间小屋（使用者要的"在原任务中执行"）',
-      )
-
-      // ① 开工那一刻产出目录里**已经是上一版**（含支持文件）——这是"能在上面改"的前提
-      const starts = fakeBackend.draftStartSkill[join(workRoot, hut)] ?? []
-      assert.ok(
-        starts.length >= 2,
-        `这个任务目录该开工至少两次（首版 + 至少一版返工），实际 ${starts.length} 次`,
-      )
-      // 首版开工时目录是**空的**（它是从零起草的）——先量这一条，后面那条"有内容"才有意义：
-      // 不量的话，"开工时有文件"可能只是因为上一版恰好没被清掉（那时候判据是空的）
-      assert.deepEqual(
-        Object.keys(starts[0]!),
-        [],
-        `首版开工时 skill/ 该是空的，实际 ${JSON.stringify(Object.keys(starts[0]!))}`,
-      )
-      for (const atStart of starts.slice(1)) {
-        assert.ok(
-          Object.keys(atStart).includes('SKILL.md'),
-          `改版开工时 skill/ 里就该有上一版的 SKILL.md（实际：${JSON.stringify(Object.keys(atStart))}）`,
-        )
-        assert.ok(
-          Object.keys(atStart).includes('references/checklist.md'),
-          '支持文件也要在（上一版有的东西不许凭空消失）',
-        )
-      }
-      // 第一次返工开工时那一份 = 首版的内容（原样，逐字）
-      assert.equal(
-        starts[1]!['SKILL.md'],
-        base['SKILL.md'],
-        '第一次返工开工时，产出目录里必须**逐字**就是上一版',
-      )
-
-      // ② 上一版**不再**在素材里出现第二份（同一份内容放两处 ⇒ 改了一处另一处就是旧的）
-      const material = await readdir(join(workRoot, hut, 'material'))
-      assert.ok(!material.includes('previous-draft'), `素材里不该再有 previous-draft（实际 ${material.join(',')}）`)
-      assert.ok(material.includes('feedback.md'), '意见必须在')
-
-      // ③ 意见是**能直接照做**的形状：位置 + 原文 + "只改写过的文件"
-      const feedback = await readFile(join(workRoot, hut, 'material', 'feedback.md'), 'utf8')
-      assert.match(feedback, /SKILL\.md:12/, '位置要交下去（含行号）')
-      assert.match(feedback, /# 报告流程/, '那一处的原文要交下去')
-      assert.match(feedback, /产出目录 `skill\/` 里已经是上一版/, '要告诉起草者"在哪儿改"')
-      assert.match(feedback, /写回 `skill\/`（完整文件，不是补丁）/, '要告诉起草者"改完怎么写回"')
-
-      // ④ 第一句话里的契约是"只改点到的地方"（不是"整份产出"）
-      const revisePrompt = fakeBackend.prompts.find((p) => p.includes('这一版是**在上一版基础上按意见改**'))
-      assert.ok(revisePrompt !== undefined, '改版那一路的第一句话要有"按意见改"这一段')
-      assert.match(revisePrompt, /只改意见点到的地方/, '契约要写成增量修改')
-      assert.ok(
-        !revisePrompt.includes('不是补丁。'),
-        '旧的"整份产出，不是补丁"那句必须撤掉（它才是"重写一版"的根源）',
-      )
-
-      // ⑤ ★ 差异因此是一行，不是整份（这一条就是使用者那句话的答卷）
-      const diff = (await (
-        await fetch(`${daemon.url}/api/crystallize/diff`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ draftRunId: v2, against: 'previous' }),
-        })
-      ).json()) as { baselineLabel: string; totals: { added: number; removed: number; changed: number } }
-      assert.equal(diff.baselineLabel, '上一版草稿', '基线必须是上一版草稿')
-      assert.ok(
-        diff.totals.added <= 2 && diff.totals.removed === 0,
-        `返工版相对上一版只该多一行（实际 +${diff.totals.added} −${diff.totals.removed}）`,
-      )
-      assert.equal(diff.totals.changed, 1, '只动一个文件')
-    } finally {
-      fakeBackend.minimalEditOnRevise = false
-      fakeBackend.draftReviewVerdict = null
-      await restoreRounds()
-    }
-  })
-})
-
-/**
- * §10.7 评审下线（§12.15，分批第 128 批改口径）：**改版草稿跑完不再自动接审核**。
- *
- * 历史：分批第 9 批曾为了"自动返工是半截链子、新版停在待审核"把这条链补成
- * 「改版跑完 ⇒ 自动接一轮审核 ⇒ 不通过 ⇒ 返工 ⇒ …」。2026-10 的决定是**沉淀线不跑评审**：
- * 自动那一半下线，每一版都由人决定要不要花那笔钱（一轮审核在真机上 ≈ $1.32）。
- *
- * 这一条现在钉的是**链仍然能跑到头、只是每一步由人触发**：
- *   初版不自动审 → 人点一次 → fail ⇒ 返工 ⇒ 新版（**同样不自动审**）→ 人点一次 → fail ⇒ 返工
- *   ⇒ 新版 → 人点一次 → 额度用尽（escalated）才停，且**不许多产一版**。
- * 终止性靠返工额度（`SKILL_DRAFT_REWORK_LIMIT` = 2），不是靠这个钩子——所以这条用例
- * 同时是"这条链不会无限烧钱"的证明。
- *
- * ⚠️ 与 §10.10 成对：那一条只证明"开关关掉后不自动审"；这一条证明**关了之后手动入口
- *    仍然把整条链走到底**。只有前一条的话，"不自动审"也可能是"审不了"。
- */
-describe('§10.7 评审下线：改版来的新草稿跑完**不再**自动接审核（人点一次才审）', () => {
-  async function huts(): Promise<string[]> {
-    const { readdir } = await import('node:fs/promises')
-    return (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
-  }
-
-
-  /** 读一条草稿的审核现场（判决没落库时 `review` 是 null）。 */
-  /**
-   * 读 JSON（**连接层失败重试一次**）。
-   *
-   * ⚠️ 这是量出来的：全量跑（`pnpm run check` 会把所有测试文件并行起来，机器很忙）时，
-   *    轮询里偶尔撞到 `TypeError: fetch failed / ECONNRESET`——机器忙的时候这个 daemon 的
-   *    HTTP 连接会空闲超过 keep-alive 时限，服务端把 socket 关掉，而客户端正好在这个瞬间
-   *    复用了它。这是 HTTP 既有行为，**不是产品缺陷**（单跑从不出现，全量跑偶发）。
-   *    原来那次红被误读成"链有问题"；重试一次就能把"观察方式的问题"和"链的问题"分开。
-   */
-  async function getJson<T>(path: string): Promise<T> {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        const res = await fetch(`${daemon.url}${path}`)
-        const text = await res.text()
-        assert.equal(res.status, 200, text)
-        return JSON.parse(text) as T
-      } catch (err) {
-        if (attempt >= 1 || !String(err).includes('fetch failed')) throw err
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-    }
-  }
-
-  async function draftReview(draftRunId: string): Promise<{
-    review: { status?: string; conclusion?: string } | null
-    reviewRunId: string | null
-    reviewRunStatus: string | null
-    versions: number
-  }> {
-    return getJson(`/api/crystallize/review?draftRunId=${draftRunId}`)
-  }
-
-  /**
-   * 等一条草稿的判决走到**某个终态**（返回它）。
-   *
-   * ⚠️ 第一版是"判决行一出现就返回"，全量跑时读到的是**半成品**：那条判决的 `status` 是
-   *    `validated`，而 `conclusion` 已经是 `fail`——判决行先落、返工决定后落，这是
-   *    `decideReview` 内部的中间态。表现是断言"该返工"却拿到 `validated`
-   *    （单跑这条用例时窗口没撞上，全量跑才撞上——同一个"全量才红"的坑）。
-   *    所以等**预期的那个终态**，不等"有判决了"。
-   */
-  async function waitSettled(
-    draftRunId: string,
-    wanted: readonly string[],
-  ): Promise<{ status?: string; conclusion?: string }> {
-    // ⚠️ 预算是 60 秒，不是 10 秒——**量出来的**：第 9 批之后"改版来的新草稿自己会接着审"，
-    //    于是整份文件里每条用例的链都会在后台继续跑（审核 + 判决不合规的自动重试都占着 daemon 的
-    //    并发额度）。单跑这条用例时 10 秒足够，全量跑时第 2 版等不到返工决定。
-    //    ⚠️ 报错里带上**最后看到的现场**（判决状态 / 审核 run 状态）：只说"超时"的话，
-    //    下一次红的人得从头再查一遍是"链没起来"还是"链卡住了"。
-    let last = ''
-    for (let i = 0; i < 2400; i += 1) {
-      const info = await draftReview(draftRunId)
-      const st = info.review?.status
-      last = `判决=${String(st)} 审核run=${String(info.reviewRunId?.slice(-6))}/${String(info.reviewRunStatus)} 版本=${info.versions}`
-      if (st !== undefined && wanted.includes(st)) return info.review as { status?: string }
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    }
-    throw new Error(`草稿 ${draftRunId.slice(-6)} 的判决没在限时内走到 ${wanted.join('/')}（最后看到：${last}）`)
-  }
-
-  test('★★ 整条链跑到头：初版等人点，之后每一版也**等人点**（评审下线），额度用尽才停', async () => {
-    // 分批第 23 批起上限来自设置（默认 10）⇒ 这条"跑满就停"的用例把轮数钉成 2
-    const restoreRounds = await useReworkRounds(2)
-    /**
-     * ★ 分批第 129 批：评审下线的临时开关已经删掉（默认即"不自动接审核"），所以这里
-     * 不再需要显式设环境变量——行为就是新版语义。
-     *
-     * 为什么不在这一条里"既证自动审、又证不自动审"：两件事要的是**相反**的夹具。
-     * "不自动审"已由 §10.10 单独钉住；这里只量"人点之后整条链走得完"。
-     */
-    /**
-     * ★ 分批第 25 批：这条必须让假后端**只改点到的地方**。
-     *
-     * 假后端默认把整份夹具重写一遍 ⇒ 返工版和上一版几乎完全不同 ⇒ 新加的收敛闸门
-     * 会判 `rewrite` 并**停掉自动循环**（那正是闸门的职责）⇒ 这条用例等第 3 版会等到超时
-     * （第一次全量 check 里就是它红：「没等到"按 0SF1XX 改出来的下一版"」）。
-     * ⚠️ 所以改的是**夹具的起草者行为**，不是放宽闸门：真机上"收敛"的起草者本来就是
-     *    只改点名处（第 15 批量过：整篇重写的那条链 15 版还在震荡）。
-     */
-    fakeBackend.minimalEditOnRevise = true
-    // 这份判决照合规形状写（理由码与严重度都是平台枚举）——不合规的判决不会返工，
-    // 那条坑 §10.5 已经记过（第一版随手写的 reasonCode/severity 让整条链一次都没触发）。
-    fakeBackend.draftReviewVerdict = {
-      schemaVersion: 1,
-      conclusion: 'fail',
-      reasonCode: 'style_violation',
-      confidence: 0.8,
-      findings: [
-        {
-          severity: 'high',
-          summary: '正文里没有 `## When to Use` 一节',
-          evidence: [{ blobRef: null, locator: 'SKILL.md', excerpt: '# 自动再审流程' }],
-          detail: {},
-        },
-      ],
-      action: null,
-      escalateReason: null,
-    }
-    try {
-      const sourceRunId = await runReviewed('审完的流程（自动再审链）')
-      const v1 = await draftAndWait({
-        runId: sourceRunId,
-        target: { kind: 'new', purpose: '自动再审流程' },
-      })
-
-      // ① **初版不自动审**：第一次审核是"要不要花这笔钱"的决定，该由人做
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      const first = await draftReview(v1)
-      assert.equal(first.reviewRunId, null, '初版跑完不许自己起审核（那笔钱要人决定）')
-      assert.equal(first.versions, 1)
-
-      // ② 人点一次「开始审核」⇒ fail ⇒ 返工 ⇒ 第 2 版
-      const started = await fetch(`${daemon.url}/api/crystallize/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId: v1 }),
-      })
-      assert.equal(started.status, 202, await started.text())
-      const verdict1 = await waitSettled(v1, ['rework_requested'])
-      assert.equal(verdict1.status, 'rework_requested', '有额度 ⇒ 返工派得出去')
-
-      // 第 2 版 = "按 v1 改出来的那一版"（**关系**，不是"目录里多数出来一间"——见 `waitRevisedFrom`）
-      const v2 = await waitRevisedFrom(v1)
-
-      // ③ ★ 第 2 版**没有人点过审核**，所以它**不该**有审核 run——这一条就是这批的全部意义。
-      //
-      // ⚠️ 负断言要给它时间：自动接审核是"跑完之后"的钩子，抢在钩子之前断言等于没量。
-      //    300ms 是"钩子早就该跑完"的量级（同进程、假后端立刻完成）；真有问题时它会一直
-      //    带着审核 run，而不是差这 300ms。
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      const secondBefore = await draftReview(v2)
-      assert.equal(secondBefore.reviewRunId, null, '第 2 版不许自己接审核（评审下线：要审由人点）')
-
-      // ④ 人再点一次 ⇒ fail ⇒ 返工 ⇒ 第 3 版（链还能往下走，只是每一步由人触发）
-      const startedV2 = await fetch(`${daemon.url}/api/crystallize/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId: v2 }),
-      })
-      assert.equal(startedV2.status, 202, await startedV2.text())
-      const verdict2 = await waitSettled(v2, ['rework_requested'])
-      assert.equal(verdict2.status, 'rework_requested', '有额度 ⇒ 返工派得出去（第二次也是）')
-      const v3 = await waitRevisedFrom(v2)
-
-      // ⑤ 第 3 版同样不自动审；人点一次，此时额度用尽 ⇒ escalated ⇒ 链停在这里
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      assert.equal((await draftReview(v3)).reviewRunId, null, '第 3 版同样不自动审')
-      const startedV3 = await fetch(`${daemon.url}/api/crystallize/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId: v3 }),
-      })
-      assert.equal(startedV3.status, 202, await startedV3.text())
-      const third = await waitSettled(v3, ['escalated'])
-      assert.equal(third.status, 'escalated', '额度用尽 ⇒ 交给人（不再返工）')
-      // 第 2 版那份判决（链跑到头之后再读，读的是稳定值）：它是**人点的那一轮审核**给的，
-      // 结论是 fail —— 于是才有第 3 版
-      assert.equal(
-        (await draftReview(v2)).review?.conclusion,
-        'fail',
-        '第 2 版的判决来自「开始审核」那一轮，结论 fail',
-      )
-
-      // ⑥ 停下来之后**不许再产第 4 版**（这条链不会自己烧下去）
-      //
-      // ⚠️ 判据用"**有没有按 v3 改出来的下一版**"（关系），不用"小屋总数"：
-      //    `workRoot` 是整份文件共用的，别的用例的链随时在开新小屋（第一版数总数 ⇒ 全量跑时
-      //    数出来 37）。这里还要给链一点时间——额度用尽到"确定不再开"之间隔着一次收尾。
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      const list = await getJsonFile<{ items: Array<{ runId: string }> }>('/api/crystallize/drafts')
-      const next: string[] = []
-      for (const item of list.items) {
-        const run = await getJsonFile<{ revisedFrom?: string }>(`/api/runs/${item.runId}`)
-        if (run.revisedFrom === v3) next.push(item.runId)
-      }
-      assert.deepEqual(next, [], '额度用尽之后不许再自动开新版')
-      assert.equal((await draftReview(v3)).versions, 3, '版本数停在 3')
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-      fakeBackend.minimalEditOnRevise = false
-      await restoreRounds()
-    }
-  })
-})
-
 /**
  * §10.10 评审下线（§12.15）：**改版草稿跑完不再自动接一轮审核**。
  *
@@ -3842,16 +3164,6 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
     throw new Error('审核 run 没在限时内落终态')
   }
 
-  /** 设自动返工轮数（同一个文件里别的用例改过它，这里要显式摆回想要的档位）。 */
-  async function setReworkRounds(rounds: number): Promise<void> {
-    const res = await fetch(`${daemon.url}/api/workspace/auto-rework`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rounds }),
-    })
-    assert.equal(res.status, 200, await res.clone().text())
-  }
-
   /** 等假后端收到**下一段**投递（第 `index` 段），最多 10 秒。 */
   async function waitForPromptAt(index: number): Promise<string> {
     for (let i = 0; i < 200; i += 1) {
@@ -4030,77 +3342,6 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
       list2.snapshots.some((sn) => sn.previousChars === '# 身份\n\n你是改过的对账执行者。'.length),
       '恢复时要把被覆盖掉的那版也存一代，否则"手滑两次"救不回来',
     )
-  })
-
-  test('★★★ 自动返工循环在"优化指令"的草稿上也成立：判不通过 ⇒ 起下一版，且下一版仍写 agent/', async () => {
-    const runId = await runWithReviewer()
-    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: agentId } })
-    const taskDir = join(workRoot, `skill-draft-${draft}`)
-    await mkdir(join(taskDir, 'agent'), { recursive: true })
-    await writeFile(join(taskDir, 'agent', 'instructions.md'), '# 身份\n\n你是对账执行者。\n', 'utf8')
-    // 轮数回到默认（同一个文件里前面的用例把它改成过 0/1）
-    await setReworkRounds(10)
-    const before = fakeBackend.prompts.length
-    // 判不通过（理由写"指令口径"那条：边界太软）——与 skill 那支的 failVerdict 同形，
-    // 但这个 describe 里拿不到它（定义在另一个 describe 作用域里）
-    fakeBackend.draftReviewVerdict = {
-      schemaVersion: 1,
-      conclusion: 'fail',
-      // ⚠️ 必须是协议里的取值（我第一次写了 'requirement_missed' ⇒ 判决不合规 ⇒
-      //    conclusion 变成 needs_human，看起来像"循环没起"）
-      reasonCode: 'style_violation',
-      confidence: 0.8,
-      findings: [
-        {
-          severity: 'high',
-          summary: '边界那一段是软的（"尽量不要…"），等于没有边界',
-          evidence: [{ blobRef: null, locator: 'instructions.md', excerpt: '尽量不要改文件' }],
-          detail: {},
-        },
-      ],
-      action: null,
-      escalateReason: null,
-    }
-    try {
-      const verdict = await agentReviewVerdict(draft)
-      assert.equal(verdict.conclusion, 'fail')
-      assert.equal(
-        verdict.status,
-        'rework_requested',
-        '判不通过且还有额度 ⇒ 必须自动起下一版（skills 那条路的老行为，agent 草稿不许例外）',
-      )
-      /**
-       * 返工版真的起来了，而且任务书还是"改指令"。
-       *
-       * ⚠️ 第一版这里取 `waitForPromptAt(before)` —— 拿到的是**紧接着**那一段，
-       * 也就是**审核**那一轮的任务书（它同样含 `agent/instructions.md`、同样不含 SKILL.md）。
-       * 于是"把返工任务书改回 skill 那支"这个红检**照样绿**（量出来的：红检时 pass 1）。
-       * 现在按**返工版的特征**在后续投递里找：返工任务书带「按意见改」+ `agent/instructions.md`。
-       */
-      let revised = ''
-      /**
-       * ⚠️ 等待上限从 200 × 50ms（10s）提到 600 × 50ms（30s）：全量并行跑时量到过一次偶发红
-       * （"返工版的任务书要真的投递出来"），单跑这个文件永远绿。返工要等上一版审核跑完 +
-       * 判 fail + 起新版 + 新版装配，机器一忙就可能超过 10 秒。断言一个字没改。
-       */
-      for (let i = 0; i < 600; i += 1) {
-        revised =
-          fakeBackend.prompts
-            .slice(before)
-            .find((p) => p.includes('agent/instructions.md') && p.includes('按意见改一版')) ?? ''
-        if (revised !== '') break
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      assert.ok(revised !== '', '返工版的任务书要真的投递出来（按"返工"这个特征找，别抓到审核那一段）')
-      assert.ok(!revised.includes('skill/SKILL.md'), '不许退化成写 SKILL.md')
-      // 整条链的版本表要记着两版
-      const versionsRaw = await readFile(join(taskDir, '.versions.json'), 'utf8').catch(() => null)
-      assert.ok(versionsRaw !== null, '版本表要落盘（整链的东西都靠它）')
-      const versions = JSON.parse(versionsRaw) as { versions: Array<{ runId: string }> }
-      assert.ok(versions.versions.length >= 2, `返工版要进版本表，实际 ${versions.versions.length} 版`)
-    } finally {
-      fakeBackend.draftReviewVerdict = null
-    }
   })
 
   test('★★ 没有历史快照时恢复 ⇒ 404 说清"它还没被沉淀改过"', async () => {
