@@ -249,7 +249,7 @@ const SESSIONS = [
         role: 'assistant',
         text: '**提炼结果（Work 轨）**\n- 负责的是「HTML 交付物要在真浏览器里证明可用」，不是「写页面」本身\n- 先定状态契约（params / phase / regenerate），验证脚本据此断言\n- 参数类效果必须扫描标定默认值，第一眼定稿会被换 seed 打脸\n- 交付前跑一次无头 Chrome，读页面状态而不是截图判断\n- 命令里的路径一律传绝对路径\n\n**没覆盖到的**（显式列出，不假装覆盖）\n- 无头浏览器在 CI 里跑不了的兜底\n- 页面超过 2000 行时的一致性检查\n\n要改哪一条，直接说「这里不对：…」。',
       },
-      { role: 'system', text: '审核：通过（第 3 版）· 机械体检 4 过 1 缺 · 自动返工 1 轮后用尽' },
+      { role: 'system', text: '机械体检：6 过 1 缺（右侧可逐项看）· 没有评审这一步' },
       { role: 'assistant', text: '已入库 **v3**（+42 −7），可以回滚到 v2 / v1。' },
     ],
     artifact: {
@@ -261,10 +261,12 @@ const SESSIONS = [
       ],
       checks: [
         { ok: true, text: 'frontmatter 的 name 是 kebab-case' },
-        { ok: true, text: '## When to Use 存在' },
-        { ok: true, text: '## Procedure 存在' },
-        { ok: true, text: '正文引用的 scripts/、templates/ 都存在' },
-        { ok: false, text: '## Verification 里 `--seeds` 没说明取值上限' },
+        { ok: true, text: 'description 含触发条件（当…时用）' },
+        { ok: true, text: '## When to Use / ## Procedure / ## Verification 三节都在' },
+        { ok: true, text: '正文引用的 scripts/、templates/ 文件都存在' },
+        { ok: true, text: '命令里的路径在素材或产物里出现过（能照着跑）' },
+        { ok: true, text: '没覆盖到的维度已显式列出（uncovered[]）' },
+        { ok: false, text: '## Verification 里 `--seeds` 没写取值上限' },
       ],
       versions: [
         { v: 'v3', note: '本次：补「状态契约」一节、加 scripts/verify.mjs', now: true },
@@ -305,7 +307,7 @@ const SESSIONS = [
         role: 'assistant',
         text: '**提炼结果（Persona 轨，因为产出是指令）**\n- 语气：先给结论，再给出处——三篇文章都是这个结构\n- 证据不足时明确写「素材不足」，不绕过去\n- 数字必须带来源；没有来源就用「约」并标注不确定\n- 拒绝在材料外补充事实，但可以指出材料之间的矛盾\n\n**没覆盖到的**\n- 跨语言材料（这次只有中文）\n\n体检有 1 项缺：「五件事」里的失败处理一节没写。要补吗？',
       },
-      { role: 'system', text: '评审：未运行（这次关掉了评审，入库会标「未经评审」）' },
+      { role: 'system', text: '机械体检：3 过 1 缺 · 没有评审这一步' },
     ],
     artifact: {
       files: [
@@ -314,6 +316,7 @@ const SESSIONS = [
       checks: [
         { ok: true, text: '指令非空' },
         { ok: true, text: '字符数 3621 / 上限 6000' },
+        { ok: true, text: '没有残留的 frontmatter / 整篇代码围栏' },
         { ok: false, text: '「五件事」里的失败处理一节未写' },
       ],
       versions: [],
@@ -410,7 +413,7 @@ function startDraft(session) {
   session.stateText = '起草中';
   session.messages.push({
     role: 'system',
-    text: '起草中… 起草者（内置）',
+    text: '起草中… 起草者（内置）· 跑完自动做机械体检（不起评审 run）',
     log: ['[00:02] 读 material/（3 项）', '[00:18] 归纳 Procedure', '[—] demo 不真的起 run'],
   });
 }
