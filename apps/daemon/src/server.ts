@@ -2813,7 +2813,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       })
       if (human !== null) await clearHumanEditStamp(dir)
     }
-    if (input.executeRun.subject.type === 'skill-draft' && input.executeRun.revisedFrom !== undefined) {
+    /**
+     * ★ 分批第 124 批（§12.15 / §12.42 第 ② 步的第一步）：**先把开关做出来，不翻它**。
+     *
+     * 决定是「沉淀线不跑评审」，但直接短路这一支会让 `crystallize-e2e.test.ts` 里 16 处 +
+     * `draft-chain.test.ts` 里 2 处断言当场变红（它们断言的正是"改版草稿会自动接审核"）。
+     * 按这一轮的纪律（一次只动一层、每步都绿着停），先加一个**默认仍为开**的开关：
+     *   · 默认 = 老行为 ⇒ 现存 2234 条测试一条都不用改；
+     *   · 下一批把断言改成"关掉时不再自动接审核"（并新增一条用例证明开关有效），**再**翻默认值。
+     * 这样"翻开关"是一行可回滚的改动，而不是"改代码 + 改 18 处断言"混在一起。
+     */
+    if (
+      input.executeRun.subject.type === 'skill-draft' &&
+      input.executeRun.revisedFrom !== undefined &&
+      process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] !== 'off'
+    ) {
       const started = await startDraftAudit(input.executeRun, { completed: true })
       if (!started.ok) {
         // 起不来就如实说（这个 note 会进 run 日志）——静默返回 null 会让"没接上审核"
