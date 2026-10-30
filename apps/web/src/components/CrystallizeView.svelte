@@ -44,6 +44,7 @@
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
+  import CrystallizeIntake from './CrystallizeIntake.svelte'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
   interface CrystallizeTargets {
@@ -760,6 +761,22 @@
     if (ad && !['completed', 'failed', 'cancelled'].includes(ad.status)) {
       void api(`/api/runs/${ad.runId}/cancel`, { method: 'POST' }).catch(() => {})
     }
+  }
+
+  /** 向导答完 → 落回原有目标状态 → 走原提交路径（`startDraft`）。 */
+  function applyIntake(payload: {
+    kind: 'new' | 'update' | 'agent'
+    skillId: string
+    agentId: string
+    purpose: string
+    feedback: string
+  }): void {
+    targetKind = payload.kind
+    purpose = payload.purpose
+    selectedSkillId = payload.skillId
+    selectedAgentId = payload.agentId
+    userFeedback = payload.feedback
+    void startDraft()
   }
 
   async function startDraft(): Promise<void> {
@@ -1720,175 +1737,9 @@
            于是这一节只在目标态出现——起草中那一屏现在整块地方都归 tab。
       -->
       {#if step === 'target'}
-      <section class="drawer-section">
-        <h3><span>{$t('crystallize.stepTarget')}</span></h3>
-        <div class="section-body">
-        {#if step === 'target'}
-          {#if targets === null}
-            <div class="skeleton" style="height:1.1rem"></div>
-          {:else}
-            <!-- 两个目标选项做成一张"卡片列表"：选中项底色高亮、分隔线分明——
-                 不用裸 radio 漂浮在空白上（裸 radio 会被全局 input 样式撑成
-                 通栏宽、还带边框和 padding，见本文件底部 .radio-row 的 reset）。 -->
-            <div class="option-group">
-              <label class="radio-row">
-                <input type="radio" bind:group={targetKind} value="new" />
-                <span class="opt-text">
-                  <strong>{$t('crystallize.targetNew')}</strong>
-                  <span class="faint small">{$t('crystallize.purposeHint')}</span>
-                </span>
-              </label>
-              {#if targetKind === 'new'}
-                <div class="sub-field">
-                  <label class="field-inner">
-                    <span class="faint small">{$t('crystallize.purposeLabel')}</span>
-                    <textarea
-                      bind:value={purpose}
-                      rows="2"
-                      placeholder={$t('crystallize.purposePlaceholder')}
-                    ></textarea>
-                  </label>
-                </div>
-              {/if}
-              <label class="radio-row" class:disabled={targets.loadedSkills.length === 0}>
-                <input
-                  type="radio"
-                  bind:group={targetKind}
-                  value="update"
-                  disabled={targets.loadedSkills.length === 0}
-                />
-                <span class="opt-text">
-                  <strong>{$t('crystallize.targetUpdate')}</strong>
-                  <span class="faint small">{$t('crystallize.targetUpdateHint')}</span>
-                </span>
-              </label>
-              <!--
-                ★ 分批第 37 批：「优化一条智能体的指令」。
-                候选就是这条 run 上真实用到的那两条（执行者 / 审核者）——不是"所有智能体"，
-                因为这不是"挑一个新建"，而是"这次谁的指令不够用"。
-              -->
-              <label
-                class="radio-row"
-                class:disabled={targets.agentTargets.reviewer === null &&
-                  targets.agentTargets.executor.instructionsChars === 0}
-              >
-                <input type="radio" bind:group={targetKind} value="agent" />
-                <span class="opt-text">
-                  <strong>{$t('crystallize.targetAgent')}</strong>
-                  <span class="faint small">{$t('crystallize.targetAgentHint')}</span>
-                </span>
-              </label>
-            </div>
-            {#if targetKind === 'agent'}
-              <div class="skill-list">
-                <label class="skill-row">
-                  <input
-                    type="radio"
-                    bind:group={selectedAgentId}
-                    value={targets.agentTargets.executor.id}
-                  />
-                  <span class="skill-info">
-                    <span class="skill-head">
-                      <code>{targets.agentTargets.executor.name}</code>
-                      <span class="badge">{$t('crystallize.agentCandidateExecutor')}</span>
-                      {#if targets.agentTargets.executor.builtin}
-                        <span class="badge mine">{$t('crystallize.badgeMine')}</span>
-                      {/if}
-                    </span>
-                    <span class="faint small">
-                      {$t('crystallize.agentCharsHint', {
-                        chars: String(targets.agentTargets.executor.instructionsChars),
-                      })}
-                    </span>
-                  </span>
-                </label>
-                {#if targets.agentTargets.reviewer}
-                  <label class="skill-row">
-                    <input
-                      type="radio"
-                      bind:group={selectedAgentId}
-                      value={targets.agentTargets.reviewer.id}
-                    />
-                    <span class="skill-info">
-                      <span class="skill-head">
-                        <code>{targets.agentTargets.reviewer.name}</code>
-                        <span class="badge in_review">{$t('crystallize.agentCandidateReviewer')}</span>
-                        {#if targets.agentTargets.reviewer.builtin}
-                          <span class="badge mine">{$t('crystallize.badgeMine')}</span>
-                        {/if}
-                      </span>
-                      <span class="faint small">
-                        {$t('crystallize.agentCharsHint', {
-                          chars: String(targets.agentTargets.reviewer.instructionsChars),
-                        })}
-                      </span>
-                    </span>
-                  </label>
-                {:else}
-                  <p class="faint small">{$t('crystallize.agentNoReviewer')}</p>
-                {/if}
-              </div>
-              {#if targets.agentTargets.executor.builtin || targets.agentTargets.reviewer?.builtin}
-                <p class="faint small">{$t('crystallize.agentBuiltinHint')}</p>
-              {/if}
-            {/if}
-            {#if targetKind === 'update'}
-              {#if targets.loadedSkills.length === 0}
-                <p class="notice">{ $t('crystallize.noLoadedSkills') }</p>
-              {:else}
-                {@const picked = targets.loadedSkills.find((x) => x.id === selectedSkillId)}
-                <div class="skill-list">
-                  {#each targets.loadedSkills as s (s.id)}
-                    <label class="skill-row">
-                      <input type="radio" bind:group={selectedSkillId} value={s.id} />
-                      <span class="skill-info">
-                        <span class="skill-head">
-                          <code>{s.slug}</code>
-                          <span class="badge" class:mine={s.source === 'mine'}>
-                            {s.source === 'mine' ? $t('crystallize.badgeMine') : $t('crystallize.badgeInstalled')}
-                          </span>
-                        </span>
-                        {#if s.description}
-                          <span class="faint small">{s.description}</span>
-                        {/if}
-                      </span>
-                    </label>
-                  {/each}
-                </div>
-                <p class="faint small">
-                  {picked?.source === 'mine'
-                    ? $t('crystallize.updateIsEvolve')
-                    : $t('crystallize.updateIsShadow')}
-                </p>
-              {/if}
-            {/if}
-
-            {#if targets.scope === 'task'}
-              <label class="field">
-                <span class="faint small">{$t('crystallize.userFeedbackLabel')}</span>
-                <textarea
-                  bind:value={userFeedback}
-                  rows="2"
-                  placeholder={$t('crystallize.userFeedbackPlaceholder')}
-                ></textarea>
-              </label>
-            {/if}
-          {/if}
-        {:else}
-          <!-- 只读摘要：目标已定（恢复的草稿按落库的目标还原） -->
-          <p class="faint">
-            {#if targetKind === 'new'}
-              {$t('crystallize.targetNew')}
-              {#if purpose.trim() !== ''}· {purpose.trim()}{/if}
-            {:else if targetKind === 'agent'}
-              {$t('crystallize.targetAgent')} · {agentNameFor(selectedAgentId)}
-            {:else}
-              {$t('crystallize.targetUpdate')} · {skillNameFor(selectedSkillId)}
-            {/if}
-          </p>
-        {/if}
-        </div>
-      </section>
+      <!-- ★ 分批第 103 批：目标表单换成**逐个问**（§12.13）。向导只负责问，发请求仍由
+           `applyIntake → startDraft` 做，目标状态所有权留在原处——不产生第二套入口。 -->
+      <CrystallizeIntake {targets} onfinish={applyIntake} />
       {/if}
 
       <!-- ══════════════════ 草稿审阅 ══════════════════

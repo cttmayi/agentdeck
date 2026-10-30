@@ -3887,6 +3887,34 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.targetFirstQuestion',
+    label: '★★ 第一问是「这次要沉淀成什么？」（逐个问的起点）',
+    ok: (v) => typeof v === 'string' && v.includes('要沉淀成什么'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetNextDisabledWhenEmpty',
+    label: '★★★ 作用描述空着时「下一步」**禁用**——「作用描述必答」的唯一执行点',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetAdvanced',
+    label: '★★★ 答完一题真的**推进**：确认步出现、上一问的选项消失',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.targetOldFormCount',
+    label: '★★★ 旧的目标表单**真的没了**（`.radio-row` 数 0）——防"两套入口并存"',
+    ok: (v) => v === 0,
+    show: (v) => `${v} 行 radio`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.targetTabCount',
     label:
       '★★★ 目标态**不做 tab**（2026-10-21 使用者确认的第 ③ 条：这一屏是"填一句话就动手"，tab 反而把唯一的动作藏起来）',
@@ -3946,15 +3974,14 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.targetFormRows',
     label:
-      '★★ 目标态的三个目标选项（新建 / 更新 / 优化一条智能体的指令）都在表单里——分批第 37 批加了第三个，**按文案核对**而不是只数行数',
+      '★★ 向导第一问给出起点选项（**按文案核对**）：至少「新建」与「优化…」两类',
     ok: (v, f) => {
       const labels = Array.isArray(f['crystal.targetFormLabels']) ? f['crystal.targetFormLabels'] : []
       return (
         typeof v === 'number' &&
-        v === 3 &&
+        v >= 2 &&
         labels.some((l) => String(l).includes('新建')) &&
-        labels.some((l) => String(l).includes('更新')) &&
-        labels.some((l) => String(l).includes('优化') && String(l).includes('指令'))
+        labels.some((l) => String(l).includes('优化'))
       )
     },
     show: (v, f) => `${v} 行　${JSON.stringify(f['crystal.targetFormLabels'] ?? [])}`,
@@ -3964,13 +3991,13 @@ const CHECKS = [
     key: 'crystal.targetMaterialLine',
     label:
       '★★★ 素材判据**就一行**（来源是对话还是任务 / 有没有审核结论）——改前它是一个分节（h3 + 外壳白占 87px），而那行字在副标题里已经写过一遍',
-    ok: (v) => typeof v === 'string' && v.length > 0 && !v.includes('\n'),
+    ok: (v) => typeof v === 'string' && v.includes('轨迹') && v.includes('轮'),
     show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
     key: 'crystal.targetStartButton',
-    label: '★★ 「开始沉淀」在，而且悬停就说得清判据（素材为空 / 门槛不过要分开说——第 ① 条"点了没反应"的常见形态）',
+    label: '★★ 确认步给出「开始提炼」',
     ok: (v) => typeof v === 'string' && v.length > 0,
     show: (v, f) => `${JSON.stringify(v)}　title ${JSON.stringify((f['crystal.targetStartButtonTitle'] ?? '').slice(0, 40))}`,
   },
@@ -4083,27 +4110,6 @@ const CHECKS = [
     label: '★★ 回到目标态之后**没有 tab 条**（与"目标态不做 tab"同一条：这一屏是表单，不是分层浏览）',
     ok: (v) => v === 0,
     show: (v) => `${v} 个`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.stoppedFoldHead',
-    label:
-      '★★★ 停止之后**素材折叠在这儿**、且默认收起——★ 这一条钉的是一个**只在这条路径上才到达**的分支：第 4 批把它的条件收窄成"有草稿且停在目标态"，不量的话那支标记就是"看着在、其实没人能到达"的疑似死代码',
-    ok: (v, f) => typeof v === 'string' && v.includes('素材') && f['crystal.stoppedFoldClosed'] === true,
-    show: (v, f) => `${JSON.stringify(v)}　默认收起 ${f['crystal.stoppedFoldClosed']}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.stoppedFoldOpens',
-    label: '★ 展开它真的列出素材（起草过一版 ⇒ `material/` 已在磁盘上，不是一行空壳）',
-    ok: (v) => v === true,
-    show: (v, f) => JSON.stringify(f['crystal.stoppedFoldRows']),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.stoppedStartButtonDisabled',
-    label: '★★ 停下来之后「开始沉淀」是**可按的**（不是灰着让人对着它发呆）',
-    ok: (v) => v === false,
   },
   {
     view: '沉淀',

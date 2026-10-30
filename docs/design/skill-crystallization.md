@@ -4476,3 +4476,38 @@ U1（`928a59f`）、U2 材料半（`5e74169`）、状态锚点（`c82f1d6`）都
 4. 四组都补完之后，才允许把"起点"统一成中性态——**一次只改一组，每组跑一遍 585**。
 
 **这一批的产出是规格与顺序，不是代码**。下一次动手就从"待补四组"的第 2 步开始。
+
+### 12.26 U2 的提问半落地：目标屏换成逐个问（分批第 103 批，**已实作**）
+
+三次试做都回滚之后，这一批成了。**不是因为向导写得更好，是因为地基补齐了**：状态锚点（`c82f1d6`）、
+入口断言（`f885c69`）、组入口事实与组间隔离（`d69b5a9`/`2d9ea63`/`a2c8e9f`）。
+
+**做了什么**：`CrystallizeIntake` 接管目标屏——第一问起点（新建 / 优化已有技能 / 优化智能体指令）、
+第二问目标细节（候选 > 1 时才问）、第三问作用描述（**必答**，空着「下一步」禁用）或"希望改什么"、
+第四步确认摘要（沉淀成 / 目标 / 作用 / 素材统计）→「开始提炼」。发起请求仍走原来的
+`applyIntake → startDraft`，**目标状态的所有权没搬家**，所以不产生第二套入口。
+
+**这一批量到的（全是真缺陷，逐条记）**：
+
+1. **探针自己会死，然后把后面整组拖空**。`text(null).replace(...)` 抛 TypeError ⇒ 探针脚本中断 ⇒
+   后面所有组的 fact 都是 undefined，表现是"改沉淀页、聊天页整组红"。**这不是布局问题**，
+   是 measurement 脚本没跑完。修法：`String(text(...) ?? '')`。
+2. **挂载判据要等"内容"，不是等"外壳"**。`.intake` 在 `targets` 还没到时就存在（里面是骨架），
+   等它会量到"0 个选项"然后一路空过。改成等 `.intake-choice`。
+3. **`agentTargets` 必须防御式取值**：第一版直接 `targets.agentTargets.executor`，缺字段就
+   TypeError ⇒ **组件崩掉 ⇒ 整页崩**（连聊天页都量不到）。`$derived.by` + 过滤 null。
+4. **i18n 死词条检查（`i18n.test.ts`）把旧面板的词条全揪出来了**：一共 **13 条**（`purposeLabel`/
+   `purposePlaceholder`/`purposeHint`/`userFeedbackLabel`/`userFeedbackPlaceholder`/`targetUpdateHint`/
+   `agentCandidateExecutor`/`agentCandidateReviewer`/`agentCharsHint`/`agentBuiltinHint`/`badgeMine`/
+   `badgeInstalled`/`updateIsEvolve`/`updateIsShadow`）。处置：**能接的都接到向导上**（作用描述的
+   标签与占位、角色标签、字符提示、技能来源徽标、"进化 vs 遮蔽"），**没有去处的删掉**
+   （`targetAgentHint`、`agentNoReviewer`、`noLoadedSkills`——旧面板的悬停说明与空态提示，
+   向导里不再出现）。**这条检查是这一批最有价值的东西**：它逼着"界面换了、词条要么用要么删"。
+
+验证：`probe:layout` **592 项全绿**（含新增：第一问文案、必答禁用、答完推进、确认摘要、旧表单数=0）；
+`check` **2234 全绿**；`typecheck` 0 错。真 Chrome 事实：第一问"这次要沉淀成什么？"、
+选项 2 个（新建 / 优化智能体指令）、必答禁用 `true`、推进 `true`、确认摘要含"轨迹 1 轮 · 0 次工具调用"、
+旧表单 `.radio-row` 数 **0**。
+
+**还没做的**：中间那一栏仍是旧流程页（对话化是 U3）；入库/返工仍是旧界面；材料区只读
+（写接口还没有）。
