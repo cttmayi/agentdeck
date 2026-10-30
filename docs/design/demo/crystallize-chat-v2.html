@@ -101,6 +101,14 @@
   .files li.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
   .files .dir { color: var(--text-faint); }
   .files .w { margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); }
+  .mats { list-style: none; margin: 0 0 0.375rem; padding: 0; font-size: var(--fs-sm); }
+  .mats li { display: flex; gap: 0.375rem; align-items: center; padding: 0.1875rem 0; border-bottom: 1px dashed var(--line); }
+  .mats li:last-child { border-bottom: 0; }
+  .mats .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mats .tag { font-size: var(--fs-xs); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 0.25rem; color: var(--text-faint); }
+  .mats .x { border: 0; background: transparent; color: var(--text-faint); padding: 0 0.25rem; }
+  .mats .x:hover { color: var(--bad); }
+  .add-mat { margin-bottom: 0.25rem; }
   .check { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); }
   .check .ok { color: var(--good); }
   .check .bad { color: var(--bad); }
@@ -196,6 +204,13 @@ const SESSIONS = [
     state: 'shipped',
     stateText: '已入库',
     source: '来自「修复动画终态」· 12 轮 · 41 次工具调用',
+    materials: [
+      { name: 'task-run.md', src: '轨迹', size: '8.1 千字' },
+      { name: 'turns/*.md（41 条工具调用）', src: '轨迹', size: '2.3 万字' },
+      { name: 'verdict.md（审核判决）', src: '轨迹', size: '412 字' },
+      { name: 'scratch/pages/*.html', src: '产物', size: '3 个文件' },
+      { name: 'cdp-cli README 片段', src: '外部', size: '620 字' },
+    ],
     messages: [
       { role: 'system', text: '本次沉淀接在 run「修复动画终态」后面（12 轮 · 41 次工具调用）' },
       { role: 'assistant', text: '这次要沉淀什么？点一个，或者直接说。', choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有指令'] },
@@ -266,6 +281,10 @@ const SESSIONS = [
     state: 'reviewing',
     stateText: '待审',
     source: '空白起 · 只有我追加的材料',
+    materials: [
+      { name: '3 篇评测文章（粘贴）', src: '外部', size: '4.1 千字' },
+      { name: '团队研究规范', src: '外部', size: '0.5 千字' },
+    ],
     messages: [
       { role: 'system', text: '这次没有来源 run：从空白/材料起' },
       { role: 'assistant', text: '要优化哪条智能体的指令？还是新建一份？', choices: ['优化 researcher 的指令', '新建一份指令', '改成沉淀技能'] },
@@ -308,6 +327,11 @@ const SESSIONS = [
     state: 'brief',
     stateText: '提问中',
     source: '从这次工作起 · 问题还没答完',
+    materials: [
+      { name: 'task-run.md', src: '轨迹', size: '8.1 千字' },
+      { name: 'turns/*.md（41 条工具调用）', src: '轨迹', size: '2.3 万字' },
+      { name: 'scratch/pages/*.html', src: '产物', size: '3 个文件' },
+    ],
     intake: [
       { id: 'start', ask: '这次要沉淀什么？点一个，或者直接说。', choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有指令'] },
       { id: 'purpose', ask: '一句话说清：这个技能在什么情况下被用到？（必答：没靶子不开跑）', optional: false },
@@ -366,16 +390,8 @@ function ensureIntake(session) {
 }
 
 function materialMessage() {
-  return {
-    role: 'assistant',
-    text: '好。材料我按这次对话自动带上，也可以再追加。',
-    attachments: [
-      { name: 'task-run.md', src: '轨迹 · 8.1 千字' },
-      { name: 'turns/*.md', src: '轨迹 · 2.3 万字' },
-      { name: 'scratch/pages/*.html', src: '产物 · 3 个' },
-    ],
-    choices: ['开始提炼'],
-  };
+  // 对话里只留一行摘要，正式清单在右栏——两处不能各说各的，所以摘要现算
+  return { role: 'assistant', materialSummary: true, choices: ['开始提炼'] };
 }
 
 function answerIntake(session, text) {
@@ -429,6 +445,14 @@ function renderMessage(m, index, total) {
       : '';
     return `<div class="msg system">${esc(m.text)}${log}</div>`;
   }
+  if (m.materialSummary) {
+    const all = active.materials ?? [];
+    const by = (src) => all.filter((x) => x.src === src).length;
+    const parts = ['轨迹', '产物', '外部'].filter((k) => by(k) > 0).map((k) => `${k} ${by(k)}`);
+    const text = `材料我按这次对话自动带上：**${all.length} 项**（${parts.join(' / ')}）。在右边可以增删。`;
+    const chips = live ? `<div class="choices">${(m.choices ?? []).map((c) => `<button type="button" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>` : '';
+    return `<div class="msg assistant">${md(text)}${chips}</div>`;
+  }
   const attach = m.attachments
     ? `<div class="attach">${m.attachments.map((a) => `<span class="item">${esc(a.name)}<span class="src">${esc(a.src)}</span></span>`).join('')}</div>`
     : '';
@@ -441,6 +465,11 @@ function renderMessage(m, index, total) {
 }
 
 function renderPane() {
+  const mats = active.materials ?? [];
+  const materialBlock = `
+    <div class="sec-title">材料 ${mats.length} 项</div>
+    <ul class="mats">${mats.map((m, i) => `<li><span class="tag">${esc(m.src)}</span><span class="grow" title="${esc(m.name)}">${esc(m.name)}</span><span class="w mono">${esc(m.size)}</span><button class="x" type="button" data-mat-remove="${i}" title="移除">✕</button></li>`).join('')}</ul>
+    <button class="ghost add-mat" type="button" data-mat-add="1">+ 追加材料</button>`;
   const a = active.artifact;
   const has = a.files.length > 0;
   if (has && viewing === null) viewing = a.files[0].path;
@@ -448,11 +477,11 @@ function renderPane() {
   const ok = a.checks.filter((c) => c.ok).length;
   const bad = a.checks.length - ok;
   if (!has) {
-    el('pane-body').innerHTML =
+    el('pane-body').innerHTML = materialBlock +
       '<div class="sec-title">产物</div><div class="empty">还没有产物。答完问题、点「开始提炼」之后，文件会出现在这里；过程与对话留在左边。</div>';
     return;
   }
-  el('pane-body').innerHTML = `
+  el('pane-body').innerHTML = materialBlock + `
     <div class="sec-title">文件</div>
     <ul class="files">${a.files.map((f) => `<li class="${f.path === current?.path ? 'on' : ''}" data-file="${esc(f.path)}"><span class="${f.path.includes('/') ? 'dir' : ''}">${esc(f.path)}</span><span class="w mono">${esc(f.bytes)}</span></li>`).join('')}</ul>
     <div class="preview"><pre>${esc(current?.body ?? '')}</pre></div>
@@ -514,6 +543,17 @@ el('rail').addEventListener('click', (e) => {
 });
 
 el('pane-body').addEventListener('click', (e) => {
+  const remove = e.target.closest('[data-mat-remove]');
+  if (remove) {
+    active.materials.splice(Number(remove.dataset.matRemove), 1);
+    renderMain();
+    return;
+  }
+  if (e.target.closest('[data-mat-add]')) {
+    active.materials.push({ name: 'notes-追加.txt', src: '外部', size: '1.2 千字' });
+    renderMain();
+    return;
+  }
   const item = e.target.closest('[data-file]');
   if (!item) return;
   viewing = item.dataset.file;
