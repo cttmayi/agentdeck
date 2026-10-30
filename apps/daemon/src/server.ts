@@ -2814,29 +2814,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       if (human !== null) await clearHumanEditStamp(dir)
     }
     /**
-     * ★ 分批第 124 批（§12.15 / §12.42 第 ② 步的第一步）：**先把开关做出来，不翻它**。
+     * ★ 分批第 129 批（§12.15 / §12.42 第 ① 步）：沉淀线**不跑评审**——起草 run 跑完
+     * **不再**自动接一轮审核（改版草稿也一样）。
      *
-     * 决定是「沉淀线不跑评审」，但直接短路这一支会让 `crystallize-e2e.test.ts` 里 16 处 +
-     * `draft-chain.test.ts` 里 2 处断言当场变红（它们断言的正是"改版草稿会自动接审核"）。
-     * 按这一轮的纪律（一次只动一层、每步都绿着停），先加一个**默认仍为开**的开关：
-     *   · 默认 = 老行为 ⇒ 现存 2234 条测试一条都不用改；
-     *   · 下一批把断言改成"关掉时不再自动接审核"（并新增一条用例证明开关有效），**再**翻默认值。
-     * 这样"翻开关"是一行可回滚的改动，而不是"改代码 + 改 18 处断言"混在一起。
+     * 历史：分批第 9 批把这里补成"改版跑完 ⇒ 自动接一轮审核"（当时的使用者诉求是
+     * 「为什么是按意见重新起草而不是基于意见修改」，顺手发现"自动返工只做到产一版就停了"）。
+     * 2026-10 的决定反过来：那一轮审核是真金白银（真机 ≈ $1.32/轮），每一版要不要再审
+     * **由人决定**，不由钩子替人决定。第 124 批先加开关（默认仍开）、第 127/128 批把用例
+     * 改成新语义，本批翻默认并**删掉那个开关**——迁移脚手架留着就是死接口。
+     *
+     * ⚠️ 短路的是"自动"，**手动入口一个字没动**：`POST /api/crystallize/review`（界面上
+     *    「开始审核」）照旧起审核，`startDraftAudit` 那条链（定检、指纹、闸门、返工）都还走它。
+     *    机械体检也不在这里（§12.15 是"不要评审，只要体检"——体检是替代品，不是被删对象）。
+     *
+     * ⚠️ 为什么保留这个分支、不让它落到下面那段"谁审"逻辑：起草 run 的 `reviewerAgentId`
+     *    是**显式 `null`**（起草路由里写死），落到下面会打一句「这次任务在新建时选择了
+     *    「这次不自动审核」」——对起草 run 那句话**不成立**（不是谁选的，是平台不自动审）。
+     *    日志必须如实说原因，否则下一次排查的人会去改一个本来不该改的配置。
      */
-    if (
-      input.executeRun.subject.type === 'skill-draft' &&
-      input.executeRun.revisedFrom !== undefined &&
-      process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] !== 'off'
-    ) {
-      const started = await startDraftAudit(input.executeRun, { completed: true })
-      if (!started.ok) {
-        // 起不来就如实说（这个 note 会进 run 日志）——静默返回 null 会让"没接上审核"
-        // 变成日志里一句"没有串接审核"，看不出是"这一版不该审"还是"审不起来"。
-        return { runId: null, note: `这一版是按意见改出来的，但审核没起来：${started.error}（${started.code}）` }
-      }
+    if (input.executeRun.subject.type === 'skill-draft') {
       return {
-        runId: started.reviewRunId as RunId,
-        note: '这一版是按意见改出来的 ⇒ 自动接了一轮审核（分批第 9 批：原来停在"产一版新的"等人点）',
+        runId: null,
+        note: '沉淀线的草稿不自动接审核（§12.15：评审下线；要审在审阅界面点「开始审核」）',
       }
     }
 

@@ -1670,13 +1670,13 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     fakeBackend.draftReviewVerdict = failVerdict()
     fakeBackend.minimalEditOnRevise = false // 假后端整篇重写 ⇒ 必然被判 rewrite
     /**
-     * ★ 分批第 128 批（评审下线，§12.15）：**改版草稿不再自动接审核**。
+     * ★ 分批第 129 批（评审下线，§12.15）：**改版草稿不再自动接审核**（默认即下线，
+     * 本批已删掉临时开关）。
      *
      * 这条用例量的是"闸门只标注、不停循环"，它的判据需要第 2 版**被审过**（闸门报告是在
      * `startDraftAudit` 里量改动量算出来的）。自动那一半下线之后，这一轮审核改由**人点**
      * 「开始审核」——也就是真机上使用者的动作（评审下线≠不能审）。
      */
-    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
     try {
       const verdict = await reviewDraftAndWait(draftRunId)
       assert.equal(verdict.status, 'rework_requested', '有额度就必须派返工')
@@ -1754,7 +1754,6 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       fakeBackend.draftReviewVerdict = null
       fakeBackend.minimalEditOnRevise = false
       await restoreRounds()
-      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
     }
   })
 
@@ -2275,13 +2274,12 @@ describe('§10.7 评审下线：改版来的新草稿跑完**不再**自动接�
     // 分批第 23 批起上限来自设置（默认 10）⇒ 这条"跑满就停"的用例把轮数钉成 2
     const restoreRounds = await useReworkRounds(2)
     /**
-     * ★ 分批第 128 批：把开关显式关掉，让这条用例按"评审下线之后"的语义跑
-     * （第 129 批翻默认值、删开关之后，这两行连同 finally 里的 delete 一起删）。
+     * ★ 分批第 129 批：评审下线的临时开关已经删掉（默认即"不自动接审核"），所以这里
+     * 不再需要显式设环境变量——行为就是新版语义。
      *
      * 为什么不在这一条里"既证自动审、又证不自动审"：两件事要的是**相反**的夹具。
-     * 自动那一半的行为已由 §10.10 单独钉住；这里只量"人点之后整条链走得完"。
+     * "不自动审"已由 §10.10 单独钉住；这里只量"人点之后整条链走得完"。
      */
-    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
     /**
      * ★ 分批第 25 批：这条必须让假后端**只改点到的地方**。
      *
@@ -2393,7 +2391,6 @@ describe('§10.7 评审下线：改版来的新草稿跑完**不再**自动接�
       fakeBackend.draftReviewVerdict = null
       fakeBackend.minimalEditOnRevise = false
       await restoreRounds()
-      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
     }
   })
 })
@@ -2401,24 +2398,21 @@ describe('§10.7 评审下线：改版来的新草稿跑完**不再**自动接�
 /**
  * §10.10 评审下线（§12.15）：**改版草稿跑完不再自动接一轮审核**。
  *
- * 这一节钉的是"自动跑的那一半先停、手动入口照旧"：评审下线 ≠ 删掉审核——
+ * 这一节钉的是"自动那一半下线、手动入口照旧"：评审下线 ≠ 删掉审核——
  * 「开始审核」这个入口（`POST /api/crystallize/review` + 界面上的按钮）**必须**还在，
  * 否则使用者想审一条草稿时没有任何办法。
  *
- * ⚠️ 开关读的是 `process.env`，且在 `autoChainReview` 内部**每次调用时**读 ⇒ 一个 daemon 就够：
- *    用例里临时置成 `off`、跑一次改版、断言没有新的审核 run，最后删掉复原。
- *    这一半正是 §12.45 摸出来的写法（不重启 daemon、现成夹具、三件事一起断言）。
+ * ⚠️ 这条用例诞生时（分批第 127 批）靠临时环境变量 `AGENTDECK_CRYSTALLIZE_AUTO_REVIEW=off`
+ *    模拟"下线"；第 129 批翻了默认值并删掉那个开关（迁移脚手架留着就是死接口），
+ *    所以现在它量的是**默认行为**：不设任何环境变量，改版跑完就没有审核 run。
  *
  * ⚠️ 为什么"没自动审"要配一条**正**断言（手动入口 202）：负断言天生容易假绿——
  *    如果我把"自动接审核"整支删掉、顺手也把审核入口删了，只断言"没有审核 run"
  *    同样会绿，而使用者从今往后再也审不了任何草稿。
  */
 describe('§10.10 评审下线：改版草稿不再自动接审核（手动入口仍在）', () => {
-  test('★★ 开关关掉 ⇒ 改版跑完不起审核 run，但「开始审核」照样能点', async () => {
-    // 复原放在 finally 里：中途断言失败也不许把这个环境变量留在进程里
-    // （留着的话后面每条用例都在"关"的状态下跑，一红一大片，而红因是上一节留下的脏）。
-    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
-    try {
+  test('★★ 改版跑完不起审核 run（默认即下线），但「开始审核」照样能点', async () => {
+    {
       const sourceRunId = await runReviewed('审完的流程（评审下线）')
       const v1 = await draftAndWait({
         runId: sourceRunId,
@@ -2464,8 +2458,6 @@ describe('§10.10 评审下线：改版草稿不再自动接审核（手动入�
         'string',
         '手动「开始审核」必须照旧起 run（否则这条负断言是假绿）',
       )
-    } finally {
-      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
     }
   })
 })
