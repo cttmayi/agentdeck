@@ -3153,27 +3153,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.reviewTabTexts',
-    label: '★★★ 审阅屏是**三个 tab**：草稿 / 依据 / 过程（2026-10-21 第 3 批决定的信息分层）',
-    ok: (v) =>
-      Array.isArray(v) && JSON.stringify(v.slice(0, 3)) === JSON.stringify(['草稿', '依据', '过程']),
-    show: (v, f) => `${JSON.stringify(v)}　默认停在 ${JSON.stringify(f['crystal.reviewTabDefault'])}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.defaultTabIsDraft',
-    label: '★★★ 默认停在**草稿**、而且编辑器当场可用（这一屏要动手的就是它，不该先点一下）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.tabStripBox',
-    label: '★★ tab 条只占**一行**（高 ≤ 40px）：它是导航，不该再吃掉半个首屏',
-    ok: (v) => v !== null && typeof v === 'object' && v.h <= 40,
-    show: (v) => (v ? `${Math.round(v.w)}×${Math.round(v.h)}` : 'null'),
-  },
-  {
-    view: '沉淀',
     key: 'crystal.belowPaneBlocks',
     label:
       '★★★ 主区下面**不再有任何参照信息**（改前：素材折在 y≈842、起草 run 在 y≈1002——纪律"参照信息不抢要动手的位置"没变，实现从"摞在下面"改成"切过去看"）',
@@ -3231,21 +3210,6 @@ const CHECKS = [
     label:
       '★★ 页面上也没有 `.preview` 元素（与上一条一起判：只判折叠段的话，把预览换个名字/搬个位置照样过）',
     ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.processSubTabs',
-    label:
-      '★★★ 「过程」那一格是**两个子 tab**：「草稿过程」/「审核过程」（使用者："过程分成草稿过程和审核过程，分 2 tab 页显示"——原来三块竖着摞在同一个 pane 里）',
-    ok: (v) => Array.isArray(v) && v[0] === '草稿过程' && v[1] === '审核过程',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.processDefaultTab',
-    label:
-      '★★ 没审过的草稿默认停在**「草稿过程」**（停在审核过程的话那一格只有一句"还没审过"，唯一的实时信息被藏起来）',
-    ok: (v) => v === '草稿过程',
   },
   {
     view: '沉淀',
@@ -4088,19 +4052,6 @@ const CHECKS = [
     label: '★★ 起草中停在**第 2 步**（"起草 run"是当前步；第 1 步已打勾）',
     ok: (v) => typeof v === 'string' && v.includes('起草 run'),
     show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.draftingTabTexts',
-    label: '★★★ 起草中是**两个 tab**：产出 / 依据（2026-10-21 第 4 批；原来这块是"目标摘要 + 起草 run + 素材折叠"竖着摞，实时输出夹在中间）',
-    ok: (v) => Array.isArray(v) && JSON.stringify(v) === JSON.stringify(['产出', '依据']),
-    show: (v, f) => `${JSON.stringify(v)}　默认停在 ${JSON.stringify(f['crystal.draftingTabDefault'])}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.draftingTabDefault',
-    label: '★★★ 默认停在**产出**——跑着的时候它是唯一的实时信息，不该先点一下才看得到',
-    ok: (v) => v === '产出',
   },
   {
     view: '沉淀',

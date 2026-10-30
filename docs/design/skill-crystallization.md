@@ -4657,3 +4657,30 @@ const ast = parse(source, { modern: true })
 **为什么这一步值得单独一批**：`editorAndDiffSameContainer` 量出 `null` 本身就说明了一件事——
 **"编辑与差异同位置"这个语义现在是靠 tab 切换实现的**，所以删 tab 不是"把控件挪一挪"，
 而是**换一种实现同一语义的方式**。这就是下一步要先拍的设计点（并排 or 分段控件）。
+
+### 12.33 U3c-2 第 3 步：删掉 7 条以 tab 命名的判据（分批第 112 批）
+
+按 §12.31 的分类，**A 类 7 条随 tab 一起删掉**（它们断言的正是"tab 这个交互形态"本身）：
+
+| 删掉的判据 | 它原来钉什么 |
+|---|---|
+| `crystal.tabStripBox` | tab 条的几何（宽度/位置） |
+| `crystal.reviewTabTexts` | 审阅态 tab 的文案与顺序 |
+| `crystal.defaultTabIsDraft` | 默认停在「草稿过程」这一档 |
+| `crystal.processSubTabs` | 过程格里的子 tab |
+| `crystal.processDefaultTab` | 子 tab 的默认档 |
+| `crystal.draftingTabTexts` | 起草态 tab 的文案 |
+| `crystal.draftingTabDefault` | 起草态默认档 |
+
+**删判据的理由（必须写下来，否则就是悄悄降低覆盖）**：设计上"编辑/差异/过程/依据"从**并列的 tab**
+变成"同一条消息流里的不同块"——tab 这个控件不存在了，那 7 条要断言的东西也**不再存在**；
+不是"太难改所以删掉"。
+
+**B 类 3 条留着**（`editorInContentTab` / `diffSamePlaceAsEditor` / `reviewInputCount`）——
+它们的语义（编辑器在主区、差异与编辑器同位置、输入控件不多不少）**新形态下依然成立**，
+换的是选择器而不是意图。
+
+`probe.html` 里对应的测量代码**先留着**（facts 变无用但无害），等 UI 真删 tab 时一起清——
+那时探针会告诉我们哪些测量确实再也没人读。
+
+验证：探针 **591 项全绿**（598 − 7）、`check` 2234 全绿。
