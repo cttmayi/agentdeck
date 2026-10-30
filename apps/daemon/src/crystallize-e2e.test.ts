@@ -1669,11 +1669,28 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
     })
     fakeBackend.draftReviewVerdict = failVerdict()
     fakeBackend.minimalEditOnRevise = false // 假后端整篇重写 ⇒ 必然被判 rewrite
+    /**
+     * ★ 分批第 128 批（评审下线，§12.15）：**改版草稿不再自动接审核**。
+     *
+     * 这条用例量的是"闸门只标注、不停循环"，它的判据需要第 2 版**被审过**（闸门报告是在
+     * `startDraftAudit` 里量改动量算出来的）。自动那一半下线之后，这一轮审核改由**人点**
+     * 「开始审核」——也就是真机上使用者的动作（评审下线≠不能审）。
+     */
+    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
     try {
       const verdict = await reviewDraftAndWait(draftRunId)
       assert.equal(verdict.status, 'rework_requested', '有额度就必须派返工')
       const v2 = await waitRevisedFrom(draftRunId, 45_000)
       const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
+
+      // ★ 评审下线后第 2 版**不会**自己接审核（那是 §10.10 钉的事）——这里由人点一次，
+      //   闸门报告要等这一刻才量得出来（它量的是"这一版相对上一版改了多少"）。
+      const startedV2 = await fetch(`${daemon.url}/api/crystallize/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v2 }),
+      })
+      assert.equal(startedV2.status, 202, await startedV2.clone().text())
 
       // ① 标注必须落盘（人可读 + 机器可读）
       //
@@ -1705,21 +1722,24 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       const wrote = await readFile(stopFile, 'utf8').catch(() => null)
       assert.equal(wrote, null, '闸门只标注 ⇒ 不许落停止标记（否则循环就停了）')
 
-      // ③ 循环真的继续：第 2 版之后还会自动起第 3 版（轮数钉成 2 ⇒ 到这里刚好用完）
+      // ③ 循环真的继续：第 2 版被判不通过之后仍然派得出第 3 版（轮数钉成 2 ⇒ 到这里刚好用完）
+      //
+      // ⚠️ 分批第 128 批（评审下线）之后这里**不再**"自动起第 3 版"那条链：第 2 版的审核是
+      //    人点的那一轮（上面那几行），它判不通过 ⇒ `decideReview` 派返工 ⇒ 第 3 版。
+      //    判据一个字没放宽：仍然是"被判重写之后不许停"。
       const v3 = await waitRevisedFrom(v2, 45_000)
       assert.ok(v3 !== '', '被判重写之后循环必须继续')
 
       // ④ 界面读得到这条标注
       //
-      // ⚠️ 这里**必须等**，不能取一次就断言（2026-10 全量跑时红过一次）：
-      //    `waitRevisedFrom(v2)` 一返回就说明 **v3 的 run 记录已经存在**，但闸门标注
-      //    是 v3 **判完**之后才落盘的——两件事之间隔着一整轮审核。单跑这个文件时
-      //    中间那点时间够用，全量并行跑时不够，于是这条会偶发变红。
-      //    等的写法不是放宽：`guard === null` 与 `kind !== 'ok'` 两条断言一个字没改。
+      // ⚠️ 读的是**第 2 版**（评审下线之前读的是 v3）：闸门报告是第 2 版**开始审核**那一刻
+      //    算出来落盘的，而 `autoReworkSummary` 只在"这一版有已收口的审核"时才给 guard。
+      //    评审下线后 v3 没有自己的审核 run ⇒ 读 v3 恒为 null，看起来就像"标注没写"。
+      //    （这不是放宽：读的是**算这份标注的那一版**，比原来更准。）
       const readReview = async (): Promise<{
         autoRework: { stopped: boolean; guard: { kind: string } | null }
       }> =>
-        (await (await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${v3}`)).json()) as {
+        (await (await fetch(`${daemon.url}/api/crystallize/review?draftRunId=${v2}`)).json()) as {
           autoRework: { stopped: boolean; guard: { kind: string } | null }
         }
       let info = await readReview()
@@ -1734,6 +1754,7 @@ describe('§10.5：审核不通过 ⇒ 自动返工', () => {
       fakeBackend.draftReviewVerdict = null
       fakeBackend.minimalEditOnRevise = false
       await restoreRounds()
+      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
     }
   })
 
@@ -2166,18 +2187,22 @@ describe('§10.8 返工契约：基于上一版改（不是重写一版）', () 
 })
 
 /**
- * §10.7 自动再审：**改版来的新草稿跑完 ⇒ 自动接一轮审核**（2026-10-21 分批第 9 批）。
+ * §10.7 评审下线（§12.15，分批第 128 批改口径）：**改版草稿跑完不再自动接审核**。
  *
- * 起因是使用者的一句话：「为什么是按意见重新起草呢，而不是基于意见修改」——顺着查"返工"这条链
- * 时发现：**自动返工只做到"产一版新的"就停了**，新版停在待审核等人点一次「开始审核」。
- * 也就是"自动返工"是半截链子，与使用者心里的"自动改进直到过审"差着一整轮审核。
+ * 历史：分批第 9 批曾为了"自动返工是半截链子、新版停在待审核"把这条链补成
+ * 「改版跑完 ⇒ 自动接一轮审核 ⇒ 不通过 ⇒ 返工 ⇒ …」。2026-10 的决定是**沉淀线不跑评审**：
+ * 自动那一半下线，每一版都由人决定要不要花那笔钱（一轮审核在真机上 ≈ $1.32）。
  *
- * 这一条钉的是**整条链跑到头**：初版不自动审 → 人点一次 → fail ⇒ 返工 ⇒ 新版**自动**审
- * ⇒ fail ⇒ 返工 ⇒ 新版自动审 ⇒ 额度用尽（escalated）才停，且**不许多产一版**。
+ * 这一条现在钉的是**链仍然能跑到头、只是每一步由人触发**：
+ *   初版不自动审 → 人点一次 → fail ⇒ 返工 ⇒ 新版（**同样不自动审**）→ 人点一次 → fail ⇒ 返工
+ *   ⇒ 新版 → 人点一次 → 额度用尽（escalated）才停，且**不许多产一版**。
  * 终止性靠返工额度（`SKILL_DRAFT_REWORK_LIMIT` = 2），不是靠这个钩子——所以这条用例
  * 同时是"这条链不会无限烧钱"的证明。
+ *
+ * ⚠️ 与 §10.10 成对：那一条只证明"开关关掉后不自动审"；这一条证明**关了之后手动入口
+ *    仍然把整条链走到底**。只有前一条的话，"不自动审"也可能是"审不了"。
  */
-describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核', () => {
+describe('§10.7 评审下线：改版来的新草稿跑完**不再**自动接审核（人点一次才审）', () => {
   async function huts(): Promise<string[]> {
     const { readdir } = await import('node:fs/promises')
     return (await readdir(workRoot)).filter((n) => n.startsWith('skill-draft-'))
@@ -2246,9 +2271,17 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
     throw new Error(`草稿 ${draftRunId.slice(-6)} 的判决没在限时内走到 ${wanted.join('/')}（最后看到：${last}）`)
   }
 
-  test('★★ 整条链跑到头：初版等人点，之后每一版都自动接着审，额度用尽才停', async () => {
+  test('★★ 整条链跑到头：初版等人点，之后每一版也**等人点**（评审下线），额度用尽才停', async () => {
     // 分批第 23 批起上限来自设置（默认 10）⇒ 这条"跑满就停"的用例把轮数钉成 2
     const restoreRounds = await useReworkRounds(2)
+    /**
+     * ★ 分批第 128 批：把开关显式关掉，让这条用例按"评审下线之后"的语义跑
+     * （第 129 批翻默认值、删开关之后，这两行连同 finally 里的 delete 一起删）。
+     *
+     * 为什么不在这一条里"既证自动审、又证不自动审"：两件事要的是**相反**的夹具。
+     * 自动那一半的行为已由 §10.10 单独钉住；这里只量"人点之后整条链走得完"。
+     */
+    process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW'] = 'off'
     /**
      * ★ 分批第 25 批：这条必须让假后端**只改点到的地方**。
      *
@@ -2303,32 +2336,46 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
       // 第 2 版 = "按 v1 改出来的那一版"（**关系**，不是"目录里多数出来一间"——见 `waitRevisedFrom`）
       const v2 = await waitRevisedFrom(v1)
 
-      // ③ ★★ 第 2 版**没有人点过审核**，它必须自己接上——这一条就是这一批的全部意义。
+      // ③ ★ 第 2 版**没有人点过审核**，所以它**不该**有审核 run——这一条就是这批的全部意义。
       //
-      // ⚠️ 这里断言的是**不变量**（"它自己挂上了一条审核 run"），**不是**判决的中间态。
-      //    第一版抓的是"等到 rework_requested"，而整条链可能在一两个轮询之间就跑到了头
-      //    （实测报错现场：`判决=escalated 审核run=.../completed 版本=3`）——那是**观察窗口**
-      //    太窄，不是链的错。终端态由 ④ 那一步按额度钉住（那里等的是稳定状态）。
-      let audited = false
-      for (let i = 0; i < 600 && !audited; i += 1) {
-        audited = (await draftReview(v2)).reviewRunId !== null
-        if (!audited) await new Promise((resolve) => setTimeout(resolve, 100))
-      }
-      assert.equal(audited, true, '第 2 版必须自己接上审核（没有人点过任何按钮）')
+      // ⚠️ 负断言要给它时间：自动接审核是"跑完之后"的钩子，抢在钩子之前断言等于没量。
+      //    300ms 是"钩子早就该跑完"的量级（同进程、假后端立刻完成）；真有问题时它会一直
+      //    带着审核 run，而不是差这 300ms。
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const secondBefore = await draftReview(v2)
+      assert.equal(secondBefore.reviewRunId, null, '第 2 版不许自己接审核（评审下线：要审由人点）')
 
-      // ④ 第 3 版同样自动审；此时额度用尽 ⇒ escalated ⇒ 链停在这里
+      // ④ 人再点一次 ⇒ fail ⇒ 返工 ⇒ 第 3 版（链还能往下走，只是每一步由人触发）
+      const startedV2 = await fetch(`${daemon.url}/api/crystallize/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v2 }),
+      })
+      assert.equal(startedV2.status, 202, await startedV2.text())
+      const verdict2 = await waitSettled(v2, ['rework_requested'])
+      assert.equal(verdict2.status, 'rework_requested', '有额度 ⇒ 返工派得出去（第二次也是）')
       const v3 = await waitRevisedFrom(v2)
+
+      // ⑤ 第 3 版同样不自动审；人点一次，此时额度用尽 ⇒ escalated ⇒ 链停在这里
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      assert.equal((await draftReview(v3)).reviewRunId, null, '第 3 版同样不自动审')
+      const startedV3 = await fetch(`${daemon.url}/api/crystallize/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId: v3 }),
+      })
+      assert.equal(startedV3.status, 202, await startedV3.text())
       const third = await waitSettled(v3, ['escalated'])
       assert.equal(third.status, 'escalated', '额度用尽 ⇒ 交给人（不再返工）')
-      // 第 2 版那份判决（链跑到头之后再读，读的是稳定值）：它是**自动接上的那轮审核**给的，
+      // 第 2 版那份判决（链跑到头之后再读，读的是稳定值）：它是**人点的那一轮审核**给的，
       // 结论是 fail —— 于是才有第 3 版
       assert.equal(
         (await draftReview(v2)).review?.conclusion,
         'fail',
-        '第 2 版的判决来自"自动接上的那一轮审核"（没人点过任何按钮）',
+        '第 2 版的判决来自「开始审核」那一轮，结论 fail',
       )
 
-      // ⑤ 停下来之后**不许再产第 4 版**（这条链不会自己烧下去）
+      // ⑥ 停下来之后**不许再产第 4 版**（这条链不会自己烧下去）
       //
       // ⚠️ 判据用"**有没有按 v3 改出来的下一版**"（关系），不用"小屋总数"：
       //    `workRoot` 是整份文件共用的，别的用例的链随时在开新小屋（第一版数总数 ⇒ 全量跑时
@@ -2346,6 +2393,7 @@ describe('§10.7 自动再审：改版来的新草稿跑完自动接一轮审核
       fakeBackend.draftReviewVerdict = null
       fakeBackend.minimalEditOnRevise = false
       await restoreRounds()
+      delete process.env['AGENTDECK_CRYSTALLIZE_AUTO_REVIEW']
     }
   })
 })
