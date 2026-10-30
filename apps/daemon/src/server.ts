@@ -120,6 +120,7 @@ import {
   findBuiltinAgent,
 } from './builtin-drafter.ts'
 import {
+  appendMaterial,
   collectMaterial,
   draftDirName,
   draftRoot,
@@ -6726,6 +6727,80 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     }
     if (req.method === 'GET' && path === '/api/crystallize/sources') {
       sendJson(res, 200, { items: await listCrystallizeSources(store, workspaceId) })
+      return
+    }
+    /**
+     * ★ 分批第 130 批（§12.14 / U3d 第二半）：**追加材料**——把使用者给的一段文本落进
+     * `material/appended/`，并登记进索引页 `00-README.md`。
+     *
+     * 为什么要有写接口：在这之前输入条里的「追加材料：…」只能如实说"没有写接口"（§12.41
+     * 的不放假接口原则）。素材是起草者唯一的依据，"随时可补材料"是这个页面最基本的动作之一。
+     *
+     * 校验为什么是这几条（每一条都对应一次会**静默**出错的情形）：
+     *   · 必须是**起草 run**（`not_a_draft`）：拿普通 run 的 id 进来，素材会写进一个没有
+     *     起草者的目录，之后没人读、也没人删；
+     *   · 必须**跑完**（`draft_not_completed`）：起草者开工时读的素材已经定了，跑着的时候
+     *     追加，只会让"它读到的"和"磁盘上的"不是一份（与 `save-draft` 同一条纪律）；
+     *   · 已入库（`already_crystallized`）不给追加：那一版已经落进技能库，材料再变只会在
+     *     以后的"重新沉淀"里造成"当时依据的素材现在多了什么"的错觉；
+     *   · 空文本（`material_empty`）、超大（`material_too_large`，上限 100 KiB，与界面
+     *     单个文件的读取封顶一致）：这两类都是"写进去也读不出来"，不如当场拒绝；
+     *   · 名字不合法 ⇒ **不报错**，退回自动命名（`appended-N.md`）——名字是糖，不是契约。
+     *
+     * 落点见 `crystallize-material.ts` 的 `appendMaterial` 注释（文件 / 索引页 / 下一版天然带上）。
+     */
+    if (req.method === 'POST' && path === '/api/crystallize/material') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; name?: unknown; text?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const text = typeof raw?.text === 'string' ? raw.text : ''
+      const name = typeof raw?.name === 'string' ? raw.name : ''
+      const draft = await store.getRun(draftRunId as RunId)
+      if (!draft || draft.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (draft.subject.type !== 'skill-draft') {
+        sendJson(res, 400, {
+          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可追加的素材`,
+          code: 'not_a_draft',
+        })
+        return
+      }
+      if (draft.crystallized === true) {
+        sendJson(res, 409, {
+          error: '这条草稿已经入库了——材料再变只会在以后的「重新沉淀」里造成误会',
+          code: 'already_crystallized',
+        })
+        return
+      }
+      if (draft.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，先别追加材料（这一版读到的素材已经定了；跑完再追加）',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      if (text.trim() === '') {
+        sendJson(res, 400, { error: '追加的材料是空的', code: 'material_empty' })
+        return
+      }
+      const bytes = Buffer.byteLength(text, 'utf8')
+      const MATERIAL_MAX_BYTES = 100 * 1024
+      if (bytes > MATERIAL_MAX_BYTES) {
+        sendJson(res, 400, {
+          error: `这份材料太大（${bytes} 字节，上限 ${MATERIAL_MAX_BYTES}）——请拆成几份追加`,
+          code: 'material_too_large',
+        })
+        return
+      }
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
+      const appended = await appendMaterial(materialDir, { name, text })
+      info(`追加材料（草稿 ${draftRunId.slice(-8)}）：${appended.relPath}（${appended.bytes} 字节）`)
+      sendJson(res, 200, appended)
       return
     }
     /**

@@ -356,6 +356,101 @@ export async function listMaterialFiles(
   return out
 }
 
+/**
+ * ★ 分批第 130 批（§12.14 材料 / U3d 第二半）：使用者**追加材料**——把一段文本落进 `material/`。
+ *
+ * 为什么这不是"界面上多一个框"：素材是起草者**唯一**的依据，而 `material/` 里每个文件都是
+ * 平台在起草前一次性写好的（`writeMaterial`）。追加材料如果没有**写接口**，输入条里那句
+ * 「追加材料：…」就只能如实说"没有落点"（§12.41 的不放假接口原则）。这一批把落点补上。
+ *
+ * 落点有三处，少一处就是"写了但没人读"：
+ *   ① 文件本身 → `material/appended/<名字>.md`。单独一档：一眼能看出哪些是自动带的、
+ *      哪些是人加的（界面的「素材」清单按相对路径排，`appended/` 会聚在一起）；
+ *   ② **索引页** `00-README.md` → 追加一段。起草者第一个读的就是它（"先读这一页，再决定
+ *      要读哪些文件"）——不登记等于让这份材料永远躺在磁盘上没人翻；
+ *   ③ 下一版草稿：`startReviseRun` 在原地改、`material/` 是**任务级**的 ⇒ 追加的内容天然
+ *      进入下一版的素材（"一个任务一个目录"带来的便宜，不需要复制或额外登记）。
+ *
+ * ⚠️ 名字只当**文件名**用：永远拼在 `material/appended/` 下面，`../` 与绝对路径在
+ *    `safeMaterialName` 里被剥掉。不能靠"界面上不会有人这么传"来省校验——API 是公开的。
+ */
+export interface AppendedMaterial {
+  /** 相对 `material/` 的路径，形如 `appended/我的复盘.md`。 */
+  relPath: string
+  /** 正文的字节数（不含平台补的那几行头）。 */
+  bytes: number
+}
+
+/** 追加材料落在这个子目录（与自动带的 `turns/`、`task-run.md` 分开，便于分辨来源）。 */
+export const APPENDED_MATERIAL_DIR = 'appended'
+
+/** 使用者给的名字 → 安全文件名（只看最后一段；不安全字符折成 `-`；默认 `.md`）。 */
+export function safeMaterialName(raw: string | undefined): string {
+  const last = (raw ?? '').trim().split(/[\\/]/).pop() ?? ''
+  const base = last
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^[-.]+/, '')
+    .slice(0, 60)
+  if (base === '') return ''
+  return /\.[a-z0-9]{1,8}$/i.test(base) ? base : `${base}.md`
+}
+
+/**
+ * 同一目录里**不重名**：`x.md` → `x-2.md` → `x-3.md`…
+ *
+ * 为什么不能直接覆盖：同名追加会**静默**丢掉前一份材料——而两份都可能是使用者特意给的。
+ * 改名虽然丑一点，但"看得见的第二份"远好过"看不见的丢失"。
+ */
+function nameWithoutClash(existing: ReadonlySet<string>, asked: string): string {
+  if (asked === '') {
+    let i = 1
+    while (existing.has(`appended-${i}.md`)) i += 1
+    return `appended-${i}.md`
+  }
+  const dot = asked.lastIndexOf('.')
+  const stem = dot === -1 ? asked : asked.slice(0, dot)
+  const ext = dot === -1 ? '' : asked.slice(dot)
+  let name = asked
+  for (let i = 2; existing.has(name); i += 1) name = `${stem}-${i}${ext}`
+  return name
+}
+
+/** 索引页追加一段"使用者后来追加的材料"（起草者读的第一个文件）。 */
+async function noteAppendedInIndex(
+  materialDir: string,
+  relPath: string,
+  bytes: number,
+  at: string,
+): Promise<void> {
+  const indexPath = join(materialDir, '00-README.md')
+  const index = await readFile(indexPath, 'utf8').catch(() => '')
+  const note =
+    `## 使用者后来追加的材料（${at}）\n\n` +
+    `- \`${relPath}\`（${bytes} 字节）——使用者明确要求把它当成素材；` +
+    '**和上面自动带上的素材同等有效**。\n' +
+    '  它可能补充或推翻前面某一条做法，动手前先读一遍。\n'
+  await writeFile(indexPath, `${index.trimEnd()}\n\n${note}`, 'utf8')
+}
+
+export async function appendMaterial(
+  materialDir: string,
+  input: { name?: string; text: string; now?: Date },
+): Promise<AppendedMaterial> {
+  const dir = join(materialDir, APPENDED_MATERIAL_DIR)
+  await mkdir(dir, { recursive: true })
+  const existing = new Set(await readdir(dir).catch(() => [] as string[]))
+  const name = nameWithoutClash(existing, safeMaterialName(input.name))
+  const at = (input.now ?? new Date()).toISOString()
+  // 头几行写清"这是谁加的、什么时候"：起草者与人都要能一眼分辨它不是自动素材
+  const header =
+    `# 使用者追加的材料\n\n（${at} 由使用者在审阅界面追加；下面正文原样保留。）\n\n`
+  await writeFile(join(dir, name), `${header}${input.text}`, 'utf8')
+  const relPath = `${APPENDED_MATERIAL_DIR}/${name}`
+  const bytes = Buffer.byteLength(input.text, 'utf8')
+  await noteAppendedInIndex(materialDir, relPath, bytes, at)
+  return { relPath, bytes }
+}
+
 /** 任务标题 / 对话标题（界面与索引都要）。 */
 export async function sourceLabelOf(store: Store, run: Run): Promise<string> {
   if (run.subject.type === 'conversation') {

@@ -2463,6 +2463,157 @@ describe('§10.10 评审下线：改版草稿不再自动接审核（手动入�
 })
 
 /**
+ * §10.11 追加材料：daemon 写接口 + 校验（分批第 130 批，§12.14 / U3d 第二半）。
+ *
+ * 在这之前输入条里的「追加材料：…」只能如实说"没有写接口"（§12.41 的不放假接口原则）。
+ * 这一批给它真正的落点：`POST /api/crystallize/material` 把文本写进 `material/appended/`，
+ * 并**登记进索引页** `00-README.md`——起草者第一个读的就是索引页，不登记等于这份材料
+ * 永远躺在磁盘上没人翻（"写了但没人读"正是本仓库最防的半截功能）。
+ *
+ * 三条用例的分工：
+ *   ① 正常路径 + 落点三处（文件 / 索引页 / 下一版草稿仍然带着它）；
+ *   ② 名字：同名不覆盖、路径穿越被剥掉（API 是公开的，不能靠"界面不会这么传"）；
+ *   ③ 校验：空文本 / 超限 / 非草稿 / 不存在 / 没跑完 / 已入库——每一条都如实拒绝。
+ */
+describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批）', () => {
+  /** 起一条可审阅的草稿（走"审过的源 run"这条正常路）。 */
+  async function newDraft(purpose: string): Promise<string> {
+    return draftAndWait({
+      runId: await runReviewed(`审完的流程（${purpose}）`),
+      target: { kind: 'new', purpose },
+    })
+  }
+
+  const append = async (
+    body: Record<string, unknown>,
+  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const res = await fetch(`${daemon.url}/api/crystallize/material`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  }
+
+  const materialOf = async (
+    draftRunId: string,
+  ): Promise<Array<{ relPath: string; text: string }>> =>
+    (await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${draftRunId}`,
+    )).items
+
+  test('★★ 追加一段文本 ⇒ 落进 appended/ + 登记进 00-README + 下一版草稿读得到', async () => {
+    const draftRunId = await newDraft('追加材料')
+    const text = '# 上周的复盘\n\n- 先看日志再动手\n- 结论必须带证据\n'
+    const r = await append({ draftRunId, text, name: '复盘' })
+    assert.equal(r.status, 200, JSON.stringify(r.body))
+    assert.equal(r.body.relPath, 'appended/复盘.md')
+    assert.equal(r.body.bytes, Buffer.byteLength(text, 'utf8'))
+
+    const items = await materialOf(draftRunId)
+    const piece = items.find((i) => i.relPath === 'appended/复盘.md')
+    assert.ok(piece, 'GET material 里要能看到这份追加的材料')
+    assert.ok(piece!.text.includes('先看日志再动手'), '追加的正文原样在文件里')
+
+    // ★ 落点 ②：索引页登记（起草者的入口）。没有这一条，这份材料就只是一份没人读的文件。
+    const index = items.find((i) => i.relPath === '00-README.md')
+    assert.ok(index, '索引页要在')
+    assert.match(index!.text, /appended\/复盘\.md/)
+    assert.match(index!.text, /使用者后来追加的材料/)
+
+    // ★ 落点 ③：下一版草稿仍然带着它（素材是任务级的，返工在原地改）
+    const revised = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, feedback: '把第一步写清从哪个目录跑' }),
+    })
+    assert.equal(revised.status, 202, await revised.clone().text())
+    const v2 = await waitRevisedFrom(draftRunId)
+    const itemsV2 = await materialOf(v2)
+    assert.ok(
+      itemsV2.some((i) => i.relPath === 'appended/复盘.md'),
+      '下一版草稿的素材里必须仍然有追加的那份（否则"追加"只对旧版有效）',
+    )
+  })
+
+  test('★★ 同名不覆盖、名字里的路径被剥掉（API 公开，不能靠"界面不会这么传"）', async () => {
+    const draftRunId = await newDraft('追加材料去重')
+    const first = await append({ draftRunId, text: '第一份', name: '同名' })
+    const second = await append({ draftRunId, text: '第二份', name: '同名' })
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(second.status, 200, JSON.stringify(second.body))
+    assert.equal(first.body.relPath, 'appended/同名.md')
+    assert.notEqual(second.body.relPath, first.body.relPath, '同名不许覆盖（覆盖会静默丢一份材料）')
+
+    const evil = await append({ draftRunId, text: '穿越', name: '../../../evil.md' })
+    assert.equal(evil.status, 200, JSON.stringify(evil.body))
+    assert.equal(evil.body.relPath, 'appended/evil.md', '路径被剥到只剩文件名')
+    const materialDir = join(workRoot, `skill-draft-${draftRunId}`, 'material')
+    assert.equal(
+      await readFile(join(materialDir, 'evil.md'), 'utf8').catch(() => null),
+      null,
+      '路径穿越不许写到 material/ 根上',
+    )
+  })
+
+  test('★★ 校验：空文本 / 超限 / 非草稿 / 不存在 / 没跑完 / 已入库 各自如实拒绝', async () => {
+    const draftRunId = await newDraft('追加材料校验')
+
+    const empty = await append({ draftRunId, text: '   \n' })
+    assert.equal(empty.status, 400, JSON.stringify(empty.body))
+    assert.equal(empty.body.code, 'material_empty')
+
+    const big = await append({ draftRunId, text: 'x'.repeat(100 * 1024 + 1) })
+    assert.equal(big.status, 400, JSON.stringify(big.body))
+    assert.equal(big.body.code, 'material_too_large')
+
+    const missing = await append({ draftRunId: ulid(), text: 'hi' })
+    assert.equal(missing.status, 404, JSON.stringify(missing.body))
+    assert.equal(missing.body.code, 'draft_run_not_found')
+
+    const sourceRunId = await runOnce('不是草稿的 run（追加材料）')
+    const notDraft = await append({ draftRunId: sourceRunId, text: 'hi' })
+    assert.equal(notDraft.status, 400, JSON.stringify(notDraft.body))
+    assert.equal(notDraft.body.code, 'not_a_draft')
+
+    // ★ 起草没跑完 ⇒ 409：起草者开工时读的素材已经定了，跑着的时候追加只会让
+    //   "它读到的"和"磁盘上的"不是一份。用 `draftGate` 把它卡在跑完之前（不是抢时序）。
+    let release!: () => void
+    fakeBackend.draftGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: await runReviewed('审过的流程（起草中追加材料）'),
+          target: { kind: 'new', purpose: '起草中追加材料' },
+        }),
+      })
+      const draftText = await res.text()
+      assert.equal(res.status, 202, draftText)
+      const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
+      const tooEarly = await append({ draftRunId: runningDraftId, text: 'hi' })
+      assert.equal(tooEarly.status, 409, JSON.stringify(tooEarly.body))
+      assert.equal(tooEarly.body.code, 'draft_not_completed')
+    } finally {
+      fakeBackend.draftGate = null
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    // 已入库 ⇒ 409：那一版已经落进技能库，材料再变只会在以后的「重新沉淀」里造成误会
+    const doneDraft = await daemon.store.getRun(draftRunId as RunId)
+    assert.ok(doneDraft, '草稿得在')
+    await daemon.store.insertRun({ ...doneDraft!, crystallized: true })
+    const afterCommit = await append({ draftRunId, text: '入库之后还想补' })
+    assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
+    assert.equal(afterCommit.body.code, 'already_crystallized')
+  })
+})
+
+/**
  * §10.6 人改草稿（2026-10-21 分批第 8 批）。
  *
  * 使用者原话：「缺少一个可以改的地方」。编辑器一直都在（草稿 tab 每个文本文件都能改），
