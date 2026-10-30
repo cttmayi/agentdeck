@@ -299,9 +299,14 @@
    * 意图路由**规则优先、不让模型猜**（§12.12）：能对上一条已有动作的，就直接走那条动作；
    * 对不上的**不假装懂**——回一条"我把它当成补充，但目前没有落点"。每句话都留一行回执，
    * 使用者才知道平台怎么理解的。
+   *
+   * ★ 分批第 130 批：「追加材料」也有落点了（`POST /api/crystallize/material`）——它不再是
+   * "如实说没有写接口"，而是真的把正文写进这一条草稿的素材、登记进索引、右栏立刻看得见。
    */
   let composerText = ''
   let composerReceipt = ''
+  /** 「追加材料」正在写（防连点：它会写盘 + 让右栏重读素材）。 */
+  let appendingMaterial = false
   /**
    * ★ 分批第 19 批：「过程」那一格里的**子 tab**。
    *
@@ -1304,7 +1309,7 @@
    * 把栏脚那句话路由到一个**已有动作**上。
    *
    * · 「这里不对：…」/「再炼一版 …」⇒ 复用「按意见改一版」（`reviseDraft`，走 /api/crystallize/revise）
-   * · 「追加材料」⇒ 现在**没有写接口**，如实回执，不假装受理
+   * · 「追加材料：…」⇒ 写进这一条草稿的素材（`POST /api/crystallize/material`，见 `appendMaterialText`）
    * · 「回到 vN」⇒ 版本回滚在技能页（这里只说明去哪）
    * · 其余 ⇒ 当成"补充"，同样如实说没有落点
    */
@@ -1325,14 +1330,56 @@
       return
     }
     if (says(/^追加材料/)) {
-      composerReceipt = '追加材料还没有写接口（daemon 目前只读），这条先不受理——加完再来一次。'
+      // 正文 = 前缀之后的部分（「追加材料：…」/「追加材料 …」都认）。
+      // ⚠️ 前缀后面什么都不写**不猜**：材料是"要落进素材的正文"，猜成一句空话就是
+      //    往素材里塞垃圾（起草者会把它当依据读）。空 ⇒ 回执教怎么说，不写盘。
+      const rest = text.replace(/^追加材料[：:\s]*/, '').trim()
+      if (rest === '') {
+        composerReceipt =
+          '追加材料：在「追加材料」后面写要追加进素材的正文，比如「追加材料：上周复盘的结论是…」。'
+        return
+      }
+      if (draftRunId === '' || step === 'target') {
+        composerReceipt = '还没有草稿——追加的材料要落进这一条草稿的素材里，先答完问题、点「开始提炼」。'
+        return
+      }
+      void appendMaterialText(rest)
       return
     }
     if (says(/^回到\s*v\d+/)) {
       composerReceipt = '版本回滚在「技能」页的历史里（这里只改草稿，不切版本）。'
       return
     }
-    composerReceipt = '我把它当成"补充"，但目前没有落点——能落地的只有「这里不对：…」「再炼一版」。'
+    composerReceipt = '我把它当成"补充"，但目前没有落点——能落地的只有「这里不对：…」「再炼一版」「追加材料：…」。'
+  }
+
+  /**
+   * 把一段正文追加进**这条草稿**的素材（daemon 侧校验，见 `POST /api/crystallize/material`）。
+   *
+   * 为什么成功之后必须重读素材：右栏的「素材」清单是"它现在手上有什么"的**唯一**显示，
+   * 不刷新的话使用者看到的是"追加了但看不见"——那和"没有落点"在体感上一模一样。
+   * 而且清单是**同一份数据现算**（§12.14）：对话里那句摘要与右栏必须同源，不能只在
+   * 本地拼一行。
+   */
+  async function appendMaterialText(body: string): Promise<void> {
+    if (appendingMaterial) return
+    appendingMaterial = true
+    try {
+      const res = await api<{ relPath: string; bytes: number }>('/api/crystallize/material', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId, text: body }),
+      })
+      composerText = ''
+      await loadMaterial()
+      // 选中刚追加的那一份：人点「追加材料」之后最想看的就是它（预览跟手上动作对上）
+      materialPick = res.relPath
+      composerReceipt = `已追加为素材 ${res.relPath}（${res.bytes} 字节）：登记进了素材索引、右栏能看到，下一版起草会读它。`
+    } catch (err) {
+      composerReceipt = `追加材料没成功：${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      appendingMaterial = false
+    }
   }
 
   async function reviseDraft(): Promise<void> {
@@ -2628,7 +2675,10 @@
         </button>
       </form>
       {#if composerReceipt !== ''}
-        <!-- 回执：平台怎么理解这句话，使用者要看得见（不是 toast，会随页面消失） -->
+        <!-- 回执：平台怎么理解这句话，使用者要看得见（不是 toast，会随页面消失）。
+             ⚠️ 它是栏脚的**第二块**（不包一层 div）：组件里 §12.22 的教训——多包一层会打断
+             高度链、过程格缩 100px。所以探针的"栏脚高"要把这两块一起算（见 probe.html 的
+             `crystal.composerH` 那条注释）。 -->
         <p class="faint small composer-receipt">{composerReceipt}</p>
       {/if}
     </div>

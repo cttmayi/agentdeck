@@ -3254,10 +3254,12 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.procFinalGap',
     label: '★★ 草稿过程那一格同样贴着内容盒底（差 ≤ 1% 视口高）',
+    // ★ 分批第 131 批：参照物从"输入条高"换成"栏脚整块高"（输入条 + 回执 + 两个 margin，
+    //   见 probe.html 里 `crystal.footH` 的注释）。回执是 §12.41 定下的常驻 UI，不是缺陷。
     ok: (v, f) =>
       typeof v === 'number' &&
       v >= 0 &&
-      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
+      v - Number(f['crystal.footH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
     show: (v) => `差 ${v}px`,
   },
   {
@@ -3861,6 +3863,20 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.appendMaterial',
+    label:
+      '★★★ 输入条里的「追加材料：…」真的写进素材（`POST /api/crystallize/material`）：回执说"已追加为素材"、' +
+      '服务端有一份 `appended/`、正文带着我打进去的标记——三条同时成立才算接上（§12.14）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.receiptOk === true &&
+      Number(v.serverCount) >= 1 &&
+      v.hasMarker === true,
+    show: (v) => (v === null ? 'null' : `${v.receiptOk}　服务端 ${v.serverCount} 份　标记 ${v.hasMarker}`),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.reviewInArtifactMsg',
     label:
       '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',
@@ -4219,9 +4235,10 @@ const CHECKS = [
       '★★★ 主区底边**贴着视口底**（差 ≤ 1% 视口高）——「沉淀页要自适应高度」：改之前格子按 `58vh` 估，窗口一高就留白（1600 高时差 277px）、窗口一矮就整页滚',
     // 两档都算过：① 填满了（差 0±1%视口高）；② 窗口太矮、`.pane-body` 真在滚（主区压到 22rem 保底，
     // 底边被推到视口外是对的——不这么留后手，判据会把"窗口太小时的合理退化"判成缺陷）
+    // ★ 分批第 131 批：同上，减的是栏脚整块高（`crystal.footH`），不是只有输入条。
     ok: (v, f) =>
       typeof v === 'number' &&
-      ((v >= 0 && v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01))) ||
+      ((v >= 0 && v - Number(f['crystal.footH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01))) ||
         (v < 0 && f['crystal.paneBodyScrollable'] === true)),
     show: (v, f) =>
       `差 ${v}px（视口 ${f['crystal.viewportH']}${f['crystal.paneBodyScrollable'] ? '，主区在滚' : ''}）`,

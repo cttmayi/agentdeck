@@ -4640,6 +4640,44 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const send = [...d().querySelectorAll('.crystal-composer button')].find((b) => text(b) === '发送')
             return input.disabled === false && !!send
           })()
+          /**
+           * ★ 分批第 130 批（§12.14 / U3d 第二半）：「追加材料：…」真的接上了写接口。
+           *
+           * 三条一起量（少一条就会放过"半截功能"）：
+           *   ① 回执照实说"已追加为素材 xxx"（不是从前那句"没有写接口"）；
+           *   ② 服务端 `GET /api/crystallize/material` 里真的有 `appended/` 那一份；
+           *   ③ 那份的正文里**有我打进去的标记**（写进去的是这句话，不是一句空壳）。
+           * 只在这条夹具草稿上做（它已 completed；真跑起来的起草在别的夹具上，别抢）。
+           *
+           * ⚠️ 派发 `input` 而不是只改 value：`bind:value` 靠它才把状态写回组件。
+           */
+          facts['crystal.appendMaterial'] = await (async () => {
+            const input = d().querySelector('.crystal-composer-input')
+            const form = input ? input.closest('form') : null
+            if (!input || !form) return null
+            const marker = '探针追加的复审结论：先看日志再动手'
+            input.value = `追加材料：${marker}`
+            input.dispatchEvent(new Event('input', { bubbles: true }))
+            await wait(30)
+            if (typeof form.requestSubmit === 'function') form.requestSubmit()
+            else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+            const gotReceipt = await until(
+              () => (d().querySelector('.composer-receipt')?.textContent ?? '').includes('已追加为素材'),
+              100,
+            )
+            const receipt = d().querySelector('.composer-receipt')?.textContent ?? ''
+            const items = await f.contentWindow
+              .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+            const appended = (items?.items ?? []).filter((i) => i.relPath.startsWith('appended/'))
+            return {
+              receiptOk: gotReceipt,
+              receipt: receipt.slice(0, 80),
+              serverCount: appended.length,
+              hasMarker: appended.some((i) => i.text.includes(marker)),
+            }
+          })()
           // U3c-2 第 4 步：把 B 类判据要的新语义先量出来（编辑器在产物消息里），
           // 旧判据不动——先有事实，再改断言（这一轮的惯性做法）。
           facts['crystal.editorInArtifactMsg'] = (() => {
@@ -4782,6 +4820,30 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                     cyPaneBodyPadBottom -
                     (cyPaneRect.y + cyPaneRect.h),
                 )
+          /**
+           * ★ 分批第 131 批：栏脚从"只有输入条"变成"输入条 + 回执"（`追加材料` 等动作会在栏脚
+           * 留一行回执，§12.41）。判据"格子底边贴着内容盒底"的参照物原来只减输入条高
+           * （`crystal.composerH`），回执一出现就差 100px——**2026-10-31 在同一屏分三层量**：
+           *
+           *   composerH 49（form 的 border-box 高）+ receiptH 38（回执那一行）
+           *   + form.marginTop 8 + receipt.marginTop 4 = 99 ≈ 实测底边差 100（差 1px 是取整）
+           *
+           * 所以这里量的是**栏脚整块吃掉的高度**（含两个 margin），与 gap 同一次测量、同一屏。
+           * ⚠️ 不要为了量它去把两块包进一个新 div：组件里 §12.22 的教训就是"多包一层打断
+           *    高度链、过程格缩 100px"（这一批先踩了一次，探针当场红两条）。
+           */
+          facts['crystal.footH'] = (() => {
+            const composer = d().querySelector('.crystal-composer')
+            if (!composer) return 0
+            const receipt = d().querySelector('.composer-receipt')
+            const cRect = composer.getBoundingClientRect()
+            const mt = parseFloat(cs(composer).marginTop || '0')
+            const top = cRect.top - (Number.isFinite(mt) ? mt : 0)
+            if (!receipt) return Math.round(cRect.bottom - top)
+            const rRect = receipt.getBoundingClientRect()
+            const rmb = parseFloat(cs(receipt).marginBottom || '0')
+            return Math.round(rRect.bottom + (Number.isFinite(rmb) ? rmb : 0) - top)
+          })()
           facts['crystal.paneTreeBodySideBySide'] =
             cyTreeRect !== null &&
             cyBodyRect !== null &&
@@ -5272,6 +5334,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              * ★ 分批第 106 批（U3a）：中间栏多了**栏脚输入条**，所以"格子填满到哪儿"的参照线
              * 从内容盒底上移了一个栏脚高度。这里只**量出**栏脚高（一条事实），
              * 由判据那头自己减——不去改那几处 gap 计算（上一版改测量代码，一次 188 红、一次 185 红）。
+             *
+             * ★ 分批第 131 批：栏脚从"只有输入条"变成"输入条 + 回执"（`追加材料` 等动作会在
+             * 栏脚留一行回执，§12.41）。**不能把两块包进一个新 div 再量**——组件里 §12.22
+             * 的教训就是"多包一层打断高度链、过程格缩 100px"（这一批先踩了一次，探针当场红
+             * 两条）。所以改成两块**分别量**，判据那头**加**起来减：
+             *   · composerH  = 输入条（form）高
+             *   · composerReceiptH = 回执那一行（含 margin-top），没有回执时为 0
+             * 三层一起量（form / 回执 / footH=detail-pane 底 − pane-body 底）是为了下次
+             * 判据说"没量到"时能直接看出是哪一层的账对不上，而不是再猜 markup。
              */
             facts['crystal.composerH'] = (() => {
               const composer = d().querySelector('.crystal-composer')
@@ -5284,10 +5355,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               const chat = d().querySelector('.crystal-chat')
               const composer = d().querySelector('.crystal-composer')
               if (!chat || !composer) return null
-              const isLast = chat.lastElementChild === composer
+              // 回执出现时它是 chat 的最后一个孩子（栏脚变成两块），两种都算"在栏脚"
+              const last = chat.lastElementChild
+              const isFoot =
+                last === composer || (last?.classList?.contains('composer-receipt') ?? false)
               const chatRect = chat.getBoundingClientRect()
-              const cRect = composer.getBoundingClientRect()
-              return isLast && Math.abs(chatRect.bottom - cRect.bottom) <= 2
+              const cRect = (last ?? composer).getBoundingClientRect()
+              return isFoot && Math.abs(chatRect.bottom - cRect.bottom) <= 2
             })()
 
             const cyProbePane = async (name, paneSel) => {
