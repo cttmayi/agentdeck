@@ -418,6 +418,68 @@ function startDraft(session) {
   });
 }
 
+
+/** 版本列表：把某一版标记成“当前”，其余变可回滚。 */
+function setCurrentVersion(session, v) {
+  for (const item of session.artifact.versions) item.now = item.v === v
+}
+
+/**
+ * 「续」的四个动作。共同点：**都是普通消息**（人一句 + 平台回执/结果一条），
+ * 状态改动落在右栏。没有专门的界面控件，所以以后加新动作也不用改 UI 结构。
+ */
+function actRework(reason) {
+  const s = active;
+  s.messages.push({ role: 'user', text: reason ?? '再炼一版' });
+  s.messages.push({ role: 'system', text: '起草完成 · 1:05 · 只补了缺的那一项（没从头重写）' });
+  s.artifact.checks = s.artifact.checks.map((c) =>
+    c.ok ? c : { ...c, ok: true, text: '## Verification 里 `--seeds` 写了取值范围（1–8）' });
+  const nextV = `v${s.artifact.versions.length + 1}`;
+  s.artifact.versions.unshift({ v: nextV, note: '再炼：补 Verification 的 --seeds 说明', now: true });
+  setCurrentVersion(s, nextV);
+  const ok = s.artifact.checks.filter((c) => c.ok).length;
+  s.messages.push({
+    role: 'assistant',
+    text: `**这一版改了什么**\n- Verification 补了 \`--seeds\` 的取值上限（1–8）\n- 其余 12 节未动\n\n体检现在 **${ok} 过 0 缺**，入库就是 ${nextV}。`,
+  });
+  s.version = Number(nextV.slice(1));
+  renderMain();
+}
+
+function actAddMaterial(text) {
+  const s = active;
+  const name = (text || '').replace(/^追加材料[:：]?\s*/, '') || 'notes-追加.txt';
+  s.messages.push({ role: 'user', text: text || '追加材料' });
+  s.materials.push({ name, src: '外部', size: '1.2 千字' });
+  s.messages.push({
+    role: 'system',
+    text: `材料 +1（现在是 ${s.materials.length} 项）· 右边清单已更新 · 要重炼才进产物`,
+  });
+  renderMain();
+}
+
+function actCorrect(text) {
+  const s = active;
+  s.messages.push({ role: 'user', text });
+  // 定性纠错只改目标那一节：这里把 Procedure 第 3 步替换掉，其余字节不动
+  const sk = s.artifact.files.find((f) => f.path === 'SKILL.md');
+  if (sk) {
+    sk.body = sk.body.replace('3. 无头 Chrome 渲染并读页面状态', '3. `pnpm exec node scripts/verify.mjs` 渲染并读页面状态');
+  }
+  s.messages.push({ role: 'system', text: '定点纠错：只改 Procedure 第 3 步（−1 +1 行），其余 12 节字节未变' });
+  s.messages.push({ role: 'assistant', text: '改好了。右侧 SKILL.md 里能看到第 3 步；要看差异就点「差异 vs 上一版」。' });
+  renderMain();
+}
+
+function actRollback(v) {
+  const s = active;
+  if (!s.artifact.versions.some((x) => x.v === v)) return;
+  s.messages.push({ role: 'user', text: `回到 ${v}` });
+  setCurrentVersion(s, v);
+  s.messages.push({ role: 'system', text: `已回到 ${v}（更新的版本留在历史里，随时可以再回去）` });
+  renderMain();
+}
+
 function renderRail() {
   const groups = [
     { title: '进行中', test: (x) => x.state !== 'shipped' },
@@ -490,9 +552,14 @@ function renderPane() {
     <div class="preview"><pre>${esc(current?.body ?? '')}</pre></div>
     <div class="sec-title">体检 ${ok} 过 ${bad} 缺</div>
     <div class="check">${a.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('')}</div>
-    ${a.versions.length ? `<div class="sec-title">版本</div><div class="versions">${a.versions.map((v) => `<div class="item"><span class="mono">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : '<button class="ghost" type="button">回滚</button>'}</div>`).join('')}</div>` : ''}
-    <div class="sec-title">动作</div>
-    <div class="choices"><button class="ghost" type="button">${active.state === 'shipped' ? '再炼一版' : '入库'}</button><button class="ghost" type="button">追加材料</button><button class="ghost" type="button">定点纠错</button></div>`;
+    ${a.versions.length ? `<div class="sec-title">版本</div><div class="versions">${a.versions.map((v) => `<div class="item"><span class="mono">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : `<button class="ghost" type="button" data-rollback="${esc(v.v)}">回滚</button>`}</div>`).join('')}</div>` : ''}
+    <div class="sec-title">动作（都会在对话里留一句）</div>
+    <div class="choices">
+      <button class="ghost" type="button" data-act="rework">再炼一版</button>
+      <button class="ghost" type="button" data-act="add">追加材料</button>
+      <button class="ghost" type="button" data-act="correct">定点纠错</button>
+      <button class="ghost" type="button" data-act="ship">${active.state === 'shipped' ? '再炼一版' : '入库'}</button>
+    </div>`;
 }
 
 function renderMain() {
@@ -518,17 +585,29 @@ function route(text) {
  *    结果材料消息又贴一遍、状态一直是"提问中"（真 Chrome 量到的，见 commit 记录）。
  */
 function respond(text) {
+  // 1) 「续」的四种动作：说一句话就够，不需要先选模式
+  if (/^(这里不对|不对)/.test(text)) return actCorrect(text);
+  if (/^追加材料|^加材料/.test(text)) return actAddMaterial(text);
+  if (/^再炼/.test(text)) return actRework(text);
+  const back = text.match(/^回到\s*(v\d+)/);
+  if (back) return actRollback(back[1]);
+
+  // 2) 开始提炼
   if (text === '开始提炼') {
     if (active.state === 'brief') active.queue = [];   // 还在提问就直接开始 ⇒ 剩下的问题算跳过
     startDraft(active);
     renderMain();
     return;
   }
+
+  // 3) 还在提问 ⇒ 这句话是答案
   if (active.state === 'brief') {
     answerIntake(active, text);
     renderMain();
     return;
   }
+
+  // 4) 其余：当成补充，留一条回执（平台怎么理解的，使用者要看得见）
   active.messages.push({ role: 'user', text });
   active.messages.push({ role: 'system', text: route(text).receipt });
   renderMain();
@@ -555,6 +634,19 @@ el('pane-body').addEventListener('click', (e) => {
   if (e.target.closest('[data-mat-add]')) {
     active.materials.push({ name: 'notes-追加.txt', src: '外部', size: '1.2 千字' });
     renderMain();
+    return;
+  }
+  const rollback = e.target.closest('[data-rollback]');
+  if (rollback) {
+    actRollback(rollback.dataset.rollback);
+    return;
+  }
+  const act = e.target.closest('[data-act]');
+  if (act) {
+    const kind = act.dataset.act;
+    if (kind === 'rework' || kind === 'ship') actRework();
+    if (kind === 'add') actAddMaterial();
+    if (kind === 'correct') actCorrect('这里不对：Procedure 第 3 步应该用 pnpm');
     return;
   }
   const item = e.target.closest('[data-file]');
