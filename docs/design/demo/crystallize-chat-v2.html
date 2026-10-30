@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>沉淀页 demo v2 · 纯对话 + 产物栏（六卡已撤）</title>
+<style>
+  /* 令牌抄 packages/ui/src/styles/app.css */
+  :root {
+    --fs-xs: 0.75rem; --fs-sm: 0.8125rem; --fs-base: 0.875rem; --fs-md: 0.9375rem;
+    --fs-lg: 1.0625rem; --fs-xl: 1.375rem;
+    --lh-tight: 1.3; --lh-base: 1.6;
+    --radius-sm: 4px; --radius: 8px; --radius-lg: 12px;
+    --topbar-h: 3.25rem;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f2f4f7; --surface-hover: #e6e9ef;
+    --panel: #eceef2; --line: #e2e5ea; --line-strong: #c9cfd8;
+    --text: #1d232c; --text-dim: #5a6472; --text-faint: #8a93a2;
+    --accent: #2b6fd0; --good: #1f9d73; --bad: #d64545; --warn: #b7791f;
+    --status-active: #2b6fd0; --status-review: #7a5fd0; --status-done: #1f9d73; --status-todo: #8a93a2;
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #0f1115; --surface: #161920; --surface-2: #1c2029; --surface-hover: #222733;
+    --panel: #0b0d11; --line: #262b36; --line-strong: #333a49;
+    --text: #e6e9ef; --text-dim: #a2abbb; --text-faint: #6d7686;
+    --accent: #5aa9f5; --good: #4ec9a0; --bad: #f2716a; --warn: #e0b04a;
+    --status-active: #5aa9f5; --status-review: #b48ef0; --status-done: #4ec9a0; --status-todo: #6d7686;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: var(--font); font-size: var(--fs-base); line-height: var(--lh-base); color: var(--text); background: var(--bg); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .mono { font-family: var(--font-mono); font-size: var(--fs-sm); }
+
+  .app { display: grid; grid-template-columns: 15rem minmax(0, 1fr) 20rem; height: 100vh; }
+
+  /* 左栏：蒸馏台 = 会话列表（与聊天页同一个心智） */
+  .rail { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .rail-head { padding: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+  .rail-title { font-size: var(--fs-sm); color: var(--text-dim); font-weight: 600; flex: 1; }
+  .new-btn { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 0.25rem 0.5rem; font-size: var(--fs-xs); }
+  .new-btn:hover { background: var(--surface-hover); }
+  .rail-list { overflow: auto; padding: 0 0.5rem 0.75rem; }
+  .rail-group { font-size: var(--fs-xs); color: var(--text-faint); padding: 0.5rem 0.25rem 0.25rem; }
+  .row { width: 100%; text-align: left; border: 1px solid transparent; background: transparent; border-radius: var(--radius); padding: 0.5rem; margin-bottom: 0.25rem; display: block; }
+  .row:hover { background: var(--surface-hover); }
+  .row.on { background: var(--surface); border-color: var(--accent); }
+  .row-top { display: flex; align-items: center; gap: 0.375rem; }
+  .row-name { font-size: var(--fs-base); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { font-size: var(--fs-xs); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { font-size: 0.6875rem; padding: 0 0.375rem; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--text-dim); white-space: nowrap; }
+  .pill.skill { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .pill.agent { color: var(--status-review); border-color: color-mix(in srgb, var(--status-review) 40%, transparent); }
+
+  /* 主区 */
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .main-head { height: var(--topbar-h); display: flex; align-items: center; gap: 0.5rem; padding: 0 1rem; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .main-title { font-size: var(--fs-lg); font-weight: 600; }
+  .spacer { flex: 1; }
+  .state { font-size: var(--fs-xs); padding: 0.125rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; }
+  .state.drafting { color: var(--status-active); }
+  .state.reviewing { color: var(--status-review); }
+  .state.shipped { color: var(--status-done); }
+  .ghost { border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius); padding: 0.25rem 0.5rem; font-size: var(--fs-xs); }
+  .ghost:hover { background: var(--surface-hover); }
+  .demo-flag { font-size: var(--fs-xs); color: var(--text-faint); border: 1px dashed var(--line-strong); border-radius: 999px; padding: 0 0.5rem; }
+
+  /* 消息流：三种角色，一种形状。没有“卡片类型”这个概念。 */
+  .stream { flex: 1; overflow: auto; padding: 1rem 1.25rem 1.5rem; min-height: 0; }
+  .stream-inner { max-width: 44rem; margin: 0 auto; display: flex; flex-direction: column; gap: 0.625rem; }
+  .msg { max-width: 88%; font-size: var(--fs-base); }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg); padding: 0.5rem 0.75rem; }
+  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm); padding: 0.625rem 0.75rem; }
+  .msg.system { align-self: center; font-size: var(--fs-xs); color: var(--text-dim); background: var(--surface-2); border-radius: 999px; padding: 0.125rem 0.75rem; max-width: 100%; }
+  .msg p { margin: 0 0 0.375rem; }
+  .msg p:last-child { margin-bottom: 0; }
+  .msg ul { margin: 0.125rem 0 0.375rem; padding-left: 1.1rem; }
+  .msg .uncovered { color: var(--warn); }
+  .attach { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.5rem; }
+  .attach .item { font-size: var(--fs-xs); border: 1px solid var(--line-strong); border-radius: 999px; padding: 0 0.5rem; color: var(--text-dim); display: inline-flex; gap: 0.25rem; align-items: center; }
+  .attach .item .src { color: var(--text-faint); }
+  .choices { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-top: 0.5rem; }
+  .choices button { border: 1px solid var(--accent); color: var(--accent); background: transparent; border-radius: 999px; padding: 0.0625rem 0.5rem; font-size: var(--fs-xs); }
+  .choices button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .logbox { margin-top: 0.375rem; }
+  .logbox summary { font-size: var(--fs-xs); color: var(--text-faint); cursor: pointer; }
+  .log { font-family: var(--font-mono); font-size: var(--fs-xs); background: var(--panel); border-radius: var(--radius-sm); padding: 0.5rem; max-height: 10rem; overflow: auto; color: var(--text-dim); margin-top: 0.25rem; }
+
+  /* 右栏：产物（任何沉淀方法都是“文件 + 体检 + 版本”） */
+  .pane { background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .pane-head { height: var(--topbar-h); display: flex; align-items: center; gap: 0.5rem; padding: 0 0.75rem; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 600; }
+  .pane-body { overflow: auto; padding: 0.5rem 0.75rem 1rem; min-height: 0; }
+  .sec-title { font-size: var(--fs-xs); color: var(--text-faint); margin: 0.875rem 0 0.25rem; letter-spacing: 0.04em; }
+  .files { list-style: none; margin: 0; padding: 0; font-size: var(--fs-sm); }
+  .files li { padding: 0.25rem 0.375rem; border-radius: var(--radius-sm); cursor: pointer; display: flex; gap: 0.375rem; align-items: center; }
+  .files li:hover { background: var(--surface-hover); }
+  .files li.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+  .files .dir { color: var(--text-faint); }
+  .files .w { margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs); }
+  .check { display: flex; flex-direction: column; gap: 0.25rem; font-size: var(--fs-sm); }
+  .check .ok { color: var(--good); }
+  .check .bad { color: var(--bad); }
+  .versions .item { display: flex; gap: 0.5rem; align-items: center; font-size: var(--fs-sm); padding: 0.25rem 0; border-bottom: 1px dashed var(--line); }
+  .versions .item:last-child { border-bottom: 0; }
+  .versions .grow { flex: 1; color: var(--text-dim); }
+  .preview { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-top: 0.375rem; }
+  .preview pre { margin: 0; padding: 0.5rem; font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; color: var(--text-dim); max-height: 15rem; overflow: auto; }
+
+  /* 输入区 */
+  .composer { border-top: 1px solid var(--line); background: var(--surface); padding: 0.625rem 1.25rem 0.75rem; }
+  .composer-inner { max-width: 44rem; margin: 0 auto; }
+  .quick { display: flex; gap: 0.375rem; margin-bottom: 0.375rem; flex-wrap: wrap; }
+  .quick button { border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 999px; padding: 0.125rem 0.625rem; font-size: var(--fs-xs); color: var(--text-dim); }
+  .quick button:hover { border-color: var(--accent); color: var(--accent); }
+  .input-row { display: flex; gap: 0.5rem; }
+  .input-row input { flex: 1; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0.5rem 0.625rem; font: inherit; background: var(--surface); color: var(--text); }
+  .input-row input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); border-color: var(--accent); }
+  .send { background: var(--accent); color: #fff; border: 0; border-radius: var(--radius); padding: 0.5rem 0.875rem; font-size: var(--fs-sm); }
+
+  /* 窄屏：三列放不下 ⇒ 产物栏收成抽屉 */
+  .pane-toggle { display: none; }
+  @media (max-width: 1280px) {
+    .app { grid-template-columns: 13rem minmax(0, 1fr); }
+    .pane { position: fixed; top: 0; right: 0; bottom: 0; width: min(22rem, 84vw); transform: translateX(100%); transition: transform 0.18s ease; z-index: 20; box-shadow: -12px 0 32px rgba(16, 24, 40, 0.16); }
+    body.pane-open .pane { transform: translateX(0); }
+    .pane-toggle { display: inline-flex; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-head">
+      <span class="rail-title">沉淀</span>
+      <button class="new-btn" type="button">+ 新对话</button>
+    </div>
+    <div class="rail-list" id="rail"></div>
+  </aside>
+
+  <main class="main">
+    <div class="main-head">
+      <span class="main-title" id="title">—</span>
+      <span class="pill" id="target-pill">skill</span>
+      <span class="state" id="state">—</span>
+      <span class="spacer"></span>
+      <span class="demo-flag" title="静态 demo：选项、日志展开、右栏预览、窄屏抽屉、意图回执都是真交互，数据是假的">demo v2</span>
+      <button class="ghost pane-toggle" type="button" id="pane-toggle">产物</button>
+    </div>
+    <div class="stream">
+      <div class="stream-inner" id="stream"></div>
+    </div>
+    <div class="composer">
+      <div class="composer-inner">
+        <div class="quick">
+          <button type="button" data-quick="开始提炼">开始提炼</button>
+          <button type="button" data-quick="追加材料">追加材料</button>
+          <button type="button" data-quick="这里不对：">这里不对：…</button>
+        </div>
+        <form class="input-row" id="composer">
+          <input id="say" placeholder="跟这次沉淀说一句话…（试试：这里不对：第 3 步应该用 pnpm）" autocomplete="off" />
+          <button class="send" type="submit">发送</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <aside class="pane" id="pane">
+    <div class="pane-head">
+      <span>产物</span>
+      <span class="spacer"></span>
+      <button class="ghost" type="button" id="pane-close">收起</button>
+    </div>
+    <div class="pane-body" id="pane-body"></div>
+  </aside>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// 只有三种东西（任何沉淀方法都落在这里，界面不为某一种方法特殊化）：
+//   session  = { id, title, target, version, state, messages[], artifact }
+//   message  = { role: 'user' | 'assistant' | 'system', text, choices?, attachments?, log? }
+//   artifact = { files[{path,bytes,body}], checks[{ok,text}], versions[{v,note,now}] }
+// 提问 = 助手的 markdown + 一行选项；进度 = 一条带可展开日志的系统消息；
+// 结论 = 助手的普通 markdown；入库 = 一条系统消息 + 右栏的版本列表。
+// ─────────────────────────────────────────────────────────────
+const SESSIONS = [
+  {
+    id: 'build-verify-html',
+    title: 'build-verify-html',
+    target: 'skill',
+    version: 3,
+    state: 'shipped',
+    stateText: '已入库',
+    source: '来自「修复动画终态」· 12 轮 · 41 次工具调用',
+    messages: [
+      { role: 'system', text: '本次沉淀接在 run「修复动画终态」后面（12 轮 · 41 次工具调用）' },
+      {
+        role: 'assistant',
+        text: '这次要沉淀什么？可以直接点，也可以直接说。',
+        choices: ['从这次工作沉淀成技能', '从空白或材料起', '优化已有技能', '优化已有智能体指令'],
+      },
+      { role: 'user', text: '从这次工作沉淀成技能' },
+      {
+        role: 'assistant',
+        text: '好。还会问三件，**都能跳过**：\n- 作用描述：这个技能在什么情况下被用到\n- 语言\n- 要不要顺带提炼「风格」（persona）轨',
+      },
+      { role: 'user', text: '作用描述：生成 HTML 并在真浏览器里验证到可交付；语言中文；不要 persona 轨' },
+      {
+        role: 'assistant',
+        text: '收到。材料我按这次的轨迹自动带上，另外挂了你追加的一份。',
+        attachments: [
+          { name: 'task-run.md', src: '轨迹 · 8.1 千字' },
+          { name: 'turns/*.md', src: '轨迹 · 2.3 万字' },
+          { name: 'verdict.md', src: '判决 · 412 字' },
+          { name: 'scratch/pages/*.html', src: '产物 · 3 个' },
+          { name: 'cdp-cli README 片段', src: '你追加 · 620 字' },
+        ],
+        choices: ['开始提炼'],
+      },
+      { role: 'user', text: '开始提炼' },
+      {
+        role: 'system',
+        text: '起草中… 起草者（内置）',
+        log: [
+          '[00:03] 读 material/task-run.md',
+          '[00:11] 读 turns/*.md（41 条）',
+          '[00:38] 归纳 Procedure：5 步',
+          '[01:02] 写 skill/SKILL.md',
+          '[01:47] 写 scripts/verify.mjs、references/state-contract.md',
+          '[02:13] 完成：4 个文件',
+        ],
+      },
+      { role: 'system', text: '起草完成 · 2:13 · 41 次工具调用' },
+      {
+        role: 'assistant',
+        text: '**提炼结果（Work 轨）**\n- 负责的是「HTML 交付物要在真浏览器里证明可用」，不是「写页面」本身\n- 先定状态契约（params / phase / regenerate），验证脚本据此断言\n- 参数类效果必须扫描标定默认值，第一眼定稿会被换 seed 打脸\n- 交付前跑一次无头 Chrome，读页面状态而不是截图判断\n- 命令里的路径一律传绝对路径\n\n**没覆盖到的**（显式列出，不假装覆盖）\n- 无头浏览器在 CI 里跑不了的兜底\n- 页面超过 2000 行时的一致性检查\n\n要改哪一条，直接说「这里不对：…」。',
+      },
+      { role: 'system', text: '审核：通过（第 3 版）· 机械体检 4 过 1 缺 · 自动返工 1 轮后用尽' },
+      { role: 'assistant', text: '已入库 **v3**（+42 −7），可以回滚到 v2 / v1。' },
+    ],
+    artifact: {
+      files: [
+        { path: 'SKILL.md', bytes: '4.1 KB', body: '# 生成 HTML，并在真实浏览器里验证到可交付\n\n## When to Use\n- 单文件、内联 CSS/JS 的页面\n- 页面含 canvas 或动画，必须确认推进到终态\n\n## Procedure\n1. 先定状态契约（params / phase / regenerate）\n2. 写文件 → 语法检查\n3. 无头 Chrome 渲染并读页面状态\n4. 参数扫描标定默认值\n5. 交互回归\n\n## Verification\nnode scripts/verify.mjs <page> --seeds 1,2,3\n' },
+        { path: 'references/state-contract.md', bytes: '2.0 KB', body: '# 状态契约\n验证脚本要能读到：params、phase、model、maxSteps。只靠截图判断「动画动了」是不够的。\n' },
+        { path: 'scripts/verify.mjs', bytes: '6.4 KB', body: '// 无头 Chrome：渲染 → 读状态 → 断言终态\nimport { launch } from "./cdp.mjs"\n' },
+        { path: 'templates/page-skeleton.html', bytes: '1.8 KB', body: '<!doctype html>\n<canvas id="c"></canvas>\n// 内联脚本占位（demo 里不写真的 script 标签）\n' },
+      ],
+      checks: [
+        { ok: true, text: 'frontmatter 的 name 是 kebab-case' },
+        { ok: true, text: '## When to Use 存在' },
+        { ok: true, text: '## Procedure 存在' },
+        { ok: true, text: '正文引用的 scripts/、templates/ 都存在' },
+        { ok: false, text: '## Verification 里 `--seeds` 没说明取值上限' },
+      ],
+      versions: [
+        { v: 'v3', note: '本次：补「状态契约」一节、加 scripts/verify.mjs', now: true },
+        { v: 'v2', note: '返工后：Procedure 拆成 5 步' },
+        { v: 'v1', note: '首版：只有 3 步，无 Verification' },
+      ],
+    },
+  },
+  {
+    id: 'researcher',
+    title: 'researcher',
+    target: 'agent',
+    version: 1,
+    state: 'reviewing',
+    stateText: '待审',
+    source: '空白起 · 只有我追加的材料',
+    messages: [
+      { role: 'system', text: '这次没有来源 run：从空白/材料起' },
+      { role: 'assistant', text: '要优化哪条智能体的指令？还是新建一份？', choices: ['优化 researcher 的指令', '新建一份指令', '改成沉淀技能'] },
+      { role: 'user', text: '优化 researcher 的指令' },
+      {
+        role: 'assistant',
+        text: '好，作用描述一句话就行：你希望它变成什么样？',
+      },
+      { role: 'user', text: '读外部材料，产出带出处的判断；材料不够就明说' },
+      {
+        role: 'assistant',
+        text: '材料只有你追加的 2 项（没有轨迹）。要我再问吗？也可以直接开始。',
+        attachments: [
+          { name: '3 篇评测文章（粘贴）', src: '你追加 · 4.1 千字' },
+          { name: '团队研究规范', src: '你追加 · 0.5 千字' },
+        ],
+        choices: ['开始提炼'],
+      },
+      { role: 'user', text: '开始提炼' },
+      { role: 'system', text: '起草完成 · 0:47 · 9 次工具调用', log: ['[00:02] 读 2 份外部材料', '[00:21] 归纳身份/边界/流程', '[00:40] 写 agent/instructions.md', '[00:47] 完成'] },
+      {
+        role: 'assistant',
+        text: '**提炼结果（Persona 轨，因为产出是指令）**\n- 语气：先给结论，再给出处——三篇文章都是这个结构\n- 证据不足时明确写「素材不足」，不绕过去\n- 数字必须带来源；没有来源就用「约」并标注不确定\n- 拒绝在材料外补充事实，但可以指出材料之间的矛盾\n\n**没覆盖到的**\n- 跨语言材料（这次只有中文）\n\n体检有 1 项缺：「五件事」里的失败处理一节没写。要补吗？',
+      },
+      { role: 'system', text: '评审：未运行（这次关掉了评审，入库会标「未经评审」）' },
+    ],
+    artifact: {
+      files: [
+        { path: 'agent/instructions.md', bytes: '3.6 KB', body: '# 身份\n你是本机的研究员：把外部材料读薄，产出带出处的判断。\n\n# 边界\n- 不臆测；没有出处就写「素材不足」\n- 数字必须给来源\n\n# 流程\n1. 先列要回答的问题\n2. 每条结论后跟一行出处\n3. 最后给「我不知道」清单\n' },
+      ],
+      checks: [
+        { ok: true, text: '指令非空' },
+        { ok: true, text: '字符数 3621 / 上限 6000' },
+        { ok: false, text: '「五件事」里的失败处理一节未写' },
+      ],
+      versions: [],
+    },
+  },
+];
+
+const ROUTING = [
+  { test: (s) => /^这里不对|^不对|应该/.test(s), receipt: '我把这句当成「定点纠错」：只改你指的那一节，其余字节不动' },
+  { test: (s) => /^追加材料|^加材料/.test(s), receipt: '我把这句当成「追加材料」：先挂进材料，等你确认再提炼' },
+  { test: (s) => /^开始提炼|^提炼|^开始/.test(s), receipt: '我把这句当成「开始提炼」：将起一次起草 run（本 demo 不真的起）' },
+  { test: () => true, receipt: '我把这句当成「补充」，确认后落进这次沉淀的参数' },
+];
+
+let active = SESSIONS[0];
+let viewing = null;
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+/** 极简 markdown：**粗体**、`代码`、- 列表（够 demo 用；真实现走现有 renderMarkdown） */
+function md(text) {
+  const lines = esc(text).split('\n');
+  let out = '';
+  let inList = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    const li = line.match(/^- (.*)$/);
+    if (li) {
+      if (!inList) { out += '<ul>'; inList = true; }
+      const body = li[1];
+      out += '<li>' + (/没覆盖|CI 里|超过 2000|跨语言|无头浏览器在/.test(body) ? '<span class="uncovered">' + body + '</span>' : body) + '</li>';
+    } else {
+      if (inList) { out += '</ul>'; inList = false; }
+      if (line.trim() !== '') out += '<p>' + line + '</p>';
+    }
+  }
+  if (inList) out += '</ul>';
+  return out;
+}
+
+function renderRail() {
+  const groups = [
+    { title: '进行中', test: (s) => s.state !== 'shipped' },
+    { title: '已入库', test: (s) => s.state === 'shipped' },
+  ];
+  el('rail').innerHTML = groups.map((g) => {
+    const rows = SESSIONS.filter(g.test);
+    if (!rows.length) return '';
+    return `<div class="rail-group">${g.title}</div>` + rows.map((s) => `
+      <button class="row ${s.id === active.id ? 'on' : ''}" data-id="${s.id}" type="button">
+        <div class="row-top">
+          <span class="row-name">${esc(s.title)}</span>
+          <span class="pill ${s.target}">${s.target === 'skill' ? '技能' : '指令'}</span>
+          ${s.version ? `<span class="pill">v${s.version}</span>` : ''}
+        </div>
+        <div class="row-sub">${esc(s.source)}</div>
+      </button>`).join('');
+  }).join('');
+}
+
+function renderMessage(m) {
+  if (m.role === 'system') {
+    const log = m.log
+      ? `<div class="logbox"><details><summary>展开日志（${m.log.length} 行）</summary><div class="log">${m.log.map((l) => `<div>${esc(l)}</div>`).join('')}</div></details></div>`
+      : '';
+    return `<div class="msg system">${esc(m.text)}${log}</div>`;
+  }
+  const attach = m.attachments
+    ? `<div class="attach">${m.attachments.map((a) => `<span class="item">${esc(a.name)}<span class="src">${esc(a.src)}</span></span>`).join('')}</div>`
+    : '';
+  const choices = m.choices
+    ? `<div class="choices">${m.choices.map((c) => `<button type="button" data-choice="${esc(c)}">${esc(c)}</button>`).join('')}</div>`
+    : '';
+  const body = m.role === 'assistant' ? md(m.text) : esc(m.text);
+  return `<div class="msg ${m.role}">${body}${attach}${choices}</div>`;
+}
+
+function renderPane() {
+  const a = active.artifact;
+  if (viewing === null && a.files.length) viewing = a.files[0].path;
+  const current = a.files.find((f) => f.path === viewing) ?? a.files[0];
+  const ok = a.checks.filter((c) => c.ok).length;
+  const bad = a.checks.length - ok;
+  el('pane-body').innerHTML = `
+    <div class="sec-title">文件</div>
+    <ul class="files">${a.files.map((f) => `<li class="${f.path === current?.path ? 'on' : ''}" data-file="${esc(f.path)}"><span class="${f.path.includes('/') ? 'dir' : ''}">${esc(f.path)}</span><span class="w mono">${esc(f.bytes)}</span></li>`).join('')}</ul>
+    ${current ? `<div class="preview"><pre>${esc(current.body)}</pre></div>` : ''}
+    <div class="sec-title">体检 ${ok} 过 ${bad} 缺</div>
+    <div class="check">${a.checks.map((c) => `<span class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✔' : '✖'} ${esc(c.text)}</span>`).join('')}</div>
+    ${a.versions.length ? `<div class="sec-title">版本</div><div class="versions">${a.versions.map((v) => `<div class="item"><span class="mono">${esc(v.v)}</span><span class="grow">${esc(v.note)}</span>${v.now ? '<span class="pill" style="color:var(--good);border-color:currentColor">当前</span>' : '<button class="ghost" type="button">回滚</button>'}</div>`).join('')}</div>` : ''}
+    <div class="sec-title">动作</div>
+    <div class="choices">
+      <button class="ghost" type="button">${active.state === 'shipped' ? '再炼一版' : '入库'}</button>
+      <button class="ghost" type="button">追加材料</button>
+      <button class="ghost" type="button">定点纠错</button>
+    </div>`;
+}
+
+function renderMain() {
+  el('title').textContent = active.title;
+  el('target-pill').textContent = active.target === 'skill' ? '技能' : '指令';
+  el('state').textContent = active.stateText;
+  el('state').className = 'state ' + active.state;
+  el('stream').innerHTML = active.messages.map(renderMessage).join('');
+  renderPane();
+  renderRail();
+  const scroller = document.querySelector('.stream');
+  scroller.scrollTop = scroller.scrollHeight;
+}
+
+el('rail').addEventListener('click', (e) => {
+  const btn = e.target.closest('.row');
+  if (!btn) return;
+  const next = SESSIONS.find((s) => s.id === btn.dataset.id);
+  if (next) { active = next; viewing = null; renderMain(); }
+});
+
+el('pane-body').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-file]');
+  if (!item) return;
+  viewing = item.dataset.file;
+  renderPane();
+});
+
+// 选项按钮 = 替使用者说那句话（同一个形状，不引入新控件类型）
+el('stream').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-choice]');
+  if (!chip) return;
+  send(chip.dataset.choice);
+});
+
+el('pane-toggle').addEventListener('click', () => document.body.classList.add('pane-open'));
+el('pane-close').addEventListener('click', () => document.body.classList.remove('pane-open'));
+
+document.querySelectorAll('[data-quick]').forEach((b) => {
+  b.addEventListener('click', () => {
+    el('say').value = b.dataset.quick === '这里不对：' ? '这里不对：' : b.dataset.quick;
+    el('say').focus();
+  });
+});
+
+function route(text) {
+  return ROUTING.find((r) => r.test(text));
+}
+
+/** 发一句话：人说的一条 + 平台解释的一条（回执）。两者都是普通消息。 */
+function send(text) {
+  const stream = el('stream');
+  const user = document.createElement('div');
+  user.className = 'msg user';
+  user.textContent = text;
+  const receipt = document.createElement('div');
+  receipt.className = 'msg system';
+  receipt.textContent = route(text).receipt;
+  stream.appendChild(user);
+  stream.appendChild(receipt);
+  const scroller = document.querySelector('.stream');
+  scroller.scrollTop = scroller.scrollHeight;
+}
+
+el('composer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = el('say');
+  const text = input.value.trim();
+  if (!text) return;
+  send(text);
+  input.value = '';
+});
+
+if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  document.documentElement.dataset.theme = 'dark';
+}
+
+renderMain();
+</script>
+</body>
+</html>
