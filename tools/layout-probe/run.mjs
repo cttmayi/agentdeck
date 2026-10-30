@@ -5222,8 +5222,6 @@ try {
     revisedRunId: '',
     sourceRunId: '',
     mineDraftRunId: '',
-    auditFailRunId: '',
-    auditDeadRunId: '',
     // ★ 第 4 批：**真跑起来**的起草 run（量"起草中那一屏"）——它不能是写进去的夹具：
     //   daemon 起的时候 `reconcileInterruptedRuns` 会把非终态 run 收成 failed，
     //   写进去的"running"夹具量到的是"没跑成"那一屏（这个坑审核那一节踩过一次）。
@@ -5235,6 +5233,7 @@ try {
     //   （它们量的是 draftRunId 的现场）。queuedAt 由 extra 覆盖（makeDraft 里 `...rest`
     //   在后面展开，见那段注释）。
     siblingDraftRunId: '',
+    manualDraftRunId: '',
     /**
      * ★ 分批第 38 批：「优化一条智能体的指令」那条草稿（`crystallizeTarget.kind === 'agent'`）。
      *
@@ -5495,8 +5494,8 @@ try {
         //    ② 我一度想"两屏各占一个任务"来绕开审核守卫，结果 `revisedFrom` 跨了任务 ⇒
         //       解析不到任务目录（`.versions.json` 与快照都不在）⇒ 两屏都量错。
         //    现在就是真形状：**同一个任务目录**，首版进 `history/<首版>/skill/`，当前内容 = 第 2 版。
-        //    而"审核真跑起来"那一屏另用一条**独立单版**夹具（`auditLiveRunId`）——审核只对
-        //    当前版本成立（第 17 批的守卫），首版在这里已经是历史版本了。
+        //    ★ 分批第 137 批：沉淀线的审核整条删除 ⇒ 原来这里还有「审核真跑起来 / 审核未通过 /
+        //    审核卡死」三条夹具与它们的三屏测量，全部连同功能一起删除（§12.42 第 ③ 步）。
         /**
          * ★ 第 16/17 批：「改版草稿」那一屏（量基线切换、"编辑器里是这一版的字"）用**任务 B**。
          *
@@ -5579,15 +5578,6 @@ try {
           { revisedFrom: revisedV2Id, sourceRunId: revisedSourceRunId, workDir: revisedTaskDir },
         )
 
-        crystalFixture.auditLiveRunId = await makeDraft(
-          ulid(),
-          {
-            'SKILL.md': skillMd('第二步'),
-            'references/notes.md': '# 说明\n\n第一版。\n',
-            'scripts/check.sh': '#!/bin/sh\necho probe\n',
-          },
-          { sourceRunId: await makeSource() },
-        )
         // 专供 P2：一条**会被入库**的草稿（它自己一个源 run ⇒ 不影响上面两条）
         crystalFixture.mineDraftRunId = await makeDraft(
           ulid(),
@@ -5596,130 +5586,15 @@ try {
         )
 
         /**
-         * ★ 第四条草稿：**只给"审核未通过"那一屏用**（§10.5 第 ③ 条的界面形态）。
-         *
-         * ⚠️ 为什么要单独一条草稿：审核结论会**改写结论条与审核区块**，挂在上面那两条
-         *    草稿上会把"新建 / 改版"那两组判据的现场改掉（它们的结论条数字是量过的）。
-         * ⚠️ 判决是**直写 store**（与这一组夹具同一个理由：走接口会 spawn 真 CLI，而探针
-         *    的边界是"基本不造 run"）。状态取 `escalated` = **配额用尽**，也就是
-         *    "停在未通过态等人"那一支——正是第 ② 条决定里最需要看得见的一屏。
+         * ★ 分批第 137 批：人工改稿那一屏的专用夹具（原来借用 `crystalAuditFail` 那条
+         * "审核未通过"夹具，而审核已整条删除）。它会被**真的编辑并保存**，所以必须独立——
+         * 改到别的夹具上会把它们量过的现场改掉。
          */
-        crystalFixture.auditFailRunId = await makeDraft(
+        crystalFixture.manualDraftRunId = await makeDraft(
           ulid(),
           { 'SKILL.md': skillMd('第三步') },
           { sourceRunId: await makeSource() },
         )
-        {
-          const auditRunId = ulid()
-          await store.insertRun({
-            id: auditRunId,
-            workspaceId,
-            kind: 'review',
-            status: 'completed',
-            agentId: executor.id,
-            agentName: executor.name,
-            // ⚠️ `subject.id` 必须是**那条起草 run 的 id**：读接口就是按它找审核 run 的
-            //    （`subject.type === 'skill-draft-review' && subject.id === draftRunId`）。
-            subject: { type: 'skill-draft-review', id: crystalFixture.auditFailRunId },
-            prompt: '探针夹具：审核',
-            queuedAt: now - 20_000,
-            startedAt: now - 19_000,
-            finishedAt: now - 18_000,
-          })
-          await store.insertVerdict({
-            id: ulid(),
-            workspaceId,
-            runId: auditRunId,
-            subject: { type: 'skill-draft-review', id: crystalFixture.auditFailRunId },
-            status: 'escalated',
-            conclusion: 'fail',
-            reasonCode: 'style_violation',
-            confidence: 0.8,
-            findings: [
-              {
-                severity: 'high',
-                summary: '「Procedure」第 2 步没有说明命令从哪个目录跑',
-                evidence: [{ blobRef: null, locator: 'skill/SKILL.md:12', excerpt: '运行 marker.sh' }],
-              },
-              {
-                severity: 'medium',
-                summary: '脚本没有退出码检查，失败时会被当成成功',
-                evidence: [{ blobRef: null, locator: 'skill/scripts/marker.sh:4', excerpt: null }],
-              },
-              {
-                severity: 'low',
-                summary: 'description 里没有说清适用边界',
-                evidence: [],
-              },
-            ],
-            action: null,
-            escalateReason: null,
-            invalidResolution: null,
-            skillRefs: [],
-            modelId: null,
-            promptHash: null,
-            createdAt: now - 18_000,
-          })
-          // ★ 分批第 8 批：补上"审核当时钉下的指纹"。
-          //
-          // 真链路上这个文件是**审核路由**写的（`writeAuditStamp`）；夹具直写 store ⇒
-          // 没有路由 ⇒ 没有指纹 ⇒ 界面判不出"过期"（`stale` 恒为 null）。
-          // 而那一节量的是"改完之后出现过期标记"——没有指纹时它**永远不出现**，
-          // 看起来就像"没改过"，正是"假绿"的样子。所以夹具必须把指纹补齐。
-          //
-          // ⚠️ 这里**不能**手写 hash：抄一份算法就有两个出处，哪天算法改了探针还在给旧指纹。
-          //    直接引 daemon 的那份实现（探针脚本是 Node 跑的，能 import .ts）。
-          {
-            const { hashDraftDir, writeAuditStamp } = await import(
-              '../../apps/daemon/src/crystallize-artifacts.ts'
-            )
-            const failHut = path.join(workRoot, `skill-draft-${crystalFixture.auditFailRunId}`)
-            await writeAuditStamp(failHut, {
-              reviewRunId: auditRunId,
-              hash: await hashDraftDir(path.join(failHut, 'skill')),
-              at: now - 18_000,
-            })
-          }
-        }
-
-        /**
-         * ★ 审核**没跑成**那一条 —— 这是本节最要紧的一条判据。
-         *
-         * run 状态是 `failed`、**没有判决**。改之前审核区只判"有没有判决"，于是这一格
-         * 永远显示"审核中…（跑完再看这里）"：使用者对着一条**早就失败**的审核 run 一直等。
-         */
-        crystalFixture.auditDeadRunId = await makeDraft(
-          ulid(),
-          { 'SKILL.md': skillMd('第五步') },
-          { sourceRunId: await makeSource() },
-        )
-        {
-          const deadReviewRunId = ulid()
-          await store.insertRun({
-            id: deadReviewRunId,
-            workspaceId,
-            kind: 'review',
-            status: 'failed',
-            agentId: executor.id,
-            agentName: executor.name,
-            subject: { type: 'skill-draft-review', id: crystalFixture.auditDeadRunId },
-            prompt: '探针夹具：审核（失败）',
-            queuedAt: now - 7_000,
-            startedAt: now - 6_000,
-            finishedAt: now - 5_000,
-            failureReason: '探针夹具：假装审核跑挂了',
-          })
-          await store.appendRunMessage(deadReviewRunId, {
-            seq: 1,
-            type: 'text',
-            tool: null,
-            content: '探针夹具：审核 run 失败现场。',
-            input: null,
-            output: null,
-            outputTruncated: false,
-            at: now - 5_500,
-          })
-        }
 
         // ★ 给**第一条草稿**一段文字产出：审阅态那块默认要显示的就是它（"最后结果"）。
         //   没有这条消息，量到的只会是"这次起草没有留下文字产出"那个空态。
@@ -5980,14 +5855,12 @@ try {
         `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
         `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
-        `&crystalAuditLive=${encodeURIComponent(crystalFixture.auditLiveRunId)}` +
         `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
         `&crystalSibling=${encodeURIComponent(crystalFixture.siblingDraftRunId)}` +
+        `&crystalManual=${encodeURIComponent(crystalFixture.manualDraftRunId)}` +
         `&crystalSource=${encodeURIComponent(crystalFixture.sourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
-        `&crystalAuditFail=${encodeURIComponent(crystalFixture.auditFailRunId)}` +
-        `&crystalAuditDead=${encodeURIComponent(crystalFixture.auditDeadRunId)}` +
         `&crystalAgentDraft=${encodeURIComponent(crystalFixture.agentDraftRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : '') +

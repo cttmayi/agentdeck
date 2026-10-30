@@ -235,50 +235,10 @@ export function hashDraftFiles(files: Record<string, string>): string {
   return h.digest('hex')
 }
 
-/** 草稿当前产出的指纹（目录读不到 = 空集合的指纹，调用方自己判"有没有产出"）。 */
-export async function hashDraftDir(skillDir: string): Promise<string> {
-  const files = (await readDraftSkillDir(skillDir)) ?? {}
-  return hashDraftFiles(files)
-}
-
-/** 审核当时那份产出的指纹（落在草稿小屋**根**上的点文件里）。 */
-export interface AuditStamp {
-  reviewRunId: string
-  hash: string
-  at: number
-}
-
-/**
- * 指纹落在哪：`<草稿小屋>/.audited.json`。
- *
- * ⚠️ 两个位置上的讲究：
- *   · 放在**根**上、不放 `skill/` 里——`readTree` 会跳过点文件，但把非产出文件塞进产出
- *     目录本身就是脏的（`artifacts` 的文件树、diff、入库的 `files` 都从那里读）；
- *   · 用**点文件**——万一将来有人把 `skill/` 整个拷走，别把审核元数据一起当成产出带走。
- */
-export const AUDIT_STAMP_FILE = '.audited.json'
-
-export async function readAuditStamp(draftDir: string): Promise<AuditStamp | null> {
-  try {
-    const raw = JSON.parse(await readFile(join(draftDir, AUDIT_STAMP_FILE), 'utf8')) as unknown
-    if (typeof raw !== 'object' || raw === null) return null
-    const obj = raw as Record<string, unknown>
-    const reviewRunId = obj['reviewRunId']
-    const hash = obj['hash']
-    const at = obj['at']
-    if (typeof reviewRunId !== 'string' || typeof hash !== 'string') return null
-    return { reviewRunId, hash, at: typeof at === 'number' ? at : 0 }
-  } catch {
-    // 没有 / 坏了都当"判不出来"（旧数据里本来就没有这个文件）。由调用方决定怎么呈现，
-    // 不要在这里编一个 false——那会让"无法判定"看起来像"没过期"。
-    return null
-  }
-}
-
-export async function writeAuditStamp(draftDir: string, stamp: AuditStamp): Promise<void> {
-  await mkdir(draftDir, { recursive: true })
-  await writeFile(join(draftDir, AUDIT_STAMP_FILE), `${JSON.stringify(stamp, null, 2)}\n`, 'utf8')
-}
+// ★ 分批第 137 批（§12.42 第 ③ 步）：审核指纹（`hashDraftDir` / `readAuditStamp` /
+//   `writeAuditStamp` / `AuditStamp` / `.audited.json`）整组删除——它只服务界面的"结论过期"，
+//   而沉淀线不再有评审，也就没有"结论过期"这件事。`hashDraftFiles` 保留：它是纯函数，
+//   `crystallize-artifacts.test.ts` 用它钉"长度前缀防碰撞"（与审核无关的防线）。
 
 /** 写回的结果：写了几份、以及拒绝了的路径（拒绝要能说出来，不能静默跳过）。 */
 export interface WriteDraftResult {

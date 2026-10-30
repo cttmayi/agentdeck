@@ -5194,10 +5194,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //      ③ 两个出口都在：**按意见重新起草**（第 ② 条）+ **确认入库仍然可按**
           //         （第 ① 条：审核是预筛，不替人做决定——按钮灰掉就等于把预筛变成了闸）。
           // ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删除。这一屏的夹具仍然叫
-          //   `crystalAuditFail`（盘上有历史审核数据的老工作区就长这样），但现在要证的是**相反**的
-          //   事：历史判决**不再出现在界面上**，结论条只说机械体检。
-          const cyFail = cyQuery.get('crystalAuditFail')
-          facts['crystal.legacyFixture'] = cyFail
+          //   `crystalManual`（它会被真的编辑/保存，所以用一条独立夹具）。这一屏还兼量
+          //   消息流外壳、栏脚、过程格那几组与审核无关的判据。
+          const cyFail = cyQuery.get('crystalManual')
+          facts['crystal.manualFixture'] = cyFail
           facts['crystal.legacyEntered'] = await cyEnter(cyFail)
           if (facts['crystal.legacyEntered']) {
             const cyBarText = text(d().querySelector('.conclusion-bar'))
@@ -5378,7 +5378,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //   ③ 点它 ⇒ 标记出现「内容已改 —— 这个结论是改之前的」+ 出现「重新审核」；
           //   ④ 保存真的写到了磁盘/接口上（重读 artifacts，正文是新写的）。
           {
-            const cyManual = cyQuery.get('crystalAuditFail')
+            const cyManual = cyQuery.get('crystalManual')
             facts['crystal.manualEntered'] = await cyEnter(cyManual)
             if (facts['crystal.manualEntered']) {
               const cyHasText = (needle) =>

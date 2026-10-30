@@ -13,14 +13,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   assembleArtifacts,
-  hashDraftDir,
   hashDraftFiles,
   isSafeDraftRelPath,
   parseSkillMd,
-  readAuditStamp,
   readDraftSkillDir,
   validateArtifactFiles,
-  writeAuditStamp,
   writeDraftSkillFiles,
   dropForeignVersions,
 } from './crystallize-artifacts.ts'
@@ -116,26 +113,9 @@ describe('人改草稿：写回、路径守卫、指纹', () => {
     )
   })
 
-  test('★ 指纹与"审核时钉下的那份"对得上：写回改变了目录指纹', async () => {
-    const hut = join(dir, 'hut-stamp')
-    const skillDir = join(hut, 'skill')
-    await mkdir(skillDir, { recursive: true })
-    await writeFile(join(skillDir, 'SKILL.md'), '# 一审时\n', 'utf8')
-    const audited = await hashDraftDir(skillDir)
-    await writeAuditStamp(hut, { reviewRunId: 'run-1', hash: audited, at: 1 })
-    assert.deepEqual(await readAuditStamp(hut), { reviewRunId: 'run-1', hash: audited, at: 1 })
-
-    assert.equal(await hashDraftDir(skillDir), audited, '没改 ⇒ 指纹一致（结论不算过期）')
-    await writeDraftSkillFiles(skillDir, { 'SKILL.md': '# 人改过\n' })
-    assert.notEqual(await hashDraftDir(skillDir), audited, '改了 ⇒ 指纹不同（结论过期）')
-
-    // 读不到 / 坏文件 ⇒ null（"判不出来"），不许编成"没过期"
-    const empty = join(dir, 'hut-no-stamp')
-    await mkdir(empty, { recursive: true })
-    assert.equal(await readAuditStamp(empty), null)
-    await writeFile(join(empty, '.audited.json'), '{ 这不是 json', 'utf8')
-    assert.equal(await readAuditStamp(empty), null)
-  })
+  // ★ 分批第 137 批：审核指纹那一组随审核一起删除（`hashDraftDir` / `writeAuditStamp` /
+  //   `readAuditStamp` 已不存在）。`hashDraftFiles` 的判据还在上面——它钉的是「长度前缀防碰撞」
+  //   这个纯函数性质，与审核无关。
 })
 
 const GOOD_SKILL_MD = `---
