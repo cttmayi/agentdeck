@@ -47,7 +47,14 @@
    *    "产物请求已经 200 拿到 4 个文件，右栏永远停在『载入产物…』"，而 console 打点
    *    显示 `loaded 4`。**这类 bug 看代码完全看不出来，只有量 DOM 才发现。**
    */
+  /** `GET /api/crystallize/material` 的返回：这一版起草吃进去的素材文件。 */
+  interface Material {
+    dir: string
+    items: Array<{ relPath: string; bytes: number; truncated: boolean; text: string }>
+  }
+
   let artifacts = $state<Artifacts | null>(null)
+  let material = $state<Material | null>(null)
   let loading = $state(true)
   let error = $state<string | null>(null)
   /** 选中预览的文件（相对 skill/ 或 agent/ 目录）。空 = 还没选，默认给第一个。 */
@@ -76,6 +83,17 @@
       artifacts = res
       const files = Object.keys(res.files ?? {})
       selected = files[0] ?? ''
+      // 素材与产物是两个接口（语义不同：一个"吃了什么"、一个"产出了什么"），
+      // 但都是**这一条沉淀的事实**，所以一起取、一起显示。
+      // ⚠️ 它必须在这里（成功分支）——第一版误加进了 catch 里，于是只有**产物取失败**时
+      //    才会去取材料，正常路径永远是"0 个素材文件"（探针当场抓到，见 §12.19）。
+      try {
+        material = await api<Material>(
+          `/api/crystallize/material?draftRunId=${encodeURIComponent(id)}`
+        )
+      } catch {
+        material = null
+      }
     } catch (err) {
       if (mine !== seq) return
       // 没有产出（起草还没跑完 / 没跑成）时接口给 404：那是正常的空态，不当错误显示。
@@ -109,6 +127,11 @@
     return value !== null && value.validation.ok
   }
 
+  function materialList(value: Material | null): Material['items'] {
+    return value === null ? [] : value.items
+  }
+
+  const materialItems = $derived(materialList(material))
   const files = $derived(fileList(artifacts))
   const current = $derived(files.includes(selected) ? selected : (files[0] ?? ''))
   const problems = $derived(problemList(artifacts))
@@ -145,6 +168,27 @@
     {:else if files.length === 0}
       <p class="faint artifact-empty">{$t('crystallize.artifactEmpty')}</p>
     {:else}
+      <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 用户追加）。只读——
+           增删要有写接口（daemon 目前没有），所以这里不放假按钮。 -->
+      <section class="artifact-mats">
+        <h3 class="artifact-sub">
+          {$t('crystallize.artifactMaterial')}
+          <span class="artifact-mat-count">{materialItems.length}</span>
+        </h3>
+        {#if materialItems.length === 0}
+          <p class="faint small">{$t('crystallize.artifactMaterialEmpty')}</p>
+        {:else}
+          <ul class="artifact-mat-list">
+            {#each materialItems as item (item.relPath)}
+              <li>
+                <span class="artifact-mat-name">{item.relPath}</span>
+                <span class="faint small">{Math.round(item.bytes / 100) / 10} KB</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
       <!-- 文件：点一个在下面预览。用 button 而不是 a：它只切换预览，不导航。 -->
       <section class="artifact-files">
         <h3 class="artifact-sub">{$t('crystallize.artifactFiles')}</h3>
@@ -223,6 +267,34 @@
     display: flex;
     align-items: baseline;
     gap: var(--sp-2);
+  }
+
+  .artifact-mat-count {
+    color: var(--text-faint);
+  }
+
+  .artifact-mat-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: var(--fs-sm);
+  }
+
+  .artifact-mat-list li {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: baseline;
+    padding: 0.125rem 0;
+  }
+
+  .artifact-mat-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
   }
 
   .artifact-files ul {

@@ -460,6 +460,8 @@ export const crystallizeText = {
     zh: '还没有产物。起草完成后，文件会出现在这里；过程仍留在中间那一栏。',
     en: 'No artifact yet. Files show up here once drafting finishes; the process stays in the middle pane.',
   },
+  'crystallize.artifactMaterial': { zh: '材料', en: 'Material' },
+  'crystallize.artifactMaterialEmpty': { zh: '还没有素材文件', en: 'No material files yet' },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },

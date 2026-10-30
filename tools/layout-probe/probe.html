@@ -5802,6 +5802,12 @@
                 (d().querySelector('.artifact-pre')?.textContent ?? '').trim().length
               facts['crystal.artifactChecksText'] =
                 d().querySelector('.artifact-check-count')?.textContent?.trim() ?? null
+              // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。
+              // ⚠️ 材料与产物是**两个接口**，产物先到不代表材料到了——等一小会儿再数，
+              //    否则量到的是"0 个素材文件"（第一版就是这么误报的）。
+              await until(() => d().querySelectorAll('.artifact-mat-list li').length > 0, 60)
+              facts['crystal.artifactMaterialCount'] =
+                d().querySelectorAll('.artifact-mat-list li').length
 
               // 收起来，别把抽屉留在兜底那一步的路由切换里
               const artClose = d().querySelector('.artifact-close')

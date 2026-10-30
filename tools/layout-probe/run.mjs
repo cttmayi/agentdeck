@@ -3748,6 +3748,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.artifactMaterialCount',
+    label:
+      '★★★ 右栏列了**这一版吃进去的材料**（`GET /api/crystallize/material`；设计 §12.14：对话里一行摘要、右栏是正式清单）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个素材文件`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.artifactPreviewLen',
     label:
       '★★★ 预览框里是**真产物正文**（非空，阈值 20 字符——这条夹具的正文只有 29 字符，' +
