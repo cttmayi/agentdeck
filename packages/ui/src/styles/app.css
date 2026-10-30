@@ -691,6 +691,31 @@ hr {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/**
+ * ★ 分批第 92 批：主从布局的**第三列**（沉淀页的产物栏）。
+ *
+ * 为什么把产物提成独立一列而不是塞进详情页里（设计 §12.12）：沉淀页的心智是
+ * "对话 + 产物"，产物如果埋在详情页的分节里，要点进去、还要在 tab 之间切才能看到
+ * "这次产出了什么、体检过没过"——那就又变成"信息在、但看不见"。
+ *
+ * 宽度固定 20rem：这一栏装的是文件名/体检条目/一段预览，跟列表栏一样属于
+ * "阅读宽度固定、剩下的给正文"的那一类。窄屏行为（退化成右侧抽屉）由
+ * `CrystallizeArtifactPane.svelte` 自己的 `@media` 负责——**两处断点必须都是 72rem**，
+ * 否则会出现"网格还是三列、但第三列已经变抽屉"的错位。
+ */
+/* ⚠️ 只有够宽才并排。1280（探针用的视口）并排的话详情只剩 304px——内容横向溢出、
+   容器多出一条横向滚动条，探针当场量到"格子离底 10px"（5 条沉淀项的回归都是它）。
+   96rem = 1536px：416（列表）+ 560（详情保底）+ 320（产物）才放得下。 */
+.split-layout.with-artifact {
+  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+}
+
+@media (min-width: 96rem) {
+  .split-layout.with-artifact {
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) 20rem;
+  }
+}
+
 .pane {
   display: flex;
   flex-direction: column;
@@ -888,6 +913,8 @@ hr {
   .split-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
+
 
   .split-layout.with-detail .list-pane {
     display: none;

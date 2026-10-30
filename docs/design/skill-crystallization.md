@@ -4232,3 +4232,40 @@ celebrity 还多一套联网研究 SOP 与 `quality_check.py` 的来源核验）
 点「入库为 v4」⇒ 版本 4、当前 v4、候选清空、按钮变「入库为 v5」、系统消息
 "已入库 v4（只过了机械体检，没有评审这一步）· 可回滚到 v3"；点 v3 的「回滚」⇒ 当前 v3、历史保留 4 版。
 （§12.17 里"纠错不立即成版本"那条简化，现在 demo 里已经是真规则了。）
+
+### 12.19 U1 落地：产物栏常驻（分批第 92 批，**已实作**）
+
+U1 只搬骨架、不动能力：**沉淀页变成三列**——列表（不变）| 流程页（原样保留）| **产物栏（新）**。
+中间那一栏的对话化是 U3 的事，所以这一批**没有损失任何现有能力**。
+
+| 做了什么 | 落在哪 |
+|---|---|
+| 产物栏组件：文件清单 + 机械体检 + 第 N 版 + 正文预览，数据走 `GET /api/crystallize/artifacts`（与流程页**同一份产出、同一份校验**） | `apps/web/src/components/CrystallizeArtifactPane.svelte` |
+| 三列布局常量与断点 | `packages/ui/src/styles/app.css` 的 `.split-layout.with-artifact` |
+| 挂进沉淀视图（选中某条沉淀时出现，取消选中就不占列） | `apps/web/src/views/Crystallize.svelte` |
+| 6 条探针判据（存在 / 不占列且离屏 / 有小旗 / 点开真开 / 文件是真数据 / 预览是真正文） | `tools/layout-probe/{probe.html,run.mjs}` |
+| i18n（中英） | `packages/i18n/src/web/crystallize.ts` |
+
+**断点为什么是 96rem（1536px）而不是设计稿里的 1280**：探针视口就是 1280×880。三列并排时
+详情只剩 `1280 − 240(侧栏) − 416(列表) − 320(产物) = 304px`，内容横向溢出、容器多出一条横向
+滚动条，探针当场量到 **5 条沉淀布局项变红**（每条的实测都是"离底 10px"）。所以：
+**≥ 96rem 并排，< 96rem 收成右侧抽屉**（小旗入口）。
+
+**这一批量到三个真缺陷，都记下来**：
+
+1. **runes 模式里普通 `let` 不是响应式的**（最隐蔽的一个）。右栏第一版永远停在"载入产物…"，
+   而真 Chrome 里请求已经 200、拿到 4 个文件——加临时打点才看到 `[pane] loaded 4`。
+   **看代码完全看不出来**，只有量 DOM 才发现。修法：`artifacts` / `loading` / `error` /
+   `selected` / `drawerOpen` 全部改成 `$state`。
+2. **`$derived` 里直接窄化 `artifacts` 会被 tsc 判成 `never`**（闭包里拿不到 `load()` 的赋值），
+   所以派生值改成走带显式签名的小函数（`fileList(value: Artifacts | null)`）。
+3. **探针 item 的 `key` 与 fact 的 key 必须逐字一致**：我先把 item 写成 `…PreviewHasText`、
+   fact 写成 `…PreviewLen`，探针报的是"**没量到这个值（选择器可能改了）**"——那句话会把
+   人往"选择器坏了"的方向带，其实只是两个名字不一样。
+
+**U1 明确没做**（留给后面几批）：主区还是旧流程页（U3 换成对话流）、没有"逐个问"的提问、
+没有材料清单、入库/返工仍是旧界面。也就是说：**这一批是"骨架多了一列"，不是"页面重做完了"。**
+
+验证：`pnpm run probe:layout` **581 项全绿**（新增 6 条）；`pnpm run check` 2234 全绿；
+`pnpm run build:web` 过。真 Chrome 另量了一遍（1680×1000）：`grid-template-columns: 416px 704px 320px`、
+三列不重叠、右栏 4 个文件 + 体检「通过」、点文件切预览生效、1100px 时抽屉打开 x=748、无横向溢出。

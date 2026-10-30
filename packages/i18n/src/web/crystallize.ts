@@ -447,6 +447,23 @@ export const crystallizeText = {
   'crystallize.groupInstalled': { zh: '安装的', en: 'Installed' },
   'crystallize.mineBadge': { zh: '我提炼的', en: 'mine' },
 
+  // ── 产物栏（分批第 92 批：U1 骨架的右栏，常驻、不随对话滚走） ──
+  'crystallize.artifactTitle': { zh: '产物', en: 'Artifact' },
+  'crystallize.artifactFiles': { zh: '文件', en: 'Files' },
+  'crystallize.artifactChecks': { zh: '机械体检', en: 'Checks' },
+  // 接口只回“哪些项有问题”（`validation.problems`），没有“检查项总数”——
+  // 所以这里不能说“N 过 M 缺”，只能说实话：通过了 / 有几项问题。
+  'crystallize.artifactChecksPassed': { zh: '通过', en: 'Passed' },
+  'crystallize.artifactChecksProblems': { zh: '{n} 项问题', en: '{n} problems' },
+  'crystallize.artifactVersion': { zh: '第 {n} 版', en: 'v{n}' },
+  'crystallize.artifactEmpty': {
+    zh: '还没有产物。起草完成后，文件会出现在这里；过程仍留在中间那一栏。',
+    en: 'No artifact yet. Files show up here once drafting finishes; the process stays in the middle pane.',
+  },
+  'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
+  'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
+  'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
+
   // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },
   'crystallize.errDraftRejected': { zh: '起草未受理：{error}', en: 'Draft not accepted: {error}' },

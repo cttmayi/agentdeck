@@ -3709,6 +3709,62 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v) => String(v),
   },
+  // ══════════════ 产物栏（分批第 92 批：第三列 / 窄屏抽屉）══════════════
+  {
+    view: '沉淀',
+    key: 'crystal.artifactPanePresent',
+    label: '★★ 产物栏存在（设计 §12.12：沉淀页 = 对话 + 产物，产物必须一眼能看到；原来它埋在流程页第 ③ 步的 tab 里）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactPaneOffGrid',
+    label:
+      '★★★ 1280 视口（不够 96rem）时产物栏**不占网格列、离屏当抽屉**——并排的话详情只剩 304px，内容横向溢出（实测当场有 5 条沉淀布局项红）',
+    ok: (v, f) => v === true && f['crystal.artifactGridCols'] === 2,
+    show: (v, f) => `${String(v)}　网格 ${f['crystal.artifactGridCols']} 列`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactTabVisible',
+    label: '★★ 窄屏有「产物」小旗入口（没有入口的话抽屉等于不存在）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactDrawerOpens',
+    label: '★★★ 点小旗之后抽屉**真的打开**（`data-open` 变成 true；这条钉住"按钮在、点了不开"）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactFileCount',
+    label: '★★★ 产物栏列的是**真产物**（`GET /api/crystallize/artifacts` 的文件清单，夹具那条至少 1 个）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个文件`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactPreviewLen',
+    label:
+      '★★★ 预览框里是**真产物正文**（非空，阈值 20 字符——这条夹具的正文只有 29 字符，' +
+      '按 100 会误判红）；空框也能"有 1 个文件"，所以要量正文',
+    ok: (v) => typeof v === 'number' && v >= 20,
+    show: (v) => `${v} 字符`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.artifactPreviewChanged',
+    label:
+      '★★ 点第二个文件之后预览**换成了它**（只量列表有 N 个文件的话，预览写死第一个也能过）。' +
+      '⚠️ 当前夹具那条草稿只有 1 个文件，这一条量到 `null`（不可测），不算通过也不算失败——' +
+      '真要多文件覆盖，得换一条 ≥ 2 个文件的夹具（见文末「没做的」）',
+    ok: (v, f) => (Number(f['crystal.artifactFileCount']) > 1 ? v === true : v === null),
+    show: (v, f) => `${String(v)}　文件 ${f['crystal.artifactFileCount']} 个`,
+  },
   // ══════════════ 深链语义（2026-10-21 第 7 批：真机上量出来的缺陷）══════════════
   {
     view: '沉淀',

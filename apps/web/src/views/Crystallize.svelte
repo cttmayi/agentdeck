@@ -37,6 +37,7 @@
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
   import CrystallizeView from '../components/CrystallizeView.svelte'
+  import CrystallizeArtifactPane from '../components/CrystallizeArtifactPane.svelte'
 
   /**
    * GET /api/crystallize/drafts 的行 —— ★ 分批第 17 批起**一行一个沉淀任务**（不是一版一行）。
@@ -280,9 +281,16 @@
   })
   $: convSources = sources.filter((s) => s.kind === 'conversation')
   $: taskSources = sources.filter((s) => s.kind === 'task')
+  /**
+   * 选中的那条沉淀对应的列表行（产物栏要它的"第 N 版"）。
+   *
+   * ⚠️ 用电 `versionRunIds.includes(...)` 判，而不是 `runId === ...`：点进来可能停在
+   *   历史某一版上（`row.runId` 只是最新那版），而列表行是**一条沉淀一行**。
+   */
+  $: selectedRow = filtered.find((r) => r.versionRunIds.includes($crystallize?.runId ?? '')) ?? null
 </script>
 
-<div class="split-layout with-detail">
+<div class="split-layout with-detail" class:with-artifact={$crystallize !== null}>
   <!-- ══════════════════ 左栏：沉淀任务列表 ══════════════════ -->
   <ListPane
     countLabel={$t('crystallize.listCount', { n: String(drafts.length) })}
@@ -359,6 +367,12 @@
         go('crystallize')
         void refresh()
       }}
+    />
+    <!-- ★ 分批第 92 批：产物提成常驻的第三列（设计 §12.3）。U1 只搬位置，
+         数据仍走 `GET /api/crystallize/artifacts`——与流程页同一份产出与同一份校验。 -->
+    <CrystallizeArtifactPane
+      draftRunId={$crystallize.runId}
+      version={selectedRow?.version ?? 1}
     />
   {:else}
     <MainArea empty={true} emptyTitle={$t('crystallize.pickHint')} emptyHint={$t('crystallize.listEmptyHint')}>
