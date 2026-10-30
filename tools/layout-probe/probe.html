@@ -4806,15 +4806,35 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const cyTabs = [...d().querySelectorAll('.pane-tabs > button')]
           facts['crystal.tabTexts'] = cyTabs.map((b) => text(b))
           facts['crystal.editorInContentTab'] = !!d().querySelector('.file-body textarea.editor')
+          // 分批第 120 批的最小实验：并排改造后到底是哪一层查不到？
+          facts['crystal.diagSide'] = d().querySelectorAll('.review-side').length
+          facts['crystal.diagCellAttr'] = d().querySelectorAll('[data-cell]').length
+          facts['crystal.diagCellCls'] = d().querySelectorAll('.review-cell').length
+          facts['crystal.diagReviewSection'] = (() => {
+            const active = [...d().querySelectorAll('.pane-tabs > button')].find(
+              (b) => b.getAttribute('aria-selected') === 'true',
+            )
+            return active ? text(active) : null
+          })()
           facts['crystal.diffVisibleInContentTab'] =
             d().querySelectorAll('.diff-line').length > 0
           const cyDiffTab = cyTabs.find((b) => text(b) === '差异')
           if (cyDiffTab) click(cyDiffTab)
+          /**
+           * ★ 分批第 120 批（审阅态并排）：这条的语义变了——宽屏两块**同时可见**；
+           * 窄屏（< 96rem，探针视口 1280 属于窄屏）只显示激活那一格。
+           * 所以断言改成"差异出现 **且窄屏下内容格不可见**"，而不是"编辑器消失"。
+           */
           const cySwapped = await until(
-            () => !d().querySelector('textarea.editor') && d().querySelectorAll('.diff-line').length > 0,
+            () => d().querySelectorAll('.diff-line').length > 0,
             60,
           )
-          facts['crystal.diffTabSwapsEditor'] = cySwapped
+          const cyContentCell = d().querySelector('.review-cell[data-cell="content"]')
+          facts['crystal.contentCellDisplay'] = cyContentCell
+            ? getComputedStyle(cyContentCell).display
+            : 'absent'
+          facts['crystal.diffTabSwapsEditor'] =
+            cySwapped && facts['crystal.contentCellDisplay'] === 'none'
           facts['crystal.diffLineCount'] = d().querySelectorAll('.diff-line').length
           const cyEditorRectBefore = cyBodyRect
           const cyDiffBox = d().querySelector('.diff-box')

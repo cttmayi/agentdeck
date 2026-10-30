@@ -4247,6 +4247,13 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.diagSide',
+    label: '诊断（临时）：并排容器 .review-side 的数量（最小实验：三条里哪条查得到，问题就在哪条）',
+    ok: (v, f) => typeof v === 'number' && v === Number(f['crystal.diagCellCls']) / 2,
+    show: (v, f) => `.review-side ${v} / [data-cell] ${f['crystal.diagCellAttr']} / .review-cell ${f['crystal.diagCellCls']}　档 ${JSON.stringify(f['crystal.diagReviewSection'])}`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.editorInContentTab',
     label: '默认标签是「内容」：编辑器在（审阅的第一件事是看字）',
     ok: (v) => v === true,
@@ -4255,7 +4262,9 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.diffTabSwapsEditor',
-    label: '★★★ 点「差异」⇒ 编辑区**让位**、diff 出现（同一个窗格换内容，不是并排挤成两半）',
+    label:
+      '★★★ 点「差异」⇒ diff 出现，且**窄屏（探针 1280）下内容格不可见**——宽屏改成并排两块同时可见，'
+      + '所以这条从"让位"改成"窄屏不可见"（§12.37/§12.38）',
     ok: (v) => v === true,
     show: (v, f) => `diff 行 ${f['crystal.diffLineCount']}`,
   },

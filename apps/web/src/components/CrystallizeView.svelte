@@ -2280,7 +2280,9 @@
                 {/if}
               </div>
 
-              {#if reviewTab === 'content'}
+              <!-- ★ 分批第 120 批（U3c-2 审阅态并排）：内容与差异并排；窄屏只显示激活那一格 -->
+              <div class="review-side" data-review-tab={reviewTab}>
+              <div class="review-cell" data-cell="content">
                 {#if selectedFile === ''}
                   <p class="faint small">{$t('crystallize.noFiles')}</p>
                 {:else if fileRows.find((r) => r.rel === selectedFile)?.change === 'D'}
@@ -2293,7 +2295,9 @@
                     spellcheck="false"
                   ></textarea>
                 {/if}
-              {:else if diffLoading}
+              </div>
+              <div class="review-cell" data-cell="diff">
+              {#if diffLoading}
                 <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
               {:else if selectedDiff && selectedDiff.hunks.length > 0}
                 <div class="diff-box mono">
@@ -2314,6 +2318,8 @@
               {:else}
                 <p class="faint small pad">{$t('crystallize.diffUnchanged')}</p>
               {/if}
+              </div>
+              </div>
             </div>
           </div>
 
@@ -3554,5 +3560,33 @@
     align-items: stretch;
     gap: var(--sp-2);
     padding: var(--sp-4);
+  }
+
+  /* U3c-2·审阅态：内容与差异并排（宽屏）；窄屏只显示激活那一格 */
+  .review-side {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--sp-2);
+    flex: 1;
+    min-height: 0;
+  }
+
+  .review-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* ⚠️ 断点统一 96rem（1536px）：探针视口 1280 属于窄屏，那里应当"只剩激活那一格" */
+  @media (max-width: 96rem) {
+    .review-side {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .review-side[data-review-tab='content'] .review-cell[data-cell='diff'],
+    .review-side[data-review-tab='diff'] .review-cell[data-cell='content'] {
+      display: none;
+    }
   }
 </style>
