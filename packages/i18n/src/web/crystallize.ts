@@ -459,6 +459,8 @@ export const crystallizeText = {
     en: 'Say something to this crystallization (wired in the next batch)',
   },
 
+  'crystallize.chatSend': { zh: '发送', en: 'Send' },
+
   // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },
   'crystallize.errDraftRejected': { zh: '起草未受理：{error}', en: 'Draft not accepted: {error}' },

@@ -4633,6 +4633,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.reviewInArtifactMsg'] = !!d().querySelector(
             '.crystal-msg[data-msg-role="artifact"] .conclusion-bar',
           )
+          // U3d：栏脚输入条真的能用了（不再是 disabled 占位）
+          facts['crystal.composerEnabled'] = (() => {
+            const input = d().querySelector('.crystal-composer-input')
+            if (!input) return null
+            const send = [...d().querySelectorAll('.crystal-composer button')].find((b) => text(b) === '发送')
+            return input.disabled === false && !!send
+          })()
           // U3c-2 第 4 步：把 B 类判据要的新语义先量出来（编辑器在产物消息里），
           // 旧判据不动——先有事实，再改断言（这一轮的惯性做法）。
           facts['crystal.editorInArtifactMsg'] = (() => {

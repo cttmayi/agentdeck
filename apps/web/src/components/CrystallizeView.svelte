@@ -292,6 +292,16 @@
   } | null = null
   /** 主区窗格的分段：内容 / 差异（同一位置切换，见 markup 里的三条规矩）。 */
   let reviewTab: 'content' | 'diff' = 'content'
+
+  /**
+   * ★ 分批第 121 批（U3d）：栏脚输入条真的接线了。
+   *
+   * 意图路由**规则优先、不让模型猜**（§12.12）：能对上一条已有动作的，就直接走那条动作；
+   * 对不上的**不假装懂**——回一条"我把它当成补充，但目前没有落点"。每句话都留一行回执，
+   * 使用者才知道平台怎么理解的。
+   */
+  let composerText = ''
+  let composerReceipt = ''
   /**
    * ★ 分批第 19 批：「过程」那一格里的**子 tab**。
    *
@@ -1290,6 +1300,41 @@
   }
 
   /** 按意见再起草一版：新 run 复用同一份素材 + 把上一版产出放进 material/previous-draft/。 */
+  /**
+   * 把栏脚那句话路由到一个**已有动作**上。
+   *
+   * · 「这里不对：…」/「再炼一版 …」⇒ 复用「按意见改一版」（`reviseDraft`，走 /api/crystallize/revise）
+   * · 「追加材料」⇒ 现在**没有写接口**，如实回执，不假装受理
+   * · 「回到 vN」⇒ 版本回滚在技能页（这里只说明去哪）
+   * · 其余 ⇒ 当成"补充"，同样如实说没有落点
+   */
+  function submitComposer(): void {
+    const text = composerText.trim()
+    if (text === '') return
+    const says =
+      (re: RegExp) => re.test(text)
+    if (says(/^(这里不对|不对|应该|再炼)/)) {
+      if (draftRunId === '' || step === 'target') {
+        composerReceipt = '还没有草稿可以改——先答完问题、点「开始提炼」。'
+        return
+      }
+      reviseFeedback = text
+      composerText = ''
+      composerReceipt = '按你这句改一版（走的是同一条「按意见改一版」）。'
+      void reviseDraft()
+      return
+    }
+    if (says(/^追加材料/)) {
+      composerReceipt = '追加材料还没有写接口（daemon 目前只读），这条先不受理——加完再来一次。'
+      return
+    }
+    if (says(/^回到\s*v\d+/)) {
+      composerReceipt = '版本回滚在「技能」页的历史里（这里只改草稿，不切版本）。'
+      return
+    }
+    composerReceipt = '我把它当成"补充"，但目前没有落点——能落地的只有「这里不对：…」「再炼一版」。'
+  }
+
   async function reviseDraft(): Promise<void> {
     if (reviseFeedback.trim() === '' || draftRunId === '') return
     revising = true
@@ -2564,15 +2609,28 @@
         </div>
       </div>
       <!-- 栏脚输入条：U3d 才接线，先只占位（不做成能按但没反应的按钮） -->
-      <form class="crystal-composer" onsubmit={(e) => e.preventDefault()}>
+      <form
+        class="crystal-composer"
+        onsubmit={(e) => {
+          e.preventDefault()
+          submitComposer()
+        }}
+      >
         <input
           class="crystal-composer-input"
           type="text"
-          disabled
+          bind:value={composerText}
           placeholder={$t('crystallize.chatPlaceholder')}
           aria-label={$t('crystallize.chatPlaceholder')}
         />
+        <button class="primary" type="submit" disabled={composerText.trim() === ''}>
+          {$t('crystallize.chatSend')}
+        </button>
       </form>
+      {#if composerReceipt !== ''}
+        <!-- 回执：平台怎么理解这句话，使用者要看得见（不是 toast，会随页面消失） -->
+        <p class="faint small composer-receipt">{composerReceipt}</p>
+      {/if}
     </div>
   {/snippet}
 </MainArea>
@@ -2663,6 +2721,11 @@
     border-top: 1px solid var(--line);
     padding-top: var(--sp-2);
     margin-top: var(--sp-2);
+  }
+
+  .composer-receipt {
+    flex-shrink: 0;
+    margin: var(--sp-1) 0 0;
   }
 
   .crystal-composer-input {

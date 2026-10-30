@@ -3853,6 +3853,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.composerEnabled',
+    label:
+      '★★★ 栏脚输入条**能用**（输入框不是 disabled、且有「发送」）——U3d：它从占位变成真的动作入口',
+    ok: (v) => v === true || v === null,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.reviewInArtifactMsg',
     label:
       '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',
