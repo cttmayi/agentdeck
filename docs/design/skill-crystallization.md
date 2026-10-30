@@ -4608,3 +4608,35 @@ const ast = parse(source, { modern: true })
 
 新增判据 `crystal.reviewInArtifactMsg`（`.crystal-msg[data-msg-role=artifact] .conclusion-bar` 在），
 实测 `true`。验证：探针 **596 项全绿**、`check` 2234 全绿、`typecheck` 0 错。
+
+### 12.31 U3c-2（删 `review-tabs`）开工前的精确清单（2026-10-30，**只清点**）
+
+删 tab 是一次**判据手术**，不是 UI 微调。实测的依赖面：
+
+- `probe.html` 里 **36 处**与 tab 相关（`review-tabs` / `pane-tabs` / `tabs-active` / `draftTab` / `reviewTab`）；
+- `run.mjs` 里 **10 条**判据直接以 tab 命名或断言 tab（`crystal.tabStripBox`、`crystal.reviewTabTexts`、
+  `crystal.defaultTabIsDraft`、`crystal.processSubTabs`、`crystal.processDefaultTab`、
+  `crystal.draftingTabTexts`、`crystal.draftingTabDefault`、`crystal.editorInContentTab`、
+  `crystal.diffTabSwapsEditor`、`crystal.diffSamePlaceAsEditor`）；
+- 界面上两处 `review-tabs`：审阅态（2163 行）与起草态（2491 行）。
+
+**处置分三类**（照 U3a/U3b/U3c-1 的做法，先分类再动手）：
+
+| 类 | 判据 | 处置 |
+|---|---|---|
+| **A. 随 tab 一起消失** | `tabStripBox` / `reviewTabTexts` / `defaultTabIsDraft` / `processSubTabs` / `processDefaultTab` / `draftingTabTexts` / `draftingTabDefault` | **删**，并在文档里写明"删判据的理由"：tab 这个交互形态本身被去掉了（编辑/差异改为同一窗格里并排或切换的另一种形态——U3c-2 要先定这个形态） |
+| **B. 语义保留、选择器换** | `editorInContentTab`（编辑器在主区里）/ `diffSamePlaceAsEditor`（差异与编辑器同位置）/ `reviewInputCount` | **改写**：断言"编辑器与差异在同一个容器里、且都在产物消息里"，不再依赖 tab 激活态 |
+| **C. 与新形态无关** | 结论条、问题清单、返工行、入库按钮那几十条 | **不动** |
+
+**动手顺序**（每步跑一遍探针，596 起算）：
+
+1. 先定"编辑/差异怎么切"（并排 or 分段控件）——**这是设计决定，不能顺手定**：并排要宽度、
+   分段控件要重新设计一个控件；两者都会改动 `paneTreeBodySideBySide` 那组几何判据。
+2. 加事实（`crystal.editorAndDiffSameContainer` 之类）→ 跑一遍，应仍 596 绿（旧 tab 还在）。
+3. 删 A 类 7 条 → 跑一遍（应 589 绿，少 7 条）。
+4. 改 B 类 3 条 → 跑一遍。
+5. 最后才删 UI 里的 tab 条 → 再跑一遍。
+
+**为什么先写清单再删**：这 10 条判据里有 7 条的名字本身就写着 tab。直接删 UI 的话，探针会在
+36 处报"没量到这个值"，而其中只有 10 处是真的该改——另外 26 处是"因为这些 fact 依赖 tab 才存在"，
+连带空掉。分类做在前面，才不会又一次"红一片、猜半天"。
