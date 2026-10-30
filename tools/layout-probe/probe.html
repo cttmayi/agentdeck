@@ -4633,6 +4633,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.reviewInArtifactMsg'] = !!d().querySelector(
             '.crystal-msg[data-msg-role="artifact"] .conclusion-bar',
           )
+          // U3c-2 第 4 步：把 B 类判据要的新语义先量出来（编辑器在产物消息里），
+          // 旧判据不动——先有事实，再改断言（这一轮的惯性做法）。
+          facts['crystal.editorInArtifactMsg'] = (() => {
+            const editor = d().querySelector('.crystal-msg[data-msg-role="artifact"] textarea')
+            return editor !== null
+          })()
           /**
            * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
            * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，

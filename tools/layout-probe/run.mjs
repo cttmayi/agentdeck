@@ -3829,6 +3829,14 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.editorInArtifactMsg',
+    label:
+      '★★ 编辑器在**产物消息里**（`.crystal-msg[data-msg-role=artifact] textarea`）——U3c-2 第 4 步：B 类判据的新语义先立成事实，旧断言（依赖 tab 激活态）下一批再换',
+    ok: (v) => v === true || v === null,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.tabStripButtonCount',
     label:
       '★ 审阅态当前的 tab 条有几个按钮（U3c-2 第 2 步：先把现状记下来——删 tab 之前要能对比"删掉了什么"，否则只能对着"没量到这个值"猜哪里连带空了）',

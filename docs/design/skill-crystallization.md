@@ -4684,3 +4684,14 @@ const ast = parse(source, { modern: true })
 那时探针会告诉我们哪些测量确实再也没人读。
 
 验证：探针 **591 项全绿**（598 − 7）、`check` 2234 全绿。
+
+### 12.34 U3c-2 第 4 步（第一半）：把 B 类要的新语义先立成事实（分批第 113 批）
+
+`crystal.editorInArtifactMsg` = 编辑器（`textarea`）在 `.crystal-msg[data-msg-role="artifact"]` 里，
+实测 **`true`**。旧判据（`editorInContentTab` 那条依赖 tab 激活态）**本轮不动**——先有事实再改断言，
+是这一轮反复验证过的顺序：事实能立刻证伪（`null` / `false` 都是信息），断言一改就掺进了意图。
+
+B 类剩下两条要等新形态（并排/切换）落定才有意义，所以第 4 步到此为止：
+**下一批动 markup（删两处 `review-tabs` + 并排布局），再回头改那 3 条断言。**
+
+验证：探针 **592 项全绿**、`check` 2234 全绿。
