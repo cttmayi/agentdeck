@@ -1780,6 +1780,15 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
         const badToolPath = probeQuery.get('badToolPath')
         const uiToolPath = probeQuery.get('uiToolPath')
 
+// 分批第 102 批：组间隔离第 4 步——先回中性态再进本组，"从哪开始"变成显式的
+
+
+f.contentWindow.location.hash = '#/tasks'
+
+
+await wait(140)
+
+
 facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wait: '.page-name 文本 = 工具 + 工具行 > 0' }
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
@@ -2046,6 +2055,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //    被卸掉了，选择器只剩"空态 / 死权限"两种形状——"框的条数 = 已装工具的
           //    动作总数""勾着的 = 这个组在接口上的 `allowedActions`"这两条**必须**在
           //    包装着的时候量，否则量到 0 = 0 这种空过的相等（踩过）。
+          // 分批第 102 批：组间隔离第 4 步——先回中性态再进本组，"从哪开始"变成显式的
+
+          f.contentWindow.location.hash = '#/tasks'
+
+          await wait(140)
+
           facts['entry.智能体组'] = { from: f.contentWindow.location.hash, to: '#/groups', wait: '.list-row-main 数 > 0' }
           f.contentWindow.location.hash = '#/groups'
           await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
