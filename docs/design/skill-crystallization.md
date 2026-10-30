@@ -4739,3 +4739,28 @@ B 类剩下两条要等新形态（并排/切换）落定才有意义，所以�
 
 新增判据 `crystal.draftingEvidenceVisibleWithoutTab`。验证：探针 **593 项全绿**、`check` 2234 全绿、
 `typecheck` 0 错。
+
+### 12.37 审阅态并排：为什么这一块要先改"加载时机"（2026-10-30，**未动手**）
+
+审阅态的「内容/差异」现在是**二选一**（`reviewTab = 'content' | 'diff'`，第 294 行；切换按钮在
+2232/2239 行；渲染分支在 2280 行起）。改成并排不只是 CSS：
+
+> **差异块的数据是"点差异时才加载"的**（`loadDiff('current')`，由切换按钮触发）。并排意味着
+> 两块同时可见 ⇒ 必须在**进入审阅态时就加载差异**，否则右半边永远停在"载入中/空"。
+
+所以这一块的顺序是：
+
+1. **改加载时机**：进入 review 态（`step === 'review'` 且 `artifacts !== null`）就 `void loadDiff('current')`；
+   同时保住"再点切换不重复拉"的现状（已有 `diffLoading` 守卫）。
+2. **改成两格布局**：`<div class="review-side" data-review-tab={reviewTab}>` 里放两个
+   `data-cell="content" | "diff"` 的格子；宽屏 `grid-template-columns: 1fr 1fr`；
+   窄屏（< 96rem，与其它断点一致）只显示 `data-review-tab` 指的那一格 —— **`reviewTab` 状态保留**，
+   它从此只服务窄屏。
+3. **判据**：`crystal.editorInContentTab` 与 `crystal.diffSamePlaceAsEditor` 改成
+   "宽屏两块**同时可见**、窄屏只剩一块且切换有效"；`crystal.reviewInputCount` 不动。
+4. 每步跑一遍探针（现在 **593**）。
+
+**为什么这次先写不先做**：第 1 步是**行为改动**（多了网络请求），第 2 步是布局改动，
+两件事叠在一起失败时很难判断是哪一层错了——而这一轮的教训是"一次只动一层"。
+另外 `loadDiff` 一进入审阅就拉，会让"审阅页打开速度"变化，这本身值得单独量一次
+（响应时间、失败时的提示），不能混在布局批里。
