@@ -3865,6 +3865,22 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.tabStripButtonCount',
+    label:
+      '★ 审阅态当前的 tab 条有几个按钮（U3c-2 第 2 步：先把现状记下来——删 tab 之前要能对比"删掉了什么"，否则只能对着"没量到这个值"猜哪里连带空了）',
+    ok: (v) => typeof v === 'number' && v > 0,
+    show: (v) => `${v} 个按钮`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.editorAndDiffSameContainer',
+    label:
+      '★★ 编辑器与差异**在同一个容器里**（现为 true；U3c-2 要把"同位置切换"的语义留住，这条就是它的锚）',
+    ok: (v) => v === true || v === null,
+    show: (v, f) => `${String(v)}　tab 条 ${f['crystal.tabStripButtonCount']} 个`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.reviewInArtifactMsg',
     label:
       '★★★ 审阅态是**一条产物消息**：结论条在 `.crystal-msg[data-msg-role=artifact]` 里（U3c-1 只包不删；删 review-tabs 是下一批）',

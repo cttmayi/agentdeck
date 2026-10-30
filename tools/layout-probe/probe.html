@@ -4633,6 +4633,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.reviewInArtifactMsg'] = !!d().querySelector(
             '.crystal-msg[data-msg-role="artifact"] .conclusion-bar',
           )
+          /**
+           * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
+           * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，
+           * 而不是删完对着 36 处"没量到这个值"猜哪里连带空了。
+           */
+          facts['crystal.tabStripPresent'] = !!d().querySelector('.review-tabs')
+          facts['crystal.tabStripButtonCount'] = d().querySelectorAll('.review-tabs > button').length
+          facts['crystal.editorAndDiffSameContainer'] = (() => {
+            const editor = d().querySelector('.editor-box, textarea')
+            const diff = d().querySelector('.diff-box')
+            if (!editor || !diff) return null
+            return editor.closest('.review-body, .pane-body, .crystal-msg') ===
+              diff.closest('.review-body, .pane-body, .crystal-msg')
+          })()
           facts['crystal.auditText'] = cyAudit ? text(cyAudit) : null
           facts['crystal.auditStartButton'] = !!(
             cyAudit &&
