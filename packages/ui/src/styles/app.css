@@ -713,7 +713,7 @@ hr {
 
 @media (min-width: 74rem) {
   .split-layout.with-artifact {
-    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) minmax(24rem, 30rem);
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) var(--artifact-w, 28rem);
   }
 }
 

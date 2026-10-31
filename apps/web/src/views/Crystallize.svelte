@@ -170,6 +170,53 @@
    * 操作没生效。
    */
   let materialRev = 0
+
+  /**
+   * ★ 分批第 171 批（使用者："能从中间消息拿宽度，改成可动态调节"）：**产物栏宽度可拖**。
+   *
+   * 为什么不是写死一个更宽的值：右栏装的是编辑器（树 + 正文），中间那栏装的是消息流，
+   * "多宽才够"取决于这一刻在干什么——改 SKILL.md 时要宽，看日志时要窄。试过写死 26–32rem，
+   * 中间那栏被挤到 352px，结论条从 y=704 掉到 1397（探针当场红）。所以给别人一个把手。
+   *
+   * 存 `localStorage`（键固定）：它是"我的窗口多大、我习惯多宽"，换条草稿不该重置。
+   */
+  const ARTIFACT_W_KEY = 'agentdeck.crystallize.artifactW'
+  const ARTIFACT_W_MIN = 320
+  const ARTIFACT_W_MAX = 760
+  const clampW = (px: number): number => Math.min(ARTIFACT_W_MAX, Math.max(ARTIFACT_W_MIN, px))
+  let artifactW = (() => {
+    try {
+      const raw = Number(localStorage.getItem(ARTIFACT_W_KEY))
+      return Number.isFinite(raw) && raw >= ARTIFACT_W_MIN ? clampW(raw) : 448
+    } catch {
+      return 448
+    }
+  })()
+
+  /**
+   * 拖动把手：`pointerdown` 记起点，`pointermove` 换算成宽度（**反向**：鼠标左移 ⇒ 栏变宽），
+   * `pointerup` 收尾并存档。⚠️ 监听挂在 `window` 上：拖动时鼠标很快离开那个 8px 的把手，
+   * 挂在把手上会"拖一下就断"。
+   */
+  function startResize(event: PointerEvent): void {
+    event.preventDefault()
+    const startX = event.clientX
+    const startW = artifactW
+    const move = (ev: PointerEvent): void => {
+      artifactW = clampW(startW - (ev.clientX - startX))
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      try {
+        localStorage.setItem(ARTIFACT_W_KEY, String(artifactW))
+      } catch {
+        // 存不上不影响用（下次开是默认值）
+      }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   const bumpMaterial = (): void => {
     materialRev += 1
   }
@@ -226,7 +273,11 @@
   $: selectedRow = filtered.find((r) => r.versionRunIds.includes($crystallize?.runId ?? '')) ?? null
 </script>
 
-<div class="split-layout with-detail" class:with-artifact={$crystallize !== null}>
+<div
+  class="split-layout with-detail"
+  class:with-artifact={$crystallize !== null}
+  style="--artifact-w:{artifactW}px"
+>
   <!-- ══════════════════ 左栏：沉淀任务列表 ══════════════════ -->
   <ListPane
     countLabel={$t('crystallize.listCount', { n: String(drafts.length) })}
@@ -310,6 +361,15 @@
          数据仍走 `GET /api/crystallize/artifacts`——与流程页同一份产出与同一份校验。
          ★ 分批第 147 批：材料可以在这里删（只有使用者给的），删完把 `materialRev` +1，
            中间那栏的「依据」跟着重读。 -->
+    <!-- ★ 分批第 171 批：右栏宽度可拖。把手贴在右栏的左缘（绝对定位在网格上），
+         拖的是 `--artifact-w`（界面里唯一使用它的地方）——不引入第二套宽度来源。 -->
+    <button
+      type="button"
+      class="pane-resizer"
+      aria-label={$t('crystallize.artifactResize')}
+      title={$t('crystallize.artifactResize')}
+      onpointerdown={startResize}
+    ></button>
     <CrystallizeArtifactPane
       draftRunId={$crystallize.runId}
       version={selectedRow?.version ?? 1}
@@ -329,6 +389,35 @@
      （§12.7「明确删掉的东西」：新建沉淀 Modal）。 -->
 
 <style>
+  /* 可拖的产物栏宽度（分批第 171 批）：把手 8px 宽，贴在右栏左缘；拖动时整页别选中文字 */
+  .split-layout {
+    position: relative;
+  }
+
+  .pane-resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: calc(var(--artifact-w, 28rem) - 4px);
+    width: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: col-resize;
+    z-index: 5;
+  }
+
+  .pane-resizer:hover {
+    background: var(--line-strong);
+  }
+
+  /* 窄屏（右栏变抽屉）时没有"两栏之间"这回事，把手不显示 */
+  @media (max-width: 73.99rem) {
+    .pane-resizer {
+      display: none;
+    }
+  }
+
   /* ── 行内容（壳不在这里：hover / 选中框 / 行高下限归 ListRow） ── */
   .crystal-list {
     list-style: none;

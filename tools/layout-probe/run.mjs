@@ -3367,6 +3367,27 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.artifactResize',
+    label:
+      '★★★ 产物栏宽度**可拖**（使用者："能从中间消息拿宽度，改成可动态调节"）：把把手往左拖 120px ⇒ ' +
+      '右栏真的宽 ~120、编辑器正文也跟着宽（只量"有把手"的话，拖不动也会绿）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.hasHandle === true &&
+      typeof v.before === 'number' &&
+      typeof v.after === 'number' &&
+      v.after >= v.before + 100 &&
+      typeof v.edAfter === 'number' &&
+      typeof v.edBefore === 'number' &&
+      v.edAfter >= v.edBefore + 100,
+    show: (v) =>
+      v === null || v === undefined
+        ? 'null'
+        : `栏 ${String(v.before)} → ${String(v.after)}px　正文 ${String(v.edBefore)} → ${String(v.edAfter)}px`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.artifactPanePresent',
     label: '★★ 产物栏存在（设计 §12.12：沉淀页 = 对话 + 产物，产物必须一眼能看到；原来它埋在流程页第 ③ 步的 tab 里）',
     ok: (v) => v === true,

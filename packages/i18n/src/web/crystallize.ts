@@ -357,6 +357,8 @@ export const crystallizeText = {
   },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
+  // ★ 分批第 171 批：产物栏宽度可拖（把手在中间栏与右栏之间）
+  'crystallize.artifactResize': { zh: '拖动调整产物栏宽度', en: 'Drag to resize the artifact pane' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
   // ── U3a 消息流外壳的栏脚（分批第 106 批：先占位，U3d 才接线） ──

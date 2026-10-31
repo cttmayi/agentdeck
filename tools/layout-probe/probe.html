@@ -5912,6 +5912,48 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               facts['crystal.artifactDrawerOpens'] =
                 (d().querySelector('.artifact-pane')?.dataset.open ?? '') === 'true'
 
+              /**
+               * ★ 分批第 171 批（使用者："能从中间消息拿宽度，改成可动态调节"）：**产物栏宽度可拖**。
+               *
+               * 判据量"拖 120px ⇒ 栏真的宽了 120、编辑器正文也跟着宽"——只量"有把手"的话，
+               * 把手拖不动也会绿。合成 `pointerdown/move/up`（拖动逻辑挂在 window 上，
+               * 所以 move/up 派发到 window，而不是把手自己）。
+               */
+              {
+                // 编辑器正文宽度（右栏里的 `textarea.editor` 那个格子）
+                const cyEdW = () => {
+                  const cell = d().querySelector('.artifact-pane .review-cell[data-cell="content"]')
+                  return cell ? Math.round(cell.getBoundingClientRect().width) : null
+                }
+                const artPaneEl = d().querySelector('.artifact-pane')
+                const resizer = d().querySelector('.pane-resizer')
+                const wBefore = artPaneEl ? Math.round(artPaneEl.getBoundingClientRect().width) : null
+                const edBefore = cyEdW()
+                if (resizer && artPaneEl) {
+                  const r = resizer.getBoundingClientRect()
+                  const y = Math.round(r.top + r.height / 2)
+                  const x = Math.round(r.left + r.width / 2)
+                  const opts = (cx) => ({ bubbles: true, cancelable: true, clientX: cx, clientY: y })
+                  resizer.dispatchEvent(new f.contentWindow.PointerEvent('pointerdown', opts(x)))
+                  f.contentWindow.dispatchEvent(
+                    new f.contentWindow.PointerEvent('pointermove', opts(x - 120)),
+                  )
+                  f.contentWindow.dispatchEvent(
+                    new f.contentWindow.PointerEvent('pointerup', opts(x - 120)),
+                  )
+                  await until(
+                    () => Math.round(artPaneEl.getBoundingClientRect().width) > (wBefore ?? 0) + 60,
+                    60,
+                  )
+                }
+                facts['crystal.artifactResize'] = {
+                  before: wBefore,
+                  after: artPaneEl ? Math.round(artPaneEl.getBoundingClientRect().width) : null,
+                  edBefore,
+                  edAfter: cyEdW(),
+                  hasHandle: !!resizer,
+                }
+              }
               const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]
               facts['crystal.artifactFileCount'] = artFiles.length
               // 正文在编辑器里（`textarea.editor`）：这是"点一个文件 ⇒ 下面就是它的内容"
