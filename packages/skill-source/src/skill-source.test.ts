@@ -1010,3 +1010,38 @@ describe('★ 清单声明的 include / exclude（"哪些文件是必须的"由�
     assert.doesNotThrow(() => assertValidPathPatterns(['docs/**'], 'exclude', '第 1 条'))
   })
 })
+
+describe('★ 加速器的 403（分批第 182 批）', () => {
+  const tree = {
+    tree: [{ path: 'SKILL.md', type: 'blob', size: 10, download_url: 'https://raw.githubusercontent.com/o/r/main/SKILL.md' }],
+  }
+  const ratelimited = () =>
+    new Response('rate', { status: 403, headers: { 'x-ratelimit-remaining': '0' } })
+
+  test('★★★ 走加速器时 403 会**重试**（它在轮换凭证：这一次 0、下一次可能是好的）', async () => {
+    let calls = 0
+    const fetchImpl = (async () => {
+      calls += 1
+      return ratelimited()
+    }) as unknown as typeof fetch
+    // 一直 403 ⇒ 最终仍然报限额，但**它试过不止一次**（直连时只会有 1 次，见下一条）
+    await assert.rejects(
+      () =>
+        resolveSkillSource(
+          { kind: 'url', url: 'https://github.com/o/r' },
+          {},
+          { fetchImpl, githubProxy: 'https://gh-proxy.org' },
+        ),
+      (err: Error) => /访问次数用完/.test(err.message),
+    )
+    assert.equal(calls >= 3, true, `走加速器时要重试（实际请求 ${String(calls)} 次）`)
+  })
+
+  test('★★ 直连时 403 + remaining=0 ⇒ 直接报限额（本机 IP 的真限额，重试只会白等）', async () => {
+    const fetchImpl = (async () => ratelimited()) as unknown as typeof fetch
+    await assert.rejects(
+      () => resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl }),
+      (err: Error) => /访问次数用完/.test(err.message),
+    )
+  })
+})

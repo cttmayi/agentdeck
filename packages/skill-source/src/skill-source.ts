@@ -982,6 +982,20 @@ async function githubFetch(
 
     if (res.status === 403 || res.status === 429) {
       const remaining = res.headers.get('x-ratelimit-remaining')
+      /**
+       * ★ 分批第 182 批（使用者开了加速器之后报"GitHub 的访问次数用完了"）：**走加速器时要重试**。
+       *
+       * 实测（同一台机器、连着两次打同一个地址，走 `https://gh-proxy.org`）：
+       *   第 1 次 → `403`，`x-ratelimit-remaining: 0`
+       *   第 2 次 → `200`，`x-ratelimit-remaining: 2690`
+       * ⇒ 加速器是在**一组凭证之间轮换**的，它这一次撞上"用完了"的那把钥匙，下一次可能换一把好的。
+       * 所以我们不该把它的 403 当成终局——同一个请求**再试一次**就好。
+       * ⚠️ 只在**走加速器时**重试：直连时 403 + remaining=0 是本机 IP 的真限额，重试只会白等。
+       */
+      if (proxy !== null && hop < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * (hop + 1)))
+        continue
+      }
       throw new SkillSourceError(
         'github_rate_limited',
         remaining === '0'
