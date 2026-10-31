@@ -1763,7 +1763,43 @@ describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批
     assert.match(index!.text, /这次没有材料/, '索引要如实说"既没有来源 run，也没给材料"')
   })
 
-  test('★★ 边界：空白起只许新建、不许同时带 runId、材料超限拒绝', async () => {
+  test('★★★ 空白起 + 更新已有技能：把那条技能的整份原文摆进素材（existing-skill/），索引说清是空白起', async () => {
+    // 先造一条技能（走正规入库那条路，确保它是"库里真有的"）
+    const draftRunId = await blankDraft([{ name: '改动依据', text: '把启动流程写细一点' }], '空白起更新夹具')
+    const commit = await fetch(`${daemon.url}/api/crystallize/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        draftRunId,
+        target: { kind: 'new' },
+        slug: 'blank-update-fixture',
+        files: {
+          'SKILL.md':
+            '---\nname: blank-update-fixture\ndescription: 空白起更新的夹具\n---\n\n## When to Use\n\n当需要夹具时。\n\n## Procedure\n\n1. 跑。\n',
+        },
+      }),
+    })
+    assert.equal(commit.status, 201, await commit.clone().text())
+    const skillId = ((await commit.json()) as { skill: { id: string } }).skill.id
+
+    // 空白起 + update：**没有来源 run**，但"上一版"是库里那条技能
+    const updated = await draftAndWait({
+      startFrom: 'blank',
+      target: { kind: 'update', skillId },
+      materials: [{ name: '改动依据', text: '把启动流程写细一点' }],
+    })
+    const items = await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${updated}`,
+    )
+    const existing = items.items.find((i) => i.relPath === 'existing-skill/SKILL.md')
+    assert.ok(existing, '要更新的技能原文必须摆进素材（否则起草者只能重写一份）')
+    assert.match(existing!.text, /当需要夹具时/, '摆的是**内容本身**，不是一句"去库里看"')
+    const index = items.items.find((i) => i.relPath === '00-README.md')!
+    assert.match(index.text, /更新现有 skill「blank-update-fixture」/, '索引要写清这次是改哪一份')
+    assert.match(index.text, /空白起/, '同时又如实说"没有来源 run"')
+  })
+
+  test('★★ 边界：空白起不许同时带 runId、不能优化智能体指令、材料超限拒绝', async () => {
     const withRun = await fetch(`${daemon.url}/api/crystallize/draft`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1776,13 +1812,24 @@ describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批
     assert.equal(withRun.status, 400, await withRun.clone().text())
     assert.equal(((await withRun.json()) as { code?: string }).code, 'blank_with_run')
 
-    const updateTarget = await fetch(`${daemon.url}/api/crystallize/draft`, {
+    // ★ 分批第 165 批：空白起**不再**一律拒更新——"上一版"是技能库里那条技能，跟来源 run 无关。
+    //   这里给一个不存在的 skillId，应当走到 404（而不是像以前那样被 `blank_requires_new` 挡在门口）。
+    const updateMissing = await fetch(`${daemon.url}/api/crystallize/draft`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'update', skillId: 'x' } }),
+      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'update', skillId: 'nope' } }),
     })
-    assert.equal(updateTarget.status, 400, await updateTarget.clone().text())
-    assert.equal(((await updateTarget.json()) as { code?: string }).code, 'blank_requires_new')
+    assert.equal(updateMissing.status, 404, await updateMissing.clone().text())
+    assert.equal(((await updateMissing.json()) as { code?: string }).code, 'skill_not_found')
+
+    // 但"优化智能体指令"仍然不行：候选是"这次 run 上真实用过的那两条"，没有来源 run 就没有候选
+    const agentTarget = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'agent', agentId: agentId } }),
+    })
+    assert.equal(agentTarget.status, 400, await agentTarget.clone().text())
+    assert.equal(((await agentTarget.json()) as { code?: string }).code, 'blank_no_agent')
 
     const tooBig = await fetch(`${daemon.url}/api/crystallize/draft`, {
       method: 'POST',

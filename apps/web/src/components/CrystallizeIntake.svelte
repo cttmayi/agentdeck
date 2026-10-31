@@ -5,6 +5,7 @@
    * ⚠️ 语言与 persona 轨**不问**——`POST /api/crystallize/draft` 没有对应入参，问了就是死接口。
    */
   import { t } from '../lib/i18n.ts'
+  import { api } from '../lib/api.ts'
 
   interface LoadedSkill {
     id: string
@@ -53,11 +54,11 @@
   type Stage = 'start' | 'detail' | 'purpose' | 'blankMaterial' | 'ready'
   // 空白起：起点已经定了（用户在「新建沉淀」里选了它），从这里直接问作用描述——不再多问一遍。
   // ⚠️ 起始值由父级给（`bind:stage`），这里只保证"blank 时候不会停在 start 那一问上"。
-  $effect(() => {
-    if (blank && stage === 'start') stage = 'purpose'
-    // 空白起：目标只能是"新建"（没有来源 run 就没有"更新谁"这回事）
-    if (blank && kind === '') kind = 'new'
-  })
+  /**
+   * ★ 分批第 165 批：空白起的**第一问回来了**——但要问的是"新建一份，还是改一份已有的"
+   * （不是问来源：来源在入口那一屏已经定了"空白起"）。原来这里直接把 stage 推到 `purpose`，
+   * 于是"改已有技能"这条路在空白起根本不存在。
+   */
 
   /**
    * ★ 分批第 145 批（U4c 补，§12.5）：**栏脚输入条的作答落到当前这一问**。
@@ -101,7 +102,26 @@
   /** 空白起时使用者一开始给的材料（一段文本，可空）。 */
   let materialText = $state('')
 
-  const skills = $derived(targets?.loadedSkills ?? [])
+  /**
+   * ★ 分批第 165 批（§12.58）：**空白起也能更新一份已有技能**。
+   *
+   * 空白起没有来源 run ⇒ 没有 `targets` ⇒ `loadedSkills` 为空，"改哪一份"就没得选。
+   * 但候选本来就该是**技能库里的全部技能**（"上一版"是库里那条，跟来源 run 无关），
+   * 所以空白起时直接问 `GET /api/skills`。
+   */
+  let blankSkills = $state<Array<{ id: string; slug: string; name: string; description: string | null; source: 'mine' | 'installed' }>>([])
+  $effect(() => {
+    if (!blank) return
+    void (async () => {
+      try {
+        const res = await api<{ skills: typeof blankSkills }>('/api/skills')
+        blankSkills = res.skills ?? []
+      } catch {
+        blankSkills = []
+      }
+    })()
+  })
+  const skills = $derived(blank ? blankSkills : (targets?.loadedSkills ?? []))
   /**
    * ⚠️ 防御式取值：`agentTargets` 在某些接口/夹具里可能缺省。第一版直接 `targets.agentTargets.executor`，
    * 一旦它是 undefined 就抛 TypeError——而**组件里未捕获的异常会整页崩**，表现是后面几十条判据
@@ -159,8 +179,8 @@
   {#if targets === null && !blank}
     <div class="skeleton" style="height:1.1rem"></div>
   {:else}
-    <!-- ★ 空白起（blank）没有"起点问"这一步（起点已在 `#/crystallize/new` 那一屏选过）⇒ 不回放它 -->
-    {#if stage !== 'start' && !blank}
+    <!-- ★ 分批第 165 批：空白起也有第一问（新建 / 改一份已有的），只是不问"从哪来" -->
+    {#if stage !== 'start'}
       <div class="qa-msg" data-msg-role="assistant">
         <p class="intake-q">这次要沉淀成什么？</p>
       </div>
@@ -184,7 +204,7 @@
               >
             </button>
           {/if}
-          {#if agents.length > 0}
+          {#if agents.length > 0 && !blank}
             <button type="button" class="intake-choice" onclick={() => pickStart('agent')}>
               优化智能体指令<span class="faint small">只改指令，不新建智能体</span>
             </button>

@@ -759,7 +759,9 @@
         blankStart || blankMode
           ? {
               startFrom: 'blank' as const,
-              target: { kind: 'new' as const, purpose: purpose.trim() },
+              // ★ 分批第 165 批（§12.58）：空白起也能"改一份已有技能"——目标照 `target` 传，
+              //   只有"优化智能体指令"在空白起不可选（没有来源 run 就没有候选，daemon 拒绝）。
+              target,
               ...(blankMaterialText.trim() === ''
                 ? {}
                 : { materials: [{ text: blankMaterialText.trim() }] }),

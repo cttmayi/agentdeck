@@ -3684,6 +3684,28 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.blankTargetQuestion',
+    // ★ 分批第 165 批（§12.58）：空白起的第一问从"作用描述"改成"新建一份技能 / 优化已有技能"
+    //   （使用者定：空白起也要能改一份已有技能）。这条量的是**那一问本身**在不在。
+    label: '★★★ 空白起的第一问是「这次要沉淀成什么？」，并且给了「新建一份技能」「优化已有技能」两个选项' +
+      '（技能库为空时只给新建；库里有一条就必须给"改它"）',
+    ok: (v, f) => {
+      const c = f['crystal.blankTargetChoices'] ?? {}
+      const skills = typeof c.skills === 'number' ? c.skills : 0
+      return (
+        typeof v === 'string' &&
+        v.includes('沉淀成什么') &&
+        c.new === true &&
+        (skills === 0 ? true : c.update === true)
+      )
+    },
+    show: (v, f) => {
+      const c = f['crystal.blankTargetChoices'] ?? {}
+      return `问「${String(v)}」　新建 ${String(c.new)}／优化 ${String(c.update)}　库里 ${String(c.skills)} 份技能`
+    },
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankIntakeQuestion',
     label:
       '★★ 空白起的目标屏**直接问作用描述**（起点已在入口选定，不再问"这次要沉淀成什么"），且必答输入框在',

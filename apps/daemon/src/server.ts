@@ -6053,15 +6053,39 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         | { kind: 'agent'; agentId: string }
       const t = raw?.target as Record<string, unknown> | undefined
       if (startFromBlank) {
-        if (t?.kind !== 'new') {
+        /**
+         * ★ 分批第 165 批（§12.58）：空白起现在也支持**更新一份已有技能**。
+         *
+         * 为什么原来只许新建：那句话是"更新/优化都要有一条已有的东西当上一版，而空白起没有"。
+         * 但这对 update 并不成立——"上一版"是**技能库里的那条技能**（`existing-skill/`），
+         * 跟有没有来源 run 无关；空白起恰恰是"我手上没有一次跑过的记录，但我知道要改哪个技能"
+         * 的用法。真正不成立的是 **agent**：优化指令的候选是"这次 run 上真实用过的那两条"，
+         * 没有来源 run 就没有候选 ⇒ 那一条继续拒，并说清原因。
+         */
+        if (t?.kind === 'new') {
+          target = { kind: 'new', purpose: typeof t['purpose'] === 'string' ? t['purpose'].trim() : '' }
+        } else if (t?.kind === 'update') {
+          const skillId = typeof t['skillId'] === 'string' ? t['skillId'] : ''
+          if (skillId === '') {
+            sendJson(res, 400, { error: '更新需要 skillId', code: 'skill_id_required' })
+            return
+          }
+          target = { kind: 'update', skillId }
+        } else if (t?.kind === 'agent') {
           sendJson(res, 400, {
             error:
-              '「从空白/材料起」只能新建一份技能——更新/优化都要有一条已有的东西当"上一版"，而空白起没有',
-            code: 'blank_requires_new',
+              '「从空白/材料起」不能优化智能体指令：候选是"这次 run 上真实用过的那两条"，' +
+              '而空白起没有来源 run（请从有来源的对话/任务发起）',
+            code: 'blank_no_agent',
+          })
+          return
+        } else {
+          sendJson(res, 400, {
+            error: '需要 target（{kind:"new"} / {kind:"update"}）',
+            code: 'target_required',
           })
           return
         }
-        target = { kind: 'new', purpose: typeof t['purpose'] === 'string' ? t['purpose'].trim() : '' }
       } else if (t?.kind === 'new') {
         // 作用描述**可选**（2026-10-19 四轮定稿）：留空则由内置技能从素材推断，
         // 审阅时把推断出的 description 摆最上面让人否定。必填的时候每次新建都要
@@ -6158,11 +6182,20 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         })
         return
       }
-      const existingSkills = (targets?.loadedSkills ?? []).map((s) => ({
-        slug: s.slug,
-        name: s.name,
-        description: s.description,
-      }))
+      // ★ 分批第 165 批：空白起没有 `targets`，但"现有技能清单"（判重 / 更新场景的上下文）
+      //   可以照样从库里取——索引页里那一行不该因为起点不同就变成"没有已加载的技能"。
+      const existingSkills =
+        targets !== null
+          ? targets.loadedSkills.map((s) => ({
+              slug: s.slug,
+              name: s.name,
+              description: s.description,
+            }))
+          : (await store.listSkills(workspaceId)).map((s) => ({
+              slug: s.slug,
+              name: s.name,
+              description: s.description,
+            }))
       // 更新基线：把现有技能**整份**（正文 + 支持文件）摆进素材，agent 才能"修订"
       // 而不是重写。只给正文的话，它会把 references/ 里的东西当不存在。
       let updateSnapshot: ExistingSkillSnapshot | null = null
