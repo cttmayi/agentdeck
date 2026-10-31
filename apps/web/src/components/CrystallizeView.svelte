@@ -748,6 +748,16 @@
     /** ★ 分批第 166 批：材料是**一组**（可零份、可多份）。 */
     materials?: Array<{ text: string }>
   }): void {
+    /**
+     * ★ 分批第 175 批（使用者定：**没装 distilly 之前不应该能沉淀**）：
+     * 起草者是"按技能干活"的，没有那份技能它就没有"怎么写"的依据 ⇒ 在**发起之前**拦住，
+     * 并说清去哪儿装（沉淀页右上「沉淀设置」）。服务端的二次拦截是下一步（要同步改夹具）。
+     */
+    if (draftSkill.id === '') {
+      error = '还没安装「沉淀用技能」——先去右上角「沉淀设置」里一键安装，再回来点开始提炼。'
+      step = 'target'
+      return
+    }
     targetKind = payload.kind
     purpose = payload.purpose
     selectedSkillId = payload.skillId

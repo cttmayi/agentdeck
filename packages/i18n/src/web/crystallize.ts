@@ -359,12 +359,24 @@ export const crystallizeText = {
   'crystallize.artifactResize': { zh: '拖动调整产物栏宽度', en: 'Drag to resize the artifact pane' },
   // ── 沉淀用技能（分批第 173 批：注入式，但不预置在仓库里，由使用者自己装）──
   'crystallize.draftSkill': { zh: '沉淀用技能', en: 'Skill for drafting' },
-  'crystallize.draftSkillHint': {
-    zh: '起草时把这个技能注入给它（可选）。技能不随项目发布，装的是上游仓库里的那一份。',
-    en: 'Injected into the drafter (optional). The skill is not bundled — this installs the upstream copy.',
-  },
   'crystallize.draftSkillInstalled': { zh: '已装好：{name}（起草时会注入它）', en: 'Installed: {name} (injected while drafting)' },
   'crystallize.draftSkillInstall': { zh: '一键安装 distilly', en: 'Install distilly' },
+  // ── 沉淀设置页（分批第 175 批）──
+  'crystallize.settingsEntry': { zh: '沉淀设置', en: 'Crystallize settings' },
+  'crystallize.settingsSkill': { zh: '沉淀用技能', en: 'Skill for drafting' },
+  'crystallize.settingsSkillHint': {
+    zh: '起草时把这个技能注入给起草者（它按技能里的流程干活）。技能不随项目发布，一键安装的是上游仓库那份。',
+    en: 'Injected into the drafter (it follows that skill). Not bundled — the one-click install pulls the upstream copy.',
+  },
+  'crystallize.settingsSkillRequired': {
+    zh: '还没安装：装好之前不能开始沉淀（起草者手里没有"怎么写"的那份依据）。',
+    en: 'Not installed — crystallization cannot start until it is (the drafter would have no "how to write" reference).',
+  },
+  'crystallize.settingsInstalled': { zh: '装好了，现在可以开始沉淀。', en: 'Installed — crystallization can start now.' },
+  'crystallize.settingsSkillRequiredShort': {
+    zh: '未安装沉淀用技能 ⇒ 不能开始沉淀（右上「沉淀设置」里装）',
+    en: 'No drafting skill installed — crystallization is blocked (install it in Crystallize settings)',
+  },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
   // ── U3a 消息流外壳的栏脚（分批第 106 批：先占位，U3d 才接线） ──

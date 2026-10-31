@@ -3368,18 +3368,19 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.draftSkillSection',
+    // ★ 分批第 175 批（使用者："一键安装放到沉淀的设置里"）：安装按钮**搬到了设置页**，
+    //   右栏只留一句状态。所以这条判据从"二选一说得清"改成"**说清现在是哪一档**"：
+    //   未装要说"不能开始沉淀"，装了要说"已装好"。安装入口本身由设置页那条判据钉。
     label:
-      '★★ 右栏有「沉淀用技能」那一块，而且**二选一说得清**：已装好（说出名字）或给出「一键安装」按钮' +
-      '（分批第 173 批：技能不预置在仓库里、由使用者自己装）',
+      '★★ 右栏说清「沉淀用技能」现在是哪一档：未装 ⇒ 明说**不能开始沉淀**，已装 ⇒ 明说已装好' +
+      '（安装入口搬进了「沉淀设置」，分批第 175 批）',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.present === true &&
-      (v.hasInstall === true || String(v.text).includes('已装好')),
+      (String(v.text).includes('未安装') || String(v.text).includes('已装好')),
     show: (v) =>
-      v === null || v === undefined
-        ? 'null'
-        : `在 ${String(v.present)}　可安装 ${String(v.hasInstall)}　「${String(v.text)}」`,
+      v === null || v === undefined ? 'null' : `在 ${String(v.present)}　「${String(v.text)}」`,
   },
   {
     view: '沉淀',

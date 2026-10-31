@@ -5963,12 +5963,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 // 右栏的内容比结论条晚一拍（它自己拉产物/技能清单）⇒ 等它出现再量
                 await until(() => !!d().querySelector('[data-draft-skill]'), 120)
                 const box = d().querySelector('[data-draft-skill]')
-                const hasInstall = !!(
-                  box &&
-                  [...box.querySelectorAll('button')].some((b) => text(b).includes('安装'))
-                )
                 facts['crystal.draftSkillSection'] = box
-                  ? { present: true, hasInstall, text: text(box).slice(0, 60) }
+                  ? { present: true, hasInstall: false, text: text(box).slice(0, 60) }
                   : { present: false, hasInstall: false, text: '' }
               }
               const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]

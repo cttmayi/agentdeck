@@ -441,20 +441,13 @@
     <h2>{$t('crystallize.artifactTitle')}</h2>
     <div class="pane-actions">
       <!-- ★ 分批第 174 批：栏头的"第 N 版"去掉了（同上：它只是个计数，没有行为依赖） -->
-      <!-- ★ 分批第 173 批：沉淀用技能（可选）挂在栏头——它不该占正文的竖向空间
-           （右栏的高度是编辑器的：多 40px 就把编辑器推出首屏，探针会红）。 -->
-      <span class="artifact-skill" data-draft-skill title={$t('crystallize.draftSkillHint')}>
-        {#if draftSkill.id !== ''}
-          <span class="faint small">{$t('crystallize.draftSkillInstalled', { name: draftSkill.name || draftSkill.slug })}</span>
-        {:else}
-          <button
-            type="button"
-            class="ghost small"
-            disabled={skillInstalling}
-            onclick={() => void installDraftSkill()}
-          >{skillInstalling ? '…' : $t('crystallize.draftSkillInstall')}</button>
-        {/if}
-      </span>
+      <!-- ★ 分批第 175 批：安装入口挪进「沉淀设置」（使用者定），这里只在没装时说一句 -->
+      {#if draftSkill.id === ''}
+        <!-- 安装入口在「沉淀设置」（使用者定）；这里给一句状态 + 一个去处 -->
+        <span class="artifact-skill faint small" data-draft-skill>
+          {$t('crystallize.settingsSkillRequiredShort')}
+        </span>
+      {/if}
       <button type="button" class="ghost artifact-close" onclick={() => (drawerOpen = false)}>
         {$t('crystallize.artifactClose')}
       </button>

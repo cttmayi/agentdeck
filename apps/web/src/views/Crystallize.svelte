@@ -36,6 +36,7 @@
   import MainArea from '../components/MainArea.svelte'
   import CrystallizeView from '../components/CrystallizeView.svelte'
   import CrystallizeArtifactPane from '../components/CrystallizeArtifactPane.svelte'
+  import CrystallizeSettings from '../components/CrystallizeSettings.svelte'
 
   /**
    * GET /api/crystallize/drafts 的行 —— ★ 分批第 17 批起**一行一个沉淀任务**（不是一版一行）。
@@ -240,6 +241,13 @@
       //   "从哪开始"做成了流程页外面的一个动作；对话式页面里，这件事就该是一条消息。
       onActivate: () => goCrystallize('new'),
     },
+    {
+      id: 'settings',
+      // ★ 分批第 175 批（使用者：把一键安装放进"沉淀设置"）：设置是路由 `#/crystallize/settings`。
+      label: $t('crystallize.settingsEntry'),
+      kind: 'ghost',
+      onActivate: () => goCrystallize('settings'),
+    },
   ])
   onDestroy(() => clearPageActions('crystallize'))
 
@@ -344,7 +352,9 @@
   </ListPane>
 
   <!-- ══════════════════ 右栏：流程页 / 空态 ══════════════════ -->
-  {#if $crystallize !== null}
+  {#if $crystallize !== null && $crystallize.runId === 'settings'}
+    <CrystallizeSettings />
+  {:else if $crystallize !== null}
     <CrystallizeView
       runId={$crystallize.runId}
       sourceLabel={selectedLabel}
