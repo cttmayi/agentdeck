@@ -49,6 +49,7 @@
   // ★ 分批第 153 批：编辑器搬进右栏 ⇒ 它的状态住在一个 runes 模块里（两个组件读同一份，
   //   见该文件头：legacy 父 → runes 子的 prop 更新不传播）
   import CrystallizeDraftState from './CrystallizeDraftState.svelte'
+  import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
   import { editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
@@ -210,6 +211,12 @@
   let diffLoading = false
   let dirty = false
   let savingDraft = false
+  /**
+   * ★ 分批第 168 批（回归修复）：右栏是不是"真列"。
+   * 窄窗口里右栏是抽屉（移出视口）⇒ 编辑器必须回到**中间那条产物消息**里，
+   * 否则使用者看不到草稿内容、也没法在输入条里就着内容反馈。
+   */
+  let paneWide = true
 
   /** 编辑器（子组件）把编辑现场推上来。见上面那段：为什么必须是回调。 */
   function syncFromEditor(s: {
@@ -222,6 +229,7 @@
     diffLoading: boolean
     dirty: boolean
     savingDraft: boolean
+    paneWide: boolean
   }): void {
     artifacts = s.artifacts
     fileRows = s.fileRows
@@ -232,6 +240,7 @@
     diffLoading = s.diffLoading
     dirty = s.dirty
     savingDraft = s.savingDraft
+    paneWide = s.paneWide
   }
 
   /**
@@ -1847,6 +1856,10 @@
         <!-- ★ 分批第 155 批：编辑器搬进右栏；这里只留一个**什么也不画**的状态推送器
              （legacy 组件的 `$:` 读不到模块信号，必须由 runes 组件回调推上来）。 -->
         <CrystallizeDraftState onstate={syncFromEditor} />
+        <!-- ★ 分批第 168 批：窄窗口（右栏是抽屉）时，编辑器回到这条产物消息里 -->
+        {#if !paneWide}
+          <CrystallizeDraftEditor />
+        {/if}
             </div>
 {/if}
 

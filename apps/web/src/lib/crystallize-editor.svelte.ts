@@ -348,6 +348,28 @@ export function parseFrontmatterName(text: string): string {
 }
 
 /**
+ * ★ 分批第 168 批（回归修复）：**右栏是不是"真列"**（≥ 74rem）。
+ *
+ * 为什么要在这里判断：编辑器（§12.53 选项 2）搬进右栏之后，窄于 74rem 的窗口里右栏是
+ * **从右侧滑出的抽屉**（`translateX(100%)`，看不见）⇒ 窄窗口下使用者根本够不着编辑器，
+ * 表现就是"看不到 skill 的细节、也没法反馈"。所以窄的时候它回到**中间那条消息里**：
+ * 状态只有一份（就在这个模块里），换的是"渲染在哪一栏"，不是两份编辑器。
+ *
+ * ⚠️ 断点必须与 `app.css` 的 `@media (min-width: 74rem)` 和右栏自己的
+ * `@media (max-width: 73.99rem)` 对齐——三处不一致就会出现"右栏画成抽屉、编辑器却还在里面"。
+ */
+export const PANE_COLUMN_MEDIA = '(min-width: 74rem)'
+export const paneWide = $state({
+  value: typeof window === 'undefined' ? true : window.matchMedia(PANE_COLUMN_MEDIA).matches,
+})
+if (typeof window !== 'undefined') {
+  const mq = window.matchMedia(PANE_COLUMN_MEDIA)
+  mq.addEventListener('change', (event) => {
+    paneWide.value = event.matches
+  })
+}
+
+/**
  * 单例。理由见文件头：一个页面只有一条沉淀被打开；`open()` 会整份重置。
  * 想并排看两条，改成 `Map<runId, DraftEditor>` —— 现在没有这个用法。
  */

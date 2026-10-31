@@ -3348,6 +3348,25 @@ const CHECKS = [
   // ══════════════ 产物栏（分批第 92 批：第三列 / 窄屏抽屉）══════════════
   {
     view: '沉淀',
+    key: 'crystal.narrowEditorInCenter',
+    // ★ 分批第 168 批（回归修复）：编辑器搬进右栏之后，窄于 74rem 的窗口里右栏是**移出视口的
+    //   抽屉** ⇒ 使用者看不到草稿内容、也没法反馈（这条是被真实使用打回来的）。修法是
+    //   "宽时在右栏、窄时回中间"，状态仍然只有一份；这条判据量窄窗口那一路。
+    label:
+      '★★★ 窄窗口（1000px，右栏退化成抽屉）时编辑器**回到中间那条产物消息里**——' +
+      '否则它藏在移出视口的抽屉里，草稿内容根本看不见（这条是回归：曾一度两边都够不着）',
+    ok: (v, f) => v === true && f['crystal.narrowPaneIsDrawer'] === true,
+    show: (v, f) => `中间有编辑器 ${String(v)}　右栏是抽屉 ${String(f['crystal.narrowPaneIsDrawer'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.wideEditorBackInPane',
+    label: '★★★ 宽窗口下编辑器**回到右栏**（与上面那条成对：只量窄的一路，宽的那一路搬错了也测不出来）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.artifactPanePresent',
     label: '★★ 产物栏存在（设计 §12.12：沉淀页 = 对话 + 产物，产物必须一眼能看到；原来它埋在流程页第 ③ 步的 tab 里）',
     ok: (v) => v === true,

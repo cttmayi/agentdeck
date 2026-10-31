@@ -22,7 +22,7 @@
   import { api } from '../lib/api.ts'
   // ★ 分批第 155 批：编辑器（树 + 内容/差异 + 保存改动）搬进这一栏
   import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
-  import { editor } from '../lib/crystallize-editor.svelte.ts'
+  import { editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
 
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
@@ -546,7 +546,12 @@
              · 文件列表 → 编辑器的文件树（`.file-row`，带变更徽标与 +n −m）；
              · 只读预览 → 编辑器的正文框（还能直接改，改完「保存改动」落盘）。
            于是这里换成编辑器本身。同一份文件不再有"预览一处、编辑一处"两个出处。 -->
-      <CrystallizeDraftEditor />
+      <!-- ★ 分批第 168 批：只在右栏是**真列**时渲染编辑器；窄窗口（抽屉形态）里它回到中间那条
+           消息里（见 `lib/crystallize-editor.svelte.ts` 的 `paneWide`）——否则它藏在移出视口的
+           抽屉里，使用者看不到草稿内容，也就没法反馈。 -->
+      {#if paneWide.value}
+        <CrystallizeDraftEditor />
+      {/if}
 
       <section class="artifact-checks">
         <h3 class="artifact-sub">

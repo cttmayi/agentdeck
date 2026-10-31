@@ -4878,6 +4878,50 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const b = d().querySelector('.conclusion-bar')
             return !!b && Math.round(b.getBoundingClientRect().width) > 800
           }, 60)
+          /*
+           * ★ 分批第 168 批（回归修复）：**窄窗口里编辑器必须回到中间那条消息里**。
+           *
+           * 这一条是被真实使用打回来的：编辑器搬进右栏之后，窄于 74rem 的窗口里右栏是移出视口的
+           * 抽屉 ⇒ 使用者"看不到 skill 的细节、也没法反馈"。修法是"宽时在右栏、窄时回中间"，
+           * 状态只有一份。这个条件**只在窄的时候成立**，所以照上面的做法把 iframe 收窄再量。
+           */
+          {
+            const cyWideW = f.style.width
+            f.style.width = '1000px'
+            await untilNet(
+              () => !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane'),
+              120,
+            )
+            const narrowPane = d().querySelector('.artifact-pane')
+            facts['crystal.narrowDebug'] = {
+              innerW: f.contentWindow.innerWidth,
+              panePos: narrowPane ? getComputedStyle(narrowPane).position : 'absent',
+              paneLeft: narrowPane ? Math.round(narrowPane.getBoundingClientRect().left) : null,
+              centerEditor: !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane'),
+              paneEditor: !!d().querySelector('.artifact-pane .review-pane'),
+            }
+            facts['crystal.narrowEditorInCenter'] =
+              !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane')
+            facts['crystal.narrowPaneIsDrawer'] = facts['crystal.narrowDebug'].panePos === 'fixed'
+            f.style.width = cyWideW
+            // 复原之后编辑器要回到右栏（宽窗口的形态）——不然就是"两边都不对"
+            await untilNet(
+              () =>
+                !d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane') &&
+                !!d().querySelector('.artifact-pane .review-pane'),
+              120,
+            )
+            facts['crystal.wideDebug'] = {
+              innerW: f.contentWindow.innerWidth,
+              panePos: d().querySelector('.artifact-pane')
+                ? getComputedStyle(d().querySelector('.artifact-pane')).position
+                : 'absent',
+              centerEditor: !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane'),
+              paneEditor: !!d().querySelector('.artifact-pane .review-pane'),
+            }
+            facts['crystal.wideEditorBackInPane'] =
+              !!d().querySelector('.artifact-pane .review-pane')
+          }
 
           // ① 结论条：在、而且**在首屏**（改前审阅的结论在 y=932，900 高的窗口看不到）
           // ★ 2026-10-21：结论条**只有一条**（原来是三条横条竖着摞：审核块 + 校验条 + frontmatter 摘要）

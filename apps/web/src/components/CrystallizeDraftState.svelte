@@ -12,7 +12,7 @@
    *（兄弟组件之间没有通道），挂一个隐藏的编辑器实例又会重复渲染整棵树。
    * 所以拆出一个只做推送的小组件，父组件静态地渲染它一次。
    */
-  import { editor } from '../lib/crystallize-editor.svelte.ts'
+  import { editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
 
   let {
     onstate,
@@ -27,6 +27,8 @@
       diffLoading: boolean
       dirty: boolean
       savingDraft: boolean
+      /** ★ 分批第 168 批：右栏是否"真列"（否则编辑器要回到中间那条消息里）。 */
+      paneWide: boolean
     }) => void
   } = $props()
 
@@ -41,6 +43,7 @@
       diffLoading: editor.diffLoading,
       dirty: editor.dirty,
       savingDraft: editor.savingDraft,
+      paneWide: paneWide.value,
     })
   })
 </script>
