@@ -3128,7 +3128,9 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.processOpens',
-    label: '★★ 起草 run 的过程仍在时间线里（U3b 的**系统消息**；tab 删了它也还在）',
+    label:
+      '★★ 起草这一轮仍在时间线里（U3b 起在消息流里；分批第 193 批从系统行改成**助手行**，' +
+      'tab 删了它也还在）',
     ok: (v) => v === true,
   },
   {
@@ -3144,31 +3146,56 @@ const CHECKS = [
       '★★ 页面上也没有 `.preview` 元素（与上一条一起判：只判折叠段的话，把预览换个名字/搬个位置照样过）',
     ok: (v) => v === true,
   },
+  /**
+   * ★ 分批第 193 批（使用者："目前沉淀还是显示「起草 run run 01M6… 已完成 完整日志」 更像任务，
+   *   不像是对话方式"）：起草那一轮从「抽屉分节 + run 抬头」改成**一条助手消息**。
+   *   下面这两条的**宿主**跟着换了（`[data-draft-turn]`），但它们量的还是同一件事
+   *   ——"时间线里有没有起草这一轮、它挂得住吗"。判据措辞也跟着说实话。
+   */
   {
     view: '沉淀',
     key: 'crystal.processDraftHasRunBlock',
-    label: '★ 「草稿过程」里有「起草 run」那一块（它才是起草过程的内容）',
+    label:
+      '★ 时间线里有「起草这一轮」那条消息（`[data-draft-turn]`）——它才是起草过程的内容',
     ok: (v) => v === true,
   },
   {
     view: '沉淀',
     key: 'crystal.draftSectionFound',
     label:
-      '夹具：系统消息里找得到「起草 run」那一块（下面几条量的是它的两态：最后结果 / 完整日志）',
+      '夹具：找得到起草那一轮的消息（下面几条量的是它的两态：最后结果 / 看过程）',
     ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftHeadText',
+    label:
+      '★★★ 起草那一轮的抬头是**一句人话**（写好了 / 这次没写成），不是任务式的「起草 run」抬头',
+    ok: (v) => typeof v === 'string' && v.length > 0 && !v.includes('起草 run'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftRunIdInHead',
+    label:
+      '★★★ 抬头里**没有 run id**（`run 01M6…` 挪进"它怎么做的"展开区）——这一条正是使用者报的原话：' +
+      '抬头写着 run id + 状态徽标，读起来像任务面板',
+    ok: (v) => v === false,
+    show: (v) => String(v),
   },
   {
     view: '沉淀',
     key: 'crystal.draftFinalText',
     label:
-      '★★★ 「起草 run」默认显示**最后结果**（那条 run 的最后一段正文）——改之前展开全是原始流水，人得自己在里面找最后那段话',
+      '★★★ 起草那一轮默认显示**最后结果**（那条 run 的最后一段正文）——改之前展开全是原始流水，人得自己在里面找最后那段话',
     ok: (v) => typeof v === 'string' && v.includes('探针夹具的最后结果'),
     show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
     key: 'crystal.draftLogAfterToggle',
-    label: '★★★ 点按钮之后**换成完整日志**（与任务页「最后结果 / 完整日志」同一个交互：同一块位置换内容）',
+    label:
+      '★★★ 点「它怎么做的」之后**展开过程日志**（同一块位置加内容；分批第 193 批把按钮从 h3 挪到消息末尾）',
     ok: (v) => v === true,
   },
   {
@@ -3684,8 +3711,9 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.stopInSystemMsg',
     label:
-      '★★ 「停止」在**起草那条系统消息里**（它和"这次起草跑到哪了"是同一件事；' +
-      '搬进消息却没从页头删的，这条会和上面那条一起红）',
+      '★★ 「停止」在**起草那条消息里**（分批第 193 批：那条消息的角色从系统行改成助手行，' +
+      '抬头也换成一句人话；它和"这次起草跑到哪了"是同一件事——搬进消息却没从页头删的，' +
+      '这条会和上面那条一起红）',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -3774,7 +3802,8 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.draftingLogInSystemMsg',
     label:
-      '★★★ 起草中的日志挂在**一条系统消息**上（U3b）——它和"起草完成"从此是同一条时间线上的东西，而不是页面上一个抽屉分节',
+      '★★★ 起草中的日志挂在**一条助手消息**上（分批第 193 批把角色从 `system` 改成 `assistant`：' +
+      '起草这一轮是它在做事，挂在系统行上是任务面板的做法）——它和"起草完成"是同一条时间线上的东西，不是页面上一个抽屉分节',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -3925,6 +3954,15 @@ const CHECKS = [
     // ★ 分批第 140 批：步骤条删掉之后，"起草中"这一屏的状态由顶栏徽标说。
     label: '★★ 起草中那一屏顶栏徽标说「起草中」（步骤条删了，但"在跑"这一眼要还在）',
     ok: (v) => typeof v === 'string' && v.includes('起草中'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingHeadText',
+    label:
+      '★★★ 起草**跑着**的时候抬头也是「正在把素材写成 skill…」这句人话（分批第 193 批：' +
+      '原来那一屏抬头是 `起草 run` + `run 01M6…` + 状态徽标，读起来像任务面板）',
+    ok: (v) => typeof v === 'string' && v.includes('正在把素材写成 skill') && !v.includes('run '),
     show: (v) => JSON.stringify(v),
   },
   {
@@ -4534,7 +4572,7 @@ function writeFakeGenericCli() {
       '#!/bin/sh',
       '# 探针夹具：假装成通用 runtime 的 CLI。',
       '#',
-      '# ★ 只对**审核那条 run** 挂着不退出（量"审核跑着的时候界面长什么样"）；',
+      '# ★ 只对**起草那条 run** 挂着不退出（量"起草跑着的时候界面长什么样"）；',
       '#   别的 run 一律立刻失败退出——探针里那几条夹具（对话第一句话 / 三步链派发）',
       '#   本来就是靠"`agent-cli` 不存在 ⇒ 立刻 ENOENT 失败"来避免真跑 CLI 的。',
       '#   ⚠️ 第一版假 CLI 对**谁都**挂 600 秒，于是那几条 run 一直"运行中"、任务页与',
@@ -4543,12 +4581,11 @@ function writeFakeGenericCli() {
       '#   这个坑花了两轮才定位：症状（探针超时、dump 空）离原因（假 CLI）隔了三层。',
       'if [ "$1" = "--version" ]; then echo "agent-cli 0.0-probe"; exit 0; fi',
       'case "$*" in',
-      `  *${PROBE_AUDIT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_LINE}"}\n'; sleep 600 ;;`,
-      // ★ 第 4 批加的第二条：**起草中那一屏**。它比审核那条更早被点着（夹具在起 Chrome
-      //   之前就发起），所以挂得久一些（1800s）——不然跑到沉淀那一节时它已经自己退出了，
-      //   量到的就是"起草 run 跑完了"，而那正是这一批要量的那一屏的**反例**。
+      // ★ 第 4 批加的这一条：**起草中那一屏**。夹具在起 Chrome 之前就发起，所以挂得久一些
+      //   （1800s）——不然跑到沉淀那一节时它已经自己退出了，量到的就是"起草 run 跑完了"，
+      //   而那正是这一批要量的那一屏的**反例**。
       `  *${PROBE_DRAFT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_DRAFT_LINE}"}\n'; sleep 1800 ;;`,
-      '  *) echo "agent-cli: 探针假 CLI 只服务审核那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
+      '  *) echo "agent-cli: 探针假 CLI 只服务起草那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
       'esac',
       '',
     ].join('\n'),
@@ -4556,8 +4593,6 @@ function writeFakeGenericCli() {
   )
   fs.chmodSync(script, 0o755)
 }
-/** 假 CLI 吐的那一行（`probe.html` 里按它判"日志真有内容"）。 */
-const PROBE_STUB_LINE = '探针夹具：审核 run 正在跑（假 CLI 的一条输出）。'
 /**
  * 起草中那一屏的假 CLI 输出行 + 记号。
  *
@@ -4566,14 +4601,6 @@ const PROBE_STUB_LINE = '探针夹具：审核 run 正在跑（假 CLI 的一条
  */
 const PROBE_STUB_DRAFT_LINE = '探针夹具：起草 run 正在跑（假 CLI 的一条输出）。'
 const PROBE_DRAFT_MARKER = 'PROBE-STUB-DRAFT-ONLY'
-/**
- * 假 CLI 凭什么认出"这是审核那条 run"：**内置 skill 审核者的身份里塞了这个记号**
- * （见下面那次 PATCH），而审核 run 的第一句话里带审核者的身份。
- *
- * 为什么不用 prompt 里的中文（"审核"/"脚本"之类）判：那是实现细节，改一句文案这条链
- * 就悄悄断了——而断了的表现是"审核 run 秒退"，看起来像"审核跑不起来"。
- */
-const PROBE_AUDIT_MARKER = 'PROBE-STUB-AUDIT-ONLY'
 
 /** 起 daemon（同一个数据目录、同一个端口，可能起两次——见下面"为什么起两次"）。 */
 let daemon = null
@@ -5204,44 +5231,12 @@ try {
     log(yellow(`⚠ 造三步链夹具时出错：${err}`))
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // 把内置 skill 审核者改挂 `generic`（探针这台一次性 daemon 上的临时改动）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // 为什么：`probe.html` 要**点界面上真的「开始审核」**，量"审核跑着的时候"那一屏。
-  // 内置审核者的 `runtimeKey` 是 `default`（跟随全局默认 ⇒ 这台机器上侦测到的是
-  // claude），照原样点下去会**真的拉起一个模型**——探针不许花使用者的额度（NFR-T-01）。
-  // 改成 `generic` 之后，daemon spawn 的是 PATH 最前面那个假 `agent-cli`
-  // （见 `writeFakeGenericCli`）：真 spawn、真 running、真日志、真取消，一个额度不花。
-  //
-  // ⚠️ 只改这一个 agent、只改这一个 runtime 字段，而且探针的 daemon 用完就整目录删掉；
-  //    没有任何判据依赖这个内置审核者的 runtimeKey（`agents.*` 那组量的是徽标与
-  //    选择器的**选项**），所以不会污染别的断言。
-  try {
-    const agentsRes = await fetch(`${base}/api/agents`)
-    const agentsPage = await agentsRes.json()
-    const skillReviewer = (agentsPage.items ?? agentsPage.agents ?? []).find(
-      (a) => a.role === 'skill-reviewer',
-    )
-    if (!skillReviewer) {
-      log(yellow('⚠ 没找到内置的 skill 审核者——"审核跑着"那一屏会量不到'))
-    } else {
-      const patchRes = await fetch(`${base}/api/agents/${encodeURIComponent(skillReviewer.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          runtimeKey: 'generic',
-          // ★ 身份里带一个记号：假 CLI 只对**带这个记号的 run** 挂着不退出（见 PROBE_AUDIT_MARKER）。
-          instructions: `${PROBE_AUDIT_MARKER}\n探针夹具：这条内置审核者的身份在探针的一次性 daemon 上被临时改过。`,
-        }),
-      })
-      if (!patchRes.ok) {
-        log(yellow(`⚠ 内置 skill 审核者改挂 generic 失败：HTTP ${patchRes.status}`))
-      }
-    }
-  } catch (err) {
-    log(yellow(`⚠ 内置 skill 审核者改挂 generic 时出错：${err}`))
-  }
+  // ★ 分批第 193 批删掉了一段**死代码**（它每次都打一句误导人的 ⚠）：
+  //   这里原来把"内置 skill 审核者"改挂 `generic` + 塞一个记号，好让界面上「开始审核」
+  //   点下去时假 CLI 挂着不退出（量"审核跑着"那一屏）。沉淀线的评审第 137 批就删了、
+  //   内置审核者第 191/192 批也随之下线 ⇒ 这段 PATCH 永远找不到那个 agent，于是每次跑探针
+  //   都打一句「⚠ 没找到内置的 skill 审核者——"审核跑着"那一屏会量不到」，而那一屏已经不存在。
+  //   同一批把假 CLI 里那条 `PROBE_AUDIT_MARKER` 分支也删了（没人会带那个记号）。
 
   // ══════════════════════════════════════════════════════════════════
   // 造**本地技能目录夹具**（Skills 页 →「设置」）

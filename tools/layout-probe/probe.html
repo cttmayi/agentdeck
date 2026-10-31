@@ -5160,21 +5160,32 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //   **系统消息**（`.crystal-msg[data-msg-role="system"]`）上（审阅态也在时间线里）。
           //   判据从"切到过程 tab 里看"改成"在系统消息里看"：两态（最后结果 / 完整日志）
           //   仍然要能切，过程格的尺寸判据也改量这条消息。
-          const draftSysMsg = () => d().querySelector('.crystal-msg[data-msg-role="system"]')
-          facts['crystal.processOpens'] = !!draftSysMsg()
-          const draftSection = draftSysMsg()
-            ? [...draftSysMsg().querySelectorAll('.drawer-section')].find((el) =>
-                (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
-              )
-            : null
+          /**
+           * ★ 分批第 193 批（使用者："目前沉淀还是显示「起草 run run 01M6… 已完成 完整日志」
+           *   更像任务，不像是对话方式"）：起草那一轮从**抽屉分节**（`起草 run` + run id +
+           *   状态徽标 + 「完整日志」按钮）改成**一条助手消息**（`.draft-turn`：一句人话
+           *   抬头 + 正文 + 一行小字的「它怎么做的」）。
+           *
+           * 所以这里的三条事实换了宿主——**不是判据没了**，量的还是同一件事：
+           *   · `processOpens` / `processDraftHasRunBlock`：这一屏有没有"起草那一轮"这块；
+           *   · `draftSectionFound`：下面几条（最后结果 / 两态切换）挂得住吗。
+           * 新建一个变量名（`draftTurn`）而不是留着 `draftSection` 骗自己：宿主真的换了。
+           */
+          const draftTurnMsg = () => d().querySelector('.crystal-msg[data-msg-role="assistant"] [data-draft-turn]')
+          facts['crystal.processOpens'] = !!draftTurnMsg()
+          const draftSection = draftTurnMsg()
           facts['crystal.draftSectionFound'] = !!draftSection
           facts['crystal.processDraftHasRunBlock'] = !!draftSection
+          // 抬头是**一句人话**（写好了 / 这次没写成），不许再出现 run id 或"起草 run"这种抬头
+          facts['crystal.draftHeadText'] = draftSection
+            ? text(draftSection.querySelector('[data-draft-turn-head]'))
+            : null
           // ⚠️ 「最后结果」是异步读回来的 ⇒ 等它出现再量
           await until(() => !!draftSection?.querySelector('.draft-final'), 60)
           const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
           facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
           {
-            const paneRect = cyRect(draftSysMsg())
+            const paneRect = cyRect(draftTurnMsg())
             const box = d().querySelector('.pane-body.detail-scroll')
             const boxRect = cyRect(box)
             const padB = box ? parseFloat(cs(box).paddingBottom || '0') : 0
@@ -5186,10 +5197,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 ? null
                 : Math.round(boxRect.y + boxRect.h - padB - (paneRect.y + paneRect.h))
           }
+          // ★ 分批第 193 批：过程按钮从 `h3` 里搬到消息末尾一行小字（`data-draft-process-toggle`）
           const toggle = draftSection
-            ? ([...draftSection.querySelectorAll('h3 button')][0] ?? null)
+            ? draftSection.querySelector('[data-draft-process-toggle]')
             : null
           facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
+          facts['crystal.draftRunIdInHead'] = draftSection
+            ? (text(draftSection.querySelector('[data-draft-turn-head]')) ?? '').includes('run ')
+            : null
           if (toggle) {
             click(toggle)
             await until(() => !!draftSection?.querySelector('.log-box'), 60)
@@ -5735,9 +5750,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               facts['crystal.draftingLogLive'] = (cyDLog?.textContent ?? '').includes(
                 '起草 run 正在跑',
               )
-              // U3b：起草日志挂在**一条系统消息**上（不再是页面上的抽屉分节）
+              // U3b：起草日志挂在**一条消息**上（不再是页面上的抽屉分节）。
+              // ★ 分批第 193 批：那条消息的角色从 `system` 改成 `assistant`——起草这一轮
+              //   是"它在做事 / 它在说话"，挂在系统行上是任务面板的做法（使用者报的正是这个）。
               facts['crystal.draftingLogInSystemMsg'] = !!d().querySelector(
-                '.crystal-msg[data-msg-role="system"] .log-box',
+                '.crystal-msg[data-msg-role="assistant"] .log-box',
+              )
+              // ★ 分批第 193 批：**正在写**也是一种"说话"——抬头必须是「正在把素材写成 skill…」
+              //   而不是 `起草 run / run 01M6… / 排队中` 那张 run 的抬头（使用者报的原话）。
+              facts['crystal.draftingHeadText'] = text(
+                d().querySelector('[data-draft-turn-head]'),
               )
               // ★ 目标那块**表单**不该再出现（它搬进了「依据」tab）：判据是"页面上没有
               //   `.section-body` 里的可编辑表单"，而不是"某段文案不见了"。
@@ -5792,9 +5814,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                  * 原来它挂在栏头——离"这次起草跑到哪了"隔着整片页面。这条与下面"点它能回目标态"
                  * 成对：只说"按钮存在"的话，搬错位置（还留在栏头）也会绿。
                  */
+                // ★ 分批第 193 批：起草那一轮的消息角色从 `system` 改成 `assistant`
+                //   （抬头是一句人话，不再报 run id 与状态徽标）⇒ 这条跟着换角色量。
+                //   判据本身没变：**停止必须在"这次起草跑到哪了"那条消息里**，不在栏头。
                 facts['crystal.stopInSystemMsg'] = (() => {
                   const btn = [
-                    ...d().querySelectorAll('.crystal-msg[data-msg-role="system"] button'),
+                    ...d().querySelectorAll('.crystal-msg[data-msg-role="assistant"] button'),
                   ].find((b) => text(b).includes('停止'))
                   return !!btn
                 })()

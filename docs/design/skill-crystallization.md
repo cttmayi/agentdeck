@@ -5527,3 +5527,49 @@ daemon 侧本来就能收多份（`materials: [{name?, text}]`，§12.48 的测�
 症状却是"loadedSkills 为空"——离原因非常远。注释已写在那行旁边。
 
 验证：`check` **2188 全绿**、`probe:layout` **555 项全绿**、`typecheck` 0 错。
+
+### 12.63 起草那一轮：从「run 抬头」改成**它在说话**（分批第 193 批，2026-11；使用者定）
+
+使用者：「目前沉淀还是显示『起草 run run 01M6… 已完成 完整日志』 更像任务，不像是对话方式」。
+
+**症结不在文案，在宿主**：那一块是**抽屉分节**（`<section class="drawer-section">` + `<h3>`），
+抬头写着 `起草 run`，后面跟 `run 01M6…` + 状态徽标 + 「完整日志」按钮。这套形状是从任务页的
+run 面板原样搬来的（"这条 run 跑成什么样"），而沉淀页从第 140 批起已经是一段对话——同一屏
+上下都是"谁在说话 + 说了什么"，只有这一条在报 run id 与状态，读起来就是任务日志嵌进了聊天窗。
+
+**改法**（三种状态都用一句人话开头，`.draft-turn`）：
+
+| 状态 | 抬头 | 正文 |
+| --- | --- | --- |
+| 正在写 | 「正在把素材写成 skill…」 | 实时过程（它此刻的正文）+ [停止] |
+| 没写成 | 「这次没写成：<原因>」 | [重新起草] |
+| 写好了 | 「写好了 · 3 个文件」 | 最后结果（Markdown），末尾一行小字「它怎么做的」 |
+
+三处刻意的取舍：
+① **run id 不在抬头上**（那是排查用的）⇒ 挪进展开后的过程里当注脚；
+② **状态徽标不在消息里重复**（顶栏那个已经说了「起草中 / 待审阅」）——同一句话说两遍这类重复
+本仓库删过好几处；`runStatusClass` 的 import 随之删掉；
+③ **过程默认收起、按钮是一行小字**：「它怎么做的」是回看时才要的东西，不该在抬头里跟正文抢位置
+（`h3` 里的动作按钮是任务面板的做法）。
+
+顺带修的两件事：
+· **消息角色**：起草那一轮原来挂在 `.crystal-msg[data-msg-role="system"]` 上（连素材那一行一起），
+现在它是 `assistant`，素材那行单独一条 `system`。挂在系统行上是任务面板的口径，与"它在做事"矛盾。
+· 起草那一轮的消息是**自然高度**（`flex: 0 0 auto`）：不给的话它会吃到 `.crystal-msg` 默认的
+`flex: 1`，审阅态里跟**产物消息**平分高度，而真正要占满的是产物（编辑器）。
+
+**死的夹具代码一并删掉**：`run.mjs` 里"把内置 skill 审核者改挂 generic"那一段（评审第 137 批就删了、
+内置审核者第 191/192 批也下线）——它每次都打一句「⚠ 没找到内置的 skill 审核者」，而"审核跑着"
+那一屏早就不存在；假 CLI 里那条 `PROBE_AUDIT_MARKER` 分支同样没人会带。
+
+**判据**（探针 558 项全绿；新增 3 条、改宿主 4 条，每处都写了理由）：
+· `crystal.draftHeadText`：抬头是一句人话、且不含「起草 run」；
+· `crystal.draftRunIdInHead`：抬头里没有 `run `（这条正是使用者报的原话）；
+· `crystal.draftingHeadText`：**跑着**的时候也是「正在把素材写成 skill…」（无 run id）；
+· 宿主从 `.drawer-section`/`h3 button` 换到 `[data-draft-turn]`/`[data-draft-process-toggle]`：
+  `draftSectionFound` / `processDraftHasRunBlock` / `processOpens` / `draftLogAfterToggle` /
+  `draftBackToFinal` 量的还是同一件事（时间线里有起草这一轮、两态走得通）；
+· `draftingLogInSystemMsg` 与 `stopInSystemMsg` 的角色从 `system` 改成 `assistant`（判据本身没变）。
+
+验证：`check` **2189 全绿**、`probe:layout` **558 全绿**、`typecheck` 0 错；
+真 Chrome 事实：抬头 `写好了 · 3 个文件`、过程按钮 `它怎么做的` → `收起过程`、编辑窗格起点 y=408。

@@ -31,7 +31,9 @@
   import { go, goCrystallize } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { showToast } from '../lib/view.ts'
-  import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
+  // ★ 分批第 193 批：`runStatusClass` 不再 import——起草那一轮的抬头不再挂状态徽标
+  //   （顶栏那个徽标已经说了"起草中 / 待审阅"，消息里再挂一个就是同一句话说两遍）。
+  import { runStatusKey } from '../lib/run-status.ts'
   // ★ 「最后结果」要按 Markdown 渲染（与任务详情页的最终产出同一观感）。
   //   ⚠️ 批次 2 删预览时把这个 import 一起删了——那是对的（预览是"同一份内容的第二种
   //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
@@ -1282,68 +1284,92 @@
     抽成片段是为了"同一份标记只有一份"：两处各写一遍，早晚改成一处忘一处。
   -->
   <!--
-    ── 审阅态的起草 run（最后结果 / 完整日志 两态）──
-    2026-10-21 第 3 批：从页面下半部搬进「过程」tab。它和审核日志是同一类东西
-    （"这一版是怎么做出来的"），而对"能不能入库"这个当场的决定没有直接作用。
+    ── 起草这一轮：**一条助手消息**（分批第 193 批，使用者："目前沉淀还是显示「起草 run
+    run 01M6… 已完成 完整日志」 更像任务，不像是对话方式"）──
+
+    改之前它是一块抽屉分节：抬头 `起草 run`、后面跟 `run 01M6…` + 状态徽标 + 「完整日志」按钮，
+    正文是最后结果。那套抬头是**任务页 run 面板**的形状（"这条 run 跑成什么样"），
+    而沉淀是对话——同一条消息流里别的消息都是"谁在说话 + 说了什么"，只有这一条在报 run id
+    与状态徽标，读起来就是任务日志嵌进了聊天窗。
+
+    现在的形状是**三种状态都用一句人话开头**：
+      · 正在写 → 「正在把素材写成 skill…」+ 实时过程（它此刻的正文）+ [停止]
+      · 没写成 → 「这次没写成：<原因>」+ [重新起草]
+      · 写好了 → 「写好了 · 3 个文件」+ 最后结果（正文），过程收在消息末尾一行小字后面
+
+    三处刻意的取舍：
+      ① **run id 不在抬头上**（那是排查用的）：挪进展开后的过程里当注脚。
+      ② **状态徽标不在消息里重复**：顶栏那个徽标已经说了「起草中 / 待审阅」，这里再挂一个
+         同一个状态的徽标，就是"同一句话在一屏里说两遍"（这类重复本仓库删过好几处）。
+      ③ **过程默认收起、按钮是一行小字**：「它怎么做的」是回看时才要的，不是读产出时要的。
   -->
-  {#snippet draftRunPane()}
-          <section class="drawer-section">
-            <h3>
-              {$t('crystallize.draftSection')}
-              <span class="faint small">
-                run {runShort}…
-                {#if draftStatus}
-                  <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-                {/if}
-                <!--
-                  ⚠️ 2026-10-21 删掉了这里的 `· {statsLine}`（原来是 `· 1 轮 · 0 次工具调用`）。
-                  两宗罪：① 它和副标题里那句是**同一个变量**——同一份数字在一屏里写两遍
-                  （探针 `crystal.statsHits` 实测 2 次）；② 更要紧的是**错标**：`statsLine` 来自
-                  `collectMaterial`，说的是**素材**有多少轮/多少次工具调用，摆在 `run 01M5…`
-                  旁边会被读成"这条 run 干了多少活"。要显示 run 自己的统计，得取 run 记录里的
-                  数（那属于「过程」tab 的事），不能拿素材的数顶上。
-                -->
-              </span>
-              <!--
-                ★ 分批第 29 批：在跑的时候不给这个按钮——那一格已经是实时日志了，
-                按钮点下去什么都不会变，只会让人以为"点了才有日志"。
-              -->
-              {#if !draftLiveNow}
-                <button
-                  type="button"
-                  class="ghost small"
-                  style="margin-left:var(--sp-3)"
-                  onclick={() => (draftLogOpen = !draftLogOpen)}
-                >
-                  {draftLogOpen ? $t('tasks.showFinalResult') : $t('tasks.showRawLog')}
-                </button>
-              {/if}
-            </h3>
-            {#if draftLiveNow}
-              <!--
-                ★ 分批第 29 批：这一版还在跑 ⇒ **直接显示实时日志**。
-                原来这里只有「完整日志」按钮后面才有 `RunLog`，默认显示的是"最后结果"
-                （= 上一版写下的最后一段文本）⇒ 循环中草稿那一格一动不动，人只能去看审核。
-              -->
-              <p class="faint small">{$t('crystallize.draftLiveHint')}</p>
-              <div class="log-box">
-                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-              </div>
-            {:else if draftLogOpen}
-              <div class="log-box">
-                <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-              </div>
-            {:else if draftFinalState === 'loading'}
-              <div class="skeleton"></div>
-            {:else if draftFinalState === 'empty'}
-              <div class="empty">
-                <strong>{$t('tasks.noTextOutput')}</strong>
-                {$t('tasks.noTextOutputHint')}
-              </div>
-            {:else}
-              <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
-            {/if}
-          </section>
+  {#snippet draftTurn()}
+    <div class="draft-turn" data-draft-turn>
+      <p class="draft-turn-head" data-draft-turn-head>
+        {#if draftLiveNow}
+          <span class="draft-turn-live">{$t('crystallize.draftTurnLive')}</span>
+        {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
+          <span class="draft-turn-bad">
+            {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
+          </span>
+          {#if draftFailedReason !== ''}
+            <span class="faint small">：{draftFailedReason}</span>
+          {/if}
+        {:else}
+          <span>{$t('crystallize.draftTurnDone')}</span>
+          {#if fileCount > 0}
+            <span class="faint small">· {fileCount} {$t('crystallize.filesUnit')}</span>
+          {/if}
+        {/if}
+      </p>
+
+      {#if draftLiveNow}
+        <!--
+          跑着的时候**过程就是这条消息的正文**——它确实正在说话，只不过说的是
+          "我在读素材 / 我写了 SKILL.md"。默认收起的话，跑着的这几十秒里这片区域是空的，
+          人只会以为卡住了（分批第 29 批量到过这个症状）。
+        -->
+        <div class="log-box">
+          <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+        </div>
+        <div class="row-end msg-actions" data-msg-actions>
+          <button class="ghost small" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
+        </div>
+      {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
+        <div class="row-end msg-actions" data-msg-actions>
+          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+        </div>
+      {:else if draftFinalState === 'loading'}
+        <div class="skeleton"></div>
+      {:else if draftFinalState === 'empty'}
+        <div class="empty">
+          <strong>{$t('tasks.noTextOutput')}</strong>
+          {$t('tasks.noTextOutputHint')}
+        </div>
+      {:else}
+        <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
+      {/if}
+
+      {#if !draftLiveNow}
+        <!-- 过程：一行小字按钮；展开之后才出现日志与 run id（run id 只在这里露脸） -->
+        <div class="draft-turn-foot">
+          <button
+            type="button"
+            class="draft-turn-toggle"
+            data-draft-process-toggle
+            onclick={() => (draftLogOpen = !draftLogOpen)}
+          >
+            {draftLogOpen ? $t('crystallize.draftProcessHide') : $t('crystallize.draftProcessShow')}
+          </button>
+        </div>
+        {#if draftLogOpen}
+          <p class="faint small draft-turn-runid">run {runShort}…</p>
+          <div class="log-box">
+            <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+          </div>
+        {/if}
+      {/if}
+    </div>
   {/snippet}
 
   <!-- 目标摘要（只读）：起草态的「依据」里用它——"这一版是照着什么做的" -->
@@ -1575,58 +1601,27 @@
       {/if}
 
       {#if draftRunId !== '' && (step === 'drafting' || step === 'review' || step === 'done')}
-      <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
-           日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
-           而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
+      <!-- ★ 分批第 173 批：**它在问**——问题是一条助手消息（与"提问/材料"同一种形状），
+           下面是栏脚输入条；人回答之后平台起下一条 run 并接上会话。 -->
       {#if questions !== ''}
-        <!-- ★ 分批第 173 批：**它在问**——问题是一条助手消息（与"提问/材料"同一种形状），
-             下面是栏脚输入条；人回答之后平台起下一条 run 并接上会话。 -->
         <div class="crystal-msg" data-msg-role="assistant" data-crystal-questions>
           <article class="markdown draft-final">{@html renderMarkdown(questions)}</article>
           <p class="faint small">它在等你回答——直接写在下面的输入条里（一行也行，多行也行）。</p>
         </div>
       {/if}
-      <div class="crystal-msg" data-msg-role="system">
-        <!-- ★ 分批第 162 批（§12.14）：对话里那行「我当时给了它什么」——与右栏清单同一份数据 -->
-        {#if materialCountLine !== ''}
+      <!-- ★ 分批第 162 批（§12.14）：对话里那行「我当时给了它什么」——与右栏清单同一份数据。
+           ★ 分批第 193 批：它单独是一条**系统行**（原来和起草那一块挤在同一条消息里，
+           而那一条的消息角色写着 `system` ⇒ 起草那一轮被当作"系统消息"渲染，与"它在说话"矛盾）。 -->
+      {#if materialCountLine !== ''}
+        <div class="crystal-msg" data-msg-role="system">
           <p class="faint small crystal-material-line" data-crystal-material-line>
             {materialCountLine}
           </p>
-        {/if}
-        {#if step === 'drafting'}
-        <section class="drawer-section">
-          <h3>
-            {$t('crystallize.draftSection')}
-            <span class="faint small">
-              run {runShort}…
-              {#if draftStatus}
-                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-              {/if}
-            </span>
-          </h3>
-          <div class="section-body">
-            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-              <div class="notice bad small">
-                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
-                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-              </div>
-            {:else}
-              <!-- ★ 分批第 150 批：停止从这里走（原来挂在栏头——动作离它说明的东西太远） -->
-              <div class="row-end msg-actions" data-msg-actions>
-                <p class="faint small">{$t('crystallize.drafting')}</p>
-                <button class="ghost small" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
-              </div>
-            {/if}
-            <div class="log-box">
-              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-            </div>
-          </div>
-        </section>
-        {:else}
-          <!-- 审阅/完成态：起草那条 run 的过程（默认"最后结果"，可切完整日志）仍在**时间线**里 -->
-          {@render draftRunPane()}
-        {/if}
+        </div>
+      {/if}
+      <!-- ★ 分批第 193 批：起草这一轮是**一条助手消息**（`detail` 见 `draftTurn` 上方的注释）。 -->
+      <div class="crystal-msg" data-msg-role="assistant" data-draft-turn-msg>
+        {@render draftTurn()}
       </div>
       {/if}
 
@@ -1950,9 +1945,8 @@
     margin-top: var(--sp-2);
     gap: var(--sp-2);
   }
-  .msg-actions p {
-    margin: 0;
-  }
+  /* ★ 分批第 193 批：`.msg-actions p` 删了——起草那一轮抬头不再是 `<p class="faint small">`
+     挂在动作条里（现在是 `draft-turn-head`），那条选择器已经没有宿主。 */
   /* 结论条里的动作组：与「保存改动 / 反馈」同一行，中间留一点呼吸 */
   .conclusion-bar .bar-actions[data-msg-actions] {
     display: inline-flex;
@@ -2026,8 +2020,18 @@
     min-height: 0;
   }
 
-  /* 系统消息（起草日志）：自然高度、不吃剩余空间；内部日志框自己滚 */
+  /* 系统消息（素材那一行）：自然高度、不吃剩余空间 */
   .crystal-msg[data-msg-role='system'] {
+    flex: 0 0 auto;
+  }
+  /**
+   * ★ 分批第 193 批：起草那一轮的消息也是**自然高度**，不吃剩余空间。
+   *
+   * ⚠️ 不给这条的话它会吃到 `.crystal-msg` 的默认 `flex: 1`——审阅态里那条消息会跟
+   *    **产物消息**平分高度，而真正要占满的是产物（编辑器）。正文自己有 `max-height:
+   *    24rem`，多出来的空间只会变成一块空白。
+   */
+  .crystal-msg[data-draft-turn-msg] {
     flex: 0 0 auto;
   }
 
@@ -2226,6 +2230,65 @@
     overflow: auto;
   }
   /* 带日志的那一块：吃剩余高度（它是这个格子里唯一"越长越好"的东西） */
+  /* ══════════════════════════════════════════════════════════════════
+     ★ 分批第 193 批：起草那一轮 = 一条助手消息（抬头是一句人话，过程收在末尾）
+     ══════════════════════════════════════════════════════════════════ */
+  .draft-turn {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  /* 抬头：小字、灰。它说的是"我写好了 / 我正在写"，不是"这条 run 的状态是 X"。 */
+  .draft-turn-head {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--text-muted);
+    display: flex;
+    gap: var(--sp-1);
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  /* 正在写：让它**看得出在动**（一次脉动），但不要转圈动画——那是加载态的语言 */
+  .draft-turn-live {
+    color: var(--text);
+  }
+  .draft-turn-live::after {
+    content: '…';
+    animation: draft-turn-blink 1.4s steps(3, end) infinite;
+  }
+  @keyframes draft-turn-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+  .draft-turn-bad {
+    color: var(--danger, #b42318);
+  }
+  /* 过程那一行：**靠左的小字按钮**（不是 h3 里的动作按钮——那是任务面板的做法） */
+  .draft-turn-foot {
+    display: flex;
+    justify-content: flex-start;
+  }
+  /* ⚠️ `.linkish` 在本页只有 `.new-version-bar .linkish` 那一份作用域样式（不是全局类），
+     所以这里必须自带一份，否则按钮会是个原生灰按钮——那正是"看起来像任务控件"的一半。 */
+  .draft-turn-toggle {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: var(--fs-xs);
+    font-family: inherit;
+    text-decoration: underline;
+  }
+  .draft-turn-toggle:hover {
+    color: var(--text-muted);
+  }
+  .draft-turn-runid {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+  }
   /*
    * 起草 run 的「最后结果」。
    *

@@ -101,8 +101,6 @@ export const crystallizeText = {
   // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
   'crystallize.newVersionHint': { zh: '这条沉淀有了新一版（你正在编辑，没有自动切过去）', en: 'This crystallization has a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
-  // 分批第 29 批：草稿这一版还在跑 ⇒ 显示实时日志（原来默认显示"最后结果"= 上一版的旧文本）
-  'crystallize.draftLiveHint': { zh: '这一版还在跑，下面是实时日志', en: 'This version is still running; live log below' },
   'crystallize.saveDraft': { zh: '保存改动', en: 'Save changes' },
   'crystallize.saveDraftDone': { zh: '已保存到草稿（审核还没看到它）', en: 'Saved (the audit has not seen this yet)' },
   'crystallize.saveDraftHint': {
@@ -177,13 +175,21 @@ export const crystallizeText = {
   },
 
 
-  // ── 起草 run ──
-  'crystallize.draftSection': { zh: '起草 run', en: 'Draft run' },
-  'crystallize.drafting': {
-    zh: 'agent 正从素材里提炼 SKILL.md…（起草不进任务列表，进度都在这页）',
-    en: 'The agent is extracting a SKILL.md from the material… (drafts live here, not in the task list)',
-  },
-  'crystallize.draftFailed': { zh: '起草失败', en: 'Drafting failed' },
+  /**
+   * ── 起草这一轮（一句话的人话，不是 run 的抬头）──
+   *
+   * ★ 分批第 193 批：原来这里是 `crystallize.draftSection`（「起草 run」）+
+   *   `crystallize.drafting`（「agent 正从素材里提炼 SKILL.md…」）+ `draftLiveHint`。
+   *   使用者："目前沉淀还是显示「起草 run run 01M6… 已完成 完整日志」 更像任务，
+   *   不像是对话方式" ⇒ 抬头改成**它自己在说话**：正在写 / 写好了 / 没写成。
+   *   三条旧词条一起删（i18n 死词条检测会报，留着就是给下一个人一个假线索）。
+   */
+  'crystallize.draftTurnLive': { zh: '正在把素材写成 skill', en: 'Writing the skill' },
+  'crystallize.draftTurnDone': { zh: '写好了', en: 'Done' },
+  /** 过程那一行小字按钮：回看时才要的东西，不该在抬头里跟正文抢位置。 */
+  'crystallize.draftProcessShow': { zh: '它怎么做的', en: 'How it got there' },
+  'crystallize.draftProcessHide': { zh: '收起过程', en: 'Hide the process' },
+  'crystallize.draftFailed': { zh: '这次没写成', en: 'It did not finish' },
   'crystallize.draftStopped': { zh: '已停止', en: 'Stopped' },
   'crystallize.retryDraft': { zh: '重新起草', en: 'Draft again' },
 
