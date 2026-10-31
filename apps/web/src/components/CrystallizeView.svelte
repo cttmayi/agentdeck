@@ -46,6 +46,10 @@
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
   import CrystallizeIntake from './CrystallizeIntake.svelte'
+  // ★ 分批第 153 批：编辑器搬进右栏 ⇒ 它的状态住在一个 runes 模块里（两个组件读同一份，
+  //   见该文件头：legacy 父 → runes 子的 prop 更新不传播）
+  import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
+  import { editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
   interface CrystallizeTargets {
@@ -187,30 +191,56 @@
   let attached = false
 
   // ── 审阅（四轮：产出 = 文件集合）──
-  /** `GET /api/crystallize/artifacts` 的返回（服务端已解析 + 已校验）。 */
-  let artifacts: Artifacts | null = null
-  /** 当前选中的文件（相对 skill/ 目录）。 */
-  let selectedFile = 'SKILL.md'
-  /** 编辑区内容（与 selectedFile 联动；写入即回写 artifacts.files）。 */
-  let editText = ''
-  /** 每次编辑 +1：让"从文件里解析出的 frontmatter 摘要"能重算（普通对象不触发响应）。 */
-  let filesVersion = 0
   /**
-   * 有未保存的改动（分批第 8 批：人改草稿要能落盘）。
+   * ★ 分批第 153 批（§12.53 选项 2）：**编辑器那一套状态搬到右栏去了**，它现在住在
+   * `lib/crystallize-editor.svelte.ts`（两个组件读同一份：legacy 组件 → runes 子组件的
+   * prop 更新不传播，§12.50 坑 4，所以状态既不能挂在这里、也不能挂在右栏）。
    *
-   * ⚠️ `artifacts.files` 是**就地改**的（`onEditInput` 直接写它），所以"改过没有"这件事
-   *    没有任何现成的信号——必须自己记。第一版我打算用"与磁盘上那版比 diff"来推，
-   *    但 diff 是**异步**拉的（停 500ms 才算），保存按钮的状态会跟着它一跳一跳的。
+   * 这里保留的是**一份镜像**：`CrystallizeDraftEditor` 用 `$effect` 把编辑现场推上来
+   * （`syncFromEditor`），结论条据此说"能不能入库 / 改了哪些 / 目标是谁"。
+   * ⚠️ 不能用 `$: artifacts = editor.artifacts` 这种"直接读模块信号"的写法：legacy 的 `$:`
+   *    跟踪不到跨模块信号，实测结论条会一直画 "○ …"、树与 slug 全不出现（20 条判据连锁红）。
    */
-  let dirty = false
-  /** 正在保存改动（防连点：保存是写盘，连点会让"最后一次"变得不确定）。 */
-  let savingDraft = false
-  /** 变更集 diff（后端算）：对当前已入库版本，或对比上一版草稿。 */
+  let artifacts: Artifacts | null = null
+  let fileRows: Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }> = []
+  let fileCount = 0
+  let totalBytes = 0
   let diff: DiffResult | null = null
-  let diffLoading = false
-  /** 对比对象：对当前版本（入库会产生的变化）或上一版草稿（改版对比）。 */
-  /** 当前停在哪条基线：原 skill / 上一版草稿 / 当前已入库版本（分批第 18 批起三条）。 */
   let diffAgainst: 'current' | 'previous' | 'original' = 'current'
+  let diffLoading = false
+  let dirty = false
+  let savingDraft = false
+
+  /** 编辑器（子组件）把编辑现场推上来。见上面那段：为什么必须是回调。 */
+  function syncFromEditor(s: {
+    artifacts: Artifacts | null
+    fileRows: Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }>
+    fileCount: number
+    totalBytes: number
+    diff: DiffResult | null
+    diffAgainst: 'current' | 'previous' | 'original'
+    diffLoading: boolean
+    dirty: boolean
+    savingDraft: boolean
+  }): void {
+    artifacts = s.artifacts
+    fileRows = s.fileRows
+    fileCount = s.fileCount
+    totalBytes = s.totalBytes
+    diff = s.diff
+    diffAgainst = s.diffAgainst
+    diffLoading = s.diffLoading
+    dirty = s.dirty
+    savingDraft = s.savingDraft
+  }
+
+  /**
+   * 改 SKILL.md 时 slug 跟着 frontmatter 的 name 走。
+   * 归属仍在这边（slug 是"入库"的字段），编辑器只负责报告"名字变了"。
+   */
+  editor.onSlugName = (name: string) => {
+    if (name !== '' && slug !== '') slug = name
+  }
   /** 素材分节（文件清单 + 预览）。 */
   let material: {
     dir: string
@@ -218,8 +248,6 @@
     dirLabel: string
     items: Array<{ relPath: string; bytes: number; text: string; truncated: boolean }>
   } | null = null
-  /** 主区窗格的分段：内容 / 差异（同一位置切换，见 markup 里的三条规矩）。 */
-  let reviewTab: 'content' | 'diff' = 'content'
 
   /**
    * ★ 分批第 121 批（U3d）：栏脚输入条真的接线了。
@@ -473,15 +501,9 @@
     // ★ 分批第 143 批：自动接上的护栏是**每个 run 一次**——换了 runId 必须复位，
     //   否则同一组件实例里换屏之后永远不再自动接（探针用 iframe 连续切换多条夹具，当场量到）。
     autoAttached = false
-    artifacts = null
-    selectedFile = 'SKILL.md'
-    editText = ''
-    filesVersion = 0
-    diff = null
-    diffAgainst = 'current'
+    editor.reset()
     material = null
     materialPick = ''
-    reviewTab = 'content'
     reviseOpen = false
     reviseFeedback = ''
     revising = false
@@ -554,8 +576,7 @@
     draftStatus = null
     draftFinalText = ''
     draftFinalState = 'loading'
-    artifacts = null
-    diff = null
+    editor.reset()
     void loadMaterial()
     void loadDraftOutput()
     void loadDraftFinalText()
@@ -818,9 +839,7 @@
     draftRunId = ''
     draftStatus = null
     handledTerminal = false
-    artifacts = null
-    selectedFile = 'SKILL.md'
-    editText = ''
+    editor.reset()
     slug = ''
     clash = null
     error = ''
@@ -852,18 +871,18 @@
   }
 
   /**
-   * 取草稿产出（四轮：`GET /api/crystallize/artifacts`）。
+   * 取草稿产出并进入审阅态（四轮：`GET /api/crystallize/artifacts`）。
    *
    * ★ 改之前这里自己拉 run 的消息、自己拆 frontmatter——解析规则被复制到前端，
    *   而且 `===== FILE: xxx =====` 那段多文件约定**从来没被解析**（多文件产物被
    *   塞进正文丢掉）。现在服务端读 `skill/` 目录、解析 frontmatter、跑校验，前端只画。
+   *
+   * ★ 分批第 153 批：产出与编辑现场在 `lib/crystallize-editor.svelte.ts`（右栏读同一份）。
+   *   这里只做"读完之后界面怎么摆"：目标、slug、步骤、素材、最后结果。
    */
   async function loadDraftOutput(): Promise<void> {
     try {
-      const res = await api<Artifacts>(
-        `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(draftRunId)}`,
-      )
-      artifacts = res
+      const res = await editor.open(draftRunId)
       // 目标以**落库的目标**为准（恢复的草稿按它还原）；界面上的 targetKind 跟着走
       if (res.target !== null && res.target !== undefined) {
         if (res.target.kind === 'update') {
@@ -876,21 +895,7 @@
         }
       }
       slug = res.skillMd.name
-      // 改版草稿默认对比上一版（那才是使用者此刻在问的问题）；否则对比当前版本
-      // ★ 分批第 18 批把默认从「上一版」翻成「原 skill」：这是使用者的定稿
-    //    （"skill 差异对比也应该是原 skill 变化"）。"上一版"只回答"我这轮反馈改了什么"，
-    //    而"相对原来那一份变成了什么样"才是他盯着一个新版本时要判断的事。
-    //    ⚠️ 这翻掉了第 14 批"默认停在对比上一版草稿"那条决定（连探针判据一起改，见 §10.34）。
-    diffAgainst = res.revisedFrom !== null ? 'original' : 'current'
-      void loadDiff(diffAgainst)
       void loadMaterial()
-      const first = pickDefaultFile(res)
-      selectedFile = first
-      editText = res.files[first] ?? ''
-      filesVersion += 1
-      // 刚读到的就是磁盘上的那一份 ⇒ 没有未保存的改动（换版/重读之后必须清，
-      // 否则「保存改动」会挂着一个上一版留下的状态，点下去写的是同一份内容）
-      dirty = false
       clash = null
       error = ''
       step = 'review'
@@ -899,23 +904,6 @@
     } catch (err) {
       step = 'drafting'
       error = $t('crystallize.errTargets', { error: err instanceof Error ? err.message : String(err) })
-    }
-  }
-
-  /**
-   * 只重读「机械体检」那一份（保存改动之后用）。
-   *
-   * 为什么不是整份 `loadDraftOutput()`：那个会重置编辑现场（`editText` / `selectedFile` /
-   * `dirty`），而保存之后磁盘上现在就是使用者刚存的内容——他要看到的只是"体检还过不过"。
-   */
-  async function refreshValidation(): Promise<void> {
-    if (draftRunId === '') return
-    try {
-      artifacts = await api<Artifacts>(
-        `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(draftRunId)}`,
-      )
-    } catch {
-      // 读不到就保留上一次的体检结果（下次进入这一屏会重读）；不把失败画成"通过"
     }
   }
 
@@ -945,83 +933,6 @@
     }
   }
 
-  /** 默认选中 SKILL.md；没有就选第一个文件（起草者写歪时也别给空白页）。 */
-  function pickDefaultFile(res: Artifacts): string {
-    if (res.files['SKILL.md'] !== undefined) return 'SKILL.md'
-    const first = Object.keys(res.files).sort()[0]
-    return first ?? ''
-  }
-
-  /** 切换选中文件：把编辑区内容换过去（当前文件的编辑已经回写进 files）。 */
-  function selectFile(rel: string): void {
-    // 点文件 = 想看内容；留在「差异」标签会让人以为点错了
-    reviewTab = 'content'
-    selectedFile = rel
-    editText = artifacts?.files[rel] ?? ''
-  }
-
-  /** 编辑回写：入库传的就是这份 files（服务端还会再校验一遍）。 */
-  function onEditInput(): void {
-    if (artifacts === null || selectedFile === '') return
-    artifacts.files[selectedFile] = editText
-    filesVersion += 1
-    dirty = true
-    // diff 跟着内容走，但**不要每敲一个字发一次请求**：停下来 500ms 再算
-    if (diffTimer !== null) clearTimeout(diffTimer)
-    diffTimer = setTimeout(() => {
-      diffTimer = null
-      void loadDiff()
-    }, 500)
-    // 改的就是 SKILL.md → slug 跟着 frontmatter 的 name 走（新建时才允许改）
-    if (selectedFile === 'SKILL.md') {
-      const name = parseFrontmatterName(editText)
-      if (name !== '' && slug !== '') slug = name
-    }
-  }
-
-  /** 极简 frontmatter 取 name（只用于"改 SKILL.md 时 slug 跟着变"）。 */
-  function parseFrontmatterName(text: string): string {
-    const m = text.match(/^name\s*:\s*(.+)$/m)
-    return m?.[1] ? m[1].trim().replace(/^["']|["']$/g, '') : ''
-  }
-
-  /**
-   * 拉变更集 diff（后端算，`text-diff.ts`）。
-   *
-   * 传的是**当前编辑后的文件**：使用者在审阅里改了一行，diff 就得反映改完的样子，
-   * 而不是磁盘上的原稿。`against` = 对当前已入库版本（入库会发生什么）或上一版草稿
-   * （"按意见改一版"后新旧对比）、`original` = **这个任务开始时的那一份**
-   * （"这份 skill 相对原来那一份变了什么"，使用者的原话是"差异对比也应该是原 skill 变化"）。
-   */
-  async function loadDiff(
-    against: 'current' | 'previous' | 'original' = diffAgainst,
-  ): Promise<void> {
-    if (artifacts === null) return
-    diffAgainst = against
-    diffLoading = true
-    try {
-      diff = await api<DiffResult>('/api/crystallize/diff', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          draftRunId,
-          files: artifacts.files,
-          against,
-        }),
-      })
-    } catch {
-      // diff 是辅助信息，拉不到不挡入库（校验与文件本身才是硬门槛）
-      diff = null
-    } finally {
-      diffLoading = false
-    }
-  }
-
-  /** 当前选中文件在变更集里的那一项（没有就是"没变/无基线"）。 */
-  $: selectedDiff = diff === null ? null : (diff.files.find((f) => f.rel === selectedFile) ?? null)
-  /** 文件树上的 +n −m 从 diff 来（与详情面板同一份数字，不会两处对不上）。 */
-  $: diffByRel = new Map((diff?.files ?? []).map((f) => [f.rel, f]))
-
   /** 拉素材清单（"素材"分节用：能核"这句话是从哪一轮来的"）。 */
   async function loadMaterial(): Promise<void> {
     if (draftRunId === '' || materialLoading) return
@@ -1044,7 +955,6 @@
       materialLoading = false
     }
   }
-
   /** 读审核结论（进入审阅时与每次审核 ran 之后调）。 */
   /**
    * 开/收「按意见改一版」的意见框。
@@ -1059,38 +969,6 @@
     // 光标落在框里：人点开这个框就是要写意见
     await tick()
     feedbackBox?.focus()
-  }
-
-  /**
-   * 把编辑器里的改动**写回**草稿小屋（分批第 8 批）。
-   *
-   * 为什么要这一步（使用者原话：「缺少一个可以改的地方」）：编辑器一直都在，但改动只活在
-   * 内存里，而审核者读的是磁盘 ⇒ 改完直接入库，入库的是改后的内容、结论却是磁盘上那一版的，
-   * 没人知道这两件事已经不是一个东西。写回之后：审核能看到你改的，指纹一比就知道结论过期了。
-   *
-   * ⚠️ 保存之后**不自动重审**：重审要花钱（真机一轮 ≈ $1.32），这笔钱该由人决定。
-   *    界面给的是「重新审核」按钮，不是自动跑。
-   */
-  async function saveDraftEdits(): Promise<void> {
-    if (artifacts === null || draftRunId === '' || savingDraft) return
-    savingDraft = true
-    error = ''
-    try {
-      await api('/api/crystallize/save-draft', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId, files: artifacts.files }),
-      })
-      dirty = false
-      // 保存之后重读一次产出（**只**为了刷新"机械体检"：人改完往往就是修体检问题）
-      void refreshValidation()
-      void loadDiff()
-      showToast($t('crystallize.saveDraftDone'))
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err)
-    } finally {
-      savingDraft = false
-    }
   }
 
   /** 按意见再起草一版：新 run 复用同一份素材 + 把上一版产出放进 material/previous-draft/。 */
@@ -1208,8 +1086,7 @@
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
-      artifacts = null
-      diff = null
+      editor.reset()
       material = null
       reviseFeedback = ''
       step = 'drafting'
@@ -1223,61 +1100,6 @@
     } finally {
       revising = false
     }
-  }
-
-  /** 变更集：新增 / 修改 / 删除（对着更新场景的当前版本算；新建 = 全新增）。 */
-  /**
-   * 文件树的行 = 文件清单 + **变更徽标**。
-   *
-   * ⚠️ 徽标的判据跟着 `diff` 走（也就是跟着"对比当前版本 / 对比上一版草稿"的切换），
-   *    不自己另算一套：曾经这里对着"入库基线"算，而旁边的 +n −m 来自 diff——切到
-   *    "对比上一版"时同一行就变成「新增 +1 −1」，自相矛盾。现在只有一处判据：
-   *    diff 有就用 diff 的 change，diff 没到（还没拉/拉失败）才退回入库基线。
-   */
-  $: fileRows = (() => {
-    const a = artifacts
-    if (a === null) return [] as Array<{ rel: string; change: '' | 'A' | 'M' | 'D'; bytes: number }>
-    void filesVersion
-    const byteLen = (text: string): number => new TextEncoder().encode(text).length
-    if (diff !== null) {
-      // 文本兜底草稿不认"删除"（服务端入库时合并保留），与下面的基线分支同一口径
-      const rows = diff.files.filter((f) => a.mode === 'files' || f.change !== 'D')
-      return rows.map((f) => ({
-        rel: f.rel,
-        change: (f.change === 'same' ? '' : f.change) as '' | 'A' | 'M' | 'D',
-        bytes: a.files[f.rel] === undefined ? 0 : byteLen(a.files[f.rel] as string),
-      }))
-    }
-    const base = a.baseline?.files ?? null
-    const rows = Object.keys(a.files)
-      .sort((x, y) => (x === 'SKILL.md' ? -1 : y === 'SKILL.md' ? 1 : x < y ? -1 : 1))
-      .map((rel) => {
-        const text = a.files[rel] ?? ''
-        const old = base?.[rel]
-        const change: '' | 'A' | 'M' = old === undefined ? 'A' : old === text ? '' : 'M'
-        return { rel, change, bytes: byteLen(text) }
-      })
-    // 草稿里没有、当前版本里有的 → 删除（更新 = 整目录替换，必须看得见）。
-    // ⚠️ **只有多文件产出（files）才这么算**：文本兜底草稿本来就没抓到支持文件，
-    //    入库时服务端会把当前的保留下来（不是"决定了要删"）。这里若也标 D，等于
-    //    对着一条没能力写文件的草稿吓唬使用者"要删 3 个文件"。
-    if (a.mode !== 'files') return rows
-    const deleted = Object.keys(base ?? {})
-      .filter((rel) => a.files[rel] === undefined)
-      .sort()
-      .map((rel) => ({ rel, change: 'D' as const, bytes: 0 }))
-    return [...rows, ...deleted]
-  })()
-
-  $: fileCount = artifacts === null ? 0 : Object.keys(artifacts.files).length
-  $: totalBytes = fileRows.reduce((sum, r) => sum + r.bytes, 0)
-
-  /** 变更徽标的文案（A/M/D → 中文；空串 = 未改动）。 */
-  function changeLabel(change: '' | 'A' | 'M' | 'D'): string {
-    if (change === 'A') return $t('crystallize.changeAdded')
-    if (change === 'M') return $t('crystallize.changeModified')
-    if (change === 'D') return $t('crystallize.changeDeleted')
-    return ''
   }
 
   /** 目标摘要里的智能体名（候选来自 targets；找不到就回退 id）。 */
@@ -1770,7 +1592,8 @@
               type="button"
               class="linkish"
               onclick={() => {
-                dirty = false
+                // 换版之后磁盘上是新版的内容 ⇒ 旧版的"未保存改动"不再成立（状态在模块里）
+                editor.dirty = false
                 followNewVersion(pendingNewVersion)
               }}>{$t('crystallize.newVersionGo')}</button
             >
@@ -1840,15 +1663,9 @@
                 ★ 分批第 8 批：「保存改动」。
                 只在**有未保存改动**时出现（`dirty`）：没有改动时它是个不该被点的按钮，
                 而"点不动的按钮"比"没有按钮"更让人困惑。
+              ★ 分批第 153 批：「保存改动」跟着**编辑器**走了（它改的就是那份正文，见
+                `CrystallizeDraftEditor`）。结论条这一行只留"读结论"与"入库"两个动作。
               -->
-              {#if artifacts && dirty}
-                <button
-                  class="ghost small primary-ghost"
-                  disabled={savingDraft}
-                  title={$t('crystallize.saveDraftHint')}
-                  onclick={() => void saveDraftEdits()}
-                >{$t('crystallize.saveDraft')}</button>
-              {/if}
               {#if artifacts}
                 <!-- ★ 点它 ⇒ 意见框打开，里面**默认已经填好**审核者的反馈（见 `toggleReviseBox`）。 -->
                 <button
@@ -1962,162 +1779,13 @@
           </section>
         {/if}
 
-        {#if artifacts && artifacts.mode !== 'refused'}
-          <!--
-            ── ★ 审阅屏的三个 tab（2026-10-21 第 3 批）──
-
-            使用者的轴："哪些必须一起显示、哪些可以切 tab。"这一屏的裁定：
-              · 常驻（结论条那一块）：过没过 / 能不能入库 / 目标是谁 / slug / 能做什么；
-              · 切 tab：**要动手的**（草稿）、**起草者读过什么**（依据）、
-                **怎么走到这一步的**（过程 = 问题清单 + 审核日志 + 起草 run）。
-            三块原来竖着摞：编辑器在 y≈490 起、素材折在 y≈842、起草 run 在 y≈1002——
-            "过程"那两块把编辑器往下推了 300 多像素，而它们只在"我要追过程"时才看。
-          -->
-          <!-- ★ 分批第 143 批（U4d）：tab 条已删（§12.7「删掉的东西：tab 机制」）。
-               这一屏只剩"要动手的那一块"：树 + 窗格（内容 / 差异 并排）。 -->
-          <!-- ── 草稿：树 + 窗格（内容 / 差异 同位置切换） ── -->
-          <div class="review-pane">
-            <ul class="file-tree">
-              {#each fileRows as row (row.rel)}
-                <li>
-                  <button
-                    type="button"
-                    class="file-row"
-                    class:active={row.rel === selectedFile}
-                    title={row.rel}
-                    onclick={() => selectFile(row.rel)}
-                  >
-                    {#if row.change !== ''}
-                      <span
-                        class="change-tag"
-                        class:add={row.change === 'A'}
-                        class:mod={row.change === 'M'}
-                        class:del={row.change === 'D'}
-                      >{changeLabel(row.change)}</span>
-                    {/if}
-                    <span class="file-name mono">{row.rel}</span>
-                    {#if row.change !== 'D'}
-                      {@const d = diffByRel.get(row.rel)}
-                      {#if d && (d.added > 0 || d.removed > 0)}
-                        <span class="num-tag add">+{d.added}</span>
-                        <span class="num-tag del">−{d.removed}</span>
-                      {/if}
-                    {/if}
-                  </button>
-                </li>
-              {/each}
-            </ul>
-
-            <div class="file-body">
-              <div class="pane-tabs" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={reviewTab === 'content'}
-                  class:tabs-active={reviewTab === 'content'}
-                  onclick={() => (reviewTab = 'content')}
-                >{$t('crystallize.tabContent')}</button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={reviewTab === 'diff'}
-                  class:tabs-active={reviewTab === 'diff'}
-                  onclick={() => (reviewTab = 'diff')}
-                >{$t('crystallize.tabDiff')}</button>
-                {#if reviewTab === 'diff'}
-                  <span class="tabs-right">
-                    {#if selectedDiff && (selectedDiff.added > 0 || selectedDiff.removed > 0)}
-                      <span class="num-tag add">+{selectedDiff.added}</span>
-                      <span class="num-tag del">−{selectedDiff.removed}</span>
-                    {/if}
-                    <!--
-                      「对比原 skill」什么时候给：
-                        · 改版草稿（`revisedFrom !== null`）⇒ 原 skill = **第一版的快照**，比得出东西；
-                        · 更新场景（`baseline !== null`）⇒ 原 skill = 任务开始时库里那一份。
-                      ⚠️ 我第一版让它**常驻**，探针那条"新建目标的草稿不给一个永远空的切换"当场红：
-                        新建目标的**首版**没有"原来那一份"（服务端会退回当前版本 = 空）⇒ 这个按钮
-                        点了什么都不会变，正是这条判据要挡的死接口。判据在探针里，别在这里放宽。
-                    -->
-                    {#if artifacts.revisedFrom !== null || artifacts.baseline !== null}
-                      <button
-                        type="button"
-                        class="ghost small"
-                        class:active={diffAgainst === 'original'}
-                        onclick={() => void loadDiff('original')}
-                      >{$t('crystallize.diffVsOriginal')}</button>
-                    {/if}
-                    {#if artifacts.revisedFrom !== null}
-                      <button
-                        type="button"
-                        class="ghost small"
-                        class:active={diffAgainst === 'current'}
-                        onclick={() => void loadDiff('current')}
-                      >{$t('crystallize.diffVsCurrent')}</button>
-                      <button
-                        type="button"
-                        class="ghost small"
-                        class:active={diffAgainst === 'previous'}
-                        onclick={() => void loadDiff('previous')}
-                      >{$t('crystallize.diffVsPrevious')}</button>
-                    {/if}
-                  </span>
-                {/if}
-              </div>
-
-              <!-- ★ 分批第 120 批（U3c-2 审阅态并排）：内容与差异并排；窄屏只显示激活那一格 -->
-              <div class="review-side" data-review-tab={reviewTab}>
-              <div class="review-cell" data-cell="content">
-                {#if selectedFile === ''}
-                  <p class="faint small">{$t('crystallize.noFiles')}</p>
-                {:else if fileRows.find((r) => r.rel === selectedFile)?.change === 'D'}
-                  <p class="faint small pad">{$t('crystallize.deletedHint')}</p>
-                {:else}
-                  <textarea
-                    bind:value={editText}
-                    oninput={onEditInput}
-                    class="mono editor"
-                    spellcheck="false"
-                  ></textarea>
-                {/if}
-              </div>
-              <div class="review-cell" data-cell="diff">
-              {#if diffLoading}
-                <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
-              {:else if selectedDiff && selectedDiff.hunks.length > 0}
-                <div class="diff-box mono">
-                  {#each selectedDiff.hunks as hunk (hunk.oldStart + ':' + hunk.newStart)}
-                    <div class="hunk-head">@@ −{hunk.oldStart} +{hunk.newStart} @@</div>
-                    {#each hunk.lines as line (line.oldNo + '/' + line.newNo + '/' + line.kind)}
-                      <div class="diff-line {line.kind === '+' ? 'add' : line.kind === '-' ? 'del' : ''}">
-                        <span class="gutter">{line.oldNo ?? ''}</span>
-                        <span class="gutter">{line.newNo ?? ''}</span>
-                        <span class="sign">{line.kind === ' ' ? ' ' : line.kind}</span>
-                        <span class="text">{line.text}</span>
-                      </div>
-                    {/each}
-                  {/each}
-                </div>
-              {:else if diff === null}
-                <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
-              {:else}
-                <p class="faint small pad">{$t('crystallize.diffUnchanged')}</p>
-              {/if}
-              </div>
-              </div>
-            </div>
-          </div>
-
-          <!--
-            ⚠️ 2026-10-21 使用者："不需要「预览」" —— 这里原来有一段折叠的 Markdown 预览
-               （`.preview`，20rem 高、还要往下滚）。删掉的理由不只是"多余"：
-               审阅这一屏要动手的只有**编辑器**（② 差异在同一个窗格里切），而预览是
-               同一份内容的**第二种渲染**——它离编辑器几百像素、还各自滚，读完预览
-               再回去改一个字要来回跳。删掉之后这一屏只剩"改 / 比"两件事。
-               （`.preview` 的 CSS 与 `renderMarkdown` 的 import 一并删了——留着就是死代码，
-               本仓库最防的就是"东西都在、就是没有路径让它发生"。）
-          -->
-
-        {/if}
+        <!-- ★ 分批第 153 批（§12.12 / §12.53 选项 2）：编辑器抽成 `CrystallizeDraftEditor`，
+             它自己也带"有没有产出 / 是不是 refused"的判断。
+             ⚠️ **不要**把它包在 `{#if artifacts && ...}` 里：`artifacts` 这份镜像正是由它推上来的
+             （`onstate`），包起来就成了"镜像要等编辑器挂载、编辑器要等镜像"的死锁——
+             实测 37 条判据连锁红（结论条 "○ …"、树空、slug 不出现）。
+             这一批先渲染在原位（行为不变）；下一批把它挂进右栏产物栏，中间只留结论与出口。 -->
+        <CrystallizeDraftEditor onstate={syncFromEditor} />
             </div>
 {/if}
 

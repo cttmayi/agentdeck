@@ -5410,10 +5410,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const cyManual = cyQuery.get('crystalManual')
             facts['crystal.manualEntered'] = await cyEnter(cyManual)
             if (facts['crystal.manualEntered']) {
+              /**
+               * ★ 分批第 153 批：找按钮的范围从 `.conclusion-block` 放到**整页**。
+               * 为什么：编辑器和它的「保存改动」一起从结论条那一行搬进了编辑器
+               * （`CrystallizeDraftEditor`，下一步就挂到右栏），仍按结论条找就永远找不到。
+               * 判据本身没变（"改过字才出现、保存完消失、磁盘真的变了"），只是参照物跟着搬家。
+               */
               const cyHasText = (needle) =>
-                [...d().querySelectorAll('.conclusion-block button')].some((b) =>
-                  text(b).includes(needle),
-                )
+                [...d().querySelectorAll('button')].some((b) => text(b).includes(needle))
               facts['crystal.manualBeforeButtons'] = [
                 ...d().querySelectorAll('.conclusion-block button'),
               ].map((b) => text(b))
@@ -5428,7 +5432,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               await until(() => cyHasText('保存改动'), 40)
               facts['crystal.manualDirtySaveButton'] = cyHasText('保存改动')
 
-              const saveBtn = [...d().querySelectorAll('.conclusion-block button')].find((b) =>
+              const saveBtn = [...d().querySelectorAll('button')].find((b) =>
                 text(b).includes('保存改动'),
               )
               if (saveBtn) click(saveBtn)
