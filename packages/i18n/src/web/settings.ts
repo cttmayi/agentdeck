@@ -39,40 +39,6 @@ export const settingsText = {
     zh: '新建的智能体默认「跟随全局默认」，所以这里改一次就处处生效；某个智能体要例外，在它的编辑页里单独选。',
     en: 'New agents follow this global default, so one change applies everywhere; pick per agent when one needs an exception.',
   },
-  'settings.webSearch': { zh: '联网搜索', en: 'Web search' },
-  'settings.webSearchLabel': {
-    zh: '允许 claude 使用 WebSearch / WebFetch',
-    en: 'Allow claude to use WebSearch / WebFetch',
-  },
-  'settings.webSearchHint': {
-    zh: '官方 Anthropic 端点会真实联网搜索；第三方兼容端点（如 DeepSeek / 阿里云百炼）没有搜索执行器，模型可能编造搜索结果并死循环——遇到这种情况把它关掉，claude 会改用 Bash + curl 调研（任何端点都能干活）。',
-    en: 'On the official Anthropic endpoint this performs real web search. Third-party endpoints (e.g. DeepSeek / Alibaba Bailian) expose the tool without an executor, so the model may fabricate results and loop — turn it off there and claude falls back to Bash + curl research (works on any endpoint).',
-  },
-  // §10.5 第 ③ 条：审核者真执行草稿脚本（默认开）。文案不许说"更安全"。
-  'settings.reviewerScriptRun': { zh: '沉淀审核', en: 'Skill audit' },
-  'settings.reviewerScriptRunLabel': {
-    zh: '允许审核者真执行草稿里的脚本',
-    en: 'Let the auditor actually run scripts in the draft',
-  },
-  'settings.reviewerScriptRunHint': {
-    zh: '开：审核者会把草稿 skill/scripts/ 里的脚本跑一遍（命令只在那份草稿的工作目录里执行，越界的会被拦），"脚本能不能跑"因此有真结论。关：提示词改成"不要执行脚本"，判决里会如实写"未被执行"。注意这一跑是在你机器上执行 agent 刚写出来的代码——本项目不做沙箱隔离。',
-    en: 'On: the auditor runs the scripts under skill/scripts/ (commands stay inside that draft work directory; out-of-bounds ones are blocked), so "does it run" gets a real answer. Off: the prompt switches to "do not execute" and the verdict states scripts were not run. Note this executes agent-written code on your machine — this project does not sandbox runs.',
-  },
-
-  /**
-   * ★ 分批第 41 批：运行时个人配置隔离（默认开）。
-   *
-   * 说明必须写"关掉会失去什么"——那是这个开关唯一的代价，也是 D78 存在的理由：
-   * 隔离开着时 agent 看不到你个人的 skill / MCP / 端点配置；关掉就全都能看到。
-   * ⚠️ 不提"更安全/更快"这类评价词：这里没有安全选项，只有两种取舍。
-   */
-
-  /**
-   * ★ 分批第 47 批：「默认工作守则」（新建智能体时预填到它的指令里）。
-   *
-   * 说明必须讲清"预填"这个语义——它不是"所有 agent 共享的一条规则"：
-   * 改这里不会回头改已存在的 agent（否则使用者改过的身份会被悄悄覆盖）。
-   */
   'settings.agentConduct': { zh: '默认工作守则', en: 'Default working conduct' },
   'settings.agentConductLabel': {
     zh: '新建智能体时，预填到它的「指令」里',

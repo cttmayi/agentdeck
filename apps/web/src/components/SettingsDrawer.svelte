@@ -189,69 +189,17 @@
     </section>
 
     <!--
-      ★ claude 的 WebSearch / WebFetch 开关（D77，默认开）。
-
-      WebSearch/WebFetch 是 Anthropic **服务端**工具：官方端点真执行；第三方
-      兼容端点（DeepSeek / 阿里云百炼）没有执行器、模型会**幻觉搜索结果**。
-      默认开 = 尊重功能（调研类任务是刚需）；在第三方端点上真出幻觉死循环时，
-      关掉它让 claude 退化为 Bash+curl 调研（执行在本地、任何端点都能干活）。
+      ★ 分批第 188 批（使用者："去掉通用设置中的「联网搜索」和「沉淀审核」选项"）：
+        这两块**已删**。
+        · 联网搜索（`webSearchEnabled`）：claude 的 WebSearch 开关，属于运行时细节，
+          不该出现在"通用设置"里；
+        · 沉淀审核（`allowReviewerScriptRun`）：沉淀线的评审早就整条下线（§12.15/§12.49），
+          这个开关控制的是"审核者能不能跑草稿脚本"——没有审核者，它就是死的。
+        服务端那两条 PUT 路由与字段**保留**（老数据还在，删字段要做迁移；而且它们是兼容面），
+        只是界面上不再有入口。
     -->
-    <section class="drawer-section" data-web-search>
-      <h3>{$t('settings.webSearch')}</h3>
-      <label>
-        <input
-          type="checkbox"
-          checked={$identity?.webSearchEnabled ?? true}
-          onchange={(e) => {
-            const next = (e.currentTarget as HTMLInputElement).checked
-            void api('/api/workspace/web-search', {
-              method: 'PUT',
-              body: JSON.stringify({ enabled: next }),
-            })
-              .then(() => void loadIdentity())
-              .catch((err) =>
-                showToast(err instanceof Error ? err.message : String(err)),
-              )
-          }}
-        />
-        {$t('settings.webSearchLabel')}
-      </label>
-      <p class="hint">{$t('settings.webSearchHint')}</p>
-    </section>
 
     <!--
-      ★ §10.5 第 ③ 条：审核者**真执行**草稿脚本的总开关（默认开）。
-
-      ⚠️ 文案不说"更安全"，只说"允许它跑"以及"跑的范围只在那份草稿的工作目录里"：
-         这一跑是**在你自己机器上跑另一个 agent 刚写出来的代码**，而本项目不做沙箱隔离
-         （NG7 是明确的范围决定）。把它说小会让人以为关掉就"安全了"。
-    -->
-    <section class="drawer-section" data-reviewer-script-run>
-      <h3>{$t('settings.reviewerScriptRun')}</h3>
-      <label>
-        <input
-          type="checkbox"
-          checked={$identity?.allowReviewerScriptRun ?? true}
-          onchange={(e) => {
-            const next = (e.currentTarget as HTMLInputElement).checked
-            void api('/api/workspace/reviewer-script-run', {
-              method: 'PUT',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ allow: next }),
-            })
-              .then(() => void loadIdentity())
-              .catch((err) =>
-                showToast(err instanceof Error ? err.message : String(err)),
-              )
-          }}
-        />
-        {$t('settings.reviewerScriptRunLabel')}
-      </label>
-      <p class="hint">{$t('settings.reviewerScriptRunHint')}</p>
-    </section>
-
-
-        <!--
       ★ 分批第 47 批：「默认工作守则」——新建智能体时预填到它的指令里。
 
       使用者要的是「让它尽量和执行者通用」：内置起草者/审核者已经带上那段守则，

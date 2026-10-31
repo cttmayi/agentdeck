@@ -316,13 +316,10 @@ function collectSources(): { files: string[]; texts: string[] } {
 describe('术语一致：同一个角色只许有一个叫法（分批第 54 批）', () => {
   const ROLE_WORD = '沉淀审核'
 
-  test('★★ 角色徽标与设置里的开关用同一个词', () => {
-    assert.equal(
-      webText['agents.roleSkillReviewer'].zh,
-      ROLE_WORD,
-      '角色徽标要与设置开关同词（推荐「沉淀审核」）',
-    )
-    assert.equal(webText['settings.reviewerScriptRun'].zh, ROLE_WORD, '设置开关也要是这个词')
+  test('★★ 角色徽标用「沉淀审核」这个词', () => {
+    // ★ 分批第 188 批：设置里那个开关**已被删掉**（沉淀线的评审整条下线，那个开关是死的），
+    //   所以这里只钉角色徽标——"同一个角色只许一个叫法"这条规矩本身没变。
+    assert.equal(webText['agents.roleSkillReviewer'].zh, ROLE_WORD, '角色徽标就用「沉淀审核」')
   })
 
   test('★★★ 服务端拒绝文案里的角色叫法必须与界面一致（两处漂开就说不到一起）', () => {
