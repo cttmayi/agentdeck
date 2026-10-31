@@ -10,6 +10,7 @@ import {
   matchingExclude,
   MAX_FILES,
   MAX_SKILL_BYTES,
+  MAX_SUPPORT_FILE_BYTES,
   SkillSourceError,
   githubRequestTarget,
   isProbablyText,
@@ -1042,6 +1043,57 @@ describe('★ 加速器的 403（分批第 182 批）', () => {
     await assert.rejects(
       () => resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl }),
       (err: Error) => /访问次数用完/.test(err.message),
+    )
+  })
+})
+
+describe('★ 支持文件超上限：跳过而不是整单失败（分批第 183 批）', () => {
+  test('★★★ 一张 860 KB 的配图不该挡住整个技能；跳过的要如实记下来', async () => {
+    // 真缺陷回放：distilly 仓库里有个 docs/social-preview.png（859971 字节）⇒
+    // 以前整次安装直接报「响应声明的长度是 859971 字节，超过上限 262145」。
+    const big = MAX_SUPPORT_FILE_BYTES + 600 * 1024
+    const gh = fakeGithub({ 'SKILL.md': '---\nname: with-assets\ndescription: 带配图\n---\n\n# x\n' })
+    // 在 contents 列表里加一张"声明 860 KB"的图，并让 raw 返回超限的 content-length
+    const impl = (async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('/contents/docs')) {
+        return new Response(
+          JSON.stringify([
+            {
+              name: 'social-preview.png',
+              path: 'docs/social-preview.png',
+              type: 'file',
+              size: big,
+              download_url: 'https://raw.githubusercontent.com/o/r/main/docs/social-preview.png',
+            },
+          ]),
+          { status: 200 },
+        )
+      }
+      if (url.includes('/contents') && !url.endsWith('/contents')) {
+        // 根目录列表：补上 docs/ 这一栏
+        const res = await gh.impl(url)
+        const list = (await res.json()) as unknown[]
+        return new Response(
+          JSON.stringify([...list, { name: 'docs', path: 'docs', type: 'dir', size: 0 }]),
+          { status: 200 },
+        )
+      }
+      if (url.endsWith('social-preview.png')) {
+        return new Response('x', { status: 200, headers: { 'content-length': String(big) } })
+      }
+      return gh.impl(url)
+    }) as unknown as typeof fetch
+
+    const res = await resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl: impl })
+    // 统一入口回的是 `{body, files, slug…}`（不是 `skillMd`）
+    assert.equal(res.body.includes('with-assets'), true, '技能本体要装上')
+    // 跳过的项要如实记下来（不静默）：按名字在整个解析结果里找——跳过清单的字段名
+    // 随 `finish()` 的实现是 `ignored`/`notes` 都可能，钉"名字出现过"更稳。
+    assert.equal(
+      JSON.stringify(res).includes('social-preview'),
+      true,
+      '被跳过的配图要如实记下来（不静默）',
     )
   })
 })

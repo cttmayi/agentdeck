@@ -1089,7 +1089,22 @@ async function listGithubDir(
   return payload
 }
 
-async function fetchFile(entry: GithubEntry, target: GithubTarget, deps: ResolveDeps): Promise<Buffer> {
+/**
+ * ★ 分批第 183 批（使用者装 distilly 时撞上）：
+ * `响应声明的长度是 859971 字节，超过上限 262145` —— 那个仓库里有个 860 KB 的
+ * `docs/social-preview.png`（README 配图），而我们**整仓**下载时对每个文件都按
+ * 单文件上限硬拒 ⇒ 一张配图把整次安装挡死。
+ *
+ * 现在的口径：**SKILL.md 仍然硬拒**（它是内容本体，超限就该说清楚），
+ * 其它文件**软判**——太大/二进制就跳过并记在 `ignored` 里，安装照常完成。
+ * 理由：技能的支持文件可以有配图/文档目录，但"装不上整个技能"不是应有的代价。
+ */
+async function fetchFile(
+  entry: GithubEntry,
+  target: GithubTarget,
+  deps: ResolveDeps,
+  soft = false,
+): Promise<Buffer | null> {
   // API 正常会给 download_url；没给就自己拼一个，**不用 HEAD 之类猜**——
   // 猜错会静默拿到别的东西
   const url =
@@ -1100,7 +1115,13 @@ async function fetchFile(entry: GithubEntry, target: GithubTarget, deps: Resolve
   if (!res.ok) {
     throw new SkillSourceError('fetch_failed', `下载文件失败（${res.status}）：${entry.path}`)
   }
-  return readCapped(res, MAX_SUPPORT_FILE_BYTES + 1)
+  try {
+    return await readCapped(res, MAX_SUPPORT_FILE_BYTES + 1)
+  } catch (err) {
+    // 软判：只有"太大"这一种可以被跳过（连接错误、403 等仍然要冒出来）
+    if (soft && err instanceof SkillSourceError && err.code === 'too_large') return null
+    throw err
+  }
 }
 
 /**
@@ -1195,8 +1216,14 @@ export async function resolveGithubUrl(
         continue
       }
 
-      const buf = await fetchFile(entry, target, deps)
+      const isSkillMd = entry.name === 'SKILL.md'
+      const buf = await fetchFile(entry, target, deps, !isSkillMd)
       const relPath = rel
+      if (buf === null) {
+        // 软判被跳过（声明超上限）——如实记下来，不静默
+        ignored.push({ path: relPath, reason: `超过单文件上限 ${MAX_SUPPORT_FILE_BYTES}，已跳过` })
+        continue
+      }
 
       if (entry.name === 'SKILL.md') {
         if (!isProbablyText(buf)) {
