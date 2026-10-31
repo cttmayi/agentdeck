@@ -100,21 +100,19 @@ describe('★ 分批第 47 批：通用工作守则', () => {
      * （它们各自对应一个真实的失败面：读法不对=贵且抓不住重点、凭印象写命令=照敲跑不起来、
      * 不写两节=入库被拒、不自检=带着坏引用交上去、硬凑=垃圾技能冻结错误行为）。
      */
+    /** ★ 分批第 178 批（“起草者的身份修改简单”）：8 条压到 6 条，且不再规定章节名。 */
     const must = [
       '只写可复用的东西',
       '先看素材索引，再按需读',
-      '写具体做法之前回查原始命令',
-      // ★ 分批第 177 批：原来的"交付要过入库闸门（必须有 When to Use / Procedure 两节）"
-      //   改成"交付要让人能直接看懂并照着用"——平台不再规定章节名（使用者定：用市面上的技能形态）
-      '交付要让',
-      '交付前自检一遍',
+      '做法要能照着跑',
       '使用者的要求是默认约定',
+      '写法以任务书 / 你被注入的那份技能为准',
       '不值得就说出来',
     ]
     const missing = must.filter((k) => !DRAFTER_INSTRUCTIONS.includes(k))
     assert.deepEqual(missing, [], `起草者身份里缺这些岗位规矩：${missing.join('、')}`)
     assert.ok(
-      DRAFTER_INSTRUCTIONS.length >= 700,
+      DRAFTER_INSTRUCTIONS.length >= 420,
       `身份不能又缩回单薄形态（现在 ${String(DRAFTER_INSTRUCTIONS.length)} 字符）——` +
         '上一批缩到 419 时使用者立刻发现了',
     )
@@ -161,9 +159,8 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     )
     // 但"以它为准"这句话要在（身份不是完全不提规范）
     assert.ok(
-      // ★ 分批第 177 批：措辞从"写作规范为准"改成"写作规范 / 所注入技能为准"
-      DRAFTER_INSTRUCTIONS.includes('写作规范 / 所注入技能为准'),
-      '身份里要有一句"写法以任务书里的写作规范 / 所注入技能为准"（否则它不知道规范在哪）',
+      DRAFTER_INSTRUCTIONS.includes('写法以任务书 / 你被注入的那份技能为准'),
+      '身份里要有一句“写法以任务书 / 你被注入的那份技能为准”',
     )
   })
 
@@ -182,8 +179,8 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     assert.ok(DRAFTER_INSTRUCTIONS.includes('一条 skill'), '要点出"可能是一条 skill"')
     assert.ok(DRAFTER_INSTRUCTIONS.includes('智能体的指令'), '也要点出"也可能是一条智能体的指令"')
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('任务书给的'),
-      '要说明产出契约由任务书给（否则身份与任务书会互相打脸）',
+      DRAFTER_INSTRUCTIONS.includes('任务书 / 你被注入的那份技能为准'),
+      '要说明写法以任务书 / 所注入的技能为准（否则身份与任务书会互相打脸）',
     )
   })
 
@@ -201,20 +198,21 @@ describe('★ 分批第 47 批：通用工作守则', () => {
      */
     // ★ 分批第 177 批：原来钉的是"入库闸门那条要限定『写 skill 时』"——现在那条已改成
     //   "交付要让人能直接看懂并照着用"（平台不再规定章节名），限定语仍然必须在。
+    // ★ 分批第 178 批：简化之后不再有单独一条“交付”；两种落法写在同一句里
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('写 skill 时，交付要让'),
-      '★ 交付那条必须仍然限定"写 skill 时"（改指令没有目录结构与支持文件）',
+      DRAFTER_INSTRUCTIONS.includes('写 skill 时落进正文，改指令时落成硬约束'),
+      '★ 两个任务的落法要在同一句里说清（改指令没有目录结构）',
     )
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('改智能体指令时'),
-      '★ 要明说改指令时交付什么由任务书定（instructions.md + 字符上限）',
+      DRAFTER_INSTRUCTIONS.includes('改指令时落成硬约束'),
+      '★ 简化后两种落法写在同一句：写 skill 落进正文 / 改指令落成硬约束',
     )
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('改智能体指令时把它落成指令里的硬约束'),
+      DRAFTER_INSTRUCTIONS.includes('改指令时落成硬约束'),
       '★ 「使用者的要求是默认约定」这条也要说明在改指令时怎么落',
     )
     // 通用的那几条**不需要**限定语（两个任务都成立），所以它们保持原样：
-    for (const generic of ['先看素材索引，再按需读', '写具体做法之前回查原始命令']) {
+    for (const generic of ['先看素材索引，再按需读', '做法要能照着跑']) {
       assert.ok(DRAFTER_INSTRUCTIONS.includes(generic), `通用条款不该被改坏：${generic}`)
     }
   })

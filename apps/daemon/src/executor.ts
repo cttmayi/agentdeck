@@ -1282,8 +1282,18 @@ export class RunExecutor {
       }
 
       /** 三块怎么投递由 `mode` 决定（A：①② 进系统提示；B：三块合一段）。 */
+      /**
+       * ★ 分批第 178 批（使用者定："**智能体使用聊天模版，而不是执行者模版**"）：
+       * 沉淀的起草 run（`subject.type === 'skill-draft'`）也走**聊天那一份**三块模版。
+       *
+       * 为什么：那一轮本质是"跟一个智能体说话、它可能反问、你再答"（分批第 172 批的
+       * 问答轮就是这么设计的），而不是"派一个任务等它交报告"——执行者那份框架里含
+       * run/对象头与"完成后给出一份报告"，灌进这条链会把它拧回"交报告"的姿势。
+       */
+      const usesChatTemplates =
+        req.subject.type === 'conversation' || req.subject.type === 'skill-draft'
       const delivery: Delivery =
-        req.subject.type === 'conversation'
+        usesChatTemplates
           ? // ★ 对话：**①②③ 都发**（2026-09 的决定）——
             //   ① 是聊天**自己**那份框架（任务那份含 run/对象头、"报告"要求与判决
             //   契约，灌进聊天是错的）；② 是 agent 的「指令」（在此之前它在聊天里
@@ -1370,7 +1380,9 @@ export class RunExecutor {
         runId,
         req.subject.type === 'conversation'
           ? `这一轮是对话：交给 CLI 的就是使用者那句话（${delivery.user.length} 字符，没套任何模版）｜${modeLabel}`
-          : `第一句话（${modeLabel}，以下就是交给 CLI 的全部内容）：`,
+          : req.subject.type === 'skill-draft'
+            ? `这一轮用**聊天那三块模版**投递（沉淀是"跟智能体说话"，不是派活）｜${modeLabel}`
+            : `第一句话（${modeLabel}，以下就是交给 CLI 的全部内容）：`,
       )
       // ★ 三块**分开、带名字**进日志（2026-09 的决定；使用者投诉过"只看到框架和
       //   身份、看不到任务"——A 档 ③ 是一条无标签的单行，夹在状态行里认不出来）。
