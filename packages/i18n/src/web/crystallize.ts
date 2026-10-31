@@ -174,6 +174,11 @@ export const crystallizeText = {
     zh: '{turns} 轮 · {tools} 次工具调用',
     en: '{turns} turns · {tools} tool calls',
   },
+  // ── 对话里那行"我当时给了它什么"（§12.14：与右栏清单**同一份数据现算**）──
+  'crystallize.materialCount': { zh: '材料 {n} 项（{parts}）', en: 'Material: {n} ({parts})' },
+  'crystallize.materialCountTrace': { zh: '轨迹 {n}', en: '{n} trace' },
+  'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
+  'crystallize.materialCountNone': { zh: '这次没有材料', en: 'No material this time' },
   'crystallize.scopeConversation': { zh: '对话', en: 'Conversation' },
   'crystallize.scopeTask': { zh: '任务', en: 'Task' },
   'crystallize.reviewedYes': { zh: '有审核判决', en: 'Reviewed' },

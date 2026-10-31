@@ -939,6 +939,48 @@
     }
   }
 
+  /**
+   * ★ 分批第 162 批（§12.14）：**对话里那行「我当时给了它什么」**。
+   *
+   * 设计原文：「对话里一行摘要回答*我当时给了它什么*（审计用）；右栏清单回答*它现在手上
+   * 有什么*（操作用）」，并且——**两处必须由同一份数据现算，否则必漂**。右栏清单已经是
+   * `GET /api/crystallize/material` 现算的，这行摘要也必须从**同一份 `material`** 推出来，
+   * 不能另拼一个数（第一版只写了"几轮几次工具调用"，删掉一份材料它不会变——使用者看不出
+   * 自己刚删的那份算不算数）。
+   *
+   * 分类口径与右栏一致：`turns/` + `task-run.md` + `verdict.md` + `feedback.md` 是**轨迹**
+   * （平台从来源 run 切出来的），`appended/` 是**使用者给的**（空白起/追加/拖进来/仓库），
+   * 剩下的是平台自己的登记文件（索引页 / meta / 技能清单 / `existing-*`）。
+   */
+  $: givenCount =
+    material === null ? 0 : material.items.filter((i) => i.relPath.startsWith('appended/')).length
+  $: traceCount =
+    material === null
+      ? 0
+      : material.items.filter(
+          (i) =>
+            i.relPath.startsWith('turns/') ||
+            i.relPath === 'task-run.md' ||
+            i.relPath === 'verdict.md' ||
+            i.relPath === 'feedback.md',
+        ).length
+  $: materialCountLine = (() => {
+    if (material === null) return ''
+    const total = material.items.length
+    if (total === 0) return $t('crystallize.materialCountNone')
+    // 轨迹那一档在**空白起**的草稿里恒为 0 ⇒ 不写出来（否则屏幕上会多一行"轨迹 0"，
+    // 而探针有一条判据专门钉"空白起不许出现轨迹字样"）
+    const parts: string[] = []
+    if (traceCount > 0) parts.push($t('crystallize.materialCountTrace', { n: String(traceCount) }))
+    if (givenCount > 0) parts.push($t('crystallize.materialCountGiven', { n: String(givenCount) }))
+    return parts.length === 0
+      ? $t('crystallize.materialCount', {
+          n: String(total),
+          parts: $t('crystallize.materialCountGiven', { n: '0' }),
+        })
+      : $t('crystallize.materialCount', { n: String(total), parts: parts.join(' · ') })
+  })()
+
   /** 拉素材清单（"素材"分节用：能核"这句话是从哪一轮来的"）。 */
   async function loadMaterial(): Promise<void> {
     if (draftRunId === '' || materialLoading) return
@@ -1517,6 +1559,12 @@
            日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
            而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
       <div class="crystal-msg" data-msg-role="system">
+        <!-- ★ 分批第 162 批（§12.14）：对话里那行「我当时给了它什么」——与右栏清单同一份数据 -->
+        {#if materialCountLine !== ''}
+          <p class="faint small crystal-material-line" data-crystal-material-line>
+            {materialCountLine}
+          </p>
+        {/if}
         {#if step === 'drafting'}
         <section class="drawer-section">
           <h3>

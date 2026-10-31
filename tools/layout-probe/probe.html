@@ -4665,6 +4665,23 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               hasMarker: appended.some((i) => i.text.includes(marker)),
             }
           })()
+          /**
+           * ★ 分批第 162 批（§12.14）：**对话那行摘要与右栏清单同源**。
+           *
+           * 判据为什么量"两个数相等"而不是"摘要里有材料"：设计原文是"两处必须由同一份数据现算，
+           * 否则必漂"——只量文字存在的话，摘要写死一个数、右栏另算一份，两边对不上也会绿。
+           * 这里覆盖了"追加一份"和"删掉一份"之后的状态（上面两段正好改过材料）。
+           */
+          facts['crystal.materialLineMatchesPane'] = (() => {
+            const line = d().querySelector('[data-crystal-material-line]')?.textContent ?? ''
+            const paneCount = d().querySelectorAll('.artifact-mat-list li').length
+            const m = line.match(/材料\s*(\d+)\s*项/)
+            return {
+              line: line.slice(0, 60),
+              lineCount: m ? Number(m[1]) : null,
+              paneCount,
+            }
+          })()
           // U3c-2 第 4 步：把 B 类判据要的新语义先量出来（编辑器在产物消息里），
           // 旧判据不动——先有事实，再改断言（这一轮的惯性做法）。
           // ★ 分批第 155 批（§12.12 / §12.53 选项 2）：编辑器**搬进右栏产物栏**。

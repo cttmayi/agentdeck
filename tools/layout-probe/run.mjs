@@ -3651,6 +3651,22 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.materialLineMatchesPane',
+    label:
+      '★★★ 对话里那行「材料 N 项」与**右栏清单**是同一份数据现算的（§12.14：两处必须同源，否则必漂——' +
+      '只量"摘要里有材料"的话，写死一个数、右栏另算一份也会绿）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      typeof v.lineCount === 'number' &&
+      Number(v.lineCount) === Number(v.paneCount),
+    show: (v) =>
+      v === null || v === undefined
+        ? 'null'
+        : `摘要 ${String(v.lineCount)} 项　右栏 ${String(v.paneCount)} 项　「${String(v.line)}」`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankEntryPresent',
     label:
       '★★ 「新建沉淀」的**起点屏**（页面内第一问，不再是浮层）里有「从空白或材料起」（§12.7：起点变成第一问）',
