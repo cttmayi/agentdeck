@@ -18,12 +18,11 @@
    *     行高下限都在它里面）——**不要自己写 `li > button` + 一套行样式**；
    *   · 状态徽标用全局 `.badge` + `lib/run-status.ts` 的映射（与任务详情
    *     的 run 徽标同一份，别自造 `.status-tag`）；
-   *   · 选来源的浮层用 `@agentdeck/ui` 的 `Modal`（遮罩 / Esc / 关闭按钮它做一次）；
+   *   · 起点（选来源 / 从空白起）不再是浮层，而是 `#/crystallize/new` 页面里的第一问（U4b）。
    *   · 主操作放顶栏（`setPageActions`），不在列表顶上自插一条按钮——
    *     聊天「新对话」、任务「新建任务」都在顶栏那一格。
    */
   import { onMount, onDestroy } from 'svelte'
-  import { Modal } from '@agentdeck/ui/components'
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
@@ -72,23 +71,10 @@
     startFromBlank?: boolean
   }
 
-  /** GET /api/crystallize/sources 的行（新建沉淀的来源选择器）。 */
-  interface SourceRow {
-    kind: 'conversation' | 'task'
-    id: string
-    label: string
-    runId: string
-    turns: number | null
-  }
-
   let drafts: DraftRow[] = []
   let loading = false
   let loadError: string | null = null
   let now = Date.now()
-  let pickOpen = false
-  let sources: SourceRow[] = []
-  let sourcesLoading = false
-  let sourcesError: string | null = null
   let filter = ''
 
   /** 列表行目标摘要：新建 / 更新 <slug> / 优化 <智能体> 的指令。 */
@@ -142,20 +128,6 @@
     void refresh()
   }
 
-  async function openPicker(): Promise<void> {
-    pickOpen = true
-    sourcesLoading = true
-    sourcesError = null
-    try {
-      const res = await api<{ items: SourceRow[] }>('/api/crystallize/sources')
-      sources = res.items
-    } catch (e) {
-      sourcesError = String(e instanceof Error ? e.message : e)
-    } finally {
-      sourcesLoading = false
-    }
-  }
-
   /**
    * 放弃一条起草（沉淀任务）。
    *
@@ -189,22 +161,6 @@
     }
   }
 
-  function pick(row: SourceRow): void {
-    pickOpen = false
-    goCrystallize(row.runId)
-  }
-
-  /**
-   * ★ 分批第 133 批（「从空白/材料起」）：**没有来源 run** 的沉淀。
-   *
-   * 用哨兵 id 进流程页（`#/crystallize/blank`）——`blank` 不是合法 ULID，与真 run id 撞不上；
-   * 流程页据此走 blank 模式（不问 targets、目标面板只问作用描述 + 可选材料，见 `CrystallizeView`）。
-   */
-  function startBlank(): void {
-    pickOpen = false
-    goCrystallize('blank')
-  }
-
   /** 当前选中条目的来源标签（流程页副题）。 */
   // ⚠️ 按**任务**匹配，不是按"最新那一版"匹配：深链可以停在历史版本上（那一条 id 不是任何行的
   //    `runId`）⇒ 只比 `runId` 会读不到来源标签、那一行也不高亮。
@@ -219,7 +175,10 @@
       label: $t('crystallize.newEntry'),
       kind: 'primary',
       icon: 'plus',
-      onActivate: () => void openPicker(),
+      // ★ 分批第 141 批（U4b，§12.7）：**「新建沉淀」不再弹 Modal**——起点变成页面内的第一问
+      //   （`#/crystallize/new`：选一个来源，或从空白/材料起）。删掉 Modal 是因为它把
+      //   "从哪开始"做成了流程页外面的一个动作；对话式页面里，这件事就该是一条消息。
+      onActivate: () => goCrystallize('new'),
     },
   ])
   onDestroy(() => clearPageActions('crystallize'))
@@ -245,8 +204,6 @@
     if (q === '') return true
     return (d.source?.label ?? '').toLowerCase().includes(q)
   })
-  $: convSources = sources.filter((s) => s.kind === 'conversation')
-  $: taskSources = sources.filter((s) => s.kind === 'task')
   /**
    * 选中的那条沉淀对应的列表行（产物栏要它的"第 N 版"）。
    *
@@ -349,79 +306,8 @@
   {/if}
 </div>
 
-<!-- ══════════════════ 新建沉淀：来源选择器（共享 Modal） ══════════════════ -->
-<Modal
-  open={pickOpen}
-  title={$t('crystallize.pickTitle')}
-  subtitle={$t('crystallize.pickHint')}
-  closeLabel={$t('crystallize.cancel')}
-  onclose={() => (pickOpen = false)}
->
-  {#if sourcesLoading}
-    <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-    <div class="skeleton" style="width:70%"></div>
-  {:else if sourcesError}
-    <p class="err-text">{$t('crystallize.errTargets', { error: sourcesError })}</p>
-  {:else}
-    <div class="crystal-pick-groups">
-      <section>
-        <h4>起点</h4>
-        <ul class="crystal-list">
-          <ListRow rowClass="crystal-pick-row" onclick={startBlank}>
-            {#snippet children()}
-              <span class="crystal-title">从空白/材料起</span>
-              <span class="crystal-meta">
-                <span class="faint small">没有来源 run，素材只有你给的</span>
-              </span>
-            {/snippet}
-          </ListRow>
-        </ul>
-      </section>
-      <section>
-        <h4>{$t('crystallize.scopeConversation')}</h4>
-        {#if convSources.length === 0}
-          <p class="faint small">{$t('crystallize.pickNoConversations')}</p>
-        {:else}
-          <ul class="crystal-list">
-            {#each convSources as s (s.id)}
-              <ListRow rowClass="crystal-pick-row" onclick={() => pick(s)}>
-                {#snippet children()}
-                  <span class="crystal-title" title={s.label}>{s.label}</span>
-                  <span class="crystal-meta">
-                    {#if s.turns !== null}
-                      <span class="faint small"
-                        >{$t('crystallize.pickTurns', { turns: String(s.turns) })}</span
-                      >
-                    {/if}
-                  </span>
-                {/snippet}
-              </ListRow>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-      <section>
-        <h4>{$t('crystallize.scopeTask')}</h4>
-        {#if taskSources.length === 0}
-          <p class="faint small">{$t('crystallize.pickNoTasks')}</p>
-        {:else}
-          <ul class="crystal-list">
-            {#each taskSources as s (s.id)}
-              <ListRow rowClass="crystal-pick-row" onclick={() => pick(s)}>
-                {#snippet children()}
-                  <span class="crystal-title" title={s.label}>{s.label}</span>
-                  <span class="crystal-meta">
-                    <span class="faint small">{$t('crystallize.reviewedYes')}</span>
-                  </span>
-                {/snippet}
-              </ListRow>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-    </div>
-  {/if}
-</Modal>
+<!-- ★ 分批第 141 批（U4b）：来源选择器 Modal 已删——起点变成 `#/crystallize/new` 的第一问
+     （§12.7「明确删掉的东西」：新建沉淀 Modal）。 -->
 
 <style>
   /* ── 行内容（壳不在这里：hover / 选中框 / 行高下限归 ListRow） ── */
@@ -445,13 +331,4 @@
     font-size: var(--fs-sm);
   }
 
-  /* ── 选择器：两组之间留白（Modal 的壳与内滚归共享控件） ── */
-  .crystal-pick-groups section + section {
-    margin-top: var(--sp-4);
-  }
-  .crystal-pick-groups h4 {
-    margin: 0 0 var(--sp-2);
-    font-size: var(--fs-sm);
-    color: var(--text-faint);
-  }
 </style>

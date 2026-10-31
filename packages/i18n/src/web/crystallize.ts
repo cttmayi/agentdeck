@@ -30,23 +30,12 @@ export const crystallizeText = {
     en: 'Turn chats & tasks into skills (drafts live here, not in the task list)',
   },
   'crystallize.newEntry': { zh: '新建沉淀', en: 'New' },
-  'crystallize.pickTitle': { zh: '选择来源', en: 'Choose a source' },
   'crystallize.pickHint': {
     // ⚠️ 2026-10-21：原文案末尾写着「（设计 §4.3）」——**内部文档编号漏进了界面**。
     //    使用者看到的是一个他无法查证的编号（探针里量到过），那句话本身也已经说清了规则。
     zh: '来源 = 对话或任务；任务要有审核结论或你给的反馈',
     en: 'Source = a conversation or a task; tasks need a review verdict or your feedback',
   },
-  'crystallize.pickNoConversations': {
-    zh: '还没有可沉淀的对话（至少要有已结束的一轮）',
-    en: 'No crystallizable conversations yet (need at least one finished turn)',
-  },
-  'crystallize.pickNoTasks': {
-    zh: '还没有可沉淀的任务（需已结束且有审核/反馈）',
-    en: 'No crystallizable tasks yet (need a finished one with review/feedback)',
-  },
-  'crystallize.cancel': { zh: '取消', en: 'Cancel' },
-  'crystallize.pickTurns': { zh: '{turns} 轮', en: '{turns} turns' },
 
   // ── 沉淀任务列表（左栏） ──
   'crystallize.listCount': { zh: '{n} 条沉淀', en: '{n} crystallizations' },
@@ -67,6 +56,23 @@ export const crystallizeText = {
    */
   'crystallize.state.done': { zh: '已入库', en: 'Saved' },
   'crystallize.status.asking': { zh: '提问中', en: 'Asking' },
+  /**
+   * ★ 分批第 141 批（U4b）：**起点变成页面内的第一问**（「新建沉淀」不再弹 Modal）。
+   *   选项 = 最近的会话/任务 + 「从空白或材料起」；一条也没有时如实说可以走空白起。
+   */
+  'crystallize.newStartBlank': { zh: '从空白或材料起', en: 'Start from blank / materials' },
+  'crystallize.newStartBlankHint': {
+    zh: '没有可沉淀的记录，只有你接下来给的材料',
+    en: 'No conversation to distill — only the materials you provide',
+  },
+  'crystallize.newStartFrom': {
+    zh: '从{kind}「{label}」沉淀成技能',
+    en: 'Distill a skill from {kind} "{label}"',
+  },
+  'crystallize.newStartEmpty': {
+    zh: '还没有可选的会话或任务——可以直接从空白或材料起。',
+    en: 'No conversations or tasks yet — start from blank or materials.',
+  },
   'crystallize.discard': { zh: '放弃这条沉淀', en: 'Discard this crystallization' },
   'crystallize.discardConfirm': {
     zh: '放弃「{label}」这条沉淀？草稿会从列表移除，已入库的技能不受影响。',
@@ -173,15 +179,6 @@ export const crystallizeText = {
     en: 'Nothing to crystallize here — cannot start',
   },
 
-  // ── 恢复进行中的起草（§4.1.1） ──
-  // ★ 状态词用**任务状态**（起草中 / 待审阅），不是起草 run 的「已完成」——
-  //   这里说"已完成"会让人以为沉淀本身完事了。
-  'crystallize.resumeNotice': {
-    zh: '有一条草稿还没收尾（{status}）',
-    en: 'A draft is still unfinished ({status})',
-  },
-  'crystallize.resumeContinue': { zh: '继续', en: 'Continue' },
-  'crystallize.resumeNew': { zh: '新起草', en: 'New draft' },
 
   // ── 起草 run ──
   'crystallize.draftSection': { zh: '起草 run', en: 'Draft run' },

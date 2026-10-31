@@ -28,7 +28,7 @@
   import { FoldSection } from '@agentdeck/ui/components'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
-  import { go } from '../lib/view.ts'
+  import { go, goCrystallize } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { showToast } from '../lib/view.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
@@ -426,10 +426,12 @@
   async function loadTargets(): Promise<void> {
     // ★ 分批第 133 批：空白起**没有来源 run** ⇒ 没有可算的目标面板（`GET /crystallize/targets`
     //   按 runId 查，给它 `blank` 只会 404）。targets 保持 null，目标面板换成空白起的那一问。
-    if (blankMode) {
+    // ★ 分批第 141 批：起点屏（`new`）同样没有来源 run，也不问 targets。
+    if (blankMode || newMode) {
       loading = false
       targets = null
       error = ''
+      if (newMode) void loadSources()
       return
     }
     loading = true
@@ -438,6 +440,12 @@
       targets = await api<CrystallizeTargets>(
         `/api/crystallize/targets?runId=${encodeURIComponent(runId)}`,
       )
+      /**
+       * ★ 分批第 141 批（U4b，§12.7）：**删掉「恢复进行中的起草」这条显式路径**——
+       *   设计原文是"状态在列表行上 + 直接点进去（不再有'恢复'这个动作）"。
+       *   所以进到一条有进行中草稿的来源页时**直接接上**，不再问「继续 / 新起草」。
+       */
+      autoAttachOnce()
     } catch (err) {
       error = $t('crystallize.errTargets', { error: err instanceof Error ? err.message : String(err) })
     } finally {
@@ -569,7 +577,17 @@
   })
   onDestroy(stopPolling)
 
-  /** 「继续」挂回进行中的起草（§4.1.1）。 */
+  /** 自动接上的护栏：只做一次（轮询会反复把 targets 读回来，不能每次都接一遍）。 */
+  let autoAttached = false
+  function autoAttachOnce(): void {
+    if (autoAttached || attached) return
+    if (step !== 'target') return
+    if (!targets?.activeDraft) return
+    autoAttached = true
+    resumeDraft()
+  }
+
+  /** 挂回进行中的起草（§4.1.1；★ 分批第 141 批起**自动**接，不再是一个按钮）。 */
   function resumeDraft(): void {
     const ad = targets?.activeDraft
     if (!ad) return
@@ -613,15 +631,6 @@
     }
   }
 
-  /** 「新起草」= 放弃旧的（还在跑就停掉），留在目标态。 */
-  function newDraft(): void {
-    const ad = targets?.activeDraft
-    attached = true
-    if (ad && !['completed', 'failed', 'cancelled'].includes(ad.status)) {
-      void api(`/api/runs/${ad.runId}/cancel`, { method: 'POST' }).catch(() => {})
-    }
-  }
-
   /** 向导答完 → 落回原有目标状态 → 走原提交路径（`startDraft`）。 */
   /**
    * ★ 分批第 133 批（「从空白/材料起」）：「起点」是空白起时 `runId` prop 是哨兵值 `blank`，
@@ -632,6 +641,33 @@
    */
   const BLANK_RUN_ID = 'blank'
   $: blankMode = runId === BLANK_RUN_ID
+  /**
+   * ★ 分批第 141 批（U4b，§12.7）：**「新建沉淀」不再弹 Modal** ⇒ 用一个哨兵路由
+   * `#/crystallize/new` 承接"还没选来源"的那一屏：页面里一条消息问「这一次要沉淀什么？」，
+   * 选项 = 最近的会话/任务 + 「从空白或材料起」。选中来源就跳到那一条来源的页面
+   * （`#/crystallize/<sourceRunId>`），从空白起就跳 `#/crystallize/blank`。
+   */
+  const NEW_RUN_ID = 'new'
+  $: newMode = runId === NEW_RUN_ID
+  /** 起点屏的来源清单（`GET /api/crystallize/sources`）。 */
+  let sourceOptions: Array<{ kind: 'conversation' | 'task'; label: string; runId: string }> = []
+  let sourcesLoading = false
+
+  /** 读"可以从哪条会话/任务沉淀"（只在起点屏用）。 */
+  async function loadSources(): Promise<void> {
+    if (!newMode) return
+    sourcesLoading = true
+    try {
+      const res = await api<{
+        items: Array<{ kind: 'conversation' | 'task'; label: string; runId: string }>
+      }>('/api/crystallize/sources')
+      sourceOptions = res.items
+    } catch {
+      sourceOptions = []
+    } finally {
+      sourcesLoading = false
+    }
+  }
   let blankMaterialText = ''
   let blankStart = false
 
@@ -1450,7 +1486,9 @@
   {/snippet}
 
   {#snippet actions()}
-    {#if step === 'target'}
+    {#if newMode}
+      <!-- 起点屏没有"开始"：先选来源（或从空白/材料起）——那是消息里的第一问 -->
+    {:else if step === 'target'}
       <button
         class="primary"
         disabled={!canStart || loading}
@@ -1498,22 +1536,43 @@
         <div class="notice bad crystal-notice">{error}</div>
       {/if}
 
-      <!-- ── 恢复进行中的起草（§4.1.1）：继续 / 新起草 ── -->
-      {#if targets?.activeDraft && !attached && step === 'target' && !loading}
-        <div class="notice resume">
-          <div class="resume-text">
-            <strong>
-              {$t('crystallize.resumeNotice', {
-                status: $t(crystallizeStateKey(crystallizeState(targets.activeDraft.status))),
-              })}
-            </strong>
-            <span class="faint small">run {targets.activeDraft.runId.slice(0, 4)}…</span>
-          </div>
-          <div class="resume-actions">
-            <button class="primary small" onclick={resumeDraft}>{$t('crystallize.resumeContinue')}</button>
-            <button class="ghost small" onclick={newDraft}>{$t('crystallize.resumeNew')}</button>
-          </div>
-        </div>
+      <!-- ★ 分批第 141 批（U4b）：「继续 / 新起草」提示**已删**（§12.7：状态在列表行上、
+           点进去直接接上）。现在进到有进行中草稿的来源页会**自动接上**，见 `autoAttachOnce`。 -->
+
+      <!--
+        ── 起点屏（`#/crystallize/new`）：**「新建沉淀」不再弹 Modal**（§12.7）──
+        这一屏就是"对话的第一条"：问一句「这一次要沉淀什么？」，选项 = 最近的会话/任务
+        + 「从空白或材料起」。选中就跳到那一条来源的页面，从空白起就跳 `#/crystallize/blank`。
+      -->
+      {#if newMode}
+        <section class="crystal-intake-msg" data-crystallize-step="new">
+          <p class="intake-q">这一次要沉淀什么？</p>
+          {#if sourcesLoading}
+            <p class="faint small">正在读最近的会话与任务…</p>
+          {:else}
+            <div class="intake-choices">
+              <button
+                type="button"
+                class="intake-choice"
+                onclick={() => goCrystallize(BLANK_RUN_ID)}
+              >
+                {$t('crystallize.newStartBlank')}
+                <span class="faint small">{$t('crystallize.newStartBlankHint')}</span>
+              </button>
+              {#each sourceOptions as opt (opt.runId)}
+                <button type="button" class="intake-choice" onclick={() => goCrystallize(opt.runId)}>
+                  {$t('crystallize.newStartFrom', {
+                    kind: opt.kind === 'conversation' ? $t('crystallize.scopeConversation') : $t('crystallize.scopeTask'),
+                    label: opt.label,
+                  })}
+                </button>
+              {/each}
+              {#if sourceOptions.length === 0}
+                <p class="faint small">{$t('crystallize.newStartEmpty')}</p>
+              {/if}
+            </div>
+          {/if}
+        </section>
       {/if}
 
       <!--
@@ -1554,7 +1613,12 @@
            `applyIntake → startDraft` 做，目标状态所有权留在原处——不产生第二套入口。
            ★ 分批第 133 批：空白起（`blank`）没有 targets，但 intake 要照画——`blank` 告诉它
            "不是还在加载，而是没有来源 run"。 -->
-      <CrystallizeIntake {targets} blank={blankMode} onfinish={applyIntake} />
+      <!-- ⚠️ 用 `{#key blankMode}` 强制重挂：`blank` 决定的是**起始 stage**（空白起直接问作用描述），
+           而它在组件里只在初始化时算一次。路由从 `#/crystallize/new` 切到 `#/crystallize/blank`
+           时两屏用的是同一个组件实例 ⇒ 不重挂就还停在"这次要沉淀成什么？"那一问（探针当场量到）。 -->
+      {#key blankMode}
+        <CrystallizeIntake {targets} blank={blankMode} onfinish={applyIntake} />
+      {/key}
       {/if}
 
       <!-- ══════════════════ 草稿审阅 ══════════════════

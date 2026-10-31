@@ -4574,15 +4574,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             f.contentWindow.location.hash = '#/tasks'
             await until(() => !d().querySelector('.conclusion-bar'), 40)
             f.contentWindow.location.hash = `#/crystallize/${cyRunId}`
-            const attached = await until(
-              () =>
-                [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
-              60,
-            )
-            if (!attached) return false
-            const cont = [...d().querySelectorAll('button')].find((b) => text(b).includes('继续'))
-            click(cont)
-            // 审阅态的标志：结论条（`.review-bar`）出现
+            // ★ 分批第 141 批（U4b，§12.7）：**不再有「继续」这个动作**——进到有进行中草稿的
+            //   来源页会**自动接上**（状态在列表行上，点进去就是接上）。所以直接等审阅态的标志。
             const enteredReview = await until(() => !!d().querySelector('.conclusion-bar'), 120)
             // 分批第 98 批：**入口断言**。各组是靠"送回 #/tasks → 再进 #/crystallize/<id> → 等某个
             // 控件"进入目标屏的；那个控件一换形态就没了 ⇒ 入口漂、整组空过（§12.24 量到 86 项红）。
@@ -5434,14 +5427,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               f.contentWindow.location.hash = '#/tasks'
               await until(() => !d().querySelector('.review-tabs'), 40)
               f.contentWindow.location.hash = `#/crystallize/${cyAgentDraft}`
-              const cont = await until(
-                () =>
-                  [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
-                120,
-              )
-              if (cont) {
-                click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
-              }
+              // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
               facts['crystal.agentAttached'] = await until(
                 () => !!d().querySelector('.conclusion-bar'),
                 120,
@@ -5501,13 +5487,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               f.contentWindow.location.hash = '#/tasks'
               await until(() => !d().querySelector('.review-tabs'), 40)
               f.contentWindow.location.hash = `#/crystallize/${id}`
-              const cont = await until(
-                () =>
-                  [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
-                120,
-              )
-              if (!cont) return null
-              click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
+              // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
               const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
               if (!attached) return null
               return {
@@ -5636,13 +5616,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               f.contentWindow.location.hash = '#/tasks'
               await untilNet(() => !d().querySelector('.review-tabs'), 20)
               f.contentWindow.location.hash = `#/crystallize/${cyDrafting}`
-              // 未收尾的草稿挂的是「继续」（与审阅态同一条路：点它才接到那条 run 上）
-              const attached = await untilNet(
-                () => [...d().querySelectorAll('button')].some((b) => text(b).includes('继续')),
-                60,
-              )
-              if (!attached) return false
-              click([...d().querySelectorAll('button')].find((b) => text(b).includes('继续')))
+              // ★ 分批第 141 批：自动接上（不再有「继续」按钮）
               // 起草中的标志：**状态锚点 = drafting** + 那个 run 的日志框（不是结论条——那时还没审核）。
               // 分批第 115 批：起草态的 tab 条已经删了（依据改为直接跟在日志下面），所以这里**不能**
               // 再等 `.review-tabs`——否则整组空过（探针当场红的就是这条：起草中那一屏挂不上）。
@@ -5837,10 +5811,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           )
           facts['crystal.blankEntryButton'] = !!blankOpenBtn
           if (blankOpenBtn) {
+            // ★ 分批第 141 批（U4b，§12.7）：**「新建沉淀」不再弹 Modal** ⇒ 起点变成页面内的
+            //   第一问（`#/crystallize/new`）。所以这里等的是"起点问题 + 选项"，不是 Modal。
             click(blankOpenBtn)
-            await until(() => !!d().querySelector('.modal .crystal-pick-row'), 80)
-            const blankRowBtn = [...d().querySelectorAll('.modal .crystal-pick-row button')].find(
-              (b) => text(b).includes('从空白/材料起'),
+            await until(() => !!d().querySelector('[data-crystallize-step="new"] .intake-choice'), 120)
+            facts['crystal.blankRoute'] = f.contentWindow.location.hash
+            const blankRowBtn = [...d().querySelectorAll('[data-crystallize-step="new"] .intake-choice')].find(
+              (b) => text(b).includes('从空白或材料起'),
             )
             facts['crystal.blankEntryPresent'] = !!blankRowBtn
             if (blankRowBtn) {
