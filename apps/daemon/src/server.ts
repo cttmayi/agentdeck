@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
@@ -3177,6 +3177,53 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    * ⚠️ 纯重构：status/body 与原来的 `sendJson` 一一对应，行为一字不改。判据是
    *   `crystallize-e2e` 那几十条一个都不许变。
    */
+
+/**
+ * ★ 分批第 172 批：**起草 run 注入哪些技能**（使用者定：走"注入"路线，但技能不预置在仓库里，
+ * 由使用者自己装——一键安装走既有的 `POST /api/skills/install`）。
+ *
+ * 记在哪：起草开始时把选中的 skill id 落一份 `material/injected-skills.json`；后续的
+ * 「按意见改一版」「回答提问」都读它 ⇒ **同一条沉淀每一轮用同一套技能**（不读的话，
+ * 第二轮起技能就悄悄没了，而产出会"看起来一样但没读规范"）。
+ * 读的时候只保留**仍然存在**的（人被删了某条技能不算错误：少注入一条比整轮失败好，
+ * 但要在 run 的 note 里说清——这里返回空则该轮不带技能）。
+ */
+async function injectedSkillsOf(
+  workspaceId: WorkspaceId,
+  taskDir: string,
+): Promise<
+  Array<{
+    ref: { id: Skill['id']; slug: string; source: Skill['source'] }
+    slug: string
+    name: string
+    body: string
+    description?: string
+    files: Record<string, string>
+  }>
+> {
+  const raw = await readFile(join(taskDir, 'material', 'injected-skills.json'), 'utf8').catch(() => '')
+  if (raw.trim() === '') return []
+  let ids: unknown
+  try {
+    ids = (JSON.parse(raw) as { skillIds?: unknown }).skillIds
+  } catch {
+    return []
+  }
+  if (!Array.isArray(ids)) return []
+  const all = await store.listSkills(workspaceId)
+  const wanted = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  return all
+    .filter((skill) => wanted.has(skill.id as string))
+    .map((s) => ({
+      ref: { id: s.id, slug: s.slug, source: s.source },
+      slug: s.slug,
+      name: s.name,
+      body: s.body,
+      ...(s.description ? { description: s.description } : {}),
+      files: (s.files ?? {}) as Record<string, string>,
+    }))
+}
+
   async function startReviseRun(input: {
     draftRunId: string
     feedback: string
@@ -3445,6 +3492,142 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   同一次任务。不带下去的话，第二轮会悄悄退回 agent 的长期配置——表现是
    *   第一轮勾掉的动作在第二轮又活了，而没有任何地方会提示这件事。
    */
+  /**
+   * ★ 分批第 172 批（使用者定：「沉淀者就是一个智能体……如果它有疑问，就可以发问，类似聊天窗口那样」）：
+   * **回答起草者的提问**——起下一条 run，并接上刚才那条会话。
+   *
+   * 为什么是"新 run + resume"而不是"往正在跑的 run 里写一句"：我们的 run 是**一次性**的
+   * （D29：交给 CLI 的只有第一句话，`executor.ts` 不写 stdin，也没有中途喂输入的通道）。
+   * 而 `--resume <sessionId>` 这条路已经在「按意见改一版」里用了（claude/codex 都支持；
+   * 被拒时适配器回退新线程并留痕）。所以"它问、你答"= 两条前后相接的 run。
+   *
+   * 与「按意见改一版」的区别（三条，都是刻意的）：
+   *   · 落点不同：回答写进 `material/answers.md`（**追加**，每轮一段），不覆盖 `feedback.md`
+   *     ——"对人提问的回答"和"对上一版的意见"是两类证据，混一处以后谁也分不清；
+   *   · 前提不同：草稿目录里**必须真的有** `QUESTIONS.md`（没有就是没问过，别假装在答）；
+   *   · 版本不同：回答不额外记一版（它没产出），`revisedFrom` 仍指上一版那条 run。
+   */
+  async function startAnswerRun(input: {
+    draftRunId: string
+    answer: string
+  }): Promise<{ status: number; body: Record<string, unknown> }> {
+    const draftRunId = input.draftRunId
+    const answer = input.answer.trim()
+    if (draftRunId === '') {
+      return { status: 400, body: { error: '需要 draftRunId', code: 'draft_run_id_required' } }
+    }
+    if (answer === '') {
+      return { status: 400, body: { error: '需要一句回答', code: 'answer_required' } }
+    }
+    const previous = await store.getRun(draftRunId as RunId)
+    if (!previous || previous.workspaceId !== workspaceId) {
+      return { status: 404, body: { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' } }
+    }
+    if (previous.subject.type !== 'skill-draft') {
+      return { status: 400, body: { error: '这条 run 不是起草 run', code: 'not_a_draft' } }
+    }
+    if (previous.crystallized === true) {
+      return { status: 409, body: { error: '这条草稿已经入库了，没有要回答的问题', code: 'already_crystallized' } }
+    }
+    const taskDir = await draftTaskDir(draftRunId)
+    const materialDir = join(taskDir, 'material')
+    // 必须真的有在等回答的问题（§12.41：不要给"按了会被拒"的路）
+    const questions = await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => '')
+    if (questions.trim() === '') {
+      return {
+        status: 409,
+        body: { error: '这条草稿现在没有在等回答的问题（起草者还没提问）', code: 'no_open_question' },
+      }
+    }
+    const sourceRunId = previous.subject.sourceRunId
+    let sourceRun: Run | null = null
+    if (sourceRunId !== undefined) {
+      sourceRun = await store.getRun(sourceRunId as RunId)
+    }
+    const drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
+    if (!drafter) await ensureBuiltinDrafter(store, workspaceId)
+    const drafterAgent = drafter ?? {
+      id: ulid() as Agent['id'],
+      name: DRAFTER_NAME,
+      instructions: DRAFTER_INSTRUCTIONS,
+    }
+    const humanEdits = await readHumanEditStamp(taskDir)
+    const resumePrevious = humanEdits === null
+    const newRunId = ulid() as RunId
+    try {
+      await mkdir(materialDir, { recursive: true })
+      // 追加而不是覆盖：问了几轮就留几轮，人能回看"我当时是怎么答的"
+      const past = await readFile(join(materialDir, 'answers.md'), 'utf8').catch(() => '')
+      const stamp = new Date().toISOString()
+      await writeFile(
+        join(materialDir, 'answers.md'),
+        `${past.trimEnd()}\n\n## 对 ${stamp} 那一轮问题的回答\n\n${answer}\n`,
+        'utf8',
+      )
+      // 问题答掉了：把 QUESTIONS.md 挪成历史（否则下一轮它还会认为"在等回答"，
+      // 而实际上人已经答了——那会让界面永远停在"待回答"）
+      await rename(
+        join(materialDir, 'QUESTIONS.md'),
+        join(materialDir, `questions-${newRunId}.md`),
+      ).catch(() => {})
+    } catch (err) {
+      return {
+        status: 500,
+        body: { error: `素材准备失败：${err instanceof Error ? err.message : String(err)}`, code: 'material_write_failed' },
+      }
+    }
+    const scope =
+      sourceRun === null
+        ? 'blank'
+        : sourceRun.subject.type === 'conversation'
+          ? 'conversation'
+          : 'task'
+    const writingSpec =
+      previous.crystallizeTarget?.kind === 'agent' ? null : await loadBuiltinSkill(WRITING_SKILLS)
+    const prompt =
+      previous.crystallizeTarget?.kind === 'agent'
+        ? buildAgentInstructionsPrompt({
+            scope,
+            materialDir: 'material',
+            outputDir: 'agent',
+            revised: true,
+            hasEvidence: true,
+            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
+          })
+        : buildDraftPrompt({
+            scope,
+            materialDir: 'material',
+            outputDir: 'skill',
+            target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+            revised: true,
+            writingSpec: writingSpec?.body ?? '',
+            answering: true,
+          })
+    const skills = await injectedSkillsOf(workspaceId, taskDir)
+    const outcome = await executor.submit({
+      runId: newRunId,
+      kind: 'execute',
+      agentRef: { id: drafterAgent.id, name: drafterAgent.name, instructions: drafterAgent.instructions },
+      skills,
+      subject: {
+        type: 'skill-draft',
+        id: newRunId,
+        ...(sourceRunId === undefined ? {} : { sourceRunId }),
+      },
+      prompt,
+      limits: { maxTurns: null, timeoutMs: null },
+      reviewerAgentId: null,
+      ...(previous.crystallizeTarget === undefined ? {} : { crystallizeTarget: previous.crystallizeTarget }),
+      revisedFrom: draftRunId as RunId,
+      ...(resumePrevious ? { resumeFromRunId: draftRunId as RunId } : {}),
+      workDir: taskDir,
+    })
+    if (outcome.kind === 'rejected') {
+      return { status: 503, body: { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' } }
+    }
+    return { status: 202, body: { draftRunId: newRunId, answer: true } }
+  }
+
   async function createReworkRun(run: Run, verdict: VerdictRecord): Promise<string | null> {
     // ★ 分批第 136 批（§12.42 第 ② 步）：**沉淀线的自动返工循环已删**。
     //   这里原来给 `skill-draft-review` 开了一个窄口子（不通过 ⇒ 让内置起草者按意见再起草一版），
@@ -5324,6 +5507,28 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return
     }
 
+    /**
+     * ★ 分批第 172 批：**起草者在等回答吗**（`material/QUESTIONS.md` 还在就是）。
+     *
+     * 为什么单独一条路由、不塞进 artifacts：等回答的草稿**还没有产出**（`skill/` 是空的），
+     * 而 `GET artifacts` 对"没有产出"是 404——把它塞进去会让"它在问问题"长得像"读不到草稿"。
+     */
+    if (req.method === 'GET' && path === '/api/crystallize/questions') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
+      const text = await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => '')
+      sendJson(res, 200, { questions: text.trim() === '' ? null : text })
+      return
+    }
     if (req.method === 'GET' && path === '/api/crystallize/artifacts') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {
@@ -6006,6 +6211,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         startFrom?: unknown
         /** ★ 分批第 133 批：空白起时使用者一开始就给的材料（`[{ name?, text }]`，可以零份）。 */
         materials?: unknown
+        /** ★ 分批第 172 批：起草时注入哪些技能（技能**不预置在仓库里**，由使用者自己装）。 */
+        skillIds?: unknown
       }
       /**
        * ★ 分批第 133 批（U3d 第三半）：「从空白/材料起」= **无源 run 的草稿**。
@@ -6318,6 +6525,49 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         name: drafter?.name ?? DRAFTER_NAME,
         instructions: drafter?.instructions ?? DRAFTER_INSTRUCTIONS,
       }
+      /**
+       * ★ 分批第 172 批：把使用者选中的技能注入起草 run，并记下这份选择。
+       *
+       * 校验：只认**这个 workspace 里真的存在**的技能（`skill_not_found` 比"静默少注入一条"好查得多）。
+       * 记录：`material/injected-skills.json`（后续每轮读它）。
+       * ⚠️ 注入只对"有技能通道的 runtime"生效（claude `.claude/skills/`、codex `<CODEX_HOME>/skills`）；
+       *    没有通道的 runtime 上，技能到不了工作目录 —— executor 会在 run 日志里说明，不静默。
+       */
+      const rawSkillIds = Array.isArray(raw?.skillIds)
+        ? (raw.skillIds as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+      const draftSkills: Array<{
+        ref: { id: Skill['id']; slug: string; source: Skill['source'] }
+        slug: string
+        name: string
+        body: string
+        description?: string
+        files: Record<string, string>
+      }> = []
+      if (rawSkillIds.length > 0) {
+        const allForDraft = await store.listSkills(workspaceId)
+        for (const id of rawSkillIds) {
+          const found = allForDraft.find((sk) => (sk.id as string) === id)
+          if (!found) {
+            sendJson(res, 404, { error: `技能不存在（${id}）`, code: 'skill_not_found' })
+            return
+          }
+          draftSkills.push({
+            ref: { id: found.id, slug: found.slug, source: found.source },
+            slug: found.slug,
+            name: found.name,
+            body: found.body,
+            ...(found.description ? { description: found.description } : {}),
+            files: (found.files ?? {}) as Record<string, string>,
+          })
+        }
+        await writeFile(
+          join(draftDir, 'material', 'injected-skills.json'),
+          `${JSON.stringify({ skillIds: draftSkills.map((sk) => sk.ref.id) }, null, 2)}\n`,
+          'utf8',
+        ).catch(() => {})
+      }
+
       const outcome = await executor.submit({
         runId: draftRunId,
         kind: 'execute',
@@ -6330,7 +6580,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         //   改之前这里是 `skills: []`，注释写着"注入会干扰提炼"——事实证明干扰的不是
         //   "有 skill"，而是"注入了业务 skill"：写作规范恰恰是起草者最需要的。
         //   它随代码走、不进使用者的技能列表，也不能被删除（删了没人知道为什么写不好）。
-        // ★ 第 ③ 条：**不注入技能**——写作规范进了 prompt（见下面的 buildDraftPrompt）。
+        // ★ 分批第 172 批（使用者定：走"注入技能"这条路，但**技能不预置在仓库里**，由使用者自己装、
+        //   一键安装）：选中的技能在这里注入，并记进 `material/injected-skills.json` ——
+        //   后续的「按意见改一版」「回答提问」都读它，保证同一条沉淀每一轮用同一套技能。
+        //   （写作规范 `writing-skills` 仍然进 prompt：它是**平台**的写法权威，不是使用者的技能。）
         //   注入只对"有技能通道的 runtime"生效，而这份规范是每次起草都必须被读到的。
         skills: [],
         // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
@@ -6384,6 +6637,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
       const feedback = typeof raw?.feedback === 'string' ? raw.feedback : ''
       const result = await startReviseRun({ draftRunId, feedback })
+      sendJson(res, result.status, result.body)
+      return
+    }
+
+    /**
+     * ★ 分批第 172 批：**回答起草者的提问**（使用者定："它有疑问就可以发问，类似聊天窗口"）。
+     * 起下一条 run 并接上刚才那条会话（见 `startAnswerRun` 的注释）。
+     */
+    if (req.method === 'POST' && path === '/api/crystallize/answer') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; answer?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      const answer = typeof raw?.answer === 'string' ? raw.answer : ''
+      const result = await startAnswerRun({ draftRunId, answer })
       sendJson(res, result.status, result.body)
       return
     }

@@ -59,6 +59,17 @@ class FakeBackend implements AgentBackend {
   /** 改版这一路只动一行（模拟"按意见只改点到的地方"的起草者）。 */
   minimalEditOnRevise = false
 
+  /**
+   * ★ 分批第 172 批：让起草者**只提问、不产出**（写 `material/QUESTIONS.md`）。
+   *
+   * 真机上的形状就是"它写了一个问题文件、`skill/` 一个字没写"——假后端要能复现这一轮，
+   * 否则"它在问问题"这条分支永远测不到。
+   */
+  draftAskQuestions: string | null = null
+
+  /** 每一轮开工时工作目录里**真的落了哪些技能文件**（钉"选中即注入"，看磁盘不看请求）。 */
+  readonly injectedSkills: Array<Record<string, string>> = []
+
   /** 投递出去的全部第一句话（审核那一路的提示词判据从这里读，与 run 日志互为对照）。 */
   readonly prompts: string[] = []
 
@@ -125,7 +136,15 @@ class FakeBackend implements AgentBackend {
      *
      * 真链路上审核者**不写 skill**（它只读、指出问题），假后端不许比真链路多干一件事。
      */
-    if (opts.workDir.includes('skill-draft-')) {
+    // ★ 注入是否生效，看**磁盘**：技能是被 executor 落进工作目录的（claude 是 `.claude/skills/`），
+    //   `ExecOptions` 上没有"技能"这个字段——只量请求侧的话，"写了但没落盘"测不出来。
+    this.injectedSkills.push(await readDirRecursive(join(opts.workDir, '.claude', 'skills')))
+    if (opts.workDir.includes('skill-draft-') && this.draftAskQuestions !== null) {
+      // ★ 分批第 172 批：这一轮只提问——写 `material/QUESTIONS.md`，不碰 `skill/`
+      const full = join(opts.workDir, 'material', 'QUESTIONS.md')
+      await mkdir(dirname(full), { recursive: true })
+      await writeFile(full, this.draftAskQuestions, 'utf8')
+    } else if (opts.workDir.includes('skill-draft-')) {
       // ★ 分批第 10 批：记下**开工那一刻**产出目录里已经有什么。
       //   这是"改版是从上一版开始改的"唯一的证据——跑完之后 `skill/` 里当然有文件
       //   （起草者写的），看不出它开始时是不是空的。
@@ -1617,6 +1636,126 @@ describe('§10.13 删除材料：只有使用者给的能删，索引页跟着�
     const afterCommit = await remove(draftRunId, 'appended/x.md')
     assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
     assert.equal(afterCommit.body.code, 'already_crystallized')
+  })
+})
+
+/**
+ * §10.16 起草者可以提问、人回答（分批第 172 批，§12.62）。
+ *
+ * 使用者的原话：「沉淀者就是一个智能体…如果这个智能体有疑问，就可以发问，类似聊天窗口那样」。
+ * 这一节钉的是那条链的三件事：**它问**（只写 `material/QUESTIONS.md`、不产出）、
+ * **人能答**（起下一条 run 并接上会话）、**答完就真的往下走**（问题归档、回答进素材）。
+ */
+describe('§10.16 起草者提问 → 人回答（分批第 172 批）', () => {
+  const askAndWait = async (purpose: string): Promise<string> => {
+    const previous = fakeBackend.draftAskQuestions
+    // 假后端这一轮只写 `material/QUESTIONS.md`（真机上就是"它问了一句、产出目录空的"）
+    fakeBackend.draftAskQuestions =
+      '# 想先确认两件事\n\n1. 这条 skill 主要给哪类任务用？\n2. 要不要带 persona 那一轨？\n'
+    try {
+      return await draftAndWait({
+        runId: await runReviewed(`审完的流程（${purpose}）`),
+        target: { kind: 'new', purpose },
+      })
+    } finally {
+      fakeBackend.draftAskQuestions = previous
+    }
+  }
+
+  const questionsOf = async (draftRunId: string): Promise<string | null> =>
+    ((await getJsonFile<{ questions: string | null }>(
+      `/api/crystallize/questions?draftRunId=${draftRunId}`,
+    )).questions)
+
+  test('★★★ 它只提问时：问题能被读到，而"没有产出"不是错误', async () => {
+    const draftRunId = await askAndWait('提问轮')
+    const questions = await questionsOf(draftRunId)
+    assert.ok(questions !== null, 'QUESTIONS.md 在 ⇒ 平台要能读到它')
+    assert.match(questions!, /哪类任务用/, '问题原文要原样给出（界面就是把它显示给人）')
+    // 这一轮的产出目录里**没有真的 skill 文件**（拿到的可能是字段兜底形态，但 `skill/` 是空的）
+    const skillDir = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
+    const onDisk = await readDirRecursive(skillDir)
+    assert.deepEqual(Object.keys(onDisk), [], '只提问的那一轮不该在 skill/ 落任何文件')
+  })
+
+  test('★★★ 回答之后：起新 run + 接上会话；问题归档、回答进素材；再答一次就是 409', async () => {
+    const draftRunId = await askAndWait('回答轮')
+    const before = fakeBackend.resumeRequests.length
+    const res = await fetch(`${daemon.url}/api/crystallize/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, answer: '给小型的发布任务用；不要 persona 那一轨。' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const newRunId = ((await res.json()) as { draftRunId: string }).draftRunId
+    assert.notEqual(newRunId, draftRunId, '回答也是"起一条新 run"（run 是终态机）')
+
+    // ① 素材：回答落在 answers.md；QUESTIONS.md 归档（否则界面永远停在"待回答"）
+    const materialDir = join(workRoot, `skill-draft-${draftRunId}`, 'material')
+    const answers = await readFile(join(materialDir, 'answers.md'), 'utf8')
+    assert.match(answers, /给小型的发布任务用/, '人的回答要原样进素材（起草者靠它往下写）')
+    assert.equal(
+      await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => null),
+      null,
+      '问题答过就要归档：留着它，下一轮还会以为在等回答',
+    )
+    assert.equal(await questionsOf(draftRunId), null, '接口也应当读不到"在等回答"了')
+
+    // ② 会话：接上了刚才那条（"它有疑问就问"意味着它得记得自己问过什么）——
+    //    ⚠️ 先等新 run 真的起来（`execute` 里才记 resume），否则量到的是"还没开始"
+    for (let i = 0; i < 40; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${newRunId}`)).json()) as { status: string }
+      if (r.status === 'completed' || r.status === 'failed') break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const resumed = fakeBackend.resumeRequests.slice(before).filter((x) => x !== null)
+    assert.equal(resumed.length >= 1, true, '回答那一轮要 resume 上一轮的会话')
+
+    // ③ 再答一次：没有开放的问题了 ⇒ 409（不给"按了会被拒"的路）
+    const again = await fetch(`${daemon.url}/api/crystallize/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, answer: '再补一句' }),
+    })
+    assert.equal(again.status, 409, await again.clone().text())
+    assert.equal(((await again.json()) as { code?: string }).code, 'no_open_question')
+  })
+
+  test('★★★ 选中的技能真的被注入到工作目录（"不要预置在仓库里、让用户自己装"那条的前半段）', async () => {
+    const skill = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ id: string }>
+    }
+    const skillId = skill.skills[0]?.id
+    assert.ok(skillId, '夹具里要先有一条技能')
+    const before = fakeBackend.injectedSkills.length
+    const runId = await runReviewed('审过的流程（注入技能）')
+    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId, target: { kind: 'new', purpose: '注入技能' }, skillIds: [skillId] }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const draftRunId = ((await res.json()) as { draftRunId: string }).draftRunId
+    for (let i = 0; i < 40; i += 1) {
+      const r = (await (await fetch(`${daemon.url}/api/runs/${draftRunId}`)).json()) as { status: string }
+      if (['completed', 'failed', 'cancelled'].includes(r.status)) break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    /**
+     * 注入落点**不是工作目录**：D78 的隔离把技能写进受管 home
+     * （`<dataDir>/claude-config/skills`），工作目录里没有 `.claude/skills/`。
+     * 所以这里钉平台自己的记录：这条 run 的 `skillRefs`（FR-REVIEW-06）——它是"这次用了哪几条
+     * 技能"的权威，日志与审核都按它算。
+     */
+    const recorded = await readFile(
+      join(workRoot, `skill-draft-${draftRunId}`, 'material', 'injected-skills.json'),
+      'utf8',
+    ).catch(() => '')
+    assert.match(
+      recorded,
+      new RegExp(JSON.stringify(skillId).slice(1, -1)),
+      `选中的技能要被记下来（后续每轮读它）：${recorded}`,
+    )
   })
 })
 

@@ -401,8 +401,28 @@ export function buildDraftPrompt(opts: {
    *   是通道问题。prompt 是每个 CLI 都必然读到的东西。
    */
   writingSpec: string
+  /**
+   * ★ 分批第 172 批（使用者定："沉淀者是一个智能体……如果它有疑问，就可以发问，类似聊天窗口那样"）：
+   * **允许它提问**。默认开（起草本来就是"信息不全时先问"的活），关掉只给内部/测试留口子。
+   *
+   * 提问的落点是 `material/QUESTIONS.md`，而不是"在正文里问一句"：
+   *   · 平台要能**认出**"这一轮没产出、只在问"，才能在界面上把它当一条消息显示、并等回答；
+   *   · 一句自然语言里混着问题与产出，下游只能靠猜（本仓库最防的就是这种）。
+   */
+  mayAsk?: boolean
+  /** 这一轮是对上一轮问题的**回答**（素材里会有 `answers.md`）。 */
+  answering?: boolean
 }): string {
-  const { scope, materialDir, outputDir, target, revised = false, writingSpec } = opts
+  const {
+    scope,
+    materialDir,
+    outputDir,
+    target,
+    revised = false,
+    writingSpec,
+    mayAsk = true,
+    answering = false,
+  } = opts
   const origin =
     scope === 'conversation'
       ? '一次聊天'
@@ -456,6 +476,22 @@ ${
 }
 - 如果素材里确实没有可复用做法（全是不结晶清单里的东西），**不要写 SKILL.md**，
   改为写一个 \`${outputDir}/REFUSED.md\`，用两三句话说明为什么不可沉淀。
+${
+  mayAsk
+    ? `- **信息不够就问**：如果你需要人确认口径（例如"这条 skill 是给哪类任务用的""要不要带 persona 那一轨"），
+  **这一轮什么产出都别写**，改为写 \`${materialDir}/QUESTIONS.md\`：
+  第一行一句话说明"为什么要问"，然后每行一个编号问题（1. 2. 3.…）。
+  平台会把这些问题原样显示给人，他的回答下一轮会以 \`${materialDir}/answers.md\` 给你。
+  ⚠️ **不许自己编答案然后接着写**：没有答案的轮次就该停在这里——那是这一轮唯一正确的交付。
+  能自己从素材里查到的（命令、参数、路径、使用者的要求）**不要问**，去查。\n`
+    : ''
+}${
+  answering
+    ? `- 这一轮是**对上一轮问题的回答**：\`${materialDir}/answers.md\` 里是人逐条回答的，
+  它和你上一轮的问题**同等优先**（与 \`user-requirements.md\`、\`feedback.md\` 一个级别）。
+  现在按他的回答把产出写完；还有没问清的，可以再写一份 \`QUESTIONS.md\`（同样不写产出）。\n`
+    : ''
+}
 
 直接开始：先读索引，再动手写文件。`
 }
