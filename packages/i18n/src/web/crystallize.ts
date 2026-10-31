@@ -335,6 +335,8 @@ export const crystallizeText = {
     en: 'GitHub repo URL (https://github.com/owner/repo, or owner/repo)',
   },
   'crystallize.materialRepoPull': { zh: '拉进来', en: 'Pull' },
+  // ── 右栏差异浮层的出口（分批第 160 批：差异盖满右栏，必须自带"返回内容"）──
+  'crystallize.diffBackToContent': { zh: '返回内容', en: 'Back to content' },
   'crystallize.materialRepoDone': {
     zh: '从仓库拉了 {files} 个文件（{kb} KB）到 {dir}/，已登记进素材索引',
     en: 'Pulled {files} file(s) ({kb} KB) from the repo into {dir}/ and registered them in the material index',

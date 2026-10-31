@@ -152,7 +152,50 @@
             ></textarea>
           {/if}
         </div>
-        <div class="review-cell" data-cell="diff">
+        <div class="review-cell diff-layer" data-cell="diff">
+          <!--
+            ★ 分批第 160 批（使用者定：右栏差异改成"弹层看"）：差异现在**盖满右栏**。
+            为什么不并排：右栏只有 24–30rem，并排两格各 ~180px，连一行 SKILL.md 都读不下
+            （探针量过）。盖满之后它有整栏宽度，代价是盖住文件树——所以这一层必须自带
+            "改动量 + 基线切换 + 返回内容"，否则进了浮层就没有出口（§12.41 不放假入口）。
+          -->
+          <div class="diff-head">
+            <span class="diff-title">{$t('crystallize.tabDiff')}</span>
+            {#if editor.selectedDiff && (editor.selectedDiff.added > 0 || editor.selectedDiff.removed > 0)}
+              <span class="num-tag add">+{editor.selectedDiff.added}</span>
+              <span class="num-tag del">−{editor.selectedDiff.removed}</span>
+            {/if}
+            <span class="diff-head-file mono">{editor.selectedFile}</span>
+            <span class="diff-head-right">
+              {#if editor.artifacts !== null && (editor.artifacts.revisedFrom !== null || editor.artifacts.baseline !== null)}
+                <button
+                  type="button"
+                  class="ghost small"
+                  class:active={editor.diffAgainst === 'original'}
+                  onclick={() => void editor.loadDiff('original')}
+                >{$t('crystallize.diffVsOriginal')}</button>
+              {/if}
+              {#if editor.artifacts !== null && editor.artifacts.revisedFrom !== null}
+                <button
+                  type="button"
+                  class="ghost small"
+                  class:active={editor.diffAgainst === 'current'}
+                  onclick={() => void editor.loadDiff('current')}
+                >{$t('crystallize.diffVsCurrent')}</button>
+                <button
+                  type="button"
+                  class="ghost small"
+                  class:active={editor.diffAgainst === 'previous'}
+                  onclick={() => void editor.loadDiff('previous')}
+                >{$t('crystallize.diffVsPrevious')}</button>
+              {/if}
+              <button
+                type="button"
+                class="ghost small diff-back"
+                onclick={() => (editor.reviewTab = 'content')}
+              >{$t('crystallize.diffBackToContent')}</button>
+            </span>
+          </div>
           {#if editor.diffLoading}
             <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
           {:else if editor.selectedDiff && editor.selectedDiff.hunks.length > 0}
@@ -267,6 +310,8 @@
      高度跟窗口走（min 420 保证编辑器不至于只有几行；max 与窗口高对齐），
      两个子块各自 overflow: auto——页面**不因为文件多而整页变长**。 */
   .review-pane {
+    /* ★ 分批第 160 批：差异是**盖满这一块**的浮层 ⇒ 它要有定位上下文 */
+    position: relative;
     display: grid;
     /* 右栏是 24–30rem 的一列：树固定 180px（文件名能读），剩下全给正文 */
     grid-template-columns: 180px minmax(0, 1fr);
@@ -442,7 +487,52 @@
   }
 
   /* ⚠️ 断点统一 96rem（1536px）：探针视口 1280 属于窄屏，那里应当"只剩激活那一格" */
-  /* ★ 分批第 155 批（编辑搬进右栏）：**不再并排**，永远只显示激活那一格。
+  /* ★ 分批第 160 批（使用者定）：差异**盖满右栏**（弹层），两者不再并排。
+     为什么：右栏 24–30rem，并排两格各 ~180px 读不进一行 SKILL.md。盖满之后它有整栏宽度；
+     代价是遮住文件树，所以这一层自带"改动量 + 基线切换 + 返回内容"。
+     仍然保留"只显示激活那一格"：内容态下这一层整块不渲染（display:none）。 */
+  .review-cell.diff-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: var(--surface);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .diff-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 0 var(--sp-1) var(--sp-1);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+
+  .diff-title {
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+  }
+
+  .diff-head-file {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 12rem;
+  }
+
+  .diff-head-right {
+    margin-left: auto;
+    display: inline-flex;
+    gap: var(--sp-1);
+    align-items: center;
+  }
+
+  /* 旧注释（保留它的理由）：★ 分批第 155 批（编辑搬进右栏）：不再并排，永远只显示激活那一格。
      右栏是 24–30rem 的一列（探针视口 1280 下 384px），两格并排各 ~180px 连一行 SKILL.md 都读不下。
      于是"内容 / 差异"回到**同一个窗格里切换**（这正是 2026-10-21 那三条排版规矩的第 ③ 条：
      编辑与差异同位置切换、切换不滚动）。原来的 `@media (max-width: 96rem)` 是按视口判的，

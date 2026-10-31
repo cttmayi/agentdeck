@@ -5017,12 +5017,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const cyEditorRectBefore = cyBodyRect
           const cyDiffBox = d().querySelector('.diff-box')
           const cyDiffRect = cyRect(cyDiffBox)
-          // "同位置"：diff 那块在**编辑器原来那块窗格里**（同一个 x / 宽），
-          // 而不是像改之前那样跑到窗格下面 519px
+          // ★ 分批第 160 批（使用者定：差异改成"弹层看"）：判据从"diff 与正文列**同一个 x**"
+          //   改成"diff **盖满右栏**、而且仍压在同一块窗格上（不是跑到下面 519px 去）"。
+          //   为什么改：右栏只有 24–30rem，并排两格各 ~180px 读不下一行 SKILL.md ⇒ 差异改成
+          //   占满整栏的浮层（起点与正文列齐平，宽度 ≥ 正文列宽）。
           facts['crystal.diffSamePlaceAsEditor'] =
             cyDiffRect !== null &&
             cyEditorRectBefore !== null &&
-            Math.abs(cyDiffRect.x - cyEditorRectBefore.x) < 4 &&
+            cyDiffRect.w >= cyEditorRectBefore.w - 4 &&
+            Math.abs(cyDiffRect.y - cyEditorRectBefore.y) < 60 &&
             cyDiffRect.y < cyEditorRectBefore.y + cyEditorRectBefore.h
           // ★ 基线切换按钮**只有改版草稿才有**（`{#if artifacts.revisedFrom !== null}`）：
           //   这一条量的正是"这条不是改版 ⇒ 不给一个永远空的切换"。
