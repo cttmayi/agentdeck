@@ -1442,6 +1442,185 @@ describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批�
 })
 
 /**
+ * §10.13 删掉一条材料（分批第 147 批，§12.14「删掉错的」）。
+ *
+ * 为什么"删"必须有写接口、而且必须一起改索引页：素材是起草者唯一的依据，索引页是它读的
+ * **第一个**文件（"先读这一页，再决定读哪些"）。只把文件删掉、索引还指着它 ⇒ 起草者去读、
+ * 读不到、然后以为素材坏了——这种半截功能比"不能删"更糟。
+ *
+ * 判据为什么落在"索引里没有它"而不只是"API 返回 200"：返回 200 只说明 unlink 成功，
+ * 说明不了**起草者读到的依据**已经变成删后的样子。
+ */
+describe('§10.13 删除材料：只有使用者给的能删，索引页跟着改（分批第 147 批）', () => {
+  const draftOf = async (purpose: string): Promise<string> =>
+    draftAndWait({
+      runId: await runReviewed(`审完的流程（${purpose}）`),
+      target: { kind: 'new', purpose },
+    })
+
+  const append = async (draftRunId: string, text: string, name: string): Promise<string> => {
+    const res = await fetch(`${daemon.url}/api/crystallize/material`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, text, name }),
+    })
+    assert.equal(res.status, 200, await res.clone().text())
+    return ((await res.json()) as { relPath: string }).relPath
+  }
+
+  const remove = async (
+    draftRunId: string,
+    relPath: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const res = await fetch(
+      `${daemon.url}/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}` +
+        `&relPath=${encodeURIComponent(relPath)}`,
+      { method: 'DELETE' },
+    )
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  }
+
+  const materialOf = async (
+    draftRunId: string,
+  ): Promise<Array<{ relPath: string; text: string }>> =>
+    (await getJsonFile<{ items: Array<{ relPath: string; text: string }> }>(
+      `/api/crystallize/material?draftRunId=${draftRunId}`,
+    )).items
+
+  test('★★★ 删掉一份追加的材料 ⇒ 文件没了、索引页不再提它、下一版草稿也读不到', async () => {
+    const draftRunId = await draftOf('删除材料')
+    const keep = await append(draftRunId, '这一份要留着：先看日志再动手', '留着')
+    const drop = await append(draftRunId, '这一份是给错的，删掉', '删掉')
+
+    const before = await materialOf(draftRunId)
+    assert.ok(before.some((i) => i.relPath === drop), '前提：这份材料在')
+    const indexBefore = before.find((i) => i.relPath === '00-README.md')!.text
+    assert.match(indexBefore, /删掉\.md/, '前提：追加时登记进了索引页')
+
+    const r = await remove(draftRunId, drop)
+    assert.equal(r.status, 200, JSON.stringify(r.body))
+    assert.equal(r.body.removed ?? r.body.relPath, drop)
+    assert.equal(r.body.remaining, 1, '还剩一份（同一份材料删了两次也不行）')
+
+    const after = await materialOf(draftRunId)
+    assert.equal(after.some((i) => i.relPath === drop), false, '文件要从清单里消失')
+    assert.ok(after.some((i) => i.relPath === keep), '别的那份不许连带删掉')
+    const indexAfter = after.find((i) => i.relPath === '00-README.md')!.text
+    assert.equal(
+      indexAfter.includes('删掉.md'),
+      false,
+      '索引页是起草者读的第一个文件：还指着已删的文件，等于让它去读一份不存在的素材',
+    )
+    assert.match(indexAfter, /留着\.md/, '保留下来的那份仍要在索引里')
+
+    // 下一版草稿读的是同一个任务目录：删掉的那份不该再出现
+    const revised = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId, feedback: '顺手再改一版' }),
+    })
+    assert.equal(revised.status, 202, await revised.clone().text())
+    const itemsV2 = await materialOf(await waitRevisedFrom(draftRunId))
+    assert.equal(itemsV2.some((i) => i.relPath === drop), false, '下一版不许再读到已删的材料')
+    assert.ok(itemsV2.some((i) => i.relPath === keep))
+  })
+
+  test('★★ 空白起的材料也能删：索引里那一行与"规模 N 份"跟着改', async () => {
+    const draftRunId = await draftAndWait({
+      startFrom: 'blank',
+      target: { kind: 'new', purpose: '空白起删材料' },
+      materials: [
+        { name: '笔记甲', text: '# 甲\n' },
+        { name: '笔记乙', text: '# 乙\n' },
+      ],
+    })
+    const indexBefore = (await materialOf(draftRunId)).find((i) => i.relPath === '00-README.md')!.text
+    assert.match(indexBefore, /使用者给的材料 2 份/, '前提：索引写着两份')
+    assert.match(indexBefore, /appended\/笔记甲\.md/)
+
+    const r = await remove(draftRunId, 'appended/笔记甲.md')
+    assert.equal(r.status, 200, JSON.stringify(r.body))
+    assert.equal(r.body.remaining, 1)
+
+    const items = await materialOf(draftRunId)
+    assert.equal(items.some((i) => i.relPath === 'appended/笔记甲.md'), false)
+    const indexAfter = items.find((i) => i.relPath === '00-README.md')!.text
+    assert.equal(
+      indexAfter.includes('笔记甲'),
+      false,
+      '空白起的索引把材料列成一行：那一行也要去掉（否则起草者去读一份不存在的文件）',
+    )
+    assert.match(indexAfter, /使用者给的材料 1 份/, '"规模 N 份"数的是还有几份，不同步就是撒谎')
+  })
+
+  test('★★ 校验：只许删 appended/；没这份 404；非草稿 / 没跑完 / 已入库各自如实拒绝', async () => {
+    const draftRunId = await draftOf('删除材料校验')
+
+    // 平台从来源 run 切出来的证据一律不给删（删了"依据"就和来源对不上，且下次起草会切回来）
+    for (const rel of ['00-README.md', 'meta.json', 'turns/001.md']) {
+      const r = await remove(draftRunId, rel)
+      assert.equal(r.status, 400, `${rel}：${JSON.stringify(r.body)}`)
+      assert.equal(r.body.code, 'material_not_removable')
+    }
+    // 路径穿越不许落到 `appended/` 之外
+    const evil = await remove(draftRunId, 'appended/../00-README.md')
+    assert.equal(evil.status, 400, JSON.stringify(evil.body))
+    assert.equal(evil.body.code, 'material_not_removable')
+
+    const missing = await remove(draftRunId, 'appended/没有这份.md')
+    assert.equal(missing.status, 404, JSON.stringify(missing.body))
+    assert.equal(missing.body.code, 'material_not_found')
+
+    const noPath = await remove(draftRunId, '')
+    assert.equal(noPath.status, 400, JSON.stringify(noPath.body))
+    assert.equal(noPath.body.code, 'rel_path_required')
+
+    const noRun = await remove(ulid(), 'appended/x.md')
+    assert.equal(noRun.status, 404, JSON.stringify(noRun.body))
+    assert.equal(noRun.body.code, 'draft_run_not_found')
+
+    const sourceRunId = await runOnce('不是草稿的 run（删除材料）')
+    const notDraft = await remove(sourceRunId, 'appended/x.md')
+    assert.equal(notDraft.status, 400, JSON.stringify(notDraft.body))
+    assert.equal(notDraft.body.code, 'not_a_draft')
+
+    // 起草跑着的时候删（403 那条纪律同追加）：它读的素材已经定了
+    let release!: () => void
+    fakeBackend.draftGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: await runReviewed('审过的流程（起草中删材料）'),
+          target: { kind: 'new', purpose: '起草中删材料' },
+        }),
+      })
+      const draftText = await res.text()
+      assert.equal(res.status, 202, draftText)
+      const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
+      const tooEarly = await remove(runningDraftId, 'appended/x.md')
+      assert.equal(tooEarly.status, 409, JSON.stringify(tooEarly.body))
+      assert.equal(tooEarly.body.code, 'draft_not_completed')
+    } finally {
+      fakeBackend.draftGate = null
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+
+    // 入库之后：材料是"这份技能依据什么生成"的证据，不再改
+    const doneDraft = await daemon.store.getRun(draftRunId as RunId)
+    assert.ok(doneDraft, '草稿得在')
+    await daemon.store.insertRun({ ...doneDraft!, crystallized: true })
+    const afterCommit = await remove(draftRunId, 'appended/x.md')
+    assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
+    assert.equal(afterCommit.body.code, 'already_crystallized')
+  })
+})
+
+/**
  * §10.12 「从空白/材料起」：**无源 run 的草稿**（分批第 133 批，U3d 第三半）。
  *
  * 不是每次沉淀都有一条跑过的 run 可以当素材——"把我知道的做法写成一个技能"本来就没跑过。

@@ -99,6 +99,22 @@
   export let ondone: () => void = () => {}
   /** 放弃了一条起草的回调（父组件刷新沉淀列表）。 */
   export let ondiscarded: () => void = () => {}
+  /**
+   * ★ 分批第 147 批（§12.14：材料的两个显示处必须由同一份数据现算）：
+   * 父组件给的"材料被**别处**改过"的信号——右栏产物栏里删掉了一份材料。
+   * 变了就重读一次素材清单，中间那栏的「依据」块跟着更新。
+   */
+  export let materialRev = 0
+  /** 本组件改了材料（追加）时通知父组件：右栏那一栏也要重读（否则"追加了但右栏看不见"）。 */
+  export let onmaterialchange: () => void = () => {}
+  /** 已经处理过的 `materialRev`（只认增量，不重复拉）。 */
+  let seenMaterialRev = 0
+
+  $: if (materialRev !== seenMaterialRev) {
+    seenMaterialRev = materialRev
+    // 父组件的 rev 只增不减；这里重读一次素材清单即可（`loadMaterial` 自己挡并发）
+    if (draftRunId !== '') void loadMaterial()
+  }
 
   let step: 'target' | 'drafting' | 'review' | 'done' = 'target'
   let targets: CrystallizeTargets | null = null
@@ -1172,6 +1188,9 @@
       await loadMaterial()
       // 选中刚追加的那一份：人点「追加材料」之后最想看的就是它（预览跟手上动作对上）
       materialPick = res.relPath
+      // ★ 分批第 147 批：右栏产物栏里的材料清单是同一份数据，也得重读
+      //   （否则"追加成功"与"右栏没有它"同时成立——§12.14 两处必须同源）。
+      onmaterialchange()
       composerReceipt = `已追加为素材 ${res.relPath}（${res.bytes} 字节）：登记进了素材索引、右栏能看到，下一版起草会读它。`
     } catch (err) {
       composerReceipt = `追加材料没成功：${err instanceof Error ? err.message : String(err)}`

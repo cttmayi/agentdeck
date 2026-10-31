@@ -293,6 +293,20 @@ export const crystallizeText = {
   },
   'crystallize.artifactMaterial': { zh: '材料', en: 'Material' },
   'crystallize.artifactMaterialEmpty': { zh: '还没有素材文件', en: 'No material files yet' },
+  // ── 材料的"删掉"（分批第 147 批，§12.14「右栏清单……删掉错的」）──
+  //     只有 `appended/` 下（使用者给的）能删；平台从来源 run 切出来的证据不给删
+  //     （删了"依据"就和来源对不上，且下次起草会切回来）。所以这几条文案只出现在
+  //     "使用者给的"那几行与分节标题上。
+  'crystallize.materialDelete': { zh: '删掉', en: 'Delete' },
+  'crystallize.materialDeleteConfirm': { zh: '确认删掉', en: 'Confirm' },
+  'crystallize.materialDeleteOnly': {
+    zh: '只有使用者给的素材（appended/）能删：其余是从来源 run 切出来的证据',
+    en: 'Only materials you provided (appended/) can be deleted — the rest is evidence cut from the source run',
+  },
+  'crystallize.materialDeleteDone': {
+    zh: '已删掉 {path}（还剩 {n} 份材料）——下一版草稿不会再读到它；自动带的素材没动',
+    en: 'Deleted {path} ({n} left) — the next draft will not read it; auto-collected material untouched',
+  },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },

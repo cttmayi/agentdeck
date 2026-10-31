@@ -3567,6 +3567,27 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.deleteMaterial',
+    label:
+      '★★★ 右栏材料清单能**删掉使用者给的那一份**（§12.14「删掉错的」）：追加后右栏立刻能看到它' +
+      '（两处同一份数据）、「删掉」→「确认删掉」两步才真的删、删完清单少一项且服务端 `appended/` 归零；' +
+      '**只有 `appended/` 有删除钮**（自动带的轨迹/判决是来源证据，不给"按了会被拒"的按钮）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.rowThere === true &&
+      v.onlyAppended === true &&
+      v.confirmShown === true &&
+      Number(v.before) > Number(v.after) &&
+      Number(v.serverCount) === 0,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `清单 ${String(v.before)}→${String(v.after)}　确认 ${String(v.confirmShown)}　` +
+          `只剩给过的 ${String(v.onlyAppended)}　服务端 ${String(v.serverCount)} 份`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankEntryPresent',
     label:
       '★★ 「新建沉淀」的**起点屏**（页面内第一问，不再是浮层）里有「从空白或材料起」（§12.7：起点变成第一问）',

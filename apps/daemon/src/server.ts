@@ -126,6 +126,7 @@ import {
   draftRoot,
   isMaterialEmpty,
   listMaterialFiles,
+  removeMaterial,
   sourceLabelOf,
   writeMaterial,
   type ExistingAgentSnapshot,
@@ -5765,6 +5766,75 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       const appended = await appendMaterial(materialDir, { name, text })
       info(`追加材料（草稿 ${draftRunId.slice(-8)}）：${appended.relPath}（${appended.bytes} 字节）`)
       sendJson(res, 200, appended)
+      return
+    }
+    /**
+     * ★ 分批第 147 批（§12.14）：**删掉一条材料**——只许删 `appended/` 下的（使用者给的）。
+     *
+     * 为什么校验与「追加材料」几乎一样（草稿 run / 跑完 / 没入库）：
+     *   · 起草者开工时读的素材已经定了——跑着的时候删，只会让"它读到的"和磁盘上不是一份；
+     *   · 已入库的那一版，材料是"这份技能依据什么生成"的证据（§12.14），再删就是篡改来源。
+     * 这与追加是同一条纪律，所以两边用同一组错误码，界面上也对应得起来。
+     *
+     * 只删 `appended/`（`material_not_removable`）：轨迹/判决/索引页/`meta.json` 是平台从
+     * 来源 run 机械切出来的证据，删了它们起草者读到的依据就和来源对不上；要换来源请重新起
+     * 一条草稿。理由写在 `crystallize-material.ts` 的 `removeMaterial` 注释里。
+     */
+    if (req.method === 'DELETE' && path === '/api/crystallize/material') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      const relPath = url.searchParams.get('relPath') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      if (relPath.trim() === '') {
+        sendJson(res, 400, { error: '需要 relPath（要删的是哪一份材料）', code: 'rel_path_required' })
+        return
+      }
+      const draft = await store.getRun(draftRunId as RunId)
+      if (!draft || draft.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (draft.subject.type !== 'skill-draft') {
+        sendJson(res, 400, {
+          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可删的素材`,
+          code: 'not_a_draft',
+        })
+        return
+      }
+      if (draft.crystallized === true) {
+        sendJson(res, 409, {
+          error: '这条草稿已经入库了——材料是"这份技能依据什么生成"的证据，不再改',
+          code: 'already_crystallized',
+        })
+        return
+      }
+      if (draft.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，先别删材料（这一版读到的素材已经定了；跑完再删）',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
+      const removed = await removeMaterial(materialDir, relPath)
+      if (!removed.ok) {
+        const status = removed.code === 'material_not_found' ? 404 : 400
+        sendJson(res, status, {
+          error:
+            removed.code === 'material_not_found'
+              ? `没有这份材料：${removed.relPath}`
+              : `只有使用者给的素材（appended/ 下）能删；${removed.relPath} 是平台从来源 run 切出来的证据` +
+                '——要换来源请重新起一条草稿',
+          code: removed.code,
+        })
+        return
+      }
+      info(
+        `删除材料（草稿 ${draftRunId.slice(-8)}）：${removed.relPath}，还剩 ${removed.remaining} 份`,
+      )
+      sendJson(res, 200, removed)
       return
     }
     /**

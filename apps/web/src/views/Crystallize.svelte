@@ -161,6 +161,19 @@
     }
   }
 
+  /**
+   * ★ 分批第 147 批（§12.14："两处必须由同一份数据现算，否则必漂"）：材料被改过的计数。
+   *
+   * 材料在两处显示——中间那栏的「依据」块（`CrystallizeView`）与右栏产物栏的材料清单
+   * （`CrystallizeArtifactPane`）——数据都来自 `GET /api/crystallize/material`。谁改了都把这
+   * 个数 +1，另一边读到就重拉：一处显示"追加了/删掉了"、另一处还是旧的，使用者只会以为
+   * 操作没生效。
+   */
+  let materialRev = 0
+  const bumpMaterial = (): void => {
+    materialRev += 1
+  }
+
   /** 当前选中条目的来源标签（流程页副题）。 */
   // ⚠️ 按**任务**匹配，不是按"最新那一版"匹配：深链可以停在历史版本上（那一条 id 不是任何行的
   //    `runId`）⇒ 只比 `runId` 会读不到来源标签、那一行也不高亮。
@@ -284,6 +297,8 @@
     <CrystallizeView
       runId={$crystallize.runId}
       sourceLabel={selectedLabel}
+      materialRev={materialRev}
+      onmaterialchange={bumpMaterial}
       onback={() => go('crystallize')}
       ondone={() => reloadQuiet()}
       ondiscarded={() => {
@@ -292,10 +307,14 @@
       }}
     />
     <!-- ★ 分批第 92 批：产物提成常驻的第三列（设计 §12.3）。U1 只搬位置，
-         数据仍走 `GET /api/crystallize/artifacts`——与流程页同一份产出与同一份校验。 -->
+         数据仍走 `GET /api/crystallize/artifacts`——与流程页同一份产出与同一份校验。
+         ★ 分批第 147 批：材料可以在这里删（只有使用者给的），删完把 `materialRev` +1，
+           中间那栏的「依据」跟着重读。 -->
     <CrystallizeArtifactPane
       draftRunId={$crystallize.runId}
       version={selectedRow?.version ?? 1}
+      rev={materialRev}
+      onchanged={bumpMaterial}
     />
   {:else}
     <MainArea empty={true} emptyTitle={$t('crystallize.pickHint')} emptyHint={$t('crystallize.listEmptyHint')}>

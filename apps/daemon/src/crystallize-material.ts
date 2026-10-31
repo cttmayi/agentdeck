@@ -20,7 +20,7 @@
  * ⚠️ 目录必须落在**起草 run 的工作目录里**：claude run 有 PreToolUse 隔离 hook，
  *    越界路径直接 deny（见 executor.ts 那段注释）。放别处 agent 根本读不到。
  */
-import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Store } from '@agentdeck/domain'
 import type { Conversation, Issue, Run, RunId } from '@agentdeck/protocol'
@@ -477,6 +477,12 @@ export function collectBlankMaterial(
   return { pieces, stats: { turns: 0, toolCalls: 0 } }
 }
 
+/**
+ * 索引页里"使用者后来追加的材料"那几个分节的**固定前缀**（追加与删除共用同一个锚点）。
+ * 追加时写成 `## 使用者后来追加的材料（<时间>）`，删除时按这个前缀找整节删掉。
+ */
+const APPENDED_NOTE_HEAD = '## 使用者后来追加的材料'
+
 /** 索引页追加一段"使用者后来追加的材料"（起草者读的第一个文件）。 */
 async function noteAppendedInIndex(
   materialDir: string,
@@ -487,7 +493,7 @@ async function noteAppendedInIndex(
   const indexPath = join(materialDir, '00-README.md')
   const index = await readFile(indexPath, 'utf8').catch(() => '')
   const note =
-    `## 使用者后来追加的材料（${at}）\n\n` +
+    `${APPENDED_NOTE_HEAD}（${at}）\n\n` +
     `- \`${relPath}\`（${bytes} 字节）——使用者明确要求把它当成素材；` +
     '**和上面自动带上的素材同等有效**。\n' +
     '  它可能补充或推翻前面某一条做法，动手前先读一遍。\n'
@@ -511,6 +517,88 @@ export async function appendMaterial(
   const bytes = Buffer.byteLength(input.text, 'utf8')
   await noteAppendedInIndex(materialDir, relPath, bytes, at)
   return { relPath, bytes }
+}
+
+/**
+ * ★ 分批第 147 批（§12.14「右栏清单回答"它现在手上有什么"——看体量、删掉错的、追加新的」）：
+ * **删掉一条使用者给的材料**。
+ *
+ * 为什么只许删 `appended/` 下的：那里放的是**使用者给的**（空白起一开始给的 + 后来追加的），
+ * 也是唯一可能"给错了"的东西。其余材料是平台从来源 run 机械切出来的证据
+ * （`turns/*.md`、`task-run.md`、`verdict.md`、`user-requirements.md`、索引页、`meta.json`）——
+ * 删了它，起草者读到的"依据"就和来源对不上了，而且下次起草也会从库里重新切回来（删了又回来，
+ * 比不给删更让人困惑）。要换来源就重新起一条草稿。
+ *
+ * 三处一起改，少一处就是"删了但索引还在说它"：
+ *   ① 文件本身 → 删掉；
+ *   ② 索引页 `00-README.md` → 去掉提到它的那一节（追加时登记的那段）；空白起的草稿把材料
+ *      列在「里面有什么」里（`- \`appended/x.md\` — 使用者给的材料（外部）`），那一行也去掉；
+ *      空白起还有一行 `规模：使用者给的材料 N 份`，不同步改数，索引就在撒谎；
+ *   ③ 下一版草稿：`material/` 是任务级的、原地复用 ⇒ 删掉的就是下一版读不到的了（不用额外做什么）。
+ *
+ * ⚠️ 返回**判别结果而不是抛异常**：调用方（HTTP 路由）要把"不给删"与"没这份"翻成不同的状态码，
+ *    而异常在跨进程边界上是最容易丢信息的一种传递方式。
+ */
+export type RemoveMaterialResult =
+  | { ok: true; relPath: string; remaining: number }
+  | { ok: false; code: 'material_not_removable' | 'material_not_found'; relPath: string }
+
+/** 索引页里"提到这份材料的那一节"整节去掉（追加时每份材料各成一节，一节一份）。 */
+function dropAppendedNote(index: string, relPath: string): string {
+  const parts = index.split(/\n(?=## )/)
+  const kept = parts.filter(
+    (part) => !(part.startsWith(APPENDED_NOTE_HEAD) && part.includes(`\`${relPath}\``)),
+  )
+  return kept.join('\n')
+}
+
+/**
+ * 删完之后把索引页改到"没有这份材料"的状态（见上面 ②）。
+ *
+ * 索引页是起草者读的**第一个文件**（"先读这一页，再决定读哪些"）——它若还指着一份不存在的
+ * 文件，起草者会去读、读不到、然后以为素材坏了。所以这里不是"追加一句已删除"，而是**真的
+ * 把引用拿掉**：索引页要始终是"磁盘上现在有什么"的一份准确说明。
+ */
+async function rewriteIndexAfterRemove(
+  materialDir: string,
+  relPath: string,
+  remaining: number,
+): Promise<void> {
+  const indexPath = join(materialDir, '00-README.md')
+  const index = await readFile(indexPath, 'utf8').catch(() => null)
+  if (index === null) return
+  // 空白起时材料会作为「里面有什么」的一行列出（自动带的轨迹没有这种行）
+  const blankBullet = `- \`${relPath}\` — 使用者给的材料（外部）`
+  const kept = dropAppendedNote(index, relPath)
+    .split('\n')
+    .filter((line) => line.trim() !== blankBullet)
+    .join('\n')
+  const next = kept.replace(/(规模：使用者给的材料\s*)\d+(\s*份)/, `$1${remaining}$2`)
+  if (next === index) return
+  await writeFile(indexPath, `${next.trimEnd()}\n`, 'utf8')
+}
+
+export async function removeMaterial(
+  materialDir: string,
+  relPath: string,
+): Promise<RemoveMaterialResult> {
+  const asked = relPath.trim().replace(/^\.\//, '')
+  const prefix = `${APPENDED_MATERIAL_DIR}/`
+  const name = asked.startsWith(prefix) ? asked.slice(prefix.length) : ''
+  // 只看 `appended/` 下的**单段文件名**：多段、`..`、绝对路径一律不给删（API 是公开的，
+  // 不能靠"界面不会这么传"来省校验——与追加那边的 `safeMaterialName` 同一条纪律）。
+  if (name === '' || name === '.' || name === '..' || /[\\/]/.test(name)) {
+    return { ok: false, code: 'material_not_removable', relPath: asked }
+  }
+  const dir = join(materialDir, APPENDED_MATERIAL_DIR)
+  const existing = await readdir(dir).catch(() => [] as string[])
+  if (!existing.includes(name)) {
+    return { ok: false, code: 'material_not_found', relPath: `${prefix}${name}` }
+  }
+  await unlink(join(dir, name))
+  const remaining = existing.length - 1
+  await rewriteIndexAfterRemove(materialDir, `${prefix}${name}`, remaining)
+  return { ok: true, relPath: `${prefix}${name}`, remaining }
 }
 
 /** 任务标题 / 对话标题（界面与索引都要）。 */

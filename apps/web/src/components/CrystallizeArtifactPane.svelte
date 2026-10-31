@@ -34,11 +34,22 @@
   let {
     draftRunId,
     version = 1,
+    /**
+     * ★ 分批第 147 批：**材料被人从别处改过**的信号（追加材料 / 删掉材料）。
+     *
+     * 为什么需要它：材料有两个显示处——中间那栏的「依据」块（`CrystallizeView`）与本栏的
+     * 材料清单——数据都来自 `GET /api/crystallize/material`。一处改了、另一处不刷新，
+     * 使用者就会看到"刚追加了但右栏没有"（§12.14：两处必须由同一份数据现算，否则必漂）。
+     * 父组件 `views/Crystallize.svelte` 持有这个计数，两边谁改了都把它 +1。
+     */
+    rev = 0,
+    /** 这一栏自己改了材料（删掉一份）时通知父组件：让另一处也跟着重读。 */
+    onchanged = () => {},
   }: {
-    /** 选中的那条沉淀（最新那一版的 run id）。 */
     draftRunId: string
-    /** 这是第几版（来自 `GET /api/crystallize/drafts` 的行）。 */
     version?: number
+    rev?: number
+    onchanged?: () => void
   } = $props()
 
   /**
@@ -61,6 +72,12 @@
   let selected = $state('')
   /** 窄屏抽屉此刻是否打开（宽屏用不到它）。 */
   let drawerOpen = $state(false)
+  /** 已经点了「删掉」、等第二次确认的那份材料（两步删除：材料是使用者给的，误删不好补）。 */
+  let pendingDelete = $state('')
+  /** 正在删的那份（防止连点两次发两个请求）。 */
+  let deleting = $state('')
+  /** 删完之后的回执（说清删了什么、还剩几份；右栏本来就是"它现在手上有什么"）。 */
+  let deleteNote = $state('')
 
   /** 一次只认一个 run：切换选中时旧的返回要丢掉（否则旧产物盖住新的）。 */
   let seq = 0
@@ -106,8 +123,42 @@
   }
 
   $effect(() => {
+    // 读 `rev` 是**故意的**：材料在中间那栏被追加时，本栏也要重读（两处同一份数据，§12.14）
+    void rev
     void load(draftRunId)
   })
+
+  /**
+   * ★ 分批第 147 批（§12.14「删掉错的」）：删掉一份**使用者给的**材料。
+   *
+   * 为什么只有 `appended/` 有按钮：其余材料是平台从来源 run 切出来的证据（轨迹 / 判决 /
+   * 索引页 / `meta.json`），删了"依据"就和来源对不上，而且下次起草会重新切回来。界面不给
+   * "按了会被拒"的按钮（§12.41 不放假接口），daemon 那边也照样拦（两道各自成立）。
+   *
+   * 删完必须重读：右栏清单是"它现在手上有什么"的唯一显示，不刷新等于"删了但还看得见"。
+   */
+  async function removeMaterial(relPath: string): Promise<void> {
+    if (deleting !== '') return
+    deleting = relPath
+    try {
+      const res = await api<{ relPath: string; remaining: number }>(
+        `/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}` +
+          `&relPath=${encodeURIComponent(relPath)}`,
+        { method: 'DELETE' },
+      )
+      pendingDelete = ''
+      deleteNote = $t('crystallize.materialDeleteDone', {
+        path: res.relPath,
+        n: String(res.remaining),
+      })
+      await load(draftRunId)
+      onchanged()
+    } catch (err) {
+      deleteNote = String(err instanceof Error ? err.message : err)
+    } finally {
+      deleting = ''
+    }
+  }
 
   /**
    * 派生值走**显式签名的小函数**，不在 `$derived` 里直接窄化 `artifacts`：
@@ -168,10 +219,11 @@
     {:else if files.length === 0}
       <p class="faint artifact-empty">{$t('crystallize.artifactEmpty')}</p>
     {:else}
-      <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 用户追加）。只读——
-           增删要有写接口（daemon 目前没有），所以这里不放假按钮。 -->
+      <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 使用者给的）。
+           ★ 分批第 147 批：使用者给的（`appended/`）可以删——§12.14「右栏清单……删掉错的」。
+             其余材料是平台从来源 run 切出来的证据，不给删除钮（daemon 那边也拒）。 -->
       <section class="artifact-mats">
-        <h3 class="artifact-sub">
+        <h3 class="artifact-sub" title={$t('crystallize.materialDeleteOnly')}>
           {$t('crystallize.artifactMaterial')}
           <span class="artifact-mat-count">{materialItems.length}</span>
         </h3>
@@ -183,9 +235,29 @@
               <li>
                 <span class="artifact-mat-name">{item.relPath}</span>
                 <span class="faint small">{Math.round(item.bytes / 100) / 10} KB</span>
+                {#if item.relPath.startsWith('appended/')}
+                  {#if pendingDelete === item.relPath}
+                    <button
+                      type="button"
+                      class="mat-del confirm"
+                      disabled={deleting !== ''}
+                      onclick={() => void removeMaterial(item.relPath)}
+                    >{$t('crystallize.materialDeleteConfirm')}</button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="mat-del"
+                      disabled={deleting !== ''}
+                      onclick={() => (pendingDelete = item.relPath)}
+                    >{$t('crystallize.materialDelete')}</button>
+                  {/if}
+                {/if}
               </li>
             {/each}
           </ul>
+          {#if deleteNote !== ''}
+            <p class="faint small artifact-mat-note">{deleteNote}</p>
+          {/if}
         {/if}
       </section>
 
@@ -295,6 +367,39 @@
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     color: var(--text-dim);
+  }
+
+  /* 「删掉」：两步（先点它、再点「确认删掉」）——材料是使用者给的，误删不好补。
+     平时几乎不可见（与列表行的删除钮同一条纪律），hover 才露出来。 */
+  .mat-del {
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
+    padding: 0 0.25rem;
+    border-radius: var(--radius);
+    opacity: 0.55;
+  }
+
+  .artifact-mat-list li:hover .mat-del {
+    opacity: 1;
+  }
+
+  .mat-del:hover {
+    color: var(--bad);
+    border-color: var(--line-strong);
+  }
+
+  .mat-del.confirm {
+    opacity: 1;
+    color: var(--bad);
+    border-color: var(--bad);
+  }
+
+  .artifact-mat-note {
+    margin: var(--sp-1) 0 0;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
   }
 
   .artifact-files ul {

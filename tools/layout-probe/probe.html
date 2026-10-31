@@ -4672,6 +4672,57 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return editor !== null
           })()
           /**
+           * ★ 分批第 147 批（§12.14「右栏清单……删掉错的」）：**删掉一份使用者给的材料**。
+           *
+           * 量的是**一整条链**（少一环就是半截功能）：
+           *   ① 上面刚追加的那份材料要真的出现在**右栏材料清单**里（两处同一份数据：
+           *      中间那栏追加、右栏也得跟着刷新，否则"追加了但右栏看不见"）；
+           *   ② 只有 `appended/` 那一行有删除钮（自动带的证据没有——不给"按了会被拒"的按钮）；
+           *   ③ 两步删除：点「删掉」先变成「确认删掉」，点第二次才真的删；
+           *   ④ 删完清单少一项、服务端也没了、回执说清"还剩几份"。
+           * 只在这条已完成草稿上做（追加/删除都要求起草跑完）。
+           */
+          facts['crystal.deleteMaterial'] = await (async () => {
+            const rowThere = await until(
+              () => !!d().querySelector('.artifact-mat-list .mat-del'),
+              120,
+            )
+            const rows = [...d().querySelectorAll('.artifact-mat-list li')]
+            const before = rows.length
+            // ② 有删除钮的行必须都是 `appended/`（按钮在本行内，用行文本判）
+            const onlyAppended = rows
+              .filter((li) => !!li.querySelector('.mat-del'))
+              .every((li) => (li.textContent ?? '').includes('appended/'))
+            const del = d().querySelector('.artifact-mat-list .mat-del')
+            if (!del) return { rowThere, before, onlyAppended, confirmShown: false }
+            del.click()
+            await wait(30)
+            const confirmBtn = d().querySelector('.artifact-mat-list .mat-del.confirm')
+            const confirmShown = !!confirmBtn
+            confirmBtn?.click()
+            const gone = await until(
+              () => d().querySelectorAll('.artifact-mat-list li').length < before,
+              150,
+            )
+            const after = d().querySelectorAll('.artifact-mat-list li').length
+            const note = d().querySelector('.artifact-mat-note')?.textContent ?? ''
+            const items = await f.contentWindow
+              .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+            const appended = (items?.items ?? []).filter((i) => i.relPath.startsWith('appended/'))
+            return {
+              rowThere,
+              onlyAppended,
+              before,
+              after,
+              gone,
+              confirmShown,
+              serverCount: appended.length,
+              note: note.slice(0, 80),
+            }
+          })()
+          /**
            * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
            * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，
            * 而不是删完对着 36 处"没量到这个值"猜哪里连带空了。
