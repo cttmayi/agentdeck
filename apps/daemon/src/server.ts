@@ -6536,6 +6536,19 @@ async function injectedSkillsOf(
       const rawSkillIds = Array.isArray(raw?.skillIds)
         ? (raw.skillIds as unknown[]).filter((x): x is string => typeof x === 'string')
         : []
+      /**
+       * ★ 分批第 176 批（使用者定："**在没有安装 distilly 之前，应该不能沉淀**"）：
+       * 起草**必须**注入「沉淀用技能」——起草者靠它才知道"怎么写"。界面已经拦了一道，
+       * 这里是最后一道：界面画对了却忘了带，这条兜住（与 `task_gate` 同一层意思）。
+       */
+      if (rawSkillIds.length === 0) {
+        sendJson(res, 400, {
+          error:
+            '起草需要「沉淀用技能」——先在「沉淀设置」里一键安装（沉淀页右上角），再开始沉淀。',
+          code: 'draft_skill_required',
+        })
+        return
+      }
       const draftSkills: Array<{
         ref: { id: Skill['id']; slug: string; source: Skill['source'] }
         slug: string

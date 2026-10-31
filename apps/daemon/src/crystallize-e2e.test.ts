@@ -205,6 +205,11 @@ let fakeBackend: FakeBackend
 let agentId: string
 let reviewerId: string
 let issueId: string
+/**
+ * ★ 分批第 176 批（使用者定："没装 distilly 之前不能沉淀"）：起草**必须**注入「沉淀用技能」。
+ * 夹具在 `before()` 里造一条，助手 `draftPost` 自动带上它——与真机上"先在沉淀设置里安装"同一件事。
+ */
+let draftSkillId = ''
 
 /** 在 skills-mine 仓库里跑 git 命令（验证真提交）。 */
 function git(...args: string[]): Promise<string> {
@@ -249,6 +254,34 @@ before(async () => {
     body: JSON.stringify({ title: '写一份报告', description: '随便看看' }),
   })
   issueId = ((await issueRes.json()) as Issue).id
+
+  const createdSkill = await fetch(`${daemon.url}/api/skills`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    // ⚠️ `POST /api/skills` 收的是**一批 payload**（`{skills: [...]}`），不是单个技能
+    body: JSON.stringify({
+      skills: [
+        {
+          slug: 'draft-skill-fixture',
+          name: '起草夹具技能',
+          source: 'mine',
+          sourceRef: 'mine:draft-skill-fixture',
+          body:
+            '---\nname: draft-skill-fixture\ndescription: 起草用的夹具技能\n---\n\n# 怎么起草\n\n## Procedure\n\n1. 先读索引。\n',
+          files: {},
+          verdictSchemaVersion: 1,
+        },
+      ],
+    }),
+  })
+  // `POST /api/skills` 回的是 `{installed, skipped}`（不是 `{skills}`）
+  const createdSkillBody = (await createdSkill.json()) as { installed?: Array<{ id: string }> }
+  draftSkillId = createdSkillBody.installed?.[0]?.id ?? ''
+  assert.notEqual(
+    draftSkillId,
+    '',
+    `起草门禁要求技能 ⇒ 夹具技能必须造出来（回执：${JSON.stringify(createdSkillBody).slice(0, 200)}）`,
+  )
 })
 
 after(async () => {
@@ -344,11 +377,7 @@ async function readDirRecursive(dir: string, prefix = ''): Promise<Record<string
 }
 
 async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
+  const res = await draftPost(payload)
   assert.equal(res.status, 202, '起草必须受理（202）')
   const body = (await res.json()) as { draftRunId: string; materialStats: { turns: number; toolCalls: number } }
   assert.equal(typeof body.draftRunId, 'string')
@@ -359,6 +388,32 @@ async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error('起草 run 未在限时内完成')
+}
+
+/**
+ * ★ 分批第 176 批：**发起起草**（唯一入口）。
+ *
+ * 为什么收成一个助手：起草现在必须带 `skillIds`（门禁），而"每条用例自己去拼一遍"
+ * 正是刚才那 19 处红灯的成因。要断言"不带技能会被拒"的用例，显式传 `skillIds: []`
+ * 或用 `rawDraftPost`。
+ */
+async function draftPost(payload: Record<string, unknown>): Promise<Response> {
+  return fetch(`${daemon.url}/api/crystallize/draft`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      payload.skillIds === undefined ? { ...payload, skillIds: [draftSkillId] } : payload,
+    ),
+  })
+}
+
+/** 原样的起草请求（给"不带技能应当被拒"这类用例用）。 */
+async function rawDraftPost(payload: Record<string, unknown>): Promise<Response> {
+  return fetch(`${daemon.url}/api/crystallize/draft`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
 }
 
 /**
@@ -473,14 +528,10 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
 
   test('draft：受理返回 draftRunId + 素材统计，subject 是 skill-draft', async () => {
     const runId = await runReviewed('再做一次任务（素材源）')
-    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const res = await draftPost({
         runId,
         target: { kind: 'new', purpose: '沉淀这段报告流程' },
-      }),
-    })
+      })
     assert.equal(res.status, 202)
     const body = (await res.json()) as { draftRunId: string; materialStats: { turns: number; toolCalls: number } }
     assert.ok(body.materialStats.toolCalls >= 1, '素材统计带工具调用数')
@@ -1430,14 +1481,10 @@ describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批�
       release = resolve
     })
     try {
-      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const res = await draftPost({
           runId: await runReviewed('审过的流程（起草中追加材料）'),
           target: { kind: 'new', purpose: '起草中追加材料' },
-        }),
-      })
+        })
       const draftText = await res.text()
       assert.equal(res.status, 202, draftText)
       const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
@@ -1609,14 +1656,10 @@ describe('§10.13 删除材料：只有使用者给的能删，索引页跟着�
       release = resolve
     })
     try {
-      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const res = await draftPost({
           runId: await runReviewed('审过的流程（起草中删材料）'),
           target: { kind: 'new', purpose: '起草中删材料' },
-        }),
-      })
+        })
       const draftText = await res.text()
       assert.equal(res.status, 202, draftText)
       const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
@@ -1636,6 +1679,19 @@ describe('§10.13 删除材料：只有使用者给的能删，索引页跟着�
     const afterCommit = await remove(draftRunId, 'appended/x.md')
     assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
     assert.equal(afterCommit.body.code, 'already_crystallized')
+  })
+})
+
+describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分批第 176 批）', () => {
+  test('★★★ 不带 skillIds 起草 ⇒ 400 draft_skill_required（界面那道之外的兜底）', async () => {
+    const runId = await runReviewed('审过的流程（门禁）')
+    const res = await rawDraftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
+    assert.equal(res.status, 400, await res.clone().text())
+    assert.equal(((await res.json()) as { code?: string }).code, 'draft_skill_required')
+
+    // 带上就正常受理（同一份请求，只多 skillIds）
+    const ok = await draftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
+    assert.equal(ok.status, 202, await ok.clone().text())
   })
 })
 
@@ -1729,11 +1785,7 @@ describe('§10.16 起草者提问 → 人回答（分批第 172 批）', () => {
     assert.ok(skillId, '夹具里要先有一条技能')
     const before = fakeBackend.injectedSkills.length
     const runId = await runReviewed('审过的流程（注入技能）')
-    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runId, target: { kind: 'new', purpose: '注入技能' }, skillIds: [skillId] }),
-    })
+    const res = await draftPost({ runId, target: { kind: 'new', purpose: '注入技能' }, skillIds: [skillId] })
     assert.equal(res.status, 202, await res.clone().text())
     const draftRunId = ((await res.json()) as { draftRunId: string }).draftRunId
     for (let i = 0; i < 40; i += 1) {
@@ -1813,14 +1865,10 @@ describe('§10.15 从仓库拉材料：路由层边界（分批第 157 批）', 
       release = resolve
     })
     try {
-      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const res = await draftPost({
           runId: await runReviewed('审过的流程（起草中拉仓库）'),
           target: { kind: 'new', purpose: '起草中拉仓库' },
-        }),
-      })
+        })
       const draftText = await res.text()
       assert.equal(res.status, 202, draftText)
       const runningId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
@@ -1939,46 +1987,30 @@ describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批
   })
 
   test('★★ 边界：空白起不许同时带 runId、不能优化智能体指令、材料超限拒绝', async () => {
-    const withRun = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const withRun = await draftPost({
         startFrom: 'blank',
         runId: await runOnce('不该被用上的 run'),
         target: { kind: 'new', purpose: 'x' },
-      }),
-    })
+      })
     assert.equal(withRun.status, 400, await withRun.clone().text())
     assert.equal(((await withRun.json()) as { code?: string }).code, 'blank_with_run')
 
     // ★ 分批第 165 批：空白起**不再**一律拒更新——"上一版"是技能库里那条技能，跟来源 run 无关。
     //   这里给一个不存在的 skillId，应当走到 404（而不是像以前那样被 `blank_requires_new` 挡在门口）。
-    const updateMissing = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'update', skillId: 'nope' } }),
-    })
+    const updateMissing = await draftPost({ startFrom: 'blank', target: { kind: 'update', skillId: 'nope' } })
     assert.equal(updateMissing.status, 404, await updateMissing.clone().text())
     assert.equal(((await updateMissing.json()) as { code?: string }).code, 'skill_not_found')
 
     // 但"优化智能体指令"仍然不行：候选是"这次 run 上真实用过的那两条"，没有来源 run 就没有候选
-    const agentTarget = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ startFrom: 'blank', target: { kind: 'agent', agentId: agentId } }),
-    })
+    const agentTarget = await draftPost({ startFrom: 'blank', target: { kind: 'agent', agentId: agentId } })
     assert.equal(agentTarget.status, 400, await agentTarget.clone().text())
     assert.equal(((await agentTarget.json()) as { code?: string }).code, 'blank_no_agent')
 
-    const tooBig = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const tooBig = await draftPost({
         startFrom: 'blank',
         target: { kind: 'new', purpose: 'x' },
         materials: [{ text: 'x'.repeat(100 * 1024 + 1) }],
-      }),
-    })
+      })
     assert.equal(tooBig.status, 400, await tooBig.clone().text())
     assert.equal(((await tooBig.json()) as { code?: string }).code, 'material_too_large')
   })
@@ -2132,14 +2164,10 @@ describe('§10.6 人改草稿：落盘到磁盘 + 体检跟着重算', () => {
       release = resolve
     })
     try {
-      const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const res = await draftPost({
           runId: await runReviewed('审过的流程（起草中保存）'),
           target: { kind: 'new', purpose: '起草中保存' },
-        }),
-      })
+        })
       const draftText = await res.text()
       assert.equal(res.status, 202, draftText)
       const runningDraftId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
@@ -2687,11 +2715,7 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
 
   test('★★★ 起草一条「优化审核者指令」的草稿：素材里有它现在的指令全文，契约写的是 agent/instructions.md', async () => {
     const runId = await runWithReviewer()
-    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runId, target: { kind: 'agent', agentId: reviewerId } }),
-    })
+    const res = await draftPost({ runId, target: { kind: 'agent', agentId: reviewerId } })
     assert.equal(res.status, 202, await res.clone().text())
     const { draftRunId } = (await res.json()) as { draftRunId: string }
 
@@ -3004,11 +3028,7 @@ describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批
       agents: Array<{ id: string; role: string }>
     }
     const drafter = all.agents.find((a) => a.role === 'drafter')!
-    const res = await fetch(`${daemon.url}/api/crystallize/draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runId, target: { kind: 'agent', agentId: drafter.id } }),
-    })
+    const res = await draftPost({ runId, target: { kind: 'agent', agentId: drafter.id } })
     assert.equal(res.status, 400)
     const body = (await res.json()) as { code: string }
     assert.equal(body.code, 'agent_not_in_run')

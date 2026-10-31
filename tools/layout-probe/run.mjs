@@ -5809,12 +5809,19 @@ try {
         // 什么都不做：那一节会以"没量到"的形式点名自己（不许静默空过）
         log(yellow('⚠ 没有"起草中"那一屏的素材源 run——那一节会量不到（见夹具阶段的注释）'))
       } else {
+        // ★ 分批第 176 批：起草现在**必须**带「沉淀用技能」（`draft_skill_required`）。
+        //   夹具里取一条已装的技能（探针自带的 `probe-skill`），没有就退到任意一条。
+        const allSkills = (await (await fetch(`${base}/api/skills`)).json()).skills ?? []
+        const fixtureSkill =
+          allSkills.find((sk) => sk.slug === 'probe-skill') ?? allSkills[0] ?? null
+        if (!fixtureSkill) log(yellow('⚠ 夹具里一条技能都没有——起草门禁会挡住这一屏'))
         const draftRes = await fetch(`${base}/api/crystallize/draft`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             runId: sourceRun.runId,
             target: { kind: 'new', purpose: '探针夹具：量起草中那一屏' },
+            ...(fixtureSkill ? { skillIds: [fixtureSkill.id] } : {}),
           }),
         })
         const draftBody = await draftRes.json().catch(() => ({}))
