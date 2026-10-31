@@ -55,6 +55,8 @@
   // ⚠️ 起始值由父级给（`bind:stage`），这里只保证"blank 时候不会停在 start 那一问上"。
   $effect(() => {
     if (blank && stage === 'start') stage = 'purpose'
+    // 空白起：目标只能是"新建"（没有来源 run 就没有"更新谁"这回事）
+    if (blank && kind === '') kind = 'new'
   })
 
   /**
@@ -86,7 +88,12 @@
     }
     return null
   }
-  let kind = $state<'new' | 'update' | 'agent' | ''>(blank ? 'new' : '')
+  /**
+   * 目标种类。**初始值不在这里读 `blank`**：在 `$state(...)` 的初始化里读 prop，svelte-check 会
+   * 提醒"只捕获了它的初始值"，而且那样写的意图也含糊。改由下面那个已有的 `$effect` 补：
+   * 空白起没有来源 run ⇒ 目标只能是"新建"（但它是**可改的**，所以不能做成 `$derived`）。
+   */
+  let kind = $state<'new' | 'update' | 'agent' | ''>('')
   let skillId = $state('')
   let agentId = $state('')
   let purpose = $state('')

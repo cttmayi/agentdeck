@@ -685,11 +685,6 @@
     font-size: var(--fs-sm);
   }
 
-  .artifact-files ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
 
 
   .artifact-check-count {

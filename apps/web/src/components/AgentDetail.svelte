@@ -692,54 +692,10 @@
   }
 
   /* 行动权限（审核者）：占整行（选择器"左选右配"，最需要宽度） */
-  .cell.picker-cell {
-    grid-column: 1 / -1;
-    margin-top: var(--sp-1);
-  }
 
   /* 行动权限的展开/收起（2026-10：与顶栏「列表 / 看板」同款分段轨——
      与组里「选已有的/新建私有」、任务里「智能体/智能体组」同一套样式） */
-  .slot-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
 
-  .slot-source-toggle {
-    display: flex;
-    align-items: center;
-    height: 1.9rem;
-    box-sizing: border-box;
-    padding: 0 var(--sp-1);
-    gap: 2px;
-    background: var(--line);
-    border-radius: var(--radius);
-  }
-  .slot-source-toggle button {
-    height: 1.5rem;
-    padding: 0 var(--sp-3);
-    border-radius: var(--radius-sm);
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .slot-source-toggle button:hover:not(:disabled) {
-    background: var(--surface);
-    color: var(--text);
-  }
-  .slot-source-toggle button.active {
-    /* ⚠️ 背景用 `--accent-dim` 而不是 `--accent`：暗色主题下 `--accent` 是浅蓝，
-       白字配它看不见（与新建任务页的来源切换同款修法）。 */
-    background: var(--accent-dim, #2f6fed);
-    color: #fff;
-  }
 
   /* ── 值的呈现 ── */
 

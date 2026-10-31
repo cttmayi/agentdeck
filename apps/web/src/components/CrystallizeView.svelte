@@ -2050,31 +2050,14 @@
     cursor: pointer;
     font-size: var(--fs-sm);
   }
-  .radio-row + .radio-row {
-    border-top: 1px solid var(--line);
-  }
   .radio-row:hover {
     background: var(--surface-hover);
-  }
-  .radio-row:has(input:checked) {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
   .radio-row.disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }
   /* ★ 全局 `input` 规则把 radio 撑成通栏宽、还带边框与 padding——这里逐条 reset
-     （与 NewAgentForm 的 `.skill-option input { width: auto }` 同一处方）。 */
-  .radio-row input[type='radio'],
-  .skill-row input[type='radio'] {
-    width: auto;
-    margin: 0.15em 0 0;
-    padding: 0;
-    border: none;
-    background: none;
-    accent-color: var(--accent);
-    flex-shrink: 0;
-  }
   .opt-text {
     display: flex;
     flex-direction: column;
@@ -2091,9 +2074,6 @@
     flex-direction: column;
     gap: var(--sp-1);
     margin: 0;
-  }
-  .field-inner textarea {
-    margin-top: 0;
   }
 
   /* ══════════ 更新目标：技能行列表 ══════════ */
@@ -2112,14 +2092,8 @@
     cursor: pointer;
     font-size: var(--fs-sm);
   }
-  .skill-row + .skill-row {
-    border-top: 1px solid var(--line);
-  }
   .skill-row:hover {
     background: var(--surface-hover);
-  }
-  .skill-row:has(input:checked) {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
   .skill-info {
     display: flex;
@@ -2147,26 +2121,11 @@
     gap: var(--sp-1);
     margin: 0;
   }
-  .field textarea {
-    font: inherit;
-    margin-top: 0;
-    padding: var(--sp-1) var(--sp-2);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text);
-  }
   .row-end {
     display: flex;
     justify-content: flex-end;
     gap: var(--sp-2);
     margin-top: var(--sp-2);
-  }
-  .log-box {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    max-height: 24rem;
-    overflow: auto;
   }
   /* ══════════════════════════════════════════════════════════════════
      ★ 分批第 33 批：过程格里的内容要**跟着格子长**（使用者："草稿过程和审核过程
@@ -2181,20 +2140,8 @@
      口径：日志框吃格子的剩余高度（`flex: 1 1 0`），上面的问题清单按内容高、
      但最多占一半（`max-height: 50%`，自己滚）——判决条目多时不能让日志被挤没。
   */
-  .process-pane > .drawer-section {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-    /* 折叠区那套下边距是为了文档流里的分节；在格子里它会把日志框往下推 */
-    margin-bottom: 0;
-  }
-  .process-pane .log-box,
-  .process-pane .draft-final {
-    flex: 1 1 0;
-    min-height: 8rem;
-    max-height: none;
-  }
+  /* ★ 分批第 159 批：`.process-pane .log-box` 这条删了——起草日志现在挂在**系统消息**里
+     （U3b），`.process-pane` 底下只剩"依据"两块（`> .proc-block`），日志框的选择器已经指不到东西。 */
   .process-pane > .proc-block {
     flex: 0 1 auto;
     min-height: 0;
@@ -2203,14 +2150,6 @@
     overflow: auto;
   }
   /* 带日志的那一块：吃剩余高度（它是这个格子里唯一"越长越好"的东西） */
-  .process-pane > .proc-log {
-    flex: 1 1 0;
-    max-height: none;
-    min-height: 8rem;
-  }
-  .process-pane > .proc-log > .log-box {
-    min-height: 0;
-  }
   /*
    * 起草 run 的「最后结果」。
    *
@@ -2280,21 +2219,6 @@
   .diff-line.del {
     background: rgba(180, 35, 24, 0.08);
   }
-  .diff-line .gutter {
-    color: var(--fg-faint);
-    text-align: right;
-    user-select: none;
-  }
-  .diff-line .sign {
-    color: var(--fg-faint);
-    user-select: none;
-  }
-  .diff-line.add .sign {
-    color: #1a7f37;
-  }
-  .diff-line.del .sign {
-    color: #b42318;
-  }
 
   /* ══════════ 审阅重排（2026-10-19）：结论条 + 主区 + 折叠 ══════════
 
@@ -2319,26 +2243,6 @@
     margin: 0 0 var(--sp-2);
     border-bottom: 1px solid var(--line);
   }
-  .review-tabs > button {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-1);
-    padding: 4px 12px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--fg-soft);
-    font-size: var(--fs-sm);
-    cursor: pointer;
-  }
-  .review-tabs > button:hover {
-    color: var(--fg);
-  }
-  .review-tabs > button.tabs-active {
-    color: var(--fg);
-    font-weight: 600;
-    border-bottom-color: var(--fg);
-  }
   .tab-count {
     padding: 0 5px;
     border-radius: 999px;
@@ -2361,20 +2265,6 @@
    */
   .evidence-pane {
     grid-template-rows: auto minmax(0, 1fr);
-  }
-  .evidence-pane > .evi-head {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    min-width: 0;
-  }
-  .evidence-pane .grow {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /*
@@ -2531,15 +2421,6 @@
     gap: var(--sp-1);
   }
 
-  .audit-findings .sev {
-    display: inline-block;
-    margin-right: var(--sp-2);
-    padding: 0 var(--sp-1);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-  }
 
   .audit-evidence {
     font-size: var(--fs-xs);
@@ -2708,21 +2589,7 @@
     flex: 0 0 auto;
   }
 
-  .pane-tabs > button {
-    padding: 3px 10px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--fg-soft);
-    font-size: var(--fs-sm);
-    cursor: pointer;
-  }
 
-  .pane-tabs > button.tabs-active {
-    background: var(--panel-sunken, rgba(0, 0, 0, 0.05));
-    color: var(--fg);
-    font-weight: 600;
-  }
 
   .tabs-right {
     margin-left: auto;
@@ -2735,28 +2602,8 @@
    * 「结论已过期」这个标记：**要显眼**，因为它是"别照这个结论做决定"的提示。
    * 用告警色（与失败结论同一个色系），不用灰色——灰色在这里等于"可以不看"。
    */
-  .conclusion-bar .stale-tag {
-    color: var(--warn, #b45309);
-    font-weight: 600;
-  }
   /* 「保存改动」比同排的其他 ghost 按钮重要一点：它是"你刚做的事还没算数"的出口。 */
-  .conclusion-bar .primary-ghost {
-    border-color: var(--accent, #2563eb);
-    color: var(--accent, #2563eb);
-  }
 
-  .file-body textarea.editor {
-    flex: 1 1 auto;
-    min-height: 0;
-    width: 100%;
-    box-sizing: border-box;
-    border: 0;
-    border-radius: 0;
-    resize: none;
-    padding: var(--sp-2) var(--sp-3);
-    font-size: 0.8125rem;
-    line-height: 1.55;
-  }
 
   .file-pre {
     margin: 0;
@@ -2770,10 +2617,6 @@
     word-break: break-word;
   }
 
-  .file-body .pad {
-    padding: var(--sp-3);
-    margin: 0;
-  }
 
   .problem-list {
     margin: 6px 0 0;
@@ -2794,31 +2637,8 @@
     padding: var(--sp-4);
   }
 
-  /* U3c-2·审阅态：内容与差异并排（宽屏）；窄屏只显示激活那一格 */
-  .review-side {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--sp-2);
-    flex: 1;
-    min-height: 0;
-  }
-
-  .review-cell {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-  }
-
-  /* ⚠️ 断点统一 96rem（1536px）：探针视口 1280 属于窄屏，那里应当"只剩激活那一格" */
-  @media (max-width: 110rem) {
-    .review-side {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .review-side[data-review-tab='content'] .review-cell[data-cell='diff'],
-    .review-side[data-review-tab='diff'] .review-cell[data-cell='content'] {
-      display: none;
-    }
-  }
+  /* ★ 分批第 159 批：`.review-side` / `.review-cell` 的样式**跟着编辑器走了**
+     （`CrystallizeDraftEditor.svelte`）——元素由那个组件渲染，样式留在这里一条都不生效
+     （Svelte 的 `<style>` 按组件作用域，§12.55 坑 4 的同一件事）。这里连同那条按视口判的
+     `@media` 一起删掉：右栏只有 24–30rem，编辑器里永远是单列切换，没有"并排"这回事。 */
 </style>

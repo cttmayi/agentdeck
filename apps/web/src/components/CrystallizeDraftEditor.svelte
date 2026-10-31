@@ -266,23 +266,15 @@
   /* ── 主区：树 240px + 窗格 ──
      高度跟窗口走（min 420 保证编辑器不至于只有几行；max 与窗口高对齐），
      两个子块各自 overflow: auto——页面**不因为文件多而整页变长**。 */
-  .review-pane,
-  .file-pane {
+  .review-pane {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    /* 右栏是 24–30rem 的一列：树固定 180px（文件名能读），剩下全给正文 */
+    grid-template-columns: 180px minmax(0, 1fr);
     gap: var(--sp-2);
-    /* 同上：吃剩余高度（basis 0：高度由剩余空间定，内容在格子里自己滚），22rem 保底 */
+    /* 吃剩余高度（basis 0：高度由剩余空间定，内容在格子里自己滚），22rem 保底 */
     flex: 1 1 0;
     min-height: 22rem;
     margin-top: var(--sp-1);
-  }
-
-  /* ⚠️ 素材折叠区里那份**保持固定高度**：它在文档流里（展开才出现），不能吃"剩余高度"，
-     否则一展开就把主区压扁、而折叠本身又让页面高度跳变。这一条比上面的 `flex` 更具体，
-     所以能盖住（`.fold-body` 在 FoldSection 组件内部，scoped 样式够不到，必须 :global 打洞）。 */
-  :global(.fold-body) .file-pane {
-    flex: 0 0 auto;
-    height: clamp(16rem, 38vh, 26rem);
   }
 
   .file-tree {
@@ -406,15 +398,7 @@
    * 「结论已过期」这个标记：**要显眼**，因为它是"别照这个结论做决定"的提示。
    * 用告警色（与失败结论同一个色系），不用灰色——灰色在这里等于"可以不看"。
    */
-  .conclusion-bar .stale-tag {
-    color: var(--warn, #b45309);
-    font-weight: 600;
-  }
   /* 「保存改动」比同排的其他 ghost 按钮重要一点：它是"你刚做的事还没算数"的出口。 */
-  .conclusion-bar .primary-ghost {
-    border-color: var(--accent, #2563eb);
-    color: var(--accent, #2563eb);
-  }
 
   .file-body textarea.editor {
     flex: 1 1 auto;
@@ -429,41 +413,17 @@
     line-height: 1.55;
   }
 
-  .file-pre {
-    margin: 0;
-    padding: var(--sp-2) var(--sp-3);
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: auto;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
 
   .file-body .pad {
     padding: var(--sp-3);
     margin: 0;
   }
 
-  .problem-list {
-    margin: 6px 0 0;
-    padding-left: 18px;
-  }
 
-  .problem-list li + li {
-    margin-top: 4px;
-  }
 
   /* ══════════ 完成态 ══════════
      ★ 底色/描边/内距吃全局 `.notice`（`.good` 那档），这里只管"竖着排"——
      再自造一张卡片就又多一套边距，是使用者说的"和任务不一样"的来源之一。 */
-  .done-box {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-2);
-    padding: var(--sp-4);
-  }
 
   /* U3c-2·审阅态：内容与差异并排（宽屏）；窄屏只显示激活那一格 */
   .review-side {
