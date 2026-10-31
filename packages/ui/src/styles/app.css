@@ -703,16 +703,17 @@ hr {
  * `CrystallizeArtifactPane.svelte` 自己的 `@media` 负责——**两处断点必须都是 72rem**，
  * 否则会出现"网格还是三列、但第三列已经变抽屉"的错位。
  */
-/* ⚠️ 只有够宽才并排。1280（探针用的视口）并排的话详情只剩 304px——内容横向溢出、
-   容器多出一条横向滚动条，探针当场量到"格子离底 10px"（5 条沉淀项的回归都是它）。
-   96rem = 1536px：416（列表）+ 560（详情保底）+ 320（产物）才放得下。 */
+/* ⚠️ 只有够宽才并排。分批第 155 批把断点从 96rem 降到 **74rem（1184px）**：
+   产物栏现在装的是**编辑器**（§12.53 选项 2：右栏加宽、编辑搬过去），而抽屉形态下
+   编辑区是一块浮层——改字的时候把中间的结论与时间线整片盖住。74rem 起让它成为真列：
+   列表 20–26rem + 详情（≥ 30rem）+ 产物 24–30rem 还放得下；再窄就退回抽屉。 */
 .split-layout.with-artifact {
   grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
 }
 
-@media (min-width: 96rem) {
+@media (min-width: 74rem) {
   .split-layout.with-artifact {
-    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) 20rem;
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) minmax(24rem, 30rem);
   }
 }
 

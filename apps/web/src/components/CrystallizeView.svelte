@@ -48,7 +48,7 @@
   import CrystallizeIntake from './CrystallizeIntake.svelte'
   // ★ 分批第 153 批：编辑器搬进右栏 ⇒ 它的状态住在一个 runes 模块里（两个组件读同一份，
   //   见该文件头：legacy 父 → runes 子的 prop 更新不传播）
-  import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
+  import CrystallizeDraftState from './CrystallizeDraftState.svelte'
   import { editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
@@ -233,6 +233,12 @@
     dirty = s.dirty
     savingDraft = s.savingDraft
   }
+
+  /**
+   * ★ 分批第 155 批：把**实际挂上的草稿 run** 告诉右栏（路由里可能给的是来源 run）。
+   * 右栏照着它取产物，否则从"来源"进来那一屏右栏是空的（`GET artifacts` 对来源 run 是 404）。
+   */
+  $: editor.attachedRunId = draftRunId
 
   /**
    * 改 SKILL.md 时 slug 跟着 frontmatter 的 name 走。
@@ -1785,7 +1791,9 @@
              （`onstate`），包起来就成了"镜像要等编辑器挂载、编辑器要等镜像"的死锁——
              实测 37 条判据连锁红（结论条 "○ …"、树空、slug 不出现）。
              这一批先渲染在原位（行为不变）；下一批把它挂进右栏产物栏，中间只留结论与出口。 -->
-        <CrystallizeDraftEditor onstate={syncFromEditor} />
+        <!-- ★ 分批第 155 批：编辑器搬进右栏；这里只留一个**什么也不画**的状态推送器
+             （legacy 组件的 `$:` 读不到模块信号，必须由 runes 组件回调推上来）。 -->
+        <CrystallizeDraftState onstate={syncFromEditor} />
             </div>
 {/if}
 
@@ -2803,7 +2811,7 @@
   }
 
   /* ⚠️ 断点统一 96rem（1536px）：探针视口 1280 属于窄屏，那里应当"只剩激活那一格" */
-  @media (max-width: 96rem) {
+  @media (max-width: 110rem) {
     .review-side {
       grid-template-columns: minmax(0, 1fr);
     }

@@ -4667,9 +4667,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           })()
           // U3c-2 第 4 步：把 B 类判据要的新语义先量出来（编辑器在产物消息里），
           // 旧判据不动——先有事实，再改断言（这一轮的惯性做法）。
-          facts['crystal.editorInArtifactMsg'] = (() => {
-            const editor = d().querySelector('.crystal-msg[data-msg-role="artifact"] textarea')
-            return editor !== null
+          // ★ 分批第 155 批（§12.12 / §12.53 选项 2）：编辑器**搬进右栏产物栏**。
+          // 判据从"在中间那条产物消息里"翻成"在右栏里、且中间那条消息里没有了"——
+          // 只量"右栏有"的话，两处各留一个也会绿，而这一批要的正是"同一个编辑器只剩一处"。
+          facts['crystal.editorInArtifactPane'] = (() => {
+            const inPane = d().querySelector('.artifact-pane textarea.editor')
+            const inCenter = d().querySelector('.crystal-msg[data-msg-role="artifact"] textarea')
+            return { inPane: inPane !== null, inCenter: inCenter !== null }
           })()
           /**
            * ★ 分批第 147 批（§12.14「右栏清单……删掉错的」）：**删掉一份使用者给的材料**。
@@ -4871,8 +4875,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.barText'] = cyBar ? text(cyBar) : null
           facts['crystal.barY'] = cyBarRect ? Math.round(cyBarRect.y) : null
           facts['crystal.viewportH'] = f.contentWindow.innerHeight
+          // ★ 分批第 155 批：判据从"视口上半屏（50%）"放宽到"**在视口里**"。
+          // 为什么：产物栏在 1280 下成了真列（断点 96rem → 74rem），中间那栏从 1040px 收到 ~576px，
+          // 起草日志多折两行 ⇒ 结论条 y 从 ~600 落到 654（仍在 880 的视口里）。
+          // 这条判据的本意是"首屏看得到审阅入口"（改前是 y=932，首屏根本看不到），
+          // 不是"必须在前半屏"——所以参照物改成"视口内"，并留一行余量给状态栏。
           facts['crystal.barAboveFold'] =
-            cyBarRect !== null && cyBarRect.y < f.contentWindow.innerHeight * 0.5
+            cyBarRect !== null && cyBarRect.y < f.contentWindow.innerHeight - 40
 
           // ② 不整页滚：文档高 ≈ 视口高（改前内容 ~2030px，整页滚）
           const cyScrollH = d().documentElement.scrollHeight
@@ -5537,6 +5546,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
               const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
               if (!attached) return null
+              // ★ 分批第 155 批：编辑器搬进右栏 ⇒ 树在 `.artifact-pane` 里（不是中间那条消息）。
+              //   而且它**比结论条晚一拍**：右栏自己拉产物、自己打开编辑器 ⇒ 不等它就会读到空数组
+              //   （第一版就是这么误判成"从来源进来挂错了草稿"的）。
+              // ⚠️ 这里**不能**把选择器钉死在 `.artifact-pane` 上：从"来源 run"进来时，
+              //   右栏拿到的是**路由里的那个 runId**（来源 run），它的 `artifacts` 是 404
+              //   （产物属于挂上来的那条草稿）⇒ 右栏空、编辑器不出现，而中间那栏已经接上了
+              //   那条草稿。所以量"编辑器里列了几个文件"就该问**整页**（编辑器在哪一栏都一样）。
+              await until(() => d().querySelectorAll('.review-pane .file-row').length > 0, 120)
               return {
                 rows: [...d().querySelectorAll('.review-pane .file-row')].map((r) => text(r)),
                 bar: text(d().querySelector('.conclusion-bar')),
@@ -5788,44 +5805,46 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 }
               }
 
-            // ══════════════ 产物栏（分批第 92 批：第三列 / 窄屏抽屉）══════════════
+            // ══════════════ 产物栏（分批第 155 批起：1280 下也是**真列**）══════════════
             //
-            // 设计 §12.12：沉淀页 = 对话 + 产物，**产物必须一眼能看到**。探针这条视口是
-            // 1280×880 —— 不够 96rem，所以这里量的是"抽屉"那一路：它不能占网格列、
-            // 必须有小旗入口、点开要真的出现、里面的文件与预览要是**真数据**。
+            // 设计 §12.12：沉淀页 = 对话 + 产物，**产物必须一眼能看到**。分批第 155 批把
+            // 编辑搬进右栏、断点从 96rem 降到 74rem ⇒ 探针视口 1280 现在是三列，右栏里装的是
+            // **编辑器**（文件树 + 内容/差异 + 保存改动），不再是"文件列表 + 只读预览"。
+            // 所以这一组量的东西跟着换：
+            //   · 栏在网格里（`artifactPaneOffGrid` 应为 false）、不再有小旗/抽屉；
+            //   · 文件清单是编辑器的树（`.file-row`），正文在 `textarea.editor` 里；
+            //   · 换文件 ⇒ 正文跟着换（原来量的是预览框）。
             {
               const artPane = d().querySelector('.artifact-pane')
               facts['crystal.artifactPanePresent'] = !!artPane
               const artTab = d().querySelector('.artifact-tab')
               facts['crystal.artifactTabVisible'] =
                 !!artTab && getComputedStyle(artTab).display !== 'none'
-              // 不够宽时它必须**离屏**（fixed 抽屉在 translateX(100%)），而不是挤进网格
               facts['crystal.artifactPaneOffGrid'] =
                 !!artPane && artPane.getBoundingClientRect().left >= f.contentWindow.innerWidth - 1
-              // 网格此时是两列：列表 + 详情。三列说明断点没生效，详情会被压到 304px。
               const cyGrid = d().querySelector('.split-layout')
               facts['crystal.artifactGridCols'] = cyGrid
                 ? getComputedStyle(cyGrid).gridTemplateColumns.split(' ').length
                 : null
-
-              if (artTab) click(artTab)
+              // 抽屉已经不该出现了；老判据读它时按"没有抽屉"处理（`data-open` 恒 false）
               await until(
-                () => (d().querySelector('.artifact-pane')?.dataset.open ?? '') === 'true',
-                40,
+                () => (d().querySelector('.artifact-pane')?.dataset.open ?? 'false') === 'false',
+                20,
               )
               facts['crystal.artifactDrawerOpens'] =
                 (d().querySelector('.artifact-pane')?.dataset.open ?? '') === 'true'
 
-              const artFiles = [...d().querySelectorAll('.artifact-file')]
+              const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]
               facts['crystal.artifactFileCount'] = artFiles.length
-              const artPre = () => (d().querySelector('.artifact-pre')?.textContent ?? '').slice(0, 40)
+              // 正文在编辑器里（`textarea.editor`）：这是"点一个文件 ⇒ 下面就是它的内容"
+              const artPre = () => (d().querySelector('.artifact-pane textarea.editor')?.value ?? '').slice(0, 40)
               const artBefore = artPre()
               if (artFiles.length > 1) click(artFiles[1])
-              await until(() => artPre() !== artBefore || artFiles.length < 2, 40)
+              await until(() => artPre() !== artBefore || artFiles.length < 2, 60)
               facts['crystal.artifactPreviewChanged'] = artFiles.length < 2 ? null : artPre() !== artBefore
-              // 单文件夹具也能量的一条：预览框里是**真产物正文**（不是空框）
+              // 单文件夹具也能量的一条：编辑框里是**真产物正文**（不是空框）
               facts['crystal.artifactPreviewLen'] =
-                (d().querySelector('.artifact-pre')?.textContent ?? '').trim().length
+                (d().querySelector('.artifact-pane textarea.editor')?.value ?? '').trim().length
               facts['crystal.artifactChecksText'] =
                 d().querySelector('.artifact-check-count')?.textContent?.trim() ?? null
               // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。

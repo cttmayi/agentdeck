@@ -19,46 +19,6 @@
   import { editor } from '../lib/crystallize-editor.svelte.ts'
   import { showToast } from '../lib/view.ts'
 
-  /**
-   * 把"编辑现场"推给父组件（`CrystallizeView` 的结论条要读 `artifacts.validation` / 改动量）。
-   *
-   * ⚠️ 为什么是**回调**而不是让父组件直接读 `editor.*`：父组件是 legacy 模式（`export let`），
-   *    实测 `$: artifacts = editor.artifacts` 这种跨模块信号**不会**让 legacy 的 `$:` 重跑——
-   *    真 Chrome 里量到的现象是：本条草稿进了审阅态（`step==='review'`），结论条却一直画
-   *    "○ …"、`treeRows` 是空数组、`slug` 输入框也不出现（20 条判据连锁红）。
-   *    子组件（runes）用 `$effect` 跟踪这些信号，再**回推**给父组件——这次是普通函数调用 +
-   *    legacy 的赋值，父组件一定会重渲染。
-   */
-  let {
-    onstate = () => {},
-  }: {
-    onstate?: (s: {
-      artifacts: typeof editor.artifacts
-      fileRows: ReturnType<typeof editor.fileRows.slice>
-      fileCount: number
-      totalBytes: number
-      diff: typeof editor.diff
-      diffAgainst: typeof editor.diffAgainst
-      diffLoading: boolean
-      dirty: boolean
-      savingDraft: boolean
-    }) => void
-  } = $props()
-
-  $effect(() => {
-    onstate({
-      artifacts: editor.artifacts,
-      fileRows: editor.fileRows,
-      fileCount: editor.fileCount,
-      totalBytes: editor.totalBytes,
-      diff: editor.diff,
-      diffAgainst: editor.diffAgainst,
-      diffLoading: editor.diffLoading,
-      dirty: editor.dirty,
-      savingDraft: editor.savingDraft,
-    })
-  })
-
   /** 变更徽标的文案（A/M/D → 中文；空串 = 未改动）。 */
   function changeLabel(change: '' | 'A' | 'M' | 'D'): string {
     if (change === 'A') return $t('crystallize.changeAdded')
@@ -522,15 +482,18 @@
   }
 
   /* ⚠️ 断点统一 96rem（1536px）：探针视口 1280 属于窄屏，那里应当"只剩激活那一格" */
-  @media (max-width: 96rem) {
-    .review-side {
-      grid-template-columns: minmax(0, 1fr);
-    }
+  /* ★ 分批第 155 批（编辑搬进右栏）：**不再并排**，永远只显示激活那一格。
+     右栏是 24–30rem 的一列（探针视口 1280 下 384px），两格并排各 ~180px 连一行 SKILL.md 都读不下。
+     于是"内容 / 差异"回到**同一个窗格里切换**（这正是 2026-10-21 那三条排版规矩的第 ③ 条：
+     编辑与差异同位置切换、切换不滚动）。原来的 `@media (max-width: 96rem)` 是按视口判的，
+     而现在这个容器比视口窄得多 ⇒ 条件永远不成立，必须无条件收成一列。 */
+  .review-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-    .review-side[data-review-tab='content'] .review-cell[data-cell='diff'],
-    .review-side[data-review-tab='diff'] .review-cell[data-cell='content'] {
-      display: none;
-    }
+  .review-side[data-review-tab='content'] .review-cell[data-cell='diff'],
+  .review-side[data-review-tab='diff'] .review-cell[data-cell='content'] {
+    display: none;
   }
 
 </style>

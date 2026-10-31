@@ -3356,23 +3356,33 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.artifactPaneOffGrid',
+    // ★ 分批第 155 批：语义**翻过来**了。右栏现在装的是编辑器（§12.53 选项 2），抽屉形态下
+    //   改字会把中间的结论与时间线整片盖住；断点因此从 96rem 降到 74rem ⇒ 1280 是**真三列**。
+    //   判据仍是同一条纪律（"产物栏不许把详情挤到横向溢出"），只是现在用"三列且详情 ≥ 30rem"
+    //   来表达：见 `crystal.artifactGridCols === 3`。
     label:
-      '★★★ 1280 视口（不够 96rem）时产物栏**不占网格列、离屏当抽屉**——并排的话详情只剩 304px，内容横向溢出（实测当场有 5 条沉淀布局项红）',
-    ok: (v, f) => v === true && f['crystal.artifactGridCols'] === 2,
-    show: (v, f) => `${String(v)}　网格 ${f['crystal.artifactGridCols']} 列`,
+      '★★★ 1280 视口下产物栏是**真第三列**（断点 74rem；右栏里是编辑器，抽屉会盖住中间的时间线）——' +
+      '三列并且详情栏仍有 ≥ 30rem 的宽度',
+    ok: (v, f) => v === false && f['crystal.artifactGridCols'] === 3,
+    show: (v, f) => `离屏 ${String(v)}　网格 ${f['crystal.artifactGridCols']} 列`,
   },
   {
     view: '沉淀',
     key: 'crystal.artifactTabVisible',
-    label: '★★ 窄屏有「产物」小旗入口（没有入口的话抽屉等于不存在）',
-    ok: (v) => v === true,
+    // ★ 分批第 155 批：1280 现在是三列 ⇒ 不该有抽屉小旗（它是"窄屏才出现"的入口）。
+    //   判据翻成"不出现"：如果它还在，说明断点没生效、右栏仍是浮层。
+    label: '★★ 1280 下**没有**「产物」小旗（真三列时它是多余的入口；还在说明断点没生效）',
+    ok: (v) => v === false,
     show: (v) => String(v),
   },
   {
     view: '沉淀',
     key: 'crystal.artifactDrawerOpens',
-    label: '★★★ 点小旗之后抽屉**真的打开**（`data-open` 变成 true；这条钉住"按钮在、点了不开"）',
-    ok: (v) => v === true,
+    // ★ 分批第 155 批：1280 下没有抽屉可开 ⇒ 这条从"点开要真的打开"翻成"不该有打开的抽屉"。
+    //   抽屉本身（< 74rem）的判据没有对象了：那一路只在很窄的窗口出现，探针只跑 1280/1680 两档，
+    //   与其留一条永远量不到的，不如明确记在这里（§12.55）。
+    label: '★★★ 1280 下抽屉**不该被打开**（`data-open` 恒 false；右栏是真列，不是浮层）',
+    ok: (v) => v === false,
     show: (v) => String(v),
   },
   {
@@ -3493,11 +3503,15 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.editorInArtifactMsg',
+    key: 'crystal.editorInArtifactPane',
+    // ★ 分批第 155 批（§12.12 / §12.53 选项 2）：编辑器**搬进右栏产物栏**。
+    //   判据从"在产物消息里"翻成"在右栏、且中间那条消息里没有了"——只量前者的话，
+    //   两处各留一个编辑器也会绿，而这一批要的正是"同一个编辑器只剩一处"。
     label:
-      '★★ 编辑器在**产物消息里**（`.crystal-msg[data-msg-role=artifact] textarea`）——U3c-2 第 4 步：B 类判据的新语义先立成事实，旧断言（依赖 tab 激活态）下一批再换',
-    ok: (v) => v === true || v === null,
-    show: (v) => String(v),
+      '★★★ 草稿编辑器在**右栏产物栏**里、中间那条产物消息里**没有**了（同一份文件不再有' +
+      '"预览一处、编辑一处"两个出处）',
+    ok: (v) => v !== null && typeof v === 'object' && v.inPane === true && v.inCenter === false,
+    show: (v) => (v === null || v === undefined ? 'null' : `右栏 ${String(v.inPane)}　中间 ${String(v.inCenter)}`),
   },
   {
     view: '沉淀',

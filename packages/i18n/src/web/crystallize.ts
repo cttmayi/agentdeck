@@ -285,8 +285,9 @@ export const crystallizeText = {
   'crystallize.mineBadge': { zh: '我提炼的', en: 'mine' },
 
   // ── 产物栏（分批第 92 批：U1 骨架的右栏，常驻、不随对话滚走） ──
+  // ★ 分批第 155 批：`crystallize.artifactFiles`（"文件"那一节的标题）删掉了——
+  //   右栏里的文件清单就是**编辑器的树**，它自己不需要一个"文件"标题（树紧挨着正文）。
   'crystallize.artifactTitle': { zh: '产物', en: 'Artifact' },
-  'crystallize.artifactFiles': { zh: '文件', en: 'Files' },
   'crystallize.artifactChecks': { zh: '机械体检', en: 'Checks' },
   // 接口只回“哪些项有问题”（`validation.problems`），没有“检查项总数”——
   // 所以这里不能说“N 过 M 缺”，只能说实话：通过了 / 有几项问题。

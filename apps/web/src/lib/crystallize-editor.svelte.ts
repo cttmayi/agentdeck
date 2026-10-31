@@ -87,6 +87,14 @@ export interface FileRow {
 class DraftEditor {
   /** 这份编辑现场属于哪条草稿 run（空 = 还没有）。 */
   runId = $state('')
+  /**
+   * ★ 分批第 155 批：**中间那栏实际挂上的草稿 run**。
+   *
+   * 为什么需要它：路由里可能是**来源 run**（`#/crystallize/<来源 runId>`，从聊天/任务页点进来），
+   * 而真正挂上来的是"该来源最近那条未入库的草稿"。右栏如果照路由 id 去取产物，只会拿到 404
+   * （实测：从来源进来那一屏右栏空着、编辑器不出现）。中间那栏把挂上的 id 写在这儿，右栏读它。
+   */
+  attachedRunId = $state('')
   artifacts = $state<Artifacts | null>(null)
   /** 当前选中的文件（相对 skill/ 目录）。 */
   selectedFile = $state('SKILL.md')

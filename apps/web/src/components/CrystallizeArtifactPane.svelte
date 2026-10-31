@@ -20,6 +20,9 @@
    */
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
+  // ★ 分批第 155 批：编辑器（树 + 内容/差异 + 保存改动）搬进这一栏
+  import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
+  import { editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
@@ -204,6 +207,12 @@
       artifacts = res
       const files = Object.keys(res.files ?? {})
       selected = files[0] ?? ''
+      // ★ 分批第 155 批：编辑器（树 + 正文）在这一栏里渲染，它的数据在
+      // `lib/crystallize-editor.svelte.ts`。**这一栏自己负责把它打开**：
+      //   中间那栏只在"审阅态"才 `loadDraftOutput()`，而右栏在任何有产出的屏都要显示树——
+      //   实测漏了这句时，起草中那一屏右栏画着"还没有产物"、编辑器空着（三条判据红）。
+      //   `editor.open()` 自己挡重复（同一条 run 只重读、不清编辑现场）。
+      if (res !== null && editor.runId !== id) void editor.open(id)
       // 素材与产物是两个接口（语义不同：一个"吃了什么"、一个"产出了什么"），
       // 但都是**这一条沉淀的事实**，所以一起取、一起显示。
       // ⚠️ 它必须在这里（成功分支）——第一版误加进了 catch 里，于是只有**产物取失败**时
@@ -230,7 +239,10 @@
     // 读 `rev` 是**故意的**：材料在中间那栏被追加 / 在这一栏被删掉时，两边都要重读
     //（§12.14：两处必须由同一份数据现算）。
     void rev
-    const id = draftRunId
+    // ★ 分批第 155 批：用**中间那栏实际挂上的草稿**（路由可能是来源 run，见 store 里
+    //   `attachedRunId` 的注释）；中间那栏还没挂上时退回路由 id。
+    void editor.attachedRunId
+    const id = editor.attachedRunId !== '' ? editor.attachedRunId : draftRunId
     if (id !== seenId) {
       // 换了一条沉淀：产物与材料一起重拉
       seenId = id
@@ -441,24 +453,12 @@
         </div>
       </section>
 
-      <!-- 文件：点一个在下面预览。用 button 而不是 a：它只切换预览，不导航。 -->
-      <section class="artifact-files">
-        <h3 class="artifact-sub">{$t('crystallize.artifactFiles')}</h3>
-        <ul>
-          {#each files as file (file)}
-            <li>
-              <button
-                type="button"
-                class="artifact-file"
-                class:active={file === current}
-                onclick={() => (selected = file)}
-              >
-                <span class="artifact-file-name">{file}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      </section>
+      <!-- ★ 分批第 155 批（§12.12 / §12.53 选项 2）：**编辑器搬进右栏**……
+           等等，这里是"文件 + 只读预览"两块，它们的作用被编辑器整个替代了：
+             · 文件列表 → 编辑器的文件树（`.file-row`，带变更徽标与 +n −m）；
+             · 只读预览 → 编辑器的正文框（还能直接改，改完「保存改动」落盘）。
+           于是这里换成编辑器本身。同一份文件不再有"预览一处、编辑一处"两个出处。 -->
+      <CrystallizeDraftEditor />
 
       <section class="artifact-checks">
         <h3 class="artifact-sub">
@@ -480,10 +480,6 @@
         {/if}
       </section>
 
-      <section class="artifact-preview">
-        <h3 class="artifact-sub">{current}</h3>
-        <pre class="artifact-pre">{artifacts?.files[current] ?? ''}</pre>
-      </section>
     {/if}
   </div>
 </aside>
@@ -612,31 +608,6 @@
     padding: 0;
   }
 
-  .artifact-file {
-    width: 100%;
-    text-align: left;
-    border: 1px solid transparent;
-    background: transparent;
-    border-radius: var(--radius);
-    padding: 0.1875rem var(--sp-2);
-    font-size: var(--fs-sm);
-    color: var(--text-dim);
-  }
-
-  .artifact-file:hover {
-    background: var(--surface-hover);
-  }
-
-  .artifact-file.active {
-    background: var(--surface-2);
-    color: var(--text);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-
-  .artifact-file-name {
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-  }
 
   .artifact-check-count {
     color: var(--bad);
@@ -664,34 +635,21 @@
     margin-right: var(--sp-1);
   }
 
-  .artifact-pre {
-    margin: 0;
-    padding: var(--sp-2);
-    background: var(--panel);
-    border-radius: var(--radius);
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 22rem;
-    overflow: auto;
-    color: var(--text-dim);
-  }
 
   .artifact-empty {
     margin: 0;
   }
 
-  /* ══════════════ 不够宽（< 96rem）：第三列改成右侧抽屉，不占网格 ══════════════
-     ⚠️ 断点必须与 `app.css` 里 `@media (min-width: 96rem)` 对齐：一个管"占不占列"，
+  /* ══════════════ 不够宽（< 74rem）：第三列改成右侧抽屉，不占网格 ══════════════
+     ⚠️ 断点必须与 `app.css` 里 `@media (min-width: 74rem)` 对齐：一个管"占不占列"，
      另一个管"长什么样"，两处不一致就会出现"网格里留了列、里面却是抽屉"的错位。 */
-  @media (max-width: 95.99rem) {
+  @media (max-width: 73.99rem) {
     .artifact-pane {
       position: fixed;
       top: 0;
       right: 0;
       bottom: 0;
-      width: min(22rem, 86vw);
+      width: min(34rem, 92vw);
       transform: translateX(100%);
       transition: transform 0.18s ease;
       z-index: 40;
