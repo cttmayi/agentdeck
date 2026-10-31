@@ -103,127 +103,199 @@
   const detailLabel = $derived(kind === 'update' ? (skills.find((s) => s.id === skillId)?.name ?? '') : (agents.find((a) => a.id === agentId)?.name ?? ''))
 </script>
 
-<section class="intake">
-  <h3 class="intake-title">沉淀目标</h3>
+<div class="intake">
   {#if targets === null && !blank}
     <div class="skeleton" style="height:1.1rem"></div>
-  {:else if stage === 'start'}
-    <p class="intake-q">这次要沉淀成什么？</p>
-    <div class="intake-choices">
-      <button type="button" class="intake-choice" onclick={() => pickStart('new')}>
-        新建一份技能<span class="faint small">从这次的过程里提炼出做法</span>
-      </button>
-      {#if skills.length > 0}
-        <button type="button" class="intake-choice" onclick={() => pickStart('update')}>
-          优化已有技能
-          <span class="faint small"
-            >这次加载过 {skills.length} 份 · {$t('crystallize.targetUpdateHint')}</span
-          >
-        </button>
-      {/if}
-      {#if agents.length > 0}
-        <button type="button" class="intake-choice" onclick={() => pickStart('agent')}>
-          优化智能体指令<span class="faint small">只改指令，不新建智能体</span>
-        </button>
-      {/if}
-    </div>
-  {:else if stage === 'detail'}
-    <p class="intake-q">是哪一份？</p>
-    <div class="intake-choices">
-      {#if kind === 'update'}
-        {#each skills as option (option.id)}
-          <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
-            {option.name}
-            <span class="faint small">
-              {option.description ?? ''}
-              · {option.source === 'mine'
-                ? $t('crystallize.badgeMine')
-                : $t('crystallize.badgeInstalled')}
-              （{option.source === 'mine'
-                ? $t('crystallize.updateIsEvolve')
-                : $t('crystallize.updateIsShadow')}）
-            </span>
-          </button>
-        {/each}
-      {:else}
-        {#each agents as option (option.id)}
-          <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
-            {option.name}
-            <span class="faint small">
-              {option.role === 'executor'
-                ? $t('crystallize.agentCandidateExecutor')
-                : $t('crystallize.agentCandidateReviewer')}
-              · {$t('crystallize.agentCharsHint', { chars: String(option.instructionsChars) })}
-              {#if option.builtin}· {$t('crystallize.agentBuiltinHint')}{/if}
-            </span>
-          </button>
-        {/each}
-      {/if}
-    </div>
-  {:else if stage === 'purpose'}
-    <p class="intake-q">
-      {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
-    </p>
-    {#if kind === 'new'}
-      <textarea
-        class="intake-input"
-        rows="3"
-        bind:value={purpose}
-        placeholder={$t('crystallize.purposePlaceholder')}
-      ></textarea>
-    {:else}
-      <textarea
-        class="intake-input"
-        rows="3"
-        bind:value={feedback}
-        placeholder={$t('crystallize.userFeedbackPlaceholder')}
-      ></textarea>
-    {/if}
-    {#if purposeMissing}
-      <p class="faint small">{$t('crystallize.purposeHint')}——这一条必答：没有靶子，起草者只能凭素材猜。</p>
-    {/if}
-    <div class="intake-actions">
-      <button type="button" class="primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
-    </div>
-  {:else if stage === 'blankMaterial'}
-    <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
-    <textarea
-      class="intake-input"
-      rows="4"
-      bind:value={materialText}
-      placeholder="比如：团队的规范、上次复盘的结论、要遵守的约定……没有就跳过，直接按作用描述写一版。"
-    ></textarea>
-    <p class="faint small">
-      这次没有来源 run：材料只有你给的这一段（可以不给）。追加更多材料可以在起草完之后用栏脚输入条。
-    </p>
-    <div class="intake-actions">
-      <button type="button" class="primary" onclick={() => (stage = 'ready')}>下一步</button>
-      <button type="button" class="ghost" onclick={() => { materialText = ''; stage = 'ready' }}>跳过</button>
-    </div>
   {:else}
-    <dl class="intake-summary">
-      <dt>沉淀成</dt><dd>{startLabel}</dd>
-      {#if blank}<dt>起点</dt><dd>空白起（没有来源 run）</dd>{/if}
-      {#if detailLabel !== ''}<dt>目标</dt><dd>{detailLabel}</dd>{/if}
-      {#if purpose.trim() !== ''}<dt>作用</dt><dd>{purpose.trim()}</dd>{/if}
-      {#if feedback.trim() !== ''}<dt>希望改</dt><dd>{feedback.trim()}</dd>{/if}
-      {#if blank}
-        <dt>材料</dt>
-        <dd>{materialText.trim() === '' ? '你这次没给材料（先按作用描述写一版）' : `你给的 1 份（${materialText.trim().length} 字符）`}</dd>
-      {:else if stats !== null}
-        <dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>
+    <!-- ★ 空白起（blank）没有"起点问"这一步（起点已在 `#/crystallize/new` 那一屏选过）⇒ 不回放它 -->
+    {#if stage !== 'start' && !blank}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">这次要沉淀成什么？</p>
+      </div>
+      <div class="qa-msg user" data-msg-role="user">
+        <p class="qa-text">{startLabel}</p>
+      </div>
+    {/if}
+
+    {#if stage === 'start'}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">这次要沉淀成什么？</p>
+        <div class="intake-choices">
+          <button type="button" class="intake-choice" onclick={() => pickStart('new')}>
+            新建一份技能<span class="faint small">从这次的过程里提炼出做法</span>
+          </button>
+          {#if skills.length > 0}
+            <button type="button" class="intake-choice" onclick={() => pickStart('update')}>
+              优化已有技能
+              <span class="faint small"
+                >这次加载过 {skills.length} 份 · {$t('crystallize.targetUpdateHint')}</span
+              >
+            </button>
+          {/if}
+          {#if agents.length > 0}
+            <button type="button" class="intake-choice" onclick={() => pickStart('agent')}>
+              优化智能体指令<span class="faint small">只改指令，不新建智能体</span>
+            </button>
+          {/if}
+        </div>
+      </div>
+    {:else if stage === 'detail'}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">是哪一份？</p>
+        <div class="intake-choices">
+          {#if kind === 'update'}
+            {#each skills as option (option.id)}
+              <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
+                {option.name}
+                <span class="faint small">
+                  {option.description ?? ''}
+                  · {option.source === 'mine'
+                    ? $t('crystallize.badgeMine')
+                    : $t('crystallize.badgeInstalled')}
+                  （{option.source === 'mine'
+                    ? $t('crystallize.updateIsEvolve')
+                    : $t('crystallize.updateIsShadow')}）
+                </span>
+              </button>
+            {/each}
+          {:else}
+            {#each agents as option (option.id)}
+              <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
+                {option.name}
+                <span class="faint small">
+                  {option.role === 'executor'
+                    ? $t('crystallize.agentCandidateExecutor')
+                    : $t('crystallize.agentCandidateReviewer')}
+                  · {$t('crystallize.agentCharsHint', { chars: String(option.instructionsChars) })}
+                  {#if option.builtin}· {$t('crystallize.agentBuiltinHint')}{/if}
+                </span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+      </div>
+    {:else if stage === 'purpose'}
+      {#if detailLabel !== ''}
+        <div class="qa-msg" data-msg-role="assistant">
+          <p class="intake-q">是哪一份？</p>
+        </div>
+        <div class="qa-msg user" data-msg-role="user">
+          <p class="qa-text">{detailLabel}</p>
+        </div>
       {/if}
-    </dl>
-    <div class="intake-actions">
-      <button type="button" class="primary" onclick={finish}>开始提炼</button>
-      <button type="button" class="ghost" onclick={() => (stage = 'start')}>重答</button>
-    </div>
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">
+          {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
+        </p>
+        {#if kind === 'new'}
+          <textarea
+            class="intake-input"
+            rows="3"
+            bind:value={purpose}
+            placeholder={$t('crystallize.purposePlaceholder')}
+          ></textarea>
+        {:else}
+          <textarea
+            class="intake-input"
+            rows="3"
+            bind:value={feedback}
+            placeholder={$t('crystallize.userFeedbackPlaceholder')}
+          ></textarea>
+        {/if}
+        {#if purposeMissing}
+          <p class="faint small">{$t('crystallize.purposeHint')}——这一条必答：没有靶子，起草者只能凭素材猜。</p>
+        {/if}
+        <div class="intake-actions">
+          <button type="button" class="primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
+        </div>
+      </div>
+    {:else if stage === 'blankMaterial'}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">
+          {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
+        </p>
+      </div>
+      <div class="qa-msg user" data-msg-role="user">
+        <p class="qa-text">{kind === 'new' ? purpose : feedback}</p>
+      </div>
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
+        <textarea
+          class="intake-input"
+          rows="4"
+          bind:value={materialText}
+          placeholder="比如：团队的规范、上次复盘的结论、要遵守的约定……没有就跳过，直接按作用描述写一版。"
+        ></textarea>
+        <p class="faint small">
+          这次没有来源 run：材料只有你给的这一段（可以不给）。追加更多材料可以在起草完之后用栏脚输入条。
+        </p>
+        <div class="intake-actions">
+          <button type="button" class="primary" onclick={() => (stage = 'ready')}>下一步</button>
+          <button type="button" class="ghost" onclick={() => { materialText = ''; stage = 'ready' }}>跳过</button>
+        </div>
+      </div>
+    {:else}
+      <!-- ready：前面几问都已答 ⇒ 按"问 / 答"两条消息回放，最后一条是**开始提炼** -->
+      {#if detailLabel !== ''}
+        <div class="qa-msg" data-msg-role="assistant">
+          <p class="intake-q">是哪一份？</p>
+        </div>
+        <div class="qa-msg user" data-msg-role="user">
+          <p class="qa-text">{detailLabel}</p>
+        </div>
+      {/if}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">
+          {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
+        </p>
+      </div>
+      <div class="qa-msg user" data-msg-role="user">
+        <p class="qa-text">{kind === 'new' ? purpose : feedback}</p>
+      </div>
+      {#if blank}
+        <div class="qa-msg" data-msg-role="assistant">
+          <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
+        </div>
+        <div class="qa-msg user" data-msg-role="user">
+          <p class="qa-text">{materialText.trim() === '' ? '（跳过）' : materialText}</p>
+        </div>
+      {/if}
+      <div class="qa-msg" data-msg-role="assistant">
+        <p class="intake-q">开始提炼？</p>
+        <dl class="intake-summary">
+          <dt>沉淀成</dt><dd>{startLabel}</dd>
+          {#if blank}<dt>起点</dt><dd>空白起（没有来源 run）</dd>{/if}
+          {#if stats !== null}<dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>{/if}
+        </dl>
+        <div class="intake-actions">
+          <button type="button" class="primary" onclick={finish}>开始提炼</button>
+          <button type="button" class="ghost" onclick={() => (stage = 'start')}>重答</button>
+        </div>
+      </div>
+    {/if}
   {/if}
-</section>
+</div>
 
 <style>
+  /**
+   * ★ 分批第 142 批（U4c，§12.12/§12.13）：目标态的问答**改成消息**——问题是一条助手消息、
+   * 回答是一条用户消息（不再是一个"目标面板 + 分步向导"的壳）。选项/输入框仍然可点可写，
+   * 但它们现在长在每条问题消息里，读起来就是一段对话。
+   */
   .intake { display: flex; flex-direction: column; gap: var(--sp-2); }
-  .intake-title { font-size: var(--fs-md); }
+  .qa-msg {
+    background: var(--surface-2, #f4f4f5);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .qa-msg.user {
+    background: var(--surface);
+    border-style: dashed;
+    margin-left: var(--sp-6, 2rem);
+  }
+  .qa-msg .intake-q { margin-bottom: var(--sp-2); }
+  .qa-text { margin: 0; white-space: pre-wrap; }
   .intake-q { font-size: var(--fs-base); color: var(--text); margin: 0; }
   .intake-choices { display: flex; flex-direction: column; gap: var(--sp-1); }
   .intake-choice {

@@ -5539,7 +5539,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               if (facts['crystal.targetAttached']) {
                 facts['crystal.stepMarkerValue'] =
                   d().querySelector('.crystal-flow')?.getAttribute('data-crystallize-step') ?? null
-                facts['crystal.targetStepText'] = text(d().querySelector('.intake-title'))
+                // ★ 分批第 142 批（U4c）：目标态不再有"面板标题"（`.intake-title`）——问答已经是
+                //   消息。原来那条「目标态停在**第 1 步**」的判据随步骤条/面板一起删（见 run.mjs）。
                 facts['crystal.targetFirstQuestion'] = text(d().querySelector('.intake-q'))
                 facts['crystal.targetTabCount'] = d().querySelectorAll('.review-tabs').length
                 facts['crystal.targetOldFormCount'] = d().querySelectorAll('.radio-row').length

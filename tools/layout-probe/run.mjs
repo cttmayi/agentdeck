@@ -3686,13 +3686,9 @@ const CHECKS = [
       '夹具：目标态那一屏挂得上（源任务没有草稿 ⇒ 进来就是表单，不用点「继续」）——不成立的话下面一整组都空过',
     ok: (v) => v === true,
   },
-  {
-    view: '沉淀',
-    key: 'crystal.targetStepText',
-    label: '★★ 目标态停在**第 1 步**（"沉淀目标"是当前步）',
-    ok: (v) => typeof v === 'string' && v.includes('沉淀目标'),
-    show: (v) => JSON.stringify(v),
-  },
+  // ★ 分批第 142 批（U4c）：`crystal.targetStepText`（量".intake-title"里是不是"沉淀目标"）
+  //   随「步骤条 + 目标面板」一起删除——目标态现在是**消息里的问答**，没有"第 1 步"这个说法；
+  //   "第一问是什么"仍由 `crystal.targetFirstQuestion` 钉着。
   {
     view: '沉淀',
     key: 'crystal.targetFirstQuestion',
