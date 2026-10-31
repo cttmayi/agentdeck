@@ -380,10 +380,18 @@
 
   <section class="card agent-card">
     {#if agent.builtin}
-      <!-- 内置徽标：让人一眼看出"这条不是他建的、删不掉、只能恢复默认"。
+      <!-- 内置徽标：让人一眼看出"这条不是他建的"。
            不给徽标的话，使用者会去点删除，然后被 400 拒绝——那是一条
-           莫名其妙的失败（他并不知道有"内置"这回事）。 -->
-      <p class="builtin-badge">{$t('agents.builtinBadge')}</p>
+           莫名其妙的失败（他并不知道有"内置"这回事）。
+           ★ 分批第 192 批：已下线的内置审核者要**额外说一句**——徽标原来只说"平台内置、
+           删不掉、只能恢复默认"，而它三条都不成立（没有默认值、现在也删得掉）。 -->
+      <p class="builtin-badge">
+        {#if agent.role === 'skill-reviewer'}
+          {$t('agents.retiredReviewerBadge')}
+        {:else}
+          {$t('agents.builtinBadge')}
+        {/if}
+      </p>
     {/if}
     <!-- ★ 角色是智能体比「新建私有」多出的一维（私有表单由槽位决定角色），
          占一整行。 -->
@@ -515,8 +523,18 @@
     <button type="submit" class="primary" disabled={busy}>
       {busy ? $t('common.saving') : $t('common.save')}
     </button>
-    {#if agent.builtin}
-      <!-- 内置的**没有删除按钮**（它删不掉，服务端也拒绝）。留一个"点了会被拒"的
+    {#if agent.builtin && agent.role === 'skill-reviewer'}
+      <!--
+        ★ 分批第 192 批：**已下线的内置审核者**是个例外——它随沉淀线的评审一起下线
+        （第 137 批），没有任何链路用得到它。所以这里给它真正用得上的那个动作：
+        **删掉**。原来对内置一律只给「恢复成默认值」，而它**没有默认值可恢复**
+        （点了是 409 `builtin_retired`），于是这一行改不了、恢复不了、也删不掉。
+      -->
+      <button type="button" class="ghost danger" onclick={() => void remove()}>
+        {$t('agents.deleteButton')}
+      </button>
+    {:else if agent.builtin}
+      <!-- 起草者**没有删除按钮**（它删不掉，服务端也拒绝）。留一个"点了会被拒"的
            按钮比没有按钮更坏：那是把平台的一条规则变成一次莫名其妙的失败。 -->
       <button type="button" class="ghost" onclick={() => void restoreDefault()} disabled={busy}>
         {$t('agents.restoreDefault')}

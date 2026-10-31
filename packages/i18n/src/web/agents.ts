@@ -386,6 +386,17 @@ export const agentsText = {
     zh: '平台内置：删不掉，只能「恢复成默认值」',
     en: 'Built in: cannot be deleted, only restored to default',
   },
+  /**
+   * ★ 分批第 192 批：已下线的内置审核者（`role: 'skill-reviewer'`）。
+   *
+   * 它随沉淀线的评审一起下线（第 137 批），平台上没有任何链路调用它。徽标必须**说实话**
+   * ——原来套用上面那句"删不掉、只能恢复默认"，而它既没有默认值可恢复（409）、现在也
+   * 删得掉，一句都不成立。
+   */
+  'agents.retiredReviewerBadge': {
+    zh: '已下线的内置审核者：沉淀线不再评审，没有任何链路用它——可以直接删掉',
+    en: 'Retired built-in auditor: crystallization no longer reviews, nothing uses it — safe to delete',
+  },
   'agents.builtinNoSkills': {
     zh: '内置智能体不挂 skill（它们做什么由平台随版本给，与挂载无关）',
     en: 'Built-in agents mount no skills (what they do ships with the platform)',

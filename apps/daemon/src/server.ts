@@ -5127,7 +5127,16 @@ async function injectedSkillsOf(
         //   有起草者，所以不留"删了之后怎么办"这种静默分支——想恢复原样有
         //   「恢复成默认值」那个按钮。这里要**明确拒绝**，而不是删了再偷偷重建：
         //   偷偷重建的表现是"删了它过一会儿又回来了"，比直接拒绝更难懂。
-        if (current.builtin === true) {
+        //
+        // ⚠️ ★ 分批第 192 批：**已下线的内置审核者例外——可以删**。
+        //
+        //   它（`role: 'skill-reviewer'`）随沉淀线的评审一起下线（第 137 批）：没有任何
+        //   链路调用它、它的默认身份也删了。但闸门原来只看 `builtin`，于是它成了**走不掉的
+        //   一行**：改不了（只读）、恢复不了（409 `builtin_retired`）、删不了（这句 400）
+        //   ——而 409 那句文案还写着"可以在「智能体」页把它删掉"，等于平台在骗人。
+        //   现在按 `builtinKindOf` 分开：起草者仍然铁律不可删，retired 的放行。
+        //   ⚠️ 不自动删：那是使用者的数据，删不删由他点。
+        if (current.builtin === true && builtinKindOf(current) !== 'skill-reviewer') {
           sendJson(res, 400, {
             error: `「${current.name}」是${describeBuiltinAgent(current)}，不能删——要恢复原样请用「恢复成默认值」。`,
             code: 'builtin_agent_not_deletable',

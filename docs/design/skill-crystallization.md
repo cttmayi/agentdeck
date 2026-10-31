@@ -5149,6 +5149,12 @@ run 硬凑素材，那等于给起草者塞一堆无关证据。这两批把这�
   `lib/audit-bar.ts`、`lib/crystallize-feedback.ts` 与单测整文件删除；
 · **老工作区里的那条 `skill-reviewer` 智能体不自动删**（使用者的数据）：`builtinKindOf` 仍认得出它，
   但「恢复成默认值」对它改判 `409 builtin_retired`（它的默认身份已不存在，写空串比不恢复更坏）；
+  ◆ **分批第 192 批补**：那句 409 当时写着"可以在「智能体」页把它删掉"，而 DELETE 闸门只看 `builtin`
+  ⇒ 实际删不掉（界面也不给按钮）。于是它成了**走不掉的一行**（改不了 / 恢复不了 / 删不了）。
+  现在按 `builtinKindOf` 分开：retired 的放行删除，起草者仍然铁律不可删；界面对 retired 那条
+  把「恢复成默认值」换成「删掉它」，徽标改成说实话的一句（`agents.retiredReviewerBadge`）。
+  判据 `builtin-role-identity.test.ts`：DELETE retired ⇒ 200、DELETE 起草者 ⇒ 400
+  `builtin_agent_not_deletable`、删完起草者还在；
 · 用例：6 组审核 e2e 删除；§10.6 改成「人改落盘 + 体检跟着重算」；单测删审核者自愈/历史升级组，
   role-identity 改成钉"已下线的审核者没有默认值可恢复 / 恢复默认 ⇒ 409"；探针删"审核未通过 /
   审核真的跑起来 / 审核卡死"三屏与夹具，新增 3 条体检判据；死词条 30 条由 `i18n.test.ts` 逐条点名。

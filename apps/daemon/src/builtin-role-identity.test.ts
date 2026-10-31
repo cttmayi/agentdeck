@@ -266,6 +266,35 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
     })
   })
 
+  test('★★★ 已下线的内置审核者**可以删**；起草者仍然铁律不可删', async () => {
+    // ★ 分批第 192 批（使用者：「审核者（内置）是否已经没有用了」）。
+    //   实测它当时是**走不掉的一行**：内置 ⇒ 只读（改不了）、`skill-reviewer` ⇒ 没有默认值
+    //   （恢复 409）、内置 ⇒ 删不了（400），而 409 那句文案还写着"可以在智能体页删掉"。
+    //   这一条钉住新的口径：按 `builtinKindOf` 分开——retired 放行，起草者照旧。
+    const seeded = await seedLegacyReviewer()
+    await withDaemon(seeded.dir, async (url) => {
+      const drafter = (await agentsOf(url)).find((a) => a.role === 'drafter')!
+      const refused = await fetch(`${url}/api/agents/${drafter.id}`, { method: 'DELETE' })
+      const refusedText = await refused.text()
+      assert.equal(refused.status, 400, refusedText)
+      assert.equal(
+        (JSON.parse(refusedText) as { code?: string }).code,
+        'builtin_agent_not_deletable',
+        '起草者必须仍然不可删（沉淀这条路永远要有它）',
+      )
+
+      const ok = await fetch(`${url}/api/agents/${seeded.id}`, { method: 'DELETE' })
+      const okText = await ok.text()
+      assert.equal(ok.status, 200, okText)
+      assert.ok(
+        !(await agentsOf(url)).some((a) => a.id === seeded.id),
+        '删掉之后列表里不该再有它',
+      )
+      // 起草者还在（删一条不能顺手影响另一条内置）
+      assert.ok((await agentsOf(url)).some((a) => a.role === 'drafter'))
+    })
+  })
+
   test('★★ 拒绝文案按**这条自己**的角色说（起草者 / 已下线的审核者各说各的）', async () => {
     const seeded = await seedLegacyReviewer()
     await withDaemon(seeded.dir, async (url) => {
