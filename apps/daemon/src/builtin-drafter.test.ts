@@ -82,9 +82,12 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(result.action, 'healed', '旧默认必须被认出来并升级')
     const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')[0]!
     assert.equal(after.instructions, DRAFTER_INSTRUCTIONS, '升级后必须等于当前默认')
+    // ★ 分批第 190 批（使用者："身份把规则都去掉，让它遵照 skill 来进行即可"）：
+    //   当前默认已经**没有守则清单**了，所以这条改成钉"它认得出技能"——
+    //   那才是它现在唯一需要的语义。
     assert.ok(
-      after.instructions.includes('默认约定'),
-      '当前默认里那条「使用者的要求是默认约定」必须真的在里面（它就是这次升级的目的）',
+      after.instructions.includes('照着你被注入的那份技能'),
+      '当前默认必须点出"按注入的技能干"（规则已经交给技能）',
     )
   })
 

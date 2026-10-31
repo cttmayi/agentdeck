@@ -4636,6 +4636,10 @@ function startDaemon() {
       skillsRoot,
       '--skills-mine-root',
       skillsMineRoot,
+      // ★ 分批第 190 批（内置 agent 只读）：这个 daemon 是**一次性的测试脚手架**，
+      //   夹具要把内置起草者指向假 CLI（否则"起草中"那一屏根本跑不起来）⇒ 显式打开
+      //   那个只给测试用的口子。真实 daemon 永远不带这个旗标。
+      '--allow-builtin-edits',
     ],
     {
       cwd: ROOT,

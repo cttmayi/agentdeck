@@ -90,140 +90,29 @@ describe('★ 分批第 47 批：通用工作守则', () => {
     assert.equal(withConduct('  ', '  '), '')
   })
 
-  test('★★★ 起草者的身份**不再单薄**：岗位专属 ≥ 7 条，且搬进来的都是"岗位长期做法"', () => {
-    /**
-     * 使用者的两次反馈：「发现有很多原则放在了框架和任务中。但我想尽量往身份去放」
-     * → ��47 批搬了通用守则；然后「我看起草者的身份内容还是很少呢」→ 第 48 批把
-     * 任务书里那几条**岗位长期做法**也搬了进来。
-     *
-     * 这条判据钉的就是"别再缩回去"：身份里必须能数出这七件事，而且每一件的措辞都得在
-     * （它们各自对应一个真实的失败面：读法不对=贵且抓不住重点、凭印象写命令=照敲跑不起来、
-     * 不写两节=入库被拒、不自检=带着坏引用交上去、硬凑=垃圾技能冻结错误行为）。
-     */
-    /** ★ 分批第 178 批（“起草者的身份修改简单”）：8 条压到 6 条，且不再规定章节名。 */
-    const must = [
-      '只写可复用的东西',
-      '先看素材索引，再按需读',
-      '做法要能照着跑',
-      '使用者的要求是默认约定',
-      '写法以任务书 / 你被注入的那份技能为准',
-      '不值得就说出来',
-    ]
-    const missing = must.filter((k) => !DRAFTER_INSTRUCTIONS.includes(k))
-    assert.deepEqual(missing, [], `起草者身份里缺这些岗位规矩：${missing.join('、')}`)
+  /**
+   * ★ 分批第 190 批（使用者："起草者的身份把规则都去掉，让它遵照 skill 来进行即可"）：
+   * 原来这一组钉的是"身份里必须有 6~8 条岗位规矩、必须带限定语、不许粘写作规范"——
+   * 全部**随这次简化作废**。现在钉三条新的、也是唯一还需要保证的语义：
+   */
+  test('★★★ 起草者的身份是**极简的**：只说"照着注入的技能写"，不再带守则清单', () => {
     assert.ok(
-      DRAFTER_INSTRUCTIONS.length >= 420,
-      `身份不能又缩回单薄形态（现在 ${String(DRAFTER_INSTRUCTIONS.length)} 字符）——` +
-        '上一批缩到 419 时使用者立刻发现了',
-    )
-    // 数字型闸门（6000）**不进身份**：它属于任务书里的契约，两处写会漂
-    assert.ok(!DRAFTER_INSTRUCTIONS.includes('6000'), '6000 上限留在任务书里，身份里不许重复')
-  })
-
-  test('★★★ 写作规范全文**不许**粘进身份（它只对"写 skill"这一件事成立）', async () => {
-    /**
-     * 使用者的疑问：「『写作规范全文 1731 字』什么不放『身份』里面呢」。
-     *
-     * 答案在代码里，而且很硬：**同一条起草者还要干另一件事**——沉淀成 Agent
-     * （`buildAgentInstructionsPrompt`，判据是"指令五项 + 6000 上限"）。
-     * 写作规范只对"写 skill"成立；放进身份的话，每一条"改智能体指令"的 run 都会
-     * 带上 1731 字完全无关的 skill 写法规范，还会跟指令五项抢注意力。
-     *
-     * 另外两条：① 规范是**随代码走的内置 skill**（`writing-skills`），③ 每次拿最新的；
-     * 而身份是**每条 agent 的私人副本**（可编辑、"存着 === 已知历史"才升级）⇒
-     * 粘进去就是第二份，规范一改它就跟不上（"内置指令停在旧版"那族缺陷）；
-     * ② 身份使用者可以删改（第 ⑥ 条），规范是平台权威，不该被手滑改掉。
-     *
-     * 所以这条判据盯的是：**别把规范正文搬进身份**（片段比对，不用整篇相等）。
-     */
-    const spec = await loadBuiltinSkill(WRITING_SKILLS)
-    assert.ok(spec !== null, '内置写作规范必须加载得到（它随代码走）')
-    if (spec === null) return
-    /**
-     * ⚠️ 第一版按固定字符位置切片（0/600/1200）→ **红检时没抓到**：粘进去的那句
-     * 恰好落在切片的缝里（切片头是 frontmatter 与空行）。按**行**取探针才不会漏：
-     * 规范里的每一行只要够长，就当作一个"这段文字属于规范"的指纹。
-     */
-    const probes = spec.body
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length >= 40)
-      .map((line) => line.slice(0, 40))
-    assert.ok(probes.length >= 5, `写作规范里长行太少（${String(probes.length)}），探针不够用`)
-    const hit = probes.find((needle) => DRAFTER_INSTRUCTIONS.includes(needle))
-    assert.equal(
-      hit,
-      undefined,
-      `起草者身份里出现了写作规范的原文片段（"${hit ?? ''}"）——` +
-        '规范必须在任务书那一处（`buildDraftPrompt` 的【写作规范】），身份里只留"以它为准"',
-    )
-    // 但"以它为准"这句话要在（身份不是完全不提规范）
-    assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('写法以任务书 / 你被注入的那份技能为准'),
-      '身份里要有一句“写法以任务书 / 你被注入的那份技能为准”',
-    )
-  })
-
-  test('★★★ 第一句必须**对象无关**：两个对象都点出来，且不再写死「skill 起草者」', () => {
-    /**
-     * 使用者原话：「如果是同一个 那身份第一句话『你是 skill 起草者：把一段真实的经验，写成一条
-     * 以后能被复用的 skill。』，就不合理」。
-     *
-     * 判据三条：① 不再是"你是 skill 起草者"；② 明确点出两个可能的产出；
-     * ③ 权限归属清楚——"产出什么"由**任务书**定（与第 35 批审核者是同一招）。
-     */
-    assert.ok(
-      !DRAFTER_INSTRUCTIONS.startsWith('你是 skill 起草者'),
-      '第一句不许再写死 skill——同一条身份也服务"改智能体指令"',
-    )
-    assert.ok(DRAFTER_INSTRUCTIONS.includes('一条 skill'), '要点出"可能是一条 skill"')
-    assert.ok(DRAFTER_INSTRUCTIONS.includes('智能体的指令'), '也要点出"也可能是一条智能体的指令"')
-    assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('任务书 / 你被注入的那份技能为准'),
-      '要说明写法以任务书 / 所注入的技能为准（否则身份与任务书会互相打脸）',
-    )
-  })
-
-  test('★★★ 同一个起草者服务「写 skill」与「改智能体指令」两个任务 ⇒ 专属条款必须带限定语', () => {
-    /**
-     * 事实（使用者问「起草者 是 起草skill 和起草agent 通用的吗？」）：**同一个 agent、
-     * 同一份身份**。两次的差别只在任务书（`buildDraftPrompt` vs `buildAgentInstructionsPrompt`）
-     * 与产出目录（`skill/` vs `agent/`）——`server.ts` 起起草 run 时只用一份
-     * `drafter.instructions`。
-     *
-     * 于是身份里那些**只对 skill 成立**的条款（`## When to Use` 两节、frontmatter、
-     * `## 约定` 一节）在"改智能体指令"时是错的：那边的产出是 `instructions.md`
-     * （纯文本、有字符上限），没有 frontmatter 也没有那两节。
-     * 加了限定语，模型才不会拿 skill 的结构去套指令。
-     */
-    // ★ 分批第 177 批：原来钉的是"入库闸门那条要限定『写 skill 时』"——现在那条已改成
-    //   "交付要让人能直接看懂并照着用"（平台不再规定章节名），限定语仍然必须在。
-    // ★ 分批第 178 批：简化之后不再有单独一条“交付”；两种落法写在同一句里
-    assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('写 skill 时落进正文，改指令时落成硬约束'),
-      '★ 两个任务的落法要在同一句里说清（改指令没有目录结构）',
+      DRAFTER_INSTRUCTIONS.includes('照着你被注入的那份技能'),
+      '身份必须说清"按技能干"——那是它现在唯一的写法来源（平台不再规定章节与守则）',
     )
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('改指令时落成硬约束'),
-      '★ 简化后两种落法写在同一句：写 skill 落进正文 / 改指令落成硬约束',
+      DRAFTER_INSTRUCTIONS.includes('可能是一条 skill') &&
+        DRAFTER_INSTRUCTIONS.includes('智能体的指令'),
+      '两个产出对象仍要点出来（同一条起草者接两种活）',
     )
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('改指令时落成硬约束'),
-      '★ 「使用者的要求是默认约定」这条也要说明在改指令时怎么落',
+      !DRAFTER_INSTRUCTIONS.includes('| 1. |') && DRAFTER_INSTRUCTIONS.length < 400,
+      `身份要短（现在 ${String(DRAFTER_INSTRUCTIONS.length)} 字符）——规则已经交给技能与任务书`,
     )
-    // 通用的那几条**不需要**限定语（两个任务都成立），所以它们保持原样：
-    for (const generic of ['先看素材索引，再按需读', '做法要能照着跑']) {
-      assert.ok(DRAFTER_INSTRUCTIONS.includes(generic), `通用条款不该被改坏：${generic}`)
-    }
-  })
-
-  test('★ 岗位专属的判据仍在身份里（守则负责通用、身份负责岗位，两者都不能空）', () => {
-    assert.ok(DRAFTER_INSTRUCTIONS.includes('起草者专属'), '起草者的专属三条要有明确小标题')
-    // ★ 分批第 51 批：措辞从「不值得沉淀就说出来」放宽成对象无关的「不值得就说出来」
-    //   （同一个起草者还要改智能体指令，"沉淀"这个词对那件事不成立）
-    assert.ok(DRAFTER_INSTRUCTIONS.includes('不值得就说出来'))
-    // ★ 分批第 137 批：内置审核者随沉淀线的评审一起删除 ⇒ 那两条"审核者身份"的断言
-    //   跟着删（它们断言的常量已经不存在了）。起草者那侧的岗位判据照旧。
+    assert.ok(
+      !DRAFTER_INSTRUCTIONS.includes('When to Use') && !DRAFTER_INSTRUCTIONS.includes('Procedure'),
+      '不再要求章节名（分批第 177 批定过）',
+    )
   })
 })
 

@@ -143,9 +143,12 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
     })
 
     // 播种出来的 agent 是 claude 的，全部改成第二个 runtime
-    const { agents } = await api<{ agents: Array<{ id: string; runtimeKey: string }> }>('/api/agents')
+    // ★ 分批第 190 批（内置 agent 只读）：跳过内置的那几条（它们跟随全局默认，不该也不能被改）
+    const { agents } = await api<{
+      agents: Array<{ id: string; runtimeKey: string; builtin?: boolean }>
+    }>('/api/agents')
     for (const a of agents) {
-      if (a.runtimeKey === 'generic') continue
+      if (a.runtimeKey === 'generic' || a.builtin === true) continue
       const res = await fetch(`${daemon.url}/api/agents/${a.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
@@ -410,9 +413,14 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
     })
 
     // 播种出来的 agent 是 claude 的，全部改成 codex
-    const { agents } = await api<{ agents: Array<{ id: string; runtimeKey: string }> }>('/api/agents')
+    // ★ 分批第 190 批（内置 agent 只读）：**跳过内置的那几条**——它们的 runtime 跟踪全局默认
+    //   （`runtimeKey: 'default'`），而"跟随全局默认"本来就等于"用这条 daemon 侦测到的那个"，
+    //   所以这里不需要、也不允许改它们。真正要验的是"普通 agent 换成 codex 之后整条跑得通"。
+    const { agents } = await api<{
+      agents: Array<{ id: string; runtimeKey: string; builtin?: boolean }>
+    }>('/api/agents')
     for (const a of agents) {
-      if (a.runtimeKey === 'codex') continue
+      if (a.runtimeKey === 'codex' || a.builtin === true) continue
       const res = await fetch(`${daemon.url}/api/agents/${a.id}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },

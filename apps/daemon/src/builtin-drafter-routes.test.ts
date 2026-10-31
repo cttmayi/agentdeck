@@ -81,35 +81,33 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
     })
   })
 
-  test('★★ 改不坏：角色 / 内置标记 / 挂载技能三条都拒绝（静默忽略会让人以为配上了）', async () => {
+  test('★★★ 只读：任何字段都改不了（名字/指令/角色/技能挂载/CLI 一律 400）', async () => {
+    // ★ 分批第 190 批（使用者："把内置智能体全部改成只读"）：从"锁三个字段"收紧到"全锁"。
+    //   写法已经交给使用者装的技能，平台内置的那条身份不能再被改——否则"平台说的"与
+    //   "实际跑的"对不上，而这条链的每一步都要能对上。
     await withDaemon(async (url) => {
       const drafter = await drafterOf(url)
-      for (const patch of [{ role: 'executor' }, { skillIds: ['01SKILL'] }, { builtin: false }]) {
+      const patches = [
+        { role: 'executor' },
+        { skillIds: ['01SKILL'] },
+        { builtin: false },
+        { name: '我改的名字' },
+        { instructions: '我们团队的起草规范。' },
+      ]
+      for (const patch of patches) {
         const res = await fetch(`${url}/api/agents/${drafter.id}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(patch),
         })
         assert.equal(res.status, 400, `这条 patch 该被拒绝：${JSON.stringify(patch)}`)
-        const body = (await res.json()) as { code?: string }
-        assert.equal(body.code, 'builtin_agent_field_locked')
+        assert.equal(((await res.json()) as { code?: string }).code, 'builtin_agent_readonly')
       }
       const after = await drafterOf(url)
       assert.equal(after.role, 'drafter')
       assert.deepEqual(after.skillIds, [])
-    })
-  })
-
-  test('★ 能改的照旧能改：名字与指令（使用者的资产），而且改完还在', async () => {
-    await withDaemon(async (url) => {
-      const drafter = await drafterOf(url)
-      const res = await fetch(`${url}/api/agents/${drafter.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instructions: '我们团队的起草规范。' }),
-      })
-      assert.equal(res.status, 200, await res.text())
-      assert.equal((await drafterOf(url)).instructions, '我们团队的起草规范。')
+      assert.equal(after.name, DRAFTER_NAME)
+      assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)
     })
   })
 

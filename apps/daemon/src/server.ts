@@ -409,6 +409,14 @@ export interface DaemonOptions {
    */
   githubProxy?: string | null
   /**
+   * ★ 分批第 190 批（内置 agent 只读）：**测试夹具专用**的口子。
+   *
+   * 产品行为是"内置 agent 任何字段都改不了"；但探针/夹具需要在一次性的 daemon 上把内置起草者
+   * 指向假 CLI（否则"起草中"那一屏根本跑不起来）。所以这个开关**默认关**、只由测试脚手架
+   * （`tools/layout-probe/run.mjs` 起的那个 daemon）显式打开——真实 daemon 永远拿不到它。
+   */
+  allowBuiltinEdits?: boolean
+  /**
    * 「本地安装清单」的路径（技能页「从本地清单安装」读的那份 JSON）。
    *
    * 缺省用仓库自带的那份（`skill-list.ts` 的 `defaultSkillListPath()`）。给了就用
@@ -4971,17 +4979,24 @@ async function injectedSkillsOf(
         //   · 技能挂载对它们**没有任何作用**（起草 run 的技能集合是写死的，第 ③ 条；
         //     审核者按角色挑），允许挂只会让人以为挂了就生效。拒绝比静默忽略好：静默忽略
         //     会让人以为"配上去了"，而他的配置永远不会生效。
-        if (current.builtin === true) {
-          const forbidden = ['role', 'builtin', 'skillIds'].filter((k) => body[k] !== undefined)
-          if (forbidden.length > 0) {
-            sendJson(res, 400, {
-              error:
-                `「${current.name}」是${describeBuiltinAgent(current)}：改不了 ${forbidden.join('、')}（可以改名字、指令、CLI；` +
-                `要恢复原样用「恢复成默认值」）。`,
-              code: 'builtin_agent_field_locked',
-            })
-            return
-          }
+        /**
+         * ★ 分批第 190 批（使用者定："**把内置智能体全部改成只读**"）：
+         * 内置 agent（起草者 / 老工作区里的 skill 审核者）**任何字段都不许改**。
+         *
+         * 为什么从"锁三个字段"收紧到"全锁"：它的身份现在是平台的一部分（分批第 190 批还把它
+         * 压成了"照着你被注入的那份技能干活"），而**写法已经由技能负责**（使用者自己装）。
+         * 允许改名字/指令/CLI 时，出问题时没人知道"这条链被改过没有"——而这条链的每一步
+         * 都要能对上"平台说的"与"实际跑的"。
+         * 要回到原样、或平台升级了默认身份，用「恢复成默认值」（那是重置，不是编辑）。
+         */
+        if (current.builtin === true && options.allowBuiltinEdits !== true) {
+          sendJson(res, 400, {
+            error:
+              `「${current.name}」是${describeBuiltinAgent(current)}：**只读**（平台内置，` +
+              `名字/指令/CLI/环境变量都不能改）。要恢复平台默认用「恢复成默认值」。`,
+            code: 'builtin_agent_readonly',
+          })
+          return
         }
 
         // 只认识这些字段——未知字段**明确拒绝**而不是静默忽略：

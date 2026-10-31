@@ -75,6 +75,8 @@ interface CliOptions {
   skillsMineRoot: string | null
   /** GitHub 加速器（第三方，默认 null = 直连；见 server.ts 的 `DaemonOptions.githubProxy`）。 */
   githubProxy: string | null
+  /** ★ 分批第 190 批：夹具专用（允许改内置 agent；默认关，真实 daemon 不带）。 */
+  allowBuiltinEdits: boolean
   /**
    * 换一份「本地安装清单」（技能页「从本地清单安装」读的那份 JSON）。
    *
@@ -118,6 +120,11 @@ export const CLI_OPTIONS = {
   'skills-root': { type: 'string' },
   'skills-mine-root': { type: 'string' },
   'github-proxy': { type: 'string' },
+  /**
+   * ★ 分批第 190 批：**夹具专用**——允许改内置 agent（默认不许）。
+   * 只有探针/夹具的一次性 daemon 会带它；真实 daemon 永远不带。
+   */
+  'allow-builtin-edits': { type: 'boolean' },
   'skills-catalog': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const
@@ -224,6 +231,8 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
         : {},
     ),
     skillListPath: typeof values['skills-catalog'] === 'string' ? values['skills-catalog'] : null,
+    /** ★ 分批第 190 批：夹具专用（允许改内置 agent）。真实使用永远不带。 */
+    allowBuiltinEdits: values['allow-builtin-edits'] === true,
   }
 }
 
@@ -479,6 +488,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       skillsRoot,
       skillsMineRoot,
       ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
+      ...(options.allowBuiltinEdits ? { allowBuiltinEdits: true } : {}),
       ...(options.skillListPath ? { skillListPath: options.skillListPath } : {}),
       onInfo: (m) => process.stdout.write(`${m}\n`),
       onWarn: (m) => process.stderr.write(`[警告] ${m}\n`),
