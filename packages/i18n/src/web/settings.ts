@@ -40,21 +40,6 @@ export const settingsText = {
     en: 'New agents follow this global default, so one change applies everywhere; pick per agent when one needs an exception.',
   },
   'settings.agentConduct': { zh: '默认工作守则', en: 'Default working conduct' },
-  'settings.agentConductLabel': {
-    zh: '新建智能体时，预填到它的「指令」里',
-    en: 'Prefilled into a new agent’s instructions',
-  },
-  'settings.agentConductPlaceholder': {
-    zh: '留空 = 新建的智能体不带守则（指令框留空，自己写）',
-    en: 'Empty = new agents start without conduct',
-  },
-  'settings.agentConductReload': { zh: '重新载入', en: 'Reload' },
-  'settings.agentConductSave': { zh: '保存守则', en: 'Save' },
-  'settings.agentConductSaved': { zh: '守则已保存', en: 'Saved' },
-  'settings.agentConductHint': {
-    zh: '这几条是与岗位无关的工作纪律（只做被要求的事、依据来自素材、产出落到文件里……），内置的起草者与审核者已经在用同一份。存下来之后只影响以后新建的智能体：它会作为指令的初值填进去，之后归那条智能体自己（改这里不会改动已有的智能体）。留空 = 新建时不预填。',
-    en: 'These are job-agnostic working rules (do only what was asked, ground everything in the material, put output in files…). The built-in drafter and reviewer already use the same text. Saving only affects agents created later: it becomes the initial value of their instructions, and afterwards belongs to that agent (this does not rewrite existing ones). Empty = no prefill.',
-  },
 
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },

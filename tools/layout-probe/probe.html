@@ -3586,19 +3586,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         const langSelect = langSelectOf()
         facts['lang.switchPresent'] = !!langSelect
         facts['lang.defaultIsZh'] = langSelect ? langSelect.value : null
-        /**
-         * ★ 分批第 47 批：设置抽屉里的「默认工作守则」（新建智能体时预填）。
-         *
-         * 量两件事：① 这一段在（使用者能找到）；② **框里已经有内容**（=identity 里那份
-         * 默认守则真的填进去了）。只量①会放过"框是空的、保存后才发现没预填"。
-         */
-        {
-          const section = d().querySelector('.drawer [data-agent-conduct]')
-          facts['settings.agentConductTitle'] = section ? text(section.querySelector('h3')) : null
-          const box = section?.querySelector('textarea')
-          facts['settings.agentConductChars'] = box ? box.value.length : null
-          facts['settings.agentConductHasRule'] = box ? box.value.includes('只做被要求的事') : null
-        }
+        // ★ 分批第 189 批（使用者："移除「默认工作守则」"）：这一段连设置项一起删了，
+        //   所以这里不再量它的标题与框里内容（功能没了，判据也不该留）。
 
         /**
          * ⚠️ 量的是**「新建任务」那一项**，不是"第一项"。

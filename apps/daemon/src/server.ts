@@ -4346,32 +4346,6 @@ async function injectedSkillsOf(
      * 允许**空串**（= 不预填，使用者要的就是空身份），不允许超长——它会整份进入
      * 每条新建 agent 的身份块，而身份块每次都随第一句话发出去（D29）。
      */
-    if (req.method === 'PUT' && path === '/api/workspace/agent-conduct') {
-      const body = (await readJsonBody(req)) as Record<string, unknown>
-      const raw = body['conduct']
-      if (typeof raw !== 'string') {
-        sendJson(res, 400, {
-          error: `conduct 必须是字符串（收到 ${JSON.stringify(raw)}）`,
-          code: 'invalid_conduct',
-        })
-        return
-      }
-      if (raw.length > CONDUCT_MAX_CHARS) {
-        sendJson(res, 400, {
-          error: `守则太长了（${String(raw.length)} 字符，上限 ${String(CONDUCT_MAX_CHARS)}）`,
-          code: 'conduct_too_long',
-        })
-        return
-      }
-      const workspace = await store.getWorkspace(workspaceId)
-      if (!workspace) {
-        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
-        return
-      }
-      await store.insertWorkspace({ ...workspace, defaultAgentConduct: raw, updatedAt: Date.now() })
-      sendJson(res, 200, { defaultAgentConduct: raw })
-      return
-    }
 
     if (req.method === 'PUT' && path === '/api/workspace/web-search') {
       const body = (await readJsonBody(req)) as Record<string, unknown>
@@ -4776,10 +4750,15 @@ async function injectedSkillsOf(
        *   · **非空不覆盖**：请求里给了 instructions（哪怕是使用者手打的一段）就用他的；
        *   · **设置为空串 = 不预填**（他要的就是"空身份"）。
        */
-      const givenInstructions = typeof body['instructions'] === 'string' ? body['instructions'] : ''
-      const conduct = (await readWorkspaceSettings(store, workspaceId)).defaultAgentConduct.trim()
+      /**
+       * ★ 分批第 189 批（使用者："移除「默认工作守则」，新建的智能体不该自动带任何守则
+       * ——身份完全自己写"）：请求里没给指令就是**空指令**，平台不再预填任何东西。
+       *
+       * 原来这里会填 workspace 的 `defaultAgentConduct`（分批第 47 批的"预填"），
+       * 现在连同那个设置项一起删掉——身份是一个智能体**自己的**东西，不该由全局配置代笔。
+       */
       const prefilledInstructions =
-        givenInstructions.trim() === '' && conduct !== '' ? conduct : givenInstructions
+        typeof body['instructions'] === 'string' ? body['instructions'] : ''
 
       const now = Date.now()
       const agent: Agent = {
