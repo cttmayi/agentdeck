@@ -4609,18 +4609,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return { x: r.left, y: r.top, w: r.width, h: r.height }
           }
 
-          // ★ 步骤条：量"是哪几步、顺序对不对"。
-          //   ⚠️ 2026-10-21 改：这里原来量的是**四步**且「审核」排第 3 位——那条判据跟着旧的
-          //      界面形态走，而形态本身被判定是错的（审核不是入库的门，画成一步会让人以为
-          //      必须等它 ⇒ "感觉一直没结束"）。现在量的是**三步**且审核**不占一格**。
-          //   ⚠️ 也**不**用"文本包含审核"当判据：那样"审核被画成第 4 步"同样能通过。
-          const cySteps = [...d().querySelectorAll('.crystal-steps .step-label')].map((e) =>
-            (e.textContent ?? '').trim(),
-          )
-          facts['crystal.stepLabels'] = cySteps
-          facts['crystal.stepAuditNotAStep'] = !cySteps.includes('审核')
-          // 步骤条占多宽/多高：原来 4 步各 `flex:1`，被拉到横跨整行（实测 735px、间距还不均）
-          facts['crystal.stepBarBox'] = cyRect(d().querySelector('.crystal-steps'))
+          // ★ 分批第 140 批（U4a，§12.6/§12.7）：**步骤条已删**（设计原文「3 步步骤条 → 删除」）。
+          //   进度写在消息流的位置里；"现在到哪了"由顶栏的**状态徽标**说。判据两条一起量：
+          //   ① 步骤条真的不在；② 徽标在、且说的是这几种状态之一（提问中/起草中/待审阅/已入库）。
+          facts['crystal.stepBarGone'] = d().querySelector('.crystal-steps') === null
+          facts['crystal.statusBadgeText'] = (
+            d().querySelector('[data-cryst-status]')?.textContent ?? ''
+          ).trim()
           // ★ 同一份"轮次 · 工具调用"统计在一屏里出现几次：原来副标题一次 + 素材摘要分节一次
           const cyStatsHits = ((d().body.innerText ?? '').match(/次工具调用/g) ?? []).length
           facts['crystal.statsHits'] = cyStatsHits
@@ -5660,7 +5655,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
             facts['crystal.draftingAttached'] = await cyEnterDrafting()
             if (facts['crystal.draftingAttached']) {
-              facts['crystal.draftingStepText'] = text(d().querySelector('.crystal-steps'))
+              // ★ 分批第 140 批：步骤条已删 ⇒ 这里改量顶栏的状态徽标（drafting）
+              facts['crystal.draftingStatusBadge'] = (d().querySelector('[data-cryst-status]')?.textContent ?? '').trim()
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
               facts['crystal.draftingTabDefault'] =

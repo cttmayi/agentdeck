@@ -3252,15 +3252,21 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.stepLabels',
-    label:
-      '★★ 步骤条是**三步**（目标 → 起草 run → 审阅入库）——审核**不是**一步，它是审阅屏里的一个动作',
-    // ⚠️ 只量"文本里有审核"是不够的：那样"审核被画成第 4 步"也照样通过。反过来，
-    //    只量"没有审核"也不够：顺序错了（比如入库排到起草之前）是另一种坏法。
-    //    所以两条一起量：**恰好这三步、顺序一致**（`crystal.stepAuditNotAStep` 再钉住"审核不占一格"）。
+    key: 'crystal.stepBarGone',
+    // ★ 分批第 140 批（U4a，§12.6/§12.7）：**步骤条必须不存在**。
+    //   设计原文：「3 步步骤条 → 删除（对话流里由消息位置表达进度；顶栏只留状态徽标）」。
+    //   ⚠️ 删掉的是"流程控件"本身，不是"进度不可见"——进度改由消息位置与顶栏徽标表达。
+    label: '★★ 步骤条**不在**了（§12.6：对话流里由消息位置表达进度，顶栏只留状态徽标）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.statusBadgeText',
+    label: '★★★ 顶栏有**状态徽标**且说得出"现在到哪了"（提问中 / 起草中 / 待审阅 / 已入库）',
     ok: (v) =>
-      Array.isArray(v) && v.length === 3 && v[0] === '沉淀目标' && v[1] === '起草 run' && v[2] === '审阅入库',
-    show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
+      typeof v === 'string' && ['提问中', '起草中', '待审阅', '已入库', '起草失败', '已停止'].includes(v),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
@@ -3838,9 +3844,10 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.draftingStepText',
-    label: '★★ 起草中停在**第 2 步**（"起草 run"是当前步；第 1 步已打勾）',
-    ok: (v) => typeof v === 'string' && v.includes('起草 run'),
+    key: 'crystal.draftingStatusBadge',
+    // ★ 分批第 140 批：步骤条删掉之后，"起草中"这一屏的状态由顶栏徽标说。
+    label: '★★ 起草中那一屏顶栏徽标说「起草中」（步骤条删了，但"在跑"这一眼要还在）',
+    ok: (v) => typeof v === 'string' && v.includes('起草中'),
     show: (v) => JSON.stringify(v),
   },
   {

@@ -61,6 +61,12 @@ export const crystallizeText = {
   'crystallize.state.review': { zh: '待审阅', en: 'Awaiting review' },
   'crystallize.state.failed': { zh: '起草失败', en: 'Draft failed' },
   'crystallize.state.stopped': { zh: '已停止', en: 'Stopped' },
+  /**
+   * ★ 分批第 140 批（U4a）：步骤条删掉之后，顶栏状态徽标要能说全四种状态。
+   *   `done` = 已入库（那是沉淀真正的完成线，不是 run 跑完）；`asking` = 还在问问题。
+   */
+  'crystallize.state.done': { zh: '已入库', en: 'Saved' },
+  'crystallize.status.asking': { zh: '提问中', en: 'Asking' },
   'crystallize.discard': { zh: '放弃这条沉淀', en: 'Discard this crystallization' },
   'crystallize.discardConfirm': {
     zh: '放弃「{label}」这条沉淀？草稿会从列表移除，已入库的技能不受影响。',
@@ -78,7 +84,6 @@ export const crystallizeText = {
 
   // ── 步骤条 ──
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
-  'crystallize.stepDraft': { zh: '起草 run', en: 'Draft run' },
   // ── 机械体检（分批第 137 批：§12.15「不要评审，只要体检」的界面说法）──
   //  ⚠️ 措辞不许说"审核/通过（审核意义上）"：入库时只能声称"只过了机械体检（N 项）"（§12.15 代价 ③）。
   'crystallize.checkTitle': { zh: '机械体检', en: 'mechanical check' },
@@ -99,7 +104,6 @@ export const crystallizeText = {
     zh: '把改动写回草稿目录——审核者读的是磁盘上那一份，不保存它看不到',
     en: 'Write the edits back to the draft directory — the reviewer reads that file',
   },
-  'crystallize.stepReview': { zh: '审阅入库', en: 'Review & save' },
 
   // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },

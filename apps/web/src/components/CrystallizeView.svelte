@@ -40,6 +40,9 @@
   import { draftIsLive } from '../lib/draft-live.ts'
   import { finalResultText } from '../lib/final-output.ts'
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
+  // ★ 分批第 140 批（U4a）：顶栏状态徽标的词条表——用 `satisfies Record<string, WebTextId>`
+  //   把"键必须是真词条"交给类型检查（写错一个键 svelte-check 当场报）。
+  import type { WebTextId } from '@agentdeck/i18n'
   import MainArea from './MainArea.svelte'
   import RunLog from './RunLog.svelte'
   import CrystallizeIntake from './CrystallizeIntake.svelte'
@@ -316,18 +319,42 @@
     artifacts === null ? '○' : artifacts.validation.ok ? '✓' : '✗'
   $: conclusionBad = conclusionMark === '✗'
 
-  /** 步骤条三态：done / current / bad / pending（按 step 与起草终态推）。 */
-  $: stepStates = (() => {
-    const idx = step === 'target' ? 0 : step === 'drafting' ? 1 : step === 'review' ? 2 : 3
-    const out: Array<'done' | 'current' | 'bad' | 'pending'> = []
-    for (let n = 1; n <= 3; n += 1) {
-      if (step === 'done') out.push('done')
-      else if (n < idx + 1) out.push('done')
-      else if (n === idx + 1)
-        out.push(n === 2 && (draftStatus === 'failed' || draftStatus === 'cancelled') ? 'bad' : 'current')
-      else out.push('pending')
+  /**
+   * ★ 分批第 140 批（U4a，§12.6/§12.7）：**步骤条删除**。设计原文是
+   *   「3 步步骤条 → 删除（对话流里由消息位置表达进度；顶栏只留状态徽标）」——
+   *   进度不再靠一个横向的三段式控件说，而是：消息流里"问到哪、答到哪"本身就说明了进度，
+   *   顶栏只挂一个状态徽标（提问中 / 起草中 / 待审阅 / 已入库 / 失败）。
+   */
+  const STATUS_KEYS = {
+    asking: 'crystallize.status.asking',
+    drafting: 'crystallize.state.drafting',
+    review: 'crystallize.state.review',
+    done: 'crystallize.state.done',
+    failed: 'crystallize.state.failed',
+    stopped: 'crystallize.state.stopped',
+  } as const satisfies Record<string, WebTextId>
+
+  $: stepStatusKey =
+    step === 'done'
+      ? STATUS_KEYS.done
+      : step === 'review'
+        ? STATUS_KEYS.review
+        : step === 'drafting'
+          ? draftStatus === 'failed'
+            ? STATUS_KEYS.failed
+            : draftStatus === 'cancelled'
+              ? STATUS_KEYS.stopped
+              : STATUS_KEYS.drafting
+          : STATUS_KEYS.asking
+  $: stepStatusClass = (() => {
+    if (step === 'done') return 'done'
+    if (step === 'review') return 'in_review'
+    if (step === 'drafting') {
+      if (draftStatus === 'failed') return 'failed'
+      if (draftStatus === 'cancelled') return 'cancelled'
+      return 'in_progress'
     }
-    return out
+    return 'in_progress'
   })()
 
   /*
@@ -1418,6 +1445,8 @@
     <span class="faint" title={`run ${runId}`}>
       {sourceLabel}{statsLine !== '' ? ` · ${statsLine}` : ''}
     </span>
+    <!-- ★ 分批第 140 批（U4a）：顶栏的**状态徽标**——步骤条删掉之后，"现在到哪了"由它说 -->
+    <span class="badge {stepStatusClass}" data-cryst-status={step}>{$t(stepStatusKey)}</span>
   {/snippet}
 
   {#snippet actions()}
@@ -1462,30 +1491,8 @@
     <div class="crystal-chat">
       <div class="crystal-msg" data-msg-role="assistant">
         <div class="crystal-flow" data-crystallize-step={step}>
-      <!--
-        ── 步骤条：① 沉淀目标 → ② 起草 run → ③ 审阅入库 ──
-
-        ⚠️ 2026-10-21 从 4 步改回 3 步：中间那一步「审核」撤掉了。
-        理由正是使用者自己说的那个心理效果——「审核」**不是入库的门**（结论只是预筛，
-        入库永远由人点），可一旦画成"第 3 步"，人就会以为必须等它；它跑着、或者跑挂了，
-        看起来就是"卡在第三步不动"（他的原话："审核的过程看不到，感觉一直没结束呢"）。
-        现在审核是**审阅屏里的一个动作**（结论条：开始审核 / 看日志 / 重试）、
-        与「按意见重新起草」同级：随时可用、不挡入库。
-      -->
-      <ol class="crystal-steps" aria-label="流程步骤">
-        <li class={stepStates[0]}>
-          <span class="step-no" aria-hidden="true">{stepStates[0] === 'done' ? '✓' : 1}</span>
-          <span class="step-label">{$t('crystallize.stepTarget')}</span>
-        </li>
-        <li class={stepStates[1]}>
-          <span class="step-no" aria-hidden="true">{stepStates[1] === 'done' ? '✓' : 2}</span>
-          <span class="step-label">{$t('crystallize.stepDraft')}</span>
-        </li>
-        <li class={stepStates[2]}>
-          <span class="step-no" aria-hidden="true">{stepStates[2] === 'done' ? '✓' : 3}</span>
-          <span class="step-label">{$t('crystallize.stepReview')}</span>
-        </li>
-      </ol>
+      <!-- ★ 分批第 140 批（U4a）：步骤条已删（§12.6：「3 步步骤条 → 删除」）。
+           进度由消息流的位置表达；状态在顶栏的状态徽标里（见 MainArea 的 sub 片段）。 -->
 
       {#if error && targets === null}
         <div class="notice bad crystal-notice">{error}</div>
@@ -2235,88 +2242,8 @@
     min-height: 100%;
   }
 
-  /* ══════════ 步骤条：圆点 + 连线（走过 = 着强调色；当前步高亮；完成打勾） ══════════ */
-  .crystal-material-line {
-    margin: 0 0 var(--sp-4);
-  }
-  .crystal-steps {
-    display: flex;
-    align-items: center;
-    list-style: none;
-    /* 分节靠 margin，步骤条同理：给下一块留出与分节之间一样的间距 */
-    margin: 0 0 var(--sp-4);
-    padding: 0;
-    font-size: var(--fs-sm);
-  }
-  /*
-   * ★ 2026-10-21：`flex: 1` 去掉了。原来每一步都 `flex:1`（连线也 `flex:1`），
-   *   四个词就被拉到横跨 735px、间距还随字数变成 279/205/155——信息量只有四个词，
-   *   却占了整行宽度、还把下面整体推低一档。现在步与步按内容排、连线定宽 2rem。
-   */
-  .crystal-steps li {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    min-width: 0;
-    color: var(--text-faint);
-  }
-  /* 步与步之间的连线。只有"上一档已走完"才着强调色（走过的路）——当前步还没走完，
-     它到下一步的那一段仍是虚的（与"建任务三步链"那套同一个语义）。 */
-  .crystal-steps li + li::before {
-    content: '';
-    flex: 0 0 2rem;
-    height: 2px;
-    border-radius: 1px;
-    background: var(--line);
-    margin-left: var(--sp-1);
-    margin-right: var(--sp-3);
-  }
-  .crystal-steps li.done + li::before {
-    background: var(--accent);
-  }
-  .step-no {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.6rem;
-    height: 1.6rem;
-    border-radius: 50%;
-    border: 1.5px solid var(--line-strong);
-    font-size: 0.8em;
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-  .step-label {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .crystal-steps li.current {
-    color: var(--text);
-    font-weight: 600;
-  }
-  .crystal-steps li.current .step-no {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-  }
-  .crystal-steps li.done {
-    color: var(--status-done);
-  }
-  .crystal-steps li.done .step-no {
-    background: var(--status-done);
-    border-color: var(--status-done);
-    color: var(--bg);
-  }
-  .crystal-steps li.bad {
-    color: var(--status-blocked);
-  }
-  .crystal-steps li.bad .step-no {
-    background: var(--status-blocked);
-    border-color: var(--status-blocked);
-    color: var(--bg);
-  }
+  /* ★ 分批第 140 批（U4a）：步骤条整套样式随步骤条删除（§12.6）。
+     顶栏徽标复用全局 `.badge` 的语义色（in_progress / in_review / done / failed / cancelled）。 */
 
   /* ★ 分节**不重定义** `.drawer-section`（那是全局的：边距 + h3 边距）——
      任务详情的分节就是朴素 `<section class="drawer-section"><h3>…</h3>`，
