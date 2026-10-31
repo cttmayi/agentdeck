@@ -119,6 +119,16 @@ export const Workspace = z.object({
   defaultAgentId: AgentId.nullable().default(null),
 
   /**
+   * ★ 分批第 187 批（使用者：把 GitHub 加速器做成设置项，改完即时生效，不用重启 daemon）：
+   * 装技能时走哪个加速器。**空 = 直连**（默认）。
+   *
+   * 它是**第三方**：能看也能改转发的内容。所以：默认关、只在显式设置时启用、
+   * 走代理时不带我们的 token（`githubRequestTarget` 的三条硬规矩不变）。
+   * 地址形如 `https://gh-proxy.org`（裸主机地址，不带路径）。
+   */
+  githubProxy: z.string().default('').optional(),
+
+  /**
    * **全局 runtime 默认值**（2026-10）：agent 的 `runtimeKey` 写 `'default'` 时用它。
    *
    * 三级解析：`agent 的值 ⇒ 这个 ⇒ 启动时侦测到的第一个可用`。为什么要三级：

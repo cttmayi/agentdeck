@@ -1273,6 +1273,8 @@ async function readWorkspaceSettings(
   webSearchEnabled: boolean
   /** 全局 runtime 默认值（2026-10 第 ⑦ 条）：空串 = 跟随启动时侦测到的那个。 */
   defaultRuntimeKey: string
+  /** ★ 分批第 187 批：GitHub 加速器（空串 = 直连）。 */
+  githubProxy: string
   /** 审核者能不能**真跑**草稿里的脚本（§10.5 第 ③ 条）。老数据 ⇒ 默认开。 */
   allowReviewerScriptRun: boolean
   /** 新建智能体时预填的「默认工作守则」（分批第 47 批）；空串 = 不预填。 */
@@ -1297,6 +1299,8 @@ async function readWorkspaceSettings(
     defaultRuntimeKey: workspace?.defaultRuntimeKey ?? '',
     // 老数据没有这个键 ⇒ 开（与 `webSearchEnabled` 同一条规矩）
     allowReviewerScriptRun: workspace?.allowReviewerScriptRun ?? true,
+    // ★ 分批第 187 批：GitHub 加速器（空串 = 直连）
+    githubProxy: workspace?.githubProxy ?? '',
     // 老数据没有这个键 ⇒ 平台默认守则（与"什么都不改"同义）
     defaultAgentConduct: workspace?.defaultAgentConduct ?? GENERAL_WORK_CONDUCT,
   }
@@ -3921,6 +3925,8 @@ async function injectedSkillsOf(
         defaultRuntimeKey: settings.defaultRuntimeKey,
         // §10.5 第 ③ 条：界面上要能看到并关掉"审核者真执行草稿脚本"
         allowReviewerScriptRun: settings.allowReviewerScriptRun,
+        // ★ 分批第 187 批：设置页要能读到当前值（空串 = 直连）
+        githubProxy: settings.githubProxy,
         /**
          * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
          * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
@@ -4380,6 +4386,51 @@ async function injectedSkillsOf(
       }
       await store.insertWorkspace({ ...workspace, webSearchEnabled: body['enabled'], updatedAt: Date.now() })
       sendJson(res, 200, { enabled: body['enabled'] })
+      return
+    }
+
+    /**
+     * ★ 分批第 187 批：**GitHub 加速器**（装技能时用）。空串 = 直连。
+     *
+     * 为什么做成设置而不是只要启动参数：换地址/开关都要重启 daemon，而它只是"下载走哪条路"，
+     * 没有任何理由需要重启。**默认仍然是直连**（它是第三方，不能替使用者拍板）。
+     */
+    if (req.method === 'PUT' && path === '/api/workspace/github-proxy') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const raw = body['url']
+      if (typeof raw !== 'string') {
+        sendJson(res, 400, { error: `url 必须是字符串（空串 = 直连，收到 ${JSON.stringify(raw)}）` })
+        return
+      }
+      const url = raw.trim()
+      if (url !== '') {
+        // 只收"主机地址"：它会被当作前缀拼在原地址前，带路径会把 GitHub 地址拼歪
+        let parsed: URL
+        try {
+          parsed = new URL(url)
+        } catch {
+          sendJson(res, 400, { error: `看不懂这个地址：${url}（形如 https://gh-proxy.org）` })
+          return
+        }
+        if (parsed.protocol !== 'https:') {
+          sendJson(res, 400, { error: '加速器地址必须是 https://' })
+          return
+        }
+        if (parsed.pathname !== '/' && parsed.pathname !== '') {
+          sendJson(res, 400, {
+            error: '只填主机地址（不要带路径）：形如 https://gh-proxy.org',
+          })
+          return
+        }
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      const proxy = url === '' ? '' : url.replace(/\/+$/, '')
+      await store.insertWorkspace({ ...workspace, githubProxy: proxy, updatedAt: Date.now() })
+      sendJson(res, 200, { url: proxy })
       return
     }
 
@@ -7448,6 +7499,14 @@ async function injectedSkillsOf(
       //   一开始只想给 `resolveSkillSource` 挂 catch，结果"动作表里有不认识的动作"
       //   是**参数不对**（该 400），却因为抛在 catch 外面而以 500 + 内部错误原文
       //   返回——那会让使用者以为服务坏了，而其实是他自己填错了。
+      /**
+       * ★ 分批第 187 批：加速器优先取**设置里的值**（空串 = 显式直连，会盖掉启动参数）；
+       * 没设过（`undefined`）才退回 daemon 启动参数。这样"设置里关掉"能真的关掉。
+       */
+      const workspaceProxy = (await store.getWorkspace(workspaceId))?.githubProxy
+      const githubProxyFromWorkspace: string | null =
+        workspaceProxy === undefined || workspaceProxy === '' ? null : workspaceProxy
+
       let resolved: ResolvedSkillSource
       let outcome: Awaited<ReturnType<typeof installSkillPayloads>>
       try {
@@ -7457,7 +7516,11 @@ async function injectedSkillsOf(
           {
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
             githubToken: options.githubToken ?? process.env['AGENTDECK_GITHUB_TOKEN'] ?? null,
-            ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
+            ...(githubProxyFromWorkspace !== null
+              ? { githubProxy: githubProxyFromWorkspace }
+              : options.githubProxy
+                ? { githubProxy: options.githubProxy }
+                : {}),
             // ★ 分批第 185 批（使用者定）：顶层非标准目录"SKILL.md 提到才下载"——
             //   只在**人装技能**这条路上启用（同步工具按清单抓取，不适用）。
             onlyMentionedTopDirs: true,

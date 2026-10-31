@@ -373,6 +373,16 @@ export const crystallizeText = {
     en: 'Not installed — crystallization cannot start until it is (the drafter would have no "how to write" reference).',
   },
   'crystallize.settingsInstalled': { zh: '装好了，现在可以开始沉淀。', en: 'Installed — crystallization can start now.' },
+  // ── GitHub 加速器（分批第 187 批：设置项，改完即时生效，不用重启）──
+  'crystallize.settingsProxy': { zh: 'GitHub 加速器', en: 'GitHub accelerator' },
+  'crystallize.settingsProxyHint': {
+    zh: '装技能时下载走哪个加速器。空 = 直连（默认）。它是第三方：能看也能改转发的内容，所以默认关，且走它时不带你的令牌。国内直连不稳时填 https://gh-proxy.org。',
+    en: 'Which accelerator to use when installing. Empty = direct (default). It is a third party: it can see and alter what it forwards, so it is off by default and your token is never sent through it.',
+  },
+  'crystallize.settingsProxySave': { zh: '保存', en: 'Save' },
+  'crystallize.settingsProxyClear': { zh: '改回直连', en: 'Use direct' },
+  'crystallize.settingsProxyOn': { zh: '已启用：{url}（下次装技能生效）', en: 'Enabled: {url} (applies to the next install)' },
+  'crystallize.settingsProxyOff': { zh: '已改回直连。', en: 'Switched back to direct.' },
   'crystallize.settingsSkillRequiredShort': {
     zh: '未安装沉淀用技能 ⇒ 不能开始沉淀（右上「沉淀设置」里装）',
     en: 'No drafting skill installed — crystallization is blocked (install it in Crystallize settings)',

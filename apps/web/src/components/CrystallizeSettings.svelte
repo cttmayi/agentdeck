@@ -15,6 +15,45 @@
   let busy = $state(false)
   let note = $state('')
 
+  /**
+   * ★ 分批第 187 批（使用者：把加速器做成设置项）：**GitHub 加速器**。
+   * 空 = 直连（默认）；填了就"装技能时下载走它"。它是第三方——能看也能改内容，
+   * 所以默认关、且走代理时不带我们的 token（那三条硬规矩没变）。
+   */
+  let proxyUrl = $state('')
+  let proxyNote = $state('')
+  let proxyBusy = $state(false)
+  const DEFAULT_PROXY = 'https://gh-proxy.org'
+
+  async function loadProxy(): Promise<void> {
+    try {
+      const id = await api<{ githubProxy?: string }>('/api/identity')
+      proxyUrl = id.githubProxy ?? ''
+    } catch {
+      // 读不到就按"没设过"显示（不影响安装那条路自己的读取）
+    }
+  }
+
+  async function saveProxy(): Promise<void> {
+    if (proxyBusy) return
+    proxyBusy = true
+    proxyNote = ''
+    try {
+      const res = await api<{ url: string }>('/api/workspace/github-proxy', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: proxyUrl.trim() }),
+      })
+      proxyUrl = res.url
+      proxyNote =
+        res.url === '' ? $t('crystallize.settingsProxyOff') : $t('crystallize.settingsProxyOn', { url: res.url })
+    } catch (err) {
+      proxyNote = String(err instanceof Error ? err.message : err)
+    } finally {
+      proxyBusy = false
+    }
+  }
+
   async function reload(): Promise<void> {
     try {
       const res = await api<{ skills: Array<{ id: string; slug: string; name: string }> }>('/api/skills')
@@ -51,6 +90,7 @@
 
   $effect(() => {
     void reload()
+    void loadProxy()
   })
 </script>
 
@@ -74,6 +114,27 @@
     {#if draftSkill.error !== ''}<p class="notice bad small">{draftSkill.error}</p>{/if}
     <p class="faint small mono">{DISTILLY_SOURCE}</p>
   </section>
+
+  <section class="drawer-section">
+    <h3>{$t('crystallize.settingsProxy')}</h3>
+    <p class="faint small">{$t('crystallize.settingsProxyHint')}</p>
+    <div class="proxy-row">
+      <input type="text" bind:value={proxyUrl} placeholder={DEFAULT_PROXY} spellcheck="false" />
+      <button type="button" class="ghost small" disabled={proxyBusy} onclick={() => void saveProxy()}>
+        {$t('crystallize.settingsProxySave')}
+      </button>
+      <button
+        type="button"
+        class="ghost small"
+        disabled={proxyBusy || proxyUrl === ''}
+        onclick={() => {
+          proxyUrl = ''
+          void saveProxy()
+        }}>{$t('crystallize.settingsProxyClear')}</button
+      >
+    </div>
+    {#if proxyNote !== ''}<p class="faint small">{proxyNote}</p>{/if}
+  </section>
 </div>
 
 <style>
@@ -83,5 +144,17 @@
 
   .settings-body p {
     margin: 0 0 var(--sp-2);
+  }
+
+  .proxy-row {
+    display: flex;
+    gap: var(--sp-1);
+    align-items: center;
+  }
+
+  .proxy-row input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
   }
 </style>

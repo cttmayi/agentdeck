@@ -443,6 +443,39 @@ function fakeGithub(files: Record<string, string>): typeof fetch {
   }) as typeof fetch
 }
 
+describe('★ GitHub 加速器的设置项（分批第 187 批）', () => {
+  test('★★★ 地址校验：非 https / 带路径 / 非字符串都拒；空串 = 直连；存进去能读回来', async () => {
+    await withDaemon(async (url) => {
+      const put = async (body: unknown) => {
+        const res = await fetch(`${url}/api/workspace/github-proxy`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+      }
+
+      const http = await put({ url: 'http://gh-proxy.org' })
+      assert.equal(http.status, 400, JSON.stringify(http.body))
+      const withPath = await put({ url: 'https://gh-proxy.org/foo' })
+      assert.equal(withPath.status, 400, JSON.stringify(withPath.body))
+      const notString = await put({ url: 42 })
+      assert.equal(notString.status, 400, JSON.stringify(notString.body))
+
+      const ok = await put({ url: 'https://gh-proxy.org' })
+      assert.equal(ok.status, 200, JSON.stringify(ok.body))
+      const read = (await (await fetch(`${url}/api/identity`)).json()) as { githubProxy?: string }
+      assert.equal(read.githubProxy, 'https://gh-proxy.org', '设置要能读回来（设置页显示它）')
+
+      // 空串 = 改回直连（这一档必须存在，否则"关掉"做不到）
+      const off = await put({ url: '' })
+      assert.equal(off.status, 200, JSON.stringify(off.body))
+      const read2 = (await (await fetch(`${url}/api/identity`)).json()) as { githubProxy?: string }
+      assert.equal(read2.githubProxy, '')
+    })
+  })
+})
+
 describe('★ 从路径安装 skill（FR-AGENT-09）', () => {
   test('★ 有 SKILL.md ⇒ 装上，支持文件也落库；来源记成 local', async () => {
     const src = await makeSkillDir({
