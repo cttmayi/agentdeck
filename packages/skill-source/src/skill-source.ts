@@ -72,7 +72,18 @@ export const MAX_FILES = 512
 /** 目录递归深度上限。 */
 export const MAX_DEPTH = 4
 /** 单次 HTTP 请求的超时。 */
-export const FETCH_TIMEOUT_MS = 15_000
+/**
+ * ★ 分批第 180 批：单次请求超时从 15s 提到 **30s**。
+ *
+ * 为什么：使用者点「一键安装 distilly」时反复得到
+ * `下载失败：The operation was aborted due to timeout`，而我在同一台机器上实测
+ * `raw.githubusercontent.com` 时通时不通（同一个文件一会儿 200/2.5s、一会儿 25s 零字节超时）——
+ * **国内到 raw 的通路就是不稳**，15s 对偶发抖动太紧。配合下面的重试，这一条能救掉大部分情况。
+ */
+export const FETCH_TIMEOUT_MS = 30_000
+
+/** 网络抖动的重试次数（只在**超时/连接类错误**上重试，HTTP 状态码不重试）。 */
+export const FETCH_ATTEMPTS = 3
 
 /** GitHub 允许的三个主机——**这是白名单，不是示例**。 */
 const ALLOWED_HOSTS = new Set(['github.com', 'raw.githubusercontent.com', 'api.github.com'])
@@ -874,6 +885,32 @@ async function githubFetch(
   accept = 'application/vnd.github+json',
 ): Promise<Response> {
   const doFetch = deps.fetchImpl ?? fetch
+  /**
+   * ★ 分批第 180 批：**网络抖动要重试**。
+   *
+   * 只对"超时 / 连接被断"这类错误重试（`AbortError` / `TimeoutError` / `ECONNRESET` / `ENOTFOUND`）：
+   * HTTP 4xx/5xx 是服务端的明确答复，重试只会放大问题、也拖长使用者的等待。
+   * 每次重试之间线性等一下（300ms / 600ms）——立刻重试多半撞同一个抖动。
+   */
+  const fetchOnce = async (target: string, init: RequestInit): Promise<Response> => {
+    let lastErr: unknown
+    for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt += 1) {
+      try {
+        return await doFetch(target, init)
+      } catch (err) {
+        lastErr = err
+        const name = (err as Error)?.name ?? ''
+        const code = String((err as { cause?: { code?: string } })?.cause?.code ?? '')
+        const retriable =
+          name === 'AbortError' ||
+          name === 'TimeoutError' ||
+          /ECONNRESET|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|socket hang up/i.test(code + (err as Error)?.message)
+        if (!retriable || attempt === FETCH_ATTEMPTS - 1) break
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)))
+      }
+    }
+    throw lastErr
+  }
   const proxy = deps.githubProxy ?? null
   const headers: Record<string, string> = {
     accept,
@@ -910,7 +947,7 @@ async function githubFetch(
 
     let res: Response
     try {
-      res = await doFetch(current, {
+      res = await fetchOnce(current, {
         headers,
         redirect: 'manual',
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
