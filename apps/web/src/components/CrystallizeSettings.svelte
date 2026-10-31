@@ -36,7 +36,9 @@
       await api('/api/skills/install', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ source: DISTILLY_SOURCE }),
+        // ⚠️ `POST /api/skills/install` 的 `source` 是**对象**（`{kind:'url', url}`），
+        //    传字符串会被 400「需要 source（对象）」——第一版就是这么错的。
+        body: JSON.stringify({ source: { kind: 'url', url: DISTILLY_SOURCE } }),
       })
       await reload()
       note = $t('crystallize.settingsInstalled')

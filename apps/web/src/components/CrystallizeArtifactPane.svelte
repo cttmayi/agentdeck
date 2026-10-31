@@ -83,7 +83,6 @@
    * ★ 分批第 173 批（使用者定："技能走注入，但**不要默认放项目中**，让用户自己装、建议一键安装"）：
    * 这一栏负责"这条沉淀用什么技能"——没装就给一键安装，装了就把 id 交给起草请求。
    */
-  let skillInstalling = $state(false)
 
   async function loadDraftSkill(): Promise<void> {
     try {
@@ -95,28 +94,6 @@
       draftSkill.error = ''
     } catch (err) {
       draftSkill.error = String(err instanceof Error ? err.message : err)
-    }
-  }
-
-  /**
-   * 一键安装：走既有的 `POST /api/skills/install`（来源是上游仓库，**平台不 vendored**）。
-   * 装完立刻回读一次——按钮要变成"已装好"，否则人不知道到底成没成。
-   */
-  async function installDraftSkill(): Promise<void> {
-    if (skillInstalling) return
-    skillInstalling = true
-    draftSkill.error = ''
-    try {
-      await api('/api/skills/install', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ source: DISTILLY_SOURCE }),
-      })
-      await loadDraftSkill()
-    } catch (err) {
-      draftSkill.error = String(err instanceof Error ? err.message : err)
-    } finally {
-      skillInstalling = false
     }
   }
 

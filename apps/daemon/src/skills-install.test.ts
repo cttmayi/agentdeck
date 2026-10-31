@@ -375,6 +375,24 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
 // 从「路径 / GitHub 链接」安装
 // ─────────────────────────────────────────────────────────────
 
+describe('★ 安装来源的**请求体形状**（分批第 178 批：设置页那条一键安装曾经传错）', () => {
+  test('★★★ source 必须是对象：传字符串 ⇒ 400「需要 source（对象）」；传 {kind,url} 才走通', async () => {
+    // 这一条是**真缺陷的回放**：沉淀设置页的「一键安装 distilly」第一版把 source 传成字符串，
+    // 使用者点下去看到的就是「需要 source（对象）」。
+    const src = await makeSkillDir({ 'SKILL.md': '# x\n' })
+    await withDaemon(async (url) => {
+      const wrong = await installFromSource(url, {
+        source: 'https://github.com/titanwings/distilly',
+      })
+      assert.equal(wrong.status, 400, JSON.stringify(wrong.body))
+      assert.match(String(wrong.body.error), /需要 source（对象）/)
+
+      const ok = await installFromSource(url, { source: { kind: 'path', path: src } })
+      assert.equal(ok.status, 201, JSON.stringify(ok.body))
+    })
+  })
+})
+
 async function installFromSource(url: string, body: unknown) {
   const res = await fetch(`${url}/api/skills/install`, {
     method: 'POST',
