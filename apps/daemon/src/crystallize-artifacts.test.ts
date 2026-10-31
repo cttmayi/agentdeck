@@ -233,6 +233,9 @@ describe('assembleArtifacts：三种产出形态', () => {
     )
     assert.equal(artifacts.mode, 'refused')
     assert.match(artifacts.refusalReason ?? '', /环境问题/)
+    // ★ 分批第 195 批：拒绝说明里的 `# ` 标题不进界面（它现在显示在一条消息里，
+    //   气泡上方已经说了「这次没有可沉淀的」——把文件标题当 H1 再印一遍是同一句话说两遍）。
+    assert.doesNotMatch(artifacts.refusalReason ?? '', /^#\s/m, '标题行应当被去掉')
     assert.equal(artifacts.validation.ok, false)
   })
 

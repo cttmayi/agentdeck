@@ -240,6 +240,21 @@ export const crystallizeText = {
     en: 'This file is missing from the draft and will be deleted on save (update replaces the whole directory)',
   },
   'crystallize.refusedTitle': { zh: '起草者判定：这里没有可沉淀的内容', en: 'The drafter found nothing crystallizable' },
+  /**
+   * ★ 分批第 195 批：拒绝那一轮的 `who` 行（说的人 + 这一轮的结果）。
+   *
+   * 它原来套的是「写好了」——而它其实**没写 skill**（写的是 REFUSED.md）。这两句话
+   * 在同一屏里是打架的，所以拒绝单独一句。
+   */
+  'crystallize.refusedHead': { zh: '这次没有可沉淀的', en: 'nothing crystallizable here' },
+  /**
+   * ★ 分批第 195 批：拒绝时的右栏。它**不列体检问题**——`validation.problems` 里那一条
+   * 就是拒绝理由本身，印出来等于把中间那条消息再说一遍。
+   */
+  'crystallize.artifactRefusedNote': {
+    zh: '没有产出可体检：起草者判定这次没有可沉淀的内容（理由在左边那条消息里）',
+    en: 'Nothing to check: the drafter found nothing crystallizable here (see the message on the left)',
+  },
   // ── 四轮 P1：变更集 diff / 素材分节 / 按意见改一版 ──
   'crystallize.tabContent': { zh: '内容', en: 'Content' },
   'crystallize.tabDiff': { zh: '差异', en: 'Diff' },

@@ -1350,15 +1350,17 @@
     <ChatBubble
       role="agent"
       who={`${$t('crystallize.speakerDrafter')} · ${
-        draftLiveNow
-          ? $t('crystallize.draftTurnLive')
-          : draftStatus === 'failed'
-            ? $t('crystallize.draftFailed')
-            : draftStatus === 'cancelled'
-              ? $t('crystallize.draftStopped')
-              : $t('crystallize.draftTurnDone')
+        refused
+          ? $t('crystallize.refusedHead')
+          : draftLiveNow
+            ? $t('crystallize.draftTurnLive')
+            : draftStatus === 'failed'
+              ? $t('crystallize.draftFailed')
+              : draftStatus === 'cancelled'
+                ? $t('crystallize.draftStopped')
+                : $t('crystallize.draftTurnDone')
       }${
-        !draftLiveNow && draftStatus === 'completed' && fileCount > 0
+        !refused && !draftLiveNow && draftStatus === 'completed' && fileCount > 0
           ? ` · ${fileCount} ${$t('crystallize.filesUnit')}`
           : ''
       }`}
@@ -1379,7 +1381,27 @@
         {/if}
       {/snippet}
 
-      {#if draftLiveNow}
+      {#if refused}
+        <!--
+          ★ 分批第 195 批：**起草者拒绝时，理由只说一次，而且就在它嘴里**。
+
+          改之前这条理由出现三处：结论条「起草者判定：这里没有可沉淀的内容」、中间一条气泡
+          （`REFUSED.md` 原文）、右栏「体检」里又把同一段当成"问题"。使用者问"有必要显示
+          REFUSED.md 的内容吗"——**有必要，但只该有一处**：它是"为什么不做"的唯一解释，
+          删了就只剩下"它没给东西"。所以留下这一处（气泡正文），另外两处不再复述。
+
+          ⚠️ 顺便修掉一个错话：拒绝的草稿没有"最后一段正文"，于是原来会落进
+             「这次执行没有留下文字产出」那一支——而它明明写了 REFUSED.md。
+             那条空态现在只在**真没有产出**时出现。
+        -->
+        <p class="draft-turn-reason">{artifacts?.refusalReason ?? ''}</p>
+        <div class="row-end msg-actions" data-msg-actions>
+          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+          <button class="ghost small" onclick={() => void abandonReview()}>
+            {$t('crystallize.abandon')}
+          </button>
+        </div>
+      {:else if draftLiveNow}
         <div class="log-box">
           <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
         </div>
@@ -1455,12 +1477,52 @@
     {/if}
   {/snippet}
 
+  <!--
+    ★ 分批第 195 批：**「入库 / 反馈 / 放弃」搬回栏头右侧**（使用者 2026-11："「入库」的按钮
+      不应该在对话下面，可能放顶上右侧比较合理"）。
+
+    翻转的是分批第 150 批那条口径（那一批把它们从栏头搬进了消息底部，理由是"动作离结论
+    远了"）。为什么这次反过来是对的：第 193–194 批把中间栏变成了**一段对话**
+    （你 / 起草者 / 它的提问），消息区里再摆一排动作按钮，就又把"对话"挤回了任务面板的样子
+    ——而这三个动作**不属于某一条消息**，它们属于"这一版草稿"（整页）。页级的动作放页级的位置，
+    这是本仓库一直在用的规矩（聊天「新对话」、任务「新建任务」都在栏头）。
+
+    ⚠️ 留在消息里的仍然留在消息里（它们属于那一条消息的状态）：起草中的「停止」、失败时的
+    「重新起草」、目标态最后一问的「开始提炼」。
+  -->
+  {#snippet headActions()}
+    {#if step === 'review' && artifacts !== null && !refused}
+      <div class="head-actions" data-review-actions>
+        <button
+          type="button"
+          class="ghost small"
+          class:active={reviseOpen}
+          data-review-feedback
+          onclick={() => void toggleReviseBox()}
+        >{$t('crystallize.reviseTitle')}</button>
+        <button type="button" class="ghost small" data-review-abandon onclick={() => void abandonReview()}>
+          {$t('crystallize.abandon')}
+        </button>
+        <button
+          type="button"
+          class="primary small"
+          data-review-commit
+          disabled={saving || !reviewValid}
+          title={reviewValid ? undefined : $t('crystallize.confirmBlocked')}
+          onclick={() => void save()}
+        >{$t('crystallize.confirm')}</button>
+      </div>
+    {/if}
+  {/snippet}
+
+
 <MainArea
   headClass="detail-head"
   backLabel={backLabel}
   onBack={onback}
   title={$t('crystallize.title')}
   bodyClass="detail-scroll"
+  actions={headActions}
 >
   {#snippet sub()}
     <!--
@@ -1475,16 +1537,6 @@
     <!-- ★ 分批第 140 批（U4a）：顶栏的**状态徽标**——步骤条删掉之后，"现在到哪了"由它说 -->
     <span class="badge {stepStatusClass}" data-cryst-status={step}>{$t(stepStatusKey)}</span>
   {/snippet}
-
-  <!--
-    ★ 分批第 150 批（§12.12/§12.17："动作在消息里，不在页头"）：**顶栏动作整块删掉**。
-    原来栏头右侧挂着「开始提炼 / 停止 / 重新起草 / 放弃 / 确认入库」——那是流程页的习惯：
-    把"这一步能做什么"做成页面外壳的一部分。而这一页的形状是"消息流 + 栏脚"：
-      · 开始提炼 ⇒ 目标态最后一问就是它（`CrystallizeIntake` 的 ready 那一问，门禁也说在那里）；
-      · 停止 / 重新起草 ⇒ 起草那条系统消息里（状态就在旁边，谁能做什么一目了然）；
-      · 放弃 / 确认入库 ⇒ 审阅那条产物消息底部（结论、改动、出口在同一块里）。
-    ⚠️ 不要为"好找"再把它们搬回栏头：动作离结论远了，人会先看见结论再去找按钮。
-  -->
 
   {#snippet body()}
     <!--
@@ -1738,6 +1790,7 @@
             >
           </div>
         {/if}
+        {#if !refused}
         <section class="conclusion-block">
           <div class="conclusion-bar" class:bad={conclusionBad}>
             <span class="bar-mark" aria-hidden="true">{conclusionMark}</span>
@@ -1794,49 +1847,6 @@
                   {/if}
                 </span>
               {/if}
-            </span>
-            <span class="bar-actions">
-              <!--
-                ⚠️ 2026-10-21（第 3 批）：这两个按钮原来是**各自的折叠开关**
-                   （`auditDetailOpen` / `auditLogOpen`）。问题清单与审核日志搬进「过程」tab 之后，
-                   它们改成**切到那个 tab**——一个东西只有一个开关，否则"折起来的问题清单"
-                   与"tab 里的问题清单"会同时存在，人分不清哪个是真的。
-              -->
-              <!-- ★ 分批第 143 批（U4d）：`看体检明细` 这个跳转按钮删了——它原来只是切到「过程」tab，
-                   而 tab 机制已删；体检的问题清单本来就常驻在结论条正下方（不需要再跳一次）。 -->
-              <!--
-                ★ 分批第 8 批：「保存改动」。
-                只在**有未保存改动**时出现（`dirty`）：没有改动时它是个不该被点的按钮，
-                而"点不动的按钮"比"没有按钮"更让人困惑。
-              ★ 分批第 153 批：「保存改动」跟着**编辑器**走了（它改的就是那份正文，见
-                `CrystallizeDraftEditor`）。结论条这一行只留"读结论"与"入库"两个动作。
-              -->
-              {#if artifacts}
-                <!-- ★ 点它 ⇒ 意见框打开，里面**默认已经填好**审核者的反馈（见 `toggleReviseBox`）。 -->
-                <button
-                  class="ghost small"
-                  class:active={reviseOpen}
-                  onclick={() => void toggleReviseBox()}
-                >{$t('crystallize.reviseTitle')}</button>
-              {/if}
-              <!--
-                ★ 分批第 150 批（§12.17："四种续法都只是一句话"）：**这一版的出口就在结论这一行**。
-                原来「放弃 / 确认入库」挂在栏头——人先在结论里读到"体检通过、3 个文件"，再抬头去
-                右上角找按钮。搬进结论条这一行之后，读结论与收尾是同一件事。
-                ⚠️ 放在**结论条这一行**而不是消息底部：试过底部（`.msg-actions`），编辑格被顶上去
-                35px，探针的"主区底边贴内容盒底"当场差 135px——那条判据量的正是"窗格吃满剩余高度"。
-              -->
-              <span class="bar-actions" data-msg-actions>
-                <button class="ghost small" onclick={() => void abandonReview()}
-                  >{$t('crystallize.abandon')}</button
-                >
-                <button
-                  class="primary small"
-                  disabled={saving || !reviewValid}
-                  title={reviewValid ? undefined : $t('crystallize.confirmBlocked')}
-                  onclick={() => void save()}
-                >{$t('crystallize.confirm')}</button>
-              </span>
             </span>
           </div>
 
@@ -1902,26 +1912,16 @@
             </div>
           {/if}
         </section>
+        {/if}
 
         <!--
           起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃。
           ⚠️ 2026-10-21：它原来是上面那条 if-chain 的第一支；结论条不再属于那条链
           （结论条在 artifacts 还没到时也要能显示审核那部分），所以这里单独成一个 if。
         -->
-        {#if artifacts && artifacts.mode === 'refused'}
-          <!-- ★ 分批第 194 批：它原来是「审阅草稿」抽屉分节里的一个黄条（又是任务面板的形状）。
-               拒绝是**它说的话**，所以现在就是一条消息（气泡）：同一句话、同一个位置，
-               只是不再顶着"审阅草稿"这个抬头。 -->
-          <ChatBubble role="agent" who={$t('crystallize.speakerDrafter')}>
-            <p class="draft-turn-reason">{artifacts.refusalReason ?? ''}</p>
-            <div class="row-end">
-              <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-              <button class="ghost small" onclick={() => void abandonReview()}>
-                {$t('crystallize.abandon')}
-              </button>
-            </div>
-          </ChatBubble>
-        {/if}
+        <!-- ★ 分批第 195 批：这里的「起草者判定」气泡删了——拒绝的理由已经在**起草那一轮**
+             的消息里说过一次（`draftTurn` 的 refused 分支）。同一句话在一屏里出现两遍，
+             正是"有点乱"的来源之一。 -->
 
         <!-- ★ 分批第 153 批（§12.12 / §12.53 选项 2）：编辑器抽成 `CrystallizeDraftEditor`，
              它自己也带"有没有产出 / 是不是 refused"的判断。
@@ -2018,12 +2018,13 @@
   }
   /* ★ 分批第 193 批：`.msg-actions p` 删了——起草那一轮抬头不再是 `<p class="faint small">`
      挂在动作条里（现在是 `draft-turn-head`），那条选择器已经没有宿主。 */
-  /* 结论条里的动作组：与「保存改动 / 反馈」同一行，中间留一点呼吸 */
-  .conclusion-bar .bar-actions[data-msg-actions] {
-    display: inline-flex;
+  /* ★ 分批第 195 批：`.conclusion-bar .bar-actions*` 那三条样式删了——动作（入库 / 反馈 /
+     放弃）搬到了**栏头右侧**（`[data-review-actions]`）。结论条现在只是一行状态字。 */
+  .head-actions {
+    display: flex;
     align-items: center;
     gap: var(--sp-1);
-    margin-left: var(--sp-2);
+    margin-left: auto;
   }
 
   /* ★ 分批第 27 批：「链上出了新版，但你正在改」的提示条。
@@ -2538,25 +2539,11 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .conclusion-bar .bar-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-1);
-    flex-shrink: 0;
-  }
-  /* 按钮里的字**不许折行**（这是上面那个 69×54 的直接病因） */
-  .conclusion-bar .bar-actions button {
-    white-space: nowrap;
-    flex-shrink: 0;
-    /*
-     * 纵向收紧：站里 `.small` 按钮是 35px 高（padding 6+6 + 行高），而结论条是**常驻的
-     * 摘要行**——它高 53px 就为了托住按钮的 35px，把编辑器又往下推。改成 3px 之后
-     * 按钮 ~29px、条 ~47px（实测 y 从 345 往回收，见探针 `crystal.paneTopY`）。
-     * ⚠️ 只在这一条上收紧，不动站里 `.small` 的通用定义：别处按钮是"动作"，这里是"摘要上的动作"。
-     */
-    padding-top: 3px;
-    padding-bottom: 3px;
-  }
+  /*
+   * ★ 分批第 195 批：`.conclusion-bar .bar-actions`（动作组）与它的取整规则删了——
+   * 动作搬到栏头右侧（`[data-review-actions]`），结论条不再托按钮，也就不需要为它
+   * 把 `.small` 压到 3px。**这条结论条现在是一行纯文本**（体检结果 · 文件数 · 目标）。
+   */
   .bar-sep {
     color: var(--line-strong);
   }

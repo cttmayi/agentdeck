@@ -4787,11 +4787,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            */
           facts['crystal.actionsInMessages'] = {
             headerButtons: [...d().querySelectorAll('section.detail-pane > header button')].map(text),
-            confirmInArtifact: [
-              ...d().querySelectorAll('.crystal-msg[data-msg-role="artifact"] button'),
+            confirmInHeader: [
+              ...d().querySelectorAll('.detail-head [data-review-actions] button'),
             ].some((b) => text(b).includes('确认入库')),
-            abandonInArtifact: [
-              ...d().querySelectorAll('.crystal-msg[data-msg-role="artifact"] button'),
+            abandonInHeader: [
+              ...d().querySelectorAll('.detail-head [data-review-actions] button'),
+            ].some((b) => text(b).includes('放弃')),
+            // ⚠️ 这两个留作"只剩一个入口"的反向检查：消息区里**不该**再有这两个动作
+            confirmInMessage: [
+              ...d().querySelectorAll('.crystal-flow button'),
+            ].some((b) => text(b).includes('确认入库')),
+            abandonInMessage: [
+              ...d().querySelectorAll('.crystal-flow button'),
             ].some((b) => text(b).includes('放弃')),
           }
           /**
@@ -4849,15 +4856,26 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const b = d().querySelector('.conclusion-bar')
             return !!b && Math.round(b.getBoundingClientRect().width) < 800
           }, 60)
-          const cyNarrowBar = d().querySelector('.conclusion-bar')
-          if (cyNarrowBar) {
-            const nb = cyNarrowBar.getBoundingClientRect()
-            const act = cyNarrowBar.querySelector('.bar-actions')
-            const ab = act ? act.getBoundingClientRect() : null
+          /**
+           * ★ 分批第 195 批：动作（入库 / 反馈 / 放弃）搬去了**栏头右侧** ⇒ 这里量的东西
+           *   跟着换，但问的还是同一件事："窄窗口下那一排按钮会不会被挤出去/折行"。
+           *   原来量的是结论条里 `.bar-actions` 有没有越出条框（那次是「开始审核」在 69px 里
+           *   折成 3 行、条高 54px）；现在动作组在 `[data-review-actions]` 里，就量它有没有
+           *   越出**栏头**、以及那一行的字有没有折行。
+           */
+          const cyNarrowHead = d().querySelector('.detail-head')
+          const cyNarrowActs = d().querySelector('[data-review-actions]')
+          if (cyNarrowHead && cyNarrowActs) {
+            const hb = cyNarrowHead.getBoundingClientRect()
+            const ab = cyNarrowActs.getBoundingClientRect()
+            const btns = [...cyNarrowActs.querySelectorAll('button')]
+            // "没折行" = 所有按钮**同一条基线**（不同的 top 才叫折了）
+            const tops = new Set(btns.map((b) => Math.round(b.getBoundingClientRect().top)))
             facts['crystal.barNarrowBox'] = {
-              w: Math.round(nb.width),
-              h: Math.round(nb.height),
-              buttonsInside: ab !== null && ab.right <= nb.right + 1 && ab.left >= nb.left - 1,
+              w: Math.round(ab.width),
+              h: Math.round(ab.height),
+              buttonsInside: ab.right <= hb.right + 1 && ab.left >= hb.left - 1,
+              singleLine: tops.size === 1,
             }
           } else {
             facts['crystal.barNarrowBox'] = null
@@ -5242,7 +5260,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // ★ 分批第 17 批：按钮改名「按意见再改一版」→「反馈」，这里跟着改。
           //   ⚠️ 我第一版只改了"点开框"那一处，漏了这一处 ⇒ 判据 `点它之后输入框真的出现`
           //   量到 null（按钮没找到，整条 else 分支），红的是探测脚本不是界面。
-          const cyReviseBtn = [...d().querySelectorAll('.bar-actions button')].find((b) =>
+          // ★ 分批第 195 批：动作搬到栏头右侧（`[data-review-actions]`）
+          const cyReviseBtn = [...d().querySelectorAll('[data-review-actions] button')].find((b) =>
             text(b).includes('反馈'),
           )
           facts['crystal.reviseButtonName'] = cyReviseBtn ? text(cyReviseBtn) : null
@@ -5624,20 +5643,45 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               await until(() => !d().querySelector('.crystal-chat'), 80)
               await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${cyRefused}`
-              const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+              // ★ 分批第 195 批：拒绝时**结论条整条不画**（没有可入库的东西）⇒ 等的是
+              //   起草那一轮的消息本身。
+              const attached = await until(
+                () =>
+                  (d().querySelector('[data-draft-turn-msg] [data-chat-turn] .who')?.textContent ?? '')
+                    .includes('没有可沉淀'),
+                120,
+              )
               facts['crystal.refusedAttached'] = attached
               if (attached) {
-                facts['crystal.refusedBar'] = text(d().querySelector('.conclusion-bar'))
-                facts['crystal.refusedMark'] = text(d().querySelector('.bar-mark'))
-                facts['crystal.refusedBarBad'] = !!d().querySelector('.conclusion-bar.bad')
-                // 拒绝理由是**一条消息**（气泡），不是一块抽屉分节
-                const bubbles = [...d().querySelectorAll('[data-chat-turn] .bubble')].map((b) => text(b))
-                facts['crystal.refusedBubbles'] = bubbles
-                facts['crystal.refusedLinesInBubbles'] = bubbles.some((t2) => t2.includes('没有可复用的做法'))
+                /**
+                 * ★ 分批第 195 批（使用者："觉得有必要显示 REFUSED.md 的内容吗"）：
+                 *   拒绝的理由**只说一次**，就在起草那一轮的消息里；结论条整条不画
+                 *   （没有可入库的东西）。所以这里量的是：
+                 *     · `who` 行说的是「这次没有可沉淀的」（不是"写好了"）；
+                 *     · 理由出现**一次**（不是两三次）；
+                 *     · 没有结论条、没有「审阅草稿」抬头、没有「确认入库」。
+                 */
+                facts['crystal.refusedHeadText'] = text(
+                  d().querySelector('[data-draft-turn-msg] [data-chat-turn] .who'),
+                )
+                facts['crystal.refusedBubbleText'] = text(
+                  d().querySelector('[data-draft-turn-msg] [data-chat-turn] .bubble'),
+                )
+                const pageText = d().body?.textContent ?? ''
+                // 数**正文那一句**（★ 195 批：文件标题不再进界面，所以别数标题）
+                facts['crystal.refusedReasonHits'] = (
+                  pageText.match(/只有一次性的环境排错/g) ?? []
+                ).length
+                facts['crystal.refusedNoConclusionBar'] = !d().querySelector('.conclusion-bar')
                 facts['crystal.refusedNoReviewHeading'] =
                   ![...d().querySelectorAll('h3')].some((h) => text(h).includes('审阅草稿'))
-                facts['crystal.refusedBarNoFailureCopy'] = !/体检发现|校验未通过/.test(
-                  facts['crystal.refusedBar'] ?? '',
+                facts['crystal.refusedNoConfirmButton'] = ![...d().querySelectorAll('button')].some(
+                  (b) => text(b).includes('确认入库'),
+                )
+                facts['crystal.refusedHasExits'] = ['重新起草', '放弃'].every((needle) =>
+                  [...d().querySelectorAll('[data-draft-turn-msg] button')].some((b) =>
+                    text(b).includes(needle),
+                  ),
                 )
               }
               f.contentWindow.location.hash = '#/tasks'

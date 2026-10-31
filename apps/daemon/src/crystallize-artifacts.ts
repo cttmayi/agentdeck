@@ -350,6 +350,28 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
  * @param draftDir 草稿根目录（`<workRoot>/skill-draft-<id>`），产出在它的 `skill/` 下
  * @param textFallback 没有目录产出时的文本兜底（起草 run 的最后一条 text 消息）
  */
+/**
+ * 去掉一段 Markdown 开头的空行与标题行（`# xxx` / `## xxx`），其余原样。
+ *
+ * 只给"拒绝说明当消息正文"这一处用：文件是给磁盘看的，消息是给人看的，两者对"标题"
+ * 的理解不同（见 `assembleArtifacts` 里 refused 那一支的注释）。
+ */
+function stripLeadingHeading(text: string): string {
+  const lines = text.trim().split('\n')
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!.trim()
+    if (line === '' || /^#{1,6}\s/.test(line)) {
+      i += 1
+      continue
+    }
+    break
+  }
+  const rest = lines.slice(i).join('\n').trim()
+  // 全是标题/空行时退回原文：宁可重复，也不要给出一句空白
+  return rest === '' ? text.trim() : rest
+}
+
 export function assembleArtifacts(
   dirFiles: Record<string, string> | null,
   textFallback: string | null,
@@ -360,7 +382,15 @@ export function assembleArtifacts(
   if (dirFiles !== null && dirFiles['SKILL.md'] === undefined && refusal !== undefined) {
     return {
       mode: 'refused',
-      refusalReason: refusal.trim(),
+      /**
+       * ★ 分批第 195 批：**去掉开头那行标题**再给界面。
+       *
+       * 拒绝说明是一份 Markdown 文件（`# 这次没有可复用的做法` + 正文），而它现在显示在
+       * 一条**消息**里——气泡上方那行已经说了「起草者 · 这次没有可沉淀的」，再把文件标题
+       * 当 H1 印一遍，就是同一句话说两遍，而且读起来像"贴了一份文件"而不是"它在说话"。
+       * 只去掉**开头连续的空行与 `#` 标题行**，正文一个字不动（那是使用者要看的东西）。
+       */
+      refusalReason: stripLeadingHeading(refusal),
       files: dirFiles,
       skillMd: { name: '', description: '', body: '', raw: '' },
       validation: { ok: false, problems: [{ file: 'REFUSED.md', message: refusal.trim() }] },

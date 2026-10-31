@@ -391,6 +391,8 @@
   const files = $derived(fileList(artifacts))
   const current = $derived(files.includes(selected) ? selected : (files[0] ?? ''))
   const problems = $derived(problemList(artifacts))
+  /** ★ 分批第 195 批：起草者拒绝 ⇒ 没有"体检"可言（problems 里那条就是拒绝理由本身）。 */
+  const refusedMode = $derived(artifacts !== null && artifacts.mode === 'refused')
   const checkTotal = $derived(problems.length)
   const checksOk = $derived(isOk(artifacts))
   /**
@@ -580,6 +582,20 @@
         <CrystallizeDraftEditor />
       {/if}
 
+      <!--
+        ★ 分批第 195 批：**拒绝的草稿不画体检**。
+
+        它的 `validation.problems` 里那一条就是 `REFUSED.md` 的正文（`assembleArtifacts` 把
+        拒绝理由塞进了 problems）⇒ 右栏会把它当成"问题"再印一遍，于是同一句话在一屏里
+        出现两处（中间那条消息 + 这里）。使用者问"有必要显示 REFUSED.md 的内容吗"——
+        有必要，但只在**中间那条消息**里（它是"为什么不做"的唯一解释）。
+      -->
+      {#if refusedMode}
+        <section class="artifact-checks">
+          <h3 class="artifact-sub">{$t('crystallize.artifactChecks')}</h3>
+          <p class="faint small">{$t('crystallize.artifactRefusedNote')}</p>
+        </section>
+      {:else}
       <section class="artifact-checks">
         <h3 class="artifact-sub">
           {$t('crystallize.artifactChecks')}
@@ -599,6 +615,7 @@
           </ul>
         {/if}
       </section>
+      {/if}
       {/if}
     {/if}
   </div>

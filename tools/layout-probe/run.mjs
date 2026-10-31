@@ -3279,9 +3279,13 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.barNarrowBox',
     label:
-      '★★ 把窗口收窄到 1000px 再量一次：结论条仍是**一条**（高不变）且按钮没有被挤出条外——「开始审核」曾经在 69px 里折成 3 行、高 54px，而那个条件**只在窄的时候出现**',
-    ok: (v) => v !== null && typeof v === 'object' && v.h <= 46 && v.buttonsInside === true,
-    show: (v) => (v ? `${v.w}×${v.h} 按钮在条内=${v.buttonsInside}` : 'null'),
+      '★★ 把窗口收窄到 1000px 再量一次：栏头那排动作（入库 / 反馈 / 放弃）**没有被挤出栏头**、' +
+      '按钮也没折行——「开始审核」曾经在 69px 里折成 3 行、条高 54px，而那个条件**只在窄的时候出现**' +
+      '（分批第 195 批：动作从结论条搬到了栏头，量的是它仍在这一行里）',
+    ok: (v) =>
+      v !== null && typeof v === 'object' && v.buttonsInside === true && v.singleLine === true,
+    show: (v) =>
+      v ? `${v.w}×${v.h} 在栏头内=${v.buttonsInside} 单行=${String(v.singleLine)}` : 'null',
   },
   {
     view: '沉淀',
@@ -3717,20 +3721,20 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.actionsInMessages',
     label:
-      '★★★ 动作在**消息里**、不在页头（§12.12/§12.17）：顶栏一个动作钮都没有，' +
-      '「确认入库」「放弃」在审阅那条产物消息底部——同一个动作只剩一个入口（搬进消息却没删页头 = 两个入口）',
+      '★★★ 动作在**栏头右侧**、消息区里没有（使用者 2026-11："「入库」的按钮不应该在对话下面，' +
+      '可能放顶上右侧比较合理"）：「确认入库」「放弃」都在栏头那一排，而且**同一个动作只有一个入口**',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
-      Array.isArray(v.headerButtons) &&
-      v.headerButtons.length === 0 &&
-      v.confirmInArtifact === true &&
-      v.abandonInArtifact === true,
+      v.confirmInHeader === true &&
+      v.abandonInHeader === true &&
+      v.confirmInMessage === false &&
+      v.abandonInMessage === false,
     show: (v) =>
       v === null
         ? 'null'
-        : `页头 [${Array.isArray(v.headerButtons) ? v.headerButtons.join('|') : '?'}]　` +
-          `消息里 确认 ${String(v.confirmInArtifact)} / 放弃 ${String(v.abandonInArtifact)}`,
+        : `栏头 确认 ${String(v.confirmInHeader)} / 放弃 ${String(v.abandonInHeader)}　` +
+          `消息里 确认 ${String(v.confirmInMessage)} / 放弃 ${String(v.abandonInMessage)}`,
   },
   {
     view: '沉淀',
@@ -3869,35 +3873,57 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.refusedMark',
+    key: 'crystal.refusedHeadText',
     label:
-      '★★★ 拒绝被画成**结论**而不是失败：标记是 `–`、条上没有 `bad`、文案是「起草者判定…」',
-    ok: (v, f) =>
-      v === '–' &&
-      f['crystal.refusedBarBad'] === false &&
-      typeof f['crystal.refusedBar'] === 'string' &&
-      f['crystal.refusedBar'].includes('没有可沉淀'),
-    show: (v, f) => `标记 ${JSON.stringify(v)}　条 ${JSON.stringify((f['crystal.refusedBar'] ?? '').slice(0, 70))}`,
+      '★★★ 拒绝那一轮的 `who` 行说的是「这次没有可沉淀的」——不是「写好了」（它确实没写 skill，写的是 REFUSED.md）',
+    ok: (v) => typeof v === 'string' && v.includes('没有可沉淀') && !v.includes('写好了'),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
-    key: 'crystal.refusedBarNoFailureCopy',
+    key: 'crystal.refusedReasonHits',
     label:
-      '★★★ 结论条里**不再有**「体检发现…问题」「校验未通过」——这正是使用者报的那句话（它让人以为还有一道审核）',
+      '★★★ 拒绝理由在一屏里**只说一次**（使用者："觉得有必要显示 REFUSED.md 的内容吗"——' +
+      '有必要，但只该有一处：它是"为什么不做"的唯一解释）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 次`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedNoConclusionBar',
+    label:
+      '★★★ 拒绝时**不画结论条**（没有可入库的东西，那条只会与上面那句话重复），' +
+      '因此也不再出现「体检发现…问题 / 校验未通过」——那正是使用者以为"还有审核"的来源',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
   {
     view: '沉淀',
-    key: 'crystal.refusedLinesInBubbles',
-    label: '★★ 拒绝理由是一条**消息**（气泡里的正文），而不是抽屉分节里的一块黄条',
-    ok: (v) => v === true,
-    show: (v) => String(v),
+    key: 'crystal.refusedBubbleText',
+    label:
+      '★★ 拒绝理由是**一条消息的正文**（气泡里），不是抽屉分节里的一块黄条；' +
+      '而且**不带文件标题**（`# 这次没有可复用的做法` 那种 H1 不进气泡——上方那行已经说了同一句话）',
+    ok: (v) => typeof v === 'string' && v.includes('只有一次性的环境排错') && !v.includes('#'),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 60)),
   },
   {
     view: '沉淀',
     key: 'crystal.refusedNoReviewHeading',
     label: '★★ 拒绝那一屏**没有**「审阅草稿」这种任务式抬头（它只是它在说话）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedNoConfirmButton',
+    label: '★★★ 拒绝的草稿**没有「确认入库」**（它没有 SKILL.md，入库必然失败——不给按了会被拒的按钮）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedHasExits',
+    label: '★★ 拒绝那一屏的两个出口都在消息里：「重新起草」「放弃」',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
