@@ -4769,6 +4769,22 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           })()
           /**
+           * ★ 分批第 150 批（§12.12/§12.17：动作在消息里，不在页头）：顶栏**没有动作钮**，
+           * 「确认入库」「放弃」在**审阅那条产物消息底部**。
+           *
+           * 为什么量"两处一起"：只量"消息里有确认入库"的话，栏头那个还留着也会绿——
+           * 而这一批要的正是"同一个动作只剩一个入口"。
+           */
+          facts['crystal.actionsInMessages'] = {
+            headerButtons: [...d().querySelectorAll('section.detail-pane > header button')].map(text),
+            confirmInArtifact: [
+              ...d().querySelectorAll('.crystal-msg[data-msg-role="artifact"] button'),
+            ].some((b) => text(b).includes('确认入库')),
+            abandonInArtifact: [
+              ...d().querySelectorAll('.crystal-msg[data-msg-role="artifact"] button'),
+            ].some((b) => text(b).includes('放弃')),
+          }
+          /**
            * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
            * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，
            * 而不是删完对着 36 处"没量到这个值"猜哪里连带空了。
@@ -5737,6 +5753,17 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // 才会走到它。不量的话，那一支标记就是"看着在、其实没人能到达"的疑似死代码；
               // 顺带这一屏也是使用者真会遇到的（起草跑歪了，停下，回头看看素材）。
               {
+                /**
+                 * ★ 分批第 150 批（§12.17："动作在消息里"）：**停止在起草那条系统消息里**。
+                 * 原来它挂在栏头——离"这次起草跑到哪了"隔着整片页面。这条与下面"点它能回目标态"
+                 * 成对：只说"按钮存在"的话，搬错位置（还留在栏头）也会绿。
+                 */
+                facts['crystal.stopInSystemMsg'] = (() => {
+                  const btn = [
+                    ...d().querySelectorAll('.crystal-msg[data-msg-role="system"] button'),
+                  ].find((b) => text(b).includes('停止'))
+                  return !!btn
+                })()
                 const cyStop = [...d().querySelectorAll('button')].find((b) =>
                   text(b).includes('停止'),
                 )

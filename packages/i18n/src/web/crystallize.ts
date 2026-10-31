@@ -161,7 +161,13 @@ export const crystallizeText = {
     zh: '哪里不对 / 该怎么改（任务场景：审核判决会自动带上）',
     en: 'What went wrong / how to fix (task: the review verdict is included automatically)',
   },
-  'crystallize.start': { zh: '开始沉淀', en: 'Start' },
+  // ★ 分批第 150 批：顶栏「开始提炼」删掉之后 `crystallize.start` 没有引用处了
+  //   （开始那一问的按钮文字在 `CrystallizeIntake` 里写着"开始提炼"）。
+  //   同一个位置换成本条：说明「确认入库」为什么按不动（体检没过 / slug 空）。
+  'crystallize.confirmBlocked': {
+    zh: '还不能入库：机械体检没过（右上「产物」栏能逐项看）',
+    en: 'Not ready: the mechanical check failed (see the artifact pane for details)',
+  },
 
   // ── 素材摘要（起草前就可见，§4.1.1） ──
   'crystallize.materialSummary': {

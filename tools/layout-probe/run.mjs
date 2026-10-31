@@ -3609,6 +3609,34 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.actionsInMessages',
+    label:
+      '★★★ 动作在**消息里**、不在页头（§12.12/§12.17）：顶栏一个动作钮都没有，' +
+      '「确认入库」「放弃」在审阅那条产物消息底部——同一个动作只剩一个入口（搬进消息却没删页头 = 两个入口）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      Array.isArray(v.headerButtons) &&
+      v.headerButtons.length === 0 &&
+      v.confirmInArtifact === true &&
+      v.abandonInArtifact === true,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `页头 [${Array.isArray(v.headerButtons) ? v.headerButtons.join('|') : '?'}]　` +
+          `消息里 确认 ${String(v.confirmInArtifact)} / 放弃 ${String(v.abandonInArtifact)}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.stopInSystemMsg',
+    label:
+      '★★ 「停止」在**起草那条系统消息里**（它和"这次起草跑到哪了"是同一件事；' +
+      '搬进消息却没从页头删的，这条会和上面那条一起红）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankEntryPresent',
     label:
       '★★ 「新建沉淀」的**起点屏**（页面内第一问，不再是浮层）里有「从空白或材料起」（§12.7：起点变成第一问）',

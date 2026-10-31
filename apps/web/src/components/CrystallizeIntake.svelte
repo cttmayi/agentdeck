@@ -22,6 +22,12 @@
   let {
     targets,
     blank = false,
+    /**
+     * ★ 分批第 150 批：**开始提炼的门禁理由**（素材为空 / 任务没审过又没反馈 / 更新没选技能）。
+     * 顶栏那个「开始提炼」删掉之后，这一问就是唯一入口 ⇒ 门禁必须说在这一问上，
+     * 否则人会点了才收到服务端一句 `task_gate`（把"不能做"变成"做失败了"）。
+     */
+    blocked = undefined,
     /** ★ 分批第 145 批（U4c 补）：当前问到哪一步要**回传给父级**——栏脚输入条要靠它判断
         "这句话是不是在答问题"（§12.5：还有必答项没答 ⇒ brief 参数）。用 `$bindable` 双向绑。 */
     stage = $bindable('start'),
@@ -30,6 +36,8 @@
     targets: Targets | null
     /** ★ 分批第 133 批：「从空白/材料起」——没有来源 run（起点已由入口选定，不再问）。 */
     blank?: boolean
+    /** 现在还不该开始的原因（空/undefined = 可以开始）。 */
+    blocked?: string | undefined
     stage?: Stage
     onfinish: (p: {
       kind: 'new' | 'update' | 'agent'
@@ -304,8 +312,17 @@
           {#if blank}<dt>起点</dt><dd>空白起（没有来源 run）</dd>{/if}
           {#if stats !== null}<dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>{/if}
         </dl>
+        {#if blocked !== undefined}
+          <p class="faint small" data-intake-blocked>{blocked}</p>
+        {/if}
         <div class="intake-actions">
-          <button type="button" class="primary" onclick={finish}>开始提炼</button>
+          <button
+            type="button"
+            class="primary"
+            disabled={blocked !== undefined}
+            title={blocked}
+            onclick={finish}>开始提炼</button
+          >
           <button type="button" class="ghost" onclick={() => (stage = 'start')}>重答</button>
         </div>
       </div>

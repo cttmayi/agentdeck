@@ -391,18 +391,12 @@
   // 而这条判据（状态未知/非终态 ⇒ 显示实时日志）在单测里就能钉死。
   $: draftLiveNow = draftIsLive(draftStatus)
 
-  $: canStart =
-    targets !== null &&
-    targets.materialStats !== null &&
-    // ★ 任务场景的门槛（设计 §4.3）：有用户反馈 或 审核过才可沉淀。聊天场景无门槛。
-    //   二轮只拦在「任务」页的按钮上；三轮导航页「新建沉淀」能选任意任务，门必须
-    //   在流程页自己也拦一道（后端 draft 路由同样拦，见 server.ts 的 task_gate）。
-    (targets.scope !== 'task' || targets.reviewed || targets.hasUserFeedback) &&
-    // 新建不再要求「作用描述」（四轮定稿：留空则由 skill 从素材推断，审阅时确认）；
-    // 更新仍然要求选一个目标技能；优化智能体要求选中一条候选。
-    (targetKind === 'new' ||
-      (targetKind === 'update' && selectedSkillId !== '') ||
-      (targetKind === 'agent' && selectedAgentId !== ''))
+  // ★ 分批第 150 批：原来这里有一个 `canStart`（顶栏「开始沉淀」按钮的 `disabled`）。
+  //   按钮搬进目标态那一问之后它就是死代码，删掉。**它守的两件事没有丢**：
+  //   ① 任务门槛（§4.3：有用户反馈或审核过才可沉淀）——`startDisabledReason` 把它说成一句话，
+  //      `CrystallizeIntake` 的「开始提炼」按它禁用；服务端 `POST /api/crystallize/draft` 也拦
+  //      （`task_gate`），前端这道只是让人**在点之前**就知道原因；
+  //   ② "更新要选一个技能 / 优化指令要选一条智能体"——那是 intake 的必答项，没选就不会到 ready。
 
   /**
    * 审阅是否可入库：**校验通过**才行。
@@ -1527,31 +1521,15 @@
     <span class="badge {stepStatusClass}" data-cryst-status={step}>{$t(stepStatusKey)}</span>
   {/snippet}
 
-  {#snippet actions()}
-    {#if newMode}
-      <!-- 起点屏没有"开始"：先选来源（或从空白/材料起）——那是消息里的第一问 -->
-    {:else if step === 'target'}
-      <button
-        class="primary"
-        disabled={!canStart || loading}
-        title={startDisabledReason}
-        onclick={() => void startDraft()}
-      >
-        {$t('crystallize.start')}
-      </button>
-    {:else if step === 'drafting'}
-      {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-        <button class="primary" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-      {:else}
-        <button class="ghost" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
-      {/if}
-    {:else if step === 'review'}
-      <button class="ghost" onclick={() => void abandonReview()}>{$t('crystallize.abandon')}</button>
-      <button class="primary" disabled={saving || !reviewValid} onclick={() => void save()}>
-        {$t('crystallize.confirm')}
-      </button>
-    {/if}
-  {/snippet}
+  <!--
+    ★ 分批第 150 批（§12.12/§12.17："动作在消息里，不在页头"）：**顶栏动作整块删掉**。
+    原来栏头右侧挂着「开始提炼 / 停止 / 重新起草 / 放弃 / 确认入库」——那是流程页的习惯：
+    把"这一步能做什么"做成页面外壳的一部分。而这一页的形状是"消息流 + 栏脚"：
+      · 开始提炼 ⇒ 目标态最后一问就是它（`CrystallizeIntake` 的 ready 那一问，门禁也说在那里）；
+      · 停止 / 重新起草 ⇒ 起草那条系统消息里（状态就在旁边，谁能做什么一目了然）；
+      · 放弃 / 确认入库 ⇒ 审阅那条产物消息底部（结论、改动、出口在同一块里）。
+    ⚠️ 不要为"好找"再把它们搬回栏头：动作离结论远了，人会先看见结论再去找按钮。
+  -->
 
   {#snippet body()}
     <!--
@@ -1662,6 +1640,7 @@
         <CrystallizeIntake
           {targets}
           blank={blankMode}
+          blocked={loading ? undefined : startDisabledReason}
           bind:this={intakeRef}
           onfinish={applyIntake}
         />
@@ -1729,7 +1708,11 @@
                 <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
               </div>
             {:else}
-              <p class="faint small">{$t('crystallize.drafting')}</p>
+              <!-- ★ 分批第 150 批：停止从这里走（原来挂在栏头——动作离它说明的东西太远） -->
+              <div class="row-end msg-actions" data-msg-actions>
+                <p class="faint small">{$t('crystallize.drafting')}</p>
+                <button class="ghost small" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
+              </div>
             {/if}
             <div class="log-box">
               <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
@@ -1874,6 +1857,24 @@
                   onclick={() => void toggleReviseBox()}
                 >{$t('crystallize.reviseTitle')}</button>
               {/if}
+              <!--
+                ★ 分批第 150 批（§12.17："四种续法都只是一句话"）：**这一版的出口就在结论这一行**。
+                原来「放弃 / 确认入库」挂在栏头——人先在结论里读到"体检通过、3 个文件"，再抬头去
+                右上角找按钮。搬进结论条这一行之后，读结论与收尾是同一件事。
+                ⚠️ 放在**结论条这一行**而不是消息底部：试过底部（`.msg-actions`），编辑格被顶上去
+                35px，探针的"主区底边贴内容盒底"当场差 135px——那条判据量的正是"窗格吃满剩余高度"。
+              -->
+              <span class="bar-actions" data-msg-actions>
+                <button class="ghost small" onclick={() => void abandonReview()}
+                  >{$t('crystallize.abandon')}</button
+                >
+                <button
+                  class="primary small"
+                  disabled={saving || !reviewValid}
+                  title={reviewValid ? undefined : $t('crystallize.confirmBlocked')}
+                  onclick={() => void save()}
+                >{$t('crystallize.confirm')}</button>
+              </span>
             </span>
           </div>
 
@@ -2115,6 +2116,7 @@
                （`.preview` 的 CSS 与 `renderMarkdown` 的 import 一并删了——留着就是死代码，
                本仓库最防的就是"东西都在、就是没有路径让它发生"。）
           -->
+
         {/if}
             </div>
 {/if}
@@ -2190,6 +2192,23 @@
 </MainArea>
 
 <style>
+  /* ★ 分批第 150 批：动作搬进消息之后的间距——要和上面的日志分开一点，
+     但不要另起一块"工具栏"（动作贴在内容尾巴上，不抢视觉） */
+  .msg-actions {
+    margin-top: var(--sp-2);
+    gap: var(--sp-2);
+  }
+  .msg-actions p {
+    margin: 0;
+  }
+  /* 结论条里的动作组：与「保存改动 / 反馈」同一行，中间留一点呼吸 */
+  .conclusion-bar .bar-actions[data-msg-actions] {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    margin-left: var(--sp-2);
+  }
+
   /* ★ 分批第 27 批：「链上出了新版，但你正在改」的提示条。
      做得比结论条**轻**（一行、无边框强调）：它是提示，不是状态本身。 */
   .new-version-bar {
