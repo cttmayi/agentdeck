@@ -36,7 +36,6 @@
 
   let {
     draftRunId,
-    version = 1,
     /**
      * ★ 分批第 147 批：**材料被人从别处改过**的信号（追加材料 / 删掉材料）。
      *
@@ -50,7 +49,6 @@
     onchanged = () => {},
   }: {
     draftRunId: string
-    version?: number
     rev?: number
     onchanged?: () => void
   } = $props()
@@ -442,7 +440,7 @@
   <header class="pane-head detail-head">
     <h2>{$t('crystallize.artifactTitle')}</h2>
     <div class="pane-actions">
-      {#if version > 1}<span class="faint small">{$t('crystallize.artifactVersion', { n: String(version) })}</span>{/if}
+      <!-- ★ 分批第 174 批：栏头的"第 N 版"去掉了（同上：它只是个计数，没有行为依赖） -->
       <!-- ★ 分批第 173 批：沉淀用技能（可选）挂在栏头——它不该占正文的竖向空间
            （右栏的高度是编辑器的：多 40px 就把编辑器推出首屏，探针会红）。 -->
       <span class="artifact-skill" data-draft-skill title={$t('crystallize.draftSkillHint')}>

@@ -314,10 +314,10 @@
                      显示 run 的「已完成」会让使用者以为已经沉淀完了（见
                      lib/crystallize-state.ts 顶部那段）。 -->
                 <span class="badge {crystallizeStateClass(stateOf(row))}">{$t(crystallizeStateKey(stateOf(row)))}</span>
-                <!-- ★ 第 2 版起才显示"第 N 版"：第一版不显示，免得每行都挂一句没信息量的话 -->
-                {#if row.version > 1}
-                  <span class="faint small">{$t('crystallize.rowVersion', { n: String(row.version) })}</span>
-                {/if}
+                <!-- ★ 分批第 174 批（使用者："第 N 版只是统计吗，没用就先不用显示"）：**去掉了**。
+                     `version` 是"这个沉淀任务里有几版"的计数，**没有任何行为依赖它**
+                     （快照/差异/回滚都按 run id 走，不按序号）⇒ 只当装饰的话就是噪音。 -->
+
                 <span class="faint small">{targetLabel(row)}</span>
                 <span class="faint small" title={absoluteTime(row.queuedAt)}
                   >{relativeTime(row.queuedAt, now)}</span
@@ -372,7 +372,6 @@
     ></button>
     <CrystallizeArtifactPane
       draftRunId={$crystallize.runId}
-      version={selectedRow?.version ?? 1}
       rev={materialRev}
       onchanged={bumpMaterial}
     />

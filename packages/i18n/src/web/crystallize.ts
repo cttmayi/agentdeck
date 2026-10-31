@@ -248,7 +248,6 @@ export const crystallizeText = {
   'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
   // 列表行上的"第几版"（分批第 17 批）：一行是一个**任务**，版本数是它的属性。
   // 不带 markdown 记号（界面文案守卫）。
-  'crystallize.rowVersion': { zh: '第 {n} 版', en: 'v{n}' },
   'crystallize.reviseTitle': {
     zh: '反馈',
     en: 'Give feedback',
@@ -303,7 +302,6 @@ export const crystallizeText = {
   // 所以这里不能说“N 过 M 缺”，只能说实话：通过了 / 有几项问题。
   'crystallize.artifactChecksPassed': { zh: '通过', en: 'Passed' },
   'crystallize.artifactChecksProblems': { zh: '{n} 项问题', en: '{n} problems' },
-  'crystallize.artifactVersion': { zh: '第 {n} 版', en: 'v{n}' },
   'crystallize.artifactEmpty': {
     zh: '还没有产物。起草完成后，文件会出现在这里；过程仍留在中间那一栏。',
     en: 'No artifact yet. Files show up here once drafting finishes; the process stays in the middle pane.',
