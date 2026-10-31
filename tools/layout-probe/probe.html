@@ -4981,117 +4981,49 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.evidenceInFirstScreen'] = null
           }
 
-          // ── 过程 tab：审核日志 + 起草 run（两态：最后结果 / 完整日志）──
-          const cyProcessTab = cyTabButton('过程')
-          if (cyProcessTab) {
-            click(cyProcessTab)
-            const cyProcOk = await until(() => !!d().querySelector('.process-pane'), 60)
-            facts['crystal.processOpens'] = cyProcOk
-
-            // ══════════════════════════════════════════════════════════════
-            // ★ 分批第 19 批：「过程」劈成两个子 tab（草稿过程 / 审核过程）
-            // ══════════════════════════════════════════════════════════════
-            //
-            // 这一屏的夹具是**没审过**的那条草稿 ⇒ 默认该停在「草稿过程」（停审核过程的话
-            // 那一格只有一句"还没审过"，等于把唯一的实时信息藏起来）。
-            // 量四件：① 两个子 tab 都在；② 默认停在草稿过程；③ 草稿过程里有「起草 run」；
-            //        ④ ★ 切到审核过程之后，「起草 run」那一块**不在页面上**——这条才是"真劈开了"，
-            //           只量"两个 tab 存在"的话，把两块摞在同一个 pane 里照样过。
-            const cySubTabs = [...d().querySelectorAll('.process-subtabs button')].map((b) => text(b))
-            facts['crystal.processSubTabs'] = cySubTabs
-            facts['crystal.processDefaultTab'] = (() => {
-              const active = [...d().querySelectorAll('.process-subtabs button')].find((b) =>
-                b.classList.contains('tabs-active'),
-              )
-              return active ? text(active) : null
-            })()
-            const cySubDraft = [...d().querySelectorAll('.process-subtabs button')].find(
-              (b) => text(b) === '草稿过程',
-            )
-            const cySubAudit = [...d().querySelectorAll('.process-subtabs button')].find(
-              (b) => text(b) === '审核过程',
-            )
-            facts['crystal.processDraftHasRunBlock'] = !!(
-              [...d().querySelectorAll('.process-pane .drawer-section')].find((el) =>
+          // ★ 分批第 143 批（U4d）：**「过程」tab 已删**——起草 run 的过程现在挂在
+          //   **系统消息**（`.crystal-msg[data-msg-role="system"]`）上（审阅态也在时间线里）。
+          //   判据从"切到过程 tab 里看"改成"在系统消息里看"：两态（最后结果 / 完整日志）
+          //   仍然要能切，过程格的尺寸判据也改量这条消息。
+          const draftSysMsg = () => d().querySelector('.crystal-msg[data-msg-role="system"]')
+          facts['crystal.processOpens'] = !!draftSysMsg()
+          const draftSection = draftSysMsg()
+            ? [...draftSysMsg().querySelectorAll('.drawer-section')].find((el) =>
                 (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
               )
-            )
-            if (cySubAudit) {
-              click(cySubAudit)
-              await until(() => !!d().querySelector('.process-pane'), 40)
-              await wait(150)
-              facts['crystal.processAuditPaneHasNoDraftBlock'] = ![
-                ...d().querySelectorAll('.process-pane .drawer-section'),
-              ].some((el) => (el.querySelector('h3')?.textContent ?? '').includes('起草 run'))
-              // 上面「起草 run」两态那一段量的是**草稿过程**那一格 ⇒ 切回去，别让它量到空 pane
-              if (cySubDraft) {
-                click(cySubDraft)
-                await until(
-                  () =>
-                    !![...d().querySelectorAll('.process-pane .drawer-section')].find((el) =>
-                      (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
-                    ),
-                  40,
-                )
-              }
-            }
-
-            // ★★ 起草 run：默认**最后结果**，一点换成**完整日志**（使用者第三条：
-            //    "应该类似任务中的最后结果和完整日志一样的切换方式"）。
-            //    这一块随第 3 批搬进「过程」tab，断言不变、只是要先切过来。
-            const draftSection = [...d().querySelectorAll('.process-pane .drawer-section')].find(
-              (el) => (el.querySelector('h3')?.textContent ?? '').includes('起草 run'),
-            )
-            facts['crystal.draftSectionFound'] = !!draftSection
-            // ⚠️ 「最后结果」是异步读回来的（`loadDraftFinalText`）⇒ 等它出现再量，
-            //    否则会量到 null、把"内容没吃满"判成布局缺陷（这一节挪到主屏之后才暴露）。
-            await until(() => !!draftSection?.querySelector('.draft-final'), 60)
-            const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
-            facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
-            /**
-             * ★★★ 分批第 33 批：这一屏的草稿**有**最后结果 ⇒ 正好用来量"草稿过程那一格
-             * 的内容有没有吃满"。审核过程那一档在 fail-verdict 那屏量（那边有日志框）。
-             * 两屏合起来才是使用者说的"两个 tab 都要自适应"。
-             */
-            {
-              const pane = d().querySelector('[data-process-pane="draft"]')
-              const paneRect = cyRect(pane)
-              const box = d().querySelector('.pane-body.detail-scroll')
-              const boxRect = cyRect(box)
-              const padB = box ? parseFloat(cs(box).paddingBottom || '0') : 0
-              const finalRect = cyRect(finalEl)
-              facts['crystal.procFinalPaneH'] = paneRect ? Math.round(paneRect.h) : null
-              facts['crystal.procFinalContentH'] = finalRect ? Math.round(finalRect.h) : null
-              facts['crystal.procFinalGap'] =
-                paneRect === null || boxRect === null
-                  ? null
-                  : Math.round(boxRect.y + boxRect.h - padB - (paneRect.y + paneRect.h))
-            }
-            const toggle = draftSection
-              ? ([...draftSection.querySelectorAll('h3 button')][0] ?? null)
-              : null
-            facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
-            if (toggle) {
-              click(toggle)
-              await until(() => !!draftSection?.querySelector('.log-box'), 60)
-              facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
-              facts['crystal.draftToggleLabelAfter'] = text(toggle)
-              click(toggle)
-              await until(() => !!draftSection?.querySelector('.draft-final'), 60)
-              facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
-            }
-
-            const cyBackToDraft2 = cyTabButton('草稿')
-            if (cyBackToDraft2) click(cyBackToDraft2)
-            await until(() => !!d().querySelector('.review-pane .file-body'), 60)
-          } else {
-            facts['crystal.processOpens'] = null
-            facts['crystal.draftSectionFound'] = null
-            facts['crystal.draftFinalText'] = null
-            facts['crystal.draftLogAfterToggle'] = null
-            facts['crystal.draftBackToFinal'] = null
+            : null
+          facts['crystal.draftSectionFound'] = !!draftSection
+          facts['crystal.processDraftHasRunBlock'] = !!draftSection
+          // ⚠️ 「最后结果」是异步读回来的 ⇒ 等它出现再量
+          await until(() => !!draftSection?.querySelector('.draft-final'), 60)
+          const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
+          facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
+          {
+            const paneRect = cyRect(draftSysMsg())
+            const box = d().querySelector('.pane-body.detail-scroll')
+            const boxRect = cyRect(box)
+            const padB = box ? parseFloat(cs(box).paddingBottom || '0') : 0
+            const finalRect = cyRect(finalEl)
+            facts['crystal.procFinalPaneH'] = paneRect ? Math.round(paneRect.h) : null
+            facts['crystal.procFinalContentH'] = finalRect ? Math.round(finalRect.h) : null
+            facts['crystal.procFinalGap'] =
+              paneRect === null || boxRect === null
+                ? null
+                : Math.round(boxRect.y + boxRect.h - padB - (paneRect.y + paneRect.h))
           }
-
+          const toggle = draftSection
+            ? ([...draftSection.querySelectorAll('h3 button')][0] ?? null)
+            : null
+          facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
+          if (toggle) {
+            click(toggle)
+            await until(() => !!draftSection?.querySelector('.log-box'), 60)
+            facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
+            facts['crystal.draftToggleLabelAfter'] = text(toggle)
+            click(toggle)
+            await until(() => !!draftSection?.querySelector('.draft-final'), 60)
+            facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
+          }
           // 「按意见改一版」：输入框**默认不在**（点开才占一行）
           // ★ 分批第 17 批：按钮改名「按意见再改一版」→「反馈」，这里跟着改。
           //   ⚠️ 我第一版只改了"点开框"那一处，漏了这一处 ⇒ 判据 `点它之后输入框真的出现`
@@ -5303,11 +5235,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             })()
 
             const cyProbePane = async (name, paneSel) => {
-              const btn = cyProcTab(name)
-              if (btn && !btn.classList.contains('tabs-active')) {
-                click(btn)
-                await untilNet(() => !!d().querySelector(paneSel), 60)
-              }
+              void name
               const pane = d().querySelector(paneSel)
               const rect = cyRect(pane)
               // 日志框与「最后结果」是同一条规矩的两种形态（在跑 = 日志；跑完 = 最后结果），
@@ -5327,14 +5255,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 logBoxH: logRect ? Math.round(logRect.h) : null,
               }
             }
-            // ★ 分批第 137 批：审核过程子 tab 已删 ⇒ 这里只剩**草稿过程**那一格
-            //   （它照样要"贴着内容盒底"，那组判据本来就是量草稿格的）。
-            const cyDraftProc = await cyProbePane('草稿过程', '[data-process-pane="draft"]')
+            // ★ 分批第 143 批（U4d）：过程 tab 已删 ⇒ 草稿过程在**系统消息**里
+            //   （它照样要"贴着内容盒底"，那组判据本来就是量这一格的）。
+            const cyDraftProc = await cyProbePane('草稿过程', '.crystal-msg[data-msg-role="system"]')
             facts['crystal.procDraftPaneH'] = cyDraftProc.paneH
             // ⚠️ 形态要**无条件**量（第一版只在 paneH===0 时量 ⇒ 判据拿到 undefined，
             //    把"空态"误判成"有内容但没吃满"。这一屏的草稿确实没有文字产出 ⇒ 空态是对的）。
             {
-              const pane = d().querySelector('[data-process-pane="draft"]')
+              const pane = d().querySelector('.crystal-msg[data-msg-role="system"]')
               facts['crystal.procDraftState'] = !pane
                 ? 'missing'
                 : pane.querySelector('.log-box')
@@ -5425,7 +5353,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.agentFixtureId'] = cyAgentDraft || null
             if (cyAgentDraft) {
               f.contentWindow.location.hash = '#/tasks'
-              await until(() => !d().querySelector('.review-tabs'), 40)
+              await until(() => !d().querySelector('.crystal-chat'), 80)
+              await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${cyAgentDraft}`
               // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
               facts['crystal.agentAttached'] = await until(
@@ -5485,7 +5414,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const cyReadDraft = async (id) => {
               if (!id) return null
               f.contentWindow.location.hash = '#/tasks'
-              await until(() => !d().querySelector('.review-tabs'), 40)
+              await until(() => !d().querySelector('.crystal-chat'), 80)
+              await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${id}`
               // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
               const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
@@ -5503,7 +5433,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.sourceEntryRows'] = cySourceView ? cySourceView.rows : null
             // 收尾：切走路由（后面的小节自己会进它要的页面）
             f.contentWindow.location.hash = '#/tasks'
-            await until(() => !d().querySelector('.review-tabs'), 40)
+            await until(() => !d().querySelector('.crystal-chat'), 80)
+              await wait(80)
           }
 
           // ══════════════════════════════════════════════════════════════
@@ -5521,7 +5452,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.targetFixtureId'] = cyTarget || null
             if (cyTarget) {
               f.contentWindow.location.hash = '#/tasks'
-              await untilNet(() => !d().querySelector('.review-tabs'), 20)
+              await untilNet(() => !d().querySelector('.crystal-chat'), 40)
+              await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${cyTarget}`
               // 目标态的标志：那张表单（radio 行 + 作用描述框）**当场**就在，不用点「继续」
               // 分批第 96 批：先按**状态锚点**定位这一屏，再在它里面找控件。
@@ -5615,7 +5547,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const cyEnterDrafting = async () => {
               if (!cyDrafting) return false
               f.contentWindow.location.hash = '#/tasks'
-              await untilNet(() => !d().querySelector('.review-tabs'), 20)
+              await untilNet(() => !d().querySelector('.crystal-chat'), 40)
+              await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${cyDrafting}`
               // ★ 分批第 141 批：自动接上（不再有「继续」按钮）
               // 起草中的标志：**状态锚点 = drafting** + 那个 run 的日志框（不是结论条——那时还没审核）。
@@ -5786,7 +5719,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             // ★ 兜底：**保证那条 SSE 关掉**（这一屏的 run 是 Node 侧起的，探针刚把它停了，
             //   真停不掉就靠切路由卸载组件；假 CLI 的残留进程由 run.mjs 收尾时一起杀）。
             f.contentWindow.location.hash = '#/tasks'
-            await untilNet(() => !d().querySelector('.review-tabs'), 20)
+            await untilNet(() => !d().querySelector('.crystal-chat'), 40)
+              await wait(80)
           }
         }
 
@@ -5806,7 +5740,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         //    否则"没进去"会被读成一堆 null，看起来像界面坏了（§12.25 的入口纪律）。
         {
           f.contentWindow.location.hash = '#/crystallize'
-          await untilNet(() => !!d().querySelector('.list-pane'), 40)
+          // ⚠️ 等的是**这一页的顶栏按钮**，不是 `.list-pane`（任务页也有 `.list-pane`，会量到别的页）
+          await untilNet(
+            () =>
+              [...d().querySelectorAll('.topbar .page-actions button')].some((b) =>
+                text(b).includes('新建沉淀'),
+              ),
+            60,
+          )
           const blankOpenBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
             text(b).includes('新建沉淀'),
           )

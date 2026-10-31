@@ -137,19 +137,12 @@
    * 同一个交互：换的是同一块位置里的内容）。
    */
   /**
-   * 审阅屏的三个 tab：`草稿` / `依据` / `过程`（2026-10-21 使用者确认的信息分层）。
-   * ⚠️ 名字不能叫 `reviewTab`——那个名字已经被下面"内容 / 差异"的内层切换占了
-   *    （`js_parse_error: Identifier 'reviewTab' has already been declared`，svelte-check 当场报）。
-   *    两层各叫各的：外层 `reviewSection`（草稿/依据/过程）、内层 `reviewTab`（内容/差异）。
-   *
-   * 常驻的只有结论条那一块；这三块互不"同时要看"——
-   *   · 草稿 = 要动手的那一屏（树 + 编辑器 / 差异），默认停在这里；
-   *   · 依据 = 起草者读过的素材（原来折在编辑器**下面** y≈842 处：要滚下去，
-   *     还要先展开一层折叠；现在一进来点一下就有）；
-   *   · 过程 = 审核问题清单 + 审核日志 + 起草 run（两态：最后结果 / 完整日志）。
-   * ⚠️ 原来这三块是竖着摞的，其中"过程"那两块（日志、起草 run）还把编辑器往下推。
+   * ★ 分批第 143 批（U4d，§12.7「删掉的东西：tab 机制」）：审阅态的 `草稿 / 依据 / 过程`
+   *   三个 tab **已删**。现在这一屏只有两块：**消息流里的产物消息**（树 + 编辑/差异并排）与
+   *   **右栏的常驻产物栏**（文件 / 体检 / 版本 / 材料清单）。依据在右栏（§12.14「右栏是正式清单」），
+   *   起草过程在它自己的**系统消息**里（U3b 已经搬过去，这一批让它跑到审阅态也还在）。
    */
-  let reviewSection: 'draft' | 'evidence' | 'process' = 'draft'
+
 
   /**
    * 起草中那一屏的两个 tab：`产出` / `依据`（2026-10-21 第 4 批）。
@@ -467,6 +460,9 @@
     materialStats = null
     handledTerminal = false
     attached = false
+    // ★ 分批第 143 批：自动接上的护栏是**每个 run 一次**——换了 runId 必须复位，
+    //   否则同一组件实例里换屏之后永远不再自动接（探针用 iframe 连续切换多条夹具，当场量到）。
+    autoAttached = false
     artifacts = null
     selectedFile = 'SKILL.md'
     editText = ''
@@ -476,7 +472,6 @@
     material = null
     materialPick = ''
     reviewTab = 'content'
-    reviewSection = 'draft'
     reviseOpen = false
     reviseFeedback = ''
     revising = false
@@ -941,7 +936,6 @@
   function selectFile(rel: string): void {
     // 点文件 = 想看内容；留在「差异」标签会让人以为点错了
     reviewTab = 'content'
-    reviewSection = 'draft'
     selectedFile = rel
     editText = artifacts?.files[rel] ?? ''
   }
@@ -1634,6 +1628,68 @@
               （每块 240px 没法读），所以用分段控件在同一个窗格里切；两者都吃满宽度，
               而且切换不滚动（改之前 diff 在编辑器下方 519px 处）。
       -->
+      {#if step === 'drafting'}
+        
+
+        <!-- ★ 分批第 115 批（U3c-2 第 5 步·起草态）：依据不再分 tab —— 它就在日志下面。
+             ★ 分批第 143 批（U4d）：`data-process-pane="evidence"` 这个名字保留给探针定位用
+             （它量的是"起草时能看到目标摘要与素材"），但它现在不是"过程 tab"的内容了。 -->
+        <div class="process-pane" data-process-pane="evidence">
+            <div class="proc-block">
+              <div class="proc-head">{$t('crystallize.stepTarget')}</div>
+              {@render targetSummary()}
+            </div>
+            <div class="proc-block">
+              <div class="proc-head">{$t('crystallize.materialTitle')}</div>
+              {#if material === null}
+                <div class="skeleton"></div>
+              {:else}
+                <div class="file-pane">
+                  {@render materialPane()}
+                </div>
+              {/if}
+            </div>
+          </div>
+      {/if}
+
+      {#if draftRunId !== '' && (step === 'drafting' || step === 'review' || step === 'done')}
+      <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
+           日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
+           而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
+      <div class="crystal-msg" data-msg-role="system">
+        {#if step === 'drafting'}
+        <section class="drawer-section">
+          <h3>
+            {$t('crystallize.draftSection')}
+            <span class="faint small">
+              run {runShort}…
+              {#if draftStatus}
+                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
+              {/if}
+            </span>
+          </h3>
+          <div class="section-body">
+            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
+              <div class="notice bad small">
+                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
+                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
+                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+              </div>
+            {:else}
+              <p class="faint small">{$t('crystallize.drafting')}</p>
+            {/if}
+            <div class="log-box">
+              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+            </div>
+          </div>
+        </section>
+        {:else}
+          <!-- 审阅/完成态：起草那条 run 的过程（默认"最后结果"，可切完整日志）仍在**时间线**里 -->
+          {@render draftRunPane()}
+        {/if}
+      </div>
+      {/if}
+
       {#if step === 'review'}
       <!-- ★ 分批第 109 批（U3c-1）：审阅态整体是**一条产物消息**（只包不删；删 review-tabs 是 U3c-2）。
            边界用 Svelte 自己的 AST 量出来的（58328 → 89030），不是靠正则数块——
@@ -1742,12 +1798,8 @@
                    它们改成**切到那个 tab**——一个东西只有一个开关，否则"折起来的问题清单"
                    与"tab 里的问题清单"会同时存在，人分不清哪个是真的。
               -->
-              {#if artifacts !== null && !artifacts.validation.ok}
-                <!-- 体检不过：切到「过程」看明细（那里只有起草过程 + 体检问题清单） -->
-                <button class="ghost small" onclick={() => (reviewSection = 'process')}
-                  >{$t('crystallize.checkShowDetail')}</button
-                >
-              {/if}
+              <!-- ★ 分批第 143 批（U4d）：`看体检明细` 这个跳转按钮删了——它原来只是切到「过程」tab，
+                   而 tab 机制已删；体检的问题清单本来就常驻在结论条正下方（不需要再跳一次）。 -->
               <!--
                 ★ 分批第 8 批：「保存改动」。
                 只在**有未保存改动**时出现（`dirty`）：没有改动时它是个不该被点的按钮，
@@ -1867,33 +1919,8 @@
             三块原来竖着摞：编辑器在 y≈490 起、素材折在 y≈842、起草 run 在 y≈1002——
             "过程"那两块把编辑器往下推了 300 多像素，而它们只在"我要追过程"时才看。
           -->
-          <div class="review-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={reviewSection === 'draft'}
-              class:tabs-active={reviewSection === 'draft'}
-              onclick={() => (reviewSection = 'draft')}
-            >{$t('crystallize.tabDraft')}</button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={reviewSection === 'evidence'}
-              class:tabs-active={reviewSection === 'evidence'}
-              onclick={() => (reviewSection = 'evidence')}
-            >{$t('crystallize.tabEvidence')}</button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={reviewSection === 'process'}
-              class:tabs-active={reviewSection === 'process'}
-              onclick={() => (reviewSection = 'process')}
-            >
-              {$t('crystallize.tabProcess')}
-            </button>
-          </div>
-
-          {#if reviewSection === 'draft'}
+          <!-- ★ 分批第 143 批（U4d）：tab 条已删（§12.7「删掉的东西：tab 机制」）。
+               这一屏只剩"要动手的那一块"：树 + 窗格（内容 / 差异 并排）。 -->
           <!-- ── 草稿：树 + 窗格（内容 / 差异 同位置切换） ── -->
           <div class="review-pane">
             <ul class="file-tree">
@@ -2035,38 +2062,6 @@
                （`.preview` 的 CSS 与 `renderMarkdown` 的 import 一并删了——留着就是死代码，
                本仓库最防的就是"东西都在、就是没有路径让它发生"。）
           -->
-          {:else if reviewSection === 'evidence'}
-            <!-- ── 依据：起草者读过的素材（只读）。原来折在编辑器下面 y≈842 处 ── -->
-            <div class="file-pane evidence-pane">
-              <div class="evi-head">
-                <code>material/</code>
-                <span class="grow faint small">{$t('crystallize.evidenceHead')}</span>
-                {#if material !== null}
-                  <span class="faint small">
-                    {material.items.length} {$t('crystallize.filesUnit')} · {material.dirLabel}
-                  </span>
-                {/if}
-              </div>
-              {#if material === null}
-                <div class="skeleton"></div>
-              {:else}
-                {@render materialPane()}
-              {/if}
-            </div>
-          {:else}
-            <!--
-              ── 过程：怎么走到这一步的 ──
-              ★ 分批第 137 批（§12.42 第 ③ 步）：沉淀线的「审核」整条删掉之后，这一格只剩
-                 **起草过程**（子 tab 随之退化成一座无用的开关，已删）。现在直接铺起草那条
-                 run 的过程（`draftRunPane`：最后结果 / 完整日志 两态）。
-            -->
-            <!-- ── 草稿过程：起草那条 run（默认"最后结果"，一点换"完整日志"） ── -->
-            <div class="process-pane" data-process-pane="draft">
-              {#if draftRunId !== ''}
-                {@render draftRunPane()}
-              {/if}
-            </div>
-          {/if}
         {/if}
             </div>
 {/if}
@@ -2094,63 +2089,8 @@
           · 产出（默认）= 那条 run 的状态 + 实时输出（跑完自动进审阅态，这里不用两态）；
           · 依据 = 目标摘要（新建 / 更新谁）+ 素材（不折叠：进了 tab 再折一层就是多一次点击）。
       -->
-      {#if step === 'drafting'}
-        
 
-        <!-- ★ 分批第 115 批（U3c-2 第 5 步·起草态）：依据不再分 tab —— 它就在日志下面。
-             原来要点头部的「依据」才看得到，而它说的是"这一版照着什么做的"，属于**看日志时正想知道的**。 -->
-        <div class="process-pane" data-process-pane="evidence">
-            <div class="proc-block">
-              <div class="proc-head">{$t('crystallize.stepTarget')}</div>
-              {@render targetSummary()}
-            </div>
-            <div class="proc-block">
-              <div class="proc-head">{$t('crystallize.materialTitle')}</div>
-              {#if material === null}
-                <div class="skeleton"></div>
-              {:else}
-                <div class="file-pane">
-                  {@render materialPane()}
-                </div>
-              {/if}
-            </div>
-          </div>
-      {/if}
 
-      {#if draftRunId !== '' && step === 'drafting'}
-      <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
-           日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
-           而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
-      <div class="crystal-msg" data-msg-role="system">
-        <section class="drawer-section">
-          <h3>
-            {$t('crystallize.draftSection')}
-            <span class="faint small">
-              run {runShort}…
-              {#if draftStatus}
-                <span class="badge {runStatusClass(draftStatus)}">{statusLabel(draftStatus)}</span>
-              {/if}
-            </span>
-          </h3>
-          <div class="section-body">
-            {#if draftStatus === 'failed' || draftStatus === 'cancelled'}
-              <div class="notice bad small">
-                {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-                {#if draftFailedReason !== ''}：{draftFailedReason}{/if}
-                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-              </div>
-            {:else}
-              <p class="faint small">{$t('crystallize.drafting')}</p>
-            {/if}
-            <div class="log-box">
-              <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-            </div>
-          </div>
-        </section>
-      </div>
-      {/if}
-
-      <!-- ── 完成态：已沉淀 + git 状态 + 查看技能 ── -->
       {#if step === 'done'}
         <section class="notice good done-box">
           <strong>{$t('crystallize.doneTitle')}</strong>

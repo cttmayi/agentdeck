@@ -3144,41 +3144,8 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.evidenceOpens',
-    label: '★★ 「依据」tab 里看得到起草者读过的素材（清单真的列出来）',
-    ok: (v) => v === true,
-    show: (v, f) => JSON.stringify(f['crystal.evidenceRows']),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.evidencePreviewLen',
-    label: '★★ 素材正文真的渲染出来（只列文件名不叫"依据"）',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v) => `${v} 字`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.evidenceNoFold',
-    label: '★ 依据 tab 里**没有**折叠段了：搬进 tab 之后再折一层等于多一次点击',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.evidenceInFirstScreen',
-    label: '★★ 依据那一屏**整个**落在首屏里（改前素材折在 y≈842，展开后还要在下面滚）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.evidencePaneCols',
-    label: '★ 依据 tab 也是**真并排**两列（清单 + 正文），与审阅主区同一套观感',
-    ok: (v) => typeof v === 'string' && v.split(' ').filter(Boolean).length >= 2,
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
     key: 'crystal.processOpens',
-    label: '★★ 「过程」tab 打得开（审核日志与起草 run 都住在这里）',
+    label: '★★ 起草 run 的过程仍在时间线里（U3b 的**系统消息**；tab 删了它也还在）',
     ok: (v) => v === true,
   },
   {
@@ -3204,7 +3171,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.draftSectionFound',
     label:
-      '夹具：切到「过程」tab 后找得到「起草 run」那一块（下面四条量的是它的两态；第 3 批把它从主区下方搬进了这里）',
+      '夹具：系统消息里找得到「起草 run」那一块（下面几条量的是它的两态：最后结果 / 完整日志）',
     ok: (v) => v === true,
   },
   {
@@ -3214,29 +3181,6 @@ const CHECKS = [
       '★★★ 「起草 run」默认显示**最后结果**（那条 run 的最后一段正文）——改之前展开全是原始流水，人得自己在里面找最后那段话',
     ok: (v) => typeof v === 'string' && v.includes('探针夹具的最后结果'),
     show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.procFinalContentH',
-    label:
-      '★★★ 草稿过程那一格的「最后结果」也吃到格子的一半以上（这一屏的草稿**有**文字产出；改之前它只有内容高、格子却是 400+）',
-    ok: (v, f) =>
-      typeof v === 'number' &&
-      typeof f['crystal.procFinalPaneH'] === 'number' &&
-      v >= Number(f['crystal.procFinalPaneH']) * 0.5,
-    show: (v, f) => `内容 ${v}px / 格子 ${f['crystal.procFinalPaneH']}px`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.procFinalGap',
-    label: '★★ 草稿过程那一格同样贴着内容盒底（差 ≤ 1% 视口高）',
-    // ★ 分批第 131 批：参照物从"输入条高"换成"栏脚整块高"（输入条 + 回执 + 两个 margin，
-    //   见 probe.html 里 `crystal.footH` 的注释）。回执是 §12.41 定下的常驻 UI，不是缺陷。
-    ok: (v, f) =>
-      typeof v === 'number' &&
-      v >= 0 &&
-      v - Number(f['crystal.footH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.viewportH']) * 0.01)),
-    show: (v) => `差 ${v}px`,
   },
   {
     view: '沉淀',
@@ -3282,12 +3226,18 @@ const CHECKS = [
     label: '★★ 两条老横条的结构都不在了（`.review-bar-block` / `.audit-block`——留着就是两套并存）',
     ok: (v) => v === true,
   },
+  // ★ 分批第 143 批（U4d）：`procFinalContentH` / `procFinalGap` 两条删了——
+  //   它们量的是"过程 tab 里草稿过程那一格把格子吃满没有"，而 tab 与格子都删了：
+  //   起草过程现在是**系统消息**（自然高度），"填满格子"不再是一个成立的判据。
   {
     view: '沉淀',
     key: 'crystal.paneTopY',
+    // ★ 分批第 143 批（U4d）：tab 条删了，但时间线里多了一条「起草 run」系统消息
+    //   （过程并入消息流）⇒ 编辑器起点从 363 抬到 ~416。阈值放宽到 430：它仍必须
+    //   在**首屏**（视口 880）且不被折叠段推到第二屏——意图不变，只是参照物多了一条消息。
     label:
-      '★★★ 编辑窗格起点 y ≤ 380（第 2 批把三条横条并成一条之后是 323；第 3 批的 tab 条是**必须占**的一行 32px ⇒ 363。改前：490）',
-    ok: (v) => typeof v === 'number' && v <= 380,
+      '★★★ 编辑窗格起点 y ≤ 430（tab 条删了、但过程中间多了系统消息；意图：编辑器在首屏、不被折叠段推下去。改前：490）',
+    ok: (v) => typeof v === 'number' && v <= 430,
     show: (v) => `y=${v}`,
   },
   {
@@ -3551,14 +3501,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.tabStripButtonCount',
-    label:
-      '★ 审阅态当前的 tab 条有几个按钮（U3c-2 第 2 步：先把现状记下来——删 tab 之前要能对比"删掉了什么"，否则只能对着"没量到这个值"猜哪里连带空了）',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v) => `${v} 个按钮`,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.editorAndDiffSameContainer',
     label:
       '★★ 编辑器与差异**在同一个容器里**（现为 true；U3c-2 要把"同位置切换"的语义留住，这条就是它的锚）',
@@ -3721,7 +3663,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.targetTabCount',
     label:
-      '★★★ 目标态**不做 tab**（2026-10-21 使用者确认的第 ③ 条：这一屏是"填一句话就动手"，tab 反而把唯一的动作藏起来）',
+      '★★★ 目标态**没有 tab 条**（U4d 之后连审阅态的 tab 也没了：§12.7 删掉 tab 机制）',
     ok: (v) => v === 0,
     show: (v) => `tab 条 ${v} 个`,
   },
@@ -3942,33 +3884,6 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.procDraftGap',
-    label: '★★★ 过程格的**草稿过程**那一档同样贴着内容盒底',
-    ok: (v, f) =>
-      typeof v === 'number' &&
-      v >= 0 &&
-      v - Number(f['crystal.composerH'] ?? 0) <= Math.max(8, Math.round(Number(f['crystal.procViewportH']) * 0.01)),
-    show: (v, f) => `差 ${v}px（格子 ${f['crystal.procDraftPaneH']}px）`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.procDraftLogBoxH',
-    label:
-      '★★ 草稿过程的「最后结果 / 实时日志」同样吃到格子的一半以上（空态除外：那条 run 本来就没有文字产出，一句话不该被拉满）',
-    ok: (v, f) => {
-      const st = f['crystal.procDraftState']
-      // 空态/骨架不是"内容"，不该被要求填满；有内容（日志或最后结果）就必须吃到一半以上
-      if (st === 'empty' || st === 'skeleton') return true
-      return (
-        typeof v === 'number' &&
-        typeof f['crystal.procDraftPaneH'] === 'number' &&
-        v >= Number(f['crystal.procDraftPaneH']) * 0.5
-      )
-    },
-    show: (v, f) => `内容 ${v}px / 格子 ${f['crystal.procDraftPaneH']}px（形态 ${f['crystal.procDraftState']}）`,
-  },
-  {
-    view: '沉淀',
     key: 'crystal.paneBottomGap',
     label:
       '★★★ 主区底边**贴着视口底**（差 ≤ 1% 视口高）——「沉淀页要自适应高度」：改之前格子按 `58vh` 估，窗口一高就留白（1600 高时差 277px）、窗口一矮就整页滚',
@@ -4019,9 +3934,11 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.editorInContentTab',
-    label: '默认标签是「内容」：编辑器在（审阅的第一件事是看字）',
+    // ★ 分批第 143 批（U4d）：内容/差异的外层 tab 已删，编辑器现在常驻在产物消息的左格
+    //   （`[data-cell="content"]`）。判据不变（"审阅的第一件事是看字"），只是不再叫"标签"。
+    label: '审阅态**编辑器常驻**（内容/差异并排的左格；tab 机制删了，第一件事仍是看字）',
     ok: (v) => v === true,
-    show: (v, f) => `标签 ${JSON.stringify(f['crystal.tabTexts'])}`,
+    show: (v) => String(v),
   },
   {
     view: '沉淀',

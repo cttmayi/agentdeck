@@ -98,7 +98,6 @@ export const crystallizeText = {
     zh: '体检发现 {n} 处问题',
     en: 'Check found {n} problem(s)',
   },
-  'crystallize.checkShowDetail': { zh: '看体检明细', en: 'See check details' },
   // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
   'crystallize.newVersionHint': { zh: '这条沉淀有了新一版（你正在编辑，没有自动切过去）', en: 'This crystallization has a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
@@ -228,14 +227,6 @@ export const crystallizeText = {
   'crystallize.vsOriginalShort': { zh: '对比原 skill', en: 'vs original' },
   'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
   'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
-  // ── 审阅屏的三个 tab（2026-10-21 第 3 批：信息分层——常驻的只有结论条那一块）──
-  'crystallize.tabDraft': { zh: '草稿', en: 'Draft' },
-  'crystallize.tabEvidence': { zh: '依据', en: 'Evidence' },
-  'crystallize.tabProcess': { zh: '过程', en: 'Process' },
-  'crystallize.evidenceHead': {
-    zh: '起草者读过的素材（它按需读的就是这些文件）',
-    en: 'The material the drafter read (it reads these on demand)',
-  },
   'crystallize.materialTitle': { zh: '素材', en: 'Material' },
   'crystallize.materialEmpty': { zh: '没有素材文件', en: 'No material files' },
   'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
