@@ -174,12 +174,15 @@ export function validateArtifactFiles(files: Record<string, string>): {
         problems.push({ file: 'SKILL.md', message: 'frontmatter 缺少 description（模型靠它决定何时加载）' })
       }
     }
-    if (!/^##\s+When to Use/m.test(parsed.body)) {
-      problems.push({ file: 'SKILL.md', message: '正文缺少「## When to Use」一节' })
-    }
-    if (!/^##\s+Procedure/m.test(parsed.body)) {
-      problems.push({ file: 'SKILL.md', message: '正文缺少「## Procedure」一节' })
-    }
+    /**
+     * ★ 分批第 177 批（使用者定："**不需要检查 when to use 等标签**，我用的是大模型的能力和市面上的
+     * skill，尽量通用些"）：**不再要求 `## When to Use` / `## Procedure` 两节**。
+     *
+     * 理由：那是**我们的**写法约定，不是 skill 的通用形态。使用者装的技能（比如 distilly）
+     * 有自己的章节结构，而"结构对不对"本来就该由那份技能与模型的判断负责——平台再钉两节，
+     * 等于逼所有人按平台的口味写。剩下的体检只留**机器能判的硬事实**：
+     * 文件在不在、能不能读、多大、路径安不安全（下面这些）。
+     */
   }
 
   return { ok: problems.length === 0, problems }

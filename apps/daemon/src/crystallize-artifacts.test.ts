@@ -162,7 +162,12 @@ describe('validateArtifactFiles', () => {
     assert.equal(result.ok, true, JSON.stringify(result.problems))
   })
 
-  test('缺 SKILL.md / 缺 frontmatter / 缺 name / 缺 When to Use 都能定位到文件', () => {
+  /**
+   * ★ 分批第 177 批（使用者定："不需要检查 when to use 等标签"）：**章节名不再是门槛**。
+   * 这一条从"缺 When to Use 要报"翻成"**不许**因为缺那两节就报"——否则装了别家技能
+   * （自己的章节结构）草稿永远过不了体检。
+   */
+  test('缺 SKILL.md / 缺 frontmatter / 缺 name 都能定位到文件；**章节名不再是门槛**', () => {
     const noSkillMd = validateArtifactFiles({ 'references/a.md': 'x' })
     assert.equal(noSkillMd.ok, false)
     assert.ok(noSkillMd.problems.some((p) => p.file === 'SKILL.md' && /缺少 SKILL.md/.test(p.message)))
@@ -179,9 +184,13 @@ describe('validateArtifactFiles', () => {
     assert.ok(noName.problems.some((p) => /缺少 name/.test(p.message)))
 
     const noSection = validateArtifactFiles({
-      'SKILL.md': '---\nname: a-b\ndescription: 当需要 x 时用\n---\n\n正文\n',
+      'SKILL.md': '---\nname: a-b\ndescription: 当需要 x 时用\n---\n\n正文（没有我们那两节）\n',
     })
-    assert.ok(noSection.problems.some((p) => /When to Use/.test(p.message)))
+    assert.equal(
+      noSection.problems.some((p) => /When to Use|Procedure/.test(p.message)),
+      false,
+      '章节名是我们的写法约定，不是 skill 的通用形态 ⇒ 体检不许拿它拦人',
+    )
   })
 
   test('name 不是 kebab-case 会点名；越界路径被拒', () => {

@@ -2083,9 +2083,10 @@ describe('§10.6 人改草稿：落盘到磁盘 + 体检跟着重算', () => {
     )
 
     // ② 体检跟着重算（§12.42 第 ③ 步之后，界面的结论条只剩机械体检）
-    //    ★ 判据用"缺必填节"（体检要求 `## When to Use` 与 `## Procedure` 都在；
-    //      实测才发现它**不**要求 Verification——我第一版按印象写的，红了一条）。
-    const broken = `---\nname: hand-edited\ndescription: 人手改过的描述\n---\n\n# 人手改过的正文\n\n## When to Use\n- 手改\n`
+    //    ⚠️ 分批第 177 批（使用者定："不需要检查 when to use 等标签"）：**章节名不再是体检项**
+    //    ⇒ 这一条从"缺 Procedure 就红"改成"**缺 frontmatter 的 name** 才红"（那是平台真需要的
+    //    字段：名字来自它；而章节名是我们的口味，不是 skill 的通用形态）。
+    const broken = `---\ndescription: 人手改过的描述\n---\n\n# 人手改过的正文\n`
     const saved2 = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2095,9 +2096,9 @@ describe('§10.6 人改草稿：落盘到磁盘 + 体检跟着重算', () => {
     const after = (await (
       await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${draftRunId}`)
     ).json()) as { validation: { ok: boolean; problems: Array<{ message: string }> } }
-    assert.equal(after.validation.ok, false, '缺 `## Procedure` ⇒ 体检不能再说通过')
+    assert.equal(after.validation.ok, false, '缺 frontmatter 的 name ⇒ 体检不能再说通过')
     assert.ok(
-      after.validation.problems.some((p) => p.message.includes('Procedure')),
+      after.validation.problems.some((p) => p.message.includes('name')),
       '要给出具体问题（人能照着改）',
     )
   })
