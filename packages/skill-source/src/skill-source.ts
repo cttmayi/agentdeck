@@ -59,6 +59,14 @@ export { MAX_SKILL_BYTES }
  *    支持文件超限现在是**跳过并记下来**（分批第 183 批），不是整单失败。
  */
 export const MAX_SUPPORT_FILE_BYTES = 512 * 1024
+
+/**
+ * 读单个文件时的**内存保护**（分批第 186 批：这不是产品规则，是"别把 daemon 撑爆"的底线）。
+ *
+ * 使用者要求"移除超上限的规则"——所以安装不再因为文件大而拒绝；但把 2 GB 的东西整个读进
+ * 内存仍然会 crash，所以 `readCapped` 保留一个很高的硬顶（256 MB）。它正常不会触发。
+ */
+export const MAX_INSTALL_FILE_BYTES = 256 * 1024 * 1024
 /**
  * 一个技能所有文件加起来的字节上限。
  *
@@ -81,9 +89,15 @@ export const MAX_TOTAL_BYTES = 8 * 1024 * 1024
  * 为什么这条**不能取消**：整仓是逐个文件走 GitHub API 的，上限是"别把限额吃光"的兜底。
  * 超限的文件会被记进忽略清单（不静默），不是静默丢弃。
  */
+/**
+ * ★ 分批第 186 批（使用者定："**这些也移除吧，原则上没有这样的规则**"）：
+ * 文件数 / 递归深度 / 单文件体积这三条**不再作为安装规则**。
+ *
+ * 保留的常量只为**兼容既有调用方与测试**（它们需要知道"曾经的默认值"），代码路径里不再拦。
+ */
 export const MAX_FILES = 2000
 /** 目录递归深度上限。 */
-/** 递归深度上限（同上：**8 层**——`references/notes/2025/q1/x.md` 这种结构很常见）。 */
+/** 递归深度上限（分批第 186 批起**不再拦**；保留常量只为兼容）。 */
 export const MAX_DEPTH = 8
 /** 单次 HTTP 请求的超时。 */
 /**
@@ -739,10 +753,6 @@ async function collectLocal(root: string): Promise<Collected> {
           ignored.push({ path: rel, reason: '版本库/依赖目录，不属于技能内容' })
           continue
         }
-        if (depth + 1 > MAX_DEPTH) {
-          ignored.push({ path: rel, reason: `超过递归深度上限 ${MAX_DEPTH}` })
-          continue
-        }
         await walk(full, depth + 1)
         continue
       }
@@ -1157,13 +1167,9 @@ async function fetchFile(
   if (!res.ok) {
     throw new SkillSourceError('fetch_failed', `下载文件失败（${res.status}）：${entry.path}`)
   }
-  try {
-    return await readCapped(res, MAX_SUPPORT_FILE_BYTES + 1)
-  } catch (err) {
-    // 软判：只有"太大"这一种可以被跳过（连接错误、403 等仍然要冒出来）
-    if (soft && err instanceof SkillSourceError && err.code === 'too_large') return null
-    throw err
-  }
+  // ★ 分批第 186 批：**不再按体积拒绝**（使用者："原则上没有这样的规则"）；
+  //   只剩 `MAX_INSTALL_FILE_BYTES` 那道内存底线（正常触发不到）。
+  return readCapped(res, MAX_INSTALL_FILE_BYTES)
 }
 
 /**
@@ -1257,10 +1263,6 @@ export async function resolveGithubUrl(
         if (filter?.include && !couldMatchUnder(rel, filter.include)) {
           // 一个子目录不可能命中任何 include 图案：**连列目录都不用去**（省调用）
           excluded.push({ path: `${rel}/`, pattern: `include: ${filter.include.join(' ')}` })
-          continue
-        }
-        if (depth + 1 > MAX_DEPTH) {
-          ignored.push({ path: rel, reason: `超过递归深度上限 ${MAX_DEPTH}` })
           continue
         }
         await walk(entry.path, await listGithubDir(target, entry.path, deps), depth + 1)

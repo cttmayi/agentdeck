@@ -625,19 +625,16 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
     assert.equal(r.ignored.some((i) => /二进制/.test(i.reason)), true)
   })
 
-  test('超过递归深度上限的目录被记下，而不是悄悄漏掉', async () => {
-    // ★ 分批第 184 批：深度上限从 4 放到 **8**（真实仓库里 references/notes/2025/q1/x.md 很常见）
-    //   ⇒ 这里要造一条**超过 8 层**的路径才测得到
+  test('★ 深目录不再有上限（分批第 186 批：使用者要求移除深度规则）', async () => {
     const gh = fakeGithub({
       'd/SKILL.md': '# 正文',
-      'd/references/a/b/c/d/e/f/g/h/i/deep.md': '太深了',
+      'd/references/a/b/c/d/e/f/g/h/i/deep.md': '深一点也该收',
     })
     const r = await resolveGithubUrl('https://github.com/o/r/tree/main/d', {}, { fetchImpl: gh.impl })
-    assert.equal(r.included.length >= 1, true)
     assert.equal(
-      r.ignored.some((i) => /深度/.test(i.reason)),
+      r.included.some((f) => JSON.stringify(f).includes('deep.md')),
       true,
-      '超深的东西必须出现在"没装什么"里',
+      '已经没有深度上限了 ⇒ 再深的文件也要收下来',
     )
   })
 })
@@ -1050,7 +1047,7 @@ describe('★ 加速器的 403（分批第 182 批）', () => {
 })
 
 describe('★ 支持文件超上限：跳过而不是整单失败（分批第 183 批）', () => {
-  test('★★★ 一张 860 KB 的配图不该挡住整个技能；跳过的要如实记下来', async () => {
+  test('★★★ 配图不再因体积被拒（分批第 186 批）；二进制仍然跳过', async () => {
     // 真缺陷回放：distilly 仓库里有个 docs/social-preview.png（859971 字节）⇒
     // 以前整次安装直接报「响应声明的长度是 859971 字节，超过上限 262145」。
     const big = MAX_SUPPORT_FILE_BYTES + 600 * 1024
@@ -1082,7 +1079,11 @@ describe('★ 支持文件超上限：跳过而不是整单失败（分批第 18
         )
       }
       if (url.endsWith('social-preview.png')) {
-        return new Response('x', { status: 200, headers: { 'content-length': String(big) } })
+        // 真 PNG 头（含 NUL）⇒ `isProbablyText` 判它是二进制；体积规则已经没有了，
+        // 所以这条断言现在考的是"二进制进不了文本库"，不是"太大"
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]), {
+          status: 200,
+        })
       }
       return gh.impl(url)
     }) as unknown as typeof fetch
@@ -1090,12 +1091,12 @@ describe('★ 支持文件超上限：跳过而不是整单失败（分批第 18
     const res = await resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl: impl })
     // 统一入口回的是 `{body, files, slug…}`（不是 `skillMd`）
     assert.equal(res.body.includes('with-assets'), true, '技能本体要装上')
-    // 这张图**不该被装进来**（超上限 ⇒ 软跳过）；统一入口的结果里只有 `files`，
-    // 跳过清单在 `resolveGithubUrl` 那一层（下面 @185 的用例钉了"不静默"那一半）。
+    // 现在**没有体积规则**：这张图不会被"太大"拒掉；它进不了 `files` 是因为
+    // `isProbablyText` 判定它是二进制（技能库里存的是字符串，二进制存不下）。
     assert.equal(
       Object.keys(res.files).some((p) => p.includes('social-preview')),
       false,
-      '超上限的配图不该进技能',
+      '二进制的配图不进技能（与体积无关）',
     )
   })
 })
