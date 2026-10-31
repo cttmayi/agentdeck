@@ -47,7 +47,8 @@
       purpose: string
       feedback: string
       blank?: boolean
-      material?: string
+      /** ★ 分批第 166 批：空白起的材料是**一组**（可以零份、可以多份）。 */
+      materials?: Array<{ text: string }>
     }) => void
   } = $props()
 
@@ -83,8 +84,11 @@
       return 'purpose'
     }
     if (stage === 'blankMaterial') {
-      materialText = text
-      stage = 'ready'
+      // ★ 分批第 166 批：这句话是**再加一份材料**，不是"这一问的答案"⇒ 加进列表、停在原处
+      //   （还能继续加，或者点「下一步」）
+      materialSeq += 1
+      blankMaterials = [...blankMaterials, { id: materialSeq, text }]
+      materialDraft = ''
       return 'blankMaterial'
     }
     return null
@@ -99,8 +103,29 @@
   let agentId = $state('')
   let purpose = $state('')
   let feedback = $state('')
-  /** 空白起时使用者一开始给的材料（一段文本，可空）。 */
-  let materialText = $state('')
+  /**
+   * ★ 分批第 166 批（§12.59，使用者定）：**空白起的材料可以给多段**。
+   *
+   * 以前只有 `materialText` 一段（超过 100 KB 整段拒）。但"我手上有几份笔记"是常态，
+   * 逼人先合并成一段，等于让人在**粘之前**先做一次编辑——而材料本来就是"原样交给起草者"。
+   * 现在是一份列表（可加、可删），提交时照 daemon 的 `materials: [{name?, text}]` 发。
+   */
+  let blankMaterials = $state<Array<{ id: number; text: string }>>([])
+  /** 正在输入、还没「加上」的那一段。 */
+  let materialDraft = $state('')
+  let materialSeq = 0
+
+  function addMaterial(): void {
+    const text = materialDraft.trim()
+    if (text === '') return
+    materialSeq += 1
+    blankMaterials = [...blankMaterials, { id: materialSeq, text }]
+    materialDraft = ''
+  }
+
+  function removeMaterial(id: number): void {
+    blankMaterials = blankMaterials.filter((m) => m.id !== id)
+  }
 
   /**
    * ★ 分批第 165 批（§12.58）：**空白起也能更新一份已有技能**。
@@ -162,7 +187,12 @@
       agentId,
       purpose: purpose.trim(),
       feedback: feedback.trim(),
-      ...(blank ? { blank: true, material: materialText.trim() } : {}),
+      ...(blank
+        ? {
+            blank: true,
+            materials: blankMaterials.map((m) => ({ text: m.text })),
+          }
+        : {}),
     })
   }
 
@@ -291,20 +321,42 @@
         <p class="qa-text">{kind === 'new' ? purpose : feedback}</p>
       </div>
       <div class="qa-msg" data-msg-role="assistant">
-        <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
+        <p class="intake-q">材料（可选）：给起草者的资料，可以一份一份加</p>
+        {#if blankMaterials.length > 0}
+          <ul class="mat-list" data-blank-materials>
+            {#each blankMaterials as item (item.id)}
+              <li>
+                <span class="mat-text">{item.text.length > 60 ? `${item.text.slice(0, 60)}…` : item.text}</span>
+                <button
+                  type="button"
+                  class="ghost small"
+                  aria-label="删掉这一份"
+                  onclick={() => removeMaterial(item.id)}>删掉</button
+                >
+              </li>
+            {/each}
+          </ul>
+        {/if}
         <textarea
           class="intake-input"
-          rows="4"
-          bind:value={materialText}
+          rows="3"
+          bind:value={materialDraft}
           placeholder="比如：团队的规范、上次复盘的结论、要遵守的约定……没有就跳过，直接按作用描述写一版。"
         ></textarea>
-        <p class="faint small">
-          这次没有来源 run：材料只有你给的这一段（可以不给）。追加更多材料可以在起草完之后用栏脚输入条。
-        </p>
         <div class="intake-actions">
-          <button type="button" class="primary" onclick={() => (stage = 'ready')}>下一步</button>
-          <button type="button" class="ghost" onclick={() => { materialText = ''; stage = 'ready' }}>跳过</button>
+          <button
+            type="button"
+            class="ghost"
+            disabled={materialDraft.trim() === ''}
+            onclick={addMaterial}>加上这一份</button
+          >
+          <button type="button" class="primary" onclick={() => (stage = 'ready')}>
+            {blankMaterials.length === 0 ? '跳过' : '下一步'}
+          </button>
         </div>
+        <p class="faint small">
+          这次没有来源 run：材料只有你给的这些（可以零份、可以多份）。起草完之后还能在右栏继续加。
+        </p>
       </div>
     {:else}
       <!-- ready：前面几问都已答 ⇒ 按"问 / 答"两条消息回放，最后一条是**开始提炼** -->
@@ -326,10 +378,14 @@
       </div>
       {#if blank}
         <div class="qa-msg" data-msg-role="assistant">
-          <p class="intake-q">材料（可选）：粘贴要给起草者的资料</p>
+          <p class="intake-q">材料（可选）：给起草者的资料</p>
         </div>
         <div class="qa-msg user" data-msg-role="user">
-          <p class="qa-text">{materialText.trim() === '' ? '（跳过）' : materialText}</p>
+          <p class="qa-text">
+            {blankMaterials.length === 0
+              ? '（跳过）'
+              : `${blankMaterials.length} 份：${blankMaterials.map((m) => (m.text.length > 20 ? `${m.text.slice(0, 20)}…` : m.text)).join('、')}`}
+          </p>
         </div>
       {/if}
       <div class="qa-msg" data-msg-role="assistant">
@@ -394,4 +450,32 @@
   .intake-summary { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.25rem var(--sp-2); font-size: var(--fs-sm); margin: 0; }
   .intake-summary dt { color: var(--text-faint); }
   .intake-summary dd { margin: 0; color: var(--text); }
+
+  /* ★ 分批第 166 批：空白起的材料清单（一份一行、可删） */
+  .mat-list {
+    list-style: none;
+    margin: 0 0 var(--sp-1);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 9rem;
+    overflow: auto;
+  }
+
+  .mat-list li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+    color: var(--text-dim);
+  }
+
+  .mat-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 </style>

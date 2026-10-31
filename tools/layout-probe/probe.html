@@ -6003,6 +6003,38 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                   () => (currentQ()?.textContent ?? '').includes('材料'),
                   100,
                 )
+                /**
+                 * ★ 分批第 166 批（§12.59，使用者定）：**空白起的材料可以给多份**。
+                 * 量"加一份 → 列表一项 → 再加一份 → 两项 → 删掉一份 → 一项"，因为这一改的
+                 * 全部意义就在"能多份、能删错的"；只量"有输入框"等于没量。
+                 */
+                const matBox = () => d().querySelector('.intake textarea.intake-input')
+                const addBtn = () =>
+                  [...d().querySelectorAll('.intake button')].find((b) => text(b) === '加上这一份')
+                const matRows = () => d().querySelectorAll('[data-blank-materials] li')
+                const matAdd = async (value) => {
+                  const box = matBox()
+                  if (!box) return false
+                  box.value = value
+                  box.dispatchEvent(new Event('input', { bubbles: true }))
+                  await wait(30)
+                  const btn = addBtn()
+                  if (!btn) return false
+                  btn.click()
+                  return true
+                }
+                let matOk = false
+                if (await matAdd('第一份：团队的规范')) {
+                  await until(() => matRows().length === 1, 60)
+                  await matAdd('第二份：上次复盘的结论')
+                  await until(() => matRows().length === 2, 60)
+                  const twoRows = matRows().length
+                  const delBtn = [...d().querySelectorAll('[data-blank-materials] button')].at(-1)
+                  delBtn?.click()
+                  await until(() => matRows().length === 1, 60)
+                  matOk = twoRows === 2 && matRows().length === 1
+                }
+                facts['crystal.blankMultiMaterial'] = matOk
                 facts['crystal.composerAnswersIntake'] =
                   movedOn &&
                   (d().querySelector('.composer-receipt')?.textContent ?? '').includes('作用描述')

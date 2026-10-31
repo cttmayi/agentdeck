@@ -700,7 +700,11 @@
       sourcesLoading = false
     }
   }
-  let blankMaterialText = ''
+  /**
+   * ★ 分批第 166 批（§12.59）：空白起的材料是**一组**。以前只有 `blankMaterialText` 一段，
+   * 于是"我手上有三份笔记"只能先自己合并——而材料本该原样交给起草者。
+   */
+  let blankMaterials: Array<{ text: string }> = []
   let blankStart = false
   /**
    * `CrystallizeIntake` 的实例：栏脚输入条把作答**直接交给它**（`answerFromComposer` 返回
@@ -719,9 +723,10 @@
     agentId: string
     purpose: string
     feedback: string
-    /** 空白起才有的两项（见 CrystallizeIntake 的 blank 流程）。 */
+    /** 空白起才有的（见 CrystallizeIntake 的 blank 流程）。 */
     blank?: boolean
-    material?: string
+    /** ★ 分批第 166 批：材料是**一组**（可零份、可多份）。 */
+    materials?: Array<{ text: string }>
   }): void {
     targetKind = payload.kind
     purpose = payload.purpose
@@ -729,7 +734,7 @@
     selectedAgentId = payload.agentId
     userFeedback = payload.feedback
     blankStart = payload.blank === true
-    blankMaterialText = payload.material ?? ''
+    blankMaterials = payload.materials ?? []
     void startDraft()
   }
 
@@ -762,9 +767,7 @@
               // ★ 分批第 165 批（§12.58）：空白起也能"改一份已有技能"——目标照 `target` 传，
               //   只有"优化智能体指令"在空白起不可选（没有来源 run 就没有候选，daemon 拒绝）。
               target,
-              ...(blankMaterialText.trim() === ''
-                ? {}
-                : { materials: [{ text: blankMaterialText.trim() }] }),
+              ...(blankMaterials.length === 0 ? {} : { materials: blankMaterials }),
             }
           : {
               runId,
