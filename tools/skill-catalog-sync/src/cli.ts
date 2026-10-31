@@ -64,7 +64,7 @@ import { syncRecommendedSkills } from './skills-sync.ts'
  *     但抓到的那些留着，下一轮只补缺的。断点那份**跨小时也留着**（花过配额的不丢）。
  *
  * ⚠️ **加速器是第三方**：`--github-proxy`（**裸写即可**，不带地址就用
- *   `DEFAULT_GITHUB_PROXY` = `https://gh-proxy.com`；也可以给别的地址，或
+ *   `DEFAULT_GITHUB_PROXY` = `https://gh-proxy.org`；也可以给别的地址，或
  *   `--github-proxy off` 这次直连）或环境变量 `AGENTDECK_GITHUB_PROXY`
  *   会把每个 GitHub 请求转给它——它能看、也能改内容。
  *   换来的是"国内下载稳"与"配额不再是本机那 60 次"（实测它自己带 5000/h 的凭证）。
@@ -287,8 +287,8 @@ export const HELP = `推荐技能目录的同步工具（独立命令，不是�
                          清单里每条可写 include/exclude（相对技能目录的 glob）——
                          仓库混着营销素材/测试产物时用；被排除的会逐个列出来
   --github-proxy [地址]  走 GitHub 加速器（**第三方**，默认不用）
-                         **不带地址就用 https://gh-proxy.com**（裸写这个旗标即可）
-                         例：--github-proxy            （= gh-proxy.com）
+                         **不带地址就用 https://gh-proxy.org**（裸写这个旗标即可）
+                         例：--github-proxy            （= gh-proxy.org）
                              --github-proxy https://别的加速器
                              --github-proxy off        （这次直连，覆盖环境变量）
                          它只代理 GitHub 自己的主机，而且**拿不到你的凭证**

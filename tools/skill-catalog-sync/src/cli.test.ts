@@ -106,10 +106,10 @@ describe('同步工具 CLI：`--` 那道闸', () => {
   test('★ 裸写 `--github-proxy` ⇒ 用默认加速器；`off` ⇒ 直连（能盖掉环境变量）', async () => {
     const dir = await makeTempDir('cli-proxy-default')
     try {
-      // 裸写：不带地址，就用 https://gh-proxy.com（使用者 2026-10 定的省事写法）
+      // 裸写：不带地址，就用默认那一个（分批第 181 批：从 `gh-proxy.com` 换成 `gh-proxy.org`）
       const bare = await runCli(['--github-proxy', '--manifest', join(dir, 'nope.json'), '--out', dir])
       assert.equal(bare.code, 1)
-      assert.match(bare.stdout, /走 GitHub 加速器：gh-proxy\.com/, '裸写要用默认那一个')
+      assert.match(bare.stdout, /走 GitHub 加速器：gh-proxy\.org/, '裸写要用默认那一个')
 
       // ★ 后面那个 `--manifest` 不许被当成地址吃掉：吃掉就会去读**默认清单**，
       //   于是错误里出现的是别的路径（这条断言就是在钉这件事）

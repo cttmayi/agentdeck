@@ -734,7 +734,7 @@ describe('统一入口', () => {
  */
 function fakeProxyGithub(
   files: Record<string, string>,
-  proxyBase = 'https://gh-proxy.com',
+  proxyBase = 'https://gh-proxy.org',
 ): { impl: typeof fetch; seen: Array<{ url: string; authorization: string | null }> } {
   const seen: Array<{ url: string; authorization: string | null }> = []
 
@@ -798,27 +798,27 @@ describe('★ GitHub 加速器（可选；第三方，默认不用）', () => {
     const api = 'https://api.github.com/repos/o/r/contents/x'
 
     assert.deepEqual(githubRequestTarget(raw, null), { url: raw, sendAuth: true })
-    assert.deepEqual(githubRequestTarget(raw, 'https://gh-proxy.com'), {
-      url: `https://gh-proxy.com/${raw}`,
+    assert.deepEqual(githubRequestTarget(raw, 'https://gh-proxy.org'), {
+      url: `https://gh-proxy.org/${raw}`,
       sendAuth: false,
     })
-    assert.deepEqual(githubRequestTarget(api, 'https://gh-proxy.com'), {
-      url: `https://gh-proxy.com/${api}`,
+    assert.deepEqual(githubRequestTarget(api, 'https://gh-proxy.org'), {
+      url: `https://gh-proxy.org/${api}`,
       sendAuth: false,
     })
     // ★ 使用者自己填的**非 GitHub** 地址不会被"顺手"代理过去：加速器不该变成
     //   一个访问任意地址的跳板（那正是本包白名单存在的理由）
     const other = 'https://evil.example.com/x'
-    assert.deepEqual(githubRequestTarget(other, 'https://gh-proxy.com'), {
+    assert.deepEqual(githubRequestTarget(other, 'https://gh-proxy.org'), {
       url: other,
       sendAuth: true,
     })
   })
 
   test('加速器地址本身要校验：必须 https、不能就是 GitHub', () => {
-    assert.equal(parseGithubProxy('https://gh-proxy.com/'), 'https://gh-proxy.com')
+    assert.equal(parseGithubProxy('https://gh-proxy.org/'), 'https://gh-proxy.org')
     assert.equal(parseGithubProxy('https://host/gh'), 'https://host/gh', '允许带路径前缀')
-    assert.throws(() => parseGithubProxy('http://gh-proxy.com'), /https/)
+    assert.throws(() => parseGithubProxy('http://gh-proxy.org'), /https/)
     assert.throws(() => parseGithubProxy('https://raw.githubusercontent.com'), /GitHub 自己/)
     assert.throws(() => parseGithubProxy('不是 URL'), /合法的 URL/)
   })
@@ -834,14 +834,14 @@ describe('★ GitHub 加速器（可选；第三方，默认不用）', () => {
         fetchImpl: proxy.impl,
         // ⚠️ 故意塞一个 token：它**绝不该**出现在发给代理的请求里
         githubToken: 'secret-token-must-not-leak',
-        githubProxy: 'https://gh-proxy.com',
+        githubProxy: 'https://gh-proxy.org',
       },
     )
 
     assert.equal(resolved.body, '# 正文')
     assert.ok(proxy.seen.length > 0)
     for (const req of proxy.seen) {
-      assert.ok(req.url.startsWith('https://gh-proxy.com/https://'), `请求该发给代理：${req.url}`)
+      assert.ok(req.url.startsWith('https://gh-proxy.org/https://'), `请求该发给代理：${req.url}`)
       assert.equal(
         req.authorization,
         null,
@@ -884,7 +884,7 @@ describe('★ GitHub 加速器（可选；第三方，默认不用）', () => {
         resolveGithubUrl(
           'https://github.com/o/r/tree/main/skills/foo',
           {},
-          { fetchImpl: impl, githubProxy: 'https://gh-proxy.com' },
+          { fetchImpl: impl, githubProxy: 'https://gh-proxy.org' },
         ),
       /白名单/,
     )
@@ -893,7 +893,7 @@ describe('★ GitHub 加速器（可选；第三方，默认不用）', () => {
 
 describe('★ `--github-proxy` 的取值规则（裸写 = 默认加速器）', () => {
   test('★ 裸写旗标 ⇒ 用默认加速器；不给 ⇒ 直连（默认仍然是不开）', () => {
-    assert.equal(DEFAULT_GITHUB_PROXY, 'https://gh-proxy.com')
+    assert.equal(DEFAULT_GITHUB_PROXY, 'https://gh-proxy.org')
     assert.equal(resolveGithubProxy({ flagValue: true }), DEFAULT_GITHUB_PROXY)
     assert.equal(resolveGithubProxy({ flagValue: '' }), DEFAULT_GITHUB_PROXY, '空串也算裸写')
     assert.equal(resolveGithubProxy({}), null, '★ 没给旗标就是直连——"默认关"这条没有变')
@@ -905,7 +905,7 @@ describe('★ `--github-proxy` 的取值规则（裸写 = 默认加速器）', (
     assert.equal(resolveGithubProxy({ flagValue: 'off' }), null)
     assert.equal(resolveGithubProxy({ flagValue: 'none' }), null)
     assert.equal(
-      resolveGithubProxy({ flagValue: 'off', envValue: 'https://gh-proxy.com' }),
+      resolveGithubProxy({ flagValue: 'off', envValue: 'https://gh-proxy.org' }),
       null,
       '命令行优先：环境变量开着也能被这一次的调用盖掉',
     )
@@ -913,7 +913,7 @@ describe('★ `--github-proxy` 的取值规则（裸写 = 默认加速器）', (
   })
 
   test('★ 环境变量只在没给旗标时生效；非法地址照旧当场拒绝', () => {
-    assert.equal(resolveGithubProxy({ envValue: 'https://gh-proxy.com' }), 'https://gh-proxy.com')
+    assert.equal(resolveGithubProxy({ envValue: 'https://gh-proxy.org' }), 'https://gh-proxy.org')
     assert.equal(
       resolveGithubProxy({ flagValue: true, envValue: 'https://other.example' }),
       DEFAULT_GITHUB_PROXY,

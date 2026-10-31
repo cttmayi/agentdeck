@@ -10,7 +10,7 @@ pnpm run sync-skills --dry-run          # 逐条真抓一遍，但不写盘
 pnpm run sync-skills --refresh          # 忽略"1 小时内抓过"的复用窗口，全部重新下载
 pnpm run sync-skills --out <目录>        # 写到别处
 pnpm run sync-skills --manifest <文件>   # 换一份清单（显式指定，不转存；默认走配置文件）
-pnpm run sync-skills --github-proxy                        # 走加速器（裸写 = https://gh-proxy.com）
+pnpm run sync-skills --github-proxy                        # 走加速器（裸写 = https://gh-proxy.org）
 pnpm run sync-skills --github-proxy https://别的加速器       # 换一个
 pnpm run sync-skills --github-proxy off                     # 这次直连（也能盖掉环境变量）
 ```
@@ -198,10 +198,10 @@ GitHub API 调用：11 次（匿名限额 60 次/小时；文件内容走 raw.gi
 环境变量 `AGENTDECK_GITHUB_PROXY`，就会把每个 GitHub 请求转给加速器：
 
 ```bash
-pnpm run sync-skills --github-proxy            # 不带地址 ⇒ https://gh-proxy.com
+pnpm run sync-skills --github-proxy            # 不带地址 ⇒ https://gh-proxy.org
 pnpm run sync-skills --github-proxy https://别的加速器
 pnpm run sync-skills --github-proxy off        # 这次直连（覆盖环境变量）
-# ⚠️ 走 GitHub 加速器：gh-proxy.com
+# ⚠️ 走 GitHub 加速器：gh-proxy.org
 #    它能看、也能改转发过来的内容（第三方进了信任链）；凭证不会交给它（它自己有），
 #    本机那 60 次/小时的匿名限额也不再适用。
 ```
@@ -216,7 +216,7 @@ pnpm run sync-skills --github-proxy off        # 这次直连（覆盖环境变�
 |---|---|
 | **只代理 GitHub 自己那三个主机** | 你填的其它地址照样被白名单挡在外面：加速器不会变成"访问任意地址的跳板"（那正是白名单存在的理由） |
 | **走代理时不带我们的 token** | 代理自己带凭证（实测 5000/h），而 token 是秘密——不给第三方看，也不赌它会不会转发 |
-| **默认关，显式指定才开** | 加速器是**第三方**：它能看、也能改转发的内容。这种事不该由工具替你决定。⚠️ "裸写旗标就用 gh-proxy.com"只是**省打字**，不是"默认开"——不带这个旗标仍然直连 |
+| **默认关，显式指定才开** | 加速器是**第三方**：它能看、也能改转发的内容。这种事不该由工具替你决定。⚠️ "裸写旗标就用 gh-proxy.org"只是**省打字**，不是"默认开"——不带这个旗标仍然直连 |
 
 ⚠️ 代价如实说：**加速器就是链路上的中间人**。它适合"直连不稳、内容又本来就是公开仓库"的场景；
 `daemon` 那条路（界面里从 GitHub 链接装技能）用 `pnpm run daemon --github-proxy` 开同一个口子

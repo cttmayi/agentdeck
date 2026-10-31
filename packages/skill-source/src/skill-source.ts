@@ -118,7 +118,20 @@ const ALLOWED_HOSTS = new Set(['github.com', 'raw.githubusercontent.com', 'api.g
  * 就等于 `--github-proxy https://gh-proxy.com`。**默认仍然是不开**——不带这个旗标
  * 就直连 GitHub，这条没有变。
  */
-export const DEFAULT_GITHUB_PROXY = 'https://gh-proxy.com'
+/**
+ * 裸写 `--github-proxy` 时用的那一个加速器。
+ *
+ * ★ 分批第 181 批（2026-11，使用者："代理地址可能变化了，https://gh-proxy.org/"）：换成 `.org`。
+ * 实测（同一台机器、同一时刻）：
+ *   · `https://gh-proxy.org/https://api.github.com/...tree` → 200 / 1.5s
+ *   · `https://gh-proxy.org/https://raw.githubusercontent.com/...` → 200 / 1.3s
+ * 而**旧的 `.com`**：raw 还能转（200），但 **api 返回 403**；再加上直连 raw 时通时不通
+ * （同一个文件一次 200/2.5s、下一次 25s 零字节超时），所以裸写默认值指向 `.org` 才有意义。
+ *
+ * ⚠️ 三条硬规矩不变（见下面的长注释）：**默认不用**（不给旗标就是直连）、只代理 GitHub 自己的主机、
+ * 走代理时不带我们的 token。换地址只是"省打字"的默认值，不是"默认开"。
+ */
+export const DEFAULT_GITHUB_PROXY = 'https://gh-proxy.org'
 
 /** `--github-proxy off` / `none`：显式关掉（也用来覆盖环境变量）。 */
 function isProxyOff(value: string): boolean {

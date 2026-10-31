@@ -668,10 +668,10 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
         url,
         authorization: new Headers((init?.headers ?? {}) as Record<string, string>).get('authorization'),
       })
-      if (!url.startsWith('https://gh-proxy.com/https://')) {
+      if (!url.startsWith('https://gh-proxy.org/https://')) {
         return new Response(`没走代理：${url}`, { status: 502 })
       }
-      return direct(url.slice('https://gh-proxy.com/'.length), init)
+      return direct(url.slice('https://gh-proxy.org/'.length), init)
     }) as typeof fetch
 
     const root = await makeTempDir('sync-proxy')
@@ -682,7 +682,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
         skillsDir,
         fetchImpl: proxyImpl,
         githubToken: 'secret-token-must-not-leak',
-        githubProxy: 'https://gh-proxy.com',
+        githubProxy: 'https://gh-proxy.org',
       })
 
       assert.equal(report.failures.length, 0, JSON.stringify(report.failures))
@@ -694,7 +694,7 @@ describe('★ sync-skills：抓取 → 校验 → 原子替换', () => {
         `取版本也要走代理，实际：${seen.map((r) => r.url).join(' | ')}`,
       )
       for (const req of seen) {
-        assert.ok(req.url.startsWith('https://gh-proxy.com/https://'), `该走代理：${req.url}`)
+        assert.ok(req.url.startsWith('https://gh-proxy.org/https://'), `该走代理：${req.url}`)
         assert.equal(req.authorization, null, '★ 凭证不许交给第三方加速器')
       }
     } finally {

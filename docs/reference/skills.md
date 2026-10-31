@@ -219,7 +219,7 @@ my-skill/
 - 私有仓库要 token 时读环境变量 `AGENTDECK_GITHUB_TOKEN`；
 - **可选：GitHub 加速器**（2026-10，第三方，**默认不用**）。国内直连 GitHub 常失败，
   社区做法是走一个"加速器"：`pnpm run sync-skills --github-proxy`（**裸写即可，值可省略
-  ⇒ `https://gh-proxy.com`**；也可以给别的地址，或 `--github-proxy off` 直连），
+  ⇒ `https://gh-proxy.org`**；也可以给别的地址，或 `--github-proxy off` 直连），
   daemon 那边是 `pnpm run daemon --github-proxy`（环境变量 `AGENTDECK_GITHUB_PROXY`
   只对同步工具有效）。三条硬规矩：
   ①**只代理 GitHub 自己那三个主机**（使用者填的其它地址照样被白名单挡在外面——加速器不会
