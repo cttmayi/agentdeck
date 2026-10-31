@@ -3588,6 +3588,27 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.dropMaterial',
+    label:
+      '★★★ 把一份文本**拖进右栏材料区**就真的成了素材（§12.4 材料卡的"拖文件 / 选目录"）：' +
+      '清单多一项、回执说加了几份、服务端 `appended/` 里真有它且正文是拖进来的那句；' +
+      '「选目录」入口也在（`webkitdirectory` 在浏览器侧展开目录，daemon 不接受任意本地路径）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.zone === true &&
+      v.grew === true &&
+      Number(v.after) > Number(v.before) &&
+      v.hasDropped === true &&
+      v.hasDirButton === true,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `清单 ${String(v.before)}→${String(v.after)}　落了盘 ${String(v.hasDropped)}　` +
+          `选目录 ${String(v.hasDirButton)}`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankEntryPresent',
     label:
       '★★ 「新建沉淀」的**起点屏**（页面内第一问，不再是浮层）里有「从空白或材料起」（§12.7：起点变成第一问）',

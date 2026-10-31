@@ -4723,6 +4723,52 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           })()
           /**
+           * ★ 分批第 148 批（§12.4 材料卡：追加的形态里有"拖文件 / 选目录"）：**拖一份进来**。
+           *
+           * 为什么量"真的进了素材索引"而不只量"有个虚线框"：拖拽最容易变成"看着能拖、
+           * 拖完没反应"（§12.41）。所以量完整条链：拖 → 清单多一项 → 回执说加了几份 →
+           * 服务端 `appended/` 里真有它，而且正文是拖进来的那句话。
+           *
+           * ⚠️ 合成 `DataTransfer` + `DragEvent`：Chrome 支持从 `new DataTransfer()` 造一个，
+           *    再塞 `File` 进去。整块不用鼠标坐标（元素在窄屏抽屉里是移出视口的，直接派发事件）。
+           */
+          facts['crystal.dropMaterial'] = await (async () => {
+            const zone = d().querySelector('[data-mat-dropzone]')
+            if (!zone) return { zone: false }
+            const before = d().querySelectorAll('.artifact-mat-list li').length
+            const marker = '探针拖进来的材料：先看日志再动手'
+            const win = f.contentWindow
+            const dt = new win.DataTransfer()
+            dt.items.add(new win.File([`# 拖入\n\n${marker}\n`], '探针拖入.md', { type: 'text/markdown' }))
+            zone.dispatchEvent(
+              new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
+            )
+            const grew = await until(
+              () => d().querySelectorAll('.artifact-mat-list li').length > before,
+              200,
+            )
+            const after = d().querySelectorAll('.artifact-mat-list li').length
+            // ⚠️ 别用上面那个 `zone` 引用去查回执：材料一改，面板会重渲染，`zone` 可能是
+            //    已经脱离文档的旧节点（第一次就是这么读到空串的——回执其实在，只是不在旧节点里）
+            const note = d().querySelector('[data-mat-add-note]')?.textContent ?? ''
+            const items = await win
+              .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+            const dropped = (items?.items ?? []).filter(
+              (i) => i.relPath.startsWith('appended/') && i.text.includes(marker),
+            )
+            return {
+              zone: true,
+              grew,
+              before,
+              after,
+              hasDropped: dropped.length === 1,
+              hasDirButton: [...zone.querySelectorAll('button')].some((b) => text(b) === '选目录'),
+              note: note.slice(0, 80),
+            }
+          })()
+          /**
            * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
            * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，
            * 而不是删完对着 36 处"没量到这个值"猜哪里连带空了。

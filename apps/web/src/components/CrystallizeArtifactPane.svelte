@@ -78,9 +78,113 @@
   let deleting = $state('')
   /** 删完之后的回执（说清删了什么、还剩几份；右栏本来就是"它现在手上有什么"）。 */
   let deleteNote = $state('')
+  /** 正在追加文件时不为空（防止一边拖两批、一边按两次按钮）。 */
+  let adding = $state(false)
+  /** 拖拽文件悬停在本区上（给一点反馈：这一块收文件）。 */
+  let dragOver = $state(false)
+  /** 追加文件（拖进来 / 选进来）的回执。 */
+  let addNote = $state('')
+  /** 两个 `<input type=file>`：一个选文件、一个选整个目录（`webkitdirectory`）。 */
+  let fileInput = $state<HTMLInputElement | null>(null)
+  let dirInput = $state<HTMLInputElement | null>(null)
+
+  /**
+   * 能被当成"素材"的扩展名。判据是"这文件能不能读成文本"——素材最终是要给起草者**读**的，
+   * 二进制（图片/压缩包/PDF）塞进去它读到的只会是乱码，比"不接收"更坏。
+   */
+  const TEXT_EXT =
+    /\.(md|markdown|txt|text|rst|json|ya?ml|csv|tsv|log|ts|tsx|js|mjs|cjs|py|sh|rb|go|rs|java|kt|c|h|cpp|html?|css|scss|toml|ini|cfg|conf|env|sql)$/i
+
+  /** 与 daemon 的 `MATERIAL_MAX_BYTES` 一致：单份上限 100 KiB（更大的塞进去也读不出来）。 */
+  const MATERIAL_MAX_BYTES = 100 * 1024
+  /** 一次最多收几份：拖一个目录进来可能是几百个文件，逐个 POST 会把 daemon 刷爆。 */
+  const MATERIAL_MAX_FILES = 20
+
+  /**
+   * ★ 分批第 148 批（§12.4 材料卡：追加的形态有"拖文件 / 粘贴 / 选目录 / 仓库"）：
+   * **拖文件 / 选目录**——浏览器读成文本，走已有的 `POST /api/crystallize/material`。
+   *
+   * 为什么不新开一个上传接口：
+   *   · daemon 那边已经有一份**落盘 + 登记索引**的通道（§12.47），再开一个等于同一件事两处写，
+   *     迟早两边不一致（本仓库最防的就是这个）；
+   *   · 更重要：素材是**文本**（起草者用工具读）。二进制走 multipart 上传，daemon 还得决定
+   *     存哪、怎么读——而读不出来，等于给素材里塞垃圾。
+   *   · 「选目录」用 `<input webkitdirectory>` 在浏览器侧展开文件列表 ⇒ daemon 不需要接受
+   *     任意本地路径（那是把"读你机器上任意文件"变成一个 HTTP 入参）。
+   *
+   * ⚠️ 逐份 POST 而不是一次打包：daemon 的校验是**单份**的（空/超大/重名），打包发送会把
+   *    "第 3 份太大"变成"整批失败"，而前面两份本来是可以进去的。
+   */
+  async function addFiles(files: FileList | File[] | null): Promise<void> {
+    if (adding) return
+    const list = files === null ? [] : [...files].filter((f) => f.size > 0)
+    if (list.length === 0) return
+    adding = true
+    addNote = ''
+    deleteNote = ''
+    let added = 0
+    const skipped: string[] = []
+    for (const file of list.slice(0, MATERIAL_MAX_FILES)) {
+      const looksText = file.type.startsWith('text/') || TEXT_EXT.test(file.name)
+      if (!looksText) {
+        skipped.push(`${file.name}（不是文本）`)
+        continue
+      }
+      if (file.size > MATERIAL_MAX_BYTES) {
+        skipped.push(`${file.name}（${Math.round(file.size / 1024)} KB 超过上限 100 KB）`)
+        continue
+      }
+      let body = ''
+      try {
+        body = await file.text()
+      } catch {
+        skipped.push(`${file.name}（读不出来）`)
+        continue
+      }
+      if (body.trim() === '') {
+        skipped.push(`${file.name}（空的）`)
+        continue
+      }
+      try {
+        await api('/api/crystallize/material', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          // 名字原样交过去：daemon 会剥掉路径、折掉不安全字符、重名自动加 -2
+          body: JSON.stringify({ draftRunId, name: file.name, text: body }),
+        })
+        added += 1
+      } catch (err) {
+        skipped.push(`${file.name}（${String(err instanceof Error ? err.message : err)}）`)
+      }
+    }
+    if (list.length > MATERIAL_MAX_FILES) {
+      skipped.push(`还有 ${list.length - MATERIAL_MAX_FILES} 份没处理（一次最多 ${MATERIAL_MAX_FILES} 份）`)
+    }
+    adding = false
+    addNote =
+      (added > 0 ? $t('crystallize.materialAddDone', { n: String(added) }) : '') +
+      (skipped.length > 0
+        ? `${added > 0 ? '；' : ''}${$t('crystallize.materialAddSkipped', { items: skipped.join('、') })}`
+        : '')
+    if (added > 0) {
+      await reloadMaterial(draftRunId)
+      // 另一处（中间那栏的「依据」）也重读：材料的两个显示处必须同源（§12.14）
+      onchanged()
+    }
+  }
+
+  /** `<input type=file>` 的 change：读完就把 value 清空，否则再选同一个文件不触发 change。 */
+  function onPicked(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement | null
+    void addFiles(input?.files ?? null).finally(() => {
+      if (input) input.value = ''
+    })
+  }
 
   /** 一次只认一个 run：切换选中时旧的返回要丢掉（否则旧产物盖住新的）。 */
   let seq = 0
+  /** 上一次 `load` 的那条沉淀（用来区分"换了一条"与"同一条、材料变了"）。 */
+  let seenId = ''
 
   /** 接口的 404/`ApiError(404)`：这条沉淀还没有产物，不算错误。 */
   function isMissing(err: unknown): boolean {
@@ -123,10 +227,30 @@
   }
 
   $effect(() => {
-    // 读 `rev` 是**故意的**：材料在中间那栏被追加时，本栏也要重读（两处同一份数据，§12.14）
+    // 读 `rev` 是**故意的**：材料在中间那栏被追加 / 在这一栏被删掉时，两边都要重读
+    //（§12.14：两处必须由同一份数据现算）。
     void rev
-    void load(draftRunId)
+    const id = draftRunId
+    if (id !== seenId) {
+      // 换了一条沉淀：产物与材料一起重拉
+      seenId = id
+      void load(id)
+      return
+    }
+    // 同一条沉淀、只是材料变了：**只重读材料**。走 `load` 会把 `loading` 置真 ⇒ 整栏闪成
+      // 「载入产物…」、材料清单与刚出的回执一起消失（删一份材料闪一下，很难看也很像出错）。
+    void reloadMaterial(id)
   })
+
+  /** 同一条沉淀的材料重读（不动 `loading` / 产物：材料变了不等于产物变了）。 */
+  async function reloadMaterial(id: string): Promise<void> {
+    if (id === '') return
+    try {
+      material = await api<Material>(`/api/crystallize/material?draftRunId=${encodeURIComponent(id)}`)
+    } catch {
+      material = null
+    }
+  }
 
   /**
    * ★ 分批第 147 批（§12.14「删掉错的」）：删掉一份**使用者给的**材料。
@@ -151,7 +275,7 @@
         path: res.relPath,
         n: String(res.remaining),
       })
-      await load(draftRunId)
+      await reloadMaterial(draftRunId)
       onchanged()
     } catch (err) {
       deleteNote = String(err instanceof Error ? err.message : err)
@@ -259,6 +383,62 @@
             <p class="faint small artifact-mat-note">{deleteNote}</p>
           {/if}
         {/if}
+        <!-- ★ 分批第 148 批（§12.4 材料卡：追加形态"拖文件 / 选目录"）：收文件的就是这一块。
+             只收**文本**（素材最终要给起草者读，二进制进去只会是乱码），单份 ≤ 100 KiB。 -->
+        <div
+          class="mat-add"
+          class:drag={dragOver}
+          data-mat-dropzone="true"
+          role="group"
+          ondragover={(e) => {
+            e.preventDefault()
+            dragOver = true
+          }}
+          ondragleave={() => (dragOver = false)}
+          ondrop={(e) => {
+            e.preventDefault()
+            dragOver = false
+            void addFiles(e.dataTransfer?.files ?? null)
+          }}
+        >
+          <p class="faint small">{$t('crystallize.materialDropHint')}</p>
+          <div class="mat-add-actions">
+            <button
+              type="button"
+              class="ghost small"
+              disabled={adding}
+              onclick={() => fileInput?.click()}>{$t('crystallize.materialAddFiles')}</button
+            >
+            <button
+              type="button"
+              class="ghost small"
+              disabled={adding}
+              onclick={() => dirInput?.click()}>{$t('crystallize.materialAddDir')}</button
+            >
+          </div>
+          <!-- 两个隐藏的 file input：选文件 / 选目录（`webkitdirectory` 在浏览器侧展开目录，
+               daemon 不需要接受任意本地路径——那等于把"读你机器上任意文件"做成一个入参）。 -->
+          <input
+            class="mat-file-input"
+            type="file"
+            multiple
+            hidden
+            bind:this={fileInput}
+            onchange={onPicked}
+          />
+          <input
+            class="mat-dir-input"
+            type="file"
+            multiple
+            webkitdirectory
+            hidden
+            bind:this={dirInput}
+            onchange={onPicked}
+          />
+          {#if addNote !== ''}
+            <p class="faint small artifact-mat-note" data-mat-add-note>{addNote}</p>
+          {/if}
+        </div>
       </section>
 
       <!-- 文件：点一个在下面预览。用 button 而不是 a：它只切换预览，不导航。 -->
@@ -400,6 +580,30 @@
     margin: var(--sp-1) 0 0;
     color: var(--text-dim);
     overflow-wrap: anywhere;
+  }
+
+  /* 收文件那一块（拖进来 / 选文件 / 选目录）：虚线框，拖过时高亮，让人一眼看出"这里能放" */
+  .mat-add {
+    margin-top: var(--sp-2);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-2);
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .mat-add.drag {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+
+  .mat-add p {
+    margin: 0;
+  }
+
+  .mat-add-actions {
+    display: flex;
+    gap: var(--sp-2);
+    margin-top: var(--sp-1);
   }
 
   .artifact-files ul {
