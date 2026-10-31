@@ -125,6 +125,7 @@ import {
   draftDirName,
   draftRoot,
   isMaterialEmpty,
+  appendRepoMaterial,
   listMaterialFiles,
   removeMaterial,
   sourceLabelOf,
@@ -134,6 +135,8 @@ import {
   type MaterialPiece,
   type MaterialStats,
 } from './crystallize-material.ts'
+// ★ 分批第 157 批（§12.54）：从仓库拉材料——解析/拉取/落盘的边界都在那个文件里
+import { fetchRepoTextFiles, parseRepoUrl, repoDirName } from './crystallize-repo.ts'
 import {
   assembleArtifacts,
   draftVersionSkillDir,
@@ -5835,6 +5838,91 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
         `删除材料（草稿 ${draftRunId.slice(-8)}）：${removed.relPath}，还剩 ${removed.remaining} 份`,
       )
       sendJson(res, 200, removed)
+      return
+    }
+    /**
+     * ★ 分批第 157 批（§12.54）：**从仓库拉材料**。
+     *
+     * 校验与「追加材料」同一组（起草 run / 跑完 / 没入库），理由也一样：素材是起草者开工时
+     * 已经读完的东西，跑着的时候改只会让"它读到的"和磁盘上不是一份。
+     *
+     * 边界（为什么是这几条，见 `crystallize-repo.ts` 的文件头）：
+     *   · 只认 GitHub 的三个主机（白名单）——本机服务不许变成"抓任意地址"的跳板；
+     *   · 总量 1 MB / 40 个文件 / 单文件 256 KB 封顶，只收文本；
+     *   · 不带 token、不走代理（材料不是安装，先不引入第三条可配路径）。
+     * 落盘走 `appendRepoMaterial`：`material/appended/<owner>-<repo>/…` + 索引页登记一行。
+     */
+    if (req.method === 'POST' && path === '/api/crystallize/material/repo') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; url?: unknown }
+      const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
+      const urlText = typeof raw?.url === 'string' ? raw.url : ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draft = await store.getRun(draftRunId as RunId)
+      if (!draft || draft.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (draft.subject.type !== 'skill-draft') {
+        sendJson(res, 400, {
+          error: `这条 run 不是起草 run（subject 是 ${draft.subject.type}），没有可追加的素材`,
+          code: 'not_a_draft',
+        })
+        return
+      }
+      if (draft.crystallized === true) {
+        sendJson(res, 409, {
+          error: '这条草稿已经入库了——材料再变只会在以后的「重新沉淀」里造成误会',
+          code: 'already_crystallized',
+        })
+        return
+      }
+      if (draft.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，先别拉材料（这一版读到的素材已经定了；跑完再拉）',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      const parsed = parseRepoUrl(urlText)
+      if (!parsed.ok) {
+        sendJson(res, 400, { error: parsed.error, code: 'bad_repo_url' })
+        return
+      }
+      let pulled
+      try {
+        pulled = await fetchRepoTextFiles(parsed.ref, options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
+      } catch (err) {
+        sendJson(res, 502, {
+          error: `拉仓库失败：${err instanceof Error ? err.message : String(err)}`,
+          code: 'repo_fetch_failed',
+        })
+        return
+      }
+      if (pulled.files.length === 0) {
+        sendJson(res, 400, {
+          error:
+            '这个仓库里没有可当素材的文本文件' +
+            (pulled.skipped.length > 0 ? `（跳过 ${pulled.skipped.length} 个：${pulled.skipped.slice(0, 3).join('；')}）` : ''),
+          code: 'repo_no_text_files',
+        })
+        return
+      }
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
+      const saved = await appendRepoMaterial(materialDir, {
+        dirName: repoDirName(parsed.ref),
+        files: pulled.files,
+      })
+      info(
+        `从仓库拉材料（草稿 ${draftRunId.slice(-8)}）：${saved.relDir} ${saved.files} 个文件 ${saved.bytes} 字节`,
+      )
+      sendJson(res, 200, {
+        ...saved,
+        skipped: pulled.skipped,
+        hasSkillMd: pulled.hasSkillMd,
+      })
       return
     }
     /**

@@ -87,6 +87,9 @@
   let dragOver = $state(false)
   /** 追加文件（拖进来 / 选进来）的回执。 */
   let addNote = $state('')
+  /** 「从仓库拉」的地址输入与进行中标记（§12.54）。 */
+  let repoUrl = $state('')
+  let repoPulling = $state(false)
   /** 两个 `<input type=file>`：一个选文件、一个选整个目录（`webkitdirectory`）。 */
   let fileInput = $state<HTMLInputElement | null>(null)
   let dirInput = $state<HTMLInputElement | null>(null)
@@ -173,6 +176,52 @@
       await reloadMaterial(draftRunId)
       // 另一处（中间那栏的「依据」）也重读：材料的两个显示处必须同源（§12.14）
       onchanged()
+    }
+  }
+
+  /**
+   * ★ 分批第 157 批（§12.54）：**从 GitHub 仓库拉一批文本当素材**。
+   *
+   * 为什么只有这一个入口形态（一个地址框）：仓库地址没有别的给法——而"选本地仓库目录"
+   * 等于让 daemon 接受任意本地路径（§12.51 已经否决过那条）。daemon 那边的边界写在
+   * `apps/daemon/src/crystallize-repo.ts` 的文件头：主机白名单 / 体量封顶 / 只收文本。
+   */
+  async function pullRepo(): Promise<void> {
+    const url = repoUrl.trim()
+    if (url === '' || repoPulling) return
+    repoPulling = true
+    addNote = ''
+    deleteNote = ''
+    try {
+      const res = await api<{
+        relDir: string
+        files: number
+        bytes: number
+        skipped: string[]
+        hasSkillMd: boolean
+      }>('/api/crystallize/material/repo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId, url }),
+      })
+      repoUrl = ''
+      addNote =
+        $t('crystallize.materialRepoDone', {
+          files: String(res.files),
+          kb: String(Math.max(1, Math.round(res.bytes / 1024))),
+          dir: res.relDir,
+        }) +
+        (res.skipped.length > 0
+          ? `；${$t('crystallize.materialAddSkipped', { items: res.skipped.slice(0, 3).join('、') })}`
+          : '') +
+        // 仓库里带 SKILL.md：**必须**说一句——"更新那个技能"与"只当素材"是两条完全不同的路
+        (res.hasSkillMd ? ` ⚠️ ${$t('crystallize.materialRepoHasSkill')}` : '')
+      await reloadMaterial(draftRunId)
+      onchanged()
+    } catch (err) {
+      addNote = String(err instanceof Error ? err.message : err)
+    } finally {
+      repoPulling = false
     }
   }
 
@@ -428,6 +477,27 @@
               onclick={() => dirInput?.click()}>{$t('crystallize.materialAddDir')}</button
             >
           </div>
+          <!-- ★ 分批第 157 批（§12.54）：从仓库拉。地址交给 daemon，它按白名单 + 体量上限去拉，
+               拉下来的文本落进 `material/appended/<owner>-<repo>/` 并登记进索引。 -->
+          <form
+            class="mat-repo"
+            onsubmit={(e) => {
+              e.preventDefault()
+              void pullRepo()
+            }}
+          >
+            <input
+              type="text"
+              bind:value={repoUrl}
+              placeholder={$t('crystallize.materialRepoPlaceholder')}
+              aria-label={$t('crystallize.materialRepoPlaceholder')}
+            />
+            <button
+              type="submit"
+              class="ghost small"
+              disabled={repoPulling || repoUrl.trim() === ''}
+            >{$t('crystallize.materialRepoPull')}</button>
+          </form>
           <!-- 两个隐藏的 file input：选文件 / 选目录（`webkitdirectory` 在浏览器侧展开目录，
                daemon 不需要接受任意本地路径——那等于把"读你机器上任意文件"做成一个入参）。 -->
           <input
@@ -600,6 +670,19 @@
     display: flex;
     gap: var(--sp-2);
     margin-top: var(--sp-1);
+  }
+
+  /* 从仓库拉：地址框 + 按钮一行；输入框吃掉剩余宽度，按钮不换行 */
+  .mat-repo {
+    display: flex;
+    gap: var(--sp-1);
+    margin-top: var(--sp-2);
+  }
+
+  .mat-repo input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
   }
 
   .artifact-files ul {

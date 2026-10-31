@@ -329,6 +329,20 @@ export const crystallizeText = {
     zh: '没加的：{items}',
     en: 'Not added: {items}',
   },
+  // ── 从仓库拉（分批第 157 批，§12.54）──
+  'crystallize.materialRepoPlaceholder': {
+    zh: 'GitHub 仓库地址（https://github.com/owner/repo，或 owner/repo）',
+    en: 'GitHub repo URL (https://github.com/owner/repo, or owner/repo)',
+  },
+  'crystallize.materialRepoPull': { zh: '拉进来', en: 'Pull' },
+  'crystallize.materialRepoDone': {
+    zh: '从仓库拉了 {files} 个文件（{kb} KB）到 {dir}/，已登记进素材索引',
+    en: 'Pulled {files} file(s) ({kb} KB) from the repo into {dir}/ and registered them in the material index',
+  },
+  'crystallize.materialRepoHasSkill': {
+    zh: '这个仓库里有 SKILL.md——如果你要的是「更新那个技能」，请从技能页发起；当素材用就继续。',
+    en: 'This repo contains SKILL.md — to update that skill, start from the Skills page; continue if you only want it as material.',
+  },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },

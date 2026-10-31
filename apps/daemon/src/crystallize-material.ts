@@ -601,6 +601,76 @@ export async function removeMaterial(
   return { ok: true, relPath: `${prefix}${name}`, remaining }
 }
 
+/**
+ * ★ 分批第 157 批（§12.54）：把**从仓库拉下来的几个文件**落进素材。
+ *
+ * 与「追加一段文本」的差别只有"一批文件 + 一个子目录"，所以落点、登记索引、下一版天然带上
+ * 这三件事完全一样（`appended/` 下、索引页要说、任务目录原地复用）。目录形如
+ * `material/appended/<owner>-<repo>/<仓库里的路径>`：带 owner 是因为不同仓库常常有同名文件。
+ *
+ * 索引页只登记**一行**（目录 + 体量 + 份数）：一个仓库几十个文件，逐个列会把索引页淹掉——
+ * 而索引页是起草者读的第一个文件，它要的是"有哪些东西"，不是一份目录树。
+ */
+export interface RepoMaterialResult {
+  /** 相对 `material/` 的目录，形如 `appended/acme-notes`。 */
+  relDir: string
+  files: number
+  bytes: number
+}
+
+export async function appendRepoMaterial(
+  materialDir: string,
+  input: {
+    dirName: string
+    files: ReadonlyArray<{ relPath: string; text: string }>
+    now?: Date
+  },
+): Promise<RepoMaterialResult> {
+  const dir = join(materialDir, APPENDED_MATERIAL_DIR, input.dirName)
+  await mkdir(dir, { recursive: true })
+  const at = (input.now ?? new Date()).toISOString()
+  let bytes = 0
+  // ⚠️ 计**真写下去的**份数，不是 `input.files.length`：被下面那道 `..` 检查丢掉的文件
+  //    不该算进"拉了 N 个文件"（测试当场抓到 2 !== 1）。
+  let written = 0
+  for (const file of input.files) {
+    // 仓库里的路径已经由 `crystallize-repo.ts` 过滤过（跳过 .git / 依赖目录 / 非文本），
+    // 这里再挡一次 `..`：API 是公开的，不能靠"上游已经查过"来省这一道。
+    const segments = file.relPath.split('/')
+    if (segments.length === 0 || segments.some((seg) => seg === '' || seg === '.' || seg === '..')) {
+      continue
+    }
+    const full = join(dir, ...segments)
+    await mkdir(dirname(full), { recursive: true })
+    const header =
+      `# 从仓库拉来的材料\n\n（${at} 由使用者在审阅界面从仓库拉取；下面正文原样保留。）\n\n`
+    await writeFile(full, `${header}${file.text}`, 'utf8')
+    bytes += Buffer.byteLength(file.text, 'utf8')
+    written += 1
+  }
+  const relDir = `${APPENDED_MATERIAL_DIR}/${input.dirName}`
+  await noteRepoInIndex(materialDir, relDir, written, bytes, at)
+  return { relDir, files: written, bytes }
+}
+
+/** 索引页追加一段"从仓库拉来的材料"（一行说清目录、份数、体量）。 */
+async function noteRepoInIndex(
+  materialDir: string,
+  relDir: string,
+  files: number,
+  bytes: number,
+  at: string,
+): Promise<void> {
+  const indexPath = join(materialDir, '00-README.md')
+  const index = await readFile(indexPath, 'utf8').catch(() => '')
+  const note =
+    `${APPENDED_NOTE_HEAD}（${at}，来自仓库）\n\n` +
+    `- \`${relDir}/\`（${files} 个文件，${bytes} 字节）——使用者从仓库拉进来当素材；` +
+    '**和上面自动带上的素材同等有效**。\n' +
+    '  它可能补充或推翻前面某一条做法，动手前先读一遍（优先看 README / 笔记类文件）。\n'
+  await writeFile(indexPath, `${index.trimEnd()}\n\n${note}`, 'utf8')
+}
+
 /** 任务标题 / 对话标题（界面与索引都要）。 */
 export async function sourceLabelOf(store: Store, run: Run): Promise<string> {
   if (run.subject.type === 'conversation') {
