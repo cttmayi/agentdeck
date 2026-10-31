@@ -14,10 +14,8 @@
     /** 技能来源（`mine` = 你提炼的 / `installed` = 装的）：决定"更新"是进化还是遮蔽。 */
     source?: string
   }
-  interface AgentBrief { id: string; name: string; role: string; instructionsChars: number; builtin: boolean }
   interface Targets {
     loadedSkills: LoadedSkill[]
-    agentTargets: { executor: AgentBrief; reviewer: AgentBrief | null }
     materialStats: { turns: number; toolCalls: number } | null
   }
   let {
@@ -41,9 +39,8 @@
     blocked?: string | undefined
     stage?: Stage
     onfinish: (p: {
-      kind: 'new' | 'update' | 'agent'
+      kind: 'new' | 'update'
       skillId: string
-      agentId: string
       purpose: string
       feedback: string
       blank?: boolean
@@ -98,9 +95,8 @@
    * 提醒"只捕获了它的初始值"，而且那样写的意图也含糊。改由下面那个已有的 `$effect` 补：
    * 空白起没有来源 run ⇒ 目标只能是"新建"（但它是**可改的**，所以不能做成 `$derived`）。
    */
-  let kind = $state<'new' | 'update' | 'agent' | ''>('')
+  let kind = $state<'new' | 'update' | ''>('')
   let skillId = $state('')
-  let agentId = $state('')
   let purpose = $state('')
   let feedback = $state('')
   /**
@@ -147,31 +143,16 @@
     })()
   })
   const skills = $derived(blank ? blankSkills : (targets?.loadedSkills ?? []))
-  /**
-   * ⚠️ 防御式取值：`agentTargets` 在某些接口/夹具里可能缺省。第一版直接 `targets.agentTargets.executor`，
-   * 一旦它是 undefined 就抛 TypeError——而**组件里未捕获的异常会整页崩**，表现是后面几十条判据
-   * 全变成"没量到这个值"（连聊天的左栏右栏都量不到）。这类"改沉淀页、聊天页跟着红"的现象，
-   * 就是整页崩掉而不是布局问题。
-   */
-  const agents = $derived.by(() => {
-    const briefs = targets?.agentTargets
-    if (!briefs) return []
-    return [briefs.executor, ...(briefs.reviewer === null ? [] : [briefs.reviewer])].filter(
-      (a): a is AgentBrief => a !== null && a !== undefined,
-    )
-  })
   const stats = $derived(targets?.materialStats ?? null)
 
-  function pickStart(next: 'new' | 'update' | 'agent'): void {
+  function pickStart(next: 'new' | 'update'): void {
     kind = next
     if (next === 'update' && skills.length === 1) { skillId = skills[0]?.id ?? ''; stage = 'purpose'; return }
-    if (next === 'agent' && agents.length === 1) { agentId = agents[0]?.id ?? ''; stage = 'purpose'; return }
     stage = next === 'new' ? 'purpose' : 'detail'
   }
 
   function pickDetail(id: string): void {
     if (kind === 'update') skillId = id
-    else agentId = id
     stage = 'purpose'
   }
 
@@ -180,11 +161,9 @@
   function finish(): void {
     if (kind === '' || purposeMissing) return
     if (kind === 'update' && skillId === '') return
-    if (kind === 'agent' && agentId === '') return
     onfinish({
       kind,
       skillId,
-      agentId,
       purpose: purpose.trim(),
       feedback: feedback.trim(),
       ...(blank
@@ -201,8 +180,8 @@
     stage = blank ? 'blankMaterial' : 'ready'
   }
 
-  const startLabel = $derived(kind === 'new' ? '新建一份技能' : kind === 'update' ? '优化已有技能' : kind === 'agent' ? '优化智能体指令' : '')
-  const detailLabel = $derived(kind === 'update' ? (skills.find((s) => s.id === skillId)?.name ?? '') : (agents.find((a) => a.id === agentId)?.name ?? ''))
+  const startLabel = $derived(kind === 'new' ? '新建一份技能' : kind === 'update' ? '优化已有技能' : '')
+  const detailLabel = $derived(kind === 'update' ? (skills.find((s) => s.id === skillId)?.name ?? '') : '')
 </script>
 
 <div class="intake">
@@ -234,11 +213,6 @@
               >
             </button>
           {/if}
-          {#if agents.length > 0 && !blank}
-            <button type="button" class="intake-choice" onclick={() => pickStart('agent')}>
-              优化智能体指令<span class="faint small">只改指令，不新建智能体</span>
-            </button>
-          {/if}
         </div>
       </div>
     {:else if stage === 'detail'}
@@ -257,19 +231,6 @@
                   （{option.source === 'mine'
                     ? $t('crystallize.updateIsEvolve')
                     : $t('crystallize.updateIsShadow')}）
-                </span>
-              </button>
-            {/each}
-          {:else}
-            {#each agents as option (option.id)}
-              <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
-                {option.name}
-                <span class="faint small">
-                  {option.role === 'executor'
-                    ? $t('crystallize.agentCandidateExecutor')
-                    : $t('crystallize.agentCandidateReviewer')}
-                  · {$t('crystallize.agentCharsHint', { chars: String(option.instructionsChars) })}
-                  {#if option.builtin}· {$t('crystallize.agentBuiltinHint')}{/if}
                 </span>
               </button>
             {/each}

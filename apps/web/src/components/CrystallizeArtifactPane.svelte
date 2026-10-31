@@ -27,7 +27,7 @@
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
     status: string
-    mode: 'files' | 'text' | 'refused' | 'agent'
+    mode: 'files' | 'text' | 'refused'
     refusalReason?: string
     files: Record<string, string>
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }

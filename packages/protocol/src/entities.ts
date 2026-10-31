@@ -905,14 +905,12 @@ export const CrystallizeTargetRef = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('new') }),
   z.object({ kind: z.literal('update'), skillId: z.string() }),
   /**
-   * ★ 分批第 34 批：「沉淀成 Agent」= 更新**某一条已有智能体的指令**。
+   * ⚠️ **只剩读取兼容，不再有生产路径**（分批第 191 批，使用者："去掉起草智能体指令的
+   * 功能，只需要起草新建或者更新现有 skill"）。
    *
-   * 使用者的口径（2026-10-25）：agent 指执行者或审核者；**只优化它的指令**，
-   * 不碰它挂的 skill；**不新建 agent，只更新当前这一条**。
-   *
-   * 所以这里只记 `agentId`——没有"新建"的分支，也就没有名字/技能/工具子集要定：
-   * 入库时只覆盖 `Agent.instructions` 一个字段，`name`/`skillIds`/`toolIds`/`model`/
-   * `reviewStandard` 一个字都不动（这条纪律写在 commit 路由里）。
+   * 历史草稿的 run 记录里还躺着 `{"kind":"agent","agentId":"…"}`；把它从枚举里删掉会让
+   * 那些记录的解析/迁移多一条岔路，而它们本来就要**能读出来再被过滤掉**（不进列表、
+   * 深链不复活，见 `crystallize.ts` 的 `draftInfo`）。新增起草只会写 `new` / `update`。
    */
   z.object({ kind: z.literal('agent'), agentId: z.string() }),
 ])

@@ -27,16 +27,12 @@ import { api } from './api.ts'
 /** `GET /api/crystallize/artifacts` 的返回（与 daemon 的 `crystallize-artifacts.ts` 对齐）。 */
 export interface Artifacts {
   status: string
-  mode: 'files' | 'text' | 'refused' | 'agent'
+  mode: 'files' | 'text' | 'refused'
   refusalReason?: string
   files: Record<string, string>
   skillMd: { name: string; description: string; body: string; raw: string }
   validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
-  target:
-    | { kind: 'new' }
-    | { kind: 'update'; skillId: string }
-    | { kind: 'agent'; agentId: string }
-    | null
+  target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
   baseline: { slug: string; files: Record<string, string> } | null
   materialDir: string
   /** 「按意见改一版」来的草稿：上一版 run id（有它才给"对比上一版"）。 */

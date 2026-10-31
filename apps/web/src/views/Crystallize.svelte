@@ -55,15 +55,7 @@
     versionRunIds: string[]
     status: string
     queuedAt: number
-    target:
-      | { kind: 'new' }
-      | { kind: 'update'; skillId: string }
-      /**
-       * ★ 分批第 38 批：「沉淀成 Agent」的草稿。类型里原来没有它 ⇒ 列表行会走到
-       * `rowUpdate` 那条分支、把 `undefined` 当 slug 印出来（"更新 undefined"）。
-       */
-      | { kind: 'agent'; agentId: string }
-      | null
+    target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
     source: { kind: 'conversation' | 'issue'; label: string } | null
     /**
      * ★ 分批第 133 批：「从空白/材料起」的沉淀任务（**没有来源 run**）。
@@ -78,14 +70,10 @@
   let now = Date.now()
   let filter = ''
 
-  /** 列表行目标摘要：新建 / 更新 <slug> / 优化 <智能体> 的指令。 */
+  /** 列表行目标摘要：新建 / 更新 <slug>。 */
   function targetLabel(row: DraftRow): string {
     if (row.target === null) return $t('crystallize.rowNew')
     if (row.target.kind === 'new') return $t('crystallize.rowNew')
-    if (row.target.kind === 'agent') {
-      // 名字在这一行拿不到（列表接口只给 id）⇒ 用 id 的尾段，至少能分辨是哪一条
-      return $t('crystallize.rowAgent', { id: row.target.agentId.slice(-6) })
-    }
     return $t('crystallize.rowUpdate', { slug: row.target.skillId })
   }
 

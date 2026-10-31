@@ -89,8 +89,6 @@ import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
 import {
-  AGENT_INSTRUCTIONS_MAX_CHARS,
-  buildAgentInstructionsPrompt,
   buildDraftPrompt,
   crystallizeTargets,
   listCrystallizeDrafts,
@@ -130,7 +128,6 @@ import {
   removeMaterial,
   sourceLabelOf,
   writeMaterial,
-  type ExistingAgentSnapshot,
   type ExistingSkillSnapshot,
   type MaterialPiece,
   type MaterialStats,
@@ -158,10 +155,6 @@ import {
 // ★ 分批第 22 批：链条只认 `revisedFrom`（四处口径统一到一个地方）。
 //   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
 //   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
-import {
-  listInstructionsSnapshots,
-  saveInstructionsSnapshot,
-} from './agent-instructions-snapshots.ts'
 import { chainOf, chainOfRun } from './draft-chain.ts'
 // ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环已删，`rework-guard.ts` 随之删除
 //   （它只服务那条循环的"收敛闸门"）。任务线的审核返工（D45）用的是 executo r 里那套
@@ -334,6 +327,17 @@ function taskIssueTitle(prompt: string): string {
  * 而 `EventSource` 每次断开都会自动重连，于是刷屏"连接中断，正在重连…"。
  */
 const TERMINAL_RUN_STATUSES: readonly string[] = ['completed', 'failed', 'cancelled']
+
+/**
+ * ★ 分批第 191 批：「优化智能体指令」这条沉淀目标已经删了。
+ *
+ * 两个入口（空白起 / 有来源）各有一条分支回这句话——放在一处，免得两处措辞漂开。
+ * 为什么还要**明确拒**而不是当成未知目标：老版本界面/深链还会发 `{kind:'agent'}`，
+ * 回一句"要改指令去智能体页"比一句 `target_required` 有用得多（后者会让人以为请求写错了）。
+ */
+const AGENT_TARGET_REMOVED_MESSAGE =
+  '沉淀现在只做 skill（新建 / 更新现有 skill）——「优化智能体指令」这条已经不做；' +
+  '要改智能体的指令请在「智能体」页直接改。'
 
 export interface DaemonOptions {
   dataDir: string
@@ -3366,9 +3370,7 @@ async function injectedSkillsOf(
       await writeFile(
         join(materialDir, '00-README.md'),
         `${index.trimEnd()}\n\n## 这一版是「按意见改一版」（第 ${versionNo} 版，仍在**同一个任务目录**里）\n\n` +
-          (previous.crystallizeTarget?.kind === 'agent'
-            ? '- **产出目录 `agent/` 里就是上一版**（`instructions.md`）——你要做的是在它上面改。\n'
-            : '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n') +
+          '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
           '- ⚠️ 这一版**不是**新开的小屋：`material/`、`skill/` 与前几版是同一个任务目录，路径没变。\n' +
           '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
           '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
@@ -3389,14 +3391,9 @@ async function injectedSkillsOf(
     /**
      * 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
      * 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）。
-     *
-     * ★ 分批第 38 批：「沉淀成 Agent」的返工**不吃这份规范**（它写的是指令，不是 skill），
-     * 所以只在 skill 那支才要求它必须在——否则内置规范读不到时，一条**跟它无关**的
-     * 智能体返工也会 500（错误信息还会指向"安装不完整"，把人带到错的地方）。
      */
-    const needsWritingSpec = previous.crystallizeTarget?.kind !== 'agent'
-    const reviseSpec = needsWritingSpec ? await loadBuiltinSkill(WRITING_SKILLS) : null
-    if (needsWritingSpec && reviseSpec === null) {
+    const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
+    if (reviseSpec === null) {
       return {
         status: 500,
         body: {
@@ -3405,40 +3402,19 @@ async function injectedSkillsOf(
         },
       }
     }
-    /**
-     * ★ 分批第 34 批：返工也要按**当初的目标**分叉，否则「沉淀成 Agent」的返工版会被
-     * 要求去写 `skill/SKILL.md`——产出凭空变成一个 skill，而入库只认 `agent/instructions.md`。
-     *
-     * 返工一定有证据（审核不通过的意见，或使用者手写的意见），所以 `hasEvidence` 恒 true。
-     */
-    const revisePrompt =
-      previous.crystallizeTarget?.kind === 'agent'
-        ? buildAgentInstructionsPrompt({
-            scope:
-              sourceRun === null
-                ? 'blank'
-                : sourceRun.subject.type === 'conversation'
-                  ? 'conversation'
-                  : 'task',
-            materialDir: 'material',
-            outputDir: 'agent',
-            revised: true,
-            hasEvidence: true,
-            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
-          })
-        : buildDraftPrompt({
-            scope:
-              sourceRun === null
-                ? 'blank'
-                : sourceRun.subject.type === 'conversation'
-                  ? 'conversation'
-                  : 'task',
-            materialDir: 'material',
-            outputDir: 'skill',
-            target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
-            revised: true,
-            writingSpec: reviseSpec?.body ?? '',
-          })
+    const revisePrompt = buildDraftPrompt({
+      scope:
+        sourceRun === null
+          ? 'blank'
+          : sourceRun.subject.type === 'conversation'
+            ? 'conversation'
+            : 'task',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+      revised: true,
+      writingSpec: reviseSpec.body,
+    })
 
     const outcome = await executor.submit({
       runId: newRunId,
@@ -3594,27 +3570,25 @@ async function injectedSkillsOf(
         : sourceRun.subject.type === 'conversation'
           ? 'conversation'
           : 'task'
-    const writingSpec =
-      previous.crystallizeTarget?.kind === 'agent' ? null : await loadBuiltinSkill(WRITING_SKILLS)
-    const prompt =
-      previous.crystallizeTarget?.kind === 'agent'
-        ? buildAgentInstructionsPrompt({
-            scope,
-            materialDir: 'material',
-            outputDir: 'agent',
-            revised: true,
-            hasEvidence: true,
-            maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
-          })
-        : buildDraftPrompt({
-            scope,
-            materialDir: 'material',
-            outputDir: 'skill',
-            target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
-            revised: true,
-            writingSpec: writingSpec?.body ?? '',
-            answering: true,
-          })
+    const writingSpec = await loadBuiltinSkill(WRITING_SKILLS)
+    if (writingSpec === null) {
+      return {
+        status: 500,
+        body: {
+          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
+          code: 'builtin_skill_missing',
+        },
+      }
+    }
+    const prompt = buildDraftPrompt({
+      scope,
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+      revised: true,
+      writingSpec: writingSpec.body,
+      answering: true,
+    })
     const skills = await injectedSkillsOf(workspaceId, taskDir)
     const outcome = await executor.submit({
       runId: newRunId,
@@ -4806,84 +4780,14 @@ async function injectedSkillsOf(
     // 发现指令没了）。
 
     /**
-     * ══════════════════════════════════════════════════════════════════
-     * ★ 分批第 37 批：智能体指令的「恢复上一版」（沉淀成 Agent 的退路）
-     * ══════════════════════════════════════════════════════════════════
+     * ★ 分批第 191 批：智能体指令的「恢复上一版」整条删掉了。
      *
-     * 为什么必须有：入库那一刻做的是**覆盖一条正在生产用的指令**。没有退路的话，
-     * 一次不满意的沉淀就变成手工重贴——而使用者压根不知道旧指令长什么样了。
-     *
-     * 两代之间可以来回：恢复时会把**当前**值再存一代，所以"恢复完发现还是原来好"
-     * 也退得回去（只增不删的代价是几个 KB 文本，换来的是"手滑两次也能救"）。
+     * 它是「沉淀成 Agent」的**退路**（入库会覆盖一条正在生产用的指令，所以入库时顺手存一代
+     * 快照）。那条功能下线之后，快照就没有写入方了——只有"恢复"自己会存快照，而恢复又要求
+     * 先有快照 ⇒ 干净的工作区里这个按钮永远不出现（典型死接口）。使用者 **2026-11 定：整条删掉**
+     * （连数据目录里的 `agent-instructions/` 一起不再产出；旧文件原样留着，是使用者的数据）。
+     * 要改指令就直接在「智能体」页改——那里本来就能改，「恢复成默认值」仍然在（内置 agent 用）。
      */
-    const snapshotsMatch = /^\/api\/agents\/([^/]+)\/instruction-snapshots$/.exec(path)
-    if (snapshotsMatch && req.method === 'GET') {
-      const agentId = decodeURIComponent(snapshotsMatch[1]!) as Agent['id']
-      const agent = await store.getAgent(agentId)
-      if (!agent || agent.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      const snaps = await listInstructionsSnapshots(options.dataDir, agentId)
-      sendJson(res, 200, {
-        // 列表只给"有哪几代、各多少字"，正文按 id 取（避免列表把几百 KB 塞给界面）
-        snapshots: snaps.map((sn) => ({
-          id: sn.id,
-          at: sn.at,
-          runId: sn.runId,
-          previousChars: sn.previous.length,
-          nextChars: sn.nextChars,
-        })),
-        currentChars: agent.instructions.length,
-      })
-      return
-    }
-
-    const restoreMatch = /^\/api\/agents\/([^/]+)\/restore-instructions$/.exec(path)
-    if (restoreMatch && req.method === 'POST') {
-      const agentId = decodeURIComponent(restoreMatch[1]!) as Agent['id']
-      const agent = await store.getAgent(agentId)
-      if (!agent || agent.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
-        return
-      }
-      const body = (await readJsonBody(req).catch(() => ({}))) as { snapshotId?: unknown }
-      const wantId = typeof body.snapshotId === 'string' ? body.snapshotId : ''
-      const all = await listInstructionsSnapshots(options.dataDir, agentId)
-      if (all.length === 0) {
-        sendJson(res, 404, {
-          error: '这条智能体没有可恢复的历史指令（它还没被"沉淀成 Agent"改过）',
-          code: 'no_instruction_snapshot',
-        })
-        return
-      }
-      const picked = wantId === '' ? all[0]! : all.find((sn) => sn.id === wantId)
-      if (picked === undefined) {
-        sendJson(res, 404, { error: `没有这一代快照：${wantId}`, code: 'snapshot_not_found' })
-        return
-      }
-      const nowRestore = Date.now()
-      // 先给**当前**值存一代（这就是"恢复也能被恢复"）
-      const keep = await saveInstructionsSnapshot(options.dataDir, {
-        agentId,
-        agentName: agent.name,
-        previous: agent.instructions,
-        nextChars: picked.previous.length,
-        runId: picked.runId,
-        at: nowRestore,
-      })
-      await store.insertAgent({ ...agent, instructions: picked.previous, updatedAt: nowRestore })
-      info(
-        `智能体「${agent.name}」的指令已恢复上一版：${agent.instructions.length} → ${picked.previous.length} 字符` +
-          (keep.ok ? '' : `（当前那版没存下来：${keep.reason}）`),
-      )
-      sendJson(res, 200, {
-        agent: { id: agentId, name: agent.name, instructionsChars: picked.previous.length },
-        restoredFrom: picked.id,
-        previousChars: agent.instructions.length,
-      })
-      return
-    }
 
     // ── 内置 agent 的「恢复成默认值」（2026-10，定稿第 ② / ⑥ 条）──
     //
@@ -5519,14 +5423,7 @@ async function injectedSkillsOf(
         })
         return
       }
-      /**
-       * ★ 分批第 37 批：智能体草稿的产出目录是 `agent/`（只有一个 `instructions.md`）。
-       *
-       * 不分支的后果不是 400，而更坏：手改的指令被写进 `skill/SKILL.md`，入库读的是
-       * `agent/instructions.md` ⇒ **界面上改的东西入库时被静默忽略**。
-       */
-      const draftOutRel = draft.crystallizeTarget?.kind === 'agent' ? 'agent' : 'skill'
-      const skillDir = join(await draftTaskDir(draftRunId), draftOutRel)
+      const skillDir = join(await draftTaskDir(draftRunId), 'skill')
       const result = await writeDraftSkillFiles(skillDir, files as Record<string, string>)
       if (result.rejected.length > 0) {
         // 整单拒（一份都不写）：半写会让磁盘进入使用者没要求过的中间状态，
@@ -5597,60 +5494,6 @@ async function injectedSkillsOf(
       //
       // ⚠️ 只有 `snapshot !== null`（= 不是当前版本）时才换：当前版本读任务目录，与"人工保存
       //    落盘即所见"那条路一致（保存写的就是任务目录，读快照会让刚保存的改动看不见）。
-      /**
-       * ★ 分批第 37 批：智能体草稿的产出是**一个文件**（`agent/instructions.md`），
-       * 校验也只有三条能机械判：不为空、不超 6000、文件在。
-       *
-       * 基线给"这条智能体**现在**的指令"——界面据此算 A/M/D 与 diff，
-       * 于是"改了什么"一眼可见（与 skill 的"更新"完全同一套展示）。
-       */
-      if (draftRun.crystallizeTarget?.kind === 'agent') {
-        const agentId = draftRun.crystallizeTarget.agentId
-        const agentNow = await store.getAgent(agentId as Agent['id'])
-        const versionsA = await readDraftVersions(draftDir)
-        const askedA = versionsA?.versions.find((v) => v.runId === draftRunId)
-        const agentDirOfVersion =
-          askedA === undefined ? join(draftDir, 'agent') : draftVersionSkillDir(draftDir, askedA, 'agent')
-        const text = await readFileSafe(join(agentDirOfVersion, 'instructions.md'))
-        const problems: Array<{ file: string; message: string }> = []
-        if (text === null) {
-          problems.push({ file: 'instructions.md', message: '还没有产出（起草者没写 instructions.md）' })
-        } else {
-          if (text.trim() === '') problems.push({ file: 'instructions.md', message: '指令是空的' })
-          if (text.trim().length > AGENT_INSTRUCTIONS_MAX_CHARS) {
-            problems.push({
-              file: 'instructions.md',
-              message: `超长：${text.trim().length} 字符，上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}`,
-            })
-          }
-        }
-        sendJson(res, 200, {
-          status: draftRun.status,
-          mode: 'agent',
-          files: text === null ? {} : { 'instructions.md': text },
-          // 形状与 skill 那支保持一致（空壳）：界面的 slug/name 推导在 agent 模式下整段跳过
-          skillMd: { name: '', description: '', body: '', raw: '' },
-          validation: { ok: problems.length === 0, problems },
-          target: draftRun.crystallizeTarget,
-          baseline:
-            agentNow === null || agentNow === undefined
-              ? null
-              : { slug: 'instructions.md', files: { 'instructions.md': agentNow.instructions } },
-          /**
-           * ⚠️ 必须**显式给 null**：界面的默认对比是
-           * `res.revisedFrom !== null ? 'original' : 'current'`——少给这个字段时它是
-           * `undefined`，而 `undefined !== null` 成立 ⇒ 一条**没改过版**的 agent 草稿
-           * 会被当成"改版草稿"，结论条上写着「对比原 skill」（探针量到的原话）。
-           */
-          revisedFrom: draftRun.revisedFrom ?? null,
-          materialDir: join(draftDir, 'material'),
-          ...(askedA !== undefined && askedA.snapshot !== null
-            ? { historic: { runId: askedA.runId, at: askedA.at } }
-            : {}),
-        })
-        return
-      }
-
       const versionsForRead = await readDraftVersions(draftDir)
       const askedVersion = versionsForRead?.versions.find((v) => v.runId === draftRunId)
       const skillDirOfVersion =
@@ -5714,77 +5557,6 @@ async function injectedSkillsOf(
       const draftRun = await store.getRun(draftRunId as RunId)
       if (!draftRun || draftRun.workspaceId !== workspaceId) {
         sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
-        return
-      }
-
-      /**
-       * ══════════════════════════════════════════════════════════════════
-       * ★ 分批第 38 批：「沉淀成 Agent」的对比
-       * ══════════════════════════════════════════════════════════════════
-       *
-       * 量出来的缺陷：这条路由原来只认 `skill/`（要改的那份 skill 的原文、`history/<版本>/skill/`、
-       * `material/existing-skill/`），而 agent 草稿的产出在 `agent/instructions.md` ⇒ 界面上点
-       * 「对比」拿到的是**空的**——使用者正好在这一屏判断"它改了哪儿"，而这一屏什么都没有。
-       *
-       * 三条基线的口径（与 skill 那支对齐，按"这一份指什么"排）：
-       *   · `current`  = 这条智能体**现在**的指令（= 上一次沉淀的结果，或原本那条）
-       *   · `previous` = 上一版草稿的 `agent/instructions.md`（不在就退回 current）
-       *   · `original` = agent 草稿没有"原 skill"这回事 ⇒ 与 current 同义，标签如实说
-       */
-      if (draftRun.crystallizeTarget?.kind === 'agent') {
-        const agentId = draftRun.crystallizeTarget.agentId
-        const agentNow = await store.getAgent(agentId as Agent['id'])
-        const filesInAgent = raw?.files
-        let agentDraftFiles: Record<string, string> = {}
-        if (typeof filesInAgent === 'object' && filesInAgent !== null) {
-          for (const [rel, text] of Object.entries(filesInAgent as Record<string, unknown>)) {
-            if (typeof text === 'string') agentDraftFiles[rel] = text
-          }
-        } else {
-          const onDisk = await readFileSafe(
-            join(await draftTaskDir(draftRunId), 'agent', 'instructions.md'),
-          )
-          if (onDisk !== null) agentDraftFiles = { 'instructions.md': onDisk }
-        }
-        const wantAgainst =
-          raw?.against === 'previous' ? 'previous' : raw?.against === 'original' ? 'original' : 'current'
-        let agentBaseline: Record<string, string> = {}
-        let agentLabel = ''
-        let agentAgainst: 'previous' | 'original' | 'current' = wantAgainst
-        if (wantAgainst === 'previous' && draftRun.revisedFrom !== undefined) {
-          const taskDirA = await draftTaskDir(draftRunId)
-          const prevId = draftRun.revisedFrom as string
-          const versionsA = await readDraftVersions(taskDirA)
-          const recordA = versionsA?.versions.find((v) => v.runId === prevId)
-          const prevDir =
-            recordA === undefined
-              ? join(taskDirA, `history/${prevId}`, 'agent')
-              : draftVersionSkillDir(taskDirA, recordA, 'agent')
-          const prevText = await readFileSafe(join(prevDir, 'instructions.md'))
-          if (prevText !== null) {
-            agentBaseline = { 'instructions.md': prevText }
-            agentLabel = '上一版草稿'
-          }
-        }
-        if (agentLabel === '' && agentNow !== null && agentNow !== undefined) {
-          agentBaseline = { 'instructions.md': agentNow.instructions }
-          agentLabel =
-            wantAgainst === 'original'
-              ? `「${agentNow.name}」当前的指令（优化指令没有"原 skill"这份基线，这里就是那条智能体的现状）`
-              : `「${agentNow.name}」当前的指令`
-          agentAgainst = wantAgainst === 'previous' ? 'current' : wantAgainst
-        }
-        const agentDiffs = diffFileSets(agentBaseline, agentDraftFiles)
-        sendJson(res, 200, {
-          against: agentAgainst,
-          baselineLabel: agentLabel,
-          files: agentDiffs,
-          totals: {
-            added: agentDiffs.reduce((sum, d) => sum + d.added, 0),
-            removed: agentDiffs.reduce((sum, d) => sum + d.removed, 0),
-            changed: agentDiffs.filter((d) => d.change !== 'same').length,
-          },
-        })
         return
       }
 
@@ -6298,11 +6070,8 @@ async function injectedSkillsOf(
         // 绝不拿草稿的产出当素材（见 crystallize.ts 的 resolveSourceRun）。
         sourceRun = await resolveSourceRun(store, requestedRun)
       }
-      // 目标：新建 skill（可带作用描述）/ 更新本次加载的 skill / **优化某条智能体的指令**。
-      let target:
-        | { kind: 'new'; purpose: string }
-        | { kind: 'update'; skillId: string }
-        | { kind: 'agent'; agentId: string }
+      // 目标：新建 skill（可带作用描述）/ 更新本次加载的 skill。
+      let target: { kind: 'new'; purpose: string } | { kind: 'update'; skillId: string }
       const t = raw?.target as Record<string, unknown> | undefined
       if (startFromBlank) {
         /**
@@ -6311,8 +6080,10 @@ async function injectedSkillsOf(
          * 为什么原来只许新建：那句话是"更新/优化都要有一条已有的东西当上一版，而空白起没有"。
          * 但这对 update 并不成立——"上一版"是**技能库里的那条技能**（`existing-skill/`），
          * 跟有没有来源 run 无关；空白起恰恰是"我手上没有一次跑过的记录，但我知道要改哪个技能"
-         * 的用法。真正不成立的是 **agent**：优化指令的候选是"这次 run 上真实用过的那两条"，
-         * 没有来源 run 就没有候选 ⇒ 那一条继续拒，并说清原因。
+         * 的用法。
+         *
+         * ★ 分批第 191 批：原来的第三种目标 `{kind:'agent'}`（优化智能体指令）整条下线，
+         * 两种入口（空白起 / 有来源）都不再接受它。
          */
         if (t?.kind === 'new') {
           target = { kind: 'new', purpose: typeof t['purpose'] === 'string' ? t['purpose'].trim() : '' }
@@ -6324,12 +6095,7 @@ async function injectedSkillsOf(
           }
           target = { kind: 'update', skillId }
         } else if (t?.kind === 'agent') {
-          sendJson(res, 400, {
-            error:
-              '「从空白/材料起」不能优化智能体指令：候选是"这次 run 上真实用过的那两条"，' +
-              '而空白起没有来源 run（请从有来源的对话/任务发起）',
-            code: 'blank_no_agent',
-          })
+          sendJson(res, 400, { error: AGENT_TARGET_REMOVED_MESSAGE, code: 'agent_target_removed' })
           return
         } else {
           sendJson(res, 400, {
@@ -6353,32 +6119,15 @@ async function injectedSkillsOf(
         target = { kind: 'update', skillId }
       } else if (t?.kind === 'agent') {
         /**
-         * ★ 分批第 34 批：「沉淀成 Agent」= 优化**某一条已有智能体**的指令。
-         *
-         * 使用者的口径（2026-10-25）：agent 指执行者或审核者；只优化它的指令、
-         * 不碰它挂的 skill、**不新建 agent**。所以这里只有 `agentId`，没有"新建"那一支。
-         *
-         * ⚠️ 必须校验它**在这次 run 上真的用过**：`agentId` 来自前端，手改请求就能指向
-         *    任意一条 agent。指向本次没参与的 agent 时，素材（这次的表现）和它无关，
-         *    改出来的指令只会是"按别人的错误改自己的规矩"。
+         * ★ 分批第 191 批（使用者："去掉起草智能体指令的功能，只需要起草新建或者更新现有 skill"）：
+         * **沉淀不再产出智能体指令**。这条路整条下线；这里挡在门口，并说清现在能做什么、
+         * 以及"要改指令去哪儿"（智能体页直接改）。
          */
-        const agentId = typeof t['agentId'] === 'string' ? t['agentId'] : ''
-        if (agentId === '') {
-          sendJson(res, 400, { error: '优化智能体需要 agentId', code: 'agent_id_required' })
-          return
-        }
-        const usedIds = [sourceRun!.agentId as string, sourceRun!.reviewerAgentId ?? null]
-        if (!usedIds.includes(agentId)) {
-          sendJson(res, 400, {
-            error: '这条智能体没有参与这次的 run（只能优化实际参与的那条执行者或审核者）',
-            code: 'agent_not_in_run',
-          })
-          return
-        }
-        target = { kind: 'agent', agentId }
+        sendJson(res, 400, { error: AGENT_TARGET_REMOVED_MESSAGE, code: 'agent_target_removed' })
+        return
       } else {
         sendJson(res, 400, {
-          error: '需要 target（{kind:"new"} / {kind:"update"} / {kind:"agent"}）',
+          error: '需要 target（{kind:"new"} / {kind:"update"}）',
           code: 'target_required',
         })
         return
@@ -6451,28 +6200,8 @@ async function injectedSkillsOf(
       // 更新基线：把现有技能**整份**（正文 + 支持文件）摆进素材，agent 才能"修订"
       // 而不是重写。只给正文的话，它会把 references/ 里的东西当不存在。
       let updateSnapshot: ExistingSkillSnapshot | null = null
-      /**
-       * ★ 分批第 34 批：优化指令要把**它现在的指令全文**摆进素材（同一条理由：
-       * 不给"上一版"，起草者只能重写一份，而使用者要的是在这条上改）。
-       */
-      let agentSnapshot: ExistingAgentSnapshot | null = null
-      if (target.kind === 'agent') {
-        const all = await store.listAgents(workspaceId)
-        const agent = all.find((a) => (a.id as string) === target.agentId)
-        if (!agent) {
-          sendJson(res, 404, {
-            error: `智能体不存在（${target.agentId}）`,
-            code: 'agent_not_found',
-          })
-          return
-        }
-        agentSnapshot = {
-          id: agent.id as string,
-          name: agent.name,
-          role: agent.role,
-          instructions: agent.instructions,
-        }
-      }
+      // ★ 分批第 191 批：`agentSnapshot`（"优化智能体指令"的上一版）随功能一起删掉了。
+
       if (target.kind === 'update') {
         const mine = await store.listSkills(workspaceId)
         const skill = mine.find((s) => (s.id as string) === target.skillId)
@@ -6496,11 +6225,9 @@ async function injectedSkillsOf(
           scope: targets === null ? 'blank' : targets.scope,
           sourceLabel: sourceRun === null ? '' : await sourceLabelOf(store, sourceRun),
           target:
-            agentSnapshot !== null
-              ? { kind: 'agent', agent: agentSnapshot }
-              : updateSnapshot === null
-                ? { kind: 'new', purpose: target.kind === 'new' ? target.purpose : '' }
-                : { kind: 'update', skill: updateSnapshot },
+            updateSnapshot === null
+              ? { kind: 'new', purpose: target.kind === 'new' ? target.purpose : '' }
+              : { kind: 'update', skill: updateSnapshot },
           existingSkills,
         })
       } catch (err) {
@@ -6535,16 +6262,7 @@ async function injectedSkillsOf(
       const hasDraftEvidence = collected.pieces.some(
         (p) => p.relPath === 'verdict.md' || p.relPath === 'feedback.md',
       )
-      const draftPrompt =
-        agentSnapshot !== null
-          ? buildAgentInstructionsPrompt({
-              scope: targets === null ? 'blank' : targets.scope,
-              materialDir: 'material',
-              outputDir: 'agent',
-              hasEvidence: hasDraftEvidence,
-              maxChars: AGENT_INSTRUCTIONS_MAX_CHARS,
-            })
-          : buildDraftPrompt({
+      const draftPrompt = buildDraftPrompt({
               scope: targets === null ? 'blank' : targets.scope,
               materialDir: 'material',
               outputDir: 'skill',
@@ -6662,11 +6380,7 @@ async function injectedSkillsOf(
         // 沉淀目标随 run 落库：恢复进行中的起草时按它还原（§4.1.1）。
         // ⚠️ purpose 不落库——它只影响起草 prompt，提交时用不到。
         crystallizeTarget:
-          target.kind === 'new'
-            ? { kind: 'new' }
-            : target.kind === 'agent'
-              ? { kind: 'agent', agentId: target.agentId }
-              : { kind: 'update', skillId: target.skillId },
+          target.kind === 'new' ? { kind: 'new' } : { kind: 'update', skillId: target.skillId },
         // 工作目录 = 草稿小屋（2026-10-19 四轮）：`material/` 是素材（平台写）、
         // `skill/` 是产出（agent 写）。素材必须在工作目录里——claude 的
         // PreToolUse 隔离 hook 会 deny 越界路径，放别处 agent 读不到。
@@ -6736,114 +6450,8 @@ async function injectedSkillsOf(
         return
       }
 
-      // ══════════════════════════════════════════════════════════════════
-      // ★ 分批第 36 批：「沉淀成 Agent」的入库 = 覆盖**一条已有智能体的指令**
-      // ══════════════════════════════════════════════════════════════════
-      //
-      // 与 skill 那条路的三点不同，都是使用者定过的：
-      //   ① **只改 instructions**：名字、技能、工具、模型、审核标准一个字不动
-      //      （原话："只优化其指令，不包括优化它包含的skill"）；
-      //   ② **不新建**：目标来自 run 上落库的 `crystallizeTarget`，不认客户端再传一份
-      //      （原话："不新建 agent，只更新当前 agent"）；
-      //   ③ 有**退路**：入库前把旧指令存成一代快照（`/api/agents/<id>/restore-instructions`）。
-      //
-      // ⚠️ 内容只认磁盘上的 `agent/instructions.md`（与 skill 那条"入库只认产出文件本身"
-      //    同一条纪律）：界面传什么内容都不算。
-      if (draftRun.crystallizeTarget?.kind === 'agent') {
-        const taskDirForAgent = await draftTaskDir(draftRunId)
-        const instructionsPath = join(taskDirForAgent, 'agent', 'instructions.md')
-        const nextInstructions = await readFile(instructionsPath, 'utf8').catch(() => null)
-        if (nextInstructions === null) {
-          sendJson(res, 400, {
-            error: '草稿里没有 agent/instructions.md（起草者没产出指令）',
-            code: 'instructions_missing',
-          })
-          return
-        }
-        const trimmed = nextInstructions.trim()
-        if (trimmed === '') {
-          sendJson(res, 400, {
-            error: 'agent/instructions.md 是空的（空指令会把这条智能体变成废物）',
-            code: 'instructions_empty',
-          })
-          return
-        }
-        /**
-         * 长度的**第二道**闸门（第一道在审核的任务书里）。
-         *
-         * 为什么这里还要拦：审核者可能判通过（它判的是内容），而超限是**使用者定的硬线**；
-         * 只靠模型遵守一条数字纪律，迟早会被一次"它觉得还行"放过。这里量的是字符数，
-         * 确定性判断，不花额度。
-         */
-        if (trimmed.length > AGENT_INSTRUCTIONS_MAX_CHARS) {
-          sendJson(res, 400, {
-            error:
-              `指令超长：${trimmed.length} 字符，上限 ${AGENT_INSTRUCTIONS_MAX_CHARS}。` +
-              '先让起草者删到上限内再入库（指令整份进每次 run 的第一句话，太长会挤掉任务本身）。',
-            code: 'instructions_too_long',
-            chars: trimmed.length,
-            max: AGENT_INSTRUCTIONS_MAX_CHARS,
-          })
-          return
-        }
-        const targetAgent = await store.getAgent(draftRun.crystallizeTarget.agentId as Agent['id'])
-        if (!targetAgent || targetAgent.workspaceId !== workspaceId) {
-          sendJson(res, 404, {
-            error: `要更新的智能体不在了（${draftRun.crystallizeTarget.agentId}）`,
-            code: 'agent_not_found',
-          })
-          return
-        }
-        const nowAgent = Date.now()
-        // 退路：把**旧指令**存成一代（写失败不拦入库，但要在响应里说清没有退路）
-        const snapshot = await saveInstructionsSnapshot(options.dataDir, {
-          agentId: targetAgent.id as string,
-          agentName: targetAgent.name,
-          previous: targetAgent.instructions,
-          nextChars: trimmed.length,
-          runId: draftRunId,
-          at: nowAgent,
-        })
-        await store.insertAgent({
-          ...targetAgent,
-          // 只覆盖这一个字段
-          instructions: trimmed,
-          updatedAt: nowAgent,
-        })
-        // 入库标记打整条链（与 skill 那条路同一口径，分批第 28 批的教训）
-        const agentTaskDir = await draftTaskDir(draftRunId)
-        const agentVersions = await readDraftVersions(agentTaskDir)
-        const agentChainIds =
-          agentVersions === null ? [draftRun.id as string] : agentVersions.versions.map((v) => v.runId)
-        for (const id of agentChainIds) {
-          if (id === (draftRun.id as string)) {
-            await store.insertRun({ ...draftRun, crystallized: true })
-            continue
-          }
-          const run = await store.getRun(id as RunId)
-          if (run === null || run === undefined || run.discarded === true) continue
-          await store.insertRun({ ...run, crystallized: true })
-        }
-        info(
-          `智能体「${targetAgent.name}」的指令已更新：` +
-            `${targetAgent.instructions.length} → ${trimmed.length} 字符` +
-            (snapshot.ok ? '' : `（旧指令没存下来：${snapshot.reason}）`),
-        )
-        sendJson(res, 201, {
-          agent: {
-            id: targetAgent.id,
-            name: targetAgent.name,
-            instructionsChars: trimmed.length,
-          },
-          previousInstructionsChars: targetAgent.instructions.length,
-          snapshot: snapshot.ok
-            ? { id: snapshot.id, restorable: true }
-            : { id: null, restorable: false, note: `旧指令没存下来（${snapshot.reason}），这一版没有退路` },
-          // 与 skill 的响应保持同一形状：没有 git 版本管理这回事，如实说
-          versioning: { enabled: false, note: '智能体指令不走 git 版本管理（退路是入库前的快照）' },
-        })
-        return
-      }
+      // ★ 分批第 191 批：「沉淀成 Agent」的入库分支已随功能一起删掉。
+      //   历史 agent 草稿点进来会在 `draftInfo` 那层就不可见（不进列表），这一层不再需要分叉。
 
       let target: { kind: 'new' } | { kind: 'update'; skillId: string }
       const t = raw?.target as Record<string, unknown> | undefined

@@ -3848,55 +3848,13 @@ const CHECKS = [
     ok: (v) => v === 0,
     show: (v) => `tab 条 ${v} 个`,
   },
-  {
-    view: '任务',
-    key: 'tasks.crystallizeActionLabel',
-    label:
-      '★★ 任务页栏头那个入口的名字必须**同时提技能与智能体**（分批第 39 批：原来叫「优化 skill」，使用者原话"以为只有 skill"——于是那条路从名字上就不存在）',
-    ok: (v) => typeof v === 'string' && v.includes('技能') && v.includes('智能体'),
-    show: (v) => JSON.stringify(v ?? null),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.agentAttached',
-    label:
-      '★★★ 「优化一条智能体的指令」的草稿能挂上审阅屏（这一族夹具原来是清一色 skill 草稿，这条屏在真浏览器里一次都没量过）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.agentFileRows',
-    label:
-      '★★★ 智能体草稿的文件行就是 instructions.md（改前 artifacts 只读 skill/ ⇒ 这一屏是空的）',
-    ok: (v) =>
-      Array.isArray(v) && v.length === 1 && v.some((r) => String(r).includes('instructions.md')),
-    show: (v) => JSON.stringify(v ?? []),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.agentBar',
-    label:
-      '★★ 结论条说清"这次改的是什么"（智能体的指令），而不是套用 skill 那套口径',
-    ok: (v) => typeof v === 'string' && v.includes('指令'),
-    show: (v) => JSON.stringify(v ?? ''),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.agentConfirmDisabled',
-    label:
-      '★★★ 「确认入库」可点——改前它要求 slug，而智能体草稿没有 slug ⇒ 那个按钮永远是灰的（看起来"做完了却入不了库"）',
-    ok: (v) => v === false,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.agentDiffLines',
-    label:
-      '★★★ 差异面板有行——改前 diff 路由只读 skill/，点「对比」是空的，而人正好在这一屏判断"它改了哪儿"',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v) => String(v),
-  },
+  // ★ 分批第 191 批删掉五条判据，理由写在这（不留空壳、也不静默消失）：
+  //   · `tasks.crystallizeActionLabel`——它钉的是"入口名必须同时提技能与智能体"（分批第 39 批，
+  //     使用者当时说"以为只有 skill"）。第 191 批把「沉淀成 Agent」整条删了，入口名随之改成
+  //     「沉淀技能」⇒ 这条判据会红，但它红的正是**按要求改成的事实**，留着就是钉一条错的口径。
+  //   · `crystal.agentAttached` / `agentFileRows` / `agentBar` / `agentConfirmDisabled` /
+  //     `agentDiffLines`——它们钉的是"智能体草稿在审阅屏上的五个毛病"。智能体草稿这种东西
+  //     已经不存在了（服务端连入库分支都删了），夹具也一起删掉（见上面的 fixture）。
   {
     view: '沉淀',
     key: 'crystal.targetFormRows',
@@ -5362,14 +5320,8 @@ try {
     //   在后面展开，见那段注释）。
     siblingDraftRunId: '',
     manualDraftRunId: '',
-    /**
-     * ★ 分批第 38 批：「优化一条智能体的指令」那条草稿（`crystallizeTarget.kind === 'agent'`）。
-     *
-     * 为什么需要它：上面这一族夹具全是 skill 草稿 ⇒ 智能体草稿的审阅屏（有没有 diff、
-     * 「确认入库」是不是可点）**在真浏览器里一次都没量过**。而它正是四批新代码的落点。
-     */
-    agentDraftRunId: '',
-    agentId: '',
+    // ★ 分批第 191 批：`agentId` 删掉了——它只服务「优化智能体指令」那条草稿夹具，
+    //   而那条功能整条下线（服务端连入库分支都删了）。
   }
   try {
     await stopDaemon()
@@ -5389,15 +5341,16 @@ try {
          *
          * ⚠️ 不派发、不 spawn——只是 store 里的一条记录。
          */
-        const makeSource = async () => {
+        const makeSource = async (agentOverride) => {
+          const agent = agentOverride ?? executor
           const id = ulid()
           await store.insertRun({
             id,
             workspaceId,
             kind: 'execute',
             status: 'completed',
-            agentId: executor.id,
-            agentName: executor.name,
+            agentId: agent.id,
+            agentName: agent.name,
             subject: { type: 'issue', id: issueFixtureId },
             prompt: '探针夹具：沉淀的来源任务',
             queuedAt: now - 60_000,
@@ -5446,7 +5399,42 @@ try {
          * 同样要过 §4.3 门槛（否则「开始沉淀」按不动、点下去 400），所以也配一条
          * completed 的 review run。
          */
-        const targetSourceRunId = await makeSource()
+        /**
+         * ★ 分批第 191 批：这一条源 run 改用**挂了技能的**执行者。
+         *
+         * 为什么：目标态那一问的第二项「优化已有技能」只在来源 run 真的加载过技能时才出现
+         * （`targets.loadedSkills` 来自执行者的 `skillIds`）。这条源 run 原来借用那个
+         * 一条技能都没挂的链执行者，之所以还能凑够两行选项，是因为**第三项**「优化智能体
+         * 指令」——第 191 批把它删了之后，这一屏就只剩「新建一份技能」一行，而
+         * `crystal.targetFormRows`（"至少「新建」与「优化」两类"）正是钉这一屏的那条判据。
+         * 与其把判据放宽到"一行也算"，不如让夹具**真的具备**两行的条件——否则"更新技能"
+         * 这个入口在探针里就没有任何覆盖了。
+         */
+        const allSkillsForTargets = await store.listSkills(workspaceId)
+        const fixtureSkillForTargets =
+          allSkillsForTargets.find((sk) => sk.slug === 'probe-skill') ?? allSkillsForTargets[0] ?? null
+        const skillOwnedExecutor = {
+          id: ulid(),
+          workspaceId,
+          name: '沉淀夹具执行者（挂了技能）',
+          instructions: '',
+          model: null,
+          builtin: false,
+          runtimeKey: 'generic',
+          workDir: null,
+          // 取一条**真的存在**的技能（探针首启时装的 `probe-skill`）；一条都没有就给空数组
+          // ——那时目标态就只有「新建一份技能」一行，下面那条判据会红，红得对（夹具坏了）。
+          skillIds: fixtureSkillForTargets === null ? [] : [fixtureSkillForTargets.id],
+          env: {},
+          role: 'executor',
+          createdAt: now,
+          updatedAt: now,
+        }
+        await store.insertAgent(skillOwnedExecutor)
+        // ⚠️ 传的是**整条 agent**，不是 `id`：`makeSource` 里读 `agent.id`/`agent.name`，
+        //    传 id 进去会得到 `agentId: undefined`（JSON 里那个键直接消失），而症状是
+        //    "loadedSkills 为空"——离真正的原因（传错了类型）非常远。第一次就这么错过。
+        const targetSourceRunId = await makeSource(skillOwnedExecutor)
         crystalFixture.targetSourceRunId = targetSourceRunId
         {
           const gateRunId = ulid()
@@ -5551,44 +5539,6 @@ try {
           '## Verification\n\n- 探针全绿\n'
 
         // 第一版：三个文件（多文件产出）
-        /**
-         * ★ 分批第 38 批：一条"优化执行者指令"的草稿。
-         *
-         * 产出目录是 `agent/instructions.md`（不是 `skill/`），目标落在 run 记录上——
-         * 与真机入库后的形状一致（`crystallizeTarget.kind === 'agent'`）。
-         */
-        {
-          const agentDraftId = ulid()
-          const agentDir = path.join(workRoot, `skill-draft-${agentDraftId}`)
-          fs.mkdirSync(path.join(agentDir, 'agent'), { recursive: true })
-          fs.writeFileSync(
-            path.join(agentDir, 'agent', 'instructions.md'),
-            '# 身份\n\n你是探针用的对账执行者。\n\n# 边界\n\n只读文件，不写。\n',
-          )
-          fs.mkdirSync(path.join(agentDir, 'material'), { recursive: true })
-          fs.writeFileSync(
-            path.join(agentDir, 'material', '00-README.md'),
-            '# 素材索引（探针夹具：优化指令）\n',
-          )
-          await store.insertRun({
-            id: agentDraftId,
-            workspaceId,
-            kind: 'execute',
-            status: 'completed',
-            agentId: executor.id,
-            agentName: executor.name,
-            subject: { type: 'skill-draft', id: agentDraftId, sourceRunId },
-            prompt: '探针夹具：优化指令',
-            queuedAt: now - 40_000,
-            startedAt: now - 39_000,
-            finishedAt: now - 38_000,
-            crystallizeTarget: { kind: 'agent', agentId: executor.id },
-            workDir: agentDir,
-          })
-          crystalFixture.agentDraftRunId = agentDraftId
-          crystalFixture.agentId = executor.id
-        }
-
         crystalFixture.sourceRunId = sourceRunId
         crystalFixture.draftRunId = await makeDraft(ulid(), {
           'SKILL.md': skillMd('第二步'),
@@ -5996,7 +5946,6 @@ try {
         `&crystalManual=${encodeURIComponent(crystalFixture.manualDraftRunId)}` +
         `&crystalSource=${encodeURIComponent(crystalFixture.sourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
-        `&crystalAgentDraft=${encodeURIComponent(crystalFixture.agentDraftRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +
         (chatFilesWorkDir ? `&chatFilesWorkDir=${encodeURIComponent(chatFilesWorkDir)}` : '') +
         // 分批第 30 批：`PROBE_IFRAME_H` 换 iframe 高度，用来量"窗口高/矮时界面是否自适应"。

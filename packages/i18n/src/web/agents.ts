@@ -21,25 +21,10 @@ export const agentsText = {
   //   ⚠️ 少了这两条，列表上它们会显示成「执行」——一个**永远不会接任务**的 agent
   //   被标成执行者，使用者会去问"它为什么不干活"。
   'agents.roleDrafter': { zh: '起草', en: 'Draft' },
-  /**
-   * ★ 分批第 37 批：「恢复上一版指令」——「沉淀成 Agent」改的是**正在生产用的**指令，
-   * 所以必须有一条一眼可见的退路（与「恢复成默认值」是两件事：那个回平台默认，
-   * 这个回**上一次沉淀之前**那一版）。
-   */
-  'agents.restoreInstructions': { zh: '恢复上一版指令', en: 'Restore previous instructions' },
-  'agents.restoreInstructionsTitle': { zh: '恢复上一版指令？', en: 'Restore the previous instructions?' },
-  'agents.restoreInstructionsBody': {
-    zh: '把「{name}」的指令换回上一次沉淀之前那一版（{chars} 字符）。当前这一版会存成一代快照，随时可以再换回来。',
-    en: 'Swap "{name}" back to the instructions from before the last crystallization ({chars} chars). The current version is snapshotted, so you can switch back at any time.',
-  },
-  'agents.restoreInstructionsNone': {
-    zh: '没有可恢复的上一版（这条智能体还没被「沉淀成 Agent」改过）',
-    en: 'No previous version to restore (this agent has not been reshaped by "crystallize into Agent" yet)',
-  },
-  'agents.restoreInstructionsDone': {
-    zh: '指令已恢复上一版（{chars} 字符）',
-    en: 'Instructions restored ({chars} chars)',
-  },
+  // ★ 分批第 191 批删掉五条词条：`agents.restoreInstructions` / `…Title` / `…Body` /
+  //   `…None` / `…Done`（「恢复上一版指令」随「沉淀成 Agent」一起下线——快照的唯一写入方
+  //   是那条入库路径，功能删掉后它就成了死接口。使用者 2026-11 定：整条删掉）。
+
   /**
    * ★ 分批第 54 批：**同一个东西只留一个词**。
    *

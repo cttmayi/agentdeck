@@ -2001,10 +2001,11 @@ describe('§10.12 从空白/材料起：无源 run 的草稿（分批第 133 批
     assert.equal(updateMissing.status, 404, await updateMissing.clone().text())
     assert.equal(((await updateMissing.json()) as { code?: string }).code, 'skill_not_found')
 
-    // 但"优化智能体指令"仍然不行：候选是"这次 run 上真实用过的那两条"，没有来源 run 就没有候选
+    // ★ 分批第 191 批：「优化智能体指令」整条目标删了 ⇒ 两个入口（空白起 / 有来源）都回同一个拒因。
+    //   这里钉"空白起"这一侧，有来源那一侧见下面的 `agent_target_removed` 用例。
     const agentTarget = await draftPost({ startFrom: 'blank', target: { kind: 'agent', agentId: agentId } })
     assert.equal(agentTarget.status, 400, await agentTarget.clone().text())
-    assert.equal(((await agentTarget.json()) as { code?: string }).code, 'blank_no_agent')
+    assert.equal(((await agentTarget.json()) as { code?: string }).code, 'agent_target_removed')
 
     const tooBig = await draftPost({
         startFrom: 'blank',
@@ -2654,384 +2655,30 @@ describe('返工：默认接上一版的会话，人改过就不接', () => {
   })
 })
 
-
 /**
  * ══════════════════════════════════════════════════════════════════
- * ★ 分批第 34 批：「沉淀成 Agent」的起草前半段（目标 + 素材 + 契约）
+ * ★ 分批第 191 批：「沉淀成 Agent」**整条功能下线**（使用者："去掉起草智能体指令的功能，
+ *   只需要起草新建或者更新现有 skill"）
  * ══════════════════════════════════════════════════════════════════
  *
- * 使用者的口径（2026-10-25）：agent 指执行者或审核者；**只优化它的指令**、
- * 不碰它挂的 skill、**不新建 agent，只更新当前这一条**。
+ * 这里原来是 §10.9 的七个用例（起草 / 素材 / 入库 / 快照 / 恢复 / 对比 / 返工）。那些路径
+ * 连同服务端的两个分支（`POST /draft` 的 agent 目标、`POST /commit` 的覆盖指令）一起删掉了，
+ * **留着它们等于钉一条已经不存在的行为**——所以整组删掉，只留一条"门口确实拒了"。
  *
- * 这一批只做到"起草能跑、素材摆对、契约指向 agent/instructions.md"；
- * 审核口径（第 35 批）与入库覆盖指令（第 36 批）各自单独一批。
+ * 为什么还要留这一条：老界面（缓存里的旧 bundle）与旧深链还会发 `{kind:'agent'}`。
+ * 静默成功才是危险的——那会写出一条谁都看不懂的 skill 草稿。拒因要能被认出来、
+ * 文案要指路（要改指令去「智能体」页）。
  */
-describe('§10.9 沉淀成 Agent：优化一条已有智能体的指令（分批第 34 批）', () => {
-  /** 起一条**带审核者**的任务 run 并审过（过 task_gate），返回 runId。 */
-  async function runWithReviewer(): Promise<string> {
-    const runId = ulid() as RunId
-    const res = await fetch(`${daemon.url}/api/runs`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        runId,
-        kind: 'execute',
-        agentRef: { id: agentId, name: '助手', instructions: '' },
-        skills: [],
-        subject: { type: 'issue', id: issueId },
-        prompt: '把这次的活干完',
-        limits: { maxTurns: null, timeoutMs: null },
-        // ★ 这条 run 上要有审核者，`agentTargets.reviewer` 才不是 null
-        reviewerAgentId: reviewerId,
-      }),
-    })
-    assert.equal(res.status, 202, await res.clone().text())
-    for (let i = 0; i < 40; i += 1) {
-      const r = (await (await fetch(`${daemon.url}/api/runs/${runId}`)).json()) as { status: string }
-      if (['completed', 'failed', 'cancelled'].includes(r.status)) break
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    await reviewOnce(runId)
-    return runId as string
-  }
-
-  test('★★★ 目标面板给出「执行者 / 审核者」两个候选（就是这条 run 上真实用过的那两条）', async () => {
-    const runId = await runWithReviewer()
-    const targets = (await (
-      await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)
-    ).json()) as {
-      agentTargets: {
-        executor: { id: string; name: string; role: string; instructionsChars: number }
-        reviewer: { id: string; role: string } | null
-      }
-    }
-    assert.equal(targets.agentTargets.executor.id, agentId, '执行者 = 这条 run 的执行者')
-    assert.equal(targets.agentTargets.executor.role, 'executor')
-    assert.ok(
-      targets.agentTargets.executor.instructionsChars >= 0,
-      '要带当前指令长度——界面据此提示"已经 5.8k/6k"的风险',
-    )
-    assert.equal(targets.agentTargets.reviewer?.id, reviewerId, '审核者 = 这条 run 的审核者')
-  })
-
-  test('★★★ 起草一条「优化审核者指令」的草稿：素材里有它现在的指令全文，契约写的是 agent/instructions.md', async () => {
-    const runId = await runWithReviewer()
-    const res = await draftPost({ runId, target: { kind: 'agent', agentId: reviewerId } })
-    assert.equal(res.status, 202, await res.clone().text())
-    const { draftRunId } = (await res.json()) as { draftRunId: string }
-
-    // ① 素材里必须是**它现在的指令全文**（没有这份，"在它上面改"无从谈起）
-    const taskDir = join(workRoot, `skill-draft-${draftRunId}`)
-    const existing = await readFile(join(taskDir, 'material', 'existing-agent.md'), 'utf8')
-    const reviewerNow = (await (
-      await fetch(`${daemon.url}/api/agents`)
-    ).json()) as { agents: Array<{ id: string; name: string; instructions: string }> }
-    const reviewer = reviewerNow.agents.find((a) => a.id === reviewerId)!
-    assert.ok(existing.includes(reviewer.instructions.trim().slice(0, 60)), '指令正文要摆进素材')
-    assert.match(existing, /角色：reviewer/, '要写清它是审核者（写法与执行者不同）')
-
-    // ② 沉淀目标随 run 落库（恢复/返工/入库都按它走）
-    for (let i = 0; i < 40; i += 1) {
-      const run = (await (await fetch(`${daemon.url}/api/runs/${draftRunId}`)).json()) as {
-        status: string
-        crystallizeTarget?: { kind: string; agentId?: string }
-      }
-      if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-        assert.deepEqual(run.crystallizeTarget, { kind: 'agent', agentId: reviewerId })
-        break
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-
-    // ③ 投递给起草者的契约：产出 agent/instructions.md、有 6000 字符上限、不许新建 agent
-    const delivered = fakeBackend.prompts.at(-1) ?? ''
-    assert.ok(delivered.includes('agent/instructions.md'), '产出路径必须是 agent/instructions.md')
-    assert.ok(delivered.includes('6000'), '指令长度上限要写进契约')
-    assert.ok(delivered.includes('不许新建智能体'), '使用者定过：不新建 agent，只更新当前这条')
-    assert.ok(
-      delivered.includes('existing-agent.md'),
-      '要指名让起草者读"它现在的指令"',
-    )
-  })
-
-  /** 起草一条"优化执行者指令"的草稿，并把 `agent/instructions.md` 写成给定内容。 */
-  async function agentDraftWith(text: string): Promise<string> {
-    const runId = await runWithReviewer()
-    const draft = await draftAndWait({ runId, target: { kind: 'agent', agentId: agentId } })
-    const taskDir = join(workRoot, `skill-draft-${draft}`)
-    await mkdir(join(taskDir, 'agent'), { recursive: true })
-    await writeFile(join(taskDir, 'agent', 'instructions.md'), text, 'utf8')
-    return draft
-  }
-
-  /** 等假后端收到**下一段**投递（第 `index` 段），最多 10 秒。 */
-  async function waitForPromptAt(index: number): Promise<string> {
-    for (let i = 0; i < 200; i += 1) {
-      const got = fakeBackend.prompts[index]
-      if (got !== undefined && got !== '') return got
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    throw new Error(`假后端没有收到第 ${index + 1} 段投递`)
-  }
-
-  async function agentById(id: string): Promise<{
-    name: string
-    instructions: string
-    skillIds: string[]
-    toolIds: string[]
-    role: string
-  }> {
-    const list = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-      agents: Array<{
-        id: string
-        name: string
-        instructions: string
-        skillIds: string[]
-        toolIds: string[]
-        role: string
-      }>
-    }
-    return list.agents.find((a) => a.id === id)!
-  }
-
-  // ★ 分批第 137 批：`agentReviewVerdict`（起审核并等判决）随审核一起删掉——这一组里
-  //   只剩起草 / 素材 / 入库 / 按意见改一版，不再有任何"审核"用例。
-
-  test('★★★ 入库 = 只覆盖那条智能体的 instructions（名字/技能/工具一字不动），旧指令留成一代快照', async () => {
-    const before = await agentById(agentId)
-    const next = '# 身份\n\n你是对账执行者，只为财务对账服务。\n\n# 边界\n\n只读，不写文件。\n'
-    const draft = await agentDraftWith(next)
-
-    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(res.status, 201, await res.clone().text())
-    const body = (await res.json()) as {
-      agent: { id: string; instructionsChars: number }
-      previousInstructionsChars: number
-      snapshot: { id: string | null; restorable: boolean }
-    }
-    assert.equal(body.agent.id, agentId)
-    assert.equal(body.agent.instructionsChars, next.trim().length)
-    assert.equal(body.previousInstructionsChars, before.instructions.length)
-    assert.equal(body.snapshot.restorable, true, '入库必须留退路')
-
-    const after = await agentById(agentId)
-    assert.equal(after.instructions, next.trim(), '指令被覆盖成草稿那一版')
-    assert.equal(after.name, before.name, '名字不许被改（使用者：只优化其指令）')
-    assert.deepEqual(after.skillIds, before.skillIds, '它挂的技能不许被改')
-    assert.deepEqual(after.toolIds, before.toolIds, '工具不许被改')
-    assert.equal(after.role, before.role)
-
-    // 快照里是**旧指令**（恢复上一版就靠它）
-    const snapPath = join(dataDir, 'agent-instructions', agentId, `${body.snapshot.id}.json`)
-    const snap = JSON.parse(await readFile(snapPath, 'utf8')) as { previous: string; runId: string }
-    assert.equal(snap.previous, before.instructions, '快照存的必须是旧的那份')
-    assert.equal(snap.runId, draft)
-
-    // 入库标记打在整条链上（否则「沉淀任务」会被重新拉出来）
-    const runNow = (await (await fetch(`${daemon.url}/api/runs/${draft}`)).json()) as {
-      crystallized?: boolean
-    }
-    assert.equal(runNow.crystallized, true)
-  })
-
-  test('★★★ 界面那一路：产出接口给 agent 形状（含基线），手改指令经 save-draft 落到 agent/instructions.md', async () => {
-    const draft = await agentDraftWith('# 身份\n\n你是对账执行者。\n')
-    const before = await agentById(agentId)
-
-    const art = (await (
-      await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${draft}`)
-    ).json()) as {
-      mode: string
-      files: Record<string, string>
-      validation: { ok: boolean; problems: unknown[] }
-      baseline: { files: Record<string, string> } | null
-      target: { kind: string } | null
-    }
-    assert.equal(art.mode, 'agent', '界面按 mode 判"这是优化指令的草稿"')
-    assert.ok(art.files['instructions.md']?.includes('你是对账执行者'), '产出要能读出来')
-    assert.equal(art.validation.ok, true)
-    assert.equal(
-      art.baseline?.files['instructions.md'],
-      before.instructions,
-      '基线 = 这条智能体**现在**的指令（界面据此算 A/M/D 与 diff）',
-    )
-    assert.equal(art.target?.kind, 'agent')
-
-    // 手改一段再保存：必须落到 agent/instructions.md（写错目录 = 界面上改了、入库时被忽略）
-    const edited = '# 身份\n\n你是对账执行者（人改过这一句）。\n'
-    const saved = await fetch(`${daemon.url}/api/crystallize/save-draft`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft, files: { 'instructions.md': edited } }),
-    })
-    assert.equal(saved.status, 200, await saved.clone().text())
-    const onDisk = await readFile(
-      join(workRoot, `skill-draft-${draft}`, 'agent', 'instructions.md'),
-      'utf8',
-    )
-    assert.equal(onDisk, edited)
-
-    // 入库读的就是它
-    const commit = await fetch(`${daemon.url}/api/crystallize/commit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(commit.status, 201, await commit.clone().text())
-    assert.equal((await agentById(agentId)).instructions, edited.trim())
-  })
-
-  test('★★★ 超长的指令：入库直接拦（400），且那条智能体一个字都不动', async () => {
-    const before = await agentById(agentId)
-    const tooLong = `# 身份\n\n${'撑到超限的一行。\n'.repeat(800)}`
-    assert.ok(tooLong.trim().length > 6000, '夹具本身要真的超限（第一版只 repeat(500) ⇒ 4500 字，压根没超）')
-    const draft = await agentDraftWith(tooLong)
-    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(res.status, 400)
-    const body = (await res.json()) as { code: string; chars: number; max: number }
-    assert.equal(body.code, 'instructions_too_long')
-    assert.equal(body.max, 6000)
-    assert.ok(body.chars > 6000, '要如实报量到的字符数')
-
-    const after = await agentById(agentId)
-    assert.equal(after.instructions, before.instructions, '拦下的时候不许改到智能体')
-  })
-
-  test('★★★ 恢复上一版：把旧指令写回去，并且"恢复也能被恢复"（当前值再存一代）', async () => {
-    const before = await agentById(agentId)
-    const draft = await agentDraftWith('# 身份\n\n你是改过的对账执行者。\n')
-    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(res.status, 201, await res.clone().text())
-    const committed = (await res.json()) as { snapshot: { id: string | null } }
-
-    // 列表里能看到这一代
-    const list = (await (
-      await fetch(`${daemon.url}/api/agents/${agentId}/instruction-snapshots`)
-    ).json()) as {
-      snapshots: Array<{ id: string; previousChars: number; nextChars: number }>
-      currentChars: number
-    }
-    const mine = list.snapshots.find((sn) => sn.id === committed.snapshot.id)
-    assert.ok(mine, '入库那一代要出现在列表里')
-    assert.equal(mine.previousChars, before.instructions.length)
-
-    // 恢复
-    const restore = await fetch(`${daemon.url}/api/agents/${agentId}/restore-instructions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    assert.equal(restore.status, 200, await restore.clone().text())
-    const restored = await agentById(agentId)
-    assert.equal(restored.instructions, before.instructions, '恢复 = 把旧指令写回去')
-
-    // "恢复也能被恢复"：当前值（刚才那版改过的）已经又存了一代
-    const list2 = (await (
-      await fetch(`${daemon.url}/api/agents/${agentId}/instruction-snapshots`)
-    ).json()) as { snapshots: Array<{ id: string; previousChars: number }> }
-    assert.ok(
-      list2.snapshots.some((sn) => sn.previousChars === '# 身份\n\n你是改过的对账执行者。'.length),
-      '恢复时要把被覆盖掉的那版也存一代，否则"手滑两次"救不回来',
-    )
-  })
-
-  test('★★ 没有历史快照时恢复 ⇒ 404 说清"它还没被沉淀改过"', async () => {
-    // 用一个从没被沉淀改过的 agent（内置起草者）
-    const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-      agents: Array<{ id: string; role: string }>
-    }
-    const drafter = all.agents.find((a) => a.role === 'drafter')!
-    const res = await fetch(`${daemon.url}/api/agents/${drafter.id}/restore-instructions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    assert.equal(res.status, 404)
-    const body = (await res.json()) as { code: string }
-    assert.equal(body.code, 'no_instruction_snapshot')
-  })
-
-  test('★★★ 对比：agent 草稿的基线与 diff 是"这条智能体现在的指令"（不是空面板）', async () => {
-    const before = await agentById(agentId)
-    const draft = await agentDraftWith(
-      `${before.instructions.trim()}\n\n## 边界\n\n不许改文件。\n`,
-    )
-    const res = await fetch(`${daemon.url}/api/crystallize/diff`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(res.status, 200, await res.clone().text())
-    const body = (await res.json()) as {
-      against: string
-      baselineLabel: string
-      files: Array<{ rel: string; change: string; added: number }>
-      totals: { added: number; removed: number; changed: number }
-    }
-    assert.equal(body.against, 'current')
-    assert.ok(body.baselineLabel.includes('当前'), `基线标签要说清比的是哪一份：${body.baselineLabel}`)
-    const file = body.files.find((f) => f.rel === 'instructions.md')
-    assert.ok(file, 'diff 里必须有 instructions.md（第一版这里是空的——只读 skill/ 的后果）')
-    assert.ok(file.change !== 'same' && body.totals.added > 0, '加了一节 ⇒ 必须量出新增行')
-  })
-
-  test('★★★ 按意见改一版：返工版的任务书还是"改指令"，索引页也指 agent/', async () => {
-    const draft = await agentDraftWith('# 身份\n\n你是对账执行者。\n')
-    const before = fakeBackend.prompts.length
-    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft, feedback: '边界那段太软，写死' }),
-    })
-    assert.equal(res.status, 202, await res.clone().text())
-    const body = (await res.json()) as { draftRunId: string; revisedFrom: string }
-    // 投递是异步的（202 先回、run 才起来）⇒ 等它真的出现再断言，别拿空串去判"没有要求"
-    const delivered = await waitForPromptAt(before)
-    assert.ok(delivered.includes('agent/instructions.md'), '返工版必须仍要求写 agent/instructions.md')
-    assert.ok(!delivered.includes('skill/SKILL.md'), '不许要求它去写 SKILL.md（产出会凭空变成 skill）')
-    const index = await readFile(
-      join(workRoot, `skill-draft-${draft}`, 'material', '00-README.md'),
-      'utf8',
-    )
-    assert.ok(index.includes('`agent/` 里就是上一版'), '索引页要指对产出目录')
-    assert.equal(body.revisedFrom, draft, '返工版记着它是从哪一版改的')
-  })
-
-  test('★★ 空指令：入库也拦（空指令会把这条智能体变成废物）', async () => {
-    const before = await agentById(agentId)
-    const draft = await agentDraftWith('   \n\n  ')
-    const res = await fetch(`${daemon.url}/api/crystallize/commit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId: draft }),
-    })
-    assert.equal(res.status, 400)
-    const body = (await res.json()) as { code: string }
-    assert.equal(body.code, 'instructions_empty')
-    assert.equal((await agentById(agentId)).instructions, before.instructions)
-  })
-
-  test('★★ 指向这次没参与的智能体 ⇒ 400（素材与它无关，改出来的指令只会按别人的错误改自己的规矩）', async () => {
-    const runId = await runWithReviewer()
-    const all = (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-      agents: Array<{ id: string; role: string }>
-    }
-    const drafter = all.agents.find((a) => a.role === 'drafter')!
-    const res = await draftPost({ runId, target: { kind: 'agent', agentId: drafter.id } })
-    assert.equal(res.status, 400)
-    const body = (await res.json()) as { code: string }
-    assert.equal(body.code, 'agent_not_in_run')
+describe('§10.9 沉淀不再产出智能体指令（分批第 191 批改口径）', () => {
+  test('★★ 有来源的 run 也拒（agent_target_removed），且文案指路智能体页', async () => {
+    const runId = await runOnce('这条 run 只想沉淀技能')
+    const res = await draftPost({ runId, target: { kind: 'agent', agentId: agentId } })
+    assert.equal(res.status, 400, await res.clone().text())
+    const body = (await res.json()) as { code?: string; error?: string }
+    assert.equal(body.code, 'agent_target_removed')
+    assert.match(body.error ?? '', /智能体/, '拒因必须说清"要改指令去哪做"')
+    assert.doesNotMatch(body.error ?? '', /target_required/, '不能退化成一句"请求写错了"')
   })
 })
+
+

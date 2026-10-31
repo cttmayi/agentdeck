@@ -21,7 +21,8 @@ export const crystallizeText = {
    * 口径：这一格同时用于**页面标题**与**对话页那个按钮**，两处必须是同一个名字
    * （同一个功能在两个地方叫两个名字，是这一族缺陷的老来源）。
    */
-  'crystallize.title': { zh: '沉淀技能&智能体', en: 'Crystallize skill or agent' },
+  // ★ 分批第 191 批：「沉淀成 Agent」删了 ⇒ 标题只说技能（原来写"技能&智能体"会误导）。
+  'crystallize.title': { zh: '沉淀技能', en: 'Crystallize a skill' },
 
   // ── 导航（三轮：沉淀是独立一页，导航列工具之下） ──
   'crystallize.navTitle': { zh: '沉淀', en: 'Crystallize' },
@@ -85,7 +86,6 @@ export const crystallizeText = {
    * ★ 分批第 38 批：「沉淀成 Agent」的草稿行。只用 id 尾段——列表接口只给 id，
    * 而为了一个名字把整张智能体表带进列表接口（或反过来在列表里 N+1 查）都不划算。
    */
-  'crystallize.rowAgent': { zh: '优化指令 · {id}', en: 'Improve instructions · {id}' },
   'crystallize.rowUpdate': { zh: '更新 {slug}', en: 'Update {slug}' },
 
   // ── 步骤条 ──
@@ -112,24 +112,6 @@ export const crystallizeText = {
 
   // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },
-  /**
-   * ★ 分批第 37 批：「沉淀成 Agent」= 优化**一条已有智能体**的指令。
-   *
-   * 文案里刻意不出现"新建"二字（使用者定过：不新建 agent，只更新当前这一条），
-   * 也不用 `**` 与反引号（D39）。
-   */
-  'crystallize.targetAgent': { zh: '优化一条智能体的指令', en: "Improve an agent's instructions" },
-  'crystallize.agentCandidateExecutor': { zh: '执行者（这次干活的那条）', en: 'Executor (ran this task)' },
-  'crystallize.agentCandidateReviewer': { zh: '审核者（这次审判的那条）', en: 'Reviewer (judged this task)' },
-  'crystallize.agentCharsHint': { zh: '当前 {chars} 字符 / 上限 6000', en: 'Currently {chars} chars / limit 6000' },
-  'crystallize.agentBuiltinHint': {
-    zh: '平台内置：指令是平台的默认值，改它等于改默认（随时可恢复上一版）',
-    en: 'Built-in: these are the platform defaults; editing changes the default (you can always restore the previous version)',
-  },
-  'crystallize.doneAgentSnapshot': {
-    zh: '旧指令已留成一代快照——在智能体页点「恢复上一版」随时退回去',
-    en: 'Previous instructions were saved as a snapshot — use Restore previous version on the agent page to roll back',
-  },
   'crystallize.targetUpdate': { zh: '更新本次加载的 skill', en: 'Update a loaded skill' },
   'crystallize.targetUpdateHint': {
     zh: '对话/任务是在矫正正在用的 skill——更新目标就是它（提炼的=进化；安装的=存为你的版本并遮蔽）',
@@ -284,10 +266,10 @@ export const crystallizeText = {
 
   // ── 任务页「沉淀技能&智能体」按钮的触发前置（Skills 列表也在用下面四个） ──
   'crystallize.taskGated': {
-    zh: '该任务没有反馈、也未审核，无法据此沉淀技能或智能体',
-    en: 'No feedback or review on this task — nothing to crystallize a skill or agent from',
+    zh: '该任务没有反馈、也未审核，无法据此沉淀技能',
+    en: 'No feedback or review on this task — nothing to crystallize a skill from',
   },
-  'crystallize.optimize': { zh: '沉淀技能&智能体', en: 'Crystallize' },
+  'crystallize.optimize': { zh: '沉淀技能', en: 'Crystallize' },
   'crystallize.shadowed': { zh: '被你的版本遮蔽', en: 'shadowed by yours' },
   'crystallize.groupMine': { zh: '我提炼的', en: 'Mine' },
   'crystallize.groupInstalled': { zh: '安装的', en: 'Installed' },

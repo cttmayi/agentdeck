@@ -3384,6 +3384,26 @@ rewrite/bloat/off-target 时**直接写停止标记、停掉自动循环**，等
 
 ## 10.50 「沉淀成 Agent」——优化一条已有智能体的指令（2026-10-25，分批第 34 批起）
 
+> ⛔ **已整条下线（分批第 191 批，2026-11）**。使用者定：「去掉起草智能体指令的功能，
+> 只需要起草新建或者更新现有 skill」。本节保留是**因为它记录了为什么要用那条路、以及它
+> 踩过什么坑**（下一节 §10.51 起的分批记录仍然指向这里）。下线范围与替代做法：
+>
+> | 原来 | 现在 |
+> | --- | --- |
+> | `POST /api/crystallize/draft` 收 `{kind:'agent', agentId}` | 400 `agent_target_removed`（两个入口都是），文案指路「智能体」页直接改 |
+> | 素材里的 `existing-agent.md`（那条 agent 的指令全文） | 不再写（`writeMaterial` 只剩 new/update 两支） |
+> | 起草者契约 `buildAgentInstructionsPrompt`（产出 `agent/instructions.md`） | 函数连同 `AGENT_INSTRUCTIONS_MAX_CHARS` 一起删掉；只有 `buildDraftPrompt` |
+> | `POST /api/crystallize/commit` 覆盖 `Agent.instructions` + 快照退路 | 分支删掉（智能体页直接改 + 恢复上一版仍在） |
+> | `artifacts`/`diff` 的 `mode: 'agent'` 分支、`crystallizeTargets.agentTargets` | 全删 |
+> | 界面：目标屏第三项「优化智能体指令」、列表行「优化指令 · …」 | 全删 |
+>
+> **历史草稿怎么处理**（这条当时必须单独定）：老数据里还躺着 `{"kind":"agent"}` 的 skill-draft
+> run，它们的产出目录是 `agent/`、入库路径已经不存在了。口径 = **不进界面、深链不复活**
+> （`crystallize.ts` 的 `draftInfo` 一处判断，列表与 `activeDraft` 同源），磁盘上的东西不删
+> ——数据是使用者的。协议里的 `{kind:'agent'}` 变体**保留**，只作为读取兼容（删掉它会让那
+> 些记录的解析多一条岔路，而它们本来就要能读出来再被过滤）。判据：
+> `crystallize-e2e.test.ts` 的 §10.9（改成"门口确实拒了"，7 条旧用例与功能一起删）。
+
 使用者：「和功能"沉淀成skill"一样，增加一个功能"沉淀成Agent"」，随后明确了口径：
 
 > agent 指的是执行者或者审核者，比如执行者，只优化其指令，不包括优化它包含的 skill。
@@ -5464,3 +5484,40 @@ daemon 侧本来就能收多份（`materials: [{name?, text}]`，§12.48 的测�
 **教训**：Svelte 里"属性级更新没生效"这种症状必须先量再改（`label` 变了不代表容器变了）；
 而在一个 3000 行的 legacy 组件 + runes 子组件混用的页面里，**把交互状态搬到 legacy 那一层**
 （这次是把手与 `--artifact-w`）比继续在子组件里折腾可靠。
+
+### 12.62 「沉淀成 Agent」整条下线（分批第 191 批，2026-11；使用者定）
+
+使用者：「去掉起草智能体指令的功能，只需要起草新建或者更新现有 skill」。
+
+**为什么这是对的**（不是"少了一个功能"，而是**收口到了一个模型**）：第 172 批起沉淀已经是
+"和一个装着市场技能的 agent 聊天"——它问、你答，它照**被注入的那份技能**写字。在这个模型里，
+"改某条智能体的指令"是**第二产出物**，它带来三样成本而没有换来对应的收益：
+① 起草者要认两套任务书与两个产出目录（`skill/` 与 `agent/`），每一处判据都得写两遍；
+② 素材要多摆一份 `existing-agent.md`，而它与素材的其余部分（这次干了什么）语义完全不同；
+③ 那条链的入库是**覆盖使用者/平台的智能体指令**，风险最高（所以才有 6000 上限、快照退路）。
+而"要改指令"这个诉求，在「智能体」页本来就能直接改、也能「恢复上一版」。⇒ **删**。
+
+**删掉的（一处不留，按"死接口"纪律）**：
+
+| 层 | 删了什么 |
+| --- | --- |
+| 协议 | `CrystallizeTargetRef` 的 `{kind:'agent'}` 变体**保留**（读取兼容，注释改成"只剩读取"） |
+| `crystallize.ts` | `CrystallizeTargets.agentTargets` + `AgentTargetBrief`、`AGENT_INSTRUCTIONS_MAX_CHARS`、`buildAgentInstructionsPrompt`（整段 ~70 行契约） |
+| `crystallize-material.ts` | `ExistingAgentSnapshot`、`MaterialContext.target` 的 agent 支、`existing-agent.md` 落盘、索引页里那两行 |
+| `server.ts` | `POST /draft` 的两条 agent 分支（改成一个共用常量 `AGENT_TARGET_REMOVED_MESSAGE` → 400 `agent_target_removed`）、`POST /revise` 与 `startAnswerRun` 的 agent 分叉、`POST /commit` 的"覆盖 instructions"整段（含快照与 6000 闸门）、`artifacts` 的 `mode:'agent'` 分支、`diff` 的 agent 基线分支、`save-draft` 的 `agent/` 目录分叉 |
+| 界面 | 目标屏第三项「优化智能体指令」、候选列表与 `agentNameFor`、列表行「优化指令 · …」、`isAgentDraft` 与"只传 draftRunId"的入库分支；词条 `crystal.targetAgent` / `agentCandidate*` / `agentCharsHint` / `agentBuiltinHint` / `doneAgentSnapshot` / `rowAgent` 六条删掉（i18n 死词条检测会报） |
+| 判据 | `crystallize-e2e.test.ts` 的 §10.9 整组（7 条）+ 空白起那条的拒因；探针 `crystal.agent*` 5 条与 `tasks.crystallizeActionLabel`（理由写在 `run.mjs` 原处） |
+
+**历史草稿的处理**（这条必须单独定，否则会留下一个死现场）：老数据里还有 `{kind:'agent'}` 的
+`skill-draft` run，磁盘上有 `agent/instructions.md`，但入库路径已经不存在。口径 = **不进界面、
+深链不复活**：`crystallize.ts` 的 `draftInfo` 返回 `null`（列表与 `activeDraft` 同一个判断，
+两处不会漂），磁盘文件**不删**。
+
+**踩到的坑**：删完界面之后 `crystal.targetFormRows`（"第一问至少两类选项"）红了——不是漏改，
+而是这一屏原来靠**第三项**凑够两行：任务来源那条夹具的执行者一条技能都没挂，所以「优化已有技能」
+本来就不该出现。处置不是放宽判据，而是给夹具一条**真挂了技能的执行者**（`makeSource(agent)`），
+否则"更新技能"这个入口在探针里就没有任何覆盖。⚠️ 改 `makeSource` 时第一次把 `id` 当 agent 传进去
+⇒ 落库的 run 没有 `agentId`（`agent.id` 在字符串上是 `undefined`，JSON 直接把键丢掉），
+症状却是"loadedSkills 为空"——离原因非常远。注释已写在那行旁边。
+
+验证：`check` **2188 全绿**、`probe:layout` **555 项全绿**、`typecheck` 0 错。

@@ -68,28 +68,8 @@
     activeDraft: {
       runId: string
       status: string
-      target:
-        | { kind: 'new' }
-        | { kind: 'update'; skillId: string }
-        | { kind: 'agent'; agentId: string }
+      target: { kind: 'new' } | { kind: 'update'; skillId: string }
     } | null
-    /**
-     * ★ 分批第 37 批：「沉淀成 Agent」的候选——这条 run 上真实用到的那两条。
-     * `reviewer` 可能是 null（没选过审核者的任务）。
-     */
-    agentTargets: {
-      executor: AgentTargetBrief
-      reviewer: AgentTargetBrief | null
-    }
-  }
-
-  /** 「沉淀成 Agent」候选（与服务端 `AgentTargetBrief` 同形）。 */
-  interface AgentTargetBrief {
-    id: string
-    name: string
-    role: string
-    instructionsChars: number
-    builtin: boolean
   }
 
   /** 源 run（对话轮次或任务执行 run）的 id。 */
@@ -128,17 +108,14 @@
 
   // ── 目标选择 ──
   /**
-   * 三种目标：新建 skill / 更新 skill / **优化一条已有智能体的指令**（分批第 37 批）。
+   * 两种目标：新建 skill / 更新一份已有 skill。
    *
-   * 使用者的口径：agent 指执行者或审核者；只优化它的指令、不碰它挂的 skill；
-   * **不新建 agent，只更新当前这一条**。所以这一支下面没有"新建"，只有候选二选一。
+   * ⚠️ 分批第 191 批删掉了第三种「优化智能体指令」——沉淀只产出 skill。
    */
-  let targetKind: 'new' | 'update' | 'agent' = 'new'
+  let targetKind: 'new' | 'update' = 'new'
   let purpose = ''
   let userFeedback = ''
   let selectedSkillId = ''
-  /** 要优化哪条智能体（候选来自这条 run 上真实用到的执行者 / 审核者）。 */
-  let selectedAgentId = ''
 
   // ── 起草 ──
   let draftRunId = ''
@@ -321,16 +298,12 @@
   /** 草稿产出的接口形状（与 `apps/daemon/src/crystallize-artifacts.ts` 对齐）。 */
   interface Artifacts {
     status: string
-    mode: 'files' | 'text' | 'refused' | 'agent'
+    mode: 'files' | 'text' | 'refused'
     refusalReason?: string
     files: Record<string, string>
     skillMd: { name: string; description: string; body: string; raw: string }
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
-    target:
-      | { kind: 'new' }
-      | { kind: 'update'; skillId: string }
-      | { kind: 'agent'; agentId: string }
-      | null
+    target: { kind: 'new' } | { kind: 'update'; skillId: string } | null
     baseline: { slug: string; files: Record<string, string> } | null
     materialDir: string
     /** 「按意见改一版」来的草稿：上一版 run id（有它才给"对比上一版"）。 */
@@ -459,11 +432,7 @@
    *   现在前端不再自己拼正文：文件集合与问题清单都来自服务端，前端只负责显示与
    *   "编辑哪个文件"。所以可入库的条件换成"服务端说没问题"，并且 slug 有值。
    */
-  $: isAgentDraft = artifacts !== null && artifacts.mode === 'agent'
-  // 智能体草稿没有 slug 这回事（不新建、不改名）⇒ 可入库只看服务端校验那三条
-  $: reviewValid = isAgentDraft
-    ? artifacts !== null && artifacts.validation.ok
-    : artifacts !== null && artifacts.validation.ok && slug.trim() !== ''
+  $: reviewValid = artifacts !== null && artifacts.validation.ok && slug.trim() !== ''
 
   /** 开始沉淀按钮的悬停解释：素材为空 / 任务门槛不过，分开说清。 */
   $: startDisabledReason =
@@ -648,12 +617,9 @@
     handledTerminal = false
     // 素材在起草开始前就已经落盘：起草中也让使用者能翻同一份（而不是等审阅）
     void loadMaterial()
-    // 还原起草时的目标（commit 按它走：更新 = 复用原 id 进化；agent = 只覆盖指令）
+    // 还原起草时的目标（commit 按它走：更新 = 复用原 id 进化）
     if (ad.target.kind === 'new') {
       targetKind = 'new'
-    } else if (ad.target.kind === 'agent') {
-      targetKind = 'agent'
-      selectedAgentId = ad.target.agentId
     } else {
       targetKind = 'update'
       selectedSkillId = ad.target.skillId
@@ -738,9 +704,8 @@
   } | null = null
 
   function applyIntake(payload: {
-    kind: 'new' | 'update' | 'agent'
+    kind: 'new' | 'update'
     skillId: string
-    agentId: string
     purpose: string
     feedback: string
     /** 空白起才有的（见 CrystallizeIntake 的 blank 流程）。 */
@@ -761,7 +726,6 @@
     targetKind = payload.kind
     purpose = payload.purpose
     selectedSkillId = payload.skillId
-    selectedAgentId = payload.agentId
     userFeedback = payload.feedback
     blankStart = payload.blank === true
     blankMaterials = payload.materials ?? []
@@ -775,17 +739,11 @@
       error = $t('crystallize.targetUpdate')
       return
     }
-    if (targetKind === 'agent' && selectedAgentId === '') {
-      error = $t('crystallize.targetAgent')
-      return
-    }
     try {
       const target =
         targetKind === 'new'
           ? { kind: 'new' as const, purpose: purpose.trim() }
-          : targetKind === 'agent'
-            ? { kind: 'agent' as const, agentId: selectedAgentId }
-            : { kind: 'update' as const, skillId: selectedSkillId }
+          : { kind: 'update' as const, skillId: selectedSkillId }
       /**
        * ★ 分批第 133 批：空白起走 `startFrom: 'blank'`——**没有来源 run**，素材是使用者
        * 在提问里给的那一段（可空）。不带 `runId`（两者只能二选一，daemon 会 400）。
@@ -986,10 +944,6 @@
         if (res.target.kind === 'update') {
           targetKind = 'update'
           selectedSkillId = res.target.skillId
-        } else if (res.target.kind === 'agent') {
-          // ★ 分批第 37 批：优化指令的草稿没有 slug 这回事（不新建、不改名）
-          targetKind = 'agent'
-          selectedAgentId = res.target.agentId
         }
       }
       slug = res.skillMd.name
@@ -1251,15 +1205,6 @@
     }
   }
 
-  /** 目标摘要里的智能体名（候选来自 targets；找不到就回退 id）。 */
-  function agentNameFor(id: string): string {
-    const a = targets?.agentTargets
-    if (a === undefined) return id
-    if (a.executor.id === id) return a.executor.name
-    if (a.reviewer?.id === id) return a.reviewer.name
-    return id
-  }
-
   /** 更新目标摘要里的技能名（可能已不在 loadedSkills 里，回退 id）。 */
   function skillNameFor(id: string): string {
     const s = targets?.loadedSkills.find((x) => x.id === id)
@@ -1272,32 +1217,6 @@
     clash = null
     try {
       if (artifacts === null) return
-      /**
-       * ★ 分批第 37 批：智能体草稿的入库**只传 draftRunId**。
-       *
-       * 内容由服务端从磁盘上的 `agent/instructions.md` 读（与 skill 那条"入库只认产出
-       * 文件本身"同一条纪律），目标来自 run 上落库的 `crystallizeTarget`——前端不传，
-       * 也就不存在"界面传的和当初起草的不是同一个目标"这种事。
-       */
-      if (isAgentDraft) {
-        const res = await api<{
-          agent: { id: string; name: string; instructionsChars: number }
-          previousInstructionsChars: number
-          snapshot: { id: string | null; restorable: boolean; note?: string }
-          versioning: { enabled: boolean; note?: string }
-        }>('/api/crystallize/commit', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ draftRunId }),
-        })
-        doneSkillName = `${res.agent.name}（${res.previousInstructionsChars} → ${res.agent.instructionsChars} 字符）`
-        doneVersioningNote = res.snapshot.restorable
-          ? $t('crystallize.doneAgentSnapshot')
-          : (res.snapshot.note ?? '')
-        step = 'done'
-        ondone()
-        return
-      }
       const target = targetKind === 'new' ? { kind: 'new' as const } : { kind: 'update' as const, skillId: selectedSkillId }
       // 四轮：只传整份文件 + 确认过的 slug。name / description 由服务端从 SKILL.md
       // 的 frontmatter 现解析——前端不再"拆出来再传回去"（那是两个出处的根源）。
@@ -1803,10 +1722,6 @@
                 <span class="muted">
                   {#if targetKind === 'new'}
                     {$t('crystallize.targetNew')}
-                  {:else if targetKind === 'agent'}
-                    <!-- ★ 分批第 38 批：结论条原来只有"新建 / 更新 <slug>"两支 ⇒
-                         智能体草稿在这里显示成「更新本次加载的 skill」（探针量到的原话） -->
-                    {$t('crystallize.targetAgent')} {agentNameFor(selectedAgentId)}
                   {:else}
                     {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
                   {/if}

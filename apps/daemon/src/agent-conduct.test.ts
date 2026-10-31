@@ -100,10 +100,12 @@ describe('★ 分批第 47 批：通用工作守则', () => {
       DRAFTER_INSTRUCTIONS.includes('照着你被注入的那份技能'),
       '身份必须说清"按技能干"——那是它现在唯一的写法来源（平台不再规定章节与守则）',
     )
+    // ★ 分批第 191 批：「沉淀成 Agent」删了 ⇒ 起草者只产出 skill。
+    //   反过来钉一句：身份里**不许**再出现"智能体的指令"——那句会让它去找一个
+    //   已经没有产出契约的东西（`buildAgentInstructionsPrompt` 已删）。
     assert.ok(
-      DRAFTER_INSTRUCTIONS.includes('可能是一条 skill') &&
-        DRAFTER_INSTRUCTIONS.includes('智能体的指令'),
-      '两个产出对象仍要点出来（同一条起草者接两种活）',
+      DRAFTER_INSTRUCTIONS.includes('skill') && !DRAFTER_INSTRUCTIONS.includes('智能体的指令'),
+      '只产出 skill（改指令的功能已经下线）',
     )
     assert.ok(
       !DRAFTER_INSTRUCTIONS.includes('| 1. |') && DRAFTER_INSTRUCTIONS.length < 400,
