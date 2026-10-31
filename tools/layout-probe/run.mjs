@@ -3900,6 +3900,24 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.draftingPaneMaterialCount',
+    label:
+      '★★ 起草中那一屏，右栏**也列材料**（§12.14：右栏是"它现在手上有什么"的正式清单——' +
+      '改之前整块材料被包在"有产物"的分支里，草案期右栏只有一句"还没有产物"）',
+    ok: (v) => typeof v === 'number' && v >= 1,
+    show: (v) => `${v} 个素材文件`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftingMaterialLocked',
+    label:
+      '★★★ 起草中**没有**追加材料区（daemon 拒"没跑完就改材料"⇒ 界面上不给按了会被拒的按钮，' +
+      '§12.41 不放假接口）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftingLogLive',
     label:
       '★★★ 产出里那行日志是**真的流下来的**（假 CLI 吐的一行，经 daemon 解析再经 SSE 落到页面）——这一条量的是"跑着的时候人看得到东西"',

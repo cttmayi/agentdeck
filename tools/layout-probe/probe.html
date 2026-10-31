@@ -5719,6 +5719,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             if (facts['crystal.draftingAttached']) {
               // ★ 分批第 140 批：步骤条已删 ⇒ 这里改量顶栏的状态徽标（drafting）
               facts['crystal.draftingStatusBadge'] = (d().querySelector('[data-cryst-status]')?.textContent ?? '').trim()
+              /**
+               * ★ 分批第 163 批（§12.14）：**起草中那一屏右栏也要列材料**（只读）。
+               *
+               * 改之前整块材料被包在"有产物"的分支里 ⇒ 起草中右栏只有一句"还没有产物"，而材料
+               * 明明已经在磁盘上（`GET /material` 早就有了）。同时这一屏**不该**有追加区：
+               * daemon 那边"没跑完就改材料"是拒的（§12.41：不给按了会被拒的按钮）。
+               */
+              // ⚠️ 这一屏开着起草 run 的 SSE ⇒ Chrome 的虚拟时钟冻着，必须用 `untilNet`
+              //    （`until` 里的 setTimeout 永远不触发，症状是"探针跑满超时、dump 里 done 不是
+              //    true"——本节开头就写着这条，我加这一段时正好踩了一遍）
+              await untilNet(() => d().querySelectorAll('.artifact-mat-list li').length > 0, 60)
+              facts['crystal.draftingPaneMaterialCount'] =
+                d().querySelectorAll('.artifact-mat-list li').length
+              facts['crystal.draftingMaterialLocked'] = !d().querySelector('[data-mat-dropzone]')
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
               facts['crystal.draftingTabDefault'] =

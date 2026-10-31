@@ -373,6 +373,14 @@
   const problems = $derived(problemList(artifacts))
   const checkTotal = $derived(problems.length)
   const checksOk = $derived(isOk(artifacts))
+  /**
+   * ★ 分批第 163 批（§12.41 不放假接口）：**材料能不能改**。
+   *
+   * daemon 那三条写接口（追加 / 删掉 / 从仓库拉）都要求"起草已跑完、且没入库"（理由：起草者
+   * 开工时读的素材已经定了）。所以草案期界面上也不该挂这些按钮——按了被拒比没有按钮更糟。
+   * 清单本身**照常显示**（§12.14：右栏是"它现在手上有什么"的正式清单，草案期同样要看得到）。
+   */
+  const materialEditable = $derived(artifacts !== null && artifacts.status === 'completed')
 </script>
 
 <!-- 窄屏的打开入口：宽屏不显示（栏本身就在网格里） -->
@@ -401,8 +409,6 @@
       <p class="notice bad small">{error}</p>
     {:else if loading}
       <p class="faint small">{$t('crystallize.artifactLoading')}</p>
-    {:else if files.length === 0}
-      <p class="faint artifact-empty">{$t('crystallize.artifactEmpty')}</p>
     {:else}
       <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 使用者给的）。
            ★ 分批第 147 批：使用者给的（`appended/`）可以删——§12.14「右栏清单……删掉错的」。
@@ -446,9 +452,10 @@
         {/if}
         <!-- ★ 分批第 148 批（§12.4 材料卡：追加形态"拖文件 / 选目录"）：收文件的就是这一块。
              只收**文本**（素材最终要给起草者读，二进制进去只会是乱码），单份 ≤ 100 KiB。 -->
-        <div
-          class="mat-add"
-          class:drag={dragOver}
+        {#if materialEditable}
+          <div
+            class="mat-add"
+            class:drag={dragOver}
           data-mat-dropzone="true"
           role="group"
           ondragover={(e) => {
@@ -520,8 +527,19 @@
           {#if addNote !== ''}
             <p class="faint small artifact-mat-note" data-mat-add-note>{addNote}</p>
           {/if}
-        </div>
+          </div>
+        {:else}
+          <!-- 草案期：清单能看、不能改（daemon 会拒"没跑完就改材料"）；说清为什么，别给死按钮 -->
+          <p class="faint small">{$t('crystallize.materialLockedUntilDone')}</p>
+        {/if}
       </section>
+
+      <!-- ★ 分批第 163 批（§12.14）：材料**在草案期也列**（只读），下面才是产物区（空态 / 有产出）。
+           改之前整块材料还被包在"有产物"的分支里 ⇒ 起草中那一屏右栏只有一句"还没有产物"，
+           而材料明明已经在磁盘上（`GET /material` 早就有数据）——那是"信息在、但看不见"。 -->
+      {#if files.length === 0}
+        <p class="faint artifact-empty">{$t('crystallize.artifactEmpty')}</p>
+      {:else}
 
       <!-- ★ 分批第 155 批（§12.12 / §12.53 选项 2）：**编辑器搬进右栏**……
            等等，这里是"文件 + 只读预览"两块，它们的作用被编辑器整个替代了：
@@ -549,7 +567,7 @@
           </ul>
         {/if}
       </section>
-
+      {/if}
     {/if}
   </div>
 </aside>

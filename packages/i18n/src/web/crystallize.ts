@@ -179,6 +179,11 @@ export const crystallizeText = {
   'crystallize.materialCountTrace': { zh: '轨迹 {n}', en: '{n} trace' },
   'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
   'crystallize.materialCountNone': { zh: '这次没有材料', en: 'No material this time' },
+  // ── 草案期：材料能看不能改（分批第 163 批）──
+  'crystallize.materialLockedUntilDone': {
+    zh: '起草跑完才能改材料（这一版读到的素材已经定了）',
+    en: 'Material can only change after the draft finishes (this version already read its material)',
+  },
   'crystallize.scopeConversation': { zh: '对话', en: 'Conversation' },
   'crystallize.scopeTask': { zh: '任务', en: 'Task' },
   'crystallize.reviewedYes': { zh: '有审核判决', en: 'Reviewed' },
