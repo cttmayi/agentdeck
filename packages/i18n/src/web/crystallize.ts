@@ -359,6 +359,14 @@ export const crystallizeText = {
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   // ★ 分批第 171 批：产物栏宽度可拖（把手在中间栏与右栏之间）
   'crystallize.artifactResize': { zh: '拖动调整产物栏宽度', en: 'Drag to resize the artifact pane' },
+  // ── 沉淀用技能（分批第 173 批：注入式，但不预置在仓库里，由使用者自己装）──
+  'crystallize.draftSkill': { zh: '沉淀用技能', en: 'Skill for drafting' },
+  'crystallize.draftSkillHint': {
+    zh: '起草时把这个技能注入给它（可选）。技能不随项目发布，装的是上游仓库里的那一份。',
+    en: 'Injected into the drafter (optional). The skill is not bundled — this installs the upstream copy.',
+  },
+  'crystallize.draftSkillInstalled': { zh: '已装好：{name}（起草时会注入它）', en: 'Installed: {name} (injected while drafting)' },
+  'crystallize.draftSkillInstall': { zh: '一键安装 distilly', en: 'Install distilly' },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
   // ── U3a 消息流外壳的栏脚（分批第 106 批：先占位，U3d 才接线） ──

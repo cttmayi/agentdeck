@@ -5954,6 +5954,23 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                   hasHandle: !!resizer,
                 }
               }
+              /**
+               * ★ 分批第 173 批（使用者定："技能走注入，但不预置在仓库里，让用户自己装、一键安装"）：
+               * 右栏要有一块「沉淀用技能」，且二选一：**已装好**（说出名字）或**一键安装**按钮。
+               * 只量"有这么一块"不够——"两个字都在、什么也按不动"正是本仓库最防的那种。
+               */
+              {
+                // 右栏的内容比结论条晚一拍（它自己拉产物/技能清单）⇒ 等它出现再量
+                await until(() => !!d().querySelector('[data-draft-skill]'), 120)
+                const box = d().querySelector('[data-draft-skill]')
+                const hasInstall = !!(
+                  box &&
+                  [...box.querySelectorAll('button')].some((b) => text(b).includes('安装'))
+                )
+                facts['crystal.draftSkillSection'] = box
+                  ? { present: true, hasInstall, text: text(box).slice(0, 60) }
+                  : { present: false, hasInstall: false, text: '' }
+              }
               const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]
               facts['crystal.artifactFileCount'] = artFiles.length
               // 正文在编辑器里（`textarea.editor`）：这是"点一个文件 ⇒ 下面就是它的内容"

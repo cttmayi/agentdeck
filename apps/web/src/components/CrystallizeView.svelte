@@ -50,7 +50,7 @@
   //   见该文件头：legacy 父 → runes 子的 prop 更新不传播）
   import CrystallizeDraftState from './CrystallizeDraftState.svelte'
   import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
-  import { editor } from '../lib/crystallize-editor.svelte.ts'
+  import { draftSkill, editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
   interface CrystallizeTargets {
@@ -217,6 +217,17 @@
    * 否则使用者看不到草稿内容、也没法在输入条里就着内容反馈。
    */
   let paneWide = true
+  /**
+   * ★ 分批第 173 批（按你定的模型："它有疑问就可以发问，类似聊天窗口"）：**它在等回答**。
+   *
+   * `questions !== ''` ⇒ 中间消息流把它显示成一条助手消息、栏脚输入条变成"回答它"。
+   * 为什么不是一个新 step：`step` 表示"这一屏在干什么"（目标/起草/审阅/完成），
+   * 而"等回答"是**起草这条链上的一个瞬时状态**——它仍然在 `drafting` 那一屏里，
+   * 只是最后一条消息从"日志"变成了"问题"。多一个 step 会把所有 `step ===` 的判断
+   * 都得改一遍，收益却只是换个名字。
+   */
+  let questions = ''
+  let answering = false
 
   /** 编辑器（子组件）把编辑现场推上来。见上面那段：为什么必须是回调。 */
   function syncFromEditor(s: {
@@ -783,6 +794,10 @@
               target,
               ...(userFeedback.trim() !== '' ? { userFeedback: userFeedback.trim() } : {}),
             }
+      // ★ 分批第 173 批：装了"沉淀用技能"就注入（不装也能沉淀：注入是可选的）
+      if (draftSkill.id !== '') {
+        ;(body as Record<string, unknown>)['skillIds'] = [draftSkill.id]
+      }
       const res = await api<{ draftRunId: string; materialStats: { turns: number; toolCalls: number } }>(
         '/api/crystallize/draft',
         {
@@ -873,11 +888,64 @@
     handledTerminal = true
     if (status === 'completed') {
       draftStatus = 'completed'
+      // ★ 分批第 173 批：**先问"它是不是在提问"**——只提问的那一轮没有产出，
+      //   直接走 `loadDraftOutput()` 会把它画成"审阅态但空草稿"（人看不出它在等自己）。
+      if (await loadQuestions()) return
       await loadDraftOutput()
     } else {
       draftStatus = status === 'cancelled' ? 'cancelled' : 'failed'
       step = 'drafting'
       void fetchDraftFailure(draftRunId)
+    }
+  }
+
+  /**
+   * 读"它在等回答吗"（`GET /api/crystallize/questions`）。
+   *
+   * 返回 `true` = 有开放问题 ⇒ 调用方**不要**进审阅态（那一轮没产出）。
+   */
+  async function loadQuestions(): Promise<boolean> {
+    if (draftRunId === '') return false
+    try {
+      const res = await api<{ questions: string | null }>(
+        `/api/crystallize/questions?draftRunId=${encodeURIComponent(draftRunId)}`,
+      )
+      questions = res.questions ?? ''
+      return questions !== ''
+    } catch {
+      questions = ''
+      return false
+    }
+  }
+
+  /**
+   * ★ 分批第 173 批：**回答起草者的问题**（`POST /api/crystallize/answer`）。
+   *
+   * 它起的是一条**新 run**（并接上刚才那条会话）——所以这里要像起草一样把终态处理清干净：
+   * `handledTerminal` 复位、`questions` 清空，否则新 run 完成时会被上一轮的"已处理"挡住。
+   */
+  async function answerQuestion(text: string): Promise<void> {
+    if (answering || draftRunId === '') return
+    answering = true
+    error = ''
+    try {
+      const res = await api<{ draftRunId: string }>('/api/crystallize/answer', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ draftRunId, answer: text.trim() }),
+      })
+      draftRunId = res.draftRunId
+      draftStatus = null
+      draftFailedReason = ''
+      handledTerminal = false
+      questions = ''
+      step = 'drafting'
+      composerText = ''
+      composerReceipt = '收到，已经转给它了（如果还有没问清的，它会再问一轮）。'
+    } catch (err) {
+      composerReceipt = `回答没送出去：${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      answering = false
     }
   }
 
@@ -1045,6 +1113,15 @@
   function submitComposer(): void {
     const text = composerText.trim()
     if (text === '') return
+    /**
+     * ★ 分批第 173 批：**它在等回答时，栏脚这句话就是回答**（不要求「这里不对：」前缀）。
+     * 顺序很关键：这条判断必须在"意图路由"之前——否则"这里不对"会被当成改稿意见，
+     * 而此刻真正该做的是把话转给它（§12.12："显式动作先于隐式答题"的反面同样成立）。
+     */
+    if (questions !== '' && draftRunId !== '') {
+      void answerQuestion(text)
+      return
+    }
     const says =
       (re: RegExp) => re.test(text)
     if (says(/^(这里不对|不对|应该|再炼)/)) {
@@ -1572,6 +1649,14 @@
       <!-- ★ 分批第 107 批（U3b）：起草日志从"分节折叠"变成**一条系统消息**。
            日志本身（RunLog + 可展开）不动，只是它现在挂在消息流里的一个"系统消息"上，
            而不是页面上的一个抽屉分节——这样它和后面的"起草完成"是同一条时间线上的东西。 -->
+      {#if questions !== ''}
+        <!-- ★ 分批第 173 批：**它在问**——问题是一条助手消息（与"提问/材料"同一种形状），
+             下面是栏脚输入条；人回答之后平台起下一条 run 并接上会话。 -->
+        <div class="crystal-msg" data-msg-role="assistant" data-crystal-questions>
+          <article class="markdown draft-final">{@html renderMarkdown(questions)}</article>
+          <p class="faint small">它在等你回答——直接写在下面的输入条里（一行也行，多行也行）。</p>
+        </div>
+      {/if}
       <div class="crystal-msg" data-msg-role="system">
         <!-- ★ 分批第 162 批（§12.14）：对话里那行「我当时给了它什么」——与右栏清单同一份数据 -->
         {#if materialCountLine !== ''}

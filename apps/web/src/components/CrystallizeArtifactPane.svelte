@@ -22,7 +22,7 @@
   import { api } from '../lib/api.ts'
   // ★ 分批第 155 批：编辑器（树 + 内容/差异 + 保存改动）搬进这一栏
   import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
-  import { editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
+  import { DISTILLY_SOURCE, draftSkill, editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
 
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
@@ -81,7 +81,52 @@
   let deleting = $state('')
   /** 删完之后的回执（说清删了什么、还剩几份；右栏本来就是"它现在手上有什么"）。 */
   let deleteNote = $state('')
-  /** 正在追加文件时不为空（防止一边拖两批、一边按两次按钮）。 */
+  /**
+   * ★ 分批第 173 批（使用者定："技能走注入，但**不要默认放项目中**，让用户自己装、建议一键安装"）：
+   * 这一栏负责"这条沉淀用什么技能"——没装就给一键安装，装了就把 id 交给起草请求。
+   */
+  let skillInstalling = $state(false)
+
+  async function loadDraftSkill(): Promise<void> {
+    try {
+      const res = await api<{ skills: Array<{ id: string; slug: string; name: string }> }>('/api/skills')
+      const found = res.skills.find((sk) => sk.slug === 'distilly' || sk.slug.startsWith('distilly'))
+      draftSkill.id = found?.id ?? ''
+      draftSkill.slug = found?.slug ?? ''
+      draftSkill.name = found?.name ?? ''
+      draftSkill.error = ''
+    } catch (err) {
+      draftSkill.error = String(err instanceof Error ? err.message : err)
+    }
+  }
+
+  /**
+   * 一键安装：走既有的 `POST /api/skills/install`（来源是上游仓库，**平台不 vendored**）。
+   * 装完立刻回读一次——按钮要变成"已装好"，否则人不知道到底成没成。
+   */
+  async function installDraftSkill(): Promise<void> {
+    if (skillInstalling) return
+    skillInstalling = true
+    draftSkill.error = ''
+    try {
+      await api('/api/skills/install', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ source: DISTILLY_SOURCE }),
+      })
+      await loadDraftSkill()
+    } catch (err) {
+      draftSkill.error = String(err instanceof Error ? err.message : err)
+    } finally {
+      skillInstalling = false
+    }
+  }
+
+  $effect(() => {
+    void loadDraftSkill()
+  })
+
+  /** 正在追加文件时不为空（防止一边拖一批、一边按两次按钮）。 */
   let adding = $state(false)
   /** 拖拽文件悬停在本区上（给一点反馈：这一块收文件）。 */
   let dragOver = $state(false)
@@ -398,6 +443,20 @@
     <h2>{$t('crystallize.artifactTitle')}</h2>
     <div class="pane-actions">
       {#if version > 1}<span class="faint small">{$t('crystallize.artifactVersion', { n: String(version) })}</span>{/if}
+      <!-- ★ 分批第 173 批：沉淀用技能（可选）挂在栏头——它不该占正文的竖向空间
+           （右栏的高度是编辑器的：多 40px 就把编辑器推出首屏，探针会红）。 -->
+      <span class="artifact-skill" data-draft-skill title={$t('crystallize.draftSkillHint')}>
+        {#if draftSkill.id !== ''}
+          <span class="faint small">{$t('crystallize.draftSkillInstalled', { name: draftSkill.name || draftSkill.slug })}</span>
+        {:else}
+          <button
+            type="button"
+            class="ghost small"
+            disabled={skillInstalling}
+            onclick={() => void installDraftSkill()}
+          >{skillInstalling ? '…' : $t('crystallize.draftSkillInstall')}</button>
+        {/if}
+      </span>
       <button type="button" class="ghost artifact-close" onclick={() => (drawerOpen = false)}>
         {$t('crystallize.artifactClose')}
       </button>

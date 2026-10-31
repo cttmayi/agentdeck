@@ -3367,6 +3367,22 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.draftSkillSection',
+    label:
+      '★★ 右栏有「沉淀用技能」那一块，而且**二选一说得清**：已装好（说出名字）或给出「一键安装」按钮' +
+      '（分批第 173 批：技能不预置在仓库里、由使用者自己装）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      (v.hasInstall === true || String(v.text).includes('已装好')),
+    show: (v) =>
+      v === null || v === undefined
+        ? 'null'
+        : `在 ${String(v.present)}　可安装 ${String(v.hasInstall)}　「${String(v.text)}」`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.artifactResize',
     label:
       '★★★ 产物栏宽度**可拖**（使用者："能从中间消息拿宽度，改成可动态调节"）：把把手往左拖 120px ⇒ ' +

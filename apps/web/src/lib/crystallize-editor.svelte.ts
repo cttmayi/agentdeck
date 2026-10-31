@@ -370,6 +370,26 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * ★ 分批第 173 批（使用者定："走注入，但**不要默认放项目中**，让用户自己装（建议一键安装）"）：
+ * **这条沉淀用的技能**。
+ *
+ * 为什么是模块状态：起草请求在 `CrystallizeView`（legacy）里拼，而"装没装 / 装的是谁"在右栏
+ * （runes）里显示——跨模式传不了 prop（§12.50 坑 4），所以放模块里两边直接读。
+ * 空 id = 没装：起草请求就不带 `skillIds`（注入是**可选**的，不装也能沉淀）。
+ */
+export const draftSkill = $state({
+  /** 装好后这条技能的 id（`POST /api/crystallize/draft` 的 `skillIds`）。 */
+  id: '',
+  slug: '',
+  name: '',
+  /** 最近一次扫描/安装的错误（界面上说清为什么装不上）。 */
+  error: '',
+})
+
+/** 一键安装的那个地址（技能不预置在仓库里，装的是上游那份）。 */
+export const DISTILLY_SOURCE = 'https://github.com/titanwings/distilly'
+
+/**
  * 单例。理由见文件头：一个页面只有一条沉淀被打开；`open()` 会整份重置。
  * 想并排看两条，改成 `Map<runId, DraftEditor>` —— 现在没有这个用法。
  */
