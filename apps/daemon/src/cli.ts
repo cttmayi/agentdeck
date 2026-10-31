@@ -263,10 +263,13 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --github-proxy [地址] 从 GitHub 装 skill 时走**加速器**（默认直连）。
                         ⚠️ 它是**第三方**：能看也能改转发过来的内容，所以默认不用、
                         只在显式指定时启用；凭证**不会**交给它。
-                        **不带地址就用 https://gh-proxy.com**（裸写这个旗标即可）。
-                        例：--github-proxy            （= gh-proxy.com）
+                        **不带地址就用 https://gh-proxy.org**（裸写这个旗标即可）。
+                        例：--github-proxy            （= gh-proxy.org）
                             --github-proxy https://别的加速器
                             --github-proxy off        （这次直连）
+      --allow-builtin-edits
+                        **夹具专用**：允许改内置 agent（默认不许——内置 agent 只读）。
+                        只有探针/测试脚手架起的一次性 daemon 才该带它。
       --verify-runtime <key|all>
                         只探测并报告 CLI 的版本验证状态（FR-CLI-07），不起服务。
                         它**不会**替你宣称"已验证"——真实端到端验证要你自己跑。
