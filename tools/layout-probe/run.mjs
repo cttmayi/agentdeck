@@ -3527,6 +3527,16 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.composerAnswersIntake',
+    label:
+      '★★★ 栏脚输入条的自由作答**落进当前这一问**（§12.5「还有必答项没答 ⇒ brief 参数」）：' +
+      '打一句作用描述并提交 ⇒ 回执说「当作作用描述记下」、下一问换成材料（不是回"没有落点"）',
+    ok: (v, f) => v === true && /材料/.test(String(f['crystal.afterComposerQuestion'] ?? '')),
+    show: (v, f) =>
+      `${String(v)}　下一问 ${JSON.stringify(String(f['crystal.afterComposerQuestion'] ?? '').slice(0, 20))}`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.reviseEmptyByDefault',
     label:
       '★★ 「反馈」的意见框默认是**空的**（没有审核者替人填意见：§12.15「人看、可就地改」）',

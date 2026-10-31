@@ -5772,6 +5772,42 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 !!d().querySelector('.intake textarea.intake-input')
               // 空白起不该出现"轨迹 N 轮"那一行（没有来源 run，也就没有轨迹可带）
               facts['crystal.blankNoTraceLine'] = !(d().body.innerText ?? '').includes('轨迹')
+
+              /**
+               * ★ 分批第 145 批（U4c 补，§12.5）：**自由作答走栏脚输入条**。
+               * 问的是文字时（作用描述 / 材料），栏脚那句就该落进这一问——而不是回"没有落点"。
+               * 打一句话提交 ⇒ 回执说"当作作用描述记下"、下一问换成材料。
+               */
+              const compInput = d().querySelector('.crystal-composer-input')
+              const compForm = compInput ? compInput.closest('form') : null
+              if (compInput && compForm) {
+                const marker = '把一次跑通的流程固化成技能（探针·输入条作答）'
+                compInput.value = marker
+                compInput.dispatchEvent(new Event('input', { bubbles: true }))
+                await wait(30)
+                if (typeof compForm.requestSubmit === 'function') compForm.requestSubmit()
+                else compForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+                await until(
+                  () => (d().querySelector('.composer-receipt')?.textContent ?? '').includes('作用描述'),
+                  100,
+                )
+                // 推给 intake 的那句要经过一次 effect 才落到当前这一问 ⇒ 等下一问真的换掉再量。
+                // ⚠️ 必须量**最后一条** `.intake-q`：已答的问题会作为历史回放留在消息流里
+                //    （第一条 .intake-q 永远是"作用描述"），第一版量第一条 ⇒ 误判成"没前进"。
+                const currentQ = () => [...d().querySelectorAll('.intake-q')].pop()
+                const movedOn = await until(
+                  () => (currentQ()?.textContent ?? '').includes('材料'),
+                  100,
+                )
+                facts['crystal.composerAnswersIntake'] =
+                  movedOn &&
+                  (d().querySelector('.composer-receipt')?.textContent ?? '').includes('作用描述')
+                facts['crystal.composerAnswerReceipt'] = text(d().querySelector('.composer-receipt'))
+                facts['crystal.afterComposerQuestion'] = text(currentQ())
+              } else {
+                facts['crystal.composerAnswersIntake'] = null
+                facts['crystal.afterComposerQuestion'] = null
+              }
             }
           }
           // 收尾：离开这一屏（后面的组自己进它要的页面）；也把可能开着的浮层关掉

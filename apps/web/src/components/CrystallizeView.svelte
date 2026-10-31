@@ -665,6 +665,16 @@
   }
   let blankMaterialText = ''
   let blankStart = false
+  /**
+   * `CrystallizeIntake` 的实例：栏脚输入条把作答**直接交给它**（`answerFromComposer` 返回
+   * 被落到哪一问、或 `null` 表示"这一问不是文字题"）。
+   *
+   * ⚠️ 为什么不用 `bind:stage` 回传"问到了哪一步"：父组件是 legacy 模式、子组件是 runes，
+   *    实测 `bind:` 没把子组件的 stage 变化写回父级（回执会说错是哪一问；方法调用没有这问题）。
+   */
+  let intakeRef: {
+    answerFromComposer?: (text: string) => 'purpose' | 'blankMaterial' | null
+  } | null = null
 
   function applyIntake(payload: {
     kind: 'new' | 'update' | 'agent'
@@ -1117,6 +1127,25 @@
     }
     if (says(/^回到\s*v\d+/)) {
       composerReceipt = '版本回滚在「技能」页的历史里（这里只改草稿，不切版本）。'
+      return
+    }
+    /**
+     * ★ 分批第 145 批（U4c 补，§12.5）：**还有必答项没答 ⇒ 这句话就是答案**。
+     *
+     * 设计的口径是"自由作答走输入条"——问的是文字时（作用描述 / 材料），栏脚这一句
+     * 就该落进那一问，而不是被当成"补充、没有落点"打发掉。
+     */
+    if (step === 'target') {
+      const applied = intakeRef?.answerFromComposer?.(text) ?? null
+      if (applied !== null) {
+        composerText = ''
+        composerReceipt =
+          applied === 'purpose'
+            ? '收到：这句会当作「作用描述」记下，接着往下问。'
+            : '收到：这句会当作「材料」记下（起草时会给起草者读）。'
+        return
+      }
+      composerReceipt = '这一问不是文字题——点上面的选项（或「开始提炼」）更准。'
       return
     }
     composerReceipt = '我把它当成"补充"，但目前没有落点——能落地的只有「这里不对：…」「再炼一版」「追加材料：…」。'
@@ -1611,7 +1640,12 @@
            而它在组件里只在初始化时算一次。路由从 `#/crystallize/new` 切到 `#/crystallize/blank`
            时两屏用的是同一个组件实例 ⇒ 不重挂就还停在"这次要沉淀成什么？"那一问（探针当场量到）。 -->
       {#key blankMode}
-        <CrystallizeIntake {targets} blank={blankMode} onfinish={applyIntake} />
+        <CrystallizeIntake
+          {targets}
+          blank={blankMode}
+          bind:this={intakeRef}
+          onfinish={applyIntake}
+        />
       {/key}
       {/if}
 

@@ -22,11 +22,15 @@
   let {
     targets,
     blank = false,
+    /** ★ 分批第 145 批（U4c 补）：当前问到哪一步要**回传给父级**——栏脚输入条要靠它判断
+        "这句话是不是在答问题"（§12.5：还有必答项没答 ⇒ brief 参数）。用 `$bindable` 双向绑。 */
+    stage = $bindable('start'),
     onfinish,
   }: {
     targets: Targets | null
     /** ★ 分批第 133 批：「从空白/材料起」——没有来源 run（起点已由入口选定，不再问）。 */
     blank?: boolean
+    stage?: Stage
     onfinish: (p: {
       kind: 'new' | 'update' | 'agent'
       skillId: string
@@ -40,7 +44,40 @@
 
   type Stage = 'start' | 'detail' | 'purpose' | 'blankMaterial' | 'ready'
   // 空白起：起点已经定了（用户在「新建沉淀」里选了它），从这里直接问作用描述——不再多问一遍。
-  let stage = $state<Stage>(blank ? 'purpose' : 'start')
+  // ⚠️ 起始值由父级给（`bind:stage`），这里只保证"blank 时候不会停在 start 那一问上"。
+  $effect(() => {
+    if (blank && stage === 'start') stage = 'purpose'
+  })
+
+  /**
+   * ★ 分批第 145 批（U4c 补，§12.5）：**栏脚输入条的作答落到当前这一问**。
+   *
+   * 设计原文是"自由作答走输入条"（"还有必答项没答 ⇒ brief 参数"）。父级（栏脚输入条）
+   * 把这句话交进来，这里按当前 stage 落进对应的答案字段并前进：
+   *   · `purpose` ⇒ 写进作用描述（新建）/ 希望改（更新/指令），然后进入下一步；
+   *   · `blankMaterial` ⇒ 当作材料正文，直接进确认。
+   * 返回 `false` = 这一问不是文字题（选择题/确认），让父级回执说清"点选项/点开始提炼"。
+   *
+   * ⚠️ 用**导出方法**而不是 prop：父组件是 legacy 模式（`export let`），实测把"第几次推"
+   *    做成 prop 之后，父级的赋值没有让 runes 子组件重跑 effect（回执到了、问题没换）。
+   *    `bind:this` + 方法调用没有这层跨模式传递问题。
+   */
+  export function answerFromComposer(raw: string): 'purpose' | 'blankMaterial' | null {
+    const text = raw.trim()
+    if (text === '') return null
+    if (stage === 'purpose') {
+      if (kind === 'new') purpose = text
+      else feedback = text
+      afterPurpose()
+      return 'purpose'
+    }
+    if (stage === 'blankMaterial') {
+      materialText = text
+      stage = 'ready'
+      return 'blankMaterial'
+    }
+    return null
+  }
   let kind = $state<'new' | 'update' | 'agent' | ''>(blank ? 'new' : '')
   let skillId = $state('')
   let agentId = $state('')
