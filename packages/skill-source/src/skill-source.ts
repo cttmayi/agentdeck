@@ -52,7 +52,13 @@ export { MAX_SKILL_BYTES }
  * 安装时按一个数收下、注入时按另一个数拒绝，就会出现"装得上但跑任务时炸"的
  * 技能——而那种失败发生在很久以后、离原因很远。
  */
-export const MAX_SUPPORT_FILE_BYTES = 256 * 1024
+/**
+ * 单**支持文件**上限：512 KB（分批第 184 批从 256 KB 放宽）。
+ *
+ * ⚠️ `SKILL.md` 不适用这一条——它走 `MAX_SKILL_BYTES`（256 KB，注入层的同一份口径）。
+ *    支持文件超限现在是**跳过并记下来**（分批第 183 批），不是整单失败。
+ */
+export const MAX_SUPPORT_FILE_BYTES = 512 * 1024
 /**
  * 一个技能所有文件加起来的字节上限。
  *
@@ -68,9 +74,17 @@ export const MAX_TOTAL_BYTES = 8 * 1024 * 1024
  * 文件）。512 仍是硬护栏：一个塞满东西的目录照样会被拒，只是不再误伤正经的
  * 完整仓库。
  */
-export const MAX_FILES = 512
+/**
+ * ★ 分批第 184 批（使用者："装技能的规则我想改一下，不要太严格了，或者只需要保证根目录下有 SKILL.md"）：
+ * 数量上限 512 → **2000**（真实技能仓库常常带一堆 references/、templates/、tools/）。
+ *
+ * 为什么这条**不能取消**：整仓是逐个文件走 GitHub API 的，上限是"别把限额吃光"的兜底。
+ * 超限的文件会被记进忽略清单（不静默），不是静默丢弃。
+ */
+export const MAX_FILES = 2000
 /** 目录递归深度上限。 */
-export const MAX_DEPTH = 4
+/** 递归深度上限（同上：**8 层**——`references/notes/2025/q1/x.md` 这种结构很常见）。 */
+export const MAX_DEPTH = 8
 /** 单次 HTTP 请求的超时。 */
 /**
  * ★ 分批第 180 批：单次请求超时从 15s 提到 **30s**。

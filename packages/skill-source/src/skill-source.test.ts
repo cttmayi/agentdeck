@@ -626,9 +626,11 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
   })
 
   test('超过递归深度上限的目录被记下，而不是悄悄漏掉', async () => {
+    // ★ 分批第 184 批：深度上限从 4 放到 **8**（真实仓库里 references/notes/2025/q1/x.md 很常见）
+    //   ⇒ 这里要造一条**超过 8 层**的路径才测得到
     const gh = fakeGithub({
       'd/SKILL.md': '# 正文',
-      'd/a/b/c/d/e/deep.md': '太深了',
+      'd/a/b/c/d/e/f/g/h/i/deep.md': '太深了',
     })
     const r = await resolveGithubUrl('https://github.com/o/r/tree/main/d', {}, { fetchImpl: gh.impl })
     assert.equal(r.included.length >= 1, true)
