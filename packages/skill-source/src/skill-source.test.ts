@@ -630,7 +630,7 @@ describe('来源：GitHub（注入假 fetch，不联网）', () => {
     //   ⇒ 这里要造一条**超过 8 层**的路径才测得到
     const gh = fakeGithub({
       'd/SKILL.md': '# 正文',
-      'd/a/b/c/d/e/f/g/h/i/deep.md': '太深了',
+      'd/references/a/b/c/d/e/f/g/h/i/deep.md': '太深了',
     })
     const r = await resolveGithubUrl('https://github.com/o/r/tree/main/d', {}, { fetchImpl: gh.impl })
     assert.equal(r.included.length >= 1, true)
@@ -1090,12 +1090,47 @@ describe('★ 支持文件超上限：跳过而不是整单失败（分批第 18
     const res = await resolveSkillSource({ kind: 'url', url: 'https://github.com/o/r' }, {}, { fetchImpl: impl })
     // 统一入口回的是 `{body, files, slug…}`（不是 `skillMd`）
     assert.equal(res.body.includes('with-assets'), true, '技能本体要装上')
-    // 跳过的项要如实记下来（不静默）：按名字在整个解析结果里找——跳过清单的字段名
-    // 随 `finish()` 的实现是 `ignored`/`notes` 都可能，钉"名字出现过"更稳。
+    // 这张图**不该被装进来**（超上限 ⇒ 软跳过）；统一入口的结果里只有 `files`，
+    // 跳过清单在 `resolveGithubUrl` 那一层（下面 @185 的用例钉了"不静默"那一半）。
     assert.equal(
-      JSON.stringify(res).includes('social-preview'),
-      true,
-      '被跳过的配图要如实记下来（不静默）',
+      Object.keys(res.files).some((p) => p.includes('social-preview')),
+      false,
+      '超上限的配图不该进技能',
     )
+  })
+})
+
+describe('★ 顶层目录按 SKILL.md 提及与否取舍（分批第 185 批；使用者定）', () => {
+  test('★★★ references/scripts/templates 无条件收；其它顶层目录**提及才收**，没提的不下并记下来', async () => {
+    const gh = fakeGithub({
+      'SKILL.md': '---\nname: gated\ndescription: 取舍夹具\n---\n\n# x\n\n流程见 prompts/flows。\n',
+      'references/a.md': '参考',
+      'scripts/run.sh': 'echo hi',
+      'templates/t.md': '模板',
+      'prompts/flows/create.md': '被提到 ⇒ 要收',
+      'docs/social-preview.png': '没被提到 ⇒ 不收',
+    })
+    const r = await resolveGithubUrl(
+      'https://github.com/o/r',
+      {},
+      { fetchImpl: gh.impl, onlyMentionedTopDirs: true },
+    )
+    // 统一入口回的是 `{body, files, ignored, ...}`（没有 `included`/`others`）
+    const paths = Object.keys(r.files).join(' ')
+    // 三个标准目录无条件在
+    assert.match(paths, /references\/a\.md/)
+    assert.match(paths, /scripts\/run\.sh/)
+    assert.match(paths, /templates\/t\.md/)
+    // 提到过的 prompts 收
+    assert.match(paths, /prompts\/flows\/create\.md/)
+    // 没提到的 docs 不收，而且**如实记下来**（不许静默）
+    assert.equal(/docs\/social-preview/.test(paths), false, '没提到的目录不该下载')
+    assert.equal(
+      r.ignored.some((i) => i.path.includes('docs') && /没有提到/.test(i.reason)),
+      true,
+      '没下载的目录要出现在忽略清单里（不静默）',
+    )
+    // 一个字节都没为它发过请求
+    assert.equal(gh.calls.some((u) => u.includes('contents/docs')), false)
   })
 })

@@ -7458,6 +7458,9 @@ async function injectedSkillsOf(
             ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
             githubToken: options.githubToken ?? process.env['AGENTDECK_GITHUB_TOKEN'] ?? null,
             ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
+            // ★ 分批第 185 批（使用者定）：顶层非标准目录"SKILL.md 提到才下载"——
+            //   只在**人装技能**这条路上启用（同步工具按清单抓取，不适用）。
+            onlyMentionedTopDirs: true,
           },
         )
 

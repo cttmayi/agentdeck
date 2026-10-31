@@ -233,6 +233,28 @@ export function githubRequestTarget(
 /** 递归时跳过的目录名：版本库内部结构与依赖，都不是技能内容。 */
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.github'])
 
+/**
+ * ★ 分批第 185 批（使用者定："保证下载 references、scripts 和 templates；根目录下**其他目录**
+ * 只要 SKILL.md 里**搜得到那个名字**就下载，搜不到就不下载"）。
+ *
+ * 这三个是社区事实标准里的"支持文件"目录，**无条件收**（SKILL.md 里不一定逐条列）。
+ * 其余顶层目录一律按"名字被 SKILL.md 提到"来决定——不要求逐文件罗列，只要求**提到过目录名**。
+ */
+export const ALWAYS_INCLUDED_DIRS = new Set(['references', 'scripts', 'templates'])
+
+/**
+ * SKILL.md 里"提到过这个目录名"吗（大小写不敏感、**按词**匹配而不是子串）。
+ *
+ * ⚠️ 为什么按词：`docs` 这种短名字很容易是别的词的一部分（`docstring`），子串匹配会把
+ * 一个没被提到的目录误判成"提到了"——那会把 `docs/` 里的配图又拖进来（正是这一批要挡的）。
+ */
+export function mentionsDirName(skillMd: string, dirName: string): boolean {
+  if (dirName === '') return false
+  const escaped = dirName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 前后不能是字母/数字/下划线/连字符（`references/`、`./references`、"references" 都算）
+  return new RegExp(`(^|[^\\p{L}\\p{N}_-])${escaped}([^\\p{L}\\p{N}_-]|$)`, 'iu').test(skillMd)
+}
+
 // ─────────────────────────────────────────────────────────────
 // 错误
 // ─────────────────────────────────────────────────────────────
@@ -304,6 +326,12 @@ export interface ResolveDeps {
    * 见 `parseGithubProxy` 上面那段：它把第三方拉进了信任链，所以**默认不用**。
    */
   githubProxy?: string | null
+  /**
+   * ★ 分批第 185 批（使用者定）：顶层非标准目录**按 SKILL.md 是否提到**取舍。
+   * 默认关——只在"人在界面上装一个技能"那条路（daemon 的 install 路由）打开；
+   * 同步工具按清单抓取，不受这条影响。
+   */
+  onlyMentionedTopDirs?: boolean
   /**
    * 路径过滤（清单里声明的 include/exclude）。不给 = 全取。
    * 只影响 **GitHub 那条路**（本地目录那条路是使用者自己的东西，不替他挑）。
@@ -1165,6 +1193,14 @@ export async function resolveGithubUrl(
   const entries = await listGithubDir(target, target.dir, deps)
   const names = entries.map((e) => e.name)
   const skillMdEntry = entries.find((e) => e.name === 'SKILL.md' && e.type === 'file')
+  /**
+   * ★ 分批第 185 批：**先预读 SKILL.md**——顶层目录要不要收，按它的正文判。
+   * 不大（`MAX_SKILL_BYTES` 以内），预读一次不影响什么；不预读就只能"先全下再判"，那代价大得多。
+   */
+  const skillMdPreview =
+    skillMdEntry === undefined
+      ? ''
+      : (await fetchFile(skillMdEntry, target, deps).catch(() => null))?.toString('utf8') ?? ''
 
   if (!skillMdEntry) {
     const hints = [describeDir(names), skillMdCaseHint(names)].filter(Boolean)
@@ -1195,6 +1231,20 @@ export async function resolveGithubUrl(
     for (const entry of list) {
       const rel = relOf(entry.path)
       if (entry.type === 'dir') {
+        // ★ 分批第 185 批：**根目录（深度 0）下的非标准目录**——SKILL.md 提到过才收
+        // ⚠️ 只在"没有显式 include/exclude 清单"时按提及与否取舍：清单是维护者声明的
+        //    "哪些文件是必须的"，那时他说了算，不该再被提及规则二次裁剪。
+        // ★ 只在**人装技能**这条路上按"提及与否"取舍（`deps.onlyMentionedTopDirs`）：
+        //   同步工具是按清单（include/exclude）抓的，那套是维护者声明的集合，不该被二次裁剪。
+        if (depth === 0 && deps.onlyMentionedTopDirs === true && !ALWAYS_INCLUDED_DIRS.has(entry.name)) {
+          if (!mentionsDirName(skillMdPreview, entry.name)) {
+            ignored.push({
+              path: rel,
+              reason: 'SKILL.md 没有提到这个目录 ⇒ 未下载（references/scripts/templates 不受此限）',
+            })
+            continue
+          }
+        }
         if (SKIP_DIRS.has(entry.name)) {
           ignored.push({ path: rel, reason: '版本库/依赖目录，不属于技能内容' })
           continue
