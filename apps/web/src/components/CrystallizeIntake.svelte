@@ -4,6 +4,10 @@
    * §12.22/§12.25：换 UI 之前已立好状态锚点、入口断言与组间隔离，这批只换目标屏内部。
    * ⚠️ 语言与 persona 轨**不问**——`POST /api/crystallize/draft` 没有对应入参，问了就是死接口。
    */
+  // ★ 分批第 194 批：问答的**气泡形状**与聊天页同一份（`@agentdeck/ui` 的 ChatBubble）。
+  //   原来这里是第三套（`.qa-msg`：助手 = 深底、人 = 虚线框 + 左缩进），聊天页却是
+  //   "人靠右、助手满宽"。使用者连提两次「应该像聊天那页的对话方式」，所以收成一份。
+  import { ChatBubble } from '@agentdeck/ui/components'
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
 
@@ -144,6 +148,9 @@
   })
   const skills = $derived(blank ? blankSkills : (targets?.loadedSkills ?? []))
   const stats = $derived(targets?.materialStats ?? null)
+  /** 气泡上方那行小字里的"谁在说"（与聊天页 `chat.you` 同一位置）。 */
+  const speaker = $derived($t('crystallize.speakerDrafter'))
+  const you = $derived($t('crystallize.speakerYou'))
 
   function pickStart(next: 'new' | 'update'): void {
     kind = next
@@ -190,16 +197,14 @@
   {:else}
     <!-- ★ 分批第 165 批：空白起也有第一问（新建 / 改一份已有的），只是不问"从哪来" -->
     {#if stage !== 'start'}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">这次要沉淀成什么？</p>
-      </div>
-      <div class="qa-msg user" data-msg-role="user">
-        <p class="qa-text">{startLabel}</p>
-      </div>
+      </ChatBubble>
+      <ChatBubble role="user" who={you} text={startLabel} />
     {/if}
 
     {#if stage === 'start'}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">这次要沉淀成什么？</p>
         <div class="intake-choices">
           <button type="button" class="intake-choice" onclick={() => pickStart('new')}>
@@ -214,9 +219,9 @@
             </button>
           {/if}
         </div>
-      </div>
+      </ChatBubble>
     {:else if stage === 'detail'}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">是哪一份？</p>
         <div class="intake-choices">
           {#if kind === 'update'}
@@ -236,17 +241,15 @@
             {/each}
           {/if}
         </div>
-      </div>
+      </ChatBubble>
     {:else if stage === 'purpose'}
       {#if detailLabel !== ''}
-        <div class="qa-msg" data-msg-role="assistant">
+        <ChatBubble role="agent" who={speaker}>
           <p class="intake-q">是哪一份？</p>
-        </div>
-        <div class="qa-msg user" data-msg-role="user">
-          <p class="qa-text">{detailLabel}</p>
-        </div>
+        </ChatBubble>
+        <ChatBubble role="user" who={you} text={detailLabel} />
       {/if}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">
           {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
         </p>
@@ -271,17 +274,15 @@
         <div class="intake-actions">
           <button type="button" class="primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
         </div>
-      </div>
+      </ChatBubble>
     {:else if stage === 'blankMaterial'}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">
           {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
         </p>
-      </div>
-      <div class="qa-msg user" data-msg-role="user">
-        <p class="qa-text">{kind === 'new' ? purpose : feedback}</p>
-      </div>
-      <div class="qa-msg" data-msg-role="assistant">
+      </ChatBubble>
+      <ChatBubble role="user" who={you} text={kind === 'new' ? purpose : feedback} />
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">材料（可选）：给起草者的资料，可以一份一份加</p>
         {#if blankMaterials.length > 0}
           <ul class="mat-list" data-blank-materials>
@@ -318,38 +319,34 @@
         <p class="faint small">
           这次没有来源 run：材料只有你给的这些（可以零份、可以多份）。起草完之后还能在右栏继续加。
         </p>
-      </div>
+      </ChatBubble>
     {:else}
       <!-- ready：前面几问都已答 ⇒ 按"问 / 答"两条消息回放，最后一条是**开始提炼** -->
       {#if detailLabel !== ''}
-        <div class="qa-msg" data-msg-role="assistant">
+        <ChatBubble role="agent" who={speaker}>
           <p class="intake-q">是哪一份？</p>
-        </div>
-        <div class="qa-msg user" data-msg-role="user">
-          <p class="qa-text">{detailLabel}</p>
-        </div>
+        </ChatBubble>
+        <ChatBubble role="user" who={you} text={detailLabel} />
       {/if}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">
           {kind === 'new' ? $t('crystallize.purposeLabel') : $t('crystallize.userFeedbackLabel')}
         </p>
-      </div>
-      <div class="qa-msg user" data-msg-role="user">
-        <p class="qa-text">{kind === 'new' ? purpose : feedback}</p>
-      </div>
+      </ChatBubble>
+      <ChatBubble role="user" who={you} text={kind === 'new' ? purpose : feedback} />
       {#if blank}
-        <div class="qa-msg" data-msg-role="assistant">
+        <ChatBubble role="agent" who={speaker}>
           <p class="intake-q">材料（可选）：给起草者的资料</p>
-        </div>
-        <div class="qa-msg user" data-msg-role="user">
-          <p class="qa-text">
-            {blankMaterials.length === 0
-              ? '（跳过）'
-              : `${blankMaterials.length} 份：${blankMaterials.map((m) => (m.text.length > 20 ? `${m.text.slice(0, 20)}…` : m.text)).join('、')}`}
-          </p>
-        </div>
+        </ChatBubble>
+        <ChatBubble
+          role="user"
+          who={you}
+          text={blankMaterials.length === 0
+            ? '（跳过）'
+            : `${blankMaterials.length} 份：${blankMaterials.map((m) => (m.text.length > 20 ? `${m.text.slice(0, 20)}…` : m.text)).join('、')}`}
+        />
       {/if}
-      <div class="qa-msg" data-msg-role="assistant">
+      <ChatBubble role="agent" who={speaker}>
         <p class="intake-q">开始提炼？</p>
         <dl class="intake-summary">
           <dt>沉淀成</dt><dd>{startLabel}</dd>
@@ -369,7 +366,7 @@
           >
           <button type="button" class="ghost" onclick={() => (stage = 'start')}>重答</button>
         </div>
-      </div>
+      </ChatBubble>
     {/if}
   {/if}
 </div>
@@ -381,19 +378,9 @@
    * 但它们现在长在每条问题消息里，读起来就是一段对话。
    */
   .intake { display: flex; flex-direction: column; gap: var(--sp-2); }
-  .qa-msg {
-    background: var(--surface-2, #f4f4f5);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2) var(--sp-3);
-  }
-  .qa-msg.user {
-    background: var(--surface);
-    border-style: dashed;
-    margin-left: var(--sp-6, 2rem);
-  }
-  .qa-msg .intake-q { margin-bottom: var(--sp-2); }
-  .qa-text { margin: 0; white-space: pre-wrap; }
+  /* ★ 分批第 194 批：`.qa-msg` / `.qa-text` 删了——气泡的观感搬进 `ChatBubble`
+     （聊天页与沉淀页共用一份）。这里只剩"问题行与下面的选项之间那一格间距"。 */
+  .intake-q { margin-bottom: var(--sp-2); }
   .intake-q { font-size: var(--fs-base); color: var(--text); margin: 0; }
   .intake-choices { display: flex; flex-direction: column; gap: var(--sp-1); }
   .intake-choice {

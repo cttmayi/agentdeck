@@ -4,6 +4,8 @@
   import MainArea from '../components/MainArea.svelte'
   import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
+  // ★ 分批第 194 批：气泡形状抽到 `@agentdeck/ui`（沉淀页共用同一份，见 ChatBubble 头注释）
+  import { ChatBubble } from '@agentdeck/ui/components'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
@@ -644,8 +646,7 @@
         {/if}
         {#each activeTurns as turn (turn.id)}
           <article class="turn">
-            <div class="who faint small">{$t('chat.you')}</div>
-            <div class="bubble user">{turn.userText}</div>
+            <ChatBubble role="user" who={$t('chat.you')} text={turn.userText} />
 
             {#if turn.error !== null}
               <p class="notice warn">
@@ -679,7 +680,7 @@
                   {/if}
                 </div>
                 {#if turn.output}
-                  <article class="bubble agent markdown">{@html renderedFor(turn)}</article>
+                  <ChatBubble role="agent" html={renderedFor(turn)} />
                 {:else if turn.status !== null && turn.status !== 'completed'}
                   <!-- ★ 状态走词表（`term.runStatus.*`），**不摊协议英文值**：
                        原来这里直接显示 `failed` / `cancelled`，中文界面上
@@ -698,7 +699,7 @@
         {#if pendingText !== ''}
           <article class="turn">
             <div class="who faint small">{$t('chat.you')}</div>
-            <div class="bubble user pending">{pendingText}</div>
+            <ChatBubble role="user" pending text={pendingText} />
             <p class="faint small">{$t('chat.sending')}</p>
           </article>
         {/if}
@@ -919,56 +920,10 @@
     gap: var(--sp-2);
   }
 
-  /**
-   * ⚠️ 圆角用令牌（8px），不用那种 100px 的"胶囊"：
-   *    气泡动辄好几行，大圆角在多行文本上会变成两条夸张的弧线，
-   *    看起来像渲染坏了（项目里已经因为同一个原因改过一次 chips）。
-   */
-  .bubble {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2) var(--sp-3);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-base);
-    white-space: pre-wrap;
-    word-break: break-word;
-    min-width: 0;
-  }
-
-  .bubble.user {
-    background: var(--surface-2);
-    align-self: flex-end;
-    max-width: 85%;
-  }
-
-  .bubble.agent {
-    background: var(--surface);
-  }
-
-  .bubble.pending {
-    opacity: 0.6;
-  }
-
-  /* Markdown 气泡里不要 pre-wrap——块级元素自己管换行，留着会多出一堆空行 */
-  .bubble.markdown {
-    white-space: normal;
-  }
-
-  .bubble.markdown :global(p) {
-    margin: 0 0 var(--sp-2);
-  }
-
-  .bubble.markdown :global(p:last-child) {
-    margin-bottom: 0;
-  }
-
-  .bubble.markdown :global(pre) {
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    padding: var(--sp-2);
-    overflow-x: auto;
-  }
+  /* ★ 分批第 194 批：`.bubble*` 那一族样式搬进了 `@agentdeck/ui` 的 `ChatBubble`
+     （沉淀页共用同一份）。这里只剩 `.turn` / `.who` 的布局——它们管的是"谁+气泡"这一层的
+     排布，而气泡自己的观感（圆角令牌、user 靠右 85%、agent 满宽、Markdown 内边距）
+     只有一个出处。 */
 
   .stop {
     margin-left: auto;

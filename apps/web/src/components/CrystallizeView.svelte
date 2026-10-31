@@ -25,7 +25,9 @@
    *   skill-draft + 无 issueId），进度只在这页，关页即离场、重开按 source 找回。
    */
 
-  import { FoldSection } from '@agentdeck/ui/components'
+  // ★ 分批第 194 批：气泡形状与聊天页**同一份**（`packages/ui` 的 ChatBubble）——
+  //   沉淀页原来是第二套（`.qa-msg`）、第三套（抽屉分节），于是"同一个对话"在两页里长得不一样。
+  import { ChatBubble, FoldSection } from '@agentdeck/ui/components'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { go, goCrystallize } from '../lib/view.ts'
@@ -353,8 +355,17 @@
    * 剩下的唯一判据是 `validateArtifactFiles`（frontmatter / 必填节 / 引用 / 连线平衡…）。
    * `○` 只在还没读到产出时出现——画 ✓ 或 ✗ 都是撒谎。
    */
+  /**
+   * ★ 分批第 194 批：**refused 不是"没通过"**。
+   *
+   * 起草者判定"这里没有可沉淀的内容"时写的是 `REFUSED.md`，而 `validation.ok` 因此为 false
+   * ⇒ 结论条原来画 `✗` 并写「体检发现 1 处问题 · 校验未通过（1）」，看起来像**审核不通过**。
+   * 使用者当场问"当前还有审核吗，为什么还有提示…"。它是**结论**（"这次没什么可沉淀的"），
+   * 所以标记用 `–`（中性）而不是 `✗`（失败），文案走 `crystallize.refusedTitle`。
+   */
+  $: refused = artifacts !== null && artifacts.mode === 'refused'
   $: conclusionMark =
-    artifacts === null ? '○' : artifacts.validation.ok ? '✓' : '✗'
+    artifacts === null ? '○' : refused ? '–' : artifacts.validation.ok ? '✓' : '✗'
   $: conclusionBad = conclusionMark === '✗'
 
   /**
@@ -445,6 +456,31 @@
         : undefined
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
+
+  /**
+   * 「你那一轮」说的话（见时间线里 `data-crystal-request` 那段注释）。
+   *
+   * ⚠️ 作用描述与反馈**不落库**（`crystallizeTarget` 只记 new/update + skillId），所以从
+   *    深链恢复一条草稿时这两截是空的 ⇒ 只说"新建一份技能"。宁可少说，不要编。
+   */
+  $: requestLine = (() => {
+    const head =
+      targetKind === 'new'
+        ? $t('crystallize.requestNew')
+        : $t('crystallize.requestUpdate', { skill: skillNameFor(selectedSkillId) })
+    const detail = targetKind === 'new' ? purpose.trim() : userFeedback.trim()
+    if (detail === '') {
+      // 空白起的材料是"我给它的东西"，说在这儿比单独一行更像对话
+      if (blankStart && blankMaterials.length > 0) {
+        return $t('crystallize.requestWithMaterials', {
+          head,
+          n: String(blankMaterials.length),
+        })
+      }
+      return head
+    }
+    return `${head}：${detail}`
+  })()
 
   /** 状态徽标的字（共享词表，与任务详情的 run 徽标同一份）。 */
   function statusLabel(status: string): string {
@@ -1304,55 +1340,34 @@
       ③ **过程默认收起、按钮是一行小字**：「它怎么做的」是回看时才要的，不是读产出时要的。
   -->
   {#snippet draftTurn()}
-    <div class="draft-turn" data-draft-turn>
-      <p class="draft-turn-head" data-draft-turn-head>
+    <!--
+      ★ 分批第 194 批：形状与聊天页**逐行对齐**（`Chat.svelte` 的 turn 是同一套）：
+        · 跑着 → `who`（起草者 · 正在写 [停止]）+ 实时日志（与聊天页 `RunLog` 同位）；
+        · 写完 → `who`（起草者 · 写好了 · 3 个文件）+ 气泡（Markdown）+ 一行小字「它怎么做的」；
+        · 失败 → `who`（起草者 · 这次没写成）+ 气泡里是原因与动作。
+      这套形状来自 `@agentdeck/ui` 的 `ChatBubble`，两页共用一份定义。
+    -->
+    <ChatBubble
+      role="agent"
+      who={`${$t('crystallize.speakerDrafter')} · ${
+        draftLiveNow
+          ? $t('crystallize.draftTurnLive')
+          : draftStatus === 'failed'
+            ? $t('crystallize.draftFailed')
+            : draftStatus === 'cancelled'
+              ? $t('crystallize.draftStopped')
+              : $t('crystallize.draftTurnDone')
+      }${
+        !draftLiveNow && draftStatus === 'completed' && fileCount > 0
+          ? ` · ${fileCount} ${$t('crystallize.filesUnit')}`
+          : ''
+      }`}
+    >
+      {#snippet whoExtra()}
         {#if draftLiveNow}
-          <span class="draft-turn-live">{$t('crystallize.draftTurnLive')}</span>
-        {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
-          <span class="draft-turn-bad">
-            {draftStatus === 'failed' ? $t('crystallize.draftFailed') : $t('crystallize.draftStopped')}
-          </span>
-          {#if draftFailedReason !== ''}
-            <span class="faint small">：{draftFailedReason}</span>
-          {/if}
+          <!-- ★ 分批第 150 批：停止在这条消息上（它说明的正是"这一轮跑到哪了"） -->
+          <button class="ghost small stop" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
         {:else}
-          <span>{$t('crystallize.draftTurnDone')}</span>
-          {#if fileCount > 0}
-            <span class="faint small">· {fileCount} {$t('crystallize.filesUnit')}</span>
-          {/if}
-        {/if}
-      </p>
-
-      {#if draftLiveNow}
-        <!--
-          跑着的时候**过程就是这条消息的正文**——它确实正在说话，只不过说的是
-          "我在读素材 / 我写了 SKILL.md"。默认收起的话，跑着的这几十秒里这片区域是空的，
-          人只会以为卡住了（分批第 29 批量到过这个症状）。
-        -->
-        <div class="log-box">
-          <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-        </div>
-        <div class="row-end msg-actions" data-msg-actions>
-          <button class="ghost small" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
-        </div>
-      {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
-        <div class="row-end msg-actions" data-msg-actions>
-          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-        </div>
-      {:else if draftFinalState === 'loading'}
-        <div class="skeleton"></div>
-      {:else if draftFinalState === 'empty'}
-        <div class="empty">
-          <strong>{$t('tasks.noTextOutput')}</strong>
-          {$t('tasks.noTextOutputHint')}
-        </div>
-      {:else}
-        <article class="markdown draft-final">{@html renderMarkdown(draftFinalText)}</article>
-      {/if}
-
-      {#if !draftLiveNow}
-        <!-- 过程：一行小字按钮；展开之后才出现日志与 run id（run id 只在这里露脸） -->
-        <div class="draft-turn-foot">
           <button
             type="button"
             class="draft-turn-toggle"
@@ -1361,15 +1376,39 @@
           >
             {draftLogOpen ? $t('crystallize.draftProcessHide') : $t('crystallize.draftProcessShow')}
           </button>
-        </div>
-        {#if draftLogOpen}
-          <p class="faint small draft-turn-runid">run {runShort}…</p>
-          <div class="log-box">
-            <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
-          </div>
         {/if}
+      {/snippet}
+
+      {#if draftLiveNow}
+        <div class="log-box">
+          <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+        </div>
+      {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
+        {#if draftFailedReason !== ''}
+          <p class="draft-turn-reason">{draftFailedReason}</p>
+        {/if}
+        <div class="row-end msg-actions" data-msg-actions>
+          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+        </div>
+      {:else if draftFinalState === 'loading'}
+        <div class="skeleton"></div>
+      {:else if draftFinalState === 'empty'}
+        <p class="empty">
+          <strong>{$t('tasks.noTextOutput')}</strong>
+          {$t('tasks.noTextOutputHint')}
+        </p>
+      {:else}
+        {@html renderMarkdown(draftFinalText)}
       {/if}
-    </div>
+
+      {#if !draftLiveNow && draftLogOpen}
+        <!-- run id 只在这里露脸（排查用），不进抬头 -->
+        <p class="faint small draft-turn-runid">run {runShort}…</p>
+        <div class="log-box">
+          <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
+        </div>
+      {/if}
+    </ChatBubble>
   {/snippet}
 
   <!-- 目标摘要（只读）：起草态的「依据」里用它——"这一版是照着什么做的" -->
@@ -1463,7 +1502,16 @@
     <!-- ★ 分批第 106 批（U3a）：中间栏套上消息流外壳。这一批只加外壳、不换内容（§12.27）。
          ⚠️ 外壳必须接住高度链：两层都显式写成 flex 列 + flex:1 + min-height:0。 -->
     <div class="crystal-chat">
-      <div class="crystal-msg" data-msg-role="assistant">
+      <!--
+        ★ 分批第 194 批：这一层的 `data-msg-role` 从 `assistant` 改成 `stream`。
+
+        它是 U3a 那时的**外壳**（"消息流的容器"），却挂着 `assistant` 这个角色——而第 194 批
+        起时间线里真的有助手消息了（`[data-draft-turn-msg]`），于是探针的
+        `.crystal-msg[data-msg-role="assistant"] ...` 全都会先命中这个外壳，再在里面
+        找错的那一条（实测：量"起草那一轮的抬头"拿到的是"你"）。容器不是消息，
+        给它自己的名字。
+      -->
+      <div class="crystal-msg" data-msg-role="stream">
         <div class="crystal-flow" data-crystallize-step={step}>
       <!-- ★ 分批第 140 批（U4a）：步骤条已删（§12.6：「3 步步骤条 → 删除」）。
            进度由消息流的位置表达；状态在顶栏的状态徽标里（见 MainArea 的 sub 片段）。 -->
@@ -1605,21 +1653,35 @@
            下面是栏脚输入条；人回答之后平台起下一条 run 并接上会话。 -->
       {#if questions !== ''}
         <div class="crystal-msg" data-msg-role="assistant" data-crystal-questions>
-          <article class="markdown draft-final">{@html renderMarkdown(questions)}</article>
+          <ChatBubble
+            role="agent"
+            who={$t('crystallize.speakerDrafter')}
+            html={renderMarkdown(questions)}
+          />
           <p class="faint small">它在等你回答——直接写在下面的输入条里（一行也行，多行也行）。</p>
         </div>
       {/if}
-      <!-- ★ 分批第 162 批（§12.14）：对话里那行「我当时给了它什么」——与右栏清单同一份数据。
-           ★ 分批第 193 批：它单独是一条**系统行**（原来和起草那一块挤在同一条消息里，
-           而那一条的消息角色写着 `system` ⇒ 起草那一轮被当作"系统消息"渲染，与"它在说话"矛盾）。 -->
-      {#if materialCountLine !== ''}
-        <div class="crystal-msg" data-msg-role="system">
+      <!--
+        ★ 分批第 194 批：**你把话说清楚了，它才能开始**——这条是"你那一轮"。
+
+        改之前起草一开始，目标屏那串问答（这次要沉淀成什么 / 作用描述…）就整块消失了：
+        中间栏只剩"起草 run 01M6…"，读起来像任务创建完就没有前因后果了。而沉淀是对话，
+        一段对话的第一条应该是**人说的话**。这里就是那句：
+          · 新建 → 「新建一份技能：<作用描述>」
+          · 更新 → 「优化「<哪一份技能>」：<希望改什么>」
+        作用描述与反馈**不落库**（`purpose` 只影响起草 prompt），所以从深链恢复的草稿上
+        这一条只说"新建一份技能"——那是实话，不编。
+      -->
+      <div class="crystal-msg" data-msg-role="user" data-crystal-request>
+        <ChatBubble role="user" who={$t('crystallize.speakerYou')} text={requestLine} />
+        <!-- ★ 分批第 162 批（§12.14）：一行说清「我当时给了它什么」（与右栏清单同一份数据）。 -->
+        {#if materialCountLine !== ''}
           <p class="faint small crystal-material-line" data-crystal-material-line>
             {materialCountLine}
           </p>
-        </div>
-      {/if}
-      <!-- ★ 分批第 193 批：起草这一轮是**一条助手消息**（`detail` 见 `draftTurn` 上方的注释）。 -->
+        {/if}
+      </div>
+      <!-- ★ 分批第 193 批：起草这一轮是一条**助手消息**（见 `draftTurn` 上方的注释）。 -->
       <div class="crystal-msg" data-msg-role="assistant" data-draft-turn-msg>
         {@render draftTurn()}
       </div>
@@ -1682,6 +1744,11 @@
             <span class="bar-text">
               {#if artifacts === null}
                 <span class="muted">…</span>
+              {:else if refused}
+                <!-- ★ 分批第 194 批：**这是结论，不是失败**（`REFUSED.md`）。
+                     原来它走的是"体检没通过"那一支 ⇒ 红条写着「体检发现 1 处问题 ·
+                     校验未通过（1）」，看起来像审核没过。 -->
+                <strong>{$t('crystallize.refusedTitle')}</strong>
               {:else if artifacts.validation.ok}
                 <strong>{$t('crystallize.checkPassed')}</strong>
                 <span class="faint small">（{$t('crystallize.checkTitle')}）</span>
@@ -1690,10 +1757,14 @@
               {/if}
               {#if artifacts}
                 <span class="bar-sep">·</span>
-                {#if artifacts.validation.ok}
+                {#if artifacts.validation.ok || refused}
                   <span class="muted">
                     {fileCount} {$t('crystallize.filesUnit')}
-                    {#if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
+                    {#if refused}
+                      <!-- ⚠️ 拒绝的草稿**不画对比**：它只有一份 REFUSED.md，而基线是"当前技能"，
+                           算出来的 `+3 −0` 是拿"拒绝说明"跟技能正文比的数字，纯噪音。
+                           （探针实测到了它：`– 起草者判定… · 1 个文件 · 对比当前版本 +3 −0`。） -->
+                    {:else if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
                       · {diff.against === 'previous'
                         ? $t('crystallize.vsPreviousShort')
                         : diff.against === 'original'
@@ -1709,9 +1780,10 @@
                     {/if}
                   </span>
                 {:else}
-                  <span class="muted">
-                    {$t('crystallize.problemsTitle')}（{artifacts.validation.problems.length}）
-                  </span>
+                  <!-- ★ 分批第 194 批：这里原来又写一遍「校验未通过（N）」——紧跟在前面的
+                       「体检发现 N 处问题」后面，等于同一件事说两遍，而且"校验"这个说法让人
+                       以为还有一道审核。改成指路（问题清单在哪看），不复述数字。 -->
+                  <span class="muted">{$t('crystallize.problemsWhere')}</span>
                 {/if}
                 <span class="bar-sep">·</span>
                 <span class="muted">
@@ -1837,19 +1909,18 @@
           （结论条在 artifacts 还没到时也要能显示审核那部分），所以这里单独成一个 if。
         -->
         {#if artifacts && artifacts.mode === 'refused'}
-          <section class="drawer-section">
-            <h3>{$t('crystallize.reviewTitle')}</h3>
-            <div class="notice warn">
-              <strong>{$t('crystallize.refusedTitle')}</strong>
-              <p>{artifacts.refusalReason ?? ''}</p>
-              <div class="row-end">
-                <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-                <button class="ghost small" onclick={() => void abandonReview()}>
-                  {$t('crystallize.abandon')}
-                </button>
-              </div>
+          <!-- ★ 分批第 194 批：它原来是「审阅草稿」抽屉分节里的一个黄条（又是任务面板的形状）。
+               拒绝是**它说的话**，所以现在就是一条消息（气泡）：同一句话、同一个位置，
+               只是不再顶着"审阅草稿"这个抬头。 -->
+          <ChatBubble role="agent" who={$t('crystallize.speakerDrafter')}>
+            <p class="draft-turn-reason">{artifacts.refusalReason ?? ''}</p>
+            <div class="row-end">
+              <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+              <button class="ghost small" onclick={() => void abandonReview()}>
+                {$t('crystallize.abandon')}
+              </button>
             </div>
-          </section>
+          </ChatBubble>
         {/if}
 
         <!-- ★ 分批第 153 批（§12.12 / §12.53 选项 2）：编辑器抽成 `CrystallizeDraftEditor`，
@@ -2020,8 +2091,10 @@
     min-height: 0;
   }
 
-  /* 系统消息（素材那一行）：自然高度、不吃剩余空间 */
-  .crystal-msg[data-msg-role='system'] {
+  /* 「你那一轮」+ 素材那一行、以及起草那一轮：都自然高度、不吃剩余空间。
+     ★ 分批第 194 批：`data-msg-role="system"` 那条消失了（素材行并进了"你那一轮"），
+     换成 user / assistant 两条——它们的 flex 必须仍在下面那两条规则里管住。 */
+  .crystal-msg[data-msg-role='user'] {
     flex: 0 0 auto;
   }
   /**
@@ -2231,50 +2304,17 @@
   }
   /* 带日志的那一块：吃剩余高度（它是这个格子里唯一"越长越好"的东西） */
   /* ══════════════════════════════════════════════════════════════════
-     ★ 分批第 193 批：起草那一轮 = 一条助手消息（抬头是一句人话，过程收在末尾）
+     ★ 分批第 194 批：气泡本身的观感搬到 `@agentdeck/ui` 的 `ChatBubble`（两页共用），
+     这里只剩三样沉淀**特有**的小东西：过程开关、失败原因、run id 注脚。
+     ⚠️ 193 批那套 `.draft-turn*`（抬头/脉动/末尾一行）随"抬头改成 who 行"一起删——
+        形状让给了聊天页那一套，不再有两份。
      ══════════════════════════════════════════════════════════════════ */
-  .draft-turn {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
-    min-width: 0;
-  }
-  /* 抬头：小字、灰。它说的是"我写好了 / 我正在写"，不是"这条 run 的状态是 X"。 */
-  .draft-turn-head {
-    margin: 0;
-    font-size: var(--fs-sm);
-    color: var(--text-muted);
-    display: flex;
-    gap: var(--sp-1);
-    flex-wrap: wrap;
-    align-items: baseline;
-  }
-  /* 正在写：让它**看得出在动**（一次脉动），但不要转圈动画——那是加载态的语言 */
-  .draft-turn-live {
-    color: var(--text);
-  }
-  .draft-turn-live::after {
-    content: '…';
-    animation: draft-turn-blink 1.4s steps(3, end) infinite;
-  }
-  @keyframes draft-turn-blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.25; }
-  }
-  .draft-turn-bad {
-    color: var(--danger, #b42318);
-  }
-  /* 过程那一行：**靠左的小字按钮**（不是 h3 里的动作按钮——那是任务面板的做法） */
-  .draft-turn-foot {
-    display: flex;
-    justify-content: flex-start;
-  }
-  /* ⚠️ `.linkish` 在本页只有 `.new-version-bar .linkish` 那一份作用域样式（不是全局类），
-     所以这里必须自带一份，否则按钮会是个原生灰按钮——那正是"看起来像任务控件"的一半。 */
+  /* 过程开关：`who` 行里的一行小字（不是 h3 里的动作按钮——那是任务面板的做法） */
   .draft-turn-toggle {
     background: none;
     border: 0;
     padding: 0;
+    margin-left: auto;
     color: var(--text-faint);
     cursor: pointer;
     font-size: var(--fs-xs);
@@ -2284,8 +2324,16 @@
   .draft-turn-toggle:hover {
     color: var(--text-muted);
   }
+  /* 「停止」在 who 行右侧（与聊天页 `.stop` 同一位置、同一作用） */
+  .stop {
+    margin-left: auto;
+  }
+  .draft-turn-reason {
+    margin: 0 0 var(--sp-2);
+    white-space: pre-wrap;
+  }
   .draft-turn-runid {
-    margin: 0;
+    margin: var(--sp-2) 0 0;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
   }

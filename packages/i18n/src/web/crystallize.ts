@@ -184,6 +184,28 @@ export const crystallizeText = {
    *   不像是对话方式" ⇒ 抬头改成**它自己在说话**：正在写 / 写好了 / 没写成。
    *   三条旧词条一起删（i18n 死词条检测会报，留着就是给下一个人一个假线索）。
    */
+  /**
+   * 气泡上方那行小字里的"谁在说"（与聊天页 `chat.you` 同一位置）。
+   *
+   * ⚠️ 为什么不取 agent 的名字：起草者是平台内置、**只读**的那一条（分批第 190 批），
+   *    名字恒为「起草者（内置）」，为它多拉一次 `/api/runs/:id` 只为读一个名字不划算；
+   *    而这里需要的是**角色**（谁在说），与聊天页那个"你"是同一层的信息。
+   */
+  'crystallize.speakerDrafter': { zh: '起草者', en: 'Drafter' },
+  /** 人说的话（与聊天页的 `chat.you` 同一个意思、同一个位置）。 */
+  'crystallize.speakerYou': { zh: '你', en: 'You' },
+  /**
+   * ★ 分批第 194 批：对话里**你那一轮**说的话。
+   *
+   * 起草一开始，目标屏那串问答就整块消失（`CrystallizeIntake` 只在目标态挂着）⇒ 中间栏
+   * 只剩"起草 run 01M6…"，读起来像任务建完就没有前因后果。这条把"你让它做什么"补回来。
+   */
+  'crystallize.requestNew': { zh: '新建一份技能', en: 'New skill' },
+  'crystallize.requestUpdate': { zh: '优化「{skill}」', en: 'Improve "{skill}"' },
+  'crystallize.requestWithMaterials': {
+    zh: '{head}（附 {n} 份材料）',
+    en: '{head} (with {n} material items)',
+  },
   'crystallize.draftTurnLive': { zh: '正在把素材写成 skill', en: 'Writing the skill' },
   'crystallize.draftTurnDone': { zh: '写好了', en: 'Done' },
   /** 过程那一行小字按钮：回看时才要的东西，不该在抬头里跟正文抢位置。 */
@@ -194,7 +216,8 @@ export const crystallizeText = {
   'crystallize.retryDraft': { zh: '重新起草', en: 'Draft again' },
 
   // ── 草稿审阅 ──
-  'crystallize.reviewTitle': { zh: '审阅草稿', en: 'Review draft' },
+  // ★ 分批第 194 批：`crystallize.reviewTitle`（「审阅草稿」）删了——它只挂在"起草者拒绝"
+  //   那块抽屉分节的抬头（`<h3>`）上，而那块已经改成一条消息（气泡）。
   'crystallize.slugLabel': { zh: 'slug', en: 'slug' },
   // ⚠️ 2026-10-21 删掉 `crystallize.previewTitle`：使用者说"不需要「预览」"，
   //    那一段折叠预览连同它的 key 一起删了（留着 key 就是给下一个人一个假线索）。
@@ -207,7 +230,10 @@ export const crystallizeText = {
     zh: '（文本产物：这条起草没有写出文件，只有单文件 SKILL.md）',
     en: '(text artifact: this draft wrote no files, only a single SKILL.md)',
   },
-  'crystallize.problemsTitle': { zh: '校验未通过', en: 'Validation failed' },
+  // ★ 分批第 194 批：`crystallize.problemsTitle`（「校验未通过」）删掉了——它紧跟在前面的
+  //   「体检发现 N 处问题」后面把同一件事说第二遍，而"校验"这个词又会让人以为还有一道审核。
+  //   现在那一格改成**指路**：问题清单在哪看。
+  'crystallize.problemsWhere': { zh: '问题清单在下面', en: 'Problems listed below' },
   'crystallize.noFiles': { zh: '没有产出任何文件', en: 'No files were produced' },
   'crystallize.deletedHint': {
     zh: '这个文件在草稿里没有，入库时会被删掉（更新 = 整目录替换）',

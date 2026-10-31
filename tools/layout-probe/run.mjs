@@ -3176,6 +3176,31 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.requestTurnText',
+    label:
+      '★★★ 时间线第一条是**「你」那一轮**（"新建一份技能…"）——改之前起草一开始，目标屏那串问答就整块消失，' +
+      '中间栏只剩一条 run，读起来像任务建完就没有前因后果',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.requestTurnRole',
+    label: '★★★ 那一轮是**人说的话**（`data-turn-role="user"`，靠右的气泡——与聊天页同一个组件）',
+    ok: (v) => v === 'user',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.draftBubbleShape',
+    label:
+      '★★★ 起草那一轮用的是**聊天页那套形状**（`[data-chat-turn]` + `说的人（who）` + `气泡（bubble）`）' +
+      '——同一份组件，不再有第二套标记',
+    ok: (v) => !!v && v.chatTurn === true && v.bubble === true && v.who === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.draftRunIdInHead',
     label:
       '★★★ 抬头里**没有 run id**（`run 01M6…` 挪进"它怎么做的"展开区）——这一条正是使用者报的原话：' +
@@ -3830,6 +3855,51 @@ const CHECKS = [
       '★★★ 详情栏带 `data-crystallize-step`（分批第 96 批：判据按**状态**定位，而不是按"旧表单里有没有某个控件"——后者一换界面形态就整组失效）',
     ok: (v) => typeof v === 'string' && v.length > 0,
     show: (v) => JSON.stringify(v),
+  },
+  // ══════════════ 起草者**拒绝**那一屏（分批第 194 批）══════════════
+  //
+  // 使用者真机上撞到的缺陷：拒绝（`REFUSED.md`）被画成了"体检没通过"——红条上写着
+  // 「体检发现 1 处问题 · 校验未通过（1）」，看起来像审核没过。这四条钉住新口径：
+  // 它是**结论**（中性）、理由是一条消息、不再有"审阅草稿"这种任务式抬头。
+  {
+    view: '沉淀',
+    key: 'crystal.refusedAttached',
+    label: '夹具：拒绝那条草稿挂得上（下面几条量的是它的结论条与消息）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedMark',
+    label:
+      '★★★ 拒绝被画成**结论**而不是失败：标记是 `–`、条上没有 `bad`、文案是「起草者判定…」',
+    ok: (v, f) =>
+      v === '–' &&
+      f['crystal.refusedBarBad'] === false &&
+      typeof f['crystal.refusedBar'] === 'string' &&
+      f['crystal.refusedBar'].includes('没有可沉淀'),
+    show: (v, f) => `标记 ${JSON.stringify(v)}　条 ${JSON.stringify((f['crystal.refusedBar'] ?? '').slice(0, 70))}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedBarNoFailureCopy',
+    label:
+      '★★★ 结论条里**不再有**「体检发现…问题」「校验未通过」——这正是使用者报的那句话（它让人以为还有一道审核）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedLinesInBubbles',
+    label: '★★ 拒绝理由是一条**消息**（气泡里的正文），而不是抽屉分节里的一块黄条',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.refusedNoReviewHeading',
+    label: '★★ 拒绝那一屏**没有**「审阅草稿」这种任务式抬头（它只是它在说话）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
   },
   {
     view: '沉淀',
@@ -5315,6 +5385,14 @@ try {
     //   在后面展开，见那段注释）。
     siblingDraftRunId: '',
     manualDraftRunId: '',
+    /**
+     * ★ 分批第 194 批：一条**起草者拒绝**的草稿（`skill/REFUSED.md`）。
+     *
+     * 为什么要有它：使用者真机上撞到的正是这一屏——一条"没什么可沉淀的"草稿，界面上却写着
+     * 「体检发现 1 处问题 · 校验未通过（1）」，看起来像**审核没通过**（而审核早在第 137 批
+     * 就删了）。这是结论不是失败，判据得钉住"它不再被画成失败"。
+     */
+    refusedRunId: '',
     // ★ 分批第 191 批：`agentId` 删掉了——它只服务「优化智能体指令」那条草稿夹具，
     //   而那条功能整条下线（服务端连入库分支都删了）。
   }
@@ -5669,6 +5747,20 @@ try {
           { sourceRunId: await makeSource() },
         )
 
+        /**
+         * ★ 分批第 194 批：**起草者拒绝**那条草稿（只有 `REFUSED.md`，没有 `SKILL.md`）。
+         * 独立一条源 run，理由与上面那几条一样：夹具之间不许互相消费。
+         */
+        crystalFixture.refusedRunId = await makeDraft(
+          ulid(),
+          {
+            'REFUSED.md':
+              '# 这次没有可复用的做法\n\n' +
+              '素材里只有一次性的环境排错，没有值得复用的步骤。\n',
+          },
+          { sourceRunId: await makeSource() },
+        )
+
         // ★ 给**第一条草稿**一段文字产出：审阅态那块默认要显示的就是它（"最后结果"）。
         //   没有这条消息，量到的只会是"这次起草没有留下文字产出"那个空态。
         await store.appendRunMessage(crystalFixture.draftRunId, {
@@ -5939,6 +6031,7 @@ try {
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
         `&crystalSibling=${encodeURIComponent(crystalFixture.siblingDraftRunId)}` +
         `&crystalManual=${encodeURIComponent(crystalFixture.manualDraftRunId)}` +
+        `&crystalRefused=${encodeURIComponent(crystalFixture.refusedRunId)}` +
         `&crystalSource=${encodeURIComponent(crystalFixture.sourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +

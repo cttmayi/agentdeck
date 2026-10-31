@@ -12,3 +12,10 @@ export type { TableColumn } from './table-types.ts'
 export { default as ExpandToggle } from './ExpandToggle.svelte'
 export { default as SourceRef } from './SourceRef.svelte'
 export { default as FoldSection } from './FoldSection.svelte'
+/**
+ * ★ 分批第 194 批：一条对话消息（`说的人 + 气泡`）。
+ *
+ * 聊天页与沉淀页**共用这一份**——沉淀线的中间栏原来是第三套形状（`.qa-msg` / 抽屉分节），
+ * 于是同一个"对话"在两页里长得不一样，使用者连提了两次「应该像聊天那页的对话方式」。
+ */
+export { default as ChatBubble } from './ChatBubble.svelte'

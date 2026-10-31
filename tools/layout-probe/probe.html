@@ -5171,21 +5171,45 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            *   · `draftSectionFound`：下面几条（最后结果 / 两态切换）挂得住吗。
            * 新建一个变量名（`draftTurn`）而不是留着 `draftSection` 骗自己：宿主真的换了。
            */
-          const draftTurnMsg = () => d().querySelector('.crystal-msg[data-msg-role="assistant"] [data-draft-turn]')
-          facts['crystal.processOpens'] = !!draftTurnMsg()
-          const draftSection = draftTurnMsg()
+          /**
+           * ★ 分批第 194 批：起草那一轮现在就是**聊天页那条消息的形状**
+           *   （`@agentdeck/ui` 的 `ChatBubble`：`[data-chat-turn]` = `说的人 + 气泡`）。
+           *   度量的宿主跟着换，但量的还是同一件事：时间线里有起草这一轮、它两态走得通。
+           */
+          const draftBubble = () =>
+            d().querySelector('[data-draft-turn-msg] [data-chat-turn]')
+          facts['crystal.processOpens'] = !!draftBubble()
+          const draftSection = draftBubble()
           facts['crystal.draftSectionFound'] = !!draftSection
           facts['crystal.processDraftHasRunBlock'] = !!draftSection
-          // 抬头是**一句人话**（写好了 / 这次没写成），不许再出现 run id 或"起草 run"这种抬头
+          // 抬头 = `who` 那一行（说的人 + 这一轮的状态），气泡里是产出本身
           facts['crystal.draftHeadText'] = draftSection
-            ? text(draftSection.querySelector('[data-draft-turn-head]'))
+            ? text(draftSection.querySelector('.who'))
             : null
-          // ⚠️ 「最后结果」是异步读回来的 ⇒ 等它出现再量
-          await until(() => !!draftSection?.querySelector('.draft-final'), 60)
-          const finalEl = draftSection ? draftSection.querySelector('.draft-final') : null
+          facts['crystal.draftBubbleRole'] = draftSection
+            ? draftSection.getAttribute('data-turn-role')
+            : null
+          /**
+           * ★ 分批第 194 批：**时间线的第一条是"你"**（它凭什么开始起草），而且起草那一轮
+           *   与聊天页用的是**同一个气泡组件**（`[data-chat-turn]` + `.bubble`）。
+           *   这两条合起来才是使用者要的"像聊天那页的对话方式"——只量文案会漏掉形状。
+           */
+          const requestTurn = d().querySelector('[data-crystal-request] [data-chat-turn]')
+          facts['crystal.requestTurnText'] = text(requestTurn?.querySelector('.bubble'))
+          facts['crystal.requestTurnRole'] = requestTurn?.getAttribute('data-turn-role') ?? null
+          facts['crystal.draftBubbleShape'] = draftSection
+            ? {
+                chatTurn: draftSection.matches('[data-chat-turn]'),
+                bubble: !!draftSection.querySelector('.bubble.agent'),
+                who: !!draftSection.querySelector('.who'),
+              }
+            : null
+          // ⚠️ 「最后结果」是异步读回来的 ⇒ 等它出现再量（现在它是气泡正文，不是 `.draft-final`）
+          await until(() => !!draftSection?.querySelector('.bubble'), 60)
+          const finalEl = draftSection ? draftSection.querySelector('.bubble') : null
           facts['crystal.draftFinalText'] = finalEl ? text(finalEl) : null
           {
-            const paneRect = cyRect(draftTurnMsg())
+            const paneRect = cyRect(draftBubble())
             const box = d().querySelector('.pane-body.detail-scroll')
             const boxRect = cyRect(box)
             const padB = box ? parseFloat(cs(box).paddingBottom || '0') : 0
@@ -5211,8 +5235,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.draftLogAfterToggle'] = !!draftSection?.querySelector('.log-box')
             facts['crystal.draftToggleLabelAfter'] = text(toggle)
             click(toggle)
-            await until(() => !!draftSection?.querySelector('.draft-final'), 60)
-            facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.draft-final')
+            await until(() => !!draftSection?.querySelector('.bubble'), 60)
+            facts['crystal.draftBackToFinal'] = !!draftSection?.querySelector('.bubble')
           }
           // 「按意见改一版」：输入框**默认不在**（点开才占一行）
           // ★ 分批第 17 批：按钮改名「按意见再改一版」→「反馈」，这里跟着改。
@@ -5586,6 +5610,42 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
 
           // ══════════════════════════════════════════════════════════════
+          // ★★★ 起草者**拒绝**那一屏（分批第 194 批）
+          // ══════════════════════════════════════════════════════════════
+          //
+          // 使用者真机上撞到的：一条"没什么可沉淀的"草稿，界面上写着「体检发现 1 处问题 ·
+          // 校验未通过（1）」，读起来像**审核没过**（而审核第 137 批就删了）。它是**结论**，
+          // 不是失败 ⇒ 结论条必须是中性的一句，拒绝理由本身是一条消息。
+          {
+            const cyRefused = cyQuery.get('crystalRefused')
+            facts['crystal.refusedFixtureId'] = cyRefused || null
+            if (cyRefused) {
+              f.contentWindow.location.hash = '#/tasks'
+              await until(() => !d().querySelector('.crystal-chat'), 80)
+              await wait(80)
+              f.contentWindow.location.hash = `#/crystallize/${cyRefused}`
+              const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+              facts['crystal.refusedAttached'] = attached
+              if (attached) {
+                facts['crystal.refusedBar'] = text(d().querySelector('.conclusion-bar'))
+                facts['crystal.refusedMark'] = text(d().querySelector('.bar-mark'))
+                facts['crystal.refusedBarBad'] = !!d().querySelector('.conclusion-bar.bad')
+                // 拒绝理由是**一条消息**（气泡），不是一块抽屉分节
+                const bubbles = [...d().querySelectorAll('[data-chat-turn] .bubble')].map((b) => text(b))
+                facts['crystal.refusedBubbles'] = bubbles
+                facts['crystal.refusedLinesInBubbles'] = bubbles.some((t2) => t2.includes('没有可复用的做法'))
+                facts['crystal.refusedNoReviewHeading'] =
+                  ![...d().querySelectorAll('h3')].some((h) => text(h).includes('审阅草稿'))
+                facts['crystal.refusedBarNoFailureCopy'] = !/体检发现|校验未通过/.test(
+                  facts['crystal.refusedBar'] ?? '',
+                )
+              }
+              f.contentWindow.location.hash = '#/tasks'
+              await until(() => !d().querySelector('.crystal-chat'), 40)
+            }
+          }
+
+          // ══════════════════════════════════════════════════════════════
           // ★★★ 目标态那一屏（2026-10-21 第 5 批）
           // ══════════════════════════════════════════════════════════════
           //
@@ -5754,12 +5814,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // ★ 分批第 193 批：那条消息的角色从 `system` 改成 `assistant`——起草这一轮
               //   是"它在做事 / 它在说话"，挂在系统行上是任务面板的做法（使用者报的正是这个）。
               facts['crystal.draftingLogInMsg'] = !!d().querySelector(
-                '.crystal-msg[data-msg-role="assistant"] .log-box',
+                '[data-draft-turn-msg] .log-box',
               )
               // ★ 分批第 193 批：**正在写**也是一种"说话"——抬头必须是「正在把素材写成 skill…」
               //   而不是 `起草 run / run 01M6… / 排队中` 那张 run 的抬头（使用者报的原话）。
               facts['crystal.draftingHeadText'] = text(
-                d().querySelector('[data-draft-turn-head]'),
+                d().querySelector('[data-draft-turn-msg] [data-chat-turn] .who'),
               )
               // ★ 目标那块**表单**不该再出现（它搬进了「依据」tab）：判据是"页面上没有
               //   `.section-body` 里的可编辑表单"，而不是"某段文案不见了"。
@@ -5819,7 +5879,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 //   判据本身没变：**停止必须在"这次起草跑到哪了"那条消息里**，不在栏头。
                 facts['crystal.stopInMsg'] = (() => {
                   const btn = [
-                    ...d().querySelectorAll('.crystal-msg[data-msg-role="assistant"] button'),
+                    ...d().querySelectorAll('[data-draft-turn-msg] button'),
                   ].find((b) => text(b).includes('停止'))
                   return !!btn
                 })()
