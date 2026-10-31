@@ -3709,7 +3709,7 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.stopInSystemMsg',
+    key: 'crystal.stopInMsg',
     label:
       '★★ 「停止」在**起草那条消息里**（分批第 193 批：那条消息的角色从系统行改成助手行，' +
       '抬头也换成一句人话；它和"这次起草跑到哪了"是同一件事——搬进消息却没从页头删的，' +
@@ -3800,7 +3800,7 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.draftingLogInSystemMsg',
+    key: 'crystal.draftingLogInMsg',
     label:
       '★★★ 起草中的日志挂在**一条助手消息**上（分批第 193 批把角色从 `system` 改成 `assistant`：' +
       '起草这一轮是它在做事，挂在系统行上是任务面板的做法）——它和"起草完成"是同一条时间线上的东西，不是页面上一个抽屉分节',

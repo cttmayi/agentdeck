@@ -5753,7 +5753,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // U3b：起草日志挂在**一条消息**上（不再是页面上的抽屉分节）。
               // ★ 分批第 193 批：那条消息的角色从 `system` 改成 `assistant`——起草这一轮
               //   是"它在做事 / 它在说话"，挂在系统行上是任务面板的做法（使用者报的正是这个）。
-              facts['crystal.draftingLogInSystemMsg'] = !!d().querySelector(
+              facts['crystal.draftingLogInMsg'] = !!d().querySelector(
                 '.crystal-msg[data-msg-role="assistant"] .log-box',
               )
               // ★ 分批第 193 批：**正在写**也是一种"说话"——抬头必须是「正在把素材写成 skill…」
@@ -5817,7 +5817,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 // ★ 分批第 193 批：起草那一轮的消息角色从 `system` 改成 `assistant`
                 //   （抬头是一句人话，不再报 run id 与状态徽标）⇒ 这条跟着换角色量。
                 //   判据本身没变：**停止必须在"这次起草跑到哪了"那条消息里**，不在栏头。
-                facts['crystal.stopInSystemMsg'] = (() => {
+                facts['crystal.stopInMsg'] = (() => {
                   const btn = [
                     ...d().querySelectorAll('.crystal-msg[data-msg-role="assistant"] button'),
                   ].find((b) => text(b).includes('停止'))
