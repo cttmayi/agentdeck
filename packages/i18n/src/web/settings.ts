@@ -39,7 +39,6 @@ export const settingsText = {
     zh: '新建的智能体默认「跟随全局默认」，所以这里改一次就处处生效；某个智能体要例外，在它的编辑页里单独选。',
     en: 'New agents follow this global default, so one change applies everywhere; pick per agent when one needs an exception.',
   },
-  'settings.agentConduct': { zh: '默认工作守则', en: 'Default working conduct' },
 
   // ── 界面主题（亮 / 暗 / 跟随系统）──
   'settings.theme': { zh: '界面主题', en: 'Theme' },
