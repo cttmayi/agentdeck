@@ -3664,27 +3664,9 @@ const CHECKS = [
         : `清单 ${String(v.before)}→${String(v.after)}　确认 ${String(v.confirmShown)}　` +
           `只剩给过的 ${String(v.onlyAppended)}　服务端 ${String(v.serverCount)} 份`,
   },
-  {
-    view: '沉淀',
-    key: 'crystal.dropMaterial',
-    label:
-      '★★★ 把一份文本**拖进右栏材料区**就真的成了素材（§12.4 材料卡的"拖文件 / 选目录"）：' +
-      '清单多一项、回执说加了几份、服务端 `appended/` 里真有它且正文是拖进来的那句；' +
-      '「选目录」入口也在（`webkitdirectory` 在浏览器侧展开目录，daemon 不接受任意本地路径）',
-    ok: (v) =>
-      v !== null &&
-      typeof v === 'object' &&
-      v.zone === true &&
-      v.grew === true &&
-      Number(v.after) > Number(v.before) &&
-      v.hasDropped === true &&
-      v.hasDirButton === true,
-    show: (v) =>
-      v === null
-        ? 'null'
-        : `清单 ${String(v.before)}→${String(v.after)}　落了盘 ${String(v.hasDropped)}　` +
-          `选目录 ${String(v.hasDirButton)}`,
-  },
+  // ★ 分批第 202 批删掉了 `crystal.dropMaterial`：拖拽区与「选文件 / 选目录」整块下线
+  //   （使用者："全部去掉「把文本文件拖到这里，或选文件 / 选目录」"），追加材料只剩
+  //   栏脚输入条的「追加材料：…」（那条另有判据 `crystal.appendMaterial`）。
   {
     view: '沉淀',
     key: 'crystal.actionsInMessages',
@@ -4068,8 +4050,9 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.draftingMaterialLocked',
     label:
-      '★★★ 起草中**没有**追加材料区（daemon 拒"没跑完就改材料"⇒ 界面上不给按了会被拒的按钮，' +
-      '§12.41 不放假接口）',
+      '★★★ 栏脚那一栏**没有收文件的入口**（拖拽区 / 选文件 / 选目录都删了，分批第 202 批）——' +
+      '追加材料只剩栏脚输入条的「追加材料：…」，而不论起草中还是审阅后，"往里加东西"都不该是' +
+      '树上的一个按钮（§12.41 不放假接口）',
     ok: (v) => v === true,
     show: (v) => String(v),
   },

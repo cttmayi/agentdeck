@@ -151,10 +151,6 @@ export const crystallizeText = {
   'crystallize.materialCountOnly': { zh: '{n} 项', en: '{n} items' },
   'crystallize.materialCountTrace': { zh: '轨迹 {n}', en: '{n} trace' },
   'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
-  'crystallize.materialLockedUntilDone': {
-    zh: '起草跑完才能改材料（这一版读到的素材已经定了）',
-    en: 'Material can only change after the draft finishes (this version already read its material)',
-  },
   'crystallize.scopeConversation': { zh: '对话', en: 'Conversation' },
   'crystallize.scopeTask': { zh: '任务', en: 'Task' },
   'crystallize.reviewedYes': { zh: '有审核判决', en: 'Reviewed' },
@@ -322,22 +318,9 @@ export const crystallizeText = {
     zh: '已删掉 {path}（还剩 {n} 份材料）——下一版草稿不会再读到它；自动带的素材没动',
     en: 'Deleted {path} ({n} left) — the next draft will not read it; auto-collected material untouched',
   },
-  // ── 追加的其它形态（分批第 148 批，§12.4 材料卡：拖文件 / 选目录）──
-  'crystallize.materialDropHint': {
-    zh: '把文本文件拖到这里，或选文件 / 选目录（单份 ≤ 100 KB）',
-    en: 'Drop text files here, or pick files / a folder (≤ 100 KB each)',
-  },
-  'crystallize.materialAddFiles': { zh: '选文件', en: 'Pick files' },
-  'crystallize.materialAddDir': { zh: '选目录', en: 'Pick folder' },
-  'crystallize.materialAddDone': {
-    zh: '加了 {n} 份材料（已登记进素材索引，下一版起草会读它）',
-    en: 'Added {n} material file(s) — registered in the material index for the next draft',
-  },
-  'crystallize.materialAddSkipped': {
-    zh: '没加的：{items}',
-    en: 'Not added: {items}',
-  },
-  // ★ 分批第 201 批：「从仓库拉」那四条词条删了——功能下线（使用者："直接删掉这个功能"）。
+  // ★ 分批第 202 批：这一族词条（拖文件 / 选目录 / 单份上限 / 草案期锁定）随「拖到这里」
+  //   那一块一起删了——使用者："全部去掉「把文本文件拖到这里，或选文件 / 选目录」"。
+  //   追加材料仍然走栏脚输入条的「追加材料：…」。
   'crystallize.diffBackToContent': { zh: '返回内容', en: 'Back to content' },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },

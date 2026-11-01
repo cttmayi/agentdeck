@@ -1836,7 +1836,6 @@
         <CrystallizeWorkDir
           {draftRunId}
           rev={materialRev}
-          editable={step === 'review' || step === 'done'}
           statsPart={materialStatsParts}
           onchanged={() => {
             void loadMaterial()

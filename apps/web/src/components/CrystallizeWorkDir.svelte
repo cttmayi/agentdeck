@@ -78,84 +78,6 @@
   let pendingDelete = $state('')
   let deleting = $state('')
   let deleteNote = $state('')
-  let fileInput = $state<HTMLInputElement | null>(null)
-  let dirInput = $state<HTMLInputElement | null>(null)
-
-  /**
-   * 能被当成"素材"的扩展名。判据是"这文件能不能读成文本"——素材最终是要给起草者**读**的，
-   * 二进制（图片/压缩包/PDF）塞进去它读到的只会是乱码，比"不接收"更坏。
-   */
-  const TEXT_EXT =
-    /\.(md|markdown|txt|text|rst|json|ya?ml|csv|tsv|log|ts|tsx|js|mjs|cjs|py|sh|rb|go|rs|java|kt|c|h|cpp|html?|css|scss|toml|ini|cfg|conf|env|sql)$/i
-
-  /** 与 daemon 的 `MATERIAL_MAX_BYTES` 一致：单份上限 100 KiB（更大的塞进去也读不出来）。 */
-  const MATERIAL_MAX_BYTES = 100 * 1024
-  /** 一次最多收几份：拖一个目录进来可能是几百个文件，逐个 POST 会把 daemon 刷爆。 */
-  const MATERIAL_MAX_FILES = 20
-
-  async function addFiles(files: FileList | File[] | null): Promise<void> {
-    if (adding) return
-    const list = files === null ? [] : [...files].filter((f) => f.size > 0)
-    if (list.length === 0) return
-    adding = true
-    addNote = ''
-    deleteNote = ''
-    let added = 0
-    const skipped: string[] = []
-    for (const file of list.slice(0, MATERIAL_MAX_FILES)) {
-      const looksText = file.type.startsWith('text/') || TEXT_EXT.test(file.name)
-      if (!looksText) {
-        skipped.push(`${file.name}（不是文本）`)
-        continue
-      }
-      if (file.size > MATERIAL_MAX_BYTES) {
-        skipped.push(`${file.name}（${Math.round(file.size / 1024)} KB 超过上限 100 KB）`)
-        continue
-      }
-      let body = ''
-      try {
-        body = await file.text()
-      } catch {
-        skipped.push(`${file.name}（读不出来）`)
-        continue
-      }
-      if (body.trim() === '') {
-        skipped.push(`${file.name}（空的）`)
-        continue
-      }
-      try {
-        await api('/api/crystallize/material', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          // 名字原样交过去：daemon 会剥掉路径、折掉不安全字符、重名自动加 -2
-          body: JSON.stringify({ draftRunId, name: file.name, text: body }),
-        })
-        added += 1
-      } catch (err) {
-        skipped.push(`${file.name}（${String(err instanceof Error ? err.message : err)}）`)
-      }
-    }
-    if (list.length > MATERIAL_MAX_FILES) {
-      skipped.push(`还有 ${list.length - MATERIAL_MAX_FILES} 份没处理（一次最多 ${MATERIAL_MAX_FILES} 份）`)
-    }
-    adding = false
-    addNote =
-      (added > 0 ? $t('crystallize.materialAddDone', { n: String(added) }) : '') +
-      (skipped.length > 0
-        ? `${added > 0 ? '；' : ''}${$t('crystallize.materialAddSkipped', { items: skipped.join('、') })}`
-        : '')
-    if (added > 0) {
-      reloadTick += 1
-      onchanged()
-    }
-  }
-
-  function onPicked(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement | null
-    void addFiles(input?.files ?? null).finally(() => {
-      if (input) input.value = ''
-    })
-  }
 
   async function removeMaterial(treePath: string): Promise<void> {
     if (deleting !== '') return
@@ -191,16 +113,6 @@
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
   bind:open={open}
 >
-  {#snippet actions()}
-    {#if editable}
-      <button type="button" class="ghost small" disabled={adding} onclick={() => fileInput?.click()}>
-        {$t('crystallize.materialAddFiles')}
-      </button>
-      <button type="button" class="ghost small" disabled={adding} onclick={() => dirInput?.click()}>
-        {$t('crystallize.materialAddDir')}
-      </button>
-    {/if}
-  {/snippet}
 
   <!--
     ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）。
@@ -236,46 +148,6 @@
     <p class="faint small" data-mat-note>{deleteNote}</p>
   {/if}
 
-  {#if editable}
-    <!-- 追加形态（§12.4 材料卡）：**拖文件 / 选目录 / 从仓库拉**。三者都走
-         `POST /api/crystallize/material`（文本落盘 + 登记索引），不新开上传接口。 -->
-    <div
-      class="mat-add"
-      class:drag={dragOver}
-      data-mat-dropzone="true"
-      role="group"
-      ondragover={(e) => {
-        e.preventDefault()
-        dragOver = true
-      }}
-      ondragleave={() => (dragOver = false)}
-      ondrop={(e) => {
-        e.preventDefault()
-        dragOver = false
-        void addFiles(e.dataTransfer?.files ?? null)
-      }}
-    >
-      <p class="faint small">{$t('crystallize.materialDropHint')}</p>
-      <!-- 两个隐藏的 file input：选文件 / 选目录（`webkitdirectory` 在浏览器侧展开目录，
-           daemon 不需要接受任意本地路径——那等于把"读你机器上任意文件"做成一个入参）。 -->
-      <input class="mat-file-input" type="file" multiple hidden bind:this={fileInput} onchange={onPicked} />
-      <input
-        class="mat-dir-input"
-        type="file"
-        multiple
-        webkitdirectory
-        hidden
-        bind:this={dirInput}
-        onchange={onPicked}
-      />
-      {#if addNote !== ''}
-        <p class="faint small mat-note" data-mat-add-note>{addNote}</p>
-      {/if}
-    </div>
-  {:else}
-    <!-- 草案期：清单能看、不能改（daemon 会拒"没跑完就改材料"）；说清为什么，别给死按钮 -->
-    <p class="faint small">{$t('crystallize.materialLockedUntilDone')}</p>
-  {/if}
 </FootFiles>
 
 <style>
@@ -292,22 +164,9 @@
     opacity: 1;
     color: var(--danger, #b42318);
   }
-  .mat-add {
-    margin-top: var(--sp-2);
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--radius-sm);
-    padding: var(--sp-2);
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-  }
-  .mat-add.drag {
-    border-color: var(--accent);
-    background: var(--surface-2);
-  }
 
 
-  .mat-note {
-    margin: 0;
-  }
+
+
+
 </style>

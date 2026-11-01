@@ -4802,65 +4802,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * ⚠️ 合成 `DataTransfer` + `DragEvent`：Chrome 支持从 `new DataTransfer()` 造一个，
            *    再塞 `File` 进去。整块不用鼠标坐标（元素在窄屏抽屉里是移出视口的，直接派发事件）。
            */
-          facts['crystal.dropMaterial'] = await (async () => {
-            const zone = d().querySelector('[data-mat-dropzone]')
-            if (!zone) return { zone: false }
-            /**
-             * ★ 分批第 198 批：材料是**一棵树**，拖进来的那份落在 `appended/`（一层目录）里
-             * ⇒ **顶层行数不会变**（`appended` 这一行本来就在）。所以"清单多一项"改成量
-             * **服务端 `appended/` 里多了一份**（那才是这件事的实质），DOM 只量"那一层能列出它"。
-             */
-            const countAppended = async () => {
-              // ⚠️ 带 cache-buster：同一个 URL 连续读两次，浏览器会给缓存那份
-              //    （实测"拖进来了但 after 还是 1"就是这么来的）。
-              const items = await f.contentWindow
-                .fetch(
-                  `/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}&probe=${Date.now()}`,
-                )
-                .then((r) => (r.ok ? r.json() : null))
-                .catch(() => null)
-              return (items?.items ?? []).filter((i) => i.relPath.startsWith('appended/')).length
-            }
-            const before = await countAppended()
-            const marker = '探针拖进来的材料：先看日志再动手'
-            const win = f.contentWindow
-            const dt = new win.DataTransfer()
-            dt.items.add(new win.File([`# 拖入\n\n${marker}\n`], '探针拖入.md', { type: 'text/markdown' }))
-            zone.dispatchEvent(
-              new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
-            )
-            // ⚠️ 别用 `wait()` 去等这次 POST：Chrome 的虚拟时钟在 fetch 没结束时**不走**
-            //    （实测"拖进来了但 after 还是 0"就是这么来的）。改成**轮询服务端**（fetch 是真的
-            //    网络往返，不受虚拟时钟影响），等到那一份出现为止。
-            let after = await countAppended()
-            for (let i = 0; i < 20 && after <= before; i += 1) {
-              await f.contentWindow.fetch('/api/identity')
-              after = await countAppended()
-            }
-            // ⚠️ 别用上面那个 `zone` 引用去查回执：材料一改，面板会重渲染，`zone` 可能是
-            //    已经脱离文档的旧节点（第一次就是这么读到空串的——回执其实在，只是不在旧节点里）
-            const note = d().querySelector('[data-mat-add-note]')?.textContent ?? ''
-            const items = await win
-              .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
-              .then((r) => (r.ok ? r.json() : null))
-              .catch(() => null)
-            const dropped = (items?.items ?? []).filter(
-              (i) => i.relPath.startsWith('appended/') && i.text.includes(marker),
-            )
-            return {
-              zone: true,
-              grew: after > before || dropped.length === 1,
-              before,
-              after,
-              hasDropped: dropped.length === 1,
-              // ★ 分批第 197 批：「选文件 / 选目录」两个入口搬到了折叠头的 `actions` 里
-              //   （材料清单整体搬进栏脚 `CrystallizeMaterials`）⇒ 从整块材料区找，而不是拖拽框里。
-              hasDirButton: [...d().querySelectorAll('[data-foot-files] button')].some(
-                (b) => text(b) === '选目录',
-              ),
-              note: note.slice(0, 80),
-            }
-          })()
+          /**
+           * ★ 分批第 202 批（使用者："全部去掉「把文本文件拖到这里，或选文件 / 选目录」"）：
+           * 拖拽区与「选文件 / 选目录」**整块删掉**了 ⇒ 这一整段测量随之删除（它不是"量不到"，
+           * 是那个控件不存在了）。追加材料现在只有一条路：栏脚输入条说「追加材料：…」。
+           */
+          facts['crystal.dropMaterial'] = null
           /**
            * ★ 分批第 150 批（§12.12/§12.17：动作在消息里，不在页头）：顶栏**没有动作钮**，
            * 「确认入库」「放弃」在**审阅那条产物消息底部**。
@@ -5965,7 +5912,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               await untilNet(() => d().querySelectorAll('[data-foot-files] .wd > li').length > 0, 60)
               facts['crystal.draftingPaneMaterialCount'] =
                 d().querySelectorAll('[data-foot-files] .wd > li').length
-              facts['crystal.draftingMaterialLocked'] = !d().querySelector('[data-mat-dropzone]')
+              // ★ 分批第 202 批：拖拽区已经整块删掉 ⇒ 这条改成量"任何状态都不再有收文件的入口"
+              facts['crystal.draftingMaterialLocked'] =
+                !d().querySelector('[data-mat-dropzone]') &&
+                ![...d().querySelectorAll('[data-foot-files] button')].some(
+                  (b) => text(b) === '选文件' || text(b) === '选目录',
+                )
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
               facts['crystal.draftingTabDefault'] =

@@ -5881,3 +5881,29 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 
 验证：`check` **2180 全绿**（-9 条：§10.15 七条 + `crystallize-repo.test.ts` 两条）、
 `probe:layout` **564 全绿**、`typecheck` 0 错。
+
+### 12.72 栏脚那一栏**只读**：拖拽区与「选文件 / 选目录」全部去掉（分批第 202 批）
+
+使用者：「全部去掉「把文本文件拖到这里，或选文件 / 选目录」」。
+
+删掉的（界面这一侧一处不留）：拖拽收文件的虚线框、折叠头上的「选文件 / 选目录」两颗按钮、
+两个隐藏的 `<input type=file>`（含 `webkitdirectory`）、以及它们配套的客户端校验
+（单份 100 KiB / 一次最多 20 份 / 只收文本）、`editable` 这个只为它们存在的门、六条词条
+（`materialDropHint` / `materialAddFiles` / `materialAddDir` / `materialAddDone` /
+`materialAddSkipped` / `materialLockedUntilDone`）。
+
+**为什么这样是对的**：这一栏的形状是"**看**目录里有什么"（一棵树），"往里加东西"是**说话**
+（栏脚输入条的「追加材料：…」，与聊天页同一条输入条）。把一个拖拽框摆在浏览区下面，等于把两个
+动词塞进一个面板——上一批的 GitHub 框就是这么被问"这是干什么的"的，这次轮到它。
+
+还留着的**写**入口只有两个，且都在"该在的地方"：
+- 栏脚输入条说一句「追加材料：…」→ `POST /api/crystallize/material`（文本落盘 + 登记索引）；
+- `material/appended/` 里自己给的那几份，行上有「删掉」（两步确认）。
+
+判据：
+- `crystal.dropMaterial` **删除**（拖拽这件事不存在了，不是"量不到"）；
+- `crystal.draftingMaterialLocked` 改成量"栏脚那一栏没有收文件的入口"（任何状态都没有，
+  仍守着 §12.41"不给按了会被拒的按钮"）；
+- `crystal.appendMaterial` 不变（追加材料那条路还在，走输入条）。
+
+验证：`check` **2180 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。
