@@ -149,7 +149,6 @@ export const crystallizeText = {
   },
   // ── 对话里那行"我当时给了它什么"（§12.14：与右栏清单**同一份数据现算**）──
   'crystallize.materialCountOnly': { zh: '{n} 项', en: '{n} items' },
-  'crystallize.materialCountWith': { zh: '{n} 项 · {parts}', en: '{n} items · {parts}' },
   'crystallize.materialCountTrace': { zh: '轨迹 {n}', en: '{n} trace' },
   'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
   'crystallize.materialLockedUntilDone': {

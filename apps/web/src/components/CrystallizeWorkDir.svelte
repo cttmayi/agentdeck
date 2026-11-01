@@ -1,6 +1,12 @@
 <script lang="ts">
   /**
-   * 沉淀页栏脚的「材料」——**折叠清单 + 追加材料**（分批第 197 批搬来的）。
+   * 沉淀页栏脚的「工作目录的文件」——**起草这一轮的工作目录**（`material/` + `skill/`）。
+   *
+   * ★ 分批第 199 批（使用者定）：「就是叫「工作目录的文件」，就是整个挂上去，包括 material
+   *   和 skill」。所以这一栏与聊天页那一栏是**同一件事、同一个组件、同一个标题**：
+   *   根目录 = 这条沉淀的任务目录（`skill/` 是产出、`material/` 是依据、`.agentdeck/` 是平台状态）。
+   *   右栏的编辑器仍然负责"打开来改/对比"——两处不冲突：一个答"目录里有什么"，
+   *   一个答"这一版写成什么"。
    *
    * ══════════════════════════════════════════════════════════════════
    * 为什么从右栏搬到中间栏的栏脚
@@ -28,24 +34,10 @@
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
 
-  /** `GET /api/crystallize/material` 的返回。 */
-  interface Material {
-    dir: string
-    items: Array<{ relPath: string; bytes: number; truncated: boolean; text: string }>
-  }
-
   let {
     draftRunId,
     /** 起草跑完了才能改材料（daemon 会拒"没跑完就改"——界面上也就不给按了会被拒的按钮）。 */
     editable = false,
-    /**
-     * 规模里**清单自己算不出来**的那一段（`轨迹 5 轮 · 3 次工具调用` / `使用者给 3 份`）。
-     *
-     * ⚠️ 数量（`N 项`）**不由父组件传**：它必须与清单条数同源（§12.14）。第一版把整句
-     * （含 N）从父组件传下来，于是"清单刚删掉一份、父组件那边还没重算"时两个数字对不上——
-     * 探针立刻量到 `摘要 4 项 / 右栏 3 项`。现在 N 由这里按 `items.length` 现算。
-     */
-    statsPart = '',
     /** 材料变了（追加/删除）：让另一处（起草态的依据、右栏）也重读。 */
     onchanged = () => {},
     /**
@@ -64,13 +56,15 @@
     rev?: number
   } = $props()
 
-  let material = $state<Material | null>(null)
+  /**
+   * 折叠开关。⚠️ 必须是一个**状态变量**：`bind:open` 不写目标时会绑到**全局同名属性**上
+   * （`window.open`——svelte-check 当场报 "Can only bind to state or props"）。
+   */
+  let open = $state(true)
   /** 树的顶层条数（`bind:count`）——折叠头上那个「N 项」以它为准（与树同源）。 */
   let topCount = $state(0)
   /** 增删之后让树重取（`reloadKey` 变了就重列）。 */
   let reloadTick = $state(0)
-  let loading = $state(true)
-  let open = $state(true)
   /** 正在追加时不为空（防止一边拖一批、一边按两次按钮）。 */
   let adding = $state(false)
   /** 拖拽文件悬停（给一点反馈：这一块收文件）。 */
@@ -98,29 +92,6 @@
   const MATERIAL_MAX_BYTES = 100 * 1024
   /** 一次最多收几份：拖一个目录进来可能是几百个文件，逐个 POST 会把 daemon 刷爆。 */
   const MATERIAL_MAX_FILES = 20
-
-  async function reloadMaterial(id: string): Promise<void> {
-    if (id === '') return
-    try {
-      material = await api<Material>(`/api/crystallize/material?draftRunId=${encodeURIComponent(id)}`)
-    } catch {
-      material = null
-    }
-  }
-
-  $effect(() => {
-    void draftRunId
-    void rev
-    loading = true
-    void reloadMaterial(draftRunId).finally(() => (loading = false))
-  })
-
-  // ⚠️ 派生值走**显式签名的小函数**，不在 `$derived` 里直接窄化 `material`：
-  //    与 `CrystallizeArtifactPane` 里同一条坑（闭包里的控制流分析拿不到 `load()` 的赋值）。
-  function itemsOf(value: Material | null): Material['items'] {
-    return value === null ? [] : value.items
-  }
-  const items = $derived(itemsOf(material))
 
   async function addFiles(files: FileList | File[] | null): Promise<void> {
     if (adding) return
@@ -175,7 +146,6 @@
         : '')
     if (added > 0) {
       reloadTick += 1
-      await reloadMaterial(draftRunId)
       onchanged()
     }
   }
@@ -211,7 +181,6 @@
         // 仓库里带 SKILL.md：**必须**说一句——"更新那个技能"与"只当素材"是两条完全不同的路
         (res.hasSkillMd ? ` ⚠️ ${$t('crystallize.materialRepoHasSkill')}` : '')
       reloadTick += 1
-      await reloadMaterial(draftRunId)
       onchanged()
     } catch (err) {
       addNote = String(err instanceof Error ? err.message : err)
@@ -227,9 +196,14 @@
     })
   }
 
-  async function removeMaterial(relPath: string): Promise<void> {
+  async function removeMaterial(treePath: string): Promise<void> {
     if (deleting !== '') return
-    deleting = relPath
+    deleting = treePath
+    /**
+     * ★ 分批第 199 批：树挂的是**整个任务目录**（`material/appended/x.md`），而删除接口
+     * 要的是相对 `material/` 的路径（`appended/x.md`）⇒ 在这里剥掉那一段前缀。
+     */
+    const relPath = treePath.replace(/^material\//, '')
     try {
       const res = await api<{ relPath: string; remaining: number }>(
         `/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}` +
@@ -242,7 +216,6 @@
         n: String(res.remaining),
       })
       reloadTick += 1
-      await reloadMaterial(draftRunId)
       onchanged()
     } catch (err) {
       deleteNote = String(err instanceof Error ? err.message : err)
@@ -253,13 +226,9 @@
 </script>
 
 <FootFiles
-  title={$t('crystallize.materialTitle')}
-  count={topCount === 0
-    ? ''
-    : statsPart === ''
-      ? $t('crystallize.materialCountOnly', { n: String(topCount) })
-      : $t('crystallize.materialCountWith', { n: String(topCount), parts: statsPart })}
-  bind:open
+  title={$t('files.heading')}
+  count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
+  bind:open={open}
 >
   {#snippet actions()}
     {#if editable}
@@ -275,15 +244,15 @@
   <!--
     ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）。
     它自带"一次列一层 / 点文件就地打开查看器 / 取不到时说明原因"，所以这里不再自己画行。
-    唯一多出来的是**删除钮**（只给 `appended/` 那几份）——通过 `rowAction` 长在那一行上。
+      唯一多出来的是**删除钮**（只给 `material/appended/` 那几份）——通过 `rowAction` 长在那一行上。
   -->
   <WorkDirTree
-    base={`/api/crystallize/material/${encodeURIComponent(draftRunId)}`}
+    base={`/api/crystallize/drafts/${encodeURIComponent(draftRunId)}`}
     reloadKey={`${draftRunId}:${rev}:${reloadTick}`}
     bind:count={topCount}
   >
     {#snippet rowAction({ entry })}
-      {#if entry.path.startsWith('appended/')}
+      {#if entry.path.startsWith('material/appended/')}
         {#if pendingDelete === entry.path}
           <button
             type="button"

@@ -30,7 +30,7 @@
   // ★ 分批第 197 批：栏脚的折叠清单与输入条与聊天页**同一份**（`FootFiles` / `ChatComposer`），
   //   材料本身搬进栏脚（`CrystallizeMaterials`）。
   import { ChatBubble, ChatComposer, FoldSection } from '@agentdeck/ui/components'
-  import CrystallizeMaterials from './CrystallizeMaterials.svelte'
+  import CrystallizeWorkDir from './CrystallizeWorkDir.svelte'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { go, goCrystallize } from '../lib/view.ts'
@@ -1828,12 +1828,12 @@
       </div>
       <!-- 栏脚输入条：U3d 才接线，先只占位（不做成能按但没反应的按钮） -->
       <!--
-        ★ 分批第 197 批：**材料在输入条上方、可展开**——与聊天页「工作目录的文件」同款
-        （`FootFiles` + `ChatComposer` 两个组件两边共用）。使用者："材料现在在右栏，
-        我想用类似聊天页一样，将工作目录放在「发送」的上方。可展开显示。"
+        ★ 分批第 197/199 批：**「工作目录的文件」在输入条上方、可展开**——与聊天页同款
+        （`FootFiles` + `WorkDirTree` + `ChatComposer` 三个组件两边共用）。
+        使用者："就是叫「工作目录的文件」，就是整个挂上去，包括 material 和 skill"。
       -->
       {#if draftRunId !== ''}
-        <CrystallizeMaterials
+        <CrystallizeWorkDir
           {draftRunId}
           rev={materialRev}
           editable={step === 'review' || step === 'done'}

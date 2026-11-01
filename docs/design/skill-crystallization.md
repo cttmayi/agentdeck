@@ -5795,3 +5795,33 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 - `crystal.artifactMaterialCount` 等三条从右栏改到栏脚的树（`.wd > li`）。
 
 验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。
+
+### 12.69 那就是「工作目录的文件」：整条草稿目录（material + skill）挂上去（分批第 199 批）
+
+使用者：「就是叫「工作目录的文件」，就是整个挂上去，包括 material 和 skill」。
+
+198 批把材料目录挂成了树，但**只挂了 `material/`**。使用者要的是聊天页那种"这一轮干活的目录"，
+那就照做：
+
+- 折叠头标题 → `files.heading`（**与聊天页同一个词条**：「工作目录的文件」）；
+- 树根 → **整条草稿的任务目录**（`skill/` 是产出、`material/` 是依据、`.agentdeck/` 是平台状态），
+  daemon 路由改成 `GET /api/crystallize/drafts/<draftRunId>/files|file`，仍然复用
+  `listWorkDir` / `sendWorkDirListing` / `sendWorkFile`；
+- 平台自己的 `.agentdeck/` 走 `managedPathsFor` 标成"注入物"（弱化显示），与聊天页同一口径；
+- 折叠头的计数回到**与聊天页一样的语义**（树的顶层条数，`2 项`），材料规模那段（轨迹/使用者给）
+  不再挤在这一行——`materialCountWith` 那条词条随之删掉；
+- 删除钮只出现在 `material/appended/` 那些行上（树路径 → 接口路径时剥掉 `material/` 前缀）。
+
+右栏编辑器与它**不冲突**：一个答"目录里有什么"（可展开、可点开看任意文件），
+一个答"这一版写成什么"（打开来改 / 对比）。
+
+⚠️ 这一批的坑（都写在探针注释里）：
+1. **删除钮要点开两层**（`material` → `appended`）才看得到——判据改成"展开两层后再找"；
+2. 拖进来的那份落在 `material/appended/` 里 ⇒ **树的顶层条数不变**（`material` 那一行本来就在）
+   ⇒ 判据改成量"服务端 `appended/` 多了一份"；
+3. **不能用 `wait()` 等那次 POST**：Chrome 的虚拟时钟在 fetch 没结束时**不走**（实测
+   "拖进来了但 after 还是 0"），改成用 fetch 轮询服务端（真实的网络往返不受虚拟时钟影响）；
+4. 服务端计数要带 cache-buster（同一个 URL 连续读两次，浏览器给的是缓存那份）；
+5. `bind:open` 不写目标会绑到 `window.open` 上（svelte-check 当场报 "Can only bind to state or props"）。
+
+验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。

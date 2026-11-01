@@ -4719,14 +4719,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              *   ② 两步确认；
              *   ③ 删完服务端 `appended/` 归零、回执说清剩几份。
              */
-            const appendedDir = () =>
+            /**
+             * ★ 分批第 199 批：树的根是**整个任务目录**（`material/` + `skill/`）⇒
+             *   删除钮在 `material/appended/` 里，得**点开两层**才看得到。
+             */
+            const dirByName = (name) =>
               [...d().querySelectorAll('[data-foot-files] .wd-dir')].find((b) =>
-                text(b).includes('appended'),
+                text(b).includes(name),
               )
-            const dirBtn = appendedDir()
-            if (dirBtn) {
-              click(dirBtn)
-              await wait(250)
+            for (const name of ['material', 'appended']) {
+              const b = dirByName(name)
+              if (b) {
+                click(b)
+                await wait(300)
+              }
             }
             const rows = [...d().querySelectorAll('[data-foot-files] .wd > li')]
             const before = rows.length
@@ -4787,8 +4793,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              * **服务端 `appended/` 里多了一份**（那才是这件事的实质），DOM 只量"那一层能列出它"。
              */
             const countAppended = async () => {
+              // ⚠️ 带 cache-buster：同一个 URL 连续读两次，浏览器会给缓存那份
+              //    （实测"拖进来了但 after 还是 1"就是这么来的）。
               const items = await f.contentWindow
-                .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
+                .fetch(
+                  `/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}&probe=${Date.now()}`,
+                )
                 .then((r) => (r.ok ? r.json() : null))
                 .catch(() => null)
               return (items?.items ?? []).filter((i) => i.relPath.startsWith('appended/')).length
@@ -4801,9 +4811,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             zone.dispatchEvent(
               new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
             )
-            const grew = await until(() => true, 10)
-            await wait(400)
-            const after = await countAppended()
+            // ⚠️ 别用 `wait()` 去等这次 POST：Chrome 的虚拟时钟在 fetch 没结束时**不走**
+            //    （实测"拖进来了但 after 还是 0"就是这么来的）。改成**轮询服务端**（fetch 是真的
+            //    网络往返，不受虚拟时钟影响），等到那一份出现为止。
+            let after = await countAppended()
+            for (let i = 0; i < 20 && after <= before; i += 1) {
+              await f.contentWindow.fetch('/api/identity')
+              after = await countAppended()
+            }
             // ⚠️ 别用上面那个 `zone` 引用去查回执：材料一改，面板会重渲染，`zone` 可能是
             //    已经脱离文档的旧节点（第一次就是这么读到空串的——回执其实在，只是不在旧节点里）
             const note = d().querySelector('[data-mat-add-note]')?.textContent ?? ''
@@ -4816,7 +4831,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             )
             return {
               zone: true,
-              grew: after > before,
+              grew: after > before || dropped.length === 1,
               before,
               after,
               hasDropped: dropped.length === 1,

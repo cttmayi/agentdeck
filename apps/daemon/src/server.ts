@@ -5738,7 +5738,7 @@ async function injectedSkillsOf(
      * ⚠️ 目录是 `material/`，不是整个任务目录：`skill/` 是"产出了什么"，它在右栏的编辑器里
      *    （两处各画一份，就会有两个"这一版写成了什么"）。
      */
-    const materialFilesMatch = /^\/api\/crystallize\/material\/([^/]+)\/(files|file)$/.exec(path)
+    const materialFilesMatch = /^\/api\/crystallize\/drafts\/([^/]+)\/(files|file)$/.exec(path)
     if (req.method === 'GET' && materialFilesMatch) {
       const draftRunId = decodeURIComponent(materialFilesMatch[1]!)
       const sub = materialFilesMatch[2]
@@ -5747,9 +5747,18 @@ async function injectedSkillsOf(
         sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
         return
       }
-      const dir = join(await draftTaskDir(draftRunId), 'material')
-      // 材料里没有"平台注入物"这个概念（注入的是技能，落在工作目录的 `.claude/` 等下面）
-      const managed: ManagedPaths = { dirs: [], files: [] }
+      /**
+       * ★ 分批第 199 批：**整条草稿的工作目录**（`material/` + `skill/` + 平台自己的
+       * `.agentdeck/`），不再是只给 `material/`。
+       *
+       * 使用者："就是叫「工作目录的文件」，就是整个挂上去，包括 material 和 skill"。
+       * 说清楚了就照做：聊天页那一栏挂的是"这一轮干活的目录"，沉淀页对应的是**起草这一轮的
+       * 工作目录**——只挂 `material/` 等于把"产出了什么"藏起来（它现在只在右栏的编辑器里）。
+       * 两处同时可见不冲突：右栏是"打开来改/对比"，这里是"目录里有什么"。
+       */
+      const dir = await draftTaskDir(draftRunId)
+      // 平台自己的状态目录（`.agentdeck/` 里的 rounds 与上下文副本）照聊天页那套弱化显示
+      const managed = managedPathsFor({ skills: { kind: 'none', reason: 'draft' } })
       if (sub === 'files') {
         await sendWorkDirListing(res, dir, url.searchParams.get('dir') ?? '', managed)
         return
