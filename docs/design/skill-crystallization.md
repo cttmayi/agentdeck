@@ -5340,7 +5340,13 @@ run 硬凑素材，那等于给起草者塞一堆无关证据。这两批把这�
 5. 仓库里若**有 `SKILL.md`**：这是"更新/进化"场景的强信号，界面应当提示"这份仓库里有 SKILL.md，
    你是想更新它还是只当素材？"——两者走完全不同的路（§12.16 的方法表）。
 
-**✅ 已实作（分批第 157 批）**：`POST /api/crystallize/material/repo` + `apps/daemon/src/crystallize-repo.ts`。
+> ⛔ **已下线（分批第 201 批）**：使用者看到界面上那个「GitHub 仓库地址」输入框问"这是做什么的"，
+> 听完解释后定：**直接删掉这个功能**。删掉的是 `POST /api/crystallize/material/repo`、
+> `apps/daemon/src/crystallize-repo.ts`（主机白名单 / 体量封顶 / 递归跳过规则）、
+> `crystallize-material.ts` 的 `appendRepoMaterial`、它的四条词条，以及 §10.15 那一组路由边界判据。
+> 下面这段留档，说明**当时为什么做**与边界在哪——不要再从侧门把外部内容倒进素材。
+
+**✅ 已实作（分批第 157 批，已在第 201 批下线）**：`POST /api/crystallize/material/repo` + `apps/daemon/src/crystallize-repo.ts`。
 按上面四条边界实现：只认 GitHub 三个主机、只走 tree 列表 + raw 原文两种请求（不带 token / 不走代理）、
 总量 1 MB / 40 文件 / 单文件 256 KB 封顶且只收文本、带 `SKILL.md` 时 API 回 `hasSkillMd` 让界面把
 "更新那个技能 vs 只当素材"问出来。落盘 `material/appended/<owner>-<repo>/…`，索引页只登记一行。
@@ -5850,3 +5856,28 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 （纯透明 + overflow auto：滚起来那一刻还是会串；不透明 + 不滚：内容被裁在盒子边界外但摸不到）。
 
 验证：`check` **2189 全绿**、`probe:layout` **564 全绿**、`typecheck` 0 错。
+
+### 12.71 「从 GitHub 仓库拉材料」下线（分批第 201 批，2026-11；使用者定）
+
+使用者看到栏脚那个「GitHub 仓库地址」输入框，问"是用来做什么的"；听完解释（把某个仓库里的文本
+拉进 `material/appended/<owner>-<repo>/` 当依据、主机白名单 + 体量封顶 + 只收文本）后定：
+**直接删掉这个功能**。
+
+删掉的清单（一处不留）：
+- `POST /api/crystallize/material/repo`（server.ts 里那一段校验 + 拉取 + 落盘）；
+- `apps/daemon/src/crystallize-repo.ts` 整个模块（`parseRepoUrl` / `fetchRepoTextFiles` /
+  `repoDirName` / 主机白名单 / `REPO_MAX_*` / `REPO_SKIP_DIRS`）与它的单测
+  `crystallize-repo.test.ts`；
+- `crystallize-material.ts` 的 `appendRepoMaterial` 与 `noteRepoInIndex`（那是"仓库"专用的
+  落盘与索引登记；普通追加走的 `appendMaterial` 不动）；
+- 界面：`CrystallizeWorkDir` 里的 `.mat-repo` 表单、`repoUrl` / `repoPulling` / `pullRepo`；
+- 词条四条（`materialRepoPlaceholder` / `materialRepoPull` / `materialRepoDone` /
+  `materialRepoHasSkill`，i18n 死词条检测会点名）；
+- 判据：`crystallize-e2e.test.ts` 的 §10.15 整组（7 条路由边界）。
+
+**为什么删是对的**：它是"把外部仓库的文本倒进素材"的一条**侧门**——而这一页要的是"对话 +
+工作目录"：材料从来源 run 切、从输入条「追加材料：…」补、从本地拖进来/选目录，三条已经够了。
+少一条侧门就少一处要维护的主机白名单与体量规则（那套规则的正确性只能靠它自己的单测守）。
+
+验证：`check` **2180 全绿**（-9 条：§10.15 七条 + `crystallize-repo.test.ts` 两条）、
+`probe:layout` **564 全绿**、`typecheck` 0 错。

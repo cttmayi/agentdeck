@@ -1811,84 +1811,9 @@ describe('§10.16 起草者提问 → 人回答（分批第 172 批）', () => {
   })
 })
 
-/**
- * §10.15 从仓库拉材料：**路由层的边界**（分批第 157 批，§12.54）。
- *
- * 真拉取那条链在 `crystallize-repo.test.ts` 里用注入的 fetch 钉着（不打真网络）。
- * 这里钉的是"请求还没出网就被挡住"的那几条：地址不合法、草稿不存在 / 不是草稿 /
- * 没跑完 / 已入库。这几条恰恰是最容易在真机上被当成"拉取失败"含糊过去的。
- */
-describe('§10.15 从仓库拉材料：路由层边界（分批第 157 批）', () => {
-  const draftOf = async (purpose: string): Promise<string> =>
-    draftAndWait({
-      runId: await runReviewed(`审完的流程（${purpose}）`),
-      target: { kind: 'new', purpose },
-    })
+// ★ 分批第 201 批：§10.15「从仓库拉材料：路由层的边界」整组删掉——功能下线
+//   （使用者："直接删掉这个功能"）。真拉取那条链所在的 `crystallize-repo.test.ts` 同时删除。
 
-  const pull = async (
-    body: Record<string, unknown>,
-  ): Promise<{ status: number; body: Record<string, unknown> }> => {
-    const res = await fetch(`${daemon.url}/api/crystallize/material/repo`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
-  }
-
-  test('★★ 不合法地址 / 缺 id / 非草稿 / 没跑完 / 已入库：各自如实拒绝，且一条请求都不出网', async () => {
-    const draftRunId = await draftOf('拉仓库校验')
-
-    const noId = await pull({ url: 'https://github.com/acme/notes' })
-    assert.equal(noId.status, 400, JSON.stringify(noId.body))
-    assert.equal(noId.body.code, 'draft_run_id_required')
-
-    const missing = await pull({ draftRunId: ulid(), url: 'https://github.com/acme/notes' })
-    assert.equal(missing.status, 404, JSON.stringify(missing.body))
-    assert.equal(missing.body.code, 'draft_run_not_found')
-
-    const sourceRunId = await runOnce('不是草稿的 run（拉仓库）')
-    const notDraft = await pull({ draftRunId: sourceRunId, url: 'https://github.com/acme/notes' })
-    assert.equal(notDraft.status, 400, JSON.stringify(notDraft.body))
-    assert.equal(notDraft.body.code, 'not_a_draft')
-
-    // 白名单之外的站点：在**发请求之前**就该拒（本机服务不许变成抓任意地址的跳板）
-    for (const url of ['https://gitlab.com/acme/notes', 'http://github.com/acme/notes', 'acme']) {
-      const bad = await pull({ draftRunId, url })
-      assert.equal(bad.status, 400, `${url}：${JSON.stringify(bad.body)}`)
-      assert.equal(bad.body.code, 'bad_repo_url')
-    }
-
-    // 起草跑着的时候：素材已经定了，不许改
-    let release!: () => void
-    fakeBackend.draftGate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    try {
-      const res = await draftPost({
-          runId: await runReviewed('审过的流程（起草中拉仓库）'),
-          target: { kind: 'new', purpose: '起草中拉仓库' },
-        })
-      const draftText = await res.text()
-      assert.equal(res.status, 202, draftText)
-      const runningId = (JSON.parse(draftText) as { draftRunId: string }).draftRunId
-      const tooEarly = await pull({ draftRunId: runningId, url: 'https://github.com/acme/notes' })
-      assert.equal(tooEarly.status, 409, JSON.stringify(tooEarly.body))
-      assert.equal(tooEarly.body.code, 'draft_not_completed')
-    } finally {
-      fakeBackend.draftGate = null
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-
-    const doneDraft = await daemon.store.getRun(draftRunId as RunId)
-    assert.ok(doneDraft, '草稿得在')
-    await daemon.store.insertRun({ ...doneDraft!, crystallized: true })
-    const afterCommit = await pull({ draftRunId, url: 'https://github.com/acme/notes' })
-    assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
-    assert.equal(afterCommit.body.code, 'already_crystallized')
-  })
-})
 
 /**
  * §10.12 「从空白/材料起」：**无源 run 的草稿**（分批第 133 批，U3d 第三半）。

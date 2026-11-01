@@ -337,22 +337,8 @@ export const crystallizeText = {
     zh: '没加的：{items}',
     en: 'Not added: {items}',
   },
-  // ── 从仓库拉（分批第 157 批，§12.54）──
-  'crystallize.materialRepoPlaceholder': {
-    zh: 'GitHub 仓库地址（https://github.com/owner/repo，或 owner/repo）',
-    en: 'GitHub repo URL (https://github.com/owner/repo, or owner/repo)',
-  },
-  'crystallize.materialRepoPull': { zh: '拉进来', en: 'Pull' },
-  // ── 右栏差异浮层的出口（分批第 160 批：差异盖满右栏，必须自带"返回内容"）──
+  // ★ 分批第 201 批：「从仓库拉」那四条词条删了——功能下线（使用者："直接删掉这个功能"）。
   'crystallize.diffBackToContent': { zh: '返回内容', en: 'Back to content' },
-  'crystallize.materialRepoDone': {
-    zh: '从仓库拉了 {files} 个文件（{kb} KB）到 {dir}/，已登记进素材索引',
-    en: 'Pulled {files} file(s) ({kb} KB) from the repo into {dir}/ and registered them in the material index',
-  },
-  'crystallize.materialRepoHasSkill': {
-    zh: '这个仓库里有 SKILL.md——如果你要的是「更新那个技能」，请从技能页发起；当素材用就继续。',
-    en: 'This repo contains SKILL.md — to update that skill, start from the Skills page; continue if you only want it as material.',
-  },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },
   // ★ 分批第 171 批：产物栏宽度可拖（把手在中间栏与右栏之间）

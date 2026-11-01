@@ -24,7 +24,8 @@
    *
    * ⚠️ 逻辑是**原地搬过来的**（`addFiles` / `pullRepo` / `removeMaterial` / 两步删除 /
    * 拖拽收文件 / 从仓库拉），一个字没改语义：`POST/DELETE /api/crystallize/material` 与
-   * `/material/repo` 的边界、单份 100 KiB、一次最多 20 份、只收文本，全部照旧。
+   * 的边界（单份 100 KiB、一次最多 20 份、只收文本）全部照旧。
+   *   ⚠️ 分批第 201 批：「从 GitHub 仓库拉材料」那条整删了（使用者："直接删掉这个功能"）。
    * 只改了两件事：**宿主**（右栏 → 栏脚）与**形状**（抽屉式分节 → 折叠清单，与聊天页同款）。
    */
   import { FootFiles } from '@agentdeck/ui/components'
@@ -71,9 +72,8 @@
   let dragOver = $state(false)
   /** 追加文件（拖进来 / 选进来）的回执。 */
   let addNote = $state('')
-  /** 「从仓库拉」的地址输入与进行中标记（§12.54）。 */
-  let repoUrl = $state('')
-  let repoPulling = $state(false)
+  // ★ 分批第 201 批：「从 GitHub 仓库拉材料」整条删掉（使用者："直接删掉这个功能"），
+  //   所以这里不再有 repoUrl / repoPulling。
   /** 已经点了「删掉」、等第二次确认的那份（两步删除：材料是使用者给的，误删不好补）。 */
   let pendingDelete = $state('')
   let deleting = $state('')
@@ -147,45 +147,6 @@
     if (added > 0) {
       reloadTick += 1
       onchanged()
-    }
-  }
-
-  async function pullRepo(): Promise<void> {
-    const url = repoUrl.trim()
-    if (url === '' || repoPulling) return
-    repoPulling = true
-    addNote = ''
-    deleteNote = ''
-    try {
-      const res = await api<{
-        relDir: string
-        files: number
-        bytes: number
-        skipped: string[]
-        hasSkillMd: boolean
-      }>('/api/crystallize/material/repo', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId, url }),
-      })
-      repoUrl = ''
-      addNote =
-        $t('crystallize.materialRepoDone', {
-          files: String(res.files),
-          kb: String(Math.max(1, Math.round(res.bytes / 1024))),
-          dir: res.relDir,
-        }) +
-        (res.skipped.length > 0
-          ? `；${$t('crystallize.materialAddSkipped', { items: res.skipped.slice(0, 3).join('、') })}`
-          : '') +
-        // 仓库里带 SKILL.md：**必须**说一句——"更新那个技能"与"只当素材"是两条完全不同的路
-        (res.hasSkillMd ? ` ⚠️ ${$t('crystallize.materialRepoHasSkill')}` : '')
-      reloadTick += 1
-      onchanged()
-    } catch (err) {
-      addNote = String(err instanceof Error ? err.message : err)
-    } finally {
-      repoPulling = false
     }
   }
 
@@ -295,23 +256,6 @@
       }}
     >
       <p class="faint small">{$t('crystallize.materialDropHint')}</p>
-      <form
-        class="mat-repo"
-        onsubmit={(e) => {
-          e.preventDefault()
-          void pullRepo()
-        }}
-      >
-        <input
-          type="text"
-          bind:value={repoUrl}
-          placeholder={$t('crystallize.materialRepoPlaceholder')}
-          aria-label={$t('crystallize.materialRepoPlaceholder')}
-        />
-        <button type="submit" class="ghost small" disabled={repoPulling || repoUrl.trim() === ''}
-          >{$t('crystallize.materialRepoPull')}</button
-        >
-      </form>
       <!-- 两个隐藏的 file input：选文件 / 选目录（`webkitdirectory` 在浏览器侧展开目录，
            daemon 不需要接受任意本地路径——那等于把"读你机器上任意文件"做成一个入参）。 -->
       <input class="mat-file-input" type="file" multiple hidden bind:this={fileInput} onchange={onPicked} />
@@ -361,15 +305,8 @@
     border-color: var(--accent);
     background: var(--surface-2);
   }
-  .mat-repo {
-    display: flex;
-    gap: var(--sp-1);
-  }
-  .mat-repo input {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--fs-sm);
-  }
+
+
   .mat-note {
     margin: 0;
   }
