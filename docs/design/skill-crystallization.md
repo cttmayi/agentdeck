@@ -5962,3 +5962,38 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 它本来就是个轮询）。随后连跑三遍全量，稳定 2187 全绿。
 
 验证：`check` **2187 全绿**、`probe:layout` **566 全绿**、`typecheck` 0 错。
+
+### 12.75 上传落 `material/` 根；删掉那行回执；"哪些能删"收成一条判据（分批第 205 批）
+
+使用者两条：「上传后放到 material 目录，而不是 material/appended 目录」；「不要加这行字
+「已删掉 appended/dsh_2.command（还剩 0 份材料）——下一版草稿不会再读到它；自动带的素材没动」」。
+
+**① 落点**：`writeWorkDirUpload(materialDir, 'appended', …)` → `''`（`material/` 根）。
+索引登记照旧，只是 relPath 变成 `x.md`。好处是他点开那一栏的树，顶层就看见自己传的文件。
+
+**② 回执**：删掉的正是那一行——删除成功**不吭声**（树里少一行就是回执），失败走 toast；
+上传同理（成功后清掉「正在上传…」，不留在栏脚）。`materialDeleteDone` / `uploadDone`
+两条词条随之删除。
+
+**③ 顺带补的一个洞**（"上传落在 material 根"必然带来的）：原来"能不能删"是按**目录名**
+（`appended/`）判的，上传改落根之后，传上去的文件就变成"看得见删不掉"了。现在收成一条判据
+`isRemovableMaterialPath(relPath)`（`crystallize-material.ts`，**一处定义**）：
+
+- `appended/<单段文件名>` ⇒ 可删（那一层本来就是"使用者给的"）；
+- `material/` **根下的单段文件名**且**不在** `MATERIAL_PLATFORM_ENTRIES` 里 ⇒ 可删（= 上传的）；
+- 其余（`turns/001.md`、`existing-skill/SKILL.md`、多段、`. .`）⇒ 不可删。
+
+两个消费者：`DELETE /api/crystallize/material`（拒绝还是允许），与 `GET …/material` 新增的
+`removable` 字段——**界面拿它决定显示不显示删除钮**，不再自己按目录名猜（猜的结果就是
+"上传的文件没有删除钮"）。
+
+**不变量测试**（`crystallize-material-removable.test.ts`）：`writeMaterial` 往 `material/`
+顶层写的**每一个**条目都必须在 `MATERIAL_PLATFORM_ENTRIES` 里——否则将来新加一个平台文件时
+它会**悄悄变成可删**，而那种错是静默的。这条不变量正是"用豁免清单判可删"能成立的前提。
+
+判据（探针 **566** 全绿）：`crystal.uploadToWorkDir` 读回路径改成 `material/<名字>`（仍然逐字节比对
+文本 + 含 NUL 的二进制）；`crystal.deleteMaterial` 不再量那行回执（它没了），改为量"服务端归零"。
+daemon 侧新增：`§10.13` 一条「上传落在根上而且能删」、`removable` 规则 3 条、
+`workdir-upload` 7 条。
+
+验证：`check` **2191 全绿**、`probe:layout` **566 全绿**、`typecheck` 0 错。

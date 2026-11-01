@@ -118,6 +118,7 @@ import {
 } from './builtin-drafter.ts'
 import {
   appendMaterial,
+  isRemovableMaterialPath,
   noteUploadedInIndex,
   collectBlankMaterial,
   collectMaterial,
@@ -5718,9 +5719,13 @@ async function injectedSkillsOf(
         dir: materialDir,
         items: all.map((f) => {
           const bytes = Buffer.byteLength(f.text, 'utf8')
+          // ★ 分批第 205 批：**能不能删由服务端说**（`isRemovableMaterialPath` 一处定义）。
+          //   界面拿它决定显示不显示删除钮——不再自己按"是不是 appended/"去猜（上传的文件
+          //   现在落在 `material/` 根上，按目录名猜会让它变成"看得见删不掉"）。
+          const removable = isRemovableMaterialPath(f.relPath)
           return bytes > PER_FILE_CAP
-            ? { relPath: f.relPath, bytes, truncated: true, text: f.text.slice(0, PER_FILE_CAP) }
-            : { relPath: f.relPath, bytes, truncated: false, text: f.text }
+            ? { relPath: f.relPath, bytes, truncated: true, removable, text: f.text.slice(0, PER_FILE_CAP) }
+            : { relPath: f.relPath, bytes, truncated: false, removable, text: f.text }
         }),
       })
       return
@@ -5728,7 +5733,7 @@ async function injectedSkillsOf(
     /**
      * ── 上传文件到**工作目录**（分批第 203 批）────────────────────────────────
      *
-     * 两个入口、一份实现（`workdir-upload.ts` 的口径）：沉淀页落在 `material/appended/`
+     * 两个入口、一份实现（`workdir-upload.ts` 的口径）：沉淀页落在 **`material/` 根**
      * （那是"它读的依据"，顺带在素材索引里登记一行），聊天页落在 `uploads/`。
      *
      * 为什么落点由**服务端**写死而不是客户端传：客户端一旦能指定目录，就得为"能不能写进
@@ -5771,8 +5776,14 @@ async function injectedSkillsOf(
               base64: f.base64 as string,
             }))
         : []
+      /**
+       * ★ 分批第 205 批（使用者定）：上传的文件落在 **`material/` 根上**，不再套一层
+       * `appended/`。理由是他的浏览习惯：那一栏的树的顶层就是 `material/`，他要在那儿
+       * 一眼看到自己传的文件，而不是点开一层才看到。
+       * 索引登记照旧（`noteUploadedInIndex`），只是 relPath 变成 `x.md`。
+       */
       const materialDir = join(await draftTaskDir(draftRunId), 'material')
-      const res2 = await writeWorkDirUpload(materialDir, 'appended', files)
+      const res2 = await writeWorkDirUpload(materialDir, '', files)
       if (!res2.ok) {
         sendJson(res, 400, { error: res2.error, code: res2.code })
         return
@@ -5780,7 +5791,7 @@ async function injectedSkillsOf(
       // 素材索引登记一行（起草者读的第一个文件；二进制要标一句"用工具读"）
       await noteUploadedInIndex(materialDir, res2.files)
       info(`上传材料（草稿 ${draftRunId.slice(-8)}）：${res2.files.length} 个文件 ${res2.bytes} 字节`)
-      sendJson(res, 200, { dir: 'material/appended', files: res2.files, bytes: res2.bytes })
+      sendJson(res, 200, { dir: 'material', files: res2.files, bytes: res2.bytes })
       return
     }
 

@@ -317,22 +317,13 @@ export const crystallizeText = {
    * ★ 分批第 203 批：上传文件到工作目录（📎 / 拖进那一栏）。两条回执都要说清**落到哪、叫什么**——
    * 重名会被加 `-2`，不点名的话人找不到自己刚传的那份。
    */
-  'crystallize.uploadDone': {
-    zh: '上传了 {n} 个文件到 material/appended/：{names}',
-    en: 'Uploaded {n} file(s) to material/appended/: {names}',
-  },
+  // ★ 分批第 205 批：`uploadDone` 删了——上传成功不留在界面上（树里多一行即回执）。
   'crystallize.uploadFailed': {
     zh: '上传失败：{error}',
     en: 'Upload failed: {error}',
   },
   'crystallize.materialDeleteConfirm': { zh: '确认删掉', en: 'Confirm' },
-  'crystallize.materialDeleteDone': {
-    zh: '已删掉 {path}（还剩 {n} 份材料）——下一版草稿不会再读到它；自动带的素材没动',
-    en: 'Deleted {path} ({n} left) — the next draft will not read it; auto-collected material untouched',
-  },
-  // ★ 分批第 202 批：这一族词条（拖文件 / 选目录 / 单份上限 / 草案期锁定）随「拖到这里」
-  //   那一块一起删了——使用者："全部去掉「把文本文件拖到这里，或选文件 / 选目录」"。
-  //   追加材料仍然走栏脚输入条的「追加材料：…」。
+  // ★ 分批第 205 批：`materialDeleteDone` 删了——删除成功不再出那行回执（树少一行即回执）。
   'crystallize.diffBackToContent': { zh: '返回内容', en: 'Back to content' },
   'crystallize.artifactOpen': { zh: '产物', en: 'Artifact' },
   'crystallize.artifactClose': { zh: '收起', en: 'Collapse' },

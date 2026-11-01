@@ -1158,10 +1158,10 @@
           body: JSON.stringify({ files: payload }),
         },
       )
-      composerReceipt = $t('crystallize.uploadDone', {
-        n: String(res.files.length),
-        names: res.files.map((f) => f.relPath.split('/').pop() ?? f.relPath).join('、'),
-      })
+      // ★ 205 批：上传成功**不留在栏脚**（树里多出来那一行就是回执；使用者明确不要那行字）。
+      //   "正在上传…" 这一句是**临时**的，成功后清掉。
+      composerReceipt = ''
+      void res
       // 树与"依据"两处都重读（材料只有一份数据源）
       onmaterialchange()
       void loadMaterial()

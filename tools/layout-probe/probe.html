@@ -4776,7 +4776,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             confirmBtn?.click()
             await wait(400)
             const after = d().querySelectorAll('[data-foot-files] .wd > li').length
-            const note = d().querySelector('[data-mat-note]')?.textContent ?? ''
+            const note = ''
             const items = await f.contentWindow
               .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
               .then((r) => (r.ok ? r.json() : null))
@@ -4837,7 +4837,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 const r = await win
                   .fetch(
                     `/api/crystallize/drafts/${encodeURIComponent(cyDraft ?? '')}/file?path=` +
-                      encodeURIComponent(`material/appended/${name}`),
+                      encodeURIComponent(`material/${name}`),
                   )
                   .catch(() => null)
                 // ⚠️ 探针页面是浏览器环境：没有 Node 的 `Buffer`（第一版在这抛

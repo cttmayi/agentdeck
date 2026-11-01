@@ -505,6 +505,60 @@ export async function appendMaterial(
  * ⚠️ 返回**判别结果而不是抛异常**：调用方（HTTP 路由）要把"不给删"与"没这份"翻成不同的状态码，
  *    而异常在跨进程边界上是最容易丢信息的一种传递方式。
  */
+/**
+ * ★ 分批第 205 批：`material/` 根上**不能删**的顶层条目（平台自己生成的那些）。
+ *
+ * 为什么要这张清单：上传的文件现在落在 `material/` 根上（使用者定），所以"能不能删"不能再按
+ * 目录名（`appended/`）判——但 `material/` 里还混着平台从来源 run 切出来的证据（`turns/`、
+ * `verdict.md`…）与登记文件（`00-README.md`、`meta.json`…），删了"依据"就和来源对不上。
+ *
+ * ⚠️ 反过来的不变量由测试钉着（`crystallize-material.test.ts`）：`writeMaterial` 往
+ *    `material/` 顶层写的**每一个**条目都必须在下面这张表里。否则将来新加一个平台文件时，
+ *    它会**悄悄变成可删**——而那种错是静默的。
+ */
+export const MATERIAL_PLATFORM_ENTRIES = new Set([
+  // 平台登记文件
+  '00-README.md',
+  'meta.json',
+  'skills-index.md',
+  'injected-skills.json',
+  // 从来源 run 切出来的证据
+  'turns',
+  'task-run.md',
+  'verdict.md',
+  'feedback.md',
+  'user-requirements.md',
+  'answers.md',
+  'QUESTIONS.md',
+  // 更新场景的"上一版"
+  'existing-skill',
+  // 使用者给的（旧路径；这一层**能删**，见 `isRemovableMaterialPath`）
+  'appended',
+])
+
+/**
+ * 这个 `material/` 下的相对路径**能不能删**。
+ *
+ * 规则（一处定义，路由与界面都吃它）：
+ *   · `appended/<单段文件名>` —— 能删（`appended/` 这一层本来就是"使用者给的"）；
+ *   · `material/` **根下的单段文件名**，且不在 `MATERIAL_PLATFORM_ENTRIES` 里 —— 能删
+ *     （那就是上传上来的文件）；
+ *   · 其余（`turns/001.md`、`existing-skill/SKILL.md`、任何多段路径、`..`）—— 不能删。
+ */
+export function isRemovableMaterialPath(relPath: string): boolean {
+  const asked = relPath.trim().replace(/^\.\//, '')
+  if (asked === '' || asked.includes('\\') || asked.includes('..')) return false
+  const segs = asked.split('/')
+  if (segs.some((seg) => seg === '' || seg === '.')) return false
+  const appendedPrefix = `${APPENDED_MATERIAL_DIR}/`
+  if (asked.startsWith(appendedPrefix)) {
+    const name = asked.slice(appendedPrefix.length)
+    return name !== '' && !name.includes('/')
+  }
+  if (segs.length === 1) return !MATERIAL_PLATFORM_ENTRIES.has(segs[0]!)
+  return false
+}
+
 export type RemoveMaterialResult =
   | { ok: true; relPath: string; remaining: number }
   | { ok: false; code: 'material_not_removable' | 'material_not_found'; relPath: string }
@@ -549,22 +603,22 @@ export async function removeMaterial(
   relPath: string,
 ): Promise<RemoveMaterialResult> {
   const asked = relPath.trim().replace(/^\.\//, '')
-  const prefix = `${APPENDED_MATERIAL_DIR}/`
-  const name = asked.startsWith(prefix) ? asked.slice(prefix.length) : ''
-  // 只看 `appended/` 下的**单段文件名**：多段、`..`、绝对路径一律不给删（API 是公开的，
-  // 不能靠"界面不会这么传"来省校验——与追加那边的 `safeMaterialName` 同一条纪律）。
-  if (name === '' || name === '.' || name === '..' || /[\\/]/.test(name)) {
+  // 能不能删由 `isRemovableMaterialPath` **一处**判（路由、界面共用同一条规则）：
+  // `appended/<文件>` 或 `material/` 根下"不是平台生成"的单段文件名（= 上传上来的）。
+  // 多段、`..`、绝对路径一律不给删（API 是公开的，不能靠"界面不会这么传"省校验）。
+  if (!isRemovableMaterialPath(asked)) {
     return { ok: false, code: 'material_not_removable', relPath: asked }
   }
-  const dir = join(materialDir, APPENDED_MATERIAL_DIR)
+  const dir = asked.includes('/') ? join(materialDir, APPENDED_MATERIAL_DIR) : materialDir
+  const name = asked.includes('/') ? asked.slice(asked.lastIndexOf('/') + 1) : asked
   const existing = await readdir(dir).catch(() => [] as string[])
   if (!existing.includes(name)) {
-    return { ok: false, code: 'material_not_found', relPath: `${prefix}${name}` }
+    return { ok: false, code: 'material_not_found', relPath: asked }
   }
   await unlink(join(dir, name))
   const remaining = existing.length - 1
-  await rewriteIndexAfterRemove(materialDir, `${prefix}${name}`, remaining)
-  return { ok: true, relPath: `${prefix}${name}`, remaining }
+  await rewriteIndexAfterRemove(materialDir, asked, remaining)
+  return { ok: true, relPath: asked, remaining }
 }
 
 // ★ 分批第 201 批：`appendRepoMaterial` / `noteRepoInIndex`（"从仓库拉材料"的落盘与索引

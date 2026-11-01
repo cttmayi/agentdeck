@@ -34,6 +34,7 @@
   import WorkDirTree from './WorkDirTree.svelte'
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
+  import { showToast } from '../lib/view.ts'
 
   let {
     draftRunId,
@@ -66,6 +67,15 @@
   let topCount = $state(0)
   /** 增删之后让树重取（`reloadKey` 变了就重列）。 */
   let reloadTick = $state(0)
+  /**
+   * ★ 分批第 205 批：**哪些文件能删**由服务端说（`GET /api/crystallize/material` 的 `removable`）。
+   *
+   * 为什么不自己按"是不是 `appended/`"判：上传上来的文件现在落在 `material/` 根上，
+   * 按目录名猜会让它变成"看得见删不掉"。这里只取一个**布尔集合**（键是相对 `material/`
+   * 的路径），列表本身仍然由树渲染——不是第二份清单。
+   */
+  let removablePaths = $state<ReadonlySet<string>>(new Set())
+
   /** 上传进行中（防连点，也给回执一个"正在传"的临时话术）。 */
   let uploading = $state(false)
   /** 正在追加时不为空（防止一边拖一批、一边按两次按钮）。 */
@@ -79,7 +89,6 @@
   /** 已经点了「删掉」、等第二次确认的那份（两步删除：材料是使用者给的，误删不好补）。 */
   let pendingDelete = $state('')
   let deleting = $state('')
-  let deleteNote = $state('')
 
   /**
    * ★ 分批第 203 批：**把文件拖进这一栏** ⇒ 传到 `material/appended/`。
@@ -91,7 +100,6 @@
   async function uploadFiles(files: File[]): Promise<void> {
     if (uploading || files.length === 0) return
     uploading = true
-    deleteNote = ''
     try {
       const payload = await Promise.all(
         files.map(async (file) => ({
@@ -109,15 +117,13 @@
         },
       )
       reloadTick += 1
-      deleteNote = $t('crystallize.uploadDone', {
-        n: String(res.files.length),
-        names: res.files.map((f) => f.relPath.split('/').pop() ?? f.relPath).join('、'),
-      })
+      // 成功不弹话：树里多出来的那一行就是回执（使用者定：不要那行"已上传…"的字）
       onchanged()
     } catch (err) {
-      deleteNote = $t('crystallize.uploadFailed', {
-        error: err instanceof Error ? err.message : String(err),
-      })
+      // 失败必须说出来（不能静默）：走 toast，不占栏脚那一行
+      showToast(
+        $t('crystallize.uploadFailed', { error: err instanceof Error ? err.message : String(err) }),
+      )
     } finally {
       uploading = false
     }
@@ -134,6 +140,25 @@
     return btoa(binary)
   }
 
+  $effect(() => {
+    void draftRunId
+    void rev
+    void reloadTick
+    void (async () => {
+      try {
+        const res = await api<{ items: Array<{ relPath: string; removable?: boolean }> }>(
+          `/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}`,
+        )
+        removablePaths = new Set(
+          res.items.filter((i) => i.removable === true).map((i) => i.relPath),
+        )
+      } catch {
+        // 取不到就不显示删除钮（降级而不是猜）
+        removablePaths = new Set()
+      }
+    })()
+  })
+
   async function removeMaterial(treePath: string): Promise<void> {
     if (deleting !== '') return
     deleting = treePath
@@ -149,14 +174,12 @@
         { method: 'DELETE' },
       )
       pendingDelete = ''
-      deleteNote = $t('crystallize.materialDeleteDone', {
-        path: res.relPath,
-        n: String(res.remaining),
-      })
+      // ★ 205 批：删掉成功也**不吭声**——树里那一行消失就是回执（使用者明确不要那行字）
       reloadTick += 1
       onchanged()
     } catch (err) {
-      deleteNote = String(err instanceof Error ? err.message : err)
+      // 失败必须说出来（不能静默）：走 toast，不占栏脚那一行
+      showToast(String(err instanceof Error ? err.message : err))
     } finally {
       deleting = ''
     }
@@ -174,7 +197,8 @@
   <!--
     ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）。
     它自带"一次列一层 / 点文件就地打开查看器 / 取不到时说明原因"，所以这里不再自己画行。
-      唯一多出来的是**删除钮**（只给 `material/appended/` 那几份）——通过 `rowAction` 长在那一行上。
+      唯一多出来的是**删除钮**（只给 `material/appended/` 那几份：那是"使用者给的、可反悔的"；
+    `material/` 根上还混着平台生成的证据文件，服务端也拒删它们）。
   -->
   <WorkDirTree
     base={`/api/crystallize/drafts/${encodeURIComponent(draftRunId)}`}
@@ -182,7 +206,7 @@
     bind:count={topCount}
   >
     {#snippet rowAction({ entry })}
-      {#if entry.path.startsWith('material/appended/')}
+      {#if removablePaths.has(entry.path.replace(/^material\//, ''))}
         {#if pendingDelete === entry.path}
           <button
             type="button"
@@ -201,9 +225,11 @@
       {/if}
     {/snippet}
   </WorkDirTree>
-  {#if deleteNote !== ''}
-    <p class="faint small" data-mat-note>{deleteNote}</p>
-  {/if}
+  <!--
+    ★ 分批第 205 批（使用者定）：「不要加这行字「已删掉 appended/…（还剩 0 份材料）——下一版草稿
+    不会再读到它；自动带的素材没动」」。删掉的就是**这一行回执**——删/传的结果由**树本身**说
+    （那一行没了、或那一行出现了），失败另走 toast（不能静默）。
+  -->
 
 </FootFiles>
 
