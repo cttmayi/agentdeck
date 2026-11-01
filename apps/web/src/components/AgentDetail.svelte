@@ -9,11 +9,16 @@
     tools,
     deleteAgent,
     loadAgents,
+    loadSkills,
     updateAgent,
   } from '../lib/stores.ts'
-  import { showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { t, tx } from '../lib/i18n.ts'
+  // ★ 分批第 208 批：起草者的「沉淀用技能」可以从**这一页**直接装（使用者定：安装入口留两处，
+  //   另一处是「沉淀设置」）。装的是同一个上游地址，走的是同一个接口。
+  import { api } from '../lib/api.ts'
+  import { DISTILLY_SOURCE } from '../lib/crystallize-editor.svelte.ts'
+  import { showToast } from '../lib/view.ts'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -40,6 +45,33 @@
 
   let busy = false
   let error = ''
+
+  /** 正在装「沉淀用技能」（防连点）。 */
+  let installingSkill = false
+
+  /**
+   * ★ 分批第 208 批（使用者定：**安装入口留两处**——「沉淀设置」与本页）：
+   * 从起草者这一格直接装它该挂的那条技能。装完 daemon 会**自动把它挂到起草者身上**
+   * （`syncDrafterSkillMount`），所以这里只要重读列表即可。
+   */
+  async function installDrafterSkill(): Promise<void> {
+    if (installingSkill) return
+    installingSkill = true
+    try {
+      await api('/api/skills/install', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // ⚠️ `source` 是**对象**（`{kind:'url', url}`）；传字符串会被 400 拒
+        body: JSON.stringify({ source: { kind: 'url', url: DISTILLY_SOURCE } }),
+      })
+      await Promise.all([loadAgents(), loadSkills()])
+      showToast($t('agents.skillInstallDone'))
+    } catch (err) {
+      showToast($t('agents.skillInstallFailed', { error: String(err instanceof Error ? err.message : err) }))
+    } finally {
+      installingSkill = false
+    }
+  }
 
   /**
    * ★ 分批第 207 批：起草者**应该挂**的那条技能的 slug（`distilly`）。
@@ -494,6 +526,13 @@
                   >
                 </p>
                 <span class="hint">{$t('agents.drafterSkillMissingHint')}</span>
+                <button
+                  type="button"
+                  class="ghost small"
+                  data-install-drafter-skill
+                  disabled={installingSkill}
+                  onclick={() => void installDrafterSkill()}
+                >{installingSkill ? $t('common.saving') : $t('agents.skillInstallNow')}</button>
               {/if}
             {:else}
               <p class="empty-value">{$t('agents.builtinNoSkills')}</p>

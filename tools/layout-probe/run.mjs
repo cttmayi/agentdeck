@@ -1262,6 +1262,19 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v > 0.45,
     show: (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : String(v)),
   },
+  // ⚠️ 208 批在这里**删掉**了两条判据（`agents.drafterSkillMissing` / `…Installed`）：
+  //   它们想用"清空挂载 → 看未装 → 装回 → 看已装"驱动界面，但 `agents` 是**页面级 store**，
+  //   只在视图挂载时重拉；改服务端状态后界面不会自己刷新，而整页 reload 会把探针的虚拟时钟搞死
+  //   （实测：探针超时、dump 里没有 done）。那一态改由 `crystallize-e2e` 的 §10.17 钉（删/装
+  //   distilly ⇒ 起草被拒 / 自动挂上），界面这一侧量"已装"与"装了就不该有安装按钮"。
+  {
+    view: '智能体',
+    key: 'agents.drafterSkillInstallButton',
+    label:
+      '★★★ 已经挂着「沉淀用技能」时**不摆**一键安装按钮（那是"未装"那一态的按钮；装了还摆等于给一个点了会重复装的东西）',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
   {
     view: '智能体',
     key: 'agents.builtinSkillsText',

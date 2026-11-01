@@ -2420,7 +2420,19 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const skillsCell = d().querySelector('.skills-cell')
           facts['agents.builtinSkillsLocked'] = !!(skillsCell && skillsCell.className.includes('locked'))
           facts['agents.builtinSkillsText'] = skillsCell ? text(skillsCell) : null
+          // ★ 208 批：装着的时候**不该**再摆一颗「一键安装」（那是"未装"那一态的按钮）
+          facts['agents.drafterSkillInstallButton'] = !!d().querySelector(
+            '[data-install-drafter-skill]',
+          )
         }
+
+        // ★ 分批第 208 批：起草者那一格的"未安装/已装"两态在探针里**量不到**（原因写在这里）：
+        //   `agents` 是**页面级 store**，只在视图挂载时重拉；而这里改的是服务端状态（PATCH 清挂载），
+        //   整页 reload 去刷新它会把探针的虚拟时钟搞死（实测：探针超时、dump 里没有 done）。
+        //   所以"未安装"那一态改由 daemon 侧判据钉（`crystallize-e2e` §10.17：删掉 distilly ⇒
+        //   起草被拒 + `GET /api/agents` 里起草者 skillIds 为空；装回去 ⇒ 自动挂上）；
+        //   界面这一侧量"已装"（`agents.builtinSkillsText`）与"装了就不该有安装按钮"
+        //   （`agents.drafterSkillInstallButton`）。
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)

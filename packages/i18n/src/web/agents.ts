@@ -410,6 +410,13 @@ export const agentsText = {
     en: 'Not installed: install it from Crystallize → Settings; it will be mounted automatically',
   },
   'agents.skillNotInstalled': { zh: '（未安装）', en: ' (not installed)' },
+  /**
+   * ★ 分批第 208 批（使用者定："留两处"）：安装入口 = 「沉淀设置」+ **智能体页这一格**。
+   * 两处装的是同一个上游地址（`DISTILLY_SOURCE`）、走同一个接口，装完 daemon 自动挂上。
+   */
+  'agents.skillInstallNow': { zh: '一键安装', en: 'Install now' },
+  'agents.skillInstallDone': { zh: '已安装「沉淀用技能」，并自动挂到起草者身上', en: 'Installed the crystallization skill and mounted it on the drafter' },
+  'agents.skillInstallFailed': { zh: '安装失败：{error}', en: 'Install failed: {error}' },
   'agents.builtinNoSkills': {
     zh: '内置智能体不挂 skill（它们做什么由平台随版本给，与挂载无关）',
     en: 'Built-in agents mount no skills (what they do ships with the platform)',
