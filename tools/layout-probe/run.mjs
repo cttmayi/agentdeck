@@ -3682,6 +3682,15 @@ const CHECKS = [
   //   栏脚输入条的「追加材料：…」（那条另有判据 `crystal.appendMaterial`）。
   {
     view: '沉淀',
+    key: 'crystal.footRefreshLabel',
+    label:
+      '★★ 沉淀页的「工作目录的文件」标题行也有**「刷新」**（使用者："聊天 中工作目录的文件，有个刷新，' +
+      '但沉淀里面没有，请补上"）——与聊天页同一颗按钮、同一个词条',
+    ok: (v) => v === '刷新',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.dropHint',
     label:
       '★★ 那一栏的标题行写着**「可把文件拖进来」**（拖拽区只在悬停时才有虚线框——不写这一句，' +
@@ -3693,7 +3702,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.uploadToWorkDir',
     label:
-      '★★★ 把文件**拖进「工作目录的文件」那一栏** ⇒ 真的落到 `material/appended/`，而且' +
+      '★★★ 把文件**拖进「工作目录的文件」那一栏** ⇒ 真的落到 **`uploads/`**（与聊天页同一落点），而且' +
       '**逐字节等于**上传内容（文本 + 含 NUL 的二进制都验）——只量"树里多一行"的话，' +
       '把二进制当文本转码写坏的实现照样能绿',
     ok: (v) => !!v && v.zone === true && v.textOk === true && v.binOk === true,

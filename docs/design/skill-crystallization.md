@@ -5997,3 +5997,31 @@ daemon 侧新增：`§10.13` 一条「上传落在根上而且能删」、`remov
 `workdir-upload` 7 条。
 
 验证：`check` **2191 全绿**、`probe:layout` **566 全绿**、`typecheck` 0 错。
+
+### 12.76 两页行为对齐：上传都落 `uploads/`；沉淀页补上「刷新」（分批第 206 批）
+
+使用者：「聊天和沉淀的行为还是有差异呢，比如上传文件，改成一样，都放 uploads 目录吧。另外 聊天 中
+工作目录的文件，有个刷新，但沉淀里面没有，请补上」。
+
+**① 上传落点统一**：两页都落 `<工作目录>/uploads/`。沉淀页原来的两条中间态（`material/appended/`
+→ `material/` 根）在这一批收敛掉——**一页一条规则**，别再让人记两个落点。
+
+连带的取舍（写在代码注释里）：
+- 文件不再是"素材"（不在 `material/` 里），所以**素材索引要指一句**：`00-README.md` 里写成
+  **相对本目录**的 `../uploads/x.md`——只写 `uploads/x.md` 的话，起草者会去 `material/uploads/`
+  找，那儿什么都没有（它会以为素材坏了）。这条被 e2e 判据钉着。
+- 「能不能删」回到一条简单规则：**只有 `appended/<单段文件名>` 可删**。205 批放开过"`material/`
+  根上非平台文件也可删"（那时上传落根上），现在 `material/` 根上只会是平台写的东西 ⇒ 那条开放
+  规则没有对象了，`MATERIAL_PLATFORM_ENTRIES` 与它的不变量测试一起删掉（不留死规则）。
+  `uploads/` 里的文件两页一样：**没有删除钮**（与聊天页一致）。
+
+**② 沉淀页补「刷新」**：`FootFiles` 的 `actions` 里加一颗，**与聊天页同一个词条**
+（`chat.filesRefresh` 搬成 `files.refresh`，两页共用）、同一个位置；点了让树重列一次
+（`reloadTick` 变化 ⇒ `WorkDirTree` 的 `reloadKey` 变 ⇒ 重取顶层）。
+
+判据（探针 **567** 全绿）：`crystal.footRefreshLabel`（那颗按钮写着「刷新」）、
+`crystal.uploadToWorkDir` 的读回路径改成 `uploads/<名字>`（仍然逐字节比对文本 + 含 NUL 的二进制）。
+daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../uploads/…`）」、删除用例组名与
+"只许删 `appended/`"的说法同步。
+
+验证：`check` **2188 全绿**、`probe:layout` **567 全绿**、`typecheck` 0 错。

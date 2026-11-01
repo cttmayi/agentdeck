@@ -1524,7 +1524,7 @@ describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批�
  * 判据为什么落在"索引里没有它"而不只是"API 返回 200"：返回 200 只说明 unlink 成功，
  * 说明不了**起草者读到的依据**已经变成删后的样子。
  */
-describe('§10.13 删除材料：只有使用者给的能删，索引页跟着改（分批第 147 批）', () => {
+describe('§10.13 删除材料：只有使用者给的（appended/）能删，索引页跟着改（分批第 147 批）', () => {
   const draftOf = async (purpose: string): Promise<string> =>
     draftAndWait({
       runId: await runReviewed(`审完的流程（${purpose}）`),
@@ -1626,7 +1626,7 @@ describe('§10.13 删除材料：只有使用者给的能删，索引页跟着�
     assert.match(indexAfter, /使用者给的材料 1 份/, '"规模 N 份"数的是还有几份，不同步就是撒谎')
   })
 
-  test('★★★ 上传的文件落在 `material/` 根上，而且**能删**（平台生成的证据仍然不能删）', async () => {
+  test('★★★ 上传的文件落在 **`uploads/`**（与聊天页同一落点），素材索引里指得出它', async () => {
     const draftRunId = await draftOf('上传材料')
     const up = await fetch(`${daemon.url}/api/crystallize/drafts/${draftRunId}/upload`, {
       method: 'POST',
@@ -1638,22 +1638,24 @@ describe('§10.13 删除材料：只有使用者给的能删，索引页跟着�
     const upText = await up.clone().text()
     assert.equal(up.status, 200, upText)
     const uploaded = (JSON.parse(upText) as { files: Array<{ relPath: string }> }).files[0]!
-    // ★ 使用者定：落 `material/` 根，不套 `appended/`
-    assert.equal(uploaded.relPath, '上传的笔记.md')
+    // ★ 使用者定（第 206 批）：与聊天页**完全一致**，落在 `<工作目录>/uploads/`
+    assert.equal(uploaded.relPath, 'uploads/上传的笔记.md')
 
+    // 它不在 `material/` 里（不是"素材"），但索引页要**指得出它**（相对 material/ 的路径）
     const items = await materialOf(draftRunId)
-    assert.ok(items.some((i) => i.relPath === '上传的笔记.md'), '上传的文件要在清单里')
+    assert.equal(items.some((i) => i.relPath === '上传的笔记.md'), false)
     const index = items.find((i) => i.relPath === '00-README.md')!.text
-    assert.match(index, /上传的笔记/, '素材索引要登记它（起草者读的第一个文件）')
+    assert.match(index, /\.\.\/uploads\/上传的笔记/, '索引要给相对 material/ 的路径，否则起草者按索引找不到')
 
-    // 能删（它在 `material/` 根上，且不是平台生成的那些）
-    const r = await remove(draftRunId, '上传的笔记.md')
-    assert.equal(r.status, 200, JSON.stringify(r.body))
-    const after = await materialOf(draftRunId)
-    assert.equal(after.some((i) => i.relPath === '上传的笔记.md'), false)
+    // 文件本身在（走工作目录树的 file 路由读回来）
+    const got = await fetch(
+      `${daemon.url}/api/crystallize/drafts/${draftRunId}/file?path=${encodeURIComponent('uploads/上传的笔记.md')}`,
+    )
+    assert.equal(got.status, 200, await got.clone().text())
+    assert.equal(await got.text(), '# 上传\n')
   })
 
-  test('★★ 校验：平台生成的不能删、上传的可以；没这份 404；非草稿 / 没跑完 / 已入库各自如实拒绝', async () => {
+  test('★★ 校验：只许删 appended/（平台证据与 uploads/ 都不在 material 里）；没这份 404；非草稿 / 没跑完 / 已入库各自如实拒绝', async () => {
     const draftRunId = await draftOf('删除材料校验')
 
     // 平台从来源 run 切出来的证据一律不给删（删了"依据"就和来源对不上，且下次起草会切回来）

@@ -8,6 +8,12 @@
  */
 export const filesText = {
   'files.heading': { zh: '工作目录的文件', en: 'Files in the work directory' },
+  /**
+   * ★ 分批第 206 批：「工作目录的文件」标题行那颗「刷新」——聊天页与沉淀页**同一颗**
+   * （使用者："聊天 中工作目录的文件，有个刷新，但沉淀里面没有，请补上"）。
+   * 所以词条搬到 `files.*` 里，两页共用。
+   */
+  'files.refresh': { zh: '刷新', en: 'Refresh' },
   'files.error': { zh: '取不到工作目录的文件', en: 'Could not read the work directory' },
   'files.errorHint': {
     zh: '（如果本机的 daemon 刚更新过，重启它再试——新功能要重启才生效）',

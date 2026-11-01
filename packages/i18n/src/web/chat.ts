@@ -71,7 +71,7 @@ export const chatText = {
    * 这里只放聊天这一侧特有的几句：条数、刷新、以及这台 daemon 还没有那条接口。
    */
   'chat.filesCount': { zh: '· {count} 项', en: '· {count} items' },
-  'chat.filesRefresh': { zh: '刷新', en: 'Refresh' },
+  // ★ 分批第 206 批：`chat.filesRefresh` 搬成了 `files.refresh`（聊天页与沉淀页同一颗按钮）。
   'chat.filesRunningHint': {
     zh: '它正在这个目录里干活——点「刷新」看现在的样子。',
     en: 'It is working in this directory right now — hit Refresh to see the current state.',

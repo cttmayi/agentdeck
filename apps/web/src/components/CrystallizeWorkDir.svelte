@@ -193,6 +193,16 @@
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
   bind:open={open}
 >
+  {#snippet actions()}
+    <!--
+      ★ 分批第 206 批：与聊天页**同一颗**「刷新」（同一个词条 `files.refresh`、同一个位置）。
+      使用者："聊天 中工作目录的文件，有个刷新，但沉淀里面没有，请补上"。
+      它只让树重列一次（`reloadTick` 变了 ⇒ `WorkDirTree` 的 `reloadKey` 变 ⇒ 重取顶层）。
+    -->
+    <button type="button" class="ghost small" data-foot-refresh onclick={() => (reloadTick += 1)}>
+      {$t('files.refresh')}
+    </button>
+  {/snippet}
 
   <!--
     ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）。

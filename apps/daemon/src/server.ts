@@ -5782,16 +5782,26 @@ async function injectedSkillsOf(
        * 一眼看到自己传的文件，而不是点开一层才看到。
        * 索引登记照旧（`noteUploadedInIndex`），只是 relPath 变成 `x.md`。
        */
-      const materialDir = join(await draftTaskDir(draftRunId), 'material')
-      const res2 = await writeWorkDirUpload(materialDir, '', files)
+      const taskDir = await draftTaskDir(draftRunId)
+      const materialDir = join(taskDir, 'material')
+      /**
+       * ★ 分批第 206 批（使用者定）：**与聊天页完全一致**——上传的文件落
+       * `<工作目录>/uploads/`，不落 `material/`（也不再落 `material/appended/`）。
+       *
+       * 两页从此只有一条规则：拖进来的文件都在 `uploads/`。代价是它不再是"素材"（不在
+       * `material/` 里），所以索引页要**指一句**，否则起草者翻不到（见下面的登记）。
+       */
+      const res2 = await writeWorkDirUpload(taskDir, 'uploads', files)
       if (!res2.ok) {
         sendJson(res, 400, { error: res2.error, code: res2.code })
         return
       }
-      // 素材索引登记一行（起草者读的第一个文件；二进制要标一句"用工具读"）
+      // 素材索引登记一行（起草者读的第一个文件；二进制要标一句"用工具读"）。
+      // ⚠️ 这些文件在 `material/` **之外**（`../uploads/`），索引里要说清路径，否则起草者
+      //    按索引去 `material/` 里找会找不到。
       await noteUploadedInIndex(materialDir, res2.files)
       info(`上传材料（草稿 ${draftRunId.slice(-8)}）：${res2.files.length} 个文件 ${res2.bytes} 字节`)
-      sendJson(res, 200, { dir: 'material', files: res2.files, bytes: res2.bytes })
+      sendJson(res, 200, { dir: 'uploads', files: res2.files, bytes: res2.bytes })
       return
     }
 

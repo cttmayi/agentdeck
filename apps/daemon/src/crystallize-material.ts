@@ -506,57 +506,19 @@ export async function appendMaterial(
  *    而异常在跨进程边界上是最容易丢信息的一种传递方式。
  */
 /**
- * ★ 分批第 205 批：`material/` 根上**不能删**的顶层条目（平台自己生成的那些）。
+ * ★ 分批第 206 批：**"能不能删"回到一条简单规则**——只有 `appended/<单段文件名>` 可删。
  *
- * 为什么要这张清单：上传的文件现在落在 `material/` 根上（使用者定），所以"能不能删"不能再按
- * 目录名（`appended/`）判——但 `material/` 里还混着平台从来源 run 切出来的证据（`turns/`、
- * `verdict.md`…）与登记文件（`00-README.md`、`meta.json`…），删了"依据"就和来源对不上。
- *
- * ⚠️ 反过来的不变量由测试钉着（`crystallize-material.test.ts`）：`writeMaterial` 往
- *    `material/` 顶层写的**每一个**条目都必须在下面这张表里。否则将来新加一个平台文件时，
- *    它会**悄悄变成可删**——而那种错是静默的。
- */
-export const MATERIAL_PLATFORM_ENTRIES = new Set([
-  // 平台登记文件
-  '00-README.md',
-  'meta.json',
-  'skills-index.md',
-  'injected-skills.json',
-  // 从来源 run 切出来的证据
-  'turns',
-  'task-run.md',
-  'verdict.md',
-  'feedback.md',
-  'user-requirements.md',
-  'answers.md',
-  'QUESTIONS.md',
-  // 更新场景的"上一版"
-  'existing-skill',
-  // 使用者给的（旧路径；这一层**能删**，见 `isRemovableMaterialPath`）
-  'appended',
-])
-
-/**
- * 这个 `material/` 下的相对路径**能不能删**。
- *
- * 规则（一处定义，路由与界面都吃它）：
- *   · `appended/<单段文件名>` —— 能删（`appended/` 这一层本来就是"使用者给的"）；
- *   · `material/` **根下的单段文件名**，且不在 `MATERIAL_PLATFORM_ENTRIES` 里 —— 能删
- *     （那就是上传上来的文件）；
- *   · 其余（`turns/001.md`、`existing-skill/SKILL.md`、任何多段路径、`..`）—— 不能删。
+ * 205 批放开过"`material/` 根上不是平台生成的文件也可删"（那时上传落在根上）；
+ * 206 批上传改落 `<工作目录>/uploads/`（与聊天页完全一致）之后，`material/` 根上**只会**有
+ * 平台写的东西 ⇒ 那条开放规则没有对象了，也多一份要维护的豁免清单，于是撤掉。
  */
 export function isRemovableMaterialPath(relPath: string): boolean {
   const asked = relPath.trim().replace(/^\.\//, '')
   if (asked === '' || asked.includes('\\') || asked.includes('..')) return false
-  const segs = asked.split('/')
-  if (segs.some((seg) => seg === '' || seg === '.')) return false
-  const appendedPrefix = `${APPENDED_MATERIAL_DIR}/`
-  if (asked.startsWith(appendedPrefix)) {
-    const name = asked.slice(appendedPrefix.length)
-    return name !== '' && !name.includes('/')
-  }
-  if (segs.length === 1) return !MATERIAL_PLATFORM_ENTRIES.has(segs[0]!)
-  return false
+  const prefix = `${APPENDED_MATERIAL_DIR}/`
+  if (!asked.startsWith(prefix)) return false
+  const name = asked.slice(prefix.length)
+  return name !== '' && !name.includes('/')
 }
 
 export type RemoveMaterialResult =
@@ -603,14 +565,14 @@ export async function removeMaterial(
   relPath: string,
 ): Promise<RemoveMaterialResult> {
   const asked = relPath.trim().replace(/^\.\//, '')
-  // 能不能删由 `isRemovableMaterialPath` **一处**判（路由、界面共用同一条规则）：
-  // `appended/<文件>` 或 `material/` 根下"不是平台生成"的单段文件名（= 上传上来的）。
-  // 多段、`..`、绝对路径一律不给删（API 是公开的，不能靠"界面不会这么传"省校验）。
+  // 能不能删由 `isRemovableMaterialPath` **一处**判（路由与界面共用同一条规则）：
+  // 只有 `appended/<单段文件名>` 可以（那一层是"使用者给的"）。多段、`..`、绝对路径一律
+  // 不给删（API 是公开的，不能靠"界面不会这么传"省校验）。
   if (!isRemovableMaterialPath(asked)) {
     return { ok: false, code: 'material_not_removable', relPath: asked }
   }
-  const dir = asked.includes('/') ? join(materialDir, APPENDED_MATERIAL_DIR) : materialDir
-  const name = asked.includes('/') ? asked.slice(asked.lastIndexOf('/') + 1) : asked
+  const dir = join(materialDir, APPENDED_MATERIAL_DIR)
+  const name = asked.slice(asked.lastIndexOf('/') + 1)
   const existing = await readdir(dir).catch(() => [] as string[])
   if (!existing.includes(name)) {
     return { ok: false, code: 'material_not_found', relPath: asked }
@@ -642,13 +604,19 @@ export async function noteUploadedInIndex(
   const indexPath = join(materialDir, '00-README.md')
   const index = await readFile(indexPath, 'utf8').catch(() => '')
   const at = new Date().toISOString()
-  const lines = files.map((file) =>
-    file.binary
-      ? `- \`${file.relPath}\`（${file.bytes} 字节）——**二进制文件**：用工具读（\`file\` / \`xxd\` 之类），` +
+  /**
+   * ⚠️ 上传的文件在 `material/` **之外**（`<工作目录>/uploads/`，与聊天页同一落点）⇒
+   *    索引里必须给**相对本目录**的路径（`../uploads/x.md`）。只写 `uploads/x.md` 的话，
+   *    起草者会去 `material/uploads/` 里找——那儿什么都没有，它会以为素材坏了。
+   */
+  const lines = files.map((file) => {
+    const rel = file.relPath.startsWith('uploads/') ? `../${file.relPath}` : file.relPath
+    return file.binary
+      ? `- \`${rel}\`（${file.bytes} 字节）——**二进制文件**：用工具读（\`file\` / \`xxd\` 之类），` +
         '不要当文本打开；它可能是图片、压缩包或文档。\n'
-      : `- \`${file.relPath}\`（${file.bytes} 字节）——使用者上传的文件，**和上面自动带上的素材同等有效**；\n` +
-        '  它可能补充或推翻前面某一条做法，动手前先读一遍。\n',
-  )
+      : `- \`${rel}\`（${file.bytes} 字节）——使用者上传的文件，**和上面自动带上的素材同等有效**；\n` +
+        '  它可能补充或推翻前面某一条做法，动手前先读一遍。\n'
+  })
   const note = `${APPENDED_NOTE_HEAD}（${at}，上传）\n\n${lines.join('')}`
   await writeFile(indexPath, `${index.trimEnd()}\n\n${note}`, 'utf8')
 }

@@ -768,7 +768,7 @@
           {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}
               <button type="button" class="ghost" onclick={() => (filesTick += 1)}>
-                {$t('chat.filesRefresh')}
+                {$t('files.refresh')}
               </button>
               {#if runningTurn !== null}
                 <span class="faint small">{$t('chat.filesRunningHint')}</span>
