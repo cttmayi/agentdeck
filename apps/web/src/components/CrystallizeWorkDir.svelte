@@ -166,6 +166,7 @@
 <FootFiles
   title={$t('files.heading')}
   ondropfiles={(files) => void uploadFiles(files)}
+  dropHint={$t('common.dropFilesHint')}
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
   bind:open={open}
 >

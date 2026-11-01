@@ -4815,6 +4815,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 再从 `/file?path=` 读回来逐字比——只量"树里多了一行"的话，把二进制当文本转码
            * 写坏的实现照样能绿。
            */
+          // ★ 分批第 204 批：拖拽**可发现**（只在悬停时才有虚线框，必须有一句提示）
+          facts['crystal.dropHint'] =
+            text(d().querySelector('[data-foot-files] .drop-hint')) || null
           facts['crystal.uploadToWorkDir'] = await (async () => {
             const zone = d().querySelector('[data-foot-files]')
             if (!zone) return { zone: false }

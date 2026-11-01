@@ -19,7 +19,7 @@
  * 而且界面要能**定位**到是哪个文件哪一条不满足。
  */
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 /** SKILL.md 的解析结果（frontmatter 拆出来的三个字段 + 全文）。 */
@@ -618,11 +618,19 @@ export function dropForeignVersions(
 
 export async function writeDraftVersions(taskDir: string, versions: DraftVersions): Promise<void> {
   await mkdir(taskDir, { recursive: true })
-  await writeFile(
-    join(taskDir, DRAFT_VERSIONS_FILE),
-    `${JSON.stringify(versions, null, 2)}\n`,
-    'utf8',
-  )
+  /**
+   * ★ 分批第 204 批：**原子替换**（临时文件 + `rename`）。
+   *
+   * 起因是一条**偶发**红的判据：`crystallize-e2e` 里等"下一版"的那条，在满载并行跑时
+   * `JSON.parse` 抛 `Unexpected end of JSON input` ——`writeFile` 是"先截断再写"，
+   * 而同一时刻别的读取方（这轮是测试，线上是任何一次读版本表的请求）会读到**空文件**。
+   * 版本表是"这个任务的账"，读到半个账就是"这条链丢了"，所以这里必须原子。
+   * 同一目录里写临时文件再 rename：跨文件系统不会发生（同一个目录）。
+   */
+  const target = join(taskDir, DRAFT_VERSIONS_FILE)
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`
+  await writeFile(tmp, `${JSON.stringify(versions, null, 2)}\n`, 'utf8')
+  await rename(tmp, target)
 }
 
 /** 把当前 `skill/` 快照到 `history/<runId>/skill/`（**只写一次**：已经存在就不动）。 */

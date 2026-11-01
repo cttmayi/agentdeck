@@ -41,6 +41,11 @@
      * 不传就完全不接拖拽（浏览器默认行为，比如把文件拖进输入框）。
      */
     ondropfiles,
+    /**
+     * ★ 分批第 204 批：**可发现性**。拖拽区只在悬停时才有虚线框——不看不知道能拖。
+     * 给了 `ondropfiles` 再给这句话，标题行末尾就多一句极淡的提示（两页共用一句词条）。
+     */
+    dropHint = '',
   }: {
     title?: string
     count?: string
@@ -48,6 +53,7 @@
     actions?: Snippet
     children?: Snippet
     ondropfiles?: ((files: File[]) => void) | undefined
+    dropHint?: string
   } = $props()
 
   /** 有文件悬在这一栏上（给一点反馈：这一块收文件）。 */
@@ -84,6 +90,9 @@
       {title}
       {#if count !== ''}
         <span class="faint small">{count}</span>
+      {/if}
+      {#if dropHint !== '' && ondropfiles !== undefined}
+        <span class="faint small drop-hint">{dropHint}</span>
       {/if}
     </button>
     {#if actions}{@render actions()}{/if}
@@ -135,6 +144,11 @@
     display: inline-block;
     width: 0.75rem;
     color: var(--text-faint);
+  }
+
+  /* 拖拽提示：极淡，跟着标题走（不是第二个标题） */
+  .drop-hint {
+    opacity: 0.7;
   }
 
   /* 拖文件悬停：整块给一道虚线框（"这里收东西"），松手就交给调用方 */

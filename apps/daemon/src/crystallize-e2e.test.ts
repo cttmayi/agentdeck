@@ -455,7 +455,14 @@ async function waitRevisedFrom(parentId: string, budgetMs = 120_000): Promise<st
       if (!name.startsWith('skill-draft-')) continue
       const raw = await readFile(join(workRoot, name, '.versions.json'), 'utf8').catch(() => null)
       if (raw === null) continue
-      const parsed = JSON.parse(raw) as { versions: Array<{ runId: string }> }
+      // ⚠️ 读到**半写的文件**是可能的（写方第 204 批起已改成原子替换，但这条等待仍然不该
+      //    因为一次坏读就整条红——它本来就是个轮询）。坏读 ⇒ 这一轮跳过，下一轮再来。
+      let parsed: { versions: Array<{ runId: string }> }
+      try {
+        parsed = JSON.parse(raw) as { versions: Array<{ runId: string }> }
+      } catch {
+        continue
+      }
       const ids = parsed.versions.map((v) => v.runId)
       const at = ids.indexOf(parentId)
       if (at >= 0 && at + 1 < ids.length) return ids[at + 1]!

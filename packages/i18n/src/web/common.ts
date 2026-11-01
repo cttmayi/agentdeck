@@ -23,6 +23,12 @@ export const commonText = {
    * 所以词条放在 common 里，不放任何一边的业务表里）。
    */
   'common.attachFile': { zh: '上传文件到工作目录', en: 'Upload files to the work directory' },
+  /**
+   * ★ 分批第 204 批：「工作目录的文件」标题行末尾那句极淡的提示。
+   * 拖拽区只在悬停时才有虚线框——不写这一句，使用者根本不知道能拖（使用者自己就问过
+   * "有支持拖动上传吗"）。
+   */
+  'common.dropFilesHint': { zh: '可把文件拖进来', en: 'drop files here' },
   'common.create': { zh: '创建', en: 'Create' },
   'common.creating': { zh: '创建中…', en: 'Creating…' },
   'common.refresh': { zh: '刷新', en: 'Refresh' },

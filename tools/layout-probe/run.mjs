@@ -3681,6 +3681,15 @@ const CHECKS = [
   //   栏脚输入条的「追加材料：…」（那条另有判据 `crystal.appendMaterial`）。
   {
     view: '沉淀',
+    key: 'crystal.dropHint',
+    label:
+      '★★ 那一栏的标题行写着**「可把文件拖进来」**（拖拽区只在悬停时才有虚线框——不写这一句，' +
+      '使用者根本不知道能拖；用户确实问过"有支持拖动上传吗"）',
+    ok: (v) => typeof v === 'string' && v.includes('拖'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.uploadToWorkDir',
     label:
       '★★★ 把文件**拖进「工作目录的文件」那一栏** ⇒ 真的落到 `material/appended/`，而且' +

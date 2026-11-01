@@ -763,6 +763,7 @@
           count={filesCount > 0 ? $t('chat.filesCount', { count: filesCount }) : ''}
           bind:open={filesOpen}
           ondropfiles={(files) => void uploadFiles(files)}
+  dropHint={$t('common.dropFilesHint')}
         >
           {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}
