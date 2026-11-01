@@ -880,14 +880,59 @@ hr {
 /* 详情/建任务的栏头（D69.15 由 MainArea 渲染，scoped 样式打不进来，放这里）：
    与 `.pane-head` 同一套指标——留白、下边框、标题字号 fs-lg（全局 h2 是 fs-xl
    22px，不钉字号标题就会比聊天栏头大 5px——使用者当场抓到的"Title 高度不一样"） */
+/**
+ * 详情栏头：**左列 = 标题 + 副题，右列 = 动作**。
+ *
+ * ★ 分批第 197 批改的（使用者："「放弃」和「确认入库」位置还是不对，依然在第 3 行，
+ *   而不是右侧"）。原来这里只是个带 padding 的块容器 ⇒ 标题、副题、动作依次占**三行**，
+ *   动作再怎么 `margin-left:auto` 也没有效果（块级流里没有"右边"）。
+ *
+ * 现在用两列网格：动作一栏跨两行、靠右；副题可以长（它自己 `min-width:0` + 省略号），
+ * 但它**挤不掉**动作那一列（`auto` 列按内容宽，`1fr` 那列先缩）。
+ * 窄屏的「返回」按钮仍独占第一行（它只在详情整页、没有左栏时出现）。
+ */
 .detail-head {
   padding: var(--sp-4) var(--sp-5) var(--sp-3);
   border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
 }
 
 .detail-head h2 {
   font-size: var(--fs-lg);
-  margin-bottom: var(--sp-1);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 副题：一行、超了省略——它是最先该让位的东西（动作与标题都比它重要） */
+.detail-head .detail-sub {
+  grid-column: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 动作：右列、跨两行、永远不换到自己那一行上 */
+.detail-head .detail-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* 窄屏的返回按钮独占第一行 */
+.detail-head .back-to-list {
+  grid-column: 1 / -1;
 }
 
 .detail-sub {

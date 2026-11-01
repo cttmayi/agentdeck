@@ -47,17 +47,10 @@
     rev = 0,
     /** 这一栏自己改了材料（删掉一份）时通知父组件：让另一处也跟着重读。 */
     onchanged = () => {},
-    /**
-     * ★ 分批第 196 批：材料规模的一句话（`10 项（轨迹 5 轮 · 3 次工具调用）`）。
-     * 由父组件算好传进来——「素材统计」的定义只有一处（`materialCountLine`），
-     * 这里只负责显示在**材料那一节的标题里**（它原来挂在中栏对话里，与清单重复）。
-     */
-    statsLine = '',
   }: {
     draftRunId: string
     rev?: number
     onchanged?: () => void
-    statsLine?: string
   } = $props()
 
   /**
@@ -101,12 +94,6 @@
   const drawerOpen = $derived(
     drawerManual ?? (!paneWide.value && artifacts !== null && artifacts.mode !== 'refused'),
   )
-  /** 已经点了「删掉」、等第二次确认的那份材料（两步删除：材料是使用者给的，误删不好补）。 */
-  let pendingDelete = $state('')
-  /** 正在删的那份（防止连点两次发两个请求）。 */
-  let deleting = $state('')
-  /** 删完之后的回执（说清删了什么、还剩几份；右栏本来就是"它现在手上有什么"）。 */
-  let deleteNote = $state('')
   /**
    * ★ 分批第 173 批（使用者定："技能走注入，但**不要默认放项目中**，让用户自己装、建议一键安装"）：
    * 这一栏负责"这条沉淀用什么技能"——没装就给一键安装，装了就把 id 交给起草请求。
@@ -128,158 +115,6 @@
   $effect(() => {
     void loadDraftSkill()
   })
-
-  /** 正在追加文件时不为空（防止一边拖一批、一边按两次按钮）。 */
-  let adding = $state(false)
-  /** 拖拽文件悬停在本区上（给一点反馈：这一块收文件）。 */
-  let dragOver = $state(false)
-  /** 追加文件（拖进来 / 选进来）的回执。 */
-  let addNote = $state('')
-  /** 「从仓库拉」的地址输入与进行中标记（§12.54）。 */
-  let repoUrl = $state('')
-  let repoPulling = $state(false)
-  /** 两个 `<input type=file>`：一个选文件、一个选整个目录（`webkitdirectory`）。 */
-  let fileInput = $state<HTMLInputElement | null>(null)
-  let dirInput = $state<HTMLInputElement | null>(null)
-
-  /**
-   * 能被当成"素材"的扩展名。判据是"这文件能不能读成文本"——素材最终是要给起草者**读**的，
-   * 二进制（图片/压缩包/PDF）塞进去它读到的只会是乱码，比"不接收"更坏。
-   */
-  const TEXT_EXT =
-    /\.(md|markdown|txt|text|rst|json|ya?ml|csv|tsv|log|ts|tsx|js|mjs|cjs|py|sh|rb|go|rs|java|kt|c|h|cpp|html?|css|scss|toml|ini|cfg|conf|env|sql)$/i
-
-  /** 与 daemon 的 `MATERIAL_MAX_BYTES` 一致：单份上限 100 KiB（更大的塞进去也读不出来）。 */
-  const MATERIAL_MAX_BYTES = 100 * 1024
-  /** 一次最多收几份：拖一个目录进来可能是几百个文件，逐个 POST 会把 daemon 刷爆。 */
-  const MATERIAL_MAX_FILES = 20
-
-  /**
-   * ★ 分批第 148 批（§12.4 材料卡：追加的形态有"拖文件 / 粘贴 / 选目录 / 仓库"）：
-   * **拖文件 / 选目录**——浏览器读成文本，走已有的 `POST /api/crystallize/material`。
-   *
-   * 为什么不新开一个上传接口：
-   *   · daemon 那边已经有一份**落盘 + 登记索引**的通道（§12.47），再开一个等于同一件事两处写，
-   *     迟早两边不一致（本仓库最防的就是这个）；
-   *   · 更重要：素材是**文本**（起草者用工具读）。二进制走 multipart 上传，daemon 还得决定
-   *     存哪、怎么读——而读不出来，等于给素材里塞垃圾。
-   *   · 「选目录」用 `<input webkitdirectory>` 在浏览器侧展开文件列表 ⇒ daemon 不需要接受
-   *     任意本地路径（那是把"读你机器上任意文件"变成一个 HTTP 入参）。
-   *
-   * ⚠️ 逐份 POST 而不是一次打包：daemon 的校验是**单份**的（空/超大/重名），打包发送会把
-   *    "第 3 份太大"变成"整批失败"，而前面两份本来是可以进去的。
-   */
-  async function addFiles(files: FileList | File[] | null): Promise<void> {
-    if (adding) return
-    const list = files === null ? [] : [...files].filter((f) => f.size > 0)
-    if (list.length === 0) return
-    adding = true
-    addNote = ''
-    deleteNote = ''
-    let added = 0
-    const skipped: string[] = []
-    for (const file of list.slice(0, MATERIAL_MAX_FILES)) {
-      const looksText = file.type.startsWith('text/') || TEXT_EXT.test(file.name)
-      if (!looksText) {
-        skipped.push(`${file.name}（不是文本）`)
-        continue
-      }
-      if (file.size > MATERIAL_MAX_BYTES) {
-        skipped.push(`${file.name}（${Math.round(file.size / 1024)} KB 超过上限 100 KB）`)
-        continue
-      }
-      let body = ''
-      try {
-        body = await file.text()
-      } catch {
-        skipped.push(`${file.name}（读不出来）`)
-        continue
-      }
-      if (body.trim() === '') {
-        skipped.push(`${file.name}（空的）`)
-        continue
-      }
-      try {
-        await api('/api/crystallize/material', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          // 名字原样交过去：daemon 会剥掉路径、折掉不安全字符、重名自动加 -2
-          body: JSON.stringify({ draftRunId, name: file.name, text: body }),
-        })
-        added += 1
-      } catch (err) {
-        skipped.push(`${file.name}（${String(err instanceof Error ? err.message : err)}）`)
-      }
-    }
-    if (list.length > MATERIAL_MAX_FILES) {
-      skipped.push(`还有 ${list.length - MATERIAL_MAX_FILES} 份没处理（一次最多 ${MATERIAL_MAX_FILES} 份）`)
-    }
-    adding = false
-    addNote =
-      (added > 0 ? $t('crystallize.materialAddDone', { n: String(added) }) : '') +
-      (skipped.length > 0
-        ? `${added > 0 ? '；' : ''}${$t('crystallize.materialAddSkipped', { items: skipped.join('、') })}`
-        : '')
-    if (added > 0) {
-      await reloadMaterial(draftRunId)
-      // 另一处（中间那栏的「依据」）也重读：材料的两个显示处必须同源（§12.14）
-      onchanged()
-    }
-  }
-
-  /**
-   * ★ 分批第 157 批（§12.54）：**从 GitHub 仓库拉一批文本当素材**。
-   *
-   * 为什么只有这一个入口形态（一个地址框）：仓库地址没有别的给法——而"选本地仓库目录"
-   * 等于让 daemon 接受任意本地路径（§12.51 已经否决过那条）。daemon 那边的边界写在
-   * `apps/daemon/src/crystallize-repo.ts` 的文件头：主机白名单 / 体量封顶 / 只收文本。
-   */
-  async function pullRepo(): Promise<void> {
-    const url = repoUrl.trim()
-    if (url === '' || repoPulling) return
-    repoPulling = true
-    addNote = ''
-    deleteNote = ''
-    try {
-      const res = await api<{
-        relDir: string
-        files: number
-        bytes: number
-        skipped: string[]
-        hasSkillMd: boolean
-      }>('/api/crystallize/material/repo', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId, url }),
-      })
-      repoUrl = ''
-      addNote =
-        $t('crystallize.materialRepoDone', {
-          files: String(res.files),
-          kb: String(Math.max(1, Math.round(res.bytes / 1024))),
-          dir: res.relDir,
-        }) +
-        (res.skipped.length > 0
-          ? `；${$t('crystallize.materialAddSkipped', { items: res.skipped.slice(0, 3).join('、') })}`
-          : '') +
-        // 仓库里带 SKILL.md：**必须**说一句——"更新那个技能"与"只当素材"是两条完全不同的路
-        (res.hasSkillMd ? ` ⚠️ ${$t('crystallize.materialRepoHasSkill')}` : '')
-      await reloadMaterial(draftRunId)
-      onchanged()
-    } catch (err) {
-      addNote = String(err instanceof Error ? err.message : err)
-    } finally {
-      repoPulling = false
-    }
-  }
-
-  /** `<input type=file>` 的 change：读完就把 value 清空，否则再选同一个文件不触发 change。 */
-  function onPicked(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement | null
-    void addFiles(input?.files ?? null).finally(() => {
-      if (input) input.value = ''
-    })
-  }
 
   /** 一次只认一个 run：切换选中时旧的返回要丢掉（否则旧产物盖住新的）。 */
   let seq = 0
@@ -333,65 +168,18 @@
   }
 
   $effect(() => {
-    // 读 `rev` 是**故意的**：材料在中间那栏被追加 / 在这一栏被删掉时，两边都要重读
-    //（§12.14：两处必须由同一份数据现算）。
+    // 读 `rev` 是**故意的**：材料在栏脚被追加/删掉之后，产物那一栏也可能要重算（§12.14 同源）。
+    // ★ 分批第 197 批：材料本身搬去了栏脚（`CrystallizeMaterials`），所以这里只剩产物一条路。
     void rev
     // ★ 分批第 155 批：用**中间那栏实际挂上的草稿**（路由可能是来源 run，见 store 里
     //   `attachedRunId` 的注释）；中间那栏还没挂上时退回路由 id。
     void editor.attachedRunId
     const id = editor.attachedRunId !== '' ? editor.attachedRunId : draftRunId
     if (id !== seenId) {
-      // 换了一条沉淀：产物与材料一起重拉
       seenId = id
       void load(id)
-      return
     }
-    // 同一条沉淀、只是材料变了：**只重读材料**。走 `load` 会把 `loading` 置真 ⇒ 整栏闪成
-      // 「载入产物…」、材料清单与刚出的回执一起消失（删一份材料闪一下，很难看也很像出错）。
-    void reloadMaterial(id)
   })
-
-  /** 同一条沉淀的材料重读（不动 `loading` / 产物：材料变了不等于产物变了）。 */
-  async function reloadMaterial(id: string): Promise<void> {
-    if (id === '') return
-    try {
-      material = await api<Material>(`/api/crystallize/material?draftRunId=${encodeURIComponent(id)}`)
-    } catch {
-      material = null
-    }
-  }
-
-  /**
-   * ★ 分批第 147 批（§12.14「删掉错的」）：删掉一份**使用者给的**材料。
-   *
-   * 为什么只有 `appended/` 有按钮：其余材料是平台从来源 run 切出来的证据（轨迹 / 判决 /
-   * 索引页 / `meta.json`），删了"依据"就和来源对不上，而且下次起草会重新切回来。界面不给
-   * "按了会被拒"的按钮（§12.41 不放假接口），daemon 那边也照样拦（两道各自成立）。
-   *
-   * 删完必须重读：右栏清单是"它现在手上有什么"的唯一显示，不刷新等于"删了但还看得见"。
-   */
-  async function removeMaterial(relPath: string): Promise<void> {
-    if (deleting !== '') return
-    deleting = relPath
-    try {
-      const res = await api<{ relPath: string; remaining: number }>(
-        `/api/crystallize/material?draftRunId=${encodeURIComponent(draftRunId)}` +
-          `&relPath=${encodeURIComponent(relPath)}`,
-        { method: 'DELETE' },
-      )
-      pendingDelete = ''
-      deleteNote = $t('crystallize.materialDeleteDone', {
-        path: res.relPath,
-        n: String(res.remaining),
-      })
-      await reloadMaterial(draftRunId)
-      onchanged()
-    } catch (err) {
-      deleteNote = String(err instanceof Error ? err.message : err)
-    } finally {
-      deleting = ''
-    }
-  }
 
   /**
    * 派生值走**显式签名的小函数**，不在 `$derived` 里直接窄化 `artifacts`：
@@ -470,131 +258,13 @@
       <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 使用者给的）。
            ★ 分批第 147 批：使用者给的（`appended/`）可以删——§12.14「右栏清单……删掉错的」。
              其余材料是平台从来源 run 切出来的证据，不给删除钮（daemon 那边也拒）。 -->
-      <section class="artifact-mats">
-        <h3 class="artifact-sub" title={$t('crystallize.materialDeleteOnly')}>
-          {$t('crystallize.artifactMaterial')}
-          <!--
-            ★ 分批第 196 批：数量与「轨迹 N 轮 / M 次工具调用」从**中栏那句**挪到这里
-              （使用者："中栏正文区有很多冗余信息，不如「材料 10 项（轨迹 5）」"）。
-              材料的数量属于材料这一节；对话里只说人话。
-          -->
-          <span class="artifact-mat-count">{statsLine}</span>
-        </h3>
-        {#if materialItems.length === 0}
-          <p class="faint small">{$t('crystallize.artifactMaterialEmpty')}</p>
-        {:else}
-          <ul class="artifact-mat-list">
-            {#each materialItems as item (item.relPath)}
-              <li>
-                <span class="artifact-mat-name">{item.relPath}</span>
-                <span class="faint small">{Math.round(item.bytes / 100) / 10} KB</span>
-                {#if item.relPath.startsWith('appended/')}
-                  {#if pendingDelete === item.relPath}
-                    <button
-                      type="button"
-                      class="mat-del confirm"
-                      disabled={deleting !== ''}
-                      onclick={() => void removeMaterial(item.relPath)}
-                    >{$t('crystallize.materialDeleteConfirm')}</button>
-                  {:else}
-                    <button
-                      type="button"
-                      class="mat-del"
-                      disabled={deleting !== ''}
-                      onclick={() => (pendingDelete = item.relPath)}
-                    >{$t('crystallize.materialDelete')}</button>
-                  {/if}
-                {/if}
-              </li>
-            {/each}
-          </ul>
-          {#if deleteNote !== ''}
-            <p class="faint small artifact-mat-note">{deleteNote}</p>
-          {/if}
-        {/if}
-        <!-- ★ 分批第 148 批（§12.4 材料卡：追加形态"拖文件 / 选目录"）：收文件的就是这一块。
-             只收**文本**（素材最终要给起草者读，二进制进去只会是乱码），单份 ≤ 100 KiB。 -->
-        {#if materialEditable}
-          <div
-            class="mat-add"
-            class:drag={dragOver}
-          data-mat-dropzone="true"
-          role="group"
-          ondragover={(e) => {
-            e.preventDefault()
-            dragOver = true
-          }}
-          ondragleave={() => (dragOver = false)}
-          ondrop={(e) => {
-            e.preventDefault()
-            dragOver = false
-            void addFiles(e.dataTransfer?.files ?? null)
-          }}
-        >
-          <p class="faint small">{$t('crystallize.materialDropHint')}</p>
-          <div class="mat-add-actions">
-            <button
-              type="button"
-              class="ghost small"
-              disabled={adding}
-              onclick={() => fileInput?.click()}>{$t('crystallize.materialAddFiles')}</button
-            >
-            <button
-              type="button"
-              class="ghost small"
-              disabled={adding}
-              onclick={() => dirInput?.click()}>{$t('crystallize.materialAddDir')}</button
-            >
-          </div>
-          <!-- ★ 分批第 157 批（§12.54）：从仓库拉。地址交给 daemon，它按白名单 + 体量上限去拉，
-               拉下来的文本落进 `material/appended/<owner>-<repo>/` 并登记进索引。 -->
-          <form
-            class="mat-repo"
-            onsubmit={(e) => {
-              e.preventDefault()
-              void pullRepo()
-            }}
-          >
-            <input
-              type="text"
-              bind:value={repoUrl}
-              placeholder={$t('crystallize.materialRepoPlaceholder')}
-              aria-label={$t('crystallize.materialRepoPlaceholder')}
-            />
-            <button
-              type="submit"
-              class="ghost small"
-              disabled={repoPulling || repoUrl.trim() === ''}
-            >{$t('crystallize.materialRepoPull')}</button>
-          </form>
-          <!-- 两个隐藏的 file input：选文件 / 选目录（`webkitdirectory` 在浏览器侧展开目录，
-               daemon 不需要接受任意本地路径——那等于把"读你机器上任意文件"做成一个入参）。 -->
-          <input
-            class="mat-file-input"
-            type="file"
-            multiple
-            hidden
-            bind:this={fileInput}
-            onchange={onPicked}
-          />
-          <input
-            class="mat-dir-input"
-            type="file"
-            multiple
-            webkitdirectory
-            hidden
-            bind:this={dirInput}
-            onchange={onPicked}
-          />
-          {#if addNote !== ''}
-            <p class="faint small artifact-mat-note" data-mat-add-note>{addNote}</p>
-          {/if}
-          </div>
-        {:else}
-          <!-- 草案期：清单能看、不能改（daemon 会拒"没跑完就改材料"）；说清为什么，别给死按钮 -->
-          <p class="faint small">{$t('crystallize.materialLockedUntilDone')}</p>
-        {/if}
-      </section>
+      <!--
+        ★ 分批第 197 批：**材料那一节整块搬到了中间栏的栏脚**（`CrystallizeMaterials`，
+        与聊天页「工作目录的文件」同一个控件）。使用者："材料现在在右栏，我想用类似聊天页一样，
+        将工作目录放在「发送」的上方"。
+        右栏因此只剩"看这一版写成了什么"——产物（编辑器）+ 体检。
+      -->
+
 
       <!-- ★ 分批第 163 批（§12.14）：材料**在草案期也列**（只读），下面才是产物区（空态 / 有产出）。
            改之前整块材料还被包在"有产物"的分支里 ⇒ 起草中那一屏右栏只有一句"还没有产物"，
@@ -690,103 +360,39 @@
     gap: var(--sp-2);
   }
 
-  .artifact-mat-count {
-    color: var(--text-faint);
-  }
 
-  .artifact-mat-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    font-size: var(--fs-sm);
-  }
 
-  .artifact-mat-list li {
-    display: flex;
-    gap: var(--sp-2);
-    align-items: baseline;
-    padding: 0.125rem 0;
-  }
 
-  .artifact-mat-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-  }
+
+
+
+
 
   /* 「删掉」：两步（先点它、再点「确认删掉」）——材料是使用者给的，误删不好补。
      平时几乎不可见（与列表行的删除钮同一条纪律），hover 才露出来。 */
-  .mat-del {
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-faint);
-    font-size: var(--fs-xs);
-    padding: 0 0.25rem;
-    border-radius: var(--radius);
-    opacity: 0.55;
-  }
 
-  .artifact-mat-list li:hover .mat-del {
-    opacity: 1;
-  }
 
-  .mat-del:hover {
-    color: var(--bad);
-    border-color: var(--line-strong);
-  }
 
-  .mat-del.confirm {
-    opacity: 1;
-    color: var(--bad);
-    border-color: var(--bad);
-  }
 
-  .artifact-mat-note {
-    margin: var(--sp-1) 0 0;
-    color: var(--text-dim);
-    overflow-wrap: anywhere;
-  }
+
+
+
+
+
 
   /* 收文件那一块（拖进来 / 选文件 / 选目录）：虚线框，拖过时高亮，让人一眼看出"这里能放" */
-  .mat-add {
-    margin-top: var(--sp-2);
-    border: 1px dashed var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2);
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
 
-  .mat-add.drag {
-    border-color: var(--accent);
-    background: var(--surface-2);
-  }
 
-  .mat-add p {
-    margin: 0;
-  }
 
-  .mat-add-actions {
-    display: flex;
-    gap: var(--sp-2);
-    margin-top: var(--sp-1);
-  }
+
+
+
+
 
   /* 从仓库拉：地址框 + 按钮一行；输入框吃掉剩余宽度，按钮不换行 */
-  .mat-repo {
-    display: flex;
-    gap: var(--sp-1);
-    margin-top: var(--sp-2);
-  }
 
-  .mat-repo input {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--fs-sm);
-  }
+
+
 
 
 

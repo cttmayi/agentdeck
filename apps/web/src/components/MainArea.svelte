@@ -68,7 +68,15 @@
       {#if sub}
         <p class="detail-sub">{@render sub()}</p>
       {/if}
-      {@render actions?.()}
+      <!--
+        ★ 分批第 197 批：动作渲进一个**有名字的容器**（`.detail-actions`）。
+        改之前它是一串裸元素，而 `.detail-head` 是块级流——于是"页头动作"永远掉在标题与副题
+        **下面那一行**（使用者："「放弃」和「确认入库」位置还是不对，依然在第 3 行，而不是右侧"）。
+        有了这个容器，CSS 才能把"标题+副题"和"动作"排成两列（见 app.css 的 `.detail-head`）。
+      -->
+      {#if actions}
+        <div class="detail-actions">{@render actions()}</div>
+      {/if}
     </header>
   {/if}
 

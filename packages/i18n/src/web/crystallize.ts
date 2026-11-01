@@ -148,11 +148,10 @@ export const crystallizeText = {
     en: '{turns} turns · {tools} tool calls',
   },
   // ── 对话里那行"我当时给了它什么"（§12.14：与右栏清单**同一份数据现算**）──
-  'crystallize.materialCount': { zh: '材料 {n} 项（{parts}）', en: 'Material: {n} ({parts})' },
+  'crystallize.materialCountOnly': { zh: '{n} 项', en: '{n} items' },
+  'crystallize.materialCountWith': { zh: '{n} 项 · {parts}', en: '{n} items · {parts}' },
   'crystallize.materialCountTrace': { zh: '轨迹 {n}', en: '{n} trace' },
   'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
-  'crystallize.materialCountNone': { zh: '这次没有材料', en: 'No material this time' },
-  // ── 草案期：材料能看不能改（分批第 163 批）──
   'crystallize.materialLockedUntilDone': {
     zh: '起草跑完才能改材料（这一版读到的素材已经定了）',
     en: 'Material can only change after the draft finishes (this version already read its material)',
@@ -326,10 +325,6 @@ export const crystallizeText = {
   //     "使用者给的"那几行与分节标题上。
   'crystallize.materialDelete': { zh: '删掉', en: 'Delete' },
   'crystallize.materialDeleteConfirm': { zh: '确认删掉', en: 'Confirm' },
-  'crystallize.materialDeleteOnly': {
-    zh: '只有使用者给的素材（appended/）能删：其余是从来源 run 切出来的证据',
-    en: 'Only materials you provided (appended/) can be deleted — the rest is evidence cut from the source run',
-  },
   'crystallize.materialDeleteDone': {
     zh: '已删掉 {path}（还剩 {n} 份材料）——下一版草稿不会再读到它；自动带的素材没动',
     en: 'Deleted {path} ({n} left) — the next draft will not read it; auto-collected material untouched',
@@ -413,6 +408,12 @@ export const crystallizeText = {
   },
 
   'crystallize.chatSend': { zh: '发送', en: 'Send' },
+  /**
+   * ★ 分批第 197 批：栏脚换成与聊天页**同一个控件**（`ChatComposer`），所以它也要有
+   * "Enter 发送"那行提示与"不能发"的悬停说明——两页一致，别一处有一处没有。
+   */
+  'crystallize.chatHint': { zh: 'Enter 发送 · Shift+Enter 换行', en: 'Enter to send · Shift+Enter for a new line' },
+  'crystallize.chatSendNotReady': { zh: '先写一句话', en: 'Type something first' },
 
   // ── 错误 ──
   'crystallize.errTargets': { zh: '读取沉淀信息失败：{error}', en: 'Failed to load crystallize info: {error}' },

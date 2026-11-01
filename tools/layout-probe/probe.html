@@ -4618,9 +4618,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.reviewInArtifactMsg'] = !!d().querySelector('[data-review-actions]')
           // U3d：栏脚输入条真的能用了（不再是 disabled 占位）
           facts['crystal.composerEnabled'] = (() => {
-            const input = d().querySelector('.crystal-composer-input')
+            const input = d().querySelector('[data-composer] .composer-input')
             if (!input) return null
-            const send = [...d().querySelectorAll('.crystal-composer button')].find((b) => text(b) === '发送')
+            const send = [...d().querySelectorAll('[data-composer] button')].find((b) => text(b) === '发送')
             return input.disabled === false && !!send
           })()
           /**
@@ -4635,15 +4635,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * ⚠️ 派发 `input` 而不是只改 value：`bind:value` 靠它才把状态写回组件。
            */
           facts['crystal.appendMaterial'] = await (async () => {
-            const input = d().querySelector('.crystal-composer-input')
-            const form = input ? input.closest('form') : null
-            if (!input || !form) return null
+            const input = d().querySelector('[data-composer] .composer-input')
+            const send = d().querySelector('[data-composer-send]')
+            if (!input || !send) return null
             const marker = '探针追加的复审结论：先看日志再动手'
             input.value = `追加材料：${marker}`
             input.dispatchEvent(new Event('input', { bubbles: true }))
             await wait(30)
-            if (typeof form.requestSubmit === 'function') form.requestSubmit()
-            else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+            // ★ 分批第 197 批：输入条换成与聊天页同一个控件（`ChatComposer`：textarea + 发送钮，
+            //   不再是一个 `<form>`）⇒ 走"点发送"这条路，而不是 `requestSubmit()`。
+            send.click()
             const gotReceipt = await until(
               () => (d().querySelector('.composer-receipt')?.textContent ?? '').includes('已追加为素材'),
               100,
@@ -4674,8 +4675,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * （写死一个数、清单另算一份，两处对不上就会绿 ⇒ 这里量"标题里的 N == 清单条数"）。
            */
           facts['crystal.materialLineMatchesPane'] = (() => {
-            const head = d().querySelector('.artifact-mats .artifact-mat-count')?.textContent ?? ''
-            const paneCount = d().querySelectorAll('.artifact-mat-list li').length
+            const head = d().querySelector('[data-foot-files] .foot-files-head')?.textContent ?? ''
+            const paneCount = d().querySelectorAll('[data-mat-list] li').length
             const m = head.match(/(\d+)\s*项/)
             return {
               line: head.slice(0, 60),
@@ -4705,29 +4706,37 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 只在这条已完成草稿上做（追加/删除都要求起草跑完）。
            */
           facts['crystal.deleteMaterial'] = await (async () => {
-            const rowThere = await until(
-              () => !!d().querySelector('.artifact-mat-list .mat-del'),
-              120,
-            )
-            const rows = [...d().querySelectorAll('.artifact-mat-list li')]
+            // ★ 分批第 197 批：清单搬进栏脚之后**不再等**——上面那条「追加材料」已经把回执等到了，
+            //   这里直接量（`until` 走的是虚拟时钟，在这个屏幕里等不到就白等 120ms）。
+            const rows = [...d().querySelectorAll('[data-mat-list] li')]
+            const rowThere = !!d().querySelector('[data-mat-list] .mat-del')
             const before = rows.length
             // ② 有删除钮的行必须都是 `appended/`（按钮在本行内，用行文本判）
             const onlyAppended = rows
               .filter((li) => !!li.querySelector('.mat-del'))
               .every((li) => (li.textContent ?? '').includes('appended/'))
-            const del = d().querySelector('.artifact-mat-list .mat-del')
-            if (!del) return { rowThere, before, onlyAppended, confirmShown: false }
+            const del = d().querySelector('[data-mat-list] .mat-del')
+            if (!del) {
+              // 诊断：把清单里那几行的文本带上，免得"没有 .mat-del"只能靠猜
+              return {
+                rowThere,
+                before,
+                onlyAppended,
+                confirmShown: false,
+                rows: rows.map((li) => text(li).slice(0, 40)),
+              }
+            }
             del.click()
             await wait(30)
-            const confirmBtn = d().querySelector('.artifact-mat-list .mat-del.confirm')
+            const confirmBtn = d().querySelector('[data-mat-list] .mat-del.confirm')
             const confirmShown = !!confirmBtn
             confirmBtn?.click()
             const gone = await until(
-              () => d().querySelectorAll('.artifact-mat-list li').length < before,
+              () => d().querySelectorAll('[data-mat-list] li').length < before,
               150,
             )
-            const after = d().querySelectorAll('.artifact-mat-list li').length
-            const note = d().querySelector('.artifact-mat-note')?.textContent ?? ''
+            const after = d().querySelectorAll('[data-mat-list] li').length
+            const note = d().querySelector('[data-mat-note]')?.textContent ?? ''
             const items = await f.contentWindow
               .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
               .then((r) => (r.ok ? r.json() : null))
@@ -4757,7 +4766,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.dropMaterial'] = await (async () => {
             const zone = d().querySelector('[data-mat-dropzone]')
             if (!zone) return { zone: false }
-            const before = d().querySelectorAll('.artifact-mat-list li').length
+            const before = d().querySelectorAll('[data-mat-list] li').length
             const marker = '探针拖进来的材料：先看日志再动手'
             const win = f.contentWindow
             const dt = new win.DataTransfer()
@@ -4766,10 +4775,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
             )
             const grew = await until(
-              () => d().querySelectorAll('.artifact-mat-list li').length > before,
+              () => d().querySelectorAll('[data-mat-list] li').length > before,
               200,
             )
-            const after = d().querySelectorAll('.artifact-mat-list li').length
+            const after = d().querySelectorAll('[data-mat-list] li').length
             // ⚠️ 别用上面那个 `zone` 引用去查回执：材料一改，面板会重渲染，`zone` 可能是
             //    已经脱离文档的旧节点（第一次就是这么读到空串的——回执其实在，只是不在旧节点里）
             const note = d().querySelector('[data-mat-add-note]')?.textContent ?? ''
@@ -4786,7 +4795,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               before,
               after,
               hasDropped: dropped.length === 1,
-              hasDirButton: [...zone.querySelectorAll('button')].some((b) => text(b) === '选目录'),
+              // ★ 分批第 197 批：「选文件 / 选目录」两个入口搬到了折叠头的 `actions` 里
+              //   （材料清单整体搬进栏脚 `CrystallizeMaterials`）⇒ 从整块材料区找，而不是拖拽框里。
+              hasDirButton: [...d().querySelectorAll('[data-foot-files] button')].some(
+                (b) => text(b) === '选目录',
+              ),
               note: note.slice(0, 80),
             }
           })()
@@ -4799,6 +4812,31 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            */
           facts['crystal.actionsInMessages'] = {
             headerButtons: [...d().querySelectorAll('section.detail-pane > header button')].map(text),
+            /**
+             * ★ 分批第 197 批：**动作在标题右侧**（使用者连提两次："依然在第 3 行，而不是右侧"）。
+             * 只量"动作组在栏头矩形里"是不够的——它在第三行时**也在**栏头里。
+             * 这里量三件事，缺一条都不算"在右侧"：
+             *   ① 与 `h2` 同一水平带（|top 差| ≤ 标题高）；② 整体在标题右边（left > 标题 right）；
+             *   ③ 贴着栏头右缘（右缘差 ≤ 24px）。
+             */
+            headActionsBesideTitle: (() => {
+              const acts = d().querySelector('.detail-head [data-review-actions]')
+              const head = d().querySelector('.detail-head')
+              const h2 = d().querySelector('.detail-head h2')
+              if (!acts || !head || !h2) return null
+              const a = acts.getBoundingClientRect()
+              const hh = head.getBoundingClientRect()
+              const t = h2.getBoundingClientRect()
+              return {
+                sameBand: Math.abs(a.top - t.top) <= t.height + 2,
+                rightOfTitle: a.left > t.right - 1,
+                nearRightEdge: Math.abs(hh.right - a.right) <= 24,
+                headRight: Math.round(hh.right),
+                actsRight: Math.round(a.right),
+                actsTop: Math.round(a.top),
+                titleTop: Math.round(t.top),
+              }
+            })(),
             confirmInHeader: [
               ...d().querySelectorAll('.detail-head [data-review-actions] button'),
             ].some((b) => text(b).includes('确认入库')),
@@ -4813,6 +4851,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               ...d().querySelectorAll('.crystal-flow button'),
             ].some((b) => text(b).includes('放弃')),
           }
+          facts['crystal.headActionsBesideTitle'] =
+            facts['crystal.actionsInMessages'].headActionsBesideTitle
           /**
            * ★ 分批第 111 批（U3c-2 第 2 步）：只**记录**当前 tab 形态，不改行为。
            * 目的：等真要删 `review-tabs` 时，能一眼看出"删之前是什么样、删之后少了什么"，
@@ -4821,7 +4861,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.tabStripPresent'] = !!d().querySelector('.review-tabs')
           facts['crystal.tabStripButtonCount'] = d().querySelectorAll('.review-tabs > button').length
           facts['crystal.editorAndDiffSameContainer'] = (() => {
-            const editor = d().querySelector('.editor-box, textarea')
+            // ★ 分批第 197 批：`textarea` 的**第一个**现在是栏脚输入条（共享 `ChatComposer`）
+            // ⇒ 必须点名编辑器那个框，否则量的是"输入条与差异在不在同一个容器"（永远是 false）。
+            const editor = d().querySelector('.review-pane textarea.editor, .review-pane .editor-box')
             const diff = d().querySelector('.diff-box')
             if (!editor || !diff) return null
             return editor.closest('.review-body, .pane-body, .crystal-msg') ===
@@ -5022,7 +5064,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            *    高度链、过程格缩 100px"（这一批先踩了一次，探针当场红两条）。
            */
           facts['crystal.footH'] = (() => {
-            const composer = d().querySelector('.crystal-composer')
+            const composer = d().querySelector('[data-composer]')
             if (!composer) return 0
             const receipt = d().querySelector('.composer-receipt')
             const cRect = composer.getBoundingClientRect()
@@ -5306,7 +5348,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           ].some((b) => text(b).includes('反馈'))
           facts['crystal.reviseButtonName'] = null
           facts['crystal.composerPlaceholder'] =
-            d().querySelector('.crystal-composer-input')?.getAttribute('placeholder') ?? null
+            d().querySelector('[data-composer] .composer-input')?.getAttribute('placeholder') ?? null
           facts['crystal.reviseRowHiddenInitially'] = !d().querySelector('.revise-row textarea')
           facts['crystal.reviseRowAppearsOnDemand'] = null
 
@@ -5478,7 +5520,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              * 判据说"没量到"时能直接看出是哪一层的账对不上，而不是再猜 markup。
              */
             facts['crystal.composerH'] = (() => {
-              const composer = d().querySelector('.crystal-composer')
+              const composer = d().querySelector('[data-composer]')
               return composer ? Math.round(composer.getBoundingClientRect().height) : 0
             })()
             // U3a 的形态判据：外壳在、旧内容确实在"一条消息"里、输入条贴在栏脚
@@ -5486,7 +5528,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               !!d().querySelector('.crystal-chat > .crystal-msg .crystal-flow')
             facts['crystal.composerAtFoot'] = (() => {
               const chat = d().querySelector('.crystal-chat')
-              const composer = d().querySelector('.crystal-composer')
+              const composer = d().querySelector('[data-composer]')
               if (!chat || !composer) return null
               // 回执出现时它是 chat 的最后一个孩子（栏脚变成两块），两种都算"在栏脚"
               const last = chat.lastElementChild
@@ -5861,9 +5903,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // ⚠️ 这一屏开着起草 run 的 SSE ⇒ Chrome 的虚拟时钟冻着，必须用 `untilNet`
               //    （`until` 里的 setTimeout 永远不触发，症状是"探针跑满超时、dump 里 done 不是
               //    true"——本节开头就写着这条，我加这一段时正好踩了一遍）
-              await untilNet(() => d().querySelectorAll('.artifact-mat-list li').length > 0, 60)
+              await untilNet(() => d().querySelectorAll('[data-mat-list] li').length > 0, 60)
               facts['crystal.draftingPaneMaterialCount'] =
-                d().querySelectorAll('.artifact-mat-list li').length
+                d().querySelectorAll('[data-mat-list] li').length
               facts['crystal.draftingMaterialLocked'] = !d().querySelector('[data-mat-dropzone]')
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
@@ -6081,9 +6123,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。
               // ⚠️ 材料与产物是**两个接口**，产物先到不代表材料到了——等一小会儿再数，
               //    否则量到的是"0 个素材文件"（第一版就是这么误报的）。
-              await until(() => d().querySelectorAll('.artifact-mat-list li').length > 0, 60)
+              await until(() => d().querySelectorAll('[data-mat-list] li').length > 0, 60)
               facts['crystal.artifactMaterialCount'] =
-                d().querySelectorAll('.artifact-mat-list li').length
+                d().querySelectorAll('[data-mat-list] li').length
 
               // 收起来，别把抽屉留在兜底那一步的路由切换里
               const artClose = d().querySelector('.artifact-close')
@@ -6179,15 +6221,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                * 问的是文字时（作用描述 / 材料），栏脚那句就该落进这一问——而不是回"没有落点"。
                * 打一句话提交 ⇒ 回执说"当作作用描述记下"、下一问换成材料。
                */
-              const compInput = d().querySelector('.crystal-composer-input')
-              const compForm = compInput ? compInput.closest('form') : null
-              if (compInput && compForm) {
+              const compInput = d().querySelector('[data-composer] .composer-input')
+              const compSend = d().querySelector('[data-composer-send]')
+              // ★ 分批第 197 批：输入条换成与聊天页同一个控件（`ChatComposer`：textarea + 发送钮，
+              //   不再是一个 `<form>`）⇒ 走"点发送"，而不是 `requestSubmit()`。
+              if (compInput && compSend) {
                 const marker = '把一次跑通的流程固化成技能（探针·输入条作答）'
                 compInput.value = marker
                 compInput.dispatchEvent(new Event('input', { bubbles: true }))
                 await wait(30)
-                if (typeof compForm.requestSubmit === 'function') compForm.requestSubmit()
-                else compForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+                compSend.click()
                 await until(
                   () => (d().querySelector('.composer-receipt')?.textContent ?? '').includes('作用描述'),
                   100,
@@ -6659,7 +6702,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
          * （`chatFilesWorkDir`）——不靠"列表里的第一条对话"这种脆假设。
          */
         const chatFilesWorkDir = probeQuery.get('chatFilesWorkDir') || ''
-        const chatFilesPanel = () => d().querySelector('.detail-pane [data-chat-files]')
+        const chatFilesPanel = () => d().querySelector('.detail-pane [data-foot-files]')
         const chatFilesOpenIt = async () => {
           const panel = chatFilesPanel()
           if (!panel) return false
@@ -6743,6 +6786,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
         facts['chat.filesPanelPresent'] = await (async () => {
           if (!(await chatOpenFixtureConversation())) return false
+          // 诊断（临时）：为什么找不到那一栏
+          facts['chat.debugFoot'] = {
+            hasFootFiles: !!d().querySelector('[data-foot-files]'),
+            hasFootFilesAny: !!d().querySelector('.foot-files'),
+            paneFoot: !!d().querySelector('.pane-foot'),
+            composer: !!d().querySelector('[data-composer]'),
+            detailPane: !!d().querySelector('.detail-pane'),
+            footHtml: (d().querySelector('.pane-foot')?.className ?? '') ,
+          }
           const panel = chatFilesPanel()
           if (!panel) {
             errors.push('对话打开着，右栏底部却没有「工作目录的文件」那一栏')

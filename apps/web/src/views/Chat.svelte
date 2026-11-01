@@ -5,7 +5,8 @@
   import ListRow from '../components/ListRow.svelte'
   import RunLog from '../components/RunLog.svelte'
   // ★ 分批第 194 批：气泡形状抽到 `@agentdeck/ui`（沉淀页共用同一份，见 ChatBubble 头注释）
-  import { ChatBubble } from '@agentdeck/ui/components'
+  // ★ 分批第 197 批：栏脚的折叠清单与输入条也抽成共享组件（沉淀页用同一份）
+  import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
@@ -707,20 +708,12 @@
       {/snippet}
       {#snippet foot()}
         {#if activeConversation !== null && filesState !== 'hidden'}
-        <section class="chat-files" data-chat-files>
-          <div class="chat-files-head">
-            <button
-              type="button"
-              class="ghost"
-              aria-expanded={filesOpen}
-              onclick={() => (filesOpen = !filesOpen)}
-            >
-              <span class="twisty">{filesOpen ? '▾' : '▸'}</span>
-              {$t('files.heading')}
-              {#if filesCount > 0}
-                <span class="faint small">{$t('chat.filesCount', { count: filesCount })}</span>
-              {/if}
-            </button>
+        <FootFiles
+          title={$t('files.heading')}
+          count={filesCount > 0 ? $t('chat.filesCount', { count: filesCount }) : ''}
+          bind:open={filesOpen}
+        >
+          {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}
               <button type="button" class="ghost" onclick={() => (filesTick += 1)}>
                 {$t('chat.filesRefresh')}
@@ -729,7 +722,7 @@
                 <span class="faint small">{$t('chat.filesRunningHint')}</span>
               {/if}
             {/if}
-          </div>
+          {/snippet}
           {#if filesState === 'unsupported'}
             {#if filesOpen}
               <p class="hint" data-files-need-restart>{$t('chat.filesNeedRestart')}</p>
@@ -751,64 +744,35 @@
               <p class="hint">{$t('chat.filesNotAnAction')}</p>
             </div>
           {/if}
-        </section>
+        </FootFiles>
         {/if}
         {#if drafting || activeConversation !== null}
-      <div class="pane-foot chat-composer">
-        {#if errorText !== ''}
-          <p class="notice bad">{errorText}</p>
-        {/if}
-        <textarea
-          bind:value={input}
-          rows="3"
-          placeholder={$t('chat.placeholder')}
-          onkeydown={onKeydown}
-          disabled={runningTurn !== null}
-        ></textarea>
-        <div class="composer-row">
-          <span class="faint small">
-            {#if runningTurn !== null}
-              {$t('chat.running')}
-            {:else}
-              {$t('chat.enterHint')}
-            {/if}
-          </span>
-          <button
-            disabled={!canSend}
-            title={canSend ? undefined : $t('chat.sendNotReady')}
-            onclick={() => void send()}
-          >{$t('chat.send')}</button>
-        </div>
-      </div>
+      {#if errorText !== ''}
+        <p class="notice bad">{errorText}</p>
+      {/if}
+      <ChatComposer
+        bind:value={input}
+        placeholder={$t('chat.placeholder')}
+        disabled={runningTurn !== null}
+        hint={runningTurn !== null ? $t('chat.running') : $t('chat.enterHint')}
+        sendLabel={$t('chat.send')}
+        sendDisabledTitle={$t('chat.sendNotReady')}
+        onsend={() => void send()}
+      />
         {/if}
       {/snippet}
     </MainArea>
 </div>
 
 <style>
-  .chat-files {
-    border-top: 1px solid var(--line);
-    padding: var(--sp-2) var(--sp-3);
-    font-size: var(--fs-sm);
-  }
 
-  .chat-files-head {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
 
-  .chat-files-head .ghost {
-    padding: var(--sp-1) var(--sp-2);
-  }
+
+
+
 
   /* 展开箭头定宽：不定宽时，标题会随着 ▸/▾ 的宽度差左右抖 */
-  .chat-files .twisty {
-    display: inline-block;
-    width: 0.75rem;
-    color: var(--text-faint);
-  }
+
 
   /*
     ★ 2026-10（紧凑性）：原来 `.list-pane` 有 `max-width: 22rem`，而 `.split-layout`
@@ -929,22 +893,9 @@
     margin-left: auto;
   }
 
-  .chat-composer {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
-  }
 
-  .chat-composer textarea {
-    width: 100%;
-    resize: vertical;
-    max-height: calc(15lh + 1.6rem);
-  }
 
-  .composer-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-2);
-  }
+
+
+
 </style>

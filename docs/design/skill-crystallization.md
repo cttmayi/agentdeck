@@ -5714,3 +5714,47 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 （宽窗口编辑器**只一处**）。**删掉**的判据都写了理由：结论条 5 条、意见框 6 条。
 
 验证：`check` **2189 全绿**、`probe:layout` **562 全绿**、`typecheck` 0 错。
+
+### 12.67 栏头动作真的到右侧了；材料搬进栏脚、与聊天页同一个控件（分批第 197 批，2026-11；使用者定）
+
+使用者两条：
+
+> 1.「放弃」和「确认入库」位置还是不对，依然在第 3 行，而不是右侧
+> 2. 材料现在在右栏，我想用类似聊天页一样，将工作目录放在「发送」的上方。可展开显示。
+>    关于「发送」一起，用相同的控件，不然不一致
+
+**① 为什么它们还在第 3 行**——不是 CSS 没写对，是**结构上没有"右边"**：
+`MainArea` 的 `.detail-head` 只是个带 padding 的**块级**容器，`h2` / `.detail-sub` / 动作依次占三行，
+`margin-left:auto` 在块级流里无从生效。上一批我只加了 `margin-left:auto`，等于对着墙推门。
+
+改法：`MainArea` 把动作渲进一个有名字的容器 `.detail-actions`，`.detail-head` 改成**两列网格**
+（`minmax(0,1fr) auto`）——标题与副题占左列、动作占右列且**跨两行**；副题先让位（`min-width:0`
++ 省略号），窄屏的「返回」独占第一行。
+
+**判据也补了**：原来那条 `barNarrowBox` 只量"按钮在栏头矩形里、彼此同基线"——**动作在第三行时也满足**。
+新增 `crystal.headActionsBesideTitle`：① 与 `h2` 同一水平带（top 差 ≤ 标题高）；② 在标题右边；
+③ 贴着栏头右缘（≤ 24px）。实测 `sameBand/rightOfTitle/nearRightEdge` 全 true（栏头右缘 832 / 动作 808）。
+
+**② 材料搬进栏脚，与聊天页同一个控件**：
+- 新建 `@agentdeck/ui` 的 `FootFiles`（折叠清单：▸ 标题 + 计数 + 右侧动作）与 `ChatComposer`
+  （`textarea` + 「Enter 发送 / Shift+Enter 换行」+ 发送钮）——**聊天页与沉淀页共用同一份**，
+  沉淀页原来的 `.crystal-composer`（单行 `input`）删掉；
+- 材料整块（清单 / 两步删除 / 拖文件 / 选目录 / 从仓库拉 / 回执）从右栏搬进中栏栏脚
+  （`CrystallizeMaterials`），逻辑原样搬、语义没动；
+- 右栏因此只剩「产物（编辑器）+ 体检」。
+
+⚠️ 三个坑（都当场被探针抓到）：
+1. `FootFiles` 正文必须是 **`hidden` 而不是 `{#if}`**：聊天页那栏的折叠头要写「N 项」，而条数
+   只有清单自己知道——`{#if}` 会在收起时把它卸载，计数永远 0（我第一版就这么写，聊天页 11 条
+   文件判据全红）；
+2. 材料的「N 项」**不能由父组件算**：父组件那份 state 与列表自己那份在"刚删/刚加"的那一帧
+   会对不上（实测 `摘要 4 项 / 清单 3 项`）。现在数量由列表按 `items.length` 现算，父组件只给
+   括号里那段（轨迹/使用者给）；
+3. 「追加材料：…」成功后清单不刷新——那条信号（`rev`）原来接在右栏，材料搬走后它跟着搬过来。
+
+判据（探针 **563** 全绿）：`headActionsBesideTitle`（新增）、`actionsInMessages`（动作在栏头、
+消息区没有）、`materialLineMatchesPane`（数量与清单同源，宿主改为栏脚折叠头）、
+`deleteMaterial` / `dropMaterial` / `blankMultiMaterial`（选择器跟着新控件走）、
+`editorAndDiffSameContainer`（`textarea` 的**第一个**现在是栏脚输入条 ⇒ 点名编辑器那个框）。
+
+验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。

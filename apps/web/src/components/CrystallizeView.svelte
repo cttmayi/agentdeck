@@ -27,7 +27,10 @@
 
   // ★ 分批第 194 批：气泡形状与聊天页**同一份**（`packages/ui` 的 ChatBubble）——
   //   沉淀页原来是第二套（`.qa-msg`）、第三套（抽屉分节），于是"同一个对话"在两页里长得不一样。
-  import { ChatBubble, FoldSection } from '@agentdeck/ui/components'
+  // ★ 分批第 197 批：栏脚的折叠清单与输入条与聊天页**同一份**（`FootFiles` / `ChatComposer`），
+  //   材料本身搬进栏脚（`CrystallizeMaterials`）。
+  import { ChatBubble, ChatComposer, FoldSection } from '@agentdeck/ui/components'
+  import CrystallizeMaterials from './CrystallizeMaterials.svelte'
   import { api, ApiError, type Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { go, goCrystallize } from '../lib/view.ts'
@@ -98,13 +101,6 @@
   export let materialRev = 0
   /** 本组件改了材料（追加）时通知父组件：右栏那一栏也要重读（否则"追加了但右栏看不见"）。 */
   export let onmaterialchange: () => void = () => {}
-  /**
-   * ★ 分批第 196 批：把「材料规模」那一句交给父组件（→ 右栏材料标题）。
-   *
-   * 为什么不在两个组件里各算一遍：它必须与右栏清单**同一份数据现算**（§12.14：两处由同一
-   * 份数据推，否则必漂）。定义仍在本组件的 `materialCountLine`，这里只是转交。
-   */
-  export let onstatsline: (line: string) => void = () => {}
   /** 已经处理过的 `materialRev`（只认增量，不重复拉）。 */
   let seenMaterialRev = 0
 
@@ -1064,25 +1060,27 @@
             i.relPath === 'verdict.md' ||
             i.relPath === 'feedback.md',
         ).length
-  $: materialCountLine = (() => {
-    if (material === null) return ''
-    const total = material.items.length
-    if (total === 0) return $t('crystallize.materialCountNone')
+  /**
+   * 规模里"清单自己算不出来"的那一段（`轨迹 5 轮 · 使用者给 3 份`）。
+   *
+   * ★ 分批第 197 批：**数量 `N 项` 不在这里拼**——它由列表那一侧按 `items.length` 现算
+   * （`CrystallizeMaterials`），否则"父组件算一次、清单列一次"会在删/加的那一帧对不上
+   * （探针当时量到 `摘要 4 项 / 清单 3 项`）。这里只给括号里那段。
+   */
+  $: materialStatsParts = (() => {
+    if (material === null || material.items.length === 0) return ''
     // 轨迹那一档在**空白起**的草稿里恒为 0 ⇒ 不写出来（否则屏幕上会多一行"轨迹 0"，
     // 而探针有一条判据专门钉"空白起不许出现轨迹字样"）
     const parts: string[] = []
     if (traceCount > 0) parts.push($t('crystallize.materialCountTrace', { n: String(traceCount) }))
     if (givenCount > 0) parts.push($t('crystallize.materialCountGiven', { n: String(givenCount) }))
     return parts.length === 0
-      ? $t('crystallize.materialCount', {
-          n: String(total),
-          parts: $t('crystallize.materialCountGiven', { n: '0' }),
-        })
-      : $t('crystallize.materialCount', { n: String(total), parts: parts.join(' · ') })
+      ? $t('crystallize.materialCountGiven', { n: '0' })
+      : parts.join(' · ')
   })()
 
-  // 材料规模那句话一变就交给父组件（右栏材料标题显示它）
-  $: onstatsline(materialCountLine)
+  // ★ 分批第 197 批：材料清单整体搬进栏脚（`CrystallizeMaterials`），规模那段在它自己那里拼，
+  //   所以这里不再需要"转交给父组件"那条通道。
 
   /** 拉素材清单（"素材"分节用：能核"这句话是从哪一轮来的"）。 */
   async function loadMaterial(): Promise<void> {
@@ -1829,24 +1827,31 @@
         </div>
       </div>
       <!-- 栏脚输入条：U3d 才接线，先只占位（不做成能按但没反应的按钮） -->
-      <form
-        class="crystal-composer"
-        onsubmit={(e) => {
-          e.preventDefault()
-          submitComposer()
-        }}
-      >
-        <input
-          class="crystal-composer-input"
-          type="text"
-          bind:value={composerText}
-          placeholder={$t('crystallize.chatPlaceholder')}
-          aria-label={$t('crystallize.chatPlaceholder')}
+      <!--
+        ★ 分批第 197 批：**材料在输入条上方、可展开**——与聊天页「工作目录的文件」同款
+        （`FootFiles` + `ChatComposer` 两个组件两边共用）。使用者："材料现在在右栏，
+        我想用类似聊天页一样，将工作目录放在「发送」的上方。可展开显示。"
+      -->
+      {#if draftRunId !== ''}
+        <CrystallizeMaterials
+          {draftRunId}
+          rev={materialRev}
+          editable={step === 'review' || step === 'done'}
+          statsPart={materialStatsParts}
+          onchanged={() => {
+            void loadMaterial()
+            onmaterialchange()
+          }}
         />
-        <button class="primary" type="submit" disabled={composerText.trim() === ''}>
-          {$t('crystallize.chatSend')}
-        </button>
-      </form>
+      {/if}
+      <ChatComposer
+        bind:value={composerText}
+        placeholder={$t('crystallize.chatPlaceholder')}
+        hint={$t('crystallize.chatHint')}
+        sendLabel={$t('crystallize.chatSend')}
+        sendDisabledTitle={$t('crystallize.chatSendNotReady')}
+        onsend={() => submitComposer()}
+      />
       {#if composerReceipt !== ''}
         <!-- 回执：平台怎么理解这句话，使用者要看得见（不是 toast，会随页面消失）。
              ⚠️ 它是栏脚的**第二块**（不包一层 div）：组件里 §12.22 的教训——多包一层会打断

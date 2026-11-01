@@ -3835,6 +3835,19 @@ const CHECKS = [
   // 它是**结论**（中性）、理由是一条消息、不再有"审阅草稿"这种任务式抬头。
   {
     view: '沉淀',
+    key: 'crystal.headActionsBesideTitle',
+    label:
+      '★★★ 「放弃 / 确认入库」在**标题右侧**（使用者连提两次："依然在第 3 行，而不是右侧"）：' +
+      '与标题同一水平带、在标题右边、贴着栏头右缘——三条缺一不算（它在第三行时也"在栏头里"）',
+    ok: (v) => !!v && v.sameBand === true && v.rightOfTitle === true && v.nearRightEdge === true,
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `同一带 ${String(v.sameBand)}　在标题右 ${String(v.rightOfTitle)}　` +
+          `贴右缘 ${String(v.nearRightEdge)}（栏头 ${v.headRight} / 动作 ${v.actsRight}）`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.refusedAttached',
     label: '夹具：拒绝那条草稿挂得上（下面几条量的是它的结论条与消息）',
     ok: (v) => v === true,
