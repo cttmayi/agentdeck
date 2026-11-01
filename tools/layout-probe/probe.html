@@ -4809,6 +4809,50 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            */
           facts['crystal.dropMaterial'] = null
           /**
+           * ★ 分批第 203 批：**上传文件到工作目录**（拖进「工作目录的文件」那一栏）。
+           *
+           * 量的是"字节对不对"：传一份文本（带唯一标记）+ 一份**含 NUL 的二进制**，
+           * 再从 `/file?path=` 读回来逐字比——只量"树里多了一行"的话，把二进制当文本转码
+           * 写坏的实现照样能绿。
+           */
+          facts['crystal.uploadToWorkDir'] = await (async () => {
+            const zone = d().querySelector('[data-foot-files]')
+            if (!zone) return { zone: false }
+            const win = f.contentWindow
+            const text = `# 探针上传的文本\n\n标记：${Date.now()}\n`
+            const binBytes = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]
+            const marker = String(Date.now())
+            const dt = new win.DataTransfer()
+            dt.items.add(new win.File([text], `probe-upload-${marker}.md`, { type: 'text/markdown' }))
+            dt.items.add(new win.File([new Uint8Array(binBytes)], `probe-upload-${marker}.png`))
+            zone.dispatchEvent(
+              new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
+            )
+            // ⚠️ 别用 wait()：Chrome 的虚拟时钟在 fetch 未结束时不走（第 199 批踩过）
+            const readBack = async (name) => {
+              for (let i = 0; i < 20; i += 1) {
+                const r = await win
+                  .fetch(
+                    `/api/crystallize/drafts/${encodeURIComponent(cyDraft ?? '')}/file?path=` +
+                      encodeURIComponent(`material/appended/${name}`),
+                  )
+                  .catch(() => null)
+                // ⚠️ 探针页面是浏览器环境：没有 Node 的 `Buffer`（第一版在这抛
+                //    `ReferenceError: Buffer is not defined`，整个探针一个字都发不出来）
+                if (r && r.ok) return new Uint8Array(await r.arrayBuffer())
+                await win.fetch('/api/identity').catch(() => null)
+              }
+              return null
+            }
+            const txt = await readBack(`probe-upload-${marker}.md`)
+            const png = await readBack(`probe-upload-${marker}.png`)
+            return {
+              zone: true,
+              textOk: txt !== null && new TextDecoder().decode(txt) === text,
+              binOk: png !== null && [...png].every((b, i) => b === binBytes[i]) && png.length === binBytes.length,
+            }
+          })()
+          /**
            * ★ 分批第 150 批（§12.12/§12.17：动作在消息里，不在页头）：顶栏**没有动作钮**，
            * 「确认入库」「放弃」在**审阅那条产物消息底部**。
            *
@@ -6798,15 +6842,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
         facts['chat.filesPanelPresent'] = await (async () => {
           if (!(await chatOpenFixtureConversation())) return false
-          // 诊断（临时）：为什么找不到那一栏
-          facts['chat.debugFoot'] = {
-            hasFootFiles: !!d().querySelector('[data-foot-files]'),
-            hasFootFilesAny: !!d().querySelector('.foot-files'),
-            paneFoot: !!d().querySelector('.pane-foot'),
-            composer: !!d().querySelector('[data-composer]'),
-            detailPane: !!d().querySelector('.detail-pane'),
-            footHtml: (d().querySelector('.pane-foot')?.className ?? '') ,
-          }
           const panel = chatFilesPanel()
           if (!panel) {
             errors.push('对话打开着，右栏底部却没有「工作目录的文件」那一栏')
@@ -6819,6 +6854,42 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return false
           }
           return true
+        })()
+
+        /**
+         * ★ 分批第 203 批：**聊天页也能把文件拖进「工作目录的文件」**（与沉淀页同一个控件、
+         * 同一份服务端实现），落点是 `uploads/`。同样验**字节**：读回来逐字等于上传内容。
+         */
+        facts['chat.uploadToWorkDir'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return null
+          const panel = chatFilesPanel()
+          if (!panel) return { panel: false }
+          const items = (await f.contentWindow.fetch('/api/conversations').then((r) => r.json()))
+            .items ?? []
+          const conv = items.find((c) => c.workDir === chatFilesWorkDir)
+          if (!conv) return { panel: true, conversation: false }
+          const win = f.contentWindow
+          const marker = String(Date.now())
+          const text = `# 探针上传（聊天）\n\n${marker}\n`
+          const dt = new win.DataTransfer()
+          dt.items.add(new win.File([text], `probe-chat-${marker}.md`, { type: 'text/markdown' }))
+          panel.dispatchEvent(
+            new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
+          )
+          for (let i = 0; i < 20; i += 1) {
+            const r = await win
+              .fetch(
+                `/api/conversations/${encodeURIComponent(conv.id)}/file?path=` +
+                  encodeURIComponent(`uploads/probe-chat-${marker}.md`),
+              )
+              .catch(() => null)
+            if (r && r.ok) {
+              const got = new TextDecoder().decode(new Uint8Array(await r.arrayBuffer()))
+              return { panel: true, conversation: true, textOk: got === text }
+            }
+            await win.fetch('/api/identity').catch(() => null)
+          }
+          return { panel: true, conversation: true, textOk: false }
         })()
 
         // ── D69.15 标题统一：聊天栏头标题字号必须 fs-lg（与任务/智能体同款）──

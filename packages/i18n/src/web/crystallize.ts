@@ -313,6 +313,18 @@ export const crystallizeText = {
     en: 'No artifact yet. Files show up here once drafting finishes; the process stays in the middle pane.',
   },
   'crystallize.materialDelete': { zh: '删掉', en: 'Delete' },
+  /**
+   * ★ 分批第 203 批：上传文件到工作目录（📎 / 拖进那一栏）。两条回执都要说清**落到哪、叫什么**——
+   * 重名会被加 `-2`，不点名的话人找不到自己刚传的那份。
+   */
+  'crystallize.uploadDone': {
+    zh: '上传了 {n} 个文件到 material/appended/：{names}',
+    en: 'Uploaded {n} file(s) to material/appended/: {names}',
+  },
+  'crystallize.uploadFailed': {
+    zh: '上传失败：{error}',
+    en: 'Upload failed: {error}',
+  },
   'crystallize.materialDeleteConfirm': { zh: '确认删掉', en: 'Confirm' },
   'crystallize.materialDeleteDone': {
     zh: '已删掉 {path}（还剩 {n} 份材料）——下一版草稿不会再读到它；自动带的素材没动',

@@ -345,6 +345,56 @@
     }
   }
 
+  /** 上传进行中（防连点；回执借提示区一行小字） */
+  let uploading = false
+
+  /**
+   * ★ 分批第 203 批：**上传文件到这段对话的工作目录**（`uploads/`）。
+   *
+   * 与沉淀页那颗「📎」是**同一个控件**（`ChatComposer` 的 `onupload`）、同一套拖拽
+   * （`FootFiles` 的 `ondropfiles`）；服务端也是同一份实现（`workdir-upload.ts`）——
+   * 差别只有落点：这边是"这一轮干活的附件"（`uploads/`，agent 在自己的 cwd 里 `ls` 就到），
+   * 沉淀那边是"起草者读的依据"（`material/appended/`，还要登记进素材索引）。
+   */
+  async function uploadFiles(files: File[]): Promise<void> {
+    if (uploading || files.length === 0 || activeConversation === null) return
+    uploading = true
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          base64: arrayBufferToBase64(await file.arrayBuffer()),
+        })),
+      )
+      const res = await api<{ files: Array<{ relPath: string; name: string }> }>(
+        `/api/conversations/${encodeURIComponent(activeConversation.id)}/upload`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ files: payload }),
+        },
+      )
+      showToast($t('chat.uploadDone', { n: String(res.files.length) }))
+      // 目录那一栏立刻重读（"传了但看不到"与"没传"在体感上一模一样）
+      filesTick += 1
+    } catch (err) {
+      showToast($t('chat.uploadFailed', { error: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      uploading = false
+    }
+  }
+
+  /** `ArrayBuffer` → base64（浏览器里没有 Buffer）。 */
+  function arrayBufferToBase64(buf: ArrayBuffer): string {
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(binary)
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     // ★ Enter 发送 / Shift+Enter 换行 —— 与「新建任务」的「要做什么」**正好相反**
     //   （那边 Enter 换行）。聊天是回合制的输入框，这里是通行惯例；两处的差别
@@ -712,6 +762,7 @@
           title={$t('files.heading')}
           count={filesCount > 0 ? $t('chat.filesCount', { count: filesCount }) : ''}
           bind:open={filesOpen}
+          ondropfiles={(files) => void uploadFiles(files)}
         >
           {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}
@@ -757,6 +808,8 @@
         hint={runningTurn !== null ? $t('chat.running') : $t('chat.enterHint')}
         sendLabel={$t('chat.send')}
         sendDisabledTitle={$t('chat.sendNotReady')}
+        attachLabel={$t('common.attachFile')}
+        onupload={(files) => void uploadFiles(files)}
         onsend={() => void send()}
       />
         {/if}

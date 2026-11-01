@@ -1264,6 +1264,18 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.uploadToWorkDir',
+    label:
+      '★★★ 聊天页**也能把文件拖进「工作目录的文件」**（与沉淀页同一个控件、同一份服务端实现），' +
+      '落点是 `uploads/`，读回来**逐字等于**上传内容',
+    ok: (v) => !!v && v.panel === true && v.conversation === true && v.textOk === true,
+    show: (v) =>
+      v === null || v === undefined
+        ? 'null'
+        : `那一栏 ${String(v.panel)}　对话 ${String(v.conversation)}　字节 ${String(v.textOk)}`,
+  },
+  {
+    view: '聊天',
     key: 'chat.filesPanelPresent',
     label:
       '★★ 对话打开着的时候，右栏底部有「工作目录的文件」那一栏（任务详情那一栏与它是同一个组件，只是"问谁"不同）',
@@ -3667,6 +3679,19 @@ const CHECKS = [
   // ★ 分批第 202 批删掉了 `crystal.dropMaterial`：拖拽区与「选文件 / 选目录」整块下线
   //   （使用者："全部去掉「把文本文件拖到这里，或选文件 / 选目录」"），追加材料只剩
   //   栏脚输入条的「追加材料：…」（那条另有判据 `crystal.appendMaterial`）。
+  {
+    view: '沉淀',
+    key: 'crystal.uploadToWorkDir',
+    label:
+      '★★★ 把文件**拖进「工作目录的文件」那一栏** ⇒ 真的落到 `material/appended/`，而且' +
+      '**逐字节等于**上传内容（文本 + 含 NUL 的二进制都验）——只量"树里多一行"的话，' +
+      '把二进制当文本转码写坏的实现照样能绿',
+    ok: (v) => !!v && v.zone === true && v.textOk === true && v.binOk === true,
+    show: (v) =>
+      v === null || v === undefined
+        ? 'null'
+        : `文本 ${String(v.textOk)}　二进制 ${String(v.binOk)}`,
+  },
   {
     view: '沉淀',
     key: 'crystal.actionsInMessages',

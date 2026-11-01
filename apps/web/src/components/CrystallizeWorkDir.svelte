@@ -66,6 +66,8 @@
   let topCount = $state(0)
   /** 增删之后让树重取（`reloadKey` 变了就重列）。 */
   let reloadTick = $state(0)
+  /** 上传进行中（防连点，也给回执一个"正在传"的临时话术）。 */
+  let uploading = $state(false)
   /** 正在追加时不为空（防止一边拖一批、一边按两次按钮）。 */
   let adding = $state(false)
   /** 拖拽文件悬停（给一点反馈：这一块收文件）。 */
@@ -78,6 +80,59 @@
   let pendingDelete = $state('')
   let deleting = $state('')
   let deleteNote = $state('')
+
+  /**
+   * ★ 分批第 203 批：**把文件拖进这一栏** ⇒ 传到 `material/appended/`。
+   *
+   * 走 `POST /api/crystallize/drafts/<id>/upload`（与「📎」那颗按钮同一个接口）：
+   * 服务端只收文件名（剥掉路径）、重名自动 `-2`、单份 5 MB / 一次 10 份、绝不覆盖；
+   * 二进制会在素材索引里被标成"用工具读"。
+   */
+  async function uploadFiles(files: File[]): Promise<void> {
+    if (uploading || files.length === 0) return
+    uploading = true
+    deleteNote = ''
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          // base64 只带数据本身（`File` 的 base64 走 `arrayBuffer` 自己转，不依赖 FileReader）
+          base64: arrayBufferToBase64(await file.arrayBuffer()),
+        })),
+      )
+      const res = await api<{ files: Array<{ relPath: string; bytes: number }>; bytes: number }>(
+        `/api/crystallize/drafts/${encodeURIComponent(draftRunId)}/upload`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ files: payload }),
+        },
+      )
+      reloadTick += 1
+      deleteNote = $t('crystallize.uploadDone', {
+        n: String(res.files.length),
+        names: res.files.map((f) => f.relPath.split('/').pop() ?? f.relPath).join('、'),
+      })
+      onchanged()
+    } catch (err) {
+      deleteNote = $t('crystallize.uploadFailed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      uploading = false
+    }
+  }
+
+  /** `ArrayBuffer` → base64（浏览器里没有 Buffer）。分块拼，避免超长参数爆栈。 */
+  function arrayBufferToBase64(buf: ArrayBuffer): string {
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(binary)
+  }
 
   async function removeMaterial(treePath: string): Promise<void> {
     if (deleting !== '') return
@@ -110,6 +165,7 @@
 
 <FootFiles
   title={$t('files.heading')}
+  ondropfiles={(files) => void uploadFiles(files)}
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
   bind:open={open}
 >

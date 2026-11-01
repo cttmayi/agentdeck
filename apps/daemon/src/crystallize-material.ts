@@ -570,6 +570,35 @@ export async function removeMaterial(
 // ★ 分批第 201 批：`appendRepoMaterial` / `noteRepoInIndex`（"从仓库拉材料"的落盘与索引
 //   登记）随那条功能一起删掉了（使用者："直接删掉这个功能"，§12.54 下线）。
 
+/**
+ * ★ 分批第 203 批：**上传的文件**也登记进素材索引（一行一个，二进制要标"用工具读"）。
+ *
+ * 为什么必须登记：索引页是起草者读的**第一个文件**（"先读这一页，再决定读哪些"）。
+ * 不登记的话，上传的文件就在磁盘上躺着没人翻——使用者会觉得"传了但它没看见"，
+ * 而起草者确实没看见（它只按索引去读）。
+ *
+ * 二进制那句尤其重要：起草者拿到一个 PNG 当文本读，读到的是一屏替换字符，它会以为素材坏了，
+ * 甚至据此写出"这个文件是坏的"这种结论。所以**在索引里就把它标出来**：用工具读。
+ */
+export async function noteUploadedInIndex(
+  materialDir: string,
+  files: ReadonlyArray<{ relPath: string; bytes: number; binary: boolean }>,
+): Promise<void> {
+  if (files.length === 0) return
+  const indexPath = join(materialDir, '00-README.md')
+  const index = await readFile(indexPath, 'utf8').catch(() => '')
+  const at = new Date().toISOString()
+  const lines = files.map((file) =>
+    file.binary
+      ? `- \`${file.relPath}\`（${file.bytes} 字节）——**二进制文件**：用工具读（\`file\` / \`xxd\` 之类），` +
+        '不要当文本打开；它可能是图片、压缩包或文档。\n'
+      : `- \`${file.relPath}\`（${file.bytes} 字节）——使用者上传的文件，**和上面自动带上的素材同等有效**；\n` +
+        '  它可能补充或推翻前面某一条做法，动手前先读一遍。\n',
+  )
+  const note = `${APPENDED_NOTE_HEAD}（${at}，上传）\n\n${lines.join('')}`
+  await writeFile(indexPath, `${index.trimEnd()}\n\n${note}`, 'utf8')
+}
+
 /** 任务标题 / 对话标题（界面与索引都要）。 */
 export async function sourceLabelOf(store: Store, run: Run): Promise<string> {
   if (run.subject.type === 'conversation') {

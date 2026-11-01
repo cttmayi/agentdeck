@@ -18,6 +18,11 @@ export const commonText = {
   'common.saving': { zh: '保存中…', en: 'Saving…' },
   'common.cancel': { zh: '取消', en: 'Cancel' },
   'common.close': { zh: '关闭', en: 'Close' },
+  /**
+   * ★ 分批第 203 批：栏脚输入条上那颗回形针（聊天页与沉淀页**同一颗**，
+   * 所以词条放在 common 里，不放任何一边的业务表里）。
+   */
+  'common.attachFile': { zh: '上传文件到工作目录', en: 'Upload files to the work directory' },
   'common.create': { zh: '创建', en: 'Create' },
   'common.creating': { zh: '创建中…', en: 'Creating…' },
   'common.refresh': { zh: '刷新', en: 'Refresh' },

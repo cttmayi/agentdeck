@@ -25,8 +25,23 @@
     sendLabel = '',
     /** 发送按钮不可用时给的悬停说明。 */
     sendDisabledTitle = '',
-    /** 额外的按钮/内容（沉淀页目前没有，留着与聊天页同构）。 */
+    /** 额外的按钮/内容（两页各自的小东西）。 */
     extra,
+    /**
+     * ★ 分批第 203 批：**上传文件**（两页共用同一颗回形针按钮）。
+     *
+     * 给了它就画一颗「📎」：点了选文件，选完把 `File[]` 交回去（**上传本身由调用方做**——
+     * 落点、接口、回执各不相同，组件不该认识 `/api/crystallize/...` 这种东西）。
+     * 不传就什么都不画（与以前的渲染一模一样）。
+     */
+    onupload,
+    /**
+     * 回形针的悬停说明 / 无障碍标签。
+     *
+     * ⚠️ 文案由调用方给：`@agentdeck/ui` 不认识任何业务词表（这个包只依赖 svelte），
+     * 所以这里不 import `t`——那会让 ui 包拖着一份 i18n 依赖，而远端管理页也要用它。
+     */
+    attachLabel = '',
     onsend,
   }: {
     value?: string
@@ -36,10 +51,23 @@
     sendLabel?: string
     sendDisabledTitle?: string
     extra?: Snippet
+    onupload?: ((files: File[]) => void) | undefined
+    attachLabel?: string
     onsend: (text: string) => void
   } = $props()
 
   const canSend = $derived(!disabled && value.trim() !== '')
+
+  /** 隐藏的 `<input type=file>`：回形针那个按钮就是它的入口。 */
+  let fileInput: HTMLInputElement | null = $state(null)
+
+  function onPicked(event: Event): void {
+    const input = event.currentTarget as HTMLInputElement | null
+    const files = [...(input?.files ?? [])]
+    // 清空 value：再选同一个文件时 `change` 才会再触发
+    if (input) input.value = ''
+    if (files.length > 0) onupload?.(files)
+  }
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
@@ -59,15 +87,37 @@
   ></textarea>
   <div class="composer-row">
     <span class="faint small">{hint}</span>
-    {#if extra}{@render extra()}{/if}
-    <button
-      type="button"
-      class="primary"
-      data-composer-send
-      disabled={!canSend}
-      title={canSend ? undefined : sendDisabledTitle}
-      onclick={() => onsend(value.trim())}
-    >{sendLabel}</button>
+    <!-- 右侧那一组：额外内容 + 回形针 + 发送。三者**挨在一起**（`space-between` 只分左右两块，
+         中间的兄弟会被摊开——那是第一版的毛病：回形针孤零零飘在行的中间）。 -->
+    <span class="composer-actions">
+      {#if extra}{@render extra()}{/if}
+      {#if onupload}
+        <button
+          type="button"
+          class="ghost small attach"
+          data-composer-attach
+          title={attachLabel}
+          aria-label={attachLabel}
+          onclick={() => fileInput?.click()}
+        >📎</button>
+        <input
+          class="attach-input"
+          type="file"
+          multiple
+          hidden
+          bind:this={fileInput}
+          onchange={onPicked}
+        />
+      {/if}
+      <button
+        type="button"
+        class="primary"
+        data-composer-send
+        disabled={!canSend}
+        title={canSend ? undefined : sendDisabledTitle}
+        onclick={() => onsend(value.trim())}
+      >{sendLabel}</button>
+    </span>
   </div>
 </div>
 
@@ -91,5 +141,17 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-2);
+  }
+
+  .composer-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  /* 回形针：紧挨着「发送」（都在右边那组），提示文字仍占左边 */
+  .attach {
+    padding: 0 var(--sp-2);
+    line-height: 1;
   }
 </style>

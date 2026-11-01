@@ -153,6 +153,12 @@ export const chatText = {
     zh: '这个对话和它的全部轮次会被删掉。执行记录会留着（审计与成本统计还认得它）。',
     en: 'This conversation and all its turns will be deleted. The run records stay (audit and cost still know about them).',
   },
+  /**
+   * ★ 分批第 203 批：上传文件到这段对话的工作目录（`uploads/`）。与沉淀页同一个控件
+   * （`ChatComposer` 的 📎 / `FootFiles` 的拖拽），落点不同。
+   */
+  'chat.uploadDone': { zh: '上传了 {n} 个文件到 uploads/', en: 'Uploaded {n} file(s) to uploads/' },
+  'chat.uploadFailed': { zh: '上传失败：{error}', en: 'Upload failed: {error}' },
   'chat.sendNotReady': {
     zh: '先输入内容；这一轮跑完之前不能再发',
     en: 'Type something first; you cannot send again until this turn finishes',

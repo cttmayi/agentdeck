@@ -1129,6 +1129,62 @@
    * · 「回到 vN」⇒ 版本回滚在技能页（这里只说明去哪）
    * · 其余 ⇒ 当成"补充"，同样如实说没有落点
    */
+  /** 上传进行中（回形针那颗按钮防连点；回执借栏脚那一行） */
+  let uploadingFiles = false
+
+  /**
+   * ★ 分批第 203 批：输入条上那颗「📎」——与拖进「工作目录的文件」那一栏**同一个接口**
+   * （`POST /api/crystallize/drafts/<id>/upload`，落 `material/appended/`）。
+   *
+   * 为什么两处各写一次调用而不是抽一个函数：它们分属两个组件（一个在栏脚、一个在栏脚上方），
+   * 而真正该只有一份的是**服务端的落点与边界**（`workdir-upload.ts`）——那已经是一份了。
+   */
+  async function uploadToWorkDir(files: File[]): Promise<void> {
+    if (uploadingFiles || files.length === 0 || draftRunId === '') return
+    uploadingFiles = true
+    composerReceipt = '正在上传…'
+    try {
+      const payload = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          base64: arrayBufferToBase64(await file.arrayBuffer()),
+        })),
+      )
+      const res = await api<{ files: Array<{ relPath: string }> }>(
+        `/api/crystallize/drafts/${encodeURIComponent(draftRunId)}/upload`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ files: payload }),
+        },
+      )
+      composerReceipt = $t('crystallize.uploadDone', {
+        n: String(res.files.length),
+        names: res.files.map((f) => f.relPath.split('/').pop() ?? f.relPath).join('、'),
+      })
+      // 树与"依据"两处都重读（材料只有一份数据源）
+      onmaterialchange()
+      void loadMaterial()
+    } catch (err) {
+      composerReceipt = $t('crystallize.uploadFailed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      uploadingFiles = false
+    }
+  }
+
+  /** `ArrayBuffer` → base64（浏览器里没有 Buffer）。 */
+  function arrayBufferToBase64(buf: ArrayBuffer): string {
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(binary)
+  }
+
   function submitComposer(): void {
     const text = composerText.trim()
     if (text === '') return
@@ -1849,6 +1905,8 @@
         hint={$t('crystallize.chatHint')}
         sendLabel={$t('crystallize.chatSend')}
         sendDisabledTitle={$t('crystallize.chatSendNotReady')}
+        attachLabel={$t('common.attachFile')}
+        onupload={(files) => void uploadToWorkDir(files)}
         onsend={() => submitComposer()}
       />
       {#if composerReceipt !== ''}

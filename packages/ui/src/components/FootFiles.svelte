@@ -33,16 +33,46 @@
     actions,
     /** 正文（清单本身）。 */
     children,
+    /**
+     * ★ 分批第 203 批：**把文件拖进这一栏**（两页共用）。
+     *
+     * 给了它就接拖拽：悬停时整块加一道虚线框（看得见"这里收东西"），松手把 `File[]`
+     * 交回去——上传本身由调用方做（落点与接口两页不同）。
+     * 不传就完全不接拖拽（浏览器默认行为，比如把文件拖进输入框）。
+     */
+    ondropfiles,
   }: {
     title?: string
     count?: string
     open?: boolean
     actions?: Snippet
     children?: Snippet
+    ondropfiles?: ((files: File[]) => void) | undefined
   } = $props()
+
+  /** 有文件悬在这一栏上（给一点反馈：这一块收文件）。 */
+  let dragging = $state(false)
 </script>
 
-<section class="foot-files" data-foot-files>
+<section
+  class="foot-files"
+  class:dragging={dragging && ondropfiles !== undefined}
+  data-foot-files
+  role={ondropfiles ? 'group' : undefined}
+  ondragover={(e) => {
+    if (!ondropfiles) return
+    e.preventDefault()
+    dragging = true
+  }}
+  ondragleave={() => (dragging = false)}
+  ondrop={(e) => {
+    if (!ondropfiles) return
+    e.preventDefault()
+    dragging = false
+    const files = [...(e.dataTransfer?.files ?? [])]
+    if (files.length > 0) ondropfiles(files)
+  }}
+>
   <div class="foot-files-head">
     <button
       type="button"
@@ -105,6 +135,12 @@
     display: inline-block;
     width: 0.75rem;
     color: var(--text-faint);
+  }
+
+  /* 拖文件悬停：整块给一道虚线框（"这里收东西"），松手就交给调用方 */
+  .foot-files.dragging {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
   }
 
   /* 清单自己滚：栏脚是"常驻的一小块"，不许把中间那栏的对话挤没 */

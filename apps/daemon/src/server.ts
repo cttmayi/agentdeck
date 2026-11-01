@@ -118,6 +118,7 @@ import {
 } from './builtin-drafter.ts'
 import {
   appendMaterial,
+  noteUploadedInIndex,
   collectBlankMaterial,
   collectMaterial,
   draftDirName,
@@ -154,6 +155,8 @@ import {
 //   原来"同来源 + 同目标"在真机上把两条不相干的任务并成一条：列表一行 18 版、
 //   返工额度被邻链撑爆（自动返工一次都没触发）、任务目录可能被搬错内容。
 import { chainOf, chainOfRun } from './draft-chain.ts'
+// ★ 分批第 203 批：上传文件到工作目录（沉淀页与聊天页共用一份实现，见该模块头注释）
+import { writeWorkDirUpload } from './workdir-upload.ts'
 // ★ 分批第 136 批（§12.42 第 ② 步）：自动返工循环已删，`rework-guard.ts` 随之删除
 //   （它只服务那条循环的"收敛闸门"）。任务线的审核返工（D45）用的是 executo r 里那套
 //   `maxReworks`，与这里无关。
@@ -5723,6 +5726,65 @@ async function injectedSkillsOf(
       return
     }
     /**
+     * ── 上传文件到**工作目录**（分批第 203 批）────────────────────────────────
+     *
+     * 两个入口、一份实现（`workdir-upload.ts` 的口径）：沉淀页落在 `material/appended/`
+     * （那是"它读的依据"，顺带在素材索引里登记一行），聊天页落在 `uploads/`。
+     *
+     * 为什么落点由**服务端**写死而不是客户端传：客户端一旦能指定目录，就得为"能不能写进
+     * `skill/`、能不能写进 `.agentdeck/`"再写一套判据——而那正是本仓库最容易长出第二份规则的地方。
+     * 这里两条路由各给一个固定子目录，检查只有"是不是起草 run / 能不能改"这几条。
+     */
+    const uploadMatch = /^\/api\/crystallize\/drafts\/([^/]+)\/upload$/.exec(path)
+    if (req.method === 'POST' && uploadMatch) {
+      const draftRunId = decodeURIComponent(uploadMatch[1]!)
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      if (draftRun.subject.type !== 'skill-draft') {
+        sendJson(res, 400, { error: '这条 run 不是起草 run，没有可上传的材料', code: 'not_a_draft' })
+        return
+      }
+      if (draftRun.crystallized === true) {
+        sendJson(res, 409, {
+          error: '这条草稿已经入库了——再往里加材料只会在以后的「重新沉淀」里造成误会',
+          code: 'already_crystallized',
+        })
+        return
+      }
+      if (draftRun.status !== 'completed') {
+        sendJson(res, 409, {
+          error: '起草还没跑完，先别加材料（这一版读到的素材已经定了；跑完再加）',
+          code: 'draft_not_completed',
+        })
+        return
+      }
+      const raw = (await readJsonBody(req)) as { files?: unknown }
+      const files = Array.isArray(raw?.files)
+        ? raw.files
+            .map((f) => f as { name?: unknown; base64?: unknown })
+            .filter((f) => typeof f?.base64 === 'string')
+            .map((f) => ({
+              name: typeof f.name === 'string' ? f.name : 'file',
+              base64: f.base64 as string,
+            }))
+        : []
+      const materialDir = join(await draftTaskDir(draftRunId), 'material')
+      const res2 = await writeWorkDirUpload(materialDir, 'appended', files)
+      if (!res2.ok) {
+        sendJson(res, 400, { error: res2.error, code: res2.code })
+        return
+      }
+      // 素材索引登记一行（起草者读的第一个文件；二进制要标一句"用工具读"）
+      await noteUploadedInIndex(materialDir, res2.files)
+      info(`上传材料（草稿 ${draftRunId.slice(-8)}）：${res2.files.length} 个文件 ${res2.bytes} 字节`)
+      sendJson(res, 200, { dir: 'material/appended', files: res2.files, bytes: res2.bytes })
+      return
+    }
+
+    /**
      * ── 材料的**目录树**与单文件（分批第 198 批）──────────────────────────────
      *
      * 使用者："中栏 发送框上面不是呈现的类似聊天页工作目录，而是素材罗列"——他要比方那一栏
@@ -7525,6 +7587,50 @@ async function injectedSkillsOf(
         return
       }
       await sendWorkFile(res, req, dir, url.searchParams.get('path') ?? '')
+      return
+    }
+
+    /**
+     * ── 上传文件到**这段对话的工作目录**（分批第 203 批）────────────────────
+     *
+     * 与沉淀那条**同一份实现**（`writeWorkDirUpload`）：只差落点——聊天落在 `uploads/`
+     * （它没有 `material/` 这一层；agent 在自己的工作目录里 `ls` 就能看到）。
+     * 两个目录名不同是刻意的：沉淀那边是"起草者读的依据"（要登记进素材索引），
+     * 这边是"这一轮干活的附件"（谁用谁读，不需要索引）。
+     */
+    const chatUploadMatch = /^\/api\/conversations\/([^/]+)\/upload$/.exec(path)
+    if (req.method === 'POST' && chatUploadMatch) {
+      const id = decodeURIComponent(chatUploadMatch[1]!) as ConversationId
+      const conversation = await store.getConversation(id)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+      const dir = resolveWorkDir({
+        requested: conversation.workDir,
+        subject: { type: 'conversation', id: conversation.id },
+        fallbackId: conversation.id,
+        workRoot,
+      }).path
+      const raw = (await readJsonBody(req)) as { files?: unknown }
+      const files = Array.isArray(raw?.files)
+        ? raw.files
+            .map((f) => f as { name?: unknown; base64?: unknown })
+            .filter((f) => typeof f?.base64 === 'string')
+            .map((f) => ({
+              name: typeof f.name === 'string' ? f.name : 'file',
+              base64: f.base64 as string,
+            }))
+        : []
+      // 目录还不存在（这段对话还没跑过任何一轮）⇒ 先建出来，否则上传必然失败
+      await mkdir(dir, { recursive: true }).catch(() => {})
+      const up = await writeWorkDirUpload(dir, 'uploads', files)
+      if (!up.ok) {
+        sendJson(res, 400, { error: up.error, code: up.code })
+        return
+      }
+      info(`上传附件（对话 ${conversation.id.slice(-8)}）：${up.files.length} 个文件 ${up.bytes} 字节`)
+      sendJson(res, 200, { dir: 'uploads', files: up.files, bytes: up.bytes })
       return
     }
 
