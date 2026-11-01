@@ -72,12 +72,21 @@
 <style>
   .foot-files {
     border-top: 1px solid var(--line);
+    /**
+     * ★ 分批第 200 批（使用者："工作目录的文件的位置是透明的，完全透出下面的文章了"）：
+     * **必须有不透明底色**。它自己是一块"常驻的栏脚"，而上面那块消息区的内容会溢出自己的盒子
+     * （`.crystal-flow` 是 `min-height:100%` 的普通流）——底色一透明，正文就从缝里透出来，
+     * 看起来像这一栏坏掉了。用 `.pane-foot` 同一档（`--surface`），两处叠在一起也没有色差。
+     */
+    background: var(--surface);
     padding: var(--sp-2) var(--sp-3);
     font-size: var(--fs-sm);
     flex-shrink: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    position: relative;
+    z-index: 1;
   }
 
   .foot-files-head {

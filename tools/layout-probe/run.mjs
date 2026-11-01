@@ -3716,6 +3716,19 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.footerOpaque',
+    label:
+      '★★★ 栏脚那块「工作目录的文件」**不透明**、消息区自己滚（使用者："位置是透明的，' +
+      '完全透出下面的文章了"）——底色 alpha=1 且 `.crystal-msg[stream]` 有 overflow-y（内容不溢出）',
+    ok: (v) =>
+      v !== null && typeof v === 'object' && v.opaque === true && v.streamOverflow === 'auto',
+    show: (v) =>
+      v === null
+        ? 'null'
+        : `${String(v.bg)}　消息区 overflow-y=${String(v.streamOverflow)}`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.materialLineMatchesPane',
     label:
       '★★★ 右栏材料标题里的「N 项」与**清单条数**是同一份数据现算的（§12.14：两处必须同源，否则必漂）。' +

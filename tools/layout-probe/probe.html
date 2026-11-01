@@ -4679,6 +4679,24 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 必须等于**树的顶层行数**（`bind:count`，与树同源）。判据的意图没变：
            * 两个数字对不上就红（写死一个数、树另算一份，照样会红）。
            */
+          /**
+           * ★ 分批第 200 批（使用者："工作目录的文件的位置是透明的，完全透出下面的文章了"）：
+           * 量两件事——栏脚那块**不透明**（computed background-color 带 alpha=1），
+           * 以及**消息区自己滚**（`overflow-y: auto`，内容不再溢出到栏脚上面）。
+           */
+          facts['crystal.footerOpaque'] = (() => {
+            const el = d().querySelector('[data-foot-files]')
+            if (!el) return null
+            const bg = cs(el).backgroundColor ?? ''
+            const m = /rgba?\(([^)]+)\)/.exec(bg)
+            const alpha = m && m[1].split(',').length === 4 ? Number(m[1].split(',')[3]) : 1
+            const stream = d().querySelector('.crystal-msg[data-msg-role="stream"]')
+            return {
+              bg,
+              opaque: alpha >= 0.99,
+              streamOverflow: stream ? cs(stream).overflowY : 'absent',
+            }
+          })()
           facts['crystal.materialLineMatchesPane'] = (() => {
             const head = d().querySelector('[data-foot-files] .foot-files-head')?.textContent ?? ''
             const paneCount = d().querySelectorAll('[data-foot-files] .wd > li').length

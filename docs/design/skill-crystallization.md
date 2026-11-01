@@ -5825,3 +5825,28 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 5. `bind:open` 不写目标会绑到 `window.open` 上（svelte-check 当场报 "Can only bind to state or props"）。
 
 验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。
+
+### 12.70 栏脚那块"透明"的根因（分批第 200 批，2026-11；使用者报）
+
+使用者：「工作目录的文件的位置是透明的，完全透出下面的文章了」。
+
+两个原因叠在一起，缺一个都不会这么明显：
+
+1. **栏脚没有底色**。`FootFiles` 只有 `border-top`，而聊天页那一栏之所以看不出问题，是因为
+   它外面还套着 `.pane-foot`（有 `background: var(--surface)`）。沉淀页这一栏直接挂在
+   `.crystal-chat` 的流里 ⇒ 透明。
+2. **消息区没有 `overflow`**。`.crystal-msg[data-msg-role='stream']` 只有 `flex:1; min-height:0`，
+   而 `.crystal-flow` 是 `min-height:100%` 的普通流 ⇒ 内容比盒子高时**溢出盒子**，画到后面的
+   兄弟节点（栏脚）上面；栏脚又是透明的 ⇒ 正文从它"身体里"穿出来。
+
+修法（两条一起，双保险）：
+- `FootFiles` 自己给 `background: var(--surface)`（与 `.pane-foot` 同一档，叠在一起也没有色差），
+  外加 `position: relative; z-index: 1`；
+- `.crystal-msg[stream]` 给 `overflow-y: auto` —— 这一页的纪律本来就是"页面不整页滚、主区自己滚"，
+  内容超出就在这一层里滚，而不是往外溢。
+
+判据 `crystal.footerOpaque`：栏脚 computed `background-color` 的 **alpha ≥ 0.99** 且
+`.crystal-msg[stream]` 的 `overflow-y === 'auto'`。只量其中一条的话，另一条退回就照样复现
+（纯透明 + overflow auto：滚起来那一刻还是会串；不透明 + 不滚：内容被裁在盒子边界外但摸不到）。
+
+验证：`check` **2189 全绿**、`probe:layout` **564 全绿**、`typecheck` 0 错。
