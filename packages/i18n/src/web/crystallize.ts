@@ -355,10 +355,7 @@ export const crystallizeText = {
   'crystallize.settingsProxyClear': { zh: '改回直连', en: 'Use direct' },
   'crystallize.settingsProxyOn': { zh: '已启用：{url}（下次装技能生效）', en: 'Enabled: {url} (applies to the next install)' },
   'crystallize.settingsProxyOff': { zh: '已改回直连。', en: 'Switched back to direct.' },
-  'crystallize.settingsSkillRequiredShort': {
-    zh: '未安装沉淀用技能 ⇒ 不能开始沉淀（右上「沉淀设置」里装）',
-    en: 'No drafting skill installed — crystallization is blocked (install it in Crystallize settings)',
-  },
+  // ★ 分批第 207 批：`settingsSkillRequiredShort` 删了——那句话从右栏栏头撤掉（见该组件注释）。
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
   /**

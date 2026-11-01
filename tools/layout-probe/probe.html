@@ -6161,12 +6161,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                * 只量"有这么一块"不够——"两个字都在、什么也按不动"正是本仓库最防的那种。
                */
               {
-                // 右栏的内容比结论条晚一拍（它自己拉产物/技能清单）⇒ 等它出现再量
-                await until(() => !!d().querySelector('[data-draft-skill]'), 120)
-                const box = d().querySelector('[data-draft-skill]')
-                facts['crystal.draftSkillSection'] = box
-                  ? { present: true, hasInstall: false, text: text(box).slice(0, 60) }
-                  : { present: false, hasInstall: false, text: '' }
+                // ★ 207 批：右栏栏头那句"没装沉淀用技能"删了 ⇒ 这里不再量它（改到智能体页量）
               }
               const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]
               facts['crystal.artifactFileCount'] = artFiles.length

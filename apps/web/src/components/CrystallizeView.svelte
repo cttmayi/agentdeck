@@ -769,7 +769,8 @@
      * 并说清去哪儿装（沉淀页右上「沉淀设置」）。服务端的二次拦截是下一步（要同步改夹具）。
      */
     if (draftSkill.id === '') {
-      error = '还没安装「沉淀用技能」——先去右上角「沉淀设置」里一键安装，再回来点开始提炼。'
+      error =
+        '还没安装「沉淀用技能」（distilly）——先去右上角「沉淀设置」里一键安装，装好之后它会自动挂到起草者身上，再回来点开始提炼。'
       step = 'target'
       return
     }
@@ -812,10 +813,9 @@
               target,
               ...(userFeedback.trim() !== '' ? { userFeedback: userFeedback.trim() } : {}),
             }
-      // ★ 分批第 173 批：装了"沉淀用技能"就注入（不装也能沉淀：注入是可选的）
-      if (draftSkill.id !== '') {
-        ;(body as Record<string, unknown>)['skillIds'] = [draftSkill.id]
-      }
+      // ★ 分批第 207 批：**不再往请求里塞 `skillIds`**——起草 run 注入的技能集合
+      //   来自起草者这条智能体的挂载（`Agent.skillIds`，与任务 run 同一条通道）。
+      //   前端唯一要做的是"没装就别让开始"（下面那道门），装好之后 daemon 自动对齐挂载。
       const res = await api<{ draftRunId: string; materialStats: { turns: number; toolCalls: number } }>(
         '/api/crystallize/draft',
         {

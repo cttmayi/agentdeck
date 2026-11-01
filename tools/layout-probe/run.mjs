@@ -1263,6 +1263,16 @@ const CHECKS = [
     show: (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : String(v)),
   },
   {
+    view: '智能体',
+    key: 'agents.builtinSkillsText',
+    label:
+      '★★★ 起草者那一格**真的挂着「沉淀用技能」**（agents.builtinSkillsText 里看得到 distilly）——' +
+      '分批第 207 批：技能集合改由 `Agent.skillIds` 决定（与任务 run 同一条通道），' +
+      '内置 agent 只读 ⇒ 挂载由平台装/卸时对齐',
+    ok: (v) => typeof v === 'string' && v.includes('distilly'),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 80)),
+  },
+  {
     view: '聊天',
     key: 'chat.uploadToWorkDir',
     label:
@@ -3391,23 +3401,9 @@ const CHECKS = [
     ok: (v) => v === true,
     show: (v) => String(v),
   },
-  {
-    view: '沉淀',
-    key: 'crystal.draftSkillSection',
-    // ★ 分批第 175 批（使用者："一键安装放到沉淀的设置里"）：安装按钮**搬到了设置页**，
-    //   右栏只留一句状态。所以这条判据从"二选一说得清"改成"**说清现在是哪一档**"：
-    //   未装要说"不能开始沉淀"，装了要说"已装好"。安装入口本身由设置页那条判据钉。
-    label:
-      '★★ 右栏说清「沉淀用技能」现在是哪一档：未装 ⇒ 明说**不能开始沉淀**，已装 ⇒ 明说已装好' +
-      '（安装入口搬进了「沉淀设置」，分批第 175 批）',
-    ok: (v) =>
-      v !== null &&
-      typeof v === 'object' &&
-      v.present === true &&
-      (String(v.text).includes('未安装') || String(v.text).includes('已装好')),
-    show: (v) =>
-      v === null || v === undefined ? 'null' : `在 ${String(v.present)}　「${String(v.text)}」`,
-  },
+  // ★ 分批第 207 批删掉了 `crystal.draftSkillSection`（右栏栏头那句"没装沉淀用技能"）。
+  //   技能现在真的挂在**起草者**身上 ⇒ "装没装"该看两处：智能体页起草者那一格
+  //   （`agents.drafterSkillChip`）与「沉淀设置」页；右栏再念一遍是第三处，且只在"没装"时出现。
   {
     view: '沉淀',
     key: 'crystal.artifactResize',
@@ -5882,19 +5878,42 @@ try {
         // 什么都不做：那一节会以"没量到"的形式点名自己（不许静默空过）
         log(yellow('⚠ 没有"起草中"那一屏的素材源 run——那一节会量不到（见夹具阶段的注释）'))
       } else {
-        // ★ 分批第 176 批：起草现在**必须**带「沉淀用技能」（`draft_skill_required`）。
-        //   夹具里取一条已装的技能（探针自带的 `probe-skill`），没有就退到任意一条。
+        /**
+         * ★ 分批第 207 批：起草 run 的技能集合来自**起草者挂的那条技能**（daemon 按 slug
+         *   `distilly` 自动挂），请求里不再带 `skillIds`。
+         *   所以夹具必须先装一条 **slug = distilly** 的技能，否则门禁（`draft_skill_required`）
+         *   会把这一屏挡在门外——这正是它的职责。
+         */
         const allSkills = (await (await fetch(`${base}/api/skills`)).json()).skills ?? []
-        const fixtureSkill =
-          allSkills.find((sk) => sk.slug === 'probe-skill') ?? allSkills[0] ?? null
-        if (!fixtureSkill) log(yellow('⚠ 夹具里一条技能都没有——起草门禁会挡住这一屏'))
+        if (!allSkills.some((sk) => sk.slug === 'distilly')) {
+          const installRes = await fetch(`${base}/api/skills/install`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              source: {
+                kind: 'payload',
+                slug: 'distilly',
+                body:
+                  '---\nname: distilly\ndescription: 探针夹具：沉淀用技能\n---\n\n' +
+                  '# 探针的起草规范\n\n## Procedure\n\n1. 先读素材索引。\n',
+                files: {},
+              },
+            }),
+          })
+          if (![200, 201].includes(installRes.status)) {
+            log(
+              yellow(
+                `⚠ 装「沉淀用技能」夹具失败：HTTP ${installRes.status} ${await installRes.text().catch(() => '')}——起草那一屏会被门禁挡住`,
+              ),
+            )
+          }
+        }
         const draftRes = await fetch(`${base}/api/crystallize/draft`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             runId: sourceRun.runId,
             target: { kind: 'new', purpose: '探针夹具：量起草中那一屏' },
-            ...(fixtureSkill ? { skillIds: [fixtureSkill.id] } : {}),
           }),
         })
         const draftBody = await draftRes.json().catch(() => ({}))

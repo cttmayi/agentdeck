@@ -262,12 +262,14 @@ before(async () => {
     body: JSON.stringify({
       skills: [
         {
-          slug: 'draft-skill-fixture',
-          name: '起草夹具技能',
+          // ★ 分批第 207 批：起草 run 的技能集合来自**起草者的挂载**（`Agent.skillIds`），
+          //   而平台按 slug 自动挂 `distilly` ⇒ 夹具技能必须叫这个名字，否则门禁不通过。
+          slug: 'distilly',
+          name: '起草夹具技能（distilly）',
           source: 'mine',
-          sourceRef: 'mine:draft-skill-fixture',
+          sourceRef: 'mine:distilly',
           body:
-            '---\nname: draft-skill-fixture\ndescription: 起草用的夹具技能\n---\n\n# 怎么起草\n\n## Procedure\n\n1. 先读索引。\n',
+            '---\nname: distilly\ndescription: 起草用的夹具技能\n---\n\n# 怎么起草\n\n## Procedure\n\n1. 先读索引。\n',
           files: {},
           verdictSchemaVersion: 1,
         },
@@ -398,12 +400,12 @@ async function draftAndWait(payload: Record<string, unknown>): Promise<string> {
  * 或用 `rawDraftPost`。
  */
 async function draftPost(payload: Record<string, unknown>): Promise<Response> {
+  // ★ 分批第 207 批：**不再拼 `skillIds`**——起草 run 注入的技能来自起草者这条智能体的挂载
+  //   （daemon 按 slug `distilly` 自动对齐）。夹具只要保证库里有一条 `distilly` 即可。
   return fetch(`${daemon.url}/api/crystallize/draft`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(
-      payload.skillIds === undefined ? { ...payload, skillIds: [draftSkillId] } : payload,
-    ),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -1718,14 +1720,43 @@ describe('§10.13 删除材料：只有使用者给的（appended/）能删，�
   })
 })
 
-describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分批第 176 批）', () => {
-  test('★★★ 不带 skillIds 起草 ⇒ 400 draft_skill_required（界面那道之外的兜底）', async () => {
+describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分批第 176 批；第 207 批改判据来源）', () => {
+  /**
+   * ★ 分批第 207 批：门禁的**来源变了**——不再是"请求里没带 `skillIds`"，而是
+   *   "**起草者这条智能体没挂上可解析的「沉淀用技能」**"（技能集合现在来自 agent 的挂载）。
+   *   判据的意图没变（没装 distilly 就不许沉淀），只是把那条技能**从库里删掉**再试，
+   *   然后装回去。
+   */
+  test('★★★ 库里没有 distilly ⇒ 400 draft_skill_required；装回去就受理', async () => {
     const runId = await runReviewed('审过的流程（门禁）')
-    const res = await rawDraftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
-    assert.equal(res.status, 400, await res.clone().text())
-    assert.equal(((await res.json()) as { code?: string }).code, 'draft_skill_required')
+    // 前提：夹具装了一条 slug=distilly 的技能（见 `before`）
+    const installed = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ id: string; slug: string; source: string }>
+    }
+    const distilly = installed.skills.find((sk) => sk.slug === 'distilly')
+    assert.ok(distilly, '前提：夹具里装着 distilly')
+    // 只装了一份夹具技能 ⇒ 删掉它就是"没装 distilly"
+    const removed = await fetch(`${daemon.url}/api/skills/${distilly.id}`, { method: 'DELETE' })
+    assert.equal(removed.status, 200, await removed.clone().text())
 
-    // 带上就正常受理（同一份请求，只多 skillIds）
+    const blocked = await draftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
+    assert.equal(blocked.status, 400, await blocked.clone().text())
+    assert.equal(((await blocked.json()) as { code?: string }).code, 'draft_skill_required')
+
+    // 装回去（同 slug，会复用原 id）⇒ 起草者的挂载由 daemon 自动对齐
+    const reinstalled = await fetch(`${daemon.url}/api/skills/install`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        source: {
+          kind: 'payload',
+          slug: 'distilly',
+          body: '---\nname: distilly\ndescription: 起草用的夹具技能\n---\n\n# 怎么起草\n\n## Procedure\n\n1. 先读索引。\n',
+          files: {},
+        },
+      }),
+    })
+    assert.ok([200, 201].includes(reinstalled.status), await reinstalled.clone().text())
     const ok = await draftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
     assert.equal(ok.status, 202, await ok.clone().text())
   })
@@ -1815,13 +1846,14 @@ describe('§10.16 起草者提问 → 人回答（分批第 172 批）', () => {
 
   test('★★★ 选中的技能真的被注入到工作目录（"不要预置在仓库里、让用户自己装"那条的前半段）', async () => {
     const skill = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
-      skills: Array<{ id: string }>
+      skills: Array<{ id: string; slug: string }>
     }
-    const skillId = skill.skills[0]?.id
-    assert.ok(skillId, '夹具里要先有一条技能')
-    const before = fakeBackend.injectedSkills.length
+    // ★ 207 批：注入的是**起草者挂的那条**（slug = distilly），不是"列表里第一条"
+    const skillId = skill.skills.find((sk) => sk.slug === 'distilly')?.id
+    assert.ok(skillId, '夹具里要先有一条 distilly')
     const runId = await runReviewed('审过的流程（注入技能）')
-    const res = await draftPost({ runId, target: { kind: 'new', purpose: '注入技能' }, skillIds: [skillId] })
+    // ★ 207 批：注入的技能集合来自**起草者的挂载**（daemon 按 slug 自动对齐），请求里不再带。
+    const res = await draftPost({ runId, target: { kind: 'new', purpose: '注入技能' } })
     assert.equal(res.status, 202, await res.clone().text())
     const draftRunId = ((await res.json()) as { draftRunId: string }).draftRunId
     for (let i = 0; i < 40; i += 1) {

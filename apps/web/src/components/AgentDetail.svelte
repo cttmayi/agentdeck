@@ -41,6 +41,13 @@
   let busy = false
   let error = ''
 
+  /**
+   * ★ 分批第 207 批：起草者**应该挂**的那条技能的 slug（`distilly`）。
+   * 从 `/api/identity` 拿，不在前端硬编码——两处写同一个 slug，迟早漂。
+   * 老 daemon 不带这个字段 ⇒ 退化成"未安装"的通用说法（不编名字）。
+   */
+  $: expectedDrafterSkill = $identity?.drafterSkillSlug ?? ''
+
   const blankDraft = () => ({
     name: agent.name,
     role: agent.role,
@@ -464,10 +471,33 @@
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
           {#if agent.builtin}
-            <!-- ★ 内置的不给挂载入口：起草 run 的技能集合是**写死的**（第 ③ 条），
-                 挂了也不生效；给出入口只会让人以为"挂上就影响起草"。接口层也拒绝
-                 （`builtin_agent_field_locked`），这里是第一道。 -->
-            <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
+            <!--
+              ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
+              起草者的**沉淀用技能现在真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
+              "内置不挂 skill"——它挂什么，起草 run 就注入什么。
+              ⚠️ 内置 agent 仍然只读（分批第 190 批）：这一格是**展示**，挂载由平台维护
+                （装/卸技能、daemon 启动时对齐）。
+            -->
+            {#if agent.role === 'drafter'}
+              {@const mounted = $skills.filter((sk) => agent.skillIds.includes(sk.id))}
+              {#if mounted.length > 0}
+                <p class="builtin-skills">
+                  {#each mounted as sk (sk.id)}
+                    <span class="skill-chip">{sk.name}</span>
+                  {/each}
+                </p>
+                <span class="hint">{$t('agents.drafterSkillHint')}</span>
+              {:else}
+                <p class="builtin-skills">
+                  <span class="skill-chip missing"
+                    >{expectedDrafterSkill}{$t('agents.skillNotInstalled')}</span
+                  >
+                </p>
+                <span class="hint">{$t('agents.drafterSkillMissingHint')}</span>
+              {/if}
+            {:else}
+              <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
+            {/if}
           {:else if $skills.length === 0}
             <p class="empty-value">{$t('agents.noSkillsYet')}</p>
           {:else if pickableSkills.length === 0}
@@ -560,6 +590,31 @@
     font-size: 12px;
   }
   .skills-cell.locked { opacity: 0.85; }
+
+  /* ★ 分批第 207 批：内置起草者挂的那条「沉淀用技能」（展示，不可编辑） */
+  .builtin-skills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    margin: 0 0 var(--sp-1);
+  }
+  .skill-chip {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    padding: 2px 8px;
+    font-size: var(--fs-sm);
+  }
+  /* 未安装：虚线框 + 弱化（"应该挂但没装"，不是一条真技能） */
+  .skill-chip.missing {
+    border-style: dashed;
+    color: var(--text-faint);
+    background: transparent;
+  }
+  .skills-cell .hint {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
   /* ══════════════════════════════════════════════════════════════════
      布局
      ══════════════════════════════════════════════════════════════════

@@ -236,13 +236,13 @@
     <h2>{$t('crystallize.artifactTitle')}</h2>
     <div class="pane-actions">
       <!-- ★ 分批第 174 批：栏头的"第 N 版"去掉了（同上：它只是个计数，没有行为依赖） -->
-      <!-- ★ 分批第 175 批：安装入口挪进「沉淀设置」（使用者定），这里只在没装时说一句 -->
-      {#if draftSkill.id === ''}
-        <!-- 安装入口在「沉淀设置」（使用者定）；这里给一句状态 + 一个去处 -->
-        <span class="artifact-skill faint small" data-draft-skill>
-          {$t('crystallize.settingsSkillRequiredShort')}
-        </span>
-      {/if}
+      <!--
+        ★ 分批第 207 批：这一行**删掉了**（原来它只在"没装沉淀用技能"时说一句）。
+        技能现在真的**挂在起草者身上**，于是"装没装"有两个更该看的地方：
+          · 「智能体」页起草者那一格（挂着就显示 chip，没装就显示「distilly（未安装）」）；
+          · 「沉淀设置」页（一键安装，且说清现在哪一档）。
+        右栏再念一遍就是第三处，而且它只在"没装"时出现（"装了就没有"本身也是噪音）。
+      -->
       <button type="button" class="ghost artifact-close" onclick={() => (drawerManual = false)}>
         {$t('crystallize.artifactClose')}
       </button>

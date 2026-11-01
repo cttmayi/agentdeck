@@ -397,6 +397,19 @@ export const agentsText = {
     zh: '已下线的内置审核者：沉淀线不再评审，没有任何链路用它——可以直接删掉',
     en: 'Retired built-in auditor: crystallization no longer reviews, nothing uses it — safe to delete',
   },
+  /**
+   * ★ 分批第 207 批：起草者这一格现在**真的挂**着「沉淀用技能」（`Agent.skillIds`），
+   * 而内置 agent 只读 ⇒ 挂载由平台维护（装/卸技能、启动时对齐）。三句话要说清这三件事。
+   */
+  'agents.drafterSkillHint': {
+    zh: '平台替它挂的：装/卸这条技能时自动对齐（内置智能体只读，不能手改）',
+    en: 'Mounted by the platform: it follows install/uninstall (built-in agents are read-only)',
+  },
+  'agents.drafterSkillMissingHint': {
+    zh: '还没装：去「沉淀」页右上角的「沉淀设置」里一键安装，装好之后会自动挂上',
+    en: 'Not installed: install it from Crystallize → Settings; it will be mounted automatically',
+  },
+  'agents.skillNotInstalled': { zh: '（未安装）', en: ' (not installed)' },
   'agents.builtinNoSkills': {
     zh: '内置智能体不挂 skill（它们做什么由平台随版本给，与挂载无关）',
     en: 'Built-in agents mount no skills (what they do ships with the platform)',

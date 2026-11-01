@@ -114,6 +114,8 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
+  DRAFTER_SKILL_SLUG,
+  syncDrafterSkillMount,
   findBuiltinAgent,
 } from './builtin-drafter.ts'
 import {
@@ -2803,6 +2805,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       warn(`${label}被修复：${r.why}（已恢复成默认，使用者改过的内容不会被动）`)
     }
   }
+  /**
+   * ★ 分批第 207 批：**把起草者的技能挂载与技能库对齐**（启动时一次）。
+   *
+   * 为什么由平台做：内置 agent 是只读的（分批第 190 批），使用者没法自己把 distilly 挂上去；
+   * 而"起草 run 注入什么"这一批起完全由**挂载**决定 ⇒ 挂载必须始终对着技能库的现状。
+   * 装/卸技能之后也有一次（见那两条路由），启动这一次是兜底（比如使用者手改了数据目录）。
+   */
+  {
+    const mount = await syncDrafterSkillMount(store, workspaceId)
+    if (mount.skillIds.length === 0) {
+      info(
+        `起草者还没挂上「沉淀用技能」（${DRAFTER_SKILL_SLUG}）：装好之后自动挂上，` +
+          '在装好之前不能开始沉淀',
+      )
+    } else {
+      info(`起草者挂了：${mount.skillSlugs.join('、')}`)
+    }
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // ★ 启动时把老 agent 记录里**已撤下的字段**从磁盘上摘掉（2026-10）
@@ -3197,18 +3217,19 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    */
 
 /**
- * ★ 分批第 172 批：**起草 run 注入哪些技能**（使用者定：走"注入"路线，但技能不预置在仓库里，
- * 由使用者自己装——一键安装走既有的 `POST /api/skills/install`）。
+ * ★ 分批第 207 批：**起草 run 注入哪些技能** —— 来自**起草者这条智能体挂的**（一份来源）。
  *
- * 记在哪：起草开始时把选中的 skill id 落一份 `material/injected-skills.json`；后续的
- * 「按意见改一版」「回答提问」都读它 ⇒ **同一条沉淀每一轮用同一套技能**（不读的话，
- * 第二轮起技能就悄悄没了，而产出会"看起来一样但没读规范"）。
+ * 改之前它读 `material/injected-skills.json`（"起草开始时把选中的 skill id 落一份，后续每轮读它"）。
+ * 那是**按请求注入**时代的配套：既然输入是请求体，就得把那份选择记下来、让后续每一轮重新注入它。
+ * 现在输入是 agent 的挂载（与任务 run 同一条通道），那份文件退化成**记录**（追溯"这一版照着
+ * 哪条技能写的"），不再是输入——两套输入正是这一批要消掉的东西。
+ *
  * 读的时候只保留**仍然存在**的（人被删了某条技能不算错误：少注入一条比整轮失败好，
  * 但要在 run 的 note 里说清——这里返回空则该轮不带技能）。
  */
 async function injectedSkillsOf(
   workspaceId: WorkspaceId,
-  taskDir: string,
+  _taskDir: string,
 ): Promise<
   Array<{
     ref: { id: Skill['id']; slug: string; source: Skill['source'] }
@@ -3219,17 +3240,9 @@ async function injectedSkillsOf(
     files: Record<string, string>
   }>
 > {
-  const raw = await readFile(join(taskDir, 'material', 'injected-skills.json'), 'utf8').catch(() => '')
-  if (raw.trim() === '') return []
-  let ids: unknown
-  try {
-    ids = (JSON.parse(raw) as { skillIds?: unknown }).skillIds
-  } catch {
-    return []
-  }
-  if (!Array.isArray(ids)) return []
+  const mount = await syncDrafterSkillMount(store, workspaceId)
   const all = await store.listSkills(workspaceId)
-  const wanted = new Set(ids.filter((x): x is string => typeof x === 'string'))
+  const wanted = new Set(mount.skillIds)
   return all
     .filter((skill) => wanted.has(skill.id as string))
     .map((s) => ({
@@ -3911,6 +3924,13 @@ async function injectedSkillsOf(
         allowReviewerScriptRun: settings.allowReviewerScriptRun,
         // ★ 分批第 187 批：设置页要能读到当前值（空串 = 直连）
         githubProxy: settings.githubProxy,
+        /**
+         * ★ 分批第 207 批：**起草者挂的那条技能的 slug**（`distilly`）。
+         *
+         * 界面需要它才能把「未安装」说出来（智能体页那颗灰 chip）——不给的话前端只能把 slug
+         * 硬编码一份，两处迟早漂。挂载本身仍然只存在 `Agent.skillIds` 上（这里只是"应该挂哪条"）。
+         */
+        drafterSkillSlug: DRAFTER_SKILL_SLUG,
         /**
          * ★ 分批第 47 批：新建智能体时会**预填**的守则（设置页那个框读它，
          * 新建表单也用它做初值——否则使用者看到空框、保存后才有内容，像"没预填"）。
@@ -6342,29 +6362,19 @@ async function injectedSkillsOf(
         instructions: drafter?.instructions ?? DRAFTER_INSTRUCTIONS,
       }
       /**
-       * ★ 分批第 172 批：把使用者选中的技能注入起草 run，并记下这份选择。
+       * ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
+       * 起草 run 的技能集合 = **这条起草者挂的**（与任务 run 同一条路），不再从请求体读。
        *
-       * 校验：只认**这个 workspace 里真的存在**的技能（`skill_not_found` 比"静默少注入一条"好查得多）。
-       * 记录：`material/injected-skills.json`（后续每轮读它）。
-       * ⚠️ 注入只对"有技能通道的 runtime"生效（claude `.claude/skills/`、codex `<CODEX_HOME>/skills`）；
-       *    没有通道的 runtime 上，技能到不了工作目录 —— executor 会在 run 日志里说明，不静默。
+       * 两件事因此成立：
+       *   · 只有一条投递通道（`agent.skillIds` → `executor.submit({ skills })`）；
+       *   · 「这条草稿照着哪条技能写的」仍然可查——落一份 `material/injected-skills.json`
+       *     （**记录**，不是输入；下一轮的输入同样是 agent 的挂载）。
+       *
+       * 门槛保留（使用者定："在没有安装 distilly 之前不能沉淀"）：挂载解析不到任何技能 ⇒ 400，
+       * 并且说清去哪儿装（界面还有一道，这里兜底）。
        */
-      const rawSkillIds = Array.isArray(raw?.skillIds)
-        ? (raw.skillIds as unknown[]).filter((x): x is string => typeof x === 'string')
-        : []
-      /**
-       * ★ 分批第 176 批（使用者定："**在没有安装 distilly 之前，应该不能沉淀**"）：
-       * 起草**必须**注入「沉淀用技能」——起草者靠它才知道"怎么写"。界面已经拦了一道，
-       * 这里是最后一道：界面画对了却忘了带，这条兜住（与 `task_gate` 同一层意思）。
-       */
-      if (rawSkillIds.length === 0) {
-        sendJson(res, 400, {
-          error:
-            '起草需要「沉淀用技能」——先在「沉淀设置」里一键安装（沉淀页右上角），再开始沉淀。',
-          code: 'draft_skill_required',
-        })
-        return
-      }
+      const mount = await syncDrafterSkillMount(store, workspaceId)
+      const allForDraft = await store.listSkills(workspaceId)
       const draftSkills: Array<{
         ref: { id: Skill['id']; slug: string; source: Skill['source'] }
         slug: string
@@ -6373,28 +6383,45 @@ async function injectedSkillsOf(
         description?: string
         files: Record<string, string>
       }> = []
-      if (rawSkillIds.length > 0) {
-        const allForDraft = await store.listSkills(workspaceId)
-        for (const id of rawSkillIds) {
-          const found = allForDraft.find((sk) => (sk.id as string) === id)
-          if (!found) {
-            sendJson(res, 404, { error: `技能不存在（${id}）`, code: 'skill_not_found' })
-            return
-          }
-          draftSkills.push({
-            ref: { id: found.id, slug: found.slug, source: found.source },
-            slug: found.slug,
-            name: found.name,
-            body: found.body,
-            ...(found.description ? { description: found.description } : {}),
-            files: (found.files ?? {}) as Record<string, string>,
-          })
-        }
-        await writeFile(
-          join(draftDir, 'material', 'injected-skills.json'),
-          `${JSON.stringify({ skillIds: draftSkills.map((sk) => sk.ref.id) }, null, 2)}\n`,
-          'utf8',
-        ).catch(() => {})
+      for (const id of mount.skillIds) {
+        const found = allForDraft.find((sk) => (sk.id as string) === id)
+        if (!found) continue
+        draftSkills.push({
+          ref: { id: found.id, slug: found.slug, source: found.source },
+          slug: found.slug,
+          name: found.name,
+          body: found.body,
+          ...(found.description ? { description: found.description } : {}),
+          files: (found.files ?? {}) as Record<string, string>,
+        })
+      }
+      if (draftSkills.length === 0) {
+        sendJson(res, 400, {
+          error:
+            '起草需要「沉淀用技能」（distilly）——先在「沉淀设置」里一键安装（沉淀页右上角），再开始沉淀。',
+          code: 'draft_skill_required',
+        })
+        return
+      }
+      /**
+       * 记录（**不是输入**）：这一版照着哪条技能写的。下一轮仍然按**挂载**取，
+       * 这份文件只用于追溯（"这条草稿当时用的是哪条技能"）。
+       */
+      await writeFile(
+        join(draftDir, 'material', 'injected-skills.json'),
+        `${JSON.stringify({ skillIds: draftSkills.map((sk) => sk.ref.id) }, null, 2)}\n`,
+        'utf8',
+      ).catch(() => {})
+
+      /**
+       * ⚠️ 旧的请求字段 `skillIds` **不再被读取**（这一批起技能集合来自起草者的挂载）。
+       * 老前端/缓存 bundle 还会带它——**静默忽略**（不是"按它注入"），并在 run 日志里
+       * 留一句，免得"我传了却没用"变成一个查不出来的谜。
+       */
+      if (Array.isArray(raw?.skillIds) && (raw.skillIds as unknown[]).length > 0) {
+        warn(
+          '起草请求里带了旧的 skillIds 字段：已忽略（技能集合现在来自起草者这条智能体的挂载）',
+        )
       }
 
       const outcome = await executor.submit({
@@ -6905,6 +6932,8 @@ async function injectedSkillsOf(
         overwrite: raw.overwrite === true,
         now: Date.now(),
       })
+      // ★ 分批第 207 批：装了/更新了技能 ⇒ 对齐起草者的挂载（装的是 distilly 就挂上）
+      await syncDrafterSkillMount(store, workspaceId)
       sendJson(res, 201, outcome)
       return
     }
@@ -7091,7 +7120,27 @@ async function injectedSkillsOf(
         return
       }
       const agents = await store.listAgents(workspaceId)
-      const holders = agents.filter((a) => a.skillIds.includes(skillId))
+      /**
+       * ★ 分批第 207 批：**平台替起草者挂的那条不算"使用者的引用"**。
+       *
+       * 起草者（内置）现在真的挂着 `distilly`，而它是只读的 ⇒ 若把它也算进"还挂着就拒"，
+       * 使用者就**永远卸不掉** distilly（想卸 → 被拒 → 又改不了内置 agent）。
+       * 所以这条技能的删除先做一次**平台侧摘挂**（`syncDrafterSkillMount` 在删除后会再对齐一次，
+       * 这里只是提前让守卫看不到它），然后照常走下面那套危险检查。
+       */
+      if (skill.slug === DRAFTER_SKILL_SLUG) {
+        for (const a of agents) {
+          if (a.builtin === true && a.role === 'drafter' && a.skillIds.includes(skillId)) {
+            await store.insertAgent({
+              ...a,
+              skillIds: a.skillIds.filter((id) => (id as string) !== (skillId as string)) as Agent['skillIds'],
+              updatedAt: Date.now(),
+            })
+          }
+        }
+      }
+      const holdersNow = await store.listAgents(workspaceId)
+      const holders = holdersNow.filter((a) => a.skillIds.includes(skillId))
       if (holders.length > 0) {
         // ★ 过渡期最常见的形态：审核者**没有内联标准**，它的判断依据正来自这条
         //   skill（老数据，见 `resolveReviewStandard` 的兼容路径）。这时光说
@@ -7113,6 +7162,9 @@ async function injectedSkillsOf(
         return
       }
       const removed = await store.deleteSkill(skillId)
+      // ★ 分批第 207 批：卸了技能 ⇒ 对齐起草者的挂载（卸掉的是 distilly 就摘下来，
+      //   然后"装好之前不能沉淀"这条门槛会重新亮起来）
+      await syncDrafterSkillMount(store, workspaceId)
       sendJson(res, 200, { removed, slug: skill.slug })
       return
     }
@@ -7223,6 +7275,8 @@ async function injectedSkillsOf(
         throw err
       }
 
+      // ★ 分批第 207 批：从路径/链接装的也可能就是 distilly ⇒ 对齐起草者的挂载
+      await syncDrafterSkillMount(store, workspaceId)
       sendJson(res, outcome.installed.length > 0 ? 201 : 200, {
         ...outcome,
         // 来源解析的**过程与结果**要如实回报：使用者得知道

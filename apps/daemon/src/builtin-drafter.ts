@@ -295,6 +295,64 @@ export function describeBuiltinAgent(agent: Pick<Agent, 'builtin' | 'role'>): st
 }
 
 /**
+ * ★ 分批第 207 批：起草者**挂**的那条技能（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）。
+ *
+ * 为什么改成挂载（原来是"起草请求里带 skillIds"）：那等于给沉淀线开一条**第二投递通道**——
+ * 任务线的技能集合来自 `agent.skillIds`，沉淀线却来自请求体，于是"这条草稿照着哪条技能写的"
+ * 有两个来源。现在只有一条：**起草者挂什么，起草 run 就注入什么**。
+ *
+ * 「未安装」怎么表示：`skillIds` 只在装了的时候有 id（**不造假记录**，那是本仓库大忌）；
+ * 智能体页拿这个 slug 去库里找，找不到就画一颗灰 chip「distilly（未安装）」并给安装入口。
+ */
+export const DRAFTER_SKILL_SLUG = 'distilly'
+
+/**
+ * 把起草者的**技能挂载**与技能库对齐（自愈；返回这条 agent 现在挂着哪些）。
+ *
+ * 三条口径：
+ *   · 只在"改了才写"（避免每次调用都 insertAgent 一条日志）；
+ *   · 只挂 slug === `DRAFTER_SKILL_SLUG` 的那一条，**其它一概不动**（将来若允许给起草者挂
+ *     别的技能，这里不会把它们抹掉）；
+ *   · 内置 agent 是只读的 ⇒ 这个字段由**平台**维护（装/卸技能、daemon 启动、每次起草前都会对齐），
+ *     界面上那句话要说清"平台替你挂的"。
+ */
+export async function syncDrafterSkillMount(
+  store: Store,
+  workspaceId: WorkspaceId,
+): Promise<{ agentId: string | null; skillIds: string[]; skillSlugs: string[] }> {
+  await ensureBuiltinDrafter(store, workspaceId)
+  const all = await store.listAgents(workspaceId)
+  const drafter = findBuiltinAgent(all, 'drafter')
+  if (!drafter) return { agentId: null, skillIds: [], skillSlugs: [] }
+
+  const skills = await store.listSkills(workspaceId)
+  const wanted = skills.filter((sk) => sk.slug === DRAFTER_SKILL_SLUG)
+  const wantedIds = new Set(wanted.map((sk) => sk.id as string))
+  // 保留它自己原有的、且不是"沉淀用技能"的那些（现在恒为空，但别写死成"清空"）
+  const kept = drafter.skillIds
+    .map((id) => id as string)
+    .filter((id) => !skills.some((sk) => (sk.id as string) === id && sk.slug === DRAFTER_SKILL_SLUG))
+  const next = [...kept, ...wantedIds]
+  const same =
+    next.length === drafter.skillIds.length &&
+    next.every((id, i) => id === (drafter.skillIds[i] as string | undefined))
+  if (!same) {
+    await store.insertAgent({
+      ...drafter,
+      skillIds: next as Agent['skillIds'],
+      updatedAt: Date.now(),
+    })
+  }
+  return {
+    agentId: drafter.id as string,
+    skillIds: next,
+    skillSlugs: skills
+      .filter((sk) => wantedIds.has(sk.id as string))
+      .map((sk) => sk.slug),
+  }
+}
+
+/**
  * ══════════════════════════════════════════════════════════════════
  * 起草者默认指令的**历史版本**（分批第 31 批）
  * ══════════════════════════════════════════════════════════════════

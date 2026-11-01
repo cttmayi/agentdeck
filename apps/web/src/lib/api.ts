@@ -149,6 +149,13 @@ export interface Identity {
   webBuild?: string | null
   /** 运行环境预检结果（例如 CLI 自己的状态目录写不进去）。 */
   environment?: { ok: boolean; issues: EnvironmentIssue[] }
+  /**
+   * ★ 分批第 207 批：**起草者应挂的那条技能的 slug**（`distilly`）。
+   *
+   * 智能体页要能说出「distilly（未安装）」——前端不去硬编码 slug（两处迟早漂），
+   * 由 daemon 给。挂载本身只在 `Agent.skillIds` 上，这个字段只回答"应该挂哪条"。
+   */
+  drafterSkillSlug?: string
 }
 
 export interface Issue {

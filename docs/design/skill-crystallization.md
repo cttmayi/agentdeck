@@ -6025,3 +6025,36 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 "只许删 `appended/`"的说法同步。
 
 验证：`check` **2188 全绿**、`probe:layout` **567 全绿**、`typecheck` 0 错。
+
+### 12.77 「沉淀用技能」改回**挂在起草者身上**（分批第 207 批，2026-11；使用者定）
+
+使用者：「不对，不应该做特殊处理，就挂在 Agent 上，而不是在沉淀做特别处理。在没有安装 distilly skill 前，
+可以显示"distilly（未安装）"」。他还补了一句：可以改，但当前内置只读，所以也算不能改。
+
+**改之前**：起草 run 的技能集合来自**请求体**（`POST /api/crystallize/draft` 的 `skillIds`，缺了 400），
+而内置起草者的 `skillIds` 是空——等于给沉淀线开了**第二条投递通道**（任务线的技能来自
+`agent.skillIds`）。两套输入，两种"这条草稿照着哪条技能写的"。
+
+**改之后**：只有一条通道——
+- `Agent.skillIds`（起草者）→ `executor.submit({ skills })`，与任务 run 完全同一路；
+- `POST /api/crystallize/draft` **不再读**请求里的 `skillIds`（老前端带了会被忽略并在 run 日志里点名）；
+- 门槛还在（"没装 distilly 不许沉淀"），但判据变成"**起草者挂的那条解析不到**"；
+- `material/injected-skills.json` 退化成**记录**（追溯用），不再是下一轮的输入。
+
+**挂载由平台维护**（内置 agent 只读，人手改不了）：`syncDrafterSkillMount()`
+在 **daemon 启动 / 装技能 / 卸技能 / 每次起草前** 各对齐一次（幂等，只挂 slug = `distilly` 那一条、
+别的 id 一概不动）。⛔ 这里有个必须处理的不对称：删技能那条路由原本"还挂着就拒"——那样
+**distilly 将永远卸不掉**（挂着 → 拒 → 又改不了内置 agent）。所以删除前先做一次**平台侧摘挂**，
+再让那套"危险检查"照常跑（真正被审核者当标准用的技能仍然会被拒）。
+
+**界面**：
+- 智能体页起草者那一格：装着 ⇒ 显示 `distilly` chip；没装 ⇒ 虚线灰 chip **「distilly（未安装）」**
+  + 一句"去沉淀设置里装"。slug 从 `GET /api/identity` 的 `drafterSkillSlug` 来（前端不硬编码）。
+- 右栏栏头那句"没装沉淀用技能"**删掉**（第三个地方，而且只在"没装"时出现，本身也是噪音）。
+
+判据：`agents.builtinSkillsText`（探针 567 全绿，实测量到 `挂载的技能 distilly …`）；
+`§10.17` 改成"把库里那条 distilly 删掉 ⇒ 400 `draft_skill_required`，装回去就受理"；
+`§10.16` 的注入判据改成"记下来的就是起草者挂的那条"；探针夹具改成**自己装一条 slug=distilly** 的技能
+（否则门禁会把"起草中"那一屏挡住——那正是它的职责）。
+
+验证：`check` **2188 全绿**、`probe:layout` **567 全绿**、`typecheck` 0 错。
