@@ -418,10 +418,15 @@ export const crystallizeText = {
   },
   'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
-  // ── U3a 消息流外壳的栏脚（分批第 106 批：先占位，U3d 才接线） ──
+  /**
+   * ── 消息流外壳的栏脚 ──
+   *
+   * ★ 分批第 196 批：占位文案原来写着「（下一批接上）」——那批早接上了（回答提问 / 「这里不对：…」
+   * 改一版 / 「追加材料：…」），一直挂着这句就是**界面上的一句假话**。现在直接说清能干什么。
+   */
   'crystallize.chatPlaceholder': {
-    zh: '跟这次沉淀说一句话（下一批接上）',
-    en: 'Say something to this crystallization (wired in the next batch)',
+    zh: '说一句话：答它的问题 /「这里不对：…」/「追加材料：…」',
+    en: 'Say something: answer it / "not quite: …" / "add material: …"',
   },
 
   'crystallize.chatSend': { zh: '发送', en: 'Send' },
