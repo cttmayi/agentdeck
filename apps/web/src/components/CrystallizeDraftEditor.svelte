@@ -98,9 +98,19 @@
         {/if}
         {#if editor.reviewTab === 'diff'}
           <span class="tabs-right">
-            {#if editor.selectedDiff && (editor.selectedDiff.added > 0 || editor.selectedDiff.removed > 0)}
-              <span class="num-tag add">+{editor.selectedDiff.added}</span>
-              <span class="num-tag del">−{editor.selectedDiff.removed}</span>
+            {#if editor.diff !== null && (editor.diff.totals.added > 0 || editor.diff.totals.removed > 0)}
+              <!--
+                ★ 分批第 196 批：**整条链的合计**搬到这里（原来是中栏结论条上那句
+                「对比当前版本 +604 −0」，使用者："这些也没必要"）。
+                它没有被删掉，而是跟着"看差异"这件事走：你要判断改了多少，本来就在这一屏。
+                单文件的 +n −m 在下面文件那行——两个层级都留着，粗看用这个、细看用那个。
+              -->
+              <span class="diff-total" data-diff-total>
+                {$t('crystallize.diffTotal', {
+                  added: String(editor.diff.totals.added),
+                  removed: String(editor.diff.totals.removed),
+                })}
+              </span>
             {/if}
             <!--
               「对比原 skill」什么时候给：
@@ -511,6 +521,12 @@
     flex-wrap: wrap;
   }
 
+  /* ★ 分批第 196 批：整条链的差异合计（从结论条搬来） */
+  .diff-total {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+  }
   .diff-title {
     font-size: var(--fs-sm);
     color: var(--text-dim);

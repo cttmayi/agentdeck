@@ -41,6 +41,15 @@
     text = '',
     /** 半透明（"正在发出去"那一态）。 */
     pending = false,
+    /**
+     * 气泡里装的是**已渲染的 Markdown**（`children` 那一路也要关掉 `pre-wrap`）。
+     *
+     * ⚠️ 分批第 196 批量到的真缺陷：`children` 那一路原来只有 `.bubble`（带 `white-space:
+     *    pre-wrap`），而 `{@html renderMarkdown(...)}` 自己的块级元素之间还有换行 ⇒ 每个
+     *    换行都多渲染出一个空行（使用者："显示的对话信息每个换行有多一个空行出来"）。
+     *    聊天页走的是 `html` 那一路（有 `.markdown` 分类），所以只有沉淀页有这毛病。
+     */
+    markdown = false,
     /** 气泡里的自定义内容（有它就不画 `html`/`text`）。 */
     children,
     /** `who` 那一行右侧的动作（比如聊天/沉淀的「停止」——它属于"这一轮"，不属于气泡内容）。 */
@@ -51,6 +60,7 @@
     html?: string
     text?: string
     pending?: boolean
+    markdown?: boolean
     children?: Snippet
     whoExtra?: Snippet
   } = $props()
@@ -64,7 +74,7 @@
     </div>
   {/if}
   {#if children}
-    <div class="bubble {role}" class:pending>{@render children()}</div>
+    <div class="bubble {role}" class:markdown class:pending>{@render children()}</div>
   {:else if html !== ''}
     <article class="bubble {role} markdown" class:pending>{@html html}</article>
   {:else}

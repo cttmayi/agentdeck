@@ -92,13 +92,6 @@ export const crystallizeText = {
   'crystallize.stepTarget': { zh: '沉淀目标', en: 'Target' },
   // ── 机械体检（分批第 137 批：§12.15「不要评审，只要体检」的界面说法）──
   //  ⚠️ 措辞不许说"审核/通过（审核意义上）"：入库时只能声称"只过了机械体检（N 项）"（§12.15 代价 ③）。
-  'crystallize.checkTitle': { zh: '机械体检', en: 'mechanical check' },
-  'crystallize.checkPassed': { zh: '体检通过', en: 'Check passed' },
-  'crystallize.checkProblems': {
-    zh: '体检发现 {n} 处问题',
-    en: 'Check found {n} problem(s)',
-  },
-  // 正在编辑正文时不自动切版：只挂一条提示（自动切会丢掉没保存的字）
   'crystallize.newVersionHint': { zh: '这条沉淀有了新一版（你正在编辑，没有自动切过去）', en: 'This crystallization has a new version (not switched automatically while you are editing)' },
   'crystallize.newVersionGo': { zh: '切到新版', en: 'Go to the new version' },
   'crystallize.saveDraft': { zh: '保存改动', en: 'Save changes' },
@@ -207,8 +200,6 @@ export const crystallizeText = {
     en: '{head} (with {n} material items)',
   },
   'crystallize.draftTurnLive': { zh: '正在把素材写成 skill', en: 'Writing the skill' },
-  'crystallize.draftTurnDone': { zh: '写好了', en: 'Done' },
-  /** 过程那一行小字按钮：回看时才要的东西，不该在抬头里跟正文抢位置。 */
   'crystallize.draftProcessShow': { zh: '它怎么做的', en: 'How it got there' },
   'crystallize.draftProcessHide': { zh: '收起过程', en: 'Hide the process' },
   'crystallize.draftFailed': { zh: '这次没写成', en: 'It did not finish' },
@@ -219,21 +210,30 @@ export const crystallizeText = {
   // ★ 分批第 194 批：`crystallize.reviewTitle`（「审阅草稿」）删了——它只挂在"起草者拒绝"
   //   那块抽屉分节的抬头（`<h3>`）上，而那块已经改成一条消息（气泡）。
   'crystallize.slugLabel': { zh: 'slug', en: 'slug' },
+  /**
+   * ★ 分批第 196 批：「确认入库」的确认框（使用者："中栏的「slug」也不应该显示，
+   * 如果要，可以放在「确认入库」后弹出的对话框中"）。
+   */
+  'crystallize.commitTitle': { zh: '确认入库？', en: 'Save this skill?' },
+  'crystallize.commitSlugHint': {
+    zh: '它的唯一标识（kebab-case）。同名会问到「是不是要更新那一条」。',
+    en: 'Its unique id (kebab-case). A clash asks whether to update the existing one.',
+  },
+  'crystallize.commitFromFrontmatter': { zh: '来自 SKILL.md 的 frontmatter（只读）', en: 'From the SKILL.md frontmatter (read-only)' },
+  'crystallize.commitFrontmatterHint': {
+    zh: 'name / description 由草稿的 frontmatter 决定——要改就改右栏那份文件。',
+    en: 'name / description come from the draft frontmatter — edit the file in the right pane to change them.',
+  },
+  'crystallize.commitSummary': {
+    zh: '入库会整目录替换：{n} 个文件、约 {kb} KB。',
+    en: 'Saving replaces the whole directory: {n} files, about {kb} KB.',
+  },
   // ⚠️ 2026-10-21 删掉 `crystallize.previewTitle`：使用者说"不需要「预览」"，
   //    那一段折叠预览连同它的 key 一起删了（留着 key 就是给下一个人一个假线索）。
   // ── 四轮：产出是文件集合（文件树 / 变更集 / 校验 / 兜底形态）──
-  'crystallize.filesUnit': { zh: '个文件', en: 'files' },
   'crystallize.changeAdded': { zh: '新增', en: 'added' },
   'crystallize.changeModified': { zh: '修改', en: 'modified' },
   'crystallize.changeDeleted': { zh: '删除', en: 'deleted' },
-  'crystallize.textModeHint': {
-    zh: '（文本产物：这条起草没有写出文件，只有单文件 SKILL.md）',
-    en: '(text artifact: this draft wrote no files, only a single SKILL.md)',
-  },
-  // ★ 分批第 194 批：`crystallize.problemsTitle`（「校验未通过」）删掉了——它紧跟在前面的
-  //   「体检发现 N 处问题」后面把同一件事说第二遍，而"校验"这个词又会让人以为还有一道审核。
-  //   现在那一格改成**指路**：问题清单在哪看。
-  'crystallize.problemsWhere': { zh: '问题清单在下面', en: 'Problems listed below' },
   'crystallize.noFiles': { zh: '没有产出任何文件', en: 'No files were produced' },
   'crystallize.deletedHint': {
     zh: '这个文件在草稿里没有，入库时会被删掉（更新 = 整目录替换）',
@@ -258,18 +258,17 @@ export const crystallizeText = {
   // ── 四轮 P1：变更集 diff / 素材分节 / 按意见改一版 ──
   'crystallize.tabContent': { zh: '内容', en: 'Content' },
   'crystallize.tabDiff': { zh: '差异', en: 'Diff' },
-  'crystallize.moreProblems': {
-    zh: '还有 {count} 条（先改这几条再看）',
-    en: 'and {count} more (fix these first)',
-  },
   'crystallize.diffVsCurrent': { zh: '对比当前版本', en: 'vs current' },
-  'crystallize.vsPreviousShort': { zh: '对比上一版', en: 'vs previous' },
-  'crystallize.vsCurrentShort': { zh: '对比当前版本', en: 'vs current' },
   'crystallize.diffVsPrevious': { zh: '对比上一版草稿', en: 'vs previous draft' },
   // ★ 分批第 18 批：第三条基线——"原 skill 的变化"（使用者定稿：「skill 差异对比也应该是原 skill 变化」）。
-  //   简称给结论条用（它那一行有字数压力），全称给切换钮用。
+  //   ⚠️ 分批第 196 批：那三条**简称**（`vsOriginalShort` 等）随结论条一起删了——那一行没了，
+  //   差异说明现在只出现在「差异」页签里，用全称。
+  /**
+   * ★ 分批第 196 批：**整条链的差异合计**（原来在中栏结论条上，使用者说那一行没必要）。
+   * 它跟着"看差异"这件事走——在「差异」页签的表头里，测 `data-diff-total`。
+   */
+  'crystallize.diffTotal': { zh: '共 +{added} −{removed}', en: '+{added} −{removed} total' },
   'crystallize.diffVsOriginal': { zh: '对比原 skill', en: 'vs original skill' },
-  'crystallize.vsOriginalShort': { zh: '对比原 skill', en: 'vs original' },
   'crystallize.diffLoading': { zh: '正在算差异…', en: 'Computing diff…' },
   'crystallize.diffUnchanged': { zh: '这个文件相对基线没有变化。', en: 'No change against the baseline.' },
   'crystallize.materialTitle': { zh: '素材', en: 'Material' },
@@ -277,22 +276,6 @@ export const crystallizeText = {
   'crystallize.materialTruncated': { zh: '（过长，已截断）', en: '(truncated)' },
   // 列表行上的"第几版"（分批第 17 批）：一行是一个**任务**，版本数是它的属性。
   // 不带 markdown 记号（界面文案守卫）。
-  'crystallize.reviseTitle': {
-    zh: '反馈',
-    en: 'Give feedback',
-  },
-  'crystallize.revisePlaceholder': {
-    zh: '比如：Procedure 第 2 步要写全命令参数；Pitfalls 里那条环境问题删掉',
-    en: 'e.g. spell out the full command in step 2; drop the environment issue from Pitfalls',
-  },
-  // ★ 分批第 17 批改文案：使用者定稿「原则上，应该叫"反馈"，在原任务中执行」。
-  //   原来叫「重新起草」——那个词把这件事说成了"另起一版"，而它实际是**把意见交回同一个任务**
-  //   （第 16 批已经让它在原目录里执行）。名字与行为要对上：叫"重新起草"，使用者就会预期
-  //   多出来一个任务（他也确实是这么理解的，并且判定那样不好）。
-  // ⚠️ 提交按钮必须与开框那个（`crystallize.reviseTitle` = 「反馈」）**不同名**：两个按钮同名时
-  //    "点一下"这类判据分不清点的是哪个（探针当场红：`点它之后输入框真的出现` 量到 null，
-  //    因为它找到了提交钮、而提交钮在框里、框还没开）。开框 = 「反馈」，发出 = 「提交反馈」。
-  'crystallize.reviseSubmit': { zh: '提交反馈', en: 'Submit feedback' },
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
   'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {

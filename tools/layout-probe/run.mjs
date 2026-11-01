@@ -3279,7 +3279,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.barNarrowBox',
     label:
-      '★★ 把窗口收窄到 1000px 再量一次：栏头那排动作（入库 / 反馈 / 放弃）**没有被挤出栏头**、' +
+      '★★ 把窗口收窄到 1000px 再量一次：栏头那排动作（放弃 / 确认入库）**没有被挤出栏头**、' +
       '按钮也没折行——「开始审核」曾经在 69px 里折成 3 行、条高 54px，而那个条件**只在窄的时候出现**' +
       '（分批第 195 批：动作从结论条搬到了栏头，量的是它仍在这一行里）',
     ok: (v) =>
@@ -3287,12 +3287,28 @@ const CHECKS = [
     show: (v) =>
       v ? `${v.w}×${v.h} 在栏头内=${v.buttonsInside} 单行=${String(v.singleLine)}` : 'null',
   },
+  // ★ 分批第 196 批：`crystal.reviseToggleButton`（页头那颗「反馈」）**删了**——
+  //   使用者："中栏页头应该不需要「反馈」"。改版走栏脚那句话，判据见
+  //   `crystal.reviseButtonPresent`（反向：页头不许再有它）与 `crystal.composerPlaceholder`
+  //   （栏脚要写得出「这里不对：…」，否则等于把入口删了却没说去哪儿）。
+  // ⚠️ 本批**删掉**了三条同族判据（不是放宽，是它们量的控件不存在了）：
+  //   `crystal.reviseButtonName`（入口叫「反馈」）、`crystal.reviseRowHiddenInitially`（意见框默认不占高）、
+  //   `crystal.reviseRowAppearsOnDemand`（点它才出现）。改版现在只有一条路：栏脚说「这里不对：…」。
   {
     view: '沉淀',
-    key: 'crystal.reviseToggleButton',
+    key: 'crystal.reviseButtonPresent',
     label:
-      '★★ 停在未通过态时给得出「反馈」（第 ② 条决定的出口；第 17 批改名前叫「按意见再改一版」）',
-    ok: (v) => v === true,
+      '★★★ 页头**没有**「反馈」钮（使用者："中栏页头应该不需要「反馈」"）——改版在栏脚说一句「这里不对：…」',
+    ok: (v) => v === false,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.composerPlaceholder',
+    label:
+      '★★★ 栏脚本栏的占位文案**写得出**改版那句话（「这里不对：…」）——删掉入口却不说去哪儿，等于把功能藏起来',
+    ok: (v) => typeof v === 'string' && v.includes('这里不对'),
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
@@ -3310,49 +3326,6 @@ const CHECKS = [
   // 而且只填 `[严重度] 一句话`（位置与原文都丢了）。这一族判据钉住四件事：
   //   ① 点它 ⇒ 意见框出现且**已填**；② 填进去的带位置与原文；③ 光标落在框里；
   //   ④ **没有自己跑起来**（框与提交按钮仍然在，这一屏没切到"起草中"）。
-  {
-    view: '沉淀',
-    key: 'crystal.redraftBoxOpened',
-    label:
-      '★★★ 点「反馈」⇒ 意见框打开，而且**里面已经有审核者的反馈**（使用者要的形状："一开就有"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftFocused',
-    label: '★ 光标落在意见框里（让人一眼看到"要发出去的是这些"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftSubmitEnabled',
-    // ★ 分批第 137 批：意见框默认是**空的** ⇒ 提交按钮应当是**禁用**的（有内容才能提交）。
-    //   判据从"可点"改成"存在且按内容启用"——按钮在、且空框时 disabled，才是"人能写、写完能提交"。
-    label: '★★ 「提交反馈」在、且按框里有没有内容启用（空框禁用：不许提交一句空意见）',
-    ok: (v) => v === false,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.redraftStillEditing',
-    label:
-      '★★★ 点了「反馈」**没有**自己开始起草：意见框与提交按钮都还在（真跑起来这一屏会切到"起草中"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.barText',
-    label: '★ 结论条一行说完"能不能入库 / 改了几个文件 / 目标是谁"（这里是新建目标）',
-    ok: (v) => typeof v === 'string' && /3 个文件/.test(v) && /新建 skill/.test(v),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.barAboveFold',
-    label: '★★ 结论条**在首屏**（改前结论在 y=932，900 高的窗口首屏根本看不到审阅）',
-    ok: (v) => v === true,
-    show: (v, f) => `结论 y=${f['crystal.barY']} / 视口 ${f['crystal.viewportH']}`,
-  },
   // ══════════════ 人改草稿（2026-10-21 分批第 8 批）══════════════
   {
     view: '沉淀',
@@ -3392,15 +3365,17 @@ const CHECKS = [
     //   抽屉** ⇒ 使用者看不到草稿内容、也没法反馈（这条是被真实使用打回来的）。修法是
     //   "宽时在右栏、窄时回中间"，状态仍然只有一份；这条判据量窄窗口那一路。
     label:
-      '★★★ 窄窗口（1000px，右栏退化成抽屉）时编辑器**回到中间那条产物消息里**——' +
-      '否则它藏在移出视口的抽屉里，草稿内容根本看不见（这条是回归：曾一度两边都够不着）',
+      '★★★ 窄窗口（1000px，右栏退化成抽屉）时**抽屉自动推开、里面就是编辑器**——' +
+      '否则草稿藏在一个移出视口的抽屉里，既看不见也改不了（分批第 196 批：中间那条产物消息删了，' +
+      '所以答案从"搬回中间"改成"自动开抽屉"，问的还是同一件事）',
     ok: (v, f) => v === true && f['crystal.narrowPaneIsDrawer'] === true,
     show: (v, f) => `中间有编辑器 ${String(v)}　右栏是抽屉 ${String(f['crystal.narrowPaneIsDrawer'])}`,
   },
   {
     view: '沉淀',
     key: 'crystal.wideEditorBackInPane',
-    label: '★★★ 宽窗口下编辑器**回到右栏**（与上面那条成对：只量窄的一路，宽的那一路搬错了也测不出来）',
+    label:
+      '★★★ 宽窗口下编辑器**只在右栏一处**（与上面那条成对：只量窄的一路，宽的那一路多出一份也测不出来）',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -3621,8 +3596,9 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.legacyBarText',
     label:
-      '★★★ 老工作区（盘上有历史审核判决）进审阅屏：结论条**只说机械体检**、不再出现审核/判决内容——' +
-      '审核已整条删除（§12.42 第 ③ 步；§12.15 代价 ③：入库不许声称"审过"）',
+      '★★★ 老工作区（盘上有历史审核判决）进审阅屏：**只说机械体检**、不再出现审核/判决内容——' +
+      '审核已整条删除（§12.42 第 ③ 步；§12.15 代价 ③：入库不许声称"审过"）。' +
+      '★ 分批第 196 批：结论条删了 ⇒ 这条改量**右栏**（体检结论现在住那儿）',
     ok: (v, f) =>
       typeof v === 'string' && v.includes('体检') && f['crystal.legacyNoAuditContent'] === true,
     show: (v) => String(v).slice(0, 80),
@@ -3644,14 +3620,6 @@ const CHECKS = [
     ok: (v, f) => v === true && /材料/.test(String(f['crystal.afterComposerQuestion'] ?? '')),
     show: (v, f) =>
       `${String(v)}　下一问 ${JSON.stringify(String(f['crystal.afterComposerQuestion'] ?? '').slice(0, 20))}`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviseEmptyByDefault',
-    label:
-      '★★ 「反馈」的意见框默认是**空的**（没有审核者替人填意见：§12.15「人看、可就地改」）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
   },
   {
     view: '沉淀',
@@ -3750,8 +3718,8 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.materialLineMatchesPane',
     label:
-      '★★★ 对话里那行「材料 N 项」与**右栏清单**是同一份数据现算的（§12.14：两处必须同源，否则必漂——' +
-      '只量"摘要里有材料"的话，写死一个数、右栏另算一份也会绿）',
+      '★★★ 右栏材料标题里的「N 项」与**清单条数**是同一份数据现算的（§12.14：两处必须同源，否则必漂）。' +
+      '★ 分批第 196 批：那句话从中栏对话搬到了右栏标题（使用者说对话里那些是冗余信息），判据跟着换宿主',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
@@ -4201,19 +4169,39 @@ const CHECKS = [
     ok: (v) => Array.isArray(v) && v.length >= 2,
     show: (v) => JSON.stringify(v),
   },
+  // ★ 分批第 196 批：slug 从审阅屏搬进「确认入库」的确认框（使用者点名）。
+  //   那两条判据（"审阅区只有一个输入框"、"frontmatter 以只读摘要呈现"）**意图不变、宿主换了**：
+  //   ① 审阅屏自己**一个输入框都不要**（中栏只剩对话）；② 那句话与 slug 在确认框里。
   {
     view: '沉淀',
     key: 'crystal.reviewInputCount',
-    label: '★★ 审阅区**只有一个输入框**（slug）——四轮第 ④ 点：SKILL.md 里已经有 name/description，不该再让人填空',
-    ok: (v) => v === 1,
-    show: (v, f) => `${v} 个（slug ${f['crystal.slugInputCount']}）`,
+    label:
+      '★★ 审阅屏**没有**输入框（slug 只在「确认入库」的确认框里）——四轮第 ④ 点：SKILL.md 里已经有 ' +
+      'name/description，不该再让人填空；第 196 批再进一步：连接库前那个 slug 也不常驻',
+    ok: (v) => v === 0,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.commitDialogOpened',
+    label: '★★★ 点「确认入库」⇒ **弹出确认框**（入库前唯一要人确认的一步不再挂在页面上）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.commitDialogSlugValue',
+    label: '★★★ 确认框里的 slug **预填好**（取 SKILL.md frontmatter 的 name）——空着等人填等于每次入库都要手打',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '沉淀',
     key: 'crystal.frontmatterLine',
-    label: 'name / description 以**只读摘要**呈现（从 SKILL.md frontmatter 解析出来的那一行）',
+    label:
+      '★★ 确认框里说清**要存的是什么**：name / description（来自 frontmatter，只读）+ 文件数与体量',
     ok: (v) => typeof v === 'string' && v.includes('probe-crystal'),
-    show: (v) => JSON.stringify(v),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 80)),
   },
   {
     view: '沉淀',
@@ -4255,24 +4243,6 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.nonRevisedHasNoBaselineSwitch',
     label: '★ 基线切换按钮只在**差异**标签下、且只在**改版草稿**上出现——这一条量的是"新建目标的草稿不给一个永远空的切换"',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviseRowHiddenInitially',
-    label: '★★「按意见改一版」的输入框**默认不占高度**（点开才出现——它是"有时要用"的动作，不是常驻表单）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviseButtonName',
-    label: '★★ 入口规规矩矩叫「反馈」（使用者定稿："原则上，应该叫反馈，在原任务中执行"——名字与行为要对上）',
-    ok: (v) => v === '反馈',
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.reviseRowAppearsOnDemand',
-    label: '★ 点它之后输入框真的出现（按钮在、点了不开是这类改动最容易出的错）',
     ok: (v) => v === true,
   },
   {

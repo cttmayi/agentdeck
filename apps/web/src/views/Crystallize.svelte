@@ -159,6 +159,12 @@
    * 操作没生效。
    */
   let materialRev = 0
+  /**
+   * ★ 分批第 196 批：材料规模那一句（`10 项（轨迹 5 轮 · 3 次工具调用）`）从**中栏**搬到
+   * 右栏材料那一节的标题里。定义仍在 `CrystallizeView`（`materialCountLine`，与右栏清单同源
+   * 现算），这里只做一个中转到 `CrystallizeArtifactPane` 的通道——兄弟组件不直接互相认识。
+   */
+  let viewStatsLine = ''
 
   /**
    * ★ 分批第 171 批（使用者："能从中间消息拿宽度，改成可动态调节"）：**产物栏宽度可拖**。
@@ -345,6 +351,7 @@
   {:else if $crystallize !== null}
     <CrystallizeView
       runId={$crystallize.runId}
+      onstatsline={(line) => (viewStatsLine = line)}
       sourceLabel={selectedLabel}
       materialRev={materialRev}
       onmaterialchange={bumpMaterial}
@@ -372,6 +379,7 @@
       draftRunId={$crystallize.runId}
       rev={materialRev}
       onchanged={bumpMaterial}
+      statsLine={viewStatsLine}
     />
   {:else}
     <MainArea empty={true} emptyTitle={$t('crystallize.pickHint')} emptyHint={$t('crystallize.listEmptyHint')}>

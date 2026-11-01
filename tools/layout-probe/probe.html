@@ -4561,11 +4561,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const cyEnter = async (cyRunId) => {
             if (!cyRunId) return false
             f.contentWindow.location.hash = '#/tasks'
-            await until(() => !d().querySelector('.conclusion-bar'), 40)
+            // ★ 分批第 196 批：结论条删了 ⇒ "切走"与"进审阅"的锚点都换成**栏头那排动作**
+            //   （`[data-review-actions]` 只在审阅态、有产物、非拒绝时渲染）。
+            await until(() => !d().querySelector('[data-review-actions]'), 40)
             f.contentWindow.location.hash = `#/crystallize/${cyRunId}`
             // ★ 分批第 141 批（U4b，§12.7）：**不再有「继续」这个动作**——进到有进行中草稿的
             //   来源页会**自动接上**（状态在列表行上，点进去就是接上）。所以直接等审阅态的标志。
-            const enteredReview = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+            const enteredReview = await until(
+              () => !!d().querySelector('[data-review-actions]'),
+              120,
+            )
             // 分批第 98 批：**入口断言**。各组是靠"送回 #/tasks → 再进 #/crystallize/<id> → 等某个
             // 控件"进入目标屏的；那个控件一换形态就没了 ⇒ 入口漂、整组空过（§12.24 量到 86 项红）。
             // 所以进入之后先确认状态锚点，再往下量。
@@ -4605,10 +4610,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // ★ 审核区块（结论与问题清单常驻的那一块）
           const cyAudit = d().querySelector('.conclusion-block')
           facts['crystal.auditPresent'] = !!cyAudit
-          // U3c-1：审阅态整体挂在**一条产物消息**上（结论条也在里面）
-          facts['crystal.reviewInArtifactMsg'] = !!d().querySelector(
-            '.crystal-msg[data-msg-role="artifact"] .conclusion-bar',
-          )
+          /**
+           * ★ 分批第 196 批：中栏那条"产物消息"删了（中间只留对话，结论条也一起没了）
+           * ⇒ 这条改名量**审阅态本身**：栏头那排动作在（它是"这一版能收尾"的唯一入口）。
+           * 判据的意图没变（"审阅态挂上了、而且有能动手的地方"），宿主跟着改。
+           */
+          facts['crystal.reviewInArtifactMsg'] = !!d().querySelector('[data-review-actions]')
           // U3d：栏脚输入条真的能用了（不再是 disabled 占位）
           facts['crystal.composerEnabled'] = (() => {
             const input = d().querySelector('.crystal-composer-input')
@@ -4661,12 +4668,17 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 否则必漂"——只量文字存在的话，摘要写死一个数、右栏另算一份，两边对不上也会绿。
            * 这里覆盖了"追加一份"和"删掉一份"之后的状态（上面两段正好改过材料）。
            */
+          /**
+           * ★ 分批第 196 批：那句「材料 N 项（轨迹 …）」从**中栏对话**搬到了**右栏材料那一节的
+           * 标题里**（使用者说对话里那些是冗余信息）。判据的意图不变：**数字必须与清单同源**
+           * （写死一个数、清单另算一份，两处对不上就会绿 ⇒ 这里量"标题里的 N == 清单条数"）。
+           */
           facts['crystal.materialLineMatchesPane'] = (() => {
-            const line = d().querySelector('[data-crystal-material-line]')?.textContent ?? ''
+            const head = d().querySelector('.artifact-mats .artifact-mat-count')?.textContent ?? ''
             const paneCount = d().querySelectorAll('.artifact-mat-list li').length
-            const m = line.match(/材料\s*(\d+)\s*项/)
+            const m = head.match(/(\d+)\s*项/)
             return {
-              line: line.slice(0, 60),
+              line: head.slice(0, 60),
               lineCount: m ? Number(m[1]) : null,
               paneCount,
             }
@@ -4852,10 +4864,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            */
           const cyIframeW = f.style.width
           f.style.width = '1000px'
-          await untilNet(() => {
-            const b = d().querySelector('.conclusion-bar')
-            return !!b && Math.round(b.getBoundingClientRect().width) < 800
-          }, 60)
+          await untilNet(
+            () => (f.contentWindow.innerWidth ?? 0) < 1100,
+            60,
+          )
           /**
            * ★ 分批第 195 批：动作（入库 / 反馈 / 放弃）搬去了**栏头右侧** ⇒ 这里量的东西
            *   跟着换，但问的还是同一件事："窄窗口下那一排按钮会不会被挤出去/折行"。
@@ -4881,10 +4893,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.barNarrowBox'] = null
           }
           f.style.width = cyIframeW
-          await untilNet(() => {
-            const b = d().querySelector('.conclusion-bar')
-            return !!b && Math.round(b.getBoundingClientRect().width) > 800
-          }, 60)
+          await untilNet(() => (f.contentWindow.innerWidth ?? 0) > 1100, 60)
           /*
            * ★ 分批第 168 批（回归修复）：**窄窗口里编辑器必须回到中间那条消息里**。
            *
@@ -4895,8 +4904,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           {
             const cyWideW = f.style.width
             f.style.width = '1000px'
+            /**
+             * ★ 分批第 196 批：中栏那条"产物消息"删了 ⇒ 窄窗口下不再有"编辑器回到中间"这回事，
+             * 改成"右栏的抽屉被**自动推开**、里面就是编辑器"（判据的意图没变：
+             * **草稿在这个窗口里看得见、改得了吗**）。
+             */
             await untilNet(
-              () => !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane'),
+              () =>
+                d().querySelector('.artifact-pane')?.getAttribute('data-open') === 'true' &&
+                !!d().querySelector('.artifact-pane .review-pane'),
               120,
             )
             const narrowPane = d().querySelector('.artifact-pane')
@@ -4904,18 +4920,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               innerW: f.contentWindow.innerWidth,
               panePos: narrowPane ? getComputedStyle(narrowPane).position : 'absent',
               paneLeft: narrowPane ? Math.round(narrowPane.getBoundingClientRect().left) : null,
-              centerEditor: !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane'),
+              drawerOpen: narrowPane?.getAttribute('data-open') ?? null,
+              centerEditor: !!d().querySelector('.crystal-flow textarea.editor'),
               paneEditor: !!d().querySelector('.artifact-pane .review-pane'),
             }
             facts['crystal.narrowEditorInCenter'] =
-              !!d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane')
+              facts['crystal.narrowDebug'].drawerOpen === 'true' &&
+              facts['crystal.narrowDebug'].paneEditor === true
             facts['crystal.narrowPaneIsDrawer'] = facts['crystal.narrowDebug'].panePos === 'fixed'
             f.style.width = cyWideW
-            // 复原之后编辑器要回到右栏（宽窗口的形态）——不然就是"两边都不对"
+            // 复原之后：编辑器**只在右栏一处**（中间那条消息已经不存在了）
             await untilNet(
               () =>
-                !d().querySelector('.crystal-msg[data-msg-role="artifact"] .review-pane') &&
-                !!d().querySelector('.artifact-pane .review-pane'),
+                !!d().querySelector('.artifact-pane .review-pane') &&
+                !d().querySelector('.crystal-flow textarea.editor'),
               120,
             )
             facts['crystal.wideDebug'] = {
@@ -4930,26 +4948,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               !!d().querySelector('.artifact-pane .review-pane')
           }
 
-          // ① 结论条：在、而且**在首屏**（改前审阅的结论在 y=932，900 高的窗口看不到）
-          // ★ 2026-10-21：结论条**只有一条**（原来是三条横条竖着摞：审核块 + 校验条 + frontmatter 摘要）
-          const cyBars = [...d().querySelectorAll('.conclusion-bar')]
-          facts['crystal.conclusionBarCount'] = cyBars.length
+          /*
+           * ★ 分批第 196 批：**结论条整个删了**（使用者："✓ 体检通过（机械体检）· 4 个文件 ·
+           *   对比当前版本 +604 −0 · 新建 skill，这些也没必要。或许「✓ 体检通过」可以放在右栏区"）。
+           *
+           * 所以这里原来那 5 条量结论条的事实/判据（`conclusionBarCount` / `barPresent` /
+           * `barText` / `barY` / `barAboveFold`）**一起删掉**——不是放宽，是宿主不存在了。
+           * 体检结论现在在**右栏**（`crystal.artifactChecksPassed` 那一条量它），
+           * 差异的 `+N −M` 在右栏「差异」里（见 `crystal.revisedDiffAdded`）。
+           * 这里只留一条反向检查：中栏**不许**再冒出一条结论条（两类旧横条也不许回来）。
+           */
+          facts['crystal.conclusionBarCount'] = d().querySelectorAll('.conclusion-bar').length
           facts['crystal.legacyBarsGone'] =
             d().querySelector('.review-bar-block') === null && d().querySelector('.audit-block') === null
-
-          const cyBar = d().querySelector('.conclusion-bar')
-          const cyBarRect = cyRect(cyBar)
-          facts['crystal.barPresent'] = !!cyBar
-          facts['crystal.barText'] = cyBar ? text(cyBar) : null
-          facts['crystal.barY'] = cyBarRect ? Math.round(cyBarRect.y) : null
           facts['crystal.viewportH'] = f.contentWindow.innerHeight
-          // ★ 分批第 155 批：判据从"视口上半屏（50%）"放宽到"**在视口里**"。
-          // 为什么：产物栏在 1280 下成了真列（断点 96rem → 74rem），中间那栏从 1040px 收到 ~576px，
-          // 起草日志多折两行 ⇒ 结论条 y 从 ~600 落到 654（仍在 880 的视口里）。
-          // 这条判据的本意是"首屏看得到审阅入口"（改前是 y=932，首屏根本看不到），
-          // 不是"必须在前半屏"——所以参照物改成"视口内"，并留一行余量给状态栏。
-          facts['crystal.barAboveFold'] =
-            cyBarRect !== null && cyBarRect.y < f.contentWindow.innerHeight - 40
 
           // ② 不整页滚：文档高 ≈ 视口高（改前内容 ~2030px，整页滚）
           const cyScrollH = d().documentElement.scrollHeight
@@ -5038,15 +5050,37 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             ...d().querySelectorAll('.review-pane .change-tag'),
           ].map((e) => text(e))
 
-          // 只读 frontmatter + slug 是唯一输入框（四轮第 ④ 点：审阅不再填空）
-          const cySlugInputs = [...d().querySelectorAll('.slug-inline input')]
-          const cyAllTextInputs = [...d().querySelectorAll('.conclusion-meta input')]
-          facts['crystal.slugInputCount'] = cySlugInputs.length
-          facts['crystal.reviewInputCount'] = cyAllTextInputs.length
-          facts['crystal.frontmatterLine'] =
-            (d().querySelector('.frontmatter-line') &&
-              text(d().querySelector('.frontmatter-line'))) ||
-            null
+          /**
+           * ★ 分批第 196 批：slug 从审阅屏**搬进了「确认入库」的确认框**（使用者："中栏的
+           *   「slug」也不应该显示，如果要，可以放在「确认入库」后弹出的对话框中"）。
+           * 所以这里量两件事，缺一不可：
+           *   ① 审阅屏**没有**输入框（中栏只剩对话）；
+           *   ② 点「确认入库」⇒ 对话框里有 slug（预填 frontmatter 的 name，可改）、
+           *      name/description 只读、以及一句"整目录替换"。
+           */
+          facts['crystal.reviewInputCount'] = d().querySelectorAll(
+            '.crystal-flow input[type="text"], .crystal-flow input:not([type])',
+          ).length
+          facts['crystal.slugInputCount'] = 0
+          {
+            const commitBtn = d().querySelector('[data-review-commit]')
+            facts['crystal.commitButtonPresent'] = !!commitBtn
+            if (commitBtn) click(commitBtn)
+            const opened = await until(() => !!d().querySelector('[role="dialog"]'), 40)
+            facts['crystal.commitDialogOpened'] = opened
+            if (opened) {
+              const slugInput = d().querySelector('[role="dialog"] input')
+              facts['crystal.commitDialogSlugValue'] = slugInput ? slugInput.value : null
+              facts['crystal.commitDialogText'] = text(d().querySelector('[role="dialog"]'))
+              // 收尾：关掉对话框，别影响后面几节
+              const cancel = [...d().querySelectorAll('[role="dialog"] button')].find((b) =>
+                text(b).includes('取消'),
+              )
+              if (cancel) click(cancel)
+              await until(() => !d().querySelector('[role="dialog"]'), 40)
+            }
+          }
+          facts['crystal.frontmatterLine'] = facts['crystal.commitDialogText'] ?? null
 
           // ③ 编辑与差异同位置切换
           const cyTabs = [...d().querySelectorAll('.pane-tabs > button')]
@@ -5244,8 +5278,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             ? draftSection.querySelector('[data-draft-process-toggle]')
             : null
           facts['crystal.draftToggleLabel'] = toggle ? text(toggle) : null
+          // ★ 分批第 196 批：`who` 行现在是 `.who`（气泡上那行小字），不是 `[data-draft-turn-head]`
           facts['crystal.draftRunIdInHead'] = draftSection
-            ? (text(draftSection.querySelector('[data-draft-turn-head]')) ?? '').includes('run ')
+            ? (text(draftSection.querySelector('.who')) ?? '').includes('run ')
             : null
           if (toggle) {
             click(toggle)
@@ -5260,22 +5295,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // ★ 分批第 17 批：按钮改名「按意见再改一版」→「反馈」，这里跟着改。
           //   ⚠️ 我第一版只改了"点开框"那一处，漏了这一处 ⇒ 判据 `点它之后输入框真的出现`
           //   量到 null（按钮没找到，整条 else 分支），红的是探测脚本不是界面。
-          // ★ 分批第 195 批：动作搬到栏头右侧（`[data-review-actions]`）
-          const cyReviseBtn = [...d().querySelectorAll('[data-review-actions] button')].find((b) =>
-            text(b).includes('反馈'),
-          )
-          facts['crystal.reviseButtonName'] = cyReviseBtn ? text(cyReviseBtn) : null
-          facts['crystal.reviseButtonPresent'] = !!cyReviseBtn
+          /**
+           * ★ 分批第 196 批：「反馈」按钮与它的意见框**删了**（使用者："中栏页头应该不需要
+           *   「反馈」"）。改版改由**栏脚那句话**发起（`这里不对：…`）——所以这里量两件事：
+           *     ① 页头**没有**「反馈」钮（原来那条"入口叫反馈"的判据翻成反向检查）；
+           *     ② 栏脚的占位文案里写得出这句话（否则人不知道怎么改一版 = 假删）。
+           */
+          facts['crystal.reviseButtonPresent'] = [
+            ...d().querySelectorAll('[data-review-actions] button'),
+          ].some((b) => text(b).includes('反馈'))
+          facts['crystal.reviseButtonName'] = null
+          facts['crystal.composerPlaceholder'] =
+            d().querySelector('.crystal-composer-input')?.getAttribute('placeholder') ?? null
           facts['crystal.reviseRowHiddenInitially'] = !d().querySelector('.revise-row textarea')
-          if (cyReviseBtn) {
-            click(cyReviseBtn)
-            const cyReviseShown = await until(() => !!d().querySelector('.revise-row textarea'), 40)
-            facts['crystal.reviseRowAppearsOnDemand'] = cyReviseShown
-            click(cyReviseBtn)
-            await wait(120)
-          } else {
-            facts['crystal.reviseRowAppearsOnDemand'] = null
-          }
+          facts['crystal.reviseRowAppearsOnDemand'] = null
 
           // ★ 改版草稿（`revisedFrom`）：默认对比**上一版草稿**，且能切回"对比当前版本"
           const cyRevisedOk = await cyEnter(cyRevised)
@@ -5290,9 +5323,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.revisedEditorHead'] = (
             d().querySelector('textarea.editor')?.value ?? ''
           ).slice(0, 60)
-          facts['crystal.revisedBarText'] = cyRevisedOk
-            ? text(d().querySelector('.conclusion-bar'))
-            : null
+          /**
+           * ★ 分批第 196 批：结论条删了 ⇒ `+N` 那个数字改从**「差异」页签的表头**读
+           *   （`[data-diff-total]`，格式 `共 +2 −2`）。判据的意图没变：量"默认停在哪条基线"。
+           */
+          // ⚠️ 这个数字在**「差异」页签里**（结论条删了）⇒ 由下面点开页签之后再读，这里先留空
+          facts['crystal.revisedBarText'] = null
           // 接口那一份也读一次：分清"接口没给 revisedFrom"与"页面没换现场"
           facts['crystal.revisedApiRevisedFrom'] = await f.contentWindow
             .fetch(`/api/crystallize/artifacts?draftRunId=${encodeURIComponent(cyRevised ?? '')}`)
@@ -5304,6 +5340,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           )
           if (cyDiffTabB) click(cyDiffTabB)
           await until(() => !!d().querySelector('.diff-box'), 60)
+          // ★ 分批第 196 批：整条链的合计在「差异」页签的表头（`共 +N −M`）
+          await until(() => !!d().querySelector('[data-diff-total]'), 60)
+          facts['crystal.revisedBarText'] = text(d().querySelector('[data-diff-total]'))
           const cySwitchButtons = [...d().querySelectorAll('.pane-tabs button')].map((b) => text(b))
           facts['crystal.revisedSwitchButtons'] = cySwitchButtons
           facts['crystal.revisedHasBaselineSwitch'] = cySwitchButtons.includes('对比上一版草稿')
@@ -5315,8 +5354,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return active ? text(active) : null
           })()
           facts['crystal.revisedDiffLineCount'] = d().querySelectorAll('.diff-line').length
-          // ★ 分批第 18 批：结论条上那个 `+N` 才是"改动了几行"（`.diff-line` 数的是**渲染出来的**
+          // ★ 分批第 18 批：那个合计 `+N` 才是"改动了几行"（`.diff-line` 数的是**渲染出来的**
           //   行，含上下文 ⇒ 夹具里改 1 行也会量到 8 行；我第一版拿它当"改动行数"断言 === 2，红了）。
+          // ★ 分批第 196 批：它原来在结论条上，现在在「差异」页签的表头（`[data-diff-total]`）。
           const cyAdded = (t) => {
             const m = /\+(\d+)/.exec(t ?? '')
             return m ? Number(m[1]) : null
@@ -5329,9 +5369,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           )
           if (cyPrevBtn) {
             click(cyPrevBtn)
-            await untilNet(() => /对比上一版/.test(text(d().querySelector('.conclusion-bar')) ?? ''))
-            await wait(200)
-            facts['crystal.revisedDiffAddedPrevious'] = cyAdded(text(d().querySelector('.conclusion-bar')))
+            await wait(250)
+            facts['crystal.revisedDiffAddedPrevious'] = cyAdded(
+              text(d().querySelector('[data-diff-total]')),
+            )
             // 切回默认那条，后面的判据看到的还是默认现场
             const cyOrigBtn = [...d().querySelectorAll('.pane-tabs .tabs-right button')].find(
               (b) => text(b) === '对比原 skill',
@@ -5353,56 +5394,45 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.manualFixture'] = cyFail
           facts['crystal.legacyEntered'] = await cyEnter(cyFail)
           if (facts['crystal.legacyEntered']) {
-            const cyBarText = text(d().querySelector('.conclusion-bar'))
-            facts['crystal.legacyBarText'] = cyBarText
-            // 结论条上：说体检、**不说**审核/判决（§12.15 代价 ③：入库不许声称"审过"）
-            facts['crystal.legacySaysCheck'] = /体检/.test(cyBarText ?? '')
-            facts['crystal.legacyNoAuditContent'] = !/审核|不通过|style_violation|问题清单/.test(
-              cyBarText ?? '',
+            /**
+             * ★ 分批第 196 批：**结论条与「反馈」意见框都删了**（它们住在中栏那条产物消息里，
+             *   而那条消息整块去掉了）。所以这一屏原来量的：
+             *     · `legacyBarText` / `legacySaysCheck` / `legacyNoAuditContent`（结论条只说体检、
+             *       不许出现审核/判决内容）——**目标换了宿主**：体检结论现在在**右栏**，
+             *       于是改成量右栏的体检那一节；
+             *     · `reviseToggleButton` 与那五条"意见框"判据（开框、默认为空、有焦点、提交可点、
+             *       开框不自己跑）——**功能搬到了栏脚**（`这里不对：…`）。判据跟着搬成
+             *       "栏脚那句话能开出一条改版 run"（见 `crystal.reviseViaComposer*`）。
+             */
+            const cyPaneText = text(d().querySelector('.artifact-pane')) ?? ''
+            facts['crystal.legacyBarText'] = cyPaneText
+            facts['crystal.legacySaysCheck'] = /体检/.test(cyPaneText)
+            // 右栏里**不许**出现审核/判决内容（§12.15 代价 ③：入库不许声称"审过"）
+            facts['crystal.legacyNoAuditContent'] = !/审核不通过|style_violation|问题清单/.test(
+              cyPaneText,
             )
             // 历史判决的条目**不再渲染**（问题清单是审核的东西，审核删了它就该消失）
-            facts['crystal.legacyFindingsGone'] = d().querySelectorAll('.conclusion-block .audit-findings, .conclusion-block .findings').length === 0
-
-            const cyToggle = [...d().querySelectorAll('button')].find((b) =>
-              // ★ 分批第 17 批改名：「按意见再改一版」→「反馈」（使用者定稿"原则上应该叫反馈"）。
-              //   判据量的是**那一个入口在不在**，所以跟着名字走；旧名字留在下面那条"不许存在"里。
-              //
-              // ⚠️ 这里**故意**用宽匹配「反馈」而不是「提交反馈」（我改成后者时这一片 12 条判据当场红）：
-              //    此刻意见框还没开，页面上只有"开框"那一个按钮；等框开了之后再找"提交"才需要收紧
-              //    （下面那个 finder 是在 `.revise-row` 里找的，`提交反馈` 是它唯一的匹配）。
-              text(b).includes('反馈'),
-            )
-            facts['crystal.reviseToggleButton'] = !!cyToggle
-            // 「按意见重新起草」/「填入审核问题」这两个按钮都**不该**存在：
-            // 同一个动作只有一个入口（多一个入口，迟早两边不一样）
+            facts['crystal.legacyFindingsGone'] =
+              d().querySelectorAll('.audit-findings, .findings').length === 0
+            // 同一个动作只有一个入口：这两个旧按钮不该存在
             facts['crystal.redraftOldButtonsGone'] = ![
               ...d().querySelectorAll('button'),
             ].some((b) => text(b).includes('按意见重新起草') || text(b).includes('填入审核问题'))
-            cyToggle?.click()
-            // ⚠️ `until` 返回的是**布尔**（它只回答"等到了没有"），不是元素——
-            //    第一版把它当元素用（`cyBox.value.includes(...)`）⇒ 探针当场抛
-            //    `TypeError: Cannot read properties of undefined`，而**一次异常会把后面
-            //    一百多条判据的取值全带走**（日志里表现为 109 条"没量到这个值"，
-            //    看起来像界面坏了，其实是探针自己崩在这一行）。所以：先等，再取。
-            const cyBoxOpen = await until(() => !!d().querySelector('.revise-row textarea'), 40)
-            const cyBox = cyBoxOpen ? d().querySelector('.revise-row textarea') : null
-            facts['crystal.redraftBoxOpened'] = cyBox !== null
-            // ★ 分批第 137 批：没有审核者 ⇒ 意见框**默认是空的**（意见完全由人写）。
-            facts['crystal.reviseEmptyByDefault'] = cyBox ? cyBox.value.trim() === '' : null
-            // ★ 分批第 137 批：没有"审核者的反馈"可预填 ⇒ 原来那组"框里默认有理由码/
-            //   位置/原文、人改过还保留"的测量随审核一起删除（预填功能已不存在）。
-            //   这里只保留"开框就有焦点"，那是**人工写意见**这条路的判据。
-            // ⚠️ 焦点要问**它所在的文档**（`d()` 是 iframe 的 document）
-            facts['crystal.redraftFocused'] = cyBox ? d().activeElement === cyBox : null
-            const cySubmit = [...d().querySelectorAll('.revise-row button')].find((b) =>
-              text(b).includes('反馈'),
-            )
-            facts['crystal.redraftSubmitEnabled'] = cySubmit ? !cySubmit.disabled : null
-            // 提交按钮**仍然在**、框**仍然在** ⇒ 开框只是写，没有自己跑起来
-            facts['crystal.redraftStillEditing'] = !!cyBox && !!cySubmit
-            // 收拾干净：把框收起来，别影响后面几节
-            cyToggle?.click()
-            await wait(150)
+            /**
+             * ★ 分批第 196 批：**「反馈」按钮与它的意见框都删了**。
+             *
+             * 使用者："中栏页头应该不需要「反馈」"。改版现在是**在栏脚说一句**
+             * 「这里不对：…」（那条路由与「追加材料：…」同一条，见上面栏脚那一段），
+             * 所以这里原来量"开框 / 框里默认空 / 有焦点 / 提交可点 / 开框不自己跑"的五条
+             * 一起作废——它们量的**功能已经不存在了**，不是量不到。
+             */
+            facts['crystal.reviseToggleButton'] = null
+            facts['crystal.redraftBoxOpened'] = null
+            facts['crystal.reviseEmptyByDefault'] = null
+            facts['crystal.redraftFocused'] = null
+            facts['crystal.redraftSubmitEnabled'] = null
+            facts['crystal.redraftStillEditing'] = null
+
             // 出口二：确认入库**没有**被判决灰掉（第 ① 条决定：审核不替代人）
             const cySave = [...d().querySelectorAll('button.primary')].find((b) =>
               text(b).includes('确认入库'),
@@ -5601,7 +5631,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               await wait(80)
               f.contentWindow.location.hash = `#/crystallize/${id}`
               // ★ 分批第 141 批：自动接上（见 `cyEnter` 的注释）
-              const attached = await until(() => !!d().querySelector('.conclusion-bar'), 120)
+              // ★ 分批第 196 批：结论条删了 ⇒ 审阅态的标志是栏头那排动作
+              const attached = await until(
+                () => !!d().querySelector('[data-review-actions]'),
+                120,
+              )
               if (!attached) return null
               // ★ 分批第 155 批：编辑器搬进右栏 ⇒ 树在 `.artifact-pane` 里（不是中间那条消息）。
               //   而且它**比结论条晚一拍**：右栏自己拉产物、自己打开编辑器 ⇒ 不等它就会读到空数组
@@ -5613,7 +5647,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               await until(() => d().querySelectorAll('.review-pane .file-row').length > 0, 120)
               return {
                 rows: [...d().querySelectorAll('.review-pane .file-row')].map((r) => text(r)),
-                bar: text(d().querySelector('.conclusion-bar')),
+                bar: text(d().querySelector('[data-diff-total]')),
               }
             }
             const cySiblingView = await cyReadDraft(cySibling)

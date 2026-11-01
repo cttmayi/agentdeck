@@ -47,10 +47,17 @@
     rev = 0,
     /** 这一栏自己改了材料（删掉一份）时通知父组件：让另一处也跟着重读。 */
     onchanged = () => {},
+    /**
+     * ★ 分批第 196 批：材料规模的一句话（`10 项（轨迹 5 轮 · 3 次工具调用）`）。
+     * 由父组件算好传进来——「素材统计」的定义只有一处（`materialCountLine`），
+     * 这里只负责显示在**材料那一节的标题里**（它原来挂在中栏对话里，与清单重复）。
+     */
+    statsLine = '',
   }: {
     draftRunId: string
     rev?: number
     onchanged?: () => void
+    statsLine?: string
   } = $props()
 
   /**
@@ -72,7 +79,28 @@
   /** 选中预览的文件（相对 skill/ 或 agent/ 目录）。空 = 还没选，默认给第一个。 */
   let selected = $state('')
   /** 窄屏抽屉此刻是否打开（宽屏用不到它）。 */
-  let drawerOpen = $state(false)
+  /**
+   * 窄屏抽屉的开关。**默认值由数据推**（不是 `$effect` 里"进审阅就置真"）：
+   *
+   * ★ 分批第 196 批：中栏那条"产物消息"删掉之后（中间只留对话），编辑器**只有右栏这一处**；
+   *   而窄于 74rem 时右栏是移出视口的抽屉 ⇒ 草稿一出来就得把抽屉推开，否则使用者看到的是
+   *   "它说写好了，但草稿在哪？"（第 168 批就因为同一件事被打回来过一次）。
+   *
+   * ⚠️ 第一版写成 `$effect`（"窄 + 有产物 ⇒ 置真"），探针量到 `data-open="false"`——
+   *    那个 effect 在**宽度变化**时重跑不可靠（它读的是模块里的 `$state`，而 `$effect`
+   *    的依赖收集在这种跨组件引用上没按预期触发）。改成 `$derived` 之后"该开"是**算出来的**，
+   *    不存在时序问题；人手动关/开用 `drawerManual` 覆盖（`null` = 按默认推）。
+   */
+  let drawerManual = $state<boolean | null>(null)
+  // 换草稿、或窗口跨过断点 ⇒ 回到"按数据推"的默认（人的手动关/开只对当前这一屏有效）
+  $effect(() => {
+    void draftRunId
+    void paneWide.value
+    drawerManual = null
+  })
+  const drawerOpen = $derived(
+    drawerManual ?? (!paneWide.value && artifacts !== null && artifacts.mode !== 'refused'),
+  )
   /** 已经点了「删掉」、等第二次确认的那份材料（两步删除：材料是使用者给的，误删不好补）。 */
   let pendingDelete = $state('')
   /** 正在删的那份（防止连点两次发两个请求）。 */
@@ -410,7 +438,7 @@
   type="button"
   class="artifact-tab"
   aria-label={$t('crystallize.artifactOpen')}
-  onclick={() => (drawerOpen = true)}
+  onclick={() => (drawerManual = true)}
 >
   {$t('crystallize.artifactOpen')}
 </button>
@@ -427,7 +455,7 @@
           {$t('crystallize.settingsSkillRequiredShort')}
         </span>
       {/if}
-      <button type="button" class="ghost artifact-close" onclick={() => (drawerOpen = false)}>
+      <button type="button" class="ghost artifact-close" onclick={() => (drawerManual = false)}>
         {$t('crystallize.artifactClose')}
       </button>
     </div>
@@ -445,7 +473,12 @@
       <section class="artifact-mats">
         <h3 class="artifact-sub" title={$t('crystallize.materialDeleteOnly')}>
           {$t('crystallize.artifactMaterial')}
-          <span class="artifact-mat-count">{materialItems.length}</span>
+          <!--
+            ★ 分批第 196 批：数量与「轨迹 N 轮 / M 次工具调用」从**中栏那句**挪到这里
+              （使用者："中栏正文区有很多冗余信息，不如「材料 10 项（轨迹 5）」"）。
+              材料的数量属于材料这一节；对话里只说人话。
+          -->
+          <span class="artifact-mat-count">{statsLine}</span>
         </h3>
         {#if materialItems.length === 0}
           <p class="faint small">{$t('crystallize.artifactMaterialEmpty')}</p>
@@ -578,9 +611,12 @@
       <!-- ★ 分批第 168 批：只在右栏是**真列**时渲染编辑器；窄窗口（抽屉形态）里它回到中间那条
            消息里（见 `lib/crystallize-editor.svelte.ts` 的 `paneWide`）——否则它藏在移出视口的
            抽屉里，使用者看不到草稿内容，也就没法反馈。 -->
-      {#if paneWide.value}
-        <CrystallizeDraftEditor />
-      {/if}
+      <!--
+        ★ 分批第 196 批：**不再按宽度分叉**——中栏那条"产物消息"删了（中间只留对话），
+        编辑器就只在右栏这一处。窄窗口里右栏是抽屉，由 `CrystallizeArtifactPane` 自己在
+        进入审阅时**自动打开**（见下面 `autoOpenDrawer` 那段），否则草稿又变成"看得见打不开"。
+      -->
+      <CrystallizeDraftEditor />
 
       <!--
         ★ 分批第 195 批：**拒绝的草稿不画体检**。

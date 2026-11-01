@@ -48,6 +48,8 @@
   //   把"键必须是真词条"交给类型检查（写错一个键 svelte-check 当场报）。
   import type { WebTextId } from '@agentdeck/i18n'
   import MainArea from './MainArea.svelte'
+  // ★ 分批第 196 批：slug 从审阅屏挪进「确认入库」的确认框（见该组件头注释）
+  import CrystallizeCommitDialog from './CrystallizeCommitDialog.svelte'
   import RunLog from './RunLog.svelte'
   import CrystallizeIntake from './CrystallizeIntake.svelte'
   // ★ 分批第 153 批：编辑器搬进右栏 ⇒ 它的状态住在一个 runes 模块里（两个组件读同一份，
@@ -96,6 +98,13 @@
   export let materialRev = 0
   /** 本组件改了材料（追加）时通知父组件：右栏那一栏也要重读（否则"追加了但右栏看不见"）。 */
   export let onmaterialchange: () => void = () => {}
+  /**
+   * ★ 分批第 196 批：把「材料规模」那一句交给父组件（→ 右栏材料标题）。
+   *
+   * 为什么不在两个组件里各算一遍：它必须与右栏清单**同一份数据现算**（§12.14：两处由同一
+   * 份数据推，否则必漂）。定义仍在本组件的 `materialCountLine`，这里只是转交。
+   */
+  export let onstatsline: (line: string) => void = () => {}
   /** 已经处理过的 `materialRev`（只认增量，不重复拉）。 */
   let seenMaterialRev = 0
 
@@ -296,6 +305,13 @@
   let saving = false
   /** 入库用的 slug：默认取 SKILL.md 的 name，新建时可改（更新不允许改，服务端会拦）。 */
   let slug = ''
+  /**
+   * ★ 分批第 196 批：「确认入库」的确认框开着吗。
+   *
+   * 它只做一件事——**把要存的东西摊开看一眼**（slug 可改、name/description 只读、
+   * 几个文件多大）。入库请求仍走原来那条 `save()`，不产生第二条路径。
+   */
+  let commitOpen = false
   /** 审阅里的冲突提示（新建撞提炼根同 slug）。 */
   let clash: { slug: string; name: string; id: string } | null = null
 
@@ -1065,6 +1081,9 @@
       : $t('crystallize.materialCount', { n: String(total), parts: parts.join(' · ') })
   })()
 
+  // 材料规模那句话一变就交给父组件（右栏材料标题显示它）
+  $: onstatsline(materialCountLine)
+
   /** 拉素材清单（"素材"分节用：能核"这句话是从哪一轮来的"）。 */
   async function loadMaterial(): Promise<void> {
     if (draftRunId === '' || materialLoading) return
@@ -1276,6 +1295,7 @@
         ? $t('crystallize.doneVersioningOn')
         : (res.versioning?.note ?? '')
       step = 'done'
+      commitOpen = false
       ondone()
     } catch (err) {
       // 409 撞提炼根同 slug：服务端把"已存在的那条"放在 body.existing 里，
@@ -1349,21 +1369,18 @@
     -->
     <ChatBubble
       role="agent"
-      who={`${$t('crystallize.speakerDrafter')} · ${
+      who={`${$t('crystallize.speakerDrafter')}${
         refused
-          ? $t('crystallize.refusedHead')
+          ? ` · ${$t('crystallize.refusedHead')}`
           : draftLiveNow
-            ? $t('crystallize.draftTurnLive')
+            ? ` · ${$t('crystallize.draftTurnLive')}`
             : draftStatus === 'failed'
-              ? $t('crystallize.draftFailed')
+              ? ` · ${$t('crystallize.draftFailed')}`
               : draftStatus === 'cancelled'
-                ? $t('crystallize.draftStopped')
-                : $t('crystallize.draftTurnDone')
-      }${
-        !refused && !draftLiveNow && draftStatus === 'completed' && fileCount > 0
-          ? ` · ${fileCount} ${$t('crystallize.filesUnit')}`
-          : ''
+                ? ` · ${$t('crystallize.draftStopped')}`
+                : ''
       }`}
+      markdown
     >
       {#snippet whoExtra()}
         {#if draftLiveNow}
@@ -1493,13 +1510,11 @@
   {#snippet headActions()}
     {#if step === 'review' && artifacts !== null && !refused}
       <div class="head-actions" data-review-actions>
-        <button
-          type="button"
-          class="ghost small"
-          class:active={reviseOpen}
-          data-review-feedback
-          onclick={() => void toggleReviseBox()}
-        >{$t('crystallize.reviseTitle')}</button>
+        <!--
+          ★ 分批第 196 批：**「反馈」按钮删了**（使用者："中栏页头应该不需要「反馈」"）。
+          它和栏脚输入条的「这里不对：…」是同一件事，而这一页的心智是对话——那就用说的。
+          占位文案已经写了这句话（`crystallize.chatPlaceholder`），按钮不再另给一个入口。
+        -->
         <button type="button" class="ghost small" data-review-abandon onclick={() => void abandonReview()}>
           {$t('crystallize.abandon')}
         </button>
@@ -1509,7 +1524,7 @@
           data-review-commit
           disabled={saving || !reviewValid}
           title={reviewValid ? undefined : $t('crystallize.confirmBlocked')}
-          onclick={() => void save()}
+          onclick={() => (commitOpen = true)}
         >{$t('crystallize.confirm')}</button>
       </div>
     {/if}
@@ -1726,243 +1741,77 @@
       -->
       <div class="crystal-msg" data-msg-role="user" data-crystal-request>
         <ChatBubble role="user" who={$t('crystallize.speakerYou')} text={requestLine} />
-        <!-- ★ 分批第 162 批（§12.14）：一行说清「我当时给了它什么」（与右栏清单同一份数据）。 -->
-        {#if materialCountLine !== ''}
-          <p class="faint small crystal-material-line" data-crystal-material-line>
-            {materialCountLine}
-          </p>
-        {/if}
+        <!--
+          ★ 分批第 196 批：这里原来还有一行「材料 10 项（轨迹 5 · 给定 5）」（`materialCountLine`）。
+          使用者："中栏正文区有很多冗余信息，不如「材料 10 项（轨迹 5）」"——它确实只是把
+          右栏材料清单的数量又说了一遍。**挪到右栏材料那一节的标题里**（那里是"它现在手上
+          有什么"的正式清单，数量属于那一节），对话里不再出现。
+        -->
       </div>
       <!-- ★ 分批第 193 批：起草这一轮是一条**助手消息**（见 `draftTurn` 上方的注释）。 -->
       <div class="crystal-msg" data-msg-role="assistant" data-draft-turn-msg>
         {@render draftTurn()}
       </div>
-      {/if}
-
-      {#if step === 'review'}
-      <!-- ★ 分批第 109 批（U3c-1）：审阅态整体是**一条产物消息**（只包不删；删 review-tabs 是 U3c-2）。
-           边界用 Svelte 自己的 AST 量出来的（58328 → 89030），不是靠正则数块——
-           正则会被注释与字符串里的块标记污染，这个坑踩过两次。 -->
-      <div class="crystal-msg" data-msg-role="artifact">
-        {#if clash}
-          <div class="notice">
-            {error}
-            <button class="ghost small" onclick={() => void switchToUpdate()}>
-              {$t('crystallize.switchToUpdate')}
-            </button>
-          </div>
-        {:else if error}
-          <div class="notice bad">{error}</div>
-        {/if}
-
-        <!--
-          ── ★ 一条结论条（2026-10-21 布局重排）──
-
-          这一块原来是把**三条横条**竖着摞起来（实测加起来 ~240px 高）：
-          ① 审核结论块（h3「审核结论（预筛）」+ 42px 说明段 + 结论条 / 日志 / 按钮）
-          ② 草稿校验条（`✓ 3 个文件 · 对比上一版 · 新建 skill` + 按意见再改一版）
-          ③ frontmatter 摘要（slug 输入 + name + description）
-          结果编辑器从 y≈490 才开始，首屏能编辑的只有 ~280px。
-
-          现在合成**一块两行**（~76px 高），判据就是使用者给的轴——"哪些必须同时看到"：
-            · 常驻（必须同时看到）：过没过（审核结论 + 草稿校验合成一句话）、目标是谁、
-              slug（入库前唯一要确认的字段）、以及"这一步能做什么"的按钮；
-            · 折叠（不必同时看）：审核问题清单、审核日志、问题定位列表、按意见改一版的输入框。
-          规矩没变：① 结论常驻 + 明细折叠 ② "还没审过"与"审过但没判决"分开说
-          ③ 不通过且额度用尽才给「重新起草」。
-        -->
-        {#if pendingNewVersion !== ''}
-          <!--
-            ★ 分批第 27 批：链上冒出了新版，但你正在改正文 ⇒ **不抢**，只挂一条提示。
-            自动切走会把没保存的字丢掉（那比"没跟上"严重得多）；而完全不提，人就以为
-            界面卡住了——这正是使用者报的那个问题的一半。
-          -->
-          <div class="new-version-bar" data-new-version-hint>
-            <span>{$t('crystallize.newVersionHint')}</span>
+      <!--
+        ★ 分批第 196 批：**「链上出了新版，但你正在改」这条提示挪到对话里**。
+        它原来挂在产物消息里（`newVersionBar`），而那条消息连同结论条一起删了——
+        但这条提示**不能一起消失**：自动切版会丢掉没保存的字，所以"没切"必须说出来，
+        否则人会以为界面卡住了（分批第 27 批踩过的正是这个）。现在它是一条系统行。
+      -->
+      {#if pendingNewVersion !== ''}
+        <div class="crystal-msg" data-msg-role="system" data-new-version-hint>
+          <p class="faint small">
+            {$t('crystallize.newVersionHint')}
             <button
               type="button"
-              class="linkish"
+              class="draft-turn-toggle"
               onclick={() => {
-                // 换版之后磁盘上是新版的内容 ⇒ 旧版的"未保存改动"不再成立（状态在模块里）
                 editor.dirty = false
                 followNewVersion(pendingNewVersion)
               }}>{$t('crystallize.newVersionGo')}</button
             >
-          </div>
-        {/if}
-        {#if !refused}
-        <section class="conclusion-block">
-          <div class="conclusion-bar" class:bad={conclusionBad}>
-            <span class="bar-mark" aria-hidden="true">{conclusionMark}</span>
-            <span class="bar-text">
-              {#if artifacts === null}
-                <span class="muted">…</span>
-              {:else if refused}
-                <!-- ★ 分批第 194 批：**这是结论，不是失败**（`REFUSED.md`）。
-                     原来它走的是"体检没通过"那一支 ⇒ 红条写着「体检发现 1 处问题 ·
-                     校验未通过（1）」，看起来像审核没过。 -->
-                <strong>{$t('crystallize.refusedTitle')}</strong>
-              {:else if artifacts.validation.ok}
-                <strong>{$t('crystallize.checkPassed')}</strong>
-                <span class="faint small">（{$t('crystallize.checkTitle')}）</span>
-              {:else}
-                <strong>{$t('crystallize.checkProblems', { n: String(artifacts.validation.problems.length) })}</strong>
-              {/if}
-              {#if artifacts}
-                <span class="bar-sep">·</span>
-                {#if artifacts.validation.ok || refused}
-                  <span class="muted">
-                    {fileCount} {$t('crystallize.filesUnit')}
-                    {#if refused}
-                      <!-- ⚠️ 拒绝的草稿**不画对比**：它只有一份 REFUSED.md，而基线是"当前技能"，
-                           算出来的 `+3 −0` 是拿"拒绝说明"跟技能正文比的数字，纯噪音。
-                           （探针实测到了它：`– 起草者判定… · 1 个文件 · 对比当前版本 +3 −0`。） -->
-                    {:else if diff !== null && (diff.totals.added > 0 || diff.totals.removed > 0)}
-                      · {diff.against === 'previous'
-                        ? $t('crystallize.vsPreviousShort')
-                        : diff.against === 'original'
-                          ? $t('crystallize.vsOriginalShort')
-                          : $t('crystallize.vsCurrentShort')}
-                      <span class="num-tag add">+{diff.totals.added}</span>
-                      <span class="num-tag del">−{diff.totals.removed}</span>
-                    {:else}
-                      · {Math.max(1, Math.round(totalBytes / 1024))} KB
-                    {/if}
-                    {#if artifacts.mode === 'text'}
-                      · {$t('crystallize.textModeHint')}
-                    {/if}
-                  </span>
-                {:else}
-                  <!-- ★ 分批第 194 批：这里原来又写一遍「校验未通过（N）」——紧跟在前面的
-                       「体检发现 N 处问题」后面，等于同一件事说两遍，而且"校验"这个说法让人
-                       以为还有一道审核。改成指路（问题清单在哪看），不复述数字。 -->
-                  <span class="muted">{$t('crystallize.problemsWhere')}</span>
-                {/if}
-                <span class="bar-sep">·</span>
-                <span class="muted">
-                  {#if targetKind === 'new'}
-                    {$t('crystallize.targetNew')}
-                  {:else}
-                    {$t('crystallize.targetUpdate')} {skillNameFor(selectedSkillId)}
-                  {/if}
-                </span>
-              {/if}
-            </span>
-          </div>
-
-          <!--
-            第二行：入库前唯一要人确认的字段（slug）+ 只读的 name/描述。
-            它属于"这条结论"的一部分（能不能入库），所以与结论同块；但不占结论那一行——
-            结论那一行要留给"过没过"，那是人第一眼要找的东西。
-          -->
-          {#if artifacts}
-            <div class="conclusion-meta">
-              <label class="slug-inline">
-                <span class="faint small">{$t('crystallize.slugLabel')}</span>
-                <input bind:value={slug} autocomplete="off" class="mono" />
-              </label>
-              {#if artifacts.skillMd.name !== '' || artifacts.skillMd.description !== ''}
-                <span class="faint small frontmatter-line">
-                  <code>{artifacts.skillMd.name}</code>
-                  {#if artifacts.skillMd.description !== ''}
-                    <span class="desc-clip" title={artifacts.skillMd.description}
-                      >{artifacts.skillMd.description}</span
-                    >
-                  {/if}
-                </span>
-              {/if}
-            </div>
-          {/if}
-
-          <!-- ★ 分批第 137 批：沉淀线的审核删掉后，这里只剩**机械体检的问题清单**
-               （能机器判的那几条）。语义层不判——由人看（§12.15）。 -->
-
-          <!-- 问题定位列表：只在不过时说，最多 4 条（再多就该先改了） -->
-          {#if artifacts && !artifacts.validation.ok}
-            <ul class="problem-list">
-              {#each artifacts.validation.problems.slice(0, 4) as p (p.file + p.message)}
-                <li>
-                  {#if p.file !== ''}<code>{p.file}</code>：{/if}{p.message}
-                </li>
-              {/each}
-              {#if artifacts.validation.problems.length > 4}
-                <li class="faint">
-                  {$t('crystallize.moreProblems', { count: String(artifacts.validation.problems.length - 4) })}
-                </li>
-              {/if}
-            </ul>
-          {/if}
-
-          <!-- 按意见改一版：输入框点开才展开（它属于"这版不行"的动作，不常驻） -->
-          {#if reviseOpen}
-            <div class="revise-row">
-              <textarea
-                bind:this={feedbackBox}
-                bind:value={reviseFeedback}
-                rows="2"
-                placeholder={$t('crystallize.revisePlaceholder')}
-              ></textarea>
-              <div class="row-end">
-                <button
-                  class="ghost small"
-                  disabled={revising || reviseFeedback.trim() === ''}
-                  onclick={() => void reviseDraft()}
-                >{$t('crystallize.reviseSubmit')}</button>
-              </div>
-            </div>
-          {/if}
-        </section>
-        {/if}
-
-        <!--
-          起草者判定"不可沉淀"：这是结论，不是失败——只给重新起草 / 放弃。
-          ⚠️ 2026-10-21：它原来是上面那条 if-chain 的第一支；结论条不再属于那条链
-          （结论条在 artifacts 还没到时也要能显示审核那部分），所以这里单独成一个 if。
-        -->
-        <!-- ★ 分批第 195 批：这里的「起草者判定」气泡删了——拒绝的理由已经在**起草那一轮**
-             的消息里说过一次（`draftTurn` 的 refused 分支）。同一句话在一屏里出现两遍，
-             正是"有点乱"的来源之一。 -->
-
-        <!-- ★ 分批第 153 批（§12.12 / §12.53 选项 2）：编辑器抽成 `CrystallizeDraftEditor`，
-             它自己也带"有没有产出 / 是不是 refused"的判断。
-             ⚠️ **不要**把它包在 `{#if artifacts && ...}` 里：`artifacts` 这份镜像正是由它推上来的
-             （`onstate`），包起来就成了"镜像要等编辑器挂载、编辑器要等镜像"的死锁——
-             实测 37 条判据连锁红（结论条 "○ …"、树空、slug 不出现）。
-             这一批先渲染在原位（行为不变）；下一批把它挂进右栏产物栏，中间只留结论与出口。 -->
-        <!-- ★ 分批第 155 批：编辑器搬进右栏；这里只留一个**什么也不画**的状态推送器
-             （legacy 组件的 `$:` 读不到模块信号，必须由 runes 组件回调推上来）。 -->
-        <CrystallizeDraftState onstate={syncFromEditor} />
-        <!-- ★ 分批第 168 批：窄窗口（右栏是抽屉）时，编辑器回到这条产物消息里 -->
-        {#if !paneWide}
-          <CrystallizeDraftEditor />
-        {/if}
-            </div>
-{/if}
-
-      <!-- ── 素材（四轮 P1）：agent 读的就是这些文件，人也能翻同一份。
-             ⚠️ 2026-10-21（第 3 批）：审阅态不再把它折在编辑器下面——它成了「依据」tab 的
-                内容（点一下就看，不必滚到 y≈842 再展开一层）。所以这里排掉 review，
-                而内容本身抽成片段 `materialPane`，两处共用一份标记（不许复制两份）。 ── -->
-      {#if draftRunId !== '' && material !== null && step === 'target'}
-        <FoldSection
-          title={$t('crystallize.materialTitle')}
-          summary={`${material.items.length} ${$t('crystallize.filesUnit')} · ${material.dirLabel}`}
-        >
-          <div class="file-pane">
-            {@render materialPane()}
-          </div>
-        </FoldSection>
+          </p>
+        </div>
+      {/if}
       {/if}
 
+      {#if step === 'review'}
       <!--
-        ── ★ 起草中那一屏：两个 tab（产出 / 依据），2026-10-21 第 4 批 ──
+        ══════════════════════════════════════════════════════════════════
+        ★ 分批第 196 批：中间栏**只剩对话**——这条"产物消息"整块删掉了。
 
-        原来这一屏是"目标摘要 + 起草 run + 素材折叠"竖着摞；素材折在下面、目标摘要在上面，
-        而"跑着的时候唯一的实时信息"（run 的输出）被夹在中间。现在：
-          · 产出（默认）= 那条 run 的状态 + 实时输出（跑完自动进审阅态，这里不用两态）；
-          · 依据 = 目标摘要（新建 / 更新谁）+ 素材（不折叠：进了 tab 再折一层就是多一次点击）。
+        它原来装三样东西，使用者逐条点了名：
+          ① 结论条「✓ 体检通过（机械体检） · 4 个文件 · 对比当前版本 +604 −0 · 新建 skill」
+             ⇒ 删。体检结果本来就在**右栏**的「体检」一节（同一份数据、同一个数字），
+             而"对比 +604 −0"是整条链的合计，真正要看差异时右栏「差异」里有逐文件的行；
+          ② slug 输入 + name/description 只读行 ⇒ 删。**slug 挪进「确认入库」的确认框**：
+             它是"入库时唯一要人确认的字段"，那就在入库那一步问，而不是平时挂在页面上；
+          ③ 「按意见改一版」的意见框 ⇒ 删。那句话改成在**栏脚输入条**里说
+             （`这里不对：…`，路由已接），对话框里再挂一个输入框就是第二套入口。
+        ══════════════════════════════════════════════════════════════════
       -->
+      {#if clash}
+        <div class="notice">
+          {error}
+          <button class="ghost small" onclick={() => void switchToUpdate()}>
+            {$t('crystallize.switchToUpdate')}
+          </button>
+        </div>
+      {:else if error}
+        <div class="notice bad">{error}</div>
+      {/if}
+      <!-- ★ 分批第 155 批：这里只留一个**什么也不画**的状态推送器（编辑器在右栏，
+           `artifacts` 这份镜像由它推上来）。 -->
+      <CrystallizeDraftState onstate={syncFromEditor} />
+      <!--
+        ★ 分批第 196 批：**中间栏不再渲染编辑器**（连窄窗口那一路也删了）。
 
+        原因：右栏现在**永远**渲染编辑器（不再按宽度分叉），窄窗口里它是抽屉、并在进入审阅时
+        自动推开（`CrystallizeArtifactPane` 的 `autoOpenedFor`）。而中间这份留着的话，窄窗口下
+        页面里会同时有**两个** `textarea.editor`（同一份状态、两处 DOM）——那比"藏在抽屉里"
+        更坏。草稿只在右栏一处，和"整页只有一个编辑器"这条一起成立。
+      -->
+      {/if}
 
       {#if step === 'done'}
         <section class="notice good done-box">
@@ -2009,6 +1858,27 @@
   {/snippet}
 </MainArea>
 
+<!--
+  ★ 分批第 196 批：「确认入库」的确认框（`CrystallizeCommitDialog`）。
+  挂在 MainArea 外面：它是浮层，不该跟着中栏那条滚动区走。
+-->
+<CrystallizeCommitDialog
+  bind:open={commitOpen}
+  kind={targetKind}
+  bind:slug
+  name={artifacts?.skillMd.name ?? ''}
+  description={artifacts?.skillMd.description ?? ''}
+  fileCount={fileCount}
+  totalBytes={totalBytes}
+  busy={saving}
+  error={commitOpen ? error : ''}
+  onconfirm={() => void save()}
+  oncancel={() => {
+    commitOpen = false
+    error = ''
+  }}
+/>
+
 <style>
   /* ★ 分批第 150 批：动作搬进消息之后的间距——要和上面的日志分开一点，
      但不要另起一块"工具栏"（动作贴在内容尾巴上，不抢视觉） */
@@ -2040,15 +1910,7 @@
     background: var(--surface-2, #f4f4f5);
     font-size: 12px;
   }
-  .new-version-bar .linkish {
-    background: none;
-    border: 0;
-    padding: 0;
-    color: var(--accent, #2563eb);
-    cursor: pointer;
-    font-size: 12px;
-    text-decoration: underline;
-  }
+
 
   /* ★ 纵向间距**只有一个来源**：`.drawer-section` 的全局 `margin-bottom`（任务
      详情就是这么排的）。这里若再给 `gap`，两种间距会叠加成双倍——所以用
@@ -2109,13 +1971,8 @@
     flex: 0 0 auto;
   }
 
-  /* 产物消息（审阅态）：占满剩余高度，内部各块自己滚 */
-  .crystal-msg[data-msg-role='artifact'] {
-    display: flex;
-    flex-direction: column;
-    flex: 1 1 auto;
-    min-height: 0;
-  }
+  /* ★ 分批第 196 批：`.crystal-msg[data-msg-role='artifact']` 那条删了——中栏不再有
+     "产物消息"（结论条、slug、编辑器全搬走了：动作去栏头，体检在右栏，编辑器只在右栏）。 */
 
   .crystal-composer {
     flex-shrink: 0;
@@ -2522,23 +2379,9 @@
     border-left-color: var(--bad);
     border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
   }
-  .conclusion-bar .bar-mark {
-    flex: 0 0 auto;
-    color: var(--good);
-    font-weight: 600;
-  }
-  .conclusion-bar.bad .bar-mark {
-    color: var(--bad);
-  }
-  .conclusion-bar .bar-text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    overflow: hidden;
-    white-space: nowrap;
-  }
+
+
+
   /*
    * ★ 分批第 195 批：`.conclusion-bar .bar-actions`（动作组）与它的取整规则删了——
    * 动作搬到栏头右侧（`[data-review-actions]`），结论条不再托按钮，也就不需要为它
@@ -2554,30 +2397,9 @@
     padding: 0 var(--sp-1);
     font-size: var(--fs-sm);
   }
-  /*
-   * slug 是入库前唯一要人确认的字段，但它在这一行里只需要"看得清、点得中"。
-   * 站里输入框是 33px 高（padding 6+6），这一行因此 43px——比结论条还高。
-   * 收到 3px ⇒ ~26px，整块从 120px 降到 ~97px（实测见探针 `crystal.paneTopY`）。
-   */
-  .conclusion-meta input {
-    padding-top: 3px;
-    padding-bottom: 3px;
-  }
-  /*
-   * ⚠️ 这一条是**量出来才发现**的：`.conclusion-meta` 明明只有 label(30.8) 和
-   *    frontmatter(20.8) 两个子元素，行高却是 42.8。逐个子元素藏掉才看出是 label——
-   *    它自己量着 30.8，但**全局 `label` 规则带着下边距**，占位是 42.8。
-   *    （只看高度差永远猜不到：差值 12 刚好等于 `--sp-3`，很容易误判成 gap。）
-   */
-  .conclusion-meta .slug-inline {
-    margin: 0;
-  }
-  .conclusion-meta .frontmatter-line {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  
+  
+
   /*
    * ⚠️ 这里刻意**不设 max-width**：这一页在 D80 之后是整页宽，宽度约束写在别处会
    *    变成"只有这一块窄"的布局缺陷（`svelte-check` 看不见这类问题，只有浏览器量得出来）。
@@ -2617,11 +2439,7 @@
     flex: 0 0 auto;
   }
 
-  .slug-inline input {
-    width: 12rem;
-    padding: 2px 6px;
-    font-size: var(--fs-sm);
-  }
+
 
   .frontmatter-line {
     display: flex;
@@ -2630,22 +2448,14 @@
     min-width: 0;
   }
 
-  .frontmatter-line .desc-clip {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 32rem;
-  }
+
 
   /* 按意见改一版：展开的那一行 */
   .revise-row {
     margin-top: var(--sp-2);
   }
 
-  .revise-row textarea {
-    width: 100%;
-    box-sizing: border-box;
-  }
+
 
   /* ── 主区：树 240px + 窗格 ──
      高度跟窗口走（min 420 保证编辑器不至于只有几行；max 与窗口高对齐），
@@ -2797,9 +2607,7 @@
     padding-left: 18px;
   }
 
-  .problem-list li + li {
-    margin-top: 4px;
-  }
+
 
   /* ══════════ 完成态 ══════════
      ★ 底色/描边/内距吃全局 `.notice`（`.good` 那档），这里只管"竖着排"——
