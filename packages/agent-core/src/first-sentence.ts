@@ -139,6 +139,34 @@ export interface ToolBrief {
 export type FirstSentenceKind = 'execute' | 'review' | 'chat'
 
 /**
+ * 这条 run 用哪一份三块模版——**唯一判据**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 只有三份模版，**没有第四份给沉淀**（分批第 210 批，使用者定）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 沉淀（`subject.type === 'skill-draft'`）不是第三种链路：它本身就长成"跟一个
+ * 装着技能的智能体说话"——素材在它自己的工作目录里、它可能要反问、人再答。
+ * 所以它的 ①②③ 就是**聊天那一份**，③ 就是"这一轮要说的那句话"。
+ *
+ * 从前这个判断写在执行器里（`usesChatTemplates`，把 conversation 与 skill-draft
+ * 并列），两个后果：一是"沉淀用聊天模版"在代码里长得像一条**特例**，读的人会
+ * 以为还有一份沉淀专用模版；二是这个判断与 `DEFAULT_TEMPLATES` 分居两个文件，
+ * 改一处不会提醒另一处。现在收敛到这一个函数，执行器只问它。
+ *
+ * ⚠️ 判据**只看 run 种类与 subject 类型**，不看 agent、不看技能、不看 prompt 内容：
+ *    同一类 subject 永远同一份模版，否则"这条 run 到底被交代了什么"要靠猜。
+ */
+export function firstSentenceKindFor(run: {
+  kind: 'execute' | 'review'
+  subject: { type: string }
+}): FirstSentenceKind {
+  // 对话与沉淀：说话，不是派活（下一轮的回答还在同一个 subject 里接着往下说）
+  if (run.subject.type === 'conversation' || run.subject.type === 'skill-draft') return 'chat'
+  return run.kind === 'review' ? 'review' : 'execute'
+}
+
+/**
  * 三块各自的模版框（2026-10 三框改造）。
  *
  * ① 框架 / ② 身份 / ③ 任务各有一个独立的模版框：空 = 平台默认

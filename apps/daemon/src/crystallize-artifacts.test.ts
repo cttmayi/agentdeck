@@ -1,5 +1,5 @@
 /**
- * 起草产出的读取与校验（2026-10-19 四轮）+ 内置写作技能。
+ * 起草产出的读取与校验（2026-10-19 四轮）。
  *
  * 覆盖四条最容易回归的语义：
  *   · 多文件目录 → `mode: 'files'`，SKILL.md 的 frontmatter 拆成 name/description
@@ -21,7 +21,6 @@ import {
   writeDraftSkillFiles,
   dropForeignVersions,
 } from './crystallize-artifacts.ts'
-import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 let dir: string
@@ -250,11 +249,11 @@ describe('assembleArtifacts：三种产出形态', () => {
 describe('readDraftSkillDir', () => {
   test('递归读文件，跳过隐藏文件（.claude 里是注入的技能，不是产出）', async () => {
     const skillDir = join(dir, 'skill')
-    await mkdir(join(skillDir, '.claude', 'skills', 'writing-skills'), { recursive: true })
+    await mkdir(join(skillDir, '.claude', 'skills', 'distilly'), { recursive: true })
     await mkdir(join(skillDir, 'references'), { recursive: true })
     await writeFile(join(skillDir, 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
     await writeFile(join(skillDir, 'references', 'fields.md'), '# 字段\n', 'utf8')
-    await writeFile(join(skillDir, '.claude', 'skills', 'writing-skills', 'SKILL.md'), 'x', 'utf8')
+    await writeFile(join(skillDir, '.claude', 'skills', 'distilly', 'SKILL.md'), 'x', 'utf8')
 
     const files = await readDraftSkillDir(skillDir)
     assert.ok(files)
@@ -272,26 +271,11 @@ describe('readDraftSkillDir', () => {
   })
 })
 
-describe('内置写作技能', () => {
-  test('能读到 SKILL.md 与三份参考（随代码走，不依赖使用者技能目录）', async () => {
-    const skill = await loadBuiltinSkill(WRITING_SKILLS)
-    assert.ok(skill, '内置技能必须存在——读不到沉淀就写不出规范的东西')
-    assert.equal(skill.slug, 'writing-skills')
-    assert.equal(skill.name, 'writing-skills')
-    assert.ok((skill.description ?? '').length > 0, 'description 是渐进式披露的第一层')
-    assert.match(skill.body, /## When to Use/)
-    assert.match(skill.body, /## Procedure/)
-    const files = Object.keys(skill.files)
-    assert.ok(files.includes('references/structure.md'))
-    assert.ok(files.includes('references/files.md'))
-    assert.ok(files.includes('references/checklist.md'))
-    assert.match(skill.files['references/structure.md'] ?? '', /不结晶清单/)
-  })
-
-  test('读不存在的内置技能返回 null（调用方据此报安装不完整）', async () => {
-    assert.equal(await loadBuiltinSkill('no-such-builtin'), null)
-  })
-})
+/**
+ * ★ 分批第 210 批：这里原来有一组「内置写作技能」（`apps/daemon/assets/builtin-skills/
+ * writing-skills/` 的读取）。整套**删掉了**——写法归使用者装的那份技能（distilly），
+ * 平台不再自带第二份；那组测试钉的是一个已经不存在的资产。
+ */
 
 /**
  * 真机现场（2026-10-23）：`9D67DN` 的任务目录里 `.versions.json` 记着 14 条，其中 4 条属于

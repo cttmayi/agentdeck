@@ -7,8 +7,8 @@
  *     task 场景的 reviewed 判定（有 completed 审核 run 才算）。
  *   · material（四轮起落盘成目录）：conversation 一轮一文件且保留工具调用；task 的
  *     判决与反馈各一份；writeMaterial 的索引 / meta / 更新基线。
- *   · draft prompt（四轮起是指针式）：只给素材目录、产出契约与本次目标，"怎么写 skill"
- *     交给内置技能 writing-skills。
+ *   · draft prompt（210 批起是指针式）：只给素材目录、平台硬事实与本次目标，"怎么写 skill"
+ *     交给使用者装的那份技能（distilly 等，import 时点名）。
  */
 
 import { after, before, describe, test } from 'node:test'
@@ -38,11 +38,8 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
 let dir: string
 let store: FileStore
 
-/**
- * 夹具里的"写作规范"正文（真身是内置 `writing-skills`，这里只要一段**可辨认的**文字，
- * 用来断言"规范真的进了 prompt"）。
- */
-const SPEC = '## 写 skill 的规范（探针夹具）\n\n- 正文必须有 When to Use 与 Procedure 两节。\n'
+/** 夹具里的技能 slug：prompt 里点名的那份（真身是使用者装的 distilly）。 */
+const DRAFTER_SKILLS = ['distilly'] as const
 
 const WS = wsId('ws-crystal')
 
@@ -605,29 +602,30 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
   })
 })
 
-describe('buildDraftPrompt：起草指令（四轮：只留本次任务）', () => {
-  test('指针式：给素材目录与产出契约，不再内联素材正文', () => {
+describe('buildDraftPrompt：起草指令（210 批：写法归技能，prompt 只留平台硬事实）', () => {
+  test('指针式：素材目录 + 点名注入的技能 + 平台硬事实，没有写作规范正文', () => {
     const prompt = buildDraftPrompt({
       scope: 'conversation',
       materialDir: 'material',
       outputDir: 'skill',
       target: 'new',
-      writingSpec: SPEC,
+      skillSlugs: DRAFTER_SKILLS,
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
-    assert.match(prompt, /skill\/SKILL\.md/, '产出契约')
-    // ★ 2026-10（定稿第 ③ 条）：**规范改成进 prompt**，不再靠"注入技能 + 提示里点名
-    //   writing-skills"。判据也跟着换：既要**真的见到规范正文**，又不能再说
-    //   "你去读那个技能文件"（那句话现在指向一个不存在的东西——技能不再注入了）。
-    assert.match(prompt, /写 skill 的规范（探针夹具）/, '规范正文进了 prompt')
-    assert.doesNotMatch(
-      prompt,
-      /你加载了 \`writing-skills\` 技能/,
-      '不许再让起草者去找技能文件（第 ③ 条之后它没有被注入）',
-    )
-    assert.match(prompt, /不结晶清单/, '不结晶清单由内置技能承载（提示里点了名）')
+    assert.match(prompt, /skill\/SKILL\.md/, '产出在哪 + 主产出的名字')
+    // ★ 分批第 210 批（使用者："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
+    //   写法**只在技能里**。这条钉两件事：点名的是**实际注入的那份**（slug 来自挂载，
+    //   不是写死的常量），并且 prompt 里**不再有**第二份写法权威。
+    assert.match(prompt, /`distilly`/, '点名这一轮真的注入的那份技能')
+    assert.doesNotMatch(prompt, /writing-skills/, '平台自带的写作规范不再进 prompt')
+    assert.doesNotMatch(prompt, /## When to Use|## Procedure/, '写作章节要求不在 prompt 里（归技能）')
+    assert.doesNotMatch(prompt, /【写作规范】/, '那一段连同标题一起删了')
+    assert.match(prompt, /QUESTIONS\.md/, '提问的落点是平台协议文件名（平台靠它认出"只在问"）')
+    assert.match(prompt, /REFUSED\.md/, '不沉淀的落点是平台协议文件名（界面据此显示"放弃"）')
     assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
+    // 篇幅也是判据：这一段每轮都要被读，内联规范那版是 2785 字。
+    assert.ok(prompt.length < 1200, `prompt 要短（现在 ${String(prompt.length)} 字符）`)
   })
 
   test('更新：指向 existing-skill/，不再塞全文', () => {
@@ -636,11 +634,23 @@ describe('buildDraftPrompt：起草指令（四轮：只留本次任务）', () 
       materialDir: 'material',
       outputDir: 'skill',
       target: 'update',
-      writingSpec: SPEC,
+      skillSlugs: DRAFTER_SKILLS,
     })
     assert.match(prompt, /material\/existing-skill\//, '更新基线在素材里')
     assert.match(prompt, /修订/, '要求修订而不是重写')
     assert.doesNotMatch(prompt, /作用描述/, '更新时没有作用描述那段')
+  })
+
+  test('没解析到技能时那句退化成"你挂着的那份技能"（不编一个 slug）', () => {
+    const prompt = buildDraftPrompt({
+      scope: 'blank',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: 'new',
+      skillSlugs: [],
+    })
+    assert.match(prompt, /你挂着的那份技能/)
+    assert.doesNotMatch(prompt, /`distilly`/)
   })
 })
 

@@ -10,6 +10,7 @@ import {
   renderDelivery,
   deliveredBytes,
   deliveryModeFor,
+  firstSentenceKindFor,
   isBlankBlock,
   BLOCK_LABELS,
   BLOCK_ORDER,
@@ -1283,18 +1284,18 @@ export class RunExecutor {
 
       /** 三块怎么投递由 `mode` 决定（A：①② 进系统提示；B：三块合一段）。 */
       /**
-       * ★ 分批第 178 批（使用者定："**智能体使用聊天模版，而不是执行者模版**"）：
-       * 沉淀的起草 run（`subject.type === 'skill-draft'`）也走**聊天那一份**三块模版。
+       * ★ 用哪一份模版**只在 `firstSentenceKindFor` 里判**（分批第 210 批）。
        *
-       * 为什么：那一轮本质是"跟一个智能体说话、它可能反问、你再答"（分批第 172 批的
-       * 问答轮就是这么设计的），而不是"派一个任务等它交报告"——执行者那份框架里含
-       * run/对象头与"完成后给出一份报告"，灌进这条链会把它拧回"交报告"的姿势。
+       * 这里从前写的是 `usesChatTemplates = conversation || skill-draft`：一个按
+       * subject 类型列名单的特例，看起来像"沉淀还有一份自己的模版，只是暂时借聊天
+       * 的来用"。它不是特例——沉淀就是"跟装着技能的智能体说话"，与对话同一条路。
+       * 判据收在 agent-core（与 `DEFAULT_TEMPLATES` 同一个文件），执行器只问它，
+       * 于是"哪份模版"这件事只有一个答案。
        */
-      const usesChatTemplates =
-        req.subject.type === 'conversation' || req.subject.type === 'skill-draft'
+      const templateKind = firstSentenceKindFor({ kind: req.kind, subject: req.subject })
       const delivery: Delivery =
-        usesChatTemplates
-          ? // ★ 对话：**①②③ 都发**（2026-09 的决定）——
+        templateKind === 'chat'
+          ? // ★ 对话 / 沉淀：**①②③ 都发**（2026-09 的决定）——
             //   ① 是聊天**自己**那份框架（任务那份含 run/对象头、"报告"要求与判决
             //   契约，灌进聊天是错的）；② 是 agent 的「指令」（在此之前它在聊天里
             //   **静默失效**，而技能照旧注入——同一个 agent 在两条路上性格不同）；
@@ -1309,7 +1310,7 @@ export class RunExecutor {
               language,
               template: migrated.chat,
             }, mode)
-          : req.kind === 'review' && req.review
+          : templateKind === 'review' && req.review
           ? renderDelivery({
               kind: 'review',
               runId,
@@ -1381,7 +1382,7 @@ export class RunExecutor {
         req.subject.type === 'conversation'
           ? `这一轮是对话：交给 CLI 的就是使用者那句话（${delivery.user.length} 字符，没套任何模版）｜${modeLabel}`
           : req.subject.type === 'skill-draft'
-            ? `这一轮用**聊天那三块模版**投递（沉淀是"跟智能体说话"，不是派活）｜${modeLabel}`
+            ? `这一轮是沉淀：跟装着那个技能的智能体说话（与对话**同一份**三块模版，没有沉淀专用的一份）｜${modeLabel}`
             : `第一句话（${modeLabel}，以下就是交给 CLI 的全部内容）：`,
       )
       // ★ 三块**分开、带名字**进日志（2026-09 的决定；使用者投诉过"只看到框架和

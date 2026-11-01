@@ -11,7 +11,6 @@ import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT, withConduct } from './agent-conduct.ts'
 import { DRAFTER_INSTRUCTIONS } from './builtin-drafter.ts'
-import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 
 /** 这份测试不跑 run（只读 identity / 建 agent），后端给个立刻成功的假货即可。 */
 class QuietBackend implements AgentBackend {

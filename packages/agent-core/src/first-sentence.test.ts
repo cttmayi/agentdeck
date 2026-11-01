@@ -9,6 +9,7 @@ import {
   TEMPLATE_VARIABLES,
   TemplateInvalidError,
   buildBlocks,
+  firstSentenceKindFor,
   isBlankBlock,
   isKnownVariable,
   migrateTemplate,
@@ -789,5 +790,34 @@ describe('第一句话：绕过校验直接塞坏模版', () => {
         }),
       (err: unknown) => err instanceof TemplateInvalidError,
     )
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════
+// 哪条 run 用哪份模版（分批第 210 批：判据只有一处）
+// ══════════════════════════════════════════════════════════════════
+
+describe('firstSentenceKindFor：三份模版，没有第四份给沉淀', () => {
+  test('★★ 沉淀与对话走**同一份**聊天模版（它不是第三种链路）', () => {
+    assert.equal(
+      firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }),
+      'chat',
+    )
+    assert.equal(
+      firstSentenceKindFor({ kind: 'execute', subject: { type: 'conversation' } }),
+      'chat',
+    )
+  })
+
+  test('★ 任务与审核各走自己那份（别把聊天那份灌进派活的链）', () => {
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }), 'execute')
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'run' } }), 'execute')
+    assert.equal(firstSentenceKindFor({ kind: 'review', subject: { type: 'run' } }), 'review')
+  })
+
+  test('★ 判据只看种类与 subject 类型（不看 prompt 内容，也不看有没有技能）', () => {
+    // 同一种 subject 永远同一份模版——否则"这条 run 到底被交代了什么"要靠猜。
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
   })
 })

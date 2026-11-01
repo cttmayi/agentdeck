@@ -503,6 +503,9 @@ skill（更新目标 = 任务 run 实际注入的 skill；反馈指向的 skill 
 
 新增**平台内置 skill**（随代码走，不落 store、不进使用者技能列表）：
 
+> ⚠️ **这一整套已随 §12.80（分批第 210 批）删除**：写法权威回到使用者装的 distilly，
+> `apps/daemon/assets/builtin-skills/` 与 `builtin-skills.ts` 都不在了。下面这段留作历史。
+
 ```
 apps/daemon/assets/builtin-skills/writing-skills/
 ├── SKILL.md            ← 渐进式披露第一层：何时用、怎么写
@@ -567,7 +570,7 @@ description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / 
 
 | 接口 | 变更 |
 |---|---|
-| `POST /api/crystallize/draft` | 服务端写 `material/`、注入内置 `writing-skills`、`workDir` = 草稿目录；返回加 `materialDir` |
+| `POST /api/crystallize/draft` | 服务端写 `material/`、~~注入内置 `writing-skills`~~（§12.80：注入**起草者挂着的**技能）、`workDir` = 草稿目录；返回加 `materialDir` |
 | `GET /api/crystallize/artifacts?draftRunId=` | **新增**：`{mode:'files'|'text', files, skillMd:{name,slug,description,body}, validation:{ok,problems[]}, baseline?}` |
 | `GET /api/crystallize/material?draftRunId=` | **新增**：素材文件清单 + 预览（审阅界面「素材」分节） |
 | `POST /api/crystallize/commit` | 入参改 `{draftRunId, target, slug, files}`；name/description 从 SKILL.md 解析，服务端复算 |
@@ -577,7 +580,7 @@ description 必须含触发条件）、`## When to Use / Procedure / Pitfalls / 
 
 #### 5.0.8 分期
 
-- **P0（已实作，2026-10-19）**：素材落盘 + 内置 writing-skills + 多文件产出/文件树审阅 +
+- **P0（已实作，2026-10-19）**：素材落盘 + ~~内置 writing-skills~~（§12.80 已删，写法归 distilly）+ 多文件产出/文件树审阅 +
   免填 frontmatter。实作清单见 §5.0.10。
 - **P1**：新建/更新变更集（A/M/D + diff）+ 校验问题定位 + 「素材」分节 +
   **「按意见改一版」**（审阅页给 agent 一句反馈再起草一轮，复用同一份 `material/`，新旧并列）。
@@ -660,9 +663,9 @@ description: <一句话，必须含触发条件——"当用户想……时用"�
 |---|---|
 | `apps/daemon/src/crystallize-material.ts` | `collectMaterial`（一轮一文件）+ `writeMaterial`（索引 / meta / 技能清单 / 更新基线）+ `draftRoot` |
 | `apps/daemon/src/crystallize-artifacts.ts` | 读 `skill/` 目录、拆 frontmatter、校验（含限额与路径安全）、三种形态（files / text / refused） |
-| `apps/daemon/src/builtin-skills.ts` | 读内置技能（`apps/daemon/assets/builtin-skills/<slug>/`）→ `SkillPayload` |
+| ~~`apps/daemon/src/builtin-skills.ts`~~ | ⚠️ **§12.80 已删除**：读内置技能（`apps/daemon/assets/builtin-skills/<slug>/`）→ `SkillPayload`——它的唯一用途是把规范内联进 prompt |
 | `apps/daemon/src/run-text.ts` | 消息渲染（`formatRunMessages` / `lastTextOf`）——从 `crystallize.ts` 抽出，避免与素材模块成环 |
-| `apps/daemon/assets/builtin-skills/writing-skills/` | 内置「写 skill 的 skill」：`SKILL.md` + `references/{structure,files,checklist}.md` |
+| ~~`apps/daemon/assets/builtin-skills/writing-skills/`~~ | ⚠️ **§12.80 已删除**：内置「写 skill 的 skill」——写法改用使用者装的 distilly（挂在起草者身上） |
 
 **接口**：`POST /api/crystallize/draft` 改为先落盘素材、注入内置技能、`workDir` = 草稿目录；
 新增 `GET /api/crystallize/artifacts`、`GET /api/crystallize/material`；`POST /api/crystallize/commit`
@@ -947,7 +950,7 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 |---|---|
 | ① | **独立角色**（起草者）：**不出现在任何"选执行者 / 选审核者"的地方**（新建任务、智能体组成员槽），智能体页上看得见、能编辑 |
 | ② | **不许删**，只能「恢复成默认值」——沉淀这条路必须永远有起草者，不留"删了之后怎么办"的静默分支 |
-| ③ | **不注入技能**：写作规范正文（现在 `writing-skills` 那份）**放进起草 prompt** ⇒ 不再依赖 runtime 有没有技能通道；顺带消掉 `builtin_skill_missing` 那条 500 |
+| ③ | ⚠️ **已被 §12.80 翻转（分批第 210 批）**：~~不注入技能；写作规范正文（`writing-skills` 那份）放进起草 prompt~~ ⇒ 现在是**注入起草者挂着的技能**（distilly），prompt 里只点名、不再自带写法规范。原决定的理由（"不依赖 runtime 的技能通道"）在"沉淀的前提就是装了 distilly"之后不再成立 |
 | ④ | **它像普通智能体一样有自己的 CLI 设定**（使用者可选） |
 | ⑤ | 规范与身份**合成一份**交给使用者编辑 |
 | ⑥ | 平台升级**只更新"默认值"那一侧**，使用者改过的那份**不动**（「恢复成默认值」随时能拿到最新默认） |
@@ -957,7 +960,7 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 
 ```
 身份 + 写法规范   ← 合成一份，使用者可编辑、可恢复默认（⑥ 升级不覆盖）
-产出契约          ← 平台任务块 buildDraftPrompt，随代码走（③ 之后：规范也走 prompt，不走技能注入）
+产出契约          ← 平台任务块 buildDraftPrompt，随代码走（§12.80 之后：只有平台的硬事实，写法归技能）
 硬结构            ← 入库校验兜底（已有：缺 `## When to Use` / `## Procedure` 直接 400）
 素材 / 草稿小屋   ← 平台写，不变（§5.0.7 的 material/ 与 outputDir）
 评审判定          ← **仍然是人**：`reviewerAgentId: null` 不动，审阅界面仍是唯一大门
@@ -968,7 +971,7 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 1. **store + 播种**：智能体加"内置"标记与新角色（起草者）；首启**幂等播种**（已有就不覆盖——使用者改过的那份必须活过升级）；被改名/损坏时能自愈到默认。
 2. **默认指令常量**（随代码走）+ `GET/POST`「恢复成默认值」接口（只在"与默认不同"时可点/可调）。
 3. **全局 runtime 默认值设定**（⑦）：设定项 + 侦测（取第一个可用的）+ 各 agent 的 `runtime` 允许 `'default'`；解析顺序 = agent 的值 ⇒ 全局默认 ⇒ 侦测第一个可用。
-4. **起草 prompt 改造**：`writing-skills` 正文从"注入技能"改为"进 prompt"；起草 run 用这条内置智能体的 `instructions`；技能集合不再靠注入。
+4. **起草 prompt 改造**：~~`writing-skills` 正文从"注入技能"改为"进 prompt"~~（§12.80 又翻回去了：注入**使用者装的**技能，prompt 只点名）；起草 run 用这条内置智能体的 `instructions`。
 5. **智能体页**：内置徽标 + 指令可编辑 + 「恢复成默认值」+ **不给挂载技能/删除入口** + CLI 可设。
 6. **过滤与判据**：所有"选执行者/审核者"的地方排除它。
 
@@ -982,7 +985,7 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 
 ### 9.4 判据（做完要能量到）
 
-它不出现在任何选执行者/审核者的地方；删不掉；改了之后能恢复、恢复后与默认**一字不差**；平台升级后使用者的改动**还在**；起草 run 的第一句话里是**它的**指令且含规范正文；**换 CLI 也必须读到规范**（③ 的目的）；CLI 不可用时报可照做的错；全局 runtime 默认为 `default` 时新 agent 跟随全局。
+它不出现在任何选执行者/审核者的地方；删不掉；改了之后能恢复、恢复后与默认**一字不差**；平台升级后使用者的改动**还在**；起草 run 的第一句话里是**它的**指令；写法规范由**注入的那份技能**提供（§12.80 翻转了 ③）；CLI 不可用时报可照做的错；全局 runtime 默认为 `default` 时新 agent 跟随全局。
 
 决策编号 **D81**（已写入 `docs/srs/requirements.md` §16；D80 是这条链的总设计）。
 
@@ -992,7 +995,7 @@ slug 是唯一要确认的字段；文件树行 = A/M/D 徽标 + 名称（超长
 |---|---|---|
 | 1 | `packages/protocol`（Agent 类型）→ `packages/domain`（端口/校验）→ `packages/store-file` | Agent 加**内置标记**；角色枚举加**起草者**。⚠️ 字段名照现有风格取，`erasableSyntaxOnly` 禁 enum/namespace |
 | 2 | `apps/daemon/src/server.ts` 首启播种处（`insertAgent` 那两处，~6944/6964） | 加第三次播种：内置起草者。**幂等**：已有就不覆盖（使用者改过的必须活过升级）；被改名/损坏时自愈到默认 |
-| 3 | 新建 `apps/daemon/src/builtin-drafter.ts`（仿 `builtin-skills.ts`） | 默认指令常量（身份 + 从 `writing-skills` 搬来的写作规范）+ `DRAFTER_NAME` + 「恢复默认」的纯函数（比较/重置） |
+| 3 | 新建 `apps/daemon/src/builtin-drafter.ts` | ⚠️ 原文写"身份 + 从 `writing-skills` 搬来的写作规范"——规范**没有**进身份（§12.77 让它归技能，§12.80 把平台那份删了）；当时仿的 `builtin-skills.ts` 也已删除 |
 | 4 | `apps/daemon/src/crystallize.ts` `buildDraftPrompt()`（~245）+ 起草路由（`server.ts` ~4436-4475） | 规范正文**从"注入技能"改为进 prompt**；`agentRef.instructions` 改用内置起草者的指令；`skills:` 不再传 `writingSkill`；CLI 取该 agent 的 runtime |
 | 5 | 全局设定 + 各 agent 的 runtime（⑦） | 设定项「runtime 默认值」+ 侦测第一个可用；解析顺序 `agent ⇒ 全局默认 ⇒ 侦测第一个可用`；新建/播种的 agent 一律写 `default`。前端落在 `WorkspaceSettings.svelte`（**它仍是抽屉**） |
 | 6 | `apps/web/src/views/Agents.svelte` + `NewAgentForm.svelte` | 内置徽标、指令可编辑、「恢复成默认值」（仅在"与默认不同"时可点）、**不给挂载技能/删除入口**、CLI 可设 |
@@ -3790,6 +3793,11 @@ skill 的五项原样保留（标题改成「审 skill 时你审的五件事」�
 
 ⇒ **可复用的是它的 prompt 片段与产物契约，不是它的流程外壳。**
 
+> ★ 分批第 210 批（§12.80）已经按这条分工落了地，且比这里说的更彻底：**写法整包归 distilly**
+> （它挂在起草者身上、随 run 注入，是唯一的写法权威），**编排仍全在 daemon**——
+> 提问走 `material/QUESTIONS.md`、拒绝走 `skill/REFUSED.md`、素材与产出目录由平台定。
+> 也就是说 §11.3.1 反对的是"把它的交互流程抄进 prompt"，不是"装它当技能"。
+
 #### 11.3.2 产出契约化：起草者交 `draft.json`，由 daemon 落盘（P0）
 
 用意三条：
@@ -6099,3 +6107,64 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 会量到 0 个（= 空过，我第一版就这么写的）。
 
 验证：`check` **2188 全绿**、`probe:layout` **569 全绿**、`typecheck` 0 错。
+
+### 12.80 写法权威回到使用者装的技能；沉淀与聊天**同一份**模版（分批第 210 批，2026-11；使用者定）
+
+使用者点「开始提炼」之后读了第一句 prompt 就停了，两条意见：
+
+> 「1. 框架、身份、任务，直接使用"聊天"的模版，不应该是单独的
+>  2. 怎么还在用 writing-skill，不是应该用安装的 distilly 吗」
+
+**先复盘他是怎么走到这一步的**（逐段追了那段 2783 字的 prompt，共五个来源）：
+开场 + 【这次的材料在哪】215 字（`buildDraftPrompt`）、【写作规范】**1740 字**（平台内置
+`apps/daemon/assets/builtin-skills/writing-skills/SKILL.md` 整份内联，连它自己的 frontmatter
+一起）、【产出契约】276 字、条件段 + 收尾 484 字。**62% 是那份规范。**
+
+**根因不是话术，是注入那条线断了**：第 207 批把技能集合改成"读起草者的挂载"，`draftSkills`
+解析出来了——却只用来**过门禁**和写 `material/injected-skills.json`，`executor.submit` 那一行
+仍然是 `skills: []`（注释还写着"第 ③ 条：不注入技能（规范在 prompt 里）"）。于是：
+
+- 起草者手里根本没有 distilly；
+- 平台只好在 prompt 里内联一份 `writing-skills` 当写法权威；
+- **同一件事两个权威**（一份在技能里没送到、一份在 prompt 里补上），而且两份会各自漂。
+
+「按意见改一版」更彻底：`skills: []` 且没有任何门禁——改一版的那一轮既没有技能、也没有内联规范。
+
+**改法（三条，都是一处判据）**
+
+1. **注入真的到**：起草 / 回答 / 改一版三条路由都注入 `injectedSkillsOf()` 解析出的那份；
+   解析不到 ⇒ 400 `draft_skill_required`（三条路由同一个判据，与"没装 distilly 不许沉淀"一致）。
+2. **平台不再自带写法权威**：`apps/daemon/assets/builtin-skills/`（`writing-skills` 的
+   `SKILL.md` + `references/{structure,files,checklist}.md`）与 `apps/daemon/src/builtin-skills.ts`
+   **整个删掉**——它唯一的用途就是被内联进 prompt，删了 `builtin_skill_missing` 那条 500 也一起消失。
+   那条"内联是为了不依赖 runtime 的技能通道"的理由**已经不成立**：起草的前提就是"装了一条
+   distilly、它挂在起草者身上"，注入通道与任何技能共用同一条。
+3. **prompt 只留平台硬事实**：`buildDraftPrompt` 去掉了 `writingSpec` 参数，改成 `skillSlugs`
+   （点名**实际注入的那几份**，不写死 slug），正文从 **2785 字 → 685 字**：
+   素材在哪（索引 + 轨迹）、`skill/SKILL.md` 与 frontmatter 的 name/description、支持文件放哪、
+   `REFUSED.md` / `QUESTIONS.md` / `answers.md` 这四个**平台协议文件名**（平台靠它们认出
+   "它拒绝了"与"它在等回答"，不是写法约定）。结构、命名、自检一个字都不写。
+
+**模版那一条**：框架/身份/任务本来就是聊天那一份（第 178 批就改了），但判据写在学习器里
+（`usesChatTemplates = conversation || skill-draft`）——读起来像"沉淀还有一份自己的模版，只是
+借聊天的来用"。现在收敛成 `firstSentenceKindFor({kind, subject})`（在 `first-sentence.ts`，
+与 `DEFAULT_TEMPLATES` 同一个文件）：**只有三份模版**，对话与沉淀走同一个分支，执行器只问它。
+日志里那句也从"这一轮用**聊天那三块模版**投递"改成"与对话**同一份**三块模版，没有沉淀专用的一份"。
+
+**判据**
+
+- `crystallize.test.ts`：prompt 里点名 `distilly`、**不再出现** `writing-skills` / `When to Use`、
+  没有【写作规范】、有 `QUESTIONS.md`/`REFUSED.md`、**总长 < 1200**；没解析到技能时那句退化成
+  "你挂着的那份技能"（不编一个 slug）。
+- `first-sentence.test.ts`：`firstSentenceKindFor` 三条（沉淀与对话同一份 / 任务与审核各走自己那份 /
+  判据只看种类与 subject 类型）。
+- `crystallize-e2e.test.ts` 新 §10.18 三条：起草 run 的 `skillRefs` **就是** `['distilly']`
+  （修复前是空的）、**改一版也注入**、`① 框架` 是聊天那份（没有 `# 任务` 与 `run：`）、
+  `③ 任务` 点名 `distilly` 且不含写作规范。
+- 删掉的：`crystallize-artifacts.test.ts` 的「内置写作技能」整组（钉的是一个已不存在的资产）、
+  `agent-conduct.test.ts` 与 `server.ts` 里对 `builtin-skills.ts` 的引用。
+
+⚠️ **新的边界（写在这里，别让它变成"没人知道为什么写不好"）**：写法现在**完全**依赖那份技能
+真的送达。runtime 如果没有技能发现机制（描述表 `skills: {kind:'none'}`），这一轮就没有写法权威
+——执行器会在日志里说清"这个 runtime 没有技能发现机制"，而不再是"prompt 里有一份规范"。
+这是使用者要的取舍：**写法归他装的那份技能**，不归平台。

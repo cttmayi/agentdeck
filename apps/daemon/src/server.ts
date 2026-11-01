@@ -105,7 +105,6 @@ import {
   probeGit,
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
-import { loadBuiltinSkill, WRITING_SKILLS } from './builtin-skills.ts'
 import {
   builtinDefaultsOf,
   builtinKindOf,
@@ -3404,16 +3403,22 @@ async function injectedSkillsOf(
     }
 
     /**
-     * 「按意见改一版」是同一条链的另一半 ⇒ 规范也必须一起给（否则改出来的那一版
-     * 就少了规范，而"改一版"恰恰是在前一轮结构不对时才会用到的路）。
+     * 「按意见改一版」是同一条链的另一半 ⇒ 它也要**注入起草者挂着的那份技能**
+     * （分批第 210 批）。
+     *
+     * 这里从前写的是 `skills: []` + 「写作规范在 prompt 里」。规范改成"归使用者装的
+     * 那份技能"之后，那条写法就变成了**什么都不给**：改一版的那一轮既没有技能、
+     * prompt 里也没有规范 ⇒ 它只能凭记忆重写，而"改一版"恰恰是上一版结构不对时才会
+     * 走的路。所以门禁与注入都跟第一版对齐：挂载解析不到 ⇒ 400，与开始提炼同一个判据。
      */
-    const reviseSpec = await loadBuiltinSkill(WRITING_SKILLS)
-    if (reviseSpec === null) {
+    const reviseSkills = await injectedSkillsOf(workspaceId, taskDir)
+    if (reviseSkills.length === 0) {
       return {
-        status: 500,
+        status: 400,
         body: {
-          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
+          error:
+            '起草需要「沉淀用技能」（distilly）——先在「沉淀设置」里一键安装（沉淀页右上角），再改这一版。',
+          code: 'draft_skill_required',
         },
       }
     }
@@ -3427,8 +3432,8 @@ async function injectedSkillsOf(
       materialDir: 'material',
       outputDir: 'skill',
       target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+      skillSlugs: reviseSkills.map((s) => s.slug),
       revised: true,
-      writingSpec: reviseSpec.body,
     })
 
     const outcome = await executor.submit({
@@ -3439,8 +3444,7 @@ async function injectedSkillsOf(
         name: reviseDrafterAgent.name,
         instructions: reviseDrafterAgent.instructions,
       },
-      // 第 ③ 条：不注入技能（规范在 prompt 里）
-      skills: [],
+      skills: reviseSkills,
       // 空白起的新版同样不带 `sourceRunId`（字段缺席 = 没有来源，与第一版一致）
       subject: {
         type: 'skill-draft',
@@ -3585,13 +3589,16 @@ async function injectedSkillsOf(
         : sourceRun.subject.type === 'conversation'
           ? 'conversation'
           : 'task'
-    const writingSpec = await loadBuiltinSkill(WRITING_SKILLS)
-    if (writingSpec === null) {
+    // 技能要**先**解析（prompt 里要点名实际注入的那几份，分批第 210 批）；
+    // 解析不到就不该起这一轮——没有技能的那一轮只会凭印象写，而它看起来像正常产出。
+    const skills = await injectedSkillsOf(workspaceId, taskDir)
+    if (skills.length === 0) {
       return {
-        status: 500,
+        status: 400,
         body: {
-          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
+          error:
+            '起草需要「沉淀用技能」（distilly）——先在「沉淀设置」里一键安装（沉淀页右上角），再回答这一轮。',
+          code: 'draft_skill_required',
         },
       }
     }
@@ -3600,11 +3607,10 @@ async function injectedSkillsOf(
       materialDir: 'material',
       outputDir: 'skill',
       target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
+      skillSlugs: skills.map((s) => s.slug),
       revised: true,
-      writingSpec: writingSpec.body,
       answering: true,
     })
-    const skills = await injectedSkillsOf(workspaceId, taskDir)
     const outcome = await executor.submit({
       runId: newRunId,
       kind: 'execute',
@@ -6311,38 +6317,6 @@ async function injectedSkillsOf(
         return
       }
 
-      // 写作规范正文要在 prompt 里（第 ③ 条）⇒ 先读它，再组装 prompt。
-      // 「读不到」仍然是 500（安装不完整），但**不再**是"技能注入失败"——
-      // 现在它的用途是"进 prompt 的那段文字"，所以文案也照实说。
-      const writingSpec = await loadBuiltinSkill(WRITING_SKILLS)
-      if (writingSpec === null) {
-        sendJson(res, 500, {
-          error: '平台内置的写作规范（writing-skills）读不到（安装不完整？）',
-          code: 'builtin_skill_missing',
-        })
-        return
-      }
-      /**
-       * ★ 分批第 34 批：目标是"优化智能体指令"时换成另一份契约（`agent/instructions.md`）。
-       *
-       * 契约分叉只有这一处：素材、执行管道、返工循环、审核收口全都同一个。
-       * 这也是为什么没有为新功能另写一条链——那条链（10 轮预算、停止循环、闸门标注、
-       * 整链入库标记）刚修过三批，第二套必然走形。
-       *
-       * `hasEvidence`：这次有没有"失败证据"（审核判决 / 使用者反馈）。没有证据时
-       * 契约要求**只收敛措辞**（审核口径同一条，见第 35 批）。
-       */
-      const hasDraftEvidence = collected.pieces.some(
-        (p) => p.relPath === 'verdict.md' || p.relPath === 'feedback.md',
-      )
-      const draftPrompt = buildDraftPrompt({
-              scope: targets === null ? 'blank' : targets.scope,
-              materialDir: 'material',
-              outputDir: 'skill',
-              target: updateSnapshot === null ? 'new' : 'update',
-              writingSpec: writingSpec.body,
-            })
-
       // ── 起起草 run（复用执行管道：第一句话投递、日志、收口全现成）──
       // ★ 起草者 = **平台内置的那条**（2026-10 定稿 §9），不再借来源 run 的执行者：
       //   从前借它的后果是"起草质量取决于你从哪条 run 发起沉淀"——同一个人同一件事，
@@ -6404,6 +6378,17 @@ async function injectedSkillsOf(
         return
       }
       /**
+       * 任务块（③）要在**技能解析之后**才组装：里面点名"照哪份技能写"（分批第 210 批），
+       * 点的是这一轮真的会注入到工作目录里的那几份，不是写死的 slug。
+       */
+      const draftPrompt = buildDraftPrompt({
+        scope: targets === null ? 'blank' : targets.scope,
+        materialDir: 'material',
+        outputDir: 'skill',
+        target: updateSnapshot === null ? 'new' : 'update',
+        skillSlugs: draftSkills.map((sk) => sk.slug),
+      })
+      /**
        * 记录（**不是输入**）：这一版照着哪条技能写的。下一轮仍然按**挂载**取，
        * 这份文件只用于追溯（"这条草稿当时用的是哪条技能"）。
        */
@@ -6432,16 +6417,20 @@ async function injectedSkillsOf(
           name: drafterAgent.name,
           instructions: drafterAgent.instructions,
         },
-        // ★ 注入**唯一**一个技能：平台内置的「写 skill 的 skill」（2026-10-19 四轮）。
-        //   改之前这里是 `skills: []`，注释写着"注入会干扰提炼"——事实证明干扰的不是
-        //   "有 skill"，而是"注入了业务 skill"：写作规范恰恰是起草者最需要的。
-        //   它随代码走、不进使用者的技能列表，也不能被删除（删了没人知道为什么写不好）。
-        // ★ 分批第 172 批（使用者定：走"注入技能"这条路，但**技能不预置在仓库里**，由使用者自己装、
-        //   一键安装）：选中的技能在这里注入，并记进 `material/injected-skills.json` ——
-        //   后续的「按意见改一版」「回答提问」都读它，保证同一条沉淀每一轮用同一套技能。
-        //   （写作规范 `writing-skills` 仍然进 prompt：它是**平台**的写法权威，不是使用者的技能。）
-        //   注入只对"有技能通道的 runtime"生效，而这份规范是每次起草都必须被读到的。
-        skills: [],
+        /**
+         * ★ 分批第 210 批（使用者定："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
+         * 这一轮注入的 = **起草者挂着的那几份技能**，一份不多一份不少。
+         *
+         * ⚠️ 这里从前是 `skills: []`：技能集合已经改成"读起草者的挂载"（第 207 批），
+         * 解析出来的 `draftSkills` 却只用来**过门禁**和写 `injected-skills.json`，**没送进 run**
+         * ——于是起草者根本拿不到 distilly，平台只好在 prompt 里内联一份 `writing-skills`
+         * 充当写法权威。两处写法权威就是这么来的：一处（技能）没送到，另一处（prompt）补上。
+         * 现在只剩一条通道：挂什么注入什么，prompt 只点名。
+         *
+         * 注入只对"有技能通道的 runtime"生效（描述表的 `skills` 能力），执行器会在日志里
+         * 说清"这个 runtime 没有技能发现机制"——那份日志就是"这一轮没拿到写法"的答案。
+         */
+        skills: draftSkills,
         // ★ 唯一 subject：`skill-draft` 不在闭环里（报告摄取不认它），
         //   也不会被"同 subject 并发"拦（每起草一次一个新 id）。
         //   `sourceRunId` = 它从哪条 run 发起（对话 = 那一轮 run，任务 =

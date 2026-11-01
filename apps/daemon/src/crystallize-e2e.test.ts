@@ -1778,6 +1778,92 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
 })
 
 /**
+ * §10.18 起草 = 跟一个装着 distilly 的智能体说话（分批第 210 批）。
+ *
+ * 使用者读完第一句话后的两点：
+ *   ① 「框架、身份、任务，直接使用"聊天"的模版，不应该是单独的」
+ *   ② 「怎么还在用 writing-skill，不是应该用安装的 distilly 吗」
+ *
+ * 量到的根因**不是话术**：技能集合从第 207 批起就已经按起草者的挂载解析了，但
+ * `executor.submit` 那一行仍然是 `skills: []` ⇒ 起草者手里根本没有 distilly，
+ * 平台只好把内置的 `writing-skills` 内联进 prompt 当写法权威（2785 字里 1740 是它）。
+ * 两条"写法权威"就是这么来的。这一节钉住修好之后的三件事：注入真的到了、改一版也到、
+ * 三块就是聊天那一份。
+ */
+describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 210 批）', () => {
+  /** 读一条 run 记录（`skillRefs` 是"这次用了哪几条技能"的权威，FR-REVIEW-06）。 */
+  const runOf = async (
+    runId: string,
+  ): Promise<{ status?: string; skillRefs?: Array<{ slug: string }> }> =>
+    await getJsonFile(`/api/runs/${runId}`)
+
+  test('★★★ 起草 run 真的注入了起草者挂着的 distilly（`skillRefs` 里有它）', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的流程（注入实证）'),
+      target: { kind: 'new', purpose: '注入实证' },
+    })
+    const run = await runOf(draftRunId)
+    const slugs = (run.skillRefs ?? []).map((s) => s.slug)
+    assert.deepEqual(
+      slugs,
+      ['distilly'],
+      '★ 这一轮拿到的技能就是起草者挂的那一条——在此之前这里是空的（`skills: []`），' +
+        '于是它只能照 prompt 里内联的规范写',
+    )
+  })
+
+  test('★★★ 「按意见改一版」也注入同一份（这条路以前是 `skills: []`）', async () => {
+    const v1 = await draftAndWait({
+      runId: await runReviewed('审过的流程（改版注入）'),
+      target: { kind: 'new', purpose: '改版注入' },
+    })
+    const res = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '把 Procedure 补全' }),
+    })
+    assert.equal(res.status, 202, await res.clone().text())
+    const v2 = ((await res.json()) as { draftRunId: string }).draftRunId
+    await waitRunStatus(v2, ['completed', 'failed', 'cancelled'])
+    const run = await runOf(v2)
+    assert.deepEqual(
+      (run.skillRefs ?? []).map((s) => s.slug),
+      ['distilly'],
+      '改一版同样是"按那份技能改"——否则它只能凭记忆重写',
+    )
+  })
+
+  test('★★ 三块就是聊天那一份：① 没有任务头，③ 点名 distilly 且不再内联写作规范', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的流程（三块）'),
+      target: { kind: 'new', purpose: '三块' },
+    })
+    const { messages } = await getJsonFile<{
+      messages: Array<{ type: string; content: string | null }>
+    }>(`/api/runs/${draftRunId}/messages`)
+    const notes = messages.map((m) => m.content ?? '')
+    const lead = notes.find((c) => c.includes('这一轮是沉淀'))
+    assert.ok(lead !== undefined, '沉淀那条引导语要在，且说的是"跟智能体说话"')
+    const frameNote = notes.find((c) => c.startsWith('===== ① 框架 ====='))
+    assert.ok(frameNote !== undefined, '① 框架要分开记一条')
+    assert.match(frameNote, /聊天窗口/, '★ ① 就是聊天那一份（不是任务那份）')
+    assert.doesNotMatch(
+      frameNote,
+      /^# 任务$|run：/m,
+      '★ 任务那份的 run/对象头不许灌进沉淀（那会把它拧回"交报告"的姿势）',
+    )
+    const taskNote = notes.find((c) => c.startsWith('===== ③ 任务 ====='))
+    assert.ok(taskNote !== undefined, '③ 任务要分开记一条')
+    assert.match(taskNote, /`distilly`/, '★ ③ 点名这一轮真的注入的那份技能')
+    assert.doesNotMatch(
+      taskNote,
+      /【写作规范】|When to Use/,
+      '★ 平台不再自带第二份写法权威（那一段连同标题一起删了，分批第 210 批）',
+    )
+  })
+})
+
+/**
  * §10.16 起草者可以提问、人回答（分批第 172 批，§12.62）。
  *
  * 使用者的原话：「沉淀者就是一个智能体…如果这个智能体有疑问，就可以发问，类似聊天窗口那样」。
