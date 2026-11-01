@@ -48,6 +48,17 @@
    * 与其让父组件再问一次接口，不如把它报上去。
    */
   export let count = 0
+  /**
+   * 某个文件行右侧的**额外动作**（分批第 198 批加的）。
+   *
+   * 为什么需要：沉淀页的栏脚把这一棵树用在「材料」上，而材料里有一样东西是能删的
+   * ——使用者给的那几份（`material/appended/`）。删除钮必须长在那**一行**上，
+   * 否则又要在旁边摆第二个清单（那正是它要替换掉的东西）。
+   * 聊天/任务两处不传 ⇒ 行为与以前一模一样。
+   */
+  export let rowAction: import('svelte').Snippet<
+    [{ entry: WorkDirFile }]
+  > | null = null
 
   let root: WorkDirFile[] = []
   /** 已经取回来的子层：目录路径 → 它的直接子项。 */
@@ -196,6 +207,7 @@
             onclick={() => (viewing = entry)}
           >{entry.name}</button>
           <span class="faint small">{humanSize(entry.sizeBytes)}</span>
+          {#if rowAction}{@render rowAction({ entry })}{/if}
         {/if}
       </li>
     {/each}

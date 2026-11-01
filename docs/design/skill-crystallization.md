@@ -5758,3 +5758,40 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 `editorAndDiffSameContainer`（`textarea` 的**第一个**现在是栏脚输入条 ⇒ 点名编辑器那个框）。
 
 验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。
+
+### 12.68 栏脚的「材料」换成与聊天页**同一棵树**（分批第 198 批，2026-11；使用者定）
+
+使用者：「中栏 发送框上面不是呈现的类似聊天页工作目录，而是素材罗列」。
+
+197 批把材料搬进了栏脚、也复用了 `FootFiles`（折叠头），但**内容**仍是我自己画的一列
+「路径 + 大小 + 删除钮」——聊天页那一栏是 `WorkDirTree`（按层展开、点文件就地打开查看器、
+一次只列一层）。同一个位置、同一种诉求，两种呈现，读起来就是"素材罗列"。
+
+**改法：材料目录也走那棵树。**
+
+- daemon 新增两条**路径式**路由（`WorkDirTree` 拼的是 `${base}/files`，把 run id 放进 base
+  才不用改组件）：
+  `GET /api/crystallize/material/<draftRunId>/files?dir=` 与 `…/file?path=`；
+  两者都复用任务/聊天那两条已有的 `listWorkDir` / `sendWorkDirListing` / `sendWorkFile`
+  （响应形状、错误口径、路径守卫、媒体 Range 全部同一份）。
+  ⚠️ 目录是 `material/`，不是整个任务目录：`skill/` 是"产出了什么"，它在右栏的编辑器里
+  ——两处各画一份就会有两个"这一版写成了什么"。
+- `WorkDirTree` 加一个**可选** `rowAction` 片段：材料里唯一能删的是使用者给的那几份
+  （`appended/`），删除钮就长在**那一行**上（聊天/任务两处不传 ⇒ 行为一字不变）。
+  这是"不新增第二份清单"的做法。
+- `CrystallizeMaterials` 里那列手写行删掉，换成 `<WorkDirTree base=… bind:count>`
+  + `{#snippet rowAction}`；增删之后 `reloadKey` 变一次让树重列。
+
+折叠头上那个「N 项」现在是**树的顶层条数**（`bind:count`，与树同源）；括号里那段
+（`轨迹 1 · 使用者给 1`）仍来自材料接口——那是"清单自己算不出来"的信息。
+
+**判据跟着换宿主**（探针 **563** 全绿）：
+- `crystal.materialLineMatchesPane`：折叠头的「N 项」== 树的**顶层行数**（`.wd > li`）。
+  这一条当场抓到过一次真漂移（摘要 4 / 清单 3）——现在两边都从树来；
+- `crystal.deleteMaterial`：`appended/` 是**一层目录**，得先展开才看得到删除钮；判据改成
+  "展开后才有删除钮 + 两步确认 + 服务端 `appended/` 归零 + 回执说清剩几份"；
+- `crystal.dropMaterial`：拖进来的那份落在 `appended/` 里 ⇒ **顶层行数不会变**（那一行本来
+  就在）⇒ 判据改成"服务端 `appended/` 多了一份"（那才是这件事的实质）；
+- `crystal.artifactMaterialCount` 等三条从右栏改到栏脚的树（`.wd > li`）。
+
+验证：`check` **2189 全绿**、`probe:layout` **563 全绿**、`typecheck` 0 错。

@@ -22,6 +22,9 @@
    * 只改了两件事：**宿主**（右栏 → 栏脚）与**形状**（抽屉式分节 → 折叠清单，与聊天页同款）。
    */
   import { FootFiles } from '@agentdeck/ui/components'
+  // ★ 分批第 198 批：材料改为**与聊天页同一棵树**（`WorkDirTree`：按层展开、点开看文件）。
+  //   使用者："中栏 发送框上面不是呈现的类似聊天页工作目录，而是素材罗列"。
+  import WorkDirTree from './WorkDirTree.svelte'
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
 
@@ -62,6 +65,10 @@
   } = $props()
 
   let material = $state<Material | null>(null)
+  /** 树的顶层条数（`bind:count`）——折叠头上那个「N 项」以它为准（与树同源）。 */
+  let topCount = $state(0)
+  /** 增删之后让树重取（`reloadKey` 变了就重列）。 */
+  let reloadTick = $state(0)
   let loading = $state(true)
   let open = $state(true)
   /** 正在追加时不为空（防止一边拖一批、一边按两次按钮）。 */
@@ -167,6 +174,7 @@
         ? `${added > 0 ? '；' : ''}${$t('crystallize.materialAddSkipped', { items: skipped.join('、') })}`
         : '')
     if (added > 0) {
+      reloadTick += 1
       await reloadMaterial(draftRunId)
       onchanged()
     }
@@ -202,6 +210,7 @@
           : '') +
         // 仓库里带 SKILL.md：**必须**说一句——"更新那个技能"与"只当素材"是两条完全不同的路
         (res.hasSkillMd ? ` ⚠️ ${$t('crystallize.materialRepoHasSkill')}` : '')
+      reloadTick += 1
       await reloadMaterial(draftRunId)
       onchanged()
     } catch (err) {
@@ -232,6 +241,7 @@
         path: res.relPath,
         n: String(res.remaining),
       })
+      reloadTick += 1
       await reloadMaterial(draftRunId)
       onchanged()
     } catch (err) {
@@ -244,11 +254,11 @@
 
 <FootFiles
   title={$t('crystallize.materialTitle')}
-  count={loading && items.length === 0
+  count={topCount === 0
     ? ''
     : statsPart === ''
-      ? $t('crystallize.materialCountOnly', { n: String(items.length) })
-      : $t('crystallize.materialCountWith', { n: String(items.length), parts: statsPart })}
+      ? $t('crystallize.materialCountOnly', { n: String(topCount) })
+      : $t('crystallize.materialCountWith', { n: String(topCount), parts: statsPart })}
   bind:open
 >
   {#snippet actions()}
@@ -262,39 +272,38 @@
     {/if}
   {/snippet}
 
-  {#if loading}
-    <p class="faint small">{$t('crystallize.artifactLoading')}</p>
-  {:else if items.length === 0}
-    <p class="faint small">{$t('crystallize.artifactMaterialEmpty')}</p>
-  {:else}
-    <ul class="mat-list" data-mat-list>
-      {#each items as item (item.relPath)}
-        <li>
-          <span class="mat-name">{item.relPath}</span>
-          <span class="faint small">{Math.round(item.bytes / 100) / 10} KB</span>
-          {#if item.relPath.startsWith('appended/')}
-            {#if pendingDelete === item.relPath}
-              <button
-                type="button"
-                class="ghost small mat-del confirm"
-                disabled={deleting !== ''}
-                onclick={() => void removeMaterial(item.relPath)}
-              >{$t('crystallize.materialDeleteConfirm')}</button>
-            {:else}
-              <button
-                type="button"
-                class="ghost small mat-del"
-                disabled={deleting !== ''}
-                onclick={() => (pendingDelete = item.relPath)}
-              >{$t('crystallize.materialDelete')}</button>
-            {/if}
-          {/if}
-        </li>
-      {/each}
-    </ul>
-    {#if deleteNote !== ''}
-      <p class="faint small" data-mat-note>{deleteNote}</p>
-    {/if}
+  <!--
+    ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）。
+    它自带"一次列一层 / 点文件就地打开查看器 / 取不到时说明原因"，所以这里不再自己画行。
+    唯一多出来的是**删除钮**（只给 `appended/` 那几份）——通过 `rowAction` 长在那一行上。
+  -->
+  <WorkDirTree
+    base={`/api/crystallize/material/${encodeURIComponent(draftRunId)}`}
+    reloadKey={`${draftRunId}:${rev}:${reloadTick}`}
+    bind:count={topCount}
+  >
+    {#snippet rowAction({ entry })}
+      {#if entry.path.startsWith('appended/')}
+        {#if pendingDelete === entry.path}
+          <button
+            type="button"
+            class="ghost small mat-del confirm"
+            disabled={deleting !== ''}
+            onclick={() => void removeMaterial(entry.path)}
+          >{$t('crystallize.materialDeleteConfirm')}</button>
+        {:else}
+          <button
+            type="button"
+            class="ghost small mat-del"
+            disabled={deleting !== ''}
+            onclick={() => (pendingDelete = entry.path)}
+          >{$t('crystallize.materialDelete')}</button>
+        {/if}
+      {/if}
+    {/snippet}
+  </WorkDirTree>
+  {#if deleteNote !== ''}
+    <p class="faint small" data-mat-note>{deleteNote}</p>
   {/if}
 
   {#if editable}
@@ -357,25 +366,9 @@
 </FootFiles>
 
 <style>
-  .mat-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .mat-list li {
-    display: flex;
-    align-items: baseline;
-    gap: var(--sp-2);
-    padding: 0.125rem 0;
-  }
-  .mat-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-  }
+
+
+
   .mat-del {
     opacity: 0.6;
   }

@@ -5724,6 +5724,39 @@ async function injectedSkillsOf(
       })
       return
     }
+    /**
+     * ── 材料的**目录树**与单文件（分批第 198 批）──────────────────────────────
+     *
+     * 使用者："中栏 发送框上面不是呈现的类似聊天页工作目录，而是素材罗列"——他要比方那一栏
+     * （`WorkDirTree`：按层展开、点开看文件），而不是一条扁平的清单。所以材料目录也走
+     * **同一个** `listWorkDir` / `sendWorkDirListing` / `sendWorkFile`（响应形状与错误口径
+     * 与任务/聊天那两条完全一致），界面那边就能原样复用同一个组件。
+     *
+     * 路径式（`/api/crystallize/material/<draftRunId>/files`）而不是查询式：`WorkDirTree`
+     * 拼的是 `${base}/files`，把 draftRunId 放进 base 才不用改组件。
+     *
+     * ⚠️ 目录是 `material/`，不是整个任务目录：`skill/` 是"产出了什么"，它在右栏的编辑器里
+     *    （两处各画一份，就会有两个"这一版写成了什么"）。
+     */
+    const materialFilesMatch = /^\/api\/crystallize\/material\/([^/]+)\/(files|file)$/.exec(path)
+    if (req.method === 'GET' && materialFilesMatch) {
+      const draftRunId = decodeURIComponent(materialFilesMatch[1]!)
+      const sub = materialFilesMatch[2]
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const dir = join(await draftTaskDir(draftRunId), 'material')
+      // 材料里没有"平台注入物"这个概念（注入的是技能，落在工作目录的 `.claude/` 等下面）
+      const managed: ManagedPaths = { dirs: [], files: [] }
+      if (sub === 'files') {
+        await sendWorkDirListing(res, dir, url.searchParams.get('dir') ?? '', managed)
+        return
+      }
+      await sendWorkFile(res, req, dir, url.searchParams.get('path') ?? '')
+      return
+    }
     if (req.method === 'GET' && path === '/api/crystallize/sources') {
       sendJson(res, 200, { items: await listCrystallizeSources(store, workspaceId) })
       return

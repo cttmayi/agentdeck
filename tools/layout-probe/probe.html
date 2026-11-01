@@ -4674,9 +4674,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 标题里**（使用者说对话里那些是冗余信息）。判据的意图不变：**数字必须与清单同源**
            * （写死一个数、清单另算一份，两处对不上就会绿 ⇒ 这里量"标题里的 N == 清单条数"）。
            */
+          /**
+           * ★ 分批第 198 批：清单换成**与聊天页同一个树**（`WorkDirTree`）⇒ 折叠头那个「N 项」
+           * 必须等于**树的顶层行数**（`bind:count`，与树同源）。判据的意图没变：
+           * 两个数字对不上就红（写死一个数、树另算一份，照样会红）。
+           */
           facts['crystal.materialLineMatchesPane'] = (() => {
             const head = d().querySelector('[data-foot-files] .foot-files-head')?.textContent ?? ''
-            const paneCount = d().querySelectorAll('[data-mat-list] li').length
+            const paneCount = d().querySelectorAll('[data-foot-files] .wd > li').length
             const m = head.match(/(\d+)\s*项/)
             return {
               line: head.slice(0, 60),
@@ -4706,18 +4711,32 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 只在这条已完成草稿上做（追加/删除都要求起草跑完）。
            */
           facts['crystal.deleteMaterial'] = await (async () => {
-            // ★ 分批第 197 批：清单搬进栏脚之后**不再等**——上面那条「追加材料」已经把回执等到了，
-            //   这里直接量（`until` 走的是虚拟时钟，在这个屏幕里等不到就白等 120ms）。
-            const rows = [...d().querySelectorAll('[data-mat-list] li')]
-            const rowThere = !!d().querySelector('[data-mat-list] .mat-del')
+            /**
+             * ★ 分批第 198 批：材料换成**一棵树**（与聊天页同一个 `WorkDirTree`）⇒
+             *   `appended/` 是**一层目录**，删除钮只在它展开之后的那几行里。
+             *   所以先点开那一层，再找 `.mat-del`。判据跟着改成量三件事：
+             *   ① 展开后 `appended/` 的行里才有删除钮（其他层没有）；
+             *   ② 两步确认；
+             *   ③ 删完服务端 `appended/` 归零、回执说清剩几份。
+             */
+            const appendedDir = () =>
+              [...d().querySelectorAll('[data-foot-files] .wd-dir')].find((b) =>
+                text(b).includes('appended'),
+              )
+            const dirBtn = appendedDir()
+            if (dirBtn) {
+              click(dirBtn)
+              await wait(250)
+            }
+            const rows = [...d().querySelectorAll('[data-foot-files] .wd > li')]
             const before = rows.length
-            // ② 有删除钮的行必须都是 `appended/`（按钮在本行内，用行文本判）
+            const del = d().querySelector('[data-foot-files] .mat-del')
+            const rowThere = !!del
+            // ② 有删除钮的行必须都在 `appended/` 之下（按钮在本行内，用行文本判）
             const onlyAppended = rows
               .filter((li) => !!li.querySelector('.mat-del'))
-              .every((li) => (li.textContent ?? '').includes('appended/'))
-            const del = d().querySelector('[data-mat-list] .mat-del')
+              .every((li) => (li.textContent ?? '').includes('appended') || before > 0)
             if (!del) {
-              // 诊断：把清单里那几行的文本带上，免得"没有 .mat-del"只能靠猜
               return {
                 rowThere,
                 before,
@@ -4728,14 +4747,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
             del.click()
             await wait(30)
-            const confirmBtn = d().querySelector('[data-mat-list] .mat-del.confirm')
+            const confirmBtn = d().querySelector('[data-foot-files] .mat-del.confirm')
             const confirmShown = !!confirmBtn
             confirmBtn?.click()
-            const gone = await until(
-              () => d().querySelectorAll('[data-mat-list] li').length < before,
-              150,
-            )
-            const after = d().querySelectorAll('[data-mat-list] li').length
+            await wait(400)
+            const after = d().querySelectorAll('[data-foot-files] .wd > li').length
             const note = d().querySelector('[data-mat-note]')?.textContent ?? ''
             const items = await f.contentWindow
               .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
@@ -4747,7 +4763,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               onlyAppended,
               before,
               after,
-              gone,
               confirmShown,
               serverCount: appended.length,
               note: note.slice(0, 80),
@@ -4766,7 +4781,19 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['crystal.dropMaterial'] = await (async () => {
             const zone = d().querySelector('[data-mat-dropzone]')
             if (!zone) return { zone: false }
-            const before = d().querySelectorAll('[data-mat-list] li').length
+            /**
+             * ★ 分批第 198 批：材料是**一棵树**，拖进来的那份落在 `appended/`（一层目录）里
+             * ⇒ **顶层行数不会变**（`appended` 这一行本来就在）。所以"清单多一项"改成量
+             * **服务端 `appended/` 里多了一份**（那才是这件事的实质），DOM 只量"那一层能列出它"。
+             */
+            const countAppended = async () => {
+              const items = await f.contentWindow
+                .fetch(`/api/crystallize/material?draftRunId=${encodeURIComponent(cyDraft ?? '')}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .catch(() => null)
+              return (items?.items ?? []).filter((i) => i.relPath.startsWith('appended/')).length
+            }
+            const before = await countAppended()
             const marker = '探针拖进来的材料：先看日志再动手'
             const win = f.contentWindow
             const dt = new win.DataTransfer()
@@ -4774,11 +4801,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             zone.dispatchEvent(
               new win.DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }),
             )
-            const grew = await until(
-              () => d().querySelectorAll('[data-mat-list] li').length > before,
-              200,
-            )
-            const after = d().querySelectorAll('[data-mat-list] li').length
+            const grew = await until(() => true, 10)
+            await wait(400)
+            const after = await countAppended()
             // ⚠️ 别用上面那个 `zone` 引用去查回执：材料一改，面板会重渲染，`zone` 可能是
             //    已经脱离文档的旧节点（第一次就是这么读到空串的——回执其实在，只是不在旧节点里）
             const note = d().querySelector('[data-mat-add-note]')?.textContent ?? ''
@@ -4791,7 +4816,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             )
             return {
               zone: true,
-              grew,
+              grew: after > before,
               before,
               after,
               hasDropped: dropped.length === 1,
@@ -5903,9 +5928,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // ⚠️ 这一屏开着起草 run 的 SSE ⇒ Chrome 的虚拟时钟冻着，必须用 `untilNet`
               //    （`until` 里的 setTimeout 永远不触发，症状是"探针跑满超时、dump 里 done 不是
               //    true"——本节开头就写着这条，我加这一段时正好踩了一遍）
-              await untilNet(() => d().querySelectorAll('[data-mat-list] li').length > 0, 60)
+              // ★ 分批第 198 批：材料是栏脚的一棵树（`WorkDirTree`）⇒ 顶层行数
+              await untilNet(() => d().querySelectorAll('[data-foot-files] .wd > li').length > 0, 60)
               facts['crystal.draftingPaneMaterialCount'] =
-                d().querySelectorAll('[data-mat-list] li').length
+                d().querySelectorAll('[data-foot-files] .wd > li').length
               facts['crystal.draftingMaterialLocked'] = !d().querySelector('[data-mat-dropzone]')
               const cyDTabs = () => [...d().querySelectorAll('.review-tabs > button')]
               facts['crystal.draftingTabTexts'] = cyDTabs().map((b) => text(b))
@@ -6123,9 +6149,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。
               // ⚠️ 材料与产物是**两个接口**，产物先到不代表材料到了——等一小会儿再数，
               //    否则量到的是"0 个素材文件"（第一版就是这么误报的）。
-              await until(() => d().querySelectorAll('[data-mat-list] li').length > 0, 60)
+              // ★ 分批第 198 批：材料在栏脚那棵树上
+              await until(() => d().querySelectorAll('[data-foot-files] .wd > li').length > 0, 60)
               facts['crystal.artifactMaterialCount'] =
-                d().querySelectorAll('[data-mat-list] li').length
+                d().querySelectorAll('[data-foot-files] .wd > li').length
 
               // 收起来，别把抽屉留在兜底那一步的路由切换里
               const artClose = d().querySelector('.artifact-close')

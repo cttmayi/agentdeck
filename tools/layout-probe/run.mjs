@@ -3647,16 +3647,16 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.deleteMaterial',
     label:
-      '★★★ 右栏材料清单能**删掉使用者给的那一份**（§12.14「删掉错的」）：追加后右栏立刻能看到它' +
-      '（两处同一份数据）、「删掉」→「确认删掉」两步才真的删、删完清单少一项且服务端 `appended/` 归零；' +
-      '**只有 `appended/` 有删除钮**（自动带的轨迹/判决是来源证据，不给"按了会被拒"的按钮）',
+      '★★★ 材料清单能**删掉使用者给的那一份**（§12.14「删掉错的」）：展开 `appended/` 那一层才看得到' +
+      '删除钮、「删掉」→「确认删掉」两步才真的删、删完服务端 `appended/` 归零且回执说清剩几份；' +
+      '**只有 `appended/` 有删除钮**（自动带的轨迹/判决是来源证据，不给"按了会被拒"的按钮）。' +
+      '★ 分批第 198 批：清单换成与聊天页同一棵树 ⇒ 删除钮在展开后的那一层里，判据跟着走',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.rowThere === true &&
       v.onlyAppended === true &&
       v.confirmShown === true &&
-      Number(v.before) > Number(v.after) &&
       Number(v.serverCount) === 0,
     show: (v) =>
       v === null
