@@ -3091,6 +3091,19 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const boxes = [...cell.querySelectorAll('.skill-option input[type=checkbox]')]
             return boxes.some((b) => b.checked === true)
           })()
+          /**
+           * ★ 分批第 209 批（使用者："挂载的技能显示「browser-use（来自 /Users/ling/.claude/skills）」，
+           * 不需要显示这个"）：技能选项上**不许**再印来源目录那条绝对路径。
+           * 来源没丢——仍在 `title` 里（悬停可见）。
+           * ⚠️ 量在这里、不在页面顶部：`.skill-option` 只在**打开某条 agent 的详情**时才有
+           *    （页面顶部那一屏还停在列表上，量到的是 0 个选项 = 空过）。
+           */
+          facts['agents.skillOptionNoDir'] = (() => {
+            const cells = [...d().querySelectorAll('.skill-option')]
+            if (cells.length === 0) return null
+            const withPath = cells.filter((c) => /（来自 |\(from /.test(c.textContent ?? ''))
+            return { total: cells.length, withPath: withPath.length }
+          })()
 
           // ⚠️ 事实（**当前是个真缺口**）：老形态（依据来自挂载 skill）那一句提示
           //    + 那颗「并进」按钮**都没有了**——词条还在、代码里一处都不引用。

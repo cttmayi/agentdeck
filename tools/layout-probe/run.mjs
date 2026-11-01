@@ -1269,6 +1269,15 @@ const CHECKS = [
   //   distilly ⇒ 起草被拒 / 自动挂上），界面这一侧量"已装"与"装了就不该有安装按钮"。
   {
     view: '智能体',
+    key: 'agents.skillOptionNoDir',
+    label:
+      '★★★ 技能选项上**不印**来源目录那条绝对路径（使用者："browser-use（来自 ' +
+      '/Users/ling/.claude/skills）…这个信息不重要"）——信息仍在 `title` 里，悬停可见',
+    ok: (v) => v === null || (v.withPath === 0 && v.total > 0),
+    show: (v) => (v === null ? 'null（这一屏没有选项）' : `${v.withPath}/${v.total} 条带路径`),
+  },
+  {
+    view: '智能体',
     key: 'agents.drafterSkillInstallButton',
     label:
       '★★★ 已经挂着「沉淀用技能」时**不摆**一键安装按钮（那是"未装"那一态的按钮；装了还摆等于给一个点了会重复装的东西）',

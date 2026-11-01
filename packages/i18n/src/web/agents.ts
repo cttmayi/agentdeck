@@ -466,13 +466,8 @@ export const agentsText = {
    *    ——实测 `~/.claude`、`~/.codex`、`~/.cursor` 里都有 `browser-use`）。
    *    只显示 slug 的话会出现三个一模一样的东西，使用者只能靠猜。
    */
-  'agents.skillFromDir': { zh: '（来自 {dir}）', en: '(from {dir})' },
-  /**
-   * ⚠️ 这条与上一条**不是同一件事**，不能合并：技能库非空、但里面一条都不能挂
-   *    （来自本地目录的那几条，它们的来源目录被取消勾选了）时，说"还没有任何
-   *    skill"是假话——使用者会去 Skills 页看，那儿明明列着好几条。所以这里要
-   *    指出那一步：去勾上它们的目录。
-   */
+  // ★ 分批第 209 批：`skillFromDir`（「（来自 {dir}）」）删了——那句话从技能选项上撤掉，
+  //   来源目录改为悬停 `title`（见 `AgentDetail` 里那段注释）。
   'agents.noSelectableSkills': {
     zh: '技能库里现在没有能挂的技能。来自本地目录的那几条，要在技能页 →「设置」里勾上它们的目录才会出现在这里。',
     en: 'The library currently has no attachable skills. The ones from local directories only appear here once their directories are ticked in Skills → Settings.',

@@ -547,19 +547,20 @@
               {#each pickableSkills as s (s.id)}
                 <label class="skill-option">
                   <input type="checkbox" value={s.id} bind:group={draft.skillIds} />
-                  <span>
+                  <!--
+                    ★ 分批第 209 批（使用者："挂载的技能显示「browser-use（来自
+                    /Users/ling/.claude/skills）」，不需要显示这个，信息不重要"）：
+                    **不再把来源目录印在选项上**——一长串绝对路径占了半行，而它几乎从不是
+                    选择时要看的判断依据（要挂哪条技能，看的是名字与说明）。
+                    ⚠️ 信息来源没有丢：仍挂在 `title` 里（悬停能看到），因为"同名两条、各自
+                    来自不同目录"这件事真的存在——真到需要分辨的那一次，鼠标一停就够。
+                  -->
+                  <span title={s.localDir ?? s.slug}>
                     <!-- ★ 2026-10：技能以**名字**为主显示（与组里「新建私有」同款）。
                          已安装技能的名字常常就是 slug（如 `fireworks-tech-graph`），
                          之前同时印 slug + name 会重复成两个一模一样的东西。slug 只在
                          和名字不同时才作为机器名补充——名字相同的场合它纯属噪音。 -->
                     {s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
-                    <!-- ★ 同 slug 可以有好几条（每个来源目录各一条）。只显示名字
-                         的话选择器里会出现几个一模一样的东西——所以带上它住在哪个目录。 -->
-                    {#if s.localDir}
-                      <span class="faint small skill-option-from" title={s.localDir}>
-                        {$t('agents.skillFromDir', { dir: s.localDir })}
-                      </span>
-                    {/if}
                   </span>
                 </label>
               {/each}
@@ -780,7 +781,6 @@
     text-align: left;
   }
 
-  .skill-option-from { margin-left: var(--sp-1); }
 
   /* 补充显示的名字之外的机器名：弱化，不抢主显示的存在感 */
   .skill-slug {
