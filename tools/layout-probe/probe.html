@@ -6238,8 +6238,21 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                *   "换文件会换正文"由下面 `artifactPreviewChanged` 单独量。
                */
               facts['crystal.artifactPreviewLen'] = artBefore.trim().length
-              facts['crystal.artifactChecksText'] =
-                d().querySelector('.artifact-check-count')?.textContent?.trim() ?? null
+              /**
+               * ★ 分批第 224 批（使用者："下面有个『机械体检 通过 ✔』，移动到右栏顶的右侧"）：
+               * 这句结论现在住在**栏头右侧**，正文里只在**有**问题时才列清单。
+               */
+              {
+                const chip = d().querySelector('.artifact-pane [data-artifact-check-chip]')
+                facts['crystal.artifactChecksText'] = chip ? text(chip) : null
+                facts['crystal.checksInHeader'] =
+                  chip !== null &&
+                  chip.closest('.pane-head') === d().querySelector('.artifact-pane .pane-head')
+                // 通过时正文里不该再有那一行（结论只说一次）
+                facts['crystal.checksNotDuplicatedInBody'] =
+                  chip !== null &&
+                  ![...d().querySelectorAll('.artifact-body .artifact-check-count')].length
+              }
               // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。
               // ⚠️ 材料与产物是**两个接口**，产物先到不代表材料到了——等一小会儿再数，
               //    否则量到的是"0 个素材文件"（第一版就是这么误报的）。

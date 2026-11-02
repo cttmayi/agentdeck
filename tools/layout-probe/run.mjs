@@ -3497,6 +3497,22 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.checksInHeader',
+    label:
+      '★★★ 「机械体检 通过 ✔」在**右栏栏头右侧**（分批第 224 批，使用者："下面有个『机械体检 通过 ✔』，' +
+      '移动到右栏顶的右侧"）——它是页级结论，不该挂在正文里像内容的一部分',
+    ok: (v) => v === true,
+    show: (v, f) => `栏头 ${String(v)}　文案 ${JSON.stringify(f['crystal.artifactChecksText'])}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.checksNotDuplicatedInBody',
+    label: '★★ 那句话**只说一次**：搬到栏头之后，正文里不再重复一遍（通过时正文那一节整块不画）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.footWorkDirPath',
     label:
       '★★★ 栏脚「工作目录的文件」的标题行右侧写着**这一条草稿的工作目录**（分批第 222 批，使用者："沉淀页也增加这个路径"）' +

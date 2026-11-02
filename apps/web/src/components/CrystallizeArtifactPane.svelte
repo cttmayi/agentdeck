@@ -140,6 +140,26 @@
   <header class="pane-head detail-head">
     <h2>{$t('crystallize.artifactTitle')}</h2>
     <div class="pane-actions">
+      <!--
+        ★ 分批第 224 批（使用者："下面有个『机械体检 通过 ✔』，移动到右栏顶的右侧"）：
+        **体检的结论搬到栏头右侧**。它是对"这一栏里的东西合不合格"的一句话结论，属于页级状态，
+        和「放弃 / 确认入库」一样该在栏头；正文里再挂一节，读起来像"内容的一部分"。
+        正文只留**问题清单**（有才出现）——结论已经在上面，列出来的才是要改的东西。
+        ⚠️ 没交 skill（`mode:'none'`）时不挂它：那种情况下的"1 项问题"不是体检结论
+        （是"什么都没交"），理由在正文那句中性说明与中间那条消息里。
+      -->
+      {#if artifacts !== null && artifacts.mode === 'files'}
+        <span
+          class="artifact-check-count"
+          class:ok={checksOk}
+          data-artifact-check-chip
+        >
+          {$t('crystallize.artifactChecks')}
+          {checksOk
+            ? `${$t('crystallize.artifactChecksPassed')} ✔`
+            : $t('crystallize.artifactChecksProblems', { n: String(checkTotal) })}
+        </span>
+      {/if}
       <!-- ★ 分批第 174 批：栏头的"第 N 版"去掉了（同上：它只是个计数，没有行为依赖） -->
       <!--
         ★ 分批第 207 批：这一行**删掉了**（原来它只在"没装沉淀用技能"时说一句）。
@@ -203,25 +223,14 @@
           <h3 class="artifact-sub">{$t('crystallize.artifactChecks')}</h3>
           <p class="faint small">{$t('crystallize.artifactNoOutputNote')}</p>
         </section>
-      {:else}
+      {:else if problems.length > 0}
+      <!-- 结论在栏头（「机械体检 N 项问题」）；这里只列**要改的东西**。通过就没有这一节。 -->
       <section class="artifact-checks">
-        <h3 class="artifact-sub">
-          {$t('crystallize.artifactChecks')}
-          <span class="artifact-check-count" class:ok={checksOk}>
-            {checksOk
-              ? $t('crystallize.artifactChecksPassed')
-              : $t('crystallize.artifactChecksProblems', { n: String(checkTotal) })}
-          </span>
-        </h3>
-        {#if problems.length === 0}
-          <p class="small artifact-check-ok">✔</p>
-        {:else}
-          <ul class="artifact-problems">
-            {#each problems as problem, i (i)}
-              <li><span class="artifact-problem-file">{problem.file || '—'}</span>{problem.message}</li>
-            {/each}
-          </ul>
-        {/if}
+        <ul class="artifact-problems">
+          {#each problems as problem, i (i)}
+            <li><span class="artifact-problem-file">{problem.file || '—'}</span>{problem.message}</li>
+          {/each}
+        </ul>
       </section>
       {/if}
       {/if}
@@ -298,8 +307,11 @@
 
 
 
+  /* 栏头右侧那一句体检结论：小字、不抢标题的眼，但颜色直接表态（红 = 有问题 / 绿 = 通过） */
   .artifact-check-count {
+    font-size: var(--fs-xs);
     color: var(--bad);
+    white-space: nowrap;
   }
 
   .artifact-check-count.ok {
