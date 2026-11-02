@@ -29,7 +29,7 @@
  * 生产代码永远不传它（默认 `git`）。
  */
 
-import { spawn } from 'node:child_process'
+import { spawnProcessTree } from '@agentdeck/agent-core'
 import { mkdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { diffFileSets, type FileDiff } from '../text-diff.ts'
@@ -41,7 +41,24 @@ export interface GitProbe {
   version: string | null
 }
 
-/** 一次 git 命令的 stdout+stderr（失败时 reason 要能说清）。 */
+/**
+ * 一次 git 命令的 stdout（失败时 reason 要能说清）。
+ *
+ * ★ 分批第 228 批（三平台兼容）：改走 **`spawnProcessTree`**（起进程的唯一出口），
+ *   而不是自己 `spawn`。
+ *
+ * 两个理由：
+ *   1. **Windows 上的 `.cmd` 垫片**：自己 `spawn` 一个 `.cmd`/`.bat` 会被 Node 直接拒绝
+ *      （CVE-2024-27980 之后是 `EINVAL`）。而 git 完全可能是垫片/包装脚本（scoop、
+ *      某些 Git Bash 安装、公司里的 `git.cmd`）。走唯一出口就自动解开了。
+ *   2. **`windowsHide` 与进程树终止**：`spawn` 那一版在 Windows 上会弹一下控制台窗口，
+ *      超时用 `kill('SIGKILL')` 也只杀得到直接子进程（git 会再起 `git-remote-*`）。
+ *      `spawnProcessTree.terminate()` 在 Windows 上是 `taskkill /T /F`。
+ *
+ * ⚠️ 行式读取的代价要说清：stdout 变成"一行一行拼回来"。对我们的用途是等价的
+ *    （`--version` / `rev-parse` / `log -z?` 都逐行；`show` 的正文按行拼回，末尾换行
+ *    原样保留）。真要按**字节**取（图片、二进制 diff）就不能用这条——那种调用点现在没有。
+ */
 async function runGit(
   gitPath: string,
   args: string[],
@@ -49,30 +66,52 @@ async function runGit(
   timeoutMs = 5_000,
 ): Promise<{ ok: true; stdout: string } | { ok: false; reason: string }> {
   return await new Promise((resolve) => {
-    const child = spawn(gitPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      resolve({ ok: false, reason: `git ${args[0]} 超时（${timeoutMs}ms）` })
-    }, timeoutMs)
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString('utf8')))
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString('utf8')))
-    child.on('error', (err: NodeJS.ErrnoException) => {
+    const out: string[] = []
+    const err: string[] = []
+    let settled = false
+    const finish = (result: { ok: true; stdout: string } | { ok: false; reason: string }): void => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
+      resolve(result)
+    }
+
+    let handle: ReturnType<typeof spawnProcessTree>
+    try {
+      handle = spawnProcessTree({
+        command: gitPath,
+        args,
+        cwd,
+        env: { ...process.env },
+        onStdoutLine: (line) => out.push(line),
+        onStderrLine: (line) => err.push(line),
+        onActivity: () => {},
+      })
+    } catch (error) {
+      // 起进程这一步就抛（`.ps1`、cmd 表达不了的参数…）：照样当"git 启动失败"
+      return resolve({ ok: false, reason: `git 启动失败：${String(error)}` })
+    }
+
+    const timer = setTimeout(() => {
+      void handle.terminate(1_000)
+      finish({ ok: false, reason: `git ${args[0]} 超时（${timeoutMs}ms）` })
+    }, timeoutMs)
+
+    handle.process.once('error', (error: NodeJS.ErrnoException) => {
       // ENOENT = 系统里根本没有 git（这是**正常状态**，见头注释）
-      resolve({
+      finish({
         ok: false,
-        reason: err.code === 'ENOENT' ? '系统没有 git' : `git 启动失败：${err.message}`,
+        reason: error.code === 'ENOENT' ? '系统没有 git' : `git 启动失败：${error.message}`,
       })
     })
-    child.on('close', (code) => {
-      clearTimeout(timer)
+
+    void handle.exited.then(({ code }) => {
       if (code === 0) {
-        resolve({ ok: true, stdout })
-      } else {
-        resolve({ ok: false, reason: `git ${args.join(' ')} 退出码 ${code}：${stderr.trim() || stdout.trim()}` })
+        finish({ ok: true, stdout: out.length === 0 ? '' : `${out.join('\n')}\n` })
+        return
       }
+      const detail = err.join('\n').trim() || out.join('\n').trim()
+      finish({ ok: false, reason: `git ${args.join(' ')} 退出码 ${String(code)}：${detail}` })
     })
   })
 }

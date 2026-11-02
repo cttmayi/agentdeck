@@ -13,22 +13,56 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
+import { delimiter } from 'node:path'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
 import { installManagedRunHook, MANAGED_HOOK_SCRIPT_REL } from './inject.ts'
 
+/**
+ * 跑 hook 脚本用的解释器。
+ *
+ * ★ 分批第 228 批（三平台兼容）：原来写死 `python3`。Windows 上**没有** `python3`
+ *   （官方安装器给的是 `python.exe`）⇒ 这一整组判据在 Windows CI 上会红，而红的原因
+ *   与"hook 的决策矩阵"无关。这里按"机器上实际有哪个"挑：`python3` → `python`。
+ *   ⚠️ 两个都没有时**不静默跳过**：让用例失败并说清"要装 Python"——那是环境问题，
+ *   不是这条判据作废了。
+ */
+function resolvePython(): string {
+  const candidates = process.platform === 'win32' ? ['python3', 'python'] : ['python3', 'python']
+  const pathValue = process.env['PATH'] ?? ''
+  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : ['']
+  for (const name of candidates) {
+    for (const dir of pathValue.split(delimiter)) {
+      if (dir === '') continue
+      for (const ext of exts) {
+        const candidate = `${dir}${dir.endsWith('\\') || dir.endsWith('/') ? '' : '/'}${name}${ext}`
+        try {
+          accessSync(candidate, constants.F_OK)
+          return candidate
+        } catch {
+          /* 继续找 */
+        }
+      }
+    }
+  }
+  // 找不到就退回 `python3`：让 spawn 报 ENOENT，用例失败且原因清楚
+  return 'python3'
+}
+
+const pythonPath = resolvePython()
 const hookScript = new URL('./pre-tool-use.py', import.meta.url).pathname
 
-/** spawn python3 跑 hook 脚本：写 stdin、收 stdout。execFile 没有 input 选项。 */
+/** 用平台上的 Python 跑 hook 脚本：写 stdin、收 stdout。execFile 没有 input 选项。 */
 function decide(
   toolName: string,
   toolInput: Record<string, unknown>,
   cwd: string,
 ): Promise<{ decision: string; reason: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('python3', [hookScript])
+    const child = spawn(pythonPath, [hookScript])
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (d) => (stdout += d))

@@ -1,8 +1,9 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { detectVersion, windowsCandidateExtensions } from './probe.ts'
+import { executableWrapper } from './spawn-target.ts'
 
 /**
  * `detectVersion` 的回归测试。
@@ -17,18 +18,40 @@ import { detectVersion, windowsCandidateExtensions } from './probe.ts'
  */
 const TEST_TMP_ROOT = join(process.cwd(), '.cache', 'test-tmp')
 
-async function makeFake(dirName: string, script: string): Promise<string> {
+/**
+ * 造一个"能报版本"的假 CLI。
+ *
+ * ★ 分批第 228 批（三平台兼容）：**用 `executableWrapper` 造两份形状**，夹具脚本写成
+ *   **Node**（`.mjs`）而不是 `#!/bin/sh`。
+ *
+ * 原因是这条夹具在 Windows 上根本起不来：`spawn('fake-version')` 拿到一个
+ * `#!/bin/sh` 文件 ⇒ 没有 sh、也没有 `.cmd` 垫片 ⇒ ENOENT/EINVAL，于是
+ * "版本探测"的三条判据在 Windows CI 上会红，而红的原因与它们要测的东西无关。
+ * `executableWrapper` 正是为这件事存在的（Unix 给 `#!/bin/sh` 包装、Windows 给
+ * npm 垫片形状），所以夹具只写**行为**（Node 脚本），两种形状由它产出。
+ */
+async function makeFake(dirName: string, body: string): Promise<string> {
   await mkdir(TEST_TMP_ROOT, { recursive: true })
   const dir = await mkdtemp(join(TEST_TMP_ROOT, dirName))
-  const path = join(dir, 'fake-version')
-  await writeFile(path, `#!/bin/sh\n${script}`, 'utf8')
-  await chmod(path, 0o755)
+  const script = join(dir, 'fake-version.mjs')
+  await writeFile(script, body, 'utf8')
+  const wrapper = executableWrapper({
+    name: 'fake-version',
+    nodePath: process.execPath,
+    scriptPath: script,
+  })
+  const path = join(dir, wrapper.name)
+  await writeFile(path, wrapper.content, 'utf8')
+  if (wrapper.needsChmod) await chmod(path, 0o755)
   return path
 }
 
 describe('detectVersion（版本探测，FR-CLI-07 的输入）', () => {
   test('★ stderr 先打警告、stdout 报版本 → 取 stdout 的版本', async () => {
-    const path = await makeFake('stderr-warn-', `echo 'WARNING: proceeding anyway' >&2\necho 'codex-cli 0.144.0-alpha.4'`)
+    const path = await makeFake(
+      'stderr-warn-',
+      `console.error('WARNING: proceeding anyway')\nconsole.log('codex-cli 0.144.0-alpha.4')\n`,
+    )
     try {
       assert.equal(await detectVersion(path), '0.144.0-alpha.4')
     } finally {
@@ -37,7 +60,10 @@ describe('detectVersion（版本探测，FR-CLI-07 的输入）', () => {
   })
 
   test('★ stdout 空、版本只在 stderr → 退回 stderr', async () => {
-    const path = await makeFake('stdout-empty-', `echo ''\necho 'v1.2.3' >&2`)
+    const path = await makeFake(
+      'stdout-empty-',
+      `console.log('')\nconsole.error('v1.2.3')\n`,
+    )
     try {
       assert.equal(await detectVersion(path), '1.2.3')
     } finally {
@@ -46,7 +72,7 @@ describe('detectVersion（版本探测，FR-CLI-07 的输入）', () => {
   })
 
   test('★ 单行版本（claude 那种）→ 正常取到', async () => {
-    const path = await makeFake('plain-version-', `echo '2.1.143'`)
+    const path = await makeFake('plain-version-', `console.log('2.1.143')\n`)
     try {
       assert.equal(await detectVersion(path), '2.1.143')
     } finally {
@@ -55,8 +81,9 @@ describe('detectVersion（版本探测，FR-CLI-07 的输入）', () => {
   })
 })
 
+/** ⚠️ 用 `node:path` 的 `dirname`（分批第 228 批）：手写 `lastIndexOf('/')` 在 Windows 上切不开反斜杠。 */
 function dirnameOf(path: string): string {
-  return path.slice(0, path.lastIndexOf('/'))
+  return dirname(path)
 }
 
 describe('★ Windows 的候选扩展名（2026-10 兼容性审计的 A2）', () => {

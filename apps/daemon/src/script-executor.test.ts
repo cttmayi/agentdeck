@@ -692,11 +692,18 @@ describe('runtime → 解释器（只有白名单里的三种）', () => {
   })
 
   test('shell / python3 从 PATH 找；找不到时说清**装什么**', async () => {
-    const missing = await resolveCommand('python3', async () => null)
+    // ★ 分批第 228 批：这里原来**不传 platform**，于是断言的文案跟着跑测机器的平台走
+    //   （Windows CI 上拿到的是 winget 那段 ⇒ 这条当场红，红的原因与它要测的东西无关）。
+    //   现在把平台钉死，并且下面另起一条对称的 Windows 断言。
+    const missing = await resolveCommand('python3', async () => null, process.execPath, 'linux')
     assert.equal(missing.ok, false)
     assert.ok(!missing.ok)
     assert.match(missing.detail, /没找到 python3/)
     assert.match(missing.detail, /apt install python3|brew install python3/)
+
+    const winPy = await resolveCommand('python3', async () => null, process.execPath, 'win32')
+    assert.ok(!winPy.ok)
+    assert.match(winPy.detail, /winget install Python/)
 
     const shell = await resolveCommand('shell', async () => null)
     assert.ok(!shell.ok)
@@ -768,21 +775,51 @@ describe('runtime → 解释器（只有白名单里的三种）', () => {
     }
   })
 
-  test('findExecutable 真的按 PATH 找可执行文件', async () => {
+  /**
+   * ★ 分批第 228 批（三平台兼容）：这条原来不注入平台，于是它在 Windows 上**必然红**，
+   *   而且红得有道理也没道理混杂：
+   *     · Windows 的查找按 `PATHEXT` 逐扩展名（`my-tool` 裸名找不到 `my-tool`）；
+   *     · `chmod 0o644` 在 Windows 上去不掉可执行位（那里根本不看权限位）。
+   *   所以拆成两条：POSIX 那条**钉住 platform**（权位语义），Windows 那条验 PATHEXT 分支。
+   */
+  test('findExecutable：POSIX 上按 PATH 找、且**看可执行位**', async () => {
     const dir = await makeTempDir('exec-path')
     const empty = await makeTempDir('exec-path-empty')
     try {
       await writeFile(join(dir, 'my-tool'), '#!/bin/sh\necho hi\n', 'utf8')
       await chmod(join(dir, 'my-tool'), 0o755)
 
-      assert.equal(await findExecutable('my-tool', { PATH: dir }), join(dir, 'my-tool'))
-      assert.equal(await findExecutable('my-tool', { PATH: empty }), null)
+      assert.equal(await findExecutable('my-tool', { PATH: dir }, 'linux'), join(dir, 'my-tool'))
+      assert.equal(await findExecutable('my-tool', { PATH: empty }, 'linux'), null)
       // 存在但不可执行 ⇒ 不算找到
       await chmod(join(dir, 'my-tool'), 0o644)
-      assert.equal(await findExecutable('my-tool', { PATH: dir }), null)
+      assert.equal(await findExecutable('my-tool', { PATH: dir }, 'linux'), null)
     } finally {
       await cleanup(dir)
       await cleanup(empty)
+    }
+  })
+
+  test('★★ findExecutable：Windows 上按 PATHEXT 逐扩展名找（裸名找不到 `.cmd`）', async () => {
+    const dir = await makeTempDir('exec-path-win')
+    try {
+      await writeFile(join(dir, 'codex.cmd'), '@echo off\n', 'utf8')
+      const env = { PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+      /**
+       * 裸名 `codex` 在 Windows 上要能靠 PATHEXT 找到 codex.cmd。
+       * ⚠️ 断言**大小写不敏感**：候选扩展名来自 PATHEXT（真实机器上是 `.CMD` 大写），
+       *    Windows 的文件系统不区分大小写，所以两种写法都能打开；而跑这条判据的
+       *    macOS 可能是大小写敏感卷。比较大小写无关的字符串，测的才是"找不找得到"。
+       */
+      const same = (got: string | null, want: string): boolean =>
+        got !== null && got.toLowerCase() === want.toLowerCase()
+      assert.ok(same(await findExecutable('codex', env, 'win32'), join(dir, 'codex.cmd')))
+      // 不带 PATHEXT 时用默认那三档，同样找得到
+      assert.ok(same(await findExecutable('codex', { PATH: dir }, 'win32'), join(dir, 'codex.cmd')))
+      // 而 POSIX 语义下这个名字不存在（没有任何扩展名可补）
+      assert.equal(await findExecutable('codex', { PATH: dir }, 'linux'), null)
+    } finally {
+      await cleanup(dir)
     }
   })
 })

@@ -713,3 +713,22 @@ pnpm run probe:layout -- --dry-run 2>$null | Select-String -Pattern 'chrome'
 - **`shell: true` 一行改完**：有注入面（Node 会警告 DEP0190），而且 `.cmd` 里 `%*` 展开又是另一套引号规则；
 - **用 mock 证明"兼容"**：mock 掉 `platform` 只能证明我们自己的判断，证不了 `cmd.exe` 收不收；
 - **Wine 当替代**：Wine 的 cmd ≠ Windows 的 cmd，libuv 在 Wine 下行为也会偏——只能当参考，不能当判据。
+
+### 第一轮 Windows CI 红：先把"假缺陷"清掉（分批第 228 批）
+
+CI 矩阵加好之后，先做"**在 Windows 上必然红、但红的原因与它们要测的东西无关**"的那一批。
+六处，都是"判据把宿主平台当成了被测平台"：
+
+| # | 位置 | 在 Windows 上会怎样 | 修法 |
+|---|---|---|---|
+| 1 | `findExecutable()` 直接读 `process.platform` | "按 PATHEXT 逐扩展名找"那条分支在 macOS 上**永远测不到** | 平台改成**参数**（默认 `process.platform`），两平台都能钉 |
+| 2 | 同一函数里的权限检查写死 `constants.X_OK` | 注入 `platform:'win32'` 在 macOS 上跑时，一个 `.cmd` 会因为"没有 +x"被判成找不到——**我们自己造出来的假缺陷** | 权限检查也看注入的平台（win32 ⇒ `F_OK`） |
+| 3 | `script-executor.test.ts` 的"找不到 python3"文案断言不传平台 | 拿到的是 winget 那段 ⇒ 红 | 钉死 `'linux'`，另加一条对称的 Windows 断言 |
+| 4 | `probe.test.ts` 的假 CLI 是 `#!/bin/sh` 脚本 | Windows 上起不来（没有 sh、`.cmd` 被 Node 拒绝） | 夹具改成 **Node 脚本 + `executableWrapper`**（两种平台的两种形状由它产出）；`dirnameOf` 也改成 `node:path` 的 `dirname` |
+| 5 | `skill-mine.test.ts` 的两把假 git 是 `#!/bin/sh` | 同上（16 条判据会全红） | 同 4；顺便把 `runGit()` 改成走 **`spawnProcessTree`**（起进程的唯一出口）⇒ git 是 `.cmd`/包装脚本时也能起，且 Windows 上不弹控制台、超时用 `taskkill /T /F` |
+| 6 | `pre-tool-use.test.ts` spawn 写死 `python3` | Windows 只有 `python.exe` | 按机器上实际有的挑（`python3` → `python`）；都没有时**不静默跳过**，让用例失败并说清"要装 Python" |
+
+顺带：`runGit` 改走唯一出口之后，`tests/test-safety.test.ts` 里 `skill-mine` 那条白名单**删掉了**
+（它不再是裸 spawn）——白名单里每少一条，"新代码绕过出口"就少一个藏身处。
+
+判据数：`check` **2206 全绿**（+1：`findExecutable` 的 Windows 分支独立成一条）、`probe:layout` 574 全绿。

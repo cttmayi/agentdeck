@@ -320,10 +320,19 @@ export type ResolvedCommand =
 export async function findExecutable(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
+  /**
+   * ★ 分批第 228 批：**平台可注入**（默认 `process.platform`）。
+   *
+   * 之前它直接读 `process.platform`，于是"Windows 上按 PATHEXT 逐扩展名找"那条分支
+   * **在 macOS 上测不到**，而测试里能替它传的只有 env——那等于让一条 Windows 专属的
+   * 查找规则永远无人验证（真机上第一次跑就是它出错的时候）。
+   * 现在三条分支（win32 / POSIX）都能在任意平台钉住。
+   */
+  platform: NodeJS.Platform = process.platform,
 ): Promise<string | null> {
   const dirs = (env['PATH'] ?? '').split(delimiter).filter((d) => d !== '')
   const suffixes =
-    process.platform === 'win32'
+    platform === 'win32'
       ? (env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';').filter((s) => s !== '')
       : ['']
 
@@ -333,7 +342,10 @@ export async function findExecutable(
       try {
         const info = await stat(candidate)
         if (!info.isFile()) continue
-        await access(candidate, constants.X_OK)
+        // ⚠️ 权限检查也要看**注入的平台**：Windows 没有"可执行位"这回事（`X_OK` 在那里等价
+        //    于存在性），而注入 `platform: 'win32'` 在 macOS 上跑时若仍用 `X_OK`，
+        //    一个 `.cmd` 会因为"没有 +x"被判成找不到 —— 那正是我们在真机之外**造**出来的假缺陷。
+        await access(candidate, platform === 'win32' ? constants.F_OK : constants.X_OK)
         return candidate
       } catch {
         // 不是可执行文件 / 不存在 ⇒ 继续找

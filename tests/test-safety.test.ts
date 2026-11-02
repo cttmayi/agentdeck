@@ -200,10 +200,6 @@ describe('★ Windows 起进程：verbatim 旗标只有一个出口（spawnPlanF
       reason: '`openBrowser`：Windows 上是 `cmd /c start <url>`（系统命令，不是 CLI 垫片）',
     },
     {
-      file: join('daemon', 'src', 'run-hooks', 'skill-mine.ts'),
-      reason: 'git（`which` 解析出的是 git.exe；Windows 上不存在 git.cmd 这种用法）',
-    },
-    {
       file: join('daemon', 'src', 'skill-exec-check.ts'),
       reason: '只跑"解释器能不能起"（node/python 等，`resolveCommand` 给的都是真实可执行）',
     },

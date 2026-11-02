@@ -2,8 +2,12 @@
  * skill-mine（D80）git 版本管理的单元测试。
  *
  * NFR-T-01 的同类理由：**不依赖跑测机器上真的装着 git**——用一把假的 `git`
- * 可执行文件（临时目录里的 shell 脚本）注入。真 git 的行为差异（init 报错、
- * commit 报错、nothing to commit）用假的脚本各态模拟。
+ * 可执行文件（临时目录里的 Node 脚本 + `executableWrapper` 包装）注入。
+ * 真 git 的行为差异（init 报错、commit 报错、nothing to commit）用假的脚本各态模拟。
+ *
+ * ★ 分批第 228 批：夹具原来是 `#!/bin/sh` 脚本 —— 那种夹具在 Windows 上起不来
+ *   （没有 sh；`.cmd` 又会被 Node 的 spawn 拒绝），整组判据会在 Windows CI 全红，
+ *   而红的理由与"git 参数/输出解析"无关。改成 Node 脚本 + 包装之后两平台都跑得动。
  */
 
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
@@ -19,34 +23,53 @@ import {
   readMineRevision,
 } from './skill-mine.ts'
 import { cleanup, makeTempDir } from '../testing/tmp.ts'
+import { executableWrapper } from '@agentdeck/agent-core'
 
 let dir: string
 let fakeGit: string
 let mineRoot: string
 
-/** 造一把"好 git"：所有操作成功，第一次 commit 成功、之后 nothing to commit。 */
+/**
+ * 造一把"好 git"：所有操作成功，第一次 commit 成功、之后 nothing to commit。
+ *
+ * ★ 分批第 228 批（三平台兼容）：夹具写成 **Node 脚本** + `executableWrapper`，
+ *   不再写 `#!/bin/sh`。原来的 shell 版在 Windows 上根本起不来（没有 sh、`.cmd` 又会被
+ *   Node 拒绝）——那会让这一整组判据在所有 Windows CI 上变红，而红的理由与它们要测的
+ *   "git 参数与输出解析"毫无关系。`executableWrapper` 给的正是两种平台的两种形状。
+ */
 async function writeFakeGit(opts: {
   /** `add` 失败（模拟 .git 损坏/权限不足）。 */
   addFails?: boolean
   /** `commit` 永远失败。 */
   commitAlwaysFails?: boolean
 } = {}): Promise<string> {
-  const git = join(dir, 'fake-git.sh')
-  const lines = [
-    '#!/bin/sh',
-    'case "$1" in',
-    '  --version) echo "git version 2.99.0-fake"; exit 0 ;;',
-    '  init) mkdir -p .git; echo "Initialized empty"; exit 0 ;;',
-    '  config) exit 0 ;;',
-    opts.addFails ? '  add) echo "fatal: bad config"; exit 128 ;;' : '  add) exit 0 ;;',
+  const body = `import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+const cmd = process.argv[2] ?? ''
+const say = (t) => process.stdout.write(t + '\\n')
+const fail = (t, code) => { process.stderr.write(t + '\\n'); process.exit(code) }
+switch (cmd) {
+  case '--version': say('git version 2.99.0-fake'); break
+  case 'init': mkdirSync('.git', { recursive: true }); say('Initialized empty'); break
+  case 'config': break
+  case 'add': ${opts.addFails ? "fail('fatal: bad config', 128)" : 'break'}; break
+  case 'commit': ${
     opts.commitAlwaysFails
-      ? '  commit) echo "fatal: bad object"; exit 128 ;;'
-      : '  commit) if [ -f .committed ]; then echo "nothing to commit, working tree clean"; exit 1; else touch .committed; echo "f123abc"; exit 0; fi ;;',
-    '  *) echo "unknown git subcommand"; exit 1 ;;',
-    'esac',
-  ]
-  await writeFile(git, lines.join('\n'), 'utf8')
-  await chmod(git, 0o755)
+      ? "fail('fatal: bad object', 128)"
+      : "if (existsSync('.committed')) { say('nothing to commit, working tree clean'); process.exit(1) } writeFileSync('.committed', ''); say('f123abc')"
+  }; break
+  default: fail('unknown git subcommand', 1)
+}
+`
+  const script = join(dir, 'fake-git.mjs')
+  await writeFile(script, body, 'utf8')
+  const wrapper = executableWrapper({
+    name: 'fake-git',
+    nodePath: process.execPath,
+    scriptPath: script,
+  })
+  const git = join(dir, wrapper.name)
+  await writeFile(git, wrapper.content, 'utf8')
+  if (wrapper.needsChmod) await chmod(git, 0o755)
   return git
 }
 
@@ -148,44 +171,63 @@ async function writeFakeGitWithHistory(opts: {
   /** 空历史（`log` 成功但没有任何行）。 */
   logEmpty?: boolean
 } = {}): Promise<string> {
-  const git = join(dir, 'fake-git-history.sh')
-  const logCase = opts.logFails
+  /**
+   * `log` 的输出：字段用 0x1F 分隔——那是设计的核心，夹具里也必须是**真的**那个字节。
+   * ⚠️ 这里是**两层**字符串（测试文件里的模板 → 写进临时目录的脚本），所以脚本里的
+   *    `\n` 必须写成 `\\n`：写成一个反斜杠的话，模板会把它变成**真的换行**，
+   *    于是生成的脚本里出现"跨行的字符串字面量"——整份脚本语法错、命令全失败，
+   *    而表现是 `available:false`（看起来像"git 不可用"）。这一版就是这么红的。
+   */
+  const logBody = opts.logFails
     ? opts.logFails === 'no-commits'
-      ? '  log) echo "fatal: your current branch does not have any commits yet" >&2; exit 128 ;;'
-      : '  log) echo "fatal: not a git repository" >&2; exit 128 ;;'
+      ? "fail('fatal: your current branch does not have any commits yet', 128)"
+      : "fail('fatal: not a git repository', 128)"
     : opts.logEmpty
-      ? '  log) exit 0 ;;'
-      : // \x1f 用 printf 造：字段分隔符是设计的核心，测试里也要**真的**是那个字节
-        '  log) printf "aaa111\\037aaa111\\0372026-10-19T10:00:00+08:00\\037skill foo 沉淀（新建）\\naaa222\\037aaa222\\0372026-10-20T11:30:00+08:00\\037skill foo 进化 | 更新\\n"; exit 0 ;;'
-  const lines = [
-    '#!/bin/sh',
-    'case "$1" in',
-    '  --version) echo "git version 2.99.0-fake"; exit 0 ;;',
-    logCase,
-    // ⚠️ 只认这两个 rev：否则"取不到那一版"根本测不到（第一版对任何 rev 都答成功，
-    //    于是那条测试量到的是"比较成功了"——测试的前提没立住，不是实现错了）
-    // ⚠️ 参数是 `ls-tree -r --name-only <rev> -- <slug>/` ⇒ **rev 在 $4**，
-    //    第一版按 `$2` 匹配（那是 `-r`）⇒ 假 git 对任何 rev 都报"不是有效对象"，
-    //    量到的失败是假的（测试脚本自己写错了参数位，与实现无关）
-    '  ls-tree) case "$4" in aaa111|aaa222) printf "foo/SKILL.md\\nfoo/reference/notes.md\\n"; exit 0 ;; *) echo "fatal: Not a valid object name" >&2; exit 128 ;; esac ;;',
-    '  show)',
-    // ⚠️ `printf` 的第一个参数**以 `-` 开头会被当成选项**：`printf "---\n…"` 什么都不输出
-    //    （而 SKILL.md 的正文正好以 `---`（frontmatter）开头 ⇒ 只有它被吃掉，
-    //     表现为"某个文件正文是空的"）。所以那两条用 `printf -- "…"`。
-    //    踩过一次：这条测试当场红在"正文里找不到 新的正文"，而实现是对的。
-    '    case "$2" in',
-    '      aaa222:foo/SKILL.md) printf -- "---\\nname: foo\\n---\\n\\n新的正文\\n"; exit 0 ;;',
-    '      aaa222:foo/reference/notes.md) printf "第二版笔记\\n"; exit 0 ;;',
-    '      aaa111:foo/SKILL.md) printf -- "---\\nname: foo\\n---\\n\\n旧的正文\\n"; exit 0 ;;',
-    '      aaa111:foo/reference/notes.md) printf "第一版笔记\\n"; exit 0 ;;',
-    '      aaa222:foo/gone.md) printf "这一版有、上一版没有\\n"; exit 0 ;;',
-    '      *) echo "fatal: path not in rev" >&2; exit 128 ;;',
-    '    esac ;;',
-    '  *) echo "unknown git subcommand" >&2; exit 1 ;;',
-    'esac',
-  ]
-  await writeFile(git, lines.join('\n'), 'utf8')
-  await chmod(git, 0o755)
+      ? 'break'
+      : `say(['aaa111', 'aaa111', '2026-10-19T10:00:00+08:00', 'skill foo 沉淀（新建）'].join(SEP) + '\\n' + ['aaa222', 'aaa222', '2026-10-20T11:30:00+08:00', 'skill foo 进化 | 更新'].join(SEP))`
+
+  const body = `import { mkdirSync, writeFileSync } from 'node:fs'
+const SEP = String.fromCharCode(31)
+const argv = process.argv.slice(2)
+const cmd = argv[0] ?? ''
+const say = (t) => process.stdout.write(t + '\\n')
+const fail = (t, code) => { process.stderr.write(t + '\\n'); process.exit(code) }
+const revArg = () => argv.find((a) => /^aaa\\d+$/.test(a)) ?? ''
+switch (cmd) {
+  case '--version': say('git version 2.99.0-fake'); break
+  case 'log': ${logBody}; break
+  case 'ls-tree': {
+    const rev = revArg()
+    if (rev === 'aaa111' || rev === 'aaa222') { say('foo/SKILL.md'); say('foo/reference/notes.md'); break }
+    fail('fatal: Not a valid object name', 128)
+    break
+  }
+  case 'show': {
+    const spec = argv[1] ?? ''
+    const table = {
+      'aaa222:foo/SKILL.md': '---\\nname: foo\\n---\\n\\n新的正文',
+      'aaa222:foo/reference/notes.md': '第二版笔记',
+      'aaa111:foo/SKILL.md': '---\\nname: foo\\n---\\n\\n旧的正文',
+      'aaa111:foo/reference/notes.md': '第一版笔记',
+      'aaa222:foo/gone.md': '这一版有、上一版没有',
+    }
+    if (spec in table) { say(table[spec]); break }
+    fail('fatal: path not in rev', 128)
+    break
+  }
+  default: fail('unknown git subcommand', 1)
+}
+`
+  const script = join(dir, 'fake-git-history.mjs')
+  await writeFile(script, body, 'utf8')
+  const wrapper = executableWrapper({
+    name: 'fake-git-history',
+    nodePath: process.execPath,
+    scriptPath: script,
+  })
+  const git = join(dir, wrapper.name)
+  await writeFile(git, wrapper.content, 'utf8')
+  if (wrapper.needsChmod) await chmod(git, 0o755)
   return git
 }
 
