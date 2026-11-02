@@ -390,26 +390,22 @@ export function buildDraftPrompt(opts: {
   } = opts
   const origin =
     scope === 'conversation'
-      ? '这次要沉淀的是一段聊天'
+      ? '这次沉淀的是一段聊天'
       : scope === 'task'
-        ? '这次要沉淀的是一个任务'
-        : '这次**没有来源 run**（从空白起，素材只有使用者给的那些）'
-  const skillNames =
-    skillSlugs.length === 0
-      ? '你挂着的技能'
-      : skillSlugs.map((s) => `\`${s}\``).join('、')
-  return `${origin}。素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`：
-${scope === 'blank' ? '来源、这次的目标、该读哪些文件——里面写了"没有轨迹"，别去找 `turns/`' : '来源、规模、这次的目标、该读哪些文件；原始轨迹在 `' + materialDir + '/turns/`'}），产出写到 \`${outputDir}/\`。
+        ? '这次沉淀的是一个任务'
+        : '这次**没有来源 run**（只有使用者给的材料）'
+  // 空 = 调用方漏了注入（门禁应当先拦下来）；那时就别硬塞一个括号，让它照被注入的那份写。
+  const skillNames = skillSlugs.map((s) => `\`${s}\``).join('、')
+  return `${origin}。素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\`；
+写法照你挂着的技能${skillNames === '' ? '' : `（${skillNames}）`}。
 
-**怎么写，照你挂着的那份技能（${skillNames}）**——结构、命名、拆分、交付前的自检都以它为准，这里不重复。
-
-平台只认下面这些（它读得出来的才存在）：
-- \`${outputDir}/SKILL.md\` 是主产出：frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）——名字与描述平台从这儿读，你不用另外报。
-- 其它文件也放 \`${outputDir}/\` 下（子目录随你），正文点到的路径都要真的存在；只写 UTF-8 文本，不写隐藏文件、二进制、\`..\` 或绝对路径。
-- 信息不够就先问，不值得做就直说——**两者都写在你的回复里**：别自己编答案接着写，也别硬凑一条 skill。能自己从素材里查到的（命令、参数、路径、使用者的要求）不要问，去查。
+平台只认这些（机器会拒的）：
+- \`${outputDir}/SKILL.md\` 的 frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）——名字与描述平台从这儿读，你不用另外报。
+- 其它文件也放 \`${outputDir}/\` 下；只写 UTF-8 文本，不写隐藏文件、二进制、\`..\` 与绝对路径。
+- 信息不够就先问、不值得做就直说——都写在**回复里**；别自己编答案，也别硬凑一条 skill。
 ${
   continuing
-    ? `- 上一轮你没有交 skill：人这一轮的回应已经**追加进素材**（\`${materialDir}/appended/\`，索引页也登记了），按它接着做。\n`
+    ? `- 上一轮你没交 skill：人这一轮的回应已**追加进素材**（\`${materialDir}/appended/\`），按它接着做。\n`
     : ''
 }${
   revised
@@ -424,7 +420,7 @@ ${
     : ''
 }${
   target === 'new'
-    ? '- 素材索引里写了使用者给的作用描述（如果有）：frontmatter 的 description 以它为基底，可以调措辞，不许改含义。'
+    ? '- 索引里有使用者的作用描述时，\`description\` 以它为基底（措辞可调，含义不改）。'
     : '- 要更新的技能当前全文在 `material/existing-skill/`：请**修订**它（保留仍然正确的部分），不要从零重写。'
 }
 直接开始。`

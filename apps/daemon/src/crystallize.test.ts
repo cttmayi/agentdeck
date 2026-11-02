@@ -624,7 +624,7 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
     //   的特殊处理才对"）：三个协议文件名（QUESTIONS / REFUSED / answers）全部消失——
     //   平台要认的状态是"这一轮有没有交 SKILL.md"，而问题与拒绝的理由都在它的回复里。
     assert.doesNotMatch(prompt, /QUESTIONS\.md|REFUSED\.md|answers\.md/, '不再有协议文件名')
-    assert.match(prompt, /都写在你的回复里/, '问与拒绝都让它在回复里说')
+    assert.match(prompt, /都写在\*\*回复里\*\*/, '问与拒绝都让它在回复里说')
     assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
     // 篇幅也是判据：这一段每轮都要被读，内联规范那版是 2785 字。
@@ -652,7 +652,7 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
       target: 'new',
       skillSlugs: [],
     })
-    assert.match(prompt, /你挂着的那份技能/)
+    assert.match(prompt, /写法照你挂着的技能/)
     assert.doesNotMatch(prompt, /`distilly`/)
   })
 })
