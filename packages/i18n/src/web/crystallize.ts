@@ -189,9 +189,23 @@ export const crystallizeText = {
    */
   'crystallize.requestNew': { zh: '新建一份技能', en: 'New skill' },
   'crystallize.requestUpdate': { zh: '优化「{skill}」', en: 'Improve "{skill}"' },
-  'crystallize.requestWithMaterials': {
-    zh: '{head}（附 {n} 份材料）',
-    en: '{head} (with {n} material items)',
+  /**
+   * ★ 分批第 214 批：上面那两句是**标签**（挂在 `who` 行：`你 · 新建一份技能`），
+   *   下面几句是**兜底正文**（任务原文还没读到时那一瞬用它）。从前兜底正文是
+   *   「{head}：{作用描述}」，于是刚点开始那一瞬显示成「新建一份技能：优化」——
+   *   同一句话说了两遍，而且读起来像被截断。
+   */
+  'crystallize.requestMaterialsBody': {
+    zh: '附 {n} 份材料',
+    en: 'with {n} material items',
+  },
+  'crystallize.requestNoPurpose': {
+    zh: '（这次没写作用描述——由它从素材里推断）',
+    en: '(no purpose given — it infers one from the material)',
+  },
+  'crystallize.requestNoFeedback': {
+    zh: '（这次没写要改什么——按素材里的问题改）',
+    en: '(nothing specified — it fixes what the material shows)',
   },
   'crystallize.draftTurnLive': { zh: '正在把素材写成 skill', en: 'Writing the skill' },
   'crystallize.draftProcessShow': { zh: '它怎么做的', en: 'How it got there' },

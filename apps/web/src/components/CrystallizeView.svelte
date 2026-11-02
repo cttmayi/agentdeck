@@ -475,44 +475,55 @@
    *   写出来"）：第一条消息 = **这一轮真的投递出去的那段 ③ 任务块**（`draftTaskText`，
    *   从 run 日志取，不是现拼），抬头挂一句标签（新建 / 优化「slug」）。
    *
-   * 下面这个 `requestLine` 只剩**兜底**：老草稿（那时还没有把三块分开记进日志）或接口读不到时
-   * 用它。⚠️ 作用描述与反馈不落库（`crystallizeTarget` 只记 new/update + skillId），所以这
-   * 条兜底在深链恢复的草稿上只有半句——能补的补在这里：purpose 其实在素材索引里，
-   * 但那是另一条路（见 §12.14 的素材清单），不在这条假设里编。
+   * 下面这个 `requestDetail` 只剩**兜底**：老草稿（那时还没有把三块分开记进日志）或接口还
+   * 没读到时用它。⚠️ 它**不带那句标签**——标签已经在 `who` 行上（`你 · 新建一份技能`），
+   * 正文再写一遍就是同一句话说两次（分批第 214 批修的就是这个：刚点开始那一瞬显示成
+   * 「新建一份技能：优化」，读起来像一句被截断的话）。
    */
-  $: requestLine = (() => {
+  $: requestDetail = (() => {
     const detail = targetKind === 'new' ? purpose.trim() : userFeedback.trim()
-    if (detail === '') {
-      // 空白起的材料是"我给它的东西"，说在这儿比单独一行更像对话
-      if (blankStart && blankMaterials.length > 0) {
-        return $t('crystallize.requestWithMaterials', {
-          head: requestLabel,
-          n: String(blankMaterials.length),
-        })
-      }
-      return requestLabel
+    if (detail !== '') return detail
+    // 空白起的材料是"我给它的东西"，说在这儿比单独一行更像对话
+    if (blankStart && blankMaterials.length > 0) {
+      return $t('crystallize.requestMaterialsBody', { n: String(blankMaterials.length) })
     }
-    return `${requestLabel}：${detail}`
+    if (targetKind === 'new') return $t('crystallize.requestNoPurpose')
+    return $t('crystallize.requestNoFeedback')
   })()
 
   /**
    * 这一轮交给它的**任务原文**（第一句话的 ③；`GET /api/crystallize/request`）。
    *
-   * 空串 = 还没读到 / 老草稿没有这条日志 ⇒ 退回 `requestLine` 那句。
+   * 空串 = 还没读到 / 老草稿没有这条日志 ⇒ 退回 `requestDetail` 那句。
    */
   let draftTaskText = ''
   let draftTaskFor = ''
 
   async function loadDraftTask(): Promise<void> {
-    if (draftRunId === '' || draftTaskFor === draftRunId) return
-    draftTaskFor = draftRunId
-    try {
-      const res = await api<{ task: string | null }>(
-        `/api/crystallize/request?draftRunId=${encodeURIComponent(draftRunId)}`,
-      )
-      draftTaskText = res.task ?? ''
-    } catch {
-      draftTaskText = ''
+    if (draftRunId === '') return
+    if (draftTaskFor === draftRunId && draftTaskText !== '') return
+    const asked = draftRunId
+    draftTaskFor = asked
+    /**
+     * ⚠️ 要**重试几次**：这条接口读的是 run 日志，而日志是在受理之后、起进程之前写下去的
+     * ——刚点「开始提炼」那一瞬它可能还没落盘，一次读不到就永远停在兜底那句上（分批第 214
+     * 批：使用者看到第一句话显示「新建一份技能：优化」，就是这个窗口）。
+     * 6 × 400ms 足够把"刚受理"那一小段盖住；仍读不到（老草稿没有三块记录）就用兜底。
+     */
+    for (let i = 0; i < 6; i += 1) {
+      try {
+        const res = await api<{ task: string | null }>(
+          `/api/crystallize/request?draftRunId=${encodeURIComponent(asked)}`,
+        )
+        if (asked !== draftRunId) return // 中途换了草稿：这一份的结果不要了
+        if (res.task !== null && res.task.trim() !== '') {
+          draftTaskText = res.task
+          return
+        }
+      } catch {
+        // 网络抖一下就重试，不打扰人
+      }
+      await new Promise((r) => setTimeout(r, 400))
     }
   }
 
@@ -847,6 +858,9 @@
         },
       )
       draftRunId = res.draftRunId
+      draftTaskText = ''
+      draftTaskFor = ''
+      void loadDraftTask()
       materialStats = res.materialStats
       draftStatus = null
       draftFailedReason = ''
@@ -959,6 +973,7 @@
       draftRunId = res.draftRunId
       draftTaskText = ''
       draftTaskFor = ''
+      void loadDraftTask()
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
@@ -1307,6 +1322,7 @@
       draftRunId = res.draftRunId
       draftTaskText = ''
       draftTaskFor = ''
+      void loadDraftTask()
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
@@ -1795,7 +1811,7 @@
         <ChatBubble
           role="user"
           who={`${$t('crystallize.speakerYou')} · ${requestLabel}`}
-          html={renderMarkdown(draftTaskText !== '' ? draftTaskText : requestLine)}
+          html={renderMarkdown(draftTaskText !== '' ? draftTaskText : requestDetail)}
         />
         <!--
           ★ 分批第 196 批：这里原来还有一行「材料 10 项（轨迹 5 · 给定 5）」（`materialCountLine`）。
