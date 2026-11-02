@@ -240,7 +240,7 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
    * `<base-dir>/<slug>/SKILL.md`）⇒ 产出在 `skill/<dir>/` 里。**唯一一层子目录也认**：
    * 在内存里归一到根，于是编辑器/差异/入库看到的是同一套相对路径。
    */
-  test('files：唯一一层子目录里的 SKILL.md 也认（归一到根）', () => {
+  test('files：唯一一层子目录里的 SKILL.md 也认（读时归一到根，磁盘不动）', () => {
     const artifacts = assembleArtifacts({
       'colleague-flow/SKILL.md': GOOD_SKILL_MD,
       'colleague-flow/work.md': '# Work\n',
@@ -254,6 +254,46 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
       '路径归一到根（`colleague-flow/` 前缀剥掉）',
     )
     assert.equal(artifacts.validation.ok, true)
+  })
+
+  /**
+   * ★ 分批第 217 批（使用者定："不要搬，动态识别位置"）：归一只发生在**读**的时候。
+   *
+   * 判据两半：① `readDraftSkillDir()` 给出来的路径已经是相对根的（读的人不用知道它在子目录里）；
+   * ② **磁盘上的文件一个都没动**（不搬——读路径上不留副作用）。
+   */
+  test('★★ readDraftSkillDir：子目录落点读出来就是根上的相对路径，且磁盘不改', async () => {
+    const probeDir = join(dir, 'nested-skill')
+    await mkdir(join(probeDir, 'colleague-flow'), { recursive: true })
+    await writeFile(join(probeDir, 'colleague-flow', 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
+    await writeFile(join(probeDir, 'colleague-flow', 'work.md'), '# Work\n', 'utf8')
+
+    const files = await readDraftSkillDir(probeDir)
+    assert.ok(files !== null)
+    assert.deepEqual(Object.keys(files).sort(), ['SKILL.md', 'work.md'], '读出来就是根上的路径')
+    // ② 磁盘没动：原来的子目录还在
+    assert.ok(
+      await readFile(join(probeDir, 'colleague-flow', 'SKILL.md'), 'utf8').catch(() => null),
+      '不搬：子目录里的文件仍在（读路径不留副作用）',
+    )
+  })
+
+  test('★★ readDraftSkillDir：根上已有 SKILL.md ⇒ 子目录那棵残留树被遮掉（不出两份）', async () => {
+    const probeDir = join(dir, 'mixed-skill')
+    await mkdir(join(probeDir, 'colleague-flow'), { recursive: true })
+    await writeFile(join(probeDir, 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
+    await writeFile(join(probeDir, 'work.md'), '# 新的\n', 'utf8')
+    await writeFile(join(probeDir, 'colleague-flow', 'SKILL.md'), '# 上一轮的残留\n', 'utf8')
+    await writeFile(join(probeDir, 'colleague-flow', 'work.md'), '# 旧的\n', 'utf8')
+
+    const files = await readDraftSkillDir(probeDir)
+    assert.ok(files !== null)
+    assert.deepEqual(
+      Object.keys(files).sort(),
+      ['SKILL.md', 'work.md'],
+      '根上的那份说了算，残留子目录不进产物（否则树里/入库里都是两份）',
+    )
+    assert.match(files['work.md'] ?? '', /新的/)
   })
 
   test('none：多份 SKILL.md ⇒ 不猜，如实报是哪几份', () => {

@@ -346,7 +346,9 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
     return null
   }
   const files = await readTree(dir)
-  return Object.keys(files).length === 0 ? null : files
+  if (Object.keys(files).length === 0) return null
+  // ★ 分批第 217 批：落点归一只在**读**这一处做（磁盘不动）——见 `normalizeSkillLayout`。
+  return normalizeSkillLayout(files)
 }
 
 /**
@@ -361,7 +363,7 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
  * ⚠️ 只认**一层**：再深（`a/b/SKILL.md`）不猜——那已经是"它自己的私有目录结构"，收进来
  *    不会是我们想要的那份技能。
  */
-export function nestedSkillDirs(files: Record<string, string>): string[] {
+function nestedSkillDirs(files: Record<string, string>): string[] {
   const out = new Set<string>()
   for (const rel of Object.keys(files)) {
     const m = /^([^/]+)\/SKILL\.md$/.exec(rel)
@@ -373,7 +375,7 @@ export function nestedSkillDirs(files: Record<string, string>): string[] {
 }
 
 /** 把 `<dir>/` 这个前缀从一份文件表里剥掉：磁盘上的子目录 → 逻辑上的根。 */
-export function rebaseToRoot(files: Record<string, string>, dir: string): Record<string, string> {
+function rebaseToRoot(files: Record<string, string>, dir: string): Record<string, string> {
   const prefix = `${dir}/`
   const out: Record<string, string> = {}
   for (const [rel, text] of Object.entries(files)) {
@@ -384,38 +386,34 @@ export function rebaseToRoot(files: Record<string, string>, dir: string): Record
 }
 
 /**
- * **把子目录里的产出挪到 `skill/` 根上**（一次性，幂等）。
+ * **读的时候把落点归一**——磁盘一个字不动（分批第 217 批，使用者定："不要搬，动态识别位置"）。
  *
- * 为什么不能只在读取时"逻辑上归一"：人改稿、差异、入库、版本快照全都按 `skill/` 下的相对路径
- * 走（`writeDraftSkillFiles`、`snapshotDraftSkill`、`commit` 的 files）。只在读的时候假装它在
- * 根上，一旦有人在编辑器里保存，磁盘上就会同时出现 `skill/SKILL.md` 与 `skill/<dir>/SKILL.md`
- * 两份，之后谁是真身要靠运气。
+ * 三种形状：
+ *   · 根上有 `SKILL.md` ⇒ 就用它；若还有**子目录里也放着 `SKILL.md`**（早前落点的残留），
+ *     把那些子树整棵遮掉——否则同一份技能在树里出现两次，入库也会带着两份。
+ *   · 根上没有、但**唯一一层**子目录里有 ⇒ 以那一层为根（`rebaseToRoot`），路径全部变
+ *     相对根的（`SKILL.md`、`work.md`…）。
+ *   · 其它（多份 / 更深）⇒ **原样返回**，由 `assembleArtifacts` 如实报"不知道收哪一份"。
  *
- * 所以：**认出就搬**。搬完之后磁盘与逻辑一致，其余所有代码一行不用改。
+ * 为什么放在**读**这一层：磁盘上的布局是 agent 的事（它可能调自己的写入器，例如 distilly 的
+ * `tools/skill_writer.py` 落点是 `<base-dir>/<slug>/SKILL.md`），而平台的编辑器、差异对比、
+ * 版本快照、入库都按"`skill/` 下的相对路径"说话。归一只做一次、在唯一入口做，下游就都一致。
+ *
+ * ⚠️ 不搬的理由（使用者明确要求）：搬是**写**，会在勘察/读取的路径上留下副作用；而
+ *    "读到什么就是什么"更好推理。代价是磁盘上可能同时存在 `skill/<dir>/SKILL.md` 与后来
+ *    人手保存出的 `skill/SKILL.md`——所以上面那一条**遮掉残留子树**是必须的，不是可选。
  */
-export interface AdoptedSkillDir {
-  /** 产出原本所在的那一层子目录名。 */
-  from: string
-  /** 挪到根上的相对路径（`SKILL.md`、`work.md`…）。 */
-  moved: string[]
-}
-
-export async function adoptNestedSkillDir(skillDir: string): Promise<AdoptedSkillDir | null> {
-  const files = await readDraftSkillDir(skillDir)
-  if (files === null || files['SKILL.md'] !== undefined) return null
-  const nested = nestedSkillDirs(files)
-  // 不唯一就**不猜**（多份 SKILL.md 说明它自己也没想清楚要交哪份）——交给读取层报清楚。
-  if (nested.length !== 1) return null
-  const dir = nested[0]!
-  const rebased = rebaseToRoot(files, dir)
-  for (const [rel, text] of Object.entries(rebased)) {
-    const full = join(skillDir, rel)
-    await mkdir(dirname(full), { recursive: true })
-    await writeFile(full, text, 'utf8')
+export function normalizeSkillLayout(files: Record<string, string>): Record<string, string> {
+  if (files['SKILL.md'] !== undefined) {
+    const hidden = nestedSkillDirs(files)
+    if (hidden.length === 0) return files
+    return Object.fromEntries(
+      Object.entries(files).filter(([rel]) => !hidden.some((d) => rel.startsWith(`${d}/`))),
+    )
   }
-  // 搬完把空壳删掉（`rm` 只落在草稿自己的 `skill/` 下、且 dir 是单段相对名）
-  await rm(join(skillDir, dir), { recursive: true, force: true })
-  return { from: dir, moved: Object.keys(rebased).sort() }
+  const nested = nestedSkillDirs(files)
+  if (nested.length === 1) return rebaseToRoot(files, nested[0]!)
+  return files
 }
 
 /**
@@ -437,34 +435,23 @@ export async function adoptNestedSkillDir(skillDir: string): Promise<AdoptedSkil
  */
 export function assembleArtifacts(dirFiles: Record<string, string> | null): DraftArtifacts {
   if (dirFiles !== null) {
-    if (dirFiles['SKILL.md'] !== undefined) {
-      return {
-        mode: 'files',
-        files: dirFiles,
-        skillMd: parseSkillMd(dirFiles['SKILL.md']),
-        validation: validateArtifactFiles(dirFiles),
-      }
-    }
     /**
-     * ★ 分批第 217 批：**唯一一层子目录里的 SKILL.md 也认**（`skill/<dir>/SKILL.md`）。
+     * ★ 分批第 217 批（使用者定："不要搬，动态识别位置"）：落点归一**在读这一层做**
+     * （`normalizeSkillLayout`：根上有就用根上的、唯一子目录里有就以那一层为根、残留子树遮掉）。
+     * 这里拿到的是归一到根的路径，于是编辑器/差异/入库看到的是同一套相对路径，磁盘不动。
      *
-     * 起草者可能调它自己的写入器（例如 distilly 的 `tools/skill_writer.py`，落点是
-     * `<base-dir>/<slug>/SKILL.md`）⇒ 产出在子目录里。这里把它**在内存里归一到根**，
-     * 于是编辑器、差异、入库看到的是同一套相对路径；磁盘上的搬移由
-     * `adoptNestedSkillDir()` 在跑完（与读取时自愈）时做。
-     *
-     * ⚠️ 唯一才认：多份 `SKILL.md` 说明它自己也没想清楚交哪份，这里**不猜**，如实报出来。
+     * ⚠️ 多份 `SKILL.md` 不猜：它自己也没想清楚要交哪份，如实报出来让人选。
      */
-    const nested = nestedSkillDirs(dirFiles)
-    if (nested.length === 1) {
-      const rebased = rebaseToRoot(dirFiles, nested[0]!)
+    const files = normalizeSkillLayout(dirFiles)
+    if (files['SKILL.md'] !== undefined) {
       return {
         mode: 'files',
-        files: rebased,
-        skillMd: parseSkillMd(rebased['SKILL.md'] ?? ''),
-        validation: validateArtifactFiles(rebased),
+        files,
+        skillMd: parseSkillMd(files['SKILL.md']),
+        validation: validateArtifactFiles(files),
       }
     }
+    const nested = nestedSkillDirs(dirFiles)
     if (nested.length > 1) {
       return {
         mode: 'none',

@@ -941,7 +941,7 @@ describe('四轮：素材落盘 + 产出读目录', () => {
    * 起草者可能调它自己的写入器写进 `skill/<dir>/`（distilly 的 writer 就是这种落点）。
    * 这一条钉**整条链**：跑完自动搬、接口给 files、磁盘上是根上的 SKILL.md、并且能入库。
    */
-  test('★★ 产出落在 skill/<dir>/ 里也认：跑完搬上来、接口是 files、能入库', async () => {
+  test('★★ 产出落在 skill/<dir>/ 里也认：读时识别位置、接口是 files、能入库（磁盘不动）', async () => {
     const runId = await runReviewed('子目录落点的流程')
     const previous = fakeBackend.draftFiles
     // 模拟"它调了写入器"：把文件写在子目录里，根上没有 SKILL.md
@@ -963,13 +963,16 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     assert.equal(art.mode, 'files', '子目录里的 SKILL.md 也要认')
     assert.ok('SKILL.md' in art.files, '归一到根')
     assert.ok(!('colleague-flow/SKILL.md' in art.files), '不再带子目录前缀')
-    // ② 磁盘：真的搬上来了（搬完磁盘与逻辑一致，人改稿/差异/快照才看得对）
+    // ② 磁盘：**原样不动**（使用者定："不要搬，动态识别位置"）——归一只在读的时候发生
     const skillDir = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
-    assert.ok(await readFile(join(skillDir, 'SKILL.md'), 'utf8').catch(() => null), '根上有 SKILL.md')
-    assert.equal(
+    assert.ok(
       await readFile(join(skillDir, 'colleague-flow', 'SKILL.md'), 'utf8').catch(() => null),
+      '它写在哪就还在哪（读路径不留副作用）',
+    )
+    assert.equal(
+      await readFile(join(skillDir, 'SKILL.md'), 'utf8').catch(() => null),
       null,
-      '原子目录搬完就删掉（否则磁盘上是两份）',
+      '没有凭空多出一份根上的 SKILL.md',
     )
     // ③ 入库：照常走
     const done = await commit({

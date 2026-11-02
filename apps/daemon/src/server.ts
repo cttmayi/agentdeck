@@ -137,7 +137,6 @@ import {
 } from './crystallize-material.ts'
 // ★ 分批第 157 批（§12.54）：从仓库拉材料——解析/拉取/落盘的边界都在那个文件里
 import {
-  adoptNestedSkillDir,
   assembleArtifacts,
   draftVersionSkillDir,
   parseSkillMd,
@@ -2537,31 +2536,6 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     // （第 14 批要挡的正是这件事）。抹之前先把标记读出来记进版本表，痕迹不丢。
     if (input.executeRun.subject.type === 'skill-draft') {
       const dir = await draftTaskDir(input.executeRun.id as string)
-      /**
-       * ★ 分批第 217 批：**产出落在 `skill/` 的子目录里就搬上来**（一次性、幂等）。
-       *
-       * 起草者不一定手写 `skill/SKILL.md`——它可能调自己那份写入器（真机上装的 distilly
-       * 有 `tools/skill_writer.py`，落点是 `<base-dir>/<slug>/SKILL.md`）。搬完磁盘与逻辑
-       * 一致，人改稿 / 差异 / 版本快照 / 入库全都按根上的相对路径走，其余代码一行不用改。
-       * 搬了就要说：日志里留一条，否则"我明明让它写 skill/，怎么文件在别处"没人答得上来。
-       */
-      const adopted = await adoptNestedSkillDir(join(dir, 'skill'))
-      if (adopted !== null) {
-        // 用与执行器同一种 note（`type: 'status'`）：它是"平台做了什么"，不是模型说的话
-        // ——`loadDraftFinalText` 取的是最后一条 text，别让它变成"它的正文"。
-        await store.appendRunMessage(input.executeRun.id, {
-          seq: Number.MAX_SAFE_INTEGER,
-          type: 'status',
-          tool: null,
-          content:
-            `它的产出落在了 \`skill/${adopted.from}/\` 里——已挪到 \`skill/\` 根上` +
-            `（${adopted.moved.join('、')}）：平台只收 \`skill/SKILL.md\` 这一种落点。`,
-          input: null,
-          output: null,
-          outputTruncated: false,
-          at: Date.now(),
-        })
-      }
       const human = await readHumanEditStamp(dir)
       await recordDraftVersion(dir, {
         runId: input.executeRun.id as string,
@@ -5598,17 +5572,8 @@ async function injectedSkillsOf(
         askedVersion === undefined || askedVersion.snapshot === null
           ? join(draftDir, 'skill')
           : draftVersionSkillDir(draftDir, askedVersion)
-      /**
-       * ★ 分批第 217 批：读之前先**归位**（自愈，与版本表那条自愈同一纪律）。
-       *
-       * 产出可能落在 `skill/<dir>/SKILL.md`（起草者调了它自己的写入器）。跑完那一刻的
-       * 正常路径已经搬过了（见 finish hook），这里兜的是：跑完那条路没走到（老数据、
-       * 手工塞进来的文件、或者钩子出错）——不搬的话界面会说"没交 skill"，而文件明明在。
-       * 只对**当前版本**做：历史快照是只读证据，不改它。
-       */
-      if (askedVersion === undefined || askedVersion.snapshot === null) {
-        await adoptNestedSkillDir(join(draftDir, 'skill'))
-      }
+      // ★ 分批第 217 批：落点在**读**那一层动态识别（`readDraftSkillDir` 里的
+      //   `normalizeSkillLayout`）——磁盘一个字不动，所以这里不需要任何"先归位"的步骤。
       const dirFiles = await readDraftSkillDir(skillDirOfVersion)
       // ★ 分批第 211 批：不再有"文本兜底"——`skill/` 里没有 SKILL.md 就是**这一轮没交**，
       //   它的回话在消息流里（界面直接读 run 的最后一段文本），不假装成一份 SKILL.md。
