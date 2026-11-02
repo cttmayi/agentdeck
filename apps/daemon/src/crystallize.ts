@@ -424,8 +424,6 @@ export function buildDraftPrompt(opts: {
   const skillNames = skillSlugs.map((s) => `\`${s}\``).join('、')
   return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${skillNames === '' ? '' : `（${skillNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/\`。
 
-平台只看 \`${outputDir}/\` 里的文本文件，图片与二进制会变成乱码。
-
 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
 ${
   revised

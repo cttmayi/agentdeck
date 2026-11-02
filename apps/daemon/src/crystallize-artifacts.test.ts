@@ -263,6 +263,25 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
    *   原样相对路径。位置只由 `findSkillMd()` 动态认，其余一切（文件树、编辑器保存、差异、
    *   版本快照）都按原样路径走，所以"编辑的正是它产生的那个文件"。
    */
+  /**
+   * ★ 分批第 221 批（使用者问"为什么要写『图片与二进制会变成乱码』"）：那句从任务块删了，
+   *   换成平台**自己跳过**——以 UTF-8 硬读一坨二进制只会得到替换字符，那份"文件"对模型和人都
+   *   没意义（安装那一路也是这么做的：二进制支持文件明确"没装"而不是写坏）。
+   */
+  test('★ readDraftSkillDir：二进制文件被跳过（不读成乱码），文本照旧', async () => {
+    const probeDir = join(dir, 'binary-skill')
+    await mkdir(probeDir, { recursive: true })
+    await writeFile(join(probeDir, 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
+    // 一个真 PNG 的头（含 0 字节）——`looksBinary` 一定判成二进制
+    await writeFile(
+      join(probeDir, 'diagram.png'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]),
+    )
+    const files = await readDraftSkillDir(probeDir)
+    assert.ok(files !== null)
+    assert.deepEqual(Object.keys(files), ['SKILL.md'], '图片不进草稿（而不是变成乱码字符串）')
+  })
+
   test('★★ readDraftSkillDir：子目录落点读出来是**原样路径**（不改名、磁盘不动）', async () => {
     const probeDir = join(dir, 'nested-skill')
     await mkdir(join(probeDir, 'colleague-flow'), { recursive: true })

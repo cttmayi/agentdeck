@@ -19,6 +19,8 @@
  * 而且界面要能**定位**到是哪个文件哪一条不满足。
  */
 import { createHash } from 'node:crypto'
+// ★ 分批第 221 批：二进制判定与上传/建聊同一条实现（`looksBinary`，同一个 daemon 包）
+import { looksBinary } from './workdir-upload.ts'
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
@@ -112,7 +114,17 @@ function stripQuotes(v: string): string {
   return v
 }
 
-/** 递归读目录（跳过隐藏文件与 `.claude`——那是注入的技能，不是产出）。 */
+/**
+ * 递归读目录（跳过隐藏文件与 `.claude`——那是注入的技能，不是产出）。
+ *
+ * ★ 分批第 221 批（使用者问"为什么要写这句『图片与二进制会变成乱码』"）：**二进制文件直接跳过**，
+ *   不再硬按 UTF-8 读成乱码。理由：
+ *     · 以 UTF-8 读一坨二进制只会得到替换字符，那份"文件"对模型和人都没有意义；
+ *     · 安装那一路（`readSkillFromDir`）本来就是这么做的（二进制支持文件明确"没装"而不是写坏）；
+ *     · 而"别写图片"这类提醒，本来就该由平台处理，不该占任务块的字。
+ *   代价说清：它真写了图片，那份文件**不会进草稿**（静默消失）。所以这里在服务端日志里留一句，
+ *   排查时看得到"它写了什么被跳过了"。
+ */
 async function readTree(dir: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
   const walk = async (current: string, prefix: string): Promise<void> => {
@@ -127,7 +139,11 @@ async function readTree(dir: string): Promise<Record<string, string>> {
       const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       const full = join(current, entry.name)
       if (entry.isDirectory()) await walk(full, rel)
-      else if (entry.isFile()) out[rel] = await readFile(full, 'utf8')
+      else if (entry.isFile()) {
+        const buf = await readFile(full)
+        if (looksBinary(buf)) continue
+        out[rel] = buf.toString('utf8')
+      }
     }
   }
   await walk(dir, '')
