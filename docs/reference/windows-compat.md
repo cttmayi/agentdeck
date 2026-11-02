@@ -572,3 +572,36 @@ pnpm run probe:layout -- --dry-run 2>$null | Select-String -Pattern 'chrome'
 5. **长路径（MAX_PATH 260）**：工作目录默认在 `%USERPROFILE%\agentdeck-workspace\…`，够短；
    但技能与工具物化会再往下几层（`.claude/skills/<slug>/templates/…`）。没量过临界点。
 6. **探针在 Windows 上的可行性**（Chrome 路径、`taskkill`、`ffmpeg` 的 PATH）。
+### 12.96 Windows：`.cmd` 被当成一条带引号路径起——先补仓库级判据（分批第 226 批，2026-11；使用者报）
+
+使用者：「我发现 windows 兼容问题，说是把 `codex.cmd app-server --stdio` 当做一个带引号的完整程序
+路径启动了，导致找不到文件」。
+
+**先说现状**：这一类**修过一遍**（`docs/reference/windows-compat.md` 的 A4，2026-10-26，真机、
+也是使用者报的）——那时补的是 `windowsVerbatimArguments` 与"命令路径永远加引号"，并让"决定起什么"
+与"怎么起"只有一条通道（`spawnPlanFor`）。当前形状实跑出来是：
+
+| 场景 | 实际交出去的 |
+|---|---|
+| npm 垫片指向 `.js` | `via: 'shim'` ⇒ `<node> <…\codex.js> app-server --stdio` |
+| 垫片指向 `.exe`（原生二进制） | `via: 'cmd'` ⇒ `cmd.exe /d /s /c ""C:\…\codex.cmd" app-server --stdio"`（外层引号被 `/s` 剥掉，`verbatimArguments: true`） |
+| 读不到垫片 | 同上（`cmd` 兜底） |
+
+**但你说得对，判据有缺口**：那条仓库级检查只守"用了 `resolveSpawnTarget` 就必须用 `spawnPlanFor`"，
+**防不住新开一条裸 `spawn`**（那种路连解析都不做，Windows 上必然把 `.cmd` 当普通路径）。
+
+**这一批补的就是它**：`tests/test-safety.test.ts` 里新增一条——生产代码里直接调
+`spawn` / `spawnSync` 的文件，要么同时用 `spawnProcessTree(`（唯一出口），要么在**白名单**里
+且写明理由（现在的六条：`process-tree` 的 taskkill、`spawn-target` 无进程、
+`cli.ts` 的 `cmd /c start`、`skill-mine` 的 git、`skill-exec-check` 的解释器检查、
+`remote/server.ts` 的 `process.execPath`）。新加一条裸 spawn 且目标是 CLI ⇒ 当场红。
+
+**还没定的**：这条报错到底是哪一个分支。请给三样东西（都在这台机器上能拿）：
+
+1. 报错原文 + 出处（run 日志里「**命令行：**…」那一行最有用——它显示我们实际 exec 的是
+   `cmd.exe` 还是 `codex.cmd`）；
+2. Windows 上 `node apps/daemon/src/cli.ts --doctor codex` 输出里的 `executable.via` 与
+   `executable.args` 两栏（那一栏就是为这件事存在的）；
+3. 是不是"某个 skill 脚本／工具包"那条路在调 `codex`（那条不走我们的解析器）。
+
+判据：`check` **2200 全绿**、`typecheck` 0 错。

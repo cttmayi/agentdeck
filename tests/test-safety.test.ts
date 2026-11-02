@@ -174,6 +174,70 @@ describe('★ Windows 起进程：verbatim 旗标只有一个出口（spawnPlanF
     return out
   }
 
+  /**
+   * ★ 分批第 226 批（使用者再次报 Windows：".cmd 被当成一条带引号的完整程序路径起，
+   *   结果找不到文件"）：上一条只守"用了 `resolveSpawnTarget` 就得用 `spawnPlanFor`"——
+   *   它防不住**新开一条裸 `spawn`** 的路（那种路连解析都不做，Windows 上必然踩 `.cmd`）。
+   *
+   * 所以再加一条：生产代码里**直接**调 `child_process.spawn` / `spawnSync` 的文件，
+   * 要么同时用的是 `spawnProcessTree(`（唯一出口），要么在**白名单**里且写明理由
+   * （理由不是"历史遗留"——必须是"目标永远不是 .cmd/.bat，或者它自己就是系统工具"）。
+   *
+   * ⚠️ 判据是**文件级**的，和上一条同一个立场：要禁止的是"新增一条起进程的路却没经过
+   *    那个出口"，而不是逐个调用点做语法分析。
+   */
+  const RAW_SPAWN_ALLOWED: Array<{ file: string; reason: string }> = [
+    {
+      file: join('agent-core', 'src', 'process-tree.ts'),
+      reason: '它就是那条唯一出口；里面的裸 spawn 是 taskkill（系统工具，永远 .exe）',
+    },
+    {
+      file: join('agent-core', 'src', 'spawn-target.ts'),
+      reason: '只导出解析函数，本身不起进程（判据里的 spawn( 出现在注释与类型名中）',
+    },
+    {
+      file: join('daemon', 'src', 'cli.ts'),
+      reason: '`openBrowser`：Windows 上是 `cmd /c start <url>`（系统命令，不是 CLI 垫片）',
+    },
+    {
+      file: join('daemon', 'src', 'run-hooks', 'skill-mine.ts'),
+      reason: 'git（`which` 解析出的是 git.exe；Windows 上不存在 git.cmd 这种用法）',
+    },
+    {
+      file: join('daemon', 'src', 'skill-exec-check.ts'),
+      reason: '只跑"解释器能不能起"（node/python 等，`resolveCommand` 给的都是真实可执行）',
+    },
+    {
+      file: join('remote', 'src', 'server.ts'),
+      reason: '起的是 `process.execPath`（node 自己）',
+    },
+  ]
+
+  test('★★ 裸 spawn 的路必须在白名单里（且不是 CLI 垫片）', async () => {
+    const files = [
+      ...(await collectProdFiles(join(REPO_ROOT, 'apps'))),
+      ...(await collectProdFiles(join(REPO_ROOT, 'packages'))),
+    ]
+    const allowed = new Map(RAW_SPAWN_ALLOWED.map((a) => [a.file, a.reason]))
+    const offenders: string[] = []
+    for (const file of files) {
+      const source = await readFile(file, 'utf8')
+      // 直接 spawn / spawnSync；`spawnProcessTree(` 与 `this.#spawn({` 不算
+      const raw = /(^|[^.\w#])spawn(?:Sync)?\(/m.test(source)
+      if (!raw) continue
+      if (source.includes('spawnProcessTree(')) continue
+      const known = [...allowed.keys()].find((rel) => file.endsWith(rel))
+      if (known === undefined) offenders.push(relative(REPO_ROOT, file))
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `这些文件直接调了 spawn/spawnSync，既没走 spawnProcessTree、也不在白名单里——` +
+        `Windows 上遇到 .cmd/.bat 会被当成一条带引号的完整路径（起不来）：` +
+        `${offenders.join('、')}`,
+    )
+  })
+
   test('★ 用了 resolveSpawnTarget 的生产文件，必须同时用 spawnPlanFor', async () => {
     const files = [
       ...(await collectProdFiles(join(REPO_ROOT, 'apps'))),
