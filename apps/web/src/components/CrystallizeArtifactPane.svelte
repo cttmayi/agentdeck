@@ -318,9 +318,6 @@
     color: var(--good);
   }
 
-  .artifact-check-ok {
-    color: var(--good);
-  }
 
   .artifact-problems {
     margin: 0;

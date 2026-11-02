@@ -6677,3 +6677,34 @@ name/description = colleague-mini-flow / 当需要复用这套小流程时用
 `crystal.checksInHeader`（chip 的最近 `.pane-head` 就是产物栏的栏头，实测 true、文案
 `机械体检 通过 ✔`）与 `crystal.checksNotDuplicatedInBody`（正文里不再有那句话：搬过去就得删掉
 原来那处，否则同一句话说两次）。`check` **2199 全绿**、`typecheck` 0 错。
+
+### 12.95 「选更新 skill，点开始提炼没反应」——我上一批把门禁当死代码删了（分批第 225 批，2026-11；使用者报）
+
+使用者：「我选更新 skill 的时候，点击『开始提炼』，没有反应」。
+
+**根因（两个叠在一起，都是静默的）**：
+
+1. `CrystallizeView.applyIntake()` 开头有一道前端门禁：
+   `if (draftSkill.id === '') { error = …; return }`——而 `draftSkill` **只由「沉淀设置」那个面板加载**。
+   于是**没打开过沉淀设置**的人点下去就被静默 return。（分批第 215 批我清理"死代码"时把
+   `CrystallizeArtifactPane` 里那次 `draftSkill` 加载删了——它确实**不再显示**，但它其实是**门禁**的
+   数据来源。教训：清理前要问"它是显示，还是判据/副作用"。）
+2. 退一步说，即使它设置了 `error`，**目标态也看不见**——那段 `{#if error && targets === null}`
+   只在"targets 加载失败"时才画。于是一个 400 或一个早退，在目标态一句话都没有 ⇒ 按钮像坏的。
+
+**改法**：
+
+- **删掉那道前端门禁**。真正的判据在 daemon：`POST /api/crystallize/draft` 解析不到起草者挂的技能时
+  回 400 `draft_skill_required`，文案就指路「沉淀设置」。前端存一份可能过期的副本、再加一个静默分支，
+  正是这次坏掉的原因。
+- **目标态也要显示错误**：`{#if error && (targets === null || step === 'target')}` +
+  `data-target-error`（发起失败必须说出来）。
+- `CrystallizeIntake` 里那条**静默 return** 也补上理由：更新场景没选定技能时，按钮下面写
+  「还没选定要更新的技能（上面那份清单里点一个）」。
+
+**这类缺陷为什么探针抓不到**：它不在布局、也不在"控件在不在"——按钮存在、可点、位置对，
+只是**点了什么都不发生**。要量"点了有反应"必须真点一次，而沉淀的"开始提炼"会起一条真 run
+（假 CLI 会睡 1800s、SSE 一开虚拟时钟就冻住）——代价与风险都不该塞进探针。所以这一条落在**代码结构**上：
+不再有第二份"是否装了技能"的副本，判据只有 daemon 一处。
+
+验证：`check` **2199 全绿**、`probe:layout` **574 全绿**、`typecheck` 0 错。

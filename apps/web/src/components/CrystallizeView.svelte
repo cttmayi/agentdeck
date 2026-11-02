@@ -59,7 +59,7 @@
   //   见该文件头：legacy 父 → runes 子的 prop 更新不传播）
   import CrystallizeDraftState from './CrystallizeDraftState.svelte'
   import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
-  import { draftSkill, editor } from '../lib/crystallize-editor.svelte.ts'
+  import { editor } from '../lib/crystallize-editor.svelte.ts'
 
   /** 目标面板信息（对应 `GET /api/crystallize/targets`，含界面改版新增字段）。 */
   interface CrystallizeTargets {
@@ -797,16 +797,16 @@
     materials?: Array<{ text: string }>
   }): void {
     /**
-     * ★ 分批第 175 批（使用者定：**没装 distilly 之前不应该能沉淀**）：
-     * 起草者是"按技能干活"的，没有那份技能它就没有"怎么写"的依据 ⇒ 在**发起之前**拦住，
-     * 并说清去哪儿装（沉淀页右上「沉淀设置」）。服务端的二次拦截是下一步（要同步改夹具）。
+     * ⚠️ 分批第 225 批（使用者报「选更新 skill 时点开始提炼没反应」）：这里原来有一道
+     * **前端的门禁**——`if (draftSkill.id === '') { error = …; return }`，而 `draftSkill`
+     * 只由「沉淀设置」那个面板加载。于是**没打开过沉淀设置的人**点下去就被静默 return：
+     * `error` 又只在审阅态/`targets === null` 时渲染，目标态一句话都看不到 ⇒ 按钮像坏的。
+     * （根因是我上一批清理死代码时把这个"消费者"当成了死的——它确实不再显示，但它是**门禁**。）
+     *
+     * 现在这道门禁**删掉**：真正的判据在 daemon（`POST /api/crystallize/draft` 在"解析不到
+     * 起草者挂的技能"时回 400 `draft_skill_required`，文案就指路沉淀设置），前端不必再存一份
+     * 可能过期的副本——那正是这次坏掉的原因（一份缓存 + 一个静默分支）。
      */
-    if (draftSkill.id === '') {
-      error =
-        '还没安装「沉淀用技能」（distilly）——先去右上角「沉淀设置」里一键安装，装好之后它会自动挂到起草者身上，再回来点开始提炼。'
-      step = 'target'
-      return
-    }
     targetKind = payload.kind
     purpose = payload.purpose
     selectedSkillId = payload.skillId
@@ -1663,8 +1663,13 @@
       <!-- ★ 分批第 140 批（U4a）：步骤条已删（§12.6：「3 步步骤条 → 删除」）。
            进度由消息流的位置表达；状态在顶栏的状态徽标里（见 MainArea 的 sub 片段）。 -->
 
-      {#if error && targets === null}
-        <div class="notice bad crystal-notice">{error}</div>
+      <!--
+        ★ 分批第 225 批：**目标态也要能看见错误**。原来这里只在 `targets === null`（加载失败）
+        时显示，于是"点开始提炼 → 服务端 400 / 前端早退"在目标态**一句话都没有**，
+        按钮看起来像坏的（使用者报的正是这个）。现在目标态一律显示——发起失败必须说出来。
+      -->
+      {#if error && (targets === null || step === 'target')}
+        <div class="notice bad crystal-notice" data-target-error>{error}</div>
       {/if}
 
       <!-- ★ 分批第 141 批（U4b）：「继续 / 新起草」提示**已删**（§12.7：状态在列表行上、

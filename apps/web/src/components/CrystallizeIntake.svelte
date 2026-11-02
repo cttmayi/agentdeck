@@ -165,6 +165,14 @@
 
   const purposeMissing = $derived(kind === 'new' && purpose.trim() === '')
 
+  /**
+   * 前几问都答了才能发起。⚠️ 分批第 225 批：原来这里**静默 return**——更新场景没选到技能时
+   * 点「开始提炼」什么都不发生（使用者报的"没有反应"就是这一类）。现在把原因挂在按钮下面。
+   */
+  const cannotStart = $derived(
+    kind === 'update' && skillId === '' ? '还没选定要更新的技能（上面那份清单里点一个）' : '',
+  )
+
   function finish(): void {
     if (kind === '' || purposeMissing) return
     if (kind === 'update' && skillId === '') return
@@ -355,6 +363,9 @@
         </dl>
         {#if blocked !== undefined}
           <p class="faint small" data-intake-blocked>{blocked}</p>
+        {/if}
+        {#if cannotStart !== ''}
+          <p class="faint small" data-intake-blocked>{cannotStart}</p>
         {/if}
         <div class="intake-actions">
           <button
