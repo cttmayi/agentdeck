@@ -365,6 +365,26 @@ async function resolveLoadedSkills(
  * 于是这里只留**索引页不说、平台又真的会拒**的几件：素材在哪、产出写到哪、`SKILL.md` 的
  * frontmatter、以及"问与拒绝都用说的"（那是**输出协议**，不是写法）。
  *
+ * ══════════════════════════════════════════════════════════════════
+ * 分批第 220 批（使用者："SKILL.md 是它生成的，应该不需要细节描述才对"）：**frontmatter 那句也删了**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 按他说的去核对了一遍——用真机上装的那份 distilly 的写入器真生成一份：
+ *
+ *     python3 <distilly>/tools/skill_writer.py --action create --slug mini-flow \
+ *       --name 小流程 --meta meta.json --work work.md --persona work.md --base-dir skill
+ *
+ * 它写出 `skill/mini-flow/{SKILL.md,meta.json,manifest.json,work.md,work_skill.md,
+ * persona.md,persona_skill.md}`，其中 `SKILL.md` 的 frontmatter 是
+ * `name: colleague-mini-flow` + `description: <meta.summary>` + `user-invocable: true`。
+ * 拿平台的读取与体检量它：`mode: files`、`skillPath: mini-flow/SKILL.md`、
+ * **`validation.ok: true`**——**它产的东西本来就合规**。
+ *
+ * 所以「frontmatter 要有 name/description」是**替它复述它自己模板里的东西**，删。
+ * 代价写清：如果它不走写入器、而是手写一份没有 `description` 的 `SKILL.md`，体检会拒
+ * （「frontmatter 缺少 description（模型靠它决定何时加载）」）——那一轮白花。这是有意的取舍：
+ * 平台不再教写法，只在结算时如实说哪一条不合格。
+ *
  * 那半句"文件与路径的底线"也在分批第 219 批删了，因为平台自己已经处理了：隐藏文件读取时
  * 直接跳过（`readTree`）、`..` 与绝对路径**结构上不可能**出现（路径由目录项拼出来）、
  * 二进制 `SKILL.md` 在安装那一关会明确报 `binary_file`。留着只是"替平台解释它自己的行为"。
@@ -402,10 +422,9 @@ export function buildDraftPrompt(opts: {
   const { materialDir, outputDir, skillSlugs, revised = false, continuing = false } = opts
   // 空 = 调用方漏了注入（门禁应当先拦下来）；那时不写括号，只说"你挂着的技能"。
   const skillNames = skillSlugs.map((s) => `\`${s}\``).join('、')
-  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下。
-**落点与格式以本任务为准**：技能${skillNames === '' ? '' : `（${skillNames}）`}只借写法——它的 \`./skills/…\`、提问流程与脚本都不适用。
+  return `素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\` 下——\`SKILL.md\` 是主产出，**写法与产物格式照你挂着的技能${skillNames === '' ? '' : `（${skillNames}）`}**，只把它自己那份 \`./skills/…\` 换成这里的 \`${outputDir}/\`。
 
-平台只收这些：\`SKILL.md\` 的 frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）；文件只写文本，图片与二进制会变乱码。
+平台只看 \`${outputDir}/\` 里的文本文件，图片与二进制会变成乱码。
 
 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
 ${

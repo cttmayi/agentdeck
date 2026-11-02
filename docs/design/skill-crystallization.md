@@ -6526,3 +6526,55 @@ SKILL.md**）。`check` **2198 全绿**、`probe:layout` **571 全绿**、`typec
 判据：`crystallize.test.ts`（`SKILL.md` 的 frontmatter 在、`交不出东西就用说的` 在、`作用描述` /
 `existing-skill` 不许有）与 `crystallize-e2e.test.ts`（任务原文里有 frontmatter 契约 + `只写文本` +
 `distilly`）同步改；`check` **2198 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。
+
+### 12.90 和 distilly 核对：`SKILL.md` 的前端信息是它产的（分批第 220 批，2026-11；使用者要求核对）
+
+使用者：「不是，你要和 distilly 去核对，`SKILL.md` 是它生成的，应该不需要细节描述才对」。
+
+**按他说的真跑了那个写入器**（真机上装的那份，不是仓库里的）：
+
+```
+python3 <distilly>/tools/skill_writer.py --action create --slug mini-flow \
+  --name 小流程 --character colleague --meta meta.json --work work.md --persona work.md --base-dir skill
+```
+
+落盘：
+
+```
+skill/mini-flow/SKILL.md   ← frontmatter: name: colleague-mini-flow / description: <meta.summary> / user-invocable: true
+skill/mini-flow/{meta.json, manifest.json, work.md, work_skill.md, persona.md, persona_skill.md}
+```
+
+拿平台的读取与体检去量它：
+
+```
+mode = files ｜ skillPath = mini-flow/SKILL.md
+name/description = colleague-mini-flow / 当需要复用这套小流程时用
+体检 ok = true ｜ problems = []
+```
+
+⇒ **它产的东西本来就合规**。所以「`SKILL.md` 的 frontmatter 要有 `name`（kebab-case）与 `description`」
+是**替它复述它自己模板里的字段**——删。
+
+**现在的任务块（231 字）**：
+
+```
+素材在 `material/`（先读 `material/00-README.md`），产出写到 `skill/` 下——`SKILL.md` 是主产出，
+**写法与产物格式照你挂着的技能（`distilly`）**，只把它自己那份 `./skills/…` 换成这里的 `skill/`。
+
+平台只看 `skill/` 里的文本文件，图片与二进制会变成乱码。
+
+交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
+直接开始。
+```
+
+**代价写清（这是有意的取舍）**：如果它**不走写入器**、而是手写一份没有 `description` 的 `SKILL.md`，
+体检会拒（「frontmatter 缺少 description（模型靠它决定何时加载）」）——那一轮白花。也就是说：
+平台不再**教写法**，只在**结算时**如实说哪一条不合格。这与使用者一路定的口径一致：
+写法归技能、契约归平台；而"契约"现在只剩平台真的会读的东西（主产出叫什么、东西在哪、只收文本）。
+
+**字数**：273 → **231**。改版 285、接着说 267。全程：2785 → 685 → 540 → 383 → 320 → 273 → **231**。
+
+判据：`crystallize.test.ts` 把「frontmatter 要有 name/description」翻成**不许出现**（并保留
+"`SKILL.md` 是主产出"与"写法与产物格式照你挂着的技能"两条）；`crystallize-e2e.test.ts` 的任务原文断言
+同步改；`check` **2198 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。

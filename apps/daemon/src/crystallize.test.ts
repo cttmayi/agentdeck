@@ -611,9 +611,11 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
     assert.match(prompt, /产出写到 `skill\/`/, '产出写到哪')
-    // ★ 分批第 217 批起**落点可以在一层子目录里**（平台动态认 `SKILL.md` 在哪），所以 prompt
-    //   只点名「`SKILL.md` 的 frontmatter」而不再强写 `skill/SKILL.md` 这个绝对落点。
-    assert.match(prompt, /`SKILL\.md` 的 frontmatter/, '主产出的名字 + 契约')
+    // ★ 分批第 220 批（使用者："SKILL.md 是它生成的，应该不需要细节描述才对"）：
+    //   **frontmatter 的字段要求从 prompt 里删了**——真机核过：distilly 的写入器产出的
+    //   `SKILL.md` 自带 name/description，直接通过我们的体检。prompt 只留"主产出叫什么"。
+    assert.match(prompt, /`SKILL\.md` 是主产出/, '主产出的名字')
+    assert.doesNotMatch(prompt, /frontmatter/, '不再复述技能自己模板里的 frontmatter 字段')
     // ★ 分批第 210 批（使用者："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
     //   写法**只在技能里**。这条钉两件事：点名的是**实际注入的那份**（slug 来自挂载，
     //   不是写死的常量），并且 prompt 里**不再有**第二份写法权威。
@@ -649,10 +651,8 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
       outputDir: 'skill',
       skillSlugs: DRAFTER_SKILLS,
     })
-    assert.match(prompt, /落点与格式以本任务为准/, '优先级要写出来')
-    assert.match(prompt, /只借写法/, '技能提供的是写法，不是落点/流程')
+    assert.match(prompt, /写法与产物格式照你挂着的技能/, '写法与格式交给那份技能')
     assert.match(prompt, /`\.\/skills\/…`/, '点名它那条冲突的落点（否则模型会照抄）')
-    assert.match(prompt, /提问流程与脚本都不适用/, '它那套 intake / skill_writer 也不适用')
   })
 
   /**
@@ -678,8 +678,8 @@ describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没
       outputDir: 'skill',
       skillSlugs: [],
     })
-    // ★ 分批第 216 批：写法那一句改成"只借写法"，并加了一条**优先级**——见下面那条用例。
-    assert.match(prompt, /只借写法/)
+    // ★ 分批第 220 批：写法那一句改成"写法与产物格式照你挂着的技能"。
+    assert.match(prompt, /照你挂着的技能/)
     assert.doesNotMatch(prompt, /`distilly`/)
   })
 })
