@@ -55,7 +55,15 @@ export interface DraftArtifacts {
    *    不给「确认入库」（没有 SKILL.md，入了也必然被拒）。
    */
   mode: 'files' | 'none'
-  /** 相对路径 → 内容。`files` 态里一定有 `SKILL.md`；`none` 态里是它写过的东西（可能为空）。 */
+  /**
+   * **哪一份是 SKILL.md**（`SKILL.md` 或 `<dir>/SKILL.md`；`none` 态为 `''`）。
+   *
+   * 分批第 217 批：它可能把产出写在自己的子目录里（调 distilly 的 `skill_writer.py` 就是这样）。
+   * 平台**不改路径**，只把这个位置告诉界面——文件树默认选它、编辑器编辑它、体检解析它、
+   * 入库拿它当正文。
+   */
+  skillPath: string
+  /** 相对路径 → 内容（**磁盘上的原样路径**，不归一）。`files` 态里一定有 `SKILL.md`；`none` 态里是它写过的东西（可能为空）。 */
   files: Record<string, string>
   /** SKILL.md 的解析结果（`none` 态全空）。 */
   skillMd: SkillMd
@@ -126,8 +134,18 @@ async function readTree(dir: string): Promise<Record<string, string>> {
   return out
 }
 
-/** 校验一组文件（供 artifacts 与入库路由共用：同一套规则只写一遍）。 */
-export function validateArtifactFiles(files: Record<string, string>): {
+/**
+ * 校验一组文件（供 artifacts 与入库路由共用：同一套规则只写一遍）。
+ *
+ * `skillPath` = **哪一份是 SKILL.md**（默认根上的那份）。分批第 217 批起，起草者可能把产出
+ * 写在 `skill/<dir>/SKILL.md`（调它自己的写入器，例如 distilly 的 `tools/skill_writer.py`），
+ * 那种形状由 `findSkillMd()` 动态认出来，再把路径传进来——**文件路径本身不归一**：右侧产物栏
+ * 编辑的就是它真正写出的那个文件。
+ */
+export function validateArtifactFiles(
+  files: Record<string, string>,
+  skillPath: string = 'SKILL.md',
+): {
   ok: boolean
   problems: ArtifactProblem[]
 } {
@@ -137,8 +155,8 @@ export function validateArtifactFiles(files: Record<string, string>): {
   if (names.length === 0) {
     problems.push({ file: '', message: '没有任何文件' })
   }
-  if (!names.includes('SKILL.md')) {
-    problems.push({ file: 'SKILL.md', message: '缺少 SKILL.md（技能正文必须在根上）' })
+  if (skillPath === '' || files[skillPath] === undefined) {
+    problems.push({ file: 'SKILL.md', message: '缺少 SKILL.md（技能正文得有这一份）' })
   }
   if (names.length > MAX_FILES) {
     problems.push({ file: '', message: `文件太多（${names.length} > ${MAX_FILES}），考虑合并同主题文件` })
@@ -160,23 +178,23 @@ export function validateArtifactFiles(files: Record<string, string>): {
     problems.push({ file: '', message: `总量过大（${Math.round(total / 1024)} KB > 1 MB）` })
   }
 
-  const skillMd = files['SKILL.md']
+  const skillMd = files[skillPath]
   if (skillMd !== undefined) {
     const parsed = parseSkillMd(skillMd)
     if (!skillMd.replace(/^\uFEFF/, '').trimStart().startsWith('---')) {
       // 把当前首行引出来：只说"缺少 frontmatter"的话，使用者还得自己找是哪一行挡着
       problems.push({
-        file: 'SKILL.md',
+        file: skillPath,
         message: `frontmatter 必须在第一行（现在是「${firstLineOf(skillMd)}」）`,
       })
     } else {
       if (parsed.name === '') {
-        problems.push({ file: 'SKILL.md', message: 'frontmatter 缺少 name' })
+        problems.push({ file: skillPath, message: 'frontmatter 缺少 name' })
       } else if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(parsed.name)) {
-        problems.push({ file: 'SKILL.md', message: `name 必须是 kebab-case（现在是「${parsed.name}」）` })
+        problems.push({ file: skillPath, message: `name 必须是 kebab-case（现在是「${parsed.name}」）` })
       }
       if (parsed.description === '') {
-        problems.push({ file: 'SKILL.md', message: 'frontmatter 缺少 description（模型靠它决定何时加载）' })
+        problems.push({ file: skillPath, message: 'frontmatter 缺少 description（模型靠它决定何时加载）' })
       }
     }
     /**
@@ -346,74 +364,41 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
     return null
   }
   const files = await readTree(dir)
-  if (Object.keys(files).length === 0) return null
-  // ★ 分批第 217 批：落点归一只在**读**这一处做（磁盘不动）——见 `normalizeSkillLayout`。
-  return normalizeSkillLayout(files)
+  return Object.keys(files).length === 0 ? null : files
 }
 
 /**
- * `skill/` 下**唯一一层子目录**里的 `SKILL.md`（`<dir>/SKILL.md`）——把那些子目录名列出来。
+ * **动态认出哪一份是 SKILL.md**（分批第 217 批，使用者定："不要搬，动态识别位置"）。
  *
- * ★ 分批第 217 批（使用者定："可以是 skill 目录，也可以是 skill 下的子目录，动态侦测"）：
- *   起草者可能不是"手写 `skill/SKILL.md`"，而是**调它自己的写入器**——比如真机上装的那份
- *   distilly 的 `tools/skill_writer.py`，它的落点是 `<base-dir>/<slug>/SKILL.md`
- *   （我实跑过：`out/probe-flow/SKILL.md` + `meta.json` + `work.md` + `persona.md` + …）。
- *   于是同一次起草可能产出 `skill/<slug>/SKILL.md` 这种形状。
+ * 起草者不一定手写 `skill/SKILL.md`——它可能调自己那份写入器（真机上装的 distilly 有
+ * `tools/skill_writer.py`，落点是 `<base-dir>/<slug>/SKILL.md`）。所以产物可能是
+ * `skill/<dir>/SKILL.md`。
  *
- * ⚠️ 只认**一层**：再深（`a/b/SKILL.md`）不猜——那已经是"它自己的私有目录结构"，收进来
- *    不会是我们想要的那份技能。
+ * ⚠️ **只认位置，不改路径**（使用者："右侧产物的编辑也应该编辑它产生的"）：返回的是它**真正
+ *    写在磁盘上的相对路径**，右侧文件树、编辑器、保存、差异、版本快照全都按这个路径走——
+ *    人在编辑器里保存时写回的就是同一份文件，不会凭空多出一份根上的 `SKILL.md`。
+ *
+ * 只认**一层**：再深（`a/b/SKILL.md`）不猜（那是它自己的私有结构）。多份也不猜。
  */
-function nestedSkillDirs(files: Record<string, string>): string[] {
-  const out = new Set<string>()
+export interface SkillMdSpot {
+  /** 认出来的 SKILL.md 相对路径（`SKILL.md` 或 `<dir>/SKILL.md`）；`''` = 没认出来。 */
+  path: string
+  /** 根上之外**其他**那几份（>1 时说明它不是唯一，`path` 为空、要如实报）。 */
+  others: string[]
+}
+
+export function findSkillMd(files: Record<string, string>): SkillMdSpot {
+  if (files['SKILL.md'] !== undefined) return { path: 'SKILL.md', others: [] }
+  const nested: string[] = []
   for (const rel of Object.keys(files)) {
     const m = /^([^/]+)\/SKILL\.md$/.exec(rel)
     const dir = m?.[1]
     if (dir === undefined || dir === '.' || dir === '..') continue
-    out.add(dir)
+    nested.push(rel)
   }
-  return [...out].sort()
-}
-
-/** 把 `<dir>/` 这个前缀从一份文件表里剥掉：磁盘上的子目录 → 逻辑上的根。 */
-function rebaseToRoot(files: Record<string, string>, dir: string): Record<string, string> {
-  const prefix = `${dir}/`
-  const out: Record<string, string> = {}
-  for (const [rel, text] of Object.entries(files)) {
-    if (!rel.startsWith(prefix)) continue
-    out[rel.slice(prefix.length)] = text
-  }
-  return out
-}
-
-/**
- * **读的时候把落点归一**——磁盘一个字不动（分批第 217 批，使用者定："不要搬，动态识别位置"）。
- *
- * 三种形状：
- *   · 根上有 `SKILL.md` ⇒ 就用它；若还有**子目录里也放着 `SKILL.md`**（早前落点的残留），
- *     把那些子树整棵遮掉——否则同一份技能在树里出现两次，入库也会带着两份。
- *   · 根上没有、但**唯一一层**子目录里有 ⇒ 以那一层为根（`rebaseToRoot`），路径全部变
- *     相对根的（`SKILL.md`、`work.md`…）。
- *   · 其它（多份 / 更深）⇒ **原样返回**，由 `assembleArtifacts` 如实报"不知道收哪一份"。
- *
- * 为什么放在**读**这一层：磁盘上的布局是 agent 的事（它可能调自己的写入器，例如 distilly 的
- * `tools/skill_writer.py` 落点是 `<base-dir>/<slug>/SKILL.md`），而平台的编辑器、差异对比、
- * 版本快照、入库都按"`skill/` 下的相对路径"说话。归一只做一次、在唯一入口做，下游就都一致。
- *
- * ⚠️ 不搬的理由（使用者明确要求）：搬是**写**，会在勘察/读取的路径上留下副作用；而
- *    "读到什么就是什么"更好推理。代价是磁盘上可能同时存在 `skill/<dir>/SKILL.md` 与后来
- *    人手保存出的 `skill/SKILL.md`——所以上面那一条**遮掉残留子树**是必须的，不是可选。
- */
-export function normalizeSkillLayout(files: Record<string, string>): Record<string, string> {
-  if (files['SKILL.md'] !== undefined) {
-    const hidden = nestedSkillDirs(files)
-    if (hidden.length === 0) return files
-    return Object.fromEntries(
-      Object.entries(files).filter(([rel]) => !hidden.some((d) => rel.startsWith(`${d}/`))),
-    )
-  }
-  const nested = nestedSkillDirs(files)
-  if (nested.length === 1) return rebaseToRoot(files, nested[0]!)
-  return files
+  nested.sort()
+  if (nested.length === 1) return { path: nested[0]!, others: [] }
+  return { path: '', others: nested }
 }
 
 /**
@@ -436,34 +421,38 @@ export function normalizeSkillLayout(files: Record<string, string>): Record<stri
 export function assembleArtifacts(dirFiles: Record<string, string> | null): DraftArtifacts {
   if (dirFiles !== null) {
     /**
-     * ★ 分批第 217 批（使用者定："不要搬，动态识别位置"）：落点归一**在读这一层做**
-     * （`normalizeSkillLayout`：根上有就用根上的、唯一子目录里有就以那一层为根、残留子树遮掉）。
-     * 这里拿到的是归一到根的路径，于是编辑器/差异/入库看到的是同一套相对路径，磁盘不动。
+     * ★ 分批第 217 批（使用者定："不要搬，动态识别位置"）；再一版（使用者："右侧产物的编辑
+     *   也应该编辑它产生的"）：**只认位置，路径原样**。
+     *
+     * 认出来的路径（`SKILL.md` 或 `<dir>/SKILL.md`）原样给界面 ⇒ 文件树显示的是它**真正写出**
+     * 的那份，人在编辑器里保存时写回同一份文件；解析 frontmatter、体检都按那个路径走。
+     * 磁盘上的路径与逻辑上的路径**始终是同一个**，不会凭空多出一份根上的 `SKILL.md`。
      *
      * ⚠️ 多份 `SKILL.md` 不猜：它自己也没想清楚要交哪份，如实报出来让人选。
      */
-    const files = normalizeSkillLayout(dirFiles)
-    if (files['SKILL.md'] !== undefined) {
+    const spot = findSkillMd(dirFiles)
+    if (spot.path !== '') {
       return {
         mode: 'files',
-        files,
-        skillMd: parseSkillMd(files['SKILL.md']),
-        validation: validateArtifactFiles(files),
+        files: dirFiles,
+        skillPath: spot.path,
+        skillMd: parseSkillMd(dirFiles[spot.path] ?? ''),
+        validation: validateArtifactFiles(dirFiles, spot.path),
       }
     }
-    const nested = nestedSkillDirs(dirFiles)
-    if (nested.length > 1) {
+    if (spot.others.length > 1) {
       return {
         mode: 'none',
         files: dirFiles,
+        skillPath: '',
         skillMd: { name: '', description: '', body: '', raw: '' },
         validation: {
           ok: false,
           problems: [
             {
               file: '',
-              message: `\`skill/\` 下有多份 SKILL.md（${nested
-                .map((d) => `\`${d}/SKILL.md\``)
+              message: `\`skill/\` 下有多份 SKILL.md（${spot.others
+                .map((rel) => `\`${rel}\``)
                 .join('、')}）——不知道收哪一份，请只留一份`,
             },
           ],
@@ -474,6 +463,7 @@ export function assembleArtifacts(dirFiles: Record<string, string> | null): Draf
   return {
     mode: 'none',
     files: dirFiles ?? {},
+    skillPath: '',
     skillMd: { name: '', description: '', body: '', raw: '' },
     validation: {
       ok: false,

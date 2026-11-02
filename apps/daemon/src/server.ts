@@ -139,6 +139,7 @@ import {
 import {
   assembleArtifacts,
   draftVersionSkillDir,
+  findSkillMd,
   parseSkillMd,
   readDraftVersions,
   // ★ 分批第 22 批：剔掉版本表里"别的链"的条目（真机上 `9D67DN` 的目录里混着 `H5YM0E` 的 4 条）
@@ -5596,6 +5597,8 @@ async function injectedSkillsOf(
       sendJson(res, 200, {
         status: draftRun.status,
         mode: artifacts.mode,
+        /** 分批第 217 批：哪一份是 SKILL.md（界面默认选它、编辑器编辑它）。 */
+        skillPath: artifacts.skillPath,
         files: artifacts.files,
         skillMd: artifacts.skillMd,
         validation: artifacts.validation,
@@ -6589,13 +6592,30 @@ async function injectedSkillsOf(
         }
         normalizedFiles[rel] = value
       }
-      const skillMdRaw = normalizedFiles['SKILL.md']
-      if (skillMdRaw === undefined || skillMdRaw.trim() === '') {
-        sendJson(res, 400, { error: '缺少 SKILL.md', code: 'skill_md_required' })
+      /**
+       * ★ 分批第 217 批：**入库时按同一套规则重新认一次 SKILL.md 在哪**（不信任客户端说的，
+       *   与"体检再算一遍"同一个立场）。它可能在自己那层子目录里（`skill/<dir>/SKILL.md`）——
+       *   正文取那一份，路径**不改**：支持文件保持磁盘上的原样相对路径。
+       */
+      const spot = findSkillMd(normalizedFiles)
+      if (spot.path === '') {
+        sendJson(res, 400, {
+          error:
+            spot.others.length > 1
+              ? `\`skill/\` 下有多份 SKILL.md（${spot.others.join('、')}）——请只留一份再入库`
+              : '缺少 SKILL.md',
+          code: spot.others.length > 1 ? 'skill_md_ambiguous' : 'skill_md_required',
+          ...(spot.others.length > 1 ? { candidates: spot.others } : {}),
+        })
+        return
+      }
+      const skillMdRaw = normalizedFiles[spot.path] ?? ''
+      if (skillMdRaw.trim() === '') {
+        sendJson(res, 400, { error: `SKILL.md（${spot.path}）是空的`, code: 'skill_md_required' })
         return
       }
       // 与界面同一套规则再算一遍（界面画对了、请求被手工改过也拦得住）
-      const check = validateArtifactFiles(normalizedFiles)
+      const check = validateArtifactFiles(normalizedFiles, spot.path)
       if (!check.ok) {
         sendJson(res, 400, {
           error: check.problems.map((p) => (p.file === '' ? p.message : `${p.file}：${p.message}`)).join('；'),
@@ -6617,7 +6637,10 @@ async function injectedSkillsOf(
         validated = resolvePayloadEntry({
           slug,
           body: skillMdRaw,
-          files: normalizedFiles,
+          // 正文那一份不进支持文件：装出来的技能里再放一份 SKILL.md 就是重复。
+          files: Object.fromEntries(
+            Object.entries(normalizedFiles).filter(([rel]) => rel !== spot.path),
+          ),
           sourceRef: `mine:${slug}`,
         })
       } catch (err) {

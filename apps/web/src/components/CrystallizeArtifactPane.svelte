@@ -28,6 +28,8 @@
     status: string
     /** `files` = 交了东西；`none` = 这一轮只是说了话（没交 skill，分批第 211 批）。 */
     mode: 'files' | 'none'
+    /** 哪一份是 SKILL.md（`SKILL.md` 或 `<dir>/SKILL.md`；分批第 217 批，路径不归一）。 */
+    skillPath: string
     files: Record<string, string>
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
     target: { kind: string } | null

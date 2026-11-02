@@ -12,6 +12,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   assembleArtifacts,
+  findSkillMd,
   hashDraftFiles,
   isSafeDraftRelPath,
   parseSkillMd,
@@ -240,29 +241,29 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
    * `<base-dir>/<slug>/SKILL.md`）⇒ 产出在 `skill/<dir>/` 里。**唯一一层子目录也认**：
    * 在内存里归一到根，于是编辑器/差异/入库看到的是同一套相对路径。
    */
-  test('files：唯一一层子目录里的 SKILL.md 也认（读时归一到根，磁盘不动）', () => {
+  test('files：子目录里的 SKILL.md 也认——但**路径原样**（不动它产生的东西）', () => {
     const artifacts = assembleArtifacts({
       'colleague-flow/SKILL.md': GOOD_SKILL_MD,
       'colleague-flow/work.md': '# Work\n',
       'colleague-flow/meta.json': '{}',
     })
     assert.equal(artifacts.mode, 'files')
+    assert.equal(artifacts.skillPath, 'colleague-flow/SKILL.md', '认出位置，但不改名')
     assert.equal(artifacts.skillMd.name, 'review-report', 'frontmatter 照样能解析')
     assert.deepEqual(
       Object.keys(artifacts.files).sort(),
-      ['SKILL.md', 'meta.json', 'work.md'],
-      '路径归一到根（`colleague-flow/` 前缀剥掉）',
+      ['colleague-flow/SKILL.md', 'colleague-flow/meta.json', 'colleague-flow/work.md'],
+      '★★ 文件表就是磁盘上的原样路径（右侧编辑器编辑的正是它产生的那个文件）',
     )
     assert.equal(artifacts.validation.ok, true)
   })
 
   /**
-   * ★ 分批第 217 批（使用者定："不要搬，动态识别位置"）：归一只发生在**读**的时候。
-   *
-   * 判据两半：① `readDraftSkillDir()` 给出来的路径已经是相对根的（读的人不用知道它在子目录里）；
-   * ② **磁盘上的文件一个都没动**（不搬——读路径上不留副作用）。
+   * ★ 分批第 217 批（使用者两句话定的）：**不搬文件、也不改路径**——读出来的就是磁盘上的
+   *   原样相对路径。位置只由 `findSkillMd()` 动态认，其余一切（文件树、编辑器保存、差异、
+   *   版本快照）都按原样路径走，所以"编辑的正是它产生的那个文件"。
    */
-  test('★★ readDraftSkillDir：子目录落点读出来就是根上的相对路径，且磁盘不改', async () => {
+  test('★★ readDraftSkillDir：子目录落点读出来是**原样路径**（不改名、磁盘不动）', async () => {
     const probeDir = join(dir, 'nested-skill')
     await mkdir(join(probeDir, 'colleague-flow'), { recursive: true })
     await writeFile(join(probeDir, 'colleague-flow', 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
@@ -270,30 +271,17 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
 
     const files = await readDraftSkillDir(probeDir)
     assert.ok(files !== null)
-    assert.deepEqual(Object.keys(files).sort(), ['SKILL.md', 'work.md'], '读出来就是根上的路径')
-    // ② 磁盘没动：原来的子目录还在
-    assert.ok(
-      await readFile(join(probeDir, 'colleague-flow', 'SKILL.md'), 'utf8').catch(() => null),
-      '不搬：子目录里的文件仍在（读路径不留副作用）',
-    )
-  })
-
-  test('★★ readDraftSkillDir：根上已有 SKILL.md ⇒ 子目录那棵残留树被遮掉（不出两份）', async () => {
-    const probeDir = join(dir, 'mixed-skill')
-    await mkdir(join(probeDir, 'colleague-flow'), { recursive: true })
-    await writeFile(join(probeDir, 'SKILL.md'), GOOD_SKILL_MD, 'utf8')
-    await writeFile(join(probeDir, 'work.md'), '# 新的\n', 'utf8')
-    await writeFile(join(probeDir, 'colleague-flow', 'SKILL.md'), '# 上一轮的残留\n', 'utf8')
-    await writeFile(join(probeDir, 'colleague-flow', 'work.md'), '# 旧的\n', 'utf8')
-
-    const files = await readDraftSkillDir(probeDir)
-    assert.ok(files !== null)
     assert.deepEqual(
       Object.keys(files).sort(),
-      ['SKILL.md', 'work.md'],
-      '根上的那份说了算，残留子目录不进产物（否则树里/入库里都是两份）',
+      ['colleague-flow/SKILL.md', 'colleague-flow/work.md'],
+      '原样路径（不归一到根）',
     )
-    assert.match(files['work.md'] ?? '', /新的/)
+    // 认得出位置，但它还在原地
+    assert.equal(findSkillMd(files).path, 'colleague-flow/SKILL.md')
+    assert.ok(
+      await readFile(join(probeDir, 'colleague-flow', 'SKILL.md'), 'utf8').catch(() => null),
+      '磁盘一个字没动',
+    )
   })
 
   test('none：多份 SKILL.md ⇒ 不猜，如实报是哪几份', () => {
@@ -302,6 +290,7 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
       'b/SKILL.md': GOOD_SKILL_MD,
     })
     assert.equal(artifacts.mode, 'none')
+    assert.equal(artifacts.skillPath, '')
     assert.match(artifacts.validation.problems[0]?.message ?? '', /多份 SKILL\.md/)
     assert.match(artifacts.validation.problems[0]?.message ?? '', /a\/SKILL\.md/)
   })

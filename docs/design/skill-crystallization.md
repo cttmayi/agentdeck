@@ -6421,39 +6421,44 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 ① 就它（写法借它、契约归平台，本批的做法）；② 另装一条真正"怎么写 skill"的技能；
 ③ 把 distilly 的 create/evolve 流程当成沉淀**本身**的编排（那是 §11 的下一代草案，要动 run 模型）。
 
-### 12.87 产出落在 `skill/<子目录>/` 里也认：**读的时候动态识别**（分批第 217 批，2026-11；使用者定）
+### 12.87 产出落在 `skill/<子目录>/` 里也认：**只认位置，路径原样**（分批第 217 批，2026-11；使用者定）
 
 使用者看了 distilly 的 `tools/skill_writer.py` 之后判断：「既然有 tools/skill_writer.py，那就代表
 不需要描述 skill 格式呀」；我实测那个写入器（`--action create --character colleague --base-dir out`）
 写出的是 `out/probe-flow/SKILL.md` + `meta.json` + `manifest.json` + `work.md` / `persona.md` / …，
 落点是 `<base-dir>/<slug>/SKILL.md`——**就算让它写进我们的目录，也是 `skill/<slug>/SKILL.md`，
-而平台只认 `skill/SKILL.md`**（用 `assembleArtifacts` 量过：`mode: none`）。使用者定：
-「B，可以做的兼容些，可以是 skill 目录，也可以是 skill 下的子目录，动态侦测 skill 目录下的 SKILL.md」，
-并明确否掉了我第一版的实现：「**不对，不要搬，动态识别位置**」。
+而平台只认 `skill/SKILL.md`**（用 `assembleArtifacts` 量过：`mode: none`）。于是使用者定：
+「B，可以做的兼容些，可以是 skill 目录，也可以是 skill 下的子目录，动态侦测 skill 目录下的 SKILL.md」。
 
-**最终做法：归一只发生在「读」这一处，磁盘一个字不动。**
+**过程中被否掉两次，两次都对**（都记在这里，免得以后有人重走）：
 
-`normalizeSkillLayout(files)` 三种形状：
+1. 第一版：跑完把子目录里的文件**搬到** `skill/` 根上，读产物时再兜一次。
+   ⇒ 使用者：「**不对，不要搬，动态识别位置**」。搬是**写**，会在勘察/读取的路径上留下副作用。
+2. 第二版：不搬了，但在**读**的时候把路径**归一到根**（`skill/<dir>/x.md` → `x.md`），
+   并在"根上已有一份"时**遮掉**子目录那棵树。
+   ⇒ 使用者：「**为什么还可能存在后来你手工保存呢（`skill/SKILL.md`）？右侧产物的编辑也应该
+   编辑它产生的呀**」。归一路径 = 平台自己造了一份根上的文件，人一保存就多出一份——那正是
+   第二版要用"遮掉"去补的洞：**补洞的动作本身就是问题的证据**。
 
-| 读到的形状 | 怎么认 |
-|---|---|
-| 根上有 `SKILL.md` | 就用它；若**子目录里也放着 `SKILL.md`**（早前落点的残留），把那些子树整棵**遮掉**——否则同一份技能在树里/入库里出现两份 |
-| 根上没有、**唯一一层**子目录里有 | 以那一层为根（`rebaseToRoot`）：路径全部变成相对根的（`SKILL.md`、`work.md`…） |
-| 多份 / 更深 | **原样返回**，由 `assembleArtifacts` 如实报「不知道收哪一份」 |
+**最终做法：`findSkillMd()` 只认位置，路径一律原样。**
 
-放在哪一层：`readDraftSkillDir()`（唯一的目录读入口）里调用它 ⇒ 编辑器、差异对比、版本快照、
-入库拿到的都是**同一套相对路径**，磁盘布局是 agent 的事。
-
-⚠️ **为什么"搬"被否掉**（我第一版就是搬）：搬是**写**，会在勘察/读取的路径上留下副作用，
-而且"看到什么就动什么"很难推理；使用者要的是**识别**，不是修正。代价说清：不搬的话，磁盘上可能
-同时存在 `skill/<dir>/SKILL.md` 与后来人手保存出的 `skill/SKILL.md`——所以"根上已有时遮掉残留
-子树"那一条是**必须的**，不是可选（否则编辑器里会是两份）。
+- `findSkillMd(files)`：根上有 `SKILL.md` ⇒ `SKILL.md`；否则**唯一一层**子目录里有 ⇒
+  `<dir>/SKILL.md`；多份 / 更深 ⇒ `path: ''` + `others`（**不猜**）。
+- `DraftArtifacts.skillPath`：把那个位置告诉界面。`files` 仍是**磁盘上的原样路径**。
+- 界面：文件树默认选中 `skillPath` 那一份（`editor.defaultFile`），编辑器编辑它、保存写回它
+  ——**编辑的正是它产生的那个文件**，磁盘上永远只有这一份。
+- 体检：`validateArtifactFiles(files, skillPath)`——frontmatter 检查针对那一份，问题也指到它的
+  实际路径（`colleague-flow/SKILL.md：frontmatter 缺少 name`）。
+- 入库：服务端**自己再认一次**（不信客户端说的，与"体检再算一遍"同一立场）：正文取 `skillPath`
+  那一份、支持文件保持原样路径、**正文那一份不进支持文件**（否则装出来的技能里多一份 `SKILL.md`）。
+  多份 ⇒ 400 `skill_md_ambiguous` 并列出候选。
+- `readDraftSkillDir()` 回到**纯读**：不归一、不遮、不搬。版本快照、差异、素材全都按原样路径。
 
 **prompt 不变**：仍然只说"产出写到 `skill/`、它的 `./skills/…` 与脚本不适用"。兼容是**安全网**，
-不是邀请——把"你也可以写子目录"写进 prompt 只会让它更随意。
+不是邀请。
 
-**判据**：`crystallize-artifacts.test.ts` 四条（`assembleArtifacts`：唯一子目录 ⇒ 归一到根且体检
-通过、多份 ⇒ `none` 且点名两份；`readDraftSkillDir`：子目录落点读出来就是根上的相对路径**且磁盘
-不改**、根上已有 ⇒ 残留子树被遮掉）；`crystallize-e2e.test.ts` 一条端到端（假后端把产出写进
-`skill/colleague-flow/` ⇒ 接口 `mode: 'files'` 且路径无前缀、**磁盘上它写在哪就还在哪、没有多出
-一份根上的 SKILL.md**、照常能入库）。`check` **2199 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。
+**判据**：`crystallize-artifacts.test.ts` 四条（子目录 ⇒ `skillPath` 认得出但**路径原样**、体检仍通过；
+多份 ⇒ `none` 且点名两份；`readDraftSkillDir` 读出**原样路径**且磁盘不动）；`crystallize-e2e.test.ts`
+一条端到端（假后端写进 `skill/colleague-flow/` ⇒ 接口 `mode:'files'` + `skillPath` 指那一份、
+files 里是原样路径、**磁盘上它写在哪就还在哪**、按原样路径入库成功且装出来的技能里**没有第二份
+SKILL.md**）。`check` **2198 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。

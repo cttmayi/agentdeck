@@ -29,6 +29,8 @@ export interface Artifacts {
   status: string
   /** `files` = 交了东西；`none` = 这一轮只是说了话（没交 skill，分批第 211 批）。 */
   mode: 'files' | 'none'
+  /** 哪一份是 SKILL.md（`SKILL.md` 或 `<dir>/SKILL.md`；`none` 态为空串，分批第 217 批）。 */
+  skillPath: string
   files: Record<string, string>
   skillMd: { name: string; description: string; body: string; raw: string }
   validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
@@ -248,6 +250,9 @@ class DraftEditor {
 
   /** 默认选中 SKILL.md；没有就选第一个文件（起草者写歪时也别给空白页）。 */
   defaultFile(res: Artifacts): string {
+    // ★ 分批第 217 批：SKILL.md 可能在它自己那层子目录里（`<dir>/SKILL.md`）——后端认出
+    //   位置（`skillPath`），这里照它选，别写死根上的名字。
+    if (res.skillPath !== '' && res.files[res.skillPath] !== undefined) return res.skillPath
     if (res.files['SKILL.md'] !== undefined) return 'SKILL.md'
     const first = Object.keys(res.files).sort()[0]
     return first ?? ''

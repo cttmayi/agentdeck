@@ -956,13 +956,18 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     } finally {
       fakeBackend.draftFiles = previous
     }
-    // ① 接口：files（不是 none），路径已经归一到根
-    const art = (await getJsonFile<{ mode: string; files: Record<string, string> }>(
-      `/api/crystallize/artifacts?draftRunId=${draftRunId}`,
-    ))
+    // ① 接口：files（不是 none）——**路径原样**，只多给一个"哪份是 SKILL.md"
+    const art = (await getJsonFile<{
+      mode: string
+      skillPath: string
+      files: Record<string, string>
+    }>(`/api/crystallize/artifacts?draftRunId=${draftRunId}`))
     assert.equal(art.mode, 'files', '子目录里的 SKILL.md 也要认')
-    assert.ok('SKILL.md' in art.files, '归一到根')
-    assert.ok(!('colleague-flow/SKILL.md' in art.files), '不再带子目录前缀')
+    assert.equal(art.skillPath, 'colleague-flow/SKILL.md', '认出位置')
+    assert.ok(
+      'colleague-flow/SKILL.md' in art.files,
+      '★★ 路径原样：右侧编辑器编辑的正是它产生的那个文件（不凭空造一份根上的）',
+    )
     // ② 磁盘：**原样不动**（使用者定："不要搬，动态识别位置"）——归一只在读的时候发生
     const skillDir = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
     assert.ok(
@@ -974,14 +979,26 @@ describe('四轮：素材落盘 + 产出读目录', () => {
       null,
       '没有凭空多出一份根上的 SKILL.md',
     )
-    // ③ 入库：照常走
+    // ③ 入库：按**原样路径**提交（与界面一致）——服务端自己再认一次哪份是正文
     const done = await commit({
       draftRunId,
       target: { kind: 'new' },
       slug: 'colleague-flow',
-      files: { 'SKILL.md': art.files['SKILL.md']!, 'work.md': art.files['work.md'] ?? '' },
+      files: {
+        'colleague-flow/SKILL.md': art.files['colleague-flow/SKILL.md']!,
+        'colleague-flow/work.md': art.files['colleague-flow/work.md'] ?? '',
+      },
     })
     assert.equal(done.status, 201, JSON.stringify(done.body))
+    const installed = await readFile(join(mineRoot, 'colleague-flow', 'SKILL.md'), 'utf8')
+    assert.match(installed, /name: colleague-flow/, '正文取自那份带位置的 SKILL.md')
+    assert.equal(
+      await readFile(join(mineRoot, 'colleague-flow', 'colleague-flow', 'SKILL.md'), 'utf8').catch(
+        () => null,
+      ),
+      null,
+      '装出来的技能里不该再多一份 SKILL.md（正文那一份不进支持文件）',
+    )
   })
 
   test('★ 没交 SKILL.md ⇒ artifacts 是 none；它写过的东西仍然带着', async () => {
