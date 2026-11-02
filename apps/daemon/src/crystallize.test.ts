@@ -602,7 +602,7 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
   })
 })
 
-describe('buildDraftPrompt：起草指令（210 批：写法归技能，prompt 只留平台硬事实）', () => {
+describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prompt 只留平台硬事实）', () => {
   test('指针式：素材目录 + 点名注入的技能 + 平台硬事实，没有写作规范正文', () => {
     const prompt = buildDraftPrompt({
       scope: 'conversation',
@@ -620,8 +620,11 @@ describe('buildDraftPrompt：起草指令（210 批：写法归技能，prompt �
     assert.doesNotMatch(prompt, /writing-skills/, '平台自带的写作规范不再进 prompt')
     assert.doesNotMatch(prompt, /## When to Use|## Procedure/, '写作章节要求不在 prompt 里（归技能）')
     assert.doesNotMatch(prompt, /【写作规范】/, '那一段连同标题一起删了')
-    assert.match(prompt, /QUESTIONS\.md/, '提问的落点是平台协议文件名（平台靠它认出"只在问"）')
-    assert.match(prompt, /REFUSED\.md/, '不沉淀的落点是平台协议文件名（界面据此显示"放弃"）')
+    // ★ 分批第 211 批（使用者："人之间在对话框里看 AI 的回答就好了，应该不需要 REFUSED
+    //   的特殊处理才对"）：三个协议文件名（QUESTIONS / REFUSED / answers）全部消失——
+    //   平台要认的状态是"这一轮有没有交 SKILL.md"，而问题与拒绝的理由都在它的回复里。
+    assert.doesNotMatch(prompt, /QUESTIONS\.md|REFUSED\.md|answers\.md/, '不再有协议文件名')
+    assert.match(prompt, /都写在你的回复里/, '问与拒绝都让它在回复里说')
     assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
     // 篇幅也是判据：这一段每轮都要被读，内联规范那版是 2785 字。

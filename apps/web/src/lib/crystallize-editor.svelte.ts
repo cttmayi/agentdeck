@@ -27,8 +27,8 @@ import { api } from './api.ts'
 /** `GET /api/crystallize/artifacts` 的返回（与 daemon 的 `crystallize-artifacts.ts` 对齐）。 */
 export interface Artifacts {
   status: string
-  mode: 'files' | 'text' | 'refused'
-  refusalReason?: string
+  /** `files` = 交了东西；`none` = 这一轮只是说了话（没交 skill，分批第 211 批）。 */
+  mode: 'files' | 'none'
   files: Record<string, string>
   skillMd: { name: string; description: string; body: string; raw: string }
   validation: { ok: boolean; problems: Array<{ file: string; message: string }> }

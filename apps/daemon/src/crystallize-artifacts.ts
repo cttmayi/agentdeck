@@ -43,16 +43,21 @@ export interface ArtifactProblem {
 
 export interface DraftArtifacts {
   /**
-   * `files` = agent 写出了目录（多文件成立）；`text` = 退回单文件文本
-   * （没有写文件能力的 runtime，或没写出目录）；`refused` = 起草者判定素材不可沉淀
-   * （写了 `REFUSED.md`，带原因——界面只给「重新起草 / 放弃」，不给入库）。
+   * 只有两态（分批第 211 批）：
+   *   · `files` = 这一轮交了东西（`skill/SKILL.md` 存在）；
+   *   · `none`  = **没交**——它只是说了话（在问、在说"不值得做"、或者干脆没吭声）。
+   *
+   * ⚠️ 从前这里是三态（`files` / `text` / `refused`），后两个都靠**协议文件**：
+   *    `REFUSED.md` 表示"判定不可沉淀"、`text` 是"把回话当 SKILL.md"的兜底。
+   *    使用者定的口径是「人之间在对话框里看 AI 的回答就好了」——拒绝理由本来就是它说的话，
+   *    "没交"这件事平台看 `SKILL.md` 在不在就够了。于是这两种特判一起删掉：
+   *    `none` 那一屏就是**它说的话 + 三个出口**（接着说 / 重新起草 / 放弃），不画结论条、
+   *    不给「确认入库」（没有 SKILL.md，入了也必然被拒）。
    */
-  mode: 'files' | 'text' | 'refused'
-  /** `refused` 时的原因（REFUSED.md 的内容）。 */
-  refusalReason?: string
-  /** 相对路径 → 内容。SKILL.md 一定在里面（文本兜底时它是唯一的一项）。 */
+  mode: 'files' | 'none'
+  /** 相对路径 → 内容。`files` 态里一定有 `SKILL.md`；`none` 态里是它写过的东西（可能为空）。 */
   files: Record<string, string>
-  /** SKILL.md 的解析结果。 */
+  /** SKILL.md 的解析结果（`none` 态全空）。 */
   skillMd: SkillMd
   /** 校验结果：ok=true 才允许入库。 */
   validation: { ok: boolean; problems: ArtifactProblem[] }
@@ -347,55 +352,21 @@ export async function readDraftSkillDir(dir: string): Promise<Record<string, str
 /**
  * 组装一份草稿的产出。
  *
- * @param draftDir 草稿根目录（`<workRoot>/skill-draft-<id>`），产出在它的 `skill/` 下
- * @param textFallback 没有目录产出时的文本兜底（起草 run 的最后一条 text 消息）
- */
-/**
- * 去掉一段 Markdown 开头的空行与标题行（`# xxx` / `## xxx`），其余原样。
+ * 只有两条判据（分批第 211 批）：
+ *   · `skill/SKILL.md` 在 ⇒ `mode: 'files'`（这一轮交了东西）；
+ *   · 不在 ⇒ `mode: 'none'`（这一轮只是说了话）。
  *
- * 只给"拒绝说明当消息正文"这一处用：文件是给磁盘看的，消息是给人看的，两者对"标题"
- * 的理解不同（见 `assembleArtifacts` 里 refused 那一支的注释）。
+ * ⚠️ 从前这里有三态，后两态靠**协议文件**：`REFUSED.md` 表示"判定不可沉淀"、`text` 是
+ *    "把它的回话当 SKILL.md"的兜底。两者都删了：
+ *    · 拒绝的理由本来就是它说的话，界面读 run 的最后一段文本就够（不需要它同时写一份文件）；
+ *    · `text` 那条兜底会把"它只说了句话"伪装成"它交了一份格式不对的 SKILL.md"，于是
+ *      拒稿会被画成 `✗ 体检未通过`——那正是使用者报过、第 194 批想在 refused 里躲掉的那个
+ *      难看。现在没有文件就是没有产出，不再假装有一份。
+ *
+ * ⚠️ `none` 态仍然把 `dirFiles` 带上（如果它写了点别的文件）：右栏的文件树要看得到
+ *    "它到底写了什么"，而不是一片空白。
  */
-function stripLeadingHeading(text: string): string {
-  const lines = text.trim().split('\n')
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]!.trim()
-    if (line === '' || /^#{1,6}\s/.test(line)) {
-      i += 1
-      continue
-    }
-    break
-  }
-  const rest = lines.slice(i).join('\n').trim()
-  // 全是标题/空行时退回原文：宁可重复，也不要给出一句空白
-  return rest === '' ? text.trim() : rest
-}
-
-export function assembleArtifacts(
-  dirFiles: Record<string, string> | null,
-  textFallback: string | null,
-): DraftArtifacts {
-  // 起草者主动拒绝：它写的是 REFUSED.md 而不是 SKILL.md。这是一种**结论**，不是失败，
-  // 所以单独一种模式——界面据此把"入库"换掉，避免出现一个空 frontmatter 的红条。
-  const refusal = dirFiles?.['REFUSED.md']
-  if (dirFiles !== null && dirFiles['SKILL.md'] === undefined && refusal !== undefined) {
-    return {
-      mode: 'refused',
-      /**
-       * ★ 分批第 195 批：**去掉开头那行标题**再给界面。
-       *
-       * 拒绝说明是一份 Markdown 文件（`# 这次没有可复用的做法` + 正文），而它现在显示在
-       * 一条**消息**里——气泡上方那行已经说了「起草者 · 这次没有可沉淀的」，再把文件标题
-       * 当 H1 印一遍，就是同一句话说两遍，而且读起来像"贴了一份文件"而不是"它在说话"。
-       * 只去掉**开头连续的空行与 `#` 标题行**，正文一个字不动（那是使用者要看的东西）。
-       */
-      refusalReason: stripLeadingHeading(refusal),
-      files: dirFiles,
-      skillMd: { name: '', description: '', body: '', raw: '' },
-      validation: { ok: false, problems: [{ file: 'REFUSED.md', message: refusal.trim() }] },
-    }
-  }
+export function assembleArtifacts(dirFiles: Record<string, string> | null): DraftArtifacts {
   if (dirFiles !== null && dirFiles['SKILL.md'] !== undefined) {
     return {
       mode: 'files',
@@ -404,35 +375,14 @@ export function assembleArtifacts(
       validation: validateArtifactFiles(dirFiles),
     }
   }
-  // 有目录但缺 SKILL.md：仍然按 files 报出来（校验会说缺 SKILL.md），让使用者看到
-  // agent 到底写了什么——比"什么都没读出来"有用。
-  if (dirFiles !== null) {
-    return {
-      mode: 'files',
-      files: dirFiles,
-      skillMd: {
-        name: '',
-        description: '',
-        body: dirFiles['SKILL.md'] ?? '',
-        raw: dirFiles['SKILL.md'] ?? '',
-      },
-      validation: validateArtifactFiles(dirFiles),
-    }
-  }
-  const text = textFallback ?? ''
-  if (text.trim() === '') {
-    return {
-      mode: 'text',
-      files: {},
-      skillMd: { name: '', description: '', body: '', raw: '' },
-      validation: { ok: false, problems: [{ file: '', message: '这条起草 run 没有产出任何内容' }] },
-    }
-  }
   return {
-    mode: 'text',
-    files: { 'SKILL.md': text },
-    skillMd: parseSkillMd(text),
-    validation: validateArtifactFiles({ 'SKILL.md': text }),
+    mode: 'none',
+    files: dirFiles ?? {},
+    skillMd: { name: '', description: '', body: '', raw: '' },
+    validation: {
+      ok: false,
+      problems: [{ file: '', message: '这一轮没有交 skill（`skill/SKILL.md` 不存在）' }],
+    },
   }
 }
 

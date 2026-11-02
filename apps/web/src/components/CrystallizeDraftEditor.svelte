@@ -36,7 +36,7 @@
   }
 </script>
 
-{#if editor.artifacts !== null && editor.artifacts.mode !== 'refused'}
+{#if editor.artifacts !== null && editor.artifacts.mode === 'files'}
   <div class="review-pane">
     <ul class="file-tree">
       {#each editor.fileRows as row (row.rel)}

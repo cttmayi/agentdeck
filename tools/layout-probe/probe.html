@@ -5785,56 +5785,52 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
 
           // ══════════════════════════════════════════════════════════════
-          // ★★★ 起草者**拒绝**那一屏（分批第 194 批）
+          // ★★★ "它只说了话、没交 skill"那一屏（分批第 211 批，前身是第 194 批的"拒绝"）
           // ══════════════════════════════════════════════════════════════
           //
           // 使用者真机上撞到的：一条"没什么可沉淀的"草稿，界面上写着「体检发现 1 处问题 ·
-          // 校验未通过（1）」，读起来像**审核没过**（而审核第 137 批就删了）。它是**结论**，
-          // 不是失败 ⇒ 结论条必须是中性的一句，拒绝理由本身是一条消息。
+          // 校验未通过（1）」，读起来像**审核没过**（而审核第 137 批就删了）。它不是失败，
+          // 是"这一轮没交东西" ⇒ 不画结论条、不给入库，理由就是**它自己那句话**。
+          //
+          // ⚠️ 分批第 211 批换掉了夹具与判据的名字：从前那一屏靠 `skill/REFUSED.md` 认出来
+          //    （协议文件），现在靠 `skill/SKILL.md` **不在**（事实）。所以这里量的是同一批行为，
+          //    只是"为什么"从文件变成了产出形态：`who` 行说「没交 skill」、理由出现一次、
+          //    没有结论条/审阅抬头/确认入库、两个出口都在。
           {
-            const cyRefused = cyQuery.get('crystalRefused')
-            facts['crystal.refusedFixtureId'] = cyRefused || null
-            if (cyRefused) {
+            const cyNoOutput = cyQuery.get('crystalNoOutput')
+            facts['crystal.noOutputFixtureId'] = cyNoOutput || null
+            if (cyNoOutput) {
               f.contentWindow.location.hash = '#/tasks'
               await until(() => !d().querySelector('.crystal-chat'), 80)
               await wait(80)
-              f.contentWindow.location.hash = `#/crystallize/${cyRefused}`
-              // ★ 分批第 195 批：拒绝时**结论条整条不画**（没有可入库的东西）⇒ 等的是
-              //   起草那一轮的消息本身。
+              f.contentWindow.location.hash = `#/crystallize/${cyNoOutput}`
+              // 没交 skill ⇒ 结论条整条不画 ⇒ 等的是起草那一轮的消息本身
               const attached = await until(
                 () =>
                   (d().querySelector('[data-draft-turn-msg] [data-chat-turn] .who')?.textContent ?? '')
-                    .includes('没有可沉淀'),
+                    .includes('没交 skill'),
                 120,
               )
-              facts['crystal.refusedAttached'] = attached
+              facts['crystal.noOutputAttached'] = attached
               if (attached) {
-                /**
-                 * ★ 分批第 195 批（使用者："觉得有必要显示 REFUSED.md 的内容吗"）：
-                 *   拒绝的理由**只说一次**，就在起草那一轮的消息里；结论条整条不画
-                 *   （没有可入库的东西）。所以这里量的是：
-                 *     · `who` 行说的是「这次没有可沉淀的」（不是"写好了"）；
-                 *     · 理由出现**一次**（不是两三次）；
-                 *     · 没有结论条、没有「审阅草稿」抬头、没有「确认入库」。
-                 */
-                facts['crystal.refusedHeadText'] = text(
+                facts['crystal.noOutputHeadText'] = text(
                   d().querySelector('[data-draft-turn-msg] [data-chat-turn] .who'),
                 )
-                facts['crystal.refusedBubbleText'] = text(
+                facts['crystal.noOutputBubbleText'] = text(
                   d().querySelector('[data-draft-turn-msg] [data-chat-turn] .bubble'),
                 )
                 const pageText = d().body?.textContent ?? ''
-                // 数**正文那一句**（★ 195 批：文件标题不再进界面，所以别数标题）
-                facts['crystal.refusedReasonHits'] = (
+                // 数**正文那一句**（它说的话就是理由；不该在别处再出现一遍）
+                facts['crystal.noOutputReasonHits'] = (
                   pageText.match(/只有一次性的环境排错/g) ?? []
                 ).length
-                facts['crystal.refusedNoConclusionBar'] = !d().querySelector('.conclusion-bar')
-                facts['crystal.refusedNoReviewHeading'] =
+                facts['crystal.noOutputNoConclusionBar'] = !d().querySelector('.conclusion-bar')
+                facts['crystal.noOutputNoReviewHeading'] =
                   ![...d().querySelectorAll('h3')].some((h) => text(h).includes('审阅草稿'))
-                facts['crystal.refusedNoConfirmButton'] = ![...d().querySelectorAll('button')].some(
+                facts['crystal.noOutputNoConfirmButton'] = ![...d().querySelectorAll('button')].some(
                   (b) => text(b).includes('确认入库'),
                 )
-                facts['crystal.refusedHasExits'] = ['重新起草', '放弃'].every((needle) =>
+                facts['crystal.noOutputHasExits'] = ['重新起草', '放弃'].every((needle) =>
                   [...d().querySelectorAll('[data-draft-turn-msg] button')].some((b) =>
                     text(b).includes(needle),
                   ),
@@ -6118,7 +6114,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             //   · 栏在网格里（`artifactPaneOffGrid` 应为 false）、不再有小旗/抽屉；
             //   · 文件清单是编辑器的树（`.file-row`），正文在 `textarea.editor` 里；
             //   · 换文件 ⇒ 正文跟着换（原来量的是预览框）。
+            //
+            // ★ 分批第 211 批（改判据位置，理由写在这里）：**这一节显式进「有产物」那一屏**。
+            //   原来它接着上一节（起草中点停止 ⇒ 回目标态）往下量，等于在**目标态**上量
+            //   「产物栏列的是真产物」——量到的 3 个数字（文件数 / 正文长度 / 拖动后的正文宽度）
+            //   都依赖"停止之后页面上还剩什么"，而那不是这条判据问的事。第 211 批改了
+            //   "没交 skill"那一屏的渲染之后它当场红（实测 `{hash: 起草来源, step: target,
+            //   rows: 0}`），暴露的正是这个错位。现在先 `cyEnter(crystalDraft)` 进审阅态，
+            //   量的是它自己说的那件事。
             {
+              facts['crystal.artifactEntered'] = await cyEnter(cyQuery.get('crystalDraft'))
               const artPane = d().querySelector('.artifact-pane')
               facts['crystal.artifactPanePresent'] = !!artPane
               const artTab = d().querySelector('.artifact-tab')
@@ -6196,9 +6201,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               if (artFiles.length > 1) click(artFiles[1])
               await until(() => artPre() !== artBefore || artFiles.length < 2, 60)
               facts['crystal.artifactPreviewChanged'] = artFiles.length < 2 ? null : artPre() !== artBefore
-              // 单文件夹具也能量的一条：编辑框里是**真产物正文**（不是空框）
-              facts['crystal.artifactPreviewLen'] =
-                (d().querySelector('.artifact-pane textarea.editor')?.value ?? '').trim().length
+              /**
+               * 编辑框里是**真产物正文**（不是空框）。
+               *
+               * ★ 分批第 211 批：量**进来时那一个**（= `SKILL.md`，第一个文件），不是点完第二个
+               *   文件之后的那个。原来它在 `click(artFiles[1])` 之后量，于是这条判据实际问的是
+               *   "第二个文件有多长"——夹具里第二个是脚本（`#!/bin/sh` 恰 10 字符），而标签写的是
+               *   "真产物正文"。语义纠正：正文这一条量第一个文件（那是审阅默认打开的那个），
+               *   "换文件会换正文"由下面 `artifactPreviewChanged` 单独量。
+               */
+              facts['crystal.artifactPreviewLen'] = artBefore.trim().length
               facts['crystal.artifactChecksText'] =
                 d().querySelector('.artifact-check-count')?.textContent?.trim() ?? null
               // 材料区：这一版起草**吃进去**的东西（轨迹/判决/追加），与产物分开显示。

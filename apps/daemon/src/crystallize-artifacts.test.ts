@@ -3,8 +3,7 @@
  *
  * 覆盖四条最容易回归的语义：
  *   · 多文件目录 → `mode: 'files'`，SKILL.md 的 frontmatter 拆成 name/description
- *   · 目录为空 → 回退文本（`mode: 'text'`），不当成"有多文件"
- *   · 起草者写了 REFUSED.md → `mode: 'refused'`（结论，不是失败）
+ *   · 没有 SKILL.md → `mode: 'none'`（这一轮只是说了话），不当成"交了一份坏东西"
  *   · 校验能指出**具体哪个文件**缺什么（界面要定位，不是只给一句"不合法"）
  */
 import { after, before, describe, test } from 'node:test'
@@ -206,43 +205,40 @@ describe('validateArtifactFiles', () => {
   })
 })
 
-describe('assembleArtifacts：三种产出形态', () => {
-  test('files：目录产出优先，SKILL.md 一定在', () => {
-    const artifacts = assembleArtifacts(
-      { 'SKILL.md': GOOD_SKILL_MD, 'scripts/check.sh': '#!/bin/sh\n' },
-      '这段文本应该被忽略',
-    )
+describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就是没交）', () => {
+  test('files：有 SKILL.md 就是产出，支持文件一起带上', () => {
+    const artifacts = assembleArtifacts({
+      'SKILL.md': GOOD_SKILL_MD,
+      'scripts/check.sh': '#!/bin/sh\n',
+    })
     assert.equal(artifacts.mode, 'files')
     assert.equal(artifacts.skillMd.name, 'review-report')
     assert.ok('scripts/check.sh' in artifacts.files)
     assert.equal(artifacts.validation.ok, true)
   })
 
-  test('text：目录为空时回退最后一条 text（generic runtime 的退化路径）', () => {
-    const artifacts = assembleArtifacts(null, GOOD_SKILL_MD)
-    assert.equal(artifacts.mode, 'text')
-    assert.deepEqual(Object.keys(artifacts.files), ['SKILL.md'])
-    assert.equal(artifacts.skillMd.name, 'review-report', '文本也要能解析出来')
+  /**
+   * ★ 分批第 211 批（使用者定："人之间在对话框里看 AI 的回答就好了，应该不需要 REFUSED
+   *   的特殊处理才对"）：`refused` 与 `text` 两种形态一起删了。
+   *
+   * 它们各自靠一个协议/兜底：`REFUSED.md`（"这是结论"）、"把它的回话当 SKILL.md"（文本兜底）。
+   * 现在只有一条判据——**`skill/SKILL.md` 在不在**：不在就是"这一轮没交东西"，它说的话在
+   * 消息流里（界面直接读 run 的最后一段文本），不假装成一份 SKILL.md。
+   */
+  test('none：只有别的文件、没有 SKILL.md ⇒ 没交东西（不再把回话冒充 SKILL.md）', () => {
+    const artifacts = assembleArtifacts({ 'REFUSED.md': '全是环境问题，没有可复用做法。' })
+    assert.equal(artifacts.mode, 'none')
+    assert.equal(artifacts.validation.ok, false)
+    assert.match(artifacts.validation.problems[0]?.message ?? '', /没有交 skill/)
+    // 它写过的东西仍然带上：右栏要看得到"它到底写了什么"，而不是一片空白
+    assert.ok('REFUSED.md' in artifacts.files)
   })
 
-  test('refused：起草者只写了 REFUSED.md → 单独一种结论，带原因', () => {
-    const artifacts = assembleArtifacts(
-      { 'REFUSED.md': '全是环境问题，没有可复用做法。' },
-      null,
-    )
-    assert.equal(artifacts.mode, 'refused')
-    assert.match(artifacts.refusalReason ?? '', /环境问题/)
-    // ★ 分批第 195 批：拒绝说明里的 `# ` 标题不进界面（它现在显示在一条消息里，
-    //   气泡上方已经说了「这次没有可沉淀的」——把文件标题当 H1 再印一遍是同一句话说两遍）。
-    assert.doesNotMatch(artifacts.refusalReason ?? '', /^#\s/m, '标题行应当被去掉')
+  test('none：什么都没写（目录不存在）也是没交东西', () => {
+    const artifacts = assembleArtifacts(null)
+    assert.equal(artifacts.mode, 'none')
+    assert.deepEqual(artifacts.files, {})
     assert.equal(artifacts.validation.ok, false)
-  })
-
-  test('什么都没产出 → 校验失败且说清原因（不是静默空草稿）', () => {
-    const artifacts = assembleArtifacts(null, null)
-    assert.equal(artifacts.mode, 'text')
-    assert.equal(artifacts.validation.ok, false)
-    assert.match(artifacts.validation.problems[0]?.message ?? '', /没有产出任何内容/)
   })
 })
 

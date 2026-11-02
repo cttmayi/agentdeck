@@ -333,8 +333,18 @@ async function resolveLoadedSkills(
  * 注入通道与任何技能共用同一条——所以内联只是把同一件事说两遍，而且两份会漂。
  *
  * 于是这里只剩**平台特有的硬事实**（机器真的会拒的那些）：文件落在哪、frontmatter
- * 要有 name/description、REFUSED 与 QUESTIONS 这两个**平台协议文件名**。写法
- * （结构、命名、自检）一个字都不写，归那份技能。
+ * 要有 name/description。写法（结构、命名、自检）一个字都不写，归那份技能。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 分批第 211 批（使用者定）：**不再有"协议文件名"**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 上一版这里有两条协议：`material/QUESTIONS.md`（它在问）、`skill/REFUSED.md`（它不做了）。
+ * 使用者问「人之间在对话框里看 AI 的回答就好了，应该不需要 REFUSED 的特殊处理才对」——
+ * 对的。那两件事平台本来就判得出：**`skill/SKILL.md` 在不在**。
+ *   · 没交 ⇒ 这一轮它只是说了话（问也好、说"不值得"也好），界面就把它说的话当一条消息；
+ *   · 交了 ⇒ 才是产出，才谈入库。
+ * 于是这里只剩一句人话：「信息不够就先问、不值得做就直说，都写在回复里」。
  */
 export function buildDraftPrompt(opts: {
   /**
@@ -355,19 +365,19 @@ export function buildDraftPrompt(opts: {
    * 空数组说明调用方漏了注入（门禁应当先拦下来），那时这句会退化成"照你挂着的那份技能"。
    */
   skillSlugs: readonly string[]
-  /** 这一版是"按意见改一版"（素材里有 previous-draft/ 与 feedback.md）。 */
+  /**
+   * 这一版是"**在上一版上改**"（`skill/` 里已有上一版的产出，意见在 `material/feedback.md`）。
+   *
+   * ⚠️ 调用方要按**事实**给：上一轮没交 SKILL.md 时必须是 false——那句「产出目录里已经是
+   * 上一版」在那种情况下是假的，起草者会去找一份不存在的上一版。
+   */
   revised?: boolean
   /**
-   * ★ 分批第 172 批（使用者定："沉淀者是一个智能体……如果它有疑问，就可以发问，类似聊天窗口那样"）：
-   * **允许它提问**。默认开（起草本来就是"信息不全时先问"的活），关掉只给内部/测试留口子。
+   * 这一轮是**接着说**（分批第 211 批）：上一轮它没交 skill，人这一轮的话被追加进素材。
    *
-   * 提问的落点是 `material/QUESTIONS.md`，而不是"在正文里问一句"：
-   *   · 平台要能**认出**"这一轮没产出、只在问"，才能在界面上把它当一条消息显示、并等回答；
-   *   · 一句自然语言里混着问题与产出，下游只能靠猜（本仓库最防的就是这种）。
+   * 判据是事实（上一轮的 `skill/` 里没有 SKILL.md），不是某个协议文件在不在。
    */
-  mayAsk?: boolean
-  /** 这一轮是对上一轮问题的**回答**（素材里会有 `answers.md`）。 */
-  answering?: boolean
+  continuing?: boolean
 }): string {
   const {
     scope,
@@ -376,8 +386,7 @@ export function buildDraftPrompt(opts: {
     target,
     skillSlugs,
     revised = false,
-    mayAsk = true,
-    answering = false,
+    continuing = false,
   } = opts
   const origin =
     scope === 'conversation'
@@ -397,12 +406,10 @@ ${scope === 'blank' ? '来源、这次的目标、该读哪些文件——里面
 平台只认下面这些（它读得出来的才存在）：
 - \`${outputDir}/SKILL.md\` 是主产出：frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）——名字与描述平台从这儿读，你不用另外报。
 - 其它文件也放 \`${outputDir}/\` 下（子目录随你），正文点到的路径都要真的存在；只写 UTF-8 文本，不写隐藏文件、二进制、\`..\` 或绝对路径。
-- 素材里确实没有可复用的做法 ⇒ **不写 SKILL.md**，改写 \`${outputDir}/REFUSED.md\`，两三句话说清为什么不可沉淀。
+- 信息不够就先问，不值得做就直说——**两者都写在你的回复里**：别自己编答案接着写，也别硬凑一条 skill。能自己从素材里查到的（命令、参数、路径、使用者的要求）不要问，去查。
 ${
-  mayAsk
-    ? `- 信息不够就先问：这一轮**什么产出都别写**，只写 \`${materialDir}/QUESTIONS.md\`（第一行说明为什么要问，之后每行一个编号问题）。人答完之后，下一轮的答案在 \`${materialDir}/answers.md\`。
-  ⚠️ 不许自己编答案然后接着写；能自己从素材里查到的（命令、参数、路径、使用者的要求）不要问，去查。
-`
+  continuing
+    ? `- 上一轮你没有交 skill：人这一轮的回应已经**追加进素材**（\`${materialDir}/appended/\`，索引页也登记了），按它接着做。\n`
     : ''
 }${
   revised
@@ -420,7 +427,6 @@ ${
     ? '- 素材索引里写了使用者给的作用描述（如果有）：frontmatter 的 description 以它为基底，可以调措辞，不许改含义。'
     : '- 要更新的技能当前全文在 `material/existing-skill/`：请**修订**它（保留仍然正确的部分），不要从零重写。'
 }
-${answering ? `- 这一轮是**对上一轮问题的回答**：\`${materialDir}/answers.md\` 是人逐条回答的，与你上一轮的问题同等优先（和 \`user-requirements.md\`、\`feedback.md\` 一个级别）。现在按他的回答把产出写完；还有没问清的，可以再写一份 \`QUESTIONS.md\`（同样不写产出）。` : ''}
 直接开始。`
 }
 

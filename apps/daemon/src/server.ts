@@ -3328,6 +3328,10 @@ async function injectedSkillsOf(
     //   在 try 之外（素材准备失败就不该提交任何东西）。判断依据见下面的长注释。
     const humanEdits = await readHumanEditStamp(taskDir)
     const resumePrevious = humanEdits === null
+    // ★ 分批第 211 批：这一版有没有"上一版"可改，也**按事实**定（`skill/SKILL.md` 在不在）。
+    //   上一轮只说了话、没交东西时，"改一版"与"接着说"是同一件事，不能对它说"产出目录里
+    //   已经是上一版"——那句会让它去找一份不存在的上一版。
+    const hasOutput = await draftHasSkillMd(taskDir)
 
     const newRunId = ulid() as RunId
     try {
@@ -3383,8 +3387,12 @@ async function injectedSkillsOf(
       const versionNo = (versionsNow?.versions.length ?? 1) + (versionsNow === null ? 0 : 1)
       await writeFile(
         join(materialDir, '00-README.md'),
-        `${index.trimEnd()}\n\n## 这一版是「按意见改一版」（第 ${versionNo} 版，仍在**同一个任务目录**里）\n\n` +
-          '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n' +
+        `${index.trimEnd()}\n\n## 这一版是「${
+          hasOutput ? '按意见改一版' : '接着说'
+        }」（第 ${versionNo} 版，仍在**同一个任务目录**里）\n\n` +
+          (hasOutput
+            ? '- **产出目录 `skill/` 里就是上一版**（含 SKILL.md 与支持文件）——你要做的是在它上面改。\n'
+            : '- 上一轮你**没有交 skill**（`skill/` 里没有 SKILL.md）：这一轮从意见说的那件事做起。\n') +
           '- ⚠️ 这一版**不是**新开的小屋：`material/`、`skill/` 与前几版是同一个任务目录，路径没变。\n' +
           '- 使用者的意见在 `feedback.md`——**它优先级最高**，照它改；意见没提到的地方**原样留着**。\n' +
           '- 只有改过的文件需要重写（写**完整文件**，不是补丁片段）；没改的文件不必动。\n' +
@@ -3433,7 +3441,9 @@ async function injectedSkillsOf(
       outputDir: 'skill',
       target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
       skillSlugs: reviseSkills.map((s) => s.slug),
-      revised: true,
+      // 按**事实**给（分批第 211 批）：上一轮没交 SKILL.md ⇒ 不是"在上一版上改"。
+      revised: hasOutput,
+      ...(hasOutput ? {} : { continuing: true }),
     })
 
     const outcome = await executor.submit({
@@ -3500,31 +3510,44 @@ async function injectedSkillsOf(
    *   第一轮勾掉的动作在第二轮又活了，而没有任何地方会提示这件事。
    */
   /**
-   * ★ 分批第 172 批（使用者定：「沉淀者就是一个智能体……如果它有疑问，就可以发问，类似聊天窗口那样」）：
-   * **回答起草者的提问**——起下一条 run，并接上刚才那条会话。
+   * 这一版的产出目录里有没有 `SKILL.md`——**"上一轮到底交没交东西"的唯一判据**（分批第 211 批）。
    *
-   * 为什么是"新 run + resume"而不是"往正在跑的 run 里写一句"：我们的 run 是**一次性**的
-   * （D29：交给 CLI 的只有第一句话，`executor.ts` 不写 stdin，也没有中途喂输入的通道）。
-   * 而 `--resume <sessionId>` 这条路已经在「按意见改一版」里用了（claude/codex 都支持；
-   * 被拒时适配器回退新线程并留痕）。所以"它问、你答"= 两条前后相接的 run。
-   *
-   * 与「按意见改一版」的区别（三条，都是刻意的）：
-   *   · 落点不同：回答写进 `material/answers.md`（**追加**，每轮一段），不覆盖 `feedback.md`
-   *     ——"对人提问的回答"和"对上一版的意见"是两类证据，混一处以后谁也分不清；
-   *   · 前提不同：草稿目录里**必须真的有** `QUESTIONS.md`（没有就是没问过，别假装在答）；
-   *   · 版本不同：回答不额外记一版（它没产出），`revisedFrom` 仍指上一版那条 run。
+   * 它替掉了两条协议文件（`QUESTIONS.md` / `REFUSED.md`）：那两件事（它在问 / 它不做了）
+   * 都由同一个事实派生——**没交 skill**。
    */
-  async function startAnswerRun(input: {
+  async function draftHasSkillMd(taskDir: string): Promise<boolean> {
+    const files = await readDraftSkillDir(join(taskDir, 'skill'))
+    return files !== null && files['SKILL.md'] !== undefined
+  }
+
+  /**
+   * **接着说**（分批第 211 批；前身是分批第 172 批的"回答提问"）。
+   *
+   * 沉淀是一条对话：它说了话但没交 skill（在问、在说"不值得做"、或者只是解释了它要什么），
+   * 人接着往下说——那句话被**追加进素材**，然后起一条接上会话的新 run。
+   *
+   * ⚠️ 为什么是"新 run + resume"而不是"往正在跑的 run 里写一句"：我们的 run 是一次性的
+   *    （D29：交给 CLI 的只有第一句话，执行器不写 stdin，也没有中途喂输入的通道）。
+   *
+   * 与「按意见改一版」的区别只有一条，但它是事实判据：**上一轮有没有交出 SKILL.md**。
+   *   · 没有 ⇒ 走这里（`continuing`，prompt 里不会说"产出目录里已经是上一版"——那是假话）；
+   *   · 有 ⇒ 走改一版（在上一版上改，意见进 `material/feedback.md`）。
+   *
+   * ⚠️ 从前这里读 `material/QUESTIONS.md` 来判"它是不是在等回答"，并要求回答落进
+   *    `material/answers.md`。两个协议文件名都删了：平台要认的状态就是"没交 SKILL.md"，
+   *    人的这句话进 `material/appended/`（与「追加材料」同一个落点、同一条索引登记）。
+   */
+  async function startContinueRun(input: {
     draftRunId: string
-    answer: string
+    text: string
   }): Promise<{ status: number; body: Record<string, unknown> }> {
     const draftRunId = input.draftRunId
-    const answer = input.answer.trim()
+    const text = input.text.trim()
     if (draftRunId === '') {
       return { status: 400, body: { error: '需要 draftRunId', code: 'draft_run_id_required' } }
     }
-    if (answer === '') {
-      return { status: 400, body: { error: '需要一句回答', code: 'answer_required' } }
+    if (text === '') {
+      return { status: 400, body: { error: '需要一句话', code: 'text_required' } }
     }
     const previous = await store.getRun(draftRunId as RunId)
     if (!previous || previous.workspaceId !== workspaceId) {
@@ -3534,16 +3557,24 @@ async function injectedSkillsOf(
       return { status: 400, body: { error: '这条 run 不是起草 run', code: 'not_a_draft' } }
     }
     if (previous.crystallized === true) {
-      return { status: 409, body: { error: '这条草稿已经入库了，没有要回答的问题', code: 'already_crystallized' } }
+      return { status: 409, body: { error: '这条草稿已经入库了，没有可接着说的', code: 'already_crystallized' } }
     }
-    const taskDir = await draftTaskDir(draftRunId)
-    const materialDir = join(taskDir, 'material')
-    // 必须真的有在等回答的问题（§12.41：不要给"按了会被拒"的路）
-    const questions = await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => '')
-    if (questions.trim() === '') {
+    if (previous.status !== 'completed') {
       return {
         status: 409,
-        body: { error: '这条草稿现在没有在等回答的问题（起草者还没提问）', code: 'no_open_question' },
+        body: { error: '这一轮还没跑完——等它说完再接着说', code: 'draft_not_completed' },
+      }
+    }
+    const taskDir = await draftTaskDir(draftRunId)
+    // 前提：这一版确实**没交** SKILL.md。交了就有"上一版"可改 ⇒ 该走改一版（§12.41：
+    // 不给"按了会被拒"的路，也不给两条语义重叠的路）。
+    if (await draftHasSkillMd(taskDir)) {
+      return {
+        status: 409,
+        body: {
+          error: '这一版已经交了 skill——接着说用不上，想改它请用「这里不对：…」',
+          code: 'draft_has_output',
+        },
       }
     }
     const sourceRunId = previous.subject.sourceRunId
@@ -3561,22 +3592,11 @@ async function injectedSkillsOf(
     const humanEdits = await readHumanEditStamp(taskDir)
     const resumePrevious = humanEdits === null
     const newRunId = ulid() as RunId
+    const materialDir = join(taskDir, 'material')
     try {
-      await mkdir(materialDir, { recursive: true })
-      // 追加而不是覆盖：问了几轮就留几轮，人能回看"我当时是怎么答的"
-      const past = await readFile(join(materialDir, 'answers.md'), 'utf8').catch(() => '')
-      const stamp = new Date().toISOString()
-      await writeFile(
-        join(materialDir, 'answers.md'),
-        `${past.trimEnd()}\n\n## 对 ${stamp} 那一轮问题的回答\n\n${answer}\n`,
-        'utf8',
-      )
-      // 问题答掉了：把 QUESTIONS.md 挪成历史（否则下一轮它还会认为"在等回答"，
-      // 而实际上人已经答了——那会让界面永远停在"待回答"）
-      await rename(
-        join(materialDir, 'QUESTIONS.md'),
-        join(materialDir, `questions-${newRunId}.md`),
-      ).catch(() => {})
+      // 人的这句话就是一份材料（与「追加材料」同一个落点：`material/appended/`、同一条索引登记）——
+      // 不再有第二个协议文件"专门装回答"。
+      await appendMaterial(materialDir, { name: '人这一轮的话', text })
     } catch (err) {
       return {
         status: 500,
@@ -3597,7 +3617,7 @@ async function injectedSkillsOf(
         status: 400,
         body: {
           error:
-            '起草需要「沉淀用技能」（distilly）——先在「沉淀设置」里一键安装（沉淀页右上角），再回答这一轮。',
+            '起草需要「沉淀用技能」（distilly）——先在「沉淀设置」里一键安装（沉淀页右上角），再接着说。',
           code: 'draft_skill_required',
         },
       }
@@ -3608,8 +3628,7 @@ async function injectedSkillsOf(
       outputDir: 'skill',
       target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
       skillSlugs: skills.map((s) => s.slug),
-      revised: true,
-      answering: true,
+      continuing: true,
     })
     const outcome = await executor.submit({
       runId: newRunId,
@@ -3632,7 +3651,7 @@ async function injectedSkillsOf(
     if (outcome.kind === 'rejected') {
       return { status: 503, body: { error: `起草 run 未受理：${outcome.reason}`, code: 'draft_rejected' } }
     }
-    return { status: 202, body: { draftRunId: newRunId, answer: true } }
+    return { status: 202, body: { draftRunId: newRunId } }
   }
 
   async function createReworkRun(run: Run, verdict: VerdictRecord): Promise<string | null> {
@@ -5486,28 +5505,9 @@ async function injectedSkillsOf(
       return
     }
 
-    /**
-     * ★ 分批第 172 批：**起草者在等回答吗**（`material/QUESTIONS.md` 还在就是）。
-     *
-     * 为什么单独一条路由、不塞进 artifacts：等回答的草稿**还没有产出**（`skill/` 是空的），
-     * 而 `GET artifacts` 对"没有产出"是 404——把它塞进去会让"它在问问题"长得像"读不到草稿"。
-     */
-    if (req.method === 'GET' && path === '/api/crystallize/questions') {
-      const draftRunId = url.searchParams.get('draftRunId') ?? ''
-      if (draftRunId === '') {
-        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
-        return
-      }
-      const draftRun = await store.getRun(draftRunId as RunId)
-      if (!draftRun || draftRun.workspaceId !== workspaceId) {
-        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
-        return
-      }
-      const materialDir = join(await draftTaskDir(draftRunId), 'material')
-      const text = await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => '')
-      sendJson(res, 200, { questions: text.trim() === '' ? null : text })
-      return
-    }
+    // ★ 分批第 211 批：`GET /api/crystallize/questions` 删了。
+    //   「它在不在等回答」不再是一条独立状态——`GET artifacts` 的 `mode` 就是答案：
+    //   `none` = 这一轮只是说了话（在问 / 说不值得做 / 解释了它要什么），`files` = 交了东西。
     if (req.method === 'GET' && path === '/api/crystallize/artifacts') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {
@@ -5538,12 +5538,9 @@ async function injectedSkillsOf(
           ? join(draftDir, 'skill')
           : draftVersionSkillDir(draftDir, askedVersion)
       const dirFiles = await readDraftSkillDir(skillDirOfVersion)
-      // 只有目录里没有产出时才回退文本（有目录就一定是目录——文本兜底不该抢戏）
-      let textFallback: string | null = null
-      if (dirFiles === null) {
-        textFallback = lastTextOf(await store.listRunMessages(draftRun.id))
-      }
-      const artifacts = assembleArtifacts(dirFiles, textFallback)
+      // ★ 分批第 211 批：不再有"文本兜底"——`skill/` 里没有 SKILL.md 就是**这一轮没交**，
+      //   它的回话在消息流里（界面直接读 run 的最后一段文本），不假装成一份 SKILL.md。
+      const artifacts = assembleArtifacts(dirFiles)
 
       // 更新场景带上"当前版本"，界面才能算 A/M/D 与对比（P1 的 diff 也吃这份）
       const draftTarget = draftRun.crystallizeTarget
@@ -5562,7 +5559,6 @@ async function injectedSkillsOf(
       sendJson(res, 200, {
         status: draftRun.status,
         mode: artifacts.mode,
-        ...(artifacts.refusalReason === undefined ? {} : { refusalReason: artifacts.refusalReason }),
         files: artifacts.files,
         skillMd: artifacts.skillMd,
         validation: artifacts.validation,
@@ -6483,14 +6479,17 @@ async function injectedSkillsOf(
     }
 
     /**
-     * ★ 分批第 172 批：**回答起草者的提问**（使用者定："它有疑问就可以发问，类似聊天窗口"）。
-     * 起下一条 run 并接上刚才那条会话（见 `startAnswerRun` 的注释）。
+     * ★ 分批第 211 批：**接着说**（前身是分批第 172 批的「回答提问」）。
+     *
+     * 它先把人这句话追加成一份素材，再起一条接上会话的新 run（见 `startContinueRun`）。
+     * 前身还带两个协议文件名（`QUESTIONS.md` / `answers.md`），现在都没有了：
+     * 前提是事实"这一版没交 SKILL.md"，落点是既有的 `material/appended/`。
      */
-    if (req.method === 'POST' && path === '/api/crystallize/answer') {
-      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; answer?: unknown }
+    if (req.method === 'POST' && path === '/api/crystallize/continue') {
+      const raw = (await readJsonBody(req)) as { draftRunId?: unknown; text?: unknown }
       const draftRunId = typeof raw?.draftRunId === 'string' ? raw.draftRunId : ''
-      const answer = typeof raw?.answer === 'string' ? raw.answer : ''
-      const result = await startAnswerRun({ draftRunId, answer })
+      const text = typeof raw?.text === 'string' ? raw.text : ''
+      const result = await startContinueRun({ draftRunId, text })
       sendJson(res, result.status, result.body)
       return
     }

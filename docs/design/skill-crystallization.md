@@ -3795,7 +3795,8 @@ skill 的五项原样保留（标题改成「审 skill 时你审的五件事」�
 
 > ★ 分批第 210 批（§12.80）已经按这条分工落了地，且比这里说的更彻底：**写法整包归 distilly**
 > （它挂在起草者身上、随 run 注入，是唯一的写法权威），**编排仍全在 daemon**——
-> 提问走 `material/QUESTIONS.md`、拒绝走 `skill/REFUSED.md`、素材与产出目录由平台定。
+> ~~提问走 `material/QUESTIONS.md`、拒绝走 `skill/REFUSED.md`~~（这两个协议文件在分批第 211 批
+> 已删除，见 §12.81：平台只判"这一轮交没交 SKILL.md"）、素材与产出目录由平台定。
 > 也就是说 §11.3.1 反对的是"把它的交互流程抄进 prompt"，不是"装它当技能"。
 
 #### 11.3.2 产出契约化：起草者交 `draft.json`，由 daemon 落盘（P0）
@@ -5655,6 +5656,11 @@ skillId），所以从深链恢复的草稿上这一条只说「新建一份技�
 
 **② 拒绝（`REFUSED.md`）那一屏：理由只说一次，而且不带文件标题。**
 
+> ⚠️ **分批第 211 批已把"拒绝"这个协议整个删掉**（见 §12.81）：那一屏现在叫
+> 「这次没交 skill」（`mode: 'none'`），判据是 `skill/SKILL.md` 不在，而不是 `REFUSED.md` 在。
+> 下面这些行为（理由只说一次、不画结论条、无审阅抬头、无确认入库、两个出口）**一条没丢**，
+> 只是不再依赖那个文件。这一节留作"为什么这么画"的记录。
+
 改之前同一句话出现**三处**：结论条「起草者判定：这里没有可沉淀的内容」、中间一条气泡
 （`REFUSED.md` 原文）、右栏「体检」里把同一段当成"问题"再列一遍。现在只留**中间那条消息**：
 
@@ -6142,7 +6148,8 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 3. **prompt 只留平台硬事实**：`buildDraftPrompt` 去掉了 `writingSpec` 参数，改成 `skillSlugs`
    （点名**实际注入的那几份**，不写死 slug），正文从 **2785 字 → 685 字**：
    素材在哪（索引 + 轨迹）、`skill/SKILL.md` 与 frontmatter 的 name/description、支持文件放哪、
-   `REFUSED.md` / `QUESTIONS.md` / `answers.md` 这四个**平台协议文件名**（平台靠它们认出
+   ~~`REFUSED.md` / `QUESTIONS.md` / `answers.md` 这四个平台协议文件名~~（下一批 211 就删了，
+   见 §12.81）（平台靠它们认出
    "它拒绝了"与"它在等回答"，不是写法约定）。结构、命名、自检一个字都不写。
 
 **模版那一条**：框架/身份/任务本来就是聊天那一份（第 178 批就改了），但判据写在学习器里
@@ -6154,7 +6161,8 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 **判据**
 
 - `crystallize.test.ts`：prompt 里点名 `distilly`、**不再出现** `writing-skills` / `When to Use`、
-  没有【写作规范】、有 `QUESTIONS.md`/`REFUSED.md`、**总长 < 1200**；没解析到技能时那句退化成
+  没有【写作规范】、~~有 `QUESTIONS.md`/`REFUSED.md`~~（211 批已删，改成断言"一个协议文件名都没有"）、
+  **总长 < 1200**；没解析到技能时那句退化成
   "你挂着的那份技能"（不编一个 slug）。
 - `first-sentence.test.ts`：`firstSentenceKindFor` 三条（沉淀与对话同一份 / 任务与审核各走自己那份 /
   判据只看种类与 subject 类型）。
@@ -6168,3 +6176,71 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 真的送达。runtime 如果没有技能发现机制（描述表 `skills: {kind:'none'}`），这一轮就没有写法权威
 ——执行器会在日志里说清"这个 runtime 没有技能发现机制"，而不再是"prompt 里有一份规范"。
 这是使用者要的取舍：**写法归他装的那份技能**，不归平台。
+
+### 12.81 起草者的两个"主动出口"不再是协议文件（分批第 211 批，2026-11；使用者定）
+
+使用者问：「感觉这部分做了特殊处理，你看看是否有实际作用，如果没有，应该就不需要了」；
+追问 REFUSED 的必要性时给的判断是：「我的理解，人之间在对话框中看 AI 的回答就好了，
+应该不需要 REFUSED 的特殊处理才对」。
+
+**那两个文件原本在做什么**（分批第 172 / 194 批）：
+
+| 文件 | 买到的东西 |
+|---|---|
+| `material/QUESTIONS.md` | 界面认出"它在问"，于是**不进审阅态**、栏脚输入条变成"回答它"；回答落 `material/answers.md`，并 `resume` 上一轮 |
+| `skill/REFUSED.md` | 界面认出"它判定不值得做"，于是用中性标记 `–`、不画结论条、不给「确认入库」 |
+
+**逐条盘下来，只有一个是不可替代的，而它也不该靠文件**：
+
+- 「这一轮没交东西」= **`skill/SKILL.md` 不在**。平台本来就判得出，不需要读任何一个额外文件；
+- 「不给确认入库」= 没有 `SKILL.md`，`commit` 本来就 400；
+- 「理由只说一次」= 理由是**它自己说的话**（run 的最后一段文本），不需要它同时写一份文件；
+- 「结论 vs 失败」之所以要单独判，是因为 `assembleArtifacts` 有一条 **text 兜底**：没有目录产出
+  就把它的回话当成 `SKILL.md` 去体检 ⇒ 于是"只说了话"被画成 `✗ 体检未通过`。那是**兜底本身**
+  的问题，不是缺一个协议（`REFUSED.md` 只是绕过了那个兜底）。
+
+**改法（协议 → 状态）**
+
+1. `DraftArtifacts.mode` 从 `files | text | refused` 收成 **`files | none`**：`SKILL.md` 在就是
+   `files`，不在就是 `none`。`text` 兜底与 `refused` 一起删（前者会把"没交"伪装成"交了"）。
+2. `buildDraftPrompt`：三个协议文件名（`QUESTIONS.md` / `REFUSED.md` / `answers.md`）**全部消失**，
+   两条契约并成一句人话——「信息不够就先问，不值得做就直说——两者都写在你的回复里」。
+   `mayAsk` / `answering` 两个参数删掉，换成一个 `continuing`（事实判据：上一轮没交 `SKILL.md`）。
+   正文 **685 → 540 字**。
+3. 路由：删 `GET /api/crystallize/questions`；`POST /api/crystallize/answer` 换成
+   **`POST /api/crystallize/continue`**（人这句话 `appendMaterial()` 进 `material/appended/`，
+   与「追加材料」同一个落点，然后起一条 resume 上一轮的新 run；门禁是"这一版确实没交 SKILL.md"，
+   交了就是 409 `draft_has_output`）。
+4. 「按意见改一版」的 `revised` 也改成**按事实**给（`draftHasSkillMd()`）：上一轮没交东西时不能说
+   「产出目录里已经是上一版」（那是假话），索引页那一段也照实换成"接着做"。
+5. 界面：`refused` 那一支换成 `noOutput`（`mode === 'none'`）。那一屏 = 它说的话（run 最后一段
+   文本）+ 一句提示 + 两个出口（重新起草 / 放弃）；不画结论条、没有「确认入库」、右栏不列体检。
+   词条 `refusedTitle` / `refusedHead` / `artifactRefusedNote` → `noOutputHead` / `artifactNoOutputNote`
+   / `noOutputHint`。
+
+**代价（写在这里，免得以后当成缺陷重开）**
+
+- 平台不再区分"它在问"与"它说这活不值得做"，界面那一屏的抬头是**中性**的「这次没交 skill」。
+  它到底在问什么、为什么拒绝，读它自己那句话；人的下一步动作集合两者相同（接着说 / 放弃）。
+- 「拒绝」看起来像「在等你说话」：可能被再问一轮才放弃。放弃按钮一直在。
+
+**判据**
+
+- `crystallize-artifacts.test.ts`：`none` 两条（有别的文件但没 SKILL.md / 目录都没有），
+  删掉 `text` 与 `refused` 两组。
+- `crystallize.test.ts`：prompt 里**不许出现**三个协议文件名、且有那句"都写在你的回复里"。
+- `crystallize-e2e.test.ts`：§10.16 改写成"只说话没交 skill ⇒ `mode: 'none'`、`skill/` 空、
+  它的话在消息流里；接着说 ⇒ 新 run + resume + 那句话进 `material/appended/` + 登记进索引；
+  交出东西之后再接着说 ⇒ 409"；原来那条 `refused` 用例改成"没有 SKILL.md ⇒ `none`，
+  它写过的文件仍然带着"。
+- 探针：`crystal.refused*` 八条**一对一改名**成 `crystal.noOutput*`（行为一条不丢：不说"写好了"、
+  理由只说一次、不画结论条、无审阅抬头、无确认入库、两个出口），夹具从"写一份 `REFUSED.md`"
+  换成"`skill/` 空 + 一条 run 消息"。⚠️ 改名的地方**在原处写了理由**（协议 → 事实）。
+
+**顺手修掉一个探针错位**（量出来的，不是猜的）：产物栏那一组原来接着"起草中点停止 ⇒ 回目标态"
+往下量 ⇒ 一整组在**目标态**上问"产物栏列的是真产物"。这一批改渲染后它当场红，实测当时的现场是
+`{hash: 起草来源, step: target, rows: 0}`。现在那一段先 `cyEnter(crystalDraft)` 进审阅态再量，
+并补了一条守卫判据 `crystal.artifactEntered`（570 项）；「编辑框里是真产物正文」也从"点完第二个
+文件之后量"改成"量进来时那一个（SKILL.md）"——它原来实际问的是"第二个文件有多长"。
+
+验证：`check` **2192 全绿**、`probe:layout` **570 全绿**、`typecheck` 0 错。

@@ -27,8 +27,8 @@
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
     status: string
-    mode: 'files' | 'text' | 'refused'
-    refusalReason?: string
+    /** `files` = 交了东西；`none` = 这一轮只是说了话（没交 skill，分批第 211 批）。 */
+    mode: 'files' | 'none'
     files: Record<string, string>
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
     target: { kind: string } | null
@@ -92,7 +92,7 @@
     drawerManual = null
   })
   const drawerOpen = $derived(
-    drawerManual ?? (!paneWide.value && artifacts !== null && artifacts.mode !== 'refused'),
+    drawerManual ?? (!paneWide.value && artifacts !== null && artifacts.mode === 'files'),
   )
   /**
    * ★ 分批第 173 批（使用者定："技能走注入，但**不要默认放项目中**，让用户自己装、建议一键安装"）：
@@ -207,8 +207,8 @@
   const files = $derived(fileList(artifacts))
   const current = $derived(files.includes(selected) ? selected : (files[0] ?? ''))
   const problems = $derived(problemList(artifacts))
-  /** ★ 分批第 195 批：起草者拒绝 ⇒ 没有"体检"可言（problems 里那条就是拒绝理由本身）。 */
-  const refusedMode = $derived(artifacts !== null && artifacts.mode === 'refused')
+  /** ★ 分批第 211 批：没交 skill ⇒ 没有"体检"可言（它没有可体检的东西）。 */
+  const noOutputMode = $derived(artifacts !== null && artifacts.mode === 'none')
   const checkTotal = $derived(problems.length)
   const checksOk = $derived(isOk(artifacts))
   /**
@@ -289,17 +289,16 @@
       <CrystallizeDraftEditor />
 
       <!--
-        ★ 分批第 195 批：**拒绝的草稿不画体检**。
+        ★ 分批第 211 批：**没交 skill 的那一轮不画体检**。
 
-        它的 `validation.problems` 里那一条就是 `REFUSED.md` 的正文（`assembleArtifacts` 把
-        拒绝理由塞进了 problems）⇒ 右栏会把它当成"问题"再印一遍，于是同一句话在一屏里
-        出现两处（中间那条消息 + 这里）。使用者问"有必要显示 REFUSED.md 的内容吗"——
-        有必要，但只在**中间那条消息**里（它是"为什么不做"的唯一解释）。
+        它没有任何产出可体检，`validation.problems` 里只有一句"这一轮没有交 skill（SKILL.md
+        不存在）"——把那句当"体检问题"印出来，看起来就像"它交了坏东西"。所以右栏只留一句
+        中性说明，理由在**中间那条消息**里（它自己说的话）。
       -->
-      {#if refusedMode}
+      {#if noOutputMode}
         <section class="artifact-checks">
           <h3 class="artifact-sub">{$t('crystallize.artifactChecks')}</h3>
-          <p class="faint small">{$t('crystallize.artifactRefusedNote')}</p>
+          <p class="faint small">{$t('crystallize.artifactNoOutputNote')}</p>
         </section>
       {:else}
       <section class="artifact-checks">

@@ -3505,8 +3505,8 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.artifactPreviewLen',
     label:
-      '★★★ 预览框里是**真产物正文**（非空，阈值 20 字符——这条夹具的正文只有 29 字符，' +
-      '按 100 会误判红）；空框也能"有 1 个文件"，所以要量正文',
+      '★★★ 编辑框里是**真产物正文**（进来第一个文件 = SKILL.md；阈值 20 字符——空框也能"有 1 个文件"，' +
+      '所以要量正文）。⚠️ 分批第 211 批：它原来在"点第二个文件"之后量，等于在问"第二个文件有多长"',
     ok: (v) => typeof v === 'number' && v >= 20,
     show: (v) => `${v} 字符`,
   },
@@ -3885,11 +3885,86 @@ const CHECKS = [
     ok: (v) => typeof v === 'string' && v.length > 0,
     show: (v) => JSON.stringify(v),
   },
-  // ══════════════ 起草者**拒绝**那一屏（分批第 194 批）══════════════
+  // ══════════════ "它只说了话、没交 skill"那一屏（分批第 211 批）══════════════
   //
-  // 使用者真机上撞到的缺陷：拒绝（`REFUSED.md`）被画成了"体检没通过"——红条上写着
-  // 「体检发现 1 处问题 · 校验未通过（1）」，看起来像审核没过。这四条钉住新口径：
-  // 它是**结论**（中性）、理由是一条消息、不再有"审阅草稿"这种任务式抬头。
+  // 起源是真机上撞到的缺陷（第 194 批记下）：一条"没什么可沉淀的"草稿被画成
+  // 「体检发现 1 处问题 · 校验未通过（1）」，看起来像审核没过——而审核早就删了。
+  //
+  // ⚠️ 分批第 211 批把判据的**名字与夹具**换了一遍（行为一条不丢）：那一屏从前靠
+  //    `skill/REFUSED.md` 这个协议文件认出来，现在靠**事实**——`skill/SKILL.md` 不在。
+  //    原因：使用者定「人之间在对话框里看 AI 的回答就好了，应该不需要 REFUSED 的特殊处理」，
+  //    于是"在问"与"不做了"合并成同一个状态（没交 skill），理由就是它自己那句话。
+  //    这里的六条量的是**新口径下的同一批行为**：不说"写好了"、理由只说一次、不画结论条、
+  //    没有审阅抬头、没有确认入库、两个出口都在。
+  {
+    view: '沉淀',
+    key: 'crystal.artifactEntered',
+    label:
+      '夹具（分批第 211 批补的守卫）：产物栏那一组先把**审阅态**挂上再量——它原来接着"停止 ⇒ 回目标态"往下量，' +
+      '于是一整组在**目标态**上问"产物栏列的是真产物"',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputAttached',
+    label: '夹具：只说话没交 skill 的那条草稿挂得上（`skill/` 空，回话在消息流里）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputHeadText',
+    label:
+      '★★★ 那一轮的 `who` 行说的是「这次没交 skill」——不是「写好了」（它确实没交，`skill/` 是空的）',
+    ok: (v) => typeof v === 'string' && v.includes('没交 skill') && !v.includes('写好了'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputReasonHits',
+    label:
+      '★★★ 它说的话在一屏里**只说一次**（理由就在它的气泡里，右栏不再把同一段当"体检问题"列一遍）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 次`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputNoConclusionBar',
+    label:
+      '★★★ 没交 skill 时**不画结论条**（没有可入库的东西），因此也不再出现「体检发现…问题 / ' +
+      '校验未通过」——那正是使用者以为"还有审核"的来源',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputBubbleText',
+    label:
+      '★★ 理由是**一条消息的正文**（气泡里），而且**不带文件标题**（它自己说的话，不是贴一份文件）',
+    ok: (v) => typeof v === 'string' && v.includes('只有一次性的环境排错') && !v.includes('#'),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 60)),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputNoReviewHeading',
+    label: '★★ 那一屏**没有**「审阅草稿」这种任务式抬头（它只是它在说话）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputNoConfirmButton',
+    label: '★★★ 没交 skill 的草稿**没有「确认入库」**（没有 SKILL.md，入库必然失败——不给按了会被拒的按钮）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.noOutputHasExits',
+    label: '★★ 那一屏的两个出口都在消息里：「重新起草」「放弃」',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
   {
     view: '沉淀',
     key: 'crystal.headActionsBesideTitle',
@@ -3902,68 +3977,6 @@ const CHECKS = [
         ? 'null'
         : `同一带 ${String(v.sameBand)}　在标题右 ${String(v.rightOfTitle)}　` +
           `贴右缘 ${String(v.nearRightEdge)}（栏头 ${v.headRight} / 动作 ${v.actsRight}）`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedAttached',
-    label: '夹具：拒绝那条草稿挂得上（下面几条量的是它的结论条与消息）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedHeadText',
-    label:
-      '★★★ 拒绝那一轮的 `who` 行说的是「这次没有可沉淀的」——不是「写好了」（它确实没写 skill，写的是 REFUSED.md）',
-    ok: (v) => typeof v === 'string' && v.includes('没有可沉淀') && !v.includes('写好了'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedReasonHits',
-    label:
-      '★★★ 拒绝理由在一屏里**只说一次**（使用者："觉得有必要显示 REFUSED.md 的内容吗"——' +
-      '有必要，但只该有一处：它是"为什么不做"的唯一解释）',
-    ok: (v) => v === 1,
-    show: (v) => `${v} 次`,
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedNoConclusionBar',
-    label:
-      '★★★ 拒绝时**不画结论条**（没有可入库的东西，那条只会与上面那句话重复），' +
-      '因此也不再出现「体检发现…问题 / 校验未通过」——那正是使用者以为"还有审核"的来源',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedBubbleText',
-    label:
-      '★★ 拒绝理由是**一条消息的正文**（气泡里），不是抽屉分节里的一块黄条；' +
-      '而且**不带文件标题**（`# 这次没有可复用的做法` 那种 H1 不进气泡——上方那行已经说了同一句话）',
-    ok: (v) => typeof v === 'string' && v.includes('只有一次性的环境排错') && !v.includes('#'),
-    show: (v) => JSON.stringify((v ?? '').slice(0, 60)),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedNoReviewHeading',
-    label: '★★ 拒绝那一屏**没有**「审阅草稿」这种任务式抬头（它只是它在说话）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedNoConfirmButton',
-    label: '★★★ 拒绝的草稿**没有「确认入库」**（它没有 SKILL.md，入库必然失败——不给按了会被拒的按钮）',
-    ok: (v) => v === true,
-    show: (v) => String(v),
-  },
-  {
-    view: '沉淀',
-    key: 'crystal.refusedHasExits',
-    label: '★★ 拒绝那一屏的两个出口都在消息里：「重新起草」「放弃」',
-    ok: (v) => v === true,
-    show: (v) => String(v),
   },
   {
     view: '沉淀',
@@ -5453,13 +5466,18 @@ try {
     siblingDraftRunId: '',
     manualDraftRunId: '',
     /**
-     * ★ 分批第 194 批：一条**起草者拒绝**的草稿（`skill/REFUSED.md`）。
+     * ★ 分批第 211 批（前身是分批第 194 批的 `refusedRunId`）：一条**只说了话、没交 skill**
+     * 的草稿（`skill/` 空着，回话在消息流里）。
      *
      * 为什么要有它：使用者真机上撞到的正是这一屏——一条"没什么可沉淀的"草稿，界面上却写着
-     * 「体检发现 1 处问题 · 校验未通过（1）」，看起来像**审核没通过**（而审核早在第 137 批
-     * 就删了）。这是结论不是失败，判据得钉住"它不再被画成失败"。
+     * 「体检发现 1 处问题 · 校验未通过（1）」，读起来像**审核没通过**（而审核早在第 137 批
+     * 就删了）。它是"这一轮没交东西"，不是失败 ⇒ 判据钉住"它不画结论条、不给入库、
+     * 理由只出现一次"。
+     *
+     * ⚠️ 夹具形状变了：从前靠 `skill/REFUSED.md` 让平台认出"它拒绝"，现在**什么都不写**
+     *    （`skill/` 空）+ 一条 run 消息（它说的话）。协议文件删了，判据跟着事实走。
      */
-    refusedRunId: '',
+    noOutputRunId: '',
     // ★ 分批第 191 批：`agentId` 删掉了——它只服务「优化智能体指令」那条草稿夹具，
     //   而那条功能整条下线（服务端连入库分支都删了）。
   }
@@ -5815,18 +5833,29 @@ try {
         )
 
         /**
-         * ★ 分批第 194 批：**起草者拒绝**那条草稿（只有 `REFUSED.md`，没有 `SKILL.md`）。
+         * ★ 分批第 211 批：**只说了话、没交 skill** 那条草稿。
+         *
+         * 夹具形状：`skill/` **空着**（`files: {}`），它说的话在 run 的消息里——这正是真机上的
+         * 形状（从前这里写一份 `REFUSED.md`，那个协议已经删了）。
          * 独立一条源 run，理由与上面那几条一样：夹具之间不许互相消费。
          */
-        crystalFixture.refusedRunId = await makeDraft(
+        crystalFixture.noOutputRunId = await makeDraft(
           ulid(),
-          {
-            'REFUSED.md':
-              '# 这次没有可复用的做法\n\n' +
-              '素材里只有一次性的环境排错，没有值得复用的步骤。\n',
-          },
+          {},
           { sourceRunId: await makeSource() },
         )
+        await store.appendRunMessage(crystalFixture.noOutputRunId, {
+          seq: 1,
+          type: 'text',
+          tool: null,
+          content:
+            '# 这次没有可复用的做法\n\n' +
+            '素材里只有一次性的环境排错，没有值得复用的步骤。\n',
+          input: null,
+          output: null,
+          outputTruncated: false,
+          at: now - 27_500,
+        })
 
         // ★ 给**第一条草稿**一段文字产出：审阅态那块默认要显示的就是它（"最后结果"）。
         //   没有这条消息，量到的只会是"这次起草没有留下文字产出"那个空态。
@@ -6121,7 +6150,7 @@ try {
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +
         `&crystalSibling=${encodeURIComponent(crystalFixture.siblingDraftRunId)}` +
         `&crystalManual=${encodeURIComponent(crystalFixture.manualDraftRunId)}` +
-        `&crystalRefused=${encodeURIComponent(crystalFixture.refusedRunId)}` +
+        `&crystalNoOutput=${encodeURIComponent(crystalFixture.noOutputRunId)}` +
         `&crystalSource=${encodeURIComponent(crystalFixture.sourceRunId)}` +
         `&crystalRevised=${encodeURIComponent(crystalFixture.revisedRunId)}` +
         `&localSkillsDir=${encodeURIComponent(fixtureLocalSkillsRoot)}` +

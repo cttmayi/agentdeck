@@ -204,16 +204,11 @@
    */
   let paneWide = true
   /**
-   * ★ 分批第 173 批（按你定的模型："它有疑问就可以发问，类似聊天窗口"）：**它在等回答**。
-   *
-   * `questions !== ''` ⇒ 中间消息流把它显示成一条助手消息、栏脚输入条变成"回答它"。
-   * 为什么不是一个新 step：`step` 表示"这一屏在干什么"（目标/起草/审阅/完成），
-   * 而"等回答"是**起草这条链上的一个瞬时状态**——它仍然在 `drafting` 那一屏里，
-   * 只是最后一条消息从"日志"变成了"问题"。多一个 step 会把所有 `step ===` 的判断
-   * 都得改一遍，收益却只是换个名字。
+   * ★ 分批第 211 批：**"它在等回答"不再是独立状态**（使用者："人之间在对话框里看 AI 的
+   * 回答就好了"）——判据就是 `artifacts.mode === 'none'`：这一轮它没交 skill，只是说了话。
+   * 那句话在消息流里（它自己说的），栏脚输入条在这时就是"接着说"。
    */
-  let questions = ''
-  let answering = false
+  let continuing = false
 
   /** 编辑器（子组件）把编辑现场推上来。见上面那段：为什么必须是回调。 */
   function syncFromEditor(s: {
@@ -314,8 +309,8 @@
   /** 草稿产出的接口形状（与 `apps/daemon/src/crystallize-artifacts.ts` 对齐）。 */
   interface Artifacts {
     status: string
-    mode: 'files' | 'text' | 'refused'
-    refusalReason?: string
+    /** `files` = 交了东西；`none` = 这一轮只是说了话（没交 skill）。 */
+    mode: 'files' | 'none'
     files: Record<string, string>
     skillMd: { name: string; description: string; body: string; raw: string }
     validation: { ok: boolean; problems: Array<{ file: string; message: string }> }
@@ -368,16 +363,14 @@
    * `○` 只在还没读到产出时出现——画 ✓ 或 ✗ 都是撒谎。
    */
   /**
-   * ★ 分批第 194 批：**refused 不是"没通过"**。
-   *
-   * 起草者判定"这里没有可沉淀的内容"时写的是 `REFUSED.md`，而 `validation.ok` 因此为 false
-   * ⇒ 结论条原来画 `✗` 并写「体检发现 1 处问题 · 校验未通过（1）」，看起来像**审核不通过**。
-   * 使用者当场问"当前还有审核吗，为什么还有提示…"。它是**结论**（"这次没什么可沉淀的"），
-   * 所以标记用 `–`（中性）而不是 `✗`（失败），文案走 `crystallize.refusedTitle`。
+   * ★ 分批第 211 批：**`none` 不是"没通过"**——它是"这一轮没交 skill"（在问、在说"不值得做"、
+   * 或者只是解释它要什么）。所以这一屏不画结论条、不给「确认入库」，也没有 `✗`：
+   * 它没有可体检的东西，把它画成"体检未通过"才是错的（那正是当初 `REFUSED.md` 想躲开的难看，
+   * 现在由状态本身躲开，不再需要那个文件）。
    */
-  $: refused = artifacts !== null && artifacts.mode === 'refused'
+  $: noOutput = artifacts !== null && artifacts.mode === 'none'
   $: conclusionMark =
-    artifacts === null ? '○' : refused ? '–' : artifacts.validation.ok ? '✓' : '✗'
+    artifacts === null ? '○' : noOutput ? '–' : artifacts.validation.ok ? '✓' : '✗'
   $: conclusionBad = conclusionMark === '✗'
 
   /**
@@ -906,9 +899,8 @@
     handledTerminal = true
     if (status === 'completed') {
       draftStatus = 'completed'
-      // ★ 分批第 173 批：**先问"它是不是在提问"**——只提问的那一轮没有产出，
-      //   直接走 `loadDraftOutput()` 会把它画成"审阅态但空草稿"（人看不出它在等自己）。
-      if (await loadQuestions()) return
+      // ★ 分批第 211 批：不再"先问它是不是在提问"——读产出就够了：
+      //   `mode === 'none'` 时那一屏就是"它说的话 + 接着说"，与它是在问还是在说"不值得做"无关。
       await loadDraftOutput()
     } else {
       draftStatus = status === 'cancelled' ? 'cancelled' : 'failed'
@@ -918,52 +910,34 @@
   }
 
   /**
-   * 读"它在等回答吗"（`GET /api/crystallize/questions`）。
+   * ★ 分批第 211 批：**接着说**（`POST /api/crystallize/continue`；前身是分批第 172 批的
+   * "回答提问"）。
    *
-   * 返回 `true` = 有开放问题 ⇒ 调用方**不要**进审阅态（那一轮没产出）。
+   * 它先把人这句话追加成一份素材，再起一条**新 run**（并接上刚才那条会话）——所以这里要像
+   * 起草一样把终态处理清干净（`handledTerminal` 复位），否则新 run 完成时会被上一轮的"已处理"
+   * 挡住。
    */
-  async function loadQuestions(): Promise<boolean> {
-    if (draftRunId === '') return false
-    try {
-      const res = await api<{ questions: string | null }>(
-        `/api/crystallize/questions?draftRunId=${encodeURIComponent(draftRunId)}`,
-      )
-      questions = res.questions ?? ''
-      return questions !== ''
-    } catch {
-      questions = ''
-      return false
-    }
-  }
-
-  /**
-   * ★ 分批第 173 批：**回答起草者的问题**（`POST /api/crystallize/answer`）。
-   *
-   * 它起的是一条**新 run**（并接上刚才那条会话）——所以这里要像起草一样把终态处理清干净：
-   * `handledTerminal` 复位、`questions` 清空，否则新 run 完成时会被上一轮的"已处理"挡住。
-   */
-  async function answerQuestion(text: string): Promise<void> {
-    if (answering || draftRunId === '') return
-    answering = true
+  async function continueDraft(text: string): Promise<void> {
+    if (continuing || draftRunId === '') return
+    continuing = true
     error = ''
     try {
-      const res = await api<{ draftRunId: string }>('/api/crystallize/answer', {
+      const res = await api<{ draftRunId: string }>('/api/crystallize/continue', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ draftRunId, answer: text.trim() }),
+        body: JSON.stringify({ draftRunId, text: text.trim() }),
       })
       draftRunId = res.draftRunId
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
-      questions = ''
       step = 'drafting'
       composerText = ''
-      composerReceipt = '收到，已经转给它了（如果还有没问清的，它会再问一轮）。'
+      composerReceipt = '收到，已经交给它了（它没有交 skill 之前，你说的话都会当成补充材料给它）。'
     } catch (err) {
-      composerReceipt = `回答没送出去：${err instanceof Error ? err.message : String(err)}`
+      composerReceipt = `没送出去：${err instanceof Error ? err.message : String(err)}`
     } finally {
-      answering = false
+      continuing = false
     }
   }
 
@@ -1189,12 +1163,14 @@
     const text = composerText.trim()
     if (text === '') return
     /**
-     * ★ 分批第 173 批：**它在等回答时，栏脚这句话就是回答**（不要求「这里不对：」前缀）。
-     * 顺序很关键：这条判断必须在"意图路由"之前——否则"这里不对"会被当成改稿意见，
-     * 而此刻真正该做的是把话转给它（§12.12："显式动作先于隐式答题"的反面同样成立）。
+     * ★ 分批第 211 批：**它还没交 skill 时，栏脚这句话就是"接着说"**（不要求任何前缀）。
+     *
+     * 判据是产出形态（`mode: 'none'`），不是某个协议文件——所以这一条既覆盖"它在问"，
+     * 也覆盖"它说这段不值得沉淀"。顺序很关键：它必须在"意图路由"之前，否则"这里不对"
+     * 会被当成改稿意见、而此刻根本没有"上一版"可改。
      */
-    if (questions !== '' && draftRunId !== '') {
-      void answerQuestion(text)
+    if (noOutput && draftRunId !== '') {
+      void continueDraft(text)
       return
     }
     const says =
@@ -1424,8 +1400,8 @@
     <ChatBubble
       role="agent"
       who={`${$t('crystallize.speakerDrafter')}${
-        refused
-          ? ` · ${$t('crystallize.refusedHead')}`
+        noOutput
+          ? ` · ${$t('crystallize.noOutputHead')}`
           : draftLiveNow
             ? ` · ${$t('crystallize.draftTurnLive')}`
             : draftStatus === 'failed'
@@ -1452,27 +1428,7 @@
         {/if}
       {/snippet}
 
-      {#if refused}
-        <!--
-          ★ 分批第 195 批：**起草者拒绝时，理由只说一次，而且就在它嘴里**。
-
-          改之前这条理由出现三处：结论条「起草者判定：这里没有可沉淀的内容」、中间一条气泡
-          （`REFUSED.md` 原文）、右栏「体检」里又把同一段当成"问题"。使用者问"有必要显示
-          REFUSED.md 的内容吗"——**有必要，但只该有一处**：它是"为什么不做"的唯一解释，
-          删了就只剩下"它没给东西"。所以留下这一处（气泡正文），另外两处不再复述。
-
-          ⚠️ 顺便修掉一个错话：拒绝的草稿没有"最后一段正文"，于是原来会落进
-             「这次执行没有留下文字产出」那一支——而它明明写了 REFUSED.md。
-             那条空态现在只在**真没有产出**时出现。
-        -->
-        <p class="draft-turn-reason">{artifacts?.refusalReason ?? ''}</p>
-        <div class="row-end msg-actions" data-msg-actions>
-          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-          <button class="ghost small" onclick={() => void abandonReview()}>
-            {$t('crystallize.abandon')}
-          </button>
-        </div>
-      {:else if draftLiveNow}
+      {#if draftLiveNow}
         <div class="log-box">
           <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
         </div>
@@ -1492,6 +1448,26 @@
         </p>
       {:else}
         {@html renderMarkdown(draftFinalText)}
+      {/if}
+
+      <!--
+        ★ 分批第 211 批：**它没交 skill**（`mode: 'none'`）时，这一屏就是它在说话。
+
+        它说的话上面那一支已经画了（run 的最后一段文本），这里只补两个东西：
+          · 一句提示：接着说就是往下走（不用记任何格式）；
+          · 两个出口：重新起草 / 放弃。
+        没有「确认入库」（没有 SKILL.md，点了必然被拒），也不画结论条——没有可体检的东西。
+        从前这里靠 `REFUSED.md` 一个协议文件生效，现在靠"没交"这个事实，因此在问、
+        在说"不值得做"、在解释它要什么，三种情况共用同一屏。
+      -->
+      {#if !draftLiveNow && noOutput && draftStatus === 'completed'}
+        <p class="faint small" data-draft-nooutput-hint>{$t('crystallize.noOutputHint')}</p>
+        <div class="row-end msg-actions" data-msg-actions>
+          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+          <button class="ghost small" onclick={() => void abandonReview()}>
+            {$t('crystallize.abandon')}
+          </button>
+        </div>
       {/if}
 
       {#if !draftLiveNow && draftLogOpen}
@@ -1562,7 +1538,7 @@
     「重新起草」、目标态最后一问的「开始提炼」。
   -->
   {#snippet headActions()}
-    {#if step === 'review' && artifacts !== null && !refused}
+    {#if step === 'review' && artifacts !== null && artifacts.mode === 'files'}
       <div class="head-actions" data-review-actions>
         <!--
           ★ 分批第 196 批：**「反馈」按钮删了**（使用者："中栏页头应该不需要「反馈」"）。
@@ -1770,18 +1746,6 @@
       {/if}
 
       {#if draftRunId !== '' && (step === 'drafting' || step === 'review' || step === 'done')}
-      <!-- ★ 分批第 173 批：**它在问**——问题是一条助手消息（与"提问/材料"同一种形状），
-           下面是栏脚输入条；人回答之后平台起下一条 run 并接上会话。 -->
-      {#if questions !== ''}
-        <div class="crystal-msg" data-msg-role="assistant" data-crystal-questions>
-          <ChatBubble
-            role="agent"
-            who={$t('crystallize.speakerDrafter')}
-            html={renderMarkdown(questions)}
-          />
-          <p class="faint small">它在等你回答——直接写在下面的输入条里（一行也行，多行也行）。</p>
-        </div>
-      {/if}
       <!--
         ★ 分批第 194 批：**你把话说清楚了，它才能开始**——这条是"你那一轮"。
 

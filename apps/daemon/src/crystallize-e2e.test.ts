@@ -60,12 +60,14 @@ class FakeBackend implements AgentBackend {
   minimalEditOnRevise = false
 
   /**
-   * ★ 分批第 172 批：让起草者**只提问、不产出**（写 `material/QUESTIONS.md`）。
+   * ★ 分批第 211 批（前身是分批第 172 批的 `draftAskQuestions`）：让起草者**只说话、不交
+   * 产出**（`skill/` 一个字不写，回话就是它要说的话）。
    *
-   * 真机上的形状就是"它写了一个问题文件、`skill/` 一个字没写"——假后端要能复现这一轮，
-   * 否则"它在问问题"这条分支永远测不到。
+   * 真机上的形状就是"它说了句'我想先确认两件事…'、`skill/` 是空的"——假后端要能复现这一轮，
+   * 否则"这一轮没交 skill"这条分支永远测不到。⚠️ 不再需要任何协议文件：从前这里要写
+   * `material/QUESTIONS.md`，现在"没交"这件事靠 `skill/SKILL.md` 不在就够了。
    */
-  draftAskQuestions: string | null = null
+  draftSayOnly: string | null = null
 
   /** 每一轮开工时工作目录里**真的落了哪些技能文件**（钉"选中即注入"，看磁盘不看请求）。 */
   readonly injectedSkills: Array<Record<string, string>> = []
@@ -139,11 +141,8 @@ class FakeBackend implements AgentBackend {
     // ★ 注入是否生效，看**磁盘**：技能是被 executor 落进工作目录的（claude 是 `.claude/skills/`），
     //   `ExecOptions` 上没有"技能"这个字段——只量请求侧的话，"写了但没落盘"测不出来。
     this.injectedSkills.push(await readDirRecursive(join(opts.workDir, '.claude', 'skills')))
-    if (opts.workDir.includes('skill-draft-') && this.draftAskQuestions !== null) {
-      // ★ 分批第 172 批：这一轮只提问——写 `material/QUESTIONS.md`，不碰 `skill/`
-      const full = join(opts.workDir, 'material', 'QUESTIONS.md')
-      await mkdir(dirname(full), { recursive: true })
-      await writeFile(full, this.draftAskQuestions, 'utf8')
+    if (opts.workDir.includes('skill-draft-') && this.draftSayOnly !== null) {
+      // ★ 分批第 211 批：这一轮只说话——`skill/` 一个字不写（"没交"就是没交）
     } else if (opts.workDir.includes('skill-draft-')) {
       // ★ 分批第 10 批：记下**开工那一刻**产出目录里已经有什么。
       //   这是"改版是从上一版开始改的"唯一的证据——跑完之后 `skill/` 里当然有文件
@@ -172,7 +171,7 @@ class FakeBackend implements AgentBackend {
     queue.push({ type: 'tool_result', tool: null, content: '文件内容', output: '文件内容', outputTruncated: false })
     // ★ 分批第 137 批：草稿小屋里的 run 永远是起草 run（审核已被删）⇒ 不再有"按审核者身份
     //   产出判决"的分支。`draftReviewVerdict` 这个夹具开关也随之删除。
-    const text = '报告：任务已完成。'
+    const text = this.draftSayOnly ?? '报告：任务已完成。'
     queue.push({ type: 'text', content: text })
     queue.close()
     return {
@@ -200,7 +199,7 @@ let dataDir: string
 let workRoot: string
 let mineRoot: string
 let daemon: DaemonHandle
-/** 假后端的引用（测试要换起草产出：写目录 / 只写 REFUSED.md）。 */
+/** 假后端的引用（测试要换起草产出：写目录 / 只说话不写文件）。 */
 let fakeBackend: FakeBackend
 let agentId: string
 let reviewerId: string
@@ -931,17 +930,24 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     assert.match(String(body['error']), /frontmatter/)
   })
 
-  test('★ 起草者写了 REFUSED.md ⇒ artifacts 是 refused（结论，不是失败）', async () => {
+  /**
+   * ★ 分批第 211 批：这里原来钉"写了 `REFUSED.md` ⇒ `mode: 'refused'`"。
+   *   使用者定的口径是「人之间在对话框里看 AI 的回答就好了」——拒绝不再是平台需要认的
+   *   一种**协议**，它只是"这一轮没交 skill"的一种说法。于是判据改成**事实**：
+   *   没有 `skill/SKILL.md` ⇒ `mode: 'none'`（哪怕它顺手写了点别的文件）。
+   */
+  test('★ 没交 SKILL.md ⇒ artifacts 是 none；它写过的东西仍然带着', async () => {
     const runId = await runReviewed('不可沉淀的任务')
     const previous = fakeBackend.draftFiles
+    // 它只写了说明、没写 SKILL.md（真机上就是"它说了句这段不值得沉淀"）
     fakeBackend.draftFiles = { 'REFUSED.md': '全是环境问题，没有可复用做法。' }
     try {
       const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
       const res = (await (
         await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${draftRunId}`)
-      ).json()) as { mode: string; refusalReason?: string }
-      assert.equal(res.mode, 'refused')
-      assert.match(res.refusalReason ?? '', /环境问题/)
+      ).json()) as { mode: string; files: Record<string, string> }
+      assert.equal(res.mode, 'none')
+      assert.ok('REFUSED.md' in res.files, '写过的文件仍然看得到（右栏要能显示它写了什么）')
     } finally {
       fakeBackend.draftFiles = previous
     }
@@ -976,8 +982,8 @@ describe('四轮：素材落盘 + 产出读目录', () => {
   })
 })
 
-describe('四轮：文本兜底草稿更新时不删支持文件', () => {
-  test('★ 文本产出（没写出目录）+ 更新 ⇒ 现有支持文件被保留（不是"整目录替换"）', async () => {
+describe('四轮：没写出目录的草稿更新时不删支持文件', () => {
+  test('★ 只说话没交 skill（原"文本兜底"）+ 更新 ⇒ 现有支持文件被保留（不是"整目录替换"）', async () => {
     // 先入库一份带支持文件的技能
     const runId = await runReviewed('建一个带支持文件的技能')
     const firstDraft = await draftAndWait({ runId, target: { kind: 'new' } })
@@ -1008,7 +1014,10 @@ describe('四轮：文本兜底草稿更新时不删支持文件', () => {
     const art = (await (
       await fetch(`${daemon.url}/api/crystallize/artifacts?draftRunId=${textDraftId}`)
     ).json()) as { mode: string }
-    assert.equal(art.mode, 'text', '没写出目录 ⇒ 文本兜底')
+    // ★ 分批第 211 批：`text` 兜底删了——没写 `skill/SKILL.md` 就是"这一轮没交东西"（`none`），
+    //   不再把它的回话冒充成一份 SKILL.md。下面要钉的事（入库时别把支持文件整目录替换掉）
+    //   与草的产出形态无关：`commit` 的内容一直由界面显式给。
+    assert.equal(art.mode, 'none', '没写出目录 ⇒ 这一轮没交 skill')
 
     const { status, body } = await commit({
       draftRunId: textDraftId,
@@ -1864,85 +1873,91 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
 })
 
 /**
- * §10.16 起草者可以提问、人回答（分批第 172 批，§12.62）。
+ * §10.16 起草者「只说了话、没交 skill」→ 人接着说（分批第 211 批；前身是分批第 172 批的
+ * 「提问 → 回答」）。
  *
- * 使用者的原话：「沉淀者就是一个智能体…如果这个智能体有疑问，就可以发问，类似聊天窗口那样」。
- * 这一节钉的是那条链的三件事：**它问**（只写 `material/QUESTIONS.md`、不产出）、
- * **人能答**（起下一条 run 并接上会话）、**答完就真的往下走**（问题归档、回答进素材）。
+ * 使用者的原话（172 批）：「沉淀者就是一个智能体…如果这个智能体有疑问，就可以发问，类似
+ * 聊天窗口那样」；211 批又把它推到底：「人之间在对话框里看 AI 的回答就好了，应该不需要
+ * REFUSED 的特殊处理才对」。于是这一节钉三件事：**没交 skill** 是一个可判定的状态
+ * （`mode: 'none'`、`skill/` 空）、**人能接着说**（起新 run + 接会话 + 那句话进素材）、
+ * **交出东西之后就不该再走这条**（409，改它请用「这里不对：…」）。
  */
-describe('§10.16 起草者提问 → 人回答（分批第 172 批）', () => {
-  const askAndWait = async (purpose: string): Promise<string> => {
-    const previous = fakeBackend.draftAskQuestions
-    // 假后端这一轮只写 `material/QUESTIONS.md`（真机上就是"它问了一句、产出目录空的"）
-    fakeBackend.draftAskQuestions =
-      '# 想先确认两件事\n\n1. 这条 skill 主要给哪类任务用？\n2. 要不要带 persona 那一轨？\n'
+describe('§10.16 只说话没交 skill → 人接着说（分批第 211 批）', () => {
+  /** 让这一轮"只说话"：`skill/` 空，回话就是给定的那段话。 */
+  const sayAndWait = async (purpose: string, words: string): Promise<string> => {
+    const previous = fakeBackend.draftSayOnly
+    fakeBackend.draftSayOnly = words
     try {
       return await draftAndWait({
         runId: await runReviewed(`审完的流程（${purpose}）`),
         target: { kind: 'new', purpose },
       })
     } finally {
-      fakeBackend.draftAskQuestions = previous
+      fakeBackend.draftSayOnly = previous
     }
   }
 
-  const questionsOf = async (draftRunId: string): Promise<string | null> =>
-    ((await getJsonFile<{ questions: string | null }>(
-      `/api/crystallize/questions?draftRunId=${draftRunId}`,
-    )).questions)
-
-  test('★★★ 它只提问时：问题能被读到，而"没有产出"不是错误', async () => {
-    const draftRunId = await askAndWait('提问轮')
-    const questions = await questionsOf(draftRunId)
-    assert.ok(questions !== null, 'QUESTIONS.md 在 ⇒ 平台要能读到它')
-    assert.match(questions!, /哪类任务用/, '问题原文要原样给出（界面就是把它显示给人）')
-    // 这一轮的产出目录里**没有真的 skill 文件**（拿到的可能是字段兜底形态，但 `skill/` 是空的）
+  test('★★★ 它只说话时：`skill/` 是空的，artifacts 是 `none`（不是"交了坏东西"）', async () => {
+    const words = '# 想先确认两件事\n\n1. 这条 skill 主要给哪类任务用？\n2. 要不要带 persona 那一轨？\n'
+    const draftRunId = await sayAndWait('只说话轮', words)
+    // ① 磁盘：`skill/` 一个字都没有
     const skillDir = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
-    const onDisk = await readDirRecursive(skillDir)
-    assert.deepEqual(Object.keys(onDisk), [], '只提问的那一轮不该在 skill/ 落任何文件')
+    assert.deepEqual(Object.keys(await readDirRecursive(skillDir)), [], '没交就是没交')
+    // ② 接口：mode = none（界面据此显示"它说的话"+出口，不给入库）
+    const res = (await getJsonFile<{ mode: string }>(
+      `/api/crystallize/artifacts?draftRunId=${draftRunId}`,
+    ))
+    assert.equal(res.mode, 'none')
+    // ③ 它说的话在**消息流**里（界面就显示这一条，不需要任何协议文件）
+    const messages = await getJsonFile<{ messages: Array<{ type: string; content: string | null }> }>(
+      `/api/runs/${draftRunId}/messages`,
+    )
+    assert.ok(
+      messages.messages.some((m) => (m.content ?? '').includes('哪类任务用')),
+      '它说的话必须能读到（那才是"回答它"的依据）',
+    )
   })
 
-  test('★★★ 回答之后：起新 run + 接上会话；问题归档、回答进素材；再答一次就是 409', async () => {
-    const draftRunId = await askAndWait('回答轮')
+  test('★★★ 接着说：起新 run + 接上会话；那句话进素材；交出东西之后再接着说就是 409', async () => {
+    const draftRunId = await sayAndWait('接着说轮', '我想先确认一下口径。')
     const before = fakeBackend.resumeRequests.length
-    const res = await fetch(`${daemon.url}/api/crystallize/answer`, {
+    const res = await fetch(`${daemon.url}/api/crystallize/continue`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId, answer: '给小型的发布任务用；不要 persona 那一轨。' }),
+      body: JSON.stringify({ draftRunId, text: '给小型的发布任务用；不要 persona 那一轨。' }),
     })
     assert.equal(res.status, 202, await res.clone().text())
     const newRunId = ((await res.json()) as { draftRunId: string }).draftRunId
-    assert.notEqual(newRunId, draftRunId, '回答也是"起一条新 run"（run 是终态机）')
+    assert.notEqual(newRunId, draftRunId, '接着说也是"起一条新 run"（run 是终态机）')
 
-    // ① 素材：回答落在 answers.md；QUESTIONS.md 归档（否则界面永远停在"待回答"）
+    // ① 素材：人这句话进了 `material/appended/`（与「追加材料」同一个落点），并登记进索引
     const materialDir = join(workRoot, `skill-draft-${draftRunId}`, 'material')
-    const answers = await readFile(join(materialDir, 'answers.md'), 'utf8')
-    assert.match(answers, /给小型的发布任务用/, '人的回答要原样进素材（起草者靠它往下写）')
-    assert.equal(
-      await readFile(join(materialDir, 'QUESTIONS.md'), 'utf8').catch(() => null),
-      null,
-      '问题答过就要归档：留着它，下一轮还会以为在等回答',
+    const appended = await readDirRecursive(join(materialDir, 'appended'))
+    const joined = Object.values(appended).join('\n')
+    assert.match(joined, /小型的发布任务用/, '人的话要原样进素材（起草者靠它往下写）')
+    assert.match(
+      await readFile(join(materialDir, '00-README.md'), 'utf8'),
+      /appended\//,
+      '追加的话要登记进素材索引（否则它读索引时看不见）',
     )
-    assert.equal(await questionsOf(draftRunId), null, '接口也应当读不到"在等回答"了')
 
-    // ② 会话：接上了刚才那条（"它有疑问就问"意味着它得记得自己问过什么）——
-    //    ⚠️ 先等新 run 真的起来（`execute` 里才记 resume），否则量到的是"还没开始"
+    // ② 会话：接上了刚才那条（它得记得自己说过什么）——先等新 run 真的起来
     for (let i = 0; i < 40; i += 1) {
       const r = (await (await fetch(`${daemon.url}/api/runs/${newRunId}`)).json()) as { status: string }
       if (r.status === 'completed' || r.status === 'failed') break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
     const resumed = fakeBackend.resumeRequests.slice(before).filter((x) => x !== null)
-    assert.equal(resumed.length >= 1, true, '回答那一轮要 resume 上一轮的会话')
+    assert.equal(resumed.length >= 1, true, '接着说那一轮要 resume 上一轮的会话')
 
-    // ③ 再答一次：没有开放的问题了 ⇒ 409（不给"按了会被拒"的路）
-    const again = await fetch(`${daemon.url}/api/crystallize/answer`, {
+    // ③ 这一轮交了东西（假后端恢复正常）⇒ 再"接着说"就该被拒：改它请用「这里不对：…」
+    const again = await fetch(`${daemon.url}/api/crystallize/continue`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ draftRunId, answer: '再补一句' }),
+      body: JSON.stringify({ draftRunId: newRunId, text: '再补一句' }),
     })
     assert.equal(again.status, 409, await again.clone().text())
-    assert.equal(((await again.json()) as { code?: string }).code, 'no_open_question')
+    assert.equal(((await again.json()) as { code?: string }).code, 'draft_has_output')
   })
 
   test('★★★ 选中的技能真的被注入到工作目录（"不要预置在仓库里、让用户自己装"那条的前半段）', async () => {
