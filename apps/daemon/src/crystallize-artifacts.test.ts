@@ -234,6 +234,38 @@ describe('assembleArtifacts：两种产出形态（分批第 211 批：没交就
     assert.ok('REFUSED.md' in artifacts.files)
   })
 
+  /**
+   * ★ 分批第 217 批（使用者定："可以是 skill 目录，也可以是 skill 下的子目录，动态侦测"）：
+   * 起草者可能调它自己的写入器（真机上 distilly 的 `tools/skill_writer.py` 落点是
+   * `<base-dir>/<slug>/SKILL.md`）⇒ 产出在 `skill/<dir>/` 里。**唯一一层子目录也认**：
+   * 在内存里归一到根，于是编辑器/差异/入库看到的是同一套相对路径。
+   */
+  test('files：唯一一层子目录里的 SKILL.md 也认（归一到根）', () => {
+    const artifacts = assembleArtifacts({
+      'colleague-flow/SKILL.md': GOOD_SKILL_MD,
+      'colleague-flow/work.md': '# Work\n',
+      'colleague-flow/meta.json': '{}',
+    })
+    assert.equal(artifacts.mode, 'files')
+    assert.equal(artifacts.skillMd.name, 'review-report', 'frontmatter 照样能解析')
+    assert.deepEqual(
+      Object.keys(artifacts.files).sort(),
+      ['SKILL.md', 'meta.json', 'work.md'],
+      '路径归一到根（`colleague-flow/` 前缀剥掉）',
+    )
+    assert.equal(artifacts.validation.ok, true)
+  })
+
+  test('none：多份 SKILL.md ⇒ 不猜，如实报是哪几份', () => {
+    const artifacts = assembleArtifacts({
+      'a/SKILL.md': GOOD_SKILL_MD,
+      'b/SKILL.md': GOOD_SKILL_MD,
+    })
+    assert.equal(artifacts.mode, 'none')
+    assert.match(artifacts.validation.problems[0]?.message ?? '', /多份 SKILL\.md/)
+    assert.match(artifacts.validation.problems[0]?.message ?? '', /a\/SKILL\.md/)
+  })
+
   test('none：什么都没写（目录不存在）也是没交东西', () => {
     const artifacts = assembleArtifacts(null)
     assert.equal(artifacts.mode, 'none')

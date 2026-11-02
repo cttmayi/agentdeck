@@ -6420,3 +6420,38 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 ⚠️ 留一个**待拍板**的问题给使用者：distilly 既然是 persona 蒸馏器，"沉淀用技能"到底该指谁？
 ① 就它（写法借它、契约归平台，本批的做法）；② 另装一条真正"怎么写 skill"的技能；
 ③ 把 distilly 的 create/evolve 流程当成沉淀**本身**的编排（那是 §11 的下一代草案，要动 run 模型）。
+
+### 12.87 产出落在 `skill/<子目录>/` 里也认：动态侦测 + 归位（分批第 217 批，2026-11；使用者定）
+
+使用者看了 distilly 的 `tools/skill_writer.py` 之后判断：「既然有 tools/skill_writer.py，那就代表
+不需要描述 skill 格式呀」；我实测那个写入器（`--action create --character colleague --base-dir out`）
+写出的是 `out/probe-flow/SKILL.md` + `meta.json` + `manifest.json` + `work.md` / `persona.md` / …，
+落点是 `<base-dir>/<slug>/SKILL.md`——**就算让它写进我们的目录，也是 `skill/<slug>/SKILL.md`，
+而平台只认 `skill/SKILL.md`**（用 `assembleArtifacts` 量过：`mode: none`）。于是使用者定：
+「B，可以做的兼容些，可以是 skill 目录，也可以是 skill 下的子目录，动态侦测 skill 目录下的 SKILL.md」。
+
+**做法：先认出，再归位（搬），最后才是读。**
+
+1. **认**：`nestedSkillDirs(files)` 找出 `skill/` 下**正好一层**子目录里的 `SKILL.md`
+   （`<dir>/SKILL.md`）。再深（`a/b/SKILL.md`）不猜——那是它自己的私有结构，不是我们想收的那份。
+2. **搬**：`adoptNestedSkillDir(skillDir)` 把那一层的文件**挪到 `skill/` 根上**、再把空壳删掉，
+   返回 `{from, moved}`。搬完磁盘与逻辑一致 ⇒ 人改稿（`writeDraftSkillFiles`）、差异、
+   版本快照、入库（`commit` 的 files）**全都不用改**。
+   - 跑完那一刻（finish hook）搬一次，并在 run 日志里留一条 note：
+     「它的产出落在了 `skill/<dir>/` 里——已挪到 `skill/` 根上（…）：平台只收 `skill/SKILL.md`」。
+     ⚠️ note 用 `type: 'status'`，不能用 `text`——`loadDraftFinalText` 取的是最后一条 text，
+     否则这条平台说明会被当成"它说的话"显示在中间栏。
+   - 读产物时（`GET /api/crystallize/artifacts`）**再兜一次**（只对当前版本；历史快照是只读证据）。
+     与版本表那条自愈同一纪律：读的时候顺手把不该存在的形状纠回来，否则界面会说"没交 skill"，
+     而文件明明躺在子目录里。
+3. **读**：`assembleArtifacts` 里如果根上没有 `SKILL.md`、而唯一一层子目录里有，就**在内存里
+   归一到根**（`rebaseToRoot`）——编辑器/差异/入库看到的是同一套相对路径。**多份 `SKILL.md`
+   不猜**：如实报「`skill/` 下有多份 SKILL.md（a/SKILL.md、b/SKILL.md）——不知道收哪一份」。
+
+**prompt 不变**：仍然只说"产出写到 `skill/`、它的 `./skills/…` 与脚本不适用"。兼容是**安全网**，
+不是邀请——把"你也可以写子目录"写进 prompt 只会让它更随意。
+
+**判据**：`crystallize-artifacts.test.ts` 两条（唯一子目录 ⇒ 归一到根且体检通过；多份 ⇒ `none`
+且消息点名两份）；`crystallize-e2e.test.ts` 一条端到端（假后端把产出写进 `skill/colleague-flow/`
+⇒ 跑完自动搬、接口 `mode: 'files'` 且路径无前缀、**磁盘上根有 SKILL.md 且子目录已删**、能入库）。
+`check` **2197 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。

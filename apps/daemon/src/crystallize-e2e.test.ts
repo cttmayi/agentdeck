@@ -936,6 +936,51 @@ describe('四轮：素材落盘 + 产出读目录', () => {
    *   一种**协议**，它只是"这一轮没交 skill"的一种说法。于是判据改成**事实**：
    *   没有 `skill/SKILL.md` ⇒ `mode: 'none'`（哪怕它顺手写了点别的文件）。
    */
+  /**
+   * ★ 分批第 217 批（使用者定："可以是 skill 目录，也可以是 skill 下的子目录，动态侦测"）：
+   * 起草者可能调它自己的写入器写进 `skill/<dir>/`（distilly 的 writer 就是这种落点）。
+   * 这一条钉**整条链**：跑完自动搬、接口给 files、磁盘上是根上的 SKILL.md、并且能入库。
+   */
+  test('★★ 产出落在 skill/<dir>/ 里也认：跑完搬上来、接口是 files、能入库', async () => {
+    const runId = await runReviewed('子目录落点的流程')
+    const previous = fakeBackend.draftFiles
+    // 模拟"它调了写入器"：把文件写在子目录里，根上没有 SKILL.md
+    fakeBackend.draftFiles = {
+      'colleague-flow/SKILL.md':
+        '---\nname: colleague-flow\ndescription: 子目录落点也能收\n---\n\n# 子目录\n\n## When to Use\n- x\n\n## Procedure\n1. y\n',
+      'colleague-flow/work.md': '# Work\n',
+    }
+    let draftRunId = ''
+    try {
+      draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    } finally {
+      fakeBackend.draftFiles = previous
+    }
+    // ① 接口：files（不是 none），路径已经归一到根
+    const art = (await getJsonFile<{ mode: string; files: Record<string, string> }>(
+      `/api/crystallize/artifacts?draftRunId=${draftRunId}`,
+    ))
+    assert.equal(art.mode, 'files', '子目录里的 SKILL.md 也要认')
+    assert.ok('SKILL.md' in art.files, '归一到根')
+    assert.ok(!('colleague-flow/SKILL.md' in art.files), '不再带子目录前缀')
+    // ② 磁盘：真的搬上来了（搬完磁盘与逻辑一致，人改稿/差异/快照才看得对）
+    const skillDir = join(workRoot, `skill-draft-${draftRunId}`, 'skill')
+    assert.ok(await readFile(join(skillDir, 'SKILL.md'), 'utf8').catch(() => null), '根上有 SKILL.md')
+    assert.equal(
+      await readFile(join(skillDir, 'colleague-flow', 'SKILL.md'), 'utf8').catch(() => null),
+      null,
+      '原子目录搬完就删掉（否则磁盘上是两份）',
+    )
+    // ③ 入库：照常走
+    const done = await commit({
+      draftRunId,
+      target: { kind: 'new' },
+      slug: 'colleague-flow',
+      files: { 'SKILL.md': art.files['SKILL.md']!, 'work.md': art.files['work.md'] ?? '' },
+    })
+    assert.equal(done.status, 201, JSON.stringify(done.body))
+  })
+
   test('★ 没交 SKILL.md ⇒ artifacts 是 none；它写过的东西仍然带着', async () => {
     const runId = await runReviewed('不可沉淀的任务')
     const previous = fakeBackend.draftFiles
