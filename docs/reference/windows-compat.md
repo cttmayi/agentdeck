@@ -605,3 +605,54 @@ pnpm run probe:layout -- --dry-run 2>$null | Select-String -Pattern 'chrome'
 3. 是不是"某个 skill 脚本／工具包"那条路在调 `codex`（那条不走我们的解析器）。
 
 判据：`check` **2200 全绿**、`typecheck` 0 错。
+
+---
+
+## 2026-11 复审：`spawn-target` / `codex-backend` / `stream-parser`（分批第 226 批）
+
+使用者让复核这三个文件（另一个 agent 主要改的就是它们）。逐条对着
+"Node / Windows 的确定性行为"过了一遍，**找到两个真问题**，都修了：
+
+### ① 裸命令名在 Windows 上永远找不到 `.cmd`（已修）
+
+- **现象**：`resolveSpawnTarget` 用 `win32.extname(command)` 分流。使用者可以用
+  `--executable codex`（或智能体里填 CLI 路径）给一个**裸名字** ⇒ 扩展名是空串 ⇒
+  直接 `via: 'direct'` ⇒ `spawn('codex', …)`。而 Windows 的 `CreateProcess`
+  **只会自动补 `.exe`**，不补 `.cmd`/`.bat` ⇒ npm 装出来的 `codex.cmd` 永远找不到，
+  报的就是**"找不到文件"**。
+  也就是说：这条报错**不必**来自垫片解析出错——它可能是**根本没走到垫片解析**。
+- **修法**：Windows 上遇到裸命令名时先补扩展名（`resolveBareWindowsCommand`）：
+  命令带目录 ⇒ 只在该目录里找；不带 ⇒ 按 `PATH` 逐目录找；候选扩展名用
+  `windowsCandidateExtensions()`（PATHEXT 声明的优先，`.exe/.com/.cmd/.bat` 补齐，最后是空串）。
+  找到就按真实文件继续分流（`.cmd`/`.bat` ⇒ 垫片 / cmd），找不到**保持原样**
+  （让 spawn 如实报 ENOENT，不编路径）。Unix 上一个字不动。
+- **判据**：`spawn-target.test.ts` 新增四条（`codex` → 认到 `.cmd` 走 shim、认到 `.exe` 走 direct、
+  都没有则原样、Unix 不插手）。
+- **顺带**：`windowsCandidateExtensions` 从 `probe.ts` 挪进 `spawn-target.ts`
+  （probe 已经 import 本文件，放下面会成环），`probe.ts` re-export，外部引用不变。
+
+### ② `codex-backend.ts` 里两份**死掉的**重复实现（已删）
+
+`isRunnableFile` 与 `describeMissingCommand` 在 `codex-backend.ts` 里各留了一份副本，
+注释还写着"与 generic 共用同一份"——而真正共用、真正在跑的那一份早在分批第 66 批
+搬进了 `@agentdeck/agent-core/executable-check.ts`（经 `ServiceBackendBase.assertRunnable`）。
+留下的两份**没有任何调用点**，其中 `describeMissingCommand` 还经 `index.ts` 导出到包外。
+这正是 `executable-check.ts` 头注释里点名要消灭的"同一件事两个判据、改的时候要一起改"。
+删掉两份 + 那条导出 + 随之空掉的 `node:fs` 导入。
+
+### 逐条核对过的（结论：现形状是对的）
+
+| 环节 | 结论 |
+|---|---|
+| 行分隔（CRLF） | `process-tree` 用 `readline` + `crlfDelay: Infinity` ⇒ `\r\n` 当一个行尾，JSON-RPC 帧不带 `\r` |
+| 帧写入 | `JSON.stringify(frame) + '\n'`；codex（Rust `read_line`）收 `\n` 没问题 |
+| `via: 'cmd'` 的引号 | `buildCmdLine` 命令路径**永远**加引号 + 整条再包一层，`/s` 剥外层；`args` 含 `"`/`%`/换行**拒绝而不是改写** |
+| `windowsVerbatimArguments` | 只有 `via: 'cmd'` 为 `true`；`shim`/`direct` 必须是 `false`（含空格的路径靠 Node 加引号）——`process-tree` / `codex-doctor` 都走 `spawnPlanFor`，`tests/test-safety` 有仓库级判据 |
+| 进程树终止 | Windows 上 `taskkill /T /F`，Unix 上负 pid 杀进程组 |
+| 起进程失败 | 同步 throw 与异步 `'error'` 事件**两条都翻成人话**（`describeSpawnError` 认 ENOENT/EACCES/EINVAL） |
+| `stream-parser` | 只吃 `transport.push(line)` 的行；字段全部防御性提取，取不到降级不抛 |
+
+### 仍然只能在真 Windows 上量的（没变）
+
+`.cmd` 真机 exec 得起来吗、`cmd.exe` 的引号规则在真机上是否如文档所写、`taskkill /T`
+在"我们成了 node 的父进程"之后是否照样收掉整棵树——这三条写在上面 A4 那节里。

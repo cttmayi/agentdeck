@@ -43,7 +43,7 @@
  * 而那正是 `docs/reference/windows-compat.md` 里写明"要在真机上量"的那一节。
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { win32 } from 'node:path'
 
 export interface SpawnTarget {
@@ -216,6 +216,67 @@ export function describeSpawnError(err: unknown, command: string, path: string):
 
 /** 可 spawn 的 Windows 可执行扩展名。**不含 `.ps1`**——Node 起不了它。 */
 export const WINDOWS_SPAWNABLE_EXT = ['.exe', '.com', '.cmd', '.bat'] as const
+
+/**
+ * Windows 上"这个命令名可能对应哪些文件"的扩展名候选。
+ *
+ * 原本住在 `probe.ts`；分批第 226 批挪到这里，因为 `resolveSpawnTarget` 现在也要用它
+ * （见 `resolveBareWindowsCommand`），而 probe 已经 import 本文件 —— 放下面会成环。
+ * `probe.ts` 原样 re-export，外部引用不变。
+ */
+export function windowsCandidateExtensions(pathext: string | undefined): string[] {
+  const declared = (pathext ?? '')
+    .split(';')
+    .map((ext) => ext.trim().toLowerCase())
+    .filter((ext) => ext !== '')
+  const spawnable = declared.filter((ext) => isWindowsSpawnableExt(ext))
+  // PATHEXT 可能被改窄过（有人把它设成只有 `.EXE`），但 PATH 里真有 `.cmd` 垫片
+  // 时我们仍然该找到它——所以三类可 spawn 的扩展名一个都不能少。
+  for (const ext of WINDOWS_SPAWNABLE_EXT) {
+    if (!spawnable.includes(ext)) spawnable.push(ext)
+  }
+  // 最后那个空串 = "命令名本身就是文件"（无扩展名的原生程序）
+  return [...new Set([...spawnable, ''])]
+}
+
+/**
+ * **裸命令名**（没有扩展名）在 Windows 上要先解析成真实文件——分批第 226 批。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 不解析会发生什么（实测过的形状）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者可以用 `--executable codex`（或智能体里填 CLI 路径）给一个**裸命令名**。
+ * 那时 `win32.extname()` 是空串 ⇒ 原来直接 `via: 'direct'` ⇒ `spawn('codex', …)`。
+ * 而 Windows 的 CreateProcess **只会自动补 `.exe`**，不会补 `.cmd`/`.bat` ⇒
+ * npm 装出来的 `codex.cmd` 永远找不到，报的是"找不到文件"——正是使用者报的那一类，
+ * 只是入口不是垫片解析，而是**根本没走到垫片解析**。
+ *
+ * 解析顺序与 `probe.findOnPath` 一致（PATHEXT 声明的在前，其余三类补齐）；
+ * 命令里带目录时只在该目录里找，不带目录时按 PATH 逐目录找。
+ * 找不到就**保持原样**（让 spawn 如实报 ENOENT，而不是我们编一个路径）。
+ */
+function resolveBareWindowsCommand(
+  command: string,
+  input: { env: NodeJS.ProcessEnv; exists: (path: string) => boolean },
+): string | null {
+  const exts = windowsCandidateExtensions(input.env['PATHEXT'])
+  const hasDir = command.includes('\\') || command.includes('/')
+  const bases = hasDir
+    ? [command]
+    : (input.env['PATH'] ?? '')
+        .split(';')
+        .map((d) => d.trim())
+        .filter((d) => d !== '')
+        .map((d) => `${d.replace(/[\\/]+$/, '')}\\${command}`)
+  for (const base of bases) {
+    for (const ext of exts) {
+      const candidate = `${base}${ext}`
+      if (input.exists(candidate)) return candidate
+    }
+  }
+  return null
+}
 
 /**
  * 这个扩展名 Node 起得起来吗。
@@ -405,8 +466,10 @@ export interface ResolveSpawnInput {
   readText?: (path: string) => string | null
   /** 解出来的脚本用哪个 node 跑。默认 `process.execPath`。 */
   nodePath?: string
-  /** `cmd.exe` 从哪来（默认读 `COMSPEC`，兜底 `cmd.exe`）。 */
+  /** `cmd.exe` 从哪来（默认读 `COMSPEC`，兜底 `cmd.exe`）；也是裸命令名找 PATH 的来源。 */
   env?: NodeJS.ProcessEnv
+  /** 判断一个路径存在吗（默认 `existsSync`）。注入是为了能在 macOS 上测 Windows 分支。 */
+  exists?: (path: string) => boolean
 }
 
 /**
@@ -425,20 +488,32 @@ export interface ResolveSpawnInput {
  */
 export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
   const platform = input.platform ?? process.platform
+  /**
+   * ★ 分批第 226 批：Windows 上的**裸命令名**（`--executable codex` 这种）先补扩展名。
+   *   不补的话 CreateProcess 只认 `.exe`，npm 的 `.cmd` 垫片永远找不到（"找不到文件"）。
+   *   ⚠️ 只在 Windows 上做：Unix 的 PATH 查找本来就是内核做的，我们不该插手。
+   */
+  const command =
+    platform === 'win32' && win32.extname(input.command) === ''
+      ? (resolveBareWindowsCommand(input.command, {
+          env: input.env ?? process.env,
+          exists: input.exists ?? defaultExists,
+        }) ?? input.command)
+      : input.command
   // direct / shim：argv 是**真参数**，让 Node 照常加引号（含空格的路径全靠它）
   const direct: SpawnTarget = {
-    command: input.command,
+    command,
     args: [...input.args],
     via: 'direct',
     verbatimArguments: false,
   }
   if (platform !== 'win32') return direct
 
-  const ext = win32.extname(input.command).toLowerCase()
+  const ext = win32.extname(command).toLowerCase()
 
   if (ext === '.ps1') {
     throw new UnspawnableCommandError(
-      `Node 起不了 PowerShell 脚本（${input.command}）。` +
+      `Node 起不了 PowerShell 脚本（${command}）。` +
         `npm 装 CLI 时会**同时**给一个 .cmd 垫片，用那个即可；` +
         `或者改用原生安装器装的 CLI（给的是 .exe）。`,
     )
@@ -447,9 +522,9 @@ export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
   if (ext !== '.cmd' && ext !== '.bat') return direct
 
   const readText = input.readText ?? defaultReadText
-  const text = readText(input.command)
+  const text = readText(command)
   if (text !== null) {
-    const shim = parseNpmShim(text, input.command)
+    const shim = parseNpmShim(text, command)
     if (shim !== null) {
       return {
         command: input.nodePath ?? process.execPath,
@@ -465,7 +540,7 @@ export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
   // `/d` 跳过 AutoRun、`/s` 让 cmd 按"最外层引号"处理整条命令行（见 buildCmdLine）
   return {
     command: comspec,
-    args: ['/d', '/s', '/c', buildCmdLine(input.command, [...input.args])],
+    args: ['/d', '/s', '/c', buildCmdLine(command, [...input.args])],
     via: 'cmd',
     // ★ 最后那一项已经是拼好的整条命令行 ⇒ 不许 Node 再转义一遍（否则引号错位、起不来）
     verbatimArguments: true,
@@ -479,6 +554,15 @@ export function resolveSpawnTarget(input: ResolveSpawnInput): SpawnTarget {
  * 几百字节、只在 Windows 上、只在命令以 `.cmd`/`.bat` 结尾时才读一次。
  * 读不到（文件没了/权限）返回 `null` ⇒ 走 `cmd.exe` 兜底，那时失败信息由 spawn 给。
  */
+/** 默认的存在性判断（同步、只查一次）。 */
+function defaultExists(path: string): boolean {
+  try {
+    return existsSync(path)
+  } catch {
+    return false
+  }
+}
+
 function defaultReadText(path: string): string | null {
   try {
     return readFileSync(path, 'utf8')

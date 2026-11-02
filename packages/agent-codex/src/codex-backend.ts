@@ -1,5 +1,3 @@
-import { constants, existsSync } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
 import {
   AsyncQueue,
   detectVersion,
@@ -673,37 +671,12 @@ function describeCodexFailure(
   )
 }
 
-/** 这个路径能不能当程序跑：必须是**普通文件**，且带执行权限（generic 同款）。 */
-async function isRunnableFile(path: string): Promise<boolean> {
-  try {
-    const info = await stat(path)
-    if (!info.isFile()) return false
-    if (process.platform === 'win32') return true // Windows 不靠权限位
-    await access(path, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
+/**
+ * ⚠️ 分批第 226 批：这里原来**各留了一份** `isRunnableFile` 与 `describeMissingCommand`
+ * （从 agent-generic 抄来的），注释还写着"与 generic 共用同一份"。实际共用的那份早就
+ * 搬进 `@agentdeck/agent-core/executable-check.ts`（分批第 66 批），而且**真正在跑的是那一份**
+ * （经 `ServiceBackendBase.assertRunnable`）。留下的这两份是**死代码**，而且还经
+ * `index.ts` 导出到包外——正好是 `executable-check.ts` 头注释里点名要消灭的那种
+ * "同一件事两个判据、改的时候要一起改"的安排。删掉。
+ */
 
-/** 探测结果要说清楚"有没有装"和"装了但跑不了"的区别（generic 同款）。 */
-export async function describeMissingCommand(path: string): Promise<string> {
-  let isFile = false
-  try {
-    isFile = (await stat(path)).isFile()
-  } catch {
-    isFile = false
-  }
-
-  if (isFile) {
-    return `${path} 不是可执行文件：缺执行权限（试试 chmod +x）`
-  }
-  if (existsSync(path)) {
-    return `${path} 存在，但它不是一个普通文件（目录不能当可执行文件用）`
-  }
-  return (
-    `${path} 未安装，或不在本进程的 PATH 里（从 GUI 启动的进程常常拿不到用户 shell 的 PATH）。` +
-    `本 runtime 在 0.144.0-alpha.4 上实测过（verified），若你确认已安装，` +
-    `很可能是描述表里的命令名与该 CLI 实际的名字不一致，或用 --executable 指定路径。`
-  )
-}

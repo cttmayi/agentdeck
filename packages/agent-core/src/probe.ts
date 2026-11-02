@@ -1,7 +1,7 @@
 import { access, constants } from 'node:fs/promises'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { spawnProcessTree } from './process-tree.ts'
-import { WINDOWS_SPAWNABLE_EXT, isWindowsSpawnableExt } from './spawn-target.ts'
+import { WINDOWS_SPAWNABLE_EXT, isWindowsSpawnableExt, windowsCandidateExtensions } from './spawn-target.ts'
 
 /**
  * 可执行文件探测（FR-RUNTIME-03）。
@@ -43,19 +43,12 @@ import { WINDOWS_SPAWNABLE_EXT, isWindowsSpawnableExt } from './spawn-target.ts'
  *
  * 末尾那个空串是"命令本身已经带扩展名"的情形（`claude.exe`）：不试它就永远找不到。
  */
-export function windowsCandidateExtensions(pathext: string | undefined): string[] {
-  const declared = (pathext ?? '')
-    .split(';')
-    .map((ext) => ext.trim().toLowerCase())
-    .filter((ext) => ext !== '')
-  const spawnable = declared.filter((ext) => isWindowsSpawnableExt(ext))
-  // PATHEXT 可能被改窄过（有人把它设成只有 `.EXE`），但 PATH 里真有 `.cmd` 垫片
-  // 时我们仍然该找到它——所以三类可 spawn 的扩展名一个都不能少。
-  for (const ext of WINDOWS_SPAWNABLE_EXT) {
-    if (!spawnable.includes(ext)) spawnable.push(ext)
-  }
-  return [...new Set([...spawnable, ''])]
-}
+/**
+ * ⚠️ 分批第 226 批：这个函数**搬去了 `spawn-target.ts`**（`resolveSpawnTarget` 也要用它
+ * 补裸命令名的扩展名，而它能 import 本文件、本文件不能反过来）。这里保留 re-export，
+ * 外部引用一个字不用改。
+ */
+export { windowsCandidateExtensions } from './spawn-target.ts'
 
 export function candidatesIn(dir: string, command: string): string[] {
   if (process.platform !== 'win32') return [join(dir, command)]

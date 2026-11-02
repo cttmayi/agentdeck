@@ -229,6 +229,72 @@ describe('★ resolveSpawnTarget：平台差异只有这一处', () => {
   })
 })
 
+/**
+ * ★ 分批第 226 批（使用者报 Windows 上"找不到文件"）：**裸命令名**必须先补扩展名。
+ *
+ * 场景是真的：`--executable codex`（或智能体里填 CLI 路径）给的是裸名字，
+ * `win32.extname()` 是空串 ⇒ 原来直接 `via:'direct'` ⇒ `spawn('codex', …)`，
+ * 而 Windows 的 CreateProcess **只自动补 `.exe`**，npm 装出来的 `codex.cmd` 永远找不到。
+ */
+describe('★★ Windows 裸命令名：先补扩展名再决定怎么起', () => {
+  /** 假的存在性判断：只有列出来的路径"存在"。 */
+  const existsOnly = (paths: readonly string[]) => {
+    const set = new Set(paths)
+    return (p: string) => set.has(p)
+  }
+  const env = { PATH: 'C:\\Users\\张三\\AppData\\Roaming\\npm', PATHEXT: '.COM;.EXE;.BAT;.CMD' }
+
+  test('码里只有 codex.cmd ⇒ 认出垫片，走 shim（真参数不变）', () => {
+    const shimPath = 'C:\\Users\\张三\\AppData\\Roaming\\npm\\codex.cmd'
+    const target = resolveSpawnTarget({
+      command: 'codex',
+      args: ['app-server', '--stdio'],
+      platform: 'win32',
+      env,
+      exists: existsOnly([shimPath]),
+      readText: () => npmShimText({ nodePath: 'C:\\Node\\node.exe', scriptPath: 'C:\\npm\\codex.js' }),
+    })
+    assert.equal(target.via, 'shim', '裸名字也要认出 .cmd 垫片')
+    assert.deepEqual(target.args, ['C:\\npm\\codex.js', 'app-server', '--stdio'], '真实参数原样')
+  })
+
+  test('只有 codex.exe ⇒ 解析成完整路径，direct 起它', () => {
+    const exePath = 'C:\\Users\\张三\\AppData\\Roaming\\npm\\codex.exe'
+    const target = resolveSpawnTarget({
+      command: 'codex',
+      args: ['app-server', '--stdio'],
+      platform: 'win32',
+      env,
+      exists: existsOnly([exePath]),
+    })
+    assert.equal(target.via, 'direct')
+    assert.equal(target.command, exePath, 'command 被解析成真实文件（否则 Windows 只补 .exe 是运气）')
+  })
+
+  test('什么都找不到 ⇒ 保持原样（让 spawn 如实报 ENOENT，不编路径）', () => {
+    const target = resolveSpawnTarget({
+      command: 'codex',
+      args: [],
+      platform: 'win32',
+      env,
+      exists: () => false,
+    })
+    assert.equal(target.via, 'direct')
+    assert.equal(target.command, 'codex')
+  })
+
+  test('★ Unix 上不插手：裸命令名原样交给内核去查 PATH', () => {
+    const target = resolveSpawnTarget({
+      command: 'codex',
+      args: ['app-server'],
+      platform: 'linux',
+      exists: () => true,
+    })
+    assert.equal(target.command, 'codex')
+    assert.equal(target.via, 'direct')
+  })
+})
+
 describe('★ cmd 的引号规则：表达不了就拒绝，不静默改写', () => {
   test('普通参数不加引号，带空格的加', () => {
     assert.equal(quoteForCmd('--flag'), '--flag')

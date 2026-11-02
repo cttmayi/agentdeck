@@ -37,8 +37,4 @@ export {
   type CodexTurnEnd,
 } from './stream-parser.ts'
 
-export {
-  CodexBackend,
-  describeMissingCommand,
-  type CodexBackendOptions,
-} from './codex-backend.ts'
+export { CodexBackend, type CodexBackendOptions } from './codex-backend.ts'
