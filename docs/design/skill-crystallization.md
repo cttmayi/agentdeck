@@ -6373,3 +6373,50 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 （`POST …/upload` 对没跑完的草稿是 409）。⇒ 这个时间窗只有真机上才出现。所以修法选了**结构性的
 那一种**（右栏不再持有第二份数据），而不是"补一个轮询把它盖住"——后者能让这次的现象消失，
 下一份"跑完之后才该更新的东西"照样会漏。
+
+### 12.86 那四条到底是"必需"还是"重复"：去读了真机上装的那份 distilly（分批第 216 批，2026-11；使用者问）
+
+使用者问：「我们再优化第一句话任务……比如 skill 的写法描述是否有必须，distilly 是否已经有描述了」。
+
+**去读了 `~/.agentdeck/skills/distilly/`**（真机上装的那份，不是仓库里的），结论和直觉相反：
+
+| 我们 prompt 里的那条 | distilly 里有吗 |
+|---|---|
+| `SKILL.md` 的 frontmatter 要有 `name`（kebab-case）+ `description`（触发条件） | ❌ **没有**。它自己的 frontmatter 是 `name / description / argument-hint / version / user-invocable / allowed-tools`；它生成的技能走它自己的模板 |
+| 写文件落在哪、只写 UTF-8、路径不许出目录 | ❌ **没有**，而且**相反**：它的规则是"生成的技能放 `./skills/<family>/{slug}`"、"只能通过 `tools/skill_writer.py` 写，不许手写文件" |
+| 交不出东西就用说的（问 / 不值得做） | ❌ 没有；它有自己的一套**交互式 intake**（四族：owner / colleague / relationship / celebrity，逐问确认） |
+| 作用描述 → `description` 以它为基底 | ❌ 没有（那是我们 intake 屏的输入，它不知道） |
+
+也就是说：**distilly 不是"怎么写 skill"的规范，它是一个 persona 蒸馏器**——把某个人
+（自己/同事/关系/名人）蒸馏成可复用的 Person Profile，产出落在 `./skills/colleague/<slug>` 之类，
+写入只走它自己的 Python 工具。所以那四条**不是在重复它**：它们是**平台契约唯一说出口的地方**。
+
+**反而发现一个真风险**：原来那句「写法照你挂着的技能（distilly）」没划线 ⇒ 模型如果真"照它写"，
+会走它的 intake 流程、把产物写到 `./skills/colleague/…`（平台看不见），或者去调
+`tools/skill_writer.py`。真机上能出 `skill/SKILL.md` 靠的是下面那几条契约压住了它——不牢靠。
+
+**改法**（净增 17 字：366 → 383，换来一条防错）：
+
+```
+素材在 `material/`（先读 `material/00-README.md`），产出写到 `skill/`。
+**落点与格式以本任务为准**：技能（`distilly`）只借写法——它的 `./skills/…`、提问流程与脚本都不适用。
+
+平台只认这些（机器会拒的）：
+- `skill/SKILL.md` 的 frontmatter 要有 `name`（kebab-case）与 `description`（写触发条件）——名字与描述平台从这儿读。
+- 只写 UTF-8 文本，路径不许出 `skill/`（不写隐藏文件、二进制、`..`、绝对路径）。
+- 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
+- 索引里有使用者的作用描述时，`description` 以它为基底（措辞可调，含义不改）。
+直接开始。
+```
+
+顺带砍掉的：「这次沉淀的是一段聊天 / 一个任务」这半句（素材是哪一种，`00-README.md` 第一行就写着；
+**只有"空白起"必须说**——不说它会去找 `turns/` 然后编一份轨迹出来）；「其它文件也放 `skill/` 下」
+（与"路径不许出 `skill/`"是同一件事的正反面，后者更短也更硬）。
+
+判据：`crystallize.test.ts` 新增一条「技能只借写法：落点与格式以本任务为准」（点名
+`./skills/…` 与"提问流程与脚本都不适用"——这两处正是会冲突的地方）。`check` **2194 全绿**、
+`probe:layout` **571 全绿**、`typecheck` 0 错。
+
+⚠️ 留一个**待拍板**的问题给使用者：distilly 既然是 persona 蒸馏器，"沉淀用技能"到底该指谁？
+① 就它（写法借它、契约归平台，本批的做法）；② 另装一条真正"怎么写 skill"的技能；
+③ 把 distilly 的 create/evolve 流程当成沉淀**本身**的编排（那是 §11 的下一代草案，要动 run 模型）。

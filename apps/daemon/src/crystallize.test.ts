@@ -624,11 +624,34 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
     //   的特殊处理才对"）：三个协议文件名（QUESTIONS / REFUSED / answers）全部消失——
     //   平台要认的状态是"这一轮有没有交 SKILL.md"，而问题与拒绝的理由都在它的回复里。
     assert.doesNotMatch(prompt, /QUESTIONS\.md|REFUSED\.md|answers\.md/, '不再有协议文件名')
-    assert.match(prompt, /都写在\*\*回复里\*\*/, '问与拒绝都让它在回复里说')
+    assert.match(prompt, /交不出东西就用说的/, '问与拒绝都用说的（不需要协议文件）')
     assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
     // 篇幅也是判据：这一段每轮都要被读，内联规范那版是 2785 字。
     assert.ok(prompt.length < 1200, `prompt 要短（现在 ${String(prompt.length)} 字符）`)
+  })
+
+  /**
+   * ★ 分批第 216 批（使用者："skill 的写法描述是否有必须，distilly 是否已经有描述了"）：
+   * 去读了真机上装的那份 distilly 才发现的——它**不是**"怎么写 skill"的规范，而是一个
+   * **persona 蒸馏器**（owner / colleague / relationship / celebrity 四族，落点在
+   * `./skills/<family>/<slug>`，写入只走它自己的 `tools/skill_writer.py`，还带一套交互式
+   * intake）。也就是说：prompt 里那四条**不是**在重复它，而是平台契约唯一说出口的地方；
+   * 反过来，"照它写"如果不划线，模型真会去走它那套流程、写到一个平台看不见的目录。
+   * 所以这一条钉住那句**优先级**。
+   */
+  test('★★ 技能只借写法：落点与格式以本任务为准（distilly 有自己的 ./skills 与脚本）', () => {
+    const prompt = buildDraftPrompt({
+      scope: 'conversation',
+      materialDir: 'material',
+      outputDir: 'skill',
+      target: 'new',
+      skillSlugs: DRAFTER_SKILLS,
+    })
+    assert.match(prompt, /落点与格式以本任务为准/, '优先级要写出来')
+    assert.match(prompt, /只借写法/, '技能提供的是写法，不是落点/流程')
+    assert.match(prompt, /`\.\/skills\/…`/, '点名它那条冲突的落点（否则模型会照抄）')
+    assert.match(prompt, /提问流程与脚本都不适用/, '它那套 intake / skill_writer 也不适用')
   })
 
   test('更新：指向 existing-skill/，不再塞全文', () => {
@@ -652,7 +675,8 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
       target: 'new',
       skillSlugs: [],
     })
-    assert.match(prompt, /写法照你挂着的技能/)
+    // ★ 分批第 216 批：写法那一句改成"只借写法"，并加了一条**优先级**——见下面那条用例。
+    assert.match(prompt, /只借写法/)
     assert.doesNotMatch(prompt, /`distilly`/)
   })
 })

@@ -388,21 +388,23 @@ export function buildDraftPrompt(opts: {
     revised = false,
     continuing = false,
   } = opts
-  const origin =
-    scope === 'conversation'
-      ? '这次沉淀的是一段聊天'
-      : scope === 'task'
-        ? '这次沉淀的是一个任务'
-        : '这次**没有来源 run**（只有使用者给的材料）'
-  // 空 = 调用方漏了注入（门禁应当先拦下来）；那时就别硬塞一个括号，让它照被注入的那份写。
+  /**
+   * ★ 分批第 216 批：**只有"空白起"值得开场说一句**。
+   *
+   * 「这次沉淀的是一段聊天 / 一个任务」是给人看的开场白：素材是哪一种，`material/00-README.md`
+   * 第一行就写着，模型读索引时自然知道。而"空白起"必须说——不然它会去找 `turns/`，
+   * 然后编一份不存在的轨迹出来。
+   */
+  const origin = scope === 'blank' ? '这次**没有来源 run**（只有使用者给的材料）。' : ''
+  // 空 = 调用方漏了注入（门禁应当先拦下来）；那时不写括号，只说"你挂着的技能"。
   const skillNames = skillSlugs.map((s) => `\`${s}\``).join('、')
-  return `${origin}。素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\`；
-写法照你挂着的技能${skillNames === '' ? '' : `（${skillNames}）`}。
+  return `${origin}素材在 \`${materialDir}/\`（先读 \`${materialDir}/00-README.md\`），产出写到 \`${outputDir}/\`。
+**落点与格式以本任务为准**：技能${skillNames === '' ? '' : `（${skillNames}）`}只借写法——它的 \`./skills/…\`、提问流程与脚本都不适用。
 
 平台只认这些（机器会拒的）：
-- \`${outputDir}/SKILL.md\` 的 frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）——名字与描述平台从这儿读，你不用另外报。
-- 其它文件也放 \`${outputDir}/\` 下；只写 UTF-8 文本，不写隐藏文件、二进制、\`..\` 与绝对路径。
-- 信息不够就先问、不值得做就直说——都写在**回复里**；别自己编答案，也别硬凑一条 skill。
+- \`${outputDir}/SKILL.md\` 的 frontmatter 要有 \`name\`（kebab-case）与 \`description\`（写触发条件）——名字与描述平台从这儿读。
+- 只写 UTF-8 文本，路径不许出 \`${outputDir}/\`（不写隐藏文件、二进制、\`..\`、绝对路径）。
+- 交不出东西就用说的：要问就问、不值得做就直说——别自己编答案，也别硬凑一条 skill。
 ${
   continuing
     ? `- 上一轮你没交 skill：人这一轮的回应已**追加进素材**（\`${materialDir}/appended/\`），按它接着做。\n`
