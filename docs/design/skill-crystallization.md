@@ -6601,3 +6601,33 @@ name/description = colleague-mini-flow / 当需要复用这套小流程时用
 `check` **2199 全绿**、`probe:layout` **571 全绿**、`typecheck` 0 错。
 
 **字数**：231 → **196**。改版 250、接着说 232。全程：2785 → 685 → 540 → 383 → 320 → 273 → 231 → **196**。
+
+### 12.92 工作目录的路径搬到栏脚标题行右侧；沉淀页也加上（分批第 222 批，2026-11；使用者定）
+
+使用者：「聊天页，顶上有一个『工作目录』的路径，我想统一移动到下面的『工作目录的文件』的右侧。
+同时『沉淀页』也增加这个路径」。
+
+**改之前**：聊天页详情页头有一行 `.chat-dir`（`工作目录 /Users/…` + 一句风险披露），而它描述的
+那份清单——「工作目录的文件」——在页面最底下的栏脚里，中间隔着一整片消息流。沉淀页那份栏脚则
+**完全没有路径**，所以"这条沉淀在哪个目录里干活"只能靠猜（或者去翻 run 日志的"工作目录：…"）。
+
+**改法（一处实现，两页共用）**：
+
+- `FootFiles` 新增 `path` prop：画在**标题行右侧**（刷新钮左边）、`title` 给完整路径、
+  窄窗口末尾省略号（`flex: 1 1 0` + `text-overflow`，`flex-wrap` 不跟着换行——否则长路径会把
+  栏头顶成两行）。
+- 路径**从哪来**：`WorkDirTree` 新增 `bind:path`，值取服务端列表本来就回的 `workDir`
+  （任务/聊天/沉淀三处目录来源不同，而树**本来就问了同一个问题**；让父组件另算一份就是第二处
+  来源，迟早"标题写着 A、列的是 B"）。聊天页直接用 `actualWorkDir`（它本来就取到了）。
+- 聊天页：页头那行整块删掉（连 `.chat-dir` / `.chat-dir-hint` 两条样式与词条
+  `chat.workDirLabel`）；那**句风险披露**（"它能改、能删、能新建…"）搬进栏脚正文**顶部**——
+  它说的就是"这个目录里"，离目录越近越不容易被当成泛指。
+- 沉淀页：`CrystallizeWorkDir` 把 `bind:path` 接到 `FootFiles`，于是栏脚标题行右侧也写着
+  `…/work/skill-draft-01M6…`。
+
+**判据**：探针 **572** 全绿（新增 `crystal.footWorkDirPath`，实测
+`/…/work/skill-draft-01M6EJ169R8RRFC7YE40R4SPPS`）；`chat.detailWorkDirReadOnly` **换了宿主**
+（理由写原地：它原来量 `.detail-pane .chat-dir`，而那一行整块删了）——**意图不变**
+（这条路径只读、不能改），现在量 `[data-foot-files] [data-workdir-path]`，并顺带确认它**真的在那儿、
+非空**（只量"没有输入框"的话，元素不存在也会绿）。实测 `chat.workDirPathText =
+/…/.cache/layout-probe/chat-files-wd`。`check` **2199 全绿**、`typecheck` 0 错。

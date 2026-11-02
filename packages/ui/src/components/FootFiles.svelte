@@ -28,6 +28,14 @@
     title = '',
     /** 右括号里那个计数（`12 项`）；空串 = 不画。 */
     count = '',
+    /**
+     * ★ 分批第 222 批（使用者定）：**这个目录的路径**，画在标题行的右侧。
+     *
+     * 从前它挂在页头（聊天页 `.chat-dir` 那一行），和被它描述的"工作目录的文件"隔着一整片消息区
+     * ——使用者：「顶上有一个「工作目录」的路径，我想统一移动到下面的「工作目录的文件」的右侧」。
+     * 两页现在共用一个位置：标题行右端、刷新钮左边；`title` 给完整路径（窄窗口会省略中间）。
+     */
+    path = '',
     open = $bindable(true),
     /** 头部右侧的动作（刷新 / 追加…）。 */
     actions,
@@ -49,6 +57,7 @@
   }: {
     title?: string
     count?: string
+    path?: string
     open?: boolean
     actions?: Snippet
     children?: Snippet
@@ -95,6 +104,10 @@
         <span class="faint small drop-hint">{dropHint}</span>
       {/if}
     </button>
+    {#if path !== ''}
+      <!-- 省略号截左边太多不好认 ⇒ 用 `text-overflow` 截尾，完整路径在 `title` 里 -->
+      <code class="foot-files-path mono" data-workdir-path title={path}>{path}</code>
+    {/if}
     {#if actions}{@render actions()}{/if}
   </div>
   <!--
@@ -133,6 +146,24 @@
     align-items: center;
     gap: var(--sp-2);
     flex-wrap: wrap;
+  }
+
+  /**
+   * 路径那一格：**吃掉标题行剩下的宽度**，自己不再换行。
+   *
+   * `flex-wrap: wrap` 是头部自带的（窄窗口里"刷新"要能换到下一行）——路径**不能**跟着换行，
+   * 否则一条长路径会把栏头顶成两行。所以它 `flex: 1 1 0; min-width: 0` + 末尾省略号，
+   * 完整路径在 `title` 里（悬停可见）。
+   */
+  .foot-files-path {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-dim);
+    font-size: var(--fs-xs);
   }
 
   .foot-files-head :global(.ghost) {

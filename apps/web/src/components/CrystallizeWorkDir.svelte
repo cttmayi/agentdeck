@@ -65,6 +65,11 @@
   let open = $state(true)
   /** 树的顶层条数（`bind:count`）——折叠头上那个「N 项」以它为准（与树同源）。 */
   let topCount = $state(0)
+  /**
+   * ★ 分批第 222 批：**这条沉淀的工作目录路径**（`bind:path`，树列表时服务端回的 `workDir`）。
+   * 画在折叠头标题行的右侧，与聊天页同一处（使用者："沉淀页也增加这个路径"）。
+   */
+  let workDirPath = $state('')
   /** 增删之后让树重取（`reloadKey` 变了就重列）。 */
   let reloadTick = $state(0)
   /**
@@ -191,6 +196,7 @@
   ondropfiles={(files) => void uploadFiles(files)}
   dropHint={$t('common.dropFilesHint')}
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
+  path={workDirPath}
   bind:open={open}
 >
   {#snippet actions()}
@@ -212,6 +218,7 @@
   -->
   <WorkDirTree
     base={`/api/crystallize/drafts/${encodeURIComponent(draftRunId)}`}
+    bind:path={workDirPath}
     reloadKey={`${draftRunId}:${rev}:${reloadTick}`}
     bind:count={topCount}
   >

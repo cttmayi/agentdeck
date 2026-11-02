@@ -49,6 +49,14 @@
    */
   export let count = 0
   /**
+   * ★ 分批第 222 批：**这个树的根路径**（`bind:path`）——服务端每次列表都回 `workDir`。
+   *
+   * 为什么从列表里取而不是让父组件自己算：任务/聊天/沉淀三处的目录来源各不相同
+   * （run 的 workDir / 对话的 / 草稿任务目录），而**列表本来就问了同一个问题**。
+   * 父组件另算一份就是第二处来源，迟早出现"标题写着 A、列的是 B"。
+   */
+  export let path = ''
+  /**
    * 某个文件行右侧的**额外动作**（分批第 198 批加的）。
    *
    * 为什么需要：沉淀页的栏脚把这一棵树用在「材料」上，而材料里有一样东西是能删的
@@ -128,6 +136,7 @@
         root = out.entries
         truncated = out.truncated
         exists = out.exists
+        path = out.workDir
       } else {
         const next = new Map(children)
         next.set(dir, out.entries)

@@ -3497,6 +3497,15 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.footWorkDirPath',
+    label:
+      '★★★ 栏脚「工作目录的文件」的标题行右侧写着**这一条草稿的工作目录**（分批第 222 批，使用者："沉淀页也增加这个路径"）' +
+      '——与聊天页同一处、同一份实现（`FootFiles` 的 `path`）',
+    ok: (v) => typeof v === 'string' && v.includes('skill-draft-'),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.artifactFileCount',
     label: '★★★ 产物栏列的是**真产物**（`GET /api/crystallize/artifacts` 的文件清单，夹具那条至少 1 个）',
     ok: (v) => typeof v === 'number' && v >= 1,

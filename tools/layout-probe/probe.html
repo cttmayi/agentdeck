@@ -6196,6 +6196,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               {
                 // ★ 207 批：右栏栏头那句"没装沉淀用技能"删了 ⇒ 这里不再量它（改到智能体页量）
               }
+              /**
+               * ★ 分批第 222 批（使用者："沉淀页也增加这个路径"）：栏脚「工作目录的文件」的
+               *   标题行右侧要有这一条草稿的工作目录路径——与聊天页同一处、同一份实现
+               *   （`FootFiles` 的 `path`，值来自树的 `workDir`）。
+               */
+              {
+                const el = d().querySelector('.crystal-chat [data-foot-files] [data-workdir-path]')
+                facts['crystal.footWorkDirPath'] = el ? text(el) : null
+              }
               const artFiles = [...d().querySelectorAll('.artifact-pane .file-row')]
               facts['crystal.artifactFileCount'] = artFiles.length
               // 正文在编辑器里（`textarea.editor`）：这是"点一个文件 ⇒ 下面就是它的内容"
@@ -6952,18 +6961,30 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return Math.round(h2.getBoundingClientRect().top - main.getBoundingClientRect().top) <= 6
         })()
 
-        // ★ 工作目录**只读**（2026-10）：它只在「新对话」界面设一次，详情页不许改。
-        //    `.chat-dir` 里不该有任何输入框或按钮（改名/保存/改回平台分配都没了）。
+        // ★ 工作目录**只读**（2026-10），路径**在栏脚标题行右侧**（分批第 222 批）。
+        //
+        // ⚠️ 判据的**宿主换了**（理由写在原地）：原来量 `.detail-pane .chat-dir`——那是页头那一行；
+        //    使用者定「顶上有一个「工作目录」的路径，我想统一移动到下面的「工作目录的文件」的右侧」，
+        //    页头那一行整块删了。**意图一点没变**（这条路径只读、不能改），只是它现在住在
+        //    `[data-foot-files] [data-workdir-path]` 里。顺带量一句"它真的在那儿"——
+        //    只量"没有输入框"的话，元素不存在也会绿。
         facts['chat.detailWorkDirReadOnly'] = await (async () => {
           if (!(await chatOpenFixtureConversation())) return false
-          const dir = d().querySelector('.detail-pane .chat-dir')
-          if (!dir) {
-            errors.push('详情页没有工作目录那一行')
+          if (!(await chatFilesOpenIt())) return false
+          const el = d().querySelector('[data-foot-files] [data-workdir-path]')
+          if (!el) {
+            errors.push('栏脚「工作目录的文件」里没有工作目录路径')
             return false
           }
-          const editable = dir.querySelectorAll('input, button').length
+          const editable = el.querySelectorAll('input, button').length
           if (editable !== 0) {
-            errors.push(`详情页的工作目录还能改（量到 ${editable} 个可编辑控件）`)
+            errors.push(`工作目录路径还能改（量到 ${editable} 个可编辑控件）`)
+            return false
+          }
+          const text = (el.textContent ?? '').trim()
+          facts['chat.workDirPathText'] = text
+          if (text === '') {
+            errors.push('工作目录路径是空的')
             return false
           }
           return true

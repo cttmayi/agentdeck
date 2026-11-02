@@ -101,7 +101,8 @@ export const chatText = {
     en: '{skills} cannot be picked right now: per-conversation skills need a restart of the local daemon — the one running now does not know about them yet.',
   },
 
-  'chat.workDirLabel': { zh: '工作目录', en: 'Working directory' },
+  // ★ 分批第 222 批：`chat.workDirLabel`（页头那行的「工作目录」标签）删了——路径搬到
+  //   栏脚「工作目录的文件」的标题行右侧，那一栏的名字自己就说明了这是哪个目录。
   // 「新对话」界面上的设定（2026-10 起工作目录只在这里设；详情页只读）。
   'chat.draftWorkDirLabel': { zh: '工作目录（可选）', en: 'Working directory (optional)' },
   'chat.workDirAuto': { zh: '自动分配', en: 'Chosen automatically' },

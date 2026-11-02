@@ -611,15 +611,11 @@
       </div>
 
       <!--
-        工作目录**只读**（2026-10）：它只在「新对话」界面上设定，对话开始后不再
-        能改——改目录等于把"这次对话在哪个目录里干的活"变成不确定的，而回看时
-        列出的文件、路径都指着旧目录。这里只回答"这个对话的目录是哪个"。
+        ★ 分批第 222 批（使用者定）：**工作目录的路径搬到栏脚那一栏的标题行右侧**。
+        使用者：「顶上有一个「工作目录」的路径，我想统一移动到下面的「工作目录的文件」的右侧」。
+        它属于"这一栏说的是哪个目录"，本来却挂在页头、隔着一整片消息区；现在两页共用一个位置
+        （`FootFiles` 的 `path`），本页传 `actualWorkDir`。
       -->
-      <div class="chat-dir">
-        <span class="faint small">{$t('chat.workDirLabel')}</span>
-        <code class="mono small">{actualWorkDir ?? $t('chat.notRunYet')}</code>
-      </div>
-      <p class="chat-dir-hint faint small">{$t('chat.workDirWarning')}</p>
         {/if}
       {/snippet}
       {#snippet body()}
@@ -761,6 +757,7 @@
         <FootFiles
           title={$t('files.heading')}
           count={filesCount > 0 ? $t('chat.filesCount', { count: filesCount }) : ''}
+          path={actualWorkDir ?? $t('chat.notRunYet')}
           bind:open={filesOpen}
           ondropfiles={(files) => void uploadFiles(files)}
   dropHint={$t('common.dropFilesHint')}
@@ -788,6 +785,9 @@
               ⚠️ 用 `hidden` 而不是 `{#if}`：`{#if}` 会把它卸载掉，条数跟着没了。
             -->
             <div hidden={!filesOpen}>
+              <!-- ★ 分批第 222 批：这条风险披露原来在页头（跟着路径那一行走）。路径搬下来之后
+                   它也跟着下来——它说的就是"这个目录里"，离目录越近越不容易被当成泛指。 -->
+              <p class="hint" data-chat-workdir-warning>{$t('chat.workDirWarning')}</p>
               <WorkDirTree
                 base={`/api/conversations/${activeConversation?.id ?? ''}`}
                 reloadKey={filesReloadKey}
@@ -896,19 +896,6 @@
     padding-top: 0;
     padding-bottom: 0;
     font-size: var(--fs-lg);
-  }
-
-  .chat-dir {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-    padding: 0 var(--sp-4);
-    margin-top: var(--sp-1);
-  }
-
-  .chat-dir-hint {
-    margin: var(--sp-1) var(--sp-4) 0;
   }
 
   /* 「新对话」界面上的工作目录设定：与上面那个执行者选择器同一节奏 */
