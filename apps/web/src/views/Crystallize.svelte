@@ -368,11 +368,7 @@
       title={$t('crystallize.artifactResize')}
       onpointerdown={startResize}
     ></button>
-    <CrystallizeArtifactPane
-      draftRunId={$crystallize.runId}
-      rev={materialRev}
-      onchanged={bumpMaterial}
-    />
+    <CrystallizeArtifactPane draftRunId={$crystallize.runId} />
   {:else}
     <MainArea empty={true} emptyTitle={$t('crystallize.pickHint')} emptyHint={$t('crystallize.listEmptyHint')}>
       {#snippet body()}

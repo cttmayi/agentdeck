@@ -19,10 +19,9 @@
    *    关掉就回到单栏。宽屏时小旗不显示（`display:none`），栏是常驻的网格列。
    */
   import { t } from '../lib/i18n.ts'
-  import { api } from '../lib/api.ts'
   // ★ 分批第 155 批：编辑器（树 + 内容/差异 + 保存改动）搬进这一栏
   import CrystallizeDraftEditor from './CrystallizeDraftEditor.svelte'
-  import { DISTILLY_SOURCE, draftSkill, editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
+  import { editor, paneWide } from '../lib/crystallize-editor.svelte.ts'
 
   /** `GET /api/crystallize/artifacts` 的返回（与流程页 `CrystallizeView` 同一份）。 */
   interface Artifacts {
@@ -34,24 +33,14 @@
     target: { kind: string } | null
   }
 
-  let {
-    draftRunId,
-    /**
-     * ★ 分批第 147 批：**材料被人从别处改过**的信号（追加材料 / 删掉材料）。
-     *
-     * 为什么需要它：材料有两个显示处——中间那栏的「依据」块（`CrystallizeView`）与本栏的
-     * 材料清单——数据都来自 `GET /api/crystallize/material`。一处改了、另一处不刷新，
-     * 使用者就会看到"刚追加了但右栏没有"（§12.14：两处必须由同一份数据现算，否则必漂）。
-     * 父组件 `views/Crystallize.svelte` 持有这个计数，两边谁改了都把它 +1。
-     */
-    rev = 0,
-    /** 这一栏自己改了材料（删掉一份）时通知父组件：让另一处也跟着重读。 */
-    onchanged = () => {},
-  }: {
-    draftRunId: string
-    rev?: number
-    onchanged?: () => void
-  } = $props()
+  /**
+   * ★ 分批第 215 批：**只留一个 prop**。
+   *
+   * 从前还有 `rev` 与 `onchanged`（材料被别处改过时互相通知）。分批第 197 批把材料整块搬到
+   * 中间栏栏脚之后，这一栏不再显示材料 ⇒ `onchanged` 从来没被调用过（死接口），`rev` 也
+   * 只剩一句 `void rev` 在 effect 里装样子。两个一起删。
+   */
+  let { draftRunId }: { draftRunId: string } = $props()
 
   /**
    * ⚠️ 这几个必须 `$state`：本组件是 **runes 模式**（用了 `$props`），普通 `let` 不是
@@ -59,19 +48,35 @@
    *    "产物请求已经 200 拿到 4 个文件，右栏永远停在『载入产物…』"，而 console 打点
    *    显示 `loaded 4`。**这类 bug 看代码完全看不出来，只有量 DOM 才发现。**
    */
-  /** `GET /api/crystallize/material` 的返回：这一版起草吃进去的素材文件。 */
-  interface Material {
-    dir: string
-    items: Array<{ relPath: string; bytes: number; truncated: boolean; text: string }>
-  }
+  /**
+   * ★ 分批第 215 批：**这一栏不再自己取产物**——它读的是共享的 `editor`（`lib/crystallize-editor.svelte.ts`）。
+   *
+   * 为什么必须改（使用者报的真缺陷）：「沉淀执行完毕后，产物不会立刻出来，需要重新手动刷新一次」。
+   * 原来这里有一份**自己的** `artifacts`，只在 `id !== seenId`（换了一条草稿）时才重读 ⇒
+   * 同一条 run 从"跑着"变成"跑完"时它**永远不会再读**：`files` 还是空的 ⇒ 整块产物区画成
+   * 「还没有产物」，连编辑器都不挂（它被包在 `files.length === 0` 的 else 里）。刷新之所以能好，
+   * 是因为刷新会走深链那条路重新 `open()` 一次。
+   *
+   * 现在数据只有一份（`editor.artifacts`）：中间那栏在**跑完**时 `loadDraftOutput()` →
+   * `editor.open()` → 这里立刻跟着变。顺带把这一段里的死代码一起删掉：材料请求（材料已经搬到
+   * 栏脚）、`selected`/`current`（预览被编辑器取代）、`materialEditable`、以及每次挂载都去拉一遍
+   * 却没人读的 `draftSkill`。
+   */
+  const artifacts = $derived(editor.artifacts)
 
-  let artifacts = $state<Artifacts | null>(null)
-  let material = $state<Material | null>(null)
-  let loading = $state(true)
-  let error = $state<string | null>(null)
-  /** 选中预览的文件（相对 skill/ 或 agent/ 目录）。空 = 还没选，默认给第一个。 */
-  let selected = $state('')
-  /** 窄屏抽屉此刻是否打开（宽屏用不到它）。 */
+  /**
+   * 谁负责 `open()`：这一栏自己兜底开一次（起草中那一屏中间那栏还没进审阅态），
+   * `CrystallizeView` 在跑完/接上时也会开一次——`open()` 对同一条 run 是"重读不清现场"，重复没事。
+   */
+  $effect(() => {
+    const id = editor.attachedRunId !== '' ? editor.attachedRunId : draftRunId
+    if (id === '') return
+    if (editor.runId === id) return
+    void editor.open(id).catch(() => {
+      // 读不到产物（还没跑完 / 接口抖）不是这一栏的错误：空态自己会说"还没有产物"
+    })
+  })
+
   /**
    * 窄屏抽屉的开关。**默认值由数据推**（不是 `$effect` 里"进审阅就置真"）：
    *
@@ -95,96 +100,8 @@
     drawerManual ?? (!paneWide.value && artifacts !== null && artifacts.mode === 'files'),
   )
   /**
-   * ★ 分批第 173 批（使用者定："技能走注入，但**不要默认放项目中**，让用户自己装、建议一键安装"）：
-   * 这一栏负责"这条沉淀用什么技能"——没装就给一键安装，装了就把 id 交给起草请求。
-   */
-
-  async function loadDraftSkill(): Promise<void> {
-    try {
-      const res = await api<{ skills: Array<{ id: string; slug: string; name: string }> }>('/api/skills')
-      const found = res.skills.find((sk) => sk.slug === 'distilly' || sk.slug.startsWith('distilly'))
-      draftSkill.id = found?.id ?? ''
-      draftSkill.slug = found?.slug ?? ''
-      draftSkill.name = found?.name ?? ''
-      draftSkill.error = ''
-    } catch (err) {
-      draftSkill.error = String(err instanceof Error ? err.message : err)
-    }
-  }
-
-  $effect(() => {
-    void loadDraftSkill()
-  })
-
-  /** 一次只认一个 run：切换选中时旧的返回要丢掉（否则旧产物盖住新的）。 */
-  let seq = 0
-  /** 上一次 `load` 的那条沉淀（用来区分"换了一条"与"同一条、材料变了"）。 */
-  let seenId = ''
-
-  /** 接口的 404/`ApiError(404)`：这条沉淀还没有产物，不算错误。 */
-  function isMissing(err: unknown): boolean {
-    const text = String(err)
-    return text.includes('404')
-  }
-
-  async function load(id: string): Promise<void> {
-    const mine = ++seq
-    loading = true
-    error = null
-    try {
-      const res = await api<Artifacts>(
-        `/api/crystallize/artifacts?draftRunId=${encodeURIComponent(id)}`
-      )
-      if (mine !== seq) return
-      artifacts = res
-      const files = Object.keys(res.files ?? {})
-      selected = files[0] ?? ''
-      // ★ 分批第 155 批：编辑器（树 + 正文）在这一栏里渲染，它的数据在
-      // `lib/crystallize-editor.svelte.ts`。**这一栏自己负责把它打开**：
-      //   中间那栏只在"审阅态"才 `loadDraftOutput()`，而右栏在任何有产出的屏都要显示树——
-      //   实测漏了这句时，起草中那一屏右栏画着"还没有产物"、编辑器空着（三条判据红）。
-      //   `editor.open()` 自己挡重复（同一条 run 只重读、不清编辑现场）。
-      if (res !== null && editor.runId !== id) void editor.open(id)
-      // 素材与产物是两个接口（语义不同：一个"吃了什么"、一个"产出了什么"），
-      // 但都是**这一条沉淀的事实**，所以一起取、一起显示。
-      // ⚠️ 它必须在这里（成功分支）——第一版误加进了 catch 里，于是只有**产物取失败**时
-      //    才会去取材料，正常路径永远是"0 个素材文件"（探针当场抓到，见 §12.19）。
-      try {
-        material = await api<Material>(
-          `/api/crystallize/material?draftRunId=${encodeURIComponent(id)}`
-        )
-      } catch {
-        material = null
-      }
-    } catch (err) {
-      if (mine !== seq) return
-      // 没有产出（起草还没跑完 / 没跑成）时接口给 404：那是正常的空态，不当错误显示。
-      // 其它错误**必须显示**——右栏静默变空，使用者只会以为"产物没了"。
-      artifacts = null
-      error = isMissing(err) ? null : String(err)
-    } finally {
-      if (mine === seq) loading = false
-    }
-  }
-
-  $effect(() => {
-    // 读 `rev` 是**故意的**：材料在栏脚被追加/删掉之后，产物那一栏也可能要重算（§12.14 同源）。
-    // ★ 分批第 197 批：材料本身搬去了栏脚（`CrystallizeMaterials`），所以这里只剩产物一条路。
-    void rev
-    // ★ 分批第 155 批：用**中间那栏实际挂上的草稿**（路由可能是来源 run，见 store 里
-    //   `attachedRunId` 的注释）；中间那栏还没挂上时退回路由 id。
-    void editor.attachedRunId
-    const id = editor.attachedRunId !== '' ? editor.attachedRunId : draftRunId
-    if (id !== seenId) {
-      seenId = id
-      void load(id)
-    }
-  })
-
-  /**
-   * 派生值走**显式签名的小函数**，不在 `$derived` 里直接窄化 `artifacts`：
-   * `$derived(a === null ? [] : Object.keys(a.files))` 会被 tsc 窄成 `never`
-   * （runes 里那个变量被包进闭包，控制流分析拿不到 `load()` 里的赋值）——
+   * 派生值走**显式签名的小函数**：`$derived(artifacts === null ? [] : Object.keys(artifacts.files))`
+   * 会被 tsc 窄成 `never`（runes 里那个变量被包进闭包，控制流分析拿不到别处的赋值）——
    * 第一次就是这么红的，改成传参的函数后类型就正常了。
    */
   function fileList(value: Artifacts | null): string[] {
@@ -199,26 +116,12 @@
     return value !== null && value.validation.ok
   }
 
-  function materialList(value: Material | null): Material['items'] {
-    return value === null ? [] : value.items
-  }
-
-  const materialItems = $derived(materialList(material))
   const files = $derived(fileList(artifacts))
-  const current = $derived(files.includes(selected) ? selected : (files[0] ?? ''))
   const problems = $derived(problemList(artifacts))
   /** ★ 分批第 211 批：没交 skill ⇒ 没有"体检"可言（它没有可体检的东西）。 */
   const noOutputMode = $derived(artifacts !== null && artifacts.mode === 'none')
   const checkTotal = $derived(problems.length)
   const checksOk = $derived(isOk(artifacts))
-  /**
-   * ★ 分批第 163 批（§12.41 不放假接口）：**材料能不能改**。
-   *
-   * daemon 那三条写接口（追加 / 删掉 / 从仓库拉）都要求"起草已跑完、且没入库"（理由：起草者
-   * 开工时读的素材已经定了）。所以草案期界面上也不该挂这些按钮——按了被拒比没有按钮更糟。
-   * 清单本身**照常显示**（§12.14：右栏是"它现在手上有什么"的正式清单，草案期同样要看得到）。
-   */
-  const materialEditable = $derived(artifacts !== null && artifacts.status === 'completed')
 </script>
 
 <!-- 窄屏的打开入口：宽屏不显示（栏本身就在网格里） -->
@@ -250,11 +153,9 @@
   </header>
 
   <div class="pane-body artifact-body">
-    {#if error !== null}
-      <p class="notice bad small">{error}</p>
-    {:else if loading}
-      <p class="faint small">{$t('crystallize.artifactLoading')}</p>
-    {:else}
+    <!-- ★ 分批第 215 批：这里原来有「读取出错 / 载入中」两条分支，随这一栏自己那份
+         `load()` 一起删了——数据现在来自共享的 `editor`，读不到就是"还没有产物"（空态自会说话）。 -->
+    {#if true}
       <!-- 材料：这一版起草**吃进去**的东西（轨迹 / 判决 / 使用者给的）。
            ★ 分批第 147 批：使用者给的（`appended/`）可以删——§12.14「右栏清单……删掉错的」。
              其余材料是平台从来源 run 切出来的证据，不给删除钮（daemon 那边也拒）。 -->

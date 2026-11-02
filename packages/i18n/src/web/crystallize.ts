@@ -373,7 +373,6 @@ export const crystallizeText = {
   'crystallize.settingsProxyOn': { zh: '已启用：{url}（下次装技能生效）', en: 'Enabled: {url} (applies to the next install)' },
   'crystallize.settingsProxyOff': { zh: '已改回直连。', en: 'Switched back to direct.' },
   // ★ 分批第 207 批：`settingsSkillRequiredShort` 删了——那句话从右栏栏头撤掉（见该组件注释）。
-  'crystallize.artifactLoading': { zh: '载入产物…', en: 'Loading artifact…' },
 
   /**
    * ── 消息流外壳的栏脚 ──

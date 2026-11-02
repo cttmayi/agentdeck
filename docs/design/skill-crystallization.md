@@ -6336,3 +6336,40 @@ daemon 侧：`§10.13` 新增「上传落 `uploads/`、索引指得出它（`../
 
 判据：`crystal.requestTurnText`（非空）与 `crystal.requestTurnIsTask`（正文是任务原文，不是
 标签）继续钉着；探针 **571** 全绿。`check` **2193 全绿**、`typecheck` 0 错。
+
+### 12.85 跑完之后产物不出现，得手动刷新一次（分批第 215 批，2026-11；使用者报）
+
+使用者：「沉淀执行完毕后，产物不会立刻出来，需要重新手动刷新一次才有」。
+
+**根因**：产物栏（`CrystallizeArtifactPane`）有**自己的一份** `artifacts`，而它的重读条件只有
+`if (id !== seenId)`——**换了一条草稿才重读**。同一条 run 从"跑着"变成"跑完"时 id 没变 ⇒
+它永远不会再读一次：`files` 还是空的 ⇒ 整块产物区画成「还没有产物」，连编辑器都不挂
+（编辑器被包在 `files.length === 0` 的 `{:else}` 里）。刷新之所以"能好"，是因为刷新会走深链那条路
+重新 `open()` 一次。
+
+**改法**：产物栏**不再自己取数据**，读共享的 `editor`（`lib/crystallize-editor.svelte.ts`）——
+中间那栏在**跑完**时 `onDraftTerminal → loadDraftOutput() → editor.open()`，那一份一变，右栏
+立刻跟着变（一份数据、一个出口）。它自己只在"挂上的草稿变了"时兜底开一次 `editor.open()`
+（起草中那一屏中间那栏还没进审阅态）。
+
+顺手删掉这一栏里的死东西（同一个"数据搬过家但旧路还留着"的病）：
+
+| 删掉 | 为什么是死的 |
+|---|---|
+| 自己的 `load()` / `loading` / `error` / `seq` / `seenId` / `isMissing` | 与共享的 `editor` 重复，而且正是上面那个 bug 的产地 |
+| `GET /api/crystallize/material` 那次请求 + `material` / `materialItems` / `materialList` | 材料在分批第 197 批就搬去了中间栏的栏脚，这一栏不再显示材料 |
+| `selected` / `current` | 只读预览早被编辑器取代，没有任何读者 |
+| `materialEditable` | 同上（材料那一段界面已经不在这一栏） |
+| `draftSkill` 的加载 `$effect` | 它的消费者（这一栏的「沉淀用技能」段）在分批第 207 批删了，状态写了没人读 |
+| props `rev` / `onchanged`（连同父组件那两行） | `onchanged` 从来没被调用；`rev` 只剩一句 `void rev` 在 effect 里装样子 |
+| 词条 `crystallize.artifactLoading` | 「载入中」那一条分支随 `loading` 一起删了（i18n 死词条检测当场抓到） |
+
+**判据与"没量到的部分"**：探针 **571** 全绿（`crystal.artifactFileCount` / `artifactPreviewLen` /
+`crystal.artifactEntered` 这些量的就是"右栏真的列着产物"），`check` **2193 全绿**、`typecheck` 0 错。
+
+⚠️ **"跑完那一刻自动出现"这条窗口本身没有探针判据**，理由写在这里免得以后被当成漏项：探针的
+假 CLI 是"吐一行就睡 1800s"（起草中那一屏要它一直跑），它**无法**在探针跑到沉淀那一节时被叫停；
+而 run 是**一次性**的、没有"中途喂一句"的通道（D29），浏览器也没有任何写进"正在跑的 run"的办法
+（`POST …/upload` 对没跑完的草稿是 409）。⇒ 这个时间窗只有真机上才出现。所以修法选了**结构性的
+那一种**（右栏不再持有第二份数据），而不是"补一个轮询把它盖住"——后者能让这次的现象消失，
+下一份"跑完之后才该更新的东西"照样会漏。
