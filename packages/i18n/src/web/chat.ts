@@ -85,17 +85,9 @@ export const chatText = {
     zh: '这一栏要重启本机的 daemon 之后才有：现在跑着的那个还不认识它。',
     en: 'This needs a restart of the local daemon: the one running now does not know about it yet.',
   },
-  /**
-   * ★ 这一栏会列出 **agent 自己写的文件**，那不是平台的"动作"。
-   *
-   *   聊天仍然不产出判决、因此不触发任何登记过的动作（见这一页顶上那段）。
-   *   这句话就是为了不让那一栏被读成"这次动了什么"——那是一个它兑现不了的
-   *   说法，而"看起来对、实际错"正是这个项目的老毛病。
-   */
-  'chat.filesNotAnAction': {
-    zh: '这一栏是这个目录里现在有什么（含它自己写的文件）。聊天仍然不触发任何登记过的动作。',
-    en: 'This shows what is in the directory now — including files it wrote itself. Chat still triggers no registered actions.',
-  },
+  // ★ 分批第 227 批：`chat.filesNotAnAction`（「这一栏是……聊天仍然不触发任何登记过的
+  //   动作」）删了——和它旁边那条风险披露一起从栏脚撤下来。理由写在那段模板注释里：
+  //   常驻说明读三遍就是噪音，而"这不是动作"由界面上**根本没有动作**这一点自己说明。
   'chat.skillsNeedRestart': {
     zh: '{skills} 现在选不到：这个对话自带技能的功能要重启本机的 daemon 之后才有（现在跑着的那个还不认识它）。',
     en: '{skills} cannot be picked right now: per-conversation skills need a restart of the local daemon — the one running now does not know about them yet.',

@@ -785,15 +785,16 @@
               ⚠️ 用 `hidden` 而不是 `{#if}`：`{#if}` 会把它卸载掉，条数跟着没了。
             -->
             <div hidden={!filesOpen}>
-              <!-- ★ 分批第 222 批：这条风险披露原来在页头（跟着路径那一行走）。路径搬下来之后
-                   它也跟着下来——它说的就是"这个目录里"，离目录越近越不容易被当成泛指。 -->
-              <p class="hint" data-chat-workdir-warning>{$t('chat.workDirWarning')}</p>
+              <!-- ★ 分批第 227 批：这里原来有两句常驻说明（"它能改能删能新建"、"聊天不触发
+                   动作"）。删掉是因为**树自己已经把这两件事说得更准**：看得见的是文件、看得见
+                   `.agentdeck/` 里登记的条目，风险披露在**新建对话时设定目录的那张表单**上
+                   （那里才是"你要在这个目录里跑东西"这个决定发生的地方）。常驻文字读三遍就
+                   变成背景噪音，而占用的是树的位置。 -->
               <WorkDirTree
                 base={`/api/conversations/${activeConversation?.id ?? ''}`}
                 reloadKey={filesReloadKey}
                 bind:count={filesCount}
               />
-              <p class="hint">{$t('chat.filesNotAnAction')}</p>
             </div>
           {/if}
         </FootFiles>
