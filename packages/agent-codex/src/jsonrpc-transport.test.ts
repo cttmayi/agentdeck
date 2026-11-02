@@ -72,6 +72,23 @@ describe('JsonRpcTransport（JSON-RPC 2.0 帧层）', () => {
     })
   })
 
+  /**
+   * ★ 分批第 227 批（三平台兼容）：**行尾可能带 `\r`**。
+   *
+   * 真 Windows 上 CLI 往 stdout 写的是 CRLF。`process-tree` 用
+   * `readline({crlfDelay: Infinity})` 把 `\r\n` 当一个行尾 ⇒ 正常情况下到不了这里。
+   * 但这条要在**帧层**自己兜住：读行的实现某天被换掉（比如改成自己按 `\n` 切），
+   * 带 `\r` 的帧会在 `JSON.parse` 处变成"不可解析"，而表现是**整条 run 判失败**、
+   * 原因指向"模型输出坏了"——离真正的原因隔了三层。
+   * JSON.parse 本身容忍尾随空白，所以这里钉的是"确实被容忍、并计入正常帧"。
+   */
+  test('★★ 行尾带 \\r（CRLF）的帧也照常解析，不算"不可解析"', () => {
+    const h = makeHarness()
+    h.transport.push('{"method":"turn/started","params":{}}\r')
+    assert.equal(h.unparsable.length, 0, '带 \\r 的帧不该进"不可解析"')
+    assert.deepEqual(h.notifications, [{ method: 'turn/started', params: {} }])
+  })
+
   test('★ 无 id 的入站帧 → onNotification', () => {
     const h = makeHarness()
     h.transport.push(JSON.stringify({ method: 'item/completed', params: { item: { type: 'agentMessage' } } }))

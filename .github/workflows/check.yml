@@ -1,0 +1,77 @@
+# 三平台兼容：真 OS 上跑同一套 check（分批第 227 批）
+#
+# ══════════════════════════════════════════════════════════════════
+# 为什么需要它（开发机是 macOS）
+# ══════════════════════════════════════════════════════════════════
+#
+# 仓库里"平台差异"的写法是**注入**的（`platform: 'win32'` 是参数，不是读
+# `process.platform`），所以纯逻辑（垫片解析、引号规则、verbatim 旗标、PATHEXT
+# 候选）在 macOS 上就能钉住——2200+ 条判据里**没有一条**读 `process.platform`。
+#
+# 但有一层注入测不到：**真的 `cmd.exe` / 真的 PATH 查找 / 真的 `taskkill /T`**。
+# 这一层只在真 Windows 上存在。GitHub 的 windows-latest 就是最便宜的那台机器。
+#
+# ⚠️ 第一次跑**预期会红几条**，那些红本身就是交付物：它们是"在 Windows 上会说错话/
+#    走错路"的清单（已知一类：诊断文案里写死了 `apt install` / `brew install`）。
+#    修的方向是**把平台注入进那些构造函数**，而不是给测试加 skip。
+#
+# ⚠️ 不要给单个测试加 `skip: process.platform === 'win32'`：那等于把"Windows 上行为
+#    不同"变成"Windows 上不检查"，而这类差异**只会越来越多、不会自己消失**。
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }} · node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 最低支持线（engines >= 22.6；22.17 是当前 22.x 的最新补丁）
+          - os: ubuntu-latest
+            node: '22.17.0'
+          - os: windows-latest
+            node: '22.17.0'
+          # 主流线：日常开发用的那个大版本
+          - os: ubuntu-latest
+            node: '24'
+          - os: windows-latest
+            node: '24'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 行尾已由 .gitattributes 钉成 LF；这里再显式关掉 Windows 上的自动转换，
+          # 免得被 runner 的全局配置（core.autocrlf）悄悄改掉——被 bash 执行的脚本
+          # 带 CRLF 会以 `$'\r': command not found` 失败，而那句话指不到行尾上去。
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.6.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # `.npmrc` 把 store 与 cache 指到工作区内（本地是为了沙箱）；CI 上照旧即可，
+      # 不进缓存目录也无所谓——install 本身有 pnpm 的 lockfile 缓存。
+      - run: pnpm install --frozen-lockfile
+
+      # 界面是构建产物；typecheck 里的 svelte-check 不需要它，但 web 相关的测试
+      # 与 `--doctor` 之类的入口需要干净的初始状态，先构建一次省得后面各自处理。
+      - run: pnpm run build:web
+
+      - run: pnpm run check

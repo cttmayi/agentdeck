@@ -656,3 +656,60 @@ pnpm run probe:layout -- --dry-run 2>$null | Select-String -Pattern 'chrome'
 
 `.cmd` 真机 exec 得起来吗、`cmd.exe` 的引号规则在真机上是否如文档所写、`taskkill /T`
 在"我们成了 node 的父进程"之后是否照样收掉整棵树——这三条写在上面 A4 那节里。
+
+---
+
+## 开发机是 macOS，怎么保证 Windows / Linux 也兼容（分批第 227 批）
+
+问的是方法。这个仓库已经有一套，按"能测到什么"分三层——三层各自能覆盖什么、剩下什么只能靠真机，
+别混着谈。
+
+### 第一层：语义层（macOS 上就能做，而且已经做了）
+
+**做法：平台作为参数注入，不读 `process.platform`。** 判据全在纯函数上：
+
+- `resolveSpawnTarget({ platform: 'win32', readText: () => 垫片原文, exists, env })`；
+- 垫片夹具是**逐字抄的真 npm 垫片**（`cmd-shim` 生成的形状），不是自己编的；
+- 假 CLI 两种形状（Unix 的 `#!/bin/sh` 包装 / Windows 的 npm 垫片形状），`executableWrapper` 一处产出；
+- 编码类（UTF-16 + BOM 的 `config.toml`）也是拿**字节夹具**测的。
+
+现状：生产代码里 **29 处**平台分支，测试里读 `process.platform` 的**一条都没有**。
+这一层覆盖了"我们的判断对不对"，覆盖不了"真 EXE 收不收"。
+
+### 第二层：执行层（macOS 上**测不到**，只能真 OS）
+
+真 `cmd.exe` 的引号规则、真 `PATH`/`PATHEXT` 查找、真 `taskkill /T`、真 `.cmd` 能不能被
+`spawn` 起来——这些在 macOS 上不存在。三种真实做法，按性价比排：
+
+| 做法 | 成本 | 适合 |
+|---|---|---|
+| **CI 矩阵**（`.github/workflows/check.yml`：ubuntu + windows × node 22.17/24，跑 `pnpm run check`） | 一次配置、每次 push 自动跑 | **首选**。这是唯一能持续、免费、不需要你手动做的事 |
+| 本机 VM（Windows Sandbox / Parallels / UTM；Linux 用 OrbStack / Docker / lima） | 每次手动，几分钟 | 改完 Windows 相关代码**当场**验一次 |
+| 一台真 Windows 机器 | 人力 | 只在上表两种都过不了时 |
+
+⚠️ **第一次跑 CI 预期会红几条**，那些红就是交付物：已知一类是"诊断文案写死了
+`apt install` / `brew install`"（`missingInterpreterMessage` 这类）。修的方向是**把平台注入进
+那些函数**，不是给测试加 `skip`——`skip` 把"Windows 上行为不同"变成"Windows 上不检查"，
+而这类差异只会越来越多。
+
+### 第三层：静态层（任何平台都跑，最便宜）
+
+仓库级判据，防"新开一条路、绕开唯一出口"：
+
+- `tests/test-safety.test.ts`：用了 `resolveSpawnTarget` 就必须用 `spawnPlanFor`（verbatim 旗标只有一个出口）；
+- 同一文件里新增的一条：**裸 `spawn`/`spawnSync` 必须在白名单里**（六条，每条写明理由），
+  否则 Windows 上把 `.cmd` 当普通路径起（"找不到文件"）。
+
+### 本批另外做的两件小事
+
+1. `.github/workflows/check.yml`：ubuntu + windows × node 22.17/24 四条腿跑 `pnpm run check`
+   （先 `pnpm run build:web`，因为界面是构建产物）。`fetch-depth: 1` + `.gitattributes` 已钉 LF。
+2. `jsonrpc-transport.test.ts` 新增一条：**行尾带 `\r` 的帧照常解析**。真 Windows 的 stdout 是 CRLF；
+   `process-tree` 用 `readline({crlfDelay: Infinity})` 会剥掉它，但这条要在**帧层**自己兜住——
+   哪天读行被改成手写 `split('\n')`，坏掉的帧会让整条 run 判"输出不可解析"，而原因离真正的问题隔三层。
+
+### 明确不做
+
+- **`shell: true` 一行改完**：有注入面（Node 会警告 DEP0190），而且 `.cmd` 里 `%*` 展开又是另一套引号规则；
+- **用 mock 证明"兼容"**：mock 掉 `platform` 只能证明我们自己的判断，证不了 `cmd.exe` 收不收；
+- **Wine 当替代**：Wine 的 cmd ≠ Windows 的 cmd，libuv 在 Wine 下行为也会偏——只能当参考，不能当判据。
