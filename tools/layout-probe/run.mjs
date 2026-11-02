@@ -4230,10 +4230,12 @@ const CHECKS = [
   },
   {
     view: '沉淀',
-    key: 'crystal.paneTreeBodySideBySide',
-    label: '★ 主区是**真的并排**两列（树固定窄栏 + 窗格），不是上下叠着（布局类缺陷只有量得出来）',
+    key: 'crystal.paneTreeBodyStacked',
+    label:
+      '★ 主区是**上下两行**（文件清单在上、编辑器在下，左右对齐）——分批第 223 批使用者定：' +
+      '"沉淀页右栏的产出中两列布局，是否可以改成是两行布局"（右栏 448px 时两列只剩 ~250px 正文）',
     ok: (v) => v === true,
-    show: (v, f) => `树 ${f['crystal.treeW']}px　窗格高 ${f['crystal.paneH']}px（底边差 ${f['crystal.paneBottomGap']}px）`,
+    show: (v, f) => `树 ${f['crystal.treeW']}px 宽　窗格高 ${f['crystal.paneH']}px（底边差 ${f['crystal.paneBottomGap']}px）`,
   },
   {
     view: '沉淀',

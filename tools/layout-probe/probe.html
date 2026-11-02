@@ -5155,11 +5155,17 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const rmb = parseFloat(cs(receipt).marginBottom || '0')
             return Math.round(rRect.bottom + (Number.isFinite(rmb) ? rmb : 0) - top)
           })()
-          facts['crystal.paneTreeBodySideBySide'] =
+          /**
+           * ★ 分批第 223 批（使用者："沉淀页右栏的产出中两列布局，是否可以改成是两行布局"）：
+           * 判据从"**并排**"翻成"**上下两行**"——理由写在原地：右栏默认 448px，两列时树吃掉
+           * 180px、正文只剩 ~250px（一行 SKILL.md 折两三次），所以改成清单在上、正文占满整栏。
+           * 判据本身没变味：它问的始终是"树与正文是不是同一套几何关系"，只是关系从左右变上下。
+           */
+          facts['crystal.paneTreeBodyStacked'] =
             cyTreeRect !== null &&
             cyBodyRect !== null &&
-            cyBodyRect.x > cyTreeRect.x &&
-            Math.abs(cyTreeRect.y - cyBodyRect.y) < 2
+            cyBodyRect.y > cyTreeRect.y &&
+            Math.abs(cyTreeRect.x - cyBodyRect.x) < 2
 
           // 树行：徽标 + 名字 + `+n −m`；徽标与行数**同源**（都来自 diff）
           facts['crystal.treeRows'] = [...d().querySelectorAll('.review-pane .file-row')].map(
@@ -5245,11 +5251,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           //   改成"diff **盖满右栏**、而且仍压在同一块窗格上（不是跑到下面 519px 去）"。
           //   为什么改：右栏只有 24–30rem，并排两格各 ~180px 读不下一行 SKILL.md ⇒ 差异改成
           //   占满整栏的浮层（起点与正文列齐平，宽度 ≥ 正文列宽）。
+          /**
+           * ★ 分批第 223 批：判据不变（起点齐平、宽度不小于正文列、仍压在正文块里），但
+           * **对齐对象是"正文块"**（`.file-body`）——两行布局之后差异那一层的定位上下文从
+           * `.review-pane` 换成了 `.file-body`（否则浮层会把上面的文件清单一起盖住，而两列
+           * 时代那份清单一直可见）。
+           */
           facts['crystal.diffSamePlaceAsEditor'] =
             cyDiffRect !== null &&
             cyEditorRectBefore !== null &&
             cyDiffRect.w >= cyEditorRectBefore.w - 4 &&
-            Math.abs(cyDiffRect.y - cyEditorRectBefore.y) < 60 &&
+            // `.diff-box` 在浮层里、头顶还有一行 `.diff-head`（改动量 + 基线切换）⇒
+            // 它的 y 比正文块顶低 ~40px。容差 60 就是给那一行留的（与上一版一致）。
+            cyDiffRect.y >= cyEditorRectBefore.y - 4 &&
+            cyDiffRect.y - cyEditorRectBefore.y < 60 &&
             cyDiffRect.y < cyEditorRectBefore.y + cyEditorRectBefore.h
           // ★ 基线切换按钮**只有改版草稿才有**（`{#if artifacts.revisedFrom !== null}`）：
           //   这一条量的正是"这条不是改版 ⇒ 不给一个永远空的切换"。

@@ -6631,3 +6631,28 @@ name/description = colleague-mini-flow / 当需要复用这套小流程时用
 （这条路径只读、不能改），现在量 `[data-foot-files] [data-workdir-path]`，并顺带确认它**真的在那儿、
 非空**（只量"没有输入框"的话，元素不存在也会绿）。实测 `chat.workDirPathText =
 /…/.cache/layout-probe/chat-files-wd`。`check` **2199 全绿**、`typecheck` 0 错。
+
+### 12.93 右栏产物：两列 → 两行（分批第 223 批，2026-11；使用者定）
+
+使用者：「沉淀页右栏的产出中两列布局，是否可以改成是两行布局」。
+
+**改之前**：`.review-pane` 是 `180px + 1fr` 两列（文件清单在左、正文在右）。右栏本身只有 24–30rem
+（默认 448px）⇒ 树吃掉 180px 之后**正文只剩 ~250px**，一行 `SKILL.md` 要折两三次，改字很难受。
+
+**改之后**：`grid-template-rows: auto minmax(0, 1fr)`——**清单在上（限高 9rem、自己滚）、正文在下占满整栏**
+（实测正文块宽 399px，原来 ~250px）。
+
+**顺带修一处连带问题**：差异那一层（`.review-cell.diff-layer`，`position:absolute; inset:0`）原来挂在
+`.review-pane` 上定位。两行之后如果还挂在那儿，它会把**上面的文件清单一起盖住**——而两列时代那份
+清单一直可见（浮层只盖正文列）。所以把定位上下文换成 `.file-body`：清单照旧可见，差异占满正文这一块。
+
+**判据**（探针 **572** 全绿）：
+
+- `crystal.paneTreeBodySideBySide` → **`crystal.paneTreeBodyStacked`**（判据从"并排"翻成"上下两行"，
+  理由写在原地：它问的一直是"树与正文是不是同一套几何关系"，只是关系从左右变上下）；
+- `crystal.diffSamePlaceAsEditor` 语义不变（起点齐平 + 宽度不小于正文列 + 仍压在正文块里），
+  只把对齐对象从"整个 pane"换成"正文块"，容差 60px 留给浮层自带的那一行 `.diff-head`；
+- 实测：`paneCols = "399px"`（单列满宽）、`treeW = 399`、`paneH = 677`、`paneBottomGap = 64`（与改前一致，
+  说明"贴视口底"这条没被破坏）。
+
+`check` **2199 全绿**、`typecheck` 0 错。

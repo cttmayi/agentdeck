@@ -319,12 +319,22 @@
   /* ── 主区：树 240px + 窗格 ──
      高度跟窗口走（min 420 保证编辑器不至于只有几行；max 与窗口高对齐），
      两个子块各自 overflow: auto——页面**不因为文件多而整页变长**。 */
+  /**
+   * ★ 分批第 223 批（使用者定："沉淀页右栏的产出中两列布局，是否可以改成是两行布局"）：**两行**。
+   *
+   * 原来是 `180px + 1fr` 两列：右栏本身只有 24–30rem（默认 448px），树吃掉 180px 之后
+   * **正文只剩 ~250px**——一行 SKILL.md 要折两三次，改字很难受。改成两行之后清单在上、
+   * 正文占满整栏宽度（448px），代价是清单不再常驻可见（它原来一直在左列）。
+   *
+   * 清单因此要**限量高**：`max-height` 拉住 + 自己滚，否则文件一多就把正文挤没
+   * （`.review-pane` 是吃剩余高度的，清单无限长会把正文压到 0）。
+   */
   .review-pane {
     /* ★ 分批第 160 批：差异是**盖满这一块**的浮层 ⇒ 它要有定位上下文 */
     position: relative;
     display: grid;
-    /* 右栏是 24–30rem 的一列：树固定 180px（文件名能读），剩下全给正文 */
-    grid-template-columns: 180px minmax(0, 1fr);
+    /* 第一行 = 文件清单（自然高度、最多 9rem），第二行 = 编辑器（吃掉剩下的全部） */
+    grid-template-rows: auto minmax(0, 1fr);
     gap: var(--sp-2);
     /* 吃剩余高度（basis 0：高度由剩余空间定，内容在格子里自己滚），22rem 保底 */
     flex: 1 1 0;
@@ -338,6 +348,8 @@
     padding: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius);
+    /* 两行布局下清单在上：限高 + 自己滚，别把下面的正文挤没 */
+    max-height: 9rem;
     overflow-y: auto;
     background: var(--panel);
   }
@@ -415,6 +427,11 @@
     border-radius: var(--radius);
     overflow: hidden;
     background: var(--panel);
+    /* ★ 分批第 223 批：差异那一层改由**这里**定位（原来挂在 `.review-pane` 上）。
+       两行布局之后如果还挂在 pane 上，浮层会把上面的文件清单一起盖住——而两列时代
+       那份清单一直是可见的（浮层只盖正文列）。改成盖住 `.file-body` 就与旧行为对齐：
+       清单在上照旧可见，差异占满正文这一块。 */
+    position: relative;
   }
 
   .pane-tabs {
