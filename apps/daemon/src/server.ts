@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import {
   ALL_KINDS,
+  BLOCK_LABELS,
   buildBlocks,
   checkVersionSupport,
   DEFAULT_TEMPLATES,
@@ -5508,6 +5509,40 @@ async function injectedSkillsOf(
     // ★ 分批第 211 批：`GET /api/crystallize/questions` 删了。
     //   「它在不在等回答」不再是一条独立状态——`GET artifacts` 的 `mode` 就是答案：
     //   `none` = 这一轮只是说了话（在问 / 说不值得做 / 解释了它要什么），`files` = 交了东西。
+    /**
+     * ★ 分批第 212 批：**这一轮交给它的任务原文**（第一句话的 ③ 任务块）。
+     *
+     * 中栏时间线的第一条要显示"你那一轮"到底说了什么。它不只是「新建一份技能：<作用描述>」
+     * 那一句——真正投递出去的是平台组装的那段任务书（素材在哪、产出契约、协议语）。
+     *
+     * ⚠️ **从 run 日志里取，不要在这里重新拼**：executor 每轮都把三块分开记一条
+     *    （`===== ③ 任务 =====`），那是**当时真的投递出去的那段**。重新拼会让历史草稿
+     *    显示出"按今天文案生成"的字——那就不叫"它当时被交代了什么"了（与审计哈希同一纪律：
+     *    只认 `deliveredBytes()`）。
+     *
+     * 取**最后一条** ③：一条草稿的每一版都是新 run，看的是当前这一版的交代。
+     */
+    if (req.method === 'GET' && path === '/api/crystallize/request') {
+      const draftRunId = url.searchParams.get('draftRunId') ?? ''
+      if (draftRunId === '') {
+        sendJson(res, 400, { error: '需要 draftRunId', code: 'draft_run_id_required' })
+        return
+      }
+      const draftRun = await store.getRun(draftRunId as RunId)
+      if (!draftRun || draftRun.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: `起草 run 不存在（${draftRunId}）`, code: 'draft_run_not_found' })
+        return
+      }
+      const messages = await store.listRunMessages(draftRun.id)
+      let task: string | null = null
+      for (const m of messages) {
+        const content = m.content ?? ''
+        if (!content.startsWith(`===== ${BLOCK_LABELS.task} =====`)) continue
+        task = content.slice(`===== ${BLOCK_LABELS.task} =====`.length).trim()
+      }
+      sendJson(res, 200, { task })
+      return
+    }
     if (req.method === 'GET' && path === '/api/crystallize/artifacts') {
       const draftRunId = url.searchParams.get('draftRunId') ?? ''
       if (draftRunId === '') {

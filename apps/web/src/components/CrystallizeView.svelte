@@ -462,30 +462,59 @@
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
 
+  /** 「你那一轮」的抬头（新建一份技能 / 优化「slug」）——它只是一句标签，正文是任务原文。 */
+  $: requestLabel =
+    targetKind === 'new'
+      ? $t('crystallize.requestNew')
+      : $t('crystallize.requestUpdate', { skill: skillNameFor(selectedSkillId) })
+
   /**
    * 「你那一轮」说的话（见时间线里 `data-crystal-request` 那段注释）。
    *
-   * ⚠️ 作用描述与反馈**不落库**（`crystallizeTarget` 只记 new/update + skillId），所以从
-   *    深链恢复一条草稿时这两截是空的 ⇒ 只说"新建一份技能"。宁可少说，不要编。
+   * ★ 分批第 212 批（使用者："第一句话显示「新建一份技能」，是否可以把它完整的『任务』输入
+   *   写出来"）：第一条消息 = **这一轮真的投递出去的那段 ③ 任务块**（`draftTaskText`，
+   *   从 run 日志取，不是现拼），抬头挂一句标签（新建 / 优化「slug」）。
+   *
+   * 下面这个 `requestLine` 只剩**兜底**：老草稿（那时还没有把三块分开记进日志）或接口读不到时
+   * 用它。⚠️ 作用描述与反馈不落库（`crystallizeTarget` 只记 new/update + skillId），所以这
+   * 条兜底在深链恢复的草稿上只有半句——能补的补在这里：purpose 其实在素材索引里，
+   * 但那是另一条路（见 §12.14 的素材清单），不在这条假设里编。
    */
   $: requestLine = (() => {
-    const head =
-      targetKind === 'new'
-        ? $t('crystallize.requestNew')
-        : $t('crystallize.requestUpdate', { skill: skillNameFor(selectedSkillId) })
     const detail = targetKind === 'new' ? purpose.trim() : userFeedback.trim()
     if (detail === '') {
       // 空白起的材料是"我给它的东西"，说在这儿比单独一行更像对话
       if (blankStart && blankMaterials.length > 0) {
         return $t('crystallize.requestWithMaterials', {
-          head,
+          head: requestLabel,
           n: String(blankMaterials.length),
         })
       }
-      return head
+      return requestLabel
     }
-    return `${head}：${detail}`
+    return `${requestLabel}：${detail}`
   })()
+
+  /**
+   * 这一轮交给它的**任务原文**（第一句话的 ③；`GET /api/crystallize/request`）。
+   *
+   * 空串 = 还没读到 / 老草稿没有这条日志 ⇒ 退回 `requestLine` 那句。
+   */
+  let draftTaskText = ''
+  let draftTaskFor = ''
+
+  async function loadDraftTask(): Promise<void> {
+    if (draftRunId === '' || draftTaskFor === draftRunId) return
+    draftTaskFor = draftRunId
+    try {
+      const res = await api<{ task: string | null }>(
+        `/api/crystallize/request?draftRunId=${encodeURIComponent(draftRunId)}`,
+      )
+      draftTaskText = res.task ?? ''
+    } catch {
+      draftTaskText = ''
+    }
+  }
 
   /** 状态徽标的字（共享词表，与任务详情的 run 徽标同一份）。 */
   function statusLabel(status: string): string {
@@ -928,6 +957,8 @@
         body: JSON.stringify({ draftRunId, text: text.trim() }),
       })
       draftRunId = res.draftRunId
+      draftTaskText = ''
+      draftTaskFor = ''
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
@@ -961,6 +992,7 @@
    *   这里只做"读完之后界面怎么摆"：目标、slug、步骤、素材、最后结果。
    */
   async function loadDraftOutput(): Promise<void> {
+    void loadDraftTask()
     try {
       const res = await editor.open(draftRunId)
       // 目标以**落库的目标**为准（恢复的草稿按它还原）；界面上的 targetKind 跟着走
@@ -1273,6 +1305,8 @@
       })
       const previous = draftRunId
       draftRunId = res.draftRunId
+      draftTaskText = ''
+      draftTaskFor = ''
       draftStatus = null
       draftFailedReason = ''
       handledTerminal = false
@@ -1758,7 +1792,11 @@
         这一条只说"新建一份技能"——那是实话，不编。
       -->
       <div class="crystal-msg" data-msg-role="user" data-crystal-request>
-        <ChatBubble role="user" who={$t('crystallize.speakerYou')} text={requestLine} />
+        <ChatBubble
+          role="user"
+          who={`${$t('crystallize.speakerYou')} · ${requestLabel}`}
+          html={renderMarkdown(draftTaskText !== '' ? draftTaskText : requestLine)}
+        />
         <!--
           ★ 分批第 196 批：这里原来还有一行「材料 10 项（轨迹 5 · 给定 5）」（`materialCountLine`）。
           使用者："中栏正文区有很多冗余信息，不如「材料 10 项（轨迹 5）」"——它确实只是把

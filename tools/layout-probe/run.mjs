@@ -3229,6 +3229,15 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.requestTurnIsTask',
+    label:
+      '★★★ 第一条显示的是**这一轮交给它的任务原文**（`GET /api/crystallize/request` 从 run 日志取的 ③ 任务块）' +
+      '——不是「新建一份技能」那句标签（使用者："是否可以把它完整的任务输入写出来"）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '沉淀',
     key: 'crystal.requestTurnRole',
     label: '★★★ 那一轮是**人说的话**（`data-turn-role="user"`，靠右的气泡——与聊天页同一个组件）',
     ok: (v) => v === 'user',
@@ -5857,10 +5866,29 @@ try {
           at: now - 27_500,
         })
 
+        /**
+         * ★ 分批第 212 批：**这一轮交给它的任务原文**（第一句话的 ③ 任务块）。
+         *
+         * 中栏时间线第一条现在显示的是它（`GET /api/crystallize/request` 从 run 日志里取），
+         * 不是「新建一份技能」那一句标签。夹具必须有这一段，否则探针量到的永远是兜底那句。
+         * ⚠️ seq 要排在"最后结果"**前面**：`loadDraftFinalText` 取的是最后一条 text。
+         */
+        await store.appendRunMessage(crystalFixture.draftRunId, {
+          seq: 1,
+          type: 'text',
+          tool: null,
+          content:
+            '===== ③ 任务 =====\n\n' +
+            '探针夹具：交给它的任务原文（素材在 `material/`，产出写到 `skill/`，照装着的那份技能写）。',
+          input: null,
+          output: null,
+          outputTruncated: false,
+          at: now - 27_900,
+        })
         // ★ 给**第一条草稿**一段文字产出：审阅态那块默认要显示的就是它（"最后结果"）。
         //   没有这条消息，量到的只会是"这次起草没有留下文字产出"那个空态。
         await store.appendRunMessage(crystalFixture.draftRunId, {
-          seq: 1,
+          seq: 2,
           type: 'text',
           tool: null,
           content: '探针夹具的最后结果：我把这段做法写成了 skill，产出在 skill/ 目录里。',

@@ -1842,6 +1842,38 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
     )
   })
 
+  /**
+   * ★ 分批第 212 批（使用者："第一句话显示「新建一份技能」，是否可以把它完整的『任务』输入
+   *   写出来"）：中栏第一条要显示**这一轮真的投递出去的那段 ③**。
+   *
+   * 判据两半，缺一不可：
+   *   ① 接口给的是 **run 日志里那段原文**（`===== ③ 任务 =====` 之后的内容），不是现拼的——
+   *      现拼会让历史草稿显示成"按今天文案生成"的字；
+   *   ② 那段里确实有平台硬事实（`skill/SKILL.md`、装着的那份技能），也就是"完整的任务输入"。
+   */
+  test('★★ 第一条要显示的任务原文 = run 日志里那段 ③（原样，不重新拼）', async () => {
+    const draftRunId = await draftAndWait({
+      runId: await runReviewed('审过的流程（任务原文）'),
+      target: { kind: 'new', purpose: '任务原文' },
+    })
+    const { task } = await getJsonFile<{ task: string | null }>(
+      `/api/crystallize/request?draftRunId=${draftRunId}`,
+    )
+    assert.ok(task !== null && task.trim() !== '', '要读得到这一轮的任务原文')
+    // 与日志里那一块**逐字一致**（接口不许重新组装）
+    const messages = await getJsonFile<{
+      messages: Array<{ type: string; content: string | null }>
+    }>(`/api/runs/${draftRunId}/messages`)
+    const note = messages.messages
+      .map((m) => m.content ?? '')
+      .find((c) => c.startsWith('===== ③ 任务 ====='))
+    assert.ok(note !== undefined, '日志里要有 ③ 那一块')
+    assert.equal(task, note!.slice('===== ③ 任务 ====='.length).trim(), '逐字取自日志')
+    // "完整的任务输入"里要有平台硬事实
+    assert.match(task!, /skill\/SKILL\.md/, '产出契约在里面')
+    assert.match(task!, /distilly/, '点名装着的那份技能')
+  })
+
   test('★★ 三块就是聊天那一份：① 没有任务头，③ 点名 distilly 且不再内联写作规范', async () => {
     const draftRunId = await draftAndWait({
       runId: await runReviewed('审过的流程（三块）'),

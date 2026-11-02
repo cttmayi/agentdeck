@@ -5371,6 +5371,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const requestTurn = d().querySelector('[data-crystal-request] [data-chat-turn]')
           facts['crystal.requestTurnText'] = text(requestTurn?.querySelector('.bubble'))
           facts['crystal.requestTurnRole'] = requestTurn?.getAttribute('data-turn-role') ?? null
+          // ★ 分批第 212 批：第一条是**交给它的任务原文**（run 日志里的 ③），不是那句标签
+          facts['crystal.requestTurnIsTask'] =
+            (facts['crystal.requestTurnText'] ?? '').includes('交给它的任务原文')
           facts['crystal.draftBubbleShape'] = draftSection
             ? {
                 chatTurn: draftSection.matches('[data-chat-turn]'),
