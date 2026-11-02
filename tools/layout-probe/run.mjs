@@ -3831,6 +3831,23 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.newNoError',
+    /**
+     * ★ 分批第 227 批（真 bug 的回归守卫）：起点屏（`#/crystallize/new`）上**一条错误都不该有**。
+     *
+     * 使用者报的：「新建沉淀」一进去就是「读取沉淀信息失败：run 不存在（new）」。原因是两个
+     * `$:` 模式判断写在使用它们的 `$:` 块后面（legacy `$:` 按源码顺序跑）⇒ 首次渲染时护栏失效，
+     * 哨兵值 `new` 被当成真 run 去查 targets。判据量**屏幕上那句话**，不读组件内部状态——
+     * 这个 bug 之所以活了这么久，正是因为那句话以前根本没地方显示。
+     */
+    label:
+      '★★★ 起点屏上没有任何错误条（「读取沉淀信息失败：run 不存在（new）」那条真 bug 的回归守卫：' +
+      '哨兵值 `new`/`blank` 绝不能被当成真 run 去查接口）',
+    ok: (v) => v === true,
+    show: (v, f) => `${String(v)}　错误条「${String(f['crystal.newErrorText'] ?? '')}」`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.blankLanded',
     label:
       '★★★ 点它真的落到空白起的目标屏（`#/crystallize/blank` 且画出 `.intake`）——' +

@@ -6312,6 +6312,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             click(blankOpenBtn)
             await until(() => !!d().querySelector('[data-crystallize-step="new"] .intake-choice'), 120)
             facts['crystal.blankRoute'] = f.contentWindow.location.hash
+            /**
+             * ★ 分批第 227 批：起点屏上**不能有任何错误条**。
+             *
+             * 这一条钉的是一个真 bug（使用者报的：「新建沉淀」一进去就提示
+             * 「读取沉淀信息失败：run 不存在（new）」）：`blankMode`/`newMode` 两个 `$:` 判断
+             * 写得比读它们的那个 `$:` 块晚，legacy `$:` 按源码顺序跑 ⇒ 首次渲染那一趟护栏失效，
+             * 拿哨兵值 `new` 去查 `/api/crystallize/targets`，404 反过来盖在屏幕上。
+             *
+             * ⚠️ 要**等一拍**再量：那条 404 是异步回来的，`.intake-choice` 出现时它可能还在路上。
+             *   节拍用 `untilNet` 的真往返，不用 `wait()`（虚拟时钟可能被挂住的流转冻住）。
+             */
+            await untilNet(() => false, 4)
+            facts['crystal.newErrorText'] = text(d().querySelector('[data-target-error]'))
+            facts['crystal.newNoError'] = (facts['crystal.newErrorText'] ?? '').trim() === ''
             const blankRowBtn = [...d().querySelectorAll('[data-crystallize-step="new"] .intake-choice')].find(
               (b) => text(b).includes('从空白或材料起'),
             )

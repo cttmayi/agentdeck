@@ -83,6 +83,33 @@
 
   /** 源 run（对话轮次或任务执行 run）的 id。 */
   export let runId = ''
+  /**
+   * ★ 分批第 133 批（「从空白/材料起」）：「起点」是空白起时 `runId` prop 是哨兵值 `blank`，
+   * 这一批把"无来源 run 的草稿"接到界面上（daemon 那一半已在第 133 批里）。
+   *
+   * 为什么哨兵值而不是新开一个路由：`#/crystallize/<id>` 的 id 本来就可以是任何串（深链用），
+   * `blank` 不是合法 ULID ⇒ 与真 run id 不可能撞。新增一条路由会让"返回/刷新/分享"多一处要维护。
+   */
+  const BLANK_RUN_ID = 'blank'
+  /**
+   * ★ 分批第 141 批（U4b，§12.7）：**「新建沉淀」不再弹 Modal** ⇒ 用一个哨兵路由
+   * `#/crystallize/new` 承接"还没选来源"的那一屏：页面里一条消息问「这一次要沉淀什么？」，
+   * 选项 = 最近的会话/任务 + 「从空白或材料起」。选中来源就跳到那一条来源的页面
+   * （`#/crystallize/<sourceRunId>`），从空白起就跳 `#/crystallize/blank`。
+   */
+  const NEW_RUN_ID = 'new'
+  /**
+   * ⚠️ **这两个判断必须留在最前面**（分批第 227 批修的一个真 bug）：它们原来写在第 744/752 行，
+   * 而下面那个"换了 runId 就整页重来"的 `$:` 块在第 599 行——legacy `$:` **按源码顺序跑**，
+   * 于是首次渲染那一趟，那个块读到的 `blankMode`/`newMode` 还是 `undefined`，护栏失效，
+   * 拿哨兵值 `new` 去查 `/api/crystallize/targets` ⇒ 404，界面上就是
+   * 「读取沉淀信息失败：run 不存在（new）」。
+   *
+   * 为什么以前没暴露：那条 `error` 从前没有任何地方渲染（谁也没看见）；第 225 批把目标步的
+   * 错误显示出来之后，这条潜了很久的竞态当场现形。
+   */
+  $: blankMode = runId === BLANK_RUN_ID
+  $: newMode = runId === NEW_RUN_ID
   /** 来源副题（对话标题 / 任务标题）。 */
   export let sourceLabel = ''
   /** 栏头返回按钮文案。 */
@@ -661,6 +688,11 @@
   }
 
   async function pollOnce(): Promise<void> {
+    // ★ 分批第 227 批：起点屏 / 空白起**没有来源 run**，这条按 runId 查的接口只会 404。
+    //   以前它每 5 秒静默 404 一次（被下面的 catch 吃掉，所以谁也没发现）；第 225 批把错误
+    //   显示出来之后，同一处缺口的另一个入口就现形了——这里一并堵上，别让轮询去问一个
+    //   本来就不存在的 run。
+    if (blankMode || newMode) return
     try {
       const t2 = await api<CrystallizeTargets>(
         `/api/crystallize/targets?runId=${encodeURIComponent(runId)}`,
@@ -733,23 +765,8 @@
   }
 
   /** 向导答完 → 落回原有目标状态 → 走原提交路径（`startDraft`）。 */
-  /**
-   * ★ 分批第 133 批（「从空白/材料起」）：「起点」是空白起时 `runId` prop 是哨兵值 `blank`，
-   * 这一批把"无来源 run 的草稿"接到界面上（daemon 那一半已在第 133 批里）。
-   *
-   * 为什么哨兵值而不是新开一个路由：`#/crystallize/<id>` 的 id 本来就可以是任何串（深链用），
-   * `blank` 不是合法 ULID ⇒ 与真 run id 不可能撞。新增一条路由会让"返回/刷新/分享"多一处要维护。
-   */
-  const BLANK_RUN_ID = 'blank'
-  $: blankMode = runId === BLANK_RUN_ID
-  /**
-   * ★ 分批第 141 批（U4b，§12.7）：**「新建沉淀」不再弹 Modal** ⇒ 用一个哨兵路由
-   * `#/crystallize/new` 承接"还没选来源"的那一屏：页面里一条消息问「这一次要沉淀什么？」，
-   * 选项 = 最近的会话/任务 + 「从空白或材料起」。选中来源就跳到那一条来源的页面
-   * （`#/crystallize/<sourceRunId>`），从空白起就跳 `#/crystallize/blank`。
-   */
-  const NEW_RUN_ID = 'new'
-  $: newMode = runId === NEW_RUN_ID
+  // ★ 哨兵值 `blank` / `new` 与两个模式判断在上面（`runId` 声明之后）——它们必须先于任何
+  //   读它们的 `$:` 块求值，理由写在那儿。
   /** 起点屏的来源清单（`GET /api/crystallize/sources`）。 */
   let sourceOptions: Array<{ kind: 'conversation' | 'task'; label: string; runId: string }> = []
   let sourcesLoading = false
@@ -757,6 +774,8 @@
   /** 读"可以从哪条会话/任务沉淀"（只在起点屏用）。 */
   async function loadSources(): Promise<void> {
     if (!newMode) return
+    // 挂载时 `loadTargets` 会被调两次（那个 `$:` 块一次、`onMount` 一次），别让清单也读两遍
+    if (sourcesLoading) return
     sourcesLoading = true
     try {
       const res = await api<{
