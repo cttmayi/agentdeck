@@ -3433,15 +3433,8 @@ async function injectedSkillsOf(
       }
     }
     const revisePrompt = buildDraftPrompt({
-      scope:
-        sourceRun === null
-          ? 'blank'
-          : sourceRun.subject.type === 'conversation'
-            ? 'conversation'
-            : 'task',
       materialDir: 'material',
       outputDir: 'skill',
-      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
       skillSlugs: reviseSkills.map((s) => s.slug),
       // 按**事实**给（分批第 211 批）：上一轮没交 SKILL.md ⇒ 不是"在上一版上改"。
       revised: hasOutput,
@@ -3605,12 +3598,6 @@ async function injectedSkillsOf(
         body: { error: `素材准备失败：${err instanceof Error ? err.message : String(err)}`, code: 'material_write_failed' },
       }
     }
-    const scope =
-      sourceRun === null
-        ? 'blank'
-        : sourceRun.subject.type === 'conversation'
-          ? 'conversation'
-          : 'task'
     // 技能要**先**解析（prompt 里要点名实际注入的那几份，分批第 210 批）；
     // 解析不到就不该起这一轮——没有技能的那一轮只会凭印象写，而它看起来像正常产出。
     const skills = await injectedSkillsOf(workspaceId, taskDir)
@@ -3625,10 +3612,8 @@ async function injectedSkillsOf(
       }
     }
     const prompt = buildDraftPrompt({
-      scope,
       materialDir: 'material',
       outputDir: 'skill',
-      target: previous.crystallizeTarget?.kind === 'update' ? 'update' : 'new',
       skillSlugs: skills.map((s) => s.slug),
       continuing: true,
     })
@@ -6418,11 +6403,9 @@ async function injectedSkillsOf(
        * 点的是这一轮真的会注入到工作目录里的那几份，不是写死的 slug。
        */
       const draftPrompt = buildDraftPrompt({
-        scope: targets === null ? 'blank' : targets.scope,
         materialDir: 'material',
         outputDir: 'skill',
-        target: updateSnapshot === null ? 'new' : 'update',
-        skillSlugs: draftSkills.map((sk) => sk.slug),
+            skillSlugs: draftSkills.map((sk) => sk.slug),
       })
       /**
        * 记录（**不是输入**）：这一版照着哪条技能写的。下一轮仍然按**挂载**取，

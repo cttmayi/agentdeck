@@ -1935,7 +1935,10 @@ describe('§10.18 起草用的是装着 distilly 的那个智能体（分批第 
     assert.ok(note !== undefined, '日志里要有 ③ 那一块')
     assert.equal(task, note!.slice('===== ③ 任务 ====='.length).trim(), '逐字取自日志')
     // "完整的任务输入"里要有平台硬事实
-    assert.match(task!, /skill\/SKILL\.md/, '产出契约在里面')
+    // ★ 分批第 217/218 批：落点可以在一层子目录里（平台动态认），所以这里不再断言
+    //   `skill/SKILL.md` 这个绝对路径，改钉它真正要守的两件事。
+    assert.match(task!, /`SKILL\.md` 的 frontmatter/, '产出契约（frontmatter 要 name+description）')
+    assert.match(task!, /路径不许出/, '路径边界')
     assert.match(task!, /distilly/, '点名装着的那份技能')
   })
 

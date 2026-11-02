@@ -602,17 +602,18 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
   })
 })
 
-describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prompt 只留平台硬事实）', () => {
+describe('buildDraftPrompt：起草指令（210/211/218 批：只说索引页没说的、且机器会拒的）', () => {
   test('指针式：素材目录 + 点名注入的技能 + 平台硬事实，没有写作规范正文', () => {
     const prompt = buildDraftPrompt({
-      scope: 'conversation',
       materialDir: 'material',
       outputDir: 'skill',
-      target: 'new',
       skillSlugs: DRAFTER_SKILLS,
     })
     assert.match(prompt, /material\/00-README\.md/, '先读索引')
-    assert.match(prompt, /skill\/SKILL\.md/, '产出在哪 + 主产出的名字')
+    assert.match(prompt, /产出写到 `skill\/`/, '产出写到哪')
+    // ★ 分批第 217 批起**落点可以在一层子目录里**（平台动态认 `SKILL.md` 在哪），所以 prompt
+    //   只点名「`SKILL.md` 的 frontmatter」而不再强写 `skill/SKILL.md` 这个绝对落点。
+    assert.match(prompt, /`SKILL\.md` 的 frontmatter/, '主产出的名字 + 契约')
     // ★ 分批第 210 批（使用者："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
     //   写法**只在技能里**。这条钉两件事：点名的是**实际注入的那份**（slug 来自挂载，
     //   不是写死的常量），并且 prompt 里**不再有**第二份写法权威。
@@ -625,7 +626,9 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
     //   平台要认的状态是"这一轮有没有交 SKILL.md"，而问题与拒绝的理由都在它的回复里。
     assert.doesNotMatch(prompt, /QUESTIONS\.md|REFUSED\.md|answers\.md/, '不再有协议文件名')
     assert.match(prompt, /交不出东西就用说的/, '问与拒绝都用说的（不需要协议文件）')
-    assert.match(prompt, /作用描述/, '新建时说明作用描述的用法')
+    // ★ 分批第 218 批：**索引页说了的就不在 prompt 里再说**——「作用描述 ⇒ description」
+    //   在 `00-README.md` 的目标那一行上；prompt 里再写一遍就是同一件事两个出处。
+    assert.doesNotMatch(prompt, /作用描述/, '作用描述由索引页说（prompt 不重复）')
     assert.doesNotMatch(prompt, /【素材】/, '素材不再内联')
     // 篇幅也是判据：这一段每轮都要被读，内联规范那版是 2785 字。
     assert.ok(prompt.length < 1200, `prompt 要短（现在 ${String(prompt.length)} 字符）`)
@@ -642,10 +645,8 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
    */
   test('★★ 技能只借写法：落点与格式以本任务为准（distilly 有自己的 ./skills 与脚本）', () => {
     const prompt = buildDraftPrompt({
-      scope: 'conversation',
       materialDir: 'material',
       outputDir: 'skill',
-      target: 'new',
       skillSlugs: DRAFTER_SKILLS,
     })
     assert.match(prompt, /落点与格式以本任务为准/, '优先级要写出来')
@@ -654,25 +655,27 @@ describe('buildDraftPrompt：起草指令（210/211 批：写法归技能，prom
     assert.match(prompt, /提问流程与脚本都不适用/, '它那套 intake / skill_writer 也不适用')
   })
 
-  test('更新：指向 existing-skill/，不再塞全文', () => {
+  /**
+   * ★ 分批第 218 批（使用者："第一句话任务可以再精简吗"）：**「要更新的技能全文在
+   * `existing-skill/`，请修订不要重写」这句从 prompt 里删了**——`buildIndex()` 的
+   * 目标那一行本来就写着它（"它的当前全文在 `existing-skill/`，请修订而不是重写……"）。
+   * 这条钉两件事：prompt 不再重复它；索引页接手说（下一条 `writeMaterial` 的用例里
+   * 有 `existing-skill/` 的断言）。
+   */
+  test('更新：prompt 不再重复"existing-skill/ 要修订"（索引页说）', () => {
     const prompt = buildDraftPrompt({
-      scope: 'task',
       materialDir: 'material',
       outputDir: 'skill',
-      target: 'update',
       skillSlugs: DRAFTER_SKILLS,
     })
-    assert.match(prompt, /material\/existing-skill\//, '更新基线在素材里')
-    assert.match(prompt, /修订/, '要求修订而不是重写')
+    assert.doesNotMatch(prompt, /existing-skill/, '更新基线由索引页说（prompt 不重复）')
     assert.doesNotMatch(prompt, /作用描述/, '更新时没有作用描述那段')
   })
 
   test('没解析到技能时那句退化成"你挂着的那份技能"（不编一个 slug）', () => {
     const prompt = buildDraftPrompt({
-      scope: 'blank',
       materialDir: 'material',
       outputDir: 'skill',
-      target: 'new',
       skillSlugs: [],
     })
     // ★ 分批第 216 批：写法那一句改成"只借写法"，并加了一条**优先级**——见下面那条用例。
