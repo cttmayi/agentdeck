@@ -116,22 +116,16 @@ export const chatText = {
 
   'chat.placeholder': { zh: '说点什么…（Enter 发送，Shift+Enter 换行）', en: 'Say something… (Enter to send, Shift+Enter for a new line)' },
   'chat.send': { zh: '发送', en: 'Send' },
-  // ⚠️ 与「新建任务」的「要做什么」**正好相反**（那边 Enter 换行），所以两处
-  //    都写在输入框下面，靠位置猜是不负责任的。
-  'chat.enterHint': { zh: 'Enter 发送 · Shift+Enter 换行', en: 'Enter to send · Shift+Enter for a new line' },
+  // ★ 分批第 232 批：`chat.enterHint`（输入框下面那行"Enter 发送 · Shift+Enter 换行"）
+  //   删了——使用者要求那一行不要（太占高度），而这句约定本来就在 `chat.placeholder` 里。
   'chat.sending': { zh: '发送中…', en: 'Sending…' },
   'chat.stop': { zh: '停止', en: 'Stop' },
   'chat.you': { zh: '你', en: 'You' },
   'chat.toolsUsed': { zh: '用了 {count} 个工具', en: '{count} tool call(s)' },
   'chat.running': { zh: '正在跑', en: 'Running' },
-  /**
-   * ★ 分批第 231 批（使用者定）：跑着的时候输入框**还能打字**，只是发不出去。
-   *   这行字必须说出"可以先写"，否则人会以为自己在填一个稍后会被清掉的框。
-   */
-  'chat.runningHint': {
-    zh: '正在跑：可以先写下来，这一轮跑完才能发',
-    en: 'Running: you can type now — it can be sent once this turn finishes',
-  },
+  // ★ 分批第 232 批：`chat.runningHint`（栏脚那行"正在跑：可以先写下来…"）也删了——
+  //   使用者："也不需要下面的『正在跑』这样的信息"。这一轮的状态在消息流里那一行
+  //   （带「停止」按钮）已经有了；而"能不能发"由发送按钮的禁用态与它的 title 说明。
   'chat.sendWhileRunning': {
     zh: '这一轮还在跑，跑完才能发（写好的字会留着）',
     en: 'This turn is still running; you can send once it finishes (what you typed is kept)',

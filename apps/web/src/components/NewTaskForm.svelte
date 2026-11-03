@@ -486,7 +486,7 @@
   <!-- 高级：工作目录。默认**不需要填**（D27）——收起来，不该出现在必经之路上。 -->
   <details class="form-advanced">
     <summary class="hint" style="cursor:pointer">{$t('newtask.advancedSummary')}</summary>
-    <label style="margin-top:var(--sp-3)">
+    <label for="newtask-workdir" style="margin-top:var(--sp-3)">
       {$t('newtask.workDirLabel')}
     </label>
     <!--
@@ -495,10 +495,12 @@
       "接进你的仓库"要求一条绝对路径。手打仍然是退路（按钮旁边的输入框没被动过）。
     -->
     <div class="workdir-row">
+      <!-- `id` + 上面 label 的 `for`：分批第 229 批把它拆出 label 之后 a11y 报了一条
+           "label 没关联控件"。有 `for` 之后 `aria-label` 就不需要了（重复命名反而更乱）。 -->
       <input
+        id="newtask-workdir"
         bind:value={workDir}
         placeholder={$t('newtask.workDirPlaceholder')}
-        aria-label={$t('newtask.workDirLabel')}
         autocomplete="off"
         spellcheck="false"
       />

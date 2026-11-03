@@ -832,7 +832,6 @@
         bind:value={input}
         placeholder={$t('chat.placeholder')}
         disabled={runningTurn !== null}
-        hint={runningTurn !== null ? $t('chat.runningHint') : $t('chat.enterHint')}
         sendLabel={$t('chat.send')}
         sendDisabledTitle={runningTurn !== null ? $t('chat.sendWhileRunning') : $t('chat.sendNotReady')}
         attachLabel={$t('common.attachFile')}

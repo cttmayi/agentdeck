@@ -386,11 +386,8 @@ export const crystallizeText = {
   },
 
   'crystallize.chatSend': { zh: '发送', en: 'Send' },
-  /**
-   * ★ 分批第 197 批：栏脚换成与聊天页**同一个控件**（`ChatComposer`），所以它也要有
-   * "Enter 发送"那行提示与"不能发"的悬停说明——两页一致，别一处有一处没有。
-   */
-  'crystallize.chatHint': { zh: 'Enter 发送 · Shift+Enter 换行', en: 'Enter to send · Shift+Enter for a new line' },
+  // ★ 分批第 232 批：`crystallize.chatHint` 删了（与 `chat.enterHint` 同一个理由：
+  //   输入条下面不再有那行小字）。"不能发"的悬停说明仍在（`chatSendNotReady`）。
   'crystallize.chatSendNotReady': { zh: '先写一句话', en: 'Type something first' },
 
   // ── 错误 ──

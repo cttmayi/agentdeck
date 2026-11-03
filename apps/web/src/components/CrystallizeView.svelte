@@ -1944,7 +1944,6 @@
       <ChatComposer
         bind:value={composerText}
         placeholder={$t('crystallize.chatPlaceholder')}
-        hint={$t('crystallize.chatHint')}
         sendLabel={$t('crystallize.chatSend')}
         sendDisabledTitle={$t('crystallize.chatSendNotReady')}
         attachLabel={$t('common.attachFile')}

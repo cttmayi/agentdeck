@@ -12,6 +12,20 @@
    *   · 左下角那行提示**由调用方给**（聊天页说"Enter 发送"，沉淀页说"这句话会被当成什么"），
    *     组件本身不认识任何业务文案。
    *
+   * ★ 分批第 232 批（使用者定）：**输入框与发送在同一行，下面不再有那行小字**。
+   *
+   *   原话："输入框和发送放同一行吧，太占高度了。也不需要下面的『正在跑』这样的信息"。
+   *
+   *   量过的高度：原来三块竖着排——两行文本框 + 一行提示（hint）+ 一行按钮，占掉栏脚
+   *   四五行的位置；而右边那行按钮只有一个回形针和一个「发送」，左边空着。合并之后
+   *   只剩"文本框那一块"，按钮贴在它的右下角。
+   *
+   *   那行提示（"Enter 发送 · Shift+Enter 换行" / "正在跑…"）一并去掉，理由分两半：
+   *     · 键盘约定**已经写在输入框的 placeholder 里**（`chat.placeholder` 就带着它），
+   *       再常驻一行等于同一句话说两遍；
+   *     · "正在跑"属于**这一轮的状态**，它已经在消息流里那一行（带「停止」）说了。
+   *   所以 `hint` 这个 prop 也删掉了——留一个没人传的参数只会让下一个人以为它还在生效。
+   *
    * ★ 分批第 231 批（使用者定）：`disabled` **只挡住"发"，不挡"打字"**。
    *   原话："在执行过程中不能输入文字。我期待可以输入文字，只是不能发送即可。"
    *
@@ -32,8 +46,6 @@
      * 输入框照旧可以打字、那几行字会留着等这一轮结束。
      */
     disabled = false,
-    /** 左下角那行小字（空串 = 不画）。 */
-    hint = '',
     /** 发送按钮的字（两页各自的词条）。 */
     sendLabel = '',
     /** 发送按钮不可用时给的悬停说明。 */
@@ -60,7 +72,6 @@
     value?: string
     placeholder?: string
     disabled?: boolean
-    hint?: string
     sendLabel?: string
     sendDisabledTitle?: string
     extra?: Snippet
@@ -95,19 +106,17 @@
 </script>
 
 <div class="pane-foot chat-composer" data-composer>
-  <!-- ⚠️ 这里**不传 `disabled`**（分批第 231 批）：跑着的时候也让人把想说的写下来，
-       只是发不出去。见上面 `disabled` 那段。 -->
-  <textarea
-    class="composer-input"
-    bind:value
-    rows="2"
-    {placeholder}
-    onkeydown={onKeydown}
-  ></textarea>
   <div class="composer-row">
-    <span class="faint small">{hint}</span>
-    <!-- 右侧那一组：额外内容 + 回形针 + 发送。三者**挨在一起**（`space-between` 只分左右两块，
-         中间的兄弟会被摊开——那是第一版的毛病：回形针孤零零飘在行的中间）。 -->
+    <!-- ⚠️ 这里**不传 `disabled`**（分批第 231 批）：跑着的时候也让人把想说的写下来，
+         只是发不出去。见上面 `disabled` 那段。 -->
+    <textarea
+      class="composer-input"
+      bind:value
+      rows="2"
+      {placeholder}
+      onkeydown={onKeydown}
+    ></textarea>
+    <!-- 右侧那一组：额外内容 + 回形针 + 发送，贴在输入框的右下角 -->
     <span class="composer-actions">
       {#if extra}{@render extra()}{/if}
       {#if onupload}
@@ -141,31 +150,35 @@
 </div>
 
 <style>
-  .chat-composer {
+  /**
+   * 一行：输入框吃掉剩下的宽度，动作组钉在右下角（`align-items: flex-end`——按钮跟着
+   * 文字块的底边走，多行时不会被顶到中间去）。
+   */
+  .composer-row {
     display: flex;
-    flex-direction: column;
+    align-items: flex-end;
     gap: var(--sp-2);
   }
 
   .composer-input {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     font: inherit;
     font-size: var(--fs-base);
-    resize: vertical;
-    max-height: calc(15lh + 1.6rem);
-  }
-
-  .composer-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-2);
+    /* 高度随内容长（Chrome 支持 `field-sizing`）；不支持的浏览器就是固定的两行 + 内部滚动，
+       两条路都是"能看见自己写了什么"，而且都很矮。 */
+    field-sizing: content;
+    resize: none;
+    max-height: calc(8lh);
+    overflow-y: auto;
   }
 
   .composer-actions {
     display: inline-flex;
     align-items: center;
     gap: var(--sp-2);
+    /* 不让动作组被输入框挤扁（中文的 min-content 是一个字，见 app.css 里那条规矩） */
+    flex: 0 0 auto;
   }
 
   /* 回形针：紧挨着「发送」（都在右边那组），提示文字仍占左边 */

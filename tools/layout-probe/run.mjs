@@ -1225,7 +1225,7 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `能打字 ${String(v.typeable)}　字留着 ${String(v.kept)}　发不出去 ${String(v.sendBlocked)}　` +
-          `提示「${String(v.hint)}」`,
+          `发送钮 title「${String(v.hint)}」`,
   },
   {
     view: '聊天',
@@ -1328,7 +1328,12 @@ const CHECKS = [
   {
     view: '聊天',
     key: 'chat.enterHint',
-    label: '★ 页面上写明 Enter 发送 / Shift+Enter 换行（与「要做什么」**正好相反**）',
+    // ★ 分批第 232 批：这句话的宿主从"栏脚那行小字"换成**输入框的 placeholder**
+    //   （那一行按要求删了，而 Enter/Shift 的约定本来就在 placeholder 里）。判据要的
+    //   仍然是"页面上写明"，只是量点在框里。
+    label:
+      '★ 页面上写明 Enter 发送 / Shift+Enter 换行——分批第 232 批起这句话在**输入框的 placeholder** 里' +
+      '（栏脚那行小字已按要求删掉），与「要做什么」的 Enter 换行**正好相反**',
     ok: (v) => v === true,
   },
   // ⚠️ 这里原有 `chat.boundaryHint`（"页面上写明这里不动手"）：2026-09 那句话

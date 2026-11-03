@@ -6556,10 +6556,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         })
         // ★ 发送键那句话必须在页面上说明白：这里 Enter 发送，与「新建任务」的
         //   「要做什么」（Enter 换行）**正好相反**，靠猜是不负责任的。
+        //
+        // ★ 分批第 232 批：这条改量**输入框的 placeholder**。使用者要求栏脚不要再有
+        //   "Enter 发送 · Shift+Enter 换行"那一行小字（太占高度），而这句话本来就在
+        //   placeholder 里（`chat.placeholder`）。判据的要求没变——"页面上写明"，
+        //   只是它的宿主从"下面那行"换成了"框里的灰字"，所以仍然必须是**看得见的那份
+        //   文案**，而不是任意一处 DOM 里藏着的属性。
         facts['chat.enterHint'] = need('Enter 发送的说明', () => {
-          const foot = d().querySelector('.detail-pane .pane-foot')
-          if (!foot) return false
-          const t = text(foot)
+          const input = d().querySelector('.detail-pane [data-composer] .composer-input')
+          if (!input) return false
+          const t = input.getAttribute('placeholder') ?? ''
           return t.includes('Enter') && t.includes('Shift')
         })
         /**
@@ -7036,7 +7042,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               errors.push('聊天页找不到输入条（`.composer-input` / 发送按钮）')
               return null
             }
-            const hint = text(d().querySelector('.composer-row .faint'))
+            // ★ 分批第 232 批：栏脚下面那行提示删了，"为什么不能发"改由发送按钮的
+            //   `title` 说（悬停可见、不占高度）。所以这里量 title，不量文字。
+            const hint = send.getAttribute('title') ?? ''
             const typeable = area.disabled === false && area.readOnly === false
             const typed = '探针：这一句写在跑的时候'
             area.value = typed
