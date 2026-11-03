@@ -11,13 +11,26 @@
    *   · 发送按钮**按内容启用**（空串禁用），并在悬停时说明为什么不能发；
    *   · 左下角那行提示**由调用方给**（聊天页说"Enter 发送"，沉淀页说"这句话会被当成什么"），
    *     组件本身不认识任何业务文案。
+   *
+   * ★ 分批第 231 批（使用者定）：`disabled` **只挡住"发"，不挡"打字"**。
+   *   原话："在执行过程中不能输入文字。我期待可以输入文字，只是不能发送即可。"
+   *
+   *   这条改动是有道理的：一轮在跑的时候，人往往正想到要补一句——那时输入框锁死，
+   *   他只能先把话写在别处、等跑完再粘回来（或者干脆忘了）。而"不能发"本来就不需要
+   *   靠锁输入框来实现：发送按钮与 Enter 都看 `canSend`。
    */
   import type { Snippet } from 'svelte'
 
   let {
     value = $bindable(''),
     placeholder = '',
-    /** 输入框禁用（聊天在跑、沉底在等回答时都可能要禁）。 */
+    /**
+     * **不能发**（不是"不能打字"）。
+     *
+     * ★ 分批第 231 批：它原来同时禁掉了输入框，于是"一轮正在跑"的时候连想补一句话都
+     * 写不进去。现在它只管"发"：发送按钮禁用、Enter 不发（按下去当换行用），
+     * 输入框照旧可以打字、那几行字会留着等这一轮结束。
+     */
     disabled = false,
     /** 左下角那行小字（空串 = 不画）。 */
     hint = '',
@@ -71,18 +84,24 @@
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+    /**
+     * ★ 分批第 231 批：`disabled` 时**不拦 Enter**——这一栏此刻还能打字，Enter 就该
+     *   老老实实换行（拦掉它、又什么都不发，等于按一下没反应）。
+     */
+    if (disabled) return
     event.preventDefault()
     if (canSend) onsend(value.trim())
   }
 </script>
 
 <div class="pane-foot chat-composer" data-composer>
+  <!-- ⚠️ 这里**不传 `disabled`**（分批第 231 批）：跑着的时候也让人把想说的写下来，
+       只是发不出去。见上面 `disabled` 那段。 -->
   <textarea
     class="composer-input"
     bind:value
     rows="2"
     {placeholder}
-    {disabled}
     onkeydown={onKeydown}
   ></textarea>
   <div class="composer-row">

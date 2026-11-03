@@ -1203,6 +1203,32 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.composerWhileRunning',
+    /**
+     * ★ 分批第 231 批（使用者定，原话："在执行过程中，不能输入文字。我期待可以输入文字，
+     * 只是不能发送即可"）：一轮在跑时**输入框照旧能打字、字留得住，「发送」是禁用的**。
+     *
+     * 这条盯的是"锁错了东西"这件事：`disabled` 原来同时禁掉了输入框，于是人想补一句话
+     * 只能先写在别处。判据量三位一体（可打字 / 字留着 / 发不出去）——只量"能打字"
+     * 会漏掉"其实还能发"，只量"发不出去"会漏掉"框被锁死"。
+     */
+    label:
+      '★★★ 一轮在跑时输入框**仍然能打字、字留得住**，而「发送」是禁用的' +
+      '（使用者："可以输入文字，只是不能发送即可"）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.typeable === true &&
+      v.kept === true &&
+      v.sendBlocked === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `能打字 ${String(v.typeable)}　字留着 ${String(v.kept)}　发不出去 ${String(v.sendBlocked)}　` +
+          `提示「${String(v.hint)}」`,
+  },
+  {
+    view: '聊天',
     key: 'chat.pickerButtonLabels',
     /**
      * ★ 分批第 230 批（真 bug 的回归守卫，使用者报的）：按钮上的字**不许折行**。

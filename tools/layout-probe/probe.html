@@ -6992,6 +6992,74 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         })()
 
         /**
+         * ★ 分批第 231 批（使用者定）：**一轮在跑的时候，输入框仍然能打字，只是发不出去**。
+         *
+         * 使用者原话："在执行过程中，不能输入文字。我期待可以输入文字，只是不能发送即可。"
+         *
+         * 怎么造出"正在跑"：探针的边界是"基本不造 run"，所以这里**不去真起一条**——
+         * 把 `GET /api/conversations/<id>` 的返回里那几轮的 `status` 改成 `running`
+         * （runId 是真的、已完成的那一条），界面就会按"这一轮在跑"渲染。
+         *
+         * ⚠️ 必须用**真的** runId：假 id 会让 `RunLog` 开一条永远连不上的 SSE，
+         *    而探针的虚拟时钟会被开着的流冻住（见 `untilNet` 那段长注释）。真的那条
+         *    流会立刻走完并关闭，虚拟时间照常前进。
+         *
+         * 量三件事：输入框没被禁用 → 打进去的字留得住 → 发送按钮是禁用的。
+         */
+        facts['chat.composerWhileRunning'] = await (async () => {
+          const real = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            // 只改**对话详情**那一条（列表 `/api/conversations` 不带 id，不动它）
+            if (!/\/api\/conversations\/[^/?]+$/.test(String(url))) {
+              return real.call(f.contentWindow, input, init)
+            }
+            return real.call(f.contentWindow, input, init).then(async (res) => {
+              if (!res.ok) return res
+              const body = await res.json().catch(() => null)
+              if (!body || !Array.isArray(body.turns)) return res
+              body.turns = body.turns.map((turn) =>
+                turn.runId ? { ...turn, status: 'running' } : turn,
+              )
+              return new Response(JSON.stringify(body), {
+                status: res.status,
+                headers: { 'content-type': 'application/json' },
+              })
+            })
+          }
+          let out = null
+          try {
+            if (!(await chatOpenFixtureConversation())) return null
+            const area = d().querySelector('.detail-pane textarea.composer-input')
+            const send = d().querySelector('[data-composer-send]')
+            if (!area || !send) {
+              errors.push('聊天页找不到输入条（`.composer-input` / 发送按钮）')
+              return null
+            }
+            const hint = text(d().querySelector('.composer-row .faint'))
+            const typeable = area.disabled === false && area.readOnly === false
+            const typed = '探针：这一句写在跑的时候'
+            area.value = typed
+            area.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            await wait(200)
+            const kept = area.value === typed
+            const sendBlocked = send.disabled === true
+            if (!typeable) errors.push('一轮在跑时输入框被禁用了——写不了字')
+            if (!kept) errors.push('一轮在跑时打进去的字没留住')
+            if (!sendBlocked) errors.push('一轮在跑时「发送」居然是可点的')
+            out = { typeable, kept, sendBlocked, hint: hint.slice(0, 40) }
+            // 把输入框清空：这句话不该跟着流到后面的判据里
+            area.value = ''
+            area.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+          } finally {
+            f.contentWindow.fetch = real
+            // 回到真实数据（后面还有判据要看这一条对话）
+            await chatOpenFixtureConversation()
+          }
+          return out
+        })()
+
+        /**
          * ★ 分批第 203 批：**聊天页也能把文件拖进「工作目录的文件」**（与沉淀页同一个控件、
          * 同一份服务端实现），落点是 `uploads/`。同样验**字节**：读回来逐字等于上传内容。
          */

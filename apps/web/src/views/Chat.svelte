@@ -217,7 +217,9 @@
     activeConversation?.workDir ?? '',
     String(filesTick),
   ].join('\u0000')
-  $: canSend = input.trim() !== '' && !sending && runningTurn === null
+  // ⚠️ 分批第 231 批：这里原来有一个 `canSend`，**从来没有人用**——"能不能发"的判据
+  //    一直只在 `ChatComposer` 里（它自己算 `canSend`）。留着它等于第二处规则，
+  //    而它已经和组件里的那个漂了（少了"跑着不能发"）。死变量删掉。
   /** 相对时间的「现在」——每次响应式更新重算一遍（列表刷新时跟着走）。 */
   $: now = Date.now()
   $: actualWorkDir = detail?.workDir ?? null
@@ -294,6 +296,13 @@
   async function send(): Promise<void> {
     const text = input.trim()
     if (text === '' || sending) return
+    /**
+     * ★ 分批第 231 批：**一轮没跑完不发第二句**这道门禁放在这里，不只放在组件里。
+     *   组件那一层只挡住"点按钮 / 按 Enter"，而 `send()` 还有别的入口能到
+     *   （草稿态提交、脚本化调用、以及"刚跑完那一刻"的竞态）。写在一处、看得见。
+     *   注意：**输入框里的字不清**——那是人刚写下来的，跑完就能直接发出去。
+     */
+    if (runningTurn !== null) return
     errorText = ''
 
     if (drafting) {
@@ -823,9 +832,9 @@
         bind:value={input}
         placeholder={$t('chat.placeholder')}
         disabled={runningTurn !== null}
-        hint={runningTurn !== null ? $t('chat.running') : $t('chat.enterHint')}
+        hint={runningTurn !== null ? $t('chat.runningHint') : $t('chat.enterHint')}
         sendLabel={$t('chat.send')}
-        sendDisabledTitle={$t('chat.sendNotReady')}
+        sendDisabledTitle={runningTurn !== null ? $t('chat.sendWhileRunning') : $t('chat.sendNotReady')}
         attachLabel={$t('common.attachFile')}
         onupload={(files) => void uploadFiles(files)}
         onsend={() => void send()}

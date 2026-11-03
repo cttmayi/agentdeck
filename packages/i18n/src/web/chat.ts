@@ -124,6 +124,18 @@ export const chatText = {
   'chat.you': { zh: '你', en: 'You' },
   'chat.toolsUsed': { zh: '用了 {count} 个工具', en: '{count} tool call(s)' },
   'chat.running': { zh: '正在跑', en: 'Running' },
+  /**
+   * ★ 分批第 231 批（使用者定）：跑着的时候输入框**还能打字**，只是发不出去。
+   *   这行字必须说出"可以先写"，否则人会以为自己在填一个稍后会被清掉的框。
+   */
+  'chat.runningHint': {
+    zh: '正在跑：可以先写下来，这一轮跑完才能发',
+    en: 'Running: you can type now — it can be sent once this turn finishes',
+  },
+  'chat.sendWhileRunning': {
+    zh: '这一轮还在跑，跑完才能发（写好的字会留着）',
+    en: 'This turn is still running; you can send once it finishes (what you typed is kept)',
+  },
   'chat.noOutput': { zh: '这一轮没有文字产出。', en: 'This turn produced no text.' },
   'chat.turnFailed': { zh: '这一轮没跑起来', en: "This turn didn't start" },
   'chat.duration': { zh: '用时 {seconds} 秒', en: '{seconds}s' },
