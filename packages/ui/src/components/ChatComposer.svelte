@@ -151,12 +151,18 @@
 
 <style>
   /**
-   * 一行：输入框吃掉剩下的宽度，动作组钉在右下角（`align-items: flex-end`——按钮跟着
-   * 文字块的底边走，多行时不会被顶到中间去）。
+   * 一行：输入框吃掉剩下的宽度，**动作组与输入框同高**。
+   *
+   * ★ 分批第 233 批（使用者定）：原话"「发送」和「附件」按钮的高度也调整一下，要和输入框
+   *   一样高"。
+   *
+   * 为什么用 `stretch` 而不是给按钮写死一个高度：输入框的高度随内容长（`field-sizing`），
+   * 写死的数字一旦和它对不上，就变成"看起来差不多、其实差两像素"——而这类错位在深色界面里
+   * 非常显眼。`stretch` 让动作组直接跟着行高走，**两边永远是同一个数字**，换字号也不会漂。
    */
   .composer-row {
     display: flex;
-    align-items: flex-end;
+    align-items: stretch;
     gap: var(--sp-2);
   }
 
@@ -169,19 +175,29 @@
        两条路都是"能看见自己写了什么"，而且都很矮。 */
     field-sizing: content;
     resize: none;
-    max-height: calc(8lh);
+    /**
+     * ⚠️ 上限**必须留**：按钮跟着 `stretch` 走，输入框长到多高按钮就多高。留一个长消息
+     *    的口子（6 行）就够用了，再长让框自己滚——否则一段贴进来的长文会把「发送」顶成
+     *    一条竖杠。
+     */
+    max-height: calc(6lh);
     overflow-y: auto;
   }
 
   .composer-actions {
     display: inline-flex;
-    align-items: center;
+    align-items: stretch;
     gap: var(--sp-2);
     /* 不让动作组被输入框挤扁（中文的 min-content 是一个字，见 app.css 里那条规矩） */
     flex: 0 0 auto;
   }
 
-  /* 回形针：紧挨着「发送」（都在右边那组），提示文字仍占左边 */
+  /* 两颗按钮都撑满那一组的高度（组已经有行高了，`height: 100%` 才接得住） */
+  .composer-actions > button {
+    height: 100%;
+  }
+
+  /* 回形针：紧挨着「发送」（都在右边那组） */
   .attach {
     padding: 0 var(--sp-2);
     line-height: 1;

@@ -1327,6 +1327,29 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.composerControlHeights',
+    /**
+     * ★ 分批第 233 批（使用者定）：原话"「发送」和「附件」按钮的高度也调整一下，
+     *   要和输入框一样高"。
+     *
+     * 判据把三个高度摆在一起比（±2px）：输入框 / 「发送」/ 回形针。差 20px 在深色界面上
+     * 一眼就看得出来，而"看起来差不多"不是判据。
+     */
+    label:
+      '★★★ 输入框、「发送」、「📎」三者**同高**（±2px）——使用者："要和输入框一样高"',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      typeof v.input === 'number' &&
+      Math.abs(v.send - v.input) <= 2 &&
+      (v.attach === null || Math.abs(v.attach - v.input) <= 2),
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `输入框 ${v.input}px　发送 ${v.send}px　📎 ${String(v.attach)}px`,
+  },
+  {
+    view: '聊天',
     key: 'chat.enterHint',
     // ★ 分批第 232 批：这句话的宿主从"栏脚那行小字"换成**输入框的 placeholder**
     //   （那一行按要求删了，而 Enter/Shift 的约定本来就在 placeholder 里）。判据要的

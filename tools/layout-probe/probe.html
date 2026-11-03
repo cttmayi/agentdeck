@@ -6548,6 +6548,22 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         facts['chat.composerNotInList'] = need('输入框不在左栏里', () => {
           return d().querySelector('.list-pane textarea') === null
         })
+        /**
+         * ★ 分批第 233 批（使用者定）：原话"「发送」和「附件」按钮的高度也调整一下，
+         *   要和输入框一样高"。
+         *
+         * 量**三个数字对得上**：输入框高、发送钮高、回形针高（±2px 容忍边框/小数）。
+         * 只量"按钮在右边那组里"是量不出这件事的——两边差 20px 在深色界面上非常显眼，
+         * 而任何"看起来差不多"的判断都不是判据。
+         */
+        facts['chat.composerControlHeights'] = (() => {
+          const input = d().querySelector('.detail-pane [data-composer] .composer-input')
+          const send = d().querySelector('.detail-pane [data-composer-send]')
+          const attach = d().querySelector('.detail-pane [data-composer-attach]')
+          if (!input || !send) return null
+          const h = (el) => (el ? Math.round(el.getBoundingClientRect().height) : null)
+          return { input: h(input), send: h(send), attach: h(attach) }
+        })()
         // 没选执行者时不该让人白打一段字：要么有下拉、要么有一条"先去建一个"的提示
         facts['chat.agentPickerOrHint'] = need('执行者选择器或提示', () => {
           const sel = d().querySelector('.detail-pane select')
