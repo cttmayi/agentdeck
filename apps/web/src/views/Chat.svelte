@@ -368,6 +368,27 @@
    * 差别只有落点：这边是"这一轮干活的附件"（`uploads/`，agent 在自己的 cwd 里 `ls` 就到），
    * 沉淀那边是"起草者读的依据"（`material/appended/`，还要登记进素材索引）。
    */
+  /**
+   * ★ 分批第 234 批：「工作目录的文件」栏头那颗「打开」——把这一栏指向的目录交给
+   *   系统文件管理器（`POST /api/fs/reveal`；三个平台的差异在 daemon 的 `reveal.ts` 里）。
+   *
+   * ⚠️ 只在**已经知道真实路径**时才画这颗按钮（`actualWorkDir`）；草稿态还没有目录，
+   *   而"自动分配"那种情况 daemon 会在受理时把真路径写回来，届时按钮自己出现。
+   */
+  async function revealWorkDir(dir: string): Promise<void> {
+    if (dir === '') return
+    try {
+      await api('/api/fs/reveal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: dir }),
+      })
+    } catch (err) {
+      // 打不开就说清楚为什么（没有桌面环境 / 目录已经没了），不要静默
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function uploadFiles(files: File[]): Promise<void> {
     if (uploading || files.length === 0 || activeConversation === null) return
     uploading = true
@@ -785,7 +806,10 @@
           path={actualWorkDir ?? $t('chat.notRunYet')}
           bind:open={filesOpen}
           ondropfiles={(files) => void uploadFiles(files)}
-  dropHint={$t('common.dropFilesHint')}
+          dropHint={$t('common.dropFilesHint')}
+          onreveal={actualWorkDir ? () => void revealWorkDir(actualWorkDir) : undefined}
+          revealLabel={$t('dirs.reveal')}
+          revealTitle={$t('dirs.revealTitle')}
         >
           {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}

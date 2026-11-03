@@ -54,6 +54,17 @@
      * 给了 `ondropfiles` 再给这句话，标题行末尾就多一句极淡的提示（两页共用一句词条）。
      */
     dropHint = '',
+    /**
+     * ★ 分批第 234 批（使用者定）：「打开」——在**系统文件管理器**里打开这个目录。
+     *
+     * 为什么不是组件自己发请求：`@agentdeck/ui` 不认识 daemon 的接口（远端管理页也在用它），
+     * 所以这里只给一颗按钮，动作与文案都由挂载端给（与 `ondropfiles` / `actions` 同一口径）。
+     * 不给就**什么都不画**（聊天页草稿态还没有目录）。
+     */
+    onreveal,
+    /** 「打开」那颗按钮的字与悬停说明（空串 = 不画）。 */
+    revealLabel = '',
+    revealTitle = '',
   }: {
     title?: string
     count?: string
@@ -63,6 +74,9 @@
     children?: Snippet
     ondropfiles?: ((files: File[]) => void) | undefined
     dropHint?: string
+    onreveal?: (() => void) | undefined
+    revealLabel?: string
+    revealTitle?: string
   } = $props()
 
   /** 有文件悬在这一栏上（给一点反馈：这一块收文件）。 */
@@ -109,6 +123,16 @@
       <code class="foot-files-path mono" data-workdir-path title={path}>{path}</code>
     {/if}
     {#if actions}{@render actions()}{/if}
+    {#if onreveal && revealLabel !== ''}
+      <!-- 最右侧那颗：把这一栏指向的目录交给系统文件管理器（分批第 234 批） -->
+      <button
+        type="button"
+        class="ghost"
+        data-workdir-reveal
+        title={revealTitle}
+        onclick={onreveal}
+      >{revealLabel}</button>
+    {/if}
   </div>
   <!--
     ⚠️ 正文**一直挂着**（收起只是 `hidden`），不是 `{#if open}`。

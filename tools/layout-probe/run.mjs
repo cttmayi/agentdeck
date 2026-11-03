@@ -1327,6 +1327,33 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.workDirReveal',
+    /**
+     * ★ 分批第 234 批（使用者定）：「工作目录的文件」栏**最右侧**那颗「打开」，点了要
+     * `POST /api/fs/reveal`、且 body 里的路径就是栏头显示的那条。
+     *
+     * 三件事一起量：**在不在** / **是不是最右侧**（位置是需求的一部分）/ **点下去发的
+     * 是不是那条路径**（"按钮在、但接错了路径"是最像能用的一种坏掉）。
+     * 探针**把这次请求拦下来**：真发出去会在开发机弹文件管理器窗口。
+     */
+    label:
+      '★★★ 「工作目录的文件」栏最右侧有「打开」，点了发出 `POST /api/fs/reveal` 且路径与栏头一致' +
+      '（在系统文件管理器里打开这个目录）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.last === true &&
+      v.method === 'POST' &&
+      v.same === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　最右侧 ${String(v.last)}　${String(v.method)}　` +
+          `路径一致 ${String(v.same)}　「${String(v.shown)}」`,
+  },
+  {
+    view: '聊天',
     key: 'chat.composerControlHeights',
     /**
      * ★ 分批第 233 批（使用者定）：原话"「发送」和「附件」按钮的高度也调整一下，
@@ -3950,6 +3977,15 @@ const CHECKS = [
       v === null
         ? 'null'
         : `${String(v.bg)}　消息区 overflow-y=${String(v.streamOverflow)}`,
+  },
+  {
+    view: '沉淀',
+    key: 'crystal.revealPresent',
+    label:
+      '★★ 「材料」栏（沉淀页同一份 `FootFiles`）也有**最右侧那颗「打开」**——两页各挂一次组件，' +
+      '只挂一边是这类改动最典型的漏法',
+    ok: (v) => v === true,
+    show: (v) => String(v),
   },
   {
     view: '沉淀',

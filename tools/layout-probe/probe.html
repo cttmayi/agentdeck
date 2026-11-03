@@ -4765,6 +4765,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               streamOverflow: stream ? cs(stream).overflowY : 'absent',
             }
           })()
+          /**
+           * ★ 分批第 234 批（使用者定）：「打开」在这一页也要有——两页各挂一次 `FootFiles`，
+           * 只挂一边是这类改动最典型的漏法（聊天页那边量的是"点了发什么"，这里只量在不在：
+           * 接口与按钮是同一个组件同一个实现，重复点一次没有新信息）。
+           */
+          facts['crystal.revealPresent'] = !!d().querySelector(
+            '[data-foot-files] .foot-files-head [data-workdir-reveal]',
+          )
           facts['crystal.materialLineMatchesPane'] = (() => {
             const head = d().querySelector('[data-foot-files] .foot-files-head')?.textContent ?? ''
             const paneCount = d().querySelectorAll('[data-foot-files] .wd > li').length
@@ -7081,6 +7089,78 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             await chatOpenFixtureConversation()
           }
           return out
+        })()
+
+        /**
+         * ★ 分批第 234 批（使用者定）：「工作目录的文件」栏**最右侧**那颗「打开」——
+         * 点了要在系统文件管理器里打开这个目录。
+         *
+         * 量三件事：
+         *   ① 按钮在、而且**是头部最后一个按钮**（"最右侧"是使用者的原话，位置是需求的一部分）；
+         *   ② 点它真的**发出** `POST /api/fs/reveal`，body 里的 `path` 与栏头显示的那条路径
+         *     **一致**（只量"按钮在"会放过一个接错路径的按钮）；
+         *   ③ 走的是 POST（GET 语义上不该有副作用）。
+         *
+         * ⚠️ **把这次请求拦下来**：探针跑在真机器上，真发出去会在开发机弹出一个文件管理器
+         *   窗口（每跑一次弹一个）。拦下来还能顺便验"请求发的是什么"。
+         */
+        facts['chat.workDirReveal'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return null
+          const panel = chatFilesPanel()
+          const head = panel?.querySelector('.foot-files-head')
+          if (!head) {
+            errors.push('找不到「工作目录的文件」的头部')
+            return null
+          }
+          const shown = (head.querySelector('[data-workdir-path]')?.getAttribute('title') ?? '').trim()
+          const btn = head.querySelector('[data-workdir-reveal]')
+          if (!btn) {
+            errors.push('「工作目录的文件」栏头没有「打开」按钮')
+            return { present: false, last: false, method: '', same: false, shown }
+          }
+          const buttons = [...head.querySelectorAll('button')]
+          const last = buttons[buttons.length - 1] === btn
+          if (!last) errors.push('「打开」不是栏头最后一个按钮——使用者要的是**最右侧**')
+          const real = f.contentWindow.fetch
+          let sent = null
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (!String(url).includes('/api/fs/reveal')) {
+              return real.call(f.contentWindow, input, init)
+            }
+            try {
+              sent = {
+                method: (init && init.method) || '',
+                path: init && init.body ? JSON.parse(String(init.body)).path : null,
+              }
+            } catch {
+              sent = { method: (init && init.method) || '', path: null }
+            }
+            return Promise.resolve(
+              new Response(JSON.stringify({ ok: true }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            )
+          }
+          try {
+            click(btn)
+            await untilNet(() => sent !== null, 30)
+          } finally {
+            f.contentWindow.fetch = real
+          }
+          if (sent === null) errors.push('点了「打开」没有发出 `/api/fs/reveal` 请求（按钮是空的？）')
+          else if (sent.method !== 'POST') errors.push(`「打开」用的是 ${sent.method}，应为 POST`)
+          else if (sent.path !== shown) {
+            errors.push(`「打开」打开的不是栏头那条路径（请求「${sent.path}」，栏头「${shown}」）`)
+          }
+          return {
+            present: true,
+            last,
+            method: sent ? sent.method : '',
+            same: sent !== null && sent.path === shown,
+            shown,
+          }
         })()
 
         /**

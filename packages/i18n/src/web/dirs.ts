@@ -23,6 +23,15 @@ export const dirsText = {
   'dirs.home': { zh: '家目录', en: 'Home' },
   'dirs.workRoot': { zh: '工作区', en: 'Workspace' },
   'dirs.go': { zh: '去', en: 'Go' },
+  /**
+   * ★ 分批第 234 批：「工作目录的文件」栏头最右侧那颗按钮——在**系统文件管理器**里
+   * 打开这个目录（Finder / 资源管理器 / xdg）。聊天页与沉淀页共用。
+   */
+  'dirs.reveal': { zh: '打开', en: 'Open' },
+  'dirs.revealTitle': {
+    zh: '在系统的文件浏览器里打开这个目录',
+    en: 'Open this directory in your file manager',
+  },
   'dirs.refresh': { zh: '刷新', en: 'Refresh' },
   'dirs.pick': { zh: '选这个目录', en: 'Use this directory' },
   /** 目录在前、文件在后：文件只是"这里确实是那个仓库"的佐证，不能选。 */

@@ -193,6 +193,7 @@ import {
 } from './workdir-files.ts'
 import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
+import { revealInFileManager } from './reveal.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
@@ -3879,6 +3880,32 @@ async function injectedSkillsOf(
         return
       }
       sendJson(res, 200, result.listing)
+      return
+    }
+
+    /**
+     * ★ 分批第 234 批：「工作目录的文件」栏头那颗「打开」——在**系统文件管理器**里打开
+     *   这个目录（Finder / 资源管理器 / xdg-open）。
+     *
+     * 为什么必须由 daemon 开：浏览器没有"打开本机某个目录"的能力，也不该有。
+     * 边界：只接受**绝对路径**、只开**目录**（先 `realpath` 再 `stat`），
+     * argv 直传不进 shell（路径里带空格与 `&` 是常态）。实现在 `reveal.ts`，
+     * 那里也写着三个平台各自的坑（Windows 的 `explorer.exe` 成功也回 1）。
+     */
+    if (req.method === 'POST' && path === '/api/fs/reveal') {
+      const raw = (await readJsonBody(req)) as { path?: unknown }
+      const asked = typeof raw?.path === 'string' ? raw.path : ''
+      if (asked.trim() === '') {
+        sendJson(res, 400, { error: '需要 path', code: 'path_required' })
+        return
+      }
+      const result = await revealInFileManager({ path: asked })
+      if (!result.ok) {
+        const status = result.code === 'no_opener' ? 409 : result.code === 'not_found' ? 404 : 400
+        sendJson(res, status, { error: result.error, code: result.code })
+        return
+      }
+      sendJson(res, 200, { ok: true, path: result.path })
       return
     }
 

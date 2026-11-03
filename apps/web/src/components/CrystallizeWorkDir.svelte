@@ -189,6 +189,24 @@
       deleting = ''
     }
   }
+
+  /**
+   * ★ 分批第 234 批：「打开」——在系统文件管理器里打开**这一条沉淀的工作目录**
+   * （与聊天页同一颗按钮、同一个接口；平台差异在 daemon 的 `reveal.ts`）。
+   * 路径是树列第一层时服务端回的 `workDir`，所以它是真实路径，不是拼出来的。
+   */
+  async function revealWorkDir(): Promise<void> {
+    if (workDirPath === '') return
+    try {
+      await api('/api/fs/reveal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: workDirPath }),
+      })
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
 </script>
 
 <FootFiles
@@ -198,6 +216,9 @@
   count={topCount === 0 ? '' : $t('crystallize.materialCountOnly', { n: String(topCount) })}
   path={workDirPath}
   bind:open={open}
+  onreveal={workDirPath === '' ? undefined : () => void revealWorkDir()}
+  revealLabel={$t('dirs.reveal')}
+  revealTitle={$t('dirs.revealTitle')}
 >
   {#snippet actions()}
     <!--

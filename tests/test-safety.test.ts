@@ -200,6 +200,12 @@ describe('★ Windows 起进程：verbatim 旗标只有一个出口（spawnPlanF
       reason: '`openBrowser`：Windows 上是 `cmd /c start <url>`（系统命令，不是 CLI 垫片）',
     },
     {
+      file: join('daemon', 'src', 'reveal.ts'),
+      reason:
+        '「打开」那颗按钮：起的是**系统自带**的 open / explorer.exe / xdg-open（不是 CLI 垫片），' +
+        'argv 直传、路径不经过 shell；不起这条命令就永远打不开目录',
+    },
+    {
       file: join('daemon', 'src', 'skill-exec-check.ts'),
       reason: '只跑"解释器能不能起"（node/python 等，`resolveCommand` 给的都是真实可执行）',
     },
