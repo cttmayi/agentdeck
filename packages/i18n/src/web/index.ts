@@ -3,6 +3,7 @@ import { agentsText } from './agents.ts'
 import { chatText } from './chat.ts'
 import { commonText } from './common.ts'
 import { crystallizeText } from './crystallize.ts'
+import { dirsText } from './dirs.ts'
 import { errorsText } from './errors.ts'
 import { filesText } from './files.ts'
 import { groupsText } from './groups.ts'
@@ -41,6 +42,8 @@ export const webText = {
   ...chatText,
   // ★ D80：聊天/任务沉淀 skill（沉淀目标面板 + 草稿审阅）。
   ...crystallizeText,
+  // ★ 分批第 229 批：目录选择框（「新建对话 / 新建任务」两处共用一个控件）。
+  ...dirsText,
   ...shellText,
   ...tasksText,
   ...agentsText,

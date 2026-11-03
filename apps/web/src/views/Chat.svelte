@@ -8,6 +8,7 @@
   // ★ 分批第 197 批：栏脚的折叠清单与输入条也抽成共享组件（沉淀页用同一份）
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import WorkDirTree from '../components/WorkDirTree.svelte'
+  import DirPicker from '../components/DirPicker.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -124,6 +125,8 @@
    * 详情页只读）。空字符串 = 平台自动分配。
    */
   let draftWorkDir = ''
+  /** 「浏览…」那颗按钮开的目录选择框（分批第 229 批；与输入框共享一个值，见模板）。 */
+  let dirPickerOpen = false
 
   /**
    * 执行者名字（对话只存 id）。
@@ -657,18 +660,31 @@
           工作目录（2026-10 起**只在这里设**）：建对话时定一次，之后详情页只读。
           留空 = 平台自动分配（`conversation.workDir = null`）；填了 = 接进你的
           仓库。风险披露在下面那行，不藏。
+
+          ★ 分批第 229 批：旁边多了「浏览…」——手打路径是门槛最高的一件事（要知道
+          绝对路径怎么写），而"接进你的仓库"恰恰是最需要看准的一步。输入框留着：
+          选择框打不通的地方（隐藏目录、网络盘）手打仍然是退路。
         -->
         <label for="chat-draft-workdir" class="draft-workdir-label">
           {$t('chat.draftWorkDirLabel')}
         </label>
-        <input
-          id="chat-draft-workdir"
-          class="draft-workdir-input"
-          bind:value={draftWorkDir}
-          placeholder={$t('chat.workDirAuto')}
-          autocomplete="off"
-          spellcheck="false"
-        />
+        <div class="workdir-row">
+          <input
+            id="chat-draft-workdir"
+            class="draft-workdir-input"
+            bind:value={draftWorkDir}
+            placeholder={$t('chat.workDirAuto')}
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            type="button"
+            class="ghost"
+            data-chat-workdir-browse
+            onclick={() => (dirPickerOpen = true)}
+          >{$t('dirs.browse')}</button>
+        </div>
+        <DirPicker bind:open={dirPickerOpen} bind:value={draftWorkDir} />
         <p class="hint">{$t('chat.workDirAutoHint')}</p>
         <p class="hint">{$t('chat.workDirWarning')}</p>
         {#if draftSkill !== null}
@@ -902,6 +918,17 @@
   /* 「新对话」界面上的工作目录设定：与上面那个执行者选择器同一节奏 */
   .draft-workdir-label {
     margin-top: var(--sp-3);
+  }
+
+  /* 输入框 + 「浏览…」同一行（分批第 229 批）：按钮贴着输入框，才看得出它是
+     "帮你填这一格"的，而不是一个独立的动作 */
+  .workdir-row {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .workdir-row .draft-workdir-input {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   /* D69.15：`.chat-stream` 打在 MainArea 渲染的 pane-body 上（bodyClass），

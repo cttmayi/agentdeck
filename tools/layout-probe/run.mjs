@@ -161,6 +161,23 @@ const CHECKS = [
   },
   {
     view: '新建任务',
+    key: 'newtask.workDirPicker',
+    /**
+     * ★ 分批第 229 批：「新建任务」的「高级 → 工作目录」也有目录选择框，且**选中的路径
+     * 会填进去**。和「新对话」那边是同一条道理，但两处各挂一次组件——一次挂对了、
+     * 另一次忘了绑 `value` 是最常见的形态，所以两边都要量。
+     */
+    label:
+      '★★ 「新建任务」的「高级」里点「浏览…」也能选目录，且选中后路径真的填进工作目录一格' +
+      '（两个表单各挂一次同一个组件，漏绑一边的话界面上看不出区别）',
+    ok: (v) => v !== null && typeof v === 'object' && v.opened === true && v.filled === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `开框 ${String(v.opened)}　回填 ${String(v.filled)}　关框 ${String(v.closed)}`,
+  },
+  {
+    view: '新建任务',
     key: 'newtask.pickCardTitle',
     label: '★ 那张卡片问的是「交给谁」（一句话 + 一张卡片 = 这一页的全部问题）',
     ok: (v) => typeof v === 'string' && v.includes('交给'),
@@ -1151,6 +1168,56 @@ const CHECKS = [
     key: 'chat.draftWorkDirInput',
     label: '「新对话」界面在 Agent 选择器下面有工作目录输入（可留空=自动分配）',
     ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.workDirPickerOpens',
+    /**
+     * ★ 分批第 229 批：工作目录旁边那颗「浏览…」——点了**真的开框、框里真的站在一个
+     * 磁盘目录上**。这条量的是"能点但没反应"这个老毛病的最短路径：按钮在、点了出现
+     * 清单、清单顶上那条路径是绝对的（说明它真的读了磁盘，不是画了个空壳）。
+     */
+    label:
+      '★★★ 工作目录旁边点「浏览…」会打开目录选择框，且框顶上已经是一条**绝对路径**' +
+      '（浏览器给不了绝对路径，所以这条路必须真的由 daemon 列出来）',
+    ok: (v) => v !== null && typeof v === 'object' && v.opened === true && v.absolute === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `开框 ${String(v.opened)}　路径「${String(v.current)}」　条目 ${String(v.rows)}`,
+  },
+  {
+    view: '聊天',
+    key: 'chat.workDirPickerOldDaemon',
+    /**
+     * ★ 分批第 229 批（旧 daemon）：界面换了、daemon 还是重启之前那个 ⇒
+     * `/api/fs/dirs` 回一个**没有错误码**的 404。那一格必须说"重启一次 daemon"，
+     * 而不是把 404 说成"读不出这个目录"——后者会让人去查权限（本仓库的老毛病：
+     * "取不到"与"还在加载"被画成同一个样子）。
+     */
+    label:
+      '★★ 旧 daemon（不认识 `/api/fs/dirs`）⇒ 目录选择框**说明要重启一次 daemon**，' +
+      '不把 404 说成"读不出这个目录"',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '聊天',
+    key: 'chat.workDirPickerPicks',
+    /**
+     * ★ 分批第 229 批：点「选这个目录」⇒ **那个绝对路径填进输入框、框关掉**。
+     *
+     * 只量"框能打开"是不够的：选择框的整个意义在于把一个路径交回去，而"看着能用、
+     * 交不回去"正是这个仓库最防的那类入口（§12.41）。所以这条盯的是回填与关框两件事。
+     */
+    label:
+      '★★★ 点「选这个目录」之后路径**真的填进了工作目录输入框**、并且框关掉了' +
+      '（只开不填 = 一个假入口）',
+    ok: (v) => v !== null && typeof v === 'object' && v.filled === true && v.closed === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `输入框「${String(v.input)}」　框关掉 ${String(v.closed)}`,
   },
   {
     view: '聊天',

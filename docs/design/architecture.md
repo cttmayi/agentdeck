@@ -811,6 +811,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | DELETE | `/api/agent-groups/{id}` | 删组，**并级联删掉它的私有成员**（按 `ownerGroupId` 找，所以建到一半的孤儿也一起清）；先删 agent 再删组（失败时不会出现"组没了、私有 agent 悬着"）。返回 `{ ok, removedPrivateAgents }` |
 | **工作区设定** | | |
 | PUT | `/api/workspace/locale` | 界面语言（`zh` / `en`，挂在 workspace 上，D39） |
+| GET | `/api/fs/dirs` | **目录浏览**（一次一层，分批第 229 批）：「新建对话 / 新建任务」的工作目录改成**点着选**。只回名字与类型（`dir` / `file`），**不读任何文件内容、不写任何东西**；`path` 省略 = 家目录，`~` 会展开，先 `realpath` 再列（链接目录的「上一级」才是真的上一级）；失败按码分（`not_found` 404 / `denied` 403 / `not_a_dir`、`not_absolute` 400）。浏览器给不了绝对路径（`webkitdirectory` 只有相对路径），所以这一步只能在 daemon 这一侧 |
 | **第一句话模版** | | |
 | GET/PUT | `/api/first-sentence/templates` | 2026-10 三框：变量对照表（十一条，带块归属）+ 每条链路的三个默认框（① 框架 / ② 身份 / ③ 任务）+ 当前生效的九框；返回的是**迁移后**的样子并带 `adjustments`（按 kind × block）。PUT 是 PATCH 语义：未传的块不动 |
 | POST | `/api/first-sentence/preview` | 用示例任务渲染预览，**按 kind × block 只渲染那一块**（与真的那次同一个渲染器） |
@@ -928,6 +929,11 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 - **Markdown 渲染器是自己写的**（`apps/web/src/lib/markdown.ts`），渲染顺序是硬规则：
   **先摘出结构、再转义剩下的文字、最后拼我们自己的标签**。原始 HTML 一律不认、
   链接只允许 `http(s)`/`mailto`、图片地址必须经调用方映射。
+- **目录浏览（`GET /api/fs/dirs`，分批第 229 批）只给名字与类型**：它读的是**工作目录之外**
+  的路径（整个磁盘），所以边界写死在三处——不读文件内容、不写、不删；只回目录与文件名，
+  且**跳过隐藏项**；`realpath` 之后再列（不跟随的 `readdir` 对链接会漏，见
+  `apps/daemon/src/fs-browse.ts` 那段注释）。这个接口没有扩大暴露面：daemon 本来就接受
+  任意绝对路径当工作目录（"手打"与"点着选"进的是同一个字段），它只是把那条路变得**看得见**。
 
 ### 7.4 CLI / MCP 的权限边界
 
@@ -1561,7 +1567,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 审核收口 | `apps/daemon/src/review.ts`（+ `review-standard.ts`） |
 | **人的三个出路**（D46 / D47） | daemon：`apps/daemon/src/server.ts` 的 `canHostHumanVerdict` + `POST /api/runs/{id}/human-verdict`、`runBelongsToIssue` + `POST /api/issues/{id}/abandon\|reopen`；**锚点判据只有一处**：`apps/web/src/lib/pipeline.ts` 的 `stageOf`（`finished ?? humanOnExecute`，以及 `abandoned` 那层覆盖）；界面在 `apps/web/src/views/Tasks.svelte`（`passGate` / `canDecide` / `feedbackReady` / `canAbandon` + `passTask` / `feedback` / `setAbandoned`）；词条在 `packages/i18n/src/web/tasks.ts` 的 `decide*` 那组 |
 | 动作执行 / 脚本进程 | `apps/daemon/src/actions.ts` / `script-executor.ts` |
-| 工作目录分配 / 文件读取 | `apps/daemon/src/workdir.ts` / `workdir-files.ts` |
+| 工作目录分配 / 文件读取 | `apps/daemon/src/workdir.ts` / `workdir-files.ts`；**目录选择框**（列磁盘目录，纯读）`apps/daemon/src/fs-browse.ts` + 界面 `apps/web/src/components/DirPicker.svelte`（「新对话」与「新建任务」各挂一次） |
 | 重启对账 | `apps/daemon/src/reconcile.ts` |
 | 装 skill / 装工具包 | `packages/skill-source/src/skill-source.ts`（daemon 与 remote **共用**）/ `apps/daemon/src/tool-source.ts`；「从本地安装」扫别的 AI 工具的技能目录：`apps/daemon/src/local-skill-dirs.ts`（只读扫描，无对账）；**本地安装清单**（一份仓库自带的 JSON，列出可点的安装方法）：`apps/daemon/src/skill-list.ts`（自带清单 `apps/daemon/catalog/skills.json`，`--skills-catalog` 可换） |
 | 第一句话的组装与模版 | `packages/agent-core/src/first-sentence.ts` |
@@ -1595,7 +1601,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 安装（skill / 工具） | `skills-install.test.ts`、`skill-source.test.ts`、`tool-source.test.ts`、`remote-tool-install.test.ts`、`skills-local-dirs-api.test.ts`（从本地安装：扫描 → 装 → 落盘 → 挂给智能体）、`local-skill-dirs.test.ts`（扫描） |
 | 换一个 runtime | `runtime-agnostic.test.ts`、`runtime-registry.test.ts` |
 | 第一句话模版 | `template-e2e.test.ts`、`packages/agent-core/src/first-sentence.test.ts` |
-| 工作目录与文件服务 | `workdir.test.ts`、`workdir-files.test.ts` |
+| 工作目录与文件服务 | `workdir.test.ts`、`workdir-files.test.ts`、`fs-browse.test.ts`（目录浏览：隐藏项 / 符号链接 / 截断 / 四种失败码） |
 | 重启 / 关闭 / 空闲 | `reconcile.test.ts`、`shutdown.test.ts`、`idle-watchdog.test.ts` |
 | Host 校验等安全项 | `daemon.test.ts` |
 | 存储端口的两套实现 | `packages/store-sqlite/src/port-thinness.test.ts`（差分契约）、`file-store.test.ts`、`sqlite-store.test.ts` |

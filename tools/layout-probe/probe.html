@@ -3895,6 +3895,49 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               : false
           })()
 
+          /**
+           * ★ 分批第 229 批：「新建任务」这张表单的「高级 → 工作目录」也有**目录选择框**
+           * （与「新对话」同一个组件，两处各挂一次）。
+           *
+           * ⚠️ 量完必须**把输入框还原成空**：这张表单后面要真的提交一次，带一个真实目录
+           *   进去会让那条端到端判据量到别的东西（它量的是"提交了什么"，不是"这条路径对不对"）。
+           */
+          facts['newtask.workDirPicker'] = await (async () => {
+            const details = d().querySelector('.form-advanced')
+            if (!details) {
+              errors.push('新建任务表单里找不到「高级」')
+              return null
+            }
+            details.open = true
+            await untilNet(() => !!d().querySelector('[data-newtask-workdir-browse]'), 20)
+            const browse = d().querySelector('[data-newtask-workdir-browse]')
+            if (!browse) {
+              errors.push('新建任务的「高级」里没有「浏览…」按钮')
+              return null
+            }
+            click(browse)
+            const ready = await untilNet(
+              () => (text(d().querySelector('[data-dir-picker-current]')) ?? '').startsWith('/'),
+              60,
+            )
+            const current = text(d().querySelector('[data-dir-picker-current]')) ?? ''
+            const pick = d().querySelector('[data-dir-picker-pick]')
+            if (pick) click(pick)
+            const closed = await untilNet(() => !d().querySelector('[data-dir-picker-list]'), 30)
+            const input = d().querySelector('.form-advanced input')
+            const got = input ? input.value : ''
+            if (input) {
+              input.value = ''
+              input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            }
+            details.open = false
+            if (!ready) errors.push('新建任务的目录选择框没站到任何目录上')
+            if (current === '' || got !== current) {
+              errors.push(`新建任务：选中的路径没填进工作目录（输入框「${got}」）`)
+            }
+            return { opened: ready, filled: current !== '' && got === current, closed }
+          })()
+
           // ══════════ 第一条路：交给**单个智能体** ══════════
           //
           //   ★ 2026-10 的契约：选单个智能体 ⇒ **这次不会被审**（agent 上那条
@@ -7682,6 +7725,113 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             if (!select || !input) return false
             return (select.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
           })
+
+          /**
+           * ★ 分批第 229 批：工作目录的**目录选择框**（`DirPicker`）。
+           *
+           * 两条事：① 点「浏览…」真的开框，且框顶那条路径是**绝对**的（说明 daemon 真
+           * 列了磁盘——浏览器自己给不了绝对路径，这是这条路唯一的实现方式）；
+           * ② 点「选这个目录」之后，那个路径**填进了输入框**、框关掉。
+           *
+           * ⚠️ 量完把输入框还原成空：后面还有别的判据要看这张表单的初始状态，
+           *   留一个路径会污染它们（"留空=自动分配"是这张表单的默认语义）。
+           * ⚠️ 用 `untilNet` 等网络往返，不用 `wait()`——探针的虚拟时钟可能被开着的流冻住。
+           */
+          facts['chat.workDirPickerOpens'] = await (async () => {
+            const browse = d().querySelector('.detail-pane [data-chat-workdir-browse]')
+            if (!browse) {
+              errors.push('工作目录旁边找不到「浏览…」按钮')
+              return null
+            }
+            click(browse)
+            const openedList = await untilNet(
+              () => !!d().querySelector('[data-dir-picker-list]'),
+              40,
+            )
+            /**
+             * ⚠️ 清单容器**一开框就在**（`{#each}` 外面那层），所以"容器在"并不等于
+             *   "读到了目录"。必须再等**顶上那条路径变成绝对的**——那才是 daemon 真的
+             *   回了一次 `GET /api/fs/dirs` 的证据（第一版就是急着读，量到空串）。
+             */
+            const ready = await untilNet(
+              () => (text(d().querySelector('[data-dir-picker-current]')) ?? '').startsWith('/'),
+              60,
+            )
+            const current = text(d().querySelector('[data-dir-picker-current]')) ?? ''
+            const rows = d().querySelectorAll('[data-dir-picker-list] [data-dir-entry]').length
+            const why = text(d().querySelector('[data-dir-picker-error]')) ?? ''
+            if (!openedList) errors.push('点了「浏览…」没出现目录选择框')
+            else if (!ready) {
+              errors.push(`选择框没站到任何目录上（顶上「${current}」，错误「${why}」）`)
+            }
+            return { opened: openedList, absolute: current.startsWith('/'), current, rows }
+          })()
+
+          facts['chat.workDirPickerPicks'] = await (async () => {
+            const pick = d().querySelector('[data-dir-picker-pick]')
+            const current = text(d().querySelector('[data-dir-picker-current]')) ?? ''
+            if (!pick) {
+              errors.push('选择框里找不到「选这个目录」按钮')
+              return null
+            }
+            click(pick)
+            const closed = await untilNet(() => !d().querySelector('[data-dir-picker-list]'), 30)
+            const input = d().querySelector('.detail-pane #chat-draft-workdir')
+            const got = input ? input.value : ''
+            if (!closed) errors.push('选完目录之后框没关掉')
+            if (current === '' || got !== current) {
+              errors.push(`选中的路径没填进输入框（框里「${current}」，输入框「${got}」）`)
+            }
+            // 还原成默认状态（留空 = 平台自动分配）
+            if (input) {
+              input.value = ''
+              input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            }
+            return { filled: current !== '' && got === current, closed, input: got }
+          })()
+
+          /**
+           * ★ 分批第 229 批（旧 daemon）：界面是构建产物，换掉就是新的，而 daemon 还是
+           *   重启之前那个 —— 那时 `/api/fs/dirs` 回一个**没有错误码**的 404
+           *   （`未知路径 /api/fs/dirs`）。这一条量的是"它有没有说清楚要重启"，
+           *   而不是把 404 说成"读不出这个目录"（那会让人去查权限）。
+           */
+          facts['chat.workDirPickerOldDaemon'] = await (async () => {
+            const real = f.contentWindow.fetch
+            f.contentWindow.fetch = function (input, init) {
+              const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+              if (!String(url).includes('/api/fs/dirs')) {
+                return real.call(f.contentWindow, input, init)
+              }
+              return Promise.resolve(
+                new Response(JSON.stringify({ error: '未知路径 /api/fs/dirs' }), {
+                  status: 404,
+                  headers: { 'content-type': 'application/json' },
+                }),
+              )
+            }
+            let out = false
+            try {
+              const browse = d().querySelector('.detail-pane [data-chat-workdir-browse]')
+              if (!browse) return false
+              click(browse)
+              await untilNet(() => !!d().querySelector('[data-dir-picker-list]'), 30)
+              await untilNet(
+                () => (text(d().querySelector('[data-dir-picker-error]')) ?? '') !== '',
+                30,
+              )
+              const msg = text(d().querySelector('[data-dir-picker-error]')) ?? ''
+              out = msg.includes('重启')
+              if (!out) errors.push(`旧 daemon 上目录选择框没说"重启"（量到「${msg}」）`)
+            } finally {
+              f.contentWindow.fetch = real
+              // 关掉框（点遮罩；留一个开着的框会影响后面判据量的界面）
+              const backdrop = d().querySelector('.drawer-backdrop')
+              if (backdrop) click(backdrop)
+              await untilNet(() => !d().querySelector('[data-dir-picker-list]'), 20)
+            }
+            return out
+          })()
           return !stillThere
         })()
 

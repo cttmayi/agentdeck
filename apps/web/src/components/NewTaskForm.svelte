@@ -15,6 +15,7 @@
   import { createDirty } from '../lib/create-draft.ts'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
   import { t, tx } from '../lib/i18n.ts'
+  import DirPicker from './DirPicker.svelte'
 
   /**
    * 新建任务的那张表单（2026-10 简化版）。
@@ -49,6 +50,8 @@
 
   let title = ''
   let workDir = ''
+  /** 「浏览…」那颗按钮开的目录选择框（分批第 229 批；与输入框共享一个值）。 */
+  let dirPickerOpen = false
   /** 交给谁：智能体 或 智能体组（互斥；只有存在启用的组时才给「组」这一档）。 */
   let source: TaskSource = 'agent'
   let agentId = ''
@@ -485,8 +488,28 @@
     <summary class="hint" style="cursor:pointer">{$t('newtask.advancedSummary')}</summary>
     <label style="margin-top:var(--sp-3)">
       {$t('newtask.workDirLabel')}
-      <input bind:value={workDir} placeholder={$t('newtask.workDirPlaceholder')} />
     </label>
+    <!--
+      ★ 分批第 229 批：和「新对话」那张表单同一个控件（`DirPicker`）。
+      这个格子藏在「高级」里，平时不出现——但**一旦要用**，它恰恰是最容易填错的一个：
+      "接进你的仓库"要求一条绝对路径。手打仍然是退路（按钮旁边的输入框没被动过）。
+    -->
+    <div class="workdir-row">
+      <input
+        bind:value={workDir}
+        placeholder={$t('newtask.workDirPlaceholder')}
+        aria-label={$t('newtask.workDirLabel')}
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button
+        type="button"
+        class="ghost"
+        data-newtask-workdir-browse
+        onclick={() => (dirPickerOpen = true)}
+      >{$t('dirs.browse')}</button>
+    </div>
+    <DirPicker bind:open={dirPickerOpen} bind:value={workDir} />
     <p class="hint">
       {$t('newtask.workDirHintBefore')}<strong>{$t('newtask.workDirHintStrong')}</strong>{$t('newtask.workDirHintAfter1')}
       {$t('newtask.workDirHintAfter2')}
@@ -673,6 +696,16 @@
   /* 高级选项 / 提交栏：整行 */
   .form-advanced {
     margin: var(--sp-2) 0;
+  }
+
+  /* 输入框 + 「浏览…」同一行（分批第 229 批）：按钮贴着它帮的那一格 */
+  .workdir-row {
+    display: flex;
+    gap: var(--sp-2);
+  }
+  .workdir-row input {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   /* 提交栏：**吸底**（沿用 D58 的原始规则：负边距拉满整栏 + 底色盖住滚过的内容）。

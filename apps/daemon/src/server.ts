@@ -192,6 +192,7 @@ import {
   managedPathsFor,
 } from './workdir-files.ts'
 import { resolveWorkDir } from './workdir.ts'
+import { listDir } from './fs-browse.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
 import { createRuntimeBackend, knownRuntimeAdapters } from './runtime-registry.ts'
@@ -3846,6 +3847,41 @@ async function injectedSkillsOf(
     }
 
     // ── GET /api/identity ──
+    /**
+     * ★ 分批第 229 批：目录浏览——「新建对话 / 新建任务」那个工作目录输入框
+     *   现在可以**点着选**（`GET /api/fs/dirs?path=…`）。
+     *
+     * 为什么这件事必须在 daemon 这一侧：浏览器里的 `<input webkitdirectory>` 交出的是
+     * **文件本身**与**相对**路径（`webkitRelativePath`），拿不到绝对路径——而工作目录要的
+     * 正是一个绝对路径（它会被写进 `conversation.workDir`，daemon 再 `chdir` 过去）。
+     * 所以只有一条路：daemon 列目录，页面画出来、点一下把绝对路径填回输入框。
+     *
+     * 边界（读一遍再改这里）：
+     *   · 只回**名字与类型**，不读任何文件内容、不写任何东西（纯 `readdir`）；
+     *   · daemon 只听 127.0.0.1，且本来就已经接受任意绝对路径当工作目录——这个接口没有
+     *     扩大暴露面，只是把"手打路径"变成"看得见地挑"；
+     *   · `path` 省略 = 家目录；`~` 会被展开；不是绝对路径直接说清楚。
+     */
+    if (req.method === 'GET' && path === '/api/fs/dirs') {
+      const url3 = new URL(req.url ?? '/', 'http://localhost')
+      const result = await listDir({
+        path: url3.searchParams.get('path') ?? '',
+        workRoot,
+      })
+      if (!result.ok) {
+        const status =
+          result.code === 'not_found'
+            ? 404
+            : result.code === 'denied'
+              ? 403
+              : 400 // `not_a_dir` / `not_absolute`：路径打错了，是请求的问题
+        sendJson(res, status, { error: result.error, code: result.code })
+        return
+      }
+      sendJson(res, 200, result.listing)
+      return
+    }
+
     if (req.method === 'GET' && path === '/api/identity') {
       const device = await store.getDevice()
       const probe = await backend.probe()
