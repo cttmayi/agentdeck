@@ -7767,6 +7767,41 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return { opened: openedList, absolute: current.startsWith('/'), current, rows }
           })()
 
+          /**
+           * ★ 分批第 230 批（使用者报的）：**按钮上的字不许折行**。
+           *
+           * 「新对话」里新加的「浏览…」与目录选择框里的「关闭 / 上一级 / 选这个目录」
+           * 都曾被折成两行。根因不是宽度算错：那一行里按钮与输入框/副标题**都是 flex 项**，
+           * 空间不够时一起收缩，而 flex 项能缩到的最小宽度是 `min-content`——对中文就是
+           * **一个字**（每个汉字都是断行点）。所以判据量的是**文字的行盒**：
+           *
+           * ⚠️ 不能用 `el.getClientRects()`：一个按钮无论里面折成几行，元素盒永远只有一个
+           *    矩形——第一版就是这么量成"全是 1 行"的，而屏幕上明明是两行。
+           *    必须用 `Range.selectNodeContents(el).getClientRects()`。
+           */
+          facts['chat.pickerButtonLabels'] = await (async () => {
+            const lineCount = (el) => {
+              if (!el) return -1
+              const range = d().createRange()
+              range.selectNodeContents(el)
+              return range.getClientRects().length
+            }
+            const browse = d().querySelector('.detail-pane [data-chat-workdir-browse]')
+            const values = {
+              browse: lineCount(browse),
+              close: lineCount(d().querySelector('.modal-head > button')),
+              up: lineCount(d().querySelector('[data-dir-picker-up]')),
+              pick: lineCount(d().querySelector('[data-dir-picker-pick]')),
+            }
+            const bad = Object.entries(values).filter(([, n]) => n !== 1)
+            if (bad.length > 0) {
+              errors.push(
+                `按钮上的字折行了：${bad.map(([k, n]) => `${k}=${String(n)} 行`).join('、')}`,
+              )
+            }
+            return values
+          })()
+
           facts['chat.workDirPickerPicks'] = await (async () => {
             const pick = d().querySelector('[data-dir-picker-pick]')
             const current = text(d().querySelector('[data-dir-picker-current]')) ?? ''

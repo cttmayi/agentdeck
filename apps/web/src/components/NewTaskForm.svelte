@@ -707,6 +707,11 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /* ★ 分批第 230 批：「浏览…」不许被挤窄（与「新对话」那张表单同一条规矩） */
+  .workdir-row > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 
   /* 提交栏：**吸底**（沿用 D58 的原始规则：负边距拉满整栏 + 底色盖住滚过的内容）。
      负边距的量是 `--create-pad-x`——它由外面那层（`Tasks.svelte` 的 `.create-body`）

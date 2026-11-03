@@ -1068,6 +1068,25 @@ button {
   transition: filter 0.12s, background 0.12s;
 }
 
+/**
+ * ⚠️ **"按钮 + 可伸缩的兄弟"这种行，按钮上必须写 `flex: 0 0 auto; white-space: nowrap`**
+ *    （分批第 230 批，使用者报的："『浏览』2 个字，都换行了"、"『选择一个目录』里面的
+ *    『关闭』换行了"）。
+ *
+ * 根因不是宽度算错了：这样的行里按钮和输入框/文字**都是 flex 项**，空间不够时一起收缩，
+ * 而一个 flex 项能缩到的最小宽度是 `min-content`——对中文来说就是**一个字**（每个汉字
+ * 都是一个断行点）。于是两三个字的按钮被压成一个字宽，「关闭」折成「关」「闭」两行。
+ * 触发条件是"兄弟那一格的内容变长了一点"，所以它看起来时有时无、换个窗口宽度就换一副样子。
+ *
+ * 已经在这些地方按这条规矩写死了（新增同类行时照着来）：
+ *   · `.modal-head > button`（模态框的「关闭」）
+ *   · `FootFiles` 的 `.foot-files-head :global(.ghost)`（「工作目录的文件」/「材料」标题行）
+ *   · `DirPicker` 的 `.path-row / .nav-row / .actions > button`
+ *   · 「新对话」与「新建任务」的 `.workdir-row > button`（「浏览…」）
+ *
+ * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
+ *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
+ */
 button:hover:not(:disabled) { filter: brightness(1.15); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -1513,6 +1532,23 @@ tbody tr:last-child td { border-bottom: 0; }
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--line);
+}
+
+/**
+ * ★ 分批第 230 批：标题区右侧那颗按钮（一般是「关闭」）**不许被挤窄**。
+ *
+ * 使用者报的："『选择一个目录』里面的『关闭』换行了"。
+ *
+ * 根因不是它的宽度算错了，而是**它和副标题都是 flex 项**：这一行没有空间时两个一起收缩，
+ * 而中文的最小内容宽度 = **一个字**（每个汉字都是一个断行点）⇒ 按钮被压到一个字宽，
+ * 「关闭」就折成两行。副标题越长越容易触发，所以它看起来"时有时无"。
+ *
+ * `flex: 0 0 auto` 让它保持自己的宽度（收缩全部落到左边的文字上），`white-space: nowrap`
+ * 再兜一层：万一父容器真的比它还窄，宁可溢出也不要断在字中间。
+ */
+.modal-head > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .modal-body {

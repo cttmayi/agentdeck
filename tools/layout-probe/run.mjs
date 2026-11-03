@@ -1203,6 +1203,31 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.pickerButtonLabels',
+    /**
+     * ★ 分批第 230 批（真 bug 的回归守卫，使用者报的）：按钮上的字**不许折行**。
+     *
+     * 「浏览…」「关闭」「上一级」「选这个目录」都曾被挤到"一个字宽"、折成两行——根因是
+     * 它们和可伸缩的兄弟（输入框、副标题）在同一个 flex 行里，一起收缩，而中文的
+     * `min-content` 是**一个字**。判据量的是**文字的行盒数**（Range 的 client rects），
+     * 不是元素盒——元素盒永远是 1 个矩形，量它等于没量。
+     */
+    label:
+      '★★★ 工作目录那颗「浏览…」与目录选择框里的「关闭 / 上一级 / 选这个目录」都只有**一行**' +
+      '（中文的 min-content 是一个字：flex 行里一挤就会折行，这一条专门盯它）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      ['browse', 'close', 'up', 'pick'].every((k) => v[k] === 1),
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : Object.entries(v)
+            .map(([k, n]) => `${k}=${String(n)} 行`)
+            .join('　'),
+  },
+  {
+    view: '聊天',
     key: 'chat.workDirPickerPicks',
     /**
      * ★ 分批第 229 批：点「选这个目录」⇒ **那个绝对路径填进输入框、框关掉**。

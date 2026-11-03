@@ -246,6 +246,21 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /**
+   * ★ 分批第 230 批：这一框里的按钮（「去」「上一级」「家目录」「工作区」「刷新」
+   * 「取消」「选这个目录」）**不许被挤窄**。
+   *
+   * 使用者报的："新加的『浏览』2 个字，都换行了"——同一个根因：它们每个都是 flex 项，
+   * 空间不够时和输入框一起收缩，而中文的最小内容宽度是**一个字**（每个汉字都是断行点），
+   * 于是「浏览…」被压到一个字宽就折成两行。`flex: 0 0 auto` 把收缩全推给输入框，
+   * `white-space: nowrap` 兜底（宁可溢出，也不要断在字中间）。
+   */
+  .path-row > button,
+  .nav-row > button,
+  .actions > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
   .nav-row {
     display: flex;
     align-items: center;
