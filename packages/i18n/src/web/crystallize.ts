@@ -104,9 +104,19 @@ export const crystallizeText = {
   // ── 沉淀目标（目标态） ──
   'crystallize.targetNew': { zh: '新建 skill', en: 'New skill' },
   'crystallize.targetUpdate': { zh: '更新本次加载的 skill', en: 'Update a loaded skill' },
-  'crystallize.targetUpdateHint': {
-    zh: '对话/任务是在矫正正在用的 skill——更新目标就是它（提炼的=进化；安装的=存为你的版本并遮蔽）',
-    en: 'This conversation/task corrects the skills in use — those are the update targets (yours = evolve; installed = save as your version and shadow)',
+  // ★ 分批第 235 批：`crystallize.targetUpdateHint`（长括注"更新目标就是它（提炼的=进化；
+  //   安装的=存为你的版本并遮蔽）"）删了——它被塞在一个选项里，跟着名字挤成两行，而两种
+  //   来源的区别在下一屏「是哪一份？」里统一说一次就够了（见 `updateChoiceNote`）。
+  'crystallize.loadedCount': { zh: '这次加载过 {n} 份技能', en: '{n} skills were loaded for this run' },
+  /**
+   * ★ 分批第 235 批（使用者："下面有2个选项，说是什么呀"）：「是哪一份？」那一屏**只出现
+   *   一次**的说明——「你的」与「安装的」选中之后分别会发生什么。
+   *   从前这段是塞进每个选项的括注里，于是每份技能名后面都跟着一长串，谁也读不出来
+   *   "这两项到底差在哪"。
+   */
+  'crystallize.updateChoiceNote': {
+    zh: '「你的」= 在它上面继续改，确认后覆盖那一份；「安装的」= 基于它另存为你自己的一版，安装的那份不动。素材都包含这次的过程与它现有的 SKILL.md。',
+    en: '"Yours" = keep editing it; on confirm it overwrites that copy. "Installed" = save your own copy from it, leaving the installed one untouched. Both use this run plus the skill’s current SKILL.md as material.',
   },
   // ★ 分批第 133 批：这条标着"可选"，而 intake 里"新建"**必填**（`purposeMissing` 禁用下一步）、
   //   §12.13 也定了"作用描述必答"——UI 自己前后矛盾。改成"必答"，与行为对上。

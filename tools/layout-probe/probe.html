@@ -6405,6 +6405,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 update: !!blankUpdateBtn,
                 skills: cySkillCount,
               }
+              /**
+               * ★ 分批第 235 批（使用者："下面有2个选项，说是什么呀"）：选项里**不再塞长括注**。
+               *
+               * 原来第二项后面跟着一长串"（提炼的=进化；安装的=存为你的版本并遮蔽）"，
+               * 和名字挤在一起，人读不出"这两项差在哪"。那两种来源的区别现在在下一屏
+               * 「是哪一份？」里**只说一次**（`crystallize.updateChoiceNote`），选项只留
+               * 名字 + 一句极短的数量提示。这条判据盯的就是"别再往选项里塞解释"。
+               */
+              facts['crystal.updateOptionText'] = blankUpdateBtn ? text(blankUpdateBtn) : null
               if (blankNewBtn) click(blankNewBtn)
               await until(() => !!d().querySelector('.intake textarea.intake-input'), 120)
               facts['crystal.blankIntakeQuestion'] = [

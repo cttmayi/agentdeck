@@ -221,9 +221,9 @@
           {#if skills.length > 0}
             <button type="button" class="intake-choice" onclick={() => pickStart('update')}>
               优化已有技能
-              <span class="faint small"
-                >这次加载过 {skills.length} 份 · {$t('crystallize.targetUpdateHint')}</span
-              >
+              <!-- 分批第 235 批：长括注（"更新目标就是它（提炼的=进化…）"）不再塞进选项——
+                   两种来源的区别由下一屏「是哪一份？」里那一句统一说。 -->
+              <span class="faint small">{$t('crystallize.loadedCount', { n: String(skills.length) })}</span>
             </button>
           {/if}
         </div>
@@ -233,22 +233,41 @@
         <p class="intake-q">是哪一份？</p>
         <div class="intake-choices">
           {#if kind === 'update'}
+            <!--
+              ★ 分批第 235 批（使用者："下面有2个选项，说是什么呀"）：
+              每个选项原来是"名字 + 描述 + 徽标 + 一长串括注"糊成两三行，人读不出
+              "这到底是哪一份、选了会怎样"。现在拆成 **名字一行（徽标在右）+ 描述一行**，
+              长解释收进徽标自己的 `title`（悬停才出），下面整段只出现**一次**。
+            -->
             {#each skills as option (option.id)}
-              <button type="button" class="intake-choice" onclick={() => pickDetail(option.id)}>
-                {option.name}
-                <span class="faint small">
-                  {option.description ?? ''}
-                  · {option.source === 'mine'
+              <button
+                type="button"
+                class="intake-choice skill-choice"
+                data-skill-option
+                onclick={() => pickDetail(option.id)}
+              >
+                <span class="skill-head">
+                  <span class="skill-name">{option.name}</span>
+                  <span
+                    class="skill-badge"
+                    data-skill-source={option.source}
+                    title={option.source === 'mine'
+                      ? $t('crystallize.updateIsEvolve')
+                      : $t('crystallize.updateIsShadow')}
+                  >{option.source === 'mine'
                     ? $t('crystallize.badgeMine')
-                    : $t('crystallize.badgeInstalled')}
-                  （{option.source === 'mine'
-                    ? $t('crystallize.updateIsEvolve')
-                    : $t('crystallize.updateIsShadow')}）
+                    : $t('crystallize.badgeInstalled')}</span>
                 </span>
+                {#if (option.description ?? '') !== ''}
+                  <!-- 两行夹断（见样式）；全文挂在 `title` 上，悬停能读全 -->
+                  <span class="skill-desc" title={option.description}>{option.description}</span>
+                {/if}
               </button>
             {/each}
           {/if}
         </div>
+        <!-- 两种来源各是什么意思：整段只说一次（每个选项里再抄一遍就是噪音） -->
+        <p class="intake-note">{$t('crystallize.updateChoiceNote')}</p>
       </ChatBubble>
     {:else if stage === 'purpose'}
       {#if detailLabel !== ''}
@@ -400,6 +419,38 @@
     padding: var(--sp-2) var(--sp-3); font-size: var(--fs-base);
   }
   .intake-choice:hover { background: var(--surface-hover); border-color: var(--line-strong); }
+  /* 「是哪一份？」那一屏的选项：名字与徽标一行、描述一行（分批第 235 批） */
+  .skill-choice { width: 100%; gap: 0.15rem; }
+  .skill-head { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; }
+  .skill-name { font-weight: 600; }
+  /* 徽标：极淡的胶囊，一眼分得清「你的 / 安装的」而不抢名字 */
+  .skill-badge {
+    margin-left: auto;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0 0.4rem;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  /**
+   * 描述**最多两行**（超了省略，全文在徽标那一堆 `title`…不，在这里另给一个 `title`）。
+   *
+   * 为什么必须夹住：技能库里那些 description 是三五十个字起步（`algorithmic-art` 那条约
+   * 200 字），十份列出来每个选项 200px 高——"挑哪一份"变成"读一篇文档"。挑的时候只要
+   * 认出是它，所以两行 + 悬停可读全文是够的。
+   */
+  .skill-desc {
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
+    text-align: left;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .intake-note { margin: var(--sp-1) 0 0; color: var(--text-faint); font-size: var(--fs-xs); }
   .intake-input {
     width: 100%; font: inherit; font-size: var(--fs-base); color: var(--text); background: var(--surface);
     border: 1px solid var(--line-strong); border-radius: var(--radius); padding: var(--sp-2); resize: vertical;
