@@ -14,6 +14,11 @@
   interface LoadedSkill {
     id: string
     name: string
+    /**
+     * 技能的 slug（daemon 两处来源都给）。**只作显示名的兜底**：万一某条记录的名字是空的，
+     * 那一行不能只剩一个徽标（使用者报过"第一个选项只显示了『安装的』"那种形状）。
+     */
+    slug?: string
     description: string | null
     /** 技能来源（`mine` = 你提炼的 / `installed` = 装的）：决定"更新"是进化还是遮蔽。 */
     source?: string
@@ -158,6 +163,18 @@
     stage = next === 'new' ? 'purpose' : 'detail'
   }
 
+  /**
+   * 选项上那个**名字**：名字 → slug → id。
+   *
+   * 一个选项必须能回答"这是哪一份"，所以三级兜底都要有——只剩一个「安装的」徽标，
+   * 等于让人对着两个看不出差别的按钮猜。
+   */
+  function optionLabel(option: LoadedSkill): string {
+    if (option.name !== '') return option.name
+    const slug = option.slug ?? ''
+    return slug !== '' ? slug : option.id
+  }
+
   function pickDetail(id: string): void {
     if (kind === 'update') skillId = id
     stage = 'purpose'
@@ -247,7 +264,8 @@
                 onclick={() => pickDetail(option.id)}
               >
                 <span class="skill-head">
-                  <span class="skill-name">{option.name}</span>
+                  <!-- 名字是主角；万一那条记录没有名字，退回 slug / id——绝不能只剩一个徽标 -->
+                  <span class="skill-name" title={optionLabel(option)}>{optionLabel(option)}</span>
                   <span
                     class="skill-badge"
                     data-skill-source={option.source}
@@ -420,9 +438,27 @@
   }
   .intake-choice:hover { background: var(--surface-hover); border-color: var(--line-strong); }
   /* 「是哪一份？」那一屏的选项：名字与徽标一行、描述一行（分批第 235 批） */
-  .skill-choice { width: 100%; gap: 0.15rem; }
+  /**
+   * ★ 分批第 236 批（使用者："第一个选项只显示了『安装的』，第二个选项是一段英文，
+   * 不是应该是 SKILL 名字"）：**名字是主角**。
+   *
+   * 上一版把名字排在 14px 常规字重里，下面紧跟一段同样大小的描述——于是有描述的那一项
+   * 读起来像"一段英文"，没描述的那一项只剩个徽标。名字是 slug 形态的标识（含连字符、
+   * 无空格），用等宽字体 + 字重才是它该有的样子：一眼就是"这一份叫什么"。
+   */
+  /* 统一高度：有描述（两行）与没描述（一行）看起来一样高——否则列表参差，不好扫 */
+  .skill-choice { width: 100%; gap: 0.15rem; min-height: 3.9rem; justify-content: center; }
   .skill-head { display: flex; align-items: baseline; gap: var(--sp-2); width: 100%; }
-  .skill-name { font-weight: 600; }
+  .skill-name {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--fs-base);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
   /* 徽标：极淡的胶囊，一眼分得清「你的 / 安装的」而不抢名字 */
   .skill-badge {
     margin-left: auto;
@@ -441,12 +477,18 @@
    * 200 字），十份列出来每个选项 200px 高——"挑哪一份"变成"读一篇文档"。挑的时候只要
    * 认出是它，所以两行 + 悬停可读全文是够的。
    */
+  /**
+   * 描述退到**一行**、更淡更小：它只是"这份技能大概是干什么的"，不是让选项变成一段英文。
+   * 全文仍在 `title` 里（悬停可读）。`fireworks-tech-graph` 那种**没有描述**的，这一行
+   * 干脆不画（`min-height` 让两种选项看起来还是一样高）。
+   */
   .skill-desc {
-    color: var(--text-dim);
-    font-size: var(--fs-sm);
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
     text-align: left;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
