@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import {
     loadLocalSkillScan,
     loadSkills,
@@ -422,6 +422,20 @@
       onActivate: () => void loadSkills(),
     },
   ])
+  /**
+   * ★ 分批第 237 批（使用者："我新入库的 SKILL，必须要重新刷新才可以看到，不合理"）：
+   *   **进这一页就重读一次**。
+   *
+   *   这张表是启动时载入的共享 store，而它背后是磁盘上的技能目录——沉淀入库、CLI 装的、
+   *   别的工具写进去的，都不会通知这个页面。服务端**每次读都对账磁盘**，所以"进页面读
+   *   一次"就等于"看到现在的真实样子"，不必让人先去点「刷新」。
+   *   （这条与入库那一路的刷新是**两件事**：那条让别的页面立刻跟着变，这条保证任何来源的
+   *   改动都能被看见。）
+   */
+  onMount(() => {
+    void loadSkills()
+  })
+
   onDestroy(() => clearPageActions('skills'))
 
   // ── 「从本地安装」页签 ──

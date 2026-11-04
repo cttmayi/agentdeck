@@ -8307,6 +8307,53 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           })
         }
 
+        /**
+         * ★ 分批第 237 批（使用者："我新入库的 SKILL，必须要重新刷新才可以看到，不合理"）：
+         * **进「技能」页就该看到现在的真实样子**，不用先点「刷新」。
+         *
+         * 怎么量：应用**已经启动之后**（共享 store 早已载入）用接口新造一条技能——
+         * 这模拟的就是"别处写进来"（沉淀入库、CLI 装的、别的工具写进技能目录）。
+         * 然后切到 `#/skills`，**不点任何刷新**，看表格里有没有它。
+         *
+         * ⚠️ 服务端每次读都对账磁盘，所以这一条真正钉的是**页面有没有去读**（不是服务端）。
+         *
+         * ⚠️ **必须放在整支探针的最后**：它要把页面导航到「技能」页，而前面那些判据依赖
+         *    "停在聊天页的草稿态"（第一版插在中间，9 条聊天判据当场全红——这正是它的价值）。
+         */
+        facts['skills.reloadsOnEnter'] = await (async () => {
+          const lateSlug = 'probe-late-skill'
+          const created = await f.contentWindow
+            .fetch('/api/skills', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                skills: [
+                  {
+                    slug: lateSlug,
+                    name: lateSlug,
+                    description: '探针：应用启动之后才入库的一条技能',
+                    body: '# probe late skill\n\n启动之后才写进来的。\n',
+                  },
+                ],
+              }),
+            })
+            .then((r) => r.ok)
+            .catch(() => false)
+          if (!created) {
+            errors.push('造"晚到的技能"失败（POST /api/skills）——这一条量不到')
+            return null
+          }
+          f.contentWindow.location.hash = '#/skills'
+          const onPage = await until(() => d().querySelector('.detail-pane') !== null, 80)
+          // 再等一拍：页面自己那次读是异步的
+          await untilNet(() => (d().body.innerText ?? '').includes(lateSlug), 40)
+          const seen = (d().body.innerText ?? '').includes(lateSlug)
+          if (!onPage) errors.push('没切到「技能」页')
+          else if (!seen) {
+            errors.push('应用启动之后才入库的技能，在「技能」页上看不到（没有自动重读）')
+          }
+          return seen
+        })()
         publish(true)
       }
 

@@ -24,6 +24,7 @@
    */
   import { onMount, onDestroy } from 'svelte'
   import { t } from '../lib/i18n.ts'
+  import { loadSkills } from '../lib/stores.ts'
   import { api } from '../lib/api.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import { crystallizeState, crystallizeStateClass, crystallizeStateKey } from '../lib/crystallize-state.ts'
@@ -112,9 +113,17 @@
     }
   }
 
-  /** 流程页入库完成（草稿从列表消失）值得重拉一次。 */
+  /**
+   * 流程页入库完成：草稿从列表消失，**技能库里多了一条（或改了一条）**。
+   *
+   * ★ 分批第 237 批（使用者："我新入库的 SKILL，必须要重新刷新才可以看到，不合理"）：
+   *   这里原来只重拉**沉淀列表**，于是"入库"这件写操作在别的页面上看不见——
+   *   「技能」页读的是启动时载入的那张共享表（`$skills`），新对话的执行者下拉也读它。
+   *   一次入库是**库变了**，不是只有这一页的列表变了。
+   */
   function reloadQuiet(): void {
     void refresh()
+    void loadSkills()
   }
 
   /**
