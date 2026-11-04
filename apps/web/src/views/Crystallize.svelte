@@ -359,10 +359,6 @@
       onmaterialchange={bumpMaterial}
       onback={() => go('crystallize')}
       ondone={() => reloadQuiet()}
-      ondiscarded={() => {
-        go('crystallize')
-        void refresh()
-      }}
     />
     <!-- ★ 分批第 92 批：产物提成常驻的第三列（设计 §12.3）。U1 只搬位置，
          数据仍走 `GET /api/crystallize/artifacts`——与流程页同一份产出与同一份校验。

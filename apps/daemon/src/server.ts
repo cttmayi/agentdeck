@@ -3553,9 +3553,14 @@ async function injectedSkillsOf(
     if (previous.subject.type !== 'skill-draft') {
       return { status: 400, body: { error: '这条 run 不是起草 run', code: 'not_a_draft' } }
     }
-    if (previous.crystallized === true) {
-      return { status: 409, body: { error: '这条草稿已经入库了，没有可接着说的', code: 'already_crystallized' } }
-    }
+    /**
+     * ★ 分批第 239 批（使用者定）：**「已入库」不再终结这条起草**。
+     *
+     * 原话："沉淀，确认入库后不删除，依然还可以继续反馈修改。并可以持续入库"。
+     * 所以这里不再拦 `crystallized: true`——入库只是"这一版进了库"，不是一个终点：
+     * 接着说 / 改一版 / 再加材料 都照常，下一版再入库就是**更新同一份技能**。
+     * （`crystallized` 标记本身留着：它是"这条链进过库"的事实，列表与状态徽标还看它。）
+     */
     if (previous.status !== 'completed') {
       return {
         status: 409,
@@ -5862,13 +5867,7 @@ async function injectedSkillsOf(
         sendJson(res, 400, { error: '这条 run 不是起草 run，没有可上传的材料', code: 'not_a_draft' })
         return
       }
-      if (draftRun.crystallized === true) {
-        sendJson(res, 409, {
-          error: '这条草稿已经入库了——再往里加材料只会在以后的「重新沉淀」里造成误会',
-          code: 'already_crystallized',
-        })
-        return
-      }
+      // ★ 分批第 239 批：入库后照样可以加材料（见 `startContinueRun` 那条注释）。
       if (draftRun.status !== 'completed') {
         sendJson(res, 409, {
           error: '起草还没跑完，先别加材料（这一版读到的素材已经定了；跑完再加）',
@@ -5973,8 +5972,8 @@ async function injectedSkillsOf(
      *     起草者的目录，之后没人读、也没人删；
      *   · 必须**跑完**（`draft_not_completed`）：起草者开工时读的素材已经定了，跑着的时候
      *     追加，只会让"它读到的"和"磁盘上的"不是一份（与 `save-draft` 同一条纪律）；
-     *   · 已入库（`already_crystallized`）不给追加：那一版已经落进技能库，材料再变只会在
-     *     以后的"重新沉淀"里造成"当时依据的素材现在多了什么"的错觉；
+     *   · ~~已入库不给追加~~（**分批第 239 批撤掉**）：使用者定"确认入库后不删除，依然
+     *     可以继续反馈修改、并可以持续入库"，所以入库不再是这条起草的终点；
      *   · 空文本（`material_empty`）、超大（`material_too_large`，上限 100 KiB，与界面
      *     单个文件的读取封顶一致）：这两类都是"写进去也读不出来"，不如当场拒绝；
      *   · 名字不合法 ⇒ **不报错**，退回自动命名（`appended-N.md`）——名字是糖，不是契约。
@@ -6002,13 +6001,8 @@ async function injectedSkillsOf(
         })
         return
       }
-      if (draft.crystallized === true) {
-        sendJson(res, 409, {
-          error: '这条草稿已经入库了——材料再变只会在以后的「重新沉淀」里造成误会',
-          code: 'already_crystallized',
-        })
-        return
-      }
+      // ★ 分批第 239 批：入库后照样可以追加材料（"确认入库后还能继续改"的另一半，
+      //   见 `startContinueRun` 那条注释）。
       if (draft.status !== 'completed') {
         sendJson(res, 409, {
           error: '起草还没跑完，先别追加材料（这一版读到的素材已经定了；跑完再追加）',
@@ -6070,13 +6064,7 @@ async function injectedSkillsOf(
         })
         return
       }
-      if (draft.crystallized === true) {
-        sendJson(res, 409, {
-          error: '这条草稿已经入库了——材料是"这份技能依据什么生成"的证据，不再改',
-          code: 'already_crystallized',
-        })
-        return
-      }
+      // ★ 分批第 239 批：入库后照样可以删材料（同上）。
       if (draft.status !== 'completed') {
         sendJson(res, 409, {
           error: '起草还没跑完，先别删材料（这一版读到的素材已经定了；跑完再删）',

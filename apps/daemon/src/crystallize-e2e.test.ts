@@ -616,11 +616,17 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     const log = await git('log', '--oneline')
     assert.match(log, /沉淀（新建）/)
 
-    // ★ 入库后 → activeDraft 清空（crystallized 跳过，不再"继续"已沉淀的草稿）
+    /**
+     * ★ 分批第 239 批（使用者定）：**入库后仍然接得上这一条**。
+     *
+     * 原话："确认入库后不删除，依然还可以继续反馈修改。并可以持续入库"。
+     * 所以这里反过来断言：入库之后从来源再进沉淀页，接上的就是刚入库的那一版
+     * （不再是 `null`——从前那种"入库即结束"正是这次要改掉的）。
+     */
     const t2 = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
       activeDraft: { runId: string; status: string } | null
     }
-    assert.equal(t2.activeDraft, null, '入库后不恢复')
+    assert.equal(t2.activeDraft?.runId, draftRunId, '入库后仍然接得上这一版（还能接着改）')
   })
 
   test('★★★ 入库要标记**整条链**：多版任务的旧版不许在"重新沉淀"时被拉回来', async () => {
@@ -664,11 +670,15 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
     }
     assert.equal(old.crystallized, true, '整条链都要标：旧版还活着就会被"重新沉淀"拉回来')
 
-    // ② 从来源进沉淀页 ⇒ 没有"进行中的起草"
+    /**
+     * ② 从来源进沉淀页 ⇒ 接上的是**最新那一版**（分批第 239 批起"已入库"不再终止，
+     *    所以这里不再是 `null`）。这条判据要守的仍然是原来那件事：**旧版不许单独冒出来**
+     *    ——接上 v1 就等于把历史版本当成"进行中的起草"复活（使用者报过的那个）。
+     */
     const t2 = (await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json()) as {
       activeDraft: { runId: string } | null
     }
-    assert.equal(t2.activeDraft, null, '入库后该来源不该再冒出任何一版')
+    assert.equal(t2.activeDraft?.runId, v2, '接上的必须是最新那一版（旧版不许复活）')
 
     // ③ 列表里也没有这一行
     const list = (await (await fetch(`${daemon.url}/api/crystallize/drafts`)).json()) as {
@@ -678,6 +688,67 @@ describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git
       list.items.some((r) => r.taskRunId === v1),
       false,
       '已入库的任务不许留在沉淀列表里',
+    )
+  })
+
+  test('★★★ 入库之后还能接着改、接着入库：第二次是**更新同一份**（id 不变）', async () => {
+    /**
+     * ★ 分批第 239 批（使用者定）："沉淀，确认入库后不删除，依然还可以继续反馈修改。
+     *   并可以持续入库。"
+     *
+     * 这条走的是完整的那条路，而不是逐个接口各验一次：
+     *   入库 → 「按意见改一版」→ 再入库（update 同一份）→ 技能库里**还是一条**、正文是新的。
+     *
+     * ⚠️ 第二次入库必须显式给 `target.kind: 'update'`（界面上入库成功后会把目标切成
+     *    "更新刚刚那一份"）：不给就会撞 `clash_mine`——那正是这条路上最容易踩的一脚。
+     */
+    const runId = await runReviewed('入库后继续改的任务')
+    const v1 = await draftAndWait({ runId, target: { kind: 'new', purpose: '入库后继续改' } })
+    const first = await commit({
+      draftRunId: v1,
+      target: { kind: 'new' },
+      slug: 'keep-iterating',
+      files: {
+        'SKILL.md':
+          '---\nname: keep-iterating\ndescription: 第一版\n---\n\n# 一\n\n## When to Use\nX。\n\n## Procedure\n1. A。\n',
+      },
+    })
+    assert.equal(first.status, 201, JSON.stringify(first.body))
+    const firstSkill = first.body['skill'] as { id: string; slug: string }
+
+    // ① 入库之后**照样**能按意见改一版（从前 `revise` 在这一点上没有拦，但材料/接着说会拦）
+    const rev = await fetch(`${daemon.url}/api/crystallize/revise`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ draftRunId: v1, feedback: '把 Procedure 换成 B' }),
+    })
+    assert.equal(rev.status, 202, JSON.stringify(await rev.clone().text()))
+    const v2 = ((await rev.json()) as { draftRunId: string }).draftRunId
+    await waitRunStatus(v2, ['completed', 'failed', 'cancelled'])
+
+    // ② 第二次入库 = 更新同一份（id 不变、正文换成新的、库里仍然只有一条）
+    const second = await commit({
+      draftRunId: v2,
+      target: { kind: 'update', skillId: firstSkill.id },
+      slug: 'keep-iterating',
+      files: {
+        'SKILL.md':
+          '---\nname: keep-iterating\ndescription: 第二版\n---\n\n# 二\n\n## When to Use\nX。\n\n## Procedure\n1. B。\n',
+      },
+    })
+    assert.equal(second.status, 201, JSON.stringify(second.body))
+    const secondSkill = second.body['skill'] as { id: string; body: string; description: string | null }
+    assert.equal(secondSkill.id, firstSkill.id, '更新同一份：id 不许变')
+    assert.match(secondSkill.body, /# 二/, '正文是第二版的')
+    assert.equal(secondSkill.description, '第二版', 'frontmatter 也跟着换了')
+
+    const after = (await (await fetch(`${daemon.url}/api/skills`)).json()) as {
+      skills: Array<{ id: string; slug: string }>
+    }
+    assert.equal(
+      after.skills.filter((x) => x.slug === 'keep-iterating').length,
+      1,
+      '持续入库不许在库里堆出同名的第二条',
     )
   })
 
@@ -1580,13 +1651,15 @@ describe('§10.11 追加材料：daemon 写接口 + 校验（分批第 130 批�
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
 
-    // 已入库 ⇒ 409：那一版已经落进技能库，材料再变只会在以后的「重新沉淀」里造成误会
+    /**
+     * ★ 分批第 239 批：**入库之后仍然可以追加材料**（使用者定"确认入库后还能继续改"）。
+     *   从前这条返回 409 `already_crystallized`——那是"入库即结束"的另一半。
+     */
     const doneDraft = await daemon.store.getRun(draftRunId as RunId)
     assert.ok(doneDraft, '草稿得在')
     await daemon.store.insertRun({ ...doneDraft!, crystallized: true })
     const afterCommit = await append({ draftRunId, text: '入库之后还想补' })
-    assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
-    assert.equal(afterCommit.body.code, 'already_crystallized')
+    assert.equal(afterCommit.status, 200, JSON.stringify(afterCommit.body))
   })
 })
 
@@ -1784,13 +1857,17 @@ describe('§10.13 删除材料：只有使用者给的（appended/）能删，�
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
 
-    // 入库之后：材料是"这份技能依据什么生成"的证据，不再改
+    /**
+     * ★ 分批第 239 批：入库之后材料照样可改。
+     *   先追加一份、再删掉它——两个动作都不再 409（从前它们都回 `already_crystallized`）。
+     */
     const doneDraft = await daemon.store.getRun(draftRunId as RunId)
     assert.ok(doneDraft, '草稿得在')
     await daemon.store.insertRun({ ...doneDraft!, crystallized: true })
-    const afterCommit = await remove(draftRunId, 'appended/x.md')
-    assert.equal(afterCommit.status, 409, JSON.stringify(afterCommit.body))
-    assert.equal(afterCommit.body.code, 'already_crystallized')
+    const addedRel = await append(draftRunId, '入库之后再加一份', 'after-commit.md')
+    assert.match(addedRel, /^appended\//, '追加的落点还是 appended/')
+    const afterCommit = await remove(draftRunId, addedRel)
+    assert.equal(afterCommit.status, 200, JSON.stringify(afterCommit.body))
   })
 })
 

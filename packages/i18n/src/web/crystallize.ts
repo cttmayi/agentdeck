@@ -298,22 +298,20 @@ export const crystallizeText = {
   // 列表行上的"第几版"（分批第 17 批）：一行是一个**任务**，版本数是它的属性。
   // 不带 markdown 记号（界面文案守卫）。
   'crystallize.confirm': { zh: '确认入库', en: 'Save' },
-  'crystallize.abandon': { zh: '放弃', en: 'Discard' },
   'crystallize.clashMine': {
     zh: '已有你提炼的同名 skill（{slug}）——选「覆盖（进化）」或改名',
     en: 'You already crystallized a skill with this slug ({slug}) — overwrite (evolve) or rename',
   },
   'crystallize.switchToUpdate': { zh: '改为更新它', en: 'Update it instead' },
 
-  // ── 完成态 ──
-  'crystallize.doneTitle': { zh: '已沉淀', en: 'Crystallized' },
-  'crystallize.doneText': {
-    zh: 'skill {name} 已入库（skills-mine）',
-    en: 'Skill {name} saved (skills-mine)',
-  },
+  // ── 入库之后 ──
+  // ★ 分批第 239 批：`doneTitle` / `doneText` / `viewSkill` / `backToSource` 随"完成屏"一起删了
+  //   （使用者定：入库后留在这一屏、可以接着改、持续入库）；`abandon` 随「放弃」按钮一起删。
   'crystallize.doneVersioningOn': { zh: '已提交到 git', en: 'Committed to git' },
-  'crystallize.viewSkill': { zh: '查看技能', en: 'View skill' },
-  'crystallize.backToSource': { zh: '返回', en: 'Back' },
+  'crystallize.committedNote': {
+    zh: '已入库：{name}。还可以接着说「这里不对：…」改它，改完再点「确认入库」——会更新同一份。',
+    en: '{name} is saved. Keep going with "not quite: …" and press Save again — it updates the same skill.',
+  },
 
   // ── 任务页「沉淀技能&智能体」按钮的触发前置（Skills 列表也在用下面四个） ──
   'crystallize.taskGated': {

@@ -118,8 +118,6 @@
   export let onback: () => void = () => {}
   /** 入库成功后的回调（父组件刷新技能列表）。 */
   export let ondone: () => void = () => {}
-  /** 放弃了一条起草的回调（父组件刷新沉淀列表）。 */
-  export let ondiscarded: () => void = () => {}
   /**
    * ★ 分批第 147 批（§12.14：材料的两个显示处必须由同一份数据现算）：
    * 父组件给的"材料被**别处**改过"的信号——右栏产物栏里删掉了一份材料。
@@ -137,7 +135,14 @@
     if (draftRunId !== '') void loadMaterial()
   }
 
-  let step: 'target' | 'drafting' | 'review' | 'done' = 'target'
+  /**
+   * 三步：目标 → 起草 → 审阅。
+   *
+   * ★ 分批第 239 批：**没有了 `'done'`**（使用者定：入库后不删除、可以接着改、持续入库）。
+   * 一次入库只是"这一版进了库"，页面留在审阅态；"已入库"由 `committedSkill` 表达
+   * （它同时供徽标与那一行说明用）。
+   */
+  let step: 'target' | 'drafting' | 'review' = 'target'
   let targets: CrystallizeTargets | null = null
   let error = ''
   let loading = false
@@ -369,8 +374,10 @@
   }
 
   // ── 完成态 ──
-  let doneSkillName = ''
-  let doneVersioningNote = ''
+  /** 这一版已经入库的是哪一份（入库后仍然留在审阅屏：再改、再入库都走同一条路）。 */
+  let committedSkill = ''
+  /** 入库附带的一句版本管理说明（git 关了 / 降级时它说清原因）。 */
+  let committedVersioning = ''
 
   /** 素材统计（起草前用 targets 的，起草后用手头的，两者同源）。 */
   $: stats = materialStats ?? targets?.materialStats ?? null
@@ -416,7 +423,7 @@
   } as const satisfies Record<string, WebTextId>
 
   $: stepStatusKey =
-    step === 'done'
+    committedSkill !== ''
       ? STATUS_KEYS.done
       : step === 'review'
         ? STATUS_KEYS.review
@@ -428,7 +435,7 @@
               : STATUS_KEYS.drafting
           : STATUS_KEYS.asking
   $: stepStatusClass = (() => {
-    if (step === 'done') return 'done'
+    if (committedSkill !== '') return 'done'
     if (step === 'review') return 'in_review'
     if (step === 'drafting') {
       if (draftStatus === 'failed') return 'failed'
@@ -616,8 +623,8 @@
     slug = ''
     saving = false
     clash = null
-    doneSkillName = ''
-    doneVersioningNote = ''
+    committedSkill = ''
+    committedVersioning = ''
   }
 
   // ★ 换了来源 run（任务列表里点另一条，流程页还开着）：整页清零重来，
@@ -914,50 +921,18 @@
   }
 
   /**
-   * 放弃草稿：**真的**把它从列表里去掉，然后回目标态。
+   * ★ 分批第 239 批（使用者定）：**「放弃」按钮删掉了**。
    *
-   * ★ 三轮修：原来这里只重置本地状态——草稿仍在库里、仍在左栏（使用者看到"很多
-   * 沉淀任务标注已完成、实际没完成"）。现在打 `/api/crystallize/discard`（服务端
-   * 记 `discarded: true`，还在跑会先停），列表那边的「×」走同一条路。
+   * 原话："去掉「放弃」按钮"。它原来在栏头与"没交 skill 那一屏"各有一个，而入库之后
+   * 这条起草还要继续（同批的另一半）——"放弃"和"接着改"并排摆着，等于给一个自相矛盾的
+   * 选择。要清掉一条草稿仍然有出口：沉淀列表每行右侧那个「×」走同一条
+   * `/api/crystallize/discard`（它才是"这条不做了"的地方，而且已经入库的会被服务端拒）。
    */
-  async function abandonReview(): Promise<void> {
-    if (draftRunId !== '') {
-      if (
-        !(await askConfirm({
-          title: $t('crystallize.abandon'),
-          message: $t('crystallize.discardConfirm', { label: sourceLabel }),
-          confirmLabel: $t('crystallize.abandon'),
-          danger: true,
-        }))
-      )
-        return
-      try {
-        await api('/api/crystallize/discard', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ draftRunId }),
-        })
-        ondiscarded()
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e)
-        return
-      }
-    }
-    step = 'target'
-    draftRunId = ''
-    draftStatus = null
-    handledTerminal = false
-    editor.reset()
-    slug = ''
-    clash = null
-    error = ''
-  }
-
   /** 起草 run 到终态：completed → 取草稿进审阅；否则留在起草节显示失败态。 */
   async function onDraftTerminal(status: string): Promise<void> {
     // 起草刚跑完：把「最后结果」也读回来（否则切到审阅态时那一段是空的）
     if (status === 'completed') void loadDraftFinalText()
-    if (handledTerminal || step === 'done') return
+    if (handledTerminal) return
     handledTerminal = true
     if (status === 'completed') {
       draftStatus = 'completed'
@@ -1389,11 +1364,26 @@
           }),
         },
       )
-      doneSkillName = res.skill.name
-      doneVersioningNote = res.versioning?.enabled
+      /**
+       * ★ 分批第 239 批（使用者定）：**入库不再终结这一条起草**。
+       *
+       * 原话："沉淀，确认入库后不删除，依然还可以继续反馈修改。并可以持续入库"。
+       *
+       * 所以这里不跳"完成"屏，而是留在审阅态，并把目标切成**更新刚刚入库的那一份**：
+       *   · 接着说的每一句都还能改这一版（栏脚输入条）；
+       *   · 再点「确认入库」= 更新**同一份** skill（服务端 update 分支复用它的 id）；
+       *   · 不切目标的话第二次会撞 409 `clash_mine`（"已有你提炼的同名 skill"）——
+       *     那正是"持续入库"这条路上最容易踩的一脚。
+       *
+       * slug 一起钉成落库后的那个：update 不允许改 slug（服务端 `slug_mismatch`）。
+       */
+      committedSkill = res.skill.name
+      committedVersioning = res.versioning?.enabled
         ? $t('crystallize.doneVersioningOn')
         : (res.versioning?.note ?? '')
-      step = 'done'
+      targetKind = 'update'
+      selectedSkillId = res.skill.id
+      slug = res.skill.slug
       commitOpen = false
       ondone()
     } catch (err) {
@@ -1427,9 +1417,6 @@
     await startDraft()
   }
 
-  function goSkills(): void {
-    go('skills')
-  }
 </script>
 
   <!--
@@ -1533,9 +1520,6 @@
         <p class="faint small" data-draft-nooutput-hint>{$t('crystallize.noOutputHint')}</p>
         <div class="row-end msg-actions" data-msg-actions>
           <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
-          <button class="ghost small" onclick={() => void abandonReview()}>
-            {$t('crystallize.abandon')}
-          </button>
         </div>
       {/if}
 
@@ -1614,9 +1598,6 @@
           它和栏脚输入条的「这里不对：…」是同一件事，而这一页的心智是对话——那就用说的。
           占位文案已经写了这句话（`crystallize.chatPlaceholder`），按钮不再另给一个入口。
         -->
-        <button type="button" class="ghost small" data-review-abandon onclick={() => void abandonReview()}>
-          {$t('crystallize.abandon')}
-        </button>
         <button
           type="button"
           class="primary small"
@@ -1819,7 +1800,7 @@
           </div>
       {/if}
 
-      {#if draftRunId !== '' && (step === 'drafting' || step === 'review' || step === 'done')}
+      {#if draftRunId !== '' && (step === 'drafting' || step === 'review')}
       <!--
         ★ 分批第 194 批：**你把话说清楚了，它才能开始**——这条是"你那一轮"。
 
@@ -1909,18 +1890,16 @@
       -->
       {/if}
 
-      {#if step === 'done'}
-        <section class="notice good done-box">
-          <strong>{$t('crystallize.doneTitle')}</strong>
-          <p>{$t('crystallize.doneText', { name: doneSkillName })}</p>
-          {#if doneVersioningNote !== ''}
-            <p class="faint small">{doneVersioningNote}</p>
-          {/if}
-          <div class="row-end">
-            <button class="primary" onclick={goSkills}>{$t('crystallize.viewSkill')}</button>
-            <button class="ghost" onclick={onback}>{$t('crystallize.backToSource')}</button>
-          </div>
-        </section>
+      <!--
+        ★ 分批第 239 批（使用者定）：入库之后**留在这一屏**。
+        原来这里是一块「完成」屏（写着"已入库" + 两个出口按钮），点完就从流程里退出去了；
+        现在只留一行说明，把"还能接着改、再点入库就是更新同一份"写清楚。
+      -->
+      {#if committedSkill !== ''}
+        <p class="faint small committed-note" data-committed-note>
+          {$t('crystallize.committedNote', { name: committedSkill })}
+          {#if committedVersioning !== ''}· {committedVersioning}{/if}
+        </p>
       {/if}
         </div>
       </div>
@@ -2724,14 +2703,9 @@
 
 
 
-  /* ══════════ 完成态 ══════════
-     ★ 底色/描边/内距吃全局 `.notice`（`.good` 那档），这里只管"竖着排"——
-     再自造一张卡片就又多一套边距，是使用者说的"和任务不一样"的来源之一。 */
-  .done-box {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-2);
-    padding: var(--sp-4);
+  /* 入库之后那一行说明（分批第 239 批：不再有一块"完成"屏，只有这一句） */
+  .committed-note {
+    margin: var(--sp-2) 0 0;
   }
 
   /* ★ 分批第 159 批：`.review-side` / `.review-cell` 的样式**跟着编辑器走了**

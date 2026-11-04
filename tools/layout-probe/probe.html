@@ -4971,16 +4971,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             confirmInHeader: [
               ...d().querySelectorAll('.detail-head [data-review-actions] button'),
             ].some((b) => text(b).includes('确认入库')),
-            abandonInHeader: [
-              ...d().querySelectorAll('.detail-head [data-review-actions] button'),
-            ].some((b) => text(b).includes('放弃')),
-            // ⚠️ 这两个留作"只剩一个入口"的反向检查：消息区里**不该**再有这两个动作
+            // ⚠️ 这两个留作"只剩一个入口"的反向检查：消息区里**不该**再有这个动作
             confirmInMessage: [
               ...d().querySelectorAll('.crystal-flow button'),
             ].some((b) => text(b).includes('确认入库')),
-            abandonInMessage: [
-              ...d().querySelectorAll('.crystal-flow button'),
-            ].some((b) => text(b).includes('放弃')),
+            /**
+             * ★ 分批第 239 批（使用者定："去掉「放弃」按钮"）：**整页一个都不许有**。
+             *   入库之后这条起草还要继续（同批的另一半），"放弃"与"接着改"并排摆着
+             *   等于给一个自相矛盾的选择；清掉草稿的出口在沉淀列表每行的「×」。
+             */
+            abandonAnywhere: [...d().querySelectorAll('button')].some((b) =>
+              text(b).trim() === '放弃',
+            ),
           }
           facts['crystal.headActionsBesideTitle'] =
             facts['crystal.actionsInMessages'].headActionsBesideTitle
@@ -5981,11 +5983,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 facts['crystal.noOutputNoConfirmButton'] = ![...d().querySelectorAll('button')].some(
                   (b) => text(b).includes('确认入库'),
                 )
-                facts['crystal.noOutputHasExits'] = ['重新起草', '放弃'].every((needle) =>
-                  [...d().querySelectorAll('[data-draft-turn-msg] button')].some((b) =>
-                    text(b).includes(needle),
-                  ),
-                )
+                /**
+                 * ★ 分批第 239 批：这一屏原来有两个出口（重新起草 / 放弃），现在只剩
+                 *   「重新起草」——「放弃」按钮整页删掉了（使用者定）。
+                 */
+                facts['crystal.noOutputHasExits'] = [
+                  ...d().querySelectorAll('[data-draft-turn-msg] button'),
+                ].some((b) => text(b).includes('重新起草'))
               }
               f.contentWindow.location.hash = '#/tasks'
               await until(() => !d().querySelector('.crystal-chat'), 40)
@@ -8402,6 +8406,75 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
          * ⚠️ **必须放在整支探针的最后**：它要把页面导航到「技能」页，而前面那些判据依赖
          *    "停在聊天页的草稿态"（第一版插在中间，9 条聊天判据当场全红——这正是它的价值）。
          */
+        /**
+         * ★ 分批第 239 批（使用者定："沉淀，确认入库后不删除，依然还可以继续反馈修改。
+         *   并可以持续入库"）：**入库之后留在审阅屏**，只多一行「已入库」说明，
+         *   「确认入库」还在（再点一次 = 更新同一份），「放弃」整页都没有。
+         *
+         * ⚠️ 这条**真的按一次入库**（会往探针那次性 daemon 的技能库里写一条），
+         *   所以和上面那条一样放在整支探针的最后——前面那些判据不该被库里多出来的东西影响。
+         */
+        facts['crystal.committedStaysOnReview'] = await (async () => {
+          // ⚠️ 这一段在 `cyEnter` / `cyQuery` 的作用域之外（它们在沉淀那一节里用 `const` 定义）
+          //    ⇒ 这里自己从 URL 取夹具 id、自己走一遍"切走 → 进来 → 等审阅态"。
+          const draftId = new URLSearchParams(location.search).get('crystalDraft')
+          if (!draftId) {
+            errors.push('没有起草夹具 id（这一条量不到）')
+            return null
+          }
+          f.contentWindow.location.hash = '#/tasks'
+          await untilNet(() => !d().querySelector('[data-review-actions]'), 40)
+          f.contentWindow.location.hash = `#/crystallize/${draftId}`
+          const entered = await untilNet(() => !!d().querySelector('[data-review-actions]'), 120)
+          if (!entered) {
+            errors.push('没进到审阅态（这一条量不到）')
+            return null
+          }
+          const commitBtn = d().querySelector('[data-review-commit]')
+          if (!commitBtn) {
+            errors.push('审阅态没有「确认入库」按钮')
+            return null
+          }
+          click(commitBtn)
+          const dialog = await untilNet(() => !!d().querySelector('[role="dialog"]'), 40)
+          if (!dialog) {
+            errors.push('点「确认入库」没弹确认框')
+            return null
+          }
+          const confirm = [...d().querySelectorAll('[role="dialog"] button')].find((b) =>
+            /^(确认|入库)/.test(text(b).trim()) && !text(b).includes('取消'),
+          )
+          if (!confirm) {
+            errors.push('确认框里找不到"确认"那一颗')
+            return null
+          }
+          click(confirm)
+          /**
+           * 入库是异步的：打接口 → 落 skills-mine → git 提交。所以先等**确认框关掉**
+           * （提交成功才会关），再等那一行说明。
+           * ⚠️ `untilNet` 每一轮只是一次真实往返，120 轮在本地不到一秒——而 git 提交
+           *   比它慢，第一版就是这么量到"还在保存中"的。这里给足 400 轮。
+           */
+          await untilNet(() => !d().querySelector('[role="dialog"]'), 400)
+          const noted = await untilNet(() => !!d().querySelector('[data-committed-note]'), 200)
+          const diag = {
+            dialogStillOpen: !!d().querySelector('[role="dialog"]'),
+            errorText: (text(d().querySelector('.crystal-flow .notice.bad')) ?? '').slice(0, 120),
+            confirmLabel: text(confirm).trim(),
+          }
+          const stillReview = !!d().querySelector('[data-review-actions]')
+          const stillCommit = !!d().querySelector('[data-review-commit]')
+          const note = text(d().querySelector('[data-committed-note]')) ?? ''
+          const noAbandon = ![...d().querySelectorAll('button')].some(
+            (b) => text(b).trim() === '放弃',
+          )
+          if (!noted) errors.push('入库成功之后没有出现「已入库」那一行说明')
+          if (!stillReview) errors.push('入库之后离开了审阅屏（应该留在原地继续改）')
+          if (!stillCommit) errors.push('入库之后「确认入库」没了（还应该能再入库一次）')
+          if (!noAbandon) errors.push('入库之后页面上又出现了「放弃」')
+          return { noted, stillReview, stillCommit, noAbandon, note: note.slice(0, 40), diag }
+        })()
+
         facts['skills.reloadsOnEnter'] = await (async () => {
           const lateSlug = 'probe-late-skill'
           const created = await f.contentWindow

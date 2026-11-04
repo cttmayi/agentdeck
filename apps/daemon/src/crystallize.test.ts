@@ -202,7 +202,7 @@ describe('crystallizeTargets：目标面板信息', () => {
    * 写侧已经改成"入库标记整条链"，这条用例钉的是**读侧**：链上任何一版已入库/已放弃
    * ⇒ 整条链都不算"进行中的起草"。没有这一半，那两个链要等下次入库才修好。
    */
-  test('★★★ 链上有一版已入库 ⇒ 整条链都不算"进行中的起草"（旧数据兜底）', async () => {
+  test('★★★ 链上最新一版已入库 ⇒ 接上的就是它（分批第 239 批：已入库不再是终点）', async () => {
     const agent = await seedAgent({ id: 'exec-chain' })
     const taskRun = await seedRun({
       id: 'run-chain',
@@ -236,10 +236,17 @@ describe('crystallizeTargets：目标面板信息', () => {
 
     const run = await store.getRun('run-chain' as never)
     const targets = await crystallizeTargets(store, run!)
+    /**
+     * ★ 分批第 239 批（使用者定）："确认入库后不删除，依然还可以继续反馈修改。
+     *   并可以持续入库" ⇒ 已入库的草稿**照样接得上**。
+     *
+     * 这条仍要守的旧承诺是"旧版不许复活"：接上的必须是**最新那一版**（v2），不是 v1。
+     * 从前这里断言 `null`（入库即结束），那条口径这一批按使用者的话翻了过来。
+     */
     assert.equal(
-      targets.activeDraft,
-      null,
-      'v1 没标记也不算"进行中"：同一条链已经入库了（否则会把它拉回界面）',
+      targets.activeDraft?.runId,
+      'draft-chain-v2',
+      '接上的是最新那一版（已入库也接；旧版不许单独冒出来）',
     )
   })
 
@@ -303,10 +310,13 @@ describe('crystallizeTargets：目标面板信息', () => {
     let t = await crystallizeTargets(store, taskRun)
     assert.deepEqual(t.activeDraft, { runId: 'draft-running', status: 'running', target: { kind: 'new' } })
 
-    // ② 已入库（crystallized）→ 跳过
+    /**
+     * ② 已入库（crystallized）→ **照样接上**（分批第 239 批，使用者定：入库后还能接着改、
+     *   持续入库）。从前这里断言 `null`——那是"入库即结束"的旧口径。
+     */
     await store.insertRun({ ...running, crystallized: true })
     t = await crystallizeTargets(store, taskRun)
-    assert.equal(t.activeDraft, null, '已入库的草稿不恢复')
+    assert.equal(t.activeDraft?.runId, 'draft-running', '已入库的草稿也要接得上（还能继续改）')
 
     // ③ 已完成待审阅 + 更新的起草中 → 取最近（queuedAt 大）
     const completed = makeRun({

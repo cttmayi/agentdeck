@@ -1376,6 +1376,33 @@ const CHECKS = [
         : `输入框 ${v.input}px　发送 ${v.send}px　📎 ${String(v.attach)}px`,
   },
   {
+    view: '沉淀',
+    key: 'crystal.committedStaysOnReview',
+    /**
+     * ★ 分批第 239 批（使用者定）："沉淀，确认入库后不删除，依然还可以继续反馈修改。
+     *   并可以持续入库"。
+     *
+     * 判据：真的按一次入库之后 —— ① 出现「已入库」那一行说明；② **仍在审阅屏**；
+     * ③ 「确认入库」还在（再点一次就是更新同一份）；④ 页面上没有「放弃」。
+     * 只量其中一条都会放过半截：例如"没跳走但按钮没了"照样不能用。
+     */
+    label:
+      '★★★ 入库之后**留在审阅屏**：出现「已入库」说明、「确认入库」还在（可以再入库）、没有「放弃」',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.noted === true &&
+      v.stillReview === true &&
+      v.stillCommit === true &&
+      v.noAbandon === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `说明 ${String(v.noted)}　还在审阅 ${String(v.stillReview)}　还能再入库 ${String(v.stillCommit)}　` +
+          `没有放弃 ${String(v.noAbandon)}　「${String(v.note)}」　` +
+          `诊断 ${JSON.stringify(v.diag ?? null)}`,
+  },
+  {
     view: '技能',
     key: 'skills.reloadsOnEnter',
     /**
@@ -3955,21 +3982,24 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.actionsInMessages',
+    /**
+     * ★ 分批第 239 批：使用者要求**去掉「放弃」按钮**，所以这条的判据跟着收窄成两件事：
+     *   「确认入库」在栏头、消息区里没有；并且**整页一个「放弃」都没有**。
+     */
     label:
       '★★★ 动作在**栏头右侧**、消息区里没有（使用者 2026-11："「入库」的按钮不应该在对话下面，' +
-      '可能放顶上右侧比较合理"）：「确认入库」「放弃」都在栏头那一排，而且**同一个动作只有一个入口**',
+      '可能放顶上右侧比较合理"）；并且「放弃」按钮整页都没有了（分批第 239 批，使用者定）',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.confirmInHeader === true &&
-      v.abandonInHeader === true &&
       v.confirmInMessage === false &&
-      v.abandonInMessage === false,
+      v.abandonAnywhere === false,
     show: (v) =>
       v === null
         ? 'null'
-        : `栏头 确认 ${String(v.confirmInHeader)} / 放弃 ${String(v.abandonInHeader)}　` +
-          `消息里 确认 ${String(v.confirmInMessage)} / 放弃 ${String(v.abandonInMessage)}`,
+        : `栏头 确认 ${String(v.confirmInHeader)}　消息里 确认 ${String(v.confirmInMessage)}　` +
+          `整页有「放弃」 ${String(v.abandonAnywhere)}`,
   },
   {
     view: '沉淀',
@@ -4227,7 +4257,7 @@ const CHECKS = [
   {
     view: '沉淀',
     key: 'crystal.noOutputHasExits',
-    label: '★★ 那一屏的两个出口都在消息里：「重新起草」「放弃」',
+    label: '★★ 那一屏的出口在消息里：「重新起草」（「放弃」按钮已按使用者要求整页删掉）',
     ok: (v) => v === true,
     show: (v) => String(v),
   },
@@ -4235,7 +4265,7 @@ const CHECKS = [
     view: '沉淀',
     key: 'crystal.headActionsBesideTitle',
     label:
-      '★★★ 「放弃 / 确认入库」在**标题右侧**（使用者连提两次："依然在第 3 行，而不是右侧"）：' +
+      '★★★ 「确认入库」在**标题右侧**（使用者连提两次："依然在第 3 行，而不是右侧"）：' +
       '与标题同一水平带、在标题右边、贴着栏头右缘——三条缺一不算（它在第三行时也"在栏头里"）',
     ok: (v) => !!v && v.sameBand === true && v.rightOfTitle === true && v.nearRightEdge === true,
     show: (v) =>

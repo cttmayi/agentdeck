@@ -60,9 +60,9 @@ export interface CrystallizeTargets {
    */
   materialStats: { turns: number; toolCalls: number } | null
   /**
-   * 该来源**最近一条未入库**的 skill-draft 起草 run（恢复进行中的起草）。
-   * 起草中（非终态）与已完成待审阅都算；`crystallized: true`（已入库）的跳过。
-   * `null` = 没有进行中的起草。
+   * 该来源最近一条 skill-draft 起草 run（恢复进行中的起草）。
+   * 起草中（非终态）与已完成待审阅都算；**已入库的也算**（分批第 239 批：入库后还能
+   * 接着改、接着入库），只有已放弃的不算。`null` = 没有进行中的起草。
    *
    * ⚠️ 2026-10-21 加了一个例外：**进来的 run 本身就是一条草稿时，就挂它**
    * （见 `crystallizeTargets` 里的 `requested`）——URL 指名了哪条草稿就是哪条。
@@ -173,7 +173,8 @@ export async function crystallizeTargets(
  *   · 任务（run.subject.type !== 'conversation'）——`subject.sourceRunId === run.id`；
  *   · 对话——run 是某一轮的 run，会话还有别的轮：先取会话全部轮次的 runId，
  *     再匹配 `sourceRunId ∈ 那些 runId`。
- * 排序取 `queuedAt` 最新一条；`crystallized: true`（已入库）的跳过。
+ * 排序取 `queuedAt` 最新一条；只有 `discarded: true`（已放弃）的跳过——
+ * `crystallized: true`（已入库）**不再**跳过（分批第 239 批：入库后还能接着改、接着入库）。
  * 带上起草时落库的沉淀目标（`crystallizeTarget`），前端按它还原目标。
  */
 async function findActiveDraft(
@@ -197,9 +198,16 @@ async function findActiveDraft(
     sourceRunIds = [run.id as string]
   }
 
+  /**
+   * ★ 分批第 239 批（使用者定）：**已入库的草稿照样算"进行中的起草"**。
+   *
+   * 原话："确认入库后不删除，依然还可以继续反馈修改。并可以持续入库"。
+   * 所以这里只排除**已放弃**的；`crystallized` 不再是终点（它是"这条链进过库"的
+   * 事实，界面上的状态徽标还看它）。刷新之后回到来源页，仍然接得上这一条。
+   */
   const matched = drafts
     .filter((r) => {
-      if (r.crystallized === true || r.discarded === true) return false
+      if (r.discarded === true) return false
       const src = r.subject.sourceRunId
       return src !== undefined && sourceRunIds.includes(src)
     })
@@ -219,7 +227,8 @@ async function findActiveDraft(
   const settledByChain = new Set<string>()
   const byId = new Map(drafts.map((r) => [r.id as string, r]))
   for (const r of drafts) {
-    if (r.crystallized !== true && r.discarded !== true) continue
+    // ★ 分批第 239 批：只有**放弃**会让整条链沉下去；入库不再算"结束"（见上）。
+    if (r.discarded !== true) continue
     // 沿 `revisedFrom` 上溯到根，再向下把所有同根的都算进去
     let cur = r
     let hops = 0
