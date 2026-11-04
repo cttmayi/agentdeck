@@ -40,6 +40,31 @@
   export let closeLabel = ''
   export let onclose: () => void = () => {}
 
+  /**
+   * ★ 分批第 238 批（使用者报的："打开 material 打开一个文件的时候，被差异这个图层挡住了"）：
+   * **把浮层整个挂到 `<body>` 下**，别留在原地。
+   *
+   * 根因是**层叠上下文**：浮层 `position: fixed; z-index: 50` 看着很高，但只要它的某个
+   * 祖先自己是一个层叠上下文（`position: relative` + `z-index`），它就只能**在那个上下文
+   * 内部**比较——而它在外面只以那个祖先的 z 参与排序。实测的那条：栏脚 `.foot-files` 带
+   * `z-index: 1`（它必须那样才盖得住消息区溢出的内容），于是栏脚里点开的文件查看器
+   * （z=50）在外层只算 z=1，被产物栏那个 `z-index: 40` 的**窄屏抽屉**盖住 ⇒ 什么也看不见。
+   *
+   * 挂到 `body` 之后它不再有任何祖先能压住它——这是"浮层就该在最上面"这句话在实现上的
+   * 样子，而不是把 z-index 往上加。
+   *
+   * ⚠️ 用 action 而不是在 `$effect` 里搬：`{#if open}` 重新挂载时 action 会重跑，
+   *    销毁时把节点带回去（`destroy`），不会在 `<body>` 里堆一堆孤儿浮层。
+   */
+  function teleport(node: HTMLElement): { destroy: () => void } {
+    document.body.appendChild(node)
+    return {
+      destroy: () => {
+        node.remove()
+      },
+    }
+  }
+
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && open) onclose()
   }
@@ -48,7 +73,9 @@
 <svelte:window onkeydown={onKeydown} />
 
 {#if open}
-  <div class="drawer-backdrop" onclick={onclose} role="presentation"></div>
+  <!-- 这一层只是搬运用的壳：里面两块都是 `position: fixed`，壳本身不参与排版 -->
+  <div class="modal-host" use:teleport>
+    <div class="drawer-backdrop" onclick={onclose} role="presentation"></div>
 
   <div
     class="modal"
@@ -75,5 +102,6 @@
     <div class="modal-foot">
       <slot name="foot" />
     </div>
+  </div>
   </div>
 {/if}

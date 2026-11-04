@@ -5317,6 +5317,88 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             cyDiffRect.y >= cyEditorRectBefore.y - 4 &&
             cyDiffRect.y - cyEditorRectBefore.y < 60 &&
             cyDiffRect.y < cyEditorRectBefore.y + cyEditorRectBefore.h
+          /**
+           * ★ 分批第 238 批（使用者报的）：差异浮层开着的时候，从栏脚点开一个**材料文件**，
+           * 那个查看器必须**在最上面**。
+           *
+           * 根因（量出来的，不是猜的）：产物栏在**窄于 74rem** 时不是网格里的一列，而是
+           * `position: fixed; z-index: 40` 的右侧抽屉——而"差异"那层就在抽屉里。栏脚
+           * （`.foot-files`）为了盖住消息区溢出的内容带 `z-index: 1`，于是它**内部**那个
+           * `position: fixed; z-index: 50` 的查看器只以 z=1 参与比较 ⇒ 被抽屉（z=40）盖住，
+           * 人点开材料文件什么也看不见。
+           *
+           * ⚠️ 所以这条**必须在窄 iframe 下量**：1280px 时产物栏是普通一列，两边不相交，
+           *    量出来永远是绿的（第一版就是这么绿的，白量一次）。量完立刻复原宽度。
+           *
+           * 判据只认**几何事实**：对话框正中间那一点，`elementFromPoint` 拿到的必须落在
+           * 对话框里。
+           */
+          facts['crystal.viewerAboveDiff'] = await (async () => {
+            const before = f.style.width
+            let out = null
+            try {
+              f.style.width = '1000px'
+              await untilNet(() => (f.contentWindow.innerWidth ?? 0) < 1100, 60)
+              // 窄屏下"有产物 ⇒ 抽屉自动推开"（`drawerOpen` 是按数据推出来的）
+              await untilNet(
+                () => !!d().querySelector('.artifact-pane[data-open="true"]'),
+                40,
+              )
+              // 栏脚根上通常只有目录（`skill/`、`material/`），展开一层再找文件
+              let fileBtn = d().querySelector('[data-foot-files] .wd-file')
+              if (!fileBtn) {
+                const dirBtn = d().querySelector('[data-foot-files] .wd-dir')
+                if (dirBtn) {
+                  click(dirBtn)
+                  await untilNet(() => !!d().querySelector('[data-foot-files] .wd-file'), 40)
+                  fileBtn = d().querySelector('[data-foot-files] .wd-file')
+                }
+              }
+              if (!fileBtn) {
+                errors.push('栏脚里连展开都没有可点的文件（这一条量不到）')
+                return null
+              }
+              click(fileBtn)
+              const opened = await untilNet(() => !!d().querySelector('[role="dialog"]'), 60)
+              if (!opened) {
+                errors.push('窄屏下点材料文件没弹出查看器（这一条量不到）')
+                return null
+              }
+              await untilNet(() => !!d().querySelector('[role="dialog"] .modal-body'), 40)
+              const dialog = d().querySelector('[role="dialog"]')
+              const box = dialog.getBoundingClientRect()
+              // 三个点（中上、正中、中下）：只量一个点会漏掉"盖住一半"的那种
+              const points = [0.15, 0.5, 0.85].map((k) => ({
+                x: Math.round(box.left + box.width / 2),
+                y: Math.round(box.top + box.height * k),
+              }))
+              const hits = points.map((pt) => {
+                const top = d().elementFromPoint(pt.x, pt.y)
+                return {
+                  inside: top !== null && (dialog === top || dialog.contains(top)),
+                  what: top ? `${top.tagName.toLowerCase()}.${String(top.className || '').split(/\s+/)[0]}` : 'null',
+                }
+              })
+              const covered = hits.filter((h) => !h.inside)
+              if (covered.length > 0) {
+                errors.push(
+                  `窄屏下材料文件的查看器被盖住了：${covered.map((h) => h.what).join('、')}`,
+                )
+              }
+              // 关掉查看器，别影响后面几节
+              const close = [...d().querySelectorAll('[role="dialog"] button')].find((b) =>
+                text(b).includes('关闭'),
+              )
+              if (close) click(close)
+              await until(() => !d().querySelector('[role="dialog"]'), 40)
+              out = { inside: covered.length === 0, top: covered.map((h) => h.what).join('、') }
+            } finally {
+              f.style.width = before
+              await untilNet(() => (f.contentWindow.innerWidth ?? 0) > 1100, 60)
+            }
+            return out
+          })()
+
           // ★ 基线切换按钮**只有改版草稿才有**（`{#if artifacts.revisedFrom !== null}`）：
           //   这一条量的正是"这条不是改版 ⇒ 不给一个永远空的切换"。
           facts['crystal.nonRevisedHasNoBaselineSwitch'] = ![

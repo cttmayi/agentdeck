@@ -4582,6 +4582,28 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.viewerAboveDiff',
+    /**
+     * ★ 分批第 238 批（使用者报的，真 bug）：差异浮层开着的时候，从栏脚点开一个**材料文件**，
+     * 那个查看器必须**在最上面**。
+     *
+     * 根因是层叠上下文：栏脚（`.foot-files`）为了盖住消息区溢出的内容而 `z-index:1`，
+     * 于是它内部那个 `position:fixed; z-index:50` 的对话框**整体只以 z=1 参与比较**，
+     * 被差异浮层（z=3）盖住——点开材料文件什么也看不见。
+     *
+     * 判据量**几何事实**：对话框正中间那一点，`elementFromPoint` 拿到的必须落在对话框里。
+     */
+    label:
+      '★★★ **窄屏（< 74rem，产物栏是右侧抽屉）**时，差异浮层开着点开材料文件，查看器仍在最上面' +
+      '（层叠上下文不能把它压在栏脚之下——浮层要挂到 body 上）',
+    ok: (v) => v !== null && typeof v === 'object' && v.inside === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `对话框上三点都在最上面 ${String(v.inside)}${v.top === '' ? '' : `　盖住它的是 ${String(v.top)}`}`,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.diffSamePlaceAsEditor',
     // ★ 分批第 160 批：差异改成"弹层看"（使用者定）——它现在**盖满右栏**，所以判据从
     //   "与正文列同一个 x"改成"起点齐平 + 宽度不小于正文列 + 仍压在同一块窗格上"。
