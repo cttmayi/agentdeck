@@ -5083,6 +5083,33 @@ async function injectedSkillsOf(
       return
     }
 
+    /**
+     * 记忆的磁盘镜像同步（分批第 241 批）：三个写入口共用，三件事一起做完。
+     *
+     * ① **失败不打断保存**：记忆已经落到 store 了，镜像只是给人看的附带产物——
+     *    让它把"记忆写进去了"变成"保存报错了"是更坏的交换。
+     * ② **降级要说出来**（`versioning.enabled === false`）：结果里的 note 必须有人读，
+     *    否则"没有历史可回退"这件事永远只存在于一个没人看的字段里（本仓库的老毛病：
+     *    字段在、路径不在）。所以这里 warn 一次，运维日志里能看见。
+     * ③ 版本管理关着是**正常状态**（机器没装 git），用 warn 而不是 error。
+     */
+    const syncMemoryMirrorFor = async (agentId: Agent['id'], agentName: string): Promise<void> => {
+      try {
+        const result = await syncMemoryMirror({
+          store,
+          workspaceId,
+          agentId,
+          agentName,
+          root: memoryRoot,
+        })
+        if (!result.versioning.enabled) {
+          warn(`记忆镜像已写但无历史回退：${result.versioning.note ?? ''}（文件：${result.path}）`)
+        }
+      } catch (err: unknown) {
+        warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
     const agentMatch = /^\/api\/agents\/([^/]+)$/.exec(path)
     if (agentMatch) {
       const agentId = decodeURIComponent(agentMatch[1]!) as Agent['id']
@@ -5392,15 +5419,7 @@ async function injectedSkillsOf(
          *   否则"记忆写进去了、但保存整份 agent 报错"会让界面以为记忆也丢了。
          */
         if (body['memory'] !== undefined) {
-          await syncMemoryMirror({
-            store,
-            workspaceId,
-            agentId,
-            agentName: updated.name,
-            root: memoryRoot,
-          }).catch((err: unknown) => {
-            warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
-          })
+          await syncMemoryMirrorFor(agentId, updated.name)
         }
         // 保存的返回值带上**最新**的记忆：这样"这期间聊天里又记了一条"也能一起画出来
         const memory = await listActiveMemory(store, workspaceId, agentId)
@@ -5519,15 +5538,7 @@ async function injectedSkillsOf(
           added.push(result.entry)
         }
         // 镜像同理（见 PATCH agent 处的说明）：聊天的两个写入口也要让它跟上
-        await syncMemoryMirror({
-          store,
-          workspaceId,
-          agentId: targetAgentId,
-          agentName: target.name,
-          root: memoryRoot,
-        }).catch((err: unknown) => {
-          warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
-        })
+        await syncMemoryMirrorFor(targetAgentId, target.name)
         sendJson(res, 201, { entries: added })
         return
       }
@@ -5542,15 +5553,7 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: result.error, code: result.code })
           return
         }
-        await syncMemoryMirror({
-          store,
-          workspaceId,
-          agentId: targetAgentId,
-          agentName: target.name,
-          root: memoryRoot,
-        }).catch((err: unknown) => {
-          warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
-        })
+        await syncMemoryMirrorFor(targetAgentId, target.name)
         sendJson(res, 200, { ok: true, alreadyRemoved: result.alreadyRemoved })
         return
       }
