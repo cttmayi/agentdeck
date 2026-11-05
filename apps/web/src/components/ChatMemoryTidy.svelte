@@ -31,11 +31,15 @@
     id: string
     text: string
     kind: MemoryKindId
+    /** 它声称的人的原话（逐字）；`null` = 没给。 */
+    from: string | null
+    /** 平台核对过：这段原话真的在人说过的话里。 */
+    grounded: boolean
   }
 
   type Answer = {
     status: string
-    candidates: Array<{ kind: MemoryKindId; text: string }> | null
+    candidates: Array<{ kind: MemoryKindId; text: string; from: string | null; grounded: boolean }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
     failure?: string | null
@@ -57,7 +61,22 @@
   type Phase = 'idle' | 'running' | 'review' | 'empty' | 'error'
   let phase = $state<Phase>('idle')
   let errorText = $state('')
-  let rows = $state<Array<{ id: string; text: string; kind: MemoryKindId; on: boolean }>>([])
+  /**
+   * 候选行。`on` 的初值 = **`grounded`**（分批第 244 批）。
+   *
+   * 出处对不上的默认**不勾**：那是它自己编的或者记岔的（使用者举的例子：人只说了一句
+   * "分析这个仓库"，却整理出了记忆）。人仍然可以亲手勾上——决定权在他，但默认不给。
+   */
+  let rows = $state<
+    Array<{
+      id: string
+      text: string
+      kind: MemoryKindId
+      from: string | null
+      grounded: boolean
+      on: boolean
+    }>
+  >([])
   let droppedNote = $state('')
   let tidyRunId = $state('')
   let elapsed = $state(0)
@@ -135,7 +154,9 @@
         id: `${String(i)}-${c.text.slice(0, 12)}`,
         text: c.text,
         kind: c.kind,
-        on: true,
+        from: c.from,
+        grounded: c.grounded,
+        on: c.grounded,
       }))
       const dropped = out.dropped.length
       droppedNote = dropped === 0 ? '' : $t('chat.tidyDropped', { n: String(dropped) })
@@ -221,7 +242,7 @@
     {#if droppedNote}<p class="hint" data-tidy-dropped>{droppedNote}</p>{/if}
     <div class="tidy-list" data-tidy-list>
       {#each rows as row (row.id)}
-        <div class="tidy-row" class:on={row.on}>
+        <div class="tidy-row" class:on={row.on} class:ungrounded={!row.grounded}>
           <input
             type="checkbox"
             data-tidy-check
@@ -231,16 +252,31 @@
               rows = rows.map((r) => (r.id === row.id ? { ...r, on } : r))
             }}
           />
-          <textarea
-            class="tidy-text"
-            data-tidy-text
-            rows={1}
-            value={row.text}
-            oninput={(e) => {
-              const text = (e.currentTarget as HTMLTextAreaElement).value
-              rows = rows.map((r) => (r.id === row.id ? { ...r, text } : r))
-            }}
-          ></textarea>
+          <span class="tidy-main">
+            <textarea
+              class="tidy-text"
+              data-tidy-text
+              rows={1}
+              value={row.text}
+              oninput={(e) => {
+                const text = (e.currentTarget as HTMLTextAreaElement).value
+                rows = rows.map((r) => (r.id === row.id ? { ...r, text } : r))
+              }}
+            ></textarea>
+            <!--
+              ★ 出处（分批第 244 批）：记忆的源头必须是**人的话**。这一行让"它是不是编的"
+                一眼可判——`grounded` 是平台核对的，不是它自己说的。
+            -->
+            {#if row.from !== null}
+              <span class="tidy-from" class:bad={!row.grounded} data-tidy-from>
+                {row.grounded
+                  ? $t('chat.tidyFrom', { quote: row.from })
+                  : $t('chat.tidyFromUnverified', { quote: row.from })}
+              </span>
+            {:else}
+              <span class="tidy-from bad" data-tidy-from>{$t('chat.tidyNoFrom')}</span>
+            {/if}
+          </span>
           <select
             aria-label={$t('agents.memoryKindLabel')}
             value={row.kind}
@@ -335,6 +371,31 @@
   .tidy-text:focus {
     outline: none;
     border-color: var(--accent);
+  }
+  /* 正文 + 出处上下排：正文可改，出处只读（它是核对结果，不是可编辑的内容） */
+  .tidy-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .tidy-from {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    /* 原话可能很长：折两行够了，再多就靠 hover */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .tidy-from.bad {
+    color: var(--text-warn, #b9770e);
+  }
+  .tidy-row.ungrounded {
+    /* 出处对不上的整行压暗：它默认不勾，视觉上也别和"有出处"的混在一起 */
+    opacity: 0.75;
   }
   .tidy-row select {
     flex: 0 0 auto;

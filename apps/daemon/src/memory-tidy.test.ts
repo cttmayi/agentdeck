@@ -22,6 +22,7 @@ import {
   parseTidyOutput,
   renderTidyTranscript,
 } from './memory-tidy.ts'
+import { MEMORY_TIDY_INSTRUCTIONS } from './builtin-drafter.ts'
 
 describe('对话正文：整段、按轮、人说的与它回的都在', () => {
   test('★ 每一轮都有人那一句与它那一句，轮次带序号', () => {
@@ -66,30 +67,73 @@ describe('对话正文：整段、按轮、人说的与它回的都在', () => {
   })
 })
 
-describe('分析任务：平台写的那段话', () => {
-  test('★ 说清了四类含义、上限、以及"只输出 JSON 数组"', () => {
-    const prompt = buildTidyPrompt()
+describe('规矩住在智能体的身份里（分批第 244 批）', () => {
+  test('★★ 四类含义、上限、"只输出 JSON 数组"、凭据禁令都在身份里（可在智能体页查看）', () => {
     for (const kind of ['preference', 'fact', 'lesson', 'commitment']) {
-      assert.ok(prompt.includes(kind), `要提到 ${kind}`)
+      assert.ok(MEMORY_TIDY_INSTRUCTIONS.includes(kind), `身份里要提到 ${kind}`)
     }
-    assert.match(prompt, /最多 12 条/)
-    assert.match(prompt, /只输出一个 JSON 数组/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /最多 12 条/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /JSON 数组/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /凭据|token|密钥/)
+    // ★ 使用者当场指出的那条（"我只说了一句话，理论上不该提取到记忆"）
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /只派活或提问时输出/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /它自己查到的/)
+  })
+
+  test('★ 任务书只留这一轮特有的话（读哪份文件、输出形状）——不重复规矩', () => {
+    const prompt = buildTidyPrompt()
     assert.match(prompt, /transcript\.md/)
-    // 凭据那条必须写进去（这段正文会进记忆、每轮发给 CLI）
-    assert.match(prompt, /凭据|token|密钥/)
+    assert.match(prompt, /只输出一个 JSON 数组/)
+    // 不该把"四类是什么"再抄一遍（两处维护必然漂）
+    assert.doesNotMatch(prompt, /preference/)
+    assert.match(prompt, /身份里那套规矩/)
   })
 })
 
 describe('解析它的输出：容错但不瞎猜', () => {
+  /** 这段对话里人说过的话（核对出处用）。 */
+  const HUMAN = ['这个仓库用 pnpm，别用 npm', '报告里不许出现赋能这类词']
   test('★ 干净数组', () => {
     const out = parseTidyOutput(
-      '[{"kind":"fact","text":"这个仓库用 pnpm"},{"kind":"preference","text":"说话短一点"}]',
+      '[{"kind":"fact","text":"这个仓库用 pnpm","from":"这个仓库用 pnpm，别用 npm"},' +
+        '{"kind":"preference","text":"报告里别出现赋能","from":"报告里不许出现赋能这类词"}]',
+      HUMAN,
     )
     assert.equal(out.parsed, true)
     assert.deepEqual(
       out.candidates.map((c) => c.text),
-      ['这个仓库用 pnpm', '说话短一点'],
+      ['这个仓库用 pnpm', '报告里别出现赋能'],
     )
+    assert.equal(out.candidates[0]?.grounded, true, '出处能在人的话里找到')
+  })
+
+  test('★★★ 出处对不上（它自己编的）⇒ 仍然列出来，但标成 grounded=false', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"fact","text":"distilly 用 python 写","from":"我说过 distilly 用 python"}]',
+      HUMAN,
+    )
+    assert.equal(out.candidates.length, 1, '不删——决定权在人')
+    assert.equal(out.candidates[0]?.grounded, false)
+    assert.equal(out.candidates[0]?.from, '我说过 distilly 用 python')
+  })
+
+  test('★★ 完全没给 from ⇒ grounded=false（它自己查到的）', () => {
+    const out = parseTidyOutput('[{"kind":"fact","text":"这个仓库用 pnpm"}]', HUMAN)
+    assert.equal(out.candidates[0]?.from, null)
+    assert.equal(out.candidates[0]?.grounded, false)
+  })
+
+  test('★ 出处带换行/多空格也算对上（空白归一）', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"fact","text":"用 pnpm","from":"这个仓库用   pnpm"}]',
+      ['这个仓库用\npnpm，别用 npm'],
+    )
+    assert.equal(out.candidates[0]?.grounded, true)
+  })
+
+  test('★ 没给人话（空数组）⇒ 一律对不上，不抛错', () => {
+    const out = parseTidyOutput('[{"kind":"fact","text":"x","from":"y"}]')
+    assert.equal(out.candidates[0]?.grounded, false)
   })
 
   test('★★ 围栏 + 前后废话：仍然解得出来（模型十次有九次会加）', () => {
@@ -97,7 +141,10 @@ describe('解析它的输出：容错但不瞎猜', () => {
       '好的，我读了这段对话，挑出这些：\n```json\n[{"kind":"lesson","text":"别直接改 dist"}]\n```\n希望有用。',
     )
     assert.equal(out.parsed, true)
-    assert.deepEqual(out.candidates, [{ kind: 'lesson', text: '别直接改 dist' }])
+    assert.deepEqual(
+      out.candidates.map((c) => [c.kind, c.text]),
+      [['lesson', '别直接改 dist']],
+    )
   })
 
   test('★★ 一行一个对象（没有外层数组）也收', () => {
@@ -121,13 +168,13 @@ describe('解析它的输出：容错但不瞎猜', () => {
   })
 
   test('★ 类型不认识 ⇒ 剔掉并报出来，不猜成 fact', () => {
-    const out = parseTidyOutput('[{"kind":"opinion","text":"我觉得还行"}]')
+    const out = parseTidyOutput('[{"kind":"opinion","text":"我觉得还行"}]', HUMAN)
     assert.equal(out.candidates.length, 0)
     assert.equal(out.dropped[0]?.reason, 'kind_invalid')
   })
 
   test('★ 正文太长 ⇒ 剔掉（记忆单条上限是 400 字）', () => {
-    const out = parseTidyOutput(`[{"kind":"fact","text":"${'x'.repeat(500)}"}]`)
+    const out = parseTidyOutput(`[{"kind":"fact","text":"${'x'.repeat(500)}"}]`, HUMAN)
     assert.equal(out.candidates.length, 0)
     assert.equal(out.dropped[0]?.reason, 'text_too_long')
   })
@@ -136,6 +183,7 @@ describe('解析它的输出：容错但不瞎猜', () => {
     const out = parseTidyOutput(
       '[{"kind":"fact","text":"部署用 sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGG"},' +
         '{"kind":"fact","text":"部署用 $DEPLOY_KEY 这个变量"}]',
+      HUMAN,
     )
     assert.equal(out.candidates.length, 1, '只有变量名那条留下')
     assert.match(out.candidates[0]!.text, /DEPLOY_KEY/)
@@ -145,6 +193,7 @@ describe('解析它的输出：容错但不瞎猜', () => {
   test('★ 同一句话出现两次 ⇒ 只留一条（重复只会挤掉别的）', () => {
     const out = parseTidyOutput(
       '[{"kind":"fact","text":"用 pnpm"},{"kind":"lesson","text":"用  pnpm"}]',
+      HUMAN,
     )
     assert.equal(out.candidates.length, 1)
   })
@@ -154,7 +203,7 @@ describe('解析它的输出：容错但不瞎猜', () => {
       kind: 'fact',
       text: `第 ${String(i)} 条`,
     }))
-    const out = parseTidyOutput(JSON.stringify(items))
+    const out = parseTidyOutput(JSON.stringify(items), HUMAN)
     assert.equal(out.candidates.length, TIDY_MAX_CANDIDATES)
     assert.equal(out.dropped.filter((d) => d.reason === 'too_many').length, 3)
   })

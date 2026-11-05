@@ -160,6 +160,22 @@ export const chatText = {
     zh: '先打开一段对话再整理。',
     en: 'Open a conversation first.',
   },
+  /**
+   * ★ 分批第 244 批：**出处**（记忆的源头必须是人的话）。
+   *
+   * 使用者的例子：他只说了一句「分析 https://…，让我理解其做法和功能」，平台却整理出了
+   * 记忆——那是它自己查到的。所以每条候选都要显示"它说这是你说的哪一句"，
+   * 且由**平台核对**（对不上就默认不勾）。
+   */
+  'chat.tidyFrom': { zh: '出自你说过的话：「{quote}」', en: 'From what you said: "{quote}"' },
+  'chat.tidyFromUnverified': {
+    zh: '它说这句出自你的话，但对话里找不到：「{quote}」——默认不勾',
+    en: 'It claims this came from you, but the conversation does not contain it: "{quote}" — unchecked by default',
+  },
+  'chat.tidyNoFrom': {
+    zh: '它没给出处——大概率是它自己查到的，不是你说的。默认不勾。',
+    en: 'No source given — most likely something it looked up itself, not something you said. Unchecked by default.',
+  },
   'chat.tidyCount': { zh: '选中 {n} 条', en: '{n} selected' },
   'chat.tidyConfirm': { zh: '记下选中的 {n} 条', en: 'Remember {n}' },
 

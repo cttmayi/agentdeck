@@ -247,6 +247,16 @@
           //   "那一行在不在 / 徽标说什么"的测量连同内置审核者一起删除（功能没了，判据也该没了）。
           facts['agents.skillAuditorRowFound'] = null
           facts['agents.skillAuditorRowBadge'] = null
+          /**
+           * ★ 分批第 244 批：内置「记忆整理者」也在这一页（使用者：「要和沉淀技能一样，
+           *   也有一个智能体显示在智能体页面列表中，方便我查看其 prompt」）。
+           *   量两件：那一行在、徽标写的是「整理记忆」（不是「执行」——它永远不接活）。
+           */
+          const tidyRow = rowOf('记忆整理者')
+          facts['agents.memoryTidyRowFound'] = !!tidyRow
+          facts['agents.memoryTidyRowBadge'] = tidyRow
+            ? (tidyRow.querySelector('.badge')?.textContent ?? '').trim()
+            : null
         }
         // 每张卡都要有：名字、角色徽章、一行说明（指令摘要 + 关系/技能/runtime 两部分）
         // ★ 2026-10（紧凑性）：原先是**两行**说明（`.agent-note` × 2，各占一行），
@@ -8350,7 +8360,27 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               return el !== null && el.tagName === 'TEXTAREA'
             })
             const kinds = rows.length > 0 && rows.every((r) => r.querySelector('select') !== null)
+            /**
+             * ★ 分批第 244 批：**出处与"默认勾不勾"**（使用者："我只说了一句话，理论上就不该
+             *   提取到记忆"）。假 CLI 吐三条：① 出处能在人的话里找到、② 找不到、③ 没给。
+             *   量的是：每条都显示出处那一行，且只有①被默认勾上——②③ 要人亲手勾。
+             */
+            const fromLines = rows.map((r) => text(r.querySelector('[data-tidy-from]')) ?? '')
+            const checkedBefore = rows.map(
+              (r) => r.querySelector('[data-tidy-check]')?.checked === true,
+            )
+            const checkedCount = () =>
+              [...d().querySelectorAll('[data-tidy-list] [data-tidy-check]')].filter(
+                (el) => el.checked === true,
+              ).length
+            const countBefore = checkedCount()
             const confirmBtn = d().querySelector('[data-tidy-confirm]')
+            // 把②③也勾上，量"人亲手勾上之后确实能写进去"（决定权在人，只是默认不给）
+            for (const r of rows) {
+              const box = r.querySelector('[data-tidy-check]')
+              if (box && box.checked !== true) click(box)
+            }
+            const countAfter = checkedCount()
             if (confirmBtn) click(confirmBtn)
             // 等写库完成：对话框那一片收起、对话末尾出现可撤销的回执
             await untilNet(() => !d().querySelector('[data-tidy-list]'), 200)
@@ -8387,6 +8417,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               texts,
               editable,
               kinds,
+              fromLines,
+              checkedBefore,
+              countBefore,
+              countAfter,
               note,
               noteText,
               tail,

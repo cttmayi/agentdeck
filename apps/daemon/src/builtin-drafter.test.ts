@@ -25,6 +25,9 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
+  ensureBuiltinMemoryTidy,
+  MEMORY_TIDY_INSTRUCTIONS,
+  MEMORY_TIDY_NAME,
 } from './builtin-drafter.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -159,3 +162,79 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
 // ★ 分批第 137 批（§12.42 第 ③ 步）：`ensureBuiltinReviewer` 与审核者的默认指令一起删除
 //   （沉淀线不再评审）。这一整组"审核者自愈 / 历史默认升级"用例随之删掉——被删的代码路径
 //   留着测试只会变成"测一个不会发生的函数"。
+
+/**
+ * 内置「记忆整理者」（分批第 244 批）。
+ *
+ * 使用者原话：「要和沉淀技能一样，也有一个智能体显示在智能体页面列表中，方便我查看其 prompt」。
+ * 于是它必须是**一条真的智能体**：能被列出来、它的指令里就是那套挑记忆的规矩（可看可改）、
+ * 而且与起草者共用同一套对账纪律（幂等 / 自愈 / 不覆盖使用者的改动）。
+ */
+describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
+  const WS2 = wsId('ws-memory-tidy')
+
+  test('没有 ⇒ 建一条：角色 memory-tidy、内置标记、指令里就是那套挑记忆的规矩', async () => {
+    const result = await ensureBuiltinMemoryTidy(store, WS2)
+    assert.equal(result.action, 'created')
+    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found, '建完必须能在列表里按内置标记找到它')
+    assert.equal(found.role, 'memory-tidy')
+    assert.equal(found.name, MEMORY_TIDY_NAME)
+    assert.equal(found.instructions, MEMORY_TIDY_INSTRUCTIONS)
+    assert.deepEqual(found.skillIds, [], '它不挂技能（规矩在身份里）')
+    // ★ 使用者要看的正是这段：规矩必须写在这条智能体的指令里，而不是藏在代码里
+    assert.match(found.instructions, /只派活或提问时输出/)
+    assert.match(found.instructions, /逐字/)
+  })
+
+  test('★ 再跑一次 ⇒ 一字不动（幂等）', async () => {
+    const before = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
+    await ensureBuiltinMemoryTidy(store, WS2)
+    const after = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.equal(after.length, before.length, '不许越跑越多')
+    assert.deepEqual(after[0]?.instructions, before[0]?.instructions)
+  })
+
+  test('★★ 使用者改过指令 ⇒ **不覆盖**（那是他的资产，要恢复靠那个按钮）', async () => {
+    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found)
+    await store.insertAgent({ ...found, instructions: '我自己写的规矩', updatedAt: Date.now() })
+    const result = await ensureBuiltinMemoryTidy(store, WS2)
+    assert.equal(result.action, 'left-alone')
+    const after = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.equal(after?.instructions, '我自己写的规矩')
+  })
+
+  test('★★ 指令被清空 ⇒ 补回默认（空指令会让它开始记"这次做了什么"）', async () => {
+    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found)
+    await store.insertAgent({ ...found, instructions: '   ', updatedAt: Date.now() })
+    const result = await ensureBuiltinMemoryTidy(store, WS2)
+    assert.equal(result.action, 'healed')
+    const after = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS)
+  })
+
+  test('★ 内置标记丢了但角色还在 ⇒ 补标记（不再造一条）', async () => {
+    const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found)
+    const { builtin: _drop, ...rest } = found
+    await store.insertAgent({ ...(rest as Agent), updatedAt: Date.now() })
+    const before = (await store.listAgents(WS2)).filter((a) => a.role === 'memory-tidy').length
+    const result = await ensureBuiltinMemoryTidy(store, WS2)
+    assert.equal(result.action, 'healed')
+    const after = (await store.listAgents(WS2)).filter((a) => a.role === 'memory-tidy')
+    assert.equal(after.length, before, '不许因为标记丢了就多造一条')
+    assert.equal(after[0]?.builtin, true)
+  })
+
+  test('★★ `ensureBuiltinAgents` 两条一起对账（启动那条路）', async () => {
+    const WS3 = wsId('ws-both')
+    const out = await ensureBuiltinAgents(store, WS3)
+    assert.equal(out.drafter.action, 'created')
+    assert.equal(out.memoryTidy.action, 'created')
+    const agents = await store.listAgents(WS3)
+    assert.equal(agents.filter((a) => builtinKindOf(a) === 'drafter').length, 1)
+    assert.equal(agents.filter((a) => builtinKindOf(a) === 'memory-tidy').length, 1)
+  })
+})

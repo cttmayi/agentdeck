@@ -36,6 +36,9 @@ export const agentsText = {
    * 判据见 `tests/i18n-terms.test.ts`（术语一致检查）。
    */
   'agents.roleSkillReviewer': { zh: '沉淀审核', en: 'Audit drafts' },
+  // ★ 分批第 244 批：内置「记忆整理者」（「整理成记忆」那条分析 run）。
+  //   同样必须有自己的词——否则列表上它被标成「执行」，而那是一条永远不接活的 agent。
+  'agents.roleMemoryTidy': { zh: '整理记忆', en: 'Tidy memory' },
   'agents.roleExecutorHint': { zh: '接到任务后动手干活', en: 'Takes on tasks and does the work' },
   'agents.roleReviewerHint': {
     zh: '按你给它写的判断依据审别人的产出，给判决',

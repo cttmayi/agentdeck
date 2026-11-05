@@ -249,7 +249,9 @@
                 ? $t('agents.roleDrafter')
                 : a.role === 'skill-reviewer'
                   ? $t('agents.roleSkillReviewer')
-                  : $t('agents.roleExecutor')}
+                  : a.role === 'memory-tidy'
+                    ? $t('agents.roleMemoryTidy')
+                    : $t('agents.roleExecutor')}
           {@const roleBadgeClass =
             a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'}
           <ListRow

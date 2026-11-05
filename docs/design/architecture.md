@@ -1591,6 +1591,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
 | **智能体组**（谁审谁 / 行动权限 / 返工次数） | 形状与判据：`packages/domain/src/groups/shape.ts`（"恰好 1 执行 + 1 审核"，多执行者 / 多审核者会明确报"还没有实现"）；实体：`packages/protocol/src/entities.ts` 的 `AgentGroup`；接口：`apps/daemon/src/server.ts` 的 `/api/agent-groups` 那 5 条；**摊平点**：`POST /api/runs` 的组展开（`server.ts:4990` 一带）；界面：`apps/web/src/views/Groups.svelte` + `components/MemberSlotForm.svelte` + `lib/newtask-chain.ts`。设计缘由见 `docs/design/agent-groups.md` |
+| **内置「记忆整理者」**（分批第 244 批） | 角色 `role: 'memory-tidy'`，默认身份 = 挑记忆的全部规矩（可在「智能体」页查看与编辑、可「恢复成默认值」）；对账在 `apps/daemon/src/builtin-drafter.ts` 的 `ensureBuiltinMemoryTidy`（幂等 / 自愈 / 不覆盖使用者改动，与起草者同一套）。设计缘由见 §4.3.38 |
 | **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；**磁盘镜像 + git**：`apps/daemon/src/memory-files.ts`；**「整理成记忆」的分析 run**：`apps/daemon/src/memory-tidy.ts`（对话正文渲染 / 平台任务 / 输出解析，纯函数）；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte`（分析 → 候选 → 确认）+ `ChatSettings.svelte`（触发词）。设计缘由见 §4.3.38 |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
@@ -2928,8 +2929,9 @@ CodexBackend   : CodexBackend → ServiceBackendBase → AgentBackendBase
 
 **落法**（`apps/daemon/src/builtin-drafter.ts`）：
 
-- `builtinKindOf(agent)` → `'drafter' | 'skill-reviewer' | null`。挂着 `builtin` 但角色既不是
-  起草者也不是 `skill-reviewer` 时返回 **null**——**不猜**（猜错的方向见 ②）；
+- `builtinKindOf(agent)` → `'drafter' | 'skill-reviewer' | 'memory-tidy' | null`
+  （第三个成员是分批第 244 批加的内置「记忆整理者」，见 §4.3.38）。挂着 `builtin` 但角色不是
+  这三个之一时返回 **null**——**不猜**（猜错的方向见 ②）；
 - `findBuiltinAgent(agents, kind)`：所有「取内置」的地方都走它；
 - `builtinDefaultsOf(kind)`：两条各一套默认值（名字/指令/给人听的叫法）。「恢复成默认值」
   按它取，角色不明时 400 `builtin_role_unknown` 并说出实际角色，**一个字段都不写**；
@@ -3275,11 +3277,25 @@ createdAt, removedAt }`，`kind` 只有四种（`preference` / `fact` / `lesson`
   可改（改成下次也成立的说法）可不记；发送照常，写进去的是**剥掉前缀之后**那句。
 - **整理成记忆…**（手动，分批第 243 批改成"分析整段对话"）：点开先给一句说明（要花一次调用），
   确认后平台把整段对话（人说的 + 它回的，逐字）落成 `transcript.md`，起一条**分析 run**
-  （`subject.type: 'memory-tidy'`，`id` = 对话 id，不在闭环里）让**这个对话的执行者本人**读
-  ——它最知道自己在乎什么；它只吐一个 JSON 数组，平台解析成候选（`preference` / `fact` /
-  `lesson` / `commitment`），**摆给人逐条改、逐条勾**，人确认才写入。出处记这次整理那条 run。
-  解析容错但有底线：围栏/前言/一行一个对象都收；类型不认识、太长、看起来像密钥的一律剔掉
-  并**如实说剔了几条**；完全没按格式输出时明说"它没按要求输出"，**不伪装成"没挑出东西"**。
+  （`subject.type: 'memory-tidy'`，`id` = 对话 id，不在闭环里）；它只吐一个 JSON 数组，平台解析
+  成候选（`preference` / `fact` / `lesson` / `commitment`），**摆给人逐条改、逐条勾**，人确认
+  才写入。出处记这次整理那条 run。解析容错但有底线：围栏/前言/一行一个对象都收；类型不认识、
+  太长、看起来像密钥的一律剔掉并**如实说剔了几条**；完全没按格式输出时明说"它没按要求输出"，
+  **不伪装成"没挑出东西"**。
+
+  **谁在挑**（第 244 批）：平台内置的「记忆整理者」（`role: 'memory-tidy'`，在「智能体」页
+  可见、可改指令、可「恢复成默认值」，与起草者同一套对账纪律）。第一版借的是**这段对话的
+  执行者**，于是"挑什么算记忆"的规矩藏在代码里——使用者看不见也改不了。现在规矩写在**它的
+  身份**里（`MEMORY_TIDY_INSTRUCTIONS`），任务书只剩"读 `transcript.md`、只输出 JSON"。
+
+  ★★ **每条候选必须指回人说过的一句话**（`from` = 逐字原话），而且由**平台机械核对**：那段
+  原话在这段对话的某一句人话里找不到 ⇒ 标成"出处对不上"，界面上**默认不勾**（人仍可亲手勾）。
+  人只派活/提问、没有纠正与补充时，它的正确输出是 `[]`——**空白是正确答案，不是失败**。
+
+  ⚠️ 这条是使用者当场抓到的：他只说了一句「分析 https://github.com/titanwings/distilly，
+  让我理解其做法和功能」，平台却整理出了记忆。那些是**它自己查到的**，不是人教的经验；
+  让这类东西进记忆，等于让智能体把读后笔记当成"你教它的"，而且每查一次就多一条，
+  真东西会被挤出去。提示词写给模型看，核对写给平台自己看——两样都要有。
 
   ⚠️ 第一版（第 240 批）是"把我说过的话逐字列出来让人勾"。使用者的原话是「过程和我想象不一样，
   我的理解它应该类似沉淀技能一样，分析整段对话」——摘录不是分析：原话多半是"这次"的话，

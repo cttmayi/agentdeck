@@ -484,6 +484,23 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.memoryTidyRowBadge',
+    /**
+     * ★ 分批第 244 批：内置「记忆整理者」在「智能体」页列出来，徽标是「整理记忆」。
+     *
+     * 使用者原话：「要和沉淀技能一样，也有一个智能体显示在智能体页面列表中，方便我查看其 prompt」。
+     * 这条量的是"它真的在那张列表上、而且说得清自己是谁"——徽标若还写「执行」，
+     * 就会有人去问"它为什么不接活"（而答案是它压根不是执行者）。
+     */
+    label:
+      '★★★ 内置「记忆整理者」出现在智能体列表里，徽标说「整理记忆」而不是「执行」' +
+      '（它是「整理成记忆」那条分析 run 的作者，prompt 在这一页能看能改）',
+    ok: (v, facts) => facts['agents.memoryTidyRowFound'] === true && v === '整理记忆',
+    show: (v, facts) =>
+      `在列表里 ${String(facts['agents.memoryTidyRowFound'])}　徽标 ${JSON.stringify(v)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.runtimeOptionsNoDefault',
     label:
       'runtime 选择器的**具体 runtime** 选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
@@ -1504,23 +1521,32 @@ const CHECKS = [
      */
     label:
       '★★★ 聊天里「整理成记忆」是一条**分析整段对话**的 run：开场白说清它会读整段对话；' +
-      '点开始后候选可改正文、可换类型；点「记下」之后记忆真的变多（接口上数得到）',
+      '候选可改正文、可换类型，**每条都标出处，只有"出处真在人的话里"的才默认勾上**；' +
+      '人亲手勾上之后点「记下」，记忆真的变多（接口上数得到）',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.opened === true &&
       v.intro === true &&
-      v.rows === 2 &&
+      v.rows === 3 &&
       v.editable === true &&
       v.kinds === true &&
+      // ★ 出处：三条都显示了那一行；只有第一条（出处真在人的话里）默认勾上
+      Array.isArray(v.checkedBefore) &&
+      v.checkedBefore[0] === true &&
+      v.checkedBefore[1] === false &&
+      v.checkedBefore[2] === false &&
+      v.countBefore === 1 &&
+      v.countAfter === 3 &&
       v.note === true &&
-      v.after === v.before + 2,
+      v.after === v.before + 3,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `对话框 ${String(v.opened)}　开场白提"整段对话" ${String(v.intro)}　候选 ${String(v.rows)} 条` +
           `${Array.isArray(v.texts) ? ` ${JSON.stringify(v.texts)}` : ''}　可改 ${String(v.editable)}　` +
-          `可换类型 ${String(v.kinds)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
+          `可换类型 ${String(v.kinds)}　默认勾中 ${String(v.countBefore)}/3（${JSON.stringify(v.checkedBefore ?? [])}）` +
+          `　手动勾后 ${String(v.countAfter)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
           `　测量后已收起 ${String(v.closed)}` +
           `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
   },
@@ -5217,7 +5243,20 @@ function writeFakeGenericCli() {
       'case "$PWD" in',
       '  */memory-tidy-*)',
       "    cat <<'PROBE_TIDY_JSON'",
-      '{"type":"text","text":"我读了一遍：```json\\n[{\\"kind\\":\\"fact\\",\\"text\\":\\"这个仓库用 pnpm\\"},{\\"kind\\":\\"preference\\",\\"text\\":\\"说话短一点\\"}]\\n```"}',
+      /**
+       * 三条候选，覆盖界面的三种出处状态（分批第 244 批）：
+       *   ① 出处 = 夹具对话里人说的原话 ⇒ 平台核对通过 ⇒ 默认勾上；
+       *   ② 出处是人没说过的话 ⇒ 核对不通过 ⇒ 默认**不勾**（"它自己编的"进不了记忆）；
+       *   ③ 根本没给出处 ⇒ 同样默认不勾。
+       *
+       * ⚠️ 夹具对话的第一句是「探针：这一条对话用来看工作目录那一栏」（见
+       *    `chatEnsureFixtureConversation`）——出处必须逐字取自它，否则走的是另一条分支。
+       */
+      '{"type":"text","text":"我读了一遍：```json\\n[' +
+        '{\\"kind\\":\\"fact\\",\\"text\\":\\"这个仓库用 pnpm\\",\\"from\\":\\"探针：这一条对话用来看工作目录那一栏\\"},' +
+        '{\\"kind\\":\\"preference\\",\\"text\\":\\"说话短一点\\",\\"from\\":\\"我让你说话短一点\\"},' +
+        '{\\"kind\\":\\"lesson\\",\\"text\\":\\"别直接改 dist\\"}' +
+        ']\\n```"}',
       'PROBE_TIDY_JSON',
       '    exit 0 ;;',
       'esac',
@@ -6415,6 +6454,33 @@ try {
   //
   // ⚠️ 素材源用**夹具对话**（`conversation.jsonl` 里那条，它的 run 因为假 CLI 立刻
   //    127 而 failed）——起草只读对话的轮次，源 run 成没成功不影响（实测：turns = 1）。
+  /**
+   * ★ 分批第 244 批：**内置「记忆整理者」也要指向假 CLI**。
+   *
+   * 它的默认 runtimeKey 是 `'default'`（跟随全局默认），而这个一次性 daemon 的全局默认
+   * 是**真的 claude**——不拦下来的话，「整理成记忆」那条分析 run 会在探针里**真跑一次
+   * 真 CLI**：既花额度（NFR-T-01），也永远跑不完（实测：界面卡在"正在分析…（15 秒）"，
+   * 候选 0 条）。这与起草者那一格是同一件事，所以放在同一段里改。
+   */
+  try {
+    const agentsPage = await (await fetch(`${base}/api/agents`)).json()
+    const tidyAgent = (agentsPage.items ?? agentsPage.agents ?? []).find(
+      (a) => a.role === 'memory-tidy',
+    )
+    if (!tidyAgent) {
+      log(yellow('⚠ 没找到内置「记忆整理者」——「整理成记忆」那一节会量不到'))
+    } else {
+      const res = await fetch(`${base}/api/agents/${encodeURIComponent(tidyAgent.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runtimeKey: 'generic' }),
+      })
+      if (!res.ok) log(yellow(`⚠ 内置记忆整理者改挂 generic 失败：HTTP ${res.status}`))
+    }
+  } catch (err) {
+    log(yellow(`⚠ 改内置记忆整理者的 runtime 时出错：${String(err)}`))
+  }
+
   try {
     const agentsPage = await (await fetch(`${base}/api/agents`)).json()
     const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.role === 'drafter')

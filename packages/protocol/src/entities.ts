@@ -418,7 +418,18 @@ export type ReviewStandard = z.infer<typeof ReviewStandard>
 //   `packages/domain/src/routing/kind.ts` 的 `a.role === 'reviewer' && hasReviewIdentity(a)`
 //   ——给它 `'reviewer'` 的话它会**开始接收业务报告去审**（进了闭环），而它的指令是
 //   "审 skill 的质量与脚本"。独立成员靠上面那条等值判断天然落在外面。
-export const AgentRole = z.enum(['executor', 'reviewer', 'drafter', 'skill-reviewer'])
+// ⚠️ `memory-tidy` = **平台内置的「记忆整理者」**（分批第 244 批）：它把一段对话里
+//    "人教过的东西"挑成候选，供人确认后写进某个智能体的记忆。和起草者同一条纪律：
+//    **绝不参与业务选择**（各处挑选执行者/审核者用的是 `role === 'executor'` /
+//    `'reviewer'` 这种**等值**判断，新成员天然落在外面），也**不能被选去聊天**
+//    （聊天只接受 executor）——它不闲聊，它只整理。
+export const AgentRole = z.enum([
+  'executor',
+  'reviewer',
+  'drafter',
+  'skill-reviewer',
+  'memory-tidy',
+])
 export type AgentRole = z.infer<typeof AgentRole>
 
 /**

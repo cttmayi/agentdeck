@@ -114,35 +114,41 @@ export function renderTidyTranscript(input: {
 /**
  * 分析那一轮的任务（**平台写的**，不是人说的）。
  *
- * 三条刻意的约束：
- *   ① **只输出 JSON**——后面要机器解析。含糊的"自由发挥"会让解析器去猜，而猜错
- *      的表现是"整理出来的记忆答非所问"，比没有更糟。
- *   ② **不许多写"这次做了什么"**——那是 run 日志，不是记忆。记忆的判据是"下次还用得上"。
- *   ③ **不给凭据**：这段正文会被写进记忆、每轮发给 CLI，抄进 token 等于自己泄露。
+ * ★ 分批第 244 批：**规矩搬到智能体的身份里了**（`MEMORY_TIDY_INSTRUCTIONS`，可在
+ *   「智能体」页查看与编辑）。这里只留这一轮特有的话：读哪份文件、只输出 JSON。
+ *
+ * 为什么这样分（D29 的老规矩）：身份 = 它长期怎么干活（该记什么、不记什么）；
+ * 任务 = 这一轮要做什么。把可变的规矩写死在这里的后果是"用户改不了、出问题只能读代码"
+ * ——而这恰恰是使用者提的那句"方便我查看其 prompt"要治的病。
  */
 export function buildTidyPrompt(): string {
-  return `读 \`transcript.md\`（就在这个工作目录里，是一段完整对话）。请从**整段对话**里挑出
-值得它以后长期记住的判断，输出成 JSON。
+  return `读这个工作目录里的 \`transcript.md\`（一段完整对话的逐字记录），按你身份里那套规矩挑出候选。
 
-什么值得记（判据是「**下次还用得上**」，不是「这次做了什么」）：
-- \`preference\`：人怎么要求它的（说话方式、格式偏好、"别用某类词"）。
-- \`fact\`：环境与项目里稳定的、它下次也会碰到的事实（用什么命令、目录结构、约定）。
-- \`lesson\`：这次踩过的坑与正确的做法（"别直接改 dist，改完要重新构建"）。
-- \`commitment\`：人明确要它以后一直守的约定（"报告里不许出现 XX"）。
-
-什么不该记：这次的具体任务与进度（"改了第 3 行"）、一次性的请求、它的客套话、
-以及人没说过的任何推测。也**不要**记任何凭据、token、密钥的值。
-
-要求：
-- 最多 ${String(TIDY_MAX_CANDIDATES)} 条，宁可少不要凑；一条都挑不出就输出 \`[]\`。
-- 每条写成**下次也成立**的独立陈述句（不带"这次""刚才"这类指代），不超过 ${String(MEMORY_TEXT_MAX)} 字。
-- **只输出一个 JSON 数组**，不要解释、不要前后缀、不要代码块围栏。元素形状：
-  {"kind":"preference|fact|lesson|commitment","text":"……"}
-
-直接开始。`
+只输出一个 JSON 数组（元素形如 {"kind":"…","text":"…","from":"人的原话"}），不要解释、不要围栏。
+一条都挑不出就输出 \`[]\`——那是正常结果，不是失败。`
 }
 
-export type TidyCandidate = { kind: MemoryKind; text: string }
+export type TidyCandidate = {
+  kind: MemoryKind
+  text: string
+  /**
+   * 它声称的**人的原话**（逐字）。`null` = 它没给。
+   *
+   * ★ 分批第 244 批加的字段：记忆的源头必须是**人的话**（使用者举的例子：他只说了
+   *   一句"分析这个仓库，让我理解其做法"，平台却整理出了记忆——那是它自己查到的）。
+   *   所以每条候选都要带出处，平台再**机械核对**一遍。
+   */
+  from: string | null
+  /**
+   * 出处核对的结果：`from` 那段原话**真的**在某个人的发言里（空白归一后是子串）。
+   *
+   * ⚠️ 为什么是平台核对而不是只写在提示词里：提示词写给模型看，模型会犯懒；
+   *    核对写给平台自己看。对不上的候选**不删**（不该替人做决定），但界面上
+   *    默认**不勾**，并明说"出处对不上"——这样"它自己编的"永远进不了记忆，
+   *    除非人亲手勾上。
+   */
+  grounded: boolean
+}
 
 export type TidyParse = {
   /** 解析出来的候选（已去重、已剔除不合规的）。 */
@@ -173,7 +179,19 @@ function stripFences(text: string): string {
  * 全都不成 ⇒ `parsed: false`，界面就如实说"它没按要求输出"，**不假装挑到了 0 条**
  * （"挑不出"与"没看懂它说了什么"是两件事，混在一起会让人以为对话里没东西可记）。
  */
-export function parseTidyOutput(text: string): TidyParse {
+export function parseTidyOutput(
+  text: string,
+  /** 这段对话里**人**说过的所有话（用来核对 `from`；不给 ⇒ 一律算对不上）。 */
+  humanTexts: readonly string[] = [],
+): TidyParse {
+  const norm = (v: string): string => v.replace(/\s+/g, ' ').trim()
+  const humanAll = humanTexts.map(norm).filter((v) => v !== '')
+  const isGrounded = (from: string): boolean => {
+    const q = norm(from)
+    // 太短的摘录（"好""嗯"）核不出什么，按对不上处理——它挡不住任何编造
+    if (q.length < 2) return false
+    return humanAll.some((h) => h.includes(q))
+  }
   const dropped: Array<{ text: string; reason: string }> = []
   const body = stripFences(text)
 
@@ -211,9 +229,10 @@ export function parseTidyOutput(text: string): TidyParse {
   const candidates: TidyCandidate[] = []
   const seen = new Set<string>()
   for (const item of raw) {
-    const row = item as { kind?: unknown; text?: unknown } | null
+    const row = item as { kind?: unknown; text?: unknown; from?: unknown } | null
     const kind = typeof row?.kind === 'string' ? row.kind.trim() : ''
     const text = typeof row?.text === 'string' ? row.text.trim() : ''
+    const fromRaw = typeof row?.from === 'string' ? row.from.trim() : ''
     if (!KINDS.includes(kind as MemoryKind)) {
       if (text !== '' || kind !== '') dropped.push({ text: text || kind, reason: 'kind_invalid' })
       continue
@@ -239,7 +258,12 @@ export function parseTidyOutput(text: string): TidyParse {
       dropped.push({ text: text.slice(0, 40), reason: 'too_many' })
       continue
     }
-    candidates.push({ kind: kind as MemoryKind, text })
+    candidates.push({
+      kind: kind as MemoryKind,
+      text,
+      from: fromRaw === '' ? null : fromRaw,
+      grounded: fromRaw === '' ? false : isGrounded(fromRaw),
+    })
   }
   return { candidates, dropped, parsed: true }
 }

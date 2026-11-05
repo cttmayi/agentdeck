@@ -691,8 +691,10 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
             type: 'text',
             content:
               '我读了整段对话：\n```json\n[' +
-              '{"kind":"fact","text":"这个仓库用 pnpm"},' +
-              '{"kind":"preference","text":"说话短一点"},' +
+              // 出处能在人的话里找到 ⇒ grounded
+              '{"kind":"fact","text":"这个仓库用 pnpm","from":"这个仓库用 pnpm，别用 npm"},' +
+              // 出处对不上 ⇒ 仍然列出来，但 grounded=false（界面默认不勾）
+              '{"kind":"fact","text":"distilly 用 python 写","from":"我说过 distilly 用 python"},' +
               '{"kind":"opinion","text":"我觉得还行"},' +
               '{"kind":"fact","text":"token 是 sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF"}' +
               ']\n```',
@@ -779,14 +781,27 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
       assert.equal(got.status, 200)
       const answer = (await got.json()) as {
         status: string
-        candidates: Array<{ kind: string; text: string }>
+        candidates: Array<{ kind: string; text: string; from: string | null; grounded: boolean }>
         dropped: Array<{ reason: string }>
         parsed: boolean
       }
       assert.equal(answer.parsed, true)
       assert.deepEqual(
         answer.candidates.map((c) => `${c.kind}:${c.text}`),
-        ['fact:这个仓库用 pnpm', 'preference:说话短一点'],
+        ['fact:这个仓库用 pnpm', 'fact:distilly 用 python 写'],
+      )
+      /**
+       * ★★ 分批第 244 批：**出处由平台核对**，不是它说了算。
+       *
+       * 使用者的例子：他只说了一句「分析 https://…，让我理解其做法和功能」，平台却
+       * 整理出了记忆——那是它自己查到的。所以"有没有人的原话"这件事不能只靠提示词，
+       * 平台要自己核一遍：对得上的标 `grounded`，对不上的照样列出来（决定权在人），
+       * 但界面上默认不勾。
+       */
+      assert.deepEqual(
+        answer.candidates.map((c) => c.grounded),
+        [true, false],
+        '★ 第一条的出处能在人的话里找到，第二条找不到',
       )
       assert.deepEqual(
         answer.dropped.map((x) => x.reason).sort(),
@@ -816,19 +831,18 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
       const write = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        // 界面上只会把**勾中的**交过来（默认勾的是 grounded 那些）——这里照那个语义走
         body: JSON.stringify({
-          entries: answer.candidates.map((c) => ({
-            kind: c.kind,
-            text: c.text,
-            evidence: tidyRunId,
-          })),
+          entries: answer.candidates
+            .filter((c) => c.grounded)
+            .map((c) => ({ kind: c.kind, text: c.text, evidence: tidyRunId })),
         }),
       })
       assert.equal(write.status, 201, await write.clone().text())
       const after = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
         memory: Array<{ text: string; evidence: string | null }>
       }
-      assert.equal(after.memory.length, 2)
+      assert.equal(after.memory.length, 1, '只有"有出处"的那一条被交上去')
       assert.equal(after.memory[0]?.evidence, tidyRunId, '出处记的是这次整理那条 run')
     } finally {
       await d.close()

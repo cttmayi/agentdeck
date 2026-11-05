@@ -196,6 +196,13 @@ export type AgentRole =
    * 给它那个角色它就会去审业务报告。两者**不能合并**。
    */
   | 'skill-reviewer'
+  /**
+   * 平台内置的**记忆整理者**（分批第 244 批，「整理成记忆」那条分析 run）。
+   *
+   * 与起草者同一条纪律：**不参与业务选择、不能聊天**（各处挑人用的是 `=== 'executor'`
+   * 这类等值判断）。它只在「智能体」页可见/可改，方便使用者查看它的 prompt。
+   */
+  | 'memory-tidy'
 
 export interface Agent {
   id: string

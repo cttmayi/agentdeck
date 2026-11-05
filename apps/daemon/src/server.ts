@@ -115,6 +115,7 @@ import {
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
+  ensureBuiltinMemoryTidy,
   DRAFTER_SKILL_SLUG,
   syncDrafterSkillMount,
   findBuiltinAgent,
@@ -2824,7 +2825,11 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
   //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
   const builtin = await ensureBuiltinAgents(store, workspaceId)
-  for (const [label, r] of [['内置起草者', builtin.drafter]] as const) {
+  for (const [label, r] of [
+    ['内置起草者', builtin.drafter],
+    // ★ 分批第 244 批：「整理成记忆」用的那一条（与起草者同一套对账）
+    ['内置记忆整理者', builtin.memoryTidy],
+  ] as const) {
     if (r.action === 'created') {
       info(`已建立${label}（沉淀这条链用的，可在「智能体」页查看与编辑）`)
     } else if (r.action === 'healed') {
@@ -8347,7 +8352,12 @@ async function injectedSkillsOf(
           return
         }
         const messages = await store.listRunMessages(run.id)
-        const parsed = parseTidyOutput(lastTextOf(messages) ?? '')
+        /**
+         * 核对出处要用**人说过的话**（分批第 244 批）：候选里 `from` 那段原话必须能在
+         * 某一句人的发言里找到，否则标成"对不上"（界面默认不勾）。
+         */
+        const humanTexts = (await store.listChatTurns(conversationId)).map((t) => t.userText)
+        const parsed = parseTidyOutput(lastTextOf(messages) ?? '', humanTexts)
         sendJson(res, 200, {
           status: run.status,
           candidates: parsed.candidates,
@@ -8363,11 +8373,27 @@ async function injectedSkillsOf(
         return
       }
 
-      const agent = await store.getAgent(conversation.agentId)
+      /**
+       * ★ 分批第 244 批：整理 run 用**平台内置的「记忆整理者」**（使用者要求：
+       *   「要和沉淀技能一样，也有一个智能体显示在智能体页面列表中，方便我查看其 prompt」）。
+       *
+       * 第一版借的是**这段对话的执行者**：于是"挑记忆"这件事的规矩藏在代码里，
+       * 使用者看不见也改不了；而它挑出来的东西还会被当成"那个执行者自己挑的"。
+       * 现在与起草者同一条路：内置智能体，可见、可编辑、可「恢复成默认值」。
+       *
+       * ⚠️ 找不到就地补一条（启动时已经对过账；这里是兜底——它是平台自己的东西，
+       *    自愈比拦下使用者更对，与起草者那条同一个理由）。
+       */
+      let tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
+      if (!tidyAgent) {
+        await ensureBuiltinMemoryTidy(store, workspaceId)
+        tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
+      }
+      const agent = tidyAgent
       if (!agent) {
-        sendJson(res, 409, {
-          error: '这个对话的执行者已经被删掉了，没办法整理（记忆是它的）。',
-          code: 'agent_gone',
+        sendJson(res, 500, {
+          error: '内置的「记忆整理者」不在，也没能补上——重启 daemon 再试。',
+          code: 'tidy_agent_missing',
         })
         return
       }
