@@ -79,6 +79,7 @@ export type MemoryWriteError =
   | 'kind_invalid'
   | 'limit_reached'
   | 'pin_limit'
+  | 'looks_like_secret'
   | 'entry_not_found'
 
 export type MemoryWriteResult =
@@ -134,6 +135,20 @@ export async function addMemoryEntry(store: Store, input: AddMemoryInput): Promi
   }
   const text = normalizeText(input.text)
   if (!text.ok) return { ok: false, code: text.code, error: text.error }
+  /**
+   * ★ 分批第 241 批：**看起来像密钥的正文直接拒**（记忆每轮都会被发到 CLI）。
+   *   要记"用哪个 token"就写**变量名**（`$GITHUB_TOKEN`），别写值。
+   */
+  const secret = looksLikeSecret(text.text)
+  if (secret !== null) {
+    return {
+      ok: false,
+      code: 'looks_like_secret',
+      error:
+        `这段像是${secret}，没有存进来——记忆每一轮都会被带进上下文发给 CLI。` +
+        `要记住"用哪个凭据"就写变量名（比如 $GITHUB_TOKEN），不要写它的值。`,
+    }
+  }
 
   const active = await listActiveMemory(store, input.workspaceId, input.agentId)
   if (active.length >= MEMORY_LIMIT) {
@@ -354,4 +369,47 @@ export async function recordMemoryUse(
       // 统计写不进去不影响这一轮：它是给人看"有没有用"的，不是 run 的一部分
     }
   }
+}
+
+/**
+ * 看起来像密钥的东西 ⇒ **拒绝写入**（分批第 241 批补：设计里那句"宁可拒绝，也不要把
+ * 密钥摘进记忆"）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么这条检查必须在**写入口**，而不是在界面上
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 记忆会被原样带进第一句话、发到 CLI（也就是模型提供方）。而人在聊天里说一句
+ * "记住：部署时用 `ghp_xxx…` 这个 token" 是**很自然**的事——那一刻没有人会想起
+ * "这句话会被存下来、以后每轮都发出去"。
+ *
+ * 所以拦在 `addMemoryEntry()`（详情页与聊天两条路都过它）：**一条写入口**。
+ *
+ * ⚠️ 判据**宁可粗一点**：误报的代价是"这句话存不进记忆，请改写成 `$GITHUB_TOKEN`"，
+ *    而漏报的代价是一个长期有效的凭据被反复发到模型那边。两边的代价不对称，
+ *    所以这里用"看起来像"就拒，不做精确解析。
+ * ⚠️ 但**不拒 `$GITHUB_TOKEN` 这种变量名**：把凭据**写成变量名**正是我们要的行为，
+ *    判定只看"像不像一串真的密钥"。
+ */
+const SECRET_PATTERNS: Array<{ what: string; re: RegExp }> = [
+  { what: '私钥', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
+  // OpenAI / Anthropic 风格的 key、GitHub token、Slack token、AWS key id
+  { what: 'API key', re: /\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/ },
+  { what: 'GitHub token', re: /\bgh[pousr]_[A-Za-z0-9]{20,}/ },
+  { what: 'Slack token', re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
+  { what: 'AWS access key', re: /\bAKIA[0-9A-Z]{16}\b/ },
+  // `token=…` / `password: …` 这类赋值，且右侧是够长的一串非空白
+  {
+    what: '口令赋值',
+    re: /\b(pass(word)?|secret|token|api[_-]?key)\b\s*[=:]\s*["']?[A-Za-z0-9_\-+/=]{12,}/i,
+  },
+  { what: 'Bearer token', re: /\bBearer\s+[A-Za-z0-9._-]{20,}/ },
+]
+
+/** 这段正文看起来像不像"把凭据抄进来了"。 */
+export function looksLikeSecret(text: string): string | null {
+  for (const { what, re } of SECRET_PATTERNS) {
+    if (re.test(text)) return what
+  }
+  return null
 }

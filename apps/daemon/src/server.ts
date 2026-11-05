@@ -194,6 +194,7 @@ import {
 } from './workdir-files.ts'
 import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
+import { memoryRootFor, syncMemoryMirror } from './memory-files.ts'
 import {
   DEFAULT_MEMORY_PREFIXES,
   MEMORY_TEXT_MAX,
@@ -414,6 +415,11 @@ export interface DaemonOptions {
    *   测试可覆盖（指向临时目录，NFR-T-01 的同类理由）。
    */
   skillsMineRoot?: string
+  /**
+   * ★ 分批第 241 批：**记忆镜像**的落点根（人可读的 `MEMORY.md` + git 历史）。
+   * 缺省 = 数据目录内的 `memory/`（测试必须显式传，否则会往真实数据目录里写）。
+   */
+  memoryRoot?: string
   /**
    * 可选沙箱（M4）。缺省 `'none'`——见 `docs/design/design.md` §14.1 与 NG7：
    * 首版 run 以 daemon 用户的完整权限执行，这一点必须如实披露。
@@ -2105,6 +2111,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 使用者提炼技能（D80）的落点：与安装根**物理分离**（`skills-mine`），
   // 且这个根是 git 仓库（平台自动 commit）。兜底同样在数据目录之内。
   const skillsMineRoot = options.skillsMineRoot ?? join(options.dataDir, 'skills-mine')
+  /** 记忆镜像根：`<dataDir>/memory/<agentId>/MEMORY.md`（权威仍是 store，这是给人看的）。 */
+  const memoryRoot = memoryRootFor(options.dataDir, options.memoryRoot)
 
   const store = await FileStore.open({
     dataDir: options.dataDir,
@@ -5377,6 +5385,23 @@ async function injectedSkillsOf(
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
         await store.insertAgent(updated)
+        /**
+         * ★ 分批第 241 批：记忆变了就同步磁盘上那份**人可读的镜像**
+         *   （`<memoryRoot>/<agentId>/MEMORY.md`）+ git 提交。
+         *   权威仍是 store；镜像只是给人看/能 grep 的副本，写失败**不打断保存**——
+         *   否则"记忆写进去了、但保存整份 agent 报错"会让界面以为记忆也丢了。
+         */
+        if (body['memory'] !== undefined) {
+          await syncMemoryMirror({
+            store,
+            workspaceId,
+            agentId,
+            agentName: updated.name,
+            root: memoryRoot,
+          }).catch((err: unknown) => {
+            warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
+          })
+        }
         // 保存的返回值带上**最新**的记忆：这样"这期间聊天里又记了一条"也能一起画出来
         const memory = await listActiveMemory(store, workspaceId, agentId)
         sendJson(res, 200, { ...updated, memory })
@@ -5493,6 +5518,16 @@ async function injectedSkillsOf(
           }
           added.push(result.entry)
         }
+        // 镜像同理（见 PATCH agent 处的说明）：聊天的两个写入口也要让它跟上
+        await syncMemoryMirror({
+          store,
+          workspaceId,
+          agentId: targetAgentId,
+          agentName: target.name,
+          root: memoryRoot,
+        }).catch((err: unknown) => {
+          warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
+        })
         sendJson(res, 201, { entries: added })
         return
       }
@@ -5507,6 +5542,15 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: result.error, code: result.code })
           return
         }
+        await syncMemoryMirror({
+          store,
+          workspaceId,
+          agentId: targetAgentId,
+          agentName: target.name,
+          root: memoryRoot,
+        }).catch((err: unknown) => {
+          warn(`记忆镜像没写成功（不影响保存）：${err instanceof Error ? err.message : String(err)}`)
+        })
         sendJson(res, 200, { ok: true, alreadyRemoved: result.alreadyRemoved })
         return
       }

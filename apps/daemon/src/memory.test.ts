@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -436,6 +437,52 @@ describe('记忆：顺序与置顶上限', () => {
   })
 })
 
+describe('记忆：不许把凭据抄进来（分批第 241 批）', () => {
+  test('★★ 像密钥的正文被拒，并给出"写变量名"的替代说法', async () => {
+    const { store } = fakeStore()
+    const cases = [
+      '部署用 sk-abcdefghijklmnopqrstuvwx 这个 key',
+      '记住 ghp_0123456789abcdefghijABCDEFGHIJ',
+      'password=SuperSecret123456',
+      'token: abcdefghijklmnop123',
+      'Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345',
+      '-----BEGIN RSA PRIVATE KEY-----',
+    ]
+    for (const text of cases) {
+      const res = await addMemoryEntry(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        kind: 'fact',
+        text,
+        newId: idGen(),
+      })
+      assert.equal(res.ok, false, `应当拒绝：${text}`)
+      if (!res.ok) {
+        assert.equal(res.code, 'looks_like_secret')
+        assert.match(res.error, /变量名/, '错误里要说清"写变量名、别写值"')
+      }
+    }
+  })
+
+  test('★★ 但"写变量名"本身是允许的（这正是我们想要的行为）', async () => {
+    const { store } = fakeStore()
+    for (const text of [
+      '部署用 $GITHUB_TOKEN（不要把它写进任何文件）',
+      'token 从环境变量 GITHUB_TOKEN 里取',
+      '这个仓库的 API key 放在 1Password 里，不在这里写',
+    ]) {
+      const res = await addMemoryEntry(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        kind: 'fact',
+        text,
+        newId: idGen(),
+      })
+      assert.equal(res.ok, true, `不该拒绝：${text}`)
+    }
+  })
+})
+
 describe('触发词（全局的一份）', () => {
   test('★ 没设过 ⇒ 平台默认那三个', () => {
     assert.deepEqual(effectiveMemoryPrefixes(null), [...DEFAULT_MEMORY_PREFIXES])
@@ -613,6 +660,77 @@ describe('记忆接口（HTTP 层）', () => {
  * （`useCount`）。任何一处断了，界面上都会看起来正常（记忆列表有、跑得也正常），
  * 只是它从没被用上——那正是最需要一条端到端断言的地方。
  */
+describe('记忆：磁盘镜像跟着写（分批第 241 批）', () => {
+  test('★★ 详情页保存 / 聊天入口 写记忆之后，<memoryRoot>/<agentId>/MEMORY.md 跟着更新', async () => {
+    const dir = await makeTempDir('memory-mirror-api')
+    const mirrorRoot = `${dir}-mirror`
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      memoryRoot: mirrorRoot,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '镜像测试', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      const mirror = `${mirrorRoot}/${agent.id}/MEMORY.md`
+
+      // ① 聊天入口（POST /memory）
+      await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'lesson', text: '别直接改 dist' }),
+      })
+      const first = await readFile(mirror, 'utf8')
+      assert.match(first, /# 记忆：镜像测试/)
+      assert.match(first, /别直接改 dist/)
+      assert.match(first, /改这个文件\*\*不会生效\*\*/, '★ 镜像必须自己说清不是权威')
+
+      // ② 详情页保存（PATCH agent 的记忆差量）——镜像同样要跟上
+      await fetch(`${d.url}/api/agents/${agent.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ memory: { add: [{ kind: 'preference', text: '说话短一点' }] } }),
+      })
+      const second = await readFile(mirror, 'utf8')
+      assert.match(second, /说话短一点/)
+      assert.match(second, /共 2 条/)
+
+      // ③ 删一条（DELETE /memory/{id}）之后镜像里不该再有它
+      const detail = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ id: string; text: string }>
+      }
+      const target = detail.memory.find((e) => e.text === '别直接改 dist')
+      assert.ok(target)
+      await fetch(`${d.url}/api/agents/${agent.id}/memory/${target.id}`, { method: 'DELETE' })
+      const third = await readFile(mirror, 'utf8')
+      assert.doesNotMatch(third, /别直接改 dist/, '删掉的条目从镜像里消失')
+      assert.match(third, /说话短一点/)
+      assert.match(third, /共 1 条/)
+    } finally {
+      await d.close()
+      await cleanup(dir)
+      await cleanup(mirrorRoot)
+    }
+  })
+})
+
 describe('记忆：真的进了第一句话（端到端）', () => {
   test('★★★ 一轮对话的第一句话里有那几条记忆，跑完之后 useCount 变成 1', async () => {
     const dir = await makeTempDir('memory-prompt')

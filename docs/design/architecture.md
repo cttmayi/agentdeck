@@ -1589,7 +1589,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
 | **智能体组**（谁审谁 / 行动权限 / 返工次数） | 形状与判据：`packages/domain/src/groups/shape.ts`（"恰好 1 执行 + 1 审核"，多执行者 / 多审核者会明确报"还没有实现"）；实体：`packages/protocol/src/entities.ts` 的 `AgentGroup`；接口：`apps/daemon/src/server.ts` 的 `/api/agent-groups` 那 5 条；**摊平点**：`POST /api/runs` 的组展开（`server.ts:4990` 一带）；界面：`apps/web/src/views/Groups.svelte` + `components/MemberSlotForm.svelte` + `lib/newtask-chain.ts`。设计缘由见 `docs/design/agent-groups.md` |
-| **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte` + 设置抽屉的「记忆」一节。设计缘由见 §4.3.38 |
+| **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；**磁盘镜像 + git**：`apps/daemon/src/memory-files.ts`；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte` + 设置抽屉的「记忆」一节。设计缘由见 §4.3.38 |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
 | 远端接口 / 插件 | `apps/remote/src/server.ts` / `plugins.ts` |
@@ -3280,6 +3280,17 @@ createdAt, removedAt }`，`kind` 只有四种（`preference` / `fact` / `lesson`
 **界面**（智能体详情页，紧贴「指令」下面）：一条一行（≈32px）、动作悬停才出、★ 置顶、
 悬停看全文与出处；「预览第一句话」抽屉（**只读**）显示服务端按**已保存的**指令 + 记忆渲染
 出来的 ②——预览与投递同一个来源，才谈得上"逐字一致"。
+
+**磁盘镜像 + 版本管理**（分批第 241 批补，`apps/daemon/src/memory-files.ts`）：记忆另外落一份
+**人可读的** `<memoryRoot>/<agentId>/MEMORY.md`（缺省 `<dataDir>/memory/`，`DaemonOptions.memoryRoot`
+可覆盖），按类型分小节、★ 标置顶、带用量与出处；目录用 **agentId** 而不是名字——改名不搬家，
+名字只出现在标题里。可用时复用 skill-mine 那一套 git（`probeGit`/`ensureMineRepo`/`commitMine`）
+自动提交，不可用就**降级并在结果里说清原因**，镜像照写。三条硬约束：① **权威仍是 store**，
+文件头第一句就写着"改这个文件不会生效"——一个看起来能改、改了却没用的文件比没有更糟；
+② 顺序与**注入顺序**一致（两边都走 `sortMemoryForInjection`），人翻文件看到的第一条就是预算
+不够时最后被裁掉的；③ 同步失败**不打断保存**（记忆已经在 store 里了，镜像只是附带产物）。
+三个写入口（`POST /api/agents/{id}/memory`、`DELETE .../{entryId}`、`PATCH /api/agents/{id}` 的
+记忆差量）之后都会同步一次。
 
 **刻意不做的**：① 平台**自动从判决里摘教训**（假设平台能算出正确因果，实际常常是错的，
 而且会长期污染它的行为）；② **agent 自己提议记忆**（分不清"这次做了什么"与"下次该注意
