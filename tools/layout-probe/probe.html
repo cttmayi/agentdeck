@@ -8323,6 +8323,23 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
             const chip = await untilNet(() => !!d().querySelector('[data-mem-chip]'), 40)
             const chipText = chip ? (text(d().querySelector('[data-mem-chip-text]')) ?? '') : ''
+
+            /**
+             * ★ 分批第 241 批（真缺陷的回归守卫）：「改」按下去之后**这一句还要记**。
+             *
+             *   第一版「改」只是把剥掉前缀的正文塞回输入框 ⇒ 下一帧前缀没了，
+             *   chip 消失、发送时什么都不记 —— 那颗按钮看起来"改好了一句记忆"，
+             *   实际把记忆改没了（界面上一切正常，只是没发生）。
+             *   所以量的是：点完「改」之后 chip **还在**，且候选 = 输入框里的字。
+             */
+            let editKept = null
+            const editBtn = d().querySelector('[data-mem-chip-edit]')
+            if (editBtn) {
+              click(editBtn)
+              editKept = await untilNet(() => !!d().querySelector('[data-mem-chip]'), 40)
+              const nowText = text(d().querySelector('[data-mem-chip-text]')) ?? ''
+              if (!nowText.includes('以后报告都用中文写')) editKept = false
+            }
             composer.value = ''
             composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
             await untilNet(() => !d().querySelector('[data-mem-chip]'), 40)
@@ -8331,7 +8348,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const tidyBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
               text(b).includes('整理成记忆'),
             )
-            if (!tidyBtn) return { chip: chip, chipText, tidy: false }
+            if (!tidyBtn) return { chip: chip, chipText, tidy: false, editKept }
             click(tidyBtn)
             const opened = await untilNet(() => !!d().querySelector('[data-tidy-list]'), 40)
             const rows = opened ? d().querySelectorAll('[data-tidy-list] .tidy-row') : []
@@ -8343,7 +8360,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             )
             if (close) click(close)
             await untilNet(() => !d().querySelector('[data-tidy-list]'), 40)
-            return { chip, chipText, tidy: true, rows: rows.length, onlyHuman }
+            return { chip, chipText, tidy: true, rows: rows.length, onlyHuman, editKept }
           })()
 
           return !stillThere

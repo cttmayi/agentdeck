@@ -1293,25 +1293,28 @@ const CHECKS = [
      *
      *   ① 前缀触发：打一句「记住：以后报告都用中文写」⇒ 发送前出现 chip，上面写的是
      *      **剥掉前缀之后**那句（前缀不写进记忆）；
-     *   ② 整理成记忆…：顶栏那颗按钮打开对话框，**只列人说过的话**（逐字，不生成总结）。
+     *   ② 整理成记忆…：顶栏那颗按钮打开对话框，**只列人说过的话**（逐字，不生成总结）；
+     *   ③ 「改」（第 241 批补的这一条，盯着一个真缺陷）——点完 chip **必须还在**：
+     *      第一版把剥掉前缀的正文塞回输入框，前缀没了 ⇒ chip 消失 ⇒ 发送时静默不记。
      */
     label:
       '★★★ 聊天里：以触发词开头会冒出「将记进它的记忆」chip（写的是剥掉前缀那句）；' +
-      '「整理成记忆…」只列**人说过的话**',
+      '点「改」之后这一句**仍然要记**（chip 不消失）；「整理成记忆…」只列**人说过的话**',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.chip === true &&
       String(v.chipText).includes('以后报告都用中文写') &&
       !String(v.chipText).includes('记住：') &&
+      v.editKept === true &&
       v.tidy === true &&
       v.rows > 0 &&
       v.onlyHuman === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `chip ${String(v.chip)}「${String(v.chipText)}」　整理对话框 ${String(v.tidy)}　` +
-          `${String(v.rows ?? 0)} 行　只列人的话 ${String(v.onlyHuman)}`,
+        : `chip ${String(v.chip)}「${String(v.chipText)}」　改完还在 ${String(v.editKept)}　` +
+          `整理对话框 ${String(v.tidy)}　${String(v.rows ?? 0)} 行　只列人的话 ${String(v.onlyHuman)}`,
   },
   {
     view: '聊天',

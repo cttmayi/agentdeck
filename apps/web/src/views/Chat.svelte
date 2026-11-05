@@ -141,8 +141,22 @@
    *   ② **整理成记忆**：手动打开，把这段对话里"你说过的判断句"挑出来勾。
    */
   $: memPrefixes = $identity?.memoryPrefixes ?? []
-  /** 这一句剥掉前缀之后的内容；`null` = 这不像"要记住"的一句话。 */
-  $: memCandidate = stripMemoryPrefix(input, memPrefixes)
+  /**
+   * ★ 「改」按下去之后的**手动模式**（分批第 241 批修）。
+   *
+   * ⚠️ 第一版「改」只是 `input = memCandidate.text` —— 前缀被剥掉了，于是下一帧
+   *    `stripMemoryPrefix` 返回 `null`，chip 消失、发送时**什么都不记**。
+   *    也就是说那颗按钮看起来"改好了一句记忆"，实际把记忆改没了（静默丢数据，
+   *    本仓库最忌讳的那种缺陷：界面上一切正常，只是没发生）。
+   *    现在的语义是：改 = "这句我留着，但要换个说法再记"——手动模式下候选就是
+   *    **输入框里的字本身**，改到哪记到哪，直到发出去或按「不记」。
+   */
+  let memForced = false
+  /** 这一句要记的内容；`null` = 这不像"要记住"的一句话。 */
+  $: memCandidate =
+    memForced && input.trim() !== ''
+      ? { text: input.trim(), prefix: '' }
+      : stripMemoryPrefix(input, memPrefixes)
   /** 被「不记」跳过的那个候选（输入一变就复位）。 */
   let memSkip = ''
   let memLastInput = input
@@ -427,6 +441,8 @@
       memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''
         ? memCandidate
         : null
+    // 手动模式只管这一句：发出去（或下面 return 掉）就复位，免得下一句被顺带记住
+    memForced = false
     /**
      * ★ 分批第 231 批：**一轮没跑完不发第二句**这道门禁放在这里，不只放在组件里。
      *   组件那一层只挡住"点按钮 / 按 Enter"，而 `send()` 还有别的入口能到
@@ -1036,7 +1052,9 @@
             data-mem-chip-edit
             title={$t('chat.memoryChipEditTitle')}
             onclick={() => {
+              // 只改输入框；记忆的候选改成"输入框里的字本身"（见 `memForced` 的说明）
               input = memCandidate.text
+              memForced = true
             }}>{$t('chat.memoryChipEdit')}</button
           >
           <button
