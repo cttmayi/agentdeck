@@ -2864,58 +2864,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         }
 
         /**
-         * ★ 分批第 240 批：设置里的「记忆」那一节（触发词，全局一份）。
-         *
-         * ⚠️ 它不在**页面级**那个「设置」抽屉里（那是第一句话模版），而在 **App 设置抽屉**
-         *    （顶栏那组 icon-btn 里的设置）。所以这里自己开一次、量完再关——
-         *    与「全局 runtime 默认值」那一段同一条路。
-         *
-         * 量三件：那一节在、列着现在生效的词、**加一个词立刻生效**（界面与身份接口都变）。
-         * 量完把那个词删掉，别让它漏到后面的判据里。
+         * ★ 分批第 242 批：触发词那一节**搬到了聊天页的「设置」抽屉**（见那一页里的
+         *   `chat.settingsPrefixes`）。这里不再量：App 设置抽屉里那份已经删掉——
+         *   配置本身仍是全局一份，只是入口换到了使用者找得到的地方。
          */
-        facts['settings.memoryPrefixes'] = await (async () => {
-          const openBtn = [...d().querySelectorAll('.topbar button')].find(
-            (b) => (b.getAttribute('aria-label') ?? '') === '设置',
-          )
-          if (!openBtn) return { present: false, reason: '找不到全局设置按钮' }
-          click(openBtn)
-          const found = await until(() => !!d().querySelector('[data-memory-prefixes]'), 60)
-          const sec = d().querySelector('[data-memory-prefixes]')
-          if (!found || !sec) {
-            f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-            await until(() => !d().querySelector('.drawer'), 40)
-            return { present: false }
-          }
-          const words = () =>
-            [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip .mono')].map((n) => text(n))
-          const before = words()
-          const input = sec.querySelector('[data-prefix-input]')
-          const addBtn = sec.querySelector('[data-prefix-add]')
-          let added = false
-          let inIdentity = false
-          if (input && addBtn) {
-            input.value = '探针词'
-            input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
-            click(addBtn)
-            added = await untilNet(() => words().includes('探针词'), 60)
-            const identity = await f.contentWindow
-              .fetch('/api/identity')
-              .then((r) => r.json())
-              .catch(() => null)
-            inIdentity = Array.isArray(identity?.memoryPrefixes)
-              ? identity.memoryPrefixes.includes('探针词')
-              : false
-            const chip = [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip')].find((c) =>
-              text(c.querySelector('.mono')).includes('探针词'),
-            )
-            const x = chip?.querySelector('[data-prefix-remove]')
-            if (x) click(x)
-            await untilNet(() => !words().includes('探针词'), 60)
-          }
-          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-          await until(() => !d().querySelector('.drawer'), 40)
-          return { present: true, before, added, inIdentity }
-        })()
+
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
@@ -8362,6 +8315,60 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             await untilNet(() => !d().querySelector('[data-tidy-list]'), 40)
             return { chip, chipText, tidy: true, rows: rows.length, onlyHuman, editKept }
           })()
+
+          /**
+           * ★ 分批第 242 批：**聊天页自己的「设置」抽屉**里的触发词。
+           *
+           * 使用者的原话是「聊天有个设置，里面有触发词的设置」——第一版把它放在
+           * 全局 App 设置抽屉里，位置错了：一个配置项找不着，就等于没有。
+           *
+           * 量三件：抽屉打得开、列着现在生效的词、**加一个词立刻生效**（chip 上出现，
+           * 身份接口里也有）——"不用保存按钮"是这一节的规矩，所以必须量到接口那层。
+           * 量完把那个词删掉、抽屉关掉，别漏到后面的判据里。
+           */
+          facts['chat.settingsPrefixes'] = await (await (async () => {
+            const openBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+              (b) => text(b).trim() === '设置',
+            )
+            if (!openBtn) return { present: false, reason: '聊天页顶栏没有「设置」' }
+            click(openBtn)
+            const sec = await untilNet(() => d().querySelector('[data-memory-prefixes]'), 60)
+              ? d().querySelector('[data-memory-prefixes]')
+              : null
+            if (!sec) return { present: false, reason: '抽屉里没有记忆触发词那一节' }
+            const words = () =>
+              [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip .mono')].map((n) => text(n))
+            const before = words()
+            const input = sec.querySelector('[data-prefix-input]')
+            const addBtn = sec.querySelector('[data-prefix-add]')
+            let added = false
+            let inIdentity = false
+            if (input && addBtn) {
+              input.value = '探针词'
+              input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+              click(addBtn)
+              added = await untilNet(() => words().includes('探针词'), 60)
+              const identity = await f.contentWindow
+                .fetch('/api/identity')
+                .then((r) => r.json())
+                .catch(() => null)
+              inIdentity = Array.isArray(identity?.memoryPrefixes)
+                ? identity.memoryPrefixes.includes('探针词')
+                : false
+              const chip = [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip')].find((c) =>
+                (text(c.querySelector('.mono')) ?? '').includes('探针词'),
+              )
+              const x = chip?.querySelector('[data-prefix-remove]')
+              if (x) click(x)
+              await untilNet(() => !words().includes('探针词'), 60)
+            }
+            // 关掉抽屉（Escape 由 Drawer 自己接）：留着会挡住后面判据量的聊天页
+            f.contentWindow.dispatchEvent(
+              new f.contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+            )
+            await untilNet(() => !d().querySelector('[data-memory-prefixes]'), 40)
+            return { present: true, before, added, inIdentity }
+          })())
 
           return !stillThere
         })()

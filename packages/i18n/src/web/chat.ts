@@ -132,6 +132,33 @@ export const chatText = {
   'chat.tidyTurn': { zh: '第 {n} 轮', en: 'turn {n}' },
   'chat.tidyCount': { zh: '选中 {n} 条', en: '{n} selected' },
   'chat.tidyConfirm': { zh: '记下选中的 {n} 条', en: 'Remember {n}' },
+
+  /**
+   * ── 聊天页自己的「设置」抽屉（分批第 242 批）──
+   *
+   * ★ 记忆触发词那几条原来在 `settings.memory*`（全局 App 设置抽屉里）。搬过来是因为
+   *   使用者找的地方是**聊天页**：「聊天有个设置，里面有触发词的设置」。配置本身
+   *   仍然是全局一份（所有对话共用），抽屉副标题把这件事写在脸上。
+   */
+  'chat.settingsAction': { zh: '设置', en: 'Settings' },
+  'chat.settingsTitle': { zh: '聊天设置', en: 'Chat settings' },
+  'chat.settingsSubtitle': {
+    zh: '这些设定对所有对话都生效（不是只管当前这一段）。',
+    en: 'These apply to every conversation, not just the one you have open.',
+  },
+  'chat.settingsMemoryHeading': { zh: '记忆触发词', en: 'Memory triggers' },
+  'chat.settingsMemoryHint': {
+    zh: '聊天里以这些词开头的句子，会被记进正在聊的那个智能体的记忆。只认开头，不做语义猜测；前缀本身不写进记忆。改完立刻生效。',
+    en: 'A chat message starting with one of these words is remembered by the agent you are chatting with. Only the beginning is matched — no guessing — and the prefix itself is not stored. Changes take effect immediately.',
+  },
+  'chat.settingsMemoryAdd': { zh: '加', en: 'Add' },
+  'chat.settingsMemoryAddPlaceholder': {
+    zh: '加一个开头，例如「记得」',
+    en: 'Add a trigger, e.g. "remember"',
+  },
+  'chat.settingsMemoryRemove': { zh: '删掉触发词「{word}」', en: 'Remove the trigger "{word}"' },
+  'chat.settingsMemoryReset': { zh: '恢复默认', en: 'Restore defaults' },
+  'chat.settingsMemoryOff': { zh: '（空：这个功能关着）', en: '(empty: this feature is off)' },
   'chat.placeholder': { zh: '说点什么…（Enter 发送，Shift+Enter 换行）', en: 'Say something… (Enter to send, Shift+Enter for a new line)' },
   'chat.send': { zh: '发送', en: 'Send' },
   // ★ 分批第 232 批：`chat.enterHint`（输入框下面那行"Enter 发送 · Shift+Enter 换行"）

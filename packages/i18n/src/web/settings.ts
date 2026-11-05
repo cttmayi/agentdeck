@@ -57,17 +57,7 @@ export const settingsText = {
    *   标签页）。界面与 daemon 各是哪一版这件事**两边都不报错**，所以必须有一句
    *   可查的话。
    */
-  // ── 记忆触发词（分批第 240 批，全局一份）──
-  'settings.memoryHeading': { zh: '记忆', en: 'Memory' },
-  'settings.memoryHint': {
-    zh: '聊天里以这些词开头的句子，会被记进正在聊的那个智能体的记忆。只认开头，不做语义猜测；前缀本身不写进记忆。这一栏是全局设定：所有对话共用这一套。',
-    en: 'A chat message starting with one of these words is remembered by the agent you are chatting with. Only the beginning is matched — no guessing — and the prefix itself is not stored. This is global: every conversation shares one list.',
-  },
-  'settings.memoryAdd': { zh: '加', en: 'Add' },
-  'settings.memoryAddPlaceholder': { zh: '加一个开头，例如「记得」', en: 'Add a trigger, e.g. "remember"' },
-  'settings.memoryRemove': { zh: '删掉这个触发词', en: 'Remove this trigger' },
-  'settings.memoryReset': { zh: '恢复默认', en: 'Restore defaults' },
-  'settings.memoryOff': { zh: '（空：这个功能关着）', en: '(empty: this feature is off)' },
+  // ── 记忆触发词那几条搬到了 `chat.settings*`（分批第 242 批：入口从 App 设置搬到聊天页）──
   'settings.about': { zh: '关于', en: 'About' },
   /**
    * ⚠️ 两条版本信息**默认收起**（2026-09）：构建文件名与协议版本号是排查用的，

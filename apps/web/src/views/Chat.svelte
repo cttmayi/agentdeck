@@ -10,6 +10,7 @@
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy, { type TidyCandidate } from '../components/ChatMemoryTidy.svelte'
+  import ChatSettings from '../components/ChatSettings.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -167,6 +168,14 @@
   /** 已经写进库里、等人在界面上看到的那些（turnId → 一条或几条 + 文案）。 */
   let memNotes: Record<string, { ids: string[]; text: string }> = {}
   let tidyOpen = false
+  /**
+   * 聊天页自己的「设置」抽屉（分批第 242 批）。
+   *
+   * 里面是**记忆触发词**：它管"你在聊天里怎么说话会被记住"，所以入口在这一页。
+   * 第一版把它塞在全局 App 设置里，使用者的原话是「聊天有个设置，里面有触发词的设置」
+   * ——配置找不着就等于没有（配置本身仍是全局一份，见 `ChatSettings.svelte` 头注释）。
+   */
+  let chatSettingsOpen = false
   let tidyCandidates: TidyCandidate[] = []
   /**
    * ★ 整理成记忆的回执（与"前缀触发"那一行分开存）。
@@ -383,28 +392,45 @@
    *
    * ⚠️ 卸载时收回来（登记里存的是抓着这一页状态的闭包）。
    */
-  $: setPageActions('chat', drafting ? [] : [
-    {
-      id: 'new',
-      label: $t('chat.newConversation'),
-      kind: 'primary',
-      icon: 'plus',
-      onActivate: startDrafting,
-    },
+  $: setPageActions('chat', [
+    // 起草时顶栏不给「新对话」：那一刻右侧已经在填新对话了，再给一个只会让人多点一下
+    ...(drafting
+      ? []
+      : [
+          {
+            id: 'new',
+            label: $t('chat.newConversation'),
+            kind: 'primary' as const,
+            icon: 'plus' as const,
+            onActivate: startDrafting,
+          },
+        ]),
     /**
      * ★ 分批第 240 批：「整理成记忆…」——**手动**入口（不做"对话够长就自己冒出来"：
      *   自动出现的东西人第二次就不看了）。没有轮次时禁用，而不是让它点了空转。
      */
-    ...(activeTurns.length > 0
-      ? [
+    ...(drafting || activeTurns.length === 0
+      ? []
+      : [
           {
             id: 'tidy-memory',
             label: $t('chat.tidyAction'),
             kind: 'secondary' as const,
             onActivate: openTidy,
           },
-        ]
-      : []),
+        ]),
+    /**
+     * ★ 分批第 242 批：**聊天页自己的「设置」**（记忆触发词在里面）。
+     *   起草时也给：触发词是"这一页怎么用"的配置，与有没有正在打的草稿无关。
+     */
+    {
+      id: 'settings',
+      label: $t('chat.settingsAction'),
+      kind: 'secondary' as const,
+      onActivate: () => {
+        chatSettingsOpen = true
+      },
+    },
   ])
   onDestroy(() => clearPageActions('chat'))
 
@@ -1083,6 +1109,8 @@
       ★ 分批第 240 批：「整理成记忆」对话框（**手动**打开）。
       勾完之后由这一页落库（对话框自己不发请求），并在对话里留一行可撤销的回执。
     -->
+    <ChatSettings bind:open={chatSettingsOpen} onclose={() => (chatSettingsOpen = false)} />
+
     <ChatMemoryTidy
       bind:open={tidyOpen}
       candidates={tidyCandidates}
