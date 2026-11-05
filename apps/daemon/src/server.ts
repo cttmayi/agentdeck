@@ -195,6 +195,7 @@ import {
 import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
 import { memoryRootFor, syncMemoryMirror } from './memory-files.ts'
+import { buildTidyPrompt, parseTidyOutput, renderTidyTranscript } from './memory-tidy.ts'
 import {
   DEFAULT_MEMORY_PREFIXES,
   MEMORY_TEXT_MAX,
@@ -8292,6 +8293,155 @@ async function injectedSkillsOf(
         return
       }
       sendJson(res, 202, out)
+      return
+    }
+
+    /**
+     * ══════════════════════════════════════════════════════════════════
+     * 「整理成记忆」（分批第 243 批）
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 使用者：「类似沉淀技能一样，分析整段对话，然后整理出要添加的记忆」。
+     *
+     * 所以这里起一条**分析 run**（`subject.type: 'memory-tidy'`，不在闭环里）：
+     *   ① 平台把整段对话落成 `transcript.md`（写进这条对话专用的分析小屋）；
+     *   ② 让这个对话的**执行者本人**读——它最知道自己在乎什么，而且它只用读文本，
+     *      不需要接着聊（**不 resume**：新开一个会话，免得把"整理"与"接着聊"混起来）；
+     *   ③ 它只吐一个 JSON 数组；平台解析成候选，**摆给人勾**——写进记忆的仍然只有人
+     *      按下那一下（铁律：只有人能写）。
+     *
+     * 为什么不做成"把我说过的话列出来让人勾"（第 240 版）：原话多半是"这次"的话，
+     * 勾了也不是经验；而真正值得记的那句常常夹在长段消息里，还得人自己再读一遍。
+     */
+    const tidyMatch = /^\/api\/conversations\/([^/]+)\/memory-tidy(?:\/([^/]+))?$/.exec(path)
+    if (tidyMatch) {
+      const conversationId = decodeURIComponent(tidyMatch[1]!) as ConversationId
+      const tidyRunId = tidyMatch[2] === undefined ? null : decodeURIComponent(tidyMatch[2])
+      const conversation = await store.getConversation(conversationId)
+      if (!conversation || conversation.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '对话不存在' })
+        return
+      }
+
+      /** 这个对话的分析小屋：按 subject 自动分配（`<workRoot>/memory-tidy-<对话 id>`）。 */
+      const tidyDir = resolveWorkDir({
+        workRoot,
+        subject: { type: 'memory-tidy', id: conversationId as string },
+        fallbackId: conversationId as string,
+      }).path
+
+      // ── 读结果：轮询这条用（跑着 ⇒ 只说状态，跑完 ⇒ 给解析出来的候选）──
+      if (req.method === 'GET' && tidyRunId !== null) {
+        const run = await store.getRun(tidyRunId as RunId)
+        if (
+          !run ||
+          run.workspaceId !== workspaceId ||
+          run.subject.type !== 'memory-tidy' ||
+          run.subject.id !== (conversationId as string)
+        ) {
+          sendJson(res, 404, { error: `整理任务不存在（${tidyRunId}）` })
+          return
+        }
+        if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
+          sendJson(res, 200, { status: run.status, candidates: null, dropped: [], parsed: false })
+          return
+        }
+        const messages = await store.listRunMessages(run.id)
+        const parsed = parseTidyOutput(lastTextOf(messages) ?? '')
+        sendJson(res, 200, {
+          status: run.status,
+          candidates: parsed.candidates,
+          dropped: parsed.dropped,
+          parsed: parsed.parsed,
+          failure: run.failureReason ?? null,
+        })
+        return
+      }
+
+      if (req.method !== 'POST' || tidyRunId !== null) {
+        sendJson(res, 405, { error: '这个地址只接受 POST（读结果用 GET .../memory-tidy/<runId>）' })
+        return
+      }
+
+      const agent = await store.getAgent(conversation.agentId)
+      if (!agent) {
+        sendJson(res, 409, {
+          error: '这个对话的执行者已经被删掉了，没办法整理（记忆是它的）。',
+          code: 'agent_gone',
+        })
+        return
+      }
+
+      // 已经在分析 ⇒ 直接把那条 run 交回去（重复点两下不该起两条 run，也不该报错）
+      const all = await store.listRuns({ workspaceId, limit: 5_000 })
+      const running = all.items.find(
+        (r) =>
+          r.subject.type === 'memory-tidy' &&
+          r.subject.id === (conversationId as string) &&
+          !TERMINAL_RUN_STATUSES.includes(r.status),
+      )
+      if (running) {
+        sendJson(res, 200, { tidyRunId: running.id, reused: true })
+        return
+      }
+
+      // ── 整段对话（人说的 + 它回的，逐字）──
+      const turns = await store.listChatTurns(conversationId)
+      if (turns.length === 0) {
+        sendJson(res, 400, {
+          error: '这段对话还没有内容可整理（先聊几句再整理）。',
+          code: 'empty_conversation',
+        })
+        return
+      }
+      const tidyTurns = []
+      for (const turn of turns) {
+        let output: string | null = null
+        if (turn.runId) {
+          const messages = await store.listRunMessages(turn.runId)
+          const text = lastTextOf(messages)
+          output = text === null || text.trim() === '' ? null : text
+        }
+        tidyTurns.push({ seq: turn.seq, userText: turn.userText, output })
+      }
+      const transcript = renderTidyTranscript({
+        title: conversation.title,
+        agentName: agent.name,
+        turns: tidyTurns,
+      })
+      await mkdir(tidyDir, { recursive: true })
+      await writeFile(join(tidyDir, 'transcript.md'), transcript.text, 'utf8')
+
+      const newRunId = ulid() as RunId
+      const outcome = await executor.submit({
+        runId: newRunId,
+        kind: 'execute',
+        agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
+        /**
+         * ⚠️ **不带技能**：这一轮要读的是 `transcript.md`，不是工作目录里的材料；
+         *    注入技能只会把这些东西一起塞进上下文，对"挑出该记的句子"没有帮助。
+         */
+        skills: [],
+        subject: { type: 'memory-tidy', id: conversationId as string },
+        prompt: buildTidyPrompt(),
+        workDir: tidyDir,
+        limits: { maxTurns: null, timeoutMs: null },
+        // `null` = 这一次明确不自动审（整理不是任务，没有什么可审的）
+        reviewerAgentId: null,
+      })
+      if (outcome.kind === 'rejected') {
+        res.setHeader('retry-after', String(Math.ceil((outcome.retryAfterMs ?? 2000) / 1000)))
+        sendJson(res, 429, {
+          error: '没有空闲的执行位（同时能跑的 run 有上限），整理没有开始。稍后再试。',
+          code: 'no_capacity',
+        })
+        return
+      }
+      sendJson(res, 202, {
+        tidyRunId: newRunId,
+        turns: transcript.included,
+        skipped: transcript.skipped,
+      })
       return
     }
 

@@ -59,6 +59,10 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   //   审核者要读的 `skill/` 与 `material/` 都在那里，另开一间屋就什么都看不到。
   //   这里的前缀只是"万一有人按 subject 分配"时的兜底，正常路径走 `draftRoot`。
   'skill-draft-review': 'skill-draft-review',
+  // ★ 整理记忆那条分析 run（第 243 批）：`<workRoot>/memory-tidy-<对话 id>`。
+  //   一间小屋一段对话——再次整理会把 `transcript.md` 覆盖成最新的对话，
+  //   旧的小屋留着没有意义（而按对话 id 固定下来，串行化也天然成立）。
+  'memory-tidy': 'memory-tidy',
 }
 
 /**

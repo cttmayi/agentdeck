@@ -170,7 +170,15 @@ export function firstSentenceKindFor(run: {
   subject: { type: string }
 }): FirstSentenceKind {
   // 对话与沉淀：说话，不是派活（下一轮的回答还在同一个 subject 里接着往下说）
-  if (run.subject.type === 'conversation' || run.subject.type === 'skill-draft') return 'chat'
+  // ★ 第 243 批：`memory-tidy` 也是"跟装着技能的智能体说话"——整理记忆与沉淀同理，
+  //   用的是聊天那份框架（任务那份含报告要求与判决契约，灌进来是错的）。
+  if (
+    run.subject.type === 'conversation' ||
+    run.subject.type === 'skill-draft' ||
+    run.subject.type === 'memory-tidy'
+  ) {
+    return 'chat'
+  }
   return run.kind === 'review' ? 'review' : 'execute'
 }
 

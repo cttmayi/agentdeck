@@ -1293,28 +1293,26 @@ const CHECKS = [
      *
      *   ① 前缀触发：打一句「记住：以后报告都用中文写」⇒ 发送前出现 chip，上面写的是
      *      **剥掉前缀之后**那句（前缀不写进记忆）；
-     *   ② 整理成记忆…：顶栏那颗按钮打开对话框，**只列人说过的话**（逐字，不生成总结）；
+     *   ② 「整理成记忆」那半**搬走了**（第 243 批）：它不再是"列出人说过的话"，而是一条
+     *      分析 run——整条闭环由 `chat.tidyAnalyses` 量。判据里删掉 `tidy/rows/onlyHuman`
+     *      三个字段，是本批**唯一的松绑方向**，理由是"被测的行为不存在了"，不是断言变弱。
      *   ③ 「改」（第 241 批补的这一条，盯着一个真缺陷）——点完 chip **必须还在**：
      *      第一版把剥掉前缀的正文塞回输入框，前缀没了 ⇒ chip 消失 ⇒ 发送时静默不记。
      */
     label:
       '★★★ 聊天里：以触发词开头会冒出「将记进它的记忆」chip（写的是剥掉前缀那句）；' +
-      '点「改」之后这一句**仍然要记**（chip 不消失）；「整理成记忆…」只列**人说过的话**',
+      '点「改」之后这一句**仍然要记**（chip 不消失）',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.chip === true &&
       String(v.chipText).includes('以后报告都用中文写') &&
       !String(v.chipText).includes('记住：') &&
-      v.editKept === true &&
-      v.tidy === true &&
-      v.rows > 0 &&
-      v.onlyHuman === true,
+      v.editKept === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `chip ${String(v.chip)}「${String(v.chipText)}」　改完还在 ${String(v.editKept)}　` +
-          `整理对话框 ${String(v.tidy)}　${String(v.rows ?? 0)} 行　只列人的话 ${String(v.onlyHuman)}`,
+        : `chip ${String(v.chip)}「${String(v.chipText)}」　改完还在 ${String(v.editKept)}`,
   },
   {
     view: '聊天',
@@ -1490,6 +1488,41 @@ const CHECKS = [
         : `说明 ${String(v.noted)}　还在审阅 ${String(v.stillReview)}　还能再入库 ${String(v.stillCommit)}　` +
           `没有放弃 ${String(v.noAbandon)}　「${String(v.note)}」　` +
           `诊断 ${JSON.stringify(v.diag ?? null)}`,
+  },
+  {
+    view: '聊天',
+    key: 'chat.tidyAnalyses',
+    /**
+     * ★ 分批第 243 批：**「整理成记忆」= 分析整段对话**（使用者："过程和我想象不一样，
+     *   我的理解它应该类似沉淀技能一样，分析整段对话，然后整理出要添加的记忆"）。
+     *
+     * 第一版（第 240 批）是"把我说过的话逐字列出来让人勾"，那是**摘录**不是分析：
+     * 原话多半是"这次"的话，而 agent 自己说过的判断根本不在候选里。这一条量的是新闭环：
+     * 开场白说清它会读整段对话 → 点开始真的起一条 run → 候选是可改的正文 + 可换的类型
+     * → 点「记下」之后**接口上的记忆总数真的变多了**（最后这一步是关键：只量界面出现
+     * 了候选，量不出"到底写没写进去"）。
+     */
+    label:
+      '★★★ 聊天里「整理成记忆」是一条**分析整段对话**的 run：开场白说清它会读整段对话；' +
+      '点开始后候选可改正文、可换类型；点「记下」之后记忆真的变多（接口上数得到）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.opened === true &&
+      v.intro === true &&
+      v.rows === 2 &&
+      v.editable === true &&
+      v.kinds === true &&
+      v.note === true &&
+      v.after === v.before + 2,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `对话框 ${String(v.opened)}　开场白提"整段对话" ${String(v.intro)}　候选 ${String(v.rows)} 条` +
+          `${Array.isArray(v.texts) ? ` ${JSON.stringify(v.texts)}` : ''}　可改 ${String(v.editable)}　` +
+          `可换类型 ${String(v.kinds)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
+          `　测量后已收起 ${String(v.closed)}` +
+          `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
   },
   {
     view: '聊天',
@@ -5167,6 +5200,27 @@ function writeFakeGenericCli() {
       '#   不走**（实测 `setInterval` 的 tick 是 0、dump 永远写不出来），整个探针挂到超时。',
       '#   这个坑花了两轮才定位：症状（探针超时、dump 空）离原因（假 CLI）隔了三层。',
       'if [ "$1" = "--version" ]; then echo "agent-cli 0.0-probe"; exit 0; fi',
+      /**
+       * ★ 分批第 243 批：**「整理成记忆」那条分析 run** 吐一个可解析的产出。
+       *
+       * 判据看的是**工作目录**（`$PWD` 里有 `memory-tidy-`），不是 prompt 里的记号：
+       * 记号会被真 agent 看见，而工作目录是平台按 subject 分配的、本来就不同
+       * （通用 runtime 的工作目录 = 子进程的 cwd，见 `backend-base.ts` 的 `cwd: opts.workDir`）。
+       *
+       * ⚠️ 这一整段必须在下面那个 `case "$*"` **之前**：那条 case 的 `*)` 分支是
+       *    `exit 127`，写在它后面就是永远走不到的死代码（第一版正是这么写的，
+       *    症状是"整理永远没有候选"，而看起来像平台解析坏了）。
+       *
+       * 吐的是一个**带 ```json 围栏**的数组（模型最常见的写法）——顺带把"平台会剥围栏"
+       * 这条也量上了。
+       */
+      'case "$PWD" in',
+      '  */memory-tidy-*)',
+      "    cat <<'PROBE_TIDY_JSON'",
+      '{"type":"text","text":"我读了一遍：```json\\n[{\\"kind\\":\\"fact\\",\\"text\\":\\"这个仓库用 pnpm\\"},{\\"kind\\":\\"preference\\",\\"text\\":\\"说话短一点\\"}]\\n```"}',
+      'PROBE_TIDY_JSON',
+      '    exit 0 ;;',
+      'esac',
       'case "$*" in',
       // ★ 第 4 批加的这一条：**起草中那一屏**。夹具在起 Chrome 之前就发起，所以挂得久一些
       //   （1800s）——不然跑到沉淀那一节时它已经自己退出了，量到的就是"起草 run 跑完了"，

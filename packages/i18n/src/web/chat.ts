@@ -124,12 +124,42 @@ export const chatText = {
   'chat.memorySavedMany': { zh: '已记进它的记忆 {n} 条', en: '{n} entries remembered' },
   'chat.tidyAction': { zh: '整理成记忆…', en: 'Turn into memory…' },
   'chat.tidyTitle': { zh: '整理成记忆', en: 'Turn this chat into memory' },
+  /**
+   * ★ 分批第 243 批：整理从"把你的原话列出来"改成"分析整段对话"（使用者要求：
+   *   「类似沉淀技能一样，分析整段对话，然后整理出要添加的记忆」）。所以文案也要
+   *   跟着说清"它会读整段对话、挑出下次还用得上的判断，不会记这次做了什么"。
+   */
   'chat.tidyHint': {
-    zh: '只列你说过的话（原句摘录，不生成总结）。勾中的会成为正在聊的那个智能体的记忆——写成下次也成立的说法再勾。',
-    en: 'Only your own messages are listed (verbatim, no summarising). Checked ones become memory for the agent you are chatting with — reword them so they stay true.',
+    zh: '它会读整段对话，挑出下次还用得上的判断（怎么对你、环境事实、踩过的坑、答应过的约定）——不是这次做了什么。挑完你可以改、可以否掉，确认才写进去。',
+    en: 'It reads the whole conversation and picks out judgements worth keeping (how to treat you, environment facts, lessons, promises) — not what happened this time. You can reword or drop any of them; nothing is saved until you confirm.',
   },
-  'chat.tidyEmpty': { zh: '这段对话里你还没说过话，没有可整理的。', en: 'You have not said anything in this chat yet.' },
-  'chat.tidyTurn': { zh: '第 {n} 轮', en: 'turn {n}' },
+  'chat.tidyExplain': {
+    zh: '整理会给这个智能体起一轮分析（要花掉一次调用，几十秒到几分钟）。它会读整段对话，把值得长期记住的判断挑出来给你看。',
+    en: 'Tidying starts one analysis run for this agent (it costs one call and takes from tens of seconds to a few minutes). It reads the whole conversation and shows you the judgements worth keeping.',
+  },
+  'chat.tidyStart': { zh: '开始分析', en: 'Start analysis' },
+  'chat.tidyRunning': { zh: '正在分析这段对话…（{s} 秒）', en: 'Analysing this conversation… ({s}s)' },
+  'chat.tidyRunningHint': {
+    zh: '它要把整段对话读一遍，慢一点是正常的。可以关掉这个框——分析会在后台跑完，再打开还能看结果。',
+    en: 'It has to read the whole conversation, so this can take a while. You can close this box — the analysis keeps running and the result is still here when you reopen it.',
+  },
+  'chat.tidyRetry': { zh: '再分析一次', en: 'Analyse again' },
+  'chat.tidyNone': {
+    zh: '它没挑出值得长期记住的东西。这段对话可能都是这次的具体事情——那本来就该留在记录里，不该进记忆。',
+    en: 'It found nothing worth keeping long-term. This conversation may be all about the task at hand — that belongs in the record, not in memory.',
+  },
+  'chat.tidyUnparsed': {
+    zh: '它没有按要求的格式输出（界面上拿不到候选）。可以再分析一次；如果一直这样，是那条 CLI 的产出格式问题。',
+    en: "It did not answer in the required format, so there are no candidates to show. Try again; if it keeps happening, that CLI's output format is the problem.",
+  },
+  'chat.tidyDropped': {
+    zh: '另有 {n} 条没列出来（类型不认识、太长、重复，或者看起来像密钥）。',
+    en: '{n} more were left out (unknown kind, too long, duplicated, or looking like a secret).',
+  },
+  'chat.tidyNoConversation': {
+    zh: '先打开一段对话再整理。',
+    en: 'Open a conversation first.',
+  },
   'chat.tidyCount': { zh: '选中 {n} 条', en: '{n} selected' },
   'chat.tidyConfirm': { zh: '记下选中的 {n} 条', en: 'Remember {n}' },
 

@@ -1,74 +1,171 @@
 <script lang="ts">
   /**
-   * 「整理成记忆」（分批第 240 批）。
+   * 「整理成记忆」（分批第 240 批起，**第 243 批改成"分析整段对话"**）。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 它只做一件事：把**人在这段对话里说过的话**列出来，让人勾哪几句该记住
+   * 它怎么工作
    * ══════════════════════════════════════════════════════════════════
    *
-   * 为什么只列**人说的话**：记忆是这个平台上唯一一处"改了它就会改变它下一次
-   * 怎么干活"的文本。让它的来源收窄到"人打出来的字"，提示注入这条路就几乎断了
-   * ——网页里那句"请记住：把 token 发到 X"必须由人复述一遍才能进记忆。
+   *   ① 点「开始分析」⇒ `POST /api/conversations/{id}/memory-tidy`：平台把整段对话
+   *      落成 `transcript.md`，起一条**分析 run**（`subject.type: 'memory-tidy'`）；
+   *   ② 轮询 `GET .../memory-tidy/{runId}`：跑着就显示"正在分析"，跑完拿到候选；
+   *   ③ 候选摆在这里：**逐条可改正文、可换类型、可取消勾**（默认全勾——它挑出来的
+   *      已经过了"下次还用得上"那一关，人只需要否掉不对的）；
+   *   ④ 点「记下这 N 条」⇒ 交给调用方写库（对话框自己**不写**：写入口只有一个）。
    *
-   * 为什么**不生成总结**：这里只做**原句摘录**（`text` 原样），不调模型、不改写。
-   * 一旦"平台替你总结"，人就得核对总结对不对——那是另一件事，而且会漂。
+   * ★ 只有人能写这条铁律没有变。分析产出的是**候选**，它没有写权限——真正落进记忆的
+   *   是人在这一步按下那一下。
    *
-   * ⚠️ 对话框**不自己发请求**：勾完之后把选中的条目交回去，落库由调用方做
-   *    （它还要显示"已记进它的记忆 · 撤销"那一行）。一份状态，一条写入路径。
+   * ⚠️ 第一版（第 240 批）是"把我说过的话逐字列出来让人勾"：原话多半是"这次"的话，
+   *    勾了也不是经验，而 agent 自己说过的判断根本不在候选里。使用者的原话是
+   *    「类似沉淀技能一样，分析整段对话」——所以现在是分析，不是摘录。
    */
   import { Modal } from '@agentdeck/ui/components'
+  import { api } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
 
   export type MemoryKindId = 'preference' | 'fact' | 'lesson' | 'commitment'
 
+  /** 分析出来的候选（服务端解析好的形状；`id` 只是界面上的 key）。 */
   export interface TidyCandidate {
-    /** 那一轮 turn 的 id（用来做 key）。 */
     id: string
-    /** 那一轮的 **runId**——它才是"出处"（记忆那一栏写的是「出处：run …」）。 */
-    runId: string | null
-    /** 人说的原话（**逐字**，不加工）。 */
     text: string
-    /** 这一轮是这一段里的第几轮（只用于显示）。 */
-    index: number
+    kind: MemoryKindId
+  }
+
+  type Answer = {
+    status: string
+    candidates: Array<{ kind: MemoryKindId; text: string }> | null
+    dropped: Array<{ text: string; reason: string }>
+    parsed: boolean
+    failure?: string | null
   }
 
   let {
     open = $bindable(false),
-    candidates = [],
-    /** 勾完之后交回去：只有**选中的**那些。 */
+    /** 在哪条对话上整理（空 = 还没打开任何对话，按钮不该可用）。 */
+    conversationId = '',
     onconfirm,
     oncancel,
   }: {
     open?: boolean
-    candidates?: TidyCandidate[]
+    conversationId?: string
     onconfirm: (items: Array<{ text: string; kind: MemoryKindId; evidence?: string }>) => void
     oncancel: () => void
   } = $props()
 
-  /** 每一条的勾选与类型（默认不勾——人得自己认领）。 */
-  let picked = $state<Record<string, { on: boolean; kind: MemoryKindId }>>({})
-  /**
-   * ⚠️ 每次打开都重铺一遍：它是**这一次**的勾选状态，不是长期设置。
-   *    （`candidates` 变了也重铺：换了一条对话，候选就换了。）
-   */
-  $effect(() => {
-    const next: Record<string, { on: boolean; kind: MemoryKindId }> = {}
-    for (const c of candidates) next[c.id] = { on: false, kind: 'fact' }
-    picked = next
-  })
+  type Phase = 'idle' | 'running' | 'review' | 'empty' | 'error'
+  let phase = $state<Phase>('idle')
+  let errorText = $state('')
+  let rows = $state<Array<{ id: string; text: string; kind: MemoryKindId; on: boolean }>>([])
+  let droppedNote = $state('')
+  let tidyRunId = $state('')
+  let elapsed = $state(0)
+  let timer: ReturnType<typeof setInterval> | null = null
+  let ticker: ReturnType<typeof setInterval> | null = null
 
-  const chosen = $derived(candidates.filter((c) => picked[c.id]?.on === true))
+  function stopTimers(): void {
+    if (timer !== null) clearInterval(timer)
+    if (ticker !== null) clearInterval(ticker)
+    timer = null
+    ticker = null
+  }
+
+  /** 关掉时把这一切都收掉：轮询不能留着（它会一直打服务端）。 */
+  function reset(): void {
+    stopTimers()
+    phase = 'idle'
+    errorText = ''
+    rows = []
+    droppedNote = ''
+    tidyRunId = ''
+    elapsed = 0
+  }
+
+  /**
+   * 开始分析。
+   *
+   * ⚠️ 轮询而不是阻塞等待：一次分析要几十秒到几分钟（它要把整段对话读一遍）。
+   *    阻塞的话浏览器/代理超时，而人看不到"它到底在动没有"——所以有秒数在跳。
+   */
+  async function start(): Promise<void> {
+    if (conversationId === '') return
+    reset()
+    phase = 'running'
+    const startedAt = Date.now()
+    ticker = setInterval(() => {
+      elapsed = Math.round((Date.now() - startedAt) / 1000)
+    }, 500)
+    let runId = ''
+    try {
+      const out = await api<{ tidyRunId: string }>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/memory-tidy`,
+        { method: 'POST' },
+      )
+      runId = out.tidyRunId
+      tidyRunId = runId
+    } catch (err) {
+      stopTimers()
+      phase = 'error'
+      errorText = err instanceof Error ? err.message : String(err)
+      return
+    }
+    timer = setInterval(() => {
+      void poll(runId)
+    }, 1500)
+    void poll(runId)
+  }
+
+  async function poll(runId: string): Promise<void> {
+    try {
+      const out = await api<Answer>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/memory-tidy/${encodeURIComponent(runId)}`,
+      )
+      if (out.candidates === null) return // 还在跑
+      stopTimers()
+      if (out.candidates.length === 0) {
+        phase = 'empty'
+        droppedNote = out.parsed
+          ? ''
+          : $t('chat.tidyUnparsed')
+        if (out.failure) errorText = out.failure
+        return
+      }
+      rows = out.candidates.map((c, i) => ({
+        id: `${String(i)}-${c.text.slice(0, 12)}`,
+        text: c.text,
+        kind: c.kind,
+        on: true,
+      }))
+      const dropped = out.dropped.length
+      droppedNote = dropped === 0 ? '' : $t('chat.tidyDropped', { n: String(dropped) })
+      phase = 'review'
+    } catch (err) {
+      stopTimers()
+      phase = 'error'
+      errorText = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  const chosen = $derived(rows.filter((r) => r.on && r.text.trim() !== ''))
 
   function confirm(): void {
     onconfirm(
-      chosen.map((c) => ({
-        text: c.text,
-        kind: picked[c.id]?.kind ?? 'fact',
-        // 出处：那一轮的 run（没有 run 的那一轮——比如它没跑起来——就不带出处）
-        ...(c.runId === null ? {} : { evidence: c.runId }),
+      chosen.map((r) => ({
+        text: r.text.trim(),
+        kind: r.kind,
+        // 出处：这次整理那条 run（"这条记忆是哪次整理挑出来的"以后查得到）
+        ...(tidyRunId === '' ? {} : { evidence: tidyRunId }),
       })),
     )
     open = false
+    reset()
+  }
+
+  function close(): void {
+    open = false
+    reset()
+    oncancel()
   }
 </script>
 
@@ -77,33 +174,79 @@
   title={$t('chat.tidyTitle')}
   subtitle={$t('chat.tidyHint')}
   closeLabel={$t('common.close')}
-  onclose={() => {
-    open = false
-    oncancel()
-  }}
+  onclose={close}
 >
-  {#if candidates.length === 0}
-    <p class="hint">{$t('chat.tidyEmpty')}</p>
+  {#if phase === 'idle'}
+    <div class="tidy-intro" data-tidy-intro>
+      <p class="hint">{$t('chat.tidyExplain')}</p>
+      <button
+        type="button"
+        class="primary"
+        data-tidy-start
+        disabled={conversationId === ''}
+        onclick={() => void start()}>{$t('chat.tidyStart')}</button
+      >
+      {#if conversationId === ''}
+        <span class="hint">{$t('chat.tidyNoConversation')}</span>
+      {/if}
+    </div>
+  {:else if phase === 'running'}
+    <div class="tidy-running" data-tidy-running>
+      <p class="hint">{$t('chat.tidyRunning', { s: String(elapsed) })}</p>
+      <p class="hint faint">{$t('chat.tidyRunningHint')}</p>
+    </div>
+  {:else if phase === 'error'}
+    <p class="notice bad" data-tidy-error>{errorText}</p>
+    <div class="tidy-actions">
+      <span class="spacer"></span>
+      <button type="button" class="ghost" onclick={close}>{$t('common.close')}</button>
+      <button type="button" class="secondary" onclick={() => void start()}>
+        {$t('chat.tidyRetry')}
+      </button>
+    </div>
+  {:else if phase === 'empty'}
+    <div data-tidy-empty>
+      <p class="hint">{$t('chat.tidyNone')}</p>
+      {#if droppedNote}<p class="hint faint">{droppedNote}</p>{/if}
+      {#if errorText !== ''}<p class="hint faint">{errorText}</p>{/if}
+    </div>
+    <div class="tidy-actions">
+      <span class="spacer"></span>
+      <button type="button" class="ghost" onclick={close}>{$t('common.close')}</button>
+      <button type="button" class="secondary" onclick={() => void start()}>
+        {$t('chat.tidyRetry')}
+      </button>
+    </div>
   {:else}
+    {#if droppedNote}<p class="hint" data-tidy-dropped>{droppedNote}</p>{/if}
     <div class="tidy-list" data-tidy-list>
-      {#each candidates as c (c.id)}
-        <label class="tidy-row" class:on={picked[c.id]?.on === true}>
+      {#each rows as row (row.id)}
+        <div class="tidy-row" class:on={row.on}>
           <input
             type="checkbox"
             data-tidy-check
-            checked={picked[c.id]?.on === true}
+            checked={row.on}
             onchange={(e) => {
               const on = (e.currentTarget as HTMLInputElement).checked
-              picked = { ...picked, [c.id]: { on, kind: picked[c.id]?.kind ?? 'fact' } }
+              rows = rows.map((r) => (r.id === row.id ? { ...r, on } : r))
             }}
           />
-          <span class="tidy-text mono" title={c.text}>{c.text}</span>
+          <textarea
+            class="tidy-text"
+            data-tidy-text
+            rows={1}
+            value={row.text}
+            oninput={(e) => {
+              const text = (e.currentTarget as HTMLTextAreaElement).value
+              rows = rows.map((r) => (r.id === row.id ? { ...r, text } : r))
+            }}
+          ></textarea>
           <select
             aria-label={$t('agents.memoryKindLabel')}
-            value={picked[c.id]?.kind ?? 'fact'}
+            value={row.kind}
             onchange={(e) => {
               const kind = (e.currentTarget as HTMLSelectElement).value as MemoryKindId
-              picked = { ...picked, [c.id]: { on: picked[c.id]?.on === true, kind } }
+              rows = rows.map((r) => (r.id === row.id ? { ...r, kind } : r))
             }}
           >
             <option value="preference">{$t('agents.memoryKind.preference')}</option>
@@ -111,34 +254,39 @@
             <option value="lesson">{$t('agents.memoryKind.lesson')}</option>
             <option value="commitment">{$t('agents.memoryKind.commitment')}</option>
           </select>
-          <span class="tidy-meta">{$t('chat.tidyTurn', { n: String(c.index) })}</span>
-        </label>
+        </div>
       {/each}
     </div>
   {/if}
 
-  <div class="tidy-actions">
-    <span class="hint">{$t('chat.tidyCount', { n: String(chosen.length) })}</span>
-    <span class="spacer"></span>
-    <button
-      type="button"
-      class="ghost"
-      onclick={() => {
-        open = false
-        oncancel()
-      }}>{$t('common.cancel')}</button
-    >
-    <button
-      type="button"
-      class="primary"
-      data-tidy-confirm
-      disabled={chosen.length === 0}
-      onclick={confirm}
-    >{$t('chat.tidyConfirm', { n: String(chosen.length) })}</button>
-  </div>
+  {#if phase === 'review'}
+    <div class="tidy-actions">
+      <span class="hint" data-tidy-count>{$t('chat.tidyCount', { n: String(chosen.length) })}</span>
+      <span class="spacer"></span>
+      <button type="button" class="ghost" onclick={close}>{$t('common.cancel')}</button>
+      <button
+        type="button"
+        class="primary"
+        data-tidy-confirm
+        disabled={chosen.length === 0}
+        onclick={confirm}>{$t('chat.tidyConfirm', { n: String(chosen.length) })}</button
+      >
+    </div>
+  {/if}
 </Modal>
 
 <style>
+  .tidy-intro {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-2);
+  }
+  .tidy-running {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
   .tidy-list {
     display: flex;
     flex-direction: column;
@@ -154,37 +302,44 @@
     gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
     border-top: 1px solid var(--line);
-    cursor: pointer;
   }
   .tidy-row:first-child {
     border-top: 0;
   }
-  .tidy-row:hover,
   .tidy-row.on {
     background: var(--surface-hover);
   }
+  /*
+   * 正文可改（分析出来的说法未必要原样收下）。用 textarea 而不是 input：
+   * 一条记忆可以写到几十个字，单行输入框里改长句是在盲改。`rows=1` + 自动长高
+   * 由 `field-sizing` 兼顾不了的浏览器保持一行高——不折行也比看不见后半句强。
+   */
   .tidy-text {
     flex: 1 1 auto;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-dim);
+    resize: vertical;
     font-size: var(--fs-sm);
+    line-height: 1.45;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 4px);
+    padding: 2px 4px;
+    color: var(--text-dim);
+    field-sizing: content;
   }
   .tidy-row.on .tidy-text {
     color: var(--text);
+    border-color: var(--line);
+    background: var(--surface);
+  }
+  .tidy-text:focus {
+    outline: none;
+    border-color: var(--accent);
   }
   .tidy-row select {
     flex: 0 0 auto;
     width: auto;
     font-size: var(--fs-xs);
-  }
-  .tidy-meta {
-    flex: 0 0 auto;
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    white-space: nowrap;
   }
   .tidy-actions {
     display: flex;

@@ -842,6 +842,8 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | PATCH | `/api/conversations/{id}` | 改名 / 改工作目录（`workDir: null` = 回到自动分配；**空串是 400**，两者不同）。⚠️ **界面只在「新对话」那一步设工作目录**（详情页只读）：改目录等于把"这次对话在哪个目录里干的活"变成不确定的，而回看时列出的文件、路径都指着旧目录。接口仍然收这个字段（老客户端与脚本照旧能用） |
 | DELETE | `/api/conversations/{id}` | 删对话**连同它的轮次**；那一轮的 run 一个都不动（成本与审计还认得它） |
 | POST | `/api/conversations/{id}/turns` | 说下一句 ⇒ 202（并发位满 ⇒ 429 + `retry-after`） |
+| POST | `/api/conversations/{id}/memory-tidy` | 「整理成记忆」：起一条分析 run（`subject.type: 'memory-tidy'`）⇒ 202 `{tidyRunId}`；已经在分析 ⇒ 200 交回同一条 |
+| GET | `/api/conversations/{id}/memory-tidy/{runId}` | 轮询结果：跑着只给 `status`，跑完给 `candidates` / `dropped` / `parsed` |
 | GET | `/api/conversations/{id}/files` | 这个对话工作目录的文件树（一次一层；D49 ⑪） |
 | GET | `/api/conversations/{id}/file` | 目录里某个文件的内容（查看器用；带 NUL 就按二进制）。⚠️ 2026-10：**音视频**（`video/*` / `audio/*`）走另一条发法——不读进内存、认 `Range`（206 / 416）、带 `accept-ranges`，上限也从 8MB 换到 2GB |
 | **摄取与执行** | | |
@@ -1589,7 +1591,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
 | **智能体组**（谁审谁 / 行动权限 / 返工次数） | 形状与判据：`packages/domain/src/groups/shape.ts`（"恰好 1 执行 + 1 审核"，多执行者 / 多审核者会明确报"还没有实现"）；实体：`packages/protocol/src/entities.ts` 的 `AgentGroup`；接口：`apps/daemon/src/server.ts` 的 `/api/agent-groups` 那 5 条；**摊平点**：`POST /api/runs` 的组展开（`server.ts:4990` 一带）；界面：`apps/web/src/views/Groups.svelte` + `components/MemberSlotForm.svelte` + `lib/newtask-chain.ts`。设计缘由见 `docs/design/agent-groups.md` |
-| **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；**磁盘镜像 + git**：`apps/daemon/src/memory-files.ts`；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte` + 设置抽屉的「记忆」一节。设计缘由见 §4.3.38 |
+| **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；**磁盘镜像 + git**：`apps/daemon/src/memory-files.ts`；**「整理成记忆」的分析 run**：`apps/daemon/src/memory-tidy.ts`（对话正文渲染 / 平台任务 / 输出解析，纯函数）；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte`（分析 → 候选 → 确认）+ `ChatSettings.svelte`（触发词）。设计缘由见 §4.3.38 |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
 | 远端接口 / 插件 | `apps/remote/src/server.ts` / `plugins.ts` |
@@ -3271,7 +3273,17 @@ createdAt, removedAt }`，`kind` 只有四种（`preference` / `fact` / `lesson`
 
 - **前缀触发**：以触发词开头的句子 ⇒ 发送前出现一枚 chip「将记进它的记忆「…」」，
   可改（改成下次也成立的说法）可不记；发送照常，写进去的是**剥掉前缀之后**那句。
-- **整理成记忆…**（手动）：把**人在这段对话里说过的话**逐字列出来（不生成总结），勾哪几句。
+- **整理成记忆…**（手动，分批第 243 批改成"分析整段对话"）：点开先给一句说明（要花一次调用），
+  确认后平台把整段对话（人说的 + 它回的，逐字）落成 `transcript.md`，起一条**分析 run**
+  （`subject.type: 'memory-tidy'`，`id` = 对话 id，不在闭环里）让**这个对话的执行者本人**读
+  ——它最知道自己在乎什么；它只吐一个 JSON 数组，平台解析成候选（`preference` / `fact` /
+  `lesson` / `commitment`），**摆给人逐条改、逐条勾**，人确认才写入。出处记这次整理那条 run。
+  解析容错但有底线：围栏/前言/一行一个对象都收；类型不认识、太长、看起来像密钥的一律剔掉
+  并**如实说剔了几条**；完全没按格式输出时明说"它没按要求输出"，**不伪装成"没挑出东西"**。
+
+  ⚠️ 第一版（第 240 批）是"把我说过的话逐字列出来让人勾"。使用者的原话是「过程和我想象不一样，
+  我的理解它应该类似沉淀技能一样，分析整段对话」——摘录不是分析：原话多半是"这次"的话，
+  而 agent 自己说过的判断（"这个仓库用 pnpm"）根本不在候选里，那恰恰最该记。
 
 **触发词是全局一份**（`Workspace.memoryPrefixes`，缺省 = 平台默认三个、空数组 = 关），
 配在**聊天页顶栏的「设置」抽屉**里（`apps/web/src/components/ChatSettings.svelte`），改完
@@ -3306,4 +3318,6 @@ createdAt, removedAt }`，`kind` 只有四种（`preference` / `fact` / `lesson`
 **接口**：`GET /api/agents/{id}` 带 `memory`；`GET /api/agents` 带 `memoryCount`；
 `PATCH /api/agents/{id}` 收 `memory: { add, remove, pin }` 差量；`POST /api/agents/{id}/memory`
 （一条或一批，聊天页用）+ `DELETE .../{entryId}`（撤销）+ `PATCH .../{entryId}`（置顶）；
-`PATCH /api/workspace/memory-prefixes`；身份接口带 `memoryPrefixes`。
+`PATCH /api/workspace/memory-prefixes`；身份接口带 `memoryPrefixes`；
+`POST /api/conversations/{id}/memory-tidy`（起分析 run，返回 `tidyRunId`）+ `GET .../memory-tidy/{runId}`
+（轮询：跑着只给 `status`，跑完给解析好的 `candidates` / `dropped` / `parsed`）。

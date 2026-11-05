@@ -660,6 +660,183 @@ describe('记忆接口（HTTP 层）', () => {
  * （`useCount`）。任何一处断了，界面上都会看起来正常（记忆列表有、跑得也正常），
  * 只是它从没被用上——那正是最需要一条端到端断言的地方。
  */
+describe('「整理成记忆」：真的分析整段对话（分批第 243 批）', () => {
+  test('★★★ 起一条分析 run（读整段对话）→ 解析出候选 → 人确认才写进记忆', async () => {
+    const dir = await makeTempDir('memory-tidy-e2e')
+    /** 它收到的第一句话（含 transcript 的内容说明）——用来断言"整段对话被交过去了"。 */
+    const prompts: string[] = []
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
+        },
+        async execute(opts: { prompt?: string; systemPrompt?: string | null }) {
+          prompts.push(deliveredText(opts as never))
+          const { AsyncQueue } = await import('@agentdeck/agent-core')
+          const queue = new AsyncQueue<never>()
+          /**
+           * ⚠️ 产出要**当一条 `text` 消息**推进队列，而不是只填 `result.output`：
+           *    daemon 只把流里的消息落进 `messages.jsonl`，`result.output` 不进记录
+           *    （真 adapter 也是靠流吐 text 的）。第一版只填了 `output`，于是平台
+           *    读到的"最后一段正文"是空的 ⇒ 解析必然失败（而 run 是 completed，
+           *    看起来一切正常）。
+           */
+          queue.push({
+            type: 'text',
+            content:
+              '我读了整段对话：\n```json\n[' +
+              '{"kind":"fact","text":"这个仓库用 pnpm"},' +
+              '{"kind":"preference","text":"说话短一点"},' +
+              '{"kind":"opinion","text":"我觉得还行"},' +
+              '{"kind":"fact","text":"token 是 sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF"}' +
+              ']\n```',
+          } as never)
+          queue.close()
+          /**
+           * 假 CLI 的"产出"：一个带围栏的 JSON（模型最常见的写法）。
+           * ⚠️ 里面有一条**看起来像密钥**的，一条类型不认识的——它们必须被剔掉，
+           *    而且界面要能说出剔了几条。
+           */
+          terminalState.push('completed')
+          return {
+            messages: queue,
+            result: Promise.resolve({
+              status: 'completed',
+              output:
+                '我读了整段对话：\n```json\n[' +
+                '{"kind":"fact","text":"这个仓库用 pnpm"},' +
+                '{"kind":"preference","text":"说话短一点"},' +
+                '{"kind":"opinion","text":"我觉得还行"},' +
+                '{"kind":"fact","text":"token 是 sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFF"}' +
+                ']\n```',
+              durationMs: 1,
+              sessionId: 'tidy',
+              usage: { inputTokens: 0, outputTokens: 0, costUsdMicros: 0, costSource: 'provider' },
+              exitCode: 0,
+            }),
+            async cancel() {
+              queue.close()
+            },
+            lastActivityAt: () => Date.now(),
+          }
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    const terminalState: string[] = []
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '整理执行者', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+
+      // 先有一段对话（否则"没有内容可整理"）
+      const conv = await fetch(`${d.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id, text: '这个仓库用 pnpm，别用 npm' }),
+      })
+      assert.equal(conv.status, 201, await conv.clone().text())
+      const conversation = (await conv.json()) as { conversation: { id: string } }
+      const conversationId = conversation.conversation.id
+
+      // 等第一轮跑完（分析要读它的产出）
+      const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+      const waitRuns = async (): Promise<void> => {
+        const deadline = Date.now() + 8000
+        for (;;) {
+          const runs = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+            runs: Array<{ status: string }>
+          }
+          if (runs.runs.length > 0 && runs.runs.every((r) => TERMINAL.has(r.status))) return
+          if (Date.now() > deadline) throw new Error('等 run 结束超时')
+          await new Promise((r) => setTimeout(r, 25))
+        }
+      }
+      await waitRuns()
+
+      // ── ① 起整理 ──
+      const start = await fetch(`${d.url}/api/conversations/${conversationId}/memory-tidy`, {
+        method: 'POST',
+      })
+      assert.equal(start.status, 202, await start.clone().text())
+      const { tidyRunId } = (await start.json()) as { tidyRunId: string }
+      assert.ok(tidyRunId !== '')
+      await waitRuns()
+
+      // ── ② 读结果：解析成候选，坏的两条被剔掉 ──
+      const got = await fetch(
+        `${d.url}/api/conversations/${conversationId}/memory-tidy/${tidyRunId}`,
+      )
+      assert.equal(got.status, 200)
+      const answer = (await got.json()) as {
+        status: string
+        candidates: Array<{ kind: string; text: string }>
+        dropped: Array<{ reason: string }>
+        parsed: boolean
+      }
+      assert.equal(answer.parsed, true)
+      assert.deepEqual(
+        answer.candidates.map((c) => `${c.kind}:${c.text}`),
+        ['fact:这个仓库用 pnpm', 'preference:说话短一点'],
+      )
+      assert.deepEqual(
+        answer.dropped.map((x) => x.reason).sort(),
+        ['kind_invalid', 'looks_like_secret'],
+        '★ 类型不认识与像密钥的都要剔掉并报出来',
+      )
+
+      // ── ③ 那条分析 run 读的是**整段对话**（transcript 落进了它的工作目录）──
+      const runs = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+        runs: Array<{ runId: string; subject: { type: string; id: string } }>
+      }
+      const tidyRun = runs.runs.find((r) => r.subject.type === 'memory-tidy')
+      assert.ok(tidyRun, '有一条 subject 是 memory-tidy 的 run')
+      assert.equal(tidyRun.subject.id, conversationId, 'subject id 是对话 id（不是 run id）')
+      const runDetail = (await (await fetch(`${d.url}/api/runs/${tidyRun.runId}`)).json()) as {
+        workDir: string
+      }
+      const transcript = await readFile(`${runDetail.workDir}/transcript.md`, 'utf8')
+      assert.match(transcript, /这个仓库用 pnpm，别用 npm/, '★ 人的话在正文里')
+      assert.match(transcript, /## 第 1 轮/)
+
+      // ── ④ **人确认之后**才写进记忆（分析本身没有写权限）──
+      const before = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: unknown[]
+      }
+      assert.equal(before.memory.length, 0, '分析完还没有记忆')
+      const write = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: answer.candidates.map((c) => ({
+            kind: c.kind,
+            text: c.text,
+            evidence: tidyRunId,
+          })),
+        }),
+      })
+      assert.equal(write.status, 201, await write.clone().text())
+      const after = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ text: string; evidence: string | null }>
+      }
+      assert.equal(after.memory.length, 2)
+      assert.equal(after.memory[0]?.evidence, tidyRunId, '出处记的是这次整理那条 run')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('记忆：磁盘镜像跟着写（分批第 241 批）', () => {
   test('★★ 详情页保存 / 聊天入口 写记忆之后，<memoryRoot>/<agentId>/MEMORY.md 跟着更新', async () => {
     const dir = await makeTempDir('memory-mirror-api')

@@ -960,7 +960,23 @@ export const SubjectRef = z.object({
   //  `skill-draft-review` = **审核起草出来的 skill 的那条 run**（2026-10 §10 第 ②.5 步）。
   //  ⚠️ 它**不是**业务报告类 subject：不进任务列表、不挂 issue、不走 `ReportIngestor`
   //  ——与 `skill-draft` 同一条纪律（起草与审它，都不打扰任何人）。
-  type: z.enum(['issue', 'report', 'run', 'conversation', 'skill-draft', 'skill-draft-review']),
+  /**
+   * ★ 分批第 243 批`'memory-tidy'`：「整理成记忆」那条**分析 run**。
+   *
+   * 与 `skill-draft` 同一条纪律：不在闭环里（`POST /api/reports` 不认这个 type）、
+   * 不打扰任何人（不挂 issue、不进任务列表）。`id` 是**对话 id**（不是 run id）——
+   * 因为"这条对话的整理"是一个可重入的操作：再点一次整理，取到的还是同一个
+   * subject，于是并发串行化与工作目录都天然只有一份。
+   */
+  type: z.enum([
+    'issue',
+    'report',
+    'run',
+    'conversation',
+    'skill-draft',
+    'skill-draft-review',
+    'memory-tidy',
+  ]),
   id: z.string(),
   /**
    * D80 界面改版（2026-10-19）：`skill-draft` 起草 run 记**它从哪条 run 发起**

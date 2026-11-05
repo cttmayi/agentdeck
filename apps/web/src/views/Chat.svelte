@@ -9,7 +9,7 @@
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
-  import ChatMemoryTidy, { type TidyCandidate } from '../components/ChatMemoryTidy.svelte'
+  import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
   import ChatSettings from '../components/ChatSettings.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
@@ -176,7 +176,6 @@
    * ——配置找不着就等于没有（配置本身仍是全局一份，见 `ChatSettings.svelte` 头注释）。
    */
   let chatSettingsOpen = false
-  let tidyCandidates: TidyCandidate[] = []
   /**
    * ★ 整理成记忆的回执（与"前缀触发"那一行分开存）。
    *
@@ -244,18 +243,15 @@
     }
   }
 
-  /** 打开「整理成记忆」：候选 = 这段对话里**人说过的话**（逐字，不生成）。 */
+  /**
+   * 打开「整理成记忆」。
+   *
+   * ★ 分批第 243 批：这一页**不再自己拼候选**。整理的内容由一条分析 run 产出
+   *   （`POST /api/conversations/{id}/memory-tidy`），对话框自己发起、自己轮询、
+   *   自己把候选摆出来——使用者的要求是"分析整段对话"，而"人说过的话逐字列出"
+   *   只是摘录，不是分析（agent 说过的判断根本不在里面）。
+   */
   function openTidy(): void {
-    tidyCandidates = activeTurns
-      .map((turn, i) => ({
-        id: turn.id as string,
-        // ⚠️ 出处用**那一轮的 runId**（不是 turn id）：记忆那一栏写的是「出处：run …」，
-        //    拿 turn id 当 run 展示就是一句假话。
-        runId: turn.runId,
-        text: turn.userText,
-        index: i + 1,
-      }))
-      .filter((c) => c.text.trim() !== '')
     tidyOpen = true
   }
 
@@ -1113,7 +1109,7 @@
 
     <ChatMemoryTidy
       bind:open={tidyOpen}
-      candidates={tidyCandidates}
+      conversationId={activeConversation?.id ?? ''}
       onconfirm={(items) => {
         void (async () => {
           const added = await captureMemory(
@@ -1130,7 +1126,7 @@
           if (added !== null) tidyNote = { ids: added, count: items.length }
         })()
       }}
-      oncancel={() => (tidyCandidates = [])}
+      oncancel={() => {}}
     />
 </div>
 

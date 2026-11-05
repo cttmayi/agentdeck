@@ -8263,7 +8263,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            *
            *   ① **前缀触发**：在输入框里打一句以触发词开头的话 ⇒ 发送前出现一枚 chip，
            *      上面写的是**剥掉前缀之后**那句（前缀本身不写进记忆）。
-           *   ② **整理成记忆…**：顶栏那颗按钮打开对话框，只列**人说过的话**（逐字）。
+           *   ② 「整理成记忆」在**第 243 批改成了"分析整段对话"**（一条 run），
+           *      它的整条闭环由下面那条 `chat.tidyAnalyses` 量——这里只管前缀触发。
            *
            * 量完把输入框清空、对话框关掉——后面还有别的判据要看这张表单。
            */
@@ -8297,23 +8298,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
             await untilNet(() => !d().querySelector('[data-mem-chip]'), 40)
 
-            // 整理成记忆：顶栏那颗动作
-            const tidyBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
-              text(b).includes('整理成记忆'),
-            )
-            if (!tidyBtn) return { chip: chip, chipText, tidy: false, editKept }
-            click(tidyBtn)
-            const opened = await untilNet(() => !!d().querySelector('[data-tidy-list]'), 40)
-            const rows = opened ? d().querySelectorAll('[data-tidy-list] .tidy-row') : []
-            const texts = [...rows].map((r) => text(r.querySelector('.tidy-text')) ?? '')
-            // 只列**人说的话**：夹具里人的话都带「探针：」，它（agent）的话不带
-            const onlyHuman = texts.length > 0 && texts.every((t) => t.includes('探针'))
-            const close = [...d().querySelectorAll('.modal-foot button, .modal button')].find((b) =>
-              text(b).trim() === '取消',
-            )
-            if (close) click(close)
-            await untilNet(() => !d().querySelector('[data-tidy-list]'), 40)
-            return { chip, chipText, tidy: true, rows: rows.length, onlyHuman, editKept }
+            return { chip, chipText, editKept }
           })()
 
           /**
@@ -8326,6 +8311,90 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 身份接口里也有）——"不用保存按钮"是这一节的规矩，所以必须量到接口那层。
            * 量完把那个词删掉、抽屉关掉，别漏到后面的判据里。
            */
+          /**
+           * ★ 分批第 243 批：**「整理成记忆」是一条"分析整段对话"的 run**（不是把原话列出来）。
+           *
+           * 使用者的原话：「类似沉淀技能一样，分析整段对话，然后整理出要添加的记忆」。
+           * 量的是整条闭环，四步都要对：
+           *   ① 点开对话框 ⇒ 先给一句"它会读整段对话、要花一次调用"的说明 + 「开始分析」；
+           *   ② 点「开始分析」⇒ 真的起了一条 run（假 CLI 按**工作目录**认出它，吐一个带
+           *      ```json 围栏的数组——顺带量"平台会剥围栏"）；
+           *   ③ 候选摆出来：**两条、正文可改、类型可换**（不是原话摘录，是它挑出来的判断）；
+           *   ④ 点「记下」⇒ 真的进了这个智能体的记忆（接口上的记忆总数变多）。
+           */
+          facts['chat.tidyAnalyses'] = await (async () => {
+            const tidyBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+              text(b).includes('整理成记忆'),
+            )
+            if (!tidyBtn) return { opened: false, reason: '顶栏没有「整理成记忆」' }
+            const memTotal = async () => {
+              const list = await f.contentWindow
+                .fetch('/api/agents')
+                .then((r) => r.json())
+                .catch(() => null)
+              const items = Array.isArray(list?.agents) ? list.agents : []
+              return items.reduce((n, a) => n + (typeof a.memoryCount === 'number' ? a.memoryCount : 0), 0)
+            }
+            const before = await memTotal()
+            click(tidyBtn)
+            const intro = await untilNet(() => !!d().querySelector('[data-tidy-intro]'), 40)
+            const startBtn = d().querySelector('[data-tidy-start]')
+            if (!intro || !startBtn) return { opened: false, reason: '对话框没有开场白与「开始分析」' }
+            const introText = text(d().querySelector('[data-tidy-intro]')) ?? ''
+            click(startBtn)
+            const listed = await untilNet(() => !!d().querySelector('[data-tidy-list]'), 900)
+            const rows = listed ? [...d().querySelectorAll('[data-tidy-list] .tidy-row')] : []
+            const texts = rows.map((r) => r.querySelector('[data-tidy-text]')?.value ?? '')
+            const editable = rows.length > 0 && rows.every((r) => {
+              const el = r.querySelector('[data-tidy-text]')
+              return el !== null && el.tagName === 'TEXTAREA'
+            })
+            const kinds = rows.length > 0 && rows.every((r) => r.querySelector('select') !== null)
+            const confirmBtn = d().querySelector('[data-tidy-confirm]')
+            if (confirmBtn) click(confirmBtn)
+            // 等写库完成：对话框那一片收起、对话末尾出现可撤销的回执
+            await untilNet(() => !d().querySelector('[data-tidy-list]'), 200)
+            /**
+             * ⚠️ 这里的等待要比别处**宽**：点「记下」之后平台还要落库、写磁盘镜像
+             *    （`MEMORY.md`）并 git 提交，那几件事加起来可能是几百毫秒；而
+             *    `untilNet` 的第二个参数是**轮数**不是毫秒——给少了会"没等到"就判失败
+             *    （实测正是这样：接口上记忆已经从 3 变 5，回执却被判成没有）。
+             */
+            const note = await untilNet(() => !!d().querySelector('[data-mem-note-tidy]'), 600)
+            const noteText = note ? (text(d().querySelector('[data-mem-note-tidy]')) ?? '') : ''
+            // 量产不到时，把现场记下来（不然"没有回执"这三个字没有下一步）
+            const tail = note ? '' : (d().body?.textContent ?? '').replace(/\s+/g, ' ').slice(-260)
+            const after = await memTotal()
+            /**
+             * ⚠️ **无论量到什么，最后都要把模态框关掉**。
+             *
+             * 第一版没有这一步：一旦候选没出现（假 CLI 那段当时是死代码），模态框就
+             * 一直开着，遮罩盖住整个应用 ⇒ 后面几十条判据的点击全打在遮罩上，
+             * 记出来的红与它们要测的东西毫无关系（实测一次 12 条）。
+             * 清理放进 `finally`，失败的路径也走。
+             */
+            const closed = await (async () => {
+              f.contentWindow.dispatchEvent(
+                new f.contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+              )
+              return await untilNet(() => !d().querySelector('[data-tidy-list]'), 60)
+            })()
+            return {
+              closed,
+              opened: true,
+              intro: introText.includes('整段对话'),
+              rows: rows.length,
+              texts,
+              editable,
+              kinds,
+              note,
+              noteText,
+              tail,
+              before,
+              after,
+            }
+          })()
+
           facts['chat.settingsPrefixes'] = await (await (async () => {
             const openBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
               (b) => text(b).trim() === '设置',
