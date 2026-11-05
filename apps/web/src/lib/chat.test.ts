@@ -9,6 +9,7 @@ import {
   executorChoices,
   isTurnRunning,
   skillsHeldBackByDaemon,
+  stripMemoryPrefix,
   type DraftPick,
 } from './chat.ts'
 import type { Agent, Skill } from './api.ts'
@@ -178,5 +179,47 @@ describe('聊天里的「工作目录的文件」这一栏', () => {
 
   test('★ 旧 daemon（没有 conversation-files）⇒ 说明原因，不去撞 404', () => {
     assert.equal(chatFilesState({ ...base, capability: false }), 'unsupported')
+  })
+})
+
+describe('记忆触发词（分批第 240 批）', () => {
+  const PREFIXES = ['记住：', '以后', '下次别']
+
+  test('★★ 只认开头：剥掉前缀，剩下的就是那条记忆', () => {
+    assert.deepEqual(stripMemoryPrefix('记住：以后报告都用中文', PREFIXES), {
+      text: '以后报告都用中文',
+      prefix: '记住：',
+    })
+    assert.deepEqual(stripMemoryPrefix('  以后用 pnpm，不要 npm', PREFIXES), {
+      text: '用 pnpm，不要 npm',
+      prefix: '以后',
+    })
+  })
+
+  test('★★ 不在开头就不算（"我记住：…"里那个词不触发）', () => {
+    assert.equal(stripMemoryPrefix('我记住：这件事了', PREFIXES), null)
+    assert.equal(stripMemoryPrefix('你以后别这样', PREFIXES), null)
+  })
+
+  test('★ 剥完太短（< 4 字）不算——"记住：好"不是一条记忆', () => {
+    assert.equal(stripMemoryPrefix('记住：好', PREFIXES), null)
+    assert.equal(stripMemoryPrefix('记住：', PREFIXES), null)
+    assert.equal(stripMemoryPrefix('记住：   ', PREFIXES), null)
+  })
+
+  test('★ 触发词表为空 = 这个功能关着（不是"每句都算"）', () => {
+    assert.equal(stripMemoryPrefix('记住：以后报告都用中文', []), null)
+  })
+
+  test('★★ 长的前缀先匹配（同时配了「记住：」与「记住」时，冒号要被剥掉）', () => {
+    assert.deepEqual(stripMemoryPrefix('记住：报告用中文', ['记住', '记住：']), {
+      text: '报告用中文',
+      prefix: '记住：',
+    })
+  })
+
+  test('★ 空串 / 纯空白不炸', () => {
+    assert.equal(stripMemoryPrefix('', PREFIXES), null)
+    assert.equal(stripMemoryPrefix('   ', PREFIXES), null)
   })
 })

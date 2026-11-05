@@ -213,3 +213,39 @@ export function chatFilesState(input: {
   }
   return input.capability ? 'ready' : 'unsupported'
 }
+
+/**
+ * 「记忆触发词」——聊天里哪句话是在说"这个以后要记住"（分批第 240 批）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 只认**开头**，不做语义猜测
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 判"这句话是不是长期偏好"如果交给模型，误判率不可能低：人说话一半是即时的
+ * 要求（"这次写短点"）、一半是长期的规矩（"以后都写短点"）。所以这里的判据是
+ * **人自己挑明的措辞**：以触发词开头的句子。
+ *
+ * 三条规则：
+ *   ① 只匹配**开头**（`trimStart()` 之后）——"我记住：…"里那个词不算；
+ *   ② 剥掉前缀之后的正文**少于 4 个字就不算**（"记住：好"不是一条记忆）；
+ *   ③ 触发词表来自设置（全局一份）；**空表 = 这个功能关着**（不是"每句都算"）。
+ *
+ * 纯函数：输入框每敲一下都会调它，而且要有单测（写在模板里就只能手点）。
+ */
+export function stripMemoryPrefix(
+  text: string,
+  prefixes: readonly string[],
+): { text: string; prefix: string } | null {
+  if (prefixes.length === 0) return null
+  const trimmed = text.trimStart()
+  if (trimmed === '') return null
+  // 长的先匹配：否则配了「记住：」与「记住」两个词时，「记住：x」会先撞上短的那个
+  const ordered = [...prefixes].sort((a, b) => b.length - a.length)
+  for (const prefix of ordered) {
+    if (prefix === '' || !trimmed.startsWith(prefix)) continue
+    const body = trimmed.slice(prefix.length).trim()
+    if (body.length < 4) return null
+    return { text: body, prefix }
+  }
+  return null
+}

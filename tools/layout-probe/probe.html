@@ -2560,7 +2560,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['settings.footSaveLabel'] = need('设置抽屉底部主操作', () =>
             text(panel.querySelector('.drawer-foot button')),
           )
-
           const kindTabs = [...(panel?.querySelectorAll('.tabs:not(.block-tabs) .tab') ?? [])]
           // ★ 2026-10：每条链路下面还有第二排「块」页签（① 框架 / ② 身份 / ③ 任务）
           const blockTabs = [...(panel?.querySelectorAll('.block-tabs .tab') ?? [])]
@@ -2839,6 +2838,60 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           }
         }
+
+        /**
+         * ★ 分批第 240 批：设置里的「记忆」那一节（触发词，全局一份）。
+         *
+         * ⚠️ 它不在**页面级**那个「设置」抽屉里（那是第一句话模版），而在 **App 设置抽屉**
+         *    （顶栏那组 icon-btn 里的设置）。所以这里自己开一次、量完再关——
+         *    与「全局 runtime 默认值」那一段同一条路。
+         *
+         * 量三件：那一节在、列着现在生效的词、**加一个词立刻生效**（界面与身份接口都变）。
+         * 量完把那个词删掉，别让它漏到后面的判据里。
+         */
+        facts['settings.memoryPrefixes'] = await (async () => {
+          const openBtn = [...d().querySelectorAll('.topbar button')].find(
+            (b) => (b.getAttribute('aria-label') ?? '') === '设置',
+          )
+          if (!openBtn) return { present: false, reason: '找不到全局设置按钮' }
+          click(openBtn)
+          const found = await until(() => !!d().querySelector('[data-memory-prefixes]'), 60)
+          const sec = d().querySelector('[data-memory-prefixes]')
+          if (!found || !sec) {
+            f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+            await until(() => !d().querySelector('.drawer'), 40)
+            return { present: false }
+          }
+          const words = () =>
+            [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip .mono')].map((n) => text(n))
+          const before = words()
+          const input = sec.querySelector('[data-prefix-input]')
+          const addBtn = sec.querySelector('[data-prefix-add]')
+          let added = false
+          let inIdentity = false
+          if (input && addBtn) {
+            input.value = '探针词'
+            input.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            click(addBtn)
+            added = await untilNet(() => words().includes('探针词'), 60)
+            const identity = await f.contentWindow
+              .fetch('/api/identity')
+              .then((r) => r.json())
+              .catch(() => null)
+            inIdentity = Array.isArray(identity?.memoryPrefixes)
+              ? identity.memoryPrefixes.includes('探针词')
+              : false
+            const chip = [...sec.querySelectorAll('[data-prefix-chips] .prefix-chip')].find((c) =>
+              text(c.querySelector('.mono')).includes('探针词'),
+            )
+            const x = chip?.querySelector('[data-prefix-remove]')
+            if (x) click(x)
+            await untilNet(() => !words().includes('探针词'), 60)
+          }
+          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          await until(() => !d().querySelector('.drawer'), 40)
+          return { present: true, before, added, inIdentity }
+        })()
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
@@ -8227,6 +8280,48 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
             return out
           })()
+
+          /**
+           * ★ 分批第 240 批：聊天里的**记忆写入口**（两条）。
+           *
+           *   ① **前缀触发**：在输入框里打一句以触发词开头的话 ⇒ 发送前出现一枚 chip，
+           *      上面写的是**剥掉前缀之后**那句（前缀本身不写进记忆）。
+           *   ② **整理成记忆…**：顶栏那颗按钮打开对话框，只列**人说过的话**（逐字）。
+           *
+           * 量完把输入框清空、对话框关掉——后面还有别的判据要看这张表单。
+           */
+          facts['chat.memoryEntries'] = await (async () => {
+            // 先打开夹具对话：草稿态没有「整理成记忆」那颗顶栏动作，也还没有"人说过的话"
+            if (!(await chatOpenFixtureConversation())) return null
+            const composer = d().querySelector('.detail-pane [data-composer] .composer-input')
+            if (!composer) return null
+            composer.value = '记住：以后报告都用中文写'
+            composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            const chip = await untilNet(() => !!d().querySelector('[data-mem-chip]'), 40)
+            const chipText = chip ? (text(d().querySelector('[data-mem-chip-text]')) ?? '') : ''
+            composer.value = ''
+            composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            await untilNet(() => !d().querySelector('[data-mem-chip]'), 40)
+
+            // 整理成记忆：顶栏那颗动作
+            const tidyBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+              text(b).includes('整理成记忆'),
+            )
+            if (!tidyBtn) return { chip: chip, chipText, tidy: false }
+            click(tidyBtn)
+            const opened = await untilNet(() => !!d().querySelector('[data-tidy-list]'), 40)
+            const rows = opened ? d().querySelectorAll('[data-tidy-list] .tidy-row') : []
+            const texts = [...rows].map((r) => text(r.querySelector('.tidy-text')) ?? '')
+            // 只列**人说的话**：夹具里人的话都带「探针：」，它（agent）的话不带
+            const onlyHuman = texts.length > 0 && texts.every((t) => t.includes('探针'))
+            const close = [...d().querySelectorAll('.modal-foot button, .modal button')].find((b) =>
+              text(b).trim() === '取消',
+            )
+            if (close) click(close)
+            await untilNet(() => !d().querySelector('[data-tidy-list]'), 40)
+            return { chip, chipText, tidy: true, rows: rows.length, onlyHuman }
+          })()
+
           return !stillThere
         })()
 

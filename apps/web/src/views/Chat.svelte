@@ -9,6 +9,7 @@
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
+  import ChatMemoryTidy, { type TidyCandidate } from '../components/ChatMemoryTidy.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -19,6 +20,7 @@
     executorChoices,
     isTurnRunning,
     skillsHeldBackByDaemon,
+    stripMemoryPrefix,
     type DraftPick,
   } from '../lib/chat.ts'
   import { goCrystallize, showToast } from '../lib/view.ts'
@@ -127,6 +129,83 @@
   let draftWorkDir = ''
   /** 「浏览…」那颗按钮开的目录选择框（分批第 229 批；与输入框共享一个值，见模板）。 */
   let dirPickerOpen = false
+
+  /**
+   * ★ 分批第 240 批：**记忆**（聊天里的两个写入口）。
+   *
+   * 触发词是**全局一份**（设置在设置抽屉的「记忆」一节），来自身份接口——
+   * 页面启动就有，聊天页不多一次请求。
+   *
+   * 两个入口都只写"人打的字"：
+   *   ① **前缀触发**：输入框以触发词开头 ⇒ 发送前出现一枚 chip（可改 / 可不记）；
+   *   ② **整理成记忆**：手动打开，把这段对话里"你说过的判断句"挑出来勾。
+   */
+  $: memPrefixes = $identity?.memoryPrefixes ?? []
+  /** 这一句剥掉前缀之后的内容；`null` = 这不像"要记住"的一句话。 */
+  $: memCandidate = stripMemoryPrefix(input, memPrefixes)
+  /** 被「不记」跳过的那个候选（输入一变就复位）。 */
+  let memSkip = ''
+  let memLastInput = input
+  $: if (input !== memLastInput) {
+    memLastInput = input
+    memSkip = ''
+  }
+  /** 已经写进库里、等人在界面上看到的那些（turnId → 一条或几条 + 文案）。 */
+  let memNotes: Record<string, { ids: string[]; text: string }> = {}
+  let tidyOpen = false
+  let tidyCandidates: TidyCandidate[] = []
+  /** 正在聊的那个智能体（记忆写进谁）。 */
+  $: memAgentId = drafting ? draftPick.agentId : (activeConversation?.agentId ?? '')
+
+  /** 把一句（或多句）写成记忆；失败只说一句，不打断对话。 */
+  async function captureMemory(
+    agentId: string,
+    entries: Array<{ text: string; kind: string; evidence?: string }>,
+    noteKey: string,
+    noteText: string,
+  ): Promise<void> {
+    if (agentId === '' || entries.length === 0) return
+    try {
+      const res = await api<{ entries: Array<{ id: string }> }>(
+        `/api/agents/${encodeURIComponent(agentId)}/memory`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ entries }),
+        },
+      )
+      memNotes = {
+        ...memNotes,
+        [noteKey]: { ids: res.entries.map((e) => e.id), text: noteText },
+      }
+    } catch (err) {
+      // 记不上就说清原因（超上限 / 太长），但**不挡这一轮对话**
+      showToast(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** 撤销：把刚记下的那几条删掉（软删——记录留在日志里）。 */
+  async function undoMemory(noteKey: string): Promise<void> {
+    const note = memNotes[noteKey]
+    if (note === undefined || memAgentId === '') return
+    const rest = { ...memNotes }
+    delete rest[noteKey]
+    memNotes = rest
+    for (const id of note.ids) {
+      await api(
+        `/api/agents/${encodeURIComponent(memAgentId)}/memory/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      ).catch(() => {})
+    }
+  }
+
+  /** 打开「整理成记忆」：候选 = 这段对话里**人说过的话**（逐字，不生成）。 */
+  function openTidy(): void {
+    tidyCandidates = activeTurns
+      .map((turn, i) => ({ id: turn.id as string, text: turn.userText, index: i + 1 }))
+      .filter((c) => c.text.trim() !== '')
+    tidyOpen = true
+  }
 
   /**
    * 执行者名字（对话只存 id）。
@@ -269,6 +348,20 @@
       icon: 'plus',
       onActivate: startDrafting,
     },
+    /**
+     * ★ 分批第 240 批：「整理成记忆…」——**手动**入口（不做"对话够长就自己冒出来"：
+     *   自动出现的东西人第二次就不看了）。没有轮次时禁用，而不是让它点了空转。
+     */
+    ...(activeTurns.length > 0
+      ? [
+          {
+            id: 'tidy-memory',
+            label: $t('chat.tidyAction'),
+            kind: 'secondary' as const,
+            onActivate: openTidy,
+          },
+        ]
+      : []),
   ])
   onDestroy(() => clearPageActions('chat'))
 
@@ -297,6 +390,15 @@
     const text = input.trim()
     if (text === '' || sending) return
     /**
+     * ★ 分批第 240 批：这一句是不是"要记住"的（前缀触发）。
+     *   `memSkip` 是「不记」那一下——它只对**这一个候选**有效。
+     *   ⚠️ 要在清空输入框**之前**算：发送之后 `input` 就没了。
+     */
+    const memoryToSave =
+      memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''
+        ? memCandidate
+        : null
+    /**
      * ★ 分批第 231 批：**一轮没跑完不发第二句**这道门禁放在这里，不只放在组件里。
      *   组件那一层只挡住"点按钮 / 按 Enter"，而 `send()` 还有别的入口能到
      *   （草稿态提交、脚本化调用、以及"刚跑完那一刻"的竞态）。写在一处、看得见。
@@ -324,6 +426,14 @@
         input = ''
         chatLiveRunId.set(out.runId)
         if (out.runId === null) errorText = out.turn.error ?? ''
+        if (memoryToSave !== null) {
+          await captureMemory(
+            out.conversation.agentId,
+            [{ text: memoryToSave.text, kind: 'fact', ...(out.runId === null ? {} : { evidence: out.runId }) }],
+            out.turn.id,
+            memoryToSave.text,
+          )
+        }
       } catch (err) {
         errorText = err instanceof Error ? err.message : String(err)
       } finally {
@@ -343,6 +453,14 @@
       chatLiveRunId.set(out.runId)
       if (out.runId === null) {
         errorText = out.turn.error ?? $t('chat.turnFailed')
+      }
+      if (memoryToSave !== null) {
+        await captureMemory(
+          memAgentId,
+          [{ text: memoryToSave.text, kind: 'fact', ...(out.runId === null ? {} : { evidence: out.runId }) }],
+          out.turn.id,
+          memoryToSave.text,
+        )
       }
       await refresh()
     } catch (err) {
@@ -740,6 +858,19 @@
         {#each activeTurns as turn (turn.id)}
           <article class="turn">
             <ChatBubble role="user" who={$t('chat.you')} text={turn.userText} />
+            {#if memNotes[turn.id] !== undefined}
+              <p class="mem-note" data-mem-note>
+                <span class="mem-note-k">{$t('chat.memorySaved')}</span>
+                {#if memNotes[turn.id]!.text !== ''}
+                  <span class="mem-note-t">「{memNotes[turn.id]!.text}」</span>
+                {:else}
+                  <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(memNotes[turn.id]!.ids.length) })}</span>
+                {/if}
+                <button type="button" class="btn-link" data-mem-undo onclick={() => void undoMemory(turn.id)}>
+                  {$t('chat.memoryUndo')}
+                </button>
+              </p>
+            {/if}
 
             {#if turn.error !== null}
               <p class="notice warn">
@@ -852,6 +983,32 @@
       {#if errorText !== ''}
         <p class="notice bad">{errorText}</p>
       {/if}
+      <!--
+        ★ 分批第 240 批：前缀触发的 chip。**发送前**就告诉你"这句会被记住"——
+          发送照常（这句话既是给它的消息，也是一条记忆）；「改」就地改成
+          "下次也成立"的说法，「不记」这一次不写。
+      -->
+      {#if memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''}
+        <div class="mem-chip" data-mem-chip>
+          <span class="mem-chip-k">{$t('chat.memoryChipLabel')}</span>
+          <span class="mem-chip-t" data-mem-chip-text>「{memCandidate.text}」</span>
+          <button
+            type="button"
+            class="ghost small"
+            data-mem-chip-edit
+            title={$t('chat.memoryChipEditTitle')}
+            onclick={() => {
+              input = memCandidate.text
+            }}>{$t('chat.memoryChipEdit')}</button
+          >
+          <button
+            type="button"
+            class="ghost small"
+            data-mem-chip-skip
+            onclick={() => (memSkip = memCandidate.text)}>{$t('chat.memoryChipSkip')}</button
+          >
+        </div>
+      {/if}
       <ChatComposer
         bind:value={input}
         placeholder={$t('chat.placeholder')}
@@ -865,9 +1022,82 @@
         {/if}
       {/snippet}
     </MainArea>
+
+    <!--
+      ★ 分批第 240 批：「整理成记忆」对话框（**手动**打开）。
+      勾完之后由这一页落库（对话框自己不发请求），并在对话里留一行可撤销的回执。
+    -->
+    <ChatMemoryTidy
+      bind:open={tidyOpen}
+      candidates={tidyCandidates}
+      onconfirm={(items) => {
+        void captureMemory(
+          memAgentId,
+          items.map((it) => ({ text: it.text, kind: it.kind, ...(it.evidence === undefined ? {} : { evidence: it.evidence }) })),
+          `tidy-${Date.now()}`,
+          items.length === 1 ? items[0]!.text : '',
+        )
+      }}
+      oncancel={() => (tidyCandidates = [])}
+    />
 </div>
 
 <style>
+  /* 那一行"已记进它的记忆 · 撤销"（极淡，不抢对话） */
+  .mem-note {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0 0 0 var(--sp-3);
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+  .mem-note-k {
+    color: var(--accent);
+  }
+  .mem-note-t {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .btn-link {
+    font: inherit;
+    font-size: var(--fs-xs);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    text-decoration: underline dotted;
+  }
+
+  /* 记忆 chip（分批第 240 批）：贴在输入条上方，一眼看出"这一句会被记住" */
+  .mem-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border-radius: var(--radius);
+    font-size: var(--fs-xs);
+  }
+  .mem-chip-k {
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .mem-chip-t {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-dim);
+  }
+
 
 
 

@@ -114,6 +114,24 @@ export const chatText = {
   },
   'chat.notRunYet': { zh: '还没跑过', en: 'Not run yet' },
 
+  // ── 记忆（分批第 240 批）：聊天里的两个写入口 ──
+  'chat.memoryChipLabel': { zh: '将记进它的记忆', en: 'Will be remembered' },
+  'chat.memoryChipEdit': { zh: '改', en: 'Edit' },
+  'chat.memoryChipSkip': { zh: '不记', en: 'Skip' },
+  'chat.memoryChipEditTitle': { zh: '改成"下次也成立"的说法', en: 'Reword it so it stays true next time' },
+  'chat.memorySaved': { zh: '已记进它的记忆', en: 'Remembered' },
+  'chat.memoryUndo': { zh: '撤销', en: 'Undo' },
+  'chat.memorySavedMany': { zh: '已记进它的记忆 {n} 条', en: '{n} entries remembered' },
+  'chat.tidyAction': { zh: '整理成记忆…', en: 'Turn into memory…' },
+  'chat.tidyTitle': { zh: '整理成记忆', en: 'Turn this chat into memory' },
+  'chat.tidyHint': {
+    zh: '只列你说过的话（原句摘录，不生成总结）。勾中的会成为正在聊的那个智能体的记忆——写成下次也成立的说法再勾。',
+    en: 'Only your own messages are listed (verbatim, no summarising). Checked ones become memory for the agent you are chatting with — reword them so they stay true.',
+  },
+  'chat.tidyEmpty': { zh: '这段对话里你还没说过话，没有可整理的。', en: 'You have not said anything in this chat yet.' },
+  'chat.tidyTurn': { zh: '第 {n} 轮', en: 'turn {n}' },
+  'chat.tidyCount': { zh: '选中 {n} 条', en: '{n} selected' },
+  'chat.tidyConfirm': { zh: '记下选中的 {n} 条', en: 'Remember {n}' },
   'chat.placeholder': { zh: '说点什么…（Enter 发送，Shift+Enter 换行）', en: 'Say something… (Enter to send, Shift+Enter for a new line)' },
   'chat.send': { zh: '发送', en: 'Send' },
   // ★ 分批第 232 批：`chat.enterHint`（输入框下面那行"Enter 发送 · Shift+Enter 换行"）

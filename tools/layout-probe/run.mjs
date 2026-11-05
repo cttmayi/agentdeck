@@ -1283,6 +1283,34 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.memoryEntries',
+    /**
+     * ★ 分批第 240 批：聊天里的**两条记忆写入口**。
+     *
+     *   ① 前缀触发：打一句「记住：以后报告都用中文写」⇒ 发送前出现 chip，上面写的是
+     *      **剥掉前缀之后**那句（前缀不写进记忆）；
+     *   ② 整理成记忆…：顶栏那颗按钮打开对话框，**只列人说过的话**（逐字，不生成总结）。
+     */
+    label:
+      '★★★ 聊天里：以触发词开头会冒出「将记进它的记忆」chip（写的是剥掉前缀那句）；' +
+      '「整理成记忆…」只列**人说过的话**',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.chip === true &&
+      String(v.chipText).includes('以后报告都用中文写') &&
+      !String(v.chipText).includes('记住：') &&
+      v.tidy === true &&
+      v.rows > 0 &&
+      v.onlyHuman === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `chip ${String(v.chip)}「${String(v.chipText)}」　整理对话框 ${String(v.tidy)}　` +
+          `${String(v.rows ?? 0)} 行　只列人的话 ${String(v.onlyHuman)}`,
+  },
+  {
+    view: '聊天',
     key: 'chat.pickerButtonLabels',
     /**
      * ★ 分批第 230 批（真 bug 的回归守卫，使用者报的）：按钮上的字**不许折行**。
@@ -1455,6 +1483,29 @@ const CHECKS = [
         : `说明 ${String(v.noted)}　还在审阅 ${String(v.stillReview)}　还能再入库 ${String(v.stillCommit)}　` +
           `没有放弃 ${String(v.noAbandon)}　「${String(v.note)}」　` +
           `诊断 ${JSON.stringify(v.diag ?? null)}`,
+  },
+  {
+    view: '设置',
+    key: 'settings.memoryPrefixes',
+    /**
+     * ★ 分批第 240 批：设置抽屉里的「记忆」一节 = **触发词（全局一份）**。
+     *
+     * 量三件：那一节在、列着现在生效的词、**加一个词立刻生效**（既出现在 chip 上，
+     * 也出现在身份接口里）——"改完不用保存按钮"是这一节的规矩，所以必须量到接口那一层。
+     */
+    label:
+      '★★ 设置里的「记忆」一节：列着当前触发词，加一个词**立刻生效**（界面与接口都变）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.added === true &&
+      v.inIdentity === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　原有 ${JSON.stringify(v.before ?? [])}　加进去 ${String(v.added)}　` +
+          `接口也变 ${String(v.inIdentity)}`,
   },
   {
     view: '技能',

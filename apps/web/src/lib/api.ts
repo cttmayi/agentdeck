@@ -123,6 +123,12 @@ export interface Identity {
   /** 分批第 47 批：新建智能体时预填的「默认工作守则」。缺省 = 平台默认（老 daemon 不带这个键）。 */
   defaultAgentConduct?: string
   /**
+   * ★ 分批第 240 批：**记忆触发词**（全局一份）。聊天页据此判断"哪些开头的句子算要记住"。
+   * 老 daemon 不带这个键 ⇒ 前端按"这个功能关着"处理（不猜默认值——那会让老 daemon 上
+   * 突然开始往记忆里写东西，而服务端根本不支持）。
+   */
+  memoryPrefixes?: string[]
+  /**
    * 全局 runtime 默认值（2026-10 第 ⑦ 条）：agent 的 `runtimeKey` 写 `'default'` 时用它。
    * **空串 = 跟随侦测**（`currentRuntime` 那个），不是一个具体值。
    */

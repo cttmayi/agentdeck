@@ -36,6 +36,62 @@
    *    存完重新拉 identity，界面显示永远以服务端为准（存失败时保持旧值 + toast）。
    */
   /** 主题三档：**存键、不存渲染好的句子**（切语言时标签要跟着变，渲染交给 $t）。 */
+  /**
+   * ★ 分批第 240 批：**记忆触发词**（全局一份，改完立刻生效）。
+   *
+   * 只在抽屉打开时从身份接口取一次——它是"几个词"的配置，不做实时订阅。
+   */
+  let memPrefixesDraft: string[] = []
+  let prefixDraft = ''
+  let prefixError = ''
+
+  $: if ($identity !== null) {
+    const fromIdentity = $identity.memoryPrefixes ?? []
+    // 只在"还没铺过"或"服务端变了"时同步（否则会把正在编辑的那份冲掉）
+    if (memPrefixesDraft.length === 0 || JSON.stringify(memPrefixesDraft) !== JSON.stringify(lastPrefixes)) {
+      memPrefixesDraft = [...fromIdentity]
+      lastPrefixes = [...fromIdentity]
+    }
+  }
+  let lastPrefixes: string[] = []
+
+  /** 写回服务端（全量替换）；成功后重新读身份，让聊天页跟着变。 */
+  async function savePrefixes(next: string[]): Promise<void> {
+    prefixError = ''
+    try {
+      const res = await api<{ prefixes: string[] }>('/api/workspace/memory-prefixes', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prefixes: next }),
+      })
+      memPrefixesDraft = [...res.prefixes]
+      lastPrefixes = [...res.prefixes]
+      await loadIdentity()
+    } catch (err) {
+      prefixError = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function addPrefix(): Promise<void> {
+    const value = prefixDraft.trim()
+    if (value === '') return
+    if (memPrefixesDraft.includes(value)) {
+      prefixDraft = ''
+      return
+    }
+    await savePrefixes([...memPrefixesDraft, value])
+    prefixDraft = ''
+  }
+
+  async function removePrefix(index: number): Promise<void> {
+    await savePrefixes(memPrefixesDraft.filter((_, i) => i !== index))
+  }
+
+  async function resetPrefixes(): Promise<void> {
+    // 「恢复默认」= 把平台默认那三个写回去（不是"清空"——清空是关掉这个功能）
+    await savePrefixes(['记住：', '以后', '下次别'])
+  }
+
   const THEME_CHOICES = [
     { value: 'light', labelId: 'settings.themeLight' },
     { value: 'dark', labelId: 'settings.themeDark' },
@@ -237,7 +293,57 @@
       信息一个字没少，只是要主动点开——判据仍然是"这句话给谁看"。
     -->
     {#if $identity}
-      <section class="drawer-section" data-about>
+      <!--
+      ══════════ 记忆（分批第 240 批）══════════
+      ★ 这里只有**一样东西**：聊天里的触发词（全局一份）。
+        为什么是全局：触发词是**人的措辞习惯**，不是某个 agent 的属性——你对着执行者、
+        对着审核员说的是同一句"记住：以后报告都用中文"。做成每个 agent 一份的结果是
+        "换个它就要换一种说法"，没人能解释为什么。
+      ★ 改完**立刻生效**（不用保存按钮）：这是"几个词"的开关式配置，不是表单。
+    -->
+    <section class="drawer-section" data-memory-prefixes>
+      <h3>{$t('settings.memoryHeading')}</h3>
+      <p class="hint">{$t('settings.memoryHint')}</p>
+      <div class="prefix-chips" data-prefix-chips>
+        {#each memPrefixesDraft as p, i (p)}
+          <span class="prefix-chip">
+            <span class="mono">{p}</span>
+            <button
+              type="button"
+              class="prefix-x"
+              data-prefix-remove
+              aria-label={$t('settings.memoryRemove')}
+              onclick={() => void removePrefix(i)}>×</button
+            >
+          </span>
+        {/each}
+        {#if memPrefixesDraft.length === 0}
+          <span class="faint small" data-prefix-empty>{$t('settings.memoryOff')}</span>
+        {/if}
+      </div>
+      <div class="prefix-add">
+        <input
+          bind:value={prefixDraft}
+          placeholder={$t('settings.memoryAddPlaceholder')}
+          aria-label={$t('settings.memoryAdd')}
+          data-prefix-input
+          onkeydown={(e) => {
+            if (e.key === 'Enter') void addPrefix()
+          }}
+        />
+        <button type="button" class="secondary" data-prefix-add onclick={() => void addPrefix()}>
+          {$t('settings.memoryAdd')}
+        </button>
+        <button type="button" class="ghost" data-prefix-reset onclick={() => void resetPrefixes()}>
+          {$t('settings.memoryReset')}
+        </button>
+      </div>
+      {#if prefixError !== ''}
+        <p class="hint bad" data-prefix-error>{prefixError}</p>
+      {/if}
+    </section>
+
+    <section class="drawer-section" data-about>
         <h3>{$t('settings.about')}</h3>
         <details>
           <summary class="hint" style="cursor:pointer">{$t('settings.diagnostics')}</summary>
@@ -372,3 +478,43 @@
     </section>
   </div>
 </aside>
+
+<style>
+  /* 记忆触发词（分批第 240 批）：chip + 加 + 恢复默认 */
+  .prefix-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    margin: var(--sp-2) 0;
+  }
+  .prefix-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 var(--sp-1) 0 var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    color: var(--text);
+  }
+  .prefix-x {
+    border: 0;
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    font: inherit;
+    padding: 0 2px;
+  }
+  .prefix-x:hover {
+    color: var(--text);
+  }
+  .prefix-add {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+  }
+  .prefix-add input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+</style>
