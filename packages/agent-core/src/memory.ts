@@ -75,12 +75,15 @@ export interface RankedMemory<T extends RankableMemory> {
  *
  * `budgetChars` 给了就按它算（测试与将来的设定项都从这里进）。
  */
-export function rankMemory<T extends RankableMemory>(
-  items: readonly T[],
-  options: { budgetChars?: number } = {},
-): RankedMemory<T> {
-  const budget = options.budgetChars ?? MEMORY_BUDGET_CHARS
-  const sorted = [...items].sort((a, b) => {
+/**
+ * 只排序、不裁剪：**注入顺序就是它**（界面也按这个顺序显示，所见即所得）。
+ *
+ * 抽出来是因为有两个调用方需要"同一个顺序、但不要预算"：`rankMemory`（要预算）
+ * 与 daemon 的列表接口（详情页按注入顺序显示记忆——否则界面上从上到下的顺序
+ * 与实际进第一句话的顺序不一致，人就没法判断"预算不够时先丢哪条"）。
+ */
+export function sortMemoryForInjection<T extends RankableMemory>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => {
     const pinnedA = a.pinned === true ? 0 : 1
     const pinnedB = b.pinned === true ? 0 : 1
     if (pinnedA !== pinnedB) return pinnedA - pinnedB
@@ -92,6 +95,14 @@ export function rankMemory<T extends RankableMemory>(
     if (usedA !== usedB) return usedB - usedA
     return (b.createdAt ?? 0) - (a.createdAt ?? 0)
   })
+}
+
+export function rankMemory<T extends RankableMemory>(
+  items: readonly T[],
+  options: { budgetChars?: number } = {},
+): RankedMemory<T> {
+  const budget = options.budgetChars ?? MEMORY_BUDGET_CHARS
+  const sorted = sortMemoryForInjection(items)
 
   const picked: T[] = []
   let chars = 0

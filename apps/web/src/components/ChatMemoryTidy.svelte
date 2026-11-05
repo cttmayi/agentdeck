@@ -22,8 +22,10 @@
   export type MemoryKindId = 'preference' | 'fact' | 'lesson' | 'commitment'
 
   export interface TidyCandidate {
-    /** 那一轮 turn 的 id（用来做 key 与"这是第几轮"）。 */
+    /** 那一轮 turn 的 id（用来做 key）。 */
     id: string
+    /** 那一轮的 **runId**——它才是"出处"（记忆那一栏写的是「出处：run …」）。 */
+    runId: string | null
     /** 人说的原话（**逐字**，不加工）。 */
     text: string
     /** 这一轮是这一段里的第几轮（只用于显示）。 */
@@ -59,7 +61,12 @@
 
   function confirm(): void {
     onconfirm(
-      chosen.map((c) => ({ text: c.text, kind: picked[c.id]?.kind ?? 'fact', evidence: c.id })),
+      chosen.map((c) => ({
+        text: c.text,
+        kind: picked[c.id]?.kind ?? 'fact',
+        // 出处：那一轮的 run（没有 run 的那一轮——比如它没跑起来——就不带出处）
+        ...(c.runId === null ? {} : { evidence: c.runId }),
+      })),
     )
     open = false
   }

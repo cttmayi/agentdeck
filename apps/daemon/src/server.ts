@@ -13,6 +13,7 @@ import {
   DEFAULT_TEMPLATES,
   getRuntimeDescriptor,
   migrateTemplate,
+  rankMemory,
   renderFirstSentence,
   SAMPLE_FIRST_SENTENCE_INPUTS,
   shouldRefuseToRun,
@@ -4776,6 +4777,12 @@ async function injectedSkillsOf(
         previewAgent === null
           ? null
           : await listActiveMemory(store, workspaceId, previewAgent.id)
+      /**
+       * ★ 分批第 240 批：预览里要能读到"这一轮带了几条、另有几条没带"。
+       *   只给渲染好的文本不够——人问的正是"我写的那些都进去了吗"。
+       */
+      const previewRank =
+        previewMemory === null ? null : rankMemory(previewMemory)
       // ★ 只渲染被预览的那一块（其它两块走平台默认，与真实投递一致）
       const rendered = buildBlocks({
         ...sample,
@@ -4785,7 +4792,15 @@ async function injectedSkillsOf(
       } as never)
       sendJson(res, 200, {
         text: rendered[block],
-        ...(previewMemory === null ? {} : { memoryCount: previewMemory.length }),
+        ...(previewMemory === null || previewRank === null
+          ? {}
+          : {
+              memoryCount: previewMemory.length,
+              memoryUsed: previewRank.picked.length,
+              memoryDropped: previewRank.dropped,
+              memoryChars: previewRank.chars,
+              memoryPinned: previewMemory.filter((m) => m.pinned).length,
+            }),
       })
       return
     }

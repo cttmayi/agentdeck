@@ -431,12 +431,14 @@ const CHECKS = [
       v.actionsHidden === true &&
       v.pins === v.rows &&
       v.hasPreview === true &&
-      v.hasAddRow === true,
+      v.hasAddRow === true &&
+      typeof v.rowBadge === 'string' &&
+      v.rowBadge.includes('记忆'),
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `${String(v.rows)} 行　行高 ${JSON.stringify(v.heights)}　动作静止隐藏 ${String(v.actionsHidden)}　` +
-          `★ ${String(v.pins)}　计数「${String(v.countText)}」`,
+          `★ ${String(v.pins)}　计数「${String(v.countText)}」　列表行「${String(v.rowBadge)}」`,
   },
   {
     view: '智能体',
@@ -457,12 +459,14 @@ const CHECKS = [
       v.opened === true &&
       v.hasExperience === true &&
       v.hasCommitment === true &&
-      v.readOnly === true,
+      v.readOnly === true &&
+      typeof v.stats === 'string' &&
+      v.stats.includes('本轮带入'),
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `打开 ${String(v.opened)}　经验块 ${String(v.hasExperience)}　约定条 ${String(v.hasCommitment)}　` +
-          `只读 ${String(v.readOnly)}`,
+          `只读 ${String(v.readOnly)}　预算行「${String(v.stats)}」`,
   },
   {
     view: '智能体',

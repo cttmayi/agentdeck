@@ -141,6 +141,8 @@
   let memNewText = ''
   /** 「预览第一句话」抽屉：`null` = 关着。 */
   let memPreview: string | null = null
+  /** 这一轮带进去几条 / 裁掉几条（服务端算的，与真的投递同一个函数）。 */
+  let memPreviewStats: { used: number; dropped: number; chars: number; pinned: number } | null = null
   let memPreviewBusy = false
   let memPreviewError = ''
   let memSeq = 0
@@ -249,12 +251,27 @@
     memPreviewBusy = true
     memPreviewError = ''
     try {
-      const res = await api<{ text: string; memoryCount?: number }>('/api/first-sentence/preview', {
+      const res = await api<{
+        text: string
+        memoryUsed?: number
+        memoryDropped?: number
+        memoryChars?: number
+        memoryPinned?: number
+      }>('/api/first-sentence/preview', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'execute', block: 'identity', agentId: agent.id }),
       })
       memPreview = res.text
+      memPreviewStats =
+        res.memoryUsed === undefined
+          ? null
+          : {
+              used: res.memoryUsed,
+              dropped: res.memoryDropped ?? 0,
+              chars: res.memoryChars ?? 0,
+              pinned: res.memoryPinned ?? 0,
+            }
     } catch (err) {
       memPreviewError = err instanceof Error ? err.message : String(err)
     } finally {
@@ -962,6 +979,18 @@
       <button type="button" class="ghost" onclick={() => (memPreview = null)}>{$t('common.close')}</button>
     </div>
     <div class="mem-preview-body">
+      {#if memPreviewStats !== null}
+        <p class="row-hint mem-preview-stats" data-memory-preview-stats>
+          {$t('agents.memoryPreviewStats', {
+            used: String(memPreviewStats.used),
+            chars: String(memPreviewStats.chars),
+            pinned: String(memPreviewStats.pinned),
+          })}
+          {#if memPreviewStats.dropped > 0}
+            · {$t('agents.memoryPreviewDropped', { n: String(memPreviewStats.dropped) })}
+          {/if}
+        </p>
+      {/if}
       <pre class="mem-preview-text" data-memory-preview-text>{memPreview}</pre>
     </div>
   </div>
@@ -1405,6 +1434,9 @@
     min-height: 0;
     overflow: auto;
     padding: var(--sp-4) var(--sp-5);
+  }
+  .mem-preview-stats {
+    margin: 0 0 var(--sp-2);
   }
   .mem-preview-text {
     margin: 0;

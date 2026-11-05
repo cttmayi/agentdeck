@@ -305,7 +305,15 @@
                        （审核走智能体组），列表上那一半（不自动审核 / 审核者名）随之
                        去掉——新执行者没有这个设置，留着只会永远显示"不自动审核"。
                        审核者保留「它审别人」。 -->
-                  {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}<code>{a.runtimeKey}</code>
+                  {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}
+                  <!-- ★ 分批第 240 批：记忆条数（0 条不画——空着的时候没有任何信息，
+                       只会在每一行上都挂一个"记忆 0"） -->
+                  {#if (a.memoryCount ?? 0) > 0}
+                    <span class="mem-count" data-agent-memory-count
+                      >{$t('agents.memoryCountInline', { n: String(a.memoryCount) })}</span
+                    >
+                  {/if}
+                  <code>{a.runtimeKey}</code>
                 </span>
               </span>
             {/snippet}
@@ -467,6 +475,9 @@
     white-space: nowrap;
   }
 
+  .mem-count {
+    color: var(--text-faint);
+  }
   .agent-notes-meta {
     flex-shrink: 0;
   }

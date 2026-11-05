@@ -51,12 +51,19 @@ export const agentsText = {
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
   'agents.memoryLabel': { zh: '记忆', en: 'Memory' },
   'agents.memoryCount': { zh: '{n} 条', en: '{n} entries' },
+  /** 智能体列表行里那个小字：**自己带"记忆"两个字**（那一行没有别的上下文，只写"3 条"读不出是什么）。 */
+  'agents.memoryCountInline': { zh: '记忆 {n}', en: 'memory {n}' },
   'agents.memoryHint': {
     zh: '它攒下的经验：会进它的第一句话，但排在「指令」之后',
     en: 'What it has learned: goes into its first sentence, after the instructions',
   },
   'agents.memoryPreview': { zh: '预览第一句话 →', en: 'Preview the first sentence →' },
   'agents.memoryPreviewTitle': { zh: '它这一轮会收到的第一句话（② 身份 + 经验）', en: 'The first sentence this run gets (identity + experience)' },
+  'agents.memoryPreviewStats': {
+    zh: '本轮带入 {used} 条（{chars} 字，其中 {pinned} 条置顶）· 预算 1200 字',
+    en: '{used} entries go in ({chars} chars, {pinned} pinned) · budget 1200 chars',
+  },
+  'agents.memoryPreviewDropped': { zh: '另有 {n} 条超出预算，本轮没带', en: '{n} more did not fit the budget' },
   'agents.memoryPreviewHint': {
     zh: '只读：这一段是服务端按「已保存」的指令与记忆渲染出来的，与真正投递出去的逐字一致。改完点保存再看。',
     en: 'Read-only: rendered by the daemon from the saved instructions and memory — byte-identical to what is delivered. Save, then look again.',

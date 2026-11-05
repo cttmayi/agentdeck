@@ -154,6 +154,14 @@
   let memNotes: Record<string, { ids: string[]; text: string }> = {}
   let tidyOpen = false
   let tidyCandidates: TidyCandidate[] = []
+  /**
+   * ★ 整理成记忆的回执（与"前缀触发"那一行分开存）。
+   *
+   * ⚠️ 第一版把它的 key 写成了 `tidy-<时间戳>`，而回执是按 **turn.id** 查的 ⇒
+   *    永远查不到、界面上什么都不出现（记上了但人看不到，等于没记）。整理出来的
+   *    那几条不挂在某一轮上，所以它需要自己的一行：对话末尾。
+   */
+  let tidyNote: { ids: string[]; count: number } | null = null
   /** 正在聊的那个智能体（记忆写进谁）。 */
   $: memAgentId = drafting ? draftPick.agentId : (activeConversation?.agentId ?? '')
 
@@ -163,8 +171,8 @@
     entries: Array<{ text: string; kind: string; evidence?: string }>,
     noteKey: string,
     noteText: string,
-  ): Promise<void> {
-    if (agentId === '' || entries.length === 0) return
+  ): Promise<string[] | null> {
+    if (agentId === '' || entries.length === 0) return null
     try {
       const res = await api<{ entries: Array<{ id: string }> }>(
         `/api/agents/${encodeURIComponent(agentId)}/memory`,
@@ -174,13 +182,27 @@
           body: JSON.stringify({ entries }),
         },
       )
-      memNotes = {
-        ...memNotes,
-        [noteKey]: { ids: res.entries.map((e) => e.id), text: noteText },
-      }
+      const ids = res.entries.map((e) => e.id)
+      // `noteKey === ''` = 这一批不挂在某一轮上（由调用方自己显示回执）
+      if (noteKey !== '') memNotes = { ...memNotes, [noteKey]: { ids, text: noteText } }
+      return ids
     } catch (err) {
       // 记不上就说清原因（超上限 / 太长），但**不挡这一轮对话**
       showToast(err instanceof Error ? err.message : String(err))
+      return null
+    }
+  }
+
+  /** 撤销整理那一次记下的那一批。 */
+  async function undoTidy(): Promise<void> {
+    if (tidyNote === null || memAgentId === '') return
+    const ids = tidyNote.ids
+    tidyNote = null
+    for (const id of ids) {
+      await api(
+        `/api/agents/${encodeURIComponent(memAgentId)}/memory/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+      ).catch(() => {})
     }
   }
 
@@ -202,7 +224,14 @@
   /** 打开「整理成记忆」：候选 = 这段对话里**人说过的话**（逐字，不生成）。 */
   function openTidy(): void {
     tidyCandidates = activeTurns
-      .map((turn, i) => ({ id: turn.id as string, text: turn.userText, index: i + 1 }))
+      .map((turn, i) => ({
+        id: turn.id as string,
+        // ⚠️ 出处用**那一轮的 runId**（不是 turn id）：记忆那一栏写的是「出处：run …」，
+        //    拿 turn id 当 run 展示就是一句假话。
+        runId: turn.runId,
+        text: turn.userText,
+        index: i + 1,
+      }))
       .filter((c) => c.text.trim() !== '')
     tidyOpen = true
   }
@@ -919,6 +948,15 @@
             {/if}
           </article>
         {/each}
+        {#if tidyNote !== null}
+          <p class="mem-note" data-mem-note-tidy>
+            <span class="mem-note-k">{$t('chat.memorySaved')}</span>
+            <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(tidyNote.count) })}</span>
+            <button type="button" class="btn-link" data-mem-undo-tidy onclick={() => void undoTidy()}>
+              {$t('chat.memoryUndo')}
+            </button>
+          </p>
+        {/if}
 
         {#if pendingText !== ''}
           <article class="turn">
@@ -1031,12 +1069,20 @@
       bind:open={tidyOpen}
       candidates={tidyCandidates}
       onconfirm={(items) => {
-        void captureMemory(
-          memAgentId,
-          items.map((it) => ({ text: it.text, kind: it.kind, ...(it.evidence === undefined ? {} : { evidence: it.evidence }) })),
-          `tidy-${Date.now()}`,
-          items.length === 1 ? items[0]!.text : '',
-        )
+        void (async () => {
+          const added = await captureMemory(
+            memAgentId,
+            items.map((it) => ({
+              text: it.text,
+              kind: it.kind,
+              ...(it.evidence === undefined ? {} : { evidence: it.evidence }),
+            })),
+            // 空 key：这一批不挂在某一轮上（用下面那条 `tidyNote` 显示）
+            '',
+            '',
+          )
+          if (added !== null) tidyNote = { ids: added, count: items.length }
+        })()
       }}
       oncancel={() => (tidyCandidates = [])}
     />

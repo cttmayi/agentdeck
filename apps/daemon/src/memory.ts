@@ -3,7 +3,7 @@ import { MemoryKind as MemoryKindSchema } from '@agentdeck/protocol'
 import type { MemoryEntryId } from '@agentdeck/protocol'
 import { ulid } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
-import { rankMemory } from '@agentdeck/agent-core'
+import { rankMemory, sortMemoryForInjection } from '@agentdeck/agent-core'
 
 /**
  * 智能体记忆（分批第 240 批）：读写这一层，以及所有**限与默认**。
@@ -32,6 +32,15 @@ export const MEMORY_LIMIT = 40
 /** 单条正文上限（它每轮都会被带进上下文，长度就是成本）。 */
 export const MEMORY_TEXT_MAX = 400
 
+/**
+ * 最多几条可以置顶。
+ *
+ * 为什么要有这个数：★ 是"预算紧张时最后才裁它"的加权，人人都置顶等于没有加权——
+ * 那时裁剪规则就退化成按类型优先级，而人还以为自己钉住了那几条。
+ * 3 是"真要紧的那几条"的量级（再多就该删掉别的，而不是全钉上）。
+ */
+export const MEMORY_PIN_LIMIT = 3
+
 export const MEMORY_KINDS: readonly MemoryKind[] = ['preference', 'fact', 'lesson', 'commitment']
 
 /**
@@ -49,14 +58,19 @@ export function effectiveMemoryPrefixes(
   return [...configured]
 }
 
-/** 这个 agent 现在**活着**的记忆（已删除的不返回）。顺序是创建顺序，注入顺序由 rankMemory 定。 */
+/**
+ * 这个 agent 现在**活着**的记忆（已删除的不返回），**按注入顺序排好**。
+ *
+ * ⚠️ 顺序在这里定、而不是留给界面：详情页从上到下的那一列就是"预算不够时先丢下面的"，
+ *    而第一句话用的是同一个函数（`sortMemoryForInjection`）。两处各排一遍必漂。
+ */
 export async function listActiveMemory(
   store: Store,
   workspaceId: MemoryEntry['workspaceId'],
   agentId: MemoryEntry['agentId'],
 ): Promise<MemoryEntry[]> {
   const all = await store.listMemoryEntries(workspaceId, agentId)
-  return all.filter((entry) => entry.removedAt === null)
+  return sortMemoryForInjection(all.filter((entry) => entry.removedAt === null))
 }
 
 export type MemoryWriteError =
@@ -64,6 +78,7 @@ export type MemoryWriteError =
   | 'text_too_long'
   | 'kind_invalid'
   | 'limit_reached'
+  | 'pin_limit'
   | 'entry_not_found'
 
 export type MemoryWriteResult =
@@ -174,7 +189,12 @@ export async function removeMemoryEntry(
   return { ok: true, alreadyRemoved: false }
 }
 
-/** 置顶开关（★ = 预算紧张时最后才裁它）。 */
+/**
+ * 置顶开关（★ = 预算紧张时最后才裁它）。
+ *
+ * ⚠️ 最多 `MEMORY_PIN_LIMIT` 条：全都能置顶等于没有加权。超出时**明确拒绝**
+ *    并说清"已经钉了几条"，而不是悄悄把最旧的那条取消置顶。
+ */
 export async function setMemoryPinned(
   store: Store,
   input: {
@@ -183,11 +203,26 @@ export async function setMemoryPinned(
     entryId: string
     pinned: boolean
   },
-): Promise<{ ok: true; entry: MemoryEntry } | { ok: false; code: 'entry_not_found'; error: string }> {
+): Promise<
+  | { ok: true; entry: MemoryEntry }
+  | { ok: false; code: 'entry_not_found' | 'pin_limit'; error: string }
+> {
   const all = await store.listMemoryEntries(input.workspaceId, input.agentId)
   const found = all.find((entry) => (entry.id as string) === input.entryId)
   if (found === undefined || found.removedAt !== null) {
     return { ok: false, code: 'entry_not_found', error: `没有这条记忆：${input.entryId}` }
+  }
+  if (input.pinned && found.pinned !== true) {
+    const pinnedNow = all.filter((e) => e.removedAt === null && e.pinned === true).length
+    if (pinnedNow >= MEMORY_PIN_LIMIT) {
+      return {
+        ok: false,
+        code: 'pin_limit',
+        error:
+          `最多置顶 ${MEMORY_PIN_LIMIT} 条（现在已经有 ${pinnedNow} 条）——` +
+          `★ 的意思是"预算紧张时最后才裁它"，全都钉上等于没钉。先取消一条再钉。`,
+      }
+    }
   }
   const next = { ...found, pinned: input.pinned }
   await store.updateMemoryEntry(next)
@@ -255,8 +290,19 @@ export async function applyMemoryDelta(
       entryId: item.id,
       pinned: item.pinned === true,
     })
-    // 置顶一条不存在的（比如另一端刚删了）不是错误：跳过，别让整次保存失败
-    if (result.ok) pinned.push(item.id)
+    if (!result.ok) {
+      /**
+       * ⚠️ 两种失败要分开：
+       *   · `entry_not_found`（另一端刚删了）——**跳过**，别让整次保存失败；
+       *   · `pin_limit`（钉太多了）——是使用者刚做的那个动作被拒，必须**说出来**，
+       *     否则界面上那个 ★ 会亮着而库里没钉上（"看起来生效了"）。
+       */
+      if (result.code === 'pin_limit') {
+        return { ok: false, code: 'pin_limit', error: result.error }
+      }
+      continue
+    }
+    pinned.push(item.id)
   }
 
   const removed: string[] = []

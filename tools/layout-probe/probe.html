@@ -361,6 +361,27 @@
           await untilNet(() => !!d().querySelector('[data-agent-memory]'), 60)
           await untilNet(() => d().querySelectorAll('[data-mem-row]').length >= 1, 60)
 
+          /**
+           * 列表行上的「记忆 N 条」：`memoryCount` 来自 `GET /api/agents`，
+           * 而**记忆是刚刚用 raw fetch 造的**（没走界面那条保存路径）⇒ 页面里的
+           * 那份列表还是旧的。所以先点一次页面级「刷新」把列表拉新，再读那个徽标。
+           * ⚠️ 这一步也在量一件事：列表那个计数真的跟着库走（不是只画了个字段）。
+           */
+          const refreshBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => text(b).trim() === '刷新',
+          )
+          if (refreshBtn) click(refreshBtn)
+          await untilNet(
+            () =>
+              [...d().querySelectorAll('.list-row-main')].some(
+                (c) => c.querySelector('[data-agent-memory-count]') !== null,
+              ),
+            60,
+          )
+          const rowBadge =
+            [...d().querySelectorAll('.list-row-main')]
+              .map((c) => text(c.querySelector('[data-agent-memory-count]')) ?? '')
+              .filter((t) => t !== '')[0] ?? null
           const section = d().querySelector('[data-agent-memory]')
           if (!section) return null
           const rows = [...section.querySelectorAll('[data-mem-row]:not([data-dropped="1"])')]
@@ -381,6 +402,7 @@
             countText,
             hasPreview: previewBtn !== null,
             hasAddRow: !!section.querySelector('[data-mem-add]'),
+            rowBadge,
           }
         })()
 
@@ -391,6 +413,7 @@
           const opened = await untilNet(() => !!d().querySelector('[data-memory-preview-text]'), 60)
           if (!opened) return { opened: false }
           const text_ = text(d().querySelector('[data-memory-preview-text]')) ?? ''
+          const stats = text(d().querySelector('[data-memory-preview-stats]')) ?? ''
           const panel = d().querySelector('[data-memory-preview-panel]')
           const readOnly = panel !== null && panel.querySelectorAll('input, textarea').length === 0
           // 关掉抽屉（后面还有别的判据要看这一页）
@@ -405,6 +428,7 @@
             hasCommitment: text_.includes('- [约定] 报告里不许出现'),
             hasInstructions: text_.includes('你是'),
             readOnly,
+            stats,
           }
         })()
         facts['agents.detailHeading'] = need('右栏标题（单态卡片里就是名字输入框的值）', () =>

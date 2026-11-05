@@ -340,6 +340,102 @@ describe('记忆：改 = 新增 + 删掉旧的', () => {
   })
 })
 
+describe('记忆：顺序与置顶上限', () => {
+  test('★★ 列表按**注入顺序**返回：置顶在前、然后 约定>偏好>事实>教训、同类最近用过的在前', async () => {
+    const { store } = fakeStore()
+    const add = async (kind: string, text: string, pinned = false) =>
+      addMemoryEntry(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        kind,
+        text,
+        ...(pinned ? { pinned: true } : {}),
+        newId: idGen(),
+      })
+    await add('lesson', '教训甲')
+    await add('fact', '事实甲')
+    await add('commitment', '约定甲')
+    await add('preference', '偏好甲')
+    await add('lesson', '置顶的教训', true)
+
+    const listed = (await listActiveMemory(store, WS, AGENT)).map((e) => e.text)
+    assert.deepEqual(
+      listed,
+      ['置顶的教训', '约定甲', '偏好甲', '事实甲', '教训甲'],
+      '界面从上到下就是"预算不够时先丢下面的"——顺序必须与第一句话一致',
+    )
+  })
+
+  test('★★ 最多 3 条可置顶；第 4 条被拒，并说清已经钉了几条', async () => {
+    const { store } = fakeStore()
+    const ids: string[] = []
+    for (let i = 0; i < 4; i += 1) {
+      const res = await addMemoryEntry(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        kind: 'fact',
+        text: `第 ${i} 条`,
+        newId: idGen(),
+      })
+      assert.equal(res.ok, true)
+      if (res.ok) ids.push(res.entry.id as string)
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const r = await setMemoryPinned(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        entryId: ids[i]!,
+        pinned: true,
+      })
+      assert.equal(r.ok, true, `第 ${i + 1} 条应当能钉`)
+    }
+    const fourth = await setMemoryPinned(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      entryId: ids[3]!,
+      pinned: true,
+    })
+    assert.equal(fourth.ok, false)
+    if (!fourth.ok) {
+      assert.equal(fourth.code, 'pin_limit')
+      assert.match(fourth.error, /最多置顶 3 条/)
+    }
+    // 取消一条之后又能钉了
+    await setMemoryPinned(store, { workspaceId: WS, agentId: AGENT, entryId: ids[0]!, pinned: false })
+    const retry = await setMemoryPinned(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      entryId: ids[3]!,
+      pinned: true,
+    })
+    assert.equal(retry.ok, true)
+  })
+
+  test('★★ 差量里的置顶超限要**说出来**（不能静默跳过：界面上 ★ 亮着而库里没钉上）', async () => {
+    const { store } = fakeStore()
+    const ids: string[] = []
+    for (let i = 0; i < 4; i += 1) {
+      const res = await addMemoryEntry(store, {
+        workspaceId: WS,
+        agentId: AGENT,
+        kind: 'fact',
+        text: `第 ${i} 条`,
+        newId: idGen(),
+      })
+      if (res.ok) ids.push(res.entry.id as string)
+    }
+    const applied = await applyMemoryDelta(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      delta: {
+        pin: ids.map((id) => ({ id, pinned: true })),
+      },
+    })
+    assert.equal(applied.ok, false)
+    if (!applied.ok) assert.equal(applied.code, 'pin_limit')
+  })
+})
+
 describe('触发词（全局的一份）', () => {
   test('★ 没设过 ⇒ 平台默认那三个', () => {
     assert.deepEqual(effectiveMemoryPrefixes(null), [...DEFAULT_MEMORY_PREFIXES])
