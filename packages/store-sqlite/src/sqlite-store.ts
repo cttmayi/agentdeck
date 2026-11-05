@@ -34,6 +34,7 @@ import type {
   InboxItem,
   Issue,
   IssueId,
+  MemoryEntry,
   Report,
   Run,
   RunId,
@@ -181,6 +182,8 @@ const META_SCHEMA = [
 /** 有 workspace 归属的实体表。键名即表名，下文用它拼通用语句。 */
 const ENTITY_TABLES = [
   'agent',
+  // 智能体记忆（分批第 240 批）。与文件适配器的 `COLLECTIONS` 同序摆放。
+  'memory',
   // 智能体组（D70 增量添加）。与文件适配器的 `COLLECTIONS` 同序摆放。
   'group',
   'skill',
@@ -210,7 +213,7 @@ type EntityTable = (typeof ENTITY_TABLES)[number]
 const GENERAL_PUT_TABLES = ENTITY_TABLES
 
 /** 需要"按 workspace 列举"的表：端口里只有 agent / skill / tool / report 有这种列法。 */
-const WORKSPACE_LIST_TABLES = ['agent', 'group', 'skill', 'tool', 'report'] as const
+const WORKSPACE_LIST_TABLES = ['agent', 'group', 'memory', 'skill', 'tool', 'report'] as const
 
 const ALL_TABLES = [
   'meta',
@@ -249,6 +252,16 @@ const SCHEMA = [
      json TEXT NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS agent_workspace ON agent(workspace_id)`,
+
+  // 智能体记忆（分批第 240 批）：按 agent 取，所以 id 之外再建一条 workspace 索引；
+  // `agent_id` 留在 JSON 里（查询永远是"这个 workspace 的全部"或"这个 agent 的全部"，
+  // 一次读几十条，不值得为它再提一列生成列）。
+  `CREATE TABLE IF NOT EXISTS memory (
+     id TEXT PRIMARY KEY,
+     workspace_id TEXT NOT NULL,
+     json TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS memory_workspace ON memory(workspace_id)`,
 
   // ── 无查询条件的实体表：JSON 里没有需要索引的字段 ──
   `CREATE TABLE IF NOT EXISTS "group" (
@@ -1075,6 +1088,27 @@ export class SqliteStore implements Store {
   async deleteAgent(id: AgentId): Promise<boolean> {
     const res = this.#stmt('del:agent').run(id as string)
     return Number(res.changes) > 0
+  }
+
+  // ── Agent memory（分批第 240 批）──
+
+  async listMemoryEntries(
+    workspaceId: WorkspaceId,
+    agentId?: AgentId,
+  ): Promise<MemoryEntry[]> {
+    const all = this.#listByWorkspace<MemoryEntry>('memory', workspaceId)
+    const scoped = agentId === undefined ? all : all.filter((e) => e.agentId === agentId)
+    return scoped.sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  async insertMemoryEntry(entry: MemoryEntry): Promise<void> {
+    this.#putEntity('memory', entry.id as string, entry.workspaceId, entry)
+  }
+
+  async updateMemoryEntry(entry: MemoryEntry): Promise<boolean> {
+    if (this.#getEntity<MemoryEntry>('memory', entry.id as string) === null) return false
+    this.#putEntity('memory', entry.id as string, entry.workspaceId, entry)
+    return true
   }
 
   // ── AgentGroup（智能体组，D70 增量添加）──

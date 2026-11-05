@@ -32,6 +32,7 @@ import type {
   InboxItem,
   Issue,
   IssueId,
+  MemoryEntry,
   Report,
   ReportId,
   Run,
@@ -94,6 +95,10 @@ export const STORE_FORMAT_VERSION = 1
 
 const COLLECTIONS = [
   'agent',
+  // 智能体记忆（分批第 240 批）。与 agent 并排：一条记忆属于某个 agent。
+  // ⚠️ 新增集合名只影响**新写**的那份日志，老数据目录里没有 `log/memory.jsonl`
+  // 会被当成"这个 workspace 还没有记忆"，所以不需要迁移。
+  'memory',
   // 智能体组（D70 增量添加）。与 agent 并排：组是 agent 的**编队**。
   // ⚠️ 新增集合名只影响**新写**的那份日志，老数据目录里没有
   // `log/group.jsonl` 会被当成"这个 workspace 还没有组"，所以不需要迁移。
@@ -283,6 +288,9 @@ class WorkspaceStore {
   }
   agent(): JsonlLog<Agent & { id: string }> {
     return this.log('agent') as unknown as JsonlLog<Agent & { id: string }>
+  }
+  memory(): JsonlLog<MemoryEntry & { id: string }> {
+    return this.log('memory') as unknown as JsonlLog<MemoryEntry & { id: string }>
   }
   group(): JsonlLog<AgentGroup & { id: string }> {
     return this.log('group') as unknown as JsonlLog<AgentGroup & { id: string }>
@@ -645,6 +653,33 @@ export class FileStore implements Store {
       return ws.mutex.run(() => ws.group().del(id as string))
     }
     return false
+  }
+
+  // ── Agent memory（分批第 240 批）──
+
+  async listMemoryEntries(
+    workspaceId: WorkspaceId,
+    agentId?: AgentId,
+  ): Promise<MemoryEntry[]> {
+    const ws = await this.#ws(workspaceId)
+    const all = ws.memory().all() as unknown as MemoryEntry[]
+    // 过滤在**调用方**的口径上做（这里只负责"这个 workspace 的"/"这个 agent 的"），
+    // 已删除的照原样返回——历史是可查的事实。
+    const scoped = agentId === undefined ? all : all.filter((e) => e.agentId === agentId)
+    return scoped.sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  async insertMemoryEntry(entry: MemoryEntry): Promise<void> {
+    const ws = await this.#ws(entry.workspaceId)
+    await ws.mutex.run(() => ws.memory().put(entry as MemoryEntry & { id: string }))
+  }
+
+  async updateMemoryEntry(entry: MemoryEntry): Promise<boolean> {
+    const ws = await this.#ws(entry.workspaceId)
+    const existing = ws.memory().get(entry.id)
+    if (!existing) return false
+    await ws.mutex.run(() => ws.memory().put(entry as MemoryEntry & { id: string }))
+    return true
   }
 
   // ── Skill ──

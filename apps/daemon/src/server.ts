@@ -193,6 +193,16 @@ import {
 } from './workdir-files.ts'
 import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
+import {
+  DEFAULT_MEMORY_PREFIXES,
+  MEMORY_TEXT_MAX,
+  addMemoryEntry,
+  applyMemoryDelta,
+  effectiveMemoryPrefixes,
+  listActiveMemory,
+  removeMemoryEntry,
+  setMemoryPinned,
+} from './memory.ts'
 import { revealInFileManager } from './reveal.ts'
 import { ReviewCoordinator } from './review.ts'
 import { RunRegistry, replayMessagesSince } from './registry.ts'
@@ -1298,6 +1308,8 @@ async function readWorkspaceSettings(
   allowReviewerScriptRun: boolean
   /** 新建智能体时预填的「默认工作守则」（分批第 47 批）；空串 = 不预填。 */
   defaultAgentConduct: string
+  /** ★ 分批第 240 批：记忆触发词。`undefined` = 没设过（用平台默认），`[]` = 关掉。 */
+  memoryPrefixes?: string[] | undefined
 }> {
   const workspace = await store.getWorkspace(workspaceId)
   return {
@@ -1322,6 +1334,7 @@ async function readWorkspaceSettings(
     githubProxy: workspace?.githubProxy ?? '',
     // 老数据没有这个键 ⇒ 平台默认守则（与"什么都不改"同义）
     defaultAgentConduct: workspace?.defaultAgentConduct ?? GENERAL_WORK_CONDUCT,
+    memoryPrefixes: workspace?.memoryPrefixes,
   }
 }
 
@@ -4017,6 +4030,11 @@ async function injectedSkillsOf(
          */
         defaultAgentConduct: settings.defaultAgentConduct,
         /**
+         * ★ 分批第 240 批：记忆触发词（聊天页那颗 input 要读它，才知道哪些开头的句子
+         *   算"要记住"）。跟着身份一起下发——页面启动就有，聊天页不多一次请求。
+         */
+        memoryPrefixes: effectiveMemoryPrefixes(settings),
+        /**
          * ★ 这份界面是哪一版（构建产物文件名）。
          *
          * 添加它的理由是一次真实误判：使用者报"聊天页不工作、任务页正常"，查下来
@@ -4084,9 +4102,23 @@ async function injectedSkillsOf(
       //   `autoChainReview` 等内部链路按 id 找执行者/审核者，私有 agent 必须能
       //   找到——过滤到执行链路上，私有审核者就会"找不到"。
       const agents = allAgents.filter((a) => a.ownerGroupId === undefined)
+      /**
+       * ★ 分批第 240 批：列表带 `memoryCount`（左栏那行小字「记忆 6」）。
+       *   一次读整个 workspace 的记忆再按 agent 归并——不按 agent 各查一次。
+       */
+      const memoryRows = await store.listMemoryEntries(workspaceId)
+      const memoryCount = new Map<string, number>()
+      for (const row of memoryRows) {
+        if (row.removedAt !== null) continue
+        memoryCount.set(row.agentId as string, (memoryCount.get(row.agentId as string) ?? 0) + 1)
+      }
+      const withMemory = agents.map((a) => ({
+        ...a,
+        memoryCount: memoryCount.get(a.id as string) ?? 0,
+      }))
       // ★ 默认智能体跟着列表一起给：界面要在卡片上标「默认」，新建任务页要用它
       //   当预选项——两处都拿同一份，不各自猜。
-      sendJson(res, 200, { agents, defaultAgentId: settings.defaultAgentId })
+      sendJson(res, 200, { agents: withMemory, defaultAgentId: settings.defaultAgentId })
       return
     }
 
@@ -4414,6 +4446,53 @@ async function injectedSkillsOf(
       }
       await store.insertWorkspace({ ...workspace, locale: raw, updatedAt: Date.now() })
       sendJson(res, 200, { locale: raw })
+      return
+    }
+
+    /**
+     * ★ 分批第 240 批：记忆触发词（全局设定，一处配置）。
+     *
+     * `PATCH` 全量替换（它是配置，不是 append-only 的记忆）：传 `{ prefixes: string[] }`，
+     * **空数组 = 关掉这个功能**（不是"每句都算"）。
+     *
+     * 校验为什么这么几条（每一条都对应一次会静默出错的情形）：
+     *   · 每一项必须是非空字符串、≤ 32 字：触发词是"开头"，长句只会永远匹配不上；
+     *   · 最多 12 个：再多就不是"几个口头习惯"，而是配置灾难；
+     *   · 去重（重复的没有意义，而且让它显示两遍会像是两个词）。
+     */
+    if (req.method === 'PATCH' && path === '/api/workspace/memory-prefixes') {
+      const body = (await readJsonBody(req)) as { prefixes?: unknown }
+      if (!Array.isArray(body.prefixes)) {
+        sendJson(res, 400, { error: '需要 prefixes（字符串数组；空数组 = 关掉这个功能）', code: 'prefixes_required' })
+        return
+      }
+      const cleaned: string[] = []
+      for (const raw of body.prefixes) {
+        if (typeof raw !== 'string') {
+          sendJson(res, 400, { error: 'prefixes 里每一项都必须是字符串', code: 'prefix_invalid' })
+          return
+        }
+        const trimmed = raw.trim()
+        if (trimmed === '' || trimmed.length > 32) {
+          sendJson(res, 400, {
+            error: `触发词必须是 1–32 字的非空串（收到「${raw}」）`,
+            code: 'prefix_invalid',
+          })
+          return
+        }
+        if (!cleaned.includes(trimmed)) cleaned.push(trimmed)
+      }
+      if (cleaned.length > 12) {
+        sendJson(res, 400, { error: '触发词最多 12 个', code: 'prefix_too_many' })
+        return
+      }
+      const workspace = await store.getWorkspace(workspaceId)
+      if (!workspace) {
+        sendJson(res, 404, { error: `workspace 不存在：${workspaceId}` })
+        return
+      }
+      await store.insertWorkspace({ ...workspace, memoryPrefixes: cleaned, updatedAt: Date.now() })
+      sendJson(res, 200, { prefixes: cleaned, defaults: [...DEFAULT_MEMORY_PREFIXES] })
       return
     }
 
@@ -4966,7 +5045,13 @@ async function injectedSkillsOf(
           sendJson(res, 404, { error: `agent 不存在：${agentId}` })
           return
         }
-        sendJson(res, 200, agent)
+        /**
+         * ★ 分批第 240 批：详情**一次往返**带上记忆（已删除的不给）。
+         *   详情页是记忆的唯一编辑处，"读 agent + 读记忆"拆两条只会多一次请求和
+         *   一个"两边不同步"的窗口。
+         */
+        const memory = await listActiveMemory(store, workspaceId, agentId)
+        sendJson(res, 200, { ...agent, memory })
         return
       }
 
@@ -5020,6 +5105,10 @@ async function injectedSkillsOf(
           'env',
           // D37：审核标准（内联在 agent 上）
           'reviewStandard',
+          // ★ 分批第 240 批：记忆的**差量**（add / remove / pin）。它不是 agent 的字段，
+          //   而是一次写操作——`Agent` 上不多一个数组（那样每次保存都要整份覆盖，
+          //   而记忆还有别的写入者：聊天里记一条）。
+          'memory',
         ])
         // ⚠️ 2026-10：`reviewerAgentId` / `allowedActions` / `actionParams` /
         //    `debugActions` 四个键**从这个白名单里拿掉了**——它们已经从 `Agent` 上
@@ -5206,9 +5295,51 @@ async function injectedSkillsOf(
           )
         }
 
+        /**
+         * ★ 分批第 240 批：先应用记忆差量，再写 agent。
+         *
+         * 顺序理由：差量失败（超上限 / 正文太长）时**不该已经把 agent 存下去了**——
+         * 那会变成"名字改了、记忆没改"，而界面上只会看到一句错误，人不知道哪些成功了。
+         * 所以先做会失败的那一半；成功了再写 agent（它只会成功）。
+         *
+         * ⚠️ 差量里**没有"改正文"**：改一条 = 新增一条 + 删掉旧的（见 `memory.ts`）。
+         */
+        if (body['memory'] !== undefined) {
+          const raw = body['memory']
+          if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+            sendJson(res, 400, { error: 'memory 必须是 { add?, remove?, pin? }' })
+            return
+          }
+          const delta = raw as { add?: unknown; remove?: unknown; pin?: unknown }
+          const applied = await applyMemoryDelta(store, {
+            workspaceId,
+            agentId,
+            delta: {
+              ...(Array.isArray(delta.add) ? { add: delta.add as never } : {}),
+              ...(Array.isArray(delta.remove)
+                ? { remove: delta.remove.filter((x): x is string => typeof x === 'string') }
+                : {}),
+              ...(Array.isArray(delta.pin)
+                ? { pin: delta.pin.filter((x): x is { id: string; pinned: unknown } =>
+                    typeof x === 'object' && x !== null && typeof (x as { id?: unknown }).id === 'string',
+                  ) }
+                : {}),
+            },
+          })
+          if (!applied.ok) {
+            sendJson(res, applied.code === 'limit_reached' ? 409 : 400, {
+              error: applied.error,
+              code: applied.code,
+            })
+            return
+          }
+        }
+
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
         await store.insertAgent(updated)
-        sendJson(res, 200, updated)
+        // 保存的返回值带上**最新**的记忆：这样"这期间聊天里又记了一条"也能一起画出来
+        const memory = await listActiveMemory(store, workspaceId, agentId)
+        sendJson(res, 200, { ...updated, memory })
         return
       }
 
@@ -5265,6 +5396,99 @@ async function injectedSkillsOf(
         sendJson(res, deleted ? 200 : 404, { ok: deleted })
         return
       }
+    }
+
+    /**
+     * ★ 分批第 240 批：聊天里的两个写入口（前缀触发 / 整理这段）走这里。
+     *
+     * 为什么单独一条而不是复用 PATCH：聊天页没有"整份 agent + 记忆差量"这份数据，
+     * 它只有"刚记下的这一句"。**一次一条或一批**，返回写进去的条目（前端拿 id 去撤销）。
+     */
+    const memoryMatch = /^\/api\/agents\/([^/]+)\/memory(?:\/([^/]+))?$/.exec(path)
+    if (memoryMatch) {
+      const targetAgentId = decodeURIComponent(memoryMatch[1]!) as Agent['id']
+      const entryId = memoryMatch[2] === undefined ? null : decodeURIComponent(memoryMatch[2])
+      const target = await store.getAgent(targetAgentId)
+      if (!target) {
+        sendJson(res, 404, { error: `agent 不存在：${targetAgentId}` })
+        return
+      }
+
+      if (req.method === 'POST' && entryId === null) {
+        const body = (await readJsonBody(req)) as {
+          entries?: unknown
+          kind?: unknown
+          text?: unknown
+          evidence?: unknown
+        }
+        // 两种形状：单条（`{kind,text}`）与批量（`{entries:[…]}`）——「整理这段」勾了
+        // 好几条时一次性提交，不做 N 次往返。
+        const items =
+          Array.isArray(body.entries)
+            ? body.entries
+            : [{ kind: body.kind, text: body.text, evidence: body.evidence }]
+        if (items.length === 0) {
+          sendJson(res, 400, { error: '需要至少一条记忆（entries 为空）', code: 'entries_required' })
+          return
+        }
+        const added = []
+        for (const [index, item] of items.entries()) {
+          const row = item as { kind?: unknown; text?: unknown; evidence?: unknown }
+          const result = await addMemoryEntry(store, {
+            workspaceId,
+            agentId: targetAgentId,
+            kind: row.kind,
+            text: row.text,
+            ...(typeof row.evidence === 'string' && row.evidence !== ''
+              ? { evidence: row.evidence }
+              : {}),
+          })
+          if (!result.ok) {
+            sendJson(res, result.code === 'limit_reached' ? 409 : 400, {
+              error: items.length > 1 ? `第 ${index + 1} 条：${result.error}` : result.error,
+              code: result.code,
+              ...(added.length > 0 ? { added } : {}),
+            })
+            return
+          }
+          added.push(result.entry)
+        }
+        sendJson(res, 201, { entries: added })
+        return
+      }
+
+      if (req.method === 'DELETE' && entryId !== null) {
+        const result = await removeMemoryEntry(store, {
+          workspaceId,
+          agentId: targetAgentId,
+          entryId,
+        })
+        if (!result.ok) {
+          sendJson(res, 404, { error: result.error, code: result.code })
+          return
+        }
+        sendJson(res, 200, { ok: true, alreadyRemoved: result.alreadyRemoved })
+        return
+      }
+
+      if (req.method === 'PATCH' && entryId !== null) {
+        const body = (await readJsonBody(req)) as { pinned?: unknown }
+        const result = await setMemoryPinned(store, {
+          workspaceId,
+          agentId: targetAgentId,
+          entryId,
+          pinned: body.pinned === true,
+        })
+        if (!result.ok) {
+          sendJson(res, 404, { error: result.error, code: result.code })
+          return
+        }
+        sendJson(res, 200, { entry: result.entry })
+        return
+      }
+
+      sendJson(res, 405, { error: '不支持的方法' })
+      return
     }
 
     if (req.method === 'GET' && path === '/api/issues') {

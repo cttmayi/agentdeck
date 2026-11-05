@@ -18,6 +18,15 @@ export const SkillId = z.string().brand<'SkillId'>()
 export type SkillId = z.infer<typeof SkillId>
 
 /**
+ * 智能体记忆的一条（分批第 240 批）。
+ *
+ * 单独一个 brand 而不是复用 `AgentId`：一条记忆属于某个 agent 但**不是**那个 agent
+ * ——把记忆 id 传进要 agent id 的地方是编译错误。
+ */
+export const MemoryEntryId = z.string().brand<'MemoryEntryId'>()
+export type MemoryEntryId = z.infer<typeof MemoryEntryId>
+
+/**
  * 工具包（D40）。**一个包 = 一个组**，一次安装一个目录。
  *
  * 与 `SkillId` 分开而不是共用一个 `PackageId`：两者的授权单位、审计字段

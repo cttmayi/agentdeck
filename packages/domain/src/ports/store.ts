@@ -18,6 +18,7 @@ import type {
   InboxItem,
   Issue,
   IssueId,
+  MemoryEntry,
   Report,
   Run,
   RunId,
@@ -251,6 +252,29 @@ export interface Store {
    *    的"边界先立着"）。
    */
   deleteGroup(id: AgentGroupId): Promise<boolean>
+
+  // ── Agent memory（分批第 240 批）──
+
+  /**
+   * 列这个 workspace 的记忆条目。
+   *
+   * @param agentId 给了就只要这个 agent 的（详情页）；不给就是全部（第一句话注入要
+   *        按 agent 取，别的地方一般用不到）。
+   *
+   * ⚠️ 返回的是**所有记录**，包括 `removedAt !== null` 的（删除只是打时间戳，历史留在
+   *    日志里）。"哪些还算数"由调用方按 `removedAt === null` 过滤——存储层不替上层
+   *    决定可见性。
+   */
+  listMemoryEntries(workspaceId: WorkspaceId, agentId?: AgentId): Promise<MemoryEntry[]>
+  /** 新增一条（"改"也走这条：新增 + 把旧的打上 `removedAt`）。 */
+  insertMemoryEntry(entry: MemoryEntry): Promise<void>
+  /**
+   * 覆盖一条（置顶开关、使用统计、打删除时间戳）。
+   *
+   * @returns 这条记录本来就在返回 true；不在返回 false（**不是错误**，调用方要分清
+   *          "它已经没了"与"写失败"）。
+   */
+  updateMemoryEntry(entry: MemoryEntry): Promise<boolean>
 
   // ── Skill ──
 

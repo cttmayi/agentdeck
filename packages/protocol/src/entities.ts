@@ -28,6 +28,7 @@ import {
   ConversationId,
   DeviceId,
   IssueId,
+  MemoryEntryId,
   ReportId,
   RunId,
   RuntimeId,
@@ -186,6 +187,20 @@ export const Workspace = z.object({
    * ⚠️ `optional()`：**后加**的字段，老 workspace 里根本没有它（缺省 = 开）。
    */
   webSearchEnabled: z.boolean().default(true).optional(),
+
+  /**
+   * ★ 分批第 240 批：「记忆触发词」——聊天里以这些词开头的句子会被记进**正在聊的那个
+   * 智能体**的记忆（全局设定：所有对话共用这一套）。
+   *
+   * 为什么是 workspace 级而不是每个 agent 一份：触发词是**人的措辞习惯**，不是 agent 的
+   * 属性——你对着执行者、对着审核员说的是同一句"记住：以后报告都用中文"。做成每 agent
+   * 一份的结果是"换个它就要换一种说法"，没人能解释为什么。
+   *
+   * ⚠️ **空数组 = 关掉这个功能**（不是"所有句子都算"）。缺省（老 workspace 没有这个键）
+   *    等同平台默认（`DEFAULT_MEMORY_PREFIXES`，见 `apps/daemon/src/memory.ts`）。
+   * ⚠️ 只认**开头**，不做语义猜测；前缀本身不写进记忆（存的是剥掉前缀那句话）。
+   */
+  memoryPrefixes: z.array(z.string().min(1).max(32)).max(12).optional(),
   /**
    * ★ 审核起草出来的 skill 时，**允许审核者真的执行草稿里的脚本**（§10.5 第 ③ 条，2026-10）。
    *
@@ -566,6 +581,76 @@ export const Agent = z.object({
   updatedAt: EpochMs,
 })
 export type Agent = z.infer<typeof Agent>
+
+// ─────────────────────────────────────────────────────────────
+// AgentMemory（分批第 240 批）：一个智能体"攒下来的经验"
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 一条记忆的**类型**。四种，每一种对应一种"以后会用到的判断"：
+ *
+ *   · `preference` 偏好——人要它怎么对待人（称呼、风格、不要什么写法）；
+ *   · `fact`       事实——关于环境/项目的稳定事实（用哪个包管理器、报告落在哪）；
+ *   · `lesson`     教训——踩过的坑（某个做法被判不过、被谁打回过）；
+ *   · `commitment` 约定——答应过要做/不做的事（"这个仓库不碰 migrations"）。
+ *
+ * ⚠️ 这四种之外的都不要收：这一栏**不是日志**（"这一轮做了什么"属于 run 日志）。
+ *    顺序也是注入时的优先级：`commitment > preference > fact > lesson`（见
+ *    `packages/agent-core/src/memory.ts` 的 `MEMORY_KIND_PRIORITY`）。
+ */
+export const MemoryKind = z.enum(['preference', 'fact', 'lesson', 'commitment'])
+export type MemoryKind = z.infer<typeof MemoryKind>
+
+/**
+ * 智能体记忆的一条记录。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 三条硬规则（它们是这个功能能安全存在的原因）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * ① **只有人能写**：界面上只有两个写入口（详情页手写、聊天里前缀触发/整理这段），
+ *    两者都是人打的字。agent 不能给自己写记忆——**记忆是唯一一处"改了它就会改变
+ *    它下一次怎么干活"的文本**，让 agent 自己写等于让它给自己立规矩。
+ *
+ * ② **改 = 新增一条 + 删掉旧的**（不是原地修改）：所以这里没有 `updatedAt`，
+ *    也没有"原文"字段。多次改就是多条记录，历史留在日志里（`removedAt` 只是打时间戳，
+ *    **不真删**）。
+ *
+ * ③ **没有"停用/退役"状态**：久不用的条目会自己排到最后、预算不够时被裁掉
+ *    （注入顺序里有 `lastUsedAt`），不需要一个状态字段——那是排序问题，不是状态问题。
+ */
+export const MemoryEntry = z.object({
+  id: MemoryEntryId,
+  workspaceId: WorkspaceId,
+  agentId: AgentId,
+  kind: MemoryKind,
+  /**
+   * 记忆正文。**要写成"下次也成立"的说法**（"这个仓库用 pnpm"），不是这一轮的现场
+   * （"第 3 节缺来源"）。上限 400 字：它每轮都会被带进上下文，长度就是成本。
+   */
+  text: z.string().min(1).max(400),
+  /**
+   * 出处：这条记忆最初来自哪条 run（人从聊天里记下的、从"整理这段"勾的）。
+   * 手写的那条没有出处。**只用于排查**，不进第一句话。
+   */
+  evidence: z.string().optional(),
+  /**
+   * ★ 置顶 = "这条一定要带上"。预算紧张时**先保置顶的**，其余按类型优先级 + 最近用过裁。
+   * 这就是"能不能调整顺序"这个需求的落地方式：不做拖拽排序，只给一个"必须带"的加权。
+   */
+  pinned: z.boolean().default(false),
+  /** 被带进第一句话的次数（"这条记忆到底有没有用"的唯一证据，也是"久不用"的判据）。 */
+  useCount: z.number().int().nonnegative().default(0),
+  /** 最后一次被带进第一句话的时间；`null` = 从没用上过。 */
+  lastUsedAt: EpochMs.nullable().default(null),
+  createdAt: EpochMs,
+  /**
+   * 删除 = 打上时间戳。界面上只列 `removedAt === null` 的；
+   * 记录本身留着（"这条曾经存在过、什么时候被谁换掉的"是可查的事实）。
+   */
+  removedAt: EpochMs.nullable().default(null),
+})
+export type MemoryEntry = z.infer<typeof MemoryEntry>
 
 // ─────────────────────────────────────────────────────────────
 // AgentGroup（D70 增量添加）
