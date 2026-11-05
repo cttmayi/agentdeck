@@ -70,6 +70,11 @@ const LANGUAGE_NAME: Record<'zh' | 'en', string> = {
 }
 import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
+import {
+  listActiveMemory,
+  pickedMemoryFor,
+  recordMemoryUse,
+} from './memory.ts'
 import { verifySentText } from './rpc-log.ts'
 import type { RunRegistry } from './registry.ts'
 import type { ReviewCoordinator } from './review.ts'
@@ -1292,6 +1297,18 @@ export class RunExecutor {
        * 判据收在 agent-core（与 `DEFAULT_TEMPLATES` 同一个文件），执行器只问它，
        * 于是"哪份模版"这件事只有一个答案。
        */
+      /**
+       * ★ 分批第 240 批：这个 agent 的**记忆**（「经验」块）。
+       *
+       * 取在组装之前、投递之后记账：投递失败就不该记成"用过"。
+       * 审核那条路用的是审核者自己的记忆（`run.agentId` 就是审核者）——一个 agent
+       * 一条记忆，与它在这次是执行还是审核无关。
+       */
+      const memoryItems = await listActiveMemory(
+        this.#deps.store,
+        run.workspaceId as never,
+        run.agentId as never,
+      )
       const templateKind = firstSentenceKindFor({ kind: req.kind, subject: req.subject })
       const delivery: Delivery =
         templateKind === 'chat'
@@ -1307,6 +1324,7 @@ export class RunExecutor {
               prompt: req.prompt,
               skills: skillsBrief,
               instructions: agentConfig?.instructions ?? null,
+              memory: memoryItems,
               language,
               template: migrated.chat,
             }, mode)
@@ -1327,6 +1345,8 @@ export class RunExecutor {
               // ★ 审核这条路上 ② 是**合成身份**（指令 + 老数据的标准）；
               //   新数据把标准写在指令里，老数据由 `reviewerIdentity` 并进来。
               instructions: reviewerIdentityText,
+              // ★ 分批第 240 批：「经验」= 这个审核者自己攒下的记忆
+              memory: memoryItems,
               // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
               prompt: req.prompt,
               // ★ 允许的动作要**写进判决契约**（D40）。不写的话，审核者配了工具
@@ -1348,6 +1368,7 @@ export class RunExecutor {
               prompt: req.prompt,
               skills: skillsBrief,
               instructions: agentConfig?.instructions ?? null,
+              memory: memoryItems,
               language,
               template: migrated.execute,
             }, mode)
@@ -1363,6 +1384,19 @@ export class RunExecutor {
       //   "可追溯"就成了空话。
       // 口径只有一处：`deliveredBytes()`（两块 + 一个不会出现在文本里的分隔符）
       const deliveredHash = createHash('sha256').update(deliveredBytes(delivery), 'utf8').digest('hex')
+
+      /**
+       * ★ 分批第 240 批：把**真的带进去了的那几条**记一次账（`useCount` / `lastUsedAt`）。
+       *
+       * 位置在投递之后：那一段文本已经拼好了，说明它们确实会进上下文。
+       * `pickedMemoryFor` 与第一句话里用的是**同一个纯函数、同一份预算**，所以
+       * "记了账的"与"进了文本的"是同一批（不会出现"记了三条例，带进去两条"）。
+       * 记账失败不打断 run（`recordMemoryUse` 自己吞掉错误）。
+       */
+      const usedMemory = pickedMemoryFor(memoryItems)
+      if (usedMemory.length > 0) {
+        await recordMemoryUse(this.#deps.store, usedMemory)
+      }
 
       /**
        * ★ 日志要说清**用哪一档投递的**（同一个模版在两个 runtime 上形状不同，

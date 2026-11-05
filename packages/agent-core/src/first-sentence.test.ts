@@ -821,3 +821,64 @@ describe('firstSentenceKindFor：三份模版，没有第四份给沉淀', () =>
     assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
   })
 })
+
+// ══════════════════════════════════════════════════════════════════
+// 「经验」（分批第 240 批）：记忆进第一句话的位置与从属声明
+// ══════════════════════════════════════════════════════════════════
+
+describe('第一句话：「经验」那一块', () => {
+  const MEMORY = [
+    { kind: 'commitment' as const, text: '报告里不许出现"赋能"这类词' },
+    { kind: 'fact' as const, text: '这个仓库跑测试用 pnpm' },
+  ]
+
+  test('★★ 记忆接在 ②（身份）后面、③（任务）之前——人设是人定的，记忆是长出来的', () => {
+    const blocks = buildBlocks({ ...SAMPLE_EXECUTE_INPUT, memory: MEMORY })
+    assert.match(blocks.identity, /你是一个严谨的协作者/, '② 里先是人设')
+    assert.match(blocks.identity, /过去记下的经验/, '然后才是经验')
+    assert.ok(
+      blocks.identity.indexOf('你是一个严谨的协作者') < blocks.identity.indexOf('过去记下的经验'),
+      '顺序：人设 → 经验',
+    )
+    assert.doesNotMatch(blocks.task, /过去记下的经验/, '经验不进 ③')
+    assert.doesNotMatch(blocks.frame, /过去记下的经验/, '经验也不进 ①')
+  })
+
+  test('★★ 经验自带从属声明：可能过时、与身份/任务冲突时以它们为准', () => {
+    const blocks = buildBlocks({ ...SAMPLE_EXECUTE_INPUT, memory: MEMORY })
+    assert.match(blocks.identity, /可能已经过时/)
+    assert.match(blocks.identity, /以它们为准/)
+  })
+
+  test('★★ 每行带类型标记（约定 / 事实），而且顺序与注入顺序一致', () => {
+    const blocks = buildBlocks({ ...SAMPLE_EXECUTE_INPUT, memory: MEMORY })
+    const commitment = blocks.identity.indexOf('- [约定] 报告里不许出现')
+    const fact = blocks.identity.indexOf('- [事实] 这个仓库跑测试用 pnpm')
+    assert.ok(commitment > 0 && fact > 0, '两条都在')
+    assert.ok(commitment < fact, '约定排在事实前面')
+  })
+
+  test('★ 没有记忆 ⇒ ② 与原来逐字节相同（这一块整块不出现）', () => {
+    const withNone = buildBlocks({ ...SAMPLE_EXECUTE_INPUT, memory: [] })
+    const without = buildBlocks(SAMPLE_EXECUTE_INPUT)
+    assert.equal(withNone.identity, without.identity)
+    assert.equal(withNone.identity, EXECUTE_IDENTITY)
+  })
+
+  test('★ 审核档也会带上审核者自己的记忆', () => {
+    const blocks = buildBlocks({
+      ...SAMPLE_REVIEW_INPUT,
+      memory: [{ kind: 'preference' as const, text: '称呼使用者"老王"' }],
+    })
+    assert.match(blocks.identity, /称呼使用者"老王"/)
+  })
+
+  test('★★ 记忆里写 `{{verdict}}` 也原样落地（它走的是「值」的通道，不进解析器）', () => {
+    const blocks = buildBlocks({
+      ...SAMPLE_EXECUTE_INPUT,
+      memory: [{ kind: 'fact' as const, text: '注意 {{verdict}} 这几个字' }],
+    })
+    assert.match(blocks.identity, /\{\{verdict\}\}/, '原样那几个字')
+    assert.doesNotMatch(blocks.identity, /"verdict"/, '没有把判决契约插进来')
+  })
+})

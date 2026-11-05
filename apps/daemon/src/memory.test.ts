@@ -15,6 +15,7 @@ import {
 } from './memory.ts'
 import type { MemoryEntry, MemoryEntryId, WorkspaceId, AgentId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
+import { deliveredText } from './testing/delivered.ts'
 
 /**
  * 智能体记忆（分批第 240 批）。
@@ -506,5 +507,113 @@ describe('记忆接口（HTTP 层）', () => {
         assert.equal(res.status, 400, JSON.stringify(body))
       }
     })
+  })
+})
+
+/**
+ * ★ 端到端：记忆**真的进了第一句话**，而且"用过"被记了一笔。
+ *
+ * 这一条把三处串起来：接口写进去 → 执行器组装第一句话（`buildBlocks`）→ 记账
+ * （`useCount`）。任何一处断了，界面上都会看起来正常（记忆列表有、跑得也正常），
+ * 只是它从没被用上——那正是最需要一条端到端断言的地方。
+ */
+describe('记忆：真的进了第一句话（端到端）', () => {
+  test('★★★ 一轮对话的第一句话里有那几条记忆，跑完之后 useCount 变成 1', async () => {
+    const dir = await makeTempDir('memory-prompt')
+    const prompts: string[] = []
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
+        },
+        async execute(opts: { prompt?: string; systemPrompt?: string | null }) {
+          // ⚠️ 用 `deliveredText`：A 档下 ①② 在 systemPrompt 里、③ 在 prompt 里——
+          //    只读 `opts.prompt` 会漏掉身份（而记忆就挂在身份那一块里）。
+          prompts.push(deliveredText(opts as never))
+          const { AsyncQueue } = await import('@agentdeck/agent-core')
+          const queue = new AsyncQueue<never>()
+          queue.close()
+          return {
+            messages: queue,
+            result: Promise.resolve({
+              status: 'completed',
+              output: '好',
+              durationMs: 1,
+              sessionId: 'mem',
+              usage: { inputTokens: 0, outputTokens: 0, costUsdMicros: 0, costSource: 'provider' },
+              exitCode: 0,
+            }),
+            async cancel() {
+              queue.close()
+            },
+            lastActivityAt: () => Date.now(),
+          }
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '记忆执行者', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'commitment', text: '报告里不许出现"赋能"这类词' }),
+      })
+
+      const conv = await fetch(`${d.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id, text: '帮我写一份周报' }),
+      })
+      assert.equal(conv.status, 201, await conv.clone().text())
+
+      /**
+       * 等这一轮跑到**终态**。
+       *
+       * ⚠️ 判据要用白名单（终态三种），不能只排除 `running`/`queued`：那一轮在真正
+       *    执行前还经过 `dispatched` 这类中间态，只排除两个会让循环**在它跑起来之前**
+       *    就退出——第一版就是这么拿到空 `prompts` 的（断言说的是"第一句话里没有记忆"，
+       *    而真正的原因是"还没跑"）。
+       */
+      const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+      const deadline = Date.now() + 8000
+      for (;;) {
+        const runs = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+          runs: Array<{ status: string }>
+        }
+        if (runs.runs.length > 0 && runs.runs.every((r) => TERMINAL.has(r.status))) break
+        if (Date.now() > deadline) throw new Error('等 run 结束超时')
+        await new Promise((r) => setTimeout(r, 25))
+      }
+
+      const delivered = prompts.join('\n=== NEXT ===\n')
+      assert.match(delivered, /过去记下的经验/, '★ 第一句话里要有「经验」这一块')
+      assert.match(delivered, /- \[约定\] 报告里不许出现"赋能"这类词/, '★ 具体那一条也在')
+      assert.match(
+        delivered,
+        /你是干活的[\s\S]*过去记下的经验/,
+        '顺序：人设 → 经验（记忆排在身份之后）',
+      )
+
+      const after = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ useCount: number; lastUsedAt: number | null }>
+      }
+      assert.equal(after.memory[0]?.useCount, 1, '跑完之后记了一次"用上了"')
+      assert.equal(typeof after.memory[0]?.lastUsedAt, 'number', '最近使用时间跟着写')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
   })
 })

@@ -94,9 +94,17 @@
  *    顺序也对。老模版由 `migrateTemplate()` 在读取时摘掉那几行（内容一个字
  *    不丢，只是位置改由平台定）。
  */
-
 import Mustache from 'mustache'
 import { renderVerdictInstruction } from '@agentdeck/protocol'
+import { memoryBlockText, type RankableMemory } from './memory.ts'
+
+/**
+ * 「经验」里一条的形状 —— `MemoryEntry` 的**最小投影**。
+ *
+ * 只取注入要用的四个字段：类型（排序与标记）、正文、置顶、最近用过。
+ * 这样 agent-core 不需要认识 `MemoryEntry` 的存储细节（id / 证据 / 删除时间戳）。
+ */
+export type MemoryItem = RankableMemory
 
 export interface SkillBrief {
   slug: string
@@ -214,6 +222,18 @@ export interface ExecuteFirstSentenceInput {
    */
   instructions?: string | null
   /**
+   * ★ 分批第 240 批：「经验」——这个 agent 自己攒下来的记忆（**只有人能写**，见
+   * `MemoryEntry` 上的三条硬规则）。
+   *
+   * 它排在 **② 身份之后、③ 任务之前**（`memoryBlockText` 渲染）：人设是人定的、
+   * 记忆是长出来的，而"这次要干什么"优先级最高——所以记忆在中间，并且**自带一句
+   * 从属声明**（"可能过时；与身份/任务冲突时以它们为准"）。
+   *
+   * ⚠️ 空数组 = 没有记忆（这一块整块不出现）；传进来的每一条都会经过
+   *    `rankMemory` 排序与预算裁剪，调用方不用自己排。
+   */
+  memory?: readonly MemoryItem[] | null
+  /**
    * 自定义模版（D32，2026-10 起是**三块各一份**：`BlockTemplates`）。
    * 某一框空 / null / 缺省 = 那一块用 `DEFAULT_TEMPLATES[kind][block]`。
    *
@@ -229,6 +249,8 @@ export interface ReviewFirstSentenceInput {
   subject: { type: string; id: string }
   /** 这个 agent 自己的指令（对审核者来说就是它的角色与倾向）。 */
   instructions?: string | null
+  /** ★ 分批第 240 批：这个审核者自己的记忆（同 `ExecuteFirstSentenceInput.memory`）。 */
+  memory?: readonly MemoryItem[] | null
   /**
    * 这次要它做什么——**必须送**。
    *
@@ -326,6 +348,8 @@ export interface ChatFirstSentenceInput {
   language?: string | null
   skills: readonly SkillBrief[]
   instructions?: string | null
+  /** ★ 分批第 240 批：这个 agent 的记忆（同 `ExecuteFirstSentenceInput.memory`）。 */
+  memory?: readonly MemoryItem[] | null
   /** 聊天自己的 ①（空 / null = `DEFAULT_TEMPLATES.chat`）。 */
   template?: BlockTemplates | null
 }
@@ -1031,6 +1055,19 @@ function identityBlock(input: FirstSentenceInput): string {
   // 聊天的 ② 与任务一样：agent 的「指令」（2026-09 的决定——之前它在聊天里不发）
   const parts = [instructionsValue(input.instructions)]
   if (input.kind === 'review') parts.push(standardsValue(input.standard))
+  /**
+   * ★ 分批第 240 批：「经验」接在身份**后面**、任务之前。
+   *
+   * 为什么放在 `{{identity}}` 里面而不是新开一个模版块：三块（框架/身份/任务）是
+   * 模版系统与投递档（A/B）的形状，改它要动 `TemplateBlock` / 校验 / 设置页的九个
+   * 框——而"经验"在**语义上属于"它是谁"的一部分**（人设 + 经历），排在身份之后
+   * 恰好就是设计里那张图的顺序（② 身份 → ②.5 经验 → ③ 任务）。
+   *
+   * ⚠️ 那块**自带从属声明**（`memoryBlockText` 的第一句）：可能过时，
+   *    与身份/任务冲突时以它们为准——记忆能影响它，但不能覆盖这次的人设与任务。
+   */
+  const memory = memoryBlockText(input.memory ?? [])
+  if (memory.text !== '') parts.push(memory.text)
   return parts
     .map((p) => p.trim())
     .filter((p) => p !== '')

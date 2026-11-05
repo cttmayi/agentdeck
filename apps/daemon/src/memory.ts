@@ -3,6 +3,7 @@ import { MemoryKind as MemoryKindSchema } from '@agentdeck/protocol'
 import type { MemoryEntryId } from '@agentdeck/protocol'
 import { ulid } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
+import { rankMemory } from '@agentdeck/agent-core'
 
 /**
  * 智能体记忆（分批第 240 批）：读写这一层，以及所有**限与默认**。
@@ -270,4 +271,41 @@ export async function applyMemoryDelta(
   }
 
   return { ok: true, added, removed, pinned }
+}
+
+/**
+ * 这一轮**真的会带进第一句话**的那几条（用来记账：`useCount` / `lastUsedAt`）。
+ *
+ * ⚠️ 它与 `buildBlocks` 里算的是**同一个纯函数、同一份默认预算**——所以"钉的两边
+ *    一致"不是靠约定，而是靠同一次调用形状。将来若允许自定义预算，两处必须一起传
+ *    （那时这个函数要多一个参数，注释在这里提醒）。
+ */
+export function pickedMemoryFor<T extends MemoryEntry>(entries: readonly T[]): T[] {
+  return rankMemory(entries).picked
+}
+
+/**
+ * 记一次"被用上了"：`useCount + 1`、`lastUsedAt = now`。
+ *
+ * 这是"这条记忆到底有没有用"的唯一证据，也是"久不用的自然沉底"的依据
+ * ——所以它必须在**投递之后**写（投递失败就不该记成用过）。
+ * 记账失败不打断 run（它只是统计，不是这次 run 的一部分）。
+ */
+export async function recordMemoryUse(
+  store: Store,
+  entries: readonly MemoryEntry[],
+  now: () => number = Date.now,
+): Promise<void> {
+  const at = now()
+  for (const entry of entries) {
+    try {
+      await store.updateMemoryEntry({
+        ...entry,
+        useCount: entry.useCount + 1,
+        lastUsedAt: at,
+      })
+    } catch {
+      // 统计写不进去不影响这一轮：它是给人看"有没有用"的，不是 run 的一部分
+    }
+  }
 }
