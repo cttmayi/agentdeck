@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Agent } from '../lib/api.ts'
+  import type { Agent, MemoryEntryView } from '../lib/api.ts'
   import {
     agents,
     identity,
@@ -97,6 +97,171 @@
     //    让 `buildPatch` 把它们写进一个必然被 400 的请求里。
   })
 
+  /**
+   * ★ 分批第 240 批：**记忆的草稿**。
+   *
+   * 它与 `draft` 一样是"进这一页时拍的一张表"，但**逐条**：每条有自己的 key、
+   * 原 id（新加的是 `null`）、正文、类型、置顶、以及"待删除"标记。
+   * 保存时它被折算成**差量**（`add` / `remove` / `pin`）——服务端的记忆存储是
+   * append-only 的，"改"= 新增一条 + 删掉旧的（不是原地改）。
+   *
+   * ⚠️ 为什么要一张本地表而不是直接改 `agent.memory`：这一页的写语义是
+   *    **表单 + 保存**（与「指令」一致）。逐条即时写会让这一页出现两套写语义，
+   *    而"改了没保存"与"保存了没改"都会变得说不清。
+   */
+  interface MemRow {
+    /** 本地稳定 key（`agent.memory` 的 id，或新加时生成的临时串）。 */
+    key: string
+    /** 库里的 id；`null` = 这一条是本页新加的（保存时进 `add`）。 */
+    id: string | null
+    kind: 'preference' | 'fact' | 'lesson' | 'commitment'
+    text: string
+    pinned: boolean
+    /** 进这一页时就是这样（用来算差量：只把**真的变了**的放进 patch）。 */
+    origPinned: boolean
+    /** 被"改"替换/被删掉的旧条目：保存时进 `remove`，界面上划掉。 */
+    drop: boolean
+  }
+
+  function memoryRows(source: readonly MemoryEntryView[] | undefined): MemRow[] {
+    return (source ?? []).map((m) => ({
+      key: m.id,
+      id: m.id,
+      kind: m.kind,
+      text: m.text,
+      pinned: m.pinned,
+      origPinned: m.pinned,
+      drop: false,
+    }))
+  }
+
+  let memRows = memoryRows(agent.memory)
+  /** 新加一条用的输入框（类型 + 正文）。 */
+  let memNewKind: MemRow['kind'] = 'fact'
+  let memNewText = ''
+  /** 「预览第一句话」抽屉：`null` = 关着。 */
+  let memPreview: string | null = null
+  let memPreviewBusy = false
+  let memPreviewError = ''
+  let memSeq = 0
+  /** 记忆脏了没有（只为了禁用/启用"保存"与提示）。 */
+  $: memDirty =
+    memRows.some((r) => r.drop || r.id === null || r.pinned !== r.origPinned) ||
+    memRows.some((r) => {
+      const orig = (agent.memory ?? []).find((m) => m.id === r.id)
+      return r.id !== null && orig !== undefined && orig.text !== r.text
+    })
+
+  const MEMORY_KINDS_UI = ['commitment', 'preference', 'fact', 'lesson'] as const
+
+  /** 界面上"活着"的那些行（被"改"替换掉或被删的旧行不列）。 */
+  $: activeMemRows = memRows.filter((r) => !r.drop)
+  /** 记住失败（超上限 / 正文太长）时的原话——服务端说的，不自己编。 */
+  let memError = ''
+
+  function memMetaFor(row: MemRow): string {
+    const orig = (agent.memory ?? []).find((m) => m.id === row.id)
+    if (orig === undefined) return $t('agents.memoryMetaNew')
+    const used = orig.useCount === 0 ? $t('agents.memoryNeverUsed') : $t('agents.memoryUsed', { n: String(orig.useCount) })
+    return used
+  }
+
+  /** 悬停里给全文 + 出处（界面上那一行只说正文，出处**不进视线**）。 */
+  function memTitleFor(row: MemRow): string {
+    const orig = (agent.memory ?? []).find((m) => m.id === row.id)
+    const lines = [row.text]
+    if (orig !== undefined) lines.push(memMetaFor(row))
+    if (orig?.evidence !== undefined && orig.evidence !== '') {
+      lines.push($t('agents.memoryEvidence', { run: orig.evidence.slice(0, 6) }))
+    }
+    return lines.join('\n')
+  }
+
+  function togglePin(row: MemRow): void {
+    row.pinned = !row.pinned
+    memError = ''
+  }
+
+  function addRow(): void {
+    const text = memNewText.trim()
+    if (text === '') return
+    memSeq += 1
+    memRows = [
+      ...memRows,
+      {
+        key: `new-${memSeq}`,
+        id: null,
+        kind: memNewKind,
+        text,
+        pinned: false,
+        origPinned: false,
+        drop: false,
+      },
+    ]
+    memNewText = ''
+    memError = ''
+  }
+
+  /**
+   * 「改」= **新增一条 + 删掉旧的那条**。
+   *
+   * 所以这里做两件事：把旧行标成 `drop`（保存时进 `remove`，界面上划掉），
+   * 再补一条**预填原文**的新行（保存时进 `add`）——人改的是这条新的。
+   * 为什么不是原地改：记忆是 append-only 的记录，"这条被换掉过"本身是可查的事实。
+   */
+  function editRow(row: MemRow): void {
+    row.drop = true
+    memSeq += 1
+    memRows = [
+      ...memRows,
+      {
+        key: `new-${memSeq}`,
+        id: null,
+        kind: row.kind,
+        text: row.text,
+        pinned: row.pinned,
+        origPinned: false,
+        drop: false,
+      },
+    ]
+    memError = ''
+  }
+
+  function removeRow(row: MemRow): void {
+    row.drop = true
+    memError = ''
+  }
+
+  /** 把"划掉"的那一行放回原样（**保存前**才有意义——保存之后它就真的删了）。 */
+  function undropRow(row: MemRow): void {
+    row.drop = false
+    memError = ''
+  }
+
+  /**
+   * 预览第一句话（**只读**）：问服务端用**这个 agent 已保存的**指令与记忆渲染一次 ②。
+   *
+   * ⚠️ 它预览的是**库里的那一份**，不是界面上的草稿——预览与投递必须同一个来源，
+   *   否则"我看到的"与"它会收到的"就是两件事。草稿改完点保存，再看这里。
+   */
+  async function openMemoryPreview(): Promise<void> {
+    if (memPreviewBusy) return
+    memPreviewBusy = true
+    memPreviewError = ''
+    try {
+      const res = await api<{ text: string; memoryCount?: number }>('/api/first-sentence/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'execute', block: 'identity', agentId: agent.id }),
+      })
+      memPreview = res.text
+    } catch (err) {
+      memPreviewError = err instanceof Error ? err.message : String(err)
+    } finally {
+      memPreviewBusy = false
+    }
+  }
+
   let draft = blankDraft()
 
   /**
@@ -122,7 +287,32 @@
     draftOwner = agent.id
     draft = blankDraft()
     error = ''
+    memRows = memoryRows(agent.memory)
+    void loadMemory(agent.id)
   }
+
+  /**
+   * ★ 分批第 240 批：**记忆要自己读一次**（详情接口带着它）。
+   *
+   * ⚠️ 不能指望 `agent.memory` 一定有值：`Agents.svelte` 传给这一页的是
+   * **列表接口**那一份（`GET /api/agents`），它只带 `memoryCount`（一条正文都不搬，
+   * 列表不该背这个）。所以这一页进来先按 id 读一次详情，把记忆铺进草稿。
+   *
+   * 第一版就是漏了这一步：界面上「记忆 0 条」，而接口里明明有——预览（它也打接口）
+   * 却有内容，探针把这对矛盾量出来了。
+   */
+  async function loadMemory(id: string): Promise<void> {
+    try {
+      const detail = await api<{ memory?: MemoryEntryView[] }>(
+        `/api/agents/${encodeURIComponent(id)}`,
+      )
+      if (agent.id !== id) return // 中途换人了：这一份不要了
+      memRows = memoryRows(detail.memory)
+    } catch {
+      // 读不到就让那一节保持空的（下一步的保存/报错会说话，不在这里吵）
+    }
+  }
+  void loadMemory(agent.id)
 
   /**
    * 可选的 runtime —— **从身份接口来，不写死**。
@@ -182,6 +372,27 @@
     //      触发一次数据迁移——老数据的有效值来自 `reviewStandard.allowedActions`，
     //      保存时把标准写成新形状，老字段就没了，那份权限在保存的一瞬间消失。
     //      判据必须落在"库里的事实"上，而不是"界面上显示的东西"。
+    /**
+     * ★ 分批第 240 批：记忆的**差量**（只有 add / remove / pin 三种动作）。
+     *
+     * 折算规则：
+     *   · 新加的（`id === null` 且没被删） ⇒ `add`
+     *   · 标了 `drop` 的（被"改"替换掉的、或点了"删"的） ⇒ `remove`
+     *   · 置顶开关真的变了 ⇒ `pin`（它是标记，不是内容——所以能有第三种动作）
+     *
+     * ⚠️ **没有"改正文"这条**：改一条 = 加一条 + 删旧的（界面上的「改」就是这么做的）。
+     */
+    const add = memRows
+      .filter((r) => r.id === null && !r.drop)
+      .map((r) => ({ kind: r.kind, text: r.text.trim(), ...(r.pinned ? { pinned: true } : {}) }))
+      .filter((r) => r.text !== '')
+    const remove = memRows.filter((r) => r.drop && r.id !== null).map((r) => r.id as string)
+    const pin = memRows
+      .filter((r) => r.id !== null && !r.drop && r.pinned !== r.origPinned)
+      .map((r) => ({ id: r.id as string, pinned: r.pinned }))
+    if (add.length > 0 || remove.length > 0 || pin.length > 0) {
+      patch['memory'] = { add, remove, pin }
+    }
     return patch
   }
 
@@ -211,6 +422,14 @@
     const hadLegacyStandard = draft.reviewStandard !== null
     try {
       const updated = await updateAgent(agent.id, patch)
+    /**
+     * ★ 分批第 240 批：保存成功之后用**服务端返回的那份记忆**重铺草稿。
+     *
+     * 两个理由：① "改 = 加一条 + 删旧的"之后，界面上那些划掉的旧行不该再留着；
+     * ② 这期间聊天里可能又记了一条（别的入口在写）——不重铺就看不到它，
+     *   而"它记得什么"这件事必须只有一份真相（服务端那份）。
+     */
+    memRows = memoryRows((updated as { memory?: MemoryEntryView[] }).memory)
       /**
        * ★★ 2026-10-19：**服务端会在保存时顺手改写两个字段，所以这里必须把它的返回值收下。**
        *
@@ -500,6 +719,112 @@
           {/if}
         </label>
 
+        <!--
+          ══════════ 记忆（分批第 240 批）══════════
+          ★ 位置：紧贴「指令」下面。理由与第一句话里的顺序一致——**人设是人定的、记忆是
+            长出来的**，两者挨着放，读者才分得清"哪些是我定的、哪些是它攒的"。
+          ★ 一条一行（悬停看全文与出处），动作在悬停时才出现；★ = 置顶（预算紧张时
+            最后才裁）。**没有"停用/退役"**：久不用的靠注入顺序自然沉底。
+          ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
+        -->
+        <section class="cell memory-cell" data-agent-memory>
+          <span class="cell-label">
+            {$t('agents.memoryLabel')}
+            <span class="mem-count" data-memory-count>
+              {$t('agents.memoryCount', { n: String(activeMemRows.length) })}
+            </span>
+            <span class="label-hint">{$t('agents.memoryHint')}</span>
+            <span class="spacer"></span>
+            <button
+              type="button"
+              class="btn-link"
+              data-memory-preview
+              disabled={memPreviewBusy}
+              onclick={() => void openMemoryPreview()}
+            >{$t('agents.memoryPreview')}</button>
+          </span>
+
+          {#if memRows.length === 0}
+            <p class="row-hint" data-memory-empty>{$t('agents.memoryEmpty')}</p>
+          {:else}
+            <div class="mem-list">
+              {#each memRows as row (row.key)}
+                <div
+                  class="mem-row"
+                  class:dropped={row.drop}
+                  data-mem-row
+                  data-dropped={row.drop ? '1' : '0'}
+                  data-pinned={row.pinned ? '1' : '0'}
+                >
+                  <button
+                    type="button"
+                    class="mem-pin"
+                    data-mem-pin
+                    class:on={row.pinned}
+                    title={$t('agents.memoryPinTitle')}
+                    aria-pressed={row.pinned}
+                    disabled={row.drop}
+                    onclick={() => togglePin(row)}
+                  >★</button>
+                  <span class="mem-kind" data-kind={row.kind}>{$t(`agents.memoryKind.${row.kind}` as never)}</span>
+                  {#if row.id === null}
+                    <input
+                      class="mem-text-input"
+                      bind:value={row.text}
+                      aria-label={$t('agents.memoryTextLabel')}
+                      autocomplete="off"
+                    />
+                  {:else}
+                    <span class="mem-text" title={memTitleFor(row)}>{row.text}</span>
+                  {/if}
+                  <span class="mem-meta">{memMetaFor(row)}</span>
+                  <span class="mem-actions">
+                    {#if row.drop}
+                      <button type="button" class="btn-mini" data-mem-undo onclick={() => undropRow(row)}>
+                        {$t('agents.memoryUndo')}
+                      </button>
+                    {:else}
+                      {#if row.id !== null}
+                        <button type="button" class="btn-mini" data-mem-edit onclick={() => editRow(row)}>
+                          {$t('agents.memoryEdit')}
+                        </button>
+                      {/if}
+                      <button type="button" class="btn-mini" data-mem-remove onclick={() => removeRow(row)}>
+                        {$t('agents.memoryRemove')}
+                      </button>
+                    {/if}
+                  </span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="mem-add">
+            <select bind:value={memNewKind} aria-label={$t('agents.memoryKindLabel')} data-mem-new-kind>
+              {#each MEMORY_KINDS_UI as k (k)}
+                <option value={k}>{$t(`agents.memoryKind.${k}` as never)}</option>
+              {/each}
+            </select>
+            <input
+              bind:value={memNewText}
+              placeholder={$t('agents.memoryAddPlaceholder')}
+              aria-label={$t('agents.memoryTextLabel')}
+              data-mem-new-text
+              autocomplete="off"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') addRow()
+              }}
+            />
+            <button type="button" class="btn-small" data-mem-add disabled={memNewText.trim() === ''} onclick={addRow}>
+              {$t('agents.memoryAdd')}
+            </button>
+          </div>
+          <p class="row-hint">{$t('agents.memoryFootHint')}</p>
+          {#if memError !== ''}
+            <p class="row-hint warn" data-memory-error>{memError}</p>
+          {/if}
+        </section>
+
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
           {#if agent.builtin}
@@ -617,6 +942,33 @@
     <button type="button" class="ghost" onclick={cancelEdit}>{$t('common.cancel')}</button>
   </div>
 </form>
+
+<!--
+  ★ 分批第 240 批：「预览第一句话」抽屉（**只读**）。
+  ★ 为什么只读：它要回答的是"它这一轮到底会收到什么"——能在这里改就会变成第二个
+    编辑入口，而"改"的地方只有「记忆」那一节（与「指令」一起保存）。
+  ★ 内容是服务端按**库里已保存的**那份指令 + 记忆渲染的 ②（身份 + 经验）——
+    与真正投递出去的那一段同一台渲染器，不是前端拼的。
+-->
+{#if memPreview !== null}
+  <div class="mem-preview-backdrop" role="presentation" onclick={() => (memPreview = null)}></div>
+  <div class="mem-preview" role="dialog" aria-label={$t('agents.memoryPreviewTitle')} data-memory-preview-panel>
+    <div class="mem-preview-head">
+      <div>
+        <h2>{$t('agents.memoryPreviewTitle')}</h2>
+        <p class="row-hint">{$t('agents.memoryPreviewHint')}</p>
+      </div>
+      <span class="spacer"></span>
+      <button type="button" class="ghost" onclick={() => (memPreview = null)}>{$t('common.close')}</button>
+    </div>
+    <div class="mem-preview-body">
+      <pre class="mem-preview-text" data-memory-preview-text>{memPreview}</pre>
+    </div>
+  </div>
+{/if}
+{#if memPreviewError !== ''}
+  <p class="row-hint warn" data-memory-preview-error>{memPreviewError}</p>
+{/if}
 
 <style>
   /* 内置徽标：一条**常驻**的说明（不是折叠的明细），因为它解释了"为什么这里
@@ -842,5 +1194,232 @@
 
   .role-card.active strong {
     color: var(--accent);
+  }
+
+  /* ══════════ 记忆（分批第 240 批）══════════ */
+  .memory-cell {
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-3);
+    grid-column: 1 / -1;
+  }
+  .memory-cell .cell-label .spacer {
+    flex: 1;
+  }
+  .mem-count {
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
+  }
+  .mem-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  /* 一条一行：★ + 类型 + 正文（省略号）+ 右侧极小的"用过几次"；动作悬停才出 */
+  .mem-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: 2rem;
+    padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-2);
+    border-top: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .mem-list .mem-row:first-child {
+    border-top: 0;
+  }
+  .mem-row:hover,
+  .mem-row:focus-within {
+    background: var(--surface-hover);
+  }
+  .mem-row[data-pinned='1'] {
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+  .mem-row.dropped {
+    opacity: 0.55;
+  }
+  .mem-row.dropped .mem-text {
+    text-decoration: line-through;
+  }
+  .mem-pin {
+    flex: 0 0 auto;
+    width: 1rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: transparent;
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    line-height: 1;
+  }
+  .mem-row:hover .mem-pin {
+    color: var(--text-faint);
+  }
+  .mem-pin.on {
+    color: var(--warn);
+  }
+  .mem-kind {
+    flex: 0 0 auto;
+    font-size: var(--fs-xs);
+    padding: 0 var(--sp-2);
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .mem-kind[data-kind='preference'] { color: var(--status-review); }
+  .mem-kind[data-kind='commitment'] { color: var(--good); }
+  .mem-kind[data-kind='lesson'] { color: var(--warn); }
+  .mem-kind[data-kind='fact'] { color: var(--accent); }
+  .mem-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mem-text-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    font-size: var(--fs-base);
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .mem-meta {
+    flex: 0 0 auto;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+  .mem-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .mem-row:hover .mem-actions,
+  .mem-row:focus-within .mem-actions {
+    opacity: 1;
+  }
+  .btn-mini {
+    font: inherit;
+    font-size: var(--fs-xs);
+    padding: 0 var(--sp-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-mini:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .mem-add {
+    display: flex;
+    gap: var(--sp-2);
+    align-items: center;
+    margin-top: var(--sp-2);
+  }
+  .mem-add select {
+    flex: 0 0 auto;
+    width: auto;
+    font-size: var(--fs-sm);
+  }
+  .mem-add input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .btn-small {
+    font: inherit;
+    font-size: var(--fs-sm);
+    padding: var(--sp-1) var(--sp-2);
+    border-radius: var(--radius);
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-small:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-link {
+    font: inherit;
+    font-size: var(--fs-xs);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .btn-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* 预览抽屉（只读） */
+  .mem-preview-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 40;
+  }
+  .mem-preview {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(52rem, 94vw);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border-left: 1px solid var(--line);
+    box-shadow: var(--shadow-2);
+  }
+  .mem-preview-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-4) var(--sp-5);
+    border-bottom: 1px solid var(--line);
+  }
+  .mem-preview-head h2 {
+    font-size: var(--fs-lg);
+  }
+  .mem-preview-head .spacer {
+    flex: 1;
+  }
+  .mem-preview-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: var(--sp-4) var(--sp-5);
+  }
+  .mem-preview-text {
+    margin: 0;
+    padding: var(--sp-3);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    color: var(--text-dim);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .label-hint {
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
   }
 </style>

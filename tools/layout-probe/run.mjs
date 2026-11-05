@@ -412,6 +412,60 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.memorySection',
+    /**
+     * ★ 分批第 240 批（使用者定：一条一行、悬停看细节、★ 置顶、预览只读）。
+     *
+     * 三条一起量，每一条对应一个真实的坏法：
+     *   ① **一条一行**（行高 ≤ 36px）：紧凑是使用者明确要求的，滑回去就成了小卡片；
+     *   ② **动作平时不占视线**（静止时 `.mem-actions` 的 opacity = 0）；
+     *   ③ 每条都有 ★、有「记下一条」那一行、有「预览第一句话」入口。
+     */
+    label:
+      '★★★ 智能体详情的「记忆」一节：**一条一行**（行高 ≤36px）、动作悬停才出、每条有 ★、有记下一条与预览入口',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.rows >= 1 &&
+      v.oneLine === true &&
+      v.actionsHidden === true &&
+      v.pins === v.rows &&
+      v.hasPreview === true &&
+      v.hasAddRow === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `${String(v.rows)} 行　行高 ${JSON.stringify(v.heights)}　动作静止隐藏 ${String(v.actionsHidden)}　` +
+          `★ ${String(v.pins)}　计数「${String(v.countText)}」`,
+  },
+  {
+    view: '智能体',
+    key: 'agents.memoryPreview',
+    /**
+     * ★ 分批第 240 批：「预览第一句话」是**只读**的，而且它显示的就是
+     * ② 身份 + 经验那一段（顺序与人设一致）。
+     *
+     * 为什么这条重要：记忆是唯一"改了它就会改变它下一次怎么干活"的文本，
+     * 而人只能通过这一段确认"我改的那些到底长什么样"。能在这里编辑的话，
+     * 这一屏就变成第二个编辑入口（设计里明确不做）。
+     */
+    label:
+      '★★★ 「预览第一句话」打开后能看到「经验」那一段（含约定那条）、**只读**（面板里没有输入框）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.opened === true &&
+      v.hasExperience === true &&
+      v.hasCommitment === true &&
+      v.readOnly === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `打开 ${String(v.opened)}　经验块 ${String(v.hasExperience)}　约定条 ${String(v.hasCommitment)}　` +
+          `只读 ${String(v.readOnly)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.drafterRowFound',
     label: '夹具：内置起草者那一行在列表里（下面两条量的是它的角色徽标）',
     ok: (v) => v === true,

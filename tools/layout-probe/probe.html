@@ -314,6 +314,99 @@
           !!d().querySelector('.detail-pane #agent-instructions') &&
           !!d().querySelector('.detail-pane .role-picker .role-card'),
         )
+
+        /**
+         * ══════════════ 记忆（分批第 240 批）══════════════
+         *
+         * 这一节要量的三件事，每一条都对应一个真实的坏法：
+         *   ① **一条一行**（使用者明确要求"紧凑写"）：行高必须像一行文字，不是一张卡；
+         *   ② **动作平时不占视线**（悬停才出）：静止时 `.mem-actions` 的 opacity 是 0；
+         *   ③ **预览第一句话**（只读）：点开之后能看到「经验」那一段，且里面没有输入框
+         *      ——能改的话它就变成第二个编辑入口。
+         *
+         * ⚠️ 夹具记忆是**这里自己造的**（幂等：详情里 0 条时才造），不依赖 run.mjs 的
+         *    造数顺序——探针点的是"第一张卡"，谁排第一由列表决定。
+         */
+        facts['agents.memorySection'] = await (async () => {
+          const win = f.contentWindow
+          const name = String(d().querySelector('.detail-pane #agent-name')?.value ?? '')
+          if (name === '') return null
+          const list = await win.fetch('/api/agents').then((r) => r.json())
+          const me = (list.agents ?? []).find((a) => a.name === name)
+          if (!me) return null
+          const detail = await win.fetch(`/api/agents/${me.id}`).then((r) => r.json())
+          if ((detail.memory ?? []).length === 0) {
+            await win.fetch(`/api/agents/${me.id}/memory`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                entries: [
+                  { kind: 'commitment', text: '报告里不许出现"赋能"这类词' },
+                  { kind: 'fact', text: '这个仓库跑测试用 pnpm，不要用 npm' },
+                  { kind: 'lesson', text: 'SKILL.md 别超过 60 行：Procedure 太散会被判不过' },
+                ],
+              }),
+            })
+          }
+          // 离开再回来：让详情重新读一次（记忆跟着 `GET /api/agents/{id}` 一起来）
+          win.location.hash = '#/tasks'
+          await untilNet(() => !d().querySelector('.detail-pane .card.agent-card'), 40)
+          win.location.hash = '#/agents'
+          await untilNet(
+            () => [...d().querySelectorAll('.list-row-main')].some((c) => text(c).includes(name)),
+            60,
+          )
+          const row = [...d().querySelectorAll('.list-row-main')].find((c) => text(c).includes(name))
+          if (row) click(row)
+          await untilNet(() => !!d().querySelector('[data-agent-memory]'), 60)
+          await untilNet(() => d().querySelectorAll('[data-mem-row]').length >= 1, 60)
+
+          const section = d().querySelector('[data-agent-memory]')
+          if (!section) return null
+          const rows = [...section.querySelectorAll('[data-mem-row]:not([data-dropped="1"])')]
+          const heights = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+          const actionsHidden = rows.every((r) => {
+            const acts = r.querySelector('.mem-actions')
+            return acts === null || cs(acts).opacity === '0'
+          })
+          const pins = section.querySelectorAll('[data-mem-pin]').length
+          const countText = text(section.querySelector('[data-memory-count]')) ?? ''
+          const previewBtn = section.querySelector('[data-memory-preview]')
+          return {
+            rows: rows.length,
+            heights,
+            oneLine: heights.every((h) => h > 0 && h <= 36),
+            actionsHidden,
+            pins,
+            countText,
+            hasPreview: previewBtn !== null,
+            hasAddRow: !!section.querySelector('[data-mem-add]'),
+          }
+        })()
+
+        facts['agents.memoryPreview'] = await (async () => {
+          const btn = d().querySelector('[data-agent-memory] [data-memory-preview]')
+          if (!btn) return null
+          click(btn)
+          const opened = await untilNet(() => !!d().querySelector('[data-memory-preview-text]'), 60)
+          if (!opened) return { opened: false }
+          const text_ = text(d().querySelector('[data-memory-preview-text]')) ?? ''
+          const panel = d().querySelector('[data-memory-preview-panel]')
+          const readOnly = panel !== null && panel.querySelectorAll('input, textarea').length === 0
+          // 关掉抽屉（后面还有别的判据要看这一页）
+          const close = [...(panel?.querySelectorAll('button') ?? [])].find(
+            (b) => text(b).trim() === '关闭',
+          )
+          if (close) click(close)
+          await untilNet(() => !d().querySelector('[data-memory-preview-text]'), 40)
+          return {
+            opened: true,
+            hasExperience: text_.includes('过去记下的经验'),
+            hasCommitment: text_.includes('- [约定] 报告里不许出现'),
+            hasInstructions: text_.includes('你是'),
+            readOnly,
+          }
+        })()
         facts['agents.detailHeading'] = need('右栏标题（单态卡片里就是名字输入框的值）', () =>
           String(d().querySelector('.detail-pane #agent-name')?.value ?? ''),
         )

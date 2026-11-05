@@ -4756,12 +4756,37 @@ async function injectedSkillsOf(
         }
       }
       const sample = SAMPLE_FIRST_SENTENCE_INPUTS[kind]
+      /**
+       * ★ 分批第 240 批：可以指定 **agentId**——用**这个 agent** 的指令与记忆来渲染。
+       *
+       * 用途是智能体详情页的「预览第一句话」：那一屏要回答的正是"我改的这些记忆，
+       * 会以什么样子出现在它这一轮的输入里"。给的是**库里已保存的那一份**
+       * （不是界面上的草稿）——预览与投递是同一份来源，才谈得上"逐字一致"。
+       */
+      const previewAgentId = typeof body['agentId'] === 'string' ? body['agentId'] : ''
+      const previewAgent =
+        previewAgentId === ''
+          ? null
+          : await store.getAgent(previewAgentId as Agent['id'])
+      if (previewAgentId !== '' && previewAgent === null) {
+        sendJson(res, 404, { error: `agent 不存在：${previewAgentId}` })
+        return
+      }
+      const previewMemory =
+        previewAgent === null
+          ? null
+          : await listActiveMemory(store, workspaceId, previewAgent.id)
       // ★ 只渲染被预览的那一块（其它两块走平台默认，与真实投递一致）
       const rendered = buildBlocks({
         ...sample,
+        ...(previewAgent === null ? {} : { instructions: previewAgent.instructions }),
+        ...(previewMemory === null ? {} : { memory: previewMemory }),
         template: { [block]: text === '' ? null : text },
       } as never)
-      sendJson(res, 200, { text: rendered[block] })
+      sendJson(res, 200, {
+        text: rendered[block],
+        ...(previewMemory === null ? {} : { memoryCount: previewMemory.length }),
+      })
       return
     }
     // ── 新建 / 更新 agent ──

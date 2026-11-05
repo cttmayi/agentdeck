@@ -221,6 +221,10 @@ export interface Agent {
    *    否则对审核者按一下会把它变成第二个起草者（角色还是 `skill-reviewer`）。
    */
   builtin?: boolean
+  /** ★ 分批第 240 批：详情接口带的**记忆**（列表接口不给正文，只给 `memoryCount`）。 */
+  memory?: MemoryEntryView[]
+  /** 列表接口给的记忆条数（左栏那行小字）。 */
+  memoryCount?: number
   /**
    * ⚠️ 2026-10：这里原来有 `reviewerAgentId: string | null`（"由谁来审**这个执行
    *    agent** 的产出"）。那个字段连同概念一起撤掉了：**谁审由智能体组决定**
@@ -288,6 +292,26 @@ export interface Agent {
  *
  * ⚠️ 这份类型只描述"界面要读写的那部分"；服务端才是权威（`AgentGroup` 实体）。
  */
+/**
+ * 智能体记忆的一条（分批第 240 批）。
+ *
+ * ⚠️ 与协议里的 `MemoryEntry` 同形，但**刻意不复用**（前端类型是独立的视图形状，
+ * 见本文件开头那段）。这里只声明界面真的用到的字段。
+ */
+export interface MemoryEntryView {
+  id: string
+  kind: 'preference' | 'fact' | 'lesson' | 'commitment'
+  text: string
+  /** 用过几次 / 最近什么时候用过（"这条有没有用"的唯一证据）。 */
+  useCount: number
+  lastUsedAt: number | null
+  /** ★ 置顶 = 预算紧张时最后才裁它。 */
+  pinned: boolean
+  /** 出处（哪条 run）——只在悬停里露，不进那一行。 */
+  evidence?: string
+  createdAt: number
+}
+
 export interface AgentGroup {
   id: string
   workspaceId: string

@@ -47,6 +47,50 @@ export const agentsText = {
   },
   'agents.roleLabel': { zh: '角色', en: 'Role' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
+  // ── 记忆（分批第 240 批）──
+  // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
+  'agents.memoryLabel': { zh: '记忆', en: 'Memory' },
+  'agents.memoryCount': { zh: '{n} 条', en: '{n} entries' },
+  'agents.memoryHint': {
+    zh: '它攒下的经验：会进它的第一句话，但排在「指令」之后',
+    en: 'What it has learned: goes into its first sentence, after the instructions',
+  },
+  'agents.memoryPreview': { zh: '预览第一句话 →', en: 'Preview the first sentence →' },
+  'agents.memoryPreviewTitle': { zh: '它这一轮会收到的第一句话（② 身份 + 经验）', en: 'The first sentence this run gets (identity + experience)' },
+  'agents.memoryPreviewHint': {
+    zh: '只读：这一段是服务端按「已保存」的指令与记忆渲染出来的，与真正投递出去的逐字一致。改完点保存再看。',
+    en: 'Read-only: rendered by the daemon from the saved instructions and memory — byte-identical to what is delivered. Save, then look again.',
+  },
+  'agents.memoryEmpty': {
+    zh: '还没有记忆。写在下面、或者聊天里用「记住：」开头说一句，它就会记住。',
+    en: 'Nothing yet. Add one below — or say it in chat starting with a trigger word.',
+  },
+  'agents.memoryKindLabel': { zh: '记忆类型', en: 'Memory kind' },
+  'agents.memoryKind.preference': { zh: '偏好', en: 'Preference' },
+  'agents.memoryKind.fact': { zh: '事实', en: 'Fact' },
+  'agents.memoryKind.lesson': { zh: '教训', en: 'Lesson' },
+  'agents.memoryKind.commitment': { zh: '约定', en: 'Commitment' },
+  'agents.memoryTextLabel': { zh: '记忆正文', en: 'Memory text' },
+  'agents.memoryAddPlaceholder': {
+    zh: '记一条它下次该记得的事（写成下次也成立的说法，例如「这个仓库跑测试用 pnpm」）',
+    en: 'One thing it should remember next time (phrase it so it stays true, e.g. "this repo tests with pnpm")',
+  },
+  'agents.memoryAdd': { zh: '记下', en: 'Add' },
+  'agents.memoryEdit': { zh: '改', en: 'Edit' },
+  'agents.memoryRemove': { zh: '删', en: 'Delete' },
+  'agents.memoryUndo': { zh: '恢复', en: 'Undo' },
+  'agents.memoryPinTitle': {
+    zh: '置顶：这条一定要带上（预算紧张时最后才裁它）',
+    en: 'Pin: always include this one (it is the last to be dropped when the budget is tight)',
+  },
+  'agents.memoryMetaNew': { zh: '新的 · 保存后生效', en: 'new · saved on save' },
+  'agents.memoryNeverUsed': { zh: '还没用过', en: 'never used yet' },
+  'agents.memoryUsed': { zh: '用过 {n} 次', en: 'used {n}×' },
+  'agents.memoryEvidence': { zh: '出处：run {run}…', en: 'From run {run}…' },
+  'agents.memoryFootHint': {
+    zh: '一条一行、悬停看全文；「改」= 新增一条并删掉原来那条（记忆只增不减地记在日志里）。改完点下面的保存。',
+    en: 'One line each; hover for the full text. "Edit" adds a new entry and removes the old one (memory is append-only). Save below when done.',
+  },
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
   /**
    * ★ 分批第 53 批：在「指令」下面说明它进第一句话的哪一块。
