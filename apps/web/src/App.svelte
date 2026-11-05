@@ -148,7 +148,9 @@
 {/if}
 
 {#if $toast}
-  <div class="drawer" style="width:auto;left:50%;right:auto;transform:translateX(-50%);top:auto;bottom:var(--sp-5);height:auto;border-radius:var(--radius);border:1px solid var(--line-strong);">
+  <!-- ★ 用 `.toast`，不再借 `.drawer`（理由见 `app.css` 里那一段：一个会过期的提示
+       不该被当成抽屉，"每个抽屉都得有 drawer-head"那条判据会被它误伤）。 -->
+  <div class="toast">
     <div style="padding:var(--sp-3) var(--sp-4)">{$toast}</div>
   </div>
 {/if}

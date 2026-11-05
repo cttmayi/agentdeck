@@ -57,7 +57,12 @@ const argv = process.argv.slice(2)
 const flag = (name) => argv.includes(`--${name}`)
 const KEEP = flag('keep')
 const ALLOW_STALE = flag('allow-stale')
-const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? 120_000)
+// ⚠️ 2026-11（分批第 245 批）：120s → 600s。这一批加了「记忆总开关」那一段（改开关 +
+//    保存 + 轮询接口 + 再手写一条 + 拨回来）与「记忆关着时聊天页」那一段（两次
+//    离开/回到聊天页 + 重新打开夹具对话），实测 120s 那条闸会在跑到最后几段时先到，
+//    报出来的话是"探针没在超时前给出结果（dump 里没有 done:true）"——离真因很远。
+//    这个闸只是"别让它永远跑下去"，放宽对跑得完的探针没有任何代价。
+const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? 600_000)
 /**
  * Chrome 的 `--virtual-time-budget`（毫秒，**虚拟**时间）。
  *
@@ -70,7 +75,9 @@ const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? 120_000)
  *   有过期断言在超时（每条 `until()` 吃 15s 虚拟时间）时，调大是唯一能看到更多段落的
  *   办法。两者一起给：`PROBE_VIRTUAL_MS=900000 PROBE_TIMEOUT_MS=900000 pnpm run probe:layout`。
  */
-const VIRTUAL_MS = Number(process.env.PROBE_VIRTUAL_MS ?? 300_000)
+// ⚠️ 同理：300s → 600s（分批第 245 批）。虚拟时间在任务队列空的时候是直接跳过去的，
+//    所以放宽它只影响"跑不完的探针能跑多远"，不影响跑得完的那些的耗时。
+const VIRTUAL_MS = Number(process.env.PROBE_VIRTUAL_MS ?? 600_000)
 
 const log = (s = '') => process.stdout.write(s + '\n')
 const paint = (code, s) => `\u001b[${code}m${s}\u001b[0m`
@@ -439,6 +446,43 @@ const CHECKS = [
         ? 'null'
         : `${String(v.rows)} 行　行高 ${JSON.stringify(v.heights)}　动作静止隐藏 ${String(v.actionsHidden)}　` +
           `★ ${String(v.pins)}　计数「${String(v.countText)}」　列表行「${String(v.rowBadge)}」`,
+  },
+  {
+    view: '智能体',
+    key: 'agents.memorySwitch',
+    /**
+     * ★ 分批第 245 批：智能体配置页的**记忆总开关**。
+     *
+     * 使用者的要求：「配置页面里面有个选项，表示是否使能记忆功能。如果没有被开启，
+     * 就不应该有『整理成记忆的按钮』，同时也不能手动添加记忆」。
+     *
+     * 量的是"关掉之后真的关住了"，四件缺一不算：默认勾着（缺省=开）、取消勾选后写入口
+     * 收起并给出说明、保存后接口上 `memoryEnabled === false`、此时手写一条被拒
+     * `memory_disabled`。只量界面的话，"按钮没了但接口照收"照样是绿的。
+     */
+    label:
+      '★★★ 智能体页的「启用记忆」：默认勾着；取消之后「记下一条」收起并说明不会被带入；' +
+      '保存后接口上是 false；再手写一条被拒（memory_disabled）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.checkedByDefault === true &&
+      v.hadAddRow === true &&
+      v.addGone === true &&
+      v.offHint === true &&
+      v.offOnServer === true &&
+      v.writeRejected === true &&
+      v.rejectCode === 'memory_disabled' &&
+      v.restored === true &&
+      v.restoredAdd === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　默认勾着 ${String(v.checkedByDefault)}　` +
+          `取消后写入口收起 ${String(v.addGone)}　有说明 ${String(v.offHint)}　` +
+          `接口上 ${String(v.offOnServer)}　手写被拒 ${String(v.writeRejected)}(${String(v.rejectCode)})` +
+          `　拨回去 ${String(v.restored)}（写入口回来 ${String(v.restoredAdd)}）`,
   },
   {
     view: '智能体',
@@ -1549,6 +1593,32 @@ const CHECKS = [
           `　手动勾后 ${String(v.countAfter)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
           `　测量后已收起 ${String(v.closed)}` +
           `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
+  },
+  {
+    view: '聊天',
+    key: 'chat.memoryOffHidesTidy',
+    /**
+     * ★ 分批第 245 批：记忆关着时，聊天里**没有「整理成记忆」、也没有前缀 chip**。
+     *
+     * 使用者："如果没有被开启，就不应该有『整理成记忆的按钮』"。量的是关掉前后**同一个
+     * 页面**上的差别（`before` 有、`afterTidy` 没有），以及再打开之后回来（`restored`）——
+     * 只量"关掉之后没有"的话，一个压根没渲染出来的按钮也能让判据变绿。
+     */
+    label:
+      '★★★ 记忆关着时聊天页**没有**「整理成记忆」按钮、打触发词也不冒 chip；打开之后又回来',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.ok === true &&
+      v.before === true &&
+      v.afterTidy === false &&
+      v.chipShown === false &&
+      v.restored === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `关之前有按钮 ${String(v.before)}　关之后没有 ${String(v.afterTidy)}　` +
+          `chip ${String(v.chipShown)}　打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
   },
   {
     view: '聊天',

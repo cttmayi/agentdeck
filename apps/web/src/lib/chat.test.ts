@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { agentMemoryEnabled } from './chat.ts'
 import { describe, test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -221,5 +222,30 @@ describe('记忆触发词（分批第 240 批）', () => {
   test('★ 空串 / 纯空白不炸', () => {
     assert.equal(stripMemoryPrefix('', PREFIXES), null)
     assert.equal(stripMemoryPrefix('   ', PREFIXES), null)
+  })
+})
+
+/**
+ * 记忆总开关（分批第 245 批）：`agentMemoryEnabled` 的三条判据。
+ *
+ * 最容易写错的是**缺省那一档**：老记录里没有 `memoryEnabled` 这个键，而它们的记忆
+ * 一直在用。写成 `=== true` 会让所有现存智能体在界面上显示"关着"——那是静默失忆。
+ */
+describe('记忆总开关：agentMemoryEnabled', () => {
+  test('★ 缺省（没有这个键）⇒ 开（老记录不许静默失忆）', () => {
+    assert.equal(agentMemoryEnabled('a1', [{ id: 'a1' }]), true)
+  })
+
+  test('★ 显式 false ⇒ 关；显式 true ⇒ 开', () => {
+    assert.equal(agentMemoryEnabled('a1', [{ id: 'a1', memoryEnabled: false }]), false)
+    assert.equal(agentMemoryEnabled('a1', [{ id: 'a1', memoryEnabled: true }]), true)
+  })
+
+  test('★★ 还没选智能体（空 id）⇒ 关（没有"记进谁"这件事）', () => {
+    assert.equal(agentMemoryEnabled('', [{ id: 'a1' }]), false)
+  })
+
+  test('★★ 列表还没到（找不到这个 agent）⇒ **不拦**（首帧不该看起来像功能坏了）', () => {
+    assert.equal(agentMemoryEnabled('a1', []), true)
   })
 })

@@ -72,6 +72,7 @@ import { checkEnvironment } from './environment.ts'
 import { ensureWorkDir, resolveWorkDir } from './workdir.ts'
 import {
   listActiveMemory,
+  memoryEnabledOf,
   pickedMemoryFor,
   recordMemoryUse,
 } from './memory.ts'
@@ -1304,11 +1305,23 @@ export class RunExecutor {
        * 审核那条路用的是审核者自己的记忆（`run.agentId` 就是审核者）——一个 agent
        * 一条记忆，与它在这次是执行还是审核无关。
        */
-      const memoryItems = await listActiveMemory(
-        this.#deps.store,
-        run.workspaceId as never,
-        run.agentId as never,
-      )
+      /**
+       * ★ 分批第 245 批：**记忆功能关着就不带入**。
+       *
+       * 关掉之后三处一起关（不带入 / 不能手写 / 不能整理），缺一不可——只关写入口的
+       * 话，"关了记忆"却还记得，等于没关；只关带入的话，人会以为关掉了却还在被
+       * 那些条目影响行为。
+       *
+       * ⚠️ 判据是 `memoryEnabledOf`（`!== false`）：老记录没有这个键 ⇒ 照旧开。
+       */
+      const memoryAgent = await this.#deps.store.getAgent(run.agentId as never)
+      const memoryItems = memoryEnabledOf(memoryAgent)
+        ? await listActiveMemory(
+            this.#deps.store,
+            run.workspaceId as never,
+            run.agentId as never,
+          )
+        : []
       const templateKind = firstSentenceKindFor({ kind: req.kind, subject: req.subject })
       const delivery: Delivery =
         templateKind === 'chat'

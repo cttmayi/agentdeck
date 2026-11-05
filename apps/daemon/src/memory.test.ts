@@ -922,6 +922,108 @@ describe('记忆：磁盘镜像跟着写（分批第 241 批）', () => {
   })
 })
 
+describe('记忆总开关：关掉之后**不带入**第一句话（分批第 245 批）', () => {
+  test('★★★ 关掉 ⇒ 第一句话里没有「经验」块；打开 ⇒ 又有（同一条记忆）', async () => {
+    const dir = await makeTempDir('memory-switch-prompt')
+    const prompts: string[] = []
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
+        },
+        async execute(opts: { prompt?: string; systemPrompt?: string | null }) {
+          prompts.push(deliveredText(opts as never))
+          const { AsyncQueue } = await import('@agentdeck/agent-core')
+          const queue = new AsyncQueue<never>()
+          queue.close()
+          return {
+            messages: queue,
+            result: Promise.resolve({
+              status: 'completed',
+              output: '好',
+              durationMs: 1,
+              sessionId: 'mem',
+              usage: { inputTokens: 0, outputTokens: 0, costUsdMicros: 0, costSource: 'provider' },
+              exitCode: 0,
+            }),
+            async cancel() {
+              queue.close()
+            },
+            lastActivityAt: () => Date.now(),
+          }
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '开关执行者', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '这个仓库用 pnpm' }),
+      })
+      // 关掉记忆，再起一个对话（第一句话就是这一轮的全部内容）
+      await fetch(`${d.url}/api/agents/${agent.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ memoryEnabled: false }),
+      })
+      await fetch(`${d.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id, text: '第一问' }),
+      })
+      const TERMINAL = new Set(['completed', 'failed', 'cancelled'])
+      const waitRuns = async (): Promise<void> => {
+        const deadline = Date.now() + 8000
+        for (;;) {
+          const runs = (await (await fetch(`${d.url}/api/runs`)).json()) as {
+            runs: Array<{ status: string }>
+          }
+          if (runs.runs.length > 0 && runs.runs.every((r) => TERMINAL.has(r.status))) return
+          if (Date.now() > deadline) throw new Error('等 run 结束超时')
+          await new Promise((r) => setTimeout(r, 25))
+        }
+      }
+      await waitRuns()
+      const off = prompts.join('\n=== NEXT ===\n')
+      assert.doesNotMatch(off, /过去记下的经验/, '关掉之后第一句话里不许有「经验」块')
+      assert.doesNotMatch(off, /这个仓库用 pnpm/)
+
+      // 再打开：同一条记忆要回来（不是被删了，只是不用）
+      prompts.length = 0
+      await fetch(`${d.url}/api/agents/${agent.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ memoryEnabled: true }),
+      })
+      await fetch(`${d.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId: agent.id, text: '第二问' }),
+      })
+      await waitRuns()
+      const on = prompts.join('\n=== NEXT ===\n')
+      assert.match(on, /过去记下的经验/, '打开之后「经验」块回来')
+      assert.match(on, /这个仓库用 pnpm/)
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('记忆：真的进了第一句话（端到端）', () => {
   test('★★★ 一轮对话的第一句话里有那几条记忆，跑完之后 useCount 变成 1', async () => {
     const dir = await makeTempDir('memory-prompt')
@@ -1020,5 +1122,144 @@ describe('记忆：真的进了第一句话（端到端）', () => {
       await d.close()
       await cleanup(dir)
     }
+  })
+})
+
+/**
+ * 记忆功能的总开关（分批第 245 批）。
+ *
+ * 使用者原话：「智能体的配置页面里面，建议有一个选项，表示是否使能记忆功能。如果没有被
+ * 开启，就不应该有"整理成记忆的按钮"，同时也不能手动添加记忆」。
+ *
+ * 这一组量的是**后端那一道**（界面是第一道，不是唯一一道）：关掉之后三个写入口都拒
+ * `memory_disabled`，而**删/撤销照样能走**（关掉不该让已经记下的东西卡死在里面）。
+ */
+describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
+  async function withAgent<T>(
+    memoryEnabled: boolean,
+    fn: (url: string, agentId: string) => Promise<T>,
+  ): Promise<T> {
+    const dir = await makeTempDir('memory-switch')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '开关测试', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      if (!memoryEnabled) {
+        const res = await fetch(`${d.url}/api/agents/${agent.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ memoryEnabled: false }),
+        })
+        assert.equal(res.status, 200, await res.clone().text())
+      }
+      return await fn(d.url, agent.id)
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  }
+
+  test('★★ 关掉 ⇒ 手写被拒（409 memory_disabled，并说清去哪儿打开）', async () => {
+    await withAgent(false, async (url, agentId) => {
+      const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '这个仓库用 pnpm' }),
+      })
+      assert.equal(res.status, 409)
+      const body = (await res.json()) as { code: string; error: string }
+      assert.equal(body.code, 'memory_disabled')
+      assert.match(body.error, /启用记忆/)
+    })
+  })
+
+  test('★★ 关掉 ⇒ 详情页保存里的记忆差量也被拒（同一个码）', async () => {
+    await withAgent(false, async (url, agentId) => {
+      const res = await fetch(`${url}/api/agents/${agentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ memory: { add: [{ kind: 'fact', text: 'x' }] } }),
+      })
+      assert.equal(res.status, 409)
+      assert.equal(((await res.json()) as { code: string }).code, 'memory_disabled')
+    })
+  })
+
+  test('★★ 关掉 ⇒ 「整理成记忆」那条分析 run 起不来', async () => {
+    await withAgent(false, async (url, agentId) => {
+      const conv = await fetch(`${url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentId, text: '你好' }),
+      })
+      const { conversation } = (await conv.json()) as { conversation: { id: string } }
+      const res = await fetch(`${url}/api/conversations/${conversation.id}/memory-tidy`, {
+        method: 'POST',
+      })
+      assert.equal(res.status, 409)
+      assert.equal(((await res.json()) as { code: string }).code, 'memory_disabled')
+    })
+  })
+
+  test('★★★ 关掉之后**删得掉**（关掉不该让已经记下的东西卡死在里面）', async () => {
+    await withAgent(true, async (url, agentId) => {
+      const added = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '先记一条' }),
+      })
+      const { entries } = (await added.json()) as { entries: Array<{ id: string }> }
+      // 关掉它
+      await fetch(`${url}/api/agents/${agentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ memoryEnabled: false }),
+      })
+      const del = await fetch(`${url}/api/agents/${agentId}/memory/${entries[0]!.id}`, {
+        method: 'DELETE',
+      })
+      assert.equal(del.status, 200, '删不受开关影响')
+      const detail = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
+        memory: unknown[]
+        memoryEnabled?: boolean
+      }
+      assert.deepEqual(detail.memory, [])
+      assert.equal(detail.memoryEnabled, false, '详情接口要如实带出开关的值')
+    })
+  })
+
+  test('★ 缺省（没设过这个键）⇒ 开着（老记录不许静默失忆）', async () => {
+    await withAgent(true, async (url, agentId) => {
+      const detail = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
+        memoryEnabled?: boolean
+      }
+      assert.equal(detail.memoryEnabled, undefined, '没设过就是没有这个键')
+      const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '照样能写' }),
+      })
+      assert.equal(res.status, 201)
+    })
   })
 })

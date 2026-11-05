@@ -16,6 +16,7 @@
   import { renderMarkdown } from '../lib/markdown.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
+    agentMemoryEnabled,
     applyChoice,
     chatFilesState,
     executorChoices,
@@ -155,9 +156,11 @@
   let memForced = false
   /** 这一句要记的内容；`null` = 这不像"要记住"的一句话。 */
   $: memCandidate =
-    memForced && input.trim() !== ''
-      ? { text: input.trim(), prefix: '' }
-      : stripMemoryPrefix(input, memPrefixes)
+    !memEnabled
+      ? null
+      : memForced && input.trim() !== ''
+        ? { text: input.trim(), prefix: '' }
+        : stripMemoryPrefix(input, memPrefixes)
   /** 被「不记」跳过的那个候选（输入一变就复位）。 */
   let memSkip = ''
   let memLastInput = input
@@ -186,6 +189,16 @@
   let tidyNote: { ids: string[]; count: number } | null = null
   /** 正在聊的那个智能体（记忆写进谁）。 */
   $: memAgentId = drafting ? draftPick.agentId : (activeConversation?.agentId ?? '')
+  /**
+   * ★ 分批第 245 批：**这个智能体的记忆功能开着吗**。
+   *
+   * 关着的时候三处一起消失：前缀 chip（"将记进它的记忆"）、写入口、「整理成记忆」那颗
+   * 顶栏按钮。缺省 = 开（`!== false`）——老记录里没有这个键，而它们的记忆一直在用。
+   *
+   * ⚠️ 界面只是第一道：`POST /memory` 与 `memory-tidy` 在后端也各拒一遍
+   *    （`memory_disabled`），否则缓存过的旧 bundle 还能往里写。
+   */
+  $: memEnabled = agentMemoryEnabled(memAgentId, $agents)
 
   /** 把一句（或多句）写成记忆；失败只说一句，不打断对话。 */
   async function captureMemory(
@@ -405,7 +418,7 @@
      * ★ 分批第 240 批：「整理成记忆…」——**手动**入口（不做"对话够长就自己冒出来"：
      *   自动出现的东西人第二次就不看了）。没有轮次时禁用，而不是让它点了空转。
      */
-    ...(drafting || activeTurns.length === 0
+    ...(drafting || activeTurns.length === 0 || !memEnabled
       ? []
       : [
           {

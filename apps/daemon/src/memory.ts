@@ -73,6 +73,29 @@ export async function listActiveMemory(
   return sortMemoryForInjection(all.filter((entry) => entry.removedAt === null))
 }
 
+/**
+ * 这个智能体的记忆功能开着吗（分批第 245 批）。
+ *
+ * ★ 判据是 **`!== false`**，不是 `=== true`：老记录里没有这个键，而"记忆"这个功能
+ *   在加这个开关之前就已经存在并生效了。反过来写（缺省 = 关）会让所有现存智能体在
+ *   升级后**静默失忆**——攒的条目还在，却突然不进第一句话，界面上还没一处变化能解释它。
+ *
+ * 关掉的范围（三处一起关，缺一不可）：
+ *   ① **不带入**第一句话（否则"关了记忆"却还记得，等于没关）；
+ *   ② **不能手写**（详情页 / 聊天里的两个写入口都拒 `memory_disabled`）；
+ *   ③ **不能整理**（没有「整理成记忆」那颗按钮，接口也拒）。
+ * 已有的条目**不删**——那是使用者的数据；再打开就照旧。
+ */
+export function memoryEnabledOf(
+  agent: { memoryEnabled?: boolean | undefined } | null,
+): boolean {
+  return agent === null ? true : agent.memoryEnabled !== false
+}
+
+/** 关掉时所有写入口共用的那句拒绝文案（说清怎么打开，而不是只说"不行"）。 */
+export const MEMORY_DISABLED_MESSAGE =
+  '这个智能体的记忆功能关着——先去「智能体 → 它的配置」把「启用记忆」打开。'
+
 export type MemoryWriteError =
   | 'text_empty'
   | 'text_too_long'

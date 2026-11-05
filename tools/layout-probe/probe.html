@@ -174,18 +174,30 @@
           try {
             if (fn()) return true
           } catch {}
-          const changed = await new Promise((resolve) => {
-            const target = d().documentElement
-            if (!target) {
-              resolve(false)
-              return
-            }
-            const mo = new MutationObserver(() => {
-              mo.disconnect()
-              resolve(true)
-            })
-            mo.observe(target, { subtree: true, childList: true, characterData: true })
-          })
+          /**
+           * ⚠️ 这里原来**只**等 MutationObserver：DOM 一直不变时那个 Promise 永远不
+           *    resolve ⇒ 整个探针挂死，dump 里 `facts` 停在上一段、`done` 永远不是 true
+           *   （2026-11 实测：一次改动的判据在等一个根本不存在的 DOM 变化，探针连着
+           *   两次超时，报出来的话是"探针没在超时前给出结果"——离真因隔了三层）。
+           *
+           * 现在与 `wait()` 赛跑：时钟能走时它兜住"没变化"，时钟被 SSE 冻住时
+           * 那个 timer 本来就不会触发，行为与从前一致（仍靠 DOM 变化推进）。
+           */
+          const changed = await Promise.race([
+            new Promise((resolve) => {
+              const target = d().documentElement
+              if (!target) {
+                resolve(false)
+                return
+              }
+              const mo = new MutationObserver(() => {
+                mo.disconnect()
+                resolve(true)
+              })
+              mo.observe(target, { subtree: true, childList: true, characterData: true })
+            }),
+            wait(400).then(() => false),
+          ])
           if (!changed) return false
         }
         return false
@@ -413,6 +425,87 @@
             hasPreview: previewBtn !== null,
             hasAddRow: !!section.querySelector('[data-mem-add]'),
             rowBadge,
+          }
+        })()
+
+        /**
+         * ★ 分批第 245 批：记忆功能的**总开关**（使用者："配置页面里面有个选项，表示是否使能记忆功能"）。
+         *
+         * 量四件，缺一都不算数：
+         *   ① 那一格在，且默认是**勾着**的（缺省 = 开，老记录不许静默失忆）；
+         *   ② 取消勾选 ⇒ 写入口（「记下一条」那一行）**当场收起**、并出现"不会被带进"的说明；
+         *   ③ 点「保存」之后，接口上 `memoryEnabled` 真的变 false（**轮询到位**，不是读一眼）；
+         *   ④ 此时再手写一条 ⇒ 被拒 `memory_disabled`（界面是第一道，**不是唯一一道**）。
+         * 量完用界面把开关拨回去并保存（**不切换路由**——这一页后面还有 3 条窄屏判据要看
+         * "有一条被选中"的现场；第一版在这里 `#/tasks` 来回一次，把选中态丢了，
+         * 于是那三条判据量的其实是一个没有详情页的界面，红得莫名其妙）。
+         */
+        facts['agents.memorySwitch'] = await (async () => {
+          const win = f.contentWindow
+          const sec = d().querySelector('[data-agent-memory]')
+          const box = sec?.querySelector('[data-memory-enabled]')
+          if (!sec || !box) return { present: false }
+          const name = String(d().querySelector('.detail-pane #agent-name')?.value ?? '')
+          const list = await win.fetch('/api/agents').then((r) => r.json())
+          const me = (list.agents ?? []).find((a) => a.name === name)
+          if (!me) return { present: false, reason: '详情里那个 agent 在列表里找不到' }
+          const detailEnabled = async () => {
+            const d2 = await win.fetch(`/api/agents/${me.id}`).then((r) => r.json())
+            return d2.memoryEnabled !== false
+          }
+          const saveBtn = () =>
+            [...d().querySelectorAll('.detail-pane .form-actions button')].find(
+              (b) => text(b).trim() === '保存',
+            )
+          const checkedByDefault = box.checked === true
+          const hadAddRow = !!sec.querySelector('[data-mem-add]')
+          // ── 关掉（只改草稿，不保存）──
+          click(box)
+          const addGone = await untilNet(
+            () => !d().querySelector('[data-agent-memory] [data-mem-add]'),
+            40,
+          )
+          const offHint = await untilNet(() => !!d().querySelector('[data-memory-off-hint]'), 40)
+          // ── 保存，并**轮询**到接口上真的变 false ──
+          click(saveBtn())
+          let offOnServer = false
+          for (let i = 0; i < 60 && !offOnServer; i++) {
+            offOnServer = !(await detailEnabled())
+            if (!offOnServer) await wait(120)
+          }
+          let writeRejected = false
+          let rejectCode = ''
+          const res = await win.fetch(`/api/agents/${me.id}/memory`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ kind: 'fact', text: '关着的时候不该写进去' }),
+          })
+          writeRejected = res.status === 409
+          rejectCode = ((await res.json().catch(() => ({}))) ?? {}).code ?? ''
+          // ── 用界面拨回去并保存（收尾：后面还有判据要看这一页）──
+          const box2 = d().querySelector('[data-agent-memory] [data-memory-enabled]')
+          if (box2 && box2.checked !== true) click(box2)
+          click(saveBtn())
+          let restored = false
+          for (let i = 0; i < 60 && !restored; i++) {
+            restored = await detailEnabled()
+            if (!restored) await wait(120)
+          }
+          const restoredAdd = await untilNet(
+            () => !!d().querySelector('[data-agent-memory] [data-mem-add]'),
+            60,
+          )
+          return {
+            present: true,
+            checkedByDefault,
+            hadAddRow,
+            addGone,
+            offHint,
+            offOnServer,
+            writeRejected,
+            rejectCode,
+            restored,
+            restoredAdd,
           }
         })()
 
@@ -8427,6 +8520,60 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               before,
               after,
             }
+          })()
+
+          /**
+           * ★ 分批第 245 批：**记忆关着时，聊天里不许出现「整理成记忆」**（使用者的要求：
+           *   "如果没有被开启，就不应该有『整理成记忆的按钮』"）。
+           *
+           * 同时也量前缀 chip：记忆关着时打一句「记住：…」不该冒出"将记进它的记忆"。
+           * 量完把开关打开并**回来重进一次页面**（后面还有判据要看这一页）。
+           */
+          facts['chat.memoryOffHidesTidy'] = await (async () => {
+            const list = await f.contentWindow.fetch('/api/conversations').then((r) => r.json())
+            const convo = (list.items ?? []).find((c) => c.workDir === chatFilesWorkDir)
+            if (!convo) return { ok: false, reason: '找不到夹具对话' }
+            const patch = (on) =>
+              f.contentWindow.fetch(`/api/agents/${convo.agentId}`, {
+                method: 'PATCH',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ memoryEnabled: on }),
+              })
+            const hasTidy = () =>
+              [...d().querySelectorAll('.topbar .page-actions button')].some((b) =>
+                text(b).includes('整理成记忆'),
+              )
+            const before = hasTidy()
+            await patch(false)
+            // 离开再回来：让这一页重新读 agents（`$agents` 里的 memoryEnabled 变了）
+            f.contentWindow.location.hash = '#/tasks'
+            await untilNet(() => !d().querySelector('[data-composer]'), 40)
+            f.contentWindow.location.hash = '#/chat'
+            await untilNet(() => !!d().querySelector('[data-composer]'), 60)
+            if (!(await chatOpenFixtureConversation())) return { ok: false, reason: '打不开夹具对话' }
+            await wait(400)
+            const afterTidy = hasTidy()
+            // 前缀 chip：打一句触发词开头的话
+            const composer = d().querySelector('[data-composer] .composer-input')
+            let chipShown = false
+            if (composer) {
+              composer.value = '记住：这一句不该被记'
+              composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+              chipShown = !!(await untilNet(() => !!d().querySelector('[data-mem-chip]'), 20))
+              composer.value = ''
+              composer.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+              await untilNet(() => !d().querySelector('[data-mem-chip]'), 20)
+            }
+            // 打开回来
+            await patch(true)
+            f.contentWindow.location.hash = '#/tasks'
+            await untilNet(() => !d().querySelector('[data-composer]'), 40)
+            f.contentWindow.location.hash = '#/chat'
+            await untilNet(() => !!d().querySelector('[data-composer]'), 60)
+            if (!(await chatOpenFixtureConversation())) return { ok: false, reason: '收尾时打不开夹具对话' }
+            await wait(400)
+            const restored = hasTidy()
+            return { ok: true, before, afterTidy, chipShown, restored }
           })()
 
           facts['chat.settingsPrefixes'] = await (await (async () => {

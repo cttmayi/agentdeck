@@ -52,6 +52,18 @@ export const agentsText = {
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   // ── 记忆（分批第 240 批）──
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
+  /**
+   * ★ 分批第 245 批：记忆功能的**总开关**（使用者："配置页面里面有个选项，表示是否使能记忆功能"）。
+   */
+  'agents.memoryEnabled': { zh: '启用记忆', en: 'Enable memory' },
+  'agents.memoryEnabledHint': {
+    zh: '关掉之后：不带入第一句话、不能手动添加、也不能「整理成记忆」。已有的条目不会删，再打开就照旧。',
+    en: 'When off: nothing is fed into its first sentence, you cannot add entries, and "Turn into memory" is unavailable. Existing entries are kept and come back when you turn it on again.',
+  },
+  'agents.memoryOffHint': {
+    zh: '记忆关着：下面这些条目不会被带进它的第一句话，也不能新增（删掉或撤销仍然可以）。',
+    en: 'Memory is off: the entries below are not fed into its first sentence, and nothing new can be added (removing or undoing still works).',
+  },
   'agents.memoryLabel': { zh: '记忆', en: 'Memory' },
   'agents.memoryCount': { zh: '{n} 条', en: '{n} entries' },
   /** 智能体列表行里那个小字：**自己带"记忆"两个字**（那一行没有别的上下文，只写"3 条"读不出是什么）。 */

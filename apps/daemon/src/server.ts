@@ -204,6 +204,8 @@ import {
   applyMemoryDelta,
   effectiveMemoryPrefixes,
   listActiveMemory,
+  MEMORY_DISABLED_MESSAGE,
+  memoryEnabledOf,
   removeMemoryEntry,
   setMemoryPinned,
 } from './memory.ts'
@@ -2825,13 +2827,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
   //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
   const builtin = await ensureBuiltinAgents(store, workspaceId)
-  for (const [label, r] of [
-    ['内置起草者', builtin.drafter],
+  for (const [label, r, why] of [
+    ['内置起草者', builtin.drafter, '沉淀这条链用的'],
     // ★ 分批第 244 批：「整理成记忆」用的那一条（与起草者同一套对账）
-    ['内置记忆整理者', builtin.memoryTidy],
+    ['内置记忆整理者', builtin.memoryTidy, '「整理成记忆」用的'],
   ] as const) {
     if (r.action === 'created') {
-      info(`已建立${label}（沉淀这条链用的，可在「智能体」页查看与编辑）`)
+      info(`已建立${label}（${why}，可在「智能体」页查看与编辑）`)
     } else if (r.action === 'healed') {
       warn(`${label}被修复：${r.why}（已恢复成默认，使用者改过的内容不会被动）`)
     }
@@ -5190,6 +5192,8 @@ async function injectedSkillsOf(
           //   而是一次写操作——`Agent` 上不多一个数组（那样每次保存都要整份覆盖，
           //   而记忆还有别的写入者：聊天里记一条）。
           'memory',
+          // ★ 分批第 245 批：记忆功能的总开关（关掉之后不带入、不能手写、不能整理）
+          'memoryEnabled',
         ])
         // ⚠️ 2026-10：`reviewerAgentId` / `allowedActions` / `actionParams` /
         //    `debugActions` 四个键**从这个白名单里拿掉了**——它们已经从 `Agent` 上
@@ -5284,6 +5288,14 @@ async function injectedSkillsOf(
         if (body['model'] !== undefined) {
           const m = typeof body['model'] === 'string' ? body['model'].trim() : ''
           patch.model = m === '' ? null : m
+        }
+
+        if (body['memoryEnabled'] !== undefined) {
+          if (typeof body['memoryEnabled'] !== 'boolean') {
+            sendJson(res, 400, { error: 'memoryEnabled 必须是 true / false' })
+            return
+          }
+          patch.memoryEnabled = body['memoryEnabled']
         }
 
         if (body['env'] !== undefined) {
@@ -5386,6 +5398,10 @@ async function injectedSkillsOf(
          * ⚠️ 差量里**没有"改正文"**：改一条 = 新增一条 + 删掉旧的（见 `memory.ts`）。
          */
         if (body['memory'] !== undefined) {
+          if (!memoryEnabledOf(current)) {
+            sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
+            return
+          }
           const raw = body['memory']
           if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
             sendJson(res, 400, { error: 'memory 必须是 { add?, remove?, pin? }' })
@@ -5505,6 +5521,14 @@ async function injectedSkillsOf(
       }
 
       if (req.method === 'POST' && entryId === null) {
+        /**
+         * ★ 分批第 245 批：记忆功能关着 ⇒ **不能手写**（聊天里的两个入口也走这条）。
+         *   删/撤销不受限：关掉不该让已经记下的东西卡死在那里。
+         */
+        if (!memoryEnabledOf(target)) {
+          sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
+          return
+        }
         const body = (await readJsonBody(req)) as {
           entries?: unknown
           kind?: unknown
@@ -8395,6 +8419,15 @@ async function injectedSkillsOf(
           error: '内置的「记忆整理者」不在，也没能补上——重启 daemon 再试。',
           code: 'tidy_agent_missing',
         })
+        return
+      }
+
+      /**
+       * ★ 分批第 245 批：记忆功能关着 ⇒ 没有「整理成记忆」（界面不给按钮，接口也拒——
+       *   按钮是第一道，不是唯一一道）。
+       */
+      if (req.method === 'POST' && !memoryEnabledOf(await store.getAgent(conversation.agentId))) {
+        sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
         return
       }
 

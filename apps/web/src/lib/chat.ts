@@ -249,3 +249,22 @@ export function stripMemoryPrefix(
   }
   return null
 }
+
+/**
+ * 这个智能体的记忆功能开着吗（分批第 245 批）。
+ *
+ * ★ 判据是 **`!== false`**（缺省开）：老记录里没有这个键，而它们的记忆一直在用；
+ *   写成 `=== true` 会让所有现存智能体在界面上显示"关着"——那种不一致比没有开关更糟。
+ *
+ * ⚠️ **找不到这个 agent 时不拦**（返回 true）：agent 列表可能还没到（首帧），
+ *   而"暂时没 chip"和"记忆关着"在界面上长得一样——前者再等一帧就没了，
+ *   后者是使用者的配置。宁可短暂多显示一个 chip，也不要让他以为功能坏了。
+ */
+export function agentMemoryEnabled(
+  agentId: string,
+  agents: ReadonlyArray<{ id: string; memoryEnabled?: boolean }>,
+): boolean {
+  if (agentId === '') return false
+  const target = agents.find((a) => a.id === agentId)
+  return target === undefined ? true : target.memoryEnabled !== false
+}

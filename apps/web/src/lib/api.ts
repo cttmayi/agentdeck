@@ -234,6 +234,13 @@ export interface Agent {
    *    否则对审核者按一下会把它变成第二个起草者（角色还是 `skill-reviewer`）。
    */
   builtin?: boolean
+  /**
+   * ★ 分批第 245 批：记忆功能的总开关。`false` = 关（不带入第一句话、不能手写、不能整理）。
+   *
+   * ⚠️ 缺省 = **开**：老记录里没有这个键。判据写 `!== false`，不要写 `=== true`
+   *    （写成后者会让所有现存智能体在界面上显示"关着"，而它们的记忆一直在用）。
+   */
+  memoryEnabled?: boolean
   /** ★ 分批第 240 批：详情接口带的**记忆**（列表接口不给正文，只给 `memoryCount`）。 */
   memory?: MemoryEntryView[]
   /** 列表接口给的记忆条数（左栏那行小字）。 */

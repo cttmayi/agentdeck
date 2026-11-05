@@ -1447,6 +1447,31 @@ tbody tr:last-child td { border-bottom: 0; }
   flex-direction: column;
 }
 
+/**
+ * 那条一闪而过的提示（toast）。
+ *
+ * ⚠️ 它原来复用的是 `.drawer`（只为蹭那套"浮在最上层"的固定定位 + 底色 + 阴影），
+ *   然后用一串 inline style 把位置改成"底部居中"。那种复用的代价是**它长得像抽屉**
+ *   ——探针里"每个 `.drawer` 都得有 `.drawer-head`"那条一致性判据会把它算进去：
+ *   一次保存成功弹出个 toast 就会让那条判据变红，而它要测的东西（抽屉头部写法统一）
+ *   与 toast 毫无关系（2026-11 实测踩到）。
+ *
+ *   所以给它自己的类：视觉上一模一样（同一套底色/阴影/圆角/层级），语义上不再冒充抽屉。
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-5);
+  transform: translateX(-50%);
+  width: auto;
+  max-width: min(32rem, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 50;
+}
+
 /* 内容宽的抽屉（比如「安装 skill」里那张远端目录表）。
    34rem 是给"读一段设置"定的宽度，塞一张五列表格就只剩横向滚动条了。 */
 .drawer.wide {

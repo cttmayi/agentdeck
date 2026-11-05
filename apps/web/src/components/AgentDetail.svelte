@@ -89,6 +89,14 @@
     // 编辑草稿——这三个"执行者设定"从界面上整段拿掉了（审核走智能体组；模型用
     // CLI 默认；工作目录是任务级的）。协议字段原样保留，老数据继续有效。
     runtimeKey: agent.runtimeKey,
+    /**
+     * ★ 分批第 245 批：记忆功能的总开关。
+     *
+     * ⚠️ 缺省（老记录没有这个键）= **开**：`agent.memoryEnabled !== false`。
+     *    写成 `=== true` 会让所有现存智能体在这一版之后"打开页面就显示关着"，
+     *    而它们的记忆其实一直在用——那种不一致比没有开关更糟。
+     */
+    memoryEnabled: agent.memoryEnabled !== false,
     // D37：审核标准（只对审核者有意义）
     reviewStandard: agent.reviewStandard ? { ...agent.reviewStandard } : null,
     // ⚠️ 2026-10：这里原来还有行动权限那三个（`allowedActions` / `actionParams` /
@@ -375,6 +383,10 @@
     // ⚠️ 2026-10：`workDir` / `model` / `reviewerAgentId` 三个设置从界面拿掉了
     // （见 `blankDraft`），PATCH 里不再生成——编辑一个 agent 不会碰它们。
     if (draft.runtimeKey !== agent.runtimeKey) patch['runtimeKey'] = draft.runtimeKey
+    // ★ 分批第 245 批：总开关变了才发（保存语义与「指令」一致：一份表单一次提交）
+    if (draft.memoryEnabled !== (agent.memoryEnabled !== false)) {
+      patch['memoryEnabled'] = draft.memoryEnabled
+    }
     if (draft.skillIds.slice().sort().join() !== agent.skillIds.slice().sort().join())
       patch['skillIds'] = draft.skillIds
     // 标准按值比较（它是对象，直接比引用永远不相等）
@@ -752,6 +764,22 @@
             </span>
             <span class="label-hint">{$t('agents.memoryHint')}</span>
             <span class="spacer"></span>
+            <!--
+              ★ 分批第 245 批：**总开关**（使用者要求："配置页面里面有个选项，表示是否使能记忆功能"）。
+                关掉 = 不带入第一句话 + 不能手写 + 不能整理（三处一起关，后端也各拒一遍）；
+                已有的条目**不删**，只是暂时不用——所以关掉之后这一节照样列出来，
+                但整节压暗、写入口收起来，并且明说"不会被带进第一句话"。
+            -->
+            <label class="mem-switch" title={$t('agents.memoryEnabledHint')}>
+              <!--
+                ⚠️ 必须用 `bind:checked`，不能写 `checked={…}` + `onchange` 里赋值：
+                   在这一页（legacy 反应式）里 `draft.memoryEnabled = x` **不会**触发重渲染，
+                    于是勾掉之后"记下一条"那一行还在——探针量到 `addGone:false`，而
+                    手点界面的人只会觉得"这个开关没用"。`bind:` 才会生成 `$$invalidate`。
+              -->
+              <input type="checkbox" data-memory-enabled bind:checked={draft.memoryEnabled} />
+              <span>{$t('agents.memoryEnabled')}</span>
+            </label>
             <button
               type="button"
               class="btn-link"
@@ -760,6 +788,9 @@
               onclick={() => void openMemoryPreview()}
             >{$t('agents.memoryPreview')}</button>
           </span>
+          {#if !draft.memoryEnabled}
+            <p class="row-hint warn" data-memory-off-hint>{$t('agents.memoryOffHint')}</p>
+          {/if}
 
           {#if memRows.length === 0}
             <p class="row-hint" data-memory-empty>{$t('agents.memoryEmpty')}</p>
@@ -816,6 +847,7 @@
             </div>
           {/if}
 
+          {#if draft.memoryEnabled}
           <div class="mem-add">
             <select bind:value={memNewKind} aria-label={$t('agents.memoryKindLabel')} data-mem-new-kind>
               {#each MEMORY_KINDS_UI as k (k)}
@@ -836,6 +868,7 @@
               {$t('agents.memoryAdd')}
             </button>
           </div>
+          {/if}
           <p class="row-hint">{$t('agents.memoryFootHint')}</p>
           {#if memError !== ''}
             <p class="row-hint warn" data-memory-error>{memError}</p>
