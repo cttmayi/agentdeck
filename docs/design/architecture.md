@@ -797,9 +797,9 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | GET | `/health` | 健康检查（不过 `/api/` 前缀） |
 | GET | `/api/identity` | 协议版本、deviceId、可用 runtime、capabilities |
 | **智能体** | | |
-| GET | `/api/agents` | 列表 + 「新建任务的默认智能体」（D36） |
+| GET | `/api/agents` | 列表 + 「新建任务的默认智能体」（D36）；每项带 `memoryCount`（分批第 240 批） |
 | POST | `/api/agents` | 新建。**认识的字段只有这些**：`name` / `instructions` / `model` / `runtimeKey` / `workDir` / `skillIds` / `env` / `role` / `reviewStandard` / `ownerGroupId`；未知字段**明确 400**（拼错名字静默忽略会让人以为保存成功了） |
-| GET | `/api/agents/{id}` | 读单个 |
+| GET | `/api/agents/{id}` | 读单个（**含 `memory`**：这个 agent 的记忆，分批第 240 批） |
 | PATCH / PUT | `/api/agents/{id}` | 改（PATCH 语义：只改给的字段；**未知字段明确 400**） |
 | PUT | `/api/agents/default` | 默认执行者（只认 executor，没有"取消默认"这回事，D36） |
 | POST | `/api/agents/{id}/review-standard/adopt-from-skills` | 把挂载 skill 里的判断依据**原样**并进 agent 的「指令」并摘掉挂载（D38；2026-09 之前落点是 `reviewStandard`），解析不出来的动作进 `droppedActions` 如实回报。⚠️ 界面上**目前没有入口**（那个按钮在 2026-10 的改版里被删了，见 §14） |
@@ -811,6 +811,7 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | DELETE | `/api/agent-groups/{id}` | 删组，**并级联删掉它的私有成员**（按 `ownerGroupId` 找，所以建到一半的孤儿也一起清）；先删 agent 再删组（失败时不会出现"组没了、私有 agent 悬着"）。返回 `{ ok, removedPrivateAgents }` |
 | **工作区设定** | | |
 | PUT | `/api/workspace/locale` | 界面语言（`zh` / `en`，挂在 workspace 上，D39） |
+| PATCH | `/api/workspace/memory-prefixes` | **记忆触发词**（全局一份，分批第 240 批）：全量替换 `{prefixes}`，空数组 = 关掉这个功能 |
 | POST | `/api/fs/reveal` | **在系统文件管理器里打开一个目录**（分批第 234 批；「工作目录的文件」栏头那颗「打开」）：`macOS` → `open`、`Windows` → `explorer.exe`、`Linux` → `xdg-open`；只收**绝对路径**、只开**目录**（先 `realpath` 再 `stat`），argv 直传**不进 shell**。没有桌面环境（Linux 上 `xdg-open` 不在）⇒ `409 no_opener` 并给出那条路径让人自己 `cd` |
 | GET | `/api/fs/dirs` | **目录浏览**（一次一层，分批第 229 批）：「新建对话 / 新建任务」的工作目录改成**点着选**。只回名字与类型（`dir` / `file`），**不读任何文件内容、不写任何东西**；`path` 省略 = 家目录，`~` 会展开，先 `realpath` 再列（链接目录的「上一级」才是真的上一级）；失败按码分（`not_found` 404 / `denied` 403 / `not_a_dir`、`not_absolute` 400）。浏览器给不了绝对路径（`webkitdirectory` 只有相对路径），所以这一步只能在 daemon 这一侧 |
 | **第一句话模版** | | |
@@ -1588,6 +1589,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | **Windows 上到底能不能跑**（平台差异清单与真机验收） | `docs/reference/windows-compat.md` |
 | CLI 适配器 | `packages/agent-claude/` / `packages/agent-generic/` / `packages/agent-codex/` |
 | **智能体组**（谁审谁 / 行动权限 / 返工次数） | 形状与判据：`packages/domain/src/groups/shape.ts`（"恰好 1 执行 + 1 审核"，多执行者 / 多审核者会明确报"还没有实现"）；实体：`packages/protocol/src/entities.ts` 的 `AgentGroup`；接口：`apps/daemon/src/server.ts` 的 `/api/agent-groups` 那 5 条；**摊平点**：`POST /api/runs` 的组展开（`server.ts:4990` 一带）；界面：`apps/web/src/views/Groups.svelte` + `components/MemberSlotForm.svelte` + `lib/newtask-chain.ts`。设计缘由见 `docs/design/agent-groups.md` |
+| **智能体记忆**（攒下的经验） | 形状与三条硬规则：`packages/protocol/src/entities.ts` 的 `MemoryEntry`；注入排序与预算：`packages/agent-core/src/memory.ts`（`rankMemory` / `memoryBlockText`，纯函数）；读写与上限：`apps/daemon/src/memory.ts`；界面：`apps/web/src/components/AgentDetail.svelte` 的「记忆」一节 + `ChatMemoryTidy.svelte` + 设置抽屉的「记忆」一节。设计缘由见 §4.3.38 |
 | 界面视图 / 组件 | `apps/web/src/views/` / `components/` |
 | 界面文案（中/英） | `packages/i18n/src/web/` |
 | 远端接口 / 插件 | `apps/remote/src/server.ts` / `plugins.ts` |
@@ -1607,6 +1609,7 @@ daemon 的静态服务**不做 SPA 回退**，`/tasks` 这样的路径会真的 
 | 换一个 runtime | `runtime-agnostic.test.ts`、`runtime-registry.test.ts` |
 | 第一句话模版 | `template-e2e.test.ts`、`packages/agent-core/src/first-sentence.test.ts` |
 | 工作目录与文件服务 | `workdir.test.ts`、`workdir-files.test.ts`、`fs-browse.test.ts`（目录浏览：隐藏项 / 符号链接 / 截断 / 四种失败码）、`reveal.test.ts`（「打开」：三个平台各起什么命令 / argv 直传 / 先解析链接 / 没有桌面环境怎么说） |
+| **智能体记忆** | `apps/daemon/src/memory.test.ts`（上限不驱逐 / 删是打时间戳 / 差量"改=加+删" / 触发词全局 / HTTP 层 / **端到端：第一句话里真的有那几条、跑完 useCount=1**）、`packages/agent-core/src/memory.test.ts`（排序 / 预算 / 截断如实说 / 从属声明）、`apps/web/src/lib/chat.test.ts` 的「记忆触发词」组（只认开头 / 太短不算 / 空表=关） |
 | 重启 / 关闭 / 空闲 | `reconcile.test.ts`、`shutdown.test.ts`、`idle-watchdog.test.ts` |
 | Host 校验等安全项 | `daemon.test.ts` |
 | 存储端口的两套实现 | `packages/store-sqlite/src/port-thinness.test.ts`（差分契约）、`file-store.test.ts`、`sqlite-store.test.ts` |
@@ -3227,3 +3230,63 @@ hook 脚本在 `<home>/agentdeck-hooks/` 里。
 
 **留给大家的教训**：我给的第一版答复把"根因在网关"与"平台该修什么"揉成一句话，读起来就像
 "这不是我的问题"。使用者那句反问把它点破了：**分清根因归属与自己的缺陷，两边都要落成动作**。
+
+### 4.3.38 智能体记忆：让它"攒下来的经验"进第一句话（分批第 240 批）
+
+**需求原话**：「我可以理解为数字人吗」→ 讨论下来的结论：现在它是"可配置、可审计、按职责
+分工的执行者"，要往"同一个它"走，缺的第一件事是**跨会话的记忆**。于是做了这一层。
+
+**形态**：一条记忆 = `{ id, agentId, kind, text, evidence?, pinned, useCount, lastUsedAt,
+createdAt, removedAt }`，`kind` 只有四种（`preference` / `fact` / `lesson` /
+`commitment`）——每一种对应一种"以后会用到的判断"，**不是日志**（"这一轮做了什么"属于 run 日志）。
+
+**三条硬规则**（写进协议实体注释，也是这一层为什么能安全存在的原因）：
+
+1. **只有人能写**。两个写入口：智能体详情页手写、聊天里（触发词前缀 / 「整理成记忆」）。
+   agent 不能给自己写记忆——记忆是唯一一处"改了它就会改变它下一次怎么干活"的文本，
+   让它自己写等于让它给自己立规矩。
+2. **改 = 新增一条 + 删掉旧的**（差量只有 `add` / `remove` / `pin`，没有"改正文"）。
+   删 = 打时间戳（`removedAt`），记录留在日志里，可以查"这条什么时候被换掉的"。
+3. **没有"停用/退役"状态**。久不用的靠**注入顺序**自然沉底（同类按 `lastUsedAt`），
+   预算不够时被裁掉——那是排序问题，不是状态问题。少一个状态，也少一串"停用的算不算上限"
+   这类没人答得清的问题。
+
+**上限**：每个 agent 最多 40 条活着的、单条 400 字。满了**明确拒绝**（`limit_reached`），
+**绝不自动驱逐**——系统偷偷删掉它自己的记忆，人不会知道它什么时候忘的。
+
+**注入**（`packages/agent-core/src/memory.ts` 的 `rankMemory` / `memoryBlockText`）：
+
+- 位置：接在 **② 身份之后、③ 任务之前**（渲染在 `{{identity}}` 里）。人设是人定的、
+  记忆是长出来的，"这次要干什么"优先级最高——所以记忆在中间。
+- 顺序：**★ 置顶 → 约定 > 偏好 > 事实 > 教训 → 同类按最近用过 → 新建的在前**。
+  这就是"能不能调顺序"那个需求的落地：不做拖拽排序，只给一个"必须带上"的加权。
+- 块首带**从属声明**（"可能过时；与身份、任务冲突时以它们为准"）——这是防"记忆悄悄
+  改写人格"的那道闸，也是提示注入的兜底。
+- 预算按**字数**（默认 1200），超了**如实写"另有 N 条没带"**（静默截断会让人以为它全记得）。
+- 投递之后给"真的带进去的那几条"记 `useCount + 1` 与 `lastUsedAt`——这是"这条记忆到底
+  有没有用"的唯一证据（也是"久不用自然沉底"的依据）。
+
+**聊天里的两个入口**（判据是纯函数 `stripMemoryPrefix`，只认开头、剥完 < 4 字不算、
+空词表 = 功能关着）：
+
+- **前缀触发**：以触发词开头的句子 ⇒ 发送前出现一枚 chip「将记进它的记忆「…」」，
+  可改（改成下次也成立的说法）可不记；发送照常，写进去的是**剥掉前缀之后**那句。
+- **整理成记忆…**（手动）：把**人在这段对话里说过的话**逐字列出来（不生成总结），勾哪几句。
+
+**触发词是全局一份**（`Workspace.memoryPrefixes`，缺省 = 平台默认三个、空数组 = 关），
+配在**App 设置抽屉**的「记忆」一节，改完立刻生效。为什么不是每个 agent 一份：触发词是
+**人的措辞习惯**，你对着执行者、对着审核者说的是同一句话。
+
+**界面**（智能体详情页，紧贴「指令」下面）：一条一行（≈32px）、动作悬停才出、★ 置顶、
+悬停看全文与出处；「预览第一句话」抽屉（**只读**）显示服务端按**已保存的**指令 + 记忆渲染
+出来的 ②——预览与投递同一个来源，才谈得上"逐字一致"。
+
+**刻意不做的**：① 平台**自动从判决里摘教训**（假设平台能算出正确因果，实际常常是错的，
+而且会长期污染它的行为）；② **agent 自己提议记忆**（分不清"这次做了什么"与"下次该注意
+什么"，还会自我强化）；③ 拖拽排序（顺序会随新增/删除漂，而注入顺序必须可解释）；
+④ 向量检索/自动摘要（先做可解释的少量条目）。
+
+**接口**：`GET /api/agents/{id}` 带 `memory`；`GET /api/agents` 带 `memoryCount`；
+`PATCH /api/agents/{id}` 收 `memory: { add, remove, pin }` 差量；`POST /api/agents/{id}/memory`
+（一条或一批，聊天页用）+ `DELETE .../{entryId}`（撤销）+ `PATCH .../{entryId}`（置顶）；
+`PATCH /api/workspace/memory-prefixes`；身份接口带 `memoryPrefixes`。
