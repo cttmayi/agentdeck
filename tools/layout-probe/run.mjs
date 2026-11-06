@@ -1582,6 +1582,12 @@ const CHECKS = [
       v.checkedBefore[2] === false &&
       v.countBefore === 1 &&
       v.countAfter === 3 &&
+      // ★ 分批第 246 批：三列对齐 + 每行一行高（"位置很丑/没对齐/宽度不一样/行太多"）
+      v.layout?.checksAligned === true &&
+      v.layout?.textsAligned === true &&
+      v.layout?.kindsAligned === true &&
+      v.layout?.oneLine === true &&
+      v.layout?.listWidth >= 480 &&
       v.note === true &&
       v.after === v.before + 3,
     show: (v) =>
@@ -1590,7 +1596,10 @@ const CHECKS = [
         : `对话框 ${String(v.opened)}　开场白提"整段对话" ${String(v.intro)}　候选 ${String(v.rows)} 条` +
           `${Array.isArray(v.texts) ? ` ${JSON.stringify(v.texts)}` : ''}　可改 ${String(v.editable)}　` +
           `可换类型 ${String(v.kinds)}　默认勾中 ${String(v.countBefore)}/3（${JSON.stringify(v.checkedBefore ?? [])}）` +
-          `　手动勾后 ${String(v.countAfter)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
+          `　勾选对齐 ${String(v.layout?.checksAligned)}（${JSON.stringify(v.layout?.checkXs ?? [])}）` +
+          `　正文等宽 ${String(v.layout?.textsAligned)}（${JSON.stringify(v.layout?.textWs ?? [])}）` +
+          `　类型列对齐 ${String(v.layout?.kindsAligned)}　行高 ${JSON.stringify(v.layout?.rowHeights ?? [])}` +
+          `　列表宽 ${String(v.layout?.listWidth)}　手动勾后 ${String(v.countAfter)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
           `　测量后已收起 ${String(v.closed)}` +
           `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
   },

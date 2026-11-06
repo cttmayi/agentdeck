@@ -194,6 +194,7 @@
   {open}
   title={$t('chat.tidyTitle')}
   subtitle={$t('chat.tidyHint')}
+  size="wide"
   closeLabel={$t('common.close')}
   onclose={close}
 >
@@ -242,6 +243,14 @@
     {#if droppedNote}<p class="hint" data-tidy-dropped>{droppedNote}</p>{/if}
     <div class="tidy-list" data-tidy-list>
       {#each rows as row (row.id)}
+        <!--
+          ★ 分批第 246 批：**三列栅格**（勾选框 / 正文+出处 / 类型）。
+          第一版是 flex + `align-items: center`：一行里正文两行、下一行正文一行，
+          于是勾选框在每一行的"竖直中心"——**看起来一个高一个低**；而正文是
+          `flex: 1 1 auto` + `field-sizing: content`，短句撑不满同一宽度，**每条宽度都不一样**。
+          栅格把三列的宽度与左边缘钉死（`auto 1fr auto`），对齐就由布局本身保证，
+          不靠"大家都一样高"这种运气。
+        -->
         <div class="tidy-row" class:on={row.on} class:ungrounded={!row.grounded}>
           <input
             type="checkbox"
@@ -268,13 +277,26 @@
                 一眼可判——`grounded` 是平台核对的，不是它自己说的。
             -->
             {#if row.from !== null}
-              <span class="tidy-from" class:bad={!row.grounded} data-tidy-from>
-                {row.grounded
+              <span
+                class="tidy-from"
+                class:bad={!row.grounded}
+                data-tidy-from
+                title={row.grounded
                   ? $t('chat.tidyFrom', { quote: row.from })
                   : $t('chat.tidyFromUnverified', { quote: row.from })}
+              >
+                <!-- ★ 只显示**一行**（超出省略、全文在 title 里）：出处是给"它是不是编的"
+                     一个凭据，不是给人逐字读的正文——摊成两三行会让整个列表变得很长。 -->
+                <span class="tidy-from-mark" aria-hidden="true">{row.grounded ? '✓' : '⚠'}</span>
+                <span class="tidy-from-t">
+                  {row.grounded ? row.from : $t('chat.tidyFromUnverifiedShort', { quote: row.from })}
+                </span>
               </span>
             {:else}
-              <span class="tidy-from bad" data-tidy-from>{$t('chat.tidyNoFrom')}</span>
+              <span class="tidy-from bad" data-tidy-from title={$t('chat.tidyNoFrom')}>
+                <span class="tidy-from-mark" aria-hidden="true">⚠</span>
+                <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
+              </span>
             {/if}
           </span>
           <select
@@ -323,19 +345,28 @@
     flex-direction: column;
     gap: var(--sp-2);
   }
+  /*
+   * ★ 分批第 246 批（使用者："位置很丑，选中框没有对齐，每一条的宽度也不一样"）：
+   *   · **栅格**而不是 flex：三列（勾选框 / 正文+出处 / 类型）的宽度与左边缘都由布局钉死；
+   *   · 三列**顶部对齐**（`align-items: start`）：正文两行时勾选框也贴着第一行，
+   *     不再"高一行低一行"；
+   *   · 正文列 `1fr`（等宽），不许被内容撑开——每一行的文字左边缘与右边缘都在同一条线上；
+   *   · 出处只占一行（省略号 + title 全文）：出处是凭据，不是正文，摊两行会把列表拉长一倍。
+   */
   .tidy-list {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     overflow: hidden;
-    max-height: 60vh;
+    max-height: 62vh;
     overflow-y: auto;
   }
   .tidy-row {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--sp-2) var(--sp-3);
     padding: var(--sp-2) var(--sp-3);
     border-top: 1px solid var(--line);
   }
@@ -345,23 +376,42 @@
   .tidy-row.on {
     background: var(--surface-hover);
   }
+  /* 勾选框：与第一行文字**垂直居中**（不是与整块居中）——`0.36em` 是让方框落在
+     首行文字的中线上；每行一样，所以上下行的方框必然齐。 */
+  .tidy-row > input[type='checkbox'] {
+    margin: 0.36em 0 0;
+    width: 1em;
+    height: 1em;
+  }
+  .tidy-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
   /*
-   * 正文可改（分析出来的说法未必要原样收下）。用 textarea 而不是 input：
-   * 一条记忆可以写到几十个字，单行输入框里改长句是在盲改。`rows=1` + 自动长高
-   * 由 `field-sizing` 兼顾不了的浏览器保持一行高——不折行也比看不见后半句强。
+   * 正文可改（分析出来的说法未必要原样收下）。`rows=1` + `field-sizing: content`
+   * 让短句就是一行、长句自己长高；`max-height` 卡在两行多，再长就内部滚动
+   * （候选正文上限 400 字，但列表里不需要一次显示完）。
    */
   .tidy-text {
-    flex: 1 1 auto;
-    min-width: 0;
-    resize: vertical;
+    width: 100%;
+    resize: none;
     font-size: var(--fs-sm);
     line-height: 1.45;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm, 4px);
-    padding: 2px 4px;
+    padding: 1px 4px;
     color: var(--text-dim);
     field-sizing: content;
+    /* ⚠️ 必须显式压掉全局那条 `textarea { min-height: 4rem }`（`app.css` 里给表单写的）：
+       留着它，一行高的候选也会被撑到 64px，加上出处那行整行 100px——
+       实测就是这个数（行高 [101,102,102]），列表凭空长出两倍。 */
+    min-height: 0;
+    height: auto;
+    max-height: 4.4em;
+    overflow-y: auto;
   }
   .tidy-row.on .tidy-text {
     color: var(--text);
@@ -372,35 +422,31 @@
     outline: none;
     border-color: var(--accent);
   }
-  /* 正文 + 出处上下排：正文可改，出处只读（它是核对结果，不是可编辑的内容） */
-  .tidy-main {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1 1 auto;
-    min-width: 0;
-  }
+  /* 出处：**一行**，超出省略（全文在 title 里） */
   .tidy-from {
+    display: block;
     font-size: var(--fs-xs);
     color: var(--text-faint);
-    /* 原话可能很长：折两行够了，再多就靠 hover */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    padding-left: 4px;
+    white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
   .tidy-from.bad {
     color: var(--text-warn, #b9770e);
   }
+  .tidy-from-mark {
+    margin-right: 4px;
+  }
   .tidy-row.ungrounded {
-    /* 出处对不上的整行压暗：它默认不勾，视觉上也别和"有出处"的混在一起 */
+    /* 出处对不上的整行压暗：它默认不勾，视觉上也别和有出处的混在一起 */
     opacity: 0.75;
   }
+  /* 类型选择器：**固定宽度**，所有行的下拉右边缘对齐（宽度随最长选项定死，
+     不随当前选中的那个词伸缩——那就是第一版"每一条宽度都不一样"的另一半）。 */
   .tidy-row select {
-    flex: 0 0 auto;
-    width: auto;
-    font-size: var(--fs-xs);
+    width: 5.2em;
+    margin-top: 2px;
   }
   .tidy-actions {
     display: flex;

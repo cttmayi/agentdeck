@@ -168,6 +168,14 @@ export const chatText = {
    * 且由**平台核对**（对不上就默认不勾）。
    */
   'chat.tidyFrom': { zh: '出自你说过的话：「{quote}」', en: 'From what you said: "{quote}"' },
+  /**
+   * 列表里那**一行**出处（分批第 246 批）：只显示一行、超长省略、全文在 title 里。
+   * 「对不上」这条要短——长句会被省略号吃掉，而"它不是你说的"这个结论必须一眼看见。
+   */
+  'chat.tidyFromUnverifiedShort': {
+    zh: '对不上：{quote}',
+    en: 'not found in your messages: {quote}',
+  },
   'chat.tidyFromUnverified': {
     zh: '它说这句出自你的话，但对话里找不到：「{quote}」——默认不勾',
     en: 'It claims this came from you, but the conversation does not contain it: "{quote}" — unchecked by default',

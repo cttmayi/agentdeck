@@ -8466,6 +8466,43 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               [...d().querySelectorAll('[data-tidy-list] [data-tidy-check]')].filter(
                 (el) => el.checked === true,
               ).length
+            /**
+             * ★ 分批第 246 批（使用者："位置很丑，选中框没有对齐，每一条的宽度也不一样，
+             *   大多数都很短导致很多行"）：量**对齐**与**紧凑**，这两件事只有浏览器量得出来。
+             *
+             * 量的是三列的 x 与宽：勾选框左边缘、正文列左边缘/宽度、类型下拉的左边缘。
+             * 只要有一行是"内容撑开的宽度"或"竖直居中"，这三个数组里就会出现不一致。
+             */
+            const rectOf = (el) => (el ? el.getBoundingClientRect() : null)
+            const r1 = (n) => Math.round(n)
+            const checkXs = rows.map((r) => {
+              const b = rectOf(r.querySelector('[data-tidy-check]'))
+              return b ? r1(b.left) : null
+            })
+            const textXs = rows.map((r) => {
+              const b = rectOf(r.querySelector('[data-tidy-text]'))
+              return b ? r1(b.left) : null
+            })
+            const textWs = rows.map((r) => {
+              const b = rectOf(r.querySelector('[data-tidy-text]'))
+              return b ? r1(b.width) : null
+            })
+            const selectLefts = rows.map((r) => {
+              const b = rectOf(r.querySelector('select'))
+              return b ? r1(b.left) : null
+            })
+            const rowHeights = rows.map((r) => r1(r.getBoundingClientRect().height))
+            const listRect = rectOf(d().querySelector('[data-tidy-list]'))
+            const allSame = (arr) => arr.length > 0 && arr.every((v) => v === arr[0])
+            /**
+             * 勾选框相对**它那一行文字首行**的偏移：每行都一样才算"对齐"。
+             * （只比勾选框之间的 y 没意义——行高不同时 y 天生不同。）
+             */
+            const checkOffsets = rows.map((r) => {
+              const box = rectOf(r.querySelector('[data-tidy-check]'))
+              const txt = rectOf(r.querySelector('[data-tidy-text]'))
+              return box && txt ? r1(box.top - txt.top) : null
+            })
             const countBefore = checkedCount()
             const confirmBtn = d().querySelector('[data-tidy-confirm]')
             // 把②③也勾上，量"人亲手勾上之后确实能写进去"（决定权在人，只是默认不给）
@@ -8512,6 +8549,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               kinds,
               fromLines,
               checkedBefore,
+              layout: {
+                checkXs,
+                textXs,
+                textWs,
+                selectLefts,
+                rowHeights,
+                listWidth: listRect ? r1(listRect.width) : 0,
+                checksAligned: allSame(checkXs) && allSame(checkOffsets),
+                textsAligned: allSame(textXs) && allSame(textWs),
+                kindsAligned: allSame(selectLefts),
+                oneLine: rowHeights.every((h) => h > 0 && h <= 64),
+              },
               countBefore,
               countAfter,
               note,
