@@ -4837,8 +4837,9 @@ async function injectedSkillsOf(
           ? {}
           : {
               memoryCount: previewMemory.length,
+              // ★ 第 266 批起不再按字数裁 ⇒ `memoryDropped` 永远 0，字段一并删掉
+              //   （留着一个恒为 0 的字段，下一个人会以为还有裁剪这回事）
               memoryUsed: previewRank.picked.length,
-              memoryDropped: previewRank.dropped,
               memoryChars: previewRank.chars,
               memoryPinned: previewMemory.filter((m) => m.pinned).length,
             }),

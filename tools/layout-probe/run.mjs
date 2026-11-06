@@ -648,7 +648,7 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `打开 ${String(v.opened)}　经验块 ${String(v.hasExperience)}　约定条 ${String(v.hasCommitment)}　` +
-          `只读 ${String(v.readOnly)}　预算行「${String(v.stats)}」`,
+          `只读 ${String(v.readOnly)}　统计行「${String(v.stats)}」`,
   },
   {
     view: '智能体',

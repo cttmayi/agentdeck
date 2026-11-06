@@ -151,7 +151,12 @@
   /** 「预览第一句话」抽屉：`null` = 关着。 */
   let memPreview: string | null = null
   /** 这一轮带进去几条 / 裁掉几条（服务端算的，与真的投递同一个函数）。 */
-  let memPreviewStats: { used: number; dropped: number; chars: number; pinned: number } | null = null
+  /**
+   * ★ 分批第 266 批：不再有"被裁掉的条数"（字数预算去掉了，全部带上）。
+   *   还留 `chars` 与 `pinned`：它们说明"这一块现在多大、里面几条是置顶的"，
+   *   记忆变长时人能看见代价。
+   */
+  let memPreviewStats: { used: number; chars: number; pinned: number } | null = null
   let memPreviewBusy = false
   /** ★ 第 260 批：「合并同类」对话框（读它的全部记忆，同义的并成一条）。 */
   let consolidateOpen = false
@@ -288,7 +293,6 @@
       const res = await api<{
         text: string
         memoryUsed?: number
-        memoryDropped?: number
         memoryChars?: number
         memoryPinned?: number
       }>('/api/first-sentence/preview', {
@@ -302,7 +306,6 @@
           ? null
           : {
               used: res.memoryUsed,
-              dropped: res.memoryDropped ?? 0,
               chars: res.memoryChars ?? 0,
               pinned: res.memoryPinned ?? 0,
             }
@@ -1132,9 +1135,6 @@
             chars: String(memPreviewStats.chars),
             pinned: String(memPreviewStats.pinned),
           })}
-          {#if memPreviewStats.dropped > 0}
-            · {$t('agents.memoryPreviewDropped', { n: String(memPreviewStats.dropped) })}
-          {/if}
         </p>
       {/if}
       <pre class="mem-preview-text" data-memory-preview-text>{memPreview}</pre>

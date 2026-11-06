@@ -97,11 +97,15 @@ export const agentsText = {
   'agents.memoryConsolidate': { zh: '合并同类…', en: 'Merge duplicates…' },
   'agents.memoryConsolidated': { zh: '已按你的确认更新记忆', en: 'Memory updated as you confirmed' },
   'agents.memoryPreviewTitle': { zh: '它这一轮会收到的第一句话（② 身份 + 经验）', en: 'The first sentence this run gets (identity + experience)' },
+  /**
+   * ★ 分批第 266 批：字数预算去掉了（全部带上）⇒ 这句里不再有"预算 1200 字"，
+   *   `memoryPreviewDropped`（"另有 N 条超出预算"）整条删掉——那个状态不存在了。
+   *   保留字数显示：记忆变长时，人应该看得见代价。
+   */
   'agents.memoryPreviewStats': {
-    zh: '本轮带入 {used} 条（{chars} 字，其中 {pinned} 条置顶）· 预算 1200 字',
-    en: '{used} entries go in ({chars} chars, {pinned} pinned) · budget 1200 chars',
+    zh: '本轮带入 {used} 条（共 {chars} 字，其中 {pinned} 条置顶）',
+    en: '{used} entries go in ({chars} chars, {pinned} pinned)',
   },
-  'agents.memoryPreviewDropped': { zh: '另有 {n} 条超出预算，本轮没带', en: '{n} more did not fit the budget' },
   'agents.memoryPreviewHint': {
     zh: '只读：服务端按已保存的指令与记忆渲染，与投递出去的逐字一致。',
     en: 'Read-only: rendered by the daemon from the saved instructions and memory, byte-identical to what is delivered.',
@@ -124,9 +128,14 @@ export const agentsText = {
   'agents.memoryEdit': { zh: '改', en: 'Edit' },
   'agents.memoryRemove': { zh: '删', en: 'Delete' },
   'agents.memoryUndo': { zh: '恢复', en: 'Undo' },
+  /**
+   * ★ 分批第 266 批：字数预算去掉之后，置顶的语义只剩**顺序**（全都带上了，
+   *   不再有"保证带上 vs 可能被裁"的差别）。所以这句改成说清它现在真的做什么：
+   *   把这条排在记忆块的最前面。
+   */
   'agents.memoryPinTitle': {
-    zh: '置顶：这条一定要带上（预算紧张时最后才裁它）',
-    en: 'Pin: always include this one (it is the last to be dropped when the budget is tight)',
+    zh: '置顶：这条排在记忆块的最前面（全都带上，只是顺序靠前）',
+    en: 'Pin: this one sits at the top of the memory block (everything is included; pinning only affects order)',
   },
   'agents.memoryMetaNew': { zh: '新的 · 保存后生效', en: 'new · saved on save' },
   'agents.memoryNeverUsed': { zh: '还没用过', en: 'never used yet' },

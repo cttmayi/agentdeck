@@ -38,8 +38,8 @@ const KIND_HEADINGS: Array<{ kind: MemoryEntry['kind']; title: string }> = [
 /**
  * 渲染镜像文件的内容。
  *
- * 顺序与**注入顺序**一致（`sortMemoryForInjection`）：人打开这个文件看到的第一条，
- * 就是预算不够时最后才会被裁掉的那条。
+ * 顺序与**注入顺序**一致（`sortMemoryForInjection`）：人打开这个文件看到的顺序，
+ * 就是它们进第一句话的顺序（第 266 批去掉字数预算之后，全部都会带上）。
  */
 export function renderMemoryMirror(input: {
   agentName: string
