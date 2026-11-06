@@ -486,6 +486,29 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.cardNoHoles',
+    /**
+     * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：卡片两列网格**不许留洞**。
+     *
+     * 按"行"量：顶边相同的格子归一行，每行宽度总和要铺满卡片（容 6px 取整误差）。
+     * 记忆加进来之前，「指令 | 技能」正好配对遮住了"格子只占半行"的问题；记忆插到
+     * 中间之后配对散掉，洞露出来。这条判据让"再插一个格子"也必须先把布局收干净。
+     */
+    label:
+      '★★★ 智能体卡片的网格**没有洞**：每一行都铺满（「指令」「记忆」「技能」占整行，' +
+      '「名称 | CLI」配对）——2026-11：记忆插进来之后半行留白',
+    ok: (v) =>
+      v !== null && typeof v === 'object' && Array.isArray(v.holes) && v.holes.length === 0,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `行数 ${String(v.rows)}　内宽 ${String(v.innerW)}　` +
+          (v.holes.length === 0
+            ? '没有洞'
+            : `洞：${v.holes.map((h) => `[${h.cells.join(' / ')}]=${h.sum}/${h.innerW}`).join('；')}`),
+  },
+  {
+    view: '智能体',
     key: 'agents.memoryRowActions',
     /**
      * ★ 分批第 253 批（使用者报："记忆我点『删』，没有反应"）。

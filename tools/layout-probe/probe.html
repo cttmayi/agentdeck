@@ -429,6 +429,55 @@
         })()
 
         /**
+         * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：**卡片网格里不许有洞**。
+         *
+         * 卡片是两列网格。原来「指令」与「挂载的技能」都只占**左半列**，右半列空着——
+         * 记忆加进来之前那个洞被"指令 | 技能"正好配对遮住了，记忆插到中间之后配对散掉，
+         * 洞就露出来。这条判据按"行"量：把顶边相同的格子归成一行，每行的宽度总和
+         * 必须铺满卡片（或者只有一格且它占整行）。任何一格只占半行又没人陪它，就红。
+         */
+        facts['agents.cardNoHoles'] = await (async () => {
+          const card = d().querySelector('.card.agent-card')
+          if (!card) return null
+          const kids = [...card.children].filter((el) => {
+            const st = cs(el)
+            return st.display !== 'none'
+          })
+          const csOf = (el) => el.getBoundingClientRect()
+          const cardRect = csOf(card)
+          // 内容区宽度：去掉 padding
+          const padL = parseFloat(cs(card).paddingLeft) || 0
+          const padR = parseFloat(cs(card).paddingRight) || 0
+          const innerW = Math.round(cardRect.width - padL - padR)
+          const gap = Math.round(parseFloat(cs(card).columnGap) || 0)
+          // 按顶边分组（同一网格行的格子顶边相同）
+          const rows = new Map()
+          for (const el of kids) {
+            const r = csOf(el)
+            if (r.width < 2 || r.height < 1) continue
+            const key = Math.round(r.top)
+            const list = rows.get(key) ?? []
+            list.push({
+              label: (el.querySelector('.cell-label')?.textContent ?? el.textContent ?? '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 14),
+              w: Math.round(r.width),
+            })
+            rows.set(key, list)
+          }
+          const holes = []
+          for (const [, cells] of [...rows.entries()].sort((a, b) => a[0] - b[0])) {
+            const sum = cells.reduce((n, c) => n + c.w, 0) + gap * (cells.length - 1)
+            // 允许 6px 的取整误差
+            if (sum < innerW - 6) {
+              holes.push({ cells: cells.map((c) => `${c.label}:${c.w}`), sum, innerW })
+            }
+          }
+          return { rows: rows.size, holes, innerW }
+        })()
+
+        /**
          * ★ 分批第 245 批：记忆功能的**总开关**（使用者："配置页面里面有个选项，表示是否使能记忆功能"）。
          *
          * 量四件，缺一都不算数：

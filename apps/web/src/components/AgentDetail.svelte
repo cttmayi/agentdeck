@@ -767,9 +767,17 @@
           <!-- ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
                指令是一份几百到上千字的文档，不是一行备注。 -->
           <textarea id="agent-instructions" class="instructions" bind:value={draft.instructions} rows="6"></textarea>
-          <p class="row-hint">{$t('agents.instructionsHintBefore')}<strong>{$t('agents.instructionsFieldStrong')}</strong>{$t('agents.instructionsHintAfter')}</p>
-          <!-- ★ 分批第 53 批：点明「指令」= 第一句话的 ② 身份（使用者报的命名困惑）。 -->
-          <p class="row-hint" data-instructions-identity>{$t('agents.instructionsIdentityHint')}</p>
+          <!--
+            ★ 分批第 254 批（使用者："文字解释太多，不需要写那么细致"）：原来这里是**两行**
+            说明（"这一段就是它的「指令」：平台每派一次活都会带上它（不用你在别处再配一遍）。
+            留空也行——那就只剩任务本身；但审核者留空就拿不到审核任务。" + 另一行讲模版）。
+            现在压成**一行**，全文进 `title`：要查的人悬停就有，不查的人不占版面。
+          -->
+          <p
+            class="row-hint"
+            data-instructions-identity
+            title={$t('agents.instructionsHintTitle')}
+          >{$t('agents.instructionsHint')}</p>
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。 -->
@@ -995,7 +1003,7 @@
             ★ 所以这里只留一句指路，而**不复用那个选择器**：两处长得一模一样、只有
               一处生效，是最坏的一种界面（使用者会在这里勾一遍，然后在组里再勾一遍）。
           -->
-          <div class="cell">
+          <div class="cell actions-cell">
             <span class="cell-label">{$t('agents.sectionActions')}</span>
             <p class="row-hint">{$t('agents.actionsMovedToGroup')}</p>
           </div>
@@ -1171,8 +1179,20 @@
     color: var(--text-faint);
   }
 
-  /* 角色（编辑态）：占整行 */
-  .cell.role-cell {
+  /**
+   * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：**别在网格里留洞**。
+   *
+   * 卡片是两列网格，而「指令」（一大块 textarea）与「挂载的技能」原来都只占**左半列**，
+   * 右半列空着。记忆加进来之前，这个洞被"指令 | 技能"正好配对遮住了；记忆插到中间之后
+   * 配对散掉，洞就露出来了（探针量到过：指令右边一片空白，然后一整块记忆横在下面）。
+   *
+   * 现在：角色 / 指令 / 记忆 / 技能 一律占整行；名称与 CLI 配对——每一行都是满的。
+   */
+  .cell.role-cell,
+  .cell.instructions-cell,
+  .cell.skills-cell,
+  .cell.actions-cell,
+  .builtin-badge {
     grid-column: 1 / -1;
   }
 
@@ -1310,12 +1330,22 @@
     color: var(--text-faint);
     font-size: var(--fs-xs);
   }
+  /**
+   * ★ 分批第 254 批：列表**限高 + 内部滚动**。
+   *   上限是 40 条——真攒满时这一节会把整页顶到看不见底（实测 21 条已经很长），
+   *   而"它还记着什么"这件事不需要一次摊满整屏。
+   */
   .mem-list {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    overflow: hidden;
+    /* ⚠️ 这里原来写的是 `overflow: hidden`（那是给圆角裁切的）——它会把下面的
+       `overflow-y: auto` 覆盖掉，于是"限高滚动"这条规则失效。合成一条写清楚。 */
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 22rem;
+    overscroll-behavior: contain;
   }
   /* 一条一行：★ + 类型 + 正文（省略号）+ 右侧极小的"用过几次"；动作悬停才出 */
   .mem-row {

@@ -227,9 +227,7 @@
             : $t('agents.instructionsPlaceholderExecutor')}
         ></textarea>
 
-        <span class="hint">
-          {$t('agents.instructionsHintBefore')}<strong>{$t('agents.instructionsFieldStrong')}</strong>{$t('agents.instructionsHintAfter')}
-        </span>
+        <span class="hint" title={$t('agents.instructionsHintTitle')}>{$t('agents.instructionsHint')}</span>
       </label>
 
       <div class="cell">

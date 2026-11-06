@@ -74,8 +74,8 @@ export const agentsText = {
   },
   'agents.memoryEnabled': { zh: '启用记忆', en: 'Enable memory' },
   'agents.memoryEnabledHint': {
-    zh: '关掉之后：不带入第一句话、不能手动添加、也不能「整理成记忆」。已有的条目不会删，再打开就照旧。',
-    en: 'When off: nothing is fed into its first sentence, you cannot add entries, and "Turn into memory" is unavailable. Existing entries are kept and come back when you turn it on again.',
+    zh: '关掉：不带入第一句话、不能添加、不能整理。已有条目保留。',
+    en: 'Off: nothing is fed in, nothing can be added, tidying is unavailable. Existing entries are kept.',
   },
   'agents.memoryOffHint': {
     zh: '记忆关着：下面这些条目不会被带进它的第一句话，也不能新增（删掉或撤销仍然可以）。',
@@ -86,8 +86,8 @@ export const agentsText = {
   /** 智能体列表行里那个小字：**自己带"记忆"两个字**（那一行没有别的上下文，只写"3 条"读不出是什么）。 */
   'agents.memoryCountInline': { zh: '记忆 {n}', en: 'memory {n}' },
   'agents.memoryHint': {
-    zh: '它攒下的经验：会进它的第一句话，但排在「指令」之后',
-    en: 'What it has learned: goes into its first sentence, after the instructions',
+    zh: '会进第一句话（排在指令之后）',
+    en: 'Goes into the first sentence, after the instructions',
   },
   'agents.memoryPreview': { zh: '预览第一句话 →', en: 'Preview the first sentence →' },
   'agents.memoryPreviewTitle': { zh: '它这一轮会收到的第一句话（② 身份 + 经验）', en: 'The first sentence this run gets (identity + experience)' },
@@ -97,12 +97,12 @@ export const agentsText = {
   },
   'agents.memoryPreviewDropped': { zh: '另有 {n} 条超出预算，本轮没带', en: '{n} more did not fit the budget' },
   'agents.memoryPreviewHint': {
-    zh: '只读：这一段是服务端按「已保存」的指令与记忆渲染出来的，与真正投递出去的逐字一致。改完点保存再看。',
-    en: 'Read-only: rendered by the daemon from the saved instructions and memory — byte-identical to what is delivered. Save, then look again.',
+    zh: '只读：服务端按已保存的指令与记忆渲染，与投递出去的逐字一致。',
+    en: 'Read-only: rendered by the daemon from the saved instructions and memory, byte-identical to what is delivered.',
   },
   'agents.memoryEmpty': {
-    zh: '还没有记忆。写在下面、或者聊天里用「记住：」开头说一句，它就会记住。',
-    en: 'Nothing yet. Add one below — or say it in chat starting with a trigger word.',
+    zh: '还没有记忆。写在下面，或在聊天里用「记住：」开头说一句。',
+    en: 'Nothing yet. Add one below, or say it in chat starting with a trigger word.',
   },
   'agents.memoryKindLabel': { zh: '记忆类型', en: 'Memory kind' },
   'agents.memoryKind.preference': { zh: '偏好', en: 'Preference' },
@@ -111,8 +111,8 @@ export const agentsText = {
   'agents.memoryKind.commitment': { zh: '约定', en: 'Commitment' },
   'agents.memoryTextLabel': { zh: '记忆正文', en: 'Memory text' },
   'agents.memoryAddPlaceholder': {
-    zh: '记一条它下次该记得的事（写成下次也成立的说法，例如「这个仓库跑测试用 pnpm」）',
-    en: 'One thing it should remember next time (phrase it so it stays true, e.g. "this repo tests with pnpm")',
+    zh: '记一条它下次该记得的事，例如「这个仓库跑测试用 pnpm」',
+    en: 'Something it should remember next time, e.g. "this repo tests with pnpm"',
   },
   'agents.memoryAdd': { zh: '记下', en: 'Add' },
   'agents.memoryEdit': { zh: '改', en: 'Edit' },
@@ -127,8 +127,8 @@ export const agentsText = {
   'agents.memoryUsed': { zh: '用过 {n} 次', en: 'used {n}×' },
   'agents.memoryEvidence': { zh: '出处：run {run}…', en: 'From run {run}…' },
   'agents.memoryFootHint': {
-    zh: '一条一行、悬停看全文；「改」= 新增一条并删掉原来那条（记忆只增不减地记在日志里）。改完点下面的保存。',
-    en: 'One line each; hover for the full text. "Edit" adds a new entry and removes the old one (memory is append-only). Save below when done.',
+    zh: '「改」= 加一条 + 删旧的；改完点保存。',
+    en: '"Edit" adds a new entry and removes the old one; click Save when done.',
   },
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
   /**
@@ -143,10 +143,6 @@ export const agentsText = {
   'agents.instructionsIdentityTag': {
     zh: '= 第一句话的 ② 身份',
     en: '= block ② identity',
-  },
-  'agents.instructionsIdentityHint': {
-    zh: '这一段会作为第一句话的 ② 身份，每次 run 都发给 CLI（审核者还会把「审核标准」接在同一块里）。它出现在哪一块、包什么标题，由设置里的「第一句话模版」决定。',
-    en: 'This text becomes block ② identity of the first sentence, sent to the CLI on every run (for reviewers the review standard is merged into the same block). Where it appears and what heading wraps it is decided by the first-sentence template in Settings.',
   },
   // ⚠️ 2026-10（使用者的决定）：`reviewerFieldLabel`（由谁来审它）、
   // `noAutoReview`、`workDirLabel`（默认工作目录）、`workDirPlaceholder` 随设置
@@ -282,11 +278,20 @@ export const agentsText = {
    *    说法**，读界面的人既看不到 ② 也没写过模版。改成说清"它会跟着每一轮一起
    *    发出去、不用你另外去哪配"。
    */
-  'agents.instructionsHintBefore': { zh: '这一段就是它的 ', en: 'This text is the agent’s ' },
-  'agents.instructionsFieldStrong': { zh: '「指令」', en: 'instructions' },
-  'agents.instructionsHintAfter': {
-    zh: '：平台每派一次活都会带上它（不用你在别处再配一遍）。留空也行——那就只剩任务本身；但审核者留空就拿不到审核任务。',
-    en: ': the platform sends it with every job (there is nowhere else to configure it). Leaving it empty is fine — then only the task itself is sent; but a reviewer left empty gets no review tasks.',
+  /**
+   * ★ 分批第 254 批（使用者："文字解释太多，不需要写那么细致"）：
+   *   这三句原来拼成一句两行的说明（"这一段就是它的「指令」：平台每派一次活都会带上它
+   *   （不用你在别处再配一遍）。留空也行……但审核者留空就拿不到审核任务。"）。
+   *   现在压成一行，**细节进 `title`**（要查的人悬停就有，不用查的人不占版面）。
+   */
+  'agents.instructionsHint': {
+    zh: '第一句话的 ② 身份，每次 run 都带上；留空就只发任务。',
+    en: 'Block ② of the first sentence, sent on every run; leave it empty and only the task is sent.',
+  },
+  /** 上面那句的悬停全文（原来就是这句话的正文）。 */
+  'agents.instructionsHintTitle': {
+    zh: '平台每派一次活都会把它带上，不用你在别处再配一遍。它出现在第一句话的哪一块、包什么标题，由设置里的「第一句话模版」决定。审核者留空就拿不到审核任务（判断依据就写在这里）。',
+    en: 'Sent with every job — there is nowhere else to configure it. Where it appears in the first sentence and what heading wraps it is decided by the first-sentence template in Settings. A reviewer left empty gets no review tasks (its judging criteria live here).',
   },
   'agents.noSkillsOption': { zh: '（还没有技能）', en: '(No skills yet)' },
   'agents.reviewerSkillsHintBefore': {
@@ -523,8 +528,8 @@ export const agentsText = {
   //   指令/技能）直接当标签，不再有小节。`sectionActions` 保留（还是 `cell-label`）。
   /**
    * ★ 2026-09：这里曾经有一条与新建表单"只有一字之差"的重复提示（各写各的键）。
-   *   现在两处用的是**同一组**词（`instructionsHintBefore` / `instructionsFieldStrong`
-   *   / `instructionsHintAfter`）——同一个字段在两处说同一件事，没有理由两套话。
+   *   现在两处用的是**同一句**话（`agents.instructionsHint`）——同一个字段在两处说同一件事，
+   *   没有理由两套话。★ 第 254 批把原来那句两行的说明压成一行，细节进 `title`。
    */
   /**
    * 技能那一段的标题（2026-09）。它原来是和「审核标准」挤在同一段里的
