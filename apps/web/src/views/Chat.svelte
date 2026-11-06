@@ -422,15 +422,23 @@
         ]),
     /**
      * ★ 分批第 240 批：「整理成记忆…」——**手动**入口（不做"对话够长就自己冒出来"：
-     *   自动出现的东西人第二次就不看了）。没有轮次时禁用，而不是让它点了空转。
+     *   自动出现的东西人第二次就不看了）。没有轮次时不给（没内容可整理）。
+     *
+     * ★★ 分批第 261 批（使用者问："为什么『分析 distilly…』这条对话没有『整理成记忆』
+     *   按钮呢？"）：**记忆关着时按钮不能凭空消失，要置灰并说清为什么**。
+     *   上一版是直接不放进数组——于是使用者看到的是"按钮不见了"，而真因是
+     *   "这段对话那个智能体的记忆被关掉了"（第 259 批把默认关了）。静默消失是本仓库
+     *   最忌讳的那种坏法：界面一切正常，只是少了一个东西，没人知道去哪找它。
      */
-    ...(drafting || activeTurns.length === 0 || !memEnabled
+    ...(drafting || activeTurns.length === 0
       ? []
       : [
           {
             id: 'tidy-memory',
             label: $t('chat.tidyAction'),
             kind: 'secondary' as const,
+            disabled: !memEnabled,
+            ...(memEnabled ? {} : { title: $t('chat.tidyMemoryOffTitle') }),
             onActivate: openTidy,
           },
         ]),

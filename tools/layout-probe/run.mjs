@@ -1713,29 +1713,42 @@ const CHECKS = [
   },
   {
     view: '聊天',
-    key: 'chat.memoryOffHidesTidy',
+    key: 'chat.memoryOffDisablesTidy',
     /**
      * ★ 分批第 245 批：记忆关着时，聊天里**没有「整理成记忆」、也没有前缀 chip**。
      *
      * 使用者："如果没有被开启，就不应该有『整理成记忆的按钮』"。量的是关掉前后**同一个
      * 页面**上的差别（`before` 有、`afterTidy` 没有），以及再打开之后回来（`restored`）——
      * 只量"关掉之后没有"的话，一个压根没渲染出来的按钮也能让判据变绿。
+     *
+     * ★ 分批第 261 批**改了口径**（使用者："为什么『分析 distilly…』这条对话没有
+     * 『整理成记忆』按钮呢？"）：原来关掉记忆时这颗按钮**直接不渲染**，于是界面看起来
+     * 一切正常、只是少了一个东西——没人知道它去哪了。现在它**还在、但置灰并带说明**
+     * （"去智能体配置里打开启用记忆"）。判据跟着从"没有"改成"在但置灰 + 说清为什么"，
+     * 这是本批**唯一的松紧变化**，理由是被测行为按使用者反馈改了，不是断言放水。
      */
     label:
-      '★★★ 记忆关着时聊天页**没有**「整理成记忆」按钮、打触发词也不冒 chip；打开之后又回来',
+      '★★★ 记忆关着时「整理成记忆」**还在但置灰**并说清去哪儿打开（不是静默消失）、' +
+      '打触发词也不冒 chip；打开之后按钮恢复可用',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.ok === true &&
       v.before === true &&
-      v.afterTidy === false &&
+      v.beforeDisabled === false &&
+      // 关着：还在、置灰、title 说明原因
+      v.afterTidy === true &&
+      v.afterDisabled === true &&
+      String(v.afterTitle).includes('启用记忆') &&
       v.chipShown === false &&
       v.restored === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `关之前有按钮 ${String(v.before)}　关之后没有 ${String(v.afterTidy)}　` +
-          `chip ${String(v.chipShown)}　打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
+        : `关之前有按钮 ${String(v.before)}（置灰 ${String(v.beforeDisabled)}）　` +
+          `关之后 还在 ${String(v.afterTidy)} 置灰 ${String(v.afterDisabled)}　` +
+          `说明「${String(v.afterTitle)}」　chip ${String(v.chipShown)}　` +
+          `打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
   },
   {
     view: '聊天',

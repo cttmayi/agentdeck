@@ -123,6 +123,14 @@ export const chatText = {
   'chat.memoryUndo': { zh: '撤销', en: 'Undo' },
   'chat.memorySavedMany': { zh: '已记进它的记忆 {n} 条', en: '{n} entries remembered' },
   'chat.tidyAction': { zh: '整理成记忆…', en: 'Turn into memory…' },
+  /**
+   * ★ 分批第 261 批：记忆关着时这颗按钮**置灰并说明原因**，而不是消失
+   *   （使用者："为什么这条对话没有『整理成记忆』按钮呢"——真因是它的智能体记忆被关掉了）。
+   */
+  'chat.tidyMemoryOffTitle': {
+    zh: '这段对话的智能体记忆关着——去「智能体 → 它的配置」打开「启用记忆」，这条按钮就能用。',
+    en: "This conversation's agent has memory turned off — enable “Memory” in the agent's settings and this button works.",
+  },
   'chat.tidyTitle': { zh: '整理成记忆', en: 'Turn this chat into memory' },
   /**
    * ★ 分批第 243 批：整理从"把你的原话列出来"改成"分析整段对话"（使用者要求：
