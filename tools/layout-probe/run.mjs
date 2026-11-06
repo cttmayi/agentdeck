@@ -495,17 +495,26 @@ const CHECKS = [
      * 中间之后配对散掉，洞露出来。这条判据让"再插一个格子"也必须先把布局收干净。
      */
     label:
-      '★★★ 智能体卡片的网格**没有洞**：每一行都铺满（「指令」「记忆」「技能」占整行，' +
-      '「名称 | CLI」配对）——2026-11：记忆插进来之后半行留白',
+      '★★★ 智能体卡片的两列布局：网格**没有洞**，且「指令 | 挂载的技能」**同一行各占一半**、' +
+      '「记忆」独占整行（2026-11：记忆插进配对中间之后半行留白；使用者要的是"保持之前的一半一半"）',
     ok: (v) =>
-      v !== null && typeof v === 'object' && Array.isArray(v.holes) && v.holes.length === 0,
+      v !== null &&
+      typeof v === 'object' &&
+      Array.isArray(v.holes) &&
+      v.holes.length === 0 &&
+      v.pair?.present === true &&
+      v.pair?.sameRow === true &&
+      v.pair?.eachHalf === true &&
+      v.memOwnRow === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `行数 ${String(v.rows)}　内宽 ${String(v.innerW)}　` +
           (v.holes.length === 0
             ? '没有洞'
-            : `洞：${v.holes.map((h) => `[${h.cells.join(' / ')}]=${h.sum}/${h.innerW}`).join('；')}`),
+            : `洞：${v.holes.map((h) => `[${h.cells.join(' / ')}]=${h.sum}/${h.innerW}`).join('；')}`) +
+          `　指令|技能 同一行 ${String(v.pair?.sameRow)} 各占一半 ${String(v.pair?.eachHalf)}` +
+          `　记忆独占整行 ${String(v.memOwnRow)}`,
   },
   {
     view: '智能体',

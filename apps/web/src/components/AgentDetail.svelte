@@ -787,10 +787,81 @@
           {/if}
         </label>
 
+
+        <div class="cell skills-cell" class:locked={agent.builtin}>
+          <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
+          {#if agent.builtin}
+            <!--
+              ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
+              起草者的**沉淀用技能现在真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
+              "内置不挂 skill"——它挂什么，起草 run 就注入什么。
+              ⚠️ 内置 agent 仍然只读（分批第 190 批）：这一格是**展示**，挂载由平台维护
+                （装/卸技能、daemon 启动时对齐）。
+            -->
+            {#if agent.role === 'drafter'}
+              {@const mounted = $skills.filter((sk) => agent.skillIds.includes(sk.id))}
+              {#if mounted.length > 0}
+                <p class="builtin-skills">
+                  {#each mounted as sk (sk.id)}
+                    <span class="skill-chip">{sk.name}</span>
+                  {/each}
+                </p>
+                <span class="hint">{$t('agents.drafterSkillHint')}</span>
+              {:else}
+                <p class="builtin-skills">
+                  <span class="skill-chip missing"
+                    >{expectedDrafterSkill}{$t('agents.skillNotInstalled')}</span
+                  >
+                </p>
+                <span class="hint">{$t('agents.drafterSkillMissingHint')}</span>
+                <button
+                  type="button"
+                  class="ghost small"
+                  data-install-drafter-skill
+                  disabled={installingSkill}
+                  onclick={() => void installDrafterSkill()}
+                >{installingSkill ? $t('common.saving') : $t('agents.skillInstallNow')}</button>
+              {/if}
+            {:else}
+              <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
+            {/if}
+          {:else if $skills.length === 0}
+            <p class="empty-value">{$t('agents.noSkillsYet')}</p>
+          {:else if pickableSkills.length === 0}
+            <!-- 库非空、但一条都不能挂：不能复用上面那句"还没有任何 skill" -->
+            <p class="empty-value">{$t('agents.noSelectableSkills')}</p>
+          {:else}
+            <div class="skill-picker">
+              {#each pickableSkills as s (s.id)}
+                <label class="skill-option">
+                  <input type="checkbox" value={s.id} bind:group={draft.skillIds} />
+                  <!--
+                    ★ 分批第 209 批（使用者："挂载的技能显示「browser-use（来自
+                    /Users/ling/.claude/skills）」，不需要显示这个，信息不重要"）：
+                    **不再把来源目录印在选项上**——一长串绝对路径占了半行，而它几乎从不是
+                    选择时要看的判断依据（要挂哪条技能，看的是名字与说明）。
+                    ⚠️ 信息来源没有丢：仍挂在 `title` 里（悬停能看到），因为"同名两条、各自
+                    来自不同目录"这件事真的存在——真到需要分辨的那一次，鼠标一停就够。
+                  -->
+                  <span title={s.localDir ?? s.slug}>
+                    <!-- ★ 2026-10：技能以**名字**为主显示（与组里「新建私有」同款）。
+                         已安装技能的名字常常就是 slug（如 `fireworks-tech-graph`），
+                         之前同时印 slug + name 会重复成两个一模一样的东西。slug 只在
+                         和名字不同时才作为机器名补充——名字相同的场合它纯属噪音。 -->
+                    {s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
+                  </span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
         <!--
           ══════════ 记忆（分批第 240 批）══════════
-          ★ 位置：紧贴「指令」下面。理由与第一句话里的顺序一致——**人设是人定的、记忆是
-            长出来的**，两者挨着放，读者才分得清"哪些是我定的、哪些是它攒的"。
+          ★ 位置（分批第 254 批调整）：**在「指令 | 技能」那一对之后，整行宽**。
+            原来它紧贴「指令」下面——但那会把它插进两列网格的配对中间（指令只剩左半列、
+            右边空着，记忆横在下面再让技能单独占半列）。整行宽的块只能放在**配对之后**，
+            否则必然留洞（探针 `agents.cardNoHoles` 钉着）。
           ★ 一条一行（悬停看全文与出处），动作在悬停时才出现；★ = 置顶（预算紧张时
             最后才裁）。**没有"停用/退役"**：久不用的靠注入顺序自然沉底。
           ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
@@ -921,74 +992,6 @@
             <p class="row-hint warn" data-memory-error>{memError}</p>
           {/if}
         </section>
-
-        <div class="cell skills-cell" class:locked={agent.builtin}>
-          <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
-          {#if agent.builtin}
-            <!--
-              ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
-              起草者的**沉淀用技能现在真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
-              "内置不挂 skill"——它挂什么，起草 run 就注入什么。
-              ⚠️ 内置 agent 仍然只读（分批第 190 批）：这一格是**展示**，挂载由平台维护
-                （装/卸技能、daemon 启动时对齐）。
-            -->
-            {#if agent.role === 'drafter'}
-              {@const mounted = $skills.filter((sk) => agent.skillIds.includes(sk.id))}
-              {#if mounted.length > 0}
-                <p class="builtin-skills">
-                  {#each mounted as sk (sk.id)}
-                    <span class="skill-chip">{sk.name}</span>
-                  {/each}
-                </p>
-                <span class="hint">{$t('agents.drafterSkillHint')}</span>
-              {:else}
-                <p class="builtin-skills">
-                  <span class="skill-chip missing"
-                    >{expectedDrafterSkill}{$t('agents.skillNotInstalled')}</span
-                  >
-                </p>
-                <span class="hint">{$t('agents.drafterSkillMissingHint')}</span>
-                <button
-                  type="button"
-                  class="ghost small"
-                  data-install-drafter-skill
-                  disabled={installingSkill}
-                  onclick={() => void installDrafterSkill()}
-                >{installingSkill ? $t('common.saving') : $t('agents.skillInstallNow')}</button>
-              {/if}
-            {:else}
-              <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
-            {/if}
-          {:else if $skills.length === 0}
-            <p class="empty-value">{$t('agents.noSkillsYet')}</p>
-          {:else if pickableSkills.length === 0}
-            <!-- 库非空、但一条都不能挂：不能复用上面那句"还没有任何 skill" -->
-            <p class="empty-value">{$t('agents.noSelectableSkills')}</p>
-          {:else}
-            <div class="skill-picker">
-              {#each pickableSkills as s (s.id)}
-                <label class="skill-option">
-                  <input type="checkbox" value={s.id} bind:group={draft.skillIds} />
-                  <!--
-                    ★ 分批第 209 批（使用者："挂载的技能显示「browser-use（来自
-                    /Users/ling/.claude/skills）」，不需要显示这个，信息不重要"）：
-                    **不再把来源目录印在选项上**——一长串绝对路径占了半行，而它几乎从不是
-                    选择时要看的判断依据（要挂哪条技能，看的是名字与说明）。
-                    ⚠️ 信息来源没有丢：仍挂在 `title` 里（悬停能看到），因为"同名两条、各自
-                    来自不同目录"这件事真的存在——真到需要分辨的那一次，鼠标一停就够。
-                  -->
-                  <span title={s.localDir ?? s.slug}>
-                    <!-- ★ 2026-10：技能以**名字**为主显示（与组里「新建私有」同款）。
-                         已安装技能的名字常常就是 slug（如 `fireworks-tech-graph`），
-                         之前同时印 slug + name 会重复成两个一模一样的东西。slug 只在
-                         和名字不同时才作为机器名补充——名字相同的场合它纯属噪音。 -->
-                    {s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
-                  </span>
-                </label>
-              {/each}
-            </div>
-          {/if}
-        </div>
 
         {#if draft.role === 'reviewer'}
           <!--
@@ -1180,17 +1183,22 @@
   }
 
   /**
-   * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：**别在网格里留洞**。
+   * ★ 分批第 254 批（使用者："加入记忆后，布局乱了" / "为什么不能保持之前的一半一半"）：
+   *   **两列配对要保住，洞是"插在配对中间"造成的，不是"用两列"造成的**。
    *
-   * 卡片是两列网格，而「指令」（一大块 textarea）与「挂载的技能」原来都只占**左半列**，
-   * 右半列空着。记忆加进来之前，这个洞被"指令 | 技能"正好配对遮住了；记忆插到中间之后
-   * 配对散掉，洞就露出来了（探针量到过：指令右边一片空白，然后一整块记忆横在下面）。
+   * 卡片是两列网格，原来的配对是「名称 | CLI」「指令 | 挂载的技能」——两列都填满。
+   * 第 240 批把**整行宽**的「记忆」插在「指令」与「技能」**中间**，配对被打散：
+   * 指令只剩左半列、右边空着，然后一整块记忆横在下面。
    *
-   * 现在：角色 / 指令 / 记忆 / 技能 一律占整行；名称与 CLI 配对——每一行都是满的。
+   * 第一版修法（第 254 批）是把指令与技能都拉成整行——洞是没了，但**整张卡变成单列**，
+   * 又高又空，使用者当场问"为什么不能保持之前的一半一半"。他说得对：那是治错了地方。
+   *
+   * 现在的规矩：
+   *   · 「名称 | CLI」「指令 | 挂载的技能」保持**相邻的配对**（这就是"一半一半"）；
+   *   · **整行宽**的那些（角色 / 记忆 / 行动权限指路 / 内置徽标）只能放在**配对的后面**，
+   *     不许插进任意两格之间——插进去就必然留洞（探针 `agents.cardNoHoles` 会红）。
    */
   .cell.role-cell,
-  .cell.instructions-cell,
-  .cell.skills-cell,
   .cell.actions-cell,
   .builtin-badge {
     grid-column: 1 / -1;
@@ -1321,6 +1329,7 @@
   .memory-cell {
     border-top: 1px solid var(--line);
     padding-top: var(--sp-3);
+    /* 整行宽：一行一条记忆 + 它下面的出处，半列宽会折成三行（见上面那段说明） */
     grid-column: 1 / -1;
   }
   .memory-cell .cell-label .spacer {

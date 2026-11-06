@@ -474,7 +474,29 @@
               holes.push({ cells: cells.map((c) => `${c.label}:${c.w}`), sum, innerW })
             }
           }
-          return { rows: rows.size, holes, innerW }
+          /**
+           * ★ 使用者接着问的那句（"为什么不能保持之前的一半一半"）：**要量到"真的是并排"**。
+           *   只量"没有洞"是不够的——把每一格都拉成整行也能没有洞，但那不是他要的布局。
+           *   所以再钉两件事：「指令」与「挂载的技能」**同一行、各占一半**；
+           *   「记忆」**独占一行、占满宽**。
+           */
+          const rect = (sel) => {
+            const el = card.querySelector(sel)
+            return el === null ? null : csOf(el)
+          }
+          const instr = rect('.instructions-cell')
+          const skills = rect('.skills-cell')
+          const memory = rect('.memory-cell')
+          const halfOf = (w) => Math.abs(w - (innerW - gap) / 2) <= 6
+          const pair = {
+            present: instr !== null && skills !== null,
+            sameRow: instr !== null && skills !== null && Math.abs(instr.top - skills.top) < 2,
+            eachHalf:
+              instr !== null && skills !== null && halfOf(instr.width) && halfOf(skills.width),
+          }
+          const memOwnRow =
+            memory !== null && Math.abs(memory.width - innerW) <= 6
+          return { rows: rows.size, holes, innerW, pair, memOwnRow }
         })()
 
         /**
