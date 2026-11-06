@@ -1150,6 +1150,72 @@ describe('记忆：真的进了第一句话（端到端）', () => {
  * 这一组量的是**后端那一道**（界面是第一道，不是唯一一道）：关掉之后三个写入口都拒
  * `memory_disabled`，而**删/撤销照样能走**（关掉不该让已经记下的东西卡死在里面）。
  */
+describe('替换：`replaces` = 旧记忆的新版（分批第 251 批）', () => {
+  test('★★★ 先加新的、再删旧的（同一个请求里完成；删是打时间戳）', async () => {
+    const dir = await makeTempDir('memory-replace-api')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '替换测试', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      const first = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'preference', text: '文章要控制篇幅、减少配图' }),
+      })
+      const old = (await first.json()) as { entries: Array<{ id: string }> }
+      const oldId = old.entries[0]!.id
+      // 整理给了"更准的一版"，并点名要替换旧的
+      const second = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: [
+            {
+              kind: 'preference',
+              text: '文章要短、图要少，优先保留流程图',
+              replaces: oldId,
+            },
+          ],
+        }),
+      })
+      assert.equal(second.status, 201, await second.clone().text())
+      const body = (await second.json()) as { replaced?: string[] }
+      assert.deepEqual(body.replaced, [oldId], '旧的被删掉了')
+      const detail = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ text: string }>
+      }
+      assert.deepEqual(
+        detail.memory.map((m) => m.text),
+        ['文章要短、图要少，优先保留流程图'],
+        '★ 库里只剩新版那一条（不是两条）',
+      )
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('重复：整理两次 / 手工重复提交（分批第 250 批）', () => {
   test('★★★ 同一句写两遍 ⇒ 第二遍返回 201 但 `skipped` 里点出它（不重复落库）', async () => {
     const dir = await makeTempDir('memory-dup-api')

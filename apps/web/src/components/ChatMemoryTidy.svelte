@@ -41,6 +41,9 @@
     subjectTerm: string | null
     /** ★ 分批第 250 批：这条**已经在它的记忆里**了（整理过两次时第二次全是这种）。 */
     alreadyExists: boolean
+    /** ★ 分批第 251 批：这是某条旧记忆的**新版**（平台已核对旧条目确实存在）。 */
+    replacesId: string | null
+    replacesText: string | null
   }
 
   type Answer = {
@@ -53,6 +56,8 @@
       subjectSpecific: boolean
       subjectTerm: string | null
       alreadyExists: boolean
+      replacesId: string | null
+      replacesText: string | null
     }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
@@ -68,7 +73,9 @@
   }: {
     open?: boolean
     conversationId?: string
-    onconfirm: (items: Array<{ text: string; kind: MemoryKindId; evidence?: string }>) => void
+    onconfirm: (
+    items: Array<{ text: string; kind: MemoryKindId; evidence?: string; replaces?: string }>,
+  ) => void
     oncancel: () => void
   } = $props()
 
@@ -91,6 +98,8 @@
       subjectSpecific: boolean
       subjectTerm: string | null
       alreadyExists: boolean
+      replacesId: string | null
+      replacesText: string | null
       on: boolean
     }>
   >([])
@@ -176,6 +185,8 @@
         subjectSpecific: c.subjectSpecific,
         subjectTerm: c.subjectTerm,
         alreadyExists: c.alreadyExists,
+        replacesId: c.replacesId,
+        replacesText: c.replacesText,
         /**
          * 默认只勾"出处对得上、不专指这次对象、而且还没记过"的那几条。
          * 三种默认不勾对应三种"它不该被记"的理由：编的 / 只对这次成立 / 已经记过。
@@ -199,6 +210,8 @@
       chosen.map((r) => ({
         text: r.text.trim(),
         kind: r.kind,
+        // ★ 批次第 251 批：这条是旧记忆的新版 ⇒ 平台"先加新的、再删旧的"
+        ...(r.replacesId === null ? {} : { replaces: r.replacesId }),
         // 出处：这次整理那条 run（"这条记忆是哪次整理挑出来的"以后查得到）
         ...(tidyRunId === '' ? {} : { evidence: tidyRunId }),
       })),
@@ -324,6 +337,12 @@
               <span class="tidy-from bad" data-tidy-from title={$t('chat.tidyNoFrom')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
+              </span>
+            {/if}
+            {#if row.replacesId !== null}
+              <span class="tidy-from" data-tidy-replaces title={$t('chat.tidyReplacesHint')}>
+                <span class="tidy-from-mark" aria-hidden="true">↻</span>
+                <span class="tidy-from-t">{$t('chat.tidyReplaces', { old: row.replacesText ?? '' })}</span>
               </span>
             {/if}
             {#if row.alreadyExists}

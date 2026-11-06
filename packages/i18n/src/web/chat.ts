@@ -196,6 +196,15 @@ export const chatText = {
    * ★ 分批第 250 批：这条候选**已经在它的记忆里**了（同一段对话整理两次时第二次全是这种）。
    *   默认不勾——重复条目白占 40 条的预算，而"删旧的再加新的"才是改一条的正路。
    */
+  /**
+   * ★ 分批第 251 批：这条是**某条已有记忆的新版**（整理时它读到了 existing-memory.md）。
+   *   平台已核对旧条目确实存在；确认后先加新的、再删旧的（本平台唯一的改法）。
+   */
+  'chat.tidyReplaces': { zh: '替换旧条目：「{old}」', en: 'Replaces an existing entry: "{old}"' },
+  'chat.tidyReplacesHint': {
+    zh: '确认之后平台会先记下这一条新的、再删掉旧的那条（删是打时间戳，可追溯）。',
+    en: 'On confirm the platform adds this new entry, then removes the old one (removal is timestamped, so it stays traceable).',
+  },
   'chat.tidyExists': { zh: '已经记过了（不重复添加）', en: 'Already remembered' },
   'chat.tidyExistsHint': {
     zh: '这条与它现有的某条记忆相同。要换说法就先在「智能体 → 记忆」里删掉旧的。',

@@ -20,8 +20,10 @@ import {
   TIDY_TRANSCRIPT_MAX_CHARS,
   buildTidyPrompt,
   parseTidyOutput,
+  renderExistingMemory,
   renderTidyTranscript,
 } from './memory-tidy.ts'
+import type { MemoryEntry, MemoryKind } from '@agentdeck/protocol'
 import { MEMORY_TIDY_INSTRUCTIONS } from './builtin-drafter.ts'
 
 describe('对话正文：整段、按轮、人说的与它回的都在', () => {
@@ -276,5 +278,77 @@ describe('只对这次成立：提到对话对象的候选默认不勾', () => {
   test('★ 不给对象信息 ⇒ 不做这项检查（老调用方不受影响）', () => {
     const out = parseTidyOutput('[{"kind":"fact","text":"Distilly 本体就是一个 Skill"}]')
     assert.equal(out.candidates[0]?.subjectSpecific, false)
+  })
+})
+
+/**
+ * 「它已经有哪些记忆」也要交给分析 run（分批第 251 批）。
+ *
+ * 使用者同一段对话整理**三次** ⇒ 21 条里三批几乎是同一件事换着说法。根因不是"没查重"，
+ * 而是分析那一轮**只看得到对话**、看不到它已经记住了什么，于是每次从头挑一遍。
+ * 机械查重救不了这件事：中文改写之间的字符重合度极低（实测同义句 bigram Dice 只有
+ * 0.17–0.53，与"完全不同"的那一对重合）——所以语义判断必须交给它，而它得先知道有什么。
+ */
+describe('已有记忆：写进分析小屋，让它别重复提', () => {
+  const mk = (over: { id: string; text: string; kind?: MemoryKind; removedAt?: number | null }) =>
+    ({
+      id: over.id,
+      workspaceId: 'ws-1',
+      agentId: 'agent-1',
+      kind: over.kind ?? 'preference',
+      text: over.text,
+      evidence: null,
+      pinned: false,
+      useCount: 0,
+      lastUsedAt: null,
+      createdAt: 1,
+      removedAt: over.removedAt ?? null,
+    }) as unknown as MemoryEntry
+
+  test('★ 条条目都进文件，带类型标签', () => {
+    const text = renderExistingMemory([
+      mk({ id: 'm1', text: '文章要短、图要少' }),
+      mk({ id: 'm2', text: '解释工具时别用比喻代替结论', kind: 'lesson' }),
+    ])
+    assert.match(text, /共 2 条/)
+    assert.match(text, /- \[偏好\] 文章要短、图要少/)
+    assert.match(text, /- \[教训\] 解释工具时别用比喻代替结论/)
+    // 说清"要改就写 replaces"，否则它只会一直往上加
+    assert.match(text, /replaces/)
+  })
+
+  test('★ 删掉的不进文件；一条都没有时也给出文件（不是空文件）', () => {
+    // ⚠️ 断言要比的是"条目的正文"，不是"旧的"这两个字——文件头里本来就有"旧条目原文"。
+    const text = renderExistingMemory([mk({ id: 'm1', text: '这条已经被删掉了', removedAt: 9 })])
+    assert.doesNotMatch(text, /这条已经被删掉了/)
+    assert.match(text, /共 0 条/)
+    assert.match(text, /（还没有任何记忆）/)
+  })
+
+  test('★★ 它的输出可以带 `replaces`（旧原文），用来"加一条 + 删旧的"', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"preference","text":"文章要短、图要少，优先保留流程图",' +
+        '"from":"文章要短一点，图少一点",' +
+        '"replaces":"文章要控制篇幅、减少配图，优先保留流程图"}]',
+    )
+    assert.equal(out.candidates[0]?.replaces, '文章要控制篇幅、减少配图，优先保留流程图')
+  })
+
+  test('★ 不带 `replaces` ⇒ null（纯新增）', () => {
+    const out = parseTidyOutput('[{"kind":"fact","text":"这个仓库用 pnpm"}]')
+    assert.equal(out.candidates[0]?.replaces, null)
+  })
+
+  test('★★★ 任务书点名两份文件（对话 + 已有记忆），并说清 replaces 怎么写', () => {
+    const prompt = buildTidyPrompt()
+    assert.match(prompt, /transcript\.md/)
+    assert.match(prompt, /existing-memory\.md/)
+    assert.match(prompt, /replaces/)
+    assert.match(prompt, /同义的就不要再提一条/)
+  })
+
+  test('★★ 身份里也有这一节（可在「智能体」页查看）', () => {
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /别重复提，要改就替换/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /加一条 \+ 删旧的/)
   })
 })

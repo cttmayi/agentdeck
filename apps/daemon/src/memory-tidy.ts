@@ -1,5 +1,13 @@
-import type { MemoryKind } from '@agentdeck/protocol'
+import type { MemoryEntry, MemoryKind } from '@agentdeck/protocol'
 import { MEMORY_TEXT_MAX, looksLikeSecret } from './memory.ts'
+
+/** 记忆类型的显示名（写进 `existing-memory.md` 给人/给模型看；与界面上的词一致）。 */
+const MEMORY_KIND_LABEL: Record<MemoryKind, string> = {
+  preference: '偏好',
+  fact: '事实',
+  lesson: '教训',
+  commitment: '约定',
+}
 
 /**
  * 「整理成记忆」的分析层（分批第 243 批）。
@@ -112,6 +120,39 @@ export function renderTidyTranscript(input: {
 }
 
 /**
+ * 「它现在已有的记忆」——写进分析小屋，让分析 run 读（分批第 251 批）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么必须给它看（一次真实的翻车）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者同一段对话整理**三次**，每次 7 条 ⇒ 库里 21 条，其中三批几乎是同一件事换着说法
+ * （"文章要短、图要少" / "控制篇幅、减少配图" / "技术文章要控制篇幅…"）。
+ * 原因很简单：**分析那一轮只看得到对话，看不到它已经记住了什么**——于是每次都从头挑一遍。
+ *
+ * 平台这一侧补不了这件事：中文改写之间的字符重合度极低（实测同义的几句 bigram Dice 只有
+ * 0.17–0.53，而完全不同的一句是 0.17），机械相似度要么误删、要么漏掉，两头都不讨好。
+ * **语义判断交给模型，判完由平台核对 `replaces` 是否真的存在**——这是这个仓库一贯的分工。
+ */
+export function renderExistingMemory(entries: readonly MemoryEntry[]): string {
+  const alive = entries.filter((e) => e.removedAt === null)
+  const lines = [
+    `# 它现在已有的记忆（共 ${String(alive.length)} 条）`,
+    '',
+    '这些是它**已经记住的**。已经有同义的就不要再提一条新的；要改就提新的一版并在',
+    '`replaces` 里写上下面**那一行的原文**（平台据此做"加一条 + 删旧的"）。',
+    '',
+  ]
+  if (alive.length === 0) {
+    lines.push('（还没有任何记忆）', '')
+    return lines.join('\n')
+  }
+  for (const e of alive) lines.push(`- [${MEMORY_KIND_LABEL[e.kind]}] ${e.text}`)
+  lines.push('')
+  return lines.join('\n')
+}
+
+/**
  * 分析那一轮的任务（**平台写的**，不是人说的）。
  *
  * ★ 分批第 244 批：**规矩搬到智能体的身份里了**（`MEMORY_TIDY_INSTRUCTIONS`，可在
@@ -122,10 +163,15 @@ export function renderTidyTranscript(input: {
  * ——而这恰恰是使用者提的那句"方便我查看其 prompt"要治的病。
  */
 export function buildTidyPrompt(): string {
-  return `读这个工作目录里的 \`transcript.md\`（一段完整对话的逐字记录），按你身份里那套规矩挑出候选。
+  return `读这个工作目录里的两份文件：
+- \`transcript.md\`：一段完整对话的逐字记录；
+- \`existing-memory.md\`：它**已经记住的**那些条目（可能为空）。
 
-只输出一个 JSON 数组（元素形如 {"kind":"…","text":"…","from":"人的原话"}），不要解释、不要围栏。
-一条都挑不出就输出 \`[]\`——那是正常结果，不是失败。`
+按你身份里那套规矩挑出候选。**已经有同义的就不要再提一条**；要改就提新的一版，并在
+\`replaces\` 里写上旧条目原文（逐字照抄 \`existing-memory.md\` 里的那一行）。
+
+只输出一个 JSON 数组（元素形如 {"kind":"…","text":"…","from":"人的原话","replaces":"旧条目原文"}），
+不要解释、不要围栏。一条都挑不出就输出 \`[]\`——那是正常结果，不是失败。`
 }
 
 export type TidyCandidate = {
@@ -153,6 +199,14 @@ export type TidyCandidate = {
   subjectSpecific: boolean
   /** 命中的那个专名（画在界面上："提到「Distilly」"）；没命中是 null。 */
   subjectTerm: string | null
+  /**
+   * ★ 分批第 251 批：它想**替换**的那条旧记忆（原文，逐字）。`null` = 纯新增。
+   *
+   * 语义只有一种：这条候选是某条已有记忆的**新版**。平台拿这段原文去库里核对：
+   * 对得上 ⇒ 解析成 id，落库时"加新的 + 删旧的"（本平台唯一的改法）；对不上 ⇒ 当成新增，
+   * 并在界面上如实说"它想替换的那条没找到"。
+   */
+  replaces: string | null
   /**
    * 出处核对的结果：`from` 那段原话**真的**在某个人的发言里（空白归一后是子串）。
    *
@@ -273,10 +327,11 @@ export function parseTidyOutput(
   const subjectTerms = new Set<string>()
   for (const t of subjectTexts) for (const noun of properNouns(t)) subjectTerms.add(noun.toLowerCase())
   for (const item of raw) {
-    const row = item as { kind?: unknown; text?: unknown; from?: unknown } | null
+    const row = item as { kind?: unknown; text?: unknown; from?: unknown; replaces?: unknown } | null
     const kind = typeof row?.kind === 'string' ? row.kind.trim() : ''
     const text = typeof row?.text === 'string' ? row.text.trim() : ''
     const fromRaw = typeof row?.from === 'string' ? row.from.trim() : ''
+    const replacesRaw = typeof row?.replaces === 'string' ? row.replaces.trim() : ''
     if (!KINDS.includes(kind as MemoryKind)) {
       if (text !== '' || kind !== '') dropped.push({ text: text || kind, reason: 'kind_invalid' })
       continue
@@ -310,6 +365,7 @@ export function parseTidyOutput(
       grounded: fromRaw === '' ? false : isGrounded(fromRaw),
       subjectSpecific: hit !== null,
       subjectTerm: hit,
+      replaces: replacesRaw === '' ? null : replacesRaw,
     })
   }
   return { candidates, dropped, parsed: true }

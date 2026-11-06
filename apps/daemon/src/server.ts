@@ -196,7 +196,12 @@ import {
 import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
 import { memoryRootFor, syncMemoryMirror } from './memory-files.ts'
-import { buildTidyPrompt, parseTidyOutput, renderTidyTranscript } from './memory-tidy.ts'
+import {
+  buildTidyPrompt,
+  parseTidyOutput,
+  renderExistingMemory,
+  renderTidyTranscript,
+} from './memory-tidy.ts'
 import {
   DEFAULT_MEMORY_PREFIXES,
   MEMORY_TEXT_MAX,
@@ -5556,12 +5561,24 @@ async function injectedSkillsOf(
         }
         const added = []
         /**
+         * ★ 分批第 251 批：`replaces` = "这条是某条旧记忆的新版"。
+         *
+         * 落法是本平台唯一的改法——**先加新的、再删旧的**（删 = 打时间戳，可追溯）。
+         * 顺序不能反：先删后加的话，加失败就把人原来的那条弄没了。
+         */
+        const replaced: string[] = []
+        /**
          * ★ 分批第 250 批：**重复的跳过、不整批失败**（同一段对话整理两次时，第二次的
          *   候选基本都是已经记过的——那不该是一次"失败"，只该是一句"这些已经在了"）。
          */
         const skipped: Array<{ text: string; existingId: string }> = []
         for (const [index, item] of items.entries()) {
-          const row = item as { kind?: unknown; text?: unknown; evidence?: unknown }
+          const row = item as {
+            kind?: unknown
+            text?: unknown
+            evidence?: unknown
+            replaces?: unknown
+          }
           const result = await addMemoryEntry(store, {
             workspaceId,
             agentId: targetAgentId,
@@ -5588,10 +5605,27 @@ async function injectedSkillsOf(
             return
           }
           added.push(result.entry)
+          if (typeof row.replaces === 'string' && row.replaces !== '') {
+            replaced.push(row.replaces)
+          }
+        }
+        // 新的都加完了，再删旧的（对不存在的 id 是幂等跳过）
+        const removedIds: string[] = []
+        for (const id of replaced) {
+          const gone = await removeMemoryEntry(store, {
+            workspaceId,
+            agentId: targetAgentId,
+            entryId: id,
+          })
+          if (gone.ok) removedIds.push(id)
         }
         // 镜像同理（见 PATCH agent 处的说明）：聊天的两个写入口也要让它跟上
         await syncMemoryMirrorFor(targetAgentId, target.name)
-        sendJson(res, 201, { entries: added, skipped })
+        sendJson(res, 201, {
+          entries: added,
+          skipped,
+          ...(removedIds.length > 0 ? { replaced: removedIds } : {}),
+        })
         return
       }
 
@@ -8423,7 +8457,20 @@ async function injectedSkillsOf(
         const existing = owner ? await listActiveMemory(store, workspaceId, owner.id) : []
         const candidates = parsed.candidates.map((c) => {
           const hit = findDuplicateMemory(existing, c.text)
-          return { ...c, alreadyExists: hit !== null, existingId: hit === null ? null : hit.id }
+          /**
+           * ★ 分批第 251 批：它也可能会说"我想把某条旧的换成这版"（`replaces` = 旧原文）。
+           *   平台**核对**那段原文真的存在（逐字、空白归一）⇒ 解析成 id；对不上就把
+           *   `replacesId` 留空并让界面说清"它想替换的那条没找到"（当成新增处理）。
+           */
+          const replaced =
+            c.replaces === null ? null : findDuplicateMemory(existing, c.replaces)
+          return {
+            ...c,
+            alreadyExists: hit !== null,
+            existingId: hit === null ? null : hit.id,
+            replacesId: replaced === null ? null : replaced.id,
+            replacesText: replaced === null ? null : replaced.text,
+          }
         })
         sendJson(res, 200, {
           status: run.status,
@@ -8517,6 +8564,19 @@ async function injectedSkillsOf(
       })
       await mkdir(tidyDir, { recursive: true })
       await writeFile(join(tidyDir, 'transcript.md'), transcript.text, 'utf8')
+      /**
+       * ★ 分批第 251 批：**把"它已经记住的"也交给分析 run**。
+       *
+       * 使用者同一段对话整理三次 ⇒ 21 条里三批几乎是同一件事换着说法。根因不是"没查重"，
+       * 而是分析那一轮**只看得到对话**：它每次从头挑一遍，当然挑出同一批。
+       * 机械查重救不了中文改写（实测同义句的 bigram Dice 只有 0.17–0.53，与"完全不同"
+       * 的那一对重合），所以语义判断只能交给它——而它得先知道有什么。
+       */
+      await writeFile(
+        join(tidyDir, 'existing-memory.md'),
+        renderExistingMemory(await listActiveMemory(store, workspaceId, agent.id)),
+        'utf8',
+      )
 
       const newRunId = ulid() as RunId
       const outcome = await executor.submit({

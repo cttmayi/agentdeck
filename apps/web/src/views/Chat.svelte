@@ -203,7 +203,7 @@
   /** 把一句（或多句）写成记忆；失败只说一句，不打断对话。 */
   async function captureMemory(
     agentId: string,
-    entries: Array<{ text: string; kind: string; evidence?: string }>,
+    entries: Array<{ text: string; kind: string; evidence?: string; replaces?: string }>,
     noteKey: string,
     noteText: string,
   ): Promise<string[] | null> {
@@ -1131,6 +1131,8 @@
               text: it.text,
               kind: it.kind,
               ...(it.evidence === undefined ? {} : { evidence: it.evidence }),
+              // ★ 分批第 251 批：整理想说"这条是某条旧记忆的新版"时，平台先加新的再删旧的
+              ...(it.replaces === undefined ? {} : { replaces: it.replaces }),
             })),
             // 空 key：这一批不挂在某一轮上（用下面那条 `tidyNote` 显示）
             '',
