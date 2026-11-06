@@ -357,6 +357,26 @@
           const list = await win.fetch('/api/agents').then((r) => r.json())
           const me = (list.agents ?? []).find((a) => a.name === name)
           if (!me) return null
+          /**
+           * ★ 分批第 259 批：新建的智能体**默认关记忆** ⇒ 这一段量"记忆那一节"之前，
+           *   先把它打开（否则写记忆恒 409、列表恒空，量到的全是"关着"的样子）。
+           */
+          const enableRes = await win.fetch(`/api/agents/${me.id}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ memoryEnabled: true }),
+          })
+          /**
+           * ⚠️ PATCH 走的是 raw fetch，**页面里的 `$agents` store 并不会因此变新**；而详情页的
+           * 草稿只在"换了一个 agent"时才重铺 ⇒ 直接点回同一个人看到的是旧的开关状态
+           * （实测：接口上已经 true，界面上勾选框还是 false、加号行不出现）。
+           * 所以先点一次页面级「刷新」把列表拉新，再选人。
+           */
+          const refreshBtn0 = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => text(b).trim() === '刷新',
+          )
+          if (refreshBtn0) click(refreshBtn0)
+          await untilNet(() => !!d().querySelector('.card.agent-card'), 40)
           const detail = await win.fetch(`/api/agents/${me.id}`).then((r) => r.json())
           if ((detail.memory ?? []).length === 0) {
             await win.fetch(`/api/agents/${me.id}/memory`, {
@@ -426,6 +446,10 @@
             hasPreview: previewBtn !== null,
             hasAddRow: !!section.querySelector('[data-mem-add]'),
             rowBadge,
+            // 诊断：这一节依赖"记忆开着"（新建的智能体默认关）
+            enableStatus: enableRes.status,
+            detailEnabled: detail.memoryEnabled,
+            switchChecked: section.querySelector('[data-memory-enabled]')?.checked ?? null,
           }
         })()
 
@@ -610,6 +634,7 @@
             40,
           )
           const offHint = await untilNet(() => !!d().querySelector('[data-memory-off-hint]'), 40)
+          const offHintAny = d().querySelector('[data-memory-off-hint]') !== null
           // ── 保存，并**轮询**到接口上真的变 false ──
           click(saveBtn())
           let offOnServer = false
@@ -645,6 +670,7 @@
             hadAddRow,
             addGone,
             offHint,
+            offHintAny,
             offOnServer,
             writeRejected,
             rejectCode,

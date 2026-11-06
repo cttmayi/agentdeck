@@ -445,6 +445,8 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `${String(v.rows)} 行　行高 ${JSON.stringify(v.heights)}　动作静止隐藏 ${String(v.actionsHidden)}　` +
+          `加号行 ${String(v.hasAddRow)}　预览 ${String(v.hasPreview)}　` +
+          `（打开记忆 HTTP ${String(v.enableStatus)}，接口上 ${String(v.detailEnabled)}，勾选框 ${String(v.switchChecked)}）　` +
           `★ ${String(v.pins)}　计数「${String(v.countText)}」　列表行「${String(v.rowBadge)}」`,
   },
   {
@@ -461,7 +463,7 @@ const CHECKS = [
      * `memory_disabled`。只量界面的话，"按钮没了但接口照收"照样是绿的。
      */
     label:
-      '★★★ 智能体页的「启用记忆」：默认勾着；取消之后「记下一条」收起并说明不会被带入；' +
+      '★★★ 智能体页的「启用记忆」：打开状态下取消勾选 ⇒「记下一条」收起并说明不会被带入；' +
       '保存后接口上是 false；再手写一条被拒（memory_disabled）',
     ok: (v) =>
       v !== null &&
@@ -480,7 +482,7 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　默认勾着 ${String(v.checkedByDefault)}　` +
-          `取消后写入口收起 ${String(v.addGone)}　有说明 ${String(v.offHint)}　` +
+          `取消后写入口收起 ${String(v.addGone)}　有说明 ${String(v.offHint)}（元素在 ${String(v.offHintAny)}）　` +
           `接口上 ${String(v.offOnServer)}　手写被拒 ${String(v.writeRejected)}(${String(v.rejectCode)})` +
           `　拨回去 ${String(v.restored)}（写入口回来 ${String(v.restoredAdd)}）`,
   },
@@ -5821,6 +5823,9 @@ try {
         name: '探针用的目录执行者',
         role: 'executor',
         runtimeKey: 'generic',
+        // ★ 分批第 259 批：新建的智能体**默认关记忆** ⇒ 这一条是聊天/整理那几节的
+        //   落库对象，必须显式打开（否则触发词 chip 不出现、整理写入恒 409）
+        memoryEnabled: true,
       }),
     })
     if (!madeAgent.ok) throw new Error(`造目录执行者失败（HTTP ${madeAgent.status}）`)

@@ -14,6 +14,8 @@ import {
   removeMemoryEntry,
   setMemoryPinned,
   normalizeMemoryText,
+  memoryEnabledOf,
+  migrateMemoryEnabledDefaults,
 } from './memory.ts'
 import type { MemoryEntry, MemoryEntryId, WorkspaceId, AgentId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
@@ -524,7 +526,12 @@ describe('记忆接口（HTTP 层）', () => {
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '记忆测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '记忆测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       return await fn(d.url, agent.id)
@@ -737,7 +744,12 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '整理执行者', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '整理执行者',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
 
@@ -893,7 +905,12 @@ describe('记忆：磁盘镜像跟着写（分批第 241 批）', () => {
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '镜像测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '镜像测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       const mirror = `${mirrorRoot}/${agent.id}/MEMORY.md`
@@ -981,7 +998,12 @@ describe('记忆总开关：关掉之后**不带入**第一句话（分批第 24
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '开关执行者', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '开关执行者',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
@@ -1085,7 +1107,12 @@ describe('记忆：真的进了第一句话（端到端）', () => {
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '记忆执行者', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '记忆执行者',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
@@ -1174,7 +1201,12 @@ describe('来源原话：记下来、按它查重（分批第 252 批）', () =>
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '来源测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '来源测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
@@ -1226,7 +1258,12 @@ describe('替换：`replaces` = 旧记忆的新版（分批第 251 批）', () =
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '替换测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '替换测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       const first = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
@@ -1292,7 +1329,12 @@ describe('重复：整理两次 / 手工重复提交（分批第 250 批）', ()
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '重复测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '重复测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       const post = (entries: unknown) =>
@@ -1358,7 +1400,12 @@ describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
       const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '开关测试', instructions: '你是干活的' }),
+        body: JSON.stringify({
+          name: '开关测试',
+          instructions: '你是干活的',
+          // ★ 新默认：记忆**关**（分批第 259 批）⇒ 这些用例要显式打开
+          memoryEnabled: true,
+        }),
       })
       const agent = (await created.json()) as { id: string }
       if (!memoryEnabled) {
@@ -1445,19 +1492,98 @@ describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
     })
   })
 
-  test('★ 缺省（没设过这个键）⇒ 开着（老记录不许静默失忆）', async () => {
-    await withAgent(true, async (url, agentId) => {
-      const detail = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
-        memoryEnabled?: boolean
-      }
-      assert.equal(detail.memoryEnabled, undefined, '没设过就是没有这个键')
-      const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
+  test('★★★ 新建的智能体 ⇒ 记忆**默认关**（分批第 259 批）', async () => {
+    /**
+     * 使用者："除了助手，启用记忆的默认值需要是关闭，包括新建的智能体。"
+     *
+     * 默认关而不是默认开：记忆会**改变它每一次的回答**，而新建一个智能体时人多半还
+     * 不知道要用它干什么。代价也是单向的——关着时只是少一样东西，开着时多一样人没预期的影响。
+     */
+    const dir = await makeTempDir('memory-default-off')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ kind: 'fact', text: '照样能写' }),
+        body: JSON.stringify({ name: '默认关测试', instructions: '你是干活的' }),
       })
-      assert.equal(res.status, 201)
-    })
+      const agent = (await created.json()) as { id: string }
+      const detail = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memoryEnabled?: boolean
+      }
+      assert.equal(detail.memoryEnabled, false, '新建 ⇒ 记忆关')
+      const res = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '关着的时候写不进去' }),
+      })
+      assert.equal(res.status, 409)
+      // ★ 例外：首启播种的那条「助手」是开着的（它是天天用的那个）
+      const list = (await (await fetch(`${d.url}/api/agents`)).json()) as {
+        agents: Array<{ name: string; memoryEnabled?: boolean }>
+      }
+      const assistant = list.agents.find((a) => a.name === '助手')
+      assert.equal(assistant?.memoryEnabled, true, '「助手」保持开')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★★ 老记录（没有这个键）读作**开**——迁移只补一次，之后不再有这种记录', async () => {
+    const { store } = fakeStore()
+    assert.equal(memoryEnabledOf({}), true, '没有字段 = 开（老工作区不许静默失忆）')
+    assert.equal(memoryEnabledOf({ memoryEnabled: false }), false)
+    assert.equal(memoryEnabledOf({ memoryEnabled: true }), true)
+    // 假的 store 没有 agent 接口，这里只钉"判据本身"，迁移见下面那组
+    void store
+  })
+
+  test('★★★ 迁移：没字段的显式写成关，但「助手」（默认智能体）保持开，改过的不碰', async () => {
+    type Row = { id: string; memoryEnabled?: boolean }
+    const rows: Row[] = [
+      { id: 'a-assistant' }, // 默认智能体 ⇒ 保持原样（读作开）
+      { id: 'a-reviewer' }, // 没有字段 ⇒ 写成关
+      { id: 'a-mine', memoryEnabled: true }, // 人自己开的 ⇒ 一个字节都不动
+      { id: 'a-off', memoryEnabled: false }, // 已经关了 ⇒ 不动
+    ]
+    const fake = {
+      async getWorkspace() {
+        return { id: WS, defaultAgentId: 'a-assistant' }
+      },
+      async listAgents() {
+        return rows as never
+      },
+      async insertAgent(agent: Row) {
+        const i = rows.findIndex((r) => r.id === agent.id)
+        if (i >= 0) rows[i] = agent
+      },
+    } as unknown as Store
+    const out = await migrateMemoryEnabledDefaults(fake, WS)
+    assert.deepEqual(out.switched, ['a-reviewer'])
+    assert.deepEqual(out.keptOn, ['a-assistant'])
+    assert.equal(rows.find((r) => r.id === 'a-assistant')?.memoryEnabled, undefined)
+    assert.equal(rows.find((r) => r.id === 'a-reviewer')?.memoryEnabled, false)
+    assert.equal(rows.find((r) => r.id === 'a-mine')?.memoryEnabled, true)
+    // 幂等：再跑一次什么都不做
+    const again = await migrateMemoryEnabledDefaults(fake, WS)
+    assert.deepEqual(again.switched, [])
   })
 })
 

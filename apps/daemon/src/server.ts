@@ -213,6 +213,7 @@ import {
   findBySource,
   findDuplicateMemory,
   memoryEnabledOf,
+  migrateMemoryEnabledDefaults,
   removeMemoryEntry,
   setMemoryPinned,
 } from './memory.ts'
@@ -2833,6 +2834,21 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   //    下次启动要回来）与"自愈"（内置标记丢了、指令被清空了要补回默认）。幂等由
   //    `ensureBuiltinDrafter` 内部保证：**使用者改过的指令一字不动**（第 ⑥ 条）。
   //    对账结果只在真动手时吭声——正常启动不该多一句噪音。
+  /**
+   * ★ 分批第 259 批的一次性迁移：**记忆默认关，只有「助手」保持开着**
+   *   （逻辑与三条边界在 `memory.ts` 的 `migrateMemoryEnabledDefaults` 里，那里有测试）。
+   *   它只改开关，不动记忆条目。
+   */
+  {
+    const { switched } = await migrateMemoryEnabledDefaults(store, workspaceId)
+    if (switched.length > 0) {
+      info(
+        `记忆默认关：${switched.length} 个智能体已关掉记忆（只有「助手」保持开）——` +
+          '要用的话在它自己的配置页打开「启用记忆」；已有条目一条都没删',
+      )
+    }
+  }
+
   const builtin = await ensureBuiltinAgents(store, workspaceId)
   for (const [label, r, why] of [
     ['内置起草者', builtin.drafter, '沉淀这条链用的'],
@@ -4864,6 +4880,10 @@ async function injectedSkillsOf(
         'reviewStandard',
         // 私有归属：『组里新建私有』是它唯一的生产入口（见下面那段）
         'ownerGroupId',
+        // ★ 分批第 259 批：新建时就能指定记忆开关（缺省**关**）。
+        //   ⚠️ 白名单漏了它 ⇒ 带着这个字段的请求会被 400 拒绝（"不认识的字段"），
+        //      而界面上看不出原因。这条白名单就是"新建能配什么"的唯一清单。
+        'memoryEnabled',
       ])
       const unknownKeys = Object.keys(body).filter((k) => !allowedKeys.has(k))
       if (unknownKeys.length > 0) {
@@ -4987,11 +5007,20 @@ async function injectedSkillsOf(
         typeof body['instructions'] === 'string' ? body['instructions'] : ''
 
       const now = Date.now()
+      /**
+       * ★ 分批第 259 批（使用者："除了助手，启用记忆的默认值需要是关闭，包括新建的智能体"）：
+       *   **新建的智能体默认不带记忆**，要用再在它自己的配置页打开。
+       *
+       * 为什么默认关而不是默认开：记忆会**改变它每一次的回答**，而新建一个智能体时人多半
+       * 还不知道要用它干什么；默认开等于替人决定"这个它该攒经验了"。而代价是单向的：
+       * 关着时少一样东西（忘了就忘了），开着时多一样人没预期的影响。
+       */
       const agent: Agent = {
         id: ulid() as Agent['id'],
         workspaceId,
         name,
         instructions: prefilledInstructions,
+        memoryEnabled: body['memoryEnabled'] === true,
         model: typeof body['model'] === 'string' && body['model'] !== '' ? body['model'] : null,
         // D28：runtime 可由使用者选（它现在真的会被消费，见 executor）
         runtimeKey: runtimeCheck.runtimeKey,
@@ -10219,6 +10248,8 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     id: ulid() as Agent['id'],
     workspaceId: workspace.id,
     name: '审核员',
+    // ★ 分批第 259 批：记忆默认关（只有「助手」默认开）
+    memoryEnabled: false,
     // ★ 判据（2026-09 三次改）：这是**纯判据**，一个判决词都不出现（pass /
     //   fail / needs_human 是平台的事，由判决契约 `{{verdict}}` 统一说明）。
     //   顺带修掉过时的"按挂载的审核标准"——2026-09 标准已并进「指令」，没有
@@ -10246,6 +10277,12 @@ async function bootstrap(store: Store, info: (m: string) => void): Promise<Works
     workspaceId: workspace.id,
     name: '助手',
     instructions: '你是一个严谨的协作者。先理解任务，再动手；报告要写清楚结论与不确定的地方。',
+    /**
+     * ★ 分批第 259 批：**只有「助手」默认带记忆**（使用者的选择：它是天天用的那个，
+     *   "记住：「下次别用 npm」"这类话本来就该落在它身上）。其余新建/播种的智能体默认关，
+     *   要用再在自己的配置页打开。
+     */
+    memoryEnabled: true,
     model: null,
     runtimeKey: 'claude',
     workDir: null,

@@ -213,6 +213,44 @@ function normalizeText(text: unknown): { ok: true; text: string } | { ok: false;
 }
 
 /**
+ * 一次性迁移（分批第 259 批）：**记忆默认关，只有「助手」保持开着**。
+ *
+ * 使用者："除了助手，启用记忆的默认值需要是关闭，包括新建的智能体。"
+ *
+ * 「默认值」对**已经存在的**智能体不生效——它们建立时还没有这个字段，而
+ * `memoryEnabledOf` 把"没有字段"读作**开**（那是对的：当时它们的记忆确实在用，
+ * 缺省关会让它们在一次升级后静默失忆）。所以补这一次迁移：把"没有字段、又不是默认
+ * 智能体"的那些**显式写成关**。
+ *
+ * 三条边界（每条都对着一种坏法）：
+ *   · **已经显式写过的**（`memoryEnabled !== undefined`）一个都不碰——人自己开的就开着；
+ *   · 「助手」= `workspace.defaultAgentId`，认 **id** 不认名字（名字可改，而"谁是默认
+ *     智能体"是工作区上的事实）；它保持开；
+ *   · 幂等：跑完就没有"没有字段"的智能体了，下次启动什么都不做。
+ *
+ * ⚠️ 只改**开关**，一个字都不动记忆条目——那些是使用者的数据。
+ */
+export async function migrateMemoryEnabledDefaults(
+  store: Store,
+  workspaceId: MemoryEntry['workspaceId'],
+): Promise<{ switched: string[]; keptOn: string[] }> {
+  const workspace = await store.getWorkspace(workspaceId)
+  const assistantId = (workspace?.defaultAgentId ?? '') as string
+  const switched: string[] = []
+  const keptOn: string[] = []
+  for (const agent of await store.listAgents(workspaceId)) {
+    if (agent.memoryEnabled !== undefined) continue
+    if ((agent.id as string) === assistantId) {
+      keptOn.push(agent.id as string)
+      continue
+    }
+    await store.insertAgent({ ...agent, memoryEnabled: false, updatedAt: Date.now() })
+    switched.push(agent.id as string)
+  }
+  return { switched, keptOn }
+}
+
+/**
  * 加一条。
  *
  * ⚠️ 上限按**活着**的条数算（删掉的不占名额）。满了返回 `limit_reached` 而不是
