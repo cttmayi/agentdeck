@@ -122,7 +122,12 @@ export const chatText = {
   'chat.memorySaved': { zh: '已记进它的记忆', en: 'Remembered' },
   'chat.memoryUndo': { zh: '撤销', en: 'Undo' },
   'chat.memorySavedMany': { zh: '已记进它的记忆 {n} 条', en: '{n} entries remembered' },
-  'chat.tidyAction': { zh: '整理成记忆…', en: 'Turn into memory…' },
+  /**
+   * ★ 分批第 264 批（使用者："『整理成记忆...』改成『整理记忆』"）：词条缩短。
+   *   去掉"成"（它已经是记忆这一类的动作，不必再说一遍结果）与省略号
+   *   （它在对话头那排工具条里，与「沉淀技能&智能体」并列，靠位置说明"这是个入口"）。
+   */
+  'chat.tidyAction': { zh: '整理记忆', en: 'Tidy memory' },
   /**
    * 按钮在「沉淀技能」左侧；两种"不能用"都用**置灰 + 说明**表达，不隐藏。
    * ⚠️ 这块位置翻过一次车（262 批按"关着就不该有"改成不渲染，使用者回头又问

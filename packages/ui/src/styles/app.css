@@ -812,6 +812,55 @@ hr {
   flex-shrink: 0;
 }
 
+/**
+ * ★ 分批第 264 批（使用者："这 3 个按钮的风格改成和『新建对话』『设置』一样的风格"）：
+ *   对话头那排（整理记忆 / 沉淀技能&智能体 / 删除对话）原来用的是**普通按钮**
+ *   （`ghost` / `danger`，各自一个带边框的方块），而顶栏那排是一**条**工具条
+ *   （`.topbar .page-actions`：底色轨道 + 里面几格、hover 才浮起）。
+ *   同一类东西两种长相，使用者一眼就看出来了。这里把那排改成同一种工具条。
+ *
+ * ⚠️ 三条都按工具条里的格子来（含「删除对话」）：形状/高度/底色一致，
+ *    危险动作只**用颜色**区分（`--bad` 的文字色），不再给它一块实心底
+ *    ——"这一格是危险的"靠颜色说得清，靠一整块红底反而把那一排拆散了。
+ */
+.pane-actions {
+  display: flex;
+  align-items: center;
+  /* 与顶栏那排同高同节奏：外面一条带子 1.9rem，里面每一格 1.5rem */
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.pane-actions button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pane-actions button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.pane-actions button.danger {
+  /* 危险动作：同一格形状，只用文字色区分 */
+  background: transparent;
+  color: var(--bad);
+}
+.pane-actions button.danger:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--bad);
+  filter: none;
+}
+
 .pane-body {
   flex: 1;
   min-height: 0;

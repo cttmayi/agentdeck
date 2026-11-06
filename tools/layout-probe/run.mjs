@@ -1699,6 +1699,11 @@ const CHECKS = [
       v.note === true &&
       // ★ 第 262 批：它在「沉淀技能」**左边**
       v.leftOfCrystallize === true &&
+      // ★ 第 264 批：那一排是**与顶栏同一套工具条**（同轨道、同高、每格同高）
+      v.toolbar?.rowPresent === true &&
+      v.toolbar?.sameTrack === true &&
+      v.toolbar?.sameHeight === true &&
+      v.toolbar?.cellsSame === true &&
       v.after === v.before + 3,
     show: (v) =>
       v === null || typeof v !== 'object'
@@ -1710,7 +1715,10 @@ const CHECKS = [
           `　正文等宽 ${String(v.layout?.textsAligned)}（${JSON.stringify(v.layout?.textWs ?? [])}）` +
           `　类型列对齐 ${String(v.layout?.kindsAligned)}　行高 ${JSON.stringify(v.layout?.rowHeights ?? [])}` +
           `　列表宽 ${String(v.layout?.listWidth)}　手动勾后 ${String(v.countAfter)}` +
-          `　在沉淀左边 ${String(v.leftOfCrystallize)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
+          `　在沉淀左边 ${String(v.leftOfCrystallize)}` +
+          `　同一条工具条 ${String(v.toolbar?.sameTrack)}/${String(v.toolbar?.sameHeight)}/${String(v.toolbar?.cellsSame)}` +
+          `（格高 ${JSON.stringify(v.toolbar?.heights ?? [])} vs 顶栏 ${JSON.stringify(v.toolbar?.topHeights ?? [])}）` +
+          `　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
           `　测量后已收起 ${String(v.closed)}` +
           `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
   },

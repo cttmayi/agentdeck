@@ -8709,11 +8709,51 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              *   探针跟着换查找范围，并顺带量一句"它确实在沉淀技能左边"。
              */
             const headerButtons = [...d().querySelectorAll('.detail-pane .pane-actions button')]
-            const tidyIdx = headerButtons.findIndex((b) => text(b).includes('整理成记忆'))
+            const tidyIdx = headerButtons.findIndex((b) => text(b).includes('整理记忆'))
             const crystalIdx = headerButtons.findIndex((b) => text(b).includes('沉淀'))
             const tidyBtn = tidyIdx >= 0 ? headerButtons[tidyIdx] : null
             if (!tidyBtn) return { opened: false, reason: '对话头没有「整理成记忆」' }
             const leftOfCrystallize = tidyIdx >= 0 && crystalIdx >= 0 && tidyIdx < crystalIdx
+            /**
+             * ★ 分批第 264 批（使用者："这 3 个按钮的风格改成和『新建对话』『设置』一样的风格"）：
+             *   对话头那排要和**顶栏那排工具条**同一种长相——量三件可比的：
+             *   外框底色是不是同一条轨道（都带背景色、都圆角）、外框高度一样、里面每格高度一样。
+             *   只量"有没有 class"是量不出"看起来一样"的。
+             */
+            const row = d().querySelector('.detail-pane .pane-actions')
+            const topRow = d().querySelector('.topbar .page-actions')
+            const rowStyle = row === null ? null : cs(row)
+            const topStyle = topRow === null ? null : cs(topRow)
+            const heights = headerButtons.map((b) => Math.round(b.getBoundingClientRect().height))
+            const topHeights = topRow
+              ? [...topRow.querySelectorAll('button')].map((b) =>
+                  Math.round(b.getBoundingClientRect().height),
+                )
+              : []
+            const toolbar = {
+              rowPresent: row !== null,
+              // 同一条轨道：底色不是透明的、圆角一样、高度一样（±1px 取整）
+              sameTrack:
+                rowStyle !== null &&
+                topStyle !== null &&
+                rowStyle.backgroundColor === topStyle.backgroundColor &&
+                rowStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+                Math.abs(parseFloat(rowStyle.borderTopLeftRadius) - parseFloat(topStyle.borderTopLeftRadius)) <= 1,
+              sameHeight:
+                rowStyle !== null &&
+                topStyle !== null &&
+                Math.abs(
+                  parseFloat(rowStyle.height) - parseFloat(topStyle.height),
+                ) <= 1,
+              // 里面每一格高度：那排自己一致，且与顶栏格子一致
+              cellsSame:
+                heights.length === 3 &&
+                heights.every((h) => h === heights[0]) &&
+                topHeights.length > 0 &&
+                Math.abs(heights[0] - topHeights[0]) <= 1,
+              heights,
+              topHeights,
+            }
             const memTotal = async () => {
               const list = await f.contentWindow
                 .fetch('/api/agents')
@@ -8827,6 +8867,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               closed,
               opened: true,
               leftOfCrystallize,
+              toolbar,
               intro: introText.includes('整段对话'),
               rows: rows.length,
               texts,
@@ -8875,9 +8916,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               })
             /** 按钮现在住在对话头那一排（`pane-actions`，沉淀技能左侧）。 */
             const headerBtns = () => [...d().querySelectorAll('.detail-pane .pane-actions button')]
-            const hasTidy = () => headerBtns().some((b) => text(b).includes('整理成记忆'))
+            const hasTidy = () => headerBtns().some((b) => text(b).includes('整理记忆'))
             const before = hasTidy()
-            const beforeBtn = headerBtns().find((b) => text(b).includes('整理成记忆')) ?? null
+            const beforeBtn = headerBtns().find((b) => text(b).includes('整理记忆')) ?? null
             await patch(false)
             // 离开再回来：让这一页重新读 agents（`$agents` 里的 memoryEnabled 变了）
             f.contentWindow.location.hash = '#/tasks'
@@ -8891,7 +8932,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              * ★ 分批第 263 批：记忆关着时这颗按钮**还在但置灰**，且 title 说清去哪儿打开。
              *   同时量"那一排还在"（沉淀技能那颗仍渲染）与"开着时不置灰"。
              */
-            const afterBtn = headerBtns().find((b) => text(b).includes('整理成记忆')) ?? null
+            const afterBtn = headerBtns().find((b) => text(b).includes('整理记忆')) ?? null
             const afterDisabled = afterBtn === null ? null : afterBtn.disabled === true
             const afterTitle = afterBtn === null ? '' : (afterBtn.getAttribute('title') ?? '')
             const rowStillThere = headerBtns().some((b) => text(b).includes('沉淀'))
