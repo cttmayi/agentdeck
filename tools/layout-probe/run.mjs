@@ -1697,6 +1697,8 @@ const CHECKS = [
       v.layout?.oneLine === true &&
       v.layout?.listWidth >= 480 &&
       v.note === true &&
+      // ★ 第 262 批：它在「沉淀技能」**左边**
+      v.leftOfCrystallize === true &&
       v.after === v.before + 3,
     show: (v) =>
       v === null || typeof v !== 'object'
@@ -1707,13 +1709,14 @@ const CHECKS = [
           `　勾选对齐 ${String(v.layout?.checksAligned)}（${JSON.stringify(v.layout?.checkXs ?? [])}）` +
           `　正文等宽 ${String(v.layout?.textsAligned)}（${JSON.stringify(v.layout?.textWs ?? [])}）` +
           `　类型列对齐 ${String(v.layout?.kindsAligned)}　行高 ${JSON.stringify(v.layout?.rowHeights ?? [])}` +
-          `　列表宽 ${String(v.layout?.listWidth)}　手动勾后 ${String(v.countAfter)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
+          `　列表宽 ${String(v.layout?.listWidth)}　手动勾后 ${String(v.countAfter)}` +
+          `　在沉淀左边 ${String(v.leftOfCrystallize)}　回执 ${String(v.note)}　记忆 ${String(v.before)} → ${String(v.after)}` +
           `　测量后已收起 ${String(v.closed)}` +
           `${v.note === true ? '' : `　现场：${String(v.tail ?? '')}`}`,
   },
   {
     view: '聊天',
-    key: 'chat.memoryOffDisablesTidy',
+    key: 'chat.memoryOffHidesTidyButton',
     /**
      * ★ 分批第 245 批：记忆关着时，聊天里**没有「整理成记忆」、也没有前缀 chip**。
      *
@@ -1721,34 +1724,29 @@ const CHECKS = [
      * 页面**上的差别（`before` 有、`afterTidy` 没有），以及再打开之后回来（`restored`）——
      * 只量"关掉之后没有"的话，一个压根没渲染出来的按钮也能让判据变绿。
      *
-     * ★ 分批第 261 批**改了口径**（使用者："为什么『分析 distilly…』这条对话没有
-     * 『整理成记忆』按钮呢？"）：原来关掉记忆时这颗按钮**直接不渲染**，于是界面看起来
-     * 一切正常、只是少了一个东西——没人知道它去哪了。现在它**还在、但置灰并带说明**
-     * （"去智能体配置里打开启用记忆"）。判据跟着从"没有"改成"在但置灰 + 说清为什么"，
-     * 这是本批**唯一的松紧变化**，理由是被测行为按使用者反馈改了，不是断言放水。
+     * ★ 分批第 262 批**改回"不出现"**（使用者："我错了，如果没有启动记忆，确实不应该这个按钮"）：
+     *   第 261 批曾改成"置灰 + 说明"，使用者否了——关着就是关着，不留一个永远点不动的按钮。
+     *   判据回到"关掉之后没有这颗按钮"，但**多量一件**：那一排本身还在（`rowStillThere`），
+     *   否则"没出现"可能只是整排都没渲染，那种假绿正是这条判据要挡的。
      */
     label:
-      '★★★ 记忆关着时「整理成记忆」**还在但置灰**并说清去哪儿打开（不是静默消失）、' +
-      '打触发词也不冒 chip；打开之后按钮恢复可用',
+      '★★★ 记忆关着时「整理成记忆」**不出现**（那一排仍在，只是少了这颗）、' +
+      '打触发词也不冒 chip；打开之后按钮回来',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.ok === true &&
       v.before === true &&
-      v.beforeDisabled === false &&
-      // 关着：还在、置灰、title 说明原因
-      v.afterTidy === true &&
-      v.afterDisabled === true &&
-      String(v.afterTitle).includes('启用记忆') &&
+      // 关着：那颗按钮不出现，但同一排（沉淀技能）还在
+      v.afterTidy === false &&
+      v.rowStillThere === true &&
       v.chipShown === false &&
       v.restored === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `关之前有按钮 ${String(v.before)}（置灰 ${String(v.beforeDisabled)}）　` +
-          `关之后 还在 ${String(v.afterTidy)} 置灰 ${String(v.afterDisabled)}　` +
-          `说明「${String(v.afterTitle)}」　chip ${String(v.chipShown)}　` +
-          `打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
+        : `关之前有按钮 ${String(v.before)}　关之后 没有 ${String(v.afterTidy)}（那排还在 ${String(v.rowStillThere)}）　` +
+          `chip ${String(v.chipShown)}　打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
   },
   {
     view: '聊天',
