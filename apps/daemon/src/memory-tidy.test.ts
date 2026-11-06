@@ -80,6 +80,23 @@ describe('规矩住在智能体的身份里（分批第 244 批）', () => {
     assert.match(MEMORY_TIDY_INSTRUCTIONS, /它自己查到的/)
   })
 
+  test('★★★ 要求「泛化」：记的是它以后怎么做，不是这次的对象是什么（分批第 248 批）', () => {
+    /**
+     * 使用者打回来的真实产出：「不要把 Distilly 比喻成编译器，这类比喻会让人困惑」——
+     * 那段对话是**调研 Distilly**，这条只在"又聊到 Distilly"时成立，等于把调研对象
+     * 写成了经验，还挤掉了通用条目。
+     *
+     * 所以身份里必须钉住这条：换成另一个对象也成立才算记忆，自检就是"删掉对象名"。
+     * ⚠️ 这是**判据**不是文案：有人把这节删掉（觉得"太长/太多规矩"），这里当场红。
+     */
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /要泛化/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /把这次的对象名从句子里删掉/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /调研出来的东西是\*\*这次的产出\*\*/)
+    // ★ 反面：抽象不等于编造（否则下一个毛病是"它替人发明原则"）
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /抽象不等于编造/)
+    assert.match(MEMORY_TIDY_INSTRUCTIONS, /直接摘原话/)
+  })
+
   test('★ 任务书只留这一轮特有的话（读哪份文件、输出形状）——不重复规矩', () => {
     const prompt = buildTidyPrompt()
     assert.match(prompt, /transcript\.md/)

@@ -185,6 +185,14 @@ export const chatText = {
     en: 'No source given — most likely something it looked up itself, not something you said. Unchecked by default.',
   },
   'chat.tidyCount': { zh: '选中 {n} 条', en: '{n} selected' },
+  /**
+   * ★ 分批第 248 批：给人同一把尺子（"换个对象还成立吗"）。
+   *   使用者打回过一条只对这次调研对象成立的经验——那种条目会挤掉通用的。
+   */
+  'chat.tidyGeneralizeHint': {
+    zh: '尺子：把这次的对象名删掉，这条还成立吗？只对这次成立的，是记录不是经验。',
+    en: 'Test: delete this conversation’s subject from the sentence — does it still hold? If only for this one, it is a record, not a lesson.',
+  },
   'chat.tidyConfirm': { zh: '记下选中的 {n} 条', en: 'Remember {n}' },
 
   /**

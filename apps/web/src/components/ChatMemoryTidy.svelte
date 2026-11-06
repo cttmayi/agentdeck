@@ -320,6 +320,13 @@
   {#if phase === 'review'}
     <div class="tidy-actions">
       <span class="hint" data-tidy-count>{$t('chat.tidyCount', { n: String(chosen.length) })}</span>
+      <!--
+        ★ 分批第 248 批：把"泛不泛化"这道自检也摆到人面前。
+        使用者打回过一条「不要把 Distilly 比喻成编译器」——那段对话是**调研 Distilly**，
+        这条只在又聊到 Distilly 时成立，是这次的记录而不是经验，还会挤掉通用条目
+        （每个智能体只有 40 条 / 1200 字预算）。规矩写进了整理者的身份，这里给人同一个尺子。
+      -->
+      <span class="hint faint" data-tidy-generalize>{$t('chat.tidyGeneralizeHint')}</span>
       <span class="spacer"></span>
       <button type="button" class="ghost" onclick={close}>{$t('common.cancel')}</button>
       <button
