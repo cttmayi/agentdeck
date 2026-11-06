@@ -55,6 +55,14 @@ export const agentsText = {
   /**
    * ★ 分批第 245 批：记忆功能的**总开关**（使用者："配置页面里面有个选项，表示是否使能记忆功能"）。
    */
+  /**
+   * ★ 分批第 250 批：保存时"因为已经有了而没加"的条目要说出来
+   *   （不说的话表现是"我加了一条，保存后又不见了"——它其实一直在库里）。
+   */
+  'agents.memorySkipped': {
+    zh: '{n} 条已经在记忆里了，没有重复添加',
+    en: '{n} entry/entries were already remembered — not added twice',
+  },
   'agents.memoryEnabled': { zh: '启用记忆', en: 'Enable memory' },
   'agents.memoryEnabledHint': {
     zh: '关掉之后：不带入第一句话、不能手动添加、也不能「整理成记忆」。已有的条目不会删，再打开就照旧。',

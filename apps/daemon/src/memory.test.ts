@@ -13,6 +13,7 @@ import {
   listActiveMemory,
   removeMemoryEntry,
   setMemoryPinned,
+  normalizeMemoryText,
 } from './memory.ts'
 import type { MemoryEntry, MemoryEntryId, WorkspaceId, AgentId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
@@ -781,7 +782,13 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
       assert.equal(got.status, 200)
       const answer = (await got.json()) as {
         status: string
-        candidates: Array<{ kind: string; text: string; from: string | null; grounded: boolean }>
+        candidates: Array<{
+          kind: string
+          text: string
+          from: string | null
+          grounded: boolean
+          alreadyExists: boolean
+        }>
         dropped: Array<{ reason: string }>
         parsed: boolean
       }
@@ -828,6 +835,15 @@ describe('「整理成记忆」：真的分析整段对话（分批第 243 批�
         memory: unknown[]
       }
       assert.equal(before.memory.length, 0, '分析完还没有记忆')
+      /**
+       * ★ 分批第 250 批：**第一次整理时，候选都没有"已经记过"**。
+       *   （"同一条对话再整理一次"由下面的 HTTP 用例覆盖，这里只要这一半。）
+       */
+      assert.deepEqual(
+        answer.candidates.map((c) => c.alreadyExists),
+        [false, false],
+        '第一次整理：都还没记过',
+      )
       const write = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1134,6 +1150,69 @@ describe('记忆：真的进了第一句话（端到端）', () => {
  * 这一组量的是**后端那一道**（界面是第一道，不是唯一一道）：关掉之后三个写入口都拒
  * `memory_disabled`，而**删/撤销照样能走**（关掉不该让已经记下的东西卡死在里面）。
  */
+describe('重复：整理两次 / 手工重复提交（分批第 250 批）', () => {
+  test('★★★ 同一句写两遍 ⇒ 第二遍返回 201 但 `skipped` 里点出它（不重复落库）', async () => {
+    const dir = await makeTempDir('memory-dup-api')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '重复测试', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      const post = (entries: unknown) =>
+        fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ entries }),
+        })
+      const first = await post([{ kind: 'fact', text: '这个仓库用 pnpm' }])
+      assert.equal(first.status, 201)
+      // 第二次：一条重复（只差句号）+ 一条新的
+      const second = await post([
+        { kind: 'fact', text: '这个仓库用 pnpm。' },
+        { kind: 'lesson', text: '别直接改 dist' },
+      ])
+      assert.equal(second.status, 201, await second.clone().text())
+      const body = (await second.json()) as {
+        entries: Array<{ text: string }>
+        skipped: Array<{ text: string; existingId: string }>
+      }
+      assert.deepEqual(
+        body.entries.map((e) => e.text),
+        ['别直接改 dist'],
+        '只加了新的那条',
+      )
+      assert.equal(body.skipped.length, 1)
+      assert.equal(body.skipped[0]?.text, '这个仓库用 pnpm。')
+      const detail = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ text: string }>
+      }
+      assert.equal(detail.memory.length, 2, '库里只有两条（没有第三条重复的）')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
   async function withAgent<T>(
     memoryEnabled: boolean,
@@ -1261,5 +1340,100 @@ describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
       })
       assert.equal(res.status, 201)
     })
+  })
+})
+
+/**
+ * 重复记忆（分批第 250 批）。
+ *
+ * 使用者问："有检查重复吗？如果之前这项对话有被保存过，还可以被重复保存吗？"
+ * 在此之前**可以**——同一段对话整理两次、或手写一条已有的，都会多出一条一模一样的，
+ * 把 40 条的预算白白吃掉（而预算就是"还能记住多少件有用的事"）。
+ *
+ * 三条口径：
+ *   ① 归一化只抹**排版差异**（首尾/连续空白、结尾标点），不抹内容；
+ *   ② 单条写重复 ⇒ 拒 `duplicate` 并说出**哪一条**已经有了；
+ *   ③ 批量/差量里重复 ⇒ **跳过、不整批失败**，但如实报出来（`skipped`）。
+ */
+describe('重复记忆：同一条不许记两次', () => {
+  test('★★ 归一化只抹排版：空白与结尾标点算同一条，换词不算', () => {
+    assert.equal(normalizeMemoryText('  这个仓库用 pnpm。 '), normalizeMemoryText('这个仓库用  pnpm'))
+    assert.equal(normalizeMemoryText('报告要短！'), normalizeMemoryText('报告要短'))
+    assert.notEqual(normalizeMemoryText('用 pnpm'), normalizeMemoryText('用 yarn'))
+  })
+
+  test('★★ 写第二遍 ⇒ 拒 duplicate，并带上库里那一条', async () => {
+    const { store } = fakeStore()
+    const first = await addMemoryEntry(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      kind: 'fact',
+      text: '这个仓库用 pnpm',
+      newId: idGen(),
+    })
+    assert.equal(first.ok, true)
+    // 只差排版：多一个句号、多几个空格
+    const again = await addMemoryEntry(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      kind: 'fact',
+      text: '  这个仓库用 pnpm。',
+      newId: idGen(),
+    })
+    assert.equal(again.ok, false)
+    if (!again.ok) {
+      assert.equal(again.code, 'duplicate')
+      assert.match(again.error, /已经在/)
+      assert.equal(again.existing?.text, '这个仓库用 pnpm')
+    }
+  })
+
+  test('★★ 删掉的旧条目不挡新的一条（删 = 打时间戳，不是"还占着查重"）', async () => {
+    const { store, rows } = fakeStore()
+    const first = await addMemoryEntry(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      kind: 'fact',
+      text: '这个仓库用 pnpm',
+      newId: idGen(),
+    })
+    assert.ok(first.ok)
+    if (!first.ok) return
+    await store.updateMemoryEntry({ ...first.entry, removedAt: 5 })
+    const again = await addMemoryEntry(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      kind: 'fact',
+      text: '这个仓库用 pnpm',
+      newId: idGen(),
+    })
+    assert.equal(again.ok, true, '删过的可以重新记')
+    assert.equal(rows.filter((r) => r.removedAt === null).length, 1)
+  })
+
+  test('★★★ 差量里重复 ⇒ **跳过而不失败**，并报出 skipped（详情页保存不会因此整次失败）', async () => {
+    const { store } = fakeStore()
+    await addMemoryEntry(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      kind: 'fact',
+      text: '这个仓库用 pnpm',
+      newId: idGen(),
+    })
+    const applied = await applyMemoryDelta(store, {
+      workspaceId: WS,
+      agentId: AGENT,
+      delta: {
+        add: [
+          { kind: 'fact', text: '这个仓库用 pnpm。' },
+          { kind: 'lesson', text: '别直接改 dist' },
+        ],
+      },
+      newId: idGen(),
+    })
+    assert.equal(applied.ok, true, '整次保存成功')
+    if (!applied.ok) return
+    assert.equal(applied.added.length, 1, '只加进去新的那条')
+    assert.deepEqual(applied.skipped, ['这个仓库用 pnpm。'])
   })
 })

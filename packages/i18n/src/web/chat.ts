@@ -192,6 +192,15 @@ export const chatText = {
     zh: '把对象名删掉，这条还成立吗？不成立就说明它是这次的记录，不是经验。',
     en: 'Delete the subject from the sentence — does it still hold? If not, it is a record of this task, not a lesson.',
   },
+  /**
+   * ★ 分批第 250 批：这条候选**已经在它的记忆里**了（同一段对话整理两次时第二次全是这种）。
+   *   默认不勾——重复条目白占 40 条的预算，而"删旧的再加新的"才是改一条的正路。
+   */
+  'chat.tidyExists': { zh: '已经记过了（不重复添加）', en: 'Already remembered' },
+  'chat.tidyExistsHint': {
+    zh: '这条与它现有的某条记忆相同。要换说法就先在「智能体 → 记忆」里删掉旧的。',
+    en: 'This matches an entry it already has. To reword it, delete the old one in the agent’s memory first.',
+  },
   'chat.tidyNoFrom': {
     zh: '它没给出处——大概率是它自己查到的，不是你说的。默认不勾。',
     en: 'No source given — most likely something it looked up itself, not something you said. Unchecked by default.',

@@ -460,6 +460,14 @@
      */
     memRows = memoryRows((updated as { memory?: MemoryEntryView[] }).memory)
       /**
+       * ★ 分批第 250 批：有"已经记过所以没加"的条目就**说出来**。
+       *   不说的话表现为"我加了一条，保存后又不见了"——而它其实一直在库里。
+       */
+      const skipped = (updated as { memorySkipped?: string[] }).memorySkipped ?? []
+      if (skipped.length > 0) {
+        showToast($t('agents.memorySkipped', { n: String(skipped.length) }))
+      }
+      /**
        * ★★ 2026-10-19：**服务端会在保存时顺手改写两个字段，所以这里必须把它的返回值收下。**
        *
        * ══════════════════════════════════════════════════════════════════

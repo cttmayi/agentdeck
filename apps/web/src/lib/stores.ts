@@ -595,11 +595,16 @@ export async function createAgent(input: {
 export async function updateAgent(
   id: string,
   patch: Record<string, unknown>,
-): Promise<Agent> {
-  const agent = await api<Agent>(`/api/agents/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
+): Promise<Agent & { memorySkipped?: string[] }> {
+  /**
+   * ★ 分批第 250 批：服务端会把"因为已经有了而没加"的那些带回来（`memorySkipped`）。
+   *   这里原样透传——**不能吞掉**：人加了一条与现有记忆相同的，界面必须说一句
+   *   "这条已经在了"，否则他以为加上了。
+   */
+  const agent = await api<Agent & { memorySkipped?: string[] }>(
+    `/api/agents/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  )
   await loadAgents()
   return agent
 }

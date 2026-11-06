@@ -205,6 +205,7 @@ import {
   effectiveMemoryPrefixes,
   listActiveMemory,
   MEMORY_DISABLED_MESSAGE,
+  findDuplicateMemory,
   memoryEnabledOf,
   removeMemoryEntry,
   setMemoryPinned,
@@ -5397,6 +5398,8 @@ async function injectedSkillsOf(
          *
          * ⚠️ 差量里**没有"改正文"**：改一条 = 新增一条 + 删掉旧的（见 `memory.ts`）。
          */
+        /** 这次保存里"因为已经有了而没加"的原文（见下面 applyMemoryDelta 的 skipped）。 */
+        let memorySkipped: string[] = []
         if (body['memory'] !== undefined) {
           if (!memoryEnabledOf(current)) {
             sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
@@ -5430,6 +5433,7 @@ async function injectedSkillsOf(
             })
             return
           }
+          memorySkipped = applied.skipped
         }
 
         const updated: Agent = { ...current, ...patch, updatedAt: Date.now() }
@@ -5445,7 +5449,12 @@ async function injectedSkillsOf(
         }
         // 保存的返回值带上**最新**的记忆：这样"这期间聊天里又记了一条"也能一起画出来
         const memory = await listActiveMemory(store, workspaceId, agentId)
-        sendJson(res, 200, { ...updated, memory })
+        // ★ 分批第 250 批：因为"已经有了"而没加的那些，如实带回去（界面要说一句）
+        sendJson(res, 200, {
+          ...updated,
+          memory,
+          ...(memorySkipped.length > 0 ? { memorySkipped } : {}),
+        })
         return
       }
 
@@ -5546,6 +5555,11 @@ async function injectedSkillsOf(
           return
         }
         const added = []
+        /**
+         * ★ 分批第 250 批：**重复的跳过、不整批失败**（同一段对话整理两次时，第二次的
+         *   候选基本都是已经记过的——那不该是一次"失败"，只该是一句"这些已经在了"）。
+         */
+        const skipped: Array<{ text: string; existingId: string }> = []
         for (const [index, item] of items.entries()) {
           const row = item as { kind?: unknown; text?: unknown; evidence?: unknown }
           const result = await addMemoryEntry(store, {
@@ -5558,10 +5572,18 @@ async function injectedSkillsOf(
               : {}),
           })
           if (!result.ok) {
+            if (result.code === 'duplicate') {
+              skipped.push({
+                text: typeof row.text === 'string' ? row.text : '',
+                existingId: (result.existing?.id ?? '') as string,
+              })
+              continue
+            }
             sendJson(res, result.code === 'limit_reached' ? 409 : 400, {
               error: items.length > 1 ? `第 ${index + 1} 条：${result.error}` : result.error,
               code: result.code,
               ...(added.length > 0 ? { added } : {}),
+              ...(skipped.length > 0 ? { skipped } : {}),
             })
             return
           }
@@ -5569,7 +5591,7 @@ async function injectedSkillsOf(
         }
         // 镜像同理（见 PATCH agent 处的说明）：聊天的两个写入口也要让它跟上
         await syncMemoryMirrorFor(targetAgentId, target.name)
-        sendJson(res, 201, { entries: added })
+        sendJson(res, 201, { entries: added, skipped })
         return
       }
 
@@ -8390,9 +8412,22 @@ async function injectedSkillsOf(
           conversation.title,
           ...humanTexts.slice(0, 1),
         ])
+        /**
+         * ★ 分批第 250 批：**已经记过的不必再记一次**（使用者："如果之前这项对话有被保存过，
+         *   还可以被重复保存吗？"）。这里逐条比对这条对话那个智能体现有的记忆，比中的标出来
+         *   ——界面上默认不勾、写一句"已经记过了"。
+         *
+         * ⚠️ 只比对**这个对话的执行者**：整理出来的记忆本来就是写给它的。
+         */
+        const owner = await store.getAgent(conversation.agentId)
+        const existing = owner ? await listActiveMemory(store, workspaceId, owner.id) : []
+        const candidates = parsed.candidates.map((c) => {
+          const hit = findDuplicateMemory(existing, c.text)
+          return { ...c, alreadyExists: hit !== null, existingId: hit === null ? null : hit.id }
+        })
         sendJson(res, 200, {
           status: run.status,
-          candidates: parsed.candidates,
+          candidates,
           dropped: parsed.dropped,
           parsed: parsed.parsed,
           failure: run.failureReason ?? null,

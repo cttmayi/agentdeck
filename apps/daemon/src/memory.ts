@@ -103,11 +103,18 @@ export type MemoryWriteError =
   | 'limit_reached'
   | 'pin_limit'
   | 'looks_like_secret'
+  | 'duplicate'
   | 'entry_not_found'
 
 export type MemoryWriteResult =
   | { ok: true; entry: MemoryEntry }
-  | { ok: false; code: MemoryWriteError; error: string }
+  | {
+      ok: false
+      code: MemoryWriteError
+      error: string
+      /** `duplicate` 时带上库里那条（界面上要说清"哪一条已经有了"）。 */
+      existing?: MemoryEntry
+    }
 
 export interface AddMemoryInput {
   workspaceId: MemoryEntry['workspaceId']
@@ -120,6 +127,40 @@ export interface AddMemoryInput {
   /** 测试缝：id 与时间。 */
   newId?: () => string
   now?: () => number
+}
+
+/**
+ * 查重用的归一化（分批第 250 批）。
+ *
+ * 只抹掉**排版差异**（首尾空白、连续空白、结尾标点），不抹内容差异：
+
+ *   · ✅ 「这个仓库用 pnpm」「这个仓库用  pnpm。」→ 同一条；
+ *   · ❌ 「用 pnpm」「用 yarn」→ 不同（那是两条真不同的约定，机器不猜）。
+ *
+ * ⚠️ 不做相似度/包含判断（"报告要短"与"报告不超过 200 字"是不是同一条？）——
+ *    那种判断会**误删人想留下的条目**，而误删比重复更难发现。近似重复由人在界面上看。
+ */
+export function normalizeMemoryText(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, ' ')
+    // 结尾标点抹掉：中文句号、英文句号、感叹/问号、分号、逗号
+    .replace(/[。．.！!？?；;，,、]+$/u, '')
+    .trim()
+}
+
+/** 库里已有同一条了吗？（只在**活着的**条目里找） */
+export function findDuplicateMemory(
+  active: readonly MemoryEntry[],
+  text: string,
+): MemoryEntry | null {
+  const target = normalizeMemoryText(text)
+  if (target === '') return null
+  for (const entry of active) {
+    if (entry.removedAt !== null) continue
+    if (normalizeMemoryText(entry.text) === target) return entry
+  }
+  return null
 }
 
 function parseKind(kind: unknown): MemoryKind | null {
@@ -174,6 +215,23 @@ export async function addMemoryEntry(store: Store, input: AddMemoryInput): Promi
   }
 
   const active = await listActiveMemory(store, input.workspaceId, input.agentId)
+  /**
+   * ★ 分批第 250 批：**同一条不许重复记**（使用者："如果之前这项对话有被保存过，还可以被
+   *   重复保存吗？"——在此之前是**可以**的：同一段对话整理两次、或手写一条已有的，都会
+   *   多出一条一模一样的，把 40 条的预算白白吃掉）。
+   *
+   * ⚠️ 查重放在**上限之前**：满了的时候重复提交一条旧的，报"满了"是误导——真正该说的是
+   *    "这条已经在了"。
+   */
+  const duplicate = findDuplicateMemory(active, text.text)
+  if (duplicate !== null) {
+    return {
+      ok: false,
+      code: 'duplicate',
+      error: `这条记忆已经在了（「${duplicate.text}」）。要换成新的说法，就先删掉旧的那条再记。`,
+      existing: duplicate,
+    }
+  }
   if (active.length >= MEMORY_LIMIT) {
     return {
       ok: false,
@@ -275,7 +333,17 @@ export interface MemoryDelta {
 }
 
 export type MemoryDeltaResult =
-  | { ok: true; added: MemoryEntry[]; removed: string[]; pinned: string[] }
+  | {
+      ok: true
+      added: MemoryEntry[]
+      removed: string[]
+      pinned: string[]
+      /**
+       * ★ 分批第 250 批：**因为"已经有了"而没加**的那些（原文）。
+       *   它不是失败（整次保存照样成功），但必须**说出来**——否则人以为自己加上了。
+       */
+      skipped: string[]
+    }
   | { ok: false; code: MemoryWriteError; error: string }
 
 /**
@@ -295,6 +363,7 @@ export async function applyMemoryDelta(
   },
 ): Promise<MemoryDeltaResult> {
   const added: MemoryEntry[] = []
+  const skipped: string[] = []
   for (const item of input.delta.add ?? []) {
     const result = await addMemoryEntry(store, {
       workspaceId: input.workspaceId,
@@ -306,6 +375,17 @@ export async function applyMemoryDelta(
       ...(input.now ? { now: input.now } : {}),
     })
     if (!result.ok) {
+      /**
+       * ★ 分批第 250 批：**重复不算失败**——跳过它，接着说下一条。
+       *
+       * 理由：详情页的一次保存里有好几行（改一条 = 加一条 + 删旧的），其中一行恰好
+       * 与库里已有的同一句话一模一样时，整次保存失败会让人"改不上去"，而他要的
+       * 其实就是"这条已经在里面了"。但**必须说出来**（`skipped` 会回到界面）。
+       */
+      if (result.code === 'duplicate') {
+        skipped.push(typeof item.text === 'string' ? item.text : '')
+        continue
+      }
       // 已经加进去的那几条**不回滚**：这是流式的"逐条如实"，
       // 报错里说清停在第几条，界面上那一份草稿还在（人改一改再存）。
       return {
@@ -354,7 +434,7 @@ export async function applyMemoryDelta(
     if (result.ok) removed.push(id)
   }
 
-  return { ok: true, added, removed, pinned }
+  return { ok: true, added, removed, pinned, skipped }
 }
 
 /**

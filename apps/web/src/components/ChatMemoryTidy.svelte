@@ -39,6 +39,8 @@
     subjectSpecific: boolean
     /** 命中的那个专名（"提到「Distilly」"）。 */
     subjectTerm: string | null
+    /** ★ 分批第 250 批：这条**已经在它的记忆里**了（整理过两次时第二次全是这种）。 */
+    alreadyExists: boolean
   }
 
   type Answer = {
@@ -50,6 +52,7 @@
       grounded: boolean
       subjectSpecific: boolean
       subjectTerm: string | null
+      alreadyExists: boolean
     }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
@@ -87,6 +90,7 @@
       grounded: boolean
       subjectSpecific: boolean
       subjectTerm: string | null
+      alreadyExists: boolean
       on: boolean
     }>
   >([])
@@ -171,9 +175,12 @@
         grounded: c.grounded,
         subjectSpecific: c.subjectSpecific,
         subjectTerm: c.subjectTerm,
-        // ★ 只对这次成立的也默认不勾（与"出处对不上"同一条纪律：默认不给，
-        //   人要勾就自己勾——它是这次的记录，不该占泛化条目的预算）
-        on: c.grounded && !c.subjectSpecific,
+        alreadyExists: c.alreadyExists,
+        /**
+         * 默认只勾"出处对得上、不专指这次对象、而且还没记过"的那几条。
+         * 三种默认不勾对应三种"它不该被记"的理由：编的 / 只对这次成立 / 已经记过。
+         */
+        on: c.grounded && !c.subjectSpecific && !c.alreadyExists,
       }))
       const dropped = out.dropped.length
       droppedNote = dropped === 0 ? '' : $t('chat.tidyDropped', { n: String(dropped) })
@@ -271,7 +278,7 @@
         <div
           class="tidy-row"
           class:on={row.on}
-          class:ungrounded={!row.grounded || row.subjectSpecific}
+          class:ungrounded={!row.grounded || row.subjectSpecific || row.alreadyExists}
         >
           <input
             type="checkbox"
@@ -317,6 +324,12 @@
               <span class="tidy-from bad" data-tidy-from title={$t('chat.tidyNoFrom')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
+              </span>
+            {/if}
+            {#if row.alreadyExists}
+              <span class="tidy-from" data-tidy-exists title={$t('chat.tidyExistsHint')}>
+                <span class="tidy-from-mark" aria-hidden="true">✓✓</span>
+                <span class="tidy-from-t">{$t('chat.tidyExists')}</span>
               </span>
             {/if}
             {#if row.subjectSpecific}
