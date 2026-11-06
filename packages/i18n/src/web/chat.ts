@@ -180,6 +180,18 @@ export const chatText = {
     zh: '它说这句出自你的话，但对话里找不到：「{quote}」——默认不勾',
     en: 'It claims this came from you, but the conversation does not contain it: "{quote}" — unchecked by default',
   },
+  /**
+   * ★ 分批第 248 批：这条候选提到了**这次对话的对象**（调研的那个项目/工具）。
+   *   使用者两次打回的都是这种（"调研对象不该成为教训本体"），所以标出来、默认不勾。
+   */
+  'chat.tidySubject': {
+    zh: '提到这次的对象「{term}」——只对这次成立就默认不勾',
+    en: 'Mentions this conversation’s subject "{term}" — unchecked unless it holds beyond this task',
+  },
+  'chat.tidySubjectHint': {
+    zh: '把对象名删掉，这条还成立吗？不成立就说明它是这次的记录，不是经验。',
+    en: 'Delete the subject from the sentence — does it still hold? If not, it is a record of this task, not a lesson.',
+  },
   'chat.tidyNoFrom': {
     zh: '它没给出处——大概率是它自己查到的，不是你说的。默认不勾。',
     en: 'No source given — most likely something it looked up itself, not something you said. Unchecked by default.',

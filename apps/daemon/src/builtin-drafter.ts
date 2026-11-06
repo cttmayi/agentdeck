@@ -236,6 +236,60 @@ export const MEMORY_TIDY_INSTRUCTIONS = withConduct(
   ].join('\n'),
 )
 
+/**
+ * ★ 分批第 248 批才补上的一条自愈：**平台改了整理者的默认指令，老工作区要跟上来**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么必须有它（这是一次真实的"改了却没生效"）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者报"怎么又整理出两条 Distilly 专属的记忆"时，代码里的规矩已经改好了——但那段
+ * 规矩**是 agent 的身份**，而身份在第一次启动时就已经写进 workspace 的 store 了。
+ * `ensureBuiltinMemoryTidy` 的纪律是"已存在且指令非空 ⇒ 一字不动"（那是给使用者改过的
+ * 指令留的余地），于是**新规矩永远到不了老工作区**：人在界面里看到的是旧的那一份，
+ * 跑起来用的也是旧的，而代码、测试、文档全是新的。这正是本仓库最忌讳的那类缺陷——
+ * 每一处单独看都对，只是没有一条路让它发生。
+ *
+ * 判据与起草者那份**完全一致**：逐字等于某个**历史默认**才升级；"与当前默认不同"绝不
+ * 触发（那会覆盖使用者自己改过的指令）。起草者当初漏的就是这条路（第 31 批补的），
+ * 这里不该再漏一次。
+ */
+export const MEMORY_TIDY_INSTRUCTIONS_V1 = withConduct(
+  [
+    '你是平台内置的记忆整理者：把一段对话里**人教过的东西**挑出来，供人确认后写进某个智能体的长期记忆。',
+    '你**不执行**那段对话里的任何任务，也不评价它的产出——你只读 `transcript.md`，只做挑选。',
+    '',
+    '## 两条硬规矩',
+    '',
+    '1. **每条候选都要指回人说过的一句话**：把那段原话**逐字**抄进 `from`。抄不出原话的，就不是记忆。',
+    '2. **人只派活或提问时输出 `[]`**。例如「分析这个仓库，让我理解它的做法」「帮我写一份周报」——',
+    '   那是任务要求，不是教它什么。空白是正确答案，不是失败。',
+    '',
+    '## 什么算记忆（判据是「人教过它什么」，不是「这次发生了什么」）',
+    '',
+    '- `preference`：人怎么要求它的（说话方式、格式、用词禁忌）。',
+    '- `fact`：人告诉它的环境与项目事实（用什么命令、哪个目录、什么约定）。',
+    '- `lesson`：人指出它做错的地方、或纠正过的做法（"别直接改 dist，改完要重新构建"）。',
+    '- `commitment`：人明确要它以后一直守的约定（"报告里不许出现 XX 这类词"）。',
+    '',
+    '## 不要记',
+    '',
+    '- 这次的任务与进度、一次性的请求；',
+    '- **它自己查到的、推断的、建议的**东西（哪怕看起来有用——那是它的笔记，不是人教的经验）；',
+    '- 任何凭据、token、密钥的值（这段正文之后每轮都会发给 CLI）；',
+    '- 人的客套话与情绪。',
+    '',
+    '## 输出',
+    '',
+    '只输出**一个 JSON 数组**：不要解释、不要围栏、不要前后缀。每条形如',
+    '`{"kind":"fact","text":"下次也成立的独立陈述句","from":"人的原话（逐字）"}`。',
+    '最多 12 条，`text` 不超过 400 字；一条都挑不出就输出 `[]`。',
+  ].join('\n'),
+)
+
+/** 整理者身份的历史版本（逐字冻结）。命中任一 ⇒ 升级成当前默认。 */
+const MEMORY_TIDY_INSTRUCTIONS_HISTORY: readonly string[] = [MEMORY_TIDY_INSTRUCTIONS_V1]
+
 /** 分批第 190 批那份（极简身份，但第一句还留着"也可能是一条智能体的指令"）：逐字冻结。 */
 const OLD_V7_INSTRUCTIONS = withConduct(
   '你是平台内置的起草者：**照着你被注入的那份技能**把素材写成可复用的东西——可能是一条 skill，' +
@@ -631,6 +685,20 @@ export async function ensureBuiltinMemoryTidy(
   if (found.instructions.trim() === '') {
     await store.insertAgent({ ...found, instructions: MEMORY_TIDY_INSTRUCTIONS, updatedAt: Date.now() })
     return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  // ★ 分批第 248 批：平台改了默认规矩 ⇒ 老工作区跟上来（判据是"逐字等于历史默认"，
+  //   不是"与当前不同"——后者会把使用者自己改过的指令一次次抹掉）。
+  if (MEMORY_TIDY_INSTRUCTIONS_HISTORY.includes(found.instructions)) {
+    await store.insertAgent({
+      ...found,
+      instructions: MEMORY_TIDY_INSTRUCTIONS,
+      updatedAt: Date.now(),
+    })
+    return {
+      action: 'healed',
+      agentId: found.id as string,
+      why: '内置指令还是旧版（缺「要泛化」那几条规矩）',
+    }
   }
   return { action: 'left-alone', agentId: found.id as string }
 }

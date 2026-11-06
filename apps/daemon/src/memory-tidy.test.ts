@@ -225,3 +225,56 @@ describe('解析它的输出：容错但不瞎猜', () => {
     assert.equal(out.dropped.filter((d) => d.reason === 'too_many').length, 3)
   })
 })
+
+/**
+ * 「这次的对象」不该被写成经验（分批第 248 批）——使用者两次打回的都是这一种：
+ *
+ *   「不要把 Distilly 比喻成编译器」/「Distilly 本体就是一个 Skill。」
+ *
+ * 身份里已经写了"要泛化"的规矩，但模型会犯懒 ⇒ 平台再给一记**机械提示**：
+ * 候选正文里出现了**这段对话标题里的专名** ⇒ 标成 `subjectSpecific`，界面默认不勾。
+ *
+ * ⚠️ 判据是"宁可多标几条，不要漏标"：清单宁短不长（`pnpm`/`git` 这类到处都在的词不算专名）。
+ */
+describe('只对这次成立：提到对话对象的候选默认不勾', () => {
+  const HUMAN = ['我的理解 Distilly 就是一个 Skill。你把它比喻成编译器，让我困惑了']
+  const SUBJECT = ['分析 https://github.com/titanwings/distilly，让我理解其做法和功能']
+
+  test('★★★ 正文里点名了这次调研的对象 ⇒ subjectSpecific', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"fact","text":"Distilly 本体就是一个 Skill",' +
+        '"from":"我的理解 Distilly 就是一个 Skill。你把它比喻成编译器，让我困惑了"}]',
+      HUMAN,
+      SUBJECT,
+    )
+    assert.equal(out.candidates.length, 1)
+    assert.equal(out.candidates[0]?.grounded, true, '出处是真的')
+    assert.equal(out.candidates[0]?.subjectSpecific, true, '★ 但它只对这次成立')
+    assert.equal(out.candidates[0]?.subjectTerm?.toLowerCase(), 'distilly')
+  })
+
+  test('★★ 泛化之后的同一句话 ⇒ 不再命中（它才是该记的那一版）', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"lesson","text":"解释陌生工具时，先按它自己的定位说清它是什么，别用比喻代替结论",' +
+        '"from":"我的理解 Distilly 就是一个 Skill。你把它比喻成编译器，让我困惑了"}]',
+      HUMAN,
+      SUBJECT,
+    )
+    assert.equal(out.candidates[0]?.subjectSpecific, false)
+    assert.equal(out.candidates[0]?.grounded, true)
+  })
+
+  test('★ 通用词不算对象（pnpm / git / json 出现在标题里也不误标）', () => {
+    const out = parseTidyOutput(
+      '[{"kind":"fact","text":"这个仓库用 pnpm，测试前先跑 git status"}]',
+      ['这个仓库用 pnpm'],
+      ['pnpm + git 的最佳实践'],
+    )
+    assert.equal(out.candidates[0]?.subjectSpecific, false)
+  })
+
+  test('★ 不给对象信息 ⇒ 不做这项检查（老调用方不受影响）', () => {
+    const out = parseTidyOutput('[{"kind":"fact","text":"Distilly 本体就是一个 Skill"}]')
+    assert.equal(out.candidates[0]?.subjectSpecific, false)
+  })
+})

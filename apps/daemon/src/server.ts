@@ -8381,7 +8381,15 @@ async function injectedSkillsOf(
          * 某一句人的发言里找到，否则标成"对不上"（界面默认不勾）。
          */
         const humanTexts = (await store.listChatTurns(conversationId)).map((t) => t.userText)
-        const parsed = parseTidyOutput(lastTextOf(messages) ?? '', humanTexts)
+        /**
+         * ★ 分批第 248 批：把**这段对话的对象**（标题）也交给解析器——候选正文里出现了
+         *   标题里的专名，就标成"只对这次成立"（界面默认不勾）。
+         *   使用者两次打回的都是这种：调研 Distilly 的对话里整理出「Distilly 本体就是一个 Skill」。
+         */
+        const parsed = parseTidyOutput(lastTextOf(messages) ?? '', humanTexts, [
+          conversation.title,
+          ...humanTexts.slice(0, 1),
+        ])
         sendJson(res, 200, {
           status: run.status,
           candidates: parsed.candidates,
@@ -8408,11 +8416,15 @@ async function injectedSkillsOf(
        * ⚠️ 找不到就地补一条（启动时已经对过账；这里是兜底——它是平台自己的东西，
        *    自愈比拦下使用者更对，与起草者那条同一个理由）。
        */
-      let tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
-      if (!tidyAgent) {
-        await ensureBuiltinMemoryTidy(store, workspaceId)
-        tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
-      }
+      /**
+       * ⚠️ **每次都先对一次账**（不只是"找不到才补"）：内置整理者的规矩（该记什么、
+       *   要泛化）就是它的身份，而身份写在 store 里。平台升级了默认规矩、老工作区却
+       *   还在用旧的那份——第 248 批就撞过：代码/测试/文档都改了，整理出来的东西
+       *   还是老样子，因为**没有一条路把新规矩送进去**。`ensureBuiltinMemoryTidy`
+       *   内部是幂等的（使用者自己改过的一字不动），所以每次跑一遍是安全的。
+       */
+      await ensureBuiltinMemoryTidy(store, workspaceId)
+      const tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
       const agent = tidyAgent
       if (!agent) {
         sendJson(res, 500, {

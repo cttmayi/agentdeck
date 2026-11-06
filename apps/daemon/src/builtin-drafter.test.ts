@@ -27,6 +27,7 @@ import {
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
   MEMORY_TIDY_INSTRUCTIONS,
+  MEMORY_TIDY_INSTRUCTIONS_V1,
   MEMORY_TIDY_NAME,
 } from './builtin-drafter.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -226,6 +227,45 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     const after = (await store.listAgents(WS2)).filter((a) => a.role === 'memory-tidy')
     assert.equal(after.length, before, '不许因为标记丢了就多造一条')
     assert.equal(after[0]?.builtin, true)
+  })
+
+  test('★★★ 老工作区里是**旧版**默认指令 ⇒ 升级成当前默认（第 248 批补的自愈）', async () => {
+    /**
+     * 这条对应一次真实事故：第 248 批我改了规矩（"要泛化"），代码/测试/文档全改了，
+     * 但使用者那边的整理结果**一点没变**——因为规矩是 agent 的身份、身份在 store 里，
+     * 而自愈只处理"标记丢了"与"指令空了"。没有这条路，新规矩永远到不了老工作区。
+     */
+    const WS_OLD = wsId('ws-memory-tidy-old')
+    await ensureBuiltinMemoryTidy(store, WS_OLD)
+    const found = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found)
+    // 摆回旧版默认（逐字）
+    await store.insertAgent({
+      ...found,
+      instructions: MEMORY_TIDY_INSTRUCTIONS_V1,
+      updatedAt: Date.now(),
+    })
+    const result = await ensureBuiltinMemoryTidy(store, WS_OLD)
+    assert.equal(result.action, 'healed')
+    const after = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS, '升级成当前默认')
+    assert.match(after?.instructions ?? '', /要泛化/)
+  })
+
+  test('★★ 但**使用者自己写的**指令绝不升级（判据是"逐字等于历史默认"）', async () => {
+    const WS_MINE = wsId('ws-memory-tidy-mine')
+    await ensureBuiltinMemoryTidy(store, WS_MINE)
+    const found = (await store.listAgents(WS_MINE)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.ok(found)
+    await store.insertAgent({
+      ...found,
+      instructions: `${MEMORY_TIDY_INSTRUCTIONS_V1}\n\n（我自己加的一条：报告要短）`,
+      updatedAt: Date.now(),
+    })
+    const result = await ensureBuiltinMemoryTidy(store, WS_MINE)
+    assert.equal(result.action, 'left-alone')
+    const after = (await store.listAgents(WS_MINE)).find((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.match(after?.instructions ?? '', /我自己加的一条/)
   })
 
   test('★★ `ensureBuiltinAgents` 两条一起对账（启动那条路）', async () => {

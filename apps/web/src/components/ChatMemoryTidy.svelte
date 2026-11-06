@@ -35,11 +35,22 @@
     from: string | null
     /** 平台核对过：这段原话真的在人说过的话里。 */
     grounded: boolean
+    /** ★ 分批第 248 批：正文里提到了这次对话的对象（标题里的专名）⇒ 只对这次成立。 */
+    subjectSpecific: boolean
+    /** 命中的那个专名（"提到「Distilly」"）。 */
+    subjectTerm: string | null
   }
 
   type Answer = {
     status: string
-    candidates: Array<{ kind: MemoryKindId; text: string; from: string | null; grounded: boolean }> | null
+    candidates: Array<{
+      kind: MemoryKindId
+      text: string
+      from: string | null
+      grounded: boolean
+      subjectSpecific: boolean
+      subjectTerm: string | null
+    }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
     failure?: string | null
@@ -74,6 +85,8 @@
       kind: MemoryKindId
       from: string | null
       grounded: boolean
+      subjectSpecific: boolean
+      subjectTerm: string | null
       on: boolean
     }>
   >([])
@@ -156,7 +169,11 @@
         kind: c.kind,
         from: c.from,
         grounded: c.grounded,
-        on: c.grounded,
+        subjectSpecific: c.subjectSpecific,
+        subjectTerm: c.subjectTerm,
+        // ★ 只对这次成立的也默认不勾（与"出处对不上"同一条纪律：默认不给，
+        //   人要勾就自己勾——它是这次的记录，不该占泛化条目的预算）
+        on: c.grounded && !c.subjectSpecific,
       }))
       const dropped = out.dropped.length
       droppedNote = dropped === 0 ? '' : $t('chat.tidyDropped', { n: String(dropped) })
@@ -251,7 +268,11 @@
           栅格把三列的宽度与左边缘钉死（`auto 1fr auto`），对齐就由布局本身保证，
           不靠"大家都一样高"这种运气。
         -->
-        <div class="tidy-row" class:on={row.on} class:ungrounded={!row.grounded}>
+        <div
+          class="tidy-row"
+          class:on={row.on}
+          class:ungrounded={!row.grounded || row.subjectSpecific}
+        >
           <input
             type="checkbox"
             data-tidy-check
@@ -296,6 +317,14 @@
               <span class="tidy-from bad" data-tidy-from title={$t('chat.tidyNoFrom')}>
                 <span class="tidy-from-mark" aria-hidden="true">⚠</span>
                 <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
+              </span>
+            {/if}
+            {#if row.subjectSpecific}
+              <span class="tidy-from bad" data-tidy-subject title={$t('chat.tidySubjectHint')}>
+                <span class="tidy-from-mark" aria-hidden="true">⚠</span>
+                <span class="tidy-from-t">
+                  {$t('chat.tidySubject', { term: row.subjectTerm ?? '' })}
+                </span>
               </span>
             {/if}
           </span>

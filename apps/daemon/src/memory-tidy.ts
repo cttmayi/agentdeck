@@ -140,6 +140,20 @@ export type TidyCandidate = {
    */
   from: string | null
   /**
+   * ★ 分批第 248 批：这条候选**提到这次对话的对象**了吗（比如调研的那个项目名）。
+   *
+   * 使用者第二次打回的正是这种：调研 Distilly 的对话里整理出「Distilly 本体就是一个 Skill」
+   * 「解释 Distilly 时不要使用"编译器"这一比喻」——只在"又聊到 Distilly"时成立。
+   * 身份里已经写了"要泛化"的规矩，但模型会犯懒，所以平台再给一记**机械提示**：
+   * 候选正文里出现了**这段对话标题里的专名** ⇒ 标出来、界面默认不勾（人仍可亲手勾）。
+   *
+   * ⚠️ 这是**提示**不是判决：`pnpm`/`git`/`json` 这类到处都在的词不算专名（见 `UBIQUITOUS`），
+   *    否则每一条都会被误标，人就不看这个标记了。
+   */
+  subjectSpecific: boolean
+  /** 命中的那个专名（画在界面上："提到「Distilly」"）；没命中是 null。 */
+  subjectTerm: string | null
+  /**
    * 出处核对的结果：`from` 那段原话**真的**在某个人的发言里（空白归一后是子串）。
    *
    * ⚠️ 为什么是平台核对而不是只写在提示词里：提示词写给模型看，模型会犯懒；
@@ -148,6 +162,31 @@ export type TidyCandidate = {
    *    除非人亲手勾上。
    */
   grounded: boolean
+}
+
+/**
+ * 到处都在的词：它们出现在这段对话的标题里也不说明"这是这次的对象"。
+ *
+ * ⚠️ 这份清单**宁短不长**：长清单会让真正的专名（Distilly / acme-api）漏标，
+ *    短清单只会多标几条（人看一眼就知道该不该勾）。漏标比误标坏。
+ */
+const UBIQUITOUS = new Set([
+  'the', 'and', 'for', 'with', 'this', 'that', 'you', 'how', 'why', 'what',
+  'json', 'yaml', 'html', 'css', 'http', 'https', 'url', 'api', 'cli', 'sdk',
+  'git', 'npm', 'pnpm', 'yarn', 'node', 'deno', 'bun', 'deno', 'ts', 'js', 'md',
+  'test', 'tests', 'dist', 'src', 'docs', 'readme', 'todo', 'ok', 'id', 'ui', 'ux',
+  'web', 'app', 'apps', 'lib', 'bin', 'tmp', 'env', 'dev', 'prod', 'ci', 'pr',
+])
+
+/** 抽出"看起来是专名"的词：拉丁字母打头、至少 3 个字符（中文专名靠人看，机器不猜）。 */
+function properNouns(text: string): string[] {
+  const out = new Set<string>()
+  for (const m of text.matchAll(/[A-Za-z][A-Za-z0-9_.-]{2,}/g)) {
+    const raw = m[0].replace(/[.-]+$/, '')
+    if (raw.length < 3 || UBIQUITOUS.has(raw.toLowerCase())) continue
+    out.add(raw)
+  }
+  return [...out]
 }
 
 export type TidyParse = {
@@ -183,6 +222,8 @@ export function parseTidyOutput(
   text: string,
   /** 这段对话里**人**说过的所有话（用来核对 `from`；不给 ⇒ 一律算对不上）。 */
   humanTexts: readonly string[] = [],
+  /** 这段对话的标题/对象（用来标出"只对这次成立"的候选；不给 ⇒ 不做这项检查）。 */
+  subjectTexts: readonly string[] = [],
 ): TidyParse {
   const norm = (v: string): string => v.replace(/\s+/g, ' ').trim()
   const humanAll = humanTexts.map(norm).filter((v) => v !== '')
@@ -228,6 +269,9 @@ export function parseTidyOutput(
 
   const candidates: TidyCandidate[] = []
   const seen = new Set<string>()
+  // 这段对话的"对象专名"（标题里出现的、不像通用词的拉丁词）
+  const subjectTerms = new Set<string>()
+  for (const t of subjectTexts) for (const noun of properNouns(t)) subjectTerms.add(noun.toLowerCase())
   for (const item of raw) {
     const row = item as { kind?: unknown; text?: unknown; from?: unknown } | null
     const kind = typeof row?.kind === 'string' ? row.kind.trim() : ''
@@ -258,11 +302,14 @@ export function parseTidyOutput(
       dropped.push({ text: text.slice(0, 40), reason: 'too_many' })
       continue
     }
+    const hit = properNouns(text).find((noun) => subjectTerms.has(noun.toLowerCase())) ?? null
     candidates.push({
       kind: kind as MemoryKind,
       text,
       from: fromRaw === '' ? null : fromRaw,
       grounded: fromRaw === '' ? false : isGrounded(fromRaw),
+      subjectSpecific: hit !== null,
+      subjectTerm: hit,
     })
   }
   return { candidates, dropped, parsed: true }
