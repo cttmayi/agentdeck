@@ -141,13 +141,24 @@ export function renderExistingMemory(entries: readonly MemoryEntry[]): string {
     '',
     '这些是它**已经记住的**。已经有同义的就不要再提一条新的；要改就提新的一版并在',
     '`replaces` 里写上下面**那一行的原文**（平台据此做"加一条 + 删旧的"）。',
+    '每条的「出自」是那句话的来源原话——**同一句原话已经产出过条目，就别再从它提新的**',
     '',
   ]
   if (alive.length === 0) {
     lines.push('（还没有任何记忆）', '')
     return lines.join('\n')
   }
-  for (const e of alive) lines.push(`- [${MEMORY_KIND_LABEL[e.kind]}] ${e.text}`)
+  for (const e of alive) {
+    lines.push(`- [${MEMORY_KIND_LABEL[e.kind]}] ${e.text}`)
+    /**
+     * ★ 分批第 252 批：把**它的来源原话**也写出来。
+     *   这是"同一句话被反复整理成好几条"的直接证据——模型看得见"这句原话我已经记过两条了"，
+     *   就不该再提第三条（平台那边还有一道按原话的标记兜底）。
+     */
+    if (e.source !== undefined && e.source.trim() !== '') {
+      lines.push(`  - 出自：「${e.source.trim()}」`)
+    }
+  }
   lines.push('')
   return lines.join('\n')
 }

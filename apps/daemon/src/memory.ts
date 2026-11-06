@@ -123,6 +123,11 @@ export interface AddMemoryInput {
   text: unknown
   /** 出处（哪条 run）——聊天里记下的带，手写的不带。 */
   evidence?: string | undefined
+  /**
+   * ★ 分批第 252 批：**人的原话**（这条记忆从那句话来的）。
+   * 它同时是"同一句话被反复整理"的查重键——见 `findBySource`。
+   */
+  source?: string | undefined
   pinned?: boolean | undefined
   /** 测试缝：id 与时间。 */
   newId?: () => string
@@ -147,6 +152,27 @@ export function normalizeMemoryText(text: string): string {
     // 结尾标点抹掉：中文句号、英文句号、感叹/问号、分号、逗号
     .replace(/[。．.！!？?；;，,、]+$/u, '')
     .trim()
+}
+
+/**
+ * ★ 分批第 252 批（使用者提的做法）：**按"人的原话"查重**。
+ *
+ * 比按正文查重可靠得多：同一段对话整理三次，模型每次把同一句话改写成不同的措辞
+ * （实测同义改写的字符重合度只有 0.17–0.53，机械阈值分不开），但那句话**是同一句**
+ * ——`from` 必须逐字抄自对话，所以它是天然的查重键。
+ *
+ * ⚠️ 但它**不硬丢**：一句人可以同时说出两件事（"这个仓库用 pnpm，测试前先跑 git status"
+ *    ⇒ 两条记忆），所以"同源"只用来**标出来**（界面默认不勾，人仍可勾）——见调用方。
+ */
+export function findBySource(
+  active: readonly MemoryEntry[],
+  source: string,
+): MemoryEntry[] {
+  const target = normalizeMemoryText(source)
+  if (target === '') return []
+  return active.filter(
+    (e) => e.removedAt === null && e.source !== undefined && normalizeMemoryText(e.source) === target,
+  )
 }
 
 /** 库里已有同一条了吗？（只在**活着的**条目里找） */
@@ -243,6 +269,10 @@ export async function addMemoryEntry(store: Store, input: AddMemoryInput): Promi
   }
 
   const now = (input.now ?? Date.now)()
+  const sourceText =
+    typeof input.source === 'string' && input.source.trim() !== ''
+      ? input.source.trim().slice(0, 2000)
+      : undefined
   const entry: MemoryEntry = {
     id: ((input.newId ?? ulid)() as MemoryEntryId),
     workspaceId: input.workspaceId,
@@ -250,6 +280,7 @@ export async function addMemoryEntry(store: Store, input: AddMemoryInput): Promi
     kind,
     text: text.text,
     ...(input.evidence === undefined || input.evidence === '' ? {} : { evidence: input.evidence }),
+    ...(sourceText === undefined ? {} : { source: sourceText }),
     pinned: input.pinned === true,
     useCount: 0,
     lastUsedAt: null,

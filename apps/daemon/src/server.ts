@@ -210,6 +210,7 @@ import {
   effectiveMemoryPrefixes,
   listActiveMemory,
   MEMORY_DISABLED_MESSAGE,
+  findBySource,
   findDuplicateMemory,
   memoryEnabledOf,
   removeMemoryEntry,
@@ -5578,6 +5579,7 @@ async function injectedSkillsOf(
             text?: unknown
             evidence?: unknown
             replaces?: unknown
+            source?: unknown
           }
           const result = await addMemoryEntry(store, {
             workspaceId,
@@ -5586,6 +5588,10 @@ async function injectedSkillsOf(
             text: row.text,
             ...(typeof row.evidence === 'string' && row.evidence !== ''
               ? { evidence: row.evidence }
+              : {}),
+            // ★ 分批第 252 批：记下"这条是从哪句人话来的"（同源查重与追溯都用它）
+            ...(typeof row.source === 'string' && row.source.trim() !== ''
+              ? { source: row.source }
               : {}),
           })
           if (!result.ok) {
@@ -8464,12 +8470,26 @@ async function injectedSkillsOf(
            */
           const replaced =
             c.replaces === null ? null : findDuplicateMemory(existing, c.replaces)
+          /**
+           * ★ 分批第 252 批（使用者提的做法）：**按"人的原话"查重**。
+           *
+           * 中文改写之间的字符重合度太低（同义句子 0.17–0.53，与"完全不同"的那一对重合），
+           * 按正文查重挡不住"三次整理、三套措辞"。但 `from` 必须**逐字抄自对话**——
+           * 同一句话在三次整理里是**同一串字符**。所以拿它当键：
+           * 这句原话已经产出过条目 ⇒ 标出来、界面默认不勾。
+           *
+           * ⚠️ 只标、不硬丢：一句人可以同时说两件事（"用 pnpm，测试前先 git status"），
+           *    那两条都该留。
+           */
+          const sameSource = c.from === null ? [] : findBySource(existing, c.from)
           return {
             ...c,
             alreadyExists: hit !== null,
             existingId: hit === null ? null : hit.id,
             replacesId: replaced === null ? null : replaced.id,
             replacesText: replaced === null ? null : replaced.text,
+            sameSourceCount: sameSource.length,
+            sameSourceTexts: sameSource.map((e) => e.text),
           }
         })
         sendJson(res, 200, {

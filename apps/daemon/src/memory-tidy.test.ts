@@ -352,3 +352,65 @@ describe('已有记忆：写进分析小屋，让它别重复提', () => {
     assert.match(MEMORY_TIDY_INSTRUCTIONS, /加一条 \+ 删旧的/)
   })
 })
+
+/**
+ * 按「人的原话」查重（分批第 252 批，**使用者提的做法**）。
+ *
+ * 这比按正文查重可靠得多：同一段对话整理三次，模型每次把同一句话改写成不同的措辞
+ * （实测同义改写的字符重合度只有 0.17–0.53，机械阈值分不开），但那句话**是同一句**
+ * ——`from` 必须逐字抄自对话，所以它是天然的查重键。
+ *
+ * ⚠️ 它只**标**不丢：一句人可以同时说两件事（"用 pnpm，测试前先 git status"⇒ 两条记忆）。
+ */
+describe('按原话查重：同一句人话不重复产出', () => {
+  const mk = (over: { id: string; text: string; source?: string }): MemoryEntry =>
+    ({
+      id: over.id,
+      workspaceId: 'ws-1',
+      agentId: 'agent-1',
+      kind: 'preference',
+      text: over.text,
+      ...(over.source === undefined ? {} : { source: over.source }),
+      evidence: null,
+      pinned: false,
+      useCount: 0,
+      lastUsedAt: null,
+      createdAt: 1,
+      removedAt: null,
+    }) as unknown as MemoryEntry
+
+  test('★★ 同一句原话（只差排版）⇒ 找得到已有的那些', async () => {
+    const { findBySource } = await import('./memory.ts')
+    const existing = [
+      mk({ id: 'm1', text: '文章要短、图要少', source: '文章要短一点，图少一点' }),
+      mk({ id: 'm2', text: '解释工具别用比喻', source: '别用比喻，我困惑了' }),
+    ]
+    const hits = findBySource(existing, '  文章要短一点，图少一点。')
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0]?.id, 'm1')
+  })
+
+  test('★★ 一句原话产出两条不同的事实 ⇒ 两条都留着（"同源"只是标出来，不硬丢）', async () => {
+    const { findBySource } = await import('./memory.ts')
+    const existing = [mk({ id: 'm1', text: '用 pnpm', source: '用 pnpm，测试前先 git status' })]
+    const hits = findBySource(existing, '用 pnpm，测试前先 git status')
+    assert.equal(hits.length, 1, '找得到同源的那条')
+    // ⚠️ 但落库那边不会拒绝第二条：正文不同就不是重复
+    const { findDuplicateMemory } = await import('./memory.ts')
+    assert.equal(findDuplicateMemory(existing, '测试前先跑 git status'), null, '不同的那条照收')
+  })
+
+  test('★ 手写的条目（没有 source）不参与按原话的比对', async () => {
+    const { findBySource } = await import('./memory.ts')
+    const existing = [mk({ id: 'm1', text: '文章要短、图要少' })]
+    assert.deepEqual(findBySource(existing, '文章要短一点'), [])
+  })
+
+  test('★★ 已有记忆那份文件里带上「出自：原话」（模型看得见它记过什么）', () => {
+    const text = renderExistingMemory([
+      mk({ id: 'm1', text: '文章要短、图要少', source: '文章要短一点，图少一点' }),
+    ])
+    assert.match(text, /出自：「文章要短一点，图少一点」/)
+    assert.match(text, /同一句原话已经产出过条目/)
+  })
+})

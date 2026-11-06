@@ -1150,6 +1150,58 @@ describe('记忆：真的进了第一句话（端到端）', () => {
  * 这一组量的是**后端那一道**（界面是第一道，不是唯一一道）：关掉之后三个写入口都拒
  * `memory_disabled`，而**删/撤销照样能走**（关掉不该让已经记下的东西卡死在里面）。
  */
+describe('来源原话：记下来、按它查重（分批第 252 批）', () => {
+  test('★★ 写进去时带上 `source`，详情接口原样带出（下次整理按它比对）', async () => {
+    const dir = await makeTempDir('memory-source-api')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: false, command: 'claude', cliVersion: null }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '来源测试', instructions: '你是干活的' }),
+      })
+      const agent = (await created.json()) as { id: string }
+      await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: [
+            {
+              kind: 'preference',
+              text: '文章要短、图要少',
+              source: '文章要短一点，图少一点，别搞那么多配图',
+            },
+          ],
+        }),
+      })
+      const detail = (await (await fetch(`${d.url}/api/agents/${agent.id}`)).json()) as {
+        memory: Array<{ text: string; source?: string }>
+      }
+      assert.equal(detail.memory.length, 1)
+      assert.equal(detail.memory[0]?.source, '文章要短一点，图少一点，别搞那么多配图')
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  })
+})
+
 describe('替换：`replaces` = 旧记忆的新版（分批第 251 批）', () => {
   test('★★★ 先加新的、再删旧的（同一个请求里完成；删是打时间戳）', async () => {
     const dir = await makeTempDir('memory-replace-api')

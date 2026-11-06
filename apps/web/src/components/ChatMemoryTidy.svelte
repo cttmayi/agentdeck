@@ -44,6 +44,9 @@
     /** ★ 分批第 251 批：这是某条旧记忆的**新版**（平台已核对旧条目确实存在）。 */
     replacesId: string | null
     replacesText: string | null
+    /** ★ 分批第 252 批：**这句原话已经产出过条目**（按来源查重，不看措辞）。 */
+    sameSourceCount: number
+    sameSourceTexts: string[]
   }
 
   type Answer = {
@@ -58,6 +61,8 @@
       alreadyExists: boolean
       replacesId: string | null
       replacesText: string | null
+      sameSourceCount: number
+      sameSourceTexts: string[]
     }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
@@ -74,7 +79,13 @@
     open?: boolean
     conversationId?: string
     onconfirm: (
-    items: Array<{ text: string; kind: MemoryKindId; evidence?: string; replaces?: string }>,
+    items: Array<{
+      text: string
+      kind: MemoryKindId
+      evidence?: string
+      replaces?: string
+      source?: string
+    }>,
   ) => void
     oncancel: () => void
   } = $props()
@@ -100,6 +111,8 @@
       alreadyExists: boolean
       replacesId: string | null
       replacesText: string | null
+      sameSourceCount: number
+      sameSourceTexts: string[]
       on: boolean
     }>
   >([])
@@ -187,11 +200,15 @@
         alreadyExists: c.alreadyExists,
         replacesId: c.replacesId,
         replacesText: c.replacesText,
+        sameSourceCount: c.sameSourceCount,
+        sameSourceTexts: c.sameSourceTexts,
         /**
          * 默认只勾"出处对得上、不专指这次对象、而且还没记过"的那几条。
          * 三种默认不勾对应三种"它不该被记"的理由：编的 / 只对这次成立 / 已经记过。
          */
-        on: c.grounded && !c.subjectSpecific && !c.alreadyExists,
+        // ★ 第 252 批：这句原话已经产出过条目的，也默认不勾（它就是"三次整理三套措辞"
+        //   里重复的那一类；人仍可亲手勾——一句原话确实可能有两件不同的事）
+        on: c.grounded && !c.subjectSpecific && !c.alreadyExists && c.sameSourceCount === 0,
       }))
       const dropped = out.dropped.length
       droppedNote = dropped === 0 ? '' : $t('chat.tidyDropped', { n: String(dropped) })
@@ -210,6 +227,8 @@
       chosen.map((r) => ({
         text: r.text.trim(),
         kind: r.kind,
+        // ★ 第 252 批：记下"这条是从哪句人话来的"——下次整理按它查重（不看措辞）
+        ...(r.from === null ? {} : { source: r.from }),
         // ★ 批次第 251 批：这条是旧记忆的新版 ⇒ 平台"先加新的、再删旧的"
         ...(r.replacesId === null ? {} : { replaces: r.replacesId }),
         // 出处：这次整理那条 run（"这条记忆是哪次整理挑出来的"以后查得到）
@@ -343,6 +362,17 @@
               <span class="tidy-from" data-tidy-replaces title={$t('chat.tidyReplacesHint')}>
                 <span class="tidy-from-mark" aria-hidden="true">↻</span>
                 <span class="tidy-from-t">{$t('chat.tidyReplaces', { old: row.replacesText ?? '' })}</span>
+              </span>
+            {/if}
+            {#if row.sameSourceCount > 0}
+              <span class="tidy-from bad" data-tidy-same-source title={row.sameSourceTexts.join('\n')}>
+                <span class="tidy-from-mark" aria-hidden="true">⚠</span>
+                <span class="tidy-from-t">
+                  {$t('chat.tidySameSource', {
+                    n: String(row.sameSourceCount),
+                    first: row.sameSourceTexts[0] ?? '',
+                  })}
+                </span>
               </span>
             {/if}
             {#if row.alreadyExists}

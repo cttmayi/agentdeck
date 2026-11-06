@@ -203,7 +203,13 @@
   /** 把一句（或多句）写成记忆；失败只说一句，不打断对话。 */
   async function captureMemory(
     agentId: string,
-    entries: Array<{ text: string; kind: string; evidence?: string; replaces?: string }>,
+    entries: Array<{
+      text: string
+      kind: string
+      evidence?: string
+      replaces?: string
+      source?: string
+    }>,
     noteKey: string,
     noteText: string,
   ): Promise<string[] | null> {
@@ -476,6 +482,11 @@
       memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''
         ? memCandidate
         : null
+    /**
+     * 这一句的**原文**（含触发词）——记忆的 `source` 记它。
+     * ⚠️ 要在 `input = ''` 之前取；它同时也是"同一句话被反复记"的查重键。
+     */
+    const memCandidateRaw = memoryToSave === null ? '' : input.trim()
     // 手动模式只管这一句：发出去（或下面 return 掉）就复位，免得下一句被顺带记住
     memForced = false
     /**
@@ -509,7 +520,15 @@
         if (memoryToSave !== null) {
           await captureMemory(
             out.conversation.agentId,
-            [{ text: memoryToSave.text, kind: 'fact', ...(out.runId === null ? {} : { evidence: out.runId }) }],
+            [
+              {
+                text: memoryToSave.text,
+                kind: 'fact',
+                // ★ 分批第 252 批：来源原话 = 人打的那一整句（含触发词）——下次按它查重
+                source: memCandidateRaw,
+                ...(out.runId === null ? {} : { evidence: out.runId }),
+              },
+            ],
             out.turn.id,
             memoryToSave.text,
           )
@@ -537,7 +556,14 @@
       if (memoryToSave !== null) {
         await captureMemory(
           memAgentId,
-          [{ text: memoryToSave.text, kind: 'fact', ...(out.runId === null ? {} : { evidence: out.runId }) }],
+          [
+            {
+              text: memoryToSave.text,
+              kind: 'fact',
+              source: memCandidateRaw,
+              ...(out.runId === null ? {} : { evidence: out.runId }),
+            },
+          ],
           out.turn.id,
           memoryToSave.text,
         )
@@ -1133,6 +1159,8 @@
               ...(it.evidence === undefined ? {} : { evidence: it.evidence }),
               // ★ 分批第 251 批：整理想说"这条是某条旧记忆的新版"时，平台先加新的再删旧的
               ...(it.replaces === undefined ? {} : { replaces: it.replaces }),
+              // ★ 分批第 252 批：这条的**来源原话**（下次整理按它查重，不看措辞）
+              ...(it.source === undefined ? {} : { source: it.source }),
             })),
             // 空 key：这一批不挂在某一轮上（用下面那条 `tidyNote` 显示）
             '',

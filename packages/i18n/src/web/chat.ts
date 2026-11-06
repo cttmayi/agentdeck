@@ -200,6 +200,16 @@ export const chatText = {
    * ★ 分批第 251 批：这条是**某条已有记忆的新版**（整理时它读到了 existing-memory.md）。
    *   平台已核对旧条目确实存在；确认后先加新的、再删旧的（本平台唯一的改法）。
    */
+  /**
+   * ★ 分批第 252 批（使用者提的做法）：**按"人的原话"查重**。
+   *
+   * 同一句原话已经产出过条目 ⇒ 标出来、默认不勾。它比按正文查重可靠：中文改写之间的
+   * 字符重合度太低（同义句 0.17–0.53），而"原话"是逐字抄自对话的，三次整理都一样。
+   */
+  'chat.tidySameSource': {
+    zh: '这句原话已经记过 {n} 条（如「{first}」）——默认不勾',
+    en: 'This sentence already produced {n} entry(ies), e.g. "{first}" — unchecked by default',
+  },
   'chat.tidyReplaces': { zh: '替换旧条目：「{old}」', en: 'Replaces an existing entry: "{old}"' },
   'chat.tidyReplacesHint': {
     zh: '确认之后平台会先记下这一条新的、再删掉旧的那条（删是打时间戳，可追溯）。',
