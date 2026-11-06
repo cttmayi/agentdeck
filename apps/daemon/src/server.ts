@@ -206,7 +206,6 @@ import {
 } from './memory-tidy.ts'
 import {
   DEFAULT_MEMORY_PREFIXES,
-  MEMORY_TEXT_MAX,
   addMemoryEntry,
   applyMemoryDelta,
   effectiveMemoryPrefixes,

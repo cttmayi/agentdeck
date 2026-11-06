@@ -130,7 +130,7 @@ describe('记忆：加一条', () => {
     }
   })
 
-  test('★★ 满了（40 条）⇒ `limit_reached`，**不驱逐**最旧的那条', async () => {
+  test('★★ 满了（上限 ${MEMORY_LIMIT} 条，第 267 批起是 100）⇒ `limit_reached`，**不驱逐**最旧的那条', async () => {
     const seed: MemoryEntry[] = Array.from({ length: MEMORY_LIMIT }, (_, i) => ({
       id: `seed-${i}` as MemoryEntryId,
       workspaceId: WS,
@@ -366,7 +366,7 @@ describe('记忆：顺序与置顶上限', () => {
     assert.deepEqual(
       listed,
       ['置顶的教训', '约定甲', '偏好甲', '事实甲', '教训甲'],
-      '界面从上到下就是"预算不够时先丢下面的"——顺序必须与第一句话一致',
+      '界面从上到下就是它们进第一句话的顺序——顺序必须与第一句话一致',
     )
   })
 
