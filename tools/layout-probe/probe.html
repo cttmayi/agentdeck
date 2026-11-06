@@ -509,6 +509,62 @@
           }
         })()
 
+        /**
+         * ★ 分批第 253 批（使用者报"记忆我点『删』，没有反应"）：**行内动作点了要看得见**。
+         *
+         * 「删」不是立刻删（划掉 + 保存才生效，与「指令」同一套写语义），所以它至少要做到两件：
+         *   ① 点完那一行**当场**变成划掉态（`data-dropped="1"`）——第一版就地改 `row.drop`，
+         *      legacy 反应式下不重渲染，于是"数据变了、界面纹丝不动"；
+         *   ② 说出"还没保存"（不然人以为按钮坏了）。
+         * 量完用「恢复」还原，**不保存**（不改库里的东西）。
+         */
+        facts['agents.memoryRowActions'] = await (async () => {
+          const section = d().querySelector('[data-agent-memory]')
+          if (!section) return null
+          const rows = [...section.querySelectorAll('[data-mem-row]')]
+          const row = rows.find((r) => r.getAttribute('data-dropped') !== '1') ?? null
+          if (!row) return { reason: '没有可试的行' }
+          const before = row.getAttribute('data-dropped')
+          const btn = row.querySelector('[data-mem-remove]')
+          if (!btn) {
+            // 动作是悬停才出现的：先触发 hover（用 focus 更稳，`focus-within` 也让它们出现）
+            const textEl = row.querySelector('[data-mem-edit]')
+            if (textEl) textEl.focus()
+          }
+          // 悬停/聚焦之后重新取一遍（节点可能被重建）
+          const live = [...section.querySelectorAll('[data-mem-row]')].find(
+            (r) => r.getAttribute('data-dropped') !== '1',
+          )
+          const removeBtn = live?.querySelector('[data-mem-remove]')
+          if (!live || !removeBtn) return { reason: '找不到那一行的删' }
+          click(removeBtn)
+          const droppedNow = await untilNet(
+            () =>
+              [...section.querySelectorAll('[data-mem-row]')].some(
+                (r) => r.getAttribute('data-dropped') === '1',
+              ),
+            40,
+          )
+          const pendingHint = await untilNet(
+            () => !!d().querySelector('[data-memory-pending]'),
+            40,
+          )
+          // 恢复（别把"划掉"留在界面上——后面还有判据要看这一节）
+          const droppedRow = [...section.querySelectorAll('[data-mem-row]')].find(
+            (r) => r.getAttribute('data-dropped') === '1',
+          )
+          const undo = droppedRow?.querySelector('[data-mem-undo]')
+          if (undo) click(undo)
+          const restored = await untilNet(
+            () =>
+              [...section.querySelectorAll('[data-mem-row]')].every(
+                (r) => r.getAttribute('data-dropped') !== '1',
+              ),
+            40,
+          )
+          return { before, droppedNow, pendingHint, restored }
+        })()
+
         facts['agents.memoryPreview'] = await (async () => {
           const btn = d().querySelector('[data-agent-memory] [data-memory-preview]')
           if (!btn) return null

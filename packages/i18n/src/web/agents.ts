@@ -63,6 +63,15 @@ export const agentsText = {
     zh: '{n} 条已经在记忆里了，没有重复添加',
     en: '{n} entry/entries were already remembered — not added twice',
   },
+  /**
+   * ★ 分批第 253 批：「删」是"划掉 + 保存才生效"（与「指令」同一套写语义）。
+   *   不写出来就是个坑：点了删、卡片还在 ⇒ 使用者以为按钮坏了（实测就是这么报的）。
+   *   ⚠️ 两个数字都可能为 0（"只删没加"也很常见），所以文案要经得起 0。
+   */
+  'agents.memoryPending': {
+    zh: '还没保存：{dropped} 条划掉待删除、{added} 条待新增——点下面的「保存」才生效。',
+    en: 'Not saved yet: {dropped} marked for removal, {added} to be added — click Save below to apply.',
+  },
   'agents.memoryEnabled': { zh: '启用记忆', en: 'Enable memory' },
   'agents.memoryEnabledHint': {
     zh: '关掉之后：不带入第一句话、不能手动添加、也不能「整理成记忆」。已有的条目不会删，再打开就照旧。',

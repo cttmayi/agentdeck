@@ -154,6 +154,16 @@
   let memPreviewBusy = false
   let memPreviewError = ''
   let memSeq = 0
+  /**
+   * ★ 分批第 253 批：标记了但**还没保存**的条数。
+   *
+   * 「删」不是立刻删——它是"划掉 + 点保存才生效"（与「指令」同一套写语义）。这一点
+   * 不写出来就是个坑：使用者点了删、看到卡片还在，就会以为按钮坏了（实测就是这么报的）。
+   */
+  $: memDroppedCount = memRows.filter((r) => r.drop && r.id !== null).length
+  $: memAddedCount = memRows.filter((r) => !r.drop && r.id === null && r.text.trim() !== '').length
+  $: memPending = memDroppedCount > 0 || memAddedCount > 0
+
   /** 记忆脏了没有（只为了禁用/启用"保存"与提示）。 */
   $: memDirty =
     memRows.some((r) => r.drop || r.id === null || r.pinned !== r.origPinned) ||
@@ -187,9 +197,23 @@
     return lines.join('\n')
   }
 
-  function togglePin(row: MemRow): void {
-    row.pinned = !row.pinned
+  /**
+   * ★ 分批第 253 批（使用者报："记忆我点『删』，没有反应"）：**必须整份重赋值**。
+   *
+   * 这一页是 legacy 反应式（`$:`），就地改 `row.drop = true` **不会**触发重渲染：
+   * 点了「删」数据其实变了、界面纹丝不动。同一个坑在「★ 置顶」上也在（点了星不亮）。
+   * 「改」之所以看起来正常，是因为它紧接着**重新赋值了 `memRows`**（顺带把划掉那一行
+   * 也画了出来）——也就是说，一个 bug 被另一个副作用暂时遮住了。
+   *
+   * 判据：改数组里的一项，就要给 `memRows` 一个新数组。
+   */
+  function patchRow(key: string, next: Partial<MemRow>): void {
+    memRows = memRows.map((r) => (r.key === key ? { ...r, ...next } : r))
     memError = ''
+  }
+
+  function togglePin(row: MemRow): void {
+    patchRow(row.key, { pinned: !row.pinned })
   }
 
   function addRow(): void {
@@ -220,7 +244,8 @@
    * 为什么不是原地改：记忆是 append-only 的记录，"这条被换掉过"本身是可查的事实。
    */
   function editRow(row: MemRow): void {
-    row.drop = true
+    // 先划掉旧的（`patchRow` 会重赋值——别只改 `row.drop`，见上面那段注释）
+    patchRow(row.key, { drop: true })
     memSeq += 1
     memRows = [
       ...memRows,
@@ -238,14 +263,12 @@
   }
 
   function removeRow(row: MemRow): void {
-    row.drop = true
-    memError = ''
+    patchRow(row.key, { drop: true })
   }
 
   /** 把"划掉"的那一行放回原样（**保存前**才有意义——保存之后它就真的删了）。 */
   function undropRow(row: MemRow): void {
-    row.drop = false
-    memError = ''
+    patchRow(row.key, { drop: false })
   }
 
   /**
@@ -800,6 +823,14 @@
             <p class="row-hint warn" data-memory-off-hint>{$t('agents.memoryOffHint')}</p>
           {/if}
 
+          {#if memPending}
+            <p class="row-hint warn" data-memory-pending>
+              {$t('agents.memoryPending', {
+                dropped: String(memDroppedCount),
+                added: String(memAddedCount),
+              })}
+            </p>
+          {/if}
           {#if memRows.length === 0}
             <p class="row-hint" data-memory-empty>{$t('agents.memoryEmpty')}</p>
           {:else}

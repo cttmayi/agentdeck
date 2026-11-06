@@ -486,6 +486,31 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.memoryRowActions',
+    /**
+     * ★ 分批第 253 批（使用者报："记忆我点『删』，没有反应"）。
+     *
+     * 根因是**就地改对象**：`row.drop = true` 在 legacy 反应式下不触发重渲染（同一处
+     * 「★ 置顶」也一样；「改」看起来正常，只是因为它顺带重新赋值了整个数组）。
+     * 这条判据量三件：点完当场划掉、说出"还没保存"、点「恢复」能还原。
+     */
+    label:
+      '★★★ 记忆行点「删」**当场**划掉并提示"还没保存"，点「恢复」能还原' +
+      '（就地改 row.drop 不触发重渲染 ⇒ 点了没反应，2026-11 实修）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.droppedNow === true &&
+      v.pendingHint === true &&
+      v.restored === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `划掉 ${String(v.droppedNow)}　还没保存提示 ${String(v.pendingHint)}　` +
+          `恢复 ${String(v.restored)}${v.reason === undefined ? '' : `　${String(v.reason)}`}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.memoryPreview',
     /**
      * ★ 分批第 240 批：「预览第一句话」是**只读**的，而且它显示的就是
