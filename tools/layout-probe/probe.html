@@ -511,6 +511,38 @@
            * 真正要看的是**两个控件等高等宽**（人眼看到的就是那两个框）：左边的指令输入框
            * 与右边的技能列表。格子本身已经同高（上面那条），这里再钉住"框也一样高"。
            */
+          /**
+           * ★ 分批第 258 批（使用者："挂载的技能里面每个技能的上下间隔太大"）：
+           *   grid 的 `align-content` 默认是 `stretch` —— 行数不够时会**把每一行拉开**去
+           *   铺满容器，于是技能少的时候中间出现一大段空白（看起来像"间距设得很大"）。
+           *   量两件：同一列相邻两项的**竖直间隙**、以及每个选项的实际高度（被拉开就会很高）。
+           */
+          const opts = [...card.querySelectorAll('.skill-picker .skill-option')]
+          const optRects = opts.map((el) => csOf(el))
+          // 两列网格：**按左边缘分列**再比同一列里相邻两项的竖直间隙
+          //（第一版拿"下标相邻的两项"比，而它们在左右两列里交替 ⇒ 一个间隙都没比到，
+          //  判据于是靠"项高 ≤40"兜底，而项高跟"行被拉伸"不是一回事）
+          const columns = new Map()
+          for (const r of optRects) {
+            const key = Math.round(r.left)
+            const list = columns.get(key) ?? []
+            list.push(r)
+            columns.set(key, list)
+          }
+          const colGaps = []
+          for (const list of columns.values()) {
+            list.sort((a, b) => a.top - b.top)
+            for (let i = 1; i < list.length; i += 1) {
+              colGaps.push(Math.round(list[i].top - list[i - 1].bottom))
+            }
+          }
+          const skillRows = {
+            count: opts.length,
+            // 选项自然高度：一个勾选框 + 一行字，超过 40px 说明被行拉伸了
+            maxItemH: optRects.length === 0 ? 0 : Math.round(Math.max(...optRects.map((r) => r.height))),
+            maxGap: colGaps.length === 0 ? 0 : Math.max(...colGaps),
+            gaps: colGaps,
+          }
           const box = card.querySelector('.instructions')
           const boxRect = box === null ? null : csOf(box)
           const pickerFillsCell =
@@ -524,6 +556,7 @@
             pairSameHeight,
             pickerScrolls,
             pickerFillsCell,
+            skillRows,
             // 诊断用（红了才看得懂）
             instrH: instr === null ? null : Math.round(instr.height),
             instrTop: instr === null ? null : Math.round(instr.top),
