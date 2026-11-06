@@ -505,7 +505,11 @@ const CHECKS = [
       v.pair?.present === true &&
       v.pair?.sameRow === true &&
       v.pair?.eachHalf === true &&
-      v.memOwnRow === true,
+      v.memOwnRow === true &&
+      // ★ 第 255 批：并排的两格同高；技能列表填满它、不无缘无故滚
+      v.pairSameHeight === true &&
+      v.pickerScrolls === false &&
+      v.pickerFillsCell === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
@@ -514,7 +518,11 @@ const CHECKS = [
             ? '没有洞'
             : `洞：${v.holes.map((h) => `[${h.cells.join(' / ')}]=${h.sum}/${h.innerW}`).join('；')}`) +
           `　指令|技能 同一行 ${String(v.pair?.sameRow)} 各占一半 ${String(v.pair?.eachHalf)}` +
-          `　记忆独占整行 ${String(v.memOwnRow)}`,
+          `　记忆独占整行 ${String(v.memOwnRow)}` +
+          `　指令|技能 同高 ${String(v.pairSameHeight)}　技能列表在滚 ${String(v.pickerScrolls)}` +
+          `　两个框同高 ${String(v.pickerFillsCell)}` +
+          `（高 指令格 ${String(v.instrH)} / 技能格 ${String(v.skillsH)} / 输入框 ${String(v.boxH)} / 列表 ${String(v.pickerH)}，` +
+          `顶 ${String(v.instrTop)}/${String(v.skillsTop)}，alignSelf ${String(v.instrAlignSelf)}）`,
   },
   {
     view: '智能体',

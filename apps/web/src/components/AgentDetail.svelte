@@ -1095,6 +1095,29 @@
   }
   .skills-cell.locked { opacity: 0.85; }
 
+  /**
+   * ★ 分批第 255 批（使用者："技能出现了滚动条，高度明显小于左侧的指令；既然是左右，
+   *   应该一样高"）：
+   *
+   * 两格并排之后，行高由**高的那一格**（指令，`min-height: 22rem`）决定；而技能那一格的
+   * 列表钉了 `max-height: 11rem` + `overflow-y: auto` ⇒ 它比左边矮一大截，还平白多出一根
+   * 滚动条。并排的两格就该**同高**：
+   *   · 两格都 `align-self: stretch`（铺满行高）；
+   *   · 列表改成"**填满剩下的高度**"，只有在真的装不下时才滚（那根滚动条才是有效信息：
+   *     "还有更多技能"）；
+   *   · 上限仍留一个（22rem，与指令同高）——不然技能特别多时会把整张卡顶穿。
+   */
+  .cell.instructions-cell,
+  .cell.skills-cell {
+    align-self: stretch;
+    min-height: 0;
+  }
+  .skills-cell .skill-picker {
+    flex: 1 1 auto;
+    max-height: 22rem;
+    min-height: 0;
+  }
+
   /* ★ 分批第 207 批：内置起草者挂的那条「沉淀用技能」（展示，不可编辑） */
   .builtin-skills {
     display: flex;
@@ -1175,6 +1198,15 @@
     flex-direction: column;
     gap: var(--sp-1);
     min-width: 0;
+    /**
+     * ★ 分批第 255 批：**必须清掉全局那条 `label { margin-bottom: var(--sp-3) }`**。
+     *
+     * 「指令」「名称」这些格子是 `<label>`，于是它们比 `div`/`section` 的格子多出 12px
+     * 下边距——并排时表现是"右边那格明明铺满了，左边那格底边矮一截"（实测指令 431、
+     * 技能 443，顶边一样、底边差 12：差的正是这个 margin）。网格自己已经有 `gap`，
+     * 格子不需要再带外边距。
+     */
+    margin-bottom: 0;
   }
 
   .cell-label {

@@ -339,6 +339,8 @@
     flex-direction: column;
     gap: var(--sp-1);
     min-width: 0;
+    /* ★ 第 255 批：清掉全局 `label { margin-bottom }`（并排的格子要一样高） */
+    margin-bottom: 0;
   }
 
   .cell-label {

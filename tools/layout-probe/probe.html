@@ -240,6 +240,7 @@
 
         facts['agents.cardCount'] = cards().length
 
+
         // ★★ 内置起草者 / 内置 skill 审核者那一行：角色徽标要说出它们是谁（§9/D81、§10/D82）。
         //    ⚠️ 这一条是**改出来才发现**的：列表原先写的是 `role === 'reviewer' ? 审核 : 执行`，
         //    加了 `drafter` / `skill-reviewer` 之后，它们被标成**「执行」**——一个永远不会
@@ -496,7 +497,46 @@
           }
           const memOwnRow =
             memory !== null && Math.abs(memory.width - innerW) <= 6
-          return { rows: rows.size, holes, innerW, pair, memOwnRow }
+          /**
+           * ★ 使用者（第 255 批）："技能出现了滚动条，高度明显小于左侧的指令；既然是左右，
+           *   应该一样高"。并排的两格**必须同高**，而技能列表只有在真的装不下时才滚。
+           */
+          const picker = card.querySelector('.skill-picker')
+          const pickerRect = picker === null ? null : csOf(picker)
+          const pairSameHeight =
+            instr !== null && skills !== null && Math.abs(instr.height - skills.height) <= 2
+          const pickerScrolls =
+            picker !== null && picker.scrollHeight > picker.clientHeight + 2
+          /**
+           * 真正要看的是**两个控件等高等宽**（人眼看到的就是那两个框）：左边的指令输入框
+           * 与右边的技能列表。格子本身已经同高（上面那条），这里再钉住"框也一样高"。
+           */
+          const box = card.querySelector('.instructions')
+          const boxRect = box === null ? null : csOf(box)
+          const pickerFillsCell =
+            pickerRect !== null && boxRect !== null && Math.abs(pickerRect.height - boxRect.height) <= 4
+          return {
+            rows: rows.size,
+            holes,
+            innerW,
+            pair,
+            memOwnRow,
+            pairSameHeight,
+            pickerScrolls,
+            pickerFillsCell,
+            // 诊断用（红了才看得懂）
+            instrH: instr === null ? null : Math.round(instr.height),
+            instrTop: instr === null ? null : Math.round(instr.top),
+            skillsTop: skills === null ? null : Math.round(skills.top),
+            instrAlignSelf: (() => {
+              const el = card.querySelector('.instructions-cell')
+              return el === null ? null : cs(el).alignSelf
+            })(),
+            skillsH: skills === null ? null : Math.round(skills.height),
+            pickerH: pickerRect === null ? null : Math.round(pickerRect.height),
+            boxH: boxRect === null ? null : Math.round(boxRect.height),
+            hasPicker: picker !== null,
+          }
         })()
 
         /**
