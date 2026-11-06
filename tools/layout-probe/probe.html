@@ -629,6 +629,53 @@
          *   ② 说出"还没保存"（不然人以为按钮坏了）。
          * 量完用「恢复」还原，**不保存**（不改库里的东西）。
          */
+        /**
+         * ★ 分批第 257 批（使用者："又发现了居中的选择框，比如『启用记忆』的选择框布局很奇怪"）：
+         *
+         * 两个具体病因，都能量：
+         *   ① `.mem-switch` 原来**没有任何样式** ⇒ 吃到全局 `label { display: block;
+         *      margin-bottom: 12px }` ⇒ 勾选框自成一块、上下各顶一行（量 `display` 与
+         *      `marginBottom` 就看得出来）；
+         *   ② 头部那一行是一堆 inline 元素挤在普通 `<span>` 里，没有 flex ⇒ 勾选框跟着
+         *      文字流走、被换行推到句子中间（量"标题行里每个控件的顶边是否一致"）。
+         *
+         * 现在：控件那行 `display:flex; align-items:center`（**只放单行短内容**），
+         * 会换行的说明挪到下面单独一行。
+         */
+        facts['agents.memoryHeader'] = await (async () => {
+          const head = d().querySelector('[data-agent-memory] .mem-head')
+          const sw = head?.querySelector('.mem-switch')
+          const box = sw?.querySelector('input[type="checkbox"]')
+          if (!head || !sw || !box) return { present: false }
+          const headRect = head.getBoundingClientRect()
+          const swRect = sw.getBoundingClientRect()
+          const boxRect = box.getBoundingClientRect()
+          const label = head.querySelector('.mem-count')
+          const labelRect = label === null ? null : label.getBoundingClientRect()
+          const btn = head.querySelector('[data-memory-preview]')
+          const btnRect = btn === null ? null : btn.getBoundingClientRect()
+          const hint = d().querySelector('[data-agent-memory] .mem-hint')
+          const hintRect = hint === null ? null : hint.getBoundingClientRect()
+          return {
+            present: true,
+            switchDisplay: cs(sw).display,
+            switchMargin: cs(sw).marginBottom,
+            // 控件都在同一视觉行里：顶边差不超过 6px
+            sameRow:
+              labelRect !== null &&
+              btnRect !== null &&
+              Math.abs(swRect.top - labelRect.top) <= 6 &&
+              Math.abs(btnRect.top - labelRect.top) <= 6,
+            // 头部不高（一行，不是被 block 的 label 撑成三行）
+            headHeight: Math.round(headRect.height),
+            // 说明在头部**下面**另一行
+            hintBelow: hintRect !== null && hintRect.top >= headRect.bottom - 2,
+            // 勾选框本身在它的文字左侧居中对齐（不是飘在句子中间）
+            boxInsideSwitch:
+              boxRect.left >= swRect.left - 1 && boxRect.right <= swRect.right + 1,
+          }
+        })()
+
         facts['agents.memoryRowActions'] = await (async () => {
           const section = d().querySelector('[data-agent-memory]')
           if (!section) return null

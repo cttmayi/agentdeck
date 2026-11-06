@@ -526,6 +526,40 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.memoryHeader',
+    /**
+     * ★ 分批第 257 批（使用者："又发现了居中的选择框，比如『启用记忆』的选择框布局很奇怪"）。
+     *
+     * 病因一：`.mem-switch` 没有样式 ⇒ 继承全局 `label { display: block; margin-bottom: 12px }`
+     * ⇒ 勾选框自成一块、上下各顶一行。
+     * 病因二：头部那一行是一堆 inline 元素挤在普通 `<span>` 里（没有 flex）⇒ 勾选框跟着
+     * 文字流走，被换行推到句子中间。
+     * 量四件：开关是行内（`display: flex` 且 `margin-bottom: 0`）、控件在同一视觉行、
+     * 头部只有一行高、会换行的说明在头部**下面**单独一行。
+     */
+    label:
+      '★★★ 「记忆」头部：勾选框是**行内小开关**（不是 block 撑成三行）、与标题同一行、' +
+      '会换行的说明在自己的下一行（2026-11 实修：全局 label 样式 + 没有 flex）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      (v.switchDisplay === 'flex' || v.switchDisplay === 'inline-flex') &&
+      v.switchMargin === '0px' &&
+      v.sameRow === true &&
+      v.headHeight <= 40 &&
+      v.hintBelow === true &&
+      v.boxInsideSwitch === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　开关 display ${String(v.switchDisplay)}　` +
+          `下边距 ${String(v.switchMargin)}　同一行 ${String(v.sameRow)}　` +
+          `头部高 ${String(v.headHeight)}　说明在下面 ${String(v.hintBelow)}　` +
+          `勾选框在开关内 ${String(v.boxInsideSwitch)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.memoryRowActions',
     /**
      * ★ 分批第 253 批（使用者报："记忆我点『删』，没有反应"）。

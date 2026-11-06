@@ -867,12 +867,21 @@
           ★ 与「指令」一起随页面底部那个「保存」提交，提交的是**差量**。
         -->
         <section class="cell memory-cell" data-agent-memory>
-          <span class="cell-label">
+          <!--
+            ★ 分批第 257 批（使用者："又发现了居中的选择框，比如『启用记忆』的选择框布局很奇怪"）：
+            这一行原来是**一堆 inline 元素挤在一个普通 `<span>` 里**（`记忆` / `条数` / 说明 /
+            勾选框 / 按钮），没有 flex ⇒ 勾选框跟着文字流走、换行时飘在句子中间；
+            而 `<label class="mem-switch">` 又没有任何样式，于是吃到了全局那条
+            `label { display: block; margin-bottom: var(--sp-3) }` ⇒ 它自成一块、上下各顶一行。
+            现在拆成两行：**控件那一行只放单行短内容**（可以用 `align-items: center`），
+            **会换行的说明单独一行**放下面——"会换行的子元素不许跟控件挤在一行"这条规矩
+            （见 `tools/layout-probe/README.md` 的坑清单）就是这么落地的。
+          -->
+          <span class="cell-label mem-head">
             {$t('agents.memoryLabel')}
             <span class="mem-count" data-memory-count>
               {$t('agents.memoryCount', { n: String(activeMemRows.length) })}
             </span>
-            <span class="label-hint">{$t('agents.memoryHint')}</span>
             <span class="spacer"></span>
             <!--
               ★ 分批第 245 批：**总开关**（使用者要求："配置页面里面有个选项，表示是否使能记忆功能"）。
@@ -898,6 +907,7 @@
               onclick={() => void openMemoryPreview()}
             >{$t('agents.memoryPreview')}</button>
           </span>
+          <p class="label-hint mem-hint">{$t('agents.memoryHint')}</p>
           {#if !draft.memoryEnabled}
             <p class="row-hint warn" data-memory-off-hint>{$t('agents.memoryOffHint')}</p>
           {/if}
@@ -1364,12 +1374,48 @@
     /* 整行宽：一行一条记忆 + 它下面的出处，半列宽会折成三行（见上面那段说明） */
     grid-column: 1 / -1;
   }
-  .memory-cell .cell-label .spacer {
+  /**
+   * ★ 分批第 257 批：「记忆」这一节的头部。
+   *
+   * 这一行里**只有单行短内容**（标题、条数、开关、预览按钮），所以 `align-items: center`
+   * 在这里是对的——会换行的说明被挪到下面单独一行了（`.mem-hint`）。
+   * 判据永远问同一句：**行里有没有会换行的子元素**？没有 ⇒ 居中安全；有 ⇒ 用栅格 + 顶部对齐。
+   */
+  .memory-cell .cell-label.mem-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    /* 窄屏时允许折行，但折的是整块控件，不会让勾选框飘进句子中间 */
+    flex-wrap: wrap;
+  }
+  .memory-cell .cell-label.mem-head .spacer {
     flex: 1;
+  }
+  /* 说明单独一行（可以自由换行，不跟控件抢同一行） */
+  .memory-cell .mem-hint {
+    margin: 2px 0 0;
   }
   .mem-count {
     color: var(--text-faint);
     font-size: var(--fs-xs);
+  }
+  /**
+   * ★ 分批第 257 批：`<label class="mem-switch">` 原来**没有样式**，于是继承了全局的
+   *   `label { display: block; margin-bottom: var(--sp-3) }`——勾选框自成一块、上下各顶
+   *   一行，看着像"布局坏了"。这里把它收成行内的小开关。
+   */
+  .mem-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .mem-switch input {
+    margin: 0;
   }
   /**
    * ★ 分批第 254 批：列表**限高 + 内部滚动**。
