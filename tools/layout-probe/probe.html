@@ -445,6 +445,11 @@
             countText,
             hasPreview: previewBtn !== null,
             hasAddRow: !!section.querySelector('[data-mem-add]'),
+            /**
+             * ★ 分批第 260 批：「合并同类…」只在"记忆开着 + 至少两条"时出现
+             *   （一条没什么可并的；关着则根本不该动记忆）。
+             */
+            hasConsolidate: !!section.querySelector('[data-memory-consolidate]'),
             rowBadge,
             // 诊断：这一节依赖"记忆开着"（新建的智能体默认关）
             enableStatus: enableRes.status,

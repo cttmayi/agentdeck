@@ -185,6 +185,27 @@ export function buildTidyPrompt(): string {
 不要解释、不要围栏。一条都挑不出就输出 \`[]\`——那是正常结果，不是失败。`
 }
 
+/**
+ * 「合并同类」那一轮的任务（分批第 260 批）。
+ *
+ * 与 `buildTidyPrompt` 的区别只有一处：**没有对话可读**，只读它的记忆。
+ * 要它干的事：把同义的几条并成一条更抽象、更完整的说法，并在 `replaces` 里点名那几条；
+ * 顺带把明显过时的列成 `forget`。
+ *
+ * ⚠️ 用的是**同一个**整理者 agent（同一条身份）：它的规矩（要泛化、别编造、出处、
+ *   别重复提）对合并同样成立——合并出来的那条也是"下次也成立"的说法。
+ */
+export function buildConsolidatePrompt(): string {
+  return `读这个工作目录里的 \`existing-memory.md\`（它现在的全部记忆），按你身份里那套规矩做一次**合并**：
+
+1. 找出**在说同一件事**的几条（措辞不同、意思相同）⇒ 合并成**一条更完整、更抽象**的说法，
+   在 \`replaces\` 里列出那几条的原文（数组，逐字照抄）。
+2. 相对**过时**（被别的话推翻、或明显已经被更好的说法取代）的 ⇒ 用 \`{"forget":"原文","why":"为什么"}\`。
+3. 既不重复也不过时的，**不要动**（别为了"有产出"硬并）。
+
+只输出一个 JSON 数组，不要解释、不要围栏。没有什么可合并的就输出 \`[]\`——那是正常结果。`
+}
+
 export type TidyCandidate = {
   kind: MemoryKind
   text: string
@@ -211,13 +232,25 @@ export type TidyCandidate = {
   /** 命中的那个专名（画在界面上："提到「Distilly」"）；没命中是 null。 */
   subjectTerm: string | null
   /**
-   * ★ 分批第 251 批：它想**替换**的那条旧记忆（原文，逐字）。`null` = 纯新增。
+   * ★ 分批第 251 批：它想**替换**的那几条旧记忆（原文，逐字）。空数组 = 纯新增。
    *
-   * 语义只有一种：这条候选是某条已有记忆的**新版**。平台拿这段原文去库里核对：
-   * 对得上 ⇒ 解析成 id，落库时"加新的 + 删旧的"（本平台唯一的改法）；对不上 ⇒ 当成新增，
-   * 并在界面上如实说"它想替换的那条没找到"。
+   * 语义只有一种：这条候选是某几条已有记忆的**新版**（一条或几条合并成一条更抽象的）。
+   * 平台拿这些原文去库里核对：对得上 ⇒ 解析成 id，落库时"加新的 + 删旧的"（本平台唯一的
+   * 改法）；对不上 ⇒ 当成新增，并在界面上如实说"它想替换的那条没找到"。
+   *
+   * ⚠️ 第 260 批：从"一条"扩成"一组"——「合并同类」要一次替换好几条（见 consolidate 那支）。
    */
-  replaces: string | null
+  replaces: string[]
+  /**
+   * ★ 分批第 260 批：**建议忘掉**的那条旧记忆（原文，逐字）。`null` = 这条不是删除建议。
+   *
+   * 从 Mem0 的 `DELETE` 学来的（`ADD` / `UPDATE` / `DELETE` / `NONE` 四选一）：在此之前
+   * 我们只有"加"与"替换"，**没有"删"** ⇒ 过时的记忆只能人翻列表手工删。
+   * 删除建议的候选**没有 `text`**（它不提新内容，只说这条该忘掉），落库时走 remove。
+   */
+  forget: string | null
+  /** 删除建议的理由（可选，给人看的依据）。 */
+  why: string | null
   /**
    * 出处核对的结果：`from` 那段原话**真的**在某个人的发言里（空白归一后是子串）。
    *
@@ -338,11 +371,47 @@ export function parseTidyOutput(
   const subjectTerms = new Set<string>()
   for (const t of subjectTexts) for (const noun of properNouns(t)) subjectTerms.add(noun.toLowerCase())
   for (const item of raw) {
-    const row = item as { kind?: unknown; text?: unknown; from?: unknown; replaces?: unknown } | null
+    const row = item as {
+      kind?: unknown
+      text?: unknown
+      from?: unknown
+      replaces?: unknown
+      forget?: unknown
+      why?: unknown
+    } | null
     const kind = typeof row?.kind === 'string' ? row.kind.trim() : ''
     const text = typeof row?.text === 'string' ? row.text.trim() : ''
     const fromRaw = typeof row?.from === 'string' ? row.from.trim() : ''
-    const replacesRaw = typeof row?.replaces === 'string' ? row.replaces.trim() : ''
+    /** `replaces` 收字符串或字符串数组（一份输出里两种写法都见过） */
+    const replacesRaw: string[] = Array.isArray(row?.replaces)
+      ? (row?.replaces as unknown[]).filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter((v) => v !== '')
+      : typeof row?.replaces === 'string' && row.replaces.trim() !== ''
+        ? [row.replaces.trim()]
+        : []
+    const forgetRaw = typeof row?.forget === 'string' ? row.forget.trim() : ''
+    const whyRaw = typeof row?.why === 'string' ? row.why.trim() : ''
+    /**
+     * ★ 第 260 批：**删除建议**（`{"forget":"旧条目原文"}`）——它没有 kind/text。
+     *   单独一支处理，别掉进"类型不认识"那条丢弃分支里（否则删除建议永远到不了人眼前）。
+     */
+    if (forgetRaw !== '') {
+      if (candidates.length >= TIDY_MAX_CANDIDATES) {
+        dropped.push({ text: forgetRaw.slice(0, 40), reason: 'too_many' })
+        continue
+      }
+      candidates.push({
+        kind: 'lesson',
+        text: '',
+        from: null,
+        grounded: true,
+        subjectSpecific: false,
+        subjectTerm: null,
+        replaces: [],
+        forget: forgetRaw,
+        why: whyRaw === '' ? null : whyRaw,
+      })
+      continue
+    }
     if (!KINDS.includes(kind as MemoryKind)) {
       if (text !== '' || kind !== '') dropped.push({ text: text || kind, reason: 'kind_invalid' })
       continue
@@ -376,7 +445,9 @@ export function parseTidyOutput(
       grounded: fromRaw === '' ? false : isGrounded(fromRaw),
       subjectSpecific: hit !== null,
       subjectTerm: hit,
-      replaces: replacesRaw === '' ? null : replacesRaw,
+      replaces: replacesRaw,
+      forget: null,
+      why: null,
     })
   }
   return { candidates, dropped, parsed: true }

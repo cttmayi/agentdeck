@@ -90,6 +90,12 @@ export const agentsText = {
     en: 'Goes into the first sentence, after the instructions',
   },
   'agents.memoryPreview': { zh: '预览第一句话 →', en: 'Preview the first sentence →' },
+  /**
+   * ★ 分批第 260 批：「合并同类」。让整理者读**它的全部记忆**，把同义的几条并成一条更抽象的说法、
+   *   把过时的标成"忘掉"，摆给人确认。使用者库里那 21 条重复就是手工删 14 条 vs 一键合并的差别。
+   */
+  'agents.memoryConsolidate': { zh: '合并同类…', en: 'Merge duplicates…' },
+  'agents.memoryConsolidated': { zh: '已按你的确认更新记忆', en: 'Memory updated as you confirmed' },
   'agents.memoryPreviewTitle': { zh: '它这一轮会收到的第一句话（② 身份 + 经验）', en: 'The first sentence this run gets (identity + experience)' },
   'agents.memoryPreviewStats': {
     zh: '本轮带入 {used} 条（{chars} 字，其中 {pinned} 条置顶）· 预算 1200 字',

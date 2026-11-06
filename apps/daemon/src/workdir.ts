@@ -63,6 +63,9 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   //   一间小屋一段对话——再次整理会把 `transcript.md` 覆盖成最新的对话，
   //   旧的小屋留着没有意义（而按对话 id 固定下来，串行化也天然成立）。
   'memory-tidy': 'memory-tidy',
+  // ★ 分批第 260 批：「合并同类」那条分析 run：`<workRoot>/memory-consolidate-<智能体 id>`。
+  //   按智能体分屋（不是按对话）：合并的对象是它的记忆，与哪段对话无关。
+  'memory-consolidate': 'memory-consolidate',
 }
 
 /**

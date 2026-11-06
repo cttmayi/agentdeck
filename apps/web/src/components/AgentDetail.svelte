@@ -19,6 +19,7 @@
   import { api } from '../lib/api.ts'
   import { DISTILLY_SOURCE } from '../lib/crystallize-editor.svelte.ts'
   import { showToast } from '../lib/view.ts'
+  import ChatMemoryTidy from './ChatMemoryTidy.svelte'
 
   /**
    * 智能体详情 / 编辑（FR-AGENT-19）。
@@ -152,6 +153,8 @@
   /** 这一轮带进去几条 / 裁掉几条（服务端算的，与真的投递同一个函数）。 */
   let memPreviewStats: { used: number; dropped: number; chars: number; pinned: number } | null = null
   let memPreviewBusy = false
+  /** ★ 第 260 批：「合并同类」对话框（读它的全部记忆，同义的并成一条）。 */
+  let consolidateOpen = false
   let memPreviewError = ''
   let memSeq = 0
   /**
@@ -899,6 +902,19 @@
               <input type="checkbox" data-memory-enabled bind:checked={draft.memoryEnabled} />
               <span>{$t('agents.memoryEnabled')}</span>
             </label>
+            <!--
+              ★ 分批第 260 批：「合并同类…」——让整理者读**它的全部记忆**，把同义的并成一条、
+                把过时的标成"忘掉"，摆给人确认。比手工删十几条现实得多。
+                只在"记忆开着 + 至少两条"时出现：一条没什么可并的，关着则根本不该动。
+            -->
+            {#if draft.memoryEnabled && activeMemRows.length >= 2}
+              <button
+                type="button"
+                class="btn-link"
+                data-memory-consolidate
+                onclick={() => (consolidateOpen = true)}
+              >{$t('agents.memoryConsolidate')}</button>
+            {/if}
             <button
               type="button"
               class="btn-link"
@@ -1060,6 +1076,43 @@
   ★ 内容是服务端按**库里已保存的**那份指令 + 记忆渲染的 ②（身份 + 经验）——
     与真正投递出去的那一段同一台渲染器，不是前端拼的。
 -->
+<!--
+  ★ 分批第 260 批：「合并同类」对话框。
+  ★ 与聊天页那个「整理成记忆」是**同一个组件**（同一套分析 run、同一套核对、同一个写入口），
+    只是 `mode="consolidate"`：它读的不是一段对话，而是**它的全部记忆**。
+  ★ 确认之后由这一页落库：先删"忘掉"的那几条，再把合并出来的新条目连同 `replaces` 一起提交
+    ——平台那边是"先加新的、再删旧的"，与「改一条」同一条纪律。
+-->
+<ChatMemoryTidy
+  bind:open={consolidateOpen}
+  mode="consolidate"
+  agentId={agent.id}
+  onconfirm={(items, forget) => {
+    void (async () => {
+      try {
+        await api(`/api/agents/${encodeURIComponent(agent.id)}/memory`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            entries: items.map((it) => ({
+              text: it.text,
+              kind: it.kind,
+              ...(it.replaces === undefined ? {} : { replaces: it.replaces }),
+            })),
+            ...(forget === undefined || forget.length === 0 ? {} : { forget }),
+          }),
+        })
+        showToast($t('agents.memoryConsolidated'))
+        // 记忆变了 ⇒ 重新读一次记忆，让这一节跟着服务端走（不拿本地状态假装成功）
+        await loadMemory(agent.id)
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err))
+      }
+    })()
+  }}
+  oncancel={() => {}}
+/>
+
 {#if memPreview !== null}
   <div class="mem-preview-backdrop" role="presentation" onclick={() => (memPreview = null)}></div>
   <div class="mem-preview" role="dialog" aria-label={$t('agents.memoryPreviewTitle')} data-memory-preview-panel>

@@ -41,9 +41,12 @@
     subjectTerm: string | null
     /** ★ 分批第 250 批：这条**已经在它的记忆里**了（整理过两次时第二次全是这种）。 */
     alreadyExists: boolean
-    /** ★ 分批第 251 批：这是某条旧记忆的**新版**（平台已核对旧条目确实存在）。 */
-    replacesId: string | null
-    replacesText: string | null
+    /** ★ 分批第 251/260 批：这是某几条旧记忆的**新版**（平台已核对旧条目确实存在）。 */
+    replacesIds: string[]
+    replacesTexts: string[]
+    /** ★ 分批第 260 批：**建议忘掉**的那条（`forgetId` 非空 ⇒ 这是一条删除建议）。 */
+    forgetId: string | null
+    forgetText: string | null
     /** ★ 分批第 252 批：**这句原话已经产出过条目**（按来源查重，不看措辞）。 */
     sameSourceCount: number
     sameSourceTexts: string[]
@@ -59,34 +62,53 @@
       subjectSpecific: boolean
       subjectTerm: string | null
       alreadyExists: boolean
-      replacesId: string | null
-      replacesText: string | null
+      replacesIds: string[]
+      replacesTexts: string[]
+      forgetId: string | null
+      forgetText: string | null
       sameSourceCount: number
       sameSourceTexts: string[]
+      why?: string | null
     }> | null
     dropped: Array<{ text: string; reason: string }>
     parsed: boolean
     failure?: string | null
   }
 
+  /**
+   * ★ 分批第 260 批：同一个对话框两种用法。
+   *   · `'tidy'`（默认）：读**一段对话**，挑出该记的 —— 从聊天页顶栏打开；
+   *   · `'consolidate'`：读**它的全部记忆**，把同义的并成一条、把过时的标成"忘掉"
+   *     —— 从智能体页的记忆那一节打开（那里才是重复条目堆积的地方）。
+   */
+  type TidyMode = 'tidy' | 'consolidate'
+
   let {
     open = $bindable(false),
     /** 在哪条对话上整理（空 = 还没打开任何对话，按钮不该可用）。 */
     conversationId = '',
+    /** 在哪**个智能体**上合并（`consolidate` 模式用；`tidy` 模式忽略）。 */
+    agentId = '',
+    mode = 'tidy' as TidyMode,
     onconfirm,
     oncancel,
   }: {
     open?: boolean
     conversationId?: string
+    agentId?: string
+    mode?: TidyMode
     onconfirm: (
-    items: Array<{
-      text: string
-      kind: MemoryKindId
-      evidence?: string
-      replaces?: string
-      source?: string
-    }>,
-  ) => void
+      items: Array<{
+        text: string
+        kind: MemoryKindId
+        evidence?: string
+        /** ★ 第 260 批：可以是**好几条**（合并同类时一次替换多条） */
+        replaces?: string[]
+        source?: string
+      }>,
+      /** ★ 第 260 批：人确认要**忘掉**的那几条（id）。 */
+      forget?: string[],
+    ) => void
     oncancel: () => void
   } = $props()
 
@@ -109,10 +131,13 @@
       subjectSpecific: boolean
       subjectTerm: string | null
       alreadyExists: boolean
-      replacesId: string | null
-      replacesText: string | null
+      replacesIds: string[]
+      replacesTexts: string[]
+      forgetId: string | null
+      forgetText: string | null
       sameSourceCount: number
       sameSourceTexts: string[]
+      why: string | null
       on: boolean
     }>
   >([])
@@ -146,8 +171,16 @@
    * ⚠️ 轮询而不是阻塞等待：一次分析要几十秒到几分钟（它要把整段对话读一遍）。
    *    阻塞的话浏览器/代理超时，而人看不到"它到底在动没有"——所以有秒数在跳。
    */
+  /** 当前模式的接口前缀（两个模式是同一套机器，只有入口与任务书不同）。 */
+  function baseUrl(): string {
+    return mode === 'consolidate'
+      ? `/api/agents/${encodeURIComponent(agentId)}/memory-consolidate`
+      : `/api/conversations/${encodeURIComponent(conversationId)}/memory-tidy`
+  }
+
   async function start(): Promise<void> {
-    if (conversationId === '') return
+    if (mode === 'tidy' && conversationId === '') return
+    if (mode === 'consolidate' && agentId === '') return
     reset()
     phase = 'running'
     const startedAt = Date.now()
@@ -156,11 +189,10 @@
     }, 500)
     let runId = ''
     try {
-      const out = await api<{ tidyRunId: string }>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/memory-tidy`,
-        { method: 'POST' },
-      )
-      runId = out.tidyRunId
+      const out = await api<{ tidyRunId?: string; consolidateRunId?: string }>(baseUrl(), {
+        method: 'POST',
+      })
+      runId = out.tidyRunId ?? out.consolidateRunId ?? ''
       tidyRunId = runId
     } catch (err) {
       stopTimers()
@@ -176,9 +208,7 @@
 
   async function poll(runId: string): Promise<void> {
     try {
-      const out = await api<Answer>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/memory-tidy/${encodeURIComponent(runId)}`,
-      )
+      const out = await api<Answer>(`${baseUrl()}/${encodeURIComponent(runId)}`)
       if (out.candidates === null) return // 还在跑
       stopTimers()
       if (out.candidates.length === 0) {
@@ -198,10 +228,13 @@
         subjectSpecific: c.subjectSpecific,
         subjectTerm: c.subjectTerm,
         alreadyExists: c.alreadyExists,
-        replacesId: c.replacesId,
-        replacesText: c.replacesText,
+        replacesIds: c.replacesIds ?? [],
+        replacesTexts: c.replacesTexts ?? [],
+        forgetId: c.forgetId ?? null,
+        forgetText: c.forgetText ?? null,
         sameSourceCount: c.sameSourceCount,
         sameSourceTexts: c.sameSourceTexts,
+        why: (c as { why?: string | null }).why ?? null,
         /**
          * 默认只勾"出处对得上、不专指这次对象、而且还没记过"的那几条。
          * 三种默认不勾对应三种"它不该被记"的理由：编的 / 只对这次成立 / 已经记过。
@@ -220,20 +253,34 @@
     }
   }
 
-  const chosen = $derived(rows.filter((r) => r.on && r.text.trim() !== ''))
+  /**
+   * 勾中的条目。**删除建议**（`forgetId`）不看 `text`（它本来就没有正文），
+   * 其它条目必须有正文。
+   */
+  const chosen = $derived(
+    rows.filter((r) => r.on && (r.forgetId !== null || r.text.trim() !== '')),
+  )
 
   function confirm(): void {
+    /**
+     * ★ 分批第 260 批：勾中的分两类交出去——
+     *   · 删除建议（`forgetId`）⇒ 进 `forget` 列表（只删不增）；
+     *   · 其它 ⇒ 每条一次 `add`，`replaces` 带上它要替换的那几条 id（合并同类时是好几条）。
+     */
+    const adds = chosen.filter((r) => r.forgetId === null)
+    const forgets = chosen.filter((r) => r.forgetId !== null)
     onconfirm(
-      chosen.map((r) => ({
+      adds.map((r) => ({
         text: r.text.trim(),
         kind: r.kind,
         // ★ 第 252 批：记下"这条是从哪句人话来的"——下次整理按它查重（不看措辞）
         ...(r.from === null ? {} : { source: r.from }),
-        // ★ 批次第 251 批：这条是旧记忆的新版 ⇒ 平台"先加新的、再删旧的"
-        ...(r.replacesId === null ? {} : { replaces: r.replacesId }),
+        // ★ 第 251/260 批：这条是旧记忆的新版（可能合并了好几条）⇒ 先加新的、再删旧的
+        ...(r.replacesIds.length === 0 ? {} : { replaces: r.replacesIds }),
         // 出处：这次整理那条 run（"这条记忆是哪次整理挑出来的"以后查得到）
         ...(tidyRunId === '' ? {} : { evidence: tidyRunId }),
       })),
+      forgets.map((r) => r.forgetId as string),
     )
     open = false
     reset()
@@ -248,21 +295,24 @@
 
 <Modal
   {open}
-  title={$t('chat.tidyTitle')}
-  subtitle={$t('chat.tidyHint')}
+  title={mode === 'consolidate' ? $t('chat.consolidateTitle') : $t('chat.tidyTitle')}
+  subtitle={mode === 'consolidate' ? $t('chat.consolidateHint') : $t('chat.tidyHint')}
   size="wide"
   closeLabel={$t('common.close')}
   onclose={close}
 >
   {#if phase === 'idle'}
     <div class="tidy-intro" data-tidy-intro>
-      <p class="hint">{$t('chat.tidyExplain')}</p>
+      <p class="hint">
+        {mode === 'consolidate' ? $t('chat.consolidateExplain') : $t('chat.tidyExplain')}
+      </p>
       <button
         type="button"
         class="primary"
         data-tidy-start
         disabled={conversationId === ''}
-        onclick={() => void start()}>{$t('chat.tidyStart')}</button
+        onclick={() => void start()}
+      >{mode === 'consolidate' ? $t('chat.consolidateStart') : $t('chat.tidyStart')}</button
       >
       {#if conversationId === ''}
         <span class="hint">{$t('chat.tidyNoConversation')}</span>
@@ -358,10 +408,23 @@
                 <span class="tidy-from-t">{$t('chat.tidyNoFrom')}</span>
               </span>
             {/if}
-            {#if row.replacesId !== null}
+            {#if row.replacesIds.length > 0}
               <span class="tidy-from" data-tidy-replaces title={$t('chat.tidyReplacesHint')}>
                 <span class="tidy-from-mark" aria-hidden="true">↻</span>
-                <span class="tidy-from-t">{$t('chat.tidyReplaces', { old: row.replacesText ?? '' })}</span>
+                <span class="tidy-from-t">
+                  {$t('chat.tidyReplaces', {
+                    n: String(row.replacesIds.length),
+                    old: row.replacesTexts[0] ?? '',
+                  })}
+                </span>
+              </span>
+            {/if}
+            {#if row.forgetId !== null}
+              <span class="tidy-from bad" data-tidy-forget title={row.why ?? ''}>
+                <span class="tidy-from-mark" aria-hidden="true">🗑</span>
+                <span class="tidy-from-t">
+                  {$t('chat.tidyForget', { old: row.forgetText ?? '' })}
+                </span>
               </span>
             {/if}
             {#if row.sameSourceCount > 0}

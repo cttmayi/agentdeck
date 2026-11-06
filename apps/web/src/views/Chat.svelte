@@ -207,7 +207,7 @@
       text: string
       kind: string
       evidence?: string
-      replaces?: string
+      replaces?: string[]
       source?: string
     }>,
     noteKey: string,
@@ -1149,8 +1149,16 @@
     <ChatMemoryTidy
       bind:open={tidyOpen}
       conversationId={activeConversation?.id ?? ''}
-      onconfirm={(items) => {
+      onconfirm={(items, forget) => {
         void (async () => {
+          // ★ 第 260 批：人确认"忘掉"的那几条先删（删除是破坏性的，界面默认不勾）
+          if (forget !== undefined && forget.length > 0 && memAgentId !== '') {
+            await api(`/api/agents/${encodeURIComponent(memAgentId)}/memory`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ forget }),
+            }).catch(() => {})
+          }
           const added = await captureMemory(
             memAgentId,
             items.map((it) => ({

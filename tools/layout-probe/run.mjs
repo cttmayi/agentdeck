@@ -439,6 +439,8 @@ const CHECKS = [
       v.pins === v.rows &&
       v.hasPreview === true &&
       v.hasAddRow === true &&
+      // ★ 第 260 批：这一节有「合并同类…」（记忆开着 + ≥2 条）
+      v.hasConsolidate === true &&
       typeof v.rowBadge === 'string' &&
       v.rowBadge.includes('记忆'),
     show: (v) =>
@@ -446,6 +448,7 @@ const CHECKS = [
         ? 'null'
         : `${String(v.rows)} 行　行高 ${JSON.stringify(v.heights)}　动作静止隐藏 ${String(v.actionsHidden)}　` +
           `加号行 ${String(v.hasAddRow)}　预览 ${String(v.hasPreview)}　` +
+          `合并同类 ${String(v.hasConsolidate)}　` +
           `（打开记忆 HTTP ${String(v.enableStatus)}，接口上 ${String(v.detailEnabled)}，勾选框 ${String(v.switchChecked)}）　` +
           `★ ${String(v.pins)}　计数「${String(v.countText)}」　列表行「${String(v.rowBadge)}」`,
   },

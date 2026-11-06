@@ -74,6 +74,7 @@ import {
   type Workspace,
   type WorkspaceId,
   type AgentGroup,
+  type MemoryEntry,
 } from '@agentdeck/protocol'
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
@@ -197,6 +198,7 @@ import { resolveWorkDir } from './workdir.ts'
 import { listDir } from './fs-browse.ts'
 import { memoryRootFor, syncMemoryMirror } from './memory-files.ts'
 import {
+  buildConsolidatePrompt,
   buildTidyPrompt,
   parseTidyOutput,
   renderExistingMemory,
@@ -5549,6 +5551,144 @@ async function injectedSkillsOf(
     }
 
     /**
+     * ══════════════════════════════════════════════════════════════════
+     * 「合并同类」（分批第 260 批）
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 使用者库里 21 条记忆其实是三套同义的话。删 14 条太笨，所以给它一个动作：
+     * 让整理者读**它的全部记忆**，把同义的并成一条更抽象的说法（`replaces` 列出那几条），
+     * 把过时的列成 `forget`，**摆给人确认**才动库。
+     *
+     * 与「整理成记忆」同一套机器（同一个分析 run、同一份核对、同一个写入口），
+     * 只是**输入从"一段对话"换成"它的记忆"**、任务书换成"合并"。
+     */
+    const consolidateMatch = /^\/api\/agents\/([^/]+)\/memory-consolidate(?:\/([^/]+))?$/.exec(path)
+    if (consolidateMatch) {
+      const agentId = decodeURIComponent(consolidateMatch[1]!) as Agent['id']
+      const runId = consolidateMatch[2] === undefined ? null : decodeURIComponent(consolidateMatch[2])
+      const target = await store.getAgent(agentId)
+      if (!target || target.workspaceId !== workspaceId) {
+        sendJson(res, 404, { error: '智能体不存在' })
+        return
+      }
+      if (!memoryEnabledOf(target)) {
+        sendJson(res, 409, { error: MEMORY_DISABLED_MESSAGE, code: 'memory_disabled' })
+        return
+      }
+      const dir = resolveWorkDir({
+        workRoot,
+        subject: { type: 'memory-consolidate', id: agentId as string },
+        fallbackId: agentId as string,
+      }).path
+
+      if (req.method === 'GET' && runId !== null) {
+        const run = await store.getRun(runId as RunId)
+        if (
+          !run ||
+          run.workspaceId !== workspaceId ||
+          run.subject.type !== 'memory-consolidate' ||
+          run.subject.id !== (agentId as string)
+        ) {
+          sendJson(res, 404, { error: `合并任务不存在（${runId}）` })
+          return
+        }
+        if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
+          sendJson(res, 200, { status: run.status, candidates: null, dropped: [], parsed: false })
+          return
+        }
+        const existing = await listActiveMemory(store, workspaceId, agentId)
+        const parsed = parseTidyOutput(lastTextOf(await store.listRunMessages(run.id)) ?? '')
+        const resolveOld = (texts: readonly string[]): MemoryEntry[] => {
+          const out: MemoryEntry[] = []
+          for (const t of texts) {
+            const hit = findDuplicateMemory(existing, t)
+            if (hit !== null && !out.some((e) => (e.id as string) === (hit.id as string))) out.push(hit)
+          }
+          return out
+        }
+        const candidates = parsed.candidates.map((c) => {
+          const replaced = resolveOld(c.replaces)
+          const forgot = c.forget === null ? null : findDuplicateMemory(existing, c.forget)
+          return {
+            ...c,
+            alreadyExists: false,
+            existingId: null,
+            replacesIds: replaced.map((e) => e.id as string),
+            replacesTexts: replaced.map((e) => e.text),
+            forgetId: forgot === null ? null : (forgot.id as string),
+            forgetText: forgot === null ? null : forgot.text,
+            sameSourceCount: 0,
+            sameSourceTexts: [],
+          }
+        })
+        sendJson(res, 200, {
+          status: run.status,
+          candidates,
+          dropped: parsed.dropped,
+          parsed: parsed.parsed,
+          failure: run.failureReason ?? null,
+        })
+        return
+      }
+
+      if (req.method !== 'POST' || runId !== null) {
+        sendJson(res, 405, { error: '这个地址只接受 POST（读结果用 GET .../memory-consolidate/<runId>）' })
+        return
+      }
+      const existing = await listActiveMemory(store, workspaceId, agentId)
+      if (existing.length < 2) {
+        sendJson(res, 400, {
+          error: '记忆不足两条，没有可合并的。',
+          code: 'not_enough_memory',
+        })
+        return
+      }
+      await ensureBuiltinMemoryTidy(store, workspaceId)
+      const tidyAgent = findBuiltinAgent(await store.listAgents(workspaceId), 'memory-tidy')
+      if (!tidyAgent) {
+        sendJson(res, 500, { error: '内置的「记忆整理者」不在——重启 daemon 再试。' })
+        return
+      }
+      // 已经有在跑的就直接交回去（重复点两下不该起两条 run）
+      const allRuns = await store.listRuns({ workspaceId, limit: 5_000 })
+      const running = allRuns.items.find(
+        (r) =>
+          r.subject.type === 'memory-consolidate' &&
+          r.subject.id === (agentId as string) &&
+          !TERMINAL_RUN_STATUSES.includes(r.status),
+      )
+      if (running) {
+        sendJson(res, 200, { consolidateRunId: running.id, reused: true })
+        return
+      }
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'existing-memory.md'), renderExistingMemory(existing), 'utf8')
+      const newRunId = ulid() as RunId
+      const outcome = await executor.submit({
+        runId: newRunId,
+        kind: 'execute',
+        agentRef: {
+          id: tidyAgent.id,
+          name: tidyAgent.name,
+          instructions: tidyAgent.instructions,
+        },
+        skills: [],
+        subject: { type: 'memory-consolidate', id: agentId as string },
+        prompt: buildConsolidatePrompt(),
+        workDir: dir,
+        limits: { maxTurns: null, timeoutMs: null },
+        reviewerAgentId: null,
+      })
+      if (outcome.kind === 'rejected') {
+        res.setHeader('retry-after', String(Math.ceil((outcome.retryAfterMs ?? 2000) / 1000)))
+        sendJson(res, 429, { error: '没有空闲的执行位，合并没有开始。稍后再试。', code: 'no_capacity' })
+        return
+      }
+      sendJson(res, 202, { consolidateRunId: newRunId, entries: existing.length })
+      return
+    }
+
+    /**
      * ★ 分批第 240 批：聊天里的两个写入口（前缀触发 / 整理这段）走这里。
      *
      * 为什么单独一条而不是复用 PATCH：聊天页没有"整份 agent + 记忆差量"这份数据，
@@ -5578,14 +5718,25 @@ async function injectedSkillsOf(
           kind?: unknown
           text?: unknown
           evidence?: unknown
+          /** ★ 第 260 批：只删不增（"忘掉这几条"），与 `entries` 可以同时出现 */
+          forget?: unknown
         }
         // 两种形状：单条（`{kind,text}`）与批量（`{entries:[…]}`）——「整理这段」勾了
         // 好几条时一次性提交，不做 N 次往返。
-        const items =
-          Array.isArray(body.entries)
-            ? body.entries
+        /**
+         * ⚠️ 第 260 批：`forget`（只删不增）的请求体里**没有** `kind`/`text` —— 那种情况
+         * 不能再兜成一个 `{kind: undefined}` 的"单条"，否则走到下面就是 `kind_invalid`
+         * （实测：删除建议被自己的兜底分支打成 400）。
+         */
+        const single =
+          Array.isArray(body.entries) || (body.kind === undefined && body.text === undefined)
+            ? null
             : [{ kind: body.kind, text: body.text, evidence: body.evidence }]
-        if (items.length === 0) {
+        const items = Array.isArray(body.entries) ? body.entries : (single ?? [])
+        const forgetList = Array.isArray(body.forget)
+          ? body.forget.filter((v): v is string => typeof v === 'string' && v !== '')
+          : []
+        if (items.length === 0 && forgetList.length === 0) {
           sendJson(res, 400, { error: '需要至少一条记忆（entries 为空）', code: 'entries_required' })
           return
         }
@@ -5597,6 +5748,8 @@ async function injectedSkillsOf(
          * 顺序不能反：先删后加的话，加失败就把人原来的那条弄没了。
          */
         const replaced: string[] = []
+        /** ★ 第 260 批：`forget` = 人确认过的"忘掉这几条"（id 列表）。 */
+        const forgotten: string[] = forgetList
         /**
          * ★ 分批第 250 批：**重复的跳过、不整批失败**（同一段对话整理两次时，第二次的
          *   候选基本都是已经记过的——那不该是一次"失败"，只该是一句"这些已经在了"）。
@@ -5640,13 +5793,18 @@ async function injectedSkillsOf(
             return
           }
           added.push(result.entry)
+          // `replaces` 收一条或几条（合并同类会一次替换多条）
           if (typeof row.replaces === 'string' && row.replaces !== '') {
             replaced.push(row.replaces)
+          } else if (Array.isArray(row.replaces)) {
+            for (const id of row.replaces) {
+              if (typeof id === 'string' && id !== '') replaced.push(id)
+            }
           }
         }
         // 新的都加完了，再删旧的（对不存在的 id 是幂等跳过）
         const removedIds: string[] = []
-        for (const id of replaced) {
+        for (const id of [...replaced, ...forgotten]) {
           const gone = await removeMemoryEntry(store, {
             workspaceId,
             agentId: targetAgentId,
@@ -8490,15 +8648,28 @@ async function injectedSkillsOf(
          */
         const owner = await store.getAgent(conversation.agentId)
         const existing = owner ? await listActiveMemory(store, workspaceId, owner.id) : []
+        /** 把"它说的旧原文"解析成库里的 id（多对少、少对多都如实返回）。 */
+        const resolveOld = (texts: readonly string[]): MemoryEntry[] => {
+          const out: MemoryEntry[] = []
+          for (const t of texts) {
+            const hit = findDuplicateMemory(existing, t)
+            if (hit !== null && !out.some((e) => (e.id as string) === (hit.id as string))) out.push(hit)
+          }
+          return out
+        }
         const candidates = parsed.candidates.map((c) => {
-          const hit = findDuplicateMemory(existing, c.text)
+          const hit = c.text === '' ? null : findDuplicateMemory(existing, c.text)
           /**
-           * ★ 分批第 251 批：它也可能会说"我想把某条旧的换成这版"（`replaces` = 旧原文）。
-           *   平台**核对**那段原文真的存在（逐字、空白归一）⇒ 解析成 id；对不上就把
-           *   `replacesId` 留空并让界面说清"它想替换的那条没找到"（当成新增处理）。
+           * ★ 分批第 251/260 批：它也可能会说"我想把某几条旧的换成这版"（`replaces` = 旧原文，
+           *   一条或几条）。平台**核对**那些原文真的存在（逐字、空白归一）⇒ 解析成 id；
+           *   对不上的部分如实告诉界面（"它想替换的那条没找到"）。
            */
-          const replaced =
-            c.replaces === null ? null : findDuplicateMemory(existing, c.replaces)
+          const replaced = resolveOld(c.replaces)
+          /**
+           * ★ 分批第 260 批：**删除建议**（`forget`）——同样先核对旧条目真的存在。
+           *   对不上 ⇒ `forgetId` 为空，界面显示"它建议忘掉的那条没找到"（不写库）。
+           */
+          const forgot = c.forget === null ? null : findDuplicateMemory(existing, c.forget)
           /**
            * ★ 分批第 252 批（使用者提的做法）：**按"人的原话"查重**。
            *
@@ -8515,8 +8686,10 @@ async function injectedSkillsOf(
             ...c,
             alreadyExists: hit !== null,
             existingId: hit === null ? null : hit.id,
-            replacesId: replaced === null ? null : replaced.id,
-            replacesText: replaced === null ? null : replaced.text,
+            replacesIds: replaced.map((e) => e.id as string),
+            replacesTexts: replaced.map((e) => e.text),
+            forgetId: forgot === null ? null : (forgot.id as string),
+            forgetText: forgot === null ? null : forgot.text,
             sameSourceCount: sameSource.length,
             sameSourceTexts: sameSource.map((e) => e.text),
           }

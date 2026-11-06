@@ -331,12 +331,33 @@ describe('已有记忆：写进分析小屋，让它别重复提', () => {
         '"from":"文章要短一点，图少一点",' +
         '"replaces":"文章要控制篇幅、减少配图，优先保留流程图"}]',
     )
-    assert.equal(out.candidates[0]?.replaces, '文章要控制篇幅、减少配图，优先保留流程图')
+    assert.deepEqual(out.candidates[0]?.replaces, ['文章要控制篇幅、减少配图，优先保留流程图'])
   })
 
-  test('★ 不带 `replaces` ⇒ null（纯新增）', () => {
-    const out = parseTidyOutput('[{"kind":"fact","text":"这个仓库用 pnpm"}]')
-    assert.equal(out.candidates[0]?.replaces, null)
+  test('★ 不带 `replaces` ⇒ 空数组（纯新增）；`replaces` 写字符串也收（归一成数组）', () => {
+    const plain = parseTidyOutput('[{"kind":"fact","text":"这个仓库用 pnpm"}]')
+    assert.deepEqual(plain.candidates[0]?.replaces, [])
+    const one = parseTidyOutput(
+      '[{"kind":"fact","text":"用 pnpm","replaces":"旧的写法"},{"kind":"fact","text":"再一条","replaces":["a","b"]}]',
+    )
+    assert.deepEqual(one.candidates[0]?.replaces, ['旧的写法'], '字符串归一成一条')
+    assert.deepEqual(one.candidates[1]?.replaces, ['a', 'b'], '数组照收（合并同类要用）')
+  })
+
+  test('★★★ 「忘掉」是一条独立的建议：没有 text，带为什么', () => {
+    /**
+     * ★ 分批第 260 批：从 Mem0 的 `DELETE` 学来的——在此之前我们只有"加"与"替换"，
+     *   没有"删" ⇒ 过时的记忆只能人翻列表手工删。它必须能被解析出来，
+     *   而且**不能**掉进"类型不认识"那条丢弃分支（那会让删除建议永远到不了人眼前）。
+     */
+    const out = parseTidyOutput(
+      '[{"forget":"这个仓库用 npm","why":"人后来改口说要用 pnpm"}]',
+    )
+    assert.equal(out.candidates.length, 1)
+    assert.equal(out.candidates[0]?.forget, '这个仓库用 npm')
+    assert.equal(out.candidates[0]?.why, '人后来改口说要用 pnpm')
+    assert.equal(out.candidates[0]?.text, '', '删除建议不提新内容')
+    assert.deepEqual(out.dropped, [], '不该被当成坏输出丢掉')
   })
 
   test('★★★ 任务书点名两份文件（对话 + 已有记忆），并说清 replaces 怎么写', () => {

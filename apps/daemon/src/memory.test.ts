@@ -1234,6 +1234,133 @@ describe('来源原话：记下来、按它查重（分批第 252 批）', () =>
   })
 })
 
+describe('忘掉 / 合并：`forget` 与多条 `replaces`（分批第 260 批）', () => {
+  async function withAgent<T>(fn: (url: string, agentId: string) => Promise<T>): Promise<T> {
+    const dir = await makeTempDir('memory-forget')
+    const d = await startDaemon({
+      dataDir: dir,
+      port: 0,
+      fsync: false,
+      backend: {
+        key: 'claude',
+        protocol: 'stream-json',
+        rejectDetectable: true,
+        async probe() {
+          return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
+        },
+        async execute() {
+          throw new Error('这个测试不该执行任何 run')
+        },
+      } as never,
+      onWarn: () => {},
+    })
+    try {
+      const created = await fetch(`${d.url}/api/agents`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: '忘掉测试', instructions: '你是干活的', memoryEnabled: true }),
+      })
+      const agent = (await created.json()) as { id: string }
+      return await fn(d.url, agent.id)
+    } finally {
+      await d.close()
+      await cleanup(dir)
+    }
+  }
+
+  test('★★★ `forget`：只删不增（删除建议确认后的落库）', async () => {
+    await withAgent(async (url, agentId) => {
+      const first = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: [
+            { kind: 'fact', text: '这个仓库用 npm' },
+            { kind: 'fact', text: '这个仓库用 pnpm' },
+          ],
+        }),
+      })
+      const { entries } = (await first.json()) as {
+        entries: Array<{ id: string; text: string }>
+      }
+      const stale = entries.find((e) => e.text.includes('npm'))!
+      // 人确认"忘掉"那一条（没有 entries，只有 forget）
+      const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ forget: [stale.id] }),
+      })
+      assert.equal(res.status, 201, await res.clone().text())
+      const body = (await res.json()) as { entries: unknown[]; replaced?: string[] }
+      assert.deepEqual(body.entries, [], '只删不增')
+      assert.deepEqual(body.replaced, [stale.id])
+      const detail = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
+        memory: Array<{ text: string }>
+      }
+      assert.deepEqual(
+        detail.memory.map((m) => m.text),
+        ['这个仓库用 pnpm'],
+      )
+    })
+  })
+
+  test('★★★ `replaces` 收多条：合并同类 = 加一条新的 + 删掉那几条旧的', async () => {
+    await withAgent(async (url, agentId) => {
+      const first = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: [
+            { kind: 'preference', text: '文章要短、图要少' },
+            { kind: 'preference', text: '技术文章要控制篇幅、减少配图' },
+          ],
+        }),
+      })
+      const { entries } = (await first.json()) as { entries: Array<{ id: string }> }
+      const ids = entries.map((e) => e.id)
+      const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: [
+            {
+              kind: 'preference',
+              text: '写技术文章要控制篇幅、图要少，优先保留流程图',
+              replaces: ids,
+            },
+          ],
+        }),
+      })
+      assert.equal(res.status, 201, await res.clone().text())
+      const body = (await res.json()) as { entries: Array<{ text: string }>; replaced?: string[] }
+      assert.equal(body.replaced?.length, 2, '两条旧的都被删掉')
+      const detail = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
+        memory: Array<{ text: string }>
+      }
+      assert.deepEqual(
+        detail.memory.map((m) => m.text),
+        ['写技术文章要控制篇幅、图要少，优先保留流程图'],
+        '库里只剩合并后的那一条',
+      )
+    })
+  })
+
+  test('★ 记忆不足两条 ⇒ 「合并同类」直接拒（一条没什么可并的）', async () => {
+    await withAgent(async (url, agentId) => {
+      await fetch(`${url}/api/agents/${agentId}/memory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'fact', text: '只有一条' }),
+      })
+      const res = await fetch(`${url}/api/agents/${agentId}/memory-consolidate`, {
+        method: 'POST',
+      })
+      assert.equal(res.status, 400)
+      assert.equal(((await res.json()) as { code: string }).code, 'not_enough_memory')
+    })
+  })
+})
+
 describe('替换：`replaces` = 旧记忆的新版（分批第 251 批）', () => {
   test('★★★ 先加新的、再删旧的（同一个请求里完成；删是打时间戳）', async () => {
     const dir = await makeTempDir('memory-replace-api')

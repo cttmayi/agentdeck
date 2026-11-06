@@ -210,7 +210,29 @@ export const chatText = {
     zh: '这句原话已经记过 {n} 条（如「{first}」）——默认不勾',
     en: 'This sentence already produced {n} entry(ies), e.g. "{first}" — unchecked by default',
   },
-  'chat.tidyReplaces': { zh: '替换旧条目：「{old}」', en: 'Replaces an existing entry: "{old}"' },
+  /**
+   * ★ 分批第 260 批：两项新能力（都是从 Mem0 的 ADD/UPDATE/DELETE/NONE 那套动作里取的）。
+   *   · `forget` = 它认为这条过时了/被推翻了 ⇒ 建议忘掉（**默认不勾**，删除是破坏性的）；
+   *   · `replaces` 现在可以是**好几条**（合并同类）。
+   */
+  /**
+   * ★ 分批第 260 批：「合并同类」模式（同一个对话框，读的是**它的全部记忆**而不是一段对话）。
+   */
+  'chat.consolidateTitle': { zh: '合并同类的记忆', en: 'Merge duplicate memories' },
+  'chat.consolidateHint': {
+    zh: '它会把在说同一件事的几条并成一条更完整的说法，把明显过时的标成"忘掉"。合并出来的那一条由你确认，旧的那几条才会删。',
+    en: 'It merges entries that say the same thing into one fuller statement and marks clearly stale ones as "forget". Nothing changes until you confirm.',
+  },
+  'chat.consolidateExplain': {
+    zh: '这会读它现有的全部记忆（要花一次调用）。没有可合并的就什么都不提——那也是正常结果。',
+    en: 'This reads all of its current memory (one call). If nothing can be merged it proposes nothing — that is a normal result.',
+  },
+  'chat.consolidateStart': { zh: '开始合并', en: 'Start merging' },
+  'chat.tidyForget': { zh: '忘掉：「{old}」', en: 'Forget: "{old}"' },
+  'chat.tidyReplaces': {
+    zh: '替换 {n} 条旧条目（如「{old}」）',
+    en: 'Replaces {n} existing entries (e.g. "{old}")',
+  },
   'chat.tidyReplacesHint': {
     zh: '确认之后平台会先记下这一条新的、再删掉旧的那条（删是打时间戳，可追溯）。',
     en: 'On confirm the platform adds this new entry, then removes the old one (removal is timestamped, so it stays traceable).',

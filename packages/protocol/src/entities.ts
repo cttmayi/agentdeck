@@ -1010,6 +1010,13 @@ export const SubjectRef = z.object({
     'skill-draft',
     'skill-draft-review',
     'memory-tidy',
+    /**
+     * ★ 分批第 260 批（「合并同类」）：把**某个智能体**现有记忆里同义的几条并成一条的分析 run。
+     *
+     * 与 `memory-tidy` 的区别：那个读的是**一段对话**（`id` = 对话 id），这个读的是
+     * **它的记忆**（`id` = 智能体 id）。同样不在闭环里，同样不打扰任何人。
+     */
+    'memory-consolidate',
   ]),
   id: z.string(),
   /**

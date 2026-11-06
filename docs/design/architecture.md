@@ -844,6 +844,8 @@ CLI，消耗真实额度。这条错误当场被测试抓到了（`apps/daemon/s
 | POST | `/api/conversations/{id}/turns` | 说下一句 ⇒ 202（并发位满 ⇒ 429 + `retry-after`） |
 | POST | `/api/conversations/{id}/memory-tidy` | 「整理成记忆」：起一条分析 run（`subject.type: 'memory-tidy'`）⇒ 202 `{tidyRunId}`；已经在分析 ⇒ 200 交回同一条 |
 | GET | `/api/conversations/{id}/memory-tidy/{runId}` | 轮询结果：跑着只给 `status`，跑完给 `candidates` / `dropped` / `parsed` |
+| POST | `/api/agents/{id}/memory-consolidate` | 「合并同类」：读**它的全部记忆**起一条分析 run（`subject.type: 'memory-consolidate'`）⇒ 202 `{consolidateRunId}`；不足两条 ⇒ 400 `not_enough_memory` |
+| GET | `/api/agents/{id}/memory-consolidate/{runId}` | 轮询结果（形状与 `memory-tidy` 同） |
 | GET | `/api/conversations/{id}/files` | 这个对话工作目录的文件树（一次一层；D49 ⑪） |
 | GET | `/api/conversations/{id}/file` | 目录里某个文件的内容（查看器用；带 NUL 就按二进制）。⚠️ 2026-10：**音视频**（`video/*` / `audio/*`）走另一条发法——不读进内存、认 `Range`（206 / 416）、带 `accept-ranges`，上限也从 8MB 换到 2GB |
 | **摄取与执行** | | |
@@ -3286,6 +3288,20 @@ Agent PATCH 的差量都拒 `memory_disabled`）；③ 没有「整理成记忆�
 ⚠️ 为什么不用"字符串相似度"兜这件事：实测同一批真实数据，**同义改写**的 bigram Dice 只有
 `0.17–0.53`，而**完全不同**的一对是 `0.17`——两个区间重叠，机械阈值要么误删要么漏掉。
 语义判断交给模型、结果由平台核对，是这个仓库对此类问题的固定分工。
+
+**三个动作**（分批第 260 批，参照 Mem0 的 `ADD / UPDATE / DELETE / NONE` 四选一补齐）：
+新增（ADD）、替换（UPDATE：`replaces` 一条或几条，平台核对旧原文存在后"先加新的、再删旧的"）、
+**忘掉**（`forget`：它认为某条被推翻/过时了 ⇒ 提议删除，**默认不勾**——删除是破坏性的，
+必须人亲手动）、重复（NONE：正文相同硬跳过 + 同源原话标记）。
+
+**「合并同类…」**（分批第 260 批）：智能体记忆那一节的动作，**读它的全部记忆**（不是一段对话：
+新 subject 类型 `memory-consolidate`，`id` = 智能体 id），让它把同义的几条并成一条更完整、更抽象
+的说法（`replaces` 列出那几条），把过时的列成 `forget`，摆给人确认。使用者库里那 21 条重复
+就是"手工删 14 条"与"一键合并"的差别。不足两条时直接拒（`not_enough_memory`）——一条没什么可并的。
+
+**few-shot**（分批第 260 批，也是从 Mem0 学的）：身份里加了"什么时候什么都不提"的例子
+（"你好" ⇒ `[]`、"分析这个仓库" ⇒ `[]`、"以后报告都用中文写" ⇒ 一条偏好）。原来只有一句文字
+规则，而使用者连着两次报"只说了一句『分析这个仓库』却整理出记忆"——这类边界靠例子比靠规则稳。
 
 **查重**（分批第 250 批）：同一条不许记两次。归一化只抹**排版差异**（首尾/连续空白、结尾标点），
 不抹内容——「这个仓库用 pnpm。」与「这个仓库用  pnpm」是同一条，而「用 pnpm」与「用 yarn」是两条。

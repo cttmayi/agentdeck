@@ -175,7 +175,8 @@ export function firstSentenceKindFor(run: {
   if (
     run.subject.type === 'conversation' ||
     run.subject.type === 'skill-draft' ||
-    run.subject.type === 'memory-tidy'
+    run.subject.type === 'memory-tidy' ||
+    run.subject.type === 'memory-consolidate'
   ) {
     return 'chat'
   }
