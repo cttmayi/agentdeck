@@ -8863,7 +8863,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            * 同时也量前缀 chip：记忆关着时打一句「记住：…」不该冒出"将记进它的记忆"。
            * 量完把开关打开并**回来重进一次页面**（后面还有判据要看这一页）。
            */
-          facts['chat.memoryOffHidesTidyButton'] = await (async () => {
+          facts['chat.memoryOffDisablesTidy'] = await (async () => {
             const list = await f.contentWindow.fetch('/api/conversations').then((r) => r.json())
             const convo = (list.items ?? []).find((c) => c.workDir === chatFilesWorkDir)
             if (!convo) return { ok: false, reason: '找不到夹具对话' }
@@ -8888,9 +8888,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             await wait(400)
             const afterTidy = hasTidy()
             /**
-             * ⚠️ 还要量"那一排**还在**"（沉淀技能那颗仍渲染）：否则"整理没出现"可能只是
-             *   整排没渲染出来——那会让判据在一种假绿上通过。
+             * ★ 分批第 263 批：记忆关着时这颗按钮**还在但置灰**，且 title 说清去哪儿打开。
+             *   同时量"那一排还在"（沉淀技能那颗仍渲染）与"开着时不置灰"。
              */
+            const afterBtn = headerBtns().find((b) => text(b).includes('整理成记忆')) ?? null
+            const afterDisabled = afterBtn === null ? null : afterBtn.disabled === true
+            const afterTitle = afterBtn === null ? '' : (afterBtn.getAttribute('title') ?? '')
             const rowStillThere = headerBtns().some((b) => text(b).includes('沉淀'))
             // 前缀 chip：打一句触发词开头的话
             const composer = d().querySelector('[data-composer] .composer-input')
@@ -8917,6 +8920,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               before,
               beforeDisabled: beforeBtn === null ? null : beforeBtn.disabled === true,
               afterTidy,
+              afterDisabled,
+              afterTitle,
               rowStillThere,
               chipShown,
               restored,

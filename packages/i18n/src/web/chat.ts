@@ -124,13 +124,17 @@ export const chatText = {
   'chat.memorySavedMany': { zh: '已记进它的记忆 {n} 条', en: '{n} entries remembered' },
   'chat.tidyAction': { zh: '整理成记忆…', en: 'Turn into memory…' },
   /**
-   * ★ 分批第 262 批：按钮挪到「沉淀技能」左侧之后，**还没有轮次**时置灰（与右边那颗同口径）。
-   * ⚠️ 第 261 批那条 `chat.tidyMemoryOffTitle` 随"关着就不出现"一起删掉——
-   *    使用者定了：记忆关着就不该有这颗按钮，不留一个永远点不动的。
+   * 按钮在「沉淀技能」左侧；两种"不能用"都用**置灰 + 说明**表达，不隐藏。
+   * ⚠️ 这块位置翻过一次车（262 批按"关着就不该有"改成不渲染，使用者回头又问
+   *    "为什么不见了"）——结论：**关着就置灰并说清去哪儿打开**，别再翻。
    */
   'chat.tidyDisabledHint': {
     zh: '这段对话还没有内容可整理——先说几句。',
     en: 'Nothing to tidy yet — say a few things first.',
+  },
+  'chat.tidyMemoryOffTitle': {
+    zh: '这个智能体的记忆关着——去「智能体 → 它的配置」打开「启用记忆」，这颗按钮就能用。',
+    en: "This agent's memory is off — enable it in the agent's settings and this button works.",
   },
   'chat.tidyTitle': { zh: '整理成记忆', en: 'Turn this chat into memory' },
   /**

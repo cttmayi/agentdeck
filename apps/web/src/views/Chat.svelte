@@ -848,21 +848,26 @@
           <!--
             ★ 分批第 262 批：「整理成记忆…」在「沉淀技能」**左侧**（使用者定的位置）。
             两者都是"拿这段对话做点什么"，排在同一个位置列里。
-            · 记忆关着 ⇒ **不出现**（第 261 批试过"置灰并说明"，使用者定为不要：
-              关着就是关着，别留一个永远点不动的按钮）；
-            · 还没有轮次 ⇒ 出现但**置灰**，title 说清为什么（与右边那颗同一个口径）。
+
+            ★★ 分批第 263 批：**两种"不能用"都用置灰 + 说明表达，不隐藏**。
+            这块位置翻过一次车：261 批置灰 → 使用者说"关着就不该有这颗按钮" → 262 批改成
+            关着就不渲染 → 使用者回头问"为什么不见了，刚才那样置灰挺好的呀"。
+            结论记在这里，别再翻：**关着就置灰并说清去哪儿打开**——一颗不出现的按钮不会
+            告诉你它为什么不在，而"关掉记忆"这件事本身是使用者的配置，不是故障。
           -->
-          {#if memEnabled}
-            <button
-              class="ghost"
-              data-chat-tidy
-              disabled={activeTurns.length === 0}
-              title={activeTurns.length === 0 ? $t('chat.tidyDisabledHint') : ''}
-              onclick={openTidy}
-            >
-              {$t('chat.tidyAction')}
-            </button>
-          {/if}
+          <button
+            class="ghost"
+            data-chat-tidy
+            disabled={!memEnabled || activeTurns.length === 0}
+            title={!memEnabled
+              ? $t('chat.tidyMemoryOffTitle')
+              : activeTurns.length === 0
+                ? $t('chat.tidyDisabledHint')
+                : ''}
+            onclick={openTidy}
+          >
+            {$t('chat.tidyAction')}
+          </button>
           <!-- D80：会话级「沉淀技能&智能体」——至少有一轮已结束才可用。
                它与任务页那一格读**同一个词条**（`crystallize.title` / `crystallize.optimize`
                各一处，但文案一致）：同一个功能在两处叫两个名字是这一族缺陷的老来源。 -->

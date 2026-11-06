@@ -1716,7 +1716,7 @@ const CHECKS = [
   },
   {
     view: '聊天',
-    key: 'chat.memoryOffHidesTidyButton',
+    key: 'chat.memoryOffDisablesTidy',
     /**
      * ★ 分批第 245 批：记忆关着时，聊天里**没有「整理成记忆」、也没有前缀 chip**。
      *
@@ -1724,28 +1724,35 @@ const CHECKS = [
      * 页面**上的差别（`before` 有、`afterTidy` 没有），以及再打开之后回来（`restored`）——
      * 只量"关掉之后没有"的话，一个压根没渲染出来的按钮也能让判据变绿。
      *
-     * ★ 分批第 262 批**改回"不出现"**（使用者："我错了，如果没有启动记忆，确实不应该这个按钮"）：
-     *   第 261 批曾改成"置灰 + 说明"，使用者否了——关着就是关着，不留一个永远点不动的按钮。
-     *   判据回到"关掉之后没有这颗按钮"，但**多量一件**：那一排本身还在（`rowStillThere`），
-     *   否则"没出现"可能只是整排都没渲染，那种假绿正是这条判据要挡的。
+     * ★★ 分批第 263 批**定为最终口径**：记忆关着时这颗按钮**还在、但置灰并写明原因**
+     *   （"为什么不见了，刚才那样置灰挺好的呀"）。261 置灰 → 262 改成不渲染 → 263 改回置灰，
+     *   翻了一次；这里连着量四件，以后再改必须同时改判据：
+     *   ① 关着：按钮**在**且 `disabled`；② title 里有「启用记忆」（说清去哪儿打开）；
+     *   ③ 开着时**不**置灰（否则"永远点不动"也满足前两条）；④ 打触发词不冒 chip。
      */
     label:
-      '★★★ 记忆关着时「整理成记忆」**不出现**（那一排仍在，只是少了这颗）、' +
-      '打触发词也不冒 chip；打开之后按钮回来',
+      '★★★ 记忆关着时「整理成记忆」**还在但置灰**并说清去哪儿打开；开着时不置灰；' +
+      '打触发词也不冒 chip',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.ok === true &&
+      // 开着：在、且不置灰
       v.before === true &&
-      // 关着：那颗按钮不出现，但同一排（沉淀技能）还在
-      v.afterTidy === false &&
+      v.beforeDisabled === false &&
+      // 关着：还在、置灰、title 说清去哪儿打开；同一排也还在（不是整排没渲染）
+      v.afterTidy === true &&
+      v.afterDisabled === true &&
+      String(v.afterTitle).includes('启用记忆') &&
       v.rowStillThere === true &&
       v.chipShown === false &&
       v.restored === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `关之前有按钮 ${String(v.before)}　关之后 没有 ${String(v.afterTidy)}（那排还在 ${String(v.rowStillThere)}）　` +
+        : `关之前有按钮 ${String(v.before)}（置灰 ${String(v.beforeDisabled)}）　` +
+          `关之后 还在 ${String(v.afterTidy)} 置灰 ${String(v.afterDisabled)}　` +
+          `说明「${String(v.afterTitle)}」（那排还在 ${String(v.rowStillThere)}）　` +
           `chip ${String(v.chipShown)}　打开回来 ${String(v.restored)}${v.ok === false ? `　${String(v.reason)}` : ''}`,
   },
   {
