@@ -979,6 +979,56 @@ hr {
   flex-shrink: 0;
 }
 
+/**
+ * ★ 分批第 265 批（使用者："按钮风格，任务页也一样……如果其他页有类似风格问题，一起修改了"）：
+ *   **栏头那一排动作也走同一条工具条**（与顶栏 `新建对话 / 设置`、与聊天页 `pane-actions`
+ *   同一套）。原来各页的栏头按钮都是裸 `ghost` / `secondary` 方块，同一种东西在四个页面
+ *   四种长相，而这四条规则本来就只该有一处。
+ *
+ * ⚠️ 只在**真有内容**时才画那条轨道（`:has(> *)`）：没有动作的页面（比如沉淀页的栏头）
+ *    不该凭空多出一枚灰色小胶囊。聊天页「工作目录的文件」那一栏的 `actions` 片段平时也
+ *    是空的——同一个理由。
+ * ⚠️ 栏头那一格还兼着 `grid-column/row`（见上），这里只补"看起来像工具条"的部分。
+ */
+/**
+ * ⚠️ 只在**两颗以上**按钮时才画那条轨道（`> button + button`）：只有一个动作的栏头
+ *   （沉淀页那颗「确认入库」）保持原来的贴右缘单按钮——那是主操作，套进一条轨道会
+ *   让它离栏头右缘 20 多像素，而"确认入库必须在标题右侧、贴着右缘"是使用者连提两次的
+ *   一条判据（`crystal.commitRight`）。一颗按钮不存在"和邻居对齐"的问题，不需要轨道。
+ */
+.detail-head .detail-actions:has(> button + button) {
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.detail-head .detail-actions > button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.detail-head .detail-actions > button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+  filter: none;
+}
+.detail-head .detail-actions > button.danger {
+  background: transparent;
+  color: var(--bad);
+}
+.detail-head .detail-actions > button.danger:hover:not(:disabled) {
+  background: var(--surface);
+  filter: none;
+}
+
 /* 窄屏的返回按钮独占第一行 */
 .detail-head .back-to-list {
   grid-column: 1 / -1;

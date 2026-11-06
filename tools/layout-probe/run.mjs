@@ -568,6 +568,36 @@ const CHECKS = [
           `勾选框在开关内 ${String(v.boxInsideSwitch)}`,
   },
   {
+    view: '任务',
+    key: 'tasks.headerActions',
+    /**
+     * ★ 分批第 265 批（使用者："按钮风格，任务页也一样，需要有『沉淀技能』和『删除任务』
+     *   2 个按钮。如果其他页有类似风格问题，一起修改了"）。
+     *
+     * 两件事：① 任务栏头**要有那两颗**（删除任务原来只在列表行右侧的 ×，选中之后想删
+     * 还得回列表里找）；② 那一排是**与顶栏同一条工具条**（同轨道、同高、每格同高）
+     * ——"看起来一样"只有浏览器量得出来。
+     */
+    label:
+      '★★★ 任务页栏头有「沉淀技能&智能体」与「删除任务」两颗，且那一排与顶栏**同一条工具条**' +
+      '（同轨道、同高、每格同高）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.hasCrystallize === true &&
+      v.hasDelete === true &&
+      v.sameTrack === true &&
+      v.sameHeight === true &&
+      v.cellsSame === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　按钮 ${JSON.stringify(v.labels ?? [])}　` +
+          `同一条工具条 ${String(v.sameTrack)}/${String(v.sameHeight)}/${String(v.cellsSame)}` +
+          `（格高 ${JSON.stringify(v.heights ?? [])} vs 顶栏 ${JSON.stringify(v.topHeights ?? [])}）`,
+  },
+  {
     view: '智能体',
     key: 'agents.memoryRowActions',
     /**

@@ -1126,6 +1126,59 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           if (!pane) return 'NO-PANE'
           return !pane.querySelector('.detail-head') && !!pane.querySelector('.empty')
         })
+        /**
+         * ★ 分批第 265 批（使用者："按钮风格，任务页也一样，需要有『沉淀技能』和『删除任务』
+         *   2 个按钮。如果其他页有类似风格问题，一起修改了"）。
+         *
+         * 栏头那一排也要**与顶栏同一条工具条**，并且任务页要有那两颗按钮。
+         * 量的都是可比的东西：外框是不是同一条轨道、同高；每格同高。
+         */
+        facts['tasks.headerActions'] = await (async () => {
+          // 选中左栏第一行，才有栏头动作可量
+          const row = d().querySelector('.list-pane .task-row .list-row-main') ??
+            d().querySelector('.list-pane .task-row')
+          if (row) {
+            click(row)
+            await untilNet(() => !!d().querySelector('.detail-head .detail-actions'), 40)
+          }
+          const box = d().querySelector('.detail-head .detail-actions')
+          if (!box) return { present: false }
+          const btns = [...box.querySelectorAll('button')]
+          const labels = btns.map((b) => (text(b) ?? '').trim())
+          const topRow = d().querySelector('.topbar .page-actions')
+          const boxStyle = cs(box)
+          const topStyle = topRow === null ? null : cs(topRow)
+          const heights = btns.map((b) => Math.round(b.getBoundingClientRect().height))
+          const topHeights = topRow
+            ? [...topRow.querySelectorAll('button')].map((b) =>
+                Math.round(b.getBoundingClientRect().height),
+              )
+            : []
+          return {
+            present: true,
+            labels,
+            hasCrystallize: labels.some((l) => l.includes('沉淀')),
+            hasDelete: labels.some((l) => l.includes('删除')),
+            sameTrack:
+              topStyle !== null &&
+              boxStyle.backgroundColor === topStyle.backgroundColor &&
+              boxStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+              Math.abs(
+                parseFloat(boxStyle.borderTopLeftRadius) - parseFloat(topStyle.borderTopLeftRadius),
+              ) <= 1,
+            sameHeight:
+              topStyle !== null &&
+              Math.abs(parseFloat(boxStyle.height) - parseFloat(topStyle.height)) <= 1,
+            cellsSame:
+              heights.length >= 2 &&
+              heights.every((h) => h === heights[0]) &&
+              topHeights.length > 0 &&
+              Math.abs(heights[0] - topHeights[0]) <= 1,
+            heights,
+            topHeights,
+          }
+        })()
+
         facts['tasks.rowCount'] = rows.length
         // 从没跑过的任务：标签「执行中」+ 额外信息「还没开始执行」。
         // 这一行同时钉住了"标签之外的信息该不该显示"这条规则。

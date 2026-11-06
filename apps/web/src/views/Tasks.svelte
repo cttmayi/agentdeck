@@ -1057,6 +1057,13 @@
             且（有用户反馈 或 审核过）。置灰时 title 说明"为什么灰"。
             ★ 三轮：点按钮**跳到沉淀页**（`#/crystallize/<runId>`），流程在那里进行。
           -->
+          <!--
+            ★ 分批第 265 批（使用者："任务页也一样，需要有『沉淀技能』和『删除任务』2 个按钮"）：
+            栏头这一排现在两格：沉淀技能&智能体 / 删除任务，与聊天页那排同一种工具条
+            （样式在 `app.css` 的 `.detail-head .detail-actions` 里，一处定义）。
+            ⚠️ 「删除任务」原来**只在列表行右侧**有个 ×：选中一个任务之后想删它，得先回列表
+              找到那一行。同一个动作现在两处都有，用的是同一个 `removeTask`（含确认框）。
+          -->
           <button
             type="button"
             class="ghost"
@@ -1065,6 +1072,14 @@
             onclick={() => goCrystallize(activeRun?.runId ?? '')}
           >
             {$t('crystallize.optimize')}
+          </button>
+          <button
+            type="button"
+            class="ghost danger"
+            data-task-delete
+            onclick={() => void removeTask(selected.id)}
+          >
+            {$t('tasks.delete')}
           </button>
         {/if}
       {/snippet}
