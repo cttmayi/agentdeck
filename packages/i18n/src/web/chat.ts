@@ -384,6 +384,27 @@ export const chatText = {
     zh: '试录超时：转写 30 秒还没回来（模型是不是太大/CPU 太忙？）',
     en: 'Test recording timed out: no result after 30s (model too large, or the CPU is busy?)',
   },
+  /**
+   * ★ 分批第 280 批：**词典那一节**（两层矫正的可编辑面）+ 从手改里提规则的 chip。
+   *   两张表是一句话的两半：上面那行说"这是干什么的"，下面那些说"分两层"。
+   */
+  'chat.voiceVocabHeading': { zh: '专有名词', en: 'Proper nouns' },
+  'chat.voiceVocabHint': {
+    zh: '两层：词表让模型更容易听对；替换规则把它已经固定下来的错形态改回来（改了几处会在识别后提示）。',
+    en: 'Two layers: the term list helps the model hear it correctly; rules rewrite the errors it still makes (you will see how many were fixed).',
+  },
+  'chat.voiceVocabPromptLabel': { zh: '词表（正确写法）', en: 'Term list (correct spelling)' },
+  'chat.voiceVocabRuleLabel': { zh: '替换规则（听错的样子 → 正确写法）', en: 'Rewrite rules (misheard → correct)' },
+  'chat.voiceVocabEmpty': { zh: '还没加', en: 'Nothing yet' },
+  'chat.voiceVocabTermPlaceholder': { zh: '例如：AgentDeck', en: 'e.g. AgentDeck' },
+  'chat.voiceVocabFromPlaceholder': { zh: '听成的样子，如 微思普', en: 'As heard, e.g. "agent deck"' },
+  'chat.voiceVocabToPlaceholder': { zh: '正确写法，如 Whisper', en: 'Correct, e.g. "AgentDeck"' },
+  // 从"人手动改过的那一处"提规则（`lib/dictation.ts`）
+  'chat.voiceRuleLabel': { zh: '这是你改的：', en: 'You changed this:' },
+  'chat.voiceRuleSave': { zh: '记进词典', en: 'Add to dictionary' },
+  'chat.voiceRuleSkip': { zh: '不用', en: 'Not now' },
+  'chat.voiceRuleSaved': { zh: '已记进词典：「{from}」→「{to}」', en: 'Saved: "{from}" → "{to}"' },
+  'chat.voiceRuleFailed': { zh: '没记上：{error}', en: 'Could not save: {error}' },
   'chat.noOutput': { zh: '这一轮没有文字产出。', en: 'This turn produced no text.' },
   'chat.turnFailed': { zh: '这一轮没跑起来', en: "This turn didn't start" },
   'chat.duration': { zh: '用时 {seconds} 秒', en: '{seconds}s' },

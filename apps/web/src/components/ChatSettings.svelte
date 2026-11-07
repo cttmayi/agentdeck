@@ -60,6 +60,16 @@
     approxMb: number
   }
 
+  /** 词典（两层：prompt 词 + 替换规则）。 */
+  let vocab: { promptTerms: string[]; rules: Array<{ from: string; to: string }> } = {
+    promptTerms: [],
+    rules: [],
+  }
+  let vocabProblems: string[] = []
+  let termInput = ''
+  let ruleFrom = ''
+  let ruleTo = ''
+
   let capability: VoiceCapability | null = null
   let settings: VoiceSettings | null = null
   let models: VoiceModelSpec[] = []
@@ -90,11 +100,75 @@
     }
   }
 
+  /** 读词表（与设置同一次请求拿回来，见下面 `loadSettings` 的注释）。 */
+  function applyVocab(res: {
+    promptTerms?: string[]
+    rules?: Array<{ from: string; to: string }>
+    problems?: string[]
+  }): void {
+    vocab = { promptTerms: res.promptTerms ?? [], rules: res.rules ?? [] }
+    vocabProblems = res.problems ?? []
+  }
+
+  /**
+   * 写词表：**整份替换**（服务端就是这么收的）。
+   *
+   * ⚠️ 失败时**不吞**：说清原因（人在改配置，静默失败会让他以为加上了）。
+   */
+  async function saveVocab(patch: {
+    promptTerms?: string[]
+    rules?: Array<{ from: string; to: string }>
+  }): Promise<void> {
+    error = ''
+    try {
+      const res = await api<{
+        promptTerms: string[]
+        rules: Array<{ from: string; to: string }>
+        problems?: string[]
+      }>('/api/voice/vocab', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          promptTerms: patch.promptTerms ?? vocab.promptTerms,
+          rules: patch.rules ?? vocab.rules,
+        }),
+      })
+      applyVocab(res)
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function addTerm(): Promise<void> {
+    const value = termInput.trim()
+    if (value === '') return
+    if (!vocab.promptTerms.includes(value)) {
+      await saveVocab({ promptTerms: [...vocab.promptTerms, value] })
+    }
+    termInput = ''
+  }
+
+  async function addRule(): Promise<void> {
+    const from = ruleFrom.trim()
+    const to = ruleTo.trim()
+    if (from === '' || to === '' || from === to) return
+    const exists = vocab.rules.some((r) => r.from === from && r.to === to)
+    if (!exists) await saveVocab({ rules: [...vocab.rules, { from, to }] })
+    ruleFrom = ''
+    ruleTo = ''
+  }
+
   async function loadSettings(): Promise<void> {
     try {
       // 词表接口顺带带回 settings（一个请求拿两样东西）
-      const res = await api<{ settings: VoiceSettings }>('/api/voice/vocab')
+      const res = await api<{
+        settings: VoiceSettings
+        promptTerms: string[]
+        rules: Array<{ from: string; to: string }>
+        problems?: string[]
+      }>('/api/voice/vocab')
       settings = res.settings
+      applyVocab(res)
       const catalog = await api<{ models: VoiceModelSpec[] }>('/api/voice/models').catch(() => null)
       models = catalog?.models ?? []
     } catch {
@@ -292,6 +366,88 @@
       <p class="hint bad" data-prefix-error>{error}</p>
     {/if}
   </section>
+  <section class="drawer-section" data-voice-vocab>
+    <h3>{$t('chat.voiceVocabHeading')}</h3>
+    <p class="hint">{$t('chat.voiceVocabHint')}</p>
+
+    <!-- 第一层：进 initialPrompt 的词（只放"正确写法"） -->
+    <p class="voice-label">{$t('chat.voiceVocabPromptLabel')}</p>
+    <div class="prefix-chips" data-voice-term-chips>
+      {#each vocab.promptTerms as term, i (term)}
+        <span class="prefix-chip">
+          <span class="mono">{term}</span>
+          <button
+            type="button"
+            class="prefix-x"
+            data-voice-term-remove
+            aria-label={$t('chat.settingsMemoryRemove', { word: term })}
+            onclick={() => void saveVocab({ promptTerms: vocab.promptTerms.filter((_, k) => k !== i) })}>×</button
+          >
+        </span>
+      {/each}
+      {#if vocab.promptTerms.length === 0}
+        <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+      {/if}
+    </div>
+    <div class="prefix-add">
+      <input
+        bind:value={termInput}
+        placeholder={$t('chat.voiceVocabTermPlaceholder')}
+        data-voice-term-input
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void addTerm()
+        }}
+      />
+      <button type="button" class="secondary" data-voice-term-add onclick={() => void addTerm()}>
+        {$t('chat.settingsMemoryAdd')}
+      </button>
+    </div>
+
+    <!-- 第二层：替换规则（"常被听成的样子" → "正确写法"） -->
+    <p class="voice-label">{$t('chat.voiceVocabRuleLabel')}</p>
+    <div class="voice-rules" data-voice-rules>
+      {#each vocab.rules as rule, i (rule.from + rule.to)}
+        <span class="voice-rule">
+          <span class="mono">{rule.from}</span>
+          <span class="faint">→</span>
+          <span class="mono">{rule.to}</span>
+          <button
+            type="button"
+            class="prefix-x"
+            data-voice-rule-remove
+            aria-label={$t('chat.settingsMemoryRemove', { word: rule.from })}
+            onclick={() => void saveVocab({ rules: vocab.rules.filter((_, k) => k !== i) })}>×</button
+          >
+        </span>
+      {/each}
+      {#if vocab.rules.length === 0}
+        <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+      {/if}
+    </div>
+    <div class="prefix-add">
+      <input
+        bind:value={ruleFrom}
+        placeholder={$t('chat.voiceVocabFromPlaceholder')}
+        data-voice-rule-from
+      />
+      <span class="faint">→</span>
+      <input
+        bind:value={ruleTo}
+        placeholder={$t('chat.voiceVocabToPlaceholder')}
+        data-voice-rule-to
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void addRule()
+        }}
+      />
+      <button type="button" class="secondary" data-voice-rule-add onclick={() => void addRule()}>
+        {$t('chat.settingsMemoryAdd')}
+      </button>
+    </div>
+    {#if vocabProblems.length > 0}
+      <p class="hint bad" data-voice-vocab-problems>{vocabProblems.join('；')}</p>
+    {/if}
+  </section>
+
   <section class="drawer-section" data-voice-settings>
     <h3>{$t('chat.voiceSettingsHeading')}</h3>
     <p class="hint">{$t('chat.voiceSettingsHint')}</p>
@@ -515,6 +671,27 @@
     color: var(--text-dim);
     margin: 0;
     white-space: nowrap;
+  }
+  .voice-label {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    margin: var(--sp-2) 0 var(--sp-1);
+  }
+  /* 规则列表：一条一行（`from → to` + 删），不折行 */
+  .voice-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: var(--sp-2);
+  }
+  .voice-rule {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .voice-path {
     overflow: hidden;

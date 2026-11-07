@@ -8,6 +8,7 @@
   // ★ 分批第 197 批：栏脚的折叠清单与输入条也抽成共享组件（沉淀页用同一份）
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import VoiceButton from '../components/VoiceButton.svelte'
+  import { suggestRule } from '../lib/dictation.ts'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
@@ -590,11 +591,67 @@
    * ⚠️ 回复焦点给输入框：接着改字是这个动作**唯一**的下一步，要人再点一次输入框
    *   是无谓的一步（与"识别完就该能继续编辑"这件事直接相关）。
    */
+  /**
+   * 上一次口述**识别出来的原样**（分批第 280 批）。
+   *
+   * 用途只有一个：人如果手动改了这段字，就用"改前/改后"提一条词典规则
+   * （"微思普" → "Whisper"）。改的痕迹本来就是现成的，不该让他再描述一遍。
+   */
+  let dictatedText = ''
+  let ruleAsk: { from: string; to: string } | null = null
+  let ruleAsked = false
+
+  /**
+   * 人改完那段话之后，看看值不值得提一条规则。
+   *
+   * ⚠️ 只在"这次口述还没问过"时问一次：连着改三处时界面已经被他的操作占满了，
+   *   再弹一条建议只会添乱（那种情况他可以去设置里自己加）。
+   */
+  $: if (dictatedText !== '' && input !== dictatedText && !ruleAsked) {
+    const found = suggestRule(dictatedText, input)
+    if (found !== null) {
+      ruleAsk = found
+      ruleAsked = true
+    }
+  }
+
+  /** 把这条建议写进词典（词表是整个替换掉的：读回来 + 追加 + 写回）。 */
+  async function rememberRule(): Promise<void> {
+    if (ruleAsk === null) return
+    const rule = ruleAsk
+    ruleAsk = null
+    try {
+      const current = await api<{ promptTerms: string[]; rules: Array<{ from: string; to: string }> }>(
+        '/api/voice/vocab',
+      )
+      const exists = current.rules.some(
+        (r) => r.from === rule.from && r.to === rule.to,
+      )
+      if (!exists) {
+        await api('/api/voice/vocab', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            promptTerms: current.promptTerms,
+            rules: [...current.rules, { from: rule.from, to: rule.to }],
+          }),
+        })
+      }
+      showToast($t('chat.voiceRuleSaved', { from: rule.from, to: rule.to }))
+    } catch (err) {
+      showToast($t('chat.voiceRuleFailed', { error: err instanceof Error ? err.message : String(err) }))
+    }
+  }
+
   function insertDictation(text: string): void {
     const addition = text.trim()
     if (addition === '') return
     const base = input.replace(/[ \t]+$/, '')
     input = base === '' ? addition : `${base} ${addition}`
+    // 记下"这次填入的是什么"：之后人一改，就拿它当"改前"的基准
+    dictatedText = input
+    ruleAsk = null
+    ruleAsked = false
     // 光标移到末尾再聚焦：`focus()` 会把光标放在末尾（这里正是想要的位置）
     requestAnimationFrame(() => {
       const box = document.querySelector<HTMLTextAreaElement>('.pane-foot [data-composer] textarea')
@@ -1147,6 +1204,29 @@
           发送照常（这句话既是给它的消息，也是一条记忆）；「改」就地改成
           "下次也成立"的说法，「不记」这一次不写。
       -->
+      <!--
+        ★ 分批第 280 批：**从手改里提词典规则**。
+        人把识别错的那个词改对了 ⇒ 直接问"记进词典吗"（下次就不再错）。
+        一条建议只在"这次口述"里问一次，而且只在**一处改动**时才出现——
+        重写了半句话的情况不该变成全局替换（见 `lib/dictation.ts` 的说明）。
+      -->
+      {#if ruleAsk !== null}
+        <div class="mem-chip" data-voice-rule-chip>
+          <span class="mem-chip-k">{$t('chat.voiceRuleLabel')}</span>
+          <span class="mem-chip-t" data-voice-rule-pair
+            >「{ruleAsk.from}」→「{ruleAsk.to}」</span
+          >
+          <button type="button" class="ghost small" data-voice-rule-save onclick={() => void rememberRule()}
+            >{$t('chat.voiceRuleSave')}</button
+          >
+          <button
+            type="button"
+            class="ghost small"
+            data-voice-rule-skip
+            onclick={() => (ruleAsk = null)}>{$t('chat.voiceRuleSkip')}</button
+          >
+        </div>
+      {/if}
       {#if memCandidate !== null && memSkip !== memCandidate.text && memAgentId !== ''}
         <div class="mem-chip" data-mem-chip>
           <span class="mem-chip-k">{$t('chat.memoryChipLabel')}</span>

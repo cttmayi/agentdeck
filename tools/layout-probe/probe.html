@@ -9592,6 +9592,31 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              *   · 状态行说"还没有语音模型…"（不是"可以用"）；
              *   · 一颗**「下载模型」**按钮（而不是"试录 3 秒"——没模型时那个按钮按了必失败）。
              */
+            /**
+             * ★ 分批第 280 批：词典那一节（两层矫正的可编辑面）。
+             *   量"两层的编辑入口都在"：词 chips + 加词框、规则列表 + 加规则的两个框。
+             *   ⚠️ 不量"真的加进去了"——那会改到探针 daemon 的临时词表，而下一条判据
+             *   （`chat.voiceSettings`）读的是同一块地方；加词/删词的往返由
+             *   `voice-api.test.ts` 的接口测试钉着。
+             */
+            const vocabSec = d().querySelector('[data-voice-vocab]')
+            facts['chat.voiceVocab'] = (() => {
+              if (vocabSec === null || vocabSec === undefined) return { present: false }
+              return {
+                present: true,
+                termChips: vocabSec.querySelectorAll('[data-voice-term-chips] .prefix-chip').length,
+                termInput: vocabSec.querySelector('[data-voice-term-input]') !== null,
+                termAdd: vocabSec.querySelector('[data-voice-term-add]') !== null,
+                rules: vocabSec.querySelectorAll('[data-voice-rules] .voice-rule').length,
+                ruleFrom: vocabSec.querySelector('[data-voice-rule-from]') !== null,
+                ruleTo: vocabSec.querySelector('[data-voice-rule-to]') !== null,
+                ruleAdd: vocabSec.querySelector('[data-voice-rule-add]') !== null,
+                labels: [...vocabSec.querySelectorAll('.voice-label')].map((n) =>
+                  (text(n) ?? '').trim(),
+                ),
+              }
+            })()
+
             const voiceSec = d().querySelector('[data-voice-settings]')
             const optionValues = (sel) =>
               sel === null ? null : [...sel.querySelectorAll('option')].map((o) => o.value)

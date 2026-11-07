@@ -1850,6 +1850,36 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.voiceVocab',
+    /**
+     * ★ 分批第 280 批：词典那一节（两层矫正的**可编辑面**）。
+     *
+     * 判据是"两层的入口都在"：词表（chips + 加词框）与替换规则（列表 + from/to 两个
+     * 框 + 加）。少一层就等于"只能用平台自带的那几句"——而两层本来就是分开解决
+     * 两个问题的（让模型听对 vs 把它已经听错的固定形态改回来）。
+     */
+    label:
+      '★★ 聊天设置里有「专有名词」一节：**词表**（chips + 加词）与**替换规则**（列表 + from→to 两个框）两层都在，且两层各有小标题',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.termInput === true &&
+      v.termAdd === true &&
+      v.ruleFrom === true &&
+      v.ruleTo === true &&
+      v.ruleAdd === true &&
+      Array.isArray(v.labels) &&
+      v.labels.length === 2,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　词 ${String(v.termChips)} 个（输入 ${String(v.termInput)}/加 ${String(v.termAdd)}）　` +
+          `规则 ${String(v.rules)} 条（${String(v.ruleFrom)}→${String(v.ruleTo)}/加 ${String(v.ruleAdd)}）　` +
+          `小标题 ${JSON.stringify(v.labels ?? [])}`,
+  },
+  {
+    view: '聊天',
     key: 'chat.voiceSettings',
     /**
      * ★ 分批第 279 批：聊天页「设置」抽屉里的**语音**一节。

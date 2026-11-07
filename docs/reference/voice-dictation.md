@@ -175,6 +175,14 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 - 新增 `GET /api/voice/models`（三档 + 每档在本地的状态），走 `VoiceService.modelCatalog()`
   以便测试注入
 
+**词典那一节（批 280）**：同一个抽屉里的「专有名词」，两层都能编
+- 词表 chips（加/删）——只放正确写法；替换规则列表（`听错的样子 → 正确写法`，加/删）
+- 服务端整份替换写回；**被跳过的坏条目**（`problems`）原样显示，不假装保存成功
+- 「一键加词」：识别完人如果**手动改了**，就用改动前后提一条规则（`apps/web/src/lib/dictation.ts`），
+  聊天页弹一枚 chip「这是你改的：「微思普」→「Whisper」」+「记进词典」
+  ⚠️ 只在**一处、像词、不跨标点、不只有大小写差别**时才提（词级 LCS；第一版用逐字符
+  前后缀，`agent deck → AgentDeck` 会提出半截规则 `agent d → AgentD`，测试当场抓到）
+
 **还没做**：
 - `outputMode`（`input` / `via-skill`）的**开关与行为**——设置里这个字段已经有了，
   但界面还没给入口，等"自动发送 + 3 秒撤销"一起做（先摆一颗不起作用的开关就是死接口）
