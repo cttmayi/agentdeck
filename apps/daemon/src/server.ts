@@ -4284,6 +4284,17 @@ async function injectedSkillsOf(
       return
     }
 
+    /**
+     * 下载进度（分批第 282 批）。
+     *
+     * ★ 轮询而不是 SSE：一次下载最多几十秒，而这条要跨过"页面刚打开"与"刚点下载"
+     *   两种时刻——轮询不怕丢首帧，也不给 daemon 多条长连接。
+     */
+    if (path === '/api/voice/models/progress' && req.method === 'GET') {
+      sendJson(res, 200, { progress: voice.modelDownloadProgress() })
+      return
+    }
+
     if (path === '/api/voice/models/ensure' && req.method === 'POST') {
       const body = (await readJsonBody(req)) as { model?: unknown } | null
       const modelId = typeof body?.model === 'string' ? body.model : undefined

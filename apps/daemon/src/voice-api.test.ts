@@ -45,7 +45,10 @@ function fakeCaptureBox(): {
 
 const transcript: Transcriber = {
   async transcribe() {
-    return { segments: [['00:00:00,000', '00:00:01,000', ' 用微思普跑一遍语音方案']], ms: 5 }
+    return {
+      segments: [{ start: '00:00:00,000', end: '00:00:01,000', text: ' 用微思普跑一遍语音方案' }],
+      ms: 5,
+    }
   },
   dispose() {},
 }
@@ -210,6 +213,16 @@ describe('模型目录', () => {
   })
 })
 
+describe('下载进度', () => {
+  test('★★ 没在下载时是 null（界面据此不画进度条），而且这条不联网也不落盘', async () => {
+    await withDaemon(async ({ url }) => {
+      const { status, body } = await json(`${url}/api/voice/models/progress`)
+      assert.equal(status, 200)
+      assert.equal(body['progress'], null)
+    })
+  })
+})
+
 describe('录音会话', () => {
   test('★★ 开录音 ⇒ 201 + 会话 id；同一时刻只许一个（第二次 409）', async () => {
     await withDaemon(async ({ url }) => {
@@ -303,7 +316,8 @@ describe('录音会话', () => {
         await new Promise((r) => setTimeout(r, 25))
       }
       assert.equal(snapshot['state'], 'done', JSON.stringify(snapshot))
-      assert.equal(snapshot['text'], '用Whisper跑一遍语音方案')
+      // 替换之后再收拾一遍空格 ⇒ 中英文交界有一个空格（真机验证抓到的排版）
+      assert.equal(snapshot['text'], '用 Whisper 跑一遍语音方案')
       assert.equal(snapshot['raw'], '用微思普跑一遍语音方案')
       assert.deepEqual(snapshot['corrections'], [{ from: '微思普', to: 'Whisper', count: 1 }])
     })

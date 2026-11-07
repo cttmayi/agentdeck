@@ -24,9 +24,28 @@
  * 把 whisper 的分段拼成一段文字。
  *
  * 每段自带前导空格（英文需要它，中文不需要），所以先按段拼、再统一收拾。
+ *
+ * ⚠️ 两种形状都认：包 0.2.12 实际返回 `{start, end, text}`，而它的 README 写的是
+ *   三元组 `[start, end, text]`。第一版只按 README 取 `seg[2]` ⇒ 真机上拿到
+ *   `undefined`、整段变空（直接调包能看到正确文本，所以这个缺陷藏得很深）。
+ *   现在对象优先、三元组兜底——**文档与实现不一致时，两种都接受**比猜一边安全。
  */
-export function joinSegments(segments: readonly (readonly [string, string, string])[]): string {
-  return segments.map((seg) => seg[2] ?? '').join('')
+export function joinSegments(
+  segments: readonly (TranscriptSegment | readonly [string, string, string])[],
+): string {
+  return segments
+    .map((seg) => {
+      if (Array.isArray(seg)) return (seg[2] as string | undefined) ?? ''
+      return (seg as TranscriptSegment).text ?? ''
+    })
+    .join('')
+}
+
+/** 分段（与 `transcriber.ts` 的 `TranscriptSegment` 同一件事；这里不 import 以免循环）。 */
+interface TranscriptSegment {
+  start: string
+  end: string
+  text: string
 }
 
 /** 中文/中文标点：用来判断"这个空格该不该留"。 */

@@ -375,6 +375,7 @@ export const chatText = {
   },
   'chat.voiceSettingsDownload': { zh: '下载模型（约 {mb} MiB）', en: 'Download model (~{mb} MiB)' },
   'chat.voiceSettingsDownloading': { zh: '正在下载…', en: 'Downloading…' },
+  'chat.voiceSettingsDownloadPercent': { zh: '正在下载… {pct}%', en: 'Downloading… {pct}%' },
   'chat.voiceSettingsDownloaded': { zh: '下好了（{mb} MiB），之后全程离线', en: 'Downloaded ({mb} MiB) — offline from now on' },
   'chat.voiceSettingsSelfTest': { zh: '试录 3 秒', en: 'Test record 3s' },
   'chat.voiceSettingsSelfTestRecording': { zh: '录 3 秒…', en: 'Recording 3s…' },

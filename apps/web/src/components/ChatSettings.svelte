@@ -74,6 +74,11 @@
   let settings: VoiceSettings | null = null
   let models: VoiceModelSpec[] = []
   let downloading = false
+  /** 下载进度（0–100）；null = 没有在下载（分批第 282 批）。 */
+  let downloadPercent: number | null = null
+  let downloadDoneMb = 0
+  let downloadTotalMb = 0
+  let progressTimer: ReturnType<typeof setInterval> | null = null
   let downloadNote = ''
   let selftest = ''
   let selfTestNote = ''
@@ -195,10 +200,45 @@
     }
   }
 
+  /**
+   * 轮询下载进度。
+   *
+   * ⚠️ 用 `setInterval` 而不是跟着 `ensure` 的响应走：`ensure` 是"下完才 resolve"的，
+   *   等它回来时进度条已经没意义了。
+   */
+  function startProgressPolling(): void {
+    stopProgressPolling()
+    downloadPercent = 0
+    progressTimer = setInterval(() => {
+      void (async () => {
+        try {
+          const res = await api<{
+            progress: { done: number; total: number; percent: number } | null
+          }>('/api/voice/models/progress')
+          if (res.progress === null) return
+          downloadPercent = res.progress.percent
+          downloadDoneMb = res.progress.done / 1048576
+          downloadTotalMb = res.progress.total / 1048576
+        } catch {
+          // 轮询失败不打断下载（它还在跑），下一次再读
+        }
+      })()
+    }, 500)
+  }
+
+  function stopProgressPolling(): void {
+    if (progressTimer !== null) {
+      clearInterval(progressTimer)
+      progressTimer = null
+    }
+    downloadPercent = null
+  }
+
   async function downloadModel(): Promise<void> {
     downloading = true
     downloadNote = ''
     error = ''
+    startProgressPolling()
     try {
       const res = await api<{ downloaded: boolean; bytes: number }>('/api/voice/models/ensure', {
         method: 'POST',
@@ -212,6 +252,7 @@
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     } finally {
+      stopProgressPolling()
       downloading = false
     }
   }
@@ -549,8 +590,19 @@
           disabled={downloading}
           onclick={() => void downloadModel()}
         >{downloading
-            ? $t('chat.voiceSettingsDownloading')
+            ? downloadPercent === null
+              ? $t('chat.voiceSettingsDownloading')
+              : $t('chat.voiceSettingsDownloadPercent', { pct: String(downloadPercent) })
             : $t('chat.voiceSettingsDownload', { mb: String(capability.model.approxMb) })}</button>
+        <!-- ★ 282 批：进度条（"在动"与"卡死"必须分得开——一次 57 MiB 在慢网络下能跑几十秒） -->
+        {#if downloading && downloadPercent !== null}
+          <span class="voice-progress" data-voice-progress>
+            <span class="voice-progress-bar" style:width={`${downloadPercent}%`}></span>
+          </span>
+          <span class="faint small" data-voice-progress-text
+            >{downloadDoneMb.toFixed(1)} / {downloadTotalMb.toFixed(1)} MiB</span
+          >
+        {/if}
       {:else}
         <button
           type="button"
@@ -709,6 +761,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* 下载进度条：与按钮同一行，吃掉剩下的宽度 */
+  .voice-progress {
+    flex: 1 1 8rem;
+    min-width: 6rem;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .voice-progress-bar {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.3s linear;
+  }
+
   /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行） */
   .voice-output {
     flex: 1 1 100%;

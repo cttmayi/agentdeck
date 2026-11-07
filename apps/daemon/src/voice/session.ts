@@ -326,7 +326,13 @@ export class VoiceSession {
     }
     const applied = applyVocabRules(joined, this.deps.vocab.rules)
     this.raw = joined
-    this.text = applied.text
+    /**
+     * ⚠️ 替换**之后再收拾一遍空格**（278 批真机验证抓到的）：`Whisp 古来` 换成
+     *   `Whisper来` 之后，中英文之间就少了一个空格——替换是"改词"，它不知道排版。
+     *   这一次只动空格与标点边角（`normalizeText` 不改词），所以不会与"改词必须回显"
+     *   那条纪律冲突：`corrections` 仍然只记替换本身。
+     */
+    this.text = normalizeText(applied.text)
     this.corrections = applied.corrections
     this.state = 'done'
     this.finishing = false

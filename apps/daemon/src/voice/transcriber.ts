@@ -28,8 +28,23 @@ import { createRequire } from 'node:module'
 
 export type VoiceLanguage = 'zh' | 'en' | 'auto'
 
-/** whisper 的分段：`[开始, 结束, 文本]`（时间戳是 `HH:MM:SS,mmm`）。 */
-export type TranscriptSegment = readonly [string, string, string]
+/**
+ * whisper 的分段。
+ *
+ * ⚠️⚠️ **这里踩过一个真缺陷**（真机验证抓到的）：包的 README 写的是三元组
+ *   `[开始, 结束, 文本]`，而 0.2.12 **实际返回的是对象** `{start, end, text}`
+ *   （`types.d.ts` 里的 `TranscriptSegment` 也是对象）。第一版按 README 取 `seg[2]`
+ *   ⇒ 每段都是 `undefined` ⇒ 连起来是空字符串 ⇒ 界面显示"没听清"，
+ *   而模型其实认得好好的（直接调包能看到正确文本）。
+ *
+ *   所以这里按**真实返回**定义，并让 `joinSegments` 两种形状都认（见 `text.ts`）：
+ *   包的文档与实现对不上这件事，不该再咬第二次。
+ */
+export interface TranscriptSegment {
+  start: string
+  end: string
+  text: string
+}
 
 export interface TranscribeRequest {
   /** 16kHz 单声道 Float32，取值 -1..1。 */

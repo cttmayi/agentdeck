@@ -66,6 +66,15 @@ export class VoiceService {
   private transcriber: Transcriber | null = null
   private transcriberKey = ''
   private modelEnsuring: Promise<EnsureModelResult> | null = null
+  /**
+   * 正在进行的下载进度（分批第 282 批）。
+   *
+   * ★ 为什么要单独记一份：`ensureModel` 是"下完才 resolve"的，而一次 57 MiB 的下载
+   *   在慢网络下能跑几十秒——界面若只能显示"正在下载…"，人分不出"在动"和"卡死"。
+   *   进度由 `onProgress` 写进来，界面轮询 `GET /api/voice/models/progress` 读它。
+   * ⚠️ 只在内存里：daemon 重启就没了（那也正是"这次下载没在继续"的事实）。
+   */
+  private modelProgress: { modelId: string; done: number; total: number } | null = null
   private counter = 0
 
   constructor(deps: VoiceServiceDeps) {
@@ -102,6 +111,19 @@ export class VoiceService {
   async capability(modelId?: string): Promise<VoiceCapability> {
     const settings = await this.settings()
     return probeVoiceCapability({ ...this.deps, modelId: modelId ?? settings.model })
+  }
+
+  /**
+   * 当前下载进度（没有在下载 ⇒ null）。
+   *
+   * ⚠️ `percent` 由服务端算好：界面不该自己相除（除零、取整不一致这类小事很容易
+   *   在两边长出两种结果）。
+   */
+  modelDownloadProgress(): { modelId: string; done: number; total: number; percent: number } | null {
+    const p = this.modelProgress
+    if (p === null) return null
+    const percent = p.total <= 0 ? 0 : Math.min(100, Math.round((p.done / p.total) * 100))
+    return { ...p, percent }
   }
 
   /**
@@ -159,6 +181,9 @@ export class VoiceService {
       spec,
       baseUrl: this.deps.modelBaseUrl ?? DEFAULT_MODEL_BASE_URL,
       ...(this.deps.fetchImpl === undefined ? {} : { fetchImpl: this.deps.fetchImpl }),
+      onProgress: (done, total) => {
+        this.modelProgress = { modelId: id, done, total }
+      },
     })
     this.modelEnsuring = promise
     try {
@@ -166,6 +191,7 @@ export class VoiceService {
       return { ...result, modelId: id }
     } finally {
       this.modelEnsuring = null
+      this.modelProgress = null
     }
   }
 

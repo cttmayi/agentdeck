@@ -67,9 +67,7 @@ function fakeTranscriber(text = '我们来讨论一下语音方案'): Transcribe
       // 断言"调用方把 16k 单声道 Float32 送进来了"（-1..1）
       assert.ok(request.pcm instanceof Float32Array)
       return {
-        segments: [
-          ['00:00:00,000', '00:00:02,000', ` ${text}`],
-        ],
+        segments: [{ start: '00:00:00,000', end: '00:00:02,000', text: ` ${text}` }],
         ms: 12,
       }
     },
@@ -287,9 +285,27 @@ describe('词典替换在会话里真的生效', () => {
     await new Promise((r) => setTimeout(r, 20))
     const snap = h.session.snapshot()
     assert.equal(snap.state, 'done')
-    assert.equal(snap.text, '我们用Whisper来识别')
+    assert.equal(snap.text, '我们用 Whisper 来识别')
     assert.equal(snap.raw, '我们用微思普来识别')
     assert.deepEqual(snap.corrections, [{ from: '微思普', to: 'Whisper', count: 1 }])
+  })
+
+  test('★★ 替换之后再收拾一遍空格（换词会造成中英文交界缺空格）', async () => {
+    // 真机验证抓到的：`Whisp 古来` → `Whisper来`，中英文之间少了空格
+    const h = makeSession({
+      text: '我们用Whisp 古来识别',
+      vocab: { version: 1, promptTerms: [], rules: [{ from: 'Whisp 古', to: 'Whisper' }] },
+    })
+    await h.session.start()
+    h.capture.events?.data(loudFrame())
+    h.capture.events?.speech()
+    h.capture.events?.silence()
+    await new Promise((r) => setTimeout(r, 20))
+    const snap = h.session.snapshot()
+    assert.equal(snap.state, 'done')
+    assert.equal(snap.text, '我们用 Whisper 来识别')
+    // 原始那份只做过**排版**（不改词）：中英文交界处那个空格是 `normalizeText` 加的
+    assert.equal(snap.raw, '我们用 Whisp 古来识别')
   })
 
   test('★★ 一句都没识别出词 ⇒ 失败并说"没听清"（不是给出一个空字符串）', async () => {

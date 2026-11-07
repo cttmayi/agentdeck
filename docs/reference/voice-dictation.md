@@ -127,6 +127,23 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 
 ## 8. 踩过的坑（写在这里免得再踩）
 
+**真机验证（2026-11，真模型 + 真 whisper + `say` 合成语音）抓到的两个真缺陷**——它们
+在全部单测与探针都绿的条件下存在，正是"夹具跟着错代码一起错"的典型：
+
+0. **ggml 魔数是按小端整数写的**：文件头是 `6c 6d 67 67`（读出来 "lmgg"），不是 ASCII
+   的 `ggml`。第一版拿 `Buffer.from('ggml')` 去比 ⇒ **每个真模型都被判成"不是模型"**，
+   下载永远失败在最后一步，而报错还说"可能返回了错误页"（指向完全错误的方向）。
+   修法：按 `readUInt32LE(0) === 0x67676d6c` 比，并顺带认 `ggmf` 与 `GGUF`。
+0b. **`whisper-cpp-node` 返回的分段是对象**（`{start,end,text}`），而它的 README 写的是
+   三元组 ⇒ 第一版 `seg[2]` 全是 `undefined`，整段文本变空、界面显示"没听清"，而模型
+   其实认得好好的。修法：按对象定义，`joinSegments` 两种形状都认。
+0c. 替换规则把词改短/改长之后，**中英文交界会缺空格**（`Whisp 古来` → `Whisper来`）⇒
+   替换之后再跑一遍 `normalizeText`（只动排版、不动词）。
+
+验证结果（`base-q5_1`，Apple Silicon，GPU）：模型加载 ~10s（一次性、常驻），**4.96s 音频
+转写 0.78s（约 6x 实时）**；`initialPrompt` 确实起了作用（不加 prompt 时 "AgentDeck"
+被认成 "AgentStack"），替换规则命中并回显 `corrections`。
+
 1. **`import('whisper-cpp-node')` 是坏的**（0.2.12）：`exports.import` 指向不存在的
    `dist/index.mjs`。必须 `createRequire(...)` 拿 CJS 入口。
 2. **`new Microphone()` 会阻塞 event loop**（同步做 Silero 模型加载）⇒ 一律
@@ -192,8 +209,13 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
   输入框原本有字不发（那份字是人写的）、这一轮还在跑不发（硬发会被静默丢）、识别为空不发
 - 人一动笔就撤销自动发送（他开始改字 = 这一句还没准备好发出去）
 
+**下载进度（批 282）**
+- `GET /api/voice/models/progress` 轮询（不用 SSE：一次下载几十秒，轮询不怕丢首帧、
+  也不给 daemon 多条长连接）；设置里显示百分比 + 进度条 + `x / y MiB`
+- 为什么值得做：一次 57 MiB 在慢网络下能跑几十秒，只有"正在下载…"的话，人分不出
+  "在动"和"卡死"（实测慢网 400 秒）
+
 **还没做**：
-- 下载进度（现在只有一个"正在下载…"，没有百分比）
 - 任务输入条的麦克风按钮（`VoiceButton` 不认识聊天，直接接即可）
 - `outputMode: 'via-skill'`：识别后**自动发送一条聊天消息** + 3 秒可撤销（平台不自己调 skill）
 - 词典编辑与「一键加词」（从 `raw` 与改后文本的差异生成规则）

@@ -99,8 +99,27 @@ export function modelPathOf(asrRoot: string, spec: AsrModelSpec): string {
   return join(modelsDirOf(asrRoot), spec.file)
 }
 
-/** ggml 文件头 4 字节。 */
-const GGML_MAGIC = Buffer.from('ggml', 'ascii')
+/**
+ * 模型文件头的魔数。
+ *
+ * ⚠️⚠️ **这里踩过一个真缺陷**（排查记录，别改回去）：ggml 的魔数是**按小端整数**写的
+ *   `0x67676d6c`，落成字节是 `6c 6d 67 67`（读出来是 "lmgg"，**不是** "ggml"）。
+ *   第一版拿 `Buffer.from('ggml')` 去比 ⇒ 每个真模型都被判成"不是 ggml 模型"，
+ *   于是下载永远失败在最后一步（而且报错还说"可能返回了错误页"，指向完全错误的方向）。
+ *   测试没抓到是因为夹具也用了同一段错误代码当"真模型"。
+ *
+ * 真实文件的前 16 字节（`ggml-base-q5_1.bin`）：
+ *   `6c6d 6767 99ca 0000 dc05 0000 0002 0000`
+ */
+const GGML_MAGIC_LE = 0x67676d6c
+/** 老版本 whisper.cpp 用过的另一个魔数（同样是按小端整数写的 "ggmf"）。 */
+const GGM_F_MAGIC_LE = 0x666d6767
+/**
+ * GGUF 是新容器格式（文件头就是 ASCII 的 `GGUF`）。
+ * 现在这些 whisper 模型都还是 ggml，但以后可能换成 GGUF——两种都认，免得那一天又
+ * 变成"下完了却说文件无效"。
+ */
+const GGUF_MAGIC = Buffer.from('GGUF', 'ascii')
 /** 小于这个数的一定不是模型（真实的量化模型最小也有几十 MiB）。 */
 const MIN_MODEL_BYTES = 1 << 20
 
@@ -137,14 +156,22 @@ async function writeLock(asrRoot: string, lock: ModelsLock): Promise<void> {
   await writeJsonFile(lockPathOf(asrRoot), lock)
 }
 
-/** 读文件头，判断"这是不是一个 ggml 模型"。 */
+/**
+ * 读文件头，判断"这是不是一个 ggml / GGUF 模型"。
+ *
+ * 魔数按**小端整数**比（见上面 `GGML_MAGIC_LE` 那段：字节序搞反过一次，整个下载
+ * 因此永远失败）。
+ */
 export async function looksLikeGgml(path: string): Promise<boolean> {
   try {
     const handle = await open(path, 'r')
     try {
-      const buf = Buffer.alloc(GGML_MAGIC.length)
-      const { bytesRead } = await handle.read(buf, 0, GGML_MAGIC.length, 0)
-      return bytesRead === GGML_MAGIC.length && buf.equals(GGML_MAGIC)
+      const buf = Buffer.alloc(8)
+      const { bytesRead } = await handle.read(buf, 0, 8, 0)
+      if (bytesRead < 4) return false
+      if (buf.subarray(0, 4).equals(GGUF_MAGIC)) return true
+      const magic = buf.readUInt32LE(0)
+      return magic === GGML_MAGIC_LE || magic === GGM_F_MAGIC_LE
     } finally {
       await handle.close()
     }

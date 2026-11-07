@@ -40,12 +40,26 @@ after(async () => {
 const SPEC = ASR_MODELS[0]
 if (SPEC === undefined) throw new Error('ASR_MODELS 不该是空的')
 
-/** 造一份"长得像模型"的字节：ggml 魔数 + 补到 1 MiB 以上（跳过"体积太小"的判定）。 */
+/**
+ * 造一份"长得像模型"的字节：**真的 ggml 魔数**（小端整数 → 字节 `6c 6d 67 67`）+
+ * 补到 1 MiB 以上（跳过"体积太小"的判定）。
+ *
+ * ⚠️ 这里必须与真实文件一致。第一版拿 `Buffer.from('ggml')`（ASCII）当魔数，而真实文件
+ *   的前 4 字节是 `6c 6d 67 67`——夹具跟着错代码一起错，于是**测试全绿、真机必崩**
+ *   （实测：真模型下载完被判"不是 ggml 模型"）。现在按小端整数写。
+ */
 function fakeModelBytes(pad = 1 << 20): Uint8Array {
-  const bytes = new Uint8Array(Buffer.byteLength('ggml') + pad)
-  bytes.set(Buffer.from('ggml', 'ascii'), 0)
+  const bytes = new Uint8Array(8 + pad)
+  // 0x67676d6c 小端 ⇒ 6c 6d 67 67（与 `ggml-base-q5_1.bin` 的真实头 4 字节相同）
+  bytes[0] = 0x6c
+  bytes[1] = 0x6d
+  bytes[2] = 0x67
+  bytes[3] = 0x67
+  // 第 5–8 字节留给"版本号"（真实文件这里是 `99ca 0000`），不必与真实值相同
+  bytes[4] = 0x99
+  bytes[5] = 0xca
   // 填充非零字节，避免"全是 0"看起来像稀疏文件
-  bytes.fill(7, 4)
+  bytes.fill(7, 8)
   return bytes
 }
 
@@ -203,20 +217,35 @@ describe('下载与校验', () => {
   test('★ 体型太小的文件不算模型（1 MiB 以下一律判坏）', async () => {
     const asr = join(root, 'tiny')
     await mkdir(join(asr, 'models'), { recursive: true })
-    await writeFile(modelPathOf(asr, SPEC), Buffer.concat([Buffer.from('ggml'), Buffer.alloc(64)]))
+    await writeFile(
+      modelPathOf(asr, SPEC),
+      Buffer.concat([Buffer.from([0x6c, 0x6d, 0x67, 0x67]), Buffer.alloc(64)]),
+    )
     const state = await modelState(asr, SPEC)
     assert.equal(state.present, true)
     assert.equal(state.looksValid, false)
   })
 
-  test('★ 魔数判定本身：改掉头 4 个字节就不认', async () => {
+  test('★★ 魔数判定按**小端整数**认（真实文件头是 6c6d6767，不是 ASCII 的 "ggml"）', async () => {
     const p = join(root, 'magic.bin')
     await mkdir(root, { recursive: true })
-    await writeFile(p, Buffer.concat([Buffer.from('ggml'), Buffer.alloc(1 << 20)]))
-    assert.equal(await looksLikeGgml(p), true)
-    await writeFile(p, Buffer.concat([Buffer.from('html'), Buffer.alloc(1 << 20)]))
-    assert.equal(await looksLikeGgml(p), false)
+    // 真模型的前 4 字节
+    assert.equal(await writeAndCheck(p, Buffer.from([0x6c, 0x6d, 0x67, 0x67])), true)
+    // GGUF（新容器格式）：文件头就是 ASCII 的 GGUF
+    assert.equal(await writeAndCheck(p, Buffer.from('GGUF', 'ascii')), true)
+    // 老的 'ggmf'（同样按小端整数写 ⇒ 字节是 67 67 6d 66）
+    assert.equal(await writeAndCheck(p, Buffer.from([0x67, 0x67, 0x6d, 0x66])), true)
+    // ASCII 的 "ggml" 是**错的**字节序——它必须被拒（第一版就是把它当成了对的）
+    assert.equal(await writeAndCheck(p, Buffer.from('ggml', 'ascii')), false)
+    // 反代返回的 HTML 错误页
+    assert.equal(await writeAndCheck(p, Buffer.from('<html>', 'ascii')), false)
   })
+
+  /** 写一个"头 4 字节指定 + 补到 1 MiB"的文件，返回 `looksLikeGgml` 的结论。 */
+  async function writeAndCheck(path: string, head: Buffer): Promise<boolean> {
+    await writeFile(path, Buffer.concat([head, Buffer.alloc(1 << 20)]))
+    return looksLikeGgml(path)
+  }
 
   test('★ 默认上游地址是可覆盖的（国内直连 HF 经常不通，要能换镜像）', async () => {
     const asr = join(root, 'mirror')
