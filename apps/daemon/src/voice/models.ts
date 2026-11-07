@@ -83,13 +83,28 @@ export const ASR_MODELS: readonly AsrModelSpec[] = [
 export const DEFAULT_ASR_MODEL = 'base-q5_1'
 
 /**
- * 上游的默认地址。
+ * 上游地址：**按顺序试**。
  *
- * ⚠️ 可覆盖（`--asr-model-base`）：国内直连 huggingface 经常不通（本机实测连
- *   HEAD 都拿不到），而"装不上模型"会表现成"麦克风按钮点了没反应"。给一个显式的
- *   镜像地址，比让人去改代码强。
+ * ⚠️ 国内直连 huggingface 经常不通（本机实测 HEAD 都拿不到），而"装不上模型"会表现成
+ *   "麦克风按钮点了没反应"。使用者第一次点「下载模型」就撞上 `fetch failed` 之后，
+ *   他得到的建议不该是"去改一行代码"——所以这里直接给一条**回退链**：
+ *
+ *     ① huggingface.co（官方）
+ *     ② hf-mirror.com（国内镜像，内容一致、由第三方加速）
+ *
+ * 第一个不可用就换第二个，并**在结果里说清用的是哪一个**（`source`）——"我下的东西
+ * 到底来自哪儿"不该是个谜。
+ *
+ * ★ 可整体覆盖（`--asr-model-base`）：给了就只用给的那一个，**不回落**
+ *   （想钉死某个内网镜像的人，不该被偷偷换回公网）。
  */
-export const DEFAULT_MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/'
+export const DEFAULT_MODEL_BASE_URLS: readonly string[] = [
+  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/',
+  'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/',
+]
+
+/** 老名字（单值）：给"只想要官方地址"的调用方用；等价于取回退链的第一个。 */
+export const DEFAULT_MODEL_BASE_URL = DEFAULT_MODEL_BASE_URLS[0] as string
 
 export function findModelSpec(id: string): AsrModelSpec | null {
   return ASR_MODELS.find((m) => m.id === id) ?? null
@@ -224,8 +239,13 @@ export async function modelState(asrRoot: string, spec: AsrModelSpec): Promise<M
 export interface EnsureModelDeps {
   asrRoot: string
   spec: AsrModelSpec
-  /** 上游根地址（结尾带斜杠），可注入以便测试与镜像。 */
+  /**
+   * 上游根地址（结尾带斜杠）。给了就**只用它、不回落**（想钉死内网镜像的人不该被
+   * 偷偷换回公网）。
+   */
   baseUrl?: string
+  /** 一条**回退链**（按顺序试）。不给 `baseUrl` 时用它；两者都不给用默认那条链。 */
+  baseUrls?: readonly string[]
   /** 注入 fetch（测试用它给假响应，绝不真的联网）。 */
   fetchImpl?: typeof fetch
   /** 进度回调（已写字节 / 总字节；总字节来自 Content-Length）。 */
@@ -235,6 +255,11 @@ export interface EnsureModelDeps {
 export interface EnsureModelResult extends ModelState {
   /** 这次真的下载了（false = 本来就有一份好的）。 */
   downloaded: boolean
+  /**
+   * 这次用的是哪条上游地址（回退链里第几个成功的就是它）。
+   * ⚠️ 必须回给界面："我下的东西到底来自哪儿"不该是个谜。
+   */
+  source?: string
 }
 
 /**
@@ -253,9 +278,45 @@ export async function ensureModel(deps: EnsureModelDeps): Promise<EnsureModelRes
     return { ...before, downloaded: false }
   }
 
-  const baseUrl = deps.baseUrl ?? DEFAULT_MODEL_BASE_URL
+  const sources =
+    deps.baseUrl !== undefined
+      ? [deps.baseUrl]
+      : (deps.baseUrls ?? DEFAULT_MODEL_BASE_URLS)
+
+  /**
+   * ★ 按顺序试（分批第 283 批，使用者实测报的："模型下载失败（连不上
+   *   huggingface.co…）：fetch failed"）。国内直连 HF 不通是常态，而让使用者自己
+   *   去找镜像等于"这功能在我这儿不能用"。
+   *
+   * ⚠️ 回退的判据是**任何一次失败**：连不上、非 200、缺 Content-Length、传输中断、
+   *   下完发现不是模型——这些都不该把整次下载判死，换下一个源往往就好了。
+   *   每一次的失败原因都留着，最后一起报（否则"全都失败了"等于什么都没说）。
+   */
+  const failures: Array<{ url: string; reason: string }> = []
+  for (const base of sources) {
+    const url = `${base.replace(/\/$/, '')}/${spec.file}`
+    try {
+      const result = await downloadFrom(deps, url)
+      return { ...result, downloaded: true, source: url }
+    } catch (err) {
+      failures.push({ url, reason: messageOf(err) })
+    }
+  }
+
+  const detail = failures
+    .map((f) => `· ${f.url}\n    ${f.reason}`)
+    .join('\n')
+  throw new Error(
+    `模型下载失败：试过的 ${failures.length} 个来源都不可用。\n${detail}\n` +
+      `可以换一个可用的镜像：启动 daemon 时加 --asr-model-base <镜像根地址>（结尾带斜杠），` +
+      `或把 ${spec.file} 手动放进 ${modelPathOf(asrRoot, spec)}。`,
+  )
+}
+
+/** 从**一条**上游地址下载并校验。失败一律抛错（由调用方决定要不要换下一个源）。 */
+async function downloadFrom(deps: EnsureModelDeps, url: string): Promise<ModelState> {
+  const { asrRoot, spec } = deps
   const doFetch = deps.fetchImpl ?? fetch
-  const url = `${baseUrl.replace(/\/$/, '')}/${spec.file}`
   const dir = modelsDirOf(asrRoot)
   await mkdir(dir, { recursive: true })
   const target = modelPathOf(asrRoot, spec)
@@ -265,21 +326,21 @@ export async function ensureModel(deps: EnsureModelDeps): Promise<EnsureModelRes
   try {
     response = await doFetch(url)
   } catch (err) {
-    throw new Error(`模型下载失败（连不上 ${url}）：${messageOf(err)}`)
+    throw new Error(`连不上（${messageOf(err)}）`)
   }
   if (!response.ok) {
-    throw new Error(`模型下载失败：${url} 返回 ${response.status}`)
+    throw new Error(`返回 ${response.status}`)
   }
   const lengthHeader = response.headers.get('content-length')
   if (lengthHeader === null) {
-    throw new Error(`模型下载失败：${url} 没给 Content-Length，无法确认下载是否完整`)
+    throw new Error('没给 Content-Length，无法确认下载是否完整')
   }
   const total = Number(lengthHeader)
   if (!Number.isFinite(total) || total <= 0) {
-    throw new Error(`模型下载失败：${url} 的 Content-Length 不可用（${lengthHeader}）`)
+    throw new Error(`Content-Length 不可用（${lengthHeader}）`)
   }
   if (response.body === null) {
-    throw new Error(`模型下载失败：${url} 没有响应体`)
+    throw new Error('没有响应体')
   }
 
   const hash = createHash('sha256')
@@ -301,21 +362,18 @@ export async function ensureModel(deps: EnsureModelDeps): Promise<EnsureModelRes
   } catch (err) {
     await handle.close()
     await rm(partial, { force: true })
-    throw new Error(`模型下载中断：${messageOf(err)}（已删除半截文件，可以重试）`)
+    throw new Error(`传输中断（${messageOf(err)}），已删除半截文件`)
   }
   await handle.close()
 
   if (done !== total) {
     await rm(partial, { force: true })
-    throw new Error(`模型下载不完整：收到 ${done} 字节，应为 ${total} 字节（已删除，可以重试）`)
+    throw new Error(`下载不完整（收到 ${done} 字节，应为 ${total} 字节），已删除`)
   }
   const digest = hash.digest('hex')
   if (spec.sha256 !== undefined && digest !== spec.sha256) {
     await rm(partial, { force: true })
-    throw new Error(
-      `模型校验失败：sha256 与预期不符（拿到 ${digest.slice(0, 12)}…）。` +
-        `上游可能已更新——请确认来源，或换一个模型档`,
-    )
+    throw new Error(`sha256 与预期不符（拿到 ${digest.slice(0, 12)}…），上游可能已更新`)
   }
   await rename(partial, target)
 
@@ -327,11 +385,9 @@ export async function ensureModel(deps: EnsureModelDeps): Promise<EnsureModelRes
   const after = await modelState(asrRoot, spec)
   if (!after.looksValid) {
     await rm(target, { force: true })
-    throw new Error(
-      `下载到的文件不是有效的 ggml 模型（头部不是 ggml）：${url} 可能返回了错误页或反代页面`,
-    )
+    throw new Error('下载到的文件不是有效的 ggml 模型（这个源可能返回了错误页或反代页面）')
   }
-  return { ...after, downloaded: true }
+  return after
 }
 
 function messageOf(err: unknown): string {

@@ -119,7 +119,7 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 | Intel Mac / Windows ARM / Linux | 能力探测判不可用，界面不画按钮（不是运行时崩） |
 | 落点 | `~/.agentdeck/asr/`（`--asr-root` 可覆盖）：`vocab.json` / `settings.json` / `models/` / `models.lock.json` |
 | 默认模型 | `ggml-base-q5_1.bin`（约 57 MiB，多语言）；可切 `small-q5_1`（181 MiB）/ `small`（466 MiB） |
-| 上游基址 | 默认 HuggingFace，`--asr-model-base` 可换镜像（国内直连常常不通） |
+| 上游基址 | **回退链**：先 huggingface.co，不通就自动换 hf-mirror.com（两者内容一致）；`--asr-model-base` 给了就**只用它、不回落**。结果里带 `source`，界面会说清"来自哪个 host" |
 | 语言 | 默认 `zh`，可选 `en` / `auto`（中英混说时 auto 容易判错） |
 | 灵敏度 | 三档 `stable`(0.6/1200ms) / `normal`(0.5/800ms) / `quick`(0.4/500ms) |
 
@@ -208,6 +208,12 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 - 四条自我保护（`apps/web/src/lib/auto-send.ts`，6 条单测）：只有 `via-skill` 才发、
   输入框原本有字不发（那份字是人写的）、这一轮还在跑不发（硬发会被静默丢）、识别为空不发
 - 人一动笔就撤销自动发送（他开始改字 = 这一句还没准备好发出去）
+
+**下载源回退（批 283）**：使用者实测报的 `模型下载失败（连不上 huggingface.co…）：fetch failed`
+- 默认按 **huggingface.co → hf-mirror.com** 顺序试；连不上、非 200、缺 Content-Length、
+  传输中断、下完发现不是模型——**任何一次失败都换下一个源**（这些都不该把整次下载判死）
+- 全都失败时把**每一个源的失败原因**一起报出来，并给出下一步（`--asr-model-base`）
+- 结果里带 `source`，界面显示"来自哪个 host"——"这文件哪来的"不该是个谜
 
 **下载进度（批 282）**
 - `GET /api/voice/models/progress` 轮询（不用 SSE：一次下载几十秒，轮询不怕丢首帧、

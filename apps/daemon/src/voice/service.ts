@@ -3,7 +3,7 @@ import { probeVoiceCapability, type CapabilityDeps, type VoiceCapability } from 
 import {
   ASR_MODELS,
   DEFAULT_ASR_MODEL,
-  DEFAULT_MODEL_BASE_URL,
+  DEFAULT_MODEL_BASE_URLS,
   ensureModel,
   findModelSpec,
   modelState,
@@ -179,7 +179,10 @@ export class VoiceService {
     const promise = ensureModel({
       asrRoot: this.asrRoot,
       spec,
-      baseUrl: this.deps.modelBaseUrl ?? DEFAULT_MODEL_BASE_URL,
+      // 给了 `--asr-model-base` 就只用它（钉死）；否则走默认的回退链（官方 → 镜像）
+      ...(this.deps.modelBaseUrl === undefined
+        ? { baseUrls: DEFAULT_MODEL_BASE_URLS }
+        : { baseUrl: this.deps.modelBaseUrl }),
       ...(this.deps.fetchImpl === undefined ? {} : { fetchImpl: this.deps.fetchImpl }),
       onProgress: (done, total) => {
         this.modelProgress = { modelId: id, done, total }

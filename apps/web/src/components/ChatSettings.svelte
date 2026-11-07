@@ -240,14 +240,26 @@
     error = ''
     startProgressPolling()
     try {
-      const res = await api<{ downloaded: boolean; bytes: number }>('/api/voice/models/ensure', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model: settings?.model }),
-      })
-      downloadNote = $t('chat.voiceSettingsDownloaded', {
-        mb: String(Math.round(res.bytes / 1048576)),
-      })
+      const res = await api<{ downloaded: boolean; bytes: number; source?: string }>(
+        '/api/voice/models/ensure',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: settings?.model }),
+        },
+      )
+      /**
+       * ★ 分批第 283 批：把**用的是哪条上游**说出来。直连官方不通时 daemon 会自动换
+       *   镜像——不说的话，人会以为下的是官方的（下一次别人问"这文件哪来的"就没人答得上）。
+       */
+      const host = res.source === undefined ? '' : new URL(res.source).hostname
+      downloadNote =
+        host === ''
+          ? $t('chat.voiceSettingsDownloaded', { mb: String(Math.round(res.bytes / 1048576)) })
+          : $t('chat.voiceSettingsDownloadedFrom', {
+              mb: String(Math.round(res.bytes / 1048576)),
+              host,
+            })
       await loadCapability()
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)

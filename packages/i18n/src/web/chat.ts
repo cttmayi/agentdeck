@@ -376,6 +376,11 @@ export const chatText = {
   'chat.voiceSettingsDownload': { zh: '下载模型（约 {mb} MiB）', en: 'Download model (~{mb} MiB)' },
   'chat.voiceSettingsDownloading': { zh: '正在下载…', en: 'Downloading…' },
   'chat.voiceSettingsDownloadPercent': { zh: '正在下载… {pct}%', en: 'Downloading… {pct}%' },
+  /** ★ 283 批：直连官方不通时 daemon 会自动换镜像——用的是哪条要说出来。 */
+  'chat.voiceSettingsDownloadedFrom': {
+    zh: '下好了（{mb} MiB，来自 {host}）——之后全程离线',
+    en: 'Downloaded ({mb} MiB, from {host}) — offline from now on',
+  },
   'chat.voiceSettingsDownloaded': { zh: '下好了（{mb} MiB），之后全程离线', en: 'Downloaded ({mb} MiB) — offline from now on' },
   'chat.voiceSettingsSelfTest': { zh: '试录 3 秒', en: 'Test record 3s' },
   'chat.voiceSettingsSelfTestRecording': { zh: '录 3 秒…', en: 'Recording 3s…' },

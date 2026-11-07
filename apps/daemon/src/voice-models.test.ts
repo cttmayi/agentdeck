@@ -109,7 +109,9 @@ describe('下载与校验', () => {
         ensureModel({
           asrRoot: asr,
           spec: SPEC,
-          fetchImpl: async () => fakeResponse(new TextEncoder().encode('<html>mirror says hi</html>'.repeat(40000))),
+          baseUrl: 'https://pages-only.example/',
+          fetchImpl: async () =>
+            fakeResponse(new TextEncoder().encode('<html>mirror says hi</html>'.repeat(40000))),
         }),
       /不是有效的 ggml 模型|太短/,
     )
@@ -125,6 +127,7 @@ describe('下载与校验', () => {
         ensureModel({
           asrRoot: asr,
           spec: SPEC,
+          baseUrl: 'https://no-length.example/',
           fetchImpl: async () => fakeResponse(fakeModelBytes(), { contentLength: null }),
         }),
       /Content-Length/,
@@ -140,6 +143,7 @@ describe('下载与校验', () => {
         ensureModel({
           asrRoot: asr,
           spec: SPEC,
+          baseUrl: 'https://truncated.example/',
           // 声明比实际多 1000 字节：模拟连接被掐
           fetchImpl: async () => fakeResponse(body, { contentLength: String(body.length + 1000) }),
         }),
@@ -151,9 +155,97 @@ describe('下载与校验', () => {
   test('★ 404 / 500 要说人话（能据此换镜像），不是抛一个 fetch 的原始错误', async () => {
     const asr = join(root, 'status-404')
     await assert.rejects(
-      () => ensureModel({ asrRoot: asr, spec: SPEC, fetchImpl: async () => fakeResponse(new Uint8Array(0), { status: 404 }) }),
+      () =>
+        ensureModel({
+          asrRoot: asr,
+          spec: SPEC,
+          baseUrl: 'https://only-source.example/',
+          fetchImpl: async () => fakeResponse(new Uint8Array(0), { status: 404 }),
+        }),
       /返回 404/,
     )
+  })
+
+  test('★★ 第一条源连不上 ⇒ **自动换下一条**（使用者实测：直连 huggingface 就是 fetch failed）', async () => {
+    const asr = join(root, 'fallback')
+    const tried: string[] = []
+    const res = await ensureModel({
+      asrRoot: asr,
+      spec: SPEC,
+      baseUrls: ['https://blocked.example/', 'https://mirror.example/'],
+      fetchImpl: async (input) => {
+        const url = String(input)
+        tried.push(url)
+        if (url.startsWith('https://blocked.example/')) throw new Error('fetch failed')
+        return fakeResponse(fakeModelBytes())
+      },
+    })
+    assert.deepEqual(tried, [
+      `https://blocked.example/${SPEC.file}`,
+      `https://mirror.example/${SPEC.file}`,
+    ])
+    assert.equal(res.downloaded, true)
+    // 必须说清用的是哪一条（"我下的东西来自哪儿"不该是个谜）
+    assert.equal(res.source, `https://mirror.example/${SPEC.file}`)
+  })
+
+  test('★★ 第一条返回的是 HTML 错误页也照样换下一条（200 不等于"拿到了模型"）', async () => {
+    const asr = join(root, 'fallback-html')
+    const res = await ensureModel({
+      asrRoot: asr,
+      spec: SPEC,
+      baseUrls: ['https://bad.example/', 'https://good.example/'],
+      fetchImpl: async (input) =>
+        String(input).startsWith('https://bad.example/')
+          ? fakeResponse(new TextEncoder().encode('<html>nope</html>'.repeat(40000)))
+          : fakeResponse(fakeModelBytes()),
+    })
+    assert.equal(res.downloaded, true)
+    assert.equal(res.source, `https://good.example/${SPEC.file}`)
+  })
+
+  test('★★ 全都失败时，**每一个源的失败原因都列出来**（否则"都失败了"等于什么都没说）', async () => {
+    const asr = join(root, 'all-fail')
+    await assert.rejects(
+      () =>
+        ensureModel({
+          asrRoot: asr,
+          spec: SPEC,
+          baseUrls: ['https://a.example/', 'https://b.example/'],
+          fetchImpl: async (input) => {
+            if (String(input).startsWith('https://a.example/')) throw new Error('fetch failed')
+            return fakeResponse(new Uint8Array(0), { status: 503 })
+          },
+        }),
+      (err: Error) => {
+        assert.match(err.message, /a\.example/)
+        assert.match(err.message, /fetch failed/)
+        assert.match(err.message, /b\.example/)
+        assert.match(err.message, /503/)
+        // 还要给出"下一步怎么做"
+        assert.match(err.message, /--asr-model-base/)
+        return true
+      },
+    )
+  })
+
+  test('★ `--asr-model-base` 给了就**只用它**（钉死内网镜像的人不该被偷偷换回公网）', async () => {
+    const asr = join(root, 'pinned')
+    const tried: string[] = []
+    await assert.rejects(
+      () =>
+        ensureModel({
+          asrRoot: asr,
+          spec: SPEC,
+          baseUrl: 'https://internal.example/',
+          fetchImpl: async (input) => {
+            tried.push(String(input))
+            throw new Error('fetch failed')
+          },
+        }),
+      /internal\.example/
+    )
+    assert.deepEqual(tried, [`https://internal.example/${SPEC.file}`])
   })
 
   test('★★ 正常一次：落盘 + 写锁定哈希 + 第二次不再下载', async () => {

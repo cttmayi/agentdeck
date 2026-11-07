@@ -4306,6 +4306,8 @@ async function injectedSkillsOf(
           bytes: result.bytes,
           downloaded: result.downloaded,
           hashOk: result.hashOk,
+          // 用的是哪条上游（回退到镜像时界面要说出来，别让人以为下的是官方的）
+          ...(result.source === undefined ? {} : { source: result.source }),
         })
       } catch (err) {
         // 下载失败是**使用者能修的问题**（换镜像 / 网络），不是 500
