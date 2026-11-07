@@ -1840,11 +1840,43 @@ const CHECKS = [
       typeof v === 'object' &&
       typeof v.input === 'number' &&
       Math.abs(v.send - v.input) <= 2 &&
-      (v.attach === null || Math.abs(v.attach - v.input) <= 2),
+      (v.attach === null || Math.abs(v.attach - v.input) <= 2) &&
+      // ★ 分批第 278 批：语音按钮（`extra`）也在同一组里，同样必须与输入框同高
+      (v.voice === null || v.voice === undefined || Math.abs(v.voice - v.input) <= 2),
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
-        : `输入框 ${v.input}px　发送 ${v.send}px　📎 ${String(v.attach)}px`,
+        : `输入框 ${v.input}px　发送 ${v.send}px　📎 ${String(v.attach)}px　🎙 ${String(v.voice)}px`,
+  },
+  {
+    view: '聊天',
+    key: 'chat.voiceButton',
+    /**
+     * ★ 分批第 278 批：输入条里那颗麦克风按钮**点了必须有反应**。
+     *
+     * 探针这台 daemon 上**没有语音模型**（临时数据目录），所以正确行为是：点一下当场
+     * 说清原因（"还没有语音模型…首次使用需要下载一次"），而不是静静什么都不做——
+     * "点了没反应"正是这次最想避免的那种失败。
+     *
+     * ⚠️ 不量"录音中"那一态：那要真的开麦克风（每次跑探针都弹一次系统权限窗是不可接受
+     * 的）。会话状态机由 `voice-session.test.ts` 钉着（15 条）。
+     */
+    label:
+      '★★ 聊天输入条里有**麦克风按钮**（带无障碍标签），而且**点一下就有反应**：' +
+      '没有模型时当场说清原因（不是一颗点了没动静的按钮）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      String(v.label).length > 0 &&
+      v.stateBefore === 'idle' &&
+      v.reacts === true &&
+      (typeof v.reason === 'string' ? v.reason.length > 0 : true),
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　标签「${String(v.label)}」　起始态 ${String(v.stateBefore)}　` +
+          `点击有反应 ${String(v.reacts)}　原因「${String(v.reason)}」`,
   },
   {
     view: '沉淀',

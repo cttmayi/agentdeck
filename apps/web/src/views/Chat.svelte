@@ -7,6 +7,7 @@
   // ★ 分批第 194 批：气泡形状抽到 `@agentdeck/ui`（沉淀页共用同一份，见 ChatBubble 头注释）
   // ★ 分批第 197 批：栏脚的折叠清单与输入条也抽成共享组件（沉淀页用同一份）
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
+  import VoiceButton from '../components/VoiceButton.svelte'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
@@ -574,6 +575,31 @@
       pendingText = ''
       sending = false
     }
+  }
+
+  /**
+   * ★ 分批第 278 批：把**识别出来的文字**放进输入框。
+   *
+   * 三条口径（每条都对应一次具体的选择）：
+   *   ① **只回填，不发送**——识别是一回事，发出去是另一回事，中间必须有人看一眼
+   *      （离线 ASR 认错一个词就可能把话说反了）；
+   *   ② **接在已有的字后面**，不覆盖：人可能已经写了一半，那些字是他写的；
+   *   ③ 补一个空格再拼：中文与英文之间、两句话之间都需要它，`normalizeText` 已经把
+   *      段内的空格收拾干净了，这里只管"接缝"。
+   *
+   * ⚠️ 回复焦点给输入框：接着改字是这个动作**唯一**的下一步，要人再点一次输入框
+   *   是无谓的一步（与"识别完就该能继续编辑"这件事直接相关）。
+   */
+  function insertDictation(text: string): void {
+    const addition = text.trim()
+    if (addition === '') return
+    const base = input.replace(/[ \t]+$/, '')
+    input = base === '' ? addition : `${base} ${addition}`
+    // 光标移到末尾再聚焦：`focus()` 会把光标放在末尾（这里正是想要的位置）
+    requestAnimationFrame(() => {
+      const box = document.querySelector<HTMLTextAreaElement>('.pane-foot [data-composer] textarea')
+      box?.focus()
+    })
   }
 
   /** 上传进行中（防连点；回执借提示区一行小字） */
@@ -1153,7 +1179,19 @@
         attachLabel={$t('common.attachFile')}
         onupload={(files) => void uploadFiles(files)}
         onsend={() => void send()}
-      />
+      >
+        <!--
+          ★ 分批第 278 批：**语音按钮**走输入条的 `extra`（右边那一组里，紧挨着回形针
+          与「发送」）。用 `extra` 而不是另开一行：一行只放单行控件那条规矩（见
+          `tools/layout-probe/README.md` 的坑清单）——输入条的高度由输入框决定，
+          塞第二行会让栏脚凭空长高一行。
+          ⚠️ 只有 daemon 报出 `voice-dictation` 能力时才画它（旧 daemon 上
+            `/api/voice/*` 是 404，画出来就是一颗点了没反应的按钮）。
+        -->
+        {#snippet extra()}
+          <VoiceButton ontext={(text) => insertDictation(text)} />
+        {/snippet}
+      </ChatComposer>
         {/if}
       {/snippet}
     </MainArea>

@@ -317,6 +317,37 @@ export const chatText = {
     zh: '这一轮还在跑，跑完才能发（写好的字会留着）',
     en: 'This turn is still running; you can send once it finishes (what you typed is kept)',
   },
+  /**
+   * ══════════════ 语音口述（分批第 278 批）══════════════
+   *
+   * ★ 一切都围绕一句话：**按钮点了必须有反应**。所以每种状态都有词，包括"用不了"
+   *   ——一个点了什么都不发生的麦克风按钮，是这次最想避免的那种失败。
+   *
+   * ⚠️ 这些词条由 `VoiceButton` 用，而它是**页面组件**（`apps/web`）。所以词表放在
+   *   `chat.*` 下是"先服务聊天页"；等它接进任务页时，这些词条可以整体搬到 `voice.*`
+   *   （那时才搬——现在搬只会让两个页面各有一半）。
+   */
+  'chat.voiceLabel': { zh: '语音输入', en: 'Voice input' },
+  'chat.voiceStartTitle': {
+    zh: '点一下开始口述（说完自动结束；再点一下是提前结束，Esc 是取消）',
+    en: 'Click to start dictating (stops on silence; click again to stop early, Esc cancels)',
+  },
+  'chat.voiceStopTitle': { zh: '结束并转写（Esc 取消这一次）', en: 'Stop and transcribe (Esc cancels)' },
+  'chat.voiceTranscribingTitle': { zh: '正在转写…', en: 'Transcribing…' },
+  'chat.voiceRecordingShort': { zh: '{s}s', en: '{s}s' },
+  'chat.voiceTranscribingShort': { zh: '转写…', en: 'Transcribing…' },
+  /** daemon 太旧、没有 `/api/voice/*`（界面据此**不画**按钮；这条只在悬停/诊断时用）。 */
+  'chat.voiceUnsupported': {
+    zh: '这个 daemon 还不支持语音，重启 daemon 之后就有了',
+    en: 'This daemon does not support voice yet — restart it',
+  },
+  'chat.voiceStartFailed': { zh: '开不了录音（原因没给出来）', en: 'Could not start recording' },
+  'chat.voiceStartFailedDetail': { zh: '开不了录音：{error}', en: 'Could not start recording: {error}' },
+  'chat.voiceLost': {
+    zh: '和 daemon 的连接断了，这一段录音没能取回来',
+    en: 'Lost the daemon connection, so this recording could not be retrieved',
+  },
+  'chat.voiceFailedNoReason': { zh: '转写失败（没给原因）', en: 'Transcription failed (no reason given)' },
   'chat.noOutput': { zh: '这一轮没有文字产出。', en: 'This turn produced no text.' },
   'chat.turnFailed': { zh: '这一轮没跑起来', en: "This turn didn't start" },
   'chat.duration': { zh: '用时 {seconds} 秒', en: '{seconds}s' },
