@@ -787,7 +787,7 @@ const CHECKS = [
     view: '智能体',
     key: 'agents.runtimeFollowDefaultFirst',
     label:
-      '★★ 「跟随全局默认」（`default`）在选择器里、而且是**第一项**（少了它，打开编辑页什么都没做、保存就把这个 agent 的默认改掉了）',
+      '★★ `default`（= 跟随全局默认）在选择器里、而且是**第一项**（少了它，打开编辑页什么都没做、保存就把这个 agent 的默认改掉了）',
     ok: (v) => v === true,
   },
   {

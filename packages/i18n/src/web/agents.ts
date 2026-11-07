@@ -553,7 +553,19 @@ export const agentsText = {
     zh: '「{name}」的指令与名字会恢复成平台默认。你改过的内容会丢失——平台升级本来不会动它，这一步是你主动按的。',
     en: '"{name}" will go back to the platform default. Your edits are lost — upgrades never touch them, this is your own click.',
   },
-  'agents.runtimeFollowDefault': { zh: '跟随全局默认', en: 'Follow global default' },
+  /**
+   * ★ 分批第 271 批（使用者："感觉显示上就叫 default 好一点"）：下拉里那条**就叫 `default`**。
+   *
+   * 为什么之前叫「跟随全局默认」：怕使用者把它当成一个叫 default 的**具体 runtime**。
+   * 但代价是两个词指的是同一个东西、界面上却各叫各的（连同"CLI：跟随全局默认"那一行），
+   * 而且代码/接口/文档里到处都写 `default`——界面上的名字与它们对不上，查起来更绕。
+   * 现在统一显示 `default`；**含义**放进 `title`（悬停可见），既不丢解释也不再有两个名字。
+   */
+  'agents.runtimeFollowDefault': { zh: 'default', en: 'default' },
+  'agents.runtimeFollowDefaultHint': {
+    zh: 'default = 跟随全局默认（agent 没指定 → 全局设定 → 启动时侦测到的那个）',
+    en: 'default = follow the global default (agent → global setting → whatever was detected at startup)',
+  },
   'agents.deleteButton': { zh: '删除', en: 'Delete' },
   'agents.confirmDeleteTitle': { zh: '删除智能体', en: 'Delete agent' },
   'agents.confirmDeleteBody': {

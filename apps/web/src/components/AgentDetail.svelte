@@ -769,7 +769,11 @@
         >
       </h2>
     {/if}
-    <p class="detail-sub" data-agent-head-sub>
+    <p
+      class="detail-sub"
+      data-agent-head-sub
+      title={draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefaultHint') : ''}
+    >
       {$t('agents.headSub', {
         cli: draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefault') : draft.runtimeKey,
         memory: draft.memoryEnabled
@@ -850,7 +854,9 @@
             <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
                  agent 记的就是它，不给这一项的话下拉会落到第一个具体 runtime ——
                  那等于"打开编辑页什么都没做，保存就把它的默认改掉了"。 -->
-            <option value="default">{$t('agents.runtimeFollowDefault')}</option>
+            <option value="default" title={$t('agents.runtimeFollowDefaultHint')}
+              >{$t('agents.runtimeFollowDefault')}</option
+            >
             {#each runtimeOptions as key (key)}
               <option value={key}>{key}</option>
             {/each}
