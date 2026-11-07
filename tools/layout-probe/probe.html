@@ -271,7 +271,7 @@
           if (row) {
             click(row)
             await untilNet(
-              () => (d().querySelector('.detail-pane #agent-name')?.value ?? '').includes(needle),
+              () => (text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '').includes(needle),
               40,
             )
             return true
@@ -478,7 +478,7 @@
          */
         facts['agents.memorySection'] = await (async () => {
           const win = f.contentWindow
-          const name = String(d().querySelector('.detail-pane #agent-name')?.value ?? '')
+          const name = String(text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '')
           if (name === '') return null
           const list = await win.fetch('/api/agents').then((r) => r.json())
           const me = (list.agents ?? []).find((a) => a.name === name)
@@ -594,6 +594,45 @@
          * 洞就露出来。这条判据按"行"量：把顶边相同的格子归成一行，每行的宽度总和
          * 必须铺满卡片（或者只有一格且它占整行）。任何一格只占半行又没人陪它，就红。
          */
+        /**
+         * ★ 分批第 269 批（使用者："智能体的细节页……只是先要有类似任务和聊天那页的 Title 顶栏"）：
+         *
+         * 量四件：
+         *   ① 标题栏在（`.detail-head` 在详情里、名字在 h2 里）；
+         *   ② 副题一行（CLI / 记忆 / 技能数）；
+         *   ③ 右侧动作工具条里**有保存与取消**（保存从页面底部上移到这里）；
+         *   ④ **名字只有一个入口**：`#agent-name` 那个输入框不该再存在（否则标题与卡片
+         *      各一份，谁是真的说不清）。
+         */
+        facts['agents.headBar'] = await (async () => {
+          const head = d().querySelector('.detail-pane .detail-head')
+          if (!head) return { present: false }
+          const h2 = head.querySelector('h2')
+          const name = text(head.querySelector('[data-agent-head-name]')) ?? ''
+          const sub = text(head.querySelector('[data-agent-head-sub]')) ?? ''
+          const btns = [...head.querySelectorAll('.detail-actions button')]
+          const labels = btns.map((b) => (text(b) ?? '').trim())
+          const topRow = d().querySelector('.topbar .page-actions')
+          const act = head.querySelector('.detail-actions')
+          const sameTrack =
+            topRow !== null &&
+            act !== null &&
+            cs(act).backgroundColor === cs(topRow).backgroundColor &&
+            cs(act).backgroundColor !== 'rgba(0, 0, 0, 0)'
+          return {
+            present: true,
+            hasH2: h2 !== null,
+            name,
+            sub,
+            labels,
+            hasSave: labels.some((l) => l.includes('保存')),
+            hasCancel: labels.some((l) => l.includes('取消')),
+            sameTrack,
+            // 名字的第二个入口：卡片里那个输入框已经删了
+            legacyNameInput: d().querySelector('#agent-name') !== null,
+          }
+        })()
+
         facts['agents.cardNoHoles'] = await (async () => {
           const card = d().querySelector('.card.agent-card')
           if (!card) return null
@@ -746,7 +785,7 @@
           const sec = d().querySelector('[data-agent-memory]')
           const box = sec?.querySelector('[data-memory-enabled]')
           if (!sec || !box) return { present: false }
-          const name = String(d().querySelector('.detail-pane #agent-name')?.value ?? '')
+          const name = String(text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '')
           const list = await win.fetch('/api/agents').then((r) => r.json())
           const me = (list.agents ?? []).find((a) => a.name === name)
           if (!me) return { present: false, reason: '详情里那个 agent 在列表里找不到' }
@@ -755,7 +794,7 @@
             return d2.memoryEnabled !== false
           }
           const saveBtn = () =>
-            [...d().querySelectorAll('.detail-pane .form-actions button')].find(
+            [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
               (b) => text(b).trim() === '保存',
             )
           const checkedByDefault = box.checked === true
@@ -861,6 +900,13 @@
             // 头部不高（一行，不是被 block 的 label 撑成三行）
             headHeight: Math.round(headRect.height),
             // 说明在头部**下面**另一行
+            /**
+             * ★ 第 269 批：那句会换行的说明**已经从这一行挪走了**（进了 title）。
+             *   所以这一项从"说明在自己的下一行"改成"说明**不在**这一行里"——
+             *   两种落地都算对（还在下面一行，或者干脆收进 title），
+             *   要挡的始终是同一件事：**会换行的说明不许跟控件挤在同一行**。
+             */
+            hintPresent: hintRect !== null,
             hintBelow: hintRect !== null && hintRect.top >= headRect.bottom - 2,
             // 勾选框本身在它的文字左侧居中对齐（不是飘在句子中间）
             boxInsideSwitch:
@@ -941,7 +987,7 @@
           }
         })()
         facts['agents.detailHeading'] = need('右栏标题（单态卡片里就是名字输入框的值）', () =>
-          String(d().querySelector('.detail-pane #agent-name')?.value ?? ''),
+          String(text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? ''),
         )
         // ── D69.15 标题统一（**只对还有栏头 hero 的页面成立**）：智能体页
         //    2026-10 起没有预览页头了，这条在智能体页退化成"没有 hero"这一事实
@@ -1066,7 +1112,7 @@
         facts['agents.sidebarNavNoOpWhenSelected'] = need('点侧边栏「智能体」是不是空操作', () =>
           layout()?.className.includes('with-detail') === true,
         )
-        const cancelBtn = [...d().querySelectorAll('.detail-pane .form-actions button')].find(
+        const cancelBtn = [...d().querySelectorAll('.detail-pane .detail-actions button')].find(
           (b) => text(b).trim() === '取消',
         )
         facts['agents.narrowExitFound'] = !!cancelBtn
@@ -2366,7 +2412,7 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           if (ldsExecItem) {
             click(ldsExecItem)
             await until(
-              () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的执行者',
+              () => String(text(d().querySelector('[data-agent-head-name]')) ?? '') === '探针用的执行者',
               60,
             )
             await wait(300)
@@ -2835,7 +2881,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           click(probeExecRow.querySelector('.list-row-main'))
           // ⚠️ 必须等右栏**换成了这个 agent**：前面的段落已经选过别的 agent 了
           const probeSwitched = await until(
-            () => String(d().querySelector('#agent-name')?.value ?? '') === '探针用的执行者',
+            () => String(text(d().querySelector('[data-agent-head-name]')) ?? '') === '探针用的执行者',
             60,
           )
           if (!probeSwitched) errors.push('点开夹具执行者之后右栏没换成它')
@@ -2891,8 +2937,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const probeReviewerSwitched = await until(
             () =>
               !!d().querySelector('.card.agent-card') &&
-              String(d().querySelector('#agent-name')?.value ?? '') !== '' &&
-              probeReviewerName.includes(String(d().querySelector('#agent-name')?.value ?? '')),
+              String(text(d().querySelector('[data-agent-head-name]')) ?? '') !== '' &&
+              probeReviewerName.includes(String(text(d().querySelector('[data-agent-head-name]')) ?? '')),
             60,
           )
           if (!probeReviewerSwitched) errors.push('点开审核者之后右栏没换过去')
@@ -3111,7 +3157,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
           const badge = d().querySelector('.builtin-badge')
           facts['agents.builtinBadgeText'] = badge ? text(badge) : null
-          const detailBtns = [...d().querySelectorAll('.form-actions button')].map((b) => text(b))
+          const detailBtns = [...d().querySelectorAll('.detail-actions button')].map((b) => text(b))
           facts['agents.builtinDetailButtons'] = detailBtns
           facts['agents.builtinHasRestore'] = detailBtns.some((t) => t.includes('恢复成默认值'))
           // ⚠️ 判据是"**没有**删除按钮"：留一个点了会被服务端拒的按钮，比没有按钮更坏
@@ -3732,7 +3778,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             click(emptyRow.querySelector('.list-row-main'))
             facts['standard.emptyReviewerSwitched'] = await until(
               () =>
-                String(d().querySelector('#agent-name')?.value ?? '') ===
+                String(text(d().querySelector('[data-agent-head-name]')) ?? '') ===
                 '探针用的没写指令的审核者',
               60,
             )
@@ -3859,7 +3905,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['fold.detailSwitched'] = await until(
             () =>
               !!d().querySelector('.card.agent-card') &&
-              String(d().querySelector('#agent-name')?.value ?? '').startsWith(
+              String(text(d().querySelector('[data-agent-head-name]')) ?? '').startsWith(
                 '探针用的内联老标准审核者',
               ),
             60,
@@ -3887,15 +3933,23 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['fold.editHintWarns'] = (
             text(d().querySelector('.card.agent-card [data-legacy-standard]')) ?? ''
           ).includes('并进')
-          // 改个**别的字段**（名字）：这正是"我什么都没配、保存一下提示该没了"的场景，
-          // 而且指令不动 ⇒ 前后身份必须逐字节相同，断言最干净
-          const nameBox = d().querySelector('#agent-name')
-          if (nameBox) {
-            nameBox.value = '探针用的内联老标准审核者（改过）'
-            nameBox.dispatchEvent(new Event('input', { bubbles: true }))
-            await wait(150)
+          /**
+           * 改个**别的字段**：这正是"我什么都没配、保存一下提示该没了"的场景，
+           * 而且指令不动 ⇒ 前后身份必须逐字节相同，断言最干净。
+           *
+           * ⚠️ 第 269 批：名字从卡片输入框移到了**标题栏**（改名要点「改名」再打字），
+           *    所以这里改用 CLI 下拉——同样与指令无关，一步就能改。
+           */
+          const runtimeBox = d().querySelector('#agent-runtime')
+          if (runtimeBox) {
+            const other = [...runtimeBox.options].map((o) => o.value).find((v) => v !== runtimeBox.value)
+            if (other !== undefined) {
+              runtimeBox.value = other
+              runtimeBox.dispatchEvent(new Event('change', { bubbles: true }))
+              await wait(150)
+            }
           }
-          const saveBtn = [...d().querySelectorAll('.card.agent-card ~ .form-actions button')].find(
+          const saveBtn = [...d().querySelectorAll('.detail-head .detail-actions button')].find(
             (b) => text(b) === '保存',
           ) ?? [...d().querySelectorAll('.form-actions button')].find((b) => text(b) === '保存')
           facts['fold.saveButtonFound'] = !!saveBtn

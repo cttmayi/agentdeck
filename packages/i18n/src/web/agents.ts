@@ -20,6 +20,20 @@ export const agentsText = {
    *   左栏按「内置 / 自建」归堆。组名两个都是两个字（对称、416px 的栏里更好扫）；
    *   标题后面那句小字顺手解释了为什么内置那些没有删除按钮。
    */
+  /**
+   * ★ 分批第 269 批：详情页补**标题栏**（与任务页 / 聊天页同一套）。
+   *   名字从卡片里移到标题，改名就地改（只改草稿，点「保存」才写库）。
+   */
+  'agents.rename': { zh: '改名', en: 'Rename' },
+  'agents.renamePending': { zh: '（未保存）', en: '(unsaved)' },
+  'agents.saveTitle': { zh: '保存改动（记忆也在这里一起提交）', en: 'Save changes (memory is submitted here too)' },
+  /** 副题一行：`CLI：claude · 记忆 3 条 · 2 个技能`。 */
+  'agents.headSub': {
+    zh: 'CLI：{cli} · {memory} · {skills} 个技能',
+    en: 'CLI: {cli} · {memory} · {skills} skill(s)',
+  },
+  'agents.headMemoryOn': { zh: '记忆 {n} 条', en: 'memory {n}' },
+  'agents.headMemoryOff': { zh: '记忆关着', en: 'memory off' },
   'agents.groupBuiltin': { zh: '内置', en: 'Built-in' },
   'agents.groupOwn': { zh: '自建', en: 'Yours' },
   'agents.groupBuiltinHint': { zh: '平台自带，不能删', en: 'Shipped with the platform, cannot be deleted' },
@@ -121,10 +135,11 @@ export const agentsText = {
     zh: '只读：服务端按已保存的指令与记忆渲染，与投递出去的逐字一致。',
     en: 'Read-only: rendered by the daemon from the saved instructions and memory, byte-identical to what is delivered.',
   },
-  'agents.memoryEmpty': {
-    zh: '还没有记忆。写在下面，或在聊天里用「记住：」开头说一句。',
-    en: 'Nothing yet. Add one below, or say it in chat starting with a trigger word.',
-  },
+  /**
+   * ★ 第 269 批（使用者："需要精简文字"）：空态压成一句——输入框的 placeholder
+   *   已经说了"记一条它下次该记得的事"，这里不必再说一遍怎么加。
+   */
+  'agents.memoryEmpty': { zh: '还没有记忆', en: 'Nothing yet' },
   'agents.memoryKindLabel': { zh: '记忆类型', en: 'Memory kind' },
   'agents.memoryKind.preference': { zh: '偏好', en: 'Preference' },
   'agents.memoryKind.fact': { zh: '事实', en: 'Fact' },
@@ -152,10 +167,7 @@ export const agentsText = {
   'agents.memoryNeverUsed': { zh: '还没用过', en: 'never used yet' },
   'agents.memoryUsed': { zh: '用过 {n} 次', en: 'used {n}×' },
   'agents.memoryEvidence': { zh: '出处：run {run}…', en: 'From run {run}…' },
-  'agents.memoryFootHint': {
-    zh: '「改」= 加一条 + 删旧的；改完点保存。',
-    en: '"Edit" adds a new entry and removes the old one; click Save when done.',
-  },
+
   'agents.instructionsLabel': { zh: '指令', en: 'Instructions' },
   /**
    * ★ 分批第 53 批：在「指令」下面说明它进第一句话的哪一块。

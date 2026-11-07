@@ -531,6 +531,37 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.headBar',
+    /**
+     * ★ 分批第 269 批（使用者："智能体的细节页，只是先要有类似任务和聊天那页的 Title 顶栏"）。
+     *
+     * 量四件：标题栏在且名字在 h2 里、副题一行（CLI / 记忆 / 技能数）、右侧动作工具条里
+     * 有**保存与取消**（都从页面底部上移到栏头）、以及**名字只有一个入口**
+     * （`#agent-name` 那个输入框该没了——两处并存会让人说不清哪个是真的）。
+     */
+    label:
+      '★★★ 智能体详情有标题栏：名字在 h2、一行副题、右侧工具条里有保存/取消，' +
+      '且**名字只有一个入口**（卡片里那个输入框已删）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      v.hasH2 === true &&
+      String(v.name).length > 0 &&
+      String(v.sub).includes('CLI') &&
+      v.hasSave === true &&
+      v.hasCancel === true &&
+      v.sameTrack === true &&
+      v.legacyNameInput === false,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　名字「${String(v.name)}」　副题「${String(v.sub)}」　` +
+          `按钮 ${JSON.stringify(v.labels ?? [])}　同一条工具条 ${String(v.sameTrack)}　` +
+          `旧名称输入框还在 ${String(v.legacyNameInput)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.cardNoHoles',
     /**
      * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：卡片两列网格**不许留洞**。
@@ -597,14 +628,16 @@ const CHECKS = [
       v.switchMargin === '0px' &&
       v.sameRow === true &&
       v.headHeight <= 40 &&
-      v.hintBelow === true &&
+      // ★ 第 269 批：说明要么在下一行，要么已经收进 title（两种都对）；
+      //   不许的是"会换行的说明跟控件挤在同一行"——头部高度 ≤40 已经挡住那种。
+      (v.hintBelow === true || v.hintPresent === false) &&
       v.boxInsideSwitch === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　开关 display ${String(v.switchDisplay)}　` +
           `下边距 ${String(v.switchMargin)}　同一行 ${String(v.sameRow)}　` +
-          `头部高 ${String(v.headHeight)}　说明在下面 ${String(v.hintBelow)}　` +
+          `头部高 ${String(v.headHeight)}　说明 ${v.hintPresent === false ? '已收进 title' : `在下面 ${String(v.hintBelow)}`}　` +
           `勾选框在开关内 ${String(v.boxInsideSwitch)}`,
   },
   {

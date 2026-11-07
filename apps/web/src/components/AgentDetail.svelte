@@ -158,6 +158,27 @@
    */
   let memPreviewStats: { used: number; chars: number; pinned: number } | null = null
   let memPreviewBusy = false
+  /**
+   * ★ 分批第 269 批（使用者："只是先要有类似任务和聊天那页的 Title 顶栏"）：
+   *   名字移到**标题栏**，改名就在那儿就地改（与聊天页的「改名」同一个做法）。
+   *
+   * ⚠️ 卡片里那个「名称」输入框删掉了：同一个值有两个输入点，迟早出现"标题写一个、
+   *   卡片里是另一个"，而没人能说清哪个才算数。
+   */
+  let renaming = false
+  /** 改名的草稿（点「改名」时从库里那份起，**不是**从 draft 起——draft 可能已经有别的改动）。 */
+  let renameValue = ''
+
+  function startRename(): void {
+    renameValue = draft.name
+    renaming = true
+  }
+  /** 提交：只落进草稿，**不写库**（与卡片里其它字段一致：点「保存」才生效）。 */
+  function commitRename(): void {
+    const next = renameValue.trim()
+    if (next !== '') draft.name = next
+    renaming = false
+  }
   /** ★ 第 260 批：「合并同类」对话框（读它的全部记忆，同义的并成一条）。 */
   let consolidateOpen = false
   let memPreviewError = ''
@@ -698,53 +719,130 @@
     的详情展示与一键并进按钮）随这次改造一起删了。
     ══════════════════════════════════════════════════════════════════
   -->
+  <!--
+    ★ 分批第 269 批（使用者："只是先要有类似任务和聊天那页的 Title 顶栏"）：
+    **栏头** = 标题（名字 + 角色徽标 + 改名）+ 一行副题 + 右侧一条工具条。
+    与任务页 / 聊天页那一排同一种长相（`.detail-head` 的样式在 `app.css`，那条工具条
+    与顶栏、聊天页那排是同一套）。
+
+    ★ 保存 / 取消 / 删除**从页面底部上移到这里**：
+      · 这一页是一整页滚动，"保存"经常滚出视口；
+      · 任务页的「沉淀技能 / 删除任务」本来就在栏头——同一个位置放同一类动作用户不用找。
+    ⚠️ 「保存」仍是 `type="submit"`：表单里按 Enter 提交的行为没有变。
+    ⚠️ 改名只改**草稿**（与卡片里其它字段一致）：点「保存」才写库。
+  -->
+  <header class="detail-head agent-head">
+    {#if renaming}
+      <input
+        class="agent-rename-input"
+        bind:value={renameValue}
+        aria-label={$t('agents.nameLabel')}
+        autocomplete="off"
+        onkeydown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commitRename()
+          } else if (e.key === 'Escape') {
+            renaming = false
+          }
+        }}
+        onblur={commitRename}
+      />
+    {:else}
+      <h2>
+        <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
+        <span class="badge {draft.role === 'reviewer' ? 'in_review' : 'in_progress'}"
+          >{draft.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}</span
+        >
+        {#if agent.builtin}
+          <span class="badge in_review" data-agent-builtin-badge
+            >{agent.role === 'skill-reviewer'
+              ? $t('agents.retiredReviewerBadge')
+              : $t('agents.builtinBadge')}</span
+          >
+        {/if}
+        {#if draft.name !== agent.name}
+          <span class="faint small" data-agent-rename-pending>{$t('agents.renamePending')}</span>
+        {/if}
+        <button type="button" class="btn-link" data-agent-rename onclick={startRename}
+          >{$t('agents.rename')}</button
+        >
+      </h2>
+    {/if}
+    <p class="detail-sub" data-agent-head-sub>
+      {$t('agents.headSub', {
+        cli: draft.runtimeKey === 'default' ? $t('agents.runtimeFollowDefault') : draft.runtimeKey,
+        memory: draft.memoryEnabled
+          ? $t('agents.headMemoryOn', { n: String(activeMemRows.length) })
+          : $t('agents.headMemoryOff'),
+        skills: String(draft.skillIds.length),
+      })}
+    </p>
+    <div class="detail-actions">
+      <button
+        type="submit"
+        class="primary"
+        data-agent-save
+        disabled={busy}
+        title={$t('agents.saveTitle')}>{busy ? $t('common.saving') : $t('common.save')}</button
+      >
+      <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
+      {#if agent.builtin && agent.role === 'skill-reviewer'}
+        <!-- 已下线的内置审核者：它没有默认值可恢复，所以给它真正用得上的那个动作（删掉） -->
+        <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
+          >{$t('agents.deleteButton')}</button
+        >
+      {:else if agent.builtin}
+        <!-- 内置的起草者删不掉（服务端也拒）⇒ 只给「恢复成默认值」 -->
+        <button
+          type="button"
+          data-agent-restore
+          onclick={() => void restoreDefault()}
+          disabled={busy}>{$t('agents.restoreDefault')}</button
+        >
+      {:else}
+        <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
+          >{$t('agents.deleteButton')}</button
+        >
+      {/if}
+    </div>
+  </header>
+
   {#if error}
     <div class="notice bad">{error}</div>
   {/if}
 
   <section class="card agent-card">
-    {#if agent.builtin}
-      <!-- 内置徽标：让人一眼看出"这条不是他建的"。
-           不给徽标的话，使用者会去点删除，然后被 400 拒绝——那是一条
-           莫名其妙的失败（他并不知道有"内置"这回事）。
-           ★ 分批第 192 批：已下线的内置审核者要**额外说一句**——徽标原来只说"平台内置、
-           删不掉、只能恢复默认"，而它三条都不成立（没有默认值、现在也删得掉）。 -->
-      <p class="builtin-badge">
-        {#if agent.role === 'skill-reviewer'}
-          {$t('agents.retiredReviewerBadge')}
-        {:else}
-          {$t('agents.builtinBadge')}
-        {/if}
-      </p>
-    {/if}
+    <!-- ★ 第 269 批：内置徽标移到**标题栏**（名字旁边），卡片里不再画一遍 -->
     <!-- ★ 角色是智能体比「新建私有」多出的一维（私有表单由槽位决定角色），
          占一整行。 -->
     <div class="cell role-cell">
           <span class="cell-label">{$t('agents.roleLabel')}</span>
           <div class="role-picker">
+            <!--
+              ★ 第 269 批（使用者："需要精简文字"）：两张卡里的副说明（"接到任务后动手干活" /
+                "按判断依据审别人的产出"）挪进 `title`——「执行」「审核」四个字已经够了。
+            -->
             <button
               type="button"
               class="role-card"
               class:active={draft.role === 'executor'}
+              title={$t('agents.roleExecutorHint')}
               onclick={() => (draft.role = 'executor')}
             >
-              <strong>{$t('agents.roleExecutor')}</strong><span>{$t('agents.roleExecutorHint')}</span>
+              <strong>{$t('agents.roleExecutor')}</strong>
             </button>
             <button
               type="button"
               class="role-card"
               class:active={draft.role === 'reviewer'}
+              title={$t('agents.roleReviewerHintShort')}
               onclick={() => (draft.role = 'reviewer')}
             >
-              <strong>{$t('agents.roleReviewer')}</strong><span>{$t('agents.roleReviewerHintShort')}</span>
+              <strong>{$t('agents.roleReviewer')}</strong>
             </button>
           </div>
         </div>
-
-        <label class="cell">
-          {$t('agents.nameLabel')}
-          <input id="agent-name" bind:value={draft.name} />
-        </label>
 
         <label class="cell">
           {$t('agents.runtimeRowLabel')}
@@ -884,7 +982,7 @@
             （见 `tools/layout-probe/README.md` 的坑清单）就是这么落地的。
           -->
           <span class="cell-label mem-head">
-            {$t('agents.memoryLabel')}
+            <span title={$t('agents.memoryHint')}>{$t('agents.memoryLabel')}</span>
             <span class="mem-count" data-memory-count>
               {$t('agents.memoryCount', { n: String(activeMemRows.length) })}
             </span>
@@ -926,7 +1024,9 @@
               onclick={() => void openMemoryPreview()}
             >{$t('agents.memoryPreview')}</button>
           </span>
-          <p class="label-hint mem-hint">{$t('agents.memoryHint')}</p>
+          <!-- ★ 第 269 批：这句（"会进第一句话（排在指令之后）"）挪进标题行的 title，
+               标题行只留"记忆 + 条数"——一行扫过去要能读完。 -->
+
           {#if !draft.memoryEnabled}
             <p class="row-hint warn" data-memory-off-hint>{$t('agents.memoryOffHint')}</p>
           {/if}
@@ -1016,7 +1116,6 @@
             </button>
           </div>
           {/if}
-          <p class="row-hint">{$t('agents.memoryFootHint')}</p>
           {#if memError !== ''}
             <p class="row-hint warn" data-memory-error>{memError}</p>
           {/if}
@@ -1043,33 +1142,6 @@
   </section>
 
   <!-- 主操作在底部（与组页同款）：保存 / 删除 / 取消 -->
-  <div class="form-actions">
-    <button type="submit" class="primary" disabled={busy}>
-      {busy ? $t('common.saving') : $t('common.save')}
-    </button>
-    {#if agent.builtin && agent.role === 'skill-reviewer'}
-      <!--
-        ★ 分批第 192 批：**已下线的内置审核者**是个例外——它随沉淀线的评审一起下线
-        （第 137 批），没有任何链路用得到它。所以这里给它真正用得上的那个动作：
-        **删掉**。原来对内置一律只给「恢复成默认值」，而它**没有默认值可恢复**
-        （点了是 409 `builtin_retired`），于是这一行改不了、恢复不了、也删不掉。
-      -->
-      <button type="button" class="ghost danger" onclick={() => void remove()}>
-        {$t('agents.deleteButton')}
-      </button>
-    {:else if agent.builtin}
-      <!-- 起草者**没有删除按钮**（它删不掉，服务端也拒绝）。留一个"点了会被拒"的
-           按钮比没有按钮更坏：那是把平台的一条规则变成一次莫名其妙的失败。 -->
-      <button type="button" class="ghost" onclick={() => void restoreDefault()} disabled={busy}>
-        {$t('agents.restoreDefault')}
-      </button>
-    {:else}
-      <button type="button" class="ghost danger" onclick={() => void remove()}>
-        {$t('agents.deleteButton')}
-      </button>
-    {/if}
-    <button type="button" class="ghost" onclick={cancelEdit}>{$t('common.cancel')}</button>
-  </div>
 </form>
 
 <!--
@@ -1146,16 +1218,7 @@
 {/if}
 
 <style>
-  /* 内置徽标：一条**常驻**的说明（不是折叠的明细），因为它解释了"为什么这里
-     没有删除按钮、为什么技能挂不上"——删掉它，那两处"缺失"就变成莫名其妙的缺失。 */
-  .builtin-badge {
-    margin: 0 0 var(--space-3, 12px);
-    padding: 6px 10px;
-    border-radius: 6px;
-    background: var(--surface-2, #f0f0f3);
-    color: var(--text-muted, #555);
-    font-size: 12px;
-  }
+  /* ★ 第 269 批：内置徽标移到标题栏（名字旁边），这里那条常驻说明的样式随之删掉 */
   .skills-cell.locked { opacity: 0.85; }
 
   /**
@@ -1238,11 +1301,34 @@
     box-sizing: border-box;
   }
 
-  /* 主操作在底部（与组页同款） */
-  .form-actions {
-    display: flex;
-    gap: var(--sp-2);
-    align-items: center;
+  /* ── 标题栏（分批第 269 批）── */
+
+  /**
+   * `.detail-head` 的网格/副题/动作排布在 `app.css`（任务页、聊天页共用同一份）。
+   * 这里只补这一页特有的两样：改名的输入框、以及"名字改过但没保存"的那句提示。
+   */
+  .agent-head h2 {
+    /* 标题里塞了徽标与「改名」，允许折行——但名字本身仍然不换行（超长省略） */
+    flex-wrap: wrap;
+    row-gap: var(--sp-1);
+  }
+  .agent-head-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .agent-rename-input {
+    grid-column: 1;
+    font: inherit;
+    font-size: var(--fs-lg);
+    font-weight: 600;
+    padding: var(--sp-1) var(--sp-2);
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    max-width: 24rem;
   }
 
   /* ── 卡片 + 网格（2026-10：对齐组里「新建私有」的 `.grid-form`）── */
@@ -1304,8 +1390,7 @@
    *     不许插进任意两格之间——插进去就必然留洞（探针 `agents.cardNoHoles` 会红）。
    */
   .cell.role-cell,
-  .cell.actions-cell,
-  .builtin-badge {
+  .cell.actions-cell {
     grid-column: 1 / -1;
   }
 
@@ -1416,11 +1501,6 @@
     font-size: var(--fs-md);
   }
 
-  .role-card span {
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-  }
-
   .role-card.active {
     border-color: var(--accent);
     background: var(--surface-2);
@@ -1441,7 +1521,7 @@
    * ★ 分批第 257 批：「记忆」这一节的头部。
    *
    * 这一行里**只有单行短内容**（标题、条数、开关、预览按钮），所以 `align-items: center`
-   * 在这里是对的——会换行的说明被挪到下面单独一行了（`.mem-hint`）。
+   * 在这里是对的——标题行里**只有单行短内容**（说明挪进了 title）。
    * 判据永远问同一句：**行里有没有会换行的子元素**？没有 ⇒ 居中安全；有 ⇒ 用栅格 + 顶部对齐。
    */
   .memory-cell .cell-label.mem-head {
@@ -1453,10 +1533,6 @@
   }
   .memory-cell .cell-label.mem-head .spacer {
     flex: 1;
-  }
-  /* 说明单独一行（可以自由换行，不跟控件抢同一行） */
-  .memory-cell .mem-hint {
-    margin: 2px 0 0;
   }
   .mem-count {
     color: var(--text-faint);
@@ -1701,9 +1777,5 @@
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-  }
-  .label-hint {
-    color: var(--text-faint);
-    font-size: var(--fs-xs);
   }
 </style>
