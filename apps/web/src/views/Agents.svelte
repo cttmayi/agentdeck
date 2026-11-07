@@ -16,6 +16,7 @@
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import AgentDetail from '../components/AgentDetail.svelte'
+  import type { Agent } from '../lib/api.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
 
@@ -87,6 +88,27 @@
    * 关系（审核者是谁、几个技能）是次要信息，搜它反而容易找不到想要的。
    */
   let filter = ''
+  /**
+   * 角色徽标的文案与样式。
+   *
+   * ★ 分批第 268 批：从模板里的 `{@const}` 提到这里——行体要抽成 snippet 给**两组**
+   *   各渲染一次（内置一组、自建一组），而 `{@const}` 不能住在 snippet 里。
+   *
+   * ⚠️ 判据是**角色**，不是名字/是否内置（2026-10 D81/D82 的教训）：名字使用者能改，
+   *    角色不能；按 `reviewer ? 审核 : 执行` 写会让内置起草者被标成「执行」——一个永远
+   *    不接任务的 agent 看起来像执行者，使用者会去问"它为什么不干活"。
+   */
+  function roleLabelOf(a: Agent): string {
+    if (a.role === 'reviewer') return $t('agents.roleReviewer')
+    if (a.role === 'drafter') return $t('agents.roleDrafter')
+    if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
+    if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    return $t('agents.roleExecutor')
+  }
+  function roleBadgeOf(a: Agent): string {
+    return a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'
+  }
+
   $: visibleAgents = $agents.filter((a) => {
     if (!filter.trim()) return true
     const q = filter.trim().toLowerCase()
@@ -94,6 +116,37 @@
       a.name.toLowerCase().includes(q) || a.instructions.trim().toLowerCase().includes(q)
     )
   })
+
+  /**
+   * ★ 分批第 268 批（使用者："期待分组，将『内置』分成一直，其他分成组"）：左栏按
+   *   **内置 / 自建** 归堆。组名是使用者定的（「内置」「自建」），顺序也是他定的
+   *   （内置在上、自建在下）。
+   *
+   * ⚠️ **分组只归堆，不改组内顺序**：组里仍然沿用原来的顺序（服务端给的顺序 = 最近改过
+   *    的在上面）。若拿分组顺带排序，使用者会失去"我刚改过的那条去哪了"的线索。
+   * ⚠️ 判据是 `builtin === true`（协议字段），**不是名字**：名字使用者能改（起草者可以改名），
+   *    而内置标记是平台写的。
+   */
+  $: builtinAgents = visibleAgents.filter((a) => a.builtin === true)
+  $: ownAgents = visibleAgents.filter((a) => a.builtin !== true)
+  /**
+   * 折叠状态：**内置默认收拢、自建默认展开**（使用者定的）。
+   *
+   * ⚠️ 搜索时**无视折叠**（下面 `showBuiltin`/`showOwn` 里判）：搜出来 3 条却被折叠藏住，
+   *    人只会以为"搜索坏了"。
+   */
+  let builtinOpen = false
+  let ownOpen = true
+  $: filtering = filter.trim() !== ''
+  $: showBuiltin = builtinAgents.length > 0 && (builtinOpen || filtering)
+  $: showOwn = ownAgents.length > 0 && (ownOpen || filtering)
+  /**
+   * ⚠️ 选中的那条如果正好在**收起来的组**里，界面上就"选中项不见了"——而右栏还在显示它。
+   *    所以那个组的标题上要留一句"选中在这里"（不是替使用者展开：他收起来是故意的）。
+   */
+  $: selectionInBuiltin =
+    !showBuiltin && builtinAgents.some((a) => a.id === selectedId)
+  $: selectionInOwn = !showOwn && ownAgents.some((a) => a.id === selectedId)
 
   /**
    * 打开「设置」（右侧抽屉）。
@@ -230,128 +283,147 @@
         <div class="notice bad">{actionError}</div>
       {/if}
     {/snippet}
+    <!--
+      ★ 分批第 268 批：**按「内置 / 自建」分组**（使用者定：内置在上、默认收拢；自建在下、
+        默认展开；标题后面留一句小字）。
+
+      为什么行体抽成 snippet 而不是复制两份：这一行有 100 多行内容（名字、角色徽标、
+      「设为默认」按钮、指令摘要、技能与记忆条数）。复制一份的后果不是"多几行代码"，
+      而是**两处会漂**——比如以后给内置那组加"不能删"的提示，另一组忘了加。
+    -->
     {#snippet rows()}
-      <ul class="agent-list">
-        {#each visibleAgents as a (a.id)}
-          {@const reviewer =
-            a.role === 'reviewer' ? $t('agents.reviewsOthers') : ''}
-          <!--
-            ★ 2026-10（D81/D82）：角色从两个变成四个（`drafter` / `skill-reviewer` 是内置的
-              那两个），而这里原先写的是 `role === 'reviewer' ? 审核 : 执行` —— 于是内置起草者
-              与内置 skill 审核者在列表上被标成**「执行」**：一个永远不会接任务的 agent
-              看起来像执行者，使用者会去问"它为什么不干活"，而答案是"它压根不是"。
-              ⚠️ 判据是**角色**，不是 agent 名字/是否 builtin：名字可以改，角色不能。
-          -->
-          {@const roleLabel =
-            a.role === 'reviewer'
-              ? $t('agents.roleReviewer')
-              : a.role === 'drafter'
-                ? $t('agents.roleDrafter')
-                : a.role === 'skill-reviewer'
-                  ? $t('agents.roleSkillReviewer')
-                  : a.role === 'memory-tidy'
-                    ? $t('agents.roleMemoryTidy')
-                    : $t('agents.roleExecutor')}
-          {@const roleBadgeClass =
-            a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'}
-          <ListRow
-            rowClass="agent-row"
-            active={a.id === selectedId}
-            onclick={() => {
-              selectedId = a.id
-              // ★ 2026-10：新建表单住在右栏了——点清单行就退出"正在新建"
-              //   （不然右栏同时想画两样东西）。
-              creating = false
-            }}
-          >
-            {#snippet children()}
-              <span class="agent-line">
-                <strong>{a.name}</strong>
-                <span class="badge {roleBadgeClass}">{roleLabel}</span>
-                <!--
-                  ⚠️ 这里原来有一个「未挂 skill」徽标（`a.role === 'reviewer' &&
-                     a.skillIds.length === 0` 时显示）。**整段删掉了**，理由是它
-                     写下的那句话**已经不是真的**：
-
-                     注释原本说"审核者不挂 skill 就审不了任何东西"。那是 D37 之前
-                     的事——那时审核标准就住在挂载的 skill 里。D37 之后标准**内联在
-                     审核者身上**（`Agent.reviewStandard`），`resolveReviewStandard()`
-                     也是**先看内联标准**、只有它为空时才回退到挂载的 skill。
-                     实测线上那个「助手审核员」正是这种形态：`skillIds` 是空的、
-                     内联标准是有的、审核跑得完全正常——而列表上给它挂了一个
-                     看起来像故障的标记。
-
-                     ★ 一个**指向不存在的故障**的标记比没有标记更糟：使用者会去
-                     找一个不需要修的问题，甚至可能为了消掉它而给审核者硬挂一份
-                     用不上的 skill。真要表达"这个审核者没有判断依据"，该看的是
-                     内联标准在不在，而那是**智能体详情页**的事（列表上不显示标准
-                     正文，在这里断言它有没有就成了第二套判断）。
-                -->
-                {#if a.id === $effectiveDefaultAgentId}
-                  <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
-                  <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
-                {/if}
-              </span>
+      {#snippet agentRow(a: Agent)}
+        <ListRow
+          rowClass="agent-row"
+          active={a.id === selectedId}
+          onclick={() => {
+            selectedId = a.id
+            // ★ 2026-10：新建表单住在右栏了——点清单行就退出"正在新建"
+            //   （不然右栏同时想画两样东西）。
+            creating = false
+          }}
+        >
+          {#snippet children()}
+            <span class="agent-line">
+              <strong>{a.name}</strong>
+              <span class="badge {roleBadgeOf(a)}">{roleLabelOf(a)}</span>
               <!--
-                ★ 2026-10（紧凑性）：指令摘要与元信息不再各占一整行——合并成
-                一行：摘要可截断（flex:1）、元信息不收缩靠右。
+                ⚠️ 这里原来有一个「未挂 skill」徽标，2026-10 删了：它写下的那句话
+                   已经不是真的（审核者不挂 skill 也能审）。
               -->
-              <span class="agent-notes faint small">
-                <span class="agent-notes-trunc">
-                  {a.instructions.trim()
-                    ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
-                    : $t('agents.noInstructions')}
-                </span>
-                <span class="agent-notes-meta">
-                  <!-- ⚠️ 2026-10（使用者的决定）：执行者的「由谁来审它」设置整段拿掉
-                       （审核走智能体组），列表上那一半（不自动审核 / 审核者名）随之
-                       去掉——新执行者没有这个设置，留着只会永远显示"不自动审核"。
-                       审核者保留「它审别人」。 -->
-                  {reviewer}{$t('agents.skillCount', { count: a.skillIds.length })}
-                  <!-- ★ 分批第 240 批：记忆条数（0 条不画——空着的时候没有任何信息，
-                       只会在每一行上都挂一个"记忆 0"） -->
-                  {#if (a.memoryCount ?? 0) > 0}
-                    <span class="mem-count" data-agent-memory-count
-                      >{$t('agents.memoryCountInline', { n: String(a.memoryCount) })}</span
-                    >
-                  {/if}
-                  <code>{a.runtimeKey}</code>
-                </span>
-              </span>
-            {/snippet}
-            {#snippet action()}
-              <!--
-                ★ 「默认」是**单选**：每个 agent 一个「设为默认」，点谁就是谁——
-                  设了新的，原来那个自动不再是默认。**没有「取消默认」**：
-                  必须有一个默认（使用者的要求），空着只会让"新建任务交给谁"
-                  变成一个每次都要想的问题。
-
-                  只对执行者给出这个动作——审核者不接任务（服务端也会拒，
-                  这里只是别让人白点一次）。
-              -->
-              {#if a.role === 'executor' && a.id !== $effectiveDefaultAgentId}
-                <button
-                  type="button"
-                  class="ghost small default-toggle"
-                  title={$t('agents.setDefaultTitle')}
-                  onclick={(e) => {
-                    e.stopPropagation()
-                    void (async () => {
-                      actionError = ''
-                      try {
-                        await setDefaultAgent(a.id)
-                      } catch (err) {
-                        actionError = err instanceof Error ? err.message : String(err)
-                      }
-                    })()
-                  }}
-                >
-                  {$t('agents.setDefault')}
-                </button>
+              {#if a.id === $effectiveDefaultAgentId}
+                <!-- 新建任务的默认选择是谁，必须在列表上看得见 -->
+                <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
               {/if}
-            {/snippet}
-          </ListRow>
-        {/each}
+            </span>
+            <span class="agent-notes faint small">
+              <span class="agent-notes-trunc">
+                {a.instructions.trim()
+                  ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
+                  : $t('agents.noInstructions')}
+              </span>
+              <span class="agent-notes-meta">
+                {#if a.role === 'reviewer'}{$t('agents.reviewsOthers')}{/if}{$t('agents.skillCount', { count: a.skillIds.length })}
+                <!-- ★ 记忆条数（0 条不画——空着的时候没有任何信息） -->
+                {#if (a.memoryCount ?? 0) > 0}
+                  <span class="mem-count" data-agent-memory-count
+                    >{$t('agents.memoryCountInline', { n: String(a.memoryCount) })}</span
+                  >
+                {/if}
+                <code>{a.runtimeKey}</code>
+              </span>
+            </span>
+          {/snippet}
+          {#snippet action()}
+            <!--
+              ★ 「默认」是**单选**：每个 agent 一个「设为默认」，点谁就是谁。
+                **没有「取消默认」**：必须有一个默认（使用者的要求）。
+                只对执行者给出这个动作——审核者不接任务（服务端也会拒）。
+            -->
+            {#if a.role === 'executor' && a.id !== $effectiveDefaultAgentId}
+              <button
+                type="button"
+                class="ghost small default-toggle"
+                title={$t('agents.setDefaultTitle')}
+                onclick={(e) => {
+                  e.stopPropagation()
+                  void (async () => {
+                    actionError = ''
+                    try {
+                      await setDefaultAgent(a.id)
+                    } catch (err) {
+                      actionError = err instanceof Error ? err.message : String(err)
+                    }
+                  })()
+                }}
+              >
+                {$t('agents.setDefault')}
+              </button>
+            {/if}
+          {/snippet}
+        </ListRow>
+      {/snippet}
+      <ul class="agent-list">
+        {#if builtinAgents.length > 0}
+          <li class="agent-group-head-wrap">
+            <button
+              type="button"
+              class="agent-group-head"
+              data-agent-group="builtin"
+              aria-expanded={showBuiltin}
+              onclick={() => (builtinOpen = !builtinOpen)}
+            >
+              <span class="chev" aria-hidden="true">{showBuiltin ? '▾' : '▸'}</span>
+              <span class="agent-group-name">{$t('agents.groupBuiltin')}</span>
+              <span class="faint">{builtinAgents.length}</span>
+              <span class="spacer"></span>
+              <!-- ★ 选中项被收起来时留一句话：右栏还在显示它，列表里却"不见了" -->
+              {#if selectionInBuiltin}
+                <span class="faint small" data-group-selected-hint
+                  >{$t('agents.groupSelectionHere')}</span
+                >
+              {:else}
+                <span class="faint small">{$t('agents.groupBuiltinHint')}</span>
+              {/if}
+            </button>
+          </li>
+          {#if showBuiltin}
+            {#each builtinAgents as a (a.id)}
+              {@render agentRow(a)}
+            {/each}
+          {/if}
+        {/if}
+
+        {#if ownAgents.length > 0}
+          <!-- ⚠️ 两组之间那条分隔线只画在"上面那组真有东西"时，否则列表顶部会多一条悬空的线 -->
+          <li class="agent-group-sep" class:with-builtin={builtinAgents.length > 0}></li>
+          <li class="agent-group-head-wrap">
+            <button
+              type="button"
+              class="agent-group-head"
+              data-agent-group="own"
+              aria-expanded={showOwn}
+              onclick={() => (ownOpen = !ownOpen)}
+            >
+              <span class="chev" aria-hidden="true">{showOwn ? '▾' : '▸'}</span>
+              <span class="agent-group-name">{$t('agents.groupOwn')}</span>
+              <span class="faint">{ownAgents.length}</span>
+              <span class="spacer"></span>
+              {#if selectionInOwn}
+                <span class="faint small" data-group-selected-hint
+                  >{$t('agents.groupSelectionHere')}</span
+                >
+              {:else}
+                <span class="faint small">{$t('agents.groupOwnHint')}</span>
+              {/if}
+            </button>
+          </li>
+          {#if showOwn}
+            {#each ownAgents as a (a.id)}
+              {@render agentRow(a)}
+            {/each}
+          {/if}
+        {/if}
       </ul>
     {/snippet}
     {#snippet bottom()}
@@ -434,6 +506,56 @@
   /* ══════════════ 列表（窄栏里的卡片，不是表格）══════════════
      画表格的话六列会在 26rem 里互相挤；卡片竖排能放同样的字段，还顺手
      把"整条可点"表达清楚了。 */
+
+  /**
+   * ★ 分批第 268 批：分组标题（内置 / 自建）。
+   *
+   * ⚠️ 它们是 `<li>` 里的按钮，但**不吃**列表的行间距（`gap: var(--sp-1)`）——
+   *    标题要贴着它那组的第一行，否则中间会浮着一条空隙，看起来像漏了一个条目。
+   */
+  .agent-group-head-wrap {
+    margin: 0;
+  }
+  .agent-group-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: var(--fs-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+  .agent-group-head:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+  .agent-group-head .chev {
+    width: 0.9em;
+    color: var(--text-faint);
+  }
+  .agent-group-name {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .agent-group-head .spacer {
+    flex: 1;
+  }
+  /* 两组之间那条分隔线：只在上面那组真有东西时画（否则列表顶部多一条悬空的线） */
+  .agent-group-sep {
+    display: none;
+  }
+  .agent-group-sep.with-builtin {
+    display: block;
+    border-top: 1px solid var(--line);
+    margin: var(--sp-1) 0;
+    list-style: none;
+  }
 
   .agent-list {
     list-style: none;

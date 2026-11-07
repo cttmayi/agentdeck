@@ -491,6 +491,46 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.listGroups',
+    /**
+     * ★ 分批第 268 批（使用者："期待分组，将『内置』分成一直，其他分成组（取名你帮忙取一下）"）。
+     *   使用者定：**内置在上、默认收拢；自建在下、默认展开；标题小字留着**。
+     *
+     * 量五件：两个组标题在且顺序对（内置在前）、内置收拢（一个内置行都看不见）、
+     * 自建展开（行看得见）、**点标题能展开/收回**（可点、不是装饰）、两句小字都在。
+     * ⚠️ 只量"有分组标题"是不够的：把两组的行混在一起渲染也能满足它。
+     */
+    label:
+      '★★★ 智能体列表按「内置 / 自建」分组：内置在前且**默认收拢**、自建**默认展开**、' +
+      '点标题能展开/收回、两组各带一句小字（不能删 / 可改可删）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      JSON.stringify(v.before) === JSON.stringify(['builtin', 'own']) &&
+      v.builtinCollapsed === true &&
+      v.builtinRowsHidden === true &&
+      v.ownExpanded === true &&
+      v.ownRowsVisible === true &&
+      v.expanded === true &&
+      v.builtinRowsShown === true &&
+      v.collapsedAgain === true &&
+      // 量完把内置那组**留着展开**：后面三条判据要量内置那两行
+      v.leftExpanded === true &&
+      v.builtinHints === true &&
+      v.ownHints === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　顺序 ${JSON.stringify(v.before ?? [])}　` +
+          `内置收着 ${String(v.builtinCollapsed)}（行不见 ${String(v.builtinRowsHidden)}）　` +
+          `自建展开 ${String(v.ownExpanded)}（行可见 ${String(v.ownRowsVisible)}）　` +
+          `点开 ${String(v.expanded)}（内置行出现 ${String(v.builtinRowsShown)}）　` +
+          `收回 ${String(v.collapsedAgain)}　留着展开 ${String(v.leftExpanded)}　` +
+          `小字 ${String(v.builtinHints)}/${String(v.ownHints)}`,
+  },
+  {
+    view: '智能体',
     key: 'agents.cardNoHoles',
     /**
      * ★ 分批第 254 批（使用者："加入记忆后，布局乱了"）：卡片两列网格**不许留洞**。

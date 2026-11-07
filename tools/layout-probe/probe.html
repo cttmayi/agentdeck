@@ -235,10 +235,129 @@
         // 等不到就说明界面或接口坏了——那本身就是要报出来的事。
         const gotCards = await until(() => d().querySelectorAll('.list-row-main').length > 0)
         const cards = () => [...d().querySelectorAll('.list-row-main')]
+        /**
+         * ★ 分批第 268 批：列表分组之后（内置默认收拢），**"按名字找一行"必须先展开它所在的那组**。
+         *   探针里好几处都靠 `.agent-row` + 名字找人（记忆那一节 / 默认智能体那一节）——
+         *   组收着的时候找不到，红的原因会是"没量到"，而那与界面对不对无关。
+         *   ⚠️ 每次**离开再回来**页面都会重建、分组回到默认（内置收拢），所以这个助手要在
+         *     "每次导航之后"调用，而不是启动时调一次。
+         */
+        const expandAllGroups = async () => {
+          for (const head of [...d().querySelectorAll('[data-agent-group]')]) {
+            if (head.getAttribute('aria-expanded') === 'false') {
+              click(head)
+              await untilNet(
+                () =>
+                  d()
+                    .querySelector(`[data-agent-group="${head.getAttribute('data-agent-group')}"]`)
+                    ?.getAttribute('aria-expanded') === 'true',
+                30,
+              )
+            }
+          }
+        }
+
+        /**
+         * 按名字选中一个 agent（先展开分组，再点那一行，**等详情里的名字真的对上**）。
+         *
+         * ⚠️ 为什么不能"点第一条"就完事：分组之后第一条可见行会随折叠状态变，而它后面
+         *   那几条判据都默认"被点开的是起草者"（runtime 选择器、挂着的技能、内置徽标）。
+         */
+        const selectAgentByName = async (needle) => {
+          await expandAllGroups()
+          const row = [...d().querySelectorAll('.list-row-main')].find((c) =>
+            (text(c) ?? '').includes(needle),
+          )
+          if (row) {
+            click(row)
+            await untilNet(
+              () => (d().querySelector('.detail-pane #agent-name')?.value ?? '').includes(needle),
+              40,
+            )
+            return true
+          }
+          return false
+        }
+
         facts['agents.gotData'] = gotCards
         if (!gotCards) errors.push('智能体页等了 15 秒也没出现任何 .list-row-main（数据没到或列表没渲染）')
 
         facts['agents.cardCount'] = cards().length
+
+        /**
+         * ★ 分批第 268 批（使用者："期待分组，将『内置』分成一直，其他分成组"）：
+         *   左栏按 **内置 / 自建** 归堆，内置在上且**默认收拢**、自建在下且**默认展开**，
+         *   标题后面留一句小字。
+         *
+         * 量五件（都是"看起来对"量不出来的）：
+         *   ① 两个组标题都在、名字是「内置」「自建」，且顺序是内置在前；
+         *   ② 内置**收拢**（一个内置行都看不见）、自建**展开**（行看得见）；
+         *   ③ 点内置标题能展开、再点收回来（可点，不是装饰）；
+         *   ④ 两句小字都在（"不能删" / "可改可删"）；
+         *   ⑤ 分组**只归堆**：内置那组里只有 `builtin` 的，自建那组里一个内置都没有。
+         */
+        facts['agents.listGroups'] = await (async () => {
+          const heads = () => [...d().querySelectorAll('[data-agent-group]')]
+          const headOf = (kind) => heads().find((b) => b.getAttribute('data-agent-group') === kind)
+          const rowsOf = () =>
+            [...d().querySelectorAll('.list-pane .list-row-main')].map((r) =>
+              (text(r) ?? '').trim(),
+            )
+          const before = heads().map((b) => b.getAttribute('data-agent-group'))
+          const labels = heads().map((b) => (text(b) ?? '').trim())
+          const builtinHead = headOf('builtin')
+          const ownHead = headOf('own')
+          if (!builtinHead || !ownHead) {
+            return { present: false, before, labels }
+          }
+          const builtinCollapsed = builtinHead.getAttribute('aria-expanded') === 'false'
+          const ownExpanded = ownHead.getAttribute('aria-expanded') === 'true'
+          // 内置那组收着 ⇒ 列表里不该出现任何「内置」行（内置 agent 的名字里带「（内置）」）
+          const rowsNow = rowsOf()
+          const builtinRowsHidden = !rowsNow.some((t) => t.includes('（内置）'))
+          const ownRowsVisible = rowsNow.length > 0
+          // 点一下展开
+          click(builtinHead)
+          const expanded = await untilNet(
+            () => headOf('builtin')?.getAttribute('aria-expanded') === 'true',
+            40,
+          )
+          const rowsAfterExpand = rowsOf()
+          const builtinRowsShown = rowsAfterExpand.some((t) => t.includes('（内置）'))
+          /**
+           * 再点一次收回 —— 验证"能收"。
+           * ⚠️ 但**最后要留在展开态**：这一节后面还有三条判据要量内置那两行
+           *    （起草者 / 记忆整理者的徽标）。默认收拢是使用者的要求，可探针必须先把它们
+           *    露出来才量得到——"量不到"不等于"不存在"。
+           */
+          click(headOf('builtin'))
+          const collapsedAgain = await untilNet(
+            () => headOf('builtin')?.getAttribute('aria-expanded') === 'false',
+            40,
+          )
+          click(headOf('builtin'))
+          const leftExpanded = await untilNet(
+            () => headOf('builtin')?.getAttribute('aria-expanded') === 'true',
+            40,
+          )
+          return {
+            present: true,
+            before,
+            labels,
+            builtinCollapsed,
+            ownExpanded,
+            builtinRowsHidden,
+            ownRowsVisible,
+            expanded,
+            builtinRowsShown,
+            collapsedAgain,
+            leftExpanded,
+            builtinHints: (text(builtinHead) ?? '').includes('不能删'),
+            ownHints: (text(ownHead) ?? '').includes('可改可删'),
+          }
+        })()
+
+
 
 
         // ★★ 内置起草者 / 内置 skill 审核者那一行：角色徽标要说出它们是谁（§9/D81、§10/D82）。
@@ -306,7 +425,14 @@
           Math.round(layout().getBoundingClientRect().height - main().clientHeight),
         )
 
-        // ── 真点击第一条 ──
+        /**
+         * ── 真点击第一条 ──
+         *
+         * ⚠️ 分组（第 268 批）之后第一条可见行是**自建组的第一条**（内置那组默认收拢），
+         *    与分组前"全表第一条"是同一个人（内置的在折叠里本来也看不见）——所以这里
+         *    保持"点第一条"，不要改成点起草者：起草者被夹具改挂成了 `generic` runtime，
+         *    而下面 `runtimeOptionsNoDefault` 会因此多出一个"(当前)"选项、当场变红。
+         */
         click(cards()[0])
         const entered = await until(() => layout()?.className.includes('with-detail'))
         if (!entered) errors.push('点了第一条 agent 之后 .split-layout 没有带上 with-detail')
@@ -399,6 +525,8 @@
             () => [...d().querySelectorAll('.list-row-main')].some((c) => text(c).includes(name)),
             60,
           )
+          // ★ 第 268 批：分组默认收拢（内置那组）⇒ 先展开，否则按名字找不到行
+          await expandAllGroups()
           const row = [...d().querySelectorAll('.list-row-main')].find((c) => text(c).includes(name))
           if (row) click(row)
           await untilNet(() => !!d().querySelector('[data-agent-memory]'), 60)
@@ -849,6 +977,13 @@
         //    「编辑」按钮已经不存在——那正是上面 `detailNoEditButton` 量的事）。
         const editBtn = null
         facts['agents.editButtonFound'] = !!editBtn
+        /**
+         * ★ 第 268 批：分组之后"当前选中的是谁"取决于折叠状态，不再稳定；而这一段比较的是
+         *   **选择器的选项集合**——被选中那条的 runtime 若不是身份接口里的那几个，界面会多出
+         *   一个"(当前)"选项（正确行为），比较就红。
+         *   ⇒ 明确选「助手」（探针夹具里它是 `claude`，一定在身份接口的 runtimes 里）。
+         */
+        await selectAgentByName('助手')
         {
           const sel = d().querySelector('select#agent-runtime')
           const runtimeOpts = sel ? [...sel.options].map((o) => o.value) : null
@@ -2956,6 +3091,19 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             cards().find(
               (c) => (c.querySelector('strong')?.textContent ?? '').includes(needle),
             ) ?? null
+          /**
+           * ★ 第 268 批：上面那次导航回 `#/agents` 会**重建页面**，分组回到默认（内置收拢）
+           *   ⇒ 起草者那一行此刻不在 DOM 里，得先展开再找。
+           *
+           * ⚠️ 量完必须**收回原来的折叠状态**：这一段前面有一张几何快照
+           *   （`.list-row-main` 的位置也在里面），展开内置那组会让"第一条"换人、y 也变，
+           *   于是 `settings.drawerLeavesLayoutAlone` 会红——而它测的是"抽屉有没有挤动主区"，
+           *   与这里的展开毫无关系（实测就是这么红的）。
+           */
+          const builtinWasOpen =
+            d().querySelector('[data-agent-group="builtin"]')?.getAttribute('aria-expanded') ===
+            'true'
+          await expandAllGroups()
           const drafterRow2 = rowOf('起草者')
           if (drafterRow2) {
             click(drafterRow2)
@@ -2975,6 +3123,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['agents.drafterSkillInstallButton'] = !!d().querySelector(
             '[data-install-drafter-skill]',
           )
+          // 量完把"内置收拢"这条默认状态还回去（见上面那段：它会影响几何快照）
+          if (!builtinWasOpen) {
+            const head = d().querySelector('[data-agent-group="builtin"]')
+            if (head && head.getAttribute('aria-expanded') === 'true') {
+              click(head)
+              await untilNet(
+                () =>
+                  d()
+                    .querySelector('[data-agent-group="builtin"]')
+                    ?.getAttribute('aria-expanded') === 'false',
+                30,
+              )
+            }
+          }
         }
 
         // ★ 分批第 208 批：起草者那一格的"未安装/已装"两态在探针里**量不到**（原因写在这里）：
@@ -3857,6 +4019,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         // ⚠️ 限定在**列表**里：详情页也有徽章（审核标准的名字），
         //    文档级的 querySelectorAll 会把两件事混成一件（踩过）
         const badge = () => d().querySelector('.agent-list .default-badge')
+        // ★ 第 268 批：这一节也靠 `.agent-row` 找人 ⇒ 先把分组展开（内置那组默认收拢）
+        await expandAllGroups()
         const toggleBtns = () =>
           [...d().querySelectorAll('.default-toggle')].filter(Boolean)
         const cancelBtns = () =>

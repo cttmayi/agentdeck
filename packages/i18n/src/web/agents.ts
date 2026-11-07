@@ -15,6 +15,17 @@ import type { TextCatalog } from '../text.ts'
  */
 export const agentsText = {
   // ── 两个以上文件共用的角色词 ──
+  /**
+   * ★ 分批第 268 批（使用者："期待分组，将『内置』分成一直，其他分成组（取名你帮忙取一下）"）：
+   *   左栏按「内置 / 自建」归堆。组名两个都是两个字（对称、416px 的栏里更好扫）；
+   *   标题后面那句小字顺手解释了为什么内置那些没有删除按钮。
+   */
+  'agents.groupBuiltin': { zh: '内置', en: 'Built-in' },
+  'agents.groupOwn': { zh: '自建', en: 'Yours' },
+  'agents.groupBuiltinHint': { zh: '平台自带，不能删', en: 'Shipped with the platform, cannot be deleted' },
+  'agents.groupOwnHint': { zh: '你建的，可改可删', en: 'Created by you — editable and deletable' },
+  /** 选中的那条正好在收起来的组里时，标题上留一句（右栏还在显示它，列表里却"不见了"）。 */
+  'agents.groupSelectionHere': { zh: '选中的在这里', en: 'selection is in here' },
   'agents.roleExecutor': { zh: '执行', en: 'Execute' },
   'agents.roleReviewer': { zh: '审核', en: 'Review' },
   // ★ 2026-10（D81/D82）：内置起草者与内置 skill 审核者也是角色，列表徽标要能说出它们是谁。
