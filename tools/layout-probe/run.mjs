@@ -1906,6 +1906,9 @@ const CHECKS = [
       Array.isArray(v.sensitivities) &&
       ['stable', 'normal', 'quick'].every((x) => v.sensitivities.includes(x)) &&
       v.denoise === true &&
+      // ★ 281 批：输出方式两档都在（"只回填"必须是默认值，见 `auto-send.ts`）
+      Array.isArray(v.outputs) &&
+      ['input', 'via-skill'].every((x) => v.outputs.includes(x)) &&
       /语音模型|预编译包|装不上/.test(String(v.status)) &&
       v.hasDownload === true &&
       v.hasSelftest === false,
@@ -1913,7 +1916,7 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　模型 ${JSON.stringify(v.models)}　语言 ${JSON.stringify(v.languages)}　` +
-          `灵敏度 ${JSON.stringify(v.sensitivities)}　降噪 ${String(v.denoise)}　` +
+          `灵敏度 ${JSON.stringify(v.sensitivities)}　输出 ${JSON.stringify(v.outputs)}　降噪 ${String(v.denoise)}　` +
           `状态「${String(v.status)}」　下载按钮 ${String(v.hasDownload)}　试录按钮 ${String(v.hasSelftest)}　` +
           `目录 ${String(v.path)}`,
   },

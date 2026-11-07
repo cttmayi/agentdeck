@@ -400,6 +400,24 @@ export const chatText = {
   'chat.voiceVocabFromPlaceholder': { zh: '听成的样子，如 微思普', en: 'As heard, e.g. "agent deck"' },
   'chat.voiceVocabToPlaceholder': { zh: '正确写法，如 Whisper', en: 'Correct, e.g. "AgentDeck"' },
   // 从"人手动改过的那一处"提规则（`lib/dictation.ts`）
+  /**
+   * ★ 分批第 281 批：`via-skill` 输出方式（3 秒倒计时 + 撤销）。
+   *   数字在文案里是写死的 3——改 `AUTO_SEND_SECONDS` 要一起改（两处都有注释）。
+   */
+  'chat.voiceSettingsOutput': { zh: '识别完', en: 'After transcription' },
+  'chat.voiceSettingsOutputHint': {
+    zh: '「先发一条消息」= 替你按回车（消息会交给那个对话里的 skill 处理，比如 wiki-capture）；发送前有 3 秒可撤销。',
+    en: '"Send a message" = presses Enter for you (the message goes to whatever skill that chat uses, e.g. wiki-capture); you get 3 seconds to cancel.',
+  },
+  'chat.voiceOutputInput': { zh: '只放进输入框（默认）', en: 'Just fill the input box (default)' },
+  'chat.voiceOutputViaSkill': { zh: '先发一条消息', en: 'Send it as a message' },
+  'chat.voiceAutoSendLabel': { zh: '{s} 秒后发送：', en: 'Sending in {s}s:' },
+  'chat.voiceAutoSendUndo': { zh: '撤销', en: 'Cancel' },
+  'chat.voiceAutoSendCancelled': { zh: '已取消自动发送，字还在输入框里', en: 'Auto-send cancelled — the text is still in the box' },
+  'chat.voiceAutoSendBlocked': {
+    zh: '这一轮还在跑，所以没自动发：字留在输入框里了',
+    en: 'A turn is still running, so nothing was sent — the text is in the box',
+  },
   'chat.voiceRuleLabel': { zh: '这是你改的：', en: 'You changed this:' },
   'chat.voiceRuleSave': { zh: '记进词典', en: 'Add to dictionary' },
   'chat.voiceRuleSkip': { zh: '不用', en: 'Not now' },

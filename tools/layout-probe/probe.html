@@ -9626,11 +9626,14 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               const langSel = voiceSec.querySelector('[data-voice-language]')
               const sensSel = voiceSec.querySelector('[data-voice-sensitivity]')
               const status = (text(voiceSec.querySelector('[data-voice-status]')) ?? '').trim()
+              const outputSel = voiceSec.querySelector('[data-voice-output]')
               return {
                 present: true,
                 models: optionValues(modelSel),
                 languages: optionValues(langSel),
                 sensitivities: optionValues(sensSel),
+                // ★ 分批第 281 批：识别完之后走哪条路（只回填 / 先发一条消息）
+                outputs: optionValues(outputSel),
                 denoise: voiceSec.querySelector('[data-voice-denoise]') !== null,
                 status,
                 hasDownload: voiceSec.querySelector('[data-voice-download]') !== null,

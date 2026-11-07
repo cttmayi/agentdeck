@@ -9,6 +9,7 @@
   import { ChatBubble, ChatComposer, FootFiles } from '@agentdeck/ui/components'
   import VoiceButton from '../components/VoiceButton.svelte'
   import { suggestRule } from '../lib/dictation.ts'
+  import { AUTO_SEND_SECONDS, shouldAutoSend, type VoiceOutputMode } from '../lib/auto-send.ts'
   import WorkDirTree from '../components/WorkDirTree.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
@@ -145,6 +146,19 @@
    *   ② **整理成记忆**：手动打开，把这段对话里"你说过的判断句"挑出来勾。
    */
   $: memPrefixes = $identity?.memoryPrefixes ?? []
+
+  // ★ 分批第 281 批：语音的输出方式（`input` / `via-skill`）
+  onMount(() => {
+    if (!($identity?.capabilities ?? []).includes('voice-dictation')) return
+    void (async () => {
+      try {
+        const res = await api<{ settings: { outputMode?: VoiceOutputMode } }>('/api/voice/vocab')
+        voiceMode = res.settings.outputMode === 'via-skill' ? 'via-skill' : 'input'
+      } catch {
+        // 读不到就按默认（只回填）——这个方向永远是安全的
+      }
+    })()
+  })
   /**
    * ★ 「改」按下去之后的**手动模式**（分批第 241 批修）。
    *
@@ -444,7 +458,11 @@
       },
     },
   ])
-  onDestroy(() => clearPageActions('chat'))
+  onDestroy(() => {
+    // ★ 281 批：页面走了就别再按期发出去（那颗定时器不该在别的页面里开火）
+    cancelPendingVoiceSend()
+    clearPageActions('chat')
+  })
 
   /**
    * 换了下拉里那一项。
@@ -602,6 +620,20 @@
   let ruleAsked = false
 
   /**
+   * ★ 分批第 281 批：`via-skill` 模式下的**自动发送**（识别完替你按回车）。
+   *
+   * 三条自我保护（判断本身在 `lib/auto-send.ts`，有单测）：
+   *   · 只有模式是 `via-skill` 才算（默认仍是"只回填"）；
+   *   · 输入框**原本有字**时不自动发——那份字是人写的，自动发会把他的话一起送出去；
+   *   · 这一轮还在跑时不发（框架不让连发，硬发会被静默丢掉）。
+   * 再加上这 3 秒倒计时 + 一枚「撤销」：一次识别错误不该直接进对话（更不该被上层
+   * skill 记进 wiki）。
+   */
+  let voiceMode: VoiceOutputMode = 'input'
+  let pendingVoiceSend: { text: string } | null = null
+  let pendingVoiceTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
    * 人改完那段话之后，看看值不值得提一条规则。
    *
    * ⚠️ 只在"这次口述还没问过"时问一次：连着改三处时界面已经被他的操作占满了，
@@ -643,15 +675,75 @@
     }
   }
 
+  /** 清掉待发送的定时器（撤销 / 改字 / 卸载都走它，免得两颗定时器同时到点）。 */
+  function cancelPendingVoiceSend(): void {
+    if (pendingVoiceTimer !== null) {
+      clearTimeout(pendingVoiceTimer)
+      pendingVoiceTimer = null
+    }
+  }
+
+  /**
+   * 撤销自动发送。
+   *
+   * ★ **一个字都不丢**：只是"别自动发"，那段识别结果仍留在输入框里，人改完自己发
+   *   （把它清掉是最糟的做法——他会以为识别失败了，得再说一遍）。
+   */
+  function undoPendingVoiceSend(): void {
+    cancelPendingVoiceSend()
+    pendingVoiceSend = null
+    showToast($t('chat.voiceAutoSendCancelled'))
+  }
+
+  /** 倒计时到点：真的发出去（发之前再确认一次"这一轮没在跑"）。 */
+  async function commitPendingVoiceSend(): Promise<void> {
+    const pending = pendingVoiceSend
+    pendingVoiceSend = null
+    pendingVoiceTimer = null
+    if (pending === null) return
+    if (runningTurn !== null) {
+      // 这一轮还没跑完：字留着，告诉人为什么没发（不静默丢弃）
+      showToast($t('chat.voiceAutoSendBlocked'))
+      return
+    }
+    await send()
+  }
+
+  /**
+   * 人一动笔就撤销自动发送：他开始改字，说明这一句还没准备好发出去。
+   */
+  $: if (pendingVoiceSend !== null && input !== pendingVoiceSend.text) {
+    cancelPendingVoiceSend()
+    pendingVoiceSend = null
+  }
+
   function insertDictation(text: string): void {
     const addition = text.trim()
     if (addition === '') return
+    // ⚠️ 在填入**之前**记下输入框原本是不是空的：自动发送只在这种情况才安排
+    const composerWasEmpty = input.trim() === ''
     const base = input.replace(/[ \t]+$/, '')
     input = base === '' ? addition : `${base} ${addition}`
     // 记下"这次填入的是什么"：之后人一改，就拿它当"改前"的基准
     dictatedText = input
     ruleAsk = null
     ruleAsked = false
+    /**
+     * ★ 281 批：`via-skill` 模式下安排一次自动发送（3 秒后，可撤销）。
+     *   判断本身在 `lib/auto-send.ts`（有四条自我保护，带单测）。
+     */
+    cancelPendingVoiceSend()
+    if (
+      shouldAutoSend({
+        mode: voiceMode,
+        composerWasEmpty,
+        turnRunning: runningTurn !== null,
+        text: input,
+      })
+    ) {
+      pendingVoiceSend = { text: input }
+      pendingVoiceTimer = setTimeout(() => void commitPendingVoiceSend(), AUTO_SEND_SECONDS * 1000)
+    }
     // 光标移到末尾再聚焦：`focus()` 会把光标放在末尾（这里正是想要的位置）
     requestAnimationFrame(() => {
       const box = document.querySelector<HTMLTextAreaElement>('.pane-foot [data-composer] textarea')
@@ -1210,6 +1302,23 @@
         一条建议只在"这次口述"里问一次，而且只在**一处改动**时才出现——
         重写了半句话的情况不该变成全局替换（见 `lib/dictation.ts` 的说明）。
       -->
+      <!--
+        ★ 分批第 281 批：`via-skill` 模式下的**自动发送倒计时**。
+        为什么不是"直接发"：一次识别错误不该直接进对话（更不该被上层 skill 记进 wiki）。
+        这 3 秒是给眼睛与手留的窗口——撤销之后字**一个字都不丢**（仍在输入框里）。
+      -->
+      {#if pendingVoiceSend !== null}
+        <div class="mem-chip" data-voice-autosend>
+          <span class="mem-chip-k">{$t('chat.voiceAutoSendLabel', { s: String(AUTO_SEND_SECONDS) })}</span>
+          <span class="mem-chip-t" data-voice-autosend-text>「{pendingVoiceSend.text}」</span>
+          <button
+            type="button"
+            class="ghost small"
+            data-voice-autosend-undo
+            onclick={undoPendingVoiceSend}>{$t('chat.voiceAutoSendUndo')}</button
+          >
+        </div>
+      {/if}
       {#if ruleAsk !== null}
         <div class="mem-chip" data-voice-rule-chip>
           <span class="mem-chip-k">{$t('chat.voiceRuleLabel')}</span>

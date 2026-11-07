@@ -523,6 +523,22 @@
       </label>
     </div>
 
+    <!-- ★ 分批第 281 批：识别完之后走哪条路（回填输入框 / 先替你发一条消息） -->
+    <label class="voice-field voice-output" title={$t('chat.voiceSettingsOutputHint')}>
+      <span>{$t('chat.voiceSettingsOutput')}</span>
+      <select
+        data-voice-output
+        onchange={(e) => void saveSettings({ outputMode: pick(e) as VoiceSettings['outputMode'] })}
+      >
+        <option value="input" selected={settings?.outputMode === 'input'}
+          >{$t('chat.voiceOutputInput')}</option
+        >
+        <option value="via-skill" selected={settings?.outputMode === 'via-skill'}
+          >{$t('chat.voiceOutputViaSkill')}</option
+        >
+      </select>
+    </label>
+
     <!-- 模型没下时给一颗按钮；下的时候说"在下"（进度条是后面的事，现在只有一个状态） -->
     <div class="voice-row">
       {#if capability !== null && !capability.model.present}
@@ -692,6 +708,10 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行） */
+  .voice-output {
+    flex: 1 1 100%;
   }
   .voice-path {
     overflow: hidden;
