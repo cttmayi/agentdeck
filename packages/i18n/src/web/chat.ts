@@ -348,6 +348,42 @@ export const chatText = {
     en: 'Lost the daemon connection, so this recording could not be retrieved',
   },
   'chat.voiceFailedNoReason': { zh: '转写失败（没给原因）', en: 'Transcription failed (no reason given)' },
+  /**
+   * ★ 分批第 279 批：聊天页设置抽屉里的「语音输入」一节。
+   *   模型 / 语言 / 灵敏度 / 降噪 / 试录自检——每一档都要有词，否则下拉里是空白。
+   */
+  'chat.voiceSettingsHeading': { zh: '语音输入', en: 'Voice input' },
+  'chat.voiceSettingsHint': {
+    zh: '说完自动结束（也可以再点一下提前结束）。识别结果只放进输入框，发不发由你决定。',
+    en: 'Stops on silence (or click again to stop early). The text only goes into the input box; sending is up to you.',
+  },
+  'chat.voiceSettingsChecking': { zh: '正在检查…', en: 'Checking…' },
+  'chat.voiceSettingsReady': { zh: '可以用（麦克风与模型都就绪）', en: 'Ready (microphone and model are in place)' },
+  'chat.voiceSettingsModel': { zh: '模型', en: 'Model' },
+  'chat.voiceSettingsLanguage': { zh: '语言', en: 'Language' },
+  'chat.voiceLanguageZh': { zh: '中文', en: 'Chinese' },
+  'chat.voiceLanguageEn': { zh: '英文', en: 'English' },
+  'chat.voiceLanguageAuto': { zh: '自动判断（中英混说容易判错）', en: 'Auto-detect (mixed speech often misjudged)' },
+  'chat.voiceSettingsSensitivity': { zh: '灵敏度', en: 'Sensitivity' },
+  'chat.voiceSensitivityStable': { zh: '稳（不容易被打断，收尾慢一点）', en: 'Steady (harder to cut off, stops a bit later)' },
+  'chat.voiceSensitivityNormal': { zh: '中（默认）', en: 'Normal (default)' },
+  'chat.voiceSensitivityQuick': { zh: '快（收尾干脆，句中的停顿可能被当句尾）', en: 'Quick (stops sooner; mid-sentence pauses may end it)' },
+  'chat.voiceSettingsDenoise': { zh: '降噪', en: 'Noise reduction' },
+  'chat.voiceSettingsDenoiseHint': {
+    zh: '默认关：它会让轻声变小甚至消失。房间安静就别开。',
+    en: 'Off by default: it can swallow soft speech. Leave it off in a quiet room.',
+  },
+  'chat.voiceSettingsDownload': { zh: '下载模型（约 {mb} MiB）', en: 'Download model (~{mb} MiB)' },
+  'chat.voiceSettingsDownloading': { zh: '正在下载…', en: 'Downloading…' },
+  'chat.voiceSettingsDownloaded': { zh: '下好了（{mb} MiB），之后全程离线', en: 'Downloaded ({mb} MiB) — offline from now on' },
+  'chat.voiceSettingsSelfTest': { zh: '试录 3 秒', en: 'Test record 3s' },
+  'chat.voiceSettingsSelfTestRecording': { zh: '录 3 秒…', en: 'Recording 3s…' },
+  'chat.voiceSettingsSelfTestHeard': { zh: '听到：「{text}」', en: 'Heard: "{text}"' },
+  'chat.voiceSettingsSelfTestFailed': { zh: '试录失败', en: 'Test recording failed' },
+  'chat.voiceSettingsSelfTestTimeout': {
+    zh: '试录超时：转写 30 秒还没回来（模型是不是太大/CPU 太忙？）',
+    en: 'Test recording timed out: no result after 30s (model too large, or the CPU is busy?)',
+  },
   'chat.noOutput': { zh: '这一轮没有文字产出。', en: 'This turn produced no text.' },
   'chat.turnFailed': { zh: '这一轮没跑起来', en: "This turn didn't start" },
   'chat.duration': { zh: '用时 {seconds} 秒', en: '{seconds}s' },

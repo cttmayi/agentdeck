@@ -89,6 +89,7 @@ import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
 import { VoiceService } from './voice/service.ts'
+import { DEFAULT_ASR_MODEL } from './voice/models.ts'
 import type { CaptureFactory } from './voice/capture.ts'
 import type { SessionLimits } from './voice/session.ts'
 import type { TranscriberLoader } from './voice/transcriber.ts'
@@ -4264,6 +4265,23 @@ async function injectedSkillsOf(
         sendJson(res, 200, await voice.updateSettings(await readJsonBody(req)))
         return
       }
+    }
+
+    /**
+     * 模型目录 + 每一档在本地的状态。
+     *
+     * ★ 为什么单独一条（而不是塞进 capability）：设置页要**列出三档**让人选，而
+     *   capability 只回答"当前那一档能不能用"。两件事分开，界面才不必为了画一个下拉
+     *   去猜有哪些档。
+     */
+    if (path === '/api/voice/models' && req.method === 'GET') {
+      const settings = await voice.settings()
+      sendJson(res, 200, {
+        models: await voice.modelCatalog(),
+        current: settings.model,
+        default: DEFAULT_ASR_MODEL,
+      })
+      return
     }
 
     if (path === '/api/voice/models/ensure' && req.method === 'POST') {

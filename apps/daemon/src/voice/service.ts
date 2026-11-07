@@ -6,6 +6,7 @@ import {
   DEFAULT_MODEL_BASE_URL,
   ensureModel,
   findModelSpec,
+  modelState,
   type AsrModelSpec,
   type EnsureModelResult,
 } from './models.ts'
@@ -101,6 +102,42 @@ export class VoiceService {
   async capability(modelId?: string): Promise<VoiceCapability> {
     const settings = await this.settings()
     return probeVoiceCapability({ ...this.deps, modelId: modelId ?? settings.model })
+  }
+
+  /**
+   * 模型目录 + 每一档在本地的状态（设置页那个下拉读它）。
+   *
+   * ⚠️ 走 `deps.modelStateOf` 那条注入（与 capability 同一个口径）：测试不落盘也能量
+   *   "哪几档在"，探针用的真 daemon 则读真实文件。
+   */
+  async modelCatalog(): Promise<
+    Array<{
+      id: string
+      label: string
+      file: string
+      approxMb: number
+      note: string
+      present: boolean
+      bytes: number
+    }>
+  > {
+    return Promise.all(
+      ASR_MODELS.map(async (spec) => {
+        const state =
+          this.deps.modelStateOf !== undefined
+            ? await this.deps.modelStateOf(this.asrRoot, spec.id)
+            : await modelState(this.asrRoot, spec)
+        return {
+          id: spec.id,
+          label: spec.label,
+          file: spec.file,
+          approxMb: spec.approxMb,
+          note: spec.note,
+          present: state !== null && state.present && state.looksValid,
+          bytes: state?.bytes ?? 0,
+        }
+      }),
+    )
   }
 
   /**

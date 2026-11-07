@@ -9584,6 +9584,36 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               if (x) click(x)
               await untilNet(() => !words().includes('探针词'), 60)
             }
+            /**
+             * ★ 分批第 279 批：**语音那一节**也得在同一个抽屉里，而且每一档都要真的在
+             *   下拉里（少了选项 = 那一档选不到 = "功能只在代码里"）。
+             *
+             * 探针这台 daemon 没有语音模型（临时数据目录），所以这里应该看到：
+             *   · 状态行说"还没有语音模型…"（不是"可以用"）；
+             *   · 一颗**「下载模型」**按钮（而不是"试录 3 秒"——没模型时那个按钮按了必失败）。
+             */
+            const voiceSec = d().querySelector('[data-voice-settings]')
+            const optionValues = (sel) =>
+              sel === null ? null : [...sel.querySelectorAll('option')].map((o) => o.value)
+            facts['chat.voiceSettings'] = (() => {
+              if (voiceSec === null || voiceSec === undefined) return { present: false }
+              const modelSel = voiceSec.querySelector('[data-voice-model]')
+              const langSel = voiceSec.querySelector('[data-voice-language]')
+              const sensSel = voiceSec.querySelector('[data-voice-sensitivity]')
+              const status = (text(voiceSec.querySelector('[data-voice-status]')) ?? '').trim()
+              return {
+                present: true,
+                models: optionValues(modelSel),
+                languages: optionValues(langSel),
+                sensitivities: optionValues(sensSel),
+                denoise: voiceSec.querySelector('[data-voice-denoise]') !== null,
+                status,
+                hasDownload: voiceSec.querySelector('[data-voice-download]') !== null,
+                hasSelftest: voiceSec.querySelector('[data-voice-selftest]') !== null,
+                path: (text(voiceSec.querySelector('.voice-path')) ?? '').trim(),
+              }
+            })()
+
             // 关掉抽屉（Escape 由 Drawer 自己接）：留着会挡住后面判据量的聊天页
             f.contentWindow.dispatchEvent(
               new f.contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),

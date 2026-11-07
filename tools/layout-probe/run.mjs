@@ -1850,6 +1850,45 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.voiceSettings',
+    /**
+     * ★ 分批第 279 批：聊天页「设置」抽屉里的**语音**一节。
+     *
+     * 量四件，每件都对应一种"功能只在代码里"的坏法：
+     *   ① 三档模型 / 三种语言 / 三档灵敏度**都在下拉里**（少一个选项 ⇒ 那一档选不到）；
+     *   ② 「降噪」开关在；
+     *   ③ 状态行**说实话**：探针这台 daemon 没模型 ⇒ 必须是"还没有语音模型…"，
+     *      而不是绿的"可以用"；
+     *   ④ 没模型时给的是**「下载模型」**而不是「试录 3 秒」（后者按了必然失败——
+     *      一颗注定向人报错的按钮不如不画）。
+     */
+    label:
+      '★★★ 聊天设置里有「语音输入」一节：模型/语言/灵敏度三组选项齐全、有降噪开关、' +
+      '状态行说实话（没模型就直说），且没模型时给「下载模型」而不是「试录」',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.present === true &&
+      Array.isArray(v.models) &&
+      v.models.length === 3 &&
+      Array.isArray(v.languages) &&
+      ['zh', 'en', 'auto'].every((x) => v.languages.includes(x)) &&
+      Array.isArray(v.sensitivities) &&
+      ['stable', 'normal', 'quick'].every((x) => v.sensitivities.includes(x)) &&
+      v.denoise === true &&
+      /语音模型|预编译包|装不上/.test(String(v.status)) &&
+      v.hasDownload === true &&
+      v.hasSelftest === false,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `在 ${String(v.present)}　模型 ${JSON.stringify(v.models)}　语言 ${JSON.stringify(v.languages)}　` +
+          `灵敏度 ${JSON.stringify(v.sensitivities)}　降噪 ${String(v.denoise)}　` +
+          `状态「${String(v.status)}」　下载按钮 ${String(v.hasDownload)}　试录按钮 ${String(v.hasSelftest)}　` +
+          `目录 ${String(v.path)}`,
+  },
+  {
+    view: '聊天',
     key: 'chat.voiceButton',
     /**
      * ★ 分批第 278 批：输入条里那颗麦克风按钮**点了必须有反应**。

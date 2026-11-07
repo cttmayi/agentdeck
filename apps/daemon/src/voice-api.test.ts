@@ -190,6 +190,26 @@ describe('词表与设置', () => {
   })
 })
 
+describe('模型目录', () => {
+  test('★★ 三档都列出来，且每档带"在不在"（缺一档 ⇒ 设置页那个下拉就选不到它）', async () => {
+    await withDaemon(async ({ url }) => {
+      const { status, body } = await json(`${url}/api/voice/models`)
+      assert.equal(status, 200)
+      const models = body['models'] as Array<Record<string, unknown>>
+      assert.equal(models.length, 3)
+      assert.deepEqual(
+        models.map((m) => m['id']),
+        ['base-q5_1', 'small-q5_1', 'small'],
+      )
+      // 注入的 modelStateOf 说"在"，所以三档都该报 present
+      assert.ok(models.every((m) => m['present'] === true))
+      assert.equal(body['default'], 'base-q5_1')
+      // 每档都带界面上要显示的体积（否则"首次需下载约 xx MiB"编不出来）
+      assert.ok(models.every((m) => typeof m['approxMb'] === 'number'))
+    })
+  })
+})
+
 describe('录音会话', () => {
   test('★★ 开录音 ⇒ 201 + 会话 id；同一时刻只许一个（第二次 409）', async () => {
     await withDaemon(async ({ url }) => {

@@ -31,6 +31,160 @@
 
   const PLATFORM_DEFAULT = ['记住：', '以后', '下次别']
 
+  /**
+   * ══════════════ 语音（分批第 279 批）══════════════
+   *
+   * ★ 为什么这一节放在**聊天页的设置里**（而不是 App 设置）：麦克风按钮就在下面那条
+   *   输入条上，人是从那里发现这个功能的，也就该在那里找到"模型 / 语言 / 灵敏度"。
+   *   与触发词那次搬家同一个判断（见文件头那段）。
+   *
+   * ⚠️ 配置本身是**全局一份**（`~/.agentdeck/asr/settings.json`）：口述是个人习惯，
+   *   换个对话就要重配一遍说不通。
+   */
+  interface VoiceCapability {
+    available: boolean
+    reason: string
+    model: { id: string; present: boolean; approxMb: number }
+    paths: { asrRoot: string; models: string }
+  }
+  interface VoiceSettings {
+    model: string
+    language: 'zh' | 'en' | 'auto'
+    sensitivity: 'stable' | 'normal' | 'quick'
+    denoise: boolean
+    outputMode: 'input' | 'via-skill'
+  }
+  interface VoiceModelSpec {
+    id: string
+    label: string
+    approxMb: number
+  }
+
+  let capability: VoiceCapability | null = null
+  let settings: VoiceSettings | null = null
+  let models: VoiceModelSpec[] = []
+  let downloading = false
+  let downloadNote = ''
+  let selftest = ''
+  let selfTestNote = ''
+  let selfTestOk = true
+
+  /**
+   * 打开抽屉时才去读（而不是挂载时）：这一页的抽屉默认关着，平时不该为它发请求。
+   * ⚠️ 但能力探测**没有副作用**（不开麦、不弹权限窗），所以读一次是安全的。
+   */
+  $: if (open) void refreshVoice()
+
+  let voiceLoaded = false
+  async function refreshVoice(): Promise<void> {
+    if (voiceLoaded) return
+    voiceLoaded = true
+    await Promise.all([loadCapability(), loadSettings()])
+  }
+
+  async function loadCapability(): Promise<void> {
+    try {
+      capability = await api<VoiceCapability>('/api/voice/capability')
+    } catch {
+      capability = null
+    }
+  }
+
+  async function loadSettings(): Promise<void> {
+    try {
+      // 词表接口顺带带回 settings（一个请求拿两样东西）
+      const res = await api<{ settings: VoiceSettings }>('/api/voice/vocab')
+      settings = res.settings
+      const catalog = await api<{ models: VoiceModelSpec[] }>('/api/voice/models').catch(() => null)
+      models = catalog?.models ?? []
+    } catch {
+      settings = null
+    }
+  }
+
+  /** 从 `<select>` 的 change 事件里取值（这个仓库的习惯写法，见 Chat.svelte 的 `onchange`）。 */
+  function pick(event: Event): string {
+    return (event.currentTarget as HTMLSelectElement).value
+  }
+
+  async function saveSettings(patch: Partial<VoiceSettings>): Promise<void> {
+    error = ''
+    try {
+      settings = await api<VoiceSettings>('/api/voice/settings', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...settings, ...patch }),
+      })
+      await loadCapability()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function downloadModel(): Promise<void> {
+    downloading = true
+    downloadNote = ''
+    error = ''
+    try {
+      const res = await api<{ downloaded: boolean; bytes: number }>('/api/voice/models/ensure', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: settings?.model }),
+      })
+      downloadNote = $t('chat.voiceSettingsDownloaded', {
+        mb: String(Math.round(res.bytes / 1048576)),
+      })
+      await loadCapability()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      downloading = false
+    }
+  }
+
+  /**
+   * 「试录 3 秒」：真的开一次麦克风、说三秒、看它认出什么。
+   *
+   * ★ 为什么值得做：这一条把**三件最容易坏的事**一次验完——麦克风权限、模型、写入口径
+   *   （是不是把话变成字了）。分开验的话，人往往是在"点了没反应"之后才去逐个排查。
+   * ⚠️ 3 秒是硬编码：自检要快，而"说完自动结束"靠的是 VAD（说话停顿两秒就会提前结束，
+   *   那也是正常结果，不算失败）。
+   */
+  async function selfTest(): Promise<void> {
+    selfTestNote = ''
+    selfTestOk = true
+    error = ''
+    selftest = $t('chat.voiceSettingsSelfTestRecording')
+    try {
+      const started = await api<{ id: string }>('/api/voice/sessions', { method: 'POST' })
+      await new Promise((r) => setTimeout(r, 3000))
+      await api(`/api/voice/sessions/${encodeURIComponent(started.id)}/stop`, { method: 'POST' })
+      for (let i = 0; i < 120; i += 1) {
+        const snap = await api<{ state: string; text?: string; error?: string }>(
+          `/api/voice/sessions/${encodeURIComponent(started.id)}`,
+        )
+        if (snap.state === 'done') {
+          selfTestNote = $t('chat.voiceSettingsSelfTestHeard', { text: snap.text ?? '' })
+          await loadCapability()
+          return
+        }
+        if (snap.state === 'failed' || snap.state === 'cancelled') {
+          selfTestOk = false
+          selfTestNote = snap.error ?? $t('chat.voiceSettingsSelfTestFailed')
+          return
+        }
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      selfTestOk = false
+      selfTestNote = $t('chat.voiceSettingsSelfTestTimeout')
+    } catch (err) {
+      selfTestOk = false
+      selfTestNote = $t('chat.voiceSettingsSelfTestFailed') + '：' + (err instanceof Error ? err.message : String(err))
+    } finally {
+      selftest = ''
+    }
+  }
+
   let draft: string[] = []
   let last: string[] = []
   let input = ''
@@ -138,6 +292,117 @@
       <p class="hint bad" data-prefix-error>{error}</p>
     {/if}
   </section>
+  <section class="drawer-section" data-voice-settings>
+    <h3>{$t('chat.voiceSettingsHeading')}</h3>
+    <p class="hint">{$t('chat.voiceSettingsHint')}</p>
+
+    <!--
+      ★ 分批第 279 批：状态行先说清"现在能不能用"。
+        不能用时**原因 + 修法**一起给（下载模型 / 换机器 / 去系统设置勾权限）——
+        "点了没反应"是这个功能最想避免的那种失败。
+    -->
+    <p class="voice-status" data-voice-status>
+      {#if capability === null}
+        <span class="faint small">{$t('chat.voiceSettingsChecking')}</span>
+      {:else if capability.available}
+        <span class="ok-dot"></span>{$t('chat.voiceSettingsReady')}
+      {:else}
+        <span class="bad-dot"></span>{capability.reason}
+      {/if}
+    </p>
+
+    <div class="voice-row">
+      <label class="voice-field">
+        <span>{$t('chat.voiceSettingsModel')}</span>
+        <select data-voice-model onchange={(e) => void saveSettings({ model: pick(e) })}>
+          {#each models as m (m.id)}
+            <option value={m.id} selected={settings?.model === m.id}>
+              {m.label} · {m.approxMb} MiB
+            </option>
+          {/each}
+        </select>
+      </label>
+      <label class="voice-field">
+        <span>{$t('chat.voiceSettingsLanguage')}</span>
+        <select
+          data-voice-language
+          onchange={(e) => void saveSettings({ language: pick(e) as VoiceSettings['language'] })}
+        >
+          <option value="zh" selected={settings?.language === 'zh'}>{$t('chat.voiceLanguageZh')}</option>
+          <option value="en" selected={settings?.language === 'en'}>{$t('chat.voiceLanguageEn')}</option>
+          <option value="auto" selected={settings?.language === 'auto'}
+            >{$t('chat.voiceLanguageAuto')}</option
+          >
+        </select>
+      </label>
+    </div>
+
+    <div class="voice-row">
+      <label class="voice-field">
+        <span>{$t('chat.voiceSettingsSensitivity')}</span>
+        <select
+          data-voice-sensitivity
+          onchange={(e) =>
+            void saveSettings({ sensitivity: pick(e) as VoiceSettings['sensitivity'] })}
+        >
+          <option value="stable" selected={settings?.sensitivity === 'stable'}
+            >{$t('chat.voiceSensitivityStable')}</option
+          >
+          <option value="normal" selected={settings?.sensitivity === 'normal'}
+            >{$t('chat.voiceSensitivityNormal')}</option
+          >
+          <option value="quick" selected={settings?.sensitivity === 'quick'}
+            >{$t('chat.voiceSensitivityQuick')}</option
+          >
+        </select>
+      </label>
+      <label class="voice-check" title={$t('chat.voiceSettingsDenoiseHint')}>
+        <input
+          type="checkbox"
+          data-voice-denoise
+          checked={settings?.denoise === true}
+          onchange={(e) => void saveSettings({ denoise: (e.currentTarget as HTMLInputElement).checked })}
+        />
+        <span>{$t('chat.voiceSettingsDenoise')}</span>
+      </label>
+    </div>
+
+    <!-- 模型没下时给一颗按钮；下的时候说"在下"（进度条是后面的事，现在只有一个状态） -->
+    <div class="voice-row">
+      {#if capability !== null && !capability.model.present}
+        <button
+          type="button"
+          class="secondary"
+          data-voice-download
+          disabled={downloading}
+          onclick={() => void downloadModel()}
+        >{downloading
+            ? $t('chat.voiceSettingsDownloading')
+            : $t('chat.voiceSettingsDownload', { mb: String(capability.model.approxMb) })}</button>
+      {:else}
+        <button
+          type="button"
+          class="ghost"
+          data-voice-selftest
+          disabled={selftest !== ''}
+          onclick={() => void selfTest()}
+        >{selftest === '' ? $t('chat.voiceSettingsSelfTest') : selftest}</button>
+      {/if}
+      <span class="faint small mono voice-path" title={capability?.paths?.asrRoot ?? ''}
+        >{capability?.paths?.asrRoot ?? ''}</span
+      >
+    </div>
+
+    {#if downloadNote !== ''}
+      <p class="hint" data-voice-download-note>{downloadNote}</p>
+    {/if}
+    {#if selfTestNote !== ''}
+      <p class="hint {selfTestOk ? '' : 'bad'}" data-voice-selftest-note>{selfTestNote}</p>
+    {/if}
+    {#if error !== ''}
+      <p class="hint bad" data-voice-error>{error}</p>
+    {/if}
+  </section>
 </Drawer>
 
 <style>
@@ -188,5 +453,73 @@
   .prefix-add button {
     white-space: nowrap;
     flex: none;
+  }
+
+  /**
+   * ══════════ 语音那一节（分批第 279 批）══════════
+   *
+   * 两条布局规矩：
+   *   · 一行里**最多两个控件**（下拉太宽，两个刚好铺满抽屉），第三个会挤成两行字；
+   *   · 状态那一行**不折行**（"可用/不可用 + 一句原因"要一眼扫过去），太长就省略并
+   *     把全文放进 `title`——这一节的第一件事是"我现在能不能用"。
+   */
+  .voice-status {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin: var(--sp-2) 0;
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ok-dot,
+  .bad-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .ok-dot {
+    background: var(--good);
+  }
+  .bad-dot {
+    background: var(--bad);
+  }
+  .voice-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .voice-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    flex: 1 1 8rem;
+    min-width: 0;
+  }
+  .voice-field select {
+    width: 100%;
+  }
+  .voice-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    margin: 0;
+    white-space: nowrap;
+  }
+  .voice-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
   }
 </style>
