@@ -25,6 +25,13 @@ export const agentsText = {
    *   名字从卡片里移到标题，改名就地改（只改草稿，点「保存」才写库）。
    */
   'agents.rename': { zh: '改名', en: 'Rename' },
+  /** 没有改动时「保存」置灰（点了也不会有事发生，那是假按钮）。 */
+  'agents.saveNothing': { zh: '没有改动', en: 'Nothing to save' },
+  /** 内置 agent 整张卡片只读——说清能做什么（只有「恢复成默认值」）。 */
+  'agents.builtinReadOnly': {
+    zh: '平台内置：只读。要回到平台默认用「恢复成默认值」。',
+    en: 'Shipped with the platform: read-only. Use "Restore default" to go back to the platform version.',
+  },
   'agents.renamePending': { zh: '（未保存）', en: '(unsaved)' },
   'agents.saveTitle': { zh: '保存改动（记忆也在这里一起提交）', en: 'Save changes (memory is submitted here too)' },
   /** 副题一行：`CLI：claude · 记忆 3 条 · 2 个技能`。 */

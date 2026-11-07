@@ -337,6 +337,7 @@
     }
   }
 
+  type Draft = ReturnType<typeof blankDraft>
   let draft = blankDraft()
 
   /**
@@ -418,30 +419,73 @@
       .map((r) => [r.key, r.evidenceNote ?? $t('agents.evidenceNoteFallback')]),
   ) as Record<string, string>
 
+  /**
+   * ★ 分批第 273 批（使用者："内置智能体不能修改，原则上应该『保存』『删除』这些按钮都是置灰的，
+   *   其他很多位置不能修改的，也应该要置灰（除了 CLI，应该都不可以改才对）"）：
+   *
+   * 服务端的事实比使用者记的还严：`PATCH /api/agents/{id}` 对内置 agent **整份拒绝**
+   * （`builtin_agent_readonly`，见 `server.ts` 里那段），连 CLI 也改不了；能做的只有
+   * 「恢复成默认值」（那是重置，不是编辑），以及 retired 那条（已下线的 skill 审核者）的删除。
+   *
+   * 而界面上原来把这些都画成**可编辑**：改了再点保存 ⇒ 400。那是本仓库最忌讳的一类——
+   * 界面上看着能改、实际改不了。所以这里按事实把整张卡片切成只读态。
+   */
+  $: readOnly = agent.builtin === true
+  /** retired 的内置审核者：没有默认值可恢复，但允许删（它已经不被任何链路使用）。 */
+  $: retiredBuiltin = readOnly && agent.role === 'skill-reviewer'
+  /**
+   * 草稿有没有改动（没改动时「保存」置灰——点了也不会有事发生，那是假按钮）。
+   *
+   * ⚠️⚠️ **必须把 `draft` / `agent` 当参数传进去**。本组件是 legacy 反应式（`$:`），
+   *   编译器靠**语句里静态出现的变量名**判断依赖：写成 `Object.keys(buildPatch())`
+   *   一个依赖都没提到 ⇒ 这一句只在初始化时算一次，之后草稿怎么改它都不变 ⇒
+   *   「保存」永远置灰、点了毫无反应（探针 273 批量到：保存之后老提示还在、
+   *   `reviewStandard` 还是 `still-there`、勾了技能也不落库——三处说的都是这件事）。
+   */
+  $: dirty = isDirty(draft, agent, memRows)
+
+  /** 内置 agent 的真实角色名（它不是 executor/reviewer 二选一，所以那个选择器对它不适用）。 */
+  function roleLabelOf(a: Agent): string {
+    if (a.role === 'reviewer') return $t('agents.roleReviewer')
+    if (a.role === 'drafter') return $t('agents.roleDrafter')
+    if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
+    return $t('agents.roleExecutor')
+  }
+  /** 只读态下的角色徽标颜色（与列表里那套一致）。 */
+  function roleBadgeOf(a: Agent): string {
+    return a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'
+  }
+
   function cancelEdit(): void {
     // ★ 2026-10：没有查看态了（选中即编辑，与组页同款）——「取消」= 放弃草稿、
     //   退出这一栏（回到空态）。改动直接丢，不逐个字段回滚。
     onclose()
   }
 
+  /** 草稿有没有改动（`dirty` 的判据，参数化是为了让 legacy 反应式看得见依赖）。 */
+  function isDirty(dr: Draft, ag: Agent, mr: MemRow[]): boolean {
+    return Object.keys(buildPatch(dr, ag, mr)).length > 0
+  }
+
   /** 只把**真的变了**的字段放进 patch。 */
-  function buildPatch(): Record<string, unknown> {
+  function buildPatch(dr: Draft = draft, ag: Agent = agent, mr: MemRow[] = memRows): Record<string, unknown> {
     const patch: Record<string, unknown> = {}
-    if (draft.name !== agent.name) patch['name'] = draft.name
-    if (draft.instructions !== agent.instructions) patch['instructions'] = draft.instructions
-    if (draft.role !== agent.role) patch['role'] = draft.role
+    if (dr.name !== ag.name) patch['name'] = dr.name
+    if (dr.instructions !== ag.instructions) patch['instructions'] = dr.instructions
+    if (dr.role !== ag.role) patch['role'] = dr.role
     // ⚠️ 2026-10：`workDir` / `model` / `reviewerAgentId` 三个设置从界面拿掉了
     // （见 `blankDraft`），PATCH 里不再生成——编辑一个 agent 不会碰它们。
-    if (draft.runtimeKey !== agent.runtimeKey) patch['runtimeKey'] = draft.runtimeKey
+    if (dr.runtimeKey !== ag.runtimeKey) patch['runtimeKey'] = dr.runtimeKey
     // ★ 分批第 245 批：总开关变了才发（保存语义与「指令」一致：一份表单一次提交）
-    if (draft.memoryEnabled !== (agent.memoryEnabled !== false)) {
-      patch['memoryEnabled'] = draft.memoryEnabled
+    if (dr.memoryEnabled !== (ag.memoryEnabled !== false)) {
+      patch['memoryEnabled'] = dr.memoryEnabled
     }
-    if (draft.skillIds.slice().sort().join() !== agent.skillIds.slice().sort().join())
-      patch['skillIds'] = draft.skillIds
+    if (dr.skillIds.slice().sort().join() !== ag.skillIds.slice().sort().join())
+      patch['skillIds'] = dr.skillIds
     // 标准按值比较（它是对象，直接比引用永远不相等）
-    if (JSON.stringify(draft.reviewStandard) !== JSON.stringify(agent.reviewStandard ?? null))
-      patch['reviewStandard'] = draft.reviewStandard
+    if (JSON.stringify(dr.reviewStandard) !== JSON.stringify(ag.reviewStandard ?? null))
+      patch['reviewStandard'] = dr.reviewStandard
     // ⚠️ 2026-10：这里原来还有三段——行动权限（`allowedActions`）、它的固定参数
     //    （`actionParams`）与调试勾选（`debugActions`）。三者一起撤掉了：**动作只
     //    属于组**（`AgentGroup`），从这里提交它们现在只会得到 400「不认识的字段」。
@@ -461,12 +505,12 @@
      *
      * ⚠️ **没有"改正文"这条**：改一条 = 加一条 + 删旧的（界面上的「改」就是这么做的）。
      */
-    const add = memRows
+    const add = mr
       .filter((r) => r.id === null && !r.drop)
       .map((r) => ({ kind: r.kind, text: r.text.trim(), ...(r.pinned ? { pinned: true } : {}) }))
       .filter((r) => r.text !== '')
-    const remove = memRows.filter((r) => r.drop && r.id !== null).map((r) => r.id as string)
-    const pin = memRows
+    const remove = mr.filter((r) => r.drop && r.id !== null).map((r) => r.id as string)
+    const pin = mr
       .filter((r) => r.id !== null && !r.drop && r.pinned !== r.origPinned)
       .map((r) => ({ id: r.id as string, pinned: r.pinned }))
     if (add.length > 0 || remove.length > 0 || pin.length > 0) {
@@ -751,9 +795,17 @@
     {:else}
       <h2>
         <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
-        <span class="badge {draft.role === 'reviewer' ? 'in_review' : 'in_progress'}"
-          >{draft.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}</span
-        >
+        {#if !agent.builtin}
+          <!--
+            ★ 分批第 273 批：内置 agent 不画「执行 / 审核」这枚徽标——它的角色是
+            `drafter` / `memory-tidy` / `skill-reviewer`，画成「执行」是错的（使用者正是
+            因为"内置都是执行智能体"才去角色格里找它，然后发现两边都不亮）。
+            它的真实角色在卡片「角色」那一格用真实徽标显示。
+          -->
+          <span class="badge {draft.role === 'reviewer' ? 'in_review' : 'in_progress'}"
+            >{draft.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}</span
+          >
+        {/if}
         {#if agent.builtin}
           <span class="badge in_review" data-agent-builtin-badge
             >{agent.role === 'skill-reviewer'
@@ -764,9 +816,11 @@
         {#if draft.name !== agent.name}
           <span class="faint small" data-agent-rename-pending>{$t('agents.renamePending')}</span>
         {/if}
-        <button type="button" class="btn-link" data-agent-rename onclick={startRename}
-          >{$t('agents.rename')}</button
-        >
+        {#if !readOnly}
+          <button type="button" class="btn-link" data-agent-rename onclick={startRename}
+            >{$t('agents.rename')}</button
+          >
+        {/if}
       </h2>
     {/if}
     <p
@@ -783,28 +837,36 @@
       })}
     </p>
     <div class="detail-actions">
-      <button
-        type="submit"
-        class="primary"
-        data-agent-save
-        disabled={busy}
-        title={$t('agents.saveTitle')}>{busy ? $t('common.saving') : $t('common.save')}</button
-      >
-      <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
-      {#if agent.builtin && agent.role === 'skill-reviewer'}
-        <!-- 已下线的内置审核者：它没有默认值可恢复，所以给它真正用得上的那个动作（删掉） -->
-        <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
-          >{$t('agents.deleteButton')}</button
-        >
-      {:else if agent.builtin}
-        <!-- 内置的起草者删不掉（服务端也拒）⇒ 只给「恢复成默认值」 -->
-        <button
-          type="button"
-          data-agent-restore
-          onclick={() => void restoreDefault()}
-          disabled={busy}>{$t('agents.restoreDefault')}</button
-        >
+      {#if readOnly}
+        <!--
+          ★ 分批第 273 批：内置 agent **没有「保存」**——服务端整份拒绝它的 PATCH，
+            留着这颗按钮就是"点了必然 400"的假动作（使用者："保存/删除这些按钮都是置灰的"）。
+          能做的只有：删（仅已下线的 skill 审核者）、恢复成默认值、取消。
+        -->
+        {#if retiredBuiltin}
+          <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
+            >{$t('agents.deleteButton')}</button
+          >
+        {:else}
+          <button
+            type="button"
+            data-agent-restore
+            disabled={busy}
+            title={$t('agents.restoreDefaultTitle')}
+            onclick={() => void restoreDefault()}>{$t('agents.restoreDefault')}</button
+          >
+        {/if}
+        <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.close')}</button>
       {:else}
+        <button
+          type="submit"
+          class="primary"
+          data-agent-save
+          disabled={busy || !dirty}
+          title={dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
+          >{busy ? $t('common.saving') : $t('common.save')}</button
+        >
+        <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
         <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
           >{$t('agents.deleteButton')}</button
         >
@@ -822,6 +884,17 @@
          占一整行。 -->
     <div class="cell role-cell">
           <span class="cell-label">{$t('agents.roleLabel')}</span>
+          {#if readOnly}
+            <!--
+              ★ 分批第 273 批（使用者："我记得内置智能体都是执行智能体，我怎么没看到被选择"）：
+              内置 agent 的角色是 `drafter` / `memory-tidy` / `skill-reviewer`，**不是**执行/审核
+              二选一 ⇒ 那个两按钮选择器对它两边都不亮，看起来"没被选中"。只读态直接显示真实角色。
+            -->
+            <div class="role-readonly" data-agent-role-badge>
+              <span class="badge {roleBadgeOf(agent)}">{roleLabelOf(agent)}</span>
+              <span class="faint small">{$t('agents.builtinReadOnly')}</span>
+            </div>
+          {:else}
           <div class="role-picker">
             <!--
               ★ 第 269 批（使用者："需要精简文字"）：两张卡里的副说明（"接到任务后动手干活" /
@@ -846,6 +919,7 @@
               <strong>{$t('agents.roleReviewer')}</strong>
             </button>
           </div>
+          {/if}
         </div>
 
         <!--
@@ -855,9 +929,10 @@
           还空出半个格子。所以 CLI 自己占整行：角色 → CLI → 指令|技能 → 记忆 → 行动权限，
           每一行都是满的（探针 `agents.cardNoHoles` 钉着这件事）。
         -->
-        <label class="cell runtime-cell">
+        <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
-          <select id="agent-runtime" bind:value={draft.runtimeKey}>
+          <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
+          <select id="agent-runtime" bind:value={draft.runtimeKey} disabled={readOnly}>
             <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
                  agent 记的就是它，不给这一项的话下拉会落到第一个具体 runtime ——
                  那等于"打开编辑页什么都没做，保存就把它的默认改掉了"。 -->
@@ -892,7 +967,14 @@
           {$t('agents.instructionsLabel')}
           <!-- ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
                指令是一份几百到上千字的文档，不是一行备注。 -->
-          <textarea id="agent-instructions" class="instructions" bind:value={draft.instructions} rows="6"></textarea>
+          <textarea
+            id="agent-instructions"
+            class="instructions"
+            class:locked={readOnly}
+            readonly={readOnly}
+            bind:value={draft.instructions}
+            rows="6"
+          ></textarea>
           <!--
             ★ 分批第 254 批（使用者："文字解释太多，不需要写那么细致"）：原来这里是**两行**
             说明（"这一段就是它的「指令」：平台每派一次活都会带上它（不用你在别处再配一遍）。
@@ -1015,6 +1097,14 @@
                 已有的条目**不删**，只是暂时不用——所以关掉之后这一节照样列出来，
                 但整节压暗、写入口收起来，并且明说"不会被带进第一句话"。
             -->
+            {#if readOnly}
+              <!-- 内置 agent 整份只读（服务端连 PATCH 都拒），开关摆出来只会让人白点。 -->
+              <span class="mem-state" data-memory-state
+                >{draft.memoryEnabled
+                  ? $t('agents.headMemoryOn', { n: String(activeMemRows.length) })
+                  : $t('agents.headMemoryOff')}</span
+              >
+            {:else}
             <label class="mem-switch" title={$t('agents.memoryEnabledHint')}>
               <!--
                 ⚠️ 必须用 `bind:checked`，不能写 `checked={…}` + `onchange` 里赋值：
@@ -1025,12 +1115,13 @@
               <input type="checkbox" data-memory-enabled bind:checked={draft.memoryEnabled} />
               <span>{$t('agents.memoryEnabled')}</span>
             </label>
+            {/if}
             <!--
               ★ 分批第 260 批：「合并同类…」——让整理者读**它的全部记忆**，把同义的并成一条、
                 把过时的标成"忘掉"，摆给人确认。比手工删十几条现实得多。
                 只在"记忆开着 + 至少两条"时出现：一条没什么可并的，关着则根本不该动。
             -->
-            {#if draft.memoryEnabled && activeMemRows.length >= 2}
+            {#if !readOnly && draft.memoryEnabled && activeMemRows.length >= 2}
               <button
                 type="button"
                 class="btn-link"
@@ -1080,7 +1171,7 @@
                     class:on={row.pinned}
                     title={$t('agents.memoryPinTitle')}
                     aria-pressed={row.pinned}
-                    disabled={row.drop}
+                    disabled={readOnly || row.drop}
                     onclick={() => togglePin(row)}
                   >★</button>
                   <span class="mem-kind" data-kind={row.kind}>{$t(`agents.memoryKind.${row.kind}` as never)}</span>
@@ -1095,6 +1186,7 @@
                     <span class="mem-text" title={memTitleFor(row)}>{row.text}</span>
                   {/if}
                   <span class="mem-meta">{memMetaFor(row)}</span>
+                  {#if !readOnly}
                   <span class="mem-actions">
                     {#if row.drop}
                       <button type="button" class="btn-mini" data-mem-undo onclick={() => undropRow(row)}>
@@ -1111,12 +1203,13 @@
                       </button>
                     {/if}
                   </span>
+                  {/if}
                 </div>
               {/each}
             </div>
           {/if}
 
-          {#if draft.memoryEnabled}
+          {#if draft.memoryEnabled && !readOnly}
           <div class="mem-add">
             <select bind:value={memNewKind} aria-label={$t('agents.memoryKindLabel')} data-mem-new-kind>
               {#each MEMORY_KINDS_UI as k (k)}
@@ -1454,6 +1547,21 @@
     resize: vertical;
   }
 
+  /**
+   * ★ 分批第 273 批：只读的指令框**不压暗文字**（它是给人读的，读的人比写的人多），
+   *   只把底色与光标换成"不可编辑"的样子——`readonly` 保留了选中/复制/滚动，
+   *   用 `disabled` 会连滚动一起废掉长指令的后半段。
+   */
+  .instructions.locked {
+    background: var(--surface-2);
+    cursor: default;
+  }
+
+  /* CLI 那一格没有单独的只读外观，整格压暗一档就够（与「内置」技能那格同一手法）。 */
+  .runtime-cell.locked {
+    opacity: 0.75;
+  }
+
   /* ── 编辑控件 ── */
 
   /**
@@ -1505,6 +1613,19 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--sp-2);
+  }
+
+  /**
+   * ★ 分批第 273 批：只读态的角色（内置 agent 的角色不是执行/审核二选一）。
+   *   与 `.role-picker` 的两张卡不同高，所以不能共用同一格：这里只要一行徽标 + 一句
+   *   "内置只读"的灰字，竖排对齐 `align-items: baseline` 免得徽标比文字飘高半行。
+   */
+  .role-readonly {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--sp-2);
+    margin-top: 2px;
   }
 
   .role-card {
@@ -1578,6 +1699,12 @@
   }
   .mem-switch input {
     margin: 0;
+  }
+
+  /* 只读态没有开关，用同一行同一字号显示"开/关"，否则这一行会比编辑态塌掉一截。 */
+  .mem-state {
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
   }
   /**
    * ★ 分批第 254 批：列表**限高 + 内部滚动**。

@@ -413,6 +413,19 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.firstCardIsOwn',
+    /**
+     * ★ 分批第 273 批：这一页下面一大串判据都假设"被点开的那张卡是自建 agent"
+     *   （能改角色、能改 CLI、能写记忆）。内置 agent 现在整份只读 ⇒ 一旦探针点错人，
+     *   那些判据会一起变红，而界面其实是对的。所以先把"点开的是自建"这件事量出来，
+     *   红的时候能一眼看出是**前置条件**坏了，而不是界面坏了。
+     */
+    label: '★★ 智能体页：探针点开的那一张是**自建** agent（内置整份只读，判据不能落在它身上）',
+    ok: (v) => v === true,
+    show: (v) => String(v),
+  },
+  {
+    view: '智能体',
     key: 'agents.detailEditableInPlace',
     label: '★ 而卡片里就是能改的控件（角色卡 + 指令框）——"选中即编辑"要真的落成能改，不是换了个空壳',
     ok: (v) => v === true,
@@ -559,6 +572,52 @@ const CHECKS = [
         : `在 ${String(v.present)}　名字「${String(v.name)}」　副题「${String(v.sub)}」　` +
           `按钮 ${JSON.stringify(v.labels ?? [])}　同一条工具条 ${String(v.sameTrack)}　` +
           `旧名称输入框还在 ${String(v.legacyNameInput)}`,
+  },
+  {
+    view: '智能体',
+    key: 'agents.builtinReadOnly',
+    /**
+     * ★ 分批第 273 批（使用者："内置智能体点击后不能修改 ⇒ 保存/删除这些按钮应该是置灰的，
+     *   除了 CLI 之外都不能改"；"我记得内置智能体都是执行智能体，那为什么没看到被选择"）。
+     *
+     * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许），界面就别再摆出能改的样子。
+     * 判据分两半：内置那张卡上量不到**任何一个写入口**，而自建那张卡**照样能改**
+     * （只量前一半的话，"整页只读"这种更糟的坏法也是绿的）。
+     */
+    label:
+      '★★★ 内置智能体**只读**：没有「保存」/「改名」，角色格里显示真实角色（不是执行/审核' +
+      '二选一——内置角色一个都不在那两支里，看起来才像"没被选中"），CLI 与指令都锁住，' +
+      '记忆只给看；而**自建智能体照样能改**',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.found === true &&
+      v.hasSave === false &&
+      v.hasRestore === true &&
+      v.hasCancel === true &&
+      v.rename === false &&
+      String(v.roleBadge ?? '').length > 0 &&
+      v.rolePicker === false &&
+      v.cli === true &&
+      v.instructions === true &&
+      v.memorySwitch === false &&
+      String(v.memoryState ?? '').length > 0 &&
+      v.memoryAdd === false &&
+      // null = 那条内置 agent 没有记忆行 ⇒ 这两项量不到，不参与判定（别让空数组的 every 空过）
+      (v.memRowActions === null || v.memRowActions === false) &&
+      (v.memPinDisabled === null || v.memPinDisabled === true) &&
+      v.ownEditable === true,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `找到 ${String(v.found)}　按钮 ${JSON.stringify(v.headLabels ?? [])}　` +
+          `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　改名入口 ${String(v.rename)}　` +
+          `角色徽标「${String(v.roleBadge)}」　二选一 ${String(v.rolePicker)}　` +
+          `CLI 锁 ${String(v.cli)}　指令锁 ${String(v.instructions)}　` +
+          `记忆开关 ${String(v.memorySwitch)}（状态「${String(v.memoryState)}」）　` +
+          `写入口 ${String(v.memoryAdd)}　记忆 ${String(v.memRows)} 条　` +
+          `行内动作 ${String(v.memRowActions)}　置顶全灰 ${String(v.memPinDisabled)}　` +
+          `自建仍可改 ${String(v.ownEditable)}`,
   },
   {
     view: '智能体',

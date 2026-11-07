@@ -433,7 +433,16 @@
          *    保持"点第一条"，不要改成点起草者：起草者被夹具改挂成了 `generic` runtime，
          *    而下面 `runtimeOptionsNoDefault` 会因此多出一个"(当前)"选项、当场变红。
          */
-        click(cards()[0])
+        /**
+         * ★ 分批第 273 批：**只点自建那一条**，不要点"全表第一条"。
+         *   内置 agent 现在整份只读（没有角色二选一、CLI/指令锁着、保存那栏换成「恢复成默认值」），
+         *   而上面 `listGroups` **故意把内置那组留在展开态**（要量那两行的徽标）⇒ 全表第一条
+         *   是「起草者（内置）」。点它的话，下面一整串"卡片里真的能改"的判据会全红——
+         *   那是判据选错了人，不是界面坏了。
+         */
+        const firstOwn = cards().find((c) => !(text(c) ?? '').includes('（内置）'))
+        facts['agents.firstCardIsOwn'] = !!firstOwn
+        click(firstOwn ?? cards()[0])
         const entered = await until(() => layout()?.className.includes('with-detail'))
         if (!entered) errors.push('点了第一条 agent 之后 .split-layout 没有带上 with-detail')
         facts['agents.afterClickClass'] = need('点击后 class', () => layout()?.className)
@@ -631,6 +640,93 @@
             // 名字的第二个入口：卡片里那个输入框已经删了
             legacyNameInput: d().querySelector('#agent-name') !== null,
           }
+        })()
+
+        /**
+         * ★ 分批第 273 批（使用者："这些内置智能体在我点击之后是不能修改的，那这些保存、删除
+         *   等按钮应该就是置灰的呀，除了 CLI 之外（都不能改）"；以及"我记得内置智能体都是执行
+         *   智能体，那为什么我没有看到被选择"）。
+         *
+         * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许）⇒ 界面上不该出现任何"看起来
+         * 能改"的控件。这里量六件，每件都对应一个当时的真实坏法：
+         *   ① 没有「保存」（留着就是"点了必然 400"的假动作），有「恢复成默认值」与「取消」；
+         *   ② 没有「改名」入口；
+         *   ③ 角色格**不是**执行/审核二选一的选择器，而是它的真实角色徽标
+         *      （内置角色是 drafter / memory-tidy / skill-reviewer，那个选择器两边都不亮，
+         *      看起来就是"没被选中"——使用者第一眼就发现了）；
+         *   ④ CLI 下拉 `disabled`、指令框 `readonly`；
+         *   ⑤ 记忆那节只给看：没有总开关、没有写入口、行内没有编辑/删除，置顶按钮置灰；
+         *   ⑥ **自建 agent 仍然可改**——少了这半，"整页只读"也能让上面全绿。
+         */
+        facts['agents.builtinReadOnly'] = await (async () => {
+          const prevName = String(
+            text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '',
+          )
+          const picked = await selectAgentByName('起草者（内置）')
+          if (!picked) {
+            if (prevName !== '') await selectAgentByName(prevName)
+            return { found: false }
+          }
+          await untilNet(() => !!d().querySelector('.card.agent-card'), 40)
+          const head = d().querySelector('.detail-pane .detail-head')
+          const labels = [...(head?.querySelectorAll('.detail-actions button') ?? [])].map((b) =>
+            (text(b) ?? '').trim(),
+          )
+          const cli = d().querySelector('#agent-runtime')
+          const ta = d().querySelector('#agent-instructions')
+          const memRows = [...d().querySelectorAll('[data-mem-row]')]
+          const out = {
+            found: true,
+            headLabels: labels,
+            hasSave: labels.some((l) => l.includes('保存')),
+            hasRestore: labels.some((l) => l.includes('恢复成默认值')),
+            hasCancel: labels.some((l) => l.includes('取消') || l.includes('关闭')),
+            hasDelete: labels.some((l) => l.includes('删除')),
+            rename: d().querySelector('[data-agent-rename]') !== null,
+            roleBadge: (text(d().querySelector('[data-agent-role-badge]')) ?? '').trim(),
+            rolePicker: d().querySelector('.role-picker') !== null,
+            cli: cli === null ? null : cli.disabled === true,
+            instructions: ta === null ? null : ta.hasAttribute('readonly') === true,
+            memorySwitch: d().querySelector('[data-memory-enabled]') !== null,
+            memoryState: (text(d().querySelector('[data-memory-state]')) ?? '').trim(),
+            memoryAdd: d().querySelector('[data-mem-add]') !== null,
+            // ⚠️ 没有记忆行时这两项**量不到**，返回 null 而不是 true：空数组的 `every`
+            //    会恒真，那正是本仓库反复踩到的"空过"。
+            memRows: memRows.length,
+            memRowActions:
+              memRows.length === 0
+                ? null
+                : memRows.some(
+                    (r) =>
+                      r.querySelector('[data-mem-edit]') !== null ||
+                      r.querySelector('[data-mem-remove]') !== null,
+                  ),
+            memPinDisabled:
+              memRows.length === 0
+                ? null
+                : memRows.every((r) => {
+                    const pin = r.querySelector('[data-mem-pin]')
+                    return pin === null || pin.disabled === true
+                  }),
+          }
+          // 另一半：自建 agent 必须还是能改的（用「助手」，它一定不是内置）
+          const own = await selectAgentByName('助手')
+          const ownCli = d().querySelector('#agent-runtime')
+          const ownTa = d().querySelector('#agent-instructions')
+          const ownHead = d().querySelector('.detail-pane .detail-head')
+          const ownLabels = [...(ownHead?.querySelectorAll('.detail-actions button') ?? [])].map(
+            (b) => (text(b) ?? '').trim(),
+          )
+          out.ownEditable =
+            own === true &&
+            d().querySelector('.role-picker') !== null &&
+            ownCli !== null &&
+            ownCli.disabled === false &&
+            ownTa !== null &&
+            !ownTa.hasAttribute('readonly') &&
+            ownLabels.some((l) => l.includes('保存'))
+          if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
+          return out
         })()
 
         facts['agents.cardNoHoles'] = await (async () => {
@@ -842,6 +938,16 @@
           // ── 用界面拨回去并保存（收尾：后面还有判据要看这一页）──
           const box2 = d().querySelector('[data-agent-memory] [data-memory-enabled]')
           if (box2 && box2.checked !== true) click(box2)
+          /**
+           * ⚠️ 分批第 273 批：**等「保存」真的可点**再点它。没改动的卡片上这颗按钮是
+           *   置灰的（点了也不会有事发生，那是假按钮），而 Svelte 的 `$:` 派生要等一个
+           *   刷新周期才算出来 ⇒ 勾完立刻点，命中的还是那个 `disabled` 的按钮，
+           *   于是"拨回去"永远是 false（探针实测到的就是这一条）。
+           */
+          await untilNet(() => {
+            const b = saveBtn()
+            return b !== undefined && b.disabled !== true
+          }, 40)
           click(saveBtn())
           let restored = false
           for (let i = 0; i < 60 && !restored; i++) {
