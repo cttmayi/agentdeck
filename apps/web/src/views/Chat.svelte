@@ -1378,7 +1378,11 @@
             `/api/voice/*` 是 404，画出来就是一颗点了没反应的按钮）。
         -->
         {#snippet extra()}
-          <VoiceButton ontext={(text) => insertDictation(text)} />
+          <!-- ★ 286 批：把"当前是哪个对话"交给它，daemon 会从这个对话里抽标识符补进 prompt -->
+          <VoiceButton
+            conversationId={activeConversation?.id ?? ''}
+            ontext={(text) => insertDictation(text)}
+          />
         {/snippet}
       </ChatComposer>
         {/if}

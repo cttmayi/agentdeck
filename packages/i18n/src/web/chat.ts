@@ -368,6 +368,20 @@ export const chatText = {
   'chat.voiceSensitivityStable': { zh: '稳（不容易被打断，收尾慢一点）', en: 'Steady (harder to cut off, stops a bit later)' },
   'chat.voiceSensitivityNormal': { zh: '中（默认）', en: 'Normal (default)' },
   'chat.voiceSensitivityQuick': { zh: '快（收尾干脆，句中的停顿可能被当句尾）', en: 'Quick (stops sooner; mid-sentence pauses may end it)' },
+  /**
+   * ★ 分批第 286 批：用**当前对话里的标识符**辅助识别（默认开）。
+   *   说清"它只往 prompt 里补词、不改写任何文本"，否则容易被当成又一个改写层。
+   */
+  'chat.voiceSettingsContext': { zh: '用对话里的词', en: 'Use terms from the chat' },
+  'chat.voiceSettingsContextHint': {
+    zh: '从当前对话里挑出像标识符的词（AgentDeck、whisper.cpp、wiki-capture…）塞进识别提示，让它更容易听对。只补词、不改写文本；手动词表优先。',
+    en: 'Picks identifier-looking words from the current chat (AgentDeck, whisper.cpp, …) into the recognition prompt so they are heard correctly. It only adds hints — it never rewrites your text, and your own term list comes first.',
+  },
+  /** 识别完成的一句回执（286 批；只在真的用上了对话词/纠正过词时才出现）。 */
+  'chat.voiceDoneSummary': {
+    zh: '识别完成：用了 {ctx} 个对话里的词，纠正 {fixed} 处',
+    en: 'Done: {ctx} term(s) from the chat, {fixed} fix(es) applied',
+  },
   'chat.voiceSettingsDenoise': { zh: '降噪', en: 'Noise reduction' },
   'chat.voiceSettingsDenoiseHint': {
     zh: '默认关：它会让轻声变小甚至消失。房间安静就别开。',

@@ -27,6 +27,11 @@ export interface VoiceSettings {
   sensitivity: VoiceSensitivity
   /** 是否开 denoise（decibri 的 fastenhancer）。默认关：它会削掉轻声。 */
   denoise: boolean
+  /**
+   * ★ 分批第 286 批：是否**从当前对话里抽标识符**辅助识别（默认开）。
+   *   它只往 `initialPrompt` 里补词，不改写任何文本；关掉之后手动词表照旧生效。
+   */
+  useContextTerms: boolean
   outputMode: VoiceOutputMode
 }
 
@@ -36,6 +41,7 @@ export const DEFAULT_SETTINGS: VoiceSettings = {
   language: 'zh',
   sensitivity: 'normal',
   denoise: false,
+  useContextTerms: true,
   outputMode: 'input',
 }
 
@@ -88,6 +94,8 @@ export function normalizeSettings(raw: unknown, knownModels: readonly string[]):
     language,
     sensitivity,
     denoise: obj['denoise'] === true,
+    // 默认开：它是"提高识别率"的那一半，而关掉只需要一次点击
+    useContextTerms: obj['useContextTerms'] !== false,
     outputMode,
   }
 }

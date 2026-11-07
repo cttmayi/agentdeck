@@ -30,11 +30,20 @@
   import { refreshVoiceCapability, voiceCapability } from '../lib/voice.ts'
 
   let {
+    /**
+     * ★ 分批第 286 批：这次口述发生在**哪个对话**里。
+     *
+     * 给了它，daemon 会从这个对话里抽"标识符"补进 whisper 的 initialPrompt
+     * （实测：`Agent Deck` 能被听成 `AgentDeck`）；不给就是"没有上下文"，录音照常。
+     * ⚠️ 这里交给它的是**一个 id**，不是对话内容——读哪个对话、读多少，是 daemon 的事。
+     */
+    conversationId = '',
     /** 识别出的文本（**替换过专有名词的**那份）。 */
     ontext,
     /** 录音过程中给调用方的状态（界面可据此禁用输入框之类；现在聊天页用不到）。 */
     onstate,
   }: {
+    conversationId?: string
     ontext: (text: string, meta: { raw: string; corrections: number }) => void
     onstate?: (state: VoiceState) => void
   } = $props()
@@ -50,6 +59,8 @@
     text?: string
     raw?: string
     corrections?: Array<{ from: string; to: string; count: number }>
+    /** 这次真的用上的"对话词"（286 批；没有就是 undefined）。 */
+    contextTerms?: string[]
     error?: string
   }
 
@@ -124,6 +135,15 @@
         level = 0
         if (snap.state === 'done' && snap.text !== undefined) {
           ontext(snap.text, { raw: snap.raw ?? snap.text, corrections: snap.corrections?.length ?? 0 })
+          /**
+           * ★ 286 批：说了什么用上过，就回显什么——"它凭什么这么认得"要能回答。
+           *   toast 一闪而过、不占栏脚高度（285 批定的口径）。
+           */
+          const ctx = snap.contextTerms?.length ?? 0
+          const fixed = snap.corrections?.length ?? 0
+          if (ctx > 0 || fixed > 0) {
+            showToast($t('chat.voiceDoneSummary', { ctx: String(ctx), fixed: String(fixed) }))
+          }
         } else if (snap.state === 'failed') {
           // ★ 285 批：一次性的失败也用 toast——它只该闪一下，不该在栏脚常驻一行
           showToast(snap.error ?? $t('chat.voiceFailedNoReason'))
@@ -155,7 +175,12 @@
       return
     }
     try {
-      const res = await fetch('/api/voice/sessions', { method: 'POST' })
+      const res = await fetch('/api/voice/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // ★ 286 批：只告诉 daemon "这是哪个对话"，让它自己去抽词（不传对话内容）
+        body: JSON.stringify(conversationId === '' ? {} : { context: { conversationId } }),
+      })
       const body = (await res.json()) as Snapshot & { error?: string }
       if (!res.ok) {
         showToast(body.error ?? $t('chat.voiceStartFailed'))

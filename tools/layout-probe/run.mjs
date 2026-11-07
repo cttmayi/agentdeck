@@ -1906,6 +1906,9 @@ const CHECKS = [
       Array.isArray(v.sensitivities) &&
       ['stable', 'normal', 'quick'].every((x) => v.sensitivities.includes(x)) &&
       v.denoise === true &&
+      // 286 批：'用对话里的词'在，而且**默认就是开的**（它是提高识别率的那一半）
+      v.useContext === true &&
+      v.useContextChecked === true &&
       // ★ 281 批：输出方式两档都在（"只回填"必须是默认值，见 `auto-send.ts`）
       Array.isArray(v.outputs) &&
       ['input', 'via-skill'].every((x) => v.outputs.includes(x)) &&
@@ -1917,6 +1920,7 @@ const CHECKS = [
         ? 'null'
         : `在 ${String(v.present)}　模型 ${JSON.stringify(v.models)}　语言 ${JSON.stringify(v.languages)}　` +
           `灵敏度 ${JSON.stringify(v.sensitivities)}　输出 ${JSON.stringify(v.outputs)}　降噪 ${String(v.denoise)}　` +
+          `用对话词 ${String(v.useContext)}（默认开 ${String(v.useContextChecked)}）　` +
           `状态「${String(v.status)}」　下载按钮 ${String(v.hasDownload)}　试录按钮 ${String(v.hasSelftest)}　` +
           `目录 ${String(v.path)}`,
   },

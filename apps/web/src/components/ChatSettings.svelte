@@ -47,6 +47,8 @@
     language: 'zh' | 'en' | 'auto'
     sensitivity: 'stable' | 'normal' | 'quick'
     denoise: boolean
+    /** ★ 286 批：用对话里的标识符辅助识别（默认开）。 */
+    useContextTerms?: boolean
     outputMode: 'input' | 'via-skill'
   }
   interface VoiceModelSpec {
@@ -560,6 +562,17 @@
             >{$t('chat.voiceSensitivityQuick')}</option
           >
         </select>
+      </label>
+      <!-- ★ 286 批：用对话里的标识符辅助识别（默认开；关掉之后手动词表照旧生效） -->
+      <label class="voice-check" title={$t('chat.voiceSettingsContextHint')}>
+        <input
+          type="checkbox"
+          data-voice-context
+          checked={settings?.useContextTerms !== false}
+          onchange={(e) =>
+            void saveSettings({ useContextTerms: (e.currentTarget as HTMLInputElement).checked })}
+        />
+        <span>{$t('chat.voiceSettingsContext')}</span>
       </label>
       <label class="voice-check" title={$t('chat.voiceSettingsDenoiseHint')}>
         <input

@@ -52,6 +52,14 @@ export interface VoiceServiceDeps extends Omit<CapabilityDeps, 'modelId'> {
   clearTimeoutImpl?: typeof clearTimeout
   /** 会话状态变化（SSE / 轮询都靠它；这里只上报，不关心谁听）。 */
   onChange?: (snapshot: SessionSnapshot) => void
+  /**
+   * ★ 分批第 286 批：**从对话里抽词**的那一步由外面注入。
+   *
+   * ⚠️ 为什么不在这里直接读 store：这一层的纪律是"**不认识** store / skill / run"
+   *   （见文件头）——它只知道"麦克风 → 文本"。识字的活儿交给 server 注入进来，
+   *   边界就不动。将来任务页要接，也只需要在这里再开一个入口。
+   */
+  contextProvider?: (conversationId: string) => Promise<string[]>
 }
 
 /** 结束的会话留几条结果给页面轮询（留太久会让内存慢慢长，全丢又会让"刚好在这次轮询
@@ -204,7 +212,7 @@ export class VoiceService {
    * ⚠️ 已经有一个在录 ⇒ **抛错**（路由翻译成 409）。不覆盖、不复用：覆盖会让第一次
    *   录音的音频留在半路（人以为还在录，其实麦克风已经换主人了）。
    */
-  async startSession(): Promise<SessionSnapshot> {
+  async startSession(input: { conversationId?: string } = {}): Promise<SessionSnapshot> {
     if (this.active !== null) {
       throw new Error('已经有一次录音在进行。先停下或取消它，再开新的。')
     }
@@ -213,11 +221,33 @@ export class VoiceService {
       throw new Error(capability.reason)
     }
     const [settings, { vocab }] = await Promise.all([this.settings(), this.vocab()])
+    /**
+     * ★ 286 批：抽"对话里的标识符"塞进 initialPrompt。
+     *
+     * 为什么值得：实测"只放 3 个标识符"时 `AgentDeck`/`distilly` 都听对了（不放则全错）。
+     * 抽不到词（新对话、没有 provider、开关关了）就当没有——**不许因此让录音失败**：
+     * 它只是锦上添花的一层。
+     */
+    let contextTerms: string[] = []
+    if (
+      settings.useContextTerms &&
+      this.deps.contextProvider !== undefined &&
+      input.conversationId !== undefined &&
+      input.conversationId !== ''
+    ) {
+      try {
+        contextTerms = await this.deps.contextProvider(input.conversationId)
+      } catch {
+        // 抽词失败不影响录音：那只是"少一层帮助"
+        contextTerms = []
+      }
+    }
     this.counter += 1
     const session = new VoiceSession({
       id: `voice-${this.counter.toString(36)}-${Date.now().toString(36)}`,
       settings,
       vocab,
+      contextTerms,
       captureFactory: this.deps.captureFactory ?? defaultCaptureFactory,
       getTranscriber: () => this.getTranscriber(settings),
       ...(this.deps.limits === undefined ? {} : { limits: this.deps.limits }),

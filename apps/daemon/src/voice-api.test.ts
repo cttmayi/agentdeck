@@ -59,9 +59,17 @@ function loudFrame(samples = 1600): Int16Array {
   return f
 }
 
-async function withDaemon<T>(fn: (ctx: { url: string; box: ReturnType<typeof fakeCaptureBox> }) => Promise<T>): Promise<T> {
+async function withDaemon<T>(
+  fn: (ctx: {
+    url: string
+    box: ReturnType<typeof fakeCaptureBox>
+    contextCalls: string[]
+  }) => Promise<T>,
+): Promise<T> {
   const dir = await makeTempDir('voice-api')
   const box = fakeCaptureBox()
+  /** 记录"抽词被请求了几次、用的是哪个对话"（286 批）。 */
+  const contextCalls: string[] = []
   const d = await startDaemon({
     dataDir: dir,
     port: 0,
@@ -72,6 +80,14 @@ async function withDaemon<T>(fn: (ctx: { url: string; box: ReturnType<typeof fak
     voiceTranscriberLoader: async () => transcript,
     // 闸调小到 0 之外仍留一点余量，避免"跑完这条测试要等 8 秒"
     voiceLimits: { startWaitMs: 60_000, maxRecordMs: 60_000, noSignalMs: 60_000 },
+    /**
+     * ★ 286 批：抽词那一步由外面注入（voice 层不碰 store）。这里给一份固定词表，
+     *   于是"body 里的 conversationId 有没有被用上"可以直接量。
+     */
+    voiceContextProvider: async (conversationId: string) => {
+      contextCalls.push(conversationId)
+      return ['AgentDeck', 'wiki-capture']
+    },
     /**
      * ⚠️ 这两条注入是**必须**的，不是图省事：真探测的结果取决于跑测试这台机器
      * （有没有预编译包、有没有下过模型）。不注入的话，同一份测试在 macOS 上会走完
@@ -104,7 +120,7 @@ async function withDaemon<T>(fn: (ctx: { url: string; box: ReturnType<typeof fak
     onInfo: () => {},
   })
   try {
-    return await fn({ url: d.url, box })
+    return await fn({ url: d.url, box, contextCalls })
   } finally {
     await d.close()
     await cleanup(dir)
@@ -320,6 +336,65 @@ describe('录音会话', () => {
       assert.equal(snapshot['text'], '用 Whisper 跑一遍语音方案')
       assert.equal(snapshot['raw'], '用微思普跑一遍语音方案')
       assert.deepEqual(snapshot['corrections'], [{ from: '微思普', to: 'Whisper', count: 1 }])
+    })
+  })
+
+  test('★★ 带 `context.conversationId` ⇒ 去抽词，并把用上的词回显在快照里（286 批）', async () => {
+    await withDaemon(async ({ url, box, contextCalls }) => {
+      const started = await json(`${url}/api/voice/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ context: { conversationId: 'conv-1' } }),
+      })
+      assert.equal(started.status, 201, JSON.stringify(started.body))
+      assert.deepEqual(contextCalls, ['conv-1'], '应该用请求里那个 conversationId 去抽词')
+
+      const id = String(started.body['id'])
+      const events = box.events()
+      events?.data(loudFrame())
+      events?.speech()
+      events?.silence()
+      let snapshot: Record<string, unknown> = {}
+      for (let i = 0; i < 40; i += 1) {
+        const res = await json(`${url}/api/voice/sessions/${id}`)
+        snapshot = res.body
+        if (snapshot['state'] === 'done' || snapshot['state'] === 'failed') break
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      assert.equal(snapshot['state'], 'done', JSON.stringify(snapshot))
+      // 回显：这次到底用了哪些"对话词"（界面上敢说"用了 2 个对话里的词"靠它）
+      assert.deepEqual(snapshot['contextTerms'], ['AgentDeck', 'wiki-capture'])
+    })
+  })
+
+  test('★ 不带 context ⇒ 不去抽词（新对话 / 别处调用不该白读一次库）', async () => {
+    await withDaemon(async ({ url, contextCalls }) => {
+      const started = await json(`${url}/api/voice/sessions`, { method: 'POST' })
+      assert.equal(started.status, 201, JSON.stringify(started.body))
+      assert.deepEqual(contextCalls, [])
+      await json(`${url}/api/voice/sessions/${String(started.body['id'])}/cancel`, {
+        method: 'POST',
+      })
+    })
+  })
+
+  test('★ 设置里关掉「用对话里的词」⇒ 即使带了 context 也不去抽词', async () => {
+    await withDaemon(async ({ url, contextCalls }) => {
+      await json(`${url}/api/voice/settings`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ useContextTerms: false }),
+      })
+      const started = await json(`${url}/api/voice/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ context: { conversationId: 'conv-2' } }),
+      })
+      assert.equal(started.status, 201, JSON.stringify(started.body))
+      assert.deepEqual(contextCalls, [])
+      await json(`${url}/api/voice/sessions/${String(started.body['id'])}/cancel`, {
+        method: 'POST',
+      })
     })
   })
 

@@ -9672,6 +9672,10 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 // ★ 分批第 281 批：识别完之后走哪条路（只回填 / 先发一条消息）
                 outputs: optionValues(outputSel),
                 denoise: voiceSec.querySelector('[data-voice-denoise]') !== null,
+                // ★ 286 批：用对话里的标识符辅助识别（默认开）
+                useContext: voiceSec.querySelector('[data-voice-context]') !== null,
+                useContextChecked:
+                  voiceSec.querySelector('[data-voice-context]')?.checked === true,
                 status,
                 hasDownload: voiceSec.querySelector('[data-voice-download]') !== null,
                 hasSelftest: voiceSec.querySelector('[data-voice-selftest]') !== null,

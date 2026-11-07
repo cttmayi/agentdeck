@@ -125,6 +125,36 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 
 ---
 
+## 7.5 用对话里的词辅助识别（批 286）
+
+使用者问："有没有可能用对话的上下文来优化录音识别率？"——可以，但**不是把对话原文塞进去**。
+真模型实测（base-q5_1 + TTS，三句含标识符的话）：
+
+| 条件 | `wiki capture 那条链路` | `distilly 技能` | `agent deck 昨天的任务` | 命中 |
+|---|---|---|---|---|
+| 不带 prompt | `Wiki Capture` | `Distly` | `Agent Deck` | 0/3 |
+| 只放 3 个标识符 | `capturne`（这句崩了） | **`distilly` ✓** | **`AgentDeck` ✓** | 2/3 |
+| 3 个 + 20 个无关词 | `toucher` | `distilly` ✓ | `AgentDeck` ✓ | 2/3 |
+| **上一轮整句话**当 prompt | `Wiki Capture` | `Distley` | `Agent Deck` | **0/3** |
+
+结论：**抽"标识符"有用，塞整段上下文没用**（后者只是噪声）。
+
+实现（`voice/context-terms.ts`，正则 + 词频，**不用 LLM**）：
+- 抽：带分隔符（`whisper.cpp`/`wiki-capture`/`SKILL.md`）、camelCase（`openConversation`）、
+  PascalCase（`AgentDeck`）、缩写（`VAD`）；外加"全小写但不在常见词表里、≥4 字母"的
+  自造词（`distilly`/`whisper`）
+- 不抽：纯中文（没有分词器时最容易误伤）、纯数字、长 hash、常见英文词（一张 300+ 词的
+  白名单反面，`model/test/commit/fine/please` 都在里面）
+- 上限：取最后 20 条消息、最多 12 个词；**手动词表先占 180 字预算**，自动词只填剩下的
+- 接口：`POST /api/voice/sessions { context: { conversationId } }`——只传 id，读库是 daemon 的事；
+  只读 `ChatTurn.userText`（**你说的话**），不读 agent 输出（路径与代码片段会把偏见拉偏）
+- 回显：快照里带 `contextTerms`，识别完成后 toast 说「用了 N 个对话里的词，纠正 M 处」
+- 开关：设置里「用对话里的词」（默认开）。抽词失败**不影响录音**（少一层帮助而已）
+
+两个风险都实测过：**静音 + prompt 会幻觉**（吐"这些人都在这儿。"）——被已有的"2 秒全零
+⇒ 判没声音"那道闸挡住；**prompt 会诱导**（杂词让 `我下午把` 变 `我下无法规及`）——
+所以只放标识符、控预算、可关闭。
+
 ## 8. 踩过的坑（写在这里免得再踩）
 
 **真机验证（2026-11，真模型 + 真 whisper + `say` 合成语音）抓到的两个真缺陷**——它们

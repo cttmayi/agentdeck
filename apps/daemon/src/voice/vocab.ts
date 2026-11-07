@@ -178,8 +178,29 @@ export const PROMPT_CHAR_BUDGET = 180
  *
  * ⚠️ 语言与引导语要一致：给中文模型塞一句英文引导语，会让它倾向于输出英文。
  */
-export function buildPrompt(vocab: VoiceVocab, language: 'zh' | 'en' | 'auto'): string {
-  const terms = vocab.promptTerms.filter((t) => t !== '')
+export function buildPrompt(
+  vocab: VoiceVocab,
+  language: 'zh' | 'en' | 'auto',
+  /**
+   * 从**当前对话**里抽出来的词（分批第 286 批）。
+   *
+   * ⚠️ 顺序有意义：**手动词表先占预算**，自动词只填剩下的——"我自己加的词"永远
+   *   不会被自动抽出来的词挤掉，后者只是补你想不到的标识符。
+   * ⚠️ 与手动词重复的（按小写比）跳过：同一个词进 prompt 两次只会白占 token
+   *   （prompt 顶到上限会被 whisper 静默截断）。
+   */
+  contextTerms: readonly string[] = [],
+): string {
+  const manual = vocab.promptTerms.filter((t) => t !== '')
+  const taken = new Set(manual.map((t) => t.toLowerCase()))
+  const extra: string[] = []
+  for (const term of contextTerms) {
+    const key = term.trim().toLowerCase()
+    if (key === '' || taken.has(key)) continue
+    taken.add(key)
+    extra.push(term)
+  }
+  const terms = [...manual, ...extra]
   if (terms.length === 0) return ''
   const head =
     language === 'en'

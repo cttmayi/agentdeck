@@ -90,6 +90,7 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
 import { VoiceService } from './voice/service.ts'
 import { DEFAULT_ASR_MODEL } from './voice/models.ts'
+import { CONTEXT_MESSAGE_LIMIT, extractContextTerms } from './voice/context-terms.ts'
 import type { CaptureFactory } from './voice/capture.ts'
 import type { SessionLimits } from './voice/session.ts'
 import type { TranscriberLoader } from './voice/transcriber.ts'
@@ -482,6 +483,8 @@ export interface DaemonOptions {
   voiceFetchImpl?: typeof fetch
   /** 会话的几条闸（测试调小，别真的等 8 秒）。 */
   voiceLimits?: Partial<SessionLimits>
+  /** 注入"从对话抽词"（测试不建真对话也能量到这段管线）。 */
+  voiceContextProvider?: (conversationId: string) => Promise<string[]>
   /**
    * 注入"原生模块能不能加载"与"模型状态"（测试用）。
    *
@@ -2184,8 +2187,23 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   的默认值是 CLI 给的 `~/.agentdeck/asr`（与 skills 同一层次，人能直接翻到）。
    */
   const voiceRoot = options.asrRoot ?? join(options.dataDir, 'asr')
+  /**
+   * ★ 分批第 286 批：从**当前对话**里抽标识符（喂 initialPrompt）。
+   *
+   * ⚠️ 只读 `ChatTurn.userText`（**你说的话**），不读 agent 的输出：
+   *   ① 要识别的是你的嘴，同一个词出现在你嘴里才值得提醒模型；
+   *   ② agent 的输出里满是代码片段与路径，进 prompt 只会把偏见拉偏。
+   * ⚠️ 只**读** store，一行都不写（这一层的纪律：不写库、不建 run、不建链接）。
+   */
+  const voiceContextProvider = async (conversationId: string): Promise<string[]> => {
+    const turns = await store.listChatTurns(conversationId as ConversationId)
+    return extractContextTerms(turns.slice(-CONTEXT_MESSAGE_LIMIT).map((t) => t.userText))
+  }
   const voice = new VoiceService({
     asrRoot: voiceRoot,
+    ...(options.voiceContextProvider === undefined
+      ? { contextProvider: voiceContextProvider }
+      : { contextProvider: options.voiceContextProvider }),
     ...(options.asrModelBase === undefined ? {} : { modelBaseUrl: options.asrModelBase }),
     ...(options.voiceCaptureFactory === undefined
       ? {}
@@ -4318,7 +4336,19 @@ async function injectedSkillsOf(
 
     if (path === '/api/voice/sessions' && req.method === 'POST') {
       try {
-        sendJson(res, 201, await voice.startSession())
+        /**
+         * ★ 286 批：请求体可以带 `context.conversationId`——"这次口述是在哪个对话里说的"。
+         *   给了才从那个对话里抽词；不给就是"没有上下文"，录音照常。
+         * ⚠️ 这个字段**不是**"把这段对话发给我"，只是让 daemon 去读它自己的库。
+         */
+        const body = (await readJsonBody(req)) as { context?: { conversationId?: unknown } } | null
+        const conversationId =
+          typeof body?.context?.conversationId === 'string' ? body.context.conversationId : undefined
+        sendJson(
+          res,
+          201,
+          await voice.startSession(conversationId === undefined ? {} : { conversationId }),
+        )
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // 已经在录 ⇒ 409：这是"状态冲突"，不是参数错

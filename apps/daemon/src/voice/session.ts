@@ -57,6 +57,8 @@ export interface SessionSnapshot {
   truncated?: boolean
   model: string
   language: VoiceLanguage
+  /** 这次真的用上的"对话词"（回显用：界面上敢说"用了 5 个对话里的词"）。 */
+  contextTerms?: string[]
   /** 失败原因（state = failed 才有）。 */
   error?: string
 }
@@ -83,6 +85,8 @@ export interface SessionDeps {
   id: string
   settings: VoiceSettings
   vocab: VoiceVocab
+  /** 从当前对话抽出来的词（分批第 286 批；空数组 = 不用上下文）。 */
+  contextTerms?: readonly string[]
   captureFactory: CaptureFactory
   /** 转写器（懒加载：模型可能还没下载 ⇒ 这里抛错就变成一次 failed）。 */
   getTranscriber: () => Promise<Transcriber>
@@ -164,6 +168,9 @@ export class VoiceSession {
       phase: this.state === 'recording' ? this.phase : null,
       model: this.deps.settings.model,
       language: this.deps.settings.language,
+      ...(this.deps.contextTerms === undefined || this.deps.contextTerms.length === 0
+        ? {}
+        : { contextTerms: [...this.deps.contextTerms] }),
       ...(this.endedBy === undefined ? {} : { endedBy: this.endedBy }),
       ...(this.truncated ? { truncated: true } : {}),
       ...(this.text === undefined ? {} : { text: this.text }),
@@ -304,7 +311,11 @@ export class VoiceSession {
       return
     }
 
-    const prompt = buildPrompt(this.deps.vocab, this.deps.settings.language)
+    const prompt = buildPrompt(
+      this.deps.vocab,
+      this.deps.settings.language,
+      this.deps.contextTerms ?? [],
+    )
     let segments: Awaited<ReturnType<Transcriber['transcribe']>>['segments']
     try {
       const result = await withTimeout(
