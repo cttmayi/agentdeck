@@ -634,6 +634,22 @@
         })()
 
         facts['agents.cardNoHoles'] = await (async () => {
+          /**
+           * ★ 第 272 批：**选一个挂着技能的智能体**再量。
+           *   不然"技能列表与指令框同高"那两项永远量不到（没有技能时 `.skill-picker` 不存在），
+           *   而那正是第 255/256 批修的那件事——量不到就等于没守。
+           */
+          if (d().querySelector('.card.agent-card .skill-picker') === null) {
+            await expandAllGroups()
+            const withSkills = [...d().querySelectorAll('.list-row-main')].find((row) => {
+              const t = text(row) ?? ''
+              return /· [1-9]\d* 个技能/.test(t)
+            })
+            if (withSkills) {
+              click(withSkills)
+              await untilNet(() => !!d().querySelector('.card.agent-card .skill-picker'), 40)
+            }
+          }
           const card = d().querySelector('.card.agent-card')
           if (!card) return null
           const kids = [...card.children].filter((el) => {

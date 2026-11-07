@@ -584,10 +584,16 @@ const CHECKS = [
       v.memOwnRow === true &&
       // ★ 第 255 批：并排的两格同高；技能列表填满它、不无缘无故滚
       v.pairSameHeight === true &&
-      v.pickerScrolls === false &&
-      v.pickerFillsCell === true &&
+      /**
+       * ⚠️⚠️ 第 258 批那条技能间距判据写成了 `… && A || B` —— `&&` 比 `||` 结合得紧，
+       *   于是整条断言退化成"**只要 B 成立就通过**"（而 `maxGap` 在没有技能时是 0 ≤ 8）。
+       *   也就是说它从第 258 批起一直在**假绿**：上面那些条件全挂了也照样通过（第 272 批
+       *   改动时才发现——`两个框同高 false` 却仍是绿的）。
+       *   现在括起来；"有没有列表"另外用 `hasPicker` 区分（没有技能时那两项不适用）。
+       */
+      (v.hasPicker !== true || (v.pickerScrolls === false && v.pickerFillsCell === true)) &&
       // ★ 第 258 批：技能选项贴顶排列，相邻两项之间只有 gap（≈4px），不被行拉伸
-      (v.skillRows?.count ?? 0) <= 1 || (v.skillRows?.maxGap ?? 0) <= 8,
+      ((v.skillRows?.count ?? 0) <= 1 || (v.skillRows?.maxGap ?? 0) <= 8),
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'

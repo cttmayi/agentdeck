@@ -848,7 +848,14 @@
           </div>
         </div>
 
-        <label class="cell">
+        <!--
+          ★ 分批第 272 批（使用者："整体布局有变化（指令被挤到右边了）"）：
+          名字上移到标题栏之后，这一格成了"**半行没人陪**"的那一个——网格自动排布会把
+          CLI 放在第 1 列，于是**指令落到第 2 列**（跑到右边），"指令 | 技能"的配对散掉、
+          还空出半个格子。所以 CLI 自己占整行：角色 → CLI → 指令|技能 → 记忆 → 行动权限，
+          每一行都是满的（探针 `agents.cardNoHoles` 钉着这件事）。
+        -->
+        <label class="cell runtime-cell">
           {$t('agents.runtimeRowLabel')}
           <select id="agent-runtime" bind:value={draft.runtimeKey}>
             <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
@@ -1405,6 +1412,7 @@
    *     不许插进任意两格之间——插进去就必然留洞（探针 `agents.cardNoHoles` 会红）。
    */
   .cell.role-cell,
+  .cell.runtime-cell,
   .cell.actions-cell {
     grid-column: 1 / -1;
   }
