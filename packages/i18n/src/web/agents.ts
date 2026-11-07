@@ -33,6 +33,22 @@ export const agentsText = {
     en: 'Shipped with the platform: read-only. Use "Restore default" to go back to the platform version.',
   },
   'agents.renamePending': { zh: '（未保存）', en: '(unsaved)' },
+  /**
+   * ★ 分批第 274 批（使用者定方案 A："内置和自建在呈现方式上行为不同一" ⇒ 同一套骨架、
+   *   只读的就锁住）。只读控件右上角那枚小字与其余只读文案都从这里来。
+   */
+  'agents.lockReadOnly': { zh: '只读', en: 'read-only' },
+  /** 角色格右边那张卡：告诉人这一维为什么不能被选（内置角色不在这条业务链上）。 */
+  'agents.roleFixed': { zh: '平台固定', en: 'Set by the platform' },
+  'agents.roleFixedHint': {
+    zh: '内置智能体只在平台自己发起的那一轮里干活（起草沉淀技能 / 整理记忆），所以它不在「执行 / 审核」这条业务链上——派活、进组、聊天都轮不到它。',
+    en: 'Built-in agents only run when the platform starts them (drafting a skill, tidying memory) — they are not part of the task → review → action chain, so they take no tasks, join no groups and have no chat.',
+  },
+  'agents.roleDescDrafter': { zh: '把一段经验写成 skill', en: 'Turns an experience into a skill' },
+  'agents.roleDescMemoryTidy': { zh: '把对话里的话整理成记忆', en: 'Turns a conversation into memories' },
+  'agents.roleDescSkillReviewer': { zh: '审起草出来的 skill（已下线）', en: 'Audits drafted skills (retired)' },
+  /** 只读态的写入口：输入框里那句占位说明它不是坏了，是不能写。 */
+  'agents.memoryAddLocked': { zh: '内置智能体不能手写记忆（由平台维护）', en: 'Built-in agents take no hand-written memories' },
   'agents.saveTitle': { zh: '保存改动（记忆也在这里一起提交）', en: 'Save changes (memory is submitted here too)' },
   /** 副题一行：`CLI：claude · 记忆 3 条 · 2 个技能`。 */
   'agents.headSub': {
@@ -538,11 +554,14 @@ export const agentsText = {
     zh: '平台替它挂的：装/卸这条技能时自动对齐（内置智能体只读，不能手改）',
     en: 'Mounted by the platform: it follows install/uninstall (built-in agents are read-only)',
   },
+  'agents.drafterSkillMissingHintNamed': {
+    zh: '还没装「{slug}」：去「沉淀」页右上角的「沉淀设置」里一键安装，装好之后会自动挂上',
+    en: '"{slug}" is not installed: install it from Crystallize → Settings; it will be mounted automatically',
+  },
   'agents.drafterSkillMissingHint': {
     zh: '还没装：去「沉淀」页右上角的「沉淀设置」里一键安装，装好之后会自动挂上',
     en: 'Not installed: install it from Crystallize → Settings; it will be mounted automatically',
   },
-  'agents.skillNotInstalled': { zh: '（未安装）', en: ' (not installed)' },
   /**
    * ★ 分批第 208 批（使用者定："留两处"）：安装入口 = 「沉淀设置」+ **智能体页这一格**。
    * 两处装的是同一个上游地址（`DISTILLY_SOURCE`）、走同一个接口，装完 daemon 自动挂上。
@@ -550,10 +569,6 @@ export const agentsText = {
   'agents.skillInstallNow': { zh: '一键安装', en: 'Install now' },
   'agents.skillInstallDone': { zh: '已安装「沉淀用技能」，并自动挂到起草者身上', en: 'Installed the crystallization skill and mounted it on the drafter' },
   'agents.skillInstallFailed': { zh: '安装失败：{error}', en: 'Install failed: {error}' },
-  'agents.builtinNoSkills': {
-    zh: '内置智能体不挂 skill（它们做什么由平台随版本给，与挂载无关）',
-    en: 'Built-in agents mount no skills (what they do ships with the platform)',
-  },
   'agents.restoreDefault': { zh: '恢复成默认值', en: 'Restore default' },
   'agents.restoreDefaultTitle': { zh: '恢复成默认值？', en: 'Restore default?' },
   'agents.restoreDefaultBody': {

@@ -452,9 +452,18 @@
     if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
     return $t('agents.roleExecutor')
   }
-  /** 只读态下的角色徽标颜色（与列表里那套一致）。 */
-  function roleBadgeOf(a: Agent): string {
-    return a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'
+  /**
+   * 只读态那张角色卡的第二行：这个角色**干什么**。
+   *
+   * 与自建那两张卡的结构对齐（都是"名字 + 一句说明"）——但内置这三个角色的语义
+   * 不是"派活给它/别人产出交给它判"，所以文案也得说它们自己的事（起草 = 把经验
+   * 写成 skill；整理记忆 = 把对话里的话整理成候选；沉淀审核 = 审起草出来的 skill）。
+   */
+  function roleDescOf(a: Agent): string {
+    if (a.role === 'drafter') return $t('agents.roleDescDrafter')
+    if (a.role === 'memory-tidy') return $t('agents.roleDescMemoryTidy')
+    if (a.role === 'skill-reviewer') return $t('agents.roleDescSkillReviewer')
+    return $t('agents.roleExecutorHint')
   }
 
   function cancelEdit(): void {
@@ -886,13 +895,28 @@
           <span class="cell-label">{$t('agents.roleLabel')}</span>
           {#if readOnly}
             <!--
-              ★ 分批第 273 批（使用者："我记得内置智能体都是执行智能体，我怎么没看到被选择"）：
-              内置 agent 的角色是 `drafter` / `memory-tidy` / `skill-reviewer`，**不是**执行/审核
-              二选一 ⇒ 那个两按钮选择器对它两边都不亮，看起来"没被选中"。只读态直接显示真实角色。
+              ★ 分批第 273/274 批：内置 agent 的角色是 `drafter` / `memory-tidy` /
+              `skill-reviewer`，**不是**执行/审核二选一 ⇒ 那个两按钮选择器对它两边都不亮，
+              看起来"没被选中"（使用者第一眼就发现了这一点）。
+              ★ 274 批的修法（方案 A，"同一套骨架、锁住"）：**仍然占两张卡的位置**，
+              但两张都不可点——左边是它真实角色的那张（静态、加亮，等价于"选中"），
+              右边用同样大小的卡说清"这一维由平台固定、为什么"。这样它与自建逐格对齐，
+              又不会摆出一个点了没反应的按钮。
             -->
-            <div class="role-readonly" data-agent-role-badge>
-              <span class="badge {roleBadgeOf(agent)}">{roleLabelOf(agent)}</span>
-              <span class="faint small">{$t('agents.builtinReadOnly')}</span>
+            <div class="role-picker" data-agent-role-static>
+              <!-- ⚠️ 每张卡**只留一行字**（副说明进 `title`）——与自建那两张完全同款
+                   （269 批就是这么精简的）。两行字会让内置那张比自建高出一行，而"同一套
+                   骨架"在探针 `agents.builtinParity` 里是拿角色卡高度量的（实测 69 vs 58）。 -->
+              <div
+                class="role-card static active"
+                data-agent-role-badge
+                title={roleDescOf(agent)}
+              >
+                <strong>{roleLabelOf(agent)}</strong>
+              </div>
+              <div class="role-card static" title={$t('agents.roleFixedHint')}>
+                <strong>{$t('agents.roleFixed')}</strong>
+              </div>
             </div>
           {:else}
           <div class="role-picker">
@@ -932,6 +956,8 @@
         <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
           <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
+          <span class="field">
+            {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
           <select id="agent-runtime" bind:value={draft.runtimeKey} disabled={readOnly}>
             <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
                  agent 记的就是它，不给这一项的话下拉会落到第一个具体 runtime ——
@@ -958,6 +984,7 @@
               <option value={draft.runtimeKey}>{$t('agents.runtimeCurrent', { key: draft.runtimeKey })}</option>
             {/if}
           </select>
+          </span>
           {#if evidenceWarnings[draft.runtimeKey]}
             <p class="row-hint warn">{evidenceWarnings[draft.runtimeKey]}</p>
           {/if}
@@ -967,6 +994,8 @@
           {$t('agents.instructionsLabel')}
           <!-- ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
                指令是一份几百到上千字的文档，不是一行备注。 -->
+          <span class="field">
+            {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
           <textarea
             id="agent-instructions"
             class="instructions"
@@ -975,6 +1004,7 @@
             bind:value={draft.instructions}
             rows="6"
           ></textarea>
+          </span>
           <!--
             ★ 分批第 254 批（使用者："文字解释太多，不需要写那么细致"）：原来这里是**两行**
             说明（"这一段就是它的「指令」：平台每派一次活都会带上它（不用你在别处再配一遍）。
@@ -998,30 +1028,45 @@
 
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
+          <!--
+            ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
+            起草者的**沉淀用技能真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
+            "内置不挂 skill"——它挂什么，起草 run 就注入什么。挂载由平台维护（装/卸技能、
+            daemon 启动时对齐）。
+            ★ 分批第 274 批（使用者："内置和自建在呈现方式上行为不同一"，选定方案 A
+              "同一套控件、锁住"）：这一格原来是一列 chip，与自建的两列勾选框骨架不同。
+              现在**用同一个 `.skill-picker`**、同一套选项，只是勾选框 `disabled`：
+              勾着的就是平台替它挂的。骨架对齐 + "它挂了什么"仍然一眼看得见。
+          -->
           {#if agent.builtin}
-            <!--
-              ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
-              起草者的**沉淀用技能现在真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
-              "内置不挂 skill"——它挂什么，起草 run 就注入什么。
-              ⚠️ 内置 agent 仍然只读（分批第 190 批）：这一格是**展示**，挂载由平台维护
-                （装/卸技能、daemon 启动时对齐）。
-            -->
+            {#if pickableSkills.length > 0}
+              <div class="skill-picker locked" data-skill-picker-locked>
+                {#each pickableSkills as s (s.id)}
+                  <label class="skill-option">
+                    <input
+                      type="checkbox"
+                      checked={agent.skillIds.includes(s.id)}
+                      disabled
+                    />
+                    <span title={s.localDir ?? s.slug}
+                      >{s.name}{#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}</span
+                    >
+                  </label>
+                {/each}
+              </div>
+            {:else}
+              <p class="empty-value">{$t('agents.noSkillsYet')}</p>
+            {/if}
             {#if agent.role === 'drafter'}
-              {@const mounted = $skills.filter((sk) => agent.skillIds.includes(sk.id))}
-              {#if mounted.length > 0}
-                <p class="builtin-skills">
-                  {#each mounted as sk (sk.id)}
-                    <span class="skill-chip">{sk.name}</span>
-                  {/each}
-                </p>
-                <span class="hint">{$t('agents.drafterSkillHint')}</span>
-              {:else}
-                <p class="builtin-skills">
-                  <span class="skill-chip missing"
-                    >{expectedDrafterSkill}{$t('agents.skillNotInstalled')}</span
-                  >
-                </p>
-                <span class="hint">{$t('agents.drafterSkillMissingHint')}</span>
+              {#if agent.skillIds.length === 0}
+                <!-- 只有起草者这一格能**动手**（装那条沉淀技能），而且这是平台给的动作，
+                     不是"改它"。装完 daemon 自己挂上——所以按钮留着。 -->
+                <!-- 有 slug 就点名（"还没装 distilly"），老 daemon 不带就只有通用那句 -->
+                <span class="hint">
+                  {expectedDrafterSkill === ''
+                    ? $t('agents.drafterSkillMissingHint')
+                    : $t('agents.drafterSkillMissingHintNamed', { slug: expectedDrafterSkill })}
+                </span>
                 <button
                   type="button"
                   class="ghost small"
@@ -1029,9 +1074,9 @@
                   disabled={installingSkill}
                   onclick={() => void installDrafterSkill()}
                 >{installingSkill ? $t('common.saving') : $t('agents.skillInstallNow')}</button>
+              {:else}
+                <span class="hint">{$t('agents.drafterSkillHint')}</span>
               {/if}
-            {:else}
-              <p class="empty-value">{$t('agents.builtinNoSkills')}</p>
             {/if}
           {:else if $skills.length === 0}
             <p class="empty-value">{$t('agents.noSkillsYet')}</p>
@@ -1097,35 +1142,44 @@
                 已有的条目**不删**，只是暂时不用——所以关掉之后这一节照样列出来，
                 但整节压暗、写入口收起来，并且明说"不会被带进第一句话"。
             -->
-            {#if readOnly}
-              <!-- 内置 agent 整份只读（服务端连 PATCH 都拒），开关摆出来只会让人白点。 -->
-              <span class="mem-state" data-memory-state
-                >{draft.memoryEnabled
-                  ? $t('agents.headMemoryOn', { n: String(activeMemRows.length) })
-                  : $t('agents.headMemoryOff')}</span
-              >
-            {:else}
-            <label class="mem-switch" title={$t('agents.memoryEnabledHint')}>
+            <!--
+              ★ 分批第 274 批（方案 A）：只读态**不再把这颗开关换成一行灰字**——那样这一
+                行的高度与控件位置都和自建不一样。现在开关还在原位，只是锁住：
+                看得见"它是开是关"，也不会去想"怎么少了这颗"。
+            -->
+            <label
+              class="mem-switch"
+              class:locked={readOnly}
+              title={readOnly ? $t('agents.builtinReadOnly') : $t('agents.memoryEnabledHint')}
+            >
               <!--
                 ⚠️ 必须用 `bind:checked`，不能写 `checked={…}` + `onchange` 里赋值：
                    在这一页（legacy 反应式）里 `draft.memoryEnabled = x` **不会**触发重渲染，
                     于是勾掉之后"记下一条"那一行还在——探针量到 `addGone:false`，而
                     手点界面的人只会觉得"这个开关没用"。`bind:` 才会生成 `$$invalidate`。
               -->
-              <input type="checkbox" data-memory-enabled bind:checked={draft.memoryEnabled} />
+              <input
+                type="checkbox"
+                data-memory-enabled
+                bind:checked={draft.memoryEnabled}
+                disabled={readOnly}
+              />
               <span>{$t('agents.memoryEnabled')}</span>
             </label>
-            {/if}
             <!--
               ★ 分批第 260 批：「合并同类…」——让整理者读**它的全部记忆**，把同义的并成一条、
                 把过时的标成"忘掉"，摆给人确认。比手工删十几条现实得多。
                 只在"记忆开着 + 至少两条"时出现：一条没什么可并的，关着则根本不该动。
             -->
-            {#if !readOnly && draft.memoryEnabled && activeMemRows.length >= 2}
+            {#if draft.memoryEnabled && activeMemRows.length >= 2}
+              <!-- ★ 274 批：只读态**灰着**而不是消失（方案 A：控件留在原位，只是锁住）。 -->
               <button
                 type="button"
                 class="btn-link"
+                class:locked={readOnly}
                 data-memory-consolidate
+                disabled={readOnly}
+                title={readOnly ? $t('agents.builtinReadOnly') : ''}
                 onclick={() => (consolidateOpen = true)}
               >{$t('agents.memoryConsolidate')}</button>
             {/if}
@@ -1186,47 +1240,78 @@
                     <span class="mem-text" title={memTitleFor(row)}>{row.text}</span>
                   {/if}
                   <span class="mem-meta">{memMetaFor(row)}</span>
-                  {#if !readOnly}
                   <span class="mem-actions">
                     {#if row.drop}
-                      <button type="button" class="btn-mini" data-mem-undo onclick={() => undropRow(row)}>
+                      <button
+                        type="button"
+                        class="btn-mini"
+                        data-mem-undo
+                        disabled={readOnly}
+                        onclick={() => undropRow(row)}
+                      >
                         {$t('agents.memoryUndo')}
                       </button>
                     {:else}
                       {#if row.id !== null}
-                        <button type="button" class="btn-mini" data-mem-edit onclick={() => editRow(row)}>
+                        <button
+                          type="button"
+                          class="btn-mini"
+                          data-mem-edit
+                          disabled={readOnly}
+                          title={readOnly ? $t('agents.builtinReadOnly') : ''}
+                          onclick={() => editRow(row)}
+                        >
                           {$t('agents.memoryEdit')}
                         </button>
                       {/if}
-                      <button type="button" class="btn-mini" data-mem-remove onclick={() => removeRow(row)}>
+                      <button
+                        type="button"
+                        class="btn-mini"
+                        data-mem-remove
+                        disabled={readOnly}
+                        title={readOnly ? $t('agents.builtinReadOnly') : ''}
+                        onclick={() => removeRow(row)}
+                      >
                         {$t('agents.memoryRemove')}
                       </button>
                     {/if}
                   </span>
-                  {/if}
                 </div>
               {/each}
             </div>
           {/if}
 
-          {#if draft.memoryEnabled && !readOnly}
-          <div class="mem-add">
-            <select bind:value={memNewKind} aria-label={$t('agents.memoryKindLabel')} data-mem-new-kind>
+          {#if draft.memoryEnabled}
+          <div class="mem-add" class:locked={readOnly}>
+            <select
+              bind:value={memNewKind}
+              aria-label={$t('agents.memoryKindLabel')}
+              data-mem-new-kind
+              disabled={readOnly}
+            >
               {#each MEMORY_KINDS_UI as k (k)}
                 <option value={k}>{$t(`agents.memoryKind.${k}` as never)}</option>
               {/each}
             </select>
             <input
               bind:value={memNewText}
-              placeholder={$t('agents.memoryAddPlaceholder')}
+              placeholder={readOnly ? $t('agents.memoryAddLocked') : $t('agents.memoryAddPlaceholder')}
               aria-label={$t('agents.memoryTextLabel')}
               data-mem-new-text
               autocomplete="off"
+              disabled={readOnly}
               onkeydown={(e) => {
                 if (e.key === 'Enter') addRow()
               }}
             />
-            <button type="button" class="btn-small" data-mem-add disabled={memNewText.trim() === ''} onclick={addRow}>
+            <button
+              type="button"
+              class="btn-small"
+              data-mem-add
+              disabled={readOnly || memNewText.trim() === ''}
+              title={readOnly ? $t('agents.builtinReadOnly') : ''}
+              onclick={addRow}
+            >
               {$t('agents.memoryAdd')}
             </button>
           </div>
@@ -1369,26 +1454,6 @@
     align-items: start;
   }
 
-  /* ★ 分批第 207 批：内置起草者挂的那条「沉淀用技能」（展示，不可编辑） */
-  .builtin-skills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-1);
-    margin: 0 0 var(--sp-1);
-  }
-  .skill-chip {
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--surface-2);
-    padding: 2px 8px;
-    font-size: var(--fs-sm);
-  }
-  /* 未安装：虚线框 + 弱化（"应该挂但没装"，不是一条真技能） */
-  .skill-chip.missing {
-    border-style: dashed;
-    color: var(--text-faint);
-    background: transparent;
-  }
   .skills-cell .hint {
     font-size: var(--fs-xs);
     color: var(--text-faint);
@@ -1548,18 +1613,66 @@
   }
 
   /**
-   * ★ 分批第 273 批：只读的指令框**不压暗文字**（它是给人读的，读的人比写的人多），
-   *   只把底色与光标换成"不可编辑"的样子——`readonly` 保留了选中/复制/滚动，
-   *   用 `disabled` 会连滚动一起废掉长指令的后半段。
+   * ★ 分批第 273/274 批：只读的指令框**不压暗文字**（它是给人读的，读的人比写的人多），
+   *   只换底色与边框：`readonly` 保留了选中/复制/滚动，用 `disabled` 会连滚动一起废掉
+   *   长指令的后半段。虚线边框 + 右上角那枚「只读」是 274 批统一的"锁住"语言
+   *   （与 CLI 下拉、技能勾选框、记忆写入口同一套）。
    */
   .instructions.locked {
     background: var(--surface-2);
+    border-style: dashed;
+    color: var(--text-dim);
     cursor: default;
+    resize: none;
   }
 
-  /* CLI 那一格没有单独的只读外观，整格压暗一档就够（与「内置」技能那格同一手法）。 */
-  .runtime-cell.locked {
-    opacity: 0.75;
+  /**
+   * ★ 分批第 274 批：只读控件的统一"锁"语言。
+   *
+   *   `.field` 只是一个定位壳（虚线 + 小锁要贴在控件右上角），`.lockmark` 是那枚
+   *   小字。为什么要它：只读态原来只靠"灰一点"表达，而 `disabled` 的 select 与
+   *   可选的 select 差别小到看不出来（使用者第一次就以为是能选的）。
+   */
+  .field {
+    position: relative;
+    display: block;
+  }
+
+  .lockmark {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    z-index: 1;
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    pointer-events: none;
+  }
+
+  .runtime-cell select:disabled {
+    background: var(--surface-2);
+    border-style: dashed;
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+
+  /* 内置那一格的技能列表：同一个 `.skill-picker` 骨架，只是勾选框锁着 */
+  .skill-picker.locked {
+    background: var(--surface-2);
+    border-style: dashed;
+  }
+
+  .skill-picker.locked .skill-option {
+    cursor: not-allowed;
+    color: var(--text-dim);
+  }
+
+  .skill-picker.locked .skill-option input {
+    cursor: not-allowed;
   }
 
   /* ── 编辑控件 ── */
@@ -1616,28 +1729,34 @@
   }
 
   /**
-   * ★ 分批第 273 批：只读态的角色（内置 agent 的角色不是执行/审核二选一）。
-   *   与 `.role-picker` 的两张卡不同高，所以不能共用同一格：这里只要一行徽标 + 一句
-   *   "内置只读"的灰字，竖排对齐 `align-items: baseline` 免得徽标比文字飘高半行。
+   * ★ 分批第 274 批（方案 A）：只读态的角色卡——**与自建那两张同尺寸**，只是不可点。
+   *   第一张是它真实角色的那张（`.active` 的样子 = "选中的就是它"），第二张说清
+   *   "这一维由平台固定、为什么"。这样两栏逐格对齐，也不会摆出点了没反应的按钮。
    */
-  .role-readonly {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--sp-2);
-    margin-top: 2px;
+  .role-card.static {
+    cursor: default;
+    background: var(--surface-2);
   }
+
 
   .role-card {
     display: flex;
     flex-direction: column;
     gap: 2px;
     align-items: flex-start;
+    justify-content: center;
     text-align: left;
     padding: var(--sp-3);
     background: var(--bg);
     border: 1px solid var(--line-strong);
     color: var(--text-dim);
+    /**
+     * ★ 分批第 274 批：**固定最小高度**，否则"同一套骨架"是空话。
+     *   自建那两张卡只有一行字（269 批把副说明挪进 `title`），而内置的角色卡是
+     *   "名字 + 一句它在干什么"两行 ⇒ 不加这一条，内置那张会高出一行，两栏在角色格
+     *   这一行就对不齐了（这正是使用者说的"呈现方式不同一"）。
+     */
+    min-height: 3.6rem;
   }
 
   .role-card strong {
@@ -1701,10 +1820,43 @@
     margin: 0;
   }
 
-  /* 只读态没有开关，用同一行同一字号显示"开/关"，否则这一行会比编辑态塌掉一截。 */
-  .mem-state {
-    font-size: var(--fs-xs);
+  /* ★ 274 批：只读态的记忆开关留在原位，只是锁住（不再换成一行灰字）。 */
+  .mem-switch.locked {
+    cursor: not-allowed;
+    color: var(--text-faint);
+  }
+
+  .mem-switch.locked input {
+    cursor: not-allowed;
+  }
+
+  .mem-add.locked select,
+  .mem-add.locked input {
+    background: var(--surface-2);
+    border-style: dashed;
     color: var(--text-dim);
+    cursor: not-allowed;
+  }
+
+  .mem-add.locked .btn-small {
+    border-style: dashed;
+    color: var(--text-faint);
+    background: transparent;
+    cursor: not-allowed;
+  }
+
+  /* 行内动作在只读态原地灰掉（虚线框），行高与列宽不变 */
+  .mem-actions .btn-mini:disabled {
+    border-style: dashed;
+    color: var(--text-faint);
+    background: transparent;
+    cursor: not-allowed;
+  }
+
+  .btn-link.locked,
+  .btn-link:disabled {
+    color: var(--text-faint);
+    cursor: not-allowed;
   }
   /**
    * ★ 分批第 254 批：列表**限高 + 内部滚动**。

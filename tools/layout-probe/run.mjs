@@ -577,47 +577,79 @@ const CHECKS = [
     view: '智能体',
     key: 'agents.builtinReadOnly',
     /**
-     * ★ 分批第 273 批（使用者："内置智能体点击后不能修改 ⇒ 保存/删除这些按钮应该是置灰的，
-     *   除了 CLI 之外都不能改"；"我记得内置智能体都是执行智能体，那为什么没看到被选择"）。
+     * ★ 分批第 273/274 批（使用者："内置智能体点击后不能修改 ⇒ 保存/删除这些按钮应该是置灰的"；
+     *   "我记得内置智能体都是执行智能体，那为什么没看到被选择"；最后定："内置和自建在呈现方式上
+     *   行为不同一" ⇒ **方案 A：同一套骨架，只读的锁住**）。
      *
-     * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许），界面就别再摆出能改的样子。
-     * 判据分两半：内置那张卡上量不到**任何一个写入口**，而自建那张卡**照样能改**
-     * （只量前一半的话，"整页只读"这种更糟的坏法也是绿的）。
+     * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许）。这一条量"锁住了"，并且
+     * 274 批起还量"**没有缩水**"：开关 / 写入口 / 行内改删 / 技能勾选框都还在原位，
+     * 只是 `disabled`——当初那版是直接把它们拿掉，于是内置那一侧矮一截、行宽也不同。
+     * 另一半量自建：只量前者的话，"整页都只读"这种更糟的坏法也是绿的。
      */
     label:
-      '★★★ 内置智能体**只读**：没有「保存」/「改名」，角色格里显示真实角色（不是执行/审核' +
-      '二选一——内置角色一个都不在那两支里，看起来才像"没被选中"），CLI 与指令都锁住，' +
-      '记忆只给看；而**自建智能体照样能改**',
+      '★★★ 内置智能体**只读但不缩水**：没有「保存」/「改名」（有「恢复成默认值」+「关闭」），' +
+      '角色格仍是两张卡但都不是按钮（显示真实角色，不是执行/审核二选一），CLI 与指令锁着并带「只读」标，' +
+      '技能的勾选框、记忆的开关/写入口/行内改删都还在原位只是锁住；而**自建仍然能改**',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
       v.found === true &&
       v.hasSave === false &&
       v.hasRestore === true &&
-      v.hasCancel === true &&
+      v.hasLeave === true &&
       v.rename === false &&
+      v.roleCards === 2 &&
+      v.roleButtons === 0 &&
       String(v.roleBadge ?? '').length > 0 &&
-      v.rolePicker === false &&
-      v.cli === true &&
-      v.instructions === true &&
-      v.memorySwitch === false &&
-      String(v.memoryState ?? '').length > 0 &&
-      v.memoryAdd === false &&
-      // null = 那条内置 agent 没有记忆行 ⇒ 这两项量不到，不参与判定（别让空数组的 every 空过）
-      (v.memRowActions === null || v.memRowActions === false) &&
-      (v.memPinDisabled === null || v.memPinDisabled === true) &&
+      v.cliDisabled === true &&
+      v.instructionsReadonly === true &&
+      v.lockMarks >= 2 &&
+      v.memorySwitch === true &&
+      v.memorySwitchDisabled === true &&
+      // 写入口的有无**只跟开关走**（关着就没有，自建也一样）：内置与否不改变这条规则
+      v.memoryAdd === v.memoryOn &&
+      (v.memoryAdd === false || v.memoryAddDisabled === true) &&
+      // 上面那段 fixture 会给这条内置 agent 造一条记忆 ⇒ 这三项**必须**真的有东西可量
+      // （写成 `null || …` 就成了空过，这正是本仓库反复踩到的那类假绿）
+      v.memRows >= 1 &&
+      v.memRowActions === true &&
+      v.memRowActionsDisabled === true &&
+      v.memPinDisabled === true &&
+      v.skillPickerLocked === true &&
+      v.skillBoxesDisabled === true &&
       v.ownEditable === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `找到 ${String(v.found)}　按钮 ${JSON.stringify(v.headLabels ?? [])}　` +
-          `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　改名入口 ${String(v.rename)}　` +
-          `角色徽标「${String(v.roleBadge)}」　二选一 ${String(v.rolePicker)}　` +
-          `CLI 锁 ${String(v.cli)}　指令锁 ${String(v.instructions)}　` +
-          `记忆开关 ${String(v.memorySwitch)}（状态「${String(v.memoryState)}」）　` +
-          `写入口 ${String(v.memoryAdd)}　记忆 ${String(v.memRows)} 条　` +
-          `行内动作 ${String(v.memRowActions)}　置顶全灰 ${String(v.memPinDisabled)}　` +
+          `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　关闭 ${String(v.hasLeave)}　` +
+          `改名入口 ${String(v.rename)}　角色卡 ${String(v.roleCards)} 张 / 其中按钮 ${String(v.roleButtons)}　` +
+          `角色「${String(v.roleBadge)}」　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
+          `「只读」标 ${String(v.lockMarks)} 处　记忆开关 ${String(v.memorySwitch)}（开着 ${String(v.memoryOn)} / 锁 ${String(v.memorySwitchDisabled)}）　` +
+          `写入口 ${String(v.memoryAdd)}（锁 ${String(v.memoryAddDisabled)}）　记忆 ${String(v.memRows)} 条　` +
+          `行内动作 ${String(v.memRowActions)}（锁 ${String(v.memRowActionsDisabled)}）　` +
+          `置顶全灰 ${String(v.memPinDisabled)}　技能骨架锁 ${String(v.skillPickerLocked)}` +
+          `（${String(v.skillBoxes)} 个勾选框全灰 ${String(v.skillBoxesDisabled)}）　` +
           `自建仍可改 ${String(v.ownEditable)}`,
+  },
+  {
+    view: '智能体',
+    key: 'agents.builtinParity',
+    /**
+     * ★ 分批第 274 批：使用者说的是"**呈现方式**不同一"。上面那条量的是"锁没锁对"，
+     *   这一条量"两边**骨架是否同一套**"——同一批选择器在内置那张卡与自建那张卡上都在，
+     *   角色格也同样是两张卡。只挑不随数据变的那几样（技能/记忆行数取决于那个 agent 的
+     *   数据，拿它们比会把"数据不同"当"骨架不同"）。
+     */
+    label:
+      '★★ 内置 / 自建**同一套骨架**：角色格都是两张卡，CLI、指令、记忆节、记忆开关四处结构一致' +
+      '（方案 A 的定义——不同只体现在"锁着"，不体现在"少一块"）',
+    ok: (v) => v !== null && typeof v === 'object' && v.found === true && Array.isArray(v.differs) && v.differs.length === 0 && v.builtin?.roleCards === 2,
+    show: (v) =>
+      v === null || typeof v !== 'object'
+        ? 'null'
+        : `骨架 ${JSON.stringify(v.builtin ?? null)}　自建 ${JSON.stringify(v.own ?? null)}　` +
+          `不同处 ${JSON.stringify(v.differs ?? [])}`,
   },
   {
     view: '智能体',

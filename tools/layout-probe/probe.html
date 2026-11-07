@@ -643,31 +643,77 @@
         })()
 
         /**
-         * ★ 分批第 273 批（使用者："这些内置智能体在我点击之后是不能修改的，那这些保存、删除
-         *   等按钮应该就是置灰的呀，除了 CLI 之外（都不能改）"；以及"我记得内置智能体都是执行
-         *   智能体，那为什么我没有看到被选择"）。
+         * ★ 分批第 273/274 批（使用者："这些内置智能体在我点击之后是不能修改的，那这些保存、删除
+         *   等按钮应该就是置灰的"；"我记得内置智能体都是执行智能体，那为什么我没有看到被选择"；
+         *   最后定了"内置和自建在呈现方式上行为不同一"⇒ 采用**方案 A：同一套骨架、只读的锁住**）。
          *
-         * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许）⇒ 界面上不该出现任何"看起来
-         * 能改"的控件。这里量六件，每件都对应一个当时的真实坏法：
-         *   ① 没有「保存」（留着就是"点了必然 400"的假动作），有「恢复成默认值」与「取消」；
+         * 服务端**整份拒绝**内置 agent 的 PATCH（连 CLI 也不许）⇒ 界面上不该出现任何"点了
+         * 就会 400"的东西。这一条量的是"锁住了"，并且逐件对着当时的真实坏法：
+         *   ① 没有「保存」（留着就是假动作），有「恢复成默认值」与「关闭／取消」；
          *   ② 没有「改名」入口；
-         *   ③ 角色格**不是**执行/审核二选一的选择器，而是它的真实角色徽标
-         *      （内置角色是 drafter / memory-tidy / skill-reviewer，那个选择器两边都不亮，
-         *      看起来就是"没被选中"——使用者第一眼就发现了）；
-         *   ④ CLI 下拉 `disabled`、指令框 `readonly`；
-         *   ⑤ 记忆那节只给看：没有总开关、没有写入口、行内没有编辑/删除，置顶按钮置灰；
-         *   ⑥ **自建 agent 仍然可改**——少了这半，"整页只读"也能让上面全绿。
+         *   ③ 角色格**仍在原位、仍是两张卡**，但两张都不可点（内置角色是 drafter /
+         *      memory-tidy / skill-reviewer，那个执行/审核二选一对它两边都不亮）；
+         *   ④ CLI 下拉 `disabled`、指令框 `readonly`，两者都带一枚「只读」标记；
+         *   ⑤ 记忆那节**骨架不缩水**：开关 / 写入口 / 行内改删都还在原位，只是 `disabled`；
+         *   ⑥ 技能那一格用的是**同一个 `.skill-picker`**（不是一列 chip），勾选框锁着；
+         *   ⑦ **自建 agent 仍然可改**——少了这半，"整页只读"也能让上面全绿。
          */
         facts['agents.builtinReadOnly'] = await (async () => {
           const prevName = String(
             text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '',
           )
+          /**
+           * ⚠️ 先给这条内置 agent 造**一条记忆**（幂等）。
+           *   为什么非要造：记忆行内那两颗按钮（改 / 删）与 ★ 只有"有条目"时才存在，
+           *   没有条目时这两项恒为 null ⇒ 判据空过，将来谁把 `disabled` 弄丢都不会红。
+           *   探针的 daemon 允许改内置（`allowBuiltinEdits`），所以这条写得进去。
+           */
+          {
+            const win = f.contentWindow
+            const list = await win.fetch('/api/agents').then((r) => r.json())
+            const me = (list.agents ?? []).find((a) => a.builtin === true && a.role === 'drafter')
+            if (me) {
+              await win.fetch(`/api/agents/${me.id}`, {
+                method: 'PATCH',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ memoryEnabled: true }),
+              })
+              const detail = await win.fetch(`/api/agents/${me.id}`).then((r) => r.json())
+              if ((detail.memory ?? []).length === 0) {
+                await win.fetch(`/api/agents/${me.id}/memory`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    entries: [{ kind: 'fact', text: '探针夹具：内置智能体的记忆行（量只读态用）' }],
+                  }),
+                })
+              }
+              /**
+               * PATCH 走的是 raw fetch，页面里的 store 不会自己变新 ⇒ 先点「刷新」把它拉新。
+               * ⚠️ 但只刷新**不够**：`AgentDetail` 的草稿只在"换了个 agent"时重铺（同一个
+               *   id 换了个对象不算），于是接口上 `memoryEnabled` 已经是 true、勾选框还是
+               *   没勾（实测到的正是这个）。所以刷新之后再**换一个人再换回来**，让详情按
+               *   新那份重新读一次。
+               * ⚠️ 也别用 `location.hash` 离开这一页：那会把整页重建，后面几条判据的前置
+               *   状态跟着变（实测：`agents.builtinParity` 与 `agents.runtimeOptions` 一起
+               *   变成 null）。
+               */
+              const refreshBtn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+                (b) => text(b).trim() === '刷新',
+              )
+              if (refreshBtn) click(refreshBtn)
+              await untilNet(() => !!d().querySelector('.card.agent-card'), 60)
+              await selectAgentByName('助手')
+              await selectAgentByName('起草者（内置）')
+            }
+          }
           const picked = await selectAgentByName('起草者（内置）')
           if (!picked) {
             if (prevName !== '') await selectAgentByName(prevName)
             return { found: false }
           }
           await untilNet(() => !!d().querySelector('.card.agent-card'), 40)
+          await untilNet(() => d().querySelectorAll('[data-mem-row]').length >= 1, 60)
           const head = d().querySelector('.detail-pane .detail-head')
           const labels = [...(head?.querySelectorAll('.detail-actions button') ?? [])].map((b) =>
             (text(b) ?? '').trim(),
@@ -675,41 +721,57 @@
           const cli = d().querySelector('#agent-runtime')
           const ta = d().querySelector('#agent-instructions')
           const memRows = [...d().querySelectorAll('[data-mem-row]')]
+          const skillBoxes = [...d().querySelectorAll('.card.agent-card .skill-picker input')]
+          const roleCards = [...d().querySelectorAll('.card.agent-card .role-picker > *')]
           const out = {
             found: true,
             headLabels: labels,
             hasSave: labels.some((l) => l.includes('保存')),
             hasRestore: labels.some((l) => l.includes('恢复成默认值')),
-            hasCancel: labels.some((l) => l.includes('取消') || l.includes('关闭')),
+            // 三槽位纪律（274 批）：主=写（这里是"恢复成默认值"）、次=离开、危险=删
+            hasLeave: labels.some((l) => l.includes('取消') || l.includes('关闭')),
             hasDelete: labels.some((l) => l.includes('删除')),
             rename: d().querySelector('[data-agent-rename]') !== null,
+            // ③ 角色：两张卡还在（骨架对齐），但**没有一个是按钮**
+            roleCards: roleCards.length,
+            roleButtons: roleCards.filter((el) => el.tagName === 'BUTTON').length,
+            rolePicker: d().querySelector('.card.agent-card .role-picker') !== null,
             roleBadge: (text(d().querySelector('[data-agent-role-badge]')) ?? '').trim(),
-            rolePicker: d().querySelector('.role-picker') !== null,
-            cli: cli === null ? null : cli.disabled === true,
-            instructions: ta === null ? null : ta.hasAttribute('readonly') === true,
+            // ④ 两个文本控件
+            cliDisabled: cli === null ? null : cli.disabled === true,
+            instructionsReadonly: ta === null ? null : ta.hasAttribute('readonly') === true,
+            lockMarks: d().querySelectorAll('.card.agent-card .lockmark').length,
+            // ⑤ 记忆那一节：控件都在，只是锁着
             memorySwitch: d().querySelector('[data-memory-enabled]') !== null,
-            memoryState: (text(d().querySelector('[data-memory-state]')) ?? '').trim(),
+            memorySwitchDisabled:
+              d().querySelector('[data-memory-enabled]')?.disabled !== false,
+            /**
+             * ⚠️ 写入口**在不在只由开关决定**（关着就没有，自建也一样）——所以这里先量开关
+             *   自己，再让判据去比"写入口存在与否 == 开关是否打开"。把 `memoryAdd === true`
+             *   写死会红在"这条内置 agent 记忆关着"上，而那是**同一套规则**的正确表现。
+             */
+            memoryOn: d().querySelector('[data-memory-enabled]')?.checked === true,
             memoryAdd: d().querySelector('[data-mem-add]') !== null,
-            // ⚠️ 没有记忆行时这两项**量不到**，返回 null 而不是 true：空数组的 `every`
-            //    会恒真，那正是本仓库反复踩到的"空过"。
+            memoryAddDisabled: d().querySelector('[data-mem-add]')?.disabled !== false,
             memRows: memRows.length,
-            memRowActions:
+            memRowActions: memRows.length === 0 ? null : memRows.every((r) => r.querySelector('.mem-actions') !== null),
+            memRowActionsDisabled:
               memRows.length === 0
                 ? null
-                : memRows.some(
-                    (r) =>
-                      r.querySelector('[data-mem-edit]') !== null ||
-                      r.querySelector('[data-mem-remove]') !== null,
+                : memRows.every((r) =>
+                    [...r.querySelectorAll('.mem-actions button')].every((b) => b.disabled === true),
                   ),
             memPinDisabled:
               memRows.length === 0
                 ? null
-                : memRows.every((r) => {
-                    const pin = r.querySelector('[data-mem-pin]')
-                    return pin === null || pin.disabled === true
-                  }),
+                : memRows.every((r) => [r.querySelector('[data-mem-pin]')].every((b) => b === null || b.disabled === true)),
+            // ⑥ 技能那一格：同一个骨架 + 锁着
+            skillPickerLocked: d().querySelector('[data-skill-picker-locked]') !== null,
+            skillBoxes: skillBoxes.length,
+            skillBoxesDisabled: skillBoxes.length > 0 && skillBoxes.every((b) => b.disabled === true),
+            // ⑦ 另一半：自建 agent 必须还是能改的（用「助手」，它一定不是内置）
+            ownEditable: false,
           }
-          // 另一半：自建 agent 必须还是能改的（用「助手」，它一定不是内置）
           const own = await selectAgentByName('助手')
           const ownCli = d().querySelector('#agent-runtime')
           const ownTa = d().querySelector('#agent-instructions')
@@ -717,9 +779,10 @@
           const ownLabels = [...(ownHead?.querySelectorAll('.detail-actions button') ?? [])].map(
             (b) => (text(b) ?? '').trim(),
           )
+          const ownRoleCards = [...d().querySelectorAll('.card.agent-card .role-picker > *')]
           out.ownEditable =
             own === true &&
-            d().querySelector('.role-picker') !== null &&
+            ownRoleCards.filter((el) => el.tagName === 'BUTTON').length === 2 &&
             ownCli !== null &&
             ownCli.disabled === false &&
             ownTa !== null &&
@@ -727,6 +790,50 @@
             ownLabels.some((l) => l.includes('保存'))
           if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
           return out
+        })()
+
+        /**
+         * ★ 分批第 274 批（使用者："内置和自建在呈现方式上行为不同一"，定了方案 A
+         *   "同一套骨架、只读的锁住"）。
+         *
+         * 这一条只量**骨架**：同一批选择器在内置那张卡上与在自建那张卡上是否都成立，
+         * 以及角色格的两张卡数量是否一致。为什么只挑这几样：技能列表与记忆行数取决于
+         * 那一个 agent 的**数据**（有没有挂技能、有没有记忆），拿它们比会把"数据不同"
+         * 误判成"骨架不同"。
+         */
+        facts['agents.builtinParity'] = await (async () => {
+          const prevName = String(
+            text(d().querySelector('.detail-pane [data-agent-head-name]')) ?? '',
+          )
+          const shape = () => {
+            const rc = d().querySelector('.card.agent-card .role-picker > *')
+            return {
+              roleCards: d().querySelectorAll('.card.agent-card .role-picker > *').length,
+              // 角色卡的高度：两边不一样高，"同一套骨架"就是空话（内置那张是两行字）
+              roleCardH: rc === null ? null : Math.round(rc.getBoundingClientRect().height),
+              cli: d().querySelector('#agent-runtime') !== null,
+              instructions: d().querySelector('#agent-instructions') !== null,
+              memoryCell: d().querySelector('[data-agent-memory]') !== null,
+              memorySwitch: d().querySelector('[data-memory-enabled]') !== null,
+            }
+          }
+          if (!(await selectAgentByName('起草者（内置）'))) return { found: false }
+          const builtin = shape()
+          if (!(await selectAgentByName('助手'))) return { found: false }
+          const own = shape()
+          if (prevName !== '' && prevName !== '助手') await selectAgentByName(prevName)
+          const keys = Object.keys(builtin)
+          // 高度按 ±2px 比（亚像素取整不该让这条变红）
+          const same = (k) =>
+            k === 'roleCardH'
+              ? Math.abs((builtin[k] ?? 0) - (own[k] ?? 0)) <= 2
+              : builtin[k] === own[k]
+          return {
+            found: true,
+            builtin,
+            own,
+            differs: keys.filter((k) => !same(k)),
+          }
         })()
 
         facts['agents.cardNoHoles'] = await (async () => {
