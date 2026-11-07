@@ -53,6 +53,12 @@ importers:
       '@agentdeck/web':
         specifier: workspace:*
         version: link:../web
+      decibri:
+        specifier: ^5.8.0
+        version: 5.8.0
+      whisper-cpp-node:
+        specifier: ^0.2.12
+        version: 0.2.12
       zod:
         specifier: ^4.6.2
         version: 4.6.2
@@ -225,6 +231,31 @@ importers:
         version: link:../../packages/skill-source
 
 packages:
+
+  '@decibri/decibri-darwin-arm64@5.8.0':
+    resolution: {integrity: sha512-dv86BvRoP+IlS/ucJ73vGP/mzGgRcLvyoS0MxoCAkSnrlWKFhKzW6fbm7rqberIkODsiJPHjUfXuSIAd06KC+g==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@decibri/decibri-linux-arm64-gnu@5.8.0':
+    resolution: {integrity: sha512-wlzVMVh5aWzVyZgaSNJ0ZfpUfyGsb+plNGdlEcg5bLZ5KFhnT5D/y9YBA+Q+NKLdyzO/mgrsuZpf9VS6ZDJHbw==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@decibri/decibri-linux-x64-gnu@5.8.0':
+    resolution: {integrity: sha512-+43s3AzpktZiDy2ws47v59TzUivhFo8TQYUKU/EcDdRRebYCnlEHGSeoSDkjI30lW4m85nURETfxEWsGbKtcGg==}
+    cpu: [x64]
+    os: [linux]
+
+  '@decibri/decibri-win32-arm64-msvc@5.8.0':
+    resolution: {integrity: sha512-FS1yvuj0UpG9WDTG3JIcDR1UyGDBNKw+Ht7LVhqJDs4uoJmSnrMTTuHzqyY5QuznVE6jyFkTCIl+/XKku48GoA==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@decibri/decibri-win32-x64-msvc@5.8.0':
+    resolution: {integrity: sha512-pAmKh6fp3VLaOVD6bChCZFLqThM+pzohb/2BYDN99+3thrb9/cZYgfTocXZ/WjRuHHvR6ErjgQ1wed63unQKYQ==}
+    cpu: [x64]
+    os: [win32]
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -733,6 +764,21 @@ packages:
   '@types/node@24.19.1':
     resolution: {integrity: sha512-aS3/DG0oM05K0RIXXP+hKjinGG5IgSSVGzswZxW3O0sS3pH4/fycXundUC9XsszgKCk4gHXylTEK6hyFxVxnoQ==}
 
+  '@whisper-cpp-node/darwin-arm64@0.2.12':
+    resolution: {integrity: sha512-8sQE1pNzi/Osy1OfGMLes9Mwc5hWh59u2lJWKyM4HVLTl6h9LIb44bZINtgmlwUKVxECIpzQ7VnCKyY6eWJOnQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@whisper-cpp-node/win32-ia32@0.2.7':
+    resolution: {integrity: sha512-L3D7Kpi76yBGXOXkHcVCye6jcINyg4R6eis8MhC08bCVbojamTEbEtoUD7XYcLPXX1KJxrm51DO0uzhVsRgOlQ==}
+    cpu: [ia32]
+    os: [win32]
+
+  '@whisper-cpp-node/win32-x64@0.2.11':
+    resolution: {integrity: sha512-MTVwIoJ/lMz53jZIT0XHQu9/38Vg/Kp+khcOKEyfQmXMf+m5VR8kn1Pr3Y/nMkQo6H9EojTmOArgR7BjrcADMg==}
+    cpu: [x64]
+    os: [win32]
+
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
     engines: {node: '>=0.4.0'}
@@ -762,6 +808,12 @@ packages:
     peerDependenciesMeta:
       supports-color:
         optional: true
+
+  decibri@5.8.0:
+    resolution: {integrity: sha512-mAIFQ0jMmGj4UqF56UDHtX53PvUMpEE4odTUfhvR8ejG2VvohiSPc4hSk83IUNRxj1unrEuSeF0G6RPtaegR6Q==}
+    engines: {node: '>=18.0.0'}
+    cpu: [x64, arm64]
+    os: [win32, darwin, linux]
 
   deepmerge@4.3.1:
     resolution: {integrity: sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A==}
@@ -982,6 +1034,10 @@ packages:
       vite:
         optional: true
 
+  whisper-cpp-node@0.2.12:
+    resolution: {integrity: sha512-Y9cO+WJyzjcGOxFEEUiZETOVX3PBEmWsFHceAdjX7pprWxVibleTFgxItnHcvsu4CK26kURsgAJzC+wAnM/ElA==}
+    engines: {node: '>=18.0.0'}
+
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
     engines: {node: '>= 14.6'}
@@ -994,6 +1050,21 @@ packages:
     resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
 
 snapshots:
+
+  '@decibri/decibri-darwin-arm64@5.8.0':
+    optional: true
+
+  '@decibri/decibri-linux-arm64-gnu@5.8.0':
+    optional: true
+
+  '@decibri/decibri-linux-x64-gnu@5.8.0':
+    optional: true
+
+  '@decibri/decibri-win32-arm64-msvc@5.8.0':
+    optional: true
+
+  '@decibri/decibri-win32-x64-msvc@5.8.0':
+    optional: true
 
   '@esbuild/aix-ppc64@0.25.12':
     optional: true
@@ -1301,6 +1372,15 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
+  '@whisper-cpp-node/darwin-arm64@0.2.12':
+    optional: true
+
+  '@whisper-cpp-node/win32-ia32@0.2.7':
+    optional: true
+
+  '@whisper-cpp-node/win32-x64@0.2.11':
+    optional: true
+
   acorn@8.18.0: {}
 
   aria-query@5.3.1: {}
@@ -1316,6 +1396,14 @@ snapshots:
   debug@4.4.3:
     dependencies:
       ms: 2.1.3
+
+  decibri@5.8.0:
+    optionalDependencies:
+      '@decibri/decibri-darwin-arm64': 5.8.0
+      '@decibri/decibri-linux-arm64-gnu': 5.8.0
+      '@decibri/decibri-linux-x64-gnu': 5.8.0
+      '@decibri/decibri-win32-arm64-msvc': 5.8.0
+      '@decibri/decibri-win32-x64-msvc': 5.8.0
 
   deepmerge@4.3.1: {}
 
@@ -1541,6 +1629,12 @@ snapshots:
   vitefu@1.1.3(vite@7.3.7(@types/node@24.19.1)(yaml@2.9.1)):
     optionalDependencies:
       vite: 7.3.7(@types/node@24.19.1)(yaml@2.9.1)
+
+  whisper-cpp-node@0.2.12:
+    optionalDependencies:
+      '@whisper-cpp-node/darwin-arm64': 0.2.12
+      '@whisper-cpp-node/win32-ia32': 0.2.7
+      '@whisper-cpp-node/win32-x64': 0.2.11
 
   yaml@2.9.1: {}
 

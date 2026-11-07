@@ -88,6 +88,10 @@ import {
 import { runAgentLegacyCleanupOnce } from './agent-legacy-cleanup.ts'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
+import { VoiceService } from './voice/service.ts'
+import type { CaptureFactory } from './voice/capture.ts'
+import type { SessionLimits } from './voice/session.ts'
+import type { TranscriberLoader } from './voice/transcriber.ts'
 import { ActionRunner } from './actions.ts'
 import { createScriptExecutor } from './script-executor.ts'
 import { submitChatTurn, titleFromText } from './chat.ts'
@@ -458,6 +462,46 @@ export interface DaemonOptions {
    */
   allowBuiltinEdits?: boolean
   /**
+   * ★ 分批第 277 批：**语音（离线口述）的落点根**。
+   *
+   * 缺省由 CLI 给出（`~/.agentdeck/asr`）——那里放词表、设置与模型文件。与 `skillsRoot`
+   * 同一层次的产品决定：词表是人会去加词的东西，模型是人会去看到底下到哪儿的东西，
+   * 都不该藏在数据目录里。
+   *
+   * ⚠️ 测试必须显式传（否则会写进真实家目录）；探针的 daemon 也传一份临时目录。
+   */
+  asrRoot?: string
+  /** 语音模型的上游基址（国内直连 HF 常常不通，可换镜像）。 */
+  asrModelBase?: string
+  /** 注入采集（测试用假采集，绝不开真实麦克风）。 */
+  voiceCaptureFactory?: CaptureFactory
+  /** 注入转写加载器（测试用假转写，绝不加载真实模型）。 */
+  voiceTranscriberLoader?: TranscriberLoader
+  /** 注入模型下载用的 fetch（测试绝不联网）。 */
+  voiceFetchImpl?: typeof fetch
+  /** 会话的几条闸（测试调小，别真的等 8 秒）。 */
+  voiceLimits?: Partial<SessionLimits>
+  /**
+   * 注入"原生模块能不能加载"与"模型状态"（测试用）。
+   *
+   * ⚠️ 为什么测试非要注入这两样，而不是"用真探测看看结果"：真探测的结果取决于
+   *   **跑测试这台机器**（有没有预编译包、有没有下过模型）⇒ 同一份测试在 macOS 上
+   *   走完会话流程、在 Linux 上"提前 return"——那是最坏的一种测试：**绿得毫无意义**。
+   *   注入之后，会话那几条在哪儿跑都一样。
+   */
+  voiceProbeNative?: () => {
+    capture: { ok: boolean; detail: string }
+    transcribe: { ok: boolean; detail: string }
+  }
+  voiceModelStateOf?: (asrRoot: string, modelId: string) => Promise<{
+    id: string
+    path: string
+    present: boolean
+    looksValid: boolean
+    bytes: number
+    hashOk: boolean | null
+  } | null>
+  /**
    * 「本地安装清单」的路径（技能页「从本地清单安装」读的那份 JSON）。
    *
    * 缺省用仓库自带的那份（`skill-list.ts` 的 `defaultSkillListPath()`）。给了就用
@@ -521,6 +565,8 @@ export interface DaemonHandle {
   skillsRoot: string
   /** 使用者提炼技能（D80）的落点根（git 化）——CLI 横幅一并显示。 */
   skillsMineRoot: string
+  /** 语音的落点根（词表 / 设置 / 模型）——同样印在启动横幅上。 */
+  asrRoot: string
   close(): Promise<void>
 }
 
@@ -2126,6 +2172,31 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const skillsMineRoot = options.skillsMineRoot ?? join(options.dataDir, 'skills-mine')
   /** 记忆镜像根：`<dataDir>/memory/<agentId>/MEMORY.md`（权威仍是 store，这是给人看的）。 */
   const memoryRoot = memoryRootFor(options.dataDir, options.memoryRoot)
+
+  /**
+   * ★ 分批第 277 批：离线口述（语音）。
+   *
+   * ★ 它**不碰 store、不碰 skill、不碰 run**：只有"音频 → 文本"这一条路。约束里
+   *   那几条"不自动记忆 / 不自动建链接 / 保存由上层 SKILL 决定"在代码里就是这一句。
+   *
+   * ⚠️ 落点缺省在数据目录之内的 `asr/`：那是**测试与嵌入式调用**的兜底。真实使用
+   *   的默认值是 CLI 给的 `~/.agentdeck/asr`（与 skills 同一层次，人能直接翻到）。
+   */
+  const voiceRoot = options.asrRoot ?? join(options.dataDir, 'asr')
+  const voice = new VoiceService({
+    asrRoot: voiceRoot,
+    ...(options.asrModelBase === undefined ? {} : { modelBaseUrl: options.asrModelBase }),
+    ...(options.voiceCaptureFactory === undefined
+      ? {}
+      : { captureFactory: options.voiceCaptureFactory }),
+    ...(options.voiceTranscriberLoader === undefined
+      ? {}
+      : { transcriberLoader: options.voiceTranscriberLoader }),
+    ...(options.voiceFetchImpl === undefined ? {} : { fetchImpl: options.voiceFetchImpl }),
+    ...(options.voiceLimits === undefined ? {} : { limits: options.voiceLimits }),
+    ...(options.voiceProbeNative === undefined ? {} : { probeNative: options.voiceProbeNative }),
+    ...(options.voiceModelStateOf === undefined ? {} : { modelStateOf: options.voiceModelStateOf }),
+  })
 
   const store = await FileStore.open({
     dataDir: options.dataDir,
@@ -4126,9 +4197,137 @@ async function injectedSkillsOf(
           //   就一直看不到新能力（实测踩过：前端正确藏起「新建私有」，而 daemon
           //   报的清单里根本没有它）。
           Capability.AgentGroupsWorkflow,
+          // ★ 分批第 277 批：离线口述（`/api/voice/*`）。旧 daemon 上这条路径 404，
+          //   而麦克风按钮"点了没反应"是最难解释的一种失败 ⇒ 界面只在标志在时才画它。
+          Capability.VoiceDictation,
         ],
       })
       return
+    }
+
+    /**
+     * ══════════════════════════════════════════════════════════════════
+     * ★ 分批第 277 批：离线口述（语音）的路由
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * 三条纪律，与这一块的其他接口刻意不同：
+     *
+     * ① **这里没有任何写库的路由**：`POST /api/voice/sessions/{id}/stop` 只把音频变成
+     *    文本，**不写 store、不建 run、不碰 skill、不建链接**。使用者定的是"保存与
+     *    链接由上层 SKILL 控制"——在代码里就是"这一块不认识 store"。
+     * ② **识别结果只回给调用方**，谁都不会替它发送：页面拿到 `text` 之后是回填输入框
+     *    还是发给某人，是上层的事（`outputMode` 也在上层）。
+     * ③ **音频不落盘**：帧只活在会话对象的内存里，结束就丢。没有"临时 wav"这种
+     *    中间文件——那种文件一旦有了，就会有人去读它、忘记删它。
+     */
+    if (path === '/api/voice/capability' && req.method === 'GET') {
+      try {
+        sendJson(res, 200, await voice.capability())
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
+    if (path === '/api/voice/vocab') {
+      if (req.method === 'GET') {
+        const [loaded, settings] = await Promise.all([voice.vocab(), voice.settings()])
+        // ⚠️ 摊平成 `{promptTerms, rules, problems, settings}`：`problems` 与词表**一起**
+        //   发出去，界面才能说"有 2 条格式不对，已跳过"——只发词表的话，人改坏了一条
+        //   规则会看到"保存成功"而那一行悄悄不见了。
+        sendJson(res, 200, {
+          promptTerms: loaded.vocab.promptTerms,
+          rules: loaded.vocab.rules,
+          problems: loaded.problems,
+          settings,
+        })
+        return
+      }
+      if (req.method === 'PATCH') {
+        const body = await readJsonBody(req)
+        const saved = await voice.updateVocab(body)
+        sendJson(res, 200, {
+          promptTerms: saved.vocab.promptTerms,
+          rules: saved.vocab.rules,
+          problems: saved.problems,
+        })
+        return
+      }
+    }
+
+    if (path === '/api/voice/settings') {
+      if (req.method === 'GET') {
+        sendJson(res, 200, await voice.settings())
+        return
+      }
+      if (req.method === 'PATCH') {
+        sendJson(res, 200, await voice.updateSettings(await readJsonBody(req)))
+        return
+      }
+    }
+
+    if (path === '/api/voice/models/ensure' && req.method === 'POST') {
+      const body = (await readJsonBody(req)) as { model?: unknown } | null
+      const modelId = typeof body?.model === 'string' ? body.model : undefined
+      try {
+        const result = await voice.ensureModel(modelId)
+        sendJson(res, 200, {
+          modelId: result.modelId,
+          path: result.path,
+          bytes: result.bytes,
+          downloaded: result.downloaded,
+          hashOk: result.hashOk,
+        })
+      } catch (err) {
+        // 下载失败是**使用者能修的问题**（换镜像 / 网络），不是 500
+        sendJson(res, 502, { error: err instanceof Error ? err.message : String(err) })
+      }
+      return
+    }
+
+    if (path === '/api/voice/sessions' && req.method === 'POST') {
+      try {
+        sendJson(res, 201, await voice.startSession())
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        // 已经在录 ⇒ 409：这是"状态冲突"，不是参数错
+        sendJson(res, message.includes('已经有一次录音') ? 409 : 400, { error: message })
+      }
+      return
+    }
+
+    const voiceSessionMatch = /^\/api\/voice\/sessions\/([^/]+)(\/(stop|cancel))?$/.exec(path)
+    if (voiceSessionMatch !== null) {
+      const sessionId = decodeURIComponent(voiceSessionMatch[1] as string)
+      const action = voiceSessionMatch[3]
+      if (action === undefined && req.method === 'GET') {
+        const snapshot = voice.getSession(sessionId)
+        if (snapshot === null) {
+          sendJson(res, 404, { error: `没有这个录音会话（${sessionId}）——它可能已经过期了` })
+          return
+        }
+        sendJson(res, 200, snapshot)
+        return
+      }
+      if (action === 'stop' && req.method === 'POST') {
+        const snapshot = await voice.stopSession(sessionId)
+        if (snapshot === null) {
+          sendJson(res, 404, { error: `没有这个录音会话（${sessionId}）` })
+          return
+        }
+        // 202：转写在后台跑，页面接着轮询同一个 id 就会看到 done
+        sendJson(res, 202, snapshot)
+        return
+      }
+      if (action === 'cancel' && req.method === 'POST') {
+        const snapshot = voice.cancelSession(sessionId)
+        if (snapshot === null) {
+          sendJson(res, 404, { error: `没有这个录音会话（${sessionId}）` })
+          return
+        }
+        sendJson(res, 200, snapshot)
+        return
+      }
     }
 
     // ── agents / issues（M0 看板需要的最小 CRUD）──
@@ -10286,6 +10485,7 @@ async function injectedSkillsOf(
     workRoot,
     skillsRoot,
     skillsMineRoot,
+    asrRoot: voiceRoot,
     async close() {
       // 先断开所有连接：`server.close()` 会等现有连接自然结束，而页面的
       // keep-alive 与 SSE 长连接可能挂很久——那会让"停止 daemon"看起来卡住。
@@ -10296,6 +10496,11 @@ async function injectedSkillsOf(
       //   顺序反过来的话，run 会在 store 已关之后继续写——写不进去，
       //   或者更糟：进程退出时留下一个"看起来在执行"的 run。
       await executor.shutdown()
+
+      // ★ 分批第 277 批：把麦克风与 whisper 模型一起放掉。模型那几十到几百 MiB
+      //   不等进程退出才还——daemon 是"随时可停可起"的东西，留着它们等于每次都
+      //   要等一遍 GC/退出才释放（也让"再起一次"立刻吃满内存）。
+      voice.dispose()
 
       await store.close()
     },

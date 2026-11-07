@@ -21,6 +21,8 @@
     "@agentdeck/skill-source": "workspace:*",
     "@agentdeck/store-file": "workspace:*",
     "@agentdeck/web": "workspace:*",
+    "decibri": "^5.8.0",
+    "whisper-cpp-node": "^0.2.12",
     "zod": "^4.6.2"
   }
 }

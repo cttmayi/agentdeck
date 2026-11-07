@@ -9,6 +9,7 @@ import { startDaemon, type DaemonHandle } from './server.ts'
 import {
   defaultSkillsRoot,
   defaultSkillsMineRoot,
+  defaultAsrRoot,
   defaultWorkRoot,
   fallbackWorkRoot,
   migrateLegacyWorkRoot,
@@ -73,6 +74,15 @@ interface CliOptions {
    * 与安装根物理分离，且这个根是 git 仓库（平台自动 commit）。要放别处用这个。
    */
   skillsMineRoot: string | null
+  /**
+   * ★ 分批第 277 批：语音（离线口述）的落点根。
+   *
+   * 缺省 `~/.agentdeck/asr`——与 `--skills-root` 同一层次：词表是人会去加词的东西、
+   * 模型是人会想看到"下到哪儿了"的东西，都不该藏进数据目录。
+   */
+  asrRoot: string | null
+  /** 语音模型的上游基址（直连 HuggingFace 不通时换镜像）。 */
+  asrModelBase: string | null
   /** GitHub 加速器（第三方，默认 null = 直连；见 server.ts 的 `DaemonOptions.githubProxy`）。 */
   githubProxy: string | null
   /** ★ 分批第 190 批：夹具专用（允许改内置 agent；默认关，真实 daemon 不带）。 */
@@ -119,6 +129,13 @@ export const CLI_OPTIONS = {
   'work-root': { type: 'string' },
   'skills-root': { type: 'string' },
   'skills-mine-root': { type: 'string' },
+  /**
+   * ★ 分批第 277 批：语音（离线口述）的落点与模型来源。
+   * `--asr-root` 与 `--skills-root` 同一层次（可见、可预期的家目录），
+   * `--asr-model-base` 是"直连 HuggingFace 不通时换镜像"的那条路。
+   */
+  'asr-root': { type: 'string' },
+  'asr-model-base': { type: 'string' },
   'github-proxy': { type: 'string' },
   /**
    * ★ 分批第 190 批：**夹具专用**——允许改内置 agent（默认不许）。
@@ -217,6 +234,8 @@ export function parseCliArgs(argv: readonly string[]): CliOptions {
     runtimeKey: typeof values['runtime-key'] === 'string' ? values['runtime-key'] : null,
     workRoot: typeof values['work-root'] === 'string' ? values['work-root'] : null,
     skillsRoot: typeof values['skills-root'] === 'string' ? values['skills-root'] : null,
+    asrRoot: typeof values['asr-root'] === 'string' ? values['asr-root'] : null,
+    asrModelBase: typeof values['asr-model-base'] === 'string' ? values['asr-model-base'] : null,
     skillsMineRoot:
       typeof values['skills-mine-root'] === 'string' ? values['skills-mine-root'] : null,
     // ⚠️ 校验**严格**（与 --sandbox 同一个口径）：写错了就报错退出，而不是
@@ -257,6 +276,8 @@ export const HELP = `agentdeck —— 本机 AI 工作台
       --skills-root <路径> 技能内容的落点（默认 ~/.agentdeck/skills）。
                         技能正文与支持文件存成真文件放在这里，**改文件就生效**。
       --skills-mine-root <路径> 提炼技能的落点（默认 ~/.agentdeck/skills-mine，D80）。
+      --asr-root <路径>    语音（离线口述）的落点（默认 ~/.agentdeck/asr：词表/设置/模型）。
+      --asr-model-base <URL> 语音模型的上游基址（默认 HuggingFace；直连不通时换镜像）。
                         与安装根物理分离，平台自动 git commit（可回退）。
       --skills-catalog <路径>  换一份「本地安装清单」（技能页「从本地清单安装」读的
                         那份 JSON）。默认用仓库自带的那份（apps/daemon/catalog/skills.json）。
@@ -456,6 +477,14 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     // 使用者提炼技能（D80）的可见默认根：`~/.agentdeck/skills-mine`——与安装根
     // **物理分离**且 git 化（平台自动 commit）。测试可覆盖（NFR-T-01）。
     const skillsMineRoot = options.skillsMineRoot ?? defaultSkillsMineRoot()
+    /**
+     * ★ 分批第 277 批：语音（离线口述）的落点。
+     *
+     * 与 skills 同一层次的判断：词表（`vocab.json`）是人会去加词的东西，模型文件是
+     * 人会想看到"下到哪儿了"的东西——都该在**看得见**的地方，而不是数据目录里。
+     * 核心层的兜底是 `<dataDir>/asr`（自洽、不碰家目录，测试与嵌入式调用用它）。
+     */
+    const asrRoot = options.asrRoot ?? defaultAsrRoot()
 
     // ★ 只有用默认位置时才迁移旧目录。
     //
@@ -490,6 +519,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       workRoot,
       skillsRoot,
       skillsMineRoot,
+      asrRoot,
+      ...(options.asrModelBase ? { asrModelBase: options.asrModelBase } : {}),
       ...(options.githubProxy ? { githubProxy: options.githubProxy } : {}),
       ...(options.allowBuiltinEdits ? { allowBuiltinEdits: true } : {}),
       ...(options.skillListPath ? { skillListPath: options.skillListPath } : {}),
@@ -520,7 +551,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   process.stdout.write(
     `\nAgentDeck 已就绪\n  地址：${daemon.url}\n  数据：${options.dataDir}\n` +
       `  工作目录：${daemon.workRoot}\n  技能目录：${daemon.skillsRoot}\n` +
-      `  提炼技能目录：${daemon.skillsMineRoot}\n`,
+      `  提炼技能目录：${daemon.skillsMineRoot}\n` +
+      // ★ 分批第 277 批：语音的目录也印出来——模型会往下沉几十 MiB，
+      //   "它到底放哪儿了"这个问题该在启动横幅里就有答案。
+      `  语音（词表/模型）：${daemon.asrRoot}\n`,
   )
   // ★ 沙箱状态必须**每次启动都报**，而不是只在开启时报。
   //   "这次跑的东西有没有被沙箱"是个要紧的事实，不该要人去翻命令历史。

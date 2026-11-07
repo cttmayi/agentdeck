@@ -284,6 +284,20 @@ export function defaultSkillsMineRoot(): string {
 }
 
 /**
+ * 语音（离线口述）的**可见默认根**：`~/.agentdeck/asr`（分批第 277 批）。
+ *
+ * 与 `defaultSkillsRoot()` 同一层次、同一个理由：那里放的是
+ *   · `vocab.json`   —— 人会去加词、去改规则的词表；
+ *   · `settings.json`—— 模型 / 语言 / 灵敏度的选择；
+ *   · `models/`      —— 几十到几百 MiB 的 whisper 模型（人会想看"下到哪儿了"）。
+ * 藏进数据目录里等于让人翻不到。要换用 `--asr-root`；核心层的兜底是数据目录内的
+ * `asr/`（见 `startDaemon`）。
+ */
+export function defaultAsrRoot(): string {
+  return join(homedir(), '.agentdeck', 'asr')
+}
+
+/**
  * 数据目录之内的 `skills/`——**自洽的兜底**（与 `fallbackWorkRoot` 逐字对应）。
  *
  * 调用 `startDaemon` 的人没给 `skillsRoot` 时用它。它只用调用者给的 `dataDir`，

@@ -5754,6 +5754,11 @@ function startDaemon() {
       skillsRoot,
       '--skills-mine-root',
       skillsMineRoot,
+      // ★ 分批第 277 批：语音的落点也必须指到临时目录。
+      //   它缺省是 `~/.agentdeck/asr`（CLI 的产品决定），探针的 daemon 若不带这个参数
+      //   就会去读写**使用者真实的家目录**——这正是本仓库最怕的那种污染。
+      '--asr-root',
+      path.join(dataDir, 'asr'),
       // ★ 分批第 190 批（内置 agent 只读）：这个 daemon 是**一次性的测试脚手架**，
       //   夹具要把内置起草者指向假 CLI（否则"起草中"那一屏根本跑不起来）⇒ 显式打开
       //   那个只给测试用的口子。真实 daemon 永远不带这个旗标。

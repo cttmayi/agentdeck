@@ -694,6 +694,17 @@ export const Capability = {
    *   错。所以界面**只在这个标志在的时候**才给「新建私有」与模式展示。
    */
   AgentGroupsWorkflow: 'agent-groups-workflow',
+  /**
+   * `/api/voice/*` 存在（离线口述录入，分批第 277 批）。
+   *
+   * ★ 为什么需要它：麦克风按钮是"点了就该有反应"的东西，而**旧 daemon 上这个路径
+   *   是 404**——按钮会静静地什么都不做（或者更糟：说出一个 fetch 报错）。界面据此
+   *   决定"给不给这颗按钮"，不给时说一句"这个 daemon 还不支持语音，重启一下"。
+   *
+   * ⚠️ 与能力类标志同一口径：**不要**用版本号猜，能力标志优先（见上面 `IdentityResponse`
+   *   那段说明）。
+   */
+  VoiceDictation: 'voice-dictation',
 } as const
 
 /** `POST /skills` —— 页面下载好 skill 后交给 daemon 落盘。 */

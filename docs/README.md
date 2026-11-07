@@ -26,6 +26,7 @@
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | **智能体组是怎么工作的**（工作流：执行 → 审核 → 行动、展开、返工闭环、四道闸） | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
 | **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看「现在的状态」，再看「下一步」与「最小验收清单」） |
+| **离线语音口述**（按一下说话、说完自动停、出文本给 SKILL） | [`./reference/voice-dictation.md`](./reference/voice-dictation.md)（为什么采集在 daemon、状态机、两层矫正、平台限制与坑） |
 
 **读代码的路线**：`./runtime/pipeline.md` 是按"一次 run 的生命周期"写的，每一节都标了对应文件——
 从它进比从目录树进快得多。改哪一段去哪找，见那份文档最后的「代码索引」，
@@ -135,6 +136,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 |---|---|---|
 | **Windows 兼容性**（2026-10） | A / B / D 三级**已修完**（`pnpm run test` 1855/0、`typecheck` 0 错）；**剩"在真 Windows 上量一次"**——那几条 `[判断]` 还没变成 `[量到]` | [`./reference/windows-compat.md`](./reference/windows-compat.md) 的「现在的状态」+「下一步（新对话从这里接）」 |
 | 展示页面支持音视频 | 已做完（daemon 认 `video/*`/`audio/*` + 支持 `Range`；查看器就地播放） | `./design/design.md` §15.58 |
+| **离线语音口述**（2026-11，分批做） | **后端已做完**（分批第 277 批：能力探测 / 模型管理 / 两句矫正 / 录音会话 / 8 条路由，`check` 2419 全绿）；**界面未做**——下一步是聊天输入框的麦克风按钮（四态 + 电平 + 计时 + Esc）、`via-skill` 输出方式、词典编辑与"一键加词" | [`./reference/voice-dictation.md`](./reference/voice-dictation.md)（§10 是"还没做"） |
 | 远端管理页（技能 / 工具目录） | 已做完（含常驻探针 `pnpm run probe:remote`，21 项） | `./srs/requirements.md` §16 的 D51–D55 |
 | **文档对账**（2026-10） | 已做完（只改文档、没动代码）：把「链路深度上限与环检测」被说成硬不变量的两处 README 改回实情；给 `architecture.md` 的「完整路由表」补上**整段漏掉的 `/api/agent-groups` 5 条**并修掉 `POST /api/agents` 的过时字段；术语表的「行动权限」落点从 agent 改到**智能体组**；§14 补上本轮新查到的几处开口 | `./design/architecture.md` §4.3 / §7.2 / §13 / §14；本文件下面那节「架构与不变量」 |
 | **布局探针重对齐** | ✅ **已完成**（六批 + 之后逐批跟着功能走）：全局 194 红 → **0 红**，当前 **608 项全绿 / 0 探针错误**（含 P2 技能「历史」那一节的 11 条；「沉淀成 Agent」的 5 条随功能在第 191 批一起删了，第 193 批又补了 3 条「起草那一轮在说人话」）。过程中一共**量到 3 个真缺陷并当场修掉**：① 保存后草稿没跟服务端走（界面看不见并进去的正文）② 同一次保存把刚清掉的老字段写回来 ③ **改已有的组保存必然 400**（`id` 混进 PATCH body）。其余的红都是四类：断言住在**已经不存在的宿主**上、界面**重做过**、断言**滞后**（数字/顺序）、以及探针**等错了**（虚拟时间）——三类教训写在 `probe.html` / `run.mjs` 的注释里 | [`tools/layout-probe/README.md`](../tools/layout-probe/README.md)（现状 + 历史那 7 段怎么过期的 + 四类病因） |
