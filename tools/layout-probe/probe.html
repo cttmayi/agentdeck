@@ -7752,16 +7752,24 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const stateBefore = btn.getAttribute('data-voice-state') ?? ''
           const title = btn.getAttribute('title') ?? ''
           click(btn)
-          // 要么当场给原因（模型没下），要么真的开始录音（那说明这台机器连模型都有）
+          /**
+           * ★ 分批第 285 批（使用者："我也不想占高度，或许 Toast 的提示就可以了"）：
+           *   原因改成 **toast**（`position: fixed` 的浮层，不占栏脚高度）。
+           *   所以这里等的是 `.toast` 出现，而不是按钮旁边那行字（那行已经删了）。
+           */
           const spoke = await until(
             () =>
-              d().querySelector('.detail-pane [data-composer] [data-voice-reason]') !== null ||
+              d().querySelector('.toast') !== null ||
               d().querySelector('.detail-pane [data-composer] [data-voice-button]')?.getAttribute('data-voice-state') === 'recording',
             80,
           )
-          const reasonEl = d().querySelector('.detail-pane [data-composer] [data-voice-reason]')
+          const reasonEl = d().querySelector('.toast')
           const stateAfter =
             d().querySelector('.detail-pane [data-composer] [data-voice-button]')?.getAttribute('data-voice-state') ?? ''
+          // toast 是浮层：它不该把栏脚撑高（这是这条设计的关键，顺手量一下）
+          const composerH = Math.round(
+            (d().querySelector('.detail-pane [data-composer]')?.getBoundingClientRect().height ?? 0),
+          )
           // 真开始录了（这台机器有模型）⇒ 立刻取消，别把麦克风留在 daemon 手里
           if (stateAfter === 'recording') {
             click(d().querySelector('.detail-pane [data-composer] [data-voice-button]'))
@@ -7774,6 +7782,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             stateBefore,
             reacts: spoke,
             reason: reasonEl === null ? null : (text(reasonEl) ?? '').trim(),
+            // toast 出现时栏脚高度（与上面那次量的比，用来确认"浮层没撑高"）
+            composerH,
+            unavailable: btn.classList.contains('unavailable'),
           }
         })()
         // 没选执行者时不该让人白打一段字：要么有下拉、要么有一条"先去建一个"的提示

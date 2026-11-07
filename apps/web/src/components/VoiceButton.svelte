@@ -26,6 +26,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { t } from '../lib/i18n.ts'
   import { identity } from '../lib/stores.ts'
+  import { showToast } from '../lib/view.ts'
   import { refreshVoiceCapability, voiceCapability } from '../lib/voice.ts'
 
   let {
@@ -54,7 +55,6 @@
 
   let phase = $state<VoiceState>('idle')
   let detail = $state<Snapshot | null>(null)
-  let reason = $state('')
   let sessionId = $state('')
   let elapsedMs = $state(0)
   let level = $state(0)
@@ -125,23 +125,19 @@
         if (snap.state === 'done' && snap.text !== undefined) {
           ontext(snap.text, { raw: snap.raw ?? snap.text, corrections: snap.corrections?.length ?? 0 })
         } else if (snap.state === 'failed') {
-          reason = snap.error ?? $t('chat.voiceFailedNoReason')
-          // 失败原因留在按钮的 title 上，同时行内显示一次（人不必去悬停才发现）
-          setTimeout(() => {
-            if (phase === 'idle' && detail?.state === 'failed') reason = ''
-          }, 8000)
+          // ★ 285 批：一次性的失败也用 toast——它只该闪一下，不该在栏脚常驻一行
+          showToast(snap.error ?? $t('chat.voiceFailedNoReason'))
         }
       } catch {
         stopPolling()
         sessionId = ''
         phase = 'idle'
-        reason = $t('chat.voiceLost')
+        showToast($t('chat.voiceLost'))
       }
     })(), 200)
   }
 
   async function start(): Promise<void> {
-    reason = ''
     detail = null
     /**
      * ★ 分批第 284 批（使用者报的："small 已经下载好了，录制时还提示『还没有语音模型
@@ -154,14 +150,15 @@
      */
     const fresh = await refreshVoiceCapability()
     if (fresh !== null && !fresh.available) {
-      reason = fresh.reason
+      // ★ 285 批：原因走 **toast**（不占栏脚高度），按钮自己不显示文字
+      showToast(fresh.reason)
       return
     }
     try {
       const res = await fetch('/api/voice/sessions', { method: 'POST' })
       const body = (await res.json()) as Snapshot & { error?: string }
       if (!res.ok) {
-        reason = body.error ?? $t('chat.voiceStartFailed')
+        showToast(body.error ?? $t('chat.voiceStartFailed'))
         // 这次失败可能正是"模型刚被删掉/刚下好"——把共享的那份也拉新
         void refreshVoiceCapability()
         return
@@ -172,7 +169,7 @@
       level = 0
       poll(body.id)
     } catch (err) {
-      reason = $t('chat.voiceStartFailedDetail', { error: String(err) })
+      showToast($t('chat.voiceStartFailedDetail', { error: String(err) }))
     }
   }
 
@@ -237,6 +234,7 @@
     class="ghost small voice"
     class:recording={phase === 'recording'}
     class:busy={phase === 'transcribing'}
+    class:unavailable={$voiceCapability !== null && !$voiceCapability.available}
     data-voice-button
     data-voice-state={phase}
     {title}
@@ -256,9 +254,6 @@
       <span aria-hidden="true">🎙</span>
     {/if}
   </button>
-  {#if reason !== ''}
-    <span class="voice-reason" data-voice-reason>{reason}</span>
-  {/if}
 {/if}
 
 <style>
@@ -309,13 +304,18 @@
     color: var(--text-faint);
   }
 
-  /* 原因那一句：紧贴在按钮旁边（不占输入框的位置，也不弹窗） */
-  .voice-reason {
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-    max-width: 24ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /**
+   * ★ 分批第 285 批（使用者："我也不想占高度，或许 Toast 的提示就可以了"）：
+   *   **失败/不可用的原因改走 toast**（`.toast` 是 `position: fixed` 的浮层，一点
+   *   栏脚高度都不占），按钮自己不显示任何文字。
+   *
+   *   删掉的是原来那条"原因塞在按钮右边"的做法，它的三个毛病：动作条被挤窄、
+   *   24ch 截断后变成半句话、和按钮同高看着像个控件。
+   *   ⚠️ 但"可用不可用"仍然要**一眼看得出**（不用点、不用悬停）——那是按钮自己的
+   *   形状（虚线 + 灰），不是文字，所以不占高度。
+   */
+  .voice.unavailable {
+    color: var(--text-faint);
+    border-style: dashed;
   }
 </style>

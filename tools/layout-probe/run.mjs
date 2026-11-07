@@ -1951,7 +1951,7 @@ const CHECKS = [
      */
     label:
       '★★ 聊天输入条里有**麦克风按钮**（带无障碍标签），而且**点一下就有反应**：' +
-      '没有模型时当场说清原因（不是一颗点了没动静的按钮）',
+      '没有模型时用 **toast** 说清原因（浮层，不占栏脚高度），按钮本身用虚线表示不可用',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
@@ -1959,12 +1959,15 @@ const CHECKS = [
       String(v.label).length > 0 &&
       v.stateBefore === 'idle' &&
       v.reacts === true &&
-      (typeof v.reason === 'string' ? v.reason.length > 0 : true),
+      // 285 批：原因是 toast（浮层），而且按钮用"虚线"表达不可用（不靠文字、不占高度）
+      (typeof v.reason === 'string' ? v.reason.length > 0 : true) &&
+      v.unavailable === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　标签「${String(v.label)}」　起始态 ${String(v.stateBefore)}　` +
-          `点击有反应 ${String(v.reacts)}　原因「${String(v.reason)}」`,
+          `点击有反应 ${String(v.reacts)}　toast「${String(v.reason)}」　虚线态 ${String(v.unavailable)}　` +
+          `栏脚高 ${String(v.composerH)}px`,
   },
   {
     view: '沉淀',
