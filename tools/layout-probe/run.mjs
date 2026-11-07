@@ -2105,6 +2105,31 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.builtinBadgeText',
+    /**
+     * ★ 分批第 275 批（使用者："为什么起草者显示的是『平台内置：删不掉，只能「恢复成
+     *   默认值」』"）：那是**一整句解释塞在徽标的位置上**——写于 2026-10，那时这一页
+     *   真的没有删除按钮、也没有技能那一格。现在栏头就有「恢复成默认值」与「关闭」，
+     *   "只能"不成立，只读的理由也换成了"平台维护"。⇒ 徽标回到两个字，整句进 `title`。
+     *
+     * ⚠️ 这条同时补上一个空洞：探针原来等的是 `.builtin-badge`（class 早就不存在了），
+     *   于是这个事实恒为 null、又没有任何判据读它——"断言在，但量不到"。
+     */
+    label:
+      '★★ 内置徽标是**短标签**（「平台内置」），整句解释在 `title` 里——原来那句' +
+      '「删不掉，只能恢复成默认值」既占满标题栏又已经不全对（栏头还有「关闭」）',
+    ok: (v) => typeof v === 'string' && v.length > 0 && v.length <= 6,
+    show: (v) => JSON.stringify(v ?? null),
+  },
+  {
+    view: '智能体',
+    key: 'agents.builtinBadgeTitle',
+    label: '★ 那枚徽标的 `title` 说清了"整份只读、要回默认用恢复成默认值"（短标签不丢信息）',
+    ok: (v) => typeof v === 'string' && v.includes('只读') && v.includes('恢复成默认值'),
+    show: (v) => JSON.stringify((v ?? '').slice(0, 80)),
+  },
+  {
+    view: '智能体',
     key: 'agents.builtinSkillsText',
     label:
       '★★★ 起草者那一格**真的挂着「沉淀用技能」**（agents.builtinSkillsText 里看得到 distilly）——' +

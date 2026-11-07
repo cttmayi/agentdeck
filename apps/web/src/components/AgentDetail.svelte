@@ -816,7 +816,20 @@
           >
         {/if}
         {#if agent.builtin}
-          <span class="badge in_review" data-agent-builtin-badge
+          <!--
+            ★ 分批第 275 批（使用者："为什么起草者显示的是『平台内置：删不掉，只能「恢复成
+              默认值」』"）：那**是一整句解释塞在徽标的位置上**。它写于 2026-10，那时这一页
+              真的既没有删除按钮、也没有技能那一格，所以要把"缺了什么"说出来。
+              现在两件事都变了：栏头就有「恢复成默认值」和「关闭」两颗按钮（"只能"不成立），
+              而整份只读的原因也不是"删不掉"，是"平台维护"（273/274 批定的口径）。
+              ⇒ 徽标回到徽标该有的长度（两个字），整句进 `title`。
+            -->
+          <span
+            class="badge in_review"
+            data-agent-builtin-badge
+            title={agent.role === 'skill-reviewer'
+              ? $t('agents.retiredReviewerBadgeTitle')
+              : $t('agents.builtinBadgeTitle')}
             >{agent.role === 'skill-reviewer'
               ? $t('agents.retiredReviewerBadge')
               : $t('agents.builtinBadge')}</span

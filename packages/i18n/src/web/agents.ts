@@ -531,9 +531,16 @@ export const agentsText = {
   //    （`AgentDetail.svelte` 的 `{#if agent.builtin}`）——审核者那一页也在说
   //    "（沉淀这条链的起草者）"，是事实错误，使用者会照着它去改错的那条。
   //    所以这里只说**两条都成立**的话；具体是哪一条由「角色」那一栏说。
-  'agents.builtinBadge': {
-    zh: '平台内置：删不掉，只能「恢复成默认值」',
-    en: 'Built in: cannot be deleted, only restored to default',
+  /**
+   * ★ 分批第 275 批：徽标**只留两个字**，整句进 `title`。
+   *   原来这里是「平台内置：删不掉，只能「恢复成默认值」」——一整句解释被塞进徽标的位置。
+   *   它写于 2026-10（那时这一页真的没有删除按钮、也没有技能那一格），现在栏头就有
+   *   「恢复成默认值」与「关闭」，"只能"已经不成立；而只读的原因是"平台维护"。
+   */
+  'agents.builtinBadge': { zh: '平台内置', en: 'Built-in' },
+  'agents.builtinBadgeTitle': {
+    zh: '平台内置：名字 / 指令 / CLI / 技能 / 记忆都由平台维护，整份只读。改不了也不该改——要回到平台默认用「恢复成默认值」。',
+    en: 'Built-in: name, instructions, CLI, skills and memory are all maintained by the platform, so the whole agent is read-only. Use "Restore default" to go back.',
   },
   /**
    * ★ 分批第 192 批：已下线的内置审核者（`role: 'skill-reviewer'`）。
@@ -542,7 +549,8 @@ export const agentsText = {
    * ——原来套用上面那句"删不掉、只能恢复默认"，而它既没有默认值可恢复（409）、现在也
    * 删得掉，一句都不成立。
    */
-  'agents.retiredReviewerBadge': {
+  'agents.retiredReviewerBadge': { zh: '已下线', en: 'Retired' },
+  'agents.retiredReviewerBadgeTitle': {
     zh: '已下线的内置审核者：沉淀线不再评审，没有任何链路用它——可以直接删掉',
     en: 'Retired built-in auditor: crystallization no longer reviews, nothing uses it — safe to delete',
   },

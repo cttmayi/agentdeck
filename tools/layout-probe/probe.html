@@ -3391,10 +3391,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const drafterRow2 = rowOf('起草者')
           if (drafterRow2) {
             click(drafterRow2)
-            await until(() => !!d().querySelector('.builtin-badge'), 60)
+            /**
+             * ⚠️ 分批第 275 批：这里原来等的是 `.builtin-badge`——**那个 class 早就没了**
+             *   （269 批把徽标搬进标题栏时换成了 `data-agent-builtin-badge`）。于是这一段
+             *   每次白等 60 拍到超时、`builtinBadgeText` 恒为 null，而**没有任何判据读它**
+             *   ⇒ 一个"看门狗自己瞎了"的空洞（本仓库最怕的那种：断言在，但量不到）。
+             *   现在改成等 data 属性，并补上判据（见 run.mjs）。
+             */
+            await until(() => !!d().querySelector('[data-agent-builtin-badge]'), 60)
           }
-          const badge = d().querySelector('.builtin-badge')
+          const badge = d().querySelector('[data-agent-builtin-badge]')
           facts['agents.builtinBadgeText'] = badge ? text(badge) : null
+          facts['agents.builtinBadgeTitle'] = badge ? (badge.getAttribute('title') ?? '') : null
           const detailBtns = [...d().querySelectorAll('.detail-actions button')].map((b) => text(b))
           facts['agents.builtinDetailButtons'] = detailBtns
           facts['agents.builtinHasRestore'] = detailBtns.some((t) => t.includes('恢复成默认值'))
