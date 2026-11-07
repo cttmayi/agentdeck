@@ -2,6 +2,7 @@
   import Drawer from './Drawer.svelte'
   import { api } from '../lib/api.ts'
   import { identity, loadIdentity } from '../lib/stores.ts'
+  import { refreshVoiceCapability, voiceCapability } from '../lib/voice.ts'
   // `$t` 是 i18n store 的自动订阅名——**必须 import 进来**，否则模板里的 `$t` 指不到
   // 任何 store（svelte-check 报 "illegal variable name"，第 242 批第一次写就撞上）。
   import { t } from '../lib/i18n.ts'
@@ -41,12 +42,6 @@
    * ⚠️ 配置本身是**全局一份**（`~/.agentdeck/asr/settings.json`）：口述是个人习惯，
    *   换个对话就要重配一遍说不通。
    */
-  interface VoiceCapability {
-    available: boolean
-    reason: string
-    model: { id: string; present: boolean; approxMb: number }
-    paths: { asrRoot: string; models: string }
-  }
   interface VoiceSettings {
     model: string
     language: 'zh' | 'en' | 'auto'
@@ -70,7 +65,11 @@
   let ruleFrom = ''
   let ruleTo = ''
 
-  let capability: VoiceCapability | null = null
+  /**
+   * ⚠️ 分批第 284 批：能力状态**与输入条那颗按钮共用一份**（`lib/voice.ts`）。
+   *   原来这里各存一份，于是"设置里说下载好了、按钮还说没有模型"——两处判断必然漂。
+   */
+  $: capability = $voiceCapability
   let settings: VoiceSettings | null = null
   let models: VoiceModelSpec[] = []
   let downloading = false
@@ -98,11 +97,8 @@
   }
 
   async function loadCapability(): Promise<void> {
-    try {
-      capability = await api<VoiceCapability>('/api/voice/capability')
-    } catch {
-      capability = null
-    }
+    // 走共享加载器：它会把结果写进 store，输入条那颗按钮同时看到
+    await refreshVoiceCapability()
   }
 
   /** 读词表（与设置同一次请求拿回来，见下面 `loadSettings` 的注释）。 */

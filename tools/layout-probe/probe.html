@@ -7717,6 +7717,32 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
          * 为什么不量"录音中"那一态：那要真的开麦克风（会弹系统权限窗），而探针
          * 每次跑都弹一个窗是不可接受的。录音会话的状态机由 `voice-session.test.ts` 钉着。
          */
+        /**
+         * ★ 分批第 284 批（使用者报的："small 已经下载好了，录制时还提示『还没有语音模型
+         *   small』，重新刷新后正常"）：**点一下必须现查一次能力**。
+         *
+         * 量法：数一下点按钮前后 `/api/voice/capability` 被请求了几次。
+         * 只查一次（挂载时）就是那个 bug 的形状——设置里刚下好模型、按钮还在说没有。
+         */
+        facts['chat.voiceRechecksOnClick'] = await (async () => {
+          const btn = d().querySelector('.detail-pane [data-composer] [data-voice-button]')
+          if (!btn) return null
+          let calls = 0
+          const real = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (String(url).includes('/api/voice/capability')) calls += 1
+            return real.call(f.contentWindow, input, init)
+          }
+          try {
+            click(btn)
+            await wait(600)
+          } finally {
+            f.contentWindow.fetch = real
+          }
+          return { calls }
+        })()
+
         facts['chat.voiceButton'] = await (async () => {
           const pane = d().querySelector('.detail-pane [data-composer]')
           if (!pane) return null

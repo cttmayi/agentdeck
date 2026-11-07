@@ -26,6 +26,7 @@
   import { onDestroy, onMount } from 'svelte'
   import { t } from '../lib/i18n.ts'
   import { identity } from '../lib/stores.ts'
+  import { refreshVoiceCapability, voiceCapability } from '../lib/voice.ts'
 
   let {
     /** 识别出的文本（**替换过专有名词的**那份）。 */
@@ -38,13 +39,6 @@
   } = $props()
 
   type VoiceState = 'idle' | 'recording' | 'transcribing'
-
-  interface Capability {
-    available: boolean
-    reason: string
-    model: { id: string; present: boolean; approxMb: number }
-    platformLabel: string | null
-  }
 
   interface Snapshot {
     id: string
@@ -59,7 +53,6 @@
   }
 
   let phase = $state<VoiceState>('idle')
-  let capability = $state<Capability | null>(null)
   let detail = $state<Snapshot | null>(null)
   let reason = $state('')
   let sessionId = $state('')
@@ -78,14 +71,8 @@
    */
   onMount(() => {
     if (!supported) return
-    void (async () => {
-      try {
-        const cap = await fetch('/api/voice/capability').then((r) => r.json() as Promise<Capability>)
-        capability = cap
-      } catch {
-        // 探测失败不挡按钮：真点的时候还会再报一次，而且那时的话更具体
-      }
-    })()
+    // 探测失败不挡按钮：真点的时候还会再查一次，而且那时的话更具体
+    void refreshVoiceCapability()
   })
 
   onDestroy(() => {
@@ -156,9 +143,18 @@
   async function start(): Promise<void> {
     reason = ''
     detail = null
-    if (capability !== null && !capability.available) {
-      // 预先知道不可用：直接把原因说出来（省掉一次必然失败的请求）
-      reason = capability.reason
+    /**
+     * ★ 分批第 284 批（使用者报的："small 已经下载好了，录制时还提示『还没有语音模型
+     *   small』，重新刷新后正常"）：这里是**现查**，不是用挂载时那一份。
+     *
+     *   根因是两处各自缓存——设置里下载完只刷新了它自己那一份，按钮这边还是旧的。
+     *   能力是会变的（刚下完模型、刚删了文件），而"点一下"正是最该拿最新事实的时刻。
+     *   ⚠️ 查完之后**不再拿它当放行的唯一依据**：直接发请求，服务端会给真结论
+     *   （201 或 400 + 人话）。
+     */
+    const fresh = await refreshVoiceCapability()
+    if (fresh !== null && !fresh.available) {
+      reason = fresh.reason
       return
     }
     try {
@@ -166,6 +162,8 @@
       const body = (await res.json()) as Snapshot & { error?: string }
       if (!res.ok) {
         reason = body.error ?? $t('chat.voiceStartFailed')
+        // 这次失败可能正是"模型刚被删掉/刚下好"——把共享的那份也拉新
+        void refreshVoiceCapability()
         return
       }
       sessionId = body.id
@@ -225,8 +223,8 @@
         ? $t('chat.voiceStopTitle')
         : phase === 'transcribing'
           ? $t('chat.voiceTranscribingTitle')
-          : capability !== null && !capability.available
-            ? capability.reason
+          : $voiceCapability !== null && !$voiceCapability.available
+            ? $voiceCapability.reason
             : $t('chat.voiceStartTitle'),
   )
 </script>

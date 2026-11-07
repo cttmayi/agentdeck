@@ -1922,6 +1922,22 @@ const CHECKS = [
   },
   {
     view: '聊天',
+    key: 'chat.voiceRechecksOnClick',
+    /**
+     * ★ 分批第 284 批（使用者报的："small 已经下载好了，录制时还提示『还没有语音模型
+     *   small』，重新刷新后正常"）。
+     *
+     * 根因是**两处各自缓存**：设置里下载完只刷新了它自己那份，输入条那颗按钮还拿着
+     * 页面挂载时的旧结论 ⇒ 点下去仍在说"没有模型"，直到整页刷新。
+     * 修法两条：① 能力收成一份共享 store；② **点的时候现查一次**。
+     * 这条判据钉的是②：点一下按钮，`/api/voice/capability` 必须被请求。
+     */
+    label: '★★ 点麦克风按钮时会**重新查一次能力**（不再用页面挂载时那份旧结论）',
+    ok: (v) => v !== null && typeof v === 'object' && typeof v.calls === 'number' && v.calls >= 1,
+    show: (v) => (v === null ? 'null' : `点一次查了 ${String(v.calls)} 次`),
+  },
+  {
+    view: '聊天',
     key: 'chat.voiceButton',
     /**
      * ★ 分批第 278 批：输入条里那颗麦克风按钮**点了必须有反应**。
