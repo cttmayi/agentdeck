@@ -811,6 +811,22 @@
               roleCards: d().querySelectorAll('.card.agent-card .role-picker > *').length,
               // 角色卡的高度：两边不一样高，"同一套骨架"就是空话（内置那张是两行字）
               roleCardH: rc === null ? null : Math.round(rc.getBoundingClientRect().height),
+              /**
+               * 形状：**圆角、边框、底色**。
+               * 为什么要单独量：`<button>` 与 `<div>` 吃的规矩不一样——全局那条
+               * `button { border-radius: var(--radius) }` 只对按钮生效。274 批把内置那两张
+               * 卡从 `<button>` 换成 `<div>`（不可点），于是**一个圆角一个直角**，而两类
+               * 元素的行高、内外距都对得上，光看数字看不出来（使用者一眼就看出来了）。
+               */
+              roleCardShape:
+                rc === null
+                  ? null
+                  : [
+                      cs(rc).borderRadius,
+                      cs(rc).borderTopStyle,
+                      cs(rc).borderTopWidth,
+                      cs(rc).backgroundColor,
+                    ].join('|'),
               cli: d().querySelector('#agent-runtime') !== null,
               instructions: d().querySelector('#agent-instructions') !== null,
               memoryCell: d().querySelector('[data-agent-memory]') !== null,

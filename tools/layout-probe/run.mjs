@@ -642,8 +642,9 @@ const CHECKS = [
      *   数据，拿它们比会把"数据不同"当"骨架不同"）。
      */
     label:
-      '★★ 内置 / 自建**同一套骨架**：角色格都是两张卡，CLI、指令、记忆节、记忆开关四处结构一致' +
-      '（方案 A 的定义——不同只体现在"锁着"，不体现在"少一块"）',
+      '★★ 内置 / 自建**同一套骨架**：角色格都是两张卡（**连圆角/边框/底色都一样**），' +
+      'CLI、指令、记忆节、记忆开关四处结构一致' +
+      '（方案 A 的定义——不同只体现在"锁着"，不体现在"少一块"或"长得不一样"）',
     ok: (v) => v !== null && typeof v === 'object' && v.found === true && Array.isArray(v.differs) && v.differs.length === 0 && v.builtin?.roleCards === 2,
     show: (v) =>
       v === null || typeof v !== 'object'
