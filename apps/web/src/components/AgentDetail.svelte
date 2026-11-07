@@ -854,10 +854,19 @@
             {#each runtimeOptions as key (key)}
               <option value={key}>{key}</option>
             {/each}
-            {#if !runtimeOptions.includes(draft.runtimeKey)}
-              <!-- 身份还没到（或这个 runtime 已被摘掉）：把当前值显示出来。
-                   少了这一支，select 会静默落到第一项 —— 那等于偷偷改了
-                   这个 agent 的 runtime。 -->
+            <!--
+              ⚠️ ★ 分批第 270 批（使用者："CLI 有一个『跟随全局默认』和『Default 当前』，
+                 这个不是重复的吗？"）：**是重复的**，而且是这一支造成的。
+
+              `default` 是**伪值**（"跟随全局默认"），它已经在上面第一条里了；而
+              `runtimeOptions` 只含**身份接口里那几个具体 runtime**，永远不含 `default`
+              ⇒ `!runtimeOptions.includes('default')` 恒为真 ⇒ 这里又画了一个
+              `value="default"` 的「default（当前）」。同一个值两行，选哪个都一样。
+
+              这一支真正要覆盖的是"当前值是个**具体 runtime**、但它不在身份接口那张表里"
+              （还没装上 / 已被摘掉 / 老的未验证 runtime），所以 `default` 必须排除。
+            -->
+            {#if draft.runtimeKey !== 'default' && !runtimeOptions.includes(draft.runtimeKey)}
               <option value={draft.runtimeKey}>{$t('agents.runtimeCurrent', { key: draft.runtimeKey })}</option>
             {/if}
           </select>

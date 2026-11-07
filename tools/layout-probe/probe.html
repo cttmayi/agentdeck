@@ -1043,6 +1043,15 @@
             ? runtimeOpts.filter((k) => k !== 'default').sort()
             : null
           facts['agents.runtimeFollowDefaultFirst'] = runtimeOpts ? runtimeOpts[0] === 'default' : null
+          /**
+           * ★ 分批第 270 批（使用者："CLI 有一个『跟随全局默认』和『Default 当前』，
+           *   这个不是重复的吗？"）：**同一个值不许画两行**。
+           *   原来 `default` 既是第一条固定选项，又因为"当前值不在身份接口的表里"这一支
+           *   被判成"要补一个当前值"——于是同一个 value 出现两次，选哪个都一样。
+           */
+          facts['agents.runtimeOptionDuplicates'] = runtimeOpts
+            ? runtimeOpts.filter((v, i) => runtimeOpts.indexOf(v) !== i)
+            : null
           // ── 未接真实 CLI 的 runtime（evidence 非 verified）不进 runtimes 数组 ──
           //
           //   2026-10（使用者决定）：未验证的 runtime（generic）**不显示在 UI 上**，

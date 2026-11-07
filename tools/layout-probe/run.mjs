@@ -756,6 +756,20 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.runtimeOptionDuplicates',
+    /**
+     * ★ 分批第 270 批（使用者："CLI 有一个『跟随全局默认』和『Default 当前』，这个不是重复的吗？"）。
+     *
+     * 根因：`default` 是伪值（"跟随全局默认"），已经在第一条；而"当前值不在身份接口的表里
+     * 就补一条"那一支没排除它 ⇒ 同一个 value 画了两行，选哪个都一样。
+     * 这条判据钉"选项值不许重复"——它管的是**所有** dropdown，不只 CLI。
+     */
+    label: '★★ CLI 下拉里**没有重复的选项值**（"跟随全局默认"与"default（当前）"曾是同一个值两行）',
+    ok: (v) => Array.isArray(v) && v.length === 0,
+    show: (v) => (Array.isArray(v) ? (v.length === 0 ? '没有重复' : `重复：${JSON.stringify(v)}`) : String(v)),
+  },
+  {
+    view: '智能体',
     key: 'agents.runtimeOptionsNoDefault',
     label:
       'runtime 选择器的**具体 runtime** 选项与身份接口一致（加/删一个 runtime 时写死的界面会在这里暴露）',
