@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  AGENT_TERM_LIMIT,
   CONTEXT_MESSAGE_LIMIT,
   CONTEXT_TERM_LIMIT,
   extractContextTerms,
@@ -23,6 +24,8 @@ describe('抽词：该抽的', () => {
       '再确认下 whisper.cpp 的 VAD 那一段，我担心 base 模型不够准',
       '现在跑的是 base-q5_1，要不要换 small-q5_1',
       'AgentDeck 这边 openConversation 的入口也检查过了',
+      // ⚠️ `distilly` 是**全小写自造词**：按 287 批的规则，用户说过 ≥2 次才算
+      'distilly 那个目录我还是没找到',
     ])
     for (const want of [
       'wiki-capture',
@@ -55,6 +58,73 @@ describe('抽词：该抽的', () => {
   test(`★ 最多 ${CONTEXT_TERM_LIMIT} 个词（prompt 预算就那么多）`, () => {
     const text = Array.from({ length: 40 }, (_, i) => `Token${i}Name`).join(' ')
     assert.ok(extractContextTerms([text]).length <= CONTEXT_TERM_LIMIT)
+  })
+})
+
+describe('抽词：两个来源，两套门槛（287 批）', () => {
+  test('★★ 全小写自造词：用户只说 1 次**不算**，说 2 次才算（只有人会打错字）', () => {
+    // 用户说一次 ⇒ 不收（可能是 `samll` 这种笔误）
+    assert.deepEqual(extractContextTerms(['我们用了 distilly 一次']), [])
+    // 用户说两次 ⇒ 收（同一个词在两句话里都用过 = 它是真词）
+    assert.deepEqual(extractContextTerms(['distilly 装好了', 'distilly 是内置那条']), ['distilly'])
+  })
+
+  test('★★ 模型回复只补**强形状**的词；全小写自造词与路径 / 引用 / 文件名一律不收', () => {
+    // 强形状（驼峰 / 带分隔符 / 缩写）⇒ 收
+    assert.deepEqual(extractContextTerms({ userTexts: [], agentTexts: ['用的是 AgentDeck 与 ARC'] }), [
+      'AgentDeck',
+      'ARC',
+    ])
+    // 全小写自造词（模型说了也不算——它不是"会打错字"，而是"这段字不会被说出口"）
+    assert.deepEqual(extractContextTerms({ userTexts: [], agentTexts: ['挂载了 distilly'] }), [])
+    // 路径 / 引用 / 文件名 ⇒ 不收（实测真实对话里这些会把 prompt 灌满）
+    assert.deepEqual(
+      extractContextTerms({
+        userTexts: [],
+        agentTexts: ['见 doc/image/obsidian-wiki-memory-flow.svg 与 arXiv:2610.11794 还有 memento3-ste-article.md'],
+      }),
+      [],
+    )
+  })
+
+  test(`★ 模型来源最多补 ${AGENT_TERM_LIMIT} 个（它的输出量级比你的话大得多）`, () => {
+    const terms = extractContextTerms({
+      userTexts: [],
+      agentTexts: ['Alpha One, Beta Two, Gamma Three, Delta Four, Epsilon Five'],
+    })
+    assert.ok(terms.length <= AGENT_TERM_LIMIT, JSON.stringify(terms))
+  })
+
+  test('★★ 模型回复里的**普通英文词**不收（否则英文散文会灌满 prompt）', () => {
+    assert.deepEqual(
+      extractContextTerms({
+        userTexts: [],
+        agentTexts: ['The prize goes to Pong, and prize money is fine. Prize!'],
+      }),
+      [],
+    )
+  })
+
+  test('★★ URL 只取**最后一段路径**（整条 URL 进 prompt 毫无用处）', () => {
+    assert.deepEqual(
+      extractContextTerms(['你看看 https://github.com/ar9av/obsidian-wiki 这个']),
+      ['obsidian-wiki'],
+    )
+  })
+
+  test('★ 表达式形态（`N=1`）不当词收', () => {
+    assert.deepEqual(extractContextTerms({ userTexts: [], agentTexts: ['样本 N=1，x<3'] }), [])
+  })
+
+  test('★ 用户说过的词排在模型说过的词前面（要识别的是你的嘴）', () => {
+    const terms = extractContextTerms({
+      userTexts: ['Memento 那篇论文'],
+      agentTexts: ['Memento 的 arXiv 版本，还有 ARC Prize 与 LaTeX 模板'],
+    })
+    const idxUser = terms.indexOf('Memento')
+    const idxAgentOnly = terms.indexOf('LaTeX')
+    assert.ok(idxUser >= 0 && idxAgentOnly >= 0, JSON.stringify(terms))
+    assert.ok(idxUser < idxAgentOnly, `用户提过的词应更靠前：${JSON.stringify(terms)}`)
   })
 })
 

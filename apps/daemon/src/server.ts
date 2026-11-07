@@ -90,7 +90,7 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from '@agentdeck/i18n'
 import { NOT_BUILT_HINT, isWebBuilt, loadStatic, webBuildId } from '@agentdeck/web'
 import { VoiceService } from './voice/service.ts'
 import { DEFAULT_ASR_MODEL } from './voice/models.ts'
-import { CONTEXT_MESSAGE_LIMIT, extractContextTerms } from './voice/context-terms.ts'
+import { CONTEXT_MESSAGE_LIMIT } from './voice/context-terms.ts'
 import type { CaptureFactory } from './voice/capture.ts'
 import type { SessionLimits } from './voice/session.ts'
 import type { TranscriberLoader } from './voice/transcriber.ts'
@@ -483,8 +483,11 @@ export interface DaemonOptions {
   voiceFetchImpl?: typeof fetch
   /** 会话的几条闸（测试调小，别真的等 8 秒）。 */
   voiceLimits?: Partial<SessionLimits>
-  /** 注入"从对话抽词"（测试不建真对话也能量到这段管线）。 */
-  voiceContextProvider?: (conversationId: string) => Promise<string[]>
+  /** 注入"从对话取素材"（测试不建真对话也能量到这段管线）。 */
+  voiceContextProvider?: (conversationId: string) => Promise<{
+    userTexts: readonly string[]
+    agentTexts?: readonly string[]
+  }>
   /**
    * 注入"原生模块能不能加载"与"模型状态"（测试用）。
    *
@@ -2195,9 +2198,29 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
    *   ② agent 的输出里满是代码片段与路径，进 prompt 只会把偏见拉偏。
    * ⚠️ 只**读** store，一行都不写（这一层的纪律：不写库、不建 run、不建链接）。
    */
-  const voiceContextProvider = async (conversationId: string): Promise<string[]> => {
+  const voiceContextProvider = async (
+    conversationId: string,
+  ): Promise<{ userTexts: string[]; agentTexts: string[] }> => {
     const turns = await store.listChatTurns(conversationId as ConversationId)
-    return extractContextTerms(turns.slice(-CONTEXT_MESSAGE_LIMIT).map((t) => t.userText))
+    const recent = turns.slice(-CONTEXT_MESSAGE_LIMIT)
+    const userTexts = recent.map((t) => t.userText)
+    /**
+     * ★ 287 批（使用者："只有用户会输出错误"）：除了**你说的话**，也读**模型的回复**——
+     *   模型已经整理过，所以它出现的全小写词一次就算（你说的话要 ≥2 次）。
+     * ⚠️ 只取每轮 run 的**最后一条文本**（`lastTextOf`）：那是它的结论，不是中间过程。
+     * ⚠️ 读不到就跳过（那一轮可能没跑起来，或者用户删了 run）——抽词不该因此失败。
+     */
+    const agentTexts: string[] = []
+    for (const turn of recent) {
+      if (turn.runId === null) continue
+      try {
+        const last = lastTextOf(await store.listRunMessages(turn.runId))
+        if (last !== null && last !== '') agentTexts.push(last)
+      } catch {
+        // 这一轮的输出读不出来就算了
+      }
+    }
+    return { userTexts, agentTexts }
   }
   const voice = new VoiceService({
     asrRoot: voiceRoot,

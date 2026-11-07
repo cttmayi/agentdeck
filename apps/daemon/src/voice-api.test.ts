@@ -86,7 +86,12 @@ async function withDaemon<T>(
      */
     voiceContextProvider: async (conversationId: string) => {
       contextCalls.push(conversationId)
-      return ['AgentDeck', 'wiki-capture']
+      // ★ 287 批：素材分两个来源（你说的话 + 模型的回复）
+      return {
+        userTexts: ['用 AgentDeck 跑一遍'],
+        // 模型那侧只补**强形状**的词（287 批：路径/文件名/全小写散文都不收）
+        agentTexts: ['这个对话里还提到了 wiki-capture 与 distilly'],
+      }
     },
     /**
      * ⚠️ 这两条注入是**必须**的，不是图省事：真探测的结果取决于跑测试这台机器
@@ -363,6 +368,8 @@ describe('录音会话', () => {
       }
       assert.equal(snapshot['state'], 'done', JSON.stringify(snapshot))
       // 回显：这次到底用了哪些"对话词"（界面上敢说"用了 2 个对话里的词"靠它）
+      // `AgentDeck` 出自你说的话；`wiki-capture` 从模型的回复补进来（强形状，1 次就够）；
+      // `distilly` 是全小写自造词且只出现在模型回复里 ⇒ 不收（见 context-terms 的说明）
       assert.deepEqual(snapshot['contextTerms'], ['AgentDeck', 'wiki-capture'])
     })
   })

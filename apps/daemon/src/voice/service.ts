@@ -15,6 +15,7 @@ import type { CaptureFactory } from './capture.ts'
 import { VoiceSession, type SessionLimits, type SessionSnapshot } from './session.ts'
 import type { Transcriber, TranscriberLoader } from './transcriber.ts'
 import { readVocab, writeVocab, type VoiceVocab } from './vocab.ts'
+import { extractContextTerms } from './context-terms.ts'
 
 /**
  * 语音这一块的**装配点**：能力、设置、词表、模型、会话，全在这里收口。
@@ -59,7 +60,10 @@ export interface VoiceServiceDeps extends Omit<CapabilityDeps, 'modelId'> {
    *   （见文件头）——它只知道"麦克风 → 文本"。识字的活儿交给 server 注入进来，
    *   边界就不动。将来任务页要接，也只需要在这里再开一个入口。
    */
-  contextProvider?: (conversationId: string) => Promise<string[]>
+  contextProvider?: (conversationId: string) => Promise<{
+    userTexts: readonly string[]
+    agentTexts?: readonly string[]
+  }>
 }
 
 /** 结束的会话留几条结果给页面轮询（留太久会让内存慢慢长，全丢又会让"刚好在这次轮询
@@ -236,7 +240,12 @@ export class VoiceService {
       input.conversationId !== ''
     ) {
       try {
-        contextTerms = await this.deps.contextProvider(input.conversationId)
+        /**
+         * ★ 287 批：两个来源——**你说的话** + **模型在这个对话里的回复**。
+         *   前者的全小写词要出现 ≥2 次（人会打错字），后者出现一次就够
+         *   （模型已经整理过）。打分与准入门槛都在 `context-terms.ts` 里，这里只管取素材。
+         */
+        contextTerms = extractContextTerms(await this.deps.contextProvider(input.conversationId))
       } catch {
         // 抽词失败不影响录音：那只是"少一层帮助"
         contextTerms = []

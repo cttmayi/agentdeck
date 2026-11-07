@@ -155,6 +155,41 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 ⇒ 判没声音"那道闸挡住；**prompt 会诱导**（杂词让 `我下午把` 变 `我下无法规及`）——
 所以只放标识符、控预算、可关闭。
 
+## 7.6 抽词的完整规则（批 286–287）
+
+素材来自**当前对话**的两个来源，**两套门槛**（使用者定："≥2 次只用在用户语句上，
+大模型的答复不需要，因为只有用户会输出错误"）：
+
+| 来源 | 取什么 | 准入门槛 |
+|---|---|---|
+| **你说的话** | 最近 20 轮 `ChatTurn.userText` | 强形状 1 次即可；**全小写自造词要 ≥2 次** |
+| **模型的回复** | 每轮 run 的**最后一条文本**（`lastTextOf`） | **只收强形状**，且排除路径（`/`）、引用（`:`）、文件名（`.md`/`.png`）、超 24 字符；**最多补 3 个** |
+
+**强形状** = 带分隔符（`whisper.cpp`/`wiki-capture`/`base-q5_1`）｜camelCase（`openConversation`）｜
+PascalCase（`AgentDeck`）｜缩写（`VAD`、`ARC`、`STE100`）｜含大写字母。
+
+一律不收：纯中文（没有分词器时最容易误伤）、纯数字、长 hash、表达式（`N=1`）、
+图尺寸（`1800×1306`）、`COMMON_ENGLISH`（约 500 词：常见英文词 + 开发通用词 +
+缩写形态的通用词 `LLM/API/SVG/PNG/Git`…）。
+
+其它细节：
+- **URL 取最后一段路径**（`…/ar9av/obsidian-wiki` → `obsidian-wiki`）
+- 排序：你说过的词永远在前（次数 → 新鲜度），模型的补充词排后面；总数上限 12
+- 进 prompt 时**手动词表先占 180 字预算**，自动词只填剩下的
+- 回显：快照带 `contextTerms`；识别完成 toast 说「用了 N 个对话里的词，纠正 M 处」
+- 开关：设置里「用对话里的词」（默认开）；抽词失败不影响录音
+
+真数据验收（本机 store 里的两个真实对话）：
+
+```
+「调查 Memento 3」(5 轮)  → ASD-STE100 · arXiv · Memento · STE100 · RHAE · RSI
+「obsidian-wiki」(2 轮)   → wiki-skills · obsidian-wiki
+```
+
+⚠️ 不加"模型来源限定"时的对照（说明为什么要有那三条过滤）：模型那一侧会灌进
+`SVG/PNG/Git/Agentic/Workflow/recap/unittest/1800×1306/doc/image/…-flow.svg`——
+"写下来的字"不等于"会说出口的名字"。
+
 ## 8. 踩过的坑（写在这里免得再踩）
 
 **真机验证（2026-11，真模型 + 真 whisper + `say` 合成语音）抓到的两个真缺陷**——它们

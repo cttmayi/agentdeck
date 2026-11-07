@@ -25,6 +25,23 @@
  * ③ 目标很窄：只要"标识符形状"的东西，正字法是确定的，正则在这类目标上准确率很高。
  *
  * ══════════════════════════════════════════════════════════════════
+ * 两个来源，两套门槛（分批第 287 批，使用者定的）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 原话："「全小写自造词要 ≥2 次」这个我想只用在用户的语句中，大模型的答复不需要，
+ *       因为只有用户会输出错误。"
+ *
+ * 这条判断是对的，而且它顺带让"模型回复"成了一个**有价值的补充来源**：
+ *   · **你说的话**：可能有拼写错（`samll` 这种），所以全小写自造词要出现 **≥2 次**
+ *     才算"这是你真在用的词"；
+ *   · **模型的回复**：已经整理过，**全小写词出现一次就够**。
+ *     ⚠️ 代价是英文散文里的普通词会混进来（实测出现过 `Prize`/`Pong`）⇒
+ *     用 `COMMON_ENGLISH` 那张词表兜（`prize`/`pong`/`however`… 都在里面），
+ *     并且模型的权重低于用户（1.0 vs 1.5）。
+ *
+ * 打分上用户永远优先（1.5 vs 1.0）：要识别的是你的嘴，模型只是补充你没说全的词。
+ *
+ * ══════════════════════════════════════════════════════════════════
  * 为什么**不抽中文**
  * ══════════════════════════════════════════════════════════════════
  *
@@ -133,7 +150,21 @@ const COMMON_ENGLISH = new Set(
     'thread threads async await promise callback listener emitter plugin plugins loader ' +
     'parser encoder decoder adapter factory registry resolver router middleware schema ' +
     'schemas index indexes key keys id ids uuid ulid sha md5 base64 utf8 webhook payload ' +
-    'prompt prompts skill skills agent agents model models token tokens limit limits'
+    'prompt prompts skill skills agent agents model models token tokens limit limits ' +
+    'prize prizes pong notion memo file files read reads write writes email emails ' +
+    'answer answers question questions paper papers article articles author authors ' +
+    'book books chapter chapters section sections figure figures table tables image images ' +
+    'github gitlab pdf docx pptx csv xlsx url link links site website blog post posts ' +
+    // 缩写形态的通用词（它们"长得像标识符"，但进 prompt 只会把普通话说成术语）
+    'llm llms gpt ai agi mcp rag rl sdk cli ide api apis url urls uri ui ux os vm cpu gpu ' +
+    'ram ssd usb pdf csv svg png jpg jpeg gif webp mp3 mp4 wav git github gitlab npm pnpm ' +
+    'yarn node deno html css json yaml toml xml sql http https ftp dns tcp udp ' +
+    // 模型回复里"首字母大写但其实是普通词"的那一批（实测：Agentic / Workflow 混进来过）
+    'agentic workflow workflows session sessions memory memories context contexts runtime ' +
+    'plugin plugins template templates overview overviews summary summaries appendix ' +
+    'example examples sample samples result results output outputs input inputs ' +
+    'money cost costs price prices time times day days week weeks month months year years ' +
+    'goes went come came take takes give gives says said tell tells know knows think thinks'
   ).split(/\s+/).filter((w) => w !== ''),
 )
 
@@ -145,55 +176,118 @@ export interface ExtractOptions {
   limit?: number
 }
 
+/** 抽词的素材：**你说的话** + **模型在这个对话里的回复**（后者可省略）。 */
+export interface ContextSources {
+  userTexts: readonly string[]
+  agentTexts?: readonly string[]
+}
+
+/** 模型来源最多补几个词（它的输出量级比你的话大得多，不设上限会挤掉你说的词）。 */
+export const AGENT_TERM_LIMIT = 3
+/** 模型来源的词最多这么长（更长的多半是文件名 / 路径）。 */
+const AGENT_TERM_MAX = 24
+
 /**
- * 从若干段文本里抽出候选词。
+ * 从对话里抽候选词。两条准入线分开（见文件头那段说明）：
  *
- * 打分 = 出现次数 × (含大写或分隔符 ? 2 : 1) × (出自你说的话 ? 1.5 : 1)。
- * 这里只传"你说的话"，所以第三项恒为 1.5 —— 但函数保留它，**将来接 agent 输出时
- * 直接降权**（那是唯一需要动这里的地方）。
+ *   · **你说的话**：强形状出现 1 次即可；**全小写自造词要出现 ≥2 次**
+ *     （只有人会打错字，`samll` 这种一次不算数）。
+ *   · **模型的回复**：只收**强形状**，而且排除
+ *     路径（含 `/`）、引用（含 `:`）、文件名（`.md`/`.png` 结尾）、超长的，
+ *     并且最多补 {@link AGENT_TERM_LIMIT} 个。
+ *     ⚠️ 为什么这么严：模型的输出里有大量路径与散文（实测 `doc/image/…-flow.svg`、
+ *     `Agentic`、`recap`、`unittest`）——它们是"写下来的字"，不是"会说出口的名字"。
+ *     放开它们的代价是把整份 prompt 灌满，而一个正确的专名都听不回来。
  *
- * ⚠️ 通用**小写**词要求出现 ≥2 次才算（`model` 出现一次就进 prompt 太危险）。
+ * 排序：**你说过的词永远在前**（按出现次数、再按新鲜度），模型的补充词排在后面。
  */
 export function extractContextTerms(
-  texts: readonly string[],
+  sources: ContextSources | readonly string[],
   options: ExtractOptions = {},
 ): string[] {
   const limit = options.limit ?? CONTEXT_TERM_LIMIT
-  const seen = new Map<string, { term: string; count: number; shaped: boolean }>()
+  // 兼容旧调用（只给一串用户文本）
+  const userTexts: readonly string[] = Array.isArray(sources)
+    ? (sources as readonly string[])
+    : (sources as ContextSources).userTexts
+  const agentTexts: readonly string[] = Array.isArray(sources)
+    ? []
+    : ((sources as ContextSources).agentTexts ?? [])
 
-  for (const text of texts.slice(-CONTEXT_MESSAGE_LIMIT)) {
-    for (const raw of splitTokens(text)) {
+  /** 用户来源的词：`{ term, count, strong, freshness }`。 */
+  const fromUser = new Map<string, { term: string; count: number; strong: boolean; fresh: number }>()
+  for (const { token, fresh } of tokenize(userTexts)) {
+    const strong = isStrongShape(token)
+    const key = token.toLowerCase()
+    const cur = fromUser.get(key) ?? { term: token, count: 0, strong, fresh }
+    cur.count += 1
+    if (strong && !cur.strong) {
+      cur.term = token
+      cur.strong = true
+    }
+    cur.fresh = Math.max(cur.fresh, fresh)
+    fromUser.set(key, cur)
+  }
+
+  /** 用户来源的准入：强形状 1 次；全小写自造词 ≥2 次。 */
+  const userTerms = [...fromUser.values()]
+    .filter((c) => c.strong || c.count >= 2)
+    .sort((a, b) => b.count - a.count || b.fresh - a.fresh)
+  const taken = new Set(userTerms.map((c) => c.term.toLowerCase()))
+
+  /** 模型来源：只收强形状，且不是路径 / 引用 / 文件名（见上面那段"为什么这么严"）。 */
+  const fromAgent = new Map<string, { term: string; count: number; fresh: number }>()
+  for (const { token, fresh } of tokenize(agentTexts)) {
+    if (!isStrongShape(token)) continue
+    if (token.includes('/') || token.includes(':') || /\.[a-z]{2,5}$/i.test(token)) continue
+    if (token.length > AGENT_TERM_MAX) continue
+    const key = token.toLowerCase()
+    if (taken.has(key)) continue
+    const cur = fromAgent.get(key) ?? { term: token, count: 0, fresh }
+    cur.count += 1
+    cur.fresh = Math.max(cur.fresh, fresh)
+    fromAgent.set(key, cur)
+  }
+  const agentTerms = [...fromAgent.values()]
+    .sort((a, b) => b.count - a.count || b.fresh - a.fresh)
+    .slice(0, AGENT_TERM_LIMIT)
+
+  return [...userTerms, ...agentTerms].slice(0, limit).map((c) => c.term)
+}
+
+/** 强形状 = 带分隔符 / camelCase / PascalCase / 缩写 / 含大写字母。 */
+function isStrongShape(token: string): boolean {
+  return SHAPES.some((re) => re.test(token)) || /[A-Z]/.test(token)
+}
+
+/** 把若干段文本切成候选 token（含"这算不算词"的过滤，返回 token 与"多新鲜"）。 */
+function tokenize(texts: readonly string[]): Array<{ token: string; fresh: number }> {
+  const out: Array<{ token: string; fresh: number }> = []
+  const window = texts.slice(-CONTEXT_MESSAGE_LIMIT)
+  const span = Math.max(1, window.length - 1)
+  window.forEach((text, index) => {
+    const fresh = index / span
+    for (let raw of splitTokens(text)) {
+      // ★ URL 只取**最后一段路径**：`…/ar9av/obsidian-wiki` → `obsidian-wiki`
+      //   （整条 URL 进 prompt 毫无用处，而末段正是你会说出口的那个名字）
+      if (raw.includes('://')) {
+        const segs = raw.split('://')[1]?.split('/').filter((x) => x !== '') ?? []
+        raw = segs.at(-1) ?? raw
+      }
       const token = trimToken(raw)
       if (token.length < MIN_LEN || token.length > MAX_LEN) continue
       if (STOPWORDS.has(token.toLowerCase())) continue
+      if (COMMON_ENGLISH.has(token.toLowerCase())) continue
       if (/^\d+$/.test(token)) continue
-      // 长十六进制（hash / 会话 id）：进 prompt 毫无用处，还占预算
+      // `N=1`、`x<3` 这类是表达式不是名字；`1800×1306` 是图尺寸
+      if (/[=<>*()]/.test(token)) continue
+      if (/[0-9]+[×x][0-9]+/.test(token)) continue
+      // 长十六进制（hash / 会话 id）：进 prompt 毫无用处
       if (/^[0-9a-f]{16,}$/i.test(token)) continue
-      const shaped = SHAPES.some((re) => re.test(token)) || /[A-Z]/.test(token)
-      const key = token.toLowerCase()
-      const cur = seen.get(key) ?? { term: token, count: 0, shaped }
-      cur.count += 1
-      // 后来的写法里带大写/分隔符的，用它当"正字"（`agentdeck` 之后出现 `AgentDeck` 时取后者）
-      if (!cur.shaped && shaped) {
-        cur.term = token
-        cur.shaped = true
-      }
-      seen.set(key, cur)
+      out.push({ token, fresh })
     }
-  }
-
-  return [...seen.values()]
-    /**
-     * 准入规则（两条择一）：
-     *   ① **形状**像标识符（大写 / 分隔符 / 缩写）；
-     *   ② 或：**全小写但不在常见词表里、且 ≥4 个字母** —— 这一条是给 `distilly`
-     *      这类"自造词"留的路（见 `COMMON_ENGLISH` 那段说明）。
-     */
-    .filter((c) => c.shaped || (!COMMON_ENGLISH.has(c.term.toLowerCase()) && c.term.length >= 4))
-    .map((c) => ({ term: c.term, score: c.count * (c.shaped ? 2 : 1) * 1.5 }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((c) => c.term)
+  })
+  return out
 }
 
 /** 按空白与中英文标点切（保留 `@ . - _ /` 这些标识符里会出现的字符）。 */
