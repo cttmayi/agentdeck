@@ -392,7 +392,7 @@
      共用样式（`@agentdeck/ui`）。 */
   .install-box {
     border: 1px solid var(--line);
-    border-radius: var(--radius-1);
+    border-radius: var(--radius-sm);
     padding: var(--sp-2) var(--sp-3);
     margin-bottom: var(--sp-3);
   }
@@ -424,7 +424,7 @@
     overflow: auto;
     background: var(--surface-2);
     border: 1px solid var(--line);
-    border-radius: var(--radius-1);
+    border-radius: var(--radius-sm);
     padding: var(--sp-2);
     margin: var(--sp-2) 0;
     white-space: pre-wrap;
@@ -434,7 +434,7 @@
     overflow: auto;
     background: var(--surface-2);
     border: 1px solid var(--line);
-    border-radius: var(--radius-1);
+    border-radius: var(--radius-sm);
     padding: var(--sp-3);
     white-space: pre-wrap;
   }

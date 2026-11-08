@@ -122,7 +122,7 @@
       {#if onupload}
         <button
           type="button"
-          class="ghost small attach"
+          class="btn btn--ghost btn--sm attach"
           data-composer-attach
           title={attachLabel}
           aria-label={attachLabel}

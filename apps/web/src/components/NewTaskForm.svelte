@@ -659,7 +659,7 @@
        （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
        出来（与顶栏激活按钮同一套惯例）。 */
     background: var(--accent-dim, #2f6fed);
-    color: #fff;
+    color: var(--on-accent);
   }
 
   .card-title {

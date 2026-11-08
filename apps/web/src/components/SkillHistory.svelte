@@ -281,7 +281,7 @@
     border: 1px solid var(--line);
   }
   .change.add {
-    color: var(--ok, #2a7);
+    color: var(--good);
   }
   .change.del {
     color: var(--bad, #c33);
@@ -293,17 +293,17 @@
   .hunk-head,
   .diff-line {
     font-family: var(--font-mono);
-    font-size: var(--fs-small);
+    font-size: var(--fs-xs);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     padding: 0 var(--sp-2);
   }
   .hunk-head {
-    color: var(--fg-faint);
+    color: var(--text-faint);
     background: var(--surface-2);
   }
   .diff-line.add {
-    background: color-mix(in srgb, var(--ok, #2a7) 12%, transparent);
+    background: color-mix(in srgb, var(--good) 12%, transparent);
   }
   .diff-line.del {
     background: color-mix(in srgb, var(--bad, #c33) 12%, transparent);

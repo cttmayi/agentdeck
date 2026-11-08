@@ -2220,12 +2220,8 @@
   }
 
   /* ══════════ 表单字段（审阅态） ══════════ */
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-    margin: 0;
-  }
+  /* 字段的竖排/间距已收进 `app.css` 的 `.field`（300 批）；这条原来在这里
+     又抄了一遍，而且是死规则（本组件模板里没有 `class="field"`）。 */
   .row-end {
     display: flex;
     justify-content: flex-end;
@@ -2274,7 +2270,7 @@
     text-decoration: underline;
   }
   .draft-turn-toggle:hover {
-    color: var(--text-muted);
+    color: var(--text-dim);
   }
   /* 「停止」在 who 行右侧（与聊天页 `.stop` 同一位置、同一作用） */
   .stop {
@@ -2336,9 +2332,9 @@
   }
   .hunk-head {
     padding: 0.15rem 0.5rem;
-    color: var(--fg-faint);
-    background: var(--bg-sunken, #f6f6f6);
-    border-top: 1px solid var(--border);
+    color: var(--text-faint);
+    background: var(--surface-2);
+    border-top: 1px solid var(--line);
     user-select: none;
   }
   .hunk-head:first-child {
@@ -2385,7 +2381,7 @@
   .tab-count {
     padding: 0 5px;
     border-radius: var(--radius-pill);
-    background: var(--panel-sunken, rgba(0, 0, 0, 0.06));
+    background: var(--surface-2);
     font-size: var(--fs-xs);
   }
   /* 审核跑着时 tab 上的点：切到草稿去改字也不会忘了它还在跑 */
@@ -2479,7 +2475,8 @@
   /*
    * ★ 分批第 195 批：`.conclusion-bar .bar-actions`（动作组）与它的取整规则删了——
    * 动作搬到栏头右侧（`[data-review-actions]`），结论条不再托按钮，也就不需要为它
-   * 把 `.small` 压到 3px。**这条结论条现在是一行纯文本**（体检结果 · 文件数 · 目标）。
+   * 把 `.small`（298 批已改名 `.fs-xs`）压到 3px。**这条结论条现在是一行纯文本**
+   * （体检结果 · 文件数 · 目标）。
    */
   .bar-sep {
     color: var(--line-strong);
@@ -2604,11 +2601,11 @@
   }
 
   .file-row:hover {
-    background: var(--hover);
+    background: var(--surface-hover);
   }
 
   .file-row.active {
-    background: var(--active, var(--hover));
+    background: var(--surface-hover);
     font-weight: 600;
   }
 

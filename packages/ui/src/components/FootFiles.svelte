@@ -112,10 +112,10 @@
       <span class="twisty">{open ? '▾' : '▸'}</span>
       {title}
       {#if count !== ''}
-        <span class="faint small">{count}</span>
+        <span class="faint fs-xs">{count}</span>
       {/if}
       {#if dropHint !== '' && ondropfiles !== undefined}
-        <span class="faint small drop-hint">{dropHint}</span>
+        <span class="faint fs-xs drop-hint">{dropHint}</span>
       {/if}
     </button>
     {#if path !== ''}

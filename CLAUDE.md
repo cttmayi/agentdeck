@@ -69,10 +69,14 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
 5. **不要留死接口**：本仓库最常见的缺陷是"字段/接口/界面都在，就是没有代码路径让它发生"。留一处死接口，早晚有人以为它生效了。
 6. **交给 CLI 的只有「第一句话」**（D29）：由 `packages/agent-core/src/first-sentence.ts` 一处组装（三块：框架/身份/任务），整块进 run 日志。要往里面加东西就加在那一个函数里——**不要另开投递通道**，也不要写 CLI 认识的项目记忆文件名。
 7. **界面改动要过 `svelte-check`**（`pnpm run check` 已含，`tsc` 看不见 `.svelte` 模板）；改布局再跑 `pnpm run probe:layout`。
-8. **改界面之前的三件事**（详见 [`docs/README.md`](docs/README.md)）：
+8. **改界面之前的四件事**（详见 [`docs/README.md`](docs/README.md)；样式规则见
+   [`docs/design/ui-style.md`](docs/design/ui-style.md)——**控件长什么样只有一处定义**
+   （`packages/ui/src/styles/app.css`），页面只决定"放什么、放在哪"）：
    - Markdown 渲染器是自己写的（`apps/web/src/lib/markdown.ts`），渲染的是 agent 产出的文本，顺序是硬规则：**先摘结构 → 再转义剩余文字 → 最后拼自己的标签**。原始 HTML 一律不认。
    - 工作目录文件响应**必须带 `Content-Security-Policy: sandbox allow-scripts`**，**绝不要加 `allow-same-origin`**（加上等于把"agent 写的 html 能读 run 日志"这条路接回去）。测试里钉着。
    - 布局类缺陷类型检查看不见（"两栏有没有真并排"之类），只有浏览器量得出来。
+   - **样式别开小灶**：按钮/输入/徽标/面板的类名从 `ui-style.md` §2 挑，
+     不写裸 `px`/`#hex`、不在组件里重定义全局控件——`tests/ui-style.test.ts` 会拦。
 
 ## 文档与现状
 

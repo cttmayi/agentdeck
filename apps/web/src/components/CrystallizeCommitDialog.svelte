@@ -115,11 +115,6 @@
     flex-direction: column;
     gap: var(--sp-3);
   }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-1);
-  }
   .label {
     font-size: var(--fs-sm);
     color: var(--text-faint);

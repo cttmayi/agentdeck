@@ -594,7 +594,7 @@
     text-overflow: ellipsis;
   }
   .tidy-from.bad {
-    color: var(--text-warn, #b9770e);
+    color: var(--warn);
   }
   .tidy-from-mark {
     margin-right: 4px;

@@ -267,9 +267,9 @@
   }
   .hunk-head {
     padding: 0.15rem 0.5rem;
-    color: var(--fg-faint);
-    background: var(--bg-sunken, #f6f6f6);
-    border-top: 1px solid var(--border);
+    color: var(--text-faint);
+    background: var(--surface-2);
+    border-top: 1px solid var(--line);
     user-select: none;
   }
   .hunk-head:first-child {
@@ -290,12 +290,12 @@
     background: rgba(180, 35, 24, 0.08);
   }
   .diff-line .gutter {
-    color: var(--fg-faint);
+    color: var(--text-faint);
     text-align: right;
     user-select: none;
   }
   .diff-line .sign {
-    color: var(--fg-faint);
+    color: var(--text-faint);
     user-select: none;
   }
   .diff-line.add .sign {
@@ -375,11 +375,11 @@
   }
 
   .file-row:hover {
-    background: var(--hover);
+    background: var(--surface-hover);
   }
 
   .file-row.active {
-    background: var(--active, var(--hover));
+    background: var(--surface-hover);
     font-weight: 600;
   }
 
@@ -448,14 +448,14 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--fg-soft);
+    color: var(--text-dim);
     font-size: var(--fs-sm);
     cursor: pointer;
   }
 
   .pane-tabs > button.tabs-active {
-    background: var(--panel-sunken, rgba(0, 0, 0, 0.05));
-    color: var(--fg);
+    background: var(--surface-2);
+    color: var(--text);
     font-weight: 600;
   }
 

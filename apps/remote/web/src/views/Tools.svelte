@@ -132,7 +132,7 @@
     overflow: auto;
     background: var(--surface-2);
     border: 1px solid var(--line);
-    border-radius: var(--radius-1);
+    border-radius: var(--radius-sm);
     padding: var(--sp-3);
     white-space: pre-wrap;
   }

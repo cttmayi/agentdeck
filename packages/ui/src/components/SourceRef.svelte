@@ -9,5 +9,5 @@
 </script>
 
 {#if value}
-<span class="faint small source-ref" title={value}>{value}</span>
+<span class="faint fs-xs source-ref" title={value}>{value}</span>
 {/if}

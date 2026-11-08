@@ -230,7 +230,7 @@
     </div>
 
     {#if member.privateDraft.id}
-      <span class="badge">{$t('groups.privateBadge')}</span>
+      <span class="badge badge--sm badge--accent">{$t('groups.privateBadge')}</span>
     {/if}
   {/if}
 </div>
@@ -293,7 +293,7 @@
        （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
        出来（与顶栏激活按钮同一套惯例）。 */
     background: var(--accent-dim, #2f6fed);
-    color: #fff;
+    color: var(--on-accent);
   }
 
   .member-card input,
@@ -393,16 +393,12 @@
     text-overflow: ellipsis;
   }
 
+  /* 「私有成员」标记就是系统里的小号 accent 徽标（`.badge--sm .badge--accent`），
+     组件里只留"贴着左边界"这一条位置属性。
+     ⚠️ 2026-10 的教训：原来这里自己写了一块色，引用的那个变量（`--accent-soft`）
+       全局根本没有定义 ⇒ 暗色主题下回退成浅底浅字，看不见。改用徽标族之后，
+       底色跟着 `currentColor` 走，两套主题都对。 */
   .badge {
     align-self: flex-start;
-    font-size: 0.8em;
-    padding: 0.15em 0.6em;
-    border-radius: var(--radius-pill);
-    /* ⚠️ 2026-10：原来 `background: var(--accent-soft, #e8f0ff)` —— `--accent-soft`
-       全局没有定义，暗色主题下回退到浅底 #e8f0ff + 浅蓝 `--accent`，浅底浅字看不清。
-       改用全局 `.badge` 同款主题安全写法：accent 文字 + 12% accent 底色，
-       两种主题都可读（浅色：深蓝字浅蓝底；暗色：浅蓝字深蓝底）。 */
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
   }
 </style>

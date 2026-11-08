@@ -1146,7 +1146,7 @@
               </div>
             </td>
             <td>
-              <!-- D69：名称与目录表 / remote 同一档（faint small）——slug 才是
+              <!-- D69：名称与目录表 / remote 同一档（`faint fs-xs`，298 批前叫 `small`）——slug 才是
                    主标识，名称是第二行 -->
               <div class="faint fs-xs">{s.name}</div>
               <!-- ★ 与工具页同一格式：名称下面跟一句说明（没有就不画）。

@@ -487,7 +487,10 @@ export const chatText = {
   'chat.rename': { zh: '改名', en: 'Rename' },
   'chat.renameSave': { zh: '保存', en: 'Save' },
   'chat.renamed': { zh: '已改名', en: 'Renamed' },
-  'chat.deleteConfirmYes': { zh: '确认删除', en: 'Delete' },
+  // 300 批：确认框的"确定"按钮与它那一行动作按钮**同名**（`chat.delete` = 删除对话，
+  //   组 / 任务那边也是这么写的）。原来是「确认删除」——同一个位置三种措辞，
+  //   一页一页看过去才会发现不一致。
+  'chat.deleteConfirmYes': { zh: '删除对话', en: 'Delete' },
   'chat.deleted': { zh: '对话已删除', en: 'Conversation deleted' },
   // ⚠️ 这四条是**误删后从构建产物里恢复的**（2026-10）：我用正则批量删 bridge 词条时，
   //    非贪婪匹配吃到了这几条。教训写在 D57 里：删词条要**按模块解析**，不要用正则扫文本。

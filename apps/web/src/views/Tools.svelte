@@ -630,7 +630,7 @@
               </div>
             </td>
             <td>
-              <!-- D69：名称与技能页同一档（faint small）——slug 才是主标识 -->
+              <!-- D69：名称与技能页同一档（`faint fs-xs`，298 批前叫 `small`）——slug 才是主标识 -->
               <div class="faint fs-xs">{tool.name}</div>
               <!-- ★ 与技能页同一格式：说明最多两行，全文在 `title` 里 -->
               {#if tool.description}

@@ -11,7 +11,7 @@
    * 聊天页一条消息长这样（`views/Chat.svelte`）：
    *
    *   <article class="turn">
-   *     <div class="who faint small">你 / 某个 agent · 用了 3 次工具 · 2 秒</div>
+   *     <div class="who faint fs-xs">你 / 某个 agent · 用了 3 次工具 · 2 秒</div>
    *     <div class="bubble user">…</div>          ← 人说的话，靠右、底色深一档
    *     <article class="bubble agent markdown">…</article>  ← agent 说的，满宽、Markdown
    *   </article>
@@ -68,7 +68,7 @@
 
 <article class="turn" data-chat-turn data-turn-role={role}>
   {#if who !== '' || whoExtra}
-    <div class="who faint small">
+    <div class="who faint fs-xs">
       {#if who !== ''}<span>{who}</span>{/if}
       {#if whoExtra}{@render whoExtra()}{/if}
     </div>

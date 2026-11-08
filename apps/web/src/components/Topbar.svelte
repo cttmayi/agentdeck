@@ -253,7 +253,7 @@
     height: 1.25rem;
     border-radius: 50%;
     background: var(--accent-dim);
-    color: #fff;
+    color: var(--on-accent);
     display: inline-flex;
     align-items: center;
     justify-content: center;

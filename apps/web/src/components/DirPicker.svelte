@@ -275,7 +275,7 @@
     max-height: 18rem;
     overflow-y: auto;
     border: 1px solid var(--line);
-    border-radius: var(--r-sm);
+    border-radius: var(--radius-sm);
     padding: var(--sp-1);
     display: flex;
     flex-direction: column;
@@ -287,7 +287,7 @@
     gap: var(--sp-2);
     padding: 0.15rem 0.35rem;
     border: 0;
-    border-radius: var(--r-sm);
+    border-radius: var(--radius-sm);
     background: none;
     text-align: left;
     width: 100%;
@@ -298,7 +298,7 @@
     cursor: pointer;
   }
   .row.dir:hover {
-    background: var(--bg-hover);
+    background: var(--surface-hover);
   }
   /* 文件淡一档：一眼就能看出"这些不是能点的" */
   .row.file {

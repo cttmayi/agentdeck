@@ -496,7 +496,7 @@
   .ap-chip.on {
     background: var(--accent-dim);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .ap-expand {
     border: 1px solid var(--line);

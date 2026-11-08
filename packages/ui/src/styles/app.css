@@ -47,6 +47,7 @@
   /* 字号层级 */
   /* ★ 299 批：11px / 10px 这两档原来散在组件里（徽标、进度条、极小的辅助字），
      不是新字号，是把已经在用的两档**给个名字** */
+  --fs-3xs: 0.625rem;
   --fs-2xs: 0.6875rem;
   --fs-xs: 0.75rem;
   --fs-sm: 0.8125rem;
@@ -65,15 +66,19 @@
   --radius-none: 0;
   --radius-xs: 6px;
   --radius-pill: 999px;
-  /* ★ 298 批：控件高度（按钮/输入/下拉的三种档）；现在只**登记**，改用见 299 批 */
+  /* ★ 298 批：控件高度（按钮/输入/下拉的两种档）。
+     298 批当批就用上了：`.topbar button` = `--ctl-h`、`.topbar .page-actions button` = `--ctl-h-sm` */
   --ctl-h: 1.9rem;
   --ctl-h-sm: 1.5rem;
-  --fs-3xs: 0.625rem;
   --radius: 8px;
   --radius-lg: 12px;
 
   --sidebar-w: 15rem;
   --topbar-h: 3.25rem;
+  /* ★ 300 批：压在 accent 实心块上的字色。亮/暗**两套主题里都是白**，所以写在
+     主题无关这一段（原来 11 处各写 `#fff`，其中 6 处在组件里——既看不出它是
+     "accent 上的字"，改主题时也没人会想到它）。 */
+  --on-accent: #fff;
 
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
@@ -417,7 +422,7 @@ hr {
 /* 当前那一格（呈现模式 / 正在建任务）：实心底，一排里最重的信号 */
 .topbar .page-actions button.active {
   background: var(--accent-dim);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .topbar .page-actions button.active:hover:not(:disabled) {
@@ -551,7 +556,7 @@ hr {
 
 .page-menu button.active {
   background: var(--accent-dim);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* 点空白处关闭（与抽屉同一个办法：全屏透明遮罩，不必判断"点哪儿算外面"） */
@@ -1175,7 +1180,7 @@ button,
   border-radius: var(--radius);
   border: none;
   background: var(--accent-dim);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   transition: filter 0.12s, background 0.12s;
 }
@@ -1236,7 +1241,7 @@ button:disabled,
  */
 .btn--primary {
   background: var(--accent-dim);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .btn--secondary {
@@ -1282,9 +1287,12 @@ button:disabled,
   font-size: var(--fs-xs);
 }
 
+/* 禁用态：除了整体变淡，字色也压到 faint——只靠透明度的话，accent 蓝在浅色
+   底上仍然"看起来能点"（300 批：`AgentDetail` 里那份本地定义并到这里）。 */
 .btn--link:disabled {
   opacity: 0.5;
-  cursor: default;
+  color: var(--text-faint);
+  cursor: not-allowed;
 }
 
 /* 更淡的链接（`Chat` 的撤销条）：靠虚线下划线表示可点，颜色压到 faint */
@@ -1390,7 +1398,18 @@ label > select { margin-top: var(--sp-1); }
    ⚠️ 这三条**原来在 `Skills.svelte` 与 `Tools.svelte` 里各抄了一份、逐字相同**
       （用 `diff` 验过）——同一套样式两份出处，改一处漏一处，两个页面立刻长得
       不一样。提到全局：同一件事只有一个出处。 */
-.field { margin-bottom: var(--sp-3); }
+/* ★ 300 批：字段的"竖排"也收在这里。原来 `CrystallizeCommitDialog` 与
+   `CrystallizeView` 各写了一遍 `display:flex; flex-direction:column; gap:--sp-1`
+   ——同一个形状两处抄，改一处就漏一处。`--flush` 给"外层已经管了间距、
+   自己不要再顶出 12px"的场合（审阅态那一屏）。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field--flush { margin-bottom: 0; }
 .field > label {
   display: block;
   margin-bottom: var(--sp-1);
@@ -1574,6 +1593,19 @@ tbody tr:last-child td { border-bottom: 0; }
   height: 5px;
   border-radius: 50%;
   background: currentColor;
+}
+
+/* 小一号（表单/卡片里的"私有""必填"这类贴身标记）。用 `em` 而不是令牌，
+   因为在密集的表单区里它要跟着那一块的正文一起缩，而不是钉死 12px。 */
+.badge--sm {
+  font-size: 0.8em;
+  padding: 0.15em 0.6em;
+}
+
+/* accent 强调档：只改字色，描边与 10% 底色都跟着 `currentColor` 走
+   （与 `.badge.local` 同一个配方，区别只在它不表示"来源"） */
+.badge--accent {
+  color: var(--accent);
 }
 
 /* ⚠️ `todo` / `backlog` 已无使用点：原来那个「本地技能目录缺哪几个」徽章挂在设置抽屉里，
@@ -1856,7 +1888,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .theme-picker button:hover:not(:disabled):not(.active) { color: var(--text); }
 .theme-picker button.active {
   background: var(--accent-dim);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* ══════════════ 提示条 ══════════════ */

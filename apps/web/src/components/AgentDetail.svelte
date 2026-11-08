@@ -969,7 +969,7 @@
         <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
           <!-- 服务端连 CLI 都不许改（内置整份只读），界面就别让它看起来能改。 -->
-          <span class="field">
+          <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
           <select id="agent-runtime" bind:value={draft.runtimeKey} disabled={readOnly}>
             <!-- ★ `default` = 跟随全局默认（2026-10 第 ⑦ 条）。它在最上面：新建的
@@ -1007,7 +1007,7 @@
           {$t('agents.instructionsLabel')}
           <!-- ★ 与 `NewAgentForm.svelte` 里那一栏**同一个字段、同一个要求**（D48）：
                指令是一份几百到上千字的文档，不是一行备注。 -->
-          <span class="field">
+          <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
           <textarea
             id="agent-instructions"
@@ -1646,7 +1646,7 @@
    *   小字。为什么要它：只读态原来只靠"灰一点"表达，而 `disabled` 的 select 与
    *   可选的 select 差别小到看不出来（使用者第一次就以为是能选的）。
    */
-  .field {
+  .field.field-lock {
     position: relative;
     display: block;
   }
@@ -1875,8 +1875,9 @@
     cursor: not-allowed;
   }
 
-  .btn--link.locked,
-  .btn--link:disabled {
+  /* 只读态（不是 disabled）：沿用同一个视觉。禁用态本身归 app.css 的
+     `.btn--link:disabled`，这里不再重复一份。 */
+  .btn--link.locked {
     color: var(--text-faint);
     cursor: not-allowed;
   }
