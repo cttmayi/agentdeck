@@ -154,7 +154,7 @@
 
 **第②③屏也已做完**（304B 一批收尾）：`ActionPicker` 的 `.ap-chip/.ap-expand/.ap-search/.ap-badge.fixed/.ap-bound-row`、
 `ChatMemoryTidy .tidy-text`、`ChatSettings .prefix-x`、`DirPicker .row`、`WorkDirTree .wd li` 全部换到 `--sp-*`。
-`.tpl-state .badge`（#17）**不按内距改**——它是 `.badge` 的重画，该并进 `.badge--sm`（另记）。
+`.tpl-state .badge`（#17）已按徽标族处理：新增 `.badge--outline`（描边换 `--line-strong`、圆角 `--radius`），字号与内距用 `.badge--sm`，组件里只留字色。`probe:layout` 618 全绿。
 `theme-picker` 的 `2px` 保持（它是选择器的内框，不是控件内距）。
 判据：`probe:layout` **618 项全绿**。
 每屏做完跑一次 `pnpm run probe:layout`（618 项），红了就当场看清是哪一屏的哪个断言。

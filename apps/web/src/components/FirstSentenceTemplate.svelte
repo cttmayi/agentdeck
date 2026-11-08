@@ -129,9 +129,9 @@
       <span class="tpl-label">{$t('tpl.label')}</span>
       <span class="tpl-state">
         {#if custom}
-          <span class="badge custom">{$t('tpl.custom')}</span>
+          <span class="badge badge--sm badge--outline custom">{$t('tpl.custom')}</span>
         {:else}
-          <span class="badge">{$t('tpl.platformDefault')}</span>
+          <span class="badge badge--sm badge--outline">{$t('tpl.platformDefault')}</span>
         {/if}
       </span>
     </div>
@@ -141,9 +141,9 @@
     {#if !showLabel}
       <span class="tpl-state tpl-state-inline">
         {#if custom}
-          <span class="badge custom">{$t('tpl.custom')}</span>
+          <span class="badge badge--sm badge--outline custom">{$t('tpl.custom')}</span>
         {:else}
-          <span class="badge">{$t('tpl.platformDefault')}</span>
+          <span class="badge badge--sm badge--outline">{$t('tpl.platformDefault')}</span>
         {/if}
       </span>
     {/if}
@@ -266,11 +266,10 @@
     color: var(--text-dim);
   }
 
+  /* ★ 304 批：这里是 `.badge` 的**重画**（换了圆角与描边强度），不是内距问题。
+     已经并入系统徽标：字号/内距用 `.badge--sm`，描边用 `.badge--outline`，
+     组件里只留"这一处的位置"（见下）。 */
   .tpl-state .badge {
-    font-size: var(--fs-xs);
-    padding: 1px 6px;
-    border-radius: var(--radius);
-    border: 1px solid var(--line-strong);
     color: var(--text-faint);
   }
 

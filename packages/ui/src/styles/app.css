@@ -1649,6 +1649,13 @@ tbody tr:last-child td { border-bottom: 0; }
   color: var(--accent);
 }
 
+/* 描边加强档（表单里的"平台默认 / 自定义"这类说明性徽标）：全局徽标的描边是
+   `currentColor` 的 28%，这一档换成 `--line-strong`，在浅底上更"看得见边界" */
+.badge--outline {
+  border-color: var(--line-strong);
+  border-radius: var(--radius);
+}
+
 /* ⚠️ `todo` / `backlog` 已无使用点：原来那个「本地技能目录缺哪几个」徽章挂在设置抽屉里，
    而设置抽屉随"本地技能目录改成显式安装"撤掉了（D73）。任务状态徽章另有各档（见下），
    表格 source 徽标已换 `badge.local`（D69）。保留这条只为兼容旧样式，不新增使用。 */
