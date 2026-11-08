@@ -1547,12 +1547,26 @@
      · `flex-wrap: wrap` 让长标题自己独占一行并折行 ⇒ 去掉 wrap（栏头是一行的事）
      · h2 要能收缩：`flex: 1 1 auto; min-width: 0` + 单行省略五件套
      · 按钮 `flex: 0 0 auto`，否则窄栏里「改名」会被压成两行 */
+  /* ★ 311 批（使用者："还是看见的是一行"）：这一行里其实是**三样东西**——
+     标题 h2、「改名」按钮、`文章写作员 · 2 轮` 那行辅助信息。要求（312 批定的规则）：
+     第一行标题 + 改名，第二行辅助信息。
+     做法：允许换行，让辅助信息**独占一整行**（`flex: 0 0 100%`），
+     标题则 `flex: 1 1 auto; min-width: 0` 在一行里收缩省略。 */
   .chat-head-main {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: var(--sp-2);
+    gap: var(--sp-1) var(--sp-2);
     min-width: 0;
+  }
+
+  /* 辅助信息（执行者 · 轮数 · 技能）：强制换到第二行 */
+  .chat-head-main > .detail-sub {
+    flex: 0 0 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .chat-head-main > h2 {
