@@ -409,6 +409,13 @@
     input = ''
     pendingText = ''
     draftWorkDir = ''
+    // ★ 2026-11（使用者报"跑着一个 CLI 时新建聊天，发送点不动"）：起草态是**没有当前
+    //   对话**的状态，但这里原来没清 `chatDetail`——旧对话的 turns 还在 detail 里，
+    //   `runningTurn` 沿用了旧对话正在跑的 run，把新对话的输入条锁住了（发送键置灰、
+    //   `send()` 也拦）。对话由第一句话诞生：起草那一刻就该清掉"上一个对话"，
+    //   连同它的 live run 一起（与 `select()` 切对话时清 `chatLiveRunId` 同一规矩）。
+    chatDetail.set(null)
+    chatLiveRunId.set(null)
     const first = $effectiveDefaultAgentId ?? executors[0]?.id ?? ''
     draftChoice = first === '' ? '' : `agent:${first}`
     draftPick = { agentId: first, skillId: '' }

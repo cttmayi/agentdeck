@@ -8552,6 +8552,73 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         })()
 
         /**
+         * ★ 2026-11（使用者报"聊天页跑着一个 CLI，新建对话，发送点不动"）：
+         *   起草态不该继承上一个对话的"正在跑"。量法：把当前对话的轮次伪装成
+         *   `running`（同 `chat.composerWhileRunning` 的手法）→ 点顶栏「新建对话」
+         *   → 起草态的发送键必须**可点**。
+         *
+         * 旧实现没清 `chatDetail`：起草态里 `runningTurn` 沿用了旧对话在跑的 run，
+         *   输入条被 `disabled={runningTurn !== null}` 锁死，字打得了、发送发不出去。
+         * 修法：`startDrafting()` 把 `chatDetail` / `chatLiveRunId` 清掉——
+         *   "对话由第一句话诞生"，起草那一刻就没有当前对话。
+         */
+        facts['chat.draftingNotLockedByPrevRun'] = await (async () => {
+          const real = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (!/\/api\/conversations\/[^/?]+$/.test(String(url))) {
+              return real.call(f.contentWindow, input, init)
+            }
+            return real.call(f.contentWindow, input, init).then(async (res) => {
+              if (!res.ok) return res
+              const body = await res.json().catch(() => null)
+              if (!body || !Array.isArray(body.turns)) return res
+              body.turns = body.turns.map((turn) =>
+                turn.runId ? { ...turn, status: 'running' } : turn,
+              )
+              return new Response(JSON.stringify(body), {
+                status: res.status,
+                headers: { 'content-type': 'application/json' },
+              })
+            })
+          }
+          let out = null
+          try {
+            if (!(await chatOpenFixtureConversation())) return null
+            const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+              text(b).includes('新建对话'),
+            )
+            if (!newBtn) {
+              errors.push('顶栏找不到「新建对话」——这一条空过')
+              return null
+            }
+            click(newBtn)
+            await wait(300)
+            const area = d().querySelector('.detail-pane textarea.composer-input')
+            const send = d().querySelector('[data-composer-send]')
+            if (!area || !send) {
+              errors.push('起草态下找不到输入条（`.composer-input` / 发送键）')
+              return null
+            }
+            // ⚠️ 发送键在**输入为空**时本来就置灰（`canSend = !disabled && value !== ''`），
+            //    必须先打一个字再断言——不然锁没锁根本量不出来。
+            const typed = '探针：上一轮还在跑，这一句是新对话'
+            area.value = typed
+            area.dispatchEvent(new f.contentWindow.Event('input', { bubbles: true }))
+            await wait(200)
+            const sendEnabled = send.disabled === false
+            if (!sendEnabled)
+              errors.push('上一对话在跑时新建对话，发送键被锁死了——起草态不该继承旧对话的 runningTurn')
+            out = { sendEnabled, drafting: !!d().querySelector('.detail-pane h2') }
+          } finally {
+            f.contentWindow.fetch = real
+            // 回到真实数据 + 退出起草态（点列表里的夹具对话）
+            await chatOpenFixtureConversation()
+          }
+          return out
+        })()
+
+        /**
          * ★ 分批第 234 批（使用者定）：「工作目录的文件」栏**最右侧**那颗「打开」——
          * 点了要在系统文件管理器里打开这个目录。
          *
