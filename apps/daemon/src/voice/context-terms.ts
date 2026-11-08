@@ -182,8 +182,22 @@ export interface ContextSources {
   agentTexts?: readonly string[]
 }
 
-/** 模型来源最多补几个词（它的输出量级比你的话大得多，不设上限会挤掉你说的词）。 */
-export const AGENT_TERM_LIMIT = 3
+/**
+ * 模型来源**最多**补几个词。
+ *
+ * ★ 分批第 288 批（使用者："最多 3 个…感觉太少了，合适吗？"）。
+ *
+ *   原来这里是 3：模型那侧一个词都进不来时（你说的话已经把 12 个名额占满），
+ *   3 是它的上限；但当**你说的话没占满**时，剩余名额被白白浪费——实测
+ *   「调查 Memento 3」里模型能补出 `STE100 / RHAE / RSI`，正好顶到 3 就没位置了。
+ *
+ *   现在的规则是**两个上限取小**：
+ *     `min(6, 12 − 你说的话占的名额)`
+ *   ——你说得少，模型可以多补（最多 6）；你说了很多，模型自然被挤到后面。
+ *   既不会"太抠"，也不会让模型的散文把 prompt 灌满（它的准入还另有五条限制，
+ *   见 `AgentTerm` 那段）。
+ */
+export const AGENT_TERM_LIMIT = 6
 /** 模型来源的词最多这么长（更长的多半是文件名 / 路径）。 */
 const AGENT_TERM_MAX = 24
 
@@ -248,9 +262,16 @@ export function extractContextTerms(
     cur.fresh = Math.max(cur.fresh, fresh)
     fromAgent.set(key, cur)
   }
+  /**
+   * 模型的名额 = min(上限, 总名额 − 你占掉的)。
+   *
+   * ⚠️ 两个上限取小是刻意的：只写 `AGENT_TERM_LIMIT` 会在"你说得多"时仍硬塞 6 个，
+   *   把你后说的词挤掉；只写"剩余名额"又会在"你没说话"时让模型的散文占满 12 个。
+   */
+  const agentQuota = Math.max(0, Math.min(AGENT_TERM_LIMIT, limit - userTerms.length))
   const agentTerms = [...fromAgent.values()]
     .sort((a, b) => b.count - a.count || b.fresh - a.fresh)
-    .slice(0, AGENT_TERM_LIMIT)
+    .slice(0, agentQuota)
 
   return [...userTerms, ...agentTerms].slice(0, limit).map((c) => c.term)
 }

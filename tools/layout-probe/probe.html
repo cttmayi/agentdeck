@@ -9644,6 +9644,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 termChips: vocabSec.querySelectorAll('[data-voice-term-chips] .prefix-chip').length,
                 termInput: vocabSec.querySelector('[data-voice-term-input]') !== null,
                 termAdd: vocabSec.querySelector('[data-voice-term-add]') !== null,
+                // ★ 288 批：预览按钮在（点它会现抽一次"当前对话里的词"）
+                previewButton: vocabSec.querySelector('[data-voice-preview-context]') !== null,
                 rules: vocabSec.querySelectorAll('[data-voice-rules] .voice-rule').length,
                 ruleFrom: vocabSec.querySelector('[data-voice-rule-from]') !== null,
                 ruleTo: vocabSec.querySelector('[data-voice-rule-to]') !== null,

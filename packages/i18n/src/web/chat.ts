@@ -415,6 +415,22 @@ export const chatText = {
   },
   'chat.voiceVocabPromptLabel': { zh: '词表（正确写法）', en: 'Term list (correct spelling)' },
   'chat.voiceVocabRuleLabel': { zh: '替换规则（听错的样子 → 正确写法）', en: 'Rewrite rules (misheard → correct)' },
+  /**
+   * ★ 288 批：「专有名词」里的**预览**——把"从这个对话里抽到了哪些词"摊开。
+   *   抽词是隐式的，抽错了只会表现为"识别突然变差"，所以让人能看。
+   */
+  'chat.voicePreview': { zh: '预览：这次会用哪些对话里的词', en: 'Preview the terms from this chat' },
+  'chat.voicePreviewBusy': { zh: '正在看…', en: 'Checking…' },
+  'chat.voicePreviewNoConv': { zh: '（先打开一个对话才能预览）', en: '(open a chat first)' },
+  'chat.voicePreviewEmpty': {
+    zh: '这个对话里没有可用的标识符（只抽 AgentDeck、whisper.cpp 这类词；普通中文与常见英文词不收）。',
+    en: 'No usable identifiers in this chat (only things like AgentDeck / whisper.cpp; plain Chinese and common English words are skipped).',
+  },
+  'chat.voicePreviewOff': { zh: '「用对话里的词」是关着的，所以不会抽。', en: '"Use terms from the chat" is off, so nothing is extracted.' },
+  'chat.voicePreviewSource': {
+    zh: '素材：{u} 条你说的话 + {a} 段它的回复',
+    en: 'Sources: {u} message(s) from you + {a} repl(y/ies) from it',
+  },
   'chat.voiceVocabEmpty': { zh: '还没加', en: 'Nothing yet' },
   'chat.voiceVocabTermPlaceholder': { zh: '例如：AgentDeck', en: 'e.g. AgentDeck' },
   'chat.voiceVocabFromPlaceholder': { zh: '听成的样子，如 微思普', en: 'As heard, e.g. "agent deck"' },

@@ -14,7 +14,7 @@ import { readSettings, writeSettings, type VoiceSettings } from './settings.ts'
 import type { CaptureFactory } from './capture.ts'
 import { VoiceSession, type SessionLimits, type SessionSnapshot } from './session.ts'
 import type { Transcriber, TranscriberLoader } from './transcriber.ts'
-import { readVocab, writeVocab, type VoiceVocab } from './vocab.ts'
+import { buildPrompt, readVocab, writeVocab, type VoiceVocab } from './vocab.ts'
 import { extractContextTerms } from './context-terms.ts'
 
 /**
@@ -123,6 +123,51 @@ export class VoiceService {
   async capability(modelId?: string): Promise<VoiceCapability> {
     const settings = await this.settings()
     return probeVoiceCapability({ ...this.deps, modelId: modelId ?? settings.model })
+  }
+
+  /**
+   * ★ 分批第 288 批：**预览**——这次口述会用上哪些"对话词"。
+   *
+   * ★ 为什么要它：抽词是**隐式**的（进 prompt，人看不见）。看不见的东西一旦抽错，
+   *   表现是"识别突然变差"，而没人能想到是那几个词干的。预览把它摊开：
+   *   同一份 `extractContextTerms`、同一份手动词表、同一套预算 ⇒ **预览到的是什么，
+   *   录的时候就是什么**（两处若各写一份，预览就会变成一句谎话）。
+   */
+  async previewContextTerms(conversationId: string | undefined): Promise<{
+    terms: string[]
+    prompt: string
+    auto: boolean
+    /** 素材条数（让人知道"为什么是空的"）。 */
+    userTurns: number
+    agentReplies: number
+  }> {
+    const [settings, { vocab }] = await Promise.all([this.settings(), this.vocab()])
+    let terms: string[] = []
+    let userTurns = 0
+    let agentReplies = 0
+    if (
+      settings.useContextTerms &&
+      this.deps.contextProvider !== undefined &&
+      conversationId !== undefined &&
+      conversationId !== ''
+    ) {
+      try {
+        const sources = await this.deps.contextProvider(conversationId)
+        userTurns = sources.userTexts.length
+        agentReplies = sources.agentTexts?.length ?? 0
+        terms = extractContextTerms(sources)
+      } catch {
+        terms = []
+      }
+    }
+    return {
+      terms,
+      // 与真正开录音时同一个函数、同一份词表（含手动词表优先与预算截断）
+      prompt: buildPrompt(vocab, settings.language, terms),
+      auto: settings.useContextTerms,
+      userTurns,
+      agentReplies,
+    }
   }
 
   /**

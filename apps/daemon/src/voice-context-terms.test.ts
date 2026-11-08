@@ -87,12 +87,22 @@ describe('抽词：两个来源，两套门槛（287 批）', () => {
     )
   })
 
-  test(`★ 模型来源最多补 ${AGENT_TERM_LIMIT} 个（它的输出量级比你的话大得多）`, () => {
-    const terms = extractContextTerms({
+  test(`★★ 模型来源最多补 ${AGENT_TERM_LIMIT} 个；你占了大半名额时它就更少`, () => {
+    // 你什么都不说 ⇒ 模型可以补到上限
+    const onlyAgent = extractContextTerms({
       userTexts: [],
-      agentTexts: ['Alpha One, Beta Two, Gamma Three, Delta Four, Epsilon Five'],
+      agentTexts: ['Alpha One, Beta Two, Gamma Three, Delta Four, Epsilon Five, Zeta Six, Eta Seven'],
     })
-    assert.ok(terms.length <= AGENT_TERM_LIMIT, JSON.stringify(terms))
+    assert.equal(onlyAgent.length, AGENT_TERM_LIMIT, JSON.stringify(onlyAgent))
+
+    // 你已经占了 12 个名额 ⇒ 模型一个都进不来
+    const userFull = Array.from({ length: 12 }, (_, i) => `UserTerm${i}Name`)
+    const none = extractContextTerms({
+      userTexts: [userFull.join(' ')],
+      agentTexts: ['AgentAlpha AgentBeta'],
+    })
+    assert.equal(none.length, 12)
+    assert.ok(!none.some((t) => t.startsWith('Agent')), JSON.stringify(none))
   })
 
   test('★★ 模型回复里的**普通英文词**不收（否则英文散文会灌满 prompt）', () => {

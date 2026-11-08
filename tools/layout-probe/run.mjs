@@ -1869,6 +1869,8 @@ const CHECKS = [
       v.ruleFrom === true &&
       v.ruleTo === true &&
       v.ruleAdd === true &&
+      // ★ 288 批：预览按钮（把"这次会用哪些对话里的词"摊开）
+      v.previewButton === true &&
       Array.isArray(v.labels) &&
       v.labels.length === 2,
     show: (v) =>
@@ -1876,6 +1878,7 @@ const CHECKS = [
         ? 'null'
         : `在 ${String(v.present)}　词 ${String(v.termChips)} 个（输入 ${String(v.termInput)}/加 ${String(v.termAdd)}）　` +
           `规则 ${String(v.rules)} 条（${String(v.ruleFrom)}→${String(v.ruleTo)}/加 ${String(v.ruleAdd)}）　` +
+          `预览按钮 ${String(v.previewButton)}　` +
           `小标题 ${JSON.stringify(v.labels ?? [])}`,
   },
   {

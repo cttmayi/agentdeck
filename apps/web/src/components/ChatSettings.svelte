@@ -29,6 +29,11 @@
    */
   export let open = false
   export let onclose: () => void = () => {}
+  /**
+   * ★ 分批第 288 批：当前打开的对话（「专有名词」里的**预览**要用它）。
+   * 空串 = 没有打开任何对话 ⇒ 预览会说"先打开一个对话"，而不是给一个空列表。
+   */
+  export let conversationId = ''
 
   const PLATFORM_DEFAULT = ['记住：', '以后', '下次别']
 
@@ -55,6 +60,44 @@
     id: string
     label: string
     approxMb: number
+  }
+
+  /**
+   * ★ 288 批：**预览**这次口述会用上哪些"对话里的词"。
+   *
+   * 抽词是隐式的（进 whisper 的 initialPrompt，人看不见）。看不见的东西抽错了，
+   * 表现是"识别突然变差"而没人想得到是那几个词——所以把它摊开。
+   * ⚠️ 这个预览走的是**和真正录音同一条路**（同一个抽词器 + 同一份手动词表 + 同一套预算），
+   *   所以"预览到的"就是"录的时候会用的"。
+   */
+  let preview: {
+    terms: string[]
+    prompt: string
+    auto: boolean
+    userTurns: number
+    agentReplies: number
+  } | null = null
+  let previewing = false
+
+  async function previewTerms(): Promise<void> {
+    previewing = true
+    try {
+      preview = await api<{
+        terms: string[]
+        prompt: string
+        auto: boolean
+        userTurns: number
+        agentReplies: number
+      }>('/api/voice/context-terms', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId }),
+      })
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      previewing = false
+    }
   }
 
   /** 词典（两层：prompt 词 + 替换规则）。 */
@@ -497,6 +540,48 @@
     {#if vocabProblems.length > 0}
       <p class="hint bad" data-voice-vocab-problems>{vocabProblems.join('；')}</p>
     {/if}
+
+    <!--
+      ★ 288 批：**预览**——把"从这个对话里抽到了哪些词"摊开。
+      抽词是隐式的（进 initialPrompt），抽错了只会表现为"识别突然变差"，
+      而没人会想到是那几个词干的。预览走的是和真正录音同一条路。
+    -->
+    <div class="prefix-add voice-preview-row">
+      <button
+        type="button"
+        class="ghost"
+        data-voice-preview-context
+        disabled={previewing}
+        onclick={() => void previewTerms()}
+      >{previewing ? $t('chat.voicePreviewBusy') : $t('chat.voicePreview')}</button>
+      {#if conversationId === ''}
+        <span class="faint small" data-voice-preview-no-conv>{$t('chat.voicePreviewNoConv')}</span>
+      {/if}
+    </div>
+    {#if preview !== null}
+      <div class="voice-preview" data-voice-preview>
+        {#if preview.terms.length === 0}
+          <p class="hint" data-voice-preview-empty>
+            {preview.auto ? $t('chat.voicePreviewEmpty') : $t('chat.voicePreviewOff')}
+          </p>
+        {:else}
+          <div class="prefix-chips" data-voice-preview-terms>
+            {#each preview.terms as term (term)}
+              <span class="prefix-chip"><span class="mono">{term}</span></span>
+            {/each}
+          </div>
+        {/if}
+        <p class="faint small" data-voice-preview-source>
+          {$t('chat.voicePreviewSource', {
+            u: String(preview.userTurns),
+            a: String(preview.agentReplies),
+          })}
+        </p>
+        {#if preview.prompt !== ''}
+          <p class="voice-preview-prompt mono" data-voice-preview-prompt>{preview.prompt}</p>
+        {/if}
+      </div>
+    {/if}
   </section>
 
   <section class="drawer-section" data-voice-settings>
@@ -801,6 +886,23 @@
   /* 输出方式那一行：整行给下拉（它有三档、字也长，挤在并排里会折行） */
   .voice-output {
     flex: 1 1 100%;
+  }
+  /* 预览那一块：词 chips + 来源统计 + 最终 prompt（等宽、可换行） */
+  .voice-preview-row {
+    margin-top: var(--sp-2);
+  }
+  .voice-preview {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--surface-2);
+  }
+  .voice-preview-prompt {
+    font-size: var(--fs-xs);
+    color: var(--text-dim);
+    margin: var(--sp-1) 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
   .voice-path {
     overflow: hidden;

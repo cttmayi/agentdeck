@@ -4326,6 +4326,22 @@ async function injectedSkillsOf(
     }
 
     /**
+     * ★ 分批第 288 批：「专有名词」设置里那颗**预览**按钮。
+     *
+     * 它跑的是**和真正录音同一条路**（同一个抽词器、同一份手动词表、同一套预算），
+     * 只是不碰麦克风、不转写。所以"预览看到的"就是"录的时候会用的"。
+     */
+    if (path === '/api/voice/context-terms' && req.method === 'POST') {
+      const body = (await readJsonBody(req)) as { conversationId?: unknown } | null
+      const conversationId =
+        typeof body?.conversationId === 'string' && body.conversationId !== ''
+          ? body.conversationId
+          : undefined
+      sendJson(res, 200, await voice.previewContextTerms(conversationId))
+      return
+    }
+
+    /**
      * 下载进度（分批第 282 批）。
      *
      * ★ 轮询而不是 SSE：一次下载最多几十秒，而这条要跨过"页面刚打开"与"刚点下载"

@@ -244,6 +244,59 @@ describe('下载进度', () => {
   })
 })
 
+describe('对话词的预览（288 批）', () => {
+  test('★★ 预览给出：抽到的词 + 素材条数 + 最终 prompt（与录音同一条路）', async () => {
+    await withDaemon(async ({ url, contextCalls }) => {
+      const { status, body } = await json(`${url}/api/voice/context-terms`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'conv-9' }),
+      })
+      assert.equal(status, 200)
+      assert.deepEqual(contextCalls, ['conv-9'])
+      assert.deepEqual(body['terms'], ['AgentDeck', 'wiki-capture'])
+      assert.equal(body['userTurns'], 1)
+      assert.equal(body['agentReplies'], 1)
+      assert.equal(body['auto'], true)
+      // prompt 就是真正会发给 whisper 的那一句
+      assert.match(String(body['prompt']), /^以下是关于这个项目的口述笔记/)
+      assert.match(String(body['prompt']), /AgentDeck/)
+    })
+  })
+
+  test('★ 没有 conversationId ⇒ 不去抽词，直说"没素材"（不报错）', async () => {
+    await withDaemon(async ({ url, contextCalls }) => {
+      const { status, body } = await json(`${url}/api/voice/context-terms`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      assert.equal(status, 200)
+      assert.deepEqual(contextCalls, [])
+      assert.deepEqual(body['terms'], [])
+      assert.equal(body['prompt'], '')
+    })
+  })
+
+  test('★ 设置里关掉「用对话里的词」⇒ 预览也说关着（`auto:false`）', async () => {
+    await withDaemon(async ({ url, contextCalls }) => {
+      await json(`${url}/api/voice/settings`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ useContextTerms: false }),
+      })
+      const { body } = await json(`${url}/api/voice/context-terms`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'conv-10' }),
+      })
+      assert.equal(body['auto'], false)
+      assert.deepEqual(contextCalls, [])
+      assert.deepEqual(body['terms'], [])
+    })
+  })
+})
+
 describe('录音会话', () => {
   test('★★ 开录音 ⇒ 201 + 会话 id；同一时刻只许一个（第二次 409）', async () => {
     await withDaemon(async ({ url }) => {
