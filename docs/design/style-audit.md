@@ -87,7 +87,39 @@
 理由与 §6 一致——"统一"不等于"顺手挪 1px"。
 
 真要收它们，是一轮**有意的视觉调整**：逐条列出"这个控件该多松"再改，
-并且要重跑探针里所有按像素断言的行高/对齐判据。写进 302 的待办，不在本轮做。
+并且要重跑探针里所有按像素断言的行高/对齐判据。
+
+### 2.3.1 剩下的**裸内距**逐条（303 批量的，共 25 处；`em` 的不列——那是刻意跟着字号缩的）
+
+| # | 位置 | 现值 | 若收敛到 `--sp-*` | 会差 |
+|---|---|---|---|---|
+| 1 | `ActionPicker` `.ap-chip` | `1px 9px` | `0 var(--sp-2)` | −1 / −1 |
+| 2 | `ActionPicker` `.ap-expand` | `1px 8px` | `0 var(--sp-2)` | −1 / 0 |
+| 3 | `ActionPicker` `.ap-search` | `2px 8px` | `var(--sp-1) var(--sp-2)` | +2 / 0 |
+| 4 | `ActionPicker` `.ap-badge.fixed` | `0 7px` | `0 var(--sp-2)` | 0 / +1 |
+| 5 | `ActionPicker` `.ap-bound-row` | `1px 0` | `0`（竖直不要） | −2 |
+| 6 | `ChatMemoryTidy` `.tidy-text` | `1px 4px` | `0 var(--sp-1)` | −2 / 0 |
+| 7 | `ChatSettings` `.prefix-x` | `0 2px` | `0` | 0 / −4 |
+| 8 | `CrystallizeDraftEditor` `.file-row` | `6px 10px` | `var(--sp-2) var(--sp-3)` | +4 / +2 |
+| 9 | `CrystallizeView` `.file-row` | `6px 10px` | 同上（**与 #8 完全同值：同一个形状写了两遍**） | +4 / +2 |
+| 10 | `CrystallizeDraftEditor` `.change-tag` | `0 5px` | `0 var(--sp-1)` | 0 / −1 |
+| 11 | `CrystallizeView` `.change-tag` | `0 5px` | 同上（**与 #10 同值**） | 0 / −1 |
+| 12 | `CrystallizeView` `.tab-count` | `0 5px` | `0 var(--sp-1)` | 0 / −1 |
+| 13 | 两处 `.hunk-head` | `0.15rem 0.5rem` | `2px var(--sp-2)` | 约 0 / 0 |
+| 14 | `CrystallizeDraftEditor` `.pane-tabs > button` | `3px 10px` | `var(--sp-1) var(--sp-3)` | +2 / +4 |
+| 15 | `CrystallizeView` `.new-version-bar` | `6px 10px` | `var(--sp-2) var(--sp-3)` | +4 / +2 |
+| 16 | `DirPicker` `.row` | `0.15rem 0.35rem` | `2px var(--sp-1)` | +0.4 / +2.6 |
+| 17 | `FirstSentenceTemplate` `.tpl-state .badge` | `1px 6px` | **不该改**：它是 `.badge` 的重画（见 §9 的收口规则），理想是并进 `.badge--sm` | — |
+| 18 | `WorkDirTree` `.wd li` | `2px 0` | `0`（竖直不要） | −4 |
+| 19 | `app.css` `.theme-picker` | `2px` | `0` | −4 |
+| 20 | `app.css` `code` / `.markdown code` / `.badge--sm` / `.unread` | `em` | **不动**（跟着字号缩才对齐） | — |
+
+**能"等值"先做的**：只有 #13（`0.15rem` 就是 2px 的另一种写法）。其余每一条都要动 1–4px，
+**所以本轮一条都没动**。如果要做，建议**一次只做一屏**（比如先把沉淀页的差异视图 #8–#15
+统一到 `--sp-*`，再跑探针），否则出问题时分不清是哪一屏。
+
+**顺手能做的（不下 1px 的）**：#8/#9、#10/#11 是**同一个形状在两个组件里各写一遍**，
+把它们抽成 `app.css` 的一个 `.diff-*` 家族是**等值**的——这才是"统一"该先做的事。
 
 ---
 
