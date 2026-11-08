@@ -82,11 +82,18 @@
   )
   let termsOpen = $state(false)
   let termsBusy = $state(false)
+  /**
+   * 取词失败的原因。
+   * ⚠️ 必须有它：否则失败时浮层一直显示"正在取…"——那和"点了没反应"一样糟
+   *   （使用者实测报过"点了取词没反应"）。
+   */
+  let termsError = $state('')
 
   /** 拉一次"本对话取词"（与真正录音同一条路：同一个抽词器 + 同一份手动词表）。 */
   async function loadTerms(): Promise<void> {
     if (termsBusy) return
     termsBusy = true
+    termsError = ''
     try {
       const res = await fetch('/api/voice/context-terms', {
         method: 'POST',
@@ -100,9 +107,14 @@
           agentReplies: number
           auto: boolean
         }
+      } else {
+        termsError = $t('chat.voiceTermsFailed', { code: String(res.status) })
       }
-    } catch {
-      // 取词拿不到不影响录音（它只是"这次带上哪些词"的说明）
+    } catch (err) {
+      // 取词拿不到不影响录音（它只是"这次带上哪些词"的说明），但要说出来
+      termsError = $t('chat.voiceTermsFailedDetail', {
+        error: err instanceof Error ? err.message : String(err),
+      })
     } finally {
       termsBusy = false
     }
@@ -353,33 +365,35 @@
         ? $t('chat.voiceTermsLabel')
         : $t('chat.voiceTermsLabelN', { n: String(terms.terms.length) })}
     </button>
+    {#if termsOpen}
+      <span class="terms-pop" data-voice-terms-pop>
+        {#if termsError !== ''}
+          <span class="faint small">{termsError}</span>
+        {:else if terms === null}
+          <span class="faint small">{$t('chat.voiceTermsBusy')}</span>
+        {:else if !terms.auto}
+          <span class="faint small">{$t('chat.voiceTermsOff')}</span>
+        {:else if terms.terms.length === 0}
+          <span class="faint small">{$t('chat.voiceTermsNone')}</span>
+        {:else}
+          <span class="terms-list">
+            {#each terms.terms as term (term)}
+              <span class="terms-chip mono">{term}</span>
+            {/each}
+          </span>
+          <span class="faint small"
+            >{$t('chat.voiceTermsSource', {
+              u: String(terms.userTurns),
+              a: String(terms.agentReplies),
+            })}</span
+          >
+        {/if}
+        {#if conversationId === ''}
+          <span class="faint small">{$t('chat.voiceTermsNoConv')}</span>
+        {/if}
+      </span>
+    {/if}
   </span>
-  {#if termsOpen}
-    <span class="terms-pop" data-voice-terms-pop>
-      {#if terms === null}
-        <span class="faint small">{$t('chat.voiceTermsBusy')}</span>
-      {:else if !terms.auto}
-        <span class="faint small">{$t('chat.voiceTermsOff')}</span>
-      {:else if terms.terms.length === 0}
-        <span class="faint small">{$t('chat.voiceTermsNone')}</span>
-      {:else}
-        <span class="terms-list">
-          {#each terms.terms as term (term)}
-            <span class="terms-chip mono">{term}</span>
-          {/each}
-        </span>
-        <span class="faint small"
-          >{$t('chat.voiceTermsSource', {
-            u: String(terms.userTurns),
-            a: String(terms.agentReplies),
-          })}</span
-        >
-      {/if}
-      {#if conversationId === ''}
-        <span class="faint small">{$t('chat.voiceTermsNoConv')}</span>
-      {/if}
-    </span>
-  {/if}
 {/if}
 
 <style>

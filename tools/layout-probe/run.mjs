@@ -1970,7 +1970,10 @@ const CHECKS = [
       typeof v.termsLabel === 'string' &&
       v.termsLabel.length > 0 &&
       typeof v.termsPop === 'string' &&
-      v.termsPop.length > 0,
+      v.termsPop.length > 0 &&
+      // ⚠️ 存在 ≠ 看得见：浮层必须真的在视口里、且没被别的东西盖住
+      //    （第一次实现时它按更远的祖先定位，跑到了屏幕外——DOM 里有、人看不到）
+      v.termsVisible === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
@@ -1978,7 +1981,7 @@ const CHECKS = [
           `点击有反应 ${String(v.reacts)}　toast「${String(v.reason)}」　虚线态 ${String(v.unavailable)}　` +
           `栏脚高 ${String(v.composerH)}px　取词「${String(v.termsLabel)}」→「${String(
             (v.termsPop ?? '').slice(0, 40),
-          )}」`,
+          )}」　浮层可见 ${String(v.termsVisible)}`,
   },
   {
     view: '沉淀',

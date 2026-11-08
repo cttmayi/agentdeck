@@ -438,6 +438,9 @@ export const chatText = {
     en: 'Sources: {u} message(s) from you + {a} repl(y/ies) from it',
   },
   'chat.voiceTermsNoConv': { zh: '（先打开一个对话才有取词）', en: '(open a chat to get terms)' },
+  /** 取词失败也要说出来（否则浮层一直"正在取…"，和"点了没反应"一样糟）。 */
+  'chat.voiceTermsFailed': { zh: '取词失败（HTTP {code}）', en: 'Could not collect terms (HTTP {code})' },
+  'chat.voiceTermsFailedDetail': { zh: '取词失败：{error}', en: 'Could not collect terms: {error}' },
   'chat.voiceVocabEmpty': { zh: '还没加', en: 'Nothing yet' },
   'chat.voiceVocabTermPlaceholder': { zh: '例如：AgentDeck', en: 'e.g. AgentDeck' },
   'chat.voiceVocabFromPlaceholder': { zh: '听成的样子，如 微思普', en: 'As heard, e.g. "agent deck"' },

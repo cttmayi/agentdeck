@@ -803,23 +803,6 @@
   .voice-output {
     flex: 1 1 100%;
   }
-  /* 预览那一块：词 chips + 来源统计 + 最终 prompt（等宽、可换行） */
-  .voice-preview-row {
-    margin-top: var(--sp-2);
-  }
-  .voice-preview {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2) var(--sp-3);
-    background: var(--surface-2);
-  }
-  .voice-preview-prompt {
-    font-size: var(--fs-xs);
-    color: var(--text-dim);
-    margin: var(--sp-1) 0 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
   .voice-path {
     overflow: hidden;
     text-overflow: ellipsis;

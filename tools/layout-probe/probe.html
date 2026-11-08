@@ -7784,11 +7784,30 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const termsBtn = d().querySelector('.detail-pane [data-composer] [data-voice-terms]')
           const termsLabel = (text(termsBtn) ?? '').trim()
           let termsPop = null
+          /** 浮层**真的看得见**吗（存在 ≠ 看得见，这里踩过一次）。 */
+          let termsVisible = null
           if (termsBtn !== null) {
             click(termsBtn)
             await wait(500)
             const pop = d().querySelector('.detail-pane [data-voice-terms-pop]')
             termsPop = pop === null ? null : (text(pop) ?? '').trim()
+            if (pop !== null) {
+              const r = pop.getBoundingClientRect()
+              const st = cs(pop)
+              const cx = Math.round(r.left + r.width / 2)
+              const cy = Math.round(r.top + r.height / 2)
+              const at = d().elementFromPoint(cx, cy)
+              termsVisible =
+                r.width > 0 &&
+                r.height > 0 &&
+                r.top >= 0 &&
+                r.left >= 0 &&
+                r.bottom <= f.contentWindow.innerHeight &&
+                st.visibility !== 'hidden' &&
+                Number(st.opacity) > 0 &&
+                at !== null &&
+                pop.contains(at)
+            }
             click(termsBtn)
           }
           return {
@@ -7799,6 +7818,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             reacts: spoke,
             termsLabel,
             termsPop,
+            termsVisible,
             reason: reasonEl === null ? null : (text(reasonEl) ?? '').trim(),
             // toast 出现时栏脚高度（与上面那次量的比，用来确认"浮层没撑高"）
             composerH,
