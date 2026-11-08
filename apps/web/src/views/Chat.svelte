@@ -990,7 +990,7 @@
             <h2>{$t('chat.newConversation')}</h2>
           </div>
         {:else if activeConversation !== null}
-      <div class="pane-head chat-head">
+      <div class="detail-head chat-head">
         <div class="chat-head-main">
           {#if renaming}
             <input
@@ -1023,7 +1023,7 @@
               · {activeSkillSlugs.join(' + ')}{/if}
           </span>
         </div>
-        <div class="pane-actions">
+        <div class="detail-actions pane-actions">
           <!--
             ★ 分批第 262 批：「整理成记忆…」在「沉淀技能」**左侧**（使用者定的位置）。
             两者都是"拿这段对话做点什么"，排在同一个位置列里。
@@ -1537,10 +1537,10 @@
     display: block;
   }
 
-  .chat-head {
-    align-items: flex-start;
-    gap: var(--sp-2);
-  }
+  /* ★ 313 批：栏头改用 `.detail-head` 那套 grid 骨架（标题左列 / 动作右列 /
+     元信息自动落到第二行）。原来这里是 `.pane-head` + 自己写的 flex，与任务、
+     智能体两页的头**根本不是同一套**——使用者说的"风格没统一"就是这个。
+     本组件只保留"聊天特有"的东西（标题里的改名输入框）。 */
 
   /* ★ 311 批（使用者报的：标题被拉成两行——上一批我改错了地方，改的是**列表行**的
      `.conv-title`；出问题的是**栏头这颗 h2**）：
