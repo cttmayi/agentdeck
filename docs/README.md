@@ -23,6 +23,7 @@
 | **一条 run 实际是怎么跑起来的**（命令行、注入、判决链路） | [`./runtime/pipeline.md`](./runtime/pipeline.md) |
 | **skill 是什么、住在哪、怎么装**（来源、磁盘落点、注入、限额） | [`./reference/skills.md`](./reference/skills.md) |
 | **工具包怎么开发、住在哪**（清单逐字段、脚本约定、远端目录、执行链路） | [`./reference/tools.md`](./reference/tools.md) |
+| **界面风格规则（控件类体系、字号/间距令牌、怎么加新控件）** | [`./design/ui-style.md`](./design/ui-style.md)（批 300 落地；**现状体检与迁移计划**在 [`./design/style-audit.md`](./design/style-audit.md)） |
 | 端到端走查与边界情况 | [`./reference/scenarios.md`](./reference/scenarios.md) |
 | **智能体组是怎么工作的**（工作流：执行 → 审核 → 行动、展开、返工闭环、四道闸） | [`./reference/agent-group-workflow.md`](./reference/agent-group-workflow.md) |
 | **要装到 Windows 上跑 / 有人报"Windows 上跑不起来"** | [`./reference/windows-compat.md`](./reference/windows-compat.md)（先看「现在的状态」，再看「下一步」与「最小验收清单」） |
