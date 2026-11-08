@@ -669,9 +669,14 @@
           if (e.key === 'Enter') void add()
         }}
       />
-      <button type="button" class="btn btn--secondary" data-prefix-add onclick={() => void add()}>
-        {$t('chat.settingsMemoryAdd')}
-      </button>
+      <button
+        type="button"
+        class="btn btn--secondary btn--icon"
+        data-prefix-add
+        title={$t('chat.settingsMemoryAdd')}
+        aria-label={$t('chat.settingsMemoryAdd')}
+        onclick={() => void add()}>+</button
+      >
       <button type="button" class="btn btn--ghost" data-prefix-reset onclick={() => void reset()}>
         {$t('chat.settingsMemoryReset')}
       </button>
