@@ -9952,6 +9952,71 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
+        // ══════════════ 跨页"长得是不是同一套"（303 批）══════════════
+        //
+        // 语境：界面风格统一（298–302 批）把按钮/输入/徽标/字段收进了 `app.css` 的族里。
+        // 但那只是"**代码里**只有一份定义"——同一个变体在**各页渲染出来**到底一不一样，
+        // 类型检查看不见，静态护栏也看不见（护栏只读源码，量不出"聊天页主按钮 30px、
+        // 任务页 31px"这种）。所以这里把三件最该一样的东西量出来，跨页比一遍：
+        //   ① 同一种按钮变体（`btn--primary` 等）的高度与字号
+        //   ② 徽标（`.badge`）的形状（圆角/字号/内距）
+        //   ③ 列表行标题的字号
+        // 顶栏那一排单独记一份：它是**按位置定尺寸**的上下文按钮（`--ctl-h-sm`），
+        // 本来就比页面里的按钮矮，不参与"跨页比高度"，但要自己内部一致。
+        {
+          const stylePages = [
+            { key: 'chat', hash: '#/chat' },
+            { key: 'tasks', hash: '#/tasks' },
+            { key: 'agents', hash: '#/agents' },
+            { key: 'skills', hash: '#/skills' },
+            { key: 'tools', hash: '#/tools' },
+            { key: 'groups', hash: '#/groups' },
+          ]
+          const VARIANTS = ['btn--primary', 'btn--secondary', 'btn--ghost', 'btn--danger', 'btn--link']
+          // 尺寸修饰也算进"哪一类按钮"里：`btn--ghost` 与 `btn--ghost btn--sm` 是
+          // 两个不同的大小档，混在一个键里比字号只会得到"14 与 12 不一致"这种假红。
+          const SIZES = { 'btn--sm': 'sm', 'btn--mini': 'mini', 'btn--tight': 'tight', 'btn--icon': 'icon' }
+          const samples = {}
+          for (const pg of stylePages) {
+            f.contentWindow.location.hash = pg.hash
+            await wait(900)
+            samples[pg.key] = need(`风格样本（${pg.key}）`, () => {
+              const btns = {}
+              for (const b of d().querySelectorAll('button.btn, a.btn')) {
+                const variant =
+                  VARIANTS.find((c) => b.classList.contains(c)) ?? '(无变体)'
+                const inTopbar = !!b.closest('.topbar')
+                const size = Object.keys(SIZES).find((c) => b.classList.contains(c)) ?? ''
+                const c = getComputedStyle(b)
+                const key = variant + (size === '' ? '' : '/' + SIZES[size]) + (inTopbar ? '@topbar' : '')
+                // 高度**按内容变**是正常的（只有图标的、带两行的），所以只比字号；
+                // 高度照样记下来，报错时能一眼看出是哪一颗。
+                const sample = `${Math.round(parseFloat(c.fontSize) * 10) / 10}（高 ${Math.round(b.getBoundingClientRect().height)}）`
+                ;(btns[key] ??= []).push(sample)
+              }
+              const badge = d().querySelector('.badge')
+              const bc = badge ? getComputedStyle(badge) : null
+              const rowTitle = d().querySelector(
+                '.list-pane .row-title, .list-pane .task-title, .list-pane .conv-title, .list-pane .agent-line strong',
+              )
+              return {
+                btns,
+                badge: bc
+                  ? {
+                      r: bc.borderRadius,
+                      fs: bc.fontSize,
+                      p: `${bc.paddingTop}/${bc.paddingRight}/${bc.paddingBottom}/${bc.paddingLeft}`,
+                    }
+                  : null,
+                rowTitleFs: rowTitle ? getComputedStyle(rowTitle).fontSize : null,
+              }
+            })
+          }
+          // ⚠️ 一次性赋值（不是先 `facts[...] = {}` 再往里填）：`publish()` 是增量的，
+          //    先放一个空对象会让**第一版快照**里这个键存在但没内容，判据当场红。
+          facts['style.pageStyles'] = samples
+        }
+
         // ══════════════ 列表栏骨架（D61，D62 补智能体栏头带）══════════════
         //
         // 聊天 / 任务 / 智能体三页的列表栏共用同一套骨架：

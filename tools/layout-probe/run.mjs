@@ -1575,6 +1575,36 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
+  // ══════════════ 跨页风格一致（303 批）══════════════
+  //
+  // 界面风格统一把按钮/徽标/字段收进了 `app.css` 的族里，但"代码里一份"不等于
+  // "各页渲染出来一样"（字号会被父容器的 line-height/font-size 带跑）。这三条量的是
+  // **渲染结果**，静态护栏量不到。
+  //
+  // 三条共用同一个事实键（`style.pageStyles`）：探针那边只量一遍、一次发布，
+  // 这边从同一个样本集里看三件事。分开成三个键的话，探针要重复走六遍页面。
+  {
+    view: '风格一致',
+    key: 'style.pageStyles',
+    label: '★★ 同一类按钮（变体+尺寸）在各页是同一档字号（高度按内容变，不算不一致）',
+    ok: (v) => uniformViolations(v).length === 0,
+    show: (v) => uniformViolations(v).join('；') || '各页一致',
+  },
+  {
+    view: '风格一致',
+    key: 'style.pageStyles',
+    label: '★★ 徽标在各页是同一形状（圆角 / 字号 / 内距）',
+    ok: (v) => distinctValues(v, (p) => (p?.badge ? `${p.badge.r}|${p.badge.fs}|${p.badge.p}` : null)).length <= 1,
+    show: (v) => distinctValues(v, (p) => (p?.badge ? `${p.badge.r}|${p.badge.fs}|${p.badge.p}` : null)).join('　') || '没有徽标',
+  },
+  {
+    view: '风格一致',
+    key: 'style.pageStyles',
+    label: '★ 列表行标题在各页是同一档字号',
+    ok: (v) => distinctValues(v, (p) => p?.rowTitleFs ?? null).length <= 1,
+    show: (v) => distinctValues(v, (p) => p?.rowTitleFs ?? null).join('　') || '没量到',
+  },
+
   // ══════════════ 聊天（闭环的旁路）══════════════
   {
     view: '聊天',
@@ -7491,3 +7521,40 @@ try {
 }
 
 process.exit(exitCode)
+
+/**
+ * 按钮"同一类"跨页不一致的清单。
+ *
+ * ⚠️ 只比**字号**，不比高度：同一类按钮的高度本来就跟着内容走（只有图标的、
+ *    带两行的、行内被 `align-items:stretch` 拉伸的），拿高度当判据立刻假红一片
+ *    （第一版就这么写的，`btn--ghost` 在一页里量到 22/24/53/64 四种）。
+ *    字号才是"这一档按钮该多大"的判据——它只由变体+尺寸决定。
+ */
+function uniformViolations(v) {
+  const bad = []
+  const keys = new Set()
+  for (const page of Object.values(v ?? {})) for (const k of Object.keys(page?.btns ?? {})) keys.add(k)
+  for (const key of keys) {
+    const samples = new Set()
+    for (const page of Object.values(v ?? {})) {
+      for (const sample of page?.btns?.[key] ?? []) samples.add(sample.split('（')[0])
+    }
+    if (samples.size > 1) {
+      const detail = [...new Set(
+        Object.entries(v ?? {}).flatMap(([pg, page]) => (page?.btns?.[key] ?? []).map((s) => `${pg} ${s}`)),
+      )]
+      bad.push(`${key}: ${detail.join(' / ')}`)
+    }
+  }
+  return bad
+}
+
+/** 跨页取"去掉空值之后的取值集合"——用来判"是不是同一套"。 */
+function distinctValues(v, pick) {
+  const out = new Set()
+  for (const page of Object.values(v ?? {})) {
+    const got = pick(page)
+    if (got !== null && got !== undefined) out.add(got)
+  }
+  return [...out]
+}
