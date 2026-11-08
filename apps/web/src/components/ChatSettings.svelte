@@ -574,9 +574,17 @@
             if (e.key === 'Enter') void addTerm()
           }}
         />
-        <button type="button" class="btn btn--secondary" data-voice-term-add onclick={() => void addTerm()}>
-          {$t('chat.settingsMemoryAdd')}
-        </button>
+        <!-- ★ 308 批（使用者：「这里用中文就很奇怪，还不如 +」）：新增这类"往列表里
+             追加一条"的动作一律用符号 `+`，语义由 title/aria-label 说；
+             中文动词留给"真的在做一件事"的按钮（保存/删除/开始）。 -->
+        <button
+          type="button"
+          class="btn btn--secondary btn--icon"
+          data-voice-term-add
+          title={$t('chat.settingsMemoryAdd')}
+          aria-label={$t('chat.settingsMemoryAdd')}
+          onclick={() => void addTerm()}>+</button
+        >
       </div>
 
       <!-- 第二层：替换规则（"常被听成的样子" → "正确写法"） -->
@@ -615,9 +623,14 @@
             if (e.key === 'Enter') void addRule()
           }}
         />
-        <button type="button" class="btn btn--secondary" data-voice-rule-add onclick={() => void addRule()}>
-          {$t('chat.settingsMemoryAdd')}
-        </button>
+        <button
+          type="button"
+          class="btn btn--secondary btn--icon"
+          data-voice-rule-add
+          title={$t('chat.settingsMemoryAdd')}
+          aria-label={$t('chat.settingsMemoryAdd')}
+          onclick={() => void addRule()}>+</button
+        >
       </div>
       {#if vocabProblems.length > 0}
         <p class="hint bad" data-voice-vocab-problems>{vocabProblems.join('；')}</p>
@@ -769,9 +782,13 @@
   .bad-dot {
     background: var(--bad);
   }
+  /* ★ 308 批：这一行是**短控件（勾选）+ 长控件（标签+下拉/输入）混排**。
+     `align-items: center` 在两者高度差大时会让勾选"浮在中间"，`flex-start` 更糟
+     （贴着顶边，使用者报的就是这个）。混排的统一做法是**底对齐**：短控件压在这行
+     控件的底边上，看起来才像同一行的东西。 */
   .voice-row {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: var(--sp-2);
     margin-bottom: var(--sp-2);
     flex-wrap: wrap;
