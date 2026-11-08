@@ -24,7 +24,8 @@ export const toolsText = {
   // ★ 使用者的决定：原来"恰好四项"（新建任务 / 任务清单 / 智能体 / Skills），
   //   D40 起改成五项，「工具」排在 Skills 之后。
   'tools.navTitle': { zh: '工具', en: 'Tools' },
-  'tools.navHint': { zh: '一组动作 · 装一次整组可用', en: 'Action groups · install once' },
+  // 2026-11：侧栏减半，提示语精简（动作组 + 装一次整组可用，只留两句短的）。
+  'tools.navHint': { zh: '动作 · 可安装', en: 'Install once' },
 
   // ── 页头 ──
   /**

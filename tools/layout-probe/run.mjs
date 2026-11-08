@@ -1566,6 +1566,19 @@ const CHECKS = [
   },
   { view: '工具（D40）', key: 'tools.title', label: '工具页渲染出来了', ok: (v) => v === '工具' },
   {
+    view: '工具（D40）',
+    key: 'shell.navHintsOneLineAndFit',
+    label:
+      '★★ 侧栏**标题与辅助文字**都是一行且放得下（2026-11：左栏减半后文案已精简，不放不下也不换行）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '工具（D40）',
+    key: 'shell.sidebarHalfWidth',
+    label: '★★ 侧栏宽度减半后钉死 120px（`--sidebar-w: 7.5rem`，顶栏左格与它共线）',
+    ok: (v) => v === true,
+  },
+  {
     view: '任务',
     // ★ 2026-10（D58）：合并之后**建任务的入口在这一页**。这一条钉的正是"合并"
     //   这件事本身：少一个入口（侧栏）就必须多一个（这一页），否则功能是**没了**

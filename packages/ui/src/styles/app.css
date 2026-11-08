@@ -73,7 +73,10 @@
   --radius: 8px;
   --radius-lg: 12px;
 
-  --sidebar-w: 15rem;
+  /* ★ 2026-11：侧栏宽度**减半**（15rem → 7.5rem）——使用者：左栏太宽、
+     辅助文字要更精简。`.shell` 与 `.topbar` 共用这一个值（顶栏左格与侧栏共线），
+     所以顶栏左格也跟着变窄（页名本来就允许收缩省略）。 */
+  --sidebar-w: 7.5rem;
   --topbar-h: 3.25rem;
   /* ★ 300 批：压在 accent 实心块上的字色。亮/暗**两套主题里都是白**，所以写在
      主题无关这一段（原来 11 处各写 `#fff`，其中 6 处在组件里——既看不出它是
@@ -302,6 +305,15 @@ hr {
   letter-spacing: -0.01em;
   /* 品牌名与页名之间靠那条竖线分开，这里只留一点气口 */
   flex: none;
+}
+
+/* ★ 2026-11：侧栏减半（`--sidebar-w: 7.5rem`）后顶栏左格只有 120px，「品牌 + 页名」
+   放不下（"AgentDeck" 78px + 页名 ≥ 28px + 分隔线 ≈ 120px+）。让位的是品牌：
+   页名是"我在哪一页"的功能信息（也是这一页的 h1），品牌只是站点名——产品名仍写在
+   页面 `title` 与 README 里。将来要把侧栏加宽，把这两行 display 删掉就回来了。 */
+.topbar .brand,
+.topbar .page-sep {
+  display: none;
 }
 
 /* 品牌与页名之间那条细竖线：两者都是文字，不隔开会被读成一句话 */
@@ -610,6 +622,11 @@ hr {
   display: block;
   font-size: var(--fs-md);
   font-weight: 500;
+  /* ★ 2026-11：侧栏减半后标题也要**一行**（英文 "Agent groups" 那种 12 个字母
+     会折成两行、把这一项撑高）。与 `.nav-hint` 同一套兜底：放不下就省略。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-hint {
@@ -617,6 +634,11 @@ hr {
   font-size: var(--fs-xs);
   color: var(--text-faint);
   margin-top: 1px;
+  /* ★ 2026-11：侧栏减半后宽度变窄——辅助文字**不许换行**，超了就省略。
+     （文案本身也已精简到能放下，这一行是兜底，不是让文案偷懒的借口。） */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-item.active .nav-hint { color: var(--text-dim); }
@@ -625,6 +647,14 @@ hr {
   margin-top: auto;
   padding: var(--sp-3) var(--sp-3) var(--sp-2);
   border-top: 1px solid var(--line);
+}
+
+/* ★ 2026-11：侧栏减半后，脚部的环境/同步状态两行也钉成一行省略
+   （设备名、CLI 版本、上报条数都可能长过 7.5rem 的内容宽）。 */
+.sidebar-foot .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 侧栏底部的环境状态：一眼看出"这台机器的运行环境有没有问题" */

@@ -26,9 +26,11 @@ export const crystallizeText = {
 
   // ── 导航（三轮：沉淀是独立一页，导航列工具之下） ──
   'crystallize.navTitle': { zh: '沉淀', en: 'Crystallize' },
+  // 2026-11：侧栏减半，提示语精简——原来是整整两行的长句，现在只点出
+  // "把经验变成 skill"这一个动作（沉淀成 Agent 那条已下线）。
   'crystallize.navHint': {
-    zh: '把对话/任务的经验沉淀成 skill，或优化一条智能体的指令（起草不占任务列表）',
-    en: 'Turn chats & tasks into skills (drafts live here, not in the task list)',
+    zh: '经验 → skill',
+    en: 'Chat → skill',
   },
   'crystallize.newEntry': { zh: '新建沉淀', en: 'New' },
   'crystallize.pickHint': {

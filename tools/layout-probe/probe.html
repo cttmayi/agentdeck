@@ -2815,6 +2815,49 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         facts['shell.navLastItem'] =
           probeNavTitles.length > 0 ? probeNavTitles[probeNavTitles.length - 1] : null
 
+        // ★ 2026-11（使用者：左栏减半 + 辅助文字不超过 1 行）：侧栏**标题与辅助文字**
+        //   都必须是一行且放得下（scrollWidth ≤ clientWidth——放不下会省略，
+        //   但"精简文案"的意图是让它们真的放下；省略是兜底不是常态）。
+        //   ⚠️ 标题也要量：英文 "Agent groups"（12 个字母）在 120px 下会折成两行、
+        //   把那一项撑高——标题折行与辅助文字折行是同一个缺陷。
+        facts['shell.navHintsOneLineAndFit'] = await (async () => {
+          const els = [
+            ...[...d().querySelectorAll('.sidebar .nav-title')].map((el) => ({ el, what: '标题' })),
+            ...[...d().querySelectorAll('.sidebar .nav-hint')].map((el) => ({ el, what: '辅助文字' })),
+          ]
+          if (els.length === 0) {
+            errors.push('侧栏找不到标题或辅助文字（.nav-title / .nav-hint 一个都没有）')
+            return false
+          }
+          const bad = []
+          for (const { el, what } of els) {
+            if (el.scrollHeight > el.clientHeight) {
+              bad.push(`${what}「${text(el)}」换行了（scrollH ${el.scrollHeight} > clientH ${el.clientHeight}）`)
+            } else if (el.scrollWidth > el.clientWidth) {
+              bad.push(`${what}「${text(el)}」被省略了（scrollW ${el.scrollWidth} > clientW ${el.clientWidth}）`)
+            }
+          }
+          if (bad.length > 0) {
+            errors.push(bad.join('；'))
+            return false
+          }
+          return true
+        })()
+
+        // ★ 2026-11 同一条使用者的要求：侧栏宽度**减半**后钉死为 7.5rem（120px）。
+        //   它同时是顶栏左格的列宽（`.shell` 与 `.topbar` 共用 `--sidebar-w`），
+        //   所以这里量的是"整个左列"——量侧栏本体即可。
+        facts['shell.sidebarHalfWidth'] = await (async () => {
+          const side = d().querySelector('.sidebar')
+          if (!side) return false
+          const w = Math.round(side.getBoundingClientRect().width)
+          if (w !== 120) {
+            errors.push(`侧栏宽度不是减半后的 120px（量到 ${w}px）`)
+            return false
+          }
+          return true
+        })()
+
         // ── ② 列表 ──
         facts['tools.title'] = need('工具页标题', () => text(d().querySelector('.page-name')))
         const probeToolRows = () => [...d().querySelectorAll('.tool-table tbody tr.tool-row')]

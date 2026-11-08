@@ -18,23 +18,29 @@ export const shellText = {
   //   侧边栏每一项都是一个场景，所以这一项是一整个页面（左对话列表 / 右消息流），
   //   不是「新建任务」页里的一条 tab。
   'shell.navChat': { zh: '聊天', en: 'Chat' },
-  'shell.navChatHint': { zh: '先聊清楚这件事', en: 'Talk it through first' },
+  // ★ 2026-11：侧栏减半后提示语只留 4–6 个字（内容宽约 80px、fs-xs 12px）。
+  //   原句「先聊清楚这件事」放不下；语义没变——先聊，再决定要不要派活。
+  'shell.navChatHint': { zh: '先聊清楚', en: 'Talk first' },
   'shell.navNewTask': { zh: '新建任务', en: 'New task' },
   'shell.navNewTaskHint': { zh: '交给智能体去做', en: 'Hand it to an agent' },
   // ⚠️ 2026-10（D58）：这一项原来是「任务清单」，与侧栏另一项「新建任务」并列。
   //    两者合并成一页「任务」——**建**（顶栏那个主操作）与**看**（看板 / 列表）
   //    本来就是同一件事的两半。按使用者的定名：就叫「任务」。
   'shell.navTasks': { zh: '任务', en: 'Tasks' },
-  'shell.navTasksHint': { zh: '看 + 建 · 看板 / 列表', en: 'View & create · board / list' },
+  'shell.navTasksHint': { zh: '看板 · 列表', en: 'Board · list' },
   'shell.navAgents': { zh: '智能体', en: 'Agents' },
-  'shell.navAgentsHint': { zh: '指令 · 用哪个 CLI', en: 'Instructions · which CLI' },
+  'shell.navAgentsHint': { zh: '指令 · CLI', en: 'Instructions' },
   // ★ D70 第六项：智能体组（一队人的编队：执行 → 审核 → 行动）。
   //   ⚠️ 与「智能体」是**两个页面**（设计稿 §7.1）：智能体页保灵活性（每个人的
   //   指令/角色/审核者），组页保方便性（整条链的默认配置，新建任务一下选走）。
-  'shell.navGroups': { zh: '智能体组', en: 'Agent groups' },
-  'shell.navGroupsHint': { zh: '编队 · 执行+审核的默认配置', en: 'Teams · default executor+reviewer config' },
+  'shell.navGroups': { zh: '智能体组', en: 'Groups' },
+  // 2026-11：侧栏减半，提示语精简——"执行+审核的默认配置"只剩"执行 · 审核"。
+  //   （英文标题也顺手从 "Agent groups" 缩短成 "Groups"：120px 下 12 个字母放不下。）
+  'shell.navGroupsHint': { zh: '执行 · 审核', en: 'Exec · review' },
   'shell.navSkills': { zh: '技能', en: 'Skills' },
-  'shell.navSkillsHint': { zh: '执行者的参考资料 · 可安装', en: 'Reference packs for executors' },
+  // 2026-11：侧栏减半，提示语精简——"执行者的参考资料"只剩"参考资料"。
+  'shell.navSkillsHint': { zh: '参考资料', en: 'Skill packs' },
+
 
   'shell.envOk': { zh: '运行环境正常', en: 'Environment OK' },
   'shell.envNoCli': { zh: '未检测到 agent CLI', en: 'No agent CLI detected' },
