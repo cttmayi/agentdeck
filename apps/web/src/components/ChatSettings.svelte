@@ -703,7 +703,7 @@
     gap: 2px;
     padding: 0 var(--sp-1) 0 var(--sp-2);
     border: 1px solid var(--line-strong);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-size: var(--fs-xs);
     color: var(--text);
     /* ★ 不许折行（中文的 min-content 是一个字）：第 230 批那颗「浏览…」被挤成
@@ -823,7 +823,7 @@
     flex: 1 1 8rem;
     min-width: 6rem;
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--surface-2);
     overflow: hidden;
   }

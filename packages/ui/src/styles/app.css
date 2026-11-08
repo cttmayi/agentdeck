@@ -45,6 +45,9 @@
   --sp-8: 3rem;
 
   /* 字号层级 */
+  /* ★ 299 批：11px / 10px 这两档原来散在组件里（徽标、进度条、极小的辅助字），
+     不是新字号，是把已经在用的两档**给个名字** */
+  --fs-2xs: 0.6875rem;
   --fs-xs: 0.75rem;
   --fs-sm: 0.8125rem;
   --fs-base: 0.875rem;
@@ -65,6 +68,7 @@
   /* ★ 298 批：控件高度（按钮/输入/下拉的三种档）；现在只**登记**，改用见 299 批 */
   --ctl-h: 1.9rem;
   --ctl-h-sm: 1.5rem;
+  --fs-3xs: 0.625rem;
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -1272,7 +1276,7 @@ button:disabled,
 .btn--link {
   padding: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-none);
   background: none;
   color: var(--accent);
   font-size: var(--fs-xs);
@@ -1556,7 +1560,7 @@ tbody tr:last-child td { border-bottom: 0; }
   align-items: center;
   gap: var(--sp-1);
   padding: 0.1rem var(--sp-2);
-  border-radius: 100px;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-xs);
   font-weight: 500;
   border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
@@ -1933,7 +1937,7 @@ a > button { width: 100%; }
     font-size: 0.92em;
     background: var(--bg);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 0 0.3em;
   }
 

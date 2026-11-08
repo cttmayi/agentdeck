@@ -778,7 +778,7 @@
     min-width: 1.4rem;
     height: 1.4rem;
     padding: 0 4px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--accent-dim);
     color: #fff;
     display: inline-flex;

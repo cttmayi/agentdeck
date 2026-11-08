@@ -503,7 +503,7 @@
 
   .log {
     border: 0;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     max-height: 26rem;
     overflow-y: auto;
     background: var(--bg);

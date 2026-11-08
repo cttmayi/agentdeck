@@ -397,7 +397,7 @@
     align-self: flex-start;
     font-size: 0.8em;
     padding: 0.15em 0.6em;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     /* ⚠️ 2026-10：原来 `background: var(--accent-soft, #e8f0ff)` —— `--accent-soft`
        全局没有定义，暗色主题下回退到浅底 #e8f0ff + 浅蓝 `--accent`，浅底浅字看不清。
        改用全局 `.badge` 同款主题安全写法：accent 文字 + 12% accent 底色，

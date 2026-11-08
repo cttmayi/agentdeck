@@ -487,7 +487,7 @@
     border: 1px solid var(--line);
     background: var(--bg);
     color: var(--text-dim);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 1px 9px;
     font-size: var(--fs-xs);
     cursor: pointer;
@@ -592,7 +592,7 @@
     padding: var(--sp-2) var(--sp-3);
     background: var(--surface-2);
     border: none;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     color: inherit;
     font: inherit;
     text-align: left;
@@ -662,8 +662,8 @@
     min-width: 0;
   }
   .ap-badge.fixed {
-    font-size: 10px;
-    border-radius: 999px;
+    font-size: var(--fs-3xs);
+    border-radius: var(--radius-pill);
     padding: 0 7px;
     flex: none;
     color: var(--good);
@@ -758,7 +758,7 @@
   .ap-switch {
     width: 36px;
     height: 20px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--surface-2);
     border: 1px solid var(--line-strong);
     position: relative;

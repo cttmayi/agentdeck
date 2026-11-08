@@ -1651,7 +1651,7 @@
        会红——而它在这个列表里是元信息行的内容，该贴文本行高）。横向留 `--sp-2`
        与 `.badge` 一致；胶囊形状（圆角 + 圆点 + 底）不变。 */
     padding: 0 var(--sp-2);
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     font-size: var(--fs-xs);
     font-weight: 500;
     border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
@@ -1932,7 +1932,7 @@
     border: 1px solid var(--line);
     color: var(--text-dim);
     padding: var(--sp-1) var(--sp-3);
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
   }
 
   .run-tab.active {

@@ -235,7 +235,7 @@
     padding: var(--sp-2);
     background: none;
     border: 1px solid transparent;
-    border-radius: var(--r-2, 6px);
+    border-radius: var(--radius-xs);
     text-align: left;
     cursor: pointer;
   }
@@ -263,7 +263,7 @@
   .file-diff {
     margin-top: var(--sp-3);
     border: 1px solid var(--line);
-    border-radius: var(--r-2, 6px);
+    border-radius: var(--radius-xs);
     overflow: hidden;
   }
   .file-head {
@@ -277,7 +277,7 @@
   .change {
     flex: none;
     padding: 0 var(--sp-1);
-    border-radius: var(--r-1, 4px);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--line);
   }
   .change.add {

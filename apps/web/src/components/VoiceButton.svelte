@@ -425,7 +425,7 @@
     background: transparent;
     color: var(--text-faint);
     font: inherit;
-    font-size: 0.625rem;
+    font-size: var(--fs-3xs);
     line-height: 1;
     padding: 0;
     cursor: pointer;
@@ -477,7 +477,7 @@
     font-size: var(--fs-xs);
     padding: 0 var(--sp-2);
     border: 1px solid var(--line-strong);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: var(--text-dim);
   }
 

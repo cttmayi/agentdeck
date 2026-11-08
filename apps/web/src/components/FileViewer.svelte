@@ -579,7 +579,7 @@
   .fv-toggle button {
     background: transparent;
     border: 0;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     padding: var(--sp-1) var(--sp-3);
     color: var(--text-dim);
     cursor: pointer;

@@ -3733,8 +3733,11 @@ const CHECKS = [
     view: '行内细节（D65）',
     key: 'rowdetail.chip',
     label:
-      '★ 徽标同一形状：任务阶段标签与智能体角色徽标都是胶囊（radius=100px；原来任务描边方角 r4px）',
-    ok: (v) => !!v && v.tasks === '100px' && v.agents === '100px' && v.tasks === v.agents,
+      '★ 徽标同一形状：任务阶段标签与智能体角色徽标都是胶囊（`--radius-pill`；原来任务描边方角 r4px）',
+    // 299 批：`100px`/`999px` 都收敛成 `--radius-pill`（999px）——探针认的是
+    // "两边一样且都是胶囊"，不是那个历史字面量。
+    ok: (v) =>
+      !!v && v.tasks === v.agents && (v.tasks === '999px' || v.tasks === '100px'),
     show: (v) => ['tasks', 'agents'].map((k) => `${k}: ${v?.[k]}`).join('　'),
   },
   {

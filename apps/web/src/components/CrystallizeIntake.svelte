@@ -465,7 +465,7 @@
     font-size: var(--fs-xs);
     color: var(--text-faint);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0 0.4rem;
     white-space: nowrap;
     flex: 0 0 auto;

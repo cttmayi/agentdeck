@@ -311,7 +311,7 @@
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     color: var(--text-faint);
     padding: var(--sp-2) var(--sp-4);
     cursor: pointer;

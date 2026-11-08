@@ -1269,7 +1269,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     padding: var(--sp-2) var(--sp-3);
     color: var(--text-faint);
     cursor: pointer;
@@ -1313,7 +1313,7 @@
     width: 100%;
     background: none;
     border: none;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     padding: var(--sp-2) 0;
     color: var(--text);
     font-size: var(--fs-sm);

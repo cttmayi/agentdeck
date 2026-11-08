@@ -1988,9 +1988,9 @@
     flex-wrap: wrap;
     margin: 0 0 8px;
     padding: 6px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     background: var(--surface-2, #f4f4f5);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
 
@@ -2314,9 +2314,9 @@
      这一块是"多文件产物的呈现"，不是另一套设计语言。 */
   /* ── 变更集 diff（P1）：行号 gutter + 符号 + 文本，三色只区分增删 ── */
   .num-tag {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     padding: 0 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     white-space: nowrap;
   }
   .num-tag.add {
@@ -2331,7 +2331,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     line-height: 1.5;
   }
   .hunk-head {
@@ -2384,7 +2384,7 @@
   }
   .tab-count {
     padding: 0 5px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--panel-sunken, rgba(0, 0, 0, 0.06));
     font-size: var(--fs-xs);
   }
@@ -2618,15 +2618,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.8125rem;
+    font-size: var(--fs-sm);
   }
 
   /* 变更标记：A/M/D 用 git 的说法，颜色靠全局 badge 的语义色 */
   .change-tag {
     flex: 0 0 auto;
     padding: 0 5px;
-    border-radius: 4px;
-    font-size: 0.6875rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-2xs);
     line-height: 1.5;
     border: 1px solid var(--line);
   }
@@ -2689,7 +2689,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;

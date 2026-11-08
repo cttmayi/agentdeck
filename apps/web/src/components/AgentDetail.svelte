@@ -1658,7 +1658,7 @@
     z-index: 1;
     padding: 0 var(--sp-2);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: var(--surface);
     color: var(--text-faint);
     font-size: var(--fs-xs);
@@ -1944,7 +1944,7 @@
     flex: 0 0 auto;
     font-size: var(--fs-xs);
     padding: 0 var(--sp-2);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid var(--line-strong);
     color: var(--text-dim);
     white-space: nowrap;

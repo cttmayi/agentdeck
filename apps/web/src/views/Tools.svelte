@@ -983,7 +983,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    border-radius: 0;
+    border-radius: var(--radius-none);
     padding: var(--sp-2) var(--sp-3);
     color: var(--text-faint);
     cursor: pointer;
