@@ -487,6 +487,9 @@ export const chatText = {
   'chat.rename': { zh: '改名', en: 'Rename' },
   'chat.renameSave': { zh: '保存', en: 'Save' },
   'chat.renamed': { zh: '已改名', en: 'Renamed' },
+  // 2026-11：改名入口从「改名」按钮改成**点标题**（长标题下按钮会被挤到第二行）。
+  // 这条是标题悬浮提示——"能点"的暗示。
+  'chat.renameHint': { zh: '点击改名', en: 'Click to rename' },
   // 300 批：确认框的"确定"按钮与它那一行动作按钮**同名**（`chat.delete` = 删除对话，
   //   组 / 任务那边也是这么写的）。原来是「确认删除」——同一个位置三种措辞，
   //   一页一页看过去才会发现不一致。

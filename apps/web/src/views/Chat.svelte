@@ -852,6 +852,21 @@
     })
   }
 
+  /** ★ 2026-11（使用者报的）：改名入口从「改名」按钮改成**点标题**——按钮在长标题下
+   *   会被挤到第二行、栏头整体变 3 行（根因见下面 CSS 那段注释）。现在标题本身可点
+   *   （`role="button"` + tabindex 让键盘也能进：Enter / 空格），悬浮提示是"能点"的暗示。 */
+  function startRename(): void {
+    if (renaming || activeConversation === null) return
+    renameValue = activeConversation.title
+    renaming = true
+  }
+
+  /** 进改名时聚焦 + 全选：直接打字就替换整段旧标题，不用先删（Svelte 5 的 action）。 */
+  function focusSelect(node: HTMLInputElement): void {
+    node.focus()
+    node.select()
+  }
+
   async function saveTitle(): Promise<void> {
     const id = $activeConversationId
     const title = renameValue.trim()
@@ -998,6 +1013,7 @@
               bind:value={renameValue}
               autocomplete="off"
               aria-label={$t('chat.rename')}
+              use:focusSelect
               onkeydown={(e) => {
                 if (e.key === 'Enter') void saveTitle()
                 if (e.key === 'Escape') renaming = false
@@ -1006,14 +1022,20 @@
             <button onclick={() => void saveTitle()}>{$t('chat.renameSave')}</button>
             <button class="btn btn--ghost" onclick={() => (renaming = false)}>{$t('chat.renameCancel')}</button>
           {:else}
-            <h2>{activeConversation.title}</h2>
-            <button
-              class="btn btn--ghost"
-              onclick={() => {
-                renameValue = activeConversation.title
-                renaming = true
-              }}>{$t('chat.rename')}</button
-            >
+            <!-- ★ 2026-11（使用者报的）：标题太长会把「改名」按钮挤到第二行 ⇒ 栏头整体 3 行。
+                 干脆删掉按钮：标题本身可点（悬浮提示 + 光标变化），点一下就地进改名。 -->
+            <h2
+              role="button"
+              tabindex="0"
+              title={$t('chat.renameHint')}
+              onclick={startRename}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  startRename()
+                }
+              }}
+            >{activeConversation.title}</h2>
           {/if}
           <span class="detail-sub">
             {agentOfActive?.name ?? '—'} ·
@@ -1542,16 +1564,11 @@
      智能体两页的头**根本不是同一套**——使用者说的"风格没统一"就是这个。
      本组件只保留"聊天特有"的东西（标题里的改名输入框）。 */
 
-  /* ★ 311 批（使用者报的：标题被拉成两行——上一批我改错了地方，改的是**列表行**的
-     `.conv-title`；出问题的是**栏头这颗 h2**）：
-     · `flex-wrap: wrap` 让长标题自己独占一行并折行 ⇒ 去掉 wrap（栏头是一行的事）
-     · h2 要能收缩：`flex: 1 1 auto; min-width: 0` + 单行省略五件套
-     · 按钮 `flex: 0 0 auto`，否则窄栏里「改名」会被压成两行 */
-  /* ★ 311 批（使用者："还是看见的是一行"）：这一行里其实是**三样东西**——
-     标题 h2、「改名」按钮、`文章写作员 · 2 轮` 那行辅助信息。要求（312 批定的规则）：
-     第一行标题 + 改名，第二行辅助信息。
-     做法：允许换行，让辅助信息**独占一整行**（`flex: 0 0 100%`），
-     标题则 `flex: 1 1 auto; min-width: 0` 在一行里收缩省略。 */
+  /* ★ 311/312 批（"标题被拉成两行"）：栏头一行里是标题 + 「改名」按钮，
+     辅助信息独占第二行——做法是允许换行、副题 `flex: 0 0 100%`、
+     标题 `flex: 1 1 auto; min-width: 0` 单行省略。
+     ⚠️ 2026-11 被使用者报的 bug 推翻：「改名」按钮已删，标题本身可点进改名
+     （按钮在长标题下会被挤到第二行 ⇒ 栏头 3 行，根因写在 h2 那条的注释里）。 */
   .chat-head-main {
     display: flex;
     flex-wrap: wrap;
@@ -1570,22 +1587,37 @@
   }
 
   .chat-head-main > h2 {
-    flex: 1 1 auto;
+    /* ★ 2026-11（使用者报的：标题太长把「改名」挤到第二行、整体 3 行）：
+       **flex-basis 必须是 0，不能是 auto**。`auto` 时 basis = 整段标题的内容宽
+       （headless Chrome 实测：1258px 的标题 + 444px 的容器），flex-wrap 里它
+       自己占满第一行、同排的按钮只能换行。basis 0 + grow 1 = 先让同排的按钮
+       坐下、再占满剩余宽度省略——删掉按钮后 h2 独行，宽窄窗都稳定两行。 */
+    flex: 1 1 0;
     min-width: 0;
     display: block;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* 标题本身可点进改名（按钮已删）：光标与悬浮下划线给出"能点"的暗示 */
+    cursor: pointer;
+  }
+  .chat-head-main > h2:hover {
+    text-decoration: underline;
   }
 
+  /* 改名输入框与「保存/取消」：`.chat-head-main > button` 已把按钮钉成
+     `flex: 0 0 auto; white-space: nowrap`（按钮永远不换行、不被压扁）。 */
   .chat-head-main > button {
     flex: 0 0 auto;
     white-space: nowrap;
   }
 
   .rename-input {
-    min-width: 14rem;
+    /* ★ 2026-11：输入框也要 `flex: 1 1 0`（能缩能长），与「保存/取消」同排——
+       原来 `min-width: 14rem` 在窄栏里会把整排顶出右缘（同一条 flex-basis 的坑）。 */
+    flex: 1 1 0;
+    min-width: 8rem;
   }
 
   /* D69.15.2 栏头标题对齐：默认的 ghost 按钮（垂直 padding 8px×2，高 38px）和

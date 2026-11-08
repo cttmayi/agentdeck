@@ -8576,6 +8576,81 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return Math.round(h2.getBoundingClientRect().top - main.getBoundingClientRect().top) <= 6
         })()
 
+        // ★ 2026-11（使用者报的：标题太长把「改名」按钮挤到第二行 ⇒ 栏头 3 行）。
+        //   改版后**没有「改名」按钮**了：标题本身可点进改名。这条量四件事：
+        //   ① 栏头里确实没有「改名」按钮（它是换行的根源）；
+        //   ② 点标题 ⇒ 出现改名输入框；
+        //   ③ 输入框与「保存/取消」**同一排**、输入框不溢出栏头右缘（flex-basis 0 的落地）；
+        //   ④ Esc 回到标题（旧的取消路径没断）。
+        facts['chat.renameByClickTitle'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const head = d().querySelector('.detail-pane .chat-head .chat-head-main')
+          const h2 = head?.querySelector('h2')
+          if (!head || !h2) {
+            errors.push('聊天栏头没有标题 h2')
+            return false
+          }
+          if ([...head.children].some((c) => text(c).includes('改名'))) {
+            errors.push('栏头里还找得到「改名」按钮（这版应该删掉了）')
+            return false
+          }
+          click(h2)
+          await wait(300)
+          const input = head.querySelector('.rename-input')
+          if (!input) {
+            errors.push('点了标题，改名输入框没出现')
+            return false
+          }
+          const rowOf = (el) => el.getBoundingClientRect()
+          // ⚠️ 不能比 top 相等：`.chat-head-main` 是 `align-items: baseline`，
+          //    input 与按钮的基线不同 ⇒ top 差几像素（left 在同一行上才是判据）。
+          const sameRow = (a, b) => rowOf(a).top < rowOf(b).bottom && rowOf(b).top < rowOf(a).bottom
+          const buttons = [...head.querySelectorAll(':scope > button')]
+          if (buttons.length < 2 || !sameRow(input, buttons[0]) || !sameRow(input, buttons[1])) {
+            errors.push('改名输入框与「保存/取消」不在同一排（flex-basis 0 没生效）')
+            return false
+          }
+          if (input.getBoundingClientRect().right > head.getBoundingClientRect().right + 1) {
+            errors.push('改名输入框溢出了栏头右缘（宽度没处理好）')
+            return false
+          }
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          await wait(300)
+          if (head.querySelector('.rename-input')) {
+            errors.push('Esc 之后改名输入框还在（取消路径断了）')
+            return false
+          }
+          return true
+        })()
+
+        // ★ 2026-11 同一条使用者报的 bug 的另一半：**长标题下栏头必须仍是两行**。
+        //   往 h2 里塞长文本量布局（flex 布局只认内容宽度，文本从哪来不影响结果）：
+        //   两行（标题行 + 辅助信息行）且标题被截断省略（clientW < scrollW），
+        //   而不是把标题撑到别处去。
+        facts['chat.headLongTitleKeepsTwoLines'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const head = d().querySelector('.detail-pane .chat-head .chat-head-main')
+          const h2 = head?.querySelector('h2')
+          if (!head || !h2) return false
+          const original = h2.textContent ?? ''
+          h2.textContent =
+            '一个特别特别特别特别特别特别特别特别特别特别特别特别特别特别特别特别长的聊天标题用来复现换行问题'
+          await wait(300)
+          const rows = new Set([...head.children].map((el) => Math.round(el.getBoundingClientRect().top)))
+          const ellipsized = h2.scrollWidth > h2.clientWidth
+          h2.textContent = original
+          await wait(300)
+          if (rows.size !== 2) {
+            errors.push(`长标题下栏头不是两行（量到 ${rows.size} 行）`)
+            return false
+          }
+          if (!ellipsized) {
+            errors.push('长标题没有被截断省略（scrollWidth 没超过 clientWidth）')
+            return false
+          }
+          return true
+        })()
+
         // ★ 工作目录**只读**（2026-10），路径**在栏脚标题行右侧**（分批第 222 批）。
         //
         // ⚠️ 判据的**宿主换了**（理由写在原地）：原来量 `.detail-pane .chat-dir`——那是页头那一行；
