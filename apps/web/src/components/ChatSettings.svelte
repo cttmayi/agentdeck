@@ -716,7 +716,7 @@
     color: var(--text-faint);
     cursor: pointer;
     font: inherit;
-    padding: 0 2px;
+    padding: 0;
   }
   .prefix-x:hover {
     color: var(--text);

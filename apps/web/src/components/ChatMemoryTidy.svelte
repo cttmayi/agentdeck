@@ -563,7 +563,7 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm, 4px);
-    padding: 1px 4px;
+    padding: 0 var(--sp-1);
     color: var(--text-dim);
     field-sizing: content;
     /* ⚠️ 必须显式压掉全局那条 `textarea { min-height: 4rem }`（`app.css` 里给表单写的）：

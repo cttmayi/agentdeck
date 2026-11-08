@@ -241,7 +241,7 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: 2px 0;
+    padding: 0;
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     min-width: 0;

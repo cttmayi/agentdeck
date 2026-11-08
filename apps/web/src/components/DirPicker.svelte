@@ -285,7 +285,7 @@
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    padding: 0.15rem 0.35rem;
+    padding: 2px var(--sp-1);
     border: 0;
     border-radius: var(--radius-sm);
     background: none;

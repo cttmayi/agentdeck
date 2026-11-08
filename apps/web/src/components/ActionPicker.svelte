@@ -488,7 +488,7 @@
     background: var(--bg);
     color: var(--text-dim);
     border-radius: var(--radius-pill);
-    padding: 1px 9px;
+    padding: 0 var(--sp-2);
     font-size: var(--fs-xs);
     cursor: pointer;
     white-space: nowrap;
@@ -503,7 +503,7 @@
     background: var(--bg);
     color: var(--text-dim);
     border-radius: var(--radius-sm);
-    padding: 1px 8px;
+    padding: 0 var(--sp-2);
     font-size: var(--fs-xs);
     cursor: pointer;
     white-space: nowrap;
@@ -517,7 +517,7 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     color: var(--text);
-    padding: 2px 8px;
+    padding: var(--sp-1) var(--sp-2);
     font-size: var(--fs-xs);
     width: 13rem;
     outline: none;
@@ -664,7 +664,7 @@
   .ap-badge.fixed {
     font-size: var(--fs-3xs);
     border-radius: var(--radius-pill);
-    padding: 0 7px;
+    padding: 0 var(--sp-2);
     flex: none;
     color: var(--good);
     border: 1px solid rgba(78, 201, 160, 0.4);
@@ -823,7 +823,7 @@
     gap: var(--sp-2);
     font-size: var(--fs-sm);
     color: var(--text-dim);
-    padding: 1px 0;
+    padding: 0;
   }
   .ap-bound-row code {
     color: var(--text-faint);

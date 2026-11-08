@@ -152,7 +152,11 @@
 `.pane-tabs > button` → `--sp-1/--sp-3`、`.new-version-bar` → `--sp-2/--sp-3`（含 margin）。
 `probe:layout` **618 项全绿** ⇒ 这一屏改了 1–4px 的内距但没把布局弄坏。
 
-顺序建议：① ~~沉淀页差异视图~~（做完）→ ② `ActionPicker`（#1–#5）→ ③ 其余零散（#6/#7/#16/#18/#19）。
+**第②③屏也已做完**（304B 一批收尾）：`ActionPicker` 的 `.ap-chip/.ap-expand/.ap-search/.ap-badge.fixed/.ap-bound-row`、
+`ChatMemoryTidy .tidy-text`、`ChatSettings .prefix-x`、`DirPicker .row`、`WorkDirTree .wd li` 全部换到 `--sp-*`。
+`.tpl-state .badge`（#17）**不按内距改**——它是 `.badge` 的重画，该并进 `.badge--sm`（另记）。
+`theme-picker` 的 `2px` 保持（它是选择器的内框，不是控件内距）。
+判据：`probe:layout` **618 项全绿**。
 每屏做完跑一次 `pnpm run probe:layout`（618 项），红了就当场看清是哪一屏的哪个断言。
 #17（`.tpl-state .badge`）**不按内距改**，它是 `.badge` 的重画，该并进 `.badge--sm`。
 
