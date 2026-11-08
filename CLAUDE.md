@@ -77,6 +77,12 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
    - 布局类缺陷类型检查看不见（"两栏有没有真并排"之类），只有浏览器量得出来。
    - **样式别开小灶**：按钮/输入/徽标/面板的类名从 `ui-style.md` §2 挑，
      不写裸 `px`/`#hex`、不在组件里重定义全局控件——`tests/ui-style.test.ts` 会拦。
+9. **平台差异有纪律与检查**（Windows 咬过一次：沉淀总报 infra_error，见
+   [`docs/design/platform-compat.md`](docs/design/platform-compat.md)）：
+   适配器**自己 terminate 之后不许读进程退出码**（Windows 上 `taskkill /T /F`
+   留下 exitCode=1，把成功误判成失败，提交 f79ee99）；适配器不许读
+   `process.platform`、不许自己 spawn `taskkill`（收进程只许在
+   `process-tree.ts` 一处）——`tests/platform-compat.test.ts` 机器检查着这三条。
 
 ## 文档与现状
 
