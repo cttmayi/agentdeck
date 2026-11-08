@@ -118,7 +118,7 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 | 支持平台 | **macOS（Apple Silicon，13.3+）**、**Windows（x64）**——`whisper-cpp-node` 只发这两个预编译包 |
 | Intel Mac / Windows ARM / Linux | 能力探测判不可用，界面不画按钮（不是运行时崩） |
 | 落点 | `~/.agentdeck/asr/`（`--asr-root` 可覆盖）：`vocab.json` / `settings.json` / `models/` / `models.lock.json` |
-| 默认模型 | `ggml-base-q5_1.bin`（约 57 MiB，多语言）；可切 `small-q5_1`（181 MiB）/ `small`（466 MiB） |
+| 默认模型 | **`ggml-small-q5_1.bin`（约 181 MiB，多语言）**（293 批改的；实测比 base 准得多，见 §7.7）；可切 `base-q5_1`（57 MiB）/ `small`（466 MiB） |
 | 上游基址 | **回退链**：先 huggingface.co，不通就自动换 hf-mirror.com（两者内容一致）；`--asr-model-base` 给了就**只用它、不回落**。结果里带 `source`，界面会说清"来自哪个 host" |
 | 语言 | 默认 `zh`，可选 `en` / `auto`（口径见下面 §7.7：中英混说 `zh` 与 `auto` **一样好**；`zh` 的坑是**整段英文会被翻成中文**） |
 | 灵敏度 | 三档 `stable`(0.6/1200ms) / `normal`(0.5/800ms) / `quick`(0.4/500ms) |
@@ -225,7 +225,10 @@ PascalCase（`AgentDeck`）｜缩写（`VAD`、`ARC`、`STE100`）｜含大写�
    那种情况用 `auto`（或 `en`）。`en` 反过来会把中文翻成英文，所以不能当默认。
 3. **模型档的差距比语言档大得多**：`small-q5_1` 上表第 3 行**全对**，而 `base-q5_1`
    同一句是 `用 pm、tm、装衣下 distilly,然后跑达的测试。`——`pnpm`、`VAD` 全毁。
-   速度：small ≈ 0.13×（约 8 倍实时）、base ≈ 0.06×（约 17 倍实时）。**default 应该用 small**。
+   速度：small ≈ 0.13×（约 8 倍实时）、base ≈ 0.06×（约 17 倍实时）。**default 已改成 small**
+   （293 批）：`DEFAULT_ASR_MODEL` 与 `DEFAULT_SETTINGS.model` 都换了，模型目录里
+   small 排第一；首次下载因此从 57 MiB 变成 181 MiB（一次性）。
+   ⚠️ 已经存过 `settings.json` 的人**不会被悄悄换掉**——那是他自己选过的。
 
 ## 8. 踩过的坑（写在这里免得再踩）
 

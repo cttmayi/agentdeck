@@ -90,9 +90,11 @@ function fakeResponse(
 }
 
 describe('模型目录', () => {
-  test('★ 默认档是 base-q5_1（体积小的那档），三档都是多语言模型', () => {
-    assert.equal(DEFAULT_ASR_MODEL, 'base-q5_1')
-    assert.equal(findModelSpec(DEFAULT_ASR_MODEL)?.file, 'ggml-base-q5_1.bin')
+  test('★ 默认档是 small-q5_1（293 批：实测比 base 准得多），三档都是多语言模型', () => {
+    assert.equal(DEFAULT_ASR_MODEL, 'small-q5_1')
+    assert.equal(findModelSpec(DEFAULT_ASR_MODEL)?.file, 'ggml-small-q5_1.bin')
+    // 目录里**第一档就是默认档**（"第一个 = 默认"这条读起来要一致）
+    assert.equal(ASR_MODELS[0]?.id, DEFAULT_ASR_MODEL)
     // ⚠️ `.en` 版对中文等于不会说话——文件名里不许出现 `.en.bin`
     for (const spec of ASR_MODELS) {
       assert.ok(!spec.file.includes('.en.bin'), `${spec.file} 是多语言的还是 .en？`)

@@ -37,7 +37,12 @@ export interface VoiceSettings {
 
 export const DEFAULT_SETTINGS: VoiceSettings = {
   version: 1,
-  model: 'base-q5_1',
+  /**
+   * ★ 分批第 293 批：默认模型改成 `small-q5_1`（实测比 base 明显准，见 `models.ts` 的
+   *   `ASR_MODELS[0]` 那段）。⚠️ 只是**新装/没选过**时的默认——已经存过
+   *   `settings.json` 的人不会被悄悄换掉（那是他自己选过的）。
+   */
+  model: 'small-q5_1',
   language: 'zh',
   sensitivity: 'normal',
   denoise: false,

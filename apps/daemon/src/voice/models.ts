@@ -58,18 +58,30 @@ export interface AsrModelSpec {
  */
 export const ASR_MODELS: readonly AsrModelSpec[] = [
   {
-    id: 'base-q5_1',
-    label: 'base（量化 q5_1）',
-    file: 'ggml-base-q5_1.bin',
-    approxMb: 57,
-    note: '默认：快，日常口述够用',
-  },
-  {
     id: 'small-q5_1',
     label: 'small（量化 q5_1）',
     file: 'ggml-small-q5_1.bin',
     approxMb: 181,
-    note: '更准，慢 2–4 倍',
+    /**
+     * ★ 分批第 293 批（使用者："你用 small q5_1，我感觉 base 太差了"）：**默认改 small**。
+     *
+     * 实测（同一句「用 pnpm 装一下 distilly，然后跑 VAD 测试」）：
+     *   · small → `用 pnpm 装一下 distilly,然后跑 VAD 测试。`（**全对**）
+     *   · base  → `用 pm、tm、装衣下 distilly,然后跑达的测试。`（pnpm / VAD 全毁）
+     * 速度：small ≈ 0.13× 实时（约 8 倍实时）、base ≈ 0.06×（约 17 倍）。
+     * 口述是"说完就要看到字"，8 倍实时完全够用——而 `pnpm`、`VAD` 这种缩写被毁掉时，
+     * 后面要靠替换规则一条条补，补不完。
+     *
+     * ⚠️ 代价：首次下载从 57 MiB 变成 181 MiB（一次性）。
+     */
+    note: '默认：中文与中英混说都明显更准（首次下载约 181 MiB）',
+  },
+  {
+    id: 'base-q5_1',
+    label: 'base（量化 q5_1）',
+    file: 'ggml-base-q5_1.bin',
+    approxMb: 57,
+    note: '最省资源，但中文与缩写容易错（实测 pnpm/VAD 会被毁）',
   },
   {
     id: 'small',
@@ -80,7 +92,7 @@ export const ASR_MODELS: readonly AsrModelSpec[] = [
   },
 ]
 
-export const DEFAULT_ASR_MODEL = 'base-q5_1'
+export const DEFAULT_ASR_MODEL = 'small-q5_1'
 
 /**
  * 上游地址：**按顺序试**。

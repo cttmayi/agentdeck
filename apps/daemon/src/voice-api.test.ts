@@ -193,10 +193,11 @@ describe('词表与设置', () => {
     })
   })
 
-  test('★★ 设置：默认 base-q5_1 / zh / 中档；PATCH 之后读回来是新的', async () => {
+  test('★★ 设置：默认 small-q5_1 / zh / 中档；PATCH 之后读回来是新的', async () => {
     await withDaemon(async ({ url }) => {
       const initial = await json(`${url}/api/voice/settings`)
-      assert.equal(initial.body['model'], 'base-q5_1')
+      // ★ 293 批：默认模型改成 small-q5_1（实测比 base 准得多）
+      assert.equal(initial.body['model'], 'small-q5_1')
       assert.equal(initial.body['language'], 'zh')
       assert.equal(initial.body['sensitivity'], 'normal')
       assert.equal(initial.body['outputMode'], 'input')
@@ -223,11 +224,11 @@ describe('模型目录', () => {
       assert.equal(models.length, 3)
       assert.deepEqual(
         models.map((m) => m['id']),
-        ['base-q5_1', 'small-q5_1', 'small'],
+        ['small-q5_1', 'base-q5_1', 'small'],
       )
       // 注入的 modelStateOf 说"在"，所以三档都该报 present
       assert.ok(models.every((m) => m['present'] === true))
-      assert.equal(body['default'], 'base-q5_1')
+      assert.equal(body['default'], 'small-q5_1')
       // 每档都带界面上要显示的体积（否则"首次需下载约 xx MiB"编不出来）
       assert.ok(models.every((m) => typeof m['approxMb'] === 'number'))
     })

@@ -121,7 +121,8 @@ describe('模型状态与归因', () => {
     )
     assert.equal(cap.available, false)
     assert.match(cap.reason, /首次使用需要下载/)
-    assert.match(cap.reason, /57 MiB/)
+    // ★ 293 批：默认档换成 small-q5_1 ⇒ 首次下载约 181 MiB
+    assert.match(cap.reason, /181 MiB/)
     assert.equal(cap.model.approxMb, SPEC.approxMb)
   })
 
