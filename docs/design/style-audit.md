@@ -121,6 +121,30 @@
 **顺手能做的（不下 1px 的）**：#8/#9、#10/#11 是**同一个形状在两个组件里各写一遍**，
 把它们抽成 `app.css` 的一个 `.diff-*` 家族是**等值**的——这才是"统一"该先做的事。
 
+### 2.3.2 下一批（304）的施工单（使用者已点头"按建议做"）
+
+**A. 抽取差异视图的三个形状（像素不变）**
+
+`CrystallizeDraftEditor.svelte` 与 `CrystallizeView.svelte` 里 `.file-row` / `.change-tag` /
+`.hunk-head` 三条规则**逐字相同**（已比对）：
+
+| 类 | 两份的声明 |
+|---|---|
+| `.file-row` | `display:flex; align-items:center; gap:8px; width:100%; padding:6px 10px; background:transparent; border:0; border-bottom:1px solid var(--line); font:inherit; color:inherit; text-align:left; cursor:pointer` |
+| `.change-tag` | `flex:0 0 auto; padding:0 5px; border-radius:var(--radius-sm); font-size:var(--fs-2xs); line-height:1.5; border:1px solid var(--line)` |
+| `.hunk-head` | `padding:0.15rem 0.5rem; color:var(--text-faint); background:var(--surface-2); border-top:1px solid var(--line); user-select:none` |
+
+做法：在 `app.css` 里加**带作用域**的一组（`.diff-view .file-row` 这样），
+两个组件的外层容器加 `class="diff-view"`，再把三份本地规则删掉。
+⚠️ **不要**直接写成全局 `.file-row`：`FileViewer` / `WorkDirTree` / `ActionPicker` 里也有
+同名类（各自 scoped），全局化会把这几条属性漏过去。
+
+**B. 再动内距（会改像素，一屏一批）**
+
+顺序建议：① 沉淀页差异视图（#8–#15）→ ② `ActionPicker`（#1–#5）→ ③ 其余零散（#6/#7/#16/#18/#19）。
+每屏做完跑一次 `pnpm run probe:layout`（618 项），红了就当场看清是哪一屏的哪个断言。
+#17（`.tpl-state .badge`）**不按内距改**，它是 `.badge` 的重画，该并进 `.badge--sm`。
+
 ---
 
 ## 3. 组件在重定义控件外观（**7 处**）
