@@ -48,13 +48,15 @@ export interface AsrModelSpec {
 }
 
 /**
- * 目录里可选的三档。
+ * 目录里可选的两档。
  *
- * ★ 默认 base-q5_1（分批第 277 批，使用者："默认模型 = 体积小的 base-q5_1"）：
- *   约 57 MiB、Apple Silicon 上 10 秒音频不到 1 秒就出结果——口述录入这种"说完就要
- *   看到字"的场景，慢的模型即使更准也会被放弃。
- * ⚠️ 三档都是**多语言**模型（不带 `.en`）：中文与中英混说都要认，`.en` 版对中文
- *   等于不会说话。
+ * ★ **没有 `base` 了**（分批第 294 批，使用者："去掉 base 的选项，我感觉它基本不可用"）。
+ *   实测同一句「用 pnpm 装一下 distilly，然后跑 VAD 测试」：
+ *     · `small-q5_1` → `用 pnpm 装一下 distilly,然后跑 VAD 测试。`（全对）
+ *     · `base-q5_1`  → `用 pm、tm、装衣下 distilly,然后跑达的测试。`（`pnpm`/`VAD` 全毁）
+ *   一个"每个缩写都可能被毁"的档，留着只会让人踩一次坑——所以从目录里删掉。
+ *   ⚠️ 老 `settings.json` 里存过 `base-q5_1` 的人，`normalizeSettings` 会因为"不在
+ *     已知档里"自动回落到默认档（不会因为找不到模型而卡住）。
  */
 export const ASR_MODELS: readonly AsrModelSpec[] = [
   {
@@ -75,13 +77,6 @@ export const ASR_MODELS: readonly AsrModelSpec[] = [
      * ⚠️ 代价：首次下载从 57 MiB 变成 181 MiB（一次性）。
      */
     note: '默认：中文与中英混说都明显更准（首次下载约 181 MiB）',
-  },
-  {
-    id: 'base-q5_1',
-    label: 'base（量化 q5_1）',
-    file: 'ggml-base-q5_1.bin',
-    approxMb: 57,
-    note: '最省资源，但中文与缩写容易错（实测 pnpm/VAD 会被毁）',
   },
   {
     id: 'small',

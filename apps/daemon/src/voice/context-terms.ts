@@ -61,7 +61,7 @@ export const CONTEXT_TERM_LIMIT = 12
  *   这类通用词也抽进来，而它们进 prompt 只会把普通话说成术语。
  */
 const SHAPES: readonly RegExp[] = [
-  // 带分隔符：whisper.cpp / wiki-capture / SKILL.md / base-q5_1 / @agentdeck/daemon
+  // 带分隔符：whisper.cpp / wiki-capture / SKILL.md / small-q5_1 / @agentdeck/daemon
   /[A-Za-z][A-Za-z0-9]*(?:[./_-][A-Za-z0-9]+)+/,
   // camelCase：openConversation
   /[a-z]+[A-Z][A-Za-z0-9]*/,

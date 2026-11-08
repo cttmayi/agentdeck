@@ -90,11 +90,13 @@ function fakeResponse(
 }
 
 describe('模型目录', () => {
-  test('★ 默认档是 small-q5_1（293 批：实测比 base 准得多），三档都是多语言模型', () => {
+  test('★ 默认档是 small-q5_1（293 批：实测比 base 准得多），且 base 已从目录删除', () => {
     assert.equal(DEFAULT_ASR_MODEL, 'small-q5_1')
     assert.equal(findModelSpec(DEFAULT_ASR_MODEL)?.file, 'ggml-small-q5_1.bin')
     // 目录里**第一档就是默认档**（"第一个 = 默认"这条读起来要一致）
     assert.equal(ASR_MODELS[0]?.id, DEFAULT_ASR_MODEL)
+    // ★ 294 批：`base` 不在目录里了（使用者："去掉 base 的选项，我感觉它基本不可用"）
+    assert.equal(findModelSpec('base-q5_1'), null)
     // ⚠️ `.en` 版对中文等于不会说话——文件名里不许出现 `.en.bin`
     for (const spec of ASR_MODELS) {
       assert.ok(!spec.file.includes('.en.bin'), `${spec.file} 是多语言的还是 .en？`)

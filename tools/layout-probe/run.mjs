@@ -1900,7 +1900,8 @@ const CHECKS = [
       typeof v === 'object' &&
       v.present === true &&
       Array.isArray(v.models) &&
-      v.models.length === 3 &&
+      // ★ 294 批：`base` 已从目录删除 ⇒ 只剩两档（small-q5_1 / small）
+      v.models.length === 2 &&
       Array.isArray(v.languages) &&
       ['zh', 'en', 'auto'].every((x) => v.languages.includes(x)) &&
       Array.isArray(v.sensitivities) &&

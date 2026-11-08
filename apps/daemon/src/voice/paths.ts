@@ -28,7 +28,7 @@ import { dirname, join } from 'node:path'
  * 目录内容：
  *   `vocab.json`       词典（prompt 词 + 替换规则），人可读可改
  *   `settings.json`    语音的选项（模型 / 语言 / 灵敏度 / 输出方式）
- *   `models/`          模型文件（`ggml-base-q5_1.bin` 等，几十到几百 MiB）
+ *   `models/`          模型文件（`ggml-small-q5_1.bin` 等，几十到几百 MiB）
  *   `models.lock.json` 模型的 sha256 记录（下载时算、之后每次加载都核对）
  */
 export function asrRootJoin(root: string, ...parts: string[]): string {

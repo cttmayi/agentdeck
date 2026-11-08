@@ -221,10 +221,11 @@ describe('模型目录', () => {
       const { status, body } = await json(`${url}/api/voice/models`)
       assert.equal(status, 200)
       const models = body['models'] as Array<Record<string, unknown>>
-      assert.equal(models.length, 3)
+      // ★ 294 批：`base` 从目录里删掉了（实测"每个缩写都可能被毁"，留着只会让人踩坑）
+      assert.equal(models.length, 2)
       assert.deepEqual(
         models.map((m) => m['id']),
-        ['small-q5_1', 'base-q5_1', 'small'],
+        ['small-q5_1', 'small'],
       )
       // 注入的 modelStateOf 说"在"，所以三档都该报 present
       assert.ok(models.every((m) => m['present'] === true))
