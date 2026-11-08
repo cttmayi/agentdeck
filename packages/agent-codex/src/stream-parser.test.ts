@@ -392,9 +392,26 @@ describe('classifyCodexFailure（失败分级，与 generic 同构）', () => {
     )
   })
 
-  test('★ 非零退出码 → agent_error', () => {
+  test('★★★ Windows 误判回归：turn 正常完成 + 有产出，进程退出码 1 不算失败', () => {
+    /*
+     * 现场（2026-11，使用者 Windows 上沉淀总报 infra_error）：codex 的 app-server
+     * 干完了活（skill/SKILL.md 都写好了），`turn/completed`（status completed）先到，
+     * 适配器随后 `terminate()` 收进程——Unix 上 SIGTERM 让 exitCode=null，Windows 上
+     * `taskkill /T /F` 强杀却留下 exitCode=1。旧判据把"非零退出码"当 CLI 失败，
+     * 于是同一份成功产出在 Windows 上被记成 agent_error → executor 报 infra_error。
+     * 有明确结局（turnEndStatus=completed）且这轮有产出 ⇒ 成功，退出码不参与判失败。
+     */
     assert.equal(
       classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: false, exitCode: 1, sawAssistantOutput: true, turnEndStatus: 'completed' }),
+      null,
+    )
+  })
+
+  test('★★ 进程先于终止帧退出（turnEndStatus=null）+ 非零退出码 → agent_error', () => {
+    // 与上面那条成对：只有进程**自己先死**（没等到 turn/completed）时，退出码才说明
+    // CLI 真挂了——比如 app-server 起动即崩（exit=1、什么帧都没有）。
+    assert.equal(
+      classifyCodexFailure({ recognizedEvents: 3, resultSeen: true, parserIsError: false, exitCode: 1, sawAssistantOutput: false, turnEndStatus: null }),
       'agent_error',
     )
   })
@@ -428,6 +445,22 @@ describe('classifyCodexFailure（失败分级，与 generic 同构）', () => {
         resultSeen: true,
         parserIsError: false,
         exitCode: 0,
+        sawAssistantOutput: false,
+        turnEndStatus: 'completed',
+      }),
+      'empty_response',
+    )
+  })
+
+  test('★ 完成但零产出 + 退出码 1 → 仍是 empty_response（判据是产出，不是退出码）', () => {
+    // 退出码 1 在这里是"收进程的产物"（Windows taskkill），不是 CLI 失败——
+    // "完成但零产出"已经说明了这一轮的性质，别让退出码把它顶成 agent_error。
+    assert.equal(
+      classifyCodexFailure({
+        recognizedEvents: 6,
+        resultSeen: true,
+        parserIsError: false,
+        exitCode: 1,
         sawAssistantOutput: false,
         turnEndStatus: 'completed',
       }),

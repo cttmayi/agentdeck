@@ -521,9 +521,29 @@ export function classifyCodexFailure(input: {
 
   if (input.recognizedEvents === 0) return 'cli_unparsable_output'
   if (!input.resultSeen) return 'cli_unparsable_output'
-  if (input.parserIsError || exitedNonZero) return 'agent_error'
-  // ★ 只对**正常完成**的一轮套"零产出"判据：取消（interrupted）本来就可能一个字没说，
-  //   失败那一档已经有自己的原因码——混进来会把一次正常的取消记成失败。
-  if (input.turnEndStatus === 'completed' && !input.sawAssistantOutput) return 'empty_response'
+  if (input.parserIsError) return 'agent_error'
+
+  // ★ 2026-11（Windows 沉淀失败的现场：skill 文件都写好了、收尾话也说了，却报
+  //   infra_error）：**turn/completed 先到**（turnEndStatus 有值）时，进程退出码
+  //   是"适配器收进程"的产物，不是 CLI 的失败——
+  //   · Unix：`terminate()` 发 SIGTERM ⇒ exitCode=null，本来就不算非零；
+  //   · Windows：`taskkill /T /F` 强杀 ⇒ 进程留下 exitCode=1，于是同一份成功产出
+  //     在 Windows 上被 `exitedNonZero` 误判成 agent_error → executor 记 infra_error。
+  //   turn 的结局由 `turn/completed` 自己说了算（completed/输出/错误都在那个帧里）；
+  //   退出码只有**进程先于终止帧死掉**（turnEndStatus=null，进程自己退出）时才说明
+  //   CLI 真死了。所以：有明确结局的一轮，退出码不参与判失败。
+  if (input.turnEndStatus !== null) {
+    if (input.turnEndStatus === 'completed') {
+      // ★ 只对**正常完成**的一轮套"零产出"判据：取消（interrupted）本来就可能一个字没说，
+      //   失败那一档已经有自己的原因码——混进来会把一次正常的取消记成失败。
+      return input.sawAssistantOutput ? null : 'empty_response'
+    }
+    // interrupted / failed：failed 一定已被 parserIsError 拦下（见 #onTurnCompleted）；
+    // 到这里只可能是"平台发起取消的 interrupted"——那是正常收尾，不是失败
+    // （executor 按取消处理，见 cancel 测试）。
+    return null
+  }
+
+  if (exitedNonZero) return 'agent_error'
   return null
 }

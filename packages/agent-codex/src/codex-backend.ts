@@ -502,14 +502,21 @@ export class CodexBackend extends ServiceBackendBase {
           parser.turnEnd.then((e) => ({ kind: 'end' as const, end: e })),
           handle!.exited.then((exit) => ({ kind: 'exit' as const, exit })),
         ])
+        let exit: { code: number | null; signal: NodeJS.Signals | null }
         if (end.kind === 'end') {
-          // 正常路径：turn 结束了，把 per-run 服务进程收掉，拿退出码
+          // 正常路径：turn 结束了，把 per-run 服务进程收掉
           await handle!.terminate()
+          // ★ 2026-11（Windows 沉淀失败的现场）：turn/completed **先到**时，退出码是
+          //   **我们收进程的产物**，不是 CLI 的失败——Unix 上 SIGTERM 让 exitCode=null，
+          //   Windows 上 taskkill /T /F 强杀却留下 exitCode=1，同一份成功产出在 Windows
+          //   上被记成 infra_error（skill 都写好了还报失败）。正常结束路径一律不读退出码
+          //   （classifyCodexFailure 同样按"有明确结局就不拿退出码判失败"）——run 记录里
+          //   exitCode=null，和 Unix 行为对齐。
+          exit = { code: null, signal: null }
+        } else {
+          // 进程**先于**终止帧退出：退出码是它自己的，如实记
+          exit = end.exit
         }
-        const exit =
-          end.kind === 'exit'
-            ? end.exit
-            : await handle!.exited.catch(() => ({ code: null as number | null, signal: null as NodeJS.Signals | null }))
         return this.#buildResult({
           parser,
           exit,
