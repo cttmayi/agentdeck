@@ -718,7 +718,7 @@
   }
 
   .mode-label {
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     color: var(--text-faint);
   }
 

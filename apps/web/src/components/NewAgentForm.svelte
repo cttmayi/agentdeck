@@ -344,7 +344,7 @@
   }
 
   .cell-label {
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     color: var(--text-faint);
   }
 
@@ -439,7 +439,7 @@
   /* 补充显示的名字之外的机器名：弱化，不抢主显示的存在感 */
   .skill-slug {
     margin-left: var(--sp-1);
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     color: var(--text-faint);
   }
 </style>

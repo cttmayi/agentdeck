@@ -562,7 +562,7 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     color: var(--accent);
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     user-select: none;
   }
 
@@ -582,7 +582,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-dim);
-    font-size: 0.95em;
+    font-size: var(--fs-sm);
     max-height: 22rem;
     overflow-y: auto;
   }
@@ -631,7 +631,7 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-style: normal;
-    font-size: 0.85em;
+    font-size: var(--fs-xs);
     color: var(--text-faint);
     user-select: none;
   }

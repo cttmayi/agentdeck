@@ -2216,7 +2216,7 @@
     color: var(--bg);
     border-radius: var(--radius-sm);
     padding: 0 var(--sp-1);
-    font-size: 0.85em;
+    font-size: var(--fs-xs);
   }
 
   /* ══════════ 表单字段（审阅态） ══════════ */

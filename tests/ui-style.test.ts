@@ -72,9 +72,10 @@ function declarations(files: Map<string, string>, prop: string): Hit[] {
  * 三个月后就没人敢删了，于是规则悄悄死了。
  */
 const ALLOW = {
-  /** `em` 跟着父级字号缩放（代码块行号跟代码字号走、Markdown 标题分级）；
-      换成 `rem` 必然改变实际大小 ⇒ 2026-11 与使用者确认过保持原样。 */
-  fontEm: /font-size:\s*[\d.]+em\b/,
+  /** ★ 305 批：使用者纠正了口径——"可以变像素，主要还是为了同一"。
+      原来那 17 处 `em` 与 `.markdown` 的标题分级已全部换成 `--fs-*` 令牌，
+      所以这里**不再放行 `em`**：新写 `em` 字号一律拦下（要相对父级就用令牌档位说话）。 */
+  fontEm: /$^/,
   /** 令牌、`inherit`、百分比 */
   fontOk: /font-size:\s*(var\(--fs-|inherit|[\d.]+%)/,
   /** `50%` 是"圆"（头像/圆点/进度环），不是圆角档位 */

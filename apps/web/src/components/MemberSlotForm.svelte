@@ -321,7 +321,7 @@
 
   .pick-summary {
     margin: 0;
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     color: var(--text-faint, #888);
   }
 
@@ -341,7 +341,7 @@
   }
 
   .cell-label {
-    font-size: 0.9em;
+    font-size: var(--fs-sm);
     color: var(--text-faint, #888);
   }
 
