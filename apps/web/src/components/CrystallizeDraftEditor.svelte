@@ -415,7 +415,7 @@
   }
 
   .pane-tabs > button {
-    padding: 3px 10px;
+    padding: var(--sp-1) var(--sp-3);
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;

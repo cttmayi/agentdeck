@@ -1984,10 +1984,10 @@
   .new-version-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--sp-2);
     flex-wrap: wrap;
-    margin: 0 0 8px;
-    padding: 6px 10px;
+    margin: 0 0 var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
     border-radius: var(--radius-xs);
     background: var(--surface-2, #f4f4f5);
     font-size: var(--fs-xs);
@@ -2379,7 +2379,7 @@
     border-bottom: 1px solid var(--line);
   }
   .tab-count {
-    padding: 0 5px;
+    padding: 0 var(--sp-1);
     border-radius: var(--radius-pill);
     background: var(--surface-2);
     font-size: var(--fs-xs);

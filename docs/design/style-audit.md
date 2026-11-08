@@ -147,7 +147,12 @@
 ⚠️ **不要**直接写成全局 `.file-row`：`FileViewer` / `WorkDirTree` / `ActionPicker` 里也有
 同名类（各自 scoped），全局化会把这几条属性漏过去。
 
-顺序建议：① 沉淀页差异视图（#8–#15）→ ② `ActionPicker`（#1–#5）→ ③ 其余零散（#6/#7/#16/#18/#19）。
+**第①屏（沉淀页差异视图 #8–#15）—— ✅ 304B 已做完**：`.file-row` → `--sp-2/--sp-3`、
+`.change-tag`/`.tab-count` → `0 var(--sp-1)`、`.hunk-head` → `2px var(--sp-2)`、
+`.pane-tabs > button` → `--sp-1/--sp-3`、`.new-version-bar` → `--sp-2/--sp-3`（含 margin）。
+`probe:layout` **618 项全绿** ⇒ 这一屏改了 1–4px 的内距但没把布局弄坏。
+
+顺序建议：① ~~沉淀页差异视图~~（做完）→ ② `ActionPicker`（#1–#5）→ ③ 其余零散（#6/#7/#16/#18/#19）。
 每屏做完跑一次 `pnpm run probe:layout`（618 项），红了就当场看清是哪一屏的哪个断言。
 #17（`.tpl-state .badge`）**不按内距改**，它是 `.badge` 的重画，该并进 `.badge--sm`。
 

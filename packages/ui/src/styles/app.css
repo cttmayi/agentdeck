@@ -1581,9 +1581,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .diff-view .file-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   width: 100%;
-  padding: 6px 10px;
+  padding: var(--sp-2) var(--sp-3);
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -1595,7 +1595,7 @@ tbody tr:last-child td { border-bottom: 0; }
 
 .diff-view .change-tag {
   flex: 0 0 auto;
-  padding: 0 5px;
+  padding: 0 var(--sp-1);
   border-radius: var(--radius-sm);
   font-size: var(--fs-2xs);
   line-height: 1.5;
@@ -1603,7 +1603,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 
 .diff-view .hunk-head {
-  padding: 0.15rem 0.5rem;
+  padding: 2px var(--sp-2);
   color: var(--text-faint);
   background: var(--surface-2);
   border-top: 1px solid var(--line);
