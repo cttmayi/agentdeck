@@ -393,7 +393,7 @@
     <header class="main-panel-head">
       <button
         type="button"
-        class="ghost small panel-back"
+        class="btn btn--ghost btn--sm panel-back"
         onclick={closePanel}>{$t('tools.backToList')}</button
       >
       <h2>{$t('tools.install')}</h2>
@@ -424,13 +424,13 @@
         {#if $remoteError}
           <div class="notice bad col">
             <strong>{$t('tools.remoteUnavailableTitle')}</strong>
-            <p class="small">{$t('tools.remoteUnavailable', { error: $remoteError })}</p>
+            <p class="fs-xs">{$t('tools.remoteUnavailable', { error: $remoteError })}</p>
           </div>
         {:else if $remoteCatalog === null}
-          <p class="faint small">{$t('tools.remoteReading')}</p>
+          <p class="faint fs-xs">{$t('tools.remoteReading')}</p>
         {:else if $remoteCatalog.tools.length === 0}
           <!-- 空目录是**真话**，不是错误：说清"远端目录里现在没有包"比留一片空白好 -->
-          <p class="faint small">{$t('tools.remoteEmpty')}</p>
+          <p class="faint fs-xs">{$t('tools.remoteEmpty')}</p>
         {:else}
           <!-- ★ 与技能页的远端目录表同一套表格样式（全局 `thead th` / `tbody td`）：
                原来这里自带一份 `.remote-tools`（表头字重 600 vs 500、内边距更小、
@@ -449,8 +449,8 @@
                 <tr>
                   <td>
                     <code>{entry.slug}</code>
-                    <div class="faint small">{entry.name}</div>
-                    <div class="faint small">{entry.summary}</div>
+                    <div class="faint fs-xs">{entry.name}</div>
+                    <div class="faint fs-xs">{entry.summary}</div>
                   </td>
                   <td>
                     <!-- 动作名是**契约值**（判决里就这么写），原样显示 -->
@@ -458,11 +458,11 @@
                       <div><code>{entry.slug}.{a.name}</code></div>
                     {/each}
                   </td>
-                  <td class="faint small">{entry.version ? `v${entry.version}` : $t('common.noVersion')}</td>
+                  <td class="faint fs-xs">{entry.version ? `v${entry.version}` : $t('common.noVersion')}</td>
                   <td>
                     <button
                       type="button"
-                      class="secondary small"
+                      class="btn btn--secondary btn--sm"
                       disabled={installing !== null}
                       title={installing !== null ? $t('tools.installingBusy') : $t('tools.actionInstall')}
                       onclick={() => void installFromCatalog(entry.slug)}
@@ -474,7 +474,7 @@
               {/each}
             </tbody>
           </table>
-          <p class="faint small">{$t('tools.remoteHint')}</p>
+          <p class="faint fs-xs">{$t('tools.remoteHint')}</p>
         {/if}
       {:else}
       <div class="field">
@@ -485,7 +485,7 @@
           placeholder={$t('tools.sourcePlaceholder')}
           onkeydown={(e) => e.key === 'Enter' && submitPath()}
         />
-        <p class="faint small">
+        <p class="faint fs-xs">
           {$t('tools.pathHintBefore')}<code>tool.json</code>{$t('tools.pathHintAfter')}
         </p>
       </div>
@@ -500,12 +500,12 @@
           <input type="checkbox" bind:checked={overwrite} />
           {$t('tools.overwriteLabel')}
         </label>
-        <p class="faint small">
+        <p class="faint fs-xs">
           {$t('tools.overwriteHint')}
         </p>
       </div>
 
-      <p class="faint small" style="margin:0">{$t('tools.footHint')}</p>
+      <p class="faint fs-xs" style="margin:0">{$t('tools.footHint')}</p>
 
       {/if}
 
@@ -518,13 +518,13 @@
               写在这里。只显示一句概括（"清单无效"）等于把唯一的线索丢掉。
           -->
           {#if errorDetail}
-            <span class="faint small">{$t('tools.errorDetailLabel')}</span>
+            <span class="faint fs-xs">{$t('tools.errorDetailLabel')}</span>
             <pre class="tool-error-detail">{errorDetail}</pre>
           {/if}
           <!-- 认不出的错误码 ⇒ `toolInstallErrorHint()` 返回 null（没有建议可说），
                这里什么都不显示，而不是显示半句话。 -->
           {#if errorHint}
-            <p class="faint small">{$t(errorHint.id, errorHint.params)}</p>
+            <p class="faint fs-xs">{$t(errorHint.id, errorHint.params)}</p>
           {/if}
         </div>
       {/if}
@@ -535,24 +535,24 @@
           <p>
             <code>{result.tool.slug}</code>
             {result.tool.name}
-            {#if result.tool.version}<span class="faint small">v{result.tool.version}</span>{/if}
+            {#if result.tool.version}<span class="faint fs-xs">v{result.tool.version}</span>{/if}
           </p>
           <!--
             ★ **装进来了什么**：动作与文件都列出来。
               只说"安装完成"会让使用者以为拿到了完整的一包——而实际可能少了
               入口脚本（这时的症状是"判决里那个动作执行不了"，离安装差着十万八千里）。
           -->
-          <p class="faint small">
+          <p class="faint fs-xs">
             {$t('tools.resultActions', { count: actionCountOf(result.tool) })}
             {#each actionsOf(result.tool) as a (a.type)}<code>{a.type}</code>{/each}
           </p>
-          <p class="faint small">
+          <p class="faint fs-xs">
             {$t('tools.resultFiles', { count: result.included.length })}
             {#each result.included as f (f.path)}<code>{f.path}</code>{/each}
           </p>
           <!-- ★ **明确没装什么**：被跳过的二进制、符号链接、版本库目录都在这里。 -->
           {#if result.ignored.length > 0}
-            <p class="faint small">
+            <p class="faint fs-xs">
               {$t('tools.ignoredHeading')}
               {#each result.ignored as i (i.path)}<code>{i.path}</code>{$t('install.ignoredReason', { reason: i.reason })}{/each}
             </p>
@@ -562,10 +562,10 @@
               "没装什么"无从得知——所以**明说拿不到**，而不是让使用者把"没显示"
               读成"全都装进来了"。
             -->
-            <p class="faint small">{$t('tools.ignoredNotReported')}</p>
+            <p class="faint fs-xs">{$t('tools.ignoredNotReported')}</p>
           {/if}
           {#if result.tool.sourceRef}
-            <p class="faint small">{$t('tools.resultSource', { ref: result.tool.sourceRef })}</p>
+            <p class="faint fs-xs">{$t('tools.resultSource', { ref: result.tool.sourceRef })}</p>
           {/if}
         </div>
       {/if}
@@ -590,7 +590,7 @@
   <div class="empty">
     <strong>{$t('tools.emptyTitle')}</strong>
     {$t('tools.emptyHint')}
-    <p class="faint small" style="margin-top:var(--sp-3)">
+    <p class="faint fs-xs" style="margin-top:var(--sp-3)">
       {$t('tools.emptyExampleBefore')}<code>examples/tools/example-note/</code>{$t('tools.emptyExampleAfter')}
     </p>
   </div>
@@ -631,10 +631,10 @@
             </td>
             <td>
               <!-- D69：名称与技能页同一档（faint small）——slug 才是主标识 -->
-              <div class="faint small">{tool.name}</div>
+              <div class="faint fs-xs">{tool.name}</div>
               <!-- ★ 与技能页同一格式：说明最多两行，全文在 `title` 里 -->
               {#if tool.description}
-                <div class="faint small desc-clamp" title={tool.description}>{tool.description}</div>
+                <div class="faint fs-xs desc-clamp" title={tool.description}>{tool.description}</div>
               {/if}
             </td>
             <!-- 动作数：一眼看出"这一组装了几个动作"。与展开后那条清单必须对得上 -->
@@ -653,11 +653,11 @@
                 <SourceRef value={tool.sourceRef} />
               {/if}
             </td>
-            <td class="faint small">
+            <td class="faint fs-xs">
               {tool.version ? `v${tool.version}` : $t('common.noVersion')}
             </td>
             <!-- 更新于：与技能页同一列同一格式 -->
-            <td class="faint small" title={absoluteTime(tool.updatedAt)}>{relativeTime(tool.updatedAt, now)}</td>
+            <td class="faint fs-xs" title={absoluteTime(tool.updatedAt)}>{relativeTime(tool.updatedAt, now)}</td>
             <!--
               ★ 这里原来有一格「被哪些执行者挂载」。撤掉了：使用者的决定是
                 「不需要"被哪些执行者挂载"，因为我已经移除了此功能」——挂载这个
@@ -676,7 +676,7 @@
                   {@const update = updateStates.get(tool.id)!}
                   <button
                     type="button"
-                    class="small"
+                    class="btn btn--primary btn--sm"
                     disabled={updating !== null}
                     title={$t(update.hintId, update.hintParams)}
                     onclick={() => void updateFromCatalog(tool)}
@@ -688,7 +688,7 @@
                 {/if}
                 <button
                   type="button"
-                  class="ghost small danger"
+                  class="btn btn--danger btn--sm"
                   disabled={removing === tool.id}
                   title={$t('tools.uninstallTitle')}
                   onclick={() => void uninstall(tool.id, tool.slug)}
@@ -728,7 +728,7 @@
                           <span class="badge bad flag-irreversible">{$t('tools.actionIrreversible')}</span>
                         {/if}
                         {#if item.action.timeoutMs}
-                          <span class="faint small">{$t('tools.actionTimeout', { ms: item.action.timeoutMs })}</span>
+                          <span class="faint fs-xs">{$t('tools.actionTimeout', { ms: item.action.timeoutMs })}</span>
                         {/if}
                       </div>
                       <p class="tool-action-summary">{item.action.summary}</p>
@@ -742,12 +742,12 @@
                         <div class="param-group params-bound">
                           <span class="group-label">{$t('tools.paramsBoundHeading')}</span>
                           {#if boundParams(item.action).length === 0}
-                            <span class="faint small">{$t('tools.paramsNone')}</span>
+                            <span class="faint fs-xs">{$t('tools.paramsNone')}</span>
                           {:else}
                             {#each boundParams(item.action) as p (p.name)}
                               <div class="param-row">
                                 <code>{p.name}</code>
-                                <span class="faint small">{$t(p.label.id, p.label.params)}</span>
+                                <span class="faint fs-xs">{$t(p.label.id, p.label.params)}</span>
                               </div>
                             {/each}
                           {/if}
@@ -756,16 +756,16 @@
                         <div class="param-group params-open">
                           <span class="group-label">{$t('tools.paramsOpenHeading')}</span>
                           {#if openParams(item.action).length === 0}
-                            <span class="faint small">{$t('tools.paramsNone')}</span>
+                            <span class="faint fs-xs">{$t('tools.paramsNone')}</span>
                           {:else}
                             {#each openParams(item.action) as p (p.name)}
                               <div class="param-row">
                                 <code>{p.name}</code>
-                                <span class="faint small">{$t(p.label.id, p.label.params)}</span>
+                                <span class="faint fs-xs">{$t(p.label.id, p.label.params)}</span>
                                 {#if p.required}
                                   <span class="badge">{$t('common.required')}</span>
                                 {:else}
-                                  <span class="faint small">{$t('tools.paramOptional')}</span>
+                                  <span class="faint fs-xs">{$t('tools.paramOptional')}</span>
                                 {/if}
                                 {#each p.values as v (v)}<code>{v}</code>{/each}
                               </div>

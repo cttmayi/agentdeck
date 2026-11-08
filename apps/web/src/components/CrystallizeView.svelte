@@ -1471,7 +1471,7 @@
       {#snippet whoExtra()}
         {#if draftLiveNow}
           <!-- ★ 分批第 150 批：停止在这条消息上（它说明的正是"这一轮跑到哪了"） -->
-          <button class="ghost small stop" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
+          <button class="btn btn--ghost btn--sm stop" onclick={() => void stopDraft()}>{$t('chat.stop')}</button>
         {:else}
           <button
             type="button"
@@ -1493,7 +1493,7 @@
           <p class="draft-turn-reason">{draftFailedReason}</p>
         {/if}
         <div class="row-end msg-actions" data-msg-actions>
-          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+          <button class="btn btn--ghost btn--sm" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
         </div>
       {:else if draftFinalState === 'loading'}
         <div class="skeleton"></div>
@@ -1517,15 +1517,15 @@
         在说"不值得做"、在解释它要什么，三种情况共用同一屏。
       -->
       {#if !draftLiveNow && noOutput && draftStatus === 'completed'}
-        <p class="faint small" data-draft-nooutput-hint>{$t('crystallize.noOutputHint')}</p>
+        <p class="faint fs-xs" data-draft-nooutput-hint>{$t('crystallize.noOutputHint')}</p>
         <div class="row-end msg-actions" data-msg-actions>
-          <button class="ghost small" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
+          <button class="btn btn--ghost btn--sm" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>
         </div>
       {/if}
 
       {#if !draftLiveNow && draftLogOpen}
         <!-- run id 只在这里露脸（排查用），不进抬头 -->
-        <p class="faint small draft-turn-runid">run {runShort}…</p>
+        <p class="faint fs-xs draft-turn-runid">run {runShort}…</p>
         <div class="log-box">
           <RunLog runId={draftRunId} onterminal={(st) => void onDraftTerminal(st)} />
         </div>
@@ -1547,7 +1547,7 @@
 
   {#snippet materialPane()}
     {#if material === null || material.items.length === 0}
-      <p class="faint small">{$t('crystallize.materialEmpty')}</p>
+      <p class="faint fs-xs">{$t('crystallize.materialEmpty')}</p>
     {:else}
       <ul class="file-tree">
         {#each material.items as item (item.relPath)}
@@ -1559,7 +1559,7 @@
               onclick={() => (materialPick = item.relPath)}
             >
               <span class="file-name mono">{item.relPath}</span>
-              <span class="faint small">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+              <span class="faint fs-xs">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
             </button>
           </li>
         {/each}
@@ -1569,7 +1569,7 @@
           {#if item.relPath === materialPick}
             <pre class="file-pre mono">{item.text}</pre>
             {#if item.truncated}
-              <p class="faint small">{$t('crystallize.materialTruncated')}</p>
+              <p class="faint fs-xs">{$t('crystallize.materialTruncated')}</p>
             {/if}
           {/if}
         {/each}
@@ -1600,7 +1600,7 @@
         -->
         <button
           type="button"
-          class="primary small"
+          class="btn btn--primary btn--sm"
           data-review-commit
           disabled={saving || !reviewValid}
           title={reviewValid ? undefined : $t('crystallize.confirmBlocked')}
@@ -1684,7 +1684,7 @@
         <section class="crystal-intake-msg" data-crystallize-step="new">
           <p class="intake-q">这一次要沉淀什么？</p>
           {#if sourcesLoading}
-            <p class="faint small">正在读最近的会话与任务…</p>
+            <p class="faint fs-xs">正在读最近的会话与任务…</p>
           {:else}
             <div class="intake-choices">
               <button
@@ -1693,7 +1693,7 @@
                 onclick={() => goCrystallize(BLANK_RUN_ID)}
               >
                 {$t('crystallize.newStartBlank')}
-                <span class="faint small">{$t('crystallize.newStartBlankHint')}</span>
+                <span class="faint fs-xs">{$t('crystallize.newStartBlankHint')}</span>
               </button>
               {#each sourceOptions as opt (opt.runId)}
                 <button type="button" class="intake-choice" onclick={() => goCrystallize(opt.runId)}>
@@ -1704,7 +1704,7 @@
                 </button>
               {/each}
               {#if sourceOptions.length === 0}
-                <p class="faint small">{$t('crystallize.newStartEmpty')}</p>
+                <p class="faint fs-xs">{$t('crystallize.newStartEmpty')}</p>
               {/if}
             </div>
           {/if}
@@ -1721,7 +1721,7 @@
       -->
       {#if step === 'target' && !loading && targets}
         {#if targets.materialStats}
-          <p class="faint small crystal-material-line">
+          <p class="faint fs-xs crystal-material-line">
             <!-- ⚠️ 这里**不再**写轮次/工具调用数：副标题已经写过一遍（实测同一句话
                  在一屏里出现两次）。这一行只留副标题没有的"判据"部分：来源是对话还是
                  任务、任务有没有审核结论与反馈。 -->
@@ -1734,7 +1734,7 @@
             {/if}
           </p>
         {:else}
-          <div class="notice bad small">{$t('crystallize.noMaterial')}</div>
+          <div class="notice bad fs-xs">{$t('crystallize.noMaterial')}</div>
         {/if}
       {/if}
 
@@ -1837,7 +1837,7 @@
       -->
       {#if pendingNewVersion !== ''}
         <div class="crystal-msg" data-msg-role="system" data-new-version-hint>
-          <p class="faint small">
+          <p class="faint fs-xs">
             {$t('crystallize.newVersionHint')}
             <button
               type="button"
@@ -1870,7 +1870,7 @@
       {#if clash}
         <div class="notice">
           {error}
-          <button class="ghost small" onclick={() => void switchToUpdate()}>
+          <button class="btn btn--ghost btn--sm" onclick={() => void switchToUpdate()}>
             {$t('crystallize.switchToUpdate')}
           </button>
         </div>
@@ -1896,7 +1896,7 @@
         现在只留一行说明，把"还能接着改、再点入库就是更新同一份"写清楚。
       -->
       {#if committedSkill !== ''}
-        <p class="faint small committed-note" data-committed-note>
+        <p class="faint fs-xs committed-note" data-committed-note>
           {$t('crystallize.committedNote', { name: committedSkill })}
           {#if committedVersioning !== ''}· {committedVersioning}{/if}
         </p>
@@ -1934,7 +1934,7 @@
              ⚠️ 它是栏脚的**第二块**（不包一层 div）：组件里 §12.22 的教训——多包一层会打断
              高度链、过程格缩 100px。所以探针的"栏脚高"要把这两块一起算（见 probe.html 的
              `crystal.composerH` 那条注释）。 -->
-        <p class="faint small composer-receipt">{composerReceipt}</p>
+        <p class="faint fs-xs composer-receipt">{composerReceipt}</p>
       {/if}
     </div>
   {/snippet}
@@ -1968,7 +1968,7 @@
     margin-top: var(--sp-2);
     gap: var(--sp-2);
   }
-  /* ★ 分批第 193 批：`.msg-actions p` 删了——起草那一轮抬头不再是 `<p class="faint small">`
+  /* ★ 分批第 193 批：`.msg-actions p` 删了——起草那一轮抬头不再是 `<p class="faint fs-xs">`
      挂在动作条里（现在是 `draft-turn-head`），那条选择器已经没有宿主。 */
   /* ★ 分批第 195 批：`.conclusion-bar .bar-actions*` 那三条样式删了——动作（入库 / 反馈 /
      放弃）搬到了**栏头右侧**（`[data-review-actions]`）。结论条现在只是一行状态字。 */

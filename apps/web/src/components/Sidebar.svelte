@@ -106,7 +106,7 @@
         <span class="env-dot" class:bad={problem}></span>
         <span class="env-body">
           <span class="env-line">{$identity.deviceName}</span>
-          <span class="faint small">
+          <span class="faint fs-xs">
             {#if rt === null}
               {$t('shell.envNoCli')}
             {:else if !rt.available}
@@ -123,14 +123,14 @@
     {/if}
 
     {#if $syncStatus?.error}
-      <div class="faint small" title={$syncStatus.error}>{$t('shell.syncError')}</div>
+      <div class="faint fs-xs" title={$syncStatus.error}>{$t('shell.syncError')}</div>
     {:else if $syncStatus}
-      <div class="faint small">
+      <div class="faint fs-xs">
         {$t('shell.syncedCount', { count: $syncStatus.reported })}
         {#if $syncStatus.queued > 0}{$t('shell.syncedQueued', { count: $syncStatus.queued })}{/if}
       </div>
     {:else}
-      <div class="faint small">{$t('shell.neverSynced')}</div>
+      <div class="faint fs-xs">{$t('shell.neverSynced')}</div>
     {/if}
   </div>
 </nav>

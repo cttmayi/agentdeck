@@ -43,12 +43,12 @@
 
 <section class="main-panel" data-settings-panel aria-label={ariaLabel ?? title}>
   <header class="main-panel-head">
-    <button type="button" class="ghost small panel-back" data-settings-back onclick={onback}
+    <button type="button" class="btn btn--ghost btn--sm panel-back" data-settings-back onclick={onback}
       >{$t('common.backPanel')}</button
     >
     <h2>{title}</h2>
     {#if subtitle !== ''}
-      <span class="faint small">{subtitle}</span>
+      <span class="faint fs-xs">{subtitle}</span>
     {/if}
   </header>
   <div class="main-panel-body detail-scroll settings-body">

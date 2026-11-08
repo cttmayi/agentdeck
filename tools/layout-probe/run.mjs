@@ -1565,7 +1565,8 @@ const CHECKS = [
     view: '任务',
     key: 'tasks.createActionKind',
     label: '★ 它是 primary（这一页的主操作，不是与模式开关并列的第三个开关）',
-    ok: (v) => v === 'primary',
+    // 298 批：按钮重量改用显式的 `btn--primary`（不再靠裸 `primary` + 元素选择器）
+    ok: (v) => v === 'btn--primary',
   },
   {
     view: '任务',

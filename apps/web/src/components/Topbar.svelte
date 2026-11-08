@@ -112,7 +112,7 @@
       {#each pageActionsOfView as action (action.id)}
         <button
           type="button"
-          class={action.kind ?? 'secondary'}
+          class={`btn btn--${action.kind ?? 'secondary'}`}
           class:active={action.active}
           disabled={action.disabled}
           title={action.title}
@@ -129,7 +129,7 @@
     <div class="page-more">
       <button
         type="button"
-        class="ghost more-btn"
+        class="btn btn--ghost more-btn"
         aria-haspopup="menu"
         aria-expanded={moreOpen}
         aria-label={$t('shell.pageActionsMore')}
@@ -177,7 +177,7 @@
          名字由 `aria-label` 给读屏器。 -->
     <button
       type="button"
-      class="ghost icon-btn"
+      class="btn btn--ghost btn--icon"
       onclick={() => openDrawer.set('inbox')}
       aria-label={$t('shell.inbox')}
       title={$t('shell.inbox')}
@@ -193,7 +193,7 @@
     {#if $remoteLoggedIn}
       <button
         type="button"
-        class="ghost account"
+        class="btn btn--ghost account"
         onclick={() => openDrawer.set('settings')}
         title={$remoteAccount?.email ?? ''}
       >
@@ -205,7 +205,7 @@
     {:else}
       <button
         type="button"
-        class="ghost login"
+        class="btn btn--ghost login"
         onclick={() => openDrawer.set('remote')}
         title={$remoteError || $t('shell.signInHint')}
       >
@@ -214,7 +214,7 @@
     {/if}
     <button
       type="button"
-      class="ghost icon-btn"
+      class="btn btn--ghost btn--icon"
       onclick={() => openDrawer.set('settings')}
       aria-label={$t('shell.settings')}
       title={$t('shell.settings')}
@@ -236,28 +236,8 @@
      `⋯` 与菜单、以及顶栏里按钮统一成什么尺寸）写在 `styles/app.css` 的
      「布局骨架」一段里——`.topbar` 本来就在那儿，拆成两处会更难看出它怎么排。 */
 
-  /* 图标按钮（通知/设置）：SVG 只做装饰，大小跟着按钮走 */
-  .icon-btn svg {
-    width: 1rem;
-    height: 1rem;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    flex: none;
-  }
-
-  /* 未读徽标紧贴铃铛图标：数字小、不占位，只在有未读时出现。
-     圆点藏掉——铃铛自己就是图标，旁边再放一个状态点会变成"两个圆" */
-  .icon-btn .unread {
-    padding: 0 0.3rem;
-    min-width: 1.1rem;
-    justify-content: center;
-  }
-  .icon-btn .unread::before {
-    display: none;
-  }
+  /* 图标按钮的尺寸与未读徽标已归到 `styles/app.css` 的 `.btn--icon`
+     （298 批：从前这里是全站唯一一处，别的页想加图标按钮只能照抄一遍）。 */
 
   /* 账号控件：头像 + 名字。用头像是因为纯文字的名字在顶栏里很容易
      和"设置"这类按钮混成一片，而一个圆形色块能立刻把它区分开。

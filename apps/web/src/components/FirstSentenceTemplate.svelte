@@ -170,7 +170,7 @@
   <div class="tpl-tools">
     <button
       type="button"
-      class="ghost small"
+      class="btn btn--ghost btn--sm"
       onclick={() => onchange(defaultText)}
       disabled={!defaultText}
     >
@@ -178,7 +178,7 @@
     </button>
     <button
       type="button"
-      class="ghost small"
+      class="btn btn--ghost btn--sm"
       onclick={() => {
         onchange('')
         preview = ''
@@ -188,10 +188,10 @@
     >
       {$t('tpl.clearToDefault')}
     </button>
-    <button type="button" class="ghost small" onclick={runPreview} disabled={busy}>
+    <button type="button" class="btn btn--ghost btn--sm" onclick={runPreview} disabled={busy}>
       {busy ? $t('common.previewing') : $t('common.preview')}
     </button>
-    <button type="button" class="ghost small" onclick={() => (showVariables = !showVariables)}>
+    <button type="button" class="btn btn--ghost btn--sm" onclick={() => (showVariables = !showVariables)}>
       {showVariables ? $t('tpl.hideVars') : $t('tpl.showVars')}
     </button>
   </div>
@@ -228,9 +228,9 @@
               <span class="var-line">
                 <code>{varToken(v.name)}</code>
                 {#if v.requiredFor.includes(kind)}<span class="req">{$t('common.required')}</span>{/if}
-                <span class="faint small">{v.multiline ? $t('tpl.multiline') : $t('tpl.singleValue')}</span>
+                <span class="faint fs-xs">{v.multiline ? $t('tpl.multiline') : $t('tpl.singleValue')}</span>
               </span>
-              <span class="var-label faint small">{v.label}</span>
+              <span class="var-label faint fs-xs">{v.label}</span>
             </li>
           {/each}
         </ul>
@@ -242,11 +242,11 @@
     <div class="preview">
       <div class="preview-head">
         <strong>{$t('tpl.previewHeading')}</strong>
-        <span class="faint small">
+        <span class="faint fs-xs">
           {$t('tpl.previewNote1')}<strong>{$t('tpl.sampleValues')}</strong>{$t('tpl.previewNote2')}
           {$t('tpl.previewNote3')}
         </span>
-        <button type="button" class="ghost small" onclick={() => (showText = false)}>{$t('common.collapse')}</button>
+        <button type="button" class="btn btn--ghost btn--sm" onclick={() => (showText = false)}>{$t('common.collapse')}</button>
       </div>
       <pre>{preview}</pre>
     </div>

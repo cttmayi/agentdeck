@@ -278,7 +278,7 @@
       </button>
       <button
         type="button"
-        class="secondary"
+        class="btn btn--secondary"
         onclick={onclose}
         disabled={busy}
         title={busy ? $t('common.busyHint') : undefined}
@@ -287,7 +287,7 @@
       {#if error}
         <div class="notice bad settings-error">{error}</div>
       {:else}
-        <span class="faint small">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
+        <span class="faint fs-xs">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
       {/if}
     {/snippet}
   </SettingsPanel>

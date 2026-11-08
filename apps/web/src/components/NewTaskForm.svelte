@@ -506,7 +506,7 @@
       />
       <button
         type="button"
-        class="ghost"
+        class="btn btn--ghost"
         data-newtask-workdir-browse
         onclick={() => (dirPickerOpen = true)}
       >{$t('dirs.browse')}</button>

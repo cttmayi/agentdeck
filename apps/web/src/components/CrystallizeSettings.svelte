@@ -112,35 +112,35 @@
   {#snippet body()}
   <section class="drawer-section">
     <h3>{$t('crystallize.settingsSkill')}</h3>
-    <p class="faint small">{$t('crystallize.settingsSkillHint')}</p>
+    <p class="faint fs-xs">{$t('crystallize.settingsSkillHint')}</p>
     {#if draftSkill.id !== ''}
       <p>
         {$t('crystallize.draftSkillInstalled', { name: draftSkill.name || draftSkill.slug })}
       </p>
     {:else}
-      <div class="notice warn small">
+      <div class="notice warn fs-xs">
         <p>{$t('crystallize.settingsSkillRequired')}</p>
-        <button type="button" class="primary small" disabled={busy} onclick={() => void install()}>
+        <button type="button" class="btn btn--primary btn--sm" disabled={busy} onclick={() => void install()}>
           {busy ? '…' : $t('crystallize.draftSkillInstall')}
         </button>
       </div>
     {/if}
-    {#if note !== ''}<p class="notice good small">{note}</p>{/if}
-    {#if draftSkill.error !== ''}<p class="notice bad small">{draftSkill.error}</p>{/if}
-    <p class="faint small mono">{DISTILLY_SOURCE}</p>
+    {#if note !== ''}<p class="notice good fs-xs">{note}</p>{/if}
+    {#if draftSkill.error !== ''}<p class="notice bad fs-xs">{draftSkill.error}</p>{/if}
+    <p class="faint fs-xs mono">{DISTILLY_SOURCE}</p>
   </section>
 
   <section class="drawer-section">
     <h3>{$t('crystallize.settingsProxy')}</h3>
-    <p class="faint small">{$t('crystallize.settingsProxyHint')}</p>
+    <p class="faint fs-xs">{$t('crystallize.settingsProxyHint')}</p>
     <div class="proxy-row">
       <input type="text" bind:value={proxyUrl} placeholder={DEFAULT_PROXY} spellcheck="false" />
-      <button type="button" class="ghost small" disabled={proxyBusy} onclick={() => void saveProxy()}>
+      <button type="button" class="btn btn--ghost btn--sm" disabled={proxyBusy} onclick={() => void saveProxy()}>
         {$t('crystallize.settingsProxySave')}
       </button>
       <button
         type="button"
-        class="ghost small"
+        class="btn btn--ghost btn--sm"
         disabled={proxyBusy || proxyUrl === ''}
         onclick={() => {
           proxyUrl = ''
@@ -148,7 +148,7 @@
         }}>{$t('crystallize.settingsProxyClear')}</button
       >
     </div>
-    {#if proxyNote !== ''}<p class="faint small">{proxyNote}</p>{/if}
+    {#if proxyNote !== ''}<p class="faint fs-xs">{proxyNote}</p>{/if}
   </section>
   {/snippet}
 </SettingsPanel>

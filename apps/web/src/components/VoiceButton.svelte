@@ -325,7 +325,7 @@
   <span class="voice-cell" data-voice-cell>
     <button
       type="button"
-      class="ghost small voice"
+      class="btn btn--ghost btn--sm voice"
       class:recording={phase === 'recording'}
       class:busy={phase === 'transcribing'}
       class:unavailable={$voiceCapability !== null && !$voiceCapability.available}
@@ -368,20 +368,20 @@
     {#if termsOpen}
       <span class="terms-pop" data-voice-terms-pop>
         {#if termsError !== ''}
-          <span class="faint small">{termsError}</span>
+          <span class="faint fs-xs">{termsError}</span>
         {:else if terms === null}
-          <span class="faint small">{$t('chat.voiceTermsBusy')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceTermsBusy')}</span>
         {:else if !terms.auto}
-          <span class="faint small">{$t('chat.voiceTermsOff')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceTermsOff')}</span>
         {:else if terms.terms.length === 0}
-          <span class="faint small">{$t('chat.voiceTermsNone')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceTermsNone')}</span>
         {:else}
           <span class="terms-list">
             {#each terms.terms as term (term)}
               <span class="terms-chip mono">{term}</span>
             {/each}
           </span>
-          <span class="faint small"
+          <span class="faint fs-xs"
             >{$t('chat.voiceTermsSource', {
               u: String(terms.userTurns),
               a: String(terms.agentReplies),
@@ -389,7 +389,7 @@
           >
         {/if}
         {#if conversationId === ''}
-          <span class="faint small">{$t('chat.voiceTermsNoConv')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceTermsNoConv')}</span>
         {/if}
       </span>
     {/if}

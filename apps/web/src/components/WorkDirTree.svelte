@@ -171,8 +171,8 @@
 {#if error}
   <div class="notice bad">
     {$t('files.error')}
-    <p class="faint small" style="margin:var(--sp-2) 0 0">{error}</p>
-    <p class="faint small" style="margin:var(--sp-2) 0 0">{$t('files.errorHint')}</p>
+    <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{error}</p>
+    <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{$t('files.errorHint')}</p>
   </div>
 {:else if !ready}
   <div class="skeleton" style="width:70%"></div>
@@ -200,7 +200,7 @@
             <span class="mono">{entry.name}</span>
           </button>
           {#if loading.has(entry.path)}
-            <span class="faint small">{$t('files.reading')}</span>
+            <span class="faint fs-xs">{$t('files.reading')}</span>
           {/if}
         {:else}
           <!--
@@ -215,14 +215,14 @@
             title={entry.path}
             onclick={() => (viewing = entry)}
           >{entry.name}</button>
-          <span class="faint small">{humanSize(entry.sizeBytes)}</span>
+          <span class="faint fs-xs">{humanSize(entry.sizeBytes)}</span>
           {#if rowAction}{@render rowAction({ entry })}{/if}
         {/if}
       </li>
     {/each}
   </ul>
   {#if truncated}
-    <p class="faint small">{$t('files.truncated')}</p>
+    <p class="faint fs-xs">{$t('files.truncated')}</p>
   {/if}
 {/if}
 

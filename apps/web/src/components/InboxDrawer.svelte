@@ -40,7 +40,7 @@
 <aside class="drawer">
   <div class="drawer-head">
     <h2>{$t('inbox.title')}</h2>
-    <button type="button" class="ghost" onclick={onclose}>{$t('common.close')}</button>
+    <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.close')}</button>
   </div>
 
   <div class="drawer-body">
@@ -66,11 +66,11 @@
             <span class="badge {item.severity === 'action_required' ? 'blocked' : 'in_review'}">
               {severityId ? $t(severityId) : item.severity}
             </span>
-            <span class="faint small mono">{item.type}</span>
+            <span class="faint fs-xs mono">{item.type}</span>
             <!-- 2026-10（紧凑性）：「标为已读」不再独占一行——并入第一行靠右 -->
             <button
               type="button"
-              class="ghost small"
+              class="btn btn--ghost btn--sm"
               style="margin-left:auto"
               onclick={() => markRead(item.id)}
             >

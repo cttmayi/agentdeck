@@ -1435,7 +1435,7 @@
         //   （原来有 `class="hint faint small"` 这种写法：fs-sm 与 fs-xs 一起上，
         //   同一页的说明文字因此大小不一）。
         facts['common.noHintStacking'] = need('提示文字不叠加字号档', () => {
-          return d().querySelectorAll('.hint.faint.small, .hint.small').length === 0
+          return d().querySelectorAll('.hint.faint.fs-xs, .hint.fs-xs').length === 0
         })
 
         // ★ 2026-10 一致性：**抽屉的头部只有一种写法**（`.drawer-head` + `<h2>`）。
@@ -1842,8 +1842,15 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         facts['tasks.createActionLabel'] = need('任务页顶栏的「新建任务」按钮文字', () =>
           createBtn ? createBtn.textContent.trim() : null,
         )
+        // ★ 298 批：按钮的重量由 `btn--primary` 这一类显式类名说出来（从前是裸的
+        //   `primary`，与 `button` 元素选择器绑着）。量的是"它是主操作"，所以
+        //   **认 `btn--primary` 这个标记**，而不是整串 class——后者一改尺寸修饰就假红。
         facts['tasks.createActionKind'] = need('那个按钮的 class', () =>
-          createBtn ? createBtn.className.replace(/ svelte-\w+/, '').trim() : null,
+          createBtn
+            ? (createBtn.classList.contains('btn--primary')
+                ? 'btn--primary'
+                : createBtn.className.replace(/ svelte-\w+/, '').trim())
+            : null,
         )
         if (!createBtn) {
           errors.push('任务页顶栏没有「新建任务」按钮——侧栏那一项已经去掉了，建任务就没入口了')
@@ -2960,7 +2967,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               })
               facts['tools.installFailureHint'] = need('失败时的下一步建议', () => {
                 const hints = [
-                  ...d().querySelectorAll('.main-panel .notice.bad p.faint.small'),
+                  ...d().querySelectorAll('.main-panel .notice.bad p.faint.fs-xs'),
                 ]
                 return hints.length > 0 ? text(hints[hints.length - 1]) : null
               })
@@ -4682,15 +4689,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // ⚠️ 必须点**全局**那组的设置（`openDrawer.set('settings')`）：agents
           //   页的「设置」开的是 WorkspaceSettings（第一句话模版），**没有语言
           //   切换器**——语言段 2026-09 起在全局 SettingsDrawer 里。全局组里
-          //   inbox 和 settings 都是 icon-btn，按 aria-label 区分。
+          //   inbox 和 settings 都是 btn--icon，按 aria-label 区分。
           const openBtn = [
-            ...d().querySelectorAll('.topbar .global-actions button.icon-btn'),
+            ...d().querySelectorAll('.topbar .global-actions button.btn--icon'),
           ].find((b) => (b.getAttribute('aria-label') ?? '') === '设置')
           if (openBtn) {
             click(openBtn)
             await wait(1500)
           } else {
-            errors.push('语言组：全局设置按钮（icon-btn）找不到（抽屉打不开，语言切换量不到）')
+            errors.push('语言组：全局设置按钮（btn--icon）找不到（抽屉打不开，语言切换量不到）')
           }
         }
         const langSelectOf = () =>
@@ -4750,7 +4757,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
              *      量（读屏器拿到的就是它，翻译的正是这一份）。
              */
             const b = [
-              ...d().querySelectorAll('.topbar .global-actions button.icon-btn'),
+              ...d().querySelectorAll('.topbar .global-actions button.btn--icon'),
             ].find((x) => (x.getAttribute('aria-label') ?? '') === 'Settings')
             return b ? 'Settings' : null
           })
@@ -4834,7 +4841,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               text(d().querySelector('.list-pane .task-row .stage-tag')),
             )
             facts['lang.stageNote'] = need('英文界面下的行内提示', () =>
-              text(d().querySelector('.list-pane .task-row .task-meta .faint.small')),
+              text(d().querySelector('.list-pane .task-row .task-meta .faint.fs-xs')),
             )
           }
           const toBoardEn = [...d().querySelectorAll('button')].find(
@@ -6798,7 +6805,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['crystal.redraftStillEditing'] = null
 
             // 出口二：确认入库**没有**被判决灰掉（第 ① 条决定：审核不替代人）
-            const cySave = [...d().querySelectorAll('button.primary')].find((b) =>
+            const cySave = [...d().querySelectorAll('button.btn--primary')].find((b) =>
               text(b).includes('确认入库'),
             )
             facts['crystal.auditFailSaveDisabled'] = cySave ? cySave.disabled : null

@@ -322,7 +322,7 @@
                 <span class="badge default-badge">{$t('agents.defaultBadge')}</span>
               {/if}
             </span>
-            <span class="agent-notes faint small">
+            <span class="agent-notes faint fs-xs">
               <span class="agent-notes-trunc">
                 {a.instructions.trim()
                   ? a.instructions.slice(0, 48) + (a.instructions.length > 48 ? '…' : '')
@@ -349,7 +349,7 @@
             {#if a.role === 'executor' && a.id !== $effectiveDefaultAgentId}
               <button
                 type="button"
-                class="ghost small default-toggle"
+                class="btn btn--ghost btn--sm default-toggle"
                 title={$t('agents.setDefaultTitle')}
                 onclick={(e) => {
                   e.stopPropagation()
@@ -385,11 +385,11 @@
               <span class="spacer"></span>
               <!-- ★ 选中项被收起来时留一句话：右栏还在显示它，列表里却"不见了" -->
               {#if selectionInBuiltin}
-                <span class="faint small" data-group-selected-hint
+                <span class="faint fs-xs" data-group-selected-hint
                   >{$t('agents.groupSelectionHere')}</span
                 >
               {:else}
-                <span class="faint small">{$t('agents.groupBuiltinHint')}</span>
+                <span class="faint fs-xs">{$t('agents.groupBuiltinHint')}</span>
               {/if}
             </button>
           </li>
@@ -416,11 +416,11 @@
               <span class="faint">{ownAgents.length}</span>
               <span class="spacer"></span>
               {#if selectionInOwn}
-                <span class="faint small" data-group-selected-hint
+                <span class="faint fs-xs" data-group-selected-hint
                   >{$t('agents.groupSelectionHere')}</span
                 >
               {:else}
-                <span class="faint small">{$t('agents.groupOwnHint')}</span>
+                <span class="faint fs-xs">{$t('agents.groupOwnHint')}</span>
               {/if}
             </button>
           </li>
@@ -459,9 +459,9 @@
               <div class="runtime-line">
                 <code>{r.key}</code>
                 {#if r.available}
-                  <span class="faint small">{r.cliVersion ?? $t('agents.runtimeReady')}</span>
+                  <span class="faint fs-xs">{r.cliVersion ?? $t('agents.runtimeReady')}</span>
                 {:else}
-                  <span class="bad small">{$t('agents.runtimeNotFound')}</span>
+                  <span class="bad fs-xs">{$t('agents.runtimeNotFound')}</span>
                 {/if}
               </div>
             </div>

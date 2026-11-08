@@ -407,10 +407,10 @@
 <div class="log-wrap" class:fill={fill}>
   {#if thinkingCount > 0}
     <div class="log-toolbar">
-      <button type="button" class="ghost small" onclick={toggleThinking}>
+      <button type="button" class="btn btn--ghost btn--sm" onclick={toggleThinking}>
         {$t(showThinking ? 'runs.hideThinking' : 'runs.showThinking', { count: thinkingCount })}
       </button>
-      <span class="faint small">
+      <span class="faint fs-xs">
         {$t('runs.thinkingNote')}
       </span>
     </div>
@@ -455,12 +455,12 @@
             {#if isLong || row.outputTruncated}
               <span class="payload-meta">
                 {#if isLong}
-                  <button type="button" class="ghost tiny" onclick={() => toggleRow(i)}>
+                  <button type="button" class="btn btn--ghost btn--sm tiny" onclick={() => toggleRow(i)}>
                     {$t(open ? 'runs.collapsePayload' : 'runs.expandPayload', { count: payload.length })}
                   </button>
                 {/if}
                 {#if row.outputTruncated}
-                  <span class="faint small">{$t('runs.outputTruncated')}</span>
+                  <span class="faint fs-xs">{$t('runs.outputTruncated')}</span>
                 {/if}
               </span>
             {/if}
@@ -497,7 +497,7 @@
     border-bottom: 1px solid var(--line);
   }
 
-  .log-toolbar .ghost {
+  .log-toolbar .btn--ghost {
     padding: var(--sp-1) var(--sp-2);
   }
 
@@ -592,9 +592,9 @@
     border-top: 1px solid var(--line);
   }
 
+  /* 这一格是「展开/收起」的小三角：只留横向内距，字号由 `btn--sm` 给 */
   .tiny {
     padding: 0 var(--sp-2);
-    font-size: var(--fs-xs);
   }
 
   .payload-meta {

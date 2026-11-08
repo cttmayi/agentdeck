@@ -323,8 +323,8 @@
                      `version` 是"这个沉淀任务里有几版"的计数，**没有任何行为依赖它**
                      （快照/差异/回滚都按 run id 走，不按序号）⇒ 只当装饰的话就是噪音。 -->
 
-                <span class="faint small">{targetLabel(row)}</span>
-                <span class="faint small" title={absoluteTime(row.queuedAt)}
+                <span class="faint fs-xs">{targetLabel(row)}</span>
+                <span class="faint fs-xs" title={absoluteTime(row.queuedAt)}
                   >{relativeTime(row.queuedAt, now)}</span
                 >
               </span>

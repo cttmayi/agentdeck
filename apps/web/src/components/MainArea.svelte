@@ -58,7 +58,7 @@
   {:else if !empty && (backLabel || title || sub || actions)}
     <header class={headClass}>
       {#if backLabel}
-        <button type="button" class="ghost small back-to-list" onclick={onBack}>
+        <button type="button" class="btn btn--ghost btn--sm back-to-list" onclick={onBack}>
           {backLabel}
         </button>
       {/if}

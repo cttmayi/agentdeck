@@ -218,7 +218,7 @@
       <p class="empty-value">
         <strong>{$t('agents.actionsNoToolsStrong')}</strong>{$t('agents.actionsNoToolsHint')}
       </p>
-      <button type="button" class="secondary small" onclick={() => go('tools')}>
+      <button type="button" class="btn btn--secondary btn--sm" onclick={() => go('tools')}>
         {$t('agents.actionsGoTools')}
       </button>
     </div>
@@ -342,7 +342,7 @@
                 <code class="ap-ct dead">{type}</code>
                 <!-- 与只读态那条 chip 用**同一个标记词条**（同一个状态同一个名字） -->
                 <span class="action-summary bad">{$t('agents.actionsUnresolvedChip')}</span>
-                <button type="button" class="ghost small" onclick={() => drop(type)}>
+                <button type="button" class="btn btn--ghost btn--sm" onclick={() => drop(type)}>
                   {$t('agents.actionsUnresolvedDrop')}
                 </button>
               </div>

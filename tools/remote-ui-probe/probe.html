@@ -140,7 +140,8 @@ async function collect() {
   facts.untranslatedKeys = (bodyText.match(/remote\.[a-z][a-zA-Z.]+/g) ?? []).slice(0, 5)
 
   // ── 交互①：点「查看」开抽屉，里面要有 SKILL.md 正文；Esc 关掉 ──
-  const viewBtn = doc.querySelector('table tbody button.secondary')
+  // 298 批：按钮重量由显式类名说（`btn btn--secondary btn--sm`），选择器跟着改
+  const viewBtn = doc.querySelector('table tbody button.btn--secondary')
   if (viewBtn) {
     click(viewBtn)
     await until(() => doc.querySelector('.drawer'))

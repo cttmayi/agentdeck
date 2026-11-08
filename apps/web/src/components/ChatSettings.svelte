@@ -399,7 +399,7 @@
     -->
     <p class="voice-status" data-voice-status>
       {#if capability === null}
-        <span class="faint small">{$t('chat.voiceSettingsChecking')}</span>
+        <span class="faint fs-xs">{$t('chat.voiceSettingsChecking')}</span>
       {:else if capability.available}
         <span class="ok-dot"></span>{$t('chat.voiceSettingsReady')}
       {:else}
@@ -495,7 +495,7 @@
       {#if capability !== null && !capability.model.present}
         <button
           type="button"
-          class="secondary"
+          class="btn btn--secondary"
           data-voice-download
           disabled={downloading}
           onclick={() => void downloadModel()}
@@ -509,20 +509,20 @@
           <span class="voice-progress" data-voice-progress>
             <span class="voice-progress-bar" style:width={`${downloadPercent}%`}></span>
           </span>
-          <span class="faint small" data-voice-progress-text
+          <span class="faint fs-xs" data-voice-progress-text
             >{downloadDoneMb.toFixed(1)} / {downloadTotalMb.toFixed(1)} MiB</span
           >
         {/if}
       {:else}
         <button
           type="button"
-          class="ghost"
+          class="btn btn--ghost"
           data-voice-selftest
           disabled={selftest !== ''}
           onclick={() => void selfTest()}
         >{selftest === '' ? $t('chat.voiceSettingsSelfTest') : selftest}</button>
       {/if}
-      <span class="faint small mono voice-path" title={capability?.paths?.asrRoot ?? ''}
+      <span class="faint fs-xs mono voice-path" title={capability?.paths?.asrRoot ?? ''}
         >{capability?.paths?.asrRoot ?? ''}</span
       >
     </div>
@@ -562,7 +562,7 @@
           </span>
         {/each}
         {#if vocab.promptTerms.length === 0}
-          <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceVocabEmpty')}</span>
         {/if}
       </div>
       <div class="prefix-add">
@@ -574,7 +574,7 @@
             if (e.key === 'Enter') void addTerm()
           }}
         />
-        <button type="button" class="secondary" data-voice-term-add onclick={() => void addTerm()}>
+        <button type="button" class="btn btn--secondary" data-voice-term-add onclick={() => void addTerm()}>
           {$t('chat.settingsMemoryAdd')}
         </button>
       </div>
@@ -597,7 +597,7 @@
           </span>
         {/each}
         {#if vocab.rules.length === 0}
-          <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+          <span class="faint fs-xs">{$t('chat.voiceVocabEmpty')}</span>
         {/if}
       </div>
       <div class="prefix-add">
@@ -615,7 +615,7 @@
             if (e.key === 'Enter') void addRule()
           }}
         />
-        <button type="button" class="secondary" data-voice-rule-add onclick={() => void addRule()}>
+        <button type="button" class="btn btn--secondary" data-voice-rule-add onclick={() => void addRule()}>
           {$t('chat.settingsMemoryAdd')}
         </button>
       </div>
@@ -643,7 +643,7 @@
         </span>
       {/each}
       {#if draft.length === 0}
-        <span class="faint small" data-prefix-empty>{$t('chat.settingsMemoryOff')}</span>
+        <span class="faint fs-xs" data-prefix-empty>{$t('chat.settingsMemoryOff')}</span>
       {/if}
     </div>
     <div class="prefix-add">
@@ -656,10 +656,10 @@
           if (e.key === 'Enter') void add()
         }}
       />
-      <button type="button" class="secondary" data-prefix-add onclick={() => void add()}>
+      <button type="button" class="btn btn--secondary" data-prefix-add onclick={() => void add()}>
         {$t('chat.settingsMemoryAdd')}
       </button>
-      <button type="button" class="ghost" data-prefix-reset onclick={() => void reset()}>
+      <button type="button" class="btn btn--ghost" data-prefix-reset onclick={() => void reset()}>
         {$t('chat.settingsMemoryReset')}
       </button>
     </div>

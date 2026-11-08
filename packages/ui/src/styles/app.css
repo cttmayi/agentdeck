@@ -58,6 +58,13 @@
   --lh-base: 1.6;
 
   --radius-sm: 4px;
+  /* ★ 298 批：圆角的全部取值（原来组件里散着 0/5px/6px/100px 这些裸值） */
+  --radius-none: 0;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+  /* ★ 298 批：控件高度（按钮/输入/下拉的三种档）；现在只**登记**，改用见 299 批 */
+  --ctl-h: 1.9rem;
+  --ctl-h-sm: 1.5rem;
   --radius: 8px;
   --radius-lg: 12px;
 
@@ -374,7 +381,7 @@ hr {
  *    （实测踩过：三条探针都还是绿的，因为它们只量"高度齐不齐"）。
  */
 .topbar .page-actions button {
-  height: 1.5rem;
+  height: var(--ctl-h-sm);
   padding: 0 var(--sp-3);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -398,7 +405,7 @@ hr {
  *    （13px）按 AA 要 4.5。朝正文色压 15% 之后是 **4.62:1**，色相不变、仍然一眼
  *    看出是"强调"。深色主题下这个式子算出来是 5.9:1，同样成立——所以只写一条。
  */
-.topbar .page-actions button.primary {
+.topbar .page-actions button.btn--primary {
   color: color-mix(in srgb, var(--accent) 85%, var(--text));
   font-weight: 600;
 }
@@ -463,6 +470,7 @@ hr {
  * 无框 = 呈现方式切换（列表 / 看板，当前那个用底色标出来）。
  */
 .topbar button {
+  height: var(--ctl-h);
   /**
    * ⚠️ 高度是**写死的**，不是"字高 + 内距"算出来的：算出来的话，`⋯`（那个字比
    *    别的按钮大、行高又是 1）与带 24px 头像的账号按钮会各差几像素，一条带子上
@@ -850,12 +858,12 @@ hr {
   color: var(--text);
   filter: none;
 }
-.pane-actions button.danger {
+.pane-actions button.btn--danger {
   /* 危险动作：同一格形状，只用文字色区分 */
   background: transparent;
   color: var(--bad);
 }
-.pane-actions button.danger:hover:not(:disabled) {
+.pane-actions button.btn--danger:hover:not(:disabled) {
   background: var(--surface);
   color: var(--bad);
   filter: none;
@@ -1020,11 +1028,11 @@ hr {
   color: var(--text);
   filter: none;
 }
-.detail-head .detail-actions > button.danger {
+.detail-head .detail-actions > button.btn--danger {
   background: transparent;
   color: var(--bad);
 }
-.detail-head .detail-actions > button.danger:hover:not(:disabled) {
+.detail-head .detail-actions > button.btn--danger:hover:not(:disabled) {
   background: var(--surface);
   filter: none;
 }
@@ -1156,7 +1164,8 @@ hr {
    主按钮 = 实心色块（白字）；次级 = 浅灰软底（flat 的"第二等"不是描边，
    是低对比度的底色）；ghost = 无底无框，hover 才浮出底色。
    三种重量靠**底色对比**区分，不靠边框。 */
-button {
+button,
+.btn {
   font: inherit;
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius);
@@ -1186,37 +1195,156 @@ button {
  * ⚠️ 不要图省事在这里全局写 `white-space: nowrap`：`.intake-choice` 那类按钮里**本来就要
  *    折行**（第一行是选项、第二行是说明），全局禁掉会把它们挤成横向溢出。
  */
-button:hover:not(:disabled) { filter: brightness(1.15); }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:hover:not(:disabled),
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+button:disabled,
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-button.ghost {
-  background: transparent;
-  color: var(--text-dim);
+/**
+ * ══════════ 按钮族（分批第 298 批）══════════
+ *
+ * **界面上只有这几类按钮。**写新界面时从这里挑一个变体，不要另起一套
+ * `padding/border-radius/background` —— 从前同一个"次要按钮"在 7 个组件里
+ * 各写了一遍内距，改一处色就漏掉六处（清单见 `docs/design/style-audit.md`）。
+ *
+ * 结构 = `class="btn btn--<重量>"`，可选再叠 `btn--<尺寸>`：
+ *
+ * | 变体            | 用在哪                                        |
+ * |-----------------|-----------------------------------------------|
+ * | `btn--primary`  | 这一屏的主线动作（新建 / 发送 / 保存）         |
+ * | `btn--secondary`| 配套动作（刷新 / 浏览… / 取消里的"次要那个"）  |
+ * | `btn--ghost`    | 无底无框，hover 才浮出底（返回 / 关闭 / 小图标）|
+ * | `btn--danger`   | 破坏性动作（删除 / 清空 / 停掉）               |
+ * | `btn--link`     | 行内文字链（`撤销` / `重命名`），不带按钮形状  |
+ * | `btn--sm`       | 字号降到 `--fs-xs`（12px），形状不变           |
+ * | `btn--mini`     | 行尾那排"悬停才出现"的极小动作（记忆行的 改/删）|
+ * | `btn--tight`    | 小内距 + 描边的次要按钮（表单里紧贴输入框）    |
+ * | `btn--icon`     | 只有图标（顶栏铃铛/齿轮），SVG 尺寸由这里定     |
+ *
+ * ⚠️ **重量是互斥的**，尺寸可以叠。写 `btn btn--ghost btn--sm` 而不是
+ *    `ghost small`——两个类各自说清"哪个重量""哪档大小"，不再靠类名重叠去猜。
+ * ⚠️ `btn--primary` 与基类同款，显式写出来是为了让**每次**调用都看得见重量；
+ *    没有写变体的 `class="btn"` 也按 primary 渲染，但新代码不要这么写。
+ *
+ * 结构性控件（列表行 `.row`、标签页 `.tab`、角色卡 `.role-card`、
+ * `DirPicker` 的目录行……）**不属于按钮族**：它们自带形状，只借基类的
+ * `font: inherit` / 指针。清单见 `docs/design/ui-style.md`。
+ */
+.btn--primary {
+  background: var(--accent-dim);
+  color: #fff;
 }
 
-button.ghost:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-button.secondary {
+.btn--secondary {
   background: var(--surface-2);
   color: var(--text-dim);
 }
 
-button.secondary:hover:not(:disabled) {
+.btn--secondary:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-button.danger {
+.btn--ghost {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn--danger {
   background: color-mix(in srgb, var(--bad) 12%, transparent);
   color: var(--bad);
 }
 
-button.danger:hover:not(:disabled) {
+.btn--danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--bad) 22%, transparent);
   filter: none;
+}
+
+/**
+ * 行内文字链：**去掉一切按钮形状**（内距/底色/圆角都归零），只剩可点的字。
+ * 用在"已记进它的记忆 · 撤销"这类句子里——描边或色块会把一行灰字撑成一排控件。
+ */
+.btn--link {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+
+.btn--link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 更淡的链接（`Chat` 的撤销条）：靠虚线下划线表示可点，颜色压到 faint */
+.btn--link.btn--quiet {
+  color: var(--text-faint);
+  text-decoration: underline dotted;
+}
+
+/* 尺寸：只改字号与内距，**不改圆角/底色**，所以能跟任何重量叠 */
+.btn--sm {
+  font-size: var(--fs-xs);
+}
+
+.btn--mini {
+  padding: 0 var(--sp-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.btn--mini:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.btn--tight {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-strong);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.btn--icon {
+  padding: 0 var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* SVG 只做装饰，大小跟着按钮走（原来是 Topbar 自己的 `.icon-btn svg`） */
+.btn--icon > svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+/* 未读徽标紧贴图标：数字小、不占位，只在有未读时出现。
+   圆点藏掉——铃铛自己就是图标，旁边再放一个状态点会变成"两个圆" */
+.btn--icon .unread {
+  padding: 0 0.3rem;
+  min-width: 1.1rem;
+  justify-content: center;
+}
+
+.btn--icon .unread::before {
+  display: none;
 }
 
 input,
@@ -1470,7 +1598,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .warn { color: var(--warn); }
 .muted { color: var(--text-dim); }
 .faint { color: var(--text-faint); }
-.small { font-size: var(--fs-xs); }
+/* 小号字（原来是 `.small`；298 批改名，跟 `--fs-*` 令牌一族对齐） */
+.fs-xs { font-size: var(--fs-xs); }
 .mono { font-family: var(--font-mono); }
 
 .hint {

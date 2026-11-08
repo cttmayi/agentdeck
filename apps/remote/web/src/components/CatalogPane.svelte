@@ -81,18 +81,18 @@
 {:else if error}
   <div class="notice bad">
     {error}
-    <p class="faint small" style="margin:var(--sp-2) 0 0">
-      <button type="button" class="small" onclick={onretry}>{retryText}</button>
+    <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">
+      <button type="button" class="btn btn--primary btn--sm" onclick={onretry}>{retryText}</button>
     </p>
   </div>
 {:else if empty}
   <div class="empty">{empty}</div>
 {:else}
-  <p class="faint small">{titleCount}</p>
+  <p class="faint fs-xs">{titleCount}</p>
   <!-- ★ snippet 直接按属性转给 Table（`rows={rows}`）：重新 `{#snippet}` 一层
        反而会遮蔽同名 prop，得不偿失。 -->
   <Table {columns} rows={rows} />
-  <p class="faint small" style="margin-top:var(--sp-3)">{footer}</p>
+  <p class="faint fs-xs" style="margin-top:var(--sp-3)">{footer}</p>
 {/if}
 
 {#if detailTitle !== ''}
@@ -100,10 +100,10 @@
   <div class="drawer wide" role="dialog" aria-modal="true" aria-label={detailTitle}>
     <div class="drawer-head">
       <h2>{detailTitle}</h2>
-      <button type="button" class="small" onclick={onclose}>{closeText}</button>
+      <button type="button" class="btn btn--primary btn--sm" onclick={onclose}>{closeText}</button>
     </div>
     <div class="drawer-body">
-      {#if detailRef !== ''}<p class="faint small">{detailRef}</p>{/if}
+      {#if detailRef !== ''}<p class="faint fs-xs">{detailRef}</p>{/if}
       {@render drawerBody()}
     </div>
   </div>

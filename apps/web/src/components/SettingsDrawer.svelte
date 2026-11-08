@@ -116,7 +116,7 @@
 <aside class="drawer">
   <div class="drawer-head">
     <h2>{focus === 'remote' ? $t('settings.titleRemote') : $t('settings.title')}</h2>
-    <button type="button" class="ghost" onclick={onclose}>{$t('common.close')}</button>
+    <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.close')}</button>
   </div>
 
   <div class="drawer-body">
@@ -288,7 +288,7 @@
                     <td>{b.key}</td>
                     <td>{b.runs}</td>
                     <td>{(b.costUsdMicros / 1e6).toFixed(4)}</td>
-                    <td class="faint small">{b.estimatedRuns > 0 ? $t('settings.estimatedRuns', { count: b.estimatedRuns }) : '—'}</td>
+                    <td class="faint fs-xs">{b.estimatedRuns > 0 ? $t('settings.estimatedRuns', { count: b.estimatedRuns }) : '—'}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -304,7 +304,7 @@
 
       <!-- 审计导出是**下载**，不是页面内渲染——用链接让浏览器走原生下载语义 -->
       <a href="/api/audits/export" download>
-        <button type="button" class="secondary">{$t('settings.exportAudit')}</button>
+        <button type="button" class="btn btn--secondary">{$t('settings.exportAudit')}</button>
       </a>
       <p class="hint">
         {$t('settings.exportHintBefore')}<strong>{$t('settings.exportHintStrong')}</strong>{$t('settings.exportHintAfter')}
@@ -319,9 +319,9 @@
       <h3>
         {$t('settings.remoteSection')}
         {#if $remoteError}
-          <span class="bad small">{$remoteError}</span>
+          <span class="bad fs-xs">{$remoteError}</span>
         {:else if $remoteCatalog}
-          <span class="faint small">{$t('settings.connected', { url: getRemoteUrl() })}</span>
+          <span class="faint fs-xs">{$t('settings.connected', { url: getRemoteUrl() })}</span>
         {/if}
       </h3>
 
@@ -340,7 +340,7 @@
           </label>
           <div style="display:flex;gap:var(--sp-2)">
             <button type="submit">{$t('settings.signIn')}</button>
-            <button type="button" class="secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
+            <button type="button" class="btn btn--secondary" onclick={() => void submitLogin(true)}>{$t('settings.register')}</button>
           </div>
         </form>
         <!-- 2026-10（紧凑性）：保存按钮不再独占一行——与地址输入框同排 -->
@@ -348,14 +348,14 @@
           {$t('settings.remoteUrl')}
           <div style="display:flex;gap:var(--sp-2)">
             <input bind:value={$remoteUrlValue} style="flex:1;min-width:0" />
-            <button type="button" class="secondary" style="flex:none" onclick={saveRemoteUrl}>
+            <button type="button" class="btn btn--secondary" style="flex:none" onclick={saveRemoteUrl}>
               {$t('settings.saveUrl')}
             </button>
           </div>
         </label>
       {:else}
         <p>{$t('settings.signedInAs')}<strong>{$remoteAccount?.displayName}</strong> <span class="faint">{$remoteAccount?.email}</span></p>
-        <button type="button" class="secondary" onclick={doLogout}>{$t('settings.signOut')}</button>
+        <button type="button" class="btn btn--secondary" onclick={doLogout}>{$t('settings.signOut')}</button>
 
       {/if}
 
@@ -363,14 +363,14 @@
       {#if $syncStatus?.error}
         <div class="notice warn">{$syncStatus.error}</div>
       {:else if $syncStatus}
-        <p class="faint small">
+        <p class="faint fs-xs">
           {$t('settings.syncReported', { count: $syncStatus.reported })}
           {#if $syncStatus.queued > 0}{$t('settings.syncQueued', { count: $syncStatus.queued })}{/if}
           {#if $syncStatus.fetched > 0}{$t('settings.syncFetched', { count: $syncStatus.fetched })}{/if}
           {#if $syncStatus.skippedReporting}{$t('settings.syncReportingOff')}{/if}
         </p>
         {#if $syncStatus.warnings.length > 0}
-          <ul class="plain small">
+          <ul class="plain fs-xs">
             {#each $syncStatus.warnings as w}
               <li><code>{w.plugin}</code>：<span class="bad">{w.reason}</span></li>
             {/each}

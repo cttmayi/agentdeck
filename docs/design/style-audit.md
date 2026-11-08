@@ -1,4 +1,8 @@
-# 界面风格审计（批 297，只读盘点）
+# 界面风格审计（批 297 只读盘点 → 批 298 起逐批落地）
+
+> **怎么读这份文档**：§0–§8 是 297 批量到的现状（数字是当时的），§9–§10 是目标与进度；
+> 表格里标了「已落地 / ✅」的就是 298 批做完的。**规则本身**（新代码该怎么写）之后会
+> 单独整理到 `docs/design/ui-style.md`（300 批），这份文档留作"为什么是这么改的"证据。
 
 > **这份文档是"体检报告 + 迁移计划"**，不含任何改动。
 > 规则本体在 [`./ui-style.md`](./ui-style.md)（批 300 落地）；本文件只记录**现状**与**要改什么**。
@@ -91,22 +95,35 @@
     back-to-list ghost small / ghost panel-back small / ap-chip / list-row-main
 ```
 
-**迁移目标（全部机械替换）**
+**迁移目标（全部机械替换）——2026-11 批 298 已落地**
 
-| 旧 | 新 |
-|---|---|
-| （无 class，裸 `<button>`） | `btn btn--primary`（默认主操作） |
-| `ghost` | `btn btn--ghost` |
-| `secondary` | `btn btn--secondary` |
-| `primary` | `btn btn--primary` |
-| `danger` | `btn btn--danger` |
-| `btn-link` | `btn btn--link` |
-| `ghost small` / `secondary small` / `primary small` | 上面各变体 + `btn--sm` |
-| `ghost tiny` | `btn btn--ghost btn--sm` |
-| `.icon-btn`（顶栏） | `btn btn--icon` |
-| `.btn-mini`（记忆行） | `btn btn--sm`（行内高度用 `--ctl-h-sm`） |
+| 旧 | 新 | 落地情况 |
+|---|---|---|
+| （无 class，裸 `<button>`） | `btn btn--primary`（默认主操作） | ✅ 唯一一处（`Tools` 的「更新」） |
+| `ghost` | `btn btn--ghost` | ✅ |
+| `secondary` | `btn btn--secondary` | ✅ |
+| `primary` | `btn btn--primary` | ✅ |
+| `danger` | `btn btn--danger` | ✅（`ghost danger` 两处合并成 `btn--danger`：旧 CSS 里 `button.danger` 写在 `button.ghost` 之后，只有它生效） |
+| `btn-link` | `btn btn--link` | ✅；`Chat` 那条更淡的撤销链再加 `btn--quiet`（虚线下划线） |
+| `ghost small` / `secondary small` / `primary small` / `danger small` | 上面各变体 + `btn--sm` | ✅ |
+| `ghost tiny`（跑日志展开） | `btn btn--ghost btn--sm` + 组件内只留横向内距 | ✅ |
+| `.icon-btn`（顶栏） | `btn btn--icon` | ✅ 组件里那三条规则删掉，SVG 尺寸归 app.css |
+| `.btn-mini`（记忆行） | `btn btn--mini` | ✅ |
+| `.btn-small`（表单「记下」） | `btn btn--secondary btn--tight`（小内距 + 描边，字号仍是 `--fs-sm`） | ✅ |
+| `ghost small primary-ghost`（误留的死类） | `btn btn--ghost btn--sm` | ✅ 去掉 `primary-ghost`（从来没有对应规则） |
 
-**尺寸**：`btn`（默认，高 `--ctl-h` = 1.9rem）/ `btn--sm`（1.5rem）/ `btn--icon`（方形）。
+**尺寸**：`btn`（默认，高 `--ctl-h` = 1.9rem）/ `btn--sm`（只降字号，形状不变）/
+`--mini`（行尾极小动作）/ `--tight`（小内距 + 描边）/ `--icon`（方形，SVG 1rem）。
+
+**结构性控件不在按钮族里**（它们自带形状，套 `.btn` 会把底色变成 accent）：
+`.intake-choice`、`.role-card`、`.tab`、`.list-row-main` / `.list-row-action`、`.prefix-x`、
+`.agent-group-head`、`.cat-toggle`、`.draft-turn-toggle`、`.file-row`、`.ap-*`、`.artifact-tab`、
+`.card`、`.env`、`.history-row`、`.mem-pin`、`.nav-item`、`.pane-resizer`、`.row.dir`、
+`.run-tab`、`.terms-label`、`.wd-dir`、`.wd-file`。清单同步在 `app.css` 的按钮族注释里。
+
+**远端管理页（`apps/remote/web`）只做机械跟随**：它 import 同一份 `app.css`，
+所以 `.small` 一改名它就跟着坏——本轮把它的 `small` 换成 `fs-xs`、
+`secondary small` 一类换成 `btn btn--*`，但**不重新设计它**（使用者口径：那页不在本轮范围）。
 
 ---
 
@@ -116,9 +133,11 @@
 
 ⇒ 拆分：
 
-- 文本上的 `.small` → **`.fs-xs`**（纯字号工具，语义清楚）
-- 按钮上的 `.small` → 由 `btn--sm` 接管（尺寸是按钮族的属性，不是字号）
-- 与 `.faint` 同用的 `.faint small` → `.faint .fs-xs`
+- 文本上的 `.small` → **`.fs-xs`**（纯字号工具，语义清楚）——✅ 298 已做完（`app.css` 里
+  `.small` 这个类**已删除**，不是留了别名：留别名就还是两套名字）
+- 按钮上的 `.small` → 由 `btn--sm` 接管（尺寸是按钮族的属性，不是字号）——✅
+- 与 `.faint` 同用的 `.faint small` → `.faint .fs-xs`——✅（探针判据跟着改成
+  `.hint.faint.fs-xs, .hint.fs-xs` 计数为 0）
 
 ---
 
@@ -187,8 +206,15 @@
 | 辅助文字 | `.hint` / `.hint--bad/--warn` | — | — |
 | 字号工具 | `.fs-2xs / .fs-xs / .fs-sm / .fs-base` | — | — |
 
-新增令牌：`--fs-2xs: 11px`、`--fs-3xs: 10px`、`--radius-none: 0`、`--radius-pill: 999px`、
-`--radius-xs: 6px`（待批）、`--ctl-h: 1.9rem`、`--ctl-h-sm: 1.5rem`。
+新增令牌（298 批已加进 `app.css`）：`--radius-none: 0`、`--radius-xs: 6px`、
+`--radius-pill: 999px`、`--ctl-h: 1.9rem`、`--ctl-h-sm: 1.5rem`。
+
+- `--ctl-h` / `--ctl-h-sm` 当批就用掉了（`.topbar button` / `.topbar .page-actions button`），
+  不再是"登记待用"。
+- `--radius-*` 三个是给 299/302 的裸圆角迁移用的：**保留等值**（`6px` 就是 `6px`），
+  换名不改像素。
+- `--fs-2xs` / `--fs-3xs` 这一批**没有**加：本轮没有一处字号需要它们（`11px`/`10px`
+  那几处属于 299 的裸值迁移，等真要用再加，免得留一个没人用的令牌）。
 
 ---
 
@@ -196,9 +222,9 @@
 
 | 批 | 内容 | 验证 |
 |---|---|---|
-| **297**（本批） | 本报告 + 扫描脚本 | 无代码改动 |
-| 298 | 令牌补齐 + `app.css` 收口按钮/输入/徽标三族（**不动组件**，先让新类可用） | `check` |
-| 299 | 组件迁移：按钮 → `btn btn--*`；`.small` → `.fs-xs`/`btn--sm`；删组件里的 `.btn-mini/.btn-small/.btn-link/.icon-btn` | `check` + `probe` |
+| 297 | 本报告 + 扫描脚本 | 无代码改动 |
+| **298**（本批，合并了原 298+299） | 令牌补齐 + `app.css` 按钮族（`btn` / `--primary/--secondary/--ghost/--danger/--link` / `--sm/--mini/--tight/--icon`）+ **全量组件迁移** + `.small` → `.fs-xs` + 删组件里那四个自造按钮类 | `check`（2464）+ `probe:layout`（615）+ `probe:remote`（27） |
+| 299 | 输入 / 勾选 / chip / 徽标 / 卡片 / 列表行 / 标题 六族收口（§9 其余行） | `check` |
 | 300 | 修未定义变量（§8）+ 文案统一（§7）+ 写 `docs/design/ui-style.md` + 三处指路 | `check` + `probe` |
 | 301 | 护栏：静态测试（禁裸字号/圆角/控件内距）+ 探针 `style.*` 判据 | `check` + `probe` |
 | 302 | §6 的像素变更逐条落地（**等你逐条确认**） | 你抽查页面 |

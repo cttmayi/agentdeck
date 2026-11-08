@@ -64,7 +64,7 @@
   <!-- 栏头带：三页同款（D61 起）——计数 + 搜索。计数数的是**当前显示**的条数
        （过滤之后），不是仓库里全部。 -->
   <div class="pane-head list-toolbar">
-    <span class="faint small">{countLabel}</span>
+    <span class="faint fs-xs">{countLabel}</span>
     <input
       value={filter}
       oninput={(e) => onFilter((e.currentTarget as HTMLInputElement).value)}
@@ -86,13 +86,13 @@
     {:else if empty}
       <div class="empty">
         <strong>{emptyTitle}</strong>
-        <p class="faint small">{emptyHint}</p>
+        <p class="faint fs-xs">{emptyHint}</p>
       </div>
     {:else if emptyFiltered}
       <!-- 有东西、但搜索一个都没命中：说"还没有"是假话——两种空态必须分开说 -->
       <div class="empty">
         <strong>{emptyFilteredTitle}</strong>
-        <p class="faint small">{emptyFilteredHint}</p>
+        <p class="faint fs-xs">{emptyFilteredHint}</p>
       </div>
     {:else}
       {#if readyTop}{@render readyTop()}{/if}

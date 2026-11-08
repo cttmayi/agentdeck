@@ -168,7 +168,7 @@
           · 「沉淀设置」页（一键安装，且说清现在哪一档）。
         右栏再念一遍就是第三处，而且它只在"没装"时出现（"装了就没有"本身也是噪音）。
       -->
-      <button type="button" class="ghost artifact-close" onclick={() => (drawerManual = false)}>
+      <button type="button" class="btn btn--ghost artifact-close" onclick={() => (drawerManual = false)}>
         {$t('crystallize.artifactClose')}
       </button>
     </div>
@@ -221,7 +221,7 @@
       {#if noOutputMode}
         <section class="artifact-checks">
           <h3 class="artifact-sub">{$t('crystallize.artifactChecks')}</h3>
-          <p class="faint small">{$t('crystallize.artifactNoOutputNote')}</p>
+          <p class="faint fs-xs">{$t('crystallize.artifactNoOutputNote')}</p>
         </section>
       {:else if problems.length > 0}
       <!-- 结论在栏头（「机械体检 N 项问题」）；这里只列**要改的东西**。通过就没有这一节。 -->

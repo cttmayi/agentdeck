@@ -51,7 +51,7 @@
   <div class="topbar-right">
     <div class="page-actions">
       <!-- 语言：与 daemon 界面同一个 localStorage 键 ⇒ 两页语言一致 -->
-      <label class="faint small" for="remote-locale">{$t('remote.language')}</label>
+      <label class="faint fs-xs" for="remote-locale">{$t('remote.language')}</label>
       <select
         id="remote-locale"
         value={$locale}
@@ -62,7 +62,7 @@
         {/each}
       </select>
       <!-- 主题：三档（跟随系统 / 亮 / 暗），与 daemon 界面共用同一份判定 -->
-      <label class="faint small" for="remote-theme">{$t('remote.theme')}</label>
+      <label class="faint fs-xs" for="remote-theme">{$t('remote.theme')}</label>
       <select
         id="remote-theme"
         value={$themePref}
@@ -96,7 +96,7 @@
     >
       {$t('remote.navTools')}
     </button>
-    <div class="sidebar-foot faint small">{$t('remote.servedBy')}</div>
+    <div class="sidebar-foot faint fs-xs">{$t('remote.servedBy')}</div>
   </nav>
 
   <main class="main">

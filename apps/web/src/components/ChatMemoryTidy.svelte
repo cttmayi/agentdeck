@@ -308,7 +308,7 @@
       </p>
       <button
         type="button"
-        class="primary"
+        class="btn btn--primary"
         data-tidy-start
         disabled={conversationId === ''}
         onclick={() => void start()}
@@ -327,8 +327,8 @@
     <p class="notice bad" data-tidy-error>{errorText}</p>
     <div class="tidy-actions">
       <span class="spacer"></span>
-      <button type="button" class="ghost" onclick={close}>{$t('common.close')}</button>
-      <button type="button" class="secondary" onclick={() => void start()}>
+      <button type="button" class="btn btn--ghost" onclick={close}>{$t('common.close')}</button>
+      <button type="button" class="btn btn--secondary" onclick={() => void start()}>
         {$t('chat.tidyRetry')}
       </button>
     </div>
@@ -340,8 +340,8 @@
     </div>
     <div class="tidy-actions">
       <span class="spacer"></span>
-      <button type="button" class="ghost" onclick={close}>{$t('common.close')}</button>
-      <button type="button" class="secondary" onclick={() => void start()}>
+      <button type="button" class="btn btn--ghost" onclick={close}>{$t('common.close')}</button>
+      <button type="button" class="btn btn--secondary" onclick={() => void start()}>
         {$t('chat.tidyRetry')}
       </button>
     </div>
@@ -482,10 +482,10 @@
       -->
       <span class="hint faint" data-tidy-generalize>{$t('chat.tidyGeneralizeHint')}</span>
       <span class="spacer"></span>
-      <button type="button" class="ghost" onclick={close}>{$t('common.cancel')}</button>
+      <button type="button" class="btn btn--ghost" onclick={close}>{$t('common.cancel')}</button>
       <button
         type="button"
-        class="primary"
+        class="btn btn--primary"
         data-tidy-confirm
         disabled={chosen.length === 0}
         onclick={confirm}>{$t('chat.tidyConfirm', { n: String(chosen.length) })}</button

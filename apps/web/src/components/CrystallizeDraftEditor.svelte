@@ -90,7 +90,7 @@
              而"点不动的按钮"比"没有按钮"更让人困惑。 -->
         {#if editor.dirty}
           <button
-            class="ghost small primary-ghost"
+            class="btn btn--ghost btn--sm"
             disabled={editor.savingDraft}
             title={$t('crystallize.saveDraftHint')}
             onclick={() => void saveEdits()}
@@ -123,7 +123,7 @@
             {#if editor.artifacts.revisedFrom !== null || editor.artifacts.baseline !== null}
               <button
                 type="button"
-                class="ghost small"
+                class="btn btn--ghost btn--sm"
                 class:active={editor.diffAgainst === 'original'}
                 onclick={() => void editor.loadDiff('original')}
               >{$t('crystallize.diffVsOriginal')}</button>
@@ -131,13 +131,13 @@
             {#if editor.artifacts.revisedFrom !== null}
               <button
                 type="button"
-                class="ghost small"
+                class="btn btn--ghost btn--sm"
                 class:active={editor.diffAgainst === 'current'}
                 onclick={() => void editor.loadDiff('current')}
               >{$t('crystallize.diffVsCurrent')}</button>
               <button
                 type="button"
-                class="ghost small"
+                class="btn btn--ghost btn--sm"
                 class:active={editor.diffAgainst === 'previous'}
                 onclick={() => void editor.loadDiff('previous')}
               >{$t('crystallize.diffVsPrevious')}</button>
@@ -150,9 +150,9 @@
       <div class="review-side" data-review-tab={editor.reviewTab}>
         <div class="review-cell" data-cell="content">
           {#if editor.selectedFile === ''}
-            <p class="faint small">{$t('crystallize.noFiles')}</p>
+            <p class="faint fs-xs">{$t('crystallize.noFiles')}</p>
           {:else if editor.fileRows.find((r) => r.rel === editor.selectedFile)?.change === 'D'}
-            <p class="faint small pad">{$t('crystallize.deletedHint')}</p>
+            <p class="faint fs-xs pad">{$t('crystallize.deletedHint')}</p>
           {:else}
             <textarea
               value={editor.editText}
@@ -180,7 +180,7 @@
               {#if editor.artifacts !== null && (editor.artifacts.revisedFrom !== null || editor.artifacts.baseline !== null)}
                 <button
                   type="button"
-                  class="ghost small"
+                  class="btn btn--ghost btn--sm"
                   class:active={editor.diffAgainst === 'original'}
                   onclick={() => void editor.loadDiff('original')}
                 >{$t('crystallize.diffVsOriginal')}</button>
@@ -188,26 +188,26 @@
               {#if editor.artifacts !== null && editor.artifacts.revisedFrom !== null}
                 <button
                   type="button"
-                  class="ghost small"
+                  class="btn btn--ghost btn--sm"
                   class:active={editor.diffAgainst === 'current'}
                   onclick={() => void editor.loadDiff('current')}
                 >{$t('crystallize.diffVsCurrent')}</button>
                 <button
                   type="button"
-                  class="ghost small"
+                  class="btn btn--ghost btn--sm"
                   class:active={editor.diffAgainst === 'previous'}
                   onclick={() => void editor.loadDiff('previous')}
                 >{$t('crystallize.diffVsPrevious')}</button>
               {/if}
               <button
                 type="button"
-                class="ghost small diff-back"
+                class="btn btn--ghost btn--sm diff-back"
                 onclick={() => (editor.reviewTab = 'content')}
               >{$t('crystallize.diffBackToContent')}</button>
             </span>
           </div>
           {#if editor.diffLoading}
-            <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
+            <p class="faint fs-xs pad">{$t('crystallize.diffLoading')}</p>
           {:else if editor.selectedDiff && editor.selectedDiff.hunks.length > 0}
             <div class="diff-box mono">
               {#each editor.selectedDiff.hunks as hunk (hunk.oldStart + ':' + hunk.newStart)}
@@ -223,9 +223,9 @@
               {/each}
             </div>
           {:else if editor.diff === null}
-            <p class="faint small pad">{$t('crystallize.diffLoading')}</p>
+            <p class="faint fs-xs pad">{$t('crystallize.diffLoading')}</p>
           {:else}
-            <p class="faint small pad">{$t('crystallize.diffUnchanged')}</p>
+            <p class="faint fs-xs pad">{$t('crystallize.diffUnchanged')}</p>
           {/if}
         </div>
       </div>

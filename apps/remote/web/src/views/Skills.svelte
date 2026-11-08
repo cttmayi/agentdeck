@@ -177,7 +177,7 @@
 <div class="page-actions">
   <button
     type="button"
-    class="small"
+    class="btn btn--primary btn--sm"
     disabled={busy || syncDisabledReason() !== ''}
     title={syncDisabledReason()}
     onclick={() => void startSync()}
@@ -186,7 +186,7 @@
       ? $t('remote.syncBusy', { seconds: runningSeconds() })
       : $t('remote.syncNow')}
   </button>
-  <span class="faint small">
+  <span class="faint fs-xs">
     <!-- ⚠️ 这里只放这句话：**页面不知道清单的"核对于"是哪天**（那是清单文件的字段），
          所以不许在这儿编一个日期（第一版我就那么写了，随即撤掉——"编一个值"正是
          这个仓库最防的东西）。条数由表格标题那块如实显示（`共 N 条`）。 -->
@@ -208,11 +208,11 @@
 <!-- ★ 这句单独一行（2026-10 审查时量的）：它原来和按钮**同一行**，于是按钮被挤到
      745px 之外、标签折成两行 ⇒ 实测 54px 高（daemon 那一档是 32px）。长句自己占一行，
      按钮就不会被挤。这句本身是使用者问过"同步的是什么"之后补的，必须看得见。 -->
-<p class="faint small" style="margin:var(--sp-2) 0 0">{$t('remote.syncWhat')}</p>
+<p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{$t('remote.syncWhat')}</p>
 <!-- ★ 清单这一行来自**接口给的真实数据**（D54）：条数、核对于哪天、文件在哪。
      以前这里写的是仓库里的路径，而且我一度想写死一个日期——那是编值，被自己撤了。
      三种状态分开说：有配置 / 还没转存 / 读不了。 -->
-<p class="faint small manifest-line">
+<p class="faint fs-xs manifest-line">
   {#if catalog?.manifest && !catalog.manifest.exists}
     {$t('remote.manifestMissing', { path: catalog.manifest.path })}
   {:else if catalog?.manifest?.error}
@@ -235,7 +235,7 @@
       bind:value={installUrl}
       placeholder="https://github.com/owner/repo/tree/main/skills/name"
     />
-    <p class="faint small">{$t('remote.installUrlHint')}</p>
+    <p class="faint fs-xs">{$t('remote.installUrlHint')}</p>
     <div class="install-row">
       <div>
         <label for="install-name">{$t('remote.installNameLabel')}</label>
@@ -265,7 +265,7 @@
 {/if}
 
 {#if sync && sync.tail.length > 0}
-  <details class="faint small">
+  <details class="faint fs-xs">
     <summary>{$t('remote.syncLogTitle', { count: sync.tail.length })}</summary>
     <pre class="log-tail">{sync.tail.join('\n')}</pre>
   </details>
@@ -311,9 +311,9 @@
               />
               <code>{s.slug}</code>
             </div>
-            {#if s.name}<div class="faint small">{s.name}</div>{/if}
+            {#if s.name}<div class="faint fs-xs">{s.name}</div>{/if}
             {#if s.excluded && s.excluded.length > 0}
-              <div class="warn small" title={s.excluded.join('\n')}>
+              <div class="warn fs-xs" title={s.excluded.join('\n')}>
                 {$t('remote.incomplete', { count: s.excluded.length })}
               </div>
             {/if}
@@ -326,25 +326,25 @@
             </span>
             <SourceRef value={s.sourceRef} />
           </td>
-          <td class="faint small">{s.version ? `v${s.version}` : $t('remote.noVersion')}</td>
-          <td class="faint small">
+          <td class="faint fs-xs">{s.version ? `v${s.version}` : $t('remote.noVersion')}</td>
+          <td class="faint fs-xs">
             <!-- D69.5：与 daemon 同一档显示——`files` 都是**不含 SKILL.md** 的支持
                  文件（同一个 resolveLocalPath 规则），所以同一套格式：SKILL.md + N，
                  0 个支持文件时只写 SKILL.md（不写刺眼的 0 个文件）。 -->
             SKILL.md{#if fileCount > 0} +{fileCount}{/if}
           </td>
-          <td class="faint small" title={absoluteTime(s.fetchedAt, currentLanguageTag())}>
+          <td class="faint fs-xs" title={absoluteTime(s.fetchedAt, currentLanguageTag())}>
             {relativeTime(s.fetchedAt, Date.now())}
           </td>
           <td>
             <div class="row-actions">
-              <button type="button" class="secondary small" onclick={() => (detail = s)}>
+              <button type="button" class="btn btn--secondary btn--sm" onclick={() => (detail = s)}>
                 {$t('remote.view')}
               </button>
               {#if s.source === 'local'}
                 <button
                   type="button"
-                  class="ghost small danger"
+                  class="btn btn--danger btn--sm"
                   disabled={uninstalling === s.slug}
                   onclick={() => void doUninstall(s.slug)}
                 >
@@ -353,7 +353,7 @@
               {:else}
                 <!-- ⚠️ 同步来的**不给卸载按钮**，但要说明该怎么做（项目纪律：不能做的
                      事要说清为什么、以及替代路径）。推荐清单里去掉它再点"重新同步"。 -->
-                <button type="button" class="ghost small" disabled title={$t('remote.syncedNotRemovable')}>
+                <button type="button" class="btn btn--ghost btn--sm" disabled title={$t('remote.syncedNotRemovable')}>
                   {$t('remote.uninstall')}
                 </button>
               {/if}
@@ -369,17 +369,17 @@
       <!-- ★ 装完还得自己配的东西必须在装之前/刚打开时就看得见（web 目录表在装前
            就显示）：装完才发现不能用，比不推荐更糟。 -->
       <h3>{$t('remote.detailNeeds')}</h3>
-      <p class="warn small">{detail!.needs}</p>
+      <p class="warn fs-xs">{detail!.needs}</p>
     {/if}
     <h3>{$t('remote.detailFiles')}</h3>
-    <ul class="faint small">
+    <ul class="faint fs-xs">
       {#each Object.keys(detail!.files).sort() as path (path)}
         <li><code>{path}</code></li>
       {/each}
     </ul>
     {#if detail!.excluded.length > 0}
       <h3>{$t('remote.detailExcluded')}</h3>
-      <ul class="warn small">
+      <ul class="warn fs-xs">
         {#each detail!.excluded as path (path)}
           <li><code>{path}</code></li>
         {/each}

@@ -142,7 +142,7 @@
           }
         }}
       />
-      <button type="button" class="ghost" onclick={() => void load(jump.trim())}>
+      <button type="button" class="btn btn--ghost" onclick={() => void load(jump.trim())}>
         {$t('dirs.go')}
       </button>
     </div>
@@ -150,28 +150,28 @@
     <div class="nav-row">
       <button
         type="button"
-        class="ghost"
+        class="btn btn--ghost"
         disabled={listing?.parent === null || listing === null}
         data-dir-picker-up
         onclick={() => {
           if (listing?.parent) void load(listing.parent)
         }}
       >{$t('dirs.up')}</button>
-      <button type="button" class="ghost" onclick={() => void load('')}>{$t('dirs.home')}</button>
+      <button type="button" class="btn btn--ghost" onclick={() => void load('')}>{$t('dirs.home')}</button>
       <button
         type="button"
-        class="ghost"
+        class="btn btn--ghost"
         onclick={() => {
           if (listing?.workRoot) void load(listing.workRoot)
         }}
       >{$t('dirs.workRoot')}</button>
       <button
         type="button"
-        class="ghost"
+        class="btn btn--ghost"
         onclick={() => void load(listing?.path ?? '')}
       >{$t('dirs.refresh')}</button>
       {#if listing !== null}
-        <span class="faint small counts" data-dir-picker-counts>
+        <span class="faint fs-xs counts" data-dir-picker-counts>
           {$t('dirs.count', {
             dirs: String(listing.entries.filter((e) => e.kind === 'dir').length),
             files: String(listing.entries.filter((e) => e.kind === 'file').length),
@@ -220,10 +220,10 @@
 
     <div class="actions">
       <code class="mono now" data-dir-picker-current>{listing?.path ?? ''}</code>
-      <button type="button" class="ghost" onclick={() => (open = false)}>{$t('common.cancel')}</button>
+      <button type="button" class="btn btn--ghost" onclick={() => (open = false)}>{$t('common.cancel')}</button>
       <button
         type="button"
-        class="primary"
+        class="btn btn--primary"
         data-dir-picker-pick
         disabled={listing === null || busy}
         onclick={pick}

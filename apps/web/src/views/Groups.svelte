@@ -417,7 +417,7 @@
                   <span class="badge bad">{$t('groups.disabledBadge')}</span>
                 {/if}
               </span>
-              <span class="group-notes faint small">
+              <span class="group-notes faint fs-xs">
                 <span class="group-notes-trunc">
                   {exec ? $t('groups.chainExecutor', { name: exec.name }) : $t('groups.memberMissing')}
                   <span class="arrow">→</span>
@@ -625,15 +625,15 @@
           {/if}
 
           <div class="form-actions">
-            <button type="submit" class="primary">
+            <button type="submit" class="btn btn--primary">
               {draftId ? $t('groups.saveButton') : $t('groups.createButton')}
             </button>
             {#if draftId}
-              <button type="button" class="ghost danger" onclick={() => void remove()}>
+              <button type="button" class="btn btn--danger" onclick={() => void remove()}>
                 {$t('groups.deleteButton')}
               </button>
             {/if}
-            <button type="button" class="ghost" onclick={() => { creating = false; selectedId = null }}>
+            <button type="button" class="btn btn--ghost" onclick={() => { creating = false; selectedId = null }}>
               {$t('common.cancel')}
             </button>
           </div>

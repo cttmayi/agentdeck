@@ -226,7 +226,7 @@
       使用者："聊天 中工作目录的文件，有个刷新，但沉淀里面没有，请补上"。
       它只让树重列一次（`reloadTick` 变了 ⇒ `WorkDirTree` 的 `reloadKey` 变 ⇒ 重取顶层）。
     -->
-    <button type="button" class="ghost small" data-foot-refresh onclick={() => (reloadTick += 1)}>
+    <button type="button" class="btn btn--ghost btn--sm" data-foot-refresh onclick={() => (reloadTick += 1)}>
       {$t('files.refresh')}
     </button>
   {/snippet}
@@ -248,14 +248,14 @@
         {#if pendingDelete === entry.path}
           <button
             type="button"
-            class="ghost small mat-del confirm"
+            class="btn btn--ghost btn--sm mat-del confirm"
             disabled={deleting !== ''}
             onclick={() => void removeMaterial(entry.path)}
           >{$t('crystallize.materialDeleteConfirm')}</button>
         {:else}
           <button
             type="button"
-            class="ghost small mat-del"
+            class="btn btn--ghost btn--sm mat-del"
             disabled={deleting !== ''}
             onclick={() => (pendingDelete = entry.path)}
           >{$t('crystallize.materialDelete')}</button>

@@ -233,14 +233,14 @@
         <p class="intake-q">这次要沉淀成什么？</p>
         <div class="intake-choices">
           <button type="button" class="intake-choice" onclick={() => pickStart('new')}>
-            新建一份技能<span class="faint small">从这次的过程里提炼出做法</span>
+            新建一份技能<span class="faint fs-xs">从这次的过程里提炼出做法</span>
           </button>
           {#if skills.length > 0}
             <button type="button" class="intake-choice" onclick={() => pickStart('update')}>
               优化已有技能
               <!-- 分批第 235 批：长括注（"更新目标就是它（提炼的=进化…）"）不再塞进选项——
                    两种来源的区别由下一屏「是哪一份？」里那一句统一说。 -->
-              <span class="faint small">{$t('crystallize.loadedCount', { n: String(skills.length) })}</span>
+              <span class="faint fs-xs">{$t('crystallize.loadedCount', { n: String(skills.length) })}</span>
             </button>
           {/if}
         </div>
@@ -314,10 +314,10 @@
           ></textarea>
         {/if}
         {#if purposeMissing}
-          <p class="faint small">{$t('crystallize.purposeHint')}——这一条必答：没有靶子，起草者只能凭素材猜。</p>
+          <p class="faint fs-xs">{$t('crystallize.purposeHint')}——这一条必答：没有靶子，起草者只能凭素材猜。</p>
         {/if}
         <div class="intake-actions">
-          <button type="button" class="primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
+          <button type="button" class="btn btn--primary" disabled={purposeMissing} onclick={afterPurpose}>下一步</button>
         </div>
       </ChatBubble>
     {:else if stage === 'blankMaterial'}
@@ -336,7 +336,7 @@
                 <span class="mat-text">{item.text.length > 60 ? `${item.text.slice(0, 60)}…` : item.text}</span>
                 <button
                   type="button"
-                  class="ghost small"
+                  class="btn btn--ghost btn--sm"
                   aria-label="删掉这一份"
                   onclick={() => removeMaterial(item.id)}>删掉</button
                 >
@@ -353,15 +353,15 @@
         <div class="intake-actions">
           <button
             type="button"
-            class="ghost"
+            class="btn btn--ghost"
             disabled={materialDraft.trim() === ''}
             onclick={addMaterial}>加上这一份</button
           >
-          <button type="button" class="primary" onclick={() => (stage = 'ready')}>
+          <button type="button" class="btn btn--primary" onclick={() => (stage = 'ready')}>
             {blankMaterials.length === 0 ? '跳过' : '下一步'}
           </button>
         </div>
-        <p class="faint small">
+        <p class="faint fs-xs">
           这次没有来源 run：材料只有你给的这些（可以零份、可以多份）。起草完之后还能在右栏继续加。
         </p>
       </ChatBubble>
@@ -399,20 +399,20 @@
           {#if stats !== null}<dt>素材</dt><dd>轨迹 {stats.turns} 轮 · {stats.toolCalls} 次工具调用（起草时自动带上）</dd>{/if}
         </dl>
         {#if blocked !== undefined}
-          <p class="faint small" data-intake-blocked>{blocked}</p>
+          <p class="faint fs-xs" data-intake-blocked>{blocked}</p>
         {/if}
         {#if cannotStart !== ''}
-          <p class="faint small" data-intake-blocked>{cannotStart}</p>
+          <p class="faint fs-xs" data-intake-blocked>{cannotStart}</p>
         {/if}
         <div class="intake-actions">
           <button
             type="button"
-            class="primary"
+            class="btn btn--primary"
             disabled={blocked !== undefined}
             title={blocked}
             onclick={finish}>开始提炼</button
           >
-          <button type="button" class="ghost" onclick={() => (stage = 'start')}>重答</button>
+          <button type="button" class="btn btn--ghost" onclick={() => (stage = 'start')}>重答</button>
         </div>
       </ChatBubble>
     {/if}

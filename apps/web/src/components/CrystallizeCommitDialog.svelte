@@ -87,7 +87,7 @@
       </div>
     {/if}
 
-    <p class="faint small summary">
+    <p class="faint fs-xs summary">
       {$t('crystallize.commitSummary', {
         n: String(fileCount),
         kb: String(Math.max(1, Math.round(totalBytes / 1024))),
@@ -96,12 +96,12 @@
   </div>
 
   <div class="commit-actions">
-    <button type="button" class="ghost" onclick={() => (busy ? undefined : oncancel())} disabled={busy}>
+    <button type="button" class="btn btn--ghost" onclick={() => (busy ? undefined : oncancel())} disabled={busy}>
       {$t('common.cancel')}
     </button>
     <button
       type="button"
-      class="primary"
+      class="btn btn--primary"
       data-commit-confirm
       disabled={busy || slug.trim() === ''}
       onclick={onconfirm}

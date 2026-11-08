@@ -85,22 +85,22 @@
               />
               <code>{tool.slug}</code>
             </div>
-            {#if tool.name}<div class="faint small">{tool.name}</div>{/if}
+            {#if tool.name}<div class="faint fs-xs">{tool.name}</div>{/if}
             {#if tool.summary}
-              <div class="faint small desc-clamp" title={tool.summary}>{tool.summary}</div>
+              <div class="faint fs-xs desc-clamp" title={tool.summary}>{tool.summary}</div>
             {/if}
           </td>
-          <td class="faint small">
+          <td class="faint fs-xs">
             {#each tool.manifest.actions as action (action.name)}
               <div><code>{tool.slug}.{action.name}</code></div>
             {/each}
           </td>
-          <td class="faint small">{tool.version ? `v${tool.version}` : $t('remote.noVersion')}</td>
+          <td class="faint fs-xs">{tool.version ? `v${tool.version}` : $t('remote.noVersion')}</td>
           <td>
             <div class="row-actions">
               <!-- ★ 按钮叫「查看」，与技能页那一列同一句话：两页的同一件事应该长得一样，
                    而且原来这里是每行重复一遍「清单（tool.json）」（等于重复表头）。 -->
-              <button type="button" class="secondary small" onclick={() => (detail = tool)}>
+              <button type="button" class="btn btn--secondary btn--sm" onclick={() => (detail = tool)}>
                 {$t('remote.view')}
               </button>
             </div>
@@ -109,7 +109,7 @@
     {/each}
   {/snippet}
   {#snippet drawerBody()}
-    <p class="faint small">
+    <p class="faint fs-xs">
       {entryIncluded(detail!)
         ? $t('remote.toolEntryFound')
         : $t('remote.toolEntryMissing', { entry: entryOf(detail!) ?? '—' })}
@@ -119,7 +119,7 @@
     <h3>{$t('remote.toolDocs', { file: 'TOOL.md' })}</h3>
     <pre class="file-text">{detail!.docs}</pre>
     <h3>{$t('remote.detailFiles')}</h3>
-    <ul class="faint small">
+    <ul class="faint fs-xs">
       {#each Object.keys(detail!.files).sort() as path (path)}
         <li><code>{path}</code></li>
       {/each}

@@ -210,7 +210,7 @@
              ⚠️ 只放**一行标签**，不放大段说明：新建表单每加两行文字，「创建」按钮就会被挤出
              视口（探针 `template.footVisible` 当场量到过）；完整说明在智能体详情的编辑态里。 -->
         {$t('agents.instructionsLabel')}
-        <span class="muted small" data-instructions-identity>{$t('agents.instructionsIdentityTag')}</span>
+        <span class="muted fs-xs" data-instructions-identity>{$t('agents.instructionsIdentityTag')}</span>
         <!--
           ★ 指令是**一份文档**，不是一行备注（D48）。
 
@@ -272,10 +272,10 @@
 
   <!-- 主操作在底部（与组页同款）：创建 / 取消 -->
   <div class="form-actions">
-    <button type="submit" class="primary" disabled={busy || !name.trim()}>
+    <button type="submit" class="btn btn--primary" disabled={busy || !name.trim()}>
       {busy ? $t('common.creating') : $t('common.create')}
     </button>
-    <button type="button" class="ghost" onclick={onclose}>{$t('common.cancel')}</button>
+    <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
   </div>
 </form>
 

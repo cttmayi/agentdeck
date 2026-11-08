@@ -142,14 +142,14 @@
 
 <FoldSection title={$t('skills.historyTitle')}>
   {#if state === 'loading'}
-    <p class="faint small">{$t('skills.historyLoading')}</p>
+    <p class="faint fs-xs">{$t('skills.historyLoading')}</p>
   {:else if offReason !== null}
     <!-- "版本管理未启用：<理由>"——理由必须原样带出来（是"没有 git"还是别的） -->
-    <p class="faint small">{$t('skills.historyOff', { reason: offReason })}</p>
+    <p class="faint fs-xs">{$t('skills.historyOff', { reason: offReason })}</p>
   {:else if entries.length === 0}
-    <p class="faint small">{$t('skills.historyEmpty')}</p>
+    <p class="faint fs-xs">{$t('skills.historyEmpty')}</p>
   {:else}
-    <p class="faint small history-hint">{$t('skills.historyPickHint')}</p>
+    <p class="faint fs-xs history-hint">{$t('skills.historyPickHint')}</p>
     <ul class="history-list">
       {#each entries as entry, i (entry.rev)}
         <li>
@@ -165,12 +165,12 @@
                  给的 ISO 串——提交时间是"要能精确到分秒"的那种信息（核对"哪次改的"）。
                  ⚠️ `relativeTime` 要两个参数（`at, now`）：第一版只传了时间戳，
                  svelte-check 报 "Expected 2 arguments, but got 1"。 -->
-            <span class="faint small when" title={entry.when}
+            <span class="faint fs-xs when" title={entry.when}
               >{relativeTime(entry.when, Date.now())}</span
             >
             {#if i === entries.length - 1}
               <!-- 最早那条：它对比的是空目录，说清楚免得被读成"改了什么" -->
-              <span class="faint small first">{$t('skills.historyFirstVersion')}</span>
+              <span class="faint fs-xs first">{$t('skills.historyFirstVersion')}</span>
             {/if}
           </button>
         </li>
@@ -180,13 +180,13 @@
     {#if selectedRev !== null}
       <div class="rev-diff">
         {#if rowsLoading}
-          <p class="faint small">{$t('skills.historyLoading')}</p>
+          <p class="faint fs-xs">{$t('skills.historyLoading')}</p>
         {:else if rowsError !== null}
           <div class="notice warn">{$t('skills.historyCompareFailed', { reason: rowsError })}</div>
         {:else if rows.length === 0}
-          <p class="faint small">{$t('skills.historyNoChanges')}</p>
+          <p class="faint fs-xs">{$t('skills.historyNoChanges')}</p>
         {:else}
-          <p class="faint small">{$t('skills.historyChanges', { n: rows.length })}</p>
+          <p class="faint fs-xs">{$t('skills.historyChanges', { n: rows.length })}</p>
           {#each rows as row (row.rel)}
             <div class="file-diff">
               <div class="file-head">
@@ -194,7 +194,7 @@
                   {changeLabel(row.change)}
                 </span>
                 <code>{row.rel}</code>
-                <span class="faint small counts">+{row.added} −{row.removed}</span>
+                <span class="faint fs-xs counts">+{row.added} −{row.removed}</span>
               </div>
               {#each row.hunks as hunk (hunk.oldStart + ':' + hunk.newStart)}
                 <div class="hunk-head">@@ −{hunk.oldStart} +{hunk.newStart} @@</div>

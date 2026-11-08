@@ -836,10 +836,10 @@
           >
         {/if}
         {#if draft.name !== agent.name}
-          <span class="faint small" data-agent-rename-pending>{$t('agents.renamePending')}</span>
+          <span class="faint fs-xs" data-agent-rename-pending>{$t('agents.renamePending')}</span>
         {/if}
         {#if !readOnly}
-          <button type="button" class="btn-link" data-agent-rename onclick={startRename}
+          <button type="button" class="btn btn--link" data-agent-rename onclick={startRename}
             >{$t('agents.rename')}</button
           >
         {/if}
@@ -866,7 +866,7 @@
           能做的只有：删（仅已下线的 skill 审核者）、恢复成默认值、取消。
         -->
         {#if retiredBuiltin}
-          <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
+          <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
             >{$t('agents.deleteButton')}</button
           >
         {:else}
@@ -882,14 +882,14 @@
       {:else}
         <button
           type="submit"
-          class="primary"
+          class="btn btn--primary"
           data-agent-save
           disabled={busy || !dirty}
           title={dirty ? $t('agents.saveTitle') : $t('agents.saveNothing')}
           >{busy ? $t('common.saving') : $t('common.save')}</button
         >
         <button type="button" data-agent-cancel onclick={cancelEdit}>{$t('common.cancel')}</button>
-        <button type="button" class="danger" data-agent-delete onclick={() => void remove()}
+        <button type="button" class="btn btn--danger" data-agent-delete onclick={() => void remove()}
           >{$t('agents.deleteButton')}</button
         >
       {/if}
@@ -1082,7 +1082,7 @@
                 </span>
                 <button
                   type="button"
-                  class="ghost small"
+                  class="btn btn--ghost btn--sm"
                   data-install-drafter-skill
                   disabled={installingSkill}
                   onclick={() => void installDrafterSkill()}
@@ -1188,7 +1188,7 @@
               <!-- ★ 274 批：只读态**灰着**而不是消失（方案 A：控件留在原位，只是锁住）。 -->
               <button
                 type="button"
-                class="btn-link"
+                class="btn btn--link"
                 class:locked={readOnly}
                 data-memory-consolidate
                 disabled={readOnly}
@@ -1198,7 +1198,7 @@
             {/if}
             <button
               type="button"
-              class="btn-link"
+              class="btn btn--link"
               data-memory-preview
               disabled={memPreviewBusy}
               onclick={() => void openMemoryPreview()}
@@ -1257,7 +1257,7 @@
                     {#if row.drop}
                       <button
                         type="button"
-                        class="btn-mini"
+                        class="btn btn--mini"
                         data-mem-undo
                         disabled={readOnly}
                         onclick={() => undropRow(row)}
@@ -1268,7 +1268,7 @@
                       {#if row.id !== null}
                         <button
                           type="button"
-                          class="btn-mini"
+                          class="btn btn--mini"
                           data-mem-edit
                           disabled={readOnly}
                           title={readOnly ? $t('agents.builtinReadOnly') : ''}
@@ -1279,7 +1279,7 @@
                       {/if}
                       <button
                         type="button"
-                        class="btn-mini"
+                        class="btn btn--mini"
                         data-mem-remove
                         disabled={readOnly}
                         title={readOnly ? $t('agents.builtinReadOnly') : ''}
@@ -1319,7 +1319,7 @@
             />
             <button
               type="button"
-              class="btn-small"
+              class="btn btn--secondary btn--tight"
               data-mem-add
               disabled={readOnly || memNewText.trim() === ''}
               title={readOnly ? $t('agents.builtinReadOnly') : ''}
@@ -1410,7 +1410,7 @@
         <p class="row-hint">{$t('agents.memoryPreviewHint')}</p>
       </div>
       <span class="spacer"></span>
-      <button type="button" class="ghost" onclick={() => (memPreview = null)}>{$t('common.close')}</button>
+      <button type="button" class="btn btn--ghost" onclick={() => (memPreview = null)}>{$t('common.close')}</button>
     </div>
     <div class="mem-preview-body">
       {#if memPreviewStats !== null}
@@ -1860,7 +1860,7 @@
     cursor: not-allowed;
   }
 
-  .mem-add.locked .btn-small {
+  .mem-add.locked .btn--tight {
     border-style: dashed;
     color: var(--text-faint);
     background: transparent;
@@ -1868,15 +1868,15 @@
   }
 
   /* 行内动作在只读态原地灰掉（虚线框），行高与列宽不变 */
-  .mem-actions .btn-mini:disabled {
+  .mem-actions .btn--mini:disabled {
     border-style: dashed;
     color: var(--text-faint);
     background: transparent;
     cursor: not-allowed;
   }
 
-  .btn-link.locked,
-  .btn-link:disabled {
+  .btn--link.locked,
+  .btn--link:disabled {
     color: var(--text-faint);
     cursor: not-allowed;
   }
@@ -1988,21 +1988,6 @@
   .mem-row:focus-within .mem-actions {
     opacity: 1;
   }
-  .btn-mini {
-    font: inherit;
-    font-size: var(--fs-xs);
-    padding: 0 var(--sp-1);
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--text-faint);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn-mini:hover {
-    color: var(--text);
-    background: var(--surface-2);
-  }
   .mem-add {
     display: flex;
     gap: var(--sp-2);
@@ -2018,31 +2003,10 @@
     flex: 1 1 auto;
     min-width: 0;
   }
-  .btn-small {
-    font: inherit;
-    font-size: var(--fs-sm);
-    padding: var(--sp-1) var(--sp-2);
-    border-radius: var(--radius);
-    border: 1px solid var(--line-strong);
-    background: var(--surface-2);
-    color: var(--text-dim);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .btn-small:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .btn-link {
-    font: inherit;
-    font-size: var(--fs-xs);
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    cursor: pointer;
-  }
-  .btn-link:disabled {
+  /* 记忆行的「改 / 删」、表单里的「记下」、标题旁的「重命名」三处按钮
+     已经统一到 `styles/app.css` 的 `.btn--mini / .btn--tight / .btn--link`
+     （298 批：这三个类原来只在本组件里存在，别处要用就得再抄一遍）。 */
+  .btn--link:disabled {
     opacity: 0.5;
     cursor: default;
   }

@@ -351,11 +351,11 @@
 >
   {#if entry !== null}
     <div class="fv-bar">
-      <span class="fv-path mono faint small" title={entry.path}>
+      <span class="fv-path mono faint fs-xs" title={entry.path}>
         {#if parts.dir !== ''}<span class="fv-dir">{parts.dir}</span>{/if}{parts.name}
       </span>
       {#if sizeText !== ''}
-        <span class="faint small" data-file-bytes>{sizeText}</span>
+        <span class="faint fs-xs" data-file-bytes>{sizeText}</span>
       {/if}
       <span class="fv-spacer"></span>
       <!--
@@ -386,11 +386,11 @@
            没下载（见文件顶上那一段）⇒ 画出来点一下只会复制到一个空串，那比不画更坏。
       -->
       {#if raw.length > 0}
-        <button type="button" class="ghost" onclick={() => void copyRaw()} data-copy-raw>
+        <button type="button" class="btn btn--ghost" onclick={() => void copyRaw()} data-copy-raw>
           {copied === '' ? $t('files.copyRaw') : copied}
         </button>
       {/if}
-      <a class="ghost" href={fileUrl(base, entry)} target="_blank" rel="noreferrer noopener">
+      <a class="btn btn--ghost" href={fileUrl(base, entry)} target="_blank" rel="noreferrer noopener">
         {$t('files.openTab')}
       </a>
     </div>
@@ -398,7 +398,7 @@
     {#if error !== ''}
       <div class="notice bad">
         {$t('files.viewError')}
-        <p class="faint small" style="margin:var(--sp-2) 0 0">{error}</p>
+        <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{error}</p>
       </div>
     {:else if loading}
       <div class="skeleton" style="width:80%"></div>
@@ -407,13 +407,13 @@
         原文面是十六进制：二进制文件，以及位图（.png/.jpg/…）——按字节看没有
         可读文本，hex 就是对得上号的证据。SVG 不进来（它的原文是源码文本）。
       -->
-      <div class="fv-note faint small">
+      <div class="fv-note faint fs-xs">
         {kind === 'image'
           ? $t('files.imageRawNotice', { type: contentType === '' ? '?' : contentType })
           : $t('files.binaryNotice', { type: contentType === '' ? '?' : contentType })}
       </div>
       <pre class="fv-pre fv-hex" data-hex>{hexDump(raw)}</pre>
-      <p class="faint small">{$t('files.hexPeek', { bytes: String(HEX_PEEK_BYTES) })}</p>
+      <p class="faint fs-xs">{$t('files.hexPeek', { bytes: String(HEX_PEEK_BYTES) })}</p>
     {:else if face === 'raw'}
       <!--
         原文：解出来的文本原样显示。不加行号、不着色、不重排——这一面存在的
@@ -460,7 +460,7 @@
           onerror={() => onMediaError(entry)}
         ></video>
         {#if mediaFailed}
-          <p class="faint small" data-media-failed>
+          <p class="faint fs-xs" data-media-failed>
             {mediaReason === 'unsupportedByDaemon'
               ? $t('files.mediaNeedsDaemonRestart')
               : $t('files.mediaUnsupported')}
@@ -478,7 +478,7 @@
           onerror={() => onMediaError(entry)}
         ></audio>
         {#if mediaFailed}
-          <p class="faint small" data-media-failed>
+          <p class="faint fs-xs" data-media-failed>
             {mediaReason === 'unsupportedByDaemon'
               ? $t('files.mediaNeedsDaemonRestart')
               : $t('files.mediaUnsupported')}
@@ -491,7 +491,7 @@
       </div>
     {:else if kind === 'json'}
       {#if jsonBroken}
-        <div class="fv-note faint small">{$t('files.jsonBroken')}</div>
+        <div class="fv-note faint fs-xs">{$t('files.jsonBroken')}</div>
       {/if}
       {#if highlighted !== ''}
         <pre class="fv-pre">{@html highlighted}</pre>
@@ -517,7 +517,7 @@
         </table>
       </div>
       {#if csvView.truncated}
-        <p class="faint small">{$t('files.csvTruncated', { cols: String(CSV_MAX_COLS) })}</p>
+        <p class="faint fs-xs">{$t('files.csvTruncated', { cols: String(CSV_MAX_COLS) })}</p>
       {/if}
     {:else}
       <!-- 代码与纯文本 -->
@@ -531,7 +531,7 @@
         </div>
       {:else}
         {#if noHighlight !== ''}
-          <div class="fv-note faint small">
+          <div class="fv-note faint fs-xs">
             {noHighlight === 'tooBig'
               ? $t('files.noHighlightTooBig', { bytes: sizeText })
               : $t('files.noHighlightUnknown')}

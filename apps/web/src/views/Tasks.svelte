@@ -869,16 +869,16 @@
         <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句
              「等待审核」是重复，使用者点名要去掉的就是它。 -->
         {#if info.noteId}
-          <span class="faint small">{$t(info.noteId)}</span>
+          <span class="faint fs-xs">{$t(info.noteId)}</span>
         {/if}
         <!-- ★ D45：返工过就标出来。它是这条回路**真的转过**的痕迹，扫列表时
              最该看见的就是"这个任务审了不止一轮"——否则"返工一次后通过"与
              "一次就通过"长得一模一样。 -->
         {#if info.reworked > 0}
-          <span class="faint small">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
+          <span class="faint fs-xs">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
         {/if}
-        <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
-        <span class="faint small" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
+        <span class="faint fs-xs">{agentName(issue.assignee?.id ?? null)}</span>
+        <span class="faint fs-xs" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
       </span>
     {/snippet}
     {#snippet action()}
@@ -950,18 +950,18 @@
                 </h4>
 
                 {#if items.length === 0}
-                  <p class="col-empty faint small">{$t('tasks.columnEmpty')}</p>
+                  <p class="col-empty faint fs-xs">{$t('tasks.columnEmpty')}</p>
                 {/if}
 
                 {#each items as { issue, info } (issue.id)}
                   <button type="button" class="card" onclick={() => selectFromBoard(issue.id)}>
                     <span class="card-title">{issue.title}</span>
                     <span class="card-meta">
-                      <span class="faint small">{agentName(issue.assignee?.id ?? null)}</span>
+                      <span class="faint fs-xs">{agentName(issue.assignee?.id ?? null)}</span>
                     </span>
                     <span class="card-meta">
-                      {#if info.noteId}<span class="faint small">{$t(info.noteId)}</span>{/if}
-                      <span class="faint small" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
+                      {#if info.noteId}<span class="faint fs-xs">{$t(info.noteId)}</span>{/if}
+                      <span class="faint fs-xs" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
                     </span>
                     {#if info.warningId}
                       <span class="card-warning">{$t(info.warningId, info.warningParams)}</span>
@@ -1066,7 +1066,7 @@
           -->
           <button
             type="button"
-            class="ghost"
+            class="btn btn--ghost"
             disabled={!canOptimizeSkill}
             title={canOptimizeSkill ? '' : $t('crystallize.taskGated')}
             onclick={() => goCrystallize(activeRun?.runId ?? '')}
@@ -1075,7 +1075,7 @@
           </button>
           <button
             type="button"
-            class="ghost danger"
+            class="btn btn--danger"
             data-task-delete
             onclick={() => void removeTask(selected.id)}
           >
@@ -1108,7 +1108,7 @@
       {:else}
         <p>
           {agentName(selectedStage.executeRun.reviewer.agentId)}
-          <span class="faint small">
+          <span class="faint fs-xs">
             {$t(
               selectedStage.executeRun.groupId
                 ? 'tasks.reviewerFromGroup'
@@ -1121,7 +1121,7 @@
   {/if}
 
   <section class="drawer-section">
-    <h3>{$t('tasks.runsHeading')} <span class="faint small">（{issueRuns.length}）</span></h3>
+    <h3>{$t('tasks.runsHeading')} <span class="faint fs-xs">（{issueRuns.length}）</span></h3>
 
     {#if issueRuns.length === 0}
       <div class="empty">
@@ -1142,8 +1142,8 @@
             >
             <!-- ★ 类型与时间必须显示：只给状态和 runId 的话，使用者**看不出
                  哪个先哪个后**——他只能凭感觉，于是会觉得"顺序不对"。 -->
-            <span class="small">{run.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</span>
-            <span class="mono faint small" title={new Date(run.queuedAt).toLocaleString()}>
+            <span class="fs-xs">{run.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</span>
+            <span class="mono faint fs-xs" title={new Date(run.queuedAt).toLocaleString()}>
               {formatRunStamp(run.queuedAt)}
             </span>
           </button>
@@ -1164,14 +1164,14 @@
     <section class="drawer-section run-section">
       <h3>
         {activeIsTerminal && !showRawLog ? $t('tasks.finalResult') : $t('tasks.rawLog')}
-        <span class="faint small mono"
+        <span class="faint fs-xs mono"
           >{$t('tasks.runIdLabel', { id: activeRun.runId.slice(-8) })}</span
         >
         {#if activeIsTerminal}
           <!-- 跑完之后默认给结论；原始流水仍然一条不少，按需翻 -->
           <button
             type="button"
-            class="ghost small"
+            class="btn btn--ghost btn--sm"
             style="margin-left:var(--sp-3)"
             onclick={() => (showRawLog = !showRawLog)}
           >
@@ -1195,7 +1195,7 @@
           -->
           <button
             type="button"
-            class="danger small"
+            class="btn btn--danger btn--sm"
             style="margin-left:var(--sp-3)"
             onclick={() => cancel(activeRun!.runId)}
           >
@@ -1265,12 +1265,12 @@
               -->
               <span class="badge {v.conclusion === 'pass' ? 'done' : v.conclusion === 'fail' ? 'failed' : 'blocked'}">
                 <code>{v.conclusion}</code>
-                <span class="faint small">{$t(`term.conclusion.${v.conclusion}` as WebTextId)}</span>
+                <span class="faint fs-xs">{$t(`term.conclusion.${v.conclusion}` as WebTextId)}</span>
               </span>
-              <span class="mono small faint" title={$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}
+              <span class="mono fs-xs faint" title={$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}
                 >{v.reasonCode}</span
               >
-              <span class="faint small">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
+              <span class="faint fs-xs">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
               <!--
                 ★ D46：这条判决**是谁做的**。
                 
@@ -1284,15 +1284,15 @@
               {#if v.source === 'human'}
                 <span class="badge done">{$t('tasks.humanVerdictBadge')}</span>
               {:else}
-                <span class="faint small"
+                <span class="faint fs-xs"
                   >{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span
                 >
               {/if}
             </div>
             <!-- 人工裁决的理由：它是**这句话**而不是一组 findings（D46） -->
             {#if v.source === 'human' && v.humanReason}
-              <p class="small">
-                <span class="faint small">{$t('tasks.humanVerdictReasonHeading')}</span>
+              <p class="fs-xs">
+                <span class="faint fs-xs">{$t('tasks.humanVerdictReasonHeading')}</span>
                 {v.humanReason}
               </p>
             {/if}
@@ -1321,9 +1321,9 @@
             -->
             {#each verdictActions.filter((a) => a.verdictId === v.id) as a (a.id)}
               <div class="action-line">
-                <div class="small">
+                <div class="fs-xs">
                   <code>{a.type}</code>
-                  <span class="faint small"
+                  <span class="faint fs-xs"
                     >{$t(`term.actionStatus.${a.status}` as WebTextId)}</span
                   >
                 </div>
@@ -1332,10 +1332,10 @@
                 {/if}
                 <!-- 脚本自己回的那句话："做了什么 / 为什么没做成" -->
                 {#if actionDetailOf(a)}
-                  <p class="small">{actionDetailOf(a)}</p>
+                  <p class="fs-xs">{actionDetailOf(a)}</p>
                 {/if}
                 {#if actionMetaOf(a).length > 0}
-                  <p class="faint small">
+                  <p class="faint fs-xs">
                     {#each actionMetaOf(a) as m, i (m)}
                       {i > 0 ? ' · ' : ''}{m}
                     {/each}
@@ -1344,8 +1344,8 @@
                 <!-- 它带着什么参数跑的（模型填的 open + 平台注入的 bound + 界面固定值）-->
                 {#if actionParamsOf(a).length > 0}
                   <details>
-                    <summary class="faint small">{$t('tasks.actionParamsSummary')}</summary>
-                    <ul class="plain small" style="margin:0">
+                    <summary class="faint fs-xs">{$t('tasks.actionParamsSummary')}</summary>
+                    <ul class="plain fs-xs" style="margin:0">
                       {#each actionParamsOf(a) as [k, val] (k)}
                         <li><code>{k}</code> = <code>{val}</code></li>
                       {/each}
@@ -1355,19 +1355,19 @@
               </div>
             {/each}
             {#if v.action}
-              <div class="small">{$t('tasks.suggestedAction')}<code>{v.action.type}</code></div>
+              <div class="fs-xs">{$t('tasks.suggestedAction')}<code>{v.action.type}</code></div>
             {/if}
             {#if v.escalateReason}
-              <div class="small warn">{$t('tasks.needsHuman', { reason: v.escalateReason ?? '' })}</div>
+              <div class="fs-xs warn">{$t('tasks.needsHuman', { reason: v.escalateReason ?? '' })}</div>
             {/if}
             {#if v.findings.length > 0}
-              <ul class="plain small" style="margin:0">
+              <ul class="plain fs-xs" style="margin:0">
                 {#each v.findings as f}
                   <li>[{f.severity}] {f.summary}</li>
                 {/each}
               </ul>
             {:else}
-              <div class="faint small">{$t('tasks.noFindings')}</div>
+              <div class="faint fs-xs">{$t('tasks.noFindings')}</div>
             {/if}
             </FoldSection>
           </article>
@@ -1435,7 +1435,7 @@
           {#if isAbandoned}
             <!-- 放弃过的任务只给一条出路：恢复。它已经出局了，不该再出现三个
                  能改流程的按钮——那会让人以为它还在流程里。 -->
-            <p class="faint small">{$t('tasks.abandonNote')}</p>
+            <p class="faint fs-xs">{$t('tasks.abandonNote')}</p>
             {#if canAbandon}
               <button
                 type="button"
@@ -1448,11 +1448,11 @@
             {/if}
           {:else}
             {#if humanDecided}
-              <p class="faint small">{$t('tasks.humanVerdictAlready')}</p>
+              <p class="faint fs-xs">{$t('tasks.humanVerdictAlready')}</p>
             {/if}
 
             <label class="human-reason">
-              <span class="small reason-label">{$t('tasks.decideReasonLabel')}</span>
+              <span class="fs-xs reason-label">{$t('tasks.decideReasonLabel')}</span>
               <textarea
                 bind:value={humanReason}
                 rows="3"
@@ -1496,7 +1496,7 @@
               {#if canAbandon}
                 <button
                   type="button"
-                  class="danger"
+                  class="btn btn--danger"
                   disabled={deciding !== null}
                   title={$t('tasks.decideAbandonHint')}
                   onclick={() => setAbandoned(true)}
@@ -1515,7 +1515,7 @@
                 一整行都是极短的小字。缺一则只出其一。
             -->
             {#if passBlockedNoteId || !feedbackReady}
-              <p class="faint small">
+              <p class="faint fs-xs">
                 {#if passBlockedNoteId}{$t(passBlockedNoteId)}{/if}{#if passBlockedNoteId && !feedbackReady}
                   <span class="faint"> · </span>
                 {/if}{#if !feedbackReady}{$t('tasks.needRunForFeedback')}{/if}
@@ -1952,7 +1952,7 @@
   .meta-grid dt { color: var(--text-faint); }
   .meta-grid dd { margin: 0; word-break: break-all; }
 
-  :global(button.ghost.active) {
+  :global(.btn--ghost.active) {
     background: var(--surface-2);
     color: var(--text);
   }

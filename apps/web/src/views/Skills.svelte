@@ -570,7 +570,7 @@
     <header class="main-panel-head">
       <button
         type="button"
-        class="ghost small panel-back"
+        class="btn btn--ghost btn--sm panel-back"
         onclick={closePanel}>{$t('skills.backToList')}</button
       >
       <h2>{$t('skills.install')}</h2>
@@ -634,7 +634,7 @@
           placeholder={$t('skills.sourcePlaceholder')}
           onkeydown={(e) => e.key === 'Enter' && submitPath()}
         />
-        <p class="faint small">
+        <p class="faint fs-xs">
           {$t('skills.pathHintBefore')}<strong>{$t('skills.pathHintStrong')}</strong>{$t('skills.pathHintMid')}<strong>{$t('skills.pathHintSupportStrong')}</strong>{$t('skills.pathHintAfter')}
         </p>
       </div>
@@ -683,8 +683,8 @@
                     >
                       <span class="chevron" aria-hidden="true">{openDirs[dir.path] ? '▾' : '▸'}</span>
                       <span class="cat-label">{dirToolLabel(dir.id)}</span>
-                      <span class="faint small cat-count">{dir.skills.length}</span>
-                      <span class="faint small dir-group-path" title={dir.path}>{dir.path}</span>
+                      <span class="faint fs-xs cat-count">{dir.skills.length}</span>
+                      <span class="faint fs-xs dir-group-path" title={dir.path}>{dir.path}</span>
                     </button>
                   </td>
                 </tr>
@@ -695,32 +695,32 @@
                         <code>{s.slug}</code>
                         <!-- 目录名派生的 name 常常与 slug 相同，重复一行没有信息量。 -->
                         {#if s.name && s.name !== s.slug}
-                          <div class="faint small">{s.name}</div>
+                          <div class="faint fs-xs">{s.name}</div>
                         {/if}
                       </td>
                       <!-- ★ 「来源」在这一列是**技能在目录里的相对位置**：目录本身已经
                            在组标题里了，逐条再写一遍那串路径只是重复。 -->
-                      <td class="faint small">
+                      <td class="faint fs-xs">
                         <span class="list-source" title={s.rel}>{s.rel}</span>
                       </td>
-                      <td class="faint small">
+                      <td class="faint fs-xs">
                         {#if s.description}
                           <div class="desc-clamp" title={s.description}>{s.description}</div>
                         {/if}
                       </td>
-                      <td class="faint small">
+                      <td class="faint fs-xs">
                         {#if s.installed}{$t('skills.installedNoVersion')}{:else}—{/if}
                       </td>
                       <td>
                         {#if s.installed}
                           <!-- 目录装进来的没有版本号，只能如实说「已安装」并禁用。 -->
-                          <button type="button" class="secondary small" disabled>
+                          <button type="button" class="btn btn--secondary btn--sm" disabled>
                             {$t('skills.dirInstalled')}
                           </button>
                         {:else}
                           <button
                             type="button"
-                            class="secondary small"
+                            class="btn btn--secondary btn--sm"
                             disabled={busy || installingDir === s.dir}
                             onclick={() => void installFromDir(dir, s)}
                           >
@@ -736,13 +736,13 @@
                        （"读不到就说读不到"是这一页的一贯原则）。 -->
                   <tr>
                     <td colspan="5">
-                      <div class="notice warn small">{$t('skills.dirReadError', { error: dir.error })}</div>
+                      <div class="notice warn fs-xs">{$t('skills.dirReadError', { error: dir.error })}</div>
                     </td>
                   </tr>
                 {:else}
                   {#if dir.skills.length === 0}
                     <tr>
-                      <td colspan="5"><p class="faint small" style="margin:0">{$t('skills.dirsNoSkill')}</p></td>
+                      <td colspan="5"><p class="faint fs-xs" style="margin:0">{$t('skills.dirsNoSkill')}</p></td>
                     </tr>
                   {/if}
                   {#if dir.skipped.length > 0}
@@ -751,7 +751,7 @@
                          而且它会让人去查权限、查扫描是不是坏了。 -->
                     <tr>
                       <td colspan="5">
-                        <div class="faint small dir-skip">
+                        <div class="faint fs-xs dir-skip">
                           {$t('skills.dirsSkipped', {
                             list: dir.skipped.map((k) => `${k.rel}（${k.reason}）`).join('、'),
                           })}
@@ -777,14 +777,14 @@
                  改成订阅值（`$remoteError`）之后三个状态才真的分开。
                  ⚠️ 机器检查：`tests/web-template-stores.test.ts` 会抓这类裸用。 -->
             {$t('skills.remoteUnavailable', { error: $remoteError })}
-            <p class="faint small" style="margin:var(--sp-2) 0 0">
+            <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">
               {$t('skills.remoteDownBefore')}<strong>{$t('skills.remoteDownStrong')}</strong>{$t('skills.remoteDownAfter')}
             </p>
           </div>
         {:else if !isLoggedIn()}
           <div class="notice warn">
             {$t('skills.notSignedIn')}
-            <p class="faint small" style="margin:var(--sp-2) 0 0">
+            <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">
               {$t('skills.notSignedInHint')}
             </p>
           </div>
@@ -794,7 +794,7 @@
           <!-- ★ 目录里是**精选推荐**（2026-10）：来源由维护者在远端核过，每条都
                带着**原始 GitHub 来源**（下面那一格），装的时候落库记录也指回上游。
                所以这一页签不是"谁都能往里投稿的目录"，是"平台挑过的几条"。 -->
-          <p class="faint small" style="margin:0 0 var(--sp-2)">{$t('skills.remotePickedNote')}</p>
+          <p class="faint fs-xs" style="margin:0 0 var(--sp-2)">{$t('skills.remotePickedNote')}</p>
           <Table
             columns={[
               { label: $t('skills.colSlug') },
@@ -813,7 +813,7 @@
                     <td>
                       <code>{s.slug}</code>
                       {#if s.name}
-                        <div class="faint small">{s.name}</div>
+                        <div class="faint fs-xs">{s.name}</div>
                       {/if}
                       <!-- ★ 「内容不完整」必须在**装之前**看得见（2026-10）：
                            维护者可以在清单里声明 exclude（仓库里混着营销素材/测试产物
@@ -822,7 +822,7 @@
                            全文在 title 里，行内只说个数。 -->
                       {#if s.excluded && s.excluded.length > 0}
                         <div
-                          class="warn small"
+                          class="warn fs-xs"
                           title={s.excluded.join('\n')}
                         >{$t('skills.remoteIncomplete', { count: s.excluded.length })}</div>
                       {/if}
@@ -834,16 +834,16 @@
                         <SourceRef value={s.sourceRef} />
                       {/if}
                     </td>
-                    <td class="faint small">{s.version ? `v${s.version}` : $t('common.noVersion')}</td>
-                    <td class="faint small">
+                    <td class="faint fs-xs">{s.version ? `v${s.version}` : $t('common.noVersion')}</td>
+                    <td class="faint fs-xs">
                       {s.summary}
                       <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说：装完才发现不能用，
                            比不推荐更糟（如 firecrawl 那一类要 API key）。 -->
                       {#if s.needs}
-                        <div class="warn small">{s.needs}</div>
+                        <div class="warn fs-xs">{s.needs}</div>
                       {/if}
                     </td>
-                    <td class="faint small">
+                    <td class="faint fs-xs">
                       {#if local}
                         {local.version
                           ? $t('skills.installedVersion', { version: local.version })
@@ -857,7 +857,7 @@
                            所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
                       <button
                         type="button"
-                        class={state.action === 'update' ? 'small' : 'secondary small'}
+                        class={state.action === 'update' ? 'btn btn--sm' : 'btn btn--secondary btn--sm'}
                         disabled={busy || state.disabled}
                         title={$t(state.hintId, state.hintParams)}
                         onclick={() => installFromCatalog(s.slug)}
@@ -924,7 +924,7 @@
                       >
                         <span class="chevron" aria-hidden="true">{openCats[group.id] ? '▾' : '▸'}</span>
                         <span class="cat-label">{catLabel(group.id)}</span>
-                        <span class="faint small cat-count">{group.entries.length}</span>
+                        <span class="faint fs-xs cat-count">{group.entries.length}</span>
                       </button>
                     </td>
                   </tr>
@@ -936,23 +936,23 @@
                         <td>
                           <code>{e.slug}</code>
                           {#if e.name}
-                            <div class="faint small">{e.name}</div>
+                            <div class="faint fs-xs">{e.name}</div>
                           {/if}
                         </td>
                         <td>
                           <!-- ★ 来源是**安装方法**本身（GitHub 链接或本地路径），原样显示：
                                使用者要能核对"我点的这条到底从哪儿装"。长链接单行省略，
                                全文在 title 里。 -->
-                          <span class="faint small list-source" title={e.source.value}>{e.source.value}</span>
+                          <span class="faint fs-xs list-source" title={e.source.value}>{e.source.value}</span>
                         </td>
-                        <td class="faint small">
+                        <td class="faint fs-xs">
                           {e.summary}
                           <!-- ⚠️ 装完还得自己配的东西必须**在装之前**说（如某个 API key）。 -->
                           {#if e.needs}
-                            <div class="warn small">{e.needs}</div>
+                            <div class="warn fs-xs">{e.needs}</div>
                           {/if}
                         </td>
-                        <td class="faint small">
+                        <td class="faint fs-xs">
                           {#if local}
                             {local.version
                               ? $t('skills.installedVersion', { version: local.version })
@@ -966,7 +966,7 @@
                                所以这里必须用 `$t` 渲染：切语言时这一列要跟着变。 -->
                           <button
                             type="button"
-                            class={state.action === 'install' ? 'secondary small' : 'small'}
+                            class={state.action === 'install' ? 'btn btn--secondary btn--sm' : 'btn btn--sm'}
                             disabled={busy || state.disabled}
                             title={$t(state.hintId, state.hintParams)}
                             onclick={() => installFromList(e)}
@@ -991,7 +991,7 @@
           {#if skillList.skipped.length > 0}
             <!-- ★ 明确**没**列出来的条目及原因：静默跳过是这类功能最容易让人困惑的
                  地方（"我清单里写了 12 条，怎么只有 11 条"）。 -->
-            <p class="warn small" style="margin-top:var(--sp-2)">
+            <p class="warn fs-xs" style="margin-top:var(--sp-2)">
               {$t('skills.listSkipped', {
                 list: skillList.skipped.map((s) => `${s.path}（${s.reason}）`).join('、'),
               })}
@@ -1006,19 +1006,19 @@
         <input type="checkbox" bind:checked={overwrite} />
         {$t('skills.overwriteLabel')}
       </label>
-      <p class="faint small">
+      <p class="faint fs-xs">
         {$t('skills.overwriteHint')}
       </p>
     </div>
 
     {#if tab === 'path'}
-      <p class="faint small" style="margin:0">{$t('skills.pathFootHint')}</p>
+      <p class="faint fs-xs" style="margin:0">{$t('skills.pathFootHint')}</p>
     {:else if tab === 'dirs'}
-      <p class="faint small" style="margin:0">{$t('skills.dirsFootHint')}</p>
+      <p class="faint fs-xs" style="margin:0">{$t('skills.dirsFootHint')}</p>
     {:else if tab === 'remote'}
-      <p class="faint small" style="margin:0">{$t('skills.remoteFootHint')}</p>
+      <p class="faint fs-xs" style="margin:0">{$t('skills.remoteFootHint')}</p>
     {:else}
-      <p class="faint small" style="margin:0">{$t('skills.listFootHint')}</p>
+      <p class="faint fs-xs" style="margin:0">{$t('skills.listFootHint')}</p>
     {/if}
 
     {#if errorMessage}
@@ -1027,7 +1027,7 @@
         <p style="margin:var(--sp-2) 0 0">{errorMessage}</p>
         <!-- 错误码认不出来时 `installErrorHintMessage()` 给的是 `null`（= 没有建议
              可说，词表里也没有一条空词条），所以这里什么都不显示，而不是显示半句。 -->
-        {#if errorHint}<p class="faint small" style="margin:var(--sp-2) 0 0">{renderInstallMessage(errorHint, (id, params) => $t(id, params))}</p>{/if}
+        {#if errorHint}<p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{renderInstallMessage(errorHint, (id, params) => $t(id, params))}</p>{/if}
       </div>
     {/if}
 
@@ -1043,19 +1043,19 @@
         <!-- ★ 装了什么、什么没装，都要列出来。只说"安装完成"会让使用者以为
              拿到了完整的技能，而实际可能只装了 SKILL.md。 -->
         {#if result.included.length > 0}
-          <p class="faint small" style="margin:var(--sp-2) 0 0">
+          <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">
             {$t('skills.includedCount', { count: result.included.length })}
             {#each result.included as f (f.path)}<code>{f.path}</code>{/each}
           </p>
         {/if}
         {#if result.ignored.length > 0}
-          <p class="faint small" style="margin:var(--sp-2) 0 0">
+          <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">
             {$t('skills.ignoredHeading')}
             {#each result.ignored as i (i.path)}<code>{i.path}</code>{$t('install.ignoredReason', { reason: i.reason })}{/each}
           </p>
         {/if}
         {#if result.sourceRef}
-          <p class="faint small" style="margin:var(--sp-2) 0 0">{$t('skills.source', { ref: result.sourceRef })}</p>
+          <p class="faint fs-xs" style="margin:var(--sp-2) 0 0">{$t('skills.source', { ref: result.sourceRef })}</p>
         {/if}
       </div>
     {/if}
@@ -1073,15 +1073,15 @@
           {busy ? $t('skills.installing') : $t('skills.installCheck')}
         </button>
       {:else if tab === 'dirs'}
-        <span class="faint small">
+        <span class="faint fs-xs">
           {$t('skills.dirsFootNote')}
         </span>
       {:else if tab === 'remote'}
-        <span class="faint small">
+        <span class="faint fs-xs">
           {$t('skills.remoteFootNote')}
         </span>
       {:else}
-        <span class="faint small">
+        <span class="faint fs-xs">
           {$t('skills.listFootNote')}
         </span>
       {/if}
@@ -1120,7 +1120,7 @@
           {#if i === 0 || !prev || prev.group !== entry.group}
             <tr class="group-head">
               <td colspan="7">
-                <span class="faint small group-label">
+                <span class="faint fs-xs group-label">
                   {entry.group === 'mine'
                     ? $t('crystallize.groupMine')
                     : $t('crystallize.groupInstalled')}
@@ -1148,13 +1148,13 @@
             <td>
               <!-- D69：名称与目录表 / remote 同一档（faint small）——slug 才是
                    主标识，名称是第二行 -->
-              <div class="faint small">{s.name}</div>
+              <div class="faint fs-xs">{s.name}</div>
               <!-- ★ 与工具页同一格式：名称下面跟一句说明（没有就不画）。
                    ⚠️ 说明可能很长（实测有 400+ 字符的），所以**最多两行**截断、
                    全文在 `title` 里——列表是用来扫的，一行被撑成十行就扫不动了。
                    完整内容在展开后的正文里。 -->
               {#if s.description}
-                <div class="faint small desc-clamp" title={s.description}>{s.description}</div>
+                <div class="faint fs-xs desc-clamp" title={s.description}>{s.description}</div>
               {/if}
             </td>
             <td>
@@ -1195,13 +1195,13 @@
                 <SourceRef value={s.sourceRef} />
               {/if}
             </td>
-            <td class="faint small">
+            <td class="faint fs-xs">
               {s.version ? `v${s.version}` : $t('common.noVersion')}
             </td>
-            <td class="faint small">
+            <td class="faint fs-xs">
               SKILL.md{#if fileCount > 0} +{fileCount}{/if}
             </td>
-            <td class="faint small" title={absoluteTime(s.updatedAt)}>{relativeTime(s.updatedAt, now)}</td>
+            <td class="faint fs-xs" title={absoluteTime(s.updatedAt)}>{relativeTime(s.updatedAt, now)}</td>
             <!-- ⚠️ 与工具页同一做法：flex 放在**内层 div** 上，不放 td 上 -->
             <td>
               <div class="row-actions">
@@ -1211,7 +1211,7 @@
                      回来"。以前它每次读列表都会被重扫回来，所以那时不给卸。 -->
                 <button
                   type="button"
-                  class="ghost small danger"
+                  class="btn btn--danger btn--sm"
                   disabled={removing === s.id}
                   title={$t('skills.uninstallTitle')}
                   onclick={() => void uninstall(s.id, s.slug)}
@@ -1238,7 +1238,7 @@
                   <details class="support">
                     <summary>{$t('skills.supportFiles', { count: fileCount })}</summary>
                     {#each Object.entries(s.files ?? {}) as [path, content] (path)}
-                      <p class="faint small" style="margin:var(--sp-2) 0 0"><code>{path}</code></p>
+                      <p class="faint fs-xs" style="margin:var(--sp-2) 0 0"><code>{path}</code></p>
                       <pre class="skill-body">{content}</pre>
                     {/each}
                   </details>

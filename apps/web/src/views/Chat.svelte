@@ -938,7 +938,7 @@
                    打算显示，只是没接上（`relativeTime` 同样是死导入）。
                    准确时间在 `title` 里（列表只需要量级）。 -->
               <span
-                class="conv-sub faint small"
+                class="conv-sub faint fs-xs"
                 title={conversation.lastTurnAt === null
                   ? $t('chat.neverUsed')
                   : absoluteTime(conversation.lastTurnAt)}
@@ -1004,11 +1004,11 @@
               }}
             />
             <button onclick={() => void saveTitle()}>{$t('chat.renameSave')}</button>
-            <button class="ghost" onclick={() => (renaming = false)}>{$t('chat.renameCancel')}</button>
+            <button class="btn btn--ghost" onclick={() => (renaming = false)}>{$t('chat.renameCancel')}</button>
           {:else}
             <h2>{activeConversation.title}</h2>
             <button
-              class="ghost"
+              class="btn btn--ghost"
               onclick={() => {
                 renameValue = activeConversation.title
                 renaming = true
@@ -1035,7 +1035,7 @@
             告诉你它为什么不在，而"关掉记忆"这件事本身是使用者的配置，不是故障。
           -->
           <button
-            class="ghost"
+            class="btn btn--ghost"
             data-chat-tidy
             disabled={!memEnabled || activeTurns.length === 0}
             title={!memEnabled
@@ -1051,14 +1051,14 @@
                它与任务页那一格读**同一个词条**（`crystallize.title` / `crystallize.optimize`
                各一处，但文案一致）：同一个功能在两处叫两个名字是这一族缺陷的老来源。 -->
           <button
-            class="ghost"
+            class="btn btn--ghost"
             disabled={!crystallizeEnabled}
             title={crystallizeEnabled ? '' : $t('chat.crystallizeDisabledHint')}
             onclick={() => goCrystallize(crystallizeRunId)}
           >
             {$t('crystallize.title')}
           </button>
-          <button class="danger" onclick={() => void remove($activeConversationId ?? '')}>
+          <button class="btn btn--danger" onclick={() => void remove($activeConversationId ?? '')}>
             {$t('chat.delete')}
           </button>
         </div>
@@ -1132,7 +1132,7 @@
           />
           <button
             type="button"
-            class="ghost"
+            class="btn btn--ghost"
             data-chat-workdir-browse
             onclick={() => (dirPickerOpen = true)}
           >{$t('dirs.browse')}</button>
@@ -1171,7 +1171,7 @@
                 {:else}
                   <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(memNotes[turn.id]!.ids.length) })}</span>
                 {/if}
-                <button type="button" class="btn-link" data-mem-undo onclick={() => void undoMemory(turn.id)}>
+                <button type="button" class="btn btn--link btn--quiet" data-mem-undo onclick={() => void undoMemory(turn.id)}>
                   {$t('chat.memoryUndo')}
                 </button>
               </p>
@@ -1186,9 +1186,9 @@
 
             {#if turn.runId !== null}
               {#if isTurnRunning(turn)}
-                <div class="who faint small">
+                <div class="who faint fs-xs">
                   {agentOfActive?.name ?? '—'} · {$t('chat.running')}
-                  <button class="ghost stop" onclick={() => void stop(turn.runId!)}>
+                  <button class="btn btn--ghost stop" onclick={() => void stop(turn.runId!)}>
                     {$t('chat.stop')}
                   </button>
                 </div>
@@ -1201,7 +1201,7 @@
                   }}
                 />
               {:else}
-                <div class="who faint small">
+                <div class="who faint fs-xs">
                   {agentOfActive?.name ?? '—'}
                   {#if turn.toolCount > 0}· {$t('chat.toolsUsed', { count: turn.toolCount })}{/if}
                   {#if turn.durationMs !== null}
@@ -1218,7 +1218,7 @@
                     {$t(`term.runStatus.${turn.status}` as WebTextId)}
                   </p>
                 {:else}
-                  <p class="faint small">{$t('chat.noOutput')}</p>
+                  <p class="faint fs-xs">{$t('chat.noOutput')}</p>
                 {/if}
               {/if}
             {/if}
@@ -1228,7 +1228,7 @@
           <p class="mem-note" data-mem-note-tidy>
             <span class="mem-note-k">{$t('chat.memorySaved')}</span>
             <span class="mem-note-t">{$t('chat.memorySavedMany', { n: String(tidyNote.count) })}</span>
-            <button type="button" class="btn-link" data-mem-undo-tidy onclick={() => void undoTidy()}>
+            <button type="button" class="btn btn--link btn--quiet" data-mem-undo-tidy onclick={() => void undoTidy()}>
               {$t('chat.memoryUndo')}
             </button>
           </p>
@@ -1236,9 +1236,9 @@
 
         {#if pendingText !== ''}
           <article class="turn">
-            <div class="who faint small">{$t('chat.you')}</div>
+            <div class="who faint fs-xs">{$t('chat.you')}</div>
             <ChatBubble role="user" pending text={pendingText} />
-            <p class="faint small">{$t('chat.sending')}</p>
+            <p class="faint fs-xs">{$t('chat.sending')}</p>
           </article>
         {/if}
         {/if}
@@ -1260,11 +1260,11 @@
         >
           {#snippet actions()}
             {#if filesOpen && filesState === 'ready'}
-              <button type="button" class="ghost" onclick={() => (filesTick += 1)}>
+              <button type="button" class="btn btn--ghost" onclick={() => (filesTick += 1)}>
                 {$t('files.refresh')}
               </button>
               {#if runningTurn !== null}
-                <span class="faint small">{$t('chat.filesRunningHint')}</span>
+                <span class="faint fs-xs">{$t('chat.filesRunningHint')}</span>
               {/if}
             {/if}
       {/snippet}
@@ -1321,7 +1321,7 @@
           <span class="mem-chip-t" data-voice-autosend-text>「{pendingVoiceSend.text}」</span>
           <button
             type="button"
-            class="ghost small"
+            class="btn btn--ghost btn--sm"
             data-voice-autosend-undo
             onclick={undoPendingVoiceSend}>{$t('chat.voiceAutoSendUndo')}</button
           >
@@ -1333,12 +1333,12 @@
           <span class="mem-chip-t" data-voice-rule-pair
             >「{ruleAsk.from}」→「{ruleAsk.to}」</span
           >
-          <button type="button" class="ghost small" data-voice-rule-save onclick={() => void rememberRule()}
+          <button type="button" class="btn btn--ghost btn--sm" data-voice-rule-save onclick={() => void rememberRule()}
             >{$t('chat.voiceRuleSave')}</button
           >
           <button
             type="button"
-            class="ghost small"
+            class="btn btn--ghost btn--sm"
             data-voice-rule-skip
             onclick={() => (ruleAsk = null)}>{$t('chat.voiceRuleSkip')}</button
           >
@@ -1350,7 +1350,7 @@
           <span class="mem-chip-t" data-mem-chip-text>「{memCandidate.text}」</span>
           <button
             type="button"
-            class="ghost small"
+            class="btn btn--ghost btn--sm"
             data-mem-chip-edit
             title={$t('chat.memoryChipEditTitle')}
             onclick={() => {
@@ -1361,7 +1361,7 @@
           >
           <button
             type="button"
-            class="ghost small"
+            class="btn btn--ghost btn--sm"
             data-mem-chip-skip
             onclick={() => (memSkip = memCandidate.text)}>{$t('chat.memoryChipSkip')}</button
           >
@@ -1458,17 +1458,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .btn-link {
-    font: inherit;
-    font-size: var(--fs-xs);
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--text-faint);
-    cursor: pointer;
-    text-decoration: underline dotted;
-  }
-
   /* 记忆 chip（分批第 240 批）：贴在输入条上方，一眼看出"这一句会被记住" */
   .mem-chip {
     display: flex;
@@ -1564,7 +1553,7 @@
      顶（实测标题 top 75 vs 任务/智能体的 68——"Title 高度不一样"的第二个出处）。
      压到与标题同高（竖 padding 归零、input 字号对齐 fs-lg），行高=标题高，标题
      回到栏头顶部 16px 那一档。 */
-  .chat-head-main .ghost {
+  .chat-head-main .btn--ghost {
     padding-top: 0;
     padding-bottom: 0;
   }
