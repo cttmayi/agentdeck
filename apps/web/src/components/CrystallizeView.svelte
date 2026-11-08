@@ -163,6 +163,14 @@
   /** 起草 run 的终态（completed/failed/cancelled）——徽标与失败态用。 */
   let draftStatus: string | null = null
   let draftFailedReason = ''
+  /**
+   * 失败的具体原因文字（`Run.failureMessage`）。
+   *
+   * ★ 与原因码分开存：码回答"哪一类"，这一条回答"到底发生了什么"。
+   *   只显示码不显示字（老版本就是这样），Windows 上那种"CLI 结尾退出码
+   *   非 0 但过程正常"的失败就只剩一个 `infra_error`，真凶永远看不见。
+   */
+  let draftFailedMessage = ''
   let materialStats: { turns: number; toolCalls: number } | null = null
   /** 已处理过终态（防 RunLog 重复触发 / 已手动处理过）。 */
   let handledTerminal = false
@@ -607,6 +615,7 @@
     draftRunId = ''
     draftStatus = null
     draftFailedReason = ''
+    draftFailedMessage = ''
     materialStats = null
     handledTerminal = false
     attached = false
@@ -890,6 +899,7 @@
       materialStats = res.materialStats
       draftStatus = null
       draftFailedReason = ''
+    draftFailedMessage = ''
       handledTerminal = false
       step = 'drafting'
       // 新起草一律从「产出」开始：跑起来的时候实时输出是唯一的信息（依据是"回头再看"的）
@@ -916,6 +926,7 @@
     draftRunId = ''
     draftStatus = null
     draftFailedReason = ''
+    draftFailedMessage = ''
     handledTerminal = false
     error = ''
   }
@@ -970,6 +981,7 @@
       void loadDraftTask()
       draftStatus = null
       draftFailedReason = ''
+    draftFailedMessage = ''
       handledTerminal = false
       step = 'drafting'
       composerText = ''
@@ -983,10 +995,15 @@
 
   async function fetchDraftFailure(id: string): Promise<void> {
     try {
-      const run = await api<{ failureReason: string | null }>(`/api/runs/${id}`)
+      const run = await api<{ failureReason: string | null; failureMessage: string | null }>(
+        `/api/runs/${id}`,
+      )
       draftFailedReason = run.failureReason ?? ''
+      // ★ 老 run 没有 `failureMessage` ⇒ 显示为空（不能拿"原因码"顶替"原因文字"）。
+      draftFailedMessage = run.failureMessage ?? ''
     } catch {
       draftFailedReason = ''
+      draftFailedMessage = ''
     }
   }
 
@@ -1319,6 +1336,7 @@
       void loadDraftTask()
       draftStatus = null
       draftFailedReason = ''
+    draftFailedMessage = ''
       handledTerminal = false
       editor.reset()
       material = null
@@ -1490,7 +1508,10 @@
         </div>
       {:else if draftStatus === 'failed' || draftStatus === 'cancelled'}
         {#if draftFailedReason !== ''}
-          <p class="draft-turn-reason">{draftFailedReason}</p>
+          <p class="draft-turn-reason">
+            {draftFailedReason}
+            {#if draftFailedMessage !== ''} — {draftFailedMessage}{/if}
+          </p>
         {/if}
         <div class="row-end msg-actions" data-msg-actions>
           <button class="btn btn--ghost btn--sm" onclick={retryDraft}>{$t('crystallize.retryDraft')}</button>

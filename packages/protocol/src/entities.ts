@@ -1235,6 +1235,17 @@ export const Run = z.object({
   attempt: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
   failureReason: RunFailureReason.nullable(),
+  /**
+   * 失败时的**具体原因文字**（`RunFailure.message`）。
+   *
+   * ★ 与 `failureReason` 一起写、一起读：原因码回答"哪一类"（infra_error /
+   * agent_error / …），这一条回答"到底发生了什么"（CLI 的原话、退出码、
+   * stderr 尾部）。只有码没有字，界面就只剩「环境坏了」四个字，而真凶
+   * （比如 Windows 上 codex 结尾退出码非 0 的具体报错）永远看不到。
+   *
+   * 老记录没有这个字段 ⇒ `optional()`（缺字段不是非法，是"还没记过"）。
+   */
+  failureMessage: z.string().nullable().optional(),
   usage: TokenUsage.nullable(),
   queuedAt: EpochMs,
   dispatchedAt: EpochMs.nullable(),

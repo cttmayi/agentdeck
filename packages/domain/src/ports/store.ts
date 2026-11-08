@@ -512,6 +512,8 @@ export interface RunPatch {
   waitReason?: string | null
   sessionId?: string | null
   failureReason?: Run['failureReason']
+  /** 失败原因的具体文字——与 `failureReason` 一起落库（只留码不留字，原因就永远找不回来）。 */
+  failureMessage?: Run['failureMessage']
   usage?: Run['usage']
   dispatchedAt?: number | null
   startedAt?: number | null

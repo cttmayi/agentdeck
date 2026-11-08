@@ -10018,6 +10018,9 @@ async function injectedSkillsOf(
           queuedAt: run.queuedAt,
           finishedAt: run.finishedAt,
           failureReason: run.failureReason,
+          // ★ 原因文字和原因码**一起给**：码回答"哪一类"，字回答"到底发生了什么"。
+          //   只给码的话，前端渲染时还得为"没给字"再兜一层，而字本来就在记录里。
+          failureMessage: run.failureMessage ?? null,
           chainDepth: run.chainDepth,
           /**
            * ★ 这条 run **有没有审核者**、是谁（见 `Run.reviewerAgentId`）。
@@ -10509,7 +10512,12 @@ async function injectedSkillsOf(
         status: run.status,
         result: null,
         error: run.failureReason
-          ? { reason: run.failureReason, message: '这条执行已经结束（终态由运行记录给出）' }
+          ? {
+              reason: run.failureReason,
+              // ★ 用**落库的真实原因**，而不是一句通用文案：老记录没有
+              //   `failureMessage`（还没有这个字段）才回落到这句兜底。
+              message: run.failureMessage ?? '这条执行已经结束（终态由运行记录给出）',
+            }
           : null,
       })
       res.end()

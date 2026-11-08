@@ -2158,6 +2158,10 @@ export class RunExecutor {
           ...(usage ? { usage } : {}),
           ...(sessionId ? { sessionId } : {}),
           ...(error ? { failureReason: error.reason } : {}),
+          // ★ 具体原因必须和原因码一起落库：只写 `failureReason` 的话，
+          //   `RunFailure.message`（CLI 的原话、退出码、stderr 尾部）在
+          //   `#finish` 这一层被丢掉——界面只剩「环境坏了」，真凶永远看不见。
+          ...(error ? { failureMessage: error.message } : {}),
         })
       } catch (err) {
         this.#deps.onWarn?.(`run ${runId} 终态写入失败：${String(err)}`)

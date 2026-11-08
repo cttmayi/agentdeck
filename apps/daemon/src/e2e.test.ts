@@ -576,9 +576,18 @@ describe('端到端：失败路径', () => {
       const run = (await (await fetch(`${d.url}/api/runs/${runId}`)).json()) as {
         status: string
         failureReason: string | null
+        failureMessage: string | null
       }
       assert.equal(run.status, 'failed')
       assert.notEqual(run.failureReason, null, '失败必须带机器可读的原因码')
+      // ★ 原因码必须和**具体原因文字**一起落库：只留码不留字，界面就只能显示
+      //   「infra_error」，而"CLI 为什么结尾退出非 0"（原话 / 退出码 / stderr 尾部）
+      //   永远找不到——这正是 Windows 上沉淀失败查不到原因的那次事故。
+      assert.equal(
+        run.failureMessage,
+        '假装失败了',
+        '失败的具体原因（RunFailure.message）必须和原因码一起落库',
+      )
 
       // 失败路径与成功路径**同一条规矩**（2026-09 起）：副本文件不写（日志已含
       // 第一句话全文），而使用者的文件一个字都不碰（另有一组用例钉着，见下面）。
@@ -760,6 +769,62 @@ describe('端到端：SSE 终态补发', () => {
       )
     } finally {
       release()
+      await d.close()
+      await cleanup(work)
+      await cleanup(dataDir)
+    }
+  })
+
+  test('★ 失败 run 晚订阅：补发的终态带**真实原因**（不是通用文案）', async () => {
+    const dataDir = await makeTempDir('e2e-sse-fail-data')
+    const work = await makeTempDir('e2e-sse-fail-work')
+    const failing = new FakeBackend({ fail: true })
+    const d = await startDaemon({
+      dataDir,
+      port: 0,
+      fsync: false,
+      backend: failing,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+
+    try {
+      const runId = ulid() as RunId
+      await fetch(`${d.url}/api/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId,
+          kind: 'execute',
+          agentRef: { id: 'a', name: 'A', instructions: '' },
+          skills: [],
+          subject: { type: 'issue', id: 'i' },
+          prompt: '跑完之后再来看日志',
+          workDir: work,
+          limits: { maxTurns: null, timeoutMs: null },
+        }),
+      })
+
+      // 先让它跑完（失败）
+      const first = await readUntilTerminal(`${d.url}/api/runs/${runId}/events`)
+      assert.equal(first.terminal !== null, true, '第一条订阅应该能拿到终态')
+
+      // 再**新开**一条订阅，模拟"刷新页面"——补发的终态必须带上**落库的真实原因**。
+      // ★ 老版本这里只有一句通用文案「这条执行已经结束（终态由运行记录给出）」：
+      //   原因码落库了、原因文字没落库，于是晚订阅的页面永远看不到
+      //   "CLI 为什么失败"，只能看到一个干巴巴的 `infra_error`。
+      const { events, ended } = await readStreamToEnd(`${d.url}/api/runs/${runId}/events?since=-1`)
+      assert.equal(ended, true, '终态之后服务端必须主动 end()')
+      const terminal = events.find((e) => e.t === 'terminal') as
+        | { status: string; error: { message: string } | null }
+        | undefined
+      assert.ok(terminal !== null && terminal !== undefined, '晚订阅必须补发 terminal')
+      assert.equal(
+        terminal.error?.message,
+        '假装失败了',
+        '补发的终态必须带落库的真实失败原因，而不是通用文案',
+      )
+    } finally {
       await d.close()
       await cleanup(work)
       await cleanup(dataDir)
