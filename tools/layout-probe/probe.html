@@ -446,7 +446,9 @@
         const entered = await until(() => layout()?.className.includes('with-detail'))
         if (!entered) errors.push('点了第一条 agent 之后 .split-layout 没有带上 with-detail')
         facts['agents.afterClickClass'] = need('点击后 class', () => layout()?.className)
-        facts['agents.tracks'] = need('两栏宽度', () => cs(layout()).gridTemplateColumns.split(' '))
+        facts['agents.tracks'] = need('网格列数', () => cs(layout()).gridTemplateColumns.split(' '))
+        // 2026-11：列表宽度可拖——把手是动作**插进网格**的（不是 CSS 画的），在页面上就得量得到
+        facts['agents.listGripPresent'] = !!d().querySelector('.split-layout .split-grip')
         // ⚠️ 选中态挂在 `.agent-row`（那一行才是卡片：边框要包住右侧的开关），
         //    所以这里按**行**取，再确认它里面确实是刚点的那张卡
         facts['agents.activeCardClass'] = need('选中态', () =>
@@ -1658,6 +1660,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           !!d().querySelector('.split-layout .list-pane') &&
           !!d().querySelector('.split-layout .detail-pane'),
         )
+        facts['tasks.listGripPresent'] = !!d().querySelector('.split-layout .split-grip')
         facts['tasks.mainOverflowY'] = need('任务页 main overflow-y', () => cs(main()).overflowY)
         // 使用者点名要去掉的那句「等待审核」：整份渲染结果里一次都不该出现。
         // 任何视图里重新长出这句话，这里就会红。
@@ -3108,6 +3111,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           await until(() => d().querySelectorAll('.list-row-main').length > 0, 60)
 
           facts['entry.智能体组.actual'] = d().querySelectorAll('.list-row-main').length
+          // 2026-11：列表宽度可拖——把手在页面上就得量得到（动作插进网格的）
+          facts['groups.listGripPresent'] = !!d().querySelector('.split-layout .split-grip')
           await wait(400)
           const grpRefresh = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
             (b.textContent ?? '').includes('刷新'),
@@ -5788,6 +5793,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
           const cyOk = await cyEnter(cyDraft)
           facts['crystal.attached'] = cyOk
+          // 2026-11：列表宽度可拖——沉淀页的把手也在（动作插进网格的）
+          facts['crystal.listGripPresent'] = !!d().querySelector('.split-layout .split-grip')
 
           // ★★ 「预览」那一段必须**不在**了（2026-10-21 使用者："不需要「预览」"）。
           //    判据两条一起用：折叠段里没有叫"预览"的，且页面上没有 `.preview` 元素——
@@ -8405,6 +8412,58 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return true
         }
         const chatOpenFixtureConversation = chatEnsureFixtureConversation
+
+        /**
+         * ★ 2026-11（使用者：每个列表的宽度要能拖动）：列表与详情之间有一条拖动把手
+         *   （`.split-grip`），拖一下列表**真的变宽**。探针拖完**拖回原位**再清掉存档——
+         *   夹具的宽度要稳定：不能拖完就留着（下一条、下一趟都按默认宽度量）。
+         *   ⚠️ 必须放在 `chatOpenFixtureConversation` 定义**之后**：它是个 `const`，
+         *     探针脚本是顺序执行的，放在前面会在 TDZ 里炸（第一次就是这么红的）。
+         */
+        facts['chat.listGripResizes'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          const split = d().querySelector('.split-layout')
+          const grip = d().querySelector('.split-grip')
+          const list = d().querySelector('.split-layout > .list-pane')
+          if (!split || !grip || !list) {
+            errors.push('聊天页找不到列表拖动把手（.split-grip）')
+            return false
+          }
+          const widthOf = () => Math.round(list.getBoundingClientRect().width)
+          const before = widthOf()
+          const g = grip.getBoundingClientRect()
+          const cx = g.left + g.width / 2
+          const cy = g.top + g.height / 2
+          const fire = (target, type, x) =>
+            target.dispatchEvent(
+              new PointerEvent(type, { bubbles: true, clientX: x, clientY: cy, pointerId: 1, pointerType: 'mouse' }),
+            )
+          fire(grip, 'pointerdown', cx)
+          fire(f.contentWindow, 'pointermove', cx + 120)
+          fire(f.contentWindow, 'pointerup', cx + 120)
+          await wait(50)
+          const after = widthOf()
+          // 拖回原位 + 清掉存档：探针夹具的宽度要稳定
+          fire(grip, 'pointerdown', cx + 120)
+          fire(f.contentWindow, 'pointermove', cx)
+          fire(f.contentWindow, 'pointerup', cx)
+          try {
+            f.contentWindow.localStorage.removeItem('agentdeck.listW.chat')
+          } catch {
+            // 清不掉也无所谓，下一趟按默认量
+          }
+          await wait(50)
+          const restored = widthOf()
+          if (after - before < 60) {
+            errors.push(`拖了 120px 列表只变宽了 ${after - before}px（把手没生效？）`)
+            return false
+          }
+          if (Math.abs(restored - before) > 8) {
+            errors.push(`拖回原位后宽度没复原（${restored} vs ${before}）`)
+            return false
+          }
+          return true
+        })()
 
         facts['chat.filesPanelPresent'] = await (async () => {
           if (!(await chatOpenFixtureConversation())) return false

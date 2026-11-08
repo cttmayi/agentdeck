@@ -32,6 +32,7 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { showToast } from '../lib/view.ts'
+  import { listGrip } from '../lib/list-grip.ts'
   import ListPane from '../components/ListPane.svelte'
   import ListRow from '../components/ListRow.svelte'
   import MainArea from '../components/MainArea.svelte'
@@ -282,6 +283,9 @@
   class="split-layout with-detail"
   class:with-artifact={$crystallize !== null}
   style="--artifact-w:{artifactW}px"
+  data-list-key="crystallize"
+  data-list-label={$t('shell.resizeList')}
+  use:listGrip
 >
   <!-- ══════════════════ 左栏：沉淀任务列表 ══════════════════ -->
   <ListPane

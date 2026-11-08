@@ -728,14 +728,38 @@ hr {
 .split-layout {
   height: 100%;
   display: grid;
-  /* 清单那一栏固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
-     固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。 */
-  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+  /* 清单那一栏默认固定一个阅读宽度（跟着它的表格内容走），详情拿走剩下的。
+     固定而不是按比例：按比例时窗口一变宽，列表里那几列就被拉得很散。
+     ★ 2026-11：列表宽度**可拖**——`--list-w` 由把手写入（localStorage 存档，
+     见 `apps/web/src/lib/list-grip.ts`），没拖过就是下面的默认。把手占第 2 列
+     （`--grip-w`），详情从第 3 列开始。 */
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
 }
 
 /* 看板是"扫"的视图：三列挤在半个屏幕里没法看，所以它占满整宽、不带详情栏 */
 .split-layout.board {
   grid-template-columns: minmax(0, 1fr);
+}
+/* 看板没有"列表 | 详情"两栏，把手不显示（不然它会在单列网格里变成一整行） */
+.split-layout.board .split-grip {
+  display: none;
+}
+
+/* 拖动把手：列表与详情之间那一格。默认是一道透明窄缝（光标 col-resize 是唯一的暗示），
+   悬停 / 拖动时加深——跟沉淀页产物栏那个把手同一套观感。 */
+.split-grip {
+  cursor: col-resize;
+  /* 拖动时别让浏览器把 pointermove 抢走（触屏上尤其，否则一拖就变成滚动/选中） */
+  touch-action: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.split-grip:hover,
+.split-grip.dragging {
+  background: var(--line-strong);
 }
 
 /**
@@ -755,12 +779,12 @@ hr {
    编辑区是一块浮层——改字的时候把中间的结论与时间线整片盖住。74rem 起让它成为真列：
    列表 20–26rem + 详情（≥ 30rem）+ 产物 24–30rem 还放得下；再窄就退回抽屉。 */
 .split-layout.with-artifact {
-  grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+  grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr);
 }
 
 @media (min-width: 74rem) {
   .split-layout.with-artifact {
-    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr) var(--artifact-w, 28rem);
+    grid-template-columns: var(--list-w, minmax(20rem, 26rem)) var(--grip-w, 0.375rem) minmax(0, 1fr) var(--artifact-w, 28rem);
   }
 }
 
@@ -1113,8 +1137,10 @@ hr {
   .split-layout {
     grid-template-columns: minmax(0, 1fr);
   }
-
-
+  /* 窄屏退化成单栏（列表被详情盖掉）——"两栏之间"不存在，把手不显示 */
+  .split-layout .split-grip {
+    display: none;
+  }
 
   .split-layout.with-detail .list-pane {
     display: none;

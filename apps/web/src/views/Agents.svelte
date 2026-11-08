@@ -19,6 +19,7 @@
   import type { Agent } from '../lib/api.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { t } from '../lib/i18n.ts'
+  import { listGrip } from '../lib/list-grip.ts'
 
   /**
    * 智能体视图 = agent 配置 + runtime 状态。
@@ -239,7 +240,13 @@
   保留自己的导语（它们没有别的地方说那一句）；这一页删。
 -->
 
-<div class="split-layout" class:with-detail={creating || selected !== null}>
+<div
+  class="split-layout"
+  class:with-detail={creating || selected !== null}
+  data-list-key="agents"
+  data-list-label={$t('shell.resizeList')}
+  use:listGrip
+>
   <!-- ══════════════════ 左栏：智能体清单 + Runtime ══════════════════ -->
   <!--
     ⚠️ 左栏从"没有栏头"（2026-09）到 D62 加回一条与任务/智能体同款的

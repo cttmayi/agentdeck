@@ -22,6 +22,7 @@
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { t, tx } from '../lib/i18n.ts'
+  import { listGrip } from '../lib/list-grip.ts'
 
   /**
    * 智能体组视图（D70 增量添加；第二轮起支持工作流模式 + 私有成员）。
@@ -380,7 +381,13 @@
   onDestroy(() => clearPageActions('groups'))
 </script>
 
-<div class="split-layout" class:with-detail={selected !== null || creating}>
+<div
+  class="split-layout"
+  class:with-detail={selected !== null || creating}
+  data-list-key="groups"
+  data-list-label={$t('shell.resizeList')}
+  use:listGrip
+>
   <!-- ══════════════════ 左栏：组清单 ══════════════════ -->
   <ListPane
     countLabel={$t('groups.listCount', { count: visibleGroups.length })}

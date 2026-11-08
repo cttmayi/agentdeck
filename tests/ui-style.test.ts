@@ -153,9 +153,11 @@ describe('界面风格护栏（规则见 docs/design/ui-style.md）', () => {
     }
     /**
      * 运行期由 inline style 注入的（不是令牌，是"这一处算出来的数"）：
-     *   `--level`（麦克风电平）、`--artifact-w`（右栏宽度）、`--create-pad-x`（栅格留白）
+     *   `--level`（麦克风电平）、`--artifact-w`（右栏宽度）、`--create-pad-x`（栅格留白）、
+     *   `--list-w` / `--grip-w`（列表宽度拖动把手，2026-11，由 `apps/web/src/lib/list-grip.ts`
+     *   运行时写进网格；`--grip-w` 的默认值在 fallback 里，声明留给把手自己）
      */
-    const injected = new Set(['--level', '--artifact-w', '--create-pad-x'])
+    const injected = new Set(['--level', '--artifact-w', '--create-pad-x', '--list-w', '--grip-w'])
     const bad: string[] = []
     for (const [file, text] of files) {
       text.split('\n').forEach((line, i) => {

@@ -381,10 +381,13 @@ const CHECKS = [
   {
     view: '智能体',
     key: 'agents.tracks',
-    label: '两栏：清单 26rem(416px) + 详情占剩余',
-    ok: (v) => Array.isArray(v) && v.length === 2 && near(parseFloat(v[0]), 416) && parseFloat(v[1]) > parseFloat(v[0]),
+    label:
+      '三列：清单 26rem(416px) + 拖动把手 + 详情占剩余（2026-11 列表宽度可拖，网格多了一列把手）',
+    ok: (v) =>
+      Array.isArray(v) && v.length === 3 && near(parseFloat(v[0]), 416) && near(parseFloat(v[1]), 6) && parseFloat(v[2]) > parseFloat(v[0]),
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
+  { view: '智能体', key: 'agents.listGripPresent', label: '列表拖动把手在页面上（2026-11）', ok: (v) => v === true },
   { view: '智能体', key: 'agents.activeCardClass', label: '选中的卡片有 active 态', ok: (v) => String(v).includes('active') },
   { view: '智能体', key: 'agents.detailRendered', label: '右栏真的渲染出了 agent 详情', ok: (v) => v === true },
   { view: '智能体', key: 'agents.wideListDisplay', label: '宽屏左栏可见', ok: (v) => v === 'flex' },
@@ -1143,6 +1146,7 @@ const CHECKS = [
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   { view: '任务', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
+  { view: '任务', key: 'tasks.listGripPresent', label: '列表拖动把手在页面上（2026-11）', ok: (v) => v === true },
   {
     view: '任务',
     key: 'tasks.mainOverflowY',
@@ -1654,6 +1658,13 @@ const CHECKS = [
     view: '聊天',
     key: 'chat.listNarrowerThanDetail',
     label: '左栏比右栏窄（对话列表是索引，消息流是正文）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.listGripResizes',
+    label:
+      '★★ 列表与详情之间有拖动把手，拖一下列表真的变宽（2026-11；探针拖完复原，夹具宽度稳定）',
     ok: (v) => v === true,
   },
   {
@@ -4259,6 +4270,12 @@ const CHECKS = [
   },
   {
     view: '沉淀',
+    key: 'crystal.listGripPresent',
+    label: '沉淀页的列表拖动把手在页面上（2026-11）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '沉淀',
     key: 'crystal.belowPaneBlocks',
     label:
       '★★★ 主区下面**不再有任何参照信息**（改前：素材折在 y≈842、起草 run 在 y≈1002——纪律"参照信息不抢要动手的位置"没变，实现从"摞在下面"改成"切过去看"）',
@@ -4564,12 +4581,12 @@ const CHECKS = [
     key: 'crystal.artifactPaneOffGrid',
     // ★ 分批第 155 批：语义**翻过来**了。右栏现在装的是编辑器（§12.53 选项 2），抽屉形态下
     //   改字会把中间的结论与时间线整片盖住；断点因此从 96rem 降到 74rem ⇒ 1280 是**真三列**。
-    //   判据仍是同一条纪律（"产物栏不许把详情挤到横向溢出"），只是现在用"三列且详情 ≥ 30rem"
-    //   来表达：见 `crystal.artifactGridCols === 3`。
+    //   判据仍是同一条纪律（"产物栏不许把详情挤到横向溢出"），只是现在用"四列且详情 ≥ 30rem"
+    //   来表达：见 `crystal.artifactGridCols === 4`（2026-11 列表宽度可拖，网格又多了把手一列）。
     label:
       '★★★ 1280 视口下产物栏是**真第三列**（断点 74rem；右栏里是编辑器，抽屉会盖住中间的时间线）——' +
-      '三列并且详情栏仍有 ≥ 30rem 的宽度',
-    ok: (v, f) => v === false && f['crystal.artifactGridCols'] === 3,
+      '四列并且详情栏仍有 ≥ 30rem 的宽度',
+    ok: (v, f) => v === false && f['crystal.artifactGridCols'] === 4,
     show: (v, f) => `离屏 ${String(v)}　网格 ${f['crystal.artifactGridCols']} 列`,
   },
   {
@@ -4705,6 +4722,12 @@ const CHECKS = [
     label: '★★ 进「智能体组」组之后**确实到了那一屏**（列表行数 > 0）',
     ok: (v) => typeof v === 'number' && v > 0,
     show: (v) => `${v} 行`,
+  },
+  {
+    view: '任务',
+    key: 'groups.listGripPresent',
+    label: '智能体组页的列表拖动把手在页面上（2026-11）',
+    ok: (v) => v === true,
   },
   {
     view: '任务',

@@ -41,6 +41,8 @@ export const shellText = {
   // 2026-11：侧栏减半，提示语精简——"执行者的参考资料"只剩"参考资料"。
   'shell.navSkillsHint': { zh: '参考资料', en: 'Skill packs' },
 
+  // 2026-11（使用者：每个列表的宽度要能拖动）：列表栏拖动把手的无障碍标签。
+  'shell.resizeList': { zh: '拖动调整列表宽度', en: 'Drag to resize list' },
 
   'shell.envOk': { zh: '运行环境正常', en: 'Environment OK' },
   'shell.envNoCli': { zh: '未检测到 agent CLI', en: 'No agent CLI detected' },

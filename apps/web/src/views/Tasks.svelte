@@ -15,6 +15,7 @@
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { listGrip } from '../lib/list-grip.ts'
     import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { leaveCreate } from '../lib/leave-create.ts'
@@ -899,6 +900,9 @@
   class="split-layout"
   class:board={mode === 'board'}
   class:with-detail={mode === 'list' && (selected !== null || $creating)}
+  data-list-key="tasks"
+  data-list-label={$t('shell.resizeList')}
+  use:listGrip
 >
   <!-- ══════════════════ 中栏：清单 / 看板 ══════════════════ -->
   {#if mode === 'board'}
