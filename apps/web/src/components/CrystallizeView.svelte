@@ -2311,7 +2311,7 @@
   /* ── 变更集 diff（P1）：行号 gutter + 符号 + 文本，三色只区分增删 ── */
   .num-tag {
     font-size: var(--fs-2xs);
-    padding: 0 4px;
+    padding: 0 var(--sp-1);
     border-radius: var(--radius-sm);
     white-space: nowrap;
   }
@@ -2344,7 +2344,7 @@
     display: grid;
     grid-template-columns: 3rem 3rem 1rem minmax(0, 1fr);
     gap: 0.25rem;
-    padding: 0 0.5rem;
+    padding: 0 var(--sp-2);
     white-space: pre-wrap;
     word-break: break-word;
   }

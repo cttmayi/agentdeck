@@ -777,7 +777,7 @@
     align-self: center;
     min-width: 1.4rem;
     height: 1.4rem;
-    padding: 0 4px;
+    padding: 0 var(--sp-1);
     border-radius: var(--radius-pill);
     background: var(--accent-dim);
     color: var(--on-accent);

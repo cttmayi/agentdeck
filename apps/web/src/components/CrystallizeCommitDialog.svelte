@@ -135,7 +135,7 @@
     font-size: var(--fs-sm);
   }
   .slug-fixed {
-    padding: 4px 6px;
+    padding: var(--sp-1) 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
