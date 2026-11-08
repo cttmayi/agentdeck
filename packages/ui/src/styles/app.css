@@ -1569,6 +1569,47 @@ tbody tr:last-child td { border-bottom: 0; }
    因此不省略、会折行撑高整行。同一件事只有一个出处：这几套是 5 张数据表共用的，
    提到这里，remote 自动获得同样的行为。 */
 
+/* ══════════════ 差异视图（沉淀页） ══════════════ */
+
+/**
+ * ★ 304 批：`CrystallizeDraftEditor` 与 `CrystallizeView` 里这三条规则**逐字相同**
+ *   （同一个"文件行 / 变更标 / hunk 头"写了两遍）。收到这里，一处定义。
+ *
+ * ⚠️ 必须带 `.diff-view` 作用域，不能直接写 `.file-row`：`FileViewer` / `WorkDirTree` /
+ *    `ActionPicker` 里也有同名类（各自 scoped），全局化会把这三条属性漏过去。
+ */
+.diff-view .file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-view .change-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+  border: 1px solid var(--line);
+}
+
+.diff-view .hunk-head {
+  padding: 0.15rem 0.5rem;
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  user-select: none;
+}
+
 /* ══════════════ 状态徽标 ══════════════ */
 
 /* ★ 扁平化（2026-09），**但描边留一条发丝**：纯色块在浅底上会"看不见边界"，

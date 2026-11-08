@@ -1549,7 +1549,7 @@
     {#if material === null || material.items.length === 0}
       <p class="faint fs-xs">{$t('crystallize.materialEmpty')}</p>
     {:else}
-      <ul class="file-tree">
+      <ul class="file-tree diff-view">
         {#each material.items as item (item.relPath)}
           <li>
             <button
@@ -2581,20 +2581,7 @@
   }
 
   /* 文件行是真按钮（tab 能到、读屏器能读）——与列表行同一纪律，只是密度更高 */
-  .file-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    font: inherit;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
+    /* `.file-row` 的形状归 `app.css` 的 `.diff-view .file-row`（304 批） */
 
   .file-tree li:last-child .file-row {
     border-bottom: 0;

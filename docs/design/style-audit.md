@@ -123,7 +123,15 @@
 
 ### 2.3.2 下一批（304）的施工单（使用者已点头"按建议做"）
 
-**A. 抽取差异视图的三个形状（像素不变）**
+**A. 抽取差异视图的三个形状（像素不变）—— ✅ 304 批已做完**
+
+`.diff-view .file-row / .change-tag / .hunk-head` 已进 `app.css`；
+`CrystallizeDraftEditor` 的根容器与 `CrystallizeView` 的 `.file-tree` 各加 `diff-view`。
+`CrystallizeView` 里那两条 `.change-tag` / `.hunk-head` 本地规则**保留未动**：
+本组件模板里没有对应元素（先不删，等确认是死规则再清）。
+判据：`probe:layout` 618 项全绿（= 没有像素位移）、`check` 全绿。
+
+**B. 再动内距（会改像素，一屏一批）**
 
 `CrystallizeDraftEditor.svelte` 与 `CrystallizeView.svelte` 里 `.file-row` / `.change-tag` /
 `.hunk-head` 三条规则**逐字相同**（已比对）：
@@ -138,8 +146,6 @@
 两个组件的外层容器加 `class="diff-view"`，再把三份本地规则删掉。
 ⚠️ **不要**直接写成全局 `.file-row`：`FileViewer` / `WorkDirTree` / `ActionPicker` 里也有
 同名类（各自 scoped），全局化会把这几条属性漏过去。
-
-**B. 再动内距（会改像素，一屏一批）**
 
 顺序建议：① 沉淀页差异视图（#8–#15）→ ② `ActionPicker`（#1–#5）→ ③ 其余零散（#6/#7/#16/#18/#19）。
 每屏做完跑一次 `pnpm run probe:layout`（618 项），红了就当场看清是哪一屏的哪个断言。

@@ -37,7 +37,7 @@
 </script>
 
 {#if editor.artifacts !== null && editor.artifacts.mode === 'files'}
-  <div class="review-pane">
+  <div class="review-pane diff-view">
     <ul class="file-tree">
       {#each editor.fileRows as row (row.rel)}
         <li>
@@ -265,14 +265,7 @@
     font-size: var(--fs-xs);
     line-height: 1.5;
   }
-  .hunk-head {
-    padding: 0.15rem 0.5rem;
-    color: var(--text-faint);
-    background: var(--surface-2);
-    border-top: 1px solid var(--line);
-    user-select: none;
-  }
-  .hunk-head:first-child {
+    .hunk-head:first-child {
     border-top: 0;
   }
   .diff-line {
@@ -355,21 +348,7 @@
   }
 
   /* 文件行是真按钮（tab 能到、读屏器能读）——与列表行同一纪律，只是密度更高 */
-  .file-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    font: inherit;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-
+  
   .file-tree li:last-child .file-row {
     border-bottom: 0;
   }
@@ -393,15 +372,7 @@
   }
 
   /* 变更标记：A/M/D 用 git 的说法，颜色靠全局 badge 的语义色 */
-  .change-tag {
-    flex: 0 0 auto;
-    padding: 0 5px;
-    border-radius: var(--radius-sm);
-    font-size: var(--fs-2xs);
-    line-height: 1.5;
-    border: 1px solid var(--line);
-  }
-
+  
   .change-tag.add {
     color: var(--good);
     border-color: var(--good);
