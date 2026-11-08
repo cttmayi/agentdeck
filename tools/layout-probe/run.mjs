@@ -1869,8 +1869,6 @@ const CHECKS = [
       v.ruleFrom === true &&
       v.ruleTo === true &&
       v.ruleAdd === true &&
-      // ★ 288 批：预览按钮（把"这次会用哪些对话里的词"摊开）
-      v.previewButton === true &&
       Array.isArray(v.labels) &&
       v.labels.length === 2,
     show: (v) =>
@@ -1878,7 +1876,6 @@ const CHECKS = [
         ? 'null'
         : `在 ${String(v.present)}　词 ${String(v.termChips)} 个（输入 ${String(v.termInput)}/加 ${String(v.termAdd)}）　` +
           `规则 ${String(v.rules)} 条（${String(v.ruleFrom)}→${String(v.ruleTo)}/加 ${String(v.ruleAdd)}）　` +
-          `预览按钮 ${String(v.previewButton)}　` +
           `小标题 ${JSON.stringify(v.labels ?? [])}`,
   },
   {
@@ -1957,8 +1954,8 @@ const CHECKS = [
      * 的）。会话状态机由 `voice-session.test.ts` 钉着（15 条）。
      */
     label:
-      '★★ 聊天输入条里有**麦克风按钮**（带无障碍标签），而且**点一下就有反应**：' +
-      '没有模型时用 **toast** 说清原因（浮层，不占栏脚高度），按钮本身用虚线表示不可用',
+      '★★ 聊天输入条里有**麦克风按钮**（带无障碍标签）与它下面的**「取词」**：点按钮有反应' +
+      '（没模型时 toast 说清原因、虚线表示不可用），点「取词」会列出这一句识别会带上的专有名词',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
@@ -1968,13 +1965,20 @@ const CHECKS = [
       v.reacts === true &&
       // 285 批：原因是 toast（浮层），而且按钮用"虚线"表达不可用（不靠文字、不占高度）
       (typeof v.reason === 'string' ? v.reason.length > 0 : true) &&
-      v.unavailable === true,
+      v.unavailable === true &&
+      // ★ 289 批：按钮下面有「取词」，点开要给出这一句识别会带上的词（或"没有可用标识符"）
+      typeof v.termsLabel === 'string' &&
+      v.termsLabel.length > 0 &&
+      typeof v.termsPop === 'string' &&
+      v.termsPop.length > 0,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　标签「${String(v.label)}」　起始态 ${String(v.stateBefore)}　` +
           `点击有反应 ${String(v.reacts)}　toast「${String(v.reason)}」　虚线态 ${String(v.unavailable)}　` +
-          `栏脚高 ${String(v.composerH)}px`,
+          `栏脚高 ${String(v.composerH)}px　取词「${String(v.termsLabel)}」→「${String(
+            (v.termsPop ?? '').slice(0, 40),
+          )}」`,
   },
   {
     view: '沉淀',

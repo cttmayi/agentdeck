@@ -7700,8 +7700,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const input = d().querySelector('.detail-pane [data-composer] .composer-input')
           const send = d().querySelector('.detail-pane [data-composer-send]')
           const attach = d().querySelector('.detail-pane [data-composer-attach]')
-          // ★ 分批第 278 批：语音按钮也在这一组里（`extra`），所以它必须**同高**
-          const voice = d().querySelector('.detail-pane [data-composer] [data-voice-button]')
+          // ★ 分批第 278/289 批：语音那一格（按钮 + 下面「取词 N」）也在这一组里，必须**同高**
+          const voice = d().querySelector('.detail-pane [data-composer] [data-voice-cell]')
           if (!input || !send) return null
           const h = (el) => (el ? Math.round(el.getBoundingClientRect().height) : null)
           return { input: h(input), send: h(send), attach: h(attach), voice: h(voice) }
@@ -7775,12 +7775,30 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             click(d().querySelector('.detail-pane [data-composer] [data-voice-button]'))
             await wait(200)
           }
+          /**
+           * ★ 289 批（使用者："预览改一个位置，可以放在录制按钮的下面，名字可能要改一下"）：
+           *   按钮下面那行小字叫**取词**，点它弹出"本对话会带上哪些词"。
+           * ⚠️ 探针的对话没有可抽的标识符 ⇒ 弹出的是"没有可用的标识符"那句话，
+           *   那也是**有反应**（不是点了没动静）——判据要按这个量。
+           */
+          const termsBtn = d().querySelector('.detail-pane [data-composer] [data-voice-terms]')
+          const termsLabel = (text(termsBtn) ?? '').trim()
+          let termsPop = null
+          if (termsBtn !== null) {
+            click(termsBtn)
+            await wait(500)
+            const pop = d().querySelector('.detail-pane [data-voice-terms-pop]')
+            termsPop = pop === null ? null : (text(pop) ?? '').trim()
+            click(termsBtn)
+          }
           return {
             present: true,
             label,
             title,
             stateBefore,
             reacts: spoke,
+            termsLabel,
+            termsPop,
             reason: reasonEl === null ? null : (text(reasonEl) ?? '').trim(),
             // toast 出现时栏脚高度（与上面那次量的比，用来确认"浮层没撑高"）
             composerH,
@@ -9644,8 +9662,6 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 termChips: vocabSec.querySelectorAll('[data-voice-term-chips] .prefix-chip').length,
                 termInput: vocabSec.querySelector('[data-voice-term-input]') !== null,
                 termAdd: vocabSec.querySelector('[data-voice-term-add]') !== null,
-                // ★ 288 批：预览按钮在（点它会现抽一次"当前对话里的词"）
-                previewButton: vocabSec.querySelector('[data-voice-preview-context]') !== null,
                 rules: vocabSec.querySelectorAll('[data-voice-rules] .voice-rule').length,
                 ruleFrom: vocabSec.querySelector('[data-voice-rule-from]') !== null,
                 ruleTo: vocabSec.querySelector('[data-voice-rule-to]') !== null,

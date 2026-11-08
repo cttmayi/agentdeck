@@ -69,6 +69,50 @@
   let sessionId = $state('')
   let elapsedMs = $state(0)
   let level = $state(0)
+  /**
+   * ★ 分批第 289 批（使用者："预览改一个位置，可以放在录制按钮的下面，名字可能要改一下，
+   *   不应该还叫预览。它就可以预览当前对话的取词"）：
+   *
+   * 把"这个对话会贡献哪些词"从设置抽屉搬到**按钮下面**——它就长在口头相邻的位置，
+   * 而不再是一个要进设置里找的动作。名字也从「预览」改成「取词」：
+   * 这不是"预览某件要发生的事"，而是"这一句识别会带上的词"。
+   */
+  let terms = $state<{ terms: string[]; userTurns: number; agentReplies: number; auto: boolean } | null>(
+    null,
+  )
+  let termsOpen = $state(false)
+  let termsBusy = $state(false)
+
+  /** 拉一次"本对话取词"（与真正录音同一条路：同一个抽词器 + 同一份手动词表）。 */
+  async function loadTerms(): Promise<void> {
+    if (termsBusy) return
+    termsBusy = true
+    try {
+      const res = await fetch('/api/voice/context-terms', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ conversationId }),
+      })
+      if (res.ok) {
+        terms = (await res.json()) as {
+          terms: string[]
+          userTurns: number
+          agentReplies: number
+          auto: boolean
+        }
+      }
+    } catch {
+      // 取词拿不到不影响录音（它只是"这次带上哪些词"的说明）
+    } finally {
+      termsBusy = false
+    }
+  }
+
+  function toggleTerms(): void {
+    termsOpen = !termsOpen
+    if (termsOpen) void loadTerms()
+  }
+
   /** 轮询的句柄（`setTimeout` 的 id，用来在卸载/取消时停掉）。 */
   let pollTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -94,6 +138,13 @@
         method: 'POST',
       }).catch(() => {})
     }
+  })
+
+  // 换了一个对话 ⇒ 取词也得重来（它是按对话算的）
+  $effect(() => {
+    void conversationId
+    terms = null
+    termsOpen = false
   })
 
   // 状态外泄给调用方（页面可据此做点别的；现在聊天页用不到，但接口先开着）
@@ -254,31 +305,81 @@
 <svelte:window onkeydown={onkeydown} />
 
 {#if supported}
-  <button
-    type="button"
-    class="ghost small voice"
-    class:recording={phase === 'recording'}
-    class:busy={phase === 'transcribing'}
-    class:unavailable={$voiceCapability !== null && !$voiceCapability.available}
-    data-voice-button
-    data-voice-state={phase}
-    {title}
-    aria-label={$t('chat.voiceLabel')}
-    aria-pressed={phase === 'recording'}
-    disabled={phase === 'transcribing'}
-    {onclick}
-  >
-    <!-- 录音中换成一块"电平"，让人看到它真的在收声音（不是只有一行字） -->
-    {#if phase === 'recording'}
-      <span class="dot" style:--level={level} data-voice-level={String(Math.round(level * 100))}
-        >{$t('chat.voiceRecordingShort', { s: String(Math.round(elapsedMs / 1000)) })}</span
-      >
-    {:else if phase === 'transcribing'}
-      <span class="dot" data-voice-transcribing>{$t('chat.voiceTranscribingShort')}</span>
-    {:else}
-      <span aria-hidden="true">🎙</span>
-    {/if}
-  </button>
+  <!--
+    ★ 289 批：一个**竖着的小格子**——上面是麦克风按钮，下面是「取词 N」。
+    为什么要竖着：`ChatComposer` 的动作组是 `align-items: stretch`，竖着放能让这一格
+    与输入框**同高**（探针量的就是这一格的高度），不会凭空多出一行。
+  -->
+  <span class="voice-cell" data-voice-cell>
+    <button
+      type="button"
+      class="ghost small voice"
+      class:recording={phase === 'recording'}
+      class:busy={phase === 'transcribing'}
+      class:unavailable={$voiceCapability !== null && !$voiceCapability.available}
+      data-voice-button
+      data-voice-state={phase}
+      {title}
+      aria-label={$t('chat.voiceLabel')}
+      aria-pressed={phase === 'recording'}
+      disabled={phase === 'transcribing'}
+      {onclick}
+    >
+      <!-- 录音中换成一块"电平"，让人看到它真的在收声音（不是只有一行字） -->
+      {#if phase === 'recording'}
+        <span class="dot" style:--level={level} data-voice-level={String(Math.round(level * 100))}
+          >{$t('chat.voiceRecordingShort', { s: String(Math.round(elapsedMs / 1000)) })}</span
+        >
+      {:else if phase === 'transcribing'}
+        <span class="dot" data-voice-transcribing>{$t('chat.voiceTranscribingShort')}</span>
+      {:else}
+        <span aria-hidden="true">🎙</span>
+      {/if}
+    </button>
+    <!--
+      ★ 289 批（使用者："预览改一个位置，可以放在录制按钮的下面，名字可能要改一下…
+        它就可以预览当前对话的取词"）：名字叫**取词**，不是"预览"——
+        它不是"预览某件将要发生的事"，而是"这一句识别会带上哪些词"。
+    -->
+    <button
+      type="button"
+      class="terms-label"
+      data-voice-terms
+      title={$t('chat.voiceTermsTitle')}
+      aria-expanded={termsOpen}
+      onclick={toggleTerms}
+    >
+      {terms === null
+        ? $t('chat.voiceTermsLabel')
+        : $t('chat.voiceTermsLabelN', { n: String(terms.terms.length) })}
+    </button>
+  </span>
+  {#if termsOpen}
+    <span class="terms-pop" data-voice-terms-pop>
+      {#if terms === null}
+        <span class="faint small">{$t('chat.voiceTermsBusy')}</span>
+      {:else if !terms.auto}
+        <span class="faint small">{$t('chat.voiceTermsOff')}</span>
+      {:else if terms.terms.length === 0}
+        <span class="faint small">{$t('chat.voiceTermsNone')}</span>
+      {:else}
+        <span class="terms-list">
+          {#each terms.terms as term (term)}
+            <span class="terms-chip mono">{term}</span>
+          {/each}
+        </span>
+        <span class="faint small"
+          >{$t('chat.voiceTermsSource', {
+            u: String(terms.userTurns),
+            a: String(terms.agentReplies),
+          })}</span
+        >
+      {/if}
+      {#if conversationId === ''}
+        <span class="faint small">{$t('chat.voiceTermsNoConv')}</span>
+      {/if}
+    </span>
+  {/if}
 {/if}
 
 <style>
@@ -289,6 +390,70 @@
    *   接管——那一组是 `align-items: stretch`，所以语音按钮与「发送」永远**同高**。
    *   在这里写死一个高度，换字号就会差两像素（深色界面里非常显眼）。
    */
+  /* 竖着的一格：按钮 + 下面那行「取词 N」（同高由输入框的行高决定，见上面注释） */
+  .voice-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+    flex: 0 0 auto;
+    /* 浮层要贴着这一格的上方弹出（没有它，`position: absolute` 会去找更远的祖先） */
+    position: relative;
+  }
+
+  .voice-cell > .voice {
+    flex: 1 1 auto;
+  }
+
+  /* 「取词 N」：比按钮矮得多的一行小字，点击展开词表 */
+  .terms-label {
+    border: 0;
+    background: transparent;
+    color: var(--text-faint);
+    font: inherit;
+    font-size: 0.625rem;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .terms-label:hover {
+    color: var(--accent);
+  }
+
+  /* 词表浮层：贴在按钮上方（不占栏脚高度） */
+  .terms-pop {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    max-width: 24rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-2);
+    text-align: left;
+  }
+
+  .terms-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .terms-chip {
+    font-size: var(--fs-xs);
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    color: var(--text-dim);
+  }
+
   .voice {
     padding: 0 var(--sp-2);
     line-height: 1;

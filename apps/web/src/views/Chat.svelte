@@ -1393,12 +1393,7 @@
       ★ 分批第 240 批：「整理成记忆」对话框（**手动**打开）。
       勾完之后由这一页落库（对话框自己不发请求），并在对话里留一行可撤销的回执。
     -->
-    <!-- ★ 288 批：把"当前是哪个对话"传进去，「专有名词」里的预览要按它抽词 -->
-    <ChatSettings
-      bind:open={chatSettingsOpen}
-      conversationId={activeConversation?.id ?? ''}
-      onclose={() => (chatSettingsOpen = false)}
-    />
+    <ChatSettings bind:open={chatSettingsOpen} onclose={() => (chatSettingsOpen = false)} />
 
     <ChatMemoryTidy
       bind:open={tidyOpen}
