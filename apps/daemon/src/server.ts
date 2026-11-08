@@ -133,6 +133,7 @@ import {
   noteUploadedInIndex,
   collectBlankMaterial,
   collectMaterial,
+  collectSourceWorkdirFiles,
   draftDirName,
   draftRoot,
   isMaterialEmpty,
@@ -7204,6 +7205,33 @@ async function injectedSkillsOf(
         if (isMaterialEmpty(collected)) {
           sendJson(res, 400, { error: '这个 run 没有可沉淀的内容（消息为空）', code: 'empty_material' })
           return
+        }
+      }
+
+      // ── 参考文件：把来源工作目录里的文件并进素材 ──
+      //
+      // ★ 2026-11（使用者："对话里让智能体参考某个文件，沉淀时没把目录下的文件
+      //   拷过来，沉淀不出合适的内容"）：素材里只有转写，而转写里的工具输出是截断的、
+      //   且只有 agent 实际读过的那一段——"参考这份文件"里的**原文件**不在素材里。
+      //   这里把来源工作目录里的文本文件拷进 `material/from-workdir/`（上限与
+      //   排除规则见 `collectSourceWorkdirFiles` 的注释）。空白起没有来源目录，跳过。
+      //
+      // ⚠️ 素材判空（上面）在**拷贝之前**：转写为空就是没有可沉淀的内容，文件再多
+      //   也不能把"没跑过的东西"变成素材——起草者需要的上下文来自对话/任务本身。
+      if (!startFromBlank && sourceRun !== null && sourceRun.workDir !== null) {
+        const sourceAgent = await store.getAgent(sourceRun.agentId as never)
+        const wd = await collectSourceWorkdirFiles(sourceRun.workDir, await managedPathsOf(sourceAgent))
+        if (wd.pieces.length > 0) {
+          collected = { pieces: [...collected.pieces, ...wd.pieces], stats: collected.stats }
+        }
+        if (wd.skipped.length > 0) {
+          // 没拷进来的要**如实说**，不能静默少一块（起草者得知道"参考文件不全"）
+          collected.pieces.push({
+            relPath: 'from-workdir/00-SKIPPED.md',
+            text: `# 未拷贝的文件\n\n${wd.skipped
+              .map((s) => `- \`${s.relPath}\` — ${s.reason}`)
+              .join('\n')}\n`,
+          })
         }
       }
 

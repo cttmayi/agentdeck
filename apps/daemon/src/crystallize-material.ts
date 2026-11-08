@@ -20,7 +20,7 @@
  * ⚠️ 目录必须落在**起草 run 的工作目录里**：claude run 有 PreToolUse 隔离 hook，
  *    越界路径直接 deny（见 executor.ts 那段注释）。放别处 agent 根本读不到。
  */
-import { copyFile, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Store } from '@agentdeck/domain'
 import type { Conversation, Issue, Run, RunId } from '@agentdeck/protocol'
@@ -31,6 +31,8 @@ import {
   renderUserRequirements,
   requirementTerms,
 } from './user-requirements.ts'
+// 平台注入物的判定（拷贝参考文件时要避开：注入物不是 agent 的东西）
+import { isManagedPath, type ManagedPaths } from './workdir-files.ts'
 
 /** 一片素材 = 一个文件。 */
 export interface MaterialPiece {
@@ -166,6 +168,99 @@ export async function collectMaterial(
   return { pieces, stats: { turns, toolCalls } }
 }
 
+/**
+ * 把来源工作目录里的**文件**并进素材（对话/任务里 agent 参考过、产出过的文件）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么需要它（2026-11，使用者："对话里让智能体参考某个文件，沉淀时没把
+ * 目录下的文件拷过来，沉淀不出合适的内容"）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 素材里只有转写（`turns/*.md`），而转写里的工具输出是**截断的、且只有 agent
+ * 实际读过的那一段**——使用者说的"参考这份配置/这篇文档"里的**原文件**根本不在
+ * 素材里。起草者要么凭只言片语猜、要么干脆没看见，产出自然对不上。
+ *
+ * 所以：起草前把来源工作目录里的文本文件**原样**拷进 `material/from-workdir/`，
+ * 起草者按名字读。它是"参考文件"，不是"整个环境"——
+ *
+ *   · **只拷文本**：二进制拷进来既不能读又占地方（素材栏按 utf8 读，会坏掉那一栏）；
+ *   · **有上限**：单文件 512 KiB、总数 200 个——超了就跳过并在 `00-SKIPPED.md`
+ *     里说明（宁可少拷，不可让素材无限膨胀）；
+ *   · **不碰平台注入物**（`managed`：`.agentdeck/`、技能目录、CLI 状态目录）
+ *     与 `node_modules`/`.git`（依赖与版本库是环境噪音，不是素材）；
+ *   · **不跟符号链接**（`Dirent.isFile()` 对链接是 false——链接可能指向工作目录外，
+ *     拷贝必须呆在来源目录内）。
+ */
+export interface WorkdirFilePiece {
+  pieces: MaterialPiece[]
+  skipped: Array<{ relPath: string; reason: string }>
+}
+
+/** 参考文件单文件大小上限（再大也不该整份进素材）。 */
+export const MAX_WORKDIR_FILE_BYTES = 512 * 1024
+/** 参考文件总数上限（防"把整个目录搬进来"）。 */
+export const MAX_WORKDIR_FILES = 200
+
+export async function collectSourceWorkdirFiles(
+  workDir: string | null,
+  managed: ManagedPaths,
+): Promise<WorkdirFilePiece> {
+  if (workDir === null) return { pieces: [], skipped: [] }
+  const pieces: MaterialPiece[] = []
+  const skipped: Array<{ relPath: string; reason: string }> = []
+  let count = 0
+
+  const isNoise = (rel: string): boolean =>
+    // 环境噪音：任何一层的 node_modules / .git（依赖与版本库不是素材）
+    rel.split('/').some((seg) => seg === 'node_modules' || seg === '.git') ||
+    isManagedPath(rel, managed)
+
+  const walk = async (current: string, prefix: string): Promise<void> => {
+    if (count >= MAX_WORKDIR_FILES) return
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      // 目录读不了（权限等）就跳过——拷贝参考文件不该让整个起草失败
+      return
+    }
+    // 排序后再拷：素材里的文件顺序要稳定（回看时"第几个"才有意义）
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const entry of entries) {
+      if (count >= MAX_WORKDIR_FILES) break
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) {
+        if (isNoise(rel)) continue
+        await walk(join(current, entry.name), rel)
+        continue
+      }
+      // 符号链接在这里**整个跳过**：Dirent 上 isFile()/isDirectory() 都是 false，
+      // 天然不跟（见函数头注释的最后一条）
+      if (!entry.isFile()) continue
+      if (isNoise(rel)) continue
+      const full = join(current, entry.name)
+      const info = await stat(full).catch(() => null)
+      if (info === null || !info.isFile()) continue
+      if (info.size > MAX_WORKDIR_FILE_BYTES) {
+        skipped.push({ relPath: rel, reason: `超过 ${MAX_WORKDIR_FILE_BYTES / 1024} KiB` })
+        continue
+      }
+      const buf = await readFile(full).catch(() => null)
+      if (buf === null) continue
+      if (buf.includes(0)) {
+        skipped.push({ relPath: rel, reason: '二进制文件（不是文本）' })
+        continue
+      }
+      pieces.push({ relPath: `from-workdir/${rel}`, text: buf.toString('utf8') })
+      count += 1
+    }
+  }
+
+  await walk(workDir, '')
+  pieces.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0))
+  return { pieces, skipped }
+}
+
 /** 素材是否为空（起草前就该拦，别让它跑完才发现）。 */
 export function isMaterialEmpty(collected: { pieces: MaterialPiece[] }): boolean {
   return collected.pieces.every((p) => p.text.trim() === '')
@@ -198,6 +293,10 @@ function buildIndex(ctx: MaterialContext, stats: MaterialStats, pieces: Material
           : pieces.map((p) => `- \`${p.relPath}\` — 使用者给的材料（外部）`).join('\n')
         : '- `task-run.md` — 这条任务的完整执行记录'
 
+  // ★ 2026-11：来源目录里 agent 参考/产出过的文件（`from-workdir/`）——转写里的
+  //   工具输出可能被截断，原文件才是"参考"的真相。列出来让起草者知道有它们。
+  const workdirFiles = pieces.filter((p) => p.relPath.startsWith('from-workdir/'))
+
   const sourceLine =
     ctx.scope === 'blank'
       ? '来源：**空白起**（没有来源 run）'
@@ -223,7 +322,7 @@ ${turnList}
 ${ctx.scope === 'task' && pieces.some((p) => p.relPath === 'verdict.md') ? '- `verdict.md` — 审核判决（哪些做对了、哪些要改，这是最可信的判据）\n' : ''}${pieces.some((p) => p.relPath === 'feedback.md') ? '- `feedback.md` — 使用者的反馈\n' : ''}- \`meta.json\` — 结构化元信息（轮数/工具调用数/目标）
 - \`skills-index.md\` — 现有技能清单（判重：素材明显属于某个已有技能时，在结论里说明并给出依据）
 ${pieces.some((p) => p.relPath === 'user-requirements.md') ? '- \`user-requirements.md\` — **使用者在素材里提出来的要求**（平台机械抽取，原文照抄）——每一条都要有落点\n' : ''}
-${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当前全文（含支持文件）\n' : ''}
+${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当前全文（含支持文件）\n' : ''}${workdirFiles.length > 0 ? `- \`from-workdir/\` — **参考文件**：来源目录里 agent 参考/产出过的文件（${workdirFiles.length} 个），按名字读\n` : ''}${workdirFiles.some((p) => p.relPath === 'from-workdir/00-SKIPPED.md') ? '- ⚠️ 有文件没有拷进来（太大/二进制）——清单在 `from-workdir/00-SKIPPED.md`\n' : ''}
 ## 怎么用这些文件
 
 1. **先读这一页**，再决定要读哪些文件——不要一次性把全部素材读进上下文。
@@ -233,7 +332,9 @@ ${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当�
       : '回查**原始命令与参数**（在 \`turns/*.md\` 的「工具调用」里）'
   }，
    不要凭印象重写；命令要能直接复制就跑。
-3. **分清两类东西**（2026-10-25 改，使用者："这些要求就是我对此部分的习惯…这才有沉淀的意义"）：
+3. **对话/任务里提到的参考文件在 \`from-workdir/\`**：以那里的**原样内容**为准——
+   转写里的工具输出可能被截断；没读过的文件不要凭名字猜内容。
+4. **分清两类东西**（2026-10-25 改，使用者："这些要求就是我对此部分的习惯…这才有沉淀的意义"）：
    - **使用者的要求**（\`## 使用者\` 段里的话，清单见 \`user-requirements.md\`）⇒ 这是**约定的来源**：
      默认写进 \`skill/SKILL.md\` 的「约定」一节，**无条件生效**。**只有**素材里明确写了
      "这次/本次/临时/就这一篇"，才允许写成"如果用户要求…"的条件分支。
@@ -241,7 +342,7 @@ ${ctx.target.kind === 'update' ? '- `existing-skill/` — 要更新的技能当�
      把"这次我做了 X"改写成"当需要 X 时，先……再……"。
    ⚠️ 旧版这里只有第二条，于是"使用者要求 STE100"被当成一次性细节抽象成了可选开关
      —— 使用者原话就是那次投诉。不要再用一条规则同时处理这两类东西。
-4. 素材里凡是**环境依赖的失败、工具吐槽、一次性重试**，不要写进 skill（不结晶清单）。
+5. 素材里凡是**环境依赖的失败、工具吐槽、一次性重试**，不要写进 skill（不结晶清单）。
    这条**只针对执行细节**，不针对使用者的要求。
 
 ## 产出写在哪

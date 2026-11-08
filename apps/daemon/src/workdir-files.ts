@@ -140,7 +140,13 @@ export function managedPathsFor(descriptor: {
 /** 我们自己放上下文副本的地方（相对工作目录）。 */
 export const CONTEXT_DIR = '.agentdeck'
 
-function isManaged(relPath: string, managed: ManagedPaths): boolean {
+/**
+ * 一条相对路径是不是**平台注入物**（技能目录、CLI 状态目录、上下文副本）。
+ *
+ * 导出出来是因为素材收集（`collectSourceWorkdirFiles`）也要用它：拷贝参考文件
+ * 进素材目录时，平台注入物同样是"不是 agent 的东西"，不该跟着进素材。
+ */
+export function isManagedPath(relPath: string, managed: ManagedPaths): boolean {
   if (managed.files.includes(relPath)) return true
   return managed.dirs.some((dir) => relPath === dir || relPath.startsWith(`${dir}/`))
 }
@@ -222,7 +228,7 @@ export async function listWorkDir(
       sizeBytes: isDir ? 0 : statInfo.size,
       modifiedAt: statInfo.mtimeMs,
       hasChildren,
-      managed: isManaged(rel, managed),
+      managed: isManagedPath(rel, managed),
     })
   }
 

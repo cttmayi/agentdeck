@@ -13,7 +13,7 @@
 
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FileStore } from '@agentdeck/store-file'
 import {
@@ -32,7 +32,7 @@ import {
   listCrystallizeSources,
   resolveSourceRun,
 } from './crystallize.ts'
-import { collectMaterial, writeMaterial } from './crystallize-material.ts'
+import { collectMaterial, writeMaterial, collectSourceWorkdirFiles, MAX_WORKDIR_FILE_BYTES, MAX_WORKDIR_FILES } from './crystallize-material.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 let dir: string
@@ -609,6 +609,89 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
     assert.match(index, /skill\/SKILL\.md/, '索引里说明产出写在哪（与素材目录同级）')
     assert.match(await read('meta.json'), /"turns": 1/)
     assert.match(await read('skills-index.md'), /general-review/)
+  })
+})
+
+describe('collectSourceWorkdirFiles：把来源目录里的参考文件并进素材', () => {
+  /**
+   * ★ 2026-11（使用者："对话里让智能体参考某个文件，沉淀时没把目录下的文件拷过来，
+   * 沉淀不出合适的内容"）：素材只有转写，转写里的工具输出是截断的、且只有 agent 实际
+   * 读过的那一段——"参考这份文件"里的**原文件**不在素材里。这批钉住拷贝规则：
+   * 只拷文本、避开平台注入物与环境噪音、不跟符号链接、超限要如实说。
+   */
+  test('文本文件原样拷进来（from-workdir/ 前缀）；注入物/噪音/二进制/超限/软链都跳过并说明', async () => {
+    const wd = join(dir, 'wd-ref')
+    await mkdir(join(wd, '.agentdeck', 'context'), { recursive: true })
+    await mkdir(join(wd, 'node_modules'), { recursive: true })
+    await mkdir(join(wd, 'sub'), { recursive: true })
+    await writeFile(join(wd, '参考文档.md'), '这是参考文档\n', 'utf8')
+    await writeFile(join(wd, 'sub', 'config.json'), '{"a":1}\n', 'utf8')
+    await writeFile(join(wd, '.agentdeck', 'context', '注入物.md'), '平台的东西\n', 'utf8')
+    await writeFile(join(wd, 'node_modules', 'dep.md'), '依赖\n', 'utf8')
+    await writeFile(join(wd, 'bin.dat'), Buffer.from([0x01, 0x00, 0x02, 0x03]))
+    await writeFile(join(wd, 'huge.txt'), 'x'.repeat(MAX_WORKDIR_FILE_BYTES + 1), 'utf8')
+    // 指向目录外的软链：拷贝必须呆在来源目录内，链接整个跳过
+    const outside = join(dir, 'wd-outside.txt')
+    await writeFile(outside, '外面\n', 'utf8')
+    await symlink(outside, join(wd, 'link.md'))
+
+    const { pieces, skipped } = await collectSourceWorkdirFiles(wd, {
+      dirs: ['.agentdeck'],
+      files: [],
+    })
+    const byPath = new Map(pieces.map((p) => [p.relPath, p.text]))
+    assert.equal(byPath.get('from-workdir/参考文档.md'), '这是参考文档\n', '顶层文本文件原样拷')
+    assert.equal(byPath.get('from-workdir/sub/config.json'), '{"a":1}\n', '子目录文件也拷')
+    assert.equal(pieces.length, 2, '只拷了那两份文本')
+    assert.equal(byPath.has('from-workdir/.agentdeck/context/注入物.md'), false, '平台注入物不拷')
+    assert.equal(byPath.has('from-workdir/node_modules/dep.md'), false, '环境噪音（node_modules）不拷')
+    assert.equal(byPath.has('from-workdir/link.md'), false, '符号链接不跟')
+
+    const skippedByPath = new Map(skipped.map((s) => [s.relPath, s.reason]))
+    assert.match(skippedByPath.get('bin.dat') ?? '', /二进制/, '二进制要如实说明')
+    assert.match(skippedByPath.get('huge.txt') ?? '', /KiB/, '超限要如实说明')
+  })
+
+  test('工作目录不存在/为 null ⇒ 空素材（不报错）', async () => {
+    const none = await collectSourceWorkdirFiles(null, { dirs: [], files: [] })
+    assert.equal(none.pieces.length, 0)
+    assert.equal(none.skipped.length, 0)
+    const missing = await collectSourceWorkdirFiles(join(dir, 'no-such-dir'), { dirs: [], files: [] })
+    assert.equal(missing.pieces.length, 0, '目录读不了就跳过，不该让起草失败')
+  })
+
+  test('★ 总数有上限：超过 MAX_WORKDIR_FILES 只拷前 N 个（防"把整个目录搬进来"）', async () => {
+    const wd = join(dir, 'wd-cap')
+    await mkdir(wd, { recursive: true })
+    for (let i = 0; i < MAX_WORKDIR_FILES + 5; i += 1) {
+      await writeFile(join(wd, `f${String(i).padStart(3, '0')}.txt`), `${i}\n`, 'utf8')
+    }
+    const { pieces } = await collectSourceWorkdirFiles(wd, { dirs: [], files: [] })
+    assert.equal(pieces.length, MAX_WORKDIR_FILES, '总数钉在上限')
+  })
+
+  test('writeMaterial 的索引要登记参考文件，并警告"有文件没拷进来"', async () => {
+    const materialDir = join(dir, 'material-wd')
+    await writeMaterial(
+      materialDir,
+      {
+        pieces: [
+          { relPath: 'task-run.md', text: '# 任务执行记录\n\n[消息] 干活' },
+          { relPath: 'from-workdir/规格.md', text: '规格\n' },
+          { relPath: 'from-workdir/00-SKIPPED.md', text: '# 未拷贝的文件\n\n- `big.bin` — 二进制文件（不是文本）\n' },
+        ],
+        stats: { turns: 1, toolCalls: 0 },
+      },
+      {
+        scope: 'task',
+        sourceLabel: '修复构建',
+        target: { kind: 'new', purpose: '' },
+        existingSkills: [],
+      },
+    )
+    const index = await readFile(join(materialDir, '00-README.md'), 'utf8')
+    assert.match(index, /参考文件/, '索引要说明 from-workdir/ 是什么')
+    assert.match(index, /from-workdir\/00-SKIPPED\.md/, '索引要指向未拷贝清单')
   })
 })
 

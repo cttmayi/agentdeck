@@ -951,6 +951,41 @@ describe('四轮：素材落盘 + 产出读目录', () => {
     assert.match(res.dir, /skill-draft-[A-Z0-9]+[/\\]material$/)
   })
 
+  test('★ 来源目录里的参考文件拷进素材（from-workdir/），注入物/噪音/二进制不拷', async () => {
+    // ★ 2026-11（使用者："对话里让智能体参考某个文件，沉淀时没把目录下的文件拷过来，
+    // 沉淀不出合适的内容"）：源 run 的工作目录里躺着 agent 参考过的文件，起草时要把
+    // 它们拷进素材，起草者才能读到原样内容（转写里的工具输出是截断的）。
+    const runId = await runReviewed('参考文件的任务')
+    const run = (await (await fetch(`${daemon.url}/api/runs/${runId}`)).json()) as {
+      workDir: string
+    }
+    assert.notEqual(run.workDir, '', '源 run 有工作目录')
+    const wd = run.workDir
+    // 源 run 跑完之后文件才放进去（模拟"对话里让 agent 参考的文件就躺在目录里"）
+    await mkdir(join(wd, '.agentdeck'), { recursive: true })
+    await mkdir(join(wd, 'sub'), { recursive: true })
+    await writeFile(join(wd, '参考文档.md'), '这是对话里让 agent 参考的文档\n', 'utf8')
+    await writeFile(join(wd, 'sub', 'config.json'), '{"key": "value"}\n', 'utf8')
+    await writeFile(join(wd, '.agentdeck', 'junk.md'), '平台注入的东西\n', 'utf8')
+    await writeFile(join(wd, 'bin.dat'), Buffer.from([1, 0, 2, 3]))
+
+    const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
+    const res = (await (
+      await fetch(`${daemon.url}/api/crystallize/material?draftRunId=${draftRunId}`)
+    ).json()) as { items: Array<{ relPath: string; text: string }> }
+    const byPath = new Map(res.items.map((i) => [i.relPath, i.text]))
+    assert.equal(
+      byPath.get('from-workdir/参考文档.md'),
+      '这是对话里让 agent 参考的文档\n',
+      '参考文档原样拷进素材',
+    )
+    assert.equal(byPath.get('from-workdir/sub/config.json'), '{"key": "value"}\n', '子目录文件也拷')
+    assert.equal(byPath.has('from-workdir/.agentdeck/junk.md'), false, '平台注入物不拷')
+    assert.ok(byPath.has('from-workdir/00-SKIPPED.md'), '有文件没拷进来要如实说明')
+    assert.match(byPath.get('from-workdir/00-SKIPPED.md') ?? '', /bin\.dat/, '二进制在未拷贝清单里')
+    assert.match(byPath.get('00-README.md') ?? '', /参考文件/, '索引要登记参考文件')
+  })
+
   test('★ 起草产出是多文件：artifacts 给文件集合 + 解析后的 frontmatter', async () => {
     const runId = await runReviewed('多文件产出的任务')
     const draftRunId = await draftAndWait({ runId, target: { kind: 'new' } })
