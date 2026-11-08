@@ -453,8 +453,10 @@
       id: 'settings',
       label: $t('chat.settingsAction'),
       kind: 'secondary' as const,
+      // ★ 295 批：**再点一次就回去**（设置现在是主区面板，右栏被它换掉；
+      //   顶栏这颗是最顺手的开关，不必非得去点面板里的返回）
       onActivate: () => {
-        chatSettingsOpen = true
+        chatSettingsOpen = !chatSettingsOpen
       },
     },
   ])
@@ -976,12 +978,14 @@
          · 输入条在草稿与对话**两支都在**（D46/D58 的教训：新对话选完执行者必须
            能说第一句话），走 foot snippet 且在空态不渲染。 -->
     <MainArea
-      empty={!drafting && activeConversation === null}
+      empty={!chatSettingsOpen && !drafting && activeConversation === null}
       emptyTitle={$t('chat.noSelection')}
-      bodyClass={activeConversation !== null ? 'chat-stream' : ''}
+      bodyClass={chatSettingsOpen ? 'detail-scroll settings-body' : activeConversation !== null ? 'chat-stream' : ''}
     >
       {#snippet head()}
-        {#if drafting}
+        {#if chatSettingsOpen}
+          <!-- ★ 295 批：设置进了主区 ⇒ 右栏整块换成面板，它自己带栏头（不给双栏头） -->
+        {:else if drafting}
           <div class="pane-head">
             <h2>{$t('chat.newConversation')}</h2>
           </div>
@@ -1069,7 +1073,9 @@
         {/if}
       {/snippet}
       {#snippet body()}
-        {#if drafting}
+        {#if chatSettingsOpen}
+          <ChatSettings onclose={() => (chatSettingsOpen = false)} />
+        {:else if drafting}
         <label for="chat-agent">{$t('chat.agentLabel')}</label>
         <select id="chat-agent" value={draftChoice} onchange={onDraftChoice}>
           <optgroup label={$t('chat.agentGroup')}>
@@ -1238,6 +1244,8 @@
         {/if}
       {/snippet}
       {#snippet foot()}
+        <!-- ★ 295 批：设置面板占着右栏时，栏脚（文件树 + 输入条）一起让位 -->
+        {#if !chatSettingsOpen}
         {#if activeConversation !== null && filesState !== 'hidden'}
         <FootFiles
           title={$t('files.heading')}
@@ -1259,7 +1267,7 @@
                 <span class="faint small">{$t('chat.filesRunningHint')}</span>
               {/if}
             {/if}
-          {/snippet}
+      {/snippet}
           {#if filesState === 'unsupported'}
             {#if filesOpen}
               <p class="hint" data-files-need-restart>{$t('chat.filesNeedRestart')}</p>
@@ -1386,6 +1394,7 @@
         {/snippet}
       </ChatComposer>
         {/if}
+        {/if}
       {/snippet}
     </MainArea>
 
@@ -1393,7 +1402,7 @@
       ★ 分批第 240 批：「整理成记忆」对话框（**手动**打开）。
       勾完之后由这一页落库（对话框自己不发请求），并在对话里留一行可撤销的回执。
     -->
-    <ChatSettings bind:open={chatSettingsOpen} onclose={() => (chatSettingsOpen = false)} />
+
 
     <ChatMemoryTidy
       bind:open={tidyOpen}

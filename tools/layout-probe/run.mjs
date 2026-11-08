@@ -2754,7 +2754,12 @@ const CHECKS = [
   },
 
   // ── 设置抽屉 ──
-  { view: '新建表单 / 设置', key: 'settings.panelOpened', label: '点「设置」后出现抽屉', ok: (v) => v === true },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.panelOpened',
+    label: '点「设置」后出现**主区面板**（295 批：从右抽屉搬进主区，与沉淀设置同一族）',
+    ok: (v) => v === true,
+  },
   {
     view: '新建表单 / 设置',
     key: 'settings.defaultRuntimePresent',
@@ -2769,27 +2774,69 @@ const CHECKS = [
       '★★★ 它的第一项是**「自动侦测」**且值为**空串**（空串 = 跟随启动时侦测到的那个——这条语义只有界面上说出来才算落地）',
     ok: (v) => v === true,
   },
-  { view: '新建表单 / 设置', key: 'settings.drawerTitle', label: '★ 抽屉标题就是「设置」（不是"第一句话设置"）', ok: (v) => v === '设置' },
-  { view: '新建表单 / 设置', key: 'settings.hasBackdrop', label: '设置有遮罩', ok: (v) => v === true },
-  { view: '新建表单 / 设置', key: 'settings.isWide', label: '设置用的是宽抽屉（46rem）', ok: (v) => v === true },
+  { view: '新建表单 / 设置', key: 'settings.drawerTitle', label: '★ 面板标题就是「设置」（不是"第一句话设置"）', ok: (v) => v === '设置' },
   {
     view: '新建表单 / 设置',
-    key: 'settings.panelWidthPx',
-    label: '设置抽屉宽度（模版这种长文本要够宽）',
-    ok: (v) => typeof v === 'number' && v > 600,
-    show: (v) => `${v}px`,
-  },
-  { view: '新建表单 / 设置', key: 'settings.panelAtRight', label: '★ 设置抽屉也在右边', ok: (v) => v === true },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.panelInsidePane',
-    label: '★ 设置抽屉不在主从两栏里',
+    key: 'settings.hasBackdrop',
+    label: '★ 主区面板**没有**遮罩（遮罩是浮层才有的；它是"换掉右栏"，不是"盖住它"）',
     ok: (v) => v === false,
   },
   {
     view: '新建表单 / 设置',
+    key: 'settings.position',
+    label: '★ 它是**就地面板**不是浮层：`position` 不是 `fixed`（随页面滚，不是钉在屏幕上）',
+    ok: (v) => String(v) !== 'fixed' && String(v) !== 'absolute',
+    show: (v) => String(v),
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.listPaneStillVisible',
+    label: '★ 主区面板**不盖住左栏**（列表还在）——这正是它比抽屉好的地方',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.backButtonVisible',
+    label: '★ 面板头部那颗「← 返回」**一直可见**（列表被面板换掉了，这是唯一的回去入口）',
+    ok: (v) => v === true,
+  },
+  /**
+   * ★ 分批第 295 批（使用者："聊天设置，智能体设置，都改成和沉淀设置一样，放在主区"）：
+   *   这一组判据原来量的是**右抽屉**（宽 46rem、贴着屏幕右边、**不在**主从两栏里、
+   *   打开时主区各块位置不动）。搬成主区面板之后，"同一条规矩"要换个说法：
+   *     · 它**就是右栏本身**（宽度≈右栏内宽，且在右栏里面）；
+   *     · 它把右栏原来那块内容**换掉**，而左栏还在；
+   *     · 没有遮罩、不是 fixed（就地面板）。
+   */
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.isWide',
+    label: '★ 设置面板吃满**右栏**（不再是 46rem 的抽屉：宽度≈右栏内宽）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.panelWidthPx',
+    label: '★ 设置面板的宽度与右栏一致（模版这种长文本要够宽，而"够宽"现在由右栏本身决定）',
+    ok: (v) => typeof v === 'number' && v > 400,
+    show: (v) => `${v}px`,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.panelAtRight',
+    label: '★ 设置面板在**右栏**里（与左栏并列：这正是它比抽屉好的地方——列表没被盖住）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
+    key: 'settings.panelInsidePane',
+    label: '★ 面板**在**主从两栏之内（主区面板 ≠ 浮层：它随页面滚、不盖任何人）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建表单 / 设置',
     key: 'settings.drawerLeavesLayoutAlone',
-    label: '★★ 打开设置抽屉前后，主区里每一块的位置与尺寸都没动',
+    label: '★ 打开设置前后，**左栏列表的位置与尺寸没动**（换掉的只是右栏）',
     ok: (v) => v === true,
   },
   {
@@ -2850,8 +2897,8 @@ const CHECKS = [
   {
     view: '新建表单 / 设置',
     key: 'settings.tplFieldWidthPx',
-    label: '★ 模版输入框比左栏宽得多（这正是要抽屉的原因）',
-    ok: (v) => typeof v === 'number' && v > 550,
+    label: '★ 模版输入框比**左栏**宽（面板吃满右栏 ⇒ 长模版看得清；左栏 416px）',
+    ok: (v) => typeof v === 'number' && v > 400,
     show: (v) => `${v}px`,
   },
   {

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Drawer from './Drawer.svelte'
   import { api } from '../lib/api.ts'
   import { identity, loadIdentity } from '../lib/stores.ts'
   import { refreshVoiceCapability, voiceCapability } from '../lib/voice.ts'
@@ -27,7 +26,10 @@
    * ⚠️ 别处的同名配置一律删掉（这里搬过来之后 App 设置里那份就没有了）：
    *    同一份数据两个编辑入口 ⇒ "我改的是哪一个"迟早要问一次。
    */
-  export let open = false
+  /**
+   * ★ 295 批：`open` 不再需要——设置是不是开着由**页面**决定（它决定右栏放什么），
+   * 组件自己只管画那一块面板。
+   */
   export let onclose: () => void = () => {}
 
   const PLATFORM_DEFAULT = ['记住：', '以后', '下次别']
@@ -89,7 +91,8 @@
    * 打开抽屉时才去读（而不是挂载时）：这一页的抽屉默认关着，平时不该为它发请求。
    * ⚠️ 但能力探测**没有副作用**（不开麦、不弹权限窗），所以读一次是安全的。
    */
-  $: if (open) void refreshVoice()
+  // 面板一挂载就加载（它现在只在"设置开着"时被页面渲染出来）
+  $: void refreshVoice()
 
   let voiceLoaded = false
   async function refreshVoice(): Promise<void> {
@@ -370,136 +373,23 @@
   }
 </script>
 
-<Drawer
-  {open}
-  title={$t('chat.settingsTitle')}
-  subtitle={$t('chat.settingsSubtitle')}
-  {onclose}
->
-  <section class="drawer-section" data-memory-prefixes>
-    <h3>{$t('chat.settingsMemoryHeading')}</h3>
-    <p class="hint">{$t('chat.settingsMemoryHint')}</p>
-    <div class="prefix-chips" data-prefix-chips>
-      {#each draft as p, i (p)}
-        <span class="prefix-chip">
-          <span class="mono">{p}</span>
-          <button
-            type="button"
-            class="prefix-x"
-            data-prefix-remove
-            aria-label={$t('chat.settingsMemoryRemove', { word: p })}
-            onclick={() => void remove(i)}>×</button
-          >
-        </span>
-      {/each}
-      {#if draft.length === 0}
-        <span class="faint small" data-prefix-empty>{$t('chat.settingsMemoryOff')}</span>
-      {/if}
-    </div>
-    <div class="prefix-add">
-      <input
-        bind:value={input}
-        placeholder={$t('chat.settingsMemoryAddPlaceholder')}
-        aria-label={$t('chat.settingsMemoryAddPlaceholder')}
-        data-prefix-input
-        onkeydown={(e) => {
-          if (e.key === 'Enter') void add()
-        }}
-      />
-      <button type="button" class="secondary" data-prefix-add onclick={() => void add()}>
-        {$t('chat.settingsMemoryAdd')}
-      </button>
-      <button type="button" class="ghost" data-prefix-reset onclick={() => void reset()}>
-        {$t('chat.settingsMemoryReset')}
-      </button>
-    </div>
-    {#if error !== ''}
-      <p class="hint bad" data-prefix-error>{error}</p>
-    {/if}
-  </section>
-  <section class="drawer-section" data-voice-vocab>
-    <h3>{$t('chat.voiceVocabHeading')}</h3>
-    <p class="hint">{$t('chat.voiceVocabHint')}</p>
-
-    <!-- 第一层：进 initialPrompt 的词（只放"正确写法"） -->
-    <p class="voice-label">{$t('chat.voiceVocabPromptLabel')}</p>
-    <div class="prefix-chips" data-voice-term-chips>
-      {#each vocab.promptTerms as term, i (term)}
-        <span class="prefix-chip">
-          <span class="mono">{term}</span>
-          <button
-            type="button"
-            class="prefix-x"
-            data-voice-term-remove
-            aria-label={$t('chat.settingsMemoryRemove', { word: term })}
-            onclick={() => void saveVocab({ promptTerms: vocab.promptTerms.filter((_, k) => k !== i) })}>×</button
-          >
-        </span>
-      {/each}
-      {#if vocab.promptTerms.length === 0}
-        <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
-      {/if}
-    </div>
-    <div class="prefix-add">
-      <input
-        bind:value={termInput}
-        placeholder={$t('chat.voiceVocabTermPlaceholder')}
-        data-voice-term-input
-        onkeydown={(e) => {
-          if (e.key === 'Enter') void addTerm()
-        }}
-      />
-      <button type="button" class="secondary" data-voice-term-add onclick={() => void addTerm()}>
-        {$t('chat.settingsMemoryAdd')}
-      </button>
-    </div>
-
-    <!-- 第二层：替换规则（"常被听成的样子" → "正确写法"） -->
-    <p class="voice-label">{$t('chat.voiceVocabRuleLabel')}</p>
-    <div class="voice-rules" data-voice-rules>
-      {#each vocab.rules as rule, i (rule.from + rule.to)}
-        <span class="voice-rule">
-          <span class="mono">{rule.from}</span>
-          <span class="faint">→</span>
-          <span class="mono">{rule.to}</span>
-          <button
-            type="button"
-            class="prefix-x"
-            data-voice-rule-remove
-            aria-label={$t('chat.settingsMemoryRemove', { word: rule.from })}
-            onclick={() => void saveVocab({ rules: vocab.rules.filter((_, k) => k !== i) })}>×</button
-          >
-        </span>
-      {/each}
-      {#if vocab.rules.length === 0}
-        <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
-      {/if}
-    </div>
-    <div class="prefix-add">
-      <input
-        bind:value={ruleFrom}
-        placeholder={$t('chat.voiceVocabFromPlaceholder')}
-        data-voice-rule-from
-      />
-      <span class="faint">→</span>
-      <input
-        bind:value={ruleTo}
-        placeholder={$t('chat.voiceVocabToPlaceholder')}
-        data-voice-rule-to
-        onkeydown={(e) => {
-          if (e.key === 'Enter') void addRule()
-        }}
-      />
-      <button type="button" class="secondary" data-voice-rule-add onclick={() => void addRule()}>
-        {$t('chat.settingsMemoryAdd')}
-      </button>
-    </div>
-    {#if vocabProblems.length > 0}
-      <p class="hint bad" data-voice-vocab-problems>{vocabProblems.join('；')}</p>
-    {/if}
-
-  </section>
-
+<!--
+  ★ 分批第 295 批（使用者："聊天设置，智能体设置，都改成和沉淀设置一样，放在主区"）：
+  **不再是右抽屉**，而是主区里的一块面板（与沉淀设置、技能/工具的「安装」同一族）。
+  理由：抽屉会**盖住**正在编辑的那段对话，而设置恰恰是"对着它改"的；主区面板把右栏
+  整块换掉、左栏还在，与沉淀页的做法完全同款。
+  ⚠️ 返回入口必须**一直可见**（`.panel-back`）——列表被面板换掉了，"点列表回去"这条
+    路此刻不存在；也**不再用 Esc**（它不是浮层，拦 Esc 会抢掉输入框的 Esc）。
+-->
+<section class="main-panel" data-settings-panel aria-label={$t('chat.settingsTitle')}>
+  <header class="main-panel-head">
+    <button type="button" class="ghost small panel-back" data-settings-back onclick={onclose}
+      >{$t('common.backPanel')}</button
+    >
+    <h2>{$t('chat.settingsTitle')}</h2>
+    <span class="faint small">{$t('chat.settingsSubtitle')}</span>
+  </header>
+  <div class="main-panel-body detail-scroll settings-body">
   <section class="drawer-section" data-voice-settings>
     <h3>{$t('chat.voiceSettingsHeading')}</h3>
     <p class="hint">{$t('chat.voiceSettingsHint')}</p>
@@ -648,14 +538,169 @@
     {#if error !== ''}
       <p class="hint bad" data-voice-error>{error}</p>
     {/if}
+
+    <!--
+      ★ 分批第 295 批（使用者："我就认为专有名词是为语音输入的，不应该是并列放置"）：
+      「专有名词」**降为语音输入的子块**。它只作用于识别（initialPrompt + 替换规则），
+      与"打字/记忆"无关——并列会让人以为它还有别的用处。
+    -->
+      <div class="sub-block" data-voice-vocab>
+      <h4>{$t('chat.voiceVocabHeading')}</h4>
+      <p class="hint">{$t('chat.voiceVocabHint')}</p>
+
+      <!-- 第一层：进 initialPrompt 的词（只放"正确写法"） -->
+      <p class="voice-label">{$t('chat.voiceVocabPromptLabel')}</p>
+      <div class="prefix-chips" data-voice-term-chips>
+        {#each vocab.promptTerms as term, i (term)}
+          <span class="prefix-chip">
+            <span class="mono">{term}</span>
+            <button
+              type="button"
+              class="prefix-x"
+              data-voice-term-remove
+              aria-label={$t('chat.settingsMemoryRemove', { word: term })}
+              onclick={() => void saveVocab({ promptTerms: vocab.promptTerms.filter((_, k) => k !== i) })}>×</button
+            >
+          </span>
+        {/each}
+        {#if vocab.promptTerms.length === 0}
+          <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+        {/if}
+      </div>
+      <div class="prefix-add">
+        <input
+          bind:value={termInput}
+          placeholder={$t('chat.voiceVocabTermPlaceholder')}
+          data-voice-term-input
+          onkeydown={(e) => {
+            if (e.key === 'Enter') void addTerm()
+          }}
+        />
+        <button type="button" class="secondary" data-voice-term-add onclick={() => void addTerm()}>
+          {$t('chat.settingsMemoryAdd')}
+        </button>
+      </div>
+
+      <!-- 第二层：替换规则（"常被听成的样子" → "正确写法"） -->
+      <p class="voice-label">{$t('chat.voiceVocabRuleLabel')}</p>
+      <div class="voice-rules" data-voice-rules>
+        {#each vocab.rules as rule, i (rule.from + rule.to)}
+          <span class="voice-rule">
+            <span class="mono">{rule.from}</span>
+            <span class="faint">→</span>
+            <span class="mono">{rule.to}</span>
+            <button
+              type="button"
+              class="prefix-x"
+              data-voice-rule-remove
+              aria-label={$t('chat.settingsMemoryRemove', { word: rule.from })}
+              onclick={() => void saveVocab({ rules: vocab.rules.filter((_, k) => k !== i) })}>×</button
+            >
+          </span>
+        {/each}
+        {#if vocab.rules.length === 0}
+          <span class="faint small">{$t('chat.voiceVocabEmpty')}</span>
+        {/if}
+      </div>
+      <div class="prefix-add">
+        <input
+          bind:value={ruleFrom}
+          placeholder={$t('chat.voiceVocabFromPlaceholder')}
+          data-voice-rule-from
+        />
+        <span class="faint">→</span>
+        <input
+          bind:value={ruleTo}
+          placeholder={$t('chat.voiceVocabToPlaceholder')}
+          data-voice-rule-to
+          onkeydown={(e) => {
+            if (e.key === 'Enter') void addRule()
+          }}
+        />
+        <button type="button" class="secondary" data-voice-rule-add onclick={() => void addRule()}>
+          {$t('chat.settingsMemoryAdd')}
+        </button>
+      </div>
+      {#if vocabProblems.length > 0}
+        <p class="hint bad" data-voice-vocab-problems>{vocabProblems.join('；')}</p>
+      {/if}
+
+    </div>
   </section>
-</Drawer>
+
+  <section class="drawer-section" data-memory-prefixes>
+    <h3>{$t('chat.settingsMemoryHeading')}</h3>
+    <p class="hint">{$t('chat.settingsMemoryHint')}</p>
+    <div class="prefix-chips" data-prefix-chips>
+      {#each draft as p, i (p)}
+        <span class="prefix-chip">
+          <span class="mono">{p}</span>
+          <button
+            type="button"
+            class="prefix-x"
+            data-prefix-remove
+            aria-label={$t('chat.settingsMemoryRemove', { word: p })}
+            onclick={() => void remove(i)}>×</button
+          >
+        </span>
+      {/each}
+      {#if draft.length === 0}
+        <span class="faint small" data-prefix-empty>{$t('chat.settingsMemoryOff')}</span>
+      {/if}
+    </div>
+    <div class="prefix-add">
+      <input
+        bind:value={input}
+        placeholder={$t('chat.settingsMemoryAddPlaceholder')}
+        aria-label={$t('chat.settingsMemoryAddPlaceholder')}
+        data-prefix-input
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void add()
+        }}
+      />
+      <button type="button" class="secondary" data-prefix-add onclick={() => void add()}>
+        {$t('chat.settingsMemoryAdd')}
+      </button>
+      <button type="button" class="ghost" data-prefix-reset onclick={() => void reset()}>
+        {$t('chat.settingsMemoryReset')}
+      </button>
+    </div>
+    {#if error !== ''}
+      <p class="hint bad" data-prefix-error>{error}</p>
+    {/if}
+  </section>
+  </div>
+</section>
 
 <style>
   /*
    * 触发词的 chip 列表。样式原本住在 `SettingsDrawer.svelte`（第 240 批），
    * 第 242 批跟着这一节搬到聊天页——留在那边就是一段没人用的 CSS。
    */
+  /**
+   * ★ 295 批：「专有名词」是**语音输入的子块**（使用者："我就认为专有名词是为语音输入的，
+   *   不应该是并列放置"）——用左侧一条竖线 + 缩进表达层级，而不是另起一个同级小节。
+   *   它只作用于识别（`initialPrompt` + 替换规则），与打字/记忆无关。
+   */
+  .sub-block {
+    margin-top: var(--sp-3);
+    padding-left: var(--sp-3);
+    border-left: 2px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  }
+
+  .sub-block h4 {
+    font-size: var(--fs-sm);
+    margin: 0 0 var(--sp-1);
+  }
+
+  .settings-body {
+    padding: var(--sp-4);
+  }
+
+  .settings-body p {
+    margin: 0 0 var(--sp-2);
+  }
+
   .prefix-chips {
     display: flex;
     flex-wrap: wrap;

@@ -1488,9 +1488,10 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
             if (!btn) return false
             click(btn)
             await wait(1500)
-            return d().querySelector('.drawer textarea') !== null
+            // ★ 295 批：设置从右抽屉搬进**主区面板**（与沉淀设置同一族）
+            return d().querySelector('[data-settings-panel] textarea') !== null
           }
-          const field = () => d().querySelector('.drawer textarea')
+          const field = () => d().querySelector('[data-settings-panel] textarea')
           if (!(await openSettings())) {
             errors.push('打开智能体页的「设置」之后没看到模版输入框')
             return false
@@ -1510,11 +1511,16 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
             errors.push('改了输入框但内容没变（这一条量不到）')
             return false
           }
-          // 关掉（走 Esc，等于点「关闭」）
-          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+          // 关掉（295 批：**点面板头部那颗返回**；主区面板不是浮层，不再走 Esc）
+          const backBtn = d().querySelector('[data-settings-panel] [data-settings-back]')
+          if (backBtn === null) {
+            errors.push('设置面板里没有返回按钮（这一条的第一步就没成立）')
+            return false
+          }
+          click(backBtn)
           await wait(800)
-          if (d().querySelector('.drawer') !== null) {
-            errors.push('Esc 没关掉抽屉（这一条的第一步就没成立）')
+          if (d().querySelector('[data-settings-panel]') !== null) {
+            errors.push('点返回之后设置面板还在（这一条的第一步就没成立）')
             return false
           }
           // 重开：必须回到已保存的那份
@@ -1523,7 +1529,8 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
             return false
           }
           const again = field()?.value ?? ''
-          f.contentWindow.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+          const backBtn2 = d().querySelector('[data-settings-panel] [data-settings-back]')
+          if (backBtn2) click(backBtn2)
           await wait(400)
           if (again !== saved) {
             errors.push(
@@ -3457,25 +3464,64 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）
         publish(false)
-        // ══════════════ 设置抽屉 ══════════════
+        // ══════════════ 设置（295 批：从右抽屉搬进主区面板）══════════════
         const settingsBtn2 = paneBtn('设置')
         if (!settingsBtn2) {
           errors.push('找不到「设置」按钮')
         } else {
           click(settingsBtn2)
-          facts['settings.panelOpened'] = await until(() => !!d().querySelector('.drawer'))
-          const panel = d().querySelector('.drawer')
+          /**
+           * ★ 分批第 295 批（使用者："聊天设置，智能体设置，都改成和沉淀设置一样，放在主区"）：
+           *   原来这一整段量的都是**右抽屉**（`.drawer`、遮罩、宽度 46rem、贴着屏幕右边）；
+           *   现在它是**主区里的一块面板**（`.main-panel`，与沉淀设置/技能安装同族）——
+           *   所以判据整体换了宿主：
+           *     · 没有遮罩、不是 `position: fixed`（它随页面滚）；
+           *     · 它在**右栏里面**（`.detail-pane` 里），把原来那块内容**换掉**；
+           *     · 左栏（列表）还在（这正是"主区面板"与"抽屉盖住"的区别）；
+           *     · 头部有一颗**一直可见**的返回。
+           */
+          facts['settings.panelOpened'] = await until(
+            () => !!d().querySelector('[data-settings-panel]'),
+          )
+          const panel = d().querySelector('[data-settings-panel]')
           const panelBox = box(panel)
-          facts['settings.drawerTitle'] = need('设置抽屉标题', () =>
-            text(panel.querySelector('.drawer-head h2')),
+          facts['settings.drawerTitle'] = need('设置面板标题', () =>
+            text(panel.querySelector('.main-panel-head h2')),
           )
+          // 主区面板**不该有**遮罩（那是浮层才有的东西）
           facts['settings.hasBackdrop'] = !!d().querySelector('.drawer-backdrop')
-          facts['settings.isWide'] = !!(panel && panel.className.includes('wide'))
+          // 也不该是浮层：`position` 必须是 static/relative（`.drawer` 是 fixed）
+          facts['settings.position'] = panel ? cs(panel).position : null
           facts['settings.panelWidthPx'] = panelBox ? Math.round(panelBox.w) : null
-          facts['settings.panelAtRight'] = !!(
-            panelBox && Math.abs(panelBox.x + panelBox.w - f.contentWindow.innerWidth) <= 1
+          /**
+           * ★ 295 批：面板**就是右栏本身**。所以"宽不宽"改成与右栏比：
+           *   宽度差在 40px 以内（右栏有左右内距）就算吃满了；右缘也要落在右栏右缘
+           *   附近（而不是像抽屉那样贴屏幕右边）。
+           */
+          const rightPane = d().querySelector('.detail-pane')
+          const paneBox = rightPane ? rightPane.getBoundingClientRect() : null
+          facts['settings.paneWidthPx'] = paneBox ? Math.round(paneBox.width) : null
+          // 右栏有左右内距（各 var(--sp-5)=24px）⇒ 面板比右栏窄 ~48px 是正常的
+          facts['settings.isWide'] = !!(
+            panelBox &&
+            paneBox &&
+            paneBox.width - panelBox.w <= 64 &&
+            panelBox.w > 400
           )
-          facts['settings.panelInsidePane'] = !!(paneEl && panel && paneEl.contains(panel))
+          facts['settings.panelAtRight'] = !!(
+            panelBox && paneBox && Math.abs(panelBox.x + panelBox.w - (paneBox.x + paneBox.width)) <= 40
+          )
+          // ⚠️ `paneEl` 是**左栏清单**（`.pane` 的第一个）；面板在**右栏**（`.detail-pane`）里
+          facts['settings.panelInsidePane'] = !!(
+            panel && d().querySelector('.detail-pane')?.contains(panel)
+          )
+          // 左栏还在（"替换右栏"而不是"盖住整页"）
+          facts['settings.listPaneStillVisible'] = !!d().querySelector('.list-pane')
+          // 头部那颗返回必须一直可见（它是唯一的回去入口）
+          const backBtnMain = panel?.querySelector('[data-settings-back]')
+          facts['settings.backButtonVisible'] = !!(
+            backBtnMain && backBtnMain.getBoundingClientRect().width > 0
+          )
           facts['settings.layoutAfterDrawer'] = layoutSnapshot()
           facts['settings.drawerLeavesLayoutAlone'] =
             facts['settings.layoutAfterDrawer'] === layoutBefore
@@ -3485,8 +3531,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           facts['settings.sectionTitles'] = [...panel.querySelectorAll('.drawer-section h3')].map(
             (h) => text(h),
           )
-          facts['settings.footSaveLabel'] = need('设置抽屉底部主操作', () =>
-            text(panel.querySelector('.drawer-foot button')),
+          facts['settings.footSaveLabel'] = need('设置面板底部主操作', () =>
+            text(panel.querySelector('.main-panel-foot button')),
           )
           const kindTabs = [...(panel?.querySelectorAll('.tabs:not(.block-tabs) .tab') ?? [])]
           // ★ 2026-10：每条链路下面还有第二排「块」页签（① 框架 / ② 身份 / ③ 任务）
@@ -3513,6 +3559,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           // 抽屉够宽：模版输入框应当明显宽于原来那个 416px 的左栏
           const ta = panel && panel.querySelector('.tpl-text')
           facts['settings.tplFieldWidthPx'] = ta ? Math.round(ta.getBoundingClientRect().width) : null
+          facts['settings.listPaneWidthPx'] = d().querySelector('.list-pane')
+            ? Math.round(d().querySelector('.list-pane').getBoundingClientRect().width)
+            : null
           // ★ 输入框高度：使用者点名"太小了，不利用看内容"。空的模版也必须有
           //   一个像样的下限；填入默认那段之后要**跟着内容长高**。
           facts['settings.tplFieldHeightEmptyPx'] = ta
@@ -3547,13 +3596,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             click(reviewTab)
             await wait(250)
             facts['settings.reviewBadgeWhileExecuteCustom'] = need('审核页签的徽章', () =>
-              text(d().querySelector('.drawer .tpl-state .badge')),
+              text(d().querySelector('[data-settings-panel] .tpl-state .badge')),
             )
-            const fill2 = findIn(d().querySelector('.drawer'), '填入默认模版')
+            const fill2 = findIn(d().querySelector('[data-settings-panel]'), '填入默认模版')
             if (fill2) {
               click(fill2)
               await wait(200)
-              const ta2 = d().querySelector('.drawer .tpl-text')
+              const ta2 = d().querySelector('[data-settings-panel] .tpl-text')
               // ⚠️ `{{material}}` 与两个标记现在由**平台**放进 ③，不在模版里
               //（2026-09）；模版里唯一的必需变量是判决契约。
               facts['settings.reviewFilledHasVerdict'] = ta2
@@ -3569,11 +3618,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           }
 
-          const varBtn = findIn(d().querySelector('.drawer'), '可用的变量')
+          const varBtn = findIn(d().querySelector('[data-settings-panel]'), '可用的变量')
           if (varBtn) {
             click(varBtn)
-            await until(() => !!d().querySelector('.drawer .var-list li'))
-            const rows = [...d().querySelectorAll('.drawer .var-list li')]
+            await until(() => !!d().querySelector('[data-settings-panel] .var-list li'))
+            const rows = [...d().querySelectorAll('[data-settings-panel] .var-list li')]
             facts['settings.varRowCount'] = rows.length
             /**
              * ⚠️ 2026-09 三块组装之后，变量表**只剩九个**：`{{prompt}}` / `{{instructions}}` /
@@ -3596,11 +3645,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['settings.varRowCountIsNine'] = rows.length === 9
           }
 
-          const pvBtn = findIn(d().querySelector('.drawer'), '预览')
+          const pvBtn = findIn(d().querySelector('[data-settings-panel]'), '预览')
           if (pvBtn) {
             click(pvBtn)
-            await until(() => !!d().querySelector('.drawer .preview pre'))
-            const pre = d().querySelector('.drawer .preview pre')
+            await until(() => !!d().querySelector('[data-settings-panel] .preview pre'))
+            const pre = d().querySelector('[data-settings-panel] .preview pre')
             const rendered = pre ? pre.textContent ?? '' : ''
             facts['settings.previewHasHeader'] = rendered.includes('# 审核任务')
             facts['settings.previewHasNoRawVar'] = !rendered.includes('{{')
@@ -3612,11 +3661,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           if (taskTab) {
             click(taskTab)
             await wait(250)
-            const pvTask = findIn(d().querySelector('.drawer'), '预览')
+            const pvTask = findIn(d().querySelector('[data-settings-panel]'), '预览')
             if (pvTask) {
               click(pvTask)
-              await until(() => !!d().querySelector('.drawer .preview pre'), 40)
-              const preTask = d().querySelector('.drawer .preview pre')
+              await until(() => !!d().querySelector('[data-settings-panel] .preview pre'), 40)
+              const preTask = d().querySelector('[data-settings-panel] .preview pre')
               const taskRendered = preTask ? preTask.textContent ?? '' : ''
               facts['settings.previewHasSampleMaterial'] = taskRendered.includes('审核执行产出')
               // 预览里不许留生变量（漏渲染的表现就是大括号原样出现）
@@ -3650,17 +3699,17 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               click(chatFrameTab)
               await wait(200)
             }
-            const taChat = d().querySelector('.drawer .tpl-text')
+            const taChat = d().querySelector('[data-settings-panel] .tpl-text')
             if (taChat) {
               taChat.value = CHAT_TPL
               taChat.dispatchEvent(new Event('input', { bubbles: true }))
               await wait(200)
-              const pvChat = findIn(d().querySelector('.drawer'), '预览')
+              const pvChat = findIn(d().querySelector('[data-settings-panel]'), '预览')
               if (pvChat) {
                 click(pvChat)
-                await until(() => !!d().querySelector('.drawer .preview pre'), 40)
+                await until(() => !!d().querySelector('[data-settings-panel] .preview pre'), 40)
                 await wait(200)
-                const preChat = d().querySelector('.drawer .preview pre')
+                const preChat = d().querySelector('[data-settings-panel] .preview pre')
                 const chatRendered = preChat ? preChat.textContent ?? '' : ''
                 facts['settings.chatPreviewRenders'] = chatRendered.includes(CHAT_MARK)
                 // ★ 预览里不许留生变量：漏渲染的表现就是那几个大括号原样出现
@@ -3669,7 +3718,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             }
           }
 
-          const saveBtn = findIn(d().querySelector('.drawer'), '保存')
+          const saveBtn = findIn(d().querySelector('[data-settings-panel]'), '保存')
           facts['settings.saveButtonFound'] = !!saveBtn
           if (saveBtn) {
             click(saveBtn)
@@ -3677,7 +3726,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             //    会把 setTimeout 快进，而网络请求是真的——那样会**看早**，
             //    报出来的是"保存后抽屉没关"（上一版就踩了这个）。
             facts['settings.panelClosedAfterSave'] = await until(
-              () => !d().querySelector('.drawer'),
+              () => !d().querySelector('[data-settings-panel]'),
               60,
             )
             const api = await f.contentWindow
@@ -3700,29 +3749,32 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             const again = paneBtn('设置')
             if (again) {
               click(again)
-              await until(() => !!d().querySelector('.drawer'))
-              await until(() => !!d().querySelector('.drawer .tpl-state .badge'))
+              await until(() => !!d().querySelector('[data-settings-panel]'))
+              await until(() => !!d().querySelector('[data-settings-panel] .tpl-state .badge'))
               facts['settings.reopenedBadge'] = need('重开后的徽章', () =>
-                text(d().querySelector('.drawer .tpl-state .badge')),
+                text(d().querySelector('[data-settings-panel] .tpl-state .badge')),
               )
               // ★ 重开之后切到聊天页签：框里应当是**刚存进去的那份**（走了一圈库
               //   回来，而不是内存里那份草稿）
-              const chatTab2 = [...d().querySelectorAll('.drawer .tabs .tab')].find((t) =>
-                text(t).includes('聊天'),
+              // ★ 295 批：页签在**主区面板**里（不再是抽屉）
+              const chatTab2 = [...d().querySelectorAll('[data-settings-panel] .tabs .tab')].find(
+                (t) => text(t).includes('聊天'),
               )
               if (chatTab2) {
                 click(chatTab2)
                 await wait(250)
-                const taChat2 = d().querySelector('.drawer .tpl-text')
+                const taChat2 = d().querySelector('[data-settings-panel] .tpl-text')
                 facts['settings.reopenedChat'] = taChat2
                   ? taChat2.value.includes(CHAT_MARK)
                   : null
               }
-              // Esc 关（抽屉组件里的统一处理）
-              f.contentWindow.dispatchEvent(
-                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+              // ★ 295 批：主区面板不是浮层 ⇒ **点头部那颗返回**（不再走 Esc）
+              const backMain = d().querySelector('[data-settings-panel] [data-settings-back]')
+              if (backMain) click(backMain)
+              facts['settings.goneAfterEsc'] = await until(
+                () => !d().querySelector('[data-settings-panel]'),
+                40,
               )
-              facts['settings.goneAfterEsc'] = await until(() => !d().querySelector('.drawer'), 40)
             }
           }
         }
@@ -9675,8 +9727,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             )
             if (!openBtn) return { present: false, reason: '聊天页顶栏没有「设置」' }
             click(openBtn)
-            const sec = await untilNet(() => d().querySelector('[data-memory-prefixes]'), 60)
-              ? d().querySelector('[data-memory-prefixes]')
+            // ★ 295 批：设置在**主区面板**里（不再是右抽屉）
+            const sec = (await untilNet(() => d().querySelector('[data-settings-panel] [data-memory-prefixes]'), 60))
+              ? d().querySelector('[data-settings-panel] [data-memory-prefixes]')
               : null
             if (!sec) return { present: false, reason: '抽屉里没有记忆触发词那一节' }
             const words = () =>
@@ -9767,10 +9820,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               }
             })()
 
-            // 关掉抽屉（Escape 由 Drawer 自己接）：留着会挡住后面判据量的聊天页
-            f.contentWindow.dispatchEvent(
-              new f.contentWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-            )
+            /**
+             * ★ 295 批：关掉面板 = **点头部那颗返回**（主区面板不是浮层，Esc 不再关它）。
+             *   留着会挡住后面判据量的聊天页——右栏此刻被设置换掉了。
+             */
+            const backFromSettings = d().querySelector('[data-settings-panel] [data-settings-back]')
+            if (backFromSettings) click(backFromSettings)
             await untilNet(() => !d().querySelector('[data-memory-prefixes]'), 40)
             return { present: true, before, added, inIdentity }
           })())

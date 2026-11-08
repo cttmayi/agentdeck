@@ -206,12 +206,18 @@
       id: 'settings',
       label: $t('agents.settingsButton'),
       kind: 'secondary',
-      disabled: settingsOpen,
       title: $t('agents.settingsTitle'),
+      /**
+       * ★ 295 批：设置从右抽屉搬进**主区面板** ⇒ 这颗按钮变成**开关**：
+       *   再点一次就回到刚才那个智能体（原来它是 `disabled: settingsOpen`，
+       *   而抽屉自己有关闭按钮，不需要它当开关）。
+       */
       onActivate: () => {
-        settingsOpen = true
-        creating = false
-        selectedId = null
+        settingsOpen = !settingsOpen
+        if (settingsOpen) {
+          creating = false
+          selectedId = null
+        }
       },
     },
     {
@@ -469,10 +475,10 @@
     ⚠️ 2026-10：新建智能体**不再弹右侧抽屉**——与编辑态同款，住在右栏正文里
     （`MainArea` body 的 `{#if creating}`，见下）。`WorkspaceSettings` 仍是抽屉。
   -->
-  <WorkspaceSettings open={settingsOpen} onclose={() => (settingsOpen = false)} />
+
 
   <!-- ══════════════════ 右栏：新建表单 / 选中的 agent（宽屏并排 / 窄屏整页）══════════════════ -->
-  <MainArea empty={!creating && selected === null}>
+  <MainArea empty={!settingsOpen && !creating && selected === null}>
     {#snippet emptyContent()}
       <div class="empty">
         <strong>{$t('agents.pickOneTitle')}</strong>
@@ -483,7 +489,9 @@
       </div>
     {/snippet}
     {#snippet body()}
-      {#if creating}
+      {#if settingsOpen}
+        <WorkspaceSettings onclose={() => (settingsOpen = false)} />
+      {:else if creating}
         <NewAgentForm
           onclose={() => (creating = false)}
           oncreated={() => {

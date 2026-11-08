@@ -3,7 +3,6 @@
   import { showToast } from '../lib/view.ts'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
-  import Drawer from './Drawer.svelte'
   import FirstSentenceTemplate from './FirstSentenceTemplate.svelte'
   import type { BlockTemplates, FirstSentenceKind, TemplateBlock } from '../lib/api.ts'
 
@@ -34,7 +33,7 @@
    * 最初的版本做成了每个 agent 一份，被使用者当场纠正；界面上显示的这份与
    * 执行器投递的那份也因此收在同一个接口上（`current`）。
    */
-  export let open = false
+  /** ★ 295 批：设置是不是开着由**页面**决定（页面决定右栏放什么），组件只管画面板。 */
   export let onclose: () => void = () => {}
 
   let tab: FirstSentenceKind = 'execute'
@@ -75,8 +74,13 @@
     task: t?.task ?? '',
   })
 
-  $: if (open && $templateKit === null) void loadTemplateKit()
-  $: if (open && !seeded && $templateKit !== null) {
+  /**
+   * ★ 295 批：面板是**挂载即打开**（页面只在"设置开着"时渲染它），所以原来那些
+   *   `if (open && …)` 的门换成"挂载时就做一次"——否则 `open` 永远是 undefined，
+   *   模版库永远不加载、草稿永远不铺（实测就是这句"condition will always return true"）。
+   */
+  $: if ($templateKit === null) void loadTemplateKit()
+  $: if (!seeded && $templateKit !== null) {
     drafts = {
       execute: copyKit($templateKit.current.execute),
       review: copyKit($templateKit.current.review),
@@ -92,15 +96,11 @@
    * 清空这些行是给"打开时那份配置还没取回来"的窗口用的：那一刻宁可显示占位符，
    * 也不要先闪一段上一次的残稿——"取消之后还留着"正是这个 bug 的样子。
    */
-  $: if (!open && seeded) {
-    seeded = false
-    drafts = {
-      execute: emptyKit(),
-      review: emptyKit(),
-      chat: emptyKit(),
-    }
-    error = ''
-  }
+  /**
+   * ⚠️ "关掉就丢弃草稿"这一段随抽屉一起删了：面板**卸载即关闭**，下一次打开是新的
+   *   实例、草稿天然是新的（原来的清空逻辑只是为了处理"同一个组件实例被复用"）。
+   *   如果留着，`!open` 恒为真 ⇒ 会不停地清空正在编辑的草稿。
+   */
 
   $: current = drafts[tab][block]
   /**
@@ -155,15 +155,22 @@
   }
 </script>
 
-{#if open}
-  <Drawer
-    {open}
-    size="wide"
-    title={$t('tpl.settings.title')}
-    subtitle={$t('tpl.settings.subtitle')}
-    ariaLabel={$t('tpl.settings.title')}
-    {onclose}
-  >
+  <!--
+    ★ 分批第 295 批（使用者："聊天设置，智能体设置，都改成和沉淀设置一样，放在主区"）：
+    **不再是右抽屉**，而是主区面板（与沉淀设置、技能/工具的「安装」同一族）。
+    抽屉会盖住右栏正在看的那个智能体；面板把右栏整块换掉、左栏还在。
+    ⚠️ 头部那颗返回**一直可见**（列表被面板换掉了，没有别的回去的路）；
+      Esc 不再拦（它不是浮层）。
+  -->
+  <section class="main-panel" data-settings-panel aria-label={$t('tpl.settings.title')}>
+    <header class="main-panel-head">
+      <button type="button" class="ghost small panel-back" data-settings-back onclick={onclose}
+        >{$t('common.backPanel')}</button
+      >
+      <h2>{$t('tpl.settings.title')}</h2>
+      <span class="faint small">{$t('tpl.settings.subtitle')}</span>
+    </header>
+    <div class="main-panel-body detail-scroll settings-body">
     <form
       id="settings-form"
       class="settings-form"
@@ -261,7 +268,8 @@
       <!-- 以后的设置往这里加：一段一件独立的事，底部那个「保存」是共用的 -->
     </form>
 
-    <svelte:fragment slot="foot">
+    </div>
+    <div class="main-panel-foot settings-error">
       <button
         type="submit"
         form="settings-form"
@@ -283,9 +291,8 @@
       {:else}
         <span class="faint small">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
       {/if}
-    </svelte:fragment>
-  </Drawer>
-{/if}
+    </div>
+  </section>
 
 <style>
   .settings-form { width: 100%; min-width: 0; }
