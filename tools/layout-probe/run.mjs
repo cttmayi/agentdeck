@@ -1973,7 +1973,12 @@ const CHECKS = [
       v.termsPop.length > 0 &&
       // ⚠️ 存在 ≠ 看得见：浮层必须真的在视口里、且没被别的东西盖住
       //    （第一次实现时它按更远的祖先定位，跑到了屏幕外——DOM 里有、人看不到）
-      v.termsVisible === true,
+      v.termsVisible === true &&
+      // ⚠️ 看得见 ≠ 好看：**太窄**时一个词就被折成两行（使用者一眼就看出来了）。
+      //    判据：浮层至少 14rem 宽，且每个词 chip 只占一行。
+      typeof v.termsWidth === 'number' &&
+      v.termsWidth >= 200 &&
+      v.termsChipsSingleLine === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
@@ -1981,7 +1986,8 @@ const CHECKS = [
           `点击有反应 ${String(v.reacts)}　toast「${String(v.reason)}」　虚线态 ${String(v.unavailable)}　` +
           `栏脚高 ${String(v.composerH)}px　取词「${String(v.termsLabel)}」→「${String(
             (v.termsPop ?? '').slice(0, 40),
-          )}」　浮层可见 ${String(v.termsVisible)}`,
+          )}」　浮层可见 ${String(v.termsVisible)}　宽 ${String(v.termsWidth)}px　` +
+          `词不换行 ${String(v.termsChipsSingleLine)}`,
   },
   {
     view: '沉淀',

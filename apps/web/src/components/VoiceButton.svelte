@@ -442,7 +442,18 @@
     bottom: calc(100% + 6px);
     right: 0;
     z-index: 30;
-    max-width: 24rem;
+    /**
+     * ⚠️⚠️ **必须有 `width: max-content`**（290 批的教训）。
+     *
+     * 绝对定位元素的宽度是"收缩适应"：可用宽度 = **包含块宽度 − 偏移**，而这里的
+     * 包含块是那个 `.voice-cell`（约 44px，只装得下一颗图标 + 「取词」两个字）。
+     * 只写 `max-width: 24rem` 时，它照样按 44px 去折行 ⇒ **一个词都换行**，
+     * 使用者一眼看到的就是"太窄、太丑"。
+     * `max-content` 让宽度按内容算，再用 `max-width` 封顶，才不会被包含块压扁。
+     */
+    width: max-content;
+    min-width: 14rem;
+    max-width: min(24rem, 62vw);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -461,6 +472,8 @@
   }
 
   .terms-chip {
+    /* 一个词就是一行：词内部绝不换行（浮层窄是浮层的事，不该由词来承担） */
+    white-space: nowrap;
     font-size: var(--fs-xs);
     padding: 0 var(--sp-2);
     border: 1px solid var(--line-strong);

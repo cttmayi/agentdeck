@@ -7783,9 +7783,37 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
            */
           const termsBtn = d().querySelector('.detail-pane [data-composer] [data-voice-terms]')
           const termsLabel = (text(termsBtn) ?? '').trim()
+          /**
+           * ★ 290 批：临时把「取词」那个接口换成一份假词表——探针的对话里没有可抽的
+           *   标识符，而这里要量的是**浮层的排版**（宽度够不够、词会不会被折断）。
+           *   量完立刻还原（`finally`），不留副作用。
+           */
+          const realFetchForTerms = f.contentWindow.fetch
+          f.contentWindow.fetch = function (input, init) {
+            const url = typeof input === 'string' ? input : input && input.url ? input.url : ''
+            if (!String(url).includes('/api/voice/context-terms')) {
+              return realFetchForTerms.call(f.contentWindow, input, init)
+            }
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  terms: ['ASD-STE100', 'whisper-cpp-node', 'obsidian-wiki', 'AgentDeck'],
+                  prompt: '',
+                  auto: true,
+                  userTurns: 5,
+                  agentReplies: 5,
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+              ),
+            )
+          }
           let termsPop = null
           /** 浮层**真的看得见**吗（存在 ≠ 看得见，这里踩过一次）。 */
           let termsVisible = null
+          /** 浮层宽度（太窄 ⇒ 一个词都换行；290 批）。 */
+          let termsWidth = null
+          /** 每个词 chip 是不是只占一行。 */
+          let termsChipsSingleLine = null
           if (termsBtn !== null) {
             click(termsBtn)
             await wait(500)
@@ -7807,9 +7835,25 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
                 Number(st.opacity) > 0 &&
                 at !== null &&
                 pop.contains(at)
+              /**
+               * ★ 290 批（使用者："太丑了，主要原因还是太窄了，一个词都换行了"）：
+               *   量两件——① 浮层至少 14rem 宽；② 每个词 chip **只占一行**
+               *   （chip 高度不超过它的行高太多，就是没有被折断）。
+               */
+              termsWidth = Math.round(r.width)
+              const chips = [...pop.querySelectorAll('.terms-chip')]
+              termsChipsSingleLine =
+                chips.length > 0 &&
+                chips.every((chip) => {
+                  const cr = chip.getBoundingClientRect()
+                  const fs = parseFloat(cs(chip).fontSize || '12')
+                  return cr.height <= fs * 2.2
+                })
             }
             click(termsBtn)
           }
+          // 还原 fetch（这一段只是量排版，不该影响后面的判据）
+          f.contentWindow.fetch = realFetchForTerms
           return {
             present: true,
             label,
@@ -7819,6 +7863,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             termsLabel,
             termsPop,
             termsVisible,
+            termsWidth,
+            termsChipsSingleLine,
             reason: reasonEl === null ? null : (text(reasonEl) ?? '').trim(),
             // toast 出现时栏脚高度（与上面那次量的比，用来确认"浮层没撑高"）
             composerH,
