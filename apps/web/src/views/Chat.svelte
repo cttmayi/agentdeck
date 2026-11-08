@@ -1522,6 +1522,12 @@
        三页标题字号字重各不一样（实测 13/400、14/600、14/700）。 */
     font-weight: 600;
     color: var(--text);
+    /* ★ 310 批（使用者报的：标题被拉成两行，末尾却还带省略号）：行内元素上
+       `overflow`/`text-overflow` **不生效**——`nowrap` 只挡住换行点的算法，
+       长中文在窄栏里仍会被父级按钮的宽度顶出去、看起来像两行。必须 `display: block`
+       + `max-width: 100%`，省略号才有"盒子"可裁。 */
+    display: block;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

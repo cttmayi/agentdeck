@@ -580,8 +580,15 @@
    * 这一页 scoped 只剩行**内容**的样式：名字 / 徽标 / 注释摘要 / 「设为默认」。
    * 名字与聊天/任务标题同一档（D65：600；strong 默认 700，实测三页 400/600/700）。
    */
+  /* ★ 310 批：与聊天的 `.conv-title`、任务的 `.task-title` 同一条规矩——
+     单行 + 省略号必须是**块级**且有 `max-width`，否则长名字会被顶成两行。 */
   .agent-line strong {
     font-weight: 600;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .agent-line {

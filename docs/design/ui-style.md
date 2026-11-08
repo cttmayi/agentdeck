@@ -94,6 +94,7 @@
 | 主区面板（设置这类） | `.main-panel` + `.main-panel-head`（`h2` + `.panel-back`）+ `.main-panel-body` + `.main-panel-foot` | **所有"整块换掉右栏"的面板都长这样** |
 | 详情头 | `.detail-head` + `.detail-sub` + `.detail-actions` | 动作按钮 ≥2 个时自动画分组轨道 |
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
+| 单行省略 | 列表标题一类要"一行 + 省略号"的元素必须 **`display: block` + `max-width: 100%` + `overflow: hidden` + `text-overflow: ellipsis` + `white-space: nowrap`** 五件套 | 310 批：行内元素上 `overflow`/`text-overflow` 不生效，`nowrap` 只挡换行*算法*，中文长标题在窄栏里仍会被顶成两行、末尾却还挂着省略号（使用者报的） |
 | 混排行 | 短控件（勾选）+ 长控件（标签+输入）同排时 **`align-items: flex-end`** | 308 批：`center` 会让勾选浮在中间、`flex-start` 贴着顶边——两者高度差大时都不像同一行。新写这类行照这条来 |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
 | 浮层 | `.drawer*` / `.modal*` / `.page-menu` / `.toast` | 遮罩 + 描边 + `--shadow-2` 三层一起给 |
