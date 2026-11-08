@@ -361,9 +361,20 @@ export const chatText = {
   'chat.voiceSettingsReady': { zh: '可以用（麦克风与模型都就绪）', en: 'Ready (microphone and model are in place)' },
   'chat.voiceSettingsModel': { zh: '模型', en: 'Model' },
   'chat.voiceSettingsLanguage': { zh: '语言', en: 'Language' },
-  'chat.voiceLanguageZh': { zh: '中文', en: 'Chinese' },
-  'chat.voiceLanguageEn': { zh: '英文', en: 'English' },
-  'chat.voiceLanguageAuto': { zh: '自动判断（中英混说容易判错）', en: 'Auto-detect (mixed speech often misjudged)' },
+  /**
+   * ★ 分批第 292 批（用 small-q5_1 实测后改的口径）：
+   *   · 中英混说：`zh` 与 `auto` **结果一样**（英文术语都保留），原来那句
+   *     "中英混说容易判错"是不准的；
+   *   · 真正的坑是**整段说英文**：`zh` 会把整段**翻译成中文**（实测："Let us ship the
+   *     AgentDeck VAD fix today" → "当我们发行的 AgentDeck…评论给你"），而 `auto` 会判成英文。
+   *   ⇒ 说明改成"说整段英文时用它"，这才是它存在的理由。
+   */
+  'chat.voiceLanguageZh': { zh: '中文（中英混说够用；整段英文会被翻成中文）', en: 'Chinese (fine for mixed speech; English-only gets translated)' },
+  'chat.voiceLanguageEn': { zh: '英文（中文会被翻成英文，别选错）', en: 'English (Chinese gets translated — pick deliberately)' },
+  'chat.voiceLanguageAuto': {
+    zh: '自动判断（整段说英文时用它；短句可能判成英文）',
+    en: 'Auto-detect (use for English-only speech; short clips may be judged as English)',
+  },
   'chat.voiceSettingsSensitivity': { zh: '灵敏度', en: 'Sensitivity' },
   'chat.voiceSensitivityStable': { zh: '稳（不容易被打断，收尾慢一点）', en: 'Steady (harder to cut off, stops a bit later)' },
   'chat.voiceSensitivityNormal': { zh: '中（默认）', en: 'Normal (default)' },

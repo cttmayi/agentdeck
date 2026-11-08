@@ -120,7 +120,7 @@ idle ──start──▶ recording:waiting-speech ──首个 speech──▶ 
 | 落点 | `~/.agentdeck/asr/`（`--asr-root` 可覆盖）：`vocab.json` / `settings.json` / `models/` / `models.lock.json` |
 | 默认模型 | `ggml-base-q5_1.bin`（约 57 MiB，多语言）；可切 `small-q5_1`（181 MiB）/ `small`（466 MiB） |
 | 上游基址 | **回退链**：先 huggingface.co，不通就自动换 hf-mirror.com（两者内容一致）；`--asr-model-base` 给了就**只用它、不回落**。结果里带 `source`，界面会说清"来自哪个 host" |
-| 语言 | 默认 `zh`，可选 `en` / `auto`（中英混说时 auto 容易判错） |
+| 语言 | 默认 `zh`，可选 `en` / `auto`（口径见下面 §7.7：中英混说 `zh` 与 `auto` **一样好**；`zh` 的坑是**整段英文会被翻成中文**） |
 | 灵敏度 | 三档 `stable`(0.6/1200ms) / `normal`(0.5/800ms) / `quick`(0.4/500ms) |
 
 ---
@@ -200,6 +200,32 @@ PascalCase（`AgentDeck`）｜缩写（`VAD`、`ARC`、`STE100`）｜含大写�
 ⚠️ 不加"模型来源限定"时的对照（说明为什么要有那三条过滤）：模型那一侧会灌进
 `SVG/PNG/Git/Agentic/Workflow/recap/unittest/1800×1306/doc/image/…-flow.svg`——
 "写下来的字"不等于"会说出口的名字"。
+
+## 7.7 语言档与模型档：small-q5_1 实测（批 292）
+
+使用者问："当前我语音识别默认是中文，是否合理，我们确实有可能在中文中说一下英语单词，
+比如 Agent、LLM 等"。
+
+用 **small-q5_1** + TTS 合成语音实测（5 段 × 3 档）：
+
+| 素材 | `zh` | `auto` | `en` |
+|---|---|---|---|
+| 这个 Agent 跑在 LLM 上，我们用 AgentDeck 试一下 | `这个 Agent 好在 LLM 上,我们用 AgentDeck 试一下。` | **与 zh 相同** | 整段翻成英文（不能用） |
+| 我们今天讨论 Memento 3 的 RSI 机制，它用的是 frozen LLM | `Memento3 的 RSI 机制,它用的是 Frozen、LLM,不是微条。` | **与 zh 相同** | 翻成英文 |
+| 用 pnpm 装一下 distilly，然后跑 VAD 测试 | **`用 pnpm 装一下 distilly,然后跑 VAD 测试。`（全对）** | **与 zh 相同** | 翻成英文 |
+| 今天我们讨论一下离线语音识别的方案 | `离线与音识别`（与音 = 语音，差一字） | 与 zh 相同 | 翻成英文 |
+| **整段英文**：Let us ship the AgentDeck VAD fix today | **`当我们发行的 AgentDeck…评论给你。`（整段翻成中文幻觉）** | **判成英文，输出英文** | 英文（仍不准） |
+| 短句「好的，继续」/「试一下这个」 | 正确 | **同样正确**（短句没判错） | — |
+
+**结论**：
+1. **默认 `zh` 合理**——你说的"中英混说"这一档，`zh` 与 `auto` 结果**完全一样**，
+   英文术语（`Agent`/`LLM`/`AgentDeck`/`distilly`）都被保留。原来设置里那句
+   "中英混说容易判错"是不准的，已按实测改写。
+2. **`zh` 唯一的坑是整段说英文**：它会把整段**翻译成中文**（上表最后一行）。
+   那种情况用 `auto`（或 `en`）。`en` 反过来会把中文翻成英文，所以不能当默认。
+3. **模型档的差距比语言档大得多**：`small-q5_1` 上表第 3 行**全对**，而 `base-q5_1`
+   同一句是 `用 pm、tm、装衣下 distilly,然后跑达的测试。`——`pnpm`、`VAD` 全毁。
+   速度：small ≈ 0.13×（约 8 倍实时）、base ≈ 0.06×（约 17 倍实时）。**default 应该用 small**。
 
 ## 8. 踩过的坑（写在这里免得再踩）
 
