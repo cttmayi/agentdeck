@@ -350,7 +350,7 @@
 
   <!-- ══════════════════ 右栏：流程页 / 空态 ══════════════════ -->
   {#if $crystallize !== null && $crystallize.runId === 'settings'}
-    <CrystallizeSettings />
+    <CrystallizeSettings onback={() => go('crystallize')} />
   {:else if $crystallize !== null}
     <CrystallizeView
       runId={$crystallize.runId}

@@ -5,6 +5,7 @@
   // `$t` 是 i18n store 的自动订阅名——**必须 import 进来**，否则模板里的 `$t` 指不到
   // 任何 store（svelte-check 报 "illegal variable name"，第 242 批第一次写就撞上）。
   import { t } from '../lib/i18n.ts'
+  import SettingsPanel from './SettingsPanel.svelte'
 
   /**
    * 聊天页的「设置」抽屉。
@@ -381,15 +382,12 @@
   ⚠️ 返回入口必须**一直可见**（`.panel-back`）——列表被面板换掉了，"点列表回去"这条
     路此刻不存在；也**不再用 Esc**（它不是浮层，拦 Esc 会抢掉输入框的 Esc）。
 -->
-<section class="main-panel" data-settings-panel aria-label={$t('chat.settingsTitle')}>
-  <header class="main-panel-head">
-    <button type="button" class="ghost small panel-back" data-settings-back onclick={onclose}
-      >{$t('common.backPanel')}</button
-    >
-    <h2>{$t('chat.settingsTitle')}</h2>
-    <span class="faint small">{$t('chat.settingsSubtitle')}</span>
-  </header>
-  <div class="main-panel-body detail-scroll settings-body">
+<SettingsPanel
+  title={$t('chat.settingsTitle')}
+  subtitle={$t('chat.settingsSubtitle')}
+  onback={onclose}
+>
+  {#snippet body()}
   <section class="drawer-section" data-voice-settings>
     <h3>{$t('chat.voiceSettingsHeading')}</h3>
     <p class="hint">{$t('chat.voiceSettingsHint')}</p>
@@ -669,8 +667,8 @@
       <p class="hint bad" data-prefix-error>{error}</p>
     {/if}
   </section>
-  </div>
-</section>
+  {/snippet}
+</SettingsPanel>
 
 <style>
   /*
@@ -691,14 +689,6 @@
   .sub-block h4 {
     font-size: var(--fs-sm);
     margin: 0 0 var(--sp-1);
-  }
-
-  .settings-body {
-    padding: var(--sp-4);
-  }
-
-  .settings-body p {
-    margin: 0 0 var(--sp-2);
   }
 
   .prefix-chips {

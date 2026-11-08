@@ -11,6 +11,12 @@
   import { t } from '../lib/i18n.ts'
   import { api } from '../lib/api.ts'
   import { DISTILLY_SOURCE, draftSkill } from '../lib/crystallize-editor.svelte.ts'
+  import SettingsPanel from './SettingsPanel.svelte'
+
+  /**
+   * ★ 296 批：返回交给页面（沉淀页的"回去"就是回到空态 / 上一屏）。
+   */
+  let { onback }: { onback: () => void } = $props()
 
   let busy = $state(false)
   let note = $state('')
@@ -94,7 +100,16 @@
   })
 </script>
 
-<div class="detail-scroll settings-body">
+<!--
+  ★ 296 批：与聊天 / 智能体设置**同一副外壳**（`SettingsPanel`）——三处终于长得一样，
+  头部那颗返回也是同一颗。业务分段仍是各自的内容。
+-->
+<SettingsPanel
+  title={$t('crystallize.settingsEntry')}
+  subtitle={$t('crystallize.settingsSubtitle')}
+  onback={onback}
+>
+  {#snippet body()}
   <section class="drawer-section">
     <h3>{$t('crystallize.settingsSkill')}</h3>
     <p class="faint small">{$t('crystallize.settingsSkillHint')}</p>
@@ -135,17 +150,10 @@
     </div>
     {#if proxyNote !== ''}<p class="faint small">{proxyNote}</p>{/if}
   </section>
-</div>
+  {/snippet}
+</SettingsPanel>
 
 <style>
-  .settings-body {
-    padding: var(--sp-4);
-  }
-
-  .settings-body p {
-    margin: 0 0 var(--sp-2);
-  }
-
   .proxy-row {
     display: flex;
     gap: var(--sp-1);

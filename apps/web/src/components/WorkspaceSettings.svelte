@@ -4,10 +4,11 @@
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
   import FirstSentenceTemplate from './FirstSentenceTemplate.svelte'
+  import SettingsPanel from './SettingsPanel.svelte'
   import type { BlockTemplates, FirstSentenceKind, TemplateBlock } from '../lib/api.ts'
 
   /**
-   * 设置（右侧抽屉）。
+   * 设置（**主区面板**，295 批从右抽屉搬过来；外壳见 `SettingsPanel.svelte`）。
    *
    * ══════════════════════════════════════════════════════════════════
    * 它是一个**装设置的容器**，不只有第一句话
@@ -162,15 +163,12 @@
     ⚠️ 头部那颗返回**一直可见**（列表被面板换掉了，没有别的回去的路）；
       Esc 不再拦（它不是浮层）。
   -->
-  <section class="main-panel" data-settings-panel aria-label={$t('tpl.settings.title')}>
-    <header class="main-panel-head">
-      <button type="button" class="ghost small panel-back" data-settings-back onclick={onclose}
-        >{$t('common.backPanel')}</button
-      >
-      <h2>{$t('tpl.settings.title')}</h2>
-      <span class="faint small">{$t('tpl.settings.subtitle')}</span>
-    </header>
-    <div class="main-panel-body detail-scroll settings-body">
+  <SettingsPanel
+    title={$t('tpl.settings.title')}
+    subtitle={$t('tpl.settings.subtitle')}
+    onback={onclose}
+  >
+    {#snippet body()}
     <form
       id="settings-form"
       class="settings-form"
@@ -268,8 +266,8 @@
       <!-- 以后的设置往这里加：一段一件独立的事，底部那个「保存」是共用的 -->
     </form>
 
-    </div>
-    <div class="main-panel-foot settings-error">
+    {/snippet}
+    {#snippet foot()}
       <button
         type="submit"
         form="settings-form"
@@ -291,8 +289,8 @@
       {:else}
         <span class="faint small">{$t('tpl.settings.savedHint.before')}<strong>{$t('tpl.settings.savedHint.strong')}</strong>{$t('tpl.settings.savedHint.after')}</span>
       {/if}
-    </div>
-  </section>
+    {/snippet}
+  </SettingsPanel>
 
 <style>
   .settings-form { width: 100%; min-width: 0; }

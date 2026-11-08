@@ -2757,7 +2757,7 @@ const CHECKS = [
   {
     view: '新建表单 / 设置',
     key: 'settings.panelOpened',
-    label: '点「设置」后出现**主区面板**（295 批：从右抽屉搬进主区，与沉淀设置同一族）',
+    label: '点「设置」后出现**主区面板**（295 批：从右抽屉搬进主区，与设置（沉淀页）同一族）',
     ok: (v) => v === true,
   },
   {
@@ -4470,7 +4470,7 @@ const CHECKS = [
   },
   // ★ 分批第 207 批删掉了 `crystal.draftSkillSection`（右栏栏头那句"没装沉淀用技能"）。
   //   技能现在真的挂在**起草者**身上 ⇒ "装没装"该看两处：智能体页起草者那一格
-  //   （`agents.drafterSkillChip`）与「沉淀设置」页；右栏再念一遍是第三处，且只在"没装"时出现。
+  //   （`agents.drafterSkillChip`）与「设置」页（沉淀页）；右栏再念一遍是第三处，且只在"没装"时出现。
   {
     view: '沉淀',
     key: 'crystal.artifactResize',

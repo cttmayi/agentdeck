@@ -1488,7 +1488,7 @@ facts['entry.智能体'] = { from: f.contentWindow.location.hash, to: '#/agents'
             if (!btn) return false
             click(btn)
             await wait(1500)
-            // ★ 295 批：设置从右抽屉搬进**主区面板**（与沉淀设置同一族）
+            // ★ 295 批：设置从右抽屉搬进**主区面板**（与设置（沉淀页）同一族）
             return d().querySelector('[data-settings-panel] textarea') !== null
           }
           const field = () => d().querySelector('[data-settings-panel] textarea')
@@ -3473,7 +3473,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           /**
            * ★ 分批第 295 批（使用者："聊天设置，智能体设置，都改成和沉淀设置一样，放在主区"）：
            *   原来这一整段量的都是**右抽屉**（`.drawer`、遮罩、宽度 46rem、贴着屏幕右边）；
-           *   现在它是**主区里的一块面板**（`.main-panel`，与沉淀设置/技能安装同族）——
+           *   现在它是**主区里的一块面板**（`.main-panel`，与设置（沉淀页）/技能安装同族）——
            *   所以判据整体换了宿主：
            *     · 没有遮罩、不是 `position: fixed`（它随页面滚）；
            *     · 它在**右栏里面**（`.detail-pane` 里），把原来那块内容**换掉**；

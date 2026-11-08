@@ -359,7 +359,13 @@ export const crystallizeText = {
   'crystallize.draftSkillInstalled': { zh: '已装好：{name}（起草时会注入它）', en: 'Installed: {name} (injected while drafting)' },
   'crystallize.draftSkillInstall': { zh: '一键安装 distilly', en: 'Install distilly' },
   // ── 沉淀设置页（分批第 175 批）──
-  'crystallize.settingsEntry': { zh: '沉淀设置', en: 'Crystallize settings' },
+  /**
+   * ★ 296 批（使用者："把名字也改一下'沉淀设置'改成'设置'"）：这一页就在沉淀页里，
+   *   叫「沉淀设置」等于把父级名字念两遍；三处设置页也终于同名（聊天 / 智能体 / 沉淀
+   *   都叫「设置」）。
+   */
+  'crystallize.settingsEntry': { zh: '设置', en: 'Settings' },
+  'crystallize.settingsSubtitle': { zh: '沉淀这条线的配置', en: 'Settings for crystallization' },
   'crystallize.settingsSkill': { zh: '沉淀用技能', en: 'Skill for drafting' },
   'crystallize.settingsSkillHint': {
     zh: '起草时把这个技能注入给起草者（它按技能里的流程干活）。技能不随项目发布，一键安装的是上游仓库那份。',
