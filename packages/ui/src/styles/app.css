@@ -969,6 +969,10 @@ hr {
 
 .detail-head h2 {
   font-size: var(--fs-lg);
+  /* ★ 314 批（使用者："标题字色"有差别）：标题字色**显式**钉成正文色。
+     原来是继承——聊天那一栏的容器与任务那一栏不是同一个，继承链不同，
+     同一颗 h2 就会落成 `--text` 与 `--text-dim` 两种，看着就是"颜色不一样"。 */
+  color: var(--text);
   margin: 0;
   min-width: 0;
   overflow: hidden;
