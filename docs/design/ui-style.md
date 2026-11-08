@@ -96,6 +96,7 @@
 | 空态 | `.empty`（可带 `strong` + `p`） | 别自己拼居中的灰字 |
 | 提示条 | `.notice` + `.bad` / `.warn` / `.good` | 一句话；更长的进 body |
 | 浮层 | `.drawer*` / `.modal*` / `.page-menu` / `.toast` | 遮罩 + 描边 + `--shadow-2` 三层一起给 |
+| 表格 | `.table-wrap`（壳）+ `<table class="table">` | 307 批：表头/单元格内距等规则挂**元素选择器与 `.table` 两条**，所以"长得像表格但不是 `<table>` 元素"的东西加 `class="table"` 就同款 |
 | 折叠 | `.fold-section` / `.fold-head` / `.fold-body` | |
 
 ### 2.5 已经归位、**不要**再新画的

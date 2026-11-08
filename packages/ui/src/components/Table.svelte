@@ -15,7 +15,7 @@
    * 展开行、remote 没有）。这正是"差异是真差异，硬抽会把差异塞回 props 和插槽"
    * 的那条教训——所以：
    *
-   *   · **壳进组件**：`.table-wrap` + `<table>` + thead（`scope="col"` 给读屏器、
+   *   · **壳进组件**：`.table-wrap` + `<table class="table">` + thead（`scope="col"` 给读屏器、
    *     操作列用 `aria-label` 起名——这两条无障碍约定 5 处各写一遍，迟早有人
    *     漏一处）+ `<tbody>`；
    *   · **内容进 snippet**：`rows` 由页面给（行标记类如 `tool-row` / `skill-slug`

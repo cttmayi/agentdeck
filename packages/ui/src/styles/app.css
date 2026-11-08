@@ -1420,13 +1420,20 @@ label > select { margin-top: var(--sp-1); }
 
 /* ══════════════ 表格 ══════════════ */
 
-table {
+/* ★ 307 批（使用者要求"给未来的表格也留一个同一的入口"）：每条规则都同时挂
+   元素选择器与 `.table` 类。现在的表都是 `<table>`（四页共用 `Table` 组件），
+   所以加类不会改任何像素；将来若有"不是 table 元素但该长得像表格"的东西
+   （栅格化的对照表之类），加个 `class="table"` 就同款，不用再抄一遍内距。 */
+
+table,
+.table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-sm);
 }
 
-thead th {
+thead th,
+.table th {
   text-align: left;
   font-weight: 500;
   font-size: var(--fs-xs);
@@ -1439,15 +1446,18 @@ thead th {
   white-space: nowrap;
 }
 
-tbody td {
+tbody td,
+.table td {
   padding: var(--sp-3);
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
-tbody tr:hover { background: var(--surface); }
+tbody tr:hover,
+.table tbody tr:hover { background: var(--surface); }
 
-tbody tr:last-child td { border-bottom: 0; }
+tbody tr:last-child td,
+.table tbody tr:last-child td { border-bottom: 0; }
 
 .table-wrap {
   border: 1px solid var(--line);
