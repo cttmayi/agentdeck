@@ -1542,12 +1542,32 @@
     gap: var(--sp-2);
   }
 
+  /* ★ 311 批（使用者报的：标题被拉成两行——上一批我改错了地方，改的是**列表行**的
+     `.conv-title`；出问题的是**栏头这颗 h2**）：
+     · `flex-wrap: wrap` 让长标题自己独占一行并折行 ⇒ 去掉 wrap（栏头是一行的事）
+     · h2 要能收缩：`flex: 1 1 auto; min-width: 0` + 单行省略五件套
+     · 按钮 `flex: 0 0 auto`，否则窄栏里「改名」会被压成两行 */
   .chat-head-main {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: baseline;
     gap: var(--sp-2);
     min-width: 0;
+  }
+
+  .chat-head-main > h2 {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-head-main > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .rename-input {
