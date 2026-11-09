@@ -56,7 +56,7 @@
 | [`./design/style-audit.md`](./design/style-audit.md) | **界面风格审计（2026-11 的快照）** —— 裸值/重复定义/未定义变量/按钮 class 组合的体检数字、逐条迁移记录、像素变更清单与分批计划。**规则去 `ui-style.md`，这里只讲"当初为什么这么改"** | 批 297–302 |
 | [`./design/platform-compat.md`](./design/platform-compat.md) | **平台兼容规则（规程，2026-11 Windows infra_error 事故后固化）** —— Windows ≠ macOS 的九条纪律（进程退出码只在进程自己退出时可信、收进程只有 `process-tree.ts` 一处、适配器不许读平台、路径分隔符/文件系统大小写/CRLF/环境变量/文件占用）、怎么新增平台分支、配套机器检查在 `tests/platform-compat.test.ts`。**现状审计去 `reference/windows-compat.md`，这里是规则** | — |
 | [`./design/skill-crystallization.md`](./design/skill-crystallization.md) | **聊天沉淀 skill 设计（chat-to-skill，已设计未实现）** —— 在 conversation 里把"这段做法"提炼成 SKILL.md 入库、可进化（覆盖 + git 版本管理）；触发双层（用户主动按钮 + 信号建议）、起草 run + 不结晶清单、审阅后入库、git 化自动 commit；调研依据（skilldistill / dsh-skill-evolution / skill-miner / Anthropic 官方）与实现范围六项 | 设计稿（D80） |
-| [`./design/recruiter-interview.md`](./design/recruiter-interview.md) | **生成智能体 + 访谈官 设计（requirement-to-agent，设计稿未实作）** —— 两个**独立**功能（使用者三轮定稿）：功能 A「生成智能体」= 智能体页写一段**要求** → AI（内置 `card-drafter`）起草名称/角色/指令（边界进指令段，缺则最小权限缺省）→ 栏位最少的审阅 → 确认创建；功能 B「访谈官」（可选，角色 `interviewer`）= 聊天页找方向，产出「岗位卡方向」仅作参考。**A、B 不连接**（不用访谈也能生成）；第 2 步 = §4.1.3「沉淀 Agent」的简化落地 | 设计稿 |
+| [`./design/recruiter-interview.md`](./design/recruiter-interview.md) | **从要求生成 + 访谈官 设计（requirement-to-agent-or-skill，设计稿未实作）** —— 两个**独立**功能（使用者四轮定稿）：功能 A「从要求生成」= **独立面板**（不复用新建表单，独立接口族），写一段要求 → 选产出类型（**智能体/技能二选一**）→ AI 起草 → 审阅 → 确认；智能体分支 = `card-drafter` + `agent-draft`，技能分支 = 复用沉淀 skill-draft 骨架（素材源=要求文本，**未经验证**明示）。功能 B「访谈官」（可选，`interviewer`）聊天找方向，「岗位卡方向」仅作参考。**A、B 不连接** | 设计稿 |
 
 > 决策记录见 `./srs/requirements.md` §16（**D1–D75**；D1–D50 是需求期、D51 起是逐轮的实施决定）。**决定改了就把编号写进去**——同步文档时
 > 发现 `D28` 被代码注释引用了十几处、决策表里却一直没有：**决策只活在代码里就会漂。**
