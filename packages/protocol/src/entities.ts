@@ -455,6 +455,14 @@ export const Agent = z.object({
   workspaceId: WorkspaceId,
   name: z.string().min(1).max(100),
   instructions: z.string(),
+  /**
+   * ★ 2026-11（D111）：`instructions.md` 里存的是**组装前**正文（内置 = 身份块，
+   *   自建 = 使用者写的全文）；平台的工作守则（`withConduct`）在**运行时**拼。
+   *   这个标记说"md 里已经是组装后的全文"——只有**老数据迁移**那一处会写 true
+   *   （老记录里内置的指令是组装后的），读取端靠它决定**不要再拼一遍**（拼两遍 =
+   *   守则出现两次）。新写的记录恒为 false。
+   */
+  instructionsAssembled: z.boolean().optional(),
   model: z.string().nullable(),
   /**
    * 平台**内置**的 agent（2026-10：沉淀的起草者）。
@@ -1075,10 +1083,20 @@ export type CrystallizeTargetRef = z.infer<typeof CrystallizeTargetRef>
 
 /** run 使用的 skill 的**标识与来源**（不记版本、不记指纹，D9）。 */
 export const SkillRef = z.object({
-  id: SkillId,
+  /**
+   * 技能库里的 id。
+   *
+   * ★ 2026-11（D111）**允许为空**：智能体的**独有技能**（`agents/<id>/SKILL/`
+   *   里的文件）不在技能库里，没有库 id——ref 只留 slug + `source: 'agent'`。
+   *   老数据全是库技能（id 非空），所以可空不会破坏任何既有读路径。
+   */
+  id: SkillId.nullable(),
   slug: z.string(),
-  /** 含 `'mine'`（D80）：提炼的 skill 同样可以被注入，来源要如实带过去。 */
-  source: z.enum(['local', 'remote', 'mine']),
+  /**
+   * 含 `'mine'`（D80）：提炼的 skill 同样可以被注入，来源要如实带过去。
+   * `'agent'`（D111）：智能体目录里那份独有技能（不是共享资产）。
+   */
+  source: z.enum(['local', 'remote', 'mine', 'agent']),
 })
 export type SkillRef = z.infer<typeof SkillRef>
 

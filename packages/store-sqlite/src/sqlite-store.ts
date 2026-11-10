@@ -1090,6 +1090,30 @@ export class SqliteStore implements Store {
     return Number(res.changes) > 0
   }
 
+  // ── Agent 的独有技能（D111）──
+
+  // ⚠️ 独有技能是**文件资产**（`agents/<id>/SKILL/`），v2 SQLite 没接线（见
+  //    docs/README.md「store-sqlite 已实现但没有接线」），这里如实**不支持**：
+  //    daemon 用的是 store-file，独有技能只会落到文件上。写死返回/抛错，比
+  //    假装能存更诚实——真接线时（SQLite 管文件路径？）再重新设计。
+  async listExclusiveSkills(
+    _agentId: AgentId,
+  ): Promise<Array<{ slug: string; body: string }>> {
+    throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
+  }
+
+  async getExclusiveSkill(_agentId: AgentId, _slug: string): Promise<string | null> {
+    throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
+  }
+
+  async writeExclusiveSkill(_agentId: AgentId, _slug: string, _body: string): Promise<void> {
+    throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
+  }
+
+  async removeExclusiveSkill(_agentId: AgentId, _slug: string): Promise<boolean> {
+    throw new Error('store-sqlite 不支持智能体的独有技能（D111）：独有技能是文件资产，请用 store-file')
+  }
+
   // ── Agent memory（分批第 240 批）──
 
   async listMemoryEntries(

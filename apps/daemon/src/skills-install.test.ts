@@ -1098,17 +1098,13 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
         assert.equal(del.status, 200, '固化之后卸载应当成功')
       }
       const remaining = await listSkills(url)
-      // ★ 2026-11（D109）：daemon 启动会自动装 3 条**平台技能**（生成者的手则）——
-      //   所以这里不能断言"一个都不剩"，而是断言"那两条老标准没了、只剩平台技能"。
+      // ★ 2026-11（D111）：平台技能（生成者的手则）已经是生成者的**独有技能**（目录
+      //   文件），不再进技能库 ⇒ 卸完那两条老标准后库里应该**一个都不剩**。
+      assert.equal(remaining.length, 0, '那两条老标准要卸载干净；库里不该有平台技能')
       assert.equal(
         remaining.some((s) => s.slug === 'legacy-a' || s.slug === 'legacy-b'),
         false,
         '那两条老标准要卸载干净',
-      )
-      assert.deepEqual(
-        remaining.map((s) => s.slug).sort(),
-        ['agent-design-norms', 'boundary-checklist', 'skill-eligibility'],
-        '只剩平台自动装的 3 条生成者技能',
       )
     })
   })

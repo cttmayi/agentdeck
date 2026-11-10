@@ -30,6 +30,26 @@ import { ulid } from '@agentdeck/protocol'
 import type { Agent, WorkspaceId } from '@agentdeck/protocol'
 import type { Store } from '@agentdeck/domain'
 
+/**
+ * **最终指令**（组装后）——模型真正会读到的就是这一份。
+ *
+ * ★ 2026-11（D111）：`instructions.md` 存的是**组装前**正文（内置 = 身份块，
+ *   自建 = 使用者写的全文），平台守则在这里拼。拼装**只在**这一处：
+ *
+ *   · 内置 ⇒ `withConduct(正文)`（身份块 + 平台工作守则）；
+ *   · 自建 ⇒ 原文照用（使用者写的就应该是最终指令，不再追加什么）；
+ *   · `instructionsAssembled === true`（只有老数据迁移会写这个标记）⇒ 正文本身
+ *     已经是组装后的全文，**不要再拼一遍**——拼两遍 = 守则出现两次。
+ *
+ * 使用方：agentRef 快照（聊天/任务/审核/返工）、界面展示（`GET /api/agents`）。
+ * 对账（`ensureBuiltin*`）**不用**它——那里比较的是组装前正文与历史默认。
+ */
+export function effectiveInstructions(agent: Agent): string {
+  if (agent.instructionsAssembled === true) return agent.instructions
+  if (agent.builtin === true) return withConduct(agent.instructions)
+  return agent.instructions
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // ★ 分批第 70 批：内置的有**两条**，`builtin` 只说明"是平台的"，不说明是哪一条
 // ════════════════════════════════════════════════════════════════════════
@@ -144,11 +164,16 @@ export const DRAFTER_NAME = '起草者（内置）'
  * 就**不再成立**了——那句是第 51 批为了"同一个起草者干两件事"加的对象无关表述。现在
  * 起草者只干一件事（把素材写成 skill），留着那半句会让它去找一个不存在的产出契约。
  * 旧版本冻结成 `OLD_V7_INSTRUCTIONS`，老工作区才会被治愈（它在界面上只读，不认历史就只能干看着）。
+ *
+ * ★ 2026-11（D111）：`*_BODY` 是**组装前**正文（instructions.md 里存的就是它）；
+ * `*_INSTRUCTIONS` 是**组装后**（`withConduct` 拼上平台守则）——保留给既有读路径
+ * （界面预填、恢复默认、测试断言"最终指令"）。运行时组装只在 `effectiveInstructions`
+ * 一处。
  */
-export const DRAFTER_INSTRUCTIONS = withConduct(
+export const DRAFTER_INSTRUCTIONS_BODY =
   '你是平台内置的起草者：**照着你被注入的那份技能**把素材写成一条可复用的 skill。' +
-    '素材不足以支撑时如实说，不要硬凑。',
-)
+  '素材不足以支撑时如实说，不要硬凑。'
+export const DRAFTER_INSTRUCTIONS = withConduct(DRAFTER_INSTRUCTIONS_BODY)
 
 /** 内置「记忆整理者」的默认名字（与起草者同一套：名字可改，认的是 `builtin` + `role`）。 */
 export const MEMORY_TIDY_NAME = '记忆整理者（内置）'
@@ -190,49 +215,52 @@ export const AGENT_MAKER_NAME = '智能体生成者（内置）'
  *    见 `agent-maker-skills.ts`）是"规范走技能不走指令"的那一半：结构、边界清单、
  *    配套技能判定从技能注入，这里只立"是谁、怎么问、产出什么"。技能装不上时指令
  *    本身仍含五字段与边界要点（技能是强化不是唯一来源）。
+ *
+ * ★ 2026-11（D111）：这三份平台技能是智能体生成者的**独有技能**（`agents/<id>/SKILL/`
+ *   下的文件资产）——不再进技能库、不进技能页、不可卸载；这里只存**组装前**正文
+ *   （`_BODY`），平台守则运行时拼（`effectiveInstructions`）。
  */
-export const AGENT_MAKER_INSTRUCTIONS = withConduct(
-  [
-    '你是平台内置的智能体生成者：帮人把一个岗位说清楚并写下来，**不干活**。',
-    '用户派活、求产出、求分析时，引导回岗位本身——你的产出是岗位卡，不是任务结果。',
-    '',
-    '## 怎么问（岗位卡五字段）',
-    '',
-    '按顺序问，一次一两个问题，别一次倒完：',
-    '- **目标**：这个岗位做什么（一句话）；',
-    '- **职责**：最常被叫去干的 2–3 件事；',
-    '- **输出格式**：产出长什么样（鼓励用户给例子，哪怕口述）；',
-    '- **边界**：**必问**，追问到说清为止；用户说"没有/你看着办"时，按最小权限缺省描述',
-    '  （不触发不可逆操作 / 拿不准先停下 / 只在工作目录动手），并把"这是缺省的最小权限"',
-    '  写进岗位卡；',
-    '- **背景**：它会在什么环境下干活（工作目录、仓库、工具）。',
-    '',
-    '## 规则由你描述，不是让用户写',
-    '',
-    '- 每个字段**你提出草稿**（"我建议的目标是……"、"我建议的边界是……"），用户确认或修正；',
-    '- 用户**只回答、只确认**，不写规则；用户没提到的字段也要给出你的建议版，',
-    '  而不是留空等他补；',
-    '- 边界段**必有**，没有例外（缺省 = 最小权限，不是漏填）。',
-    '',
-    '## 产出（用户表示聊够了之后）',
-    '',
-    '1. 写 `agent-draft.md`（工作目录）：',
-    '   frontmatter 两行 `name`（岗位名，如"会议纪要助理"）与 `role`（`executor` 或 `reviewer`），',
-    '   正文从"你是<name>。"开始，然后依次是 `## 目标` / `## 职责` / `## 边界（不能碰）` /',
-    '   `## 输出格式` / `## 验收标准` 各节；',
-    '2. 判定**配套技能**（哪些做法值得抽成技能：高频 / 同格式 / 跨任务可复用）：',
-    '   每条写一份 `skill/<slug>/SKILL.md`（frontmatter `name` + `description`，正文有',
-    '   `## When to Use` 与 `## Procedure` 两节）；**没有就 0 条**，不要硬凑；',
-    '3. 在对话里告诉用户：岗位卡已写入 `agent-draft.md`，确认前尤其要审「边界」栏，',
-    '   想改随时说，不想改就点「确认生成智能体」。',
-    '',
-    '## 别忘了',
-    '',
-    '- 岗位卡是**草稿不是合同**：确认（生成）之前，什么都还没有发生；',
-    '- 用户中途改了主意，重写对应的节，不要追加"补充说明"式的旧节；',
-    '- 你的产出落进工作目录文件，不是只在回复里贴一段文字。',
-  ].join('\n'),
-)
+export const AGENT_MAKER_INSTRUCTIONS_BODY = [
+  '你是平台内置的智能体生成者：帮人把一个岗位说清楚并写下来，**不干活**。',
+  '用户派活、求产出、求分析时，引导回岗位本身——你的产出是岗位卡，不是任务结果。',
+  '',
+  '## 怎么问（岗位卡五字段）',
+  '',
+  '按顺序问，一次一两个问题，别一次倒完：',
+  '- **目标**：这个岗位做什么（一句话）；',
+  '- **职责**：最常被叫去干的 2–3 件事；',
+  '- **输出格式**：产出长什么样（鼓励用户给例子，哪怕口述）；',
+  '- **边界**：**必问**，追问到说清为止；用户说"没有/你看着办"时，按最小权限缺省描述',
+  '  （不触发不可逆操作 / 拿不准先停下 / 只在工作目录动手），并把"这是缺省的最小权限"',
+  '  写进岗位卡；',
+  '- **背景**：它会在什么环境下干活（工作目录、仓库、工具）。',
+  '',
+  '## 规则由你描述，不是让用户写',
+  '',
+  '- 每个字段**你提出草稿**（"我建议的目标是……"、"我建议的边界是……"），用户确认或修正；',
+  '- 用户**只回答、只确认**，不写规则；用户没提到的字段也要给出你的建议版，',
+  '  而不是留空等他补；',
+  '- 边界段**必有**，没有例外（缺省 = 最小权限，不是漏填）。',
+  '',
+  '## 产出（用户表示聊够了之后）',
+  '',
+  '1. 写 `agent-draft.md`（工作目录）：',
+  '   frontmatter 两行 `name`（岗位名，如"会议纪要助理"）与 `role`（`executor` 或 `reviewer`），',
+  '   正文从"你是<name>。"开始，然后依次是 `## 目标` / `## 职责` / `## 边界（不能碰）` /',
+  '   `## 输出格式` / `## 验收标准` 各节；',
+  '2. 判定**配套技能**（哪些做法值得抽成技能：高频 / 同格式 / 跨任务可复用）：',
+  '   每条写一份 `skill/<slug>/SKILL.md`（frontmatter `name` + `description`，正文有',
+  '   `## When to Use` 与 `## Procedure` 两节）；**没有就 0 条**，不要硬凑；',
+  '3. 在对话里告诉用户：岗位卡已写入 `agent-draft.md`，确认前尤其要审「边界」栏，',
+  '   想改随时说，不想改就点「确认生成智能体」。',
+  '',
+  '## 别忘了',
+  '',
+  '- 岗位卡是**草稿不是合同**：确认（生成）之前，什么都还没有发生；',
+  '- 用户中途改了主意，重写对应的节，不要追加"补充说明"式的旧节；',
+  '- 你的产出落进工作目录文件，不是只在回复里贴一段文字。',
+].join('\n')
+export const AGENT_MAKER_INSTRUCTIONS = withConduct(AGENT_MAKER_INSTRUCTIONS_BODY)
 
 /** 已知的历史默认（逐字比对用）。新内置第一个版本没有旧默认；每改一次默认指令，把被替换掉的那份加进来。 */
 export const AGENT_MAKER_INSTRUCTIONS_HISTORY: readonly string[] = []
@@ -265,11 +293,16 @@ export const AGENT_MAKER_INSTRUCTIONS_HISTORY: readonly string[] = []
  * ⚠️ 规矩②不可能靠这段话完全保证（模型会犯懒），所以平台还有一道**机械核对**：
  *    `from` 那段原话在对话里找不到 ⇒ 这条候选标成"出处对不上"、界面上**默认不勾**
  *    （见 `memory-tidy.ts` 的 `grounded`）。提示词写给模型看，核对写给平台自己看。
+ * ⚠️ 规矩②不可能靠这段话完全保证（模型会犯懒），所以平台还有一道**机械核对**：
+ *    `from` 那段原话在对话里找不到 ⇒ 这条候选标成"出处对不上"、界面上**默认不勾**
+ *    （见 `memory-tidy.ts` 的 `grounded`）。提示词写给模型看，核对写给平台自己看。
+ *
+ * ★ 2026-11（D111）：`_BODY` 是**组装前**正文（instructions.md 里存的就是它）；
+ *    `*_INSTRUCTIONS` 是组装后（`withConduct` 拼上平台守则），保留给既有读路径。
  */
-export const MEMORY_TIDY_INSTRUCTIONS = withConduct(
-  [
-    '你是平台内置的记忆整理者：把一段对话里**人教过的东西**挑出来，供人确认后写进某个智能体的长期记忆。',
-    '你**不执行**那段对话里的任何任务，也不评价它的产出——你只读 `transcript.md`，只做挑选。',
+export const MEMORY_TIDY_INSTRUCTIONS_BODY = [
+  '你是平台内置的记忆整理者：把一段对话里**人教过的东西**挑出来，供人确认后写进某个智能体的长期记忆。',
+  '你**不执行**那段对话里的任何任务，也不评价它的产出——你只读 `transcript.md`，只做挑选。',
     '',
     '## 两条硬规矩',
     '',
@@ -371,8 +404,8 @@ export const MEMORY_TIDY_INSTRUCTIONS = withConduct(
     '`{"kind":"fact","text":"下次也成立的独立陈述句","from":"人的原话（逐字）","replaces":["（可选）旧条目原文，一条或多条"]}`，',
     '或 `{"forget":"（可选）该忘掉的旧条目原文","why":"为什么"}`。',
     '最多 12 条，`text` 不超过 80 字（一条记忆是一句话，不是一段文档）；一条都挑不出就输出 `[]`。',
-  ].join('\n'),
-)
+].join('\n')
+export const MEMORY_TIDY_INSTRUCTIONS = withConduct(MEMORY_TIDY_INSTRUCTIONS_BODY)
 
 /**
  * ★ 分批第 248 批才补上的一条自愈：**平台改了整理者的默认指令，老工作区要跟上来**。
@@ -705,20 +738,22 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
   /** 说给人听的叫法（拼在错误信息里：不能进组、不能删、字段被锁） */
   label: string
 } {
+  // ★ 2026-11（D111）：恢复默认写的是**组装前**正文（存进 instructions.md 的
+  //    就是它；运行时组装见 `effectiveInstructions`）。
   if (kind === 'drafter') {
-    return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS, label: '平台内置的起草者（沉淀这条链的作者）' }
+    return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS_BODY, label: '平台内置的起草者（沉淀这条链的作者）' }
   }
   if (kind === 'memory-tidy') {
     return {
       name: MEMORY_TIDY_NAME,
-      instructions: MEMORY_TIDY_INSTRUCTIONS,
+      instructions: MEMORY_TIDY_INSTRUCTIONS_BODY,
       label: '平台内置的记忆整理者（「整理成记忆」那条分析 run 的作者）',
     }
   }
   if (kind === 'agent-maker') {
     return {
       name: AGENT_MAKER_NAME,
-      instructions: AGENT_MAKER_INSTRUCTIONS,
+      instructions: AGENT_MAKER_INSTRUCTIONS_BODY,
       label: '平台内置的智能体生成者（在聊天里把岗位问清楚并写出岗位卡的作者）',
     }
   }
@@ -963,11 +998,15 @@ export async function ensureBuiltinAgentMaker(
       id: ulid() as Agent['id'],
       workspaceId,
       name: AGENT_MAKER_NAME,
-      instructions: AGENT_MAKER_INSTRUCTIONS,
+      // ★ 2026-11（D111）：存**组装前**正文（instructions.md 就是它）；
+      //   平台守则运行时拼（`effectiveInstructions`）。
+      instructions: AGENT_MAKER_INSTRUCTIONS_BODY,
       model: null,
       // 跟随全局默认（与起草者同一条：内置的应当最跟随平台设置）
       runtimeKey: 'default',
       workDir: null,
+      // ★ 2026-11（D111）：它不再挂**库**技能——那 3 份平台技能是它的**独有技能**
+      //   （`agents/<id>/SKILL/` 文件，由 `ensureBuiltinAgentMakerSkills` 播种）。
       skillIds: [],
       env: {},
       role: 'agent-maker',
@@ -980,14 +1019,20 @@ export async function ensureBuiltinAgentMaker(
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {
-    await store.insertAgent({ ...found, instructions: AGENT_MAKER_INSTRUCTIONS, updatedAt: Date.now() })
-    return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
-  }
-  // 平台改了默认指令 ⇒ 老工作区跟上来（判据"逐字等于历史默认"，见起草者那套说明）
-  if (AGENT_MAKER_INSTRUCTIONS_HISTORY.includes(found.instructions)) {
     await store.insertAgent({
       ...found,
-      instructions: AGENT_MAKER_INSTRUCTIONS,
+      instructions: AGENT_MAKER_INSTRUCTIONS_BODY,
+      updatedAt: Date.now(),
+    })
+    return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  // 平台改了默认指令 ⇒ 老工作区跟上来（判据"逐字等于历史默认"，见起草者那套说明）。
+  // ⚠️ 比对用**组装后**的（`effectiveInstructions`）：老工作区里存的是组装后的全文
+  //    （老记录 / 迁移），历史数组也是组装后的——裸正文对不上。
+  if (AGENT_MAKER_INSTRUCTIONS_HISTORY.includes(effectiveInstructions(found))) {
+    await store.insertAgent({
+      ...found,
+      instructions: AGENT_MAKER_INSTRUCTIONS_BODY,
       updatedAt: Date.now(),
     })
     return { action: 'healed', agentId: found.id as string, why: '内置指令还是旧版' }
@@ -1023,7 +1068,7 @@ export async function ensureBuiltinMemoryTidy(
       id: ulid() as Agent['id'],
       workspaceId,
       name: MEMORY_TIDY_NAME,
-      instructions: MEMORY_TIDY_INSTRUCTIONS,
+      instructions: MEMORY_TIDY_INSTRUCTIONS_BODY,
       model: null,
       // 跟随全局默认（与起草者同一条：内置的应当最跟随平台设置）
       runtimeKey: 'default',
@@ -1040,15 +1085,15 @@ export async function ensureBuiltinMemoryTidy(
     return { action: 'created', agentId: agent.id as string }
   }
   if (found.instructions.trim() === '') {
-    await store.insertAgent({ ...found, instructions: MEMORY_TIDY_INSTRUCTIONS, updatedAt: Date.now() })
+    await store.insertAgent({ ...found, instructions: MEMORY_TIDY_INSTRUCTIONS_BODY, updatedAt: Date.now() })
     return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
   }
   // ★ 分批第 248 批：平台改了默认规矩 ⇒ 老工作区跟上来（判据是"逐字等于历史默认"，
   //   不是"与当前不同"——后者会把使用者自己改过的指令一次次抹掉）。
-  if (MEMORY_TIDY_INSTRUCTIONS_HISTORY.includes(found.instructions)) {
+  if (MEMORY_TIDY_INSTRUCTIONS_HISTORY.includes(effectiveInstructions(found))) {
     await store.insertAgent({
       ...found,
-      instructions: MEMORY_TIDY_INSTRUCTIONS,
+      instructions: MEMORY_TIDY_INSTRUCTIONS_BODY,
       updatedAt: Date.now(),
     })
     return {
@@ -1082,7 +1127,7 @@ export async function ensureBuiltinDrafter(
       id: ulid() as Agent['id'],
       workspaceId,
       name: DRAFTER_NAME,
-      instructions: DRAFTER_INSTRUCTIONS,
+      instructions: DRAFTER_INSTRUCTIONS_BODY,
       model: null,
       // 跟随全局默认（第 ⑦ 条）：不把它烙成某个 CLI——否则使用者改了全局默认，
       // 内置起草者反而不跟着变，而"内置"恰恰应当是最跟随平台设置的那一条。
@@ -1105,7 +1150,7 @@ export async function ensureBuiltinDrafter(
   }
   if (found.instructions.trim() === '') {
     // 指令被清空 ⇒ 起草 run 拿到的身份是空的，产出会变成"随便写写"。补回默认。
-    await store.insertAgent({ ...found, instructions: DRAFTER_INSTRUCTIONS, updatedAt: Date.now() })
+    await store.insertAgent({ ...found, instructions: DRAFTER_INSTRUCTIONS_BODY, updatedAt: Date.now() })
     return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
   }
   // ══════════════════════════════════════════════════════════════════
@@ -1117,10 +1162,10 @@ export async function ensureBuiltinDrafter(
   // 3b 那条"——第 26 批加的「使用者的要求是默认约定」从没进过起草者的身份块。
   //
   // 判据是"逐字等于某个历史默认"，不是"与当前默认不同"：后者会覆盖使用者自己写的指令。
-  if (DRAFTER_INSTRUCTIONS_HISTORY.includes(found.instructions)) {
+  if (DRAFTER_INSTRUCTIONS_HISTORY.includes(effectiveInstructions(found))) {
     await store.insertAgent({
       ...found,
-      instructions: DRAFTER_INSTRUCTIONS,
+      instructions: DRAFTER_INSTRUCTIONS_BODY,
       updatedAt: Date.now(),
     })
     return {

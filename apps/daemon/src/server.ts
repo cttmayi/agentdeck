@@ -80,9 +80,8 @@ import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
 import {
-  AGENT_MAKER_SKILL_SLUGS,
-  ensureAgentMakerSkillsInstalled,
-  syncAgentMakerSkillMount,
+  ensureBuiltinAgentMakerSkills,
+  migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
 import { CONDUCT_MAX_CHARS, GENERAL_WORK_CONDUCT } from './agent-conduct.ts'
 import { forgetRuntimeConfigHome, isIsolatedRuntime } from './run-hooks/runtime-config.ts'
@@ -120,12 +119,15 @@ import {
   probeGit,
   readMineRevision,
 } from './run-hooks/skill-mine.ts'
+import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
 import {
   builtinDefaultsOf,
   builtinKindOf,
   describeBuiltinAgent,
   DRAFTER_INSTRUCTIONS,
+  DRAFTER_INSTRUCTIONS_BODY,
   DRAFTER_NAME,
+  effectiveInstructions,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
@@ -244,6 +246,7 @@ import {
   resolveLocalPath,
   resolvePayloadEntry,
   resolveSkillSource,
+  assertValidSlug,
   type ResolvedSkillSource,
   type SkillSourceSpec,
 } from '@agentdeck/skill-source'
@@ -3004,25 +3007,24 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   }
 
   /**
-   * ★ 2026-11 设计定稿（§3.3）：**智能体生成者的平台技能，动态安装 + 挂载对齐**。
+   * ★ 2026-11 设计定稿（§3.3）+ D111：**智能体生成者的平台技能 = 它的独有技能**。
    *
-   * 与起草者挂 distilly 同一套分工（规范走技能不走指令），只差来源：这三份是平台内置
-   * 技能（随仓库分发），daemon 启动时自动装进技能库并挂到生成者身上——使用者不用做
-   * 任何事（distilly 要显式安装，这份不用）。装不上也只是"规范没注入"，不阻塞启动。
+   * 上一版是"动态安装进技能库 + 挂载对齐"——技能页会看到三条、还能卸。D111 之后
+   * 这三份是生成者目录里的**文件资产**（不进技能库、不进技能页、不可卸载），这里
+   * 做两件事：老库里的三条**搬进**生成者目录（一次性迁移）、缺的从随仓库分发的
+   * `catalog/platform-skills/` **播种**（幂等）。装不上也只是"规范没注入"，不阻塞启动。
    */
   {
-    const ensure = await ensureAgentMakerSkillsInstalled(store, workspaceId)
-    if (ensure.installed.length > 0) {
-      info(`智能体生成者平台技能已动态安装：${ensure.installed.join('、')}`)
+    const migrated = await migratePlatformSkillsToExclusive(store, workspaceId)
+    if (migrated.moved.length > 0) {
+      info(`生成者平台技能已从技能库迁入独有目录：${migrated.moved.join('、')}`)
+    }
+    const ensure = await ensureBuiltinAgentMakerSkills(store, workspaceId)
+    if (ensure.seeded.length > 0) {
+      info(`生成者平台技能已就位（独有技能）：${ensure.seeded.join('、')}`)
     }
     if (ensure.skipped.length > 0) {
-      warn(`智能体生成者平台技能安装跳过：${ensure.skipped.join('；')}`)
-    }
-    const mount = await syncAgentMakerSkillMount(store, workspaceId)
-    if (mount.skillSlugs.length > 0) {
-      info(`智能体生成者挂了：${mount.skillSlugs.join('、')}`)
-    } else {
-      info('智能体生成者还没挂上平台技能（装不上时指令本身仍含五字段与边界要点）')
+      warn(`生成者平台技能播种跳过：${ensure.skipped.join('；')}`)
     }
   }
 
@@ -3147,8 +3149,10 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const { reviewer } = input
     // ★ 技能按 agent 求解（不是全局挂一遍，D22）——
     //   D37 之后它对**审核者**只是"可选的参考/支持文件"，标准本身在
-    //   `reviewStandard` 上。所以这里照旧取，但**不拿它当"能不能审"的判据**。
-    const skills = await loadAgentSkills(store, reviewer)
+    //   `reviewStandard` 上。所以这里照旧取，但**不拿它当"能不能审"的判据"。
+    // ★ 2026-11（D111）：共享 ∪ 独有的拼接只在 `agent-injectable-skills.ts` 一处
+    //   （聊天、任务、审核、返工都走那里）。
+    const skills = await loadAgentInjectableSkills(store, reviewer)
     /**
      * ★ 资格判据（2026-09 的决定）：**身份非空**——也就是「指令」非空。
      *
@@ -3167,20 +3171,14 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const outcome = await executor.submit({
       runId,
       kind: 'review',
-      agentRef: { id: reviewer.id, name: reviewer.name, instructions: reviewer.instructions },
-      skills: skills.map((s) => ({
-        ref: { id: s.id, slug: s.slug, source: s.source },
-        slug: s.slug,
-        name: s.name,
-        body: s.body,
-        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
-        ...(s.description ? { description: s.description } : {}),
-        // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后 skill
-        //    载荷里没有这一项了（动作权限属于智能体组，见 `AgentGroup.allowedActions`）
-        //    ——skill 从执行侧到审核侧都只剩"正文 + 支持文件"。
-        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
-        files: s.files ?? {},
-      })),
+      // ★ 2026-11（D111）：agentRef 里快照的是**组装后**的最终指令
+      //   （内置 = 身份 + 平台守则；组装只在 `effectiveInstructions` 一处）。
+      agentRef: {
+        id: reviewer.id,
+        name: reviewer.name,
+        instructions: effectiveInstructions(reviewer),
+      },
+      skills,
       subject: input.subject,
       prompt: input.prompt,
       agentDefaultWorkDir: input.workDirOverride ?? reviewer.workDir ?? undefined,
@@ -3312,7 +3310,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
       return null
     }
 
-    const skills = await loadAgentSkills(store, agent)
+    const skills = await loadAgentInjectableSkills(store, agent)
     if (reviewerIdentity(agent, skills).text === '') {
       warn(`agent ${agent.name} 没有写「指令」，无法重试审核`)
       return null
@@ -3337,20 +3335,13 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     const outcome = await executor.submit({
       runId,
       kind: 'review',
-      agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
-      skills: skills.map((s) => ({
-        ref: { id: s.id, slug: s.slug, source: s.source },
-        slug: s.slug,
-        name: s.name,
-        body: s.body,
-        // 协议里是 optional（`string | undefined`），实体上是 `string | null`
-        ...(s.description ? { description: s.description } : {}),
-        // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后 skill
-        //    载荷里没有这一项了（动作权限属于智能体组，见 `AgentGroup.allowedActions`）
-        //    ——skill 从执行侧到审核侧都只剩"正文 + 支持文件"。
-        // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
-        files: s.files ?? {},
-      })),
+      // ★ 2026-11（D111）：快照组装后的最终指令（`effectiveInstructions`）。
+      agentRef: {
+        id: agent.id,
+        name: agent.name,
+        instructions: effectiveInstructions(agent),
+      },
+      skills,
       subject: previous.subject,
       // ⚠️ 措辞原来说"按**审核标准**里的围栏格式输出"——而围栏约定不在
       //    审核标准（skill）里，它在**本次任务的说明**里（第一句话的「输出要求」）。
@@ -3785,11 +3776,13 @@ async function injectedSkillsOf(
     }
     const drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
     if (!drafter) await ensureBuiltinDrafter(store, workspaceId)
-    const drafterAgent = drafter ?? {
+    const drafterAgent = (drafter ?? {
       id: ulid() as Agent['id'],
       name: DRAFTER_NAME,
-      instructions: DRAFTER_INSTRUCTIONS,
-    }
+      // ★ 2026-11（D111）：兜底对象没有 builtin ⇒ 组装 = 原样；真正找到起草者时
+      //   `effectiveInstructions` 会按内置拼平台守则
+      instructions: DRAFTER_INSTRUCTIONS_BODY,
+    }) as Agent
     const humanEdits = await readHumanEditStamp(taskDir)
     const resumePrevious = humanEdits === null
     const newRunId = ulid() as RunId
@@ -3826,7 +3819,12 @@ async function injectedSkillsOf(
     const outcome = await executor.submit({
       runId: newRunId,
       kind: 'execute',
-      agentRef: { id: drafterAgent.id, name: drafterAgent.name, instructions: drafterAgent.instructions },
+      agentRef: {
+          id: drafterAgent.id,
+          name: drafterAgent.name,
+          // ★ 2026-11（D111）：快照组装后指令
+          instructions: effectiveInstructions(drafterAgent),
+        },
       skills,
       subject: {
         type: 'skill-draft',
@@ -3875,20 +3873,18 @@ async function injectedSkillsOf(
       return null
     }
 
-    const skills = await loadAgentSkills(store, agent)
+    const skills = await loadAgentInjectableSkills(store, agent)
     const runId = ulid() as RunId
     const outcome = await executor.submit({
       runId,
       kind: 'execute',
-      agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
-      skills: skills.map((s) => ({
-        ref: { id: s.id, slug: s.slug, source: s.source },
-        slug: s.slug,
-        name: s.name,
-        body: s.body,
-        ...(s.description ? { description: s.description } : {}),
-        files: s.files ?? {},
-      })),
+      // ★ 2026-11（D111）：快照组装后的最终指令（`effectiveInstructions`）。
+      agentRef: {
+        id: agent.id,
+        name: agent.name,
+        instructions: effectiveInstructions(agent),
+      },
+      skills,
       // ★ subject 用**被审那条 run 的**（也就是原任务），不是审核 run 的
       //   （审核 run 的 subject 是 `{type:'run'}`——照抄会变成"让执行者去做
       //   一条 run"，语义完全错，而且它会被当成一条新的审核链）。
@@ -4486,6 +4482,10 @@ async function injectedSkillsOf(
       }
       const withMemory = agents.map((a) => ({
         ...a,
+        // ★ 2026-11（D111）：界面拿到的指令是**组装后**的最终指令（内置 = 身份 +
+        //   平台守则）——与模型真正读到的一致，不然详情页展示的"指令"和实际生效的
+        //   不是同一份。
+        instructions: effectiveInstructions(a),
         memoryCount: memoryCount.get(a.id as string) ?? 0,
       }))
       // ★ 默认智能体跟着列表一起给：界面要在卡片上标「默认」，新建任务页要用它
@@ -5487,6 +5487,115 @@ async function injectedSkillsOf(
       }
     }
 
+    // ── 智能体的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+    //
+    // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
+    //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载。
+    //     这里三条路由管的就是它们；
+    //   · **共享** = 技能库里的资产，`skillIds` 引用（`/api/skills` 那一套）。
+    //
+    // ⚠️ 校验与安装接口**同一关**（`resolvePayloadEntry`）——自建一条不校验的写入口
+    //    = 两处规则迟早分叉，而坏的那份技能"装上了却永不生效"。
+    const agentSkillsListMatch = /^\/api\/agents\/([^/]+)\/skills$/.exec(path)
+    if (agentSkillsListMatch) {
+      const agentId = decodeURIComponent(agentSkillsListMatch[1]!) as Agent['id']
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: '这个地址只接受 GET' })
+        return
+      }
+      const agent = await store.getAgent(agentId)
+      if (!agent) {
+        sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+        return
+      }
+      const rows = await store.listExclusiveSkills(agentId)
+      const skills = rows.map((row) => {
+        const meta = extractSkillMeta(row.body)
+        return {
+          slug: row.slug,
+          name: meta.name ?? row.slug,
+          ...(meta.description ? { description: meta.description } : {}),
+          body: row.body,
+        }
+      })
+      sendJson(res, 200, { skills })
+      return
+    }
+
+    const agentSkillsMatch = /^\/api\/agents\/([^/]+)\/skills\/([^/]+)$/.exec(path)
+    if (agentSkillsMatch) {
+      const agentId = decodeURIComponent(agentSkillsMatch[1]!) as Agent['id']
+      const skillSlug = decodeURIComponent(agentSkillsMatch[2]!)
+      if (req.method === 'PUT') {
+        const agent = await store.getAgent(agentId)
+        if (!agent) {
+          sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+          return
+        }
+        if (agent.builtin === true && options.allowBuiltinEdits !== true) {
+          sendJson(res, 400, {
+            error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可改。`,
+            code: 'builtin_agent_readonly',
+          })
+          return
+        }
+        const body = (await readJsonBody(req)) as { body?: unknown }
+        const raw = typeof body?.body === 'string' ? body.body : ''
+        if (raw.trim() === '') {
+          sendJson(res, 400, { error: '缺少正文（body 为空）', code: 'skill_body_required' })
+          return
+        }
+        // ★ 与安装接口同一关：规范化 + 限额检查（slug 规则也在里面）。
+        //   sourceRef 只用于校验上下文（独有技能没有库记录，不落任何来源字段）。
+        //   ⚠️ 校验失败是**使用者的输入问题**（400），不是服务端故障（500）——
+        //     安装接口对同一条规则就是这么回答的。
+        //   ⚠️ 路径段就是 slug：**不静默规范化**（安装接口会对不规范的名字改名，
+        //     这里目录名 = 使用者给的机器名，改了会让他找不到自己写的文件），
+        //     所以先按 slug 规则严格拒绝。
+        let validated
+        try {
+          assertValidSlug(skillSlug, `智能体的独有技能 slug「${skillSlug}」。`)
+          validated = resolvePayloadEntry({
+            slug: skillSlug,
+            body: raw,
+            sourceRef: `agent:${agentId}`,
+          })
+        } catch (err) {
+          sendJson(res, 400, {
+            error: err instanceof Error ? err.message : String(err),
+            code: 'exclusive_skill_invalid',
+          })
+          return
+        }
+        await store.writeExclusiveSkill(agentId, skillSlug, validated.body)
+        sendJson(res, 200, { slug: skillSlug })
+        return
+      }
+      if (req.method === 'DELETE') {
+        const agent = await store.getAgent(agentId)
+        if (!agent) {
+          sendJson(res, 404, { error: `agent 不存在：${agentId}` })
+          return
+        }
+        if (agent.builtin === true && options.allowBuiltinEdits !== true) {
+          sendJson(res, 400, {
+            error: `「${agent.name}」是${describeBuiltinAgent(agent)}：它的独有技能由平台播种，不可删。`,
+            code: 'builtin_agent_readonly',
+          })
+          return
+        }
+        const removed = await store.removeExclusiveSkill(agentId, skillSlug)
+        if (!removed) {
+          sendJson(res, 404, { error: `这个智能体没有独有技能「${skillSlug}」` })
+          return
+        }
+        sendJson(res, 200, { removed: true })
+        return
+      }
+      sendJson(res, 405, { error: '这个地址只接受 GET / PUT / DELETE' })
+      return
+    }
+
     const agentMatch = /^\/api\/agents\/([^/]+)$/.exec(path)
     if (agentMatch) {
       const agentId = decodeURIComponent(agentMatch[1]!) as Agent['id']
@@ -5503,7 +5612,8 @@ async function injectedSkillsOf(
          *   一个"两边不同步"的窗口。
          */
         const memory = await listActiveMemory(store, workspaceId, agentId)
-        sendJson(res, 200, { ...agent, memory })
+        // ★ 2026-11（D111）：与列表同一口径——详情拿到的指令是**组装后**的最终指令。
+        sendJson(res, 200, { ...agent, instructions: effectiveInstructions(agent), memory })
         return
       }
 
@@ -6001,7 +6111,8 @@ async function injectedSkillsOf(
         agentRef: {
           id: tidyAgent.id,
           name: tidyAgent.name,
-          instructions: tidyAgent.instructions,
+          // ★ 2026-11（D111）：快照组装后指令（内置 = 身份 + 平台守则）
+          instructions: effectiveInstructions(tidyAgent),
         },
         skills: [],
         subject: { type: 'memory-consolidate', id: agentId as string },
@@ -7350,11 +7461,12 @@ async function injectedSkillsOf(
         await ensureBuiltinDrafter(store, workspaceId)
         drafter = findBuiltinAgent(await store.listAgents(workspaceId), 'drafter')
       }
-      const drafterAgent = {
-        id: drafter?.id ?? (ulid() as Agent['id']),
-        name: drafter?.name ?? DRAFTER_NAME,
-        instructions: drafter?.instructions ?? DRAFTER_INSTRUCTIONS,
-      }
+      const drafterAgent = (drafter ?? {
+        id: ulid() as Agent['id'],
+        name: DRAFTER_NAME,
+        // ★ 2026-11（D111）：兜底对象没有 builtin ⇒ 组装 = 原样；找到起草者时按内置拼守则
+        instructions: DRAFTER_INSTRUCTIONS_BODY,
+      }) as Agent
       /**
        * ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
        * 起草 run 的技能集合 = **这条起草者挂的**（与任务 run 同一条路），不再从请求体读。
@@ -7433,7 +7545,8 @@ async function injectedSkillsOf(
         agentRef: {
           id: drafterAgent.id,
           name: drafterAgent.name,
-          instructions: drafterAgent.instructions,
+          // ★ 2026-11（D111）：快照组装后指令
+          instructions: effectiveInstructions(drafterAgent),
         },
         /**
          * ★ 分批第 210 批（使用者定："怎么还在用 writing-skill，不是应该用安装的 distilly 吗"）：
@@ -8158,13 +8271,14 @@ async function injectedSkillsOf(
        * 所以这条技能的删除先做一次**平台侧摘挂**（`syncDrafterSkillMount` 在删除后会再对齐一次，
        * 这里只是提前让守卫看不到它），然后照常走下面那套危险检查。
        *
-       * ★ 2026-11（D109）同款处理**生成者的平台技能**：`agent-maker`（内置、只读）挂着
-       * 那 3 条动态安装的平台技能 ⇒ 不摘挂的话使用者永远卸不掉它们（设计定稿 §3.3：
-       * 允许卸载，下次启动对账会再装回来——自愈）。
+       * ★ 2026-11（D111）：生成者的那 3 条平台技能不再是库技能（是它的**独有技能**，
+       *    在 `agents/<id>/SKILL/` 目录里、不可卸载）——所以这里只剩 distilly 这一条
+       *    要提前摘挂；生成者的分支整个删掉（上一版那个"允许卸载、下次启动再装回来"
+       *    的特殊处理被统一机制取代了）。
        */
-      const platformMountSlugs = [DRAFTER_SKILL_SLUG, ...AGENT_MAKER_SKILL_SLUGS]
+      const platformMountSlugs = [DRAFTER_SKILL_SLUG]
       if (platformMountSlugs.includes(skill.slug)) {
-        const platformRoles = new Set(skill.slug === DRAFTER_SKILL_SLUG ? ['drafter'] : ['agent-maker'])
+        const platformRoles = new Set(['drafter'])
         for (const a of agents) {
           if (a.builtin === true && platformRoles.has(a.role) && a.skillIds.includes(skillId)) {
             await store.insertAgent({
@@ -9378,7 +9492,12 @@ async function injectedSkillsOf(
       const outcome = await executor.submit({
         runId: newRunId,
         kind: 'execute',
-        agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
+        agentRef: {
+          id: agent.id,
+          name: agent.name,
+          // ★ 2026-11（D111）：快照组装后指令
+          instructions: effectiveInstructions(agent),
+        },
         /**
          * ⚠️ **不带技能**：这一轮要读的是 `transcript.md`，不是工作目录里的材料；
          *    注入技能只会把这些东西一起塞进上下文，对"挑出该记的句子"没有帮助。
@@ -9747,7 +9866,9 @@ async function injectedSkillsOf(
       let skills = body.skills
       if (skills === undefined || skills.length === 0) {
         const agent = await store.getAgent(body.agentRef.id as Agent['id'])
-        const configured = agent ? await loadAgentSkills(store, agent) : []
+        // ★ 2026-11（D111）：按 agent 配置解析 = 共享（skillIds）∪ 独有（目录文件），
+        //   与聊天/审核/返工同一份（`agent-injectable-skills.ts`）。
+        const configured = agent ? await loadAgentInjectableSkills(store, agent) : []
         if (skills !== undefined && configured.length > 0) {
           warn(
             `run ${body.runId} 显式传了空 skills，但 agent ${agent?.name ?? body.agentRef.id} ` +
@@ -9755,25 +9876,16 @@ async function injectedSkillsOf(
           )
         }
         if (skills === undefined) {
-          skills = configured.map((s) => ({
-            ref: { id: s.id, slug: s.slug, source: s.source },
-            slug: s.slug,
-            name: s.name,
-            body: s.body,
-            // 协议里是 optional（`string | undefined`），实体上是 `string | null`
-            ...(s.description ? { description: s.description } : {}),
-            // ⚠️ 这里原来带 `allowedActions: s.allowedActions`。D40 收口之后
-            //    skill 载荷里没有这一项了（动作权限住在 `Agent.allowedActions`）。
-            // 支持文件必须一路带下去，否则装上来的脚本/参考文档到不了工作目录
-            files: s.files ?? {},
-          }))
+          skills = configured
           if (skills.length > 0) {
             info(`run ${body.runId} 按 agent 配置解析到 ${skills.length} 个 skill`)
           }
         }
       }
 
-      const outcome = await executor.submit({ ...body, skills })
+      // ★ 流分析看不出上面那段已保证非空（undefined 分支在块内赋值了），显式收口。
+      const resolvedSkills = skills ?? []
+      const outcome = await executor.submit({ ...body, skills: resolvedSkills })
       if (outcome.kind === 'rejected') {
         // 取不到槽位就不返回 202——让页面稍后重试（FR-RUNTIME-04）
         out.headers.push(['retry-after', String(Math.ceil(outcome.retryAfterMs / 1000))])

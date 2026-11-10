@@ -34,11 +34,11 @@ import { wsId } from '@agentdeck/domain/testing'
 import { ulid } from '@agentdeck/protocol'
 import type { Agent, Workspace } from '@agentdeck/protocol'
 import {
-  AGENT_MAKER_INSTRUCTIONS,
+  AGENT_MAKER_INSTRUCTIONS_BODY,
   AGENT_MAKER_NAME,
   builtinDefaultsOf,
   builtinKindOf,
-  DRAFTER_INSTRUCTIONS,
+  DRAFTER_INSTRUCTIONS_BODY,
   DRAFTER_NAME,
   ensureBuiltinAgentMaker,
   ensureBuiltinAgents,
@@ -115,7 +115,7 @@ describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪�
   test('★ 审核者已下线 ⇒ **没有默认值可恢复**（指令是空串，界面/路由据此拒绝）', () => {
     const drafter = builtinDefaultsOf('drafter')
     assert.equal(drafter.name, DRAFTER_NAME)
-    assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
+    assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
     // ★ 2026-11：智能体生成者有默认身份（与起草者同一套，可查看/编辑/恢复默认）
     const maker = builtinDefaultsOf('agent-maker')
     assert.equal(maker.name, AGENT_MAKER_NAME)
@@ -138,7 +138,7 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       const after = await store.listAgents(WS)
       const maker = after.find((a) => a.role === 'agent-maker')!
       assert.equal(maker.name, AGENT_MAKER_NAME)
-      assert.equal(maker.instructions, AGENT_MAKER_INSTRUCTIONS)
+      assert.equal(maker.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
       assert.equal(maker.builtin, true)
       assert.deepEqual(maker.skillIds, [], '挂载由 syncAgentMakerSkillMount 管，对账不挂')
 
@@ -165,7 +165,7 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       const result = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(result.action, 'healed')
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS)
+      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
     })
   })
 
@@ -200,7 +200,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
     await withStore(async (store) => {
       // 顺序就是这条用例的全部意义：审核者先入库 ⇒ 从前 `find(builtin)` 直接撞上它
       const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, LEGACY_REVIEWER_INSTRUCTIONS, true)
-      const drafter = mkAgent('drafter', DRAFTER_NAME, DRAFTER_INSTRUCTIONS, false)
+      const drafter = mkAgent('drafter', DRAFTER_NAME, DRAFTER_INSTRUCTIONS_BODY, false)
       await store.insertAgent(reviewer)
       await store.insertAgent(drafter)
 
@@ -233,12 +233,12 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
       const reviewerAfter = afterCreate.find((a) => a.id === reviewer.id)!
       assert.notEqual(
         reviewerAfter.instructions,
-        DRAFTER_INSTRUCTIONS,
+        DRAFTER_INSTRUCTIONS_BODY,
         '审核者拿到起草者指令 = 它以后按"你是 skill 作者"去审，而看起来一切正常',
       )
       const drafter = afterCreate.find((a) => a.role === 'drafter')
       assert.ok(drafter, '起草者必须被建出来')
-      assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
+      assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
 
       // 然后内置对账再跑一遍：★ 分批第 137 批之后**只剩起草者**那条——
       //   已下线的审核者**不会**再被"修"（它的默认身份已删；平台也不悄悄删/改使用者数据）。
@@ -249,7 +249,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
         '   ',
         '已下线的审核者不该被内置对账重新填指令（它没有默认指令了）',
       )
-      assert.equal(final.find((a) => a.role === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS)
+      assert.equal(final.find((a) => a.role === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS_BODY)
     })
   })
 })
@@ -334,9 +334,15 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
       assert.equal(body.code, 'builtin_retired')
       assert.match(body.error, /已下线/)
       assert.match(body.error, /不再评审/)
-      // 指令与名字一个字都没动
+      // 指令与名字一个字都没动。
+      // ★ 2026-11（D111）：列表接口返回的是**组装后**指令（内置会附上运行时守则），
+      //   所以这里断言的是**正文原样**（`startsWith`）——追加的守则是平台运行时拼的，
+      //   不是一次写入；若正文被覆盖过，开头对不上。
       const after = (await agentsOf(url)).find((a) => a.id === seeded.id)!
-      assert.equal(after.instructions, LEGACY_REVIEWER_INSTRUCTIONS)
+      assert.ok(
+        after.instructions.startsWith(LEGACY_REVIEWER_INSTRUCTIONS),
+        `正文必须原样保留（拿到的组装后指令：${after.instructions.slice(0, 60)}…）`,
+      )
       assert.equal(after.name, LEGACY_REVIEWER_NAME)
     })
   })
@@ -428,9 +434,11 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
       const body = JSON.parse(text) as { code?: string; error: string }
       assert.equal(body.code, 'builtin_role_unknown')
       assert.match(body.error, /reviewer/, '文案要把它实际的角色说出来，否则使用者不知道去改哪条')
-      // 一条字都不许写进去（猜错的后果比"没恢复"严重得多）
+      // 一条字都不许写进去（猜错的后果比"没恢复"严重得多）。
+      // ★ 2026-11（D111）：列表返回组装后指令 ⇒ 断言正文原样（startsWith），
+      //   追加的守则是运行时拼的，不是写入。
       const after = (await agentsOf(url)).find((a) => a.id === weird.id)!
-      assert.equal(after.instructions, '它是谁？')
+      assert.ok(after.instructions.startsWith('它是谁？'), `正文必须原样：${after.instructions.slice(0, 60)}…`)
       assert.equal(after.name, '奇怪的内置')
     })
   })

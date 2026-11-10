@@ -636,6 +636,85 @@ export const agentsText = {
    */
   'agents.noSkillsYet': { zh: '还没有任何技能。', en: 'No skills yet.' },
   /**
+   * ★ 2026-11（D111）：**独有技能**——`agents/<id>/SKILL/` 里的文件，只属于这条
+   *   智能体。与「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
+   */
+  'agents.exclusiveSkillsLabel': {
+    zh: '独有技能',
+    en: 'Exclusive skills',
+  },
+  'agents.exclusiveSkillsCount': {
+    zh: ' · {n} 条 · ',
+    en: ' · {n} · ',
+  },
+  'agents.exclusiveSkillsHint': {
+    zh: '只属于这条智能体的技能文件（agents/<id>/SKILL/）。共享技能在上方那格「挂载的技能」里选——这里不选技能库，是它自己的文件。',
+    en: 'Skill files that belong to this agent only (agents/<id>/SKILL/). Shared skills are picked in "Attached skills" above — these are its own files, not library entries.',
+  },
+  'agents.exclusiveSkillsBuiltinHint': {
+    zh: '内置智能体的独有技能由平台播种，只读。',
+    en: 'Built-in agents get their exclusive skills seeded by the platform; read-only.',
+  },
+  'agents.exclusiveSkillsEmpty': {
+    zh: '还没有独有技能。',
+    en: 'No exclusive skills yet.',
+  },
+  'agents.exclusiveSkillsAdd': { zh: '新增', en: 'Add' },
+  'agents.exclusiveSkillsEdit': { zh: '编辑', en: 'Edit' },
+  'agents.exclusiveSkillsDelete': { zh: '删除', en: 'Delete' },
+  'agents.exclusiveSkillsSlug': { zh: '机器名（slug）', en: 'Slug' },
+  'agents.exclusiveSkillsSlugPlaceholder': {
+    zh: '小写字母/数字/连字符，如 meeting-notes-format',
+    en: 'lowercase letters/digits/hyphens, e.g. meeting-notes-format',
+  },
+  'agents.exclusiveSkillsSlugLockedHint': {
+    zh: 'slug 在保存后不可改名（要换名就删掉重建）',
+    en: 'The slug cannot be renamed after saving (delete and recreate to rename)',
+  },
+  'agents.exclusiveSkillsBody': { zh: 'SKILL.md 正文', en: 'SKILL.md body' },
+  'agents.exclusiveSkillsBodyPlaceholder': {
+    zh: 'frontmatter（name / description）+ ## When to Use / ## Procedure。与安装技能同一套校验。',
+    en: 'frontmatter (name / description) + ## When to Use / ## Procedure. Same validation as installing a skill.',
+  },
+  'agents.exclusiveSkillsSave': { zh: '保存', en: 'Save' },
+  'agents.exclusiveSkillsSaved': {
+    zh: '已保存独有技能「{slug}」',
+    en: 'Exclusive skill "{slug}" saved',
+  },
+  'agents.exclusiveSkillsSaveFailed': {
+    zh: '保存失败：{error}',
+    en: 'Save failed: {error}',
+  },
+  'agents.exclusiveSkillsDeleted': {
+    zh: '已删除独有技能「{slug}」',
+    en: 'Exclusive skill "{slug}" deleted',
+  },
+  'agents.exclusiveSkillsDeleteFailed': {
+    zh: '删除失败：{error}',
+    en: 'Delete failed: {error}',
+  },
+  'agents.exclusiveSkillsDeleteConfirm': {
+    zh: '删除独有技能「{name}（{slug}）」？它只是这条智能体的文件，不会影响技能库。',
+    en: 'Delete exclusive skill "{name} ({slug})"? It is only this agent\'s file; the skill library is unaffected.',
+  },
+  'agents.exclusiveSkillsLoading': { zh: '读取中…', en: 'Loading…' },
+  'agents.exclusiveSkillsDeleteTitle': {
+    zh: '删除独有技能',
+    en: 'Delete exclusive skill',
+  },
+  'agents.exclusiveSkillsLoadFailed': {
+    zh: '独有技能读取失败：{error}',
+    en: 'Failed to load exclusive skills: {error}',
+  },
+  'agents.exclusiveSkillsSlugRequired': {
+    zh: '请先填机器名（slug）。',
+    en: 'Please fill in the slug first.',
+  },
+  'agents.exclusiveSkillsBodyRequired': {
+    zh: '正文不能为空（SKILL.md 得有点内容）。',
+    en: 'The body cannot be empty.',
+  },
+  /**
    * ⚠️ 选择器里**必须**带上来源目录：同 slug 可以有好几条（每个来源目录各一条
    *    ——实测 `~/.claude`、`~/.codex`、`~/.cursor` 里都有 `browser-use`）。
    *    只显示 slug 的话会出现三个一模一样的东西，使用者只能靠猜。

@@ -55,6 +55,7 @@ import { BlobStore } from './blobs.ts'
 import {
   atomicWrite,
   ensureDir,
+  exists,
   readJsonOrNull,
   removeQuietly,
   sha256Hex,
@@ -64,6 +65,19 @@ import { LockHeldError, acquireLock } from './lock.ts'
 import { MessageLog, ensureRunDir, messageLogPath } from './messages.ts'
 import { Mutex, pruneUndefined } from './mutex.ts'
 import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-files.ts'
+import {
+  agentDirExists,
+  agentsRoot,
+  getExclusiveSkillBody,
+  listAgentDirs,
+  listExclusiveSkillBodies,
+  readAgentDir,
+  removeAgentDir,
+  removeExclusiveSkillBody,
+  writeAgentDir,
+  writeExclusiveSkillBody,
+  writeLegacyAgentDir,
+} from './agent-dirs.ts'
 
 /**
  * 文件存储适配器 —— `Store` 端口的 v1 实现。
@@ -75,11 +89,19 @@ import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-fil
  *   ├── lock                          单进程锁
  *   ├── device.json                   本机设备标识
  *   ├── workspaces.jsonl              workspace 记录（全局，量小）
+ *   ├── agents/<agentId>/              ★ 智能体目录（D111，2026-11）——
+ *   │   ├── agent.json               结构化资讯（不含指令正文）
+ *   │   ├── instructions.md          指令**组装前**正文（内置 = 身份块；自建 = 全文）
+ *   │   └── SKILL/<slug>/SKILL.md    这个智能体**独有**的技能（文件资产，不进技能库）
  *   └── workspaces/<wsId>/
  *       ├── log/<collection>.jsonl    append-only，权威记录
  *       ├── log/<collection>.jsonl.snapshot   压缩后的物化快照
  *       ├── blobs/<前两位>/<sha256>    内容寻址
  *       └── runs/<runId>/messages.jsonl        执行消息流
+ *
+ * 智能体**不在** `workspaces/<wsId>/log/agent.jsonl` 里（D111）：一个智能体 =
+ * 一个目录，与 `skills/`、`skills-mine/` 并列；老 JSONL 只用于**一次性迁移**，
+ * 迁完停用但**保留文件**（等使用者确认后再删）。详见 `docs/design/agent-directory.md`。
  *
  * 另外**技能内容**不在这棵树下（2026-10）：`SKILL.md` 正文与支持文件落在
  * `<skillsRoot>/<slug>/`（`skill-files.ts`），`log/skill.jsonl` 里只留索引与
@@ -418,6 +440,8 @@ export class FileStore implements Store {
   readonly #wsIndex: JsonlLog<Workspace & { id: string }>
   readonly #device = new Mutex()
   readonly #mutex = new Mutex()
+  /** 智能体目录的写锁——目录是平的（`<dataDir>/agents/`），不属于某个 workspace。 */
+  readonly #agentsMutex = new Mutex()
   readonly #stores = new Map<string, WorkspaceStore>()
   #releaseLock: (() => Promise<void>) | null = null
 
@@ -475,10 +499,39 @@ export class FileStore implements Store {
       await store.#ws(ws.id as WorkspaceId)
     }
 
+    // 智能体从"JSONL 记录"迁到"一个智能体一个目录"（D111，2026-11）。
+    // 必须在预加载之后——迁移要遍历 `#stores` 里的老记录。幂等：目录在就跳过，
+    // 全部迁完写 `.migrated` 标记，之后老 `agent.jsonl` **保留但不再读**。
+    await store.#migrateAgentsToDirs()
+
     // 技能内容从"记录里"搬到"磁盘上"的一次性迁移（2026-10）。必须在预加载
     // 之后——它要遍历 `#stores` 里的记录。
     await store.#migrateSkillsToDisk()
     return store
+  }
+
+  /**
+   * 把**老记录**里的智能体迁到 `<dataDir>/agents/<id>/`（D111）。
+   *
+   * 为什么在 `open()` 里做、而不是懒迁移：迁移是**一次性的**，且幂等——
+   * 目录在就跳过，全部迁完写 `.migrated` 标记（没有标记才会重跑，防止
+   * "删了目录、老 JSONL 里那行还在"把已删的智能体**复活**回来）。
+   *
+   * ★ 老 JSONL **保留不删**（使用者拍板：等确认后再删）；只是从迁移完成起
+   *   不再读、不再写——读路径全部走目录。
+   */
+  async #migrateAgentsToDirs(): Promise<void> {
+    const marker = join(agentsRoot(this.#dataDir), '.migrated')
+    if (await exists(marker)) return
+    await this.#agentsMutex.run(async () => {
+      for (const ws of this.#stores.values()) {
+        for (const rec of ws.agent().all()) {
+          if (await agentDirExists(this.#dataDir, rec.id)) continue
+          await writeLegacyAgentDir(this.#dataDir, rec)
+        }
+      }
+    })
+    await atomicWrite(marker, JSON.stringify({ v: 1, at: Date.now() }, null, 2))
   }
 
   /**
@@ -568,43 +621,64 @@ export class FileStore implements Store {
     )
   }
 
-  // ── Agent ──
+  // ── Agent（D111：一个智能体 = `<dataDir>/agents/<id>/` 一个目录，不是 JSONL）──
 
   // ⚠️ 两个读方法都要过 `cleanAgent`（**这里是 agent 读取的唯一总闸**）：
   //    agent 整条以 JSON 存，2026-10 撤掉的字段（`reviewerAgentId` / 行动权限那三个）
   //    还留在老记录里，而删 schema 字段**不会**让它们消失——只会让读的人看不见。
   //    摘在这里，"界面拿到的"与"内部链路拿到的"才是同一份干净记录。
   //    （磁盘上那一次的彻底清理见 `apps/daemon/src/agent-legacy-cleanup.ts`。）
+  //
+  //   `instructions` 恒为 **instructions.md 的内容（组装前正文）**——平台守则的
+  //   组装在 daemon 读取端（`effectiveInstructions`），存储层不拼。
   async getAgent(id: AgentId): Promise<Agent | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.agent().get(id)
-      if (found) return cleanAgent(found)
-    }
-    return null
+    const found = await readAgentDir(this.#dataDir, id)
+    if (!found) return null
+    return cleanAgent(found)
   }
 
   async listAgents(workspaceId: WorkspaceId): Promise<Agent[]> {
-    return (await this.#ws(workspaceId)).agent().all().map(cleanAgent)
+    const all = await listAgentDirs(this.#dataDir)
+    return all.filter((a) => a.workspaceId === workspaceId).map(cleanAgent)
   }
 
   // 未经清理的那一份（磁盘上是什么样就是什么样）：只给启动时的老记录清理用——
   // 它要删的正是读时兜底藏起来的那几个键，用 `listAgents` 就永远判不出"需要清"。
   async listAgentsRaw(workspaceId: WorkspaceId): Promise<Agent[]> {
-    return (await this.#ws(workspaceId)).agent().all()
+    const all = await listAgentDirs(this.#dataDir)
+    return all.filter((a) => a.workspaceId === workspaceId)
   }
 
   async insertAgent(agent: Agent): Promise<void> {
-    const ws = await this.#ws(agent.workspaceId)
-    await ws.mutex.run(() => ws.agent().put(agent))
+    await this.#agentsMutex.run(() => writeAgentDir(this.#dataDir, agent))
   }
 
   async deleteAgent(id: AgentId): Promise<boolean> {
-    for (const wsId of await this.listWorkspaceIds()) {
-      const ws = await this.#ws(wsId)
-      if (!ws.agent().has(id as string)) continue
-      return ws.mutex.run(() => ws.agent().del(id as string))
-    }
-    return false
+    return this.#agentsMutex.run(() => removeAgentDir(this.#dataDir, id))
+  }
+
+  // ── Agent 的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+
+  // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
+  //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载，
+  //     删智能体连目录一起删。这里四个方法管的就是它们。
+  //   · **共享** = 技能库里的资产，智能体用 `skillIds` 引用（下面 `Skill` 一节）。
+
+  /** 列出这个智能体的独有技能（slug + 正文）。 */
+  async listExclusiveSkills(agentId: AgentId): Promise<Array<{ slug: string; body: string }>> {
+    return listExclusiveSkillBodies(this.#dataDir, agentId)
+  }
+
+  async getExclusiveSkill(agentId: AgentId, slug: string): Promise<string | null> {
+    return getExclusiveSkillBody(this.#dataDir, agentId, slug)
+  }
+
+  async writeExclusiveSkill(agentId: AgentId, slug: string, body: string): Promise<void> {
+    await this.#agentsMutex.run(() => writeExclusiveSkillBody(this.#dataDir, agentId, slug, body))
+  }
+
+  async removeExclusiveSkill(agentId: AgentId, slug: string): Promise<boolean> {
+    return this.#agentsMutex.run(() => removeExclusiveSkillBody(this.#dataDir, agentId, slug))
   }
 
   // ── AgentGroup（智能体组，D70 增量添加）──

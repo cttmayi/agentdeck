@@ -11,13 +11,15 @@ import {
 } from '@agentdeck/agent-core'
 import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
+import type { Agent, Skill } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { parseAgentDraft, readAgentDraftArtifacts, type AgentDraftParsed } from './agent-maker.ts'
 import {
   AGENT_MAKER_SKILL_SLUGS,
-  ensureAgentMakerSkillsInstalled,
-  syncAgentMakerSkillMount,
+  ensureBuiltinAgentMakerSkills,
+  migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
+import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -137,33 +139,189 @@ describe('生成产物读取（readAgentDraftArtifacts）', () => {
   })
 })
 
-describe('平台技能动态安装 + 挂载（agent-maker-skills）', () => {
-  test('★ 三份平台技能从仓库装进技能库（幂等：再跑一遍不动）；挂载对齐到生成者身上', async () => {
+describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）', () => {
+  test('★ 三份平台技能播种进生成者的独有目录（不进技能库、不挂 skillIds、幂等）', async () => {
     const dir = await makeTempDir('agent-maker-skills')
     const store = await FileStore.open({ dataDir: dir, fsync: false })
     try {
-      const first = await ensureAgentMakerSkillsInstalled(store, WS)
-      assert.deepEqual([...first.installed].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
-      const skills = await store.listSkills(WS)
-      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
-        const skill = skills.find((s) => s.slug === slug)
-        assert.ok(skill, `平台技能 ${slug} 要装进来`)
-        assert.ok(skill!.body.includes('## When to Use'), `${slug} 的正文要完整（含 When to Use）`)
-        assert.equal(skill!.source, 'local')
-      }
-      // 幂等：再跑一遍 = 什么都不装（同名已存在）
-      const again = await ensureAgentMakerSkillsInstalled(store, WS)
-      assert.deepEqual(again.installed, [])
-      assert.equal((await store.listSkills(WS)).length, AGENT_MAKER_SKILL_SLUGS.length)
+      const first = await ensureBuiltinAgentMakerSkills(store, WS)
+      assert.deepEqual([...first.seeded].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
 
-      // 挂载：生成者身上挂着那三条（对账先建出生成者）
-      const mount = await syncAgentMakerSkillMount(store, WS)
-      assert.equal(mount.skillSlugs.length, AGENT_MAKER_SKILL_SLUGS.length)
       const maker = (await store.listAgents(WS)).find((a) => a.role === 'agent-maker')!
-      assert.equal(maker.skillIds.length, AGENT_MAKER_SKILL_SLUGS.length)
-      // 再跑一遍 = 不写（改了才写）
-      const mountAgain = await syncAgentMakerSkillMount(store, WS)
-      assert.deepEqual(mountAgain.skillIds, mount.skillIds)
+      const exclusive = await store.listExclusiveSkills(maker.id)
+      assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
+      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
+        const skill = exclusive.find((e) => e.slug === slug)
+        assert.ok(skill, `平台技能 ${slug} 要进生成者的独有目录`)
+        assert.ok(skill!.body.includes('## When to Use'), `${slug} 的正文要完整（含 When to Use）`)
+      }
+      // ★ 不进技能库：库里**一条都没有**（技能页看不到、卸载入口不存在）
+      assert.deepEqual(await store.listSkills(WS), [])
+      // 生成者不再挂库技能
+      assert.deepEqual(maker.skillIds, [])
+
+      // 幂等：再跑一遍 = 什么都不写（目录里已有）
+      const again = await ensureBuiltinAgentMakerSkills(store, WS)
+      assert.deepEqual(again.seeded, [])
+      assert.equal((await store.listExclusiveSkills(maker.id)).length, AGENT_MAKER_SKILL_SLUGS.length)
+    } finally {
+      await store.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★ 老库里的三条平台技能迁进独有目录并清掉（一次性、幂等；正文原样搬）', async () => {
+    const dir = await makeTempDir('agent-maker-migrate')
+    const store = await FileStore.open({ dataDir: dir, fsync: false })
+    try {
+      // 造一个"老工作区"：库里三条 platform:agent-maker + 生成者 skillIds 指向它们
+      const now = Date.now()
+      await store.insertWorkspace({
+        id: WS,
+        name: '测试工作区',
+        executeTemplate: '',
+        reviewTemplate: '',
+        chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        createdAt: now,
+        updatedAt: now,
+      })
+      const maker: Agent = {
+        id: 'maker-1' as Agent['id'],
+        workspaceId: WS,
+        name: '智能体生成者（内置）',
+        instructions: '身份块',
+        model: null,
+        runtimeKey: 'default',
+        workDir: null,
+        skillIds: ['sk-1', 'sk-2', 'sk-3'] as Agent['skillIds'],
+        env: {},
+        role: 'agent-maker',
+        builtin: true,
+        reviewStandard: null,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await store.insertAgent(maker)
+      const bodies: Record<string, string> = {}
+      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
+        const body = `---\nname: ${slug}\ndescription: 规范\n---\n## When to Use\n${slug}\n## Procedure\n照做。`
+        bodies[slug] = body
+        await store.insertSkill({
+          id: (`sk-${AGENT_MAKER_SKILL_SLUGS.indexOf(slug) + 1}`) as Skill['id'],
+          workspaceId: WS,
+          slug,
+          name: slug,
+          description: '规范',
+          body,
+          verdictSchemaVersion: 1,
+          source: 'local',
+          sourceRef: 'platform:agent-maker',
+          version: null,
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
+      const first = await migratePlatformSkillsToExclusive(store, WS)
+      assert.deepEqual([...first.moved].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
+      // 库清空；正文原样搬进独有目录；skillIds 清掉
+      assert.deepEqual(await store.listSkills(WS), [])
+      const exclusive = await store.listExclusiveSkills('maker-1' as Agent['id'])
+      assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
+      for (const slug of AGENT_MAKER_SKILL_SLUGS) {
+        const e = exclusive.find((x) => x.slug === slug)
+        assert.equal(e?.body, bodies[slug])
+      }
+      const after = await store.getAgent('maker-1' as Agent['id'])
+      assert.deepEqual(after?.skillIds, [])
+
+      // 幂等：再跑一遍 = 什么都不做
+      const again = await migratePlatformSkillsToExclusive(store, WS)
+      assert.deepEqual(again.moved, [])
+    } finally {
+      await store.close()
+      await cleanup(dir)
+    }
+  })
+
+  test('★★ 注入：共享 ∪ 独有走同一条通道；同 slug 时独有**盖过**共享', async () => {
+    const dir = await makeTempDir('agent-maker-inject')
+    const store = await FileStore.open({ dataDir: dir, fsync: false })
+    try {
+      await store.insertWorkspace({
+        id: WS,
+        name: '测试工作区',
+        executeTemplate: '',
+        reviewTemplate: '',
+        chatTemplate: '',
+        defaultAgentId: null,
+        locale: 'zh',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      // 一个自建执行者：库里挂 shared-x 与 shared-y，独有目录里也有一条 x
+      const agent: Agent = {
+        id: 'exec-1' as Agent['id'],
+        workspaceId: WS,
+        name: '执行者',
+        instructions: '你是助手。',
+        model: null,
+        runtimeKey: 'default',
+        workDir: null,
+        skillIds: ['sk-x', 'sk-y'] as Agent['skillIds'],
+        env: {},
+        role: 'executor',
+        builtin: false,
+        reviewStandard: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      await store.insertAgent(agent)
+      await store.insertSkill({
+        id: 'sk-x' as Skill['id'],
+        workspaceId: WS,
+        slug: 'shared-x',
+        name: '共享X',
+        description: null,
+        body: '# 共享X\n\n## When to Use\n共享\n## Procedure\n用共享的。',
+        verdictSchemaVersion: 1,
+        source: 'local',
+        sourceRef: 'local:shared-x',
+        version: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      await store.insertSkill({
+        id: 'sk-y' as Skill['id'],
+        workspaceId: WS,
+        slug: 'shared-y',
+        name: '共享Y',
+        description: null,
+        body: '# 共享Y\n\n## When to Use\n共享\n## Procedure\n用共享的。',
+        verdictSchemaVersion: 1,
+        source: 'local',
+        sourceRef: 'local:shared-y',
+        version: null,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      await store.writeExclusiveSkill('exec-1' as Agent['id'], 'shared-x', '# 独有X\n\n## When to Use\n独有\n## Procedure\n用独有这份。')
+
+      const payloads = await loadAgentInjectableSkills(store, agent)
+      const refs = payloads.map((p) => ({ slug: p.ref.slug, source: p.ref.source }))
+      assert.deepEqual(
+        refs.sort((a, b) => (a.slug < b.slug ? -1 : 1)),
+        [
+          { slug: 'shared-x', source: 'agent' },
+          { slug: 'shared-y', source: 'local' },
+        ],
+        '独有 x 盖过同 slug 的共享 x；共享 y 照常注入',
+      )
+      const x = payloads.find((p) => p.ref.slug === 'shared-x')!
+      assert.ok(x.body.includes('独有这份'), '注入的是独有那份正文，不是共享的')
+      assert.equal(x.ref.id, null, '独有技能没有库 id')
     } finally {
       await store.close()
       await cleanup(dir)
@@ -396,24 +554,31 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     assert.equal((res.body as { code?: string }).code, 'agent_skill_clash_mine')
   })
 
-  test('★ 平台技能允许卸载：生成者（内置、只读）不挡路（下次启动对账会再装回来，自愈）', async () => {
-    // 设计定稿 §3.3：平台技能"允许卸载，下次启动对账重装"——若把内置的挂载算成
-    // "使用者的引用"，使用者就永远卸不掉（内置只读、没法自己摘挂）。
-    const all = await json('/api/skills')
-    const target = (all.body as { skills: Array<{ id: string; slug: string }> }).skills.find(
-      (s) => s.slug === 'boundary-checklist',
-    )!
-    const del = await json(`/api/skills/${encodeURIComponent(target.id)}`, { method: 'DELETE' })
-    assert.equal(del.status, 200, `卸平台技能应成功：${JSON.stringify(del.body)}`)
+  test('★ 生成者对话的 run 注入 3 条独有技能（source: agent）；技能页里一条都没有', async () => {
+    const created = await postJson('/api/conversations', { agentId: makerId, text: '问岗位' })
+    assert.equal(created.status, 201)
+    const conversationId = (created.body as { conversation: { id: string } }).conversation.id
+    const runId = (created.body as { turn: { runId: string } }).turn.runId
+    await waitForTerminal(runId)
 
-    const agents = await json('/api/agents')
-    const maker = (agents.body as { agents: Array<{ id: string; role: string; skillIds: string[] }> }).agents.find(
-      (a) => a.role === 'agent-maker',
-    )!
-    assert.ok(!maker.skillIds.includes(target.id), '生成者身上的挂载要被摘掉（它只读，但平台侧摘挂）')
-    const after = await json('/api/skills')
-    const skillsAfter = (after.body as { skills: Array<{ slug: string }> }).skills
-    assert.ok(!skillsAfter.some((s) => s.slug === 'boundary-checklist'), '那条要从技能库消失')
-    assert.ok(skillsAfter.some((s) => s.slug === 'agent-design-norms'), '另外两条不受影响')
+    // ★ D111：独有技能走同一条注入通道——run.skillRefs 如实带来源 `agent`
+    const run = await json(`/api/runs/${runId}`)
+    const skillRefs = (run.body as { skillRefs?: Array<{ id: string | null; slug: string; source: string }> }).skillRefs
+    assert.ok(skillRefs, 'run 要有 skillRefs')
+    const agentRefs = skillRefs!.filter((r) => r.source === 'agent')
+    assert.equal(agentRefs.length, AGENT_MAKER_SKILL_SLUGS.length, '注入的独有技能要是那三条')
+    assert.deepEqual(
+      [...agentRefs].map((r) => r.slug).sort(),
+      [...AGENT_MAKER_SKILL_SLUGS].sort(),
+    )
+    assert.ok(agentRefs.every((r) => r.id === null), '独有技能没有库 id（id === null）')
+
+    // ★ 不进技能库、不进技能页
+    const all = await json('/api/skills')
+    const skills = (all.body as { skills: Array<{ slug: string }> }).skills
+    assert.ok(
+      !skills.some((s) => (AGENT_MAKER_SKILL_SLUGS as readonly string[]).includes(s.slug)),
+      '技能页里不应该有那三条平台技能',
+    )
   })
 })

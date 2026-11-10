@@ -20,13 +20,13 @@ import {
   //    第 70 批量出来"按标记一把抓"会抓到**先出现的那条内置**（起草者/审核者都有标记），
   //    于是用例在"审核者排在前面"时测的根本不是起草者——而它照样是绿的。
   builtinKindOf,
-  DRAFTER_INSTRUCTIONS,
+  DRAFTER_INSTRUCTIONS_BODY,
   DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
-  MEMORY_TIDY_INSTRUCTIONS,
+  MEMORY_TIDY_INSTRUCTIONS_BODY,
   MEMORY_TIDY_INSTRUCTIONS_V1,
   MEMORY_TIDY_NAME,
 } from './builtin-drafter.ts'
@@ -54,7 +54,8 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.ok(drafter, '建完必须能在列表里按内置标记找到它')
     assert.equal(drafter.role, 'drafter')
     assert.equal(drafter.name, DRAFTER_NAME)
-    assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
+    // ★ 2026-11（D111）：存储的是**组装前**正文（平台守则运行时拼）
+    assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
     // 第 ③ 条：它不挂技能——挂了会让人以为那些技能影响起草（它们不影响，
     // 起草 run 的技能集合是写死的）
     assert.deepEqual(drafter.skillIds, [])
@@ -80,12 +81,15 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
    */
   test('★★★ 盘上还是**旧默认**指令 ⇒ 升级成当前默认（否则新规则永远进不了起草者）', async () => {
     const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    await store.insertAgent({ ...mine, instructions: DRAFTER_INSTRUCTIONS_V1 })
+    // ★ 2026-11（D111）：老工作区里存的是**组装后**全文（老记录/迁移），
+    //   所以要带 `instructionsAssembled: true`——否则对账会把它当"组装前"
+    //   再拼一遍守则（拼两遍 = 守则出现两次），旧默认就认不出来了。
+    await store.insertAgent({ ...mine, instructions: DRAFTER_INSTRUCTIONS_V1, instructionsAssembled: true })
 
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed', '旧默认必须被认出来并升级')
     const after = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')[0]!
-    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS, '升级后必须等于当前默认')
+    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY, '升级后必须等于当前默认（组装前正文）')
     // ★ 分批第 190 批（使用者："身份把规则都去掉，让它遵照 skill 来进行即可"）：
     //   当前默认已经**没有守则清单**了，所以这条改成钉"它认得出技能"——
     //   那才是它现在唯一需要的语义。
@@ -115,7 +119,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     const result = await ensureBuiltinDrafter(store, WS)
     assert.equal(result.action, 'healed')
     const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
-    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)
+    assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY)
   })
 
   test('内置标记丢了但角色还在 ⇒ 补标记，**不是**再造一条（否则每次启动多一条）', async () => {
@@ -181,7 +185,8 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     assert.ok(found, '建完必须能在列表里按内置标记找到它')
     assert.equal(found.role, 'memory-tidy')
     assert.equal(found.name, MEMORY_TIDY_NAME)
-    assert.equal(found.instructions, MEMORY_TIDY_INSTRUCTIONS)
+    // ★ 2026-11（D111）：存储的是**组装前**正文
+    assert.equal(found.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
     assert.deepEqual(found.skillIds, [], '它不挂技能（规矩在身份里）')
     // ★ 使用者要看的正是这段：规矩必须写在这条智能体的指令里，而不是藏在代码里
     assert.match(found.instructions, /只派活或提问时输出/)
@@ -213,7 +218,7 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     const result = await ensureBuiltinMemoryTidy(store, WS2)
     assert.equal(result.action, 'healed')
     const after = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS)
+    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
   })
 
   test('★ 内置标记丢了但角色还在 ⇒ 补标记（不再造一条）', async () => {
@@ -239,16 +244,17 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     await ensureBuiltinMemoryTidy(store, WS_OLD)
     const found = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
     assert.ok(found)
-    // 摆回旧版默认（逐字）
+    // 摆回旧版默认（逐字；老工作区里是**组装后**全文 ⇒ 带 `instructionsAssembled: true`）
     await store.insertAgent({
       ...found,
       instructions: MEMORY_TIDY_INSTRUCTIONS_V1,
+      instructionsAssembled: true,
       updatedAt: Date.now(),
     })
     const result = await ensureBuiltinMemoryTidy(store, WS_OLD)
     assert.equal(result.action, 'healed')
     const after = (await store.listAgents(WS_OLD)).find((a) => builtinKindOf(a) === 'memory-tidy')
-    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS, '升级成当前默认')
+    assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY, '升级成当前默认（组装前正文）')
     assert.match(after?.instructions ?? '', /要泛化/)
   })
 
@@ -260,6 +266,7 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     await store.insertAgent({
       ...found,
       instructions: `${MEMORY_TIDY_INSTRUCTIONS_V1}\n\n（我自己加的一条：报告要短）`,
+      instructionsAssembled: true,
       updatedAt: Date.now(),
     })
     const result = await ensureBuiltinMemoryTidy(store, WS_MINE)

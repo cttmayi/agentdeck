@@ -220,6 +220,24 @@ export interface Store {
    */
   deleteAgent(id: AgentId): Promise<boolean>
 
+  // ── Agent 的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
+
+  // 两类技能的分界（设计定稿 `docs/design/agent-directory.md` §4）：
+  //   · **独有** = 这个智能体目录里的文件——不进技能库、不进技能页、不可卸载，
+  //     删智能体连目录一起删。下面四个方法管的就是它们。
+  //   · **共享** = 技能库里的资产，智能体用 `skillIds` 引用（见 `Skill` 一节）。
+  //
+  // ⚠️ 独有技能**没有库 id**：run 的 `skillRefs` 里它们长这样——
+  //    `{ id: null, slug, source: 'agent' }`（`SkillRef.id` 可空，D111）。
+  /** 列出这个智能体的独有技能（slug + 正文）。正文 = `SKILL.md` 原文。 */
+  listExclusiveSkills(agentId: AgentId): Promise<Array<{ slug: string; body: string }>>
+  /** 读一条独有技能的正文；没有返回 null（**不是错误**）。 */
+  getExclusiveSkill(agentId: AgentId, slug: string): Promise<string | null>
+  /** 写一条独有技能（覆盖同 slug）。校验（slug/正文规则）由调用方做。 */
+  writeExclusiveSkill(agentId: AgentId, slug: string, body: string): Promise<void>
+  /** 删一条独有技能。真的删到了返回 true；本来就没有返回 false（**不是错误**）。 */
+  removeExclusiveSkill(agentId: AgentId, slug: string): Promise<boolean>
+
   // ── AgentGroup（智能体组，D70 增量添加）──
 
   getGroup(id: AgentGroupId): Promise<AgentGroup | null>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Agent, MemoryEntryView } from '../lib/api.ts'
+  import type { Agent, AgentExclusiveSkill, MemoryEntryView } from '../lib/api.ts'
   import {
     agents,
     identity,
@@ -8,8 +8,11 @@
     skills,
     tools,
     deleteAgent,
+    deleteExclusiveSkill,
+    listExclusiveSkills,
     loadAgents,
     loadSkills,
+    saveExclusiveSkill,
     updateAgent,
   } from '../lib/stores.ts'
   import { askConfirm } from '../lib/confirm.ts'
@@ -49,6 +52,86 @@
 
   /** 正在装「沉淀用技能」（防连点）。 */
   let installingSkill = false
+
+  // ── 独有技能（2026-11，D111）──
+  // 只属于这个智能体的技能文件（agents/<id>/SKILL/<slug>/SKILL.md）。与上面那格
+  // 「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
+  let exclusiveSkills: AgentExclusiveSkill[] = []
+  let exclusiveLoading = false
+  /** 编辑器状态：null = 关；否则 = 正在编辑的（`editingSlug` 空串 = 新增）。 */
+  let editorOpen = false
+  let editingSlug = ''
+  let editingBody = ''
+  let exclusiveBusy = false
+
+  // 换了 agent 就重新读（`selected` 是派生值，agent prop 会变）。
+  // ⚠️ 用 legacy `$:` 而不是 `$effect`：本组件是 legacy 模式（`export let` + `$:`），
+  //    引入 runes 会把整文件切到 runes 模式，`export let` 直接变编译错误。
+  $: agent && void loadExclusive()
+
+  async function loadExclusive(): Promise<void> {
+    exclusiveLoading = true
+    try {
+      exclusiveSkills = await listExclusiveSkills(agent.id)
+    } catch (err) {
+      showToast($t('agents.exclusiveSkillsLoadFailed', { error: String(err instanceof Error ? err.message : err) }))
+    } finally {
+      exclusiveLoading = false
+    }
+  }
+
+  function openAddExclusive(): void {
+    editingSlug = ''
+    editingBody = ''
+    editorOpen = true
+  }
+
+  function openEditExclusive(s: AgentExclusiveSkill): void {
+    editingSlug = s.slug
+    editingBody = s.body
+    editorOpen = true
+  }
+
+  async function saveExclusive(): Promise<void> {
+    if (exclusiveBusy) return
+    const slug = editingSlug.trim()
+    if (slug === '') {
+      showToast($t('agents.exclusiveSkillsSlugRequired'))
+      return
+    }
+    if (editingBody.trim() === '') {
+      showToast($t('agents.exclusiveSkillsBodyRequired'))
+      return
+    }
+    exclusiveBusy = true
+    try {
+      await saveExclusiveSkill(agent.id, slug, editingBody)
+      showToast($t('agents.exclusiveSkillsSaved', { slug }))
+      editorOpen = false
+      await loadExclusive()
+    } catch (err) {
+      showToast($t('agents.exclusiveSkillsSaveFailed', { error: String(err instanceof Error ? err.message : err) }))
+    } finally {
+      exclusiveBusy = false
+    }
+  }
+
+  async function removeExclusive(s: AgentExclusiveSkill): Promise<void> {
+    const ok = await askConfirm({
+      title: tx('agents.exclusiveSkillsDeleteTitle'),
+      message: tx('agents.exclusiveSkillsDeleteConfirm', { name: s.name, slug: s.slug }),
+      confirmLabel: tx('agents.exclusiveSkillsDelete'),
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await deleteExclusiveSkill(agent.id, s.slug)
+      showToast($t('agents.exclusiveSkillsDeleted', { slug: s.slug }))
+      await loadExclusive()
+    } catch (err) {
+      showToast($t('agents.exclusiveSkillsDeleteFailed', { error: String(err instanceof Error ? err.message : err) }))
+    }
+  }
 
   /**
    * ★ 分批第 208 批（使用者定：**安装入口留两处**——「沉淀设置」与本页）：
@@ -1126,6 +1209,112 @@
         </div>
 
         <!--
+          ══════════ 独有技能（2026-11，D111）══════════
+          ★ 位置：在「指令 | 挂载的技能」这一对的**后面**（整行宽，与记忆同款规矩——
+          插入配对中间必然留洞，探针 `agents.cardNoHoles` 钉着）。
+          ★ 与上面那格的分界：上一格 = **共享**技能（`skillIds` 引用技能库，全工作区
+            都看得到）；这一格 = **独有**技能（`agents/<id>/SKILL/` 文件，只属于它）。
+            两格都显示、动作都在这里改——内置智能体只读（平台播种，服务端同样拒）。
+        -->
+        <section class="cell exclusive-cell" data-exclusive-skills>
+          <span class="cell-label">
+            <span title={$t('agents.exclusiveSkillsHint')}>{$t('agents.exclusiveSkillsLabel')}</span>
+            <span class="mem-count" data-exclusive-count>
+              {$t('agents.exclusiveSkillsCount', { n: String(exclusiveSkills.length) })}
+            </span>
+            {#if !agent.builtin}
+              <span class="spacer"></span>
+              <button
+                type="button"
+                class="btn btn--ghost btn--sm"
+                data-exclusive-add
+                onclick={openAddExclusive}
+              >{$t('agents.exclusiveSkillsAdd')}</button>
+            {/if}
+          </span>
+          {#if agent.builtin}
+            <p class="row-hint">{$t('agents.exclusiveSkillsBuiltinHint')}</p>
+          {/if}
+          {#if exclusiveLoading}
+            <p class="empty-value">{$t('agents.exclusiveSkillsLoading')}</p>
+          {:else if exclusiveSkills.length === 0}
+            <p class="empty-value">{$t('agents.exclusiveSkillsEmpty')}</p>
+          {:else}
+            <div class="exclusive-list" data-exclusive-list>
+              {#each exclusiveSkills as s (s.slug)}
+                <div class="exclusive-row">
+                  <span class="exclusive-name">
+                    {s.name}
+                    {#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
+                  </span>
+                  {#if s.description}<span class="exclusive-desc">{s.description}</span>{/if}
+                  {#if !agent.builtin}
+                    <span class="exclusive-actions">
+                      <button
+                        type="button"
+                        class="btn btn--ghost btn--sm"
+                        data-exclusive-edit={s.slug}
+                        onclick={() => openEditExclusive(s)}
+                      >{$t('agents.exclusiveSkillsEdit')}</button>
+                      <button
+                        type="button"
+                        class="btn btn--ghost btn--sm"
+                        data-exclusive-delete={s.slug}
+                        onclick={() => void removeExclusive(s)}
+                      >{$t('agents.exclusiveSkillsDelete')}</button>
+                    </span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if editorOpen}
+            <div class="exclusive-editor" data-exclusive-editor>
+              <label class="exclusive-slug-row">
+                <span class="cell-label-inner">{$t('agents.exclusiveSkillsSlug')}</span>
+                {#if editingSlug === ''}
+                  <input
+                    type="text"
+                    class="input"
+                    placeholder={$t('agents.exclusiveSkillsSlugPlaceholder')}
+                    bind:value={editingSlug}
+                    data-exclusive-slug
+                  />
+                {:else}
+                  <code class="skill-slug">{editingSlug}</code>
+                  <p class="row-hint">{$t('agents.exclusiveSkillsSlugLockedHint')}</p>
+                {/if}
+              </label>
+              <label class="exclusive-body-row">
+                <span class="cell-label-inner">{$t('agents.exclusiveSkillsBody')}</span>
+                <textarea
+                  class="textarea"
+                  rows="10"
+                  placeholder={$t('agents.exclusiveSkillsBodyPlaceholder')}
+                  bind:value={editingBody}
+                  data-exclusive-body
+                ></textarea>
+              </label>
+              <div class="row-actions">
+                <button
+                  type="button"
+                  class="btn btn--primary btn--sm"
+                  data-exclusive-save
+                  disabled={exclusiveBusy}
+                  onclick={() => void saveExclusive()}
+                >{exclusiveBusy ? $t('common.saving') : $t('agents.exclusiveSkillsSave')}</button>
+                <button
+                  type="button"
+                  class="btn btn--ghost btn--sm"
+                  data-exclusive-cancel
+                  onclick={() => (editorOpen = false)}
+                >{$t('common.cancel')}</button>
+              </div>
+            </div>
+          {/if}
+        </section>
+
+        <!--
           ══════════ 记忆（分批第 240 批）══════════
           ★ 位置（分批第 254 批调整）：**在「指令 | 技能」那一对之后，整行宽**。
             原来它紧贴「指令」下面——但那会把它插进两列网格的配对中间（指令只剩左半列、
@@ -1805,6 +1994,70 @@
     /* 整行宽：一行一条记忆 + 它下面的出处，半列宽会折成三行（见上面那段说明） */
     grid-column: 1 / -1;
   }
+
+  /* ══════════ 独有技能（2026-11，D111）══════════ */
+  .exclusive-cell {
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-3);
+    /* 整行宽（与记忆同款规矩：只许放在配对之后） */
+    grid-column: 1 / -1;
+  }
+  .exclusive-cell .cell-label {
+    /* 与记忆头部同款：这一行只有单行短内容（标题/条数/新增按钮），居中安全 */
+    align-items: center;
+  }
+  .exclusive-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin-top: var(--sp-2);
+  }
+  .exclusive-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+  .exclusive-name {
+    font-weight: 600;
+  }
+  .exclusive-desc {
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .exclusive-actions {
+    margin-left: auto;
+    display: flex;
+    gap: var(--sp-1);
+    flex-shrink: 0;
+  }
+  .exclusive-editor {
+    margin-top: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .exclusive-editor .input,
+  .exclusive-editor .textarea {
+    width: 100%;
+  }
+  .exclusive-editor .row-actions {
+    display: flex;
+    gap: var(--sp-2);
+    justify-content: flex-end;
+  }
+
   /**
    * ★ 分批第 257 批：「记忆」这一节的头部。
    *

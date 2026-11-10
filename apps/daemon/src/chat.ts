@@ -4,13 +4,14 @@ import type {
   ChatTurn,
   Conversation,
   RunId,
-  Skill,
   SkillPayload,
   SubmitRunRequest,
 } from '@agentdeck/protocol'
 import { ulid } from '@agentdeck/protocol'
 import type { RunExecutor } from './executor.ts'
 import { resolveWorkDir } from './workdir.ts'
+import { loadAgentInjectableSkills } from './agent-injectable-skills.ts'
+import { effectiveInstructions } from './builtin-drafter.ts'
 
 /**
  * 聊天那一轮的服务端逻辑。
@@ -71,27 +72,7 @@ export interface ChatTurnOutcome {
 }
 
 /**
- * 一条 skill 载荷。
- *
- * ⚠️ 这份映射与 `POST /api/runs` 里那段是**同一件事**（那边是内联的）。
- *    不共用是因为那边那段夹在 300 行的校验里、抽出来要动它；而**漏掉它**的
- *    后果是这里已经踩过一次的坑：`skills` 省略 ⇒ 执行器按 `[]` 处理 ⇒
- *    一个 skill 也没注入，agent 用它自己的默认行为跑，正常完成、结果不对。
- *    所以这里宁可重复一遍，也不省略这个字段。
- */
-function skillPayload(skills: readonly Skill[]): SkillPayload[] {
-  return skills.map((s) => ({
-    ref: { id: s.id, slug: s.slug, source: s.source },
-    slug: s.slug,
-    name: s.name,
-    body: s.body,
-    ...(s.description ? { description: s.description } : {}),
-    files: s.files ?? {},
-  }))
-}
-
-/**
- * 这一轮要注入的 skill：**执行者自己挂的 ∪ 对话自己带的**。
+ * 这一轮要注入的 skill：**共享（执行者挂的 ∪ 对话带的）∪ 独有（执行者目录里的）**。
  *
  * ══════════════════════════════════════════════════════════════════
  * 为什么是并集，不是"对话带的说了算"
@@ -110,24 +91,20 @@ function skillPayload(skills: readonly Skill[]): SkillPayload[] {
  * ⚠️ 查不到的 id（skill 后来被卸了、记录里留着旧 id）**跳过**，不是报错：
  *    那条对话该照常能说话，而不是因为一条早已不在的 skill 卡死。
  */
+/**
+ * 这个对话这一轮注入的技能 = 共享（`agent.skillIds` ∪ 对话自己选的
+ * `conversation.skillIds`，按 id 去重）∪ 独有（`agents/<id>/SKILL/` 文件）。
+ *
+ * ★ 2026-11（D111）不再自己拼一遍库技能——共享 ∪ 独有的拼接只在
+ *   `agent-injectable-skills.ts` 一处（聊天、任务、审核、返工都走那里），
+ *   这里只负责把"对话自己选的那几个库技能 id"并进来。
+ */
 async function loadTurnSkills(
   store: Store,
   agent: Agent,
   conversationSkillIds: readonly string[],
-): Promise<Skill[]> {
-  const all = await store.listSkills(agent.workspaceId)
-  const byId = new Map(all.map((s) => [s.id as string, s]))
-  const ids = [...agent.skillIds, ...conversationSkillIds]
-  const out: Skill[] = []
-  const seen = new Set<string>()
-  for (const id of ids) {
-    const key = id as string
-    if (seen.has(key)) continue
-    seen.add(key)
-    const skill = byId.get(key)
-    if (skill) out.push(skill)
-  }
-  return out
+): Promise<SkillPayload[]> {
+  return loadAgentInjectableSkills(store, agent, conversationSkillIds)
 }
 
 /**
@@ -199,10 +176,14 @@ export async function submitChatTurn(
   const request: SubmitRunRequest = {
     runId,
     kind: 'execute',
-    agentRef: { id: agent.id, name: agent.name, instructions: agent.instructions },
-    skills: skillPayload(
-      await loadTurnSkills(store, agent, conversation.skillIds ?? []),
-    ),
+    // ★ 2026-11（D111）：指令的组装（内置 = 身份 + 平台守则）在**这里**做一次，
+    //   快照进 agentRef 的就是模型真正会读到的最终指令。
+    agentRef: {
+      id: agent.id,
+      name: agent.name,
+      instructions: effectiveInstructions(agent),
+    },
+    skills: await loadTurnSkills(store, agent, conversation.skillIds ?? []),
     // ★ 这一轮属于一个**对话**，不属于任务。报告摄取只认 issue/report/run，
     //   所以这条 run 结构上到不了判决——聊天不进闭环不是靠约定，是靠这条路不存在。
     subject: { type: 'conversation', id: conversation.id },
