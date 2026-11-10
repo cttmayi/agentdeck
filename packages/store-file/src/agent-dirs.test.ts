@@ -1,6 +1,7 @@
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { exists } from './fs-utils.ts'
 import { join } from 'node:path'
 import { makeAgent, wsId } from '@agentdeck/domain/testing'
 import type { Agent, Workspace } from '@agentdeck/protocol'
@@ -15,7 +16,8 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  *   · 目录形态：agent.json（结构化，**不含指令正文**）+ instructions.md（组装前）；
  *   · 独有技能 = 目录里的文件（SKILL/<slug>/SKILL.md），不进技能库；
  *   · 老 JSONL 的一次性迁移：幂等、内置带 `instructionsAssembled: true`（老记录存的是
- *     组装后全文）、`.migrated` 标记防"删了又复活"；老 jsonl **保留不删**。
+ *     组装后全文）；迁移完成后老 jsonl **删掉**（使用者确认），`.migrated` 标记
+ *     留着——备份把 jsonl 放回来也不许重迁复活。
  */
 
 let dir: string
@@ -39,7 +41,7 @@ function mk(
   return makeAgent({ id: id as Agent['id'], workspaceId: WS, name: '测试智能体', ...over })
 }
 
-/** 老工作区的落盘形状：workspaces.jsonl（wsIndex）+ workspaces/<WS>/log/agents.jsonl。 */
+/** 老工作区的落盘形状：workspaces.jsonl（wsIndex）+ workspaces/<WS>/log/agent.jsonl（集合名是单数）。 */
 async function seedLegacyWorkspace(d2: string, records: Array<Agent & { id: string }>): Promise<void> {
   const now = Date.now()
   const ws: Workspace = {
@@ -156,10 +158,10 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
             () => false,
           ),
         )
-        // 老 jsonl 保留不删（等使用者确认后再删）
-        const kept = await readFile(join(d2, 'workspaces', String(WS), 'log', 'agent.jsonl'), 'utf8')
-        assert.ok(kept.includes('old-builtin'), '老 jsonl 保留')
-        // 标记写出来了
+        // 老 jsonl 已删（使用者确认："可以删老 agent.jsonl 了"）
+        const legacyPath = join(d2, 'workspaces', String(WS), 'log', 'agent.jsonl')
+        assert.equal(await exists(legacyPath), false, '老 jsonl 迁移完成后删掉')
+        // 标记写出来了（留着防备份放回 jsonl ⇒ 重迁复活）
         const marker = await readFile(join(agentsRoot(d2), '.migrated'), 'utf8')
         assert.ok(marker.includes('v'), '.migrated 标记要写出来')
       } finally {
@@ -178,7 +180,7 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
     }
   })
 
-  test('★★ 删掉的智能体**不复活**（.migrated 标记防"老 jsonl 还在 ⇒ 重迁"）', async () => {
+  test('★★ 删掉的智能体**不复活**（备份把老 jsonl 放回来，.migrated 标记挡着重迁）', async () => {
     const d2 = await makeTempDir('agent-dirs-zombie')
     try {
       await seedLegacyWorkspace(d2, [mk('old-zombie', { instructions: '老正文' })])
@@ -192,7 +194,13 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
         await s1.close()
       }
 
-      // 第二轮：open ⇒ 老 jsonl 里那行还在，但标记在 ⇒ 不许复活
+      // 第二轮前：**模拟备份/拷贝把老 jsonl 放回来**——jsonl 已经在上一次 open 里
+      // 删掉了，能把它放回来的只有"人/备份"。标记在 ⇒ 不许重迁复活。
+      const now = Date.now()
+      await appendFile(
+        join(d2, 'workspaces', String(WS), 'log', 'agent.jsonl'),
+        JSON.stringify({ seq: 1, at: now, op: 'put', id: 'old-zombie', value: mk('old-zombie', { instructions: '老正文' }) }) + '\n',
+      )
       const s2 = await FileStore.open({ dataDir: d2, fsync: false })
       try {
         assert.equal(await s2.getAgent('old-zombie' as Agent['id']), null, '删掉的不许被老记录复活')

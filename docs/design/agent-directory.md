@@ -70,10 +70,10 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 
 - `FileStore.open()` 里做，一次性且幂等：`agent.json` 在 ⇒ 跳过；全部迁完写
   `agents/.migrated` 标记（没有标记才会重跑）。
-- **老 `agent.jsonl` 保留不删**（使用者拍板：等确认后再删）；从迁移完成起不再读、
-  不再写——读路径全部走目录。
-- `.migrated` 标记同时防"删了又复活"：删掉某条智能体后，老 jsonl 里那行还在，
-  没有标记的话下次启动会把它重新迁回来。
+- **老 `agent.jsonl` 迁移完成后删除**（2026-11 使用者确认："初步测试OK，可以删老
+  agent.jsonl了"）；从迁移完成起不再读、不再写——读路径全部走目录，jsonl 已无读者。
+- `.migrated` 标记**留着**，防"删了又复活"：万一有备份/拷贝把 jsonl 放回数据目录，
+  标记挡着不再重迁（"删掉的智能体被老记录复活"的判据仍然成立）。
 - 内置的老记录用 `writeLegacyAgentDir` 落盘（`instructionsAssembled: builtin === true`）。
 
 ## 6. 读取端（daemon）
@@ -106,7 +106,7 @@ DELETE /api/agents/:id/skills/:slug     → { removed }
   本轮**没有** `catalog/builtin-agents/` 模板目录——内置的生成仍然由
   `ensureBuiltin*` 在启动时保证，与自建同形落成目录。
 - 独有技能 v1 **只支持 SKILL.md**（支持文件暂不落盘）；注入时 `files: {}`。
-- 老 `agent.jsonl` 何时删：**等使用者确认后**再删（目前只留不读）。
+- 老 `agent.jsonl` 已在迁移完成后删除（2026-11 使用者确认）。
 
 ## 9. 代码落点
 

@@ -300,6 +300,11 @@ class WorkspaceStore {
     return this.#mutex
   }
 
+  /** 工作区根目录（`<dataDir>/workspaces/<wsId>`）。D111 删老 jsonl 要用。 */
+  get root(): string {
+    return this.#root
+  }
+
   /** 强类型取日志——避免到处写 `as unknown as`。 */
   log<K extends CollectionName>(name: K): JsonlLog<{ id: string }> {
     return this.logs[name]
@@ -517,21 +522,34 @@ export class FileStore implements Store {
    * 目录在就跳过，全部迁完写 `.migrated` 标记（没有标记才会重跑，防止
    * "删了目录、老 JSONL 里那行还在"把已删的智能体**复活**回来）。
    *
-   * ★ 老 JSONL **保留不删**（使用者拍板：等确认后再删）；只是从迁移完成起
-   *   不再读、不再写——读路径全部走目录。
+   * ★ 老 JSONL 在迁移完成后**删掉**（2026-11 使用者确认："初步测试OK，可以删老
+   *   agent.jsonl了"）——迁移完成后读路径全部走目录，jsonl 已无读者。
+   *   `.migrated` 标记**留着**：万一有备份/拷贝把 jsonl 放回数据目录，标记挡着
+   *   不再重迁——"删掉的智能体被老记录复活"的判据仍然成立。
    */
   async #migrateAgentsToDirs(): Promise<void> {
     const marker = join(agentsRoot(this.#dataDir), '.migrated')
-    if (await exists(marker)) return
-    await this.#agentsMutex.run(async () => {
-      for (const ws of this.#stores.values()) {
-        for (const rec of ws.agent().all()) {
-          if (await agentDirExists(this.#dataDir, rec.id)) continue
-          await writeLegacyAgentDir(this.#dataDir, rec)
+    if (!(await exists(marker))) {
+      await this.#agentsMutex.run(async () => {
+        for (const ws of this.#stores.values()) {
+          for (const rec of ws.agent().all()) {
+            if (await agentDirExists(this.#dataDir, rec.id)) continue
+            await writeLegacyAgentDir(this.#dataDir, rec)
+          }
         }
-      }
-    })
-    await atomicWrite(marker, JSON.stringify({ v: 1, at: Date.now() }, null, 2))
+      })
+      await atomicWrite(marker, JSON.stringify({ v: 1, at: Date.now() }, null, 2))
+    }
+    // 删老 jsonl 放在标记之后（而不是迁移循环里）：万一迁移中途失败，jsonl 还在
+    // （数据不丢）；删是幂等的（文件不在就跳过），所以"早就迁过的库"也会删干净。
+    await this.#removeLegacyAgentLogs()
+  }
+
+  /** 删掉每个 workspace 的 `log/agent.jsonl`（D111：迁移完成后老记录不再有读者）。 */
+  async #removeLegacyAgentLogs(): Promise<void> {
+    for (const ws of this.#stores.values()) {
+      await removeQuietly(join(ws.root, 'log', 'agent.jsonl'))
+    }
   }
 
   /**
