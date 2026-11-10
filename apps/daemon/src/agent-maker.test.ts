@@ -499,6 +499,15 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     assert.ok(mine, '配套技能要落 skills-mine（source === mine）')
     assert.deepEqual(out.skillIds, [mine!.id], '智能体的 skillIds 要指向已沉淀的那条技能')
     assert.deepEqual(out.agent.skillIds, [mine!.id])
+
+    // ★ D111（存储目录化）：生成的新智能体 = `agents/<id>/` 目录——详情接口要能
+    //   从目录读回，且 `instructions` = 岗位卡正文（组装前，builtin=false 不再拼守则）
+    const parsed = parseAgentDraft(artifactBody.agentDraft)
+    assert.ok(parsed.ok, '岗位卡要能被重新解析')
+    const fresh = await json(`/api/agents/${out.agent.id}`)
+    const freshBody = fresh.body as { instructions?: string; builtin?: boolean }
+    assert.equal(freshBody.instructions, parsed.ok ? parsed.instructions : '', '目录读回的指令 = 岗位卡正文')
+    assert.equal(freshBody.builtin, false)
   })
 
   test('★ 非生成者对话不能确认生成（agent_commit_not_maker）', async () => {
