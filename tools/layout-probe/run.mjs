@@ -667,7 +667,9 @@ const CHECKS = [
      */
     label:
       '★★★ 智能体卡片的两列布局：网格**没有洞**，且「指令 | 挂载的技能」**同一行各占一半**、' +
-      '「记忆」独占整行（2026-11：记忆插进配对中间之后半行留白；使用者要的是"保持之前的一半一半"）',
+      '「记忆」独占整行（2026-11：记忆插进配对中间之后半行留白；使用者要的是"保持之前的一半一半"）' +
+      '；独有技能**住在「挂载的技能」那一格里**（共享列表下面，2026-11 使用者："还是放里面比较合适，' +
+      '可以用一横线隔开"）',
     ok: (v) =>
       v !== null &&
       typeof v === 'object' &&
@@ -677,7 +679,7 @@ const CHECKS = [
       v.pair?.sameRow === true &&
       v.pair?.eachHalf === true &&
       v.memOwnRow === true &&
-      // ★ 第 255 批：并排的两格同高；技能列表填满它、不无缘无故滚
+      // ★ 第 255 批：并排的两格同高；技能列表不无缘无故滚
       v.pairSameHeight === true &&
       /**
        * ⚠️⚠️ 第 258 批那条技能间距判据写成了 `… && A || B` —— `&&` 比 `||` 结合得紧，
@@ -686,7 +688,11 @@ const CHECKS = [
        *   改动时才发现——`两个框同高 false` 却仍是绿的）。
        *   现在括起来；"有没有列表"另外用 `hasPicker` 区分（没有技能时那两项不适用）。
        */
-      (v.hasPicker !== true || (v.pickerScrolls === false && v.pickerFillsCell === true)) &&
+      (v.hasPicker !== true || (v.pickerScrolls === false && v.boxFillsCell === true)) &&
+      // ★ 2026-11（D111）：共享 + 独有技能共用一个框（`.skill-box`）；独有技能区在
+      //   共享列表下面（同一框、border-top 横线分开）。`hasExclusive` 不存在时
+      //   （老界面没有独有技能节）不适用。
+      (v.hasExclusive !== true || v.exclusiveBelow === true) &&
       // ★ 第 258 批：技能选项贴顶排列，相邻两项之间只有 gap（≈4px），不被行拉伸
       ((v.skillRows?.count ?? 0) <= 1 || (v.skillRows?.maxGap ?? 0) <= 8),
     show: (v) =>
@@ -699,7 +705,7 @@ const CHECKS = [
           `　指令|技能 同一行 ${String(v.pair?.sameRow)} 各占一半 ${String(v.pair?.eachHalf)}` +
           `　记忆独占整行 ${String(v.memOwnRow)}` +
           `　指令|技能 同高 ${String(v.pairSameHeight)}　技能列表在滚 ${String(v.pickerScrolls)}` +
-          `　两个框同高 ${String(v.pickerFillsCell)}` +
+          `　框与指令框同高 ${String(v.boxFillsCell)}　独有区在共享列表下 ${String(v.exclusiveBelow)}` +
           `　技能项 ${String(v.skillRows?.count)} 个／最大项高 ${String(v.skillRows?.maxItemH)}／` +
           `列内间隙 ${JSON.stringify(v.skillRows?.gaps ?? [])}` +
           `（高 指令格 ${String(v.instrH)} / 技能格 ${String(v.skillsH)} / 输入框 ${String(v.boxH)} / 列表 ${String(v.pickerH)}，` +

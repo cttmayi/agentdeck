@@ -58,7 +58,7 @@
   // 「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
   let exclusiveSkills: AgentExclusiveSkill[] = []
   let exclusiveLoading = false
-  /** 编辑器状态：null = 关；否则 = 正在编辑的（`editingSlug` 空串 = 新增）。 */
+  /** 编辑器状态：false = 关；true = 正在编辑已有的一条（slug 锁定不可改名）。 */
   let editorOpen = false
   let editingSlug = ''
   let editingBody = ''
@@ -85,12 +85,6 @@
     }
   }
 
-  function openAddExclusive(): void {
-    editingSlug = ''
-    editingBody = ''
-    editorOpen = true
-  }
-
   function openEditExclusive(s: AgentExclusiveSkill): void {
     editingSlug = s.slug
     editingBody = s.body
@@ -99,11 +93,9 @@
 
   async function saveExclusive(): Promise<void> {
     if (exclusiveBusy) return
-    const slug = editingSlug.trim()
-    if (slug === '') {
-      showToast($t('agents.exclusiveSkillsSlugRequired'))
-      return
-    }
+    // ★ 2026-11（使用者："也不需要新增按钮"）：界面只留**编辑已有**的入口，
+    //   slug 恒为锁定值（编辑态），新增态/空校验随之删掉。
+    const slug = editingSlug
     if (editingBody.trim() === '') {
       showToast($t('agents.exclusiveSkillsBodyRequired'))
       return
@@ -1132,6 +1124,9 @@
 
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
+          <!-- ★ 2026-11（使用者："还是没放进去呢，还是2个框"）：**一个框**——
+               共享技能与独有技能共用一个带边框的框（`.skill-box`），框内横线隔开。 -->
+          <div class="skill-box">
           <!--
             ★ 分批第 207 批（使用者定："就挂在 Agent 上，而不是在沉淀做特别处理"）：
             起草者的**沉淀用技能真的挂在它身上**（`Agent.skillIds`），所以这一格不再写
@@ -1211,65 +1206,58 @@
               {/each}
             </div>
           {/if}
-        </div>
 
-        <!--
-          ══════════ 独有技能（2026-11，D111）══════════
-          ★ 位置：在「指令 | 挂载的技能」这一对的**后面**（整行宽，与记忆同款规矩——
-          插入配对中间必然留洞，探针 `agents.cardNoHoles` 钉着）。
-          ★ 与上面那格的分界：上一格 = **共享**技能（`skillIds` 引用技能库，全工作区
-            都看得到）；这一格 = **独有**技能（`agents/<id>/SKILL/` 文件，只属于它）。
-            两格都显示、动作都在这里改——内置智能体只读（平台播种，服务端同样拒）。
-        -->
-        <section class="cell exclusive-cell" data-exclusive-skills>
-          <span class="cell-label">
-            <span title={$t('agents.exclusiveSkillsHint')}>{$t('agents.exclusiveSkillsLabel')}</span>
-            <span class="mem-count" data-exclusive-count>
-              {$t('agents.exclusiveSkillsCount', { n: String(exclusiveSkills.length) })}
-            </span>
-            {#if !agent.builtin}
-              <span class="spacer"></span>
-              <button
-                type="button"
-                class="btn btn--ghost btn--sm"
-                data-exclusive-add
-                onclick={openAddExclusive}
-              >{$t('agents.exclusiveSkillsAdd')}</button>
-            {/if}
-          </span>
-          {#if agent.builtin}
-            <p class="row-hint">{$t('agents.exclusiveSkillsBuiltinHint')}</p>
-          {/if}
+          <!--
+            ══════════ 独有技能（2026-11，D111）══════════
+            ★ 位置（2026-11 使用者："独有技能被放在了挂载的技能的外面，不好，
+              还是放里面比较合适，可以用一横线隔开"；再精简："也不需要『独有技能』
+              这些文字……也不需要新增按钮"；最后定稿："还是没放进去呢，还是2个框"
+              ——**与共享技能共用一个框**（`.skill-box`），框内横线
+              （`.exclusive-cell` 的 `border-top`）隔开）。上一段 = **共享**技能
+              （`skillIds` 引用技能库，全工作区看得到）；下一段 = **独有**技能
+              （`agents/<id>/SKILL/` 文件，只属于它，勾选锁着）。编辑/删除悬停
+              出现，内置只读（平台播种，服务端同样拒）。没有标题/条数/新增按钮
+              （独有技能当前靠平台播种/文件/API 添加，界面不提供新增入口）。
+          -->
+          <section class="exclusive-cell" data-exclusive-skills>
           {#if exclusiveLoading}
             <p class="empty-value">{$t('agents.exclusiveSkillsLoading')}</p>
           {:else if exclusiveSkills.length === 0}
             <p class="empty-value">{$t('agents.exclusiveSkillsEmpty')}</p>
           {:else}
-            <div class="exclusive-list" data-exclusive-list>
+            <!-- ★ 2026-11（使用者："我就是要显示成『勾选 名字』的样子"）：独有技能
+                 与共享技能**同款勾选列表**（checkbox 锁着——独有技能是文件资产，
+                 没有"卸载"概念，随智能体删除）；编辑/删除悬停才出现，不抢勾选的样子。 -->
+            <div class="exclusive-picker locked" data-exclusive-list>
               {#each exclusiveSkills as s (s.slug)}
-                <div class="exclusive-row">
+                <label class="skill-option" data-exclusive-row>
+                  <input type="checkbox" checked disabled />
+                  <!-- ★ 2026-11（使用者："我要的是和上面的一致，不要不同行为"）：
+                       独有技能与共享技能**同一套显示**——名字为主，slug 只在和名字
+                       不同时才作为机器名补充（内置平台技能 name 是中文标题、slug 是
+                       英文 kebab，所以会看到"智能体设计规范 agent-design-norms"：
+                       这正是共享技能的老规矩，第 209 批）。 -->
                   <span class="exclusive-name">
                     {s.name}
                     {#if s.name !== s.slug}<code class="skill-slug">{s.slug}</code>{/if}
                   </span>
-                  {#if s.description}<span class="exclusive-desc">{s.description}</span>{/if}
                   {#if !agent.builtin}
                     <span class="exclusive-actions">
                       <button
                         type="button"
-                        class="btn btn--ghost btn--sm"
+                        class="btn btn--mini"
                         data-exclusive-edit={s.slug}
                         onclick={() => openEditExclusive(s)}
                       >{$t('agents.exclusiveSkillsEdit')}</button>
                       <button
                         type="button"
-                        class="btn btn--ghost btn--sm"
+                        class="btn btn--mini"
                         data-exclusive-delete={s.slug}
                         onclick={() => void removeExclusive(s)}
                       >{$t('agents.exclusiveSkillsDelete')}</button>
                     </span>
                   {/if}
-                </div>
+                </label>
               {/each}
             </div>
           {/if}
@@ -1277,18 +1265,8 @@
             <div class="exclusive-editor" data-exclusive-editor>
               <label class="exclusive-slug-row">
                 <span class="cell-label-inner">{$t('agents.exclusiveSkillsSlug')}</span>
-                {#if editingSlug === ''}
-                  <input
-                    type="text"
-                    class="input"
-                    placeholder={$t('agents.exclusiveSkillsSlugPlaceholder')}
-                    bind:value={editingSlug}
-                    data-exclusive-slug
-                  />
-                {:else}
-                  <code class="skill-slug">{editingSlug}</code>
-                  <p class="row-hint">{$t('agents.exclusiveSkillsSlugLockedHint')}</p>
-                {/if}
+                <code class="skill-slug">{editingSlug}</code>
+                <p class="row-hint">{$t('agents.exclusiveSkillsSlugLockedHint')}</p>
               </label>
               <label class="exclusive-body-row">
                 <span class="cell-label-inner">{$t('agents.exclusiveSkillsBody')}</span>
@@ -1317,7 +1295,9 @@
               </div>
             </div>
           {/if}
-        </section>
+          </section>
+          </div>
+        </div>
 
         <!--
           ══════════ 记忆（分批第 240 批）══════════
@@ -1648,6 +1628,30 @@
     align-self: stretch;
     min-height: 0;
   }
+  /* ★ 2026-11：共享技能 + 独有技能**共用一个框**（`border` 只在这一个元素上）。
+     flex column：共享列表 `flex: 1` 吃掉剩余高度（装不下才滚），独有技能段固定
+     在框底、横线隔开。 */
+  .skill-box {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    /* ★ 2026-11（使用者："框的高度不对了，没有和左边的指令框一致"）：
+       `flex: 1` 撑满格子、`max-height: 22rem` 与指令框同高——22rem ≈ 6 行指令
+       的高度，这正是第 255 批给 `.skill-picker` 定过的"上限仍留一个（22rem，
+       与指令同高）"；框内独有技能段（`.exclusive-cell`）`flex-shrink: 0` 不被
+       压缩，挤不下的是共享列表（picker 在框内滚）。差 4px 内的判据见探针
+       `boxFillsCell`。 */
+    flex: 1 1 auto;
+    max-height: 22rem;
+    min-height: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: var(--sp-2);
+    background: var(--bg);
+  }
+  .exclusive-cell {
+    flex-shrink: 0;
+  }
   .skills-cell .skill-picker {
     flex: 1 1 auto;
     max-height: 22rem;
@@ -1870,12 +1874,17 @@
     cursor: not-allowed;
   }
 
-  /* 内置那一格的技能列表：同一个 `.skill-picker` 骨架，只是勾选框锁着 */
-  .skill-picker.locked {
+  /* ★ 2026-11：内置的只读视觉（灰底 + 虚线框）挪到 `.skill-box` 上——框现在
+     只有一个（`.skill-box`），`border-style: dashed` 若还留在 `.skill-picker.locked`
+     上，会在框内再画出一个黑色粗虚线框（border-width 从 `border: 1px solid` 简写
+     里消失后回落到默认 medium、颜色回落 currentColor）——使用者亲眼抓到的
+     "多了一个黑色虚线框"就是这个。 */
+  .skills-cell.locked .skill-box {
     background: var(--surface-2);
     border-style: dashed;
   }
 
+  /* 内置那一格的技能列表：同一个 `.skill-picker` 骨架，只是勾选框锁着 */
   .skill-picker.locked .skill-option {
     cursor: not-allowed;
     color: var(--text-dim);
@@ -1893,17 +1902,15 @@
    *   `repeat(auto-fill, minmax(11rem, 1fr))`，窄格子里会自动缩成一列，
    *   使用者要求的就是"两列"，钉死列数。
    */
+  /* ★ 2026-11：框（border/圆角/padding/底色）挪到 `.skill-box` 上——共享技能与
+     独有技能**共用一个框**（使用者："还是没放进去呢，还是2个框"）。这里只留
+     "两列铺开 + 装不下才滚"的部分。 */
   .skill-picker {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--sp-1) var(--sp-2);
     max-height: 11rem;
     overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: var(--sp-2);
-    background: var(--bg);
-    text-align: left;
   }
 
 
@@ -2000,48 +2007,40 @@
     grid-column: 1 / -1;
   }
 
-  /* ══════════ 独有技能（2026-11，D111）══════════ */
+  /* ══════════ 独有技能（2026-11，D111）══════════
+     2026-11（使用者："独有技能被放在了挂载的技能的外面，不好，还是放里面比较
+     合适，可以用一横线隔开"）：这一节**住在「挂载的技能」格子里**，不再是整行宽的
+     grid 格——`border-top` 就是那条横线，把共享技能（上一段）与独有技能分开。 */
+  /* ★ 2026-11：独有技能 = 与共享技能同款的勾选列表（checkbox 锁着：文件资产、
+     没有卸载概念），而且**也在一个带边框的框里**（使用者："放原来框的里面
+     （挂载的技能下面有个框）"——框 = 和「挂载的技能」同款：白底、圆角、padding；
+     横线 `border-top` 把两个框隔开）。没有标题/条数/新增按钮（"也不需要『独有技能』
+     这些文字……也不需要新增按钮"）。 */
   .exclusive-cell {
+    /* 框内的横线：把共享技能（上段）与独有技能（下段）隔开 */
     border-top: 1px solid var(--line);
-    padding-top: var(--sp-3);
-    /* 整行宽（与记忆同款规矩：只许放在配对之后） */
-    grid-column: 1 / -1;
+    padding-top: var(--sp-2);
   }
-  .exclusive-cell .cell-label {
-    /* 与记忆头部同款：这一行只有单行短内容（标题/条数/新增按钮），居中安全 */
-    align-items: center;
-  }
-  .exclusive-list {
+  .exclusive-picker {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-2);
-    margin-top: var(--sp-2);
-  }
-  .exclusive-row {
-    display: flex;
-    align-items: baseline;
-    gap: var(--sp-2);
-    padding: var(--sp-2);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
+    gap: var(--sp-1);
+    margin-top: var(--sp-1);
   }
   .exclusive-name {
     font-weight: 600;
-  }
-  .exclusive-desc {
-    color: var(--text-dim);
-    font-size: var(--fs-sm);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
   }
   .exclusive-actions {
     margin-left: auto;
     display: flex;
     gap: var(--sp-1);
     flex-shrink: 0;
+    /* 悬停才出现（与记忆同款交互） */
+    opacity: 0;
+  }
+  .exclusive-picker .skill-option:hover .exclusive-actions,
+  .exclusive-picker .skill-option:focus-within .exclusive-actions {
+    opacity: 1;
   }
   .exclusive-editor {
     margin-top: var(--sp-3);

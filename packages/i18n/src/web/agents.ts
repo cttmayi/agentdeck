@@ -635,38 +635,13 @@ export const agentsText = {
    *    "行动权限一个都没勾"却能触发动作，进而以为界面坏了。
    */
   'agents.noSkillsYet': { zh: '还没有任何技能。', en: 'No skills yet.' },
-  /**
-   * ★ 2026-11（D111）：**独有技能**——`agents/<id>/SKILL/` 里的文件，只属于这条
-   *   智能体。与「挂载的技能」（技能库引用）两码事：不进技能库、不进技能页、不可卸载。
-   */
-  'agents.exclusiveSkillsLabel': {
-    zh: '独有技能',
-    en: 'Exclusive skills',
-  },
-  'agents.exclusiveSkillsCount': {
-    zh: ' · {n} 条 · ',
-    en: ' · {n} · ',
-  },
-  'agents.exclusiveSkillsHint': {
-    zh: '只属于这条智能体的技能文件（agents/<id>/SKILL/）。共享技能在上方那格「挂载的技能」里选——这里不选技能库，是它自己的文件。',
-    en: 'Skill files that belong to this agent only (agents/<id>/SKILL/). Shared skills are picked in "Attached skills" above — these are its own files, not library entries.',
-  },
-  'agents.exclusiveSkillsBuiltinHint': {
-    zh: '内置智能体的独有技能由平台播种，只读。',
-    en: 'Built-in agents get their exclusive skills seeded by the platform; read-only.',
-  },
   'agents.exclusiveSkillsEmpty': {
     zh: '还没有独有技能。',
     en: 'No exclusive skills yet.',
   },
-  'agents.exclusiveSkillsAdd': { zh: '新增', en: 'Add' },
   'agents.exclusiveSkillsEdit': { zh: '编辑', en: 'Edit' },
   'agents.exclusiveSkillsDelete': { zh: '删除', en: 'Delete' },
   'agents.exclusiveSkillsSlug': { zh: '机器名（slug）', en: 'Slug' },
-  'agents.exclusiveSkillsSlugPlaceholder': {
-    zh: '小写字母/数字/连字符，如 meeting-notes-format',
-    en: 'lowercase letters/digits/hyphens, e.g. meeting-notes-format',
-  },
   'agents.exclusiveSkillsSlugLockedHint': {
     zh: 'slug 在保存后不可改名（要换名就删掉重建）',
     en: 'The slug cannot be renamed after saving (delete and recreate to rename)',
@@ -701,10 +676,6 @@ export const agentsText = {
   'agents.exclusiveSkillsDeleteTitle': {
     zh: '删除独有技能',
     en: 'Delete exclusive skill',
-  },
-  'agents.exclusiveSkillsSlugRequired': {
-    zh: '请先填机器名（slug）。',
-    en: 'Please fill in the slug first.',
   },
   'agents.exclusiveSkillsBodyRequired': {
     zh: '正文不能为空（SKILL.md 得有点内容）。',

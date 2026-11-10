@@ -980,6 +980,26 @@
           const boxRect = box === null ? null : csOf(box)
           const pickerFillsCell =
             pickerRect !== null && boxRect !== null && Math.abs(pickerRect.height - boxRect.height) <= 4
+          /**
+           * ★ 2026-11：共享 + 独有技能共用的框（`.skill-box`）要**与左边指令框同高**
+           *   （使用者："框的高度不对了，没有和左边的指令框一致"）——`.skill-box`
+           *   `flex: 1` 撑满格子，格子与指令格同高。
+           */
+          const skillBox = card.querySelector('.skill-box')
+          const skillBoxRect = skillBox === null ? null : csOf(skillBox)
+          const boxFillsCell =
+            skillBoxRect !== null && boxRect !== null && Math.abs(skillBoxRect.height - boxRect.height) <= 4
+          /**
+           * ★ 2026-11（D111，使用者："独有技能还是放里面比较合适，可以用一横线隔开"）：
+           *   独有技能住进了「挂载的技能」这一格（共享技能列表**下面**，border-top 横线分开）。
+           *   于是"技能列表与左边指令框同高"（第 255 批的 `pickerFillsCell`）**不再是意图**——
+           *   那一格里现在有两段，列表只占一段。新意图：**独有技能区在共享列表下面**（同一格）。
+           */
+          const exclusive = card.querySelector('.exclusive-cell')
+          const exclusiveRect = exclusive === null ? null : csOf(exclusive)
+          const hasExclusive = exclusive !== null
+          const exclusiveBelow =
+            exclusiveRect !== null && pickerRect !== null && exclusiveRect.top >= pickerRect.bottom - 1
           return {
             rows: rows.size,
             holes,
@@ -989,9 +1009,18 @@
             pairSameHeight,
             pickerScrolls,
             pickerFillsCell,
+            boxFillsCell,
+            hasExclusive,
+            exclusiveBelow,
             skillRows,
             // 诊断用（红了才看得懂）
             instrH: instr === null ? null : Math.round(instr.height),
+            labelH: card.querySelector('.skills-cell .cell-label') === null ? null : Math.round(csOf(card.querySelector('.skills-cell .cell-label')).height),
+            boxClientH: skillBox === null ? null : skillBox.clientHeight,
+            pickerClientH: picker === null ? null : picker.clientHeight,
+            pickerScrollH: picker === null ? null : picker.scrollHeight,
+            exclusiveH: exclusive === null ? null : Math.round(csOf(exclusive).height),
+            skillBoxH: skillBoxRect === null ? null : Math.round(skillBoxRect.height),
             instrTop: instr === null ? null : Math.round(instr.top),
             skillsTop: skills === null ? null : Math.round(skills.top),
             instrAlignSelf: (() => {
