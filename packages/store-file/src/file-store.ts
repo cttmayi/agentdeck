@@ -67,6 +67,7 @@ import { Mutex, pruneUndefined } from './mutex.ts'
 import { readSkillContent, removeSkillFiles, writeSkillFiles } from './skill-files.ts'
 import {
   agentDirExists,
+  agentDirPath,
   agentsRoot,
   getExclusiveSkillBody,
   listAgentDirs,
@@ -158,6 +159,11 @@ export interface FileStoreOptions {
   dataDir: string
   /** 关掉 fsync 换取速度——**只应在测试里用**。 */
   fsync?: boolean
+  /**
+   * 启动一次性迁移的日志出口（D112：记忆目录化丢弃的孤儿数要能看见）。
+   * 不传 = 静默（测试与"忘传"的场景都不该炸）。
+   */
+  onInfo?: (message: string) => void
   /**
    * 技能内容的落点（`<skillsRoot>/<slug>/SKILL.md` + 支持文件）。
    *
@@ -448,6 +454,10 @@ export class FileStore implements Store {
   /** 智能体目录的写锁——目录是平的（`<dataDir>/agents/`），不属于某个 workspace。 */
   readonly #agentsMutex = new Mutex()
   readonly #stores = new Map<string, WorkspaceStore>()
+  /** 每个智能体一份 `agents/<id>/memory.jsonl` 的懒缓存（D112：记忆 = 智能体自己的）。 */
+  readonly #memoryLogs = new Map<string, JsonlLog<MemoryEntry & { id: string }>>()
+  /** 启动一次性迁移的日志出口（D112）。 */
+  readonly #onInfo: (message: string) => void
   #releaseLock: (() => Promise<void>) | null = null
 
   private constructor(
@@ -456,12 +466,14 @@ export class FileStore implements Store {
     fsync: boolean,
     skillsRoot: string,
     mineRoot: string,
+    onInfo: (message: string) => void = () => {},
   ) {
     this.#dataDir = dataDir
     this.#fsync = fsync
     this.#meta = meta
     this.#skillsRoot = skillsRoot
     this.#mineRoot = mineRoot
+    this.#onInfo = onInfo
     this.#wsIndex = new JsonlLog<Workspace & { id: string }>(join(dataDir, 'workspaces.jsonl'), {
       fsync,
     })
@@ -489,7 +501,7 @@ export class FileStore implements Store {
       await atomicWrite(join(dataDir, 'meta.json'), JSON.stringify(meta, null, 2))
     }
 
-    const store = new FileStore(dataDir, meta, fsync, skillsRoot, mineRoot)
+    const store = new FileStore(dataDir, meta, fsync, skillsRoot, mineRoot, options.onInfo ?? (() => {}))
     // 锁必须在读日志之前拿到，否则第二个进程会先读到一半状态
     store.#releaseLock = await acquireLock(dataDir)
     await store.#wsIndex.open()
@@ -506,8 +518,12 @@ export class FileStore implements Store {
 
     // 智能体从"JSONL 记录"迁到"一个智能体一个目录"（D111，2026-11）。
     // 必须在预加载之后——迁移要遍历 `#stores` 里的老记录。幂等：目录在就跳过，
-    // 全部迁完写 `.migrated` 标记，之后老 `agent.jsonl` **保留但不再读**。
+    // 全部迁完写 `.migrated` 标记，之后老 `agent.jsonl` 已删（使用者确认）。
     await store.#migrateAgentsToDirs()
+
+    // 记忆从 workspace 级 `log/memory.jsonl` 迁到智能体目录（D112，2026-11）。
+    // 必须在 agents 迁移**之后**——要把老记录分进 `agents/<id>/`，目录得先存在。
+    await store.#migrateMemoryToAgentDirs()
 
     // 技能内容从"记录里"搬到"磁盘上"的一次性迁移（2026-10）。必须在预加载
     // 之后——它要遍历 `#stores` 里的记录。
@@ -550,6 +566,63 @@ export class FileStore implements Store {
     for (const ws of this.#stores.values()) {
       await removeQuietly(join(ws.root, 'log', 'agent.jsonl'))
     }
+  }
+
+  /**
+   * 把老 workspace 级记忆（`log/memory.jsonl`）迁进智能体目录
+   * （`agents/<id>/memory.jsonl`）（D112，2026-11）。
+   *
+   * 为什么迁：使用者纠正过——"记忆应该是智能体自己的，不是智能体之间也共享"。
+   * 老存储按 workspace 存（记录里有 `agentId` 字段），于是**删智能体不删记忆**
+   * （deleteAgent 只删目录，记忆留在 workspace 日志里变成孤儿）。迁进目录之后，
+   * "记忆跟着智能体走"才成立：删智能体连目录一起删、记忆一起没。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 幂等与边界
+   * ══════════════════════════════════════════════════════════════════
+   * · 判据：**只要还有一个 workspace 的老文件在**就执行（新数据目录根本没有
+   *   老文件 ⇒ 跳过）。不写标记——老文件本身被删掉，就是"迁过了"的证据。
+   * · 孤儿（`agentId` 没有对应目录 = 智能体已删）：**丢弃**，它的记忆本来
+   *   也没有归属；记进返回值的 `dropped`，启动日志能看到。
+   * · 迁移完成后**删掉老文件**（与 `agent.jsonl` 同一个决定：已无读者）。
+   */
+  async #migrateMemoryToAgentDirs(): Promise<{ dropped: number }> {
+    let hasLegacy = false
+    for (const ws of this.#stores.values()) {
+      if (await exists(join(ws.root, 'log', 'memory.jsonl'))) {
+        hasLegacy = true
+        break
+      }
+    }
+    if (!hasLegacy) return { dropped: 0 }
+
+    let dropped = 0
+    await this.#agentsMutex.run(async () => {
+      for (const ws of this.#stores.values()) {
+        const legacyPath = join(ws.root, 'log', 'memory.jsonl')
+        if (!(await exists(legacyPath))) continue
+        const legacy = new JsonlLog<MemoryEntry & { id: string }>(legacyPath, { fsync: false })
+        await legacy.open()
+        for (const entry of legacy.all() as unknown as MemoryEntry[]) {
+          if (!(await agentDirExists(this.#dataDir, entry.agentId))) {
+            dropped += 1
+            continue
+          }
+          const log = await this.#memoryLog(entry.agentId)
+          await log.put(entry)
+        }
+      }
+    })
+    for (const ws of this.#stores.values()) {
+      await removeQuietly(join(ws.root, 'log', 'memory.jsonl'))
+    }
+    if (dropped > 0) {
+      this.#onInfo(
+        `记忆目录化迁移完成：${dropped} 条孤儿记忆被丢弃（它们的智能体已经删了——` +
+          `记忆跟着智能体走，没有归属就不留）。老 log/memory.jsonl 已删。`,
+      )
+    }
+    return { dropped }
   }
 
   /**
@@ -672,7 +745,17 @@ export class FileStore implements Store {
   }
 
   async deleteAgent(id: AgentId): Promise<boolean> {
-    return this.#agentsMutex.run(() => removeAgentDir(this.#dataDir, id))
+    return this.#agentsMutex.run(async () => {
+      // D112：记忆住在智能体目录里，删智能体连目录一起删（记忆随之消失）。
+      // ⚠️ 先关掉并丢弃缓存的日志——否则句柄还开着已删除的文件，下一次
+      //    `#memoryLog` 拿到旧对象会把记忆写回一个不存在的目录。
+      const log = this.#memoryLogs.get(id as string)
+      if (log) {
+        await log.close()
+        this.#memoryLogs.delete(id as string)
+      }
+      return removeAgentDir(this.#dataDir, id)
+    })
   }
 
   // ── Agent 的独有技能（D111：`agents/<id>/SKILL/<slug>/SKILL.md` 文件资产）──
@@ -747,31 +830,67 @@ export class FileStore implements Store {
     return false
   }
 
-  // ── Agent memory（分批第 240 批）──
+  // ── Agent memory（分批第 240 批；D112 起落在智能体目录里）──
+
+  /**
+   * `agents/<id>/memory.jsonl` 的懒缓存（每个智能体一份）。
+   *
+   * ⚠️ 不校验 `agentDirExists`：调用方（daemon 路由）在进 store 之前已经 `getAgent`
+   *    确认过智能体存在；这里只负责"这份日志在不在缓存、在就开、开了就复用"。
+   *    删智能体（`deleteAgent`）会关掉并丢弃缓存——不写回一个已删除的目录。
+   */
+  async #memoryLog(agentId: AgentId): Promise<JsonlLog<MemoryEntry & { id: string }>> {
+    const key = agentId as string
+    let log = this.#memoryLogs.get(key)
+    if (!log) {
+      log = new JsonlLog<MemoryEntry & { id: string }>(
+        join(agentDirPath(this.#dataDir, key), 'memory.jsonl'),
+        { fsync: this.#fsync },
+      )
+      await log.open()
+      this.#memoryLogs.set(key, log)
+    }
+    return log
+  }
 
   async listMemoryEntries(
     workspaceId: WorkspaceId,
     agentId?: AgentId,
   ): Promise<MemoryEntry[]> {
-    const ws = await this.#ws(workspaceId)
-    const all = ws.memory().all() as unknown as MemoryEntry[]
+    const out: MemoryEntry[] = []
+    if (agentId !== undefined) {
+      const all = (await this.#memoryLog(agentId)).all() as unknown as MemoryEntry[]
+      out.push(...all)
+    } else {
+      // 不给 agentId = 跨所有智能体目录汇总（列表页的 `memoryCount` 用）。
+      // 这是唯一"全部"的调用点，逐目录读是合理的（agent 数量少）。
+      for (const agent of await listAgentDirs(this.#dataDir)) {
+        const all = (await this.#memoryLog(agent.id)).all() as unknown as MemoryEntry[]
+        out.push(...all)
+      }
+    }
     // 过滤在**调用方**的口径上做（这里只负责"这个 workspace 的"/"这个 agent 的"），
     // 已删除的照原样返回——历史是可查的事实。
-    const scoped = agentId === undefined ? all : all.filter((e) => e.agentId === agentId)
-    return scoped.sort((a, b) => a.createdAt - b.createdAt)
+    return out
+      .filter((e) => e.workspaceId === workspaceId)
+      .sort((a, b) => a.createdAt - b.createdAt)
   }
 
   async insertMemoryEntry(entry: MemoryEntry): Promise<void> {
-    const ws = await this.#ws(entry.workspaceId)
-    await ws.mutex.run(() => ws.memory().put(entry as MemoryEntry & { id: string }))
+    await this.#agentsMutex.run(async () => {
+      const log = await this.#memoryLog(entry.agentId)
+      await log.put(entry as MemoryEntry & { id: string })
+    })
   }
 
   async updateMemoryEntry(entry: MemoryEntry): Promise<boolean> {
-    const ws = await this.#ws(entry.workspaceId)
-    const existing = ws.memory().get(entry.id)
-    if (!existing) return false
-    await ws.mutex.run(() => ws.memory().put(entry as MemoryEntry & { id: string }))
-    return true
+    return this.#agentsMutex.run(async () => {
+      const log = await this.#memoryLog(entry.agentId)
+      const existing = log.get(entry.id)
+      if (!existing) return false
+      await log.put(entry as MemoryEntry & { id: string })
+      return true
+    })
   }
 
   // ── Skill ──

@@ -25,6 +25,7 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 <dataDir>/agents/<id>/
   agent.json          结构化资讯（不含指令正文；builtin / role / skillIds / env / …）
   instructions.md     指令**组装前**正文
+  memory.jsonl        这个智能体的**记忆**（D112：记忆 = 智能体自己的）
   SKILL/<slug>/SKILL.md  这个智能体**独有的**技能（文件资产）
 ```
 
@@ -33,6 +34,12 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 - `instructions.md` 存的是**组装前**正文：内置 = 身份块（平台守则运行时拼），
   自建 = 全文。为什么组装前：人打开目录看到的就是"智能体自己的话"；
   平台守则是平台的（改守则不该改写每一条内置的记录）。
+- **记忆也住在目录里**（D112，2026-11 使用者纠正："记忆应该是智能体自己的，不是
+  智能体之间也共享"）：老存储是 workspace 级 `log/memory.jsonl`（记录里有
+  `agentId` 字段），于是**删智能体不删记忆**（留下孤儿）。迁进目录之后
+  "记忆跟着智能体走"才成立：删智能体连目录一起删、记忆一起没；注入 / 整理 /
+  手写全部按 `agents/<id>/memory.jsonl` 读。`listMemoryEntries` 不给 `agentId`
+  时跨所有目录汇总（列表页 `memoryCount` 的唯一调用点）。
 - 独有技能是**文件**：没有库记录、不进技能页、不可卸载；删智能体连目录一起删。
 
 ## 3. 组装前 vs 组装后（effectiveInstructions）
@@ -75,6 +82,10 @@ JSONL 记录（`workspaces/<wsId>/log/agent.jsonl`）做智能体的载体有两
 - `.migrated` 标记**留着**，防"删了又复活"：万一有备份/拷贝把 jsonl 放回数据目录，
   标记挡着不再重迁（"删掉的智能体被老记录复活"的判据仍然成立）。
 - 内置的老记录用 `writeLegacyAgentDir` 落盘（`instructionsAssembled: builtin === true`）。
+- **老 `log/memory.jsonl`（D112）**：按 `agentId` 分进各 `agents/<id>/memory.jsonl`；
+  孤儿（智能体已删）丢弃 + `onInfo` 启动日志；迁移完成后删老文件。幂等判据 =
+  老文件不在就跳过（不写标记，文件被删本身就是"迁过了"的证据）。顺序在 agents
+  迁移**之后**——目录要先存在。
 
 ## 6. 读取端（daemon）
 
@@ -107,14 +118,16 @@ DELETE /api/agents/:id/skills/:slug     → { removed }
   `ensureBuiltin*` 在启动时保证，与自建同形落成目录。
 - 独有技能 v1 **只支持 SKILL.md**（支持文件暂不落盘）；注入时 `files: {}`。
 - 老 `agent.jsonl` 已在迁移完成后删除（2026-11 使用者确认）。
+- 记忆（D112）：`agents/<id>/memory.jsonl`；`listMemoryEntries` 不给 `agentId` 时
+  跨目录汇总（列表页 `memoryCount` 唯一调用点）。
 
 ## 9. 代码落点
 
 | 模块 | 文件 |
 |---|---|
 | 目录读写 | `packages/store-file/src/agent-dirs.ts` |
-| store 封装 + 迁移 | `packages/store-file/src/file-store.ts`（`#migrateAgentsToDirs`） |
-| 端口 | `packages/domain/src/ports/store.ts`（4 个独有技能方法） |
+| store 封装 + 迁移 | `packages/store-file/src/file-store.ts`（`#migrateAgentsToDirs` / `#migrateMemoryToAgentDirs` / `#memoryLog`） |
+| 端口 | `packages/domain/src/ports/store.ts`（4 个独有技能方法；memory 端口签名不变） |
 | 注入 | `apps/daemon/src/agent-injectable-skills.ts` |
 | 组装 | `apps/daemon/src/builtin-drafter.ts`（`effectiveInstructions` / `*_BODY`） |
 | 平台技能播种/迁移 | `apps/daemon/src/agent-maker-skills.ts` |

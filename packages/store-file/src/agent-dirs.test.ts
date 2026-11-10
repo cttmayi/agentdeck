@@ -4,7 +4,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { exists } from './fs-utils.ts'
 import { join } from 'node:path'
 import { makeAgent, wsId } from '@agentdeck/domain/testing'
-import type { Agent, Workspace } from '@agentdeck/protocol'
+import type { Agent, MemoryEntry, Workspace } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
 import { agentsRoot } from './agent-dirs.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -133,10 +133,45 @@ describe('一个智能体 = 一个目录（D111）', () => {
       false,
     )
   })
+
+  test('★★ 记忆 = 智能体自己的：落在 agents/<id>/memory.jsonl，删智能体连记忆一起删', async () => {
+    const id = 'a-memory' as Agent['id']
+    await store.insertAgent(mk(id))
+    const entry = {
+      id: 'mem-1' as MemoryEntry['id'],
+      workspaceId: WS,
+      agentId: id,
+      kind: 'fact' as const,
+      text: '这个仓库用 pnpm',
+      pinned: false,
+      useCount: 0,
+      lastUsedAt: null,
+      createdAt: 111,
+      removedAt: null,
+    }
+    await store.insertMemoryEntry(entry)
+    // 落点：agents/<id>/memory.jsonl（不是 workspace 级）
+    const onDisk = await readFile(join(agentsRoot(dir), id, 'memory.jsonl'), 'utf8')
+    assert.ok(onDisk.includes('这个仓库用 pnpm'), '记忆在智能体目录里')
+    const listed = await store.listMemoryEntries(WS, id)
+    assert.equal(listed.length, 1)
+    assert.equal(listed[0]!.text, '这个仓库用 pnpm')
+    // 不给 agentId = 跨所有目录汇总（列表页 memoryCount 的取法）
+    const all = await store.listMemoryEntries(WS)
+    assert.ok(all.some((e) => e.agentId === id))
+    // update：覆盖置顶开关
+    assert.equal(await store.updateMemoryEntry({ ...entry, pinned: true }), true)
+    assert.equal((await store.listMemoryEntries(WS, id))[0]!.pinned, true)
+    // 删智能体 ⇒ 记忆跟着一起没（目录删了）
+    assert.equal(await store.deleteAgent(id), true)
+    assert.deepEqual(await store.listMemoryEntries(WS, id), [])
+    // 再插入到已删的智能体 = 目录会被重建？——不：调用方路由先 getAgent 校验存在，
+    // 这里只钉"删过之后列表是空的"（不写回已删目录是 daemon 层的责任）。
+  })
 })
 
 describe('老 JSONL → 目录的迁移（D111）', () => {
-  test('★ 老记录迁进目录：内置带 instructionsAssembled: true，自建 false；老 jsonl 保留', async () => {
+  test('★ 老记录迁进目录：内置带 instructionsAssembled: true，自建 false；老 jsonl 已删', async () => {
     const d2 = await makeTempDir('agent-dirs-migrate')
     try {
       await seedLegacyWorkspace(d2, [
@@ -206,6 +241,72 @@ describe('老 JSONL → 目录的迁移（D111）', () => {
         assert.equal(await s2.getAgent('old-zombie' as Agent['id']), null, '删掉的不许被老记录复活')
       } finally {
         await s2.close()
+      }
+    } finally {
+      await cleanup(d2)
+    }
+  })
+
+  test('★★ 老记忆（workspace 级 log/memory.jsonl）迁进智能体目录；孤儿丢弃；老文件删', async () => {
+    const d2 = await makeTempDir('agent-dirs-mem-migrate')
+    const infos: string[] = []
+    try {
+      // 老形状：两个活着的智能体 + 一条孤儿记忆（它的智能体已经被删了——老系统里
+      // 删 agent 不删记忆，workspace 级日志里就留着这种没人认领的记录）
+      await seedLegacyWorkspace(d2, [
+        mk('mem-a', { instructions: 'A' }),
+        mk('mem-b', { instructions: 'B' }),
+      ])
+      const now = Date.now()
+      const memPath = join(d2, 'workspaces', String(WS), 'log', 'memory.jsonl')
+      const rec = (id: string, agentId: string, text: string) => ({
+        seq: 1,
+        at: now,
+        op: 'put',
+        id,
+        value: {
+          id,
+          workspaceId: String(WS),
+          agentId,
+          kind: 'fact',
+          text,
+          pinned: false,
+          useCount: 0,
+          lastUsedAt: null,
+          createdAt: now,
+          removedAt: null,
+        },
+      })
+      await appendFile(memPath, JSON.stringify(rec('m1', 'mem-a', 'A 的记忆')) + '\n')
+      await appendFile(memPath, JSON.stringify(rec('m2', 'mem-b', 'B 的记忆')) + '\n')
+      await appendFile(memPath, JSON.stringify(rec('m3', 'ghost-agent', '没主儿的记忆')) + '\n')
+
+      const s2 = await FileStore.open({ dataDir: d2, fsync: false, onInfo: (m) => infos.push(m) })
+      try {
+        // 分进各自的目录
+        const a = await s2.listMemoryEntries(WS, 'mem-a' as Agent['id'])
+        assert.equal(a.length, 1)
+        assert.equal(a[0]!.text, 'A 的记忆')
+        const b = await s2.listMemoryEntries(WS, 'mem-b' as Agent['id'])
+        assert.equal(b.length, 1)
+        assert.equal(b[0]!.text, 'B 的记忆')
+        // 跨目录汇总也读得到（列表页 memoryCount）
+        const all = await s2.listMemoryEntries(WS)
+        assert.equal(all.length, 2)
+        // 老文件已删
+        assert.equal(await exists(join(d2, 'workspaces', String(WS), 'log', 'memory.jsonl')), false)
+        // 孤儿被丢弃，且启动日志说了一句（不静默）
+        assert.ok(infos.some((m) => m.includes('孤儿') && m.includes('ghost-agent') === false), '孤儿丢弃要有日志')
+      } finally {
+        await s2.close()
+      }
+
+      // 幂等：老文件没了 ⇒ 第二次 open 不重迁、不报错
+      const s3 = await FileStore.open({ dataDir: d2, fsync: false })
+      try {
+        assert.equal((await s3.listMemoryEntries(WS, 'mem-a' as Agent['id'])).length, 1)
+      } finally {
+        await s3.close()
       }
     } finally {
       await cleanup(d2)
