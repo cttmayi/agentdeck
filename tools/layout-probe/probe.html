@@ -1071,8 +1071,6 @@
             () => !d().querySelector('[data-agent-memory] [data-mem-add]'),
             40,
           )
-          const offHint = await untilNet(() => !!d().querySelector('[data-memory-off-hint]'), 40)
-          const offHintAny = d().querySelector('[data-memory-off-hint]') !== null
           // ── 保存，并**轮询**到接口上真的变 false ──
           click(saveBtn())
           let offOnServer = false
@@ -1117,8 +1115,6 @@
             checkedByDefault,
             hadAddRow,
             addGone,
-            offHint,
-            offHintAny,
             offOnServer,
             writeRejected,
             rejectCode,

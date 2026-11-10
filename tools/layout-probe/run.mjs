@@ -482,7 +482,7 @@ const CHECKS = [
      * `memory_disabled`。只量界面的话，"按钮没了但接口照收"照样是绿的。
      */
     label:
-      '★★★ 智能体页的「启用记忆」：打开状态下取消勾选 ⇒「记下一条」收起并说明不会被带入；' +
+      '★★★ 智能体页的「启用记忆」：打开状态下取消勾选 ⇒「记下一条」收起；' +
       '保存后接口上是 false；再手写一条被拒（memory_disabled）',
     ok: (v) =>
       v !== null &&
@@ -491,7 +491,6 @@ const CHECKS = [
       v.checkedByDefault === true &&
       v.hadAddRow === true &&
       v.addGone === true &&
-      v.offHint === true &&
       v.offOnServer === true &&
       v.writeRejected === true &&
       v.rejectCode === 'memory_disabled' &&
@@ -501,7 +500,7 @@ const CHECKS = [
       v === null || typeof v !== 'object'
         ? 'null'
         : `在 ${String(v.present)}　默认勾着 ${String(v.checkedByDefault)}　` +
-          `取消后写入口收起 ${String(v.addGone)}　有说明 ${String(v.offHint)}（元素在 ${String(v.offHintAny)}）　` +
+          `取消后写入口收起 ${String(v.addGone)}　` +
           `接口上 ${String(v.offOnServer)}　手写被拒 ${String(v.writeRejected)}(${String(v.rejectCode)})` +
           `　拨回去 ${String(v.restored)}（写入口回来 ${String(v.restoredAdd)}）`,
   },

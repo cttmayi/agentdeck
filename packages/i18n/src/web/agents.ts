@@ -131,10 +131,6 @@ export const agentsText = {
     zh: '关掉：不带入第一句话、不能添加、不能整理。已有条目保留。',
     en: 'Off: nothing is fed in, nothing can be added, tidying is unavailable. Existing entries are kept.',
   },
-  'agents.memoryOffHint': {
-    zh: '记忆关着：下面这些条目不会被带进它的第一句话，也不能新增（删掉或撤销仍然可以）。',
-    en: 'Memory is off: the entries below are not fed into its first sentence, and nothing new can be added (removing or undoing still works).',
-  },
   'agents.memoryLabel': { zh: '记忆', en: 'Memory' },
   'agents.memoryCount': { zh: '{n} 条', en: '{n} entries' },
   /** 智能体列表行里那个小字：**自己带"记忆"两个字**（那一行没有别的上下文，只写"3 条"读不出是什么）。 */
@@ -168,7 +164,6 @@ export const agentsText = {
    * ★ 第 269 批（使用者："需要精简文字"）：空态压成一句——输入框的 placeholder
    *   已经说了"记一条它下次该记得的事"，这里不必再说一遍怎么加。
    */
-  'agents.memoryEmpty': { zh: '还没有记忆', en: 'Nothing yet' },
   'agents.memoryKindLabel': { zh: '记忆类型', en: 'Memory kind' },
   'agents.memoryKind.preference': { zh: '偏好', en: 'Preference' },
   'agents.memoryKind.fact': { zh: '事实', en: 'Fact' },
@@ -351,15 +346,6 @@ export const agentsText = {
    *   （不用你在别处再配一遍）。留空也行……但审核者留空就拿不到审核任务。"）。
    *   现在压成一行，**细节进 `title`**（要查的人悬停就有，不用查的人不占版面）。
    */
-  'agents.instructionsHint': {
-    zh: '第一句话的 ② 身份，每次 run 都带上；留空就只发任务。',
-    en: 'Block ② of the first sentence, sent on every run; leave it empty and only the task is sent.',
-  },
-  /** 上面那句的悬停全文（原来就是这句话的正文）。 */
-  'agents.instructionsHintTitle': {
-    zh: '平台每派一次活都会把它带上，不用你在别处再配一遍。它出现在第一句话的哪一块、包什么标题，由设置里的「第一句话模版」决定。审核者留空就拿不到审核任务（判断依据就写在这里）。',
-    en: 'Sent with every job — there is nowhere else to configure it. Where it appears in the first sentence and what heading wraps it is decided by the first-sentence template in Settings. A reviewer left empty gets no review tasks (its judging criteria live here).',
-  },
   'agents.noSkillsOption': { zh: '（还没有技能）', en: '(No skills yet)' },
   'agents.reviewerSkillsHintBefore': {
     zh: '审核者的判断依据写在上面那条',
@@ -564,18 +550,6 @@ export const agentsText = {
    * ★ 分批第 207 批：起草者这一格现在**真的挂**着「沉淀用技能」（`Agent.skillIds`），
    * 而内置 agent 只读 ⇒ 挂载由平台维护（装/卸技能、启动时对齐）。三句话要说清这三件事。
    */
-  'agents.drafterSkillHint': {
-    zh: '平台替它挂的：装/卸这条技能时自动对齐（内置智能体只读，不能手改）',
-    en: 'Mounted by the platform: it follows install/uninstall (built-in agents are read-only)',
-  },
-  'agents.drafterSkillMissingHintNamed': {
-    zh: '还没装「{slug}」：去「沉淀」页右上角的「沉淀设置」里一键安装，装好之后会自动挂上',
-    en: '"{slug}" is not installed: install it from Crystallize → Settings; it will be mounted automatically',
-  },
-  'agents.drafterSkillMissingHint': {
-    zh: '还没装：去「沉淀」页右上角的「沉淀设置」里一键安装，装好之后会自动挂上',
-    en: 'Not installed: install it from Crystallize → Settings; it will be mounted automatically',
-  },
   /**
    * ★ 分批第 208 批（使用者定："留两处"）：安装入口 = 「沉淀设置」+ **智能体页这一格**。
    * 两处装的是同一个上游地址（`DISTILLY_SOURCE`）、走同一个接口，装完 daemon 自动挂上。
@@ -634,11 +608,6 @@ export const agentsText = {
    *    而它实际能动的动作仍然来自 skill。不说清的话，使用者会看到
    *    "行动权限一个都没勾"却能触发动作，进而以为界面坏了。
    */
-  'agents.noSkillsYet': { zh: '还没有任何技能。', en: 'No skills yet.' },
-  'agents.exclusiveSkillsEmpty': {
-    zh: '还没有独有技能。',
-    en: 'No exclusive skills yet.',
-  },
   'agents.exclusiveSkillsEdit': { zh: '编辑', en: 'Edit' },
   'agents.exclusiveSkillsDelete': { zh: '删除', en: 'Delete' },
   'agents.exclusiveSkillsSlug': { zh: '机器名（slug）', en: 'Slug' },
@@ -688,10 +657,6 @@ export const agentsText = {
    */
   // ★ 分批第 209 批：`skillFromDir`（「（来自 {dir}）」）删了——那句话从技能选项上撤掉，
   //   来源目录改为悬停 `title`（见 `AgentDetail` 里那段注释）。
-  'agents.noSelectableSkills': {
-    zh: '技能库里现在没有能挂的技能。来自本地目录的那几条，要在技能页 →「设置」里勾上它们的目录才会出现在这里。',
-    en: 'The library currently has no attachable skills. The ones from local directories only appear here once their directories are ticked in Skills → Settings.',
-  },
   /** 行动权限为空时的说明（在「行动权限」那一段里，与标准无关）。 */
   /**
    * 顿号：一串 skill slug 之间的列表分隔符（老数据那两句提示里用）。

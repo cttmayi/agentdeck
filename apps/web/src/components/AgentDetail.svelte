@@ -159,7 +159,6 @@
    * 从 `/api/identity` 拿，不在前端硬编码——两处写同一个 slug，迟早漂。
    * 老 daemon 不带这个字段 ⇒ 退化成"未安装"的通用说法（不编名字）。
    */
-  $: expectedDrafterSkill = $identity?.drafterSkillSlug ?? ''
 
   const blankDraft = () => ({
     name: agent.name,
@@ -1101,17 +1100,6 @@
             rows="6"
           ></textarea>
           </span>
-          <!--
-            ★ 分批第 254 批（使用者："文字解释太多，不需要写那么细致"）：原来这里是**两行**
-            说明（"这一段就是它的「指令」：平台每派一次活都会带上它（不用你在别处再配一遍）。
-            留空也行——那就只剩任务本身；但审核者留空就拿不到审核任务。" + 另一行讲模版）。
-            现在压成**一行**，全文进 `title`：要查的人悬停就有，不查的人不占版面。
-          -->
-          <p
-            class="row-hint"
-            data-instructions-identity
-            title={$t('agents.instructionsHintTitle')}
-          >{$t('agents.instructionsHint')}</p>
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。 -->
@@ -1153,19 +1141,11 @@
                   </label>
                 {/each}
               </div>
-            {:else}
-              <p class="empty-value">{$t('agents.noSkillsYet')}</p>
             {/if}
             {#if agent.role === 'drafter'}
               {#if agent.skillIds.length === 0}
                 <!-- 只有起草者这一格能**动手**（装那条沉淀技能），而且这是平台给的动作，
                      不是"改它"。装完 daemon 自己挂上——所以按钮留着。 -->
-                <!-- 有 slug 就点名（"还没装 distilly"），老 daemon 不带就只有通用那句 -->
-                <span class="hint">
-                  {expectedDrafterSkill === ''
-                    ? $t('agents.drafterSkillMissingHint')
-                    : $t('agents.drafterSkillMissingHintNamed', { slug: expectedDrafterSkill })}
-                </span>
                 <button
                   type="button"
                   class="btn btn--ghost btn--sm"
@@ -1173,15 +1153,8 @@
                   disabled={installingSkill}
                   onclick={() => void installDrafterSkill()}
                 >{installingSkill ? $t('common.saving') : $t('agents.skillInstallNow')}</button>
-              {:else}
-                <span class="hint">{$t('agents.drafterSkillHint')}</span>
               {/if}
             {/if}
-          {:else if $skills.length === 0}
-            <p class="empty-value">{$t('agents.noSkillsYet')}</p>
-          {:else if pickableSkills.length === 0}
-            <!-- 库非空、但一条都不能挂：不能复用上面那句"还没有任何 skill" -->
-            <p class="empty-value">{$t('agents.noSelectableSkills')}</p>
           {:else}
             <div class="skill-picker">
               {#each pickableSkills as s (s.id)}
@@ -1222,8 +1195,6 @@
           <section class="exclusive-cell" data-exclusive-skills>
           {#if exclusiveLoading}
             <p class="empty-value">{$t('agents.exclusiveSkillsLoading')}</p>
-          {:else if exclusiveSkills.length === 0}
-            <p class="empty-value">{$t('agents.exclusiveSkillsEmpty')}</p>
           {:else}
             <!-- ★ 2026-11（使用者："我就是要显示成『勾选 名字』的样子"）：独有技能
                  与共享技能**同款勾选列表**（checkbox 锁着——独有技能是文件资产，
@@ -1384,10 +1355,6 @@
           <!-- ★ 第 269 批：这句（"会进第一句话（排在指令之后）"）挪进标题行的 title，
                标题行只留"记忆 + 条数"——一行扫过去要能读完。 -->
 
-          {#if !draft.memoryEnabled}
-            <p class="row-hint warn" data-memory-off-hint>{$t('agents.memoryOffHint')}</p>
-          {/if}
-
           {#if memPending}
             <p class="row-hint warn" data-memory-pending>
               {$t('agents.memoryPending', {
@@ -1396,9 +1363,7 @@
               })}
             </p>
           {/if}
-          {#if memRows.length === 0}
-            <p class="row-hint" data-memory-empty>{$t('agents.memoryEmpty')}</p>
-          {:else}
+          {#if memRows.length > 0}
             <div class="mem-list">
               {#each memRows as row (row.key)}
                 <div
