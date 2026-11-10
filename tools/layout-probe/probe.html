@@ -8104,6 +8104,25 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
           return (orphanOpt.textContent ?? '').includes('chat-orphan-skill')
         })()
+        // ★ 2026-11（D109 智能体生成者）：新对话下拉里要有「智能体生成者（内置）」——
+        //   它是唯一能聊天的内置角色（判据 `=== 'executor' || === 'agent-maker'`，
+        //   `chat.test.ts` 钉住纯函数那一半，这里钉住真的渲染在下拉里）。
+        facts['chat.agentMakerChoice'] = await (async () => {
+          const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const maker = agents.find((a) => a.role === 'agent-maker')
+          if (!maker) {
+            errors.push('启动对账没建出智能体生成者（agent-maker）')
+            return false
+          }
+          const opt = [...(chatSelect()?.querySelectorAll('option') ?? [])].find(
+            (o) => o.getAttribute('value') === `agent:${maker.id}`,
+          )
+          if (!opt) {
+            errors.push('智能体生成者不在新对话下拉里（它应该是唯一能聊天的内置角色）')
+            return false
+          }
+          return (opt.textContent ?? '').includes('智能体生成者')
+        })()
         facts['chat.skillBindsOwner'] = await (async () => {
           const sel = chatSelect()
           const opt = chatSkillOpts().find(
@@ -10177,6 +10196,155 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           )
           if (!survived) errors.push('★ 点了「取消」却把对话删掉了')
           return !stillOpen && survived && offset <= 60
+        })()
+
+        // ══════════════ 智能体生成者（D109）：按钮 + 审阅面板 ══════════════
+        /**
+         * ★ 2026-11：生成者流程的界面三件事。
+         *   · 没有 agent-draft.md 的对话：按钮**不出现**（判据 = 条件出现，不置灰）；
+         *   · 有 agent-draft.md 的对话：按钮出现（`hasAgentDraft`）；
+         *   · 点了按钮：审阅面板两段渲染（岗位卡部分 + 配套技能部分）。
+         *
+         * 夹具对话（上一段刚量完的那条）没有 agent-draft.md（假 CLI 对普通聊天
+         *  run 一律 `exit 127`，什么都不写）⇒ 先量"不出现"。生成者那条对话由假 CLI
+         *  代办"写岗位卡"（prompt 带 `PROBE-MAKER-DRAFT` ⇒ 假 CLI 写
+         *  `agent-draft.md` + `skill/meeting-notes-format/SKILL.md`，见 run.mjs）。
+         */
+        const makerButtons = () =>
+          [...d().querySelectorAll('.pane-actions button')].filter((b) =>
+            (text(b) ?? '').includes('确认生成智能体'),
+          )
+        const makerPanelParts = () => {
+          const modal = d().querySelector('.modal')
+          if (!modal) return null
+          const hasName = [...modal.querySelectorAll('input')].some(
+            (i) => (i.value ?? '') !== '',
+          )
+          const hasRole = modal.querySelector('select') !== null
+          const hasInstructions = [...modal.querySelectorAll('textarea')].length >= 1
+          const hasSkillCard = (modal.textContent ?? '').includes('meeting-notes-format')
+          const hasWarn = (modal.textContent ?? '').includes('未经验证')
+          return { hasName, hasRole, hasInstructions, hasSkillCard, hasWarn }
+        }
+
+        facts['chat.agentMakerButtonHidden'] = await (async () => {
+          if (!(await chatOpenFixtureConversation())) return false
+          return makerButtons().length === 0
+        })()
+
+        facts['chat.agentMakerButtonShows'] = await (async () => {
+          // 走**真实用户路径**造生成者那条对话：新对话 → 选生成者 → 发送。
+          // （接口 raw fetch 建出来的对话不会出现在左栏——聊天页那份列表 store
+          //   只在空时拉一次，探针早踩过；而整页 reload 会把探针的虚拟时钟搞死，
+          //   run.mjs 3513 行那段注释就是那次事故的教训。）
+          const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const maker = agents.find((a) => a.role === 'agent-maker')
+          if (!maker) {
+            errors.push('找不到内置智能体生成者（agent-maker）')
+            return false
+          }
+          // ★ 与起草者同一个套路（run.mjs 里 7266 行那一段）：生成者内置的
+          //   runtimeKey 是 `'default'`（跟随全局默认 ⇒ 这台探针 daemon 上是真 claude）。
+          //   生成者那条对话要真跑起来、把岗位卡写进工作目录，得先把它改挂
+          //   `generic`（= 假 `agent-cli`）。探针 daemon 带 `--allow-builtin-edits`，
+          //   所以这一步只在这个一次性脚手架里合法。
+          const patchRes = await f.contentWindow.fetch(`/api/agents/${encodeURIComponent(maker.id)}`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ runtimeKey: 'generic' }),
+          })
+          if (!patchRes.ok) {
+            errors.push(`把生成者改挂 generic 失败（HTTP ${patchRes.status}）——这条会空过`)
+            return false
+          }
+          // ① 新对话（顶栏那颗主线按钮；文案是 i18n 的「新建对话」）
+          const newBtn = [...(d().querySelectorAll('.topbar .page-actions button') ?? [])].find(
+            (b) => (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏没有「新对话」——走不了生成者那条真实路径')
+            return false
+          }
+          click(newBtn)
+          await wait(300)
+          // ② 选「智能体生成者」
+          const sel = chatSelect()
+          if (!sel) {
+            errors.push('点了「新对话」没有出现执行者下拉')
+            return false
+          }
+          const opt = [...(sel.querySelectorAll('option') ?? [])].find(
+            (o) => o.getAttribute('value') === `agent:${maker.id}`,
+          )
+          if (!opt) {
+            errors.push('生成者不在新对话下拉里（它应该是唯一能聊天的内置角色）')
+            return false
+          }
+          sel.value = opt.getAttribute('value')
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(250)
+          // ③ 发送第一句话（假 CLI 会把岗位卡 + 配套技能写进工作目录）
+          const input = d().querySelector('.detail-pane [data-composer] .composer-input')
+          const send = d().querySelector('.detail-pane [data-composer-send]')
+          if (!input || !send) {
+            errors.push('选了生成者之后没有输入条（ChatComposer 没渲染）')
+            return false
+          }
+          input.value = '探针：生成者岗位\nPROBE-MAKER-DRAFT 把会议纪要变成一页纪要'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          await wait(60)
+          send.click()
+          // ④ 等那一轮跑完：run 终态会触发页面刷新（loadConversations），
+          //    列表里出现生成者那条对话；hasAgentDraft 到位后按钮出现。
+          const deadline = Date.now() + 12000
+          for (;;) {
+            if (makerButtons().length > 0) break
+            if (Date.now() > deadline) {
+              errors.push('生成者那条对话跑完也没等到「确认生成智能体」按钮（run 没到终态？）')
+              return false
+            }
+            await wait(100)
+          }
+          // 按钮出现的同时，左栏应该已有生成者那条对话（refresh 拉过列表）
+          const row = [...d().querySelectorAll('.list-pane .list-row-main')].find((b) =>
+            (text(b) ?? '').includes('探针：生成者岗位'),
+          )
+          if (!row) {
+            errors.push('左栏没有生成者那条对话（列表没刷新？）')
+          }
+          return true
+        })()
+
+        facts['chat.agentMakerPanelTwoParts'] = await (async () => {
+          const btn = makerButtons()[0]
+          if (!btn) {
+            errors.push('没有「确认生成智能体」按钮可点')
+            return false
+          }
+          click(btn)
+          await wait(600)
+          const parts = makerPanelParts()
+          if (!parts) {
+            errors.push('点了「确认生成智能体」没有弹出审阅面板')
+            return false
+          }
+          if (!parts.hasName || !parts.hasRole || !parts.hasInstructions) {
+            errors.push(`审阅面板缺岗位卡部分（${JSON.stringify(parts)}）`)
+          }
+          if (!parts.hasSkillCard) {
+            errors.push('审阅面板缺配套技能部分（meeting-notes-format 不在）')
+          }
+          if (!parts.hasWarn) {
+            errors.push('配套技能部分缺"未经验证"提示（设计 §9.1，提示不是校验）')
+          }
+          const pass = parts.hasName && parts.hasRole && parts.hasInstructions && parts.hasSkillCard && parts.hasWarn
+          // 关掉面板收场（别让下一条量到开着面板的聊天页）
+          const close = [...(d().querySelectorAll('.modal button') ?? [])].find(
+            (b) => (text(b) ?? '').includes('关闭'),
+          )
+          if (close) click(close)
+          await wait(300)
+          return pass
         })()
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）

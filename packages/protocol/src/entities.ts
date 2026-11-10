@@ -423,12 +423,20 @@ export type ReviewStandard = z.infer<typeof ReviewStandard>
 //    **绝不参与业务选择**（各处挑选执行者/审核者用的是 `role === 'executor'` /
 //    `'reviewer'` 这种**等值**判断，新成员天然落在外面），也**不能被选去聊天**
 //    （聊天只接受 executor）——它不闲聊，它只整理。
+// ⚠️ `agent-maker` = **平台内置的「智能体生成者」**（2026-11 设计定稿
+//    `docs/design/recruiter-interview.md`）：帮人把一个岗位说清楚并**写下来**——它
+//    在聊天里问五字段、**规则由它描述**（不是让用户写），产出岗位卡（工作目录
+//    agent-draft.md）供确认生成。与 memory-tidy 同一条纪律：**绝不参与业务选择**
+//    （等值判断天然排除）。它与 memory-tidy 唯一的不同是**能聊天**：聊天放行的
+//    判据从 `role === 'executor'` 扩到 `'executor' ∪ 'agent-maker'`（只有那两处，
+//    由测试钉住）。为什么敢放行：聊天不产出判决，而它本来就不判事——它只问只写。
 export const AgentRole = z.enum([
   'executor',
   'reviewer',
   'drafter',
   'skill-reviewer',
   'memory-tidy',
+  'agent-maker',
 ])
 export type AgentRole = z.infer<typeof AgentRole>
 
@@ -1017,6 +1025,13 @@ export const SubjectRef = z.object({
      * **它的记忆**（`id` = 智能体 id）。同样不在闭环里，同样不打扰任何人。
      */
     'memory-consolidate',
+    /**
+     * ★ 2026-11 设计定稿（`docs/design/recruiter-interview.md` §4.1.3 预留的变体）：
+     * 「智能体生成者」产岗位卡的那条 run。与 `skill-draft` 同一条纪律：不在闭环里、
+     * 不打扰任何人。`id` = **对话 id**（岗位卡是对话的产物，可重入：再跑一次取到的
+     * 还是同一个 subject，工作目录天然只有一份）。
+     */
+    'agent-draft',
   ]),
   id: z.string(),
   /**

@@ -104,6 +104,7 @@
     if (a.role === 'drafter') return $t('agents.roleDrafter')
     if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
     if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    if (a.role === 'agent-maker') return $t('agents.roleAgentMaker')
     return $t('agents.roleExecutor')
   }
   function roleBadgeOf(a: Agent): string {

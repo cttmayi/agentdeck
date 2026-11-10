@@ -1097,7 +1097,19 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
         const del = await fetch(`${url}/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
         assert.equal(del.status, 200, '固化之后卸载应当成功')
       }
-      assert.equal((await listSkills(url)).length, 0)
+      const remaining = await listSkills(url)
+      // ★ 2026-11（D109）：daemon 启动会自动装 3 条**平台技能**（生成者的手则）——
+      //   所以这里不能断言"一个都不剩"，而是断言"那两条老标准没了、只剩平台技能"。
+      assert.equal(
+        remaining.some((s) => s.slug === 'legacy-a' || s.slug === 'legacy-b'),
+        false,
+        '那两条老标准要卸载干净',
+      )
+      assert.deepEqual(
+        remaining.map((s) => s.slug).sort(),
+        ['agent-design-norms', 'boundary-checklist', 'skill-eligibility'],
+        '只剩平台自动装的 3 条生成者技能',
+      )
     })
   })
 

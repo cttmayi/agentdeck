@@ -1084,6 +1084,30 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   {
+    view: '聊天',
+    key: 'chat.agentMakerChoice',
+    label: '★ 2026-11（D109 智能体生成者）：新对话下拉里有「智能体生成者（内置）」——唯一能聊天的内置角色',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.agentMakerButtonHidden',
+    label: '★ 2026-11（D109）：没有 agent-draft.md 的对话，「确认生成智能体」按钮不出现（条件出现，不置灰）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.agentMakerButtonShows',
+    label: '★ 2026-11（D109）：工作目录有 agent-draft.md 的对话，栏头出现「确认生成智能体」按钮',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.agentMakerPanelTwoParts',
+    label: '★ 2026-11（D109）：审阅面板两段渲染（岗位卡 名/角色/指令 + 配套技能 meeting-notes-format + 未经验证提示）',
+    ok: (v) => v === true,
+  },
+  {
     view: '任务',
     key: 'tasks.deleteButtonPerRow',
     label: '每项右侧有独立的删除按钮（主按钮之外、不是按钮套按钮）',
@@ -5992,6 +6016,19 @@ function writeFakeGenericCli() {
       //   （1800s）——不然跑到沉淀那一节时它已经自己退出了，量到的就是"起草 run 跑完了"，
       //   而那正是这一批要量的那一屏的**反例**。
       `  *${PROBE_DRAFT_MARKER}*) printf '{"type":"text","text":"${PROBE_STUB_DRAFT_LINE}"}\n'; sleep 1800 ;;`,
+      // ★ 2026-11（D109 智能体生成者）：带生成者记号 ⇒ 把岗位卡与配套技能草稿写进
+      //   `$PWD`（chat 对话的 cwd = 工作目录），再正常收尾。写文件用 heredoc：
+      //   引号带 `EOF`，`$` 不会展开（正文里有 `$` 会炸——内容里没有）。
+      `  *${PROBE_MAKER_MARKER}*)`,
+      `    mkdir -p "$PWD/skill/meeting-notes-format"`,
+      `    cat > "$PWD/agent-draft.md" <<'PROBE_MAKER_EOF'`,
+      PROBE_MAKER_DRAFT_MD,
+      'PROBE_MAKER_EOF',
+      `    cat > "$PWD/skill/meeting-notes-format/SKILL.md" <<'PROBE_MAKER_EOF'`,
+      PROBE_MAKER_SKILL_MD,
+      'PROBE_MAKER_EOF',
+      `    printf '{"type":"text","text":"岗位卡已写入 agent-draft.md。"}\\n'`,
+      '    exit 0 ;;',
       '  *) echo "agent-cli: 探针假 CLI 只服务起草那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
       'esac',
       '',
@@ -6008,6 +6045,50 @@ function writeFakeGenericCli() {
  */
 const PROBE_STUB_DRAFT_LINE = '探针夹具：起草 run 正在跑（假 CLI 的一条输出）。'
 const PROBE_DRAFT_MARKER = 'PROBE-STUB-DRAFT-ONLY'
+
+/**
+ * ★ 2026-11（智能体生成者，D109）：假 CLI 的生成者分支。
+ *
+ * 生成者"在聊天里写岗位卡"这件事由假 CLI 代办：prompt 里带这个记号 ⇒ 在当前工作
+ * 目录（chat 对话的 cwd = `$PWD`）写出 `agent-draft.md` + 一条配套技能草稿
+ * `skill/meeting-notes-format/SKILL.md`，再回一句话——与真机生成者做的事同构。
+ * 探针据此量「确认生成智能体」按钮与审阅面板两段渲染。
+ */
+const PROBE_MAKER_MARKER = 'PROBE-MAKER-DRAFT'
+const PROBE_MAKER_DRAFT_MD = [
+  '---',
+  'name: 会议纪要助理',
+  'role: executor',
+  '---',
+  '你是会议纪要助理。',
+  '',
+  '## 目标',
+  '把转写变成一页纪要。',
+  '',
+  '## 职责',
+  '转写、提炼、分节。',
+  '',
+  '## 边界（不能碰）',
+  '不替参会人做决定；只在工作目录写。',
+  '',
+  '## 输出格式',
+  'decisions / owners / deadlines 三段。',
+  '',
+].join('\n')
+const PROBE_MAKER_SKILL_MD = [
+  '---',
+  'name: 会议纪要格式',
+  'description: decisions/owners/deadlines 三段的会议纪要格式',
+  '---',
+  '## When to Use',
+  '把转写变成纪要时。',
+  '',
+  '## Procedure',
+  '1. decisions 每行一条',
+  '2. owners 每行一条',
+  '3. deadlines 每行一条',
+  '',
+].join('\n')
 
 /** 起 daemon（同一个数据目录、同一个端口，可能起两次——见下面"为什么起两次"）。 */
 let daemon = null

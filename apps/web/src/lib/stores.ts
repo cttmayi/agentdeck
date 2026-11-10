@@ -93,6 +93,11 @@ export interface ChatDetail {
   conversation: Conversation
   turns: ChatTurnView[]
   workDir: string | null
+  /**
+   * ★ 2026-11 设计定稿（§3.6）：工作目录顶层有 `agent-draft.md`（智能体生成者已
+   *    产出岗位卡）⇒ 聊天页出现「确认生成智能体」按钮。按钮按条件出现，不搞置灰。
+   */
+  hasAgentDraft: boolean
 }
 
 /** 全部对话，最近说过话的在前（顺序由服务端定，界面不重排）。 */

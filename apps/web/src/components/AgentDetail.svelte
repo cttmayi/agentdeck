@@ -450,19 +450,22 @@
     if (a.role === 'drafter') return $t('agents.roleDrafter')
     if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
     if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
+    if (a.role === 'agent-maker') return $t('agents.roleAgentMaker')
     return $t('agents.roleExecutor')
   }
   /**
-   * 只读态那张角色卡的第二行：这个角色**干什么**。
-   *
-   * 与自建那两张卡的结构对齐（都是"名字 + 一句说明"）——但内置这三个角色的语义
-   * 不是"派活给它/别人产出交给它判"，所以文案也得说它们自己的事（起草 = 把经验
-   * 写成 skill；整理记忆 = 把对话里的话整理成候选；沉淀审核 = 审起草出来的 skill）。
-   */
+    * 只读态那张角色卡的第二行：这个角色**干什么**。
+    *
+    * 与自建那两张卡的结构对齐（都是"名字 + 一句说明"）——但内置这三个角色的语义
+    * 不是"派活给它/别人产出交给它判"，所以文案也得说它们自己的事（起草 = 把经验
+    * 写成 skill；整理记忆 = 把对话里的话整理成候选；沉淀审核 = 审起草出来的 skill；
+    * 生成者 = 在聊天里把岗位问清楚并写出岗位卡）。
+    */
   function roleDescOf(a: Agent): string {
     if (a.role === 'drafter') return $t('agents.roleDescDrafter')
     if (a.role === 'memory-tidy') return $t('agents.roleDescMemoryTidy')
     if (a.role === 'skill-reviewer') return $t('agents.roleDescSkillReviewer')
+    if (a.role === 'agent-maker') return $t('agents.roleDescAgentMaker')
     return $t('agents.roleExecutorHint')
   }
 

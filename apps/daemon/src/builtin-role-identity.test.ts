@@ -34,10 +34,13 @@ import { wsId } from '@agentdeck/domain/testing'
 import { ulid } from '@agentdeck/protocol'
 import type { Agent, Workspace } from '@agentdeck/protocol'
 import {
+  AGENT_MAKER_INSTRUCTIONS,
+  AGENT_MAKER_NAME,
   builtinDefaultsOf,
   builtinKindOf,
   DRAFTER_INSTRUCTIONS,
   DRAFTER_NAME,
+  ensureBuiltinAgentMaker,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
 } from './builtin-drafter.ts'
@@ -95,9 +98,11 @@ async function withStore<T>(fn: (store: FileStore, dir: string) => Promise<T>): 
 }
 
 describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪一条"', () => {
-  test('★ 起草者/审核者各认各的；普通 agent 与"标记+怪角色"都返回 null（不猜）', () => {
+  test('★ 起草者/审核者/生成者各认各的；普通 agent 与"标记+怪角色"都返回 null（不猜）', () => {
     assert.equal(builtinKindOf({ builtin: true, role: 'drafter' }), 'drafter')
     assert.equal(builtinKindOf({ builtin: true, role: 'skill-reviewer' }), 'skill-reviewer')
+    // ★ 2026-11：智能体生成者（生成智能体那条链的执行者）
+    assert.equal(builtinKindOf({ builtin: true, role: 'agent-maker' }), 'agent-maker')
     // 普通执行者：不是内置
     assert.equal(builtinKindOf({ builtin: false, role: 'executor' }), null)
     assert.equal(builtinKindOf({ role: 'executor' }), null)
@@ -111,6 +116,11 @@ describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪�
     const drafter = builtinDefaultsOf('drafter')
     assert.equal(drafter.name, DRAFTER_NAME)
     assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
+    // ★ 2026-11：智能体生成者有默认身份（与起草者同一套，可查看/编辑/恢复默认）
+    const maker = builtinDefaultsOf('agent-maker')
+    assert.equal(maker.name, AGENT_MAKER_NAME)
+    assert.ok(maker.instructions.length > 0, '生成者的默认指令不能是空的')
+    assert.match(maker.label, /智能体生成者/)
     const retired = builtinDefaultsOf('skill-reviewer')
     // ★ 分批第 137 批：它的默认身份已随评审删除。"恢复成默认值"若拿空串写库，
     //   那条智能体会被清空——比不恢复更坏，所以路由层（下一组用例）直接拒绝。
@@ -120,8 +130,73 @@ describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪�
   })
 })
 
-describe('起草者的自愈：撞上审核者时必须**认角色**，不能按标记一把抓', () => {
-  test('★★★ 起草者的 `builtin` 标记丢了、而审核者排在前面 ⇒ 补的是**起草者**的标记', async () => {
+describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §3.1）', () => {
+  test('★ 没有 ⇒ 建出来；再跑一遍 ⇒ 一字不动（幂等）；角色撞上就补标记（自愈）', async () => {
+    await withStore(async (store) => {
+      const first = await ensureBuiltinAgentMaker(store, WS)
+      assert.equal(first.action, 'created')
+      const after = await store.listAgents(WS)
+      const maker = after.find((a) => a.role === 'agent-maker')!
+      assert.equal(maker.name, AGENT_MAKER_NAME)
+      assert.equal(maker.instructions, AGENT_MAKER_INSTRUCTIONS)
+      assert.equal(maker.builtin, true)
+      assert.deepEqual(maker.skillIds, [], '挂载由 syncAgentMakerSkillMount 管，对账不挂')
+
+      // 幂等：再跑一遍不动任何东西
+      const again = await ensureBuiltinAgentMaker(store, WS)
+      assert.equal(again.action, 'left-alone')
+
+      // 自愈：标记丢了但角色还在 ⇒ 补标记，不另建一条
+      const damaged = await store.listAgents(WS)
+      await store.insertAgent({ ...damaged.find((a) => a.role === 'agent-maker')!, builtin: false })
+      const healed = await ensureBuiltinAgentMaker(store, WS)
+      assert.equal(healed.action, 'healed')
+      const final = await store.listAgents(WS)
+      assert.equal(final.filter((a) => a.role === 'agent-maker').length, 1, '不许造第二条')
+      assert.equal(final.find((a) => a.role === 'agent-maker')!.builtin, true)
+    })
+  })
+
+  test('★ 指令被清空 ⇒ 补回默认（空指令的"问岗位"没有任何规矩）', async () => {
+    await withStore(async (store) => {
+      await ensureBuiltinAgentMaker(store, WS)
+      const all = await store.listAgents(WS)
+      await store.insertAgent({ ...all.find((a) => a.role === 'agent-maker')!, instructions: '   ' })
+      const result = await ensureBuiltinAgentMaker(store, WS)
+      assert.equal(result.action, 'healed')
+      const after = await store.listAgents(WS)
+      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS)
+    })
+  })
+
+  test('★ 使用者改过的指令是资产：一字不动（判据是"损坏"不是"与默认不同"）', async () => {
+    await withStore(async (store) => {
+      await ensureBuiltinAgentMaker(store, WS)
+      const all = await store.listAgents(WS)
+      const edited = '你是我的私人生成者。'
+      await store.insertAgent({ ...all.find((a) => a.role === 'agent-maker')!, instructions: edited })
+      const result = await ensureBuiltinAgentMaker(store, WS)
+      assert.equal(result.action, 'left-alone')
+      const after = await store.listAgents(WS)
+      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, edited)
+    })
+  })
+
+  test('★ 全量对账三件套都建出来（ensureBuiltinAgents 的返回形状）', async () => {
+    await withStore(async (store) => {
+      const result = await ensureBuiltinAgents(store, WS)
+      assert.equal(result.drafter.action, 'created')
+      assert.equal(result.memoryTidy.action, 'created')
+      assert.equal(result.agentMaker.action, 'created')
+      const all = await store.listAgents(WS)
+      assert.ok(all.some((a) => a.role === 'agent-maker'), '智能体生成者要在')
+      assert.ok(all.some((a) => a.role === 'memory-tidy'), '记忆整理者要在')
+      assert.ok(all.some((a) => a.role === 'drafter'), '起草者要在')
+    })
+  })
+})
+
+describe('起草者的自愈：撞上审核者时必须**认角色**，不能按标记一把抓', () => {  test('★★★ 起草者的 `builtin` 标记丢了、而审核者排在前面 ⇒ 补的是**起草者**的标记', async () => {
     await withStore(async (store) => {
       // 顺序就是这条用例的全部意义：审核者先入库 ⇒ 从前 `find(builtin)` 直接撞上它
       const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, LEGACY_REVIEWER_INSTRUCTIONS, true)

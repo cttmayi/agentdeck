@@ -41,11 +41,13 @@ export const agentsText = {
   /** 角色格右边那张卡：告诉人这一维为什么不能被选（内置角色不在这条业务链上）。 */
   'agents.roleFixed': { zh: '平台固定', en: 'Set by the platform' },
   'agents.roleFixedHint': {
-    zh: '内置智能体只在平台自己发起的那一轮里干活（起草沉淀技能 / 整理记忆），所以它不在「执行 / 审核」这条业务链上——派活、进组、聊天都轮不到它。',
-    en: 'Built-in agents only run when the platform starts them (drafting a skill, tidying memory) — they are not part of the task → review → action chain, so they take no tasks, join no groups and have no chat.',
+    zh: '内置智能体只在平台自己发起的那一轮里干活（起草沉淀技能 / 整理记忆），所以它不在「执行 / 审核」这条业务链上——派活、进组都轮不到它；聊天只有「智能体生成者」例外（它全部的工作就是聊天，出岗位卡）。',
+    en: 'Built-in agents only run when the platform starts them (drafting a skill, tidying memory) — they are not part of the task → review → action chain, so they take no tasks and join no groups; the agent maker is the only one that chats (asking about a job and writing its job card).',
   },
   'agents.roleDescDrafter': { zh: '把一段经验写成 skill', en: 'Turns an experience into a skill' },
   'agents.roleDescMemoryTidy': { zh: '把对话里的话整理成记忆', en: 'Turns a conversation into memories' },
+  // ★ 2026-11 设计定稿：生成者 = 在聊天里把岗位问清楚、自己描述规则、写出岗位卡。
+  'agents.roleDescAgentMaker': { zh: '在聊天里把岗位问清楚并写出岗位卡', en: 'Asks about a job in chat and writes its job card' },
   'agents.roleDescSkillReviewer': { zh: '审起草出来的 skill（已下线）', en: 'Audits drafted skills (retired)' },
   /** 只读态的写入口：输入框里那句占位说明它不是坏了，是不能写。 */
   'agents.memoryAddLocked': { zh: '内置智能体不能手写记忆（由平台维护）', en: 'Built-in agents take no hand-written memories' },
@@ -87,6 +89,10 @@ export const agentsText = {
   // ★ 分批第 244 批：内置「记忆整理者」（「整理成记忆」那条分析 run）。
   //   同样必须有自己的词——否则列表上它被标成「执行」，而那是一条永远不接活的 agent。
   'agents.roleMemoryTidy': { zh: '整理记忆', en: 'Tidy memory' },
+  // ★ 2026-11 设计定稿：内置「智能体生成者」（聊天里问岗位、出岗位卡的那一条）。
+  //   同样必须有自己的词——它是唯一**能聊天**的内置角色，标成「执行」会让人以为
+  //   它接任务干活（它只问只写不干活）。
+  'agents.roleAgentMaker': { zh: '生成智能体', en: 'Agent maker' },
   'agents.roleExecutorHint': { zh: '接到任务后动手干活', en: 'Takes on tasks and does the work' },
   'agents.roleReviewerHint': {
     zh: '按你给它写的判断依据审别人的产出，给判决',

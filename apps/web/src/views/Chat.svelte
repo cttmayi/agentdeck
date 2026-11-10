@@ -15,6 +15,7 @@
   import DirPicker from '../components/DirPicker.svelte'
   import ChatMemoryTidy from '../components/ChatMemoryTidy.svelte'
   import ChatSettings from '../components/ChatSettings.svelte'
+  import AgentMakerConfirm from '../components/AgentMakerConfirm.svelte'
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
@@ -188,6 +189,11 @@
   /** 已经写进库里、等人在界面上看到的那些（turnId → 一条或几条 + 文案）。 */
   let memNotes: Record<string, { ids: string[]; text: string }> = {}
   let tidyOpen = false
+  /**
+   * ★ 2026-11 设计定稿（§3.6）：「确认生成智能体」面板。
+   * 按钮按条件出现（`hasAgentDraft`），不搞置灰——没有岗位卡时置灰按钮是一种半开的门。
+   */
+  let agentMakerOpen = false
   /**
    * 聊天页自己的「设置」抽屉（分批第 242 批）。
    *
@@ -1093,6 +1099,16 @@
           >
             {$t('crystallize.title')}
           </button>
+          <!--
+            ★ 2026-11 设计定稿（§3.6）：「确认生成智能体」——工作目录顶层有
+            `agent-draft.md`（智能体生成者已产出岗位卡）才出现；没有就不出现
+            （与「沉淀技能」同一模式，不搞置灰）。
+          -->
+          {#if detail?.hasAgentDraft}
+            <button class="btn btn--ghost" onclick={() => (agentMakerOpen = true)}>
+              {$t('chat.agentMakerAction')}
+            </button>
+          {/if}
           <button class="btn btn--danger" onclick={() => void remove($activeConversationId ?? '')}>
             {$t('chat.delete')}
           </button>
@@ -1471,6 +1487,12 @@
         })()
       }}
       oncancel={() => {}}
+    />
+
+    <!-- ★ 2026-11 设计定稿（§3.5）：「确认生成智能体」面板（岗位卡 + 配套技能审阅） -->
+    <AgentMakerConfirm
+      bind:open={agentMakerOpen}
+      conversationId={activeConversation?.id ?? ''}
     />
 </div>
 

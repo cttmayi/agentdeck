@@ -250,6 +250,30 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     assert.equal((res.body as { code?: string }).code, 'skill_not_found')
   })
 
+  test('★ 2026-11 聊天放行：智能体生成者（agent-maker）能开对话，审核者仍被拒（daemon 那半边）', async () => {
+    // 设计定稿 §3.1：生成者是唯一能聊天的内置角色——它的全部工作就是聊天。
+    // daemon 门（POST /api/conversations）与 web 选择器（executorChoices）各钉一处，
+    // 这半边钉 daemon；另外半边在 apps/web/src/lib/chat.test.ts。
+    const list = await json('/api/agents')
+    const agents = (list.body as { agents: Array<{ id: string; role: string }> }).agents
+    const maker = agents.find((a) => a.role === 'agent-maker')
+    assert.ok(maker !== undefined, '启动对账要建出智能体生成者（内置）')
+    const made = await postJson('/api/conversations', {
+      agentId: maker!.id,
+      text: '帮我理清一个岗位：把会议纪要变成一页纪要。',
+    })
+    assert.equal(made.status, 201, `生成者建对话应成功：${JSON.stringify(made.body)}`)
+    await waitForTerminal((made.body as { turn: { runId: string } }).turn.runId)
+
+    // 审核者仍然进不来（聊天不产出判决）
+    const reviewer = agents.find((a) => a.role === 'reviewer')
+    if (reviewer) {
+      const denied = await postJson('/api/conversations', { agentId: reviewer.id, text: '你好' })
+      assert.equal(denied.status, 400)
+      assert.equal((denied.body as { code?: string }).code, 'agent_role_mismatch')
+    }
+  })
+
   test('★★ 对照组：任务那条路**照旧套模版**（同一台 daemon、同一个执行者）', async () => {
     const issue = await postJson('/api/issues', { title: `对照组 ${ulid().slice(-6)}` })
     const runId = ulid()

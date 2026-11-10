@@ -530,4 +530,47 @@ export const chatText = {
   'chat.summary': { zh: '{turns} 轮 · 最近 {when}', en: '{turns} turn(s) · last {when}' },
   // ⚠️ 相对时间那四条（刚刚/分钟前/小时前/天前）已提升到 `common.*`：
   //    它不只是聊天的东西——任务/技能/工具列表都要用（见 `lib/time.ts`）。
+
+  /**
+   * ★ 2026-11 设计定稿（§3.6）：智能体生成者的「确认生成智能体」按钮与内联审阅面板。
+   * 按钮按条件出现（工作目录有 agent-draft.md 才出现），不搞置灰——没有素材时置灰
+   * 按钮是一种半开的门（设计稿 §9.7）。
+   */
+  'chat.agentMakerAction': { zh: '确认生成智能体', en: 'Confirm agent' },
+  'chat.agentMakerPanelTitle': { zh: '确认生成智能体 · 岗位卡 + 配套技能', en: 'Confirm the agent · job card + skills' },
+  'chat.agentMakerDraftNote': {
+    zh: '岗位卡已由智能体生成者起草（规则由它描述，你确认过）——改一改，然后确认生成。',
+    en: 'The job card was drafted by the agent maker (it described the rules, you confirmed them) — tweak, then confirm.',
+  },
+  'chat.agentMakerNameLabel': { zh: '岗位名', en: 'Name' },
+  'chat.agentMakerRoleLabel': { zh: '角色', en: 'Role' },
+  'chat.agentMakerInstructionsLabel': {
+    zh: '指令（一段）· 边界 / 输出格式都在这一段里',
+    en: 'Instructions (one block) · boundary and output format live in here',
+  },
+  'chat.agentMakerBoundaryHint': {
+    zh: '草稿不是合同——检查「边界」段（生成者按最小权限缺省描述，你确认过）。',
+    en: 'The draft is not a contract — check the "boundary" section (the maker described it with minimal-permission defaults, which you confirmed).',
+  },
+  'chat.agentMakerSkillsLabel': { zh: '配套技能（AI 起草 · 随智能体一起确认）', en: 'Accompanying skills (AI-drafted, confirmed together)' },
+  'chat.agentMakerSkillsWarn': {
+    zh: '技能草稿未经验证——建议先让智能体干几轮，再用沉淀结晶正式版（提示，不是校验）。',
+    en: 'Skill drafts are unverified — run the agent a few times first, then crystallize the official version (a hint, not a gate).',
+  },
+  'chat.agentMakerSkillBodyPlaceholder': {
+    zh: 'SKILL.md 正文（When to Use / Procedure）',
+    en: 'SKILL.md body (When to Use / Procedure)',
+  },
+  'chat.agentMakerRemoveSkill': { zh: '去掉这条', en: 'Drop this one' },
+  'chat.agentMakerConfirm': { zh: '确认生成', en: 'Confirm & create' },
+  'chat.agentMakerConfirmHint': {
+    zh: '先沉淀配套技能（mine + git 共享）→ 再创建智能体（skillIds 挂新技能）· 人确认是唯一入口',
+    en: 'Skills are crystallized first (mine + git, shared), then the agent is created with those skills mounted · a human confirm is the only way in',
+  },
+  'chat.agentMakerDone': {
+    zh: '已创建智能体「{name}」+ 沉淀 {n} 条配套技能（skills-mine + git，可共享）',
+    en: 'Created agent "{name}" + crystallized {n} skill(s) (skills-mine + git, shared)',
+  },
+  'chat.agentMakerFail': { zh: '生成失败：{error}', en: 'Creation failed: {error}' },
+  'chat.agentMakerLoading': { zh: '正在读岗位卡…', en: 'Loading the job card…' },
 } as const satisfies TextCatalog

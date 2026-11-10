@@ -89,6 +89,18 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
     )
   })
 
+  test('★ 2026-11：智能体生成者（agent-maker）能出现在下拉里——它是唯一能聊天的内置角色', () => {
+    // 与 memory-tidy / drafter / skill-reviewer 相反：生成者的全部工作就是聊天，
+    // 判据是 `=== 'executor' || === 'agent-maker'` 两个等值并起来（不写 !==）。
+    const withMaker = [...executors, agent('m1', '智能体生成者（内置）', [], 'agent-maker')]
+    const out = executorChoices(withMaker, skills, null, true)
+    assert.equal(out.some((c) => c.value === 'agent:m1'), true, '智能体生成者要在下拉里')
+    // 其它内置角色仍然进不来（起草者/记忆整理者）
+    const withTidy = [...executors, agent('t1', '记忆整理者（内置）', [], 'memory-tidy')]
+    const out2 = executorChoices(withTidy, skills, null, true)
+    assert.equal(out2.some((c) => c.value === 'agent:t1'), false, '记忆整理者不能出现在下拉里')
+  })
+
   test('多个执行者挂了同一个 skill：优先平台默认执行者，否则取列表里第一个', () => {
     const both = [agent('a1', '助手', ['s1']), agent('a2', '算法艺术', ['s1'])]
     const val = (preferred: string | null) =>

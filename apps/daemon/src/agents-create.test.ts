@@ -121,6 +121,16 @@ describe('★ 挂载不存在的 skill 要在**创建时**就报错', () => {
 
   test('技能库为空时也说清"还没有 skill"，而不是给一句空列表', async () => {
     await withDaemon(async (url) => {
+      // ★ 2026-11（D109）：daemon 启动会自动装 3 条平台技能（生成者的手则）——
+      //   先把它们卸掉，才能回到"技能库为空"这一档（测的还是原来的那句话）。
+      const skills = ((await (await fetch(`${url}/api/skills`)).json()) as {
+        skills: Array<{ id: string; slug: string }>
+      }).skills
+      for (const s of skills) {
+        if (['agent-design-norms', 'boundary-checklist', 'skill-eligibility'].includes(s.slug)) {
+          await fetch(`${url}/api/skills/${encodeURIComponent(s.id)}`, { method: 'DELETE' })
+        }
+      }
       const res = await create(url, { name: 'x', skillIds: ['not-a-real-skill'] })
       assert.equal(res.status, 400)
       assert.match(String(res.body['error']), /还没有 skill/)

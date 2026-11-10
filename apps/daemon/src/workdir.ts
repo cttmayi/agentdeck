@@ -66,6 +66,11 @@ const SUBJECT_PREFIX: Record<SubjectRef['type'], string> = {
   // ★ 分批第 260 批：「合并同类」那条分析 run：`<workRoot>/memory-consolidate-<智能体 id>`。
   //   按智能体分屋（不是按对话）：合并的对象是它的记忆，与哪段对话无关。
   'memory-consolidate': 'memory-consolidate',
+  // ★ 2026-11 设计定稿：`agent-draft` subject（岗位卡起草 run）占位——
+  //   当前实现里生成者直接在**聊天**里写岗位卡（对话 run 就是素材），没有单独的
+  //   agent-draft run；这里只是让 `SubjectRef` 枚举完整（`Record` 缺键会编译错），
+  //   将来若走"从对话起一条岗位卡起草 run"（§4.1.3），前缀就是这个。
+  'agent-draft': 'agent-draft',
 }
 
 /**
