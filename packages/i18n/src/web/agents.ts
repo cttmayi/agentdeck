@@ -702,10 +702,6 @@ export const agentsText = {
     zh: '删除独有技能',
     en: 'Delete exclusive skill',
   },
-  'agents.exclusiveSkillsLoadFailed': {
-    zh: '独有技能读取失败：{error}',
-    en: 'Failed to load exclusive skills: {error}',
-  },
   'agents.exclusiveSkillsSlugRequired': {
     zh: '请先填机器名（slug）。',
     en: 'Please fill in the slug first.',

@@ -73,8 +73,13 @@
     exclusiveLoading = true
     try {
       exclusiveSkills = await listExclusiveSkills(agent.id)
-    } catch (err) {
-      showToast($t('agents.exclusiveSkillsLoadFailed', { error: String(err instanceof Error ? err.message : err) }))
+    } catch {
+      // ★ 2026-11（使用者："有报错『独有技能读取失败』，没有每个智能体都有独有技能的，
+      //   不需要提示"）：读取失败**不提示**——独有技能是可选能力，大多数智能体没有；
+      //   读不到就当空列表（静默降级），不许打断使用。
+      //   那次报错的真根因：daemon 还是旧版（没有 /api/agents/:id/skills 路由 → 404），
+      //   重启后接口正常；但就算将来再遇到这类环境问题，也不该弹 toast 烦人。
+      exclusiveSkills = []
     } finally {
       exclusiveLoading = false
     }
