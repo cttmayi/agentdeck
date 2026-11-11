@@ -83,6 +83,13 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
    留下 exitCode=1，把成功误判成失败，提交 f79ee99）；适配器不许读
    `process.platform`、不许自己 spawn `taskkill`（收进程只许在
    `process-tree.ts` 一处）——`tests/platform-compat.test.ts` 机器检查着这三条。
+10. **界面改动的沟通与布局纪律**（使用者拍板写入，见
+    [`docs/design/operations-discipline.md`](docs/design/operations-discipline.md) §8）：
+    - 用户描述现状 / 问「为什么」时，先复述理解或先解释，**不默认动手改**；
+    - 删界面元素 ≠ 删功能（先确认功能去留）；显示逻辑默认与同类一致；
+    - 改布局对照旧探针判据的**意图清单**逐条重量——意图没变，判据不能删；
+    - UI 文案默认不加解释文字，要加先问「这句必要吗」；
+    - 被问数据/行为先查代码；移动样式搜该元素**所有**相关规则（简写 + 单属性分散都要看）。
 
 ## 文档与现状
 
