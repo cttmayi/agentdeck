@@ -6,7 +6,7 @@
    * 它怎么工作
    * ══════════════════════════════════════════════════════════════════
    *
-   *   ① 打开 ⇒ `GET /api/conversations/{id}/agent-draft`：把岗位卡（agent-draft.md）
+   *   ① 打开 ⇒ `GET /api/conversations/{id}/agent-draft`：把岗位卡（agent-draft/agent-draft.md）
    *      与配套技能草稿（skill/<slug>/SKILL.md）读出来；
    *   ② 岗位卡拆成 岗位名 + 角色 + 指令（正文）三段，**人可改**——确认前要能改；
    *   ③ 配套技能逐条摆出来（slug / name / description / SKILL.md 正文），可改可删；

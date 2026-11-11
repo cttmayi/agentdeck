@@ -8938,9 +8938,11 @@ async function injectedSkillsOf(
         /**
          * ★ 2026-11 设计定稿（§3.6）：**这个对话能不能「确认生成智能体」**。
          *
-         * 判据 = 工作目录顶层有 `agent-draft.md`（智能体生成者已产出岗位卡）。目录用
-         * `resolveWorkDir` 算，与 files 路由同一个函数同一套参数（见那边那段注释）。
-         * 界面拿它决定按钮出不出——按钮按条件出现，不搞置灰（设计稿 §9.7）。
+         * 判据 = 工作目录的 `agent-draft/` 目录里有 `agent-draft.md`（智能体生成者
+         * 已产出岗位卡；2026-11 使用者拍板：生成产物收进 `agent-draft/` 目录，
+         * **只认新位置**——顶层老文件不再认）。目录用 `resolveWorkDir` 算，与
+         * files 路由同一个函数同一套参数（见那边那段注释）。界面拿它决定按钮
+         * 出不出——按钮按条件出现，不搞置灰（设计稿 §9.7）。
          */
         let hasAgentDraft = false
         {
@@ -8951,7 +8953,7 @@ async function injectedSkillsOf(
             workRoot,
           }).path
           try {
-            hasAgentDraft = (await readdir(dir)).includes('agent-draft.md')
+            hasAgentDraft = (await readdir(join(dir, 'agent-draft'))).includes('agent-draft.md')
           } catch {
             hasAgentDraft = false
           }

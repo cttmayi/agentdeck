@@ -22,8 +22,8 @@
   它问（岗位卡五字段），你答
   它自己描述规则（目标/职责/边界/输出格式/验收）——不是让你写规则，你只确认
   它挂几个平台技能（D111 起：生成者的**独有技能**，启动播种进目录，不再装进技能库）
-  聊完 → 产出「岗位卡（草稿）」（写进工作目录 agent-draft.md）+ 配套技能草稿
-        （skill/<slug>/SKILL.md）
+  聊完 → 产出「岗位卡（草稿）」（写进工作目录 agent-draft/agent-draft.md）+ 配套
+        技能草稿（agent-draft/skill/<slug>/SKILL.md）
         ↓ 栏头出现「确认生成智能体」按钮
   审阅面板（岗位卡 + 配套技能，边界必审，人可改）→ 确认
         ↓
@@ -106,21 +106,26 @@
 
 ### 3.4 产出：岗位卡（草稿）+ 配套技能草稿
 
-聊天结束（用户确认规则）后，生成者在工作目录写：
+聊天结束（用户确认规则）后，生成者在工作目录写。**整个生成产物收进
+`agent-draft/` 目录**（2026-11 使用者拍板："放一个目录里面，比如目录的名字叫
+agent-draft。在工作目录下，很容易和其他文件干扰，看不清楚"）：
 
 ```
 conversation-<id>/
-  agent-draft.md     ← 岗位卡（草稿），分节：
-                       frontmatter: name / role
-                       ## 目标 / ## 职责 / ## 边界（不能碰）/ ## 输出格式
-                       ## 验收标准
-  skill/<slug>/SKILL.md   ← 配套技能草稿（0..N 条，逐条一个子目录；
-                           没有就 0 条，不写任何技能文件）
+  agent-draft/
+    agent-draft.md     ← 岗位卡（草稿），分节：
+                         frontmatter: name / role
+                         ## 目标 / ## 职责 / ## 边界（不能碰）/ ## 输出格式
+                         ## 验收标准
+    skill/<slug>/SKILL.md ← 配套技能草稿（0..N 条，逐条一个子目录；
+                            没有就 0 条，不写任何技能文件）
 ```
 
+一个"生成产物"是一个包，不散在工作目录、不和 agent 写的其他文件混在一起。
+**只认新位置**（使用者拍板）：工作目录顶层的老 `agent-draft.md` 不再被认。
 岗位卡 = 生成者在对话里已逐条描述并被用户确认的规则，**落盘一份**，确认生成时
 平台读它（可复现、可 diff、可重新聊天再写）。配套技能同理：草稿落盘在
-`skill/<slug>/SKILL.md`，确认时与岗位卡一起过审一起沉淀（§3.6）。
+`agent-draft/skill/<slug>/SKILL.md`，确认时与岗位卡一起过审一起沉淀（§3.6）。
 
 ### 3.5 素材（可选）：工作目录 `agent/` 目录
 
@@ -130,9 +135,10 @@ conversation-<id>/
 
 ### 3.6 确认生成（按钮 → 内联审阅 → 确认）
 
-- 侦测：对话工作目录顶层出现 `agent-draft.md`（岗位卡产出）→ 栏头（「沉淀技能」
-  旁）出现「**确认生成智能体**」按钮；没有就不出现（与沉淀技能按钮同一模式，
-  不搞置灰——没有素材时置灰按钮是一种半开的门，§9.7）。
+- 侦测：对话工作目录的 `agent-draft/` 目录里有 `agent-draft.md`（岗位卡产出；
+  只认新位置）→ 栏头（「沉淀技能」旁）出现「**确认生成智能体**」按钮；没有就
+  不出现（与沉淀技能按钮同一模式，不搞置灰——没有素材时置灰按钮是一种半开的
+  门，§9.7）。
 - 点按钮 → 聊天页弹出审阅面板（Modal，尺寸 wide）：
   - **岗位卡部分**：名称 / 角色 / 指令（一段，边界在段内），**人可改**；提示
     「草稿不是合同——检查『边界』段」（提示不是校验）；
@@ -195,7 +201,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
 ## 6. 界面改动
 
 - 聊天页：「新对话」下拉出现「智能体生成者（内置）」；对话栏头「沉淀技能」旁出现
-  「确认生成智能体」按钮（工作目录顶层有 `agent-draft.md` 时）；点了弹出审阅面板
+  「确认生成智能体」按钮（agent-draft/ 目录有 `agent-draft.md` 时）；点了弹出审阅面板
   （岗位卡部分 + 配套技能部分，§3.6）。
 - 智能体页列表：出现「智能体生成者（内置）」一条（可查看/编辑/恢复默认，同
   memory-tidy）。不再有「访谈官」「岗位卡起草者」两条（已合并）。
@@ -208,7 +214,7 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
   - **内置对账**：生成者启动建出来、可恢复默认、历史版本冻结、不进业务选择
     （补进 `agents-create` 判据）；**挂载技能 = 独有技能（D111）**（3 条平台技能
     播种进生成者目录、不进技能库，幂等；老库 `platform:agent-maker` 记录一次性搬走）；
-  - **整链**：fake 生成者聊天产出岗位卡（写 agent-draft.md + `skill/<slug>/SKILL.md`）→
+  - **整链**：fake 生成者聊天产出岗位卡（写 agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md`）→
     按钮出现（`hasAgentDraft`）→ 审阅（改边界、删一条技能）→ 确认 → 断言配套技能
     **不进共享技能池**、`GET /api/agents/:id/skills` 读回新智能体的独有技能
     = 配套技能（agent-maker.test.ts 钉住）；
@@ -216,15 +222,15 @@ v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者�
     用户只确认（e2e 断言岗位卡边界段来自生成者描述，不是用户输入原文）；
   - **边界缺省**：用户没说边界时岗位卡含最小权限缺省段；
   - **配套技能为 0 条**时只建智能体。
-- **探针**（`probe:layout`）：聊天下拉有「智能体生成者」；工作目录有 agent-draft.md
+- **探针**（`probe:layout`）：聊天下拉有「智能体生成者」；agent-draft/ 目录有 agent-draft.md
   时按钮出现；审阅面板两段渲染。
 
 ## 8. 协议草案（实现时定细节）
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/conversations/:id` | 详情带 `hasAgentDraft`（工作目录顶层有 agent-draft.md 的侦测） |
-| `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{slug,name,description,body}]}`（agent-draft.md + `skill/<slug>/SKILL.md` 解析） |
+| `GET /api/conversations/:id` | 详情带 `hasAgentDraft`（agent-draft/ 目录里有 agent-draft.md 的侦测） |
+| `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{slug,name,description,body}]}`（agent-draft/agent-draft.md + `agent-draft/skill/<slug>/SKILL.md` 解析） |
 | `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/SKILL/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
 
 创建动作仍走现有端点（智能体 `POST /api/agents` 同批字段、技能沉淀 commit 同

@@ -10226,14 +10226,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         // ══════════════ 智能体生成者（D109）：按钮 + 审阅面板 ══════════════
         /**
          * ★ 2026-11：生成者流程的界面三件事。
-         *   · 没有 agent-draft.md 的对话：按钮**不出现**（判据 = 条件出现，不置灰）；
-         *   · 有 agent-draft.md 的对话：按钮出现（`hasAgentDraft`）；
+         *   · 没有 agent-draft/agent-draft.md 的对话：按钮**不出现**（判据 = 条件出现，不置灰）；
+         *   · 有 agent-draft/agent-draft.md 的对话：按钮出现（`hasAgentDraft`）；
          *   · 点了按钮：审阅面板两段渲染（岗位卡部分 + 配套技能部分）。
          *
-         * 夹具对话（上一段刚量完的那条）没有 agent-draft.md（假 CLI 对普通聊天
+         * 夹具对话（上一段刚量完的那条）没有 agent-draft/ 目录（假 CLI 对普通聊天
          *  run 一律 `exit 127`，什么都不写）⇒ 先量"不出现"。生成者那条对话由假 CLI
          *  代办"写岗位卡"（prompt 带 `PROBE-MAKER-DRAFT` ⇒ 假 CLI 写
-         *  `agent-draft.md` + `skill/meeting-notes-format/SKILL.md`，见 run.mjs）。
+         *  `agent-draft/agent-draft.md` + `agent-draft/skill/meeting-notes-format/SKILL.md`，
+         *  见 run.mjs）。
          */
         const makerButtons = () =>
           [...d().querySelectorAll('.pane-actions button')].filter((b) =>

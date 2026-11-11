@@ -97,10 +97,14 @@ describe('生成产物读取（readAgentDraftArtifacts）', () => {
   test('★ 岗位卡 + 配套技能草稿都读出来；skill/ 不存在 = 0 条（不是错误）', async () => {
     const dir = await makeTempDir('agent-maker-artifacts')
     try {
-      await writeFile(join(dir, 'agent-draft.md'), '---\nname: 会议纪要助理\nrole: executor\n---\n你是会议纪要助理。')
-      await mkdir(join(dir, 'skill', 'meeting-notes-format'), { recursive: true })
+      await mkdir(join(dir, 'agent-draft'), { recursive: true })
       await writeFile(
-        join(dir, 'skill', 'meeting-notes-format', 'SKILL.md'),
+        join(dir, 'agent-draft', 'agent-draft.md'),
+        '---\nname: 会议纪要助理\nrole: executor\n---\n你是会议纪要助理。',
+      )
+      await mkdir(join(dir, 'agent-draft', 'skill', 'meeting-notes-format'), { recursive: true })
+      await writeFile(
+        join(dir, 'agent-draft', 'skill', 'meeting-notes-format', 'SKILL.md'),
         '---\nname: 会议纪要格式\ndescription: decisions/owners/deadlines 三段\n---\n## When to Use\n会议纪要\n## Procedure\n分三段。',
       )
       const out = await readAgentDraftArtifacts(dir)
@@ -128,9 +132,10 @@ describe('生成产物读取（readAgentDraftArtifacts）', () => {
   test('★ 子目录里没有 SKILL.md = 不是配套技能（跳过，不抛）', async () => {
     const dir = await makeTempDir('agent-maker-skip')
     try {
-      await writeFile(join(dir, 'agent-draft.md'), '---\nname: x\nrole: executor\n---\n你是x。')
-      await mkdir(join(dir, 'skill', 'not-a-skill'), { recursive: true })
-      await writeFile(join(dir, 'skill', 'not-a-skill', 'notes.txt'), '没有 SKILL.md')
+      await mkdir(join(dir, 'agent-draft'), { recursive: true })
+      await writeFile(join(dir, 'agent-draft', 'agent-draft.md'), '---\nname: x\nrole: executor\n---\n你是x。')
+      await mkdir(join(dir, 'agent-draft', 'skill', 'not-a-skill'), { recursive: true })
+      await writeFile(join(dir, 'agent-draft', 'skill', 'not-a-skill', 'notes.txt'), '没有 SKILL.md')
       const out = await readAgentDraftArtifacts(dir)
       assert.deepEqual(out.skills, [])
     } finally {
@@ -348,11 +353,12 @@ class WritingBackend implements AgentBackend {
   async execute(opts: ExecOptions): Promise<AgentSession> {
     const workDir = opts.workDir ?? ''
     if (this.agentDraft !== '') {
-      await writeFile(join(workDir, 'agent-draft.md'), this.agentDraft)
+      await mkdir(join(workDir, 'agent-draft'), { recursive: true })
+      await writeFile(join(workDir, 'agent-draft', 'agent-draft.md'), this.agentDraft)
     }
     if (this.skillBody !== '') {
-      await mkdir(join(workDir, 'skill', 'meeting-notes-format'), { recursive: true })
-      await writeFile(join(workDir, 'skill', 'meeting-notes-format', 'SKILL.md'), this.skillBody)
+      await mkdir(join(workDir, 'agent-draft', 'skill', 'meeting-notes-format'), { recursive: true })
+      await writeFile(join(workDir, 'agent-draft', 'skill', 'meeting-notes-format', 'SKILL.md'), this.skillBody)
     }
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'text', content: '岗位卡已写入 agent-draft.md。' })

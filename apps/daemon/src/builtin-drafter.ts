@@ -191,7 +191,9 @@ export const AGENT_MAKER_NAME = '智能体生成者（内置）'
  * 使用者原话（第七轮定稿）："要有一个智能体生成者的智能体，用户在聊天界面聊天，
  * 相关的规则都需要在智能体生成者去描述，而不是让用户来描述。"——所以它**只问只写
  * 不干活**：把"一个岗位"问清楚、**自己把规则描述出来**（用户只回答、只确认），
- * 产出岗位卡（工作目录 `agent-draft.md`）+ 配套技能草稿（`skill/<slug>/SKILL.md`）。
+ * 产出岗位卡 + 配套技能草稿，**整个生成产物收进 `agent-draft/` 目录**
+ * （2026-11 使用者拍板：避免散在工作目录与别的文件互相干扰）：
+ * `agent-draft/agent-draft.md` + `agent-draft/skill/<slug>/SKILL.md`。
  *
  * ══════════════════════════════════════════════════════════════════
  * 为什么这些规矩住在身份里而不是代码里（与记忆整理者同一条）
@@ -244,15 +246,16 @@ export const AGENT_MAKER_INSTRUCTIONS_BODY = [
   '',
   '## 产出（用户表示聊够了之后）',
   '',
-  '1. 写 `agent-draft.md`（工作目录）：',
+  '1. 新建目录 `agent-draft/`（工作目录下，**整个生成产物都放这里面**，不散在',
+  '   工作目录顶层，避免和别的文件混在一起），写 `agent-draft/agent-draft.md`：',
   '   frontmatter 两行 `name`（岗位名，如"会议纪要助理"）与 `role`（`executor` 或 `reviewer`），',
   '   正文从"你是<name>。"开始，然后依次是 `## 目标` / `## 职责` / `## 边界（不能碰）` /',
   '   `## 输出格式` / `## 验收标准` 各节；',
   '2. 判定**配套技能**（哪些做法值得抽成技能：高频 / 同格式 / 跨任务可复用）：',
-  '   每条写一份 `skill/<slug>/SKILL.md`（frontmatter `name` + `description`，正文有',
-  '   `## When to Use` 与 `## Procedure` 两节）；**没有就 0 条**，不要硬凑；',
-  '3. 在对话里告诉用户：岗位卡已写入 `agent-draft.md`，确认前尤其要审「边界」栏，',
-  '   想改随时说，不想改就点「确认生成智能体」。',
+  '   每条写一份 `agent-draft/skill/<slug>/SKILL.md`（frontmatter `name` + `description`，',
+  '   正文有 `## When to Use` 与 `## Procedure` 两节）；**没有就 0 条**，不要硬凑；',
+  '3. 在对话里告诉用户：岗位卡已写入 `agent-draft/agent-draft.md`，确认前尤其要审',
+  '   「边界」栏，想改随时说，不想改就点「确认生成智能体」。',
   '',
   '## 别忘了',
   '',

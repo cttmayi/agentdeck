@@ -533,7 +533,7 @@ export const chatText = {
 
   /**
    * ★ 2026-11 设计定稿（§3.6）：智能体生成者的「确认生成智能体」按钮与内联审阅面板。
-   * 按钮按条件出现（工作目录有 agent-draft.md 才出现），不搞置灰——没有素材时置灰
+   * 按钮按条件出现（agent-draft/ 目录有 agent-draft.md 才出现），不搞置灰——没有素材时置灰
    * 按钮是一种半开的门（设计稿 §9.7）。
    */
   'chat.agentMakerAction': { zh: '确认生成智能体', en: 'Confirm agent' },

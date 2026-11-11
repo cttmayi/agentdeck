@@ -1103,7 +1103,7 @@ const CHECKS = [
   {
     view: '聊天',
     key: 'chat.agentMakerButtonShows',
-    label: '★ 2026-11（D109）：工作目录有 agent-draft.md 的对话，栏头出现「确认生成智能体」按钮',
+    label: '★ 2026-11（D109）：agent-draft/ 目录有 agent-draft.md 的对话，栏头出现「确认生成智能体」按钮',
     ok: (v) => v === true,
   },
   {
@@ -6025,11 +6025,11 @@ function writeFakeGenericCli() {
       //   `$PWD`（chat 对话的 cwd = 工作目录），再正常收尾。写文件用 heredoc：
       //   引号带 `EOF`，`$` 不会展开（正文里有 `$` 会炸——内容里没有）。
       `  *${PROBE_MAKER_MARKER}*)`,
-      `    mkdir -p "$PWD/skill/meeting-notes-format"`,
-      `    cat > "$PWD/agent-draft.md" <<'PROBE_MAKER_EOF'`,
+      `    mkdir -p "$PWD/agent-draft/skill/meeting-notes-format"`,
+      `    cat > "$PWD/agent-draft/agent-draft.md" <<'PROBE_MAKER_EOF'`,
       PROBE_MAKER_DRAFT_MD,
       'PROBE_MAKER_EOF',
-      `    cat > "$PWD/skill/meeting-notes-format/SKILL.md" <<'PROBE_MAKER_EOF'`,
+      `    cat > "$PWD/agent-draft/skill/meeting-notes-format/SKILL.md" <<'PROBE_MAKER_EOF'`,
       PROBE_MAKER_SKILL_MD,
       'PROBE_MAKER_EOF',
       `    printf '{"type":"text","text":"岗位卡已写入 agent-draft.md。"}\\n'`,
@@ -6055,8 +6055,10 @@ const PROBE_DRAFT_MARKER = 'PROBE-STUB-DRAFT-ONLY'
  * ★ 2026-11（智能体生成者，D109）：假 CLI 的生成者分支。
  *
  * 生成者"在聊天里写岗位卡"这件事由假 CLI 代办：prompt 里带这个记号 ⇒ 在当前工作
- * 目录（chat 对话的 cwd = `$PWD`）写出 `agent-draft.md` + 一条配套技能草稿
- * `skill/meeting-notes-format/SKILL.md`，再回一句话——与真机生成者做的事同构。
+ * 目录（chat 对话的 cwd = `$PWD`）写出 `agent-draft/agent-draft.md` + 一条配套
+ * 技能草稿 `agent-draft/skill/meeting-notes-format/SKILL.md`，再回一句话——与真机
+ * 生成者做的事同构（2026-11：生成产物收进 `agent-draft/` 目录，避免与工作目录
+ * 其他文件互相干扰）。
  * 探针据此量「确认生成智能体」按钮与审阅面板两段渲染。
  */
 const PROBE_MAKER_MARKER = 'PROBE-MAKER-DRAFT'

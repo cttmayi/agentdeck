@@ -205,7 +205,7 @@ export type AgentRole =
   | 'memory-tidy'
   /**
    * 平台内置的**智能体生成者**（2026-11 设计定稿）：在聊天里问岗位、规则由它描述、
-   * 产出岗位卡（agent-draft.md）。与 memory-tidy 同一条纪律（**不参与业务选择**），
+   * 产出岗位卡（agent-draft/agent-draft.md）。与 memory-tidy 同一条纪律（**不参与业务选择**），
    * 唯一的不同是**能聊天**——聊天放行的判据是 `=== 'executor' || === 'agent-maker'`
    * （只有那两处，由测试钉住）。
    */
