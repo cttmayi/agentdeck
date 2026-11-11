@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { escapeHtml, renderMarkdown } from './markdown.ts'
+import { escapeHtml, renderMarkdown, stripFrontmatter } from './markdown.ts'
 
 /**
  * Markdown 渲染。
@@ -221,6 +221,38 @@ describe('escapeHtml', () => {
  *
  * 所以这一条钉住"渲染器这一侧的产出"：只要它把换行丢掉，任何样式都救不回来。
  */
+/**
+ * frontmatter 剥离（2026-11 使用者："SKILL.md 的头显示也显示不好，被做成一行了"——
+ * 预览工作目录里的 SKILL.md / 岗位卡时，头块不能当普通 markdown 渲染）。
+ */
+describe('★ stripFrontmatter：预览前剥掉 YAML 头块', () => {
+  test('★ 标准头块剥掉，正文原样（换行开头也去掉）', () => {
+    const src = '---\nname: 会议纪要格式\ndescription: 三段\n---\n## When to Use\n开会。'
+    assert.equal(stripFrontmatter(src), '## When to Use\n开会。')
+  })
+
+  test('★ 头块后直接是正文（没有额外空行）', () => {
+    const src = '---\nname: x\n---\n第一行。'
+    assert.equal(stripFrontmatter(src), '第一行。')
+  })
+
+  test('★ 没有头块 = 原样返回（普通 markdown 不误伤）', () => {
+    const src = '# 标题\n---\n正文里的横线。'
+    assert.equal(stripFrontmatter(src), src)
+  })
+
+  test('★ 只有 `---` 没有结束行 = 原样返回', () => {
+    const src = '---\nname: x'
+    assert.equal(stripFrontmatter(src), src)
+  })
+
+  test('★ 渲染结果里不出现 frontmatter 的键值行', () => {
+    const html = renderMarkdown(stripFrontmatter('---\nname: x\ndescription: y\n---\n## When to Use\na'))
+    assert.equal(html.includes('name: x'), false)
+    assert.match(html, /<h2>When to Use<\/h2>/)
+  })
+})
+
 describe('★ 代码块：换行', () => {
   test('围栏代码块里的换行原样保留（不是合成一段）', () => {
     const out = renderMarkdown('```python\ndef f(a):\n    return a\n```\n')

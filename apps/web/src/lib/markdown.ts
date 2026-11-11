@@ -46,6 +46,27 @@ export interface MarkdownOptions {
   resolveAsset?: (href: string) => string | null
 }
 
+/**
+ * 剥离 YAML frontmatter 头块（`---\n…\n---`，只在文件开头）。
+ *
+ * SKILL.md / 岗位卡这类文件都以 frontmatter 开头——直接渲染全文会把 `---`
+ * 渲染成横线、键值行挤成一团（段落内单换行折叠成空格）。预览时剥掉头块只渲染
+ * 正文（2026-11 使用者："SKILL.md 的头显示也显示不好，被做成一行了"）。
+ *
+ * 判据与 `parseAgentDraft` / `splitFrontmatter` 同款：开头 `---` 行 + 后面能
+ * 找到第一个 `\n---` 结束行；不匹配就原样返回（普通 markdown 不误伤）。
+ */
+export function stripFrontmatter(text: string): string {
+  const trimmed = text.replace(/^\uFEFF/, '')
+  if (!trimmed.startsWith('---')) return text
+  const firstNl = trimmed.indexOf('\n')
+  if (firstNl < 0) return text
+  const end = trimmed.indexOf('\n---', firstNl + 1)
+  if (end < 0) return text
+  const rest = trimmed.slice(end + 4)
+  return rest.startsWith('\n') ? rest.slice(1) : rest
+}
+
 /** HTML 转义。**所有**来自输入的文字都要过这一道。 */
 export function escapeHtml(text: string): string {
   return text
