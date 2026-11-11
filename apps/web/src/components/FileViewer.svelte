@@ -47,6 +47,7 @@
   import { Modal } from '@agentdeck/ui/components'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown, stripFrontmatter } from '../lib/markdown.ts'
+  import { markdownHtmlMode } from '../lib/markdown-html.ts'
   import { humanSize } from '../lib/workdir-view.ts'
   import {
     CSV_MAX_COLS,
@@ -323,7 +324,7 @@
   $: csvView = kind === 'csv' ? parseCsv(text) : { rows: [] as string[][], truncated: false }
   $: renderedMarkdown =
     kind === 'markdown' && face === 'rendered'
-      ? renderMarkdown(stripFrontmatter(text), { resolveAsset })
+      ? renderMarkdown(stripFrontmatter(text), { resolveAsset, html: $markdownHtmlMode })
       : ''
 
   async function copyRaw(): Promise<void> {

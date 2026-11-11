@@ -19,6 +19,7 @@
   import { api, type Agent, type ChatTurnView, type Conversation } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { markdownHtmlMode } from '../lib/markdown-html.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
     agentMemoryEnabled,
@@ -861,6 +862,7 @@
   function renderedFor(turn: ChatTurnView): string {
     if (!turn.output) return ''
     return renderMarkdown(turn.output, {
+      html: $markdownHtmlMode,
       resolveAsset: (href: string) =>
         /^https?:/i.test(href) ? href : `/api/runs/${turn.runId}/file?path=${encodeURIComponent(href)}`,
     })

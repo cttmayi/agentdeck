@@ -44,6 +44,7 @@
   //   渲染"），这里是另一个用途：**起草 run 的最终产出**。两件事不要混。
   import { tick, onDestroy, onMount } from 'svelte'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { markdownHtmlMode } from '../lib/markdown-html.ts'
   import { draftIsLive } from '../lib/draft-live.ts'
   import { finalResultText } from '../lib/final-output.ts'
   import { crystallizeState, crystallizeStateKey } from '../lib/crystallize-state.ts'
@@ -1524,7 +1525,7 @@
           {$t('tasks.noTextOutputHint')}
         </p>
       {:else}
-        {@html renderMarkdown(draftFinalText)}
+        {@html renderMarkdown(draftFinalText, { html: $markdownHtmlMode })}
       {/if}
 
       <!--
@@ -1837,7 +1838,7 @@
         <ChatBubble
           role="user"
           who={`${$t('crystallize.speakerYou')} · ${requestLabel}`}
-          html={renderMarkdown(draftTaskText !== '' ? draftTaskText : requestDetail)}
+          html={renderMarkdown(draftTaskText !== '' ? draftTaskText : requestDetail, { html: $markdownHtmlMode })}
         />
         <!--
           ★ 分批第 196 批：这里原来还有一行「材料 10 项（轨迹 5 · 给定 5）」（`materialCountLine`）。

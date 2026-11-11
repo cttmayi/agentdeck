@@ -28,6 +28,8 @@
   //    拦下）。判据用 `currentRuntime`——它就是 daemon 启动时选中/侦测到的那个 key。
   $: detectedRuntime = $identity?.currentRuntime ?? '?'
   import { setThemePref, themePref, type ThemePref } from '@agentdeck/ui'
+  import { markdownHtmlMode, setMarkdownHtmlMode } from '../lib/markdown-html.ts'
+  import type { MarkdownHtmlMode } from '../lib/markdown.ts'
 
   /**
    * ★ 分批第 47 批：「默认工作守则」的草稿与保存。
@@ -50,6 +52,13 @@
     { value: 'dark', labelId: 'settings.themeDark' },
     { value: 'system', labelId: 'settings.themeSystem' },
   ] as const satisfies ReadonlyArray<{ value: ThemePref; labelId: string }>
+
+  /** Markdown 里 HTML 的三档（2026-11 使用者定案：默认关，可开白名单/原始）。 */
+  const MARKDOWN_HTML_CHOICES = [
+    { value: 'off', labelId: 'settings.markdownHtmlOff' },
+    { value: 'allowlist', labelId: 'settings.markdownHtmlAllowlist' },
+    { value: 'raw', labelId: 'settings.markdownHtmlRaw' },
+  ] as const satisfies ReadonlyArray<{ value: MarkdownHtmlMode; labelId: string }>
 
   /**
    * 设置抽屉。
@@ -143,6 +152,34 @@
         {/each}
       </div>
       <p class="hint">{$t('settings.themeHint')}</p>
+    </section>
+
+    <!--
+      ★ 2026-11（使用者："或许可以用一个开关，默认是关（不支持HTML），可以被打开"
+        → 定案三档）：Markdown 里的 HTML 怎么处理。默认「不支持」（安全底线，
+        大模型爱写的 `<br>` 显示成文字）；「白名单」把安全标签翻译成等价渲染
+        （页面里仍不出现真 HTML）；「原始」完全放行（信任档，带警告）。
+        与主题同款三档按钮（radiogroup）。存 localStorage，纯显示偏好。
+    -->
+    <section class="drawer-section">
+      <h3>{$t('settings.markdownHtml')}</h3>
+      <div class="theme-picker" role="radiogroup" aria-label={$t('settings.markdownHtml')}>
+        {#each MARKDOWN_HTML_CHOICES as c (c.value)}
+          <button
+            type="button"
+            class:active={$markdownHtmlMode === c.value}
+            role="radio"
+            aria-checked={$markdownHtmlMode === c.value}
+            onclick={() => setMarkdownHtmlMode(c.value)}
+          >
+            {$t(c.labelId)}
+          </button>
+        {/each}
+      </div>
+      <p class="hint">{$t('settings.markdownHtmlHint')}</p>
+      {#if $markdownHtmlMode === 'raw'}
+        <p class="hint warn">{$t('settings.markdownHtmlRawWarn')}</p>
+      {/if}
     </section>
 
     <!--

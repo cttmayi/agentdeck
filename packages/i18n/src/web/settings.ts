@@ -49,6 +49,18 @@ export const settingsText = {
     zh: '「跟随系统」就是跟着操作系统的亮暗切换走；手动选亮 / 暗会定死，系统怎么换都不影响。',
     en: '"System" follows the OS light/dark switch; picking Light or Dark pins it, no matter what the OS does.',
   },
+  'settings.markdownHtml': { zh: 'Markdown 里的 HTML', en: 'HTML in Markdown' },
+  'settings.markdownHtmlOff': { zh: '不支持', en: 'Off' },
+  'settings.markdownHtmlAllowlist': { zh: '白名单', en: 'Allowlist' },
+  'settings.markdownHtmlRaw': { zh: '原始', en: 'Raw' },
+  'settings.markdownHtmlHint': {
+    zh: '大模型常在 markdown 里写 br、b 这类 HTML 标签（标准本来就允许）。白名单档把它们翻译成等价效果（换行、粗体等），危险标签仍全部转义；原始档完全放行。',
+    en: 'LLMs often write tags like br and b in markdown (the standard allows them). Allowlist translates safe tags into their equivalent effects (line break, bold, etc.); Raw passes everything through.',
+  },
+  'settings.markdownHtmlRawWarn': {
+    zh: '原始档会放行 agent 产出的全部 HTML——脚本、事件属性可以直接调用本机接口（跑任务、读日志）。只在完全信任内容来源时用。',
+    en: 'Raw passes ALL HTML from agent output through — scripts and event attributes can call local APIs. Use only when you fully trust the source.',
+  },
 
   /**
    * 「关于」：这一版界面叫什么。

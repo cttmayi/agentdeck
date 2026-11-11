@@ -222,6 +222,76 @@ describe('escapeHtml', () => {
  * 所以这一条钉住"渲染器这一侧的产出"：只要它把换行丢掉，任何样式都救不回来。
  */
 /**
+ * Markdown 里 HTML 的三档（2026-11 使用者定案："或许可以用一个开关，默认是关
+ * （不支持HTML），可以被打开" → 不支持 / 白名单 / 原始）。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么白名单档也要测试"页面里不出现真 HTML"
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 白名单档的承诺是"安全标签翻译成等价渲染、危险标签仍全部转义"——它不是"放
+ * 行 HTML"。所以测试钉住两件事：`<br>`/`<b>` 真的生效（否则使用者开了等于没开），
+ * 而 `<script>`/事件属性**仍然**以文字出现（否则安全底线被悄悄打开）。
+ *
+ * `raw` 档是使用者**明示的信任档**（设置页带警告），测试钉住它确实放行——
+ * 不然"开了却还是转义"也是另一种骗人。
+ */
+describe('★ Markdown 里 HTML 的三档', () => {
+  test('★ 默认（off）：`<br>` 仍显示成文字（安全底线不动）', () => {
+    const html = renderMarkdown('第一行<br>第二行')
+    assert.equal(html.includes('<br>'), false, 'off 档页面里不该出现 <br>')
+    assert.match(html, /&lt;br&gt;/)
+  })
+
+  test('★ 白名单：`<br>` 变成渲染器自己的换行标签', () => {
+    const html = renderMarkdown('第一行<br>第二行', { html: 'allowlist' })
+    assert.match(html, /<p>第一行<br>第二行<\/p>/, `白名单档 <br> 要真的换行：${html}`)
+  })
+
+  test('★ 白名单：`<b>/<i>/<s>/<code>/<kbd>/&nbsp;` 翻译成等价渲染', () => {
+    const html = renderMarkdown(
+      '<b>粗</b> <i>斜</i> <s>删</s> <code>码</code> <kbd>键</kbd> a&nbsp;b',
+      { html: 'allowlist' },
+    )
+    assert.match(html, /<strong>粗<\/strong>/)
+    assert.match(html, /<em>斜<\/em>/)
+    assert.match(html, /<del>删<\/del>/)
+    assert.match(html, /<code>码<\/code>/)
+    assert.match(html, /<code>键<\/code>/)
+    assert.match(html, /a\u00A0b/, '&nbsp; 要变成不换行空格')
+  })
+
+  test('★ 白名单：危险形态仍然全部转义（页面里不出现来自输入的真 HTML）', () => {
+    for (const evil of [
+      '<script>alert(1)</script>',
+      '<img src=x onerror=alert(1)>',
+      '<a href="javascript:x">点</a>',
+      '<div onclick="x()">d</div>',
+    ]) {
+      const html = renderMarkdown(evil, { html: 'allowlist' })
+      assert.equal(html.includes('<script>'), false, `白名单档不许出现真 <script>：${evil}`)
+      assert.equal(/<img|<a |<div/.test(html), false, `白名单档不许出现真标签：${evil}`)
+    }
+  })
+
+  test('★ 白名单：`<br>` 在代码块里保持原样（不被翻译）', () => {
+    const html = renderMarkdown('```\n<br> 是字面量\n```', { html: 'allowlist' })
+    assert.match(html, /<code[^>]*>&lt;br&gt; 是字面量<\/code>/)
+  })
+
+  test('★ 原始（raw）：完全放行（使用者明示的信任档）', () => {
+    const html = renderMarkdown('<b>真粗体</b> 与 <br> 换行', { html: 'raw' })
+    assert.match(html, /<b>真粗体<\/b>/, 'raw 档输入里的 <b> 原样进页面')
+    assert.match(html, /<br>/, 'raw 档输入里的 <br> 原样进页面')
+  })
+
+  test('★ 原始（raw）：`<script>` 也放行——测试钉住"它确实放行"', () => {
+    const html = renderMarkdown('<script>alert(1)</script>', { html: 'raw' })
+    assert.equal(html.includes('<script>alert(1)</script>'), true, 'raw 档确实放行（信任档，设置页有警告）')
+  })
+})
+
+/**
  * frontmatter 剥离（2026-11 使用者："SKILL.md 的头显示也显示不好，被做成一行了"——
  * 预览工作目录里的 SKILL.md / 岗位卡时，头块不能当普通 markdown 渲染）。
  */

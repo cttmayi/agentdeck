@@ -36,6 +36,18 @@
  * 显示成文字**——那比"悄悄解析错"好。
  */
 
+/**
+ * Markdown 里出现的 HTML 怎么处理（2026-11 使用者定案：三档开关，默认关）：
+ *   - `off`：原始 HTML 一律转义成文字（安全底线，默认）；
+ *   - `allowlist`：把**安全标签翻译成等价渲染**（`<br>` → 换行、`<b>`/`<strong>`
+ *     → 粗体、`<i>`/`<em>` → 斜体、`<s>`/`<del>` → 删除线、`<code>`/`<kbd>` →
+ *     行内代码、`&nbsp;` → 不换行空格）；危险标签（`<script>`、事件属性、任意
+ *     链接）仍然全部转义——页面里永远不出现真实的 HTML，安全底线不变；
+ *   - `raw`：完全放行（使用者明示的信任档——agent 产出的 HTML 原样进页面，
+ *     事件属性可执行、可调用同源接口；只在完全信任内容来源时用，设置页有警告）。
+ */
+export type MarkdownHtmlMode = 'off' | 'allowlist' | 'raw'
+
 export interface MarkdownOptions {
   /**
    * 把图片/链接里的相对路径映射成可取的地址。
@@ -44,6 +56,8 @@ export interface MarkdownOptions {
    * 表示这个地址不该被渲染成链接/图片（会退化成纯文本）。
    */
   resolveAsset?: (href: string) => string | null
+  /** HTML 处理档位，默认 `off`（原始 HTML 一律转义成文字）。 */
+  html?: MarkdownHtmlMode
 }
 
 /**
@@ -87,6 +101,38 @@ function safeHref(href: string): string | null {
   return trimmed
 }
 
+/** 换行占位：`<br>` 翻译成它，最后一步由渲染器自己替换成 `<br>` 标签（安全：
+ * 页面里的 `<br>` 永远是渲染器生成的，不是输入的）。 */
+const BR_PLACEHOLDER = '\u0000BR\u0000'
+
+/**
+ * 白名单翻译（`html: 'allowlist'` 时，在转义**之前**）：把安全标签翻译成等价的
+ * markdown 记号，剩下的照常走"摘结构 → 转义 → 拼标签"——页面里不会出现任何
+ * 来自输入的 HTML。危险形态（`<script>`、`<img onerror>`、`<a>` 等）不在表里，
+ * 继续被转义成文字。
+ */
+function translateSafeHtml(text: string): string {
+  return text
+    .replace(/<br\s*\/?>/gi, BR_PLACEHOLDER)
+    .replace(/&nbsp;/gi, '\u00A0')
+    .replace(/<b>/gi, '**')
+    .replace(/<\/b>/gi, '**')
+    .replace(/<strong>/gi, '**')
+    .replace(/<\/strong>/gi, '**')
+    .replace(/<i>/gi, '*')
+    .replace(/<\/i>/gi, '*')
+    .replace(/<em>/gi, '*')
+    .replace(/<\/em>/gi, '*')
+    .replace(/<s>/gi, '~~')
+    .replace(/<\/s>/gi, '~~')
+    .replace(/<del>/gi, '~~')
+    .replace(/<\/del>/gi, '~~')
+    .replace(/<code>/gi, '`')
+    .replace(/<\/code>/gi, '`')
+    .replace(/<kbd>/gi, '`')
+    .replace(/<\/kbd>/gi, '`')
+}
+
 function renderInline(text: string, options: MarkdownOptions): string {
   // ══════════════════════════════════════════════════════════════════
   // 顺序很要紧：**先摘出结构，再转义剩下的文字，最后拼我们自己的标签**
@@ -107,6 +153,12 @@ function renderInline(text: string, options: MarkdownOptions): string {
   const stash = (html: string): string => `\u0000S${slots.push(html) - 1}\u0000`
 
   let work = text
+
+  // 0️⃣ 白名单档：安全 HTML 标签翻译成 markdown 记号（在摘结构之前，所以行内
+  //    代码/链接里的内容不受影响；代码块不走本函数，里面的 `<br>` 保持原样）
+  if (options.html === 'allowlist') {
+    work = translateSafeHtml(work)
+  }
 
   // ① 行内代码：内容按"文本节点"转义
   work = work.replace(/`([^`]+)`/g, (_m, code: string) =>
@@ -140,8 +192,9 @@ function renderInline(text: string, options: MarkdownOptions): string {
     )
   })
 
-  // ④ 剩下的**文字**整体转义（此刻文本里只剩普通字符与占位符）
-  let out = escapeHtml(work)
+  // ④ 剩下的**文字**整体转义（此刻文本里只剩普通字符与占位符）。
+  //    `raw` 档（使用者明示的信任档）：跳过转义，输入里的 HTML 原样进页面。
+  let out = options.html === 'raw' ? work : escapeHtml(work)
 
   // ⑤ 强调。放在转义之后做：`*` `~` 不在转义集合里，而我们的标签是字面量
   out = out
@@ -304,5 +357,7 @@ export function renderMarkdown(source: string, options: MarkdownOptions = {}): s
   }
 
   closeList()
-  return html.join('\n')
+  // 白名单档的 `<br>` 占位在这里换成渲染器自己的 `<br>`（页面里的 `<br>` 只
+  // 可能是渲染器生成的——占位符在转义之后才出现，输入里的 `<br>` 早已是文字）
+  return html.join('\n').split(BR_PLACEHOLDER).join('<br>')
 }

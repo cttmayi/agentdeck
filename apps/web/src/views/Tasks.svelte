@@ -15,6 +15,7 @@
     type WorkDirListing,
   } from '../lib/api.ts'
   import { renderMarkdown } from '../lib/markdown.ts'
+  import { markdownHtmlMode } from '../lib/markdown-html.ts'
   import { listGrip } from '../lib/list-grip.ts'
     import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
@@ -380,7 +381,8 @@
 
   $: renderedResult =
     resultText !== ''
-      ? renderMarkdown(resultText, { resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
+      ? renderMarkdown(resultText, {
+        html: $markdownHtmlMode, resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
       : ''
 
   let verdicts: VerdictView[] = []
