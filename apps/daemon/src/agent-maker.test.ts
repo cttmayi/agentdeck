@@ -455,7 +455,7 @@ after(async () => {
 })
 
 describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => {
-  test('★ 生成者对话跑完 ⇒ hasAgentDraft=true ⇒ 读岗位卡与配套技能 ⇒ 确认生成（先技能后智能体）', async () => {
+  test('★ 生成者对话跑完 ⇒ hasAgentDraft=true ⇒ 读岗位卡与配套技能 ⇒ 确认生成（配套技能 = 新智能体的独有技能）', async () => {
     const created = await postJson('/api/conversations', {
       agentId: makerId,
       text: '帮我理清一个岗位：把会议纪要变成一页纪要。',
@@ -485,20 +485,23 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     })
     assert.equal(committed.status, 201, `确认生成失败：${JSON.stringify(committed.body)}`)
     const out = committed.body as {
-      agent: { id: string; name: string; role: string; skillIds: string[] }
-      skillIds: string[]
+      agent: { id: string; name: string; role: string }
+      exclusiveSlugs: string[]
     }
     assert.equal(out.agent.name, '会议纪要助理')
     assert.equal(out.agent.role, 'executor')
 
-    // 配套技能先落库（mine + 可见），智能体 skillIds 指向它
+    // ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine 里没有它），
+    //   落成**新智能体的独有技能**（`agents/<id>/SKILL/`）——响应带 exclusiveSlugs。
     const skills = await json('/api/skills')
-    const mine = (skills.body as { skills: Array<{ slug: string; source: string; id: string }> }).skills.find(
-      (s) => s.slug === 'meeting-notes-format' && s.source === 'mine',
+    const poolHit = (skills.body as { skills: Array<{ slug: string; source: string }> }).skills.find(
+      (x) => x.slug === 'meeting-notes-format',
     )
-    assert.ok(mine, '配套技能要落 skills-mine（source === mine）')
-    assert.deepEqual(out.skillIds, [mine!.id], '智能体的 skillIds 要指向已沉淀的那条技能')
-    assert.deepEqual(out.agent.skillIds, [mine!.id])
+    assert.ok(!poolHit, '配套技能不要进共享技能池')
+    assert.deepEqual(out.exclusiveSlugs, ['meeting-notes-format'], '响应要如实带独有技能 slug')
+    const agentSkills = await json(`/api/agents/${out.agent.id}/skills`)
+    const exclusive = (agentSkills.body as { skills: Array<{ slug: string }> }).skills
+    assert.deepEqual(exclusive.map((x) => x.slug), ['meeting-notes-format'], '新智能体的独有技能 = 配套技能')
 
     // ★ D111（存储目录化）：生成的新智能体 = `agents/<id>/` 目录——详情接口要能
     //   从目录读回，且 `instructions` = 岗位卡正文（组装前，builtin=false 不再拼守则）
@@ -549,18 +552,25 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     assert.equal((badRole.body as { code?: string }).code, 'agent_role_invalid')
   })
 
-  test('★ 同名 mine 技能冲突 ⇒ 409（与沉淀新建同一口径，不静默覆盖）', async () => {
+  test('★ 坏配套技能 ⇒ 400 agent_skill_invalid（缺正文 / slug 非法都拦在写之前）', async () => {
     const created = await postJson('/api/conversations', { agentId: makerId, text: '再问一个' })
     assert.equal(created.status, 201)
     const conversationId = (created.body as { conversation: { id: string } }).conversation.id
     await waitForTerminal((created.body as { turn: { runId: string } }).turn.runId)
 
-    const res = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
+    const noBody = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
       agentDraft: '---\nname: 岗位二\nrole: executor\n---\n你是岗位二。',
-      skills: [{ slug: 'meeting-notes-format', body: '---\nname: x\n---\n## When to Use\na\n## Procedure\nb\n' }],
+      skills: [{ slug: 'meeting-notes-format', body: '   ' }],
     })
-    assert.equal(res.status, 409)
-    assert.equal((res.body as { code?: string }).code, 'agent_skill_clash_mine')
+    assert.equal(noBody.status, 400)
+    assert.equal((noBody.body as { code?: string }).code, 'agent_skill_invalid')
+
+    const badSlug = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
+      agentDraft: '---\nname: 岗位三\nrole: executor\n---\n你是岗位三。',
+      skills: [{ slug: '大 写 不 行', body: '---\nname: x\n---\n## When to Use\na\n## Procedure\nb\n' }],
+    })
+    assert.equal(badSlug.status, 400)
+    assert.equal((badSlug.body as { code?: string }).code, 'agent_skill_invalid')
   })
 
   test('★ 生成者对话的 run 注入 3 条独有技能（source: agent）；技能页里一条都没有', async () => {

@@ -9108,11 +9108,18 @@ async function injectedSkillsOf(
       }
 
       // ── 配套技能：人审过的最终版（slug + SKILL.md 正文）。每一条与安装/沉淀
-      //    同一关（`resolvePayloadEntry`），落 mine + git——共享资产，不是私有。
+      //    同一关（`resolvePayloadEntry`）。
+      //
+      // ★ 2026-11（使用者拍板："生成的 SKILL 被放进了共享技能池，应该作为智能体的
+      //    内置技能"）：配套技能是**这个新智能体自己的**——落成它的**独有技能**
+      //    （`agents/<id>/SKILL/<slug>/SKILL.md`），**不进共享技能池**（skills-mine、
+      //    无 git）。配套技能给这个岗位用，就是 D111"智能体自己的东西住进它的目录"
+      //    的同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程不替
+      //    使用者往共享池写。独有技能随智能体删除而删除（文件资产语义）。
       const rawSkills = Array.isArray(body?.skills) ? body.skills : []
-      const existing = await store.listSkills(workspaceId)
-      const committedSkillIds: Skill['id'][] = []
       const now = Date.now()
+      // 先校验全部配套技能（质量关在写之前），收集落盘清单
+      const exclusiveSkills: Array<{ slug: string; body: string }> = []
       for (const raw of rawSkills) {
         const item = raw as Record<string, unknown> | null
         const slug = typeof item?.['slug'] === 'string' ? item['slug'].trim() : ''
@@ -9129,7 +9136,7 @@ async function injectedSkillsOf(
           validated = resolvePayloadEntry({
             slug,
             body: skillBody,
-            sourceRef: `mine:${slug}`,
+            sourceRef: `exclusive:${slug}`,
           })
         } catch (err) {
           sendJson(res, 400, {
@@ -9138,52 +9145,11 @@ async function injectedSkillsOf(
           })
           return
         }
-        // 同名 mine 已存在 ⇒ 冲突（与沉淀新建同一口径：进化走更新，不静默覆盖）
-        const clashMine = existing.find((s) => s.slug === validated.slug && s.source === 'mine')
-        if (clashMine) {
-          sendJson(res, 409, {
-            error: `已有你提炼的同名技能（${clashMine.slug}）——要么换 slug，要么去沉淀页更新它`,
-            code: 'agent_skill_clash_mine',
-          })
-          return
-        }
-        const parsedSkill = parseSkillMd(skillBody)
-        const skill: Skill = {
-          id: ulid() as Skill['id'],
-          workspaceId,
-          slug: validated.slug,
-          name: parsedSkill.name !== '' ? parsedSkill.name : validated.slug,
-          description: parsedSkill.description !== '' ? parsedSkill.description : null,
-          body: validated.body,
-          ...(Object.keys(validated.files).length > 0 ? { files: validated.files } : {}),
-          verdictSchemaVersion: 1,
-          source: 'mine',
-          sourceRef: `mine:${validated.slug}`,
-          version: null,
-          createdAt: now,
-          updatedAt: now,
-        }
-        await store.insertSkill(skill)
-        committedSkillIds.push(skill.id as Skill['id'])
-        existing.push(skill)
-      }
-
-      // ── git 版本管理（与沉淀 commit 同一段逻辑：有 git 就提交，没有就降级不拦）──
-      let versioning: { enabled: boolean; note?: string } = { enabled: false }
-      const probe = await probeGit()
-      if (probe.available) {
-        const ensure = await ensureMineRepo(skillsMineRoot)
-        if (!ensure.ok) {
-          versioning = { enabled: false, note: `版本管理未启用：${ensure.reason}` }
-        } else {
-          const committed = await commitMine(skillsMineRoot, '配套技能沉淀（生成智能体）')
-          versioning = committed.ok
-            ? { enabled: true }
-            : { enabled: false, note: `git 提交失败（已降级）：${committed.reason}` }
-        }
+        exclusiveSkills.push({ slug: validated.slug, body: validated.body })
       }
 
       // ── 创建智能体（与 POST /api/agents 同一批字段；动作权限不落智能体，属组）──
+      //    先建目录、再写独有技能（SKILL.md 落进它自己的目录）。
       const agent: Agent = {
         id: ulid() as Agent['id'],
         workspaceId,
@@ -9192,7 +9158,7 @@ async function injectedSkillsOf(
         model: null,
         runtimeKey: 'default',
         workDir: null,
-        skillIds: committedSkillIds,
+        skillIds: [],
         env: {},
         role: parsed.role as Agent['role'],
         builtin: false,
@@ -9202,11 +9168,17 @@ async function injectedSkillsOf(
         updatedAt: now,
       }
       await store.insertAgent(agent)
+      for (const s of exclusiveSkills) {
+        await store.writeExclusiveSkill(agent.id, s.slug, s.body)
+      }
       info(
-        `生成智能体「${agent.name}」（角色 ${agent.role}，配套技能 ${committedSkillIds.length} 条）` +
+        `生成智能体「${agent.name}」（角色 ${agent.role}，内置配套技能 ${exclusiveSkills.length} 条）` +
           `——来源：对话 ${conversation.id.slice(-8)}`,
       )
-      sendJson(res, 201, { agent, skillIds: committedSkillIds, versioning })
+      sendJson(res, 201, {
+        agent,
+        exclusiveSlugs: exclusiveSkills.map((s) => s.slug),
+      })
       return
     }
 

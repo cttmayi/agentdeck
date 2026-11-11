@@ -564,12 +564,12 @@ export const chatText = {
   'chat.agentMakerRemoveSkill': { zh: '去掉这条', en: 'Drop this one' },
   'chat.agentMakerConfirm': { zh: '确认生成', en: 'Confirm & create' },
   'chat.agentMakerConfirmHint': {
-    zh: '先沉淀配套技能（mine + git 共享）→ 再创建智能体（skillIds 挂新技能）· 人确认是唯一入口',
-    en: 'Skills are crystallized first (mine + git, shared), then the agent is created with those skills mounted · a human confirm is the only way in',
+    zh: '配套技能作为新智能体的内置技能（不进共享技能池）· 人确认是唯一入口',
+    en: 'Companion skills become the new agent\'s built-in skills (not in the shared pool) · a human confirm is the only way in',
   },
   'chat.agentMakerDone': {
-    zh: '已创建智能体「{name}」+ 沉淀 {n} 条配套技能（skills-mine + git，可共享）',
-    en: 'Created agent "{name}" + crystallized {n} skill(s) (skills-mine + git, shared)',
+    zh: '已创建智能体「{name}」+ {n} 条配套技能作为它的内置技能',
+    en: 'Created agent "{name}" with {n} companion skill(s) as its built-in skills',
   },
   'chat.agentMakerFail': { zh: '生成失败：{error}', en: 'Creation failed: {error}' },
   'chat.agentMakerLoading': { zh: '正在读岗位卡…', en: 'Loading the job card…' },

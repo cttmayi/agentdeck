@@ -11,8 +11,9 @@
    *   ② 岗位卡拆成 岗位名 + 角色 + 指令（正文）三段，**人可改**——确认前要能改；
    *   ③ 配套技能逐条摆出来（slug / name / description / SKILL.md 正文），可改可删；
    *      黄条提示"未经验证"（提示不是校验）；
-   *   ④ 点「确认生成」⇒ `POST /api/conversations/{id}/agent-commit`：先沉淀配套
-   *      技能（mine + git），再创建智能体（skillIds 挂新技能）。
+   *   ④ 点「确认生成」⇒ `POST /api/conversations/{id}/agent-commit`：配套技能
+   *      作为**新智能体的独有技能**（`agents/<id>/SKILL/`，不进共享技能池）——
+   *      2026-11 使用者拍板："生成的 SKILL 应该作为智能体的内置技能"。
    *
    * ★ 只有人能确认这条铁律没有变：生成者只**起草**，真正落库是人在这一步按的那一下。
    * ⚠️ 岗位卡的 frontmatter 拆分只在界面做展示用，提交时拼回一整段给服务端重解析
@@ -22,6 +23,7 @@
   import { api } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
   import { showToast } from '../lib/view.ts'
+  import { loadAgents } from '../lib/stores.ts'
 
   export let open = false
   export let conversationId = ''
@@ -115,7 +117,7 @@
       error = ''
       const agentDraft = `---\nname: ${name}\nrole: ${role}\n---\n${instructions}`
       try {
-        const out = await api<{ agent: { name: string }; skillIds: string[] }>(
+        const out = await api<{ agent: { name: string }; exclusiveSlugs: string[] }>(
           `/api/conversations/${encodeURIComponent(conversationId)}/agent-commit`,
           {
             method: 'POST',
@@ -127,10 +129,14 @@
           },
         )
         done = true
+        // ★ 2026-11（使用者："生成的智能体默认在智能体页面看不到，需要重新刷新"）：
+        //   生成是写动作——成功后**立刻重拉智能体列表**，让界面跟着数据走，
+        //   不用等使用者刷新。同类问题已多次（§8.6 纪律）。
+        await loadAgents()
         showToast(
           $t('chat.agentMakerDone', {
             name: out.agent.name,
-            n: String(out.skillIds.length),
+            n: String(out.exclusiveSlugs.length),
           }),
         )
       } catch (err) {

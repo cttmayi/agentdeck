@@ -27,8 +27,8 @@
         ↓ 栏头出现「确认生成智能体」按钮
   审阅面板（岗位卡 + 配套技能，边界必审，人可改）→ 确认
         ↓
-  先沉淀配套技能（生成者起草的 SKILL.md 直接过审落 mine+git）→ 再创建智能体
-  （skillIds 挂新技能）
+  创建智能体，配套技能落成**它的独有技能**（agents/<id>/SKILL/，不进共享技能池）
+  （2026-11 使用者拍板：生成的 SKILL 应该作为智能体的内置技能）
 ```
 
 - **规则由生成者描述**：边界、输出格式、职责……是它提出、你确认，不是你在表单
@@ -38,8 +38,9 @@
 - **取代两个内置**：「访谈官」（只问不干）与「岗位卡起草者」（只写岗位卡）被
   **智能体生成者**吸收合并——它既问又起草，一个内置、一个角色、一个入口。
 - **配套技能与岗位卡同一场确认**：生成者按 skill-eligibility 判定、在聊天里起草
-  `skill/<slug>/SKILL.md`（§3.4），确认时与岗位卡一起过审、一起沉淀
-  （§3.6 v1 拍板：不走 skill-draft run），落 mine+git 共享。
+  `skill/<slug>/SKILL.md`（§3.4），确认时与岗位卡一起过审（§3.6 v1 拍板：不走
+  skill-draft run）。**落成新智能体的独有技能**（不进共享技能池——2026-11 使用者
+  拍板："生成的 SKILL 应该作为智能体的内置技能"，D1xx 记录）。
 
 ## 2. 为什么合并成「智能体生成者」（2026-11 使用者第七轮定稿）
 
@@ -141,13 +142,14 @@ conversation-<id>/
   - 打开时 `GET /api/conversations/:id/agent-draft` 读一次；确认成功后面板内显示
     结果（不自动关，可关）。
 - 确认 = 人确认是唯一入口（`POST /api/conversations/:id/agent-commit`）：
-  1. **配套技能直接沉淀**（v1 拍板：不走 skill-draft run）：生成者在聊天里按
-     skill-eligibility 起草 `skill/<slug>/SKILL.md`（配套技能 = 生成产物的另一半，
-     与岗位卡一起在审阅面板里确认）→ 确认时逐条过 `resolvePayloadEntry` 同一关、
-     落 `skills-mine`（source `mine`，sourceRef `mine:<slug>`）+ git（共享）；
-     同名 mine 已存在 ⇒ 409（与沉淀新建同一口径，不静默覆盖）；
-  2. 创建智能体：name/role/instructions（岗位卡 frontmatter + 正文），`skillIds`
-     = 本次沉淀的配套技能。先沉淀技能、再建智能体（skillIds 指向已存在的技能）。
+  1. 配套技能逐条过 `resolvePayloadEntry` 同一关（缺正文 / slug 非法 ⇒ 400
+     `agent_skill_invalid`，拦在写之前）；
+  2. 创建智能体：name/role/instructions（岗位卡 frontmatter + 正文，`skillIds`
+     = 空）；配套技能写进它的**独有技能**目录（`agents/<id>/SKILL/<slug>/SKILL.md`）。
+     ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine / 无 git）——
+     它是"这个岗位自己"的技能，是 D111"智能体自己的东西住进它的目录"的同一句语义；
+     共享沉淀是使用者主动提炼的动作，生成流程不替使用者往共享池写。独有技能随
+     智能体删除而删除（文件资产语义，见 agent-directory.md）。
   服务端重解析岗位卡与 SKILL.md（不信任客户端分开传来的字段）。
 
 > **v1 为什么不走 skill-draft run**：配套技能是"生成者一边问一边起草"的产物，
@@ -156,11 +158,14 @@ conversation-<id>/
 > 之间的对应要跨 run 传递。直接由生成者在聊天里起草（规则由它描述，§1），确认时
 > 一起过审一起落库，是"生成智能体"这一条链最短的路径；未经验证由 §9.1 明示。
 
-### 3.7 技能是共享资产，不是私有（平台定性，v1 不变）
+### 3.7 配套技能 = 新智能体的独有技能（2026-11 使用者拍板，取代 v1 的"共享资产"）
 
-配套技能落库后和所有技能一样（`skillsRoot`、mine 进 git、任何智能体可挂）。私有
-技能概念 v1 不做（新存储 + 新注入通道 + git 处理，为配套技能付出整个私有面不值）；
-要私有，另起设计再议。
+v1 定的是"共享资产"（mine + git、任何智能体可挂）；使用者实操后拍板推翻：
+"智能体生成的 SKILL 被放在了共享技能池中了，应该作为智能体的内置技能"。
+配套技能是**这个新智能体自己的**——落成独有技能（`agents/<id>/SKILL/`，文件资产
+语义，随智能体删除），不进共享技能池、无 git 镜像。这与 D111"智能体自己的东西
+住进它的目录"是同一句语义；共享沉淀（mine）是使用者主动提炼的动作，生成流程
+不替使用者往共享池写。
 
 ## 4. 推荐的挂载技能（使用者点名"你给我推荐"）
 
@@ -205,7 +210,8 @@ conversation-<id>/
     播种进生成者目录、不进技能库，幂等；老库 `platform:agent-maker` 记录一次性搬走）；
   - **整链**：fake 生成者聊天产出岗位卡（写 agent-draft.md + `skill/<slug>/SKILL.md`）→
     按钮出现（`hasAgentDraft`）→ 审阅（改边界、删一条技能）→ 确认 → 断言配套技能
-    落 `skills-mine` + git、`GET /api/agents` 新智能体 skillIds 指向已沉淀技能；
+    **不进共享技能池**、`GET /api/agents/:id/skills` 读回新智能体的独有技能
+    = 配套技能（agent-maker.test.ts 钉住）；
   - **规则由生成者描述**：fake 生成者的对话轮次里包含"我建议的边界是……"，
     用户只确认（e2e 断言岗位卡边界段来自生成者描述，不是用户输入原文）；
   - **边界缺省**：用户没说边界时岗位卡含最小权限缺省段；
@@ -219,7 +225,7 @@ conversation-<id>/
 |---|---|
 | `GET /api/conversations/:id` | 详情带 `hasAgentDraft`（工作目录顶层有 agent-draft.md 的侦测） |
 | `GET /api/conversations/:id/agent-draft` | 生成产物：`{agentDraft: string|null, skills: [{slug,name,description,body}]}`（agent-draft.md + `skill/<slug>/SKILL.md` 解析） |
-| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 落 `skills-mine` + git → 创建智能体（skillIds = 本次配套技能）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
+| `POST /api/conversations/:id/agent-commit` `{agentDraft, skills:[{slug,body}]}` | 人确认：岗位卡重解析校验 → 配套技能逐条 `resolvePayloadEntry` 校验（缺正文/slug 非法 ⇒ 400 `agent_skill_invalid`）→ 创建智能体 → 配套技能写进它的独有技能目录（`agents/<id>/SKILL/`；不进共享池）。非 `agent-maker` 对话 ⇒ 400 `agent_commit_not_maker` |
 
 创建动作仍走现有端点（智能体 `POST /api/agents` 同批字段、技能沉淀 commit 同
 `resolvePayloadEntry`），新接口只负责"岗位卡 → 配套技能 → 确认"这一段，不复制
