@@ -55,6 +55,8 @@ export const VIEW_TITLE_KEYS = {
   tools: 'tools.navTitle',
   // ★ D80 三轮：沉淀是第七个视图（导航列工具之下），词条在 crystallize 的 i18n 里。
   crystallize: 'crystallize.navTitle',
+  // ★ 定时任务（2026-11，使用者立项）：第八个视图，排沉淀之后。
+  schedules: 'schedules.navTitle',
 } as const satisfies Record<ViewName, WebTextId>
 
 /**

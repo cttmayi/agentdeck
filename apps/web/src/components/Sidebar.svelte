@@ -46,6 +46,8 @@
     // ★ D80 三轮第七项：沉淀（排工具之下——使用者在导航列点名的位置）。
     //   沉淀的整个过程在此页进行（左栏列表切沉淀任务，右栏流程页）。
     { id: 'crystallize', title: 'crystallize.navTitle', hint: 'crystallize.navHint' },
+    // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器，排沉淀之下。
+    { id: 'schedules', title: 'schedules.navTitle', hint: 'schedules.navHint' },
   ]
 
   /**

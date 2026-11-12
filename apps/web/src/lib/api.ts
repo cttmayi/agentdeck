@@ -986,3 +986,50 @@ export interface WorkDirListing {
    */
   exists?: boolean
 }
+
+// ─────────────────────────────────────────────────────────────
+// 定时任务（2026-11，使用者立项）
+// ─────────────────────────────────────────────────────────────
+
+export type ScheduleExecutorType = 'agent' | 'group'
+
+export interface ScheduleView {
+  id: string
+  workspaceId: string
+  name: string
+  enabled: boolean
+  /** cron 表达式（croner 语法）。界面用表单生成，高级模式直接填。 */
+  cron: string
+  /** daemon 算好的人话调度描述（cron 是内部表示，列表不裸显它）。 */
+  humanCron: string
+  /** 下次触发时刻（停用时为 null）。 */
+  nextRunAt: number | null
+  executorType: ScheduleExecutorType
+  executorId: string
+  taskText: string
+  createdAt: number
+  updatedAt: number
+  triggerCount: number
+  lastRunId: string | null
+  lastTriggerAt: number | null
+  /** 触发记录（最近 N 条，新的在前；列表返回就带着，详情页直接读）。 */
+  records: ScheduleRecordView[]
+}
+
+export type ScheduleRecordStatus = 'triggered' | 'skipped' | 'failed'
+
+export interface ScheduleRecordView {
+  triggeredAt: number
+  runId: string | null
+  issueId: string | null
+  status: ScheduleRecordStatus
+  note: string | null
+}
+
+export interface ScheduleCreateInput {
+  name: string
+  cron: string
+  executorType: ScheduleExecutorType
+  executorId: string
+  taskText: string
+}

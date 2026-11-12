@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { Cron } from 'croner'
 import type { AddressInfo } from 'node:net'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
@@ -52,6 +53,8 @@ import {
   ulid,
   type ActionRefType,
   type Agent,
+  type AgentId,
+  type AgentGroupId,
   type InboxItem,
   type Issue,
   type IssueId,
@@ -79,6 +82,19 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
 import { readAgentDraftArtifacts, parseAgentDraft } from './agent-maker.ts'
+import {
+  describeCron,
+  loadSchedules,
+  MAX_RECORDS,
+  nextRunAt,
+  renderScheduleTask,
+  saveSchedules,
+  scheduleVarsFor,
+  splitScheduleRequest,
+  validateCron,
+  type Schedule,
+  type ScheduleRecord,
+} from './schedules.ts'
 import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
@@ -2256,6 +2272,39 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
     skillsRoot,
     skillsMineRoot,
   })
+
+  // ══════════════════════════════════════════════════════════════════
+  // 定时任务（2026-11，使用者立项）
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // 到点的任务生成器：调度在 daemon 内建（croner 注册的 job），触发时
+  // 渲染模板 → 建 issue → 提交执行 run（`submitRunRequest`，组展开/校验/起进程
+  // 全部复用）→ 记一条触发记录。触发的 run 是**普通任务**，在任务页看。
+  //
+  // 存储是独立 JSON（`<dataDir>/schedules.json`），不进 domain store——判据
+  // 写在 `schedules.ts` 顶部。内存数组是唯一权威（routes 与 fire 都改它，
+  // 每次变更落盘一次）。
+  const schedules: Schedule[] = await loadSchedules(options.dataDir)
+  /** 已注册的 croner job（按 schedule id）；启停/更新/删除时同步。 */
+  const scheduleJobs = new Map<string, Cron>()
+  // fire 定义在后面（需要 submitRunRequest）；这里先声明占位，避免"注册时
+  // 还没定义"的时序问题——函数声明提升本来就能覆盖，但写成显式更清楚。
+  let fireScheduleRef: ((s: Schedule) => Promise<void>) | undefined
+
+  /** 让某个 schedule 的 croner job 与它当前状态一致（新建/启停/更新后调用）。 */
+  function syncScheduleJob(s: Schedule): void {
+    const existing = scheduleJobs.get(s.id)
+    if (existing) {
+      existing.stop()
+      scheduleJobs.delete(s.id)
+    }
+    if (!s.enabled) return
+    // ⚠️ `protect: true`：上次触发还没跑完就不并发触发下一条——定时任务是
+    //    无人值守的，两条同时跑会烧双份额度而且互相踩工作目录。
+    const job = new Cron(s.cron, { protect: true }, () => void (fireScheduleRef?.(s) ?? Promise.resolve()))
+    scheduleJobs.set(s.id, job)
+  }
+  for (const s of schedules) syncScheduleJob(s)
 
   // ★ runtime 的选择从"写死 claude"变成"查装配表"（FR-CLI-47）。
   //   表里有几个 runtime，这里就能跑几个——本文件不再认识任何具体 CLI。
@@ -6430,6 +6479,179 @@ async function injectedSkillsOf(
       return
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── 定时任务（2026-11，使用者立项）──
+    // ══════════════════════════════════════════════════════════════
+    //
+    // 到点的任务生成器。触发记录在详情里给；列表只给视图（含下次触发时间与
+    // 人话调度描述——cron 是内部表示，界面不裸显它，除非是高级模式手填的）。
+    const scheduleView = (s: Schedule): Record<string, unknown> => ({
+      ...s,
+      humanCron: describeCron(s.cron),
+      nextRunAt: s.enabled ? nextRunAt(s.cron) : null,
+    })
+
+    if (req.method === 'GET' && path === '/api/schedules') {
+      sendJson(res, 200, { items: schedules.map(scheduleView) })
+      return
+    }
+    const scheduleDetail = /^\/api\/schedules\/([^/]+)$/.exec(path)
+    if (req.method === 'GET' && scheduleDetail) {
+      const s = schedules.find((x) => x.id === scheduleDetail[1])
+      if (!s) {
+        sendJson(res, 404, { error: '定时任务不存在', code: 'schedule_not_found' })
+        return
+      }
+      sendJson(res, 200, { schedule: scheduleView(s), records: s.records })
+      return
+    }
+    if (req.method === 'POST' && path === '/api/schedules') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const name = typeof body.name === 'string' ? body.name.trim() : ''
+      if (name === '') {
+        sendJson(res, 400, { error: '名字必填', code: 'schedule_name_missing' })
+        return
+      }
+      const cron = typeof body.cron === 'string' ? body.cron.trim() : ''
+      const cronError = validateCron(cron)
+      if (cronError) {
+        sendJson(res, 400, { error: cronError, code: 'schedule_cron_invalid' })
+        return
+      }
+      const taskText = typeof body.taskText === 'string' ? body.taskText.trim() : ''
+      if (taskText === '') {
+        sendJson(res, 400, { error: '要做什么必填', code: 'schedule_task_missing' })
+        return
+      }
+      const executorType = body.executorType === 'agent' || body.executorType === 'group' ? body.executorType : null
+      if (!executorType) {
+        sendJson(res, 400, { error: '执行者类型必须是 agent 或 group', code: 'schedule_executor_type_invalid' })
+        return
+      }
+      const executorId = typeof body.executorId === 'string' ? body.executorId : ''
+      if (executorId === '') {
+        sendJson(res, 400, { error: '执行者必填', code: 'schedule_executor_missing' })
+        return
+      }
+      // 创建时校验存在性（防手滑）；之后被删了由 fire 记 failed，不拦
+      if (executorType === 'agent' && !(await store.getAgent(executorId as AgentId))) {
+        sendJson(res, 400, { error: '执行智能体不存在', code: 'schedule_agent_not_found' })
+        return
+      }
+      if (executorType === 'group' && !(await store.getGroup(executorId as AgentGroupId))) {
+        sendJson(res, 400, { error: '智能体组不存在', code: 'schedule_group_not_found' })
+        return
+      }
+      const now = Date.now()
+      const schedule: Schedule = {
+        id: ulid(),
+        workspaceId,
+        name,
+        enabled: true,
+        cron,
+        executorType,
+        executorId,
+        taskText,
+        createdAt: now,
+        updatedAt: now,
+        triggerCount: 0,
+        lastRunId: null,
+        lastTriggerAt: null,
+        records: [],
+      }
+      schedules.push(schedule)
+      syncScheduleJob(schedule)
+      await saveSchedules(options.dataDir, schedules)
+      sendJson(res, 201, scheduleView(schedule))
+      return
+    }
+    if (req.method === 'PATCH' && scheduleDetail) {
+      const s = schedules.find((x) => x.id === scheduleDetail[1])
+      if (!s) {
+        sendJson(res, 404, { error: '定时任务不存在', code: 'schedule_not_found' })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      // 字段在不在 = 改不改（与 allowedActions 同一套三态纪律：省略不动）
+      if (body.name !== undefined) {
+        const name = typeof body.name === 'string' ? body.name.trim() : ''
+        if (name === '') {
+          sendJson(res, 400, { error: '名字不能为空', code: 'schedule_name_missing' })
+          return
+        }
+        s.name = name
+      }
+      if (body.cron !== undefined) {
+        const cron = typeof body.cron === 'string' ? body.cron.trim() : ''
+        const cronError = validateCron(cron)
+        if (cronError) {
+          sendJson(res, 400, { error: cronError, code: 'schedule_cron_invalid' })
+          return
+        }
+        s.cron = cron
+      }
+      if (body.taskText !== undefined) {
+        const taskText = typeof body.taskText === 'string' ? body.taskText.trim() : ''
+        if (taskText === '') {
+          sendJson(res, 400, { error: '要做什么不能为空', code: 'schedule_task_missing' })
+          return
+        }
+        s.taskText = taskText
+      }
+      if (body.executorType !== undefined || body.executorId !== undefined) {
+        const executorType = body.executorType === 'group' || body.executorType === 'agent' ? body.executorType : s.executorType
+        const executorId = typeof body.executorId === 'string' && body.executorId !== '' ? body.executorId : s.executorId
+        if (executorType === 'agent' && !(await store.getAgent(executorId as AgentId))) {
+          sendJson(res, 400, { error: '执行智能体不存在', code: 'schedule_agent_not_found' })
+          return
+        }
+        if (executorType === 'group' && !(await store.getGroup(executorId as AgentGroupId))) {
+          sendJson(res, 400, { error: '智能体组不存在', code: 'schedule_group_not_found' })
+          return
+        }
+        s.executorType = executorType
+        s.executorId = executorId
+      }
+      if (body.enabled !== undefined) {
+        s.enabled = body.enabled === true
+      }
+      s.updatedAt = Date.now()
+      syncScheduleJob(s)
+      await saveSchedules(options.dataDir, schedules)
+      sendJson(res, 200, scheduleView(s))
+      return
+    }
+    if (req.method === 'DELETE' && scheduleDetail) {
+      const idx = schedules.findIndex((x) => x.id === scheduleDetail[1])
+      if (idx === -1) {
+        sendJson(res, 404, { error: '定时任务不存在', code: 'schedule_not_found' })
+        return
+      }
+      const removed = schedules[idx]!
+      const job = scheduleJobs.get(removed.id)
+      if (job) {
+        job.stop()
+        scheduleJobs.delete(removed.id)
+      }
+      schedules.splice(idx, 1)
+      await saveSchedules(options.dataDir, schedules)
+      sendJson(res, 200, { ok: true })
+      return
+    }
+    // 手动触发一次（"立即跑一次"）——与到点触发**同一条 fire**（同一次记录、
+    // 同一个 count）。测试也靠它驱动 fire（croner job 的到点触发没法在测试里等）。
+    const scheduleTrigger = /^\/api\/schedules\/([^/]+)\/trigger$/.exec(path)
+    if (req.method === 'POST' && scheduleTrigger) {
+      const s = schedules.find((x) => x.id === scheduleTrigger[1])
+      if (!s) {
+        sendJson(res, 404, { error: '定时任务不存在', code: 'schedule_not_found' })
+        return
+      }
+      await fireSchedule(s)
+      sendJson(res, 200, { ok: true, records: s.records })
+      return
+    }
+
     // ── 通知中心（FR-ISSUE-07/08）──
     if (req.method === 'GET' && path === '/api/inbox') {
       const unreadOnly = url.searchParams.get('all') !== '1'
@@ -9873,6 +10095,168 @@ async function injectedSkillsOf(
   }
 
   /**
+   * ══════════════════════════════════════════════════════════════════
+   * 定时任务的触发链（2026-11）
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * 到点要做的事，与「新建任务」页面提交的那次**同构**（判据见 NewTaskForm）：
+   *   渲染模板 → 建 issue（第一行当标题）→ `submitRunRequest`（组展开/校验/起进程
+   *   全部复用，**一个覆盖字段都不带**——省略 = 跟随组/执行者的长期配置）。
+   *
+   * 与手动提交的差别只有三处：
+   *   ① 任务文本是模板（触发时算好 {{date}} 等变量再渲染）；
+   *   ② 无人值守：上次触发还在跑 ⇒ **跳过本次**（protect 是保险丝，这里是
+   *      明确行为——跳过要留痕，所以记 `skipped` 记录而不是什么都不说）；
+   *   ③ 每次触发写一条记录（时间 / issue / runId / 状态），供定时任务页索引，
+   *      点开跳任务页那次 run。
+   *
+   * ⚠️ 失败不留尾巴：建 issue 成功但提交 run 失败（组/执行者被删、组形态被改坏）
+   *   也要把 issue 留着（使用者能在任务页看到"它到点建了个任务但没跑起来"，
+   *   比"连 issue 都没有"好——那会让人以为它根本没到点）。状态记 `failed`。
+   */
+  async function fireSchedule(s: Schedule): Promise<void> {
+    const now = Date.now()
+
+    // ── 上次触发还在跑 → 跳过（无人值守下的明确行为，留痕）──
+    if (s.lastRunId) {
+      const last = await store.getRun(s.lastRunId)
+      if (last && !TERMINAL_RUN_STATUSES.includes(last.status)) {
+        pushScheduleRecord(s, {
+          triggeredAt: now,
+          runId: null,
+          issueId: null,
+          status: 'skipped',
+          note: '上次触发仍在进行，本次跳过',
+        })
+        s.updatedAt = now
+        await saveSchedules(options.dataDir, schedules)
+        return
+      }
+    }
+
+    const runId = ulid() as RunId
+    const prompt = renderScheduleTask(
+      s.taskText,
+      scheduleVarsFor(now, s.triggerCount + 1, runId, s.lastRunId),
+    )
+    const { title, body } = splitScheduleRequest(prompt)
+
+    try {
+      // ── 执行者：组 → 组的执行者；单个智能体 → 它自己 ──
+      let agentRef: SubmitRunRequest['agentRef']
+      let groupId: string | undefined
+      if (s.executorType === 'group') {
+        const group = await store.getGroup(s.executorId as AgentGroupId)
+        if (!group) {
+          pushScheduleRecord(s, {
+            triggeredAt: now, runId: null, issueId: null, status: 'failed',
+            note: '智能体组不存在或已被删除',
+          })
+          s.updatedAt = now
+          await saveSchedules(options.dataDir, schedules)
+          return
+        }
+        const members = await store.listAgents(group.workspaceId)
+        const shape = checkGroupShape(group, members.filter((a) => group.members.includes(a.id as AgentGroup['members'][number])))
+        if (!shape.ok) {
+          pushScheduleRecord(s, {
+            triggeredAt: now, runId: null, issueId: null, status: 'failed',
+            note: `智能体组形态不合法：${shape.issues.join('；')}`,
+          })
+          s.updatedAt = now
+          await saveSchedules(options.dataDir, schedules)
+          return
+        }
+        agentRef = {
+          id: shape.executor.id,
+          name: shape.executor.name,
+          instructions: shape.executor.instructions,
+        }
+        groupId = group.id
+      } else {
+        const agent = await store.getAgent(s.executorId as AgentId)
+        if (!agent) {
+          pushScheduleRecord(s, {
+            triggeredAt: now, runId: null, issueId: null, status: 'failed',
+            note: '执行智能体不存在或已被删除',
+          })
+          s.updatedAt = now
+          await saveSchedules(options.dataDir, schedules)
+          return
+        }
+        agentRef = { id: agent.id, name: agent.name, instructions: agent.instructions }
+      }
+
+      // ── 建 issue（第一行当标题；模板渲染后为空标题时用任务名兜底）──
+      const issue: Issue = {
+        id: ulid() as Issue['id'],
+        workspaceId,
+        title: title || s.name,
+        description: body,
+        status: 'todo',
+        priority: 'none',
+        assignee: { type: 'agent', id: agentRef.id },
+        labels: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      await store.insertIssue(issue)
+
+      // ── 提交执行 run（组展开/校验/起进程全部由 submitRunRequest 完成）──
+      const out = await submitRunRequest({
+        runId,
+        kind: 'execute',
+        agentRef,
+        subject: { type: 'issue', id: issue.id },
+        // 全文进 prompt（不切）——与「新建任务」同一句判据
+        prompt,
+        ...(groupId ? { groupId } : {}),
+        limits: { maxTurns: null, timeoutMs: null },
+      })
+      const accepted = out.status >= 200 && out.status < 300
+      pushScheduleRecord(s, {
+        triggeredAt: now,
+        runId: accepted ? runId : null,
+        issueId: issue.id,
+        status: accepted ? 'triggered' : 'failed',
+        note: accepted
+          ? null
+          : `提交失败（${out.status}）：${extractSubmitError(out.body)}`,
+      })
+      s.triggerCount += 1
+      if (accepted) s.lastRunId = runId
+      s.lastTriggerAt = now
+      s.updatedAt = now
+      await saveSchedules(options.dataDir, schedules)
+    } catch (err) {
+      pushScheduleRecord(s, {
+        triggeredAt: now,
+        runId: null,
+        issueId: null,
+        status: 'failed',
+        note: String(err instanceof Error ? err.message : err),
+      })
+      s.updatedAt = now
+      await saveSchedules(options.dataDir, schedules)
+    }
+  }
+  fireScheduleRef = fireSchedule
+
+  /** 往 schedule 的触发记录头部插一条（截断到 MAX_RECORDS）。 */
+  function pushScheduleRecord(s: Schedule, record: ScheduleRecord): void {
+    s.records = [record, ...(s.records ?? [])].slice(0, MAX_RECORDS)
+  }
+
+  /** 从 submitRunRequest 的响应体里抠出错误文案（记录给使用者看）。 */
+  function extractSubmitError(body: unknown): string {
+    if (body && typeof body === 'object') {
+      const error = (body as { error?: unknown }).error
+      if (typeof error === 'string') return error.slice(0, 200)
+    }
+    return String(body)
+  }
+
+  /**
    * 等到这条 run 到终态（最多 `waitSec` 秒），然后**重新读一遍库**。
    *
    * 为什么不是只靠订阅：`wait` 的语义是"我最多等这么久"，而不是"我一定等到底"。
@@ -10956,6 +11340,10 @@ async function injectedSkillsOf(
     skillsMineRoot,
     asrRoot: voiceRoot,
     async close() {
+      // 先停定时任务的 croner job：它们的内部 interval 挂着会让进程退出等
+      // 不到"所有定时器清空"（node:test 会报 Promise pending、CLI 停止会卡住）。
+      for (const job of scheduleJobs.values()) job.stop()
+      scheduleJobs.clear()
       // 先断开所有连接：`server.close()` 会等现有连接自然结束，而页面的
       // keep-alive 与 SSE 长连接可能挂很久——那会让"停止 daemon"看起来卡住。
       server.closeAllConnections()

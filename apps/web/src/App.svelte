@@ -13,6 +13,7 @@
   import Skills from './views/Skills.svelte'
   import Tools from './views/Tools.svelte'
   import Crystallize from './views/Crystallize.svelte'
+  import Schedules from './views/Schedules.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
@@ -128,6 +129,10 @@
       <!-- ★ D80 三轮：沉淀页（导航列工具之下）——沉淀的整个过程在此页进行，
            左栏 = 沉淀任务列表，右栏 = 流程页 / 空态。 -->
       <Crystallize />
+    {:else if $view === 'schedules'}
+      <!-- ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
+           左栏 = 定时任务列表，右栏 = 新建表单 / 详情（含触发记录）。 -->
+      <Schedules />
     {:else}
       <!-- ★ D40：最后一项。`$view` 的取值来自 `VIEWS`，每一支都写明了是哪个；
            最后这个 `{:else}` 不再兼作别的视图（写死成"剩下的都是 Skills"

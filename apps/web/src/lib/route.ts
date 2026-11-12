@@ -34,6 +34,8 @@ export const VIEWS = [
   'skills',
   'tools',
   'crystallize',
+  // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器，排沉淀之后。
+  'schedules',
 ] as const
 export type ViewName = (typeof VIEWS)[number]
 

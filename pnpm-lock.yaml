@@ -53,6 +53,9 @@ importers:
       '@agentdeck/web':
         specifier: workspace:*
         version: link:../web
+      croner:
+        specifier: 11.0.0
+        version: 11.0.0
       decibri:
         specifier: ^5.8.0
         version: 5.8.0
@@ -800,6 +803,10 @@ packages:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
 
+  croner@11.0.0:
+    resolution: {integrity: sha512-T17ADjdttrVToyzLpLq9Xb9xzcMwpQ/M3Qs9szhh0MVNTbv6NWQ9OFYa2qlzPYXFMn+uoDlnW1IpIv6cAvFtyA==}
+    engines: {node: '>=18.0'}
+
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
     engines: {node: '>=6.0'}
@@ -812,7 +819,6 @@ packages:
   decibri@5.8.0:
     resolution: {integrity: sha512-mAIFQ0jMmGj4UqF56UDHtX53PvUMpEE4odTUfhvR8ejG2VvohiSPc4hSk83IUNRxj1unrEuSeF0G6RPtaegR6Q==}
     engines: {node: '>=18.0.0'}
-    cpu: [x64, arm64]
     os: [win32, darwin, linux]
 
   deepmerge@4.3.1:
@@ -1392,6 +1398,8 @@ snapshots:
       readdirp: 4.1.2
 
   clsx@2.1.1: {}
+
+  croner@11.0.0: {}
 
   debug@4.4.3:
     dependencies:

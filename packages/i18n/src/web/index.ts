@@ -10,6 +10,7 @@ import { groupsText } from './groups.ts'
 import { installText } from './install.ts'
 import { newtaskText } from './newtask.ts'
 import { runsText } from './runs.ts'
+import { schedulesText } from './schedules.ts'
 import { settingsText } from './settings.ts'
 import { shellText } from './shell.ts'
 import { skillsText } from './skills.ts'
@@ -51,6 +52,8 @@ export const webText = {
   ...groupsText,
   ...skillsText,
   ...installText,
+  // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
+  ...schedulesText,
   ...settingsText,
   ...templatesText,
   ...newtaskText,
@@ -63,3 +66,4 @@ export const webText = {
 } as const satisfies TextCatalog
 
 export type WebTextId = keyof typeof webText
+
