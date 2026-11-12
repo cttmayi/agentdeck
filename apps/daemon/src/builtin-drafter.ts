@@ -105,8 +105,19 @@ export function findBuiltinAgent(
   return agents.find((a) => builtinKindOf(a) === kind)
 }
 
-/** 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin` + `role`）。 */
-export const DRAFTER_NAME = '起草者（内置）'
+/**
+ * 内置起草者的默认名字（使用者可改，改名不影响它是不是内置——认的是 `builtin` + `role`）。
+ *
+ * ★ 2026-11（使用者："内置智能体的名字'起草者'是不是应该改名为'沉淀起草者'，
+ *   不然很容易误解"）：改成「沉淀起草者（内置）」——它干的是**沉淀这条链**的
+ *   起草（把素材写成 skill），光叫"起草者"容易被当成"随便什么起草"（比如生成者
+ *   也在起草岗位卡）。`ensure` 会把名字仍是旧默认值的老工作区同步过来
+ *   （判据"逐字等于旧默认"：使用者改过的名字不动）。
+ */
+export const DRAFTER_NAME = '沉淀起草者（内置）'
+
+/** 改名前的旧默认值（迁移判据，见 `ensureBuiltinDrafter`）。 */
+export const DRAFTER_NAME_LEGACY = '起草者（内置）'
 
 /**
  * 默认指令。
@@ -171,7 +182,7 @@ export const DRAFTER_NAME = '起草者（内置）'
  * 一处。
  */
 export const DRAFTER_INSTRUCTIONS_BODY =
-  '你是平台内置的起草者：**照着你被注入的那份技能**把素材写成一条可复用的 skill。' +
+  '你是平台内置的沉淀起草者：**照着你被注入的那份技能**把素材写成一条可复用的 skill。' +
   '素材不足以支撑时如实说，不要硬凑。'
 export const DRAFTER_INSTRUCTIONS = withConduct(DRAFTER_INSTRUCTIONS_BODY)
 
@@ -253,7 +264,9 @@ export const AGENT_MAKER_INSTRUCTIONS_BODY = [
   '   `## 输出格式` / `## 验收标准` 各节；',
   '2. 判定**配套技能**（哪些做法值得抽成技能：高频 / 同格式 / 跨任务可复用）：',
   '   每条写一份 `agent-draft/skill/<slug>/SKILL.md`（frontmatter `name` + `description`，',
-  '   正文有 `## When to Use` 与 `## Procedure` 两节）；**没有就 0 条**，不要硬凑；',
+  '   正文三节：`## When to Use` / `## Procedure` / `## When NOT to Use`（失败模式：',
+  '   什么时候**不该**用——输入不符、缺前提、超出岗位职责，遇到要停下而不是硬套）；',
+  '   **没有就 0 条**，不要硬凑；',
   '3. 在对话里告诉用户：岗位卡已写入 `agent-draft/agent-draft.md`，确认前尤其要审',
   '   「边界」栏，想改随时说，不想改就点「确认生成智能体」。',
   '',
@@ -744,7 +757,7 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
   // ★ 2026-11（D111）：恢复默认写的是**组装前**正文（存进 instructions.md 的
   //    就是它；运行时组装见 `effectiveInstructions`）。
   if (kind === 'drafter') {
-    return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS_BODY, label: '平台内置的起草者（沉淀这条链的作者）' }
+    return { name: DRAFTER_NAME, instructions: DRAFTER_INSTRUCTIONS_BODY, label: '平台内置的沉淀起草者（沉淀这条链的作者）' }
   }
   if (kind === 'memory-tidy') {
     return {
@@ -1155,6 +1168,14 @@ export async function ensureBuiltinDrafter(
     // 指令被清空 ⇒ 起草 run 拿到的身份是空的，产出会变成"随便写写"。补回默认。
     await store.insertAgent({ ...found, instructions: DRAFTER_INSTRUCTIONS_BODY, updatedAt: Date.now() })
     return { action: 'healed', agentId: found.id as string, why: '指令被清空了' }
+  }
+  // ★ 2026-11（使用者："名字'起草者'是不是应该改名为'沉淀起草者'"）：老工作区里
+  //    名字还是旧默认「起草者（内置）」的同步成「沉淀起草者（内置）」。判据是
+  //    "逐字等于旧默认值"——使用者**改过的名字**（自定义）不动（内置智能体的名字
+  //    可改，认的是 `builtin` + `role`，不靠名字认身份）。
+  if (found.name === DRAFTER_NAME_LEGACY) {
+    await store.insertAgent({ ...found, name: DRAFTER_NAME, updatedAt: Date.now() })
+    return { action: 'healed', agentId: found.id as string, why: '内置名字还是旧默认（起草者 → 沉淀起草者）' }
   }
   // ══════════════════════════════════════════════════════════════════
   // ★ 分批第 31 批：**平台改了默认指令，老工作区要跟上来**

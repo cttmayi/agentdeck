@@ -23,6 +23,7 @@ import {
   DRAFTER_INSTRUCTIONS_BODY,
   DRAFTER_INSTRUCTIONS_V1,
   DRAFTER_NAME,
+  DRAFTER_NAME_LEGACY,
   ensureBuiltinAgents,
   ensureBuiltinDrafter,
   ensureBuiltinMemoryTidy,
@@ -111,6 +112,26 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(result.action, 'left-alone')
     const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     assert.equal(after.instructions, '我们团队的规范：每条 skill 都要带一个检查清单。')
+  })
+
+  test('★★★ 2026-11（改名）：名字还是旧默认「起草者（内置）」⇒ 同步成「沉淀起草者（内置）」', async () => {
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    await store.insertAgent({ ...mine, name: DRAFTER_NAME_LEGACY })
+
+    const result = await ensureBuiltinDrafter(store, WS)
+    assert.equal(result.action, 'healed', '旧默认名字必须被认出来并同步')
+    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    assert.equal(after.name, DRAFTER_NAME, '同步后必须等于新默认名')
+  })
+
+  test('★★★ 2026-11（改名）：使用者改过的名字必须活过对账（判据是"旧默认"，不是"与默认不同"）', async () => {
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    await store.insertAgent({ ...mine, name: '我改的起草者' })
+
+    const result = await ensureBuiltinDrafter(store, WS)
+    assert.equal(result.action, 'left-alone')
+    const after = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
+    assert.equal(after.name, '我改的起草者', '使用者改过的名字不许被覆盖')
   })
 
   test('指令被清空 ⇒ 自愈回默认（那是"损坏"，起草 run 否则会拿到空身份）', async () => {

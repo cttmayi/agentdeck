@@ -31,4 +31,4 @@ description: 判断哪些做法值得抽成配套技能（高频 / 同格式 / �
 
 ### 写法
 
-每条配套技能：`skill/<slug>/SKILL.md`，frontmatter `name` + `description`，正文有 `## When to Use` 与 `## Procedure` 两节。描述写"这个岗位为什么需要它"，不写"它怎么用"（那是正文的事）。
+每条配套技能：`skill/<slug>/SKILL.md`，frontmatter `name` + `description`，正文三节：`## When to Use` / `## Procedure` / `## When NOT to Use`（失败模式：什么时候**不该**用——输入不符、缺前提、超出岗位职责，遇到要停下而不是硬套；2026-11 定稿：技能不只写顺利路径）。描述写"这个岗位为什么需要它"，不写"它怎么用"（那是正文的事）。
