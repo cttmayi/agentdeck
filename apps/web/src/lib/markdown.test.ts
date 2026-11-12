@@ -237,8 +237,13 @@ describe('escapeHtml', () => {
  * 不然"开了却还是转义"也是另一种骗人。
  */
 describe('★ Markdown 里 HTML 的三档', () => {
-  test('★ 默认（off）：`<br>` 仍显示成文字（安全底线不动）', () => {
+  test('★ 默认档 = 白名单（2026-11 使用者定）：`<br>` 默认就生效', () => {
     const html = renderMarkdown('第一行<br>第二行')
+    assert.match(html, /<p>第一行<br>第二行<\/p>/, `默认档 <br> 要真的换行：${html}`)
+  })
+
+  test('★ 显式 off：`<br>` 仍显示成文字（安全底线不动）', () => {
+    const html = renderMarkdown('第一行<br>第二行', { html: 'off' })
     assert.equal(html.includes('<br>'), false, 'off 档页面里不该出现 <br>')
     assert.match(html, /&lt;br&gt;/)
   })

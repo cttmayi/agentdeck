@@ -56,7 +56,8 @@ export interface MarkdownOptions {
    * 表示这个地址不该被渲染成链接/图片（会退化成纯文本）。
    */
   resolveAsset?: (href: string) => string | null
-  /** HTML 处理档位，默认 `off`（原始 HTML 一律转义成文字）。 */
+  /** HTML 处理档位，默认 `allowlist`（2026-11 使用者："默认改成白名单"——白名单档
+   * 危险 HTML 仍全转义，安全底线不变，所以可以默认开）。 */
   html?: MarkdownHtmlMode
 }
 
@@ -211,6 +212,10 @@ function renderInline(text: string, options: MarkdownOptions): string {
 const FENCE = /^\s*```(\w*)\s*$/
 
 export function renderMarkdown(source: string, options: MarkdownOptions = {}): string {
+  // ★ 默认档 = 白名单（2026-11 使用者："默认改成白名单"）。白名单档页面里
+  //   仍不出现来自输入的真 HTML，所以默认开不碰安全底线；显式传 `off` 才
+  //   回到"一律转义成文字"。
+  options = { ...options, html: options.html ?? 'allowlist' }
   const lines = source.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
 
