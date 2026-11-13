@@ -281,13 +281,46 @@ describe('定时任务整链（建 → 触发 → run → 记录）', () => {
       assert.equal(sched.resumeMode, 'resume')
 
       // resume 模式触发两次都成功（第二次续上次，走 fireSchedule 的 resumeFromRunId 分支）
+      const runIds: string[] = []
       for (let i = 0; i < 2; i++) {
         const t = await postJson(`/api/schedules/${sched.id}/trigger`, {})
         assert.equal(t.status, 200, `第 ${i + 1} 次触发失败：${JSON.stringify(t.body)}`)
         const record = (t.body as { records: Array<{ runId: string | null; status: string }> }).records[0]
         assert.ok(record && record.runId, `第 ${i + 1} 次要产生 run：${JSON.stringify(t.body)}`)
+        runIds.push(record.runId)
         await waitForTerminal(record.runId)
       }
+      // ★ 两次 run 的工作目录必须相同（resume 续的是"上一次的那间屋子"；显式
+      //   目录本来就不变——这条断言钉住"没设目录时自动分配会给新 issue 换目录"
+      //   那个坑，fireSchedule 现在把上次 run 的 workDir 显式传下去）
+      const wd1 = (await json(`/api/runs/${runIds[0]}`)).body as { workDir: string }
+      const wd2 = (await json(`/api/runs/${runIds[1]}`)).body as { workDir: string }
+      assert.equal(wd1.workDir, wd)
+      assert.equal(wd2.workDir, wd, `resume 模式第二次触发不能换目录：${wd2.workDir} vs ${wd1.workDir}`)
+
+      // ★ 不设目录 + resume：自动分配的目录也要在两次触发之间**延续**（同一间屋子）
+      const created2 = await postJson('/api/schedules', {
+        name: '续跑无目录',
+        cron: '0 9 * * 2',
+        executorType: 'agent',
+        executorId: executorAgentId,
+        taskText: '继续上次',
+        resumeMode: 'resume',
+      })
+      assert.equal(created2.status, 201)
+      const sched2 = created2.body as { id: string }
+      const runIds2: string[] = []
+      for (let i = 0; i < 2; i++) {
+        const t = await postJson(`/api/schedules/${sched2.id}/trigger`, {})
+        const record = (t.body as { records: Array<{ runId: string | null }> }).records[0]
+        assert.ok(record && record.runId, `无目录第 ${i + 1} 次触发失败：${JSON.stringify(t.body)}`)
+        runIds2.push(record.runId)
+        await waitForTerminal(record.runId)
+      }
+      const aw1 = (await json(`/api/runs/${runIds2[0]}`)).body as { workDir: string | null }
+      const aw2 = (await json(`/api/runs/${runIds2[1]}`)).body as { workDir: string | null }
+      assert.ok(aw1.workDir, '第一次触发要有自动分配目录')
+      assert.equal(aw2.workDir, aw1.workDir, `resume 无目录也必须延续上次目录：${aw2.workDir} vs ${aw1.workDir}`)
 
       // PATCH：改回 fresh + 清空目录（三态：省略不动）
       const patched = await patchJson(`/api/schedules/${sched.id}`, {
