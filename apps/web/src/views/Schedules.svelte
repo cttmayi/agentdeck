@@ -7,6 +7,7 @@
     type ScheduleCreateInput,
     type SchedulePreview,
     type ScheduleRecordView,
+    type ScheduleResumeMode,
     type ScheduleView,
   } from '../lib/api.ts'
   import { t, tx } from '../lib/i18n.ts'
@@ -22,6 +23,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   import { askConfirm } from '../lib/confirm.ts'
   import { relativeTime } from '../lib/time.ts'
   import { listGrip } from '../lib/list-grip.ts'
+  import DirPicker from '../components/DirPicker.svelte'
   import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
   import {
     defaultScheduleForm,
@@ -72,6 +74,10 @@ import type { WebTextId } from '@agentdeck/i18n'
   let formGroupId = ''
   let formError = ''
   let busy = false
+  // 2026-11：工作目录（可选，与「新建任务」同款控件）+ 触发方式（fresh/resume）
+  let formWorkDir = ''
+  let formResume: ScheduleResumeMode = 'fresh'
+  let dirPickerOpen = false
   // 结果区「下次」行：daemon 用 croner 算（debounce），表单任何调度变化都重算
   let previewNext: number | null = null
   let previewError = ''
@@ -156,6 +162,8 @@ import type { WebTextId } from '@agentdeck/i18n'
     formSource = 'agent'
     formGroupId = ''
     formAgentId = $effectiveDefaultAgentId ?? executorAgents[0]?.id ?? ''
+    formWorkDir = ''
+    formResume = 'fresh'
     formError = ''
     selectedId = null
   }
@@ -172,6 +180,8 @@ import type { WebTextId } from '@agentdeck/i18n'
     } else {
       formAgentId = s.executorId
     }
+    formWorkDir = s.workDir ?? ''
+    formResume = s.resumeMode
     formError = ''
   }
 
@@ -204,6 +214,9 @@ import type { WebTextId } from '@agentdeck/i18n'
       return
     }
     const executorId = formSource === 'group' ? formGroupId : formAgentId
+    // 2026-11：工作目录留空 = null（daemon 自动分配）；触发方式 fresh/resume
+    const workDir = formWorkDir.trim() === '' ? null : formWorkDir.trim()
+    const resumeMode: ScheduleResumeMode = formResume
     busy = true
     try {
       if (formMode === 'edit' && editingId) {
@@ -215,6 +228,8 @@ import type { WebTextId } from '@agentdeck/i18n'
             taskText: formTaskText.trim(),
             executorType: formSource,
             executorId,
+            workDir,
+            resumeMode,
           }),
         })
         showToast(tx('schedules.updatedToast'))
@@ -225,6 +240,8 @@ import type { WebTextId } from '@agentdeck/i18n'
           executorType: formSource,
           executorId,
           taskText: formTaskText.trim(),
+          workDir,
+          resumeMode,
         }
         const created = await api<ScheduleView>('/api/schedules', {
           method: 'POST',
@@ -674,6 +691,60 @@ import type { WebTextId } from '@agentdeck/i18n'
             {/if}
           </div>
 
+          <!-- 启动方式（2026-11 使用者要求：设定新启动 Agent 还是 resume 一个原来的
+               Agent）：fresh 每次新起一个会话；resume 触发时续上**上一次触发**的会话
+               （FR-CLI-06，第一次触发没有上次可续，自动按新起走）。同一套
+               source-toggle 轨道，与「交给谁」、任务表单同款。 -->
+          <div class="field">
+            <label>{$t('schedules.resumeLabel')}</label>
+            <div class="source-toggle">
+              <button
+                type="button"
+                class:active={formResume === 'fresh'}
+                onclick={() => (formResume = 'fresh')}
+              >
+                {$t('schedules.resumeFresh')}
+              </button>
+              <button
+                type="button"
+                class:active={formResume === 'resume'}
+                onclick={() => (formResume = 'resume')}
+              >
+                {$t('schedules.resumeLast')}
+              </button>
+            </div>
+          </div>
+
+          <!-- 高级：工作目录。与「新建任务」同一个控件（DirPicker）、同一句判据
+               （默认不需要填，留空 = daemon 自动分配）。 -->
+          <details class="form-advanced">
+            <summary class="hint" style="cursor:pointer">{$t('newtask.advancedSummary')}</summary>
+            <label for="sched-workdir" style="margin-top:var(--sp-3)">
+              {$t('newtask.workDirLabel')}
+            </label>
+            <div class="workdir-row">
+              <input
+                id="sched-workdir"
+                bind:value={formWorkDir}
+                placeholder={$t('newtask.workDirPlaceholder')}
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button
+                type="button"
+                class="btn btn--ghost"
+                data-sched-workdir-browse
+                onclick={() => (dirPickerOpen = true)}
+              >{$t('dirs.browse')}</button>
+            </div>
+            <DirPicker bind:open={dirPickerOpen} bind:value={formWorkDir} />
+            <p class="hint">
+              {$t('newtask.workDirHintBefore')}<strong>{$t('newtask.workDirHintStrong')}</strong>{$t('newtask.workDirHintAfter1')}
+              {$t('newtask.workDirHintAfter2')}
+              {$t('newtask.workDirHintAfter3')}
+            </p>
+          </details>
+
           {#if formError}
             <div class="notice bad">{formError}</div>
           {/if}
@@ -716,6 +787,13 @@ import type { WebTextId } from '@agentdeck/i18n'
             {s.executorType === 'group'
               ? $groups.find((g) => g.id === s.executorId)?.name ?? s.executorId
               : $agents.find((a) => a.id === s.executorId)?.name ?? s.executorId}
+          </p>
+          <!-- 启动方式 + 工作目录（有值才说；与表单同一句话） -->
+          <p class="hint">
+            {s.resumeMode === 'resume' ? $t('schedules.resumeLast') : $t('schedules.resumeFresh')}
+            {#if s.workDir}
+              · {$t('newtask.workDirLabel')}：<code class="mono">{s.workDir}</code>
+            {/if}
           </p>
           <!-- 任务原文：与任务页详情同款（hint + pre-wrap），不用 mono 小字 -->
           <p class="hint" style="white-space:pre-wrap">{s.taskText}</p>

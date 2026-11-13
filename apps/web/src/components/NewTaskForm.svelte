@@ -656,26 +656,6 @@
     overflow-wrap: anywhere;
   }
 
-  /* 高级选项 / 提交栏：整行 */
-  .form-advanced {
-    margin: var(--sp-2) 0;
-  }
-
-  /* 输入框 + 「浏览…」同一行（分批第 229 批）：按钮贴着它帮的那一格 */
-  .workdir-row {
-    display: flex;
-    gap: var(--sp-2);
-  }
-  .workdir-row input {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  /* ★ 分批第 230 批：「浏览…」不许被挤窄（与「新对话」那张表单同一条规矩） */
-  .workdir-row > button {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-
   /* 提交栏：**吸底**（沿用 D58 的原始规则：负边距拉满整栏 + 底色盖住滚过的内容）。
      负边距的量是 `--create-pad-x`——它由外面那层（`Tasks.svelte` 的 `.create-body`）
      定义，必须与 `.form-frame` 的内边距一致。 */

@@ -53,6 +53,10 @@ export interface Schedule {
    * 支持触发上下文变量：{{date}} {{time}} {{weekday}} {{count}} {{runId}} {{lastRunId}}。
    */
   taskText: string
+  /** 触发时的工作目录（2026-11 与「新建任务」同款：可选，null = daemon 自动分配）。 */
+  workDir: string | null
+  /** 触发方式：每次新起一个 agent 会话（fresh），还是续上上一次触发的会话（resume）。 */
+  resumeMode: 'fresh' | 'resume'
   createdAt: number
   updatedAt: number
   /** 累计触发次数（{{count}} 用它 +1）。 */

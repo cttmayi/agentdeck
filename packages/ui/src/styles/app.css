@@ -1164,6 +1164,30 @@ hr {
   color: var(--on-accent);
 }
 
+/* ══════════ 表单高级区 + 工作目录行（两表单 + 新对话共用）══════════
+ *
+ * 「高级选项」折叠区与「输入框 + 浏览…」同一行。原来在 NewTaskForm 与
+ * Chat 各写了一份（2026-11 定时任务表单也要同一控件，第三处要抄）——
+ * 同一份内距/收缩规矩三处各写一遍就是三处会漂移的常量，提到这里一处定义。
+ */
+.form-advanced {
+  margin: var(--sp-2) 0;
+}
+.workdir-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+.workdir-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，
+   一挤就折成两行）。收缩全推给输入框。 */
+.workdir-row > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 /* 窄屏的返回按钮独占第一行 */
 .detail-head .back-to-list {
   grid-column: 1 / -1;

@@ -2998,6 +2998,31 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
 
           if (!clickByText('每天')) { errors.push('预设键「每天」找不到'); return false }
+
+          // 2026-11：启动方式（新启动 / 续上上次）+ 高级区（工作目录）。
+          // 注意 .source-toggle 有两条轨道（交给谁 + 启动方式），只查新键存在性
+          const resumeBtnTexts = [...d().querySelectorAll('.schedules-main .source-toggle button')].map(
+            (b) => text(b),
+          )
+          if (!resumeBtnTexts.includes('新启动') || !resumeBtnTexts.includes('续上上次')) {
+            errors.push(`启动方式轨道缺键：${JSON.stringify(resumeBtnTexts)}`)
+            return false
+          }
+          const advSummary = [...d().querySelectorAll('.schedules-main summary')].find(
+            (b) => text(b) === '高级选项',
+          )
+          if (!advSummary) {
+            errors.push('高级区折叠头「高级选项」找不到')
+            return false
+          }
+          click(advSummary)
+          await wait(60)
+          const wdInput = d().querySelector('.schedules-main #sched-workdir')
+          const browse = d().querySelector('.schedules-main [data-sched-workdir-browse]')
+          if (!wdInput || !browse) {
+            errors.push(`高级区展开后缺工作目录控件：input ${!!wdInput}、浏览 ${!!browse}`)
+            return false
+          }
           return true
         })()
         facts['schedules.cancelCloses'] = await (async () => {

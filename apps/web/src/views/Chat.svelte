@@ -1677,23 +1677,6 @@
     margin-top: var(--sp-3);
   }
 
-  /* 输入框 + 「浏览…」同一行（分批第 229 批）：按钮贴着输入框，才看得出它是
-     "帮你填这一格"的，而不是一个独立的动作 */
-  .workdir-row {
-    display: flex;
-    gap: var(--sp-2);
-  }
-  .workdir-row .draft-workdir-input {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  /* ★ 分批第 230 批：「浏览…」不许被挤窄（中文最小内容宽度 = 一个字，一挤就折成两行）。
-     收缩全推给输入框。 */
-  .workdir-row > button {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-
   /* D69.15：`.chat-stream` 打在 MainArea 渲染的 pane-body 上（bodyClass），
      scoped 样式跨不过组件边界——:global 才能命中（与 Tasks 的 log-mode 同一处理） */
   :global(.chat-stream) {

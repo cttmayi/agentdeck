@@ -117,6 +117,8 @@ describe('定时任务存储与切分', () => {
         executorType: 'agent',
         executorId: 'a-1',
         taskText: '{{date}} 竞品周报',
+        workDir: null,
+        resumeMode: 'fresh',
         createdAt: 1,
         updatedAt: 1,
         triggerCount: 3,
@@ -255,6 +257,50 @@ describe('定时任务整链（建 → 触发 → run → 记录）', () => {
     assert.equal((await postJson('/api/schedules', { name: 'a', cron: 'bad', executorType: 'agent', executorId: executorAgentId, taskText: 'x' })).status, 400)
     assert.equal((await postJson('/api/schedules', { name: 'a', cron: '0 9 * * *', executorType: 'agent', executorId: 'no-such-agent', taskText: 'x' })).status, 400)
     assert.equal((await postJson('/api/schedules', { name: 'a', cron: '0 9 * * *', executorType: 'agent', executorId: executorAgentId, taskText: '  ' })).status, 400)
+  })
+
+  test('★ 2026-11：工作目录 + 启动方式（fresh/resume）随创建/更新落库；resume 模式触发不报错', async () => {
+    const wd = await makeTempDir('sched-workdir')
+    try {
+      const created = await postJson('/api/schedules', {
+        name: '续跑任务',
+        cron: '0 9 * * 1',
+        executorType: 'agent',
+        executorId: executorAgentId,
+        taskText: '继续上次的工作：{{count}}',
+        workDir: wd,
+        resumeMode: 'resume',
+      })
+      assert.equal(created.status, 201, `创建失败：${JSON.stringify(created.body)}`)
+      const sched = created.body as {
+        id: string
+        workDir: string | null
+        resumeMode: string
+      }
+      assert.equal(sched.workDir, wd)
+      assert.equal(sched.resumeMode, 'resume')
+
+      // resume 模式触发两次都成功（第二次续上次，走 fireSchedule 的 resumeFromRunId 分支）
+      for (let i = 0; i < 2; i++) {
+        const t = await postJson(`/api/schedules/${sched.id}/trigger`, {})
+        assert.equal(t.status, 200, `第 ${i + 1} 次触发失败：${JSON.stringify(t.body)}`)
+        const record = (t.body as { records: Array<{ runId: string | null; status: string }> }).records[0]
+        assert.ok(record && record.runId, `第 ${i + 1} 次要产生 run：${JSON.stringify(t.body)}`)
+        await waitForTerminal(record.runId)
+      }
+
+      // PATCH：改回 fresh + 清空目录（三态：省略不动）
+      const patched = await patchJson(`/api/schedules/${sched.id}`, {
+        resumeMode: 'fresh',
+        workDir: null,
+      })
+      assert.equal(patched.status, 200)
+      const after = patched.body as { resumeMode: string; workDir: string | null }
+      assert.equal(after.resumeMode, 'fresh')
+      assert.equal(after.workDir, null)
+    } finally {
+      await cleanup(wd)
+    }
   })
 
   test('★ 建一个带模板变量的定时任务 → 手动触发 → issue + run + 记录都落库，变量已渲染', async () => {

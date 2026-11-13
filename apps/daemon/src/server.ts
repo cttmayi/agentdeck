@@ -6561,6 +6561,13 @@ async function injectedSkillsOf(
         return
       }
       const now = Date.now()
+      // 2026-11：工作目录可选（null = 自动分配，与 D27「新建任务」同款）；
+      // 触发方式 fresh（默认）/ resume（续上上次会话）
+      const workDir =
+        typeof body.workDir === 'string' && body.workDir.trim() !== ''
+          ? body.workDir.trim()
+          : null
+      const resumeMode = body.resumeMode === 'resume' ? 'resume' : 'fresh'
       const schedule: Schedule = {
         id: ulid(),
         workspaceId,
@@ -6570,6 +6577,8 @@ async function injectedSkillsOf(
         executorType,
         executorId,
         taskText,
+        workDir,
+        resumeMode,
         createdAt: now,
         updatedAt: now,
         triggerCount: 0,
@@ -6632,6 +6641,16 @@ async function injectedSkillsOf(
       }
       if (body.enabled !== undefined) {
         s.enabled = body.enabled === true
+      }
+      // 2026-11：触发方式与工作目录同样三态（省略不动）
+      if (body.resumeMode !== undefined) {
+        s.resumeMode = body.resumeMode === 'resume' ? 'resume' : 'fresh'
+      }
+      if (body.workDir !== undefined) {
+        s.workDir =
+          typeof body.workDir === 'string' && body.workDir.trim() !== ''
+            ? body.workDir.trim()
+            : null
       }
       s.updatedAt = Date.now()
       syncScheduleJob(s)
@@ -10229,6 +10248,12 @@ async function injectedSkillsOf(
         // 全文进 prompt（不切）——与「新建任务」同一句判据
         prompt,
         ...(groupId ? { groupId } : {}),
+        // 2026-11：工作目录可选（null = 自动分配）；resume 模式续上上一次触发的会话
+        //（FR-CLI-06 同一机制：executor 取上次 run 的 sessionId 按描述表决定是否恢复）
+        ...(s.workDir ? { workDir: s.workDir } : {}),
+        ...(s.resumeMode === 'resume' && s.lastRunId
+          ? { resumeFromRunId: s.lastRunId as RunId }
+          : {}),
         limits: { maxTurns: null, timeoutMs: null },
       })
       const accepted = out.status >= 200 && out.status < 300

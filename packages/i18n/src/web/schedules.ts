@@ -53,6 +53,10 @@ export const schedulesText = {
   'schedules.taskLabel': { zh: '要做什么（第一行当标题）', en: 'What to do (first line is the title)' },
   'schedules.taskPlaceholder': { zh: '抓取竞品本周更新，按固定模板写成简报：\n1. 读上一期简报确定增量范围\n2. 抓取各竞品 changelog / 发布页\n3. 输出固定格式的简报', en: 'Grab this week\'s competitor updates:\n1. Read last week\'s report for the delta\n2. Fetch changelogs / release pages\n3. Write the report' },
   'schedules.varsHint': { zh: '可用变量点一下插入；缺值（如首次没有上次）替换成空。标题自己写，变量只给内容。', en: 'Click a variable to insert it; missing values (e.g. no last run yet) render empty. You write the title; variables only carry content.' },
+  // 2026-11：触发方式（使用者要求：设定新启动 Agent 还是 resume 一个原来的 Agent）
+  'schedules.resumeLabel': { zh: '启动方式', en: 'Start mode' },
+  'schedules.resumeFresh': { zh: '新启动', en: 'Fresh' },
+  'schedules.resumeLast': { zh: '续上上次', en: 'Resume last' },
   'schedules.executorLabel': { zh: '交给谁', en: 'Who runs it' },
   'schedules.executorAgent': { zh: '一个智能体', en: 'One agent' },
   'schedules.executorGroup': { zh: '一个智能体组', en: 'A group' },

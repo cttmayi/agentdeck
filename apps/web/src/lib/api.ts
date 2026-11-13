@@ -1007,6 +1007,10 @@ export interface ScheduleView {
   executorType: ScheduleExecutorType
   executorId: string
   taskText: string
+  /** 触发时的工作目录（null = daemon 自动分配，与「新建任务」同款可选）。 */
+  workDir: string | null
+  /** 触发方式：fresh 每次新起 / resume 续上上次触发的会话。 */
+  resumeMode: ScheduleResumeMode
   createdAt: number
   updatedAt: number
   triggerCount: number
@@ -1032,7 +1036,11 @@ export interface ScheduleCreateInput {
   executorType: ScheduleExecutorType
   executorId: string
   taskText: string
+  workDir: string | null
+  resumeMode: ScheduleResumeMode
 }
+
+export type ScheduleResumeMode = 'fresh' | 'resume'
 
 /** 表单里「下次」行的实时预览（POST /api/schedules/preview，daemon 用 croner 算）。 */
 export interface SchedulePreview {
