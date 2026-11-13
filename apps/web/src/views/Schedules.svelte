@@ -956,6 +956,15 @@ import type { WebTextId } from '@agentdeck/i18n'
 </div>
 
 <style>
+  /* 2026-11（使用者："列表 item 宽度不对，左边空出一大截"）：`ul.list-stack`
+     继承了浏览器默认 `padding-left: 40px`（别的页面的列表 ul 都显式重置了，
+     定时任务页漏了）——行从 40px 处开始、只占 ul 内容宽，左边空一大截。
+     与聊天页 `.conv-list` 同款重置：list-style none + margin/padding 0。 */
+  ul.list-stack {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
   .sched-title {
     /* ★ 310 批同款规矩（使用者报过"标题被拉成两行还带省略号"）：行内元素上
        overflow/text-overflow 不生效——必须 block + max-width:100%，省略号才有

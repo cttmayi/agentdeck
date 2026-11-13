@@ -3186,7 +3186,21 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const title = row?.querySelector('.sched-title')
           // 与任务页 `tasks.titleClipped` 同款判法：长标题**被截断**
           // （scrollWidth > clientWidth）= 单行省略生效，没有把行顶宽
-          const ok = !!title && title.clientWidth > 0 && title.scrollWidth > title.clientWidth + 1
+          let ok = !!title && title.clientWidth > 0 && title.scrollWidth > title.clientWidth + 1
+          // 2026-11（使用者："左边空出一大截"）：ul.list-stack 曾继承浏览器默认
+          //   padding-left:40px（别的页面的列表 ul 都显式重置了）——行缩进 40px
+          //   且变窄。量 ul padding-left==0 且行右缘==ul 右缘（行撑满自己的容器）。
+          const ulEl = row?.closest('ul')
+          if (ulEl) {
+            const u = ulEl.getBoundingClientRect()
+            const l = row.getBoundingClientRect()
+            const ulPl = getComputedStyle(ulEl).paddingLeft
+            const fills = ulPl === '0px' && Math.abs(l.right - u.right) < 2
+            if (!fills) {
+              errors.push(`rowLayout：ul padding-left ${ulPl}、行右缘 ${Math.round(l.right)} vs ul ${Math.round(u.right)}`)
+            }
+            ok = ok && fills
+          }
           await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
           if (!ok) {
             errors.push(

@@ -1616,7 +1616,7 @@ const CHECKS = [
     label: '★ 2026-11：每月/间隔那行放一行（「每月第」与 select、「每」与「分钟」top 相同）——防 flex-wrap 在窄列拆行回归',
     ok: (v) => v === true },
   { view: '定时任务（D115）', key: 'schedules.rowTitleNoOverflow',
-    label: '★ 2026-11：列表行长标题单行 + 省略号（被截断 = scrollWidth > clientWidth）——防 sched-title 漏 block/max-width 把行顶宽回归',
+    label: '★ 2026-11：列表行长标题单行 + 省略号 + 行撑满容器（ul padding-left==0）——防 sched-title 漏 block/max-width、ul 继承默认 40px 缩进把行顶歪回归',
     ok: (v) => v === true },
   { view: '定时任务（D115）', key: 'schedules.cancelCloses',
     label: '★ 点「取消」表单消失、回到空态',
