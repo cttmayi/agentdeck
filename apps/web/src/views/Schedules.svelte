@@ -18,6 +18,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { relativeTime } from '../lib/time.ts'
+  import { listGrip } from '../lib/list-grip.ts'
   import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
   import {
     defaultScheduleForm,
@@ -298,7 +299,12 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
 </script>
 
-<div class="split-layout with-detail" data-list-key="schedules">
+<div
+  class="split-layout with-detail"
+  data-list-key="schedules"
+  data-list-label={$t('shell.resizeList')}
+  use:listGrip
+>
   <!-- ══════════ 左栏：列表 ══════════ -->
   <section class="pane list-pane">
     <header class="pane-head">

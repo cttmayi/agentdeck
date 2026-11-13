@@ -2886,6 +2886,65 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return true
         })()
 
+        // ── 定时任务（D115）：右栏可见 + 点「新建定时任务」表单出现 ──
+        //
+        //   2026-11 修过一版布局缺陷：右栏（`.schedules-main`）没放进 `split-layout`
+        //   的把手列布局里，被网格塞进 0.375rem 的缝隙——点「新建定时任务」界面毫无
+        //   反应（表单其实渲染了，只是看不见）。类型检查看不见这种缺陷（CLAUDE.md
+        //   §8.3：布局类缺陷只有浏览器量得出来），这条判据是它的守卫：右栏必须
+        //   > 200px 宽，点新建后表单真出现（标题 + 4 个频率键 + 6 个变量 chips +
+        //   名字框），点「取消」能回到空态。
+        f.contentWindow.location.hash = '#/schedules'
+        await until(() => !!d().querySelector('.schedules-main'))
+        await wait(300)
+        facts['schedules.mainPaneWidth'] = await (async () => {
+          const right = d().querySelector('.schedules-main')
+          if (!right) {
+            errors.push('定时任务页右栏 .schedules-main 不存在')
+            return -1
+          }
+          const w = Math.round(right.getBoundingClientRect().width)
+          if (w < 200) {
+            errors.push(`定时任务右栏被挤窄了（${w}px）——它应该占详情那列`)
+          }
+          return w
+        })()
+        facts['schedules.createFormOpens'] = await (async () => {
+          const newBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建定时任务')
+          if (!newBtn) {
+            errors.push('定时任务页找不到「新建定时任务」按钮')
+            return false
+          }
+          click(newBtn)
+          const panel = await until(() => d().querySelector('.schedules-main .main-panel'))
+          if (!panel) {
+            errors.push('点「新建定时任务」后表单没出现（.main-panel 没有）')
+            return false
+          }
+          const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
+          const chips = d().querySelectorAll('.schedules-main .var-chip').length
+          const nameField = !!d().querySelector('.schedules-main input[type=text]')
+          if (freq !== 4 || chips !== 6 || !nameField) {
+            errors.push(`表单不完整：频率键 ${freq}/4、变量 chips ${chips}/6、名字框 ${nameField}`)
+            return false
+          }
+          return true
+        })()
+        facts['schedules.cancelCloses'] = await (async () => {
+          const cancel = [...d().querySelectorAll('.schedules-main button')].find(
+            (b) => text(b) === '取消',
+          )
+          if (!cancel) {
+            errors.push('表单里找不到「取消」按钮')
+            return false
+          }
+          click(cancel)
+          await until(() => !d().querySelector('.schedules-main .main-panel'))
+          return !d().querySelector('.schedules-main .main-panel')
+        })()
+        f.contentWindow.location.hash = '#/tools'
+        await until(() => text(d().querySelector('.page-name')) === '工具')
+
         // ── ② 列表 ──
         facts['tools.title'] = need('工具页标题', () => text(d().querySelector('.page-name')))
         const probeToolRows = () => [...d().querySelectorAll('.tool-table tbody tr.tool-row')]
