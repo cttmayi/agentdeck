@@ -3,6 +3,7 @@
   import {
     api,
     type ScheduleCreateInput,
+    type SchedulePreview,
     type ScheduleRecordView,
     type ScheduleView,
   } from '../lib/api.ts'
@@ -22,11 +23,16 @@ import type { WebTextId } from '@agentdeck/i18n'
   import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
   import {
     defaultScheduleForm,
+    isWorkdays,
     scheduleCronToForm,
     scheduleFormToCron,
     type ScheduleForm,
     type ScheduleFreq,
   } from '../lib/schedule-cron.ts'
+  // cronstrue：自定义 cron 的人话翻译（2026-11 使用者拍板用业界标准库）。
+  // locale 必须显式 import 注册（`cronstrue/i18n` 聚合版带全语言 300KB，这里只带中文 10KB）。
+  import cronstrue from 'cronstrue'
+  import 'cronstrue/locales/zh_CN.js'
 
   /**
    * 定时任务（2026-11，使用者立项）。
@@ -64,6 +70,10 @@ import type { WebTextId } from '@agentdeck/i18n'
   let formGroupId = ''
   let formError = ''
   let busy = false
+  // 结果区「下次」行：daemon 用 croner 算（debounce），表单任何调度变化都重算
+  let previewNext: number | null = null
+  let previewError = ''
+  let previewTimer: ReturnType<typeof setTimeout> | null = null
 
   async function load(): Promise<void> {
     loading = true
@@ -275,13 +285,26 @@ import type { WebTextId } from '@agentdeck/i18n'
     return tx('schedules.recordFailed', { note: record.note ?? '?' })
   }
 
+  // 预设五档：每天 / 每周 / 每月 / 间隔 / 自定义（2026-11 v8 定型——
+  // 「工作日」并入「每周」做一键快捷，不再单独占一档，避免与每周多选重复）
   const FREQS: Array<{ key: ScheduleFreq; label: WebTextId }> = [
     { key: 'daily', label: 'schedules.freqDaily' },
     { key: 'weekly', label: 'schedules.freqWeekly' },
     { key: 'monthly', label: 'schedules.freqMonthly' },
     { key: 'interval', label: 'schedules.freqInterval' },
+    { key: 'custom', label: 'schedules.freqCustom' },
   ]
-  const WEEKDAY_BTNS = [1, 2, 3, 4, 5, 6, 7] as const
+  const WEEKDAY_BTNS: Array<{ day: number; label: WebTextId }> = [
+    { day: 1, label: 'schedules.weekdayMon' },
+    { day: 2, label: 'schedules.weekdayTue' },
+    { day: 3, label: 'schedules.weekdayWed' },
+    { day: 4, label: 'schedules.weekdayThu' },
+    { day: 5, label: 'schedules.weekdayFri' },
+    { day: 6, label: 'schedules.weekdaySat' },
+    { day: 7, label: 'schedules.weekdaySun' },
+  ]
+  // 人话行的星期名（day 1–7 → 周一…周日；与 daemon describeCron 同一套输出）
+  const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
   function toggleWeekday(day: number): void {
     if (form.weekdays.includes(day)) {
@@ -291,12 +314,70 @@ import type { WebTextId } from '@agentdeck/i18n'
     }
   }
 
-  function nextRunLine(): string {
-    const cron = scheduleFormToCron(form)
-    // 展示用：高级模式原文太长就不在提示行里塞 cron——提示行只说"已保存为
-    // 高级模式"，具体下次触发由 daemon 算（列表会显示）。
-    return cron
+  // 「工作日」一键快捷：点一下 = 周一至周五，再点 = 回到只选周一。
+  // on 状态由 isWorkdays 判定——手动勾/取消任意一天，快捷自动熄灭（同一状态的两侧）。
+  function toggleWorkdaysQuick(): void {
+    form.weekdays = isWorkdays(form) ? [1] : [1, 2, 3, 4, 5]
   }
+
+  // ── 结果区三行（cron / 人话 / 下次），改任何一处实时同步 ──
+  //
+  // ⚠️ 2026-11 v8 踩过：模板里直接调 `{cronLine()}` 在 Svelte 5 里**不建立依赖
+  //   追踪**——probe 真浏览器实测：点预设键后 `{#if}` 分支更新了，但文本插值
+  //   的函数调用停在首帧值（点「工作日」快捷，cron 行还是 `00 09 * * *`）。
+  //   必须用 `$:` 派生变量（编译器能追踪 `$:` 表达式里读到的状态）。
+  let cronText = ''
+  let humanText = ''
+  $: cronText = scheduleFormToCron(form)
+  $: humanText = humanLine()
+
+  function humanLine(): string {
+    if (form.freq === 'custom') {
+      const e = form.customCron.trim()
+      if (e === '') return '—'
+      try {
+        return cronstrue.toString(e, { locale: 'zh_CN' })
+      } catch {
+        return e // cronstrue 也不认识（基本不可能）：原文兜底，不假装看懂
+      }
+    }
+    const t = form.time
+    switch (form.freq) {
+      case 'daily':
+        return `每天 ${t}`
+      case 'weekly':
+        if (isWorkdays(form)) return `工作日（周一至周五）${t}`
+        return `每周 ${[...form.weekdays].sort((a, b) => a - b).map((d) => WEEKDAY_LABELS[d % 7]).join('、')} ${t}`
+      case 'monthly':
+        return form.monthDay === 'L' ? `每月最后一天 ${t}` : `每月 ${form.monthDay} 日 ${t}`
+      case 'interval':
+        return `每 ${form.minutes} 分钟`
+    }
+  }
+
+  async function refreshPreview(): Promise<void> {
+    if (previewTimer !== null) clearTimeout(previewTimer)
+    previewTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await api<SchedulePreview>(
+            '/api/schedules/preview',
+            { method: 'POST', body: JSON.stringify({ cron: scheduleFormToCron(form) }) },
+          )
+          previewNext = res.nextRunAt
+          previewError = ''
+        } catch (err) {
+          // 400 = cron 写错了（daemon 返回中文人话错误）——直接显示，不假装看懂
+          previewError = err instanceof Error ? err.message : String(err)
+          previewNext = null
+        }
+      })()
+    }, 300)
+  }
+  // 表单调度变化（含新建/编辑打开）→ 重算「下次」；没打开表单时不发请求。
+  // 依赖 cronText（→ form）才能跟着表单重算——直接 `$: refreshPreview()` 只会在
+  // 初始化跑一次（Svelte 编译 $: 时看不出函数体里读了什么）。
+  $: cronText, formMode !== null && void refreshPreview()
 </script>
 
 <div
@@ -395,9 +476,10 @@ import type { WebTextId } from '@agentdeck/i18n'
             />
           </div>
 
-          <!-- 表单式调度：频率 + 时间点（cron 是内部表示） -->
+          <!-- 表单式调度：预设五档 + 时间 + 结果区三行（cron 永远可见，改任何一侧实时同步） -->
           <div class="field">
             <label>{$t('schedules.whenLabel')}</label>
+            <input class="schedule-time" type="time" bind:value={form.time} />
             <div class="freq-picker">
               {#each FREQS as f (f.key)}
                 <button
@@ -410,38 +492,38 @@ import type { WebTextId } from '@agentdeck/i18n'
               {/each}
             </div>
 
-            {#if form.freq === 'daily'}
+            {#if form.freq === 'weekly'}
               <div class="schedule-line">
-                <span>{$t('schedules.freqDaily')}</span>
-                <input type="time" bind:value={form.time} />
-              </div>
-            {:else if form.freq === 'weekly'}
-              <div class="schedule-line">
-                <span>{$t('schedules.everyWeekday')}</span>
+                <button
+                  type="button"
+                  class="pill quick-weekdays {isWorkdays(form) ? 'active' : ''}"
+                  onclick={toggleWorkdaysQuick}
+                >
+                  {$t('schedules.workdaysQuick')}
+                </button>
                 <div class="weekday-picker">
-                  {#each WEEKDAY_BTNS as day (day)}
+                  {#each WEEKDAY_BTNS as w (w.day)}
                     <button
                       type="button"
-                      class="weekday-btn {form.weekdays.includes(day) ? 'active' : ''}"
-                      onclick={() => toggleWeekday(day)}
+                      class="weekday-btn {form.weekdays.includes(w.day) ? 'active' : ''}"
+                      onclick={() => toggleWeekday(w.day)}
                     >
-                      {['一', '二', '三', '四', '五', '六', '日'][day - 1]}
+                      {$t(w.label)}
                     </button>
                   {/each}
                 </div>
-                <input type="time" bind:value={form.time} />
               </div>
             {:else if form.freq === 'monthly'}
               <div class="schedule-line">
                 <span>{$t('schedules.everyMonthDay')}</span>
                 <select bind:value={form.monthDay}>
+                  <option value="L">{$t('schedules.lastDay')}</option>
                   {#each Array.from({ length: 31 }, (_, i) => i + 1) as day (day)}
                     <option value={day}>{day} 日</option>
                   {/each}
                 </select>
-                <input type="time" bind:value={form.time} />
               </div>
-            {:else}
+            {:else if form.freq === 'interval'}
               <div class="schedule-line">
                 <span>{$t('schedules.everyInterval')}</span>
                 <select bind:value={form.minutes}>
@@ -451,19 +533,38 @@ import type { WebTextId } from '@agentdeck/i18n'
                 </select>
                 <span>{$t('schedules.minutes')}</span>
               </div>
+            {:else if form.freq === 'custom'}
+              <div class="custom-cron">
+                <input
+                  type="text"
+                  bind:value={form.customCron}
+                  placeholder={$t('schedules.customPlaceholder')}
+                />
+                <p class="hint">{$t('schedules.customHint')}</p>
+              </div>
             {/if}
 
-            <p class="hint next-line">{$t('schedules.nextLine')} {nextRunLine()}</p>
-
-            <details class="form-advanced">
-              <summary class="hint" style="cursor:pointer">{$t('schedules.advanced')}</summary>
-              <input
-                type="text"
-                bind:value={form.advancedCron}
-                placeholder={$t('schedules.advancedPlaceholder')}
-                style="font-family:var(--font-mono)"
-              />
-            </details>
+            <!-- 结果区：cron / 人话 / 下次 常驻三行 -->
+            <div class="schedule-result">
+              <div class="schedule-result-row">
+                <span class="k">{$t('schedules.cronLabel')}</span>
+                <code>{cronText}</code>
+              </div>
+              <div class="schedule-result-row">
+                <span class="k">{$t('schedules.humanLabel')}</span>
+                <span class="human">{humanText}</span>
+              </div>
+              <div class="schedule-result-row">
+                <span class="k">{$t('schedules.next')}</span>
+                {#if previewError}
+                  <span class="bad">{previewError}</span>
+                {:else if previewNext !== null}
+                  <span>{relativeTime(previewNext, Date.now())}</span>
+                {:else}
+                  <span class="faint">{$t('schedules.nextUnavailable')}</span>
+                {/if}
+              </div>
+            </div>
           </div>
 
           <!-- 要做什么：与「新建任务」同一个框、同一套模板（第一行当标题） -->
@@ -751,9 +852,69 @@ import type { WebTextId } from '@agentdeck/i18n'
     border-color: var(--accent);
     color: #fff;
   }
-  .next-line {
-    margin-top: 0.5rem;
+  /* 结果区三行（2026-11 v8 定型：cron / 人话 / 下次 常驻，改哪侧都实时同步） */
+  .schedule-time {
+    font-size: var(--fs-xl);
+    font-weight: 600;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    margin-bottom: 0.5rem;
+  }
+  .quick-weekdays {
+    border-style: dashed;
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    height: auto;
+    padding: 0.2rem 0.8rem;
+  }
+  .quick-weekdays.active {
+    border-style: solid;
+    color: #fff;
+  }
+  .custom-cron {
+    margin-top: 0.4rem;
+  }
+  .custom-cron input {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+  }
+  .schedule-result {
+    margin-top: 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .schedule-result-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    font-size: var(--fs-sm);
+  }
+  .schedule-result-row + .schedule-result-row {
+    border-top: 1px dashed var(--line);
+  }
+  .schedule-result-row .k {
+    width: 2.6rem;
+    flex-shrink: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+  .schedule-result-row code {
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+  .schedule-result-row .human {
     color: var(--good);
+    font-weight: 600;
+  }
+  .schedule-result-row .bad {
+    color: var(--bad);
   }
   .var-chips {
     display: flex;

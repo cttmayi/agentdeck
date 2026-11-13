@@ -83,7 +83,10 @@ describe('定时任务 cron 工具', () => {
     assert.equal(describeCron('0 9 1 * *'), '每月 1 日 09:00')
     assert.equal(describeCron('*/30 * * * *'), '每 30 分钟')
     assert.equal(describeCron('15 * * * *'), '每小时 15 分')
-    // 高级模式手填：看不懂就不假装看懂
+    // 2026-11 v8 定型新增的两档：工作日（区间 1-5）与每月最后一天（L）
+    assert.equal(describeCron('0 9 * * 1-5'), '工作日（周一至周五）09:00')
+    assert.equal(describeCron('0 9 L * *'), '每月最后一天 09:00')
+    // 自定义模式手填：看不懂就不假装看懂
     assert.equal(describeCron('0 9 * * 1-5/2'), '0 9 * * 1-5/2')
   })
 
@@ -233,6 +236,20 @@ after(async () => {
 })
 
 describe('定时任务整链（建 → 触发 → run → 记录）', () => {
+  test('★ preview 接口：合法 cron 返回人话 + 下次触发；非法 cron → 400', async () => {
+    const ok = await postJson('/api/schedules/preview', { cron: '0 9 * * 1-5' })
+    assert.equal(ok.status, 200)
+    const out = ok.body as { humanCron: string; nextRunAt: number }
+    assert.equal(out.humanCron, '工作日（周一至周五）09:00')
+    assert.ok(out.nextRunAt > Date.now())
+
+    const bad = await postJson('/api/schedules/preview', { cron: 'not-a-cron' })
+    assert.equal(bad.status, 400)
+    const badOut = bad.body as { error: string; code: string }
+    assert.equal(badOut.code, 'schedule_cron_invalid')
+    assert.ok(badOut.error.length > 0)
+  })
+
   test('★ 创建校验：空名字 / 坏 cron / 不存在的执行者 → 400', async () => {
     assert.equal((await postJson('/api/schedules', { name: ' ', cron: '0 9 * * *', executorType: 'agent', executorId: executorAgentId, taskText: 'x' })).status, 400)
     assert.equal((await postJson('/api/schedules', { name: 'a', cron: 'bad', executorType: 'agent', executorId: executorAgentId, taskText: 'x' })).status, 400)

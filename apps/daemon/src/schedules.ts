@@ -195,13 +195,19 @@ export function describeCron(expr: string): string {
   const e = expr.trim()
   const daily = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(e)
   if (daily) return `每天 ${pad2(daily[2]!)}:${pad2(daily[1]!)}`
-  const weekly = /^(\d{1,2}) (\d{1,2}) \* \* ([0-7](?:,[0-7])*)$/.exec(e)
+  const weekly = /^(\d{1,2}) (\d{1,2}) \* \* (1-5|[0-7](?:,[0-7])*)$/.exec(e)
   if (weekly) {
+    // 「工作日」= 区间 `1-5`（2026-11 v8 定型：表单里工作日快捷的唯一 cron 形态）
+    if (weekly[3]! === '1-5') return `工作日（周一至周五）${pad2(weekly[2]!)}:${pad2(weekly[1]!)}`
     const names = weekly[3]!.split(',').map((n) => weekdayName(Number(n)))
     return `每周 ${names.join('、')} ${pad2(weekly[2]!)}:${pad2(weekly[1]!)}`
   }
-  const monthly = /^(\d{1,2}) (\d{1,2}) (\d{1,2}) \* \*$/.exec(e)
-  if (monthly) return `每月 ${Number(monthly[3]!)} 日 ${pad2(monthly[2]!)}:${pad2(monthly[1]!)}`
+  const monthly = /^(\d{1,2}) (\d{1,2}) (L|\d{1,2}) \* \*$/.exec(e)
+  if (monthly) {
+    // `L` = 每月最后一天（croner 原生支持：11 月→30 / 12 月→31 / 2 月→28，实测）
+    if (monthly[3]! === 'L') return `每月最后一天 ${pad2(monthly[2]!)}:${pad2(monthly[1]!)}`
+    return `每月 ${Number(monthly[3]!)} 日 ${pad2(monthly[2]!)}:${pad2(monthly[1]!)}`
+  }
   const everyMin = /^\*\/(\d{1,3}) \* \* \* \*$/.exec(e)
   if (everyMin) return `每 ${everyMin[1]!} 分钟`
   const hourly = /^(\d{1,2}) \* \* \* \*$/.exec(e)

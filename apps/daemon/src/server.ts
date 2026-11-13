@@ -6495,6 +6495,24 @@ async function injectedSkillsOf(
       sendJson(res, 200, { items: schedules.map(scheduleView) })
       return
     }
+    // ★ 表单里「下次」行的实时预览（2026-11 v8 定型）：前端把当前 cron 发来，
+    //   daemon 用 croner 算下次触发 + 人话描述 + 校验。前端 debounce 调用。
+    if (req.method === 'POST' && path === '/api/schedules/preview') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const cron = typeof body.cron === 'string' ? body.cron.trim() : ''
+      const cronError = validateCron(cron)
+      if (cronError) {
+        sendJson(res, 400, { error: cronError, code: 'schedule_cron_invalid' })
+        return
+      }
+      sendJson(res, 200, {
+        cron,
+        humanCron: describeCron(cron),
+        nextRunAt: nextRunAt(cron),
+        valid: true,
+      })
+      return
+    }
     const scheduleDetail = /^\/api\/schedules\/([^/]+)$/.exec(path)
     if (req.method === 'GET' && scheduleDetail) {
       const s = schedules.find((x) => x.id === scheduleDetail[1])

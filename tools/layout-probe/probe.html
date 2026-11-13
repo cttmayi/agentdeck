@@ -2892,8 +2892,11 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         //   的把手列布局里，被网格塞进 0.375rem 的缝隙——点「新建定时任务」界面毫无
         //   反应（表单其实渲染了，只是看不见）。类型检查看不见这种缺陷（CLAUDE.md
         //   §8.3：布局类缺陷只有浏览器量得出来），这条判据是它的守卫：右栏必须
-        //   > 200px 宽，点新建后表单真出现（标题 + 4 个频率键 + 6 个变量 chips +
-        //   名字框），点「取消」能回到空态。
+        //   > 200px 宽，点新建后表单真出现（标题 + 5 个预设键 + 结果区三行 + 6 个
+        //   变量 chips + 名字框），预设交互（每周→工作日快捷、每月→最后一天、
+        //   自定义→cron 输入）真能点，点「取消」能回到空态。
+        //   2026-11 v8 还踩过预览脚本的 SyntaxError（`do` 是保留字）——交互断言
+        //   是真浏览器点击，专防"界面画出来了但脚本挂了"这类回归。
         f.contentWindow.location.hash = '#/schedules'
         await until(() => !!d().querySelector('.schedules-main'))
         await wait(300)
@@ -2924,10 +2927,59 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
           const chips = d().querySelectorAll('.schedules-main .var-chip').length
           const nameField = !!d().querySelector('.schedules-main input[type=text]')
-          if (freq !== 4 || chips !== 6 || !nameField) {
-            errors.push(`表单不完整：频率键 ${freq}/4、变量 chips ${chips}/6、名字框 ${nameField}`)
+          const timeField = !!d().querySelector('.schedules-main input.schedule-time')
+          const resultRows = d().querySelectorAll('.schedules-main .schedule-result-row').length
+          if (freq !== 5 || chips !== 6 || !nameField || !timeField || resultRows !== 3) {
+            errors.push(`表单不完整：预设键 ${freq}/5、变量 chips ${chips}/6、名字框 ${nameField}、时间行 ${timeField}、结果区三行 ${resultRows}/3`)
             return false
           }
+          return true
+        })()
+        facts['schedules.formPresets'] = await (async () => {
+          // 预设交互（v8 定型）：每周 → 工作日快捷 + 7 天；快捷点亮后 cron 行出 1-5；
+          // 每月 → 下拉含「最后一天（L）」；自定义 → cron 输入框出现；回每天恢复。
+          const freqBtns = [...d().querySelectorAll('.schedules-main .freq-picker button')]
+          const byText = (t) => freqBtns.find((b) => text(b) === t)
+          const clickByText = (t) => { const b = byText(t); if (!b) return false; click(b); return true }
+          const cronText = () => d().querySelector('.schedules-main .schedule-result code')?.textContent ?? ''
+
+          if (!clickByText('每周')) { errors.push('预设键「每周」找不到'); return false }
+          await wait(60)
+          const dayBtns = d().querySelectorAll('.schedules-main .weekday-btn').length
+          const quick = !!d().querySelector('.schedules-main .quick-weekdays')
+          if (dayBtns !== 7 || !quick) {
+            errors.push(`每周视图不对：星期键 ${dayBtns}/7、工作日快捷 ${quick}`)
+            return false
+          }
+          const quickBtn = d().querySelector('.schedules-main .quick-weekdays')
+          click(quickBtn)
+          await wait(60)
+          const quickActive = quickBtn.classList.contains('active')
+          const cronHas15 = cronText().includes('1-5')
+          if (!quickActive || !cronHas15) {
+            errors.push(`工作日快捷未生效：active ${quickActive}、cron 含 1-5 ${cronHas15}（${cronText()}）`)
+            return false
+          }
+
+          if (!clickByText('每月')) { errors.push('预设键「每月」找不到'); return false }
+          await wait(60)
+          const lastDayOption = [...d().querySelectorAll('.schedules-main select option')].some(
+            (o) => o.value === 'L',
+          )
+          if (!lastDayOption) {
+            errors.push('每月下拉缺「最后一天（L）」选项')
+            return false
+          }
+
+          if (!clickByText('自定义')) { errors.push('预设键「自定义」找不到'); return false }
+          await wait(60)
+          const customInput = !!d().querySelector('.schedules-main .custom-cron input')
+          if (!customInput) {
+            errors.push('自定义视图缺 cron 输入框')
+            return false
+          }
+
+          if (!clickByText('每天')) { errors.push('预设键「每天」找不到'); return false }
           return true
         })()
         facts['schedules.cancelCloses'] = await (async () => {

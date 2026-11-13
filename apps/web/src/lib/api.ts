@@ -1033,3 +1033,11 @@ export interface ScheduleCreateInput {
   executorId: string
   taskText: string
 }
+
+/** 表单里「下次」行的实时预览（POST /api/schedules/preview，daemon 用 croner 算）。 */
+export interface SchedulePreview {
+  cron: string
+  humanCron: string
+  nextRunAt: number | null
+  valid: true
+}
