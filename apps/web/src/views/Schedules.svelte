@@ -793,10 +793,12 @@ import type { WebTextId } from '@agentdeck/i18n'
             {/if}
           </div>
 
-          <!-- 启动方式（2026-11 使用者要求：设定新启动 Agent 还是 resume 一个原来的
-               Agent）：fresh 每次新起一个会话；resume 触发时续上**上一次触发**的会话
-               （FR-CLI-06，第一次触发没有上次可续，自动按新起走）。同一套
-               source-toggle 轨道，与「交给谁」、任务表单同款。 -->
+          <!-- 启动方式（2026-11 使用者三档定稿，顺序即此）：
+               ① 新启动        = 新会话 + 新目录（每次触发从零开始，自动分配目录）
+               ② 新启动·原目录 = 新会话 + 保持上次目录（从零聊但同一间屋子）
+               ③ 接续·原目录   = 续上次会话 + 保持上次目录（FR-CLI-06；
+                   第一次触发没有上次可续，自动按新起走）
+               同一套 source-toggle 轨道，与「交给谁」、任务表单同款。 -->
           <div class="field">
             <label>{$t('schedules.resumeLabel')}</label>
             <div class="source-toggle">
@@ -806,6 +808,13 @@ import type { WebTextId } from '@agentdeck/i18n'
                 onclick={() => (formResume = 'fresh')}
               >
                 {$t('schedules.resumeFresh')}
+              </button>
+              <button
+                type="button"
+                class:active={formResume === 'fresh-same-dir'}
+                onclick={() => (formResume = 'fresh-same-dir')}
+              >
+                {$t('schedules.resumeFreshSameDir')}
               </button>
               <button
                 type="button"
@@ -892,7 +901,11 @@ import type { WebTextId } from '@agentdeck/i18n'
           </p>
           <!-- 启动方式 + 工作目录（有值才说；与表单同一句话） -->
           <p class="hint">
-            {s.resumeMode === 'resume' ? $t('schedules.resumeLast') : $t('schedules.resumeFresh')}
+            {s.resumeMode === 'resume'
+              ? $t('schedules.resumeLast')
+              : s.resumeMode === 'fresh-same-dir'
+                ? $t('schedules.resumeFreshSameDir')
+                : $t('schedules.resumeFresh')}
             {#if s.workDir}
               · {$t('newtask.workDirLabel')}：<code class="mono">{s.workDir}</code>
             {/if}

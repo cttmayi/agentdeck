@@ -3022,13 +3022,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return false
           }
 
-          // 2026-11：启动方式（新启动 / 续上上次）+ 高级区（工作目录）。
-          // 注意 .source-toggle 有两条轨道（交给谁 + 启动方式），只查新键存在性
-          const resumeBtnTexts = [...d().querySelectorAll('.schedules-main .source-toggle button')].map(
-            (b) => text(b),
-          )
-          if (!resumeBtnTexts.includes('新启动') || !resumeBtnTexts.includes('续上上次')) {
-            errors.push(`启动方式轨道缺键：${JSON.stringify(resumeBtnTexts)}`)
+          // 2026-11：启动方式三档（使用者定稿，顺序即按钮顺序）：
+          //   ①新启动 ②新启动 · 原目录 ③接续 · 原目录。
+          // 注意 .source-toggle 有两条轨道（交给谁 + 启动方式），只取含三档文案的
+          // 那条，且顺序必须 ①②③（②③换过序，防回归）。
+          const resumeBtnTexts = [
+            ...d().querySelectorAll('.schedules-main .source-toggle button'),
+          ]
+            .map((b) => text(b))
+            .filter((t) => ['新启动', '新启动 · 原目录', '接续 · 原目录'].includes(t))
+          const expectOrder = ['新启动', '新启动 · 原目录', '接续 · 原目录']
+          if (JSON.stringify(resumeBtnTexts) !== JSON.stringify(expectOrder)) {
+            errors.push(`启动方式三档不对（应 ${expectOrder.join(' / ')}）：${JSON.stringify(resumeBtnTexts)}`)
             return false
           }
           const advSummary = [...d().querySelectorAll('.schedules-main summary')].find(

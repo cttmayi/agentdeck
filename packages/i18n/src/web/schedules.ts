@@ -58,8 +58,11 @@ export const schedulesText = {
   'schedules.varsHint': { zh: '可用变量点一下插入；缺值（如首次没有上次）替换成空。标题自己写，变量只给内容。', en: 'Click a variable to insert it; missing values (e.g. no last run yet) render empty. You write the title; variables only carry content.' },
   // 2026-11：触发方式（使用者要求：设定新启动 Agent 还是 resume 一个原来的 Agent）
   'schedules.resumeLabel': { zh: '启动方式', en: 'Start mode' },
+  // 2026-11（使用者三档定稿，顺序 = 按钮顺序）：①新启动（新会话+新目录）
+  //   ②新启动·原目录（新会话+保持上次目录）③接续·原目录（续会话+保持上次目录）
   'schedules.resumeFresh': { zh: '新启动', en: 'Fresh' },
-  'schedules.resumeLast': { zh: '续上上次', en: 'Resume last' },
+  'schedules.resumeFreshSameDir': { zh: '新启动 · 原目录', en: 'Fresh, same dir' },
+  'schedules.resumeLast': { zh: '接续 · 原目录', en: 'Resume, same dir' },
   'schedules.executorLabel': { zh: '交给谁', en: 'Who runs it' },
   'schedules.executorAgent': { zh: '一个智能体', en: 'One agent' },
   'schedules.executorGroup': { zh: '一个智能体组', en: 'A group' },

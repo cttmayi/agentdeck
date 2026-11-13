@@ -1040,7 +1040,7 @@ export interface ScheduleCreateInput {
   resumeMode: ScheduleResumeMode
 }
 
-export type ScheduleResumeMode = 'fresh' | 'resume'
+export type ScheduleResumeMode = 'fresh' | 'fresh-same-dir' | 'resume'
 
 /** 表单里「下次」行的实时预览（POST /api/schedules/preview，daemon 用 croner 算）。 */
 export interface SchedulePreview {

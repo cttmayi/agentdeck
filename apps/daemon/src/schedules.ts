@@ -56,7 +56,13 @@ export interface Schedule {
   /** 触发时的工作目录（2026-11 与「新建任务」同款：可选，null = daemon 自动分配）。 */
   workDir: string | null
   /** 触发方式：每次新起一个 agent 会话（fresh），还是续上上一次触发的会话（resume）。 */
-  resumeMode: 'fresh' | 'resume'
+  /**
+   * 启动方式（2026-11 使用者三档定稿，顺序 = 按钮顺序）：
+   *   'fresh'            = 新启动（新会话 + 新目录）
+   *   'fresh-same-dir'   = 新启动 · 原目录（新会话 + 保持上次目录）
+   *   'resume'           = 接续 · 原目录（续上次会话 + 保持上次目录）
+   */
+  resumeMode: 'fresh' | 'fresh-same-dir' | 'resume'
   createdAt: number
   updatedAt: number
   /** 累计触发次数（{{count}} 用它 +1）。 */

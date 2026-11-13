@@ -6567,7 +6567,11 @@ async function injectedSkillsOf(
         typeof body.workDir === 'string' && body.workDir.trim() !== ''
           ? body.workDir.trim()
           : null
-      const resumeMode = body.resumeMode === 'resume' ? 'resume' : 'fresh'
+      // 2026-11 三档：'fresh-same-dir' 与 'resume' 是白名单值；其余（含缺省）落 'fresh'
+      const resumeMode: Schedule['resumeMode'] =
+        body.resumeMode === 'resume' || body.resumeMode === 'fresh-same-dir'
+          ? body.resumeMode
+          : 'fresh'
       const schedule: Schedule = {
         id: ulid(),
         workspaceId,
@@ -6644,7 +6648,10 @@ async function injectedSkillsOf(
       }
       // 2026-11：触发方式与工作目录同样三态（省略不动）
       if (body.resumeMode !== undefined) {
-        s.resumeMode = body.resumeMode === 'resume' ? 'resume' : 'fresh'
+        s.resumeMode =
+          body.resumeMode === 'resume' || body.resumeMode === 'fresh-same-dir'
+            ? body.resumeMode
+            : 'fresh'
       }
       if (body.workDir !== undefined) {
         s.workDir =
@@ -10242,14 +10249,14 @@ async function injectedSkillsOf(
       await store.insertIssue(issue)
 
       // ── 提交执行 run（组展开/校验/起进程全部由 submitRunRequest 完成）──
-      // ★ 工作目录（2026-11，使用者确认过语义）：resume 模式续的必须是**上一次
-      //   的那间屋子**——显式设了目录就用显式的；没设时自动分配会按**新 issue**
-      //   给新目录（每次触发都建新 issue），resume 的会话上下文所在目录就断了，
-      //   所以把上次 run 记着的 workDir 显式传下去（resolveWorkDir 的 requested
-      //   分支优先于 auto）。fresh 模式保持 D27：没设就自动分配。
+      // ★ 工作目录（2026-11，使用者确认过语义）：**非 fresh 的两档都续"上一次的
+      //   那间屋子"**——显式设了目录就用显式的；没设时自动分配会按**新 issue**
+      //   给新目录（每次触发都建新 issue），会话上下文所在目录就断了，所以把上次
+      //   run 记着的 workDir 显式传下去（resolveWorkDir 的 requested 分支优先于
+      //   auto）。'fresh'（新启动）保持 D27：没设就自动分配。
       const fireWorkDir =
         s.workDir ??
-        (s.resumeMode === 'resume' && s.lastRunId && lastRun?.workDir
+        (s.resumeMode !== 'fresh' && s.lastRunId && lastRun?.workDir
           ? lastRun.workDir
           : null)
       const out = await submitRunRequest({
@@ -10260,8 +10267,9 @@ async function injectedSkillsOf(
         // 全文进 prompt（不切）——与「新建任务」同一句判据
         prompt,
         ...(groupId ? { groupId } : {}),
-        // 2026-11：resume 模式续上上一次触发的会话（FR-CLI-06 同一机制：
-        // executor 取上次 run 的 sessionId 按描述表决定是否恢复）
+        // 2026-11：'resume' 续上上一次触发的会话（FR-CLI-06 同一机制：executor
+        // 取上次 run 的 sessionId 按描述表决定是否恢复）；'fresh-same-dir' 是
+        // 新会话（不传 resumeFromRunId）但目录保持（上面 fireWorkDir 已处理）
         ...(fireWorkDir ? { workDir: fireWorkDir } : {}),
         ...(s.resumeMode === 'resume' && s.lastRunId
           ? { resumeFromRunId: s.lastRunId as RunId }

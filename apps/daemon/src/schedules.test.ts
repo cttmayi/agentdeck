@@ -322,6 +322,34 @@ describe('定时任务整链（建 → 触发 → run → 记录）', () => {
       assert.ok(aw1.workDir, '第一次触发要有自动分配目录')
       assert.equal(aw2.workDir, aw1.workDir, `resume 无目录也必须延续上次目录：${aw2.workDir} vs ${aw1.workDir}`)
 
+      // ★ 2026-11 第三档（使用者："只有新开-保持的需求"）：'fresh-same-dir' =
+      //   新会话 + 保持上次目录——两次触发 workDir 延续（fireWorkDir 同 resume
+      //   分支），但**不传 resumeFromRunId**（新会话；run 不落库该字段，这里
+      //   断言两次都成功且目录延续即可）
+      const created3 = await postJson('/api/schedules', {
+        name: '新开保持目录',
+        cron: '0 9 * * 3',
+        executorType: 'agent',
+        executorId: executorAgentId,
+        taskText: '新会话同一间屋子',
+        resumeMode: 'fresh-same-dir',
+      })
+      assert.equal(created3.status, 201, `fresh-same-dir 创建失败：${JSON.stringify(created3.body)}`)
+      const sched3 = created3.body as { id: string; resumeMode: string }
+      assert.equal(sched3.resumeMode, 'fresh-same-dir')
+      const runIds3: string[] = []
+      for (let i = 0; i < 2; i++) {
+        const t = await postJson(`/api/schedules/${sched3.id}/trigger`, {})
+        const record = (t.body as { records: Array<{ runId: string | null }> }).records[0]
+        assert.ok(record && record.runId, `fresh-same-dir 第 ${i + 1} 次触发失败：${JSON.stringify(t.body)}`)
+        runIds3.push(record.runId)
+        await waitForTerminal(record.runId)
+      }
+      const sw1 = (await json(`/api/runs/${runIds3[0]}`)).body as { workDir: string | null }
+      const sw2 = (await json(`/api/runs/${runIds3[1]}`)).body as { workDir: string | null }
+      assert.ok(sw1.workDir, 'fresh-same-dir 第一次触发要有自动分配目录')
+      assert.equal(sw2.workDir, sw1.workDir, `fresh-same-dir 无目录也必须延续上次目录：${sw2.workDir} vs ${sw1.workDir}`)
+
       // PATCH：改回 fresh + 清空目录（三态：省略不动）
       const patched = await patchJson(`/api/schedules/${sched.id}`, {
         resumeMode: 'fresh',
