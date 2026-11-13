@@ -3067,14 +3067,33 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return true
         })()
 
-        // 2026-11（使用者要求"编辑后立刻测试"）：编辑表单栏头要有「保存并立即触发」。
-        // 真建一条 → 点行进详情 → 点编辑 → 断言按钮 → 取消 + 删除清理。
+        // 2026-11（使用者要求"保存后立刻测试"，两态都有）：新建表单栏头就要有
+        // 「保存并立即触发」；再真建一条 → 点行进详情 → 点编辑 → 编辑态也有。
         facts['schedules.editHasTrigger'] = await (async () => {
           const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
           if (!execId) {
             errors.push('editHasTrigger：拿不到夹具执行者 id')
             return false
           }
+          // 新建表单（刚被 formSurvivesNav 取消关掉）先开出来断言按钮
+          const newBtn2 = [...d().querySelectorAll('button')].find((b) => text(b) === '新建定时任务')
+          if (!newBtn2) {
+            errors.push('editHasTrigger：找不到「新建定时任务」')
+            return false
+          }
+          click(newBtn2)
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          const createTriggerBtn = [
+            ...d().querySelectorAll('.schedules-main .detail-actions button'),
+          ].find((b) => text(b) === '保存并立即触发')
+          if (!createTriggerBtn) {
+            errors.push('editHasTrigger：新建表单缺「保存并立即触发」按钮')
+            return false
+          }
+          // 关掉新建表单再走编辑路径
+          const cancel0 = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          if (cancel0) click(cancel0)
+          await until(() => !d().querySelector('.schedules-main .detail-actions'))
           const res = await f.contentWindow.fetch('/api/schedules', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

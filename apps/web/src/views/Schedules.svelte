@@ -288,7 +288,16 @@ import type { WebTextId } from '@agentdeck/i18n'
           body: JSON.stringify(input),
         })
         selectedId = created.id
-        showToast(tx('schedules.createdToast'))
+        if (saveAndTrigger) {
+          // 新建后立刻测试：保存完马上触发一次（与编辑态同一句）
+          await api(`/api/schedules/${created.id}/trigger`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+          })
+          showToast(tx('schedules.savedAndTriggeredToast'))
+        } else {
+          showToast(tx('schedules.createdToast'))
+        }
       }
       await load()
       closeForm()
@@ -553,17 +562,15 @@ import type { WebTextId } from '@agentdeck/i18n'
           >
             {$t('schedules.save')}
           </button>
-          <!-- 2026-11（使用者要求）：编辑后立刻测试——保存完马上触发一次 -->
-          {#if $schedForm.mode === 'edit'}
-            <button
-              type="button"
-              class="btn btn--secondary"
-              disabled={busy}
-              onclick={() => void save(true)}
-            >
-              {$t('schedules.saveAndTrigger')}
-            </button>
-          {/if}
+          <!-- 2026-11（使用者要求）：保存后立刻测试——新建/编辑都显示（保存完马上触发一次） -->
+          <button
+            type="button"
+            class="btn btn--secondary"
+            disabled={busy}
+            onclick={() => void save(true)}
+          >
+            {$t('schedules.saveAndTrigger')}
+          </button>
           <button type="button" class="btn btn--ghost" onclick={closeForm}>
             {$t('schedules.cancel')}
           </button>
