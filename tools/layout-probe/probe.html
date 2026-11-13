@@ -3046,6 +3046,46 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return Math.abs(w - t) > 80
         })()
 
+        // 2026-11（使用者："每月/间隔那行要放一行"）：量「每月第」与 select、
+        // 「每」与「分钟」的 top 是否在同一行（flex-wrap 拆行时 top 差一大截）。
+        // ⚠️ 放表单开着时（cancelCloses 前）；formPresets 把 freq 留在 custom，
+        //    这里自己点「每月」「间隔」。
+        facts['schedules.scheduleLineOneRow'] = await (async () => {
+          const monthlyBtn = [...d().querySelectorAll('.schedules-main .freq-picker button')].find(
+            (b) => text(b) === '每月',
+          )
+          if (!monthlyBtn) return false
+          click(monthlyBtn)
+          await until(() => !!d().querySelector('.schedules-main .schedule-line select'))
+          const everyMonth = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+            (l) => text(l) === '每月',
+          )
+          // ⚠️ 别量元素 top：span 与 select 垂直居中（align-items:center），一行时
+          //    top 也差 ~11px。量**容器高度**——一行 ~38px（select 高），拆两行
+          //    就 ~60px+，阈值 48 分得开。
+          const monthLine = everyMonth?.closest('.schedule-line')
+          const row1 = !!monthLine && monthLine.getBoundingClientRect().height < 48
+          const intervalBtn = [...d().querySelectorAll('.schedules-main .freq-picker button')].find(
+            (b) => text(b) === '间隔',
+          )
+          if (!intervalBtn) return row1
+          click(intervalBtn)
+          await until(() => !!d().querySelector('.schedules-main .schedule-line select'))
+          const every = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+            (l) => text(l) === '每',
+          )
+          const minuteSpan = [...d().querySelectorAll('.schedules-main .schedule-line span')].find(
+            (l) => text(l) === '分钟',
+          )
+          const intervalLine = every?.closest('.schedule-line')
+          const row2 = !!intervalLine && intervalLine.getBoundingClientRect().height < 48
+          if (!row1 || !row2) {
+            errors.push(`scheduleLineOneRow：每月一行 ${row1}、间隔一行 ${row2}`)
+            return false
+          }
+          return true
+        })()
+
         facts['schedules.cancelCloses'] = await (async () => {
           const cancel = [...d().querySelectorAll('.schedules-main button')].find(
             (b) => text(b) === '取消',

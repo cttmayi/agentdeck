@@ -669,7 +669,7 @@ import type { WebTextId } from '@agentdeck/i18n'
                 </div>
               </div>
             {:else if form.freq === 'monthly'}
-              <div class="schedule-line">
+              <div class="schedule-line keep-together">
                 <span>{$t('schedules.everyMonthDay')}</span>
                 <select bind:value={form.monthDay}>
                   <option value="L">{$t('schedules.lastDay')}</option>
@@ -679,7 +679,7 @@ import type { WebTextId } from '@agentdeck/i18n'
                 </select>
               </div>
             {:else if form.freq === 'interval'}
-              <div class="schedule-line">
+              <div class="schedule-line keep-together">
                 <span>{$t('schedules.everyInterval')}</span>
                 <select bind:value={form.minutes}>
                   {#each [5, 10, 15, 30, 60, 120, 180, 240] as m (m)}
@@ -1043,6 +1043,19 @@ import type { WebTextId } from '@agentdeck/i18n'
     flex-wrap: wrap;
     font-size: var(--fs-sm);
     color: var(--text-dim);
+  }
+  /* 2026-11（使用者："每月/间隔那行要放一行"）：全局 `select { width:100% }`
+     + flex-wrap 在窄列里把「每月 [第…日]」「每 [30] 分钟」拆成两行。
+     keep-together = nowrap + select 按内容宽；weekly 行**不动**（工作日快捷 +
+     7 颗星期 pill 必须能换行）。 */
+  .schedule-line.keep-together {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+  .schedule-line.keep-together select {
+    flex: 0 1 auto;
+    min-width: 0;
+    width: auto;
   }
   .weekday-picker {
     display: flex;
