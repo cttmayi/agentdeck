@@ -1077,7 +1077,10 @@ import type { WebTextId } from '@agentdeck/i18n'
   .schedule-time input[type='number'] {
     font-size: var(--fs-xl);
     font-weight: 600;
-    width: 4rem;
+    /* 2026-11（使用者："26 的时候 6 被挡住一部分"）：4rem 放不下两位数字 +
+       浏览器自带 spinner（上下箭头）。6rem 与原生 type=time 控件同宽，留够
+       spinner 的空间，不再裁字。 */
+    width: 6rem;
     text-align: center;
   }
   .schedule-time .time-unit {
