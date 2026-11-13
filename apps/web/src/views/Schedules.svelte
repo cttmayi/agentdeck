@@ -462,16 +462,17 @@ import type { WebTextId } from '@agentdeck/i18n'
         <div class="main-panel-head">
           <h2>{$t(formMode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
           <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）；
-               取消跟它一排，原来是唯一的头部按钮 -->
+               取消跟它一排。按钮风格照聊天页改名态：保存 accent-dim 底、正常字号
+               （不用 btn--sm 小尺寸，使用者说风格不对），取消 btn--ghost -->
           <button
             type="button"
-            class="btn btn--primary btn--sm"
+            class="btn btn--primary"
             disabled={busy}
             onclick={() => void save()}
           >
             {$t('schedules.save')}
           </button>
-          <button type="button" class="btn btn--ghost btn--sm" onclick={closeForm}>
+          <button type="button" class="btn btn--ghost" onclick={closeForm}>
             {$t('schedules.cancel')}
           </button>
         </div>
