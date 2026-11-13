@@ -3151,6 +3151,52 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return true
         })()
 
+        // 2026-11（使用者："定时任务列表 item 宽度不对"）：长标题必须单行 + 省略号
+        //   （310 批同款规矩，sched-title 原来漏了 block + max-width 被顶宽）。
+        //   真建一条长名字 → 量标题 scrollWidth/clientWidth → 删除清理。
+        facts['schedules.rowTitleNoOverflow'] = await (async () => {
+          const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+          if (!execId) {
+            errors.push('rowTitleNoOverflow：拿不到夹具执行者 id')
+            return false
+          }
+          const longName = '探针很长的名字探针很长的名字探针很长的名字探针很长的名字'
+          const res = await f.contentWindow.fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: longName,
+              cron: '0 9 * * *',
+              executorType: 'agent',
+              executorId: execId,
+              taskText: 'x',
+            }),
+          })
+          if (res.status !== 201) return false
+          const created = await res.json()
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !d().querySelector('.schedules-main'))
+          f.contentWindow.location.hash = '#/schedules'
+          await until(() => !!d().querySelector('.schedules-main'))
+          await untilNet(
+            () => [...d().querySelectorAll('.sched-row')].some((r) => text(r).includes(longName)),
+            60,
+          )
+          const row = [...d().querySelectorAll('.sched-row')].find((r) => text(r).includes(longName))
+          const title = row?.querySelector('.sched-title')
+          // 与任务页 `tasks.titleClipped` 同款判法：长标题**被截断**
+          // （scrollWidth > clientWidth）= 单行省略生效，没有把行顶宽
+          const ok = !!title && title.clientWidth > 0 && title.scrollWidth > title.clientWidth + 1
+          await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
+          if (!ok) {
+            errors.push(
+              `rowTitleNoOverflow：标题 ${title ? `${title.scrollWidth}/${title.clientWidth}px` : '找不到'}`,
+            )
+            return false
+          }
+          return true
+        })()
+
         // 2026-11（使用者要求"保存后立刻测试"，两态都有）：新建表单栏头就要有
         // 「保存并立即触发」；再真建一条 → 点行进详情 → 点编辑 → 编辑态也有。
         facts['schedules.editHasTrigger'] = await (async () => {

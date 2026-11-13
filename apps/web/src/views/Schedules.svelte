@@ -957,6 +957,11 @@ import type { WebTextId } from '@agentdeck/i18n'
 
 <style>
   .sched-title {
+    /* ★ 310 批同款规矩（使用者报过"标题被拉成两行还带省略号"）：行内元素上
+       overflow/text-overflow 不生效——必须 block + max-width:100%，省略号才有
+       盒子可裁；2026-11（使用者："列表 item 宽度不对"）sched-title 漏了这两行。 */
+    display: block;
+    max-width: 100%;
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -969,6 +974,11 @@ import type { WebTextId } from '@agentdeck/i18n'
     color: var(--text-faint);
     overflow: hidden;
     white-space: nowrap;
+  }
+  /* 2026-11（同一批）：flex 子项默认 min-width:auto 不收缩——长 cron 人话
+     （如"整点, 每隔 4 小时"）会把行撑宽/溢出。子项可收缩后省略号才生效。 */
+  .sched-sub > * {
+    min-width: 0;
   }
   .sched-cron {
     color: var(--text-dim);
