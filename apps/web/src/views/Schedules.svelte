@@ -897,8 +897,6 @@ import type { WebTextId } from '@agentdeck/i18n'
               · {$t('newtask.workDirLabel')}：<code class="mono">{s.workDir}</code>
             {/if}
           </p>
-          <!-- 任务原文：与任务页详情同款（hint + pre-wrap），不用 mono 小字 -->
-          <p class="hint" style="white-space:pre-wrap">{s.taskText}</p>
         </div>
 
         <div class="drawer-section">
