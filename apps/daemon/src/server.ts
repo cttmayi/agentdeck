@@ -90,7 +90,6 @@ import {
   renderScheduleTask,
   saveSchedules,
   scheduleVarsFor,
-  splitScheduleRequest,
   validateCron,
   type Schedule,
   type ScheduleRecord,
@@ -10185,7 +10184,6 @@ async function injectedSkillsOf(
       s.taskText,
       scheduleVarsFor(now, s.triggerCount + 1, runId, s.lastRunId),
     )
-    const { title, body } = splitScheduleRequest(prompt)
 
     try {
       // ── 执行者：组 → 组的执行者；单个智能体 → 它自己 ──
@@ -10233,12 +10231,15 @@ async function injectedSkillsOf(
         agentRef = { id: agent.id, name: agent.name, instructions: agent.instructions }
       }
 
-      // ── 建 issue（第一行当标题；模板渲染后为空标题时用任务名兜底）──
+      // ── 建 issue（2026-11 使用者："触发的任务名称改成 定时任务名称 - 次数"）──
+      //    标题固定 = 「任务名 - 第 N 次」（triggerCount+1 = 这次是第几次）；
+      //    prompt 全文进 description（不再拆第一行当标题——第一行仍全文可见，
+      //    agent 的 prompt 与改动前一致）。
       const issue: Issue = {
         id: ulid() as Issue['id'],
         workspaceId,
-        title: title || s.name,
-        description: body,
+        title: `${s.name} - ${s.triggerCount + 1}`,
+        description: prompt,
         status: 'todo',
         priority: 'none',
         assignee: { type: 'agent', id: agentRef.id },

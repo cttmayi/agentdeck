@@ -233,13 +233,3 @@ function weekdayName(n: number): string {
   return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][((n % 7) + 7) % 7] ?? String(n)
 }
 
-/** 「要做什么」切分（与 web 版 `splitRequest` 同规则：第一行当标题，只截标题）。 */
-export function splitScheduleRequest(text: string): { title: string; body: string } {
-  const lines = text.split('\n')
-  const titleIndex = lines.findIndex((line) => line.trim() !== '')
-  if (titleIndex === -1) return { title: '', body: '' }
-  return {
-    title: lines[titleIndex]!.trim().slice(0, 500),
-    body: lines.slice(titleIndex + 1).join('\n').trim(),
-  }
-}

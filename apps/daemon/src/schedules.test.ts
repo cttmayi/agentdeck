@@ -25,7 +25,6 @@ import {
   renderScheduleTask,
   saveSchedules,
   scheduleVarsFor,
-  splitScheduleRequest,
   validateCron,
   nextRunAt,
   type Schedule,
@@ -147,14 +146,6 @@ describe('定时任务存储与切分', () => {
     } finally {
       await cleanup(dir)
     }
-  })
-
-  test('★ splitScheduleRequest：第一行当标题、前面空行不算、标题超 500 截断', () => {
-    const { title, body } = splitScheduleRequest('\n\n2026-11-16 竞品周报\n抓取本周更新。')
-    assert.equal(title, '2026-11-16 竞品周报')
-    assert.equal(body, '抓取本周更新。')
-    const long = splitScheduleRequest('x'.repeat(600) + '\n正文')
-    assert.equal(long.title.length, 500)
   })
 })
 
@@ -400,13 +391,20 @@ describe('定时任务整链（建 → 触发 → run → 记录）', () => {
     assert.equal(sched.lastRunId, runId)
     assert.ok(sched.lastTriggerAt !== null)
 
-    // 模板变量已渲染进 issue 标题（{{date}} 今天）
+    // 2026-11（使用者："触发的任务名称改成 定时任务名称 - 次数"）：issue 标题
+    // 固定 = 「任务名 - 第 N 次」；模板第一行不再当标题（{{date}} 等仍全文渲染
+    // 进 description，agent 的 prompt 不变）
     const issues = await json('/api/issues')
     const titles = (issues.body as { items: Array<{ title: string }> }).items.map((i) => i.title)
-    const today = new Date()
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
-    assert.ok(titles.some((t) => t.startsWith(todayStr)), `issue 标题应含今天日期：${titles.join(' | ')}`)
+    assert.ok(titles.some((t) => t === '竞品周报 - 1'), `issue 标题应为「竞品周报 - 1」：${titles.join(' | ')}`)
+    const mine = (issues.body as { items: Array<{ title: string; description: string }> }).items.find(
+      (i) => i.title === '竞品周报 - 1',
+    )
+    assert.ok(mine, '要找到刚触发的那条 issue')
+    assert.ok(
+      (mine!.description ?? '').includes('{{date}}'.length > 0 ? '竞品周报（第' : ''),
+      `模板仍全文进 description：${mine!.description}`,
+    )
 
     // 停用 → 列表 enabled=false
     const patched = await patchJson(`/api/schedules/${scheduleId}`, { enabled: false })
