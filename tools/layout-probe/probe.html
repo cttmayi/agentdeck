@@ -2919,9 +2919,18 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return false
           }
           click(newBtn)
-          const panel = await until(() => d().querySelector('.schedules-main .main-panel'))
+          // 2026-11 表单容器改为与任务页同款（detail-head + 动作工具条），
+          // 判据跟着走：栏头存在 + 工具条里有「保存」
+          const panel = await until(() => d().querySelector('.schedules-main .detail-actions'))
           if (!panel) {
-            errors.push('点「新建定时任务」后表单没出现（.main-panel 没有）')
+            errors.push('点「新建定时任务」后表单没出现（.detail-actions 没有）')
+            return false
+          }
+          const saveBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+            (b) => text(b) === '保存',
+          )
+          if (!saveBtn) {
+            errors.push('表单栏头工具条里没有「保存」按钮')
             return false
           }
           const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
@@ -3000,8 +3009,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return false
           }
           click(cancel)
-          await until(() => !d().querySelector('.schedules-main .main-panel'))
-          return !d().querySelector('.schedules-main .main-panel')
+          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          return !d().querySelector('.schedules-main .detail-actions')
         })()
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')

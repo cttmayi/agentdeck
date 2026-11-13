@@ -457,13 +457,19 @@ import type { WebTextId } from '@agentdeck/i18n'
   <!-- ══════════ 右栏 ══════════ -->
   <section class="pane-body schedules-main">
     {#if formMode === 'create' || formMode === 'edit'}
-      <!-- ── 新建 / 编辑表单 ── -->
-      <div class="main-panel">
-        <div class="main-panel-head">
+      <!-- ── 新建 / 编辑表单 ──
+           ★ 2026-11 定稿：右栏表单容器与任务页/聊天页同款——栏头用 `detail-head`
+            （两列网格：标题左、动作右），动作走 `detail-actions` 工具条（透明胶囊，
+            app.css 265 批那条「栏头那一排动作也走同一条工具条」）；不用 `.main-panel`
+            卡片（那是设置/安装那种次级面板的容器，使用者说"和其他页面风格完全不同"）。
+            `.main-panel-body` 的留白与 detail-head 同套（sp-4/sp-5），正文直接铺。 -->
+      <div class="detail-head">
+        <div class="detail-sub">
           <h2>{$t(formMode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
-          <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）；
-               取消跟它一排。按钮风格照聊天页改名态：保存 accent-dim 底、正常字号
-               （不用 btn--sm 小尺寸，使用者说风格不对），取消 btn--ghost -->
+        </div>
+        <div class="detail-actions">
+          <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）——在动作
+               工具条里它就是一颗透明胶囊，与任务页/聊天页栏头动作同一长相 -->
           <button
             type="button"
             class="btn btn--primary"
@@ -476,7 +482,8 @@ import type { WebTextId } from '@agentdeck/i18n'
             {$t('schedules.cancel')}
           </button>
         </div>
-        <div class="main-panel-body">
+      </div>
+      <div class="main-panel-body">
           <div class="field">
             <label>{$t('schedules.nameLabel')}</label>
             <input
@@ -650,7 +657,6 @@ import type { WebTextId } from '@agentdeck/i18n'
             <div class="notice bad">{formError}</div>
           {/if}
         </div>
-      </div>
     {:else if selectedId}
       {@const s = list.find((x) => x.id === selectedId)}
       {#if s}
