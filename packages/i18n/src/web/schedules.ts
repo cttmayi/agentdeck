@@ -12,7 +12,6 @@ export const schedulesText = {
   'schedules.navHint': { zh: '到点自动跑', en: 'Run on a schedule' },
   'schedules.title': { zh: '定时任务', en: 'Schedules' },
   'schedules.titleHint': { zh: '触发的任务在「任务」页查看', en: 'Triggered tasks show up in Tasks' },
-  'schedules.new': { zh: '新建定时任务', en: 'New schedule' },
   'schedules.listTitle': { zh: '所有定时任务', en: 'All schedules' },
   'schedules.enabledCount': { zh: '{enabled} 个启用 · 共 {total} 个', en: '{enabled} enabled · {total} total' },
   'schedules.empty': { zh: '还没有定时任务。到点会自动跑起来的任务，从这里建。', en: 'No schedules yet. Tasks that run on their own start here.' },

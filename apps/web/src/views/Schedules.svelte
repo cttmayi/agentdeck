@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import ListRow from '../components/ListRow.svelte'
+  import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
     api,
     type ScheduleCreateInput,
@@ -124,6 +126,25 @@ import type { WebTextId } from '@agentdeck/i18n'
   $: actionNames = [...chain.actions, ...chain.unavailableActions]
 
   $: enabledCount = list.filter((s) => s.enabled).length
+
+  // ── 新建 / 编辑 ──
+  // ── 顶栏动作（与智能体/聊天/任务同款：主操作在顶栏 page-actions，
+  //    不在列表头自插按钮——Crystallize.svelte 那句「主操作放顶栏」是明规则；
+  //    2026-11 使用者点名：「新建定时任务」按钮与其它页完全不一样）
+  //    label 复用 createTitle（与 agents 同一个做法：按钮 = 它打开的面板标题，
+  //    同一句话只有一个出处）
+  $: setPageActions('schedules', [
+    {
+      id: 'new',
+      label: $t('schedules.createTitle'),
+      kind: 'primary',
+      icon: 'plus',
+      // 表单开着时禁点（与智能体页 creating 同款）
+      disabled: formMode !== null,
+      onActivate: openCreate,
+    },
+  ])
+  onDestroy(() => clearPageActions('schedules'))
 
   // ── 新建 / 编辑 ──
   function openCreate(): void {
@@ -393,9 +414,6 @@ import type { WebTextId } from '@agentdeck/i18n'
         <h2>{$t('schedules.listTitle')}</h2>
         <p class="hint">{$t('schedules.enabledCount', { enabled: enabledCount, total: list.length })}</p>
       </div>
-      <button type="button" class="btn btn--primary btn--sm" onclick={openCreate}>
-        {$t('schedules.new')}
-      </button>
     </header>
 
     <div class="pane-body">
