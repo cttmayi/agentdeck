@@ -34,3 +34,4 @@ ref/
 # ── 本地环境 ──
 .env
 .env.local
+/docs/tmp/
