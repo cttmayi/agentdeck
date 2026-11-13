@@ -483,7 +483,7 @@ import type { WebTextId } from '@agentdeck/i18n'
           </button>
         </div>
       </div>
-      <div class="main-panel-body">
+      <div class="schedule-form-body">
           <div class="field">
             <label>{$t('schedules.nameLabel')}</label>
             <input
@@ -606,17 +606,20 @@ import type { WebTextId } from '@agentdeck/i18n'
           <!-- 交给谁：智能体 / 组（与任务表单同一套推导） -->
           <div class="field">
             <label>{$t('schedules.executorLabel')}</label>
-            <div class="exec-switch">
+            <!-- 智能体/组互斥切换：与任务表单同一套轨道（app.css .source-toggle，
+                 2026-11 review 从 NewTaskForm 提取共用——原来定时任务用独立 pill，
+                 使用者说整个页面风格与其它页面完全不同） -->
+            <div class="source-toggle">
               <button
                 type="button"
-                class="pill {formSource === 'agent' ? 'active' : ''}"
+                class:active={formSource === 'agent'}
                 onclick={() => (formSource = 'agent')}
               >
                 {$t('schedules.executorAgent')}
               </button>
               <button
                 type="button"
-                class="pill {formSource === 'group' ? 'active' : ''}"
+                class:active={formSource === 'group'}
                 onclick={() => (formSource = 'group')}
               >
                 {$t('schedules.executorGroup')}
@@ -689,17 +692,18 @@ import type { WebTextId } from '@agentdeck/i18n'
           </div>
         </div>
 
-        <div class="detail-section">
+        <div class="drawer-section">
           <h3>{$t('schedules.executorLabel')}</h3>
           <p class="muted">
             {s.executorType === 'group'
               ? $groups.find((g) => g.id === s.executorId)?.name ?? s.executorId
               : $agents.find((a) => a.id === s.executorId)?.name ?? s.executorId}
           </p>
-          <pre class="task-text">{s.taskText}</pre>
+          <!-- 任务原文：与任务页详情同款（hint + pre-wrap），不用 mono 小字 -->
+          <p class="hint" style="white-space:pre-wrap">{s.taskText}</p>
         </div>
 
-        <div class="detail-section">
+        <div class="drawer-section">
           <h3>
             {$t('schedules.recordsTitle')}
             <span class="faint fs-xs">{$t('schedules.recordsHint', { n: s.records.length })}</span>
@@ -709,7 +713,7 @@ import type { WebTextId } from '@agentdeck/i18n'
               {$t('schedules.empty')}
             </p>
           {:else}
-            <table class="record-table">
+            <table>
               <thead>
                 <tr>
                   <th>{$t('schedules.colTriggeredAt')}</th>
@@ -865,11 +869,11 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   /* 结果区三行（2026-11 v8 定型：cron / 人话 / 下次 常驻，改哪侧都实时同步） */
   .schedule-time {
+    /* 大字时间：只改字号与宽度——border/radius/padding 交给全局 input
+       （2026-11 review：原来重复定义了一份全局已有样式） */
     font-size: var(--fs-xl);
     font-weight: 600;
-    padding: 0.25rem 0.6rem;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius);
+    width: 6rem;
     margin-bottom: 0.5rem;
   }
   .quick-weekdays {
@@ -947,49 +951,19 @@ import type { WebTextId } from '@agentdeck/i18n'
     border-color: var(--accent);
     color: var(--accent);
   }
-  .exec-switch {
-    display: flex;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
-  }
   .summary-line {
     margin-top: 0.5rem;
     color: var(--text-dim);
-  }
-  .task-text {
-    margin-top: 0.5rem;
-    font-family: var(--font-mono);
-    font-size: var(--fs-xs);
-    white-space: pre-wrap;
-    color: var(--text-dim);
-  }
-  .record-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--fs-sm);
-  }
-  .record-table th {
-    text-align: left;
-    font-weight: 600;
-    color: var(--text-dim);
-    padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid var(--line);
-    font-size: var(--fs-xs);
-  }
-  .record-table td {
-    padding: 0.45rem 0.6rem;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
   }
   .mono {
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
   }
-  .detail-section {
-    margin-top: 1.25rem;
+  /* 表单正文留白与任务表单（NewTaskForm .form-frame）同款：上下 sp-5、左右 sp-6 */
+  .schedule-form-body {
+    padding: var(--sp-5) var(--sp-6);
   }
-  .detail-section h3 {
-    font-size: var(--fs-md);
+  .source-toggle {
     margin-bottom: 0.5rem;
   }
 </style>

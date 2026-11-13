@@ -623,45 +623,6 @@
    * —— `var(--line)` 的轨 + 圆角矩形按钮，活动态 `--accent-dim` 实心底白字。
    * 原来是独立胶囊（`border-radius: 999px` + 细边框），使用者要求改样式。
    */
-  .source-toggle {
-    display: flex;
-    align-items: center;
-    /* ★ 轨道**贴内容**：`.pick-card` 是纵向 flex，块级子项默认被 `stretch` 拉满
-       整卡宽度——实测灰轨横贯整张卡（使用者报"右侧被拉太长了"）。钉死内容宽，
-       与顶栏 `page-actions`（flex 行里的内容宽轨道）同一个行为。 */
-    width: fit-content;
-    height: 1.9rem;
-    box-sizing: border-box;
-    padding: 0 var(--sp-1);
-    gap: 2px;
-    background: var(--line);
-    border-radius: var(--radius);
-  }
-  .source-toggle button {
-    height: 1.5rem;
-    padding: 0 var(--sp-3);
-    border-radius: var(--radius-sm);
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .source-toggle button:hover:not(:disabled) {
-    background: var(--surface);
-    color: var(--text);
-  }
-  .source-toggle button.active {
-    /* ⚠️ 背景用 `--accent-dim` 而不是 `--accent`：暗色主题下 `--accent` 是**浅蓝**
-       （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
-       出来（与顶栏激活按钮同一套惯例）。 */
-    background: var(--accent-dim, #2f6fed);
-    color: var(--on-accent);
-  }
-
   .card-title {
     font-size: var(--fs-sm);
     font-weight: 600;

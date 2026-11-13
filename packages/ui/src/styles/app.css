@@ -1114,6 +1114,56 @@ hr {
   filter: none;
 }
 
+/* ══════════ 轨道式互斥切换（`.source-toggle`）══════════
+ *
+ * 「智能体 / 智能体组」这类二选一（乃至多选一）的切换：灰轨 + 透明胶囊按钮，
+ * 选中那颗 `active` 变 `--accent-dim` 底白字。与 `.detail-actions` 工具条
+ * 同一族（轨道 + 1.5rem 胶囊），只是它**贴内容宽**（`width: fit-content`）、
+ * 用在表单字段里而不是栏头。
+ *
+ * ★ 2026-11：原来定义在 `NewTaskForm.svelte` 局部，定时任务表单的「智能体/组」
+ *   互斥切换要同一形态，于是提到这里**两处共用**（使用者：定时任务页风格与
+ *   其它页面完全不同——独立 pill 换成这同一套轨道）。
+ */
+.source-toggle {
+  display: flex;
+  align-items: center;
+  /* ★ 轨道**贴内容**：父容器是纵向 flex，块级子项默认被 `stretch` 拉满整宽——
+     实测灰轨横贯整卡（使用者报"右侧被拉太长了"）。钉死内容宽，与顶栏
+     `page-actions`（flex 行里的内容宽轨道）同一个行为。 */
+  width: fit-content;
+  height: 1.9rem;
+  box-sizing: border-box;
+  padding: 0 var(--sp-1);
+  gap: 2px;
+  background: var(--line);
+  border-radius: var(--radius);
+}
+.source-toggle button {
+  height: 1.5rem;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.source-toggle button:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+.source-toggle button.active {
+  /* ⚠️ 背景用 `--accent-dim` 而不是 `--accent`：暗色主题下 `--accent` 是**浅蓝**
+     （#5aa9f5），白字配它看不见；`--accent-dim` 两种主题下都是深蓝，白字才读得
+     出来（与顶栏激活按钮同一套惯例）。 */
+  background: var(--accent-dim, #2f6fed);
+  color: var(--on-accent);
+}
+
 /* 窄屏的返回按钮独占第一行 */
 .detail-head .back-to-list {
   grid-column: 1 / -1;
