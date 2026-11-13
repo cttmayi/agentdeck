@@ -17,4 +17,7 @@ export const { relativeTime, absoluteTime } = createTimeKit({
   minutesAgo: (count) => tx('common.minutesAgo', { count }),
   hoursAgo: (count) => tx('common.hoursAgo', { count }),
   daysAgo: (count) => tx('common.daysAgo', { count }),
+  inMinutes: (count) => tx('common.inMinutes', { count }),
+  inHours: (count) => tx('common.inHours', { count }),
+  inDays: (count) => tx('common.inDays', { count }),
 })

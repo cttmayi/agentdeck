@@ -2951,6 +2951,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             errors.push(`每周视图不对：星期键 ${dayBtns}/7、工作日快捷 ${quick}`)
             return false
           }
+          // 2026-11 v8：星期按钮曾是 1.9rem 圆形，「周一」两个字出框（使用者抓到）——
+          // 量每个按钮有没有文字溢出（scrollWidth > clientWidth 就是溢出）
+          const overflowDays = [...d().querySelectorAll('.schedules-main .weekday-btn')].filter(
+            (b) => b.scrollWidth > b.clientWidth,
+          )
+          if (overflowDays.length > 0) {
+            errors.push(`星期按钮文字出框：${overflowDays.length} 个（scrollWidth > clientWidth）`)
+            return false
+          }
           const quickBtn = d().querySelector('.schedules-main .quick-weekdays')
           click(quickBtn)
           await wait(60)

@@ -51,5 +51,9 @@ export const commonText = {
   'common.minutesAgo': { zh: '{count} 分钟前', en: '{count} min ago' },
   'common.hoursAgo': { zh: '{count} 小时前', en: '{count} h ago' },
   'common.daysAgo': { zh: '{count} 天前', en: '{count} d ago' },
+  // 未来向（定时任务「下次触发」等）：2026-11 v8 补，与过去向对称
+  'common.inMinutes': { zh: '{count} 分钟后', en: 'in {count} min' },
+  'common.inHours': { zh: '{count} 小时后', en: 'in {count} h' },
+  'common.inDays': { zh: '{count} 天后', en: 'in {count} d' },
   'common.busyHint': { zh: '上一次操作还没结束，稍等一下', en: 'The previous action has not finished yet — one moment' },
 } as const satisfies TextCatalog

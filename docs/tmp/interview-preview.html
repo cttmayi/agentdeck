@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能体生成者 · 聊天页（设计稿预览）</title>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#161920; --surface-2:#1c2029; --surface-hover:#222733; --panel:#0b0d11;
+    --line:#262b36; --line-strong:#333a49;
+    --text:#e6e9ef; --text-dim:#a2abbb; --text-faint:#6d7686;
+    --accent:#5aa9f5; --accent-dim:#2b5f92; --good:#4ec9a0; --bad:#f2716a; --warn:#e0b04a;
+    --status-todo:#6d7686; --status-active:#5aa9f5; --status-review:#b48ef0;
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,'Cascadia Code',Consolas,monospace;
+    --sp-1:.25rem; --sp-2:.5rem; --sp-3:.75rem; --sp-4:1rem; --sp-5:1.5rem; --sp-6:2rem;
+    --fs-2xs:.6875rem; --fs-xs:.75rem; --fs-sm:.8125rem; --fs-base:.875rem; --fs-md:.9375rem; --fs-lg:1.0625rem; --fs-xl:1.375rem;
+    --lh-tight:1.3; --lh-base:1.6; --radius:8px; --shadow-2:0 12px 32px rgba(0,0,0,.5);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body { background:var(--bg); color:var(--text); font-family:var(--font); font-size:var(--fs-base); line-height:var(--lh-base); }
+  h1,h2,h3,h4 { margin:0; line-height:var(--lh-tight); font-weight:600; }
+  p { margin:0 0 var(--sp-3); }
+  code,pre { font-family:var(--font-mono); font-size:var(--fs-xs); }
+  button { font:inherit; cursor:pointer; }
+
+  .topbar { display:flex; align-items:center; gap:var(--sp-4); height:48px; padding:0 var(--sp-5);
+    background:var(--surface); border-bottom:1px solid var(--line); }
+  .brand { font-weight:600; font-size:var(--fs-md); color:var(--text-dim); }
+  .brand b { color:var(--text); }
+  .nav { display:flex; gap:var(--sp-1); }
+  .nav a { padding:var(--sp-1) var(--sp-3); border-radius:var(--radius); color:var(--text-dim); text-decoration:none; font-size:var(--fs-sm); }
+  .nav a.active { color:var(--text); background:var(--surface-2); }
+  .topbar-actions { margin-left:auto; display:flex; gap:var(--sp-2); align-items:center; }
+  .tag { font-size:var(--fs-2xs); color:var(--text-faint); border:1px solid var(--line-strong); padding:1px 6px; border-radius:999px; }
+
+  .split { display:flex; height:calc(100% - 49px); }
+  .list-pane { width:272px; min-width:220px; border-right:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; overflow-y:auto; }
+  .list-head { padding:var(--sp-3) var(--sp-4); border-bottom:1px solid var(--line); }
+  .list-head h2 { font-size:var(--fs-lg); }
+  .list-head .sub { color:var(--text-faint); font-size:var(--fs-xs); margin-top:2px; }
+  .convs { list-style:none; margin:0; padding:var(--sp-2) 0; }
+  .convs li { padding:var(--sp-2) var(--sp-4); border-radius:var(--radius); margin:0 var(--sp-2) 2px; }
+  .convs li .name { font-size:var(--fs-sm); }
+  .convs li .meta { color:var(--text-faint); font-size:var(--fs-2xs); }
+  .convs li:hover { background:var(--surface-hover); }
+  .convs li.cur { background:var(--surface-2); }
+  .convs li .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:1px; background:var(--status-review); }
+  .convs li .dot.idle { background:var(--status-todo); }
+  .tree { padding:var(--sp-3) var(--sp-4); border-top:1px solid var(--line); font-size:var(--fs-xs); }
+  .tree h4 { color:var(--text-dim); font-size:var(--fs-xs); margin-bottom:var(--sp-2); }
+  .tree .file { color:var(--text-faint); padding:2px 0 2px 14px; font-family:var(--font-mono); }
+  .tree .dir { color:var(--text-dim); padding:2px 0; font-family:var(--font-mono); font-weight:600; }
+  .tree .dir.agent-dir { color:var(--accent); }
+  .tree .file.in-agent { color:var(--text-dim); }
+  .tree .file.draft { color:var(--good); font-weight:600; }
+  .tree .note { color:var(--text-faint); font-size:var(--fs-2xs); margin-top:4px; }
+
+  .main { flex:1; overflow-y:auto; }
+  .pane-head { padding:var(--sp-4) var(--sp-5) var(--sp-3); border-bottom:1px solid var(--line); }
+  .pane-head h2 { font-size:var(--fs-xl); }
+  .pane-head .sub { color:var(--text-faint); font-size:var(--fs-xs); margin-top:2px; }
+  .bar-head { display:flex; gap:var(--sp-2); align-items:center; }
+  .body { padding:var(--sp-5); max-width:860px; }
+
+  .btn { border-radius:var(--radius); border:1px solid var(--line-strong); background:var(--surface-2); color:var(--text); padding:5px 12px; font-size:var(--fs-sm); }
+  .btn:hover { background:var(--surface-hover); }
+  .btn.primary { background:var(--accent-dim); border-color:transparent; color:#fff; }
+  .btn.primary:hover { background:#3573b3; }
+  .btn.ghost { background:transparent; }
+  .hint { color:var(--text-faint); font-size:var(--fs-xs); }
+
+  .detect-bar { display:flex; align-items:center; gap:var(--sp-2); background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); padding:var(--sp-2) var(--sp-3); margin-bottom:var(--sp-4); font-size:var(--fs-xs); }
+  .detect-bar .ok { color:var(--good); }
+
+  .msg { display:flex; gap:var(--sp-3); margin-bottom:var(--sp-4); }
+  .who { flex:none; width:88px; text-align:right; color:var(--text-faint); font-size:var(--fs-2xs); padding-top:2px; }
+  .bubble { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:var(--sp-3) var(--sp-4); min-width:0; }
+  .bubble.user { background:var(--accent-dim); border-color:transparent; color:#fff; }
+  .bubble .t { font-size:var(--fs-sm); }
+  .bubble .t b { color:var(--text); }
+  .bubble.user .t b { color:#fff; }
+  .rules { background:var(--panel); border:1px solid var(--line-strong); border-radius:var(--radius); padding:var(--sp-3) var(--sp-4); margin-top:var(--sp-2); font-size:var(--fs-xs); }
+  .rules .cap { color:var(--text-faint); margin-bottom:var(--sp-1); }
+  .rules pre { margin:0; color:var(--text-dim); white-space:pre-wrap; line-height:1.6; }
+
+  .gen-panel { background:var(--surface); border:1px solid var(--line-strong); border-radius:var(--radius); padding:var(--sp-4); margin:var(--sp-4) 0; }
+  .gen-panel .cap { color:var(--text-dim); font-size:var(--fs-sm); font-weight:600; margin-bottom:var(--sp-3); }
+  .form .field { margin-bottom:var(--sp-4); }
+  .form .field > label { display:block; font-weight:600; margin-bottom:var(--sp-1); font-size:var(--fs-sm); }
+  .form input[type=text], .form textarea { width:100%; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    color:var(--text); padding:8px 10px; font:inherit; font-size:var(--fs-sm); }
+  .form textarea { resize:vertical; }
+  .form input:focus, .form textarea:focus { outline:none; border-color:var(--accent); }
+  .draft-note { font-size:var(--fs-2xs); color:var(--good); margin-bottom:var(--sp-3); }
+  .warn-note { font-size:var(--fs-xs); color:var(--warn); border:1px solid var(--warn); border-radius:var(--radius);
+    padding:8px 10px; margin-bottom:var(--sp-3); }
+  .role-pick { display:flex; gap:var(--sp-2); }
+  .role-card { flex:1; border:1px solid var(--line-strong); border-radius:var(--radius); padding:8px 10px; text-align:center; }
+  .role-card.sel { border-color:var(--accent); background:var(--accent-dim); color:#fff; }
+  .role-card .r { font-size:var(--fs-sm); font-weight:600; }
+  .role-card .rh { font-size:var(--fs-2xs); color:var(--text-dim); }
+  .role-card.sel .rh { color:rgba(255,255,255,.8); }
+  .skill-opts { display:flex; flex-direction:column; gap:6px; font-size:var(--fs-sm); }
+  .skill-opts label { display:flex; align-items:center; gap:var(--sp-2); }
+  .skills-hint { display:flex; flex-wrap:wrap; gap:var(--sp-1); margin:var(--sp-2) 0 var(--sp-3); }
+  .skill-chip { font-size:var(--fs-2xs); color:var(--text-dim); border:1px solid var(--line-strong); border-radius:999px; padding:1px 8px; }
+
+  .notes { margin:var(--sp-6) var(--sp-5) var(--sp-8); max-width:860px; }
+  .notes h3 { font-size:var(--fs-md); margin-bottom:var(--sp-3); }
+  .notes .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:var(--sp-4); margin-bottom:var(--sp-3); }
+  .notes li { margin-bottom:var(--sp-2); color:var(--text-dim); }
+  .notes code { color:var(--accent); }
+  .hide { display:none !important; }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="topbar">
+  <div class="brand">AgentDeck <b>· 设计稿预览</b></div>
+  <nav class="nav"><a href="#" class="active">聊天页</a><a href="#">智能体</a><a href="#">技能</a><a href="#">任务</a></nav>
+  <div class="topbar-actions"><span class="tag">设计稿 · 未实作</span></div>
+</div>
+
+<div class="split">
+  <!-- 左栏：对话列表 + 工作目录文件树 -->
+  <aside class="list-pane">
+    <div class="list-head"><h2>对话</h2><div class="sub">智能体生成者 = 问 + 起草，一个内置</div></div>
+    <ul class="convs">
+      <li class="cur"><span class="dot"></span><div class="name">智能体生成者 · 会议纪要岗位</div><div class="meta">agent-maker · 已产出岗位卡</div></li>
+      <li><span class="dot idle"></span><div class="name">本周例会纪要</div><div class="meta">执行者：会议纪要助理</div></li>
+      <li><span class="dot idle"></span><div class="name">发布审核讨论</div><div class="meta">执行者：发布审核</div></li>
+    </ul>
+    <div class="tree">
+      <h4>工作目录 conversation-…/</h4>
+      <div class="file draft">✓ agent-draft.md（岗位卡草稿）</div>
+      <div class="dir agent-dir">📁 agent/（可选素材）</div>
+      <div class="file in-agent">　资料.md</div>
+      <div class="file in-agent">　示例纪要.md</div>
+      <div class="note">有 agent-draft.md → 栏头出现「确认生成智能体」</div>
+    </div>
+  </aside>
+
+  <!-- 右主区：聊天 + 确认面板 -->
+  <main class="main">
+    <div class="pane-head">
+      <h2>智能体生成者 · 会议纪要岗位</h2>
+      <div class="sub">规则由它描述 · 你只回答、只确认 · 挂 3 个动态安装的技能</div>
+    </div>
+    <div class="body">
+      <div class="detect-bar">
+        <span class="ok">✓ 工作目录有 agent-draft.md（岗位卡已产出）</span>
+        <span class="hint" style="margin-left:auto">挂载技能：agent-design-norms · boundary-checklist · skill-eligibility</span>
+      </div>
+
+      <div class="msg"><div class="who">智能体生成者</div><div class="bubble"><div class="t">先别急着干活。这个岗位平时<b>做什么</b>？一句话目标 + 2–3 件事。</div></div></div>
+      <div class="msg"><div class="who">你</div><div class="bubble user"><div class="t">把妙记链接变成一页会议纪要。</div></div></div>
+      <div class="msg"><div class="who">智能体生成者</div><div class="bubble"><div class="t">最常被叫去干的活？产出长什么样？</div></div></div>
+      <div class="msg"><div class="who">你</div><div class="bubble user"><div class="t">每周例会纪要。decisions / owners / deadlines 三段。</div></div></div>
+      <div class="msg"><div class="who">智能体生成者</div><div class="bubble"><div class="t">接下来是最重要的一问：哪些事<b>绝不许它碰</b>？就算"没有"，也明说一句。</div></div></div>
+      <div class="msg"><div class="who">你</div><div class="bubble user"><div class="t">这个我还没想好，你看着办。</div></div></div>
+      <div class="msg"><div class="who">智能体生成者</div><div class="bubble"><div class="t">好，边界由我按<b>最小权限缺省</b>来定。以下是我描述的规则，请逐条确认或修正：
+        <div class="rules">
+          <div class="cap">岗位卡（草稿）· 规则由生成者描述</div>
+          <pre>- 名称：会议纪要助理（executor）
+- 目标/职责：把妙记转成纪要；转写→提炼→分节→交付；缺信息先停下
+- 边界（不能碰）：不替参会人做决定 / 不对外发送 / 只在工作目录写 /
+   缺关键信息不猜先问
+- 输出格式：decisions / owners / deadlines 三段，来源链接附末尾
+- 验收标准：decisions 逐条有 owner + deadline
+- 配套技能：meeting-notes-format（会议纪要格式，可复用做法）</pre>
+        </div>
+      </div></div></div>
+      <div class="msg"><div class="who">你</div><div class="bubble user"><div class="t">可以，就这么定。</div></div></div>
+      <div class="msg"><div class="who">智能体生成者</div><div class="bubble"><div class="t">已写入 <b>agent-draft.md</b>。确认前尤其要审「边界」栏。想改随时说，不想改就点「确认生成智能体」。</div></div></div>
+
+      <!-- 确认面板（点按钮后内联展开） -->
+      <div class="gen-panel hide" id="gen-panel">
+        <div class="cap">确认生成 · 岗位卡 + 配套技能</div>
+        <div class="draft-note">岗位卡已产出（生成者在对话里描述的规则，你已确认）——改一改，然后确认生成。</div>
+        <div class="form">
+          <div class="field">
+            <label>智能体 · 名称 / 角色</label>
+            <div style="display:flex; gap:var(--sp-2); align-items:center">
+              <input type="text" value="会议纪要助理" style="flex:1">
+              <div class="role-pick" style="flex:1">
+                <div class="role-card sel"><div class="r">executor</div><div class="rh">干活</div></div>
+                <div class="role-card"><div class="r">reviewer</div><div class="rh">审核</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label>指令（一段） <span class="hint">边界 / 输出格式都在这一段里</span></label>
+            <textarea rows="9">你是会议纪要助理。
+## 目标/职责
+把妙记链接转成纪要；转写 → 提炼 → 分节 → 交付；缺信息先停下、列出缺什么。
+## 边界（不能碰）
+- 不替参会人做决定（decisions 只列不判）
+- 不对外发送；只在工作目录里写文件
+- 缺关键信息时不猜，先问
+## 输出格式
+- decisions / owners / deadlines 三段，每段一行一个
+- 来源链接附在末尾</textarea>
+            <div class="hint" style="margin-top:6px">草稿不是合同——检查「边界」段（生成者按最小权限缺省描述，你确认过）。</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>配套技能（AI 起草 · 随智能体一起确认）</label>
+          <div class="warn-note">技能草稿未经验证——建议先让智能体干几轮，再用沉淀结晶正式版（提示，不是校验）。</div>
+          <div class="skill-opts">
+            <label style="align-items:flex-start"><input type="checkbox" checked style="margin-top:3px"><span><b>meeting-notes-format</b> · 会议纪要格式<br><span class="hint">生成者在聊天里起草 skill/meeting-notes-format/SKILL.md → 确认时直接沉淀 skills-mine + git，可共享</span></span></label>
+          </div>
+        </div>
+        <div style="display:flex; gap:var(--sp-2); align-items:center">
+          <button class="btn primary" onclick="commit()">确认生成</button>
+          <span class="hint">先沉淀配套技能 → 再建智能体（skillIds 挂新技能）· 人确认是唯一入口 · 动作权限不落智能体（属于组）</span>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:var(--sp-2); align-items:center; margin-top:var(--sp-4)">
+        <button class="btn">沉淀技能</button>
+        <button class="btn primary" onclick="openPanel()">确认生成智能体</button>
+        <span class="hint">工作目录有 agent-draft.md 才出现</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="notes">
+  <h3>设计要点（对应 docs/design/recruiter-interview.md，最终形态）</h3>
+  <div class="card">
+    <b>智能体生成者（内置，聊天页）</b>：用户和它聊天，<b>规则由它描述</b>（不是用户写）——它问五字段，每个字段它提出草稿（"我建议的边界是……"），用户只回答、只确认。
+    <ul>
+      <li>取代「访谈官」与「岗位卡起草者」：问和写合并成一个内置（角色 <code>agent-maker</code>，聊天放行两处、业务选择天然排除）。</li>
+      <li>聊完产出岗位卡（工作目录 <code>agent-draft.md</code>）+ 配套技能草稿（<code>skill/&lt;slug&gt;/SKILL.md</code>）；栏头出现「确认生成智能体」→ 审阅面板 → 确认。</li>
+      <li>挂 <b>3 个动态安装的平台技能</b>（同沉淀起草者挂 distilly 机制）：<code>agent-design-norms</code>（五字段/指令组装）、<code>boundary-checklist</code>（边界必含/最小权限缺省）、<code>skill-eligibility</code>（配套技能可复用性判定）。</li>
+      <li>确认 = 先沉淀配套技能（生成者起草的 <code>skill/&lt;slug&gt;/SKILL.md</code> 直接过审落 mine+git 共享）再建智能体（<code>POST /api/agents</code>，skillIds 挂新技能）。</li>
+      <li>agent/ 目录降为<b>可选素材</b>（不是规则来源）；技能共享不私有；配套技能未经验证黄条提示。</li>
+    </ul>
+  </div>
+</div>
+
+<div class="toast" id="toast" style="position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--surface-2); border:1px solid var(--good); color:var(--good); border-radius:var(--radius); padding:10px 16px; box-shadow:var(--shadow-2); font-size:var(--fs-sm); opacity:0; transition:opacity .25s; pointer-events:none;">✓</div>
+
+<script>
+  function openPanel() {
+    document.getElementById('gen-panel').classList.remove('hide')
+    document.getElementById('gen-panel').scrollIntoView({ behavior: 'smooth' })
+  }
+  let toastTimer = null
+  function commit() {
+    const t = document.getElementById('toast')
+    t.textContent = '✓ 已创建智能体「会议纪要助理」+ 沉淀技能「会议纪要格式」（skills-mine + git，可共享）'
+    t.classList.add('show')
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600)
+  }
+</script>
+</body>
+</html>

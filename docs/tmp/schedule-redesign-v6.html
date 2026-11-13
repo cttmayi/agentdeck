@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>定时任务：调度设定 v6 预览（业界方案：n8n 式 + 常驻结果）</title>
+<style>
+  :root {
+    --accent:#4a6cf7; --good:#1a9e5c; --bad:#d64545;
+    --line:#d8dde6; --line-strong:#b9c1cf; --surface:#fff; --surface-2:#f3f5f9;
+    --text:#1d2433; --text-dim:#5b6577; --faint:#8a94a6;
+    --radius:10px; --radius-pill:999px; --fs-xs:12px; --fs-sm:13px;
+  }
+  body{font-family:-apple-system,"PingFang SC",sans-serif;background:#eef1f6;margin:0;padding:24px;color:var(--text)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);max-width:580px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+  h2{margin:0 0 16px;font-size:16px}
+  .field{margin-bottom:16px}
+  label{display:block;font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:8px}
+  .time-input{font-size:20px;font-weight:600;padding:6px 10px;border:1px solid var(--line-strong);border-radius:8px;width:100px}
+  .preset-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:10px}
+  .preset-btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--radius-pill);height:38px;font-size:13px;cursor:pointer}
+  .preset-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  [hidden]{display:none !important}
+  .week-picker{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+  .week-btn{border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--radius-pill);padding:5px 11px;font-size:13px;cursor:pointer}
+  .week-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .sub-row{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--text-dim)}
+  select{padding:5px 8px;border:1px solid var(--line-strong);border-radius:8px;font-size:13px}
+  /* 五字段编辑器（n8n 式） */
+  .fields{border:1px solid var(--line);border-radius:8px;margin-top:10px;padding:4px 12px}
+  .field-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line)}
+  .field-row:last-child{border-bottom:0}
+  .field-row .name{width:52px;font-size:13px;font-weight:600;color:var(--text-dim);flex-shrink:0}
+  .field-row .opts{display:flex;gap:5px;flex-wrap:wrap;font-size:12px;color:var(--faint)}
+  .field-row .opts .on{color:var(--text);font-weight:600}
+  .field-row input[type=number]{width:52px;padding:3px 6px;border:1px solid var(--line-strong);border-radius:6px;font-size:12px}
+  /* 结果区：常驻 */
+  .result{margin-top:14px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .result .row{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:13px}
+  .result .row+.row{border-top:1px dashed var(--line)}
+  .result .k{width:44px;font-size:12px;color:var(--faint);flex-shrink:0}
+  .result code{font-family:Menlo,monospace;font-size:13px;font-weight:600}
+  .result .human{color:var(--good);font-weight:600}
+  .result .next{color:var(--text-dim)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>新建定时任务 · 调度设定（v6 · n8n 式）</h2>
+
+  <div class="field">
+    <label>什么时候跑</label>
+    <input class="time-input" id="time" type="time" value="09:00">
+    <div class="preset-grid">
+      <button class="preset-btn active" data-p="daily">每天</button>
+      <button class="preset-btn" data-p="workdays">工作日</button>
+      <button class="preset-btn" data-p="weekly">每周</button>
+      <button class="preset-btn" data-p="monthly">每月</button>
+      <button class="preset-btn" data-p="interval">间隔</button>
+      <button class="preset-btn" data-p="custom">自定义</button>
+    </div>
+
+    <div class="week-picker" id="week" hidden>
+      <button class="week-btn" data-day="1">周一</button><button class="week-btn" data-day="2">周二</button>
+      <button class="week-btn" data-day="3">周三</button><button class="week-btn" data-day="4">周四</button>
+      <button class="week-btn" data-day="5">周五</button><button class="week-btn" data-day="6">周六</button>
+      <button class="week-btn" data-day="7">周日</button>
+    </div>
+    <div class="sub-row" id="month" hidden>
+      <span>每月</span><select id="monthDay"><option>1</option><option>5</option><option>15</option><option>28</option></select><span>号</span>
+    </div>
+    <div class="sub-row" id="interval" hidden>
+      <span>每</span><select id="minutes"><option>10</option><option selected>30</option><option>60</option></select><span>分钟</span>
+    </div>
+
+    <!-- 自定义：五字段编辑器 -->
+    <div class="fields" id="fields" hidden>
+      <div class="field-row"><span class="name">分钟</span><span class="opts" id="fMin"></span></div>
+      <div class="field-row"><span class="name">小时</span><span class="opts" id="fHour"></span></div>
+      <div class="field-row"><span class="name">日</span><span class="opts" id="fDom"></span></div>
+      <div class="field-row"><span class="name">月</span><span class="opts" id="fMon"></span></div>
+      <div class="field-row"><span class="name">星期</span><span class="opts" id="fDow"></span></div>
+    </div>
+  </div>
+
+  <!-- 结果区：常驻三行 -->
+  <div class="result">
+    <div class="row"><span class="k">cron</span><code id="cronText">0 9 * * *</code></div>
+    <div class="row"><span class="k">人话</span><span class="human" id="humanText">每天 09:00</span></div>
+    <div class="row"><span class="k">下次</span><span class="next" id="nextText">周一 09:00（示意：正式版由系统按当前时间计算）</span></div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id)
+  const pad = n => String(n).padStart(2,'0')
+  const WD = '一二三四五六日'
+  let p = 'daily', days = [1]
+  // 字段（自定义模式）：每个字段存 {mode:'every'|'at', every:N, at:[]}
+  const fields = { min:{every:1,at:[0]}, hour:{every:1,at:[9]}, dom:{every:1,at:[1]}, mon:{every:1,at:[1]}, dow:{every:1,at:[1]} }
+  const setVisible = () => {
+    $('week').hidden = p !== 'weekly'
+    $('month').hidden = p !== 'monthly'
+    $('interval').hidden = p !== 'interval'
+    $('fields').hidden = p !== 'custom'
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.toggle('active', b.dataset.p === p))
+  }
+  function formCron() {
+    const [h,m] = $('time').value.split(':')
+    if (p==='daily') return `${m} ${h} * * *`
+    if (p==='workdays') return `${m} ${h} * * 1-5`
+    if (p==='weekly') return `${m} ${h} * * ${[...days].sort((a,b)=>a-b).join(',')}`
+    if (p==='monthly') return `${m} ${h} ${$('monthDay').value} * *`
+    if (p==='interval') return `*/${$('minutes').value} * * * *`
+    // custom：由五字段拼
+    const fm = f => f.mode==='every' ? `*/${f.every}` : (f.at.length? f.at.join(','): '*')
+    return `${fm(fields.min)} ${fm(fields.hour)} ${fm(fields.dom)} ${fm(fields.mon)} ${fm(fields.dow)}`
+  }
+  function human() {
+    const [h,m] = $('time').value.split(':')
+    if (p==='daily') return `每天 ${h}:${m}`
+    if (p==='workdays') return `工作日（周一至周五）${h}:${m}`
+    if (p==='weekly') return `每周 ${[...days].sort((a,b)=>a-b).map(d=>'周'+WD[d-1]).join('、')} ${h}:${m}`
+    if (p==='monthly') return `每月 ${$('monthDay').value} 日 ${h}:${m}`
+    if (p==='interval') return `每 ${$('minutes').value} 分钟`
+    return `自定义：${formCron()}（字段见上）`
+  }
+  function sync() {
+    $('cronText').textContent = formCron()
+    $('humanText').textContent = human()
+    $('nextText').textContent = p==='interval' ? '每 ' + $('minutes').value + ' 分钟一次（示意）' : '下次触发时间（由系统计算显示）'
+  }
+  // 渲染五字段
+  function renderFields() {
+    const rows = { min:'分钟', hour:'小时', dom:'日', mon:'月', dow:'星期' }
+    for (const key of ['min','hour','dom','mon','dow']) {
+      const f = fields[key]
+      const el = $('f'+key[0].toUpperCase()+key.slice(1))
+      el.innerHTML = ''
+      const every = document.createElement('span')
+      every.textContent = '每 '
+      const inp = document.createElement('input'); inp.type='number'; inp.value=f.every; inp.min=1
+      inp.onchange = () => { f.every = Math.max(1, Number(inp.value)||1); f.mode='every'; renderFields(); sync() }
+      const unit = document.createElement('span'); unit.textContent = key==='min'?' 分钟':key==='hour'?' 小时':key==='dow'?' 天(周)':' 天/月'
+      const sep = document.createElement('span'); sep.textContent = ' · '
+      const ats = document.createElement('span')
+      ats.textContent = key==='dow' ? '具体：' + [...Array(7)].map((_,i)=>i+1).join(' ') : '具体值'
+      el.append(every, inp, unit, sep, ats)
+    }
+  }
+  $('time').addEventListener('input', sync)
+  document.querySelectorAll('.preset-btn').forEach(b => b.addEventListener('click', () => {
+    p = b.dataset.p
+    if (p==='workdays') days=[1,2,3,4,5]
+    setVisible(); renderFields(); sync()
+  }))
+  document.querySelectorAll('.week-btn').forEach(b => b.addEventListener('click', () => {
+    const d = Number(b.dataset.day)
+    days = days.includes(d) ? days.filter(x=>x!==d) : [...days,d]
+    if (!days.length) days=[d]
+    document.querySelectorAll('.week-btn').forEach(w => w.classList.toggle('active', days.includes(Number(w.dataset.day))))
+    sync()
+  }))
+  $('monthDay').addEventListener('change', sync)
+  $('minutes').addEventListener('change', sync)
+  setVisible(); renderFields(); sync()
+</script>
+</body>
+</html>

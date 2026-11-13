@@ -838,11 +838,13 @@ import type { WebTextId } from '@agentdeck/i18n'
     gap: 0.25rem;
   }
   .weekday-btn {
-    width: 1.9rem;
-    height: 1.9rem;
-    border-radius: 50%;
+    /* 2026-11 v8：原来是 1.9rem 圆形——「周一」两个字放不下出框（使用者抓到的），
+      改 pill 形状（与预设键一致，能容纳完整词） */
     border: 1px solid var(--line-strong);
     background: var(--surface);
+    border-radius: var(--radius-pill);
+    height: var(--ctl-h);
+    padding: 0 0.7rem;
     cursor: pointer;
     font-size: var(--fs-sm);
     color: var(--text);

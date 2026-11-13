@@ -16,4 +16,7 @@ export const { relativeTime, absoluteTime } = createTimeKit({
   minutesAgo: (count) => tx('remote.minutesAgo', { count }),
   hoursAgo: (count) => tx('remote.hoursAgo', { count }),
   daysAgo: (count) => tx('remote.daysAgo', { count }),
+  inMinutes: (count) => tx('remote.inMinutes', { count }),
+  inHours: (count) => tx('remote.inHours', { count }),
+  inDays: (count) => tx('remote.inDays', { count }),
 })

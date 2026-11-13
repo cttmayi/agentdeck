@@ -17,6 +17,10 @@ export interface TimeText {
   minutesAgo: (count: number) => string
   hoursAgo: (count: number) => string
   daysAgo: (count: number) => string
+  /** 未来向（「下次触发」这类场景）：X 分钟后 / 小时后 / 天后。 */
+  inMinutes: (count: number) => string
+  inHours: (count: number) => string
+  inDays: (count: number) => string
 }
 
 function toTs(at: number | string | null): number | null {
@@ -28,13 +32,31 @@ function toTs(at: number | string | null): number | null {
 export function createTimeKit(text: TimeText) {
   return {
     /**
-     * 相对时间。只做到"天"，再久就直接说日期——"37 天前"没人算得出来是什么时候。
+     * 相对时间。**过去向**：只做到"天"，再久就直接说日期——"37 天前"没人算得
+     * 出来是什么时候。**未来向**（定时任务的「下次触发」等）：对称处理——
+     * "X 分钟后 / 小时后 / 天后"，超过 30 天同样给日期。
+     *
+     * ⚠️ 2026-11 v8 踩过：旧实现 `diff = Math.max(0, now - ts)` 对**未来的时间戳**
+     *    一律算成「刚刚」（定时任务表单的「下次」行因此显示"刚刚"，probe 与
+     *    使用者都抓到）——现在按正负分开。
      * `null` / 解析不了的值 ⇒ `—`（"未记录"要如实说，不拿空字符串糊过去）。
      */
     relativeTime(at: number | string | null, now: number): string {
       const ts = toTs(at)
       if (ts === null) return '—'
-      const diff = Math.max(0, now - ts)
+      const diff = now - ts
+      if (diff < 0) {
+        // 未来：1 分钟内直接说「1 分钟后」最直白（"即将"要多一条词条，不值）
+        const minutes = Math.floor(-diff / 60_000)
+        if (minutes < 1) return text.inMinutes(1)
+        if (minutes < 60) return text.inMinutes(minutes)
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24) return text.inHours(hours)
+        const days = Math.floor(hours / 24)
+        if (days < 30) return text.inDays(days)
+        const d = new Date(ts)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      }
       const minutes = Math.floor(diff / 60_000)
       if (minutes < 1) return text.justNow()
       if (minutes < 60) return text.minutesAgo(minutes)

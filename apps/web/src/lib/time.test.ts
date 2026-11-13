@@ -19,8 +19,9 @@ describe('相对时间（列表一律用它，准确时间放 title）', () => {
     assert.equal(relativeTime(now - 2 * 86_400_000, now), '2 天前')
     const old = relativeTime(now - 400 * 86_400_000, now)
     assert.match(old, /^\d{4}-\d{2}-\d{2}$/)
-    // 未来时间不能出现"-3 分钟前"
-    assert.equal(relativeTime(now + 60_000, now), '刚刚')
+    // 未来时间不能出现"-3 分钟前"（2026-11 v8：从"糊成刚刚"改成对称的未来向
+    // "X 分钟后"——定时任务「下次」行显示"刚刚"就是这么来的）
+    assert.equal(relativeTime(now + 60_000, now), '1 分钟后')
   })
 
   test('完整时间戳到秒（列表那一格的 title 用它）', () => {

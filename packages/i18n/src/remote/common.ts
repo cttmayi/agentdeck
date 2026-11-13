@@ -26,4 +26,8 @@ export const remoteCommonText = {
   'remote.minutesAgo': { zh: '{count} 分钟前', en: '{count} min ago' },
   'remote.hoursAgo': { zh: '{count} 小时前', en: '{count} h ago' },
   'remote.daysAgo': { zh: '{count} 天前', en: '{count} d ago' },
+  // 未来向（与 web 端对称；remote 现在没有未来场景，但接口要求两侧文案齐）
+  'remote.inMinutes': { zh: '{count} 分钟后', en: 'in {count} min' },
+  'remote.inHours': { zh: '{count} 小时后', en: 'in {count} h' },
+  'remote.inDays': { zh: '{count} 天后', en: 'in {count} d' },
 } as const satisfies TextCatalog
