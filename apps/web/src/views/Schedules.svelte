@@ -1013,7 +1013,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     background: var(--surface);
     border-radius: var(--radius-pill);
     height: var(--ctl-h);
-    padding: 0 0.7rem;
+    padding: 0 0.9rem;
     cursor: pointer;
     font-size: var(--fs-sm);
     color: var(--text);
@@ -1116,19 +1116,30 @@ import type { WebTextId } from '@agentdeck/i18n'
     font-size: var(--fs-xs);
   }
   /* 表单正文留白与任务表单（NewTaskForm .form-frame）同款：上下 sp-5、左右 sp-6 */
-  /* 2026-11 紧凑表单：两列 grid，窄窗 auto-fit 自动退成单列。
-     gap 用 sp-4（与 form-frame 同套间距）；grid-full 横跨两列。 */
+  /* 2026-11 紧凑表单：两列 grid，**左右一样宽**（使用者定稿：等分即可）。
+     （先试过"任务宽列"——使用者否了："就分左右就好了，左右一样宽"。）
+     退化用 **container query** 而不是窗口媒体查询：列表把手能把右栏拖窄，
+     窗口再宽也可能把任务列挤没（探针 mainPaneWidth 量的是右栏实宽）。
+     gap 用 sp-4（与 form-frame 同套间距）；grid-full 全宽。 */
+  .schedule-form-body {
+    container-type: inline-size;
+    padding: var(--sp-5) var(--sp-6);
+  }
   .form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--sp-4);
     align-items: start;
   }
   .form-grid .grid-full {
     grid-column: 1 / -1;
   }
-  .schedule-form-body {
-    padding: var(--sp-5) var(--sp-6);
+  /* 右栏（容器）窄于 600px 时两列放不下 ⇒ 落回单列（freq-picker/weekday-picker
+     本来就是 flex-wrap，单列形态和旧版一样不难看） */
+  @container (max-width: 600px) {
+    .form-grid {
+      grid-template-columns: 1fr;
+    }
   }
   .source-toggle {
     margin-bottom: 0.5rem;
