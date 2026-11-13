@@ -62,6 +62,9 @@ export const schedulesText = {
   'schedules.executorGroup': { zh: '一个智能体组', en: 'A group' },
   'schedules.summary': { zh: '执行者 {executor} · 审核者 {reviewer} · 允许的动作 {actions} · 返工 {reworks}（从智能体组推导）', en: 'Runs {executor} · reviews {reviewer} · allowed actions {actions} · reworks {reworks} (from the group)' },
   'schedules.save': { zh: '保存', en: 'Save' },
+  // 2026-11（使用者要求）：编辑后立刻测试任务执行
+  'schedules.saveAndTrigger': { zh: '保存并立即触发', en: 'Save & run now' },
+  'schedules.savedAndTriggeredToast': { zh: '已保存，并立即触发了一次', en: 'Saved, and triggered a run now' },
   'schedules.cancel': { zh: '取消', en: 'Cancel' },
   'schedules.updateTitle': { zh: '编辑定时任务', en: 'Edit schedule' },
   'schedules.createTitle': { zh: '新建定时任务', en: 'New schedule' },

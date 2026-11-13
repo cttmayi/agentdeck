@@ -19,7 +19,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     identity,
     tools,
   } from '../lib/stores.ts'
-  import { go, selectedIssueId, showToast } from '../lib/view.ts'
+  import { go, goSchedCreate, goSchedEdit, schedForm, selectedIssueId, showToast } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { relativeTime } from '../lib/time.ts'
   import { listGrip } from '../lib/list-grip.ts'
@@ -63,9 +63,11 @@ import type { WebTextId } from '@agentdeck/i18n'
   let selectedId: string | null = null
 
   // ── 表单 ──
-  type FormMode = 'create' | 'edit' | null
-  let formMode: FormMode = null
-  let editingId: string | null = null
+  // ★ 2026-11：「在不在表单、编辑谁」在**全局 store**（$schedForm）——
+  //   使用者报"没点取消切到其他页面，切回来新建任务消失了"。表单状态放组件里
+  //   一卸载就丢；放全局 store 里切走切回（点侧栏回来）都在（地址方案挡不住
+  //   侧栏导航覆盖 hash，见 view.ts schedForm 的说明）。字段内容仍是组件状态
+  //   （切走丢，与任务页表单同款行为），表单本体不丢。
   let formName = ''
   let form: ScheduleForm = defaultScheduleForm()
   let formTaskText = ''
@@ -146,16 +148,37 @@ import type { WebTextId } from '@agentdeck/i18n'
       kind: 'primary',
       icon: 'plus',
       // 表单开着时禁点（与智能体页 creating 同款）
-      disabled: formMode !== null,
+      disabled: $schedForm !== null,
       onActivate: openCreate,
     },
   ])
   onDestroy(() => clearPageActions('schedules'))
 
   // ── 新建 / 编辑 ──
+  // 按钮只负责改地址；字段填充统一在 hydrateForm（$schedForm 变化时跑）。
   function openCreate(): void {
-    formMode = 'create'
-    editingId = null
+    selectedId = null
+    goSchedCreate()
+  }
+
+  function openEdit(s: ScheduleView): void {
+    selectedId = null
+    goSchedEdit(s.id)
+  }
+
+  function closeForm(): void {
+    schedForm.set(null)
+  }
+
+  /**
+   * ★ 表单字段从 $schedForm 初始化（2026-11，地址驱动之后挂载/返回都要它）。
+   *
+   * ⚠️ `hydratedFor` 防重复：编辑回填只做一次（列表后续刷新不能把用户正在填的
+   *    内容重置掉）。create 一次标死；edit 若 list 里还没数据（切回来 load 未回）
+   *    不标记，等 list 到了再填。
+   */
+  let hydratedFor: string | null = null
+  function resetFormFields(): void {
     formName = ''
     form = defaultScheduleForm()
     formTaskText = ''
@@ -165,12 +188,8 @@ import type { WebTextId } from '@agentdeck/i18n'
     formWorkDir = ''
     formResume = 'fresh'
     formError = ''
-    selectedId = null
   }
-
-  function openEdit(s: ScheduleView): void {
-    formMode = 'edit'
-    editingId = s.id
+  function fillEditFields(s: ScheduleView): void {
     formName = s.name
     form = scheduleCronToForm(s.cron)
     formTaskText = s.taskText
@@ -182,19 +201,31 @@ import type { WebTextId } from '@agentdeck/i18n'
     }
     formWorkDir = s.workDir ?? ''
     formResume = s.resumeMode
-    formError = ''
   }
-
-  function closeForm(): void {
-    formMode = null
-    editingId = null
+  // ⚠️ Svelte 5 的 `$:` 块里**不许 `return`**（编译器把它当语句段，不是函数体），
+  //    这里用 if/else 把分支写开（2026-11 踩过一次 js_parse_error）
+  $: if ($schedForm) {
+    const key = $schedForm.mode === 'create' ? 'create' : `edit:${$schedForm.id}`
+    if (key !== hydratedFor) {
+      resetFormFields()
+      if ($schedForm.mode === 'create') {
+        hydratedFor = key
+      } else {
+        const s = list.find((x) => x.id === $schedForm.id)
+        if (s) {
+          fillEditFields(s)
+          hydratedFor = key
+        }
+        // 列表还没回填（切回来 load 未回）：不标记，list 到了再填
+      }
+    }
   }
 
   function insertVar(v: string): void {
     formTaskText += v
   }
 
-  async function save(): Promise<void> {
+  async function save(saveAndTrigger = false): Promise<void> {
     if (busy) return
     formError = ''
     if (formName.trim() === '') {
@@ -219,8 +250,8 @@ import type { WebTextId } from '@agentdeck/i18n'
     const resumeMode: ScheduleResumeMode = formResume
     busy = true
     try {
-      if (formMode === 'edit' && editingId) {
-        await api(`/api/schedules/${editingId}`, {
+      if ($schedForm?.mode === 'edit') {
+        await api(`/api/schedules/${$schedForm.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
             name: formName.trim(),
@@ -232,7 +263,16 @@ import type { WebTextId } from '@agentdeck/i18n'
             resumeMode,
           }),
         })
-        showToast(tx('schedules.updatedToast'))
+        if (saveAndTrigger) {
+          // 编辑后立刻测试：保存完马上触发一次（到点同一条 fire）
+          await api(`/api/schedules/${$schedForm.id}/trigger`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+          })
+          showToast(tx('schedules.savedAndTriggeredToast'))
+        } else {
+          showToast(tx('schedules.updatedToast'))
+        }
       } else {
         const input: ScheduleCreateInput = {
           name: formName.trim(),
@@ -415,7 +455,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   // 表单调度变化（含新建/编辑打开）→ 重算「下次」；没打开表单时不发请求。
   // 依赖 cronText（→ form）才能跟着表单重算——直接 `$: refreshPreview()` 只会在
   // 初始化跑一次（Svelte 编译 $: 时看不出函数体里读了什么）。
-  $: cronText, formMode !== null && void refreshPreview()
+  $: cronText, $schedForm !== null && void refreshPreview()
 </script>
 
 <div
@@ -451,7 +491,7 @@ import type { WebTextId } from '@agentdeck/i18n'
               active={s.id === selectedId}
               onclick={() => {
                 selectedId = s.id
-                formMode = null
+                closeForm()
               }}
             >
               {#snippet children()}
@@ -491,7 +531,7 @@ import type { WebTextId } from '@agentdeck/i18n'
 
   <!-- ══════════ 右栏 ══════════ -->
   <section class="pane-body schedules-main">
-    {#if formMode === 'create' || formMode === 'edit'}
+    {#if $schedForm}
       <!-- ── 新建 / 编辑表单 ──
            ★ 2026-11 定稿：右栏表单容器与任务页/聊天页同款——栏头用 `detail-head`
             （两列网格：标题左、动作右），动作走 `detail-actions` 工具条（透明胶囊，
@@ -500,7 +540,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             `.main-panel-body` 的留白与 detail-head 同套（sp-4/sp-5），正文直接铺。 -->
       <div class="detail-head">
         <div class="detail-sub">
-          <h2>{$t(formMode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
+          <h2>{$t($schedForm.mode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
         </div>
         <div class="detail-actions">
           <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）——在动作
@@ -513,6 +553,17 @@ import type { WebTextId } from '@agentdeck/i18n'
           >
             {$t('schedules.save')}
           </button>
+          <!-- 2026-11（使用者要求）：编辑后立刻测试——保存完马上触发一次 -->
+          {#if $schedForm.mode === 'edit'}
+            <button
+              type="button"
+              class="btn btn--secondary"
+              disabled={busy}
+              onclick={() => void save(true)}
+            >
+              {$t('schedules.saveAndTrigger')}
+            </button>
+          {/if}
           <button type="button" class="btn btn--ghost" onclick={closeForm}>
             {$t('schedules.cancel')}
           </button>

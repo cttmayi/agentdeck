@@ -3037,6 +3037,98 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           await until(() => !d().querySelector('.schedules-main .detail-actions'))
           return !d().querySelector('.schedules-main .detail-actions')
         })()
+
+        // 2026-11（使用者报"没点取消切到其他页面，切回来新建任务消失了"）：
+        // 表单是地址的一部分（#/schedules/new），切走切回必须还在——回归守卫
+        facts['schedules.formSurvivesNav'] = await (async () => {
+          const newBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建定时任务')
+          if (!newBtn) {
+            errors.push('formSurvivesNav：找不到「新建定时任务」')
+            return false
+          }
+          click(newBtn)
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !d().querySelector('.schedules-main'))
+          f.contentWindow.location.hash = '#/schedules'
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          const still = !!d().querySelector('.schedules-main .detail-actions')
+          const save = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+            (b) => text(b) === '保存',
+          )
+          if (!still || !save) {
+            errors.push(`切走切回表单丢了：表单 ${still}、保存 ${!!save}`)
+            return false
+          }
+          // 收尾：取消关掉（别影响后续判据）
+          const cancel = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          if (cancel) click(cancel)
+          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          return true
+        })()
+
+        // 2026-11（使用者要求"编辑后立刻测试"）：编辑表单栏头要有「保存并立即触发」。
+        // 真建一条 → 点行进详情 → 点编辑 → 断言按钮 → 取消 + 删除清理。
+        facts['schedules.editHasTrigger'] = await (async () => {
+          const execId = new URLSearchParams(location.search).get('chainExecutor') ?? ''
+          if (!execId) {
+            errors.push('editHasTrigger：拿不到夹具执行者 id')
+            return false
+          }
+          const res = await f.contentWindow.fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              name: '探针编辑测试',
+              cron: '0 9 * * *',
+              executorType: 'agent',
+              executorId: execId,
+              taskText: '探针造的一条，用于编辑态测试',
+            }),
+          })
+          if (res.status !== 201) {
+            errors.push(`editHasTrigger：建失败 ${res.status}`)
+            return false
+          }
+          const created = await res.json()
+          // hash 已在 '#/schedules' 时直接切回不会重挂载/重拉列表（探针踩过）——
+          // 先切走再切回，强制重挂载 + load()
+          f.contentWindow.location.hash = '#/chat'
+          await until(() => !d().querySelector('.schedules-main'))
+          f.contentWindow.location.hash = '#/schedules'
+          await until(() => !!d().querySelector('.schedules-main'))
+          await untilNet(
+            () => [...d().querySelectorAll('.sched-row')].some((r) => text(r).includes('探针编辑测试')),
+            60,
+          )
+          const row = [...d().querySelectorAll('.sched-row')].find((r) => text(r).includes('探针编辑测试'))
+          // ListRow 的 onclick 绑在 `.list-row-main`（整行按钮），点 li 根不触发
+          if (row) click(row.querySelector('.list-row-main'))
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'), 60)
+          const editBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+            (b) => text(b) === '编辑',
+          )
+          if (!editBtn) {
+            errors.push('editHasTrigger：详情页没有「编辑」按钮')
+            await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
+            return false
+          }
+          click(editBtn)
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          const triggerBtn = [...d().querySelectorAll('.schedules-main .detail-actions button')].find(
+            (b) => text(b) === '保存并立即触发',
+          )
+          // 清理：取消表单 + 删除造的条目
+          const cancel = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
+          if (cancel) click(cancel)
+          await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          await f.contentWindow.fetch(`/api/schedules/${created.id}`, { method: 'DELETE' })
+          if (!triggerBtn) {
+            errors.push('editHasTrigger：编辑表单缺「保存并立即触发」按钮')
+            return false
+          }
+          return true
+        })()
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
 

@@ -77,6 +77,18 @@ export const view = writable<ViewName>(parseHash(location.hash).view)
 export const creating = writable<boolean>(parseHash(location.hash).creating)
 
 /**
+ * 定时任务页右栏此刻是**建 / 编辑表单**（2026-11，使用者报"没点取消切走、
+ * 切回来新建任务消失了"）。
+ *
+ * ★ 2026-11 定为**全局 store 而不是地址**：地址方案试过（`#/schedules/new`），
+ *   但使用者切回来是**点侧栏「定时任务」**——侧栏导航会把 hash 覆盖成
+ *   `#/schedules`，表单照样丢。store 在组件销毁时**不丢**（切走 = 视图卸载，
+ *   store 还在；切回 = 视图重挂载读 store），正好覆盖"点侧栏切回"这个真实场景。
+ *   代价是刷新会回到列表（可接受：表单内容本来就是组件态，任务页同款行为）。
+ */
+export const schedForm = writable<{ mode: 'create' } | { mode: 'edit'; id: string } | null>(null)
+
+/**
  * 沉淀页（`crystallize` 视图）此刻选中了哪条沉淀。
  *
  * ★ 与 `creating` 同构、同一个理由：它是**地址**（`#/crystallize/<runId>`）
@@ -123,6 +135,21 @@ export function go(next: ViewName): void {
 export function goCreate(): void {
   location.hash = CREATE_HASH
   syncRoute()
+}
+
+/**
+ * 进定时任务的建表单（`#/schedules/new`）。
+ *
+ * ★ 与 `goCreate()` 同构、同一个理由：表单是"定时任务页右栏的一个位置"，
+ *   地址读起来也该是这样。切走切回、刷新、分享链接都靠它。
+ */
+export function goSchedCreate(): void {
+  schedForm.set({ mode: 'create' })
+}
+
+/** 进定时任务的编辑表单，与建表单同一套理由（store 驱动，见 schedForm 的说明）。 */
+export function goSchedEdit(id: string): void {
+  schedForm.set({ mode: 'edit', id })
 }
 
 /**
