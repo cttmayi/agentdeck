@@ -576,8 +576,10 @@ import type { WebTextId } from '@agentdeck/i18n'
           </button>
         </div>
       </div>
-      <div class="schedule-form-body">
-          <div class="field">
+      <div class="schedule-form-body form-grid">
+          <!-- 名称全宽；「什么时候跑 | 要做什么」「交给谁 | 启动方式」两列并排，
+               高级/错误全宽——2026-11 使用者要求紧凑：尽量不往下拉就能配置完 -->
+          <div class="field grid-full">
             <label>{$t('schedules.nameLabel')}</label>
             <input
               type="text"
@@ -684,7 +686,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             <textarea
               bind:value={formTaskText}
               placeholder={$t('schedules.taskPlaceholder')}
-              rows={7}
+              rows={6}
             ></textarea>
             <div class="var-chips">
               {#each VAR_CHIPS as v (v.label)}
@@ -775,7 +777,7 @@ import type { WebTextId } from '@agentdeck/i18n'
 
           <!-- 高级：工作目录。与「新建任务」同一个控件（DirPicker）、同一句判据
                （默认不需要填，留空 = daemon 自动分配）。 -->
-          <details class="form-advanced">
+          <details class="form-advanced grid-full">
             <summary class="hint" style="cursor:pointer">{$t('newtask.advancedSummary')}</summary>
             <label for="sched-workdir" style="margin-top:var(--sp-3)">
               {$t('newtask.workDirLabel')}
@@ -804,7 +806,7 @@ import type { WebTextId } from '@agentdeck/i18n'
           </details>
 
           {#if formError}
-            <div class="notice bad">{formError}</div>
+            <div class="notice bad grid-full">{formError}</div>
           {/if}
         </div>
     {:else if selectedId}
@@ -1114,6 +1116,17 @@ import type { WebTextId } from '@agentdeck/i18n'
     font-size: var(--fs-xs);
   }
   /* 表单正文留白与任务表单（NewTaskForm .form-frame）同款：上下 sp-5、左右 sp-6 */
+  /* 2026-11 紧凑表单：两列 grid，窄窗 auto-fit 自动退成单列。
+     gap 用 sp-4（与 form-frame 同套间距）；grid-full 横跨两列。 */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: var(--sp-4);
+    align-items: start;
+  }
+  .form-grid .grid-full {
+    grid-column: 1 / -1;
+  }
   .schedule-form-body {
     padding: var(--sp-5) var(--sp-6);
   }

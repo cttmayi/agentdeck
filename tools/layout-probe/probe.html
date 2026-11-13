@@ -3025,6 +3025,27 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
           return true
         })()
+        // 2026-11（使用者要求紧凑排布）：表单主体是两列 grid——
+        // 「什么时候跑」与「要做什么」的 label 左右并排（x 明显不同）；单列（窄窗
+        // 退化）时 x 相同。量 label 的 x，防"grid 没生效、还是上下排"回归。
+        // ⚠️ 必须放在表单开着的时候（cancelCloses 之前）；formPresets 交互完
+        //    form 的 freq 可能停在 weekly/monthly——label 位置与预设无关。
+        facts['schedules.compactGrid'] = await (async () => {
+          const whenLbl = [...d().querySelectorAll('.schedule-form-body label')].find(
+            (l) => text(l) === '什么时候跑',
+          )
+          const taskLbl = [...d().querySelectorAll('.schedule-form-body label')].find((l) =>
+            text(l).startsWith('要做什么'),
+          )
+          if (!whenLbl || !taskLbl) {
+            errors.push('compactGrid：找不到「什么时候跑/要做什么」label')
+            return false
+          }
+          const w = whenLbl.getBoundingClientRect().x
+          const t = taskLbl.getBoundingClientRect().x
+          return Math.abs(w - t) > 80
+        })()
+
         facts['schedules.cancelCloses'] = await (async () => {
           const cancel = [...d().querySelectorAll('.schedules-main button')].find(
             (b) => text(b) === '取消',
