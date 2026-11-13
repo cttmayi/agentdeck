@@ -2999,6 +2999,29 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
 
           if (!clickByText('每天')) { errors.push('预设键「每天」找不到'); return false }
 
+          // 2026-11（使用者："间隔 240 提示 cron 不合法"）：60 分钟以上的间隔
+          //   走小时字段（0 */4 * * *），preview 不再报 "steps cannot be greater
+          //   than maximum value of part (60)"。选间隔→240→结果区无 bad + cron 对
+          if (!clickByText('间隔')) { errors.push('预设键「间隔」找不到'); return false }
+          await wait(60)
+          const mins = d().querySelector('.schedules-main .schedule-line select')
+          if (!mins) {
+            errors.push('间隔视图缺分钟下拉')
+            return false
+          }
+          mins.value = '240'
+          mins.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(500) // preview 是 300ms debounce + 网络，等它跑完
+          const badRow = d().querySelector('.schedules-main .schedule-result-row .bad')
+          if (badRow) {
+            errors.push(`间隔 240 的 preview 报错：${text(badRow)}`)
+            return false
+          }
+          if (!cronText().includes('0 */4')) {
+            errors.push(`间隔 240 的 cron 应为 0 */4 * * *：${cronText()}`)
+            return false
+          }
+
           // 2026-11：启动方式（新启动 / 续上上次）+ 高级区（工作目录）。
           // 注意 .source-toggle 有两条轨道（交给谁 + 启动方式），只查新键存在性
           const resumeBtnTexts = [...d().querySelectorAll('.schedules-main .source-toggle button')].map(

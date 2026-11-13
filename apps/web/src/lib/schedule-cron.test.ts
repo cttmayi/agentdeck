@@ -80,6 +80,18 @@ test('cron → 表单（五类回填 + 自定义落回原文）', () => {
   assert.equal(interval.freq, 'interval')
   assert.equal(interval.minutes, 45)
 
+  // 2026-11（使用者："间隔 240 提示 cron 不合法"）：60 分钟以上的间隔走
+  // **小时**字段（分钟 step 不能 >59），正反两个方向都要认
+  // 60 → `0 */1 * * *`（显式 step）：不能是 `0 * * * *`——那个形态会被 daily
+  // 正则吃掉、反向解析成「每天 00:00」（分钟字段的 step 写法保住「间隔」语义）
+  assert.equal(scheduleFormToCron({ ...defaultScheduleForm(), freq: 'interval', minutes: 60 }), '0 */1 * * *')
+  assert.equal(scheduleFormToCron({ ...defaultScheduleForm(), freq: 'interval', minutes: 120 }), '0 */2 * * *')
+  assert.equal(scheduleFormToCron({ ...defaultScheduleForm(), freq: 'interval', minutes: 240 }), '0 */4 * * *')
+  assert.equal(scheduleCronToForm('0 */4 * * *').minutes, 240)
+  // `0 * * * *` 本身就是 daily 形态（每天 00:00）——我们的表单**不产出**这个
+  // 形态（60 分钟间隔产出 `0 */1 * * *`），所以反向解析归 daily，不指望 60
+  assert.equal(scheduleFormToCron({ ...defaultScheduleForm(), freq: 'interval', minutes: 30 }), '*/30 * * * *')
+
   // 自定义：认不出 → 原文照显、freq=custom
   const weird = scheduleCronToForm('0 9 15 * 1,2')
   assert.equal(weird.freq, 'custom')

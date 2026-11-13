@@ -83,7 +83,13 @@ export function scheduleFormToCron(form: ScheduleForm): string {
     case 'monthly':
       return `${min} ${hour} ${form.monthDay} * *`
     case 'interval':
-      return `*/${form.minutes} * * * *`
+      // 2026-11（使用者："间隔 240 提示 cron 不合法"）：cron 分钟字段的 step
+      //   不能大于 59（`*/240` → CronPattern: "steps cannot be greater than
+      //   maximum value of part (60)"）。60 以上的间隔（60/120/180/240）落到
+      //   **小时**字段表达：60→`0 * * * *`、120→`0 */2 * * *`、240→`0 */4 * * *`
+      return form.minutes >= 60
+        ? `0 */${form.minutes / 60} * * *`
+        : `*/${form.minutes} * * * *`
   }
 }
 
@@ -115,6 +121,15 @@ export function scheduleCronToForm(cron: string): ScheduleForm {
     form.freq = 'monthly'
     form.time = `${pad2(monthly[2]!)}:${pad2(monthly[1]!)}`
     form.monthDay = monthly[3]! === 'L' ? 'L' : Number(monthly[3]!)
+    return form
+  }
+  // 2026-11（与正向同一对）：`0 */N * * *`（每 N 小时）是 >=60 分钟间隔的
+  //   cron 形态，解析回 minutes = N*60；放 everyMin 前（形态不同不会误配，
+  //   但两种形态都要先于自定义兜底命中）
+  const everyHour = /^0 \*\/(\d{1,2}) \* \* \*$/.exec(e)
+  if (everyHour) {
+    form.freq = 'interval'
+    form.minutes = Number(everyHour[1]!) * 60
     return form
   }
   const everyMin = /^\*\/(\d{1,3}) \* \* \* \*$/.exec(e)
