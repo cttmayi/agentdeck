@@ -77,6 +77,26 @@ import type { WebTextId } from '@agentdeck/i18n'
   let formError = ''
   let busy = false
   // 2026-11：工作目录（可选，与「新建任务」同款控件）+ 触发方式（fresh/resume）
+  // 2026-11（"分"不见了那次的配套）：form.time 是 "HH:MM"；这里拆/合两端。
+  // 边界收敛（0-23/0-59、非数回退当前值）写在写回处，别让坏值进 cron。
+  function timeHour(t: string): number {
+    return Number((t ?? '09:00').split(':')[0] ?? '0')
+  }
+  function timeMinute(t: string): number {
+    return Number((t ?? '09:00').split(':')[1] ?? '0')
+  }
+  function setTimePart(part: 'h' | 'm', raw: string): void {
+    const h = timeHour(form.time)
+    const m = timeMinute(form.time)
+    const n = Number(raw)
+    if (part === 'h') {
+      const v = Number.isFinite(n) ? Math.min(23, Math.max(0, Math.trunc(n))) : h
+      form.time = `${String(v).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    } else {
+      const v = Number.isFinite(n) ? Math.min(59, Math.max(0, Math.trunc(n))) : m
+      form.time = `${String(h).padStart(2, '0')}:${String(v).padStart(2, '0')}`
+    }
+  }
   let formWorkDir = ''
   let formResume: ScheduleResumeMode = 'fresh'
   let dirPickerOpen = false
@@ -592,7 +612,29 @@ import type { WebTextId } from '@agentdeck/i18n'
           <!-- 表单式调度：预设五档 + 时间 + 结果区三行（cron 永远可见，改任何一侧实时同步） -->
           <div class="field">
             <label>{$t('schedules.whenLabel')}</label>
-            <input class="schedule-time" type="time" bind:value={form.time} />
+            <!-- 2026-11（使用者："时间显示里'分'不见了"）：原生 type=time 控件
+                 显示 09:00 没有单位字，换成「09 时 00 分」两段数字输入 + 单位。
+                 form.time 仍是 "HH:MM"（schedule-cron 只认这个格式），拆/合在此处。 -->
+            <div class="schedule-time">
+              <input
+                type="number"
+                min={0}
+                max={23}
+                value={timeHour(form.time)}
+                oninput={(e) => setTimePart('h', e.currentTarget.value)}
+                aria-label={$t('schedules.hourUnit')}
+              />
+              <span class="time-unit">{$t('schedules.hourUnit')}</span>
+              <input
+                type="number"
+                min={0}
+                max={59}
+                value={timeMinute(form.time)}
+                oninput={(e) => setTimePart('m', e.currentTarget.value)}
+                aria-label={$t('schedules.minuteUnit')}
+              />
+              <span class="time-unit">{$t('schedules.minuteUnit')}</span>
+            </div>
             <div class="freq-picker">
               {#each FREQS as f (f.key)}
                 <button
@@ -1025,12 +1067,22 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   /* 结果区三行（2026-11 v8 定型：cron / 人话 / 下次 常驻，改哪侧都实时同步） */
   .schedule-time {
-    /* 大字时间：只改字号与宽度——border/radius/padding 交给全局 input
-       （2026-11 review：原来重复定义了一份全局已有样式） */
+    /* 2026-11（"分"不见了那次的配套）：时间行 = 两段数字输入 + 「时」「分」单位。
+       字号大字（与任务表单时间同款观感）；border/radius/padding 交给全局 input */
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+  }
+  .schedule-time input[type='number'] {
     font-size: var(--fs-xl);
     font-weight: 600;
-    width: 6rem;
-    margin-bottom: 0.5rem;
+    width: 4rem;
+    text-align: center;
+  }
+  .schedule-time .time-unit {
+    font-size: var(--fs-sm);
+    color: var(--text-faint);
   }
   .quick-weekdays {
     border-style: dashed;

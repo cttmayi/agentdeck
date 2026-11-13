@@ -2936,7 +2936,7 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
           const chips = d().querySelectorAll('.schedules-main .var-chip').length
           const nameField = !!d().querySelector('.schedules-main input[type=text]')
-          const timeField = !!d().querySelector('.schedules-main input.schedule-time')
+          const timeField = d().querySelectorAll('.schedules-main .schedule-time input').length === 2
           const resultRows = d().querySelectorAll('.schedules-main .schedule-result-row').length
           if (freq !== 5 || chips !== 6 || !nameField || !timeField || resultRows !== 3) {
             errors.push(`表单不完整：预设键 ${freq}/5、变量 chips ${chips}/6、名字框 ${nameField}、时间行 ${timeField}、结果区三行 ${resultRows}/3`)

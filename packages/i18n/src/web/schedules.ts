@@ -38,6 +38,9 @@ export const schedulesText = {
   'schedules.lastDay': { zh: '最后一天（L）', en: 'Last day (L)' },
   'schedules.everyInterval': { zh: '每', en: 'Every' },
   'schedules.minutes': { zh: '分钟', en: 'minutes' },
+  // 2026-11（使用者："时间显示里'分'不见了"）：时间行两段输入的单位字
+  'schedules.hourUnit': { zh: '时', en: 'h' },
+  'schedules.minuteUnit': { zh: '分', en: 'min' },
   'schedules.customPlaceholder': { zh: '分 时 日 月 周，如 0 9 * * 1', en: 'min hour dom mon dow, e.g. 0 9 * * 1' },
   'schedules.customHint': { zh: '段序：分 时 日 月 周 · 例：0 9 * * 1 = 每周一 09:00', en: 'Order: min hour dom mon dow · e.g. 0 9 * * 1 = Mondays 09:00' },
   'schedules.weekdayMon': { zh: '周一', en: 'Mon' },
