@@ -461,6 +461,16 @@ import type { WebTextId } from '@agentdeck/i18n'
       <div class="main-panel">
         <div class="main-panel-head">
           <h2>{$t(formMode === 'create' ? 'schedules.createTitle' : 'schedules.updateTitle')}</h2>
+          <!-- ★ 保存放栏头（使用者要求：主操作在表单上部，不在最底下）；
+               取消跟它一排，原来是唯一的头部按钮 -->
+          <button
+            type="button"
+            class="btn btn--primary btn--sm"
+            disabled={busy}
+            onclick={() => void save()}
+          >
+            {$t('schedules.save')}
+          </button>
           <button type="button" class="btn btn--ghost btn--sm" onclick={closeForm}>
             {$t('schedules.cancel')}
           </button>
@@ -638,14 +648,6 @@ import type { WebTextId } from '@agentdeck/i18n'
           {#if formError}
             <div class="notice bad">{formError}</div>
           {/if}
-        </div>
-        <div class="main-panel-foot">
-          <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void save()}>
-            {$t('schedules.save')}
-          </button>
-          <button type="button" class="btn" onclick={closeForm}>
-            {$t('schedules.cancel')}
-          </button>
         </div>
       </div>
     {:else if selectedId}
