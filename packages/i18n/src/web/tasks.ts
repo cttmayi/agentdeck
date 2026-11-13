@@ -134,30 +134,8 @@ export const tasksText = {
   'tasks.col.action_running.hint': { zh: '判决要求做一件事，平台正在做', en: 'the verdict asked for something and the platform is doing it' },
   'tasks.noteActionRunning': { zh: '正在执行判决要求的动作', en: 'Running the action the verdict asked for' },
   'tasks.actionFailed': { zh: '失败原因：{reason}', en: 'Why it failed: {reason}' },
-  // ── 「这一次是谁审的」（D42）——只在偏离长期配置时显示 ──
-  'tasks.reviewerHeading': { zh: '这次由谁审', en: 'Who reviews this one' },
-  'tasks.reviewerNone': {
-    zh: '这条任务没有审核者。产出没有被审，也不会有审核结论——建任务时要自动审核，得选一个「智能体组」（组的审核者就是这条链的审核者）。',
-    en: 'This task has no reviewer. Its output was not reviewed and there is no verdict — to get an automatic review, pick an agent group when creating the task (the group’s reviewer is the one that reviews the chain).',
-  },
-  /**
-   * ★ 两种来源要分开说（2026-10）：
-   *
-   *   · `reviewerFromGroup` —— 审核者是**组里**那个人。这件事的后续是"改了组，
-   *     以后的任务跟着变"；
-   *   · `reviewerOverridden` —— 这一次单独点名的人（只对这条任务有效）。
-   *
-   *   两句混成一句（原来那句说的是"没有改它长期的「由谁来审它」"）会指向一个**已经
-   *   不存在的设置**：那个字段撤掉了，现在没有"长期的由谁审"这回事。
-   */
-  'tasks.reviewerFromGroup': {
-    zh: '（来自这条任务选的智能体组：改组的审核者，以后的任务跟着变）',
-    en: '(from the agent group this task picked: change the group’s reviewer and later tasks follow)',
-  },
-  'tasks.reviewerOverridden': {
-    zh: '（这条任务单独指定的审核者，只对这一次有效）',
-    en: '(reviewer picked for this task alone; applies to this run only)',
-  },
+  // 2026-11（使用者："任务里面，不需要显示「这次由谁审」"）：整个区连同四句词条
+  //   （heading/none/fromGroup/overridden）一起删——死键 i18n.test 会拦
   'tasks.warnActionFailed': {
     zh: '行动失败：{reason}',
     en: 'The action failed: {reason}',

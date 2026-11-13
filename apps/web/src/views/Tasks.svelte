@@ -1098,33 +1098,9 @@
   <!--
     ★ 「这一次是谁审的」（D42；2026-10 收成两态）。
 
-    ⚠️ 原来是**三态**：`follow`（跟随执行者的长期配置）那一档不画（绝大多数情况，
-    说出来只是噪音），只在"偏离长期配置"时才说。`follow` 随 `Agent.reviewerAgentId`
-    撤销之后，能出现的事实只剩两件——**有审核者**（可能来自组）与**没有审核者**，
-    两件都必须说出来：
-      · "没有人审"必须留痕，否则一条没被审的产出事后看起来像"审核链路坏了"；
-      · "谁审的"也要说，而且**来自组还是本次指定**由 run 上有没有 `groupId` 决定
-        （不同的来源要用不同的话说，见下面 `tasks.reviewerOverridden*` 两句）。
-  -->
-  {#if selectedStage?.executeRun?.reviewer}
-    <section class="drawer-section">
-      <h3>{$t('tasks.reviewerHeading')}</h3>
-      {#if selectedStage.executeRun.reviewer.mode === 'none'}
-        <p class="hint">{$t('tasks.reviewerNone')}</p>
-      {:else}
-        <p>
-          {agentName(selectedStage.executeRun.reviewer.agentId)}
-          <span class="faint fs-xs">
-            {$t(
-              selectedStage.executeRun.groupId
-                ? 'tasks.reviewerFromGroup'
-                : 'tasks.reviewerOverridden',
-            )}
-          </span>
-        </p>
-      {/if}
-    </section>
-  {/if}
+  <!-- 2026-11（使用者："任务里面，不需要显示「这次由谁审」…"）：整块删掉——
+       标题 + 两种显示（没审核者的长解释、有审核者的名字+来源）都不画。
+       审核行为不受影响（reviewer 仍随 run 记录，这里只是详情页不再说）。 -->
 
   <section class="drawer-section">
     <h3>{$t('tasks.runsHeading')} <span class="faint fs-xs">（{issueRuns.length}）</span></h3>
