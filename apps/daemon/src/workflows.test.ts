@@ -31,6 +31,7 @@ function freshRun(steps: WorkflowStep[] = []): WorkflowRun {
     status: 'queued',
     steps,
     gateFeedback: null,
+    taskAppend: null,
     error: null,
     createdAt: 0,
     updatedAt: 0,
@@ -213,7 +214,10 @@ test('★ gate 否决（带意见）：打回重跑——步骤链重置、意�
   )
   assert.equal(out.status, 'done', '打回一轮后应正常完成')
   assert.equal(gateCalls, 2, 'gate 要等两轮确认')
-  assert.equal(out.gateFeedback, '风格不对，重写')
+  // 打回时 gateFeedback 会被清掉（避免重跑轮的 gate 被误判成"刚否决"）——
+  // 意见固化在 taskAppend，agent 下一轮任务里看得到
+  assert.equal(out.gateFeedback, null, '否决标记已消费（清了）')
+  assert.ok(out.taskAppend?.includes('风格不对，重写'), '意见固化到 taskAppend')
   assert.equal(submitted.length, 2, '打回后写作步骤重新提交一次')
   // 步骤链：flow 步骤跑了两轮（两个 runId 都留着作历史）
   const flowStep = out.steps.find((x) => x.kind === 'flow')
@@ -231,6 +235,95 @@ test('★ gate 连续否决超过 3 轮：run failed（不无限打转）', asyn
   const out = await executeWorkflow(run, `await gate('过目')`, hooks)
   assert.equal(out.status, 'failed')
   assert.match(out.error ?? '', /打回 3 次仍未通过/)
+})
+
+test('★ 兜底：编排代码忘写 await（loop/gate 不 await）——fn 结束不等于步骤收口，run 等步骤跑完、gate 等人确认', async () => {
+  // 使用者 2026-11 踩到：`loop(...)`/`gate(...)` 不 await → fn 立即结束、run 提前
+  // 标 done，后台步骤还在跑；之后否决把 run 设回 running 就永远卡住。
+  // 兜底：fn 结束还有步骤没收口就继续等；gate 挂着等确认。
+  const run = freshRun()
+  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
+  let gateCalls = 0
+  const hooks = makeHooks({ submitted })
+  hooks.waitForGateConfirm = async () => {
+    gateCalls += 1
+    const g = run.steps.find((x) => x.kind === 'gate')
+    if (g) {
+      g.status = 'done'
+      g.finishedAt = Date.now()
+    }
+    return { kind: 'passed' as const }
+  }
+  // 故意不 await：`loop(...)` 和 `gate(...)` 都裸调用
+  const out = await executeWorkflow(
+    run,
+    `loop('groupA', '{{task}}')\ngate('过目')`,
+    hooks,
+  )
+  assert.equal(out.status, 'done', '没 await 也不能提前 done——要等步骤收口')
+  assert.equal(gateCalls, 1, 'gate 要等过人确认')
+  assert.equal(submitted.length, 1, 'loop 步骤只跑一轮')
+  const loopStep = out.steps.find((x) => x.kind === 'loop')
+  assert.equal(loopStep?.status, 'done')
+})
+
+test('★ 兜底 + 否决：没 await 的代码点否决——固化意见、打回重跑、再等确认', async () => {
+  const run = freshRun()
+  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
+  let gateCalls = 0
+  const hooks = makeHooks({ submitted })
+  hooks.waitForGateConfirm = async () => {
+    gateCalls += 1
+    // 第一轮否决（gate primitive 自己设 gateFeedback + taskAppend，不 throw）
+    if (gateCalls === 1) return { kind: 'rejected', feedback: '风格不对，重写' }
+    // 第二轮确认：把 gate 步骤标 done（confirm 接口做的事）
+    const g = run.steps.find((x) => x.kind === 'gate')
+    if (g) {
+      g.status = 'done'
+      g.finishedAt = Date.now()
+    }
+    return { kind: 'passed' as const }
+  }
+  // 没 await：fn 立即结束，gate 的否决标记发生在后台 promise——兜底 while 打回重跑
+  const out = await executeWorkflow(
+    run,
+    `loop('groupA', '{{task}}')\ngate('过目')`,
+    hooks,
+  )
+  assert.equal(out.status, 'done', '兜底路径否决后要打回重跑并最终完成')
+  assert.equal(gateCalls, 2, 'gate 等两轮确认')
+  assert.ok(out.taskAppend?.includes('风格不对，重写'), '否决意见固化成 taskAppend')
+  // 步骤链只有一份（loop 重置后复用同一对象）
+  const loopStep = out.steps.find((x) => x.kind === 'loop')
+  assert.equal(loopStep?.runIds.length, 2, 'loop 跑了两轮（runIds 累积）')
+})
+
+test('★ 正常路径（await）+ 否决两次：gate primitive 设标记、兜底打回，taskAppend 累积两条意见', async () => {
+  const run = freshRun()
+  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
+  let gateCalls = 0
+  const hooks = makeHooks({ submitted })
+  hooks.waitForGateConfirm = async () => {
+    gateCalls += 1
+    if (gateCalls === 1) return { kind: 'rejected', feedback: '风格不对，重写' }
+    if (gateCalls === 2) return { kind: 'rejected', feedback: '还是要改' }
+    const g = run.steps.find((x) => x.kind === 'gate')
+    if (g) {
+      g.status = 'done'
+      g.finishedAt = Date.now()
+    }
+    return { kind: 'passed' as const }
+  }
+  const out = await executeWorkflow(
+    run,
+    `await flow('groupA', '{{task}}')\nawait gate('过目')`,
+    hooks,
+  )
+  assert.equal(out.status, 'done')
+  assert.ok(out.taskAppend?.includes('风格不对，重写'), '第一条意见在')
+  assert.ok(out.taskAppend?.includes('还是要改'), '第二条意见也在（累积）')
+  const flowStep = out.steps.find((x) => x.kind === 'flow')
+  assert.equal(flowStep?.runIds.length, 3, '跑了三轮')
 })
 
 test('★ 暂停在步骤边界生效：paused 时引擎挂起，resume 后继续', async () => {

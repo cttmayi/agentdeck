@@ -75,8 +75,16 @@ export interface WorkflowRun {
   status: 'queued' | 'running' | 'paused' | 'waiting-human' | 'done' | 'failed'
   /** 步骤链（引擎按代码顺序登记）。 */
   steps: WorkflowStep[]
-  /** 2026-11：gate 否决时人填的意见——打回重跑时附加到任务（老数据没有=null）。 */
+  /** 2026-11：gate 否决时人填的意见——UI 展示用；打回轮由 taskAppend 固化。 */
   gateFeedback: string | null
+  /**
+   * ★ 2026-11（使用者踩到：编排代码忘写 await）：否决意见**固化**到这里，重跑轮
+   *   的 submitStep 把它附加进任务。为什么不能直接读 gateFeedback：fn 结束后（没
+   *   await 的兜底路径）gate 步骤还挂着 waiting-human，兜底靠"gateFeedback 有值
+   *   且 taskAppend 为空"识别"刚否决、要打回"——意见留在 gateFeedback 上，重跑轮
+   *   的 gate 就永远被误判成"刚否决"，死循环打回（实测踩过）。
+   */
+  taskAppend: string | null
   error: string | null
   createdAt: number
   updatedAt: number
@@ -252,18 +260,6 @@ export interface EngineHooks {
 /** gate 的确认结果（2026-11：不只"通过"，还能"否决 + 意见"）。 */
 export type GateVerdict = { kind: 'passed' } | { kind: 'rejected'; feedback: string }
 
-/**
- * ★ gate 否决信号（引擎内部）：否决 = 打回重跑——executeWorkflow 捕获后重置
- *   步骤链、把意见存到 run 上，重新执行一遍代码（带意见再跑写/审/再等确认）。
- */
-export class WorkflowRejectedError extends Error {
-  feedback: string
-  constructor(feedback: string) {
-    super('gate 否决')
-    this.feedback = feedback
-  }
-}
-
 /** 编排代码能用的节点：**组名**（字符串，运行时按名字在智能体组里解析）
  * 或内嵌智能体（`inline:名字`）。用组名而不是组 id：可读、稳定（用户自己命名），
  * 模板骨架里的 `'组A'` 等占位符在编辑时改成真实组名。 */
@@ -283,6 +279,11 @@ export interface InlineAgentDef {
  * cron 表达式同一信任级）；原语只接受组 id / 内嵌智能体，不接受任意 workDir，
  * 安全边界保持（不能开放"提交任意 run"）。
  */
+/** 兜底轮询用的小睡（250ms）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export async function executeWorkflow(
   run: WorkflowRun,
   code: string,
@@ -476,8 +477,18 @@ export async function executeWorkflow(
       run.status = 'waiting-human'
       await hooks.persist(run)
       const verdict = await hooks.waitForGateConfirm(step)
-      // 否决（带意见）：打回重跑——executeWorkflow 捕获信号、重置步骤链再跑一遍
-      if (verdict.kind === 'rejected') throw new WorkflowRejectedError(verdict.feedback)
+      if (verdict.kind === 'rejected') {
+        // ★ 否决**不 throw**（2026-11 使用者踩到：编排代码忘写 await 时，throw 发
+        //   生在后天的 gate Promise——unhandledRejection 直接崩 daemon 进程）。
+        //   统一：设 gateFeedback（UI 展示）+ 固化 taskAppend（重跑轮附加进任务），
+        //   由 executeWorkflow 的兜底 while 识别"刚否决"→ 重置步骤链打回重跑。
+        //   gate 步骤留在 waiting-human（重置时清成 pending 重新等确认）。
+        run.gateFeedback = verdict.feedback
+        const append = `[打回意见] ${verdict.feedback}`
+        run.taskAppend = run.taskAppend ? `${run.taskAppend}\n\n${append}` : append
+        await hooks.persist(run)
+        return
+      }
       step.status = 'done'
       step.finishedAt = now()
       await hooks.persist(run)
@@ -526,30 +537,48 @@ export async function executeWorkflow(
         primitives.gate,
         primitives.inline,
       )
-      run.status = 'done'
-      break
     } catch (err) {
-      if (err instanceof WorkflowRejectedError) {
-        run.gateFeedback = err.feedback
+      run.status = 'failed'
+      run.error = err instanceof Error ? err.message : String(err)
+      break
+    }
+    // ★ fn 结束 ≠ 步骤收口（2026-11 使用者踩到：编排代码忘写 await，loop/gate
+    //   的 Promise 在后台继续，run 却已经标 done——之后否决把 run 设回 running
+    //   就永远卡住）。兜底：fn 结束还有步骤没收口就继续等；gate 挂着时等人
+    //   确认，或识别"刚否决"（gateFeedback 有值，gate primitive 设置的）→
+    //   重置步骤链、清标记、打回重跑（意见已固化在 taskAppend）。
+    let redo = false
+    for (;;) {
+      await sleep(250)
+      const active = run.steps.filter((s) => s.status === 'running' || s.status === 'pending')
+      if (active.length > 0) continue
+      const gateWait = run.steps.find((s) => s.status === 'waiting-human')
+      if (!gateWait) break
+      if (run.gateFeedback !== null) {
+        // 刚否决：打回重跑（重跑轮 submitStep 读 taskAppend 附加意见）
         rejectRounds += 1
         if (rejectRounds > MAX_REJECT_ROUNDS) {
           run.status = 'failed'
           run.error = `打回 ${MAX_REJECT_ROUNDS} 次仍未通过`
           break
         }
-        // 打回：步骤链全部重置为 pending（runIds 保留作历史）——重新执行时
-        // nextStep 复用这些步骤对象（同一引用），runStep 再提交一轮
         for (const st of run.steps) {
           st.status = 'pending'
           st.startedAt = null
           st.finishedAt = null
         }
-        continue
+        // 清否决标记——重跑轮的 gate 等确认时不再被当成"刚否决"
+        run.gateFeedback = null
+        redo = true
+        break
       }
-      run.status = 'failed'
-      run.error = err instanceof Error ? err.message : String(err)
-      break
+      // 否则等人确认——继续等（confirm action 会把 gate 步骤标 done）
     }
+    if (redo) continue
+    // 超轮失败已在兜底里定过 status——别用 done 覆盖它
+    if (run.status === 'failed') break
+    run.status = 'done'
+    break
   }
   run.updatedAt = now()
   await hooks.persist(run)

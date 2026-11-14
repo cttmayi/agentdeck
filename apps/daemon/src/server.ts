@@ -4128,11 +4128,12 @@ async function injectedSkillsOf(
             if (!node) return { ok: false, runId: null, error: '步骤没有节点' }
             // 占位符替换（先于一切使用 prompt 的地方；步骤链上登记的 prompt 也换成
             // 替换后的——运行画面显示 agent 实际收到什么）。
-            // gate 否决打回后：意见**每次提交现算**（run.gateFeedback 在打回轮才
-            //   写入——开头算成常量的话第二轮还是旧值，agent 看不到人的意见）
+            // gate 否决打回后：固化意见（taskAppend）附加进任务——引擎在打回轮
+            //   把意见固化到 run.taskAppend（gateFeedback 只做 UI 展示），每次
+            //   提交现算，agent 能看到人的意见
             const task = prompt.replace(
               /\{\{task\}\}/g,
-              run.gateFeedback ? `${taskPrompt}\n\n[打回意见] ${run.gateFeedback}` : taskPrompt,
+              run.taskAppend ? `${taskPrompt}\n\n${run.taskAppend}` : taskPrompt,
             )
             step.prompt = task
             const runId = ulid() as RunId
@@ -7031,6 +7032,7 @@ async function injectedSkillsOf(
         status: 'queued',
         steps: [],
         gateFeedback: null,
+        taskAppend: null,
         error: null,
         createdAt: now,
         updatedAt: now,

@@ -3031,10 +3031,11 @@ describe('编排：gate 否决打回重跑', () => {
       // ② 否决（带意见）→ 打回重跑 → 再次 waiting-human
       await post(`/api/workflow-runs/${rid}/reject`, { feedback: '风格不对，重写' })
       assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '否决后应自动重跑并再次等确认')
-      const runAfter = await get<{ run: { gateFeedback: string | null; steps: Array<{ runIds: string[] }> } }>(
+      const runAfter = await get<{ run: { taskAppend: string | null; steps: Array<{ runIds: string[] }> } }>(
         `/api/workflow-runs/${rid}`,
       )
-      assert.equal(runAfter.run.gateFeedback, '风格不对，重写', '意见存到 run 上')
+      // 打回时 gateFeedback 标记会被消费（清了）——意见固化到 taskAppend
+      assert.ok(runAfter.run.taskAppend?.includes('风格不对，重写'), '意见固化到 taskAppend')
       assert.equal(runAfter.run.steps[0]!.runIds.length, 2, '写作步骤跑了两轮（runIds 累积）')
       // ③ 第二轮 agent 收到的任务要带打回意见（{{task}} 替换时附加）
       assert.ok(
@@ -3046,6 +3047,79 @@ describe('编排：gate 否决打回重跑', () => {
       assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
       const fin = await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)
       assert.equal(fin.run.status, 'done')
+    } finally {
+      await d.close()
+    }
+  })
+})
+
+/**
+ * ★ 编排代码忘写 await 的兜底（2026-11 使用者踩到：`loop(...)`/`gate(...)` 不
+ *   await → fn 立即结束、run 提前标 done，之后否决把 run 设回 running 就永远
+ *   卡住）。真 API：没 await 的代码 → gate 等确认 → 否决 → 引擎兜底打回重跑 →
+ *   再等确认 → confirm → done。
+ */
+describe('编排：没 await 代码的兜底（gate 否决打回）', () => {
+  test('没 await：否决后兜底打回重跑、意见进任务、再确认完成', async () => {
+    const backend = new FakeBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-noawait'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+      const waitStatus = async (rid: string, statuses: string[]): Promise<string> => {
+        for (let i = 0; i < 80; i++) {
+          const st = (await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)).run.status
+          if (statuses.includes(st)) return st
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        throw new Error('run 未到目标状态')
+      }
+
+      const agent = await post<{ id: string }>('/api/agents', { name: '无await执行者', role: 'executor' })
+      // ★ 故意不写 await——引擎兜底负责收口，run 不能提前 done
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: '无await编排',
+        code: `flow('inline:无await执行者', '{{task}}')\ngate('结果请你过目')`,
+        templateKey: 'gate',
+      })
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: '写一篇文章',
+        workDir: null,
+      })
+      const rid = started.run.id
+
+      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '没 await 也要等到 gate 等人确认（不能提前 done）')
+      // 否决 → 兜底打回重跑 → 再次 waiting-human
+      await post(`/api/workflow-runs/${rid}/reject`, { feedback: '风格不对，重写' })
+      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '否决后兜底打回并再次等确认')
+      const runAfter = await get<{ run: { taskAppend: string | null; steps: Array<{ runIds: string[] }> } }>(
+        `/api/workflow-runs/${rid}`,
+      )
+      assert.ok(runAfter.run.taskAppend?.includes('风格不对，重写'), '意见固化到 taskAppend')
+      assert.equal(runAfter.run.steps[0]!.runIds.length, 2, '写作步骤跑了两轮')
+      assert.ok(backend.seenPrompt?.includes('风格不对，重写'), '重跑时 agent 应收到打回意见')
+      // confirm → done
+      await post(`/api/workflow-runs/${rid}/confirm`, {})
+      assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
     } finally {
       await d.close()
     }
