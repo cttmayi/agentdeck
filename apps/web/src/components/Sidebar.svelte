@@ -47,6 +47,9 @@
     { id: 'crystallize', title: 'crystallize.navTitle', hint: 'crystallize.navHint' },
     // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器，排沉淀之下。
     { id: 'schedules', title: 'schedules.navTitle', hint: 'schedules.navHint' },
+    // ★ 设置（2026-11，使用者立项）：从右侧抽屉改主窗口视图（主题/语言/默认
+    //   运行时/成本/远端能力）。排「关于」前面——设置是常用入口。
+    { id: 'settings', title: 'settings.navTitle', hint: 'settings.navHint' },
     // ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界，排最后（它说明"这一台
     //   是怎么搭的"，不是天天用的入口）。
     { id: 'about', title: 'about.navTitle', hint: 'about.navHint' },

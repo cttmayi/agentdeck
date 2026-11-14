@@ -17,9 +17,18 @@ import type { TextCatalog } from '../text.ts'
  *    与原来那段一字不差。以英文单词结尾/开头的那几段首尾各带一个空格，不是笔误。
  */
 export const settingsText = {
+  // ★ 2026-11（使用者立项）：设置从右侧抽屉改为**主窗口视图**（侧栏「设置」项）。
+  'settings.navTitle': { zh: '设置', en: 'Settings' },
+  // ⚠️ 侧栏减半纪律：辅助文字 4–6 个字、一行放得下。
+  'settings.navHint': { zh: '主题 · 语言', en: 'Theme · language' },
+  'settings.headIntro': {
+    zh: '这一台怎么配：主题、语言、默认运行时，成本与审计导出，以及远端账号。',
+    en: 'How this machine is configured: theme, language, default runtime, costs & audit export, and the remote account.',
+  },
+  'settings.general': { zh: '通用', en: 'General' },
   // ── 抽屉外壳 ──
-  'settings.title': { zh: '设置', en: 'Settings' },
-  'settings.titleRemote': { zh: '远端账号', en: 'Remote account' },
+  // 2026-11：抽屉没了——`settings.title` / `settings.titleRemote`（抽屉标题）
+  // 删除（页名用 `settings.navTitle`）。
 
   // ── 界面语言（D39）──
   'settings.language': { zh: '界面语言', en: 'Interface language' },

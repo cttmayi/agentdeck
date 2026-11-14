@@ -2,7 +2,7 @@
   import { unreadCount } from '../lib/stores.ts'
   import { t } from '../lib/i18n.ts'
   import Icon from './Icon.svelte'
-  import { VIEW_TITLE_KEYS, openDrawer, view } from '../lib/view.ts'
+  import { VIEW_TITLE_KEYS, go, openDrawer, view } from '../lib/view.ts'
   import { actionsFor, pageActions } from '../lib/page-actions.ts'
   import {
     remoteAccount,
@@ -194,7 +194,7 @@
       <button
         type="button"
         class="btn btn--ghost account"
-        onclick={() => openDrawer.set('settings')}
+        onclick={() => go('settings')}
         title={$remoteAccount?.email ?? ''}
       >
         <span class="avatar">{$remoteAccount?.displayName?.slice(0, 1)?.toUpperCase() ?? '?'}</span>
@@ -206,7 +206,7 @@
       <button
         type="button"
         class="btn btn--ghost login"
-        onclick={() => openDrawer.set('remote')}
+        onclick={() => go('settings')}
         title={$remoteError || $t('shell.signInHint')}
       >
         {$remoteError ? $t('shell.signInRemoteDown') : $t('shell.signIn')}
@@ -215,7 +215,7 @@
     <button
       type="button"
       class="btn btn--ghost btn--icon"
-      onclick={() => openDrawer.set('settings')}
+      onclick={() => go('settings')}
       aria-label={$t('shell.settings')}
       title={$t('shell.settings')}
     >

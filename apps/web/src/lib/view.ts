@@ -57,7 +57,9 @@ export const VIEW_TITLE_KEYS = {
   crystallize: 'crystallize.navTitle',
   // ★ 定时任务（2026-11，使用者立项）：第八个视图，排沉淀之后。
   schedules: 'schedules.navTitle',
-  // ★ 关于（2026-11，使用者立项）：第九个视图，排最后。
+  // ★ 设置（2026-11，使用者立项）：从抽屉改主窗口视图，排「关于」前面。
+  settings: 'settings.navTitle',
+  // ★ 关于（2026-11，使用者立项）：第十个视图，排最后。
   about: 'about.navTitle',
 } as const satisfies Record<ViewName, WebTextId>
 
@@ -180,7 +182,9 @@ export const selectedIssueId = writable<string | null>(null)
  * 顶栏点「登录」时不该让人在成本、审计导出里翻找登录表单在哪。
  * 分成两个独立组件会在两处各写一遍表单，迟早不一致。
  */
-export const openDrawer = writable<'inbox' | 'settings' | 'remote' | null>(null)
+// ★ 2026-11：设置从抽屉改主窗口视图——抽屉只剩「通知」（inbox）。
+//   'settings'/'remote' 两个值撤掉（登录也进设置页，见 Topbar）。
+export const openDrawer = writable<'inbox' | null>(null)
 
 /** 一闪而过的提示（操作成功/失败的一句话反馈）。 */
 export const toast = writable<string | null>(null)

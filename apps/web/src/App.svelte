@@ -3,7 +3,6 @@
   import Topbar from './components/Topbar.svelte'
   import Sidebar from './components/Sidebar.svelte'
   import InboxDrawer from './components/InboxDrawer.svelte'
-  import SettingsDrawer from './components/SettingsDrawer.svelte'
   import { ConfirmDialog } from '@agentdeck/ui/components'
   import { t } from './lib/i18n.ts'
   import Chat from './views/Chat.svelte'
@@ -15,6 +14,7 @@
   import Crystallize from './views/Crystallize.svelte'
   import Schedules from './views/Schedules.svelte'
   import About from './views/About.svelte'
+  import Settings from './views/Settings.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
@@ -134,6 +134,10 @@
       <!-- ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
            左栏 = 定时任务列表，右栏 = 新建表单 / 详情（含触发记录）。 -->
       <Schedules />
+    {:else if $view === 'settings'}
+      <!-- ★ 设置（2026-11，使用者立项）：从右侧抽屉改主窗口视图——
+           主题/语言/默认运行时/成本/远端能力全在这页。 -->
+      <Settings />
     {:else if $view === 'about'}
       <!-- ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界。
            收拢散在各处的诊断信息（侧栏底部状态块 / 设置抽屉诊断折叠区）。 -->
@@ -149,12 +153,9 @@
 
 {#if $openDrawer}
   <div class="drawer-backdrop" onclick={closeDrawer} role="presentation"></div>
-  {#if $openDrawer === 'inbox'}
-    <InboxDrawer onclose={closeDrawer} />
-  {:else}
-    <!-- 同一个组件，'remote' 只渲染远端那一段（顶栏点「登录」进来的路径） -->
-    <SettingsDrawer onclose={closeDrawer} focus={$openDrawer === 'remote' ? 'remote' : 'all'} />
-  {/if}
+  <!-- ★ 2026-11：设置从抽屉改主窗口视图——抽屉只剩「通知」（inbox）；
+     设置/登录都在「设置」页（`views/Settings.svelte`）。 -->
+  <InboxDrawer onclose={closeDrawer} />
 {/if}
 
 {#if $toast}

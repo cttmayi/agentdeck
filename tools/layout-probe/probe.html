@@ -4428,17 +4428,25 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         facts['settings.defaultRuntimePresent'] = null
         facts['settings.defaultRuntimeFirstIsAuto'] = null
         {
+          // 2026-11：设置从抽屉改主窗口视图——顶栏图标按钮现在跳到「设置」页，
+          // 不再开抽屉（也没有 Esc 可关；量完切回 agents 视图）。
           const settingsIcon = [...d().querySelectorAll('.topbar button')].find(
             (b) => (b.getAttribute('aria-label') ?? '') === '设置',
           )
           if (!settingsIcon) {
-            // 顶栏那个图标按钮是唯一"focus='all'"的入口；找不到就说清楚，不要静默跳过
             errors.push('顶栏找不到 aria-label=设置 的按钮 ⇒ 量不到全局 runtime 默认值那一段')
           } else {
             click(settingsIcon)
-            const opened = await until(() => !!d().querySelector('.drawer'), 60)
-            const panel2 = d().querySelector('.drawer')
-            const drSection = panel2 ? panel2.querySelector('[data-default-runtime]') : null
+            const opened = await until(() => !!d().querySelector('[data-set-general]'), 60)
+            // ★ 2026-11：设置页三卡片（通用/成本/远端能力）都在、页头导语在、
+            //    没有遮罩（主窗口视图不是浮层）
+            facts['settings.sections'] =
+              !!d().querySelector('[data-set-general]') &&
+              !!d().querySelector('[data-set-costs]') &&
+              !!d().querySelector('[data-set-remote]')
+            facts['settings.viewIntroPresent'] = !!d().querySelector('.view-intro')
+            facts['settings.noBackdropWhenOpen'] = !d().querySelector('.drawer-backdrop')
+            const drSection = d().querySelector('[data-set-general] [data-default-runtime]')
             facts['settings.defaultRuntimePresent'] = !!drSection
             const drSelect = drSection ? drSection.querySelector('select') : null
             facts['settings.defaultRuntimeOptions'] = drSelect
@@ -4447,12 +4455,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             facts['settings.defaultRuntimeFirstIsAuto'] = drSelect
               ? drSelect.options[0]?.value === '' && /自动侦测/.test(drSelect.options[0].textContent)
               : null
-            if (opened) {
-              f.contentWindow.dispatchEvent(
-                new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-              )
-              await until(() => !d().querySelector('.drawer'), 40)
-            }
+            f.contentWindow.location.hash = '#/agents'
+            await until(() => !!d().querySelector('.agent-row'), 60)
           }
         }
 
@@ -5159,6 +5163,9 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           ['#/tools', '工具', ['安装工具', '刷新']],
           // ★ 2026-11（关于页立项）：只读说明页，顶栏**没有**动作。
           ['#/about', '关于', []],
+          // ★ 2026-11（设置页立项）：主窗口视图，顶栏**没有**页面动作
+          //   （登录/齿轮在全局动作区，不属于 page-actions）。
+          ['#/settings', '设置', []],
         ]) {
           f.contentWindow.location.hash = tpHash
           // ⚠️ 等到**地址真的生效**再量：`hashchange` 晚一拍，而页名在"建任务"
@@ -5318,22 +5325,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         await until(() => d().querySelectorAll('.agent-row').length > 0, 60)
         await wait(300)
         {
-          // ⚠️ 必须点**全局**那组的设置（`openDrawer.set('settings')`）：agents
-          //   页的「设置」开的是 WorkspaceSettings（第一句话模版），**没有语言
-          //   切换器**——语言段 2026-09 起在全局 SettingsDrawer 里。全局组里
-          //   inbox 和 settings 都是 btn--icon，按 aria-label 区分。
+          // 2026-11：设置从抽屉改主窗口视图——全局设置按钮跳到「设置」页，
+          // 语言切换器在 `[data-set-general]` 里。量完切回 agents。
           const openBtn = [
             ...d().querySelectorAll('.topbar .global-actions button.btn--icon'),
           ].find((b) => (b.getAttribute('aria-label') ?? '') === '设置')
           if (openBtn) {
             click(openBtn)
-            await wait(1500)
+            await until(() => !!d().querySelector('[data-set-general]'), 60)
           } else {
-            errors.push('语言组：全局设置按钮（btn--icon）找不到（抽屉打不开，语言切换量不到）')
+            errors.push('语言组：全局设置按钮（btn--icon）找不到（设置页打不开，语言切换量不到）')
           }
         }
         const langSelectOf = () =>
-          [...d().querySelectorAll('.drawer select')].find(
+          [...d().querySelectorAll('[data-set-general] select')].find(
             (s) => ['zh', 'en'].includes(s.value),
           ) ?? null
         const langSelect = langSelectOf()
@@ -5505,8 +5510,13 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
 
           // 切回中文，并以服务端为准确认它记住了
-          // ⚠️ 用 `langSelectOf()` 重新取：切到 en 之后抽屉因 locale 重渲染，
+          // ⚠️ 用 `langSelectOf()` 重新取：切到 en 之后因 locale 重渲染，
           //    旧的 `langSelect` 引用可能已脱离 DOM（探针第一次跑就栽在这）。
+          // ★ 2026-11：语言切换器在**设置页**（不再是抽屉）。英文文案那几段量完
+          //    之后视图可能在 agents/任务页——先切回设置页再找切换器，否则
+          //    `langSelectOf()` 取到 null，中文切不回去，后面所有量中文的段全错。
+          f.contentWindow.location.hash = '#/settings'
+          await until(() => !!d().querySelector('[data-set-general]'), 60)
           const langSelectZh = langSelectOf()
           if (!langSelectZh) errors.push('语言组：切回中文时抽屉里的语言 select 不见了')
           else {
