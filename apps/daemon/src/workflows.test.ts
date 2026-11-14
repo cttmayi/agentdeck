@@ -30,6 +30,7 @@ function freshRun(steps: WorkflowStep[] = []): WorkflowRun {
     workDir: null,
     status: 'queued',
     steps,
+    gateFeedback: null,
     error: null,
     createdAt: 0,
     updatedAt: 0,
@@ -52,7 +53,7 @@ function makeHooks(opts: {
   return {
     persist: async () => {},
     waitIfPaused: async () => {},
-    waitForGateConfirm: async () => {},
+    waitForGateConfirm: async () => ({ kind: 'passed' as const }),
     submit: opts.submit ?? base,
   }
 }
@@ -140,6 +141,7 @@ test('★ gate：挂起成 waiting-human，confirm 后继续、run 完成', asyn
       g.finishedAt = Date.now()
     }
     released = true
+    return { kind: 'passed' as const }
   }
   const out = await executeWorkflow(
     run,
@@ -191,6 +193,44 @@ test('★ route：按关键字选组', async () => {
   )
   assert.equal(out.status, 'done')
   assert.equal(out.steps[0]!.nodeId, 'groupCode')
+})
+
+test('★ gate 否决（带意见）：打回重跑——步骤链重置、意见随下一轮、再等确认', async () => {
+  const run = freshRun()
+  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
+  let gateCalls = 0
+  const hooks = makeHooks({ submitted })
+  hooks.waitForGateConfirm = async () => {
+    gateCalls += 1
+    // 第一轮否决（带意见）；第二轮通过
+    if (gateCalls === 1) return { kind: 'rejected', feedback: '风格不对，重写' }
+    return { kind: 'passed' }
+  }
+  const out = await executeWorkflow(
+    run,
+    `await flow('groupA', '{{task}}')\nawait gate('结果请你过目')`,
+    hooks,
+  )
+  assert.equal(out.status, 'done', '打回一轮后应正常完成')
+  assert.equal(gateCalls, 2, 'gate 要等两轮确认')
+  assert.equal(out.gateFeedback, '风格不对，重写')
+  assert.equal(submitted.length, 2, '打回后写作步骤重新提交一次')
+  // 步骤链：flow 步骤跑了两轮（两个 runId 都留着作历史）
+  const flowStep = out.steps.find((x) => x.kind === 'flow')
+  assert.ok(flowStep, 'flow 步骤在')
+  assert.equal(flowStep!.runIds.length, 2, '两轮各有一个 runId（同一步骤累积）')
+  assert.equal(out.steps.length, 2, '步骤链不重复（第二轮复用第一轮的步骤对象）')
+  // 第二轮提交的 prompt 要带打回意见（submitStep 在 server 拼；这里引擎透传）
+  assert.equal(submitted[1]!.prompt, '{{task}}', '引擎透传原样（意见拼接在 server 的占位符替换里）')
+})
+
+test('★ gate 连续否决超过 3 轮：run failed（不无限打转）', async () => {
+  const run = freshRun()
+  const hooks = makeHooks({})
+  hooks.waitForGateConfirm = async () => ({ kind: 'rejected', feedback: '还是不行' })
+  const out = await executeWorkflow(run, `await gate('过目')`, hooks)
+  assert.equal(out.status, 'failed')
+  assert.match(out.error ?? '', /打回 3 次仍未通过/)
 })
 
 test('★ 暂停在步骤边界生效：paused 时引擎挂起，resume 后继续', async () => {

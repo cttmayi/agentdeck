@@ -76,6 +76,8 @@
     }
   }
 
+  /** gate 否决时人的意见（必填——打回理由，附加给 agent 重写）。 */
+  let gateFeedback = ''
   let timer: ReturnType<typeof setInterval> | null = null
   onMount(() => {
     void refresh()
@@ -85,6 +87,25 @@
       if (timer) clearInterval(timer)
     }
   })
+
+  /** gate 否决（带意见）：POST reject —— 引擎打回重跑（意见进下一轮任务）。 */
+  async function rejectGate(): Promise<void> {
+    if (busy) return
+    busy = true
+    try {
+      await api<{ run: WorkflowRun }>(`/api/workflow-runs/${runId}/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ feedback: gateFeedback }),
+      })
+      gateFeedback = ''
+      await refresh()
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err)
+    } finally {
+      busy = false
+    }
+  }
 
   async function control(action: 'pause' | 'resume' | 'confirm' | 'retry-step'): Promise<void> {
     if (busy) return
@@ -176,9 +197,22 @@
           <article class="notice wf-gate">
             <strong>{$t('workflows.stepWaitingHuman')}</strong>
             <p>"{currentStep.gateText}"</p>
+            <label class="field">
+              <span class="fs-sm faint">{$t('workflows.gateFeedbackLabel')}</span>
+              <textarea rows="2" bind:value={gateFeedback}></textarea>
+            </label>
             <div class="detail-actions">
               <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void control('confirm')}>
                 {$t('workflows.confirm')}
+              </button>
+              <button
+                type="button"
+                class="btn btn--danger"
+                disabled={busy || gateFeedback.trim() === ''}
+                title={gateFeedback.trim() === '' ? $t('workflows.gateFeedbackLabel') : ''}
+                onclick={() => void rejectGate()}
+              >
+                {$t('workflows.gateReject')}
               </button>
             </div>
           </article>

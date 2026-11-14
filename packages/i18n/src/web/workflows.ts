@@ -58,6 +58,8 @@ export const workflowsText = {
   'workflows.pause': { zh: '暂停', en: 'Pause' },
   'workflows.resume': { zh: '继续', en: 'Resume' },
   'workflows.confirm': { zh: '确认', en: 'Confirm' },
+  'workflows.gateReject': { zh: '否决并打回重写', en: 'Reject & rework' },
+  'workflows.gateFeedbackLabel': { zh: '你的意见（不通过时必填，会附加给 agent 重写）', en: 'Your feedback (required when rejecting; appended for rework)' },
   'workflows.runStatusQueued': { zh: '排队中', en: 'Queued' },
   'workflows.runStatusRunning': { zh: '进行中', en: 'Running' },
   'workflows.runStatusPaused': { zh: '已暂停', en: 'Paused' },

@@ -103,6 +103,7 @@ import {
   saveWorkflows,
   type EngineHooks,
   type Workflow,
+  type GateVerdict,
   type WorkflowRun,
   type WorkflowStep,
 } from './workflows.ts'
@@ -2318,8 +2319,8 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
 
   /** 暂停等待器：pause 时引擎在每个步骤边界挂起；resume 时全部放行。 */
   const resumeWaiters = new Set<() => void>()
-  /** gate 等待器：waiting-human 时引擎挂起；confirm 时放行（按 run id）。 */
-  const gateWaiters = new Map<string, () => void>()
+  /** gate 等待器：waiting-human 时引擎挂起；confirm/reject 时放行（按 run id）。 */
+  const gateWaiters = new Map<string, (verdict: GateVerdict) => void>()
 
 
   /** 已注册的 croner job（按 schedule id）；启停/更新/删除时同步。 */
@@ -4122,19 +4123,37 @@ async function injectedSkillsOf(
           const taskPrompt = taskIssue?.description ?? ''
 
           // 每步的 submit：解析节点 → 提交一次"组跑"（或内嵌智能体纯执行）。
-          const submitStep: NonNullable<EngineHooks['submit']> = async (step, prompt) => {
+          const submitStep: NonNullable<EngineHooks['submit']> = async (step, prompt, opts) => {
             const node = step.nodeId
             if (!node) return { ok: false, runId: null, error: '步骤没有节点' }
             // 占位符替换（先于一切使用 prompt 的地方；步骤链上登记的 prompt 也换成
             // 替换后的——运行画面显示 agent 实际收到什么）。
-            const task = prompt.replace(/\{\{task\}\}/g, taskPrompt)
+            // gate 否决打回后：意见**每次提交现算**（run.gateFeedback 在打回轮才
+            //   写入——开头算成常量的话第二轮还是旧值，agent 看不到人的意见）
+            const task = prompt.replace(
+              /\{\{task\}\}/g,
+              run.gateFeedback ? `${taskPrompt}\n\n[打回意见] ${run.gateFeedback}` : taskPrompt,
+            )
             step.prompt = task
             const runId = ulid() as RunId
             let agentRef: SubmitRunRequest['agentRef']
             let groupId: string | undefined
+            // ★ 2026-11：编排不用「智能体组」也能配审核链——`opts.reviewer`
+            //   （`inline:名字`）作为执行 run 的审核者覆盖（组节点时盖过组默认）。
+            let reviewerAgentId: AgentId | undefined
+            if (opts?.reviewer) {
+              const rName = opts.reviewer.replace(/^inline:/, '')
+              const rAgents = await store.listAgents(workspaceId)
+              const rAgent = rAgents.find((a) => (a.name as string) === rName)
+              if (!rAgent) {
+                return { ok: false, runId: null, error: `审核者智能体不存在：${rName}` }
+              }
+              reviewerAgentId = rAgent.id as AgentId
+            }
             if (node.startsWith('inline:')) {
-              // 内嵌智能体（一期）：按名字引用**现有智能体**当执行者，纯执行
-              // （无审核、无动作——不建组也能用编排跑一步）。
+              // 内嵌智能体（2026-11）：按名字引用**现有智能体**当执行者——不再
+              //   "纯执行"：`{ reviewer: 'inline:审查员' }` 选项能挂审核链（审不过
+              //   run failed，loop 自动打回重写）——智能体组的形态被编排取代。
               const agentName = node.slice('inline:'.length)
               const agents = await store.listAgents(workspaceId)
               const agent = agents.find((a) => (a.name as string) === agentName)
@@ -4163,6 +4182,7 @@ async function injectedSkillsOf(
               subject: { type: 'issue', id: run.issueId as Issue['id'] },
               prompt: task,
               ...(groupId ? { groupId } : {}),
+              ...(reviewerAgentId ? { reviewerAgentId } : {}),
               // 编排任务的工作目录：发起时设定（与「新建任务」同款：null = daemon 自动分配）
               ...(run.workDir ? { workDir: run.workDir } : {}),
               limits: { maxTurns: null, timeoutMs: null },
@@ -4206,13 +4226,9 @@ async function injectedSkillsOf(
                     resumeWaiters.add(resolve)
                   })
                 : Promise.resolve(),
-            waitForGateConfirm: (step) =>
-              new Promise<void>((resolve) => {
-                gateWaiters.set(run.id, () => {
-                  step.status = 'done'
-                  step.finishedAt = Date.now()
-                  resolve()
-                })
+            waitForGateConfirm: () =>
+              new Promise<GateVerdict>((resolve) => {
+                gateWaiters.set(run.id, resolve)
               }),
             submit: submitStep,
           }
@@ -7014,6 +7030,7 @@ async function injectedSkillsOf(
         workDir: typeof body.workDir === 'string' ? body.workDir : null,
         status: 'queued',
         steps: [],
+        gateFeedback: null,
         error: null,
         createdAt: now,
         updatedAt: now,
@@ -7041,7 +7058,7 @@ async function injectedSkillsOf(
       sendJson(res, 200, { run })
       return
     }
-    const workflowRunCtrl = /^\/api\/workflow-runs\/([^/]+)\/(pause|resume|confirm|retry-step)$/.exec(path)
+    const workflowRunCtrl = /^\/api\/workflow-runs\/([^/]+)\/(pause|resume|confirm|reject|retry-step)$/.exec(path)
     if (req.method === 'POST' && workflowRunCtrl) {
       const run = workflowRunById(workflowRunCtrl[1]!)
       if (!run) {
@@ -7089,7 +7106,33 @@ async function injectedSkillsOf(
         const release = gateWaiters.get(run.id)
         if (release) {
           gateWaiters.delete(run.id)
-          release()
+          release({ kind: 'passed' })
+        }
+        sendJson(res, 200, { ok: true, run })
+        return
+      }
+      if (action === 'reject') {
+        // ★ 2026-11 gate 否决（带意见）：放行引擎 → gate 抛打回信号 → 引擎重置
+        //   步骤链从头重跑（意见附加进下一轮任务，见 submitStep）
+        const verdictBody = (await readJsonBody(req).catch(() => null)) as { feedback?: unknown } | null
+        const feedback = typeof verdictBody?.feedback === 'string' ? verdictBody.feedback.trim() : ''
+        if (feedback === '') {
+          sendJson(res, 400, { error: '否决必须说明意见（打回理由）', code: 'workflow_reject_need_feedback' })
+          return
+        }
+        const gateStep = run.steps.find((x) => x.status === 'waiting-human' && x.kind === 'gate')
+        if (!gateStep) {
+          sendJson(res, 400, { error: '没有在等待确认的 gate', code: 'workflow_gate_not_waiting' })
+          return
+        }
+        run.gateFeedback = feedback
+        run.status = 'running'
+        run.updatedAt = Date.now()
+        await persistWorkflowRuns()
+        const release = gateWaiters.get(run.id)
+        if (release) {
+          gateWaiters.delete(run.id)
+          release({ kind: 'rejected', feedback })
         }
         sendJson(res, 200, { ok: true, run })
         return
