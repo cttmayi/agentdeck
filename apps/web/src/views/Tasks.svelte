@@ -20,7 +20,8 @@
     import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { leaveCreate } from '../lib/leave-create.ts'
-  import { creating, goCreate, goCrystallize, selectedIssueId, showToast, wfReturn } from '../lib/view.ts'
+  import { creating, goCreate, goCrystallize, selectedIssueId, showToast } from '../lib/view.ts'
+  import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
@@ -34,7 +35,7 @@
     stageShortId,
   } from '../lib/pipeline.ts'
   import { groupTasks } from '../lib/task-groups.ts'
-  import { workflowRuns } from '../lib/stores.ts'
+  import { workflowRuns, loadWorkflowRuns } from '../lib/stores.ts'
   import RunLog from '../components/RunLog.svelte'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -250,17 +251,11 @@
   /** 点列表里的一条：如果右栏正开着表单，先按上面的规矩问一句。 */
   async function pickIssue(id: string): Promise<void> {
     if ($creating && !(await leaveCreate())) return
-    // ★ 编排任务（2026-11）：点开进**编排任务页**（步骤链 + 日志 + 工作目录树），
-    //   不进现有任务页的详情——编排任务不是"一条 run 的任务"，是"一串步骤"。
-    const issue = $issues.find((i) => i.id === id)
-    if (issue?.source?.kind === 'workflow') {
-      const run = $workflowRuns.find((r) => r.issueId === id)
-      if (run) {
-        // 从任务页进运行画面：返回按钮回**编排任务列表**
-        wfReturn.set('workflow-runs')
-        location.hash = `#/workflows/run/${run.id}`
-        return
-      }
+    // ★ 编排任务（2026-11 再改）：**不跳转**——点开就在任务页主区显示运行画面
+    //   （步骤链 + 日志 + 工作目录树）。编排任务不是"一条 run 的任务"，
+    //   是"一串步骤"；细节 = 运行画面，直接嵌在详情区。
+    if ($issues.find((i) => i.id === id)?.source?.kind === 'workflow') {
+      await loadWorkflowRuns()
     }
     selectedIssueId.set(id)
   }
@@ -362,6 +357,8 @@
   })
 
   $: selected = $issues.find((i) => i.id === $selectedIssueId) ?? null
+  /** 选中任务是编排任务时，它的编排 run（详情区显示运行画面，不切视图）。 */
+  $: wfRunForSelected = selected ? $workflowRuns.find((r) => r.issueId === selected.id) ?? null : null
   // ⚠️ 不能只按 `subject.id === issue.id` 过滤：**review run 的 subject 是那条
   //   执行 run 的 id**，不是 issue。那样过滤会漏掉所有审查 run ——
   //   表现就是"看板说已审查完成，点进来却看不到审查结论"。
@@ -789,15 +786,9 @@
    * 而不是丢进一个没有列表的孤立页面。
    */
   function selectFromBoard(issueId: string): void {
-    // 编排任务（2026-11）：看板点开也进**编排任务页**（与列表同一个落点）
-    const issue = $issues.find((i) => i.id === issueId)
-    if (issue?.source?.kind === 'workflow') {
-      const run = $workflowRuns.find((r) => r.issueId === issueId)
-      if (run) {
-        wfReturn.set('workflow-runs')
-        location.hash = `#/workflows/run/${run.id}`
-        return
-      }
+    // 编排任务（2026-11 再改）：看板点开同样不跳转——主区显示运行画面
+    if ($issues.find((i) => i.id === issueId)?.source?.kind === 'workflow') {
+      void loadWorkflowRuns()
     }
     setMode('list')
     selectedIssueId.set(issueId)
@@ -1189,7 +1180,7 @@
       headClass={$creating ? 'detail-head create-head' : 'detail-head'}
       backLabel={selected ? $t('tasks.backToList') : undefined}
       onBack={() => selectedIssueId.set(null)}
-      title={$creating ? $t('shell.navNewTask') : selected?.title ?? ''}
+      title={$creating ? $t('shell.navNewTask') : wfRunForSelected ? undefined : selected?.title ?? ''}
       bodyClass={$creating ? 'create-body' : logMode ? 'detail-scroll log-mode' : 'detail-scroll'}
     >
       {#snippet sub()}
@@ -1242,6 +1233,11 @@
       {#snippet body()}
         {#if $creating}
           <NewTaskForm />
+        {:else if wfRunForSelected}
+          <!-- ★ 编排任务（2026-11 再改）：主区直接显示运行画面（步骤链 + 日志 +
+               工作目录树）——与「编排任务」视图的右栏同一形态（embedded 隐藏
+               返回按钮，栏头由 WorkflowRunView 自带标题/状态/控制）。 -->
+          <WorkflowRunView runId={wfRunForSelected.id} embedded />
         {:else if selected}
           {#key selected.id}
 
