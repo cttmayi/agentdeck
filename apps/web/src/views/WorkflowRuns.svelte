@@ -18,7 +18,8 @@
     loadWorkflowRuns,
     loadWorkflows,
   } from '../lib/stores.ts'
-  import { wfReturn } from '../lib/view.ts'
+  import { wfReturn, workflowRun } from '../lib/view.ts'
+  import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import {
     workflowRunStatusClass,
     workflowRunStatusKey,
@@ -39,12 +40,18 @@
   }
 
   function openRun(runId: string): void {
-    // 返回按钮回**编排任务列表**（wfReturn 是 WorkflowRunView「返回」的去处）
+    // ★ 2026-11 使用者拍板：点一条**不跳去「编排」视图**——`#/workflow-runs/<id>`
+    //   子路由，本视图主区直接画运行画面（返回按钮回列表：wfReturn 是
+    //   WorkflowRunView「返回」的去处）。
     wfReturn.set('workflow-runs')
-    location.hash = `#/workflows/run/${runId}`
+    location.hash = `#/workflow-runs/${runId}`
   }
 </script>
 
+{#if $workflowRun}
+  <!-- 点列表一条：主区直接画运行画面（子路由 `#/workflow-runs/<id>`） -->
+  <WorkflowRunView runId={$workflowRun.runId} />
+{:else}
 <div
   class="split-layout with-detail"
   data-list-key="workflow-runs"
@@ -93,6 +100,7 @@
     </div>
   </section>
 </div>
+{/if}
 
 <style>
   /* 与 Workflows.svelte 历史行同款两行结构（311/312 批纪律）：

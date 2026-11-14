@@ -119,10 +119,24 @@ describe('hashFor', () => {
     })
   })
 
-  it('★ `workflowRun` 只对编排视图成立（别的视图没有这个状态）', () => {
+  it('★ `workflowRun` 只对编排两个视图成立（别的视图没有这个状态）', () => {
     assert.equal(hashFor('agents', { workflowRun: { runId: 'X' } }), '#/agents')
     assert.equal(hashFor('tasks', { workflowRun: { runId: 'X' } }), '#/tasks')
-    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: 'X' } }), '#/workflow-runs')
+    // 编排任务列表也接受运行画面子路由（点一条主区直接画，不切视图——2026-11 拍板）
+    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: 'X' } }), '#/workflow-runs/X')
+  })
+
+  it('★ 编排任务列表里点一条：子路由 `#/workflow-runs/<id>`，视图仍是编排任务', () => {
+    const r = parseHash('#/workflow-runs/01M57WHC')
+    assert.deepEqual(r, {
+      view: 'workflow-runs',
+      creating: false,
+      crystallize: null,
+      workflowRun: { runId: '01M57WHC' },
+    })
+    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: '01M57WHC' } }), '#/workflow-runs/01M57WHC')
+    // 与 parseHash 是一对（刷新还在）
+    assert.deepEqual(parseHash(hashFor('workflow-runs', { workflowRun: { runId: '01M57WHC' } })), r)
   })
 
   it('★ 编排任务列表是独立视图（`#/workflow-runs`），不是编排页的子状态', () => {

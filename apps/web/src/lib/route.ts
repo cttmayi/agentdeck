@@ -74,8 +74,11 @@ export interface Route {
    * 与 `creating` 同构：`view` 决定住哪个视图，crystallize 决定右栏画什么。
    */
   crystallize: { runId: string } | null
-  /** 编排页（`workflows` 视图）此刻开着的运行画面（`#/workflows/run/<runId>`）。
-   *  非空 = 右主区在「编排任务页」；空 = 定义列表。与 crystallize 同构。 */
+  /** 编排运行画面（2026-11）：
+   *  · `workflows` 视图：`#/workflows/run/<runId>`——定义页发起的运行画面；
+   *  · `workflow-runs` 视图：`#/workflow-runs/<runId>`——编排任务列表点一条，
+   *    主区直接显示运行画面（使用者拍板：不跳去「编排」视图）。
+   *  非空 = 当前视图的主区在运行画面；空 = 定义页 / 任务列表。与 crystallize 同构。 */
   workflowRun: { runId: string } | null
 }
 
@@ -99,6 +102,17 @@ export function parseHash(hash: string): Route {
   const wfRun = /^workflows\/run\/([0-9A-Za-z]+)$/.exec(raw)
   if (wfRun) {
     return { view: 'workflows', creating: false, crystallize: null, workflowRun: { runId: wfRun[1]! } }
+  }
+  // 编排任务列表里点一条：`#/workflow-runs/<runId>`——**不切去「编排」视图**，
+  // 主区直接画运行画面（2026-11 使用者拍板；`workflow-runs/…` 不是 VIEWS 的一项）。
+  const wfRunInList = /^workflow-runs\/([0-9A-Za-z]+)$/.exec(raw)
+  if (wfRunInList) {
+    return {
+      view: 'workflow-runs',
+      creating: false,
+      crystallize: null,
+      workflowRun: { runId: wfRunInList[1]! },
+    }
   }
   const crystal = CRYSTALLIZE_RE.exec(raw)
   if (crystal) {
@@ -131,6 +145,9 @@ export function hashFor(
   //    （与 `creating` 同一个处方，见下）。
   if (opts.workflowRun && view === 'workflows') {
     return `#/workflows/run/${opts.workflowRun.runId}`
+  }
+  if (opts.workflowRun && view === 'workflow-runs') {
+    return `#/workflow-runs/${opts.workflowRun.runId}`
   }
   if (opts.crystallize && view === 'crystallize') {
     return `#/crystallize/${opts.crystallize.runId}`
