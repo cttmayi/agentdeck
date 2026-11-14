@@ -37,11 +37,26 @@
 
   /** 当前步骤 = 最后一个还没 done 的（running / waiting-human / pending）。 */
   $: currentStep = (run?.steps ?? []).find((s) => s.status !== 'done') ?? null
-  /** 当前步骤里最近一次组跑的 runId（RunLog 问它要日志；没跑过 = 空）。 */
-  $: activeRunId =
-    currentStep && currentStep.runIds.length > 0
-      ? currentStep.runIds[currentStep.runIds.length - 1]!
-      : null
+  /**
+   * 日志区看哪条 run 的日志。
+   *
+   * ★ 2026-11 使用者问"为什么提示还没开始跑"：编排**已经跑完**（全 done）时
+   *   `currentStep` 为空、按旧逻辑 `activeRunId` 落成 null → 日志区显示「还没开始跑」
+   *   ——完全误导。修法：当前步骤没有 runId（gate 等在确认 / pending 未提交 / 全
+   *   done）时，回退到**最后一个有 runId 的步骤**——日志区永远显示"最近的那次
+   *   组跑"，只有整条 run 一步都没提交过才显示空态。
+   */
+  $: activeRunId = (() => {
+    const steps = run?.steps ?? []
+    if (steps.length === 0) return null
+    const current = steps.find((s) => s.status !== 'done')
+    if (current && current.runIds.length > 0) return current.runIds[current.runIds.length - 1]!
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const st = steps[i]!
+      if (st.runIds.length > 0) return st.runIds[st.runIds.length - 1]!
+    }
+    return null
+  })()
   /** 这条运行对应的任务（标题展示用）。 */
   $: issue = $issues.find((i) => i.id === run?.issueId) ?? null
 
