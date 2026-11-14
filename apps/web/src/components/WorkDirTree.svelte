@@ -215,7 +215,7 @@
             title={entry.path}
             onclick={() => (viewing = entry)}
           >{entry.name}</button>
-          <span class="faint fs-xs">{humanSize(entry.sizeBytes)}</span>
+          <span class="wd-meta faint fs-xs">{humanSize(entry.sizeBytes)}</span>
           {#if rowAction}{@render rowAction({ entry })}{/if}
         {/if}
       </li>
@@ -257,6 +257,11 @@
     color: var(--text-dim);
     font: inherit;
     cursor: pointer;
+    /* 2026-11（使用者："文件大小被击成 2 行"）：flex 子项默认 min-width:auto
+       不收缩——长名字占满整行，后面的「16.3KB」被挤得折行。min-width:0 +
+       flex-shrink:1 让名字收缩省略，大小/动作项不被压缩。 */
+    min-width: 0;
+    flex-shrink: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -281,8 +286,17 @@
     cursor: pointer;
     text-align: left;
     color: var(--text);
+    /* 2026-11 同批：min-width:0 + flex-shrink:1（见 .wd-dir 的注释） */
+    min-width: 0;
+    flex-shrink: 1;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 2026-11 同批：文件大小这一项不许收缩、不许折行——「16.3KB」保持一行 */
+  .wd-meta {
+    flex-shrink: 0;
     white-space: nowrap;
   }
 
