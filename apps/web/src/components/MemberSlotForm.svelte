@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Agent, Skill } from '../lib/api.ts'
   import { t } from '../lib/i18n.ts'
+  import PromptField from './PromptField.svelte'
 
   /**
    * 组详情里的一个成员槽（第二轮）：选已有的 / 新建私有。
@@ -88,30 +89,8 @@
     isReviewer ? member.privateDraft.standard : member.privateDraft.instructions,
   )
 
-  /**
-   * 指令/标准自动增高：`rows=5` 起，内容变多跟着长，**最多 20 行**后内部滚动。
-   * 量法：先放平（height=auto）再按 `scrollHeight` 撑起来，封顶 = 20 行行高 +
-   * 上下内边距。`overflow-y: auto` 兜底：到了上限内容继续多就滚动而不是撑破卡。
-   */
-  function autosize(el: HTMLTextAreaElement): void {
-    el.style.height = 'auto'
-    const cs = getComputedStyle(el)
-    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.6 || 22
-    const padTop = parseFloat(cs.paddingTop) || 0
-    const padBottom = parseFloat(cs.paddingBottom) || 0
-    const maxH = lineHeight * 20 + padTop + padBottom
-    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`
-  }
+  // 2026-11 控件化：autosize（5→20 行）搬进 PromptField（`autosize` prop）。
 
-  let contentArea = $state<HTMLTextAreaElement | undefined>(undefined)
-  // 内容一变（输入 / 载入已有私有成员）就重新量一次高度——只靠 oninput 的话，
-  // "打开编辑已有私有成员"时预填的长内容不会自动长高。
-  $effect(() => {
-    if (contentArea) {
-      void contentValue
-      autosize(contentArea)
-    }
-  })
 </script>
 
 <div class="member-card">
@@ -185,20 +164,20 @@
 
       <label class="cell">
         {isReviewer ? standardBodyLabel : instructionsLabel}
-        <textarea
-          rows="5"
-          bind:this={contentArea}
+        <PromptField
           value={contentValue}
+          label={isReviewer ? standardBodyLabel : instructionsLabel}
+          rows={5}
+          autosize={{ min: 5, max: 20 }}
           oninput={(e) => {
             const ta = e.currentTarget as HTMLTextAreaElement
-            autosize(ta)
             onPatchPrivate(
               isReviewer
                 ? { standard: ta.value }
                 : { instructions: ta.value },
             )
           }}
-        ></textarea>
+        />
       </label>
 
       <div class="cell">

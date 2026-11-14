@@ -2,7 +2,7 @@
   import { createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole, ReviewStandard } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
-  import PromptEditor from './PromptEditor.svelte'
+  import PromptField from './PromptField.svelte'
   import { t, tx } from '../lib/i18n.ts'
 
   /**
@@ -56,8 +56,7 @@
    * 但界面上必须**先看见**，才能改、才能删。
    */
   let instructions = $identity?.defaultAgentConduct ?? ''
-  /** 2026-11：指令大编辑器（PromptEditor）。 */
-  let instructionsEditorOpen = false
+
   /**
    * 审核标准（D37）——只对审核者有意义。
    *
@@ -221,23 +220,16 @@
              `.instructions` 的 `min-height`（与 `AgentDetail.svelte` 里那一份
              必须一致）。
         -->
-        <!-- 2026-11（使用者：指令可能写很长）：右下角「⛶ 展开」弹大编辑器 -->
-        <div class="field-prompt">
-          <textarea
-            class="instructions"
-            bind:value={instructions}
-            rows="6"
-            placeholder={role === 'reviewer'
-              ? $t('agents.instructionsPlaceholderReviewer')
-              : $t('agents.instructionsPlaceholderExecutor')}
-          ></textarea>
-          <button
-            type="button"
-            class="prompt-expand"
-            title={$t('editor.expand')}
-            onclick={() => (instructionsEditorOpen = true)}
-          >⛶</button>
-        </div>
+        <!-- 2026-11（使用者：指令可能写很长）：PromptField（右下角「⛶」展开大编辑器） -->
+        <PromptField
+          class="instructions"
+          bind:value={instructions}
+          label={$t('agents.instructionsLabel')}
+          rows={6}
+          placeholder={role === 'reviewer'
+            ? $t('agents.instructionsPlaceholderReviewer')
+            : $t('agents.instructionsPlaceholderExecutor')}
+        />
 
       </label>
 
@@ -288,13 +280,7 @@
     </button>
     <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
   </div>
-  <PromptEditor
-    open={instructionsEditorOpen}
-    title={$t('agents.instructionsLabel')}
-    value={instructions}
-    onSave={(v) => (instructions = v)}
-    onCancel={() => (instructionsEditorOpen = false)}
-  />
+
 </form>
 
 <style>
@@ -393,12 +379,6 @@
    *    盖掉样式表里的 `height`，看起来"拖了没用"；而 `min-height` 只挡下限，
    *    往上拖永远有效。（代价是拖不到 22rem 以下——那正是这个下限的意思。）
    */
-  .instructions {
-    min-height: 22rem;
-    line-height: 1.6;
-    resize: vertical;
-  }
-
   /**
    * 角色选择：两个等宽卡片（2026-10 起与**智能体详情编辑态**同款 `1fr 1fr`）。
    * 原来用 `auto-fit` 是为了旧版单列窄栏（416px 里并排只剩 ~150px 一张）；

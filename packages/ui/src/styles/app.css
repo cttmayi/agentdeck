@@ -837,6 +837,23 @@ hr {
 /* 行右侧动作钮（原来聊天 `.conv-delete` 与任务 `.task-delete` 各写一份同样的，
    D66 收成一条）：1.75rem 方块、右缘内缩 `--sp-1`、垂直居中。 */
 
+/* ── 指令框（智能体详情编辑态 + 新建智能体表单共用，2026-11 控件化后提升为全局；
+    原来两份 scoped 规则随 PromptField 迁移 —— 22rem = 352px 是实测值
+    （13px 字号 / 行高 1.6 ⇒ 16 行），两处必须一致）── */
+.instructions {
+  min-height: 22rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+/* 只读的指令框**不压暗文字**（读的人比写的人多）：只换底色与边框。 */
+.instructions.locked {
+  background: var(--surface-2);
+  border-style: dashed;
+  color: var(--text-dim);
+  cursor: default;
+  resize: none;
+}
+
 .field-prompt {
   position: relative;
 }

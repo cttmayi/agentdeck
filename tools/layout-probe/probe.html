@@ -1982,6 +1982,26 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           f.contentWindow.location.hash = '#/tasks/new'
           await until(() => !!d().querySelector('.detail-pane .create-body .newtask-form'), 40)
           await wait(200)
+          // 2026-11（控件化）：任务页「要做什么」也是 PromptField——展开按钮在、
+          // 弹层能开、能关（不细测保存：定时任务那条判据已测全流程）
+          facts['tasks.promptEditor'] = await (async () => {
+            const form = d().querySelector('.detail-pane .create-body .newtask-form')
+            const expand = form?.querySelector('.form-lead .prompt-expand')
+            if (!expand) {
+              errors.push('tasks.promptEditor：任务「要做什么」没有「⛶ 展开」按钮')
+              return false
+            }
+            click(expand)
+            await until(() => !!d().querySelector('.pe-panel'), 40)
+            const opened = !!d().querySelector('.pe-panel .pe-textarea')
+            click(d().querySelector('.pe-actions .btn--ghost'))
+            await until(() => !d().querySelector('.pe-panel'), 40)
+            if (!opened) {
+              errors.push('tasks.promptEditor：点展开没弹出编辑器')
+              return false
+            }
+            return true
+          })()
           facts['tasks.createNarrowColumns'] = need('窄屏表单列数', () => {
             const form = d().querySelector('.detail-pane .create-body .newtask-form')
             if (!form) return null

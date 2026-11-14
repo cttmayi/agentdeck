@@ -4253,6 +4253,11 @@ const CHECKS = [
   },
   {
     view: '任务',
+    key: 'tasks.promptEditor',
+    label: '★ 2026-11：任务页「要做什么」PromptField——展开弹层能开能关',
+    ok: (v) => v === true,
+  },
+  {
     key: 'tasks.createNarrowColumns',
     label:
       '★★ 800px 窗口 ⇒ 右栏内容宽约 496px（< 36rem）⇒ 表单退成**单列**（两列硬撑会溢出）',

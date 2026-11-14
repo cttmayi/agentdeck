@@ -11,6 +11,7 @@
     tools,
   } from '../lib/stores.ts'
   import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
+  import PromptField from './PromptField.svelte'
   import { splitRequest } from '../lib/request-text.ts'
   import { createDirty } from '../lib/create-draft.ts'
   import { go, selectedIssueId, showToast } from '../lib/view.ts'
@@ -146,54 +147,10 @@
         ? { kind: 'no-group' }
         : { kind: 'none' }
 
-  /**
-   * 「要做什么」那个框：**默认 3 行，写多了自己长高，到 15 行封顶**。
-   *
-   * ══════════════════════════════════════════════════════════════════
-   * 为什么要长高，而不是给个固定高度
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 这一页只有**一个**输入框，任务写长了（多段、带步骤、贴一段日志）是很正常
-   * 的事。固定高度只有两种下场：给矮了——写第四行时就得在一个三行的小窗里滚动，
-   * 看不到自己刚写的；给高了——空着的时候占掉小半屏。
-   *
-   * 所以：3 行起步，随输入长高，**15 行封顶**（再多就自己滚——一个框吃掉整屏
-   * 会让"提交"又跑到屏幕外）。
-   *
-   * ⚠️ 高度由 JS 设成 `scrollHeight`，上限交给 CSS 的 `max-height`（`lh` 单位
-   *    算的 15 行）——两处都算一遍行高，迟早对不上（字号一改就分叉）。
-   *    超上限时 `scrollHeight > max-height`，于是 `overflow-y` 切成 `auto`。
-   */
+  // 2026-11 控件化：autosize（3→15 行）搬进 PromptField（`autosize` prop），
+  // 这里只留行数常量与 Ctrl/Cmd+Enter 提交。
   const TITLE_ROWS = 3
   const TITLE_MAX_ROWS = 15
-
-  function autoGrow(
-    node: HTMLTextAreaElement,
-    _dep: unknown,
-  ): { update: () => void; destroy: () => void } {
-    const fit = (): void => {
-      node.style.height = 'auto'
-      const cs = getComputedStyle(node)
-      const line = Number.parseFloat(cs.lineHeight) || 20
-      const chrome =
-        Number.parseFloat(cs.paddingTop) +
-        Number.parseFloat(cs.paddingBottom) +
-        Number.parseFloat(cs.borderTopWidth) +
-        Number.parseFloat(cs.borderBottomWidth)
-      const max = line * TITLE_MAX_ROWS + chrome
-      const want = node.scrollHeight
-      node.style.height = `${Math.min(want, max)}px`
-      node.style.overflowY = want > max ? 'auto' : 'hidden'
-    }
-    node.addEventListener('input', fit)
-    fit()
-    return {
-      // 参数是 `title`：**清空表单、粘贴、程序化改值**都要重新量一次
-      // （只监听 `input` 会漏掉这些——它们的症状是"框里字很多，但框还是三行高"）。
-      update: fit,
-      destroy: () => node.removeEventListener('input', fit),
-    }
-  }
 
   function onTitleKeydown(event: KeyboardEvent): void {
     if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return
@@ -338,15 +295,16 @@
   <div class="form-lead">
     <label>
       {$t('newtask.titleLabel')}
-      <textarea
+      <PromptField
         bind:value={title}
-        use:autoGrow={title}
+        label={$t('newtask.titleLabel')}
         rows={TITLE_ROWS}
+        autosize={{ min: TITLE_ROWS, max: TITLE_MAX_ROWS }}
         required
         autocomplete="off"
         placeholder={$t('newtask.titlePlaceholder')}
         onkeydown={onTitleKeydown}
-      ></textarea>
+      />
       <span class="hint">{$t('newtask.titleSplitHint')}</span>
     </label>
   </div>

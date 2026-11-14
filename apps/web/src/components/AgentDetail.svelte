@@ -22,7 +22,7 @@
   import { api } from '../lib/api.ts'
   import { DISTILLY_SOURCE } from '../lib/crystallize-editor.svelte.ts'
   import { showToast } from '../lib/view.ts'
-  import PromptEditor from './PromptEditor.svelte'
+  import PromptField from './PromptField.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
 
   /**
@@ -419,8 +419,7 @@
 
   type Draft = ReturnType<typeof blankDraft>
   let draft = blankDraft()
-  /** 2026-11：指令大编辑器（PromptEditor）。 */
-  let instructionsEditorOpen = false
+
 
   /**
    * ══════════════════════════════════════════════════════════════════
@@ -1094,25 +1093,16 @@
                指令是一份几百到上千字的文档，不是一行备注。 -->
           <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
-          <!-- 2026-11（使用者：指令可能写很长）：右下角「⛶ 展开」弹大编辑器 -->
-          <div class="field-prompt">
-            <textarea
-              id="agent-instructions"
-              class="instructions"
-              class:locked={readOnly}
-              readonly={readOnly}
-              bind:value={draft.instructions}
-              rows="6"
-            ></textarea>
-            {#if !readOnly}
-              <button
-                type="button"
-                class="prompt-expand"
-                title={$t('editor.expand')}
-                onclick={() => (instructionsEditorOpen = true)}
-              >⛶</button>
-            {/if}
-          </div>
+          <!-- 2026-11（使用者：指令可能写很长）：PromptField（右下角「⛶」展开
+               大编辑器；只读态不显示展开按钮） -->
+          <PromptField
+            id="agent-instructions"
+            class="instructions"
+            bind:value={draft.instructions}
+            label={$t('agents.instructionsLabel')}
+            locked={readOnly}
+            rows={6}
+          />
           </span>
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
@@ -1123,15 +1113,7 @@
           {/if}
         </label>
 
-        <!-- 2026-11：大编辑器弹层放 label **外面**（fixed 定位的遮罩不该在
-             label 的盒子里，避免 label 点击/焦点行为波及弹层） -->
-        <PromptEditor
-          open={instructionsEditorOpen}
-          title={$t('agents.instructionsLabel')}
-          value={draft.instructions}
-          onSave={(v) => (draft.instructions = v)}
-          onCancel={() => (instructionsEditorOpen = false)}
-        />
+
 
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
@@ -1808,25 +1790,6 @@
    *    两个组件没法共用一条作用域规则（提到全局 `app.css` 也不对：那里放的是
    *    通用元素样式，不是某一个字段的高度）。所以只能靠注释互相指认。
    */
-  .instructions {
-    min-height: 22rem;
-    line-height: 1.6;
-    resize: vertical;
-  }
-
-  /**
-   * ★ 分批第 273/274 批：只读的指令框**不压暗文字**（它是给人读的，读的人比写的人多），
-   *   只换底色与边框：`readonly` 保留了选中/复制/滚动，用 `disabled` 会连滚动一起废掉
-   *   长指令的后半段。虚线边框 + 右上角那枚「只读」是 274 批统一的"锁住"语言
-   *   （与 CLI 下拉、技能勾选框、记忆写入口同一套）。
-   */
-  .instructions.locked {
-    background: var(--surface-2);
-    border-style: dashed;
-    color: var(--text-dim);
-    cursor: default;
-    resize: none;
-  }
 
   /**
    * ★ 分批第 274 批：只读控件的统一"锁"语言。
