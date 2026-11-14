@@ -228,7 +228,9 @@
      ~850px 放三栏，侧栏按 16-22rem 会把日志压到 ~150px——收窄侧栏到 11-14rem，
      日志回到 ~406px。整页形态（'workflows' 视图）不 embedded，保持 16-22rem。 */
   .embedded .wf-run-main {
-    grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr) minmax(11rem, 14rem);
+    /* 11-13rem（minmax 在 fr 网格里优先取 max）：右栏窄容器里把宽度让给日志栏——
+       2026-11 使用者："窗口太小了，只有一行"（原 11-14rem 时日志 ~406px） */
+    grid-template-columns: minmax(11rem, 13rem) minmax(0, 1fr) minmax(11rem, 13rem);
   }
   .wf-steps {
     overflow-y: auto;
