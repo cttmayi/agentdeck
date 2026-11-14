@@ -66,11 +66,53 @@
   /** 这条运行对应的任务（标题展示用）。 */
   $: issue = $issues.find((i) => i.id === run?.issueId) ?? null
 
+  /**
+   * ★ 每步的「最后输出」（2026-11 使用者："中间应该显示每个 Agent 的最后输出，
+   *   方便看到流程的运行"）。步骤的 runIds 里取最后一个 runId，拉 `GET
+   *   /api/runs/:id` 的 `result.summary`（terminal 事件的最终产出）。
+   *   用 plain object 替换触发渲染（Svelte 5 legacy，Map 不触发）。
+   */
+  let outputs: Record<string, string> = {}
+  /** 点击步骤卡头展开它的完整过程日志（RunLog）。 */
+  let expandedSeq: number | null = null
+
+  function lastRunId(st: WorkflowStep): string | null {
+    return st.runIds.length > 0 ? st.runIds[st.runIds.length - 1]! : null
+  }
+  function stepOutput(st: WorkflowStep): string | null {
+    const rid = lastRunId(st)
+    return rid && outputs[rid] ? outputs[rid]! : null
+  }
+  function toggleStep(seq: number): void {
+    expandedSeq = expandedSeq === seq ? null : seq
+  }
+
   async function refresh(): Promise<void> {
     try {
       const out = await api<{ run: WorkflowRun }>(`/api/workflow-runs/${runId}`)
       run = out.run
       error = ''
+      // 步骤输出：只取没缓存过的 runId（轮询 2s 一次，避免重复拉同一 run）
+      for (const st of run.steps) {
+        const rid = lastRunId(st)
+        if (!rid || outputs[rid]) continue
+        void (async () => {
+          try {
+            // ★ 用 messages 的最后一条 text——与任务详情页同一条规矩（run 对象的
+            //   result 永远 null：executor 的 #finish 只把 result 发 SSE，不落库）
+            const d = await api<{ messages: Array<{ type: string; content: string }> }>(
+              `/api/runs/${rid}/messages`,
+            )
+            const texts = (d.messages ?? []).filter(
+              (m) => m.type === 'text' && m.content.trim() !== '',
+            )
+            const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
+            if (last) outputs = { ...outputs, [rid]: last }
+          } catch {
+            // 单步取数失败不阻塞整体刷新
+          }
+        })()
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     }
@@ -191,41 +233,72 @@
         {/if}
       </aside>
 
-      <!-- ══════════ 中：日志 + gate 面板 ══════════ -->
+      <!-- ══════════ 中：步骤输出流（每步最后输出）+ gate 面板 ══════════ -->
       <section class="wf-run-log">
-        {#if run.status === 'waiting-human' && currentStep?.kind === 'gate' && currentStep.gateText}
-          <article class="notice wf-gate">
-            <strong>{$t('workflows.stepWaitingHuman')}</strong>
-            <p>"{currentStep.gateText}"</p>
-            <label class="field">
-              <span class="fs-sm faint">{$t('workflows.gateFeedbackLabel')}</span>
-              <textarea rows="2" bind:value={gateFeedback}></textarea>
-            </label>
-            <div class="detail-actions">
-              <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void control('confirm')}>
-                {$t('workflows.confirm')}
-              </button>
-              <button
-                type="button"
-                class="btn btn--danger"
-                disabled={busy || gateFeedback.trim() === ''}
-                title={gateFeedback.trim() === '' ? $t('workflows.gateFeedbackLabel') : ''}
-                onclick={() => void rejectGate()}
-              >
-                {$t('workflows.gateReject')}
-              </button>
-            </div>
-          </article>
-        {/if}
-
-        {#if activeRunId}
-          <RunLog runId={activeRunId} fill />
-        {:else if run?.status === 'running' && currentStep?.kind === 'parallel'}
-          <!-- 并行子步的 runId 引擎不实时挂到主步骤（并行运行期间主步骤 runIds
-               为空）——给个明确的"进行中"提示，而不是误导的"还没开始跑"。 -->
-          <p class="hint">{$t('workflows.parallelRunning')}</p>
-        {:else}
+        {#if run.steps.length === 0}
           <p class="hint">{$t('workflows.noRunYet')}</p>
+        {:else}
+          <ol class="wf-outputs">
+            {#each [...run.steps].sort((a, b) => a.seq - b.seq) as st (st.seq)}
+              <li class="wf-out {st.status === 'running' ? 'on' : ''}">
+                <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
+                  <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
+                  <span class="wf-out-title">{st.label}</span>
+                  <span class="wf-out-run mono faint">{lastRunId(st) ? lastRunId(st)!.slice(-8) : ''}</span>
+                  <span class="wf-out-toggle">
+                    {expandedSeq === st.seq ? $t('workflows.collapse') : $t('workflows.expand')}
+                  </span>
+                </button>
+
+                {#if st.kind === 'gate' && st.gateText}
+                  {#if st.status === 'waiting-human'}
+                    <article class="notice wf-gate">
+                      <strong>{$t('workflows.stepWaitingHuman')}</strong>
+                      <p>"{st.gateText}"</p>
+                      <label class="field">
+                        <span class="fs-sm faint">{$t('workflows.gateFeedbackLabel')}</span>
+                        <textarea rows="2" bind:value={gateFeedback}></textarea>
+                      </label>
+                      <div class="detail-actions">
+                        <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void control('confirm')}>
+                          {$t('workflows.confirm')}
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn--danger"
+                          disabled={busy || gateFeedback.trim() === ''}
+                          title={gateFeedback.trim() === '' ? $t('workflows.gateFeedbackLabel') : ''}
+                          onclick={() => void rejectGate()}
+                        >
+                          {$t('workflows.gateReject')}
+                        </button>
+                      </div>
+                    </article>
+                  {:else}
+                    <!-- gate 步骤没有 run，无输出——只显示等待文案 -->
+                    <div class="wf-out-body">
+                      <p class="wf-out-gate">"{st.gateText}"</p>
+                    </div>
+                  {/if}
+                {:else}
+                  <div class="wf-out-body">
+                    <p class="wf-out-text">
+                      {stepOutput(st) ??
+                        (st.status === 'running' || st.status === 'pending'
+                          ? (st.kind === 'parallel' ? $t('workflows.parallelRunning') : $t('workflows.stepWorking'))
+                          : $t('workflows.noOutput'))}
+                    </p>
+                  </div>
+                {/if}
+
+                {#if expandedSeq === st.seq && lastRunId(st)}
+                  <div class="wf-out-log">
+                    <RunLog runId={lastRunId(st)!} fill />
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ol>
         {/if}
       </section>
 
@@ -269,6 +342,77 @@
   .wf-steps {
     overflow-y: auto;
     padding-right: var(--sp-2);
+  }
+  /* ★ 2026-11 步骤输出流：每步一张卡（状态 + label + 最后输出），点卡头展开
+     过程日志（RunLog）。卡与卡之间留空，flow 一览式往下走。 */
+  .wf-outputs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .wf-out {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .wf-out.on {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .wf-out-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+  .wf-out-head:hover {
+    background: var(--surface-hover);
+  }
+  .wf-out-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .wf-out-run {
+    font-size: var(--fs-sm);
+    color: var(--text-faint);
+  }
+  .wf-out-toggle {
+    font-size: var(--fs-sm);
+    color: var(--accent);
+  }
+  .wf-out-body {
+    padding: 4px 12px 10px;
+  }
+  .wf-out-text,
+  .wf-out-gate {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-dim);
+    font-size: var(--fs-base);
+    line-height: 1.5;
+  }
+  .wf-out-gate {
+    color: var(--text);
+    font-style: italic;
+  }
+  .wf-out-log {
+    border-top: 1px solid var(--line);
+    padding: 8px 12px;
+    height: 320px;
   }
   .wf-run-log {
     /* ★ 2026-11：RunLog 的 fill 是 flex 链（flex:1 撑满、内部 .log 自己滚）——
