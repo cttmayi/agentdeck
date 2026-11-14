@@ -1759,7 +1759,18 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         //   符合"筛掉不该看的"）；组头计数跟筛后数量走；切回「全部」。
         //   ★ 2026-11 精简后 chips 是三档（进行中/待处理/已结束），"只看待审查"
         //     的习惯落在「待处理」档上（待审查 + 待人工都收在那一列）。
+        //   ★ 2026-11 修 bug（用户："选中进行中内容都消失了"）：工具条在 **top
+        //     插槽**（empty 分支之外）常驻——筛出 0 结果时 chips 还在，能切回
+        //     「全部」，不会被锁死在空态里。下面三件事一起钉：筛选生效、空态时
+        //     chips 仍在、「全部」的数字**恒为总数**不跟着筛选走（用户："全部本来
+        //     27，选中待处理后变成 14，不合理"）。
         {
+          const allTextBefore = (() => {
+            const b = [...d().querySelectorAll('.list-pane .stage-chips button')].find((t) =>
+              text(t).includes('全部'),
+            )
+            return b ? text(b) : null
+          })()
           const chips = [...d().querySelectorAll('.list-pane .stage-chips button')]
           const waitChip = chips.find((b) => text(b).includes('待处理'))
           const allChip = chips.find((b) => text(b).includes('全部'))
@@ -1789,18 +1800,34 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
               visibleRows.length === 0
                 ? 'empty'
                 : !!(countText && String(visibleInFirst) === (countText.match(/\d+/) ?? [''])[0])
-            // ⚠️ 筛选后如果 0 结果，ListPane 显示空态、rows 不渲染——chips 与
-            //    view-switch 都跟着脱离 DOM，**任何旧引用/重新查找都点不到**。
-            //    恢复方式：hash 先切走再切回任务页，强制重挂载（viewMode 从
-            //    localStorage 读回 'group'，列表回到分组视图）。
-            f.contentWindow.location.hash = '#/chat'
-            await until(() => !d().querySelector('.list-pane'), 60)
-            f.contentWindow.location.hash = '#/tasks'
+            // ★ 空态时 chips 仍在（top 插槽常驻）——这是"不被锁死"的直接证据
+            facts['tasks.chipsSurviveEmptyFilter'] =
+              emptyShown && d().querySelectorAll('.list-pane .stage-chips button').length > 0
+            // ★ 「全部」的数字恒为总数：筛选前后文字不变
+            const allTextAfter = (() => {
+              const b = [...d().querySelectorAll('.list-pane .stage-chips button')].find((t) =>
+                text(t).includes('全部'),
+              )
+              return b ? text(b) : null
+            })()
+            facts['tasks.filterAllCountConstant'] =
+              allTextBefore !== null && allTextBefore === allTextAfter
+            // ★ 筛选空态文案是"没有「待处理」的任务"，不是"还没有任务"
+            facts['tasks.emptyStageWording'] =
+              emptyShown && text(d().querySelector('.list-pane .empty strong')).includes('没有')
+            // 恢复：chips 常驻，直接重新查「全部」点回去（不再需要 hash 重进）
+            const allChip2 = [...d().querySelectorAll('.list-pane .stage-chips button')].find(
+              (b) => text(b).includes('全部'),
+            )
+            if (allChip2) click(allChip2)
             await until(() => d().querySelectorAll('.list-pane .task-row').length > 0, 60)
             await wait(150)
           } else {
             facts['tasks.stageFilterWorks'] = null
             facts['tasks.groupCountFollowsFilter'] = null
+            facts['tasks.chipsSurviveEmptyFilter'] = null
+            facts['tasks.filterAllCountConstant'] = null
+            facts['tasks.emptyStageWording'] = null
           }
         }
         /**

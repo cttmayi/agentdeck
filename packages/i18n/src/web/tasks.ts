@@ -34,6 +34,13 @@ export const tasksText = {
   'tasks.groupCount': { zh: '{n} 个任务', en: '{n} tasks' },
   'tasks.emptyFiltered': { zh: '没有匹配的任务', en: 'No matching tasks' },
   'tasks.empty': { zh: '还没有任务', en: 'No tasks yet' },
+  // ★ 2026-11：状态筛选出的空态——"还没有任务"在筛选时是假话（任务都在，
+  //   只是这一档没有），空态文案分开说；工具条在 top 插槽里常驻，不会锁死。
+  'tasks.emptyStage': { zh: '没有「{stage}」的任务', en: 'No tasks in “{stage}”' },
+  'tasks.emptyStageHint': {
+    zh: '这一档现在没有任务——点「全部」看全部',
+    en: 'Nothing in this stage right now — switch back to “All”',
+  },
   'tasks.emptyFilteredHint': { zh: '换个关键词试试。', en: 'Try another keyword.' },
   // ⚠️ 2026-10（D58）：新建任务并进这一页之后，"去『新建任务』"这个指路要改成
   //    **指这一页自己的主操作**（顶栏），否则空态会把人指去一个不存在的侧栏项。

@@ -975,6 +975,24 @@ const CHECKS = [
   },
   {
     view: '任务',
+    key: 'tasks.chipsSurviveEmptyFilter',
+    label: '★ 筛选出 0 结果时 chips 仍在（top 插槽常驻——不会被锁死在空态里切不回「全部」）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.filterAllCountConstant',
+    label: '★ 「全部」的数字恒为总数，不跟着筛选走（用户：全部 27 选中待处理后变 14 不合理）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.emptyStageWording',
+    label: '★ 筛选空态文案是"没有「待处理」的任务"（不是假话"还没有任务"）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
     key: 'tasks.viewSwitchFlat',
     label: '★ 平铺切换生效（分组容器消失）；默认仍是分组',
     ok: (v) => v === true,

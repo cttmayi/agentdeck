@@ -185,14 +185,17 @@
     localStorage.setItem(GROUP_VIEW_KEY, next)
   }
 
-  /** 筛选 chips 的计数（**筛前**各列总数——筛选按钮上的数字始终是总数）。 */
+  /** 筛选 chips 的计数：**恒为总数**（用 `searched`，不含状态筛选）——
+      选中某档后其它档的数字不变、「全部」也不变（见 `searched` 的注释）。 */
   $: colCounts = COLUMNS.map((c) => ({
     // ⚠️ 每列至少一个 stage（`ids` 非空是数组定义保证的）；`!` 消掉
     //    noUncheckedIndexedAccess 的 undefined。
     key: c.ids[0]!,
     titleId: c.titleId,
-    n: staged.filter((x) => c.ids.includes(x.info.stage)).length,
+    n: searched.filter((i) => c.ids.includes(stageOf(i, $runs).stage)).length,
   }))
+  /** 当前筛选档对应的列标题（筛选空态文案要用）。 */
+  $: activeColTitle = COLUMNS.find((c) => c.ids[0] === stageCol)?.titleId ?? null
 
   /**
    * 分组视图的派生数据：按来源分组、组内保持 staged 顺序（时间倒序）、
@@ -326,19 +329,27 @@
 
   let filter = ''
 
-  $: visible = $issues
-    .filter((i) => {
-      if (!filter.trim()) return true
-      const q = filter.trim().toLowerCase()
-      return i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)
-    })
-    .filter((i) => {
-      // ★ 2026-11：状态筛选（与分组正交——分组管"同源"、筛选管"状态"）
-      if (stageCol === 'all') return true
-      const col = COLUMNS.find((c) => c.ids[0] === stageCol)
-      if (!col) return true
-      return col.ids.includes(stageOf(i, $runs).stage)
-    })
+  /**
+   * 文字搜索后的集合（**不含状态筛选**）。
+   *
+   * ★ 2026-11 修 bug（使用者："全部本来 27，选中待处理后变成 14，不合理"）：
+   *   chips 上的数字（「全部」和各列）**恒为总数**——一旦跟着当前筛选走，
+   *   选中「待处理」后「全部」就显示 14，看起来像"任务变少了"。
+   *   所以计数一律用 `searched`（只有文字搜索参与），状态筛选单独在 `visible` 做。
+   */
+  $: searched = $issues.filter((i) => {
+    if (!filter.trim()) return true
+    const q = filter.trim().toLowerCase()
+    return i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)
+  })
+  // ★ 状态筛选（与分组正交——分组管"同源"、筛选管"状态"）；0 结果时的观感
+  //   由空态文案承担（`tasks.emptyStage`），工具条在 `top` 插槽里不跟着消失。
+  $: visible = searched.filter((i) => {
+    if (stageCol === 'all') return true
+    const col = COLUMNS.find((c) => c.ids[0] === stageCol)
+    if (!col) return true
+    return col.ids.includes(stageOf(i, $runs).stage)
+  })
 
   $: selected = $issues.find((i) => i.id === $selectedIssueId) ?? null
   // ⚠️ 不能只按 `subject.id === issue.id` 过滤：**review run 的 subject 是那条
@@ -1045,19 +1056,24 @@
       onFilter={(v) => (filter = v)}
       loading={($loading['issues'] && $issues.length === 0) ?? false}
       loadError={$loadError['issues'] ?? null}
-      empty={!filter && visible.length === 0}
+      empty={stageCol === 'all' && !filter && visible.length === 0}
       emptyTitle={$t('tasks.empty')}
       emptyHint={$t('tasks.emptyHint')}
-      emptyFiltered={filter !== '' && visible.length === 0}
-      emptyFilteredTitle={$t('tasks.emptyFiltered')}
-      emptyFilteredHint={$t('tasks.emptyFilteredHint')}
+      emptyFiltered={(stageCol !== 'all' || filter !== '') && visible.length === 0}
+      emptyFilteredTitle={
+        filter !== ''
+          ? $t('tasks.emptyFiltered')
+          : $t('tasks.emptyStage', { stage: $t(activeColTitle ?? 'tasks.filterAll') })
+      }
+      emptyFilteredHint={
+        filter !== '' ? $t('tasks.emptyFilteredHint') : $t('tasks.emptyStageHint')
+      }
     >
-      {#snippet loadingSkeleton()}
-        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
-        <div class="skeleton" style="width:70%"></div>
-      {/snippet}
-      {#snippet rows()}
-        <!-- ★ 2026-11：状态筛选 chips（计数=筛前总数）+ 分组/平铺切换 -->
+      {#snippet top()}
+        <!-- ★ 2026-11：状态筛选 chips + 分组/平铺切换。
+             ⚠️ 放 **top 插槽**（ListPane 的 empty 分支之外、常驻）：筛选出 0 结果时
+             列表显示空态，若工具条跟着 rows 一起消失，使用者会被锁死在空态里
+             切不回「全部」（用户实测踩到："选中进行中内容都消失了"）。 -->
         <div class="list-tools">
           <div class="stage-chips" role="group" aria-label={$t('tasks.filterLabel')}>
             <button
@@ -1065,7 +1081,7 @@
               class:active={stageCol === 'all'}
               onclick={() => (stageCol = 'all')}
             >
-              {$t('tasks.filterAll')} {staged.length}
+              {$t('tasks.filterAll')} {searched.length}
             </button>
             {#each colCounts as c (c.key)}
               <button
@@ -1094,7 +1110,12 @@
             </button>
           </div>
         </div>
-
+      {/snippet}
+      {#snippet loadingSkeleton()}
+        <div class="skeleton" style="margin-bottom:var(--sp-2)"></div>
+        <div class="skeleton" style="width:70%"></div>
+      {/snippet}
+      {#snippet rows()}
         {#if viewMode === 'group'}
           <ul class="task-list task-list--grouped">
             {#each groups as g (g.key)}
