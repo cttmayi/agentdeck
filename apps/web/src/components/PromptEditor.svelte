@@ -51,8 +51,12 @@
   //   但高亮层/字数统计全不响应）。显式 $state 才会响应。
   let draft = $state('')
   let ta: HTMLTextAreaElement | null = null
+  // ⚠️ 滚动容器是 `.pe-hl` / `.pe-gutter`（overflow hidden 的盒子），不是里面的 pre：
+  //   pre 是块级元素，scrollTop 设置无效（2026-11 用户"滚动条有问题，内容没滚动"——
+  //   textarea 滚了、高亮层/行号原地不动）。
+  let hlBox: HTMLDivElement | null = null
+  let gutterBox: HTMLDivElement | null = null
   let hlPre: HTMLPreElement | null = null
-  let gutterPre: HTMLPreElement | null = null
 
   // 快照：打开（open 变 true）那一刻把 value 落进 draft（时机见头注释）
   $effect.pre(() => {
@@ -75,8 +79,8 @@
 
   function syncScroll(): void {
     const top = ta?.scrollTop ?? 0
-    if (hlPre) hlPre.scrollTop = top
-    if (gutterPre) gutterPre.scrollTop = top
+    if (hlBox) hlBox.scrollTop = top
+    if (gutterBox) gutterBox.scrollTop = top
   }
 
   function save(): void {
@@ -152,11 +156,11 @@
       </header>
 
       <div class="pe-body">
-        <div class="pe-gutter" aria-hidden="true">
-          <pre bind:this={gutterPre}>{lineNos}</pre>
+        <div class="pe-gutter" aria-hidden="true" bind:this={gutterBox}>
+          <pre>{lineNos}</pre>
         </div>
         <div class="pe-code">
-          <div class="pe-hl" aria-hidden="true">
+          <div class="pe-hl" aria-hidden="true" bind:this={hlBox}>
             <pre bind:this={hlPre}>{@html hl}</pre>
           </div>
           <textarea
@@ -322,7 +326,9 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .pe-hl-var {
+  /* ⚠️ @html 插入的 span 没有组件 scoped 类名，scoped 选择器 `.pe-hl-var.svelte-*`
+     匹配不上 ⇒ {{date}} 不高亮（2026-11 用户报）。必须 :global。 */
+  :global(.pe-hl-var) {
     color: var(--accent);
   }
 
