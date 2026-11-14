@@ -59,6 +59,9 @@ export const VIEW_TITLE_KEYS = {
   schedules: 'schedules.navTitle',
   // ★ 编排（2026-11，使用者立项）：第十一个视图，排定时任务之后。
   workflows: 'workflows.navTitle',
+  // ★ 编排任务（2026-11，使用者拍板"侧栏应该有一编排任务页"）：全部编排运行的
+  //   列表视图，排「编排」之后。
+  'workflow-runs': 'workflowruns.navTitle',
   // ★ 设置（2026-11，使用者立项）：从抽屉改主窗口视图，排「关于」前面。
   settings: 'settings.navTitle',
   // ★ 关于（2026-11，使用者立项）：第十个视图，排最后。
@@ -110,6 +113,17 @@ export const crystallize = writable<{ runId: string } | null>(parseHash(location
  *   （执行中切到别处看文件、再切回来，画面还在），地址里才有这个信息。
  */
 export const workflowRun = writable<{ runId: string } | null>(parseHash(location.hash).workflowRun)
+
+/**
+ * 运行画面「返回」按钮回哪（2026-11，使用者拍板侧栏加「编排任务」之后）。
+ *
+ * 运行画面可以从两处进：定义页发起运行后自动跳、编排任务列表点一条。
+ * 返回应该回**来处**——store 在跳转前由各入口设置：定义页（Workflows.svelte
+ * 的 startRun/openRun）设 'workflows'，编排任务列表（WorkflowRuns.svelte）与
+ * 任务页（Tasks.svelte 的编排任务）设 'workflow-runs'。地址方案做不到
+ * （返回目标不在地址里）；组件卸载不丢（view.ts 的 store 都是这个语义）。
+ */
+export const wfReturn = writable<ViewName>('workflows')
 
 /** 读地址 → 写四个 store。地址是唯一出处，store 只是它的投影。 */
 function syncRoute(): void {

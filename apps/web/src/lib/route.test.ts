@@ -122,6 +122,23 @@ describe('hashFor', () => {
   it('★ `workflowRun` 只对编排视图成立（别的视图没有这个状态）', () => {
     assert.equal(hashFor('agents', { workflowRun: { runId: 'X' } }), '#/agents')
     assert.equal(hashFor('tasks', { workflowRun: { runId: 'X' } }), '#/tasks')
+    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: 'X' } }), '#/workflow-runs')
+  })
+
+  it('★ 编排任务列表是独立视图（`#/workflow-runs`），不是编排页的子状态', () => {
+    assert.deepEqual(parseHash('#/workflow-runs'), {
+      view: 'workflow-runs',
+      creating: false,
+      crystallize: null,
+      workflowRun: null,
+    })
+    assert.equal(hashFor('workflow-runs'), '#/workflow-runs')
+    assert.deepEqual(parseHash(hashFor('workflow-runs')), {
+      view: 'workflow-runs',
+      creating: false,
+      crystallize: null,
+      workflowRun: null,
+    })
   })
 
   it('★ `crystallize` 只对沉淀视图成立（别的视图没有这个状态）', () => {

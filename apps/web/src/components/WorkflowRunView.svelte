@@ -25,7 +25,7 @@
     workflowStepKindKey,
   } from '../lib/run-status.ts'
   import { issues } from '../lib/stores.ts'
-  import { go } from '../lib/view.ts'
+  import { go, wfReturn } from '../lib/view.ts'
   import RunLog from './RunLog.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
 
@@ -83,8 +83,8 @@
 <div class="wf-run-layout">
   <div class="detail-head">
     <div class="detail-sub">
-      <button type="button" class="btn btn--ghost" onclick={() => go('workflows')}>
-        {$t('workflows.runBack')}
+      <button type="button" class="btn btn--ghost" onclick={() => go($wfReturn)}>
+        {$t($wfReturn === 'workflows' ? 'workflows.runBack' : 'workflowruns.runBack')}
       </button>
       <h2>{issue?.title ?? runId.slice(0, 8)}</h2>
       <p class="hint">

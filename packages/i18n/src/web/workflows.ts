@@ -67,4 +67,12 @@ export const workflowsText = {
 
   // ── 任务列表徽标（Tasks.svelte 里编排任务的标记）──
   'workflows.taskBadge': { zh: '编排', en: 'Workflow' },
+
+  // ── 编排任务列表（`views/WorkflowRuns.svelte`，2026-11 使用者拍板侧栏加一项）──
+  'workflowruns.navTitle': { zh: '编排任务', en: 'Workflow runs' },
+  'workflowruns.navHint': { zh: '运行历史', en: 'Run history' },
+  'workflowruns.listTitle': { zh: '所有编排任务', en: 'All workflow runs' },
+  'workflowruns.empty': { zh: '还没有跑过的编排任务。', en: 'No workflow runs yet.' },
+  'workflowruns.pickHint': { zh: '点一条看运行画面', en: 'Pick a run to open it' },
+  'workflowruns.runBack': { zh: '返回编排任务', en: 'Back to runs' },
 }

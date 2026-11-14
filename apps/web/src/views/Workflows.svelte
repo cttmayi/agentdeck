@@ -28,7 +28,7 @@
     loadWorkflows,
     loadWorkflowRuns,
   } from '../lib/stores.ts'
-  import { workflowRun, toast } from '../lib/view.ts'
+  import { workflowRun, toast, wfReturn } from '../lib/view.ts'
   import ListRow from '../components/ListRow.svelte'
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
@@ -69,6 +69,8 @@
     .sort((a, b) => b.updatedAt - a.updatedAt)
 
   function openRun(runId: string): void {
+    // 从定义页进运行画面：返回按钮回定义页
+    wfReturn.set('workflows')
     location.hash = `#/workflows/run/${runId}`
   }
 
@@ -170,7 +172,8 @@
       runWorkDir = ''
       // 编排任务会进「任务」列表（徽标 + 步骤进度）——发起后立即重拉，界面跟着数据走。
       await Promise.all([loadWorkflowRuns(), loadIssues()])
-      // 跳运行画面（子路由：`#/workflows/run/<runId>`）
+      // 跳运行画面（子路由：`#/workflows/run/<runId>`）；返回按钮回定义页
+      wfReturn.set('workflows')
       location.hash = `#/workflows/run/${out.run.id}`
     } catch (err) {
       runError = err instanceof Error ? err.message : String(err)

@@ -20,7 +20,7 @@
     import { agents, identity, issues, loadIssues, loadRuns, loading, loadError, runs, deleteTask, loadSkills } from '../lib/stores.ts'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import { leaveCreate } from '../lib/leave-create.ts'
-  import { creating, goCreate, goCrystallize, selectedIssueId, showToast } from '../lib/view.ts'
+  import { creating, goCreate, goCrystallize, selectedIssueId, showToast, wfReturn } from '../lib/view.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { absoluteTime, relativeTime } from '../lib/time.ts'
   import { runStatusClass, runStatusKey } from '../lib/run-status.ts'
@@ -256,6 +256,8 @@
     if (issue?.source?.kind === 'workflow') {
       const run = $workflowRuns.find((r) => r.issueId === id)
       if (run) {
+        // 从任务页进运行画面：返回按钮回**编排任务列表**
+        wfReturn.set('workflow-runs')
         location.hash = `#/workflows/run/${run.id}`
         return
       }
@@ -792,6 +794,7 @@
     if (issue?.source?.kind === 'workflow') {
       const run = $workflowRuns.find((r) => r.issueId === issueId)
       if (run) {
+        wfReturn.set('workflow-runs')
         location.hash = `#/workflows/run/${run.id}`
         return
       }
