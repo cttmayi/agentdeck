@@ -830,8 +830,36 @@ hr {
    ⚠️ 它为什么放全局：动作按钮是**页面的 snippet** 提供的（聊天/任务的删除钮），
    snippet 内容不吃 ListRow 的 scoped 样式——放组件里就永远匹配不上。 */
 
+/* ── 大编辑器入口（2026-11：PromptEditor，使用者："编辑框太小想弹出来编辑"）──
+   通用控件：包在 textarea 外面的 `.field-prompt` 容器 + 浮在右下角的「⛶ 展开」
+   按钮。智能体指令 / 定时任务模板三处共用，只此一份。 */
+
 /* 行右侧动作钮（原来聊天 `.conv-delete` 与任务 `.task-delete` 各写一份同样的，
    D66 收成一条）：1.75rem 方块、右缘内缩 `--sp-1`、垂直居中。 */
+
+.field-prompt {
+  position: relative;
+}
+
+.prompt-expand {
+  position: absolute;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-base);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--sp-1);
+  border-radius: var(--radius);
+}
+
+.prompt-expand:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
 .list-row-action {
   flex-shrink: 0;
   margin-right: var(--sp-1);

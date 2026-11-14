@@ -2,6 +2,7 @@
   import { createAgent, identity, skills } from '../lib/stores.ts'
   import type { AgentRole, ReviewStandard } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
+  import PromptEditor from './PromptEditor.svelte'
   import { t, tx } from '../lib/i18n.ts'
 
   /**
@@ -55,6 +56,8 @@
    * 但界面上必须**先看见**，才能改、才能删。
    */
   let instructions = $identity?.defaultAgentConduct ?? ''
+  /** 2026-11：指令大编辑器（PromptEditor）。 */
+  let instructionsEditorOpen = false
   /**
    * 审核标准（D37）——只对审核者有意义。
    *
@@ -218,14 +221,23 @@
              `.instructions` 的 `min-height`（与 `AgentDetail.svelte` 里那一份
              必须一致）。
         -->
-        <textarea
-          class="instructions"
-          bind:value={instructions}
-          rows="6"
-          placeholder={role === 'reviewer'
-            ? $t('agents.instructionsPlaceholderReviewer')
-            : $t('agents.instructionsPlaceholderExecutor')}
-        ></textarea>
+        <!-- 2026-11（使用者：指令可能写很长）：右下角「⛶ 展开」弹大编辑器 -->
+        <div class="field-prompt">
+          <textarea
+            class="instructions"
+            bind:value={instructions}
+            rows="6"
+            placeholder={role === 'reviewer'
+              ? $t('agents.instructionsPlaceholderReviewer')
+              : $t('agents.instructionsPlaceholderExecutor')}
+          ></textarea>
+          <button
+            type="button"
+            class="prompt-expand"
+            title={$t('editor.expand')}
+            onclick={() => (instructionsEditorOpen = true)}
+          >⛶</button>
+        </div>
 
       </label>
 
@@ -276,6 +288,13 @@
     </button>
     <button type="button" class="btn btn--ghost" onclick={onclose}>{$t('common.cancel')}</button>
   </div>
+  <PromptEditor
+    open={instructionsEditorOpen}
+    title={$t('agents.instructionsLabel')}
+    value={instructions}
+    onSave={(v) => (instructions = v)}
+    onCancel={() => (instructionsEditorOpen = false)}
+  />
 </form>
 
 <style>

@@ -474,6 +474,26 @@
           !!d().querySelector('.detail-pane #agent-instructions') &&
           !!d().querySelector('.detail-pane .role-picker .role-card'),
         )
+        // 2026-11（使用者："智能体指令可能写很长"）：指令框的「⛶ 展开」按钮要能
+        // 弹大编辑器（选中的是自建 agent，非内置 → 不是只读，按钮应在）
+        facts['agents.promptEditorOpens'] = await (async () => {
+          const expand = d().querySelector('.detail-pane #agent-instructions + .prompt-expand')
+          const anyExpand = d().querySelector('.detail-pane .prompt-expand')
+          if (!anyExpand) {
+            errors.push('agents.promptEditor：指令框没有「⛶ 展开」按钮')
+            return false
+          }
+          click(anyExpand)
+          await until(() => !!d().querySelector('.pe-panel'), 40)
+          const opened = !!d().querySelector('.pe-panel .pe-textarea')
+          click(d().querySelector('.pe-actions .btn--ghost'))
+          await until(() => !d().querySelector('.pe-panel'), 40)
+          if (!opened) {
+            errors.push('agents.promptEditor：点展开没弹出编辑器')
+            return false
+          }
+          return true
+        })()
 
         /**
          * ══════════════ 记忆（分批第 240 批）══════════════
@@ -2934,12 +2954,15 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             return false
           }
           const freq = d().querySelectorAll('.schedules-main .freq-picker button').length
-          const chips = d().querySelectorAll('.schedules-main .var-chip').length
+          // 2026-11：变量 chips 已搬进大编辑器弹层（.pe-var-chip）——表单里不再有
+          //   .var-chip，改为断言「⛶ 展开」按钮存在（chips 的数量在 promptEditor
+          //   判据里量弹层）
+          const expandBtn = !!d().querySelector('.schedules-main .prompt-expand')
           const nameField = !!d().querySelector('.schedules-main input[type=text]')
           const timeField = d().querySelectorAll('.schedules-main .schedule-time input').length === 2
           const resultRows = d().querySelectorAll('.schedules-main .schedule-result-row').length
-          if (freq !== 5 || chips !== 6 || !nameField || !timeField || resultRows !== 3) {
-            errors.push(`表单不完整：预设键 ${freq}/5、变量 chips ${chips}/6、名字框 ${nameField}、时间行 ${timeField}、结果区三行 ${resultRows}/3`)
+          if (freq !== 5 || !expandBtn || !nameField || !timeField || resultRows !== 3) {
+            errors.push(`表单不完整：预设键 ${freq}/5、展开按钮 ${expandBtn}、名字框 ${nameField}、时间行 ${timeField}、结果区三行 ${resultRows}/3`)
             return false
           }
           return true
@@ -3153,6 +3176,65 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           const cancel = [...d().querySelectorAll('.schedules-main button')].find((b) => text(b) === '取消')
           if (cancel) click(cancel)
           await until(() => !d().querySelector('.schedules-main .detail-actions'))
+          return true
+        })()
+
+        // 2026-11（使用者："编辑框太小，想弹出编辑器来编辑"）：大编辑器全流程——
+        //   点「⛶ 展开」→ 弹层出现、6 个变量 chips 在弹层 → 改内容 → 「取消」原值
+        //   不变（快照+确认语义）→ 再展开 → 改 + 点变量 chip 插入 → 「保存」写回。
+        facts['schedules.promptEditor'] = await (async () => {
+          // 前一判据（formSurvivesNav）收尾取消了表单——这里自己开
+          const openBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建定时任务')
+          if (!openBtn) {
+            errors.push('promptEditor：找不到「新建定时任务」')
+            return false
+          }
+          click(openBtn)
+          await until(() => !!d().querySelector('.schedules-main .detail-actions'))
+          const pv = (el, v) => {
+            el.value = v
+            el.dispatchEvent(new Event('input', { bubbles: true }))
+          }
+          const expand = d().querySelector('.schedules-main .prompt-expand')
+          if (!expand) {
+            errors.push('promptEditor：表单里没有「⛶ 展开」按钮')
+            return false
+          }
+          click(expand)
+          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
+          const chips = d().querySelectorAll('.schedules-main .pe-var-chip').length
+          const bigTa = d().querySelector('.schedules-main .pe-textarea')
+          if (chips !== 6 || !bigTa) {
+            errors.push(`promptEditor：弹层缺变量 chips（${chips}/6）或 textarea`)
+            return false
+          }
+          const before = bigTa.value
+          // 取消：改了不生效（快照语义）
+          pv(bigTa, before + '\n不该有的草稿')
+          click(d().querySelector('.schedules-main .pe-actions .btn--ghost'))
+          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
+          const afterCancel = d().querySelector('.schedules-main .field-prompt textarea').value
+          if (afterCancel !== before) {
+            errors.push(`promptEditor：取消后原值变了：${afterCancel} vs ${before}`)
+            return false
+          }
+          // 保存：改动生效 + 变量插入
+          click(expand)
+          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
+          const ta2 = d().querySelector('.schedules-main .pe-textarea')
+          pv(ta2, before + '\n正式草稿')
+          click(d().querySelectorAll('.schedules-main .pe-var-chip')[0])
+          // ⚠️ Svelte 5 的 DOM 更新在微任务 flush——点完 chip 立即读 value 拿到的是
+          //   旧值（踩过：插入后 "\n正式草稿" 没有 {{date}}）。等一拍再读。
+          await wait(150)
+          const withVar = d().querySelector('.schedules-main .pe-textarea').value
+          click(d().querySelector('.schedules-main .pe-actions .btn--primary'))
+          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
+          const afterSave = d().querySelector('.schedules-main .field-prompt textarea').value
+          if (!afterSave.includes(before + '\n正式草稿') || !withVar.includes('{{date}}')) {
+            errors.push(`promptEditor：保存/插入不对：before=${JSON.stringify(before)}、保存后 ${JSON.stringify(afterSave)}、插入后 ${JSON.stringify(withVar)}`)
+            return false
+          }
           return true
         })()
 

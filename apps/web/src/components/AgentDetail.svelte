@@ -22,6 +22,7 @@
   import { api } from '../lib/api.ts'
   import { DISTILLY_SOURCE } from '../lib/crystallize-editor.svelte.ts'
   import { showToast } from '../lib/view.ts'
+  import PromptEditor from './PromptEditor.svelte'
   import ChatMemoryTidy from './ChatMemoryTidy.svelte'
 
   /**
@@ -418,6 +419,8 @@
 
   type Draft = ReturnType<typeof blankDraft>
   let draft = blankDraft()
+  /** 2026-11：指令大编辑器（PromptEditor）。 */
+  let instructionsEditorOpen = false
 
   /**
    * ══════════════════════════════════════════════════════════════════
@@ -1091,15 +1094,33 @@
                指令是一份几百到上千字的文档，不是一行备注。 -->
           <span class="field field-lock">
             {#if readOnly}<span class="lockmark">{$t('agents.lockReadOnly')}</span>{/if}
-          <textarea
-            id="agent-instructions"
-            class="instructions"
-            class:locked={readOnly}
-            readonly={readOnly}
-            bind:value={draft.instructions}
-            rows="6"
-          ></textarea>
+          <!-- 2026-11（使用者：指令可能写很长）：右下角「⛶ 展开」弹大编辑器 -->
+          <div class="field-prompt">
+            <textarea
+              id="agent-instructions"
+              class="instructions"
+              class:locked={readOnly}
+              readonly={readOnly}
+              bind:value={draft.instructions}
+              rows="6"
+            ></textarea>
+            {#if !readOnly}
+              <button
+                type="button"
+                class="prompt-expand"
+                title={$t('editor.expand')}
+                onclick={() => (instructionsEditorOpen = true)}
+              >⛶</button>
+            {/if}
+          </div>
           </span>
+          <PromptEditor
+            open={instructionsEditorOpen}
+            title={$t('agents.instructionsLabel')}
+            value={draft.instructions}
+            onSave={(v) => (draft.instructions = v)}
+            onCancel={() => (instructionsEditorOpen = false)}
+          />
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。 -->

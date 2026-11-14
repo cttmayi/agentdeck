@@ -435,6 +435,12 @@ const CHECKS = [
   },
   {
     view: '智能体',
+    key: 'agents.promptEditorOpens',
+    label: '★ 2026-11：智能体指令框「⛶ 展开」→ 大编辑器弹层（选中即编辑态可点）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '智能体',
     key: 'agents.memorySection',
     /**
      * ★ 分批第 240 批（使用者定：一条一行、悬停看细节、★ 置顶、预览只读）。
@@ -1614,6 +1620,9 @@ const CHECKS = [
     ok: (v) => v === true },
   { view: '定时任务（D115）', key: 'schedules.scheduleLineOneRow',
     label: '★ 2026-11：每月/间隔那行放一行（「每月第」与 select、「每」与「分钟」top 相同）——防 flex-wrap 在窄列拆行回归',
+    ok: (v) => v === true },
+  { view: '定时任务（D115）', key: 'schedules.promptEditor',
+    label: '★ 2026-11：模板大编辑器——展开弹层、取消不生效、保存生效、变量插入',
     ok: (v) => v === true },
   { view: '定时任务（D115）', key: 'schedules.rowTitleNoOverflow',
     label: '★ 2026-11：列表行长标题单行 + 省略号 + 行撑满容器（ul padding-left==0）——防 sched-title 漏 block/max-width、ul 继承默认 40px 缩进把行顶歪回归',

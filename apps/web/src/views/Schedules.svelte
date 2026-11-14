@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import ListRow from '../components/ListRow.svelte'
+  import PromptEditor from '../components/PromptEditor.svelte'
   import { clearPageActions, setPageActions } from '../lib/page-actions.ts'
   import {
     api,
@@ -99,6 +100,8 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   let formWorkDir = ''
   let formResume: ScheduleResumeMode = 'fresh'
+  /** 2026-11：模板大编辑器（PromptEditor）开没开。 */
+  let taskEditorOpen = false
   let dirPickerOpen = false
   // 结果区「下次」行：daemon 用 croner 算（debounce），表单任何调度变化都重算
   let previewNext: number | null = null
@@ -239,10 +242,6 @@ import type { WebTextId } from '@agentdeck/i18n'
         // 列表还没回填（切回来 load 未回）：不标记，list 到了再填
       }
     }
-  }
-
-  function insertVar(v: string): void {
-    formTaskText += v
   }
 
   async function save(saveAndTrigger = false): Promise<void> {
@@ -722,20 +721,23 @@ import type { WebTextId } from '@agentdeck/i18n'
             </div>
           </div>
 
-          <!-- 要做什么：与「新建任务」同一个框、同一套模板（第一行当标题） -->
+          <!-- 要做什么：与「新建任务」同一个框、同一套模板。2026-11（使用者：
+               模板可能写很长）：右下角「⛶ 展开」弹大编辑器（PromptEditor），
+               变量 chips 搬进弹层并插到光标处；varsHint 仍说明 6 个变量。 -->
           <div class="field">
             <label>{$t('schedules.taskLabel')}</label>
-            <textarea
-              bind:value={formTaskText}
-              placeholder={$t('schedules.taskPlaceholder')}
-              rows={6}
-            ></textarea>
-            <div class="var-chips">
-              {#each VAR_CHIPS as v (v.label)}
-                <button type="button" class="var-chip" title={v.title} onclick={() => insertVar(v.label)}>
-                  {v.label}
-                </button>
-              {/each}
+            <div class="field-prompt">
+              <textarea
+                bind:value={formTaskText}
+                placeholder={$t('schedules.taskPlaceholder')}
+                rows={6}
+              ></textarea>
+              <button
+                type="button"
+                class="prompt-expand"
+                title={$t('editor.expand')}
+                onclick={() => (taskEditorOpen = true)}
+              >⛶</button>
             </div>
             <p class="hint">{$t('schedules.varsHint')}</p>
           </div>
@@ -859,6 +861,17 @@ import type { WebTextId } from '@agentdeck/i18n'
           {#if formError}
             <div class="notice bad grid-full">{formError}</div>
           {/if}
+
+          <!-- 模板大编辑器（2026-11）：快照+确认语义（取消不改原值）；变量 chips
+               在弹层底部、插到光标处 -->
+          <PromptEditor
+            open={taskEditorOpen}
+            title={$t('schedules.taskLabel')}
+            value={formTaskText}
+            vars={VAR_CHIPS}
+            onSave={(v) => (formTaskText = v)}
+            onCancel={() => (taskEditorOpen = false)}
+          />
         </div>
     {:else if selectedId}
       {@const s = list.find((x) => x.id === selectedId)}
@@ -1185,12 +1198,6 @@ import type { WebTextId } from '@agentdeck/i18n'
   .schedule-result-row .bad {
     color: var(--bad);
   }
-  .var-chips {
-    display: flex;
-    gap: 0.3rem;
-    flex-wrap: wrap;
-    margin-top: 0.35rem;
-  }
   .var-chip {
     border: 1px solid var(--line);
     background: var(--surface-2);
@@ -1200,10 +1207,6 @@ import type { WebTextId } from '@agentdeck/i18n'
     font-size: var(--fs-xs);
     padding: 0.15rem 0.55rem;
     cursor: pointer;
-  }
-  .var-chip:hover {
-    border-color: var(--accent);
-    color: var(--accent);
   }
   .summary-line {
     margin-top: 0.5rem;
