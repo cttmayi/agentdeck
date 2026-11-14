@@ -36,6 +36,9 @@ export const VIEWS = [
   'crystallize',
   // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器，排沉淀之后。
   'schedules',
+  // ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界，收拢散在各处的诊断信息，
+  //   排最后——它是"这一台是怎么搭的"的说明页，不是天天用的入口。
+  'about',
 ] as const
 export type ViewName = (typeof VIEWS)[number]
 

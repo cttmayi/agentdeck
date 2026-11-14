@@ -57,6 +57,8 @@ export const VIEW_TITLE_KEYS = {
   crystallize: 'crystallize.navTitle',
   // ★ 定时任务（2026-11，使用者立项）：第八个视图，排沉淀之后。
   schedules: 'schedules.navTitle',
+  // ★ 关于（2026-11，使用者立项）：第九个视图，排最后。
+  about: 'about.navTitle',
 } as const satisfies Record<ViewName, WebTextId>
 
 /**

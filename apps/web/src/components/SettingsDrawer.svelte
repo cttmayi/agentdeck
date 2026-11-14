@@ -282,24 +282,6 @@
       平时摊在设置里就是两条没人看得懂的字（`index-CKNBcUzP.js` / `1`）。
       信息一个字没少，只是要主动点开——判据仍然是"这句话给谁看"。
     -->
-    {#if $identity}
-      <!-- ★ 分批第 242 批：记忆触发词那一节搬到了聊天页的「设置」抽屉
-         （`components/ChatSettings.svelte`）——这里不留第二份入口，见上面状态区的说明。 -->
-
-    <section class="drawer-section" data-about>
-        <h3>{$t('settings.about')}</h3>
-        <details>
-          <summary class="hint" style="cursor:pointer">{$t('settings.diagnostics')}</summary>
-          <p class="hint">
-            {$t('settings.webBuildLabel')}
-            <code data-web-build>{$identity.webBuild ?? $t('settings.webBuildUnknown')}</code>
-          </p>
-          <p class="hint">
-            {$t('settings.protocolLabel')} <code>{$identity.protocolVersion}</code>
-          </p>
-        </details>
-      </section>
-    {/if}
 
     <section class="drawer-section">
       <h3>{$t('settings.costs')}</h3>

@@ -3410,6 +3410,55 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           }
           return true
         })()
+
+        // ── 关于（2026-11 立项）：版本 · 环境 · 边界 ──
+        f.contentWindow.location.hash = '#/about'
+        await until(() => text(d().querySelector('.page-name')) === '关于')
+        await until(() => !!d().querySelector('[data-ab-app]'), 40)
+
+        // ① 六个区都在（应用/运行环境/存储/安全/诊断/文档）
+        facts['about.sections'] = [
+          '[data-ab-app]', '[data-ab-env]', '[data-ab-storage]',
+          '[data-ab-security]', '[data-ab-diagnostics]', '[data-ab-docs]',
+        ].every((sel) => !!d().querySelector(sel))
+        if (!facts['about.sections']) {
+          errors.push('关于页六个区不齐（应用/运行环境/存储/安全/诊断/文档）')
+        }
+
+        // ② 侦测到的 CLI 列表（罗列，不强调"当前"）：claude 行里有命令名 + 版本
+        facts['about.cliList'] = (() => {
+          const env = d().querySelector('[data-ab-env]')
+          const cli = [...(env?.querySelectorAll('.ab-cli') ?? [])].map((el) => text(el))
+          return { cli, hasClaude: cli.some((x) => x.startsWith('claude')), hasVersion: cli.some((x) => /\d+\.\d+/.test(x)) }
+        })()
+        if (!facts['about.cliList'].hasClaude || !facts['about.cliList'].hasVersion) {
+          errors.push(`关于页运行时列表缺 claude / 版本：${JSON.stringify(facts['about.cliList'].cli)}`)
+        }
+
+        // ③ 环境预检区存在（问题列表或"全部通过"）
+        facts['about.envPreflightShown'] = !!d().querySelector('[data-ab-env] .ab-badge')
+
+        // ④ 存储与目录：daemon 下发的路径（工作目录/数据目录/技能目录）至少两行 code
+        facts['about.storageDirs'] = (() => {
+          const codes = [...d().querySelectorAll('[data-ab-storage] code')].map((c) => c.textContent)
+          return { count: codes.length, first: codes[0] ?? null }
+        })()
+        if (facts['about.storageDirs'].count < 2) {
+          errors.push(`关于页存储区路径不足（${facts['about.storageDirs'].count} 行 code）`)
+        }
+
+        // ⑤ 诊断默认折叠：summary 在、详情内容不展开（details 无 open 属性）
+        facts['about.diagnosticsCollapsed'] = (() => {
+          const details = d().querySelector('[data-ab-diagnostics] details')
+          return details ? !details.hasAttribute('open') && !!details.querySelector('summary') : null
+        })()
+        if (!facts['about.diagnosticsCollapsed']) {
+          errors.push('关于页「诊断」区没有默认折叠（details 应无 open）')
+        }
+
+        // ⑥ 侧栏底部状态块还在（环境入口不因详情移走而消失）
+        facts['about.sidebarEnvKept'] = !!d().querySelector('.sidebar .env')
+
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
 
@@ -5127,6 +5176,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           ['#/tasks', '任务', ['新建任务', '列表', '看板', '刷新']],
           ['#/agents', '智能体', ['新建智能体', '设置', '刷新']],
           ['#/tools', '工具', ['安装工具', '刷新']],
+          // ★ 2026-11（关于页立项）：只读说明页，顶栏**没有**动作。
+          ['#/about', '关于', []],
         ]) {
           f.contentWindow.location.hash = tpHash
           // ⚠️ 等到**地址真的生效**再量：`hashchange` 晚一拍，而页名在"建任务"

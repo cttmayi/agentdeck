@@ -14,6 +14,7 @@
   import Tools from './views/Tools.svelte'
   import Crystallize from './views/Crystallize.svelte'
   import Schedules from './views/Schedules.svelte'
+  import About from './views/About.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
@@ -133,6 +134,10 @@
       <!-- ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
            左栏 = 定时任务列表，右栏 = 新建表单 / 详情（含触发记录）。 -->
       <Schedules />
+    {:else if $view === 'about'}
+      <!-- ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界。
+           收拢散在各处的诊断信息（侧栏底部状态块 / 设置抽屉诊断折叠区）。 -->
+      <About />
     {:else}
       <!-- ★ D40：最后一项。`$view` 的取值来自 `VIEWS`，每一支都写明了是哪个；
            最后这个 `{:else}` 不再兼作别的视图（写死成"剩下的都是 Skills"

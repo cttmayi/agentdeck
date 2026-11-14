@@ -4229,6 +4229,16 @@ async function injectedSkillsOf(
 
       sendJson(res, 200, {
         environment: { ok: env.ok, issues: env.issues },
+        // ★ 关于页（2026-11）：这一台是怎么搭的——Node/平台、工作目录、数据目录、
+        //   技能目录。都是运行时事实，由 daemon 下发（界面不猜值）。缺省值用
+        //   `fallbackWorkRoot` / `fallbackSkillsRoot`（见 `workdir.ts`）与
+        //   `options.dataDir`——真实运行时 CLI 会显式传 `~/agentdeck-workspace`
+        //   等可见值，这里如实报出 daemon 实际在用的。
+        nodeVersion: process.version,
+        platform: process.platform,
+        workDir: options.workRoot ?? fallbackWorkRoot(options.dataDir),
+        dataDir: options.dataDir,
+        skillsDir: options.skillsRoot ?? fallbackSkillsRoot(options.dataDir),
         protocolVersion: LOCAL_PROTOCOL_VERSION,
         deviceId: device?.id ?? 'unknown',
         deviceName: device?.name ?? 'unknown',

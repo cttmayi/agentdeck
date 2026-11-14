@@ -1,4 +1,5 @@
 import type { TextCatalog } from '../text.ts'
+import { aboutText } from './about.ts'
 import { agentsText } from './agents.ts'
 import { chatText } from './chat.ts'
 import { commonText } from './common.ts'
@@ -63,6 +64,8 @@ export const webText = {
   ...termsText,
   // ★ D40：工具（列表 / 安装抽屉 / 智能体详情里的挂载 / 审核标准里可勾的工具动作）
   ...toolsText,
+  // ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界。
+  ...aboutText,
 } as const satisfies TextCatalog
 
 export type WebTextId = keyof typeof webText

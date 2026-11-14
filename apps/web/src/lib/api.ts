@@ -156,6 +156,16 @@ export interface Identity {
   /** 运行环境预检结果（例如 CLI 自己的状态目录写不进去）。 */
   environment?: { ok: boolean; issues: EnvironmentIssue[] }
   /**
+   * ★ 关于页（2026-11）：这一台是怎么搭的——Node 版本 / 平台 / 工作目录 /
+   *   数据目录 / 技能目录。由 daemon 下发（界面不猜值）；老 daemon 不带这些键
+   *   ⇒ 界面按"未知"处理（隐藏对应行）。
+   */
+  nodeVersion?: string
+  platform?: string
+  workDir?: string
+  dataDir?: string
+  skillsDir?: string
+  /**
    * ★ 分批第 207 批：**起草者应挂的那条技能的 slug**（`distilly`）。
    *
    * 智能体页要能说出「distilly（未安装）」——前端不去硬编码 slug（两处迟早漂），

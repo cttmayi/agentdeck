@@ -62,27 +62,8 @@ export const settingsText = {
     en: 'Raw passes ALL HTML from agent output through — scripts and event attributes can call local APIs. Use only when you fully trust the source.',
   },
 
-  /**
-   * 「关于」：这一版界面叫什么。
-   *
-   * ★ 加它的理由是一次真实误判（"聊天页不工作、任务页正常"，实际是没刷新的旧
-   *   标签页）。界面与 daemon 各是哪一版这件事**两边都不报错**，所以必须有一句
-   *   可查的话。
-   */
-  // ── 记忆触发词那几条搬到了 `chat.settings*`（分批第 242 批：入口从 App 设置搬到聊天页）──
-  'settings.about': { zh: '关于', en: 'About' },
-  /**
-   * ⚠️ 两条版本信息**默认收起**（2026-09）：构建文件名与协议版本号是排查用的，
-   *    平时摊在设置里就是两句没人看得懂的字。收起来而不是删掉——理由见下面
-   *    `webBuildLabel` 那段（"我到底在跑哪一版"必须是一句可查的话）。
-   */
-  'settings.diagnostics': { zh: '诊断信息（排查版本错位时再看）', en: 'Diagnostic info (only needed when versions mismatch)' },
-  'settings.webBuildLabel': { zh: '这一版界面：', en: 'This UI build:' },
-  'settings.webBuildUnknown': {
-    zh: '（读不到——界面没有构建？）',
-    en: '(unreadable — UI not built?)',
-  },
-  'settings.protocolLabel': { zh: '接口协议版本：', en: 'API protocol version:' },
+  // ── 2026-11：「关于」那几条（settings.about / diagnostics / webBuild* /
+  //    protocolLabel）整节搬去了「关于」页（about.ts）——这里不留死词条。
 
   // ── 成本 ──
   'settings.costs': { zh: '成本', en: 'Costs' },
