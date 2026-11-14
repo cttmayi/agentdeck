@@ -409,10 +409,16 @@
     color: var(--text);
     font-style: italic;
   }
+  /* ★ 2026-11 展开区：RunLog 的 fill 是 flex 链的中间环（flex:1 撑满、内部
+     .log 自己滚）——这里必须是 flex column 容器 + 固定高度，链才不断。
+     之前是块级 + 定高，链断 → RunLog 高度=内容高度，日志少就收缩成一行
+     （使用者报"日志显示框又变一行"）。 */
   .wf-out-log {
     border-top: 1px solid var(--line);
-    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
     height: 320px;
+    min-height: 0;
   }
   .wf-run-log {
     /* ★ 2026-11：RunLog 的 fill 是 flex 链（flex:1 撑满、内部 .log 自己滚）——
