@@ -65,8 +65,6 @@ export const tasksText = {
    * 否则栏头就是半空。数的是**当前列表里实际显示的条数**（过滤之后）。
    */
   'tasks.listCount': { zh: '共 {count} 条', en: '{count} tasks' },
-  'tasks.attentionTitle': { zh: '需要注意（{count}）', en: 'Needs attention ({count})' },
-  'tasks.restTitle': { zh: '其余任务（{count}）', en: 'Everything else ({count})' },
   'tasks.backToList': { zh: '← 返回任务清单', en: '← Back to tasks' },
   'tasks.updatedAt': { zh: '更新于 {time}', en: 'Updated {time}' },
   'tasks.descriptionHeading': { zh: '说明', en: 'Description' },

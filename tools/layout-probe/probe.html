@@ -11222,16 +11222,20 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               // （其余任务）38px、双行那条（需要注意+长提示折行）59px。
               // D67：「需要注意」后面的解释句（"执行失败/被取消…"）按要求删了，
               // 两条都回到单行 ~38px。漏的特征是"全部 == 51"——用 **min** 抓它。
+              // ★ 2026-11（使用者："平铺改一下，去掉之前的分类"）：「需要注意/
+              //   其余任务」分段连同 `.list-head` 一起删了；分组标题现在是
+              //   分组视图的 `.group-head`（组头）。同一意图换载体继续钉：
+              //   组头也是内容高度（不许被全局固定高度带成一条死带）。
               sk.separatorHeights = need('任务分组标题是内容高度', () => {
-                const seps = [...lp.querySelectorAll('.pane-body .list-head')]
+                const seps = [...lp.querySelectorAll('.pane-body .group-head')]
                 if (seps.length === 0) return { min: 0, max: 0 }
                 const hs = seps.map((x) => Math.round(x.getBoundingClientRect().height))
                 return { min: Math.min(...hs), max: Math.max(...hs) }
               })
               // D67：删掉的解释句要**钉住"没有"**（谁把它加回来就红）——
-              // 判据：第一条分组标题（需要注意）的文本里不许再出现它。
-              sk.separatorNoHint = need('「需要注意」分组不带解释', () => {
-                const seps = [...lp.querySelectorAll('.pane-body .list-head')]
+              // 判据：组头（分组标题）的文本里不许再出现它。
+              sk.separatorNoHint = need('分组标题不带解释', () => {
+                const seps = [...lp.querySelectorAll('.pane-body .group-head')]
                 const t = seps.length > 0 ? text(seps[0]) ?? '' : ''
                 return !t.includes('执行失败') && !t.includes('——')
               })

@@ -30,7 +30,6 @@
     TERMINAL_RUN_STATUSES,
     formatRunStamp,
     runsForIssue,
-    splitByAttention,
     stageOf,
     stageShortId,
   } from '../lib/pipeline.ts'
@@ -156,8 +155,6 @@
    * 不重排全部：使用者的心理模型是"列表按时间（新的在前）"，整体重排会让人
    * 找不到刚才那条。置顶一拨 + 其余保持原序，两边都成立。
    */
-  $: byAttention = splitByAttention(staged)
-
   /**
    * ★ 2026-11（使用者立项，demo v3 拍板）：任务列表**分组**——同一来源
    *   （定时任务触发的）任务一组。与看板/平铺切换并列：
@@ -893,11 +890,7 @@
   }
 </script>
 
-{#snippet row(
-  issue: (typeof visible)[number],
-  info: ReturnType<typeof stageOf>,
-  needsAttention: boolean,
-)}
+{#snippet row(issue: (typeof visible)[number], info: ReturnType<typeof stageOf>)}
   <!--
     ★ 为什么从"四列的表格"改成"两行的列表"
 
@@ -916,7 +909,7 @@
       而**信息一个没少**。与「智能体」那一栏的列表也是同一个形状。
   -->
   <ListRow
-    rowClass={needsAttention ? 'task-row attention' : 'task-row'}
+    rowClass="task-row"
     active={$selectedIssueId === issue.id}
     onclick={() => void pickIssue(issue.id)}
   >
@@ -1132,25 +1125,20 @@
                 </button>
                 {#if !collapsedGroups.has(g.key)}
                   {#each g.items as { issue, info } (issue.id)}
-                    {@render row(issue, info, false)}
+                    {@render row(issue, info)}
                   {/each}
                 {/if}
               </li>
             {/each}
           </ul>
         {:else}
+          <!-- ★ 2026-11（使用者："平铺改一下，去掉之前的分类"）：平铺 = 纯时间倒序，
+               不再分「需要注意 / 其余」两拨（分组视图按来源分组、平铺按时间，
+               两个视图都不再做"需注意置顶"）。行上该显示的警告（执行失败等）仍在
+               每行的标签/提示里。 -->
           <ul class="task-list">
-            {#if byAttention.attention.length > 0}
-              <div class="list-head">
-                {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
-              </div>
-              {#each byAttention.attention as { issue, info } (issue.id)}
-                {@render row(issue, info, true)}
-              {/each}
-              <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
-            {/if}
-            {#each byAttention.rest as { issue, info } (issue.id)}
-              {@render row(issue, info, false)}
+            {#each staged as { issue, info } (issue.id)}
+              {@render row(issue, info)}
             {/each}
           </ul>
         {/if}
@@ -1718,14 +1706,6 @@
     flex-direction: column;
     /* D66：行距与聊天/智能体一致（原来 2px vs var(--sp-1)） */
     gap: var(--sp-1);
-  }
-
-  /* 「需要注意」那一拨：左边一条醒目色条，不靠颜色变字体 */
-  .list-head {
-    padding: var(--sp-3) 0 var(--sp-1);
-    font-size: var(--fs-sm);
-    color: var(--text-dim);
-    border-bottom: 1px solid var(--line);
   }
 
   /* ★ 整行可点 + 右侧独立删除按钮（与「智能体」「聊天」两栏同形）：

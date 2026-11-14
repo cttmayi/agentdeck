@@ -306,8 +306,9 @@ export function stageOf(
       ...derived,
       stage: 'abandoned',
       // ⚠️ 提示与警告都必须清掉：放弃过的任务不该再进「需要注意」那一拨
-      //    （`splitByAttention` 的判据就是 `warningId !== null`），也不该再
-      //    提示"没有派审核"——那是**要你去办**的事，而你已经决定不办了。
+      //    （判据就是 `warningId !== null`；2026-11 列表已不再做"需注意置顶"，
+      //      警告仍显示在行的标签/提示里），也不该再提示"没有派审核"——那是
+      //    **要你去办**的事，而你已经决定不办了。
       noteId: null,
       warningId: null,
     }
@@ -600,44 +601,6 @@ const SHORT_LABEL_ID: Record<Stage, WebTextId> = {
 /** 某个阶段的短标签键（表格单元格、卡片角标用）。 */
 export function stageShortId(stage: Stage): WebTextId {
   return SHORT_LABEL_ID[stage]
-}
-
-/** 一个任务 + 它的阶段推导——列表与看板都用它。 */
-export interface StagedIssue<T> {
-  issue: T
-  info: StageInfo
-}
-
-/**
- * 把任务分成「**需要注意**」与其余两拨。
- *
- * ══════════════════════════════════════════════════════════════════
- * 为什么单独一拨，而不是换个排序
- * ══════════════════════════════════════════════════════════════════
- *
- * 单独一拨而不是"按优先级重排全部"：重排会让**其余任务的顺序也变**，而使用者的
- * 心理模型是"列表按时间（新的在前）"，突然整体重排会让人找不到刚才那条。
- * 置顶一拨 + 其余保持原序，两边都成立。
- *
- * 判据只用 `StageInfo.warningId`（有没有那条"需要注意"的提示），它现在覆盖两类
- * **真的要人看一眼**的情况：
- *   - 执行失败/被取消 —— 它**不会**有审核结果（没有产出可审），干等是白等；
- *   - 执行成功但没派审核 —— 配置问题（那个 agent 没配「由谁来审它」）。
- *
- * 第三类：「**判决要求人介入**」（`needs_human`，或判决状态 `escalated`）。
- *
- * ⚠️ 这类原来**进不来**，因为判决结论不在 `runs` 列表里（要按 run 单独查）。
- *    当时的注释写着"等把它并进列表响应之后再加进来，在那之前不要在这里假装
- *    覆盖了它"——现在判决已经并进列表响应（`RunSummary.verdict`），所以补上。
- *    它正落在 INV-8 对"通知"的定义上：**需要你介入**。
- */
-export function splitByAttention<T>(
-  staged: ReadonlyArray<StagedIssue<T>>,
-): { attention: Array<StagedIssue<T>>; rest: Array<StagedIssue<T>> } {
-  const attention: Array<StagedIssue<T>> = []
-  const rest: Array<StagedIssue<T>> = []
-  for (const item of staged) (item.info.warningId ? attention : rest).push(item)
-  return { attention, rest }
 }
 
 /** 三列的定义。顺序就是流水线方向，不能乱。 */
