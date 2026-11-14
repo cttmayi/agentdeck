@@ -18,6 +18,8 @@ import type { WebTextId } from '@agentdeck/i18n'
     effectiveDefaultAgentId,
     groups,
     identity,
+    loadIssues,
+    loadRuns,
     tools,
   } from '../lib/stores.ts'
   import { go, goSchedCreate, goSchedEdit, schedForm, selectedIssueId, showToast } from '../lib/view.ts'
@@ -288,6 +290,10 @@ import type { WebTextId } from '@agentdeck/i18n'
             body: JSON.stringify({}),
           })
           showToast(tx('schedules.savedAndTriggeredToast'))
+          // ★ 2026-11（用户实测："触发自动任务后没看到进入分组"）：触发即建了
+          //   任务（带 source 进分组），任务列表的数据必须立刻跟上——否则切到
+          //   任务页还是旧数据，新任务/新分组都看不见。
+          await Promise.all([loadIssues(), loadRuns()])
         } else {
           showToast(tx('schedules.updatedToast'))
         }
@@ -313,6 +319,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             body: JSON.stringify({}),
           })
           showToast(tx('schedules.savedAndTriggeredToast'))
+          await Promise.all([loadIssues(), loadRuns()])
         } else {
           showToast(tx('schedules.createdToast'))
         }
@@ -362,6 +369,8 @@ import type { WebTextId } from '@agentdeck/i18n'
       await api(`/api/schedules/${s.id}/trigger`, { method: 'POST' })
       showToast(tx('schedules.triggeredToast'))
       await load()
+      // ★ 2026-11（用户实测）：触发建的任务立即进任务列表（分组）——数据跟上
+      await Promise.all([loadIssues(), loadRuns()])
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err))
     }
