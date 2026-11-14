@@ -46,7 +46,10 @@
     vars?: Array<{ label: string; title: string }> | null
   } = $props()
 
-  let draft = ''
+  // ⚠️ runes 模式 `let draft = ''` 不是自动 $state（Svelte 5.57 实测：编译成普通
+  //   变量，赋值不触发任何模板更新——2026-11 用户「白底白字」就是它：draft 更新了
+  //   但高亮层/字数统计全不响应）。显式 $state 才会响应。
+  let draft = $state('')
   let ta: HTMLTextAreaElement | null = null
   let hlPre: HTMLPreElement | null = null
   let gutterPre: HTMLPreElement | null = null
@@ -185,7 +188,7 @@
 
       <div class="pe-status">
         <span>{lineNos.split('\n').length} {$t('editor.lines')}</span>
-        <span>{draft.length} {$t('editor.count')}</span>
+        <span>{$t('editor.count', { n: draft.length })}</span>
       </div>
     </div>
   </div>
