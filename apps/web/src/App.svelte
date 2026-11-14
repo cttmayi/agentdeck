@@ -13,6 +13,7 @@
   import Tools from './views/Tools.svelte'
   import Crystallize from './views/Crystallize.svelte'
   import Schedules from './views/Schedules.svelte'
+  import Workflows from './views/Workflows.svelte'
   import About from './views/About.svelte'
   import Settings from './views/Settings.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
@@ -23,6 +24,8 @@
     loadInbox,
     loadIssues,
     loadConversations,
+    loadWorkflows,
+    loadWorkflowRuns,
     loadRuns,
     loadSkills,
     loadTools,
@@ -56,6 +59,9 @@
       loadInbox(),
       // 对话列表也在首屏取：它是侧边栏第一项的页面，晚一步到会闪一下空态。
       loadConversations(),
+      // 编排（2026-11）：定义列表 + 运行实例（任务列表的编排徽标、编排页历史都要）。
+      loadWorkflows(),
+      loadWorkflowRuns(),
     ])
 
     // 同步循环独立于本机功能：远端挂了只影响侧边栏那一行状态
@@ -134,6 +140,10 @@
       <!-- ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
            左栏 = 定时任务列表，右栏 = 新建表单 / 详情（含触发记录）。 -->
       <Schedules />
+    {:else if $view === 'workflows'}
+      <!-- ★ 编排（2026-11，使用者立项）：代码控制的多智能体流程。
+           定义页在这里；`$workflowRun` 非空时右主区画「编排任务页」（子路由）。 -->
+      <Workflows />
     {:else if $view === 'settings'}
       <!-- ★ 设置（2026-11，使用者立项）：从右侧抽屉改主窗口视图——
            主题/语言/默认运行时/成本/远端能力全在这页。 -->

@@ -34,6 +34,7 @@
     stageShortId,
   } from '../lib/pipeline.ts'
   import { groupTasks } from '../lib/task-groups.ts'
+  import { workflowRuns } from '../lib/stores.ts'
   import RunLog from '../components/RunLog.svelte'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -249,6 +250,16 @@
   /** 点列表里的一条：如果右栏正开着表单，先按上面的规矩问一句。 */
   async function pickIssue(id: string): Promise<void> {
     if ($creating && !(await leaveCreate())) return
+    // ★ 编排任务（2026-11）：点开进**编排任务页**（步骤链 + 日志 + 工作目录树），
+    //   不进现有任务页的详情——编排任务不是"一条 run 的任务"，是"一串步骤"。
+    const issue = $issues.find((i) => i.id === id)
+    if (issue?.source?.kind === 'workflow') {
+      const run = $workflowRuns.find((r) => r.issueId === id)
+      if (run) {
+        location.hash = `#/workflows/run/${run.id}`
+        return
+      }
+    }
     selectedIssueId.set(id)
   }
 
@@ -776,6 +787,15 @@
    * 而不是丢进一个没有列表的孤立页面。
    */
   function selectFromBoard(issueId: string): void {
+    // 编排任务（2026-11）：看板点开也进**编排任务页**（与列表同一个落点）
+    const issue = $issues.find((i) => i.id === issueId)
+    if (issue?.source?.kind === 'workflow') {
+      const run = $workflowRuns.find((r) => r.issueId === issueId)
+      if (run) {
+        location.hash = `#/workflows/run/${run.id}`
+        return
+      }
+    }
     setMode('list')
     selectedIssueId.set(issueId)
   }
@@ -924,7 +944,9 @@
 
           完整标题在 `title`（悬停可见）和右栏详情里；列表是用来扫的。
       -->
-      <span class="task-title" title={issue.title}>{issue.title}</span>
+      <!-- ⚠️ 标题与徽标必须同一行：`{#if}` 块换行会在 textContent 里留前导空白，
+           探针按 `startsWith('探针用的任务')` 找夹具行（布局判据的入口）——踩过。 -->
+      <span class="task-title" title={issue.title}>{#if issue.source?.kind === 'workflow'}<span class="badge">{$t('workflows.taskBadge')}</span>{/if}{issue.title}</span>
       <span class="task-meta">
         <span class="stage-tag {info.stage}">{$t(stageShortId(info.stage))}</span>
         <!-- 只显示标签**之外**的信息（`note`）：「待审查」后面再跟一句

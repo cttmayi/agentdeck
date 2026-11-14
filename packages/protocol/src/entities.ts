@@ -829,11 +829,19 @@ export const Issue = z.object({
    *    undefined，前端统一按 `source?.kind === 'schedule'` 判断，两种缺法都安全）。
    */
   source: z
-    .object({
-      kind: z.literal('schedule'),
-      scheduleId: z.string(),
-      scheduleName: z.string(),
-    })
+    .discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('schedule'),
+        scheduleId: z.string(),
+        scheduleName: z.string(),
+      }),
+      // ★ 2026-11：编排任务（任务 = 编排运行实例；列表按此识别"来自编排"）。
+      z.object({
+        kind: z.literal('workflow'),
+        workflowId: z.string(),
+        workflowName: z.string(),
+      }),
+    ])
     .nullable()
     .default(null),
 })

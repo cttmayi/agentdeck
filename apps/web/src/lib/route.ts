@@ -36,6 +36,10 @@ export const VIEWS = [
   'crystallize',
   // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器，排沉淀之后。
   'schedules',
+  // ★ 编排（2026-11，使用者立项）：代码控制的多智能体编排——定义页在这里；
+  //   它的"运行画面"是子路由（`#/workflows/run/<runId>`，同 crystallize 模式），
+  //   不是又一个视图。排定时任务之后（同属"任务生成器"一类）。
+  'workflows',
   // ★ 设置（2026-11，使用者立项）：从右侧抽屉改为**主窗口视图**——主题/语言/
   //   默认运行时/成本/远端能力全在这页。排「关于」前面（设置是常用入口）。
   'settings',
@@ -66,6 +70,9 @@ export interface Route {
    * 与 `creating` 同构：`view` 决定住哪个视图，crystallize 决定右栏画什么。
    */
   crystallize: { runId: string } | null
+  /** 编排页（`workflows` 视图）此刻开着的运行画面（`#/workflows/run/<runId>`）。
+   *  非空 = 右主区在「编排任务页」；空 = 定义列表。与 crystallize 同构。 */
+  workflowRun: { runId: string } | null
 }
 
 /** 沉淀页选中某条的正规地址形态：`crystallize/<runId>`。 */
@@ -84,22 +91,27 @@ export const LEGACY_CRYSTALLIZE_RE = /^(chat|tasks)\/crystallize\/([0-9A-Za-z]+)
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '')
   // 沉淀页选中某条：先于普通视图匹配（`crystallize/…` 不是 VIEWS 里的一项）。
+  // 编排运行画面子路由：先于普通视图匹配（`workflows/run/…` 不是 VIEWS 里的一项）。
+  const wfRun = /^workflows\/run\/([0-9A-Za-z]+)$/.exec(raw)
+  if (wfRun) {
+    return { view: 'workflows', creating: false, crystallize: null, workflowRun: { runId: wfRun[1]! } }
+  }
   const crystal = CRYSTALLIZE_RE.exec(raw)
   if (crystal) {
-    return { view: 'crystallize', creating: false, crystallize: { runId: crystal[1]! } }
+    return { view: 'crystallize', creating: false, crystallize: { runId: crystal[1]! }, workflowRun: null }
   }
   // 旧子路由（聊天/任务右栏的流程页）：同样解析成沉淀视图，地址由 syncRoute 重定向。
   const legacy = LEGACY_CRYSTALLIZE_RE.exec(raw)
   if (legacy) {
-    return { view: 'crystallize', creating: false, crystallize: { runId: legacy[2]! } }
+    return { view: 'crystallize', creating: false, crystallize: { runId: legacy[2]! }, workflowRun: null }
   }
   // ⚠️ 两个地址都指向同一个状态：`tasks/new` 是正规写法，`new` 是 D58 之前那个
   //    「新建任务」整页的地址（当时它还是侧栏一项）。同义地址写两处会不会分叉？
   //    不会——它们在这里**就是同一行**，而 `hashFor()` 只吐正规那个。
-  if (raw === 'tasks/new' || raw === 'new') return { view: 'tasks', creating: true, crystallize: null }
+  if (raw === 'tasks/new' || raw === 'new') return { view: 'tasks', creating: true, crystallize: null, workflowRun: null }
   // 未知地址回落 `tasks`（D58 改的：原来回落到那个表单，而合并之后"任务"才是主场）
-  if (!(VIEWS as readonly string[]).includes(raw)) return { view: 'tasks', creating: false, crystallize: null }
-  return { view: raw as ViewName, creating: false, crystallize: null }
+  if (!(VIEWS as readonly string[]).includes(raw)) return { view: 'tasks', creating: false, crystallize: null, workflowRun: null }
+  return { view: raw as ViewName, creating: false, crystallize: null, workflowRun: null }
 }
 
 /**
@@ -107,9 +119,15 @@ export function parseHash(hash: string): Route {
  * 逐项钉住（`VIEWS` 里每一项都过一遍）。两处各写一份映射的后果是"点进去是 A、
  * 地址栏写着 B"，而刷新一下才发现。
  */
-export function hashFor(view: ViewName, opts: { creating?: boolean; crystallize?: { runId: string } } = {}): string {
+export function hashFor(
+  view: ViewName,
+  opts: { creating?: boolean; crystallize?: { runId: string }; workflowRun?: { runId: string } } = {},
+): string {
   // ⚠️ `crystallize` 只对沉淀视图成立：别的视图没有这个状态，传进来就当没传
   //    （与 `creating` 同一个处方，见下）。
+  if (opts.workflowRun && view === 'workflows') {
+    return `#/workflows/run/${opts.workflowRun.runId}`
+  }
   if (opts.crystallize && view === 'crystallize') {
     return `#/crystallize/${opts.crystallize.runId}`
   }

@@ -62,6 +62,25 @@ describe('task-groups', () => {
     assert.equal(groups[1]?.latest, 900)
   })
 
+  it('编排任务按编排分组（组头 = 编排名）', () => {
+    const groups = groupTasks(
+      [
+        item('w1', 7, { kind: 'workflow', workflowId: 'wf1', workflowName: '日报流水线' }),
+        item('m', 5, null),
+        item('w2', 3, { kind: 'workflow', workflowId: 'wf1', workflowName: '日报流水线' }),
+      ],
+      '手动创建',
+    )
+    assert.equal(groups.length, 2)
+    const wf = groups.find((g) => g.key === 'wf1')
+    assert.ok(wf)
+    assert.equal(wf.name, '日报流水线')
+    assert.deepEqual(wf.items.map((x) => x.issue.id), ['w1', 'w2'])
+    const manual = groups.find((g) => g.key === MANUAL_GROUP_KEY)
+    assert.ok(manual)
+    assert.deepEqual(manual.items.map((x) => x.issue.id), ['m'])
+  })
+
   it('空列表 → 空组', () => {
     assert.deepEqual(groupTasks([], '手动创建'), [])
   })

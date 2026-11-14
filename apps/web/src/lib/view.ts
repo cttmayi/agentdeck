@@ -57,6 +57,8 @@ export const VIEW_TITLE_KEYS = {
   crystallize: 'crystallize.navTitle',
   // ★ 定时任务（2026-11，使用者立项）：第八个视图，排沉淀之后。
   schedules: 'schedules.navTitle',
+  // ★ 编排（2026-11，使用者立项）：第十一个视图，排定时任务之后。
+  workflows: 'workflows.navTitle',
   // ★ 设置（2026-11，使用者立项）：从抽屉改主窗口视图，排「关于」前面。
   settings: 'settings.navTitle',
   // ★ 关于（2026-11，使用者立项）：第十个视图，排最后。
@@ -101,7 +103,15 @@ export const schedForm = writable<{ mode: 'create' } | { mode: 'edit'; id: strin
  */
 export const crystallize = writable<{ runId: string } | null>(parseHash(location.hash).crystallize)
 
-/** 读地址 → 写三个 store。地址是唯一出处，三个 store 只是它的三个投影。 */
+/**
+ * 编排页此刻开着的运行画面（`#/workflows/run/<runId>`）。
+ *
+ * ★ 与 crystallize 同构、同一个理由：运行画面是"切走还能回来、刷新还在"的一页
+ *   （执行中切到别处看文件、再切回来，画面还在），地址里才有这个信息。
+ */
+export const workflowRun = writable<{ runId: string } | null>(parseHash(location.hash).workflowRun)
+
+/** 读地址 → 写四个 store。地址是唯一出处，store 只是它的投影。 */
 function syncRoute(): void {
   // 旧子路由重定向（D80 三轮）：`#/chat/crystallize/<runId>` 与 `#/tasks/crystallize/<runId>`
   // 解析成沉淀视图的同一状态，但地址本身要写回正规形态——地址是唯一出处，不能让
@@ -116,6 +126,7 @@ function syncRoute(): void {
   view.set(route.view)
   creating.set(route.creating)
   crystallize.set(route.crystallize)
+  workflowRun.set(route.workflowRun)
 }
 
 // 浏览器前进/后退要跟着走——否则后退键看起来"没反应"

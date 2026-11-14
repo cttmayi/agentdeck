@@ -22,6 +22,8 @@ import {
   type TemplateBlock,
   type TemplateKit,
   type Tool,
+  type Workflow,
+  type WorkflowRun,
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
 import { setLocaleFromIdentity } from './i18n.ts'
@@ -176,6 +178,18 @@ export const loadIdentity = (): Promise<void> =>
 
 export const loadIssues = (): Promise<void> =>
   load('issues', async () => (await api<{ items: Issue[] }>('/api/issues?limit=200')).items ?? [], issues)
+
+// ── 编排（2026-11，使用者立项）──
+// 编排定义列表 + 运行实例列表（任务列表显示编排徽标、编排页历史都要它）。
+// 与 issues 同一条纪律：写动作成功后立即重拉（界面跟着数据走）。
+export const workflows = writable<Workflow[]>([])
+export const workflowRuns = writable<WorkflowRun[]>([])
+
+export const loadWorkflows = (): Promise<void> =>
+  load('workflows', async () => (await api<{ items: Workflow[] }>('/api/workflows')).items ?? [], workflows)
+
+export const loadWorkflowRuns = (): Promise<void> =>
+  load('workflowRuns', async () => (await api<{ items: WorkflowRun[] }>('/api/workflow-runs')).items ?? [], workflowRuns)
 
 export const loadAgents = (): Promise<void> =>
   load(

@@ -3515,6 +3515,48 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return true
         })()
 
+        // ── 编排（2026-11 立项）：定义页右栏可见 + 点「新建」表单出现 ──
+        //
+        //   与定时任务那条同款布局守卫：右栏（`.workflows-main`）必须 > 200px 宽；
+        //   点「新建」后表单出现（名字框 + 从模板胶囊 + 代码编辑框），空态文案在。
+        f.contentWindow.location.hash = '#/workflows'
+        await until(() => !!d().querySelector('.workflows-main'))
+        await wait(300)
+        facts['workflows.mainPaneWidth'] = await (async () => {
+          const right = d().querySelector('.workflows-main')
+          if (!right) {
+            errors.push('编排页右栏 .workflows-main 不存在')
+            return -1
+          }
+          const w = Math.round(right.getBoundingClientRect().width)
+          if (w < 200) {
+            errors.push(`编排页右栏被挤窄了（${w}px）——它应该占详情那列`)
+          }
+          return w
+        })()
+        facts['workflows.emptyStage'] = await (async () => {
+          // 空态：还没有编排时，右栏给「从模板」引导（新建是唯一入口）。
+          // ⚠️ 模板胶囊按钮的文字是模板名（如「单组流程」），不带"模板"字样——
+          //    引导是那条 hint（"从模板"）+ 模板按钮列表本身，两样都要在。
+          const hintOk = [...d().querySelectorAll('.workflows-main')].some((el) =>
+            (text(el) ?? '').includes('从模板'),
+          )
+          const tplBtns = d().querySelectorAll('.workflows-main .wf-tpl-row button').length
+          return hintOk && tplBtns >= 1
+        })()
+        facts['workflows.createFormOpens'] = await (async () => {
+          const newBtn = [...d().querySelectorAll('button')].find((b) => text(b) === '新建')
+          if (!newBtn) {
+            errors.push('编排页找不到「新建」按钮')
+            return false
+          }
+          click(newBtn)
+          await until(() => !!d().querySelector('.workflows-main textarea'), 60)
+          const nameInput = d().querySelector('.workflows-main input[type=text]')
+          const codeArea = d().querySelector('.workflows-main textarea')
+          return !!nameInput && !!codeArea
+        })()
+
         // ── 关于（2026-11 立项）：版本 · 环境 · 边界 ──
         f.contentWindow.location.hash = '#/about'
         await until(() => text(d().querySelector('.page-name')) === '关于')

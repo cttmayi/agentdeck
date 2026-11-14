@@ -1,7 +1,8 @@
 /**
  * 任务列表**分组**（2026-11，使用者立项，demo v3 拍板）。
  *
- * 同一来源（定时任务触发）的任务一组，手动创建（无 `source`）一组。
+ * 同一来源的任务一组（定时任务触发按定时任务、编排任务按编排），
+ * 手动创建（无 `source`）一组。
  *
  * 规则（拍板定稿，探针与单测一起钉住）：
  * · 组间按「组内最新任务时间」倒排——**手动创建组也参与**（不固定压底），
@@ -37,8 +38,19 @@ export function groupTasks<I extends { issue: Pick<Issue, 'source' | 'createdAt'
     const src = item.issue.source
     // ⚠️ `src &&` 而不是 `src?.`：TS 对 `src?.kind === 'schedule'` 不窄化
     //    （老数据 `source` 缺失 = undefined，`src?.scheduleId` 是 string|undefined）
-    const key = src && src.kind === 'schedule' ? src.scheduleId : MANUAL_GROUP_KEY
-    const name = src && src.kind === 'schedule' ? src.scheduleName : manualName
+    // ★ 2026-11 编排：编排任务也按来源分组（同"定时任务"语义——组头 = 编排名）。
+    const key =
+      src && (src.kind === 'schedule' || src.kind === 'workflow')
+        ? src.kind === 'schedule'
+          ? src.scheduleId
+          : src.workflowId
+        : MANUAL_GROUP_KEY
+    const name =
+      src && (src.kind === 'schedule' || src.kind === 'workflow')
+        ? src.kind === 'schedule'
+          ? src.scheduleName
+          : src.workflowName
+        : manualName
     const g = byKey.get(key)
     if (g) {
       g.items.push(item)

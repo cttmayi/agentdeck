@@ -183,8 +183,71 @@ export interface Issue {
   labels: string[]
   updatedAt: number
   createdAt: number
-  /** 来源（2026-11，任务列表分组）：定时任务触发的记「哪个定时任务」，手动为 null。 */
-  source: { kind: 'schedule'; scheduleId: string; scheduleName: string } | null
+  /** 来源（2026-11，任务列表分组）：定时任务触发的记「哪个定时任务」；编排任务记
+   *  「哪个编排」；手动为 null。 */
+  source:
+    | { kind: 'schedule'; scheduleId: string; scheduleName: string }
+    | { kind: 'workflow'; workflowId: string; workflowName: string }
+    | null
+}
+
+// ─────────────────────────────────────────────────────────────
+// 编排（2026-11，使用者立项："编排用代码控制，节点 = 智能体组"）
+// ─────────────────────────────────────────────────────────────
+
+/** 编排定义（一个有名字的代码脚本）。 */
+export interface Workflow {
+  id: string
+  name: string
+  code: string
+  source: 'template' | 'manual' | 'ai'
+  templateKey: string | null
+  inlineAgents: WorkflowInlineAgent[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** 编排内嵌智能体（只在编排里有效，不占智能体组页）。 */
+export interface WorkflowInlineAgent {
+  id: string
+  name: string
+  role: 'executor' | 'reviewer' | 'executor-no-review'
+  model: string | null
+  reviewStandard: string | null
+}
+
+/** 固定模板骨架（UI「从模板」入口的数据源）。 */
+export interface WorkflowTemplate {
+  key: string
+  name: string
+  code: string
+}
+
+/** 编排运行里的一步（一次"组跑" / 一个 gate 站）。 */
+export interface WorkflowStep {
+  seq: number
+  kind: 'flow' | 'parallel' | 'aggregate' | 'loop' | 'route' | 'gate'
+  label: string
+  nodeId: string | null
+  prompt: string | null
+  runIds: string[]
+  gateText: string | null
+  status: 'pending' | 'running' | 'done' | 'failed' | 'waiting-human' | 'skipped'
+  startedAt: number | null
+  finishedAt: number | null
+}
+
+/** 编排运行实例（一次运行；挂在任务 issue 上）。 */
+export interface WorkflowRun {
+  id: string
+  issueId: string
+  workflowId: string
+  workDir: string | null
+  status: 'queued' | 'running' | 'paused' | 'waiting-human' | 'done' | 'failed'
+  steps: WorkflowStep[]
+  error: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 /**

@@ -95,6 +95,18 @@ import {
   type ScheduleRecord,
 } from './schedules.ts'
 import {
+  WORKFLOW_TEMPLATES,
+  executeWorkflow,
+  loadWorkflowRuns,
+  loadWorkflows,
+  saveWorkflowRuns,
+  saveWorkflows,
+  type EngineHooks,
+  type Workflow,
+  type WorkflowRun,
+  type WorkflowStep,
+} from './workflows.ts'
+import {
   ensureBuiltinAgentMakerSkills,
   migratePlatformSkillsToExclusive,
 } from './agent-maker-skills.ts'
@@ -2284,6 +2296,32 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   // 写在 `schedules.ts` 顶部。内存数组是唯一权威（routes 与 fire 都改它，
   // 每次变更落盘一次）。
   const schedules: Schedule[] = await loadSchedules(options.dataDir)
+
+  // ══════════════════════════════════════════════════════════════════
+  // ── 编排（2026-11，使用者立项）──
+  // ══════════════════════════════════════════════════════════════════
+  // 存储是独立 JSON（`<dataDir>/workflows.json` / `workflow-runs.json`），
+  // 不进 domain store——判据写在 `workflows.ts` 顶部。内存数组是唯一权威
+  // （routes 与引擎都改它，每次变更落盘一次）。
+  const workflows: Workflow[] = await loadWorkflows(options.dataDir)
+  const workflowRuns: WorkflowRun[] = await loadWorkflowRuns(options.dataDir)
+
+  async function persistWorkflowRuns(): Promise<void> {
+    await saveWorkflowRuns(options.dataDir, workflowRuns)
+  }
+  function workflowById(id: string): Workflow | undefined {
+    return workflows.find((w) => w.id === id)
+  }
+  function workflowRunById(id: string): WorkflowRun | undefined {
+    return workflowRuns.find((r) => r.id === id)
+  }
+
+  /** 暂停等待器：pause 时引擎在每个步骤边界挂起；resume 时全部放行。 */
+  const resumeWaiters = new Set<() => void>()
+  /** gate 等待器：waiting-human 时引擎挂起；confirm 时放行（按 run id）。 */
+  const gateWaiters = new Map<string, () => void>()
+
+
   /** 已注册的 croner job（按 schedule id）；启停/更新/删除时同步。 */
   const scheduleJobs = new Map<string, Cron>()
   // fire 定义在后面（需要 submitRunRequest）；这里先声明占位，避免"注册时
@@ -2966,6 +3004,7 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
   const probe2 = await backend.probe()
 
   const workspaceId = await bootstrap(store, info)
+
 
   // ══════════════════════════════════════════════════════════════════
   /**
@@ -4036,6 +4075,111 @@ async function injectedSkillsOf(
   })
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+        /**
+         * 启动一次编排运行（后台 async，逐步执行；调用方立即返回，不阻塞请求）。
+         *
+         * ⚠️ 引擎的 submit 回调**只接受组名 / 内嵌智能体名**——节点解析后交给
+         * `submitRunRequest`（组展开/校验/起进程全在那里），编排代码永远无法指定
+         * 任意 workDir 的 run——安全边界与定时任务一致。
+         *
+         * ⚠️ 定义在 `handle` 里：submitRunRequest / extractSubmitError 都是 handle 的
+         * 嵌套函数（10141 起），放外层启动函数会"找不到名字"（实测踩过）。
+         */
+        async function launchWorkflowRun(run: WorkflowRun): Promise<void> {
+          const wf = workflowById(run.workflowId)
+          if (!wf) {
+            run.status = 'failed'
+            run.error = '编排不存在或已被删除'
+            await persistWorkflowRuns()
+            return
+          }
+          const groups = await store.listGroups(workspaceId)
+          const groupByName = new Map(groups.map((g) => [g.name as string, g]))
+
+          // 每步的 submit：解析节点 → 提交一次"组跑"（或内嵌智能体纯执行）。
+          const submitStep: NonNullable<EngineHooks['submit']> = async (step, prompt) => {
+            const node = step.nodeId
+            if (!node) return { ok: false, runId: null, error: '步骤没有节点' }
+            const runId = ulid() as RunId
+            let agentRef: SubmitRunRequest['agentRef']
+            let groupId: string | undefined
+            if (node.startsWith('inline:')) {
+              // 内嵌智能体（一期）：按名字引用**现有智能体**当执行者，纯执行
+              // （无审核、无动作——不建组也能用编排跑一步）。
+              const agentName = node.slice('inline:'.length)
+              const agents = await store.listAgents(workspaceId)
+              const agent = agents.find((a) => (a.name as string) === agentName)
+              if (!agent) return { ok: false, runId: null, error: `内嵌智能体不存在：${agentName}` }
+              agentRef = { id: agent.id as AgentId, name: agent.name as string, instructions: agent.instructions ?? '' }
+            } else {
+              const group = groupByName.get(node)
+              if (!group) return { ok: false, runId: null, error: `智能体组不存在：${node}` }
+              const members = await store.listAgents(group.workspaceId)
+              const shape = checkGroupShape(
+                group,
+                members.filter((a) => group.members.includes(a.id as AgentGroup['members'][number])),
+              )
+              if (!shape.ok) return { ok: false, runId: null, error: `组形态不合法：${shape.issues.join('；')}` }
+              agentRef = {
+                id: shape.executor.id,
+                name: shape.executor.name,
+                instructions: shape.executor.instructions,
+              }
+              groupId = group.id as AgentGroupId
+            }
+            const out = await submitRunRequest({
+              runId,
+              kind: 'execute',
+              agentRef,
+              subject: { type: 'issue', id: run.issueId as Issue['id'] },
+              prompt,
+              ...(groupId ? { groupId } : {}),
+              // 编排任务的工作目录：发起时设定（与「新建任务」同款：null = daemon 自动分配）
+              ...(run.workDir ? { workDir: run.workDir } : {}),
+              limits: { maxTurns: null, timeoutMs: null },
+            })
+            const ok = out.status >= 200 && out.status < 300
+            if (ok) return { ok: true, runId }
+            return { ok: false, runId: null, error: extractSubmitError(out.body) ?? '提交失败' }
+          }
+
+          const hooks: EngineHooks = {
+            persist: async () => {
+              await persistWorkflowRuns()
+            },
+            waitIfPaused: () =>
+              run.status === 'paused'
+                ? new Promise<void>((resolve) => {
+                    // 只在**确实暂停了**才挂起等待——直接返回 promise 会让每一步
+                    // 永远卡在边界（实测踩过：step 停在 pending、引擎不前进）。
+                    resumeWaiters.add(resolve)
+                  })
+                : Promise.resolve(),
+            waitForGateConfirm: (step) =>
+              new Promise<void>((resolve) => {
+                gateWaiters.set(run.id, () => {
+                  step.status = 'done'
+                  step.finishedAt = Date.now()
+                  resolve()
+                })
+              }),
+            submit: submitStep,
+          }
+
+          void executeWorkflow(run, wf.code, hooks).then(async (finished) => {
+            if (finished.status === 'done') {
+              // 全部跑完：任务收尾（跟手动作业同一个落点——issue 变 completed）
+              const issue = await store.getIssue(finished.issueId as Issue['id'])
+              if (issue) {
+                await store.transitionIssue(issue.id, issue.status, 'done')
+              }
+            }
+            await persistWorkflowRuns()
+          }).catch((err: unknown) => {
+            // ⚠️ 不能让它变成 unhandled rejection——Node 会直接打崩进程（实测踩过）。
+            warn(`编排运行收尾失败：${String(err)}`)
+          })
+        }
     const url = new URL(req.url ?? '/', 'http://localhost')
     const host = req.headers.host ?? ''
 
@@ -6703,6 +6847,224 @@ async function injectedSkillsOf(
       }
       await fireSchedule(s)
       sendJson(res, 200, { ok: true, records: s.records })
+      return
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ── 编排（2026-11，使用者立项："编排用代码控制，节点 = 智能体组"）──
+    // ══════════════════════════════════════════════════════════════════
+    // 定义 CRUD + 发起运行 + 运行控制（暂停/续跑/确认/重试步骤）。
+    // 执行画面在「编排任务页」（独立页面，不破坏现有任务页——使用者拍板）。
+
+    if (req.method === 'GET' && path === '/api/workflows') {
+      sendJson(res, 200, { items: workflows })
+      return
+    }
+    // 固定模板清单（新建编排「从模板」入口的数据源）。
+    if (req.method === 'GET' && path === '/api/workflows/templates') {
+      sendJson(res, 200, { items: WORKFLOW_TEMPLATES })
+      return
+    }
+    if (req.method === 'POST' && path === '/api/workflows') {
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const name = typeof body.name === 'string' ? body.name.trim() : ''
+      if (name === '') {
+        sendJson(res, 400, { error: '编排名字必填', code: 'workflow_name_missing' })
+        return
+      }
+      const code = typeof body.code === 'string' ? body.code : ''
+      if (code === '') {
+        sendJson(res, 400, { error: '编排代码不能为空', code: 'workflow_code_missing' })
+        return
+      }
+      const templateKey = typeof body.templateKey === 'string' ? body.templateKey : null
+      const now = Date.now()
+      const wf: Workflow = {
+        id: ulid() as Workflow['id'],
+        workspaceId,
+        name,
+        code,
+        source: templateKey ? 'template' : 'manual',
+        templateKey,
+        inlineAgents: [],
+        createdAt: now,
+        updatedAt: now,
+      }
+      workflows.push(wf)
+      await saveWorkflows(options.dataDir, workflows)
+      sendJson(res, 201, { workflow: wf })
+      return
+    }
+    const workflowDetail = /^\/api\/workflows\/([^/]+)$/.exec(path)
+    if (req.method === 'GET' && workflowDetail) {
+      const wf = workflowById(workflowDetail[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      sendJson(res, 200, { workflow: wf })
+      return
+    }
+    if (req.method === 'PUT' && workflowDetail) {
+      const wf = workflowById(workflowDetail[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      if (typeof body.name === 'string' && body.name.trim() !== '') wf.name = body.name.trim()
+      if (typeof body.code === 'string' && body.code !== '') wf.code = body.code
+      wf.updatedAt = Date.now()
+      await saveWorkflows(options.dataDir, workflows)
+      sendJson(res, 200, { workflow: wf })
+      return
+    }
+    if (req.method === 'DELETE' && workflowDetail) {
+      const idx = workflows.findIndex((x) => x.id === workflowDetail[1])
+      if (idx < 0) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      workflows.splice(idx, 1)
+      await saveWorkflows(options.dataDir, workflows)
+      sendJson(res, 200, { ok: true })
+      return
+    }
+    // 发起运行：建任务（issue）+ 运行实例，后台逐步执行。
+    const workflowRunPath = /^\/api\/workflows\/([^/]+)\/run$/.exec(path)
+    if (req.method === 'POST' && workflowRunPath) {
+      const wf = workflowById(workflowRunPath[1]!)
+      if (!wf) {
+        sendJson(res, 404, { error: '编排不存在', code: 'workflow_not_found' })
+        return
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>
+      const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+      const title = prompt.split('\n')[0]!.slice(0, 80) || wf.name
+      const now = Date.now()
+      const issue: Issue = {
+        id: ulid() as Issue['id'],
+        workspaceId,
+        title,
+        description: prompt,
+        status: 'todo',
+        priority: 'none',
+        assignee: null,
+        labels: [],
+        createdAt: now,
+        updatedAt: now,
+        source: { kind: 'workflow', workflowId: wf.id, workflowName: wf.name },
+      }
+      await store.insertIssue(issue)
+      const run: WorkflowRun = {
+        id: ulid() as WorkflowRun['id'],
+        issueId: issue.id,
+        workflowId: wf.id,
+        workDir: typeof body.workDir === 'string' ? body.workDir : null,
+        status: 'queued',
+        steps: [],
+        error: null,
+        createdAt: now,
+        updatedAt: now,
+      }
+      workflowRuns.push(run)
+      await persistWorkflowRuns()
+      // 后台执行（不 await——请求立即返回；前端轮询 run 状态看进度）
+      void launchWorkflowRun(run)
+      sendJson(res, 201, { run, issueId: issue.id })
+      return
+    }
+
+    // ── 编排运行实例（执行画面在「编排任务页」）──
+    if (req.method === 'GET' && path === '/api/workflow-runs') {
+      sendJson(res, 200, { items: workflowRuns })
+      return
+    }
+    const workflowRunDetail = /^\/api\/workflow-runs\/([^/]+)$/.exec(path)
+    if (req.method === 'GET' && workflowRunDetail) {
+      const run = workflowRunById(workflowRunDetail[1]!)
+      if (!run) {
+        sendJson(res, 404, { error: '运行不存在', code: 'workflow_run_not_found' })
+        return
+      }
+      sendJson(res, 200, { run })
+      return
+    }
+    const workflowRunCtrl = /^\/api\/workflow-runs\/([^/]+)\/(pause|resume|confirm|retry-step)$/.exec(path)
+    if (req.method === 'POST' && workflowRunCtrl) {
+      const run = workflowRunById(workflowRunCtrl[1]!)
+      if (!run) {
+        sendJson(res, 404, { error: '运行不存在', code: 'workflow_run_not_found' })
+        return
+      }
+      const action = workflowRunCtrl[2]!
+      if (action === 'pause') {
+        if (run.status !== 'running') {
+          sendJson(res, 400, { error: '只能暂停运行中的编排', code: 'workflow_run_not_running' })
+          return
+        }
+        run.status = 'paused'
+        run.updatedAt = Date.now()
+        await persistWorkflowRuns()
+        sendJson(res, 200, { ok: true, run })
+        return
+      }
+      if (action === 'resume') {
+        if (run.status !== 'paused') {
+          sendJson(res, 400, { error: '只能恢复已暂停的编排', code: 'workflow_run_not_paused' })
+          return
+        }
+        run.status = 'running'
+        run.updatedAt = Date.now()
+        await persistWorkflowRuns()
+        // 放行引擎（步骤边界的 waitIfPaused 挂起在这里被解除）
+        for (const resolve of resumeWaiters) resolve()
+        resumeWaiters.clear()
+        sendJson(res, 200, { ok: true, run })
+        return
+      }
+      if (action === 'confirm') {
+        // gate 确认：把 waiting-human 的 gate 步骤标记 done，放行引擎
+        const gateStep = run.steps.find((x) => x.status === 'waiting-human' && x.kind === 'gate')
+        if (!gateStep) {
+          sendJson(res, 400, { error: '没有在等待确认的 gate', code: 'workflow_gate_not_waiting' })
+          return
+        }
+        gateStep.status = 'done'
+        gateStep.finishedAt = Date.now()
+        run.status = 'running'
+        run.updatedAt = Date.now()
+        await persistWorkflowRuns()
+        const release = gateWaiters.get(run.id)
+        if (release) {
+          gateWaiters.delete(run.id)
+          release()
+        }
+        sendJson(res, 200, { ok: true, run })
+        return
+      }
+      if (action === 'retry-step') {
+        // 重试失败步骤：把 failed 步骤重置成 pending，重跑代码
+        // （幂等：done 步骤跳过；重试的这步从 pending 重新提交）
+        if (run.status !== 'failed') {
+          sendJson(res, 400, { error: '只有失败的编排能重试步骤', code: 'workflow_run_not_failed' })
+          return
+        }
+        for (const st of run.steps) {
+          if (st.status === 'failed') {
+            st.status = 'pending'
+            st.finishedAt = null
+          }
+        }
+        run.status = 'running'
+        run.error = null
+        run.updatedAt = Date.now()
+        await persistWorkflowRuns()
+        void launchWorkflowRun(run)
+        sendJson(res, 200, { ok: true, run })
+        return
+      }
+      sendJson(res, 400, { error: '未知控制动作', code: 'workflow_run_bad_action' })
       return
     }
 
