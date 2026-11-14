@@ -523,12 +523,13 @@ describe('六列的定义', () => {
     //   执行中 → 待审查 → 行动中 → 等待人处理 → 已完成审查
     // "待人工"与"行动失败"都是**卡在你手里**那一档——还没结束，所以在"已审查"前面。
     //
-    // ★ D47：「已放弃」在最后，但它**不是流水线的下一站**——它是人的一个判断
-    //   （"我不管它了"），与"越来越接近结束"无关。放在末尾是为了让它看得见但不
-    //   占注意力，不是为了让它读起来像终点。
+    // ★ 2026-11 精简（使用者："太多了，精简一下，同步看板也精简"）：六列并三列，
+    //   列序仍是"从左往右越来越接近结束"——进行中 → 待处理 → 已结束。
+    //   「已放弃」与「已审查」一起收在最后一列（D47 决策保留：它不是流水线的
+    //   下一站，是人的判断；列里仍可见，只是不再单独一列）。
     assert.deepEqual(
       PIPELINE_COLUMNS.map((c) => c.ids[0]),
-      ['executing', 'awaiting_review', 'action_running', 'needs_human', 'reviewed', 'abandoned'],
+      ['executing', 'awaiting_review', 'reviewed'],
     )
   })
 
@@ -551,10 +552,14 @@ describe('六列的定义', () => {
     assert.equal(inColumns.length, all.length, '一档只能出现在一列里')
   })
 
-  test('★ 「等待人处理」那一列同时收 needs_human 与 action_failed', () => {
+  test('★ 「待处理」列同时收 awaiting_review / needs_human / action_failed（都要你过目）', () => {
     const col = PIPELINE_COLUMNS.find((c) => c.ids.includes('needs_human'))
     assert.ok(col)
-    assert.deepEqual([...col.ids], ['needs_human', 'action_failed'], '两者下一步都是等人')
+    assert.deepEqual(
+      [...col.ids],
+      ['awaiting_review', 'needs_human', 'action_failed'],
+      '一个是等审核判决、两个是判决后要你介入/动作失败——都要你过目，并成一列',
+    )
   })
 
   test('每列各有标题与说明', () => {

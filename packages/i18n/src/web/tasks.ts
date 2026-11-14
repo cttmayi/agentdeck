@@ -133,13 +133,21 @@ export const tasksText = {
 
   // ── 阶段：看板列头、表格短标签、行内提示 ─────────────────────────────
   // ⚠️ 列头（`tasks.col.*`）与表格里的短标签（`term.stage.*`）**分开**：
-  //    「已完成执行 · 待审查」塞进表格单元格会把那一列撑开、把标题挤没。
-  'tasks.col.executing.title': { zh: '正在执行', en: 'Executing' },
-  'tasks.col.executing.hint': { zh: '智能体正在干活', en: 'the agent is working' },
-  'tasks.col.awaiting_review.title': { zh: '已完成执行 · 待审查', en: 'Executed · awaiting review' },
-  'tasks.col.awaiting_review.hint': { zh: '等审核给出判决', en: 'waiting for the review verdict' },
-  'tasks.col.action_running.title': { zh: '行动中', en: 'Acting' },
-  'tasks.col.action_running.hint': { zh: '判决要求做一件事，平台正在做', en: 'the verdict asked for something and the platform is doing it' },
+  //   列头是**粗分组**（2026-11 精简后只有三列：进行中 / 待处理 / 已结束），
+  //   短标签才是每一档的名字（卡片/行内显示它，列内仍分得出"执行中 vs 行动中"）。
+  // ★ 2026-11 精简（使用者：「太多了，精简一下，同步看板也精简」）：六列并三列，
+  //   旧六组词条（executing/awaiting_review/action_running/needs_human/reviewed/
+  //   abandoned 的 title/hint）随列一起删——死键 i18n.test 会拦。
+  'tasks.col.ongoing.title': { zh: '进行中', en: 'Ongoing' },
+  'tasks.col.ongoing.hint': {
+    zh: '平台正在推进（执行或执行判决要求的动作）',
+    en: 'the platform is working (executing or running the verdict’s action)',
+  },
+  'tasks.col.pending.title': { zh: '待处理', en: 'Pending' },
+  'tasks.col.pending.hint': {
+    zh: '要你过目：等审核判决，或判决要你介入/动作失败',
+    en: 'needs you: awaiting the verdict, or the verdict asked for you / the action failed',
+  },
   'tasks.noteActionRunning': { zh: '正在执行判决要求的动作', en: 'Running the action the verdict asked for' },
   'tasks.actionFailed': { zh: '失败原因：{reason}', en: 'Why it failed: {reason}' },
   // 2026-11（使用者："任务里面，不需要显示「这次由谁审」"）：整个区连同四句词条
@@ -152,19 +160,10 @@ export const tasksText = {
     zh: '行动失败 —— 这一条要你处理（详情见这条审核的记录）',
     en: 'The action failed — this one is on you (see this review’s record)',
   },
-  'tasks.col.needs_human.title': { zh: '等待人处理', en: 'Needs a human' },
-  'tasks.col.needs_human.hint': {
-    zh: '判决要求人介入，卡在你这里',
-    en: 'the verdict asks for a human — it is blocked on you',
-  },
-  'tasks.col.reviewed.title': { zh: '已完成审查', en: 'Reviewed' },
-  'tasks.col.reviewed.hint': { zh: '判决已经产出', en: 'the verdict is in' },
-  // ★ D47：这一列**不是流水线的一站**（见 `PIPELINE_COLUMNS` 里的注释）。
-  //   提示语要说出"它还能回来"，否则这一列看起来像个垃圾桶。
-  'tasks.col.abandoned.title': { zh: '已放弃', en: 'Dropped' },
-  'tasks.col.abandoned.hint': {
-    zh: '你决定不管它了 · 还能恢复',
-    en: 'you decided not to bother · recoverable',
+  'tasks.col.finished.title': { zh: '已结束', en: 'Finished' },
+  'tasks.col.finished.hint': {
+    zh: '不再动了：审查已出判决，或你决定不管它了（还能恢复）',
+    en: 'no longer moving: the verdict is in, or you dropped it (recoverable)',
   },
 
   // 行内 note：只给标签**之外**的信息（与标签重复的字样不要说）。

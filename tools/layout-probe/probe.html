@@ -1755,11 +1755,13 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           await wait(120)
         }
 
-        // 状态筛选：点「待审查」→ 只剩待审行（或无结果显示空态——两种都符合
-        //   "只留待审查"）；组头计数跟筛后数量走；切回「全部」。
+        // 状态筛选：点「待处理」→ 只剩待处理列的行（或无结果显示空态——两种都
+        //   符合"筛掉不该看的"）；组头计数跟筛后数量走；切回「全部」。
+        //   ★ 2026-11 精简后 chips 是三档（进行中/待处理/已结束），"只看待审查"
+        //     的习惯落在「待处理」档上（待审查 + 待人工都收在那一列）。
         {
           const chips = [...d().querySelectorAll('.list-pane .stage-chips button')]
-          const waitChip = chips.find((b) => text(b).includes('待审查'))
+          const waitChip = chips.find((b) => text(b).includes('待处理'))
           const allChip = chips.find((b) => text(b).includes('全部'))
           if (waitChip && allChip) {
             click(waitChip)
@@ -1768,7 +1770,9 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
               (r) => r.style.display !== 'none',
             )
             const allWait = visibleRows.every((r) =>
-              [...r.querySelectorAll('.stage-tag')].some((t) => text(t).includes('待审查')),
+              [...r.querySelectorAll('.stage-tag')].some((t) =>
+                ['待审查', '等待人处理', '行动失败'].some((w) => text(t).includes(w)),
+              ),
             )
             const emptyShown = !!d().querySelector('.list-pane .empty')
             facts['tasks.stageFilterWorks'] = allWait && (visibleRows.length > 0 || emptyShown)
@@ -2227,11 +2231,11 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           await until(() => d().querySelectorAll('.list-pane .task-row').length > 0)
         }
 
-        // ── 看板：四档状态，且"待人工"排在"已审查"之前 ──
+        // ── 看板：三列（2026-11 使用者精简拍板）──
         //
-        //   使用者反馈过「审查的结论是 needs_human，被标为已审查，不合理」——
-        //   修法是把它单独列一档。这条守住：列本身在，且顺序是"从左往右越来越
-        //   接近结束"（待人工还没结束，所以它在已审查前面）。
+        //   ★ 2026-11（使用者："太多了，精简一下，同步看板也精简"）：六列并三列
+        //   （进行中 / 待处理 / 已结束）。列合并的是**粗分组**，卡片仍显示具体
+        //   档（`term.stage.*` 短标签），所以"行动中/待人工/已放弃"依然看得见。
         //
         //   ⚠️ 放在本视图**最后**：切看板会让列表重新渲染，前面那些"抓住元素
         //      再点"的断言会拿到已脱离文档的旧节点而失败（实测踩到过）。
@@ -2243,8 +2247,8 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
           click(toBoard)
           await until(() => d().querySelectorAll('.column').length > 0)
           facts['tasks.boardColumnCount'] = d().querySelectorAll('.column').length
-          facts['tasks.boardHasActingColumn'] = [...d().querySelectorAll('.column h4')].some((h) =>
-            (h.textContent ?? '').includes('行动中'),
+          facts['tasks.boardHasOngoingColumn'] = [...d().querySelectorAll('.column h4')].some((h) =>
+            (h.textContent ?? '').includes('进行中'),
           )
           facts['tasks.boardColumns'] = [...d().querySelectorAll('.column h4')].map((h) =>
             (h.textContent ?? '').trim().split('\n')[0].trim(),

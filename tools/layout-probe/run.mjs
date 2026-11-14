@@ -1176,25 +1176,26 @@ const CHECKS = [
     view: '任务',
     key: 'tasks.boardColumnCount',
     label:
-      '★ 看板是**六档**状态（执行中 / 待审查 / 行动中 / 等待人处理 / 已完成审查 / 已放弃，D47）',
-    ok: (v) => v === 6,
+      '★ 看板是**三列**（2026-11 使用者精简拍板：进行中 / 待处理 / 已结束——六列太多）',
+    ok: (v) => v === 3,
     show: (v) => `${v} 列`,
   },
   {
     view: '任务',
-    key: 'tasks.boardHasActingColumn',
-    label: '★ 「行动中」有自己的一列（判决要求做的动作还没做完时不再显示成"已审查"）',
+    key: 'tasks.boardHasOngoingColumn',
+    label: '★ 「进行中」列在（执行中 + 行动中合并——两者都是平台在动，卡片仍显示具体档）',
     ok: (v) => v === true,
   },
   {
     view: '任务',
     key: 'tasks.boardColumns',
-    label: '★ 「待人工」排在「已审查」之前——从左往右越来越接近结束',
+    label: '★ 列序是进行中 → 待处理 → 已结束——从左往右越来越接近结束',
     ok: (v) =>
       Array.isArray(v) &&
-      v.some((t) => t.includes('等待人处理')) &&
-      v.findIndex((t) => t.includes('等待人处理')) <
-        v.findIndex((t) => t.includes('已完成审查')),
+      v.length === 3 &&
+      v[0].includes('进行中') &&
+      v[1].includes('待处理') &&
+      v[2].includes('已结束'),
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   { view: '任务', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
@@ -4011,18 +4012,16 @@ const CHECKS = [
   {
     view: '语言切换',
     key: 'lang.boardColumnsInEn',
-    label: '★ 看板六个列头都翻（`titleId`），一个中文字都不剩',
+    label: '★ 看板三个列头都翻（`titleId`），一个中文字都不剩',
     ok: (v) =>
-      Array.isArray(v) &&
-      v.length === 6 &&
-      v.join('|') === 'Executing|Executed · awaiting review|Acting|Needs a human|Reviewed|Dropped',
+      Array.isArray(v) && v.length === 3 && v.join('|') === 'Ongoing|Pending|Finished',
   },
   {
     view: '语言切换',
     key: 'lang.boardHintsInEn',
     label: '★ 列说明也翻（`hintId`）',
     ok: (v) =>
-      Array.isArray(v) && v.length === 6 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
+      Array.isArray(v) && v.length === 3 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
   },
   {
     view: '语言切换',

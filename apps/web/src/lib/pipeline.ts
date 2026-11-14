@@ -645,50 +645,41 @@ export const PIPELINE_COLUMNS: ReadonlyArray<{
   /**
    * 这一列收哪些 stage。
    *
-   * ⚠️ 是**数组**：一列可以收两档（「等待人处理」同时收 `needs_human` 与
-   *    `action_failed`——两者下一步都是等人）。用数组而不是"给某档一个别名"，
+   * ⚠️ 是**数组**：一列可以收多档。用数组而不是"给某档一个别名"，
    *    是因为阶段推导那边必须是**一档一个事实**，列只是它的展示分组。
+   *
+   * ★ 2026-11 精简（使用者：「太多了，精简一下，同步看板也精简」）：
+   *   六列并成三列——**进行中 / 待处理 / 已结束**。
+   *   合并理由与代价写在下面，别把历史当噪音删掉：
+   *   · 「行动中」曾因"判决一产出就显示成已审查"而单独拆列（D40）——那场
+   *     事故的本质是"还在做"和"做完了"长得一样。现在并入「进行中」：
+   *     执行与动作都是**平台在动**，对使用者"这条还在跑"的观感一致，拆列
+   *     的区分度收益小于三列带来的整洁。
+   *   · 「待人工」（needs_human + action_failed）并入「待处理」：与「待审查」
+   *     一样是**要你过目**（一个是等审核判决、一个是判决后要你介入/动作失败）。
+   *   · 「已放弃」并入「已结束」（D47 决策保留：它由 issue 状态决定、盖过
+   *     run 推导，不是流水线的一站；列里仍可见，只是与「已审查」一起收在
+   *     最右）。
+   *   ⚠️ 合并的是**列**，不是档：卡片与行内仍显示具体 stage（`term.stage.*`
+   *     短标签），「进行中」卡片仍能看出"执行中 vs 行动中"。
    */
   ids: readonly Stage[]
   titleId: WebTextId
   hintId: WebTextId
 }> = [
-  { ids: ['executing'], titleId: 'tasks.col.executing.title', hintId: 'tasks.col.executing.hint' },
   {
-    ids: ['awaiting_review'],
-    titleId: 'tasks.col.awaiting_review.title',
-    hintId: 'tasks.col.awaiting_review.hint',
+    ids: ['executing', 'action_running'],
+    titleId: 'tasks.col.ongoing.title',
+    hintId: 'tasks.col.ongoing.hint',
   },
-  // ★ D40 起「行动中」单独一列：判决一产出就显示"已审查"的那段日子，
-  //   把"还在做"和"做完了"显示成了同一个样子。
   {
-    ids: ['action_running'],
-    titleId: 'tasks.col.action_running.title',
-    hintId: 'tasks.col.action_running.hint',
+    ids: ['awaiting_review', 'needs_human', 'action_failed'],
+    titleId: 'tasks.col.pending.title',
+    hintId: 'tasks.col.pending.hint',
   },
-  // ★ 这一列在"行动中"之后、"已审查"之前：从左往右是"越来越接近结束"，
-  //   而"待人工"是**卡在你手里**那一档——还没结束，所以它在"已审查"前面。
-  //
-  //   ⚠️ 它同时收 **两个** stage：`needs_human`（判决自己说要人介入）与
-  //   `action_failed`（判决要求的动作失败了）。两者下一步动作完全一样——
-  //   **等人来看一眼**——所以并在一列；卡片上写清是哪一种。分成两列的唯一
-  //   好处是更整齐，代价是看板从 5 列变 6 列、每列挤到读不了。
   {
-    ids: ['needs_human', 'action_failed'],
-    titleId: 'tasks.col.needs_human.title',
-    hintId: 'tasks.col.needs_human.hint',
-  },
-  { ids: ['reviewed'], titleId: 'tasks.col.reviewed.title', hintId: 'tasks.col.reviewed.hint' },
-  /**
-   * ★ D47：「已放弃」**不在流水线上**，所以它排在最后、与"越来越接近结束"无关。
-   *
-   * 它是人的一个判断（"这条我不管了"），不是流程走过的一站——一条被放弃的任务
-   * 可能一条 run 都没跑完。放在末尾是为了让它**看得见但不占注意力**：它会退出
-   * 「需要注意」那一拨（`stageOf` 把 warning 清掉了），但不会被藏起来。
-   */
-  {
-    ids: ['abandoned'],
-    titleId: 'tasks.col.abandoned.title',
-    hintId: 'tasks.col.abandoned.hint',
+    ids: ['reviewed', 'abandoned'],
+    titleId: 'tasks.col.finished.title',
+    hintId: 'tasks.col.finished.hint',
   },
 ]
