@@ -294,13 +294,8 @@ export const agentsText = {
    *   核对徽标、会话、版本支持判定全部去掉（使用者点名"其他都不需要"）。
    *   那些判定仍然活在 `--verify-runtime` 的输出里，一条没丢。
    */
-  'agents.runtimeLocal': { zh: '本机 CLI', en: 'CLI on this machine' },
-  'agents.runtimeIntro': {
-    zh: '这台机器上装着的 CLI 与版本。',
-    en: 'CLIs installed on this machine, with versions.',
-  },
-  'agents.runtimeReady': { zh: '已就绪', en: 'Ready' },
-  'agents.runtimeNotFound': { zh: '未找到', en: 'Not found' },
+  // 2026-11（使用者点名去掉）：智能体页底部「本机 CLI」概览整块删除——CLI 名 +
+  //   版本号列表搬去了「关于」页（运行环境区）。词条跟着删，不留死键。
 
   // ── NewAgentForm.svelte ──
   /**

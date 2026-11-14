@@ -911,19 +911,6 @@ const CHECKS = [
   },
   {
     view: '智能体',
-    key: 'agents.runtimeCardCount',
-    label: 'Runtime 概览渲染成卡片',
-    ok: (v) => v >= 1,
-    show: (v) => `${v} 张`,
-  },
-  {
-    view: '智能体',
-    key: 'agents.runtimeCardsWellFormed',
-    label: '每张 runtime 卡都至少有一行（名字+版本还在）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '智能体',
     key: 'agents.noPageIntro',
     label: '★ 智能体页**没有**页头导语（D63 按要求去掉："这里配置每个智能体…"——那句在复述卡片已经在说的话）',
     ok: (v) => v === true,
@@ -944,12 +931,6 @@ const CHECKS = [
     view: '智能体',
     key: 'common.noHintStacking',
     label: '提示文字不叠加两档字号（`hint faint small` 那种写法已清掉）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '智能体',
-    key: 'agents.runtimeCardMinimal',
-    label: 'CLI 卡极简：只剩「claude + 版本」，核对/会话/版本支持那些行全没了',
     ok: (v) => v === true,
   },
   {
@@ -1639,12 +1620,6 @@ const CHECKS = [
     view: '关于（2026-11）',
     key: 'about.diagnosticsCollapsed',
     label: '★ 「诊断」区默认折叠（排查版本错位才展开）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '关于（2026-11）',
-    key: 'about.sidebarEnvKept',
-    label: '★ 侧栏底部环境状态块仍在（详情移入关于页，入口不删）',
     ok: (v) => v === true,
   },
   { view: '定时任务（D115）', key: 'schedules.mainPaneWidth',

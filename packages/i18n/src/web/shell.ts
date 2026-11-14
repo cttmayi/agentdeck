@@ -44,16 +44,9 @@ export const shellText = {
   // 2026-11（使用者：每个列表的宽度要能拖动）：列表栏拖动把手的无障碍标签。
   'shell.resizeList': { zh: '拖动调整列表宽度', en: 'Drag to resize list' },
 
-  'shell.envOk': { zh: '运行环境正常', en: 'Environment OK' },
-  'shell.envNoCli': { zh: '未检测到 agent CLI', en: 'No agent CLI detected' },
-  'shell.envMissing': { zh: '未检测到 {command}', en: '{command} not found' },
-  'shell.envReady': { zh: '{command} {version}', en: '{command} {version}' },
-  'shell.envReadyNoVersion': { zh: '{command} 已就绪', en: '{command} ready' },
-  'shell.envIssueCount': { zh: '· {count} 个环境问题', en: '· {count} environment issue(s)' },
-  'shell.syncError': { zh: '同步异常', en: 'Sync error' },
-  'shell.syncedCount': { zh: '已上报 {count}', en: 'Reported {count}' },
-  'shell.syncedQueued': { zh: '· 暂存 {count}', en: '· {count} queued' },
-  'shell.neverSynced': { zh: '尚未同步', en: 'Not synced yet' },
+  // 2026-11（使用者点名去掉）：侧栏底部「运行环境状态」（设备名 + CLI 版本 +
+  //   同步状态）整块删除——这些搬去了「关于」页（运行环境区 / 存储-远端同步区）。
+  //   词条跟着删，不留死键。
 
   'shell.inbox': { zh: '通知', en: 'Inbox' },
   'shell.settings': { zh: '设置', en: 'Settings' },

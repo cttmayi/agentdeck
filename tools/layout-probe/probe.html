@@ -1434,26 +1434,8 @@
         f.style.width = '1280px'
         await wait(300)
 
-        // ── Runtime 概览（原来六列表格，现在是竖排卡片）──
-        const rc = () => [...d().querySelectorAll('.runtime-card')]
-        facts['agents.runtimeCardCount'] = rc().length
-        facts['agents.runtimeCardsWellFormed'] =
-          rc().length > 0 && rc().every((c) => c.querySelectorAll('.runtime-line').length >= 1)
-
-        // ★ 2026-10 极简（使用者点名"只显示 claude 2.0.14，其他都不需要"）：
-        //    每张卡**只**有「CLI 名 + 版本」，不再有核对/会话/版本支持那些行。
-        facts['agents.runtimeCardMinimal'] = need('CLI 卡只剩名字与版本', () => {
-          const card = rc().find((c) => text(c).includes('claude'))
-          if (!card) return false
-          const t = text(card)
-          const noExtras =
-            !t.includes('会话') &&
-            !t.includes('核对') &&
-            !t.includes('声明支持') &&
-            !t.includes('没有写明')
-          return noExtras
-        })
-
+        // 2026-11（使用者点名去掉）：智能体页「本机 CLI」概览（runtime-card）整块
+        // 删除——CLI 列表搬去「关于」页（about.cliList 判据）。这里不再钉卡片。
         // ★ 2026-10（D63）：智能体页的页头导语**按要求去掉了**（"这里配置每个
         //   智能体：它的指令、行动权限，以及由谁来审它。"——它是在复述下面卡片
         //   已经在说的话）。原来这里钉的是"必须有导语"（`common.pageIntros`），
@@ -3456,9 +3438,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           errors.push('关于页「诊断」区没有默认折叠（details 应无 open）')
         }
 
-        // ⑥ 侧栏底部状态块还在（环境入口不因详情移走而消失）
-        facts['about.sidebarEnvKept'] = !!d().querySelector('.sidebar .env')
-
+        // ⑥（2026-11 使用者点名去掉）侧栏底部环境状态块已删——入口与详情都
+        //    只留「关于」页一处（不再有两处，见 Sidebar.svelte 的注释）。
         f.contentWindow.location.hash = '#/tools'
         await until(() => text(d().querySelector('.page-name')) === '工具')
 

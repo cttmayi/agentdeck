@@ -1,7 +1,6 @@
 <script lang="ts">
   import { leaveCreate } from '../lib/leave-create.ts'
-  import { creating, view, go, VIEWS, openDrawer } from '../lib/view.ts'
-  import { identity, syncStatus } from '../lib/stores.ts'
+  import { creating, view, go, VIEWS } from '../lib/view.ts'
   import { t } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
 
@@ -69,18 +68,6 @@
     if (id === 'tasks' && $creating && !(await leaveCreate())) return
     go(id)
   }
-
-  /**
-   * ══════════════════════════════════════════════════════════════════
-   * 环境状态从**顶栏**挪到侧栏底部
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 设备名、CLI 版本、证据等级原来常驻顶栏 —— 那条带子是界面上最显眼的位置，
-   * 而这三样是**偶尔才看**的诊断信息（排查"agent 为什么没跑起来"时）。常驻
-   * 在那里会把"去哪儿"和"我是谁"挤到边上。
-   *
-   * 挪到侧栏底部之后仍然**一眼可见**（有异常时点一下变红），点开就是设置抽屉。
-   */
 </script>
 
 <nav class="sidebar">
@@ -96,46 +83,4 @@
       <span class="nav-hint">{$t(item.hint)}</span>
     </button>
   {/each}
-
-  <div class="sidebar-foot">
-    {#if $identity}
-      {@const rt = $identity.runtimes.find((r) => r.key === $identity?.currentRuntime) ?? $identity.runtimes[0] ?? null}
-      {@const envIssues = $identity.environment?.issues ?? []}
-      {@const problem = envIssues.length > 0 || (rt !== null && !rt.available)}
-      <button
-        type="button"
-        class="env"
-        onclick={() => openDrawer.set('settings')}
-        title={envIssues.map((i) => i.summary).join('；') || $t('shell.envOk')}
-      >
-        <span class="env-dot" class:bad={problem}></span>
-        <span class="env-body">
-          <span class="env-line">{$identity.deviceName}</span>
-          <span class="faint fs-xs">
-            {#if rt === null}
-              {$t('shell.envNoCli')}
-            {:else if !rt.available}
-              {$t('shell.envMissing', { command: rt.command })}
-            {:else if rt.cliVersion}
-              {$t('shell.envReady', { command: rt.command, version: rt.cliVersion })}
-            {:else}
-              {$t('shell.envReadyNoVersion', { command: rt.command })}
-            {/if}
-            {#if envIssues.length > 0}{$t('shell.envIssueCount', { count: envIssues.length })}{/if}
-          </span>
-        </span>
-      </button>
-    {/if}
-
-    {#if $syncStatus?.error}
-      <div class="faint fs-xs" title={$syncStatus.error}>{$t('shell.syncError')}</div>
-    {:else if $syncStatus}
-      <div class="faint fs-xs">
-        {$t('shell.syncedCount', { count: $syncStatus.reported })}
-        {#if $syncStatus.queued > 0}{$t('shell.syncedQueued', { count: $syncStatus.queued })}{/if}
-      </div>
-    {:else}
-      <div class="faint fs-xs">{$t('shell.neverSynced')}</div>
-    {/if}
-  </div>
 </nav>

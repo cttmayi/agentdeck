@@ -440,43 +440,12 @@
         {/if}
       </ul>
     {/snippet}
-    {#snippet bottom()}
-      {#if $identity}
-        <!--
-          Runtime 概览：窄栏里不再用六列表格（那会只剩横向滚动条），改成一格
-          一张卡——字段一个不少，只是竖着排。
-
-          ⚠️ 这一块是**给使用者看的**，所以只说人话（2026-09 改写）：原来它把描述表的
-          内部取值（`provisional` / `verified` / `undeclared` / `stateful`）、需求编号
-          FR-CLI-07、以及 `pnpm run daemon --verify-runtime all` 一起摆在界面上——
-          那些词对读界面的人不构成信息（而且 `**实测过**` 的强调号是原样显示出来的）。
-          机器取值仍在 `--verify-runtime` 的输出里，那一份是给开发者的。
-          ★ 2026-10 再简化（使用者点名）：卡片只显示「CLI 名 + 版本号」，
-            核对/会话/版本支持判定一律不画。判定数据仍在 `--verify-runtime` 里。
-        -->
-        <section class="runtime-block">
-          <h3>{$t('agents.runtimeLocal')}</h3>
-          <p class="hint">{$t('agents.runtimeIntro')}</p>
-
-          {#each $identity.runtimes as r (r.key)}
-            <!--
-              ★ 2026-10 极简：每张卡**只**显示「CLI 名 + 版本号」（如
-                 `gpt-4o` → `gpt-4o`；若探测不到版本就显示 ready 态）。
-            -->
-            <div class="runtime-card">
-              <div class="runtime-line">
-                <code>{r.key}</code>
-                {#if r.available}
-                  <span class="faint fs-xs">{r.cliVersion ?? $t('agents.runtimeReady')}</span>
-                {:else}
-                  <span class="bad fs-xs">{$t('agents.runtimeNotFound')}</span>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        </section>
-      {/if}
-    {/snippet}
+    <!--
+      ★ 2026-11（使用者点名去掉）：「本机 CLI」概览（runtime-block）整块删除——
+      CLI 名 + 版本号的列表搬去了「关于」页的「运行环境」区（`views/About.svelte`，
+      `/api/identity` 的 `runtimes` 同一份数据）。列表顶部环境预检问题（env-issues）
+      保留：它提示"CLI 状态目录写不进去"这类方向性错误，是排障提示不是展示。
+    -->
   </ListPane>
 
   <!--
@@ -647,29 +616,4 @@
     margin-bottom: var(--sp-2);
   }
 
-  /* ══════════════ Runtime ══════════════ */
-
-  .runtime-block h3 {
-    font-size: var(--fs-sm);
-    margin-bottom: var(--sp-2);
-  }
-
-  .runtime-block .hint {
-    margin-bottom: var(--sp-3);
-  }
-
-  .runtime-card {
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    padding: var(--sp-3);
-    margin-bottom: var(--sp-2);
-  }
-
-  .runtime-line {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
 </style>
