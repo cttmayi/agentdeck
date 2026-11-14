@@ -109,11 +109,11 @@
     formError = ''
     const name = formName.trim()
     if (name === '') {
-      formError = tx('workflows.nameLabel')
+      formError = tx('workflows.nameRequired')
       return
     }
     if (formCode.trim() === '') {
-      formError = tx('workflows.codeLabel')
+      formError = tx('workflows.codeRequired')
       return
     }
     busy = true
@@ -160,6 +160,19 @@
     runError = ''
     runBusy = true
     try {
+      // ★ 运行用**已保存的代码**（daemon 按 workflowId 读库）——编辑器里有未保存的
+      //   改动（formCode !== selected.code）先保存再运行。2026-11 使用者实操踩过：
+      //   把模板默认节点「组A」改成自己的组名后没点「保存」直接点「运行」，跑的是
+      //   旧代码、报「组A 不存在」——界面看起来"运行没按我写的来"。
+      if (selected && formCode !== selected.code) {
+        await save()
+        if (formError !== '' || !selectedId) {
+          // 保存失败（名字/代码为空等）：错误显示在运行表单里（表单区的 notice
+          // 被 modal 盖住看不见，这里带过来）
+          runError = formError
+          return
+        }
+      }
       const out = await api<{ run: WorkflowRun }>(`/api/workflows/${selectedId}/run`, {
         method: 'POST',
         body: JSON.stringify({

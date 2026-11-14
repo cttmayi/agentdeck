@@ -16,6 +16,8 @@ export const workflowsText = {
   'workflows.empty': { zh: '还没有编排。用一个模板起步，或直接写代码。', en: 'No workflows yet. Start from a template, or write code.' },
   'workflows.templatesLabel': { zh: '从模板', en: 'From template' },
   'workflows.nameLabel': { zh: '名字', en: 'Name' },
+  'workflows.nameRequired': { zh: '先给编排起个名字', en: 'Give the workflow a name first' },
+  'workflows.codeRequired': { zh: '编排代码不能为空', en: 'Workflow code cannot be empty' },
   'workflows.namePlaceholder': { zh: '如：日报流水线', en: 'e.g. Daily pipeline' },
   'workflows.codeLabel': { zh: '编排代码', en: 'Workflow code' },
   'workflows.codePlaceholder': { zh: "await flow('组A', '要做什么')", en: "await flow('Group A', 'what to do')" },
