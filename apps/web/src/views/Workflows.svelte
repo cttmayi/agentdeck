@@ -33,6 +33,7 @@
   import DirPicker from '../components/DirPicker.svelte'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
   import { relativeTime } from '../lib/time.ts'
+  import { workflowRunStatusClass, workflowRunStatusKey } from '../lib/run-status.ts'
 
   // ── 新建/编辑表单 ──
   let formMode: 'create' | 'edit' = 'create'
@@ -186,21 +187,6 @@
         : 'workflows.sourceManual'
   }
 
-  function runStatusKey(s: WorkflowRun['status']): WebTextId {
-    const map: Record<string, WebTextId> = {
-      queued: 'workflows.runStatusQueued',
-      running: 'workflows.runStatusRunning',
-      paused: 'workflows.runStatusPaused',
-      'waiting-human': 'workflows.runStatusWaitingHuman',
-      done: 'workflows.runStatusDone',
-      failed: 'workflows.runStatusFailed',
-    }
-    return map[s] ?? 'workflows.runStatusQueued'
-  }
-
-  function runStatusClass(s: WorkflowRun['status']): string {
-    return s === 'done' ? 'done' : s === 'failed' ? 'failed' : s === 'waiting-human' ? 'warn' : ''
-  }
 </script>
 
 {#if $workflowRun}
@@ -342,7 +328,7 @@
           </div>
 
           {#if history.length > 0}
-            <h3 style="margin-top:var(--sp-4)">{$t('workflows.stepsTitle')}</h3>
+            <h3 class="wf-history-head">{$t('workflows.stepsTitle')}</h3>
             <ul class="list-stack">
               {#each history as r (r.id)}
                 <ListRow
@@ -351,7 +337,7 @@
                 >
                   {#snippet children()}
                     <span class="wf-title">
-                      <span class="badge {runStatusClass(r.status)}">{$t(runStatusKey(r.status))}</span>
+                      <span class="badge {workflowRunStatusClass(r.status)}">{$t(workflowRunStatusKey(r.status))}</span>
                       <span class="mono">{r.id.slice(-6)}</span>
                     </span>
                     <span class="wf-sub">
@@ -376,22 +362,28 @@
           <h2>{$t('workflows.runFormTitle')}</h2>
           <p class="hint">{selected.name}</p>
         </div>
-        <div class="modal-body" style="padding:var(--sp-4)">
+        <div class="modal-body">
           <div class="field">
             <label>{$t('workflows.promptLabel')}</label>
             <textarea rows="4" bind:value={runPrompt} placeholder={$t('workflows.promptPlaceholder')}></textarea>
           </div>
           <div class="field">
             <label>{$t('workflows.workDirLabel')}</label>
-            <div class="wf-dir-row">
+            <!-- 与「新建任务」「定时任务」同一个控件（.workdir-row + 浏览… + DirPicker）：
+                 输入框始终留着（手打永远可用），选择框是"看见目录里有什么"的入口。 -->
+            <div class="workdir-row">
               <input
                 type="text"
                 bind:value={runWorkDir}
                 placeholder={$t('workflows.workDirAuto')}
                 autocomplete="off"
+                spellcheck="false"
               />
-              <DirPicker bind:open={runDirPickerOpen} bind:value={runWorkDir} />
+              <button type="button" class="btn btn--ghost" onclick={() => (runDirPickerOpen = true)}>
+                {$t('dirs.browse')}
+              </button>
             </div>
+            <DirPicker bind:open={runDirPickerOpen} bind:value={runWorkDir} />
           </div>
           {#if runError}
             <div class="notice bad">{runError}</div>
@@ -411,14 +403,24 @@
 {/if}
 
 <style>
+  /* 列表行两行结构（311/312 批纪律，与 .sched-title/.sched-sub 同款）：
+     第一行标题（单行省略五件套）、第二行辅助信息（显式字色/字号 + 单行省略）——
+     不写 color/font-size 就会从行里继承，两页的辅助信息颜色不一致。 */
   .wf-title {
+    display: block;
+    max-width: 100%;
     font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .wf-sub {
     display: flex;
-    gap: var(--sp-2);
-    align-items: center;
-    flex-wrap: wrap;
+    gap: 0.6rem;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    overflow: hidden;
+    white-space: nowrap;
   }
   .wf-tpl-row {
     display: flex;
@@ -426,12 +428,7 @@
     flex-wrap: wrap;
     margin-bottom: var(--sp-3);
   }
-  .wf-dir-row {
-    display: flex;
-    gap: var(--sp-2);
-    align-items: center;
-  }
-  .wf-dir-row input {
-    flex: 1;
+  .wf-history-head {
+    margin-top: var(--sp-4);
   }
 </style>

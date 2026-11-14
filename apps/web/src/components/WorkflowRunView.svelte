@@ -17,6 +17,13 @@
   import { t } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
   import { api, type WorkflowRun, type WorkflowStep } from '../lib/api.ts'
+  import {
+    workflowRunStatusClass,
+    workflowRunStatusKey,
+    workflowStepStatusClass,
+    workflowStepStatusKey,
+    workflowStepKindKey,
+  } from '../lib/run-status.ts'
   import { issues } from '../lib/stores.ts'
   import { go } from '../lib/view.ts'
   import RunLog from './RunLog.svelte'
@@ -71,45 +78,6 @@
     }
   }
 
-  function runStatusKey(s: WorkflowRun['status']): WebTextId {
-    const map: Record<string, WebTextId> = {
-      queued: 'workflows.runStatusQueued',
-      running: 'workflows.runStatusRunning',
-      paused: 'workflows.runStatusPaused',
-      'waiting-human': 'workflows.runStatusWaitingHuman',
-      done: 'workflows.runStatusDone',
-      failed: 'workflows.runStatusFailed',
-    }
-    return map[s] ?? 'workflows.runStatusQueued'
-  }
-
-  function statusKey(s: WorkflowStep['status']): WebTextId {
-    const map: Record<string, WebTextId> = {
-      pending: 'workflows.stepPending',
-      running: 'workflows.stepRunning',
-      done: 'workflows.stepDone',
-      failed: 'workflows.stepFailed',
-      'waiting-human': 'workflows.stepWaitingHuman',
-      skipped: 'workflows.stepPending',
-    }
-    return map[s] ?? 'workflows.stepPending'
-  }
-
-  function statusClass(s: WorkflowStep['status']): string {
-    return s === 'done' ? 'done' : s === 'failed' ? 'failed' : s === 'waiting-human' ? 'warn' : ''
-  }
-
-  function kindLabel(k: WorkflowStep['kind']): WebTextId {
-    const map: Record<string, WebTextId> = {
-      flow: 'workflows.stepKindFlow',
-      parallel: 'workflows.stepKindParallel',
-      aggregate: 'workflows.stepKindAggregate',
-      loop: 'workflows.stepKindLoop',
-      route: 'workflows.stepKindRoute',
-      gate: 'workflows.stepKindGate',
-    }
-    return map[k] ?? 'workflows.stepKindFlow'
-  }
 </script>
 
 <div class="wf-run-layout">
@@ -121,8 +89,8 @@
       <h2>{issue?.title ?? runId.slice(0, 8)}</h2>
       <p class="hint">
         {#if run}
-          <span class="badge {run.status === 'done' ? 'done' : run.status === 'failed' ? 'failed' : run.status === 'waiting-human' ? 'warn' : ''}">
-            {$t(runStatusKey(run.status))}
+          <span class="badge {workflowRunStatusClass(run.status)}">
+            {$t(workflowRunStatusKey(run.status))}
           </span>
           {#if run.error}
             <span class="wf-error">{$t('workflows.runStatusFailed')}: {run.error}</span>
@@ -150,7 +118,7 @@
   {#if error && !run}
     <div class="notice bad">{error}</div>
   {:else if !run}
-    <div class="skeleton" style="height:3rem"></div>
+    <div class="skeleton"></div>
   {:else}
     <div class="wf-run-main">
       <!-- ══════════ 左：步骤链 ══════════ -->
@@ -165,8 +133,8 @@
                 <span class="wf-step-seq mono">{st.seq}</span>
                 <span class="wf-step-main">
                   <span class="wf-step-label">
-                    <span class="badge {statusClass(st.status)}">{$t(statusKey(st.status))}</span>
-                    <span class="faint">{$t(kindLabel(st.kind))}</span>
+                    <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
+                    <span class="faint">{$t(workflowStepKindKey(st.kind))}</span>
                   </span>
                   <span class="wf-step-text">{st.label}</span>
                   {#if st.gateText}
@@ -201,7 +169,7 @@
       </section>
 
       <!-- ══════════ 右：工作目录树（按任务设定，各步同一目录） ══════════ -->
-      <aside class="result-files">
+      <aside class="wf-workdir">
         <h4>{$t('workflows.workDirTitle')}</h4>
         {#if activeRunId}
           <WorkDirTree base={`/api/runs/${activeRunId}`} reloadKey={activeRunId} />
@@ -281,8 +249,16 @@
     gap: var(--sp-2);
   }
   .wf-error {
-    color: var(--danger);
+    color: var(--bad);
     font-size: var(--fs-sm);
     margin-left: var(--sp-2);
+  }
+  .wf-workdir {
+    border-left: 1px solid var(--line);
+    padding-left: var(--sp-4);
+    overflow-y: auto;
+  }
+  .wf-workdir h4 {
+    margin: 0 0 var(--sp-2);
   }
 </style>
