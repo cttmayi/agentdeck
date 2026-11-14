@@ -1598,6 +1598,12 @@ const CHECKS = [
   },
   {
     view: '关于（2026-11）',
+    key: 'about.twoColumns',
+    label: '★ 关于页**两列**（使用者拍板"关于也改成 2 列"）——六卡流式两列',
+    ok: (v) => v === true,
+  },
+  {
+    view: '关于（2026-11）',
     key: 'about.cliList',
     label: '★ 运行环境区**罗列侦测到的 CLI**（含 claude + 版本；不强调"当前"）',
     ok: (v) => v.hasClaude === true && v.hasVersion === true,

@@ -44,6 +44,9 @@
 {:else}
   {@const id = $identity}
 
+  <!-- ★ 2026-11（使用者拍板"关于也改成 2 列"）：六卡流式两列，与设置页同款规则 -->
+  <div class="ab-grid">
+
   <!-- ① 应用 -->
   <section class="ab-card" data-ab-app>
     <h2>{$t('about.app')}</h2>
@@ -182,16 +185,23 @@
     <div class="ab-row"><span class="ab-k">{$t('about.docsUiStyle')}</span><span class="ab-v">{$t('about.docsUiStyleHint')}</span></div>
     <p class="ab-note">{$t('about.docsNote')}</p>
   </section>
+
+  </div>
 {/if}
 
 <style>
   /* 关于页布局（页面专属；控件样式不进这里——见 ui-style.md §2） */
+  .ab-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-4);
+    align-items: start;
+  }
   .ab-card {
     background: var(--surface);
     border: 1px solid var(--surface-2);
     border-radius: var(--radius);
     padding: var(--sp-4) var(--sp-5);
-    margin-bottom: var(--sp-4);
   }
   .ab-card h2 {
     font-size: var(--fs-md);

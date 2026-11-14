@@ -3399,6 +3399,12 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
         await until(() => !!d().querySelector('[data-ab-app]'), 40)
 
         // ① 六个区都在（应用/运行环境/存储/安全/诊断/文档）
+        // ★ 2026-11（使用者拍板"关于也改成 2 列"）：六卡流式两列（与设置页同款）
+        const aboutGrid = d().querySelector('.ab-grid')
+        facts['about.twoColumns'] = !!(
+          aboutGrid &&
+          getComputedStyle(aboutGrid).gridTemplateColumns.split(' ').length === 2
+        )
         facts['about.sections'] = [
           '[data-ab-app]', '[data-ab-env]', '[data-ab-storage]',
           '[data-ab-security]', '[data-ab-diagnostics]', '[data-ab-docs]',
