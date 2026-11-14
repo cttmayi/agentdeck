@@ -3235,6 +3235,17 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
             errors.push(`promptEditor：保存/插入不对：before=${JSON.stringify(before)}、保存后 ${JSON.stringify(afterSave)}、插入后 ${JSON.stringify(withVar)}`)
             return false
           }
+          // ★ 2026-11（使用者："刚编辑完，点开，里面是空的，重新打开又是好的"）：
+          //   保存后**立刻**重开弹层，内容必须在（第一次打开空 = 快照没落上）
+          click(expand)
+          await until(() => !!d().querySelector('.schedules-main .pe-panel'), 40)
+          const reopenValue = d().querySelector('.schedules-main .pe-textarea').value
+          click(d().querySelector('.schedules-main .pe-actions .btn--ghost'))
+          await until(() => !d().querySelector('.schedules-main .pe-panel'), 40)
+          if (reopenValue !== afterSave) {
+            errors.push(`promptEditor：保存后重开为空：重开 ${JSON.stringify(reopenValue)} vs 保存后 ${JSON.stringify(afterSave)}`)
+            return false
+          }
           return true
         })()
 

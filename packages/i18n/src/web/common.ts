@@ -15,8 +15,10 @@ import type { TextCatalog } from '../text.ts'
  */
 export const commonText = {
   'common.save': { zh: '保存', en: 'Save' },
-  // 2026-11：PromptEditor 大编辑器入口（编辑框右下角的展开按钮）
+  // 2026-11：PromptEditor 大编辑器（入口按钮 + 弹层内部）
   'editor.expand': { zh: '展开编辑', en: 'Expand editor' },
+  'editor.count': { zh: '{n} 字', en: '{n} chars' },
+  'editor.shortcut': { zh: '⌘/Ctrl + Enter 保存 · Esc 取消', en: '⌘/Ctrl + Enter save · Esc cancel' },
   'common.saving': { zh: '保存中…', en: 'Saving…' },
   'common.cancel': { zh: '取消', en: 'Cancel' },
   'common.close': { zh: '关闭', en: 'Close' },

@@ -1114,13 +1114,6 @@
             {/if}
           </div>
           </span>
-          <PromptEditor
-            open={instructionsEditorOpen}
-            title={$t('agents.instructionsLabel')}
-            value={draft.instructions}
-            onSave={(v) => (draft.instructions = v)}
-            onCancel={() => (instructionsEditorOpen = false)}
-          />
           {#if legacyStandardPending}
             <!-- ★ 编辑态**只提示**（按钮在只读态，理由见只读态那段注释：搬移会清空
                  `skillIds`，而草稿里还留着旧的那份 ⇒ 保存会把挂载写回去，正文被投递两遍）。 -->
@@ -1130,6 +1123,15 @@
           {/if}
         </label>
 
+        <!-- 2026-11：大编辑器弹层放 label **外面**（fixed 定位的遮罩不该在
+             label 的盒子里，避免 label 点击/焦点行为波及弹层） -->
+        <PromptEditor
+          open={instructionsEditorOpen}
+          title={$t('agents.instructionsLabel')}
+          value={draft.instructions}
+          onSave={(v) => (draft.instructions = v)}
+          onCancel={() => (instructionsEditorOpen = false)}
+        />
 
         <div class="cell skills-cell" class:locked={agent.builtin}>
           <span class="cell-label">{$t('agents.attachedSkillsLabel')}</span>
