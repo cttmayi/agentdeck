@@ -2845,6 +2845,29 @@ describe('编排：步骤等组跑真正完成（2026-11 修复）', () => {
       const early = await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)
       assert.equal(early.run.status, 'running', '发起后编排应立即是 running，不是瞬间 done')
 
+      // ② 等第一步**带着 runId**登记（executeWorkflow 异步开始、第一步提交）——
+      //   必须发生在**组跑 running 期间**（中栏 RunLog 实时可看；修复前 runId
+      //   要等组跑结束才写进步骤，运行期间中栏一直"还没开始跑"）。修复前的
+      //   代码：runIds 直到组跑完成才出现，命中时 run 已是 done——下面那个
+      //   running 断言会失败，测试照样能分辨。
+      let seen: { run: { status: string; steps: Array<{ runIds: string[] }> } } | null = null
+      for (let i = 0; i < 40; i++) {
+        const snap = await get<{ run: { status: string; steps: Array<{ runIds: string[] }> } }>(
+          `/api/workflow-runs/${rid}`,
+        )
+        if (snap.run.steps.length >= 1 && snap.run.steps[0]!.runIds.length >= 1) {
+          seen = snap
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      assert.ok(seen, '第一步应在运行期间带着 runId 登记进步骤链')
+      assert.equal(
+        seen!.run.status,
+        'running',
+        'runId 必须出现在组跑 running 期间（不是等它跑完才补上）',
+      )
+
       // ② 轮询到编排 done（最多 10s——慢后端 400ms × 1 步）
       let fin: { run: { status: string; steps: Array<{ runIds: string[] }> } } | null = null
       for (let i = 0; i < 40; i++) {

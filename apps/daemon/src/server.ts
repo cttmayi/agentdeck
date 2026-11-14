@@ -4158,6 +4158,13 @@ async function injectedSkillsOf(
             })
             const ok = out.status >= 200 && out.status < 300
             if (ok) {
+              // ★ 组跑在跑（可能几分钟）——**先把 runId 挂到步骤上**：运行画面轮询
+              //   workflow-runs 时，中栏 RunLog 才能实时显示这条 run 的日志。
+              //   以前 runId 要等 submit 返回（= 组跑结束）才写进步骤，运行期间
+              //   中栏一直"还没开始跑"（使用者："步骤右边一直没有东西"）。
+              //   引擎 runStep 返回后还会 push 一次——那里有 includes 去重。
+              if (!step.runIds.includes(runId)) step.runIds.push(runId)
+              await hooks.persist(run)
               // ★ 2026-11：**等这步的组跑真正跑完**再算完成。提交返回 202 只表示
               //   "run 已创建"，不表示跑完了——以前把 202 当完成，5 步编排 120ms
               //   全标 done、agent 其实还在跑（使用者："瞬间就执行完毕了，我怀疑

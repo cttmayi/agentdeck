@@ -186,6 +186,10 @@
 
         {#if activeRunId}
           <RunLog runId={activeRunId} fill />
+        {:else if run?.status === 'running' && currentStep?.kind === 'parallel'}
+          <!-- 并行子步的 runId 引擎不实时挂到主步骤（并行运行期间主步骤 runIds
+               为空）——给个明确的"进行中"提示，而不是误导的"还没开始跑"。 -->
+          <p class="hint">{$t('workflows.parallelRunning')}</p>
         {:else}
           <p class="hint">{$t('workflows.noRunYet')}</p>
         {/if}
@@ -196,6 +200,8 @@
         <h4>{$t('workflows.workDirTitle')}</h4>
         {#if activeRunId}
           <WorkDirTree base={`/api/runs/${activeRunId}`} reloadKey={activeRunId} />
+        {:else if run?.status === 'running' && currentStep?.kind === 'parallel'}
+          <p class="hint">{$t('workflows.parallelRunning')}</p>
         {:else}
           <p class="hint">{$t('workflows.noRunYet')}</p>
         {/if}

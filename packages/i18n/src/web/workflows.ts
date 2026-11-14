@@ -66,6 +66,7 @@ export const workflowsText = {
   'workflows.retryStep': { zh: '重试此步', en: 'Retry step' },
   'workflows.workDirTitle': { zh: '工作目录', en: 'Work directory' },
   'workflows.noRunYet': { zh: '还没开始跑', en: 'Not started yet' },
+  'workflows.parallelRunning': { zh: '并行子步进行中', en: 'Parallel steps running' },
 
   // ── 任务列表徽标（Tasks.svelte 里编排任务的标记）──
   'workflows.taskBadge': { zh: '编排', en: 'Workflow' },
