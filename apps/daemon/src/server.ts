@@ -4114,10 +4114,21 @@ async function injectedSkillsOf(
           const groups = await store.listGroups(workspaceId)
           const groupByName = new Map(groups.map((g) => [g.name as string, g]))
 
+          // ★ 2026-11 任务参数化：发起运行时填的任务描述（= issue.description）
+          //   替换步骤任务里的 `{{task}}` 占位符。编排 = 流程剧本（怎么跑写死），
+          //   具体任务每次运行传入——模板/代码里写 `{{task}}`，运行时就变成
+          //   这次填的内容（使用者拍板："流程写死、任务动态传入"）。
+          const taskIssue = await store.getIssue(run.issueId as Issue['id'])
+          const taskPrompt = taskIssue?.description ?? ''
+
           // 每步的 submit：解析节点 → 提交一次"组跑"（或内嵌智能体纯执行）。
           const submitStep: NonNullable<EngineHooks['submit']> = async (step, prompt) => {
             const node = step.nodeId
             if (!node) return { ok: false, runId: null, error: '步骤没有节点' }
+            // 占位符替换（先于一切使用 prompt 的地方；步骤链上登记的 prompt 也换成
+            // 替换后的——运行画面显示 agent 实际收到什么）。
+            const task = prompt.replace(/\{\{task\}\}/g, taskPrompt)
+            step.prompt = task
             const runId = ulid() as RunId
             let agentRef: SubmitRunRequest['agentRef']
             let groupId: string | undefined
@@ -4150,7 +4161,7 @@ async function injectedSkillsOf(
               kind: 'execute',
               agentRef,
               subject: { type: 'issue', id: run.issueId as Issue['id'] },
-              prompt,
+              prompt: task,
               ...(groupId ? { groupId } : {}),
               // 编排任务的工作目录：发起时设定（与「新建任务」同款：null = daemon 自动分配）
               ...(run.workDir ? { workDir: run.workDir } : {}),

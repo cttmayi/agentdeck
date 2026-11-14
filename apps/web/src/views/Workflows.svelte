@@ -382,6 +382,7 @@
           <div class="field">
             <label>{$t('workflows.promptLabel')}</label>
             <textarea rows="4" bind:value={runPrompt} placeholder={$t('workflows.promptPlaceholder')}></textarea>
+            <p class="hint fs-sm">{@html $t('workflows.promptHint')}</p>
           </div>
           <div class="field">
             <label>{$t('workflows.workDirLabel')}</label>

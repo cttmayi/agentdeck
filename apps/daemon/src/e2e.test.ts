@@ -2889,3 +2889,87 @@ describe('编排：步骤等组跑真正完成（2026-11 修复）', () => {
     }
   })
 })
+
+/**
+ * ★ 编排任务参数化（2026-11 使用者拍板）：流程写死、任务动态传入。
+ *   步骤任务里的 `{{task}}` 占位符在运行时替换成发起时填的任务描述——
+ *   同一套编排每次跑不同的具体任务，不用改代码。断言三点：agent 实际收到
+ *   的 prompt 含任务描述；不含占位符字面量；步骤链登记的 prompt 也是替换后的
+ *   （运行画面显示 agent 真实收到什么）。
+ */
+describe('编排：任务参数化（{{task}} 占位符）', () => {
+  test('发起时填的任务描述替换步骤任务里的 {{task}}', async () => {
+    const paramBackend = new FakeBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-param'),
+      port: 0,
+      fsync: false,
+      backend: paramBackend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+
+      const agent = await post<{ id: string }>('/api/agents', {
+        name: '参数执行者',
+        role: 'executor',
+      })
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: '参数化编排',
+        code: `await flow('inline:参数执行者', '{{task}}')`,
+        templateKey: 'single-flow',
+      })
+      const taskDesc = '写一份关于依赖漏洞的报告'
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: taskDesc,
+        workDir: null,
+      })
+      const rid = started.run.id
+
+      let fin: { run: { status: string; steps: Array<{ prompt: string | null }> } } | null = null
+      for (let i = 0; i < 40; i++) {
+        const snap = await get<{ run: { status: string; steps: Array<{ prompt: string | null }> } }>(
+          `/api/workflow-runs/${rid}`,
+        )
+        if (snap.run.status === 'done' || snap.run.status === 'failed') {
+          fin = snap
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      assert.ok(fin, '编排应在超时内收口')
+      assert.equal(fin!.run.status, 'done')
+      // ① agent 实际收到的 prompt = 替换后的任务描述
+      assert.ok(
+        paramBackend.seenPrompt?.includes(taskDesc),
+        'agent 应收到发起时填的任务描述（不是占位符）',
+      )
+      assert.ok(
+        !paramBackend.seenPrompt?.includes('{{task}}'),
+        '占位符字面量不应漏进 agent 的任务',
+      )
+      // ② 步骤链登记的 prompt 也是替换后的（运行画面显示 agent 真实收到什么）
+      assert.equal(
+        fin!.run.steps[0]!.prompt,
+        taskDesc,
+        '步骤链的 prompt 应是替换后的任务描述',
+      )
+    } finally {
+      await d.close()
+    }
+  })
+})

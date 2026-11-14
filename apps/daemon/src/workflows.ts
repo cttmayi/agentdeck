@@ -115,44 +115,46 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     name: '单组流程',
     code: `// 单组流程：等同于"用组跑一次任务"
 // 节点 = 组名（字符串，运行时按名字在智能体组里解析）
-await flow('组A', '要做什么')`,
+// {{task}} = 发起运行时填的任务描述（占位符，会被替换）
+await flow('组A', '{{task}}')`,
   },
   {
     key: 'sequential',
     name: '顺序流水线',
     code: `// 顺序流水线：A 干完 B 接力
-await flow(['组A', '组B'], '把这件事做完')`,
+await flow(['组A', '组B'], '{{task}}')`,
   },
   {
     key: 'parallel',
     name: '并行派活',
     code: `// 并行派活：分头干、合一份
-const drafts = await parallel(['组A', '组B'], '各自起草')
+const drafts = await parallel(['组A', '组B'], '{{task}}')
 await aggregate(drafts, '组C', '合并成一份')`,
   },
   {
     key: 'loop',
     name: '评审返工',
     code: `// 评审返工：审不过就重做，最多 N 轮
-await loop('组A', '写这段代码', { maxRounds: 2 })`,
+await loop('组A', '{{task}}', { maxRounds: 2 })`,
   },
   {
     key: 'route',
     name: '路由分流',
     code: `// 路由分流：按类型派专家（按任务描述里的关键字选组）
-await route('任务描述', { 代码: '组A', 写作: '组B' })`,
+// {{task}} 会被替换成任务描述——填的任务里带上关键字（如"代码"/"写作"）才能正确分派
+await route('{{task}}', { 代码: '组A', 写作: '组B' })`,
   },
   {
     key: 'supervise',
     name: '协调者',
     code: `// 协调者：拆任务 + 汇总（二期实现，先用 flow 兜底）
-await flow('组A', '把这个大项目拆开做完')`,
+await flow('组A', '{{task}}')`,
   },
   {
     key: 'gate',
     name: '人机把关',
     code: `// 人机把关：干完你拍板
-await flow('组A', '把这件事做完')
+await flow('组A', '{{task}}')
 await gate('结果请你过目')`,
   },
 ]

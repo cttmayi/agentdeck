@@ -36,6 +36,7 @@ export const workflowsText = {
   'workflows.runFormTitle': { zh: '发起一次运行', en: 'Start a run' },
   'workflows.promptLabel': { zh: '任务描述', en: 'Task description' },
   'workflows.promptPlaceholder': { zh: '这个任务叫什么、给谁看', en: 'What this task is about' },
+  'workflows.promptHint': { zh: '这段描述会替换步骤任务里的 {{task}} 占位符', en: 'This description replaces {{task}} placeholders in steps' },
   'workflows.workDirLabel': { zh: '工作目录', en: 'Work directory' },
   'workflows.workDirAuto': { zh: '自动分配', en: 'Auto-assign' },
   'workflows.startRun': { zh: '发起', en: 'Start' },
