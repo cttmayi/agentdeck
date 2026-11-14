@@ -4444,6 +4444,16 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
               !!d().querySelector('[data-set-general]') &&
               !!d().querySelector('[data-set-costs]') &&
               !!d().querySelector('[data-set-remote]')
+            // ★ 2026-11（使用者拍板"分左右 2 列"）：三卡两列——远端卡跨满整行
+            const setGrid = d().querySelector('.set-grid')
+            facts['settings.twoColumns'] = !!(
+              setGrid &&
+              getComputedStyle(setGrid).gridTemplateColumns.split(' ').length === 2
+            )
+            facts['settings.remoteSpansRow'] = !!(
+              setGrid &&
+              getComputedStyle(d().querySelector('[data-set-remote]')).gridColumn === '1 / -1'
+            )
             facts['settings.viewIntroPresent'] = !!d().querySelector('.view-intro')
             facts['settings.noBackdropWhenOpen'] = !d().querySelector('.drawer-backdrop')
             const drSection = d().querySelector('[data-set-general] [data-default-runtime]')

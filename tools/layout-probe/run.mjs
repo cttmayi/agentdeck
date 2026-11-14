@@ -2920,6 +2920,18 @@ const CHECKS = [
   },
   {
     view: '设置（2026-11）',
+    key: 'settings.twoColumns',
+    label: '★ 设置页**两列**（使用者拍板"分左右 2 列"）——不是 3 列/自适应',
+    ok: (v) => v === true,
+  },
+  {
+    view: '设置（2026-11）',
+    key: 'settings.remoteSpansRow',
+    label: '★ 远端能力卡**跨满整行**（内容最多，独占一行）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '设置（2026-11）',
     key: 'settings.noBackdropWhenOpen',
     label: '★ 打开设置**没有**遮罩（不是抽屉/浮层）',
     ok: (v) => v === true,

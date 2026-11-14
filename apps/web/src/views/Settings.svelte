@@ -302,9 +302,11 @@
 
 <style>
   /* 设置页布局（页面专属；控件样式在 app.css，见 ui-style.md §2） */
+  /* ★ 2026-11（使用者拍板"分左右 2 列"）：固定两列——三卡排法为
+     通用 | 成本 第一行，远端能力（登录表单 + 同步说明，内容最多）跨满整行。 */
   .set-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--sp-4);
     align-items: start;
   }
@@ -313,6 +315,9 @@
     border: 1px solid var(--surface-2);
     border-radius: var(--radius);
     padding: var(--sp-4) var(--sp-5);
+  }
+  [data-set-remote] {
+    grid-column: 1 / -1;
   }
   .set-card > h2 {
     font-size: var(--fs-md);
