@@ -4085,6 +4085,24 @@ async function injectedSkillsOf(
          * ⚠️ 定义在 `handle` 里：submitRunRequest / extractSubmitError 都是 handle 的
          * 嵌套函数（10141 起），放外层启动函数会"找不到名字"（实测踩过）。
          */
+        /**
+         * ★ 等一条组跑 run 真正收口（completed/failed/cancelled）。
+         *
+         * 2026-11 使用者的编排"瞬间执行完毕"：submitRunRequest 返回 202 只表示
+         * "run 已创建"，agent 还在跑——编排步骤却当场标 done。这里轮询 `store`
+         * （run 收口会写回），每 250ms 看一次终态。组跑可能几分钟，轮询期间
+         * 编排 run 保持 running（运行画面步骤链停在 running + 日志实时），
+         * 这正是"执行画面要中途可看"要的形态。
+         */
+        async function waitForRunDone(runId: RunId): Promise<string> {
+          for (;;) {
+            const target = await store.getRun(runId)
+            if (!target) return 'cancelled'
+            if (TERMINAL_RUN_STATUSES.includes(target.status)) return target.status
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          }
+        }
+
         async function launchWorkflowRun(run: WorkflowRun): Promise<void> {
           const wf = workflowById(run.workflowId)
           if (!wf) {
@@ -4139,7 +4157,22 @@ async function injectedSkillsOf(
               limits: { maxTurns: null, timeoutMs: null },
             })
             const ok = out.status >= 200 && out.status < 300
-            if (ok) return { ok: true, runId }
+            if (ok) {
+              // ★ 2026-11：**等这步的组跑真正跑完**再算完成。提交返回 202 只表示
+              //   "run 已创建"，不表示跑完了——以前把 202 当完成，5 步编排 120ms
+              //   全标 done、agent 其实还在跑（使用者："瞬间就执行完毕了，我怀疑
+              //   根本没跑"）。这里轮询到子 run 收口（completed/failed/cancelled），
+              //   步骤 done/failed 才跟子 run 的真实结果走。
+              const final = await waitForRunDone(runId)
+              if (final === 'completed') return { ok: true, runId }
+              const target = await store.getRun(runId)
+              return {
+                ok: false,
+                runId,
+                error:
+                  target?.failureMessage ?? (final === 'failed' ? '组跑失败' : '组跑被取消'),
+              }
+            }
             return { ok: false, runId: null, error: extractSubmitError(out.body) ?? '提交失败' }
           }
 

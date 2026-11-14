@@ -86,8 +86,13 @@ class FakeBackend implements AgentBackend {
   /** 卡住执行用的闸门——见 `hold()`。 */
   #gate: Promise<void> | null = null
 
-  constructor(options: { fail?: boolean } = {}) {
+  /** 慢执行用的延迟（编排测试用）：execute 返回前睡这么多毫秒——组跑 completed
+   * 才真正发生；没有它，编排"提交 202 当完成"的 bug 测不出来（run 瞬间收口）。 */
+  #delay = 0
+
+  constructor(options: { fail?: boolean; delayMs?: number } = {}) {
     this.#fail = options.fail === true
+    this.#delay = options.delayMs ?? 0
   }
 
   /**
@@ -175,15 +180,18 @@ class FakeBackend implements AgentBackend {
 
     const fail = this.#fail
     const gate = this.#gate ?? Promise.resolve()
-    const result = gate.then(() => ({
-      status: fail ? ('failed' as const) : ('completed' as const),
-      output: fail ? '' : '报告：任务已完成。',
-      error: fail ? '假装失败了' : null,
-      durationMs: 5,
-      sessionId: 'fake-session-1',
-      usage: { inputTokens: 100, outputTokens: 50, costUsdMicros: 1234, costSource: 'provider' as const },
-      exitCode: fail ? 1 : 0,
-    }))
+    const result = gate.then(async () => {
+      if (this.#delay > 0) await new Promise((resolve) => setTimeout(resolve, this.#delay))
+      return {
+        status: fail ? ('failed' as const) : ('completed' as const),
+        output: fail ? '' : '报告：任务已完成。',
+        error: fail ? '假装失败了' : null,
+        durationMs: 5,
+        sessionId: 'fake-session-1',
+        usage: { inputTokens: 100, outputTokens: 50, costUsdMicros: 1234, costSource: 'provider' as const },
+        exitCode: fail ? 1 : 0,
+      }
+    })
 
     return {
       messages: queue,
@@ -2780,5 +2788,81 @@ describe('2026-09：投递档记在 run 上', () => {
 
   test('★ 禁改表挡住了系统提示旗标（使用者的自定义参数覆盖不了它）', () => {
     assert.equal(CLAUDE_BLOCKED_ARGS['--append-system-prompt'], 'withValue')
+  })
+})
+
+/**
+ * ★ 编排：步骤**等组跑真正跑完**才标 done（2026-11 使用者："瞬间就执行完毕了，
+ *   我怀疑根本没跑"——提交 202 只表示 run 已创建，agent 其实还在跑）。
+ *
+ * 用**慢 FakeBackend**（execute 延迟 400ms）复现：修复前编排 5 步 120ms 全 done
+ * 而子 run 还在 running；修复后编排 run 全程 running、子 run completed 了步骤才
+ * done。断言三点：发起后编排立即是 running（不是 done）；等编排 done 后子 run
+ * 一定是 completed；gate 步照常等你确认。
+ */
+describe('编排：步骤等组跑真正完成（2026-11 修复）', () => {
+  test('慢组跑下编排不瞬间 done：步骤 done 晚于子 run completed', async () => {
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-data'),
+      port: 0,
+      fsync: false,
+      backend: new FakeBackend({ delayMs: 400 }),
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+
+      const agent = await post<{ id: string }>('/api/agents', {
+        name: '慢执行者',
+        role: 'executor',
+      })
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: '慢测编排',
+        code: `await flow('inline:慢执行者', '慢慢跑')`,
+        templateKey: 'single-flow',
+      })
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: '慢',
+        workDir: null,
+      })
+      const rid = started.run.id
+
+      // ① 发起后**立即**查：编排 run 必须还在 running——修复前这里是 done（bug）
+      const early = await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)
+      assert.equal(early.run.status, 'running', '发起后编排应立即是 running，不是瞬间 done')
+
+      // ② 轮询到编排 done（最多 10s——慢后端 400ms × 1 步）
+      let fin: { run: { status: string; steps: Array<{ runIds: string[] }> } } | null = null
+      for (let i = 0; i < 40; i++) {
+        const snap = await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)
+        fin = snap as { run: { status: string; steps: Array<{ runIds: string[] }> } }
+        if (snap.run.status === 'done' || snap.run.status === 'failed') break
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+      assert.ok(fin, '编排应在超时内收口')
+      const finalRun = fin.run
+      assert.equal(finalRun.status, 'done', '慢组跑下编排应等子 run 完成后再 done')
+
+      // ③ 子 run 已 completed（步骤 done 发生在其后）
+      const subId = finalRun.steps[0]!.runIds[0]!
+      const sub = await get<{ status: string }>(`/api/runs/${subId}`)
+      assert.equal(sub.status, 'completed', '编排 done 时子 run 必须已 completed')
+    } finally {
+      await d.close()
+    }
   })
 })
