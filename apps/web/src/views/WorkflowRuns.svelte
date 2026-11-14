@@ -20,6 +20,7 @@
   } from '../lib/stores.ts'
   import { wfReturn, workflowRun } from '../lib/view.ts'
   import WorkflowRunView from '../components/WorkflowRunView.svelte'
+  import MainArea from '../components/MainArea.svelte'
   import {
     workflowRunStatusClass,
     workflowRunStatusKey,
@@ -48,17 +49,15 @@
   }
 </script>
 
-{#if $workflowRun}
-  <!-- 点列表一条：主区直接画运行画面（子路由 `#/workflow-runs/<id>`） -->
-  <WorkflowRunView runId={$workflowRun.runId} />
-{:else}
 <div
-  class="split-layout with-detail"
+  class="split-layout"
+  class:with-detail={$workflowRun !== null}
   data-list-key="workflow-runs"
   data-list-label={$t('shell.resizeList')}
   use:listGrip
 >
-  <!-- ══════════ 左栏：编排运行列表 ══════════ -->
+  <!-- ══════════ 左栏：编排运行列表（恒在——2026-11 使用者拍板"列表不该消失"，
+       点一条只在右栏换运行画面，任务页同款主从） ══════════ -->
   <section class="pane list-pane">
     <header class="pane-head">
       <div>
@@ -93,14 +92,21 @@
     </div>
   </section>
 
-  <!-- ══════════ 右栏：提示（列表即入口，点一条看运行画面） ══════════ -->
-  <section class="pane-body">
-    <div class="empty">
-      <strong>{$t('workflowruns.pickHint')}</strong>
-    </div>
-  </section>
+  <!-- ══════════ 右栏：选中运行 → 运行画面（列表在左，不消失）；
+       没选中 → 「点一条看运行画面」空态（任务页同款主从） ══════════ -->
+  <MainArea
+    empty={$workflowRun === null}
+    emptyTitle={$t('workflowruns.pickHint')}
+    backLabel={$workflowRun !== null ? $t('workflowruns.runBack') : undefined}
+    onBack={() => (location.hash = '#/workflow-runs')}
+  >
+    {#snippet body()}
+      {#if $workflowRun}
+        <WorkflowRunView runId={$workflowRun.runId} embedded />
+      {/if}
+    {/snippet}
+  </MainArea>
 </div>
-{/if}
 
 <style>
   /* 与 Workflows.svelte 历史行同款两行结构（311/312 批纪律）：

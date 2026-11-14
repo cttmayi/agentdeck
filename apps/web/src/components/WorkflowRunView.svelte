@@ -30,6 +30,12 @@
   import WorkDirTree from './WorkDirTree.svelte'
 
   export let runId: string
+  /**
+   * 主从形态（编排任务列表右栏）时隐藏**自带返回按钮**：列表就在左边，返回交给
+   * MainArea 的 back-to-list（72rem 断点下列表隐藏、它才出现）。'workflows' 视图
+   * 整页形态不传（返回按钮照常显示）。
+   */
+  export let embedded = false
 
   let run: WorkflowRun | null = null
   let error = ''
@@ -95,12 +101,14 @@
 
 </script>
 
-<div class="wf-run-layout">
+<div class="wf-run-layout" class:embedded>
   <div class="detail-head">
     <div class="detail-sub">
-      <button type="button" class="btn btn--ghost" onclick={() => go($wfReturn)}>
-        {$t($wfReturn === 'workflows' ? 'workflows.runBack' : 'workflowruns.runBack')}
-      </button>
+      {#if !embedded}
+        <button type="button" class="btn btn--ghost" onclick={() => go($wfReturn)}>
+          {$t($wfReturn === 'workflows' ? 'workflows.runBack' : 'workflowruns.runBack')}
+        </button>
+      {/if}
       <h2>{issue?.title ?? runId.slice(0, 8)}</h2>
       <p class="hint">
         {#if run}
@@ -209,6 +217,12 @@
     gap: var(--sp-3);
     overflow: hidden;
     padding: var(--sp-3) var(--sp-4);
+  }
+  /* ★ 主从形态（编排任务列表右栏，2026-11 使用者拍板"列表不该消失"）：右栏
+     ~850px 放三栏，侧栏按 16-22rem 会把日志压到 ~150px——收窄侧栏到 11-14rem，
+     日志回到 ~406px。整页形态（'workflows' 视图）不 embedded，保持 16-22rem。 */
+  .embedded .wf-run-main {
+    grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr) minmax(11rem, 14rem);
   }
   .wf-steps {
     overflow-y: auto;

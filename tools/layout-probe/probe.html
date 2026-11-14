@@ -3574,8 +3574,8 @@ facts['entry.工具'] = { from: f.contentWindow.location.hash, to: '#/tools', wa
           return rows >= 0 && (rows > 0 || empty)
         })()
         facts['workflowRuns.emptyShown'] = await (async () => {
-          // 右栏（列表即入口）给「点一条看运行画面」提示
-          const right = d().querySelector('.split-layout > .pane-body:not(.list-pane)')
+          // 右栏 = MainArea 空态（列表即入口，没选中时给「点一条看运行画面」提示）
+          const right = d().querySelector('.detail-pane .empty')
           return right !== null && (text(right) ?? '').includes('点一条看运行画面')
         })()
 
