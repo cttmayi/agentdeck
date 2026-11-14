@@ -9,14 +9,19 @@
    * 模板）起草时不想动到原值，改坏了也不会污染。
    *
    * 定时任务的模板变量（{{date}} 等）：传 `vars` 数组，组件自己在弹层底部
-   * 渲染 chips 并**插到光标处**（selectionStart/selectionEnd）——小框里原来
-   * 是"追加到末尾"（2026-11 使用者要求一并搬进弹层 + 光标插入）。
+   * 渲染 chips 并**插到光标处**（selectionStart/selectionEnd）。
    *
-   * ⚠️ 快照为什么用 textarea 的 `onmount` 而不是 `$effect`（2026-11 使用者
-   *   报过"刚编辑完，点开是空的，重新打开又好"）：`$effect` 依赖 open/value 的
-   *   变化时序，表单重建（切页回来、保存后立刻重开）时第一次打开可能读到旧的
-   *   draft；而弹层是 `{#if open}` 渲染的——每次打开 textarea 都重新挂载，
-   *   `onmount` 保证**这一帧**的 value 一定落进 draft，时序问题不存在。
+   * ══════════════════════════════════════════════════════════════════
+   * 观感（2026-11 用户两轮："太丑像玩具"→"还是不专业"）：按编辑器来，
+   * 不是文本框——
+   *   · **行号 gutter**：左侧行号列，与 textarea 同步滚动；
+   *   · **模板变量高亮**：textarea 文字透明 + 下层 pre 着色（{{…}} 用主题色），
+   *     caret 仍可见；高亮层宽度补偿滚动条（textarea clientWidth）；
+   *   · **状态栏**：底部一条（行数 / 字数），编辑器式收尾。
+   *
+   * ⚠️ 快照为什么用 `$effect.pre`（2026-11 用户报"刚编辑完，点开是空的，
+   *   重新打开又好"）：`$effect` 在 DOM 更新**后**跑，textarea 挂载那一帧读到
+   *   的是旧 draft；`pre` 在 DOM 更新**前**跑，挂载帧即是快照。
    * ══════════════════════════════════════════════════════════════════
    */
   import { t } from '../lib/i18n.ts'
@@ -43,6 +48,33 @@
 
   let draft = ''
   let ta: HTMLTextAreaElement | null = null
+  let hlPre: HTMLPreElement | null = null
+  let gutterPre: HTMLPreElement | null = null
+
+  // 快照：打开（open 变 true）那一刻把 value 落进 draft（时机见头注释）
+  $effect.pre(() => {
+    if (open) draft = value
+  })
+
+  /** 高亮层文本：先转义（用户文本可含 <>&），再给 {{…}} 包主题色 span。 */
+  function highlighted(text: string): string {
+    const esc = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    return esc.replace(/\{\{[^}\n]*\}\}/g, (m) => `<span class="pe-hl-var">${m}</span>`)
+  }
+
+  const hl = $derived(highlighted(draft))
+  const lineNos = $derived(
+    Array.from({ length: draft.split('\n').length }, (_, i) => String(i + 1)).join('\n'),
+  )
+
+  function syncScroll(): void {
+    const top = ta?.scrollTop ?? 0
+    if (hlPre) hlPre.scrollTop = top
+    if (gutterPre) gutterPre.scrollTop = top
+  }
 
   function save(): void {
     onSave(draft)
@@ -62,16 +94,9 @@
     requestAnimationFrame(() => {
       el.focus()
       el.selectionStart = el.selectionEnd = start + label.length
+      syncScroll()
     })
   }
-
-  // 快照：打开（open 变 true）那一刻把 value 落进 draft。
-  // ⚠️ 用 `$effect.pre` 而不是 `$effect`（2026-11 使用者报"刚编辑完，点开是空的，
-  //   重新打开又好"）：`$effect` 在 DOM 更新**后**跑，textarea 挂载那一帧读到的是
-  //   旧 draft；`pre` 在 DOM 更新**前**跑，textarea 第一次渲染时 draft 已经是快照。
-  $effect.pre(() => {
-    if (open) draft = value
-  })
 
   // 键盘：Esc 取消、Cmd/Ctrl+Enter 保存（textarea 里回车仍是换行）
   $effect(() => {
@@ -87,6 +112,18 @@
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  })
+
+  // 打开后：高亮层宽度补偿滚动条（textarea clientWidth 不含滚动条，高亮层要
+  // 同宽才对齐换行），并聚焦
+  $effect(() => {
+    if (!open) return
+    const raf = requestAnimationFrame(() => {
+      if (ta && hlPre) hlPre.style.width = `${ta.clientWidth}px`
+      ta?.focus()
+      syncScroll()
+    })
+    return () => cancelAnimationFrame(raf)
   })
 </script>
 
@@ -107,16 +144,28 @@
           <h3>{title}</h3>
         </div>
         <div class="pe-head-right">
-          <span class="pe-count">{$t('editor.count', { n: draft.length })}</span>
           <button type="button" class="pe-close" title={$t('common.close')} onclick={cancel}>✕</button>
         </div>
       </header>
-      <textarea
-        class="pe-textarea mono"
-        bind:this={ta}
-        bind:value={draft}
-        spellcheck="false"
-      ></textarea>
+
+      <div class="pe-body">
+        <div class="pe-gutter" aria-hidden="true">
+          <pre bind:this={gutterPre}>{lineNos}</pre>
+        </div>
+        <div class="pe-code">
+          <div class="pe-hl" aria-hidden="true">
+            <pre bind:this={hlPre}>{@html hl}</pre>
+          </div>
+          <textarea
+            class="pe-textarea mono"
+            bind:this={ta}
+            bind:value={draft}
+            onscroll={syncScroll}
+            spellcheck="false"
+          ></textarea>
+        </div>
+      </div>
+
       <footer class="pe-foot">
         <div class="pe-toolbar">
           {#if vars}
@@ -133,6 +182,11 @@
           <button type="button" class="btn btn--primary" onclick={save}>{$t('common.save')}</button>
         </div>
       </footer>
+
+      <div class="pe-status">
+        <span>{lineNos.split('\n').length} {$t('editor.lines')}</span>
+        <span>{draft.length} {$t('editor.count')}</span>
+      </div>
     </div>
   </div>
 {/if}
@@ -142,24 +196,26 @@
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: rgba(0, 0, 0, 0.45);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
   .pe-panel {
-    width: min(860px, 92vw);
+    /* 宽度留视口边距（2026-11 用户："右边边框不见了"——92vw + 深阴影在窄窗下
+       右缘被阴影吞掉）：calc(100vw - 48px) 保证两侧各留 24px，边框必然可见 */
+    width: min(880px, calc(100vw - 48px));
     height: 78vh;
-    min-height: 420px;
+    min-height: 440px;
     display: flex;
     flex-direction: column;
     background: var(--surface);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     box-shadow:
-      0 16px 48px rgba(0, 0, 0, 0.35),
-      0 2px 8px rgba(0, 0, 0, 0.15);
+      0 12px 40px rgba(0, 0, 0, 0.25),
+      0 1px 4px rgba(0, 0, 0, 0.1);
     overflow: hidden;
   }
 
@@ -197,11 +253,6 @@
     gap: var(--sp-3);
     flex-shrink: 0;
   }
-  .pe-count {
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    font-variant-numeric: tabular-nums;
-  }
   .pe-close {
     background: none;
     border: 0;
@@ -217,24 +268,82 @@
     color: var(--text);
   }
 
-  .pe-textarea {
+  /* ── 编辑区：行号 + 高亮层 + textarea 三层 ── */
+  .pe-body {
     flex: 1;
+    min-height: 0;
+    display: flex;
     margin: var(--sp-3) var(--sp-4);
-    padding: var(--sp-3);
-    resize: none;
-    background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    color: var(--text);
-    font-size: var(--fs-sm);
-    line-height: 1.7;
-    outline: none;
-    transition: border-color 120ms ease;
-  }
-  .pe-textarea:focus {
-    border-color: var(--accent);
+    overflow: hidden;
+    background: var(--surface);
   }
 
+  .pe-gutter {
+    width: 3.25rem;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--line);
+    background: var(--surface-2);
+    user-select: none;
+  }
+  .pe-gutter pre {
+    margin: 0;
+    padding: var(--sp-3) var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    text-align: right;
+    color: var(--text-faint);
+  }
+
+  .pe-code {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  .pe-hl {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .pe-hl pre {
+    margin: 0;
+    padding: var(--sp-3);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .pe-hl-var {
+    color: var(--accent);
+  }
+
+  .pe-textarea {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--text);
+    resize: none;
+    outline: none;
+    border: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    padding: var(--sp-3);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+  }
+
+  /* ── 底部：工具条 + 操作 + 状态栏 ── */
   .pe-foot {
     display: flex;
     align-items: center;
@@ -277,5 +386,16 @@
     color: var(--text-faint);
     margin-right: var(--sp-2);
     white-space: nowrap;
+  }
+
+  .pe-status {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--sp-1) var(--sp-4);
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    flex-shrink: 0;
   }
 </style>

@@ -18,6 +18,7 @@ export const commonText = {
   // 2026-11：PromptEditor 大编辑器（入口按钮 + 弹层内部）
   'editor.expand': { zh: '展开编辑', en: 'Expand editor' },
   'editor.count': { zh: '{n} 字', en: '{n} chars' },
+  'editor.lines': { zh: '行', en: 'lines' },
   'editor.shortcut': { zh: '⌘/Ctrl + Enter 保存 · Esc 取消', en: '⌘/Ctrl + Enter save · Esc cancel' },
   'common.saving': { zh: '保存中…', en: 'Saving…' },
   'common.cancel': { zh: '取消', en: 'Cancel' },
