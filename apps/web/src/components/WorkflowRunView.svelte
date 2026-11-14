@@ -237,6 +237,12 @@
     padding-right: var(--sp-2);
   }
   .wf-run-log {
+    /* ★ 2026-11：RunLog 的 fill 是 flex 链（flex:1 撑满、内部 .log 自己滚）——
+       这里不是 flex 容器时链就断了，RunLog 高度=内容高度，日志少就收缩成
+       一行（使用者："只有一行，根本看不到内容"）。补上 flex column，
+       gate 面板 + RunLog 一起排；内容超高时外层照旧滚。 */
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
   }
   .wf-step-list {
