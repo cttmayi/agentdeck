@@ -183,6 +183,8 @@ export interface Issue {
   labels: string[]
   updatedAt: number
   createdAt: number
+  /** 来源（2026-11，任务列表分组）：定时任务触发的记「哪个定时任务」，手动为 null。 */
+  source: { kind: 'schedule'; scheduleId: string; scheduleName: string } | null
 }
 
 /**

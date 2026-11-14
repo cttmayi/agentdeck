@@ -820,6 +820,22 @@ export const Issue = z.object({
   labels: z.array(z.string()),
   createdAt: EpochMs,
   updatedAt: EpochMs,
+  /**
+   * 来源（2026-11，任务列表分组用）：定时任务触发生成的任务记着「哪个定时任务」，
+   * 手动创建/其他途径为 null。
+   *
+   * ⚠️ 老数据（加字段之前落的盘）没有这个键：`default(null)` 让 zod 解析时补
+   *    null（store-file 不走 zod，读取路径本来就是 JSON 直读——`source` 缺失 =
+   *    undefined，前端统一按 `source?.kind === 'schedule'` 判断，两种缺法都安全）。
+   */
+  source: z
+    .object({
+      kind: z.literal('schedule'),
+      scheduleId: z.string(),
+      scheduleName: z.string(),
+    })
+    .nullable()
+    .default(null),
 })
 export type Issue = z.infer<typeof Issue>
 

@@ -1710,6 +1710,95 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         facts['tasks.detailHasTimestamp'] = need('右栏有没有完整时间戳', () =>
           /\d{1,2}:\d{2}/.test(text(d().querySelector('.detail-pane .detail-sub')) ?? ''),
         )
+        // ── 2026-11（使用者立项，demo v3 拍板）：任务列表分组 + 状态筛选 ──
+        //   分组逻辑（source 分组/组间排序）在单测里钉死；这里量界面交互：
+        //   默认分组、手动组头在、组头折叠、状态筛选、平铺切换。
+        facts['tasks.groupViewDefault'] = !!d().querySelector('.list-pane .task-list--grouped')
+        facts['tasks.manualGroupHead'] = [...d().querySelectorAll('.list-pane .group-head')].some(
+          (h) => text(h).includes('手动创建'),
+        )
+        // 组头折叠：点第一个组头，aria-expanded true → false（再点回来）
+        {
+          const head = d().querySelector('.list-pane .group-head')
+          const before = head?.getAttribute('aria-expanded')
+          if (head) click(head)
+          await wait(80)
+          const after = head?.getAttribute('aria-expanded')
+          facts['tasks.groupCollapseToggle'] = !!(head && before === 'true' && after === 'false')
+          if (head) click(head)
+          await wait(80)
+        }
+        // 平铺切换：点「平铺」→ 分组容器消失；再切回分组（后续判据按分组默认走）
+        {
+          const flatBtn = [...d().querySelectorAll('.list-pane .view-switch button')].find(
+            (b) => text(b) === '平铺',
+          )
+          const groupBtn = [...d().querySelectorAll('.list-pane .view-switch button')].find(
+            (b) => text(b) === '分组',
+          )
+          if (flatBtn) {
+            click(flatBtn)
+            await wait(120)
+            facts['tasks.viewSwitchFlat'] = !d().querySelector('.list-pane .task-list--grouped')
+          } else {
+            facts['tasks.viewSwitchFlat'] = null
+            // 调试：找不到平铺按钮时把现场记下来
+            const tools = d().querySelector('.list-pane .list-tools')
+            facts['tasks.viewSwitchDebug'] = {
+              toolsPresent: !!tools,
+              toolsHtml: tools ? (tools.textContent ?? '').replace(/\s+/g, ' ').slice(0, 200) : null,
+              rowsNow: d().querySelectorAll('.list-pane .task-row').length,
+              emptyNow: !!d().querySelector('.list-pane .empty'),
+            }
+          }
+          if (groupBtn) click(groupBtn)
+          await wait(120)
+        }
+
+        // 状态筛选：点「待审查」→ 只剩待审行（或无结果显示空态——两种都符合
+        //   "只留待审查"）；组头计数跟筛后数量走；切回「全部」。
+        {
+          const chips = [...d().querySelectorAll('.list-pane .stage-chips button')]
+          const waitChip = chips.find((b) => text(b).includes('待审查'))
+          const allChip = chips.find((b) => text(b).includes('全部'))
+          if (waitChip && allChip) {
+            click(waitChip)
+            await wait(150)
+            const visibleRows = [...d().querySelectorAll('.list-pane .task-row')].filter(
+              (r) => r.style.display !== 'none',
+            )
+            const allWait = visibleRows.every((r) =>
+              [...r.querySelectorAll('.stage-tag')].some((t) => text(t).includes('待审查')),
+            )
+            const emptyShown = !!d().querySelector('.list-pane .empty')
+            facts['tasks.stageFilterWorks'] = allWait && (visibleRows.length > 0 || emptyShown)
+            // 组头计数与筛后可见行数一致（不误导）
+            const firstGroup = d().querySelector('.list-pane .task-group')
+            const head = firstGroup ? firstGroup.querySelector('.group-head') : null
+            const countText = head ? text(head.querySelector('.group-count')) : null
+            const visibleInFirst = firstGroup
+              ? [...firstGroup.querySelectorAll('.task-row')].filter(
+                  (r) => r.style.display !== 'none',
+                ).length
+              : 0
+            facts['tasks.groupCountFollowsFilter'] =
+              visibleRows.length === 0
+                ? 'empty'
+                : !!(countText && String(visibleInFirst) === (countText.match(/\d+/) ?? [''])[0])
+            // ⚠️ 筛选后如果 0 结果，ListPane 显示空态、rows 不渲染——chips 与
+            //    view-switch 都跟着脱离 DOM，**任何旧引用/重新查找都点不到**。
+            //    恢复方式：hash 先切走再切回任务页，强制重挂载（viewMode 从
+            //    localStorage 读回 'group'，列表回到分组视图）。
+            f.contentWindow.location.hash = '#/chat'
+            await until(() => !d().querySelector('.list-pane'), 60)
+            f.contentWindow.location.hash = '#/tasks'
+            await until(() => d().querySelectorAll('.list-pane .task-row').length > 0, 60)
+            await wait(150)
+          } else {
+            facts['tasks.stageFilterWorks'] = null
+            facts['tasks.groupCountFollowsFilter'] = null
+          }
+        }
         /**
          * ★ 分批第 39 批：任务页栏头那个入口的名字。
          *
@@ -1845,7 +1934,9 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         //   标题也从行的左边起（不是被推到中间/右边）。
         facts['tasks.rowsNotIndented'] = need('任务行没有 ul 默认缩进', () => {
           const list = d().querySelector('.list-pane .task-list')
-          const row = rows[0]
+          // ⚠️ 分组块在前面做过 hash 重进（空态恢复），`rows` 变量已失效——
+          //    重新查 DOM，别拿脱离文档的旧节点量宽。
+          const row = d().querySelector('.list-pane .task-row')
           if (!list || !row) return false
           const l = list.getBoundingClientRect()
           const r = row.getBoundingClientRect()
@@ -1856,7 +1947,7 @@ facts['entry.任务.actual'] = text(d().querySelector('.page-name'))
         })
         // 圆点标记也不该有（`list-style: none`）
         facts['tasks.noListMarker'] = need('行首没有圆点标记', () => {
-          const row = rows[0]
+          const row = d().querySelector('.list-pane .task-row')
           return !!row && cs(row).listStyleType === 'none'
         })
 

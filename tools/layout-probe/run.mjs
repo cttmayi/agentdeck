@@ -945,6 +945,42 @@ const CHECKS = [
   { view: '任务', key: 'tasks.gotRows', label: '夹具任务渲染成了表格行（否则下面那条会空过）', ok: (v) => v === true },
   {
     view: '任务',
+    key: 'tasks.groupViewDefault',
+    label: '★ 任务列表默认**分组**（2026-11 使用者拍板 demo v3：同一定时任务一组）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.manualGroupHead',
+    label: '★ 「手动创建」组头在（老数据/无来源任务归它，不误归定时任务）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.groupCollapseToggle',
+    label: '★ 组头点击折叠（aria-expanded true→false，默认展开）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.stageFilterWorks',
+    label: '★ 状态筛选：点「待审查」只剩待审行（或无结果显示空态）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
+    key: 'tasks.groupCountFollowsFilter',
+    label: '★ 组头计数跟筛后数量走（不误导）；无结果显示 empty',
+    ok: (v) => v === true || v === 'empty',
+  },
+  {
+    view: '任务',
+    key: 'tasks.viewSwitchFlat',
+    label: '★ 平铺切换生效（分组容器消失）；默认仍是分组',
+    ok: (v) => v === true,
+  },
+  {
+    view: '任务',
     key: 'tasks.firstRowStageCell',
     label: '从没跑过的那行：标签「执行中」+ 额外信息「还没开始执行」',
     ok: (v) => /^执行中\s+还没开始执行/.test(String(v)),

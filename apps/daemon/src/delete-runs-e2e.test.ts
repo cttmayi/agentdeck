@@ -260,6 +260,7 @@ describe('DELETE /api/issues/:id', () => {
       priority: 'none',
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      source: null,
     })
     await daemon.store.insertComment({
       id: 'c-del' as never,
@@ -342,6 +343,7 @@ describe('DELETE /api/issues/:id', () => {
       priority: 'none',
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      source: null,
     })
     const res = await del('/api/issues/i-other')
     assert.equal(res.status, 404)

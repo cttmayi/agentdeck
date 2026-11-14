@@ -2142,6 +2142,54 @@ tbody tr:last-child td,
   color: var(--on-accent);
 }
 
+/*
+ * ★ 状态筛选 chips（任务列表，2026-11）：一排小圆钮，与 theme-picker 同族
+ *   （软底分段选择器），但允许换行（列表栏窄时 chips 折行）。
+ */
+.stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.stage-chips button {
+  border: 1px solid var(--surface-2);
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.stage-chips button:hover:not(:disabled):not(.active) { color: var(--text); }
+.stage-chips button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: var(--on-accent);
+}
+
+/* ★ 分组/平铺切换（任务列表，2026-11）：与 theme-picker 同族的紧凑两档 */
+.view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  gap: 2px;
+}
+.view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px var(--sp-2);
+  border-radius: calc(var(--radius) - 2px);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+.view-switch button:hover:not(:disabled):not(.active) { color: var(--text); }
+.view-switch button.active {
+  background: var(--accent-dim);
+  color: var(--on-accent);
+}
+
 /* ══════════════ 提示条 ══════════════ */
 
 /* 扁平化（2026-09）：重描边 → 浅色块底 + 状态色发丝线。状态色以 10% 混进

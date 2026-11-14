@@ -225,6 +225,7 @@ export function makeIssue(over: Omit<Partial<Issue>, 'id'> & { id: string }): Is
     labels: [],
     createdAt: T0,
     updatedAt: T0,
+    source: null,
     ...over,
     id: issueId(over.id),
   }

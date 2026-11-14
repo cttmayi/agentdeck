@@ -6482,6 +6482,7 @@ async function injectedSkillsOf(
         labels: body.labels ?? [],
         createdAt: now,
         updatedAt: now,
+        source: null,
       }
       await store.insertIssue(issue)
       sendJson(res, 201, issue)
@@ -10256,6 +10257,8 @@ async function injectedSkillsOf(
         labels: [],
         createdAt: now,
         updatedAt: now,
+        // ★ 2026-11：来源 = 触发它的定时任务（任务列表按此分组显示）。
+        source: { kind: 'schedule', scheduleId: s.id, scheduleName: s.name },
       }
       await store.insertIssue(issue)
 
@@ -10634,6 +10637,7 @@ async function injectedSkillsOf(
         labels: [],
         createdAt: now,
         updatedAt: now,
+        source: null,
       }
 
       // ── 身份：agent / groupId / 默认执行者 ──

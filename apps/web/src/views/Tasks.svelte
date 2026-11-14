@@ -34,6 +34,7 @@
     stageOf,
     stageShortId,
   } from '../lib/pipeline.ts'
+  import { groupTasks } from '../lib/task-groups.ts'
   import RunLog from '../components/RunLog.svelte'
   import { t, tx } from '../lib/i18n.ts'
   import type { WebTextId } from '@agentdeck/i18n'
@@ -156,6 +157,51 @@
    * 找不到刚才那条。置顶一拨 + 其余保持原序，两边都成立。
    */
   $: byAttention = splitByAttention(staged)
+
+  /**
+   * ★ 2026-11（使用者立项，demo v3 拍板）：任务列表**分组**——同一来源
+   *   （定时任务触发的）任务一组。与看板/平铺切换并列：
+   *   · viewMode：'group'（默认，组间按组内最新任务时间倒排、手动组参与）/ 'flat'（现状）
+   *   · stageCol：状态筛选，'all' 或某看板列（`col.ids[0]` 作 key）——与分组正交
+   *   · 组头可折叠（默认展开）
+   */
+  const GROUP_VIEW_KEY = 'agentdeck.issue-view-group'
+  let viewMode: 'group' | 'flat' =
+    localStorage.getItem(GROUP_VIEW_KEY) === 'flat' ? 'flat' : 'group'
+  let stageCol: string = 'all'
+  // 折叠状态：本文件是 **legacy 模式**（满篇 `$:`），不能引 runes 的 `$state`
+  //   （一用整文件切 runes 模式，所有 legacy `$:` 当场报错）。
+  //   普通 Set 的 add/delete 也不触发重渲染（探针实测 aria-expanded 不翻转），
+  //   所以 toggle 时**换一个新 Set 实例赋值**——legacy 的赋值依赖照常工作。
+  let collapsedGroups = new Set<string>()
+  function toggleGroup(key: string): void {
+    const next = new Set(collapsedGroups)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    collapsedGroups = next
+  }
+  function setViewMode(next: 'group' | 'flat'): void {
+    viewMode = next
+    localStorage.setItem(GROUP_VIEW_KEY, next)
+  }
+
+  /** 筛选 chips 的计数（**筛前**各列总数——筛选按钮上的数字始终是总数）。 */
+  $: colCounts = COLUMNS.map((c) => ({
+    // ⚠️ 每列至少一个 stage（`ids` 非空是数组定义保证的）；`!` 消掉
+    //    noUncheckedIndexedAccess 的 undefined。
+    key: c.ids[0]!,
+    titleId: c.titleId,
+    n: staged.filter((x) => c.ids.includes(x.info.stage)).length,
+  }))
+
+  /**
+   * 分组视图的派生数据：按来源分组、组内保持 staged 顺序（时间倒序）、
+   * 组间按组内最新任务时间倒排（手动创建也参与——不固定压底）。
+   * 逻辑在 `lib/task-groups.ts`（纯函数，单测钉死）；这里只喂数据。
+   * ⚠️ `staged` 已是筛选后的（见 `visible`），所以 `g.items` 天然是筛后数量——
+   *    组头计数与可见内容一致（不误导）。
+   */
+  $: groups = groupTasks(staged, tx('tasks.manualGroup'))
 
   const VIEW_KEY = 'agentdeck.issue-view'
   let mode: 'list' | 'board' = localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'
@@ -280,11 +326,19 @@
 
   let filter = ''
 
-  $: visible = $issues.filter((i) => {
-    if (!filter.trim()) return true
-    const q = filter.trim().toLowerCase()
-    return i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)
-  })
+  $: visible = $issues
+    .filter((i) => {
+      if (!filter.trim()) return true
+      const q = filter.trim().toLowerCase()
+      return i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)
+    })
+    .filter((i) => {
+      // ★ 2026-11：状态筛选（与分组正交——分组管"同源"、筛选管"状态"）
+      if (stageCol === 'all') return true
+      const col = COLUMNS.find((c) => c.ids[0] === stageCol)
+      if (!col) return true
+      return col.ids.includes(stageOf(i, $runs).stage)
+    })
 
   $: selected = $issues.find((i) => i.id === $selectedIssueId) ?? null
   // ⚠️ 不能只按 `subject.id === issue.id` 过滤：**review run 的 subject 是那条
@@ -1003,20 +1057,82 @@
         <div class="skeleton" style="width:70%"></div>
       {/snippet}
       {#snippet rows()}
-        <ul class="task-list">
-          {#if byAttention.attention.length > 0}
-            <div class="list-head">
-              {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
-            </div>
-            {#each byAttention.attention as { issue, info } (issue.id)}
-              {@render row(issue, info, true)}
+        <!-- ★ 2026-11：状态筛选 chips（计数=筛前总数）+ 分组/平铺切换 -->
+        <div class="list-tools">
+          <div class="stage-chips" role="group" aria-label={$t('tasks.filterLabel')}>
+            <button
+              type="button"
+              class:active={stageCol === 'all'}
+              onclick={() => (stageCol = 'all')}
+            >
+              {$t('tasks.filterAll')} {staged.length}
+            </button>
+            {#each colCounts as c (c.key)}
+              <button
+                type="button"
+                class:active={stageCol === c.key}
+                onclick={() => (stageCol = c.key)}
+              >
+                {$t(c.titleId)} {c.n}
+              </button>
             {/each}
-            <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
-          {/if}
-          {#each byAttention.rest as { issue, info } (issue.id)}
-            {@render row(issue, info, false)}
-          {/each}
-        </ul>
+          </div>
+          <div class="view-switch" role="group" aria-label={$t('tasks.viewSwitchLabel')}>
+            <button
+              type="button"
+              class:active={viewMode === 'group'}
+              onclick={() => setViewMode('group')}
+            >
+              {$t('tasks.viewGroup')}
+            </button>
+            <button
+              type="button"
+              class:active={viewMode === 'flat'}
+              onclick={() => setViewMode('flat')}
+            >
+              {$t('tasks.viewFlat')}
+            </button>
+          </div>
+        </div>
+
+        {#if viewMode === 'group'}
+          <ul class="task-list task-list--grouped">
+            {#each groups as g (g.key)}
+              <li class="task-group" data-task-group={g.key}>
+                <button
+                  type="button"
+                  class="group-head"
+                  onclick={() => toggleGroup(g.key)}
+                  aria-expanded={!collapsedGroups.has(g.key)}
+                >
+                  <span class="group-arrow" class:collapsed={collapsedGroups.has(g.key)}>▾</span>
+                  <span class="group-name">{g.name}</span>
+                  <span class="group-count">{$t('tasks.groupCount', { n: g.items.length })}</span>
+                </button>
+                {#if !collapsedGroups.has(g.key)}
+                  {#each g.items as { issue, info } (issue.id)}
+                    {@render row(issue, info, false)}
+                  {/each}
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <ul class="task-list">
+            {#if byAttention.attention.length > 0}
+              <div class="list-head">
+                {$t('tasks.attentionTitle', { count: byAttention.attention.length })}
+              </div>
+              {#each byAttention.attention as { issue, info } (issue.id)}
+                {@render row(issue, info, true)}
+              {/each}
+              <div class="list-head">{$t('tasks.restTitle', { count: byAttention.rest.length })}</div>
+            {/if}
+            {#each byAttention.rest as { issue, info } (issue.id)}
+              {@render row(issue, info, false)}
+            {/each}
+          </ul>
+        {/if}
       {/snippet}
     </ListPane>
   {/if}
@@ -1662,6 +1778,38 @@
      （放弃是人的决定，不是故障），也不是"做完了"（它只是出局了）。中性灰是唯一
      不会误导读者的选择——这条任务既不需要你管，也没有做成什么。 */
   .stage-tag.abandoned { color: var(--text-faint); }
+
+  /* ══════════════ 分组视图（2026-11，使用者立项）══════════════ */
+  .list-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: 0 var(--sp-3) var(--sp-2);
+    flex-wrap: wrap;
+  }
+  .task-list--grouped .task-group { margin-bottom: var(--sp-2); }
+  .group-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--surface-2);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .group-head:hover { background: var(--surface-2); }
+  .group-arrow {
+    color: var(--text-faint);
+    font-size: var(--fs-2xs);
+    transition: transform 0.15s;
+  }
+  .group-arrow.collapsed { transform: rotate(-90deg); }
+  .group-name { font-weight: 600; font-size: var(--fs-sm); }
+  .group-count { margin-left: auto; color: var(--text-dim); font-size: var(--fs-xs); }
 
   /* 跑完之后：左边结论、右边产出文件（D69.9.1 从折叠区挪回——文件是高频项） */
   .result-grid {
