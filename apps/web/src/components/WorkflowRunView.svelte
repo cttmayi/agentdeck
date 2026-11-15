@@ -162,8 +162,9 @@
         if (!rid || execStatuses[rid] !== undefined) continue
         void (async () => {
           try {
-            const d = await api<{ run: { status: string } }>(`/api/runs/${rid}`)
-            execStatuses = { ...execStatuses, [rid]: d.run.status }
+            // ⚠️ GET /api/runs/<id> 返回 run 对象**本身**（不是 { run } 包装）
+            const d = await api<{ status: string }>(`/api/runs/${rid}`)
+            execStatuses = { ...execStatuses, [rid]: d.status }
           } catch {
             // 单步取数失败不阻塞整体刷新
           }
