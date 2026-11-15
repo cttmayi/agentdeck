@@ -76,6 +76,14 @@
   /** 点击步骤卡头展开它的完整过程日志（RunLog）。 */
   let expandedSeq: number | null = null
 
+  /** ★ 2026-11 每个 Agent 一个显示：loop 步骤拆成「写作员 → 审查员」每轮两行。
+   *   审查 run 没有挂在执行 run 上的字段，靠 subject（type:'run' + id=执行 run）
+   *   从全量 runs 列表反查（与 daemon 同一条规矩）。列表只拉一次缓存；审查意见
+   *   取审查 run 的 messages 最后一条 text（与输出流同一规则），没取到就每轮重试
+   *   （审查 run 可能还在跑）。 */
+  let reviewRunIds: Record<string, string> = {}
+  let reviewOutputs: Record<string, string> = {}
+
   function lastRunId(st: WorkflowStep): string | null {
     return st.runIds.length > 0 ? st.runIds[st.runIds.length - 1]! : null
   }
@@ -85,6 +93,24 @@
   }
   function toggleStep(seq: number): void {
     expandedSeq = expandedSeq === seq ? null : seq
+  }
+
+  /** 按执行 runId 反查它的审查 run（没有则 null）。列表只拉一次。 */
+  let runsList: Array<{ runId: string; kind: string; subject: { type: string; id: string } }> | null =
+    null
+  async function findReviewRun(execRunId: string): Promise<string | null> {
+    if (reviewRunIds[execRunId] !== undefined) return reviewRunIds[execRunId] ?? null
+    if (!runsList) {
+      const page = await api<{
+        runs: Array<{ runId: string; kind: string; subject: { type: string; id: string } }>
+      }>('/api/runs')
+      runsList = page.runs ?? []
+    }
+    const review = runsList.find(
+      (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === execRunId,
+    )
+    reviewRunIds = { ...reviewRunIds, [execRunId]: review?.runId ?? '' }
+    return review?.runId ?? null
   }
 
   async function refresh(): Promise<void> {
@@ -112,6 +138,28 @@
             // 单步取数失败不阻塞整体刷新
           }
         })()
+      }
+      // loop 步骤：每轮执行 run 反查审查 run，再取审查意见正文
+      for (const st of run.steps) {
+        if (st.kind !== 'loop') continue
+        for (const rid of st.runIds) {
+          void (async () => {
+            try {
+              const reviewId = await findReviewRun(rid)
+              if (!reviewId || reviewOutputs[reviewId]) return
+              const d = await api<{ messages: Array<{ type: string; content: string }> }>(
+                `/api/runs/${reviewId}/messages`,
+              )
+              const texts = (d.messages ?? []).filter(
+                (m) => m.type === 'text' && m.content.trim() !== '',
+              )
+              const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
+              if (last) reviewOutputs = { ...reviewOutputs, [reviewId]: last }
+            } catch {
+              // 单步取数失败不阻塞整体刷新
+            }
+          })()
+        }
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
@@ -280,6 +328,27 @@
                       <p class="wf-out-gate">"{st.gateText}"</p>
                     </div>
                   {/if}
+                {:else if st.kind === 'loop'}
+                  <!-- ★ 2026-11 每个 Agent 一个显示：loop 按轮拆成「写作员产出」
+                       与「审查员意见」两行——不再压成一个「评审返工」卡 -->
+                  <ol class="wf-loop-rounds">
+                    {#each st.runIds as rid, i (rid)}
+                      <li class="wf-round">
+                        <div class="wf-round-row">
+                          <span class="wf-round-tag">{$t('workflows.round')} {i + 1} · {$t('workflows.loopWriter')}</span>
+                          <span class="wf-round-out">{outputs[rid] ?? $t('workflows.stepWorking')}</span>
+                        </div>
+                        <div class="wf-round-row review">
+                          <span class="wf-round-tag">{$t('workflows.loopReviewer')}</span>
+                          {#if reviewRunIds[rid]}
+                            <span class="wf-round-out">{reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}</span>
+                          {:else}
+                            <span class="wf-round-out faint">{$t('workflows.loopReviewing')}</span>
+                          {/if}
+                        </div>
+                      </li>
+                    {/each}
+                  </ol>
                 {:else}
                   <div class="wf-out-body">
                     <p class="wf-out-text">
@@ -400,6 +469,42 @@
   }
   .wf-out-body {
     padding: 4px 12px 10px;
+  }
+  /* ★ 2026-11 loop 步骤按轮拆：每轮「写作员产出」+「审查员意见」两行。
+     审查员行缩进一档、标签淡色，跟写作员行区分开。 */
+  .wf-loop-rounds {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .wf-round {
+    border-left: 2px solid var(--line);
+    padding-left: 8px;
+  }
+  .wf-round-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .wf-round-row.review {
+    padding-left: 14px;
+  }
+  .wf-round-tag {
+    flex: none;
+    font-size: var(--fs-sm);
+    color: var(--text-faint);
+  }
+  .wf-round-out {
+    min-width: 0;
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-dim);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
   }
   .wf-out-text,
   .wf-out-gate {
