@@ -368,6 +368,11 @@
     gap: 8px;
     width: 100%;
     padding: 8px 12px;
+    /* ★ 2026-11 白底白字：app.css 的全局 `button` 默认 `color: var(--on-accent)`
+       （accent 上的白字）——这里把背景换成透明但没设字色，卡头就变成
+       "白底白字"（亮色主题下 --surface 是白的，使用者报的正是这个）。
+       显式拉回主题文字色。 */
+    color: var(--text);
     background: none;
     border: 0;
     cursor: pointer;
