@@ -42,8 +42,13 @@ export interface Reply {
  * - 结果不挂句柄：`await handle` 返回 `Reply`（见 §设计）。
  */
 export interface Handle {
-  /** 执行函数——输入"本次任务"（外层嵌套/重跑时传入），返回 Reply。 */
-  run: (input: string) => Reply | Promise<Reply>
+  /** 执行函数——输入"本次任务"（外层嵌套/重跑时传入），返回 Reply。
+   *  opts.review：把关者位（loop guard）——提交**审核 run**（kind review，
+   *  subject = 被审执行 run——界面按 subject 反查，与 autoChainReview 同规则）。 */
+  run: (
+    input: string,
+    opts?: { review?: boolean; subjectRunId?: string },
+  ) => Reply | Promise<Reply>
   /** 展示名（界面用）。 */
   label?: string
   /** 运行时重置（清 resume 锚点——复合 Handle 递归）。 */

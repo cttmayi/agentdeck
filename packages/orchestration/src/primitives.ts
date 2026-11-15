@@ -63,12 +63,19 @@ async function runExecute(
   step: WorkflowStep,
   prompt: string,
   resumeFromRunId: string | null,
+  review?: { subjectRunId: string },
 ): Promise<{ ok: boolean; runId: string | null; output: string; error?: string }> {
   const out = await env.hooks.submit(step, prompt, {
     ...(resumeFromRunId ? { resumeFromRunId: resumeFromRunId as never } : {}),
+    // 把关者位：提交审核 run（kind review + subject = 被审执行 run）——界面/审核链
+    // 按 subject 反查（与 autoChainReview 同一套规则）。审核 run 不进 step.runIds
+    // （它挂在执行 run 的调查链上，界面通过反查展示）。
+    ...(review
+      ? { kind: 'review' as const, subjectRunId: review.subjectRunId as never }
+      : {}),
   })
   if (out.ok && out.runId) {
-    if (!step.runIds.includes(out.runId)) step.runIds.push(out.runId)
+    if (!review && !step.runIds.includes(out.runId)) step.runIds.push(out.runId)
     return { ok: true, runId: out.runId, output: out.output ?? '' }
   }
   return { ok: false, runId: null, output: '', error: out.error ?? '执行 run 提交失败' }
@@ -117,7 +124,10 @@ export function makePrimitives(env: Env): Primitives {
     let lastRunId: string | null = null
     const resume = opts?.resume !== false
 
-    const exec = async (input: string): Promise<Reply> => {
+    const exec = async (
+      input: string,
+      stepOpts?: { review?: boolean; subjectRunId?: string },
+    ): Promise<Reply> => {
       // agent 独立执行：没外层原语时自己登记步骤；在 flow/loop 里用外层步骤。
       const step =
         env.currentStep ??
@@ -130,7 +140,13 @@ export function makePrimitives(env: Env): Primitives {
         if (step.status === 'done' && step.runIds.length > 0) {
           return { result: 'done', message: lastTextOf(await stepOutputCached(step)) }
         }
-        const out = await runExecute(env, step, input, resume ? lastRunId : null)
+        const out = await runExecute(
+          env,
+          step,
+          input,
+          resume ? lastRunId : null,
+          stepOpts?.review && stepOpts.subjectRunId ? { subjectRunId: stepOpts.subjectRunId } : undefined,
+        )
         if (!out.ok) return { result: 'done', message: out.error ?? '执行失败' }
         if (resume) lastRunId = out.runId
         let reply: Reply = { result: 'done', message: out.output }
@@ -291,8 +307,13 @@ export function makePrimitives(env: Env): Primitives {
         while (attempt <= maxRounds) {
           // ① 执行者（resume 是执行者 run 自己的事——loop 不管）
           execReply = await executor.run(taskNow)
-          // ② 把关者
-          guardReply = await guard.run(Array.isArray(execReply.message) ? execReply.message.join('\n') : (execReply.message ?? ''))
+          // ② 把关者——带 review 位（agent 把关者提交审核 run，subject = 执行 run；
+          //    gate 把关者忽略该项——人确认）
+          const execRunId = step.runIds[step.runIds.length - 1]
+          guardReply = await guard.run(
+            Array.isArray(execReply.message) ? execReply.message.join('\n') : (execReply.message ?? ''),
+            execRunId ? { review: true, subjectRunId: execRunId } : undefined,
+          )
           if (guardReply.result === 'pass') {
             step.status = 'done'
             step.finishedAt = now()

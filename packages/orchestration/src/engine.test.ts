@@ -255,6 +255,40 @@ test('★ loop 超轮：编排兜底——Reply fail（executor.message + guard�
   assert.equal(reply.guard?.message, '不通过：还不行', 'guard = 最后审核者返回')
 })
 
+test('★ 把关者位：agent 把关者提交审核 run（kind=review + subject=执行 run；不进 runIds）', async () => {
+  const calls: Array<{ opts?: { kind?: string; subjectRunId?: string } | undefined }> = []
+  const { hooks } = makeHooks()
+  const origSubmit = hooks.submit
+  hooks.submit = async (step, prompt, opts) => {
+    calls.push({ opts })
+    return origSubmit(step, prompt, opts)
+  }
+  const { makePrimitives } = await import('./primitives.ts')
+  const run1 = freshRun()
+  const env = {
+    run: run1,
+    hooks,
+    currentStep: null,
+    nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
+      const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
+      run1.steps.push(s)
+      return s
+    },
+    atBoundary: async () => {},
+  }
+  const primitives = makePrimitives(env)
+  const 判定 = (意见: string): Reply => 意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' }
+  await (primitives.loop(primitives.agent('写作员'), primitives.agent('审查员', 判定), '任务') as unknown as Promise<Reply>)
+  // 执行 run（无 kind）+ 审核 run（kind=review + subject）
+  assert.equal(calls.length, 2)
+  assert.equal(calls[0]!.opts?.kind, undefined, '执行 run 不是 review')
+  assert.equal(calls[1]!.opts?.kind, 'review', '把关者位提交审核 run')
+  assert.ok(calls[1]!.opts?.subjectRunId, 'subject = 执行 run')
+  // 审核 run 不进 step.runIds（界面按 subject 反查）
+  const loopStep = run1.steps[0]!
+  assert.equal(loopStep.runIds.length, 1, 'step.runIds 只记执行 run')
+})
+
 /* ══════════════════════════════════════════════════════════════════
  * 嵌套：loop 作执行者（惰性嵌套）
  * ══════════════════════════════════════════════════════════════════ */
