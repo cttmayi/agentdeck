@@ -1358,6 +1358,25 @@ export class RunExecutor {
               language,
               template: migrated.chat,
             }, mode)
+          : templateKind === 'workflow' && req.review
+          ? renderDelivery({
+              kind: 'review',
+              runId,
+              subject: req.subject,
+              report: { kind: req.review.kind, title: req.review.title, body: req.review.body },
+              skills: skillsBrief,
+              relatedIssueId: req.review.relatedIssueId ?? null,
+              previousContextPath: null,
+              materialRefs: req.review.materialRefs ?? null,
+              instructions: reviewerIdentityText,
+              memory: memoryItems,
+              prompt: req.prompt,
+              allowedActions: [],
+              toolActions: [],
+              language,
+              // 编排的审核：用编排模版（任务 = 被审产出；无判决契约——判定在编排代码里）
+              template: migrated.workflow,
+            }, mode)
           : templateKind === 'review' && req.review
           ? renderDelivery({
               kind: 'review',
@@ -1389,6 +1408,7 @@ export class RunExecutor {
               language,
               // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
               // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
+              // （编排审核在上一分支已用编排模版——这里就是组/任务审核的审核模版）
               template: migrated.review,
             }, mode)
           : renderDelivery({
