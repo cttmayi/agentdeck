@@ -83,6 +83,8 @@
    *   （审查 run 可能还在跑）。 */
   let reviewRunIds: Record<string, string> = {}
   let reviewOutputs: Record<string, string> = {}
+  /** 执行 run 的状态（completed 才认为"写完了"——流式部分产出不算）。 */
+  let execStatuses: Record<string, string> = {}
 
   function lastRunId(st: WorkflowStep): string | null {
     return st.runIds.length > 0 ? st.runIds[st.runIds.length - 1]! : null
@@ -147,6 +149,9 @@
             )
             const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
             if (last) outputs = { ...outputs, [rid]: last }
+            // ★ 执行 run 的**状态**（流式部分产出 ≠ 完成——审查员行要等 completed）
+            const runDetail = await api<{ run: { status: string } }>(`/api/runs/${rid}`)
+            execStatuses = { ...execStatuses, [rid]: runDetail.run.status }
           } catch {
             // 单步取数失败不阻塞整体刷新
           }
@@ -357,7 +362,7 @@
                       <li class="wf-round">
                         <div class="wf-round-tag">{$t('workflows.loopWriter')}</div>
                         <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
-                        {#if !st.gateText && (outputs[rid] !== undefined || reviewRunIds[rid])}
+                        {#if !st.gateText && execStatuses[rid] === 'completed'}
                           <!-- ★ 2026-11（统一模型）：只有 agent 把关（带审核者）才有
                              审查员行；gate 把关（人在 loop 卡内确认）没有审查员——
                              显示"（审查中…）"是误导。
