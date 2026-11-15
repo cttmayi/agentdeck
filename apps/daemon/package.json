@@ -17,6 +17,7 @@
     "@agentdeck/agent-generic": "workspace:*",
     "@agentdeck/domain": "workspace:*",
     "@agentdeck/i18n": "workspace:*",
+    "@agentdeck/orchestration": "workspace:*",
     "@agentdeck/protocol": "workspace:*",
     "@agentdeck/skill-source": "workspace:*",
     "@agentdeck/store-file": "workspace:*",

@@ -2832,7 +2832,7 @@ describe('编排：步骤等组跑真正完成（2026-11 修复）', () => {
       })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '慢测编排',
-        code: `await flow('inline:慢执行者', '慢慢跑')`,
+        code: `await flow([agent('慢执行者')], '慢慢跑')`,
         templateKey: 'single-flow',
       })
       const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
@@ -2930,7 +2930,7 @@ describe('编排：任务参数化（{{task}} 占位符）', () => {
       })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '参数化编排',
-        code: `await flow('inline:参数执行者', '{{task}}')`,
+        code: `await flow([agent('参数执行者')], '{{task}}')`,
         templateKey: 'single-flow',
       })
       const taskDesc = '写一份关于依赖漏洞的报告'
@@ -3017,7 +3017,7 @@ describe('编排：gate 否决打回重跑', () => {
       const agent = await post<{ id: string }>('/api/agents', { name: '打回执行者', role: 'executor' })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '打回编排',
-        code: `await flow('inline:打回执行者', '{{task}}')\nawait gate('结果请你过目')`,
+        code: `const 写作 = agent('打回执行者')\nawait loop(写作, gate('结果请你过目'), '{{task}}')`,
         templateKey: 'gate',
       })
       const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
@@ -3031,12 +3031,12 @@ describe('编排：gate 否决打回重跑', () => {
       // ② 否决（带意见）→ 打回重跑 → 再次 waiting-human
       await post(`/api/workflow-runs/${rid}/reject`, { feedback: '风格不对，重写' })
       assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '否决后应自动重跑并再次等确认')
-      const runAfter = await get<{ run: { taskAppend: string | null; steps: Array<{ runIds: string[] }> } }>(
+      const runAfter = await get<{ run: { steps: Array<{ runIds: string[]; prompt: string | null }> } }>(
         `/api/workflow-runs/${rid}`,
       )
-      // 打回时 gateFeedback 标记会被消费（清了）——意见固化到 taskAppend
-      assert.ok(runAfter.run.taskAppend?.includes('风格不对，重写'), '意见固化到 taskAppend')
       assert.equal(runAfter.run.steps[0]!.runIds.length, 2, '写作步骤跑了两轮（runIds 累积）')
+      // v5：loop 原语把打回意见直接附加进重写任务的 prompt（不再设 taskAppend）
+      assert.ok(runAfter.run.steps[0]!.prompt?.includes('风格不对，重写'), '重写任务带打回意见')
       // ③ 第二轮 agent 收到的任务要带打回意见（{{task}} 替换时附加）
       assert.ok(
         backend.seenPrompt?.includes('风格不对，重写'),
@@ -3095,12 +3095,12 @@ describe('编排：没 await 代码的兜底（gate 否决打回）', () => {
       }
 
       const agent = await post<{ id: string }>('/api/agents', { name: '无await执行者', role: 'executor' })
-      // ★ 故意不写 await（flow 裸调用）——引擎兜底负责收口，run 不能提前 done。
-      //   gate 必须 await：2026-11（统一模型）gate() 返回句柄（thenable），不被
-      //   await/消费就不执行——"忘写 await"的兜底场景落在 flow/loop 上。
+      // ★ v5（2026-11 设计）：惰性句柄——不 await 不执行（无兜底魔法）。
+      //   人把关否决打回 = 显式 loop（gate 作把关者）：否决 → 重写轮（意见附加到
+      //   重写任务）→ 再等确认。这里验证这一整条真链路。
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
-        name: '无await编排',
-        code: `flow('inline:无await执行者', '{{task}}')\nawait gate('结果请你过目')`,
+        name: 'v5 把关循环',
+        code: `const 写作 = agent('无await执行者')\nawait loop(写作, gate('结果请你过目'), '{{task}}')`,
         templateKey: 'gate',
       })
       const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
@@ -3109,14 +3109,11 @@ describe('编排：没 await 代码的兜底（gate 否决打回）', () => {
       })
       const rid = started.run.id
 
-      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '没 await 也要等到 gate 等人确认（不能提前 done）')
-      // 否决 → 兜底打回重跑 → 再次 waiting-human
+      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', 'loop 的 gate 把关 → 等确认')
+      // 否决 → loop 重写轮（打回意见附加进重写任务）→ 再次 waiting-human
       await post(`/api/workflow-runs/${rid}/reject`, { feedback: '风格不对，重写' })
-      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '否决后兜底打回并再次等确认')
-      const runAfter = await get<{ run: { taskAppend: string | null; steps: Array<{ runIds: string[] }> } }>(
-        `/api/workflow-runs/${rid}`,
-      )
-      assert.ok(runAfter.run.taskAppend?.includes('风格不对，重写'), '意见固化到 taskAppend')
+      assert.equal(await waitStatus(rid, ['waiting-human']), 'waiting-human', '否决后重写并再次等确认')
+      const runAfter = await get<{ run: { steps: Array<{ runIds: string[] }> } }>(`/api/workflow-runs/${rid}`)
       assert.equal(runAfter.run.steps[0]!.runIds.length, 2, '写作步骤跑了两轮')
       assert.ok(backend.seenPrompt?.includes('风格不对，重写'), '重跑时 agent 应收到打回意见')
       // confirm → done

@@ -28,6 +28,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { RunId, WorkspaceId } from '@agentdeck/protocol'
+import type { WorkflowRun, WorkflowStep } from '@agentdeck/orchestration'
 
 /* ══════════════════════════════════════════════════════════════════
  * 类型
@@ -64,52 +65,6 @@ export interface WorkflowInlineAgent {
   reviewStandard: string | null
 }
 
-/** 编排运行实例（一次运行；挂在 issue 上，见 server.ts）。 */
-export interface WorkflowRun {
-  id: string
-  /** 这次运行对应的任务（issue）id。 */
-  issueId: string
-  workflowId: string
-  /** 这次运行的工作目录（发起时设定，null = daemon 自动分配；每步都在其下跑）。 */
-  workDir: string | null
-  status: 'queued' | 'running' | 'paused' | 'waiting-human' | 'done' | 'failed'
-  /** 步骤链（引擎按代码顺序登记）。 */
-  steps: WorkflowStep[]
-  /** 2026-11：gate 否决时人填的意见——UI 展示用；打回轮由 taskAppend 固化。 */
-  gateFeedback: string | null
-  /**
-   * ★ 2026-11（使用者踩到：编排代码忘写 await）：否决意见**固化**到这里，重跑轮
-   *   的 submitStep 把它附加进任务。为什么不能直接读 gateFeedback：fn 结束后（没
-   *   await 的兜底路径）gate 步骤还挂着 waiting-human，兜底靠"gateFeedback 有值
-   *   且 taskAppend 为空"识别"刚否决、要打回"——意见留在 gateFeedback 上，重跑轮
-   *   的 gate 就永远被误判成"刚否决"，死循环打回（实测踩过）。
-   */
-  taskAppend: string | null
-  error: string | null
-  createdAt: number
-  updatedAt: number
-}
-
-/** 一步（一次"组跑" / 一个 gate 站）。 */
-export interface WorkflowStep {
-  /** 步骤序号（幂等键：代码未变时稳定；续跑按它跳过已完成步骤）。 */
-  seq: number
-  kind: 'flow' | 'parallel' | 'aggregate' | 'loop' | 'route' | 'gate'
-  /** 展示名（如"起草 A · 组A"、"gate · 等你确认"）。 */
-  label: string
-  /** 节点（组 id 或内嵌智能体 id）。gate/并行聚合时可能为 null。 */
-  nodeId: string | null
-  /** 投给这一步的 prompt。 */
-  prompt: string | null
-  /** 这一步的 run（并行聚合时是多个）。 */
-  runIds: RunId[]
-  /** gate 的等待文案。 */
-  gateText: string | null
-  status: 'pending' | 'running' | 'done' | 'failed' | 'waiting-human' | 'skipped'
-  startedAt: number | null
-  finishedAt: number | null
-}
-
 /** 模板骨架：新建编排时插入代码。 */
 export interface WorkflowTemplate {
   key: string
@@ -124,35 +79,38 @@ export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
     key: 'single-flow',
     name: '单组流程',
     code: `// 单组流程：一个智能体跑一次任务
-// 节点 = 智能体名（inline: 前缀，运行时按名字在智能体里解析）
 // {{task}} = 发起运行时填的任务描述（占位符，会被替换）
-await flow('inline:智能体名', '{{task}}')`,
+await flow([agent('智能体名')], '{{task}}')`,
   },
   {
     key: 'sequential',
     name: '顺序流水线',
-    code: `// 顺序流水线：A 干完 B 接力
-await flow(['inline:智能体A', 'inline:智能体B'], '{{task}}')`,
+    code: `// 顺序流水线：A 干完 B 接力（产物自动传递）
+await flow([agent('智能体A'), agent('智能体B')], '{{task}}')`,
   },
   {
     key: 'parallel',
     name: '并行派活',
-    code: `// 并行派活：分头干、合一份
-const drafts = await parallel(['inline:智能体A', 'inline:智能体B'], '{{task}}')
-await aggregate(drafts, 'inline:合并智能体', '合并成一份')`,
+    code: `// 并行派活：分头干（同一任务 → 多个智能体）
+const 部分 = await parallel([agent('智能体A'), agent('智能体B')], '{{task}}')
+// 聚合 = JS 拼 + 一个 agent
+const 汇总 = 部分.map((x) => x.message).join('\n\n')
+await flow([agent('合并智能体')], '合并成一份：\n' + 汇总)`,
   },
   {
     key: 'loop',
     name: '评审返工',
-    code: `// 评审返工：审不过就重做，最多 N 轮（reviewer = 审核者智能体名）
-await loop('inline:执行智能体', '{{task}}', { maxRounds: 2, reviewer: 'inline:审核智能体' })`,
+    code: `// 评审返工：执行者 ↔ 把关者，审不过就重做（最多 2 次重写）
+const 写作 = agent('执行智能体')
+const 审查 = agent('审核智能体', (意见) =>
+  意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' })
+await loop(写作, 审查, '{{task}}', { maxRounds: 2 })`,
   },
   {
     key: 'route',
     name: '路由分流',
-    code: `// 路由分流：按类型派专家（按任务描述里的关键字选智能体）
-// {{task}} 会被替换成任务描述——填的任务里带上关键字（如"代码"/"写作"）才能正确分派
-await route('{{task}}', { 代码: 'inline:代码智能体', 写作: 'inline:写作智能体' })`,
+    code: `// 路由分流：按任务描述里的关键字选智能体（无命中 = 第一个）
+await route({ 代码: agent('代码智能体'), 写作: agent('写作智能体') }, '{{task}}')`,
   },
   {
     key: 'supervise',
@@ -225,532 +183,16 @@ export async function saveWorkflowRuns(dir: string, list: readonly WorkflowRun[]
   await writeFile(tmp, JSON.stringify(list, null, 2), 'utf8')
   await rename(tmp, path)
 }
-
 /* ══════════════════════════════════════════════════════════════════
- * 引擎（纯逻辑；提交 run 靠注入的 submit 回调）
+ * 引擎（v5）——已迁到 @agentdeck/orchestration（与界面/daemon 解耦）
  * ══════════════════════════════════════════════════════════════════ */
 
-/** 一次"组跑"的提交回调（server 提供：调 submitRunRequest）。 */
-/** 步骤提交选项（2026-11：编排不用「智能体组」也能配审核链）。 */
-export interface StepSubmitOptions {
-  /** 审核者智能体名（`inline:名字` 格式；组节点时作为对组默认审核者的覆盖）。 */
-  reviewer?: string
-  /** ★ 2026-11 重写轮续会话：指向上一次执行 run（executor 取它的 sessionId 恢复）。 */
-  resumeFromRunId?: RunId
-  /** ★ 2026-11 把关：提交审核 run（而非执行 run）。 */
-  kind?: 'execute' | 'review'
-  /** ★ 2026-11 把关：审核者智能体名（kind='review' 时）。 */
-  reviewAgentName?: string
-  /** ★ 2026-11 把关：被审的执行 run id（kind='review' 时，subject = {type:'run', id}）。 */
-  subjectRunId?: RunId
-}
-
-export interface StepSubmitter {
-  (
-    step: WorkflowStep,
-    prompt: string,
-    opts?: StepSubmitOptions,
-  ): Promise<{
-    ok: boolean
-    runId: RunId | null
-    error?: string
-    /** ★ 2026-11 把关：run 收口后的最后一条文本（执行/审核 run 的产出）。 */
-    output?: string | null
-    /** ★ 2026-11 把关（不带 parser 时）：审核 run 的判决结论（通过 = true）。 */
-    reviewPass?: boolean
-  }>
-}
-
-/**
- * ★ 2026-11（使用者拍板：统一模型）把关循环的最小契约——loop 只读 `pass`（过不过）
- * 与 `feedback`（打回依据，附加进重写轮任务），**其余字段任意**（分数/建议/要求……
- * 判定函数想带什么都行，loop 不读、信息不丢）。
- */
-export type GuardVerdict = { pass: boolean; feedback?: string; [k: string]: unknown }
-
-/** ★ 2026-11（使用者拍板）agent 句柄：`agent('名字', 判定?)`。名字引用现有智能体；
- *  带 parser 时 PASS/FAIL 由确定性函数判（不靠 AI 自己说）；`lastRunId` 是执行链锚点
- *  ——重写轮 resume 它，跨 loop 传递"接着上一段改"（同一个 agent 变量贯穿两个循环）。 */
-export interface AgentHandle {
-  kind: 'agent'
-  name: string
-  parser?: (output: string) => GuardVerdict
-  lastRunId: RunId | null
-}
-
-/** ★ 2026-11 gate 句柄：`gate('文案')` = "把关者是人"。thenable——`await gate()`
- *  保持旧的一次性等待语义（旧编排不用改）；交给 loop 第二参时按把关者消费（不 await）。 */
-export interface GateHandle {
-  kind: 'gate'
-  text: string
-  then: <T = unknown>(
-    onfulfilled?: ((value: unknown) => T | PromiseLike<T>) | null,
-    onrejected?: ((reason: unknown) => T | PromiseLike<T>) | null,
-  ) => Promise<T>
-}
-
-/** 把关者：agent（自动判定）或 gate（人等确认）。 */
-export type GuardHandle = AgentHandle | GateHandle
-
-/** 引擎的宿主钩子（server 实现：持久化、暂停等待、gate 等待确认）。 */
-export interface EngineHooks {
-  /** 提交一次"组跑"（server 实现：解析节点 → submitRunRequest）。 */
-  submit: StepSubmitter
-  /** 每步状态变化后保存一次（断点续跑靠它）。 */
-  persist: (run: WorkflowRun) => Promise<void>
-  /** 在步骤边界检查暂停；暂停中返回的 promise 直到 resume 才 resolve。 */
-  waitIfPaused: () => Promise<void>
-  /** gate 挂起：返回的 promise 直到 confirm 才 resolve（passed）；否决 = rejected + 意见。 */
-  waitForGateConfirm: (step: WorkflowStep) => Promise<GateVerdict>
-}
-
-/** gate 的确认结果（2026-11：不只"通过"，还能"否决 + 意见"）。 */
-export type GateVerdict = { kind: 'passed' } | { kind: 'rejected'; feedback: string }
-
-/** 编排代码能用的节点：**组名**（字符串，运行时按名字在智能体组里解析）
- * 或内嵌智能体（`inline:名字`）。用组名而不是组 id：可读、稳定（用户自己命名），
- * 模板骨架里的 `'组A'` 等占位符在编辑时改成真实组名。 */
-export type WorkflowNode = string
-
-/** 把内嵌智能体定义转成节点（inline 原语；一期只做引用，不展开配置）。 */
-export interface InlineAgentDef {
-  executor: string
-  review?: string
-  model?: string
-}
-
-/**
- * 执行编排代码（注入原语），逐步登记步骤、按幂等键跳过已完成步骤。
- *
- * ⚠️ `new Function` 执行的是**使用者自己写的**编排代码（本机工具，与定时任务的
- * cron 表达式同一信任级）；原语只接受组 id / 内嵌智能体，不接受任意 workDir，
- * 安全边界保持（不能开放"提交任意 run"）。
- */
-/** 兜底轮询用的小睡（250ms）。 */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-export async function executeWorkflow(
-  run: WorkflowRun,
-  code: string,
-  hooks: EngineHooks,
-): Promise<WorkflowRun> {
-  // 幂等基线：续跑时加载已有步骤（done 跳过；waiting-human 的 gate 等确认）。
-  // ⚠️ seq 从 **1 重新计数**（代码从头重跑，原语调用按代码顺序再次登记 seq=1,2,3…），
-  //    这样续跑时第一步命中 prior 里的 done 步骤、跳过提交。若把基线设成 prior.size，
-  //    续跑会继续往后编号、永远撞不上已登记的步骤——幂等失效（实测踩过）。
-  let prior = new Map<number, WorkflowStep>(run.steps.map((s) => [s.seq, s]))
-  let seq = 0
-
-  const now = (): number => Date.now()
-
-  /** 登记下一个步骤（或取续跑时的已有步骤）。 */
-  function nextStep(
-    kind: WorkflowStep['kind'],
-    label: string,
-    nodeId: string | null,
-    prompt: string | null,
-    gateText: string | null,
-  ): WorkflowStep {
-    seq += 1
-    const priorStep = prior.get(seq)
-    if (priorStep) {
-      // 续跑：复用已有状态（done 跳过 / waiting-human 等确认 / failed 报错）。
-      return priorStep
-    }
-    const step: WorkflowStep = {
-      seq,
-      kind,
-      label,
-      nodeId,
-      prompt,
-      runIds: [],
-      gateText,
-      status: 'pending',
-      startedAt: null,
-      finishedAt: null,
-    }
-    run.steps.push(step)
-    // ⚠️ 这里**不** void persist——原语在 atBoundary/runStep 里都有 await persist，
-    // 再 fire-and-forget 一次会和后面那次**并发写同一文件**：两次 save 的 tmp 名
-    // 同毫秒撞名时，先 rename 的会把后一个的 tmp 移走，后者 rename 直接 ENOENT
-    // （真实踩过：整条编排挂 failed、daemon 进程被 unhandled rejection 打崩）。
-    return step
-  }
-
-  /** 步骤边界：暂停检查 + 状态落盘。 */
-  async function atBoundary(step: WorkflowStep): Promise<void> {
-    await hooks.persist(run)
-    await hooks.waitIfPaused()
-    void step
-  }
-
-  /** 提交一次组跑并登记到步骤（幂等：done 跳过）。 */
-  async function runStep(
-    step: WorkflowStep,
-    prompt: string,
-    opts?: StepSubmitOptions,
-  ): Promise<{ ok: boolean; runId: RunId | null }> {
-    if (step.status === 'done') return { ok: true, runId: step.runIds[0] ?? null }
-    if (step.status === 'failed') {
-      throw new Error(`步骤 ${step.seq} 上次失败了（${step.label}）——重试请用「重试此步」`)
-    }
-    step.status = 'running'
-    step.startedAt = step.startedAt ?? now()
-    await hooks.persist(run)
-    const out = await hooks.submit(step, prompt, opts)
-    if (out.ok && out.runId) {
-      if (!step.runIds.includes(out.runId)) step.runIds.push(out.runId)
-      step.status = 'done'
-    } else {
-      step.status = 'failed'
-      run.error = out.error ?? `步骤 ${step.seq}（${step.label}）提交失败`
-    }
-    step.finishedAt = now()
-    await hooks.persist(run)
-    if (step.status === 'failed') throw new Error(run.error ?? '步骤失败')
-    return { ok: true, runId: out.runId }
-  }
-
-  const primitives = {
-    /** 单组跑一次（节点 = 组 id 或内嵌智能体 id）。数组 = 顺序接力。 */
-    flow: async (
-      node: WorkflowNode | WorkflowNode[],
-      prompt: string,
-      opts?: StepSubmitOptions,
-    ) => {
-      if (Array.isArray(node)) {
-        let last: unknown = null
-        for (const n of node) {
-          const step = nextStep('flow', `组跑 · ${n}`, n, prompt, null)
-          await atBoundary(step)
-          const out = await runStep(step, prompt, opts)
-          last = out.runId ? `[已完成 ${out.runId}]` : null
-        }
-        return last
-      }
-      const step = nextStep('flow', `组跑 · ${node}`, node, prompt, null)
-      await atBoundary(step)
-      const out = await runStep(step, prompt, opts)
-      return out.runId
-    },
-
-    /** 并行：几组分头干，等全部（整体一个步骤，runIds 多个）。 */
-    parallel: async (nodes: WorkflowNode[], prompt: string) => {
-      const step = nextStep('parallel', `并行 · ${nodes.join(' + ')}`, nodes[0] ?? null, prompt, null)
-      await atBoundary(step)
-      step.status = 'running'
-      step.startedAt = step.startedAt ?? now()
-      await hooks.persist(run)
-      const outs = await Promise.all(
-        nodes.map(async (n) => {
-          const sub: WorkflowStep = { ...step, seq: 0, label: `并行子步 · ${n}`, nodeId: n }
-          return hooks.submit(sub, prompt)
-        }),
-      )
-      const okAll = outs.every((o) => o.ok && o.runId)
-      step.runIds = outs.map((o) => o.runId).filter((x): x is RunId => !!x)
-      step.status = okAll ? 'done' : 'failed'
-      if (!okAll) run.error = '并行步骤有子步失败'
-      step.finishedAt = now()
-      await hooks.persist(run)
-      if (!okAll) throw new Error(run.error ?? '并行步骤失败')
-      return step.runIds
-    },
-
-    /** 聚合：把上一步结果摘要附进 prompt，交给一组整合。 */
-    aggregate: async (results: unknown, node: WorkflowNode, prompt: string) => {
-      const digest = Array.isArray(results) ? `（上一步产出：${results.length} 份结果）` : ''
-      const step = nextStep('aggregate', `聚合 · ${node}`, node, prompt, null)
-      await atBoundary(step)
-      const out = await runStep(step, `${digest}${prompt}`)
-      return out.runId
-    },
-
-    /** 路由：按 prompt 里的关键字选组（map：{ 名字: 组id }）。 */
-    route: async (prompt: string, map: Record<string, WorkflowNode>) => {
-      const key = Object.keys(map).find((k) => prompt.includes(k)) ?? Object.keys(map)[0]
-      const node: WorkflowNode | null = key ? (map[key] ?? null) : (Object.values(map)[0] ?? null)
-      const step = nextStep('route', `路由 → ${key ?? '默认'}`, node, prompt, null)
-      await atBoundary(step)
-      const out = await runStep(step, prompt)
-      return out.runId
-    },
-
-    /** 人机回环：停下等确认。★ 2026-11（统一模型）`gate()` 返回**句柄**（可 thenable）：
-     *   `await gate('文案')` = 旧的一次性等待（旧编排不改）；`loop(A, gate('文案'))`
-     *   把它当"把关者是人"的循环形态（见 loop 的 guard 分支）。 */
-    gate: (text: string): GateHandle => {
-      const handle: GateHandle = {
-        kind: 'gate',
-        text,
-        then: <T>(
-          onfulfilled?: ((value: unknown) => T | PromiseLike<T>) | null,
-          onrejected?: ((reason: unknown) => T | PromiseLike<T>) | null,
-        ): Promise<T> => gateOnce(text).then(onfulfilled, onrejected),
-      }
-      return handle
-    },
-
-    /** ★ 2026-11（使用者拍板：统一模型）agent 句柄：`agent('名字', 判定?)`。名字引用
-     *  现有智能体（`inline:` 前缀兼容）；带判定函数时，把关的 PASS/FAIL 由它（确定性
-     *  函数）判审核 run 的产出——不靠 AI 自己输出"通过/不通过"字样。`lastRunId` 是
-     *  执行链锚点：同一变量贯穿多个 loop 时，"接着上一段最后那版改"写进代码就成立。 */
-    agent: (name: string, parser?: (output: string) => GuardVerdict): AgentHandle => ({
-      kind: 'agent',
-      name: name.replace(/^inline:/, ''),
-      // exactOptionalPropertyTypes：parser 缺省时不留 `parser: undefined` 键
-      ...(parser ? { parser } : {}),
-      lastRunId: null,
-    }),
-
-    /** 评审返工：组跑，失败且轮数 < maxRounds 时重跑（同一步骤内循环）。
-     *  ★ 2026-11（统一模型）新签名 `loop(执行者, 把关者, prompt?, opts?)`：
-     *    把关者 = agent 句柄（AI 审核 + 判定函数）或 gate 句柄（人等确认）；
-     *    执行者 = agent 句柄（resume 锚点在句柄的 lastRunId 上）。
-     *    旧签名 `loop('节点', 'prompt', { maxRounds, reviewer })` 兼容（reviewer 挂
-     *    执行 run、由 autoChainReview 串审核——判定靠 verdict，不打回意见）。 */
-    loop: async (
-      executor: WorkflowNode | AgentHandle,
-      guardOrPrompt: GuardHandle | string,
-      promptOrOpts?: string | { maxRounds?: number; reviewer?: string },
-      opts?: { maxRounds?: number; reviewer?: string },
-    ) => {
-      let executorNode: string
-      let guard: GuardHandle | null
-      let prompt: string
-      let options: { maxRounds?: number; reviewer?: string }
-      if (typeof guardOrPrompt === 'string') {
-        // 旧签名：loop('节点', 'prompt', { maxRounds, reviewer })
-        executorNode = executor as string
-        guard = null
-        prompt = guardOrPrompt
-        options = (promptOrOpts as { maxRounds?: number; reviewer?: string } | undefined) ?? {}
-      } else {
-        // 新签名：loop(agent('写作'), agent('审查', 判定), '{{task}}', { maxRounds })
-        const eh = executor as AgentHandle
-        executorNode = `inline:${eh.name}`
-        guard = guardOrPrompt
-        prompt = typeof promptOrOpts === 'string' ? promptOrOpts : '{{task}}'
-        options = (typeof promptOrOpts === 'string' ? opts : promptOrOpts) ?? {}
-      }
-      const maxRounds = Math.max(0, options.maxRounds ?? 1)
-      const step = nextStep(
-        'loop',
-        `评审返工 · ${executorNode}（≤${maxRounds + 1} 轮）`,
-        executorNode,
-        prompt,
-        null,
-      )
-      await atBoundary(step)
-      if (step.status === 'done') return step.runIds[0] ?? null
-      step.status = 'running'
-      step.startedAt = step.startedAt ?? now()
-      await hooks.persist(run)
-      let attempt = 0
-      let out: { ok: boolean; runId: RunId | null } = { ok: false, runId: null }
-      while (attempt <= maxRounds) {
-        // ① 执行者 run。resume 锚点：重写轮续**执行者句柄**（executor）的
-        //    lastRunId——不是把关者的！把关者（agent/gate）不执行、不产出版本；
-        //    上一版是执行者写的，锚点必须在执行者身上（实测踩过：写在把关者上，
-        //    gate 把关时重写轮永远 fresh）。
-        const eh = guard ? (executor as AgentHandle) : null
-        const submitOpts: StepSubmitOptions | undefined = eh
-          ? {
-              ...(eh.lastRunId ? { resumeFromRunId: eh.lastRunId } : {}),
-            }
-          : options.reviewer
-            ? { reviewer: options.reviewer }
-            : undefined
-        out = await hooks.submit(step, prompt, submitOpts)
-        if (out.ok && out.runId) {
-          if (eh) eh.lastRunId = out.runId
-          if (!step.runIds.includes(out.runId)) step.runIds.push(out.runId)
-        } else {
-          attempt += 1
-          if (attempt > maxRounds) break
-          // 同一目录续跑（自动重试一次组跑）
-          await hooks.waitIfPaused()
-          continue
-        }
-        // ② 把关。旧签名：执行 run 带 reviewer（autoChainReview 串审核、审不过
-        //    run failed）——一次提交即一轮，这里直接收口。
-        if (!guard) break
-        if (guard.kind === 'gate') {
-          // 人把关：挂起等确认。确认 = pass 出循环；否决 = 意见固化进 taskAppend
-          // （重跑轮 submitStep 附加进任务）→ 下一轮执行者 resume 重写。
-          step.gateText = guard.text
-          step.status = 'waiting-human'
-          step.startedAt = step.startedAt ?? now()
-          run.status = 'waiting-human'
-          await hooks.persist(run)
-          const verdict = await hooks.waitForGateConfirm(step)
-          if (verdict.kind === 'passed') break
-          const append = `[打回意见] ${verdict.feedback}`
-          run.taskAppend = run.taskAppend ? `${run.taskAppend}\n\n${append}` : append
-          await hooks.persist(run)
-          step.status = 'running'
-        } else {
-          // agent 把关：提交审核 run（审执行者产出）→ 产出 → 判定函数（带 parser）
-          //   或审核 run 判决（不带 parser）。不通过：意见固化 → 下一轮重写。
-          const review = await hooks.submit(step, prompt, {
-            kind: 'review',
-            reviewAgentName: guard.name,
-            subjectRunId: out.runId,
-          })
-          if (!review.ok) {
-            step.status = 'failed'
-            run.error = review.error ?? '审核 run 提交失败'
-            break
-          }
-          const verdict = guard.parser
-            ? guard.parser(review.output ?? '')
-            : { pass: review.reviewPass ?? false, feedback: review.output ?? '' }
-          if (verdict.pass) break
-          const feedback = (verdict.feedback ?? '').trim()
-          if (feedback !== '') {
-            const append = `[审查意见] ${feedback}`
-            run.taskAppend = run.taskAppend ? `${run.taskAppend}\n\n${append}` : append
-            await hooks.persist(run)
-          }
-        }
-        attempt += 1
-        if (attempt > maxRounds) break
-        await hooks.waitIfPaused()
-      }
-      if (out.ok && out.runId) {
-        // ⚠️ 无条件 done：把关 gate 的确认可能已由 confirm action 标过 done
-        //   （waiting-human → done）——重复标无害；不改的话续跑时这个分支的类型
-        //   收窄成"绝不会 done"（TS2367），运行时会漏掉 confirm 后的收口。
-        step.status = 'done'
-      } else {
-        step.status = 'failed'
-        run.error = `评审返工 ${maxRounds + 1} 轮都没过`
-      }
-      step.finishedAt = now()
-      await hooks.persist(run)
-      if (step.status === 'failed') throw new Error(run.error ?? '评审返工失败')
-      return out.runId
-    },
-
-    /** 内嵌智能体（一期：引用编排定义里的 inlineAgents；代码里按名字查）。 */
-    inline: (def: InlineAgentDef): WorkflowNode => {
-      // 一期：按名字在 run 的定义里查（server 解析时把 def 挂到 workflow）；这里
-      // 只接受定义对象、返回占位节点——真正的内嵌智能体在 server 端解析。
-      return `inline:${def.executor}`
-    },
-  }
-
-  // ★ 2026-11（统一模型）：gate 句柄 thenable 的一次性等待逻辑——旧 `await gate()`
-  //   编排的语义（创建 gate 步骤、waiting-human、等确认）。否决的兜底处理保持
-  //   v2：设 gateFeedback + 固化 taskAppend，由 executeWorkflow 的兜底 while 识别
-  //   "刚否决"→ 重置步骤链打回重跑（loop 把关的 gate 不走这条——loop 原语自己在
-  //   把关循环里处理否决，见 loop 的 guard.kind === 'gate' 分支）。
-  async function gateOnce(text: string): Promise<void> {
-    const step = nextStep('gate', 'gate · 等你确认', null, null, text)
-    if (step.status === 'done') return
-    step.status = 'waiting-human'
-    step.startedAt = step.startedAt ?? now()
-    await hooks.persist(run)
-    run.status = 'waiting-human'
-    await hooks.persist(run)
-    const verdict = await hooks.waitForGateConfirm(step)
-    if (verdict.kind === 'rejected') {
-      // ★ 否决**不 throw**（2026-11 使用者踩到：编排代码忘写 await 时，throw 发
-      //   生在后天的 gate Promise——unhandledRejection 直接崩 daemon 进程）。
-      run.gateFeedback = verdict.feedback
-      const append = `[打回意见] ${verdict.feedback}`
-      run.taskAppend = run.taskAppend ? `${run.taskAppend}\n\n${append}` : append
-      await hooks.persist(run)
-      return
-    }
-    step.status = 'done'
-    step.finishedAt = now()
-    await hooks.persist(run)
-  }
-
-  const fn = new Function(
-    'flow',
-    'parallel',
-    'aggregate',
-    'loop',
-    'route',
-    'gate',
-    'agent',
-    'inline',
-    `return (async () => {\n${code}\n})()`,
-  )
-  // ★ 2026-11 gate 打回（使用者："不通过就要重新打回去改"）：否决 → 重置步骤链、
-  //   意见存 run（submitStep 附加进下一轮任务），从头再执行一遍——写/审/再等确认。
-  //   最多打回 3 轮，仍不通过则 run failed（不再无限打转）。
-  let rejectRounds = 0
-  const MAX_REJECT_ROUNDS = 3
-  for (;;) {
-    // ★ 打回重跑：seq 从 1 重新登记、**prior 按当前 run.steps 重建**——命中第一轮
-    //   留下的步骤对象（重置成 pending 的同一引用），runStep 再提交一轮、runIds
-    //   累积在同一步骤上。prior 不重建/seq 不归零都会让第二轮从 1 或 3 新登记，
-    //   旧步骤成了孤儿（两处都实测踩过）。
-    seq = 0
-    prior = new Map<number, WorkflowStep>(run.steps.map((s) => [s.seq, s]))
-    run.status = 'running'
-    run.error = null
-    await hooks.persist(run)
-    try {
-      await fn(
-        primitives.flow,
-        primitives.parallel,
-        primitives.aggregate,
-        primitives.loop,
-        primitives.route,
-        primitives.gate,
-        primitives.agent,
-        primitives.inline,
-      )
-    } catch (err) {
-      run.status = 'failed'
-      run.error = err instanceof Error ? err.message : String(err)
-      break
-    }
-    // ★ fn 结束 ≠ 步骤收口（2026-11 使用者踩到：编排代码忘写 await，loop/gate
-    //   的 Promise 在后台继续，run 却已经标 done——之后否决把 run 设回 running
-    //   就永远卡住）。兜底：fn 结束还有步骤没收口就继续等；gate 挂着时等人
-    //   确认，或识别"刚否决"（gateFeedback 有值，gate primitive 设置的）→
-    //   重置步骤链、清标记、打回重跑（意见已固化在 taskAppend）。
-    let redo = false
-    for (;;) {
-      await sleep(250)
-      const active = run.steps.filter((s) => s.status === 'running' || s.status === 'pending')
-      if (active.length > 0) continue
-      const gateWait = run.steps.find((s) => s.status === 'waiting-human')
-      if (!gateWait) break
-      if (run.gateFeedback !== null) {
-        // 刚否决：打回重跑（重跑轮 submitStep 读 taskAppend 附加意见）
-        rejectRounds += 1
-        if (rejectRounds > MAX_REJECT_ROUNDS) {
-          run.status = 'failed'
-          run.error = `打回 ${MAX_REJECT_ROUNDS} 次仍未通过`
-          break
-        }
-        for (const st of run.steps) {
-          st.status = 'pending'
-          st.startedAt = null
-          st.finishedAt = null
-        }
-        // 清否决标记——重跑轮的 gate 等确认时不再被当成"刚否决"
-        run.gateFeedback = null
-        redo = true
-        break
-      }
-      // 否则等人确认——继续等（confirm action 会把 gate 步骤标 done）
-    }
-    if (redo) continue
-    // 超轮失败已在兜底里定过 status——别用 done 覆盖它
-    if (run.status === 'failed') break
-    run.status = 'done'
-    break
-  }
-  run.updatedAt = now()
-  await hooks.persist(run)
-  return run
-}
+export { executeWorkflow } from '@agentdeck/orchestration'
+export type {
+  EngineHooks,
+  GateVerdict,
+  StepSubmitOptions,
+  StepSubmitResult,
+  WorkflowRun,
+  WorkflowStep,
+} from '@agentdeck/orchestration'
