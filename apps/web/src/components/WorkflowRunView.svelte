@@ -357,10 +357,13 @@
                       <li class="wf-round">
                         <div class="wf-round-tag">{$t('workflows.loopWriter')}</div>
                         <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
-                        {#if !st.gateText}
+                        {#if !st.gateText && (outputs[rid] !== undefined || reviewRunIds[rid])}
                           <!-- ★ 2026-11（统一模型）：只有 agent 把关（带审核者）才有
                              审查员行；gate 把关（人在 loop 卡内确认）没有审查员——
-                             显示"（审查中…）"是误导。 -->
+                             显示"（审查中…）"是误导。
+                             2026-11 补充：执行 run 还没产出（写作员还在跑）时**不显示**
+                             审查员行——否则会出现"写作员执行中、审核员已审查中"的
+                             提前出现（使用者实测）。 -->
                           <div class="wf-round-tag">{$t('workflows.loopReviewer')}</div>
                           <div class="wf-round-box">
                             {#if reviewRunIds[rid]}
