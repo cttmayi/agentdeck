@@ -144,7 +144,7 @@ export interface ToolBrief {
  * `chat` 的模版就是聊天的 **① 框架**——任务那份框架里有 run/对象头、"报告"要求与
  * 判决契约，灌进聊天是错的（聊天不产出判决，也没有报告可交）。
  */
-export type FirstSentenceKind = 'execute' | 'review' | 'chat'
+export type FirstSentenceKind = 'execute' | 'review' | 'chat' | 'workflow'
 
 /**
  * 这条 run 用哪一份三块模版——**唯一判据**。
@@ -165,10 +165,21 @@ export type FirstSentenceKind = 'execute' | 'review' | 'chat'
  * ⚠️ 判据**只看 run 种类与 subject 类型**，不看 agent、不看技能、不看 prompt 内容：
  *    同一类 subject 永远同一份模版，否则"这条 run 到底被交代了什么"要靠猜。
  */
-export function firstSentenceKindFor(run: {
-  kind: 'execute' | 'review'
-  subject: { type: string }
-}): FirstSentenceKind {
+export function firstSentenceKindFor(
+  run: {
+    kind: 'execute' | 'review'
+    subject: { type: string }
+  },
+  opts?: {
+    /**
+     * ★ 2026-11 编排链路：这个 run 是编排（issue source = workflow）发起的。
+     * 编排的 agent 用**编排模版**（框架 + 身份 + 任务；审核 run 的任务 =
+     * 被审产出，不加组跑那套审核任务书包装）——调用方（执行器）查 issue 来源后传入。
+     */
+    workflow?: boolean
+  },
+): FirstSentenceKind {
+  if (opts?.workflow === true) return 'workflow'
   // 对话与沉淀：说话，不是派活（下一轮的回答还在同一个 subject 里接着往下说）
   // ★ 第 243 批：`memory-tidy` 也是"跟装着技能的智能体说话"——整理记忆与沉淀同理，
   //   用的是聊天那份框架（任务那份含报告要求与判决契约，灌进来是错的）。
@@ -454,7 +465,7 @@ const BOTH = ['execute', 'review'] as const
  *   不会报错，只会**静默漏掉**它——表现为界面上一个页签点下去就报"kind 必须是
  *   execute 或 review"。
  */
-export const ALL_KINDS = ['execute', 'review', 'chat'] as const
+export const ALL_KINDS = ['execute', 'review', 'chat', 'workflow'] as const
 const REVIEW_ONLY = ['review'] as const
 const EXECUTE_ONLY = ['execute'] as const
 
@@ -652,6 +663,27 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, BlockTemplates> = {
     task: '{{task}}',
   },
 
+  /**
+   * ★ 编排链路（2026-11）：框架/身份/任务三框——默认与 execute 同结构（编排的
+   * agent 一样在自己的工作目录里干活、一样有身份与任务）；审核 run 的「任务」
+   * = 被审产出（由平台组装进 task 块，不加组跑那套审核任务书）。
+   */
+  workflow: {
+    frame: [
+      '# 编排任务',
+      '',
+      '- run：`{{runId}}`',
+      '',
+      '{{#skills}}',
+      '能用到的技能：{{skills}}',
+      '{{/skills}}',
+      '',
+      '请用{{language}}回答。',
+    ].join('\n'),
+    identity: '{{identity}}',
+    task: '{{task}}',
+  },
+
   review: {
     frame: [
       '# 审核任务',
@@ -772,6 +804,7 @@ function walkTokens(
 function kindName(kind: FirstSentenceKind): string {
   if (kind === 'review') return '审核'
   if (kind === 'chat') return '聊天'
+  if (kind === 'workflow') return '编排'
   return '执行'
 }
 
@@ -871,8 +904,8 @@ export function validateTemplate(
         const ownerKinds = owner?.kinds.filter((k) => k !== kind) ?? []
         if (owner && ownerKinds.length > 0) {
           const why =
-            kind === 'execute'
-              ? '执行 run 没有待审核的内容与判决契约'
+            kind === 'execute' || kind === 'workflow'
+              ? '执行/编排 run 没有待审核的内容与判决契约'
               : kind === 'chat'
                 ? '聊天那一轮没有待审核的内容与判决契约'
                 : '这里没有它的值'
@@ -1438,4 +1471,6 @@ export const SAMPLE_FIRST_SENTENCE_INPUTS: Record<FirstSentenceKind, FirstSenten
   execute: SAMPLE_EXECUTE_INPUT,
   review: SAMPLE_REVIEW_INPUT,
   chat: SAMPLE_CHAT_INPUT,
+  // 编排链路：样例复用执行那份（结构同：框架+身份+任务）
+  workflow: SAMPLE_EXECUTE_INPUT,
 }

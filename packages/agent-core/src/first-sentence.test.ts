@@ -820,6 +820,27 @@ describe('firstSentenceKindFor：三份模版，没有第四份给沉淀', () =>
     assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
     assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
   })
+
+  test('★ 编排链路（2026-11）：workflow 标记 → 编排模版（优先于执行/审核/聊天）', () => {
+    // 编排 run（issue source = workflow）——执行/审核都用编排模版
+    assert.equal(
+      firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }, { workflow: true }),
+      'workflow',
+    )
+    assert.equal(
+      firstSentenceKindFor({ kind: 'review', subject: { type: 'issue' } }, { workflow: true }),
+      'workflow',
+    )
+    // 没标记 = 照旧（组/任务）
+    assert.equal(
+      firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }),
+      'execute',
+    )
+    // 编排模版默认存在（框架+身份+任务）
+    assert.ok((DEFAULT_TEMPLATES.workflow.frame ?? '').length > 0)
+    assert.equal(DEFAULT_TEMPLATES.workflow.identity, '{{identity}}')
+    assert.equal(DEFAULT_TEMPLATES.workflow.task, '{{task}}')
+  })
 })
 
 // ══════════════════════════════════════════════════════════════════

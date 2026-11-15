@@ -1135,6 +1135,7 @@ export class RunExecutor {
         execute: BlockTemplates
         review: BlockTemplates
         chat: BlockTemplates
+        workflow: BlockTemplates
       } = {
         execute: {
           frame: workspace?.executeTemplate ?? '',
@@ -1151,6 +1152,12 @@ export class RunExecutor {
           frame: workspace?.chatTemplate ?? '',
           identity: workspace?.chatIdentityTemplate ?? '',
           task: workspace?.chatTaskTemplate ?? '',
+        },
+        // 编排那一份（2026-11 第四份）。空 = 平台默认。
+        workflow: {
+          frame: workspace?.workflowTemplate ?? '',
+          identity: workspace?.workflowIdentityTemplate ?? '',
+          task: workspace?.workflowTaskTemplate ?? '',
         },
       }
       // ★ 回答语言（D39）：界面语言决定模型用什么语言答复。**prompt 本身不翻译**，
@@ -1243,6 +1250,7 @@ export class RunExecutor {
         execute: migratedBlocks(templates.execute),
         review: migratedBlocks(templates.review),
         chat: migratedBlocks(templates.chat),
+        workflow: migratedBlocks(templates.workflow ?? {}),
       }
       // 只有框架框里可能出现退役变量（身份/任务框是新字段）；审核那条老链路上也有
       const retiredSeen = [
@@ -1322,7 +1330,16 @@ export class RunExecutor {
             run.agentId as never,
           )
         : []
-      const templateKind = firstSentenceKindFor({ kind: req.kind, subject: req.subject })
+      // ★ 2026-11 编排链路：这个 run 是不是编排发起的（issue source = workflow）？
+      //   是 → 用「编排」那份模版（框架+身份+任务）；否则按执行/审核/聊天。
+      const workflowSource =
+        req.subject.type === 'issue'
+          ? ((await this.#deps.store.getIssue(req.subject.id as never))?.source?.kind ?? null) === 'workflow'
+          : false
+      const templateKind = firstSentenceKindFor(
+        { kind: req.kind, subject: req.subject },
+        { workflow: workflowSource },
+      )
       const delivery: Delivery =
         templateKind === 'chat'
           ? // ★ 对话 / 沉淀：**①②③ 都发**（2026-09 的决定）——
@@ -1383,7 +1400,8 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               memory: memoryItems,
               language,
-              template: migrated.execute,
+              // 编排 run 用编排模版（框架+身份+任务）；否则执行模版
+              template: templateKind === 'workflow' ? migrated.workflow : migrated.execute,
             }, mode)
 
       // ★ 全文进日志，**不截断**。

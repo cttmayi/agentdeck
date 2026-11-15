@@ -495,7 +495,7 @@ export interface ReviewStandard {
  * 三条链路各有一套模版：执行 / 审核 / **聊天**（2026-09 加的第三份）。
  * 聊天那份是它自己的 ① 框架——任务那份含 run/对象头与判决契约，灌进聊天是错的。
  */
-export type FirstSentenceKind = 'execute' | 'review' | 'chat'
+export type FirstSentenceKind = 'execute' | 'review' | 'chat' | 'workflow'
 
 /**
  * 三块各自的模版框（2026-10 三框改造）：① 框架 / ② 身份 / ③ 任务。
@@ -562,6 +562,8 @@ export interface TemplateKit {
     review: BlockTemplates
     /** 聊天那一份（老 daemon 不返回这个键 ⇒ `undefined` 按空处理）。 */
     chat?: BlockTemplates
+    /** 编排那一份（2026-11；老 daemon 不返回 ⇒ `undefined` 按空处理）。 */
+    workflow?: BlockTemplates
   }
   /**
    * ★ 平台替你调整过什么（2026-09 三块组装 / 2026-10 三框改造：六个变量退役）。

@@ -1407,6 +1407,9 @@ async function readWorkspaceSettings(
   reviewTaskTemplate: string
   chatIdentityTemplate: string
   chatTaskTemplate: string
+  workflowTemplate: string
+  workflowIdentityTemplate: string
+  workflowTaskTemplate: string
   defaultAgentId: string | null
   locale: Locale
   /** D77：claude 的 WebSearch/WebFetch 开关。老数据没有这个键 ⇒ 默认开。 */
@@ -1434,6 +1437,9 @@ async function readWorkspaceSettings(
     reviewTaskTemplate: workspace?.reviewTaskTemplate ?? '',
     chatIdentityTemplate: workspace?.chatIdentityTemplate ?? '',
     chatTaskTemplate: workspace?.chatTaskTemplate ?? '',
+    workflowTemplate: workspace?.workflowTemplate ?? '',
+    workflowIdentityTemplate: workspace?.workflowIdentityTemplate ?? '',
+    workflowTaskTemplate: workspace?.workflowTaskTemplate ?? '',
     defaultAgentId: workspace?.defaultAgentId ?? null,
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
@@ -5329,6 +5335,11 @@ async function injectedSkillsOf(
           identity: stored.chatIdentityTemplate,
           task: stored.chatTaskTemplate,
         },
+        workflow: {
+          frame: stored.workflowTemplate ?? '',
+          identity: stored.workflowIdentityTemplate ?? '',
+          task: stored.workflowTaskTemplate ?? '',
+        },
       }
       /**
        * 迁移某一条链路的三块，逐块报告"摘了什么、哪几行成了空标题"。
@@ -5356,10 +5367,12 @@ async function injectedSkillsOf(
       const executed = migrateKind(flat.execute)
       const reviewed = migrateKind(flat.review)
       const chatted = migrateKind(flat.chat)
+      const workflowed = migrateKind(flat.workflow)
       const current = {
         execute: executed.next,
         review: reviewed.next,
         chat: chatted.next,
+        workflow: workflowed.next,
       }
       sendJson(res, 200, {
         defaults: DEFAULT_TEMPLATES,
@@ -5371,6 +5384,7 @@ async function injectedSkillsOf(
           execute: executed.perBlock,
           review: reviewed.perBlock,
           chat: chatted.perBlock,
+          workflow: workflowed.perBlock,
         },
       })
       return
@@ -5404,6 +5418,11 @@ async function injectedSkillsOf(
           frame: 'reviewTemplate',
           identity: 'reviewIdentityTemplate',
           task: 'reviewTaskTemplate',
+        },
+        workflow: {
+          frame: 'workflowTemplate',
+          identity: 'workflowIdentityTemplate',
+          task: 'workflowTaskTemplate',
         },
         chat: {
           frame: 'chatTemplate',

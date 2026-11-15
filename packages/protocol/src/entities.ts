@@ -103,6 +103,14 @@ export const Workspace = z.object({
   reviewTaskTemplate: z.string().default('').optional(),
   chatIdentityTemplate: z.string().default('').optional(),
   chatTaskTemplate: z.string().default('').optional(),
+  /**
+   * ★ 编排链路（2026-11）：编排的 agent（执行者/审核者）用的三块模版。
+   * 编排 = 代码写死流程（框架 + 身份 + 任务就能跑），审核 run 的「任务」=
+   * 被审产出（不加组跑那套"审核任务书"包装）。空 = 平台默认。
+   */
+  workflowTemplate: z.string().default('').optional(),
+  workflowIdentityTemplate: z.string().default('').optional(),
+  workflowTaskTemplate: z.string().default('').optional(),
 
   /**
    * ★ 「新建任务」默认交给哪个智能体（D36）。

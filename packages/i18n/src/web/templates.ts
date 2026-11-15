@@ -218,6 +218,7 @@ export const templatesText = {
    *    与判决契约，而聊天不产出判决、也没有报告可交。所以它有自己的 ①。
    */
   'tpl.settings.tabChat': { zh: '聊天', en: 'Chat' },
+  'tpl.settings.tabWorkflow': { zh: '编排', en: 'Workflow' },
 
   // ── WorkspaceSettings：页签与底部 ──
   'tpl.settings.tabExecute': { zh: '执行', en: 'Execute' },

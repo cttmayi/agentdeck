@@ -45,6 +45,7 @@
     execute: { frame: '', identity: '', task: '' },
     review: { frame: '', identity: '', task: '' },
     chat: { frame: '', identity: '', task: '' },
+    workflow: { frame: '', identity: '', task: '' },
   }
   /**
    * 初始值**每次打开取一次**（不是"一辈子取一次"）。
@@ -86,6 +87,7 @@
       execute: copyKit($templateKit.current.execute),
       review: copyKit($templateKit.current.review),
       chat: copyKit($templateKit.current.chat),
+      workflow: copyKit($templateKit.current.workflow),
     }
     seeded = true
     error = ''
@@ -216,6 +218,15 @@
           >
             {$t('tpl.settings.tabChat')}
             {#if kindDirty('chat')}<span class="dot">●</span>{/if}
+          </button>
+          <button
+            type="button"
+            class="tab"
+            class:active={tab === 'workflow'}
+            onclick={() => (tab = 'workflow')}
+          >
+            {$t('tpl.settings.tabWorkflow')}
+            {#if kindDirty('workflow')}<span class="dot">●</span>{/if}
           </button>
         </div>
 
