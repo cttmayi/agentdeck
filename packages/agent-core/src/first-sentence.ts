@@ -1203,9 +1203,11 @@ export function isBlankBlock(text: string): boolean {
  * 不可能——设置页保存时就拦了），宁可让 run 明确失败并说清原因，也不要渲染出半截
  * 文本——那会表现成"模型乱答"，排查方向会指向模型。
  */
-export function buildBlocks(input: FirstSentenceInput): DeliveryBlocks {
+export function buildBlocks(input: FirstSentenceInput, defaultKind?: FirstSentenceKind): DeliveryBlocks {
   const custom = input.template ?? {}
-  const defaults = DEFAULT_TEMPLATES[input.kind]
+  // ★ 2026-11 编排：workflow run 的 input 仍是 execute 形状（kind 字段），但空模板
+  //   的默认要取**编排**那份（# 编排任务）——由调用方用 defaultKind 指定。
+  const defaults = DEFAULT_TEMPLATES[defaultKind ?? input.kind]
   const blocks: DeliveryBlocks = { frame: '', identity: '', task: '' }
   for (const block of TEMPLATE_BLOCKS) {
     const written = custom[block]?.trim()
@@ -1297,8 +1299,12 @@ export function deliveredBytes(delivery: Pick<Delivery, 'system' | 'user'>): str
   return `${delivery.system}\u0000${delivery.user}`
 }
 
-export function renderDelivery(input: FirstSentenceInput, mode: DeliveryMode): Delivery {
-  const blocks = buildBlocks(input)
+export function renderDelivery(
+  input: FirstSentenceInput,
+  mode: DeliveryMode,
+  defaultKind?: FirstSentenceKind,
+): Delivery {
+  const blocks = buildBlocks(input, defaultKind)
   if (mode === 'A') {
     const system = [blocks.frame, blocks.identity].filter((b) => !isBlankBlock(b)).join('\n\n')
     return { mode, system, user: blocks.task, blocks }

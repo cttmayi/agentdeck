@@ -2979,6 +2979,67 @@ describe('编排：任务参数化（{{task}} 占位符）', () => {
  *   真 API 全链路：run 到 waiting-human → POST reject（带意见）→ 引擎打回重跑
  *   （步骤链重置、意见附加进下一轮任务）→ 再次 waiting-human → confirm → done。
  */
+describe('编排 v5：第一句话用编排模版', () => {
+  test('编排 run 的执行第一句话是「# 编排任务」（不是执行模版「# 任务」）', async () => {
+    const backend = new FakeBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-tpl'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+      const waitStatus = async (rid: string, statuses: string[]): Promise<string> => {
+        for (let i = 0; i < 80; i++) {
+          const st = (await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)).run.status
+          if (statuses.includes(st)) return st
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        throw new Error('run 未到目标状态')
+      }
+      await post<{ id: string }>('/api/agents', { name: 'tpl执行者', role: 'executor' })
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: 'tpl编排',
+        code: `await flow([agent('tpl执行者')], '{{task}}')`,
+        templateKey: 'single-flow',
+      })
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: '写篇文章',
+        workDir: null,
+      })
+      const rid = started.run.id
+      assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
+      const runAfter = await get<{ run: { steps: Array<{ runIds: string[] }> } }>(`/api/workflow-runs/${rid}`)
+      const execRunId = runAfter.run.steps[0]!.runIds[0]!
+      // 执行 run 的第一句话（A 档：system + 用户消息）——编排模版框架是「# 编排任务」
+      const msgs = await get<{ messages: Array<{ type: string; content: string }> }>(
+        `/api/runs/${execRunId}/messages`,
+      )
+      const all = msgs.messages.map((m) => m.content).join('\n')
+      assert.ok(all.includes('# 编排任务'), '编排 run 的第一句话用编排模版（# 编排任务）')
+      assert.ok(!all.includes('# 任务\n\n- run：`') || all.includes('# 编排任务'), '不是执行模版')
+    } finally {
+      await d.close()
+    }
+  })
+})
+
 describe('编排 v5：把关循环（审查员审核 run + 反查）', () => {
   test('审查员审核 run 生成、按 subject 反查（界面「审查员意见」数据源）', async () => {
     const backend = new FakeBackend()

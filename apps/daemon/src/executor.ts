@@ -1420,9 +1420,11 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               memory: memoryItems,
               language,
-              // 编排 run 用编排模版（框架+身份+任务）；否则执行模版
+              // 编排 run 用编排模版（框架+身份+任务）；否则执行模版。
+              // 空模板的**默认**也要跟着换（workflow → # 编排任务），否则空模板
+              // 会落回执行默认（# 任务）——使用者实测踩过。
               template: templateKind === 'workflow' ? migrated.workflow : migrated.execute,
-            }, mode)
+            }, mode, templateKind === 'workflow' ? 'workflow' : undefined)
 
       // ★ 全文进日志，**不截断**。
       //
