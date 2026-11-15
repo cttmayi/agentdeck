@@ -139,6 +139,7 @@ pnpm run dev:web            # 界面开发模式：Vite(5173) 把 /api 代理到
 
 | 线索 | 状态 | 去哪看 |
 |---|---|---|
+| **编排 v5**（2026-11，✅ 收口） | **引擎独立成包 `@agentdeck/orchestration`**（与界面/daemon 解耦，hooks 注入）；三层分离（Handle 惰性 / await 执行 / Reply 结果）；原语 5 个（flow/parallel/loop/route/gate——聚合是组合）；惰性嵌套 + reset 递归；严格测试 16 用例 + e2e 49。判据：`check` 全绿 / `probe` 663 | [`./reference/orchestration-api.md`](./reference/orchestration-api.md)；`./srs/requirements.md` §16 的 **D118** |
 | **Windows 兼容性**（2026-10） | A / B / D 三级**已修完**（`pnpm run test` 1855/0、`typecheck` 0 错）；**剩"在真 Windows 上量一次"**——那几条 `[判断]` 还没变成 `[量到]` | [`./reference/windows-compat.md`](./reference/windows-compat.md) 的「现在的状态」+「下一步（新对话从这里接）」 |
 | 展示页面支持音视频 | 已做完（daemon 认 `video/*`/`audio/*` + 支持 `Range`；查看器就地播放） | `./design/design.md` §15.58 |
 | **离线语音口述**（2026-11，分批做） | **后端已做完**（第 277 批：能力探测 / 模型管理 / 两层矫正 / 录音会话 / 8 条路由）；**聊天输入条的麦克风按钮已做**（第 278 批：四态 + 电平 + Esc 取消 + 只回填不发送）。**还差**：设置面板（模型下载进度 / 语言 / 灵敏度 / `via-skill` 档）、`via-skill` 自动发送 + 3 秒撤销、词典编辑与「一键加词」、任务输入条接同一颗按钮 | [`./reference/voice-dictation.md`](./reference/voice-dictation.md)（§10 是"还没做"） |
