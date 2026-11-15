@@ -1332,10 +1332,26 @@ export class RunExecutor {
         : []
       // ★ 2026-11 编排链路：这个 run 是不是编排发起的（issue source = workflow）？
       //   是 → 用「编排」那份模版（框架+身份+任务）；否则按执行/审核/聊天。
+      //   ⚠️ 审核 run 的 subject 是 **run**（被审执行 run）——要顺着它查 issue；
+      //     只查 issue 的话审核 run 永远识别不出编排（实测踩过：审核员收到
+      //     组跑审核模板、输出判决 JSON）。
+      const sourceKindOfRun = async (runId: string): Promise<string | null> => {
+        const r = await this.#deps.store.getRun(runId as never)
+        if (!r) return null
+        // Run 实体带 issueId（可空）——派生的 subject 之外再兜一层
+        const issueId =
+          (r as { issueId?: string | null }).issueId ??
+          (r.subject.type === 'issue' ? r.subject.id : null)
+        if (!issueId) return null
+        const issue = await this.#deps.store.getIssue(issueId as never)
+        return issue?.source?.kind ?? null
+      }
       const workflowSource =
         req.subject.type === 'issue'
           ? ((await this.#deps.store.getIssue(req.subject.id as never))?.source?.kind ?? null) === 'workflow'
-          : false
+          : req.subject.type === 'run'
+            ? (await sourceKindOfRun(req.subject.id)) === 'workflow'
+            : false
       const templateKind = firstSentenceKindFor(
         { kind: req.kind, subject: req.subject },
         { workflow: workflowSource },
