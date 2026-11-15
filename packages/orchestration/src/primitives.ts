@@ -63,15 +63,19 @@ async function runExecute(
   step: WorkflowStep,
   prompt: string,
   resumeFromRunId: string | null,
-  review?: { subjectRunId: string },
+  review?: { subjectRunId: string; reviewAgentName: string },
 ): Promise<{ ok: boolean; runId: string | null; output: string; error?: string }> {
   const out = await env.hooks.submit(step, prompt, {
     ...(resumeFromRunId ? { resumeFromRunId: resumeFromRunId as never } : {}),
-    // 把关者位：提交审核 run（kind review + subject = 被审执行 run）——界面/审核链
-    // 按 subject 反查（与 autoChainReview 同一套规则）。审核 run 不进 step.runIds
-    // （它挂在执行 run 的调查链上，界面通过反查展示）。
+    // 把关者位：提交审核 run（kind review + reviewAgentName + subject = 被审执行
+    // run）——server 的审核分支要求审核者名非空（"没有依据的审核不算审核"）。
+    // 审核 run 不进 step.runIds（挂在执行 run 的调查链上，界面按 subject 反查）。
     ...(review
-      ? { kind: 'review' as const, subjectRunId: review.subjectRunId as never }
+      ? {
+          kind: 'review' as const,
+          reviewAgentName: review.reviewAgentName,
+          subjectRunId: review.subjectRunId as never,
+        }
       : {}),
   })
   if (out.ok && out.runId) {
@@ -145,7 +149,9 @@ export function makePrimitives(env: Env): Primitives {
           step,
           input,
           resume ? lastRunId : null,
-          stepOpts?.review && stepOpts.subjectRunId ? { subjectRunId: stepOpts.subjectRunId } : undefined,
+          stepOpts?.review && stepOpts.subjectRunId
+            ? { subjectRunId: stepOpts.subjectRunId, reviewAgentName: name }
+            : undefined,
         )
         if (!out.ok) return { result: 'done', message: out.error ?? '执行失败' }
         if (resume) lastRunId = out.runId

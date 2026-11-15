@@ -2979,6 +2979,77 @@ describe('编排：任务参数化（{{task}} 占位符）', () => {
  *   真 API 全链路：run 到 waiting-human → POST reject（带意见）→ 引擎打回重跑
  *   （步骤链重置、意见附加进下一轮任务）→ 再次 waiting-human → confirm → done。
  */
+describe('编排 v5：把关循环（审查员审核 run + 反查）', () => {
+  test('审查员审核 run 生成、按 subject 反查（界面「审查员意见」数据源）', async () => {
+    const backend = new FakeBackend()
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-review'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+      const waitStatus = async (rid: string, statuses: string[]): Promise<string> => {
+        for (let i = 0; i < 80; i++) {
+          const st = (await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)).run.status
+          if (statuses.includes(st)) return st
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        throw new Error('run 未到目标状态')
+      }
+
+      // 审查员必须有指令（没有依据的审核不算审核）；产出"通过"（判定 pass 出循环）
+      const execAgent = await post<{ id: string }>('/api/agents', {
+        name: 'v5执行者',
+        role: 'executor',
+      })
+      const reviewAgent = await post<{ id: string }>('/api/agents', {
+        name: 'v5审查员',
+        role: 'reviewer',
+        instructions: '审核标准：内容完整、风格一致。',
+      })
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: 'v5把关循环',
+        code: `const 写作 = agent('v5执行者')\nconst 审查 = agent('v5审查员', (意见) => 意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' })\nawait loop(写作, 审查, '{{task}}', { maxRounds: 2 })`,
+        templateKey: 'loop',
+      })
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: '写一篇文章',
+        workDir: null,
+      })
+      const rid = started.run.id
+      assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
+      const runAfter = await get<{ run: { steps: Array<{ runIds: string[] }> } }>(`/api/workflow-runs/${rid}`)
+      const execRunId = runAfter.run.steps[0]!.runIds[0]!
+      assert.ok(execRunId, '执行 run 在步骤链上')
+      // 反查审核 run（与界面 findReviewRun 同一规则：kind=review + subject.type=run + subject.id=执行 run）
+      const runs = await get<{ runs: Array<{ kind: string; subject: { type: string; id: string } }> }>('/api/runs')
+      const rev = runs.runs.find(
+        (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === execRunId,
+      )
+      assert.ok(rev, '审核 run 存在（界面「审查员意见」反查的数据源）')
+    } finally {
+      await d.close()
+    }
+  })
+})
+
 describe('编排：gate 否决打回重跑', () => {
   test('否决带意见 → 自动重跑 → 再确认完成', async () => {
     const backend = new FakeBackend()
