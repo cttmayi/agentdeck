@@ -62,7 +62,6 @@ export const workflowsText = {
   'workflows.gateFeedbackLabel': { zh: '你的意见（不通过时必填，会附加给 agent 重写）', en: 'Your feedback (required when rejecting; appended for rework)' },
   'workflows.noOutput': { zh: '（这个 agent 还没有产出）', en: '(no output from this agent yet)' },
   'workflows.stepWorking': { zh: '（这个 agent 正在跑…）', en: '(agent working…)' },
-  'workflows.round': { zh: '轮', en: 'Round' },
   'workflows.loopWriter': { zh: '写作员', en: 'Writer' },
   'workflows.loopReviewer': { zh: '审查员', en: 'Reviewer' },
   'workflows.loopReviewing': { zh: '（审查中…）', en: '(reviewing…)' },

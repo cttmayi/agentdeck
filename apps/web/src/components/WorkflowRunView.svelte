@@ -333,12 +333,12 @@
                        与「审查员意见」两块——每个 Agent 的输出独立成框（默认限高，
                        太长内部滚动），不再压成一个「评审返工」卡 -->
                   <ol class="wf-loop-rounds">
-                    {#each st.runIds as rid, i (rid)}
+                    {#each st.runIds as rid (rid)}
                       <li class="wf-round">
-                        <div class="wf-round-tag">{$t('workflows.round')} {i + 1} · {$t('workflows.loopWriter')}</div>
+                        <div class="wf-round-tag">{$t('workflows.loopWriter')}</div>
                         <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
-                        <div class="wf-round-tag review">{$t('workflows.loopReviewer')}</div>
-                        <div class="wf-round-box review">
+                        <div class="wf-round-tag">{$t('workflows.loopReviewer')}</div>
+                        <div class="wf-round-box">
                           {#if reviewRunIds[rid]}
                             {reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}
                           {:else}
@@ -471,9 +471,16 @@
   }
   /* ★ 2026-11 每个 Agent 的输出**独立成框** + 默认限高（太长内部滚动）——
      使用者："缺一个框把每个 Agent 的输出隔开，默认高度也要做限制，
-     展开太多不利于阅读整体"。所有步骤的输出统一走这个限高。 */
+     展开太多不利于阅读整体"。所有步骤的输出统一走这个限高。
+     使用者第二版反馈：框边界太浅看不清 → 外层框用 --line-strong、输出框
+     加 --surface-2 浅灰底；标签颜色统一（不要写作员/审查员分色）；不要
+     轮号显示（多轮靠外层框分隔）。 */
   .wf-out-text,
   .wf-out-gate {
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    padding: 6px 10px;
     max-height: 9rem;
     overflow-y: auto;
   }
@@ -489,7 +496,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     padding: 8px 10px;
   }
@@ -497,10 +504,11 @@
     font-size: var(--fs-sm);
     color: var(--text-faint);
   }
-  .wf-round-tag.review {
-    color: var(--accent-dim);
-  }
   .wf-round-box {
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    padding: 6px 10px;
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-dim);
