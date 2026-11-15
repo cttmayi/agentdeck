@@ -149,9 +149,21 @@
             )
             const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
             if (last) outputs = { ...outputs, [rid]: last }
-            // ★ 执行 run 的**状态**（流式部分产出 ≠ 完成——审查员行要等 completed）
-            const runDetail = await api<{ run: { status: string } }>(`/api/runs/${rid}`)
-            execStatuses = { ...execStatuses, [rid]: runDetail.run.status }
+          } catch {
+            // 单步取数失败不阻塞整体刷新
+          }
+        })()
+      }
+      // ★ 执行 run 的**状态**（独立加载——流式部分产出 ≠ 完成，审查员行要等
+      //   completed）。⚠️ 不能挂在 outputs 的 `continue` 后面：第一轮产出缓存过
+      //   之后 status 就永远不加载了（实测踩过：审核员行消失）。
+      for (const st of run.steps) {
+        const rid = lastRunId(st)
+        if (!rid || execStatuses[rid] !== undefined) continue
+        void (async () => {
+          try {
+            const d = await api<{ run: { status: string } }>(`/api/runs/${rid}`)
+            execStatuses = { ...execStatuses, [rid]: d.run.status }
           } catch {
             // 单步取数失败不阻塞整体刷新
           }
