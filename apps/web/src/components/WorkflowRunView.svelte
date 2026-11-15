@@ -330,20 +330,19 @@
                   {/if}
                 {:else if st.kind === 'loop'}
                   <!-- ★ 2026-11 每个 Agent 一个显示：loop 按轮拆成「写作员产出」
-                       与「审查员意见」两行——不再压成一个「评审返工」卡 -->
+                       与「审查员意见」两块——每个 Agent 的输出独立成框（默认限高，
+                       太长内部滚动），不再压成一个「评审返工」卡 -->
                   <ol class="wf-loop-rounds">
                     {#each st.runIds as rid, i (rid)}
                       <li class="wf-round">
-                        <div class="wf-round-row">
-                          <span class="wf-round-tag">{$t('workflows.round')} {i + 1} · {$t('workflows.loopWriter')}</span>
-                          <span class="wf-round-out">{outputs[rid] ?? $t('workflows.stepWorking')}</span>
-                        </div>
-                        <div class="wf-round-row review">
-                          <span class="wf-round-tag">{$t('workflows.loopReviewer')}</span>
+                        <div class="wf-round-tag">{$t('workflows.round')} {i + 1} · {$t('workflows.loopWriter')}</div>
+                        <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
+                        <div class="wf-round-tag review">{$t('workflows.loopReviewer')}</div>
+                        <div class="wf-round-box review">
                           {#if reviewRunIds[rid]}
-                            <span class="wf-round-out">{reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}</span>
+                            {reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}
                           {:else}
-                            <span class="wf-round-out faint">{$t('workflows.loopReviewing')}</span>
+                            <span class="faint">{$t('workflows.loopReviewing')}</span>
                           {/if}
                         </div>
                       </li>
@@ -470,8 +469,14 @@
   .wf-out-body {
     padding: 4px 12px 10px;
   }
-  /* ★ 2026-11 loop 步骤按轮拆：每轮「写作员产出」+「审查员意见」两行。
-     审查员行缩进一档、标签淡色，跟写作员行区分开。 */
+  /* ★ 2026-11 每个 Agent 的输出**独立成框** + 默认限高（太长内部滚动）——
+     使用者："缺一个框把每个 Agent 的输出隔开，默认高度也要做限制，
+     展开太多不利于阅读整体"。所有步骤的输出统一走这个限高。 */
+  .wf-out-text,
+  .wf-out-gate {
+    max-height: 9rem;
+    overflow-y: auto;
+  }
   .wf-loop-rounds {
     list-style: none;
     margin: 0;
@@ -481,30 +486,28 @@
     gap: 6px;
   }
   .wf-round {
-    border-left: 2px solid var(--line);
-    padding-left: 8px;
-  }
-  .wf-round-row {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .wf-round-row.review {
-    padding-left: 14px;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px 10px;
   }
   .wf-round-tag {
-    flex: none;
     font-size: var(--fs-sm);
     color: var(--text-faint);
   }
-  .wf-round-out {
-    min-width: 0;
-    flex: 1;
+  .wf-round-tag.review {
+    color: var(--accent-dim);
+  }
+  .wf-round-box {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-dim);
     font-size: var(--fs-sm);
     line-height: 1.5;
+    max-height: 9rem;
+    overflow-y: auto;
   }
   .wf-out-text,
   .wf-out-gate {
