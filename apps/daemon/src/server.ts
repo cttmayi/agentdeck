@@ -4124,6 +4124,85 @@ async function injectedSkillsOf(
 
           // 每步的 submit：解析节点 → 提交一次"组跑"（或内嵌智能体纯执行）。
           const submitStep: NonNullable<EngineHooks['submit']> = async (step, prompt, opts) => {
+            // ★ 2026-11（统一模型）把关提交：kind='review' → 提交审核 run（审一条
+            //   执行 run 的产出），不走执行链路。审核 run 的 subject = 被审执行 run，
+            //   与 autoChainReview 串接的审核 run 同一套反查规则（UI 两侧都能找到）。
+            if (opts?.kind === 'review') {
+              const rName = (opts.reviewAgentName ?? '').replace(/^inline:/, '')
+              if (rName === '' || !opts.subjectRunId) {
+                return { ok: false, runId: null, error: '审核提交缺少审核者或被审 run' }
+              }
+              const rAgents = await store.listAgents(workspaceId)
+              const rAgent = rAgents.find((a) => (a.name as string) === rName)
+              if (!rAgent) {
+                return { ok: false, runId: null, error: `审核者智能体不存在：${rName}` }
+              }
+              // ★ 审核者的"身份"（指令）必须非空——"没有依据的审核不算审核"
+              //   （与 autoChainReview 同一句判据；没有指令直接说清楚，别让审核
+              //   run 跑起来却不知道按什么标准审）。
+              const skills = await loadAgentInjectableSkills(store, rAgent)
+              const identity = reviewerIdentity(rAgent, skills)
+              if (identity.text === '') {
+                return { ok: false, runId: null, error: `审核者「${rName}」没有写「指令」（审核者的身份与判断依据都在那里），无法审核` }
+              }
+              const execRun = await store.getRun(opts.subjectRunId)
+              if (!execRun) {
+                return { ok: false, runId: null, error: '被审的执行 run 不存在' }
+              }
+              // 审核任务书：内联任务 + 被审 run 的产出（截断——产出全文可能很长，
+              //   审核者按需读材料；编排审核不配材料文件引用，先内联兜底）。
+              const execOutput =
+                lastTextOf(await store.listRunMessages(opts.subjectRunId)) ?? ''
+              const reviewPrompt =
+                `请审核这份任务产出，给出审核意见。意见里明确「通过」或「不通过」，` +
+                `不通过时说明要改什么。\n\n【任务】${taskPrompt}\n\n【产出】` +
+                `${execOutput.slice(0, 8000)}`
+              const reviewRunId = ulid() as RunId
+              const outcome = await executor.submit({
+                runId: reviewRunId,
+                kind: 'review',
+                agentRef: {
+                  id: rAgent.id,
+                  name: rAgent.name,
+                  instructions: effectiveInstructions(rAgent),
+                },
+                skills,
+                subject: { type: 'run', id: opts.subjectRunId },
+                prompt: reviewPrompt,
+                agentDefaultWorkDir: execRun.workDir ?? rAgent.workDir ?? undefined,
+                limits: { maxTurns: null, timeoutMs: null },
+                review: {
+                  kind: 'workflow',
+                  title: `编排审核 · ${rName}`,
+                  body: reviewPrompt,
+                  inputBlobRef: null,
+                  relatedIssueId: run.issueId,
+                  materialRefs: null,
+                },
+              })
+              if (outcome.kind !== 'accepted') {
+                return { ok: false, runId: null, error: '审核 run 未受理' }
+              }
+              const final = await waitForRunDone(reviewRunId)
+              if (final === 'failed' || final === 'cancelled') {
+                return { ok: false, runId: reviewRunId, error: '审核 run 失败' }
+              }
+              const reviewRun = await store.getRun(reviewRunId)
+              const reviewOutput = reviewRun
+                ? (lastTextOf(await store.listRunMessages(reviewRunId)) ?? '')
+                : ''
+              const verdicts = reviewRun
+                ? await store.listVerdictsByRun(reviewRunId)
+                : []
+              const lastVerdict = verdicts[verdicts.length - 1] ?? null
+              return {
+                ok: true,
+                runId: reviewRunId,
+                output: reviewOutput,
+                // 不带 parser 的把关：按审核 run 的判决结论判（通过 = pass）。
+                reviewPass: lastVerdict ? lastVerdict.conclusion === 'pass' : false,
+              }
+            }
             const node = step.nodeId
             if (!node) return { ok: false, runId: null, error: '步骤没有节点' }
             // 占位符替换（先于一切使用 prompt 的地方；步骤链上登记的 prompt 也换成
@@ -4184,6 +4263,9 @@ async function injectedSkillsOf(
               prompt: task,
               ...(groupId ? { groupId } : {}),
               ...(reviewerAgentId ? { reviewerAgentId } : {}),
+              // ★ 2026-11（统一模型）重写轮续会话：resume 上一轮执行 run（executor
+              //   取它的 sessionId 交给 CLI 恢复——agent 记得上一版和打回意见）。
+              ...(opts?.resumeFromRunId ? { resumeFromRunId: opts.resumeFromRunId } : {}),
               // 编排任务的工作目录：发起时设定（与「新建任务」同款：null = daemon 自动分配）
               ...(run.workDir ? { workDir: run.workDir } : {}),
               limits: { maxTurns: null, timeoutMs: null },
@@ -4203,7 +4285,12 @@ async function injectedSkillsOf(
               //   根本没跑"）。这里轮询到子 run 收口（completed/failed/cancelled），
               //   步骤 done/failed 才跟子 run 的真实结果走。
               const final = await waitForRunDone(runId)
-              if (final === 'completed') return { ok: true, runId }
+              if (final === 'completed') {
+                // ★ 2026-11（统一模型）把关需要产出：收口后带出最后一条文本。
+                const output =
+                  lastTextOf(await store.listRunMessages(runId)) ?? ''
+                return { ok: true, runId, output }
+              }
               const target = await store.getRun(runId)
               return {
                 ok: false,
@@ -7094,8 +7181,10 @@ async function injectedSkillsOf(
         return
       }
       if (action === 'confirm') {
-        // gate 确认：把 waiting-human 的 gate 步骤标记 done，放行引擎
-        const gateStep = run.steps.find((x) => x.status === 'waiting-human' && x.kind === 'gate')
+        // gate 确认：把 waiting-human 的步骤标记 done，放行引擎。★ 2026-11（统一
+        //   模型）不限于 kind='gate'——loop 把关的 gate 让 loop 步骤本身挂着
+        //   waiting-human（见 workflows.ts 的 loop guard 分支）。
+        const gateStep = run.steps.find((x) => x.status === 'waiting-human')
         if (!gateStep) {
           sendJson(res, 400, { error: '没有在等待确认的 gate', code: 'workflow_gate_not_waiting' })
           return
@@ -7115,14 +7204,17 @@ async function injectedSkillsOf(
       }
       if (action === 'reject') {
         // ★ 2026-11 gate 否决（带意见）：放行引擎 → gate 抛打回信号 → 引擎重置
-        //   步骤链从头重跑（意见附加进下一轮任务，见 submitStep）
+        //   步骤链从头重跑（意见附加进下一轮任务，见 submitStep）。
+        //   ⚠️ 2026-11（统一模型）：loop 把关的 gate（loop 步骤 waiting-human）否决
+        //   后由 loop 原语自己走下一轮（执行者 resume 重写）——不重置整个步骤链。
+        //   run.gateFeedback 是给 UI 的展示 + 兜底（忘 await 时）的识别标记。
         const verdictBody = (await readJsonBody(req).catch(() => null)) as { feedback?: unknown } | null
         const feedback = typeof verdictBody?.feedback === 'string' ? verdictBody.feedback.trim() : ''
         if (feedback === '') {
           sendJson(res, 400, { error: '否决必须说明意见（打回理由）', code: 'workflow_reject_need_feedback' })
           return
         }
-        const gateStep = run.steps.find((x) => x.status === 'waiting-human' && x.kind === 'gate')
+        const gateStep = run.steps.find((x) => x.status === 'waiting-human')
         if (!gateStep) {
           sendJson(res, 400, { error: '没有在等待确认的 gate', code: 'workflow_gate_not_waiting' })
           return

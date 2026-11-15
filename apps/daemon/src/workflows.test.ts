@@ -254,10 +254,12 @@ test('★ 兜底：编排代码忘写 await（loop/gate 不 await）——fn 结
     }
     return { kind: 'passed' as const }
   }
-  // 故意不 await：`loop(...)` 和 `gate(...)` 都裸调用
+  // 故意不 await：`loop(...)` 裸调用（最常被忘的那个），gate 正常 await——
+  //   ★ 2026-11（统一模型）gate() 是句柄（thenable）：不 await 它就不执行，
+  //   所以"忘写 await"的兜底场景落在 loop 上（后台 promise 继续跑，兜底等收口）。
   const out = await executeWorkflow(
     run,
-    `loop('groupA', '{{task}}')\ngate('过目')`,
+    `loop('groupA', '{{task}}')\nawait gate('过目')`,
     hooks,
   )
   assert.equal(out.status, 'done', '没 await 也不能提前 done——要等步骤收口')
@@ -284,10 +286,11 @@ test('★ 兜底 + 否决：没 await 的代码点否决——固化意见、打
     }
     return { kind: 'passed' as const }
   }
-  // 没 await：fn 立即结束，gate 的否决标记发生在后台 promise——兜底 while 打回重跑
+  // 没 await（loop）：fn 立即结束，loop 的后台 promise 继续跑；gate 正常 await，
+  // 它的否决标记发生在后台 promise——兜底 while 打回重跑
   const out = await executeWorkflow(
     run,
-    `loop('groupA', '{{task}}')\ngate('过目')`,
+    `loop('groupA', '{{task}}')\nawait gate('过目')`,
     hooks,
   )
   assert.equal(out.status, 'done', '兜底路径否决后要打回重跑并最终完成')
@@ -326,8 +329,7 @@ test('★ 正常路径（await）+ 否决两次：gate primitive 设标记、兜
   assert.equal(flowStep?.runIds.length, 3, '跑了三轮')
 })
 
-test('★ 暂停在步骤边界生效：paused 时引擎挂起，resume 后继续', async () => {
-  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
+test('★ 暂停在步骤边界生效：paused 时引擎挂起，resume 后继续', async () => {  const submitted: Array<{ prompt: string; step: WorkflowStep }> = []
   const run = freshRun()
   const waiters: Array<() => void> = []
   const hooks = makeHooks({ submitted })
@@ -382,4 +384,99 @@ test('★ 运行实例存储往返', async () => {
   const loaded = await loadWorkflowRuns(TMP)
   assert.equal(loaded.length, 1)
   assert.equal(loaded[0]!.id, 'run-1')
+})
+
+/* ══════════════════════════════════════════════════════════════════
+ * ★ 2026-11 统一模型（使用者拍板）：agent 变量 + loop(执行者, 把关者)
+ *   ——执行者/审核者/人都是"把关循环里的一方"；把关结果最小契约
+ *   { pass, feedback }（其余字段任意）；重写轮 resume 上一轮会话
+ *   （resume 锚点 = agent 句柄的 lastRunId，跨 loop 传递）。
+ * ══════════════════════════════════════════════════════════════════ */
+
+test('★ 统一模型：loop(agent, agent+判定)——执行者写、审核 run 判；不过打回（resume 重写 + 意见固化）、过了 done', async () => {
+  const run = freshRun()
+  const calls: Array<{ opts?: import('./workflows.ts').StepSubmitOptions | undefined; prompt: string }> = []
+  const hooks = makeHooks({})
+  hooks.submit = async (step, prompt, opts) => {
+    calls.push({ opts, prompt })
+    if (opts?.kind === 'review') {
+      // 第一次审核：不过（产出含"不通过"）；第二次：过
+      const revCount = calls.filter((c) => c.opts?.kind === 'review').length
+      if (revCount === 1) {
+        return { ok: true, runId: 'rev-1' as RunId, output: '不通过：风格不对', reviewPass: false }
+      }
+      return { ok: true, runId: 'rev-2' as RunId, output: '通过', reviewPass: true }
+    }
+    const execCount = calls.filter((c) => !c.opts?.kind).length
+    return { ok: true, runId: `ex-${execCount}` as RunId, output: '文章' }
+  }
+  const out = await executeWorkflow(
+    run,
+    `const A = agent('写作员')\nconst 判 = (意见) => 意见.includes('不通过') ? { pass: false, feedback: 意见 } : { pass: true }\nawait loop(A, agent('审查员', 判), '{{task}}', { maxRounds: 3 })`,
+    hooks,
+  )
+  assert.equal(out.status, 'done')
+  const execCalls = calls.filter((c) => !c.opts?.kind)
+  assert.equal(execCalls.length, 2, '两轮执行（第一轮审不过 → 重写）')
+  assert.equal(
+    execCalls[1]!.opts?.resumeFromRunId,
+    'ex-1',
+    '第二轮 resume 第一轮（executor 句柄的 lastRunId 锚点）',
+  )
+  assert.ok(out.taskAppend?.includes('[审查意见] 不通过：风格不对'), '审核意见固化进 taskAppend（重写轮 submitStep 附加）')
+  const loopStep = out.steps.find((x) => x.kind === 'loop')
+  assert.equal(loopStep?.runIds.length, 2, '两轮 runId 累积在同一步骤')
+})
+
+test('★ 统一模型：loop(agent, gate)——执行者写、人等确认；否决 → resume 重写再确认', async () => {
+  const run = freshRun()
+  const execCalls: Array<string> = []
+  let gateCalls = 0
+  const hooks = makeHooks({})
+  hooks.submit = async (step, prompt, opts) => {
+    if (opts?.kind === 'review') return { ok: false, runId: null, error: 'gate 把关不该提交审核 run' }
+    execCalls.push(opts?.resumeFromRunId ?? 'fresh')
+    return { ok: true, runId: `ex-${execCalls.length}` as RunId, output: '文章' }
+  }
+  hooks.waitForGateConfirm = async () => {
+    gateCalls += 1
+    if (gateCalls === 1) return { kind: 'rejected', feedback: '再改改' }
+    const st = run.steps.find((x) => x.status === 'waiting-human')
+    if (st) {
+      st.status = 'done'
+      st.finishedAt = Date.now()
+    }
+    return { kind: 'passed' as const }
+  }
+  const out = await executeWorkflow(
+    run,
+    `const A = agent('写作员')\nawait loop(A, gate('请过目，不满意说明意见'), '{{task}}', { maxRounds: 3 })`,
+    hooks,
+  )
+  assert.equal(out.status, 'done')
+  assert.equal(execCalls.length, 2, '两轮执行（否决 → 重写）')
+  assert.equal(execCalls[1], 'ex-1', '第二轮 resume 第一轮')
+  assert.ok(out.taskAppend?.includes('再改改'), '人否决的意见固化进 taskAppend')
+  assert.equal(gateCalls, 2, '人等了两轮确认')
+})
+
+test('★ 统一模型：同一 agent 变量贯穿两个 loop——第二个 loop 第一轮 resume 第一个 loop 的最后执行 run', async () => {
+  const run = freshRun()
+  const execCalls: Array<{ resume: string }> = []
+  const hooks = makeHooks({})
+  hooks.submit = async (step, prompt, opts) => {
+    if (opts?.kind === 'review') {
+      return { ok: true, runId: 'rev' as RunId, output: '通过', reviewPass: true }
+    }
+    execCalls.push({ resume: opts?.resumeFromRunId ?? 'fresh' })
+    return { ok: true, runId: `ex-${execCalls.length}` as RunId, output: '文章' }
+  }
+  const out = await executeWorkflow(
+    run,
+    `const A = agent('写作员')\nawait loop(A, agent('审查员', (o) => ({ pass: true })), '{{task}}', { maxRounds: 3 })\nawait loop(A, gate('请过目'), '{{task}}', { maxRounds: 3 })`,
+    hooks,
+  )
+  assert.equal(out.status, 'done')
+  assert.equal(execCalls.length, 2, '两个 loop 各一轮')
+  assert.equal(execCalls[1]!.resume, 'ex-1', '第二个 loop 第一轮 resume 第一个 loop 的最后执行 run（agent 变量跨 loop 传递锚点）')
 })

@@ -3095,10 +3095,12 @@ describe('编排：没 await 代码的兜底（gate 否决打回）', () => {
       }
 
       const agent = await post<{ id: string }>('/api/agents', { name: '无await执行者', role: 'executor' })
-      // ★ 故意不写 await——引擎兜底负责收口，run 不能提前 done
+      // ★ 故意不写 await（flow 裸调用）——引擎兜底负责收口，run 不能提前 done。
+      //   gate 必须 await：2026-11（统一模型）gate() 返回句柄（thenable），不被
+      //   await/消费就不执行——"忘写 await"的兜底场景落在 flow/loop 上。
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '无await编排',
-        code: `flow('inline:无await执行者', '{{task}}')\ngate('结果请你过目')`,
+        code: `flow('inline:无await执行者', '{{task}}')\nawait gate('结果请你过目')`,
         templateKey: 'gate',
       })
       const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {

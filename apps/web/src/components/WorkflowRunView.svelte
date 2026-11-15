@@ -298,36 +298,38 @@
                   </span>
                 </button>
 
-                {#if st.kind === 'gate' && st.gateText}
-                  {#if st.status === 'waiting-human'}
-                    <article class="notice wf-gate">
-                      <strong>{$t('workflows.stepWaitingHuman')}</strong>
-                      <p>"{st.gateText}"</p>
-                      <label class="field">
-                        <span class="fs-sm faint">{$t('workflows.gateFeedbackLabel')}</span>
-                        <textarea rows="2" bind:value={gateFeedback}></textarea>
-                      </label>
-                      <div class="detail-actions">
-                        <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void control('confirm')}>
-                          {$t('workflows.confirm')}
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn--danger"
-                          disabled={busy || gateFeedback.trim() === ''}
-                          title={gateFeedback.trim() === '' ? $t('workflows.gateFeedbackLabel') : ''}
-                          onclick={() => void rejectGate()}
-                        >
-                          {$t('workflows.gateReject')}
-                        </button>
-                      </div>
-                    </article>
-                  {:else}
-                    <!-- gate 步骤没有 run，无输出——只显示等待文案 -->
-                    <div class="wf-out-body">
-                      <p class="wf-out-gate">"{st.gateText}"</p>
+                {#if st.status === 'waiting-human' && st.gateText}
+                  <!-- ★ 2026-11（统一模型）确认面板：gate 卡与 loop 把关 gate
+                     （loop 步骤本身挂着 waiting-human）共用同一块——人等确认，
+                     否决必填意见（打回理由，附加给重写轮）。 -->
+                  <article class="notice wf-gate">
+                    <strong>{$t('workflows.stepWaitingHuman')}</strong>
+                    <p>"{st.gateText}"</p>
+                    <label class="field">
+                      <span class="fs-sm faint">{$t('workflows.gateFeedbackLabel')}</span>
+                      <textarea rows="2" bind:value={gateFeedback}></textarea>
+                    </label>
+                    <div class="detail-actions">
+                      <button type="button" class="btn btn--primary" disabled={busy} onclick={() => void control('confirm')}>
+                        {$t('workflows.confirm')}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn--danger"
+                        disabled={busy || gateFeedback.trim() === ''}
+                        title={gateFeedback.trim() === '' ? $t('workflows.gateFeedbackLabel') : ''}
+                        onclick={() => void rejectGate()}
+                      >
+                        {$t('workflows.gateReject')}
+                      </button>
                     </div>
-                  {/if}
+                  </article>
+                {/if}
+                {#if st.kind === 'gate' && st.gateText && st.status !== 'waiting-human'}
+                  <!-- gate 步骤没有 run，无输出——只显示等待文案 -->
+                  <div class="wf-out-body">
+                    <p class="wf-out-gate">"{st.gateText}"</p>
+                  </div>
                 {:else if st.kind === 'loop'}
                   <!-- ★ 2026-11 每个 Agent 一个显示：loop 按轮拆成「写作员产出」
                        与「审查员意见」两块——每个 Agent 的输出独立成框（默认限高，
@@ -337,14 +339,19 @@
                       <li class="wf-round">
                         <div class="wf-round-tag">{$t('workflows.loopWriter')}</div>
                         <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
-                        <div class="wf-round-tag">{$t('workflows.loopReviewer')}</div>
-                        <div class="wf-round-box">
-                          {#if reviewRunIds[rid]}
-                            {reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}
-                          {:else}
-                            <span class="faint">{$t('workflows.loopReviewing')}</span>
-                          {/if}
-                        </div>
+                        {#if !st.gateText}
+                          <!-- ★ 2026-11（统一模型）：只有 agent 把关（带审核者）才有
+                             审查员行；gate 把关（人在 loop 卡内确认）没有审查员——
+                             显示"（审查中…）"是误导。 -->
+                          <div class="wf-round-tag">{$t('workflows.loopReviewer')}</div>
+                          <div class="wf-round-box">
+                            {#if reviewRunIds[rid]}
+                              {reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}
+                            {:else}
+                              <span class="faint">{$t('workflows.loopReviewing')}</span>
+                            {/if}
+                          </div>
+                        {/if}
                       </li>
                     {/each}
                   </ol>
