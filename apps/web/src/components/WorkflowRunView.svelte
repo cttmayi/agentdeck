@@ -94,6 +94,19 @@
   function toggleStep(seq: number): void {
     expandedSeq = expandedSeq === seq ? null : seq
   }
+  /** 卡片标题上的「最后结果」摘要（使用者 2026-11：结果放标题上）。 */
+  function resultSummary(st: WorkflowStep): string {
+    if (st.status === 'running' || st.status === 'pending') return $t('workflows.stepWorking')
+    const out = stepOutput(st)
+    if (!out) return $t('workflows.noOutput')
+    const first = (out.split('\n')[0] ?? '').trim()
+    return first.length > 72 ? `${first.slice(0, 72)}…` : first
+  }
+  /** 展开态：手动展开（expandedSeq）优先；默认运行中/等确认自动展开，执行完收起。 */
+  function isExpanded(st: WorkflowStep): boolean {
+    if (expandedSeq === st.seq) return true
+    return expandedSeq === null && (st.status === 'running' || st.status === 'waiting-human')
+  }
 
   /** 按执行 runId 反查它的审查 run（没有则 null）。列表只拉一次。 */
   let runsList: Array<{ runId: string; kind: string; subject: { type: string; id: string } }> | null =
@@ -291,10 +304,13 @@
               <li class="wf-out {st.status === 'running' ? 'on' : ''}">
                 <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
                   <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
-                  <span class="wf-out-title">{st.label}</span>
+                  <span class="wf-out-title">
+                    {st.label}
+                    <span class="wf-out-result">— {resultSummary(st)}</span>
+                  </span>
                   <span class="wf-out-run mono faint">{lastRunId(st) ? lastRunId(st)!.slice(-8) : ''}</span>
                   <span class="wf-out-toggle">
-                    {expandedSeq === st.seq ? $t('workflows.collapse') : $t('workflows.expand')}
+                    {isExpanded(st) ? '▾ ' + $t('workflows.collapse') : '▸ ' + $t('workflows.expand')}
                   </span>
                 </button>
 
@@ -325,7 +341,9 @@
                     </div>
                   </article>
                 {/if}
-                {#if st.kind === 'gate' && st.gateText && st.status !== 'waiting-human'}
+                {#if !isExpanded(st)}
+                  <!-- 收起态：正文不显示（标题已带最后结果） -->
+                {:else if st.kind === 'gate' && st.gateText && st.status !== 'waiting-human'}
                   <!-- gate 步骤没有 run，无输出——只显示等待文案 -->
                   <div class="wf-out-body">
                     <p class="wf-out-gate">"{st.gateText}"</p>
@@ -366,7 +384,7 @@
                   </div>
                 {/if}
 
-                {#if expandedSeq === st.seq && lastRunId(st)}
+                {#if isExpanded(st) && lastRunId(st)}
                   <div class="wf-out-log">
                     <RunLog runId={lastRunId(st)!} fill />
                   </div>
@@ -465,6 +483,11 @@
     white-space: nowrap;
     font-weight: 600;
   }
+  .wf-out-result {
+    color: var(--text-faint);
+    font-weight: 400;
+  }
+
   .wf-out-run {
     font-size: var(--fs-sm);
     color: var(--text-faint);
