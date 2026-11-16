@@ -49,7 +49,6 @@ import {
 const EXECUTE_FRAME = `# 任务
 
 - run：\`01M2EXEC000000000000000001\`
-- 对象：issue \`01M2ISSUE00000000000000001\`
 
 能用到的技能：algorithmic-art、writing-notes
 

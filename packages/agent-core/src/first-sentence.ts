@@ -524,11 +524,20 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, BlockTemplates> = {
    * 那几行连同它们的标题一起消失，不会留下空标题或光秃秃的标签行。
    */
   execute: {
+    /**
+     * ⚠️ 2026-11（S6）使用者拍板：这里原来还有一行 `- 对象：{{subjectType}} `{{subjectId}}``，
+     *   **删掉**。两个理由：
+     *     · 编排那份默认**从来没有**这一行——同一件事在两档里长得不一样，本身就说明
+     *       它不属于"平台默认"该有的东西（两档现在除标题外逐字相同）；
+     *     · 它当初是给审核那一档认"对象是什么"用的（报告 / 任务 / run）。审核退场之后
+     *       它对一条普通任务 run 只是噪音：模型真正需要的是"这次要做什么"，那是 ③。
+     *   ⚠️ `{{subjectType}}` / `{{subjectId}}` **两个变量都还在**（见 `TEMPLATE_VARIABLES`）：
+     *   想知道这次是哪条任务的人，把它写进自己的模版就行——平台不替他决定要不要。
+     */
     frame: [
       '# 任务',
       '',
       '- run：`{{runId}}`',
-      '- 对象：{{subjectType}} `{{subjectId}}`',
       '',
       '{{#skills}}',
       '能用到的技能：{{skills}}',

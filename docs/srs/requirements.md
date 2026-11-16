@@ -1199,6 +1199,8 @@ proposed → (auto_approved | awaiting_approval) → executing → executed | fa
 
 | **D129** ✅ 已实施 | **S6 收口：老数据容忍 + 探针按意图重量 + 两个"死接口"当场删掉** | 2026-11，S1–S5 之后的最后一步。① **老数据**：不做回填，只在**读**的时候容忍缺键（`agent-legacy.ts` 摘 `role` / `allowedActions` / `reviewStandard` 等老键；`Run.reviewerAgentId`、`groupId`、`verdict` 那类字段删了之后老记录原样读得出来）。② **文档**：D122–D128 逐条记进 §16，根 `README.md` 里"执行 → 审核 → 结构化判决 → 有界动作"那条产品链整体改写（它不再成立）。③ **探针**：界面少了三个视图（组 / 工具 / 判决）与新建任务的三步链，`probe:layout` 的 **118 条判据宿主没了**——按"意图没变就不许删"逐条重量（96 条随功能删、其余改成新契约，另新写 13 条钉"退场的东西不许长回来"），**551 项全绿**。④ 顺手抓到两个**真缺陷**：**(a)** 设置页那个「审核」模版页签——daemon 侧 `FirstSentenceKind` 早就是 `execute \| chat \| workflow`，Web 的类型还留着 `'review'`，于是页签画得出来、框能写、**保存被静默忽略**（本仓库第一号缺陷"接口接受了、行为上不存在"）；**(b)** 两条死词条（`agents.standardLegacyNoticeFromSkill` / `agents.headlineNoInstructions`，i18n 死词条检查一直红着）。 | 承 D122/D127；`tools/layout-probe/README.md` 的"现状"一节记了逐段处置表与两次"删区域吃掉邻居"的教训 |
 
+| **D130** ✅ 已实施 | **第一句话默认里的「对象」一行删掉；「执行」与「编排」两档默认对齐到只差一级标题（三档**不**合并）** | 2026-11 使用者问「第一句模版里的『执行』是什么场景用的」→ 看过渲染结果之后拍板两件事。① **删「- 对象：{{subjectType}} …」那一行**：编排那档默认从来没有这一行（同一件事在两档里长得不一样，本身就说明它不属于平台默认）；它当初是给审核认"对象是什么"用的，审核退场之后对一条普通任务 run 只是噪音，模型真正需要的是"这次要做什么"（③）。⚠️ `{{subjectType}}` / `{{subjectId}}` **两个变量都保留**——想认对象的人自己写进模版。② **不合并成两档**：使用者选"先不动结构，只把两档默认文案对齐"——对齐之后「执行」与「编排」除 `# 任务` / `# 编排任务` 外**逐字相同**（分成两档的唯一理由是"想让编排的 agent 单独被交代"，默认什么都没变）。判据：`check` 1999 全绿、`probe:layout` 551 项全绿。 | 代码：`packages/agent-core/src/first-sentence.ts#DEFAULT_TEMPLATES`；文档：`docs/reference/first-sentence-template.md`（§2 表格 / §4 变量表 / §5 默认全文）、`docs/runtime/pipeline.md` 的第一句话实例 |
+
 
 
 | # | 问题 | 状态 |
