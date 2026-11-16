@@ -3578,27 +3578,12 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           return !!nameInput && !!codeArea
         })()
 
-        // ── 编排任务（2026-11，使用者拍板"侧栏应该有一编排任务页"）──
-        //   全部编排运行的列表视图（左栏列表 + 右栏提示），点一条进运行画面。
-        f.contentWindow.location.hash = '#/workflow-runs'
-        await until(() => text(d().querySelector('.page-name')) === '编排任务')
-        await until(() => !!d().querySelector('.wf-run-row, .empty'), 60)
-        facts['workflowRuns.listRenders'] = await (async () => {
-          const pane = d().querySelector('.list-pane .pane-body')
-          if (!pane) {
-            errors.push('编排任务页左栏列表区不存在')
-            return false
-          }
-          // 列表（有运行数据时 .wf-run-row 行）或空态（.empty）至少一个在
-          const rows = pane.querySelectorAll('.wf-run-row').length
-          const empty = !!pane.querySelector('.empty')
-          return rows >= 0 && (rows > 0 || empty)
-        })()
-        facts['workflowRuns.emptyShown'] = await (async () => {
-          // 右栏 = MainArea 空态（列表即入口，没选中时给「点一条看运行画面」提示）
-          const right = d().querySelector('.detail-pane .empty')
-          return right !== null && (text(right) ?? '').includes('点一条看运行画面')
-        })()
+        /*
+         * ⚠️ 2026-11（D132）：「编排任务」页删掉了——编排的每一次运行都会建一条 issue，
+         *   它在**任务页**里按编排分组列着，点开就是同一个运行画面。所以这里原来量的
+         *   `workflowRuns.listRenders` / `workflowRuns.emptyShown` 两条随页面一起删；
+         *   "编排的运行在任务页里看得见"这件事，由任务页那几条（分组 + 行）继续守着。
+         */
 
         // ── 关于（2026-11 立项）：版本 · 环境 · 边界 ──
         f.contentWindow.location.hash = '#/about'

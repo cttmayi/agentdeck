@@ -25,7 +25,7 @@
     workflowStepKindKey,
   } from '../lib/run-status.ts'
   import { agents, issues } from '../lib/stores.ts'
-  import { go, wfReturn } from '../lib/view.ts'
+  import { go } from '../lib/view.ts'
   import RunLog from './RunLog.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
 
@@ -249,9 +249,14 @@
 <div class="wf-run-layout" class:embedded>
   <div class="detail-head">
     <div class="detail-sub">
+      <!--
+        ⚠️ 2026-11（D132）：这里原来按 `wfReturn` 决定回哪儿（定义页 or「编排任务」页）。
+        那一页删掉之后，整页形态只剩"从编排定义页进来"这一种 ⇒ 返回恒回「编排」页；
+        embedded 形态（任务页里）本来就不画返回按钮。
+      -->
       {#if !embedded}
-        <button type="button" class="btn btn--ghost" onclick={() => go($wfReturn)}>
-          {$t($wfReturn === 'workflows' ? 'workflows.runBack' : 'workflowruns.runBack')}
+        <button type="button" class="btn btn--ghost" onclick={() => go('workflows')}>
+          {$t('workflows.runBack')}
         </button>
       {/if}
       <h2>{issue?.title ?? runId.slice(0, 8)}</h2>

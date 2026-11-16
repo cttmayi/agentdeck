@@ -119,36 +119,34 @@ describe('hashFor', () => {
     })
   })
 
-  it('★ `workflowRun` 只对编排两个视图成立（别的视图没有这个状态）', () => {
+  it('★ `workflowRun` 只对编排视图成立（别的视图没有这个状态）', () => {
     assert.equal(hashFor('agents', { workflowRun: { runId: 'X' } }), '#/agents')
     assert.equal(hashFor('tasks', { workflowRun: { runId: 'X' } }), '#/tasks')
-    // 编排任务列表也接受运行画面子路由（点一条主区直接画，不切视图——2026-11 拍板）
-    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: 'X' } }), '#/workflow-runs/X')
   })
 
-  it('★ 编排任务列表里点一条：子路由 `#/workflow-runs/<id>`，视图仍是编排任务', () => {
+  /**
+   * ⚠️ 2026-11（D132）：「编排任务」页（`workflow-runs`）删掉了——编排的每一次运行都
+   *   有一条 issue，它在**任务页**按编排分组列着、点开就是同一个运行画面。所以这里
+   *   钉两件事：**旧地址仍然认得**（报错式作废一个地址，等于让书签悄悄落到别处），
+   *   且它现在指向**编排视图的运行画面**（正规地址 `#/workflows/run/<id>`）。
+   */
+  it('★ 旧地址 `#/workflow-runs/<id>` 认得，且解析成编排视图的运行画面（D132）', () => {
     const r = parseHash('#/workflow-runs/01M57WHC')
     assert.deepEqual(r, {
-      view: 'workflow-runs',
+      view: 'workflows',
       creating: false,
       crystallize: null,
       workflowRun: { runId: '01M57WHC' },
     })
-    assert.equal(hashFor('workflow-runs', { workflowRun: { runId: '01M57WHC' } }), '#/workflow-runs/01M57WHC')
+    // 正规地址只有一种形态：`#/workflows/run/<id>`
+    assert.equal(hashFor('workflows', { workflowRun: { runId: '01M57WHC' } }), '#/workflows/run/01M57WHC')
     // 与 parseHash 是一对（刷新还在）
-    assert.deepEqual(parseHash(hashFor('workflow-runs', { workflowRun: { runId: '01M57WHC' } })), r)
+    assert.deepEqual(parseHash(hashFor('workflows', { workflowRun: { runId: '01M57WHC' } })), r)
   })
 
-  it('★ 编排任务列表是独立视图（`#/workflow-runs`），不是编排页的子状态', () => {
+  it('★ `#/workflow-runs`（没有 id 的旧列表地址）回落成任务页，不制造白屏视图', () => {
     assert.deepEqual(parseHash('#/workflow-runs'), {
-      view: 'workflow-runs',
-      creating: false,
-      crystallize: null,
-      workflowRun: null,
-    })
-    assert.equal(hashFor('workflow-runs'), '#/workflow-runs')
-    assert.deepEqual(parseHash(hashFor('workflow-runs')), {
-      view: 'workflow-runs',
+      view: 'tasks',
       creating: false,
       crystallize: null,
       workflowRun: null,

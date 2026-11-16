@@ -50,9 +50,12 @@
     // ★ 编排（2026-11，使用者立项）：代码控制的多智能体流程，排定时任务之下
     //   （同属"任务生成器"一类；运行画面是子路由，不是又一个视图）。
     { id: 'workflows', title: 'workflows.navTitle', hint: 'workflows.navHint' },
-    // ★ 编排任务（2026-11，使用者拍板"侧栏应该有一编排任务页"）：全部编排运行的
-    //   列表（状态/步骤进度/时间），点一条进运行画面——排「编排」之后。
-    { id: 'workflow-runs', title: 'workflowruns.navTitle', hint: 'workflowruns.navHint' },
+    /*
+     * ⚠️ 2026-11（D132）：这里原来有一项「编排任务」（全部编排运行的列表）。
+     *   **删掉**：编排的每一次运行都会建一条 issue，它在**任务页**里按编排分组列着、
+     *   点开就是同一个运行画面（`Tasks.svelte` 的 `wfRunForSelected`）——同一批数据
+     *   列两处，迟早分叉。定义页「该编排的历史」那一栏照旧（那是按编排看）。
+     */
     // ★ 设置（2026-11，使用者立项）：从右侧抽屉改主窗口视图（主题/语言/默认
     //   运行时/成本/远端能力）。排「关于」前面——设置是常用入口。
     { id: 'settings', title: 'settings.navTitle', hint: 'settings.navHint' },

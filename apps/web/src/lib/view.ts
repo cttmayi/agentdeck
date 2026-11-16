@@ -1,6 +1,14 @@
 import { writable } from 'svelte/store'
 import type { WebTextId } from '@agentdeck/i18n'
-import { CREATE_HASH, LEGACY_CRYSTALLIZE_RE, VIEWS, hashFor, parseHash, type ViewName } from './route.ts'
+import {
+  CREATE_HASH,
+  LEGACY_CRYSTALLIZE_RE,
+  LEGACY_WORKFLOW_RUN_RE,
+  VIEWS,
+  hashFor,
+  parseHash,
+  type ViewName,
+} from './route.ts'
 
 export { VIEWS }
 export type { ViewName }
@@ -65,7 +73,6 @@ export const VIEW_TITLE_KEYS = {
   workflows: 'workflows.navTitle',
   // ★ 编排任务（2026-11，使用者拍板"侧栏应该有一编排任务页"）：全部编排运行的
   //   列表视图，排「编排」之后。
-  'workflow-runs': 'workflowruns.navTitle',
   // ★ 设置（2026-11，使用者立项）：从抽屉改主窗口视图，排「关于」前面。
   settings: 'settings.navTitle',
   // ★ 关于（2026-11，使用者立项）：第十个视图，排最后。
@@ -118,16 +125,12 @@ export const crystallize = writable<{ runId: string } | null>(parseHash(location
  */
 export const workflowRun = writable<{ runId: string } | null>(parseHash(location.hash).workflowRun)
 
-/**
- * 运行画面「返回」按钮回哪（2026-11，使用者拍板侧栏加「编排任务」之后）。
- *
- * 运行画面可以从两处进：定义页发起运行后自动跳、编排任务列表点一条。
- * 返回应该回**来处**——store 在跳转前由各入口设置：定义页（Workflows.svelte
- * 的 startRun/openRun）设 'workflows'，编排任务列表（WorkflowRuns.svelte）与
- * 任务页（Tasks.svelte 的编排任务）设 'workflow-runs'。地址方案做不到
- * （返回目标不在地址里）；组件卸载不丢（view.ts 的 store 都是这个语义）。
+/*
+ * ⚠️ 2026-11（D132）：这里原来有一个 `wfReturn` store——运行画面那个「返回」按钮
+ *   要回**来处**（定义页 / 「编排任务」页），而"来处"不在地址里，所以用 store 记。
+ *   「编排任务」页删掉之后只剩两个入口：编排定义页与任务页（后者是 embedded，
+ *   根本没有返回按钮）⇒ 返回恒回「编排」页，store 没有存在的必要，删。
  */
-export const wfReturn = writable<ViewName>('workflows')
 
 /** 读地址 → 写四个 store。地址是唯一出处，store 只是它的投影。 */
 function syncRoute(): void {
@@ -136,9 +139,16 @@ function syncRoute(): void {
   // "两个地址同时活着"（迟早有人在别处贴旧链接，而刷新后它又跳回旧样子）。
   // `location.replace` 只换当前这一格（不污染后退栈），且会再触发一次 hashchange
   // → syncRoute 读到的是**正规**地址，重定向只发生一次，不会死循环。
-  const legacy = LEGACY_CRYSTALLIZE_RE.exec(location.hash.replace(/^#\/?/, ''))
+  const rawHash = location.hash.replace(/^#\/?/, '')
+  const legacy = LEGACY_CRYSTALLIZE_RE.exec(rawHash)
   if (legacy) {
     location.replace(`#/crystallize/${legacy[2]!}`)
+  }
+  // 旧地址 `#/workflow-runs/<runId>`（「编排任务」页删掉之前，那一页里点一条的地址）：
+  // 意思没变（"打开这一次运行的画面"），重写成编排视图的运行画面正规形态。
+  const legacyRun = LEGACY_WORKFLOW_RUN_RE.exec(rawHash)
+  if (legacyRun) {
+    location.replace(`#/workflows/run/${legacyRun[1]!}`)
   }
   const route = parseHash(location.hash)
   view.set(route.view)

@@ -12,7 +12,6 @@
   import Crystallize from './views/Crystallize.svelte'
   import Schedules from './views/Schedules.svelte'
   import Workflows from './views/Workflows.svelte'
-  import WorkflowRuns from './views/WorkflowRuns.svelte'
   import About from './views/About.svelte'
   import Settings from './views/Settings.svelte'
   import { openDrawer, toast, view } from './lib/view.ts'
@@ -136,10 +135,8 @@
       <!-- ★ 编排（2026-11，使用者立项）：代码控制的多智能体流程。
            定义页在这里；`$workflowRun` 非空时右主区画「编排任务页」（子路由）。 -->
       <Workflows />
-    {:else if $view === 'workflow-runs'}
-      <!-- ★ 编排任务（2026-11，使用者拍板侧栏加一项）：全部编排运行的列表，
-           点一条进运行画面（子路由 `#/workflows/run/<id>`）。 -->
-      <WorkflowRuns />
+    <!-- ⚠️ 2026-11（D132）：这里原来是「编排任务」页（全部编排运行的列表）。
+         删掉——编排的运行在任务页里按编排分组列着，点开就是同一个运行画面。 -->
     {:else if $view === 'settings'}
       <!-- ★ 设置（2026-11，使用者立项）：从右侧抽屉改主窗口视图——
            主题/语言/默认运行时/成本/远端能力全在这页。 -->

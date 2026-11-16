@@ -46,10 +46,16 @@ export const VIEWS = [
   //   它的"运行画面"是子路由（`#/workflows/run/<runId>`，同 crystallize 模式），
   //   不是又一个视图。排定时任务之后（同属"任务生成器"一类）。
   'workflows',
-  // ★ 编排任务（2026-11，使用者拍板"侧栏应该有一编排任务页"）：全部编排运行的
-  //   列表（状态/步骤进度/时间），点一条进运行画面——运行历史从定义页的选中详情
-  //   提升成独立视图（定义页只留"定义 + 该编排的历史"）。排「编排」之后。
-  'workflow-runs',
+  /*
+   * ⚠️ 2026-11（D132）：这里原来有一项 `'workflow-runs'`（「编排任务」页 = 全部编排
+   *   运行的列表）。**删掉**：编排的每一次运行都会建一条 issue（`source.kind =
+   *   'workflow'`），它在**任务页**里按编排分组列着，点开就是同一个运行画面
+   *   （`Tasks.svelte` 里 `wfRunForSelected` ⇒ `WorkflowRunView embedded`）——
+   *   两处列同一批数据，迟早分叉。
+   *   留着这个视图名会让 `#/workflow-runs` 解析成一个没有组件的视图（白屏），
+   *   而不是回落，所以名字一起删；`#/workflow-runs/<id>` 那种旧链接由
+   *   `parseHash` 认成**运行画面**并重写成 `#/workflows/run/<id>`（见下面那段）。
+   */
   // ★ 设置（2026-11，使用者立项）：从右侧抽屉改为**主窗口视图**——主题/语言/
   //   默认运行时/成本/远端能力全在这页。排「关于」前面（设置是常用入口）。
   'settings',
@@ -80,11 +86,13 @@ export interface Route {
    * 与 `creating` 同构：`view` 决定住哪个视图，crystallize 决定右栏画什么。
    */
   crystallize: { runId: string } | null
-  /** 编排运行画面（2026-11）：
-   *  · `workflows` 视图：`#/workflows/run/<runId>`——定义页发起的运行画面；
-   *  · `workflow-runs` 视图：`#/workflow-runs/<runId>`——编排任务列表点一条，
-   *    主区直接显示运行画面（使用者拍板：不跳去「编排」视图）。
-   *  非空 = 当前视图的主区在运行画面；空 = 定义页 / 任务列表。与 crystallize 同构。 */
+  /**
+   * 编排运行画面（2026-11）：`#/workflows/run/<runId>`——编排视图的主区在画运行画面。
+   *
+   * ⚠️ 2026-11（D132）：旧地址 `#/workflow-runs/<runId>`（「编排任务」页里点一条）也
+   *   解析到**这个**状态，并重写成上面那个正规形态。
+   * 非空 = 主区在运行画面；空 = 定义页。与 crystallize 同构。
+   */
   workflowRun: { runId: string } | null
 }
 
@@ -100,6 +108,9 @@ const CRYSTALLIZE_RE = /^crystallize\/([0-9A-Za-z]+)$/
  */
 export const LEGACY_CRYSTALLIZE_RE = /^(chat|tasks)\/crystallize\/([0-9A-Za-z]+)$/
 
+/** 旧地址：`#/workflow-runs/<runId>`（「编排任务」页删掉之前，那一页里点一条的地址）。 */
+export const LEGACY_WORKFLOW_RUN_RE = /^workflow-runs\/([0-9A-Za-z]+)$/
+
 /** 地址 → 路由。认不出来的一律回落「任务」。 */
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '')
@@ -109,15 +120,20 @@ export function parseHash(hash: string): Route {
   if (wfRun) {
     return { view: 'workflows', creating: false, crystallize: null, workflowRun: { runId: wfRun[1]! } }
   }
-  // 编排任务列表里点一条：`#/workflow-runs/<runId>`——**不切去「编排」视图**，
-  // 主区直接画运行画面（2026-11 使用者拍板；`workflow-runs/…` 不是 VIEWS 的一项）。
-  const wfRunInList = /^workflow-runs\/([0-9A-Za-z]+)$/.exec(raw)
-  if (wfRunInList) {
+  /**
+   * ⚠️ 2026-11（D132）：`#/workflow-runs/<runId>` 是「编排任务」页时代的地址。那一页
+   *   删了，但**这个链接的意思没变**——"打开这一次运行的画面"。所以它现在解析成
+   *   **编排视图的运行画面**（`#/workflows/run/<id>`），并由 `syncRoute` 把地址
+   *   写回正规形态（与上面 `LEGACY_CRYSTALLIZE_RE` 同一处置：不让两个地址同时活着，
+   *   否则刷新之后又跳回旧样子）。
+   */
+  const wfRunLegacy = LEGACY_WORKFLOW_RUN_RE.exec(raw)
+  if (wfRunLegacy) {
     return {
-      view: 'workflow-runs',
+      view: 'workflows',
       creating: false,
       crystallize: null,
-      workflowRun: { runId: wfRunInList[1]! },
+      workflowRun: { runId: wfRunLegacy[1]! },
     }
   }
   const crystal = CRYSTALLIZE_RE.exec(raw)
@@ -151,9 +167,6 @@ export function hashFor(
   //    （与 `creating` 同一个处方，见下）。
   if (opts.workflowRun && view === 'workflows') {
     return `#/workflows/run/${opts.workflowRun.runId}`
-  }
-  if (opts.workflowRun && view === 'workflow-runs') {
-    return `#/workflow-runs/${opts.workflowRun.runId}`
   }
   if (opts.crystallize && view === 'crystallize') {
     return `#/crystallize/${opts.crystallize.runId}`
