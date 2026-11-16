@@ -53,7 +53,7 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     const agents = await store.listAgents(WS)
     const drafter = agents.find((a) => builtinKindOf(a) === 'drafter')
     assert.ok(drafter, '建完必须能在列表里按内置标记找到它')
-    assert.equal(drafter.role, 'drafter')
+    assert.equal(drafter.builtinKind, 'drafter')
     assert.equal(drafter.name, DRAFTER_NAME)
     // ★ 2026-11（D111）：存储的是**组装前**正文（平台守则运行时拼）
     assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
@@ -143,17 +143,21 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(after.instructions, DRAFTER_INSTRUCTIONS_BODY)
   })
 
-  test('内置标记丢了但角色还在 ⇒ 补标记，**不是**再造一条（否则每次启动多一条）', async () => {
+  test('内置标记丢了（只剩岗位值）⇒ 认不出 ⇒ 另建一条，旧记录原样留着', async () => {
+    /*
+     * ⚠️ 2026-11（S4，D127）：这条用例原来守的是"标记丢了但 `role` 还在 ⇒ 补标记"。
+     *   **角色退场**之后没有旧证据可认（按名字认正是这个文件反复在防的事），所以
+     *   现在守的是：**认不出就另建，绝不悄悄改使用者那条记录**。
+     */
     const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     const { builtin: _dropped, ...withoutFlag } = mine
     await store.insertAgent(withoutFlag as Agent)
 
     const result = await ensureBuiltinDrafter(store, WS)
-    assert.equal(result.action, 'healed')
-    if (result.action !== 'healed') return
-    assert.match(result.why, /标记/)
-    const drafters = (await store.listAgents(WS)).filter((a) => a.role === 'drafter')
-    assert.equal(drafters.length, 1, '起草者只该有一条')
+    assert.equal(result.action, 'created', '认不出旧的那条 ⇒ 建一条新的')
+    const drafters = (await store.listAgents(WS)).filter((a) => builtinKindOf(a) === 'drafter')
+    assert.equal(drafters.length, 1, '只该有一条可用的起草者')
+    assert.equal(drafters[0]!.id, (result as { agentId: string }).agentId)
     assert.equal(drafters[0]!.builtin, true)
   })
 
@@ -162,19 +166,18 @@ describe('ensureBuiltinDrafter：建 / 幂等 / 自愈', () => {
     assert.equal(out.drafter.action, 'left-alone')
     // ★ 分批第 137 批：内置审核者随沉淀线的评审一起删除 ⇒ 这里不再断言它被建出来。
     const builtins = (await store.listAgents(WS)).filter((a) => a.builtin === true)
-    assert.equal(builtins.filter((a) => a.role === 'drafter').length, 1)
+    assert.equal(builtins.filter((a) => builtinKindOf(a) === 'drafter').length, 1)
   })
 
   test('别的 agent（普通执行者/审核者）不受影响，也不会被当成起草者', async () => {
     // 普通执行者：以起草者为底、**摘掉内置标记**（`exactOptionalPropertyTypes`
     // ⇒ 不能写 `builtin: undefined`，字段在不在本身就是判据）。
-    const mine = (await store.listAgents(WS)).find((a) => a.role === 'drafter')!
+    const mine = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'drafter')!
     const { builtin: _none, ...rest } = mine
     const plain: Agent = {
       ...(rest as Agent),
       id: ulid() as Agent['id'],
       name: '普通执行者',
-      role: 'executor',
       reviewStandard: null,
     }
     await store.insertAgent(plain)
@@ -204,7 +207,7 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     assert.equal(result.action, 'created')
     const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
     assert.ok(found, '建完必须能在列表里按内置标记找到它')
-    assert.equal(found.role, 'memory-tidy')
+    assert.equal(builtinKindOf(found), 'memory-tidy')
     assert.equal(found.name, MEMORY_TIDY_NAME)
     // ★ 2026-11（D111）：存储的是**组装前**正文
     assert.equal(found.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
@@ -242,16 +245,19 @@ describe('ensureBuiltinMemoryTidy：建 / 幂等 / 自愈', () => {
     assert.equal(after?.instructions, MEMORY_TIDY_INSTRUCTIONS_BODY)
   })
 
-  test('★ 内置标记丢了但角色还在 ⇒ 补标记（不再造一条）', async () => {
+  test('★ 内置标记丢了（只剩岗位值）⇒ 认不出 ⇒ 另建一条', async () => {
+    /*
+     * ⚠️ 2026-11（S4，D127）：同上——原来靠 `role` 认出"损坏的那条"，角色退场之后
+     *   判据只剩"`builtin` 标记 + 岗位值两个都在"，缺一个就当作没有。
+     */
     const found = (await store.listAgents(WS2)).find((a) => builtinKindOf(a) === 'memory-tidy')
     assert.ok(found)
     const { builtin: _drop, ...rest } = found
     await store.insertAgent({ ...(rest as Agent), updatedAt: Date.now() })
-    const before = (await store.listAgents(WS2)).filter((a) => a.role === 'memory-tidy').length
     const result = await ensureBuiltinMemoryTidy(store, WS2)
-    assert.equal(result.action, 'healed')
-    const after = (await store.listAgents(WS2)).filter((a) => a.role === 'memory-tidy')
-    assert.equal(after.length, before, '不许因为标记丢了就多造一条')
+    assert.equal(result.action, 'created')
+    const after = (await store.listAgents(WS2)).filter((a) => builtinKindOf(a) === 'memory-tidy')
+    assert.equal(after.length, 1)
     assert.equal(after[0]?.builtin, true)
   })
 

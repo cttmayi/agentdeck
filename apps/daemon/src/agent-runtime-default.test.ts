@@ -49,7 +49,7 @@ describe('全局 runtime 默认值：入口缺省是 default、设定可改、�
       const res = await fetch(`${url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '新执行者', instructions: '干活', role: 'executor' }),
+        body: JSON.stringify({ name: '新执行者', instructions: '干活' }),
       })
       // ⚠️ 响应体只能读一次：先 `text()` 断言状态（失败时要看得到 body），再 `JSON.parse`。
       //    写成 `assert.equal(res.status, 201, await res.text())` + `await res.json()`
@@ -66,11 +66,14 @@ describe('全局 runtime 默认值：入口缺省是 default、设定可改、�
   test('★ 内置起草者也记 `default`（它应当最跟随平台设置）', async () => {
     await withDaemon(async (url) => {
       const body = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: { runtimeKey: string; role: string; builtin?: boolean }[]
+        agents: { runtimeKey: string; builtin?: boolean; builtinKind?: string }[]
       }
-      // ⚠️ 判据是**角色**：内置有两条（起草者 + skill 审核者），按 `builtin` 挑会挑到
-      //    先出现的那条（第 70 批量的），于是这条用例可能在测审核者的 runtimeKey。
-      const drafter = body.agents.find((a) => a.role === 'drafter')
+      /*
+       * ⚠️ 判据是**哪一条内置**（不是 `builtin` 标记）：内置有好几个，按标记挑会挑到
+       *   列表里先出现的那条，于是这条用例可能在测另一个岗位的 runtimeKey。
+       *   2026-11（S4）：判据从 `role === 'drafter'` 换成 `builtinKind === 'drafter'`。
+       */
+      const drafter = body.agents.find((a) => a.builtinKind === 'drafter')
       assert.ok(drafter)
       assert.equal(drafter.runtimeKey, 'default')
     })

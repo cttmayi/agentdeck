@@ -89,6 +89,13 @@ codex app-server generate-ts --out DIR    # 生成协议 schema（可作我们�
 
 - 分析遥测默认**关**（`--analytics-default-enabled` 才开）——我们不传它。
 - 线程持久化为磁盘上的 rollout 文件（`Thread.path` 字段非 null）⇒ **跨 server 重启可 `thread/resume`**——per-run 进程模型下恢复依然成立。
+- ⚠️ **"新行分隔"只认 `\n`**（2026-11 真机 P0，D120）：一帧里可能有 **U+2028（LINE SEPARATOR）
+  / U+2029** ——agent 读进来的 PDF / 网页 / `textutil` 转文本里全是这类字符，而 codex 把它们
+  原样留在 JSON 字符串里（不转义）。用 Node 的 `readline` 收就完了：readline 把这两个码点
+  当行结束（ECMAScript 的 LineTerminator），于是**一帧 1.6MB 的 `thread/resume` 响应被切成
+  119 段**、每条都不是合法 JSON、那条请求等到 60 秒超时。收行规则因此钉在
+  `packages/agent-core/src/process-tree.ts` 的 `pipeLines`（只按 `\n` 切，`\r` 剥掉），
+  判据在 `process-tree.test.ts` + `codex-backend.test.ts`（D120）。
 - 背压：入站饱和时 JSON-RPC 错误码 `-32001`「Server overloaded; retry later.」⇒ 可重试。
 - 凭据用 codex 自己的 `~/.codex/auth.json` / keyring / `OPENAI_API_KEY`，平台不注入 env。
 
@@ -121,6 +128,9 @@ codex app-server generate-ts --out DIR    # 生成协议 schema（可作我们�
 **`response.model` 就是实际激活的模型**，留作 `AgentResult.model`（审计要"CLI 报告的"）。
 
 **`thread/resume`**：参数 `threadId`。续上次会话（返回 thread + 历史 items）。
+
+⚠️ **这个响应会很大**：本机实测一份带两次 `sed -n 1,260p` 输出的线程，响应 **1,649,749 字节、
+一整行**（里面 118 个 U+2028）。别指望"小响应"，也别在中间截断——按行收完再 parse（D120）。
 不存在的 thread ⇒ JSON-RPC error（实测一律 `-32600`，三种形态见 §7 第 5 条）⇒ 可判"恢复被拒"（`rejectDetectable=true`）。
 
 **`turn/start`**（发一轮）：

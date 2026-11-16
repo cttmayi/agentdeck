@@ -7,7 +7,6 @@ import { crystallizeText } from './crystallize.ts'
 import { dirsText } from './dirs.ts'
 import { errorsText } from './errors.ts'
 import { filesText } from './files.ts'
-import { groupsText } from './groups.ts'
 import { installText } from './install.ts'
 import { newtaskText } from './newtask.ts'
 import { runsText } from './runs.ts'
@@ -18,7 +17,6 @@ import { skillsText } from './skills.ts'
 import { tasksText } from './tasks.ts'
 import { templatesText } from './templates.ts'
 import { termsText } from './terms.ts'
-import { toolsText } from './tools.ts'
 import { workflowsText } from './workflows.ts'
 
 /**
@@ -51,7 +49,9 @@ export const webText = {
   ...tasksText,
   ...agentsText,
   // ★ D70：智能体组（执行 → 审核 → 行动 整链的默认配置）。
-  ...groupsText,
+  /*
+   * ⚠️ 2026-11（S3）：`...groupsText` 那一片随智能体组退场删（整份 `web/groups.ts`）。
+   */
   ...skillsText,
   ...installText,
   // ★ 定时任务（2026-11，使用者立项）：到点的任务生成器。
@@ -64,7 +64,6 @@ export const webText = {
   ...filesText,
   ...termsText,
   // ★ D40：工具（列表 / 安装抽屉 / 智能体详情里的挂载 / 审核标准里可勾的工具动作）
-  ...toolsText,
   ...workflowsText,
   // ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界。
   ...aboutText,

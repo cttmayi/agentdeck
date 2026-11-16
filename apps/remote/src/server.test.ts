@@ -150,15 +150,6 @@ describe('远端服务（M3）', () => {
     assert.equal(status, 200)
     const b = body as {
       skills: { slug: string }[]
-      tools: Array<{
-        slug: string
-        name: string
-        version: string | null
-        summary: string
-        manifest: { schema: string; actions: Array<{ name: string }> }
-        files: Record<string, string>
-        docs: string
-      }>
       loginMethods: { name: string }[]
     }
     // ★ D38 的那条规矩**仍然成立**：公共目录里**不该有审核标准**（`general-review`
@@ -173,50 +164,15 @@ describe('远端服务（M3）', () => {
       false,
       '审核标准不该出现在公共目录里',
     )
-    // ★ D40：这一节列的是**包**（一个目录 = 一个包 = 一组动作），不是单个动作。
-    //   原来那两条（`report.get` / `issue.update_status`）是动作名，留着会让
-    //   "tools 里的是包"这条读法在第一条记录上就破功。
-    //
-    //   现在目录里真的有一个可装的范例（`apps/remote/catalog/tools/hello-tool`），
-    //   而它**随该包一起把内容带下去**（与 skill 那条路同形：多一次往返换来
-    //   "页面拿到的东西就是装进去的东西"，中间没有第二次取内容的机会去漂移）。
-    assert.ok(b.tools.length >= 1, '目录里应当列出一个可装的工具包范例')
-    const hello = b.tools.find((t) => t.slug === 'hello-tool')
-    assert.ok(hello, '远端范例 hello-tool 应当被列出来')
-    // ⚠️ 版本会随目录改动而变：这里原来钉着 '1.0.0'，为了测「更新」功能把它提到
-    //    了 '1.0.1'（本地装的是 1.0.0 ⇒ 列表上会出现「更新到 1.0.1」）。
-    //    断言的**意图**是"版本原样带下去"，所以钉具体值不如钉形状。
-    assert.match(hello.version ?? '', /^\d+\.\d+\.\d+$/, '版本要原样带下去')
-    assert.equal(hello.manifest.schema, 'agentdeck/tool@1', '清单原样带下去')
-    assert.deepEqual(
-      (hello.manifest.actions as Array<{ name: string }>).map((a) => a.name),
-      ['say'],
-    )
-    assert.ok('scripts/say.mjs' in hello.files, '入口脚本要随包一起给，否则本地装不上')
-    assert.match(hello.docs, /hello-tool/, 'TOOL.md 的正文也要带上（界面上要显示）')
-
-    // ★ D42：远端目录里还要有**演示参数**的范例包（平台、模型、绑定参数）。
-    //   这些包是给使用者测"判决 → 参数 → 脚本"这条管道用的，所以它们必须
-    //   能过**同一份** `ToolManifest` 校验（catatlog 扫到但列不出来 = 无声地缺）
-    //   且随包带入口脚本。别让哪一天有人改坏了其中一个而目录静默少一项。
-    for (const slug of ['example-notify', 'example-llm', 'example-issue']) {
-      const t = b.tools.find((x) => x.slug === slug)
-      assert.ok(t, `远端范例 ${slug} 应当被列出来`)
-      assert.equal(t.manifest.schema, 'agentdeck/tool@1')
-      const scriptEntries = Object.keys(t.files).filter((f) => f.startsWith('scripts/'))
-      assert.ok(scriptEntries.length >= 1, `${slug} 必须带入口脚本，否则本地装不上`)
-      assert.match(t.docs, new RegExp(slug), `${slug} 的 TOOL.md 正文要带上`)
-      assert.ok(t.manifest.actions.length >= 1, `${slug} 至少要有一个动作`)
-    }
-    const notify = b.tools.find((t) => t.slug === 'example-notify')!
-    const notifyOpen = (notify.manifest.actions as unknown as Array<{
-      params: { open: Record<string, unknown> }
-    }>)[0]!.params.open
-    assert.deepEqual(
-      Object.keys(notifyOpen).sort(),
-      ['channel', 'content', 'retries', 'title', 'urgent'],
-      'example-notify 要覆盖 enum/string/integer/boolean 四种开放参数类型（给参数测试当样例）',
-    )
+    /*
+     * ⚠️ 2026-11（D123）：这里原来还有一整段**工具包目录**的断言——目录列的是
+     *   "包"（一个目录 = 一个包 = 一组动作），范例包 `hello-tool` / `example-notify`
+     *   / `example-llm` / `example-issue` 要随包带入口脚本与 TOOL.md，且
+     *   `example-notify` 要覆盖四种开放参数类型（给参数测试当样例）。
+     *
+     *   工具包随动作能力退场：`/api/catalog` 不再有 `tools` 这一节，
+     *   那四个范例包也一起删了 ⇒ 这一段整块删。
+     */
 
     const names = b.loginMethods.map((m) => m.name)
     assert.ok(names.includes('password'), '内置口令登录必须始终可用')

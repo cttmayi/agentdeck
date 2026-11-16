@@ -4,24 +4,15 @@ import { join } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import {
   ACTIVE_RUN_STATUSES,
-  assertActionTransition,
   assertRunTransition,
-  assertVerdictTransition,
-  type ActionPatch,
   type IssueQuery,
-  type ReportQuery,
   type Page,
   type RunPatch,
   type RunQuery,
   type Store,
 } from '@agentdeck/domain'
 import type {
-  Action,
-  ActionId,
-  ActionStatus,
   Agent,
-  AgentGroup,
-  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -35,7 +26,6 @@ import type {
   Issue,
   IssueId,
   MemoryEntry,
-  Report,
   Run,
   RunId,
   RunMessage,
@@ -43,11 +33,6 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
-  Tool,
-  ToolId,
-  VerdictId,
-  VerdictRecord,
-  VerdictStatus,
   Workspace,
   WorkspaceId,
 } from '@agentdeck/protocol'
@@ -185,9 +170,12 @@ const ENTITY_TABLES = [
   // 智能体记忆（分批第 240 批）。与文件适配器的 `COLLECTIONS` 同序摆放。
   'memory',
   // 智能体组（D70 增量添加）。与文件适配器的 `COLLECTIONS` 同序摆放。
-  'group',
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是 `'group'` 表（智能体组）。组退场 ⇒ 不再建那张表
+   *   （老库里它原样躺着，没有代码读它）。
+   */
   'skill',
-  'tool',
+  /* ⚠️ 2026-11（D123）：`tool` 表随工具包退场删掉（旧库里那张表不会被读，也不会被删）。 */
   'issue',
   'comment',
   /**
@@ -200,8 +188,11 @@ const ENTITY_TABLES = [
   'conversation',
   'chat_turn',
   'run',
-  'verdict',
-  'action',
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有 `'verdict'` 表（判决记录）。判决退场 ⇒ 不再建
+   *   那张表（老库里它原样躺着，没有代码读它）。
+   */
+  /* ⚠️ 2026-11（D123）：`action` 表随动作记录退场删掉（同上：旧库里那两张表留着，但没有代码读）。 */
   'artifact',
   'audit',
   'inbox',
@@ -209,18 +200,25 @@ const ENTITY_TABLES = [
 
 type EntityTable = (typeof ENTITY_TABLES)[number]
 
-/** 通用 upsert 覆盖的表。report 不在其中——它必须走"去重键唯一"那条语句。 */
+/*
+ * 通用 upsert 覆盖的表。
+ * ⚠️ 2026-11（D125）：这条注释原来补了一句"report 不在其中——它必须走'去重键唯一'
+ *   那条语句"。报告摄取退场之后没有那个例外了。
+ */
 const GENERAL_PUT_TABLES = ENTITY_TABLES
 
-/** 需要"按 workspace 列举"的表：端口里只有 agent / skill / tool / report 有这种列法。 */
-const WORKSPACE_LIST_TABLES = ['agent', 'group', 'memory', 'skill', 'tool', 'report'] as const
+/** 需要"按 workspace 列举"的表（端口里只有这几张有这种列法）。 */
+const WORKSPACE_LIST_TABLES = ['agent', 'memory', 'skill'] as const
 
 const ALL_TABLES = [
   'meta',
   'device',
   'workspace',
   ...ENTITY_TABLES,
-  'report',
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有 `'report'`。报告摄取退场 ⇒ 不再建这张表
+   *   （老库里那张表原样躺着，没有代码读它）。
+   */
   'run_message',
   'blob',
 ] as const
@@ -289,13 +287,12 @@ const SCHEMA = [
    *    做不到的改变——两个适配器对同一串操作必须给出同样的结果。
    *    slug 的唯一性由安装侧把关（安装是它唯一写入这个表的路径）。
    */
-  `CREATE TABLE IF NOT EXISTS tool (
-     id TEXT PRIMARY KEY,
-     workspace_id TEXT NOT NULL,
-     json TEXT NOT NULL,
-     slug TEXT GENERATED ALWAYS AS (json_extract(json, '$.slug')) VIRTUAL
-   )`,
-  `CREATE INDEX IF NOT EXISTS tool_workspace_slug ON tool(workspace_id, slug)`,
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是 `tool` 表与它的 `(workspace_id, slug)` 索引。
+   *   工具包随动作能力退场——表不再创建。旧库里那张表原样躺着：没有代码读它，
+   *   而"删表"是一种不可逆的数据破坏，退场不需要它。
+   */
+
 
   // ── issue：目录管理要按状态 / 指派人过滤，还要子串检索 ──
   `CREATE TABLE IF NOT EXISTS issue (
@@ -367,24 +364,12 @@ const SCHEMA = [
    */
   `CREATE INDEX IF NOT EXISTS chat_turn_with_run ON chat_turn(conversation_id, run_id, seq)`,
 
-  /**
-   * ★ report 的去重键必须是**数据库**层的唯一约束。
-   *
-   * 不能写成"先查有没有、再插入"：那是应用层判断，两个进程同时摄取同一条
-   * report 时会双双认为自己没查到、双双写进去，FR-REPORT-03 的保证就没了。
-   * 唯一索引 + `ON CONFLICT ... DO NOTHING` 才是并发下也成立的幂等。
-   *
-   * 唯一键含 `workspace_id`：文件适配器的去重是"每个 workspace 内"的
-   * （`insertReport` 只查自己的 workspace，不同 workspace 的同名去重键
-   * 各自都能写进去）。这里对齐同一语义，不擅自升级成全局唯一。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `report` 表与它的 `report_dedup` 唯一索引——
+   *   "去重键必须是**数据库**层的唯一约束，因为'先查后插'在并发下会双双写进去"。
+   *   报告摄取退场 ⇒ 表与索引不建了；那条并发纪律本身是对的，留着给将来任何
+   *   "同一个键只许一次"的东西。
    */
-  `CREATE TABLE IF NOT EXISTS report (
-     id TEXT PRIMARY KEY,
-     workspace_id TEXT NOT NULL,
-     json TEXT NOT NULL,
-     dedup_key TEXT GENERATED ALWAYS AS (json_extract(json, '$.dedupKey')) VIRTUAL
-   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS report_dedup ON report(workspace_id, dedup_key)`,
 
   `CREATE TABLE IF NOT EXISTS run (
      id TEXT PRIMARY KEY,
@@ -400,35 +385,18 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS run_work_dir ON run(work_dir, status)`,
   `CREATE INDEX IF NOT EXISTS run_subject_agent ON run(subject_type, subject_id, agent_id, status)`,
 
-  `CREATE TABLE IF NOT EXISTS verdict (
-     id TEXT PRIMARY KEY,
-     workspace_id TEXT NOT NULL,
-     json TEXT NOT NULL,
-     run_id TEXT GENERATED ALWAYS AS (json_extract(json, '$.runId')) VIRTUAL,
-     status TEXT GENERATED ALWAYS AS (json_extract(json, '$.status')) VIRTUAL,
-     created_at INTEGER GENERATED ALWAYS AS (json_extract(json, '$.createdAt')) VIRTUAL
-   )`,
-  `CREATE INDEX IF NOT EXISTS verdict_run ON verdict(run_id, created_at)`,
-
-  `CREATE TABLE IF NOT EXISTS action (
-     id TEXT PRIMARY KEY,
-     workspace_id TEXT NOT NULL,
-     json TEXT NOT NULL,
-     verdict_id TEXT GENERATED ALWAYS AS (json_extract(json, '$.verdictId')) VIRTUAL,
-     status TEXT GENERATED ALWAYS AS (json_extract(json, '$.status')) VIRTUAL,
-     idempotency_key TEXT GENERATED ALWAYS AS (json_extract(json, '$.idempotencyKey')) VIRTUAL,
-     created_at INTEGER GENERATED ALWAYS AS (json_extract(json, '$.createdAt')) VIRTUAL
-   )`,
-  `CREATE INDEX IF NOT EXISTS action_verdict ON action(verdict_id, created_at)`,
-  /**
-   * 幂等键上**只建普通索引**，不建唯一索引。
-   *
-   * 文件适配器的幂等键是一张"最后写入者赢"的内存映射：同一个 id 再写一次
-   * 只是换掉映射指向。而 `insertAction` 本身在端口里没有"仅插入一次"的语义
-   * （只有 report 有）。加唯一约束会把"调用方重放"从"可查回同一条"变成
-   * "写失败"，那是行为改变，不是加固。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `verdict` 表与它的 `verdict_run` 索引（判决按
+   *   run 取，带 `status` 生成列供 CAS 用）。判决退场 ⇒ 表与索引都不建了。
    */
-  `CREATE INDEX IF NOT EXISTS action_idempotency ON action(idempotency_key)`,
+
+
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是 `action` 表、它的两个索引（verdict 与幂等键）以及
+   *   一段"为什么幂等键不建唯一索引"的说明。动作记录退场——表不再创建，说明随表一起删。
+   *   旧库里那张表同样原样躺着（没有代码读它）。
+   */
+
 
   `CREATE TABLE IF NOT EXISTS artifact (
      id TEXT PRIMARY KEY,
@@ -507,17 +475,14 @@ const NAMED_SQL = {
 
   workspaceGet: `SELECT json FROM workspace WHERE id = ?`,
   workspacePut: `INSERT INTO workspace(id, json) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
-  /**
-   * 某个 agent 属于哪些组（D70）。
+    /*
+   * ⚠️ 2026-11（S3）：这里原来是 `groupListByAgent`（按 `json_each` 展开 `members`
+   *   找"这个 agent 属于哪些组"）。组退场 ⇒ 语句删。
    *
-   * `members` 是 JSON 数组，用 `json_each` 展开后按元素匹配。⚠️ 必须用
-   * `EXISTS` 而不是 `json_each(json) ... WHERE` 直接 join：后者一行组会产生
-   * 多行结果，还要去重；EXISTS 一行一组，语义直接。
+   *   ⚠️ 它那条 SQL 有一处值得留：**用 `EXISTS` 而不是直接 join `json_each`**——
+   *   后者一行组会产生多行结果，还得去重；`EXISTS` 一行一组，语义直接。
    */
-  groupListByAgent: `SELECT json FROM "group"
-     WHERE EXISTS (
-       SELECT 1 FROM json_each(json_extract("group".json, '$.members')) WHERE value = ?
-     ) ORDER BY rowid`,
+
   /**
    * ★ 按**插入顺序**返回，不是按 id 排序。
    *
@@ -601,36 +566,17 @@ const NAMED_SQL = {
      ORDER BY json_extract(json, '$.queuedAt') DESC, id DESC
      LIMIT ?4`,
 
-  // ── Report 去重 ──
-  reportDedup: `SELECT json FROM report WHERE dedup_key = ? ORDER BY rowid LIMIT 1`,
-  /**
-   * 第一个 ON CONFLICT 管去重键，第二个管"同一个 id 再写一次"。
-   *
-   * SQLite 允许多个 upsert 子句，按顺序匹配，这正好把文件适配器的两条规则
-   * 一次说完：去重键已存在 ⇒ `DO NOTHING`，`changes = 0` ⇒ 返回 false
-   * （幂等，不是错误）；否则按 id 覆盖（与文件适配器"同一 id 再写一次是覆盖"
-   * 一致）。
-   *
-   * ⚠️ 有一处**有意的偏离**：同一个 id 带着**新**去重键再写一次时，这里的
-   * 旧键会随之失效（生成列始终等于实体自己的去重键），而文件适配器的去重
-   * 映射只增不减，旧键会继续指向那条 report。实践中不可达——report 的 id 是
-   * ULID、去重键是内容摘要，同一个 id 换键意味着"同一条 ULID 的内容变了"。
-   * 与其复制那份"永远指向过去"的映射，不如保住"查到的就是那条键的 report"。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `reportDedup` / `reportInsert` 两条语句
+   *   （后者用两个 ON CONFLICT 子句把"去重键已存在 ⇒ DO NOTHING"与"同 id 覆盖"
+   *   一次说完）。报告摄取退场 ⇒ 两条语句一起删。
    */
-  reportInsert: `INSERT INTO report(id, workspace_id, json) VALUES(?, ?, ?)
-     ON CONFLICT(workspace_id, dedup_key) DO NOTHING
-     ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, json = excluded.json`,
 
-  // ── Verdict / Action ──
-  verdictGet: `SELECT json, status FROM verdict WHERE id = ?`,
-  verdictCas: `UPDATE verdict SET json = ? WHERE id = ? AND status = ?`,
-  actionGet: `SELECT json, status FROM action WHERE id = ?`,
-  actionCas: `UPDATE action SET json = ? WHERE id = ? AND status = ?`,
-  /**
-   * `ORDER BY rowid DESC LIMIT 1`：文件适配器的幂等映射是"最后写入者赢"，
-   * 重开后按日志顺序回放重建，同样是最后一条赢。这里用插入顺序的倒序对齐它。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `verdictGet` / `verdictCas`（判决的 CAS 读与写）。
+   *   判决退场 ⇒ 两条语句删。CAS 那条纪律（**状态迁移带前态期望，由 SQL 的 WHERE
+   *   承担**）没有变，`runCas` 还在用它。
    */
-  actionIdempotency: `SELECT json FROM action WHERE idempotency_key = ? ORDER BY rowid DESC LIMIT 1`,
 
   // ── 按外键列的列表（排序与文件适配器的 JS 稳定排序一致：时间相同则按插入顺序）──
   commentsByIssue: `SELECT json FROM comment WHERE issue_id = ? ORDER BY created_at, rowid`,
@@ -643,8 +589,6 @@ const NAMED_SQL = {
   runsAll: `SELECT json FROM run ORDER BY rowid`,
   /** 删任务时连带删掉它的评论。 */
   commentsDeleteByIssue: `DELETE FROM comment WHERE issue_id = ?`,
-  verdictsByRun: `SELECT json FROM verdict WHERE run_id = ? ORDER BY created_at, rowid`,
-  actionsByVerdict: `SELECT json FROM action WHERE verdict_id = ? ORDER BY created_at, rowid`,
   artifactsByRun: `SELECT json FROM artifact WHERE run_id = ? ORDER BY created_at, rowid`,
   auditsByRun: `SELECT json FROM audit WHERE run_id = ? ORDER BY queued_at, rowid`,
 
@@ -722,10 +666,12 @@ const NAMED_SQL = {
   chatTurnsDeleteByRun: `DELETE FROM chat_turn WHERE run_id = ?`,
   /** 重算对话轮数用的计数。 */
   chatTurnsCountByConversation: `SELECT COUNT(*) AS n FROM chat_turn WHERE conversation_id = ?`,
-  /** action 挂在 verdict 上：先删 action（按这些 verdict 的 id）再删 verdict。 */
-  actionsDeleteByRunVerdicts: `DELETE FROM action
-     WHERE verdict_id IN (SELECT id FROM verdict WHERE run_id = ?)`,
-  verdictsDeleteByRun: `DELETE FROM verdict WHERE run_id = ?`,
+  /* ⚠️ 2026-11（D123）：`actionsDeleteByRunVerdicts` 随动作表退场删掉（verdict 下面不再挂 action）。 */
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有 `verdictsByRun` / `verdictsDeleteByRun`
+   *   （按 run 取判决、删 run 时连带删判决）。判决退场 ⇒ 两条语句删；`deleteRun`
+   *   也不再动 `verdict` 表（见那里的说明）。
+   */
   artifactsDeleteByRun: `DELETE FROM artifact WHERE run_id = ?`,
   runMessagesDeleteByRun: `DELETE FROM run_message WHERE run_id = ?`,
 
@@ -733,22 +679,11 @@ const NAMED_SQL = {
      WHERE id IN (SELECT value FROM json_each(?))
      ORDER BY rowid`,
 
-  /**
-   * 按 slug 取包。**必须带上 workspace_id**：slug 只在一个 workspace 内唯一，
-   * 两个空间各有一个 `deploy` 是合法的；不带这一条会把别的空间的包交给调用方，
-   * 而判决里写的 `<slug>.<动作名>` 就指向了一个根本不是它声明过的包。
-   *
-   * `ORDER BY rowid LIMIT 1`：万一同一个 workspace 里真装了两个同 slug 的包
-   * （端口没有约束它），取最早装的那个——与文件适配器"找第一条匹配"的确定性
-   * 保持一致，而不是让 SQLite 的扫描顺序决定结果。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有两条语句——`toolBySlug`（只在同一 workspace 内按
+   *   slug 取，避免把别人空间的包交给调用方）与 `toolsByIds`（按 id 批量取）。
+   *   工具包退场，两条一起删（连同上面那段"为什么 ORDER BY rowid LIMIT 1"的说明）。
    */
-  toolBySlug: `SELECT json FROM tool
-     WHERE workspace_id = ? AND slug = ?
-     ORDER BY rowid LIMIT 1`,
-
-  toolsByIds: `SELECT json FROM tool
-     WHERE id IN (SELECT value FROM json_each(?))
-     ORDER BY rowid`,
 
   // ── 消息流 ──
   messageInsert: `INSERT INTO run_message(run_id, seq, json) VALUES(?, ?, ?)`,
@@ -777,18 +712,22 @@ type NamedStmt = keyof typeof NAMED_SQL
 /** 通用语句：按表名拼键。表名来自编译期常量，不可能是注入点。 */
 function derivedSql(): Record<string, string> {
   const out: Record<string, string> = {}
-  // `group` 是 SQL 保留字：拼语句时必须加引号（CREATE TABLE 那侧已经引了）。
-  // 键名仍用裸名（`get:group`），只有 SQL 里的表名带引号。
-  const q = (t: string): string => (t === 'group' ? '"group"' : t)
+  /*
+   * ⚠️ 2026-11（S3）：这里原来要特判 `group`（SQL 保留字，表名必须加引号）。
+   *   **表退场** ⇒ 不再有需要加引号的表名，这层特判删掉。
+   *
+   *   ⚠️ 但那个坑还在：**表名撞上 SQL 保留字时要加引号**——将来加表时若它叫
+   *   `order` / `group` / `index` 之类，`CREATE TABLE` 与拼出来的语句两边都得引。
+   */
+  const q = (t: string): string => t
   for (const t of ALL_TABLES) out[`count:${t}`] = `SELECT count(*) AS n FROM ${q(t)}`
-  for (const t of [...ENTITY_TABLES, 'report'] as const) {
+  for (const t of ENTITY_TABLES) {
     out[`get:${t}`] = `SELECT json FROM ${q(t)} WHERE id = ?`
   }
   for (const t of GENERAL_PUT_TABLES) {
     /**
      * 用 upsert 而不是 INSERT：文件适配器是追加式日志，"同一个 id 再写一次"
-     * 是覆盖（最后一条赢），不是报错。端口里没有"仅插入一次"的语义——
-     * 唯一的例外是 report 的去重键，那条单独处理。
+     * 是覆盖（最后一条赢），不是报错。端口里没有"仅插入一次"的语义。
      */
     out[`put:${t}`] = `INSERT INTO ${q(t)}(id, workspace_id, json) VALUES(?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, json = excluded.json`
@@ -951,7 +890,7 @@ export class SqliteStore implements Store {
     return row ? (JSON.parse(row.json) as T) : null
   }
 
-  #getEntity<T>(table: EntityTable | 'report', id: string): T | null {
+  #getEntity<T>(table: EntityTable, id: string): T | null {
     return this.#parse<T>(this.#stmt(`get:${table}`).get(id) as { json: string } | undefined)
   }
 
@@ -1135,38 +1074,9 @@ export class SqliteStore implements Store {
     return true
   }
 
-  // ── AgentGroup（智能体组，D70 增量添加）──
-
-  async getGroup(id: AgentGroupId): Promise<AgentGroup | null> {
-    return this.#getEntity<AgentGroup>('group', id as string)
-  }
-
-  async listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]> {
-    return this.#listByWorkspace<AgentGroup>('group', workspaceId)
-  }
-
-  async listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]> {
-    const rows = this.#stmt('groupListByAgent').all(agentId as string) as { json: string }[]
-    return rows.map((r) => JSON.parse(r.json) as AgentGroup)
-  }
-
-  async insertGroup(group: AgentGroup): Promise<void> {
-    this.#putEntity('group', group.id as string, group.workspaceId, group)
-  }
-
-  async updateGroup(group: AgentGroup): Promise<boolean> {
-    // sqlite 的 upsert 无法可靠区分"更新"与"插入"（`changes` 对两路径取值
-    // 不一致），所以先查存在性。同一进程内 `DatabaseSync` 是同步的，`get` 与
-    // `put` 之间没有 await，不存在并发窗口。
-    if (this.#getEntity<AgentGroup>('group', group.id as string) === null) return false
-    this.#putEntity('group', group.id as string, group.workspaceId, group)
-    return true
-  }
-
-  async deleteGroup(id: AgentGroupId): Promise<boolean> {
-    const res = this.#stmt('del:group').run(id as string)
-    return res.changes > 0
-  }
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是智能体组的六个方法。组退场 ⇒ 端口上没有组，实现删。
+   */
 
   // ── Skill ──
 
@@ -1195,39 +1105,11 @@ export class SqliteStore implements Store {
     return Number(res.changes) > 0
   }
 
-  // ── Tool（工具包 / 组，D40）──
-
-  async getTool(id: ToolId): Promise<Tool | null> {
-    return this.#getEntity<Tool>('tool', id as string)
-  }
-
-  async listTools(workspaceId: WorkspaceId): Promise<Tool[]> {
-    return this.#listByWorkspace<Tool>('tool', workspaceId)
-  }
-
-  async listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]> {
-    // IN () 是语法错误：空集合必须提前返回，不能指望 SQLite 容忍
-    if (ids.length === 0) return []
-    const rows = this.#named('toolsByIds').all(JSON.stringify(ids)) as { json: string }[]
-    return rows.map((r) => JSON.parse(r.json) as Tool)
-  }
-
-  async getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null> {
-    return this.#parse<Tool>(
-      this.#named('toolBySlug').get(workspaceId as string, slug) as { json: string } | undefined,
-    )
-  }
-
-  async insertTool(tool: Tool): Promise<void> {
-    this.#putEntity('tool', tool.id as string, tool.workspaceId, tool)
-  }
-
-  async deleteTool(id: ToolId): Promise<boolean> {
-    // 与 deleteSkill 一样看 `changes`：文件适配器的 `del` 对不存在的 id 返回
-    // false，这里用"真的删到了几行"对齐那个语义（删两次第二次是 false，不是错）
-    const res = this.#stmt('del:tool').run(id as string)
-    return Number(res.changes) > 0
-  }
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是工具包的六个方法（getTool / listTools /
+   *   listToolsByIds / getToolBySlug / insertTool / deleteTool）。端口删了、表不建了，
+   *   实现跟着删。
+   */
 
   // ── Issue 与 Comment ──
 
@@ -1433,9 +1315,12 @@ export class SqliteStore implements Store {
         updatedAt: Date.now(),
       })
     }
-    // ② verdict 与由它触发的 action（先 action 后 verdict）
-    this.#named('actionsDeleteByRunVerdicts').run(id as string)
-    this.#named('verdictsDeleteByRun').run(id as string)
+    /*
+     * ② 判决记录（老数据）：⚠️ 2026-11（D125）起**不再删**。判决退场之后没有任何
+     *   代码读 `verdict` 表（表也不再创建），那条老判决指向一条已删的 run 也不会有
+     *   读者遇到。为了清死数据而在删除路径上多开一句 SQL，等于把删除语义绑在一份
+     *   没人读的数据上。老库想彻底清掉的话，那是迁移工具的活。
+     */
     // ③ artifacts、④ 消息流、⑤ run 本体
     this.#named('artifactsDeleteByRun').run(id as string)
     this.#named('runMessagesDeleteByRun').run(id as string)
@@ -1479,75 +1364,16 @@ export class SqliteStore implements Store {
     return false
   }
 
-  // ── Report ──
-
-  /**
-   * 列出报告（FR-STOR-05 的导出需要它）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 report 的四个方法（`listReports` /
+   *   `findReportByDedupKey` / `getReport` / `insertReport`）。报告摄取退场 ⇒
+   *   端口上不再有 report，实现一并删。
    *
-   * 用与 agent / skill 同一套 `listByWorkspace` 机制，而不是另写一条 SQL：
-   * 三个表的列举语义应当一致（按 rowid = 写入顺序，不做额外排序），
-   * 各写各的最容易在分页边界上悄悄分叉。
+   *   `listReports` 那段里有一条值得留的经验：它**显式**按 id 排序并按游标
+   *   位置切片，为的是与文件适配器的 `paginate()` 对齐——同一份数据在两个适配器
+   *   上给出不同的翻页顺序，"差分对拍"会抓它。这条纪律对现在还在的每个
+   *   分页方法同样成立。
    */
-  async listReports(q: ReportQuery): Promise<Page<Report>> {
-    /**
-     * 这里**显式**按 id 排序并按游标的**位置**切片，而不是复用 `#page`。
-     *
-     * 理由是对齐：文件适配器的 `paginate()` 就是这么做的（按 id 排序 +
-     * `findIndex(r => r.id > cursor)`），而 `#listByWorkspace` 是按 rowid
-     * 排的。同一份数据在两个适配器上给出不同的翻页顺序，正是"差分对拍"
-     * 要抓的那类分叉——尽管现在只有导出在用这个方法，分叉照样不该留。
-     *
-     * 游标按位置而不是按身份比较，理由与文件适配器那份相同：
-     * 游标那条不在结果集里时，按身份查找会**静默重放第一页**。
-     */
-    const sorted = [...this.#listByWorkspace<Report>('report', q.workspaceId)].sort((a, b) =>
-      a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
-    )
-    let start = 0
-    if (q.cursor) {
-      const cursor = q.cursor
-      const idx = sorted.findIndex((r) => r.id > cursor)
-      start = idx === -1 ? sorted.length : idx
-    }
-    const limit = q.limit ?? 50
-    const slice = sorted.slice(start, start + limit)
-    const last = slice[slice.length - 1]
-    return {
-      items: slice,
-      nextCursor: start + limit < sorted.length && last ? last.id : null,
-    }
-  }
-
-  async findReportByDedupKey(dedupKey: string): Promise<Report | null> {
-    /**
-     * 去重键是"每个 workspace 内"唯一的（见 report_dedup 索引），所以跨
-     * workspace 出现同一个键时，这里必须挑一条。文件适配器按"workspace 被
-     * 打开的先后"挑，那个顺序本身取决于进程启动时的枚举，不确定；这里改成
-     * 最早写入的那一条（`ORDER BY rowid`），至少是确定的。
-     */
-    return this.#parse<Report>(
-      this.#named('reportDedup').get(dedupKey) as { json: string } | undefined,
-    )
-  }
-
-  async getReport(id: Report['id']): Promise<Report | null> {
-    return this.#getEntity<Report>('report', id as string)
-  }
-
-  /**
-   * ★ 返回 false 表示去重键已存在——**由唯一索引判定，不是应用层判断**。
-   *
-   * 调用方（摄取流程）必须把 false 当作"已经处理过"，而不是"写入失败"。
-   * 并发下两个进程同时插同一条 report，只有一个的 `changes` 是 1。
-   */
-  async insertReport(report: Report): Promise<boolean> {
-    const result = this.#named('reportInsert').run(
-      report.id as string,
-      report.workspaceId as string,
-      JSON.stringify(report),
-    )
-    return Number(result.changes) > 0
-  }
 
   // ── Run ──
 
@@ -1653,63 +1479,17 @@ export class SqliteStore implements Store {
     }
   }
 
-  // ── Verdict ──
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是判决的四个方法（`getVerdict` /
+   *   `listVerdictsByRun` / `insertVerdict` / `transitionVerdict`）。判决退场 ⇒
+   *   端口上不再有判决，实现一并删。
+   */
 
-  async getVerdict(id: VerdictId): Promise<VerdictRecord | null> {
-    return this.#getEntity<VerdictRecord>('verdict', id as string)
-  }
-
-  async listVerdictsByRun(runId: RunId): Promise<VerdictRecord[]> {
-    const rows = this.#named('verdictsByRun').all(runId as string) as { json: string }[]
-    return rows.map((r) => JSON.parse(r.json) as VerdictRecord)
-  }
-
-  async insertVerdict(verdict: VerdictRecord): Promise<void> {
-    this.#putEntity('verdict', verdict.id as string, verdict.workspaceId, verdict)
-  }
-
-  async transitionVerdict(
-    id: VerdictId,
-    expect: VerdictStatus,
-    next: VerdictStatus,
-    patch: Partial<Pick<VerdictRecord, 'invalidResolution'>> = {},
-  ): Promise<boolean> {
-    return this.#cas('verdictGet', 'verdictCas', id as string, expect, patch, { status: next }, () => {
-      assertVerdictTransition(expect, next)
-    })
-  }
-
-  // ── Action ──
-
-  async getAction(id: ActionId): Promise<Action | null> {
-    return this.#getEntity<Action>('action', id as string)
-  }
-
-  async listActionsByVerdict(verdictId: VerdictId): Promise<Action[]> {
-    const rows = this.#named('actionsByVerdict').all(verdictId as string) as { json: string }[]
-    return rows.map((r) => JSON.parse(r.json) as Action)
-  }
-
-  async findActionByIdempotencyKey(key: string): Promise<Action | null> {
-    return this.#parse<Action>(
-      this.#named('actionIdempotency').get(key) as { json: string } | undefined,
-    )
-  }
-
-  async insertAction(action: Action): Promise<void> {
-    this.#putEntity('action', action.id as string, action.workspaceId, action)
-  }
-
-  async transitionAction(
-    id: ActionId,
-    expect: ActionStatus,
-    next: ActionStatus,
-    patch: ActionPatch = {},
-  ): Promise<boolean> {
-    return this.#cas('actionGet', 'actionCas', id as string, expect, patch, { status: next }, () => {
-      assertActionTransition(expect, next)
-    })
-  }
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是动作记录的五个方法（getAction / listActionsByVerdict /
+   *   findActionByIdempotencyKey / insertAction / transitionAction）。判决不再触发
+   *   动作 ⇒ 没有写入者，端口与表都删了。
+   */
 
   // ── Artifact ──
 

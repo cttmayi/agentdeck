@@ -322,13 +322,22 @@ describe('术语一致：同一个角色只许有一个叫法（分批第 54 批
     assert.equal(webText['agents.roleSkillReviewer'].zh, ROLE_WORD, '角色徽标就用「沉淀审核」')
   })
 
-  test('★★★ 服务端拒绝文案里的角色叫法必须与界面一致（两处漂开就说不到一起）', () => {
-    // ⚠️ 路径要从**仓库根**算：`import.meta.url` 在 `packages/i18n/src/` 下，
-    //    第一版写成 `../../apps/...` 指到了 `packages/apps/...`（ENOENT，红了才发现）。
-    const source = readFileSync(new URL('../../../apps/daemon/src/server.ts', import.meta.url), 'utf8')
+  test('★★★ 服务端拒绝文案里的岗位叫法必须与界面一致（两处漂开就说不到一起）', () => {
+    /*
+     * ⚠️ 路径要从**仓库根**算：`import.meta.url` 在 `packages/i18n/src/` 下，
+     *    第一版写成 `../../apps/...` 指到了 `packages/apps/...`（ENOENT，红了才发现）。
+     *
+     * ⚠️ 2026-11（S4，D127）：判据从"`server.ts` 里那个 `roleRejectionLabel` 用哪个词"
+     *   换成"**内置岗位的叫法表**用哪个词"——角色退场之后，拒绝文案改由
+     *   `builtinDefaultsOf(kind).label` 说话（`apps/daemon/src/builtin-drafter.ts`）。
+     */
+    const source = readFileSync(
+      new URL('../../../apps/daemon/src/builtin-drafter.ts', import.meta.url),
+      'utf8',
+    )
     assert.ok(
-      source.includes(`if (role === 'skill-reviewer') return '「${ROLE_WORD}」'`),
-      `server.ts 的 roleRejectionLabel 必须用「${ROLE_WORD}」，与界面同一个词`,
+      source.includes(ROLE_WORD),
+      `内置岗位的叫法里必须有「${ROLE_WORD}」，与界面同一个词`,
     )
     // 判据只针对**代码里真的返回的那一句**：注释里记"原来是 skill 审核"是历史，留着有用
     assert.ok(

@@ -45,7 +45,14 @@ export interface Schedule {
   enabled: boolean
   /** cron 表达式（croner 语法，5 段）。界面用表单生成，高级模式直接填。 */
   cron: string
-  /** 任务定义复用任务表单：执行者是单个智能体还是一个智能体组。 */
+  /**
+   * 执行者类型。
+   *
+   * ⚠️ 2026-11（S3）：这里原来是 `'agent' | 'group'`（定时任务可以挂一个智能体组）。
+   *   **组退场** ⇒ 新记录只会是 `'agent'`；但**老记录里还写着 `'group'`**，所以类型
+   *   保留那个值——读到它时在触发分支里报"组已退场，请改选具体智能体"，而不是
+   *   把一条跑不起来的定时任务静默跳过。
+   */
   executorType: 'agent' | 'group'
   executorId: string
   /**

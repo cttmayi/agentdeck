@@ -2,16 +2,12 @@ import { writable, derived, get } from 'svelte/store'
 import {
   api,
   type AgentExclusiveSkill,
-  type AgentRole,
   type AgentsPayload,
   type Agent,
-  type AgentGroup,
   type BlockTemplates,
   type ChatTurnView,
   type Conversation,
   type FirstSentenceKind,
-  type GroupsPayload,
-  type GroupCreateAgentDraft,
   type Identity,
   type InboxItem,
   type Issue,
@@ -21,13 +17,11 @@ import {
   type Skill,
   type TemplateBlock,
   type TemplateKit,
-  type Tool,
   type Workflow,
   type WorkflowRun,
 } from './api.ts'
 import type { SyncStatus } from './sync.ts'
 import { setLocaleFromIdentity } from './i18n.ts'
-import { deleteTool } from './tool-install.ts'
 
 /**
  * 全局状态。
@@ -47,21 +41,11 @@ export const identity = writable<Identity | null>(null)
 export const issues = writable<Issue[]>([])
 export const agents = writable<Agent[]>([])
 
-/**
- * 组页视图里的一个组（第二轮起）：组 + 它引用的**完整成员对象**（含私有）。
- *
- * ★ 私有成员不在 `agents`（全局 `GET /api/agents` 被服务端过滤了）——组自己的
- *   数据必须带成员，否则组里的私有成员"查无此人"。组页、新建任务页、链推导
- *   （`newtask-chain.ts`）都从这份 `memberAgents` join，不各自从 `agents` 猜。
+/*
+ * ⚠️ 2026-11（S3）：这里原来是 `AgentGroupView`（`AgentGroup` + 已 join 的成员对象）
+ *   与 `groups` 这个 store。智能体组退场 ⇒ 一起删。
  */
-export type AgentGroupView = AgentGroup & { memberAgents: Agent[] }
 
-/**
- * 智能体组（D70 增量添加）：组的列表。
- *
- * 与 `agents` 并行——组页拿它画列表与详情，新建任务页拿它当"从组选"那一档。
- */
-export const groups = writable<AgentGroupView[]>([])
 
 /**
  * 「新建任务的默认智能体」（D36）。
@@ -72,13 +56,10 @@ export const groups = writable<AgentGroupView[]>([])
 export const defaultAgentId = writable<string | null>(null)
 export const skills = writable<Skill[]>([])
 
-/**
- * 已安装的工具包（D40）——**一个包 = 一个组**。
- *
- * ⚠️ 每行原来还带一个 `mountedBy`（接口算好的"挂给了哪些 agent"）。挂载能力撤掉
- *   之后接口不再算它，那个类型也删了。
+/*
+ * ⚠️ 2026-11（D123）：这里原来有一个 `tools` store（已安装的工具包）。工具包与
+ *   动作能力一起退场——接口没了、页面没了，store 也没有读者了，整段删。
  */
-export const tools = writable<Tool[]>([])
 export const runs = writable<RunSummary[]>([])
 
 // ══════════════════════════════════════════════════════════════════
@@ -205,70 +186,16 @@ export const loadAgents = (): Promise<void> =>
     agents,
   )
 
-export const loadGroups = (): Promise<void> =>
-  load(
-    'groups',
-    async () => {
-      const payload = await api<GroupsPayload>('/api/agent-groups')
-      const byId = new Map((payload.members ?? []).map((m) => [m.id, m]))
-      // ★ 按 `group.members`（id 列表）的顺序 join 出成员对象；查不到的（成员被
-      //   删）不硬塞——界面据此显示「成员已删除」而不是拿一个假对象顶替。
-      return (payload.groups ?? []).map((g) => ({
-        ...g,
-        memberAgents: g.members
-          .map((id) => byId.get(id))
-          .filter((a): a is Agent => a !== undefined),
-      }))
-    },
-    groups,
-  )
+/*
+ * ⚠️ 2026-11（S3）：这里原来是组的三个动作——`loadGroups`（列表 + 成员 join）、
+ *   `saveGroup`（建 / 改）、`deleteGroup`。智能体组退场 ⇒ 三个一起删。
+ *
+ *   ⚠️ `saveGroup` 那段长注释记着一个值钱的坑：**PATCH 的 body 里不许带 `id`**
+ *   （daemon 对未知字段严格拒收）——而它的症状是"新建能成、编辑永远存不进去"，
+ *   界面上只表现为"保存没反应"。发现方式是**包一层 `window.fetch` 看真的发出去的
+ *   那一份**：只量"接口有没有变"分不清"没发 / 被拒 / 发错"。
+ */
 
-/** 建组 / 改组的写入口。成功后重拉列表（与 agents 同款：让界面跟着数据走）。 */
-export async function saveGroup(input: {
-  id?: string
-  name: string
-  members: string[]
-  allowedActions: string[]
-  actionParams: Record<string, Record<string, unknown>>
-  debugActions: string[]
-  /** 0–100，`null` = 无限返工。 */
-  maxReworks: number | null
-  enabled: boolean
-  /** 第二轮：这次要新建的私有成员草稿（组是它们的创建入口）。 */
-  createAgents?: GroupCreateAgentDraft[]
-}): Promise<AgentGroupView | null> {
-  /**
-   * ⚠️ **PATCH 的 body 里不许带 `id`**：id 已经在路径里了，而 daemon 对 body 的
-   *    未知字段是**严格拒收**的（"不认识的字段：id。可改的有：name, members, …"）。
-   *    这里原来是 `JSON.stringify(input)`（整份对象连 `id` 一起发）⇒ **界面里改任何
-   *    一个已有的组、点保存必然 400**，而新建组走的是 POST、一直是好的——所以
-   *    "新建能成、编辑永远存不进去"这个不对称在界面上看起来只是"保存没反应"
-   *    （红字在页面底部，列表里那一行也没变）。
-   *    发现方式：布局探针量"点「移除」→ 保存 ⇒ 接口上那条权限真的没了"时，
-   *    接口上那条一直在——于是把 `window.fetch` 包了一层看**真的发出去的那一份**，
-   *    才看到 400 与 body 里的 `id`（只量"接口有没有变"分不清"没发/被拒/发错"）。
-   */
-  const { id, ...patchBody } = input
-  const res = id
-    ? await api<{ group: AgentGroup }>(`/api/agent-groups/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(patchBody),
-      })
-    : await api<{ group: AgentGroup }>('/api/agent-groups', {
-        method: 'POST',
-        body: JSON.stringify(input),
-      })
-  await loadGroups()
-  if (!res.group) return null
-  const fresh = get(groups).find((g) => g.id === res.group!.id) ?? null
-  return fresh
-}
-
-/** 删组。成功后重拉列表。 */
-export async function deleteGroup(id: string): Promise<void> {
-  await api(`/api/agent-groups/${encodeURIComponent(id)}`, { method: 'DELETE' })
-  await loadGroups()
-}
 
 /**
  * **生效中的**默认智能体（D36）。
@@ -282,7 +209,8 @@ export async function deleteGroup(id: string): Promise<void> {
  *     等下一次有人设默认时自然被覆盖。
  */
 export const effectiveDefaultAgentId = derived([agents, defaultAgentId], ([$agents, $id]) => {
-  const executors = $agents.filter((a) => a.role === 'executor')
+  // ⚠️ 2026-11（S4）：判据从"角色是执行者"换成"不是平台内置岗位"。
+  const executors = $agents.filter((a) => a.builtinKind === undefined)
   if ($id && executors.some((a) => a.id === $id)) return $id
   return executors[0]?.id ?? null
 })
@@ -351,28 +279,11 @@ export const loadLocalSkillScan = (): Promise<void> =>
     localSkillScan,
   )
 
-export const loadTools = (): Promise<void> =>
-  load(
-    'tools',
-    async () => {
-      const body = await api<{ tools: Tool[] }>('/api/tools')
-      return body.tools ?? []
-    },
-    tools,
-  )
-
-/**
- * 卸载一个工具包（D40）。
- *
- * ⚠️ 服务端原来会拒掉"还有 agent 挂着它"的情况（`ToolInUseError`），界面据此
- *    指名道姓地列出来。那条拒绝已经删掉（理由见 `server.ts` 里 DELETE 那段：
- *    "摘掉"这个动作不存在了，拒绝就是一把没有钥匙的锁），所以这里不再有那条
- *    分支。agent 列表仍然重取——智能体的动作权限可能与工具包有关。
+/*
+ * ⚠️ 2026-11（D123）：这里原来是 `loadTools()`（读 `/api/tools`）与
+ *   `uninstallTool(id)`（卸载一个包），使用者只有工具页。工具页随工具包一起删了，
+ *   两个函数一并删。
  */
-export async function uninstallTool(id: string): Promise<void> {
-  await deleteTool(id)
-  await Promise.all([loadTools(), loadAgents()])
-}
 
 // ⚠️ 这里原来还有一个 `setAgentTools()`（挂载/摘挂一个 agent 的工具组，
 //    `PUT /api/agents/:id/tools`）。它的调用方（智能体详情里那个"可挂载的工具组"
@@ -563,7 +474,10 @@ export async function saveFirstSentenceTemplates(patch: {
 
 export async function createAgent(input: {
   name: string
-  role: AgentRole
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `role: AgentRole`。**角色退场** ⇒ 新建
+   *   agent 不再问"它是什么角色"（服务端也不再收那个键）。
+   */
   instructions: string
   skillIds: string[]
   runtimeKey: string
@@ -580,27 +494,25 @@ export async function createAgent(input: {
    *    agent 上撤掉了**——"判完允许动什么"属于**这条链**（这队人的活判过之后允许
    *    做什么），不属于审核者个人：同一个审核者在不同组里本来就该配不同的权限。
    *
-   *    唯一权威现在是 `AgentGroup.allowedActions` / `actionParams` / `debugActions`
-   *    （组配置页 ③ 行动），建任务时由 daemon 展开进 `Run.*`。
+   *    后来它们短暂地搬到智能体组上，2026-11（D123）随**动作能力整体退场**彻底
+   *    消失——现在既没有 agent 级也没有组级的动作配置，判决也不再触发动作。
    *
    *    ★ 服务端**不留情面**：新建 / 编辑一个 agent 时带上这三个键（或那个已撤掉的
    *      `reviewerAgentId`）会被 400「不认识的字段」——保留它们等于把这个概念从
    *      界面这一侧再捞回来。
    */
-  /** 私有归属（第二轮）：有值 = 这个 agent 属于某个组（组详情直接建私有成员时用）。 */
-  ownerGroupId?: string
+  /*
+   * ⚠️ 2026-11（S3）：`ownerGroupId`（私有归属）随智能体组退场删——没有"组"可归属了。
+   */
 }): Promise<Agent> {
   const agent = await api<Agent>('/api/agents', {
     method: 'POST',
     body: JSON.stringify({
       name: input.name,
-      role: input.role,
       instructions: input.instructions,
       skillIds: input.skillIds,
       runtimeKey: input.runtimeKey,
       reviewStandard: input.reviewStandard ?? null,
-      // `exactOptionalPropertyTypes`：没给就整个键不出现（字段在不在 = 全局/私有）
-      ...(input.ownerGroupId ? { ownerGroupId: input.ownerGroupId } : {}),
     }),
   })
   await loadAgents()

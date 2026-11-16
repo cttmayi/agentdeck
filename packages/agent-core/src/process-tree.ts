@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { EventEmitter } from 'node:events'
-import { createInterface } from 'node:readline'
+import type { Readable } from 'node:stream'
 import { resolveSpawnTarget, spawnPlanFor } from './spawn-target.ts'
 
 /**
@@ -97,6 +97,59 @@ export interface ProcessHandle {
   lastActivityAt(): number
 }
 
+/**
+ * 按**真正的换行符**（`\n`）切行——**不认 Unicode 的行分隔符**。
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么不能用 `readline.createInterface`
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 2026-11 真机 P0（D120）：本机 9 条 run 全死在
+ * `codex 对话阶段失败：JSON-RPC 请求 thread/resume（id=2）超时（60000ms）`，
+ * 同时 run 日志里堆着 119 条「JSON-RPC 帧不可解析」。
+ *
+ * 量出来的根因就在这一行代码上：Node 的 `readline` 把 **U+2028（LINE SEPARATOR）
+ * / U+2029（PARAGRAPH SEPARATOR）** 也当成行结束（那是 ECMAScript 的
+ * LineTerminator 集合），而 JSON-RPC over stdio 是 **NDJSON**——只认 `\n`。
+ * agent 读进来的那份 PDF / 网页 / `textutil` 转出的文本里正好有 U+2028，
+ * 被塞进 `thread/resume` 的响应（1,649,749 字节、**118 个 U+2028**）里，
+ * 于是那**一帧**被切成 119 段，每一段都不是合法 JSON ⇒ 对方的响应永远拼不回来
+ * ⇒ 那条请求等到 60 秒超时 ⇒ 整条 run 记成 infra_error。
+ *
+ * 证据（本机实测，`.cache/codex-resume-wire/`）：
+ *   · 同一份字节，裸 pipe 抓下来是 **1 行 / 13 个 LF**（`JSON.parse` 通过）；
+ *   · 走 `spawnProcessTree` 同一个进程同样的帧：**readline 131 行**，其中 119 行
+ *     不可解析，切点全在 `\xe2\x80\xa8` 上——与真机日志里 119 条一一对上。
+ *
+ * 所以自己切：`\n` 才是行边界，`\r`（Windows 的 CRLF）顺手去掉，其余一律照抄。
+ * **不许多开一份切行逻辑**——平台侧进程 I/O 只在这里（见 platform-compat.md）。
+ */
+function pipeLines(stream: Readable, onLine: (line: string) => void): void {
+  // 按字符串收（不是按 Buffer）：多字节字符正好卡在块边界时，`setEncoding` 的
+  // StringDecoder 会把它补齐；自己 `toString()` 会把一个 UTF-8 字符劈成两半。
+  stream.setEncoding('utf8')
+  let pending = ''
+  stream.on('data', (chunk: string) => {
+    pending += chunk
+    let index = pending.indexOf('\n')
+    while (index >= 0) {
+      let line = pending.slice(0, index)
+      pending = pending.slice(index + 1)
+      if (line.endsWith('\r')) line = line.slice(0, -1)
+      onLine(line)
+      index = pending.indexOf('\n')
+    }
+  })
+  // 没有换行符收尾的最后一行也要吐出来——`readline` 也是这么做的，
+  // 少了它，"CLI 只写了半行就退出"时那一行会静默消失（日志尾行丢失）。
+  stream.on('end', () => {
+    if (pending === '') return
+    const line = pending.endsWith('\r') ? pending.slice(0, -1) : pending
+    pending = ''
+    onLine(line)
+  })
+}
+
 const DEFAULT_GRACE_MS = 5_000
 
 export function spawnProcessTree(input: SpawnInput): ProcessHandle {
@@ -129,15 +182,13 @@ export function spawnProcessTree(input: SpawnInput): ProcessHandle {
   }
 
   if (child.stdout) {
-    const rl = createInterface({ input: child.stdout, crlfDelay: Infinity })
-    rl.on('line', (line) => {
+    pipeLines(child.stdout, (line) => {
       touch()
       input.onStdoutLine?.(line)
     })
   }
   if (child.stderr) {
-    const rl = createInterface({ input: child.stderr, crlfDelay: Infinity })
-    rl.on('line', (line) => {
+    pipeLines(child.stderr, (line) => {
       touch()
       input.onStderrLine?.(line)
     })

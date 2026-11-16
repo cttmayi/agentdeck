@@ -135,7 +135,10 @@ export const settingsText = {
   'settings.syncHeading': { zh: '同步状态', en: 'Sync status' },
   'settings.syncReported': { zh: '已上报 {count}', en: 'Reported {count}' },
   'settings.syncQueued': { zh: '· 暂存 {count} 条待补交', en: '· {count} queued for resubmission' },
-  'settings.syncFetched': { zh: '· 取回 {count} 条待处理项', en: '· {count} fetched for handling' },
+  /*
+   * ⚠️ 2026-11（D125）：`settings.syncFetched`（"取回 N 条待处理项"）随报告摄取的
+   *   拉取半段一起删——同步现在只有一个方向（往外上报）。
+   */
   'settings.syncReportingOff': { zh: '· 上报已关闭', en: '· reporting is off' },
   'settings.reportingStrong1': { zh: '上报什么、去哪、算不算证据', en: 'What is reported, where it goes, and whether it counts as evidence' },
   'settings.reportingAfter1': { zh: '：页面定期把', en: ': the page periodically sends ' },

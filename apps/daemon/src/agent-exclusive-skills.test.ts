@@ -50,7 +50,7 @@ async function createAgent(url: string): Promise<string> {
   const res = await fetch(`${url}/api/agents`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: '独有技能持有者', role: 'executor', instructions: '你是助手。' }),
+    body: JSON.stringify({ name: '独有技能持有者', instructions: '你是助手。' }),
   })
   assert.equal(res.status, 201)
   const body = (await res.json()) as { id: string }
@@ -153,9 +153,10 @@ describe('★ 独有技能 API（D111）', () => {
   test('★ 内置智能体只读：PUT / DELETE 都 403（平台播种，不许手改）', async () => {
     await withDaemon(async (url) => {
       const agents = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string }>
+        agents: Array<{ id: string; builtin?: boolean; builtinKind?: string }>
       }
-      const drafter = agents.agents.find((a) => a.role === 'drafter')!
+      // ⚠️ 2026-11（S4）：判据从角色换成**内置岗位**。
+      const drafter = agents.agents.find((a) => a.builtinKind === 'drafter')!
       const put = await fetch(`${url}/api/agents/${drafter.id}/skills/x`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -169,7 +170,7 @@ describe('★ 独有技能 API（D111）', () => {
       assert.equal(del.status, 400)
       assert.equal(((await del.json()) as { code?: string }).code, 'builtin_agent_readonly')
       // 生成者播种的 3 条独有技能在列表里（GET 只读，仍可见）
-      const maker = agents.agents.find((a) => a.role === 'agent-maker')!
+      const maker = agents.agents.find((a) => a.builtinKind === 'agent-maker')!
       const list = (await (await fetch(`${url}/api/agents/${maker.id}/skills`)).json()) as {
         skills: Array<{ slug: string }>
       }

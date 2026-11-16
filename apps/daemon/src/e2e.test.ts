@@ -83,6 +83,19 @@ class FakeBackend implements AgentBackend {
 
   readonly #fail: boolean
 
+  /**
+   * 审核 run 的产出（默认与执行 run 相同）。
+   *
+   * ★ 审核 run 靠**第一句话**区分：审核分支的固定文案以「请审核这份任务产出」
+   *   开头（见 server 的审核分支）。假后端只有这一条线索可用（`ExecOptions`
+   *   里没有 kind），所以按文案判断——它改了就说明审核文案变了，测试会红，
+   *   这正是我们要的联动。
+   */
+  readonly #reviewOutput: string | null
+
+  /** 每个 run 收到的第一句话（按提交顺序）——重跑轮要量"这一次带了什么"。 */
+  readonly prompts: string[] = []
+
   /** 卡住执行用的闸门——见 `hold()`。 */
   #gate: Promise<void> | null = null
 
@@ -90,9 +103,10 @@ class FakeBackend implements AgentBackend {
    * 才真正发生；没有它，编排"提交 202 当完成"的 bug 测不出来（run 瞬间收口）。 */
   #delay = 0
 
-  constructor(options: { fail?: boolean; delayMs?: number } = {}) {
+  constructor(options: { fail?: boolean; delayMs?: number; reviewOutput?: string } = {}) {
     this.#fail = options.fail === true
     this.#delay = options.delayMs ?? 0
+    this.#reviewOutput = options.reviewOutput ?? null
   }
 
   /**
@@ -137,6 +151,7 @@ class FakeBackend implements AgentBackend {
      */
     // "它被交代了什么" = 系统提示 + 用户消息（A 档把 ①② 放在前者里）
     this.seenContext = [opts.systemPrompt ?? '', opts.prompt].filter((p) => p !== '').join('\n\n')
+    this.prompts.push(opts.prompt)
     this.seenUserFile = await readFile(join(opts.workDir, 'CLAUDE.md'), 'utf8').catch(() => null)
 
     // 抓一份技能目录快照（见 seenSkillFiles 的注释：只有此刻才看得到）
@@ -170,21 +185,25 @@ class FakeBackend implements AgentBackend {
       sandboxDescription: '未启用沙箱（测试里的假后端）',
     })
 
+    // 审核 run 的产出可以单独配置（量"判决围栏被剥掉"要用真围栏）
+    const isReview = opts.prompt.includes('请审核这份任务产出')
+    const text = isReview ? (this.#reviewOutput ?? '报告：任务已完成。') : '报告：任务已完成。'
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'status', content: '会话已启动' })
     queue.push({ type: 'text', content: '我先看看任务。' })
     queue.push({ type: 'tool_use', tool: 'Read', content: '调用工具 Read', input: { file_path: 'a.ts' } })
     queue.push({ type: 'tool_result', tool: null, content: '文件内容', output: '文件内容', outputTruncated: false })
-    queue.push({ type: 'text', content: '报告：任务已完成。' })
+    queue.push({ type: 'text', content: text })
     queue.close()
 
     const fail = this.#fail
+    const textOut = text
     const gate = this.#gate ?? Promise.resolve()
     const result = gate.then(async () => {
       if (this.#delay > 0) await new Promise((resolve) => setTimeout(resolve, this.#delay))
       return {
         status: fail ? ('failed' as const) : ('completed' as const),
-        output: fail ? '' : '报告：任务已完成。',
+        output: fail ? '' : textOut,
         error: fail ? '假装失败了' : null,
         durationMs: 5,
         sessionId: 'fake-session-1',
@@ -1093,70 +1112,19 @@ describe('★ INV-1：reviewer ≠ executor 必须在**写入之前**拦住', ()
    * 就是那条执行 run 的 agent，就能拿到一次"自己审自己"。INV-1 一破，S1 的整个
    * 闭环就是假的——审核退化成自我确认，而那正是这个产品的定位所在。
    */
-  test('★ 让执行者审自己 ⇒ 400，而且**不入库**', async () => {
-    const dataDir = await makeTempDir('inv1-data')
-    const work = await makeTempDir('inv1-work')
-    const b = new FakeBackend()
-    const d = await startDaemon({
-      dataDir,
-      workRoot: join(dataDir, 'work'),
-      port: 0,
-      fsync: false,
-      backend: b,
-      onWarn: () => {},
-      onInfo: () => {},
-    })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「★ 让执行者审自己 ⇒ 400，而且**不入库**」——
+   *   INV-1（reviewer ≠ executor）：公开接口不能构造出"自己审自己"。
+   *
+   *   **审核 run 退场** ⇒ 没有"reviewer"这个角色可判，用例删。
+   *
+   *   ⚠️ INV-1 那条推理本身就是这个仓库的一份范本，留着：**"结构上安全"只在
+   *   一条路上成立，换一条入口（公开接口）就不成立了**——所以不变量必须落在
+   *   写入点，而不是落在"反正只有一条路"上。而它当年还是死在第二半句上：那个
+   *   校验函数写好了、注释也写了"要在写入前拦"，**但调用点从来没接上**。
+   */
 
-    try {
-      const execAgent = { id: 'agent-self', name: '自己干自己审', instructions: '' }
-      const executeRunId = ulid() as RunId
-      await fetch(`${d.url}/api/runs`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          runId: executeRunId,
-          kind: 'execute',
-          agentRef: execAgent,
-          skills: [],
-          subject: { type: 'issue', id: 'i-inv1' },
-          prompt: '干活',
-          workDir: work,
-          limits: { maxTurns: null, timeoutMs: null },
-        }),
-      })
-      await readUntilTerminal(`${d.url}/api/runs/${executeRunId}/events`)
-
-      const reviewRunId = ulid() as RunId
-      const res = await fetch(`${d.url}/api/runs`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          runId: reviewRunId,
-          kind: 'review',
-          // ★ 同一个 agent —— 这就是"自己审自己"
-          agentRef: execAgent,
-          skills: [],
-          subject: { type: 'run', id: executeRunId },
-          prompt: '审一下你自己',
-          limits: { maxTurns: null, timeoutMs: null },
-        }),
-      })
-
-      assert.equal(res.status, 400, '★ 必须在受理之前拒绝，而不是跑起来之后才失败')
-      const body = (await res.json()) as { code?: string }
-      assert.equal(body.code, 'reviewer_must_differ')
-
-      // ★ 拒绝必须是"真的没发生"：那条 review run 不能留在库里
-      const after = await fetch(`${d.url}/api/runs/${reviewRunId}`)
-      assert.equal(after.status, 404, '★ 被拒的 run 不该入库——否则列表里会多一条幽灵')
-    } finally {
-      await d.close()
-      await cleanup(work)
-      await cleanup(dataDir)
-    }
-  })
-
-  test('换个 agent 来审 ⇒ 正常受理', async () => {
+test('换个 agent 来审 ⇒ 正常受理', async () => {
     const dataDir = await makeTempDir('inv1-ok-data')
     const work = await makeTempDir('inv1-ok-work')
     const b = new FakeBackend()
@@ -1251,7 +1219,6 @@ describe('★ agent 上填的模型与环境变量必须真的传到 CLI', () =>
           body: JSON.stringify({
             name: '带模型的执行者',
             instructions: '干活',
-            role: 'executor',
             model: 'some-model-v9',
             env: { MY_FLAG: 'on' },
           }),
@@ -1506,7 +1473,6 @@ describe('★ claude 个人配置隔离（D78）：CLAUDE_CONFIG_DIR 传下去�
           body: JSON.stringify({
             name: '试图关掉隔离的执行者',
             instructions: '干活',
-            role: 'executor',
             env: { CLAUDE_CONFIG_DIR: '/evil/user-config' },
           }),
         })
@@ -1720,7 +1686,6 @@ describe('★ codex 个人配置隔离（2026-10，D78 的 codex 版）：CODEX_
           body: JSON.stringify({
             name: '试图关掉隔离的执行者',
             instructions: '干活',
-            role: 'executor',
             env: { CODEX_HOME: '/evil/user-config' },
             runtimeKey: 'codex',
           }),
@@ -2516,46 +2481,17 @@ describe('★ 日志要说清「交给 CLI 的到底是什么」', () => {
     //   所以"没截断"这件事只能由上面那条逐字相等来判：它才是能变红的判据。
   })
 
-  test('★ 没配审核者时，日志要说清"为什么没有审核"', async () => {
-    // 这条是"日志要能回答为什么"的落点：原来只返回 null，日志里连一句
-    // "没有串接审核"都没有，使用者只能去界面上猜（或以为系统坏了）。
-    const runId = ulid() as RunId
-    const dir = await makeTempDir('e2e-noreviewer')
-    try {
-      const agent = ((await (
-        await fetch(`${daemon.url}/api/agents`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: '不指定审核者的执行者', role: 'executor' }),
-        })
-      ).json()) as { id: string }).id
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「★ 没配审核者时，日志要说清『为什么没有审核』」——
+   *   执行完没串上审核时，日志必须点名原因（没配 / 人没了 / 深度超了）。
+   *
+   *   审核 run 退场 ⇒ 不再有"要不要串审核"这件事，用例删。
+   *
+   *   ⚠️ 那条规矩本身没有过期，它是这个仓库的通用纪律：**`null` 必须带一句
+   *   "为什么没有"**。只返回 null 的那一版让日志只能说"没有 X"，而"为什么没有"
+   *   恰恰是使用者最需要知道的（三种原因的处置完全不同）。
+   */
 
-      await fetch(`${daemon.url}/api/runs`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          runId,
-          kind: 'execute',
-          agentRef: { id: agent, name: '不指定审核者的执行者', instructions: '' },
-          skills: [],
-          subject: { type: 'issue', id: issueId },
-          prompt: '跑一下就好',
-          workDir: dir,
-          limits: { maxTurns: null, timeoutMs: null },
-        }),
-      })
-
-      const text = await waitForText(runId, /没有串接审核/)
-      // ⚠️ 2026-10：文案变了。原来说的是"agent「X」没有指定审核者（「由谁审它」是空的）"
-      //    ——那个设置（`Agent.reviewerAgentId`）已经整个撤掉，"谁审"现在只有**组**
-      //    能回答。所以新的说法指向**建任务时选组**（那才是使用者能动手的地方），
-      //    而不再点名某个 agent 的某个已经不存在的配置框。
-      assert.match(text, /这条任务没有审核者/, '要说清这一次没有审核者')
-      assert.match(text, /智能体组/, '还要说清**去哪儿改**（建任务时选组）')
-    } finally {
-      await cleanup(dir)
-    }
-  })
 })
 
 describe('★ 日志要说清沙箱**到底开没开**', () => {
@@ -2825,7 +2761,6 @@ describe('编排：步骤等组跑真正完成（2026-11 修复）', () => {
 
       const agent = await post<{ id: string }>('/api/agents', {
         name: '慢执行者',
-        role: 'executor',
       })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '慢测编排',
@@ -2923,7 +2858,6 @@ describe('编排：任务参数化（{{task}} 占位符）', () => {
 
       const agent = await post<{ id: string }>('/api/agents', {
         name: '参数执行者',
-        role: 'executor',
       })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '参数化编排',
@@ -3010,7 +2944,7 @@ describe('编排 v5：第一句话用编排模版', () => {
         }
         throw new Error('run 未到目标状态')
       }
-      await post<{ id: string }>('/api/agents', { name: 'tpl执行者', role: 'executor' })
+      await post<{ id: string }>('/api/agents', { name: 'tpl执行者' })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: 'tpl编排',
         code: `await flow([agent('tpl执行者')], '{{task}}')`,
@@ -3038,74 +2972,29 @@ describe('编排 v5：第一句话用编排模版', () => {
 })
 
 describe('编排 v5：把关循环（审查员审核 run + 反查）', () => {
-  test('审查员审核 run 生成、按 subject 反查（界面「审查员意见」数据源）', async () => {
-    const backend = new FakeBackend()
-    const d = await startDaemon({
-      dataDir: await makeTempDir('e2e-wf-review'),
-      port: 0,
-      fsync: false,
-      backend,
-      onWarn: () => {},
-      onInfo: () => {},
-    })
-    try {
-      const post = async <T>(p: string, body: unknown): Promise<T> => {
-        const res = await fetch(`${d.url}${p}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
-        return (await res.json()) as T
-      }
-      const get = async <T>(p: string): Promise<T> => {
-        const res = await fetch(`${d.url}${p}`)
-        if (!res.ok) throw new Error(`${p} → ${res.status}`)
-        return (await res.json()) as T
-      }
-      const waitStatus = async (rid: string, statuses: string[]): Promise<string> => {
-        for (let i = 0; i < 80; i++) {
-          const st = (await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)).run.status
-          if (statuses.includes(st)) return st
-          await new Promise((resolve) => setTimeout(resolve, 200))
-        }
-        throw new Error('run 未到目标状态')
-      }
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「审查员审核 run 生成、按 subject 反查」——把关循环
+   *   会派生一条 **kind='review'** 的 run，界面按 `subject.type === 'run'` 反查出
+   *   "审查员意见"。
+   *
+   *   审核 run 退场 ⇒ 把关者就是一次普通执行 run，反查那条规则没有对象，用例删。
+   *   **把关这件事本身还测着**：见下面「打回任务里只有人能读的意见」那条（它验的是
+   *   打回意见真的回到下一轮任务书里）。
+   */
 
-      // 审查员必须有指令（没有依据的审核不算审核）；产出"通过"（判定 pass 出循环）
-      const execAgent = await post<{ id: string }>('/api/agents', {
-        name: 'v5执行者',
-        role: 'executor',
-      })
-      const reviewAgent = await post<{ id: string }>('/api/agents', {
-        name: 'v5审查员',
-        role: 'reviewer',
-        instructions: '审核标准：内容完整、风格一致。',
-      })
-      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
-        name: 'v5把关循环',
-        code: `const 写作 = agent('v5执行者')\nconst 审查 = agent('v5审查员', (意见) => 意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' })\nawait loop(写作, 审查, '{{task}}', { maxRounds: 2 })`,
-        templateKey: 'loop',
-      })
-      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
-        prompt: '写一篇文章',
-        workDir: null,
-      })
-      const rid = started.run.id
-      assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
-      const runAfter = await get<{ run: { steps: Array<{ runIds: string[] }> } }>(`/api/workflow-runs/${rid}`)
-      const execRunId = runAfter.run.steps[0]!.runIds[0]!
-      assert.ok(execRunId, '执行 run 在步骤链上')
-      // 反查审核 run（与界面 findReviewRun 同一规则：kind=review + subject.type=run + subject.id=执行 run）
-      const runs = await get<{ runs: Array<{ kind: string; subject: { type: string; id: string } }> }>('/api/runs')
-      const rev = runs.runs.find(
-        (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === execRunId,
-      )
-      assert.ok(rev, '审核 run 存在（界面「审查员意见」反查的数据源）')
-    } finally {
-      await d.close()
-    }
-  })
+})
+
+describe('编排 v5：审核意见交给编排时剥掉判决围栏（D121）', () => {
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「打回任务里只有人能读的意见，没有 ALPHA_VERDICT
+   *   围栏；步骤跑完都要收口」（D121）：判决围栏不许被当成建议喂回执行者，而且
+   *   跑过的步骤都要收口。
+   *
+   *   判决围栏不再由平台产生 ⇒ 那半句没有对象；**"步骤跑完都要收口"那半句仍然
+   *   重要**，它在 `packages/orchestration/src/engine.test.ts` 的
+   *   「★★ 每个跑过的步骤都要收口」里守着（那条更完整：flow/parallel/route 都覆盖）。
+   */
+
 })
 
 describe('编排：gate 否决打回重跑', () => {
@@ -3143,7 +3032,7 @@ describe('编排：gate 否决打回重跑', () => {
         throw new Error('run 未到目标状态')
       }
 
-      const agent = await post<{ id: string }>('/api/agents', { name: '打回执行者', role: 'executor' })
+      const agent = await post<{ id: string }>('/api/agents', { name: '打回执行者' })
       const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
         name: '打回编排',
         code: `const 写作 = agent('打回执行者')\nawait loop(写作, gate('结果请你过目'), '{{task}}')`,
@@ -3176,6 +3065,103 @@ describe('编排：gate 否决打回重跑', () => {
       assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
       const fin = await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)
       assert.equal(fin.run.status, 'done')
+    } finally {
+      await d.close()
+    }
+  })
+})
+
+/**
+ * ★ 2026-11 硬闸：**执行 run 没跑成，不能当产出**。
+ *
+ * 真机现场（使用者机器 2026-11-16）：编排的重写轮撞上 codex `thread/resume`
+ * 超时（infra_error，`waitForRunDone` 拿到 failed），但那两步的执行 run 仍被当成
+ * "执行完成"交给审查员——一次判「不通过」（写作员被拖去重写，真实原因是这条 run
+ * 根本没跑），另一次对**同样的空材料**判「通过」，于是编排把没跑成的一步当通过
+ * 往下跑，运行画面停在 waiting-human，没人知道中途失败过两次。
+ *
+ * 判据（两条一起才成立）：组跑失败 ⇒ 编排 run `failed`（错误带原因）+ **一条审核
+ * run 都不许生成**。只判前者的话，"改成 failed 但先审一遍再失败"也能过。
+ */
+describe('编排：执行失败不许被当成产出（硬闸）', () => {
+  test('组跑 infra 失败 ⇒ 编排 run failed，且不提交审核', async () => {
+    // fail:true 的假后端 = 执行 run 以 failed 收口、产出为空（与真机 infra 失败同形）
+    const backend = new FakeBackend({ fail: true })
+    const d = await startDaemon({
+      dataDir: await makeTempDir('e2e-wf-execfail'),
+      port: 0,
+      fsync: false,
+      backend,
+      onWarn: () => {},
+      onInfo: () => {},
+    })
+    try {
+      const post = async <T>(p: string, body: unknown): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`${p} → ${res.status}: ${await res.text()}`)
+        return (await res.json()) as T
+      }
+      const get = async <T>(p: string): Promise<T> => {
+        const res = await fetch(`${d.url}${p}`)
+        if (!res.ok) throw new Error(`${p} → ${res.status}`)
+        return (await res.json()) as T
+      }
+      const waitStatus = async (rid: string, statuses: string[]): Promise<string> => {
+        for (let i = 0; i < 80; i++) {
+          const st = (await get<{ run: { status: string } }>(`/api/workflow-runs/${rid}`)).run.status
+          if (statuses.includes(st)) return st
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        throw new Error('run 未到目标状态')
+      }
+
+      await post<{ id: string }>('/api/agents', { name: '失败执行者' })
+      await post<{ id: string }>('/api/agents', {
+        name: '失败审查员',
+        instructions: '审核标准：内容完整、风格一致。',
+      })
+      const wf = await post<{ workflow: { id: string } }>('/api/workflows', {
+        name: '失败编排',
+        code: `const 写作 = agent('失败执行者')\nconst 审查 = agent('失败审查员', (意见) => 意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' })\nawait loop(写作, 审查, '{{task}}', { maxRounds: 2 })`,
+        templateKey: 'loop',
+      })
+      const started = await post<{ run: { id: string } }>(`/api/workflows/${wf.workflow.id}/run`, {
+        prompt: '写一篇文章',
+        workDir: null,
+      })
+      const rid = started.run.id
+
+      // ① 编排 run 必须以 failed 收口——不是 done，也不是停在 waiting-human 等确认
+      assert.equal(
+        await waitStatus(rid, ['done', 'failed']),
+        'failed',
+        '执行没跑成 ⇒ 编排 run failed',
+      )
+      const fin = await get<{
+        run: { error: string | null; steps: Array<{ status: string; runIds: string[] }> }
+      }>(`/api/workflow-runs/${rid}`)
+      assert.match(fin.run.error ?? '', /执行失败/, '编排 run 的错误说清是执行失败')
+      assert.equal(fin.run.steps[0]!.status, 'failed', '步骤标 failed（运行画面看得见）')
+
+      // ② 前提：那条组跑的 run 自己确实是 failed（夹具没在替失败撒谎）
+      const runs = await get<{
+        runs: Array<{ runId: string; kind: string; status: string }>
+      }>('/api/runs')
+      assert.equal(
+        runs.runs.filter((r) => r.kind === 'execute' && r.status === 'failed').length,
+        1,
+        '组跑那条 run 是 failed（夹具前提）',
+      )
+      // ③ ★★ 核心判据：一条审核 run 都不许有——"拿失败 run 去审"正是要堵的路径
+      assert.equal(
+        runs.runs.filter((r) => r.kind === 'review').length,
+        0,
+        '执行失败之后不许提交审核（否则又拿空产出评审）',
+      )
     } finally {
       await d.close()
     }
@@ -3223,7 +3209,7 @@ describe('编排：没 await 代码的兜底（gate 否决打回）', () => {
         throw new Error('run 未到目标状态')
       }
 
-      const agent = await post<{ id: string }>('/api/agents', { name: '无await执行者', role: 'executor' })
+      const agent = await post<{ id: string }>('/api/agents', { name: '无await执行者' })
       // ★ v5（2026-11 设计）：惰性句柄——不 await 不执行（无兜底魔法）。
       //   人把关否决打回 = 显式 loop（gate 作把关者）：否决 → 重写轮（意见附加到
       //   重写任务）→ 再等确认。这里验证这一整条真链路。

@@ -24,19 +24,10 @@ import {
   type BlockTemplates,
   type FirstSentenceKind,
 } from '@agentdeck/agent-core'
-import {
-  assertRunTransition,
-  redactArgv,
-  resolveAllowedActionsWithTools,
-  toolActionHints,
-  type ReviewDecision,
-  type Store,
-  type ToolActionHint,
-} from '@agentdeck/domain'
+import { assertRunTransition, buildAuditRecord, redactArgv, type Store } from '@agentdeck/domain'
 import type { SandboxOptions } from '@agentdeck/agent-core'
 import {
   ulid,
-  type ActionRefType,
   type Issue,
   type Run,
   type RunFailure,
@@ -44,10 +35,8 @@ import {
   type RunResult,
   type SubmitRunRequest,
   type TokenUsage,
-  type Tool,
 } from '@agentdeck/protocol'
 import { startIdleWatchdog, type IdleWatchdog } from './idle-watchdog.ts'
-import { reviewerIdentity } from './review-standard.ts'
 import { syncClaudeConfigDir } from './run-hooks/claude-config.ts'
 import {
   hostSkillsFor,
@@ -78,7 +67,6 @@ import {
 } from './memory.ts'
 import { verifySentText } from './rpc-log.ts'
 import type { RunRegistry } from './registry.ts'
-import type { ReviewCoordinator } from './review.ts'
 import type { Semaphore } from './semaphore.ts'
 import type { WorkDirLocks } from './workdir-locks.ts'
 
@@ -148,8 +136,29 @@ export interface ExecutorDeps {
   descriptor: RuntimeDescriptor
   semaphore: Semaphore
   locks: WorkDirLocks
-  /** review run 的收口器。不提供则 review run 只跑不判。 */
-  reviewCoordinator?: ReviewCoordinator
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是两个可选依赖——`reviewCoordinator`（把 review run
+   *   的输出收口成一条判决）与 `autoChainReview`（执行完成后自动接一次审核）。
+   *   **审核 run 与判决一起退场** ⇒ 执行器不再有"跑完接审核"这一步，两个依赖
+   *   与它们的所有调用点一并删。
+   *
+   *   ⚠️ 留下来的那件事是 `rounds/`：执行任务与执行结果**按轮次落盘**（多轮不
+   *   覆盖），见下面那段。它原来是给审核 run 当材料用的，但它的价值与审核无关
+   *   ——人要看"上次那一版到底写了什么"，编排要读上一轮的产出。
+   */
+  /**
+   * 一条执行 run **正常跑完之后**的收尾钩子（可选）。
+   *
+   * ★ 2026-11（D125）：这个位置原来是 `autoChainReview`（跑完自动串一条审核 run）。
+   *   审核 run 退场之后它没有对象了，但**同一位置**还有一件真事要做：起草 run
+   *   跑完 ⇒ 把这一版登记进 `.versions.json` 并抹掉"人改过"的标记
+   *   （那段逻辑原来写在 `autoChainReview` 里面，跟着那个函数一起被删过一次——
+   *   症状是"按意见改一版"永远等不到下一版，因为版本表不再增长）。
+   *
+   * ⚠️ 为什么留在执行器这一层而不是返回值里：它是"跑完之后平台顺手要做的账"，
+   *   与这次 run 的产出无关，也不该影响成败——钩子抛错只记日志，不改 run 状态。
+   */
+  onRunFinished?: (run: Run) => Promise<void>
   /**
    * 可选沙箱（M4）。缺省 = 不包装。
    *
@@ -159,28 +168,6 @@ export interface ExecutorDeps {
    *   那种安全感是假的。要么全开，要么全不开。
    */
   sandbox?: SandboxOptions
-  /**
-   * 执行完成后自动接一次审核（S1）。
-   *
-   * 由调用方实现——它知道有哪些 agent、谁该当审核者、以及回路边界怎么算。
-   *
-   * ★ `runId: null` **必须带一句 `note` 说明为什么没接**。
-   *
-   *   只返回 null 的那一版让日志只能说"没有串接审核"，说不出**为什么**——
-   *   而"为什么没审"恰恰是使用者最需要知道的（是没配审核者？审核者被删了？
-   *   还是链路深度超了？）。三种情况的处置完全不同。
-   */
-  autoChainReview?: (input: {
-    executeRun: Run
-    executorAgentId: string
-    output: string
-    /**
-     * §3.3b（2026-09）：执行任务/执行结果的两份**落盘文件**路径（执行器
-     * 刚写好，按轮次编号、多轮不覆盖）。审核的第一句话用它做文件引用；
-     * null = 落盘失败/没有工作目录 ⇒ 审核退回纯内联材料。
-     */
-    materialRefs: { taskPath: string; resultPath: string } | null
-  }) => Promise<{ runId: RunId | null; note: string }>
   now?: () => number
   onWarn?: (message: string) => void
   /**
@@ -219,41 +206,17 @@ export interface ExecutorDeps {
   hostSkillRoots?: string[]
 }
 
-/**
- * 把判决结果写成一句人话。
+/*
+ * ⚠️ 2026-11（D125）：这里原来是 `describeDecision`——把一份判决结果（advisory /
+ *   escalate / retry / downgrade …）写成一句进 run 日志的人话。
  *
- * 六种走法都要有话说——**降级与不合规是最需要被看见的两种**（它们意味着
- * "模型给的东西没法直接用"），而在此之前它们和"一切正常"在日志里长得一样。
+ *   判决退场 ⇒ 没有判决可描述，函数删。
+ *
+ *   ⚠️ 它那六种走法里最值钱的一条：**降级与不合规是最需要被看见的两种**，因为
+ *   它们意味着"模型给的东西没法直接用"——而它们与"一切正常"在日志里长得一样，
+ *   正是最容易被静默吞掉的。
  */
-function describeDecision(handling: {
-  decision: ReviewDecision
-  actionIds: readonly string[]
-  spawnedRunId: string | null
-  // ⚠️ 这里原来还有一个 `derivationBlocked`——内置动作 `issue.assign_agent`
-  //    的"指派成功、派生被回路边界拦下"那个信号。D41 之后工具动作不可能派生
-  //    run，这个字段连同上面对它的处理一起删掉了（它其实从来没被本函数读过，
-  //    只是被 `ReviewHandlingResult` 的形状拖着）。
-}): string {
-  const d = handling.decision
-  const summary = (v: { conclusion: string; reasonCode: string; confidence: number }): string =>
-    `${v.conclusion}（${v.reasonCode}，置信度 ${v.confidence}）`
-  switch (d.kind) {
-    case 'act':
-      return `${summary(d.verdict)} → 已派发 ${handling.actionIds.length} 个动作`
-    case 'advisory':
-      return `${summary(d.verdict)} → 没有动作，只记录`
-    case 'escalate':
-      return `${summary(d.verdict)} → 需要人介入：${d.escalateReason}（已发通知）`
-    case 'retry':
-      return `不合规（${d.issues.length} 个问题）→ 重试一次，理由见上面的注入记录`
-    case 'downgrade':
-      return `不合规且重试次数已用尽 → 降级为建议（已发通知），本次不执行任何动作`
-    case 'invalid':
-      return `不合规且重试无意义（${d.issues.length} 个结构性问题）→ 已通知人处理`
-    default:
-      return '（未知的判决结果）'
-  }
-}
+
 
 /** 哈希只显示前 12 位：够用来对照，又不至于把一行撑爆。 */
 function shortHash(hash: string | null): string {
@@ -341,8 +304,10 @@ export class RunExecutor {
   /** 关闭中：不再受理新的 run。 */
   #closing = false
   readonly #workDirWaitMs: number
-  /** 已因 invalid 重试过几次——按 subject 记，避免无限重试。 */
-  readonly #invalidAttempts = new Map<string, number>()
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `#invalidAttempts`——"判决不合规重试过几次"
+   *   （按 subject 记，避免无限重试）。判决退场 ⇒ 没有重试计数，字段删。
+   */
 
   constructor(deps: ExecutorDeps, options: RunExecutorOptions = {}) {
     this.#deps = deps
@@ -401,35 +366,18 @@ export class RunExecutor {
       kind: req.kind,
       status: 'queued',
       agentId: req.agentRef.id,
-      // ★ 三态**原样**落库（见 `Run.reviewerAgentId`）：`undefined` = 跟随 agent
-      //   配置，`null` = 这次明确不审，id = 这次换人审。
-      //
-      //   这里绝不能写成 `reviewerAgentId: req.reviewerAgentId ?? null`——那会把
-      //   "照旧"悄悄变成"这次不审"，而这个差别在跑完之前看不出来（该审的没审，
-      //   而 run 状态一切正常）。
-      ...(req.reviewerAgentId === undefined
-        ? {}
-        : { reviewerAgentId: req.reviewerAgentId as Run['reviewerAgentId'] }),
-      // ★ 智能体组（D70 增量添加）：只作**记录**（这条 run 是哪队人），
-      //   组的默认值已经由 `POST /api/runs` 展开进上面那几个字段了。
-      //   `undefined` = 老路径（执行者「由谁审它」）。
-      ...(req.groupId === undefined ? {} : { groupId: req.groupId as Run['groupId'] }),
-      // ★ 任务级动作白名单**同理**：缺字段 = 跟随那个审核者的「行动权限」。
-      //   写成 `?? []` 会把"照旧"悄悄变成"这一次一个动作都不许触发"——
-      //   表现是判决永远只能给结论，而没有任何地方会说"为什么突然不动手了"。
-      ...(req.allowedActions === undefined
-        ? {}
-        : { allowedActions: req.allowedActions as Run['allowedActions'] }),
-      // ★ 任务级固定参数（D43）同一个判据：缺字段 = 跟随审核者长期那份
-      //   （`Agent.actionParams`）；`{}` 是"这一次不固定任何参数"的明确选择。
-      ...(req.actionParams === undefined
-        ? {}
-        : { actionParams: req.actionParams as Run['actionParams'] }),
-      // ★ 任务级调试动作（D70 增量添加，与 `allowedActions` 同款三态）：
-      //   缺字段 = 跟随审核者的 `Agent.debugActions`。
-      ...(req.debugActions === undefined
-        ? {}
-        : { debugActions: req.debugActions as Run['debugActions'] }),
+      /*
+       * ⚠️ 2026-11（D125）：这里原来落 `reviewerAgentId`（三态原样，`undefined` =
+       *   跟随、`null` = 这次不审、id = 换人）。审核 run 退场 ⇒ 不落。
+       */
+
+      /*
+       * ⚠️ 2026-11（S3）：这里原来落 `groupId`（"这条 run 是哪队人"）。组退场 ⇒ 不落。
+       */
+      // ⚠️ 2026-11（D123）：这里原来把请求里的 `allowedActions` / `actionParams` /
+      //    `debugActions` 抄到 run 上（"这一次允许触发哪些动作"三态语义）。动作能力
+      //    退场，run 上不再有这三个字段，三段一并删。
+
       // ★ D80 起草 run 的沉淀目标（新建 / 更新哪条）：随 run 落库，
       //   "恢复进行中的起草"按它还原目标（见 `CrystallizeTargetRef`）。
       ...(req.crystallizeTarget === undefined
@@ -440,24 +388,20 @@ export class RunExecutor {
       ...(req.revisedFrom === undefined
         ? {}
         : { revisedFrom: req.revisedFrom as Run['revisedFrom'] }),
-      // ★ 任务级返工次数（D45）。缺字段 = 不返工（`fail` 直接交给人）。
-      //   这里与上面三个**不同**：`0` 与"缺字段"后果相同（都是不返工），
-      //   所以不需要区分三态，落一个数即可。
-      //   2026-09：`null` = **无限**——必须原样保留，不能用 `?? 0` 吞掉
-      //   （`?? 0` 会把"无限"悄悄降级成"不返工"，语义完全反了）。
-      maxReworks: req.maxReworks === undefined ? 0 : req.maxReworks,
-      // ★ 2026-09（产品决定：日志已含第一句话全文，执行/审核都不再写上下文
-      //   副本文件）：审核的材料**记在 run 记录上**，判决不合规的重试从这里取——
-      //   · `materialRefs`：文件式审核的两份落盘文件（重试读结果文件）；
-      //   · `reportBody`：报告式审核的报告正文（重试要的材料就是它本身）。
-      ...(req.kind === 'review' && req.review
-        ? {
-            materialRefs: (req.review.materialRefs ?? null) as Run['materialRefs'],
-            reportBody: (req.review.body ?? null) as Run['reportBody'],
-          }
-        : {}),
+      /*
+       * ⚠️ 2026-11（D125）：这里原来给审核 run 落两份材料（`materialRefs` 落盘文件 /
+       *   `reportBody` 报告正文），供"判决不合规重试"取。审核 run 退场 ⇒ 删。
+       */
+
       subject: req.subject,
-      trigger: req.kind === 'review' ? 'third_party' : 'assignment',
+      /*
+       * ⚠️ 2026-11（D125/S5）：这里原来是
+       *   `req.kind === 'review' ? 'third_party' : 'assignment'`——审核 run 的来源是
+       *   第三方报告。审核 run 退场 ⇒ `kind` 恒为 `'execute'`，三元式的另一支
+       *   **永远走不到**（那种"看起来还有第二条来源"的死分支，正是这个仓库最防的）。
+       *   现在所有 run 都由人/编排/定时任务派活 ⇒ 来源就是 `assignment`。
+       */
+      trigger: 'assignment' as const,
       derivedFrom: (req.derivedFrom ?? null) as Run['derivedFrom'],
       chainDepth: req.chainDepth ?? 0,
       skillRefs: (req.skills ?? []).map((s) => s.ref),
@@ -1165,58 +1109,19 @@ export class RunExecutor {
       //   标记这些硬东西一个字都不能动。
       const language = LANGUAGE_NAME[workspace?.locale ?? DEFAULT_LOCALE]
 
-      // ★ 审核标准**在这个审核者身上**（D37），解析点只有一处
-      //   （`resolveReviewStandard`）——派发前判"能不能审"、这里渲染 `{{standards}}`、
-      //   判决收口时校验动作白名单，三处用的是同一份结果。
-      //   老数据（标准还在挂载的 skill 里）的兼容路径**只对正文生效**：skill 不
-      //   参与动作授权（D40），它的正文只进 `{{standards}}`。
-      //
-      //   ⚠️ 2026-10：动作白名单**不再来自审核者**——它属于智能体组
-      //   （`AgentGroup.allowedActions`），提交时展开进 `Run.allowedActions`。
-      //   agent 上那份字段撤掉了，所以这里不再有"回退到标准里那份"的顺序问题。
-      /**
-       * ★ 审核者的**身份**：agent 的「指令」＋（老数据里的）审核标准正文。
+      /*
+       * ⚠️ 2026-11（D125）：这里原来算的是**审核者的合成身份**——agent 的「指令」＋
+       *   （老数据里的）审核标准正文（`reviewerIdentity`，D37 起"标准并进指令"）。
+       *   审核 run 退场 ⇒ 没有审核者，② 就只是 agent 的「指令」，这段删。
        *
-       * 2026-09 的决定：「审核 Agent 的标准也放 ② 里面，不用单独设置」。所以对审核
-       * 这条链路，② 要投递的就是这份合成身份——它与派发资格用的是**同一个函数**
-       * （`reviewerIdentity`），所以"能派出去的"与"送进去的"不可能分叉。
+       *   ⚠️ 那条设计仍然成立：**"你是谁"与"你按什么判"不该拆成两个输入框**——
+       *   拆开之后人会在两个框之间来回搬文字，而最终被送进去的只有其中一份。
        */
-      const reviewerIdentityText =
-        req.kind === 'review'
-          ? reviewerIdentity(agentConfig ?? { reviewStandard: null }, mountedSkills).text
-          : null
 
-      // ★ 这次审核**允许哪些动作**（D40 收口：它在 agent 上，不在标准里）：
-      //   白名单还要考虑已安装的工具包，因为判决里可以出现
-      //   `<包 slug>.<动作名>` 这种第三方动作。
-      //   算在这里是因为它有两个消费者：①下面渲染判决契约（必须把动作名列给
-      //   模型——契约里没有的名字它写不出来）；②收口时校验判决里的动作。
-      //   两处各算一次是刻意的（与 `resolveReviewStandard` 同样的理由）：解析是
-      //   纯的、只读已读过的数据，而"两处各写一套取法"才是真正会出事的那种重复。
-      //
-      // ★★ 任务级覆盖优先（D42）：`run.allowedActions` 有值时用它，否则才用
-      //    审核者自己的「行动权限」。这一条是"新建任务页 ③ 可编辑"的落点，
-      //    而**判据只能看字段在不在**（见 `Run.allowedActions`）：
-      //    `[]` = 这一次一个动作都不许触发，是**明确的选择**，不是"没配"。
-      const reviewActions =
-        req.kind === 'review'
-          ? await this.#reviewActions(
-              run.workspaceId,
-              // 动作权限的权威取法是 `effectiveAllowedActions`（唯一解析点）：
-              // agent 上那份优先，为空才回退到老数据里标准上那份
-              // ★★ 2026-09 修：这里原来写的是
-              //    `resolveReviewStandard(...)?.allowedActions ?? []`，而那个函数在
-              //    "没有正文"时返回 null ⇒ 动作权限被整份丢掉（详见
-              //    `effectiveAllowedActions` 上面那段）。判据只能是**动作权限本身**，
-              //    与"有没有标准正文"无关。
-              // ★★ 唯一权威是**这条 run**（组展开时落下来的那份）。2026-10：
-              //   agent 上那份行动权限**整个撤掉**了（归属错了——"判完允许动什么"
-              //   是这条链的事，不是某个审核者个人的），所以这里没有第二来源可回退。
-              run.allowedActions ?? [],
-              // ★★ 固定参数同理：只有 run 上那一份（组展开时落下来的）。
-              run.actionParams ?? {},
-            )
-          : null
+      // ⚠️ 2026-11（D123）：这里原来还要算**这次允许哪些动作**（
+      //    `#reviewActions`：白名单 + 已安装工具包 ⇒ 合同里的动作清单），
+      //    两个消费者分别是"渲染判决契约"和"收口时校验判决里的动作"。
+      //    动作能力退场之后两个消费者都没了，这一段连同方法一起删掉。
 
       // ★★ 对话那一轮**不套模版**：投递出去的就是 `req.prompt`（使用者那句话）。
       //
@@ -1352,8 +1257,10 @@ export class RunExecutor {
           : req.subject.type === 'run'
             ? (await sourceKindOfRun(req.subject.id)) === 'workflow'
             : false
+      // ⚠️ 2026-11（D125）：`req.kind` 只剩 `'execute'` 一种（审核 run 退场），
+      //   第一个参数原样传它——判据仍由 `firstSentenceKindFor` 一处给出。
       const templateKind = firstSentenceKindFor(
-        { kind: req.kind, subject: req.subject },
+        { kind: 'execute', subject: req.subject },
         { workflow: workflowSource },
       )
       const delivery: Delivery =
@@ -1374,59 +1281,15 @@ export class RunExecutor {
               language,
               template: migrated.chat,
             }, mode)
-          : templateKind === 'workflow' && req.review
-          ? renderDelivery({
-              kind: 'review',
-              runId,
-              subject: req.subject,
-              report: { kind: req.review.kind, title: req.review.title, body: req.review.body },
-              skills: skillsBrief,
-              relatedIssueId: req.review.relatedIssueId ?? null,
-              previousContextPath: null,
-              materialRefs: req.review.materialRefs ?? null,
-              instructions: reviewerIdentityText,
-              memory: memoryItems,
-              prompt: req.prompt,
-              allowedActions: [],
-              toolActions: [],
-              language,
-              // 编排的审核：用编排模版（任务 = 被审产出；无判决契约——判定在编排代码里）
-              template: migrated.workflow,
-            }, mode)
-          : templateKind === 'review' && req.review
-          ? renderDelivery({
-              kind: 'review',
-              runId,
-              subject: req.subject,
-              report: { kind: req.review.kind, title: req.review.title, body: req.review.body },
-              skills: skillsBrief,
-              relatedIssueId: req.review.relatedIssueId ?? null,
-              // ★ 2026-09：不再给"上一次的上下文副本路径"——副本已不再写
-              //   （日志已含第一句话全文）。重试要的材料从 run 记录取。
-              previousContextPath: null,
-              // ★ §3.3b（2026-09）：执行任务/执行结果的**文件引用**（平台落盘，
-              //   按轮次编号、多轮不覆盖）。报告类审核没这两份 ⇒ null，不渲染引用块。
-              materialRefs: req.review.materialRefs ?? null,
-              // ★ 审核这条路上 ② 是**合成身份**（指令 + 老数据的标准）；
-              //   新数据把标准写在指令里，老数据由 `reviewerIdentity` 并进来。
-              instructions: reviewerIdentityText,
-              // ★ 分批第 240 批：「经验」= 这个审核者自己攒下的记忆
-              memory: memoryItems,
-              // ★ 调用方给的指令必须送出去（重试那句解释也在这里）
-              prompt: req.prompt,
-              // ★ 允许的动作要**写进判决契约**（D40）。不写的话，审核者配了工具
-              //   动作时模型永远写不出那个名字——它合理的选择只剩"编一个"或者
-              //   "退化成 needs_human"，而"契约里没写枚举 ⇒ 整条判决作废"这条
-              //   失败史在这个仓库里真实发生过两次。
-              allowedActions: reviewActions?.allowed ?? [],
-              // 第三方动作只列**模型要填的**参数（绑定参数由平台注入，写进契约只会诱导它去写）
-              toolActions: reviewActions?.hints ?? [],
-              language,
-              // 第一句话模版（D32）：**全局配置**，与是哪个 agent 无关。
-              // 读的是 workspace 上那份（空 = 平台默认）；写入口已经校验过。
-              // （编排审核在上一分支已用编排模版——这里就是组/任务审核的审核模版）
-              template: migrated.review,
-            }, mode)
+          /*
+           * ⚠️ 2026-11（D125）：这里原来是两个分支——`templateKind === 'workflow' &&
+           *   req.review`（编排起的审核 run，用编排模版）与 `templateKind === 'review'
+           *   && req.review`（组/任务审核，用审核模版）。
+           *
+           *   审核 run 退场 ⇒ 两个分支都失去对象。**编排的审核这一趟还在**，但它现在
+           *   就是一条**普通执行 run**（编排把"请你把关"写进任务书），走 `execute`
+           *   分支与编排模版——同一条路，不再有第二种 run 形状。
+           */
           : renderDelivery({
               kind: 'execute',
               runId,
@@ -1762,22 +1625,18 @@ export class RunExecutor {
         }
       }
 
-      // ── review run 的收口：判决、动作、审计 ──
-      if (req.kind === 'review' && result.status === 'completed') {
-        await this.#handleReview(
-          req,
-          run,
-          result.output || collected,
-          result.usage,
-          runtime.descriptor,
-          // ★ 审计要记 CLI **实际报告**的模型。传 null 也比传"我们请求的那个"诚实：
-          //   请求值只说明意图，而审计回答的是"这次到底用了什么"。
-          result.model ?? null,
-          await this.#cliVersion(runtime.descriptor, runtime.backend),
-          // 实际跑的那条命令行（含沙箱包装）——不再是"按描述表拼出来的大概样子"
-          actualArgv,
-          deliveredHash,
-        )
+      /*
+       * ★ 跑完之后平台顺手要做的账（目前只有一件：起草 run ⇒ 登记版本）。
+       *
+       * ⚠️ 钩子抛错**不能让执行本身变成失败**（它已经跑完了），但必须可见——
+       *   账没记上的后果是"下一版接不上上一版"，而那个症状出现在很远的地方。
+       */
+      if (result.status === 'completed') {
+        try {
+          await this.#deps.onRunFinished?.(run)
+        } catch (err) {
+          this.#deps.onWarn?.(`run ${runId} 的收尾钩子失败：${String(err)}`)
+        }
       }
 
       // ★ 先清理自己的痕迹，**再**去串接审核。
@@ -1788,19 +1647,22 @@ export class RunExecutor {
       //   顺序调过来之后，审核 run 拿到的是一间已经收拾干净的工作目录。
       await cleanup()
 
-      // ★ S1：执行完成后自动接一次审核（可选）
-      let chainedRunId: RunId | null = null
+      /*
+       * ══════════════════════════════════════════════════════════════════
+       * ★ §3.3b（2026-09）：执行任务与执行结果**按轮次落盘**（多轮不覆盖）
+       * ══════════════════════════════════════════════════════════════════
+       *
+       * 轮次 = `chainDepth + 1`（首轮 1）。写在清理之后：目录此刻已收拾干净，
+       * 而这两份是**我们的**文件（在 `.agentdeck/` 下），清理不动它们。
+       *
+       * 落盘失败**不拦执行**，但要说出口——它不是可有可无的装饰：人要看"上次那一版
+       * 到底写了什么"，编排读上一轮的产出也靠它。
+       *
+       * ⚠️ 2026-11（D125）：这一段原来还兼任"审核 run 的材料来源"（`materialRefs`
+       *   交给自动串接的审核 run，用文件引用代替截断的内联材料）。审核 run 退场
+       *   ⇒ 材料不再往外送，但**留档本身照做**——它跟审核无关。
+       */
       if (req.kind === 'execute' && result.status === 'completed') {
-        // ══════════════════════════════════════════════════════════════
-        // ★ §3.3b（2026-09）：执行任务与执行结果**按轮次落盘**（多轮不覆盖）——
-        //   审核 run 用文件引用（`materialRefs`）指到这两份，而不是只靠
-        //   截断的内联材料。轮次 = `chainDepth + 1`（首轮 1，每次返工 +1，
-        //   与返工 run 的 chainDepth 同一计数）。
-        //
-        //   写在清理之后、串接之前：目录此刻已收拾干净，而这两份是**我们的**
-        //   文件（在 `.agentdeck/` 下），清理不动它们。失败不拦执行——
-        //   审核退回纯内联材料，并说出口。
-        let materialRefs: { taskPath: string; resultPath: string } | null = null
         const workDir = run.workDir
         if (workDir) {
           const roundsDir = join(workDir, '.agentdeck', 'rounds')
@@ -1811,27 +1673,9 @@ export class RunExecutor {
             await mkdir(roundsDir, { recursive: true })
             await writeFile(taskPath, req.prompt, 'utf8')
             await writeFile(resultPath, result.output || collected, 'utf8')
-            materialRefs = { taskPath, resultPath }
           } catch (err) {
-            this.#deps.onWarn?.(`执行任务/结果落盘失败（审核退回纯内联材料）：${String(err)}`)
+            this.#deps.onWarn?.(`执行任务/结果落盘失败（这一轮没能留档）：${String(err)}`)
           }
-        }
-        try {
-          // 串接的**结果**（包括"没串上"和原因）都进日志：否则"这次为什么
-          // 没有审核"在日志里查不到，只能去界面上猜。
-          const chained = await this.#deps.autoChainReview?.({
-            executeRun: run,
-            executorAgentId: req.agentRef.id,
-            output: result.output || collected,
-            materialRefs,
-          })
-          if (chained) {
-            chainedRunId = chained.runId
-            await this.#note(runId, chained.note)
-          }
-        } catch (err) {
-          // 串接失败不能让执行本身变成失败——但必须可见
-          this.#deps.onWarn?.(`自动审核串接失败：${String(err)}`)
         }
       }
 
@@ -1860,6 +1704,24 @@ export class RunExecutor {
         })
         return
       }
+
+      /*
+       * ★ 审计：**每次执行收口都落一条**（成功与失败都落）。
+       *
+       * 位置在这里而不是更早：此刻 `actualArgv`（后端如实上报的那条）与终态
+       * 都已确定；而 `#finish` 之后 `run` 的状态已经变了，写进去的
+       * `startedAt/finishedAt` 会对不上"这次执行"本身。
+       */
+      await this.#appendAudit({
+        run,
+        req,
+        descriptor: runtime.descriptor,
+        backend: runtime.backend,
+        modelId: result.model ?? null,
+        promptHash: deliveredHash,
+        argv: actualArgv,
+        usage: result.usage ?? null,
+      })
 
       if (result.status === 'completed') {
         await this.#finish(
@@ -1931,254 +1793,75 @@ export class RunExecutor {
     }
   }
 
-  async #handleReview(
-    req: SubmitRunRequest,
-    run: Run,
-    output: string,
-    usage: TokenUsage | null | undefined,
-    descriptor: RuntimeDescriptor,
-    /** CLI 自己报告的模型标识；它不报告时为 null。 */
-    modelId: string | null,
-    /** 探测到的 CLI 版本；读不到时为 null（**不要**拿"我们期望的版本"顶替）。 */
-    cliVersion: string | null,
-    /** 实际执行的命令行（原始，脱敏由 domain 的 `buildAuditRecord` 做）。 */
-    argv: readonly string[],
-    /** 投递出去的「第一句话」的 sha256——审计里的 `promptHash`。 */
-    deliveredHash: string,
-  ): Promise<void> {
-    const coordinator = this.#deps.reviewCoordinator
-    if (!coordinator) return
-
-    const subjectKey = `${run.subject.type}:${run.subject.id}`
-    const invalidAttempts = this.#invalidAttempts.get(subjectKey) ?? 0
-    // ★ D45：返工额度。**额度是任务级的**，住在被审的那条执行 run 上；
-    //   "已经用了几次"就是那条 run 的 `chainDepth`（每条返工 run 在前一条的
-    //   基础上 +1）。两者一比就是"还有没有额度"——所以不需要第三个计数器。
-    const reworkBudget = await this.#reworkBudgetFor(run)
-
-    // ★ 动作白名单来自**这条链**：`Run.allowedActions`（★ 2026-10 起它的唯一出处是
-    //   智能体组 `AgentGroup.allowedActions`，提交时由 `POST /api/runs` 展开；
-    //   报告审核那条路上它是空的 ⇒ 判决只能给结论）。
-    //
-    //   演变：它与标准同源过（"这条标准只允许发评论"）→ 所有挂载 skill 的动作并集
-    //   → 搬到 `Agent.allowedActions`（D40 收口，审核者个人一份）→ 2026-10 搬到
-    //   组上（同一个人在不同组里本来就该有不同的权限）。skill 从头到尾不参与授权。
-    //
-    //   ⚠️ 取值只看**这条 run 记下来的那一份**（`run.allowedActions`），不再有
-    //   "回退到某个 agent 身上的配置"这回事——那种回退正是"事后看不出按谁判的"的
-    //   来源。
-    //
-    //   ⚠️ 这里重新解析一次（而不是把上面那个 `standard` 传下来）：这一步在
-    //   **#finishReview** 里，与组装第一句话不在同一个作用域；解析函数是纯的、
-    //   只读 store 里已经读过的数据，重算一次的代价可以忽略，而"两处各写一套
-    //   取法"才是真正会出事的那种重复。
-    // ★ 2026-10：agent 上那份行动权限整个撤掉 ⇒ 白名单**只有 run 这一个出处**
-    //   （组展开时落下的那份）。没有值就是空——报告摄取那条路不属于任何组，
-    //   所以它的判决触发不了动作（刻意承担，见 `Agent` 上那段说明）。
-    const declaredActions = run.allowedActions ?? []
-    // ★ 白名单要考虑**已安装的工具包**（D40）：判决里可以出现
-    //   `<包 slug>.<动作名>` 这种第三方动作，而"装了没有"只有 store 知道。
-    //
-    //   同一份工具清单还要传给 `decideReview`——它按"这个动作类型**现在**
-    //   存不存在"判合规（内置注册表 + 已安装的工具），而不是只按白名单判。
-    //   两处用**同一次**读取的结果：分两次读的话，中途装/卸一个包就会让
-    //   "白名单里有它、类型校验说没有"这种自相矛盾的判决出现。
-    const reviewActions = await this.#reviewActions(
-      run.workspaceId,
-      declaredActions,
-      // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）。
-      //   这里重新解析一次（而不是把上面那个 `standard` 传下来）——与
-      //   `declaredActions` 同一个理由：解析是纯的、只读已读过的数据，而
-      //   "两处各写一套取法"才是真正会出事的那种重复。
-      run.actionParams ?? {},
-    )
-
-    // ⚠️ 这里原来还会**重建链路**（`loadChainSteps`）并传给审核收口——那是给
-    //    动作派生用的（`issue.assign_agent` 派新 run 之前要判环与判深度）。
-    //    D41 把内置动作全部移除之后，没有任何动作能派生 run，链路也就没有第二个
-    //    消费者了，所以这次读取连同它的告警分支一起删掉。
-    //
-    //    域层的 `loadChainSteps` / `detectChainCycle` / `assertCanDeriveRun` 仍在
-    //    （`packages/domain/src/loop/*`，INV-14~16 的实现），只是这个版本在 daemon
-    //    里没有调用点了。
-
-    // ★★ 任务级固定参数优先（D43），与白名单同一个判据（字段在不在）。
-    //   这里解析一次、两处用：①`#reviewActions`（契约减去固定参数）已经用过了；
-    //   ②这里交给收口（判决校验拦"模型写固定参数"）与动作执行（注入真实值）。
-    const effectiveFixedParams = run.actionParams ?? {}
-
-    // ★ 调试动作（2026-09）：审核者给哪些动作勾了「调试」——勾了的不跑脚本，
-    //   只记录动作与解析后的参数。
-    //   D70：组展开时把组的 `debugActions` 落进 `Run.debugActions`，所以这里
-    //   优先 `run.debugActions`（任务级决定），缺省回退到审核者自己的
-    //   （`Agent.debugActions`）——与 `allowedActions` 同一个判据（字段在不在）。
-    const effectiveDebugActions = run.debugActions ?? []
-
-    const handling = await coordinator.handle({
-      run,
-      workspaceId: run.workspaceId,
-      output,
-      allowedActions: reviewActions.allowed,
-      tools: reviewActions.tools,
-      ...(Object.keys(effectiveFixedParams).length > 0
-        ? { fixedParams: effectiveFixedParams }
-        : {}),
-      ...(effectiveDebugActions.length > 0
-        ? { debugActions: effectiveDebugActions }
-        : {}),
-      invalidAttempts,
-      // D45：返工额度。允许几次看**这条任务**（执行 run 上的 `maxReworks`），
-      //   已经用了几次看**当前这条执行 run 的 `chainDepth`**——每条返工 run 在
-      //   前一条的基础上 +1，所以两者一比就是"还有没有额度"。
-      //
-      //   ⚠️ 额度取自 `subject` 指向的那条执行 run，不是这条审核 run：审核 run
-      //   自己的 `maxReworks` 只是被带下来的副本，而"允许几次"是任务级的决定。
-      //
-      //   ⚠️ 判据是 `!== 0` 而不是 `> 0`：`0` = 不返工（预算不往下传，判决直接
-      //   交给人），而 `null` = **无限**（预算必须传下去，判决才能一直返工）。
-      ...(reworkBudget.maxReworks !== 0
-        ? { maxReworks: reworkBudget.maxReworks, usedReworks: reworkBudget.usedReworks }
-        : {}),
-      inputBlobRefs: req.review?.inputBlobRef ? [req.review.inputBlobRef] : [],
-      skillRefs: (req.skills ?? []).map((s) => s.ref),
-      // ★ 审计里的"模型"要记 **CLI 自己报告的那个**，而不是我们请求的那个。
-      //   这里原来是写死的 `null`——于是"判决固化了模型标识"（FR-REVIEW-06）
-      //   在数据上一直是空的。CLI 不报告时仍是 null：**宁可空着，也不要
-      //   拿请求值去顶替**，那会让审计看起来比事实更确定。
-      modelId,
-      // 哈希的是**投递出去的那段文本**（由调用方传进来），不是 `req.prompt`
-      promptHash: deliveredHash,
-      // ══════════════════════════════════════════════════════════════════
-      // 审计的这四项原来是**写死的**（`runtimeDescriptorKey: 'claude'`、
-      // `cliVersion: null`、argv 是按描述表拼的。`contextBlockHash` 曾恒为 null——那个
-      // 字段随受管块机制一起删掉了：输入只剩一处，哈希也就只剩一个）
-      // ══════════════════════════════════════════════════════════════════
-      //
-      // 审计回答的是"这次到底怎么跑的"。写死的值不是"空着"，而是**说错了**：
-      // 换成任何一个别的 runtime，审计都会声称用的是 claude——而审计是最不
-      // 该出错的地方（它是事后唯一的依据）。
-      runtimeDescriptorKey: descriptor.key,
-      cliVersion,
-      argv,
-      usage,
-    })
-
-    // ★ 判决与审计进日志。
-    //
-    //   在此之前，审完之后日志里**什么都没有**：结论、理由码、动作、是否降级、
-    //   审计记录的存在——全都要去界面上另找。而日志是那条时间线，
-    //   "它最后判了什么"是这条时间线的终点。
-    await this.#note(run.id, `判决：${describeDecision(handling)}`)
-    await this.#note(
-      run.id,
-      `审计：已记录（id ${handling.audit.id}，runtime ${handling.audit.runtimeDescriptorKey}，` +
-        `CLI 版本 ${handling.audit.cliVersion ?? '读不到'}，` +
-        `输入哈希 ${shortHash(handling.audit.promptHash)}）`,
-    )
-
-    if (handling.decision.kind === 'retry') {
-      this.#invalidAttempts.set(subjectKey, invalidAttempts + 1)
-    } else {
-      this.#invalidAttempts.delete(subjectKey)
-    }
-  }
-
   /**
-   * 审核标准声明的动作白名单 → 这个工作区**现在**真的允许的动作集合（D40）。
+   * 给这条 run 落一条**审计记录**。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 为什么这一层的存在是必需的
+   * ★ 2026-11（D125）：审计的写入点从"审核收口"搬到了"每次执行收口"
    * ══════════════════════════════════════════════════════════════════
    *
-   * 判决里的动作要过两道关：**类型存在**（`validateActionRefWith`）与
-   * **在标准允许的子集内**（`validateActionAllowed`）。标准是一份静态文本，
-   * 它没法知道工作区里装了哪些工具包——那是运行时状态。
+   * 在这之前，**唯一**写审计的地方是 `ReviewCoordinator`（审核 run 收口时）。
+   * 审核 run 与判决一起退场之后，那条路没有了——如果就这么删，审计链会**整根
+   * 消失**：磁盘上不再产生任何 `AuditRecord`，而"这次到底怎么跑的"（runtime /
+   * CLI 版本 / 实际命令行 / 输入哈希 / 模型 / 用量）就再也查不到了。
    *
-   * 所以这一层把静态声明与运行时状态合起来：
+   * 审计回答的从来不是"判决是什么"，而是**这条 run 是怎么跑起来的**——那是执行
+   * 自己的事实，所以它该挂在执行收口这里。审核只是当时顺手写在了一起。
    *
-   *   · 标准里声明的**内置**动作原样保留（既有行为一字未改）；
-   *   · 标准里声明的第三方动作，只在**它的包确实装了**且包里真有这个动作名
-   *     时保留——否则进 `unavailable`。判决真引用了它，就会走既有的
-   *     invalid（结构性）路径，并在通知里说清是"标准/配置"的问题；
-   *   · 已安装工具包声明的动作全部放进来（"装一个包 = 授权它的整组动作"，
-   *     与 `Agent.toolIds` 的注释同一口径）。
-   *
-   * ⚠️ 读不到已安装工具时**退回标准里那份**（也就是既有行为）并把原因写进
-   *    日志。这不是静默忽略：此时工具清单是空的 ⇒ 引用第三方动作的判决会被
-   *    判成"未知动作类型"（结构性 invalid）并通知，而不是"看起来执行了"。
-   *
-   * 返回**同一份**工具清单，是因为调用方还要把它交给 `decideReview`：
-   * 两份结果必须来自同一次读取（见调用处的注释）。
+   * ⚠️ 几条从旧实现里**一字不改**带过来的纪律（它们都是踩出来的）：
+   *   · **不许写死** runtime / cliVersion / argv。写死不是"空着"，是**说错了**：
+   *     换一个 runtime，审计仍然声称用的是 claude，而审计是事后唯一的依据；
+   *   · **模型**记 CLI 自己报告的那个；它不报告就空着——宁可空着，也不要拿请求值
+   *     顶替，那会让审计看起来比事实更确定；
+   *   · argv 存**原始**字符串，脱敏交给 `buildAuditRecord`（`redactArgv` 只有一份，
+   *     在 domain 里）；
+   *   · 失败也要落审计。"没跑成"同样是"发生过的事"，而且是最需要复盘的那一类。
    */
-  async #reviewActions(
-    workspaceId: Run['workspaceId'],
-    /** 这条链允许触发的动作名（`Run.allowedActions`，协议里是 `ActionRefType`）。 */
-    declared: readonly ActionRefType[],
-    /**
-     * 使用者在界面上设好的固定参数（D43）：`动作名 → 参数名 → 值`。
-     *
-     * 进契约时从"你只需要给"里**减去**固定参数、并单独说"已固定、不要写"——
-     * 否则模型会把固定参数当成漏填的必填项，要么猜值、要么整条判决作废。
-     */
-    fixedByType?: Readonly<Record<ActionRefType, Readonly<Record<string, unknown>>>>,
-  ): Promise<{ allowed: readonly ActionRefType[]; hints: ToolActionHint[]; tools: readonly Tool[] }> {
-    let tools: readonly Tool[]
+  async #appendAudit(input: {
+    run: Run
+    req: SubmitRunRequest
+    descriptor: RuntimeDescriptor
+    backend: AgentBackend
+    modelId: string | null
+    promptHash: string
+    argv: readonly string[]
+    usage: TokenUsage | null
+  }): Promise<void> {
+    const { store } = this.#deps
     try {
-      tools = await this.#deps.store.listTools(workspaceId)
+      const audit = buildAuditRecord({
+        workspaceId: input.run.workspaceId,
+        runId: input.run.id,
+        subject: input.run.subject,
+        inputBlobRefs: [],
+        skillRefs: (input.req.skills ?? []).map((s) => s.ref),
+        runtimeDescriptorKey: input.descriptor.key,
+        cliVersion: await this.#cliVersion(input.descriptor, input.backend),
+        modelId: input.modelId,
+        promptHash: input.promptHash,
+        argv: input.argv,
+        /* 审计的这一栏服务历史：旧记录里可能非空（那个年代判决会触发动作）。 */
+        verdictId: null,
+        actionIds: [],
+        queuedAt: input.run.queuedAt,
+        startedAt: input.run.startedAt,
+        finishedAt: this.#now(),
+        usage: input.usage,
+      })
+      await store.appendAudit(audit)
     } catch (err) {
-      this.#deps.onWarn?.(
-        `读取已安装的工具包失败，这次判决只按这条链配的动作（Run.allowedActions）判：${String(err)}`,
-      )
-      // 读不到工具 ⇒ 契约里不列第三方动作、判决里的第三方动作一律不可用
-      return { allowed: declared, hints: [], tools: [] }
-    }
-
-    const resolved = resolveAllowedActionsWithTools(declared, tools)
-    for (const item of resolved.unavailable) {
-      this.#deps.onWarn?.(`审核者配的动作 ${item.type} 当前不可用：${item.reason}`)
-    }
-
-    // 不需要任何断言：白名单与判决里的 `action.type` 现在是**同一个形状**
-    // （`ActionRefType`），一路到 `validateActionAllowed` 都是它。
-    return {
-      allowed: resolved.allowed,
-      // 契约里那几行"第三方动作 + 你只需要填哪些参数"（D40；D43 起减去固定参数）
-      hints: toolActionHints(resolved.allowed, tools, fixedByType),
-      tools,
+      // 审计写不进去**不能让 run 变成失败**（它已经跑完了），但必须可见：
+      // 一条悄悄丢掉的审计，比没有审计更糟——它让人以为"那次没发生什么"。
+      this.#deps.onWarn?.(`run ${input.run.id} 的审计落库失败：${String(err)}`)
     }
   }
 
-  /**
-   * 这条审核 run 手上的**返工额度**（D45）。
-   *
-   * 额度是**任务级**的，落在被审的那条执行 run 上（`Run.maxReworks`）；
-   * "已经用了几次"用那条 run 的 `chainDepth`——每条返工 run 在前一条的基础上
-   * +1，所以两者一比就是"还有没有额度"，不需要第三个计数器。
-   *
-   * ⚠️ `subject` 不是 `run` 的（报告摄取那条路）⇒ 额度为 0：那份材料不是我们
-   *    自己跑出来的，没有"执行者"可以返工，判决的 `fail` 只能交给人。
-   *
-   * ⚠️ 2026-09：`Run.maxReworks` 的 `null` = **无限**，必须原样传出去——不能
-   *    `?? 0`（那会把"无限"降级成"不返工"）。只有**缺字段**（老 run / 非执行
-   *    材料）才按 0 处理。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `#handleReview`——把一条 review run 的输出交给
+   *   `ReviewCoordinator` 收口成判决（解析 → 校验 → 分流 → 写判决与审计）。
+   *   审核 run 与判决一起退场 ⇒ 这个方法整体删（审计搬进了 `#appendAudit`，见上）。
    */
-  async #reworkBudgetFor(run: Run): Promise<{ maxReworks: number | null; usedReworks: number }> {
-    // ★ 分批第 136 批（§12.42 第 ② 步）：**沉淀线的自动返工循环已删**。
-    //
-    // 以前这里给 `skill-draft-review` 开了一个口子：额度按"这条链起草过几版"算、
-    // 上限读工作区设置 `autoReworkRounds`，返工由 `createReworkRun` 派出去。
-    // 沉淀线不跑评审（§12.15 的决定）之后，这条循环连同它的轮数/闸门/停止标记一起撤掉：
-    // **起草草稿永远不自动返工**（"按意见改一版"仍然由人点，走 `startReviseRun`）。
-    //
-    // ⚠️ 任务线（`subject.type === 'run'`，D45 的"审核不通过 ⇒ 交回执行者重做"）**一个字没动**。
-    if (run.subject.type !== 'run') return { maxReworks: 0, usedReworks: 0 }
-    const executeRun = await this.#deps.store.getRun(run.subject.id as RunId)
-    if (!executeRun) return { maxReworks: 0, usedReworks: 0 }
-    return {
-      maxReworks: executeRun.maxReworks === undefined ? 0 : executeRun.maxReworks,
-      usedReworks: executeRun.chainDepth,
-    }
-  }
+
 
   async #finish(
     runId: RunId,

@@ -33,10 +33,13 @@ export const shellText = {
   // ★ D70 第六项：智能体组（一队人的编队：执行 → 审核 → 行动）。
   //   ⚠️ 与「智能体」是**两个页面**（设计稿 §7.1）：智能体页保灵活性（每个人的
   //   指令/角色/审核者），组页保方便性（整条链的默认配置，新建任务一下选走）。
-  'shell.navGroups': { zh: '智能体组', en: 'Groups' },
+  /*
+   * ⚠️ 2026-11（S3）：`shell.navGroups` = '智能体组' 随组退场删（页面、导航项、
+   *   视图名一起走）。
+   */
   // 2026-11：侧栏减半，提示语精简——"执行+审核的默认配置"只剩"执行 · 审核"。
   //   （英文标题也顺手从 "Agent groups" 缩短成 "Groups"：120px 下 12 个字母放不下。）
-  'shell.navGroupsHint': { zh: '执行 · 审核', en: 'Exec · review' },
+
   'shell.navSkills': { zh: '技能', en: 'Skills' },
   // 2026-11：侧栏减半，提示语精简——"执行者的参考资料"只剩"参考资料"。
   'shell.navSkillsHint': { zh: '参考资料', en: 'Skill packs' },

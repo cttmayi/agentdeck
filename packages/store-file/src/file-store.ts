@@ -1,12 +1,8 @@
 import { join } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
-  assertActionTransition,
   assertRunTransition,
-  assertVerdictTransition,
-  type ActionPatch,
   type IssueQuery,
-  type ReportQuery,
   type Page,
   type PageQuery,
   type RunPatch,
@@ -14,12 +10,7 @@ import {
   type Store,
 } from '@agentdeck/domain'
 import type {
-  Action,
-  ActionId,
-  ActionStatus,
   Agent,
-  AgentGroup,
-  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -33,8 +24,6 @@ import type {
   Issue,
   IssueId,
   MemoryEntry,
-  Report,
-  ReportId,
   Run,
   RunId,
   RunMessage,
@@ -42,11 +31,6 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
-  Tool,
-  ToolId,
-  VerdictId,
-  VerdictRecord,
-  VerdictStatus,
   Workspace,
   WorkspaceId,
 } from '@agentdeck/protocol'
@@ -125,7 +109,10 @@ const COLLECTIONS = [
   // 智能体组（D70 增量添加）。与 agent 并排：组是 agent 的**编队**。
   // ⚠️ 新增集合名只影响**新写**的那份日志，老数据目录里没有
   // `log/group.jsonl` 会被当成"这个 workspace 还没有组"，所以不需要迁移。
-  'group',
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是 `'group'` 集合（智能体组）。组退场 ⇒ 白名单里去掉它，
+   *   **磁盘上那一节原样留着**（不会被读、也不会被误删其它东西）。
+   */
   'skill',
   // 工具包（D40）。与 skill 并排：两者都是"装进工作区、可挂到 agent 上、
   // 可卸载"的东西，放一起便于对照。⚠️ 新增集合名只影响**新写**的那份日志，
@@ -140,9 +127,19 @@ const COLLECTIONS = [
   'conversation',
   'chat-turn',
   'run',
-  'report',
-  'verdict',
-  'action',
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有 `'report'` 集合（第三方报告）。报告摄取退场 ⇒
+   *   白名单里去掉它，**磁盘上那一节原样留着**（不会被读、也不会被误删其它东西）。
+   */
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有 `'verdict'` 集合（判决记录）。判决退场 ⇒
+   *   白名单里去掉它，**磁盘上那一节原样留着**（不会被读、也不会被误删其它东西）。
+   */
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有一个 `'action'` 集合（判决触发的动作记录）。
+   *   动作能力退场、记录与端口一起删——旧数据文件里那一节仍然躺在磁盘上，
+   *   **不会**被读（`loadWorkspace` 按这个白名单取集合），也不会被误删其它东西。
+   */
   'artifact',
   'audit',
   'inbox',
@@ -284,8 +281,6 @@ class WorkspaceStore {
   readonly blobs: BlobStore
 
   readonly #messages = new Map<string, MessageLog>()
-  readonly #dedup = new Map<string, ReportId>()
-  readonly #idempotency = new Map<string, ActionId>()
 
   #opened = false
 
@@ -325,14 +320,8 @@ class WorkspaceStore {
   memory(): JsonlLog<MemoryEntry & { id: string }> {
     return this.log('memory') as unknown as JsonlLog<MemoryEntry & { id: string }>
   }
-  group(): JsonlLog<AgentGroup & { id: string }> {
-    return this.log('group') as unknown as JsonlLog<AgentGroup & { id: string }>
-  }
   skill(): JsonlLog<Skill & { id: string }> {
     return this.log('skill') as unknown as JsonlLog<Skill & { id: string }>
-  }
-  tool(): JsonlLog<Tool & { id: string }> {
-    return this.log('tool') as unknown as JsonlLog<Tool & { id: string }>
   }
   issue(): JsonlLog<Issue & { id: string }> {
     return this.log('issue') as unknown as JsonlLog<Issue & { id: string }>
@@ -345,15 +334,6 @@ class WorkspaceStore {
   }
   chatTurn(): JsonlLog<ChatTurn & { id: string }> {
     return this.log('chat-turn') as unknown as JsonlLog<ChatTurn & { id: string }>
-  }
-  report(): JsonlLog<Report & { id: string }> {
-    return this.log('report') as unknown as JsonlLog<Report & { id: string }>
-  }
-  verdict(): JsonlLog<VerdictRecord & { id: string }> {
-    return this.log('verdict') as unknown as JsonlLog<VerdictRecord & { id: string }>
-  }
-  action(): JsonlLog<Action & { id: string }> {
-    return this.log('action') as unknown as JsonlLog<Action & { id: string }>
   }
   artifact(): JsonlLog<Artifact & { id: string }> {
     return this.log('artifact') as unknown as JsonlLog<Artifact & { id: string }>
@@ -371,9 +351,8 @@ class WorkspaceStore {
     for (const name of COLLECTIONS) {
       await this.logs[name]!.open()
     }
-    // 重建两个唯一性索引——它们必须与日志一致，所以从日志推导而不是单独持久化
-    for (const r of this.report().all()) this.#dedup.set(r.dedupKey, r.id as ReportId)
-    for (const a of this.action().all()) this.#idempotency.set(a.idempotencyKey, a.id as ActionId)
+    // 唯一性索引原来靠这里从日志重建（`report` 的去重键）。
+    // ⚠️ 2026-11（D125）：报告摄取退场之后没有这个索引了，这段重建一并删掉。
     this.#opened = true
   }
 
@@ -408,25 +387,19 @@ class WorkspaceStore {
     return messageLogPath(join(this.#root, 'runs'), runId)
   }
 
-  // ── Report 去重 ──
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 report 的去重索引（`findReportIdByDedup` /
+   *   `rememberDedup` 与那个内存 Map）。报告摄取退场 ⇒ 没有"同一条报告不重复处理"
+   *   这件事，索引与两个方法一起删。
+   */
 
-  findReportIdByDedup(dedupKey: string): ReportId | null {
-    return this.#dedup.get(dedupKey) ?? null
-  }
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**动作幂等**的两个方法
+   *   （`findActionIdByIdempotency` / `rememberIdempotency`）与它背后的内存索引。
+   *   幂等键是"同一个判决重放时不重复触发动作"的保证——动作退场后没有要幂等的
+   *   东西，整段删。
+   */
 
-  rememberDedup(dedupKey: string, id: ReportId): void {
-    this.#dedup.set(dedupKey, id)
-  }
-
-  // ── Action 幂等 ──
-
-  findActionIdByIdempotency(key: string): ActionId | null {
-    return this.#idempotency.get(key) ?? null
-  }
-
-  rememberIdempotency(key: string, id: ActionId): void {
-    this.#idempotency.set(key, id)
-  }
 
   async close(): Promise<void> {
     for (const log of this.#messages.values()) await log.close()
@@ -782,53 +755,11 @@ export class FileStore implements Store {
     return this.#agentsMutex.run(() => removeExclusiveSkillBody(this.#dataDir, agentId, slug))
   }
 
-  // ── AgentGroup（智能体组，D70 增量添加）──
-
-  async getGroup(id: AgentGroupId): Promise<AgentGroup | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.group().get(id as string)
-      if (found) return found
-    }
-    return null
-  }
-
-  async listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]> {
-    return (await this.#ws(workspaceId)).group().all()
-  }
-
-  async listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]> {
-    const wanted = agentId as string
-    const out: AgentGroup[] = []
-    for (const ws of this.#stores.values()) {
-      for (const g of ws.group().all()) {
-        if (g.members.includes(wanted as never)) out.push(g)
-      }
-    }
-    return out
-  }
-
-  async insertGroup(group: AgentGroup): Promise<void> {
-    const ws = await this.#ws(group.workspaceId)
-    await ws.mutex.run(() => ws.group().put(group))
-  }
-
-  async updateGroup(group: AgentGroup): Promise<boolean> {
-    const ws = await this.#ws(group.workspaceId)
-    return ws.mutex.run(async () => {
-      if (!ws.group().has(group.id as string)) return false
-      await ws.group().put(group)
-      return true
-    })
-  }
-
-  async deleteGroup(id: AgentGroupId): Promise<boolean> {
-    for (const wsId of await this.listWorkspaceIds()) {
-      const ws = await this.#ws(wsId)
-      if (!ws.group().has(id as string)) continue
-      return ws.mutex.run(() => ws.group().del(id as string))
-    }
-    return false
-  }
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是智能体组那六个方法（`getGroup` / `listGroups` /
+   *   `listGroupsByAgent` / `insertGroup` / `updateGroup` / `deleteGroup`）。组退场
+   *   ⇒ 端口上没有了，实现一并删。磁盘上 `log/group.jsonl` 原样留着，没有读它。
+   */
 
   // ── Agent memory（分批第 240 批；D112 起落在智能体目录里）──
 
@@ -947,66 +878,12 @@ export class FileStore implements Store {
     return false
   }
 
-  // ── Tool（工具包 / 组，D40）──
-
-  async getTool(id: ToolId): Promise<Tool | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.tool().get(id)
-      if (found) return found
-    }
-    return null
-  }
-
-  async listTools(workspaceId: WorkspaceId): Promise<Tool[]> {
-    return (await this.#ws(workspaceId)).tool().all()
-  }
-
-  async listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]> {
-    const wanted = new Set<string>(ids)
-    const out: Tool[] = []
-    for (const ws of this.#stores.values()) {
-      for (const t of ws.tool().all()) if (wanted.has(t.id)) out.push(t)
-    }
-    return out
-  }
-
-  /**
-   * 按 slug 取。
-   *
-   * ⚠️ **只在给定的 workspace 里找**，不像 `getTool` 那样跨 workspace 遍历。
-   *    这不是图省事，而是一条语义：slug 只在**一个 workspace 内**唯一，
-   *    两个工作区各有一个 `deploy` 是合法的。跨着找会把别的空间的包交给
-   *    调用方——判决里写的是 `<slug>.<动作名>`，取错了包就等于执行了别人
-   *    的动作。
-   *
-   * 也不另建一张"slug → id"的内存索引：包的数量是个位数量级，而这个查询
-   * 只在安装与判决解析时发生。索引是又一份**必须与日志保持一致**的真相
-   * （report/action 那两个映射是为"唯一性保证"才不得不建的），这里不值得。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**工具包**那一组实现（getTool / listTools /
+   *   listToolsByIds / getToolBySlug / insertTool / deleteTool）与它的 `tool()` 日志。
+   *   端口先删、这里跟着删——存储层只实现端口要的东西，端口没了就是死代码。
    */
-  async getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null> {
-    const ws = await this.#ws(workspaceId)
-    return ws.tool().all().find((t) => t.slug === slug) ?? null
-  }
 
-  async insertTool(tool: Tool): Promise<void> {
-    const ws = await this.#ws(tool.workspaceId)
-    await ws.mutex.run(() => ws.tool().put(tool))
-  }
-
-  async deleteTool(id: ToolId): Promise<boolean> {
-    // 理由与 `deleteSkill` 逐条相同（端口同样没给 workspaceId，只能逐个
-    // workspace 找）。
-    //
-    // 与 skill 唯一不同的地方：工具包的**文件就在记录里**（`Tool.files` 是
-    // "相对路径 → 文本"），所以删掉这一条就等于把包整个卸掉，没有第二处
-    // 需要清理——也因此这里不像卸载 skill 那样要顾着别处的引用。
-    for (const wsId of await this.listWorkspaceIds()) {
-      const ws = await this.#ws(wsId)
-      if (!ws.tool().has(id)) continue
-      return ws.mutex.run(() => ws.tool().del(id))
-    }
-    return false
-  }
 
   // ── Issue 与 Comment ──
 
@@ -1215,15 +1092,18 @@ export class FileStore implements Store {
         .filter((t) => t.conversationId === convId).length
       await ws.conversation().patch(convId, { turnCount: count, updatedAt: Date.now() })
     }
-    // ② verdict 与由它触发的 action（action 挂在 verdict 上，先删 action 再删
-    //    verdict——顺序反过来会留下一批指向不存在判决的动作记录）。
-    for (const v of ws.verdict().all()) {
-      if (v.runId !== id) continue
-      for (const a of ws.action().all()) {
-        if (a.verdictId === v.id) await ws.action().del(a.id)
-      }
-      await ws.verdict().del(v.id)
-    }
+    /*
+     * ② 判决记录（老数据）。
+     *
+     * ⚠️ 2026-11（D125）：判决退场之后**没有代码再写它**，`'verdict'` 也不在集合
+     *   白名单里（`open()` 不再打开那份日志）。于是"删 run 一并清掉它名下的老判决"
+     *   这件事**做不到**了——那份日志压根没被打开。
+     *
+     *   我们选择**不做**：那条老判决指向一条已删的 run，读它的代码（`getVerdict` /
+     *   `listVerdictsByRun`）也一起删了，所以没有任何读者会遇到这个悬空引用。
+     *   反过来，为它单开一条"读一份没人读的日志"的路径，等于把删除语义绑在一份
+     *   死数据上。老库想彻底清掉的话，那是迁移工具的活。
+     */
     // ③ artifacts（这条 run 的产物清单）
     for (const a of ws.artifact().all()) {
       if (a.runId === id) await ws.artifact().del(a.id)
@@ -1274,44 +1154,11 @@ export class FileStore implements Store {
     return false
   }
 
-  // ── Report ──
-
-  async listReports(q: ReportQuery): Promise<Page<Report>> {
-    const ws = await this.#ws(q.workspaceId)
-    return paginate(ws.report().all(), q)
-  }
-
-  async findReportByDedupKey(dedupKey: string): Promise<Report | null> {
-    for (const ws of this.#stores.values()) {
-      const id = ws.findReportIdByDedup(dedupKey)
-      if (id) return ws.report().get(id) ?? null
-    }
-    return null
-  }
-
-  async getReport(id: Report['id']): Promise<Report | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.report().get(id)
-      if (found) return found
-    }
-    return null
-  }
-
-  /**
-   * 返回 false 表示去重键已存在。
-   *
-   * 这个返回值是 `FR-REPORT-03` 的落点：调用方（摄取流程）必须把 false
-   * 当作"已经处理过"，而不是"写入失败"。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 report 的四个方法（`listReports` /
+   *   `findReportByDedupKey` / `getReport` / `insertReport`）。报告摄取退场 ⇒
+   *   端口上不再有 report，实现一并删。
    */
-  async insertReport(report: Report): Promise<boolean> {
-    const ws = await this.#ws(report.workspaceId)
-    return ws.mutex.run(async () => {
-      if (ws.findReportIdByDedup(report.dedupKey)) return false
-      await ws.report().put(report)
-      ws.rememberDedup(report.dedupKey, report.id)
-      return true
-    })
-  }
 
   // ── Run ──
 
@@ -1427,100 +1274,19 @@ export class FileStore implements Store {
     throw new Error(`找不到 run ${runId}（消息流必须挂在一个已知 run 上）`)
   }
 
-  // ── Verdict ──
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是判决的四个实现（`getVerdict` /
+   *   `listVerdictsByRun` / `insertVerdict` / `transitionVerdict`）。判决退场 ⇒
+   *   端口上不再有判决，实现一并删。磁盘上 `verdict` 那一节原样留着（`deleteRun`
+   *   仍然会清掉某条 run 名下的老记录）。
+   */
 
-  async getVerdict(id: VerdictId): Promise<VerdictRecord | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.verdict().get(id)
-      if (found) return found
-    }
-    return null
-  }
-
-  async listVerdictsByRun(runId: RunId): Promise<VerdictRecord[]> {
-    const out: VerdictRecord[] = []
-    for (const ws of this.#stores.values()) {
-      for (const v of ws.verdict().all()) if (v.runId === runId) out.push(v)
-    }
-    return out.sort((a, b) => a.createdAt - b.createdAt)
-  }
-
-  async insertVerdict(verdict: VerdictRecord): Promise<void> {
-    const ws = await this.#ws(verdict.workspaceId)
-    await ws.mutex.run(() => ws.verdict().put(verdict))
-  }
-
-  async transitionVerdict(
-    id: VerdictId,
-    expect: VerdictStatus,
-    next: VerdictStatus,
-    patch: Partial<Pick<VerdictRecord, 'invalidResolution'>> = {},
-  ): Promise<boolean> {
-    for (const ws of this.#stores.values()) {
-      if (!ws.verdict().has(id)) continue
-      return ws.mutex.run(async () => {
-        const current = ws.verdict().get(id)
-        if (!current || current.status !== expect) return false
-        assertVerdictTransition(expect, next)
-        await ws.verdict().patch(id, { ...pruneUndefined(patch), status: next })
-        return true
-      })
-    }
-    return false
-  }
-
-  // ── Action ──
-
-  async getAction(id: ActionId): Promise<Action | null> {
-    for (const ws of this.#stores.values()) {
-      const found = ws.action().get(id)
-      if (found) return found
-    }
-    return null
-  }
-
-  async listActionsByVerdict(verdictId: VerdictId): Promise<Action[]> {
-    const out: Action[] = []
-    for (const ws of this.#stores.values()) {
-      for (const a of ws.action().all()) if (a.verdictId === verdictId) out.push(a)
-    }
-    return out.sort((a, b) => a.createdAt - b.createdAt)
-  }
-
-  async findActionByIdempotencyKey(key: string): Promise<Action | null> {
-    for (const ws of this.#stores.values()) {
-      const id = ws.findActionIdByIdempotency(key)
-      if (id) return ws.action().get(id) ?? null
-    }
-    return null
-  }
-
-  async insertAction(action: Action): Promise<void> {
-    const ws = await this.#ws(action.workspaceId)
-    await ws.mutex.run(async () => {
-      await ws.action().put(action)
-      ws.rememberIdempotency(action.idempotencyKey, action.id)
-    })
-  }
-
-  async transitionAction(
-    id: ActionId,
-    expect: ActionStatus,
-    next: ActionStatus,
-    patch: ActionPatch = {},
-  ): Promise<boolean> {
-    for (const ws of this.#stores.values()) {
-      if (!ws.action().has(id)) continue
-      return ws.mutex.run(async () => {
-        const current = ws.action().get(id)
-        if (!current || current.status !== expect) return false
-        assertActionTransition(expect, next)
-        await ws.action().patch(id, { ...pruneUndefined(patch), status: next })
-        return true
-      })
-    }
-    return false
-  }
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**动作记录**那一组实现（getAction /
+   *   listActionsByVerdict / findActionByIdempotencyKey / insertAction /
+   *   transitionAction）与 `action()` 日志、`#idempotency` 内存索引。判决不再触发
+   *   动作 ⇒ 这些记录没有任何写入者，端口也已删除，整段删。
+   */
 
   // ── Artifact ──
 

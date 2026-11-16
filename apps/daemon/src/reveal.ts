@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process'
 import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
-import { findExecutable } from './script-executor.ts'
+// ⚠️ 2026-11（D123）：这个查找函数原来住在 `script-executor.ts`（工具包脚本执行器，
+//   随动作能力一起删掉）。它在这里的用途与工具包无关——是"这台机器上到底有没有
+//   那个打开目录的命令"，所以搬进了 `executable.ts`。
+import { findExecutable } from './executable.ts'
 
 /**
  * 在**系统文件管理器**里打开一个目录（Finder / 资源管理器 / xdg 那边）。

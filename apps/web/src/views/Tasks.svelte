@@ -6,11 +6,8 @@
   import {
     api,
     newRunId,
-    type ActionView,
     type RunMessage,
     type RunSummary,
-    type VerdictActionView,
-    type VerdictView,
     type WorkDirFile,
     type WorkDirListing,
   } from '../lib/api.ts'
@@ -96,60 +93,11 @@
   /** 当前打开那个任务的阶段——详情头要显示它（不该在模板里算两遍）。 */
   $: selectedStage = selected ? stageOf(selected, $runs) : null
 
-  /**
-   * ★ 动作要显示的三样东西。
-   *
-   * ⚠️ 这里从**派生值**（`$: actionDetail = …`）改成了**函数**，是跟着显示位置
-   *    一起变的：原来是"详情里那个唯一的最新动作"，一个值算一次就够；现在动作挂在
-   *    **各自那张判决卡**上，一屏里可能有好几张（返工回路转过几圈时），要按
-   *    `verdictId` 分别求值。
-   *
-   *    改成函数是安全的：调用点在 `{#each}` 里，`verdictActions` 变了会重建那一段，
-   *    不存在"值变了但没重渲染"那个坑（那个坑是"模板里调函数读 prop"，
-   *    这里读的是 each 的局部变量）。
-   *
-   * 三样：
-   *   - `actionDetailOf`：脚本回的那句话（`result.detail`）；
-   *   - `actionMetaOf`：退出码 / 耗时 / 预演标记这些**事实**（有才算）；
-   *   - `actionParamsOf`：它带着什么参数跑的（合并后的那一条）。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有四个助手——`actionResultOf` / `actionDetailOf`
+   *   / `actionMetaOf` / `actionParamsOf`，负责把一条动作记录画成"做了什么 /
+   *   退出码 / 耗时 / 参数"。动作能力退场 ⇒ 判决不再触发动作，这些没有数据可画。
    */
-  const actionResultOf = (a: ActionView): Record<string, unknown> | null =>
-    (a.result ?? null) as Record<string, unknown> | null
-
-  /**
-   * `detail` 是脚本自己写的，可能是空串或非字符串（脚本是我们之外的东西写的）。
-   * 只认非空字符串——否则界面上会出现一行空的段落。
-   */
-  function actionDetailOf(a: ActionView): string | null {
-    const d = actionResultOf(a)?.['detail']
-    return typeof d === 'string' && d.trim() !== '' ? d : null
-  }
-
-  function actionMetaOf(a: ActionView): string[] {
-    const r = actionResultOf(a)
-    if (!r) return []
-    return [
-      ...(typeof r['exitCode'] === 'number'
-        ? [$t('tasks.actionExitCode', { code: r['exitCode'] as number })]
-        : []),
-      ...(typeof r['durationMs'] === 'number'
-        ? [$t('tasks.actionDuration', { ms: r['durationMs'] as number })]
-        : []),
-      ...(r['dryRun'] === true ? [$t('tasks.actionDebug')] : []),
-      ...(a.finishedAt ? [new Date(a.finishedAt).toLocaleString()] : []),
-    ]
-  }
-
-  /**
-   * 参数的**展示**形状：值可能是对象/数组（模型填的开放参数没有形状约束），
-   * 直接 `{v}` 会渲染成 `[object Object]`——那等于没显示。所以统一 `JSON.stringify`，
-   * 并按**参数名**排序（对象的键序不定，同一条动作两次打开顺序不一样会像"变了"）。
-   */
-  function actionParamsOf(a: ActionView): Array<readonly [string, string]> {
-    return Object.entries((a.params ?? {}) as Record<string, unknown>)
-      .map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)] as const)
-      .sort((x, y) => x[0].localeCompare(y[0]))
-  }
 
   /**
    * 「需要注意」单独一拨置顶。
@@ -373,26 +321,15 @@
   // ── 任务详情 ──
 
   let activeRun: RunSummary | null = null
-  // ── D80：任务「沉淀技能&智能体」的置灰门（有用户反馈 或 审核过）──
-  let optimizeGate: { reviewed: boolean; hasUserFeedback: boolean } | null = null
-  let optimizeGateRunId = ''
-  $: canOptimizeSkill =
-    activeIsTerminal &&
-    optimizeGate !== null &&
-    (optimizeGate.reviewed || optimizeGate.hasUserFeedback)
-
-  /** run 终态后取一次置灰门（轻量 GET；开面板时会再取一次新鲜的）。 */
-  async function refreshOptimizeGate(runId: string): Promise<void> {
-    try {
-      const res = await api<{ reviewed: boolean; hasUserFeedback: boolean }>(
-        `/api/crystallize/targets?runId=${encodeURIComponent(runId)}`,
-      )
-      optimizeGate = { reviewed: res.reviewed, hasUserFeedback: res.hasUserFeedback }
-    } catch {
-      // 取不到就不放行（按钮置灰比误放行安全）
-      optimizeGate = null
-    }
-  }
+  /**
+   * 「沉淀技能」这个按钮什么时候能点：**这条 run 跑完了**。
+   *
+   * ⚠️ D80：这里原来还有一道"置灰门"——要**有用户反馈或者审核过**才许沉淀
+   *   （从 `/api/crystallize/targets` 取 `reviewed` / `hasUserFeedback`）。
+   *   D125 之后两半都没了：审核 run 退场，而"用户反馈"从来没有记录机制。
+   *   于是门槛只剩"跑完了"——**该不该沉淀由人判断**（他点了这个按钮就是判断）。
+   */
+  $: canOptimizeSkill = activeIsTerminal
   // ── 最后结果（跑完之后）──
   /** 这次执行的最后一段产出（最后一条 text 消息）。 */
   let finalOutput = ''
@@ -401,11 +338,6 @@
 
   $: activeIsTerminal =
     activeRun !== null && ['completed', 'failed', 'cancelled'].includes(activeRun.status)
-  // ★ 取置灰门放在 activeIsTerminal 之后：避免在它尚未求值（undefined）时白跑
-  $: if (activeRun && activeIsTerminal && optimizeGateRunId !== activeRun.runId) {
-    optimizeGateRunId = activeRun.runId
-    void refreshOptimizeGate(activeRun.runId)
-  }
   /**
    * ★ D69.12：日志视图（正在跑 / 点「看完整日志」）。此时详情栏切成 flex
    *   纵向布局：日志 `flex:1` 精确填满剩余空间、内部滚动——外置滚动条消失。
@@ -436,20 +368,17 @@
   /**
    * 「最后结果」要显示的文字。
    *
-   * ★ 判决块（`<<<ALPHA_VERDICT>>>` … `<<<END_ALPHA_VERDICT>>>`）是**机器读的**：
-   *   它已经按结论 / 理由码 / 证据 / 行动分项显示在下面的判决卡片里了，正文里再
-   *   摊一遍原始标记与 JSON 只是噪音——而且看起来像"平台没处理"（使用者的原话：
-   *   显示 `<<<ALPHA_VERDICT>>>` 不优美）。所以**这条 run 有落库判决时**剥掉它。
+   * ★ 判决围栏（`<<<ALPHA_VERDICT>>>` … `<<<END_ALPHA_VERDICT>>>`）是**机器读的**
+   *   标记。它们现在**不再由平台产生**（判决契约随审核 run 退场，D125），但**老
+   *   记录的正文里还留着**——那段围栏与 JSON 在人看的地方只是噪音，看起来还像
+   *   "平台没处理"（使用者的原话：显示 `<<<ALPHA_VERDICT>>>` 不优美）。
    *
-   * ⚠️ **没有**判决记录时不剥：那种情形通常是模型给的块没通过校验、或者块是半开的，
-   *    而那段原文是使用者唯一能看到"它到底写了什么"的地方——替人擦掉现场比难看更糟。
-   *    `activeRun.verdict` 随列表响应一起来（不是异步取的那一份判决），所以这里
-   *    没有"先剥了、又发现其实没判决"的时序问题。
+   *   所以无条件剥掉：`stripVerdictBlocks` 在没有围栏时原样返回，代价是零。
    */
   $: resultText =
     activeRun === null || finalOutputFor !== activeRun.runId
       ? ''
-      : finalResultText(finalOutput, activeRun.verdict !== null)
+      : finalResultText(finalOutput, true)
 
   $: renderedResult =
     resultText !== ''
@@ -457,17 +386,11 @@
         html: $markdownHtmlMode, resolveAsset: (href) => resolveAsset(href, activeRun!.runId) })
       : ''
 
-  let verdicts: VerdictView[] = []
-  /**
-   * ★ 这些判决**触发的**动作记录（D45 的显示位置调整）。
-   *
-   * 与判决**一起取**、**一起画**：使用者的原话是「应该作为审核 PASS 的依据，
-   * 放在一起更合理」——判决说"通过"，而"通过之后真的做了什么、结果如何"是那份
-   * 通过的一部分。分两处（或分两拍）显示，会让"通过了但什么也没发生"看起来
-   * 很正常。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `verdicts` / `verdictsFor`——这条 run 的判决
+   *   列表（`GET /api/runs/:id/verdicts`，模型判的 + 人工裁决追加的）。判决退场
+   *   ⇒ 不取、不画。
    */
-  let verdictActions: VerdictActionView[] = []
-  let verdictsFor: string | null = null
 
   // ══════════════════════════════════════════════════════════════════
   // ★ 打开详情时必须走 `selectRun()`，而不是只赋一个 `activeRun`
@@ -487,20 +410,6 @@
   $: if (issueRuns.length > 0 && (!activeRun || !issueRuns.some((r) => r.runId === activeRun!.runId))) {
     const target = newestRun(issueRuns)
     if (target) void selectRun(target)
-  }
-
-  async function loadVerdicts(runId: string): Promise<void> {
-    verdictsFor = runId
-    try {
-      const out = await api<{ verdicts: VerdictView[]; actions?: VerdictActionView[] }>(
-        `/api/runs/${runId}/verdicts`,
-      )
-      verdicts = out.verdicts ?? []
-      verdictActions = out.actions ?? []
-    } catch {
-      verdicts = []
-      verdictActions = []
-    }
   }
 
   async function cancel(runId: string): Promise<void> {
@@ -528,89 +437,30 @@
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ★ 人工裁决（D46）
+  // ★ 人的出路（D47；D125 之后只剩两个）
   // ══════════════════════════════════════════════════════════════════
   //
-  // 在这之前，一条任务的判决只可能落在三种"卡住"的状态里，而这个页面上**没有
-  // 任何出路**：判 `fail` 且没有返工额度 ⇒ 「等待人处理」；判 `needs_human` ⇒
-  // 同样；判决不合规且不可重试 ⇒ 同样。人点进去只能看到结论，唯一的按钮是
-  // 「继续沟通」——而那是**再派一次活给 agent**，不是"我自己来定"。
+  // 这里原来还装着「人工裁决」（D46）：人点「通过」就追加一条 `source: 'human'`
+  // 的判决，看板的阶段由此从「待审查」变成「已审查」。**判决与人工裁决面板一起
+  // 退场**（D125）⇒ 那个按钮、它那条判据（`passGate`，与 daemon 的
+  // `canHostHumanVerdict` 严格对齐）以及载体选择的整套推理都删了。
   //
-  // ── 为什么它不是"一个按钮" ──
+  // 剩下的是**出路**而不是**结论**：
+  //   · 「反馈」= 再派一条普通任务（就是原来的「发送并继续」）——它要的是干活；
+  //   · 「放弃」= 改 issue 状态——它要的是别再盯着它。
   //
-  // 看板的阶段是**从记录推出来的**（`lib/pipeline.ts` 的 `stageOf`），所以
-  // 人工通过必须落成一条**判决记录**（`POST /api/runs/{id}/human-verdict`）。
-  // 在界面里改一个变量的话，刷新就没了、看板也不会动。
-  //
-  // ── 载体的选法必须与 daemon 的 `canHostHumanVerdict` 一致 ──
-  //
-  // 界面算"挂在哪条 run 上"，daemon 只校验"这一条能不能被裁决"。两边判据要
-  // 对齐，否则会出现"按钮点得动、请求被 409 拒"或者更糟的"点了通过、看板不动"。
-  // 下面这个 `passGate` 就是那条判据的界面侧写法。
-  $: humanVerdictSupported = ($identity?.capabilities ?? []).includes('human-verdict')
+  // ⚠️ 那次改动留下一条一直有效的教训：**凡是"某个动作只对某一类记录生效"的
+  //   场合，界面与 daemon 必须用同一条判据**，否则会出现"按钮点得动、请求被 409
+  //   拒"，或者更糟的"点了通过、看板一动不动"（判决落在一个阶段推导不看的地方）。
   $: abandonSupported = ($identity?.capabilities ?? []).includes('issue-abandon')
-
-  /**
-   * 「通过」能不能点，以及那条判决要挂在哪条 run 上。
-   *
-   * `null` = **这条任务不能通过**，附带一句说清为什么（`noteId`）。
-   *
-   * ⚠️ 它**只关掉「通过」那一个按钮**，不关整块面板。D46 时它确实是整块面板的
-   *    开关（那时只有一个按钮），但 D47 之后那块装着三个出路，而「反馈」和
-   *    「放弃」在"不能通过"的时候**照样该给**——任务还卡着，人总得有条路。
-   *    整块面板的开关是 `canDecide`。
-   */
-  $: passGate = (() => {
-    const st = selectedStage
-    if (!st || !st.executeRun) return null
-    if (!humanVerdictSupported) return null
-    // 这次执行还没结束 ⇒ 没有产出可看，也就没有可裁决的结论
-    if (!TERMINAL_RUN_STATUSES.has(st.executeRun.status)) {
-      return { ok: false as const, noteId: 'tasks.humanVerdictUnavailable' as const }
-    }
-
-    // ★ 「行动中 / 行动失败」时不给：那里要解决的是**动作**，不是审核结论。
-    //   在这儿点"通过"会让看板从「行动失败」跳到「已完成审查」——把一件没做成
-    //   的事说成做完了，而 D40 收口那条规则本来就是为了防这个。
-    if (st.stage === 'action_running' || st.stage === 'action_failed') {
-      return { ok: false as const, noteId: 'tasks.humanVerdictActionFirst' as const }
-    }
-
-    const review = st.reviewRun
-    // ① 有审核结论 ⇒ 判决挂在**那条审核 run** 上（人裁决的就是那份结论）
-    if (review && review.status === 'completed' && review.verdict) {
-      return { ok: true as const, runId: review.runId }
-    }
-    // ② 审核还在跑 ⇒ 等它出结论（抢答会让两个结论打架）
-    if (review) {
-      return { ok: false as const, noteId: 'tasks.humanVerdictUnavailable' as const }
-    }
-    // ③ 压根没有审核 run（"没配审核者"那种任务）⇒ 挂在**执行 run** 上
-    return { ok: true as const, runId: st.executeRun.runId }
-  })()
 
   /**
    * 整块「这条任务怎么办」给不给。
    *
-   * ══════════════════════════════════════════════════════════════════
-   * ★ 为什么是"只要选中了就给"，而不是"能人工裁决时才给"
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * D46 时这块的开关是"能人工裁决"，因为那时它只有「通过」一个按钮。D47 之后
-   * 它装着三个出路，而**它们的可用条件各不相同**：
-   *
-   *   · 「通过」要有可裁决的结论（`passGate`）；
-   *   · 「反馈」要有一次**跑完**的执行可以接在后面（`feedbackReady`）；
-   *   · 「放弃」**什么都不需要**——它是"我不想管了"，与跑到哪一步无关。
-   *
-   * 用任何一个按钮的条件当整块的开关，都会让另外两个在它们**本该可用**的时候
-   * 消失。最典型的是「放弃」：一条刚建出来、一次都没跑的、或者**正在跑**的任务，
-   * 恰恰是最想放弃它的两种情形（建错了 / 在烧 token），而按"能裁决"开关的话
-   * 那块根本不会出现。
-   *
-   * 所以开关只判"有没有选中任务"，每个按钮各自置灰并各自说清为什么。代价是
-   * 一条刚建出来的任务上会看到两个灰按钮——那是**如实**的：此刻确实只有放弃
-   * 可做。
+   * ★ 为什么是"只要选中了就给"，而不是某个按钮的条件：两个按钮的可用条件不同
+   *   ——「反馈」要有一次**跑完**的执行可以接（`feedbackReady`），「放弃」什么
+   *   都不需要（它是"我不想管了"，与跑到哪一步无关）。用任何一个当整块的开关，
+   *   都会让另一个在它**本该可用**的时候消失。
    */
   $: canDecide = selected !== null
 
@@ -631,54 +481,12 @@
   $: feedbackReady =
     lastExecuteRun !== null && TERMINAL_RUN_STATUSES.has(lastExecuteRun.status)
 
-  /**
-   * 「通过」不能点时那句解释；**能点、或者这个 daemon 根本没有这条路**时是 null。
-   *
-   * 后者返回 null 是为了让"旧 daemon"这一档**不显示任何提示**——那时候连按钮
-   * 都不画（见模板里 `{#if humanVerdictSupported}`），再挂一句"现在还不能人工
-   * 裁决"会让人以为等一会儿就有了。
-   */
-  $: passBlockedNoteId =
-    humanVerdictSupported && passGate !== null && !passGate.ok ? passGate.noteId : null
-
   let humanReason = ''
   /** 哪个按钮正在跑（`null` = 都闲着）。三个动作共用一个"忙"状态。 */
-  let deciding: 'pass' | 'feedback' | 'abandon' | 'recover' | null = null
+  let deciding: 'feedback' | 'abandon' | 'recover' | null = null
   let decideError = ''
   /** run 操作的错误（现在只有「取消这次执行」）。显示在 run 详情区里。 */
   let runError = ''
-
-  /**
-   * 这条任务**已经被人判过通过**吗。
-   *
-   * 判据取已加载的判决列表里有没有 `source === 'human'` 的那条——它只是给一句
-   * 提示（"可以再判一次，历史会保留"），不是判据本身。真正的判据在 daemon 那边。
-   */
-  $: humanDecided = verdicts.some((v) => v.source === 'human')
-
-  /**
-   * ①「通过」——落一条人工判决，任务进「已完成审查」。
-   *
-   * 理由**选填**：人脑子里那个判断（"我看过了，可以"）逼他写下来，最常见的结局
-   * 是写一句"ok"或者干脆不点——门槛换来的是噪音，不是信息。所以空理由照发。
-   */
-  async function passTask(): Promise<void> {
-    if (!passGate?.ok || deciding !== null) return
-    deciding = 'pass'
-    decideError = ''
-    try {
-      await api(`/api/runs/${passGate.runId}/human-verdict`, {
-        method: 'POST',
-        body: JSON.stringify({ reason: humanReason.trim() }),
-      })
-      humanReason = ''
-      await refresh()
-    } catch (err) {
-      decideError = err instanceof Error ? err.message : String(err)
-    } finally {
-      deciding = null
-    }
-  }
 
   /**
    * ②「反馈」——把上面那段话发回给执行者重做。
@@ -801,13 +609,8 @@
     finalOutputFor = null
     // 工作目录那一栏的状态现在住在 `WorkDirTree` 里，换 run 时由 `reloadKey`
     // 触发它自己清空重取——这里不再需要手动重置六个变量。
-    await Promise.all([
-      loadVerdicts(run.runId),
-      // 跑完的才去取结果；还在跑的时候右边是实时日志，没必要多拉一次
-      ['completed', 'failed', 'cancelled'].includes(run.status)
-        ? loadResult(run)
-        : Promise.resolve(),
-    ])
+    // 跑完的才去取结果；还在跑的时候右边是实时日志，没必要多拉一次
+    if (['completed', 'failed', 'cancelled'].includes(run.status)) await loadResult(run)
   }
 
   // ── 接着沟通（在同一任务上继续）──
@@ -895,12 +698,7 @@
     // 那一份，否则"跑完切到结果视图"这个切换永远不会发生。
     const fresh = $runs.find((r) => r.runId === activeRun!.runId) ?? activeRun
     activeRun = fresh
-    await Promise.all([
-      loadVerdicts(fresh.runId),
-      ['completed', 'failed', 'cancelled'].includes(fresh.status)
-        ? loadResult(fresh)
-        : Promise.resolve(),
-    ])
+    if (['completed', 'failed', 'cancelled'].includes(fresh.status)) await loadResult(fresh)
   }
 </script>
 
@@ -948,12 +746,8 @@
         {#if info.noteId}
           <span class="faint fs-xs">{$t(info.noteId)}</span>
         {/if}
-        <!-- ★ D45：返工过就标出来。它是这条回路**真的转过**的痕迹，扫列表时
-             最该看见的就是"这个任务审了不止一轮"——否则"返工一次后通过"与
-             "一次就通过"长得一模一样。 -->
-        {#if info.reworked > 0}
-          <span class="faint fs-xs">{$t('tasks.reworkedTag', { n: info.reworked })}</span>
-        {/if}
+        <!-- ⚠️ 2026-11（D124）：这里原来是「返工 N 次」那枚标记。返工退场 ⇒
+             不再有返工 run，"这个任务审了不止一轮"这件事也就不存在了。 -->
         <span class="faint fs-xs">{agentName(issue.assignee?.id ?? null)}</span>
         <span class="faint fs-xs" title={absoluteTime(issue.updatedAt)}>{relativeTime(issue.updatedAt, now)}</span>
       </span>
@@ -1021,7 +815,7 @@
         {:else}
           <div class="board board-6">
             {#each COLUMNS as col (col.ids[0])}
-              <!-- 一列可以收两档（「等待人处理」收 needs_human 与 action_failed） -->
+              <!-- 一列可以收多档（「待处理」收 awaiting_review 与 needs_human） -->
               {@const items = staged.filter((x) => col.ids.includes(x.info.stage))}
               <div class="column">
                 <h4>
@@ -1215,7 +1009,7 @@
             type="button"
             class="btn btn--ghost"
             disabled={!canOptimizeSkill}
-            title={canOptimizeSkill ? '' : $t('crystallize.taskGated')}
+            title={canOptimizeSkill ? '' : $t('tasks.optimizeNeedsFinishedRun')}
             onclick={() => goCrystallize(activeRun?.runId ?? '')}
           >
             {$t('crystallize.optimize')}
@@ -1381,126 +1175,14 @@
       {/if}
 
       {#if !logMode}
-      {#if verdictsFor === activeRun.runId && verdicts.length > 0}
-        <h4 style="margin-top:var(--sp-4)">{$t('tasks.verdictHeading')}</h4>
-        {#each verdicts as v (v.id)}
-          {@const actionCount = verdictActions.filter((a) => a.verdictId === v.id).length}
-          <article class="notice" style="margin-bottom:var(--sp-2);flex-direction:column">
-            <div style="display:flex;gap:var(--sp-2);align-items:center">
-              <!--
-                ★ 契约值**不翻译**（它是判决 JSON 里的机器值），但**旁边**给一个
-                  本地化显示名：等宽的值 + 人话，两者都在，谁也不会误会哪个是真的。
-              -->
-              <span class="badge {v.conclusion === 'pass' ? 'done' : v.conclusion === 'fail' ? 'failed' : 'blocked'}">
-                <code>{v.conclusion}</code>
-                <span class="faint fs-xs">{$t(`term.conclusion.${v.conclusion}` as WebTextId)}</span>
-              </span>
-              <span class="mono fs-xs faint" title={$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}
-                >{v.reasonCode}</span
-              >
-              <span class="faint fs-xs">{$t(`term.reasonCode.${v.reasonCode}` as WebTextId)}</span>
-              <!--
-                ★ D46：这条判决**是谁做的**。
-                
-                同一条 run 上可能有两条判决（模型判 fail、人后来判 pass），两张
-                卡片长得几乎一样——不标出来，读的人分不清哪条该信。所以人工那条
-                带一个徽章；`source` 缺字段（老数据）就是模型判的，不标。
-                
-                ⚠️ 置信度对人工裁决**没有意义**（人不是概率输出，落库时写的是 1），
-                所以那一项对人工判决不显示——显示出来就是一句"100% 确定"的假精确。
-              -->
-              {#if v.source === 'human'}
-                <span class="badge done">{$t('tasks.humanVerdictBadge')}</span>
-              {:else}
-                <span class="faint fs-xs"
-                  >{$t('tasks.confidence', { percent: Math.round(v.confidence * 100) })}</span
-                >
-              {/if}
-            </div>
-            <!-- 人工裁决的理由：它是**这句话**而不是一组 findings（D46） -->
-            {#if v.source === 'human' && v.humanReason}
-              <p class="fs-xs">
-                <span class="faint fs-xs">{$t('tasks.humanVerdictReasonHeading')}</span>
-                {v.humanReason}
-              </p>
-            {/if}
-            <!-- ★ D69.9：结论行（徽标+理由码+来源）常驻，证据明细折叠 -->
-            <FoldSection
-              title={$t('tasks.verdictDetails')}
-              summary={$t('tasks.verdictDetailCount', { actions: actionCount, findings: v.findings.length })}
-            >
-            <!--
-              ══════════════════════════════════════════════════════════════
-              ★ 这条判决**真的做了什么**（D45 的显示位置调整）
-              ══════════════════════════════════════════════════════════════
+      <!--
+        ⚠️ 2026-11（D125）：这里原来是**判决卡**——这条 run 的每条判决一张卡片
+        （结论徽标 + 理由码 + 置信度/人工标记 + 证据明细 + 升级原因）。
+        判决退场 ⇒ 整段删。
 
-              使用者的原话：「应该作为审核 PASS 的依据，放在一起更合理」。
-
-              在这之前它单独占一段（详情里另有一个「行动」小节），于是"判决通过"
-              与"通过之后做了什么"分在两处：读者得自己在两个方块之间建立因果，
-              而"通过了但什么都没发生"和"通过了并做成了"在扫一眼时没有区别。
-
-              现在它挂回**产生它的那张判决卡**里——判决的结论、它要求的动作、
-              以及那个动作的**结果**连成一句完整的话：
-              「判了 pass ⇒ 要求 append-note ⇒ 真的 append 了（退出码 0）」。
-
-              判据用 `verdictId`（不是"最新那条"）：一张卡只认自己触发的动作，
-              返工回路转了几圈时也不会把上一轮的结论画到这一轮下面。
-            -->
-            {#each verdictActions.filter((a) => a.verdictId === v.id) as a (a.id)}
-              <div class="action-line">
-                <div class="fs-xs">
-                  <code>{a.type}</code>
-                  <span class="faint fs-xs"
-                    >{$t(`term.actionStatus.${a.status}` as WebTextId)}</span
-                  >
-                </div>
-                {#if a.error}
-                  <p class="card-warning">{$t('tasks.actionFailed', { reason: a.error })}</p>
-                {/if}
-                <!-- 脚本自己回的那句话："做了什么 / 为什么没做成" -->
-                {#if actionDetailOf(a)}
-                  <p class="fs-xs">{actionDetailOf(a)}</p>
-                {/if}
-                {#if actionMetaOf(a).length > 0}
-                  <p class="faint fs-xs">
-                    {#each actionMetaOf(a) as m, i (m)}
-                      {i > 0 ? ' · ' : ''}{m}
-                    {/each}
-                  </p>
-                {/if}
-                <!-- 它带着什么参数跑的（模型填的 open + 平台注入的 bound + 界面固定值）-->
-                {#if actionParamsOf(a).length > 0}
-                  <details>
-                    <summary class="faint fs-xs">{$t('tasks.actionParamsSummary')}</summary>
-                    <ul class="plain fs-xs" style="margin:0">
-                      {#each actionParamsOf(a) as [k, val] (k)}
-                        <li><code>{k}</code> = <code>{val}</code></li>
-                      {/each}
-                    </ul>
-                  </details>
-                {/if}
-              </div>
-            {/each}
-            {#if v.action}
-              <div class="fs-xs">{$t('tasks.suggestedAction')}<code>{v.action.type}</code></div>
-            {/if}
-            {#if v.escalateReason}
-              <div class="fs-xs warn">{$t('tasks.needsHuman', { reason: v.escalateReason ?? '' })}</div>
-            {/if}
-            {#if v.findings.length > 0}
-              <ul class="plain fs-xs" style="margin:0">
-                {#each v.findings as f}
-                  <li>[{f.severity}] {f.summary}</li>
-                {/each}
-              </ul>
-            {:else}
-              <div class="faint fs-xs">{$t('tasks.noFindings')}</div>
-            {/if}
-            </FoldSection>
-          </article>
-        {/each}
-      {/if}
+        ⚠️ 「结论值不翻译、旁边给本地化显示名」那条做法没有过期：**契约值原样
+        显示、旁边再给人话**，谁也不会误会哪个是真的。
+      -->
 
       <!-- ★ D69.9：元数据（工作目录/类型/耗时）默认折叠；标题行把工作目录
             放在摘要位——它常常是唯一想确认的那一项 -->
@@ -1510,6 +1192,7 @@
           <dd class="mono">{activeRun.workDir ?? '—'}</dd>
           <dt>{$t('tasks.type')}</dt>
           <dd>{activeRun.kind === 'review' ? $t('tasks.kindReview') : $t('tasks.kindExecute')}</dd>
+          <!-- ⚠️ 2026-11（D125）：`kindReview` 只服务**老记录**——新 run 只有 execute。 -->
           {#if activeRun.finishedAt}
             <dt>{$t('tasks.duration')}</dt>
             <dd>{$t('tasks.seconds', { seconds: ((activeRun.finishedAt - activeRun.queuedAt) / 1000).toFixed(1) })}</dd>
@@ -1523,40 +1206,32 @@
 
       <!--
         ══════════════════════════════════════════════════════════════
-        ★ 人工裁决（D46）
+        ★ 人的出路：反馈 / 放弃（D47；D125 之后只剩这两个）
         ══════════════════════════════════════════════════════════════
 
-        位置：**紧跟在判决区之后**。理由是它回答的问题紧接着判决卡上那句结论——
-        "审核说不行，那我能不能自己说行"。
+        位置：**紧跟在这次 run 的结果区之后**。这里原来放的是「人工裁决」那块面板
+        （D46：通过 / 反馈 / 放弃三个出路），它回答的是"审核说不行，我能不能
+        自己说行"。**判决与人工裁决面板一起退场**（D125）⇒ 「通过」没有了，那块
+        面板只剩下两个**出路**。
 
-        ══════════════════════════════════════════════════════════════
-        ★ D47：它同时**取代了原来那个常驻底栏**（「发送并继续」）
-        ══════════════════════════════════════════════════════════════
+        ★ 它同时**取代了原来那个常驻底栏**（「发送并继续」）：D47 把两者合并了
+        ——「反馈」就是「发送并继续」。所以这块必须覆盖底栏原来覆盖的范围，否则
+        "已经跑完的任务再也说不出下一句"。
 
-        使用者的要求是把三个出路摆在一起：「通过 / 反馈 / 放弃」，而且
-        **「反馈」就是「发送并继续」**——两者合并，所以底栏那个输入框连同它的
-        按钮一起撤掉了。留下来的这一块因此要覆盖底栏原来覆盖的范围，否则
-        "已经审完的任务再也说不出下一句"（那是这次合并最容易踩的坑）。
+        开关是 `canDecide`（**只要选中了任务就给**），两个按钮各有自己的可用性：
 
-        为此它的开关是 `canDecide`（**只要选中了任务就给**），而不是"能人工裁决"
-        ——那只是「通过」那一个按钮的条件。三个按钮各有自己的可用性：
-
-          · 通过：要有一条可裁决的 run（`passGate`），否则置灰 + 说清为什么；
-          · 反馈：要有一次**跑完**的执行可以接（`feedbackReady`），否则同上；
+          · 反馈：要有一次**跑完**的执行可以接（`feedbackReady`），否则置灰 + 说清为什么；
           · 放弃：只在支持这条路由的 daemon 上给，且放弃后换成「恢复」。
 
-        ⚠️ 开关为什么放宽到"只要选中了任务"：三个按钮的可用条件互不相同，用其中
-           任何一个当整块的开关，都会让另外两个在**本该可用**时消失。最典型的是
-           「放弃」——一条刚建出来、一次都没跑的、或者**正在跑**的任务，恰恰是最
-           想放弃它的两种情形（建错了 / 在烧 token）。代价是一条新任务上会看到
-           两个灰按钮，而那是**如实**的：此刻确实只有放弃可做。
+        ⚠️ 开关为什么放宽到"只要选中了任务"：两个按钮的可用条件不同，用其中任何
+           一个当整块的开关，都会让另一个在**本该可用**时消失。最典型的是「放弃」
+           ——一条刚建出来、一次都没跑的、或者**正在跑**的任务，恰恰是最想放弃它的
+           两种情形（建错了 / 在烧 token）。
 
-        三件事在文案里刻意说清了（见 `packages/i18n/src/web/tasks.ts` 里
+        两件事在文案里刻意说清了（见 `packages/i18n/src/web/tasks.ts` 里
         `decide*` 那组注释）：
-          ① 「通过」**不触发任何动作**（最容易的误解）；
-          ② 理由**什么时候必填**（通过选填、反馈必填）——两个按钮共用一个
-             输入框，所以这件事只能靠按钮上的提示说清；
-          ③ 「放弃」会**取消正在跑的 run**（这个功能唯一的副作用）。
+          ① 理由**必填**——这段文字就是执行者拿到的依据；
+          ② 「放弃」会**取消正在跑的 run**（这个功能唯一的副作用）。
       -->
       {#if canDecide && !logMode}
         <section class="drawer-section decide-bar">
@@ -1575,10 +1250,6 @@
               </button>
             {/if}
           {:else}
-            {#if humanDecided}
-              <p class="faint fs-xs">{$t('tasks.humanVerdictAlready')}</p>
-            {/if}
-
             <label class="human-reason">
               <span class="fs-xs reason-label">{$t('tasks.decideReasonLabel')}</span>
               <textarea
@@ -1595,20 +1266,6 @@
             </label>
 
             <div class="decide-actions">
-              {#if humanVerdictSupported}
-                <button
-                  type="button"
-                  disabled={deciding !== null || !passGate?.ok}
-                  title={passGate?.ok
-                    ? $t('tasks.decidePassHint')
-                    : passBlockedNoteId
-                      ? $t(passBlockedNoteId)
-                      : ''}
-                  onclick={passTask}
-                >
-                  {deciding === 'pass' ? $t('tasks.decidePassing') : $t('tasks.decidePass')}
-                </button>
-              {/if}
               <button
                 type="button"
                 disabled={deciding !== null || !feedbackReady}
@@ -1637,17 +1294,10 @@
             <!--
               ★ 按钮为什么是灰的 —— **必须写出来**，而且要在按钮之外也写一遍：
                 `title` 只有鼠标悬停才看得见，而"按钮是灰的、不知道为什么"
-                正是 D46 那次需求（"没有人工通过的操作 UI"）的来源。
-              ★ 2026-10（紧凑性）：两条提示（为什么不能通过 / 为什么不能反馈）
-                合并成一行、用「·」隔开——run 还在跑时两条经常同时出现，各占
-                一整行都是极短的小字。缺一则只出其一。
+                正是 D46 那次需求的来源（"没有可点的 UI"）。
             -->
-            {#if passBlockedNoteId || !feedbackReady}
-              <p class="faint fs-xs">
-                {#if passBlockedNoteId}{$t(passBlockedNoteId)}{/if}{#if passBlockedNoteId && !feedbackReady}
-                  <span class="faint"> · </span>
-                {/if}{#if !feedbackReady}{$t('tasks.needRunForFeedback')}{/if}
-              </p>
+            {#if !feedbackReady}
+              <p class="faint fs-xs">{$t('tasks.needRunForFeedback')}</p>
             {/if}
           {/if}
 
@@ -1943,9 +1593,11 @@
     margin-top: var(--sp-2);
   }
 
-  /* ── 六列流水线 ──
-     D40 起是五档：执行中 / 待审查 / 行动中 / 等待人处理（含行动失败） / 已完成审查；
-     D47 又加了最后一列「已放弃」（**不是流水线的一站**，见 `PIPELINE_COLUMNS`）。
+  /* ── 流水线看板 ──
+     阶段档位：执行中 / 待审查 / 待人工 / 已审查（+ 已放弃，**不是流水线的一站**，
+     见 `PIPELINE_COLUMNS`）。2026-11 精简成三列：进行中 / 待处理 / 已结束。
+     ⚠️ 2026-11（D123）：「行动中」「行动失败」两档随动作能力退场删掉——判决不再
+        触发动作，也就没有"判决要的那件事正在做/做失败了"这回事。
      固定列数（而不是 auto-fit）：这几列就是流水线的几个状态，少一列会让人以为
      那个状态不存在。
 

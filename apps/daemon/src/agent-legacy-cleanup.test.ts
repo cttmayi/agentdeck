@@ -123,12 +123,10 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
     try {
       executorId = await createAgent(d1.url, {
         name: '老执行者',
-        role: 'executor',
         instructions: '干活的。',
       })
       reviewerId = await createAgent(d1.url, {
         name: '老审核者',
-        role: 'reviewer',
         reviewStandard: { name: '老标准', body: '# 老标准\n\n只看有没有写测试。' },
       })
 
@@ -197,7 +195,12 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
 
       // ── ⑤ 而**在用的字段一个都没丢**（清理越界是最贵的那种错） ──
       assert.equal(rawReviewer2['name'], '老审核者')
-      assert.equal(rawReviewer2['role'], 'reviewer')
+      /*
+       * ⚠️ 2026-11（S4，D127）：这里原来断言"角色还在（`role === 'reviewer'`）"。
+       *   **角色退场** ⇒ `role` 也是要清掉的老键之一（只摘键、不补岗位值——用户建的
+       *   记录没有岗位）。这条改成反向断言：清理之后它**不该**再在库里。
+       */
+      assert.equal('role' in rawReviewer2, false, '角色退场 ⇒ 老键 `role` 被摘掉')
       /**
        * ⚠️ 分批第 47 批：这条原来断言 `instructions === ''`——那是"新建时指令为空"的
        * 副作用。现在新建会**预填默认工作守则**（使用者的要求），所以"空"不再是
@@ -213,7 +216,7 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
       assert.equal(std2['name'], '老标准', '★ 标准的正文与名字一个字都不能动')
       assert.equal(std2['body'], '# 老标准\n\n只看有没有写测试。')
       assert.equal(rawExecutor2['name'], '老执行者', '执行者那条除了那个键之外都照旧')
-      assert.equal(rawExecutor2['role'], 'executor')
+      assert.equal('role' in rawExecutor2, false, '同上：用户建的记录没有岗位值')
     } finally {
       await d2.close()
     }
@@ -225,7 +228,7 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
     const dataDir = await tempDataDir('legacy-read-gate')
     const { daemon: d } = await boot(dataDir)
     try {
-      const id = await createAgent(d.url, { name: '刚被写成老形态的人', role: 'reviewer' })
+      const id = await createAgent(d.url, { name: '刚被写成老形态的人' })
       await makeLegacy(d, id, {
         reviewerAgentId: '01ARZ3NDEKTSV4RRFFQ69G5FAX',
         allowedActions: ['legacy-tool.act'],
@@ -276,7 +279,6 @@ describe('★ 老记录清理：撤下的字段要从**库里**消失（不只�
     try {
       const id = await createAgent(d.url, {
         name: '重新保存的人',
-        role: 'reviewer',
         reviewStandard: { name: '标准', body: '# 标准\n\n判判看。' },
       })
       await makeLegacy(d, id, {
@@ -325,7 +327,7 @@ describe('★ 清理函数本身：计划与写库是分开的（便于单测，
     const dataDir = await tempDataDir('legacy-plan')
     const { daemon: d } = await boot(dataDir)
     try {
-      const id = await createAgent(d.url, { name: '计划里的人', role: 'reviewer' })
+      const id = await createAgent(d.url, { name: '计划里的人' })
       await makeLegacy(d, id, { allowedActions: ['a.b'] })
 
       const ws = await firstWorkspace(d)
@@ -348,7 +350,7 @@ describe('★ 清理函数本身：计划与写库是分开的（便于单测，
     const dataDir = await tempDataDir('legacy-noop')
     const { daemon: d } = await boot(dataDir)
     try {
-      await createAgent(d.url, { name: '干净的人', role: 'reviewer' })
+      await createAgent(d.url, { name: '干净的人' })
       const logs: string[] = []
       const result = await runAgentLegacyCleanupOnce({ store: d.store, info: (m) => logs.push(m) })
 

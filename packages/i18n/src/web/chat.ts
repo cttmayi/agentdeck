@@ -543,7 +543,10 @@ export const chatText = {
     en: 'The job card was drafted by the agent maker (it described the rules, you confirmed them) — tweak, then confirm.',
   },
   'chat.agentMakerNameLabel': { zh: '岗位名', en: 'Name' },
-  'chat.agentMakerRoleLabel': { zh: '角色', en: 'Role' },
+  /*
+   * ⚠️ 2026-11（S4，D127）：`chat.agentMakerRoleLabel`（生成智能体面板里"角色"那一格）
+   *   随角色退场删——生成出来的就是普通智能体。
+   */
   'chat.agentMakerInstructionsLabel': {
     zh: '指令（一段）· 边界 / 输出格式都在这一段里',
     en: 'Instructions (one block) · boundary and output format live in here',

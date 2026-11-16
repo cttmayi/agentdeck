@@ -65,9 +65,12 @@ export const agentsText = {
   'agents.groupOwnHint': { zh: '你建的，可改可删', en: 'Created by you — editable and deletable' },
   /** 选中的那条正好在收起来的组里时，标题上留一句（右栏还在显示它，列表里却"不见了"）。 */
   'agents.groupSelectionHere': { zh: '选中的在这里', en: 'selection is in here' },
-  'agents.roleExecutor': { zh: '执行', en: 'Execute' },
-  'agents.roleReviewer': { zh: '审核', en: 'Review' },
-  // ★ 2026-10（D81/D82）：内置起草者与内置 skill 审核者也是角色，列表徽标要能说出它们是谁。
+  /*
+   * ⚠️ 2026-11（S4，D127）：`agents.roleExecutor`（执行）/ `agents.roleReviewer`（审核）
+   *   随**角色退场**删——用户建的 agent 不再分执行与审核，统一叫「智能体」。
+   */
+  'agents.rolePlain': { zh: '智能体', en: 'Agent' },
+  // ★ 2026-10（D81/D82）：内置的起草者 / 沉淀审核者……列表徽标要能说出它们是谁。
   //   ⚠️ 少了这两条，列表上它们会显示成「执行」——一个**永远不会接任务**的 agent
   //   被标成执行者，使用者会去问"它为什么不干活"。
   'agents.roleDrafter': { zh: '起草', en: 'Draft' },
@@ -93,16 +96,12 @@ export const agentsText = {
   //   同样必须有自己的词——它是唯一**能聊天**的内置角色，标成「执行」会让人以为
   //   它接任务干活（它只问只写不干活）。
   'agents.roleAgentMaker': { zh: '生成智能体', en: 'Agent maker' },
-  'agents.roleExecutorHint': { zh: '接到任务后动手干活', en: 'Takes on tasks and does the work' },
-  'agents.roleReviewerHint': {
-    zh: '按你给它写的判断依据审别人的产出，给判决',
-    en: 'Reviews others’ output against a standard and gives a verdict',
-  },
-  'agents.roleReviewerHintShort': {
-    zh: '按判断依据审别人的产出',
-    en: 'Reviews others’ output against a standard',
-  },
-  'agents.roleLabel': { zh: '角色', en: 'Role' },
+  /*
+   * ⚠️ 2026-11（S4，D127）：`agents.roleExecutorHint` / `roleReviewerHint` /
+   *   `roleReviewerHintShort` 三条（角色选择器两张卡的副说明）随角色退场删。
+   *   `agents.roleLabel`（"角色"那一格的名字）也一起删——那一格现在是"岗位说明"。
+   */
+  'agents.roleLabel': { zh: '岗位', en: 'Kind' },
   'agents.nameLabel': { zh: '名称', en: 'Name' },
   // ── 记忆（分批第 240 批）──
   // ★ 位置在「指令」下面：人设是人定的、记忆是长出来的，两者挨着放才分得清。
@@ -239,7 +238,9 @@ export const agentsText = {
     zh: '先建一个执行者，再建一个审核者并给它挂上技能。要执行产出被自动审核，把它们放进同一个智能体组——审核者由组决定（2026-10 起执行者不再单独配「由谁来审它」）。',
     en: 'Create an executor first, then a reviewer with a skill attached. To have executor output reviewed automatically, put both in the same agent group — the group decides the reviewer (since 2026-10 executors no longer pick one themselves).',
   },
-  'agents.reviewsOthers': { zh: '它审别人', en: 'Reviews others' },
+  /*
+   * ⚠️ 2026-11（S4）：`agents.reviewsOthers`（行内"它审别人"那一句）随角色退场删。
+   */
   'agents.defaultBadge': { zh: '默认', en: 'Default' },
   'agents.noInstructions': { zh: '（没有指令）', en: '(No instructions)' },
   'agents.skillCount': { zh: ' · {count} 个技能 · ', en: ' · {count} skill(s) · ' },
@@ -309,21 +310,24 @@ export const agentsText = {
   'agents.newTitle': { zh: '新建智能体', en: 'New agent' },
   /** 提交按钮置灰时的 `title`。 */
   'agents.namePlaceholder': { zh: '例如：安全审核员', en: 'e.g. Security reviewer' },
-  'agents.roleFieldLabel': { zh: '它是做什么的', en: 'What it does' },
-  'agents.instructionsPlaceholderExecutor': {
-    zh: '它是谁、怎么干活。这段会进它的上下文。',
-    en: 'Who it is and how it works. This goes into its context.',
-  },
-  /**
-   * ★ 2026-09 改写：这里原来写的是"严格还是宽松、拿不准时怎么办"——那是
-   *    **鼓励**把"拿不准怎么办"（判决语义）写进判据。判决怎么选是平台统一
-   *    说明的（判决契约 `{{verdict}}` 里就有"结论怎么选"），判据里写它只会
-   *    重复、还会漂移。占位只引导"按什么标准判断"。
+  /*
+   * ⚠️ 2026-11（S4，D127）：`agents.roleFieldLabel`（"它是做什么的"）、
+   *   `agents.roleExecutorHint` / `agents.roleReviewerHint` 与两条件式占位符都随角色退场删。
    */
-  'agents.instructionsPlaceholderReviewer': {
-    zh: '它按什么标准判断：好与坏怎么分、要看哪些点（判决怎么写由平台统一说明，不用写）',
-    en: 'What criteria it judges by: how good and bad are told apart, which points to check (the platform explains how to write the verdict — no need to write it here)',
+  'agents.rolePlainHint': {
+    zh: '它干什么是你在「指令」里写的——平台不再替你分类。',
+    en: 'What it does is whatever you write in Instructions — the platform no longer sorts agents for you.',
   },
+  'agents.instructionsPlaceholderPlain': {
+    zh: '它是谁、怎么干活、按什么标准判断——都写在这里。这段会进它的上下文。',
+    en: 'Who it is, how it works, and what it judges by — all here. This goes into its context.',
+  },
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `agents.instructionsPlaceholderReviewer`
+   *   （"它按什么标准判断……"）——只有选了「审核」角色才显示。**角色退场** ⇒
+   *   两种形态合成一条 `agents.instructionsPlaceholderPlain`（见上）。
+   */
+
   /**
    * ⚠️ 2026-09：这里原来写的是"这一段会填进第一句话模版的 `{{instructions}}`"。
    *    那个变量已经退役了——「指令」现在是**身份那一整块**，由平台放在固定
@@ -342,17 +346,13 @@ export const agentsText = {
    *   现在压成一行，**细节进 `title`**（要查的人悬停就有，不用查的人不占版面）。
    */
   'agents.noSkillsOption': { zh: '（还没有技能）', en: '(No skills yet)' },
-  'agents.reviewerSkillsHintBefore': {
-    zh: '审核者的判断依据写在上面那条',
-    en: 'What a reviewer judges by lives in the ',
-  },
-  'agents.reviewerSkillsHintAfter': {
-    zh: '里，技能对它只是可选的参考/支持文件（挂上就会随审核一起送过去）。',
-    en: ' field above, while skills are only optional reference/support files for it (attached ones are sent along with the review).',
-  },
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是两条"审核者的技能提示"（`reviewerSkillsHint*`，
+   *   只在选了审核角色时出现）。**角色退场** ⇒ 合并成一条通用说法 `executorSkillsHint`。
+   */
   'agents.executorSkillsHint': {
-    zh: '执行者可以不挂技能（它的产出由审核者按自己的判断依据来判）。',
-    en: 'An executor can go without skills (its output is judged by the reviewer against the reviewer’s own criteria).',
+    zh: '挂上就会随它一起送过去——技能是干活时的参考与支持文件。',
+    en: 'Attached skills go into its context — they are reference and support files for the work.',
   },
   'agents.runtimeFieldLabel': { zh: '用哪个 CLI', en: 'Which CLI' },
   'agents.runtimeUnverified': {
@@ -379,23 +379,19 @@ export const agentsText = {
    *   · **详情页（老数据）**用 `standardLegacyNotice` + `standardBodySummary` +
    *     `standardFoldInEditHint`：那份老的正文还带着，它会被一起投递，并给一键并进来。
    */
-  'agents.standardMergedHint': {
-    zh: '判断依据写在上面那条「指令」里——审核标准不再单独设置。',
-    en: 'The judging criteria live in the Instructions field above — there is no separate review standard.',
-  },
-  /**
-   * ⚠️ 这里原来是**一句**「还带着一份老的标准（或挂在 skill 上的正文）…」。
-   *    两种情形的下一步不一样，所以拆成两条：
-   *      · **内联老字段** ⇒ 编辑保存一次它就自动并进「指令」（`PATCH` 里做的），
-   *        这句话要说的就是"你什么都不用做，保存一次就干净了"；
-   *      · **正文来自挂载的 skill** ⇒ 并进来必须**摘挂载**（改个名字顺手摘掉别人
-   *        的挂载是没同意的改动），所以那一种仍然要他自己点按钮。
-   *    合成一句的代价是：那句话对着两种情形都只说对一半。
+  /*
+   * ⚠️ 2026-11（S4，D127）：`agents.standardMergedHint`（"判断依据写在上面那条「指令」里"）
+   *   原来只在**审核角色**的详情表单里出现。角色退场 ⇒ 新建表单里没有那一格；
+   *   老数据的 `reviewStandard` 仍在详情页单独显示、可一键搬进「指令」。
    */
-  'agents.standardLegacyNoticeFromSkill': {
-    zh: '⚠️ 它的判断依据还来自挂载的技能——并进「指令」会连挂载一起摘掉，所以那一步要你自己点（下面那颗按钮）。',
-    en: '⚠️ Its judging criteria still come from an attached skill — folding them into Instructions also removes the attachment, so that step is yours to take (the button below).',
-  },
+  /*
+   * ⚠️ 2026-11（S6）：这里原来有两条**老形态提示**——`standardLegacyNoticeFromSkill`
+   *   （"判断依据还来自挂载的技能…下面那颗按钮"）与它内联那一半的兄弟词条。
+   *   审核标准、迁移（把挂载的正文并进「指令」）与那颗按钮都随 D125/D126 退场之后，
+   *   这两条**全仓库没有任何渲染点**（i18n 的死词条检查一直在红着这两条）。
+   *   探针那边原本还留着两条"事实（当前是个真缺口）"的记录，S6 一并删掉——
+   *   "缺口"是相对一个已经不存在的界面说的，留着只会让下一个人去找那颗按钮。
+   */
 
   // ── 行动权限（2026-10 起**只属于智能体组**）──
   //
@@ -407,103 +403,9 @@ export const agentsText = {
   //
   // 已装工具的那一半词条在 `tools.ts`（`tools.stdTools*`）——那一块的区域前缀
   // 没跟着改，理由写在那边。
-  'agents.sectionActions': {
-    zh: '行动权限：由智能体组决定',
-    en: 'Action permissions: decided by the agent group',
-  },
-  /**
-   * ★ 智能体页那句指路（2026-10）。
-   *
-   * 使用者在这里看到的应该只有一句话、**没有勾选框**：两处长得一模一样、只有一处
-   * 生效，是最坏的一种界面——他会在智能体页勾一遍，然后在组里再勾一遍，而只有组
-   * 那份起作用。所以这句话要说清两件事：① 谁决定（智能体组）；② 去哪儿改（组的
-   * ③ 行动）。
-   */
-  'agents.actionsMovedToGroup': {
-    zh: '动作属于这条链（这队人的活判过之后允许做什么），所以不在这里配：请到「智能体组」页，在组的 ③ 行动里勾。同一个人在不同组里可以有不同的权限——挂在人身上就只能共用一份。',
-    en: 'Actions belong to the chain (what this crew may do after a verdict), so they are not configured here: open the Agents-group page and tick them under ③ Actions. The same person can have different permissions in different groups — tied to a person, they can only share one set.',
-  },
-  /**
-   * 调试勾选（2026-09）：给这个动作勾上之后，判决引用它时**不跑脚本**，
-   * 在任务时间线里显示成「调试 · 未执行」并列出解析后的完整参数——用来确认
-   * "它到底会带着什么参数发出去"。是给调试看的，不是真的执行。
-   */
-  'agents.actionsDebug': { zh: '调试', en: 'Debug' },
-  'agents.actionsDebugHint': {
-    zh:
-      '勾上后这个动作执行时不跑脚本，只记录动作与解析后的完整参数（平台绑定 + 模型填的 + 你固定的），' +
-      '在任务时间线里显示成「调试 · 未执行」——用来确认"它到底会带着什么参数发出去"。',
-    en:
-      'When set, this action is not actually executed — the run records it as “debug · not executed” and ' +
-      'shows its fully resolved parameters (bound by the platform + filled by the model + fixed by you), ' +
-      'so you can check what would be sent.',
-  },
-  /**
-   * ★ 空态（D41）：**一个工具包都没装** ⇒ 这一栏没有任何可授权的动作。
-   *
-   * ⚠️ 这两句与「工具」页的 `tools.*` 是**两件事**：那一边说"工具是什么"，
-   *    这一边说"所以现在没有动作可授权、下一步去哪"。界面上的出现位置有两处
-   *    ——`ActionPermissions.svelte`（编辑态那一栏）与 `AgentDetail.svelte`
-   *    （只读态的「行动权限」那一行），两边**必须同一句话**，所以只有这一条词条。
-   *
-   * 碎片切成两段 + 一个按钮词条：中间那个「去「工具」页」是一个**可点的去处**
-   * （不是一句文案），元素留在标记里。
-   */
-  'agents.actionsNoToolsStrong': { zh: '还没有装任何工具包。', en: 'No tool packages installed yet.' },
-  'agents.actionsNoToolsHint': {
-    zh: '动作只能来自装进来的工具包，所以现在没有任何动作可授权。',
-    en: 'Actions can only come from installed tool packages, so there is nothing to authorize yet.',
-  },
-  /**
-   * ⚠️ 这一组说的是"**配过、但现在解析不出来**"的动作（D41）。
-   *    老数据里存着平台当年那六个内置动作名（已经删了），或者那个包被卸载了——
-   *    它们不在勾选框里，所以必须显式列出来并给一个移除入口，否则使用者
-   *    既看不见、也没法取消，一保存就被服务端拒。
-   */
-  'agents.actionsUnresolvedHeading': {
-    zh: '配过、但现在解析不出来（保存前先处理）',
-    en: 'Configured but no longer resolvable (deal with these before saving)',
-  },
-  'agents.actionsUnresolvedDrop': { zh: '移除', en: 'Remove' },
-  /**
-   * 只读态那一条 chip 旁边的标记。
-   *
-   * ★ 契约值**照原样留着**（"配过"这件事不能抹掉），但旁边必须看得出来它
-   *   **现在不能用**——否则界面上那条权限与一条真的能触发的动作长得一模一样。
-   *   解释那一句用下面的 `actionsUnresolvedHint`（同一个状态，同一句话）。
-   */
-  'agents.actionsUnresolvedChip': { zh: '当前不可用', en: 'Currently unavailable' },
-  /**
-   * 为什么"当前不可用"。
-   *
-   * ⚠️ 必须同时说出两个成因，缺一个就会有一种使用者看不懂自己的处境：
-   *    ① **旧的内置动作名**（`comment.create` 这类）——平台把它们整组移除了，
-   *       它们再也不是动作，**也永远装不回来**（没有哪个包会提供它）；
-   *    ② **提供它的包被卸载了**——这种是能救的：把包装回来就行。
-   *    只写①的话，被卸载那种情况的使用者不知道可以装包；只写②的话，
-   *    带着旧内置名字的使用者会去「工具」页找一个根本不存在的包。
-   *
-   * ⚠️ 这一步只说**为什么**，"下一步"分给下面两条按**出现位置**写的词条：
-   *    编辑态那一栏里有「移除」按钮，只读态那一行里**没有**——用同一句话会让
-   *    只读态的使用者去找一个不在那儿的按钮（那正是"界面坏了"的来源）。
-   */
-  'agents.actionsUnresolvedHint': {
-    zh: '这些动作现在找不到出处：平台的内置动作已经整组移除（comment.create 这类旧名字再也不是动作），或者提供它的工具包被卸载了。带着它们保存会被服务端拒绝。',
-    en: 'These actions have no source right now: the platform’s built-in actions have been removed entirely (old names such as comment.create are no longer actions), or the tool package providing them was uninstalled. Saving while they are still listed is refused by the server.',
-  },
-  /** 下一步（编辑态：那一栏里真的有「移除」按钮）。 */
-  'agents.actionsUnresolvedFixInEdit': {
-    zh: '点每一行右边的「移除」就能把它们去掉；如果只是那个包被卸载了，也可以先去「工具」页把包装回来。',
-    en: 'Click “Remove” on a row to drop it; if the package was merely uninstalled, you can also reinstall it from the Tools page first.',
-  },
-  /** 下一步（只读态：先点「编辑」才有那些按钮）。 */
-  'agents.actionsGoTools': { zh: '去「工具」页装一个', en: 'Install one on the Tools page' },
-  // ⚠️ 2026-10：这里原来有一对 `agents.actionsLegacyNote` /
-  //    `agents.actionsLegacyNoteUnresolved`（"这些动作来自老配置（写在审核标准里的
-  //    那一份）…保存时会写到行动权限上，之后它就不再依赖标准了"）。两条一起删了：
-  //    它们说的是**行动权限从老标准迁移到 agent 上**这件事，而现在动作只属于组，
-  //    那条迁移路连同字段一起撤掉了（老记录里那几个键由 daemon 启动时摘掉，
-  //    见 `agent-legacy-cleanup.ts`）。留着这两条只会指向一个不存在的操作。
+  // ⚠️ 2026-11（D123）：这里原来是「行动权限」那一组词条（`agents.sectionActions`、
+  //   `agents.actionsMovedToGroup`、调试/未解析/没有工具包这几段）——组页的 ③ 行动
+  //   与 `ActionPicker` 一起删了，界面里再没有地方显示或配置动作。
 
   // ── AgentDetail.svelte ──
   'agents.saved': { zh: '已保存', en: 'Saved' },
@@ -690,14 +592,9 @@ export const agentsText = {
     zh: '未对照真实程序（字段名是按公开形状推导的）',
     en: 'Not checked against the real program (field names are derived from the public shape)',
   },
-  /**
-   * ⚠️ 这条原来叫 `headlineNoStandard`、说的是「没有审核标准…点「编辑」写一条」。
-   *    判断依据并进「指令」之后那句话有两处不对：**字段名**（界面上已经没有
-   *    「审核标准」了）和**判据**（那句话挂在"没有标准字段"上，于是写了指令的
-   *    正常审核者被误报——使用者报的正是这条：「这个提示有问题」）。
+  /*
+   * ⚠️ 2026-11（S6）：这里原来是 `agents.headlineNoInstructions`（"它审不了任何东西：
+   *   没有写「指令」…平台不会把产出交给它审"）。审核 run 退场（D125）之后**没有
+   *   "审不了"这回事**，详情页也没有任何一处渲染它（死词条检查红着）。删掉。
    */
-  'agents.headlineNoInstructions': {
-    zh: '它审不了任何东西：没有写「指令」（判断依据就写在那里），平台不会把产出交给它审。点「编辑」写一段。',
-    en: 'It cannot review anything: with no Instructions written (the judging criteria live there) the platform will not hand it output to review. Click “Edit” to write some.',
-  },
 } as const satisfies TextCatalog

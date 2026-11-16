@@ -1,8 +1,6 @@
 import {
   DATA_SNAPSHOT_FORMAT_VERSION,
-  type Action,
   type Agent,
-  type AgentGroup,
   type Artifact,
   type AuditRecord,
   type ChatTurn,
@@ -11,11 +9,8 @@ import {
   type Device,
   type InboxItem,
   type Issue,
-  type Report,
   type Run,
   type Skill,
-  type Tool,
-  type VerdictRecord,
   type Workspace,
   type WorkspaceId,
 } from '@agentdeck/protocol'
@@ -82,21 +77,18 @@ export interface DataSnapshot {
      * ⚠️ `?? []` 与 `tools` 同一条规矩：格式版本没有因为加它而变，所以旧备份的
      *    `data` 里没有这一段——那是"当时没有组"，不是损坏。
      */
-    agentGroups: AgentGroup[]
-    skills: Skill[]
-    /**
-     * 工具包（D40）。
-     *
-     * ★ 与 skills **并排**放在这里，而不是"以后需要再加"。
-     *
-     * 审计导出要求自包含（FR-AUDIT-02）：判决与审计里的 `<slug>.<动作名>`、
-     * 以及审核者 `allowedActions` 里的动作名都是**引用**，被引用的包必须同一份
-     * 文件里就在。（原来这里还写着"agent 挂着的 `toolIds`"——挂载能力已经撤掉，
-     * 那个字段不在协议里了。）
-     * 漏掉它不会报任何错，只会让导出物里出现"引用了一个不存在的工具包"——
-     * 拿到别处打开时看不出是"当时没导"，还是"这个包当时就不在"。
+    /*
+     * ⚠️ 2026-11（S3）：这里原来是 `agentGroups: AgentGroup[]`。智能体组退场 ⇒ 快照
+     *   不再带这一段（**老备份里多出来的 `agentGroups` 键不会被读到**，导入按 key 取）。
      */
-    tools: Tool[]
+    skills: Skill[]
+    /*
+     * ⚠️ 2026-11（D123）：这里原来还有 `tools: Tool[]`（工具包）与下面的
+     *   `actions: Action[]`（动作记录）。两者随动作能力一起退场——导出物里不再有
+     *   这两段。旧备份导入时那两段**被忽略**（导入按 key 只取本文件里还列着的段，
+     *   多出来的段不报错），所以老备份照旧打得开。
+     */
+
     issues: Issue[]
     comments: Comment[]
     /**
@@ -112,10 +104,16 @@ export interface DataSnapshot {
      */
     conversations: Conversation[]
     chatTurns: ChatTurn[]
-    reports: Report[]
+    /*
+     * ⚠️ 2026-11（D125）：这里原来是 `reports: Report[]`。报告摄取退场 ⇒ 快照不再
+     *   带这一段。**老备份里多出来的 `reports` 键不会被读到**（导入按 key 取），
+     *   与 S1-③ 删 `tools` / `actions` 两段时同一个处理。
+     */
     runs: Run[]
-    verdicts: VerdictRecord[]
-    actions: Action[]
+    /*
+     * ⚠️ 2026-11（D125）：这里原来是 `verdicts: VerdictRecord[]`。判决退场 ⇒ 快照
+     *   不再带这一段（**老备份里多出来的 `verdicts` 键不会被读到**，导入按 key 取）。
+     */
     artifacts: Artifact[]
     audits: AuditRecord[]
     inbox: InboxItem[]
@@ -156,11 +154,8 @@ export async function exportData(
     workspace,
     device,
     agents,
-    agentGroups,
     skills,
-    tools,
     issues,
-    reports,
     runs,
     inbox,
     conversations,
@@ -168,19 +163,15 @@ export async function exportData(
       store.getWorkspace(ws),
       store.getDevice(),
       store.listAgents(ws),
-      store.listGroups(ws),
       store.listSkills(ws),
-      store.listTools(ws),
       drainAll<Issue>((cursor) => store.listIssues({ workspaceId: ws, limit: 200, cursor })),
-      drainAll<Report>((cursor) => store.listReports({ workspaceId: ws, limit: 200, cursor })),
       drainAll<Run>((cursor) => store.listRuns({ workspaceId: ws, limit: 200, cursor })),
       store.listInboxItems({ workspaceId: ws, limit: 10_000 }),
       store.listConversations(ws),
     ])
 
-  // 顺着关系把从属实体取全：它们没有"列出全部"的口子，
-  // 但每一个都能从 run / issue 走得到（这正是 report 当初缺 listReports
-  // 会让整个导出不完整的原因）。
+  // 顺着关系把从属实体取全：它们没有"列出全部"的端口方法，
+  // 但每一个都能从 run / issue 走得到。
   const comments: Comment[] = []
   for (const issue of issues) comments.push(...(await store.listComments(issue.id)))
 
@@ -188,33 +179,23 @@ export async function exportData(
   const chatTurns: ChatTurn[] = []
   for (const c of conversations) chatTurns.push(...(await store.listChatTurns(c.id)))
 
-  const verdicts: VerdictRecord[] = []
   const artifacts: Artifact[] = []
   const audits: AuditRecord[] = []
   for (const run of runs) {
-    verdicts.push(...(await store.listVerdictsByRun(run.id)))
     artifacts.push(...(await store.listArtifactsByRun(run.id)))
     audits.push(...(await store.listAuditsByRun(run.id)))
   }
-
-  const actions: Action[] = []
-  for (const verdict of verdicts) actions.push(...(await store.listActionsByVerdict(verdict.id)))
 
   const data = {
     workspace,
     device,
     agents,
-    agentGroups,
     skills,
-    tools,
     issues,
     comments,
     conversations,
     chatTurns,
-    reports,
     runs,
-    verdicts,
-    actions,
     artifacts,
     audits,
     inbox,
@@ -342,33 +323,22 @@ export async function importData(
       get: (id) => store.getAgent(id as Agent['id']),
       put: (row) => store.insertAgent(row),
     },
-    {
-      // ⚠️ 与 tools 同一个理由的 `?? []`：旧备份里没有 `agentGroups` 这一段。
-      //    （成员指向的 agent 由 agents 那一行负责恢复，顺序上 agent 先。）
-      key: 'agentGroups',
-      rows: doc.data.agentGroups ?? [],
-      get: (id) => store.getGroup(id as AgentGroup['id']),
-      put: (row) => store.insertGroup(row),
-    },
+    /*
+     * ⚠️ 2026-11（S3）：这里原来是 `agentGroups` 那一段的导入。组退场 ⇒ 删。
+     */
     {
       key: 'skills',
       rows: doc.data.skills,
       get: (id) => store.getSkill(id as Skill['id']),
       put: (row) => store.insertSkill(row),
     },
-    {
-      /**
-       * ⚠️ 这里的 `?? []` 不是防御性编程，而是**真的会走到**：快照的格式版本
-       *    没有因为加 tools 而变（`DATA_SNAPSHOT_FORMAT_VERSION` 仍是 1），
-       *    所以使用者手上那份旧版本导出的文件是完全正常的，它的 `data` 里
-       *    没有 `tools` 这一段。此时"一个工具包都没导"才是正确解读——
-       *    **不是**补一份，也**不是**拒绝导入（拒绝等于让旧备份突然打不开）。
-       */
-      key: 'tools',
-      rows: doc.data.tools ?? [],
-      get: (id) => store.getTool(id as Tool['id']),
-      put: (row) => store.insertTool(row),
-    },
+    /*
+     * ⚠️ 2026-11（D123）：这里原来还有两段——`tools`（工具包）与后面的
+     *   `actions`（动作记录）。两者随动作能力退场删掉。**老备份仍然打得开**：
+     *   导入是按 key 逐个取自己那一段，文件里多出来的 `tools` / `actions` 段
+     *   根本不会被读到。
+     */
+
     {
       key: 'issues',
       rows: doc.data.issues,
@@ -382,22 +352,10 @@ export async function importData(
       put: (row) => store.insertRun(row),
     },
     {
-      key: 'verdicts',
-      rows: doc.data.verdicts,
-      get: (id) => store.getVerdict(id as VerdictRecord['id']),
-      put: (row) => store.insertVerdict(row),
-    },
-    {
       key: 'conversations',
       rows: doc.data.conversations ?? [],
       get: (id) => store.getConversation(id as Conversation['id']),
       put: (row) => store.insertConversation(row),
-    },
-    {
-      key: 'actions',
-      rows: doc.data.actions,
-      get: (id) => store.getAction(id as Action['id']),
-      put: (row) => store.insertAction(row),
     },
   ]
 
@@ -432,16 +390,6 @@ export async function importData(
     }
     await store.insertComment(comment)
     bump(imported, 'comments')
-  }
-
-  for (const report of doc.data.reports) {
-    const existing = await store.getReport(report.id)
-    if (existing) {
-      bump(skipped, 'reports')
-      continue
-    }
-    await store.insertReport(report)
-    bump(imported, 'reports')
   }
 
   for (const audit of doc.data.audits) {
@@ -479,9 +427,6 @@ export async function importData(
   }
 
   // ── ★ 悬空引用统计：blob 不在快照里，引用必然可能落空 ──
-  for (const report of doc.data.reports) {
-    if (report.blobRef && !(await store.hasBlob(report.blobRef))) danglingBlobRefs += 1
-  }
   for (const audit of doc.data.audits) {
     for (const ref of audit.inputBlobRefs) {
       if (!(await store.hasBlob(ref))) danglingBlobRefs += 1

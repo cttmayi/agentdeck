@@ -26,15 +26,17 @@ import { ulid } from '@agentdeck/protocol'
  *
  *   - `POST /api/runs`（直接提交 run）。它会接受一个任意 `workDir`，
  *     然后在那里启动一个会读写文件的子进程。那等于把"在你的机器上按我给的
- *     路径执行 agent"变成一次 MCP 调用。要跑东西，请走
- *     `submit_report` → 审核 → 判决 → 有界动作这条路，
- *     或者由人在本机页面上动手。
+ *     路径执行 agent"变成一次 MCP 调用。要跑东西，请由人在本机页面上动手
+ *     （「新建任务」）。
+ *     ⚠️ 2026-11（D125）：这里原来指的路是 `submit_report` → 审核 → 判决 →
+ *     有界动作，那四段现在都不存在了。
  *   - `POST /api/skills`（写 skill 文件）。skill 会被拼进 agent 的上下文，
  *     是提示注入的现成入口。
  *   - 任何会改 agent 配置的操作（`POST /api/agents`）。
  *
- * **暴露的**都是"读 + 受控写入"：看板、审计、判决、成本，
- * 以及"投递一条报告"——后者不执行任何东西，只是把材料放进来走既有流程。
+ * **暴露的**都是"读 + 受控写入"：看板、审计、成本。
+ * ⚠️ 2026-11（D125）：这里原来还有"投递一条报告"（`submit_report`）——它不执行
+ * 任何东西，只是把材料放进来走既有流程；那条流程已经不存在，工具一并删了。
  */
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05'
@@ -137,20 +139,6 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
-    name: 'list_run_verdicts',
-    description: '读取某次 run 产生的判决。只读。判决里有结论、理由码、证据与建议动作。',
-    inputSchema: {
-      type: 'object',
-      properties: { runId: { type: 'string' } },
-      required: ['runId'],
-      additionalProperties: false,
-    },
-    async run(args, ctx) {
-      const id = encodeURIComponent(str(args['runId'], 'runId'))
-      return daemonApi(ctx, `/api/runs/${id}/verdicts`)
-    },
-  },
-  {
     name: 'list_run_audits',
     description: '读取某次 run 的审计链。只读。argv 已脱敏。',
     inputSchema: {
@@ -191,49 +179,15 @@ export const TOOLS: McpTool[] = [
       return daemonApi(ctx, '/api/costs')
     },
   },
-  {
-    name: 'submit_report',
-    description:
-      '投递一批外部报告（issue 报告 / CI 结果等）。' +
-      '这会走既有的审核流程：按 kind 路由给合适的审核 agent，产出结构化判决，' +
-      '再由判决触发有界动作。**它本身不执行任何命令。**',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        source: { type: 'string', description: '报告来源标识，如 github / ci / 手工' },
-        items: {
-          type: 'array',
-          description: '报告条目',
-          items: {
-            type: 'object',
-            properties: {
-              externalId: { type: 'string', description: '来源侧的稳定 id，用于去重' },
-              kind: { type: 'string', description: '类型键，决定路由给哪个审核者' },
-              title: { type: 'string' },
-              body: { type: 'string' },
-            },
-            required: ['externalId', 'kind', 'title'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['source', 'items'],
-      additionalProperties: false,
-    },
-    async run(args, ctx) {
-      const source = str(args['source'], 'source')
-      const items = args['items']
-      if (!Array.isArray(items) || items.length === 0) {
-        throw new Error('items 必须是非空数组')
-      }
-      // 去重键由**来源 + 外部 id** 组成，在 daemon 侧计算并保证唯一。
-      // 这里只负责把材料原样递过去。
-      return daemonApi(ctx, '/api/reports', {
-        method: 'POST',
-        body: JSON.stringify({ source, items }),
-      })
-    },
-  },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `submit_report` 工具——对外那一侧的报告投递口
+   *   （`POST /api/reports`，描述里写着"会走既有的审核流程：按 kind 路由给合适的
+   *   审核 agent，产出结构化判决，再由判决触发有界动作"）。
+   *
+   *   那句话里的三段——路由、判决、动作——都已经退场（D123/D125），报告摄取
+   *   整条链也一起删掉了 ⇒ 留着这个工具只会让调用方拿到 404，而工具描述还在
+   *   承诺一套不存在的行为。
+   */
 ]
 
 export function findTool(name: string): McpTool | undefined {

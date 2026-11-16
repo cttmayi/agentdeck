@@ -33,8 +33,7 @@ export type MemoryEntryId = z.infer<typeof MemoryEntryId>
  * 与执行路径都不同（skill 进上下文，工具进执行器），共用一个 id 类型会让
  * "把工具 id 传进要 skill id 的地方"变成编译期合法——那正是 brand 要挡的。
  */
-export const ToolId = z.string().brand<'ToolId'>()
-export type ToolId = z.infer<typeof ToolId>
+// ⚠️ 2026-11（D123）：`ToolId` 随工具包退场删掉（`Tool` 实体不存在了）。
 
 export const IssueId = z.string().brand<'IssueId'>()
 export type IssueId = z.infer<typeof IssueId>
@@ -45,8 +44,10 @@ export type CommentId = z.infer<typeof CommentId>
 export const RunId = z.string().brand<'RunId'>()
 export type RunId = z.infer<typeof RunId>
 
-export const ReportId = z.string().brand<'ReportId'>()
-export type ReportId = z.infer<typeof ReportId>
+/*
+ * ⚠️ 2026-11（D125）：`ReportId` 随报告摄取链退场删掉（见 `entities.ts` 那段
+ *   "报告摄取整条链退场"的说明）。
+ */
 
 export const VerdictId = z.string().brand<'VerdictId'>()
 export type VerdictId = z.infer<typeof VerdictId>
@@ -74,8 +75,10 @@ export type RuntimeId = z.infer<typeof RuntimeId>
  * 与 `AgentId` 分开：组是"一队 agent 的编队"，是提交任务的单位；把组 id 传进
  * 要 agent id 的地方是编译期错误，那正是 brand 要挡的。
  */
-export const AgentGroupId = z.string().brand<'AgentGroupId'>()
-export type AgentGroupId = z.infer<typeof AgentGroupId>
+/*
+ * ⚠️ 2026-11（S3）：`AgentGroupId` 随智能体组退场删除。老记录里的那个字符串本身
+ *   还在（`Run.groupId` / `Agent.ownerGroupId` 的旧键），但没有类型去认它了。
+ */
 
 export const AccountId = z.string().brand<'AccountId'>()
 export type AccountId = z.infer<typeof AccountId>

@@ -62,46 +62,27 @@ async function get(url: string, id: string) {
 describe('★ 删 agent：成功 / 两道闸 / 404', () => {
   test('删成功：详情变 404、全局列表里消失', async () => {
     await withDaemon(async (url) => {
-      const made = (await create(url, { name: '临时工', role: 'executor' })).body as { id: string }
+      const made = (await create(url, { name: '临时工' })).body as { id: string }
       assert.equal((await del(url, made.id)).status, 200)
       assert.equal((await get(url, made.id)).status, 404)
       const list = (await fetch(`${url}/api/agents`).then((r) => r.json())) as {
-        agents: Array<{ id: string }>
+        agents: Array<{ id: string; builtin?: boolean }>
       }
       assert.ok(!list.agents.some((a) => a.id === made.id))
     })
   })
 
-  test('还是智能体组成员 → 400，说清先移除', async () => {
-    await withDaemon(async (url) => {
-      const exec = (await create(url, { name: '组执行', role: 'executor' })).body as { id: string }
-      const rev = (await create(url, { name: '组审核', role: 'reviewer' })).body as { id: string }
-      const g = await fetch(`${url}/api/agent-groups`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '一组', members: [exec.id, rev.id] }),
-      })
-      assert.equal(g.status, 201, `建组失败：${await g.text()}`)
-      const r = await del(url, exec.id)
-      assert.equal(r.status, 400)
-      assert.match(String(r.body['error']), /成员/)
-      // 组没被偷偷改：成员原样
-      //
-      // ⚠️ 不能取 `groups[0]`：首启会**播种一个默认组**（成员是播种的那一对），
-      //    所以列表里不止这一条。按名字找自己建的那个（原来写 `groups[0]` 是因为
-      //    那时还没有播种组）。
-      const group = await fetch(`${url}/api/agent-groups`).then((r) => r.json())
-      const found = (group as { groups: Array<{ name: string; members: string[] }> }).groups.find(
-        (x) => x.name === '一组',
-      )!
-      assert.ok(found, '自己建的那个组还在')
-      assert.deepEqual(found.members, [exec.id, rev.id])
-    })
-  })
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是「还是智能体组成员 ⇒ 400，说清先移除」。组退场 ⇒
+   *   没有"组成员"这回事，用例删。
+   *
+   *   ⚠️ 那条规矩本身仍然成立：**删除前先查引用，并点名是谁在引用**——不查的话
+   *   症状是"删完发现某处少了一个人"，而那一刻已经是很久以后。
+   */
 
-  test('是「新建任务的默认智能体」→ 400，说清先换默认', async () => {
+test('是「新建任务的默认智能体」→ 400，说清先换默认', async () => {
     await withDaemon(async (url) => {
-      const a = (await create(url, { name: '默认的', role: 'executor' })).body as { id: string }
+      const a = (await create(url, { name: '默认的' })).body as { id: string }
       const set = await fetch(`${url}/api/agents/default`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },

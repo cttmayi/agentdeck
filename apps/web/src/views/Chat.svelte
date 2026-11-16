@@ -320,7 +320,12 @@
   //   沉淀的整个过程在那里进行，聊天页只留入口。切走再回来 / 刷新都还在。
   $: crystallizeRunId = [...activeTurns].reverse().find((turn) => turn.runId && !turn.error)?.runId ?? ''
   $: crystallizeEnabled = activeConversation !== null && activeTurns.some((turn) => turn.runId && !isTurnRunning(turn))
-  $: executors = $agents.filter((agent) => agent.role === 'executor')
+  /*
+   * ⚠️ 2026-11（S4，D127）：判据从 `role === 'executor'` 换成"不是平台内置岗位"。
+   *   用户建的 agent 一律能聊天；内置的只有「智能体生成者」放行（那在
+   *   `executorChoices` 里判，见下）。
+   */
+  $: executors = $agents.filter((agent) => agent.builtinKind === undefined)
   /**
    * 下拉的全部选项：执行者 + **每一条装着的 skill**。
    *

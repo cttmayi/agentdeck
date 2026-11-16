@@ -88,25 +88,14 @@ describe('「最后结果」显示哪段文字（策略）', () => {
   })
 })
 
-describe('围栏标记不许与协议分叉', () => {
-  /**
-   * ★ 与 `chat.test.ts` 里"终态那一列读协议源码"同一个做法。
-   *
-   * 前端不 import protocol（`api.ts` 顶部写着理由），所以这对标记在这边是抄的。
-   * 抄的东西会腐烂——协议改了名，这边不报错，只是**判决块再也剥不掉**（界面
-   * 又回到"显示 `<<<ALPHA_VERDICT>>>`"的样子，而且没有任何报错）。这条测试读
-   * **协议源码**把它们对上，腐烂当场变红。
-   */
-  test('这两个标记与 `packages/protocol/src/verdict.ts` 里的逐字相同', () => {
-    const path = fileURLToPath(
-      new URL('../../../../packages/protocol/src/verdict.ts', import.meta.url),
-    )
-    const source = readFileSync(path, 'utf8')
-    const begin = /VERDICT_FENCE_BEGIN = '([^']+)'/.exec(source)?.[1]
-    const end = /VERDICT_FENCE_END = '([^']+)'/.exec(source)?.[1]
-    assert.ok(begin, `没能从 ${path} 里抠出 BEGIN 标记，检查那条正则`)
-    assert.ok(end, `没能从 ${path} 里抠出 END 标记，检查那条正则`)
-    assert.equal(VERDICT_FENCE_BEGIN, begin)
-    assert.equal(VERDICT_FENCE_END, end)
-  })
-})
+/*
+ * ⚠️ 2026-11（D125）：这里原来是「围栏标记不许与协议分叉」——前端不 import protocol，
+ *   所以那对标记是抄的一份，这条测试读**协议源码**把它们对上，协议改名时当场变红。
+ *
+ *   **判决围栏不再由平台产生**（`packages/protocol/src/verdict.ts` 整份删了）⇒
+ *   没有"对齐"这回事，测试删。
+ *
+ *   ⚠️ 而 `stripVerdictBlocks` 自己**留着**：老记录的正文里还留着那对标记，界面上
+ *   人看的地方不该摊出机器契约。它上面的用例仍在守"剥干净、不留空行"。
+ */
+

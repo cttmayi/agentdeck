@@ -250,41 +250,14 @@ export interface WorkflowRun {
   updatedAt: number
 }
 
-/**
- * 角色（D28）。
+/*
+ * ⚠️ 2026-11（S4，D127）：这里原来是 `AgentRole`（executor / reviewer / drafter /
+ *   skill-reviewer / memory-tidy / agent-maker）。**角色退场** ⇒ 用户建的 agent 没有
+ *   角色；平台自己那几个变成 `Agent.builtinKind`（见下面 `Agent` 的说明）。
  *
- * ★ 2026-10 加 `'drafter'`：平台内置的**起草者**（沉淀那条链的执行者）。
- *   界面上它出现在「智能体」页可查看与编辑，但**不出现在任何"选执行者/选审核者"
- *   的地方**——它绝不参与业务闭环。⚠️ 各处过滤用的是 `role === 'executor'` /
- *   `'reviewer'` 这种**等值**判断，所以新成员天然被排除；谁把它改成 `!==`，
- *   起草者就会漏进选择器。
+ *   ⚠️ 当年那条"过滤用**等值**判断"的纪律仍然有效：现在筛的是 `builtin !== true`
+ *   （`executorCandidates` 那一处）。
  */
-export type AgentRole =
-  | 'executor'
-  | 'reviewer'
-  /** 平台内置的起草者（沉淀那条链）。 */
-  | 'drafter'
-  /**
-   * 平台内置的 **skill 审核者**（审起草出来的 skill，§10）。
-   *
-   * ⚠️ 它不是业务审核者 `'reviewer'`：业务报告的路由按 `role === 'reviewer'` 挑人，
-   * 给它那个角色它就会去审业务报告。两者**不能合并**。
-   */
-  | 'skill-reviewer'
-  /**
-   * 平台内置的**记忆整理者**（分批第 244 批，「整理成记忆」那条分析 run）。
-   *
-   * 与起草者同一条纪律：**不参与业务选择、不能聊天**（各处挑人用的是 `=== 'executor'`
-   * 这类等值判断）。它只在「智能体」页可见/可改，方便使用者查看它的 prompt。
-   */
-  | 'memory-tidy'
-  /**
-   * 平台内置的**智能体生成者**（2026-11 设计定稿）：在聊天里问岗位、规则由它描述、
-   * 产出岗位卡（agent-draft/agent-draft.md）。与 memory-tidy 同一条纪律（**不参与业务选择**），
-   * 唯一的不同是**能聊天**——聊天放行的判据是 `=== 'executor' || === 'agent-maker'`
-   * （只有那两处，由测试钉住）。
-   */
-  | 'agent-maker'
 
 export interface Agent {
   id: string
@@ -301,8 +274,10 @@ export interface Agent {
    *   别把它显示成一个叫 default 的 CLI。
    */
   runtimeKey: string
-  /** 干活的还是审的（D28）。 */
-  role: AgentRole
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `role: AgentRole`（"干活的还是审的"）。
+   *   **角色退场** ⇒ 用户建的 agent 没有角色。
+   */
   /**
    * 平台**内置**的 agent（2026-10：起草者 + skill 审核者，**两条**）。
    *
@@ -310,12 +285,15 @@ export interface Agent {
    * 默认值」**。接口层同样拒绝（`builtin_agent_not_deletable` /
    * `builtin_agent_field_locked`）——界面是第一道，不是唯一一道。
    *
-   * ⚠️ 分批第 70 批：这个标记**只说"是平台的"，不说"是哪一条"**。要挑出起草者，
-   *    判据是 `builtin && role === 'drafter'`（审核者也是 `builtin`，而列表顺序是
-   *    写入顺序、不保证起草者在前）。「恢复成默认值」也按**角色**取默认值，
-   *    否则对审核者按一下会把它变成第二个起草者（角色还是 `skill-reviewer`）。
+   * ⚠️ 分批第 70 批：这个标记**只说"是平台的"，不说"是哪一条"**——要挑出起草者，
+   *    判据是 `builtin && builtinKind === 'drafter'`（内置有好几个，而列表顺序是
+   *    写入顺序、不保证起草者在前）。「恢复成默认值」也按**岗位**取默认值。
+   *
+   * ⚠️ 2026-11（S4，D127）：那个"是哪一条"的判据原来是 `role`，现在是 `builtinKind`。
    */
   builtin?: boolean
+  /** **平台内置岗位**（只有内置的有；用户建的 agent 没有）。见上面那条说明。 */
+  builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
   /**
    * ★ 分批第 245 批：记忆功能的总开关。`false` = 关（不带入第一句话、不能手写、不能整理）。
    *
@@ -354,16 +332,12 @@ export interface Agent {
    *    撤掉了，字段与服务端一起删——见 `packages/protocol/src/entities.ts` 里
    *    `Agent` 上那段说明。
    */
-  /**
-   * ⚠️ 2026-10：这里原来有三个字段——`allowedActions`（"这个审核者判完之后允许触发
-   *    哪些动作"）、它的固定参数 `actionParams`、以及调试勾选 `debugActions`。
-   *    三个一起撤掉了：**动作属于智能体组**（`AgentGroup` 上那三个同名字段，
-   *    组配置页 ③ 行动），不属于某个人。
-   *
-   *    为什么必须撤（而不是"以组为准、人也留一份"）：同一个审核者在不同组里本来
-   *    就该配不同的权限，挂在人身上只能共用一份；而"以组为准"这种双重来源的后果
-   *    是使用者改了其中一份、却看到另一份在生效——这类"哪份说了算"的问题只能靠
-   *    注释记住，那正是当初把这份权限从审核标准里搬出来时想避免的事。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有一段说明，讲 agent 上那三个动作字段
+   *   （`allowedActions` / `actionParams` / `debugActions`）为什么先搬到组上、
+   *   又为什么不能两头各留一份。
+   *   动作能力整个退场之后，agent 与组上都不再有这三个字段，说明随之删
+   *   （留着它会让读的人以为"组上还有一份动作配置"）。
    */
   /**
    * 这个审核者按什么判（D37）。`null` = 没有标准（那它拿不到审核任务）。
@@ -414,59 +388,13 @@ export interface MemoryEntryView {
   createdAt: number
 }
 
-export interface AgentGroup {
-  id: string
-  workspaceId: string
-  name: string
-  /**
-   * 组的模式（第二轮）：现在只有 `'workflow'`（工作流模式 = 「执行 → 审核 →
-   * 行动」顺序链）。⚠️ 省略即默认工作流（老组没有这个键）；mode 只在创建时写。
-   */
-  mode?: 'workflow'
-  /** 组员 id（这一版恰好 1 执行 + 1 审核）。 */
-  members: string[]
-  /** 组默认的行动权限（省略时落进任务；任务级仍可覆盖）。 */
-  allowedActions: string[]
-  /** 组默认的固定参数（`动作名 → 参数名 → 值`）。 */
-  actionParams: Record<string, Record<string, unknown>>
-  /** 组默认的调试动作（`allowedActions` 的子集）。 */
-  debugActions: string[]
-  /** 组默认的返工次数：0–100，`null` = 无限返工（任务级仍可覆盖）。 */
-  maxReworks: number | null
-  /** false = 停用：新建任务时选不了它。 */
-  enabled: boolean
-  createdAt: number
-  updatedAt: number
-}
-
-/**
- * `GET /api/agent-groups`：组的列表（第二轮起带成员）。
+/*
+ * ⚠️ 2026-11（S3）：这里原来是 `AgentGroup` / `GroupsPayload` / `GroupCreateAgentDraft`
+ *   三个类型（智能体组，以及"建组时顺手建私有成员"的草稿）。组退场 ⇒ 一起删。
  *
- * `members` 是**全部组引用的成员**（含私有，去重后一张表）——界面按
- * `group.members`（id 列表）从这张表 join 名字/角色。私有成员不在全局
- * `GET /api/agents` 里，所以组自己的数据必须带它们，否则私有成员"查无此人"。
+ *   ⚠️ 其中一条做法留着：**列表接口要把成员对象一并带上**（`members` 那张表）——
+ *   组引用的成员里有"不在全局 agent 列表里"的那些，只给 id 的话界面就"查无此人"。
  */
-export interface GroupsPayload {
-  groups: AgentGroup[]
-  members: Agent[]
-}
-
-/**
- * 私有成员的草稿（第二轮）：建组 / 改组请求里的 `createAgents` 数组元素。
- *
- * 组是私有智能体的**创建入口**——表单里"新建私有"攒下的这一份，随组请求一起
- * 交给 daemon（它建好 agent、`ownerGroupId = 组 id`、把新 id 并进 `members`）。
- * 表单收敛（使用者拍板）：名字 + 指令（执行者）/ 审核标准（审核者）+ runtime +
- * 可选技能。
- */
-export interface GroupCreateAgentDraft {
-  name: string
-  role: 'executor' | 'reviewer'
-  instructions: string
-  reviewStandard: ReviewStandard | null
-  runtimeKey: string
-  skillIds: string[]
-}
 
 /**
  * 审核标准（D37）：**内联在审核者身上**的一条判断依据。
@@ -492,10 +420,18 @@ export interface ReviewStandard {
 
 /** 第一句话模版的两个角色（D32）。 */
 /**
- * 三条链路各有一套模版：执行 / 审核 / **聊天**（2026-09 加的第三份）。
+ * 三条链路各有一套模版：执行 / **聊天** / 编排。
  * 聊天那份是它自己的 ① 框架——任务那份含 run/对象头与判决契约，灌进聊天是错的。
+ *
+ * ⚠️ 2026-11（S6，D125）：这里原来还有 `'review'`（审核那一份）。审核 run 退场之后
+ *    daemon 侧的 `FirstSentenceKind` 只剩三个，**这一份却还留着 `'review'`** ⇒
+ *    设置页因此还画着一个「审核」页签：点得开、框能写、**保存却什么都不发生**
+ *    （服务端只按 `ALL_KINDS` 遍历）。那正是本仓库第一号缺陷"接口接受了、行为上
+ *    不存在"——所以类型跟着 daemon 一起收窄，页签也随之删掉。
+ *    workspace 上 `reviewTemplate` 那三个**老键**仍然留在协议里（老数据要读得出来），
+ *    只是没有界面再去写它们。
  */
-export type FirstSentenceKind = 'execute' | 'review' | 'chat' | 'workflow'
+export type FirstSentenceKind = 'execute' | 'chat' | 'workflow'
 
 /**
  * 三块各自的模版框（2026-10 三框改造）：① 框架 / ② 身份 / ③ 任务。
@@ -597,13 +533,11 @@ export interface Skill {
   body: string
   /** 支持文件：相对路径 → 内容。缺失表示只有 SKILL.md。 */
   files?: Record<string, string>
-  /**
-   * ⚠️ **这里原来有一个 `allowedActions`，已经搬走了**（D40 收口，2026-10 起
-   *    权威是 `AgentGroup.allowedActions`）。
-   *
-   * "判完之后允许触发什么"不是一份资料包的属性——挂在 skill 上等于让"给执行者
-   * 参考的东西"顺手决定了谁能改状态。老记录里这个键可能还在（整条记录以 JSON 存），
-   * 界面按"没有"处理即可。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来还有一个 `allowedActions` 的说明——它先挂在 skill
+   *   上（"判完之后允许触发什么"不是资料包的属性），后来搬到组，现在**整个没有**了：
+   *   动作能力退场，任何一处都不再声明动作。
+   *   老记录里那个键可能还在（整条记录以 JSON 存），界面按"没有"处理即可。
    */
   source: 'local' | 'remote' | 'mine'
   sourceRef: string | null
@@ -667,102 +601,10 @@ export interface LocalSkillDirsState {
   dirs: LocalSkillScanDir[]
 }
 
-/**
- * 工具包（D40）。
- *
- * ══════════════════════════════════════════════════════════════════
- * 形状照 `packages/protocol/src/tools.ts` 抄，但**不 import 它**
- * ══════════════════════════════════════════════════════════════════
- *
- * 网页这边一律不 import protocol（它是给服务端与测试用的：zod、Node 侧的
- * import 后缀、以及"改一处就要重编前端"的耦合）。所以这里只声明**界面真的
- * 用到的**字段——与 `Skill` / `Agent` 那几份同一个做法。
- *
- * ⚠️ 契约值（`slug`、`<slug>.<name>`、`from: 'workdir'`、`dryRun: 'unsupported'`）
- *    在界面上**原样显示、不翻译**：它们是机器值，也是判决里写的那串东西。
- */
-export type BoundFrom =
-  | 'literal'
-  | 'subject.issueId'
-  | 'subject.runId'
-  | 'workspace.id'
-  | 'workdir'
-
-/** 绑定参数：**模型看不到也填不了**，值由平台按事实填。 */
-export interface BoundParamSpec {
-  from: BoundFrom
-  /** 只有 `from: 'literal'` 时有值。 */
-  value?: string | number | boolean
-}
-
-/**
- * 开放参数：模型填的那部分。**每一项都有界**——协议里没有无界的 `string`。
- *
- * 这里写成可辨识联合而不是"一个 type + 一堆可选字段"：界面上要按 type 显示
- * "字符串，最长 2000" / "整数 1–10" / "枚举（a / b）"，用可选字段的话每个
- * 使用点都得自己收窄一遍。
- */
-export type OpenParamSpec =
-  | { type: 'string'; max: number; required: boolean }
-  | { type: 'integer'; min: number; max: number; required: boolean }
-  | { type: 'boolean'; required: boolean }
-  | { type: 'enum'; values: string[]; required: boolean }
-
-/** 组内一个动作。 */
-export interface ToolActionSpec {
-  /** 组内唯一；完整动作名是 `<包 slug>.<name>`。 */
-  name: string
-  summary: string
-  /** 相对包根的入口；不给就用包级 `entry`。 */
-  entry?: string
-  /** ★ `false` = 不可回滚，界面必须显式标出来。 */
-  reversible: boolean
-  /** ★ `unsupported` = 不支持预演 ⇒ 没有"自动执行"资格，界面同样要标出来。 */
-  dryRun: 'supported' | 'unsupported'
-  timeoutMs?: number
-  params?: {
-    bound?: Record<string, BoundParamSpec>
-    open?: Record<string, OpenParamSpec>
-  }
-}
-
-/** 机器读的清单（`tool.json` 的形状）。 */
-export interface ToolManifest {
-  schema: string
-  slug: string
-  name: string
-  version: string | null
-  description: string
-  runtime: string
-  entry: string
-  actions: ToolActionSpec[]
-}
-
-/** 一个已安装的工具包 —— **一个目录 = 一个包 = 一个组**。 */
-export interface Tool {
-  id: string
-  /** 与 `manifest.slug` 同一个值；它同时是组的名字与动作的命名空间。 */
-  slug: string
-  name: string
-  description: string
-  version: string | null
-  manifest: ToolManifest
-  /** 相对路径 → 文本内容（含入口脚本）。 */
-  files: Record<string, string>
-  /** `TOOL.md` 的正文；没有就是空串。 */
-  docs: string
-  source: 'local' | 'remote'
-  sourceRef: string | null
-  createdAt: number
-  updatedAt: number
-}
-
-/**
- * `GET /api/tools` 的那一行：实体 + **挂给了哪些 agent**。
- *
- * ⚠️ 这里原来是一个 `ToolWithMounts`（`Tool` + 接口算好的 `mountedBy`）。挂载能力
- *   撤掉之后它没有任何额外的字段，所以**类型删掉了**——多一层空壳只会让下一个
- *   读代码的人以为"工具还有挂载关系"这回事。
+/*
+ * ⚠️ 2026-11（D123）：这里原来有工具包那一整套界面类型（`Tool` / `ToolManifest` /
+ *   `ToolActionSpec` / `BoundParamSpec` / `OpenParamSpec` / `BoundFrom`）。工具包与
+ *   动作能力一起退场——没有页面、没有请求、没有任何读者，整段删。
  */
 
 /**
@@ -827,68 +669,24 @@ export interface RunSummary {
   finishedAt: number | null
   failureReason: string | null
   chainDepth: number
-  /**
-   * 这条 run 来自哪个**智能体组**（`null` = 没选组 / 组已被删；缺这个键 = 更早的
-   * daemon，也按"没选组"处理）。
-   *
-   * ★ 页面用它说清"审核者是从哪来的"：组的审核者与"这一次单独指定"在
-   *   `reviewer` 上长得一样（都有 `agentId`），但后续完全不同——一个随组走，
-   *   一个只对那一条任务有效。
-   *
-   * ⚠️ 写成**可选**而不是 `string | null`：这一版 daemon 一定会回这个键（没组时
-   *    是 `null`），但**更早的 daemon 没有它**，而这一页要跟不同版本打交道。
-   *    对"来自哪个组"这件事，缺键与 `null` **后果相同**（都不是从组来的）——
-   *    与 `Run.reviewerAgentId` 那种"缺键 ≠ null"的三态不同，所以这里可以合并。
+    /*
+   * ⚠️ 2026-11（S3）：这里原来是 `groupId?: string | null`——"这条 run 来自哪个
+   *   智能体组"（组被删/缺键都按"没选组"处理）。智能体组退场 ⇒ 删。
    */
-  groupId?: string | null
-  /**
-   * 这条**执行** run 的审核者（`kind !== 'execute'` 时为 `null`）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是两栏——`reviewer`（"这一次谁审"的两态对象）与
+   *   `verdict`（这条 run 最新那份判决：结论 / 状态 / 升级原因 / 谁做的）。
+   *   审核 run 与判决一起退场 ⇒ 两栏都删（daemon 也不再发它们）。
    *
-   * ★ 为什么不是 `string | null`：页面要如实显示"这条任务没人审"，而 `null` 这个值
-   *   本身读不出这层意思（它长得像"没填"）。所以给一个带 `mode` 的小对象，让
-   *   "没人审"是**说得出口的状态**。
-   *
-   *   `assigned` ⇒ 有审核者（**可能来自组**，也可能是这一次指定的——要区分看
-   *                `Run.groupId`）；
-   *   `none`     ⇒ 这条任务没有审核者。
-   *
-   * ⚠️ 2026-10：原来是**三态**（`follow` / `none` / `override`）。`follow` 那一态
-   *    （"没点名 ⇒ 跟随执行者身上那条长期配置"）随 `Agent.reviewerAgentId` 一起
-   *    撤销了——没有可跟随的东西，也就没有"跟随着谁"要显示。daemon 那边的投影
-   *    同一时刻收成两态（见 `apps/daemon/src/server.ts` 的 `reviewer:` 那一段）。
+   *   ⚠️ 其中一个设计值得留着：**"没人审"要是一个说得出口的状态**，而不是
+   *   `null`（`null` 长得像"没填"）。同类问题（"这条任务为什么没往下走"）
+   *   以后还会遇到。
    */
-  reviewer: { mode: 'none' } | { mode: 'assigned'; agentId: string } | null
-  /**
-   * 审核 run 的判决（只对 `kind === 'review'` 有值；还没判时为 `null`）。
-   *
-   * ★ 阶段推导要用它：`needs_human` 的意思是**卡在人这儿**，把它显示成
-   *   「已审查」等于把待办说成做完了。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是 `action: ActionView | null`——"这条判决要求做的
+   *   那个动作现在怎么样了"（阶段推导要用它：判决通过 ≠ 事情做完了）。
+   *   动作能力退场 ⇒ daemon 不再发这一栏，类型随之删。
    */
-  verdict: {
-    status: string
-    conclusion: string
-    escalateReason: string | null
-    /**
-     * ★ 谁做的这条判决（D46）：`'human'`，或者**缺字段 / `'agent'`**（模型做的）。
-     *
-     *   阶段推导要用它——人工判「不通过」与审核者判「不通过」要给出**不同的
-     *   那句话**，见 `lib/pipeline.ts` 里 `byHuman` 那一段。
-     *
-     * ⚠️ 这里**允许 `undefined`**，不是图省事：页面与 daemon 是两份产物，
-     *    "重建前端 → 刷新页面"不带重启 daemon 是日常做法，所以这个页面**真的
-     *    会**遇到不发这个字段的旧 daemon。缺字段按 `'agent'` 读——D46 之前的
-     *    判决本来就全是模型做的，这个默认值是**对的**，不是将就。
-     */
-    source?: 'agent' | 'human'
-  } | null
-  /**
-   * 这条判决**要求做的那个动作**的结果（没有动作 / 不是审核 run ⇒ `null`）。
-   *
-   * ★ 阶段推导要用它：判决通过 ≠ 事情做完了。动作还在跑就是「行动中」，
-   *   失败了就是「行动失败」——过去这两种都显示成「已审查」（那是"判决已产出"
-   *   的意思，不是"事情已成"）。
-   */
-  action: ActionView | null
 }
 
 export type RunDetail = RunSummary
@@ -911,71 +709,22 @@ export interface RunMessage {
   at: number
 }
 
-/**
- * 一条**动作记录**在页面上的形状。
+/*
+ * ⚠️ 2026-11（D123）：这里原来是两个类型——
  *
- * ⚠️ 提到具名类型是**必须的**（不是审美）：它原来在 `RunSummary` 里内联写了一份、
- *    在 `StageInfo` 里又抄了一份。往 daemon 那侧加字段（`result` / `params` /
- *    `finishedAt` 就是这么加的）时，抄的那一份**不报错、只是看不到那个字段**——
- *    而"看不到"正好就是使用者报的那条「配了行动但看不见结果」。现在只有一份。
- */
-export interface ActionView {
-  /**
-   * 动作类型（`<包 slug>.<动作名>`，如 `probe-tool.append-note`）——契约值，
-   * 原样显示、不翻译。
-   *
-   * ⚠️ D41 之后**只有这一种形状**：平台的内置动作整组移除了，所以老工作区里
-   *    存着的那几个裸名（`comment.create` 之类）只是历史值——它们会照原样显示，
-   *    但没有任何包认领，界面也查不到 `summary`。
-   */
-  type: string
-  status: string
-  /** 失败原因；成功时为 null。 */
-  error: string | null
-  /**
-   * 脚本回的**结果**：`{ ok, detail, exitCode, durationMs, dryRun }`。
-   *
-   * `detail` 是给人看的一句话——"这个动作到底做了什么 / 为什么没做成"。
-   */
-  result: Record<string, unknown> | null
-  /** **合并后**的参数（bound 平台注入 / open 模型填 / 界面固定值）。 */
-  params: Record<string, unknown>
-  finishedAt: number | null
-}
-
-/**
- * 判决**触发的**动作：在 `ActionView` 之上带一个 `verdictId`。
+ *   `ActionView`（一条动作记录：`type` / `status` / `error` / `result` / `params` /
+ *   `finishedAt`）与 `VerdictActionView`（在它之上带 `verdictId`，界面靠它把动作
+ *   挂回产生它的那张判决卡）。
  *
- * 界面靠它把动作挂回**产生它的那张判决卡**——"通过"与"通过之后做了什么"
- * 是同一件事的两半，分两处显示会让"通过但什么也没发生"看起来很正常。
+ * 动作能力退场 ⇒ 判决不再触发动作，这两个类型没有数据可描述，删掉。
  */
-export interface VerdictActionView extends ActionView {
-  id: string
-  verdictId: string
-}
 
-export interface VerdictView {
-  id: string
-  status: string
-  conclusion: string
-  reasonCode: string
-  confidence: number
-  findings: Array<{ severity: string; summary: string; evidence?: string | null }>
-  action: { type: string; params: Record<string, unknown> } | null
-  escalateReason: string | null
-  invalidResolution: string | null
-  /**
-   * ★ 这条判决是谁做的（D46）。**缺字段 ≡ `'agent'`**——D46 之前的判决全部是
-   *   模型做的，所以老数据不用迁移，这里也必须允许 `undefined`。
-   *
-   * 界面靠它做两件事：判决卡上标出「人工」，以及把"人工裁决过"这件事
-   * 说清楚（否则同一张卡上两条结论，读的人分不清哪条是模型哪条是人）。
-   */
-  source?: 'agent' | 'human'
-  /** 人工裁决的理由原文（`source === 'human'` 时有值）。 */
-  humanReason?: string | null
-  createdAt: number
-}
+/*
+ * ⚠️ 2026-11（D125）：这里原来是 `VerdictView`——一条判决的界面形态（结论 /
+ *   理由码 / 置信度 / 发现 / 动作 / 升级原因 / 谁做的 / 人工理由）。
+ *
+ *   判决退场（`GET /api/runs/:id/verdicts` 也一起删）⇒ 类型删。
+ */
 
 export interface InboxItem {
   id: string
@@ -1068,7 +817,13 @@ export interface WorkDirListing {
 // 定时任务（2026-11，使用者立项）
 // ─────────────────────────────────────────────────────────────
 
-export type ScheduleExecutorType = 'agent' | 'group'
+/*
+ * ⚠️ 2026-11（S3）：这里原来是 `'agent' | 'group'`。智能体组退场 ⇒ 定时任务的
+ *   执行者只剩一种：一个具体的 agent。字段名 `executorType` **保留**（老记录里
+ *   还写着 `'group'`，它要能读出来——读不懂的会被当成"找不到那个执行者"并在
+ *   触发时记一条 failed 说明要改选）。
+ */
+export type ScheduleExecutorType = 'agent'
 
 export interface ScheduleView {
   id: string

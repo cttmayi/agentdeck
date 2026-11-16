@@ -24,8 +24,10 @@ export const newtaskText = {
 
   // ── 交给谁 ──
   'newtask.pickTitle': { zh: '交给谁', en: 'Assign to' },
-  'newtask.sourceAgent': { zh: '智能体', en: 'Agent' },
-  'newtask.sourceGroup': { zh: '智能体组', en: 'Agent group' },
+  /*
+   * ⚠️ 2026-11（S3）：`newtask.sourceAgent` / `sourceGroup`（"智能体 / 智能体组"
+   *   互斥切换的两个按钮）随智能体组退场删——只剩"交给哪个智能体"。
+   */
   'newtask.agentLabel': { zh: '交给哪个智能体', en: 'Which agent gets it' },
   'newtask.submitNotReady': {
     zh: '先写要做什么、并选好交给谁',
@@ -42,68 +44,33 @@ export const newtaskText = {
     en: 'The default executor is the one set as default under Agents; otherwise the first in the list.',
   },
 
-  // ── 智能体组 ──
-  'newtask.groupLabel': { zh: '从智能体组', en: 'From an agent group' },
-  'newtask.groupPickPlaceholder': { zh: '（选一个组）', en: '(pick a group)' },
-  'newtask.groupPickRequired': {
-    zh: '先选一个智能体组——执行者、审核者、动作、返工都会按组的默认走。',
-    en: 'Pick an agent group first — its defaults for executor, reviewer, actions and rework will apply.',
-  },
-  'newtask.groupBroken': {
-    zh: '这个组的执行者已经不在了（成员被删 / 组被改坏），换一个组或改用「智能体」。',
-    en: 'This group’s executor is gone (members removed or the group is broken). Pick another group or use a single agent.',
-  },
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是「智能体组」那一档的四条词条（`groupLabel` /
+   *   `groupPickPlaceholder` / `groupPickRequired` / `groupBroken`）。组退场 ⇒ 全删。
+   */
 
   // ── 摘要（选中后显示，只读）──
-  // ★ 2026-10：标题随选中的是谁走——智能体 ⇒「智能体摘要」，智能体组 ⇒
-  //   「智能体组摘要」（使用者点名：原来那句「这次任务会怎么走」改掉，并加粗）。
+  // ⚠️ 2026-11（S3）：`newtask.summaryTitleGroup`（「智能体组摘要」）随组退场删。
   'newtask.summaryTitleAgent': { zh: '智能体摘要', en: 'Agent summary' },
-  'newtask.summaryTitleGroup': { zh: '智能体组摘要', en: 'Group summary' },
   'newtask.summaryExecutor': { zh: '执行者', en: 'Executor' },
-  'newtask.summaryReviewer': { zh: '审核者', en: 'Reviewer' },
-  'newtask.summaryActions': { zh: '允许的动作', en: 'Actions allowed' },
-  'newtask.summaryActionsValue': { zh: '{n} 个', en: '{n}' },
-  'newtask.summaryRework': { zh: '返工', en: 'Rework' },
-  'newtask.summaryReworkZero': {
-    zh: '不返工（判不通过直接交给人）',
-    en: 'No rework (rejection goes straight to a human)',
-  },
-  'newtask.summaryReworkTimes': { zh: '最多 {n} 次', en: 'At most {n}×' },
-  'newtask.summaryReworkUnlimited': {
-    zh: '无限（不通过就一直重做）',
-    en: 'Unlimited (keeps reworking)',
-  },
-  'newtask.summaryReviewerGone': {
-    zh: '组里那个审核者已不存在，这次不会自动审',
-    en: 'The group’s reviewer no longer exists; this task won’t be auto-reviewed',
-  },
-  /**
-   * ★ 选了**单个智能体**那一档的摘要（2026-10 新增，必须画出来）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有「审核者」那一行的四条词条——
+   *   `newtask.summaryReviewer`、`newtask.summaryReviewerGone`（组里那个审核者
+   *   已不存在）、`newtask.summaryReviewerAgentPath`（选单个智能体就不会被审）、
+   *   以及底栏的 `newtask.footReviewer` / `newtask.footReviewerNone`。
+   *   审核 run 退场 ⇒ 新建任务不再有"谁审"这一栏，五条一起删。
    *
-   * ══════════════════════════════════════════════════════════════════
-   * 为什么这句不能省成"不画那一行"
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 2026-10 撤掉 `Agent.reviewerAgentId` 之后，"选一个人"这条路上**没有任何东西**
-   * 能回答"谁审"——组才是审核者的出处。于是选智能体 = 这条任务不会被审。
-   *
-   * 而这件事**必须说出来**：不画那一行的话，使用者看到的摘要与"选组"那条长得
-   * 一样（只是少一行），而少的那一行恰恰意味着"你的产出不会有人看"。等他发现
-   * 的时候，产出已经跑完了——**没有任何地方会报错**。
-   *
-   * ⚠️ 措辞要把下一步给出来（选个组），否则使用者只知道"没有审核者"，不知道
-   *    该动哪里——这条规矩（早说 + 说清下一步）在本项目里一贯如此。
+   *   ⚠️ `summaryReviewerAgentPath` 那条词条的教训留着：**"你的产出不会有人看"
+   *   这类后果必须主动说出来**——不画那一行，使用者看到的界面与"有人审"只差
+   *   一行，而这一行恰恰是最要紧的那一行，且没有任何地方会报错。
    */
-  'newtask.summaryReviewerAgentPath': {
-    zh: '没有——选单个智能体不会自动审核；要审核请在「交给谁」里改选一个智能体组',
-    en: 'None — picking a single agent means no automatic review; to get one, switch “hand to” to an agent group',
-  },
-
+  /*
+   * ⚠️ 2026-11（D124）：这里原来有 `summaryRework` / `Zero` / `Times` / `Unlimited`
+   *   四条——新建任务页摘要里那一行「返工：不返工 / 最多 N 次 / 无限」。
+   *   返工退场 ⇒ 任务不再有返工预算，四条一起删。
+   */
   // ── 底部提交栏 ──
   'newtask.footExecutor': { zh: '交给 {name}', en: 'to {name}' },
-  'newtask.footReviewer': { zh: '由 {name} 审', en: 'reviewed by {name}' },
-  'newtask.footReviewerNone': { zh: '不自动审核', en: 'no auto review' },
-  'newtask.footActions': { zh: '允许 {n} 个动作', en: '{n} actions allowed' },
 
   // ── 高级（工作目录）──
   'newtask.advancedSummary': { zh: '高级选项', en: 'Advanced' },

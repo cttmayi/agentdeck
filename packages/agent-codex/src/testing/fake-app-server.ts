@@ -38,6 +38,15 @@ const SCENARIO = process.env['FAKE_SCENARIO'] ?? 'ok'
  * 不给这个开关，适配器里"两者不一致就告警"那段就没有任何东西量得到。
  */
 const RESUME_CWD = process.env['FAKE_RESUME_CWD'] ?? ''
+/**
+ * `thread/resume` 响应里带一段**含 U+2028 / U+2029 的历史文本**（2026-11 真机 P0 的夹具）。
+ *
+ * 真 codex 的响应里就有这种字符（PDF / 网页 / `textutil` 转出来的正文里全是），
+ * 而我们这边原来用 `readline` 切行——它把 U+2028 当行结束，于是**一帧被撕成上百段**、
+ * 那条请求永远等不到响应（`thread/resume` 60 秒超时，9 条 run 就是这么死的）。
+ * 没有这个开关，`process-tree` 那处修复在协议层就没有东西量得到。
+ */
+const RESUME_HISTORY_TEXT = process.env['FAKE_RESUME_HISTORY_TEXT'] ?? ''
 const echoFile = process.env['FAKE_RPC_ECHO_FILE']
 
 // 版本探测（`probe()` 会调 detectVersion）必须**早返回**：否则剧本的帧会
@@ -404,7 +413,27 @@ rl.on('line', (line) => {
           respondError(id, { code: -32600, message: 'no rollout found for thread id thr_missing' })
         } else {
           respond(id, {
-            thread: { id: params['threadId'] ?? THREAD_ID },
+            thread: {
+              id: params['threadId'] ?? THREAD_ID,
+              ...(RESUME_HISTORY_TEXT === ''
+                ? {}
+                : {
+                    turns: [
+                      {
+                        id: 'turn_old',
+                        items: [
+                          {
+                            id: 'item_old',
+                            type: 'commandExecution',
+                            command: '/bin/zsh -lc sed -n 1,260p guide.pdf',
+                            aggregatedOutput: RESUME_HISTORY_TEXT,
+                            exitCode: 0,
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+            },
             ...(RESUME_CWD === '' ? {} : { cwd: RESUME_CWD }),
           })
         }

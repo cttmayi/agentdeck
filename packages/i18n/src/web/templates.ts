@@ -222,7 +222,8 @@ export const templatesText = {
 
   // ── WorkspaceSettings：页签与底部 ──
   'tpl.settings.tabExecute': { zh: '执行', en: 'Execute' },
-  'tpl.settings.tabReview': { zh: '审核', en: 'Review' },
+  // ⚠️ 2026-11（S6）：'tpl.settings.tabReview' 随设置页那个页签一起删了——
+  //    审核模版没有消费者之后，留着这个词条就是留一个随时会被渲染出来的死文案。
   'tpl.settings.kitUnavailable': {
     zh: '拿不到变量表（daemon 可能没起来）——先重启 daemon 再改模版。',
     en: 'Could not load the variable table (the daemon may not be running) — restart the daemon before editing the template.',

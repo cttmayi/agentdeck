@@ -11,8 +11,6 @@ import {
 } from '@agentdeck/agent-core'
 import {
   ulid,
-  VERDICT_FENCE_BEGIN,
-  VERDICT_FENCE_END,
   type AuditRecord,
   type Issue,
   type RunId,
@@ -65,21 +63,11 @@ class SecondRuntimeBackend implements AgentBackend {
     this.calls += 1
     opts.onCommandLine?.({ argv: this.argv, sandboxDescription: '未启用沙箱（测试）' })
 
-    const text = [
-      '我的审核结论如下：',
-      VERDICT_FENCE_BEGIN,
-      JSON.stringify({
-        schemaVersion: 1,
-        conclusion: 'pass',
-        reasonCode: 'meets_criteria',
-        confidence: 0.9,
-        findings: [],
-        action: null,
-        escalateReason: null,
-      }),
-      VERDICT_FENCE_END,
-      '以上。',
-    ].join('\n')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来回的是一份**带判决围栏的审核结论**（那正是"第二个
+     *   runtime 也能审"的证据）。审核 run 与判决一起退场 ⇒ 一律回执行产出。
+     */
+    const text = '我的答复：这件事做完了，改动在这个工作目录里。'
 
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'text', content: text })
@@ -165,24 +153,53 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
   })
 
   test('★ 审计记的是**它自己的** runtime、真版本、真命令行、真块哈希', async () => {
-    // 走报告摄取那条路：它会按"所有 role=reviewer 的 agent"起审核 run
-    const res = await fetch(`${daemon.url}/api/reports`, {
+    /*
+     * ⚠️ 2026-11（D125）：这条用例原来走**报告摄取**那条路（`POST /api/reports`
+     *   会按"所有 role=reviewer 的 agent"起审核 run），拿那条审核 run 的审计当判据。
+     *   报告摄取与审核 run 都退场了 ⇒ 改成自己提交一条**执行** run。
+     *
+     *   ★ 判据一个字没变：审计里记的 runtime 必须是**它真的用的那个**，版本来自
+     *     探测，命令行是后端如实上报的那条。换成哪条 run 都一样——这正是这条用例的
+     *     价值：它证明"审计不写死 claude"，而不是"审核 run 特别地不写死"。
+     */
+    /*
+     * ⚠️ 2026-11（D125）：审计现在由**执行收口**落（`executor.ts` 的 `#appendAudit`，
+     *   在审核 run 退场时从"审核收口"搬过来的——否则审计链整根消失）。
+     *   所以这里只要提交一条执行 run，等它跑完，就能读到它自己的审计。
+     */
+    const agents = (await api<{ agents: Array<{ id: string; builtin?: boolean }> }>('/api/agents'))
+      .agents
+    const executor = agents.find((a) => a.builtin !== true)
+    assert.ok(executor, '播种的执行者要在')
+
+    const issue = await api<Issue>('/api/issues', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '审计 runtime 用例' }),
+    })
+
+    const dir = await makeTempDir('agnostic-audit')
+    const runId = ulid() as RunId
+    const res = await fetch(`${daemon.url}/api/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        source: 'agnostic-test',
-        items: [{ externalId: 'x1', kind: 'run-output', title: '随便一份报告', body: '正文' }],
+        runId,
+        kind: 'execute',
+        agentRef: { id: executor.id, name: 'generic 执行者（审计用）', instructions: '' },
+        subject: { type: 'issue', id: issue.id },
+        prompt: '随便做点什么',
+        workDir: dir,
+        limits: { maxTurns: null, timeoutMs: null },
       }),
     })
-    assert.equal(res.status, 202)
-    const summary = (await res.json()) as { runIds: string[] }
-    assert.ok(summary.runIds.length > 0, '应当起了审核 run')
+    assert.equal(res.status, 202, `应当受理，实得 ${res.status}`)
 
-    const runId = summary.runIds[0]!
+    // 等这条执行 run 跑完——审计挂在它身上
     await waitFor(async () => {
       const { runs } = await api<{ runs: Array<{ runId: string; status: string }> }>('/api/runs')
       const r = runs.find((x) => x.runId === runId)
-      return r && r.status === 'completed' ? r : null
+      return r && r.status === 'completed' ? true : null
     })
 
     const { audits } = await api<{ audits: AuditRecord[] }>(`/api/runs/${runId}/audits`)
@@ -232,7 +249,6 @@ describe('★ 第二个 runtime：审计、技能投递、日志都不许写死 
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: '第二个 runtime 的执行者',
-          role: 'executor',
           runtimeKey: 'generic',
           skillIds: [skill.id],
         }),
@@ -335,21 +351,11 @@ class CodexServiceBackend implements AgentBackend {
       codexHome === undefined ? join(opts.workDir, '.codex', 'skills') : join(codexHome, 'skills')
     this.skillsDirsAtExecute = await readdir(this.skillsTargetAtExecute).catch(() => [] as string[])
 
-    const text = [
-      '我的审核结论如下：',
-      VERDICT_FENCE_BEGIN,
-      JSON.stringify({
-        schemaVersion: 1,
-        conclusion: 'pass',
-        reasonCode: 'meets_criteria',
-        confidence: 0.9,
-        findings: [],
-        action: null,
-        escalateReason: null,
-      }),
-      VERDICT_FENCE_END,
-      '以上。',
-    ].join('\n')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来回的是一份**带判决围栏的审核结论**。审核 run 与
+     *   判决一起退场 ⇒ 一律回执行产出。
+     */
+    const text = '我的答复：这件事做完了，改动在这个工作目录里。'
 
     const queue = new AsyncQueue<AgentMessage>()
     queue.push({ type: 'text', content: text })
@@ -437,24 +443,42 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
   })
 
   test('★ 审计记的是 codex 自己的 runtime、真版本、真命令行（service 形状也没有例外）', async () => {
-    // 走报告摄取那条路：它会按"所有 role=reviewer 的 agent"起审核 run
-    const res = await fetch(`${daemon.url}/api/reports`, {
+    /*
+     * ⚠️ 2026-11（D125）：与 generic 那条同样改造——审计现在由**执行收口**落
+     *   （`executor.ts` 的 `#appendAudit`），所以只要一条执行 run 就够。
+     */
+    const agents = (await api<{ agents: Array<{ id: string; builtin?: boolean }> }>('/api/agents'))
+      .agents
+    const executor = agents.find((a) => a.builtin !== true)
+    assert.ok(executor, '播种的执行者要在')
+
+    const issue = await api<Issue>('/api/issues', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '审计 runtime 用例（service）' }),
+    })
+
+    const dir = await makeTempDir('service-audit')
+    const runId = ulid() as RunId
+    const res = await fetch(`${daemon.url}/api/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        source: 'service-test',
-        items: [{ externalId: 'x1', kind: 'run-output', title: '一份报告', body: '正文' }],
+        runId,
+        kind: 'execute',
+        agentRef: { id: executor.id, name: 'codex 执行者（审计用）', instructions: '' },
+        subject: { type: 'issue', id: issue.id },
+        prompt: '随便做点什么',
+        workDir: dir,
+        limits: { maxTurns: null, timeoutMs: null },
       }),
     })
-    assert.equal(res.status, 202)
-    const summary = (await res.json()) as { runIds: string[] }
-    assert.ok(summary.runIds.length > 0, '应当起了审核 run')
+    assert.equal(res.status, 202, `应当受理，实得 ${res.status}`)
 
-    const runId = summary.runIds[0]!
     await waitFor(async () => {
       const { runs } = await api<{ runs: Array<{ runId: string; status: string }> }>('/api/runs')
       const r = runs.find((x) => x.runId === runId)
-      return r && r.status === 'completed' ? r : null
+      return r && r.status === 'completed' ? true : null
     })
 
     const { audits } = await api<{ audits: AuditRecord[] }>(`/api/runs/${runId}/audits`)
@@ -497,7 +521,6 @@ describe('★ 第三个 runtime（service 形状）：整条 daemon 跑在 codex
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: 'codex 的执行者',
-          role: 'executor',
           runtimeKey: 'codex',
           skillIds: [skill.id],
         }),

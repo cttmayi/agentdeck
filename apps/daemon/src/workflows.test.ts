@@ -4,6 +4,7 @@ import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   WORKFLOW_TEMPLATES,
+  checkReviewable,
   loadWorkflowRuns,
   loadWorkflows,
   saveWorkflowRuns,
@@ -81,4 +82,28 @@ test('★ 坏 JSON 不炸（读成空数组）', async () => {
   await writeFile(join(TMP, 'workflows.json'), '{坏', 'utf8')
   const loaded = await loadWorkflows(TMP)
   assert.deepEqual(loaded, [])
+})
+
+/* ══════════════════════════════════════════════════════════════════
+ * 审核前置判据（真机缺陷固化：拿失败 run 去审）
+ * ══════════════════════════════════════════════════════════════════ */
+
+test('★★ 被审 run 没跑成 ⇒ 不提交审核（错误带状态与失败原因）', () => {
+  const verdict = checkReviewable(
+    { status: 'failed', failureMessage: 'codex 对话阶段失败：thread/resume 超时' },
+    '有产出也没用——这条 run 自己失败了',
+  )
+  assert.equal(verdict.ok, false)
+  assert.match(verdict.ok === false ? verdict.error : '', /没有正常完成/)
+  assert.match(verdict.ok === false ? verdict.error : '', /thread\/resume/, '失败原因带出来')
+})
+
+test('★★ 跑完但零产出 ⇒ 不提交审核（模型端空响应不能当成"没什么可挑的"）', () => {
+  const blank = checkReviewable({ status: 'completed' }, '  \n\t ')
+  assert.equal(blank.ok, false)
+  assert.match(blank.ok === false ? blank.error : '', /没有产出/)
+})
+
+test('★ 跑完且有产出 ⇒ 放行', () => {
+  assert.equal(checkReviewable({ status: 'completed' }, '文章正文').ok, true)
 })

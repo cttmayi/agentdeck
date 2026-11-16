@@ -33,6 +33,31 @@ export interface Reply {
  * ══════════════════════════════════════════════════════════════════ */
 
 /**
+ * 一次执行的上下文（外层原语 → 内部 Handle）。
+ *
+ * ★ 为什么上下文是**显式参数**、而不是环境里的一个可变字段（2026-11 真机缺陷）：
+ *   原先是 `env.currentStep = step`（谁进来谁设、走的时候还原）。单线程顺序跑没问题，
+ *   但 `parallel` 的分支是**并发**的：两个分支各写一次、各自"还原成自己看到的上一层"，
+ *   于是把兄弟分支的步骤留在了字段里。实测后果是**步骤漏登记**——并行块之后的那一步
+ *   以为自己还在某个并行分支里，于是 run 被挂到别人身上、run 的步骤链少一条、
+ *   运行画面也就少一条（使用者看到的"很多BUG"里就有这一类）。
+ *   现在：谁执行，就把"这一步是哪个步骤"**当参数传下去**（`owner`），
+ *   内部 Handle 不再读共享字段——并发分支各拿各的，不会串。
+ */
+export interface RunContext {
+  /** 这一步所属的步骤（容器传下来；叶子原语不再自己登记步骤）。 */
+  owner?: WorkflowStep
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有两个字段——`review`（把关者位，提交一条
+   *   **审核 run**，subject = 被审执行 run）与 `subjectRunId`（被审的 run）。
+   *
+   *   **审核 run 退场** ⇒ 把关者就是一次**普通执行 run**：它的任务书由引擎写进
+   *   prompt（"请审核下面这份产出…" + 材料），它的答复就是答复。于是"提交一条
+   *   另一种形状的 run"这件事没有对象，两个字段删。
+   */
+}
+
+/**
  * 可执行单元。
  *
  * - 惰性：构造器返回 Handle **不执行**（不登记步骤、不跑 run）——`await handle`
@@ -42,13 +67,23 @@ export interface Reply {
  * - 结果不挂句柄：`await handle` 返回 `Reply`（见 §设计）。
  */
 export interface Handle {
-  /** 执行函数——输入"本次任务"（外层嵌套/重跑时传入），返回 Reply。
-   *  opts.review：把关者位（loop guard）——提交**审核 run**（kind review，
-   *  subject = 被审执行 run——界面按 subject 反查，与 autoChainReview 同规则）。 */
-  run: (
-    input: string,
-    opts?: { review?: boolean; subjectRunId?: string },
-  ) => Reply | Promise<Reply>
+  /** 执行函数——输入"本次任务"（外层嵌套/重跑时传入），返回 Reply。 */
+  run: (input: string, ctx?: RunContext) => Reply | Promise<Reply>
+  /**
+   * 这个 Handle 能不能给出 pass/fail ——**把关者位的要求**。
+   *
+   * ★ 2026-11（D121）：`agent('审查员')` 不带解析函数时，它的回复永远是
+   *   `result: 'done'`（执行者语义），放进 `loop(...)` 当把关者只能报
+   *   「把关者输出了不认识的结果」——**而且是在花掉一次审核 run 之后**。
+   *   实测就是这么发生的：先跑执行、再跑审核、然后才炸。
+   *   所以把"能不能判"写在 Handle 上，`loop` 在**提交任何 run 之前**就拒。
+   *
+   * - `'parser'`：agent 带了解析函数（把审核意见变成 pass/fail）；
+   * - `'human'`：gate（人确认）；
+   * - `'none'`：agent 没带解析函数（不能当把关者）；
+   * - 缺省：复合 Handle（flow/parallel/loop/route）——不去猜，交给运行时检查。
+   */
+  judge?: 'parser' | 'human' | 'none'
   /** 展示名（界面用）。 */
   label?: string
   /** 运行时重置（清 resume 锚点——复合 Handle 递归）。 */
@@ -63,16 +98,25 @@ export interface Handle {
 
 /** 提交一步的执行参数（引擎 → server 的 submitStep）。 */
 export interface StepSubmitOptions {
-  /** 旧签名兼容：reviewer 挂执行 run（autoChainReview）。 */
-  reviewer?: string
   /** resume 锚点：续上一轮会话（重写轮）。 */
   resumeFromRunId?: RunId
-  /** 'review' = 提交审核 run（把关者带判定时的显式审核）。 */
-  kind?: 'execute' | 'review'
-  /** 审核者名字（kind==='review'）。 */
-  reviewAgentName?: string
-  /** 被审 run（kind==='review'——subject = 执行 run）。 */
-  subjectRunId?: RunId
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有三个字段——`reviewer`（旧签名兼容：把审核者
+   *   挂在执行 run 上，由 daemon 的 `autoChainReview` 串一条审核 run）、
+   *   `kind: 'review'` / `reviewAgentName` / `subjectRunId`（"这一步提交的是审核
+   *   run"）。**审核 run 退场** ⇒ 四个全删：编排的每一步都只是执行 run，
+   *   把关那一步不例外。
+   */
+  /**
+   * 这一步要跑哪个**智能体**（`inline:名字` 里的名字）。
+   *
+   * ★ 2026-11 真机缺陷（B7）：原先 `submitStep` 只从 `step.nodeId` 认人，而叶子原语
+   *   （agent/gate）会把 `step.nodeId` 改成自己的名字——于是**容器的步骤**（如
+   *   `把关循环 · 写作员`）跑过几个 agent 之后，nodeId 变成了最后跑的那个（
+   *   实测是审查员），运行画面上"这一步是谁在干"就错了。现在由原语显式带上，
+   *   `step.nodeId` 保持"这一步自己的节点"（容器 = null）。
+   */
+  agentName?: string
 }
 
 /** 提交一步的结果（server → 引擎）。 */
@@ -82,8 +126,12 @@ export interface StepSubmitResult {
   error?: string
   /** 执行 run 的产出（文字）。 */
   output?: string | null
-  /** 审核 run 的判决（不带 parser 时用）。 */
-  reviewPass?: boolean
+  /*
+   * ⚠️ 这里原来有一个 `reviewPass?: never`——"审核 run 的判决结论"的墓碑。
+   *   D121 时它被标成死字段（曾生产、从未消费）；D125 之后连生产它的东西都没了，
+   *   这块墓碑也就没有要挡的人。**但它记的那条教训还在**：把关者位的 agent
+   *   必须自带解析函数，或者用 `gate()` 让人来判——**不带 parser 也能过**是假的。
+   */
 }
 
 /** 引擎 hooks——执行侧注入（daemon 实现）。 */

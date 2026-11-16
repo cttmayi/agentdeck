@@ -205,10 +205,11 @@ export async function submitChatTurn(
     prompt: text.trim(),
     workDir: dir,
     limits: { maxTurns: null, timeoutMs: null },
-    // ★ 三个字说明白整件事：`null` = **这一次明确不自动审**（协议里的三态）。
-    //   省略它则是"按 agent 配置走"，那会让聊天跑完弹出一条审核 run——
-    //   而聊天本来就不产出判决，审它是审什么？
-    reviewerAgentId: null,
+    /*
+     * ⚠️ 2026-11（D125）：这里原来是 `reviewerAgentId: null`（"这一次明确不自动
+     *   审"，协议三态里的那一个）。**审核 run 退场**之后没有任何自动审核会被派生，
+     *   所以这条声明不再需要——它现在恒成立，是结构性的。
+     */
     ...(previousRun ? { resumeFromRunId: previousRun.id } : {}),
   }
 

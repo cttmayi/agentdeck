@@ -66,9 +66,18 @@ export const schedulesText = {
   'schedules.resumeFreshSameDir': { zh: '新启动 · 原目录', en: 'Fresh, same dir' },
   'schedules.resumeLast': { zh: '接续 · 原目录', en: 'Resume, same dir' },
   'schedules.executorLabel': { zh: '交给谁', en: 'Who runs it' },
-  'schedules.executorAgent': { zh: '一个智能体', en: 'One agent' },
-  'schedules.executorGroup': { zh: '一个智能体组', en: 'A group' },
-  'schedules.summary': { zh: '执行者 {executor} · 审核者 {reviewer} · 允许的动作 {actions} · 返工 {reworks}（从智能体组推导）', en: 'Runs {executor} · reviews {reviewer} · allowed actions {actions} · reworks {reworks} (from the group)' },
+  /*
+   * ⚠️ 2026-11（S3）：`schedules.executorAgent` / `executorGroup`（「一个智能体 /
+   *   一个智能体组」切换）随组退场删——定时任务只能选一个具体 agent。
+   */
+  // ⚠️ 2026-11（D123）：这里原来还带「允许的动作 {actions}」——动作能力退场，`{actions}` 删掉。
+  // ⚠️ 2026-11（D124）：`{reworks}` 那个占位随返工退场删掉——组上不再有返工次数。
+  /*
+   * ⚠️ 2026-11（D125）：这个键原来叫 `schedules.summary`，文案是
+   *   「执行者 {executor} · 审核者 {reviewer}（从智能体组推导）」。
+   *   审核 run 退场 ⇒ 定时任务也只报执行者，键名与文案一起改。
+   */
+  'schedules.summaryExecutor': { zh: '执行者 {executor}', en: 'Runs {executor}' },
   'schedules.save': { zh: '保存', en: 'Save' },
   // 2026-11（使用者要求）：编辑后立刻测试任务执行
   'schedules.saveAndTrigger': { zh: '保存并立即触发', en: 'Save & run now' },
@@ -92,7 +101,6 @@ export const schedulesText = {
   'schedules.recordSkipped': { zh: '跳过（上次仍在进行）', en: 'Skipped (previous run still going)' },
   'schedules.recordFailed': { zh: '发起失败：{note}', en: 'Failed: {note}' },
   'schedules.required': { zh: '必填', en: 'required' },
-  'schedules.none': { zh: '无', en: 'none' },
   'schedules.createdToast': { zh: '定时任务已保存', en: 'Schedule saved' },
   'schedules.deletedToast': { zh: '定时任务已删除', en: 'Schedule deleted' },
   'schedules.triggeredToast': { zh: '已触发，任务在「任务」页查看', en: 'Triggered — see it in Tasks' },

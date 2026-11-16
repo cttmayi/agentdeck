@@ -7,13 +7,10 @@ import {
   agentId,
   makeAgent,
   makeIssue,
-  makeReport,
   makeRun,
   makeSkill,
-  makeTool,
   runId,
   skillId,
-  toolId,
   wsId,
 } from '@agentdeck/domain/testing'
 import type {
@@ -88,8 +85,13 @@ describe('端口纯洁性（FR-STOR-03）', () => {
 
     for (const dep of [
       'assertRunTransition',
-      'assertVerdictTransition',
-      'assertActionTransition',
+      /*
+       * ⚠️ 2026-11（D125）：这里原来还有 `assertVerdictTransition`（判决状态机）。
+       *   判决退场 ⇒ 领域层那份状态机删了，适配器自然也不再用它。
+       */
+      /*
+       * ⚠️ 2026-11（D123）：更早之前还有 `assertActionTransition`（动作状态机）。
+       */
       'ACTIVE_RUN_STATUSES',
     ]) {
       assert.match(src, new RegExp(`\\b${dep}\\b`), `适配器必须使用领域层的 ${dep}`)
@@ -98,14 +100,19 @@ describe('端口纯洁性（FR-STOR-03）', () => {
     // 出现"状态 → 可去状态列表"这种字面量表就是抄了一份状态机
     assert.doesNotMatch(
       src,
-      /'(queued|pending_verdict|proposed)'\s*:\s*\[/,
+      /'(queued|deferred)'\s*:\s*\[/,
       '适配器里出现了转移表字面量——状态机只应存在于领域层',
     )
   })
 
   test('★ CAS 必须由 SQL 的 WHERE 承担，不能靠"先读出来再判断"', async () => {
     const src = await readFile(ADAPTER_PATH, 'utf8')
-    for (const table of ['run', 'issue', 'verdict', 'action']) {
+    // ⚠️ 2026-11（D123）：`action` 表随动作记录退场删掉（CAS 也不再有它）。
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还有 `verdict` 表（判决的 CAS）。判决退场 ⇒ 表
+     *   与它的 CAS 语句一起删，这里只剩 run 与 issue。
+     */
+    for (const table of ['run', 'issue']) {
       assert.ok(
         src.includes(`UPDATE ${table} SET json = ? WHERE id = ? AND status = ?`),
         `${table} 的 CAS 必须写成 UPDATE ... WHERE id = ? AND status = ?`,
@@ -225,42 +232,12 @@ async function scenario(store: Store): Promise<unknown[]> {
   )
   await rec('listSkillsByIds.empty', () => store.listSkillsByIds([]))
 
-  /**
-   * ── Tool（工具包 / 组，D40）──
-   *
-   * 与 skill 那一组逐条对齐，外加**两条工具特有的语义**：
-   *
-   *   ★ `getToolBySlug` 只在**给定的 workspace 内**唯一。所以这里在两边各放
-   *     一个同 slug 的包：如果哪个适配器跨着找，`getToolBySlug.otherWorkspace`
-   *     就会拿到 A 的那个包——判决里写 `<slug>.<动作名>`，取错包等于执行了
-   *     别人没声明过的动作。
-   *   ★ `listToolsByIds` 一次要解析出多个"动作属于哪个包"，所以顺带验一下
-   *     里面夹着一个**已被卸载**的 id 时，其余照常返回而不是整体失败。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来整块是**工具包**的差分记录（`getTool` / `listTools` /
+   *   `getToolBySlug` / `deleteTool` / `listToolsByIds`，含"只在一个 workspace 内按
+   *   slug 找"与"夹着已卸载的 id 也照常返回"两条特有语义）。工具包随动作能力退场，
+   *   端口删了，这块差分记录没有对象，整块删。
    */
-  await store.insertTool(makeTool({ id: 't1', workspaceId: WS_A, slug: 'deploy' }))
-  await store.insertTool(makeTool({ id: 't2', workspaceId: WS_A, slug: 'lint' }))
-  await store.insertTool(makeTool({ id: 't3', workspaceId: WS_B, slug: 'deploy' }))
-  await rec('getTool', async () => (await store.getTool(toolId('t1')))?.slug ?? null)
-  await rec('getTool.missing', () => store.getTool(toolId('nope')))
-  await rec('listTools.A', async () => (await store.listTools(WS_A)).map((t) => t.slug))
-  await rec('listTools.B', async () => (await store.listTools(WS_B)).map((t) => t.slug))
-  await rec('getToolBySlug.hit', async () => (await store.getToolBySlug(WS_A, 'deploy'))?.id ?? null)
-  await rec('getToolBySlug.miss', () => store.getToolBySlug(WS_A, 'nope'))
-  await rec(
-    'getToolBySlug.otherWorkspace',
-    async () => (await store.getToolBySlug(WS_B, 'deploy'))?.id ?? null,
-  )
-  // ★ 卸载：删得掉、幂等、删完取不到、别的 workspace 不受影响
-  await rec('deleteTool.ok', () => store.deleteTool(toolId('t1')))
-  await rec('deleteTool.again', () => store.deleteTool(toolId('t1')))
-  await rec('getTool.afterDelete', () => store.getTool(toolId('t1')))
-  await rec('getToolBySlug.afterDelete', () => store.getToolBySlug(WS_A, 'deploy'))
-  await rec('listTools.A.afterDelete', async () => (await store.listTools(WS_A)).map((t) => t.slug))
-  await rec('listTools.B.untouched', async () => (await store.listTools(WS_B)).map((t) => t.slug))
-  await rec('listToolsByIds', async () =>
-    (await store.listToolsByIds(['t2', 't3', 't1'] as never)).map((t) => t.id),
-  )
-  await rec('listToolsByIds.empty', () => store.listToolsByIds([]))
 
   // ── Issue ──
   await store.insertIssue(
@@ -473,73 +450,21 @@ async function scenario(store: Store): Promise<unknown[]> {
   await rec('issueCas.null', () => store.transitionIssue('i2' as never, 'done', 'todo', { assignee: null }))
   await rec('issueCas.null.after', async () => (await store.getIssue('i2' as never))?.assignee ?? null)
 
-  // ── Verdict / Action ──
-  const VID = 'v-1' as VerdictId
-  await store.insertVerdict({
-    id: VID,
-    workspaceId: WS_A,
-    runId: runId('r2'),
-    subject: { type: 'issue', id: 'i2' },
-    status: 'pending_verdict',
-    conclusion: 'pass',
-    reasonCode: 'ok',
-    confidence: 0.9,
-    findings: [],
-    action: null,
-    escalateReason: null,
-    invalidResolution: null,
-    skillRefs: [],
-    modelId: null,
-    promptHash: null,
-    createdAt: 3,
-  } as never)
-  await rec('verdictCas.ok', () =>
-    store.transitionVerdict(VID, 'pending_verdict', 'invalid', { invalidResolution: 'retry' }),
-  )
-  await rec('verdictCas.stale', () => store.transitionVerdict(VID, 'pending_verdict', 'emitted'))
-  await rec('verdictCas.illegal', () => store.transitionVerdict(VID, 'invalid', 'emitted'))
-  await rec('getVerdict', async () => {
-    const v = await store.getVerdict(VID)
-    return { status: v?.status, invalidResolution: v?.invalidResolution }
-  })
-  await rec('listVerdictsByRun', async () =>
-    (await store.listVerdictsByRun(runId('r2'))).map((v) => v.id),
-  )
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是判决的差分记录——`verdictCas.ok` / `.stale` /
+   *   `.illegal` / `getVerdict` / `listVerdictsByRun`（含一条判决夹具）。判决退场
+   *   ⇒ 端口上没有判决，整块删。
+   *
+   *   ⚠️ `verdictCas.illegal` 那条守的事仍然成立：**非法迁移要在适配器里就抛，
+   *   不能被 SQL 的 WHERE 悄悄吞成"没赢"**——"赢了但状态不对"和"没抢到"是两件
+   *   事，混起来就不是 CAS 了。`runCas` / `issueCas` 那几条还在守它。
+   */
 
-  await store.insertAction({
-    id: 'act-1' as ActionId,
-    workspaceId: WS_A,
-    verdictId: VID,
-    type: 'comment.create',
-    plane: 'local',
-    params: { body: 'x' },
-    status: 'proposed',
-    idempotencyKey: 'v-1:comment.create:{"body":"x"}',
-    dryRun: false,
-    result: null,
-    error: null,
-    rollbackRef: null,
-    createdAt: 4,
-    finishedAt: null,
-  } as never)
-  await rec('findActionByIdempotencyKey', async () =>
-    (await store.findActionByIdempotencyKey('v-1:comment.create:{"body":"x"}'))?.id ?? null,
-  )
-  await rec('findActionByIdempotencyKey.missing', () =>
-    store.findActionByIdempotencyKey('nope'),
-  )
-  await rec('actionCas.ok', () =>
-    store.transitionAction('act-1' as ActionId, 'proposed', 'auto_approved'),
-  )
-  await rec('actionCas.stale', () =>
-    store.transitionAction('act-1' as ActionId, 'proposed', 'executing'),
-  )
-  await rec('actionCas.illegal', () =>
-    store.transitionAction('act-1' as ActionId, 'auto_approved', 'executed'),
-  )
-  await rec('listActionsByVerdict', async () =>
-    (await store.listActionsByVerdict(VID)).map((a) => a.id),
-  )
+  /*
+   * ⚠️ 2026-11（D123）：这里原来还有**动作记录**的差分记录（`findActionByIdempotencyKey`
+   *   / `actionCas.ok/stale/illegal` / `listActionsByVerdict`）与一条动作夹具。
+   *   动作能力退场、端口删除 ⇒ 这块没有对象，整块删。
+   */
 
   // ── 消息流 ──
   await store.appendRunMessage(runId('r2'), msg(0, 'm0'))
@@ -563,19 +488,11 @@ async function scenario(store: Store): Promise<unknown[]> {
     store.appendRunMessage(runId('ghost'), msg(0, 'x')),
   )
 
-  // ── Report 去重 ──
-  await rec('report.first', () =>
-    store.insertReport(makeReport({ id: 'rep-1', workspaceId: WS_A, kind: 'ci', dedupKey: 'd1' })),
-  )
-  await rec('report.duplicate', () =>
-    store.insertReport(makeReport({ id: 'rep-2', workspaceId: WS_A, kind: 'ci', dedupKey: 'd1' })),
-  )
-  await rec('report.otherKey', () =>
-    store.insertReport(makeReport({ id: 'rep-3', workspaceId: WS_A, kind: 'ci', dedupKey: 'd2' })),
-  )
-  await rec('report.find', async () => (await store.findReportByDedupKey('d1'))?.id ?? null)
-  await rec('report.find.missing', () => store.findReportByDedupKey('nope'))
-  await rec('report.get', async () => (await store.getReport('rep-1' as never))?.kind ?? null)
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有六条 report 记录（`report.first` / `.duplicate` /
+   *   `.otherKey` / `.find` / `.find.missing` / `.get`）——差分对拍用它们钉"两个适配器
+   *   的 report 去重键一致"。报告摄取退场 ⇒ 端口上没有 report，六条一起删。
+   */
 
   // ── Blob ──
   const enc = new TextEncoder()
@@ -733,7 +650,6 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
       'cas.patch.null',
       'findRunHoldingWorkDir.exclude',
       'findActiveRunForSubjectAgent',
-      'report.duplicate',
       'messages.since',
       'messages.duplicateSeq',
       'messages.unknownRun',
@@ -742,17 +658,9 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
       'deleteSkill.again',
       'deleteAgent.ok',
       'deleteAgent.again',
-      'deleteTool.ok',
-      'deleteTool.again',
-      'getToolBySlug.hit',
-      'getToolBySlug.miss',
-      'getToolBySlug.otherWorkspace',
-      'listTools.B.untouched',
       'inbox.markRead',
       'listWorkspaceIds',
       'issueCas.ok',
-      'verdictCas.illegal',
-      'actionCas.stale',
     ]) {
       assert.ok(labels.has(required), `差分脚本缺少关键步骤：${required}`)
     }
@@ -776,7 +684,11 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
     assert.deepEqual(got.get('cas.stale'), false, '前态不匹配必须返回 false')
     assert.deepEqual(got.get('cas.illegal'), { threw: 'IllegalTransitionError' })
     assert.deepEqual(got.get('cas.illegalWithStaleExpect'), false, '前态不匹配时不该抛')
-    assert.deepEqual(got.get('report.duplicate'), false, '重复去重键必须被拒')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来是 `assert.deepEqual(got.get('report.duplicate'),
+     *   false, '重复去重键必须被拒')`。报告摄取退场 ⇒ 端口上没有 report，
+     *   差分脚本也不再记那条。
+     */
     assert.deepEqual(got.get('findRunHoldingWorkDir.exclude'), 'r3')
     assert.deepEqual(got.get('findActiveRunForSubjectAgent'), 'r2')
     assert.deepEqual(got.get('messages.since'), ['m2'], 'since 取的是"不含该序号"之后的消息')
@@ -791,38 +703,11 @@ describe('差分契约：SQLite 适配器与文件适配器行为一致（FR-STO
     assert.deepEqual(got.get('listWorkspaceIds'), ['ws-a', 'ws-b'], '按创建顺序，不是按 id 排序')
     assert.deepEqual(got.get('inbox.afterRead'), ['n1'], '默认只列未读')
 
-    // ── 工具包（D40）：卸载的语义与"slug 只在 workspace 内唯一" ──
-    assert.deepEqual(got.get('deleteTool.ok'), true)
-    assert.deepEqual(got.get('deleteTool.again'), false, '删第二次是 false，**不是错误**')
-    assert.deepEqual(got.get('getTool.afterDelete'), null)
-    assert.deepEqual(
-      got.get('getToolBySlug.hit'),
-      't1',
-      '同一 workspace 内 slug 唯一 ⇒ 命中那一个包',
-    )
-    assert.deepEqual(got.get('getToolBySlug.miss'), null)
-    assert.deepEqual(
-      got.get('getToolBySlug.otherWorkspace'),
-      't3',
-      '★ 另一个 workspace 里有同 slug 的包：必须返回**它那个**，不能跨 workspace 拿成 t1',
-    )
-    assert.deepEqual(
-      got.get('getToolBySlug.afterDelete'),
-      null,
-      '包卸载后按 slug 也应当查不到，而不是留着一个悬空引用',
-    )
-    assert.deepEqual(got.get('listTools.A.afterDelete'), ['lint'])
-    assert.deepEqual(
-      got.get('listTools.B.untouched'),
-      ['deploy'],
-      '★ 删 A 的包不能动到 B 的（哪怕两者同名）',
-    )
-    assert.deepEqual(
-      got.get('listToolsByIds'),
-      ['t2', 't3'],
-      '批量取要跳过已被卸载的 id，而不是整体失败',
-    )
-    assert.deepEqual(got.get('listToolsByIds.empty'), [])
+    /*
+     * ⚠️ 2026-11（D123）：这里原来是**工具包**那一段答案断言（卸载的语义、删除
+     *   "删第二次是 false 不是错误"、`getToolBySlug` 只在一个 workspace 内唯一、
+     *   批量取跳过已卸载的 id）。工具包随动作能力退场，端口删了，这一段整块删。
+     */
 
     // ── 游标：所有情形都要有确定的答案，不能只说"两边一样" ──
     assert.deepEqual(got.get('listIssues.page1'), { ids: ['i1', 'i2'], nextCursor: 'i2' })

@@ -81,6 +81,57 @@ async function run(backend: CodexBackend, opts: ExecOptions) {
 }
 
 /**
+ * ★★★ 2026-11 真机 P0（D120）：**恢复响应里带 U+2028 / U+2029，也必须能解析**。
+ *
+ * 现场：9 条 run 全死在 `codex 对话阶段失败：JSON-RPC 请求 thread/resume（id=2）
+ * 超时（60000ms）`，run 日志里同时堆着 119 条「JSON-RPC 帧不可解析」。
+ * 量下来是 `process-tree` 用 `readline` 切行——Node 的 readline 把 U+2028/U+2029
+ * 当成行结束（ECMAScript 的 LineTerminator），而 JSON-RPC over stdio 是 NDJSON，
+ * 只认 `\n`。真机那份 resume 响应 1,649,749 字节里有 **118 个 U+2028**，于是整帧
+ * 被撕成 119 段，那条请求永远等不到响应。
+ *
+ * 这条判据落在**协议层**（不是只测切行函数）：假 app-server 发一份带 U+2028/U+2029
+ * 的 resume 响应，run 必须完整跑完、并且**一条「帧不可解析」都不许出现**。
+ * 它红的样子正是真机的样子：5 秒超时（测试把 rpcTimeoutMs 调短了）而不是 refused。
+ */
+describe('★★★ D120：恢复响应里的 U+2028/U+2029 不能把帧撕碎', () => {
+  test('resume 响应带 U+2028/U+2029 ⇒ run 正常完成，且没有"帧不可解析"', async () => {
+    const { backend, env, echoFile } = makeBackend({
+      scenario: 'ok',
+      extraEnv: { FAKE_RESUME_HISTORY_TEXT: 'A practical \u2028guide to \u2029building agents' },
+    })
+    const workDir = await makeTempDir('codex-resume-u2028')
+    try {
+      const { messages, result } = await run(
+        backend,
+        execOpts({ workDir, env, resumeSessionId: 'thr_existing' }),
+      )
+      assert.equal(
+        result.status,
+        'completed',
+        'resume 的响应被撕碎时这条是 failed（超时），真机那 9 条 run 就是 failed',
+      )
+      assert.equal(result.output, '完成了：hello', '产出还得是正常那一份')
+      const echo = await readRpcEcho(echoFile)
+      assert.ok(
+        echo.requests.some((r) => r.method === 'thread/resume'),
+        '前提：这一轮确实走了 resume',
+      )
+      const unparsable = messages.filter(
+        (m) => m.type === 'log' && m.content.includes('帧不可解析'),
+      )
+      assert.equal(
+        unparsable.length,
+        0,
+        `一帧被撕碎就会留下成片"帧不可解析"（真机 119 条）：${JSON.stringify(unparsable.slice(0, 2))}`,
+      )
+    } finally {
+      await cleanup(workDir)
+    }
+  })
+})
+
+/**
  * ★ 分批第 74 批：①② 挂在线程上（`thread/start.developerInstructions`），每轮只发 ③。
  *
  * 起因：使用者报「在 codex CLI 情况下，每次沟通，都会发送完整的『框架+身份+任务』」。

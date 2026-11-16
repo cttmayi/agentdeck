@@ -524,8 +524,8 @@ describe('★ 分批第 61 批：删除实体时清掉它那份 CODEX_HOME', () 
       // ① 建两个对话（各自一个工作目录 ⇒ 各自一份 CODEX_HOME）
       //    ⚠️ agentId 要用**播种出来的那条**（假 id 会 404 `agent_not_found`——第一次就这么红的）
       const agentsRes = await json(h, '/api/agents')
-      const seeded = (agentsRes.body as { agents: Array<{ id: string; role: string }> }).agents
-      const execId = seeded.find((a) => a.role === 'executor')?.id ?? ''
+      const seeded = (agentsRes.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
+      const execId = seeded.find((a) => a.builtin !== true)?.id ?? ''
       assert.notEqual(execId, '', '要先拿到播种出来的执行者')
       /**
        * ⚠️ 必须把这条执行者改成 `default`（= 跟随全局 ⇒ 落到 daemon 侦测到的 codex）：
@@ -634,8 +634,8 @@ describe('★ 分批第 62 批：claude 也关掉自带 skills', () => {
     const h = await makeHarness('claude')
     try {
       const agentsRes = await json(h, '/api/agents')
-      const seeded = (agentsRes.body as { agents: Array<{ id: string; role: string }> }).agents
-      const execId = seeded.find((a) => a.role === 'executor')?.id ?? ''
+      const seeded = (agentsRes.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
+      const execId = seeded.find((a) => a.builtin !== true)?.id ?? ''
       const patched = await putJson(h, `/api/agents/${execId}`, {
         env: { CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '0' },
       })

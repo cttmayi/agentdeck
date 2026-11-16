@@ -8,9 +8,7 @@
   import Chat from './views/Chat.svelte'
   import Tasks from './views/Tasks.svelte'
   import Agents from './views/Agents.svelte'
-  import Groups from './views/Groups.svelte'
   import Skills from './views/Skills.svelte'
-  import Tools from './views/Tools.svelte'
   import Crystallize from './views/Crystallize.svelte'
   import Schedules from './views/Schedules.svelte'
   import Workflows from './views/Workflows.svelte'
@@ -20,7 +18,6 @@
   import { openDrawer, toast, view } from './lib/view.ts'
   import {
     loadAgents,
-    loadGroups,
     loadIdentity,
     loadInbox,
     loadIssues,
@@ -29,7 +26,6 @@
     loadWorkflowRuns,
     loadRuns,
     loadSkills,
-    loadTools,
     snapshot,
     syncStatus,
   } from './lib/stores.ts'
@@ -52,10 +48,7 @@
       loadIdentity(),
       loadIssues(),
       loadAgents(),
-      // 智能体组（D70）：组页与新建任务页都要它，首屏一起取。
-      loadGroups(),
       loadSkills(),
-      loadTools(),
       loadRuns(),
       loadInbox(),
       // 对话列表也在首屏取：它是侧边栏第一项的页面，晚一步到会闪一下空态。
@@ -128,9 +121,7 @@
       <Tasks />
     {:else if $view === 'agents'}
       <Agents />
-    {:else if $view === 'groups'}
-      <!-- ★ D70：智能体组页。与智能体页分开的两个页面（见设计稿 §7.1）。 -->
-      <Groups />
+    <!-- ⚠️ 2026-11（S3）：这里原来是「智能体组」页（D70）。组退场、页面删了。 -->
     {:else if $view === 'skills'}
       <Skills />
     {:else if $view === 'crystallize'}
@@ -157,12 +148,14 @@
       <!-- ★ 关于（2026-11，使用者立项）：版本 · 环境 · 边界。
            收拢散在各处的诊断信息（侧栏底部状态块 / 设置抽屉诊断折叠区）。 -->
       <About />
-    {:else}
-      <!-- ★ D40：最后一项。`$view` 的取值来自 `VIEWS`，每一支都写明了是哪个；
-           最后这个 `{:else}` 不再兼作别的视图（写死成"剩下的都是 Skills"
-           时，加视图会静默落到 Skills 上——页面能打开，只是内容不对）。 -->
-      <Tools />
     {/if}
+    <!--
+      ⚠️ 2026-11（D123）：这里原来还有一个 `{:else} <Tools />`（工具包页）。
+      「工具」这个视图随**动作能力退场**一起删了（`VIEWS` 里没有它了），所以不再有
+      兜底那一支——`VIEWS` 的每一项上面都有一支显式的，地址不认识时是 `parseHash`
+      回落成 `chat`，不该再有"剩下的都送到某页"这种兜底（它会把打错的地址静默
+      送到一个看似正常的页面）。 -->
+
   </main>
 </div>
 

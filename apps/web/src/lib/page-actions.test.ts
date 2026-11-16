@@ -54,27 +54,27 @@ describe('★ 换页：两种销毁/挂载顺序都不能出错', () => {
   test('顺序 A：先卸载旧页（清空），再登记新页', () => {
     mod.setPageActions('tasks', [action('refresh')])
     mod.clearPageActions('tasks')
-    mod.setPageActions('tools', [action('install', '安装工具')])
-    assert.deepEqual(mod.actionsFor(get(mod.pageActions), 'tools').map((a) => a.id), ['install'])
+    mod.setPageActions('skills', [action('install', '安装 skill')])
+    assert.deepEqual(mod.actionsFor(get(mod.pageActions), 'skills').map((a) => a.id), ['install'])
   })
 
   test('★★ 顺序 B：新页**先**登记，旧页才卸载——旧页的清理不许把新页清掉', () => {
     mod.setPageActions('tasks', [action('refresh')])
     // 新页挂载（登记）……
-    mod.setPageActions('tools', [action('install', '安装工具')])
+    mod.setPageActions('skills', [action('install', '安装 skill')])
     // ……旧页这一刻才卸载
     mod.clearPageActions('tasks')
     assert.deepEqual(
-      mod.actionsFor(get(mod.pageActions), 'tools').map((a) => a.id),
+      mod.actionsFor(get(mod.pageActions), 'skills').map((a) => a.id),
       ['install'],
       '旧页的清理只该清自己那一份，否则顶栏会在切页后空着',
     )
   })
 
   test('清理**当前**那一页会真的清掉（卸载之后不留残影）', () => {
-    mod.setPageActions('tools', [action('install')])
-    mod.clearPageActions('tools')
-    assert.deepEqual(mod.actionsFor(get(mod.pageActions), 'tools'), [])
+    mod.setPageActions('skills', [action('install')])
+    mod.clearPageActions('skills')
+    assert.deepEqual(mod.actionsFor(get(mod.pageActions), 'skills'), [])
   })
 })
 

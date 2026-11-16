@@ -10,8 +10,10 @@
    * 每一项都是"一个视图"，右侧主区显示它。
    *
    * ══════════════════════════════════════════════════════════════════
-   * 从**四项**变成**五项**（D40）
+   * D40 的「工具」那一项已经不在了（2026-11，D123）
    * ══════════════════════════════════════════════════════════════════
+   * 下面这段解释它当初**为什么**单独占一项，如今留着是因为"为什么曾把它与 Skills
+   * 分开"这个判断仍然成立（动作能力退场只是让工具包整个消失，不是又把它并回 Skills）。
    *
    * 原来这里写着"保持只有四项——侧边栏一长，就没人扫得完"，而 Runtime 状态与
    * 执行记录都被并进别的项里来凑那四项。D40 加了**工具**（可插拔的行动组）：
@@ -36,12 +38,10 @@
     //    `#/tasks/new` 直达那个表单，任务页顶栏那个主操作也跳它。
     { id: 'tasks', title: 'shell.navTasks', hint: 'shell.navTasksHint' },
     { id: 'agents', title: 'shell.navAgents', hint: 'shell.navAgentsHint' },
-    // ★ D70 第六项：智能体组（排在智能体后面——先有"人"，才有"队"）。
-    { id: 'groups', title: 'shell.navGroups', hint: 'shell.navGroupsHint' },
+    // ⚠️ 2026-11（S3）：这里原来是「智能体组」那一项（D70）。组退场 ⇒ 导航项删。
     { id: 'skills', title: 'shell.navSkills', hint: 'shell.navSkillsHint' },
-    // ★ D40 第五项。词条在 `tools.ts`（导航那两条本该在 `shell.ts`，理由写在
-    //   那份文件顶部：这一轮的交界不让动 shell.ts，D40 收口时归位）。
-    { id: 'tools', title: 'tools.navTitle', hint: 'tools.navHint' },
+    // ⚠️ 2026-11（D123）：这里原来还有一项「工具」（D40 的可插拔行动组）。工具包
+    //   与动作能力一起退场，页面、视图名、词条都删了。
     // ★ D80 三轮第七项：沉淀（排工具之下——使用者在导航列点名的位置）。
     //   沉淀的整个过程在此页进行（左栏列表切沉淀任务，右栏流程页）。
     { id: 'crystallize', title: 'crystallize.navTitle', hint: 'crystallize.navHint' },

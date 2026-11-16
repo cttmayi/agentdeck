@@ -109,17 +109,13 @@ export const tasksText = {
     en: 'This run will be stopped and will not resume on its own — carrying on means dispatching a new one.',
   },
   'tasks.cancelRun': { zh: '取消这次执行', en: 'Cancel this run' },
-  'tasks.verdictHeading': { zh: '判决', en: 'Verdict' },
   'tasks.metaHeading': { zh: '执行信息', en: 'Run info' },
-  'tasks.verdictDetails': { zh: '判决明细', en: 'Verdict details' },
-  'tasks.verdictDetailCount': {
-    zh: '{actions} 条行动 · {findings} 条发现',
-    en: '{actions} actions · {findings} findings',
-  },
-  'tasks.confidence': { zh: '置信度 {percent}%', en: '{percent}% confidence' },
-  'tasks.suggestedAction': { zh: '建议动作：', en: 'Suggested action: ' },
-  'tasks.needsHuman': { zh: '需要你判断：{reason}', en: 'Needs your call: {reason}' },
-  'tasks.noFindings': { zh: '（没有具体发现项）', en: '(No findings)' },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有判决卡上的五条词条——`tasks.verdictHeading`
+   *   （判决）、`tasks.verdictDetails` / `verdictDetailCount`（明细与"N 条发现"）、
+   *   `tasks.confidence`（置信度 N%）、`tasks.needsHuman`（需要你判断：{reason}）、
+   *   `tasks.noFindings`（没有具体发现项）。判决退场 ⇒ 五条全删。
+   */
   /**
    * 右栏空态：**没有任何任务被选中时**右边是什么。
    *
@@ -139,42 +135,42 @@ export const tasksText = {
   // ── 阶段：看板列头、表格短标签、行内提示 ─────────────────────────────
   // ⚠️ 列头（`tasks.col.*`）与表格里的短标签（`term.stage.*`）**分开**：
   //   列头是**粗分组**（2026-11 精简后只有三列：进行中 / 待处理 / 已结束），
-  //   短标签才是每一档的名字（卡片/行内显示它，列内仍分得出"执行中 vs 行动中"）。
+  //   短标签才是每一档的名字（卡片/行内显示它）。
   // ★ 2026-11 精简（使用者：「太多了，精简一下，同步看板也精简」）：六列并三列，
   //   旧六组词条（executing/awaiting_review/action_running/needs_human/reviewed/
   //   abandoned 的 title/hint）随列一起删——死键 i18n.test 会拦。
   'tasks.col.ongoing.title': { zh: '进行中', en: 'Ongoing' },
   'tasks.col.ongoing.hint': {
-    zh: '平台正在推进（执行或执行判决要求的动作）',
-    en: 'the platform is working (executing or running the verdict’s action)',
+    zh: '平台正在推进（执行还在跑）',
+    en: 'the platform is working (the run is still executing)',
   },
-  'tasks.col.pending.title': { zh: '待处理', en: 'Pending' },
-  'tasks.col.pending.hint': {
-    zh: '要你过目：等审核判决，或判决要你介入/动作失败',
-    en: 'needs you: awaiting the verdict, or the verdict asked for you / the action failed',
-  },
-  'tasks.noteActionRunning': { zh: '正在执行判决要求的动作', en: 'Running the action the verdict asked for' },
-  'tasks.actionFailed': { zh: '失败原因：{reason}', en: 'Why it failed: {reason}' },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有「待处理」那一列的两条词条
+   *   （`tasks.col.pending.title` / `.hint`）——它收的是"等审核判决"与"判决说
+   *   得人来定"两档。审核 run 与判决一起退场 ⇒ 没有"等审核"，那一列删。
+   *   代价说清：**看板上不再有"这件事还等着你"的位置**（见 `pipeline.ts` 里
+   *   `PIPELINE_COLUMNS` 的说明）。
+   */
   // 2026-11（使用者："任务里面，不需要显示「这次由谁审」"）：整个区连同四句词条
   //   （heading/none/fromGroup/overridden）一起删——死键 i18n.test 会拦
-  'tasks.warnActionFailed': {
-    zh: '行动失败：{reason}',
-    en: 'The action failed: {reason}',
-  },
-  'tasks.warnActionFailedNoReason': {
-    zh: '行动失败 —— 这一条要你处理（详情见这条审核的记录）',
-    en: 'The action failed — this one is on you (see this review’s record)',
-  },
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有三条词条——`tasks.noteActionRunning`（"正在执行
+   *   判决要求的动作"）、`tasks.actionFailed`（"失败原因：{reason}"）、
+   *   `tasks.warnActionFailed` / `tasks.warnActionFailedNoReason`（行动失败那一档的
+   *   行内提示）。动作能力退场 ⇒ 没有"行动失败"这一档，四条一起删。
+   */
   'tasks.col.finished.title': { zh: '已结束', en: 'Finished' },
   'tasks.col.finished.hint': {
-    zh: '不再动了：审查已出判决，或你决定不管它了（还能恢复）',
-    en: 'no longer moving: the verdict is in, or you dropped it (recoverable)',
+    zh: '不再动了：执行跑完了（或失败了），或你决定不管它了（还能恢复）',
+    en: 'no longer moving: the run finished (or failed), or you dropped it (recoverable)',
   },
 
   // 行内 note：只给标签**之外**的信息（与标签重复的字样不要说）。
   'tasks.noteNotStarted': { zh: '还没开始执行', en: 'Not started yet' },
   'tasks.noteWaitingDir': { zh: '排队中（工作目录被占用）', en: 'Queued (work directory in use)' },
-  'tasks.noteReviewing': { zh: '审核中', en: 'Reviewing' },
+  /*
+   * ⚠️ 2026-11（D125）：`tasks.noteReviewing`（「审核中」）随审核 run 一起删。
+   */
 
   // 行内 warning：只有"需要你介入"才会出现的那几句。
   'tasks.warnExecFailed': { zh: '执行失败了', en: 'Execution failed' },
@@ -184,65 +180,39 @@ export const tasksText = {
     zh: '执行被取消了（{reason}）',
     en: 'Execution was cancelled ({reason})',
   },
-  'tasks.warnNoReview': {
-    zh: '没有派审核 —— 检查这个智能体的「由谁来审它」',
-    en: 'No review was dispatched — check this agent’s “who reviews it” setting',
-  },
-  'tasks.warnNeedsHuman': {
-    zh: '判决要求人介入：{reason}',
-    en: 'The verdict asks for a human: {reason}',
-  },
-  'tasks.warnNeedsHumanNoReason': {
-    zh: '判决要求人介入（详见这条审核的判决）',
-    en: 'The verdict asks for a human (see this review’s verdict)',
-  },
-  // ── D45：审核不通过、且没有返工可跑（用完了或没配）──
-  'tasks.warnRejectedNoRework': {
-    zh: '审核不通过，且没有返工可跑：这条任务没配返工，或次数已经用完。需要你来改。',
-    en: 'The reviewer rejected the work and no rework is left: this task either has no rework budget or already used it. It needs you.',
-  },
-  // 判决已派返工、那条 run 还没出现在列表里的那一小段
-  'tasks.noteReworking': {
-    zh: '审核不通过，正在派返工重做',
-    en: 'Rejected — dispatching a rework',
-  },
-  // 列表行上的返工计数（D45）：这条回路真的转过几圈
-  'tasks.reworkedTag': {
-    zh: '返工 {n} 次',
-    en: 'reworked {n}×',
-  },
-  // ── 「行动」那一段的事实（D45 补的显示缺口：以前成功的动作只剩一句"已执行"）──
-  'tasks.actionExitCode': { zh: '退出码 {code}', en: 'exit code {code}' },
-  'tasks.actionDuration': { zh: '耗时 {ms} ms', en: 'took {ms} ms' },
-  // ★ 2026-09：这条标记只来自「调试」（审核者行动权限里勾的）——不跑脚本、
-  //   只记录动作与参数。文案说清"没跑"，不能只说"调试"两个字（那像是什么
-  //   技术状态，而它是一条给使用者看的说明）。
-  'tasks.actionDebug': {
-    zh: '调试 · 未执行（没跑脚本）',
-    en: 'debug — not executed (script not run)',
-  },
-  'tasks.actionParamsSummary': {
-    zh: '它带着什么参数跑的',
-    en: 'What parameters it ran with',
-  },
+  /*
+   * ⚠️ 2026-11（D125）：这一组原来有四条围着审核判决转的提示——
+   *   `tasks.warnNoReview`（"没有派审核，去查『由谁审它』"）、`tasks.warnNeedsHuman`
+   *   / `tasks.warnNeedsHumanNoReason`（"判决要求人介入"）与 `tasks.warnRejected`
+   *   （"审核不通过，需要你来改"；D124 时它刚改过名）。
+   *
+   *   审核 run 与判决一起退场 ⇒ 四条全删。**"执行失败/取消"那两条留下**（它们
+   *   说的是执行自己的事实，与审核无关）。
+   *
+   *   ⚠️ `tasks.warnRejected` 记的那条教训仍然成立：**平台自己不处置的事，就必须
+   *   进人的队列**——否则"判了不通过"在界面上看起来和"一切正常"一模一样。
+   */
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是「行动」那一段的四个事实词条
+   *   （`tasks.actionExitCode` / `tasks.actionDuration` / `tasks.actionDebug`
+   *   / `tasks.actionParamsSummary`）。动作能力退场 ⇒ 界面不再画动作，四个一起删。
+   */
   // ══════════════════════════════════════════════════════════════════
-  // ── 人的三个出路：通过 / 反馈 / 放弃（D46 + D47）──
+  // ── 人的出路：反馈 / 放弃（D47；D125 之后只剩这两个）──
   // ══════════════════════════════════════════════════════════════════
   //
-  // 这一组回答的是"卡住的任务，人怎么收场"。三个按钮，文案上有三条刻意的选择：
+  // ⚠️ 2026-11（D125）：这里原来还有「通过」那一支的全部词条——
+  //   `tasks.decidePassHint` / `tasks.decidePass` / `tasks.decidePassing` /
+  //   `tasks.humanVerdictBadge` / `humanVerdictReasonHeading` / `humanVerdictAlready`
+  //   / `humanVerdictUnavailable`。**判决与人工裁决面板一起退场** ⇒ 全删。
   //
-  //   ① **说清「通过」不触发任何动作**。点它时最容易的误解是"我批准了，系统就会
-  //      去做那件事"——不会，动作只能来自模型判决里的 `action`。这句必须写在
-  //      按钮**旁边**，而不是藏在文档里。
-  //   ② **说清理由什么时候必填**。通过 = 选填（逼人写"ok"只会换来噪音），
-  //      反馈 = 必填（这段文字就是执行者拿到的依据，一句"不行"没法干活）。
-  //      两个按钮共用一个输入框，所以这件事只能靠**按钮上的提示**说清。
-  //   ③ **说清「放弃」会取消正在跑的 run**。那是这个功能唯一的副作用，
-  //      不写出来就是让人在不知情的情况下丢掉一次正在跑的执行。
-  'tasks.decidePassHint': {
-    zh: '「通过」：把这条任务判为完成。不会触发任何动作——动作只能来自审核者判决里写的那一条。理由选填。',
-    en: 'Pass: mark this task as done. It triggers no action — an action can only come from the one named in a reviewer’s verdict. The reason is optional.',
-  },
+  //   剩下的两条各自说清一件事，这是刻意保留的措辞纪律：
+  //
+  //   ① **「反馈」= 再派一条普通任务**（原来的「发送并继续」）。它是"干活"，
+  //      不是"下结论"——所以理由必填，而且它**不落任何记录**（派出去那条新 run
+  //      本身就足以让看板回到"进行中"）。
+  //   ② **「放弃」会取消正在跑的 run**。那是这个功能唯一的副作用，不写出来就是
+  //      让人在不知情的情况下丢掉一次正在跑的执行。
   'tasks.decideFeedbackHint': {
     // ★ 原来那句「会复用同一个工作目录、并让 CLI 恢复上一次的会话；恢复被拒时
     //   日志里会说明」长得多，它是底栏那个「发送并继续」的 title。底栏撤掉之后
@@ -252,15 +222,14 @@ export const tasksText = {
     en: 'Send back: hand the text above to the executor and have it redo the work — the same thing the old “send and continue” did. The reason is required. It reuses the same work directory and asks the CLI to resume the previous session; if the resume is refused the log says so instead of pretending.',
   },
   'tasks.decideAbandonHint': {
-    zh: '「放弃」：不再管这条任务，它移出「需要注意」。正在跑的 run 会被取消；run、判决、审计都留着，随时可以恢复。',
-    en: 'Drop: stop tracking this task — it leaves “needs attention”. A running run is cancelled; runs, verdicts and audits are all kept, and you can recover it any time.',
+    zh: '「放弃」：不再管这条任务，它移出「需要注意」。正在跑的 run 会被取消；run 与审计都留着，随时可以恢复。',
+    en: 'Drop: stop tracking this task — it leaves “needs attention”. A running run is cancelled; runs and audits are all kept, and you can recover it any time.',
   },
-  'tasks.decideReasonLabel': { zh: '理由 / 反馈内容', en: 'Reason / feedback' },
+  'tasks.decideReasonLabel': { zh: '反馈内容', en: 'Feedback' },
   'tasks.decideReasonPlaceholder': {
-    zh: '通过时选填；反馈时必填（写清要改什么）。例如：产出里的三个问题我都核对过，第二个是误报。',
-    en: 'Optional when passing, required when sending back (say what must change). For example: I checked all three findings; the second is a false positive.',
+    zh: '写清要改什么，例如：产出里的三个问题我都核对过，第二个是误报，其余两个请修掉。',
+    en: 'Say what must change. For example: I checked all three findings; the second is a false positive, fix the other two.',
   },
-  'tasks.decidePass': { zh: '通过', en: 'Pass' },
   'tasks.decideFeedback': { zh: '反馈', en: 'Send back' },
   'tasks.decideAbandon': { zh: '放弃', en: 'Drop' },
   'tasks.decideRecover': { zh: '恢复这条任务', en: 'Recover this task' },
@@ -271,36 +240,27 @@ export const tasksText = {
     en: 'Sending back needs a reason — that text is what the executor works from.',
   },
   // ★ 反馈要接在**上一次执行**后面（`resumeFromRunId`），所以一次都没跑完时
-  //   它不能点。单独一句，因为这一档和「通过」不能点的原因是两件事。
+  //   它不能点。
   'tasks.needRunForFeedback': {
     zh: '「反馈」要接在上一次执行后面，所以得等它先跑完（正在跑的那次还没落定，接不上去）。',
     en: 'Sending back continues from the last run, so that run has to finish first (a run still in flight has not settled, so there is nothing to continue from).',
   },
-  'tasks.decidePassing': { zh: '正在记录…', en: 'Recording…' },
   'tasks.decideFeedbacking': { zh: '正在派发…', en: 'Dispatching…' },
   'tasks.decideAbandoning': { zh: '正在放弃…', en: 'Dropping…' },
-  'tasks.humanVerdictBadge': { zh: '人工', en: 'human' },
-  'tasks.humanVerdictReasonHeading': { zh: '人工裁决的理由', en: 'Why you decided this' },
-  'tasks.humanVerdictAlready': {
-    zh: '这条任务已经人工判过通过了（可以再判一次，历史会保留）。',
-    en: 'This task was already passed by hand (you can pass it again; history is kept).',
-  },
-  'tasks.humanVerdictUnavailable': {
-    zh: '「通过」暂时不可用：这条任务没有可裁决的结论（审核还在跑，或那条审核 run 没有产出判决）。「反馈」和「放弃」不受影响。',
-    en: 'Pass is unavailable for now: there is no conclusion to decide on (the review is still running, or its run produced no verdict). Send back and Drop still work.',
-  },
-  // ★ 判决已经通过、卡住的是**动作**。这一档必须单独说：在这里点"通过"会让
-  //   看板从「行动失败」跳到「已完成审查」——把一件没做成的事说成做完了。
-  'tasks.humanVerdictActionFirst': {
-    zh: '「通过」暂时不可用：这次判决已经通过了，卡住的是动作（还在跑，或者失败了）。人工通过只处理审核结论，不会把动作补上——要么等它，要么用「反馈」让它重做。「放弃」也可以。',
-    en: 'Pass is unavailable: the verdict already passed — what is stuck is the action (still running, or failed). Passing settles the review conclusion only and will not carry the action out; either wait, or use Send back to have it redone. Drop also works.',
-  },
   'tasks.abandonNote': {
     zh: '这条任务已经放弃了 —— 它不再出现在「需要注意」里。要接着做就点「恢复」。',
     en: 'This task was dropped — it no longer shows under “needs attention”. Recover it to pick it back up.',
   },
   // 删除任务（列表每项右侧的「×」）——与「放弃」不同：放弃只是改状态，
   // 删除是**连同全部执行记录一起删掉**（连带范围见 daemon 侧 `Store.deleteIssue`）。
+  /*
+   * 「沉淀技能」为什么还不能点：**这条 run 还没跑完**。
+   * （⚠️ D125 之前这里说的是"没有审核结论或用户反馈"，那个门槛已经撤掉。）
+   */
+  'tasks.optimizeNeedsFinishedRun': {
+    zh: '要等这条 run 跑完才能沉淀（沉淀的素材就是它的产出与过程）。',
+    en: 'Wait for this run to finish — what gets crystallized is its output and process.',
+  },
   'tasks.delete': { zh: '删除任务', en: 'Delete task' },
   'tasks.deleteConfirm': {
     zh: '删除后，这条任务的执行记录（消息、审核结果、产物）会一起删掉，且无法找回。',

@@ -127,7 +127,10 @@ describe('crystallizeTargets：目标面板信息', () => {
     assert.deepEqual(slugs, ['general-review', 'my-flow'], '执行者挂的 ∪ 对话带的')
     const mineEntry = targets.loadedSkills.find((s) => s.slug === 'my-flow')
     assert.equal(mineEntry?.source, 'mine', '提炼的来源如实带出（可进化）')
-    assert.equal(targets.reviewed, false, '聊天没有审核')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来断言 `targets.reviewed === false`（"聊天没有审核"）。
+     *   审核 run 退场 ⇒ 那个字段没有了。
+     */
     assert.equal(targets.materialStats, null, '没有消息 = 素材为空（早失败判据）')
     assert.equal(targets.activeDraft, null, '还没有起草过')
   })
@@ -259,32 +262,15 @@ describe('crystallizeTargets：目标面板信息', () => {
     })
     const targets1 = await crystallizeTargets(store, taskRun)
     assert.equal(targets1.scope, 'task')
-    assert.equal(targets1.reviewed, false, '还没有审核 run')
     assert.equal(targets1.activeDraft, null, '还没有起草')
-
-    // 加一条 completed 的审核 run（subject 指向任务 run）
-    const reviewRun = makeRun({
-      id: 'run-review',
-      agentId: agent.id as string,
-      kind: 'review',
-      status: 'completed',
-      subject: { type: 'run', id: taskRun.id as string },
-    })
-    await store.insertRun(reviewRun)
-    const targets2 = await crystallizeTargets(store, taskRun)
-    assert.equal(targets2.reviewed, true, '审核过 ⇒ reviewed')
-
-    // 未完成的审核 run 不算
-    const pendingRun = makeRun({
-      id: 'run-review-pending',
-      agentId: agent.id as string,
-      kind: 'review',
-      status: 'running',
-      subject: { type: 'run', id: taskRun.id as string },
-    })
-    await store.insertRun(pendingRun)
-    const targets3 = await crystallizeTargets(store, taskRun)
-    assert.equal(targets3.reviewed, true, '已完成的那条仍然成立')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来有三段 `reviewed` 判定——"还没有审核 run ⇒ false"、
+     *   "加一条 completed 的审核 run ⇒ true"、"未完成的不算，已完成的那条仍然成立"。
+     *   审核 run 退场 ⇒ 沉淀门槛没有判据，三段删（见 `crystallize.ts` 里那段说明）。
+     *
+     *   ⚠️ 那条判定守的是"**没被看过的产出不值得沉淀**"。这句话现在由人在看板上做：
+     *   平台再替他判一次，只会把"我觉得这条可以"变成一个没人能回答的问题。
+     */
   })
 
   test('task：activeDraft 的恢复语义（起草中 / 已完成待审阅 / 已入库跳过 / 最近优先）', async () => {
@@ -471,7 +457,14 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
     assert.match(round2!.text, /加个参数/)
   })
 
-  test('task：审核判决与用户反馈各成一份文件', async () => {
+  test('task：执行记录与用户反馈各成一份文件', async () => {
+    /*
+     * ⚠️ 2026-11（S5）：这条原来还断言 `verdict.md`（"审这条 run 的那条 review run
+     *   的最后一段文本"）。**审核 run 退场** ⇒ 素材不再生成那一份（`crystallize-material.ts`
+     *   里那段查找已经删掉），所以那条断言删了。
+     *
+     *   ⚠️ 老素材目录里可能还躺着 `verdict.md`：平台不删使用者的数据，起草者照样读得到。
+     */
     const agent = await seedAgent({ id: 'exec4' })
     const taskRun = await seedRun({
       id: 'run-task2',
@@ -479,20 +472,11 @@ describe('collectMaterial / writeMaterial：素材落盘（四轮）', () => {
       subject: { type: 'issue', id: 'issue-2' },
     })
     await appendMessage('run-task2', { type: 'text', content: '产出报告' })
-    const reviewRun = makeRun({
-      id: 'run-review2',
-      agentId: agent.id as string,
-      kind: 'review',
-      status: 'completed',
-      subject: { type: 'run', id: taskRun.id as string },
-    })
-    await store.insertRun(reviewRun)
-    await appendMessage('run-review2', { type: 'text', content: '结论：fail\n理由码：no_evidence' })
 
     const collected = await collectMaterial(store, taskRun, '第 3 步不对，应该先校验')
     const byPath = new Map(collected.pieces.map((p) => [p.relPath, p.text]))
     assert.match(byPath.get('task-run.md')!, /产出报告/)
-    assert.match(byPath.get('verdict.md')!, /结论：fail/, '判决单独一份')
+    assert.equal(byPath.has('verdict.md'), false, '不再生成判决那一份（审核 run 已退场）')
     assert.match(byPath.get('feedback.md')!, /第 3 步不对/, '反馈单独一份')
   })
 
@@ -966,7 +950,7 @@ describe('listCrystallizeDrafts：沉淀任务列表', () => {
 })
 
 describe('listCrystallizeSources：新建沉淀的来源选择器', () => {
-  test('对话=最后一轮没报错；任务=终态且审核过（未审核不列出）', async () => {
+  test('对话=最后一轮没报错；任务=终态就列出', async () => {
     const agent = await seedAgent({ id: 'exec4' })
     // 对话 A：最后一轮正常 → 列出
     const convA = makeConversation({ id: 'conv-4a', workspaceId: WS })
@@ -1022,7 +1006,7 @@ describe('listCrystallizeSources：新建沉淀的来源选择器', () => {
       at: 1,
     })
 
-    // 任务 X：终态 + 审核过 → 列出
+    // 任务 X：终态 → 列出
     const issueX = makeIssue({ id: 'issue-4x', workspaceId: WS })
     await store.insertIssue(issueX)
     await store.insertRun(
@@ -1035,18 +1019,12 @@ describe('listCrystallizeSources：新建沉淀的来源选择器', () => {
         queuedAt: 30,
       }),
     )
-    await store.insertRun(
-      makeRun({
-        id: 'rev-4x',
-        agentId: agent.id as string,
-        workspaceId: WS,
-        kind: 'review',
-        status: 'completed',
-        subject: { type: 'run', id: 'run-4x' },
-        queuedAt: 40,
-      }),
-    )
-    // 任务 Y：终态但没审核 → 不列出（点了进不去）
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还插一条 completed 的**审核 run**——门槛是"任务被
+     *   审核过才列进沉淀来源"。审核 run 退场 ⇒ 门槛撤掉（见 `crystallize.ts` 那段
+     *   说明），下面"任务 Y"那条断言也随之翻过来。
+     */
+    // 任务 Y：终态（没"审核"这回事了）→ 也列出
     const issueY = makeIssue({ id: 'issue-4y', workspaceId: WS })
     await store.insertIssue(issueY)
     await store.insertRun(
@@ -1069,9 +1047,11 @@ describe('listCrystallizeSources：新建沉淀的来源选择器', () => {
     assert.equal(conv4a!.turns, 1, '轮数 = 对话的 ChatTurn 条数（1 条）——仍然列出，素材统计会早失败')
     assert.ok(!convRows.some((i) => i.id === 'conv-4b'), '最后一轮报错的对话不列出')
     const taskX = taskRows.find((i) => i.id === 'issue-4x')
-    assert.ok(taskX, '审核过的终态任务列出')
+    assert.ok(taskX, '终态任务列出')
     assert.equal(taskX!.runId, 'run-4x')
-    assert.ok(!taskRows.some((i) => i.id === 'issue-4y'), '未审核的任务不列出（§4.3 门槛）')
+    const taskY = taskRows.find((i) => i.id === 'issue-4y')
+    assert.ok(taskY, '★ 终态就列出——"值不值得沉淀"由人判断，不再由平台替他判')
+    assert.equal(taskY!.runId, 'run-4y')
   })
 })
 

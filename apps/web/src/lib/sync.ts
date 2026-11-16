@@ -104,8 +104,11 @@ export interface SyncStatus {
   at: number
   reported: number
   queued: number
-  fetched: number
-  accepted: number
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有 `fetched` / `accepted`（"这轮从远端取回了几条
+   *   待处理项 / 其中几条被受理"）。报告摄取退场 ⇒ 同步只剩"往外上报"这一个方向，
+   *   两个字段与它们的界面文案一起删。
+   */
   warnings: Array<{ plugin: string; reason: string }>
   error: string | null
   skippedReporting: boolean
@@ -128,8 +131,6 @@ export async function runSyncCycle(options: {
     at: Date.now(),
     reported: 0,
     queued: readQueue().length,
-    fetched: 0,
-    accepted: 0,
     warnings: [],
     error: null,
     skippedReporting: false,
@@ -164,29 +165,19 @@ export async function runSyncCycle(options: {
     status.skippedReporting = true
   }
 
-  try {
-    const pending = await remote.pending()
-    status.warnings = pending?.warnings ?? []
-    if (Array.isArray(pending?.items) && pending.items.length > 0) {
-      // 交给本机 daemon（同源）。远端没有执行能力，也不该有。
-      const accepted = await api<{ runIds?: string[] }>('/api/reports', {
-        method: 'POST',
-        body: JSON.stringify({ source: 'third-party', items: pending.items }),
-      })
-      status.fetched = pending.items.length
-      status.accepted = accepted?.runIds?.length ?? 0
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    const loc = currentLocale()
-    const fetched = renderText(webText, 'err.fetchPendingFailed', loc, { reason: message })
-    // 一轮里两条都失败时要拼成一句给使用者看；分隔符（全角分号 vs "; "）也是
-    // 文案的一部分，所以它同样从词表里取，不写死在代码里。
-    status.error = status.error
-      ? `${status.error}${renderText(webText, 'err.messageSeparator', loc)}${fetched}`
-      : fetched
-  }
-
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有一轮"拉待处理项"——去远端 `GET /api/pending`，
+   *   把外挂插件抓到的报告**推给本机 daemon 的 `/api/reports`**，由它落库、路由、
+   *   起 review run。
+   *
+   *   报告摄取整条链退场 ⇒ 同步只剩**一个方向**（把本机发生的事上报给远端），
+   *   这一段连同 `SyncStatus.fetched` / `.accepted`、`err.fetchPendingFailed`、
+   *   `settings.syncFetched` 一起删。
+   *
+   *   ⚠️ 但它留下的两条纪律对剩下那一半仍然成立：① **先补交队列，再做别的**——
+   *   反过来会在远端不可达的每一轮先失败一次，队列永远补不上；② 失败**不抛异常**，
+   *   返回状态（同步失败不该让页面崩，也不该阻塞本机操作）。
+   */
   return status
 }
 
@@ -220,8 +211,6 @@ export function startSyncLoop(options: {
         at: Date.now(),
         reported: 0,
         queued: 0,
-        fetched: 0,
-        accepted: 0,
         warnings: [],
         error: String(err),
         skippedReporting: false,

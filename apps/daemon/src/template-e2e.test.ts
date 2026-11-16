@@ -5,7 +5,6 @@ import {
   AsyncQueue,
   buildBlocks,
   DEFAULT_TEMPLATES,
-  MATERIAL_MARKERS,
   renderFirstSentence,
   SAMPLE_EXECUTE_INPUT,
   type AgentBackend,
@@ -15,12 +14,9 @@ import {
 } from '@agentdeck/agent-core'
 import {
   ulid,
-  VERDICT_FENCE_BEGIN,
-  VERDICT_FENCE_END,
   type Agent,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
-import { createChainGroup } from './testing/chain.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -52,30 +48,14 @@ class RecordingBackend implements AgentBackend {
   seenSystem: string[] = []
   seenUser: string[] = []
 
-  /**
+  /*
    * 产出。
    *
-   * ★ 里面**带一份合法的判决**，这不是装饰：审核 run 拿不到判决时
-   *   `decideReview` 会派一条**重试 run**，于是"执行 + 审核 = 两次投递"
-   *   这条断言会数到三次。测试里数投递次数时，先让判决合法最省事
-   *   （重试那条链路自己在 review-e2e 里另有专门的用例）。
-   *   执行 run 的产出里多这几行也没关系——那边不解析判决。
+   * ⚠️ 2026-11（D125）：它原来里面**带一份合法的判决**（夹在判决围栏里）——因为
+   *   审核 run 拿不到判决时会派一条重试 run，"执行 + 审核 = 两次投递"那条断言就会
+   *   数到三次。审核 run 退场 ⇒ 不用再喂判决，一段普通产出即可。
    */
-  output =
-    '报告：我做完了。\n' +
-    VERDICT_FENCE_BEGIN +
-    '\n' +
-    JSON.stringify({
-      schemaVersion: 1,
-      conclusion: 'pass',
-      reasonCode: 'meets_criteria',
-      confidence: 0.9,
-      findings: [],
-      action: null,
-      escalateReason: null,
-    }) +
-    '\n' +
-    VERDICT_FENCE_END
+  output = '报告：我做完了。'
 
   async probe(): Promise<{ available: boolean; command: string; cliVersion: string | null }> {
     return { available: true, command: 'claude', cliVersion: '0.0.0-fake' }
@@ -166,7 +146,6 @@ async function makeIssue(title: string): Promise<string> {
 
 async function makeAgent(fields: Record<string, unknown>): Promise<Agent> {
   const { status, body } = await postJson('/api/agents', {
-    role: 'executor',
     ...fields,
   })
   assert.equal(status, 201, `建 agent 失败了：${JSON.stringify(body)}`)
@@ -245,7 +224,10 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     }
     // 2026-10：默认模版按「链路 × 块」——框架框就是老的那份，身份/任务框默认是变量
     assert.equal(payload.defaults['execute']!['frame'], DEFAULT_TEMPLATES.execute.frame, '默认模版要与代码里那份一致')
-    assert.equal(payload.defaults['review']!['frame'], DEFAULT_TEMPLATES.review.frame)
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还断言 `defaults['review']` 与代码里那份一致。
+     *   审核模版随审核 run 一起退场 ⇒ 那一档没有了。
+     */
     assert.equal(payload.defaults['execute']!['identity'], '{{identity}}')
     assert.equal(payload.defaults['execute']!['task'], '{{task}}')
     assert.equal(payload.defaults['chat']!['frame'], DEFAULT_TEMPLATES.chat.frame)
@@ -258,10 +240,6 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
       'subjectId',
       'language',
       'skills',
-      'reportKind',
-      'issueId',
-      'previousContext',
-      'verdict',
       'identity',
       'task',
     ])
@@ -276,7 +254,10 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     assert.equal(payload.current['execute']!['frame'], '')
     assert.equal(payload.current['execute']!['identity'], '')
     assert.equal(payload.current['execute']!['task'], '')
-    assert.equal(payload.current['review']!['frame'], '')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还断言 `current['review']` 三块为空串（审核模版
+     *   的存读）。审核模版随审核 run 一起退场 ⇒ 那一档没有了。
+     */
   })
 
   test('★ 预览走的是真渲染器：空模版就等于直接渲染默认那段（按块）', async () => {
@@ -409,10 +390,13 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     )
     await setBlock('execute', 'frame', '')
 
-    // 用错链路：verdict 只属于审核模版
+    /*
+     * 用错链路/不认识的变量：`{{verdict}}` 现在是**完全不存在**的变量（它原来只属于
+     * 审核模版，而审核模版随审核 run 一起退场了，D125）。
+     */
     const wrongKind = await setBlock('execute', 'frame', '{{verdict}}')
     assert.equal(wrongKind.status, 400)
-    assert.match((wrongKind.body as { error: string }).error, /只属于审核模版/)
+    assert.match((wrongKind.body as { error: string }).error, /不认识 `\{\{verdict\}\}`/)
 
     // 用错块：{{identity}} / {{task}} 只属于各自的框（2026-10）
     const identityInFrame = await setBlock('execute', 'frame', '## 角色\n\n{{identity}}')
@@ -422,20 +406,20 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     assert.equal(taskInIdentity.status, 400)
     assert.match((taskInIdentity.body as { error: string }).error, /③ 任务/)
 
-    /**
-     * ★ 聊天是**第三条链路**（2026-09）：它同样没有判决契约。
+    /*
+     * ★ 聊天是**第三条链路**（2026-09）：那里同样不该有 `{{verdict}}`。
      *
-     * ⚠️ 这条守着一句"错话"：判据原来是从当前 kind **反推**另一条链路
-     *   （`kind === 'execute' ? 'review' : 'execute'`），于是聊天模版里写
-     *   `{{verdict}}` 会被说成"只属于**执行**模版"——两条都不对，而使用者照着
-     *   这句话去找，只会在两条链路之间来回试。
+     * ⚠️ 2026-11（D125）：这条原来守着一句"错话"——判据曾经从当前 kind **反推**
+     *   另一条链路（`kind === 'execute' ? 'review' : 'execute'`），于是聊天模版里写
+     *   `{{verdict}}` 会被说成"只属于**执行**模版"。现在没有审核模版了，那个变量
+     *   直接不存在，报的是"不认识"——**说错话比不说话更费人**这条规矩没变。
      */
     const chatWrongKind = await setBlock('chat', 'frame', '{{verdict}}')
     assert.equal(chatWrongKind.status, 400)
     assert.match(
       (chatWrongKind.body as { error: string }).error,
-      /只属于审核模版/,
-      '聊天里的 {{verdict}} 属于审核，不属于执行',
+      /不认识 `\{\{verdict\}\}`/,
+      '聊天里也没有判决契约（那个变量已经不存在）',
     )
     await setBlock('chat', 'frame', '')
 
@@ -447,10 +431,11 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     const unknownBlock = await setTemplates({ execute: { nope: 'x' } })
     assert.equal(unknownBlock.status, 200, '不认识的块被忽略（PATCH 语义：只动传了的键）')
 
-    // 审核那份必须有判决契约（材料与标记现在由平台放，不在模版里）
-    const reviewMissing = await setBlock('review', 'frame', '{{runId}}')
-    assert.equal(reviewMissing.status, 400)
-    assert.match((reviewMissing.body as { error: string }).error, /verdict/)
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还验一条——"审核那份必须有判决契约
+     *   （`setBlock('review', ...)` 缺 `{{verdict}}` ⇒ 400）"。审核模版退场 ⇒
+     *   没有那一档可设，用例删。
+     */
   })
 
   test('★ 被拒的写法不落库；设上之后读得回；清空 = 回到平台默认', async () => {
@@ -481,8 +466,11 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     // 2026-10 后加的六个键（身份/任务框）老数据里也没有
     delete stripped['executeIdentityTemplate']
     delete stripped['executeTaskTemplate']
-    delete stripped['reviewIdentityTemplate']
-    delete stripped['reviewTaskTemplate']
+    /*
+     * ⚠️ 2026-11（D125）：`reviewTemplate` / `reviewIdentityTemplate` /
+     *   `reviewTaskTemplate` 三个键仍然删掉——它们是**老数据里真有的键**，而
+     *   现在的读入口不认识它们（审核模版退场）。这条用例要证明"老数据读得回来"。
+     */
     delete stripped['chatIdentityTemplate']
     delete stripped['chatTaskTemplate']
     // D36 那个字段也是同一类：加它之前建的 workspace 里根本没有这个键
@@ -494,7 +482,7 @@ describe('D32：第一句话模版是全局配置（接口与写入口）', () =
     assert.equal(current['execute']!['frame'], '', '缺键要补成空串（空 = 平台默认）')
     assert.equal(current['execute']!['identity'], '')
     assert.equal(current['execute']!['task'], '')
-    assert.equal(current['review']!['frame'], '')
+    // ⚠️ 2026-11（D125）：`current['review']` 那一档随审核模版一起退场。
     assert.equal(current['chat']!['frame'], '')
   })
 })
@@ -591,95 +579,18 @@ describe('D32：全局模版真的被投递（所有 agent 都按它来）', () 
     }
   })
 
-  test('★ 审核链路用的是**全局审核模版**，而且材料标记与判决契约仍在', async () => {
-    // 审核者必须挂 skill（没标准的审核不算审核），所以先装一个
-    const { body: installed } = await postJson('/api/skills', {
-      skills: [
-        {
-          slug: 'template-probe-review',
-          name: '模版探针标准',
-          body: '# 探针标准\n\n只看一件事：产出里有没有写测试。',
-        },
-      ],
-    })
-    const skillId = (installed as { installed: Array<{ id: string }> }).installed[0]!.id
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「★ 审核链路用的是**全局审核模版**，而且材料标记
+   *   与判决契约仍在」——执行完自动串一条审核 run，断言审核那条投递用的是全局
+   *   审核模版、判决契约没被模版删掉、文件引用块在、且不内联材料。
+   *
+   *   审核 run 退场 ⇒ 整条用例删。
+   *
+   *   ⚠️ 它守的两条纪律仍然成立：**模版改不掉平台放的关键内容**（契约、文件引用
+   *   这类），以及**有落盘文件就别内联材料**（内联是截断的转述，留着只会诱导模型
+   *   只看转述）。
+   */
 
-    const reviewer = await makeAgent({
-      name: '自定义模版的审核者',
-      role: 'reviewer',
-      skillIds: [skillId],
-    })
-    const executor = await makeAgent({ name: '执行者' })
-    // ⚠️ 2026-10：这里原来是 `makeAgent({ reviewerAgentId: reviewer.id })`——那个
-    //    字段已从 `Agent` 上撤掉（写它就是 400「不认识的字段」）。同一件事现在
-    //    由**组**表达，而提交那条 run 时要带上组的 id。
-    const groupId = await createChainGroup(
-      { url: daemon.url },
-      { name: '模版用例组', members: [executor.id, reviewer.id] },
-    )
-
-    // ★ 全局：只设一次，执行与审核两份各一份
-    const set = await setTemplates({
-      // 2026-09：模版只剩框架——材料、标记、标准、任务分别由平台放在 ②③
-      review: {
-        frame: '# 审核任务\n\n- run：`{{runId}}`\n\n（全局审核模版生效了）\n\n{{verdict}}',
-      },
-    })
-    assert.equal(set.status, 200, JSON.stringify(set.body))
-
-    const workDir = await makeTempDir('template-review')
-    try {
-      const before = backend.seen.length
-      const issueId = await makeIssue('走一遍自动串接')
-      const runId = ulid()
-      const started = await postJson('/api/runs', {
-        runId,
-        kind: 'execute',
-        agentRef: { id: executor.id, name: executor.name, instructions: '' },
-        // ★ 带组 ⇒ 自动串出审核 run（本用例要的就是"执行 + 审核两次投递"）
-        groupId,
-        skills: [],
-        subject: { type: 'issue', id: issueId },
-        prompt: '写点东西',
-        workDir,
-        limits: { maxTurns: null, timeoutMs: null },
-      })
-      assert.equal(started.status, 202)
-
-      // 执行 + 自动串接的审核 = 两次投递
-      await waitFor(async () => {
-        const { body } = await json('/api/runs')
-        const runs = (body as { runs: Array<{ status: string }> }).runs
-        return runs.length >= 2 && runs.every((r) => TERMINAL.has(r.status)) ? true : null
-      })
-      const delivered = backend.seen.slice(before)
-      assert.equal(delivered.length, 2, `应当恰好两次投递（执行 + 审核），实际 ${delivered.length}`)
-
-      const reviewText = delivered[1]!
-      assert.match(reviewText, /全局审核模版生效了/, '★ 审核那条路必须用全局审核模版')
-      assert.doesNotMatch(reviewText, /## 输出要求/, '默认模版的标题不该出现（被自定义模版换掉了）')
-      // ★ 判决契约是**必需变量**，自定义模版也删不掉它
-      assert.match(reviewText, /<<<ALPHA_VERDICT>>>/, '判决契约必须在')
-      // ★ §3.3b：文件式审核（执行 run 串出来的）平台放的是**文件引用**，
-      //   不是内联材料标记——内联那段是截断的转述，有文件就别再内联。
-      assert.match(reviewText, /## 完整材料（文件）/, '文件式审核要放文件引用（平台放，模版删不掉）')
-      assert.match(
-        reviewText,
-        /- 执行结果：`[^`]+rounds\/1-result\.md`/,
-        '结果文件引用要在',
-      )
-      assert.doesNotMatch(reviewText, /<<<ALPHA_MATERIAL>>>/, '文件式审核不再内联材料')
-      // A 档：标准并进 ②，而 ② 与 ① 一起走系统提示 ⇒ 认"内容在"而不是块名。
-      // ⚠️ 这个审核者**没写指令** ⇒ ② 里只有标准（这正是"空则跳过"的另一半：
-      //    一块里有标准就照发，不会因为没写指令而整块丢掉）。
-      assert.doesNotMatch(reviewText, /===== ② 身份 =====/, 'A 档没有块名（那是 B 档的边界）')
-      assert.match(reviewText, /探针标准/, '审核标准正文要跟着进去（并进 ②）')
-      assert.doesNotMatch(reviewText, /^# 任务$/m, '执行模版不该串到审核这条路上')
-    } finally {
-      await cleanup(workDir)
-      await setTemplates({ review: { frame: '' }, chat: { frame: '' } })
-    }
-  })
 })
 
 /**

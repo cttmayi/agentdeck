@@ -7,17 +7,18 @@ import {
   canTransitionRun,
   statusAfterDispatch,
 } from './run.ts'
-import {
-  assertVerdictTransition,
-  canTransitionVerdict,
-  verdictStatusForResolution,
-} from './verdict.ts'
-import {
-  actionIdempotencyKey,
-  assertActionTransition,
-  canTransitionAction,
-  stableStringify,
-} from './action.ts'
+/*
+ * ⚠️ 2026-11（D125）：这里原来还 import 了 './verdict.ts' 的三个东西
+ *   （`assertVerdictTransition` / `canTransitionVerdict` /
+ *   `verdictStatusForResolution`）。判决退场 ⇒ 那份状态机整份删掉。
+ */
+/*
+ * ⚠️ 2026-11（D123）：这里原来还 import 了 './action.ts' 的四个东西
+ *   （`actionIdempotencyKey` / `assertActionTransition` / `canTransitionAction` /
+ *   `stableStringify`）。动作记录退场 ⇒ 那份状态机整份删掉，这里随之删；
+ *   它的两组用例（「Action 生命周期」「动作幂等键」，后者含 `stableStringify`）
+ *   也一并删了——守着已不存在的东西的用例，比没有用例更坏。
+ */
 import { DomainError, DomainErrorCode, IllegalTransitionError } from '../errors.ts'
 
 describe('Run 状态机', () => {
@@ -79,103 +80,14 @@ describe('Run 状态机', () => {
   })
 })
 
-describe('Verdict 生命周期', () => {
-  test('正常路径 pending → emitted → validated → dispatched_to_action', () => {
-    assert.equal(canTransitionVerdict('pending_verdict', 'emitted'), true)
-    assert.equal(canTransitionVerdict('emitted', 'validated'), true)
-    assert.equal(canTransitionVerdict('validated', 'dispatched_to_action'), true)
-  })
-
-  test('★ invalid 是独立失败类型，且有三条处置路径', () => {
-    assert.equal(canTransitionVerdict('emitted', 'invalid'), true)
-    assert.equal(canTransitionVerdict('invalid', 'pending_verdict'), true) // retry
-    assert.equal(canTransitionVerdict('invalid', 'advisory'), true) // 降级
-    assert.equal(canTransitionVerdict('invalid', 'escalated'), true) // 升级
-  })
-
-  test('validated 不能直接进 invalid（已经是终局判定）', () => {
-    assert.equal(canTransitionVerdict('validated', 'invalid'), false)
-  })
-
-  test('三条处置路径映射到正确状态', () => {
-    assert.equal(verdictStatusForResolution('retry'), 'pending_verdict')
-    assert.equal(verdictStatusForResolution('downgrade_to_advisory'), 'advisory')
-    assert.equal(verdictStatusForResolution('escalate'), 'escalated')
-  })
-
-  test('非法转移抛错', () => {
-    assert.throws(() => assertVerdictTransition('advisory', 'validated'))
-  })
-})
-
-describe('Action 生命周期', () => {
-  test('默认路径是自动批准（INV-4）', () => {
-    assert.equal(canTransitionAction('proposed', 'auto_approved'), true)
-    assert.equal(canTransitionAction('auto_approved', 'executing'), true)
-    assert.equal(canTransitionAction('executing', 'executed'), true)
-  })
-
-  test('等待批准是例外路径，且仍可转回自动批准', () => {
-    assert.equal(canTransitionAction('proposed', 'awaiting_approval'), true)
-    assert.equal(canTransitionAction('awaiting_approval', 'auto_approved'), true)
-  })
-
-  test('幂等命中进 skipped（可见，不是静默成功）', () => {
-    assert.equal(canTransitionAction('proposed', 'skipped'), true)
-    assert.equal(canTransitionAction('auto_approved', 'skipped'), true)
-  })
-
-  test('已执行的动作可以事后回滚', () => {
-    assert.equal(canTransitionAction('executed', 'rolled_back'), true)
-  })
-
-  test('终态没有出边', () => {
-    for (const s of ['failed', 'rolled_back', 'skipped'] as const) {
-      assert.equal(canTransitionAction(s, 'executing'), false)
-    }
-  })
-
-  test('非法转移抛错', () => {
-    assert.throws(() => assertActionTransition('skipped', 'executing'))
-  })
-})
-
-describe('动作幂等键', () => {
-  // ⚠️ D41：这两条用到的动作名只是**幂等键的夹具**（主体是"键里含哪些东西"），
-  //    所以换成形状合法的工具动作名 `<包 slug>.<动作名>`——平台的内置动作已经
-  //    全部移除，`issue.update_status` / `comment.create` 那种内置名在平台里
-  //    不再可能出现（`<slug>.<name>` 才是唯一形状）。断言一字未改。
-  test('★ 含 verdictId：不同判决的相同动作不会被去重（多视角审核，FR-AGENT-21）', () => {
-    const base = { type: 'fixture-tool.act', params: { text: 'todo' } }
-    const a = actionIdempotencyKey({ verdictId: 'v1', ...base })
-    const b = actionIdempotencyKey({ verdictId: 'v2', ...base })
-    assert.notEqual(a, b, '两个不同的 verdict 产生同一动作，必须得到不同的幂等键')
-  })
-
-  test('同一判决重放得到同一幂等键（会被去重）', () => {
-    const input = { verdictId: 'v1', type: 'other-tool.act', params: { text: 'x' } }
-    assert.equal(actionIdempotencyKey(input), actionIdempotencyKey({ ...input }))
-  })
-
-  test('参数键顺序不影响幂等键', () => {
-    const a = actionIdempotencyKey({
-      verdictId: 'v1',
-      type: 't',
-      params: { b: 2, a: 1 },
-    })
-    const b = actionIdempotencyKey({
-      verdictId: 'v1',
-      type: 't',
-      params: { a: 1, b: 2 },
-    })
-    assert.equal(a, b)
-  })
-
-  test('stableStringify 递归排序，且忽略 undefined', () => {
-    assert.equal(stableStringify({ b: 1, a: { d: 2, c: 3 } }), '{"a":{"c":3,"d":2},"b":1}')
-    assert.equal(stableStringify({ a: 1, b: undefined }), '{"a":1}')
-    assert.equal(stableStringify([3, 1, 2]), '[3,1,2]')
-    assert.equal(stableStringify(null), 'null')
-    assert.equal(stableStringify('x'), '"x"')
-  })
-})
+/*
+ * ⚠️ 2026-11（D125）：这里原来是「Verdict 生命周期」——判决状态机（pending →
+ * emitted → validated → dispatched_to_action / invalid 的三条处置路径，以及
+ * "非法转移要抛而不是静默"）。
+ *
+ *   判决退场 ⇒ 整组用例删。
+ *
+ *   ⚠️ 其中一条规则没有过期，它是这套状态机最值钱的地方：**`invalid` 是独立的
+ *   失败类型，不是"随便哪一档都能回退"**——`validated` 不能回到 `invalid`，
+ *   因为那已经是终局判定。同一件事在 `run.ts` 那边还守着。
+ */

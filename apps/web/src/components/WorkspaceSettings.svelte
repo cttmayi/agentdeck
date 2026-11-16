@@ -43,7 +43,6 @@
   /** 三块各一份的草稿（空串 = 那一块用平台默认）。 */
   let drafts: Record<FirstSentenceKind, BlockTemplates> = {
     execute: { frame: '', identity: '', task: '' },
-    review: { frame: '', identity: '', task: '' },
     chat: { frame: '', identity: '', task: '' },
     workflow: { frame: '', identity: '', task: '' },
   }
@@ -85,7 +84,6 @@
   $: if (!seeded && $templateKit !== null) {
     drafts = {
       execute: copyKit($templateKit.current.execute),
-      review: copyKit($templateKit.current.review),
       chat: copyKit($templateKit.current.chat),
       workflow: copyKit($templateKit.current.workflow),
     }
@@ -144,8 +142,7 @@
       //    `drafts` 是从 `current` 取来的，所以这里发出去的就是界面显示的那份。
       await saveFirstSentenceTemplates({
         execute: drafts.execute,
-        review: drafts.review,
-        chat: drafts.chat,
+          chat: drafts.chat,
       })
       showToast(tx('tpl.settings.savedToast'))
       onclose()
@@ -201,15 +198,12 @@
             {$t('tpl.settings.tabExecute')}
             {#if kindDirty('execute')}<span class="dot">●</span>{/if}
           </button>
-          <button
-            type="button"
-            class="tab"
-            class:active={tab === 'review'}
-            onclick={() => (tab = 'review')}
-          >
-            {$t('tpl.settings.tabReview')}
-            {#if kindDirty('review')}<span class="dot">●</span>{/if}
-          </button>
+          <!--
+            ⚠️ 2026-11（S6）：这里原来有第三个页签「审核」。审核 run 退场（D125）之后
+            服务端只认 execute / chat / workflow 三档，而这一页还画着它 ⇒ 点得开、
+            框能写、**保存什么都不发生**（服务端按 `ALL_KINDS` 遍历，`review` 根本
+            不在里面）。那正是"接口接受了、行为上不存在"，所以页签一并删掉。
+          -->
           <button
             type="button"
             class="tab"

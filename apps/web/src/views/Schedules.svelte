@@ -13,21 +13,13 @@
   } from '../lib/api.ts'
   import { t, tx } from '../lib/i18n.ts'
 import type { WebTextId } from '@agentdeck/i18n'
-  import {
-    agents,
-    effectiveDefaultAgentId,
-    groups,
-    identity,
-    loadIssues,
-    loadRuns,
-    tools,
-  } from '../lib/stores.ts'
+  import { agents, effectiveDefaultAgentId, loadIssues, loadRuns } from '../lib/stores.ts'
   import { go, goSchedCreate, goSchedEdit, schedForm, selectedIssueId, showToast } from '../lib/view.ts'
+  import { executorCandidates } from '../lib/newtask-chain.ts'
   import { askConfirm } from '../lib/confirm.ts'
   import { relativeTime } from '../lib/time.ts'
   import { listGrip } from '../lib/list-grip.ts'
   import DirPicker from '../components/DirPicker.svelte'
-  import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
   import {
     defaultScheduleForm,
     isWorkdays,
@@ -74,9 +66,7 @@ import type { WebTextId } from '@agentdeck/i18n'
   let formName = ''
   let form: ScheduleForm = defaultScheduleForm()
   let formTaskText = ''
-  let formSource: 'agent' | 'group' = 'agent'
   let formAgentId = ''
-  let formGroupId = ''
   let formError = ''
   let busy = false
   // 2026-11：工作目录（可选，与「新建任务」同款控件）+ 触发方式（fresh/resume）
@@ -127,36 +117,15 @@ import type { WebTextId } from '@agentdeck/i18n'
   }
   void load()
 
-  // ── 执行者候选（与 NewTaskForm 同一套推导）──
-  $: groupSupported = ($identity?.capabilities ?? []).includes('agent-groups')
-  $: enabledGroups = groupSupported ? $groups.filter((g) => g.enabled) : []
-  $: executorAgents = $agents.filter((a) => a.role === 'executor')
-  $: chosenGroup = formGroupId ? ($groups.find((g) => g.id === formGroupId) ?? null) : null
-  $: groupExec = chosenGroup ? groupExecutor(chosenGroup.memberAgents) : null
-  $: groupReviewerId = chosenGroup
-    ? (chosenGroup.memberAgents.find((m) => m.id !== groupExec?.id)?.id ?? '')
-    : ''
-  $: groupChainDefaults = chosenGroup
-    ? {
-        members: chosenGroup.memberAgents,
-        reviewerId: groupReviewerId || null,
-        allowedActions: chosenGroup.allowedActions,
-        actionParams: chosenGroup.actionParams,
-        maxReworks: chosenGroup.maxReworks,
-      }
-    : null
-  $: chosen = executorAgents.find((a) => a.id === formAgentId) ?? null
-  $: executor = formSource === 'group' ? groupExec : chosen
+  /*
+   * 执行者候选（与 NewTaskForm 同一套判据：`role === 'executor'`）。
+   *
+   * ⚠️ 2026-11（S3）：这里原来还支持"挂一个智能体组"（`formSource === 'group'` +
+   *   `formGroupId` + `groupExecutor`）。组退场 ⇒ 定时任务只能选一个具体 agent。
+   */
+  $: executorAgents = executorCandidates($agents)
+  $: executor = executorAgents.find((a) => a.id === formAgentId) ?? null
   $: executorName = executor?.name ?? null
-  $: chain = resolveNewTaskChain({
-    executor,
-    choice: { mode: 'default' },
-    agents: $agents,
-    tools: $tools,
-    group: formSource === 'group' ? groupChainDefaults : null,
-  })
-  $: actionNames = [...chain.actions, ...chain.unavailableActions]
-
   $: enabledCount = list.filter((s) => s.enabled).length
 
   // ── 新建 / 编辑 ──
@@ -206,8 +175,6 @@ import type { WebTextId } from '@agentdeck/i18n'
     formName = ''
     form = defaultScheduleForm()
     formTaskText = ''
-    formSource = 'agent'
-    formGroupId = ''
     formAgentId = $effectiveDefaultAgentId ?? executorAgents[0]?.id ?? ''
     formWorkDir = ''
     formResume = 'fresh'
@@ -217,12 +184,7 @@ import type { WebTextId } from '@agentdeck/i18n'
     formName = s.name
     form = scheduleCronToForm(s.cron)
     formTaskText = s.taskText
-    formSource = s.executorType
-    if (s.executorType === 'group') {
-      formGroupId = s.executorId
-    } else {
-      formAgentId = s.executorId
-    }
+    formAgentId = s.executorId
     formWorkDir = s.workDir ?? ''
     formResume = s.resumeMode
   }
@@ -256,15 +218,11 @@ import type { WebTextId } from '@agentdeck/i18n'
       formError = tx('schedules.taskLabel') + '…' + tx('schedules.required')
       return
     }
-    if (formSource === 'group' && !formGroupId) {
-      formError = tx('newtask.groupPickRequired')
-      return
-    }
-    if (formSource === 'agent' && !formAgentId) {
+    if (!formAgentId) {
       formError = tx('schedules.executorLabel') + '…' + tx('schedules.required')
       return
     }
-    const executorId = formSource === 'group' ? formGroupId : formAgentId
+    const executorId = formAgentId
     // 2026-11：工作目录留空 = null（daemon 自动分配）；触发方式 fresh/resume
     const workDir = formWorkDir.trim() === '' ? null : formWorkDir.trim()
     const resumeMode: ScheduleResumeMode = formResume
@@ -277,7 +235,7 @@ import type { WebTextId } from '@agentdeck/i18n'
             name: formName.trim(),
             cron: scheduleFormToCron(form),
             taskText: formTaskText.trim(),
-            executorType: formSource,
+            executorType: 'agent',
             executorId,
             workDir,
             resumeMode,
@@ -301,7 +259,7 @@ import type { WebTextId } from '@agentdeck/i18n'
         const input: ScheduleCreateInput = {
           name: formName.trim(),
           cron: scheduleFormToCron(form),
-          executorType: formSource,
+          executorType: 'agent',
           executorId,
           taskText: formTaskText.trim(),
           workDir,
@@ -744,56 +702,19 @@ import type { WebTextId } from '@agentdeck/i18n'
             <p class="hint">{$t('schedules.varsHint')}</p>
           </div>
 
-          <!-- 交给谁：智能体 / 组（与任务表单同一套推导） -->
+          <!-- 交给谁：一个执行者（⚠️ 2026-11/S3：这里原来还有「智能体 / 组」互斥切换，
+               组退场 ⇒ 只剩选人） -->
           <div class="field">
             <label>{$t('schedules.executorLabel')}</label>
-            <!-- 智能体/组互斥切换：与任务表单同一套轨道（app.css .source-toggle，
-                 2026-11 review 从 NewTaskForm 提取共用——原来定时任务用独立 pill，
-                 使用者说整个页面风格与其它页面完全不同） -->
-            <div class="source-toggle">
-              <button
-                type="button"
-                class:active={formSource === 'agent'}
-                onclick={() => (formSource = 'agent')}
-              >
-                {$t('schedules.executorAgent')}
-              </button>
-              <button
-                type="button"
-                class:active={formSource === 'group'}
-                onclick={() => (formSource = 'group')}
-              >
-                {$t('schedules.executorGroup')}
-              </button>
-            </div>
-            {#if formSource === 'agent'}
-              <select bind:value={formAgentId}>
-                {#each executorAgents as a (a.id)}
-                  <option value={a.id}>{a.name}</option>
-                {/each}
-              </select>
-            {:else}
-              <select bind:value={formGroupId}>
-                <option value="" disabled>{$t('newtask.groupPickPlaceholder')}</option>
-                {#each enabledGroups as g (g.id)}
-                  <option value={g.id}>{g.name}</option>
-                {/each}
-              </select>
-            {/if}
+            <select bind:value={formAgentId}>
+              {#each executorAgents as a (a.id)}
+                <option value={a.id}>{a.name}</option>
+              {/each}
+            </select>
             {#if executorName}
-              <p class="hint summary-line">
-                {$t('schedules.summary', {
-                  executor: executorName,
-                  reviewer: chain.reviewer?.name ?? tx('newtask.footReviewerNone'),
-                  actions: actionNames.length > 0 ? actionNames.join('、') : tx('schedules.none'),
-                  reworks:
-                    formSource === 'group'
-                      ? chosenGroup?.maxReworks === null
-                        ? tx('newtask.summaryReworkUnlimited')
-                        : tx('newtask.summaryReworkTimes', { n: chosenGroup?.maxReworks ?? 0 })
-                      : tx('newtask.summaryReworkZero'),
-                })}
-              </p>
+              <!-- ⚠️ 2026-11（D125）：这里原来还报"谁审"（`schedules.summary` 的
+                   `reviewer` 插值）。审核 run 退场 ⇒ 定时任务也只说执行者。 -->
+              <p class="hint summary-line">{$t('schedules.summaryExecutor', { executor: executorName })}</p>
             {/if}
           </div>
 
@@ -901,9 +822,10 @@ import type { WebTextId } from '@agentdeck/i18n'
         <div class="drawer-section">
           <h3>{$t('schedules.executorLabel')}</h3>
           <p class="muted">
-            {s.executorType === 'group'
-              ? $groups.find((g) => g.id === s.executorId)?.name ?? s.executorId
-              : $agents.find((a) => a.id === s.executorId)?.name ?? s.executorId}
+            <!-- ⚠️ 2026-11（S3）：这里原来还分"组 / 单个智能体"两档取名字。组退场 ⇒
+                 只剩 agent（老记录里 `executorType === 'group'` 的会显示那个组 id 原文，
+                 并在触发时记一条 failed 说明要改选）。 -->
+            {$agents.find((a) => a.id === s.executorId)?.name ?? s.executorId}
           </p>
           <!-- 启动方式 + 工作目录（有值才说；与表单同一句话） -->
           <p class="hint">

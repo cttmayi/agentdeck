@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { startDaemon } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
-import { installToolPackage, writeToolPackage } from './testing/tool-fixture.ts'
 
 /**
  * 新建智能体（FR-AGENT-01/12/15/20）。
@@ -155,27 +154,25 @@ describe('★ 数组字段要校验元素类型，不是"给了数组就行"', (
   })
 })
 
-describe('★ 角色（原来还管"由谁审我"，2026-10 起那件事只有组能回答）', () => {
-  test('缺省角色是 executor', async () => {
-    // 新建一个 agent 时"它能干活"是最合理的默认；默认成审核者会让它
-    // 悄悄进入审核小组。
+describe('★ 角色已经退场（2026-11，D127）', () => {
+  test('新建的 agent **没有**角色：发 `role` 一律"不认识的字段"400', async () => {
+    /*
+     * ⚠️ 2026-11（S4，D127）：这一节原来钉的是"缺省角色 executor""role 只认两个取值"
+     *   （`executor` / `reviewer`）。**角色退场** ⇒ 用户建的 agent 就是 agent，
+     *   平台不再问"它是什么角色"。
+     *
+     *   现在守的是**反向**：那个键彻底不被接受（而不是"收下但不生效"——后者会让
+     *   使用者以为配上了，而配置一个字节都没落）。
+     */
     await withDaemon(async (url) => {
-      const res = await create(url, { name: 'x' })
-      assert.equal(res.body['role'], 'executor')
-      // ⚠️ 这里原来还断言 `reviewerAgentId === null`——那个字段已经从 `Agent` 上
-      //    整个撤掉，所以现在的判据是"读回来的记录里**没有这个键**"（而不是"它是
-      //    null"）。这一条同时钉住"老字段不会从任何角落里漏出来"。
-      assert.ok(
-        !Object.hasOwn(res.body as Record<string, unknown>, 'reviewerAgentId'),
-        '撤掉的字段不该出现在新建记录里（连 null 都不该有）',
-      )
-    })
-  })
-
-  test('role 只认两个取值', async () => {
-    await withDaemon(async (url) => {
-      assert.equal((await create(url, { name: 'x', role: 'admin' })).status, 400)
-      assert.equal((await create(url, { name: 'r', role: 'reviewer' })).status, 201)
+      for (const role of ['executor', 'reviewer', 'admin', 'drafter']) {
+        const res = await create(url, { name: `带角色的 ${role}`, role })
+        assert.equal(res.status, 400, `role=${role} 该被当成不认识的字段`)
+        assert.match(String(res.body['error']), /不认识的字段/)
+      }
+      const ok = await create(url, { name: '正常的' })
+      assert.equal(ok.status, 201)
+      assert.equal('role' in (ok.body as Record<string, unknown>), false, '新建记录里没有角色')
     })
   })
 
@@ -377,7 +374,6 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             name: 'generic 审核者',
-            role: 'reviewer',
             runtimeKey: 'generic',
             // D37/D38：审核者靠**自己带的标准**审，不再靠挂 skill
             reviewStandard: {
@@ -433,11 +429,11 @@ describe('★ runtime 真的会被消费（不只是记在字段里）', () => {
 describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
   test('★ 设上之后，列表接口把它带出来；取消之后回到 null', async () => {
     await withDaemon(async (url) => {
-      const created = await create(url, { name: '默认候选', role: 'executor' })
+      const created = await create(url, { name: '默认候选' })
       const id = created.body['id'] as string
 
       const before = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string }>
+        agents: Array<{ id: string; builtin?: boolean }>
         defaultAgentId: string | null
       }
       assert.ok(before.agents.length >= 3, '播种的 + 新建的都在')
@@ -457,18 +453,28 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
     })
   })
 
-  test('★ 审核者不能当默认（任务不会交给被动的那一方）', async () => {
+  test('★ 平台内置岗位不能当默认（任务不会交给它们）', async () => {
     await withDaemon(async (url) => {
-      const reviewer = await create(url, { name: '一个审核者', role: 'reviewer' })
+      /*
+       * ⚠️ 2026-11（S4，D127）：这条原来叫「审核者不能当默认」——那时"审核者"是一个
+       *   角色，判据是 `role === 'executor'`。**角色退场**之后，唯一不能当默认的是
+       *   **平台内置岗位**（起草者 / 记忆整理 / 生成者 / 沉淀审核者）。
+       */
+      const list = (await (await fetch(`${url}/api/agents`)).json()) as {
+        agents: Array<{ id: string; builtinKind?: string }>
+      }
+      const drawer = list.agents.find((a) => a.builtinKind === 'drafter')
+      assert.ok(drawer, '启动对账要建出内置起草者')
+
       const res = await fetch(`${url}/api/agents/default`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agentId: reviewer.body['id'] }),
+        body: JSON.stringify({ agentId: drawer.id }),
       })
       assert.equal(res.status, 400)
       const body = (await res.json()) as { error: string }
-      assert.match(body.error, /只有「执行」角色/)
-      assert.match(body.error, /审核者/, '要说清为什么——否则人会以为是 bug')
+      assert.match(body.error, /内置岗位/, '要说清为什么——否则人会以为是 bug')
+      assert.match(body.error, /不接业务任务/)
     })
   })
 
@@ -480,31 +486,6 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
    * 这条用例钉的是**拒绝时说的话**：原来一律说"…是审核者"，对起草者是错方向的解释
    * （使用者会去找"谁把它的审核关掉"，而它根本不是审核者）。
    */
-  test('★★ 沉淀起草者（内置）也不能当默认，且理由要**按角色说**（不许一律说是审核者）', async () => {
-    await withDaemon(async (url) => {
-      // 内置起草者由启动对账建出来，不必自己造
-      const list = (await (await fetch(`${url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; name: string; role: string }>
-      }
-      const drafter = list.agents.find((a) => a.role === 'drafter')
-      assert.ok(drafter, '启动对账应该已经建出内置起草者')
-
-      const res = await fetch(`${url}/api/agents/default`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agentId: drafter.id }),
-      })
-      assert.equal(res.status, 400)
-      const body = (await res.json()) as { error: string }
-      assert.match(body.error, /只有「执行」角色/)
-      assert.match(body.error, /起草/, '要说它是起草者（这是它真实的角色）')
-      assert.doesNotMatch(
-        body.error,
-        /是审核者/,
-        '对起草者说"它是审核者"是错方向的解释——使用者会照着去改错地方',
-      )
-    })
-  })
 
   test('★ 没有「取消默认」：必须有一个默认（要换就设成另一个）', async () => {
     await withDaemon(async (url) => {
@@ -519,8 +500,8 @@ describe('★ 默认智能体：设 / 取消 / 只认执行者', () => {
       assert.match(body.error, /设成另一个/, '要告诉人正确的做法是什么')
 
       // 设成另一个 ⇒ 原来那个自动让位（单值本身保证了这一点）
-      const a = await create(url, { name: '甲执行者', role: 'executor' })
-      const b = await create(url, { name: '乙执行者', role: 'executor' })
+      const a = await create(url, { name: '甲执行者' })
+      const b = await create(url, { name: '乙执行者' })
       for (const agent of [a, b]) {
         const r = await fetch(`${url}/api/agents/default`, {
           method: 'PUT',

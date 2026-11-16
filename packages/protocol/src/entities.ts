@@ -1,24 +1,18 @@
 import { z } from 'zod'
 import {
-  ActionPlane,
   ActionRefType,
-  ActionStatus,
   ArtifactKind,
   AuthorType,
   CommentType,
   IssuePriority,
   IssueStatus,
-  ReasonCode,
   RunFailureReason,
   RunKind,
   RunStatus,
   RunTrigger,
-  VerdictConclusion,
-  VerdictStatus,
 } from './enums.ts'
 import {
   ActionId,
-  AgentGroupId,
   AgentId,
   ArtifactId,
   AuditId,
@@ -29,7 +23,6 @@ import {
   DeviceId,
   IssueId,
   MemoryEntryId,
-  ReportId,
   RunId,
   RuntimeId,
   SkillId,
@@ -37,7 +30,6 @@ import {
   VerdictId,
   WorkspaceId,
 } from './ids.ts'
-import { ActionRef, Finding } from './verdict.ts'
 
 /** epoch 毫秒。全项目统一用整数时间戳，不用 ISO 字符串。 */
 export const EpochMs = z.number().int().nonnegative()
@@ -118,8 +110,8 @@ export const Workspace = z.object({
    * 它是**全局单值**——"默认交给谁"本来就是一个选择，不是每个任务一份配置。
    * `null` = 没设过（新建任务页退回"列表里的第一个"）。
    *
-   * ⚠️ 只能是 `role: 'executor'` 的 agent：审核者是被动的那一方，任务不会交给
-   *    它执行。这条在写入口校验（`PUT /api/agents/default`）。
+   * ⚠️ **不能是平台内置岗位**（起草者 / 生成者那些）：它们干的是平台自己的活，
+   *    不该被派用户任务。这条在写入口校验（`PUT /api/agents/default`）。
    *
    * ⚠️ 指向的 agent 被删掉之后，这个值会悬空。读的时候不清理（那要写库，
    *    而"读"这条路上不该有副作用），**用的时候按"等于没设"处理**——
@@ -316,9 +308,9 @@ export const Skill = z.object({
    * 内联标准才是判断依据，动作白名单却还留在 skill 里，于是同一件事有了
    * **两个出处**（老数据的兼容路径正是靠这种并集工作的）。
    *
-   * 它先是搬到 `Agent.allowedActions`（D40 收口），2026-10 又整个搬到
-   * `AgentGroup.allowedActions`（动作属于链、不属于某个人），skill 只剩
-   * "正文 + 支持文件"。
+   * 它先是搬到 `Agent.allowedActions`（D40 收口），2026-10 又搬到
+   * `AgentGroup.allowedActions`（动作属于链、不属于某个人），最后随**整个动作能力
+   * 退场**（2026-11，D123）消失——skill 从一开始就只剩"正文 + 支持文件"。
    * 老数据里这个键还在（整条记录以 JSON 存、读取路径上没有 zod 校验），
    * 读取方按"没有"处理即可——不需要数据迁移。
    */
@@ -384,9 +376,9 @@ export type Skill = z.infer<typeof Skill>
  *    逐字节相同的一份重复拷贝，且那个名字来自平台内置那份标准的常量（该常量
  *    2026-09 随"标准并进指令"一起删了），没人选过它。
  *
- * ⚠️ **"允许动什么"不在标准里**（D40 收口搬走了，2026-10 起它住在
- *    `AgentGroup.allowedActions`）：判断依据与处置权限是两件事——分开放之后，
- *    改了标准正文与放宽了能动的范围在审计与界面上都能分开看。
+ * ⚠️ **"允许动什么"不在标准里**：它一度搬到 `Agent.allowedActions`、再搬到
+ *    `AgentGroup.allowedActions`，2026-11（D123）随动作能力整体退场——现在标准只
+ *    回答"按什么判"，不再有任何处置权限。
  *
  * ⚠️ 与 `instructions` 的区别：`instructions` 是"这个 agent 的态度与角色"
  *    （进 `{{instructions}}`），标准是"它按什么判"（进 `{{standards}}`）。
@@ -415,48 +407,34 @@ export type ReviewStandard = z.infer<typeof ReviewStandard>
  * **不是常驻进程**——只在被触发时执行。
  * 每个 agent 有**自己的** skill 子集与 tool 子集（FR-AGENT-03/12/17）。
  */
-/** agent 的角色（D28）。 */
-// ⚠️ `drafter` = **平台内置的起草者**（沉淀/skill 起草那条链用它，2026-10 定稿）。
-//    加它的理由不只是"多一种角色"：起草者**绝不能被选去干业务活**（它的指令是
-//    "你是 skill 作者"），而各处"选执行者/审核者"的判据写的都是 `role === 'executor'`
-//    / `role === 'reviewer'` 这种**等值**判断 ⇒ 新成员天然被排除在外（这正是要的）。
-//    反过来说：**谁要是把这类判据改成 `role !== 'reviewer'`，起草者就会漏进选择器**。
-//   `skill-reviewer` = **平台内置的 skill 审核者**（审起草出来的 skill，2026-10 §10）。
-//   ⚠️ 为什么**不**用 `'reviewer'`：业务报告的路由判据是
-//   `packages/domain/src/routing/kind.ts` 的 `a.role === 'reviewer' && hasReviewIdentity(a)`
-//   ——给它 `'reviewer'` 的话它会**开始接收业务报告去审**（进了闭环），而它的指令是
-//   "审 skill 的质量与脚本"。独立成员靠上面那条等值判断天然落在外面。
-// ⚠️ `memory-tidy` = **平台内置的「记忆整理者」**（分批第 244 批）：它把一段对话里
-//    "人教过的东西"挑成候选，供人确认后写进某个智能体的记忆。和起草者同一条纪律：
-//    **绝不参与业务选择**（各处挑选执行者/审核者用的是 `role === 'executor'` /
-//    `'reviewer'` 这种**等值**判断，新成员天然落在外面），也**不能被选去聊天**
-//    （聊天只接受 executor）——它不闲聊，它只整理。
-// ⚠️ `agent-maker` = **平台内置的「智能体生成者」**（2026-11 设计定稿
-//    `docs/design/recruiter-interview.md`）：帮人把一个岗位说清楚并**写下来**——它
-//    在聊天里问五字段、**规则由它描述**（不是让用户写），产出岗位卡（工作目录
-//    agent-draft.md）供确认生成。与 memory-tidy 同一条纪律：**绝不参与业务选择**
-//    （等值判断天然排除）。它与 memory-tidy 唯一的不同是**能聊天**：聊天放行的
-//    判据从 `role === 'executor'` 扩到 `'executor' ∪ 'agent-maker'`（只有那两处，
-//    由测试钉住）。为什么敢放行：聊天不产出判决，而它本来就不判事——它只问只写。
-export const AgentRole = z.enum([
-  'executor',
-  'reviewer',
-  'drafter',
-  'skill-reviewer',
-  'memory-tidy',
-  'agent-maker',
-])
-export type AgentRole = z.infer<typeof AgentRole>
-
-/**
- * 智能体组的模式（第二轮，2026 续）。
+/*
+ * ⚠️ 2026-11（S4，D127）：这里原来是 `AgentRole`（`executor` / `reviewer` / `drafter` /
+ *   `skill-reviewer` / `memory-tidy` / `agent-maker`）——**智能体的角色**。
  *
- * 现在只有 `'workflow'`（工作流模式 = 「执行 → 审核 → 行动」顺序链）。它是**枚举
- * 而不是字符串**：未来模式（会签 / 多执行者并行 / 多步链）是往这个枚举里加值，
- * 而不是发明新的表达方式（见 `AgentGroup.mode` 那段注释与设计稿 §15）。
+ *   **角色退场**：使用者拍板「智能体本身也不分『执行』与『审核』」，而审核 run
+ *   （D125）退场之后，"执行者 / 审核者"这个区分已经**没有任何行为**挂着了。剩下
+ *   那四个值是**平台内置岗位**（起草者 / 沉淀审核者 / 整理记忆 / 生成者）——它们
+ *   与"角色"不是一回事：前者是"平台自己的活由谁干"，后者是"这个人能干什么活"。
+ *
+ *   所以两件事分开：
+ *   · **角色**（谁能接任务、谁审谁）⇒ 删掉，用户建的 agent 就是 agent；
+ *   · **内置岗位** ⇒ 变成 `Agent.builtinKind` 一个显式标记（只有平台建的那几条有）。
+ *
+ *   ⚠️ 当年那条"等值判断"的纪律值得记一笔：`role === 'executor'` 这种**等值**判断
+ *   让新加的岗位天然落在业务选择之外，而 `role !== 'reviewer'` 会把它漏进选择器。
+ *   **筛选用等值、不用不等值**——这条在 `builtinCandidates` 里仍然成立（现在筛的是
+ *   `builtin !== true`）。
  */
-export const GroupMode = z.enum(['workflow'])
-export type GroupMode = z.infer<typeof GroupMode>
+
+
+/*
+ * ⚠️ 2026-11（S3）：`GroupMode`（当时只有 `'workflow'` 一个值）随 `AgentGroup` 一起删。
+ *   它当年留着的理由是"未来模式（会签 / 多执行者并行 / 多步链）是往枚举里加值，而不是
+ *   发明新的表达方式"——那个未来落到了**编排**那边（`packages/orchestration` 的
+ *   `flow` / `loop` / `parallel` / `route`），也就是用**代码**表达顺序，不需要一个
+ *   枚举去描述它。
+ */
+
 
 export const Agent = z.object({
   id: AgentId,
@@ -517,14 +495,10 @@ export const Agent = z.object({
    * 同一个审核者在所有组、所有报告审核里只能共用同一份，唯一的出路是"这次任务
    * 覆盖"，而那是给归属错误打的补丁。
    *
-   * 现在的**唯一权威**是 `AgentGroup.allowedActions` / `actionParams` /
-   * `debugActions`（组页 ③ 行动），建任务时由 daemon 展开进 `Run.*`。
-   * **动作只属于组。**
-   *
-   * ⚠️ 直接后果（刻意承担）：**报告摄取**（`POST /api/reports` → 给每个有判断依据
-   *    的审核者各起一条 review run）不属于任何组，所以那条路上的白名单恒为空——
-   *    报告审核**只能给结论**，触发不了任何动作。这与"聊天在结构上到不了动作"
-   *    是同一套口径：进不了组，就进不了动作。
+   * 之后那份配置短暂地住在**智能体组**上（`AgentGroup.allowedActions` 等三个
+   * 字段），2026-11（D123）**随整个动作能力退场**——判决不再触发任何动作，所以
+   * 现在既没有 agent 级也没有组级的动作配置。老数据里那几个键由启动时的一次性
+   * 清理摘掉（`agent-legacy.ts` / `agent-legacy-cleanup.ts`）。
    */
   /**
    * ⚠️⚠️ 这里原来有一个 `toolIds`（挂载的工具包，D40）。**整个能力已经撤掉**，
@@ -570,7 +544,37 @@ export const Agent = z.object({
    * 那个能力要求使用者在建 agent 时就想清楚"哪些 kind 归谁"，
    * 而绝大多数用法里，审核者只有一个。
    */
-  role: AgentRole,
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `role: AgentRole`（"这个 agent 是执行者 /
+   *   审核者 / 起草者 / …"）。**角色退场** ⇒ 删。
+   *
+   *   用户建的 agent 就是 agent——平台不再声称"这个人只能执行、那个人只能审"。
+   *   那套区分在审核 run 退场（D125）之后已经没有任何行为挂着，留着它只会让界面
+   *   问一个不影响任何事的问题。
+   */
+
+  /**
+   * **平台内置岗位**（只有平台自己建的那几条有；用户建的 agent 恒缺字段）。
+   *
+   * ══════════════════════════════════════════════════════════════════
+   * 它与"角色"为什么不是一回事
+   * ══════════════════════════════════════════════════════════════════
+   *
+   *   角色回答"这个人能干什么活"（谁能接任务、谁审谁）——那套已经删了。
+   *   岗位回答"平台自己的活由谁干"：`drafter` = 沉淀那条链的起草者、
+   *   `skill-reviewer` = 审起草出来的 skill、`memory-tidy` = 从对话里挑记忆、
+   *   `agent-maker` = 帮人把一个岗位说清楚并写下来。
+   *
+   *   所以它**只在 `builtin === true` 时有意义**，而且 `builtinKindOf()` 的判据是
+   *   **两个一起看**（`builtin` 标记 + 这个值）——只按名字或 id 认会在改名后失效，
+   *   失效的表现是"它又能被删 / 被派去干业务活"，一种静默且查得很远的故障。
+   *
+   * ⚠️ 可选：老记录里没有这个键（它们有的是 `role`），读时兜底会把 `role` 映射成
+   *    它并摘掉 `role`（`packages/protocol/src/agent-legacy.ts`）。
+   */
+  builtinKind: z
+    .enum(['drafter', 'skill-reviewer', 'memory-tidy', 'agent-maker'])
+    .optional(),
 
   /**
    * 这个审核者按什么判（D37）。
@@ -584,10 +588,12 @@ export const Agent = z.object({
    *    审核者停摆**，不是长期设计。
    *
    *    ⚠️ 它**只顶正文**（D40 收口）：动作权限不在 skill 上，也不在这个字段里
-   *        ——它属于智能体组（`AgentGroup.allowedActions`）。
+   *         ——那份权限本身已于 2026-11（D123）随动作能力整体退场。
    *
-   * ⚠️ 它对 `role: 'reviewer'` 才有意义，但**不禁止**执行者带着它：把角色从
-   *    审核改成执行、再改回来时不该丢东西（与第一句话模版同一个理由）。
+   * ⚠️ 2026-11（S4）：角色退场之后它只是一个**老数据的字段**——审核 run 退场
+   *    （D125）之后没有"派审核"这回事，它现在唯一的作用是"搬家入口"
+   *    （`POST /api/agents/:id/review-standard/adopt-from-skills` 把老标准并进
+   *    「指令」）。字段留着是因为老记录里真有正文，删了就丢判断依据。
    */
   reviewStandard: ReviewStandard.nullable().default(null),
 
@@ -603,25 +609,14 @@ export const Agent = z.object({
    * ⚠️ `Run.reviewerAgentId`（run 上那个同名字段）**保留**：它是组把审核者交给链路
    *    的载体，语义是"**这一次任务**由谁审"，与本字段（"这个人长期由谁审"）是两件事。
    */
-  /**
-   * 私有归属（第二轮，2026 续）：**这个 agent 属于哪个智能体组**。
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是 `ownerGroupId`——"这个 agent 属于哪个智能体组"
+   *   （"私有成员"：不进全局列表、不能被别的组引用、删组时级联删）。组退场 ⇒ 字段删，
+   *   老记录里那个键不会被读。
    *
-   * ══════════════════════════════════════════════════════════════════
-   * "私有"的确切含义（使用者拍板）
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * · 在智能体库里，但**不进全局列表**（`GET /api/agents` 过滤）、**不能被别的
-   *   组引用**——它只属于 `ownerGroupId` 那个组；
-   * · 执行/审核链路**复用现有机制**：store 层保持全量（`autoChainReview` 等
-   *   内部链路按 id 找执行者/审核者），过滤只发生在**面向界面的路由层**；
-   * · 与组同生命周期：删除组时按 `ownerGroupId` 级联删（不是按 `members` 删——
-   *   顺手清掉"建了一半/被移走"的孤儿私有 agent）。
-   *
-   * ⚠️ 字段**在不在就是判据**：`undefined` = 全局智能体，有值 = 私有。可选，
-   *   因为这是后加的字段（store 读取路径上没有 zod 校验，老记录没有这个键）。
-   *   ⚠️ **归属不可改**：写入口不接受它（PATCH 未知字段拒绝），创建入口才收。
+   *   ⚠️ 那条设计里最值钱的一句留着：**归属是"创建时就定、之后不可改"的**（写入口
+   *   只收不给改）。凡是"移动一次就会让历史数据的意思变掉"的关系，都该按这个办。
    */
-  ownerGroupId: AgentGroupId.optional(),
 
   createdAt: EpochMs,
   updatedAt: EpochMs,
@@ -714,80 +709,25 @@ export type MemoryEntry = z.infer<typeof MemoryEntry>
 // AgentGroup（D70 增量添加）
 // ─────────────────────────────────────────────────────────────
 
-/**
- * 智能体组：一队有分工的 agent，是「执行 → 审核 → 行动」这条链的编队单位。
+/*
+ * ⚠️ 2026-11（D125 之后，S3）：这里原来是 `AgentGroup` 实体——"一队有分工的 agent，
+ *   是「执行 → 审核 → 行动」这条链的编队单位"（`id` / `mode` / `name` / `members` /
+ *   `enabled`）。
  *
- * ══════════════════════════════════════════════════════════════════
- * 增量添加：与老路径并行，老逻辑一行不改
- * ══════════════════════════════════════════════════════════════════
+ *   **智能体组退场**：它存在的全部理由是"回答谁审、判完允许动什么"——而审核 run
+ *   （D125）与动作能力（D123）都退场之后，组上**没有任何一件事**是别处回答不了的
+ *   （`members` 就是几个 agent id，执行者由"这次派谁"直接指定）。
  *
- * ⚠️ 2026-10：这一节原来写的是"组是一条**另一条**入口，老路径（执行者的
- *    `reviewerAgentId` + 审核者的 `allowedActions`）原样保留、继续可用"。那两个
- *    agent 上的字段已经**整个撤掉**了（谁审、允许动什么只有组能回答），所以组
- *    不再是"另一条入口"，而是**唯一**的入口：
+ *   ⚠️ 老数据里的 `group` 记录原样留在磁盘 / SQLite 里：没有代码读它。
+ *   `Run.groupId` 与 `Agent.ownerGroupId` 也一起撤了（它们是"我当时属于哪队"的记录，
+ *   没有这一队了，记录就是悬空的）。
  *
- *    建任务时选一个组（`groupId`），daemon 在 `POST /api/runs` 写入前把组**展开**
- *    成 run 上的字段（`reviewerAgentId` / `allowedActions` / `actionParams` /
- *    `debugActions` / `maxReworks`），展开后跑的还是那条老链路——
- *    `autoChainReview` / `decideReview` / 返工逻辑一行不改（★ 只换了
- *    "这些字段的默认从哪来"）。展开点见 `apps/daemon/src/server.ts` 的
- *    `POST /api/runs`（`groupId` 分支）。
- *
- *    ⚠️ 没选组的任务（界面上"选单个智能体"那一档）就是**没有审核者**：这条路上
- *       没有任何东西能回答"谁审"（`Agent.reviewerAgentId` 撤掉之后，
- *       `Run.reviewerAgentId` 也只会是缺字段），daemon 会在派发前记一句
- *       "这条任务没有审核者，要自动审请建任务时选一个智能体组"。
- *
- * 为什么是 `members: AgentId[]`（列表）而不是 `executorId + reviewerId`（两个
- * 固定槽位）：未来多 Agent（多执行者 / 多审核者会签）是**加成员**而不是破坏
- * 形状。当前唯一受支持的形态由**组形态校验器**（`packages/domain/src/groups/
- * shape.ts`）决定：恰好 1 个执行者 + 恰好 1 个审核者。成员的角色从各自的
- * `Agent.role` 读，不在组上重复存——同一个 agent 的"身份"只有一份。
- *
- * 行动权限（`allowedActions` / `actionParams` / `debugActions`）挂在这里而不是
- * 审核者身上：它的语义是**这条链**的（"这队人的活判过后允许做什么"），不是审核者
- * 个人的。同一个审核者出现在不同组里，各自配不同的权限。
- *
- * ⚠️ `debugActions` 只在 daemon 侧展开时使用（组默认的调试动作）；`SubmitRunRequest`
- *    里没有对应的任务级覆盖字段，所以它不进请求体。
+ *   ⚠️ 那条设计教训留着：**`members: AgentId[]` 比 `executorId + reviewerId` 好**——
+ *   前者要支持会签 / 多执行者时是"加成员"，后者是"破坏形状"。只是这个演进位
+ *   最终没用上：真正需要多 agent 协作的是**编排**，而编排用代码表达顺序，不需要
+ *   一个"组"的实体。
  */
-export const AgentGroup = z.object({
-  id: AgentGroupId,
-  workspaceId: WorkspaceId,
-  /**
-   * 组的模式（第二轮，2026 续）。
-   *
-   * 「新建组可能有好几个模式」——现在只有**工作流模式**（`'workflow'` =
-   * 「执行 → 审核 → 行动」的顺序链，1 执行 + 1 审核），它也是这轮唯一合法的值。
-   * 模式决定**成员怎么组织、谁先谁后**（未来的会签 / 多执行者并行 / 多步链是
-   * 同一个 `AgentGroup` 上的不同 mode，见设计稿 §10 / §15）。
-   *
-   * ⚠️ **省略即默认**：老记录没有这个键 = 工作流。mode 只在**创建时**写入，
-   *   PATCH 不接受它（这轮唯一合法值，改了也没意义；未来模式出现时再放开）。
-   */
-  mode: GroupMode.optional(),
-  name: z.string().min(1).max(100),
-  /** 组成员（列表形状 = 未来多 Agent 的演进位）。当前形态：恰好 1 执行 + 1 审核。 */
-  members: z.array(AgentId),
-  /** 组规则：这队人判过后允许触发哪些动作（权威；展开进 `Run.allowedActions`）。 */
-  allowedActions: z.array(ActionRefType),
-  /** 组规则：动作的固定参数（D43；展开进 `Run.actionParams`）。 */
-  actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())),
-  /** 组规则：调试动作（判决引用这些动作时只记录、不跑脚本）。 */
-  debugActions: z.array(ActionRefType),
-  /**
-   * 组规则：默认返工次数。
-   *
-   * `0–100` 的整数，或 `null` = **无限**（审核不通过就一直交回执行者重做，
-   * 直到通过或交给人；会一直烧 CLI 额度，慎用）。任务级仍可覆盖。
-   */
-  maxReworks: z.number().int().min(0).max(100).nullable(),
-  /** 停用 = 建任务时不可选（不删，保留历史）。 */
-  enabled: z.boolean(),
-  createdAt: EpochMs,
-  updatedAt: EpochMs,
-})
-export type AgentGroup = z.infer<typeof AgentGroup>
+
 
 /**
  * 判断一个 agent 是否认某个 kind。
@@ -993,36 +933,22 @@ export const ChatTurn = z.object({
 export type ChatTurn = z.infer<typeof ChatTurn>
 
 // ─────────────────────────────────────────────────────────────
-// Report（第三方进来的不可变快照）
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Report：外部产物的**不可变快照**（DR-1）。
+/*
+ * ⚠️ 2026-11（D125）：这里原来是 `Report` 实体——第三方报告在本机的**不可变快照**
+ *   （`dedupKey` 是"同一条报告不会重复审核"的正确性保证，D14/FR-REPORT-03）。
  *
- * `dedupKey` 是平台侧的**正确性保证**：即使第三方适配器返回重复数据，
- * 也不会重复审核（FR-REPORT-03、D14）。
+ *   **报告摄取整条链退场**：报告唯一的归宿是"起一条审核 run"，而审核 run 与判决
+ *   也一起退场了（D125），所以投进来的报告只会落库然后什么都不发生——那正是本仓库
+ *   最恨的形状（"东西在，没有路径让它发生"）。随之删掉的是：`Report` 实体与
+ *   `ReportId`、store 的四个 report 方法、`domain/routing/kind.ts` 的
+ *   `routeReportToReviewers`、daemon 的 `ingest.ts` 与 `POST /api/reports`、
+ *   CLI 的 `reports` 命令、MCP 的 `submit_report`、页面轮询远端 `/api/pending`
+ *   再推回本机的那一段、远端服务的 `/api/pending`。
+ *
+ *   ⚠️ 老数据不需要迁移：磁盘上 `report` 那一段没有代码再读它（也不删——删数据
+ *   不可逆，而没有代码读它）。`SubjectRef` 的 `'report'` 枚举值**保留**：老 run 的
+ *   subject 就长那样，删了会让整条老 run 读不出来。
  */
-export const Report = z.object({
-  id: ReportId,
-  workspaceId: WorkspaceId,
-  /** 来源插件标识。 */
-  source: z.string().min(1),
-  /** 第三方在该来源内的标识。 */
-  externalId: z.string().min(1),
-  /** 类型键——同时是路由键与审核标准选择键（D24）。 */
-  kind: z.string().min(1),
-  title: z.string().max(500),
-  /** 审核对象正文（首版不做结构化解析，整段交给 agent）。 */
-  body: z.string(),
-  /** 第三方附加的原始元数据，原文保留。 */
-  meta: z.record(z.string(), z.unknown()),
-  /** 内容寻址引用，指向不可变快照。 */
-  blobRef: BlobRef,
-  /** sha256(source + externalId + contentHash)。 */
-  dedupKey: z.string().min(1),
-  ingestedAt: EpochMs,
-})
-export type Report = z.infer<typeof Report>
 
 // ─────────────────────────────────────────────────────────────
 // Run
@@ -1052,6 +978,11 @@ export const SubjectRef = z.object({
    */
   type: z.enum([
     'issue',
+    /*
+     * ⚠️ 2026-11（D125）：报告摄取退场之后**没有代码再写这个值**了——它原来是
+     *   "审一份第三方报告"的 subject。老 run 里还有，删掉会让整条记录读不出来，
+     *   所以枚举保留（与 `VerdictStatus.dispatched_to_action` 同一处理）。
+     */
     'report',
     'run',
     'conversation',
@@ -1171,21 +1102,16 @@ export const Run = z.object({
   kind: RunKind,
   status: RunStatus,
   agentId: AgentId,
-  /**
-   * 这条 run 走的**智能体组**（D70 增量添加）。
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是 `groupId`——"这条 run 走的智能体组"（D70）。
+   *   **组退场** ⇒ 字段删（老记录里留着这个键不会被读：store 读取路径上没有 zod
+   *   校验，未知键被忽略）。
    *
-   * `undefined` = 这条 run 不是从组创建的（★ 2026-10 之后它意味着**这条任务没有
-   * 审核者**：界面上"选单个智能体"那一档，没有任何东西能回答"谁审"）。
-   * 有值 = 建任务时选了组，daemon 在写入前把组展开成现有字段（`reviewerAgentId`
-   * / `allowedActions` / `actionParams` / `maxReworks`）落库——组 id 只作**记录**，
-   * 供"这条任务当时是哪队人"可回查，界面上也靠它在"这次由谁审"那一栏区分
-   * "审核者来自组"与"这一次单独指定"。任务级覆盖（换人 / 改动作）后组 id 仍保留，
-   * 覆盖体现在那几个展开出来的字段上。
-   *
-   * ⚠️ 用 `optional`（老 run 没有这个键）；"字段在不在"就是判据，与
-   *    `deliveryMode` 同一个口径。
+   *   ⚠️ 它当年的语义值得记一笔：`undefined` 曾经意味着"**这条任务没有审核者**"
+   *   （选单个智能体那一档）。现在没有"谁审"这件事了，同一个键不再承载任何判断
+   *   ——**一个字段的意思是随能力一起变的，撤能力时要把它的旧含义一起说清**，
+   *   否则下一个人会照着老文档去读它。
    */
-  groupId: AgentGroupId.optional(),
   /**
    * 这条起草 run 是"按意见再改一版"来的，值是**上一版草稿的 run id**（2026-10-19 四轮 P1）。
    *
@@ -1196,69 +1122,29 @@ export const Run = z.object({
    * 只有起草 run（`subject.type === 'skill-draft'`）会有它。
    */
   revisedFrom: RunId.optional(),
-  /**
-   * 这条 run 的**审核者覆盖**（见 `SubmitRunRequest.reviewerAgentId`）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `reviewerAgentId`——"这一次由谁审我的产出"
+   *   （三态：缺字段=跟随、`null`=明确不审、id=这个人）。**审核 run 与判决一起
+   *   退场** ⇒ 平台不再派生审核 run，run 上也就没有"谁审"这件事。
    *
-   * 三态，缺一不可：
-   *   - `undefined`（字段缺失，含 D41 之前的旧数据）⇒ 跟随执行 agent 配置的
-   *     「由谁审它」；
-   *   - `null` ⇒ 这次明确不自动审；
-   *   - agent id ⇒ 这次由它审。
-   *
-   * 只有 `kind: 'execute'` 的 run 会用它（审核 run 自己是执行者派生出来的，
-   * 不会再被审一次）。
+   *   ⚠️ 老记录里这个键留着不会被读（不需要迁移）；UI 上"谁审"那一栏也随之删。
    */
-  reviewerAgentId: AgentId.nullable().optional(),
-  /**
-   * 这条 run 的**任务级动作白名单**（见 `SubmitRunRequest.allowedActions`）。
-   *
-   * 两条路都用同一个字段、同一个含义（"**这一次**允许触发哪些动作"）：
-   *   - `kind: 'execute'` ⇒ 这是**决定**（新建任务页 ③）。缺字段 = 跟随那个
-   *     审核者的「行动权限」；
-   *   - `kind: 'review'`（由执行 run 串接派生出来那条）⇒ 这是**决定被带下来**：
-   *     判决契约里列哪些动作、判决收口时按哪份白名单校验，都用它。缺字段 =
-   *     跟随这个审核者自己的权限。
-   *
-   * 为什么不是两个字段（一个"覆盖"、一个"生效"）：那是同一个决定的两站路程，
-   * 而两个名字会让"审核用的是哪一份"变成需要推理的事——它必须一眼可见。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来有三个字段——`allowedActions`（这次允许触发哪些动作）、
+   *   `actionParams`（动作的固定参数）、`debugActions`（调试动作）。**动作能力退场**
+   *   之后三者都没有消费者（判决不再触发动作、也没有动作执行器），整段删掉。
+   *   老数据里那些键被忽略即可（删字段 = 老记录的那些键不再被读，与 `allowedActions`
+   *   从 agent 搬走时同一个套路，不需要迁移）。
    */
-  allowedActions: z.array(ActionRefType).optional(),
-  /**
-   * 这条 run 的**任务级动作固定参数**（见 `SubmitRunRequest.actionParams`，D43）。
-   *
-   * 与 `allowedActions` 同一条规矩、同一个判据（字段在不在）：
-   *   - `kind: 'execute'` ⇒ 这是**决定**（新建任务页 ③ 上设的那份）。缺字段 =
-   *     跟随那个审核者的长期固定参数（`Agent.actionParams`）；
-   *   - `kind: 'review'`（由执行 run 串接派生出来那条）⇒ 这是**决定被带下来**：
-   *     判决契约、判决校验、动作执行都用它。缺字段 = 跟随审核者自己的。
+
+  /*
+   * ⚠️ 2026-11（D124）：这里原来是 `maxReworks`——"这条任务允许返工几次"
+   *   （`0`/缺字段 = 不返工、`null` = 无限）。**返工整个退场**（使用者拍板
+   *   "返工 = 去掉"）：审核判 `fail` 不再自动把意见交回执行者重做，判决只记录
+   *   结论、由人（或编排）决定下一步。同一个事实原来是"额度 + 已用次数
+   *   （`chainDepth`）"两个字段配合，现在两个都不需要了。
+   *   老记录里那个键留着不会被读（不需要迁移）。
    */
-  actionParams: z.record(ActionRefType, z.record(z.string(), z.unknown())).optional(),
-  /**
-   * 这条 run 的**任务级调试动作**（D70 增量添加，与 `allowedActions` 对称）。
-   *
-   * 调试动作 = 判决引用它时**不跑脚本**、只记录动作与解析后的参数
-   * （`Agent.debugActions` 的语义）。老路径没有任务级覆盖：审核 run 的调试
-   * 集合从审核者 agent 取（`executor.ts` 的 `effectiveDebugActions`）。组展开
-   * 时组的 `debugActions` 落在这里，读取方优先它、缺省回退到审核者自己——
-   * 与 `allowedActions` 同一套"字段在不在就是判据"的口径。
-   *
-   * `undefined` = 跟随审核者的 `Agent.debugActions`。
-   */
-  debugActions: z.array(ActionRefType).optional(),
-  /**
-   * 这条 run 的**任务级返工次数**（见 `SubmitRunRequest.maxReworks`，D45）。
-   *
-   * 语义：审核判 `fail` 时，把审核意见交回执行者重做，最多这么多次。
-   * `0` 或**缺字段** = 不返工，`fail` 直接交给人（看板「等待人处理」）；
-   * `null` = **无限**（一直返工到通过或交给人——会持续烧 CLI 额度，慎用）。
-   *
-   * ⚠️ 与 `chainDepth` 配合使用：`chainDepth` 是**已经**返工了几次（每条返工 run
-   *    在前一条的基础上 +1），这个字段是**允许**几次，两者一比就知道还有没有额度。
-   *    这里**不额外记一个 `usedReworks` 计数器**——同一个事实有两个出处时，
-   *    "哪个说了算"就只能靠注释记住（`reviewStandard.allowedActions` 那次搬家
-   *    正是踩了这个）。
-   */
-  maxReworks: z.number().int().min(0).max(100).nullable().optional(),
   subject: SubjectRef,
   trigger: RunTrigger,
   /** 由哪个 action 派生；根 run 为 null。 */
@@ -1282,20 +1168,15 @@ export const Run = z.object({
   deliveryMode: RunDeliveryMode.nullable().optional(),
   /** `waiting_local_directory` 时携带被占用的路径，供 UI 显示。 */
   waitReason: z.string().nullable(),
-  /**
-   * 审核 run：**文件式审核**引用的两份落盘文件（`rounds/<轮次>-task.md` /
-   * `-result.md`，§3.3b）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是两个审核 run 专用字段——`materialRefs`（文件式
+   *   审核引用的 `rounds/<轮次>-task.md` / `-result.md`）与 `reportBody`（报告式
+   *   审核的正文），都是"判决不合规的重试从这里取材料"用的。
    *
-   * 判决不合规的重试从这里取材料（读结果文件），**不再读工作目录里的上下文副本**
-   * （2026-09 产品决定：日志已含第一句话全文，执行/审核都不再写副本文件）。
-   * 报告式审核没有这两份 ⇒ `null`；非审核 run 缺字段。
+   *   审核 run 退场 ⇒ 两者没有读者，删。**但那段落盘本身留着**——
+   *   `rounds/<轮次>-task.md` / `-result.md` 是"执行任务与执行结果按轮次留档、
+   *   后一轮不覆盖前一轮"（§3.3b），那是给人看的、也是给编排读的，与审核无关。
    */
-  materialRefs: z.object({ taskPath: z.string(), resultPath: z.string() }).nullable().optional(),
-  /**
-   * 审核 run：**报告式审核**的报告正文（重试取材料就是它本身；文件式审核为
-   * `null`）。与 `materialRefs` 同源同因——重试不读上下文副本了。
-   */
-  reportBody: z.string().nullable().optional(),
   sessionId: z.string().nullable(),
   attempt: z.number().int().positive(),
   maxAttempts: z.number().int().positive(),
@@ -1342,121 +1223,45 @@ export const Run = z.object({
 export type Run = z.infer<typeof Run>
 
 // ─────────────────────────────────────────────────────────────
-// Verdict（持久化形态）
-// ─────────────────────────────────────────────────────────────
-
-/**
- * verdict 的持久化记录 = 判决本体 + 归属信息。
+/*
+ * ⚠️ 2026-11（D125）：这里原来是 `VerdictRecord`——审核结论的**持久化记录**
+ *   （结论 / 理由码 / 置信度 / 发现 / 证据 / 归属 run / 谁做的）。
  *
- * `skillRefs` 固化"用了哪个 skill"（FR-REVIEW-06）。注意**不记指纹**，
- * 因此审计链是"可追溯"而非"完全可复现"（D9、§1.3）。
+ *   **审核 run 与判决一起退场**：平台不再为产出起一条"审核 run"，也就不再有
+ *   "结构化判决"这个东西。使用者那句话是"智能体本身也不分『执行』与『审核』"
+ *   ——要一个人把关，就由编排把把关这一趟写成一条**普通任务**交给某个智能体，
+ *   它的答复就是答复，不再需要一个平台级的判决对象。
  *
- * ══════════════════════════════════════════════════════════════════
- * ★ `runId` 的语义：**这条判决归属的那条 run**（D46）
- * ══════════════════════════════════════════════════════════════════
+ *   随之删掉的（协议这一侧）：
+ *   · `packages/protocol/src/verdict.ts` 整份（判决 schema / `parseVerdict` /
+ *     围栏标记 / `foldVerdict` / `stripVerdictBlocks`）；
+ *   · `SubmitRunRequest.review`（"这是一条审核 run"的那份材料）；
+ *   · `SubmitHumanVerdictRequest`（人工裁决）；
+ *   · `/api/runs/:id/verdicts` 与 `/api/runs/:id/human-verdict` 两条路由；
+ *   · `Run.reviewerAgentId` / `SubmitRunRequest.reviewerAgentId`（"这一次谁审"
+ *     —— 没有审核 run，就没有"谁审"这件事；`AgentGroup` 上的成员还在，那是 S3
+ *     的活）。
  *
- * - `source: 'agent'` ⇒ 归属**产出它的那条 review run**（一直是这个意思）；
- * - `source: 'human'` ⇒ 人没有"产出它的 run"，所以归属**它裁决的那条 run**：
- *   有审核结论时是那条 review run（裁决的就是那份结论），没有审核结论时
- *   是最新那条执行 run（人看的就是那份产出）。
- *
- * 两条路**互斥且确定**，不是"视情况而定"：判据是"这条任务有没有已完成且
- * 带判决的 review run"，而那个判据只有一处实现（`apps/web/src/lib/pipeline.ts`
- * 的 `stageOf`）——界面把锚点算好传过来，daemon 只校验它能不能被裁决，
- * 不自己再算一遍（同一规则两处实现，正是这个仓库反复在防的那类缺陷）。
+ *   ⚠️ **两条老数据读法留着**（删了会让老记录整条读不出来）：`AuditRecord.verdictId`
+ *   与 `VerdictStatus` 的枚举值。它们现在只服务历史——新记录永远不写。
+ *   `AuditRecord.actionIds` 同理（D123 时已经变成恒空）。
  */
-export const VerdictRecord = z.object({
-  id: VerdictId,
-  workspaceId: WorkspaceId,
-  runId: RunId,
-  subject: SubjectRef,
-  status: VerdictStatus,
-  conclusion: VerdictConclusion,
-  reasonCode: ReasonCode,
-  confidence: z.number().min(0).max(1),
-  findings: z.array(Finding),
-  action: ActionRef.nullable(),
-  escalateReason: z.string().nullable(),
-  /** schema 校验失败时的处置（status 为 invalid 时有值）。 */
-  invalidResolution: z.enum(['retry', 'downgrade_to_advisory', 'escalate']).nullable(),
-  skillRefs: z.array(SkillRef),
-  /** 决策依据的固化（FR-REVIEW-06）。 */
-  modelId: z.string().nullable(),
-  promptHash: z.string().nullable(),
-  /**
-   * ★ 这条判决是谁做的（D46）。
-   *
-   * - **缺字段 ≡ `'agent'`**：D46 之前的全部判决都是模型做的，所以老数据
-   *   一个字都不用迁移。这里刻意用"字段在不在"而不是给一个 `default`：
-   *   `default` 会在**写**的时候把值填进去，而我们要的是"读老数据时也成立"
-   *   ——两件事，前者解决不了后者。
-   * - `'human'`：人在任务详情页上给出的裁决（`POST /runs/{id}/human-verdict`）。
-   *
-   * ⚠️ **为什么不另立一个实体**：人工判决与模型判决的**形状是同一个**——
-   *    结论、理由码、发现、动作、归属 run。差别只有"谁做的"这一项。另立实体
-   *    意味着 store 端口、两套存储实现、审计导出、阶段推导全都要各写一遍，
-   *    而两边一旦漂移，"判决"这个词在系统里就有两个意思了。
-   *
-   * ⚠️ **它是追加，不是覆盖**：人工裁决产生**新的一条记录**，模型那条原样留着。
-   *    DR-3「历史不得被覆盖」在这里的具体含义是——"这条产出当初被模型判过
-   *    fail、后来被人判 pass"这件事必须能从记录里读出来。谁最后生效由
-   *    `createdAt` 决定（`listVerdictsByRun` 已按它排序，取末条）。
-   */
-  source: z.enum(['agent', 'human']).optional(),
-  /**
-   * 人工裁决的理由原文（`source === 'human'` 时有值，缺省 ≡ `null`）。
-   *
-   * ★ **为什么不塞进 `findings`**：`findings` 的契约是"判决**发现的问题**，逐条"。
-   *   人工通过时并没有"发现的问题"，只有"我为什么认为它行"。塞进去之后，
-   *   任何按 `findings` 做统计或展示的地方都会把人的一段话混进问题清单里——
-   *   而那种错误不会报错，只会让数字悄悄变得没有意义。
-   */
-  humanReason: z.string().nullable().optional(),
-  createdAt: EpochMs,
-})
-export type VerdictRecord = z.infer<typeof VerdictRecord>
 
 // ─────────────────────────────────────────────────────────────
-// Action
+// （原）Action —— 已退场（2026-11，D123）
 // ─────────────────────────────────────────────────────────────
-
-/**
- * Action：由 verdict 触发的有界操作。
+/*
+ * 这里原来是 `Action` 实体：**判决触发的有界操作**那条记录（id / verdictId /
+ * type / plane / params / status / idempotencyKey / dryRun / result / error /
+ * rollbackRef）。动作能力退场之后它没有任何生产者——判决不再触发动作，审计里的
+ * `actionIds` 恒为空，`listActionsByVerdict` 永远取不到东西。所以实体、`ActionStatus`
+ * 生命周期枚举与 store 的那组方法一起删掉（"字段在、界面在、就是没有路径让它发生"
+ * 是本仓库最恨的缺陷）。
  *
- * `plane` **由注册表决定**（INV-13），落库时固化以便审计。
- * `idempotencyKey` 含 `verdictId` —— 同一 verdict 重放被去重，
- * 但**不同 verdict 产生的相同动作不会被去重**（否则多视角审核的
- * 第二次真实发现会被吞掉，见 design §10.3）。
+ * ⚠️ 仍然保留的**老数据读法**（见下面各处注释）：`AuditRecord.actionIds` 与
+ *   `VerdictRecord.action` 是给**旧记录**读的（旧 run 的审计里可能真有点过的东西）。
+ *   它们是只读的历史，不是能力。
  */
-export const Action = z.object({
-  id: ActionId,
-  workspaceId: WorkspaceId,
-  verdictId: VerdictId,
-  /**
-   * 实际执行的动作：`<包 slug>.<动作名>`（D41 起平台不内置任何动作）。
-   *
-   * ★ 这里也必须宽——否则"判决里写了工具动作、动作记录里却只剩内置枚举"，
-   *   审计链会在最后一环断掉（而审计链正是这套东西存在的理由）。
-   */
-  type: ActionRefType,
-  plane: ActionPlane,
-  params: z.record(z.string(), z.unknown()),
-  status: ActionStatus,
-  idempotencyKey: z.string().min(1),
-  /**
-   * 没真跑、只记录（2026-09 起=「调试」）：审核者给这个动作勾了「调试」时，
-   * 平台不执行脚本，只记录动作与解析后的参数；界面据此显示「调试 · 未执行」。
-   * （它**不再**表示"预演"——那套作为执行准入的机制已经撤掉。）
-   */
-  dryRun: z.boolean(),
-  result: z.record(z.string(), z.unknown()).nullable(),
-  error: z.string().nullable(),
-  /** 可回滚动作的回滚凭据；不可回滚为 null（必须由注册表显式标注）。 */
-  rollbackRef: z.string().nullable(),
-  createdAt: EpochMs,
-  finishedAt: EpochMs.nullable(),
-})
-export type Action = z.infer<typeof Action>
 
 // ─────────────────────────────────────────────────────────────
 // Artifact
@@ -1517,6 +1322,14 @@ export const AuditRecord = z.object({
   /** 已脱敏的实际命令行：令牌类参数替换为 `***`。 */
   argvRedacted: z.array(z.string()),
   verdictId: VerdictId.nullable(),
+  /**
+   * 这条 run 触发过的动作 id。
+   *
+   * ⚠️ 2026-11（D123）：**新记录里恒为空数组**——动作能力退场，没有动作可记
+   *    （`ReviewCoordinator` 落审计时写的就是 `[]`）。字段保留是因为**旧审计记录**
+   *    里可能真有点过的东西：删掉它，老数据会因为 schema 不认而整条读不出来。
+   *    `ActionId` 也因此留在 `ids.ts`——它现在只为这一栏的老值服务。
+   */
   actionIds: z.array(ActionId),
   queuedAt: EpochMs,
   startedAt: EpochMs.nullable(),

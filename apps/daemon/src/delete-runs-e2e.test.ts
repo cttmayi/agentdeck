@@ -7,7 +7,7 @@ import {
   type AgentSession,
   type ExecOptions,
 } from '@agentdeck/agent-core'
-import type { Action, Artifact, Conversation, Run, VerdictRecord } from '@agentdeck/protocol'
+import type { Artifact, Conversation, Run } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -23,7 +23,7 @@ import { cleanup, makeTempDir } from './testing/tmp.ts'
  * DELETE 与 GET——两条都验证了：删除成功（200 + 之后 GET 404）与删除的
  * 连带（对话轮次消失、turnCount 重算）。
  *
- * 连带范围本身（verdict/action/artifact/messages、审计保留）由 store 层
+ * 连带范围本身（artifact/messages、审计保留；⚠️ 判决 D125 退场）由 store 层
  * 的单元测试钉住（file-store.test.ts / sqlite-store.test.ts），这里不重复。
  */
 

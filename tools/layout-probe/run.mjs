@@ -112,52 +112,52 @@ const sameSet = (a, b) =>
   a.every((x) => b.includes(x))
 
 // ══════════════════════════════════════════════════════════════════════
-// 「新建任务」三步链的夹具（名字与动作在此定义：造夹具与 CHECKS 共用一份）
+// 「新建任务」的夹具（名字在此定义：造夹具与 CHECKS 共用一份）
 // ══════════════════════════════════════════════════════════════════════
 //
-// ★ 三个名字**必须**与既有夹具不同，而且不能互相是子串：探针里大量按
-//   "行的文字里含这个名字"找 agent（`row.textContent.includes(name)`），
-//   名字撞上或互为子串就会点到别人那一行上，而症状是"读到的值莫名其妙"。
+// ★ 名字**必须**与既有夹具不同、也不能互为子串：探针里大量按"行的文字里含这个
+//   名字"找 agent（`row.textContent.includes(name)`），撞名或互为子串就会点到
+//   别人那一行上，而症状是"读到的值莫名其妙"。
 //
-// ⚠️ 这两个审核者**刻意都不叫「探针用的执行者」/「探针用的老形态审核者」**：
-//    前者是"工具挂给了谁"与"换默认"那两段的夹具，后者是 D38 迁移那一段的
-//    夹具（它必须在跑到那一段时还是"只挂 skill、没有内联标准"的老形态）。
+// ⚠️ 2026-11（S6）：这里原来还有两个审核者夹具（带标准 / 空权限）与一个**编队**
+//    （组）。审核 run、动作权限、返工、智能体组逐条退场之后，新建任务页只剩
+//   "一句话 + 交给谁"，那三个夹具没有任何界面需要它们了 ⇒ 一起删。留下这一个
+//   执行者的理由很具体：端到端那三条要证明"界面上选的人 = 落库那条 run 的执行者"，
+//   而首启播种的那个人**本来就是默认**，用它量不出"选的是它"，等于空过。
 //
-// ⚠️ 三个新 agent 都**不抢"默认"那个位置**：默认由播种的那个执行者当着，
-//    `defaultAgent.*` 那一组（徽章只有一个、预选的是设过的那个）靠的就是它。
+// ⚠️ 它**不抢"默认"**那个位置：默认由播种的那个执行者当着，`defaultAgent.*`
+//   那一组（徽章只有一个、预选的是设过的那个）靠的就是它。
 const CHAIN_EXECUTOR = '探针用的三步链执行者'
-const CHAIN_REVIEWER = '探针用的三步链审核者'
-const CHAIN_EMPTY_REVIEWER = '探针用的空权限审核者'
-/** 那个审核者的动作权限：**已装**工具包里的一个动作（契约值 `<slug>.<动作名>`）。 */
-const CHAIN_ACTION = 'probe-tool.clean-notes'
-/**
- * 三步链夹具那个**组**的名字（2026-10 起长期行动权限的唯一权威是组）。
- */
-const CHAIN_GROUP = '探针用的三步链编队'
-/**
- * 「配过、但包已经卸载」那条权限的**宿主组**（D41 那一族的夹具）。
- *
- * ⚠️ 必须在这里造（真实时间、包还装着的时候）：写入口**会拒**"动作来自还没装的
- *    工具包"（`POST /api/agent-groups` 的 400 说得很清楚），所以"先配上、再把包卸掉"
- *    是造这个状态的唯一路径——顺序反了就造不出来（curl 试过：先传 `nope.missing`
- *    当场被拒）。当年这条状态住在 **agent** 上，2026-10 起动作权限只属于组。
- */
-// （那个夹具组由探针页自己造，见 `probe.html` 的 ④.5；名字与动作名写在那一边，
-//   因为造它的那一刻才装好 `probe-tool-ui`。）
 
 const CHECKS = [
   // ══════════════════════════════════════════════════════════════════
-  // 新建任务（2026-10 简化版）：一句话 ⇒ 交给谁（智能体 / 智能体组）⇒ 只读摘要 ⇒ 提交
+  // 新建任务：一句话 ⇒ 交给谁 ⇒ 只读摘要 ⇒ 提交
   // ══════════════════════════════════════════════════════════════════
   //
-  // ⚠️ 原来这里量的是**三步链**（① 执行 / ② 审核 / ③ 行动 + ③ 里的左选右配选择器 +
-  //    D44 固定参数编辑器 + D43 开关 + 「这一次」三态覆盖），那 66 条在重做之后
-  //    **界面上没有宿主**（一直红）。权威搬到**智能体组**，这一页只问两件事、给一张
-  //    只读摘要。所以判据也换了——**红得久了，真坏了也看不出来**（前三批的教训）。
+  // ⚠️ 2026-11（S6 重量）：S2–S5 把「审核 / 判决 / 动作 / 返工 / 智能体组 / 角色」逐条
+  //    退场之后，这一页只剩三件事。原判据（66 条 + 后来补的十几条）里，正向的那一半
+  //    是**钉在已经不存在的 DOM 上**的（`.chain-step` / `.source-toggle` / 动作选择器），
+  //    负向的那一半（"这一页不能改长期配置"）反而更值钱了——所以这一段按**意图**
+  //    重写成"正向三条 + 负向一条 + 端到端三条"：
+  //      · 正向：选谁 ⇒ 摘要说谁；下拉里只有非内置岗位；只有一个下拉；
+  //      · 负向：两档切换条 / 三步链 / 动作选择器 / 勾选框，一个都不许长回来；
+  //      · 端到端：界面选的 = 请求体带的 = 落库记录上的（这一段最贵的错误），
+  //        而且记录上**没有**那些已经退场的键（`reviewerAgentId` / `groupId` /
+  //        `allowedActions` / `maxReworks` / `materialRefs` / `reportBody`）。
+  //
+  // ⚠️ 夹具只有**一个执行者**（`CHAIN_EXECUTOR`，runtime 是 `generic` ⇒ 那条 run
+  //    立刻以 ENOENT 失败，不拉起模型）：审核者 / 空权限审核者 / 编队那三个夹具
+  //    随它们的界面一起删了（只为不存在的界面服务）。
   {
     view: '新建任务',
     key: 'newtask.pageOpened',
-    label: '前提：新建任务页打开了（`#/new` 有「交给谁」那张卡片）',
+    label: '前提：新建任务页打开了（`#/tasks/new` 有「交给谁」那张卡片）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.formFound',
+    label: '前提：表单真的挂上了（`.newtask-form` 在）——不成立的话下面每一条都只是"没量到"',
     ok: (v) => v === true,
   },
   {
@@ -169,11 +169,6 @@ const CHECKS = [
   {
     view: '新建任务',
     key: 'newtask.workDirPicker',
-    /**
-     * ★ 分批第 229 批：「新建任务」的「高级 → 工作目录」也有目录选择框，且**选中的路径
-     * 会填进去**。和「新对话」那边是同一条道理，但两处各挂一次组件——一次挂对了、
-     * 另一次忘了绑 `value` 是最常见的形态，所以两边都要量。
-     */
     label:
       '★★ 「新建任务」的「高级」里点「浏览…」也能选目录，且选中后路径真的填进工作目录一格' +
       '（两个表单各挂一次同一个组件，漏绑一边的话界面上看不出区别）',
@@ -191,165 +186,119 @@ const CHECKS = [
   },
   {
     view: '新建任务',
-    key: 'newtask.sourceToggleFound',
-    label: '★★★ 有「智能体 / 智能体组」互斥两档——组是"执行→审核→行动"的**默认配置**，'
-      + '没有这一档，「谁审、判完能做什么」就没有入口（实验过：只有智能体那一档时，'
-      + '这条任务的审核标准只能靠人另外再去组页配）',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　两档：${JSON.stringify(f['newtask.sourceToggleLabels'] ?? null)}`,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.agentSummaryTitle',
-    label: '★ 摘要标题随选中对象走（智能体 ⇒「智能体摘要」，组 ⇒「智能体组摘要」）：'
-      + '同一张卡在两档里说的事不一样，标题不说清就读不懂那几行是谁的配置',
-    ok: (v) => v === '智能体摘要',
-    show: (v, f) => `${JSON.stringify(v)}　行：${JSON.stringify(f['newtask.agentSummaryKeys'] ?? null)}`,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.agentNoReviewerText',
-    label: '★★★ 选**单个智能体**时摘要必须说出「**没有**——选单个智能体不会自动审核」'
-      + '（2026-10 起 agent 上那条「由谁来审它」撤了 ⇒ 这一档谁也不审）。'
-      + '画成一行"未配置"或干脆不画，都会让人以为还是有人审',
-    ok: (v) => typeof v === 'string' && v.includes('不会自动审核'),
+    key: 'newtask.retiredUi',
+    /**
+     * ★★★ 负向断言，为什么它比正向那条更值钱：把删掉的一整块**换个类名重新长回来**，
+     *    界面上看不出区别、正向判据照样全绿（本仓库踩过："没有那一组"换个类名就绿）。
+     *    所以"这一页只问三件事"这条要按**退场物的缺席**来钉。
+     */
+    label:
+      '★★★ 退场的几块**一个都没有长回来**：没有「智能体 / 智能体组」两档切换条、' +
+      '没有三步链（`.chain-step` / `.step-*`）、没有动作选择器、没有一个勾选框——' +
+      '这一页只问一句话 + 交给谁（「这次怎么走」不再有第二个入口）',
+    ok: (v) =>
+      !!v && v['两档切换'] === 0 && v['三步链'] === 0 && v['动作选择器'] === 0 && v['勾选框'] === 0,
     show: (v) => JSON.stringify(v),
   },
   {
     view: '新建任务',
-    key: 'newtask.agentFootSummary',
-    label: '★★ 提交栏那一行说清"我即将提交的是什么"（交给谁 · 谁审 · 允许几个动作）——'
-      + '滚下去看高级选项时它是唯一还在的上下文',
-    ok: (v) => typeof v === 'string' && v.includes('交给') && v.includes('不自动审核'),
+    key: 'newtask.agentSelectCount',
+    label: '★★ 「交给谁」里**恰好一个下拉**（组那一档退场之后不该还有第二个——两个下拉 = 两种"交给谁"，必然分叉）',
+    ok: (v) => v === 1,
+    show: (v) => `${v} 个`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentOptions',
+    /**
+     * ★ 判据是**"平台内置岗位一个都不在"**，不是"我期待那几个人都在"：
+     *   内置的那几个（沉淀起草者 / 记忆整理者 / 智能体生成者，名字里都带「（内置）」）
+     *   干的是平台自己的活，派用户任务给它们是把平台内部的东西摆到业务选择里。
+     *   ⚠️ 筛选纪律：按**相等**判（`builtinKind === undefined`）而不是"不等于某几个名字"，
+     *   否则明天多一个内置岗位就静默漏进来。
+     */
+    label:
+      '★★★ 下拉里**一个平台内置岗位都没有**（名字带「（内置）」的那些：起草者 / 记忆整理者 / ' +
+      '生成者）——它们干的是平台自己的活，不该出现在"交给谁"里；同时至少有两个可选项' +
+      '（只有一个的话"选谁"这件事量不出来）',
+    ok: (v) =>
+      Array.isArray(v) && v.length >= 2 && v.every((label) => !String(label).includes('内置')),
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.fixtureExecutorId',
+    label:
+      '前提：夹具执行者造出来了、id 也经 URL 到位了（不成立的话下面几条全部是"没量到"，' +
+      '而不是"界面画错了"——这两件事在报告里必须分开）',
+    ok: (v) => typeof v === 'string' && v.length > 0,
+    show: (v) => String(v).slice(-6),
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentSelectApplied',
+    label: '前提：真的把下拉选成了**夹具那个执行者**（不是列表里的第一个）——下面摘要与端到端都以它为准',
+    ok: (v) => v === true,
+    show: (v, f) => `${v}　夹具执行者：${JSON.stringify(f['newtask.fixtureExecutorId'] ?? null)}`,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentSummaryShown',
+    label: '★ 选完人之后摘要卡片出来了（这一页只读的那一半）',
+    ok: (v) => v === true,
+  },
+  {
+    view: '新建任务',
+    key: 'newtask.agentSummaryRows',
+    label: '★★★ 摘要**只有一行**——「执行者」，而且说的就是选中的那个人（审核 / 允许的动作 / ' +
+      '返工那三行随它们的功能一起退场了；还留着它们就是"字段在、没有代码路径让它发生"）',
+    ok: (v, f) =>
+      Array.isArray(v) &&
+      v.length === 1 &&
+      v[0][0] === '执行者' &&
+      typeof v[0][1] === 'string' &&
+      v[0][1] !== '',
     show: (v) => JSON.stringify(v),
   },
   {
     view: '新建任务',
     key: 'newtask.summaryControlCount',
-    label: '★★★ 摘要里**没有任何控件**（input/select/textarea/button 全为 0）：这一页是'
-      + '**只读**的——"这次怎么走"全部来自长期配置或组。原来说好的"这一次覆盖"整块撤了，'
-      + '所以"摘要不能改"这条本身要成为判据（否则哪天又长出半个编辑态，谁也不记得它不该在）',
+    label: '★★★ 摘要里**没有任何控件**（input/select/textarea/button 全为 0）：这一页是**只读**的——' +
+      '"这次怎么走"全部来自长期配置。所以"摘要不能改"这条本身要成为判据（否则哪天又长出半个编辑态，谁也不记得它不该在）',
     ok: (v) => v === 0,
     show: (v) => `${v} 个控件`,
   },
   {
-    view: '新建任务',
-    key: 'newtask.pickerOrParamsOnPage',
-    label: '★★★ 整页**没有**动作选择器 / 勾选框 / 固定参数编辑器 / 浮层：'
-      + '那几个东西搬去了智能体组页的 ③ 行动（同一件事只有一个入口——'
-      + '两个入口必然分叉），这一页只剩摘要与提交',
-    ok: (v) =>
-      !!v &&
-      v['选择器'] === 0 &&
-      v['勾选框'] === 0 &&
-      v['固定参数'] === 0 &&
-      v['对话框'] === 0,
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.groupTabFound',
-    label: '前提：切到「智能体组」那一档（夹具里有一个启用的组）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务',
-    key: 'newtask.groupSelectApplied',
-    label: '前提：真的选中了夹具那个组（占位项不可选 ⇒ 必须显式选一个）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupSummaryTitle',
-    label: '★ 组那一档的摘要标题是「智能体组摘要」',
-    ok: (v) => v === '智能体组摘要',
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupSummaryMatchesGroup',
-    label: '★★★ 摘要上那几行**逐项等于组上的配置**（审核者有人名 / 允许的动作数 = 组配的条数 / '
-      + '返工 = 组的默认）——这一页显示的必须是组那一份，不是"第一个审核者"之类的猜测',
-    ok: (v) => v === true,
-    show: (v, f) =>
-      `${v}　摘要：${JSON.stringify(f['newtask.groupSummaryRows'] ?? null)}　` +
-      `组：${JSON.stringify(f['newtask.groupRecordRead'] ?? null)}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupFootSummary',
-    label: '★★ 组那一档的提交栏同样说清"交给谁 · 谁审 · 允许几个动作"（与智能体那一档同一口径）',
-    ok: (v) => typeof v === 'string' && v.includes('交给') && !v.includes('不自动审核'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
     view: '新建任务 · 链',
     key: 'newtask.agentSubmitReachedTasks',
-    label: '★★★ 端到端 A：选**单个智能体**、写上一句话就能提交，而且那条 run 真的出现在接口上'
+    label: '★★★ 端到端：写上一句话就能提交，而且那条 run 真的出现在接口上'
       + '（这一段最贵的错误是"界面上选的"与"发出去的请求体"不是同一件事，只有走完真入口才看得见）',
     ok: (v) => v === true,
   },
   {
     view: '新建任务 · 链',
     key: 'newtask.agentRunAgentId',
-    label: '★★★ 端到端 A：接口上那条 run 的执行者**就是**界面上选的那个人（不是默认执行者）',
+    label: '★★★ 端到端：接口上那条 run 的执行者**就是**界面上选的那个人（不是默认执行者）',
     ok: (v, f) => v !== null && v === f['newtask.fixtureExecutorId'],
-    show: (v, f) => `${JSON.stringify(v)}　界面选的：${JSON.stringify(f['newtask.fixtureExecutorId'] ?? null)}`,
+    show: (v, f) =>
+      `${JSON.stringify(v)}　界面选的：${JSON.stringify(f['newtask.fixtureExecutorId'] ?? null)}`,
   },
   {
     view: '新建任务 · 链',
-    key: 'newtask.agentRunHasAllowedActionsKey',
-    label: '★★★ 端到端 A：接口上那条 run **没有** `allowedActions` 这个键——选智能体这条路不给动作。'
-      + '（键在且为空数组是**另一件事**：那是"这一次一个都不许动"的显式决定。省略 ≠ 空数组，'
-      + '上一版探针就是靠这对差别钉死三态纪律的，这里保留同一条口径）',
-    ok: (v) => v === false,
-    show: (v, f) => `${v}　值：${JSON.stringify(f['newtask.agentRunAllowedActions'] ?? null)}`,
+    key: 'newtask.agentRunKind',
+    label: '★★★ 端到端：那条 run 的 `kind` 是 `execute`——"建一条任务"只派一条执行 run，' +
+      '不再顺带派生审核 run（D125）',
+    ok: (v) => v === 'execute',
+    show: (v) => JSON.stringify(v),
   },
   {
     view: '新建任务 · 链',
-    key: 'newtask.agentRunReviewerMode',
-    label: '★★★ 端到端 A：接口上那条 run 的 `reviewer.mode` 是 **`none`**（"这条任务没人审"'
-      + '要是一个**说得出口的状态**，而不是一个读不出意思的 `null`）',
-    ok: (v) => v === 'none',
-    show: (v, f) => `${JSON.stringify(v)}　有 reviewerAgentId 吗：${f['newtask.agentRunHasReviewerId']}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupRunReviewerMode',
-    label: '★★★ 端到端 B：接口上那条 run 的 `reviewer.mode` 是 **`assigned`**（有审核者，'
-      + '而且它是**组**给的 ⇒ 配合下面那条 `groupId` 就能回答"审核者从哪来"）',
-    ok: (v) => v === 'assigned',
-    show: (v, f) => `${JSON.stringify(v)}　groupId：${JSON.stringify(f['newtask.groupRunGroupId'] ?? null)}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupSubmitReachedTasks',
-    label: '★★★ 端到端 B：选**智能体组**提交，那条 run 也真的出现在接口上',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupRunGroupId',
-    label: '★★★ 端到端 B：落库那条 run 上带着 **`groupId`**（记录用：判过之后要能回答'
-      + '"这条链的配置是从哪个组来的"）',
-    ok: (v, f) => v !== null && v === f['newtask.fixtureGroupId'],
-    show: (v, f) => `${JSON.stringify(v)}　夹具那个组：${JSON.stringify(f['newtask.fixtureGroupId'] ?? null)}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupRunReviewerId',
-    label: '★★★ 端到端 B：审核者由**组展开**而来（接口上的 `reviewerAgentId` = 组里那个审核者）——'
-      + '这一条与上面那条一起钉住"摘要上说的、发出去的、落库的是同一件事"',
-    ok: (v, f) => v !== null && v === f['newtask.fixtureReviewerId'],
-    show: (v, f) => `${JSON.stringify(v)}　组里的审核者：${JSON.stringify(f['newtask.fixtureReviewerId'] ?? null)}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.groupRunAllowedActions',
-    label: '★★★ 端到端 B：允许的动作由组展开（那一条 `probe-tool.clean-notes`）——'
-      + '选组这条路**不给动作**就等于"组配了但从来不会动"',
-    ok: (v, f) =>
-      Array.isArray(v) && v.length === 1 && v[0] === f['newtask.fixtureAction'],
-    show: (v, f) => `${JSON.stringify(v)}　夹具那条：${JSON.stringify(f['newtask.fixtureAction'] ?? null)}`,
+    key: 'newtask.agentRunRetiredKeys',
+    label: '★★★ 端到端：落库那条 run 上**一个退场的键都没有**（`reviewerAgentId` / `groupId` / ' +
+      '`allowedActions` / `maxReworks` / `materialRefs` / `reportBody`）——' +
+      '键还在就是"接口接受了、行为上不存在"，而且是"界面画对了、请求体多带了东西"的证据',
+    ok: (v) => Array.isArray(v) && v.length === 0,
+    show: (v) => JSON.stringify(v),
   },
   // ── 智能体：主从布局 ──
   { view: '智能体', key: 'agents.gotData', label: 'agent 数据到得了界面（列表不是空的）', ok: (v) => v === true },
@@ -596,7 +545,8 @@ const CHECKS = [
      */
     label:
       '★★★ 内置智能体**只读但不缩水**：没有「保存」/「改名」（有「恢复成默认值」+「关闭」），' +
-      '角色格仍是两张卡但都不是按钮（显示真实角色，不是执行/审核二选一），CLI 与指令锁着并带「只读」标，' +
+      '岗位格仍是两张卡但都不是按钮（左边是它真实的内置岗位、右边说"由平台固定"——' +
+      '2026-11（S4/D127）之前这里是「执行 / 审核」两张可选卡，角色退场之后换成岗位），CLI 与指令锁着并带「只读」标，' +
       '技能的勾选框、记忆的开关/写入口/行内改删都还在原位只是锁住；而**自建仍然能改**',
     ok: (v) =>
       v !== null &&
@@ -631,8 +581,8 @@ const CHECKS = [
         ? 'null'
         : `找到 ${String(v.found)}　按钮 ${JSON.stringify(v.headLabels ?? [])}　` +
           `保存 ${String(v.hasSave)}　恢复 ${String(v.hasRestore)}　关闭 ${String(v.hasLeave)}　` +
-          `改名入口 ${String(v.rename)}　角色卡 ${String(v.roleCards)} 张 / 其中按钮 ${String(v.roleButtons)}　` +
-          `角色「${String(v.roleBadge)}」　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
+          `改名入口 ${String(v.rename)}　岗位卡 ${String(v.roleCards)} 张 / 其中按钮 ${String(v.roleButtons)}　` +
+          `岗位「${String(v.roleBadge)}」　CLI 锁 ${String(v.cliDisabled)}　指令锁 ${String(v.instructionsReadonly)}　` +
           `「只读」标 ${String(v.lockMarks)} 处　记忆开关 ${String(v.memorySwitch)}（开着 ${String(v.memoryOn)} / 锁 ${String(v.memorySwitchDisabled)}）　` +
           `写入口 ${String(v.memoryAdd)}（锁 ${String(v.memoryAddDisabled)}）　记忆 ${String(v.memRows)} 条　` +
           `行内动作 ${String(v.memRowActions)}（锁 ${String(v.memRowActionsDisabled)}）　` +
@@ -650,10 +600,19 @@ const CHECKS = [
      *   数据，拿它们比会把"数据不同"当"骨架不同"）。
      */
     label:
-      '★★ 内置 / 自建**同一套骨架**：角色格都是两张卡（**连圆角/边框/底色都一样**），' +
+      '★★ 内置 / 自建**同一套骨架**：岗位那一格都在、都是静态的（没有按钮）、首卡一样高，' +
       'CLI、指令、记忆节、记忆开关四处结构一致' +
-      '（方案 A 的定义——不同只体现在"锁着"，不体现在"少一块"或"长得不一样"）',
-    ok: (v) => v !== null && typeof v === 'object' && v.found === true && Array.isArray(v.differs) && v.differs.length === 0 && v.builtin?.roleCards === 2,
+      '（方案 A 的定义——不同只体现在"锁着"与"内置有第二张说明卡"，不体现在"少一块"或"长得不一样"）',
+    ok: (v) =>
+      v !== null &&
+      typeof v === 'object' &&
+      v.found === true &&
+      Array.isArray(v.differs) &&
+      v.differs.length === 0 &&
+      v.builtin?.roleCell === true &&
+      v.builtin?.roleStatic === true &&
+      v.own?.roleCell === true &&
+      v.own?.roleStatic === true,
     show: (v) =>
       v === null || typeof v !== 'object'
         ? 'null'
@@ -964,8 +923,21 @@ const CHECKS = [
   {
     view: '任务',
     key: 'tasks.stageFilterWorks',
-    label: '★ 状态筛选：点「待审查」只剩待审行（或无结果显示空态）',
+    /**
+     * ★ 2026-11（S6 重量）：原来点的是**「待处理」**那一档，再拿「待审查 / 等待人处理 /
+     *   行动失败」三个词核对行上的 `.stage-tag`；三档变两档（进行中 / 已结束）之后
+     *   那三个词一个都不出现 ⇒ 判据恒红，而界面是对的。
+     *
+     *   重写后**不写死任何档名**，判据反而更硬：把每一档都点一遍，要求
+     *   ① 各档互不重叠、② 各档加起来正好等于「全部」的行数、③ 每档的行都来自「全部」。
+     *   "筛选没生效"（每档都显示全部 ⇒ ② 会多出来）与"筛过分叉"（某行消失/重复 ⇒ ①②
+     *   会红）都逃不掉。
+     */
+    label:
+      '★★★ 状态筛选真的在筛：把每一档都点一遍——各档之间**互不重叠**、加起来**正好等于**'
+      + '「全部」的行数、且每档的行都来自「全部」（档名不写死，改了也照样成立）',
     ok: (v) => v === true,
+    show: (v, f) => `${v}　${JSON.stringify(f['tasks.filterBucketSizes'] ?? null)}`,
   },
   {
     view: '任务',
@@ -976,8 +948,9 @@ const CHECKS = [
   {
     view: '任务',
     key: 'tasks.chipsSurviveEmptyFilter',
-    label: '★ 筛选出 0 结果时 chips 仍在（top 插槽常驻——不会被锁死在空态里切不回「全部」）',
+    label: '★ 筛选出 0 结果时 chips 仍在（top 插槽常驻——不会被锁死在空态里切不回「全部」；这一轮没有任何一档是空的 ⇒ 记 null = 没量到）',
     ok: (v) => v === true,
+    show: (v) => (v === null ? '这一轮没有空档可量（夹具里每一档都有行）' : String(v)),
   },
   {
     view: '任务',
@@ -988,8 +961,9 @@ const CHECKS = [
   {
     view: '任务',
     key: 'tasks.emptyStageWording',
-    label: '★ 筛选空态文案是"没有「待处理」的任务"（不是假话"还没有任务"）',
+    label: '★ 筛选空态文案说"没有…"（不是假话"还没有任务"）——只在真的撞上空档时量（null = 这一轮没有空档）',
     ok: (v) => v === true,
+    show: (v) => (v === null ? '这一轮没有空档可量（夹具里每一档都有行）' : String(v)),
   },
   {
     view: '任务',
@@ -1150,7 +1124,9 @@ const CHECKS = [
   {
     view: '聊天',
     key: 'chat.agentMakerPanelTwoParts',
-    label: '★ 2026-11（D109）：审阅面板两段渲染（岗位卡 名/角色/指令 + 配套技能 meeting-notes-format + 未经验证提示）',
+    label:
+      '★ 2026-11（D109）：审阅面板两段渲染（岗位卡：岗位名 + 指令，**没有**角色下拉——' +
+      'S4/D127 角色退场；+ 配套技能 meeting-notes-format + 「未经验证」提示）',
     ok: (v) => v === true,
   },
   {
@@ -1193,9 +1169,11 @@ const CHECKS = [
   {
     view: '任务',
     key: 'tasks.boardColumnCount',
-    label:
-      '★ 看板是**三列**（2026-11 使用者精简拍板：进行中 / 待处理 / 已结束——六列太多）',
-    ok: (v) => v === 3,
+    // ⚠️ 2026-11（S2/S6 重量）：审核与判决退场之后，看板从**三列**变**两列**
+    //    （进行中 / 已结束）——"待处理"那一列的宿主（等审核、等人处理）没有了。
+    //    判据的意图没变（列数要跟你说的那一套一致），数字跟着界面走。
+    label: '★ 看板是**两列**（2026-11：进行中 / 已结束——审核与判决退场之后不再有"待处理"）',
+    ok: (v) => v === 2,
     show: (v) => `${v} 列`,
   },
   {
@@ -1207,13 +1185,9 @@ const CHECKS = [
   {
     view: '任务',
     key: 'tasks.boardColumns',
-    label: '★ 列序是进行中 → 待处理 → 已结束——从左往右越来越接近结束',
+    label: '★ 列序是进行中 → 已结束——从左往右越来越接近结束',
     ok: (v) =>
-      Array.isArray(v) &&
-      v.length === 3 &&
-      v[0].includes('进行中') &&
-      v[1].includes('待处理') &&
-      v[2].includes('已结束'),
+      Array.isArray(v) && v.length === 2 && v[0].includes('进行中') && v[1].includes('已结束'),
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   { view: '任务', key: 'tasks.layoutPresent', label: '任务页也是主从（左右两栏都在）', ok: (v) => v === true },
@@ -1590,16 +1564,18 @@ const CHECKS = [
     ok: (v) => v === true,
   },
 
-  // ── 侧边栏第五项 + 工具页（D40）──
+  // ── 侧边栏：项数 + 整串顺序 ──
   //
-  // ★ **"侧边栏恰好四项"这条从 D40 起改成五项**：使用者点名要「工具」作为
-  //   第五项（排在 Skills 之后），所以这里量的是**恰好 5 项**且最后一项是
-  //   「工具」。原来那一版只有"四项够用"的说法（写在 `Sidebar.svelte` 的注释与
-  //   README 里），探针里并没有直接的计数断言——所以这一条是**新加的**，
-  //   它同时守住两处联动：`view.ts` 的 `VIEWS` 与 `Sidebar.svelte` 的 `ITEMS`，
-  //   少动一处不会报错，只表现为"视图打不开 / 侧边栏点不到它"。
+  // 这一族守的是**两处联动**：`apps/web/src/lib/route.ts` 的 `VIEWS` 与
+  // `Sidebar.svelte` 的 `ITEMS`——少动一处不会报错，只表现为"视图打不开 /
+  // 侧边栏点不到它"。
+  //
+  // ⚠️ 2026-11（S6 重量）：`view` 标签原来挂在「工具（D40）」下面，因为当年这一段
+  //    是跟工具页一起加的；工具页退场之后，留下来的是**外壳**（导航）的判据 ⇒
+  //    改挂 `外壳`。判据的**意图**没变（项数与顺序都要对），只是数字跟着界面走：
+  //    组（S3）与工具（D123）各减一项、设置与关于从抽屉变成主视图各加一项。
   {
-    view: '工具（D40）',
+    view: '外壳',
     key: 'shell.navItemCount',
     // ★ 2026-10（D70）：侧边栏第五项变第六项——「智能体组」加在「智能体」后面
     //   （先有"人"，才有"队"）。这一条与下面就差一个数，两条一起才守得住"中间
@@ -1613,20 +1589,21 @@ const CHECKS = [
     //   ⚠️ 这一条是**滞后了**的：原来写六项，加了一项之后一直红。数字型断言最容易
     //   这样——它不是"界面坏了"，而是"我们长了一项但没回来改判据"。改的时候把
     //   **为什么是这一项、为什么排这儿**写进注释，下次加项才找得到该改哪儿。
-    label: '★ 侧边栏是**十二项**（聊天最轻、排第一；D58 把「新建任务」并进「任务」、'
-      + 'D70 加了「智能体组」、D75 加了「沉淀」、2026-11 加了「定时任务」「设置」「关于」「编排」「编排任务」）',
-    ok: (v) => v === 12,
+    label: '★ 侧边栏是**十项**（聊天最轻、排第一；D58 把「新建任务」并进「任务」、'
+      + 'D75 加了「沉淀」、2026-11 加了「定时任务」「设置」「关于」「编排」「编排任务」；'
+      + 'S3 减掉「智能体组」、D123 减掉「工具」）',
+    ok: (v) => v === 10,
     show: (v) => `${v} 项`,
   },
   {
-    view: '工具（D40）',
+    view: '外壳',
     key: 'shell.navLastItem',
     label: '★ 最后一项现在是「关于」（2026-11 立项；定时任务在它前面）',
     ok: (v) => v === '关于',
     show: (v, f) => `${JSON.stringify(v)}　完整一串：${JSON.stringify(f['shell.navItems'] ?? null)}`,
   },
   {
-    view: '工具（D40）',
+    view: '外壳',
     key: 'shell.navItems',
     label:
       '★★ 侧边栏**整串顺序**就是这十项（顺序错、中间少/换一项、多出一项都会红——'
@@ -1646,7 +1623,8 @@ const CHECKS = [
       // ★ 2026-11（编排任务立项，使用者拍板"侧栏应该有一编排任务页"）：「编排任务」
       //   排「编排」之后——定义页与运行列表相邻，跑过的编排从侧栏直达。
       // ★ 2026-11（关于页立项）：「关于」排最后——说明页不是天天用的入口。
-      JSON.stringify(['聊天', '任务', '智能体', '智能体组', '技能', '工具', '沉淀', '定时任务', '编排', '编排任务', '设置', '关于']),
+      // ⚠️ 2026-11（S3/D123）：「智能体组」与「工具」两项随它们的视图一起删了。
+      JSON.stringify(['聊天', '任务', '智能体', '技能', '沉淀', '定时任务', '编排', '编排任务', '设置', '关于']),
     show: (v) => (Array.isArray(v) ? v.join(' → ') : String(v)),
   },
   {
@@ -1726,16 +1704,15 @@ const CHECKS = [
   { view: '编排任务（2026-11）', key: 'workflowRuns.emptyShown',
     label: '★ 空态时给「点一条看运行画面」提示（列表即入口，不是死页面）',
     ok: (v) => v === true },
-  { view: '工具（D40）', key: 'tools.title', label: '工具页渲染出来了', ok: (v) => v === '工具' },
   {
-    view: '工具（D40）',
+    view: '外壳',
     key: 'shell.navHintsOneLineAndFit',
     label:
       '★★ 侧栏**标题与辅助文字**都是一行且放得下（2026-11：左栏减半后文案已精简，不放不下也不换行）',
     ok: (v) => v === true,
   },
   {
-    view: '工具（D40）',
+    view: '外壳',
     key: 'shell.sidebarHalfWidth',
     label: '★★ 侧栏宽度减半后钉死 120px（`--sidebar-w: 7.5rem`，顶栏左格与它共线）',
     ok: (v) => v === true,
@@ -2693,175 +2670,6 @@ const CHECKS = [
       '★★★ 选了没人挂的 skill 之后，**发出去的请求体里真的带上了 skillIds**（界面画对而忘了带，这一轮就是白选——页面上还看不出异常）',
     ok: (v) => v === true,
   },
-  {
-    view: '工具（D40）',
-    key: 'tools.fixtureFound',
-    label: '★ 列表里有夹具工具（否则下面几条会空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.fixtureActionCell',
-    label: '★ 那一行的**动作数**是 2（一个组里有几个动作）',
-    ok: (v) => typeof v === 'string' && v.includes('2'),
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.descClampApplied',
-    label: '★ 说明列的两行截断真的生效（`.desc-clamp` 是 app.css 共用样式）',
-    ok: (v) => v === '2',
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.rowActionsFlex',
-    label: '★ 操作列是 flex 容器（`.row-actions` 是 app.css 共用样式）',
-    ok: (v) => v === 'flex',
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.updatedAtColumn',
-    label: '★ 工具表也有「更新于」列（与技能页同一套格式）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.sourceBeforeVersion',
-    label: '★ 「来源」列在「版本」之前（与技能页同一列序，D69.7）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.slugCellFlexWrap',
-    label: '★ 首格 `▸ slug` 是 flex 且不折行（D69.8）',
-    ok: (v) => v === 'nowrap',
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.actionTypes',
-    label: '★ 点开一行看得到组内动作，且动作名是契约值 `<slug>.<动作名>`',
-    ok: (v) =>
-      Array.isArray(v) &&
-      v.length === 2 &&
-      v.includes('probe-tool.append-note') &&
-      v.includes('probe-tool.clean-notes'),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.irreversibleFlag',
-    label: '★ `reversible: false` 的动作显式标了「不可回滚」',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.boundGroupNote',
-    label: '★ 绑定参数单独成组，并写明"模型看不到也填不了"（说明整块面板只说一次）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.openGroupNote',
-    label: '模型可填的参数单独成组（显示类型与上限）',
-    ok: (v) => v === true,
-  },
-  { view: '工具（D40）', key: 'tools.installButtonFound', label: '标题栏有「安装工具」', ok: (v) => v === true },
-  {
-    view: '工具（D40）',
-    key: 'tools.panelInMain',
-    label: '★ 安装面板在主区内容盒里、且不是浮层（与技能页同一套判据）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.panelNoBackdrop',
-    label: '★ 没有背景遮罩（它不是对话框）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.panelReplacesList',
-    label: '★ 面板**取代**工具列表（开着时表格不在 DOM 里）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.panelBackVisible',
-    label: '★ 头部有**一直可见**的返回入口',
-    ok: (v) => v === true,
-  },
-  { view: '工具（D40）', key: 'tools.panelBackLabel', label: '返回入口说的是「← 返回工具列表」', ok: (v) => v === '← 返回工具列表' },
-  { view: '工具（D40）', key: 'tools.backReturnsToList', label: '★ 点返回就回到列表', ok: (v) => v === true },
-  {
-    view: '工具（D40）',
-    key: 'tools.installFailureShown',
-    label: '★ 装坏包时显示失败块（不是只给一句"安装失败"）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.installFailureDetailLines',
-    label: '★ 后端给的 detail 本身**是多行**的（`missing_entry` 那条是两行）',
-    ok: (v) => typeof v === 'number' && v >= 2,
-    show: (v) => `${v} 行`,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.installFailureDetailKeepsLines',
-    label: '★ 那个多行 detail 是按多行**显示**的（`pre-wrap`，不是被折成一坨）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.installFailureHint',
-    label: '★ 失败时还给了"那我该怎么做"（按错误码）',
-    ok: (v) => typeof v === 'string' && v.length > 10,
-    show: (v) => (v === null ? 'null' : `"${String(v).slice(0, 26)}…"`),
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.installSuccess',
-    label: '★ 从抽屉里真的装得进一个包（输入框 → 检查并安装）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.installSuccessListsWhat',
-    label: '★ 装完说清了**装进来什么**（动作与文件都列出来）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.rowsAfterUiInstall',
-    label: '★ 装完列表**立刻**多了一条（不是刷新才看见）',
-    ok: (v) => typeof v === 'number' && v >= 2,
-    show: (v) => `${v} 行`,
-  },
-  { view: '工具（D40）', key: 'tools.escClosesPanel', label: 'Esc 能关掉安装面板', ok: (v) => v === true },
-  {
-    // ★ 这一段撤了两次，所以这三条查的是**最终态**（使用者的要求：
-    //   「执行智能体不支持"行动"，去掉」，然后「"干活时能用的工具包"…是否也应该去掉」）：
-    //   执行者详情里那一段**整段不在**，且「可挂载的工具组」这句不再出现。
-    //   原来那五条（detailSectionForExecutor / detailPickerHasFixture /
-    //   detailMountHintWording / mountSaveTookEffect / mountRestoreTookEffect）
-    //   随那一段一起删了——界面既然不再提供挂载，就没有"从界面上挂一次、看它真的
-    //   写进去了"这回事可查。挂载接口本身仍由 `tools-api.test.ts` 覆盖。
-    view: '工具（D40）',
-    key: 'tools.executorHasNoToolsSection',
-    label: '★ 执行者的详情里**没有**「干活时能用的工具包」那一段了',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.executorNoPickLabel',
-    label: '★ 「可挂载的工具组」这句在执行者详情里不再出现（使用者看到的就是这一句）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具（D40）',
-    key: 'tools.reviewerHasNoToolsSection',
-    label: '★ 审核者的详情里**也没有**工具那一段（只判断不动手；现在两边都没有了）',
-    ok: (v) => v === true,
-  },
   // ⚠️ 这里原来有两条："新建表单的「行动权限」里能勾到已装工具的动作" 与
   //    "那个动作旁边带着它的 `summary`"。两者量的都是 `ActionPicker` 里的
   //    `.ap-ck` / `.action-summary`，而那个控件 **2026-10 从 agent 上整个撤掉了**
@@ -3127,15 +2935,17 @@ const CHECKS = [
   {
     view: '新建表单 / 设置',
     key: 'settings.tabLabels',
+    /**
+     * ⚠️ 2026-11（S6）：原来是**四个**页签（执行 / 审核 / 聊天 / 编排）。审核模版随审核
+     *    run 一起退场（D125）⇒ 只剩三个，而那个「审核」页签当时**还在界面上**：点得开、
+     *    框能写、保存什么都不发生（服务端只按 `ALL_KINDS` 遍历）。删掉它是 S6 的一部分，
+     *    这条判据跟着改成三档——顺带守住"死页签不许再回来"。
+     */
     label:
-      '★ 段里四个**链路**页签：执行 / 审核 / 聊天 / **编排**（2026-11 加的第四份——编排的 agent 有自己的 框架/身份/任务 三块）',
+      '★ 段里三个**链路**页签：执行 / 聊天 / **编排**（审核那一份随审核 run 一起退场——'
+      + '留着一个"点了保存什么都不发生"的页签就是死接口）',
     ok: (v) =>
-      Array.isArray(v) &&
-      v.length === 4 &&
-      v[0] === '执行' &&
-      v[1] === '审核' &&
-      v[2] === '聊天' &&
-      v[3] === '编排',
+      Array.isArray(v) && v.length === 3 && v[0] === '执行' && v[1] === '聊天' && v[2] === '编排',
     show: (v) => (Array.isArray(v) ? v.join(' | ') : String(v)),
   },
   {
@@ -3176,23 +2986,6 @@ const CHECKS = [
     ok: (v) => typeof v === 'number' && v >= 300,
     show: (v, facts) => `${v}px（${facts['settings.execFilledLines']} 行）`,
   },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.reviewFilledLines',
-    label: '审核那份填进去的是那几十行默认模版（否则下面那条高度断言会空过）',
-    ok: (v) => typeof v === 'number' && v >= 20,
-    show: (v) => `${v} 行`,
-  },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.tplFieldHeightReviewPx',
-    label: '★ 输入框跟着内容长高（使用者点名"填写框太小，不利用看内容"）',
-    ok: (v, facts) =>
-      typeof v === 'number' &&
-      v > 500 &&
-      v > (facts['settings.tplFieldHeightEmptyPx'] ?? 0),
-    show: (v, facts) => `${v}px（空框 ${facts['settings.tplFieldHeightEmptyPx']}px）`,
-  },
   { view: '新建表单 / 设置', key: 'settings.badgeBefore', label: '没设过时状态是「平台默认」', ok: (v) => v === '平台默认' },
   { view: '新建表单 / 设置', key: 'settings.fillButtonFound', label: '有「填入默认模版」', ok: (v) => v === true },
   {
@@ -3203,26 +2996,6 @@ const CHECKS = [
     ok: (v) => v === true,
   },
   { view: '新建表单 / 设置', key: 'settings.filledBadge', label: '填完之后状态变「自定义」', ok: (v) => v === '自定义' },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.reviewBadgeWhileExecuteCustom',
-    label: '★ 切到「审核」页签时它是**独立的**一份（执行改了不动审核）',
-    ok: (v) => v === '平台默认',
-  },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.reviewFilledHasVerdict',
-    label:
-      '审核那份填入默认后带判决契约（`{{verdict}}` 是现在**唯一**的必需变量——材料与标记由平台放，不在模版里了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.reviewFilledHasNoMaterial',
-    label:
-      '★ 审核那份的默认模版里**没有** `{{material}}`（材料与标记由平台放——模版里写它会被保存时拒掉）',
-    ok: (v) => v === true,
-  },
   {
     view: '新建表单 / 设置',
     key: 'settings.varRowCount',
@@ -3240,25 +3013,31 @@ const CHECKS = [
     view: '新建表单 / 设置',
     key: 'settings.varListHasNoRetired',
     label:
-      '★★ 变量清单里**没有**六个退役变量与 `{{role}}`——列了就等于教人写它（写了会被保存时专门拒掉并说清去处）',
+      '★★ 变量清单里**没有**退役变量（六个 2026-09 退役的、`{{role}}`，以及 D125 之后审核那四个：' +
+      '`{{reportKind}}` / `{{issueId}}` / `{{previousContext}}` / `{{verdict}}`）——' +
+      '列了就等于教人写它（写了会被保存时专门拒掉并说清去处）',
     ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
-    key: 'settings.varRowCountIsNine',
-    label: '变量表正好九条（退役六个之后）——条数变了就说明表与文档/代码又分叉了',
+    key: 'settings.varRowCountIsFive',
+    // ⚠️ 2026-11（S6 重量）：这一条原来叫 `varRowCountIsNine`（审核那四个变量退役之后剩九条）。
+    //    D125 把 `reportKind` / `issueId` / `previousContext` / `verdict` 四个**只给审核用**
+    //    的变量也删了 ⇒ 现在一个链路的**框架框**只有五条：runId / subjectType / subjectId /
+    //    language / skills。判据的意图没变（"条数变了就说明表与文档/代码又分叉了"）。
+    label: '变量表正好五条（审核那四个变量退役之后）——条数变了就说明表与文档/代码又分叉了',
     ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
     key: 'settings.previewHasHeader',
-    label: '★ 审核那份的预览里是「# 审核任务」（说明预览走的是真渲染器）',
+    label: '★ 预览里是「# 任务」这个一级标题（说明预览走的是真渲染器，不是前端拼的）',
     ok: (v) => v === true,
   },
   {
     view: '新建表单 / 设置',
     key: 'settings.previewHasSampleMaterial',
-    label: '预览用的是示例材料（明说了不是你的真实数据）',
+    label: '预览用的是**示例**（「冒泡排序」那份，不是你的真实数据）——这一条与"预览走真渲染器"配对：只量标题的话，渲染器可以只塞一个标题',
     ok: (v) => v === true,
   },
   {
@@ -3285,13 +3064,6 @@ const CHECKS = [
     view: '新建表单 / 设置',
     key: 'settings.savedExecute',
     label: '★ 保存真的落库了（直接问接口：执行那份非空）',
-    ok: (v) => v === true,
-  },
-  { view: '新建表单 / 设置', key: 'settings.savedReview', label: '★ 审核那份也落库了', ok: (v) => v === true },
-  {
-    view: '新建表单 / 设置',
-    key: 'settings.chatTabFound',
-    label: '★ 有第三个页签「聊天」（聊天有自己的 ①：它不是任务的又一次投递）',
     ok: (v) => v === true,
   },
   {
@@ -3330,322 +3102,6 @@ const CHECKS = [
     key: 'settings.goneAfterEsc',
     label: 'Esc 能关掉设置抽屉',
     ok: (v) => v === true,
-  },
-
-  // ── 判断依据（D37 → 2026-09 收口到「指令」）──
-  //
-  // ★ 这一段量的是**一次删除**：使用者说「移除审核智能体的『审核标准』」，而那件事
-  //   能做的前提是判断依据已经并进 ② 身份（= 「指令」）。所以判据有两半：
-  //   ① 那个字段名与那一段**一个字都不剩**；
-  //   ② 老数据那份正文与"并进来"的入口**都在「指令」那一栏里**（否则就是
-  //      "删干净了，顺手把依据也删没了"）。
-  //   ⚠️ 只量一半都会假绿：只量①，正文没了也绿；只量②，段还在也绿。
-    // ══════════════════════════════════════════════════════════════════
-  // 智能体详情的判断依据（2026-10 对齐：只有一张可编辑卡片）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ 这一族原来钉的是**查看态**：只读那一行里的正文、`.std-name-badge`、
-  //    点「编辑」进编辑态、只读 chips 逐字等于接口的 `allowedActions`、
-  //    "在详情里勾一个动作再保存真的写进去"……**那一整套随查看态一起删了**
-  //    （`AgentDetail.svelte` 开头写着"使用者拍板：没有预览页了"），而
-  //    agent 上的行动权限也整个搬去了**智能体组页的 ③ 行动**。
-  //    ⇒ 这里删掉的条目不是"放宽"，是**那件事已经没有宿主**：
-  //      · "勾一个动作 → 保存 → 接口上真的变了" → 搬去组页（下一批补，那里才是宿主）
-  //      · "编辑态/只读态两态" → 概念不存在了
-  //    留下的判据全部改量**单态卡片**（`.card.agent-card` 的 `.cell-label`）。
-  {
-    view: '审核标准',
-    key: 'standard.detailHasNoNameBadge',
-    label: '★ 审核者详情里**没有**"标准的名字"徽标（那个字段已删）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailShowsBody',
-    label: '★★ 判断依据写在「指令」那一格里，而且**就在能改的地方**（从只看改为可编辑：它现在是唯一的出处）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.noStandardRowLabel',
-    label: '★★ 卡片里**没有任何一格**叫「审核标准」（使用者的要求：「移除审核智能体的『审核标准』」）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.noStandardSectionTitle',
-    label: '★★ 也没有「用什么标准」那个小标题（删的是整段，不是把标签换个说法）',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　实测各格标题：${JSON.stringify(f['standard.detailCellLabels'] ?? null)}`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.skillsSectionStillThere',
-    label: '★ 「技能」那一格还在（删的是"标准"，不是"挂载"——skill 的勾选一条都没少）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailHasActionsCell',
-    label: '★★ 审核者卡片里**有**「行动权限…」那一格（动作权限这件事仍然要在界面上有个去处，哪怕只是一句指路）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.detailActionsCellTitle',
-    label: '★★ 那一格的小标题自己说了**由谁决定**（「行动权限：由智能体组决定」）——只写"行动权限"会让人以为就在这儿配',
-    ok: (v) => typeof v === 'string' && v.includes('智能体组'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '审核标准',
-    key: 'standard.actionsPointerOnly',
-    label: '★★★ 那一格里**只有一句话、一个可操作控件都没有**（不复用 `ActionPicker`：两处长得一模一样、只有一处生效，是最坏的一种界面）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.actionsPointerText',
-    label: '★★★ 那句话给出了**可照做的下一步**（说清"动作属于这条链"、"去智能体组页的 ③ 行动里勾"）',
-    ok: (v) => typeof v === 'string' && v.includes('智能体组') && v.includes('行动'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '审核标准',
-    key: 'standard.actionsHintAbsentWhenSet',
-    label: '★ 那一格**不**说"动作也来自这些技能"（那是给另一种情形解释出处的句子，混进来就是假话）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.executorHasNoActionsSection',
-    label: '★★ 执行者的卡片里**没有**「行动权限」那一格（它的能力是工具，不给一个必然失败的勾选）',
-    ok: (v) => v === true,
-    show: (v, f) => `实测各格：${JSON.stringify(f['standard.executorSectionHeadings'] ?? null)}`,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formActionsAbsentForExecutor',
-    label: '★ 新建表单里执行者那一档也没有行动权限那一段',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formStandardEditorRemoved',
-    label: '★ 新建表单里没有「审核标准」编辑器（依据写在「指令」里）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formHasMergedHint',
-    label: '★★ 而给了那句话（"判断依据写在上面那条「指令」里"）——删掉一栏必须留下它的去处',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formMentionsNoSkillNeeded',
-    label: '★★ 那句话说的是**「指令」**（不是"上面那条审核标准"——那个字段界面上已经没有了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formActionsPointerOnly',
-    label: '★★★ 新建表单里「行动权限」那一段也**只剩一句话**：没有 `ActionPicker`、没有勾选框、没有按钮（两处各画一个只有一处生效的选择器是最坏的界面）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.formHasNoPickerAnywhere',
-    label: '★★ 整张新建表单里**一个 `ActionPicker` 都没有**（不是"挪到别处去了"——是这类控件不该在 agent 上）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.emptyReviewerFixtureFound',
-    label: '夹具：那个"没写指令"的审核者卡片在（没它的话下面的缺口记录会空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.emptyReviewerSwitched',
-    label: '★ 右栏真的换成了它（否则量到的是上一个人）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '审核标准',
-    key: 'standard.noCriteriaExplanationAnywhere',
-    label: '⚠️ **事实（当前是个真缺口）**：没写「指令」的审核者，界面上**一句解释都没有**了——'
-      + '那句"它审不了任何东西…"原来住在被删掉的查看态上，'
-      + '`agents.headlineNoInstructions` 现在全仓库没有任何代码引用（死词条）。'
-      + '这条只如实记下现状，供报告点名；要修就是加回一句提示（那时这条会红，提醒同步）。',
-    ok: (v) => typeof v === 'boolean',
-    show: (v) => (v === true ? '现在：没有任何解释（缺口）' : '现在：有解释'),
-  },
-
-  // ══════════════════════════════════════════════════════════════════
-  // 老形态依据（来自挂载的 skill）：现在还有没有出路
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ 使用者当年的处境：删不掉 `general-review`，因为审核者还挂着它、依据正来自它。
-  //    当时的出路是**只读态里那颗「并进」按钮**（正文并进「指令」+ 同时摘挂载）。
-  //    查看态删掉之后那颗按钮也没有了 ⇒ 这一族从"按钮点了会发生什么"改成：
-  //    ① 依据有没有丢（服务端不变量）；② 界面上还剩什么出路（挂载可以在卡片里取消）
-  //    + 一条**缺口事实**（老形态的提示与按钮都没了、词条成了死词条）。
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyFixtureFound',
-    label: '夹具：那个"依据来自挂载 skill"的审核者卡片在（没它的话这一族全空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.legacyAgentFound',
-    label: '夹具：接口上也读得到它（下面的挂载判据以接口为准，不扫页面文字）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.skillCellShowsMount',
-    label: '★★ 「技能」那一格里**看得见那个挂载**（`general-review`）——它是拆掉这条老依据的唯一入口，看不见就等于拆不掉',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.skillCellMountUncheckable',
-    label: '★★ 那个挂载的勾选框是**勾着的**（使用者能自己取消它——手工把正文抄进「指令」再取消，是现在唯一剩下的路）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.noFalseAdoptClaim',
-    label: '★★★ 界面上**不许出现**指向不存在按钮的话（原句"下面那颗按钮"——按钮随查看态删掉了，这句话现在只会在词条表里，一旦有人把它渲染出来就是骗人）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '迁移（D38）',
-    key: 'migrate.skillSourcedNoticeOrButtonGone',
-    label: '⚠️ **事实（当前是个真缺口）**：老形态（依据来自挂载 skill）那一句提示**与**那颗「并进」按钮都没有了——'
-      + '`agents.standardLegacyNoticeFromSkill` 这句词条已无人引用。'
-      + '后果：这种 agent 的判断依据与挂载绑在一起，而界面既不说明也不给一键拆开（只剩"自己抄 + 取消勾选"）。'
-      + '这条只记录现状，供报告点名。',
-    ok: (v) => typeof v === 'boolean',
-    show: (v) => (v === true ? '现在：提示与按钮都没了（缺口）' : '现在：还在'),
-  },
-
-  // ══════════════════════════════════════════════════════════════════
-  // 保存一次就把"老的信息"清掉（2026-09）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // 判据仍然是**两半**（只量"提示没了"会把"顺手丢掉一段判断依据"判成绿）：
-  // ① 老字段真的清掉了；② 投递出去的那段文字**逐字节相同**。
-  // ⚠️ 动作变了：原来要"进编辑态 → 保存"，现在只有一张卡片（选中即编辑），
-  //    所以是"改个别的字段 → 保存"，等的是**那句老提示消失**（不是"退出编辑态"）。
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.fixtureFound',
-    label: '夹具：那个"内联老标准"的审核者卡片在（没它的话这一族全空过）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.detailSwitched',
-    label: '★ 右栏真的换成了它（判据是卡片里名字框的值，不是"详情在不在"——后者立刻成立会量错人）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.noticeBefore',
-    label: '前提：保存**之前**那条"还带着老的字段"的提示确实在（不然"它消失了"没法量）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editHintWarns',
-    label: '★★ 那句提示**提前说清**保存会发生什么（"我的指令怎么多了一段"不该是一次没预告的改动）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.saveButtonFound',
-    label: '★ 卡片底部有「保存」（单态卡片里它就是唯一的写入口）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.noticeCleared',
-    label: '★★ 保存之后那条老提示**消失了**（使用者要的正是这一条：重新编辑保存后旧资讯就该没了）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.reviewStandardAfter',
-    label: '★★★ 老字段真的清掉了（问接口：`reviewStandard` 是 `null`；界面「no-agent」= 接口根本没读到，那也不算通过）',
-    ok: (v) => v === null,
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.instructionsGotBody',
-    label: '★★★ 老标准的正文**进了「指令」**（不是被删掉）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.identityUnchanged',
-    label: '★★★ 而**投递出去的那段文字逐字节相同**（前后各自按 `[指令, 老标准]` 拼一遍比）——"顺手清理"不许变成"顺手丢一段判断依据"',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.noticeAfter',
-    label: '★ 界面上那条老提示也没了（不是只把库改了）',
-    ok: (v) => v === false,
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editorShowsMerged',
-    label: '★★★ 保存之后卡片里「指令」那一格**就是服务端那份**（并进来的正文看得见）——'
-      + '★ 这条曾经是红的（真缺陷）：服务端把老正文并进 `instructions`，而组件的草稿只在"换了人"时作废，'
-      + '于是界面看不见刚并进来的正文。修法是 `AgentDetail.save()` 收下返回值里被服务端改过的字段；'
-      + '⚠️ 基准值必须在 `await` **之前**取（`updateAgent` 内部会 `loadAgents()`，await 之后 `agent` 已经是服务端那份，'
-      + '自己跟自己比永远相等——第一版就是这么坏的）。',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　实测指令框开头：${JSON.stringify(f['fold.editorTextAfterSave'] ?? null)}`,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editorVsApiSamples',
-    label: '★★★ 保存之后连续的几次取样里，界面那一格与**接口那份逐字相同**（不是"最终会一致"——'
-      + '使用者可能立刻就在那一格里继续打字，差一瞬就等于把服务端刚并进来的正文覆盖掉）',
-    ok: (v) =>
-      Array.isArray(v) && v.length > 0 && v.every((x) => (x?.editor ?? '') === (x?.api ?? '')),
-    show: (v) =>
-      Array.isArray(v)
-        ? v.map((x) => `#${x.t} 界面${(x.editor ?? '').length}字/接口${(x.api ?? '').length}字`).join(' · ')
-        : String(v),
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editAfterSaveLanded',
-    label: '★ 前提：保存之后那次改动真的落库了（等的是接口里那段文字，不是输入框里的字）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editAfterSaveKeepsCriteria',
-    label: '★★★ 保存之后再改「指令」并保存一次 ⇒ 投递出去的那段文字里**判断依据还在**'
-      + '（在 `instructions` 里还是在老字段里是"住在哪"的问题，住哪儿都不许丢——`identityFrom` 存在的理由）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '老信息清理（保存时）',
-    key: 'fold.editAfterSaveResurrectsLegacy',
-    label: '★★★ 那一轮保存**不许**把刚清掉的老字段写回来（`reviewStandard` 必须还是 `null`）——'
-      + '★ 这条曾经是红的（真缺陷）：草稿里那个老对象被 `buildPatch()` 判成"变了"、整份 PATCH 回去，'
-      + '界面上那条老提示重新出现、库里刚清理掉的形状被界面自动撤销（同 `fold.editorShowsMerged` 的病根）。',
-    ok: (v) => v === false,
-    show: (v, f) => `${v}　老字段：${JSON.stringify(f['fold.instructionsAfterEdit'] ?? null)?.slice(0, 40)}`,
   },
 
   // ── 默认智能体（D36）──
@@ -3772,8 +3228,8 @@ const CHECKS = [
   {
     view: '顶栏',
     key: 'topbar.pageName',
-    label: '★ 顶栏左边写着**当前这一页**的名字（任务 / 智能体 / 工具 三轮都对）',
-    ok: (v) => v && v['#/tasks'] === '任务' && v['#/agents'] === '智能体' && v['#/tools'] === '工具',
+    label: '★ 顶栏左边写着**当前这一页**的名字（任务 / 智能体 / 沉淀三轮都对——工具页随 D123 退场，换沉淀页承担同一件事）',
+    ok: (v) => v && v['#/tasks'] === '任务' && v['#/agents'] === '智能体' && v['#/crystallize'] === '沉淀',
   },
   {
     view: '顶栏',
@@ -3786,7 +3242,9 @@ const CHECKS = [
       //   这里同时钉住它排在**最前**（主操作该在模式开关前面）。
       JSON.stringify(v['#/tasks']) === JSON.stringify(['新建任务', '列表', '看板', '刷新']) &&
       JSON.stringify(v['#/agents']) === JSON.stringify(['新建智能体', '设置', '刷新']) &&
-      JSON.stringify(v['#/tools']) === JSON.stringify(['安装工具', '刷新']),
+      // ⚠️ 2026-11（S6）：沉淀页的页面动作长这样（新建沉淀 + 设置）——逐个写死，
+      //    与"按钮跟着页换"这条判据同一个立场：不写成"数量 > 0"。
+      JSON.stringify(v['#/crystallize']) === JSON.stringify(['新建沉淀', '设置']),
   },
   {
     view: '顶栏',
@@ -3802,28 +3260,28 @@ const CHECKS = [
   },
   {
     view: '顶栏',
-    key: 'topbar.sameAsSidebar#/tools',
-    label: '页名与侧栏那一项一致（工具）',
-    ok: (v) => v === '工具',
+    key: 'topbar.sameAsSidebar#/crystallize',
+    label: '页名与侧栏那一项一致（沉淀）',
+    ok: (v) => v === '沉淀',
   },
   {
     view: '顶栏',
     key: 'topbar.oneLine',
-    label: '★ 顶栏恒为**一行**（三个页面都量）：高度被 `.shell` 的 calc 用着，换行会把整页挤歪',
-    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    label: '★ 顶栏恒为**一行**（逐页都量）：高度被 `.shell` 的 calc 用着，换行会把整页挤歪',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/crystallize'] === true,
   },
   {
     view: '顶栏',
     key: 'topbar.overflowPx',
-    label: '★ 顶栏**不横向溢出**（三个页面都量）：窄窗口下动作收进 `⋯`，不靠换行解决',
-    ok: (v) => v && v['#/tasks'] === 0 && v['#/agents'] === 0 && v['#/tools'] === 0,
+    label: '★ 顶栏**不横向溢出**（逐页都量）：窄窗口下动作收进 `⋯`，不靠换行解决',
+    ok: (v) => v && v['#/tasks'] === 0 && v['#/agents'] === 0 && v['#/crystallize'] === 0,
   },
   {
     view: '顶栏',
     key: 'topbar.actionsAtSidebarEdge',
     label:
       '★★ 这一页的动作，**左缘与侧栏右缘对齐**（= 与主区内容共一条竖线）——页名长短不影响它，顶栏与 .shell 共用同一个 grid，结构上就对齐',
-    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/crystallize'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3831,7 +3289,7 @@ const CHECKS = [
     key: 'topbar.actionsLeftOfTitleRight',
     label:
       '★★ 这一页的动作在最左边那一组里，而在最右边的是与页面无关的那几个（推到最右时两者隔着一千多像素，看起来是两件不相干的事）',
-    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/crystallize'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
@@ -3841,7 +3299,7 @@ const CHECKS = [
       '★★ 两档高度**各自齐**：工具条里的格子 24px、工具条外的常驻控件 30px（2026-10 改版之后这是嵌套关系，不是"不齐"——但**组内**不齐仍然是"加一个按钮就把这排弄歪"）',
     ok: (v) =>
       !!v &&
-      ['#/tasks', '#/agents', '#/tools'].every(
+      ['#/tasks', '#/agents', '#/crystallize'].every(
         (k) =>
           v[k] &&
           JSON.stringify(v[k].cells) === JSON.stringify([24]) &&
@@ -3859,7 +3317,7 @@ const CHECKS = [
     key: 'topbar.trackHeight',
     label:
       '★ 工具条**轨道**与常驻控件同高（30px）——这一条钉的是"一条带子上的节奏"，也正是上面那个 bug 该被抓住的地方（格子被拉到 30 时轨道看不出问题，而工具条会变成一条没有呼吸的实心带）',
-    ok: (v) => v && v['#/tasks'] === 30 && v['#/agents'] === 30 && v['#/tools'] === 30,
+    ok: (v) => v && v['#/tasks'] === 30 && v['#/agents'] === 30 && v['#/crystallize'] === 30,
     show: (v) => Object.entries(v ?? {}).map(([k, h]) => `${k}: ${h}px`).join('　'),
   },
   {
@@ -3872,7 +3330,7 @@ const CHECKS = [
     // 「不适用」= 这一页没有模式切换（只有任务页有），那是正常的
     ok: (v) =>
       !!v &&
-      ['#/tasks', '#/agents', '#/tools'].every(
+      ['#/tasks', '#/agents', '#/crystallize'].every(
         (k) => v[k] === true || v[k] === '不适用（这一页没有"当前模式"）',
       ),
     show: (v) => JSON.stringify(v),
@@ -3880,8 +3338,8 @@ const CHECKS = [
   {
     view: '顶栏',
     key: 'topbar.moreHiddenWide',
-    label: '★ 宽屏下 `⋯` **不出现**（三个页面都量）：收起来只是窄屏的事',
-    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/tools'] === true,
+    label: '★ 宽屏下 `⋯` **不出现**（逐页都量）：收起来只是窄屏的事',
+    ok: (v) => v && v['#/tasks'] === true && v['#/agents'] === true && v['#/crystallize'] === true,
   },
 
   // ── 语言切换（D39）──
@@ -4054,16 +3512,15 @@ const CHECKS = [
   {
     view: '语言切换',
     key: 'lang.boardColumnsInEn',
-    label: '★ 看板三个列头都翻（`titleId`），一个中文字都不剩',
-    ok: (v) =>
-      Array.isArray(v) && v.length === 3 && v.join('|') === 'Ongoing|Pending|Finished',
+    label: '★ 看板**每个**列头都翻（`titleId`），一个中文字都不剩（现在是两列）',
+    ok: (v) => Array.isArray(v) && v.length === 2 && v.join('|') === 'Ongoing|Finished',
   },
   {
     view: '语言切换',
     key: 'lang.boardHintsInEn',
     label: '★ 列说明也翻（`hintId`）',
     ok: (v) =>
-      Array.isArray(v) && v.length === 3 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
+      Array.isArray(v) && v.length === 2 && v.every((s) => s.length > 0 && !/[\u4e00-\u9fff]/.test(s)),
   },
   {
     view: '语言切换',
@@ -4077,259 +3534,6 @@ const CHECKS = [
     label: '★ 选择写回了服务端（界面与 prompt 的语言指令一致）',
     ok: (v) => v === 'zh',
   },
-
-  // ── 一个工具包都没装：那一栏的空态（D41）──
-  //
-  // ★ 这一组**自己把现场造成"一个都没装"**（探针走真接口摘挂 + 卸载，再点「工具」
-  //   页那个刷新）：夹具里装着 `probe-tool`，"没有工具包"这个状态本来不存在。
-  //   所以它排在最后（卸载之后前面那些检查就量不到了），而且每一步都如实上报
-  //   ——这一组绿的意思是"空态真的被看到过"，不是"这一段没跑到"。
-  // ══════════════════════════════════════════════════════════════════
-  // 智能体组页 ③ 行动：D41 那一族的**新宿主**（动作权限 2026-10 从 agent 搬到组）
-  // ══════════════════════════════════════════════════════════════════
-  //
-  // ⚠️ 这一段是**新增的覆盖**，不是把旧断言改个选择器：宿主换了，"谁持有这份权限"
-  //    也跟着换（组的 `allowedActions`）。旧的（agent 详情/表单上那些）在同一批里
-  //    按"宿主不在了"处理——见下面 `行动权限空态（D41）` 那一段开头的说明。
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.chainGroupRowFound',
-    label: '前提：三步链那个组在列表里（它身上配着一条权限、还钉了固定参数）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.checkedEqualsServerAllowed',
-    label: '★★★ 组页 ③ 行动里**勾着的那些**逐条等于**接口上这个组的 `allowedActions`**'
-      + '（不是"我期待那一个名字"：界面上显示的与库里那份必须是同一件事）',
-    ok: (v) => v === true,
-    show: (v, f) =>
-      `${v}　界面：${JSON.stringify(f['groups.checkedBoxes'] ?? null)} / 接口：${JSON.stringify(f['groups.serverAllowedActions'] ?? null)}`,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadFixtureFound',
-    label: '夹具：「配过、但包已卸载」那个组在（它的 `allowedActions` 里有一条已经没有出处的动作；'
-      + '⚠️ 只能"先配上、再卸包"造出来——写入口拒收来自没装的包的动作）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.detailShown',
-    label: '★ 点那一行之后组的详情真的出来了（`picker-wrap`）——不然下面量到的是上一个组',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.pickerShown',
-    label: '★★ ③ 行动里就是那个共用选择器（组页与智能体页同一套判据：动作只能来自已装的包）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.emptyStateInNormalCase',
-    label: '★ 装了包、也有可勾的动作时**不是**空态（空态那一档由下面单独造，两档不能混成一个）',
-    ok: (v) => v === false,
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadGroupShown',
-    label: '★★★ 「配过、但解析不出来」那一组**出现在组页上**（同一条欠债在 agent 上已经无处安放）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadTypes',
-    label: '★★★ 那一组里就是那条**没有出处的契约值**（按 `data-type` 逐字比：'
-      + '不静默过滤掉——"配过"这件事不能抹，也不能换成别的名字）',
-    ok: (v) => Array.isArray(v) && v.includes('probe-tool-ui.ping'),
-    show: (v) => (Array.isArray(v) ? v.join(' | ') || '(空)' : String(v)),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadRowContractValue',
-    label: '★★ 那一行的契约值**原样显示**（`<包 slug>.<动作名>`，不翻译、不概括）',
-    ok: (v) => v === 'probe-tool-ui.ping',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadRowMarked',
-    label: '★★★ 旁边明说它**当前不可用**（不能与一条真的能触发的动作长得一模一样——'
-      + '否则使用者以为它还在生效）',
-    ok: (v) => typeof v === 'string' && v.includes('不可用'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadRowDropButton',
-    label: '★★★ 那一行有「移除」（否则一保存就被服务端 400 拒，而错误里点名的动作在界面上不存在——死胡同）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadHint',
-    label: '★★ 那一组下面说清了**为什么**（找不到出处）与**下一步**（点「移除」；'
-      + '只是包被卸了的话也可以先去「工具」页把包装回来）',
-    ok: (v) => typeof v === 'string' && v.includes('移除') && v.includes('工具'),
-    show: (v) => JSON.stringify(String(v ?? '').slice(0, 80)),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.pickerBoxAllContractValues',
-    label: '★★★ 选择器里**每一个**勾选项都是契约值形状（`<包 slug>.<动作名>`）——'
-      + 'D41 把内置动作整组移除之后，裸名不许再出现在这一栏里',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　实测：${JSON.stringify(f['groups.pickerBoxValues'] ?? null)}`,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.pickerBoxCount',
-    label: '★★ 框的条数 = 已装工具声明的**动作总数**（不是"这个组已有的那几条"——'
-      + '写成只画已配的那几条就只能减不能加）',
-    ok: (v, f) => typeof v === 'number' && v === f['groups.installedActionTotal'],
-    show: (v, f) =>
-      `${v} 个框 / 已装工具共 ${f['groups.installedActionTotal']} 个动作`,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.deadDroppedOnServer',
-    label: '★★★ 点「移除」→ 保存 ⇒ **接口上**那条权限真的没了（不是个死胡同：'
-      + '界面干净了、库里还留着，下次打开又出现）',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　移除后：${JSON.stringify(f['groups.allowedAfterDrop'] ?? null)}`,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.emptyStateShown',
-    label: '★★★ 一个工具包都没装 ⇒ 组页这一栏也走**空态**（说清"为什么没有"，不是画一条空的清单）',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　实测：「${String(f['groups.emptyStateText'] ?? '').slice(0, 60)}」`,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.emptyStateNoCheckbox',
-    label: '★★★ 空态里**一个复选框都没有**（没有可勾的东西就别画勾选框）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.emptyStateGoButton',
-    label: '★★★ 空态**指向「工具」页**（一个可点的去处，不是一句干话）',
-    ok: (v) => typeof v === 'string' && v.includes('工具'),
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '组页 ③ 行动（D41）',
-    key: 'groups.emptyStateLinkNavigates',
-    label: '★★★ 而且那个去处**真的通**：点一下落到「工具」页（画一个点不动的按钮是最坏的一种）',
-    ok: (v) => v === true,
-  },
-
-  {
-    view: '工具页空态（D41）',
-    key: 'noTools.refusals',
-    label: '★ 摘挂与卸载都没被拒（被拒的话下面的空态根本没造出来）',
-    ok: (v) => v === 0,
-  },
-  {
-    view: '工具页空态（D41）',
-    key: 'noTools.refreshButtonFound',
-    label: '「工具」页有那个刷新按钮（探针靠它让界面的 `$tools` 真的空掉）',
-    ok: (v) => v === true,
-  },
-  {
-    view: '工具页空态（D41）',
-    key: 'noTools.viewEmptyState',
-    label: '工具页自己显示的是空态（列表确实空了）',
-    ok: (v) => v === true,
-  },
-
-  // ── 配过、但没有出处的动作（D41 收尾 / D42）──
-  //
-  // ★ 现场是**真造出来的**（两个阶段，都是真接口）：
-  //   · 阶段 A：先给审核员配上 `probe-tool-ui.ping`（那个包装着，写入口收），
-  //     再把 `probe-tool-ui` 卸载 ⇒ 那条权限变成"配过、但没有出处"，然后
-  //     **勾一个仍然可用的动作再保存** ⇒ 那份 patch 里带着它 ⇒ **400**。
-  //     这就是使用者报的那条路径："打开行动权限 → 改点别的 → 保存 → 400"。
-  //   · 阶段 B/C：把那几个包全卸载 ⇒ 只读态那一行 + 编辑态那一栏的表现。
-  //   ⚠️ 真实老库（`reviewStandard.allowedActions` 里躺着 `comment.create` 这类
-  //      旧的内置动作名）在探针里**造不出来**：写入口按设计拒绝裸名、并刻意忽略
-  //      那个老字段。所以这里覆盖的是同一段界面 + 同一条接口路径的等价状态；
-  //      旧名字本身由 `apps/web/src/lib/agent-actions.test.ts` 钉住。
-
-  // ── 新建任务的三步链（① 执行 → ② 审核 → ③ 行动）──
-  //
-  // ★ 这一页刚从一个"执行者下拉"变成**三步链**，而三步里有两处错法的后果
-  //   都不是排版：
-  //     · ② 的默认值错了 ⇒ 使用者没点过任何东西，却改变了"这条产出会不会被审"；
-  //     · 提交时那个 key 的三态错了 ⇒ "跟随"被写成 `null`（这次真的不审了），
-  //       而界面上看起来一切照旧。
-  //   所以下面这组里最重要的两条是 `newtask.followRunMode` 与
-  //   `newtask.noneRunMode`：它们读的是**接口上那条 run**，不是页面上的字。
-  //
-  // ⚠️ 夹具（两个审核者 + 一个执行者）由 `run.mjs` 在**装完夹具工具包之后**造，
-  //    三个 id 与那个动作名经 URL 传给探针页：`POST /api/agents` 在保存时会校验
-  //    `allowedActions` 里的动作来自**已安装**的工具包，装之前建必然 400。
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.fixtureExecutorId',
-    label: '★ 夹具：三个 agent 的 id 与那个动作名都从 URL 到位了（否则下面一整组都会空过）',
-    ok: (v, facts) =>
-      typeof v === 'string' &&
-      v.length > 0 &&
-      typeof facts['newtask.fixtureReviewerId'] === 'string' &&
-      facts['newtask.fixtureReviewerId'].length > 0 &&
-      typeof facts['newtask.fixtureEmptyReviewerId'] === 'string' &&
-      facts['newtask.fixtureEmptyReviewerId'].length > 0 &&
-      facts['newtask.fixtureAction'] === CHAIN_ACTION,
-    show: (v, facts) =>
-      `执行者 ${String(v).slice(-6)} / 审核者 ${String(facts['newtask.fixtureReviewerId']).slice(-6)} / 空权限 ${String(facts['newtask.fixtureEmptyReviewerId']).slice(-6)} / 动作 ${String(facts['newtask.fixtureAction'])}`,
-  },
-  {
-    view: '新建任务 · 链',
-    key: 'newtask.executorSelectApplied',
-    label: '① 前提：真的把下拉选成了**夹具那个执行者**（不是列表里的第一个）——'
-      + '②③ 那几条都以它为基准，选错人时它们量的是别人的配置',
-    ok: (v) => v === true,
-    show: (v, f) => `${v}　夹具执行者：${String(f['newtask.fixtureExecutorId'] ?? '').slice(-6)}`
-  },
-  // ══════════════════════════════════════════════════════════════════
-  // ★ 版面：三步排成一行 + 首屏看得见三个问题
-  // ══════════════════════════════════════════════════════════════════
-  // ══════════════════════════════════════════════════════════════════
-  // ★「要做什么」：两个字段合并成一个多行框
-  // ══════════════════════════════════════════════════════════════════
-  // ══════════════════════════════════════════════════════════════════
-  // ★ ③ 行动：从"铺一整段选择器"改成"一个按钮 + 居中对话框"
-  // ══════════════════════════════════════════════════════════════════
-  // ── ★ 改写之一：`newtask.actionChips`（③ 只读 ⇒ 契约值画在 `.chip` 里）──
-  //
-  // 为什么原来那条不再成立：③ 从**只读**改成了**可勾**（智能体页「行动权限」那个
-  // 形状）。可勾那一档的契约值画在**勾选框旁边**（`label.action-option > code`），
-  // 不再有 `.chip` 可选那一档的判据必须整个换口径：从"有一段只读文字里出现了
-  // 契约值"变成"**框里那个动作**就是它、而且框旁边逐字写着它的 `summary`"。
-  // ⚠️ 它**不是被放松**：原来只要求"字符串在页面上出现过"，现在要求"框的
-  //    `value` / 旁边的 `code` / 旁边的 `summary` 三样都对上接口里那一份"。
-
-  // ── ★ 新不变量：那句「只对这一次任务生效」**只在改过之后**出现 ──
-  //
-  // 默认状态（一下都没碰过）出现它 = 对使用者说"你改了它的长期权限"——假话；
-  // 动一下（取消一个勾）不出现它 = 他这一次的收紧会被当成长期安排。
-
-  // ── ★ 档三：工具清单没到 ⇒ **一个勾选框都不画** ──
-  //
-  // 现场是"让 `/api/tools` 真的失败"再造出来的（`$tools` 那一刻还留着上一次取到的
-  // 清单 ⇒ 与"一个包都没装"长得一样，而这一栏必须说"说不准"）。
-
-  // ── ★ 档四：这个 daemon **兑现不了这一栏的覆盖** ⇒ 退回只读（画 chip）──
-  //
-  // 现场是把 `/api/identity` 的 `capabilities` 里 `task-action-whitelist` **只去掉
-  // 这一个**（`reviewer-override` 留着）：这正是"只重建了一半"的中间态，也是
-  // 那两个标志**必须分开**的理由。
-
-  // ── D45：返工次数（界面 ↔ 请求体 ↔ 落库）──
 
   // ── 新建任务 ──
   { view: '新建任务', key: 'new.hasContent', label: '建任务那一栏渲染出来了（表单在右栏里 + 左边清单还在）', ok: (v) => v === true },
@@ -4900,30 +4104,10 @@ const CHECKS = [
   },
   {
     view: '任务',
-    key: 'entry.工具.actual',
-    label: '★★ 进「工具」组之后**确实到了那一屏**（入口断言：`.page-name` 文本 = 工具）——入口漂了要直接说“没到那一屏”，而不是让下游报“没量到这个值”',
-    ok: (v) => v === '工具',
-    show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '任务',
     key: 'entry.智能体.actual',
     label: '★★ 进「智能体」组之后**确实到了那一屏**（`.page-name` 文本 = 智能体）',
     ok: (v) => v === '智能体',
     show: (v) => JSON.stringify(v),
-  },
-  {
-    view: '任务',
-    key: 'entry.智能体组.actual',
-    label: '★★ 进「智能体组」组之后**确实到了那一屏**（列表行数 > 0）',
-    ok: (v) => typeof v === 'number' && v > 0,
-    show: (v) => `${v} 行`,
-  },
-  {
-    view: '任务',
-    key: 'groups.listGripPresent',
-    label: '智能体组页的列表拖动把手在页面上（2026-11）',
-    ok: (v) => v === true,
   },
   {
     view: '任务',
@@ -4932,7 +4116,7 @@ const CHECKS = [
       '★★ 每组的入口都被记下来了（起点路由 / 目标路由 / 等待信号）——探针的组间耦合原来只活在代码顺序里，看不见；写出来之后，"上一组把页面留在哪儿"才有据可查（§12.25）',
     ok: (v, f) => v === true,
     show: (v, f) =>
-      ['任务', '技能', '工具', '智能体组', '智能体']
+      ['任务', '技能', '智能体']
         .map((n) => `${n}←${JSON.stringify((f['entry.' + n] ?? {}).from ?? null)}`)
         .join('　'),
   },
@@ -6232,7 +5416,6 @@ const PROBE_MAKER_MARKER = 'PROBE-MAKER-DRAFT'
 const PROBE_MAKER_DRAFT_MD = [
   '---',
   'name: 会议纪要助理',
-  'role: executor',
   '---',
   '你是会议纪要助理。',
   '',
@@ -6361,8 +5544,12 @@ try {
     throw new DaemonDown()
   }
 
-  // ★ 再造一个**老形态的审核者**（D38 的迁移夹具）：只挂 skill、没有内联标准。
-  //   探针要走一遍"把判断依据并进「指令」→ 那条 skill 才卸得掉"。
+  // ★ 播种一条夹具 skill（`probe-skill`）：技能页那一段（行、卸载、历史）靠它。
+  //
+  // ⚠️ 2026-11（S6）：这里原来还顺手造了四个"审核者"夹具（老形态 / 没写指令 /
+  //    内联老标准 / 老标准详情）。角色、审核标准、迁移、老信息清理那几族判据随
+  //    D126/D127 一起退场，这四个夹具**没有消费者了**——留着它们就是四条只为
+  //    不存在的界面服务的 POST。skills 的播种保留（下面技能页那一段要用）。
   // ⚠️ 这条 `POST /api/skills` 必须在**下面这次查找之前**执行：第一版把它写在文件
   //    后半（3800 行之外，第二次 daemon 起来之后），而迁移（D38）那一族在这里就
   //    `skills.find(s => s.slug === 'probe-skill')` —— 找不到就只打一句 ⚠、整族
@@ -6391,110 +5578,6 @@ try {
     log(yellow(`⚠ 造夹具 skill 时出错：${err}`))
   }
 
-  try {
-    const skills = (await (await fetch(`${base}/api/skills`)).json()).skills
-    const probeSkill = skills.find((s) => s.slug === 'probe-skill')
-    if (!probeSkill) {
-      log(yellow('⚠ 找不到夹具 skill——迁移那几条会空过'))
-    } else {
-      const res = await fetch(`${base}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: '探针用的老形态审核者',
-          role: 'reviewer',
-          skillIds: [probeSkill.id],
-        }),
-      })
-      if (!res.ok) log(yellow(`⚠ 造老形态审核者失败（HTTP ${res.status}）`))
-    }
-  } catch (err) {
-    log(yellow(`⚠ 造老形态审核者时出错：${err}`))
-  }
-
-  /**
-   * ★★ 再造一个**什么都没有的审核者**（2026-09）：验证详情页顶上那条红警告
-   * 「它审不了任何东西：没有写「指令」…」在**真的没有依据**时才出现。
-   *
-   * ⚠️ 它的孪生情形更重要：**只写了「指令」的审核者不该看到这条警告**——那条
-   *    判据原来只看老字段（`reviewStandard` / `skillIds`），于是正常的审核者被
-   *    误报（使用者的原话：「这个提示有问题」）。那个"不该出现"的方向用 D38 的
-   *    夹具量（它搬完之后正是"只有指令"的形态），这里造的这一个量"该出现"。
-   */
-  try {
-    const res = await fetch(`${base}/api/agents`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '探针用的没写指令的审核者', role: 'reviewer' }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造没写指令的审核者失败（HTTP ${res.status}）`))
-  } catch (err) {
-    log(yellow(`⚠ 造没写指令的审核者时出错：${err}`))
-  }
-
-  /**
-   * ★★ 再造一个**带内联老标准**的审核者（2026-09）：探针要走一遍
-   * 「重新编辑保存一次 ⇒ 那条"还带着一份老的标准"的提示就该消失」。
-   *
-   * ⚠️ 为什么要**单独造一个**、而不是拿首启那个审核员来试：首启那个审核员
-   *    被前面一组检查读着（老正文显示、并进来的按钮），把它改掉会让那一组
-   *    量到"改完之后"的样子——一条断言读到的是别的现场，是这一整个探针里
-   *    反复踩过的那类坑。
-   */
-  try {
-    const res = await fetch(`${base}/api/agents`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name: '探针用的内联老标准审核者',
-        role: 'reviewer',
-        instructions: '你是严格的审核者。',
-        // ⚠️ 正文要**长于 20 个字符**：`standard.detailShowsBody` 那条检查量的是
-        //   "老正文真的显示出来了"（`pre` 里非空的一段），阈值 >20 是当初内置
-        //   标准那段的长度——夹具正文太短会量不到"显示"这件事。
-        reviewStandard: {
-          body: '## 判定\n\n只看证据。\n\n1. 结论要有依据，证据要能指回原文。\n2. 不要引入标准之外的要求。',
-        },
-      }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造内联老标准审核者失败（HTTP ${res.status}）`))
-  } catch (err) {
-    log(yellow(`⚠ 造内联老标准审核者时出错：${err}`))
-  }
-
-  /**
-   * ★★ 再造一个**详情用的老标准审核者**（2026-09 三次改）：[审核标准] 那一段
-   *   原来拿首启的审核员量"老正文显示 + 并进来的入口"，而首启的判据已并进
-   *   「指令」（`reviewStandard` 是 null）——老正文那两条现在由**这一个**夹具
-   *   来量。
-   *
-   * ⚠️ 为什么**不能**复用 `探针用的内联老标准审核者`：那一个是 fold-on-save 段
-   *    的夹具（要留着完整的 `reviewStandard`），而 [审核标准] 段会在它身上走
-   *    **真实保存**（勾 append-note 保存 ⇒ 内联老标准被服务端并进「指令」并清掉）。
-   *    两条共用的话，fold-on-save 段量到的就是"改完之后"的样子——探针里反复
-   *    踩过的那类坑（一条断言读到的是别的现场）。
-   */
-  try {
-    const res = await fetch(`${base}/api/agents`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name: '探针用的老标准详情审核者',
-        role: 'reviewer',
-        instructions: '你是严格的审核者。',
-        // ⚠️ 正文要**长于 20 个字符**：`standard.detailShowsBody` 那条检查量的是
-        //   "老正文真的显示出来了"（`pre` 里非空的一段），阈值 >20 是当初内置
-        //   标准那段的长度——夹具正文太短会量不到"显示"这件事。
-        reviewStandard: {
-          body: '## 判定\n\n只看证据。\n\n1. 结论要有依据，证据要能指回原文。\n2. 不要引入标准之外的要求。',
-        },
-      }),
-    })
-    if (!res.ok) log(yellow(`⚠ 造老标准详情审核者失败（HTTP ${res.status}）`))
-  } catch (err) {
-    log(yellow(`⚠ 造老标准详情审核者时出错：${err}`))
-  }
-
   // ★ 再造**一个执行者**（不造 run）：探针要测"换默认智能体"，而首启播种的
   //   执行者**已经是默认**——只有一个执行者时，卡片上根本没有「设为默认」可点，
   //   那一组检查会全部空过。
@@ -6507,7 +5590,8 @@ try {
     const res = await fetch(`${base}/api/agents`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '探针用的执行者', role: 'executor' }),
+      // ⚠️ 2026-11（D127）：`role` 字段已从协议里删掉，传了会被 400 拒（夹具静默造不出来）。
+      body: JSON.stringify({ name: '探针用的执行者' }),
     })
     if (!res.ok) log(yellow(`⚠ 造夹具 agent 失败（HTTP ${res.status}）——换默认那几条会空过`))
   } catch (err) {
@@ -6545,8 +5629,8 @@ try {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          // ⚠️ 2026-11（D127）：`role` 已删（见上）。
           name: '探针用的技能执行者',
-          role: 'executor',
           skillIds: [owned.id],
         }),
       })
@@ -6624,7 +5708,7 @@ try {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: '探针用的目录执行者',
-        role: 'executor',
+        // ⚠️ 2026-11（D127）：`role` 已删。
         runtimeKey: 'generic',
         // ★ 分批第 259 批：新建的智能体**默认关记忆** ⇒ 这一条是聊天/整理那几节的
         //   落库对象，必须显式打开（否则触发词 chip 不出现、整理写入恒 409）
@@ -6638,267 +5722,42 @@ try {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 造**工具包夹具**（D40）：三个目录，加一次真的安装
+  // 造**新建任务**的夹具：一个执行者（不造 run）
   // ══════════════════════════════════════════════════════════════════
   //
-  // 三份夹具各管一件事，缺一条就会有一段检查**空过**：
+  //   ⚠️ **`runtimeKey: 'generic'`**：端到端那一条要真的点一次「创建并派发」，
+  //   于是 daemon 会去 spawn 那个 runtime 的命令。`generic` 的命令是 `agent-cli`
+  //   ——在这一段里它**不存在**（假 CLI 只服务起草那条 run，别的 run 一律 127），
+  //   run 会**立刻**失败。这里要的只是"那条 run 被创建出来、执行者是谁"，
+  //   执行本身跑不跑得起来与这条断言无关，所以刻意选那个跑不起来的 runtime：
+  //   探针不该替使用者去调真的 CLI。
   //
-  //   ① `probe-tool`：装得上、**两个动作**，其中 `clean-notes` 是
-  //      `reversible: false`——"不可回滚"那条标注只有动作本身带着这个值时才量得到
-  //      （2026-09：`dryRun` 声明保留在夹具里，但它不再参与任何判断、也没有标注）；
-  //   ② `probe-tool-ui`：给**抽屉里那次真实安装**用（换个 slug，否则同名会被
-  //      自己的 ① 挡住，量到的是"同名冲突"而不是"装上了"）；
-  //   ③ `probe-broken`：清单合法但**入口脚本不在包里** ⇒ 服务端回
-  //      `missing_entry` 且 `detail` 是**多行**的（`describeDir` 一行 +
-  //      一句解释）。"失败时 error 与多行 detail 一起显示"只有这种夹具量得到。
-  //
-  // ⚠️ 目录写在 `.cache/layout-probe/` 里（SCRATCH），仓库外一个字节都不写。
-  // ⚠️ 路径要**传给探针页**（`?badToolPath=` / `?uiToolPath=`）：抽屉里那次
-  //    安装是探针"真的往输入框里打字"驱动的，而它不可能自己编出这个路径。
-  const fixtureToolsDir = path.join(SCRATCH, 'fixture-tools')
-  const toolFixtureDir = path.join(fixtureToolsDir, 'probe-tool')
-  const uiToolFixtureDir = path.join(fixtureToolsDir, 'probe-tool-ui')
-  const brokenToolFixtureDir = path.join(fixtureToolsDir, 'probe-broken')
-
-  const writeTool = (dir, manifest, files) => {
-    fs.mkdirSync(dir, { recursive: true })
-    fs.writeFileSync(path.join(dir, 'tool.json'), JSON.stringify(manifest, null, 2))
-    for (const [rel, text] of Object.entries(files)) {
-      const full = path.join(dir, rel)
-      fs.mkdirSync(path.dirname(full), { recursive: true })
-      fs.writeFileSync(full, text)
-    }
-  }
-
+  //   ⚠️ 2026-11（S6）：审核者 / 空权限审核者 / 编队那三个夹具随它们的界面一起删了
+  //   （见上面常量区那段注释）。
+  const chainFixture = { executorId: '' }
   try {
-    writeTool(
-      toolFixtureDir,
-      {
-        schema: 'agentdeck/tool@1',
-        slug: 'probe-tool',
-        name: '探针工具（夹具）',
-        version: '1.0.0',
-        description: '探针夹具：两个动作，其中一个不可回滚。',
-        runtime: 'node',
-        entry: 'scripts/note.mjs',
-        actions: [
-          {
-            name: 'append-note',
-            summary: '把一句话追加到工作目录的 NOTES.md',
-            reversible: true,
-            dryRun: 'supported',
-            timeoutMs: 10000,
-            params: {
-              // 绑定参数：模型看不到也填不了（界面上要标出来）
-              bound: { dir: { from: 'workdir' } },
-              // 开放参数：有界，界面显示类型与上限
-              open: { text: { type: 'string', max: 500 } },
-            },
-          },
-          {
-            name: 'clean-notes',
-            // ★ 这一条是"不可回滚"那条标注的唯一来源
-            summary: '把 NOTES.md 删掉（演示 reversible=false 的动作）',
-            entry: 'scripts/clean.mjs',
-            reversible: false,
-            dryRun: 'unsupported',
-            params: {
-              bound: { confirm: { from: 'literal', value: 'yes' } },
-              // ★ D43：给这条动作一个 **open** 参数——固定参数编辑器只对"勾上的
-              //   动作 + 有 open 参数"出现，夹具审核者钉的正是这一个（见下）。
-              open: { text: { type: 'string', max: 500 } },
-            },
-          },
-        ],
-      },
-      {
-        'TOOL.md': '# 探针工具\n\n夹具包，由 tools/layout-probe 造。\n',
-        'scripts/note.mjs': "console.log('probe note')\n",
-        'scripts/clean.mjs': "console.log('probe clean')\n",
-      },
-    )
-
-    writeTool(
-      uiToolFixtureDir,
-      {
-        schema: 'agentdeck/tool@1',
-        slug: 'probe-tool-ui',
-        name: '探针工具（从抽屉里装的）',
-        version: '0.1.0',
-        runtime: 'node',
-        entry: 'scripts/run.mjs',
-        actions: [
-          {
-            name: 'ping',
-            summary: '打印一行（夹具）',
-            reversible: true,
-            dryRun: 'supported',
-          },
-        ],
-      },
-      { 'scripts/run.mjs': "console.log('probe ui tool')\n" },
-    )
-
-    writeTool(
-      brokenToolFixtureDir,
-      {
-        schema: 'agentdeck/tool@1',
-        slug: 'probe-broken',
-        name: '探针坏包（清单合法、入口不在）',
-        runtime: 'node',
-        // 声明的入口**不在**包里 ⇒ missing_entry，detail 两行
-        entry: 'scripts/missing.mjs',
-        actions: [
-          { name: 'do-nothing', summary: '什么也不做（夹具）', reversible: true, dryRun: 'supported' },
-        ],
-      },
-      // 故意只有 tool.json：`files` 为空，于是"入口文件不在包里"这条一定会触发
-      {},
-    )
-  } catch (err) {
-    log(yellow(`⚠ 写工具包夹具时出错：${err}`))
-  }
-
-  try {
-    const res = await fetch(`${base}/api/tools`, {
+    const res = await fetch(`${base}/api/agents`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ source: 'path', path: toolFixtureDir }),
+      body: JSON.stringify({ name: CHAIN_EXECUTOR, runtimeKey: 'generic' }),
     })
-    // ⚠️ 这里原来还会把夹具工具 `PUT` 到夹具执行者身上（`/api/agents/:id/tools`），
-    //    好让「被哪些执行者挂载」那一列有内容可量。那一列与那条挂载能力一起撤掉了
-    //    （使用者的决定），所以这次 PUT 没有消费者了，一并删掉——留着就是一条
-    //    只为不存在的界面服务的夹具。接口本身仍由 `tools-api.test.ts` 覆盖。
     if (!res.ok) {
-      log(yellow(`⚠ 装夹具工具失败（HTTP ${res.status}）——工具那几条会量到空态`))
-    }
-  } catch (err) {
-    log(yellow(`⚠ 装夹具工具时出错：${err}`))
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // 造**新建任务三步链**的夹具：两个审核者 + 一个执行者
-  // ══════════════════════════════════════════════════════════════════
-  //
-  //   · `CHAIN_REVIEWER`：**带标准**（D37：没有标准的审核者拿不到审核任务）
-  //     + 一个**已装**工具包里的动作（`probe-tool.clean-notes`）。③ 要量的
-  //     正是"那个审核者当前允许的动作"；
-  //   · `CHAIN_EMPTY_REVIEWER`：带标准、**一个动作都没有**。③ 的空态有两档
-  //     （"没有审核者" / "有审核者但没动作"），后者只有这么一个 agent 才量得到，
-  //     而它说的那句后果（"判决只会给出结论，不会触发任何操作"）是另一档没有的；
-  //   · `CHAIN_EXECUTOR`：执行者（2026-10 起不再有"长期由谁审"这个字段，
-  //     配对改由**组**给出——见下面 `CHAIN_GROUP`）；
-  //
-  // ⚠️ **顺序**：必须在上面那次 `POST /api/tools` **之后**。
-  //    `POST /api/agents` 保存时会拿 `allowedActions` 对着**已安装的工具包**校验
-  //    （`parseAgentAllowedActions`），装之前建必然 400（"动作来自还没安装的工具包"）。
-  //
-  // ⚠️ **`runtimeKey: 'generic'`**：端到端那两条要真的点一次「创建并派发」，
-  //    于是 daemon 会去 spawn 那个 runtime 的命令。`claude` 在这台机器上是装了
-  //    （会真的拉起一个模型去干活），而 `generic` 的命令是 `agent-cli`——它不
-  //    存在，run 会**立刻**以 ENOENT 失败。这里要的只是"那条 run 被创建出来、
-  //    带上了哪一态的 reviewer"，执行本身跑不跑得起来与这条断言无关，
-  //    所以刻意选那个跑不起来的 runtime：探针不该替使用者去调真的 CLI。
-  //
-  // ⚠️ 三个都**不抢"默认"**（默认是播种的那个执行者）：`defaultAgent.*` 那一组
-  //    量的是徽章只有一个、预选的是设过的那个。
-  const chainFixture = { executorId: '', reviewerId: '', emptyReviewerId: '', groupId: '' }
-  try {
-    const createAgent = async (body) => {
-      const res = await fetch(`${base}/api/agents`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const detail = await res
-          .json()
-          .then((p) => p.error ?? '')
-          .catch(() => '')
-        log(
-          yellow(
-            `⚠ 造三步链夹具 agent 失败（${body.name}，HTTP ${res.status}${detail ? `：${detail}` : ''}）`,
-          ),
-        )
-        return null
-      }
-      return await res.json()
-    }
-
-    const reviewer = await createAgent({
-      name: CHAIN_REVIEWER,
-      role: 'reviewer',
-      reviewStandard: {
-        name: '三步链夹具标准',
-        body: '# 三步链夹具标准\n\n只看结论有没有依据。',
-      },
-      // ⚠️ 2026-10 起 **agent 上不再有 `allowedActions` / `actionParams`**：
-      //    "判完允许动什么"的唯一权威是**智能体组**（组页 ③ 行动）。这两个键
-      //    现在会被 POST /api/agents 当"不认识的字段"400 拒掉——夹具因此
-      //    静默没造出来，三步链那一组全量到空值（这一条是实测撞到的漂移）。
-      //    长期权限改用下面那个**组**来给（见 `CHAIN_GROUP`）。
-    })
-    const emptyReviewer = await createAgent({
-      name: CHAIN_EMPTY_REVIEWER,
-      role: 'reviewer',
-      reviewStandard: {
-        name: '空权限夹具标准',
-        body: '# 空权限夹具标准\n\n只看产出在不在。',
-      },
-    })
-    // 执行者最后建：它要指向上面那个审核者（`validateRoleAndReviewer` 会查存在性）
-    const executor = await createAgent({
-      name: CHAIN_EXECUTOR,
-      role: 'executor',
-      runtimeKey: 'generic',
-      // ⚠️ 这里原来传 `reviewerAgentId`（"这个执行者长期由谁审"）——2026-10 起
-      //    这个概念**整个移除**（协议里字段都删了），"谁审"的唯一出处是
-      //    **智能体组**。所以那一段不再设：② 的「跟随」在 agent 档下跟不到人，
-      //    长期权限那一族判据改由上面那个组承担（`chainGroup`）。
-      //    ⚠️ 传了就 400（"不认识的字段"）⇒ 整个链夹具造不出来 ⇒ 那一组全空过。
-    })
-
-    // ★ 长期行动权限现在挂在**组**上：新建任务页选「智能体组」时，① ② ③ 的
-    //   默认值由这个组展开（`groupChainDefaults`）——③ 里那两个"跟随之"的
-    //   判据（胶囊逐字等于接口回给它的值、固定参数的默认值）量的就是它。
-    let chainGroup = null
-    if (reviewer && executor) {
-      const res = await fetch(`${base}/api/agent-groups`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          name: CHAIN_GROUP,
-          members: [String(executor.id), String(reviewer.id)],
-          allowedActions: [CHAIN_ACTION],
-          actionParams: { [CHAIN_ACTION]: { text: '长期钉的' } },
-        }),
-      })
-      if (!res.ok) {
-        const detail = await res
-          .json()
-          .then((p) => p.error ?? '')
-          .catch(() => '')
-        log(yellow(`⚠ 造三步链夹具组失败（HTTP ${res.status}${detail ? `：${detail}` : ''}）`))
-      } else {
-        chainGroup = await res.json()
-      }
-    }
-
-    // ⚠️ 「配过、但包已经卸载」那个夹具组**不在这里造**：`probe-tool-ui` 是探针
-    //    在界面里那次真实安装装进来的（下面那个 slug 只登记了目录项），所以
-    //    "先配上、再卸包"这个顺序只能在**探针页里、那次安装之后**做——见
-    //    `probe.html` 的「④.5 造『配过、但包已卸载』那个组」。第一版写在这里，
-    //    那一刻包还没装 ⇒ POST 400、组没造出来、整段空过（踩过）。
-    if (reviewer && emptyReviewer && executor) {
-      chainFixture.executorId = String(executor.id)
-      chainFixture.reviewerId = String(reviewer.id)
-      chainFixture.emptyReviewerId = String(emptyReviewer.id)
-      if (chainGroup) chainFixture.groupId = String(chainGroup.group.id)
+      const detail = await res
+        .json()
+        .then((p) => p.error ?? '')
+        .catch(() => '')
+      log(
+        yellow(
+          `⚠ 造新建任务夹具执行者失败（HTTP ${res.status}${detail ? `：${detail}` : ''}）` +
+            '——新建任务那一组会量到空值',
+        ),
+      )
     } else {
-      log(yellow('⚠ 三步链夹具没造全——新建任务那一组会量到空值'))
+      const created = await res.json()
+      chainFixture.executorId = String(created.id)
     }
   } catch (err) {
-    log(yellow(`⚠ 造三步链夹具时出错：${err}`))
+    log(yellow(`⚠ 造新建任务夹具执行者时出错：${err}`))
   }
 
   // ★ 分批第 193 批删掉了一段**死代码**（它每次都打一句误导人的 ⚠）：
@@ -7009,7 +5868,8 @@ try {
     try {
       const workspaceId = (await store.listWorkspaceIds())[0]
       const agents = await store.listAgents(workspaceId)
-      const executor = agents.find((a) => a.role === 'executor') ?? agents[0]
+      // ⚠️ 2026-11（D127）：判据从 `role === 'executor'` 换成"不是平台内置岗位"。
+      const executor = agents.find((a) => a.builtinKind === undefined) ?? agents[0]
       if (!workspaceId || !executor) {
         log(yellow('⚠ 找不到播种的 workspace / 执行者——沉淀那几条会空过'))
       } else {
@@ -7104,7 +5964,7 @@ try {
           // ——那时目标态就只有「新建一份技能」一行，下面那条判据会红，红得对（夹具坏了）。
           skillIds: fixtureSkillForTargets === null ? [] : [fixtureSkillForTargets.id],
           env: {},
-          role: 'executor',
+          // ⚠️ 2026-11（D127）：协议里没有 `role` 了；老键留着也不认（读时被 strip）。
           createdAt: now,
           updatedAt: now,
         }
@@ -7455,7 +6315,7 @@ try {
   try {
     const agentsPage = await (await fetch(`${base}/api/agents`)).json()
     const tidyAgent = (agentsPage.items ?? agentsPage.agents ?? []).find(
-      (a) => a.role === 'memory-tidy',
+      (a) => a.builtinKind === 'memory-tidy',
     )
     if (!tidyAgent) {
       log(yellow('⚠ 没找到内置「记忆整理者」——「整理成记忆」那一节会量不到'))
@@ -7473,7 +6333,7 @@ try {
 
   try {
     const agentsPage = await (await fetch(`${base}/api/agents`)).json()
-    const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.role === 'drafter')
+    const drafter = (agentsPage.items ?? agentsPage.agents ?? []).find((a) => a.builtinKind === 'drafter')
     if (!drafter) {
       log(yellow('⚠ 没找到内置起草者——"起草中"那一屏会量不到'))
     } else {
@@ -7705,12 +6565,8 @@ try {
       //   而探针不可能自己编出 `.cache/layout-probe/…` 这个绝对路径。
       // ★ 三步链那三个 id 与动作名同样从 URL 传（与工具路径一个理由：夹具在
       //   Node 侧造，探针**不许**靠"列表里的第一个"这种脆假设去找它们）。
-      `${base}/${PROBE_NAME}?badToolPath=${encodeURIComponent(brokenToolFixtureDir)}&uiToolPath=${encodeURIComponent(uiToolFixtureDir)}` +
+      `${base}/${PROBE_NAME}?probe=1` +
         `&chainExecutor=${encodeURIComponent(chainFixture.executorId)}` +
-        `&chainReviewer=${encodeURIComponent(chainFixture.reviewerId)}` +
-        `&chainEmptyReviewer=${encodeURIComponent(chainFixture.emptyReviewerId)}` +
-        `&chainAction=${encodeURIComponent(CHAIN_ACTION)}` +
-        `&chainGroup=${encodeURIComponent(chainFixture.groupId ?? '')}` +
         `&crystalDraft=${encodeURIComponent(crystalFixture.draftRunId)}` +
         `&crystalDrafting=${encodeURIComponent(crystalFixture.draftingRunId)}` +
         `&crystalTarget=${encodeURIComponent(crystalFixture.targetSourceRunId)}` +

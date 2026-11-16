@@ -19,7 +19,6 @@
  */
 import { renderText, webText } from '@agentdeck/i18n'
 import { currentLocale } from './locale.ts'
-import type { ToolManifest } from './api.ts'
 
 const REMOTE_URL_KEY = 'agentdeck.remote-url'
 const REMOTE_TOKEN_KEY = 'agentdeck.remote-token'
@@ -156,34 +155,15 @@ export interface CatalogSkill {
   fetchedAt?: string
 }
 
-/**
- * 远端目录里的一个**工具包**条目（D40）。
- *
- * 一个包 = 一个组，装一次整组可用。形状与 `apps/remote/src/server.ts` 的
- * `catalog.tools`（源头是 `apps/remote/src/catalog.ts` 的 `CatalogToolEntry`）
- * 一一对应。
- *
- * ★ `manifest` / `files` / `docs` 是**随列表一起给**的（与 skill 那条路同形）：
- *   装的时候直接把它们交给本机 daemon（`POST /api/tools {source:'payload'}`），
- *   中间**没有第二次取内容的机会**——两次取会让"页面看到的那份"与"装进去的
- *   那份"可以不一样，而那种不一致没有任何报错。
+/*
+ * ⚠️ 2026-11（D123）：这里原来有 `CatalogTool`（远端目录里的一个工具包条目）。
+ *   工具包与动作能力一起退场，远端目录不再有这一栏，类型删除。
  */
-export interface CatalogTool {
-  slug: string
-  name: string
-  version: string | null
-  summary: string
-  /** 清单元件（原样）；本地会用**同一份 schema**再校验一遍。 */
-  manifest: ToolManifest
-  /** 包里的文本文件（相对路径 → 内容），含入口脚本。 */
-  files: Record<string, string>
-  /** `TOOL.md` 的正文（没有就是空串）。 */
-  docs: string
-}
 
 export interface Catalog {
   skills: CatalogSkill[]
-  tools: CatalogTool[]
+  // ⚠️ 2026-11（D123）：这里原来还有 `tools: CatalogTool[]`（远端目录里的工具包），
+  //   随动作能力退场删掉——远端目录也不再统计它们。
   loginMethods: Array<{ name: string; summary: string }>
 }
 
@@ -211,10 +191,13 @@ export const remote = {
     return this.login(email, password)
   },
 
-  pending: () =>
-    remoteApi<{ items: unknown[]; warnings: Array<{ plugin: string; reason: string }>; queried: string[] }>(
-      '/api/pending',
-    ),
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `pending()`——去远端取"待处理项"（外挂插件
+   *   抓到的报告），再交给本机 daemon 的 `/api/reports` 走审核。
+   *
+   *   报告摄取整条链退场 ⇒ 远端没有"待处理项"可取，这一栏与它的
+   *   `GET /api/pending` 一起删。
+   */
 
   ingestRecords: (records: unknown[]) =>
     remoteApi('/api/records', { method: 'POST', body: JSON.stringify({ records }) }),

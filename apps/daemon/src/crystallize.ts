@@ -44,7 +44,10 @@ export interface CrystallizeTargets {
     source: Skill['source']
   }>
   /** 任务被审核过（存在 completed 的 review run）——任务按钮可用性判据之一。 */
-  reviewed: boolean
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `reviewed: boolean`——"这条任务被审核过"，
+   *   沉淀门槛（设计 §4.3）的一半。审核 run 退场 ⇒ 那个事实不存在了，字段删。
+   */
   /**
    * 任务已有用户反馈。当前平台没有独立的 run 反馈机制，恒 false；
    * 面板上提供"补充反馈"输入（填了进素材）。判据保留字段位：
@@ -120,7 +123,6 @@ export async function crystallizeTargets(
   let agentId: string = run.agentId as string
   let extraSkillIds: string[] = []
   let scope: 'conversation' | 'task' = 'task'
-  let reviewed = false
 
   if (run.subject.type === 'conversation') {
     scope = 'conversation'
@@ -129,18 +131,12 @@ export async function crystallizeTargets(
       agentId = conversation.agentId as string
       extraSkillIds = conversation.skillIds.map((id) => id as string)
     }
-  } else {
-    // 任务场景：找有没有 completed 的审核 run（与 server.ts 判"审核过"同一
-    // 条路：`RunQuery` 没有 kind/subject 过滤，所以在这里筛）。
-    const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
-    reviewed = page.items.some(
-      (r) =>
-        r.kind === 'review' &&
-        r.subject.type === 'run' &&
-        r.subject.id === run.id &&
-        r.status === 'completed',
-    )
   }
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是任务场景的"审核过没有"——翻全部 run 找一条
+   *   `kind === 'review'` 且 subject 指向这条执行、且已完成的。审核 run 退场 ⇒
+   *   没有可翻的东西，整段删（连同 `reviewed` 这个返回值）。
+   */
 
   const loadedSkills = await resolveLoadedSkills(store, agentId, extraSkillIds)
 
@@ -158,7 +154,6 @@ export async function crystallizeTargets(
 
   return {
     loadedSkills,
-    reviewed,
     hasUserFeedback: false,
     scope,
     materialStats,
@@ -626,16 +621,15 @@ export async function listCrystallizeSources(
     )
     if (execRuns.length === 0) continue
     const latest = execRuns.sort((a, b) => b.queuedAt - a.queuedAt)[0]!
-    // 门槛：有 completed 审核 run（subject 指向该任务**任何一条**执行 run——
-    // 审核挂在哪条执行上都可以，与 crystallizeTargets 同一语义）。
-    const reviewed = runs.some(
-      (r) =>
-        r.kind === 'review' &&
-        r.status === 'completed' &&
-        r.subject.type === 'run' &&
-        execRuns.some((e) => e.id === r.subject.id),
-    )
-    if (!reviewed) continue
+    /*
+     * ⚠️ 2026-11（D125）：这里原来是门槛——"这条任务有一条已完成的审核 run"才列进
+     *   沉淀来源。审核 run 退场 ⇒ 门槛没有判据，整段删。
+     *
+     *   ⚠️ 那是不是"什么都能沉淀了"？是——而这是**对的**：这条门槛存在的理由是
+     *   "没被审过的产出不值得沉淀"，而那个判断现在由**人**在做（他在看板上挑哪条
+     *   任务去沉淀）。平台再替他判一次，只会把"我觉得这条可以"变成一个没人能回答的
+     *   问题。
+     */
     out.push({ kind: 'task', id: issue.id, label: issue.title, runId: latest.id as string, turns: null })
   }
 

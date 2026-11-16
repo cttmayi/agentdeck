@@ -62,9 +62,17 @@ export const workflowsText = {
   'workflows.gateFeedbackLabel': { zh: '你的意见（不通过时必填，会附加给 agent 重写）', en: 'Your feedback (required when rejecting; appended for rework)' },
   'workflows.noOutput': { zh: '（这个 agent 还没有产出）', en: '(no output from this agent yet)' },
   'workflows.stepWorking': { zh: '（这个 agent 正在跑…）', en: '(agent working…)' },
-  'workflows.loopWriter': { zh: '写作员', en: 'Writer' },
-  'workflows.loopReviewer': { zh: '审查员', en: 'Reviewer' },
-  'workflows.loopReviewing': { zh: '（审查中…）', en: '(reviewing…)' },
+  /*
+   * loop 卡那两行的标题。
+   *
+   * ⚠️ 2026-11（S5）：这两个键原来叫 `workflows.loopWriter`（「写作员」）/
+   *   `workflows.loopReviewer`（「审查员」）——"执行者 / 审核者"两个角色的别名，而
+   *   **角色已经退场**。现在那两行显示**这条 run 真正的 agent 名字**；取不到时
+   *   才退回这两条通用说法（不编一个名字）。
+   */
+  'workflows.loopExecLabel': { zh: '执行者', en: 'Runner' },
+  'workflows.loopGuardLabel': { zh: '把关者', en: 'Guard' },
+  'workflows.loopReviewing': { zh: '（把关中…）', en: '(checking…)' },
   'workflows.expand': { zh: '展开过程', en: 'Show log' },
   'workflows.collapse': { zh: '收起过程', en: 'Hide log' },
   'workflows.runStatusQueued': { zh: '排队中', en: 'Queued' },

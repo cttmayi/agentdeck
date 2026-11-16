@@ -95,20 +95,23 @@
    * ★ 分批第 268 批：从模板里的 `{@const}` 提到这里——行体要抽成 snippet 给**两组**
    *   各渲染一次（内置一组、自建一组），而 `{@const}` 不能住在 snippet 里。
    *
-   * ⚠️ 判据是**角色**，不是名字/是否内置（2026-10 D81/D82 的教训）：名字使用者能改，
-   *    角色不能；按 `reviewer ? 审核 : 执行` 写会让内置起草者被标成「执行」——一个永远
-   *    不接任务的 agent 看起来像执行者，使用者会去问"它为什么不干活"。
+   * ⚠️ 判据是**内置岗位**，不是名字（2026-10 D81/D82 的教训）：名字使用者能改，
+   *    岗位值不能；按名字猜会让内置起草者被标成「执行」——一个永远不接任务的 agent
+   *    看起来像执行者，使用者会去问"它为什么不干活"。
+   *
+   * ⚠️ 2026-11（S4，D127）：**角色退场** ⇒ 用户建的 agent 不再有"执行 / 审核"标签，
+   *    统一叫「智能体」；只有平台内置的那几种按岗位显示（起草 / 记忆整理 / 生成智能体 /
+   *    沉淀审核）。徽标配色也不再分"审核中 / 进行中"——那是流程状态，不是身份。
    */
   function roleLabelOf(a: Agent): string {
-    if (a.role === 'reviewer') return $t('agents.roleReviewer')
-    if (a.role === 'drafter') return $t('agents.roleDrafter')
-    if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
-    if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
-    if (a.role === 'agent-maker') return $t('agents.roleAgentMaker')
-    return $t('agents.roleExecutor')
+    if (a.builtinKind === 'drafter') return $t('agents.roleDrafter')
+    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleSkillReviewer')
+    if (a.builtinKind === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    if (a.builtinKind === 'agent-maker') return $t('agents.roleAgentMaker')
+    return $t('agents.rolePlain')
   }
   function roleBadgeOf(a: Agent): string {
-    return a.role === 'reviewer' || a.role === 'skill-reviewer' ? 'in_review' : 'in_progress'
+    return a.builtinKind === undefined ? 'in_progress' : 'in_review'
   }
 
   $: visibleAgents = $agents.filter((a) => {
@@ -337,7 +340,7 @@
                   : $t('agents.noInstructions')}
               </span>
               <span class="agent-notes-meta">
-                {#if a.role === 'reviewer'}{$t('agents.reviewsOthers')}{/if}{$t('agents.skillCount', { count: a.skillIds.length })}
+                {$t('agents.skillCount', { count: a.skillIds.length })}
                 <!-- ★ 记忆条数（0 条不画——空着的时候没有任何信息） -->
                 {#if (a.memoryCount ?? 0) > 0}
                   <span class="mem-count" data-agent-memory-count
@@ -354,7 +357,8 @@
                 **没有「取消默认」**：必须有一个默认（使用者的要求）。
                 只对执行者给出这个动作——审核者不接任务（服务端也会拒）。
             -->
-            {#if a.role === 'executor' && a.id !== $effectiveDefaultAgentId}
+            <!-- ⚠️ 2026-11（S4）：判据从 `role === 'executor'` 换成"不是内置岗位"。 -->
+            {#if a.builtinKind === undefined && a.id !== $effectiveDefaultAgentId}
               <button
                 type="button"
                 class="btn btn--ghost btn--sm default-toggle"

@@ -184,6 +184,53 @@ export async function saveWorkflowRuns(dir: string, list: readonly WorkflowRun[]
   await rename(tmp, path)
 }
 /* ══════════════════════════════════════════════════════════════════
+ * 审核前置判据（纯函数——server 用、单测直接量）
+ * ══════════════════════════════════════════════════════════════════ */
+
+/** 被审 run 的最小形状（只取判据要用的两个字段）。
+ *  ⚠️ `failureMessage` 显式带 `| undefined`：`exactOptionalPropertyTypes` 下，
+ *  "字段存在但值是 undefined"与"字段不存在"是两回事——Run 实体传进来的就是前者。 */
+export interface ReviewableRun {
+  status: string
+  failureMessage?: string | null | undefined
+}
+
+/**
+ * 这条被审 run **能不能送审**（编排的把关者位提交审核 run 之前必过的一关）。
+ *
+ * ★ 为什么要有这一关（2026-11 使用者报的真机缺陷）：
+ *   原来只要步骤链上登记了一个 runId 就送去审，不看那条 run 的死活。真机后果是
+ *   **两个方向都错**：codex 在 `thread/resume` 上 infra 失败的那两步，审核员拿到的是
+ *   空的【产出】——一次判「不通过」（写作员被拖去重写，真实原因是这条 run 根本没跑），
+ *   另一次对**同样的空材料**判「通过」，于是编排把没跑成的一步当通过往下走，
+ *   运行画面停在 waiting-human，谁也不知道中途失败过。
+ *
+ *   这一关必须由平台把住：模型对空材料既可能说"不通过"也可能说"通过"，两种输出
+ *   都不是对产出的判断，而判过之后会真的影响流程。
+ *
+ * 与 `submitStep` 执行分支的关系：那边在子 run 未 completed 时返回失败，原语据此
+ * 抛错（`primitives.ts` 的 `执行失败`）。这里是**第二道闸**——两道都要在：
+ * 少一道，"拿失败 run 去审"就又从别的路径回来了。
+ */
+export function checkReviewable(
+  run: ReviewableRun,
+  output: string,
+): { ok: true } | { ok: false; error: string } {
+  if (run.status !== 'completed') {
+    const why = run.failureMessage ? `：${run.failureMessage}` : ''
+    return {
+      ok: false,
+      error: `被审的执行 run 没有正常完成（status=${run.status}${why}），不提交审核`,
+    }
+  }
+  // 完成但零产出（模型端空响应之类）也是"没有可审的东西"。
+  if (output.trim() === '') {
+    return { ok: false, error: '被审的执行 run 没有产出（空文本），不提交审核' }
+  }
+  return { ok: true }
+}
+
+/* ══════════════════════════════════════════════════════════════════
  * 引擎（v5）——已迁到 @agentdeck/orchestration（与界面/daemon 解耦）
  * ══════════════════════════════════════════════════════════════════ */
 

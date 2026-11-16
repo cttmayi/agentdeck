@@ -95,11 +95,10 @@ describe('★ 暴露范围：不执行、不写代码、不改配置', () => {
     }
   })
 
-  test('submit_report 只是投递材料，描述里明确说了它不执行任何命令', () => {
-    const tool = findTool('submit_report')
-    assert.ok(tool)
-    assert.match(tool.description, /不执行任何命令/)
-  })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有一条「submit_report 只是投递材料，描述里明确
+   *   说了它不执行任何命令」。报告摄取整条链退场 ⇒ 工具删了，用例失去对象。
+   */
 
   test('每个工具都声明了闭合的参数 schema（不允许塞入未声明字段）', () => {
     for (const tool of TOOLS) {
@@ -207,47 +206,12 @@ describe('工具调用', () => {
     assert.match(result.content[0]?.text ?? '', /issue 不存在：xyz/)
   })
 
-  test('submit_report 把 source 与 items 原样递过去', async () => {
-    const { calls, ctx } = fakeDaemon(() => ({ unmatched: 0, runIds: ['r1'] }))
-    const res = await handleRequest(
-      {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'submit_report',
-          arguments: {
-            source: 'ci',
-            items: [{ externalId: 'e1', kind: 'ci-failure', title: '构建挂了' }],
-          },
-        },
-      },
-      ctx,
-    )
-    assert.equal(calls[0]?.path, '/api/reports')
-    assert.equal(calls[0]?.init?.method, 'POST')
-    const sent = JSON.parse(String(calls[0]?.init?.body)) as {
-      source: string
-      items: unknown[]
-    }
-    assert.equal(sent.source, 'ci')
-    assert.equal(sent.items.length, 1)
-    assert.ok(res?.result)
-  })
-
-  test('submit_report 拒绝空 items，而不是把空批次发出去', async () => {
-    const { calls, ctx } = fakeDaemon()
-    const res = await handleRequest(
-      {
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: { name: 'submit_report', arguments: { source: 'ci', items: [] } },
-      },
-      ctx,
-    )
-    const result = res?.result as { isError?: boolean }
-    assert.equal(result?.isError, true)
-    assert.equal(calls.length, 0, '不该发出请求')
-  })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有两条 `submit_report` 用例（"把 source 与 items
+   *   原样递过去"、"拒绝空 items 而不是把空批次发出去"）。报告摄取退场 ⇒ 工具与
+   *   它投递的 `POST /api/reports` 都不存在，两条删掉。
+   *
+   *   ⚠️ 第二条守的是**输入校验在客户端也做一遍**这条纪律（空批次不许发出去），
+   *   那条纪律对现在还在的写工具同样成立。
+   */
 })

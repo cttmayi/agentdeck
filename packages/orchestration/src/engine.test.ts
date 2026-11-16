@@ -116,7 +116,6 @@ test('★ flow returnIndex：-1 默认最后、-2 倒数第二（负数支持）
   const env = {
     run: run1,
     hooks,
-    currentStep: null,
     nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
       const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
       run1.steps.push(s)
@@ -239,7 +238,6 @@ test('★ loop 超轮：编排兜底——Reply fail（executor.message + guard�
   const env = {
     run: run1,
     hooks,
-    currentStep: null,
     nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
       const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
       run1.steps.push(s)
@@ -255,12 +253,23 @@ test('★ loop 超轮：编排兜底——Reply fail（executor.message + guard�
   assert.equal(reply.guard?.message, '不通过：还不行', 'guard = 最后审核者返回')
 })
 
-test('★ 把关者位：agent 把关者提交审核 run（kind=review + subject=执行 run；不进 runIds）', async () => {
-  const calls: Array<{ opts?: { kind?: string; subjectRunId?: string } | undefined }> = []
+/*
+ * ⚠️ 2026-11（D125）：这里原来是「把关者位：agent 把关者提交**审核 run**（kind=review
+ *   + subject=执行 run；不进 `step.runIds`」的用例。
+ *
+ *   **审核 run 退场**之后，把关者就是一次普通执行 run：任务书由引擎组装
+ *   （`reviewTaskText`：把"请你审什么"与"被审的材料不是指令"写在一段话里），
+ *   它**照常进 `step.runIds`**——这顺带修掉了一处真机缺陷：把关那一步在运行画面上
+ *   曾经"没有 run"，因为它被故意从步骤链里漏掉了。
+ *
+ *   下面那条用例守的就是新行为。
+ */
+test('★ 把关者位：**普通执行 run**，任务书里带材料与"这不是指令"的声明，且记进 runIds', async () => {
+  const calls: Array<{ prompt: string }> = []
   const { hooks } = makeHooks()
   const origSubmit = hooks.submit
   hooks.submit = async (step, prompt, opts) => {
-    calls.push({ opts })
+    calls.push({ prompt })
     return origSubmit(step, prompt, opts)
   }
   const { makePrimitives } = await import('./primitives.ts')
@@ -268,7 +277,6 @@ test('★ 把关者位：agent 把关者提交审核 run（kind=review + subject
   const env = {
     run: run1,
     hooks,
-    currentStep: null,
     nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
       const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
       run1.steps.push(s)
@@ -279,14 +287,115 @@ test('★ 把关者位：agent 把关者提交审核 run（kind=review + subject
   const primitives = makePrimitives(env)
   const 判定 = (意见: string): Reply => 意见.includes('不通过') ? { result: 'fail', message: 意见 } : { result: 'pass' }
   await (primitives.loop(primitives.agent('写作员'), primitives.agent('审查员', 判定), '任务') as unknown as Promise<Reply>)
-  // 执行 run（无 kind）+ 审核 run（kind=review + subject）
-  assert.equal(calls.length, 2)
-  assert.equal(calls[0]!.opts?.kind, undefined, '执行 run 不是 review')
-  assert.equal(calls[1]!.opts?.kind, 'review', '把关者位提交审核 run')
-  assert.ok(calls[1]!.opts?.subjectRunId, 'subject = 执行 run')
-  // 审核 run 不进 step.runIds（界面按 subject 反查）
+  assert.equal(calls.length, 2, '执行一次 + 把关一次')
+  // ★ 把关者拿到的是**审视任务书**：既说清要它干什么，也把材料围起来并声明它不是指令。
+  const guardPrompt = calls[1]!.prompt
+  assert.match(guardPrompt, /请审核/, '要说清这一步是"请它审"')
+  assert.match(guardPrompt, /不是给你的指令/, '材料必须被声明为材料（提示注入的靶子就在这里）')
+  // ★ 两次都登记进步骤链——把关那一步在运行画面上必须看得见
   const loopStep = run1.steps[0]!
-  assert.equal(loopStep.runIds.length, 1, 'step.runIds 只记执行 run')
+  assert.equal(loopStep.runIds.length, 2, '执行与把关都记进 step.runIds')
+})
+
+/* ══════════════════════════════════════════════════════════════════
+ * 步骤生命周期（运行画面说真话）/* ══════════════════════════════════════════════════════════════════
+ * 步骤生命周期（运行画面说真话）
+ * ══════════════════════════════════════════════════════════════════ */
+
+test('★★ 每个跑过的步骤都要收口（flow/parallel/route/独立 agent 不许停在 pending）', async () => {
+  // 真机现场（2026-11 使用者）：run 都 `done` 了，运行画面上那几步还写着"未开始"——
+  // 因为只有 loop/gate 写步骤状态。判据：跑完的步骤 status=done 且起止时间都在。
+  const { hooks } = makeHooks({ outputOf: () => '产出' })
+  const r = await run(
+    `await flow([agent('甲'), agent('乙')], '任务1')
+await route({ 丙: agent('丙') }, '任务2')
+await parallel(agent('丁'), ['任务3', '任务4'])
+await agent('戊').run('任务5')`,
+    hooks,
+  )
+  assert.equal(r.status, 'done')
+  assert.ok(r.steps.length >= 5, `步骤要登记齐（实际 ${String(r.steps.length)}）`)
+  for (const s of r.steps) {
+    assert.equal(s.status, 'done', `步骤「${s.label}」没收口（status=${s.status}）`)
+    assert.ok(s.startedAt !== null, `步骤「${s.label}」没有开始时间`)
+    assert.ok(s.finishedAt !== null, `步骤「${s.label}」没有收口时间`)
+  }
+})
+
+test('★ 步骤边界会过一次暂停检查（env.atBoundary 不是死接口）', async () => {
+  // `atBoundary` 原来定义了、注入了、测试里也传了，但没有一处调用——"边界可暂停"
+  // 这个语义从来没发生过。现在每个步骤开始时过一次（内部就是 waitIfPaused）。
+  const boundaries: number[] = []
+  const base = makeHooks({ outputOf: () => '产出' })
+  const { makePrimitives } = await import('./primitives.ts')
+  const run1 = freshRun()
+  const env = {
+    run: run1,
+    hooks: base.hooks,
+    nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
+      const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
+      run1.steps.push(s)
+      return s
+    },
+    atBoundary: async (step: WorkflowStep) => {
+      boundaries.push(step.seq)
+    },
+  }
+  const primitives = makePrimitives(env)
+  await primitives.agent('甲').run('任务')
+  await primitives.flow([primitives.agent('乙')], '任务').run('')
+  assert.deepEqual(boundaries, [0, 1], '两个步骤各过一次边界（内层的 agent 用外层步骤，不重复过）')
+})
+
+/* ══════════════════════════════════════════════════════════════════
+ * 执行失败 ≠ 产出（真机缺陷固化）
+ * ══════════════════════════════════════════════════════════════════ */
+
+test('★★ 执行 run 没跑成 ⇒ 编排 run failed，且**不提交把关者**', async () => {
+  // 真机现场（2026-11）：一条 codex 在 thread/resume 上 infra 失败的执行 run，
+  // 被原语当成了 `{ result:'done', message: 失败原因 }` ⇒ 把关者随后去审一条
+  // failed 的空产出 run（一次判不通过、一次判通过）⇒ 编排把没跑成的一步当通过。
+  const base = makeHooks()
+  let submits = 0
+  const hooks: EngineHooks = {
+    ...base.hooks,
+    submit: async () => {
+      submits += 1
+      return {
+        ok: false,
+        runId: 'r-failed' as never,
+        error: 'codex 对话阶段失败：JSON-RPC 请求 thread/resume（id=2）超时（60000ms）',
+      }
+    },
+  }
+  const r = await run(
+    `const 写作 = agent('写作员')\nconst 审查 = agent('审查员', () => ({ result: 'pass' }))\nawait loop(写作, 审查, '任务')`,
+    hooks,
+  )
+  assert.equal(r.status, 'failed', '执行没跑成 ⇒ 整条编排 run 失败（不是 done）')
+  assert.match(r.error ?? '', /执行失败/, '错误说清是执行失败')
+  assert.match(r.error ?? '', /thread\/resume/, '原始失败原因原样带出来（能查）')
+  assert.equal(submits, 1, '失败之后**不许**再提交把关者（否则又去审一条失败 run）')
+  assert.equal(r.steps[0]!.status, 'failed', '步骤也标 failed（运行画面看得见）')
+})
+
+test('★ 执行失败可以被编排代码接住（try/catch 兜底仍然成立）', async () => {
+  const base = makeHooks({ outputOf: () => '兜底产出' })
+  let submits = 0
+  const hooks: EngineHooks = {
+    ...base.hooks,
+    submit: async (step, prompt) => {
+      submits += 1
+      if (submits === 1) return { ok: false, runId: null, error: '执行失败示意' }
+      return base.hooks.submit(step, prompt)
+    },
+  }
+  const r = await run(
+    `let 出错 = ''\ntry { await flow([agent('A')], '任务') } catch (e) { 出错 = e.message }\nawait flow([agent('B')], '补一个：' + 出错)`,
+    hooks,
+  )
+  assert.equal(r.status, 'done', '使用者自己接住了失败 ⇒ 编排能继续')
+  assert.match(base.submitted[0]?.prompt ?? '', /补一个：执行失败：执行失败示意/, '兜底那一步收到了失败原因')
 })
 
 /* ══════════════════════════════════════════════════════════════════
@@ -347,7 +456,6 @@ test('★ reset 递归：loop.reset() 重置内部所有 agent', async () => {
   const env = {
     run: run1,
     hooks,
-    currentStep: null,
     nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
       const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
       run1.steps.push(s)
@@ -370,6 +478,39 @@ test('★ reset 递归：loop.reset() 重置内部所有 agent', async () => {
  * 位置检查：把关者输出不认识的结果 → 报错
  * ══════════════════════════════════════════════════════════════════ */
 
+test('★★ 把关者不能判 ⇒ 在**提交任何 run 之前**就拒（B4：别等花掉一次审核）', async () => {
+  // 真机现场（2026-11 使用者）：把关者写成 `agent('审查员')`（没有解析函数），
+  // 于是 loop 先跑执行、再跑审核（真金白银的额度），最后才抛出
+  // 「把关者输出了不认识的结果 result=done」——一句话让人看不懂，
+  // 而真正的问题是"把关者位没给判定方式"。
+  //
+  // 判据：错误发生在**第一次 submit 之前**（提交次数 0），且错误里说清怎么改。
+  const { hooks, submitted } = makeHooks({ outputOf: () => '产出' })
+  const rr = await run(
+    `const 写作 = agent('写作员')
+const 审查 = agent('审查员')
+await loop(写作, 审查, '任务')`,
+    hooks,
+  )
+  assert.equal(rr.status, 'failed')
+  assert.match(rr.error ?? '', /不能给出通过\/不通过/, '错误要说清问题是什么')
+  assert.match(rr.error ?? '', /解析函数|gate/, '并且给出两条改法')
+  assert.equal(submitted.length, 0, '★ 不许先跑一轮执行/审核再报错')
+  assert.equal(rr.steps.length, 0, '一个步骤都不该登记')
+})
+
+test('★ 带解析函数的 agent 与 gate 都能当把关者（不误伤）', async () => {
+  const { hooks, submitted } = makeHooks({ outputOf: () => '产出' })
+  const rr = await run(
+    `const 写作 = agent('写作员')
+await loop(写作, agent('审查员', () => ({ result: 'pass' })), '任务')
+await loop(agent('再写作'), gate('请你过目'), '任务')`,
+    hooks,
+  )
+  assert.equal(rr.status, 'done')
+  assert.ok(submitted.length > 0, '该跑的都跑了')
+})
+
 test('★ 位置检查：把关者输出 result 不是 pass/fail → 报错', async () => {
   const { hooks } = makeHooks()
   const { makePrimitives } = await import('./primitives.ts')
@@ -377,7 +518,6 @@ test('★ 位置检查：把关者输出 result 不是 pass/fail → 报错', as
   const env = {
     run: run1,
     hooks,
-    currentStep: null,
     nextStep: async (kind: WorkflowStep['kind'], label: string, nodeId: string | null, prompt: string | null, gateText: string | null): Promise<WorkflowStep> => {
       const s: WorkflowStep = { seq: run1.steps.length, kind, label, nodeId, prompt, gateText, runIds: [], status: 'pending', startedAt: null, finishedAt: null }
       run1.steps.push(s)

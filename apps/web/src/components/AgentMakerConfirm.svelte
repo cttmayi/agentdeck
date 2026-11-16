@@ -38,9 +38,13 @@
     removed: boolean
   }
 
-  /** 岗位卡拆分出来的人可编辑状态（frontmatter 的 name/role + 正文指令）。 */
+  /**
+   * 岗位卡拆分出来的人可编辑状态（frontmatter 的 name + 正文指令）。
+   *
+   * ⚠️ 2026-11（S4，D127）：原来还有 `role`（执行 / 审核 二选一）——**角色退场** ⇒
+   *   生成出来的就是一条普通智能体，岗位卡也不再带 `role`。
+   */
   let name = ''
-  let role = 'executor'
   let instructions = ''
   let skills: DraftSkill[] = []
   let loading = false
@@ -66,7 +70,6 @@
       const text = body.agentDraft ?? ''
       const parts = splitFrontmatter(text)
       name = parts.name
-      role = parts.role
       instructions = parts.body
       skills = (body.skills ?? []).map((s) => ({
         slug: s.slug,
@@ -86,22 +89,24 @@
     }
   }
 
-  /** frontmatter 拆分：`---` 头块里的 name / role + 正文（与服务端 parseAgentDraft 同款规则）。 */
-  function splitFrontmatter(text: string): { name: string; role: string; body: string } {
+  /**
+   * frontmatter 拆分：`---` 头块里的 name + 正文（与服务端 `parseAgentDraft` 同款规则）。
+   *
+   * ⚠️ 2026-11（S4，D127）：不再拆 `role`——老岗位卡里那个键**原样忽略**（与服务端
+   *   一致：为了一格多余的 frontmatter 报错，只会让使用者不知道该改什么）。
+   */
+  function splitFrontmatter(text: string): { name: string; body: string } {
     const trimmed = text.replace(/^\uFEFF/, '').trimStart()
-    if (!trimmed.startsWith('---')) return { name: '', role: 'executor', body: trimmed }
+    if (!trimmed.startsWith('---')) return { name: '', body: trimmed }
     const end = trimmed.indexOf('\n---', 3)
-    if (end < 0) return { name: '', role: 'executor', body: trimmed }
+    if (end < 0) return { name: '', body: trimmed }
     const head = trimmed.slice(3, end)
     let name = ''
-    let role = 'executor'
     for (const line of head.split('\n')) {
       const mName = line.match(/^name\s*:\s*(.+)$/)
       if (mName?.[1]) name = stripQuotes(mName[1].trim())
-      const mRole = line.match(/^role\s*:\s*(.+)$/)
-      if (mRole?.[1]) role = stripQuotes(mRole[1].trim())
     }
-    return { name, role, body: trimmed.slice(end + 4).trim() }
+    return { name, body: trimmed.slice(end + 4).trim() }
   }
 
   function stripQuotes(v: string): string {
@@ -115,7 +120,7 @@
     void (async () => {
       committing = true
       error = ''
-      const agentDraft = `---\nname: ${name}\nrole: ${role}\n---\n${instructions}`
+      const agentDraft = `---\nname: ${name}\n---\n${instructions}`
       try {
         const out = await api<{ agent: { name: string }; exclusiveSlugs: string[] }>(
           `/api/conversations/${encodeURIComponent(conversationId)}/agent-commit`,
@@ -165,13 +170,8 @@
         <span>{$t('chat.agentMakerNameLabel')}</span>
         <input type="text" bind:value={name} maxlength="100" />
       </label>
-      <label class="form-field">
-        <span>{$t('chat.agentMakerRoleLabel')}</span>
-        <select bind:value={role}>
-          <option value="executor">{$t('agents.roleExecutor')}</option>
-          <option value="reviewer">{$t('agents.roleReviewer')}</option>
-        </select>
-      </label>
+      <!-- ⚠️ 2026-11（S4，D127）：这里原来是「执行 / 审核」下拉（岗位卡的角色）。
+           角色退场 ⇒ 生成的就是普通智能体，这一格删掉。 -->
       <label class="form-field">
         <span>{$t('chat.agentMakerInstructionsLabel')}</span>
         <textarea rows="12" bind:value={instructions}></textarea>

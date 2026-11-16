@@ -89,9 +89,9 @@ async function withCodexDaemon<T>(
 /** 把播种出来的第一个执行者改成走 codex（否则它自己的 runtimeKey 会把 run 送去 claude）。 */
 async function executorOnCodex(url: string): Promise<string> {
   const body = (await (await fetch(`${url}/api/agents`)).json()) as {
-    agents: Array<{ id: string; role: string }>
+    agents: Array<{ id: string; builtin?: boolean }>
   }
-  const executor = body.agents.find((a) => a.role === 'executor')
+  const executor = body.agents.find((a) => a.builtin !== true)
   assert.ok(executor, '启动时该播种一个执行者')
   const res = await fetch(`${url}/api/agents/${executor.id}`, {
     method: 'PATCH',
@@ -223,9 +223,9 @@ describe('★★★ codex：①② 走线程级指令，每轮只发 ③', () =>
     })
     try {
       const agents = (await (await fetch(`${d.url}/api/agents`)).json()) as {
-        agents: Array<{ id: string; role: string; runtimeKey: string }>
+        agents: Array<{ id: string; runtimeKey: string; builtin?: boolean }>
       }
-      const executor = agents.agents.find((a) => a.role === 'executor')!
+      const executor = agents.agents.find((a) => a.builtin !== true)!
       const createdClaude = await fetch(`${d.url}/api/conversations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

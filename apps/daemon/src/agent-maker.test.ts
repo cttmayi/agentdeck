@@ -12,6 +12,7 @@ import {
 import { FileStore } from '@agentdeck/store-file'
 import { wsId } from '@agentdeck/domain/testing'
 import type { Agent, Skill } from '@agentdeck/protocol'
+import { builtinKindOf } from './builtin-drafter.ts'
 import { startDaemon, type DaemonHandle } from './server.ts'
 import { parseAgentDraft, readAgentDraftArtifacts, type AgentDraftParsed } from './agent-maker.ts'
 import {
@@ -57,12 +58,16 @@ role: executor
 不替参会人做决定。
 `
 
-  test('★ 标准岗位卡：frontmatter 的 name/role + 正文即指令', () => {
+  test('★ 标准岗位卡：frontmatter 的 name + 正文即指令', () => {
     const out = parseAgentDraft(good)
     assert.ok(out.ok)
     if (!out.ok) return
     assert.equal(out.name, '会议纪要助理')
-    assert.equal(out.role, 'executor')
+    /*
+     * ⚠️ 2026-11（S4，D127）：这里原来断言 `out.role === 'executor'`。角色退场之后
+     *   岗位卡不再带 `role`（老卡片里那个键**原样忽略**，不报错）。
+     */
+    assert.equal('role' in out, false, '岗位卡不再问角色')
     assert.ok(out.instructions.startsWith('你是会议纪要助理。'))
     assert.ok(out.instructions.includes('## 边界（不能碰）'))
   })
@@ -72,7 +77,7 @@ role: executor
     assert.ok(!out.ok)
   })
 
-  test('★ 引号要去掉（与 parseSkillMd 的 stripQuotes 同款）；缺 name / role / 正文各报其错', () => {
+  test('★ 引号要去掉（与 parseSkillMd 的 stripQuotes 同款）；缺 name / 正文各报其错', () => {
     const quoted = good.replace('会议纪要助理', '"会议纪要助理"')
     const out = parseAgentDraft(quoted)
     assert.ok(out.ok)
@@ -80,16 +85,24 @@ role: executor
 
     const noName = parseAgentDraft(good.replace('name: 会议纪要助理', ''))
     assert.ok(!noName.ok)
-    const noRole = parseAgentDraft(good.replace('role: executor', ''))
-    assert.ok(!noRole.ok)
-    const empty = parseAgentDraft('---\nname: 岗位\nrole: executor\n---\n  \n')
+    /*
+     * ⚠️ 2026-11（S4）：这里原来还有"缺 `role` ⇒ 报错"。角色退场之后 `role` 不再是
+     *   岗位卡的一部分——**老卡片里带着它也不报错**（下面那条钉住这一点）。
+     */
+    const empty = parseAgentDraft('---\nname: 岗位\n---\n  \n')
     assert.ok(!empty.ok)
   })
 
-  test('★ reviewer 也算合法岗位（判据由确认路由钉住 executor/reviewer 两个值）', () => {
-    const out = parseAgentDraft(good.replace('role: executor', 'role: reviewer'))
-    assert.ok(out.ok)
-    if (out.ok) assert.equal(out.role, 'reviewer')
+  test('★ 老岗位卡里带着 `role` ⇒ **原样忽略**（不报错，也不当回事）', () => {
+    /*
+     * 使用者机器上已经存在那样的草稿文件：为一格多余的 frontmatter 报错，只会让他
+     * 不知道该改什么（而且那个键现在什么都不影响）。
+     */
+    const withRole = parseAgentDraft(good)
+    assert.ok(withRole.ok, '带 role 的卡片照样解析得出来')
+    const withoutRole = parseAgentDraft(good.replace('role: executor\n', ''))
+    assert.ok(withoutRole.ok, '不带 role 也照样')
+    assert.deepEqual(withRole, withoutRole, '两种卡片解析结果**一模一样**')
   })
 })
 
@@ -152,7 +165,7 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
       const first = await ensureBuiltinAgentMakerSkills(store, WS)
       assert.deepEqual([...first.seeded].sort(), [...AGENT_MAKER_SKILL_SLUGS].sort())
 
-      const maker = (await store.listAgents(WS)).find((a) => a.role === 'agent-maker')!
+      const maker = (await store.listAgents(WS)).find((a) => builtinKindOf(a) === 'agent-maker')!
       const exclusive = await store.listExclusiveSkills(maker.id)
       assert.equal(exclusive.length, AGENT_MAKER_SKILL_SLUGS.length)
       for (const slug of AGENT_MAKER_SKILL_SLUGS) {
@@ -202,8 +215,8 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
         workDir: null,
         skillIds: ['sk-1', 'sk-2', 'sk-3'] as Agent['skillIds'],
         env: {},
-        role: 'agent-maker',
         builtin: true,
+        builtinKind: 'agent-maker',
         reviewStandard: null,
         createdAt: now,
         updatedAt: now,
@@ -277,7 +290,6 @@ describe('平台技能 = 生成者的独有技能（D111，设计定稿 §4）',
         workDir: null,
         skillIds: ['sk-x', 'sk-y'] as Agent['skillIds'],
         env: {},
-        role: 'executor',
         builtin: false,
         reviewStandard: null,
         createdAt: Date.now(),
@@ -451,8 +463,16 @@ description: decisions/owners/deadlines 三段的会议纪要格式
     onInfo: () => {},
   })
   const agents = await json('/api/agents')
-  const list = (agents.body as { agents: Array<{ id: string; role: string }> }).agents
-  makerId = list.find((a) => a.role === 'agent-maker')!.id
+  const list = (
+    agents.body as {
+      agents: Array<{
+        id: string
+        builtin?: boolean
+        builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+      }>
+    }
+  ).agents
+  makerId = list.find((a) => builtinKindOf(a) === 'agent-maker')!.id
 })
 
 after(async () => {
@@ -491,11 +511,14 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     })
     assert.equal(committed.status, 201, `确认生成失败：${JSON.stringify(committed.body)}`)
     const out = committed.body as {
-      agent: { id: string; name: string; role: string }
+      agent: { id: string; name: string }
       exclusiveSlugs: string[]
     }
     assert.equal(out.agent.name, '会议纪要助理')
-    assert.equal(out.agent.role, 'executor')
+    /*
+     * ⚠️ 2026-11（S4，D127）：这里原来断言生成出来的 agent `role === 'executor'`。
+     *   角色退场 ⇒ 生成的就是一条普通智能体，没有角色可说。
+     */
 
     // ★ 2026-11（使用者拍板）：配套技能**不进共享技能池**（skills-mine 里没有它），
     //   落成**新智能体的独有技能**（`agents/<id>/SKILL/`）——响应带 exclusiveSlugs。
@@ -521,9 +544,16 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
 
   test('★ 非生成者对话不能确认生成（agent_commit_not_maker）', async () => {
     const agents = await json('/api/agents')
-    const executorId = (agents.body as { agents: Array<{ id: string; role: string }> }).agents.find(
-      (a) => a.role === 'executor',
-    )!.id
+    // ⚠️ 2026-11（S4）：角色退场 ⇒ "随便挑一条不是生成者的"就够（判据是内置岗位）。
+    const executorId = (
+      agents.body as {
+        agents: Array<{
+          id: string
+          builtin?: boolean
+          builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
+        }>
+      }
+    ).agents.find((a) => builtinKindOf(a) !== 'agent-maker')!.id
     const created = await postJson('/api/conversations', { agentId: executorId, text: '你好' })
     assert.equal(created.status, 201)
     const conversationId = (created.body as { conversation: { id: string } }).conversation.id
@@ -537,7 +567,7 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     assert.equal((res.body as { code?: string }).code, 'agent_commit_not_maker')
   })
 
-  test('★ 坏岗位卡 ⇒ 400（解析失败说得出哪里不对）；非 executor/reviewer ⇒ 400', async () => {
+  test('★ 坏岗位卡 ⇒ 400（解析失败说得出哪里不对）', async () => {
     const created = await postJson('/api/conversations', { agentId: makerId, text: '问个岗位' })
     assert.equal(created.status, 201)
     const conversationId = (created.body as { conversation: { id: string } }).conversation.id
@@ -550,12 +580,11 @@ describe('生成智能体整链（2026-11 设计定稿 §3.5–§3.6）', () => 
     assert.equal(bad.status, 400)
     assert.equal((bad.body as { code?: string }).code, 'agent_draft_invalid')
 
-    const badRole = await postJson(`/api/conversations/${conversationId}/agent-commit`, {
-      agentDraft: '---\nname: 岗位\nrole: drafter\n---\n你是岗位。',
-      skills: [],
-    })
-    assert.equal(badRole.status, 400)
-    assert.equal((badRole.body as { code?: string }).code, 'agent_role_invalid')
+    /*
+     * ⚠️ 2026-11（S4，D127）：这里原来还有"岗位卡里 `role: drafter` ⇒ 400
+     *   `agent_role_invalid`"。**角色退场** ⇒ 岗位卡不再带角色，任何 `role` 值
+     *   都被原样忽略，所以那条用例删。
+     */
   })
 
   test('★ 坏配套技能 ⇒ 400 agent_skill_invalid（缺正文 / slug 非法都拦在写之前）', async () => {

@@ -1,16 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import { api, newRunId, type Issue } from '../lib/api.ts'
-  import {
-    agents,
-    effectiveDefaultAgentId,
-    groups,
-    identity,
-    loadIssues,
-    loadRuns,
-    tools,
-  } from '../lib/stores.ts'
-  import { groupExecutor, resolveNewTaskChain } from '../lib/newtask-chain.ts'
+  import { agents, effectiveDefaultAgentId, loadIssues, loadRuns } from '../lib/stores.ts'
+  import { executorCandidates } from '../lib/newtask-chain.ts'
   import PromptField from './PromptField.svelte'
   import { splitRequest } from '../lib/request-text.ts'
   import { createDirty } from '../lib/create-draft.ts'
@@ -33,119 +25,43 @@
    * 现在这一页只问两件事：
    *
    *   · **要做什么**（一个多行框，第一行当标题）；
-   *   · **交给谁**——一个智能体（执行者）或一个智能体组（互斥切换）。
+   *   · **交给谁**——一个执行者。
    *
-   * 选中之后显示一行**摘要**（执行者 / 审核者 / 允许的动作 / 返工），告诉使用者
-   * 这次任务实际会怎么走。两档的后果**不一样**，这正是摘要要说的：
+   * ⚠️ 2026-11（S3）：这里原来还有「智能体组」那一档（选组 ⇒ 提交 `groupId`，
+   *   审核者 / 动作 / 返工由 daemon 按组展开；选个人 ⇒ 什么都不带）。**组退场**
+   *   ⇒ 只剩"选一个人"。于是这一页真的只问两件事了。
    *
-   *   · 选**智能体组** ⇒ 提交 `groupId`，整条链由 daemon 按组的默认展开
-   *     （审核者 / 动作 / 返工都是组的）——这是**唯一**会有人审的选法；
-   *   · 选**单个智能体** ⇒ 提交 `agentRef`，一个覆盖字段都不带：这条任务
-   *     **没有审核者**（2026-10：`Agent.reviewerAgentId` 撤掉之后，"选个人"
-   *     这条路上已经没有"由谁来审它"可跟随了；组才是审核者的出处）。
-   *
-   * 摘要里的推导仍然走 `lib/newtask-chain.ts`（纯函数、有单测）——`choice` 恒为
-   * **不点名**（没有其它档位了）。**推导不在这一页里写第二遍**。
+   *   选中的执行者仍然显示一行摘要（谁来做），推导走 `lib/newtask-chain.ts`
+   *   （纯函数、有单测）——**推导不在这一页里写第二遍**。
    */
-  type TaskSource = 'agent' | 'group'
 
   let title = ''
   let workDir = ''
   /** 「浏览…」那颗按钮开的目录选择框（分批第 229 批；与输入框共享一个值）。 */
   let dirPickerOpen = false
-  /** 交给谁：智能体 或 智能体组（互斥；只有存在启用的组时才给「组」这一档）。 */
-  let source: TaskSource = 'agent'
+  /** 交给谁：一个执行者。 */
   let agentId = ''
-  let groupId = ''
   let busy = false
   let error = ''
 
-  /** ★ 这个 daemon 认不认 `groupId`（组展开）。不认就不给「智能体组」那一档。 */
-  $: groupSupported = ($identity?.capabilities ?? []).includes('agent-groups')
-  /** 启用的组（停用 = 新建任务时不可选，见 `AgentGroup.enabled`）。 */
-  $: enabledGroups = groupSupported ? $groups.filter((g) => g.enabled) : []
-  $: groupTabVisible = groupSupported && enabledGroups.length > 0
-
-  /** 执行者候选：全局池里 `role === 'executor'`（审核者不接任务）。 */
-  $: executorAgents = $agents.filter((a) => a.role === 'executor')
+  /** 执行者候选：`role === 'executor'`（审核者不接任务）。 */
+  $: executorAgents = executorCandidates($agents)
   // 没选过执行者时，初值 = 生效中的默认（没有就用列表第一个）。
   $: if (!agentId && executorAgents.length > 0) {
     agentId = $effectiveDefaultAgentId ?? executorAgents[0]!.id
   }
-  $: chosen = executorAgents.find((a) => a.id === agentId) ?? null
-
-  $: chosenGroup = groupId ? ($groups.find((g) => g.id === groupId) ?? null) : null
-  $: groupExec = chosenGroup ? groupExecutor(chosenGroup.memberAgents) : null
-  /** 组的审核者：执行者之外的另一个成员（id 即使指向已删的人也要带出来——好报「人没了」）。 */
-  $: groupReviewerId = chosenGroup
-    ? (chosenGroup.memberAgents.find((m) => m.id !== groupExec?.id)?.id ?? '')
-    : ''
-  $: groupChainDefaults = chosenGroup
-    ? {
-        members: chosenGroup.memberAgents,
-        reviewerId: groupReviewerId || null,
-        allowedActions: chosenGroup.allowedActions,
-        actionParams: chosenGroup.actionParams,
-        maxReworks: chosenGroup.maxReworks,
-      }
-    : null
-
-  /** 这次真正会去执行的那个（组模式 = 组的执行者）。 */
-  $: executor = source === 'group' ? groupExec : chosen
-  /** 摘要要显示的执行者名字；`null` = 还没选好（没选组 / 组坏了 / 没有执行者）。 */
+  $: executor = executorAgents.find((a) => a.id === agentId) ?? null
+  /** 摘要要显示的执行者名字；`null` = 还没选好（没有执行者）。 */
   $: executorName = executor?.name ?? null
 
-  /**
-   * 链的推导：不再有"这一次的覆盖"，`choice` 恒为**不点名**——
-   * 选组 ⇒ 组的审核者；选智能体 ⇒ **没有审核者**（2026-10：agent 上那条
-   * 「由谁来审它」撤掉了，所以"选个人"这条路上谁也不审，摘要必须说出来）。
-   * 摘要要显示的审核者 / 动作数就从这一条链取。
-   */
-  $: chain = resolveNewTaskChain({
-    executor,
-    choice: { mode: 'default' },
-    agents: $agents,
-    tools: $tools,
-    group: source === 'group' ? groupChainDefaults : null,
-  })
-
-  /** 摘要：允许的动作数（含"配过、但当前解析不出定义"的——那也算这一次的配置）。 */
-  $: actionCount = chain.actions.length + chain.unavailableActions.length
-
-  type ReworkSummary = { kind: 'zero' } | { kind: 'times'; n: number } | { kind: 'unlimited' }
-  /** 摘要：返工。组模式 = 组的默认；选智能体 = 不返工（daemon 对省略的默认 0）。 */
-  let reworkSummary: ReworkSummary = { kind: 'zero' }
-  $: reworkSummary =
-    source === 'group' && chosenGroup
-      ? chosenGroup.maxReworks === null
-        ? { kind: 'unlimited' }
-        : chosenGroup.maxReworks > 0
-          ? { kind: 'times', n: chosenGroup.maxReworks }
-          : { kind: 'zero' }
-      : { kind: 'zero' }
-
-  type ReviewerSummary =
-    | { kind: 'name'; name: string }
-    | { kind: 'gone' }
-    /** ★ 选了单个智能体 ⇒ **这条任务不会被审**（必须画出来，见词条里的理由）。 */
-    | { kind: 'no-group' }
-    | { kind: 'none' }
-  /**
-   * 摘要：审核者这一行怎么显示（谁审 / 人没了 / 不会审 / 不画）。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有一整块「谁审」的推导——`groupReviewerId`、
+   *   `groupChainDefaults`、`resolveNewTaskChain(...)` 与 `reviewerSummary`
+   *   （谁审 / 人没了 / 选了单个智能体就不会被审）。
    *
-   * ⚠️ 2026-10：`not_configured` 这一档**从"不画"改成了"画出来"**。原来它是
-   *    "执行者没配「由谁来审它」"（一种少见的配置缺失），不画那一行是合理的；
-   *    现在它是**选单个智能体的必然结果**——不画的话，使用者看到的摘要与选组那条
-   *    只差一行，而那一行恰恰是"你的产出不会有人看"。**没有任何地方会报错。**
+   *   **审核 run 退场** ⇒ 新建任务不再有"谁审"这一栏：派出去的每一条 run 都只是
+   *   执行。要有人把关，就在**编排**里再派一条普通 run 去把关。
    */
-  let reviewerSummary: ReviewerSummary = { kind: 'none' }
-  $: reviewerSummary = chain.reviewer
-    ? { kind: 'name', name: chain.reviewer.name }
-    : chain.notReviewing === 'dangling'
-      ? { kind: 'gone' }
-      : chain.notReviewing === 'not_configured'
-        ? { kind: 'no-group' }
-        : { kind: 'none' }
 
   // 2026-11 控件化：autosize（3→15 行）搬进 PromptField（`autosize` prop），
   // 这里只留行数常量与 Ctrl/Cmd+Enter 提交。
@@ -170,7 +86,7 @@
   $: createDirty.set(
     title.trim() !== '' ||
       workDir.trim() !== '' ||
-      (source === 'group' ? groupId !== '' : agentId !== ($effectiveDefaultAgentId ?? executorAgents[0]?.id ?? '')),
+      agentId !== ($effectiveDefaultAgentId ?? executorAgents[0]?.id ?? ''),
   )
 
   // 离开这一栏（提交成功、或者被切走）时把标记放掉：它是**这一张表单**的状态，
@@ -184,13 +100,9 @@
     if (!trimmed) return
     const { issueTitle, issueDescription } = splitRequest(trimmed)
 
-    if (source === 'group' && !groupId) {
-      error = tx('newtask.groupPickRequired')
-      return
-    }
     const agent = executor
     if (!agent) {
-      error = source === 'group' ? tx('newtask.groupBroken') : tx('newtask.noAgents')
+      error = tx('newtask.noAgents')
       return
     }
 
@@ -224,12 +136,10 @@
           prompt: trimmed,
           // 只有真的填了才带这个字段：空字符串与"没指定"是两件事
           ...(workDir.trim() ? { workDir: workDir.trim() } : {}),
-          // ★★ 简化版（2026-10）：**一个覆盖字段都不带**——
-          //   选组 ⇒ 只带 `groupId`，审核者 / 动作 / 返工由 daemon 按组展开；
-          //   选智能体 ⇒ 什么都不带，全部跟随执行者的长期配置（省略 = 跟随）。
-          //   ⚠️ 组模式下 `agentRef` 就是组的执行者（daemon 校验
-          //     `group_executor_mismatch`，所以这里不用再锁一遍）。
-          ...(source === 'group' && groupId ? { groupId } : {}),
+          /*
+           * ⚠️ 2026-11（S3）：这里原来在组模式下带 `groupId`（审核者 / 动作 / 返工
+           *   由 daemon 按组展开）。组退场 ⇒ 什么都不带，只按 `agentRef` 派活。
+           */
           limits: { maxTurns: null, timeoutMs: null },
         }),
       })
@@ -314,46 +224,10 @@
     <span class="card-title">{$t('newtask.pickTitle')}</span>
 
     <!--
-      ★ 智能体 / 智能体组 互斥切换（只有存在**启用的组**、且 daemon 认 `groupId`
-        时才给「组」这一档——旧 daemon 会静默忽略那个字段，给了就成"选了组、
-        实际什么都没发生"，两边都不报错）。
+      ⚠️ 2026-11（S3）：这里原来是一个「智能体 / 智能体组」互斥切换 + 选组下拉。
+      **组退场** ⇒ 只剩"选一个执行者"。
     -->
-    {#if groupTabVisible}
-      <div class="source-toggle">
-        <button
-          type="button"
-          class:active={source === 'agent'}
-          onclick={() => (source = 'agent')}
-        >
-          {$t('newtask.sourceAgent')}
-        </button>
-        <button
-          type="button"
-          class:active={source === 'group'}
-          onclick={() => (source = 'group')}
-        >
-          {$t('newtask.sourceGroup')}
-        </button>
-      </div>
-    {/if}
-
-    {#if source === 'group'}
-      <label>
-        {$t('newtask.groupLabel')}
-        <select bind:value={groupId}>
-          <!-- 占位不可选：进「组」这一档就必须选一个组（想回去就切回「智能体」）。 -->
-          <option value="" disabled>{$t('newtask.groupPickPlaceholder')}</option>
-          {#each enabledGroups as g (g.id)}
-            <option value={g.id}>{g.name}</option>
-          {/each}
-        </select>
-      </label>
-      {#if groupId === ''}
-        <p class="hint">{$t('newtask.groupPickRequired')}</p>
-      {:else if chosenGroup && !groupExec}
-        <p class="hint warn">{$t('newtask.groupBroken')}</p>
-      {/if}
-    {:else}
+    {#if true}
       <label>
         {$t('newtask.agentLabel')}
         {#if executorAgents.length === 0}
@@ -384,59 +258,26 @@
     摘要（选中后显示，只读）：这次任务实际会怎么走
     ══════════════════════════════════════════════════════════════════
 
-    简化版的契约：选了**谁**，这一栏就说**那一次会怎么走**——全部来自长期配置
-    或组的默认，界面上没有可改的项。四行：执行者 / 审核者 / 允许的动作 / 返工。
+    简化版的契约：选了**谁**，这一栏就说**那一次会怎么走**——全部来自长期配置，
+    界面上没有可改的项。
 
-    ★ 2026-10（使用者拍板「摘要变干净」）：**空行不画**——没有配审核者就不画
-      「审核者」那行（否则每选一个没配审核的执行者都跳出一行"未配置"，看着像
-      bug）；一个动作都没配就不画「允许的动作」那行。**选智能体不画「返工」行**
-      （返工是组专属的设置——只有组能配返工次数，单智能体恒为不返工，画出来
-      只是噪音）。只有真实存在的东西才占行。
-      ⚠️ 唯独「人没了」(`gone`)必须画——那是有事要说的状态，不能藏。
-
-    ★ 2026-10 标题：随选中对象走（智能体摘要 / 智能体组摘要），并加粗。
+    ⚠️ 2026-11：这一栏原来有四行（执行者 / 审核者 / 允许的动作 / 返工）。动作
+    （D123）、返工（D124）、审核（D125）与组（S3）先后退场之后，**只剩执行者**。
 
     ⚠️ 推导全在 `lib/newtask-chain.ts` 里（纯函数、有单测），这一页只读结果。
   -->
   {#if executorName}
     <section class="summary-card">
-      <span class="summary-title">
-        {$t(source === 'group' ? 'newtask.summaryTitleGroup' : 'newtask.summaryTitleAgent')}
-      </span>
+      <span class="summary-title">{$t('newtask.summaryTitleAgent')}</span>
       <dl class="summary-grid">
         <dt>{$t('newtask.summaryExecutor')}</dt>
         <dd>{executorName}</dd>
 
-        {#if reviewerSummary.kind !== 'none'}
-          <dt>{$t('newtask.summaryReviewer')}</dt>
-          <dd>
-            {#if reviewerSummary.kind === 'name'}
-              {reviewerSummary.name}
-            {:else if reviewerSummary.kind === 'gone'}
-              <span class="warn">{$t('newtask.summaryReviewerGone')}</span>
-            {:else if reviewerSummary.kind === 'no-group'}
-              <span class="warn">{$t('newtask.summaryReviewerAgentPath')}</span>
-            {/if}
-          </dd>
-        {/if}
+        <!-- ⚠️ 2026-11（D125）：这里原来是「审核者」那一行（谁审 / 人没了 /
+             选单个智能体就不会被审）。审核 run 退场 ⇒ 不再有"谁审"，整行删。 -->
 
-        {#if actionCount > 0}
-          <dt>{$t('newtask.summaryActions')}</dt>
-          <dd>{$t('newtask.summaryActionsValue', { n: actionCount })}</dd>
-        {/if}
-
-        {#if source === 'group'}
-          <dt>{$t('newtask.summaryRework')}</dt>
-          <dd>
-            {#if reworkSummary.kind === 'unlimited'}
-              {$t('newtask.summaryReworkUnlimited')}
-            {:else if reworkSummary.kind === 'times'}
-              {$t('newtask.summaryReworkTimes', { n: reworkSummary.n })}
-            {:else}
-              {$t('newtask.summaryReworkZero')}
-            {/if}
-          </dd>
-        {/if}
+        <!-- ⚠️ 2026-11（D124）：这里原来是「返工：不返工 / N 次 / 无限」那一行。
+             返工退场 ⇒ 任务不再有返工预算，整段删掉。 -->
       </dl>
     </section>
   {/if}
@@ -503,14 +344,13 @@
       {#if executorName}
         <span class="foot-summary">
           {$t('newtask.footExecutor', { name: executorName })}
-          <span class="foot-sep">·</span>
-          {#if chain.reviewer}
-            {$t('newtask.footReviewer', { name: chain.reviewer.name })}
-          {:else}
-            {$t('newtask.footReviewerNone')}
+          <!-- ⚠️ 2026-11（D125）：这里原来还有「由某某审 / 不自动审核」（审核 run
+               退场）。 -->
+          {#if false}
+            <span class="foot-sep">·</span>
           {/if}
-          <span class="foot-sep">·</span>
-          {$t('newtask.footActions', { n: actionCount })}
+          <!-- ⚠️ 2026-11（D123）：这里原来还有 `{$t('newtask.footActions', …)}`——
+               动作能力退场，摘要与底栏都不再提"动作"。 -->
         </span>
       {/if}
     </div>
@@ -566,8 +406,8 @@
   .pick-card label {
     max-width: 30rem;
   }
-  /* ★ 占位「（选一个组）」的字色：select 文字**显式**设成正文色——不然部分
-     浏览器把禁用占位 option 渲染成浅色（白字），看不清选没选（与组表单同款修法）。 */
+  /* ★ select 文字**显式**设成正文色——不然部分浏览器把禁用占位 option
+     渲染成浅色（白字），看不清选没选。 */
   .pick-card select {
     color: var(--text);
   }
@@ -575,12 +415,8 @@
     color: var(--text-faint);
   }
 
-  /* 智能体 / 智能体组 分段切换（与成员卡的来源切换同款药丸） */
-  /**
-   * 智能体 / 智能体组 二选一（2026-10）：改成与顶栏「列表 / 看板」同款的分段轨
-   * —— `var(--line)` 的轨 + 圆角矩形按钮，活动态 `--accent-dim` 实心底白字。
-   * 原来是独立胶囊（`border-radius: 999px` + 细边框），使用者要求改样式。
-   */
+  /* ⚠️ 2026-11（S3）：这里原来是「智能体 / 智能体组」二选一的分段轨（`.source-toggle`）。
+     组退场 ⇒ 这一页只剩"选一个执行者"，没有可切换的两档。 */
   .card-title {
     font-size: var(--fs-sm);
     font-weight: 600;

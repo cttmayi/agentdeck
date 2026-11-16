@@ -27,7 +27,13 @@ import {
  * 事，如果有人拿着原对象继续用，就地改会让读到的东西在背后变掉。
  */
 
-/** 一条"老形态"的记录：四个撤掉的键都在，另外还内嵌着一份老标准。 */
+/**
+ * 一条"老形态"的记录：撤掉的键都在，另外还内嵌着一份老标准。
+ *
+ * ⚠️ 2026-11（S4，D127）：`role` 也进了这张清单（角色退场），而且它会**升格**——
+ *   内置记录的 `role` 变成 `builtinKind`（见下面那条专测），这条夹具刻意**不带
+ *   `builtin`**（用户建的记录），所以 `role` 只是被摘掉。
+ */
 function legacyRecord(): Record<string, unknown> {
   return {
     id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -59,7 +65,7 @@ function legacyRecord(): Record<string, unknown> {
 }
 
 describe('stripLegacyAgentFields：摘掉撤下的字段', () => {
-  test('★ 四个顶层键 + `reviewStandard.allowedActions` 都不见了', () => {
+  test('★ 撤掉的顶层键 + `reviewStandard.allowedActions` 都不见了', () => {
     const { next, removed } = stripLegacyAgentFields(legacyRecord())
 
     for (const key of LEGACY_AGENT_KEYS) {
@@ -78,6 +84,8 @@ describe('stripLegacyAgentFields：摘掉撤下的字段', () => {
       'debugActions',
       'reviewStandard.allowedActions',
       'reviewerAgentId',
+      // ⚠️ 2026-11（S4，D127）：角色退场 ⇒ `role` 也是要摘的老键。
+      'role',
     ])
   })
 

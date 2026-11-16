@@ -45,22 +45,17 @@ export const errorsText = {
     zh: '上报失败（已本地暂存 {count} 条，下轮补交）：{reason}',
     en: 'Reporting failed ({count} record(s) buffered locally, will retry next round): {reason}',
   },
-  'err.fetchPendingFailed': {
-    zh: '拉取待处理项失败：{reason}',
-    en: 'Failed to fetch pending items: {reason}',
-  },
+  /*
+   * ⚠️ 2026-11（D125）：`err.fetchPendingFailed` 随报告摄取的拉取半段一起删。
+   */
   'err.mountPointMissing': {
     zh: '找不到 #app 挂载点——index.html 被改坏了',
     en: 'Cannot find the #app mount point — index.html has been broken',
   },
-  /**
-   * 一轮同步里**两条**错误拼成一句时用的分隔符。
-   *
-   * ⚠️ 它也得进词表：中文用全角分号，英文句子之间用半角分号加空格——把 `；`
-   *    写死在 `sync.ts` 里，英文界面上就会冒出一个全角标点。
+  /*
+   * ⚠️ 2026-11（D125）：`err.messageSeparator` 是"一轮同步里两条错误拼成一句"用的
+   *   分隔符。同步只剩往外上报一个方向之后不会再拼两句，它变成死词条，删掉。
+   *   ⚠️ 那条纪律本身没错：**标点也是文案的一部分**，别把 `；` 写死在代码里。
+   *   真到又一次要拼的时候再取词表。
    */
-  'err.messageSeparator': {
-    zh: '；',
-    en: '; ',
-  },
 } as const satisfies TextCatalog

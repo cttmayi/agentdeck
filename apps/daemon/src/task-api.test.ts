@@ -21,8 +21,6 @@ import { request } from 'node:http'
 import { AsyncQueue, type AgentBackend, type AgentMessage, type ExecOptions, type AgentSession } from '@agentdeck/agent-core'
 import {
   ulid,
-  VERDICT_FENCE_BEGIN,
-  VERDICT_FENCE_END,
   type Run,
 } from '@agentdeck/protocol'
 import { startDaemon, type DaemonHandle } from './server.ts'
@@ -47,28 +45,14 @@ class FakeTaskBackend implements AgentBackend {
     this.seenPrompts.push(opts.prompt)
     opts.onCommandLine?.({ argv: ['claude', '-p', '--output-format', 'stream-json'], sandboxDescription: '假后端（测试）' })
 
-    // ⚠️ 这个假后端要**分两种活**，因为传组之后同一条链上会跑两种 run：
-    //    执行（随便说两句话）与审核（必须交一份**合规的判决 JSON**）。
-    //    第一版没分，审核那条也返回"做完了。"⇒ 判决解析不合法 ⇒ 派生重试 run ⇒
-    //    链子一直不收敛，于是用例里"review 20 秒内非空"红在一个**跟被测行为无关**的
-    //    原因上（我拿它当"传组不审"的证据查了半天，才在日志里看到"判决不合规，
-    //    已派生重试 run"）。判据就是这条 prompt 里有没有审核这件事。
-    //    ⚠️ 第二版我又踩了一次：把判决 JSON 直接当整段输出发出去——仍然不合法。
-    //    判决必须夹在**那对围栏标记**之间（`VERDICT_FENCE_BEGIN`/`END`，`verdict.ts`），
-    //    否则解析器判"格式不合法"⇒ 派生重试 run ⇒ 同样不收敛。
-    const asReviewer = opts.prompt.includes('审核')
-    const verdict = JSON.stringify({
-      schemaVersion: 1,
-      conclusion: 'pass',
-      reasonCode: 'meets_criteria',
-      confidence: 0.9,
-      findings: [],
-      action: null,
-      escalateReason: null,
-    })
-    const text = asReviewer
-      ? `我的审核结论如下：\n${VERDICT_FENCE_BEGIN}\n${verdict}\n${VERDICT_FENCE_END}\n以上。`
-      : null
+    /*
+     * ⚠️ 2026-11（D125）：这里原来要**分两种活**——执行 run 随便说两句，审核 run 交
+     *   一份夹在判决围栏里的合规 JSON（否则判决解析不合法 ⇒ 派生重试 run ⇒ 链子
+     *   不收敛，用例红在一个跟被测行为无关的原因上）。
+     *
+     *   审核 run 退场 ⇒ 一件事要做了：只是说两句话。
+     */
+    const text = null
 
     // 真的往工作目录写一个文件：`files` 清单是**读目录**得来的，不写就无从验证。
     await writeFile(join(opts.workDir, 'out.md'), '# 产出\n', 'utf8').catch(() => {})
@@ -289,28 +273,16 @@ describe('★★★ 幂等：同一个键第二次来，不重跑、不二次扣
 })
 
 describe('★★ 传组就按组走（含审核），不传组就不审', () => {
-  test('★★★ 传默认组 ⇒ 执行之后真的派了审核 run，review 最终非空', async () => {
-    await withDaemon(async (url, backend) => {
-      const groups = (await (await fetch(`${url}/api/agent-groups`)).json()) as {
-        groups: Array<{ id: string; name: string; enabled: boolean }>
-      }
-      const group = groups.groups.find((g) => g.enabled)
-      assert.ok(group, '启动时该有一个可用的默认组')
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「★★★ 传默认组 ⇒ 执行之后真的派了审核 run，
+   *   review 最终非空」——传组之后自动串一条审核 run，任务详情里的 `review`
+   *   最终能读到判决。
+   *
+   *   审核 run 退场 ⇒ 传组只剩"执行者由组决定"这一件事（上面那条用例在守），
+   *   用例删。**"传了就必须发生"这条要求没有过期**——只是现在没有"审核"这件事
+   *   可要求了。
+   */
 
-      const res = await postTask(url, { prompt: '带组跑一遍', groupId: group!.id, wait: 30 })
-      assert.equal(res.status, 200, res.text)
-      const runId = res.json['runId'] as string
-
-      // 审核 run 是执行 run 完成后才派的，所以"review 立刻非空"是不能断言的——
-      // 这正是 wait 只跟踪**执行那条**的已知边界（返回体里 review 为 null 时
-      // 用 GET /api/task/{id} 继续收口）。这里等它出现。
-      const settled = await pollTask(url, runId, (j) => j['review'] !== null, 20_000)
-      assert.notEqual(settled['review'], null, '传了组就必须真的有人审')
-      const review = settled['review'] as { conclusion?: string; status: string }
-      assert.ok(['pass', 'fail', 'needs_human'].includes(review.conclusion ?? ''))
-      assert.equal(backend.spawns >= 2, true, '审核也是一次真实的 CLI 执行')
-    })
-  })
 })
 
 describe('★★ 边界：只给回环、不进 MCP、不加 CLI 命令', () => {

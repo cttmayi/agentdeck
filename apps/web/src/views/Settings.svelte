@@ -282,7 +282,6 @@
       <p class="faint fs-xs">
         {$t('settings.syncReported', { count: $syncStatus.reported })}
         {#if $syncStatus.queued > 0}{$t('settings.syncQueued', { count: $syncStatus.queued })}{/if}
-        {#if $syncStatus.fetched > 0}{$t('settings.syncFetched', { count: $syncStatus.fetched })}{/if}
         {#if $syncStatus.skippedReporting}{$t('settings.syncReportingOff')}{/if}
       </p>
       {#if $syncStatus.warnings.length > 0}

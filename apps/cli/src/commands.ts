@@ -11,7 +11,8 @@
  *
  * 这个 CLI 同样不提供。理由一模一样，而且这里更危险：CLI 是给**脚本**用的，
  * 一个能提交任意 run 的 CLI 就是一条现成的代码执行入口。
- * 要跑东西请走 `reports` → 审核 → 判决 → 有界动作这条路，
+ * 要跑东西只能走使用者自己的「新建任务」（CLI 不提供"提交任意 run"：那接受任意
+ * workDir 并 spawn 子进程，等于开放代码执行入口）。
  * 或者由人在页面上动手。
  */
 
@@ -145,14 +146,6 @@ export const COMMANDS: CommandSpec[] = [
     },
   },
   {
-    name: 'run-verdicts',
-    summary: '看某条执行的判决',
-    needsPositional: true,
-    async run(ctx, { positionals }) {
-      return api(ctx, `/api/runs/${encodeURIComponent(positionals[0]!)}/verdicts`)
-    },
-  },
-  {
     name: 'run-audits',
     summary: '看某条执行的审计链',
     needsPositional: true,
@@ -170,39 +163,14 @@ export const COMMANDS: CommandSpec[] = [
       })
     },
   },
-  {
-    name: 'reports',
-    summary: '投递报告（它本身不执行任何命令）',
-    async run(ctx, { flags }) {
-      const source = str(flags, 'source')
-      if (!source) throw new CommandError('需要 --source <来源标识>')
-      const file = str(flags, 'file')
-      if (!file) throw new CommandError('需要 --file <路径>（- 表示标准输入）')
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 `reports` 命令——把一批第三方报告投给
+   *   `POST /api/reports`（它会落库、路由给审核者、起 review run）。
+   *
+   *   **报告摄取整条链退场**（见 `docs/srs/requirements.md` §16 D125）⇒ 这条命令
+   *   没有服务端可投，删掉。留下一个"调了会 404"的命令比没有更糟。
+   */
 
-      let raw: string
-      if (file === '-') {
-        raw = await readStdin()
-      } else {
-        const { readFile } = await import('node:fs/promises')
-        raw = await readFile(file, 'utf8')
-      }
-      let items: unknown
-      try {
-        items = JSON.parse(raw)
-      } catch (err) {
-        throw new CommandError(
-          `--file 的内容不是合法 JSON：${err instanceof Error ? err.message : String(err)}`,
-        )
-      }
-      if (!Array.isArray(items) || items.length === 0) {
-        throw new CommandError('报告条目必须是非空 JSON 数组')
-      }
-      return api(ctx, '/api/reports', {
-        method: 'POST',
-        body: JSON.stringify({ source, items }),
-      })
-    },
-  },
   {
     name: 'inbox',
     summary: '看通知',

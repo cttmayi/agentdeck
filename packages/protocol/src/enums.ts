@@ -48,89 +48,20 @@ export const RunTrigger = z.enum([
 export type RunTrigger = z.infer<typeof RunTrigger>
 
 // ─────────────────────────────────────────────────────────────
-// Verdict
-// ─────────────────────────────────────────────────────────────
-
-/** 判决结论。三选一，闭合。 */
-export const VerdictConclusion = z.enum(['pass', 'fail', 'needs_human'])
-export type VerdictConclusion = z.infer<typeof VerdictConclusion>
-
-/**
- * 判决的**原因码**。闭合共享枚举。
+/*
+ * ⚠️ 2026-11（D125）：这一节原来放着判决的四个闭合枚举——
+ *   `VerdictConclusion`（pass / fail / needs_human）、`ReasonCode`（19 个理由码）、
+ *   `Severity`、`VerdictStatus`（生命周期）、`InvalidVerdictResolution`。
  *
- * 三条纪律（requirements §7.3）：
- * 1. 不能是自由字符串——否则同一含义会漂移出十种写法，无法统计与分组；
- * 2. 新增类别要改协议并升版本；
- * 3. **不得泄露对象是否存在**：需要表达"无权访问"时统一用
- *    `insufficient_context`，不要为"不存在"和"无权"各给一个码，
- *    否则可被枚举探测。
+ *   审核 run 与判决一起退场 ⇒ 没有判决可写，五个枚举全部删。
+ *
+ *   ⚠️ 但**老记录里还留着 `VerdictStatus` 的字符串**：`AuditRecord.verdictId` 指向
+ *   的那条老记录（磁盘上原样躺着，没有代码再解析它），以及通知里有过的
+ *   `verdict.*` 类型。删枚举不影响磁盘数据——那一段没有 reader。
+ *   `ReasonCode` 最后一个成员 `human_decision` 的教训值得留一句话：**人工通过
+ *   与审核者按标准通过的证据强度完全不同**，合并成一个统计口径之后，"通过率"
+ *   这个数字就不再回答任何问题。
  */
-export const ReasonCode = z.enum([
-  // 通过
-  'meets_criteria',
-  // 未通过：质量类
-  'missing_tests',
-  'failing_tests',
-  'style_violation',
-  // 未通过：正确性
-  'logic_error',
-  'type_error',
-  'broken_reference',
-  // 未通过：安全类
-  'known_vulnerability',
-  'secret_exposed',
-  'unsafe_permission',
-  // 未通过：范围
-  'scope_creep',
-  'out_of_scope',
-  // 无法判定
-  'insufficient_context',
-  'conflicting_criteria',
-  'criteria_not_applicable',
-  // 系统
-  'internal_error',
-  /**
-   * ★ 人工裁决（D46）。
-   *
-   * 上面那些码都是**给模型用的**：它们回答"这条产出为什么不满足标准"。而人工
-   * 裁决的理由不是从这套分类里挑出来的——人写的是**一句话**，那句话原文进
-   * `findings`。所以这里给一个码，意思是"这条判决的理由在自由文本里，别去
-   * 上面的分类里找"。
-   *
-   * ⚠️ 为什么不复用 `meets_criteria` / `insufficient_context` 之类：
-   *    人工通过时填 `meets_criteria` 会让统计把"审核者按标准判通过"与
-   *    "人看了一眼说行"算成同一件事——而这两件事的**证据强度完全不同**，
-   *    合并之后"通过率"这个数字就不再回答任何问题了。
-   */
-  'human_decision',
-])
-export type ReasonCode = z.infer<typeof ReasonCode>
-
-/** 发现项的严重程度。闭合，因为升级策略与排序都依赖它。 */
-export const Severity = z.enum(['critical', 'high', 'medium', 'low', 'info'])
-export type Severity = z.infer<typeof Severity>
-
-/** verdict 的生命周期（requirements §10.2）。 */
-export const VerdictStatus = z.enum([
-  'pending_verdict',
-  'emitted',
-  'validated',
-  'invalid',
-  'dispatched_to_action',
-  'advisory',
-  'escalated',
-  /** ★ 判决合格且结论为 `fail` ⇒ **返工**：审核意见交回执行者重做（D45）。终态。 */
-  'rework_requested',
-])
-export type VerdictStatus = z.infer<typeof VerdictStatus>
-
-/** schema 校验失败后的处理路径（`invalid` 是**独立**失败类型）。 */
-export const InvalidVerdictResolution = z.enum([
-  'retry',
-  'downgrade_to_advisory',
-  'escalate',
-])
-export type InvalidVerdictResolution = z.infer<typeof InvalidVerdictResolution>
 
 // ─────────────────────────────────────────────────────────────
 // Action
@@ -140,8 +71,7 @@ export type InvalidVerdictResolution = z.infer<typeof InvalidVerdictResolution>
  * 动作的执行端。**由注册表决定，不由 verdict 决定**（INV-13）——
  * 这样本地动作将来迁移到远端时，不需要改动历史判决的结构。
  */
-export const ActionPlane = z.enum(['local', 'remote'])
-export type ActionPlane = z.infer<typeof ActionPlane>
+/* ⚠️ 2026-11（D123）：`ActionPlane`（'local' | 'remote'）随 `Action` 实体删掉。 */
 
 /**
  * ⚠️ **平台不内置任何动作**（D41）。
@@ -199,40 +129,14 @@ export const NamespacedActionType = z
 export const ActionRefType = NamespacedActionType
 export type ActionRefType = z.infer<typeof ActionRefType>
 
-/**
- * 从动作名里取包 slug；形状不对（或没有那个点）返回 `null`。
- *
- * ⚠️ 原来它还兼着"这是不是内置裸名"的判断（内置名返回 null）。内置动作删掉之后
- *    这个区分不存在了：**每个**动作名都带包 slug。
+/*
+ * ⚠️ 2026-11（D123）：这里原来是**动作的生命周期**那一组——`ActionStatus`
+ *   （proposed / auto_approved / awaiting_approval / executing / executed /
+ *   failed / rolled_back / skipped）、`TERMINAL_ACTION_STATUSES` 与
+ *   `isTerminalActionStatus`。`Action` 实体随动作能力退场删掉之后，它们没有
+ *   任何使用对象（留一个没人能构造的联合类型，下一个人会以为它还在生效），整段删。
  */
-export function toolSlugOfAction(type: string): string | null {
-  if (!NamespacedActionType.safeParse(type).success) return null
-  return type.slice(0, type.indexOf('.'))
-}
 
-/** 动作的生命周期（requirements §10.3）。 */
-export const ActionStatus = z.enum([
-  'proposed',
-  'auto_approved',
-  'awaiting_approval',
-  'executing',
-  'executed',
-  'failed',
-  'rolled_back',
-  'skipped',
-])
-export type ActionStatus = z.infer<typeof ActionStatus>
-
-export const TERMINAL_ACTION_STATUSES = [
-  'executed',
-  'failed',
-  'rolled_back',
-  'skipped',
-] as const
-export type TerminalActionStatus = (typeof TERMINAL_ACTION_STATUSES)[number]
-
-export const isTerminalActionStatus = (s: ActionStatus): s is TerminalActionStatus =>
-  (TERMINAL_ACTION_STATUSES as readonly string[]).includes(s)
 
 // ─────────────────────────────────────────────────────────────
 // Issue

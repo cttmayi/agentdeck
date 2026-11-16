@@ -86,14 +86,13 @@ export type DraftPick = {
  * `preferredAgentId` 是平台默认执行者，用来消歧：同一个 skill 被多个执行者挂着
  * 时，优先它，否则取列表里第一个（那条规则在这里，不在界面里）。
  *
- * ⚠️ 只认 `role: 'executor'` 与 `role: 'agent-maker'`——审核者不能被选来聊天
- *    （聊天不产出判决，让"按标准判事"的人来闲聊，会让人以为它说的话有判决的分量）；
- *    起草者/记忆整理者同理（它们按素材写文件，聊天对它们没有意义）。
+ * ⚠️ 判据是**内置岗位**（2026-11，S4/D127 之前是角色）：用户建的 agent 一律能聊天；
+ *    内置的那几个只放行 `agent-maker`（它的全部工作就是聊天：问五字段、规则由它描述、
+ *    产出岗位卡）。起草者 / 记忆整理 / 沉淀审核者不放行——它们按素材写文件或整理东西，
+ *    聊天对它们没有意义。
  *
- * ★ 2026-11 设计定稿（§3.1）：`agent-maker`（智能体生成者）是**唯一例外**——它的
- *    全部工作就是聊天（问五字段、规则由它描述、产出岗位卡）。判据写**等值**
- *    （两个角色并起来），不写 `role !== …`——后者会把将来新增的角色悄悄漏进来。
- *    审核者身上挂的 skill 因此也不算"有主"。
+ *    判据写**等值**（`kind === null || kind === 'agent-maker'`），不写 `kind !== …`
+ *    ——后者会把将来新增的内置岗位悄悄漏进来。那些岗位身上挂的 skill 因此也不算"有主"。
  *
  * ⚠️ 一个能聊的 agent 都没有时**不给 skill 选项**：那些选项最后都要落到某个人身上，
  *    而没有人的时候选了就是个空头承诺（界面这时候该说的是"先去建一个执行者"）。
@@ -113,8 +112,12 @@ export function executorChoices(
    */
   canCarrySkills: boolean,
 ): ExecutorChoice[] {
+  /*
+   * 能聊天的是：所有**用户建的** agent，加上内置的「智能体生成者」。
+   * 写等值（`kind === null || kind === 'agent-maker'`），不写 `kind !== 'drafter'`。
+   */
   const executors = agents.filter(
-    (agent) => agent.role === 'executor' || agent.role === 'agent-maker',
+    (agent) => agent.builtinKind === undefined || agent.builtinKind === 'agent-maker',
   )
   const choices: ExecutorChoice[] = executors.map((agent) => ({
     value: `agent:${agent.id}`,
@@ -150,7 +153,7 @@ export function skillsHeldBackByDaemon(
   canCarrySkills: boolean,
 ): Skill[] {
   if (canCarrySkills) return []
-  const executors = agents.filter((agent) => agent.role === 'executor')
+  const executors = agents.filter((agent) => agent.builtinKind === undefined)
   if (executors.length === 0) return []
   return skills.filter(
     (skill) => !executors.some((agent) => (agent.skillIds ?? []).includes(skill.id)),

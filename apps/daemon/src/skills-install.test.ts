@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { startDaemon } from './server.ts'
-import { reviewerIdentity } from './review-standard.ts'
+import { resolveReviewStandard } from './review-standard.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
 /**
@@ -288,14 +288,14 @@ describe('★ 执行 run 的 skill 解析（一次真实的静默失效）', () 
           skills: [{ slug: 'probe-skill', name: '夹具技能', body: '# 夹具\n\n正文。' }],
         }),
       })
-    ).json()) as { installed: Array<{ id: string }> }
+    ).json()) as { installed: Array<{ id: string; builtin?: boolean }> }
     const skillId = installed.installed[0]!.id
 
     const agent = (await (
       await fetch(`${url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '挂了 skill 的执行者', role: 'executor', skillIds: [skillId] }),
+        body: JSON.stringify({ name: '挂了 skill 的执行者', skillIds: [skillId] }),
       })
     ).json()) as { id: string; name: string; skillIds: string[] }
     assert.deepEqual(agent.skillIds, [skillId], '夹具 agent 得真的挂着那个 skill')
@@ -964,7 +964,7 @@ describe('★ 卸载 skill（D38）', () => {
         skills: [{ slug: 'to-remove', name: '待卸载', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
-      const id = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+      const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
       assert.equal((await listSkills(url)).filter((s) => s.slug === 'to-remove').length, 1)
 
       const res = await remove(url, id)
@@ -983,7 +983,7 @@ describe('★ 卸载 skill（D38）', () => {
         skills: [{ slug: 'in-use', name: '在用', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
-      const id = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+      const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
       await fetch(`${url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -994,7 +994,19 @@ describe('★ 卸载 skill（D38）', () => {
       assert.equal(res.status, 400)
       const error = String(res.body['error'])
       assert.match(error, /挂着它的执行者/, '要把"还挂着的是谁"列出来')
-      assert.match(error, /先在它们的配置里把它摘掉/, '要说清怎么改')
+      /*
+       * ⚠️ 2026-11（S4，D127）：这里原来只认"先在它们的配置里把它摘掉"那一支。
+       *   现在**两支都要能出现**，取决于「挂着它的那条 agent 身上有没有自己的判断依据」：
+       *   · 有 ⇒ 摘掉就行；
+       *   · 没有 ⇒ 先把它并进「指令」（否则摘掉之后它就没依据了）。
+       *   这条用例里的 agent 没有判断依据，所以命中的是第二支——判据放宽成"要说出
+       *   下一步动作"，两句都算。
+       */
+      assert.match(
+        error,
+        /先在它们的配置里把它摘掉|并进「指令」/,
+        `要说清怎么改：${error}`,
+      )
       assert.equal((await listSkills(url)).filter((s) => s.slug === 'in-use').length, 1)
     })
   })
@@ -1034,12 +1046,12 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
         ],
         batchId: 'b1',
       })
-      const ids = (installed.body['installed'] as Array<{ id: string }>).map((s) => s.id)
+      const ids = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>).map((s) => s.id)
       const reviewer = (await (
         await fetch(`${url}/api/agents`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: '老形态审核者', role: 'reviewer', skillIds: ids }),
+          body: JSON.stringify({ name: '老形态审核者', skillIds: ids }),
         })
       ).json()) as { id: string; reviewStandard: unknown; skillIds: string[] }
       assert.equal(reviewer.reviewStandard, null)
@@ -1077,7 +1089,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       assert.equal(
         after.reviewStandard,
         null,
-        '★ 老字段要清掉：留着的话 `reviewerIdentity` 会把同一段文字投递**两遍**',
+        '★ 老字段要清掉：留着的话同一段文字会在「指令」与老字段里各存一份，两处迟早不一致',
       )
       // ⚠️ 这里原来还断言 `after.reviewStandard.name` 里有"老标准甲"——那个字段
       //    已经删掉了（"名字"不承载任何东西，理由见协议里 `ReviewStandard`）。
@@ -1126,7 +1138,6 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             name: '带内联老标准的审核者',
-            role: 'reviewer',
             instructions: '你是严格的审核者。',
             reviewStandard: { body: '## 判定\n\n只看证据。' },
           }),
@@ -1143,7 +1154,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       assert.match(after.instructions, /只看证据。/, '老标准的正文搬进来了')
       assert.ok(
         after.instructions.indexOf('你是严格的审核者。') < after.instructions.indexOf('只看证据。'),
-        '★ 顺序与 `reviewerIdentity` 一致（指令在前）：反过来的话，投递出去的那一段与搬之前不是同一份',
+        '★ 指令在前：反过来的话"它原来写的身份"就不在开头了',
       )
       assert.equal(after.reviewStandard, null, '老字段要清掉，否则同一段文字会被投递两遍')
     })
@@ -1159,9 +1170,9 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
    *
    * ⚠️ 所以这一组要钉住的**不是**"合并没有发生"，而是三件事一起：
    *   ① 老字段真的清掉了（提示才会消失）；
-   *   ② **投递出去的那段文字一字未变**——判据用**同一个** `reviewerIdentity`：
-   *      并之前与并之后算出来的身份必须逐字节相同。少了这一条，"顺手清理"就可能
-   *      变成"顺手删掉一段判断依据"，而那正是这个仓库最怕的静默丢失；
+   *   ② **那些文字一字未变**——并之前与并之后算出来的内容必须逐字节相同。少了
+   *      这一条，"顺手清理"就可能变成"顺手删掉一段判断依据"，而那正是这个仓库
+   *      最怕的静默丢失；
    *   ③ 不该并的两种情形**照旧不并**（指令为空、正文来自挂载的 skill）。
    */
   describe('保存时并进「指令」（2026-09）', () => {
@@ -1189,7 +1200,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
         await fetch(`${url}/api/agents`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ role: 'reviewer', ...body }),
+          body: JSON.stringify({ ...body }),
         })
       ).json()) as { id: string; instructions: string; reviewStandard: { body: string } | null }
 
@@ -1201,8 +1212,14 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
           reviewStandard: { body: '## 判定\n\n只看证据。' },
         })
         const before = await getAgent(url, reviewer.id)
-        const identityBefore = reviewerIdentity(before, [])
-        assert.equal(identityBefore.fromLegacyStandard, true, '前提：它此刻确实走在老形态上')
+        /*
+         * ⚠️ 2026-11（D125）：判据从 `reviewerIdentity(before, []).text`（"合成后的
+         *   投递身份"）换成「指令 + 老标准正文」这两份原文的拼接——`reviewerIdentity`
+         *   随审核 run 一起退场了，而这条用例要守的东西一个字没变：
+         *   **搬家前后，这些文字一个字都不许丢**。
+         */
+        const legacyBody = resolveReviewStandard(before, [])?.body ?? ''
+        assert.equal(legacyBody, '## 判定\n\n只看证据。', '前提：它此刻确实走在老形态上')
 
         // 改的是**别的字段**（名字）——这正是"我什么都没配、保存一下提示该没了"的场景
         const res = await patchAgent(url, reviewer.id, { name: '改了个名字的审核者' })
@@ -1213,12 +1230,11 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
         assert.match(after.instructions, /你是严格的审核者。/)
         assert.match(after.instructions, /只看证据。/, '老标准的正文并进来了')
 
-        const identityAfter = reviewerIdentity(after, [])
-        assert.equal(identityAfter.fromLegacyStandard, false, '并完之后不再依赖老字段')
+        assert.equal(resolveReviewStandard(after, []), null, '并完之后不再依赖老字段')
         assert.equal(
-          identityAfter.text,
-          identityBefore.text,
-          '★★ 投递出去的那段文字必须**一字未变**——"顺手清理"不许变成"顺手丢一段判断依据"',
+          after.instructions,
+          `你是严格的审核者。\n\n${legacyBody}`,
+          '★★ 那份文字必须**一字未变**地并进「指令」——"顺手清理"不许变成"顺手丢一段判断依据"',
         )
       })
     })
@@ -1253,7 +1269,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
           skills: [{ slug: 'legacy-body', name: '老正文', body: '# 甲\n\n只看甲。', source: 'local' }],
           batchId: 'b1',
         })
-        const skillId = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+        const skillId = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
         const reviewer = await makeReviewer(url, {
           name: '正文挂在 skill 上的审核者',
           instructions: '你是严格的审核者。',
@@ -1276,7 +1292,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       const empty = await fetch(`${url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '没标准的审核者', role: 'reviewer' }),
+        body: JSON.stringify({ name: '没标准的审核者' }),
       }).then((r) => r.json() as Promise<{ id: string }>)
       const res = await adopt(url, empty.id)
       assert.equal(res.status, 400)
@@ -1285,7 +1301,7 @@ describe('★ 把挂载的 skill 里的判断依据并进「指令」（D38 的�
       const executor = await fetch(`${url}/api/agents`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '执行者', role: 'executor' }),
+        body: JSON.stringify({ name: '执行者' }),
       }).then((r) => r.json() as Promise<{ id: string }>)
       assert.equal((await adopt(url, executor.id)).status, 400)
 
@@ -1352,7 +1368,7 @@ describe('★ 技能内容落盘：正文与支持文件是真文件（2026-10�
         skills: [{ slug: 'to-disk-remove', name: '待卸载', body: '# x', source: 'local' }],
         batchId: 'b1',
       })
-      const id = (installed.body['installed'] as Array<{ id: string }>)[0]!.id
+      const id = (installed.body['installed'] as Array<{ id: string; builtin?: boolean }>)[0]!.id
       assert.ok(await exists(join(skillsRoot, 'to-disk-remove')), '装上时目录在')
 
       const del = await fetch(`${url}/api/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })

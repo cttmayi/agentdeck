@@ -7,17 +7,12 @@ import type {
   Conversation,
   ConversationId,
   IssueId,
-  Report,
-  ReportId,
   Run,
   RunId,
   Skill,
   SkillId,
-  Tool,
-  ToolId,
   WorkspaceId,
 } from '@agentdeck/protocol'
-import { TOOL_MANIFEST_SCHEMA } from '@agentdeck/protocol'
 
 /**
  * 测试夹具。
@@ -29,12 +24,10 @@ import { TOOL_MANIFEST_SCHEMA } from '@agentdeck/protocol'
 export const wsId = (s = 'ws_1') => s as WorkspaceId
 export const agentId = (s: string) => s as AgentId
 export const skillId = (s: string) => s as SkillId
-export const toolId = (s: string) => s as ToolId
 export const issueId = (s: string) => s as IssueId
 export const conversationId = (s: string) => s as ConversationId
 export const chatTurnId = (s: string) => s as ChatTurnId
 export const runId = (s: string) => s as RunId
-export const reportId = (s: string) => s as ReportId
 
 const T0 = 1_700_000_000_000
 
@@ -49,7 +42,6 @@ export function makeAgent(over: Omit<Partial<Agent>, 'id'> & { id: string }): Ag
     skillIds: [],
     env: {},
     createdAt: T0,
-    role: 'executor',
     // D37：审核标准内联在审核者上；要测就 over 里给
     reviewStandard: null,
     updatedAt: T0,
@@ -81,51 +73,11 @@ export function makeSkill(
   }
 }
 
-/**
- * 一个已安装的工具包（D40）。
- *
- * 清单是**真的按 schema 造出来的**（而不是丢一个空对象）：存储层要存的就是
- * 这份清单，夹具里给个 `{}` 会让"清单没被完整写下来"这类问题在测试里看不见。
+/*
+ * ⚠️ 2026-11（D123）：这里原来是 `makeTool()`（一个已安装的工具包的夹具）。
+ *   工具包与动作能力一起退场，`Tool` 实体与清单 schema 都没了，夹具跟着删。
  */
-export function makeTool(
-  over: Omit<Partial<Tool>, 'id'> & { id: string; slug?: string },
-): Tool {
-  const slug = over.slug ?? over.id
-  return {
-    workspaceId: wsId(),
-    slug,
-    name: over.id,
-    description: '',
-    version: null,
-    manifest: {
-      schema: TOOL_MANIFEST_SCHEMA,
-      slug,
-      name: over.id,
-      version: null,
-      description: '',
-      runtime: 'node',
-      entry: 'index.mjs',
-      actions: [
-        {
-          name: 'run',
-          summary: '跑一下',
-          reversible: true,
-          dryRun: 'supported',
-          timeoutMs: 60_000,
-          params: { bound: {}, open: {} },
-        },
-      ],
-    },
-    files: { 'index.mjs': '// 空实现\n' },
-    docs: '',
-    source: 'local',
-    sourceRef: null,
-    createdAt: T0,
-    updatedAt: T0,
-    ...over,
-    id: toolId(over.id),
-  }
-}
+
 
 export function makeRun(
   over: Omit<Partial<Run>, 'id' | 'agentId'> & { id: string; agentId: string },
@@ -156,23 +108,9 @@ export function makeRun(
   }
 }
 
-export function makeReport(
-  over: Omit<Partial<Report>, 'id'> & { id: string; kind: string },
-): Report {
-  return {
-    workspaceId: wsId(),
-    source: 'test-source',
-    externalId: 'ext-1',
-    title: 't',
-    body: 'b',
-    meta: {},
-    blobRef: `sha256:${'a'.repeat(64)}` as Report['blobRef'],
-    dedupKey: 'dedup-1',
-    ingestedAt: T0,
-    ...over,
-    id: reportId(over.id),
-  }
-}
+/*
+ * ⚠️ 2026-11（D125）：`makeReport` / `reportId` 随 `Report` 实体与报告摄取链一起删。
+ */
 
 export function makeConversation(
   over: Omit<Partial<Conversation>, 'id'> & { id: string },

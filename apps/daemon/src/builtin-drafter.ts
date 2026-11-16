@@ -86,15 +86,24 @@ export type BuiltinKind = 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-
  * ⚠️ 不认名字：名字使用者能改（第 ⑥ 条允许他改），按名字认会在改名后失效，
  *    而失效的表现是"它又能被删/被选去跑业务任务"——静默且查起来很远。
  */
-export function builtinKindOf(agent: Pick<Agent, 'builtin' | 'role'>): BuiltinKind | null {
+export function builtinKindOf(
+  agent: Pick<Agent, 'builtin' | 'builtinKind'>,
+): BuiltinKind | null {
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来从 `agent.role` 反推岗位（`role === 'drafter'`
+   *   ⇒ `'drafter'` …）。**角色退场**之后岗位是**自己的字段**（`Agent.builtinKind`），
+   *   判据变成"`builtin` 标记 + 岗位值**两个都在**"。
+   *
+   * ⚠️ 仍然**不按名字 / 不按 id 认**：名字使用者能改，按名字认会在改名后失效——
+   *   失效的表现是"它又能被删 / 被派去干业务活"，一种静默且查得很远的故障。
+   *
+   * ⚠️ 返回 null 的那一档（标记在、岗位值缺或认不出）**必须由调用方说话**，不要
+   *   替它猜一套默认值：猜错就是把起草者的指令写进另一个岗位。
+   */
   if (agent.builtin !== true) return null
-  if (agent.role === 'drafter') return 'drafter'
-  if (agent.role === 'skill-reviewer') return 'skill-reviewer'
-  if (agent.role === 'memory-tidy') return 'memory-tidy'
-  if (agent.role === 'agent-maker') return 'agent-maker'
-  // 挂着内置标记但角色不是这几条之一：老记录/被手改过。返回 null 让调用方说话，
-  // 而不是替它猜一套默认值（猜错就是把起草者指令写进审核者，见上面 ②）。
-  return null
+  const kind = agent.builtinKind
+  if (kind === undefined) return null
+  return kind
 }
 
 /** 从列表里挑出指定的那一条内置（找不到返回 undefined，由调用方决定建还是报错）。 */
@@ -779,7 +788,8 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
   return {
     name: 'Skill 审核者（内置）',
     instructions: '',
-    label: '平台内置的 skill 审核者（已下线：沉淀线不再评审）',
+    // ⚠️ 2026-11（S4）：叫法用「沉淀审核」，与界面同一个词（同一个东西只许有一个词）。
+    label: '平台内置的沉淀审核者（已下线：沉淀线不再评审）',
   }
 }
 
@@ -790,7 +800,7 @@ export function builtinDefaultsOf(kind: BuiltinKind): {
  *    加进审核者之后那句话对它是**事实错误**——使用者看到"起草者"三个字会去改错的
  *    那条，而真正被拦下的那条他没意识到。
  */
-export function describeBuiltinAgent(agent: Pick<Agent, 'builtin' | 'role'>): string {
+export function describeBuiltinAgent(agent: Pick<Agent, 'builtin' | 'builtinKind'>): string {
   const kind = builtinKindOf(agent)
   if (kind === null) return '平台内置的智能体'
   return builtinDefaultsOf(kind).label
@@ -1004,11 +1014,12 @@ export async function ensureBuiltinAgentMaker(
   const all = await store.listAgents(workspaceId)
   const found = findBuiltinAgent(all, 'agent-maker')
   if (!found) {
-    const byRole = all.find((a) => a.role === 'agent-maker')
-    if (byRole) {
-      await store.insertAgent({ ...byRole, builtin: true, updatedAt: Date.now() })
-      return { action: 'healed', agentId: byRole.id as string, why: '内置标记丢了（按角色认出来）' }
-    }
+    /*
+     * ⚠️ 2026-11（S4）：这里原来按 `role === 'agent-maker'` 认出"标记丢了的那条"。
+     *   角色退场 ⇒ 这条兜底不成立了：没标记的记录现在与普通 agent 无法区分，
+     *   而**按名字认**正是这个文件反复在防的事（改名就失效）。所以宁可直接建一条
+     *   新的——用户的旧记录原样留着，不会再被悄悄改成内置。
+     */
     const now = Date.now()
     const agent: Agent = {
       id: ulid() as Agent['id'],
@@ -1025,8 +1036,8 @@ export async function ensureBuiltinAgentMaker(
       //   （`agents/<id>/SKILL/` 文件，由 `ensureBuiltinAgentMakerSkills` 播种）。
       skillIds: [],
       env: {},
-      role: 'agent-maker',
       builtin: true,
+      builtinKind: 'agent-maker',
       reviewStandard: null,
       createdAt: now,
       updatedAt: now,
@@ -1074,11 +1085,17 @@ export async function ensureBuiltinMemoryTidy(
   const all = await store.listAgents(workspaceId)
   const found = findBuiltinAgent(all, 'memory-tidy')
   if (!found) {
-    const byRole = all.find((a) => a.role === 'memory-tidy')
-    if (byRole) {
-      await store.insertAgent({ ...byRole, builtin: true, updatedAt: Date.now() })
-      return { action: 'healed', agentId: byRole.id as string, why: '内置标记丢了（按角色认出来）' }
-    }
+    /*
+     * ⚠️ 2026-11（S4，D127）：这里原来有一条"标记丢了但 `role` 还在 ⇒ 补标记"的
+     *   自愈。**角色退场**之后没有可认的旧证据了；而按**名字**认正是这个文件反复
+     *   在防的事（改名就失效，失效的表现是"每次启动又多出一条"）。所以这条兜底删掉：
+     *   找不到就建一条新的，用户那条旧记录原样留着。
+     *
+     *   ⚠️ 这条自愈当年不是多余的——它对应的真实故障是"标记丢了 ⇒ 每次启动都多一条
+     *   起草者，而列表里看起来只是'又有一条'"。现在的防护换成：`builtin` +
+     *   `builtinKind` **两个字段都在**才算（`builtinKindOf`），且读时兜底会把老记录的
+     *   `role` 升格成 `builtinKind`（`agent-legacy.ts`），所以正常升级路径不会走到这里。
+     */
     const now = Date.now()
     const agent: Agent = {
       id: ulid() as Agent['id'],
@@ -1091,8 +1108,8 @@ export async function ensureBuiltinMemoryTidy(
       workDir: null,
       skillIds: [],
       env: {},
-      role: 'memory-tidy',
       builtin: true,
+      builtinKind: 'memory-tidy',
       reviewStandard: null,
       createdAt: now,
       updatedAt: now,
@@ -1131,13 +1148,17 @@ export async function ensureBuiltinDrafter(
   // 标记**永远修不回来**（下面那条按角色认的自愈分支成了死代码）。
   const found = findBuiltinAgent(all, 'drafter')
   if (!found) {
-    // ⚠️ 也认 `role: 'drafter'`：标记丢了但角色还在 ⇒ 那是"损坏"，补标记而不是再造一条
-    //    （否则每次启动都会多出一条起草者，而列表里看起来只是"又有了一条"）。
-    const byRole = all.find((a) => a.role === 'drafter')
-    if (byRole) {
-      await store.insertAgent({ ...byRole, builtin: true, updatedAt: Date.now() })
-      return { action: 'healed', agentId: byRole.id as string, why: '内置标记丢了（按角色认出来）' }
-    }
+    /*
+     * ⚠️ 2026-11（S4，D127）：这里原来有一条"标记丢了但 `role` 还在 ⇒ 补标记"的
+     *   自愈。**角色退场**之后没有可认的旧证据了；而按**名字**认正是这个文件反复
+     *   在防的事（改名就失效，失效的表现是"每次启动又多出一条"）。所以这条兜底删掉：
+     *   找不到就建一条新的，用户那条旧记录原样留着。
+     *
+     *   ⚠️ 这条自愈当年不是多余的——它对应的真实故障是"标记丢了 ⇒ 每次启动都多一条
+     *   起草者，而列表里看起来只是'又有一条'"。现在的防护换成：`builtin` +
+     *   `builtinKind` **两个字段都在**才算（`builtinKindOf`），且读时兜底会把老记录的
+     *   `role` 升格成 `builtinKind`（`agent-legacy.ts`），所以正常升级路径不会走到这里。
+     */
     const now = Date.now()
     const agent: Agent = {
       id: ulid() as Agent['id'],
@@ -1153,8 +1174,8 @@ export async function ensureBuiltinDrafter(
       //   给它挂业务技能只会让人以为那些技能会影响起草（它们不会）。
       skillIds: [],
       env: {},
-      role: 'drafter',
       builtin: true,
+      builtinKind: 'drafter',
       // 审核标准（D37）：起草者不审任何东西 ⇒ 没有标准（也正因为没有，平台不会把产出
       // 交给它审——这正是这一步要的：**起草者绝不参与业务选择**）。
       reviewStandard: null,

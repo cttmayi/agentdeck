@@ -59,7 +59,6 @@ export async function executeWorkflow(
   const env: Env = {
     run,
     hooks,
-    currentStep: null,
     // 登记步骤（幂等：同 seq 已 done → 复用并跳过——续跑）
     nextStep: async (kind, label, nodeId, prompt, gateText) => {
       const seq = nextSeq++

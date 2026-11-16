@@ -12,25 +12,18 @@ import {
   makeChatTurn,
   makeConversation,
   makeIssue,
-  makeReport,
   makeRun,
   makeSkill,
-  makeTool,
-  reportId,
   runId,
   skillId,
-  toolId,
   wsId,
 } from '@agentdeck/domain/testing'
 import type {
-  Action,
   ActionId,
   Artifact,
   AuditRecord,
   BlobRef,
   RunId,
-  VerdictId,
-  VerdictRecord,
 } from '@agentdeck/protocol'
 import { FileStore } from './file-store.ts'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
@@ -210,160 +203,13 @@ describe('基本 CRUD 与持久化', () => {
  *   · 包内文件与清单**就在记录里**（`files` / `manifest`），所以"重开后还在"
  *     必须连它们一起验，否则会漏掉"只把 id 与 slug 存对了"这种半截持久化。
  */
-describe('工具包（D40）：CRUD 与卸载', () => {
-  const WSA = wsId('ws-tool-a')
-  const WSB = wsId('ws-tool-b')
+/*
+ * ⚠️ 2026-11（D123）：这里原来整块是「工具包（D40）：CRUD 与卸载」——insertTool /
+ *   getTool / listTools / listToolsByIds / getToolBySlug / deleteTool 六条端口在两个
+ *   适配器上的行为（同名取一条、跨 workspace、卸载一律放行……）。
+ *   工具包随动作能力退场，端口删了，这组用例没有对象，整块删。
+ */
 
-  /** 每个用例自己开一份目录：互不干扰，也不必操心清理顺序。 */
-  async function openScratch(prefix: string): Promise<{ store: FileStore; dir: string }> {
-    const dir = await makeTempDir(prefix)
-    const s = await FileStore.open({ dataDir: dir, fsync: false })
-    for (const [id, name] of [
-      [WSA, 'A'],
-      [WSB, 'B'],
-    ] as const) {
-      await s.insertWorkspace({
-        executeTemplate: '',
-        reviewTemplate: '',
-        defaultAgentId: null,
-        locale: 'zh',
-        id,
-        name,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-    }
-    return { store: s, dir }
-  }
-
-  test('插进去能取到，且按 workspace 隔离', async () => {
-    const { store: s, dir } = await openScratch('tool-crud')
-    try {
-      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
-      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
-      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
-
-      // getTool 是跨 workspace 找的（与 getSkill 一致）：判决解析只拿得到 id
-      assert.equal((await s.getTool(toolId('t1')))?.slug, 'deploy')
-      assert.equal((await s.getTool(toolId('t3')))?.workspaceId, WSB)
-      assert.equal(await s.getTool(toolId('nope')), null)
-
-      assert.deepEqual((await s.listTools(WSA)).map((t) => t.slug), ['deploy', 'lint'])
-      assert.deepEqual((await s.listTools(WSB)).map((t) => t.slug), ['deploy'])
-    } finally {
-      await s.close()
-      await cleanup(dir)
-    }
-  })
-
-  test('listToolsByIds 批量取，且与传入顺序无关、空集合不炸', async () => {
-    const { store: s, dir } = await openScratch('tool-byids')
-    try {
-      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
-      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
-      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
-
-      const got = await s.listToolsByIds([toolId('t3'), toolId('t1')])
-      assert.deepEqual(got.map((t) => t.id).sort(), ['t1', 't3'])
-      // 传进来的顺序不影响结果集（调用方按 agent 的 toolIds 给，那是集合语义）
-      assert.deepEqual(
-        (await s.listToolsByIds([toolId('t1'), toolId('t3')])).map((t) => t.id).sort(),
-        ['t1', 't3'],
-      )
-      assert.deepEqual(await s.listToolsByIds([]), [])
-    } finally {
-      await s.close()
-      await cleanup(dir)
-    }
-  })
-
-  test('★ getToolBySlug 命中与未命中，且同名 slug 只在本 workspace 内唯一', async () => {
-    const { store: s, dir } = await openScratch('tool-slug')
-    try {
-      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
-      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
-
-      assert.equal((await s.getToolBySlug(WSA, 'deploy'))?.id, 't1')
-      assert.equal(await s.getToolBySlug(WSA, 'nope'), null)
-      assert.equal(
-        (await s.getToolBySlug(WSB, 'deploy'))?.id,
-        't3',
-        '★ 跨 workspace 取会拿到别人的包——判决里的 <slug>.<动作名> 就指向了没声明过的动作',
-      )
-    } finally {
-      await s.close()
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 卸载：删得掉、删两次第二次返回 false（幂等，不是错误）、别的 workspace 不受影响', async () => {
-    const { store: s, dir } = await openScratch('tool-uninstall')
-    try {
-      await s.insertTool(makeTool({ id: 't1', workspaceId: WSA, slug: 'deploy' }))
-      await s.insertTool(makeTool({ id: 't2', workspaceId: WSA, slug: 'lint' }))
-      await s.insertTool(makeTool({ id: 't3', workspaceId: WSB, slug: 'deploy' }))
-
-      assert.equal(await s.deleteTool(toolId('t1')), true)
-      assert.equal(await s.deleteTool(toolId('t1')), false, '"它已经不在了"不是错误')
-      // 从来没存在过的 id 同样是 false，不抛
-      assert.equal(await s.deleteTool(toolId('ghost')), false)
-
-      assert.equal(await s.getTool(toolId('t1')), null)
-      assert.equal(await s.getToolBySlug(WSA, 'deploy'), null)
-      assert.deepEqual((await s.listTools(WSA)).map((t) => t.slug), ['lint'])
-      assert.deepEqual(
-        await s.listToolsByIds([toolId('t1')]),
-        [],
-        '删完批量取也取不到（不是回落成 null 之类的东西）',
-      )
-
-      // ★ 同名 slug 的那一个在别的 workspace，必须原封不动
-      assert.deepEqual((await s.listTools(WSB)).map((t) => t.slug), ['deploy'])
-      assert.equal((await s.getToolBySlug(WSB, 'deploy'))?.id, 't3')
-    } finally {
-      await s.close()
-      await cleanup(dir)
-    }
-  })
-
-  test('★ 关闭后重开：工具包还在，清单 / 包内文件 / slug 查询都完好', async () => {
-    /**
-     * 文件适配器是**只追加日志**：删除靠日志里的 `del` 记录，重开时按顺序回放
-     * 重建索引。所以这里删一个、留一个，重开后必须看到"剩下的那个在、删掉的那个
-     * 不在"——只验"插入的还在"会漏掉 del 回放这条路。
-     */
-    const dir = await makeTempDir('tool-reopen')
-    try {
-      const a = await FileStore.open({ dataDir: dir, fsync: false })
-      await a.insertWorkspace({
-        executeTemplate: '',
-        reviewTemplate: '',
-        defaultAgentId: null,
-        locale: 'zh',
-        id: WSA,
-        name: 'A',
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      await a.insertTool(makeTool({ id: 'tool-1', workspaceId: WSA, slug: 'deploy' }))
-      await a.insertTool(makeTool({ id: 'tool-gone', workspaceId: WSA, slug: 'obsolete' }))
-      await a.deleteTool(toolId('tool-gone'))
-      await a.close()
-
-      const b = await FileStore.open({ dataDir: dir, fsync: false })
-      const back = await b.getTool(toolId('tool-1'))
-      assert.equal(back?.slug, 'deploy')
-      // 清单与包内文件都是这条记录的一部分，回放时必须原样带回来
-      assert.equal(back?.manifest.actions[0]?.name, 'run')
-      assert.deepEqual(back?.files, { 'index.mjs': '// 空实现\n' })
-      assert.equal((await b.getToolBySlug(WSA, 'deploy'))?.id, 'tool-1')
-      assert.deepEqual((await b.listTools(WSA)).map((t) => t.slug), ['deploy'])
-      await b.close()
-    } finally {
-      await cleanup(dir)
-    }
-  })
-})
 
 describe('★ 分批第 72 批：listRuns 的 order（"最近的一页"）', () => {
   /*
@@ -575,91 +421,19 @@ describe('同一 (subject, agent) 不自竞争（INV-17）', () => {
   })
 })
 
-describe('report 去重键（FR-REPORT-03 —— 平台侧的正确性保证）', () => {
-  test('★ 同一去重键第二次写入返回 false（幂等，不是错误）', async () => {
-    const d = await makeTempDir('dedup')
-    try {
-      const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
+/*
+ * ⚠️ 2026-11（D125）：这里原来有一整组「report 去重键（FR-REPORT-03 —— 平台侧的
+ *   正确性保证）」用例（两条：同去重键第二次写入返回 false、去重索引重开后仍有效）。
+ *   报告摄取整条链退场 ⇒ store 上不再有 report 的写入/去重，整组删掉。
+ */
 
-      const r1 = makeReport({ id: 'rep-1', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
-      const r2 = makeReport({ id: 'rep-2', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k1' })
 
-      assert.equal(await s.insertReport(r1), true)
-      assert.equal(await s.insertReport(r2), false, '重复去重键必须被拒')
-      assert.equal((await s.findReportByDedupKey('k1'))?.id, 'rep-1')
+/*
+ * ⚠️ 2026-11（D123）：这里原来整块是「动作幂等键（FR-ACTION-03）」——同一判决重放时
+ *   同一动作不重复执行（`findActionIdByIdempotency` / `rememberIdempotency`）。
+ *   动作记录退场之后没有要幂等的东西，端口与方法一起删，用例整块删。
+ */
 
-      // 不同去重键正常写入
-      const r3 = makeReport({ id: 'rep-3', workspaceId: WS, kind: 'ci-failure', dedupKey: 'k2' })
-      assert.equal(await s.insertReport(r3), true)
-      await s.close()
-    } finally {
-      await cleanup(d)
-    }
-  })
-
-  test('去重索引在重开后仍然有效', async () => {
-    const d = await makeTempDir('dedup2')
-    try {
-      const a = await FileStore.open({ dataDir: d, fsync: false })
-      await a.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
-      await a.insertReport(
-        makeReport({ id: 'rep-x', workspaceId: WS, kind: 'k', dedupKey: 'dup-key' }),
-      )
-      await a.close()
-
-      const b = await FileStore.open({ dataDir: d, fsync: false })
-      assert.equal((await b.findReportByDedupKey('dup-key'))?.id, 'rep-x')
-      assert.equal(
-        await b.insertReport(
-          makeReport({ id: 'rep-y', workspaceId: WS, kind: 'k', dedupKey: 'dup-key' }),
-        ),
-        false,
-      )
-      await b.close()
-    } finally {
-      await cleanup(d)
-    }
-  })
-})
-
-describe('动作幂等键（FR-ACTION-03）', () => {
-  test('按幂等键可查回已存在的动作', async () => {
-    const d = await makeTempDir('idem')
-    try {
-      const s = await FileStore.open({ dataDir: d, fsync: false })
-      await s.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: WS, name: 'w', createdAt: 1, updatedAt: 1 })
-
-      const action = {
-        id: 'act-1' as ActionId,
-        workspaceId: WS,
-        verdictId: 'v-1' as VerdictId,
-        type: 'comment.create' as const,
-        plane: 'local' as const,
-        params: { body: 'x' },
-        status: 'proposed' as const,
-        idempotencyKey: 'v-1:comment.create:{"body":"x"}',
-        dryRun: false,
-        result: null,
-        error: null,
-        rollbackRef: null,
-        createdAt: 1,
-        finishedAt: null,
-      }
-      await s.insertAction(action)
-
-      assert.equal((await s.findActionByIdempotencyKey(action.idempotencyKey))?.id, 'act-1')
-      assert.equal(await s.findActionByIdempotencyKey('nope'), null)
-
-      // 状态机对动作同样生效
-      assert.equal(await s.transitionAction(action.id, 'proposed', 'auto_approved'), true)
-      assert.equal(await s.transitionAction(action.id, 'proposed', 'executing'), false)
-      await s.close()
-    } finally {
-      await cleanup(d)
-    }
-  })
-})
 
 describe('消息流（FR-BRIDGE-18）', () => {
   test('★ seq 单调递增，since 补齐不依赖时间戳', async () => {
@@ -752,17 +526,11 @@ describe('内容寻址 blob', () => {
     assert.equal(await store.hasBlob(ghost), false)
   })
 
-  test('report 的快照可直接按内容寻址取回', async () => {
-    const enc = new TextEncoder()
-    const text = '快照内容'
-    const ref = await store.putBlob(enc.encode(text))
-    const report = makeReport({ id: 'rep-blob', workspaceId: WS, kind: 'k', dedupKey: 'blob-1' })
-    await store.insertReport({ ...report, blobRef: ref })
-    const back = await store.findReportByDedupKey('blob-1')
-    assert.equal(back?.blobRef, ref)
-    const bytes = await store.getBlob(ref)
-    assert.equal(bytes && Buffer.from(bytes).toString('utf8'), text)
-  })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有一条「report 的快照可直接按内容寻址取回」。
+   *   报告本身退场了，但它守的那件事（`blobRef` 指向的内容能取回）**属于 blob
+   *   层**，与 report 无关——上面那条 `getBlob` / `hasBlob` 的用例仍在守它。
+   */
 })
 
 describe('审计链（FR-AUDIT-01）', () => {
@@ -888,42 +656,10 @@ describe('deleteRun：删掉一条 run 连同它派生的一切', () => {
     await s.insertChatTurn(
       makeChatTurn({ id: 't2', conversationId: 'c1', workspaceId: WS, seq: 2, runId: null }),
     )
-    // verdict + action + artifact
-    const vid = 'v1' as VerdictId
-    await s.insertVerdict({
-      id: vid,
-      workspaceId: WS,
-      runId: rid,
-      subject: { type: 'issue', id: 'i1' as never },
-      status: 'dispatched_to_action',
-      conclusion: 'pass',
-      reasonCode: 'ok' as VerdictRecord['reasonCode'],
-      confidence: 0.9,
-      findings: [],
-      action: { type: 'x.y', params: {} },
-      escalateReason: null,
-      invalidResolution: null,
-      skillRefs: [],
-      modelId: null,
-      promptHash: null,
-      createdAt: 1,
-    })
-    await s.insertAction({
-      id: 'act1' as Action['id'],
-      workspaceId: WS,
-      verdictId: vid,
-      type: 'x.y',
-      plane: 'local',
-      params: {},
-      status: 'executed',
-      idempotencyKey: 'k1',
-      dryRun: false,
-      result: null,
-      error: null,
-      rollbackRef: null,
-      createdAt: 1,
-      finishedAt: 1,
-    })
+    // ⚠️ 2026-11（D125）：这里原来还插一条**判决记录**（`insertVerdict`），用来
+    //    验证"删 run 会连带删判决"。判决退场之后端口上没有判决，`deleteRun` 也
+    //    不再动那份老日志（见实现处说明）——这一行随之删。
+    // ⚠️ 2026-11（D123）：更早之前这里还插过一条**动作记录**（`insertAction`）。
     await s.insertArtifact({
       id: 'art1' as Artifact['id'],
       workspaceId: WS,
@@ -1009,12 +745,15 @@ describe('deleteRun：删掉一条 run 连同它派生的一切', () => {
     assert.equal((await store.getConversation(convId))?.turnCount, 1)
   })
 
-  test('★ 连带删除：verdict、由它触发的 action、artifact 都删掉；审计记录保留', async () => {
+  test('★ 连带删除：artifact 删掉；审计记录保留', async () => {
     const { rid } = await seedFullRun(store, 'r-full2')
     assert.equal(await store.deleteRun(rid), true)
 
-    assert.deepEqual(await store.listVerdictsByRun(rid), [])
-    assert.deepEqual(await store.listActionsByVerdict('v1' as VerdictId), [])
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还有一条 `listVerdictsByRun(rid) === []`——判决
+     *   随 run 一起删。判决退场之后端口上没有它，那份老日志也不再被打开（见
+     *   `deleteRun` 的实现注释：老判决留在磁盘上，但没有读者会遇到悬空引用）。
+     */
     assert.deepEqual(await store.listArtifactsByRun(rid), [])
     // 审计是"发生过什么"的不可变历史：run 删了它也得读得到
     const audits = await store.listAuditsByRun(rid)

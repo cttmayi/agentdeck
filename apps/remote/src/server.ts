@@ -12,9 +12,8 @@ import {
   type LoadedPlugin,
   type PluginCapability,
 } from './plugins.ts'
-import { collectPending } from './pending.ts'
 import { PluginStore } from './plugin-store.ts'
-import { loadCatalogSkills, loadCatalogTools, type CatalogSkillEntry, type CatalogToolEntry } from './catalog.ts'
+import { loadCatalogSkills, type CatalogSkillEntry } from './catalog.ts'
 import { CONFIG_FILE_NAME, summarizeManifest } from '../../../tools/skill-catalog-sync/src/manifest-config.ts'
 import {
   LocalSkillConflict,
@@ -70,13 +69,11 @@ export interface RemoteAccount {
   createdAt: string
 }
 
-/**
- * 公共目录里工具包的默认根目录。
- *
- * 它指向**仓库里那份**（`apps/remote/catalog/tools`），里面有一个可装的简单
- * 范例。部署时用 `toolsDir` 覆盖；指向不存在的目录是合法的（空目录 = 空目录）。
+/*
+ * ⚠️ 2026-11（D123）：这里原来是 `DEFAULT_TOOLS_DIR`（公共目录里工具包的默认根目录，
+ *   指向仓库自带的 `apps/remote/catalog/tools`）。工具包与动作能力一起退场，远端
+ *   不再列工具包，目录、选项与常量一并删。
  */
-const DEFAULT_TOOLS_DIR = fileURLToPath(new URL('../catalog/tools', import.meta.url))
 
 /**
  * 公共目录里**技能**（推荐清单）的默认根目录。
@@ -188,7 +185,6 @@ export interface RemoteOptions {
    * （`hello-tool`）。测试与部署都可以覆盖它；指向不存在的目录是合法的
    * （"目录里什么都没有"是一句真话，界面要有空态）。
    */
-  toolsDir?: string
   /**
    * 公共目录里**技能**的根目录（推荐清单）。
    *
@@ -250,8 +246,6 @@ export class RemoteService {
   readonly #host: string
   readonly #now: () => Date
   #plugins: LoadedPlugin[]
-  /** 公共目录里工具包的根目录（见 `RemoteOptions.toolsDir`）。 */
-  readonly #toolsDir: string
   /** 公共目录里技能的根目录（见 `RemoteOptions.skillsDir`）。 */
   readonly #skillsDir: string
   /** 管理页产物目录；`null` = 不托管页面。 */
@@ -289,7 +283,6 @@ export class RemoteService {
     this.#host = options.host ?? '127.0.0.1'
     this.#now = options.now ?? (() => new Date())
     this.#plugins = options.plugins ?? []
-    this.#toolsDir = resolve(options.toolsDir ?? DEFAULT_TOOLS_DIR)
     this.#skillsDir = resolve(
       options.skillsDir ??
         (this.#dataDir === null
@@ -559,22 +552,8 @@ export class RemoteService {
      *    不是包。D40 里这个位置放整个包，留着它们会让"tools 里的是包"这条
      *    读法在第一条记录上就破功（`report` 这个包根本不存在）。
      */
-    /**
-     * ★ 工具包目录（D40）：**从磁盘上的包读出来**，内容是原样带下去的。
-     *
-     * 一个条目就是**一个包**（一段可以装进来的目录），不是单个动作：
-     * 本地装的是同一个格式（`tool.json` + 入口脚本），判据也是同一份 schema
-     * （`packages/protocol/src/tools.ts`）——所以"远端说 A、daemon 按 B 解析"
-     * 这类不一致在这里没有立足之地。
-     *
-     * ⚠️ 远端**不做安装**：装工具包会在使用者机器上落盘、并让那些脚本真的被
-     *    执行，那件事只能由本机的 daemon 做（`apps/daemon/src/tool-source.ts`）。
-     *    这里只回答"有哪些包、内容是什么"。
-     *
-     * ⚠️ 内容随列表一起给（与 skill 那条路同形）：多一次往返换来的是"页面拿到
-     *    的东西就是装进去的东西"，中间没有"再取一次内容"的机会去漂移。
-     */
-    tools: [] as CatalogToolEntry[],
+    // ⚠️ 2026-11（D123）：这里原来还有 `tools: [] as CatalogToolEntry[]`
+    //   （D40 的工具包目录）。随动作能力退场删掉——远端目录现在只有技能。
   }
 
   // ── 职责 4：第三方查询（转发，不落盘） ───────────────────────────
@@ -744,10 +723,6 @@ export class RemoteService {
       if (req.method === 'GET' && path === '/api/catalog') {
         // ★ 每次都重扫目录：远端目录是可以被人往里加包的，缓存住会让
         //   "我刚放进去的包怎么不出现"变成一个需要重启才能解释的谜。
-        const loaded = await loadCatalogTools(this.#toolsDir)
-        for (const item of loaded.skipped) {
-          console.warn(`[warn] 目录里的包没有列出去：${item.path} —— ${item.reason}`)
-        }
         // ★ 技能也**每次重扫**（与工具包同一条理由）：远端目录是可以被维护者
         //   往里放东西的，缓存住会让"我刚同步完怎么不出现"变成需要重启才能解释的谜。
         //
@@ -776,7 +751,6 @@ export class RemoteService {
         }
         send(200, {
           ...this.catalog,
-          tools: loaded.tools,
           skills: [
             ...loadedSkills.skills.map((e) => ({ ...e, source: 'synced' as const })),
             ...localSkills.map((e) => ({ ...e, source: 'local' as const })),
@@ -989,24 +963,17 @@ export class RemoteService {
         }
       }
 
-      // ── 待处理项（FR-REG-06/07/11）──
-      //
-      // 页面定期来问"这台机器有没有要处理的东西"。远端**按需去问第三方**，
-      // 答完即弃——**绝不暂存**（FR-REG-07）。正因为不留存，才不需要 TTL、
-      // 不需要清理任务、也不需要"谁的队列"这个概念。
-      //
-      // 一个第三方失败不影响其他的（FR-REG-11）：跳过并把原因放进 warnings。
-      // warnings 必须**返回给调用方**而不只是写日志——页面要据此发通知，
-      // 只写日志等于静默丢弃。
-      if (path === '/api/pending' && req.method === 'GET') {
-        const result = await collectPending({
-          plugins: await this.activePlugins('third-party'),
-          store: this.#pluginStore,
-          account: { id: account.id, email: account.email, displayName: account.displayName },
-        })
-        send(200, result)
-        return
-      }
+      /*
+       * ⚠️ 2026-11（D125）：这里是原来的 `GET /api/pending`——页面定期来问"这台机器
+       *   有没有要处理的东西"，远端按需去问第三方插件、答完即弃（FR-REG-06/07/11）。
+       *
+       *   **报告摄取整条链退场** ⇒ 取回来的东西本来只能推给本机 daemon 的
+       *   `/api/reports` 起审核 run，那条路没了 ⇒ 这个口子与 `pending.ts`
+       *   （`collectPending` / `PendingItem`）一起删。
+       *
+       *   ⚠️ FR-REG-11 那条纪律仍然成立（一个第三方失败不该影响其他的，原因要
+       *   **返回给调用方**而不只是写日志）：它在 `/api/third-party/query` 上还在。
+       */
 
       if (path === '/api/third-party/query' && req.method === 'POST') {
         const body = (await this.#readJson(req)) as {

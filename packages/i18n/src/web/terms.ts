@@ -37,31 +37,17 @@ import type { TextCatalog } from '../text.ts'
  *    `term.stage.*`（任务阶段短标签）。
  */
 export const termsText = {
-  // ── 判决结论 ──
-  'term.conclusion.pass': { zh: '通过', en: 'Pass' },
-  'term.conclusion.fail': { zh: '未通过', en: 'Fail' },
-  'term.conclusion.needs_human': { zh: '需人工判断', en: 'Needs a human' },
-
-  // ── 理由码（16 个，与协议里的 ReasonCode 一一对应）──
-  'term.reasonCode.meets_criteria': { zh: '符合标准', en: 'Meets the criteria' },
-  'term.reasonCode.missing_tests': { zh: '缺少测试', en: 'Missing tests' },
-  'term.reasonCode.failing_tests': { zh: '测试未通过', en: 'Failing tests' },
-  'term.reasonCode.style_violation': { zh: '风格违规', en: 'Style violation' },
-  'term.reasonCode.logic_error': { zh: '逻辑错误', en: 'Logic error' },
-  'term.reasonCode.type_error': { zh: '类型错误', en: 'Type error' },
-  'term.reasonCode.broken_reference': { zh: '引用失效', en: 'Broken reference' },
-  'term.reasonCode.known_vulnerability': { zh: '已知漏洞', en: 'Known vulnerability' },
-  'term.reasonCode.secret_exposed': { zh: '密钥泄露', en: 'Secret exposed' },
-  'term.reasonCode.unsafe_permission': { zh: '权限不安全', en: 'Unsafe permission' },
-  'term.reasonCode.scope_creep': { zh: '范围蔓延', en: 'Scope creep' },
-  'term.reasonCode.out_of_scope': { zh: '超出范围', en: 'Out of scope' },
-  'term.reasonCode.insufficient_context': { zh: '依据不足', en: 'Insufficient context' },
-  'term.reasonCode.conflicting_criteria': { zh: '标准互相冲突', en: 'Conflicting criteria' },
-  'term.reasonCode.criteria_not_applicable': { zh: '标准不适用', en: 'Criteria not applicable' },
-  'term.reasonCode.internal_error': { zh: '内部错误', en: 'Internal error' },
-  // ★ 人工裁决（D46）：理由在自由文本里，不在这套分类里。标签要说清这一点，
-  //   否则读的人会去上面那堆码里找"它到底属于哪一类"。
-  'term.reasonCode.human_decision': { zh: '人工裁决', en: 'Decided by hand' },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是两族词条——`term.conclusion.*`（判决结论：
+   *   通过 / 未通过 / 需人工判断）与 `term.reasonCode.*`（16 个理由码的中文名，
+   *   与协议里的 `ReasonCode` 一一对应）。
+   *
+   *   **判决随审核 run 一起退场** ⇒ 两族都没有使用者，整块删。
+   *
+   *   ⚠️ 那条"码值要闭合、不能是自由字符串"的纪律（理由码 19 个成员、新增类别
+   *   要改协议并升版本）**没有过期**：它说的是"同一含义不该漂移出十种写法，否则
+   *   无法统计与分组"。将来任何要出结构化结论的地方都照它做。
+   */
 
   // ── 动作 ──
   //
@@ -86,21 +72,22 @@ export const termsText = {
   // ⚠️ 这几条是**表格单元格里的短标签**，"已完成执行 · 待审查"那种长句是列头
   //    （`tasks.col.*`）。英文也要短到放得下（`pipeline.test.ts` 里有长度闸门）。
   'term.stage.executing': { zh: '执行中', en: 'Running' },
-  'term.stage.awaiting_review': { zh: '待审查', en: 'To review' },
-  // ── 动作状态（`ActionStatus`；值不翻译，这里只是它的标签）──
-  'term.actionStatus.proposed': { zh: '已提出', en: 'Proposed' },
-  'term.actionStatus.auto_approved': { zh: '已自动批准', en: 'Auto-approved' },
-  'term.actionStatus.awaiting_approval': { zh: '等待批准', en: 'Awaiting approval' },
-  'term.actionStatus.executing': { zh: '执行中', en: 'Executing' },
-  'term.actionStatus.executed': { zh: '已完成', en: 'Done' },
-  'term.actionStatus.failed': { zh: '失败', en: 'Failed' },
-  'term.actionStatus.skipped': { zh: '已跳过（重复触发）', en: 'Skipped (duplicate)' },
-  'term.actionStatus.rolled_back': { zh: '已回滚', en: 'Rolled back' },
-
-  'term.stage.action_running': { zh: '行动中', en: 'Acting' },
-  'term.stage.action_failed': { zh: '行动失败', en: 'Action failed' },
-  'term.stage.needs_human': { zh: '待人工', en: 'Needs you' },
-  'term.stage.reviewed': { zh: '已审查', en: 'Reviewed' },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来还有 `term.stage.awaiting_review`（待审查）与
+   *   `term.stage.needs_human`（待人工）——两档都是**审核 run 产生的**。
+   *   审核 run 与判决一起退场 ⇒ 那两档没有产生条件，词条删。
+   *
+   *   ⚠️ 代价：看板上**不再有"这件事还等着你"的位置**。要人把关就由编排再派一条
+   *   普通 run（它在流水线上是另一条执行 run，不是新的一档）。
+   */
+  'term.stage.done': { zh: '已完成', en: 'Done' },
+  'term.stage.failed': { zh: '失败', en: 'Failed' },
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**动作状态**的七条标签
+   *   （`term.actionStatus.proposed` … `term.actionStatus.rolled_back`，以及
+   *   `term.stage.action_running` / `action_failed` 两档阶段）。
+   *   `ActionStatus` 枚举与那两档阶段都随动作能力退场删掉 ⇒ 词条一起删。
+   */
   // ★ D47：放弃。措辞用「已放弃」而不是「已取消」——`cancelled` 是**契约值**
   //   （它同时是 run 的状态之一），而这一档说的是"你决定不管它了"。
   'term.stage.abandoned': { zh: '已放弃', en: 'Dropped' },

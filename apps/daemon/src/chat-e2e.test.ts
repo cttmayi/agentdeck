@@ -113,8 +113,8 @@ before(async () => {
     onInfo: () => {},
   })
   const agents = await json('/api/agents')
-  const list = (agents.body as { agents: Array<{ id: string; role: string }> }).agents
-  agentId = list.find((a) => a.role === 'executor')!.id
+  const list = (agents.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
+  agentId = list.find((a) => a.builtin !== true)!.id
   // ★ 给这个执行者写一段"指令"：任务那条路上它由模版的 {{instructions}} 送出去，
   //   而聊天那条路上没有模版——这条用例要把"它确实不在聊天里出现"也钉住。
   const patched = await json(`/api/agents/${agentId}`, {
@@ -250,13 +250,20 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     assert.equal((res.body as { code?: string }).code, 'skill_not_found')
   })
 
-  test('★ 2026-11 聊天放行：智能体生成者（agent-maker）能开对话，审核者仍被拒（daemon 那半边）', async () => {
-    // 设计定稿 §3.1：生成者是唯一能聊天的内置角色——它的全部工作就是聊天。
-    // daemon 门（POST /api/conversations）与 web 选择器（executorChoices）各钉一处，
-    // 这半边钉 daemon；另外半边在 apps/web/src/lib/chat.test.ts。
+  test('★ 2026-11 聊天放行：智能体生成者（agent-maker）能开对话，其它内置岗位仍被拒（daemon 那半边）', async () => {
+    /*
+     * 设计定稿 §3.1：生成者是唯一能聊天的内置岗位——它的全部工作就是聊天。
+     * daemon 门（POST /api/conversations）与 web 选择器各钉一处，这半边钉 daemon。
+     *
+     * ⚠️ 2026-11（S4，D127）：「审核者进不来」这条判据换成「**其它内置岗位**进不来」
+     *   （起草者 / 记忆整理 / 沉淀审核者）。用户建的 agent 现在一律能聊天——那正是
+     *   角色退场的含义（平台不再替使用者判断"这个人该不该聊天"）。
+     */
     const list = await json('/api/agents')
-    const agents = (list.body as { agents: Array<{ id: string; role: string }> }).agents
-    const maker = agents.find((a) => a.role === 'agent-maker')
+    const agents = (list.body as {
+      agents: Array<{ id: string; builtin?: boolean; builtinKind?: string }>
+    }).agents
+    const maker = agents.find((a) => a.builtinKind === 'agent-maker')
     assert.ok(maker !== undefined, '启动对账要建出智能体生成者（内置）')
     const made = await postJson('/api/conversations', {
       agentId: maker!.id,
@@ -265,13 +272,17 @@ describe('D49 端到端：聊天投递的就是那句话', () => {
     assert.equal(made.status, 201, `生成者建对话应成功：${JSON.stringify(made.body)}`)
     await waitForTerminal((made.body as { turn: { runId: string } }).turn.runId)
 
-    // 审核者仍然进不来（聊天不产出判决）
-    const reviewer = agents.find((a) => a.role === 'reviewer')
-    if (reviewer) {
-      const denied = await postJson('/api/conversations', { agentId: reviewer.id, text: '你好' })
-      assert.equal(denied.status, 400)
-      assert.equal((denied.body as { code?: string }).code, 'agent_role_mismatch')
-    }
+    // 其它内置岗位仍然进不来（它们只干平台自己那一件活）
+    const otherBuiltin = agents.find(
+      (a) => a.builtin === true && a.builtinKind !== undefined && a.builtinKind !== 'agent-maker',
+    )
+    assert.ok(otherBuiltin, '启动对账要建出别的内置岗位（起草者 / 记忆整理）')
+    const denied = await postJson('/api/conversations', {
+      agentId: otherBuiltin!.id,
+      text: '你好',
+    })
+    assert.equal(denied.status, 400)
+    assert.equal((denied.body as { code?: string }).code, 'agent_builtin_no_chat')
   })
 
   test('★★ 对照组：任务那条路**照旧套模版**（同一台 daemon、同一个执行者）', async () => {

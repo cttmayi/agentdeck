@@ -1,10 +1,5 @@
 import type {
-  Action,
-  ActionId,
-  ActionStatus,
   Agent,
-  AgentGroup,
-  AgentGroupId,
   AgentId,
   Artifact,
   AuditRecord,
@@ -19,7 +14,6 @@ import type {
   Issue,
   IssueId,
   MemoryEntry,
-  Report,
   Run,
   RunId,
   RunMessage,
@@ -27,11 +21,6 @@ import type {
   Skill,
   SkillId,
   SubjectRef,
-  Tool,
-  ToolId,
-  VerdictId,
-  VerdictRecord,
-  VerdictStatus,
   Workspace,
   WorkspaceId,
 } from '@agentdeck/protocol'
@@ -142,9 +131,9 @@ export interface RunQuery extends PageQuery {
   order?: 'asc' | 'desc'
 }
 
-export interface ReportQuery extends PageQuery {
-  workspaceId: WorkspaceId
-}
+/*
+ * ⚠️ 2026-11（D125）：`ReportQuery` 随报告摄取链退场删掉（四个 report 方法一起）。
+ */
 
 export interface IssueQuery extends PageQuery {
   workspaceId: WorkspaceId
@@ -238,38 +227,18 @@ export interface Store {
   /** 删一条独有技能。真的删到了返回 true；本来就没有返回 false（**不是错误**）。 */
   removeExclusiveSkill(agentId: AgentId, slug: string): Promise<boolean>
 
-  // ── AgentGroup（智能体组，D70 增量添加）──
-
-  getGroup(id: AgentGroupId): Promise<AgentGroup | null>
-  listGroups(workspaceId: WorkspaceId): Promise<AgentGroup[]>
-  /**
-   * 某个 agent 属于哪些组。
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是**智能体组**那一组端口（`getGroup` / `listGroups` /
+   *   `listGroupsByAgent` / `insertGroup` / `updateGroup` / `deleteGroup`）。
    *
-   * 用途：智能体页删 agent / 改角色前**反查**——有组引用它时要被拒并列出组
-   * （与 skill 卸载被拒同一个"不得静默丢弃"的口径）。组页"这个审核者在为谁
-   * 服务"也用它。
+   *   **组退场**（它存在的全部理由是回答"谁审、判完允许动什么"，而审核 run 与动作
+   *   能力都退场了）⇒ 端口上不再有组。磁盘 / SQLite 里那一节老数据原样留着，
+   *   没有代码读它。
+   *
+   *   ⚠️ `updateGroup` 那条注释里有一句话值得留：**组是"当前配置"（可编辑），不是
+   *   append-only 的历史实体**——所以它有 update，而 Agent 只有 insert。判断一个
+   *   实体该不该可改，看的是"它是配置还是发生过的事"。
    */
-  listGroupsByAgent(agentId: AgentId): Promise<AgentGroup[]>
-  insertGroup(group: AgentGroup): Promise<void>
-  /**
-   * 更新一条组（按 id 覆盖整条记录）。
-   *
-   * @returns 真的更新到了返回 true；不存在返回 false（**不是错误**——调用方
-   *          据此区分"被删了"与"更新失败"）。
-   *
-   * ⚠️ 组是**当前配置**（可编辑），不是 append-only 的历史实体——所以有 update，
-   *    与 Agent（append-only、只 insert）不同。形态校验（`checkGroupShape`）由
-   *    调用方在写入前做，存储层不猜业务。
-   */
-  updateGroup(group: AgentGroup): Promise<boolean>
-  /**
-   * 删除一条组。语义与 `deleteSkill` 相同：删到返回 true、本来没有返回 false。
-   *
-   * ⚠️ 调用方负责**引用检查**（还有 run 引用它吗——其实 run 只是记录了
-   *    `groupId`，删组不删 run；这条检查目前没有生产调用点，与 INV-14~16 同款
-   *    的"边界先立着"）。
-   */
-  deleteGroup(id: AgentGroupId): Promise<boolean>
 
   // ── Agent memory（分批第 240 批）──
 
@@ -312,20 +281,11 @@ export interface Store {
    */
   deleteSkill(id: SkillId): Promise<boolean>
 
-  // ── Tool（工具包 / 组，D40）──
-
-  getTool(id: ToolId): Promise<Tool | null>
-  listTools(workspaceId: WorkspaceId): Promise<Tool[]>
-  /** 按 id 批量取：一次要执行的动作要解析出它属于哪个包（组）。 */
-  listToolsByIds(ids: readonly ToolId[]): Promise<Tool[]>
-  /** 按 slug 取（同一 workspace 内唯一）——判决里写的是 `<slug>.<动作名>`。 */
-  getToolBySlug(workspaceId: WorkspaceId, slug: string): Promise<Tool | null>
-  insertTool(tool: Tool): Promise<void>
-  /**
-   * 卸载一个工具包。语义与 `deleteSkill` 逐条相同：删到返回 true、本来没有
-   * 返回 false，**引用检查（还有哪些 agent 挂着它）由调用方做**。
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**工具包**那一组端口（getTool / listTools /
+   *   listToolsByIds / getToolBySlug / insertTool / deleteTool）。工具包与动作能力
+   *   一起退场——daemon 不再装包、导出不再带包、没有任何调用方，整组删掉。
    */
-  deleteTool(id: ToolId): Promise<boolean>
 
   // ── Issue 与 Comment ──
 
@@ -345,8 +305,9 @@ export interface Store {
    * 删掉一条任务（issue）**连同挂它名下的一切**。
    *
    * 连带范围（使用者确认过："删任务 = 连带删除全部执行记录"）：
-   *   ① 该 issue 上所有 run —— 逐个走 `deleteRun` 的连带（消息流 / verdicts /
-   *      actions / artifacts / 引用那些 run 的对话轮次；审计与 blob 不删）；
+   *   ① 该 issue 上所有 run —— 逐个走 `deleteRun` 的连带（消息流 / artifacts /
+   *      引用那些 run 的对话轮次；审计与 blob 不删；⚠️ 老数据里的 verdicts 也
+   *      一并清掉，见 `deleteRun`）；
    *   ② 该 issue 的全部评论；
    *   ③ issue 本体。
    *
@@ -390,9 +351,13 @@ export interface Store {
   deleteConversation(id: ConversationId): Promise<boolean>
 
   /**
-   * 删掉一条 run **连同它派生的一切**：消息流、verdicts、由那些 verdict 触发的
-   * actions、artifacts，以及**引用它的对话轮次**（那一轮的内容就是这条 run 的
-   * messages——run 没了，轮次只剩"我说了句什么"的半句话，留着是断的）。
+   * 删掉一条 run **连同它派生的一切**：消息流、artifacts，以及**引用它的对话
+   * 轮次**（那一轮的内容就是这条 run 的 messages——run 没了，轮次只剩"我说了句
+   * 什么"的半句话，留着是断的）。
+   *
+   * ⚠️ 2026-11（D125）：判决退场之后没有"由判决触发的动作"可连带；但**老数据**
+   *    里还躺着那条 run 的 verdict 记录，删除时一并清掉（见两个适配器的实现）——
+   *    留着它等于留一条指向已删 run 的判决。
    *
    * ⚠️ **审计记录与内容寻址 blob 不删**：审计是"发生过什么"的不可变历史
    *    （FR-AUDIT-01），blob 被审计/报告引用——删掉它们等于把可追溯性挖掉一块。
@@ -405,30 +370,14 @@ export interface Store {
    */
   deleteRun(id: RunId): Promise<boolean>
 
-  // ── Report ──
-
-  /** 按去重键查找。这是平台侧的**正确性保证**（FR-REPORT-03）。 */
-  /**
-   * 列出一个工作区的报告。
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是 report 的四个方法——`listReports` /
+   *   `findReportByDedupKey` / `getReport` / `insertReport`（`insertReport` 返回
+   *   false 表示"去重键已存在"，那是并发下的幂等语义）。
    *
-   * ══════════════════════════════════════════════════════════════════
-   * 这个方法是为了 FR-STOR-05（导出与导入）才加的
-   * ══════════════════════════════════════════════════════════════════
-   *
-   * 在此之前 report **只能按去重键或 id 单独取**，没有任何列举方式。
-   * 于是"把数据完整导出来"这件事**结构上做不到**：其他实体都能顺着
-   * 关系走（runs → verdicts → actions、issues → comments），
-   * 唯独 report 是一张没有入口的表。
-   *
-   * 这正是"端口缺一个方法"比"某个功能没做"更隐蔽的地方——它不会报错，
-   * 只会让某个以后才写的功能**默默地做不完整**。
+   *   **报告摄取整条链退场**（见 `entities.ts` 那段说明）⇒ 端口上不再有 report。
+   *   磁盘/SQLite 里那一段老数据原样留着，没有代码读它。
    */
-  listReports(q: ReportQuery): Promise<Page<Report>>
-
-  findReportByDedupKey(dedupKey: string): Promise<Report | null>
-  getReport(id: Report['id']): Promise<Report | null>
-  /** 返回 false 表示去重键已存在（并发下的幂等语义）。 */
-  insertReport(report: Report): Promise<boolean>
 
   // ── Run ──
 
@@ -468,31 +417,25 @@ export interface Store {
   /** 该 run 已产生到第几号消息——页面据此决定补齐起点。 */
   lastRunMessageSeq(runId: RunId): Promise<number>
 
-  // ── Verdict ──
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是判决的四个方法——`getVerdict` /
+   *   `listVerdictsByRun` / `insertVerdict` / `transitionVerdict`（后者是带前态
+   *   期望的 CAS，前态不匹配就返回 false 而不是抛）。
+   *
+   *   审核 run 与判决一起退场 ⇒ 端口上不再有判决。**磁盘/SQLite 里那一段老数据
+   *   原样留着**，没有代码读它。
+   *
+   *   ⚠️ CAS 那条纪律留着：**状态迁移必须带前态期望**，"先读出来再判断"在并发下
+   *   会漏（两个请求同时读到旧态、同时写）。`transitionRun` 还在用它。
+   */
 
-  getVerdict(id: VerdictId): Promise<VerdictRecord | null>
-  listVerdictsByRun(runId: RunId): Promise<VerdictRecord[]>
-  insertVerdict(verdict: VerdictRecord): Promise<void>
-  transitionVerdict(
-    id: VerdictId,
-    expect: VerdictStatus,
-    next: VerdictStatus,
-    patch?: Partial<Pick<VerdictRecord, 'invalidResolution'>>,
-  ): Promise<boolean>
-
-  // ── Action ──
-
-  getAction(id: ActionId): Promise<Action | null>
-  listActionsByVerdict(verdictId: VerdictId): Promise<Action[]>
-  /** 按幂等键查找——重复触发要落 `skipped` 而不是重复执行（FR-ACTION-03）。 */
-  findActionByIdempotencyKey(key: string): Promise<Action | null>
-  insertAction(action: Action): Promise<void>
-  transitionAction(
-    id: ActionId,
-    expect: ActionStatus,
-    next: ActionStatus,
-    patch?: ActionPatch,
-  ): Promise<boolean>
+  /*
+   * ⚠️ 2026-11（D123）：这里原来是**动作记录**那一组端口（getAction /
+   *   listActionsByVerdict / findActionByIdempotencyKey / insertAction /
+   *   transitionAction）。动作能力退场后判决不再触发动作，这些记录**没有任何
+   *   生产者**——`listActionsByVerdict` 永远返回空。端口与两个 store 的实现、
+   *   以及调用它们的地方（导出的 `actions` 段、任务页的动作时间线）一起删。
+   */
 
   // ── Artifact ──
 
@@ -539,13 +482,10 @@ export interface RunPatch {
   attempt?: number
 }
 
-export interface ActionPatch {
-  status?: ActionStatus
-  result?: Record<string, unknown> | null
-  error?: string | null
-  rollbackRef?: string | null
-  finishedAt?: number | null
-}
+/*
+ * ⚠️ 2026-11（D123）：这里原来是 `ActionPatch`（`transitionAction` 的部分更新形状）。
+ *   随动作记录端口一起删。
+ */
 
 /** 打开存储的工厂签名。具体实现由适配器包提供。 */
 export type StoreOpener = (options: { dataDir: string }) => Promise<Store>

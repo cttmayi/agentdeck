@@ -1,88 +1,22 @@
 import { type Agent, type Skill, type SkillId } from '@agentdeck/protocol'
 
-/**
- * report 的审核路由（D28）。
- *
- * ══════════════════════════════════════════════════════════════════
- * 从"按 kind 分派"改成"审核者是一个小组"
- * ══════════════════════════════════════════════════════════════════
- *
- * 原来这里按 `kindPatterns` 把报告分派给不同的审核 agent，还有一层
- * `isFallbackReviewer` 兜底。那套配置要求使用者在建 agent 时就想清楚
- * "哪些 kind 归谁"，而绝大多数用法里审核者只有一个——为一个不常用的
- * 能力付了四个字段的学习成本。
- *
- * 现在：**`role: 'reviewer'` 的 agent 都审每一份报告**。
- *
- * 多个审核者 ⇒ 各起一个 review run、产生多个 verdict（FR-AGENT-21 的
- * 多视角审核）。这不是"顺带支持"，而是这个模型**天然**给出的行为：
- * 既然没有分派规则，那"谁审"的答案就只能是"所有审的人"。
+/*
+ * ⚠️ 2026-11（D125）：`hasReviewIdentity`（"这个审核者有没有判断依据"的三态粗筛）
+ *   随 `routeReportToReviewers` 一起删——它唯一的调用方就是报告路由。报告摄取退场之后
+ *   平台里不再有"把一份报告交给谁审"这件事。
  */
 
-export interface ReviewRouting {
-  /** 匹配到的审核 agent。**可能多个** ⇒ 并行审核（FR-AGENT-21）。 */
-  reviewers: Agent[]
-  /**
-   * 一个审核者都没有。
-   *
-   * ⚠️ 这时调用方必须**存下 report 并发出通知**，不得静默丢弃（FR-AGENT-22）——
-   * 静默丢弃会让第三方以为处理过了，而实际上什么都没发生。
-   */
-  unmatched: boolean
-}
-
-/**
- * ★★ 一个审核者**有没有判断依据**（粗筛用的那一版）。
+/*
+ * ⚠️ 2026-11（D125）：这里原来是 `routeReportToReviewers`——"`role: 'reviewer'` 的
+ *   agent 都审每一份报告"（D28 把按 kind 分派换成这一条，多审核者 ⇒ 各起一个
+ *   review run）。**报告摄取整条链退场** ⇒ 没有"一份报告要路由给谁"这件事了，
+ *   函数与 `ReviewRouting` 类型一起删。
  *
- * ══════════════════════════════════════════════════════════════════
- * 2026-09：判据跟着"标准并进「指令」"一起改（这里踩过一次真实的坑）
- * ══════════════════════════════════════════════════════════════════
- *
- * 它原来写的是 `a.reviewStandard !== null || a.skillIds.length > 0`——只看那个
- * **老字段**。而 2026-09 之后判断依据并进了 ② 身份（= `Agent.instructions`），
- * 新审核者身上**根本没有** `reviewStandard`：于是
- *
- *   · `createReviewRun` 痛快地放行（它按"身份非空"判）；
- *   · 而这里把它们**全部筛掉** ⇒ `unmatched` ⇒ 报告只落库 + 一条通知，
- *     一条 review run 都不起。
- *
- * 症状是"第三方报告再也没人审了"，而订阅方看到的是"已收到"——一个判据留在旧字段上，
- * 坏掉的是**另一条链路**。抓它的是 `review-e2e` 那条"报告落库、路由到兜底审核者"
- * （它依赖播种的审核者，而一次"保存时并进「指令」"的改动把那条记录的
- * `reviewStandard` 清成了 `null`）。
- *
- * ⚠️ 现在收三种，缺一种都是把某一代数据打回"没人审"：
- *   ① **`instructions` 非空** —— 新形态（依据并进「指令」）；
- *   ② **`reviewStandard` 非空** —— D37 那一代（内联标准）；
- *   ③ **挂了 skill** —— 更早的形态（正文住在 skill 里）。
- *
- * ⚠️ 它仍然是**粗筛**：域层手里没有 skill 的正文，"依据到底有没有内容"是 daemon 侧
- *    `reviewerIdentity` 的判断（那里会拒绝没有身份的派发）。两处判据必须**同向**
- *    （这里只许更宽，不许更窄）——反过来就会出现"能派却派不到"这种没有任何提示的
- *    停摆。
+ *   ⚠️ 它上面那条教训值得留着：判据曾经只看老字段 `reviewStandard`，而 2026-09
+ *   之后判断依据并进了 `instructions` ⇒ 新审核者全被筛掉 ⇒ 报告只落库、一条 review
+ *   run 都不起，症状是"第三方报告再也没人审了"。**一个判据留在旧字段上，坏掉的
+ *   会是另一条链路**。
  */
-export function hasReviewIdentity(agent: Agent): boolean {
-  if ((agent.instructions ?? '').trim() !== '') return true
-  if ((agent.reviewStandard?.body ?? '').trim() !== '') return true
-  return agent.skillIds.length > 0
-}
-
-/**
- * 路由一份报告。
- *
- * ⚠️ 只看 `role`，**不看** `kind`。`kind` 仍然是报告自身的一个属性
- * （它决定审核者看到的是什么类型的材料），但它不再是**分派依据**。
- *
- * ⚠️ 顺带过滤"没有判断依据的审核者"：没有依据的审核审不出有结论的东西，把它当
- *    审核者只会起一条注定没意义的 run。判据见 `hasReviewIdentity`（它跟着
- *    2026-09 的"标准并进「指令」"改过一轮——那一次的症状是"报告全部 unmatched"）。
- */
-export function routeReportToReviewers(agents: readonly Agent[]): ReviewRouting {
-  const reviewers = agents.filter(
-    (a) => a.role === 'reviewer' && hasReviewIdentity(a),
-  )
-  return { reviewers, unmatched: reviewers.length === 0 }
-}
 
 /**
  * 某个 agent 该用哪些 skill。

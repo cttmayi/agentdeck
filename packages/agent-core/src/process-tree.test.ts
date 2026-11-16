@@ -146,3 +146,95 @@ describe('★ 分批第 43 批：via=cmd 时 spawn 必须收到 windowsVerbatimA
     )
   })
 })
+
+/**
+ * ★★ 2026-11 真机 P0（D120）：**切行只认 `\n`，U+2028/U+2029 是普通字符**。
+ *
+ * 现场：9 条 run 全死在 `thread/resume（id=2）超时（60000ms）`，run 日志里 119 条
+ * 「JSON-RPC 帧不可解析」。根因是这里原来用 `readline.createInterface`——Node 的
+ * readline 把 ECMAScript 的 LineTerminator（含 U+2028 / U+2029）也当行结束，
+ * 于是一帧 1.6MB 的 NDJSON 被切成 119 段（实测切点全落在 `\xe2\x80\xa8` 上）。
+ *
+ * 判据：**一行 JSON 里带 U+2028/U+2029，出来必须还是一行、还能 parse**。
+ * 不测的话，这处会"看起来在逐行读"，而 agent 读进来的 PDF/网页文本一旦带这类字符
+ * （很常见），协议层就整帧崩掉——而且崩的姿势是"超时"，看不出跟切行有关。
+ */
+describe('★★ D120：U+2028/U+2029 不许被当成换行（真机 9 条 run 死在这里）', () => {
+  test('★★ 一行 JSON 内含 U+2028/U+2029 ⇒ 仍是**一行**且能 JSON.parse', async () => {
+    const dir = await makeTempDir()
+    try {
+      // 与真机同形：码点直接进 JSON 字符串（真 codex 就是这么发的，不做转义）
+      const frame = JSON.stringify({ id: 2, result: { text: 'A practical \u2028guide to \u2029building agents' } })
+      const lines: string[] = []
+      const handle = spawnProcessTree({
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write(process.env.FRAME + "\\n")'],
+        cwd: dir,
+        env: { ...process.env, FRAME: frame },
+        onStdoutLine: (line) => lines.push(line),
+      })
+      await handle.exited
+      assert.equal(lines.length, 1, '两个 Unicode 行分隔符不许各成一行')
+      assert.deepEqual(JSON.parse(lines[0]!), JSON.parse(frame), '整帧原样到达')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('★ CRLF 仍然是一行（Windows 上 CLI 一直是 CRLF）', async () => {
+    const dir = await makeTempDir()
+    try {
+      const lines: string[] = []
+      const handle = spawnProcessTree({
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write("甲\\r\\n乙\\r\\n")'],
+        cwd: dir,
+        env: process.env,
+        onStdoutLine: (line) => lines.push(line),
+      })
+      await handle.exited
+      assert.deepEqual(lines, ['甲', '乙'], 'CRLF 的行尾 \\r 要剥掉，否则 JSON.parse 会多一个字符')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('★ 收尾没有换行的最后一行也要交出去（否则日志尾行静默消失）', async () => {
+    const dir = await makeTempDir()
+    try {
+      const lines: string[] = []
+      const handle = spawnProcessTree({
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write("完整一行\\n没有换行的尾巴")'],
+        cwd: dir,
+        env: process.env,
+        onStdoutLine: (line) => lines.push(line),
+      })
+      await handle.exited
+      assert.deepEqual(lines, ['完整一行', '没有换行的尾巴'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('★ 多字节字符卡在块边界也不会被劈开（按字符串收，不按 Buffer 拼）', async () => {
+    const dir = await makeTempDir()
+    try {
+      const lines: string[] = []
+      // 每 3 字节写一次：汉字/U+2028（都是 3 字节 UTF-8）必然跨块
+      const script = 'const s = "汉字\\u2028分隔\\u2029再来\\n"; for (let i = 0; i < s.length; i++) process.stdout.write(s[i]);'
+      const handle = spawnProcessTree({
+        command: process.execPath,
+        args: ['-e', script],
+        cwd: dir,
+        env: process.env,
+        onStdoutLine: (line) => lines.push(line),
+      })
+      await handle.exited
+      assert.equal(lines.length, 1)
+      assert.equal(lines[0], '汉字\u2028分隔\u2029再来')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

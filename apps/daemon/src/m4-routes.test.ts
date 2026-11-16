@@ -105,72 +105,20 @@ describe('M4 只读接口', () => {
   })
 })
 
-describe('★ 报告投递的边界校验（一个能被合法调用触发的 500 是缺陷）', () => {
-  /** 提交一个报告批次，返回状态码与响应体。 */
-  async function post(url: string, body: unknown) {
-    const res = await fetch(`${url}/api/reports`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
-  }
+/*
+ * ⚠️ 2026-11（D125）：这里原来有整整一组「★ 报告投递的边界校验（一个能被合法调用
+ *   触发的 500 是缺陷）」用例——省略 `body` 的条目要被接受、缺必填字段要 400 并指出
+ *   **第几条哪个字段**、空数组要 400、`items` 不是对象也要 400 不许 500。
+ *
+ *   报告投递整条链退场（`POST /api/reports` 删了）⇒ 这些用例失去对象，整组删。
+ *
+ *   ⚠️ 它们守的那条**纪律仍然成立**，而且是最值钱的一条：**类型不是运行时校验**。
+ *   一次真实事故是 `body` 在类型上必填、而 MCP 的 schema 标成可选，于是
+ *   `undefined` 一路走到 `createHash().update()` 才炸成 HTTP 500 + 内部错误原文。
+ *   任何接受外层 JSON 的路由（现在还在的那些）都该照它做逐条校验 + 报到"第几条、
+ *   哪个字段"。
+ */
 
-  test('★ 省略 body 的条目必须被接受 —— MCP 的工具 schema 说它可选', async () => {
-    // 这条曾经是 HTTP 500 + 一句 Node 内部的 TypeError：
-    // `body` 在类型声明上是必填的，但**类型不是运行时校验**，
-    // `undefined` 一路走到 `createHash().update()` 才炸。
-    // 而 MCP 那边的工具 schema 把 body 标成可选——按文档写的调用必然踩到。
-    await withDaemon(async (url) => {
-      const res = await post(url, {
-        source: 'cli',
-        items: [{ externalId: 'x1', kind: 'ci-failure', title: '只有标题' }],
-      })
-      assert.equal(res.status, 202, `应当受理，实得 ${res.status}：${JSON.stringify(res.body)}`)
-    })
-  })
-
-  test('★ 缺必填字段 ⇒ 400 且指出是**第几条、哪个字段**', async () => {
-    await withDaemon(async (url) => {
-      const res = await post(url, {
-        source: 'cli',
-        items: [
-          { externalId: 'ok', kind: 'k', title: 't' },
-          { externalId: 'bad', kind: 'k' }, // 缺 title
-        ],
-      })
-      assert.equal(res.status, 400)
-      // 批量投递时"输入不合法"这种话让人无从下手
-      assert.match(String(res.body['error']), /items\[1\]/, '要指出是第二条')
-      assert.match(String(res.body['error']), /title/, '要指出是哪个字段')
-      assert.equal(res.body['index'], 1)
-      assert.ok(Array.isArray(res.body['issues']))
-    })
-  })
-
-  test('★ 空数组 ⇒ 400，不是静默受理', async () => {
-    await withDaemon(async (url) => {
-      const res = await post(url, { source: 'cli', items: [] })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /不能为空/)
-    })
-  })
-
-  test('缺少 source 或是数组时才报最外层错误', async () => {
-    await withDaemon(async (url) => {
-      assert.equal((await post(url, { items: [] })).status, 400)
-      assert.equal((await post(url, { source: 'x', items: 'not-an-array' })).status, 400)
-    })
-  })
-
-  test('items 不是对象时也走 400，不会 500', async () => {
-    await withDaemon(async (url) => {
-      const res = await post(url, { source: 'x', items: ['just-a-string', 42, null] })
-      assert.equal(res.status, 400)
-      assert.match(String(res.body['error']), /items\[0\]/)
-    })
-  })
-})
 
 describe('★ D27：工作目录不再必填', () => {
   test('★ 不传 workDir 也能受理 —— 这正是 D27 要消除的动作', async () => {

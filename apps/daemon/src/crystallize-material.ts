@@ -24,7 +24,7 @@ import { copyFile, mkdir, readFile, readdir, stat, unlink, writeFile } from 'nod
 import { dirname, join } from 'node:path'
 import type { Store } from '@agentdeck/domain'
 import type { Conversation, Issue, Run, RunId } from '@agentdeck/protocol'
-import { formatRunMessages, lastTextOf } from './run-text.ts'
+import { formatRunMessages } from './run-text.ts'
 // ★ 分批第 26 批：从素材里机械抽出"使用者的要求"（见该文件头注与 §10.41）
 import {
   extractRequirements,
@@ -127,15 +127,15 @@ export async function collectMaterial(
       relPath: 'task-run.md',
       text: `# 任务执行记录\n\n${body === '' ? '（这条 run 没有消息）' : body}\n`,
     })
-    // 审核判决（有则带）：找 completed 的 review run，取它最后一条 text。
-    const page = await store.listRuns({ workspaceId: run.workspaceId, limit: 10_000 })
-    const review = page.items
-      .filter((r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === run.id)
-      .sort((a, b) => b.queuedAt - a.queuedAt)[0]
-    if (review && review.status === 'completed') {
-      const verdict = lastTextOf(await store.listRunMessages(review.id))
-      if (verdict) pieces.push({ relPath: 'verdict.md', text: `# 审核判决\n\n${verdict}\n` })
-    }
+    /*
+     * ⚠️ 2026-11（S5，D125 的收尾）：这里原来会去找"审这条 run 的那条 completed
+     *   review run"，把它的最后一段文本落成 `verdict.md` 放进素材。
+     *   **审核 run 退场** ⇒ 那条路永远找不到东西（每次沉淀都白翻一遍全量 run），
+     *   整段删。
+     *
+     *   ⚠️ 老素材目录里可能还躺着 `verdict.md`：那是使用者机器上已经生成过的文件，
+     *   平台不删（素材是使用者的数据）。起草者照样读得到它——只是新沉淀不再生成。
+     */
     if (userFeedback && userFeedback.trim() !== '') {
       pieces.push({ relPath: 'feedback.md', text: `# 使用者的反馈\n\n${userFeedback.trim()}\n` })
     }

@@ -49,10 +49,14 @@ export const VIEW_TITLE_KEYS = {
   //    而 `satisfies Record<ViewName, WebTextId>` 会因为多出一个键直接编译不过。
   tasks: 'shell.navTasks',
   agents: 'shell.navAgents',
-  // ★ D70 第六项（与 `VIEWS` / `Sidebar` 同序）。
-  groups: 'shell.navGroups',
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是 `groups: 'shell.navGroups'`（智能体组页的页名）。
+   *   组退场、页面删了，这一项也删——多一个键会被 `Record<ViewName, WebTextId>` 拒，
+   *   这正是那张表在防止的"页面有几个有两份答案"。
+   */
   skills: 'shell.navSkills',
-  tools: 'tools.navTitle',
+  // ⚠️ 2026-11（D123）：这里原来有一项 `tools`（工具包页的页名），随动作能力退场删。
+  //    它同时是一张"页面 → 页名"的表，多一个键就会被 `Record<ViewName, WebTextId>` 拒。
   // ★ D80 三轮：沉淀是第七个视图（导航列工具之下），词条在 crystallize 的 i18n 里。
   crystallize: 'crystallize.navTitle',
   // ★ 定时任务（2026-11，使用者立项）：第八个视图，排沉淀之后。

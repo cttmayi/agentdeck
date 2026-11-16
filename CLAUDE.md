@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 这是什么
 
-AgentDeck：跑在本机的 AI 工作台。把外部报告收进来，让本机 agent 按你写的标准审核，产出**结构化判决**（结论 / 理由码 / 严重度 / 证据 / 动作），判过才触发**有界的动作**，判不过交回执行者返工。
+AgentDeck：跑在本机的 AI 工作台。你写一句话建一条任务，平台把它交给本机的一个 agent（claude / codex / generic）去做，全程看得到实时日志与工作目录里的产出；多智能体的流程由**编排**用代码写死（`workflows`），把关者就是流程里的又一次普通 run。
+
+> ⚠️ 2026-11（D122–D129）：**报告摄取、审核 run、结构化判决、动作/工具包、返工、智能体组、执行-审核角色**整条产品链已经退场。上面那句「收报告 → 按标准审核 → 判决 → 有界动作 → 返工」不再成立——留着它是因为本仓库大量文档与注释是在那套概念下写的，读历史时需要对得上号。现在的心智模型只有三件事：**任务 → run → 产出**（+ 编排 = 用代码把多次 run 串起来）。
 
 **开发者文档入口是 [`docs/README.md`](docs/README.md)**（代码结构、命令、技术选型、不变量、当前进行中的工作）。使用者文档是根 [`README.md`](README.md)。本文件只放高频操作与必须记住的硬约束——**深度细节一律去 docs，不要在这里堆。**
 
@@ -50,13 +52,13 @@ daemon ──spawn──▶ agent CLI（claude / codex / generic），工作目�
 apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
 ```
 
-- **`apps/daemon`** 是唯一的装配点：认识所有包，其他 app 都不认识 daemon 内部模块。它持有全部权威数据（默认 `store-file`）、执行 run、审核收口、跑工具包动作、SSE 实时流。
+- **`apps/daemon`** 是唯一的装配点：认识所有包，其他 app 都不认识 daemon 内部模块。它持有全部权威数据（默认 `store-file`）、调度与执行 run（执行 / 聊天 / 沉淀起草 / 编排 / 定时任务）、SSE 实时流。（⚠️ 2026-11：审核收口与工具包动作已退场，见上面 D122–D129。）
 - **`apps/web`**（Svelte 5 + Vite 6）产物是纯静态文件，**不能单独跑**。**`apps/remote`** 只存账号/设定/公共目录/统计，不存使用者 payload（prompt/报告/日志只上报摘要）。
 - **CLI / MCP / 页面走同一套 HTTP 接口**，因此权限边界一致：都**不提供"提交任意 run"**——那接受任意 `workDir` 并 spawn 子进程，等于开放代码执行入口。
 
 **依赖方向单向无环**：`protocol ← domain ←（store-* / agent-core ← agent-*）`，apps 在最上层。`protocol` 不依赖任何内部包；`domain` 只依赖 `protocol`，不认识任何存储实现（存储是端口 `packages/domain/src/ports/store.ts`）。`agent-core` 依赖 `protocol` 但**不依赖 `domain`**（脱敏只能有一份：适配器只如实上报命令行，脱敏由调用方用 domain 的 `redactArgv` 做）。
 
-**run 的两次是同构的**：执行与审核都是"起一个 CLI、喂第一句话、收产出"，共用同一套 argv 组装、工作目录规则、收尾。差别只有三处：谁发起、用哪个目录、第一句话里装什么。按生命周期读代码的路线是 [`docs/runtime/pipeline.md`](docs/runtime/pipeline.md)（每节标了对应文件 + 末尾代码索引），比从目录树进快。
+**所有 run 都是同构的**（执行 / 聊天 / 沉淀起草 / 编排的每个节点 / 定时任务）："起一个 CLI、喂第一句话、收产出"，共用同一套 argv 组装、工作目录规则、收尾。差别只有三处：谁发起、用哪个目录、第一句话里装什么。（⚠️ 2026-11 之前这里叫"run 的两次"——"审核"那一半随 D125 退场，把关者现在就是流程里的又一次普通 run。）按生命周期读代码的路线是 [`docs/runtime/pipeline.md`](docs/runtime/pipeline.md)（每节标了对应文件 + 末尾代码索引），比从目录树进快。
 
 **多 runtime 是可插拔的**：claude / codex / generic 三个适配器。加一个 runtime 要做三件事（D31）：`packages/agent-core/src/runtime-table.ts` 描述表加一行（`cli` 形态必填 `managedFlags`/`resume`，`service` 形态必填 `baseArgs`，按 kind 校验，缺了当场报错）+ 写适配器包 + `apps/daemon/src/runtime-registry.ts` 装配表加一行。造完跑 `apps/daemon/src/runtime-agnostic.test.ts`（整条跑在非 claude runtime 上，专抓"还有东西写死了 claude"）。
 
@@ -97,7 +99,7 @@ apps/cli、apps/mcp 是 daemon 的 HTTP 客户端，不共享生命周期
 
 - **改哪段代码 → 去哪几个文件**：`docs/design/architecture.md` §13「代码索引」与 §13.1「谁钉住了什么」。
 - **不变量清单**：`docs/srs/requirements.md` §8；落到实现的映射与「已知的边界与开口」见 `docs/design/architecture.md` §4.3 与 §14。
-- **决策记录**：`docs/srs/requirements.md` §16（D1–D75）。决定改了就把编号写进去——决策只活在代码里就会漂。
+- **决策记录**：`docs/srs/requirements.md` §16（D1–D129）。决定改了就把编号写进去——决策只活在代码里就会漂。
 - **当前进行中的工作 / 新对话从哪接**：`docs/README.md` 的「当前进行中的工作」一节。
 - **安全边界是必读**（不做沙箱隔离 NG7 是明确的范围决定，不是待办）：根 `README.md` 的「安全边界」与 `docs/design/design.md` §14。
 - **`ref/` 是上游行为分析材料，不是本项目文档，且已 gitignore**。实现必须 **clean-room**——**不得从 `ref/multica/`（上游源码 checkout）复制任何源码**。

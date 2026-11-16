@@ -71,8 +71,11 @@
       description: string | null
       source: Skill['source']
     }>
-    reviewed: boolean
-    hasUserFeedback: boolean
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还有 `reviewed`（"这条任务被审核过"）与
+     * `hasUserFeedback`（恒 false 的占位）。审核 run 退场 ⇒ 沉淀门槛没有判据，
+     * 两个字段一起从接口删掉。
+     */
     scope: 'conversation' | 'task'
     materialStats: { turns: number; toolCalls: number } | null
     activeDraft: {
@@ -495,13 +498,15 @@
    */
   $: reviewValid = artifacts !== null && artifacts.validation.ok && slug.trim() !== ''
 
-  /** 开始沉淀按钮的悬停解释：素材为空 / 任务门槛不过，分开说清。 */
+  /**
+   * 开始沉淀按钮的悬停解释。
+   *
+   * ⚠️ 2026-11（D125）：这里原来还有一档"任务门槛不过"（没审核结论、也没用户反馈
+   * ⇒ 不许沉淀）。审核 run 退场 + 反馈从来没有记录机制 ⇒ 那一档没有判据，删。
+   * 现在只剩"素材为空"这一条真判据（早失败，而不是起草完才发现 400）。
+   */
   $: startDisabledReason =
-    targets !== null && targets.materialStats === null
-      ? $t('crystallize.noMaterial')
-      : targets !== null && targets.scope === 'task' && !(targets.reviewed || targets.hasUserFeedback)
-        ? $t('crystallize.taskGated')
-        : undefined
+    targets !== null && targets.materialStats === null ? $t('crystallize.noMaterial') : undefined
 
   $: runShort = draftRunId !== '' ? draftRunId.slice(0, 4) : ''
 
@@ -1750,10 +1755,8 @@
             {targets.scope === 'conversation'
               ? $t('crystallize.scopeConversation')
               : $t('crystallize.scopeTask')}
-            {#if targets.scope === 'task'}
-              · {targets.reviewed ? $t('crystallize.reviewedYes') : $t('crystallize.reviewedNo')}
-              · {$t('crystallize.feedbackNo')}
-            {/if}
+            <!-- ⚠️ 2026-11（D125）：这里原来还有「有/无审核判决」与「无用户反馈」两段
+                 （沉淀门槛的判据显示）。门槛撤掉 ⇒ 不再显示。 -->
           </p>
         {:else}
           <div class="notice bad fs-xs">{$t('crystallize.noMaterial')}</div>

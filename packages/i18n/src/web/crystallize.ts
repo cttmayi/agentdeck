@@ -165,9 +165,11 @@ export const crystallizeText = {
   'crystallize.materialCountGiven': { zh: '使用者给 {n}', en: '{n} from you' },
   'crystallize.scopeConversation': { zh: '对话', en: 'Conversation' },
   'crystallize.scopeTask': { zh: '任务', en: 'Task' },
-  'crystallize.reviewedYes': { zh: '有审核判决', en: 'Reviewed' },
-  'crystallize.reviewedNo': { zh: '无审核判决', en: 'Not reviewed' },
-  'crystallize.feedbackNo': { zh: '无用户反馈', en: 'No user feedback' },
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有 `crystallize.reviewedYes` / `reviewedNo`（沉淀页
+   *   "有/无审核判决"那一段）与 `crystallize.taskGated`（门槛不通过的悬停解释）。
+   *   审核 run 退场 ⇒ 沉淀门槛没有判据，三条一起删。
+   */
   'crystallize.noMaterial': {
     zh: '这个 run 没有可沉淀的内容——无法开始',
     en: 'Nothing to crystallize here — cannot start',
@@ -320,10 +322,10 @@ export const crystallizeText = {
   },
 
   // ── 任务页「沉淀技能&智能体」按钮的触发前置（Skills 列表也在用下面四个） ──
-  'crystallize.taskGated': {
-    zh: '该任务没有反馈、也未审核，无法据此沉淀技能',
-    en: 'No feedback or review on this task — nothing to crystallize a skill from',
-  },
+  /*
+   * ⚠️ 2026-11（D125）：`crystallize.taskGated`（"这条任务还没有审核结论或用户反馈，
+   *   不能沉淀"）随沉淀门槛一起删。
+   */
   'crystallize.optimize': { zh: '沉淀技能', en: 'Crystallize' },
   'crystallize.shadowed': { zh: '被你的版本遮蔽', en: 'shadowed by yours' },
   'crystallize.groupMine': { zh: '我提炼的', en: 'Mine' },

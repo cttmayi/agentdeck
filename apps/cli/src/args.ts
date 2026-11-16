@@ -37,10 +37,8 @@ const USAGE = `agentdeck —— 命令行（需要本机 daemon 正在运行）
                               建一个任务
   runs [--limit n]            列出执行记录
   run <runId>                 看一条执行的详情
-  run-verdicts <runId>        看某条执行的判决
   run-audits <runId>          看某条执行的审计链
   run-cancel <runId>          取消一条执行
-  reports --source s --file f 投递报告（f 为 JSON 数组；- 表示标准输入）
   inbox [--all]               看通知
   inbox-read <id>             把通知标为已读
   costs                       成本汇总

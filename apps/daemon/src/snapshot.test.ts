@@ -7,8 +7,37 @@ import {
   verifyDataSnapshot,
 } from '@agentdeck/domain'
 import { FileStore } from '@agentdeck/store-file'
-import { makeIssue, makeReport, wsId } from '@agentdeck/domain/testing'
-import { ulid, type Report, type Run } from '@agentdeck/protocol'
+import { makeIssue, makeRun, wsId } from '@agentdeck/domain/testing'
+import { ulid, type Run } from '@agentdeck/protocol'
+/**
+ * 一条最小审计记录（D125 之后，快照里唯一还引用 blob 的就是它）。
+ */
+function auditWith(over: {
+  workspaceId: string
+  runId: string
+  inputBlobRefs: string[]
+}): Parameters<FileStore['appendAudit']>[0] {
+  return {
+    id: `aud-${Math.random().toString(36).slice(2, 8)}` as never,
+    workspaceId: over.workspaceId as never,
+    runId: over.runId as never,
+    subject: { type: 'issue', id: 'i-1' } as never,
+    inputBlobRefs: over.inputBlobRefs as never,
+    skillRefs: [],
+    runtimeDescriptorKey: 'claude',
+    cliVersion: null,
+    modelId: null,
+    promptHash: null,
+    argvRedacted: ['claude'],
+    verdictId: null,
+    actionIds: [],
+    queuedAt: 1 as never,
+    startedAt: null,
+    finishedAt: null,
+    usage: null,
+  }
+}
+
 import { join } from 'node:path'
 import { cleanup, makeTempDir } from './testing/tmp.ts'
 
@@ -52,8 +81,6 @@ before(async () => {
   await storeA.insertIssue(makeIssue({ id: 'i-1', workspaceId: WS, title: '第一件事' }))
   await storeA.insertIssue(makeIssue({ id: 'i-2', workspaceId: WS, title: '第二件事' }))
 
-  const report = makeReport({ id: 'r-1', workspaceId: WS, kind: 'ci-failure' })
-  await storeA.insertReport(report)
   await storeA.insertComment({
     id: 'c-1' as never,
     workspaceId: WS,
@@ -91,12 +118,15 @@ describe('数据快照：导出', () => {
     const keys = Object.keys(snap.data).sort()
     assert.deepEqual(keys, [
       // ── 领域实体。**它们**才该出现在快照里：导出物要自包含，凡是别处
-      //    引用得到的东西（agent 挂的 skillIds / toolIds、判决引用的动作与
-      //    工具包）都得在同一份文件里。
-      'actions',
-      // ★ 智能体组（2026-10）："谁审谁 + 判完允许动什么"现在**只有组**能回答，
-      //   所以它必须进快照——不导它，导出物里就只剩一堆互不相干的 agent。
-      'agentGroups',
+      //    引用得到的东西（agent 挂的 skillIds、判决引用的动作…）都得在同一份文
+      //    件里。
+      //    ⚠️ 2026-11（D123）：`actions`（动作记录）与 `tools`（工具包）随动作
+      //    能力退场从快照里删掉——它们的引用面（`allowedActions`、判决的
+      //    `action`）一起没了，留着只会导出没人读的数据。
+      /*
+       * ⚠️ 2026-11（S3）：`agentGroups` 随智能体组退场从快照里删——组不再是任何
+       *   事情的出处，导出它只会带出一份没人读的数据。
+       */
       'agents',
       'artifacts',
       'audits',
@@ -108,13 +138,8 @@ describe('数据快照：导出', () => {
       'device',
       'inbox',
       'issues',
-      'reports',
       'runs',
       'skills',
-      // D40：工具包（组）也是领域实体——判决与审计里的 `<slug>.<动作名>`
-      // 引用它，导出漏了它就会指向一个不存在的包
-      'tools',
-      'verdicts',
       'workspace',
     ])
     // ── 与上面相对：**存储实现**的东西一个都不许进来。
@@ -129,7 +154,6 @@ describe('数据快照：导出', () => {
     const snap = await exportData(storeA, { workspaceId: WS })
     assert.equal(snap.counts['issues'], 2)
     assert.equal(snap.counts['comments'], 1)
-    assert.equal(snap.counts['reports'], 1)
     assert.equal(snap.counts['workspace'], 1)
   })
 
@@ -166,7 +190,6 @@ describe('★ 数据快照：导入（只增不改）', () => {
 
     assert.equal(result.imported['issues'], 2)
     assert.equal(result.imported['comments'], 1)
-    assert.equal(result.imported['reports'], 1)
     assert.equal(result.imported['inbox'], 1)
 
     // 真的读过一遍，不是只看计数
@@ -175,7 +198,6 @@ describe('★ 数据快照：导入（只增不改）', () => {
       issues.items.map((i: { title: string }) => i.title).sort(),
       ['第一件事', '第二件事'],
     )
-    assert.equal((await storeB.getReport('r-1' as never))?.id, 'r-1')
     assert.equal((await storeB.listComments('i-1' as never)).length, 1)
   })
 
@@ -253,6 +275,12 @@ describe('★ 数据快照：导入（只增不改）', () => {
 })
 
 describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
+  /*
+   * ⚠️ 2026-11（D125）：这两条用例原来拿 **report** 当"带 blobRef 的记录"
+   *   （报告的快照引用）。报告摄取退场之后，快照里还会引用 blob 的是**审计记录**
+   *   （`inputBlobRefs`）——判据一模一样：blob 不在快照里 ⇒ 导入后必须报出有多少
+   *   引用落空，而不是装作没事。改用它，避免"顺手把这条判据一起删掉"。
+   */
   test('★ blob 不在快照里 ⇒ 导入后要明确报出有多少引用落空', async () => {
     const source = await makeTempDir('alpha-snap-blob')
     const target = await makeTempDir('alpha-snap-blob2')
@@ -261,25 +289,27 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
 
     const W = wsId('ws_blob')
     await s1.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
-    const blobRef = await s1.putBlob(new TextEncoder().encode('报告的原文'))
-    const report = { ...(makeReport({ id: 'rb-1', workspaceId: W, kind: 'ci-failure' })), blobRef }
-    await s1.insertReport(report)
+    const blobRef = await s1.putBlob(new TextEncoder().encode('输入的原文'))
+    // ★ 审计是顺着 run 导出的——没有 run 的话那条审计根本进不了快照，
+    //   于是"悬空引用"这条判据会因为"什么都没导"而假通过。所以先得有 run。
+    await s1.insertRun(makeRun({ id: 'run-blob', workspaceId: W, agentId: 'a1' }))
+    await s1.appendAudit(auditWith({ workspaceId: W as string, runId: 'run-blob', inputBlobRefs: [blobRef] }))
 
     const snap = await exportData(s1, { workspaceId: W })
     // blob 刻意不在快照里
-    assert.ok(!JSON.stringify(snap).includes('报告的原文'), '快照不含二进制原文')
+    assert.ok(!JSON.stringify(snap).includes('输入的原文'), '快照不含二进制原文')
 
     const result = await importData(s2, snap)
     assert.equal(
       result.danglingBlobRefs,
       1,
-      '★ 不报出来的话，要等到某天点开一份报告发现是空的才反应过来',
+      '★ 不报出来的话，要等到某天点开一条审计发现材料是空的才反应过来',
     )
     assert.equal(result.warnings.length, 1)
     assert.match(result.warnings[0] ?? '', /原文读不到/)
 
     // 记录本身还在，只是原文读不到
-    assert.equal((await s2.getReport('rb-1' as never))?.id, 'rb-1')
+    assert.equal((await s2.listAuditsByRun('run-blob' as never)).length, 1)
 
     await s1.close()
     await s2.close()
@@ -292,7 +322,7 @@ describe('★ 悬空引用必须被报出来，而不是装作没事', () => {
     const W = wsId('ws_ok')
     await store.insertWorkspace({ executeTemplate: '', reviewTemplate: '', chatTemplate: '', defaultAgentId: null, locale: 'zh', id: W, name: 'w', createdAt: 1, updatedAt: 1 })
     const ref = await store.putBlob(new TextEncoder().encode('x'))
-    await store.insertReport({ ...(makeReport({ id: 'ok-1', workspaceId: W, kind: 'ci-failure' })), blobRef: ref })
+    await store.appendAudit(auditWith({ workspaceId: W as string, runId: 'run-ok', inputBlobRefs: [ref] }))
 
     const snap = await exportData(store, { workspaceId: W })
     const result = await importData(store, snap)

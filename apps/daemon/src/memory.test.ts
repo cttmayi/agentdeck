@@ -554,7 +554,7 @@ describe('记忆接口（HTTP 层）', () => {
         body: JSON.stringify({ kind: 'fact', text: '这个仓库用 pnpm' }),
       })
       assert.equal(res.status, 201, await res.clone().text())
-      const { entries } = (await res.json()) as { entries: Array<{ id: string }> }
+      const { entries } = (await res.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       assert.equal(entries.length, 1)
 
       const after = (await (await fetch(`${url}/api/agents/${agentId}`)).json()) as {
@@ -579,7 +579,7 @@ describe('记忆接口（HTTP 层）', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'lesson', text: '旧教训' }),
       })
-      const { entries } = (await created.json()) as { entries: Array<{ id: string }> }
+      const { entries } = (await created.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       const oldId = entries[0]!.id
 
       const patched = await fetch(`${url}/api/agents/${agentId}`, {
@@ -605,7 +605,7 @@ describe('记忆接口（HTTP 层）', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'fact', text: '记错了' }),
       })
-      const { entries } = (await created.json()) as { entries: Array<{ id: string }> }
+      const { entries } = (await created.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       const del = await fetch(`${url}/api/agents/${agentId}/memory/${entries[0]!.id}`, {
         method: 'DELETE',
       })
@@ -1316,7 +1316,7 @@ describe('忘掉 / 合并：`forget` 与多条 `replaces`（分批第 260 批）
           ],
         }),
       })
-      const { entries } = (await first.json()) as { entries: Array<{ id: string }> }
+      const { entries } = (await first.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       const ids = entries.map((e) => e.id)
       const res = await fetch(`${url}/api/agents/${agentId}/memory`, {
         method: 'POST',
@@ -1398,7 +1398,7 @@ describe('替换：`replaces` = 旧记忆的新版（分批第 251 批）', () =
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'preference', text: '文章要控制篇幅、减少配图' }),
       })
-      const old = (await first.json()) as { entries: Array<{ id: string }> }
+      const old = (await first.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       const oldId = old.entries[0]!.id
       // 整理给了"更准的一版"，并点名要替换旧的
       const second = await fetch(`${d.url}/api/agents/${agent.id}/memory`, {
@@ -1599,7 +1599,7 @@ describe('记忆总开关：关掉之后写不进去、但删得掉', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ kind: 'fact', text: '先记一条' }),
       })
-      const { entries } = (await added.json()) as { entries: Array<{ id: string }> }
+      const { entries } = (await added.json()) as { entries: Array<{ id: string; builtin?: boolean }> }
       // 关掉它
       await fetch(`${url}/api/agents/${agentId}`, {
         method: 'PATCH',

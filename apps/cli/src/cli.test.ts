@@ -69,11 +69,12 @@ describe('★ 命令集的范围：不提供代码执行入口', () => {
     }
   })
 
-  test('reports 命令的说明里写明它本身不执行任何命令', () => {
-    const spec = findCommand('reports')
-    assert.ok(spec)
-    assert.match(spec.summary, /不执行任何命令/)
-  })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来有一条「reports 命令的说明里写明它本身不执行任何
+   *   命令」。报告摄取退场 ⇒ `reports` 命令删了，用例失去对象。
+   *   ⚠️ 但它守的那件事**仍然成立**，而且换成反向断言更硬：**不许有任何命令能把
+   *   东西投给不存在的接口**。下面"主要操作"那条清单里已经不带 `reports`。
+   */
 
   test('覆盖了需求说的"主要操作"', () => {
     const names = new Set(COMMANDS.map((c) => c.name))
@@ -82,8 +83,10 @@ describe('★ 命令集的范围：不提供代码执行入口', () => {
       'issues', // 看任务
       'issue-create', // 建任务
       'runs', // 看执行
-      'run-verdicts', // 看判决
-      'reports', // 投递报告
+      /*
+       * ⚠️ 2026-11（D125）：这里原来还有 `run-verdicts`（看某条执行的判决）与
+       *   `reports`（投递报告）。审核 run 与判决、报告摄取都退场 ⇒ 两条命令删。
+       */
       'inbox', // 通知
       'costs', // 成本
       'audits-export', // 审计导出
@@ -93,7 +96,7 @@ describe('★ 命令集的范围：不提供代码执行入口', () => {
   })
 
   test('需要位置参数的命令都声明了 needsPositional（否则会以难懂的方式失败）', () => {
-    for (const name of ['run', 'run-verdicts', 'run-audits', 'run-cancel', 'inbox-read', 'issue-create']) {
+    for (const name of ['run', 'run-audits', 'run-cancel', 'inbox-read', 'issue-create']) {
       assert.equal(findCommand(name)?.needsPositional, true, `${name} 应当声明需要位置参数`)
     }
   })

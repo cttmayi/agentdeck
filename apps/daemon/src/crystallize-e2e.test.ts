@@ -243,9 +243,9 @@ before(async () => {
 
   const agents = await (
     await fetch(`${daemon.url}/api/agents`)
-  ).json() as { agents: Array<{ id: string; role: string }> }
-  agentId = agents.agents.find((a) => a.role === 'executor')!.id
-  reviewerId = agents.agents.find((a) => a.role === 'reviewer')!.id
+  ).json() as { agents: Array<{ id: string; builtin?: boolean }> }
+  agentId = agents.agents.find((a) => a.builtin !== true)!.id
+  reviewerId = agents.agents.find((a) => a.builtin !== true)!.id
 
   const issueRes = await fetch(`${daemon.url}/api/issues`, {
     method: 'POST',
@@ -276,7 +276,7 @@ before(async () => {
     }),
   })
   // `POST /api/skills` 回的是 `{installed, skipped}`（不是 `{skills}`）
-  const createdSkillBody = (await createdSkill.json()) as { installed?: Array<{ id: string }> }
+  const createdSkillBody = (await createdSkill.json()) as { installed?: Array<{ id: string; builtin?: boolean }> }
   draftSkillId = createdSkillBody.installed?.[0]?.id ?? ''
   assert.notEqual(
     draftSkillId,
@@ -317,45 +317,17 @@ async function runOnce(prompt: string): Promise<string> {
   throw new Error('源 run 未在限时内终态')
 }
 
-/**
- * 提交一个任务 run 并**补一条已完成的审核 run**，返回 runId。
+/*
+ * ⚠️ 2026-11（D125）：这里原来有两个帮手——`runReviewed`（提交任务 run 再补一条已完成
+ *   的**审核 run**）与 `reviewOnce`。它们存在的原因是起草路由按设计 §4.3 拦"没审核过的
+ *   任务"（`task_gate`）。
  *
- * ★ 三轮：后端 draft 路由按设计 §4.3 拦"没审核过的任务"（`task_gate`）。
- *   这些 e2e 测的是起草/入库机制，不是门槛本身，所以夹具要走**过门**的那条路；
- *   门槛的负例（没审核 ⇒ reviewed:false）由上面那条 targets 测试钉着。
+ *   审核 run 退场 ⇒ 那道门槛没有判据（已撤掉），这些 e2e 也不再需要"先审一遍"。
+ *   下面留一个同名帮手（`runReviewed` = "跑完一条任务 run"），是为了让几十处调用点
+ *   不用改名字——**但它的语义变了**：不再补审核 run。
  */
 async function runReviewed(prompt: string): Promise<string> {
-  const runId = await runOnce(prompt)
-  await reviewOnce(runId)
-  return runId
-}
-
-/** 给一条任务 run 起一条审核 run 并等它终态（假后端立刻完成）。 */
-async function reviewOnce(executeRunId: string): Promise<void> {
-  const runId = ulid() as RunId
-  const res = await fetch(`${daemon.url}/api/runs`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      runId,
-      kind: 'review',
-      agentRef: { id: reviewerId, name: '审核者', instructions: '' },
-      subject: { type: 'run', id: executeRunId },
-      prompt: '审一下',
-      limits: { maxTurns: null, timeoutMs: null },
-      review: { kind: 'k', title: 't', body: 'b', inputBlobRef: null, relatedIssueId: issueId },
-    }),
-  })
-  assert.equal(res.status, 202, '审核 run 受理')
-  for (let i = 0; i < 40; i += 1) {
-    const r = (await (await fetch(`${daemon.url}/api/runs/${runId}`)).json()) as { status: string }
-    if (['completed', 'failed', 'cancelled'].includes(r.status)) {
-      assert.equal(r.status, 'completed', '假后端的审核 run 应完成')
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  throw new Error('审核 run 未在限时内终态')
+  return runOnce(prompt)
 }
 
 /** 起草一个 run 并等终态，返回 draftRunId。 */
@@ -517,19 +489,20 @@ async function commit(payload: Record<string, unknown>): Promise<{ status: numbe
 }
 
 describe('D80 端到端：沉淀整条链（目标 → 起草 → 入库 → git）', () => {
-  test('targets：任务 run 给 task 场景（无审核 ⇒ reviewed:false）', async () => {
+  test('targets：任务 run 给 task 场景', async () => {
     const runId = await runOnce('写一份关于依赖漏洞的报告')
     const res = await (await fetch(`${daemon.url}/api/crystallize/targets?runId=${runId}`)).json() as {
       scope: string
-      reviewed: boolean
-      hasUserFeedback: boolean
       loadedSkills: unknown[]
       materialStats: { turns: number; toolCalls: number } | null
       activeDraft: { runId: string; status: string } | null
     }
     assert.equal(res.scope, 'task')
-    assert.equal(res.reviewed, false, '没有审核 run 就不算审核过')
-    assert.equal(res.hasUserFeedback, false, '还没有用户反馈机制')
+    /*
+     * ⚠️ 2026-11（D125）：这里原来还断言 `reviewed === false`（"没有审核 run 就不算
+     *   审核过"）与 `hasUserFeedback === false`（"还没有用户反馈机制"）。这两个字段都不
+     *   在接口上了——沉淀门槛撤掉之后，没有谁要读它们。
+     */
     assert.ok(res.materialStats, '素材统计起草前可见')
     assert.equal(res.activeDraft, null, '还没起草过')
   })
@@ -1529,7 +1502,7 @@ describe('六轮：git 历史与版本对比（P2，§7.4）', () => {
     const createdText = await created.text()
     // `POST /api/skills` 成功是 **201**（创建），不是 200——第一版按读接口的习惯写成 200
     assert.equal(created.status, 201, createdText)
-    const installedId = (JSON.parse(createdText) as { installed: Array<{ id: string }> })
+    const installedId = (JSON.parse(createdText) as { installed: Array<{ id: string; builtin?: boolean }> })
       .installed[0]!.id
     const res = await fetch(`${daemon.url}/api/skills/${installedId}/history`)
     assert.equal(res.status, 200)
@@ -1928,9 +1901,9 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
     // 删掉之后：起草者的**挂载**也空了（平台侧摘挂，否则它会一直挂着一条不存在的技能）
     const drafterAfterDelete = (
       (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-        agents: Array<{ role: string; skillIds: string[] }>
+        agents: Array<{ builtinKind?: string; skillIds: string[] }>
       }
-    ).agents.find((a) => a.role === 'drafter')
+    ).agents.find((a) => a.builtinKind === 'drafter')
     assert.deepEqual(drafterAfterDelete?.skillIds ?? ['?'], [], '起草者不该还挂着已删的技能')
 
     const blocked = await draftPost({ runId, target: { kind: 'new', purpose: '门禁' } })
@@ -1956,9 +1929,9 @@ describe('§10.17 起草门禁：没装「沉淀用技能」不许沉淀（分�
     // 装回来之后：挂载**自动对齐**（这就是"挂在 Agent 上"的全部机制）
     const drafterAfterInstall = (
       (await (await fetch(`${daemon.url}/api/agents`)).json()) as {
-        agents: Array<{ role: string; skillIds: string[] }>
+        agents: Array<{ builtinKind?: string; skillIds: string[] }>
       }
-    ).agents.find((a) => a.role === 'drafter')
+    ).agents.find((a) => a.builtinKind === 'drafter')
     assert.equal(drafterAfterInstall?.skillIds.length, 1, '装回来之后起草者要自动挂上它')
   })
 })

@@ -150,8 +150,8 @@ before(async () => {
     onInfo: () => {},
   })
   const agents = await json('/api/agents')
-  const list = (agents.body as { agents: Array<{ id: string; role: string }> }).agents
-  agentId = list.find((a) => a.role === 'executor')!.id
+  const list = (agents.body as { agents: Array<{ id: string; builtin?: boolean }> }).agents
+  agentId = list.find((a) => a.builtin !== true)!.id
 })
 
 after(async () => {

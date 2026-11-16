@@ -94,6 +94,13 @@ export interface BuildAuditInput {
   /** 实际启动的命令行——**本函数负责脱敏**。 */
   argv: readonly string[]
   verdictId: AuditRecord['verdictId']
+  /**
+   * 这条 run 触发过的动作 id。
+   *
+   * ⚠️ 2026-11（D123）：动作能力退场 ⇒ 调用方（`ReviewCoordinator`）传的恒为空
+   *    数组。这个参数留着，是因为审计记录**这一栏本身**还留着（旧记录里可能非空，
+   *    读取老数据时要能表示"这条判决当初触发过动作"）。
+   */
   actionIds: readonly AuditRecord['actionIds'][number][]
   queuedAt: number
   startedAt: number | null

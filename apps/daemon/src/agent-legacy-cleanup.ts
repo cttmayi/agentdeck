@@ -13,7 +13,7 @@ import type { Agent, WorkspaceId } from '@agentdeck/protocol'
  *
  *   · `reviewerAgentId` —— "由谁来审这个执行 agent"（现在只有**智能体组**能回答）；
  *   · `allowedActions` / `debugActions` / `actionParams` —— 审核者的"行动权限"
- *     （现在唯一权威是**组**，动作只属于组）。
+ *     （一度搬到组上，2026-11（D123）随整个动作能力退场）。
  *
  * schema 里的字段删掉之后，老记录里的键**不会自己消失**（agent 整条以 JSON 存），
  * 它们会继续出现在 API 响应与导出里。使用者对这件事的要求是明确的：

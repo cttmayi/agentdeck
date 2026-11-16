@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import type { ActionRefType, Agent } from '@agentdeck/protocol'
-import { resolveReviewStandard, reviewerIdentity } from './review-standard.ts'
+import { resolveReviewStandard } from './review-standard.ts'
 
 /**
  * ══════════════════════════════════════════════════════════════════
@@ -109,53 +109,14 @@ describe('D37：审核标准怎么解析', () => {
   })
 })
 
-/**
- * ★★ 2026-09：标准并进「指令」，资格判据改成「身份非空」。
+/*
+ * ⚠️ 2026-11（D125）：这里原来是「2026-09：审核者身份（指令 + 老数据的标准）」——
+ *   `reviewerIdentity` 把指令与老标准合成一份**投递出去的身份**，判据是"这份非空"。
  *
- * 两件事必须一起做（只做一件都会坏）：
+ *   审核 run 退场 ⇒ 没有"审核者的身份"要合成（② 就是 agent 自己的「指令」），
+ *   函数与这组用例一起删。
  *
- *   · 只改判据 ⇒ 一个**只写了标准、没写指令**的老审核者当场**静默停摆**；
- *   · 只改归属 ⇒ 界面撤了那个框，判据还在看它 ⇒ 新建的审核者永远派不出审核。
- *
- * 所以判据看的是**合成后的身份**：指令在前，老数据的标准正文并进来。
+ *   ⚠️ 那组用例守着一件很有价值的事：**"只改判据"与"只改归属"必须一起做**——
+ *   只改判据会让只写了老标准、没写指令的审核者**静默停摆**（产出照样跑、审核没了）。
+ *   任何"同一件事的判据与落点分居两处"的迁移都该照这条经验做。
  */
-describe('2026-09：审核者身份（指令 + 老数据的标准）', () => {
-  const skills = [{ name: 'skill-probe', body: '# 老标准\n\n只看有没有写测试。' }]
-
-  test('★ 只有指令 ⇒ 身份就是指令（新数据的正常路径）', () => {
-    const out = reviewerIdentity({ reviewStandard: null, instructions: '你按这条判。' }, [])
-    assert.equal(out.text, '你按这条判。')
-    assert.equal(out.fromLegacyStandard, false)
-  })
-
-  test('★★ 只有老数据里的标准 ⇒ 身份是它，而且仍然算"有身份"（不会静默停摆）', () => {
-    // ⚠️ 老记录里还带着**多余的动作键**（整条 JSON 存下来的，撤销字段之后那些键
-    //    仍在老数据里）——身份合成**不看它**，这里就照老形状造一份来钉这件事。
-    const legacyShape = {
-      reviewStandard: { body: '# 老内联标准', allowedActions: [] },
-      instructions: '',
-    } as unknown as Parameters<typeof reviewerIdentity>[0]
-    const inline = reviewerIdentity(legacyShape, [])
-    assert.equal(inline.text, '# 老内联标准')
-    assert.equal(inline.fromLegacyStandard, true)
-
-    const fromSkill = reviewerIdentity({ reviewStandard: null, instructions: '' }, skills)
-    assert.match(fromSkill.text, /老标准/)
-    assert.equal(fromSkill.fromLegacyStandard, true)
-  })
-
-  test('★ 两样都有 ⇒ 合成（指令在前，标准在后），并标出标准是老数据', () => {
-    const legacyShape = {
-      reviewStandard: { body: '# 老内联标准', allowedActions: [] },
-      instructions: '你是谁。',
-    } as unknown as Parameters<typeof reviewerIdentity>[0]
-    const out = reviewerIdentity(legacyShape, [])
-    assert.equal(out.text, '你是谁。\n\n# 老内联标准')
-    assert.equal(out.fromLegacyStandard, true)
-  })
-
-  test('★ 两样都空 ⇒ 空身份（这时才不派审核）', () => {
-    assert.equal(reviewerIdentity({ reviewStandard: null, instructions: '   ' }, []).text, '')
-    assert.equal(reviewerIdentity({ reviewStandard: null, instructions: null }, []).text, '')
-  })
-})

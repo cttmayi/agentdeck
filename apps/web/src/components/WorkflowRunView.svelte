@@ -24,7 +24,7 @@
     workflowStepStatusKey,
     workflowStepKindKey,
   } from '../lib/run-status.ts'
-  import { issues } from '../lib/stores.ts'
+  import { agents, issues } from '../lib/stores.ts'
   import { go, wfReturn } from '../lib/view.ts'
   import RunLog from './RunLog.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
@@ -76,15 +76,28 @@
   /** 点击步骤卡头展开它的完整过程日志（RunLog）。 */
   let expandedSeq: number | null = null
 
-  /** ★ 2026-11 每个 Agent 一个显示：loop 步骤拆成「写作员 → 审查员」每轮两行。
-   *   审查 run 没有挂在执行 run 上的字段，靠 subject（type:'run' + id=执行 run）
-   *   从全量 runs 列表反查（与 daemon 同一条规矩）。列表只拉一次缓存；审查意见
-   *   取审查 run 的 messages 最后一条 text（与输出流同一规则），没取到就每轮重试
-   *   （审查 run 可能还在跑）。 */
-  let reviewRunIds: Record<string, string> = {}
-  let reviewOutputs: Record<string, string> = {}
+  /**
+   * ★ 2026-11 每个 Agent 一个显示：loop 步骤按轮拆成「执行者 → 把关者」两行。
+   *
+   * ⚠️ 2026-11（S5，D125 收尾）：这里原来要靠 `subject`（type:'run' + id=执行 run）
+   *   从全量 runs 列表**反查**那条审核 run——因为审核 run 当时**故意不进
+   *   `step.runIds`**（它挂在被审 run 的调查链上）。
+   *
+   *   现在把关者就是**一次普通执行 run**，而且**记进 `step.runIds`**（顺带修掉了
+   *   "把关那一步在运行画面上没有 run"）。于是这里的规则退化成最朴素的一条：
+   *   **loop 的 runIds 是成对的**——`[执行1, 把关1, 执行2, 把关2, …]`（引擎在
+   *   `while (attempt <= maxRounds)` 里先执行再把关）。不再有任何反查。
+   */
   /** 执行 run 的状态（completed 才认为"写完了"——流式部分产出不算）。 */
   let execStatuses: Record<string, string> = {}
+  /**
+   * 每个 run 是哪个人跑的（`GET /api/runs/:id` 的 `agentId`）。
+   *
+   * ⚠️ 2026-11（S5）：loop 卡那两行的标题原来是**写死的**「写作员 / 审查员」——
+   *   那两个词是当年"执行者 / 审核者"两角色的别名，而**角色已经退场**。现在按
+   *   这条 run 真正的 agent 名字显示（取不到就退回通用说法，不编一个名字）。
+   */
+  let runAgentIds: Record<string, string> = {}
 
   function lastRunId(st: WorkflowStep): string | null {
     return st.runIds.length > 0 ? st.runIds[st.runIds.length - 1]! : null
@@ -110,22 +123,26 @@
     return expandedSeq === null && (st.status === 'running' || st.status === 'waiting-human')
   }
 
-  /** 按执行 runId 反查它的审查 run（没有则 null）。列表只拉一次。 */
-  let runsList: Array<{ runId: string; kind: string; subject: { type: string; id: string } }> | null =
-    null
-  async function findReviewRun(execRunId: string): Promise<string | null> {
-    if (reviewRunIds[execRunId] !== undefined) return reviewRunIds[execRunId] ?? null
-    if (!runsList) {
-      const page = await api<{
-        runs: Array<{ runId: string; kind: string; subject: { type: string; id: string } }>
-      }>('/api/runs')
-      runsList = page.runs ?? []
+  /**
+   * loop 步骤的「轮」：`step.runIds` 两两配对（执行者、把关者）。
+   *
+   * ⚠️ 奇数个 runId（理论上：引擎在把关者抛错时不会留下半对）时，最后那一轮只有
+   *   执行者——如实按半轮渲染，不硬凑一个空把关者。
+   */
+  /** 某个 run 是哪个 agent 跑的（找不到就 null——调用方退回通用说法）。 */
+  function agentNameOfRun(rid: string | null): string | null {
+    if (rid === null) return null
+    const id = runAgentIds[rid]
+    if (id === undefined) return null
+    return $agents.find((a) => a.id === id)?.name ?? null
+  }
+
+  function loopRounds(st: WorkflowStep): Array<{ exec: string; guard: string | null }> {
+    const out: Array<{ exec: string; guard: string | null }> = []
+    for (let i = 0; i < st.runIds.length; i += 2) {
+      out.push({ exec: st.runIds[i]!, guard: st.runIds[i + 1] ?? null })
     }
-    const review = runsList.find(
-      (r) => r.kind === 'review' && r.subject.type === 'run' && r.subject.id === execRunId,
-    )
-    reviewRunIds = { ...reviewRunIds, [execRunId]: review?.runId ?? '' }
-    return review?.runId ?? null
+    return out
   }
 
   async function refresh(): Promise<void> {
@@ -163,35 +180,21 @@
         void (async () => {
           try {
             // ⚠️ GET /api/runs/<id> 返回 run 对象**本身**（不是 { run } 包装）
-            const d = await api<{ status: string }>(`/api/runs/${rid}`)
+            const d = await api<{ status: string; agentId?: string }>(`/api/runs/${rid}`)
             execStatuses = { ...execStatuses, [rid]: d.status }
+            if (typeof d.agentId === 'string') {
+              runAgentIds = { ...runAgentIds, [rid]: d.agentId }
+            }
           } catch {
             // 单步取数失败不阻塞整体刷新
           }
         })()
       }
-      // loop 步骤：每轮执行 run 反查审查 run，再取审查意见正文
-      for (const st of run.steps) {
-        if (st.kind !== 'loop') continue
-        for (const rid of st.runIds) {
-          void (async () => {
-            try {
-              const reviewId = await findReviewRun(rid)
-              if (!reviewId || reviewOutputs[reviewId]) return
-              const d = await api<{ messages: Array<{ type: string; content: string }> }>(
-                `/api/runs/${reviewId}/messages`,
-              )
-              const texts = (d.messages ?? []).filter(
-                (m) => m.type === 'text' && m.content.trim() !== '',
-              )
-              const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
-              if (last) reviewOutputs = { ...reviewOutputs, [reviewId]: last }
-            } catch {
-              // 单步取数失败不阻塞整体刷新
-            }
-          })()
-        }
-      }
+      /*
+       * ⚠️ 2026-11（S5）：这里原来还有一段"每轮执行 run 反查审查 run，再取审查意见
+       *   正文"。把关者现在是普通 run、且**就在 `step.runIds` 里** ⇒ 上面那段
+       *   "步骤输出"的循环已经把它一起取了（`outputs[rid]`）。这里不需要第二次。
+       */
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     }
@@ -371,24 +374,26 @@
                        与「审查员意见」两块——每个 Agent 的输出独立成框（默认限高，
                        太长内部滚动），不再压成一个「评审返工」卡 -->
                   <ol class="wf-loop-rounds">
-                    {#each st.runIds as rid (rid)}
+                    {#each loopRounds(st) as round (round.exec)}
                       <li class="wf-round">
-                        <div class="wf-round-tag">{$t('workflows.loopWriter')}</div>
-                        <div class="wf-round-box">{outputs[rid] ?? $t('workflows.stepWorking')}</div>
-                        {#if !st.gateText && execStatuses[rid] === 'completed'}
-                          <!-- ★ 2026-11（统一模型）：只有 agent 把关（带审核者）才有
-                             审查员行；gate 把关（人在 loop 卡内确认）没有审查员——
-                             显示"（审查中…）"是误导。
-                             2026-11 补充：执行 run 还没产出（写作员还在跑）时**不显示**
-                             审查员行——否则会出现"写作员执行中、审核员已审查中"的
-                             提前出现（使用者实测）。 -->
-                          <div class="wf-round-tag">{$t('workflows.loopReviewer')}</div>
+                        <div class="wf-round-tag">
+                          {agentNameOfRun(round.exec) ?? $t('workflows.loopExecLabel')}
+                        </div>
+                        <div class="wf-round-box">
+                          {outputs[round.exec] ?? $t('workflows.stepWorking')}
+                        </div>
+                        {#if round.guard !== null && execStatuses[round.exec] === 'completed'}
+                          <!--
+                            ★ 2026-11（统一模型 + S5）：只有 agent 把关（带审核者）才有
+                            把关者行；gate 把关（人在 loop 卡内确认）没有——显示"（审查中…）"
+                            是误导。执行者还没跑完时也**不显示**（否则会出现"执行中、
+                            审核员已审查中"的提前出现，使用者实测）。
+                          -->
+                          <div class="wf-round-tag">
+                            {agentNameOfRun(round.guard) ?? $t('workflows.loopGuardLabel')}
+                          </div>
                           <div class="wf-round-box">
-                            {#if reviewRunIds[rid]}
-                              {reviewOutputs[reviewRunIds[rid]!] ?? $t('workflows.loopReviewing')}
-                            {:else}
-                              <span class="faint">{$t('workflows.loopReviewing')}</span>
-                            {/if}
+                            {outputs[round.guard] ?? $t('workflows.loopReviewing')}
                           </div>
                         {/if}
                       </li>

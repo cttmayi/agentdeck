@@ -44,11 +44,16 @@ export const AGENT_DRAFT_SKILL_DIR = 'skill'
 
 /** 岗位卡解析结果：失败给 `error`（界面/路由据此说清哪里不对，不猜）。 */
 export type AgentDraftParsed =
-  | { ok: true; name: string; role: string; instructions: string }
+  | { ok: true; name: string; instructions: string }
   | { ok: false; error: string }
 
 /**
- * 解析岗位卡：frontmatter 的 `name` / `role` + 正文（= 要生成的智能体的指令）。
+ * 解析岗位卡：frontmatter 的 `name` + 正文（= 要生成的智能体的指令）。
+ *
+ * ⚠️ 2026-11（S4，D127）：frontmatter 里原来还有一个 `role`（`executor` / `reviewer`）。
+ *   **角色退场** ⇒ 岗位卡不再问"它是什么角色"——生成出来的就是一条普通的智能体。
+ *   老卡片里那个键**原样忽略**（解析不报错，也不当回事）：那是使用者机器上已经存在
+ *   的草稿文件，为一格多余的 frontmatter 报错只会让他不知道该改什么。
  *
  * 与 `parseSkillMd` 同一套极简 frontmatter 规则（`---` 头块、容忍空行、不许前面多行）：
  * CLI 靠 frontmatter 认技能，这里靠它认岗位卡——前面多一行就是"岗位卡没被认出"。
@@ -64,24 +69,18 @@ export function parseAgentDraft(text: string): AgentDraftParsed {
   }
   const head = trimmed.slice(3, end)
   let name = ''
-  let role = ''
   for (const line of head.split('\n')) {
     const mName = line.match(/^name\s*:\s*(.+)$/)
     if (mName?.[1]) name = stripQuotes(mName[1].trim())
-    const mRole = line.match(/^role\s*:\s*(.+)$/)
-    if (mRole?.[1]) role = stripQuotes(mRole[1].trim())
   }
   const instructions = trimmed.slice(end + 4).trim()
   if (name === '') {
     return { ok: false, error: 'frontmatter 缺少 `name`（岗位名，如"会议纪要助理"）' }
   }
-  if (role === '') {
-    return { ok: false, error: 'frontmatter 缺少 `role`（executor 或 reviewer）' }
-  }
   if (instructions === '') {
     return { ok: false, error: '正文是空的——岗位卡至少要有一段指令' }
   }
-  return { ok: true, name, role, instructions }
+  return { ok: true, name, instructions }
 }
 
 /** 一条配套技能草稿（`skill/<slug>/SKILL.md` 解析出来的样子）。 */

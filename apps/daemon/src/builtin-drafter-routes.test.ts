@@ -45,23 +45,27 @@ interface AgentRow {
   id: string
   name: string
   instructions: string
-  role: string
   builtin?: boolean
+  /**
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `role: string`。**角色退场** ⇒ 判据换成
+   *   `builtin` + `builtinKind`（"是哪一条内置"）。
+   */
+  builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
   skillIds: string[]
 }
 
 async function drafterOf(url: string): Promise<AgentRow> {
   const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }
-  const found = body.agents.find((a) => a.role === 'drafter')
+  const found = body.agents.find((a) => a.builtinKind === 'drafter')
   assert.ok(found, '启动之后必须有一条内置起草者（每次启动对账）')
   return found
 }
 
 describe('内置起草者：启动就有、不能删、不能改坏、能恢复默认', () => {
-  test('★ 启动之后它就在（角色是起草者、指令是默认值、不挂技能）', async () => {
+  test('★ 启动之后它就在（岗位是起草者、指令是默认值、不挂技能）', async () => {
     await withDaemon(async (url) => {
       const drafter = await drafterOf(url)
-      assert.equal(drafter.role, 'drafter')
+      assert.equal(drafter.builtinKind, 'drafter')
       assert.equal(drafter.name, DRAFTER_NAME)
       assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS)
       assert.deepEqual(drafter.skillIds, [])
@@ -81,14 +85,14 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
     })
   })
 
-  test('★★★ 只读：任何字段都改不了（名字/指令/角色/技能挂载/CLI 一律 400）', async () => {
+  test('★★★ 只读：任何字段都改不了（名字/指令/技能挂载/CLI 一律 400）', async () => {
     // ★ 分批第 190 批（使用者："把内置智能体全部改成只读"）：从"锁三个字段"收紧到"全锁"。
     //   写法已经交给使用者装的技能，平台内置的那条身份不能再被改——否则"平台说的"与
     //   "实际跑的"对不上，而这条链的每一步都要能对上。
     await withDaemon(async (url) => {
       const drafter = await drafterOf(url)
       const patches = [
-        { role: 'executor' },
+        { },
         { skillIds: ['01SKILL'] },
         { builtin: false },
         { name: '我改的名字' },
@@ -104,7 +108,7 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
         assert.equal(((await res.json()) as { code?: string }).code, 'builtin_agent_readonly')
       }
       const after = await drafterOf(url)
-      assert.equal(after.role, 'drafter')
+      assert.equal(after.builtinKind, 'drafter')
       assert.deepEqual(after.skillIds, [])
       assert.equal(after.name, DRAFTER_NAME)
       assert.equal(after.instructions, DRAFTER_INSTRUCTIONS)
@@ -127,31 +131,15 @@ describe('内置起草者：启动就有、不能删、不能改坏、能恢复�
     })
   })
 
-  test('★★ 进不了智能体组（组决定谁执行谁审 = 业务闭环；它不参与）', async () => {
-    await withDaemon(async (url) => {
-      const drafter = await drafterOf(url)
-      // ⚠️ 路径是 `/api/agent-groups`（我第一版按界面上的"智能体组"猜成 `/api/groups`
-      //     —— 返回的是 404 `未知路径`，看起来像"这个接口不存在"，其实是路径写错了）。
-      const res = await fetch(`${url}/api/agent-groups`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: '试图组', members: [drafter.id] }),
-      })
-      // ⚠️ 这条挡在 `parseGroupFields` 里，是**唯一**能挡住它的地方之一：界面上
-      //    「组」页的候选是 `role === 'executor'`（起草者天然落选），但接口是公开的，
-      //    而进组之后它就可能被派去执行任务或审别人的产出——它的自愈只在启动时做
-      //    （幂等/补标记），**不会自己退出组**。
-      // 响应体只能读一次（这一条我在本文件里已经踩过一次，见上面那句注释）
-      const text = await res.text()
-      assert.equal(res.status, 400, text)
-      assert.match((JSON.parse(text) as { error: string }).error, /不能进智能体组/)
-    })
-  })
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是「起草者进不了智能体组」。组退场 ⇒ 没有组可进，用例删。
+   *   起草者仍然有边界（它不接业务任务：`builtinKindOf` + `POST /api/task` 那一段）。
+   */
 
-  test('普通 agent 没有"默认值"可恢复（400 而不是假装成功）', async () => {
+test('普通 agent 没有"默认值"可恢复（400 而不是假装成功）', async () => {
     await withDaemon(async (url) => {
       const body = (await (await fetch(`${url}/api/agents`)).json()) as { agents: AgentRow[] }
-      const plain = body.agents.find((a) => a.builtin !== true && a.role === 'executor')
+      const plain = body.agents.find((a) => a.builtin !== true)
       assert.ok(plain)
       const res = await fetch(`${url}/api/agents/${plain.id}/restore-default`, { method: 'POST' })
       assert.equal(res.status, 400)

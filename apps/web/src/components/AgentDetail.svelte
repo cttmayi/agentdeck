@@ -6,7 +6,6 @@
     loadError,
     loading,
     skills,
-    tools,
     deleteAgent,
     deleteExclusiveSkill,
     listExclusiveSkills,
@@ -32,7 +31,7 @@
    * 这一版重做了**显示**，重点在三件事
    * ══════════════════════════════════════════════════════════════════
    *
-   * ★ 2026-10（使用者拍板）：**没有预览页了**——选中即编辑，与智能体组页同款。
+   * ★ 2026-10（使用者拍板）：**没有预览页了**——选中即编辑。
    *   没有 hero 头、没有「编辑」按钮、没有查看/编辑两态：右栏进来就是一张
    *   可编辑的卡片（两列网格，对齐「新建私有」），保存 / 取消在底部。
    *
@@ -163,12 +162,11 @@
 
   const blankDraft = () => ({
     name: agent.name,
-    role: agent.role,
     instructions: agent.instructions,
     skillIds: [...agent.skillIds],
     // ⚠️ 2026-10（使用者的决定）：`reviewerAgentId` / `model` / `workDir` 不再进
-    // 编辑草稿——这三个"执行者设定"从界面上整段拿掉了（审核走智能体组；模型用
-    // CLI 默认；工作目录是任务级的）。协议字段原样保留，老数据继续有效。
+    // 编辑草稿——这三个"执行者设定"从界面上整段拿掉了（模型用 CLI 默认；工作目录
+    // 是任务级的）。协议字段原样保留，老数据继续有效。
     runtimeKey: agent.runtimeKey,
     /**
      * ★ 分批第 245 批：记忆功能的总开关。
@@ -181,9 +179,10 @@
     // D37：审核标准（只对审核者有意义）
     reviewStandard: agent.reviewStandard ? { ...agent.reviewStandard } : null,
     // ⚠️ 2026-10：这里原来还有行动权限那三个（`allowedActions` / `actionParams` /
-    //    `debugActions`）。整个能力从 agent 上撤掉了（它在**组**上，见 `blankDraft`
-    //    上面那段编辑语义的说明与表单里那一句指路），草稿里不再有它们——留着只会
+    //    `debugActions`）。整个能力从 agent 上撤掉了，草稿里不再有它们——留着只会
     //    让 `buildPatch` 把它们写进一个必然被 400 的请求里。
+    //    ⚠️ 2026-11（D123）：动作能力整个退场 ⇒ 这三个字段现在**哪一层都没有**了
+    //    （组上也没有），所以连"去组里配"那句指路也过期了。
   })
 
   /**
@@ -513,7 +512,8 @@
    */
   $: readOnly = agent.builtin === true
   /** retired 的内置审核者：没有默认值可恢复，但允许删（它已经不被任何链路使用）。 */
-  $: retiredBuiltin = readOnly && agent.role === 'skill-reviewer'
+  // ⚠️ 2026-11（S4）：判据从角色换成内置岗位（`skill-reviewer` 那条已下线）。
+  $: retiredBuiltin = readOnly && agent.builtinKind === 'skill-reviewer'
   /**
    * 草稿有没有改动（没改动时「保存」置灰——点了也不会有事发生，那是假按钮）。
    *
@@ -525,14 +525,18 @@
    */
   $: dirty = isDirty(draft, agent, memRows)
 
-  /** 内置 agent 的真实角色名（它不是 executor/reviewer 二选一，所以那个选择器对它不适用）。 */
+  /**
+   * 内置 agent 的**岗位**名。
+   *
+   * ⚠️ 2026-11（S4，D127）：原来这里读 `role`（executor / reviewer / …）。**角色退场**
+   *   ⇒ 用户建的 agent 统一叫「智能体」，只有平台内置的那几种按岗位显示。
+   */
   function roleLabelOf(a: Agent): string {
-    if (a.role === 'reviewer') return $t('agents.roleReviewer')
-    if (a.role === 'drafter') return $t('agents.roleDrafter')
-    if (a.role === 'memory-tidy') return $t('agents.roleMemoryTidy')
-    if (a.role === 'skill-reviewer') return $t('agents.roleSkillReviewer')
-    if (a.role === 'agent-maker') return $t('agents.roleAgentMaker')
-    return $t('agents.roleExecutor')
+    if (a.builtinKind === 'drafter') return $t('agents.roleDrafter')
+    if (a.builtinKind === 'memory-tidy') return $t('agents.roleMemoryTidy')
+    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleSkillReviewer')
+    if (a.builtinKind === 'agent-maker') return $t('agents.roleAgentMaker')
+    return $t('agents.rolePlain')
   }
   /**
     * 只读态那张角色卡的第二行：这个角色**干什么**。
@@ -543,11 +547,11 @@
     * 生成者 = 在聊天里把岗位问清楚并写出岗位卡）。
     */
   function roleDescOf(a: Agent): string {
-    if (a.role === 'drafter') return $t('agents.roleDescDrafter')
-    if (a.role === 'memory-tidy') return $t('agents.roleDescMemoryTidy')
-    if (a.role === 'skill-reviewer') return $t('agents.roleDescSkillReviewer')
-    if (a.role === 'agent-maker') return $t('agents.roleDescAgentMaker')
-    return $t('agents.roleExecutorHint')
+    if (a.builtinKind === 'drafter') return $t('agents.roleDescDrafter')
+    if (a.builtinKind === 'memory-tidy') return $t('agents.roleDescMemoryTidy')
+    if (a.builtinKind === 'skill-reviewer') return $t('agents.roleDescSkillReviewer')
+    if (a.builtinKind === 'agent-maker') return $t('agents.roleDescAgentMaker')
+    return $t('agents.rolePlainHint')
   }
 
   function cancelEdit(): void {
@@ -566,7 +570,7 @@
     const patch: Record<string, unknown> = {}
     if (dr.name !== ag.name) patch['name'] = dr.name
     if (dr.instructions !== ag.instructions) patch['instructions'] = dr.instructions
-    if (dr.role !== ag.role) patch['role'] = dr.role
+    // ⚠️ 2026-11（S4，D127）：`role` 退场 ⇒ 草稿里不再有它，patch 也不再生成。
     // ⚠️ 2026-10：`workDir` / `model` / `reviewerAgentId` 三个设置从界面拿掉了
     // （见 `blankDraft`），PATCH 里不再生成——编辑一个 agent 不会碰它们。
     if (dr.runtimeKey !== ag.runtimeKey) patch['runtimeKey'] = dr.runtimeKey
@@ -580,8 +584,9 @@
     if (JSON.stringify(dr.reviewStandard) !== JSON.stringify(ag.reviewStandard ?? null))
       patch['reviewStandard'] = dr.reviewStandard
     // ⚠️ 2026-10：这里原来还有三段——行动权限（`allowedActions`）、它的固定参数
-    //    （`actionParams`）与调试勾选（`debugActions`）。三者一起撤掉了：**动作只
-    //    属于组**（`AgentGroup`），从这里提交它们现在只会得到 400「不认识的字段」。
+    //    （`actionParams`）与调试勾选（`debugActions`）。三者一起撤掉了，从这里提交
+    //    它们现在只会得到 400「不认识的字段」。
+    //    ⚠️ 2026-11（D123）：动作能力整个退场 ⇒ 这几个键在任何路由上都会被拒。
     //
     //    ★ 那三段里有一条真实的教训值得留在这里（它不再有代码，但换个字段还会
     //      再遇到同样的坑）：当年"按界面上显示的有效值去比"，会让**保存动作本身**
@@ -778,7 +783,12 @@
    *   就是一条普通技能，没有这回事了。
    */
   $: pickableSkills = $skills
-  $: isReviewer = agent.role === 'reviewer'
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来判 `role === 'reviewer'`（只对审核者显示那一段）。
+   *   **角色退场** ⇒ 没有"谁是审核者"；那一段改成按"它身上有没有老标准正文"决定
+   *   （那才是这件事唯一的事实依据）。
+   */
+  $: isReviewer = agent.reviewStandard !== null
 
   /**
    * ══════════════════════════════════════════════════════════════════
@@ -850,10 +860,9 @@
 >
   <!--
     ══════════════════════════════════════════════════════════════════
-    ★ 2026-10（使用者拍板）：**没有预览页了**——选中即编辑，与智能体组页同款：
-    没有 hero 头、没有「编辑」按钮，进来就是一张可编辑的卡片（两列网格，对齐
-    「新建私有」），保存 / 取消在底部。查看态那一整套（只读值、chips、老标准
-    的详情展示与一键并进按钮）随这次改造一起删了。
+    ★ 2026-10（使用者拍板）：**没有预览页了**——选中即编辑：没有 hero 头、没有
+    「编辑」按钮，进来就是一张可编辑的卡片，保存 / 取消在底部。查看态那一整套
+    （只读值、chips、老标准的详情展示与一键并进按钮）随这次改造一起删了。
     ══════════════════════════════════════════════════════════════════
   -->
   <!--
@@ -890,14 +899,11 @@
         <span class="agent-head-name" data-agent-head-name>{draft.name}</span>
         {#if !agent.builtin}
           <!--
-            ★ 分批第 273 批：内置 agent 不画「执行 / 审核」这枚徽标——它的角色是
-            `drafter` / `memory-tidy` / `skill-reviewer`，画成「执行」是错的（使用者正是
-            因为"内置都是执行智能体"才去角色格里找它，然后发现两边都不亮）。
-            它的真实角色在卡片「角色」那一格用真实徽标显示。
+            ★ 分批第 273 批：内置 agent 不画岗位徽标（它的岗位在卡片「角色」那一格显示）。
+            ⚠️ 2026-11（S4，D127）：用户建的 agent 现在**没有角色**——统一叫「智能体」，
+            不再分「执行 / 审核」。
           -->
-          <span class="badge {draft.role === 'reviewer' ? 'in_review' : 'in_progress'}"
-            >{draft.role === 'reviewer' ? $t('agents.roleReviewer') : $t('agents.roleExecutor')}</span
-          >
+          <span class="badge in_progress">{$t('agents.rolePlain')}</span>
         {/if}
         {#if agent.builtin}
           <!--
@@ -911,10 +917,10 @@
           <span
             class="badge in_review"
             data-agent-builtin-badge
-            title={agent.role === 'skill-reviewer'
+            title={agent.builtinKind === 'skill-reviewer'
               ? $t('agents.retiredReviewerBadgeTitle')
               : $t('agents.builtinBadgeTitle')}
-            >{agent.role === 'skill-reviewer'
+            >{agent.builtinKind === 'skill-reviewer'
               ? $t('agents.retiredReviewerBadge')
               : $t('agents.builtinBadge')}</span
           >
@@ -1016,29 +1022,14 @@
               </div>
             </div>
           {:else}
-          <div class="role-picker">
-            <!--
-              ★ 第 269 批（使用者："需要精简文字"）：两张卡里的副说明（"接到任务后动手干活" /
-                "按判断依据审别人的产出"）挪进 `title`——「执行」「审核」四个字已经够了。
-            -->
-            <button
-              type="button"
-              class="role-card"
-              class:active={draft.role === 'executor'}
-              title={$t('agents.roleExecutorHint')}
-              onclick={() => (draft.role = 'executor')}
-            >
-              <strong>{$t('agents.roleExecutor')}</strong>
-            </button>
-            <button
-              type="button"
-              class="role-card"
-              class:active={draft.role === 'reviewer'}
-              title={$t('agents.roleReviewerHintShort')}
-              onclick={() => (draft.role = 'reviewer')}
-            >
-              <strong>{$t('agents.roleReviewer')}</strong>
-            </button>
+          <!--
+            ⚠️ 2026-11（S4，D127）：这里原来是「执行 / 审核」两张可选卡（角色选择器）。
+            **角色退场** ⇒ 用户建的 agent 没有角色可选；这一格只说明"它是一个智能体"。
+          -->
+          <div class="role-picker" data-agent-role-static>
+            <div class="role-card static active" title={$t('agents.rolePlainHint')}>
+              <strong>{$t('agents.rolePlain')}</strong>
+            </div>
           </div>
           {/if}
         </div>
@@ -1047,8 +1038,9 @@
           ★ 分批第 272 批（使用者："整体布局有变化（指令被挤到右边了）"）：
           名字上移到标题栏之后，这一格成了"**半行没人陪**"的那一个——网格自动排布会把
           CLI 放在第 1 列，于是**指令落到第 2 列**（跑到右边），"指令 | 技能"的配对散掉、
-          还空出半个格子。所以 CLI 自己占整行：角色 → CLI → 指令|技能 → 记忆 → 行动权限，
+          还空出半个格子。所以 CLI 自己占整行：角色 → CLI → 指令|技能 → 记忆，
           每一行都是满的（探针 `agents.cardNoHoles` 钉着这件事）。
+          ⚠️ 2026-11（D123）：「行动权限」那一行随动作能力退场删了。
         -->
         <label class="cell runtime-cell" class:locked={readOnly}>
           {$t('agents.runtimeRowLabel')}
@@ -1147,7 +1139,7 @@
                 {/each}
               </div>
             {/if}
-            {#if agent.role === 'drafter'}
+            {#if agent.builtinKind === 'drafter'}
               {#if agent.skillIds.length === 0}
                 <!-- 只有起草者这一格能**动手**（装那条沉淀技能），而且这是平台给的动作，
                      不是"改它"。装完 daemon 自己挂上——所以按钮留着。 -->
@@ -1481,24 +1473,11 @@
           {/if}
         </section>
 
-        {#if draft.role === 'reviewer'}
-          <!--
-            ⚠️ 2026-10：这里原来有一整段「行动权限」（`ActionPicker`：允许触发的
-            动作 + 固定参数 + 调试勾选）。**整个能力从 agent 上撤掉了**——动作属于
-            **这条链**（这队人的活判过之后允许做什么），不属于某个审核者个人：同一个
-            审核者在不同组里本来就该配不同的权限，挂在人身上只能共用一份。
-
-            唯一权威是 `AgentGroup.allowedActions` / `actionParams` / `debugActions`，
-            配的地方是**智能体组页的 ③ 行动**（那里也带同样的选择器）。
-
-            ★ 所以这里只留一句指路，而**不复用那个选择器**：两处长得一模一样、只有
-              一处生效，是最坏的一种界面（使用者会在这里勾一遍，然后在组里再勾一遍）。
-          -->
-          <div class="cell actions-cell">
-            <span class="cell-label">{$t('agents.sectionActions')}</span>
-            <p class="row-hint">{$t('agents.actionsMovedToGroup')}</p>
-          </div>
-        {/if}
+        <!--
+          ⚠️ 2026-10 / 2026-11（D123）：这里原来是「行动权限」那一节（`ActionPicker`），
+          2026-10 搬去智能体组、2026-11 随**动作能力整体退场**消失。现在 agent 上
+          没有任何与动作有关的配置，也不再指路（指的那个地方不存在了）。
+        -->
   </section>
 
   <!-- 主操作在底部（与组页同款）：保存 / 删除 / 取消 -->
@@ -1703,7 +1682,7 @@
    * ★ 一张卡片包住全部字段：两列网格，每个字段一格（label 在上、控件在下）。
    *
    * 与 `MemberSlotForm.svelte` 里「新建私有」的 `.grid-form` 同一套布局——
-   * 名字 / CLI 一行，指令 / 技能一行；角色（编辑态）与行动权限（审核者）占整行。
+   * 名字 / CLI 一行，指令 / 技能一行；角色（编辑态）与记忆占整行。
    */
   .card.agent-card {
     display: grid;
@@ -1750,19 +1729,16 @@
    *
    * 现在的规矩：
    *   · 「名称 | CLI」「指令 | 挂载的技能」保持**相邻的配对**（这就是"一半一半"）；
-   *   · **整行宽**的那些（角色 / 记忆 / 行动权限指路 / 内置徽标）只能放在**配对的后面**，
+   *   · **整行宽**的那些（角色 / 记忆 / 内置徽标）只能放在**配对的后面**，
    *     不许插进任意两格之间——插进去就必然留洞（探针 `agents.cardNoHoles` 会红）。
+   *
+   * ⚠️ 2026-11（D123）：`.cell.actions-cell` 与它的两条样式（「行动权限占整行」、
+   *    展开/收起分段轨）随动作能力退场删掉了。
    */
   .cell.role-cell,
-  .cell.runtime-cell,
-  .cell.actions-cell {
+  .cell.runtime-cell {
     grid-column: 1 / -1;
   }
-
-  /* 行动权限（审核者）：占整行（选择器"左选右配"，最需要宽度） */
-
-  /* 行动权限的展开/收起（2026-10：与顶栏「列表 / 看板」同款分段轨——
-     与组里「选已有的/新建私有」、任务里「智能体/智能体组」同一套样式） */
 
 
   /* ── 值的呈现 ── */

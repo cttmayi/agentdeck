@@ -75,7 +75,6 @@ function makeFakes(opts: FakeOptions = {}) {
     id: 'a1',
     name: '助手',
     instructions: '你是助手',
-    role: 'executor',
     ...(opts.agentSkillIds ? { skillIds: opts.agentSkillIds.map((id) => skillId(id)) } : {}),
   })
   const conversation = makeConversation({
@@ -151,12 +150,17 @@ describe('说一轮：一轮 = 一条 run', () => {
     assert.equal(out.failure, null)
   })
 
-  test('★ 这一轮不自动审：reviewerAgentId 必须是显式的 null，不是省略', async () => {
-    const f = makeFakes()
-    await submitChatTurn(f.store, f.executor, f.conversation, f.agent, '你好', 1, WORK_ROOT)
-    assert.equal(f.submitted!.reviewerAgentId, null)
-    assert.ok('reviewerAgentId' in f.submitted!, '省略它等于"按 agent 配置走"，会弹出一条审核 run')
-  })
+  /*
+   * ⚠️ 2026-11（D125）：这里原来是「这一轮不自动审：`reviewerAgentId` 必须是显式的
+   *   `null`，不是省略」——聊天这条路的 run 明确声明"这一次不审"，否则会按 agent
+   *   配置弹出一条审核 run。
+   *
+   *   审核 run 退场 ⇒ 没有任何自动审核会被派生，"这一次不审"成了结构性事实，那条
+   *   声明也就不需要了。**用例删**。
+   *
+   *   ⚠️ 它守的三态纪律仍然成立（"没改"必须是键不出现，"不审"必须是显式的 null），
+   *   只是现在这个字段本身没了。
+   */
 
   test('★ subject 是对话：报告那条路只认 issue/report/run，所以这条 run 到不了判决', async () => {
     const f = makeFakes()

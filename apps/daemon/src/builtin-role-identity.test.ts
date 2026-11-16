@@ -61,7 +61,7 @@ const WS = wsId('ws-builtin-role')
 
 /** 造一条 agent（只为把"顺序"和"损坏状态"摆出来，不走接口）。 */
 function mkAgent(
-  role: Agent['role'],
+  kind: Agent['builtinKind'],
   name: string,
   instructions: string,
   builtin: boolean,
@@ -77,8 +77,8 @@ function mkAgent(
     workDir: null,
     skillIds: [],
     env: {},
-    role,
     builtin,
+    ...(kind === undefined ? {} : { builtinKind: kind }),
     reviewStandard: null,
     createdAt: now,
     updatedAt: now,
@@ -97,19 +97,30 @@ async function withStore<T>(fn: (store: FileStore, dir: string) => Promise<T>): 
   }
 }
 
-describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪一条"', () => {
-  test('★ 起草者/审核者/生成者各认各的；普通 agent 与"标记+怪角色"都返回 null（不猜）', () => {
-    assert.equal(builtinKindOf({ builtin: true, role: 'drafter' }), 'drafter')
-    assert.equal(builtinKindOf({ builtin: true, role: 'skill-reviewer' }), 'skill-reviewer')
+describe('判据本身：`builtin` 只是"是平台的"，`builtinKind` 才是"是哪一条"', () => {
+  test('★ 起草者/审核者/生成者各认各的；普通 agent 与"标记+缺岗位"都返回 null（不猜）', () => {
+    /*
+     * ⚠️ 2026-11（S4，D127）：判据从 `role` 换成 `Agent.builtinKind`——**角色退场**
+     *   之后，"是哪一条内置"由它自己的字段回答（老记录的 `role` 在读时被升格成它，
+     *   见 `packages/protocol/src/agent-legacy.ts`）。
+     */
+    assert.equal(builtinKindOf({ builtin: true, builtinKind: 'drafter' }), 'drafter')
+    assert.equal(
+      builtinKindOf({ builtin: true, builtinKind: 'skill-reviewer' }),
+      'skill-reviewer',
+    )
     // ★ 2026-11：智能体生成者（生成智能体那条链的执行者）
-    assert.equal(builtinKindOf({ builtin: true, role: 'agent-maker' }), 'agent-maker')
-    // 普通执行者：不是内置
-    assert.equal(builtinKindOf({ builtin: false, role: 'executor' }), null)
-    assert.equal(builtinKindOf({ role: 'executor' }), null)
-    // 挂着内置标记但角色是业务角色（老记录/被手改过）：**不替它猜一套默认值**
-    // ——猜错就是把起草者指令写进审核者（见下面 ② 那条）
-    assert.equal(builtinKindOf({ builtin: true, role: 'reviewer' }), null)
-    assert.equal(builtinKindOf({ builtin: true, role: 'executor' }), null)
+    assert.equal(builtinKindOf({ builtin: true, builtinKind: 'agent-maker' }), 'agent-maker')
+    // 普通 agent：不是内置
+    assert.equal(builtinKindOf({ builtin: false }), null)
+    assert.equal(builtinKindOf({}), null)
+    /*
+     * 挂着内置标记但**岗位值缺失**（老记录/被手改过）：**不替它猜一套默认值**——
+     * 猜错就是把起草者指令写进另一条（见下面 ② 那条用例）。
+     */
+    assert.equal(builtinKindOf({ builtin: true }), null)
+    // 岗位值在、但没有内置标记 —— 同样不认（标记与岗位两个一起看）
+    assert.equal(builtinKindOf({ builtinKind: 'drafter' }), null)
   })
 
   test('★ 审核者已下线 ⇒ **没有默认值可恢复**（指令是空串，界面/路由据此拒绝）', () => {
@@ -131,12 +142,12 @@ describe('判据本身：`builtin` 只是"是平台的"，`role` 才是"是哪�
 })
 
 describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §3.1）', () => {
-  test('★ 没有 ⇒ 建出来；再跑一遍 ⇒ 一字不动（幂等）；角色撞上就补标记（自愈）', async () => {
+  test('★ 没有 ⇒ 建出来；再跑一遍 ⇒ 一字不动（幂等）', async () => {
     await withStore(async (store) => {
       const first = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(first.action, 'created')
       const after = await store.listAgents(WS)
-      const maker = after.find((a) => a.role === 'agent-maker')!
+      const maker = after.find((a) => builtinKindOf(a) === 'agent-maker')!
       assert.equal(maker.name, AGENT_MAKER_NAME)
       assert.equal(maker.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
       assert.equal(maker.builtin, true)
@@ -145,15 +156,13 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       // 幂等：再跑一遍不动任何东西
       const again = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(again.action, 'left-alone')
-
-      // 自愈：标记丢了但角色还在 ⇒ 补标记，不另建一条
-      const damaged = await store.listAgents(WS)
-      await store.insertAgent({ ...damaged.find((a) => a.role === 'agent-maker')!, builtin: false })
-      const healed = await ensureBuiltinAgentMaker(store, WS)
-      assert.equal(healed.action, 'healed')
-      const final = await store.listAgents(WS)
-      assert.equal(final.filter((a) => a.role === 'agent-maker').length, 1, '不许造第二条')
-      assert.equal(final.find((a) => a.role === 'agent-maker')!.builtin, true)
+      /*
+       * ⚠️ 2026-11（S4）：这里原来还有一段"标记丢了但角色还在 ⇒ 补标记"的自愈。
+       *   **角色退场**之后没有可认的旧证据了（按名字认正是该文件反复在防的事），
+       *   所以那条兜底删掉——标记丢了就当成"没有内置生成者"，另建一条。
+       *   ⚠️ 正常升级路径走不到这里：读时兜底会把老记录的 `role` 升格成
+       *   `builtinKind`（`agent-legacy.ts`）。
+       */
     })
   })
 
@@ -161,11 +170,11 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
     await withStore(async (store) => {
       await ensureBuiltinAgentMaker(store, WS)
       const all = await store.listAgents(WS)
-      await store.insertAgent({ ...all.find((a) => a.role === 'agent-maker')!, instructions: '   ' })
+      await store.insertAgent({ ...all.find((a) => builtinKindOf(a) === 'agent-maker')!, instructions: '   ' })
       const result = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(result.action, 'healed')
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
+      assert.equal(after.find((a) => builtinKindOf(a) === 'agent-maker')!.instructions, AGENT_MAKER_INSTRUCTIONS_BODY)
     })
   })
 
@@ -174,11 +183,11 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       await ensureBuiltinAgentMaker(store, WS)
       const all = await store.listAgents(WS)
       const edited = '你是我的私人生成者。'
-      await store.insertAgent({ ...all.find((a) => a.role === 'agent-maker')!, instructions: edited })
+      await store.insertAgent({ ...all.find((a) => builtinKindOf(a) === 'agent-maker')!, instructions: edited })
       const result = await ensureBuiltinAgentMaker(store, WS)
       assert.equal(result.action, 'left-alone')
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => a.role === 'agent-maker')!.instructions, edited)
+      assert.equal(after.find((a) => builtinKindOf(a) === 'agent-maker')!.instructions, edited)
     })
   })
 
@@ -189,35 +198,54 @@ describe('智能体生成者（agent-maker）的对账（2026-11 设计定稿 §
       assert.equal(result.memoryTidy.action, 'created')
       assert.equal(result.agentMaker.action, 'created')
       const all = await store.listAgents(WS)
-      assert.ok(all.some((a) => a.role === 'agent-maker'), '智能体生成者要在')
-      assert.ok(all.some((a) => a.role === 'memory-tidy'), '记忆整理者要在')
-      assert.ok(all.some((a) => a.role === 'drafter'), '起草者要在')
+      assert.ok(all.some((a) => builtinKindOf(a) === 'agent-maker'), '智能体生成者要在')
+      assert.ok(all.some((a) => builtinKindOf(a) === 'memory-tidy'), '记忆整理者要在')
+      assert.ok(all.some((a) => builtinKindOf(a) === 'drafter'), '起草者要在')
     })
   })
 })
 
-describe('起草者的自愈：撞上审核者时必须**认角色**，不能按标记一把抓', () => {  test('★★★ 起草者的 `builtin` 标记丢了、而审核者排在前面 ⇒ 补的是**起草者**的标记', async () => {
+describe('起草者的自愈：撞上另一个内置时必须**认岗位**，不能按标记一把抓', () => {
+  test('★★★ 起草者的记录缺了岗位值、而另一个内置排在前面 ⇒ 另建一条，绝不改那条', async () => {
     await withStore(async (store) => {
-      // 顺序就是这条用例的全部意义：审核者先入库 ⇒ 从前 `find(builtin)` 直接撞上它
-      const reviewer = mkAgent('skill-reviewer', LEGACY_REVIEWER_NAME, LEGACY_REVIEWER_INSTRUCTIONS, true)
-      const drafter = mkAgent('drafter', DRAFTER_NAME, DRAFTER_INSTRUCTIONS_BODY, false)
+      /*
+       * 顺序就是这条用例的全部意义：审核者先入库 ⇒ 从前 `find(builtin)` 直接撞上它。
+       *
+       * ⚠️ 2026-11（S4，D127）：这里原来是"起草者的 `builtin` 标记丢了 ⇒ 按 `role`
+       *   把它认出来并补标记"。**角色退场**之后没有旧证据可认；而按名字认正是这个
+       *   文件反复在防的事（改名就失效，失效的表现是每次启动多一条）。
+       *
+       *   现在守的是它更重要的那一半：**认不出就另建一条，绝不把起草者的指令写进
+       *   另一条内置**（写进去 = 那条以后按"你是 skill 作者"去干活，而看起来一切正常）。
+       */
+      const reviewer = mkAgent(
+        'skill-reviewer',
+        LEGACY_REVIEWER_NAME,
+        LEGACY_REVIEWER_INSTRUCTIONS,
+        true,
+      )
+      // 缺岗位值的起草者记录（老数据 / 被手改过）
+      const broken = mkAgent(undefined, DRAFTER_NAME, DRAFTER_INSTRUCTIONS_BODY, false)
       await store.insertAgent(reviewer)
-      await store.insertAgent(drafter)
+      await store.insertAgent(broken)
 
       const result = await ensureBuiltinDrafter(store, WS)
-      assert.equal(result.action, 'healed')
-      if (result.action !== 'healed') return
-      assert.equal(result.agentId, drafter.id, '被修好的必须是起草者，不是列表里先出现的那条内置')
-      assert.match(result.why, /标记/)
+      assert.equal(result.action, 'created', '认不出旧的 ⇒ 建一条新的')
+      if (result.action !== 'created') return
+      assert.notEqual(result.agentId, broken.id)
+      assert.notEqual(result.agentId, reviewer.id)
 
       const after = await store.listAgents(WS)
-      assert.equal(after.find((a) => a.id === drafter.id)!.builtin, true, '起草者的标记要真的补上')
       assert.equal(
         after.find((a) => a.id === reviewer.id)!.instructions,
         LEGACY_REVIEWER_INSTRUCTIONS,
-        '审核者的指令一个字都不许动',
+        '另一条内置的指令一个字都不许动',
       )
-      assert.equal(after.length, 2, '不许"补不出来就再建一条"（那样每次启动多一条）')
+      assert.equal(
+        after.find((a) => a.id === broken.id)!.instructions,
+        DRAFTER_INSTRUCTIONS_BODY,
+        '认不出的那条原样留着（那是使用者的数据，平台不悄悄改）',
+      )
     })
   })
 
@@ -236,7 +264,7 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
         DRAFTER_INSTRUCTIONS_BODY,
         '审核者拿到起草者指令 = 它以后按"你是 skill 作者"去审，而看起来一切正常',
       )
-      const drafter = afterCreate.find((a) => a.role === 'drafter')
+      const drafter = afterCreate.find((a) => builtinKindOf(a) === 'drafter')
       assert.ok(drafter, '起草者必须被建出来')
       assert.equal(drafter.instructions, DRAFTER_INSTRUCTIONS_BODY)
 
@@ -245,11 +273,11 @@ describe('起草者的自愈：撞上审核者时必须**认角色**，不能按
       await ensureBuiltinAgents(store, WS)
       const final = await store.listAgents(WS)
       assert.equal(
-        final.find((a) => a.role === 'skill-reviewer')!.instructions,
+        final.find((a) => builtinKindOf(a) === 'skill-reviewer')!.instructions,
         '   ',
         '已下线的审核者不该被内置对账重新填指令（它没有默认指令了）',
       )
-      assert.equal(final.find((a) => a.role === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS_BODY)
+      assert.equal(final.find((a) => builtinKindOf(a) === 'drafter')!.instructions, DRAFTER_INSTRUCTIONS_BODY)
     })
   })
 })
@@ -290,8 +318,8 @@ interface AgentRow {
   id: string
   name: string
   instructions: string
-  role: string
   builtin?: boolean
+  builtinKind?: 'drafter' | 'skill-reviewer' | 'memory-tidy' | 'agent-maker'
 }
 
 async function agentsOf(url: string): Promise<AgentRow[]> {
@@ -299,7 +327,7 @@ async function agentsOf(url: string): Promise<AgentRow[]> {
   return body.agents
 }
 
-describe('接口层：内置条目各按各的角色回答（审核者已下线）', () => {
+describe('接口层：内置条目各按各的岗位回答（审核者已下线）', () => {
   /** 造一个带"老审核者"的工作区目录（模拟从旧版本升上来的使用者）。 */
   async function seedLegacyReviewer(): Promise<{ dir: string; id: string }> {
     const dir = await makeTempDir('builtin-role-retired')
@@ -354,7 +382,7 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
     //   这一条钉住新的口径：按 `builtinKindOf` 分开——retired 放行，起草者照旧。
     const seeded = await seedLegacyReviewer()
     await withDaemon(seeded.dir, async (url) => {
-      const drafter = (await agentsOf(url)).find((a) => a.role === 'drafter')!
+      const drafter = (await agentsOf(url)).find((a) => builtinKindOf(a) === 'drafter')!
       const refused = await fetch(`${url}/api/agents/${drafter.id}`, { method: 'DELETE' })
       const refusedText = await refused.text()
       assert.equal(refused.status, 400, refusedText)
@@ -372,38 +400,20 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
         '删掉之后列表里不该再有它',
       )
       // 起草者还在（删一条不能顺手影响另一条内置）
-      assert.ok((await agentsOf(url)).some((a) => a.role === 'drafter'))
+      assert.ok((await agentsOf(url)).some((a) => builtinKindOf(a) === 'drafter'))
     })
   })
 
-  test('★★ 拒绝文案按**这条自己**的角色说（起草者 / 已下线的审核者各说各的）', async () => {
-    const seeded = await seedLegacyReviewer()
-    await withDaemon(seeded.dir, async (url) => {
-      const agents = await agentsOf(url)
-      const reviewer = agents.find((a) => a.id === seeded.id)!
-      const drafter = agents.find((a) => a.role === 'drafter')!
-      assert.ok(drafter, '启动时内置起草者要被建出来')
+  /*
+   * ⚠️ 2026-11（S3）：这里原来是「拒绝文案按**这条自己**的角色说（起草者 / 已下线的
+   *   审核者各说各的）」——用例靠"把 agent 塞进组"来触发那条按角色说话的错误。
+   *   组退场 ⇒ 触发点没了，用例删。
+   *
+   *   ⚠️ 那条做法本身仍在使用（`describeBuiltinAgent`，设默认时按内置岗位说不同的话）：
+   *   **同一类拒绝要说清"拦下的到底是谁"**——错方向的解释比没有解释更费人。
+   */
 
-      for (const [agent, mustSay, mustNotSay] of [
-        [reviewer, /审核者/, /起草者/],
-        [drafter, /起草者/, /审核者/],
-      ] as const) {
-        const res = await fetch(`${url}/api/agent-groups`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: '试图组', members: [agent.id] }),
-        })
-        const text = await res.text()
-        assert.equal(res.status, 400, text)
-        const { error } = JSON.parse(text) as { error: string }
-        assert.match(error, /不能进智能体组/)
-        assert.match(error, mustSay, `文案该说清拦下的是「${agent.role}」：${error}`)
-        assert.doesNotMatch(error, mustNotSay, `不许把另一条的名字安在它身上：${error}`)
-      }
-    })
-  })
-
-  test('★★ 挂着内置标记但角色是业务角色 ⇒ 「恢复成默认值」**明说不知道**，不猜一套写进去', async () => {
+test('★★ 挂着内置标记但角色是业务角色 ⇒ 「恢复成默认值」**明说不知道**，不猜一套写进去', async () => {
     // 先按盘上的样子摆一条坏记录（角色既不是起草者也不是审核者），再起 daemon 读它。
     //
     // ⚠️ 光插 agent 不够：store 的 `#stores` 是**按 workspace 索引**建起来的
@@ -423,7 +433,9 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
       createdAt: now,
       updatedAt: now,
     })
-    const weird = mkAgent('reviewer', '奇怪的内置', '它是谁？', true)
+    // ⚠️ 2026-11（S4）：这条记录是"挂着内置标记、但**认不出是哪个岗位**"。
+    //   角色退场之后它就是一个缺 `builtinKind` 的内置记录（老数据/被手改过）。
+    const weird = mkAgent(undefined, '奇怪的内置', '它是谁？', true)
     await seed.insertAgent(weird)
     await seed.close()
 
@@ -432,8 +444,8 @@ describe('接口层：内置条目各按各的角色回答（审核者已下线�
       const text = await res.text()
       assert.equal(res.status, 400, text)
       const body = JSON.parse(text) as { code?: string; error: string }
-      assert.equal(body.code, 'builtin_role_unknown')
-      assert.match(body.error, /reviewer/, '文案要把它实际的角色说出来，否则使用者不知道去改哪条')
+      assert.equal(body.code, 'builtin_kind_unknown')
+      assert.match(body.error, /内置岗位/, '文案要说清缺的是"哪个岗位"，否则使用者不知道去改哪条')
       // 一条字都不许写进去（猜错的后果比"没恢复"严重得多）。
       // ★ 2026-11（D111）：列表返回组装后指令 ⇒ 断言正文原样（startsWith），
       //   追加的守则是运行时拼的，不是写入。

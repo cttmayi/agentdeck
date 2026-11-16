@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createAgent, identity, skills } from '../lib/stores.ts'
-  import type { AgentRole, ReviewStandard } from '../lib/api.ts'
+  import type { ReviewStandard } from '../lib/api.ts'
   import { showToast } from '../lib/view.ts'
   import PromptField from './PromptField.svelte'
   import { t, tx } from '../lib/i18n.ts'
@@ -46,8 +46,10 @@
   export let oncreated: () => void = () => {}
 
   let name = ''
-  let role: AgentRole = 'executor'
-  /**
+  /*
+   * ⚠️ 2026-11（S4，D127）：这里原来是 `let role: AgentRole = 'executor'`——新建
+   *   agent 时选「执行 / 审核」。**角色退场** ⇒ 新建的 agent 就是 agent，没有角色可问。
+   */  /**
    * ★ 分批第 47 批：**初值 = 工作区里的「默认工作守则」**（设置页那个框）。
    *
    * 为什么不在服务端"偷偷补"就完事：那样使用者看到的是**空输入框**，保存后
@@ -70,10 +72,13 @@
    *
    *    **整个能力从 agent 上撤掉了**：动作属于**这条链**（这队人的活判过之后允许
    *    做什么），不属于某个审核者个人——同一个审核者在不同组里本来就该配不同的
-   *    权限，挂在人身上只能共用一份。唯一权威是 `AgentGroup` 上那三个同名字段，
-   *    配的地方是**智能体组页的 ③ 行动**。
+   *    权限，挂在人身上只能共用一份。
    *
-   *    ★ 所以新建一个 agent 时**没有任何动作要配**，那个选择器在这页是纯噪音：
+   *    ⚠️ 2026-11（D123）：**动作能力本身也退场了**——判决只记录结论，不再触发任何
+   *    动作。所以这段注释原来的落点（"唯一权威是 `AgentGroup` 上那三个同名字段，
+   *    配的地方是智能体组页的 ③ 行动"）已经不存在：组上也没有动作可配。
+   *
+   *    ★ 新建一个 agent 时**没有任何动作要配**，那个选择器在这页是纯噪音：
    *      使用者会在"这个人能做什么"的地方勾一遍，然后在组里再勾一遍——两处长得
    *      一样、只有一处生效，是最坏的一种界面。
    *
@@ -99,11 +104,10 @@
     try {
       await createAgent({
         name,
-        role,
         instructions,
         skillIds: selectedSkills,
         runtimeKey,
-        reviewStandard: role === 'reviewer' ? reviewStandard : null,
+        reviewStandard,
         // ⚠️ 这里原来还送 `allowedActions` / `actionParams` / `debugActions`。
         //    那三个字段已经从 agent 上撤掉（动作只属于组），再送就是 400
         //    「不认识的字段」——所以整段删掉，而不是送空数组。
@@ -114,7 +118,6 @@
       reviewStandard = null
       // 回到表单的默认值
       selectedSkills = []
-      role = 'executor'
       showToast(tx('agents.created'))
       // 关不关由父组件决定（它是"正在新建"这个状态的持有者）
       oncreated()
@@ -128,7 +131,7 @@
 
 <!--
   ══════════════════════════════════════════════════════════════════
-  ★ 2026-10（与智能体组页同款布局）：没有 hero 头——进来就是表单卡片，
+  ★ 2026-10（与智能体详情页同款布局）：没有 hero 头——进来就是表单卡片，
   主操作（创建 / 取消）在底部 `.form-actions`。
   ══════════════════════════════════════════════════════════════════
 -->
@@ -144,11 +147,6 @@
       保留（单发任务跟随它），只是这里不再生成它。原位置见头部注释。
     -->
 
-  <!--
-      ★ 2026-10：新建表单与**智能体详情编辑态**同款——一张卡片（两列网格，
-         对齐组里「新建私有」的 `.grid-form`）。角色在卡片第一行（占整行），
-         名字 / CLI 一行，指令 / 技能一行；行动权限（审核者）占整行、默认收起。
-    -->
     <!--
       ⚠️ 2026-10（使用者的决定）：「由谁来审它」整段拿掉了——审核不再由执行者
       自己配，而是走智能体组（组的审核者）。老数据的 `reviewerAgentId` 原样
@@ -158,34 +156,14 @@
     <!--
       ★ 2026-10：新建表单与**智能体详情编辑态**同款——一张卡片（两列网格，
          对齐组里「新建私有」的 `.grid-form`）。角色在卡片第一行（占整行），
-         名字 / CLI 一行，指令 / 技能一行；行动权限（审核者）占整行、默认收起。
+         名字 / CLI 一行，指令 / 技能一行。（行动权限那一行 2026-11 随动作能力退场删了。）
     -->
     <section class="card agent-card">
-      <!-- 角色：占整行。用两个大按钮而不是下拉或单选圆圈——这是一个"选边"的
-           决定，值得占视觉重量；下拉会让人一扫而过。 -->
-      <div class="cell role-cell">
-        <span class="cell-label">{$t('agents.roleFieldLabel')}</span>
-        <div class="role-picker">
-          <button
-            type="button"
-            class="role-card"
-            class:active={role === 'executor'}
-            onclick={() => (role = 'executor')}
-          >
-            <strong>{$t('agents.roleExecutor')}</strong>
-            <span>{$t('agents.roleExecutorHint')}</span>
-          </button>
-          <button
-            type="button"
-            class="role-card"
-            class:active={role === 'reviewer'}
-            onclick={() => (role = 'reviewer')}
-          >
-            <strong>{$t('agents.roleReviewer')}</strong>
-            <span>{$t('agents.roleReviewerHint')}</span>
-          </button>
-        </div>
-      </div>
+      <!--
+        ⚠️ 2026-11（S4，D127）：这里原来有两个大按钮让使用者"选边"（执行 / 审核）。
+        **角色退场** ⇒ 新建一个 agent 不再问它是哪一种；这一页从"选角色 + 填名字"变成
+        "填名字"，所以整块删掉（不留一个只有一项的选择器）。
+      -->
 
       <label class="cell">
         {$t('agents.nameLabel')}
@@ -226,9 +204,7 @@
           bind:value={instructions}
           label={$t('agents.instructionsLabel')}
           rows={6}
-          placeholder={role === 'reviewer'
-            ? $t('agents.instructionsPlaceholderReviewer')
-            : $t('agents.instructionsPlaceholderExecutor')}
+          placeholder={$t('agents.instructionsPlaceholderPlain')}
         />
 
       </label>
@@ -249,28 +225,14 @@
             {/each}
           </div>
         {/if}
-        {#if role === 'reviewer'}
-          <span class="hint">
-            {$t('agents.reviewerSkillsHintBefore')}<strong>{$t('agents.instructionsLabel')}</strong>{$t('agents.reviewerSkillsHintAfter')}
-          </span>
-        {:else}
-          <span class="hint">{$t('agents.executorSkillsHint')}</span>
-        {/if}
+        <span class="hint">{$t('agents.executorSkillsHint')}</span>
       </div>
 
-      {#if role === 'reviewer'}
-        <!--
-          ★ 2026-09：「标准」并进上面的「指令」，不再单独设置（使用者的决定）。
-
-          ⚠️ 2026-10：这里原来还有一整段「行动权限」（`ActionPicker`）。**它搬到了
-          智能体组**（组配置页 ③ 行动）——见上面状态变量那段注释里的理由。这里只
-          留一句提示：判断依据写在「指令」里，而"判完允许动什么"在组上配。
-        -->
-        <div class="cell">
-          <p class="hint" data-standard-merged>{$t('agents.standardMergedHint')}</p>
-          <p class="hint">{$t('agents.actionsMovedToGroup')}</p>
-        </div>
-      {/if}
+      <!--
+        ⚠️ 2026-11（S4，D127）：那一格「标准已并进指令」原来只在**审核者**形态下出现
+        （`{#if role === 'reviewer'}`）。角色退场 ⇒ 新建表单里不再有那一格；老数据的
+        `reviewStandard` 仍然在详情页可见、可搬进「指令」。
+      -->
     </section>
 
   <!-- 主操作在底部（与组页同款）：创建 / 取消 -->
@@ -324,7 +286,7 @@
   /**
    * ★ 2026-10：新建表单与**智能体详情编辑态**同款——一张卡片（两列网格，
    *    布局对齐组里「新建私有」的 `.grid-form`）。角色在卡片第一行（整行），
-   *    名字 / CLI 一行，指令 / 技能一行；行动权限（审核者、整行、收起）。
+   *    名字 / CLI 一行，指令 / 技能一行。（行动权限那一行 2026-11 随动作能力退场删了。）
    *    `.card.agent-card` 的规则在 `AgentDetail.svelte` 里也有一份，两处一致。
    */
   .card.agent-card {
@@ -357,10 +319,8 @@
     grid-column: 1 / -1;
   }
 
-  /* 行动权限（审核者）：占整行（选择器"左选右配"，最需要宽度） */
-
-  /* 行动权限的展开/收起（2026-10：与顶栏「列表 / 看板」同款分段轨——
-     与组里「选已有的/新建私有」、任务里「智能体/智能体组」同一套样式） */
+  /* ⚠️ 2026-11（D123）：这里原来有两条样式——「行动权限占整行」与它的展开/收起
+     分段轨。动作能力退场后那一节不存在了，样式一并删。
 
 
   /**

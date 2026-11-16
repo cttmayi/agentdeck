@@ -40,9 +40,24 @@ describe('聊天的纯逻辑', () => {
 })
 
 describe('新对话的下拉：skill 是执行者的另一条入口', () => {
-  // Agent / Skill 的字段都很多，这里只填判据用得到的，其余按类型断言放过。
-  const agent = (id: string, name: string, skillIds: string[] = [], role = 'executor'): Agent =>
-    ({ id, name, skillIds, role }) as unknown as Agent
+  /**
+   * Agent / Skill 的字段都很多，这里只填判据用得到的，其余按类型断言放过。
+   *
+   * ⚠️ 2026-11（S4，D127）：第三个可选参数原来是 `role`，现在是**内置岗位**
+   *   （`builtinKind`）。不传 = 用户建的 agent（能聊天、能接任务）。
+   */
+  const agent = (
+    id: string,
+    name: string,
+    skillIds: string[] = [],
+    builtinKind?: Agent['builtinKind'],
+  ): Agent =>
+    ({
+      id,
+      name,
+      skillIds,
+      ...(builtinKind === undefined ? {} : { builtin: true, builtinKind }),
+    }) as unknown as Agent
   const skill = (id: string, slug: string): Skill => ({ id, slug, name: slug }) as unknown as Skill
 
   const executors = [agent('a1', '助手'), agent('a2', '算法艺术', ['s1']), agent('a3', '文章写作')]
@@ -78,24 +93,29 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
     )
   })
 
-  test('挂在审核者身上的 skill 算"没人挂"——审核者不能被选来聊天', () => {
-    const withReviewer = [...executors, agent('r1', '助手审核员', ['s2'], 'reviewer')]
-    const out = executorChoices(withReviewer, skills, null, true)
-    assert.equal(out.some((c) => c.value === 'agent:r1'), false, '审核者不能出现在下拉里')
-    // s2 仍然没有执行者挂 ⇒ 它的选项不带主人，选的时候落到当前那个人身上
+  test('挂在**内置岗位**身上的 skill 算"没人挂"——它们不能被选来聊天', () => {
+    /*
+     * ⚠️ 2026-11（S4，D127）：这条原来叫"挂在审核者身上的 skill 算没人挂"——判据是
+     *   `role === 'reviewer'` 的人不能出现在下拉里。**角色退场**之后，唯一进不来的
+     *   是**平台内置岗位**（起草者 / 记忆整理 / 沉淀审核者）；用户建的 agent 一律能聊。
+     */
+    const withDrafter = [...executors, agent('r1', '起草者（内置）', ['s2'], 'drafter')]
+    const out = executorChoices(withDrafter, skills, null, true)
+    assert.equal(out.some((c) => c.value === 'agent:r1'), false, '内置岗位不能出现在下拉里')
+    // s2 仍然没有"能聊的人"挂着 ⇒ 它的选项不带主人，选的时候落到当前那个人身上
     assert.deepEqual(
       applyChoice('skill:s2', out, { agentId: 'a1', skillId: '' }, null),
       { agentId: 'a1', skillId: 's2' },
     )
   })
 
-  test('★ 2026-11：智能体生成者（agent-maker）能出现在下拉里——它是唯一能聊天的内置角色', () => {
+  test('★ 2026-11：智能体生成者（agent-maker）能出现在下拉里——它是唯一能聊天的内置岗位', () => {
     // 与 memory-tidy / drafter / skill-reviewer 相反：生成者的全部工作就是聊天，
-    // 判据是 `=== 'executor' || === 'agent-maker'` 两个等值并起来（不写 !==）。
+    // 判据写**等值**（`builtinKind === undefined || === 'agent-maker'`），不写 !==。
     const withMaker = [...executors, agent('m1', '智能体生成者（内置）', [], 'agent-maker')]
     const out = executorChoices(withMaker, skills, null, true)
     assert.equal(out.some((c) => c.value === 'agent:m1'), true, '智能体生成者要在下拉里')
-    // 其它内置角色仍然进不来（起草者/记忆整理者）
+    // 其它内置岗位仍然进不来（起草者 / 记忆整理者）
     const withTidy = [...executors, agent('t1', '记忆整理者（内置）', [], 'memory-tidy')]
     const out2 = executorChoices(withTidy, skills, null, true)
     assert.equal(out2.some((c) => c.value === 'agent:t1'), false, '记忆整理者不能出现在下拉里')

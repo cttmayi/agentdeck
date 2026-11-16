@@ -244,7 +244,6 @@ describe('★ 从本地安装：装进来', () => {
           // ⑥ ★★ 真把它挂到一个执行者身上——这是使用者要的最后一环
           const agent = await makeAgent(url, {
             name: '执行者',
-            role: 'executor',
             skillIds: [found.id],
           })
           assert.equal(agent.status, 201, JSON.stringify(agent.body))
