@@ -40,11 +40,15 @@
   let tab: FirstSentenceKind = 'execute'
   let block: TemplateBlock = 'frame'
 
-  /** 三块各一份的草稿（空串 = 那一块用平台默认）。 */
+  /**
+   * 三块各一份的草稿（空串 = 那一块用平台默认）。
+   *
+   * ⚠️ 2026-11（D131）：这里原来还有第三档 `workflow`（编排）。两档合并——编排并进
+   *    「任务」——之后它没有宿主了，唯一的"档"就是 `execute` 与 `chat`。
+   */
   let drafts: Record<FirstSentenceKind, BlockTemplates> = {
     execute: { frame: '', identity: '', task: '' },
     chat: { frame: '', identity: '', task: '' },
-    workflow: { frame: '', identity: '', task: '' },
   }
   /**
    * 初始值**每次打开取一次**（不是"一辈子取一次"）。
@@ -85,7 +89,6 @@
     drafts = {
       execute: copyKit($templateKit.current.execute),
       chat: copyKit($templateKit.current.chat),
-      workflow: copyKit($templateKit.current.workflow),
     }
     seeded = true
     error = ''
@@ -200,7 +203,7 @@
           </button>
           <!--
             ⚠️ 2026-11（S6）：这里原来有第三个页签「审核」。审核 run 退场（D125）之后
-            服务端只认 execute / chat / workflow 三档，而这一页还画着它 ⇒ 点得开、
+            服务端只认 execute / chat 两档，而这一页还画着它 ⇒ 点得开、
             框能写、**保存什么都不发生**（服务端按 `ALL_KINDS` 遍历，`review` 根本
             不在里面）。那正是"接口接受了、行为上不存在"，所以页签一并删掉。
           -->
@@ -213,15 +216,12 @@
             {$t('tpl.settings.tabChat')}
             {#if kindDirty('chat')}<span class="dot">●</span>{/if}
           </button>
-          <button
-            type="button"
-            class="tab"
-            class:active={tab === 'workflow'}
-            onclick={() => (tab = 'workflow')}
-          >
-            {$t('tpl.settings.tabWorkflow')}
-            {#if kindDirty('workflow')}<span class="dot">●</span>{/if}
-          </button>
+          <!--
+            ⚠️ 2026-11（D131）：这里原来还有第三个页签「编排」。它与「任务」的默认模版
+            除一级标题外**逐字相同**，所以并进「任务」了——"是不是编排发起的"与
+            "这段话该说什么"无关。想给编排的 agent 单独交代，用那条流程的任务书与
+            那个 agent 的「指令」。
+          -->
         </div>
 
         <!-- 第二排：块页签（① 框架 / ② 身份 / ③ 任务） -->

@@ -552,11 +552,12 @@ bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
 
 ### 2.6 第一句话的模版（D32）
 
-那段文字**可以整段换掉**，而且是**全局配置**：每条链路（执行 / 审核 / 聊天）下有**三个
-独立的模版框**（`BlockTemplates`：① 框架 / ② 身份 / ③ 任务），挂在 workspace 上
-（老键 `executeTemplate` / `reviewTemplate` / `chatTemplate` = **框架框**，新键
-`*IdentityTemplate` / `*TaskTemplate` 六个 = 身份 / 任务框；空 = 平台默认），
-**一次设定对所有 agent 生效**——包括已经建好的那些。
+那段文字**可以整段换掉**，而且是**全局配置**：**两档**（**任务 / 聊天**，2026-11 D131——更早的
+"审核"随 D125 退场、"编排"并进"任务"）每档**三个独立的模版框**（`BlockTemplates`：① 框架 /
+② 身份 / ③ 任务），挂在 workspace 上（老键 `executeTemplate` / `chatTemplate` = **框架框**，
+新键 `*IdentityTemplate` / `*TaskTemplate` = 身份 / 任务框；空 = 平台默认），
+**一次设定对所有 agent 生效**——包括已经建好的那些。老 workspace 里那三组"审核 / 编排"的
+键仍在协议里（老数据要读得出来），但没有代码再读它们。
 
 > ★ 它曾经被做成"每个 agent 一份"，被使用者当场纠正："那是通用配置，一旦设定就应该应用到
 > 所有的 Agent"。两者的区别在这一层看得很清楚：模版是**平台怎么交代一次 run** 的骨架，

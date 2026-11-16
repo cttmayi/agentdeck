@@ -128,8 +128,8 @@ export const templatesText = {
   },
   'tpl.settings.hint.threeBlocks.strong': { zh: '三块', en: 'three blocks' },
   'tpl.settings.hint.threeBlocks.after': {
-    zh: '：① 框架（每轮都一样）、② 身份（这个智能体是谁）、③ 任务（这次要干的事）。三条链路（执行 / 审核 / 聊天）各有一套，在下面按「链路 × 块」分别设置。',
-    en: ': ① the frame (the same every run), ② the identity (who this agent is), ③ the task (what this run is to do). Each of the three kinds (execute / review / chat) has its own set — configure them below by kind × block.',
+    zh: '：① 框架（每轮都一样）、② 身份（这个智能体是谁）、③ 任务（这次要干的事）。两档（任务 / 聊天）各有一套，在下面按「档 × 块」分别设置。',
+    en: ': ① the frame (the same every run), ② the identity (who this agent is), ③ the task (what this run is to do). Each of the two kinds (tasks / chat) has its own set — configure them below by kind × block.',
   },
   'tpl.settings.hint.blocksPlatform.before': {
     zh: '三块的内容仍由平台组装（材料标记、标准合成这些安全件不交给模版），模版只决定',
@@ -208,20 +208,24 @@ export const templatesText = {
     en: '{{task}} is required',
   },
   'tpl.settings.hint.requiredTask.after': {
-    zh: '：少了它这条 run 就没有任务（执行没有活、审核没有可审、聊天没有可答）。',
-    en: ': without it the run has no task at all.',
+    zh: '：少了它这条 run 就没有内容（任务没有要做的活、聊天没有要答的话）。',
+    en: ': without it the run has no content at all.',
   },
   /**
    * 第三个页签：**聊天**那一份（2026-09）。
    *
-   * ⚠️ 它不是"任务的又一次投递"：任务那份框架含 run/对象头、"完成后给出一份报告"
-   *    与判决契约，而聊天不产出判决、也没有报告可交。所以它有自己的 ①。
+   * ⚠️ 它不是"任务的又一次投递"：任务那份框架是"被交代一件事"的工作说明书
+   *    （run 头、交活儿的要求），而聊天就是说话。所以它有自己的 ①。
+   *    ⚠️ 2026-11（D131）：另一个页签「编排」并进「任务」⇒ 只剩这两档。
    */
   'tpl.settings.tabChat': { zh: '聊天', en: 'Chat' },
-  'tpl.settings.tabWorkflow': { zh: '编排', en: 'Workflow' },
+  // ⚠️ 2026-11（D131）：'tpl.settings.tabWorkflow'（编排）随两档合并一起删——那一档
+  //    并进「任务」，页签不存在了。留着词条就是留一个随时会被渲染出来的死文案。
 
   // ── WorkspaceSettings：页签与底部 ──
-  'tpl.settings.tabExecute': { zh: '执行', en: 'Execute' },
+  // ⚠️ 2026-11（D131）：中文名从「执行」改成「任务」——使用者："本质就是在聊天页用
+  //    『聊天』，在任务页用『任务』"。档名要与他脑子里的那个词一致。
+  'tpl.settings.tabExecute': { zh: '任务', en: 'Tasks' },
   // ⚠️ 2026-11（S6）：'tpl.settings.tabReview' 随设置页那个页签一起删了——
   //    审核模版没有消费者之后，留着这个词条就是留一个随时会被渲染出来的死文案。
   'tpl.settings.kitUnavailable': {

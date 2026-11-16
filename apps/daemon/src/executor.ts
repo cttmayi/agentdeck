@@ -1075,34 +1075,23 @@ export class RunExecutor {
       //   store 不做 schema 迁移，加字段之前建的 workspace 读回来没有后加的那六个键，
       //   所以在 `?? ''` 这一层补齐——**与界面上显示的那份走同一段代码**
       //   （`readWorkspaceSettings` 也这么读），否则"界面显示的"与"真的投递的"会分叉。
-      const templates: {
-        execute: BlockTemplates
-        review: BlockTemplates
-        chat: BlockTemplates
-        workflow: BlockTemplates
-      } = {
+      const templates: Record<FirstSentenceKind, BlockTemplates> = {
         execute: {
           frame: workspace?.executeTemplate ?? '',
           identity: workspace?.executeIdentityTemplate ?? '',
           task: workspace?.executeTaskTemplate ?? '',
         },
-        review: {
-          frame: workspace?.reviewTemplate ?? '',
-          identity: workspace?.reviewIdentityTemplate ?? '',
-          task: workspace?.reviewTaskTemplate ?? '',
-        },
-        // 聊天那一份（2026-09 加的第三份）。老 workspace 里没有这些键 ⇒ 空 = 平台默认。
+        // 聊天那一份（2026-09 加的）。老 workspace 里没有这些键 ⇒ 空 = 平台默认。
         chat: {
           frame: workspace?.chatTemplate ?? '',
           identity: workspace?.chatIdentityTemplate ?? '',
           task: workspace?.chatTaskTemplate ?? '',
         },
-        // 编排那一份（2026-11 第四份）。空 = 平台默认。
-        workflow: {
-          frame: workspace?.workflowTemplate ?? '',
-          identity: workspace?.workflowIdentityTemplate ?? '',
-          task: workspace?.workflowTaskTemplate ?? '',
-        },
+        /*
+         * ⚠️ 2026-11（D131）：「编排」那一份（`workflowTemplate` 三键）并进 execute，
+         *   这里**不再读**它们。老 workspace 里存过的内容原样留在库里、不被投递
+         *   （见 `FirstSentenceKind` 上面那段与 D131）。
+         */
       }
       // ★ 回答语言（D39）：界面语言决定模型用什么语言答复。**prompt 本身不翻译**，
       //   只加一条"请用 X 回答"的指令——使用者看不懂中文答复，但判决契约与材料
@@ -1151,19 +1140,12 @@ export class RunExecutor {
         identity: migrateTemplate(t.identity ?? '').next,
         task: migrateTemplate(t.task ?? '').next,
       })
-      const migrated = {
+      const migrated: Record<FirstSentenceKind, BlockTemplates> = {
         execute: migratedBlocks(templates.execute),
-        review: migratedBlocks(templates.review),
         chat: migratedBlocks(templates.chat),
-        workflow: migratedBlocks(templates.workflow ?? {}),
       }
-      // 只有框架框里可能出现退役变量（身份/任务框是新字段）；审核那条老链路上也有
-      const retiredSeen = [
-        ...new Set([
-          ...migrateTemplate(templates.execute.frame ?? '').removed,
-          ...migrateTemplate(templates.review.frame ?? '').removed,
-        ]),
-      ]
+      // 只有框架框里可能出现退役变量（身份/任务框是新字段）
+      const retiredSeen = [...new Set(migrateTemplate(templates.execute.frame ?? '').removed)]
       if (retiredSeen.length > 0) {
         await this.#note(
           runId,
@@ -1235,34 +1217,21 @@ export class RunExecutor {
             run.agentId as never,
           )
         : []
-      // ★ 2026-11 编排链路：这个 run 是不是编排发起的（issue source = workflow）？
-      //   是 → 用「编排」那份模版（框架+身份+任务）；否则按执行/审核/聊天。
-      //   ⚠️ 审核 run 的 subject 是 **run**（被审执行 run）——要顺着它查 issue；
-      //     只查 issue 的话审核 run 永远识别不出编排（实测踩过：审核员收到
-      //     组跑审核模板、输出判决 JSON）。
-      const sourceKindOfRun = async (runId: string): Promise<string | null> => {
-        const r = await this.#deps.store.getRun(runId as never)
-        if (!r) return null
-        // Run 实体带 issueId（可空）——派生的 subject 之外再兜一层
-        const issueId =
-          (r as { issueId?: string | null }).issueId ??
-          (r.subject.type === 'issue' ? r.subject.id : null)
-        if (!issueId) return null
-        const issue = await this.#deps.store.getIssue(issueId as never)
-        return issue?.source?.kind ?? null
-      }
-      const workflowSource =
-        req.subject.type === 'issue'
-          ? ((await this.#deps.store.getIssue(req.subject.id as never))?.source?.kind ?? null) === 'workflow'
-          : req.subject.type === 'run'
-            ? (await sourceKindOfRun(req.subject.id)) === 'workflow'
-            : false
+      /*
+       * ⚠️ 2026-11（D131）：这里原来有一段"这个 run 是不是编排发起的"判定
+       *   （`sourceKindOfRun` + `workflowSource`：顺着 issue / run 查
+       *   `source.kind === 'workflow'`），用途只有一个——让编排的 run 用**编排模版**。
+       *   两档合并（编排并进「任务」）之后它算出来的东西没人用了 ⇒ 整段删。
+       *
+       *   ⚠️ 那两年的两个坑仍然值得记：
+       *     · 编排的**审核** run 的 subject 是 `run`（被审那条执行 run），只查 issue
+       *       会漏掉它 ⇒ 审核员收到组跑模版、输出判决 JSON（真实缺陷）；
+       *     · 空模版的默认也要跟着换，否则会落回执行默认（# 任务）——使用者实测踩过。
+       *   现在没有第二份默认可回落，这两个坑一起消失。
+       */
       // ⚠️ 2026-11（D125）：`req.kind` 只剩 `'execute'` 一种（审核 run 退场），
-      //   第一个参数原样传它——判据仍由 `firstSentenceKindFor` 一处给出。
-      const templateKind = firstSentenceKindFor(
-        { kind: 'execute', subject: req.subject },
-        { workflow: workflowSource },
-      )
+      //   判据仍由 `firstSentenceKindFor` 一处给出。
+      const templateKind = firstSentenceKindFor({ kind: 'execute', subject: req.subject })
       const delivery: Delivery =
         templateKind === 'chat'
           ? // ★ 对话 / 沉淀：**①②③ 都发**（2026-09 的决定）——
@@ -1281,15 +1250,6 @@ export class RunExecutor {
               language,
               template: migrated.chat,
             }, mode)
-          /*
-           * ⚠️ 2026-11（D125）：这里原来是两个分支——`templateKind === 'workflow' &&
-           *   req.review`（编排起的审核 run，用编排模版）与 `templateKind === 'review'
-           *   && req.review`（组/任务审核，用审核模版）。
-           *
-           *   审核 run 退场 ⇒ 两个分支都失去对象。**编排的审核这一趟还在**，但它现在
-           *   就是一条**普通执行 run**（编排把"请你把关"写进任务书），走 `execute`
-           *   分支与编排模版——同一条路，不再有第二种 run 形状。
-           */
           : renderDelivery({
               kind: 'execute',
               runId,
@@ -1299,11 +1259,12 @@ export class RunExecutor {
               instructions: agentConfig?.instructions ?? null,
               memory: memoryItems,
               language,
-              // 编排 run 用编排模版（框架+身份+任务）；否则执行模版。
-              // 空模板的**默认**也要跟着换（workflow → # 编排任务），否则空模板
-              // 会落回执行默认（# 任务）——使用者实测踩过。
-              template: templateKind === 'workflow' ? migrated.workflow : migrated.execute,
-            }, mode, templateKind === 'workflow' ? 'workflow' : undefined)
+              // 派活全用**同一份**模版（任务 / 定时任务 / 编排的每个节点，含把关者）。
+              // ⚠️ 2026-11（D131）：这里原来还有一个"编排用 `migrated.workflow` + 传
+              //   `defaultKind = 'workflow'`（空模板回落到 # 编排任务）"的分支，随两档
+              //   合并一起删了。
+              template: migrated.execute,
+            }, mode)
 
       // ★ 全文进日志，**不截断**。
       //

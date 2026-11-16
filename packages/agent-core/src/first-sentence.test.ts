@@ -226,7 +226,8 @@ describe('第一句话：插进去的值不被重扫（安全性质）', () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe('第一句话：默认模版', () => {
-  const KINDS = ['execute', 'chat', 'workflow'] as const
+  // ⚠️ 2026-11（D131）：三档 → 两档（编排并进「任务」）。
+  const KINDS = ['execute', 'chat'] as const
 
   test('★ 三块默认模版自己必须通过校验（否则「填入默认模版」会立刻被拒）', () => {
     for (const kind of KINDS) {
@@ -292,7 +293,7 @@ describe('第一句话：默认模版', () => {
    */
 
   test('★ 护栏的措辞不许提「上面／下面」（三块重排之后位置变了）', () => {
-    for (const kind of ['execute', 'chat', 'workflow'] as const) {
+    for (const kind of ['execute', 'chat'] as const) {
       assert.doesNotMatch(
         DEFAULT_TEMPLATES[kind].frame ?? '',
         /上面描述的事|按上面的审核标准/,
@@ -397,18 +398,20 @@ describe('第一句话：模版校验（坏模版进不了库）', () => {
     assert.equal(validateTemplate('execute', 'identity', '## 角色\n\n{{identity}}').ok, true)
     assert.equal(validateTemplate('execute', 'task', '## 干活\n\n{{task}}').ok, true)
     // 三种链路都认这两个变量
-    for (const kind of ['execute', 'chat', 'workflow'] as const) {
+    for (const kind of ['execute', 'chat'] as const) {
       assert.equal(validateTemplate(kind, 'identity', '{{identity}}').ok, true)
       assert.equal(validateTemplate(kind, 'task', '{{task}}').ok, true)
     }
   })
 
-  test('★ {{task}} 对三种链路都必需（缺了这条 run 就没有任务）', () => {
-    for (const kind of ['execute', 'chat', 'workflow'] as const) {
+  test('★ {{task}} 对两档都必需（缺了这条 run 就没有内容）', () => {
+    for (const kind of ['execute', 'chat'] as const) {
       const check = validateTemplate(kind, 'task', '## 干这个')
       assert.equal(check.ok, false, `${kind} 任务框没有 {{task}} 该被拒`)
       assert.match(check.ok ? '' : check.error, /task/, '要说清缺的是哪个')
-      assert.match(check.ok ? '' : check.error, /没有任务/, '要解释缺了会怎样')
+      // ⚠️ 措辞跟着实现走（D131 之后是"没有内容"）：断言认的是**说清了后果**这件事，
+      //   而不是某一句原话——所以这里放宽成"没有"，同时底下那条仍钉住"它说清了两边"。
+      assert.match(check.ok ? '' : check.error, /没有/, '要解释缺了会怎样')
     }
     // 只出现在条件段里也不行（段不成立时它不渲染）
     const inSection = validateTemplate('execute', 'task', '{{#skills}}\n{{task}}\n{{/skills}}')
@@ -448,18 +451,20 @@ describe('第一句话：模版校验（坏模版进不了库）', () => {
       assert.ok(['frame', 'identity', 'task'].includes(v.block), `${v.name} 要有块归属`)
     }
     // 每一条都必须在渲染时真的有值：把某个 (kind, block) 的全部变量写满，渲染后不该留 `{{`
-    for (const kind of ['execute', 'chat', 'workflow'] as const) {
+    for (const kind of ['execute', 'chat'] as const) {
       for (const block of ['frame', 'identity', 'task'] as const) {
         const names = templateVariablesFor(kind, block).map((v) => v.name)
         const template = names.map((n) => `${n}={{${n}}}`).join('\n')
         const check = validateTemplate(kind, block, template)
         assert.equal(check.ok, true, `${kind} ${block} 的"写满全部变量"模版该合法：${check.ok ? '' : check.error}`)
+        // ⚠️ 2026-11（D131）：`buildBlocks` 的第二个参数（`defaultKind`，编排那份默认）
+        //   随两档合并删掉了——现在默认只由 input.kind 决定。
         const blocks = buildBlocks({
           ...(kind === 'chat'
             ? { ...SAMPLE_EXECUTE_INPUT, kind: 'chat' as const, prompt: '你好' }
             : SAMPLE_EXECUTE_INPUT),
           template: { [block]: template },
-        }, kind)
+        })
         assert.doesNotMatch(blocks[block], /\{\{/, `${kind} ${block}：不该有变量残留（说明表里有条目没被填值）`)
       }
     }
@@ -717,21 +722,19 @@ describe('firstSentenceKindFor：三份模版，没有第四份给沉淀', () =>
     assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'skill-draft' } }), 'chat')
   })
 
-  test('★ 编排链路（2026-11）：workflow 标记 → 编排模版（优先于执行/聊天）', () => {
-    // 编排 run（issue source = workflow）——用编排模版
-    assert.equal(
-      firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }, { workflow: true }),
-      'workflow',
-    )
-    // 没标记 = 照旧（组/任务）
-    assert.equal(
-      firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }),
-      'execute',
-    )
-    // 编排模版默认存在（框架+身份+任务）
-    assert.ok((DEFAULT_TEMPLATES.workflow.frame ?? '').length > 0)
-    assert.equal(DEFAULT_TEMPLATES.workflow.identity, '{{identity}}')
-    assert.equal(DEFAULT_TEMPLATES.workflow.task, '{{task}}')
+  /*
+   * ⚠️ 2026-11（D131）：这里原来有一条「编排链路：`opts.workflow` 标记 → 编排模版」的用例。
+   *   两档合并（编排并进「任务」）⇒ 那个入参与那一档模版一起删，断言换成下面这条
+   *   **反向**的：编排的 run 与普通任务 run **走同一档**（这正是合并的定义——
+   *   "是不是编排发起的"不再影响用哪份模版）。
+   */
+  test('★ 编排的 run 与普通任务 run 用**同一档**模版（D131：两档合并）', () => {
+    // 编排的节点（issue 来源是 workflow 的那条 issue）与任务页建的任务，subject 都是 issue
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'issue' } }), 'execute')
+    // 编排的把关者也是普通执行 run ⇒ 同样落到「任务」这一档
+    assert.equal(firstSentenceKindFor({ kind: 'execute', subject: { type: 'run' } }), 'execute')
+    // 编排特有那一档不存在了（谁把它加回来，这条会红）
+    assert.deepEqual(Object.keys(DEFAULT_TEMPLATES).sort(), ['chat', 'execute'])
   })
 })
 

@@ -100,6 +100,14 @@ export const Workspace = z.object({
    * 编排 = 代码写死流程（框架 + 身份 + 任务就能跑），审核 run 的「任务」=
    * 被审产出（不加组跑那套"审核任务书"包装）。空 = 平台默认。
    */
+  /*
+   * ⚠️ 2026-11（D131）：这三个键是**编排那一档**的（框架 / 身份 / 任务）。两档合并——
+   *   编排并进「任务」（`executeTemplate` 三键）——之后**没有代码再读它们**。
+   *
+   *   为什么字段还留着：删字段等于让老 workspace 整条读不出来（与 `reviewTemplate`、
+   *   `role`、`allowedActions` 同一处置）。老库里存过的内容原样留着、不再投递；
+   *   想恢复"编排单独一份模版"时，把这一段加回读路径即可（D131 里写了代价）。
+   */
   workflowTemplate: z.string().default('').optional(),
   workflowIdentityTemplate: z.string().default('').optional(),
   workflowTaskTemplate: z.string().default('').optional(),

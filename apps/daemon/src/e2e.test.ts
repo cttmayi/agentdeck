@@ -2910,8 +2910,18 @@ describe('编排：任务参数化（{{task}} 占位符）', () => {
  *   真 API 全链路：run 到 waiting-human → POST reject（带意见）→ 引擎打回重跑
  *   （步骤链重置、意见附加进下一轮任务）→ 再次 waiting-human → confirm → done。
  */
-describe('编排 v5：第一句话用编排模版', () => {
-  test('编排 run 的执行第一句话是「# 编排任务」（不是执行模版「# 任务」）', async () => {
+/**
+ * ⚠️ 2026-11（D131）：这里原来断言的是**反向**的事——"编排 run 的第一句话是
+ *   「# 编排任务」而不是执行模版「# 任务」"（那时有两档模版，编排那一档的默认
+ *   只把一级标题换掉）。两档合并（编排并进「任务」）之后，"这条 run 是不是编排
+ *   发起的"不再影响用哪份模版，所以断言翻过来：**编排的 run 与任务 run 用同一份**。
+ *
+ *   这条仍值得钉住的原因没有变：它证明编排真的**走完了整条投递链**（引擎 → 提交
+ *   run → 执行器 → 第一句话进日志）。模版档分几档是"用哪一份"的问题，与"有没有
+ *   投递出去"是两件事。
+ */
+describe('编排 v5：第一句话用「任务」那份模版（D131：两档合并）', () => {
+  test('编排 run 的执行第一句话是「# 任务」（与任务 run 同一份，不再有编排专属档）', async () => {
     const backend = new FakeBackend()
     const d = await startDaemon({
       dataDir: await makeTempDir('e2e-wf-tpl'),
@@ -2958,13 +2968,14 @@ describe('编排 v5：第一句话用编排模版', () => {
       assert.equal(await waitStatus(rid, ['done', 'failed']), 'done')
       const runAfter = await get<{ run: { steps: Array<{ runIds: string[] }> } }>(`/api/workflow-runs/${rid}`)
       const execRunId = runAfter.run.steps[0]!.runIds[0]!
-      // 执行 run 的第一句话（A 档：system + 用户消息）——编排模版框架是「# 编排任务」
+      // 执行 run 的第一句话（A 档：system + 用户消息）——框架是「# 任务」
       const msgs = await get<{ messages: Array<{ type: string; content: string }> }>(
         `/api/runs/${execRunId}/messages`,
       )
       const all = msgs.messages.map((m) => m.content).join('\n')
-      assert.ok(all.includes('# 编排任务'), '编排 run 的第一句话用编排模版（# 编排任务）')
-      assert.ok(!all.includes('# 任务\n\n- run：`') || all.includes('# 编排任务'), '不是执行模版')
+      assert.ok(all.includes('# 任务'), '编排 run 的第一句话走「任务」那份模版')
+      // 编排专属那一档连标题都不该再出现（谁把 workflow 档加回来，这条会红）
+      assert.ok(!all.includes('# 编排任务'), '不该再有「# 编排任务」——那是 D131 删掉的独立档')
     } finally {
       await d.close()
     }

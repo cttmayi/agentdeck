@@ -420,18 +420,20 @@ export interface ReviewStandard {
 
 /** 第一句话模版的两个角色（D32）。 */
 /**
- * 三条链路各有一套模版：执行 / **聊天** / 编排。
- * 聊天那份是它自己的 ① 框架——任务那份含 run/对象头与判决契约，灌进聊天是错的。
+ * **两档**模版（2026-11，D131）：`execute`（界面叫**任务**）与 `chat`（聊天）。
  *
- * ⚠️ 2026-11（S6，D125）：这里原来还有 `'review'`（审核那一份）。审核 run 退场之后
- *    daemon 侧的 `FirstSentenceKind` 只剩三个，**这一份却还留着 `'review'`** ⇒
- *    设置页因此还画着一个「审核」页签：点得开、框能写、**保存却什么都不发生**
- *    （服务端只按 `ALL_KINDS` 遍历）。那正是本仓库第一号缺陷"接口接受了、行为上
- *    不存在"——所以类型跟着 daemon 一起收窄，页签也随之删掉。
- *    workspace 上 `reviewTemplate` 那三个**老键**仍然留在协议里（老数据要读得出来），
- *    只是没有界面再去写它们。
+ * 心智模型：**在聊天页跟它说话用「聊天」，派给它一件事用「任务」**。
+ *
+ * ⚠️ 这里的类型必须与 daemon 的 `packages/agent-core/src/first-sentence.ts` 严格一致
+ *    ——两边分叉过一次，代价是一个"点得开、能写、**保存什么都不发生**"的死页签
+ *    （服务端只按 `ALL_KINDS` 遍历，多出来的那一档被静默忽略）。所以现在：
+ *      · `'review'`（审核）随审核 run 退场（D125）删掉；
+ *      · `'workflow'`（编排）并进 `execute`（D131）删掉——它的默认与任务那份
+ *        除一级标题外逐字相同，本来就没承载独立语义。
+ *    workspace 上 `reviewTemplate*` / `workflowTemplate*` 那几个**老键**仍留在协议里
+ *    （老数据要读得出来），只是没有界面再去写它们。
  */
-export type FirstSentenceKind = 'execute' | 'chat' | 'workflow'
+export type FirstSentenceKind = 'execute' | 'chat'
 
 /**
  * 三块各自的模版框（2026-10 三框改造）：① 框架 / ② 身份 / ③ 任务。

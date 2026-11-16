@@ -985,9 +985,6 @@ async function readWorkspaceSettings(
   reviewTaskTemplate: string
   chatIdentityTemplate: string
   chatTaskTemplate: string
-  workflowTemplate: string
-  workflowIdentityTemplate: string
-  workflowTaskTemplate: string
   defaultAgentId: string | null
   locale: Locale
   /** D77：claude 的 WebSearch/WebFetch 开关。老数据没有这个键 ⇒ 默认开。 */
@@ -1015,9 +1012,11 @@ async function readWorkspaceSettings(
     reviewTaskTemplate: workspace?.reviewTaskTemplate ?? '',
     chatIdentityTemplate: workspace?.chatIdentityTemplate ?? '',
     chatTaskTemplate: workspace?.chatTaskTemplate ?? '',
-    workflowTemplate: workspace?.workflowTemplate ?? '',
-    workflowIdentityTemplate: workspace?.workflowIdentityTemplate ?? '',
-    workflowTaskTemplate: workspace?.workflowTaskTemplate ?? '',
+    /*
+     * ⚠️ 2026-11（D131）：`workflowTemplate` / `workflowIdentityTemplate` /
+     *   `workflowTaskTemplate` 三个键并进 execute，这里**不再读**（老库里存过的
+     *   内容原样留着、不被投递）。协议里那三个字段也留着——老 workspace 要读得出来。
+     */
     defaultAgentId: workspace?.defaultAgentId ?? null,
     // 老数据没有这个键 ⇒ 中文（本项目的默认语言，也是所有既有数据的语言）
     locale: workspace?.locale ?? DEFAULT_LOCALE,
@@ -1139,8 +1138,12 @@ function parseReviewStandard(
  *   或第三块时，写入口自动就认识它。
  */
 function kindNameForApi(kind: FirstSentenceKind): string {
-  // ⚠️ 2026-11（D125）：`review`（审核模版）随审核 run 一起退场，只剩三种档。
-  return kind === 'execute' ? '执行' : kind === 'workflow' ? '编排' : '聊天'
+  /*
+   * ⚠️ 2026-11（D131）：档名与**界面上那个页签**一致——`execute` 现在叫「任务」
+   *   （原叫「执行」）。报错里说"执行模版"、界面上写着"任务"，人会以为说的是两样东西。
+   *   `workflow`（编排）与更早的 `review`（审核）都已并进 / 退场。
+   */
+  return kind === 'execute' ? '任务' : '聊天'
 }
 
 function blockNameForApi(block: TemplateBlock): string {
@@ -3446,19 +3449,15 @@ async function injectedSkillsOf(
           task: stored.executeTaskTemplate,
         },
         /*
-         * ⚠️ 2026-11（D125）：这里原来还有一整档 `review`（`reviewTemplate` /
-         * `reviewIdentityTemplate` / `reviewTaskTemplate`）。审核第一句话退场 ⇒
-         * 设置页只剩「执行 / 编排 / 聊天」三档模版。
+         * ⚠️ 2026-11（D131）：「编排」那一档（`workflowTemplate` 三键）并进 execute，
+         *   不再出现在这个响应里。老 workspace 里存过的内容原样留在库里、不被投递。
+         *
+         * ⚠️ 更早（D125）这里还整档删过 `review`（审核模版）。
          */
         chat: {
           frame: stored.chatTemplate,
           identity: stored.chatIdentityTemplate,
           task: stored.chatTaskTemplate,
-        },
-        workflow: {
-          frame: stored.workflowTemplate ?? '',
-          identity: stored.workflowIdentityTemplate ?? '',
-          task: stored.workflowTaskTemplate ?? '',
         },
       }
       /**
@@ -3486,23 +3485,14 @@ async function injectedSkillsOf(
       }
       const executed = migrateKind(flat.execute)
       const chatted = migrateKind(flat.chat)
-      const workflowed = migrateKind(flat.workflow)
-      const current = {
-        execute: executed.next,
-        chat: chatted.next,
-        workflow: workflowed.next,
-      }
+      const current = { execute: executed.next, chat: chatted.next }
       sendJson(res, 200, {
         defaults: DEFAULT_TEMPLATES,
         variables: TEMPLATE_VARIABLES,
         // ★ 当前生效的那几份（空 = 平台默认）。它是**全局配置**，
         //   与任何 agent 无关——所以这里不按 agent 分。
         current,
-        adjustments: {
-          execute: executed.perBlock,
-          chat: chatted.perBlock,
-          workflow: workflowed.perBlock,
-        },
+        adjustments: { execute: executed.perBlock, chat: chatted.perBlock },
       })
       return
     }
@@ -3532,15 +3522,10 @@ async function injectedSkillsOf(
           task: 'executeTaskTemplate',
         },
         /*
-         * ⚠️ 2026-11（D125）：审核模版三块退场（同 GET 那段说明）。workspace 上
-         * 那三个老键（`reviewTemplate` / `reviewIdentityTemplate` /
-         * `reviewTaskTemplate`）原样留着不被读——删字段等于让老数据整条读不出来。
+         * ⚠️ 2026-11（D131）：`workflow` 那一档并进 execute ⇒ 不再有任何代码写
+         * `workflowTemplate` / `workflowIdentityTemplate` / `workflowTaskTemplate`。
+         * 协议里那三个字段与 `review*` 一样留着：**删字段等于让老数据整条读不出来**。
          */
-        workflow: {
-          frame: 'workflowTemplate',
-          identity: 'workflowIdentityTemplate',
-          task: 'workflowTaskTemplate',
-        },
         chat: {
           frame: 'chatTemplate',
           identity: 'chatIdentityTemplate',

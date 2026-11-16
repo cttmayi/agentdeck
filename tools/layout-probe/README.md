@@ -54,7 +54,8 @@ pnpm run probe:layout -- --keep
 ★ 顺带抓到的两个**真缺陷**（都不是布局，但只有跑探针才看得见）：
 1. **设置页有一个「审核」页签，点了保存什么都不发生**——daemon 侧 `FirstSentenceKind` 早就是
    `execute | chat | workflow`，Web 那份类型还留着 `'review'`，于是页签画得出来、框能写、保存
-   被服务端静默忽略。S6 一起删（类型收窄 + 页签 + 词条），并留了一条探针判据守"三档"。
+   被服务端静默忽略。S6 一起删（类型收窄 + 页签 + 词条），并留了一条探针判据守"页签数 =
+   服务端认识的那几档"（现在是**两个**：任务 / 聊天——D131 把"编排"并进了"任务"）。
 2. **两条死词条**：`agents.standardLegacyNoticeFromSkill` / `agents.headlineNoInstructions`
    全仓库没有渲染点（`i18n.test.ts` 的死词条检查一直红着）——随那两段界面一起删。
 

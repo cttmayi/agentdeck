@@ -136,21 +136,37 @@ export interface ToolBrief {
   dir: string
 }
 
-/** 两条链路各有一套模版（D32）。 */
 /**
- * 三条链路各有一套模版（D32；`chat` 是 2026-09 加的）。
+ * **两档**模版（2026-11，D131）：`execute`（界面叫**任务**）与 `chat`（聊天）。
  *
- * `chat` 的模版就是聊天的 **① 框架**——任务那份框架里有 run/对象头、"报告"要求与
- * 判决契约，灌进聊天是错的（聊天不产出判决，也没有报告可交）。
- */
-export type FirstSentenceKind = 'execute' | 'chat' | 'workflow'
-/*
- * ⚠️ 2026-11（D125）：这里原来还有第四个成员 `'review'`（以及它那一整套模版）。
- *   **审核 run 与判决一起退场** ⇒ 没有"审核"这种第一句话。
+ * 心智模型就一句话：**在聊天页跟它说话用「聊天」，派给它一件事用「任务」**。
  *
- *   ⚠️ 编排的审核这一趟还在，但它是一条**普通执行 run**（编排把"请你把关"写进
- *   任务书）⇒ 用 `execute`（编排场景用 `workflow`，那是同一形状的另一份模版）。
+ * | 档 | 谁在用 |
+ * |---|---|
+ * | `chat` | 聊天页的每一轮、沉淀页的起草（那是"跟装着技能的智能体说话"）、聊天页的「整理成记忆」 |
+ * | `execute` | 任务页新建的任务、任务页的「反馈」再派、**定时任务**到点触发、**编排的每个节点**（含把关者） |
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * 为什么从三档并回两档（D131）
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 2026-11 曾经有第三档 `'workflow'`（编排专用）。它的默认模版与 `execute` **除一级
+ * 标题外逐字相同**（"# 编排任务" vs "# 任务"），校验白名单也完全相同——也就是说它
+ * 从来没有承载过任何独立语义，只是"编排想单独被交代"这一种可能性。
+ *
+ * 使用者 2026-11 拍板：**合并**。理由与那两档的真实差别一致——**是不是编排发起的
+ * 与"这段话该说什么"无关**：编排的节点也是"派一件事给它做"，把关者也是（它的判据
+ * 写在它自己的「指令」里）。想给编排的 agent 单独交代，办法是那条流程的**任务书**
+ * 与那个 agent 的**指令**，不是再开一档模版。
+ *
+ * ⚠️ 老数据：`Workspace.workflowTemplate` / `workflowIdentityTemplate` /
+ *   `workflowTaskTemplate` 三个键**留在协议里**（老记录要读得出来），但**没有代码再读
+ *   它们**——与你之前几轮（`reviewTemplate`、`role`、`allowedActions`）同一处置：
+ *   读时容忍、不再写。真改过编排模版的人，那份内容不会再被投递（见 D131 的说明）。
+ *
+ * ⚠️ 更早的 `'review'` 档随审核 run 一起退场（D125）。
  */
+export type FirstSentenceKind = 'execute' | 'chat'
 
 /**
  * 这条 run 用哪一份三块模版——**唯一判据**。
@@ -171,21 +187,17 @@ export type FirstSentenceKind = 'execute' | 'chat' | 'workflow'
  * ⚠️ 判据**只看 run 种类与 subject 类型**，不看 agent、不看技能、不看 prompt 内容：
  *    同一类 subject 永远同一份模版，否则"这条 run 到底被交代了什么"要靠猜。
  */
-export function firstSentenceKindFor(
-  run: {
-    kind: 'execute'
-    subject: { type: string }
-  },
-  opts?: {
-    /**
-     * ★ 2026-11 编排链路：这个 run 是编排（issue source = workflow）发起的。
-     * 编排的 agent 用**编排模版**（框架 + 身份 + 任务；审核 run 的任务 =
-     * 被审产出，不加组跑那套审核任务书包装）——调用方（执行器）查 issue 来源后传入。
-     */
-    workflow?: boolean
-  },
-): FirstSentenceKind {
-  if (opts?.workflow === true) return 'workflow'
+export function firstSentenceKindFor(run: {
+  kind: 'execute'
+  subject: { type: string }
+}): FirstSentenceKind {
+  /*
+   * ⚠️ 2026-11（D131）：这里原来还有一个 `opts.workflow` 入参（编排发起的 run ⇒ 用
+   *  `'workflow'` 那一档）。两档合并之后它没有存在的意义了——"是不是编排发起的"
+   *  与"这段话该说什么"无关：编排的节点也是派活。
+   *  ⚠️ 那一段判定（顺着 issue / run 查 `source.kind === 'workflow'`）也一起从执行器
+   *  删掉了：留着它就是一段"算出来没人用"的死代码。
+   */
   // 对话与沉淀：说话，不是派活（下一轮的回答还在同一个 subject 里接着往下说）
   // ★ 第 243 批：`memory-tidy` 也是"跟装着技能的智能体说话"——整理记忆与沉淀同理，
   //   用的是聊天那份框架（任务那份含报告要求与判决契约，灌进来是错的）。
@@ -399,7 +411,7 @@ export interface TemplateVariable {
  *   不会报错，只会**静默漏掉**它——表现为界面上一个页签点下去就报"kind 必须是
  *   execute 或 review"。
  */
-export const ALL_KINDS = ['execute', 'chat', 'workflow'] as const
+export const ALL_KINDS = ['execute', 'chat'] as const
 const EXECUTE_ONLY = ['execute'] as const
 
 /**
@@ -584,26 +596,13 @@ export const DEFAULT_TEMPLATES: Record<FirstSentenceKind, BlockTemplates> = {
     task: '{{task}}',
   },
 
-  /**
-   * ★ 编排链路（2026-11）：框架/身份/任务三框——默认与 execute 同结构（编排的
-   * agent 一样在自己的工作目录里干活、一样有身份与任务）；审核 run 的「任务」
-   * = 被审产出（由平台组装进 task 块，不加组跑那套审核任务书）。
+  /*
+   * ⚠️ 2026-11（D131）：这里原来还有第三档 `workflow`（编排专用），默认与 `execute`
+   *   **除一级标题（# 编排任务）外逐字相同** ⇒ 与 execute 合并、整档删掉。
+   *   理由写在 `FirstSentenceKind` 上面那段：**是不是编排发起的，与"这段话该说什么"
+   *   无关**。想给编排的 agent 单独交代，办法是那条流程的**任务书**与那个 agent 的
+   *   **指令**。
    */
-  workflow: {
-    frame: [
-      '# 编排任务',
-      '',
-      '- run：`{{runId}}`',
-      '',
-      '{{#skills}}',
-      '能用到的技能：{{skills}}',
-      '{{/skills}}',
-      '',
-      '请用{{language}}回答。',
-    ].join('\n'),
-    identity: '{{identity}}',
-    task: '{{task}}',
-  },
 
   /*
    * ⚠️ 2026-11（D125）：这里原来是 `review` 那一份默认模版（「# 审核任务」+ 公共裁判
@@ -623,7 +622,7 @@ export type TemplateCheck = { ok: true } | { ok: false; error: string }
 /** 缺少必需变量时要说清"缺了会怎样"——只报错不解释，人会去猜。 */
 const MISSING_REASON: Record<string, string> = {
   task:
-    '它装的是**这次要干的事**（执行=任务正文；聊天=使用者那句话；审核=指令 + 材料/文件引用）。少了它，这条 run 就没有任务——执行没有要做的活、审核没有要审的东西、聊天没有要答的话',
+    '它装的是**这次要干的事**（任务=要做的那件事；聊天=使用者那句话）。少了它，这条 run 就没有内容——任务没有要做的活、聊天没有要答的话',
 }
 
 /** mustache 的 token：[类型, 名字/文本, 起点, 终点, 子 token?, …]。 */
@@ -678,10 +677,13 @@ function walkTokens(
   }
 }
 
+/**
+ * 报错文案里的档名。**与界面上那个页签名一致**（2026-11，D131："执行" 改叫「任务」）：
+ * 报错里说"执行模版"、界面上写着"任务"，人会以为说的是两样东西。
+ */
 function kindName(kind: FirstSentenceKind): string {
   if (kind === 'chat') return '聊天'
-  if (kind === 'workflow') return '编排'
-  return '执行'
+  return '任务'
 }
 
 function blockName(block: TemplateBlock): string {
@@ -780,11 +782,9 @@ export function validateTemplate(
         const ownerKinds = owner?.kinds.filter((k) => k !== kind) ?? []
         if (owner && ownerKinds.length > 0) {
           const why =
-            kind === 'execute' || kind === 'workflow'
-              ? '执行/编排 run 没有待审核的内容与判决契约'
-              : kind === 'chat'
-                ? '聊天那一轮没有待审核的内容与判决契约'
-                : '这里没有它的值'
+            kind === 'chat'
+              ? '聊天那一轮没有待审核的内容与判决契约'
+              : '任务 run 没有待审核的内容与判决契约'
           problems.push(
             `\`{{${value}}}\` 只属于${ownerKinds.map(kindName).join(' / ')}模版——${why}`,
           )
@@ -923,7 +923,7 @@ function renderTemplate(template: string, values: Record<string, string>): strin
  * 只有"每轮都一样、且由模版决定位置"的东西留在这里。身份（②）与任务（③）
  * 已经不由模版插值了——见 `TEMPLATE_VARIABLES` 上面那段。
  */
-function frameValues(input: FirstSentenceInput, workflow = false): Record<string, string> {
+function frameValues(input: FirstSentenceInput): Record<string, string> {
   const values: Record<string, string> = {
     runId: input.runId,
     subjectType: input.subject.type,
@@ -1023,11 +1023,14 @@ export function isBlankBlock(text: string): boolean {
  * 不可能——设置页保存时就拦了），宁可让 run 明确失败并说清原因，也不要渲染出半截
  * 文本——那会表现成"模型乱答"，排查方向会指向模型。
  */
-export function buildBlocks(input: FirstSentenceInput, defaultKind?: FirstSentenceKind): DeliveryBlocks {
+export function buildBlocks(input: FirstSentenceInput): DeliveryBlocks {
   const custom = input.template ?? {}
-  // ★ 2026-11 编排：workflow run 的 input 仍是 execute 形状（kind 字段），但空模板
-  //   的默认要取**编排**那份（# 编排任务）——由调用方用 defaultKind 指定。
-  const defaults = DEFAULT_TEMPLATES[defaultKind ?? input.kind]
+  /*
+   * ⚠️ 2026-11（D131）：这里原来还有一个 `defaultKind` 入参——编排 run 的 input 仍是
+   *   execute 形状，而空模板要回落到**编排**那份默认（# 编排任务），所以执行器把它
+   *   显式传进来。两档合并 ⇒ 没有第二份默认可回落，参数删掉。
+   */
+  const defaults = DEFAULT_TEMPLATES[input.kind]
   const blocks: DeliveryBlocks = { frame: '', identity: '', task: '' }
   for (const block of TEMPLATE_BLOCKS) {
     const written = custom[block]?.trim()
@@ -1038,7 +1041,7 @@ export function buildBlocks(input: FirstSentenceInput, defaultKind?: FirstSenten
     }
     const values =
       block === 'frame'
-        ? frameValues(input, defaultKind === 'workflow')
+        ? frameValues(input)
         : block === 'identity'
           ? { identity: identityBlock(input) }
           : { task: taskBlock(input) }
@@ -1122,9 +1125,8 @@ export function deliveredBytes(delivery: Pick<Delivery, 'system' | 'user'>): str
 export function renderDelivery(
   input: FirstSentenceInput,
   mode: DeliveryMode,
-  defaultKind?: FirstSentenceKind,
 ): Delivery {
-  const blocks = buildBlocks(input, defaultKind)
+  const blocks = buildBlocks(input)
   if (mode === 'A') {
     const system = [blocks.frame, blocks.identity].filter((b) => !isBlankBlock(b)).join('\n\n')
     return { mode, system, user: blocks.task, blocks }
@@ -1287,5 +1289,4 @@ export const SAMPLE_FIRST_SENTENCE_INPUTS: Record<FirstSentenceKind, FirstSenten
   execute: SAMPLE_EXECUTE_INPUT,
   chat: SAMPLE_CHAT_INPUT,
   // 编排链路：样例复用执行那份（结构同：框架+身份+任务）
-  workflow: SAMPLE_EXECUTE_INPUT,
 }
