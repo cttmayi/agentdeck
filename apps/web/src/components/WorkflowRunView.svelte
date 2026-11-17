@@ -26,6 +26,7 @@
   } from '../lib/run-status.ts'
   import { agents, issues } from '../lib/stores.ts'
   import { go } from '../lib/view.ts'
+  import { loopRounds, needsFetch, runCardBody } from '../lib/workflow-cards.ts'
   import RunLog from './RunLog.svelte'
   import WorkDirTree from './WorkDirTree.svelte'
 
@@ -88,7 +89,16 @@
    *   **loop 的 runIds 是成对的**——`[执行1, 把关1, 执行2, 把关2, …]`（引擎在
    *   `while (attempt <= maxRounds)` 里先执行再把关）。不再有任何反查。
    */
-  /** 执行 run 的状态（completed 才认为"写完了"——流式部分产出不算）。 */
+  /**
+   * 每个 run 的**状态**（`GET /api/runs/:id` 的 `status`）。
+   *
+   * ⚠️ 2026-11（使用者："loop 的审核 agent 显示不出来"那一次）：这张表的取值规则
+   *   改过——原来只给"步骤里最后一个 runId"取，而且**取过就短路**，于是它是
+   *   **死快照**：执行 run 在"它还最新"的那几拍被取成 `running`，把关 run 一提交它
+   *   就不再刷新 ⇒ 而把关者那一行的条件是"执行 run 已 `completed`" ⇒ **永不成立**
+   *   ⇒ 审核 agent 那一行永远不出现。
+   *   现在：**按 run 取数、非终态继续刷**（判据见 `lib/workflow-cards.ts`）。
+   */
   let execStatuses: Record<string, string> = {}
   /**
    * 每个 run 是哪个人跑的（`GET /api/runs/:id` 的 `agentId`）。
@@ -101,6 +111,53 @@
 
   function lastRunId(st: WorkflowStep): string | null {
     return st.runIds.length > 0 ? st.runIds[st.runIds.length - 1]! : null
+  }
+
+  /**
+   * 一个步骤里**要画几个 agent 卡片**：loop 按轮（执行 / 把关）拆，并行/汇总
+   * 每个子 run 一张，其它步骤就是它自己那一条 run。
+   *
+   * ⚠️ 使用者的要求（2026-11）："Agent 已启动在卡片中显示出来……不要 Agent 之间
+   *   有依赖关系"。所以这里只回答"有哪些 run"，**不**回答"哪个能显示"——
+   *   显示不显示由每条 run 自己的状态与产出决定（`runCardBody`），兄弟之间互不影响。
+   */
+  function agentRows(
+    st: WorkflowStep,
+  ): Array<{ runId: string; role: 'exec' | 'guard' | 'sub'; round: number }> {
+    if (st.kind === 'loop') {
+      return loopRounds(st.runIds).flatMap((r, i) => {
+        const rows: Array<{ runId: string; role: 'exec' | 'guard' | 'sub'; round: number }> = [
+          { runId: r.exec, role: 'exec', round: i },
+        ]
+        // 把关 run 一提交就上卡片——**不**等执行 run 的状态（那是跨 agent 的依赖）
+        if (r.guard !== null) rows.push({ runId: r.guard, role: 'guard', round: i })
+        return rows
+      })
+    }
+    if ((st.kind === 'parallel' || st.kind === 'aggregate') && st.runIds.length > 1) {
+      return st.runIds.map((runId) => ({ runId, role: 'sub' as const, round: 0 }))
+    }
+    const rid = lastRunId(st)
+    return rid === null ? [] : [{ runId: rid, role: 'sub', round: 0 }]
+  }
+
+  /** 一条 run 的卡片正文：原文 / 「（正在跑…）」/「（还没有产出）」。 */
+  function runBody(runId: string, role: 'exec' | 'guard' | 'sub'): string {
+    const kind = runCardBody(execStatuses[runId], outputs[runId])
+    if (kind === 'text') return outputs[runId]!
+    if (kind === 'running') {
+      return role === 'guard' ? $t('workflows.loopReviewing') : $t('workflows.stepWorking')
+    }
+    return $t('workflows.noOutput')
+  }
+
+  /** 一条 run 的卡片标题：真 agent 名字；取不到就按角色退回通用说法（不编名字）。 */
+  function runTitle(runId: string, role: 'exec' | 'guard' | 'sub'): string {
+    const name = agentNameOfRun(runId)
+    if (name !== null) return name
+    if (role === 'guard') return $t('workflows.loopGuardLabel')
+    if (role === 'exec') return $t('workflows.loopExecLabel')
+    return runId.slice(-8)
   }
   function stepOutput(st: WorkflowStep): string | null {
     const rid = lastRunId(st)
@@ -123,12 +180,6 @@
     return expandedSeq === null && (st.status === 'running' || st.status === 'waiting-human')
   }
 
-  /**
-   * loop 步骤的「轮」：`step.runIds` 两两配对（执行者、把关者）。
-   *
-   * ⚠️ 奇数个 runId（理论上：引擎在把关者抛错时不会留下半对）时，最后那一轮只有
-   *   执行者——如实按半轮渲染，不硬凑一个空把关者。
-   */
   /** 某个 run 是哪个 agent 跑的（找不到就 null——调用方退回通用说法）。 */
   function agentNameOfRun(rid: string | null): string | null {
     if (rid === null) return null
@@ -137,64 +188,55 @@
     return $agents.find((a) => a.id === id)?.name ?? null
   }
 
-  function loopRounds(st: WorkflowStep): Array<{ exec: string; guard: string | null }> {
-    const out: Array<{ exec: string; guard: string | null }> = []
-    for (let i = 0; i < st.runIds.length; i += 2) {
-      out.push({ exec: st.runIds[i]!, guard: st.runIds[i + 1] ?? null })
-    }
-    return out
-  }
-
   async function refresh(): Promise<void> {
     try {
       const out = await api<{ run: WorkflowRun }>(`/api/workflow-runs/${runId}`)
       run = out.run
       error = ''
-      // 步骤输出：只取没缓存过的 runId（轮询 2s 一次，避免重复拉同一 run）
-      for (const st of run.steps) {
-        const rid = lastRunId(st)
-        if (!rid || outputs[rid]) continue
-        void (async () => {
-          try {
-            // ★ 用 messages 的最后一条 text——与任务详情页同一条规矩（run 对象的
-            //   result 永远 null：executor 的 #finish 只把 result 发 SSE，不落库）
-            const d = await api<{ messages: Array<{ type: string; content: string }> }>(
-              `/api/runs/${rid}/messages`,
-            )
-            const texts = (d.messages ?? []).filter(
-              (m) => m.type === 'text' && m.content.trim() !== '',
-            )
-            const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
-            if (last) outputs = { ...outputs, [rid]: last }
-          } catch {
-            // 单步取数失败不阻塞整体刷新
-          }
-        })()
-      }
-      // ★ 执行 run 的**状态**（独立加载——流式部分产出 ≠ 完成，审查员行要等
-      //   completed）。⚠️ 不能挂在 outputs 的 `continue` 后面：第一轮产出缓存过
-      //   之后 status 就永远不加载了（实测踩过：审核员行消失）。
-      for (const st of run.steps) {
-        const rid = lastRunId(st)
-        if (!rid || execStatuses[rid] !== undefined) continue
-        void (async () => {
-          try {
-            // ⚠️ GET /api/runs/<id> 返回 run 对象**本身**（不是 { run } 包装）
-            const d = await api<{ status: string; agentId?: string }>(`/api/runs/${rid}`)
-            execStatuses = { ...execStatuses, [rid]: d.status }
-            if (typeof d.agentId === 'string') {
-              runAgentIds = { ...runAgentIds, [rid]: d.agentId }
-            }
-          } catch {
-            // 单步取数失败不阻塞整体刷新
-          }
-        })()
-      }
-      /*
-       * ⚠️ 2026-11（S5）：这里原来还有一段"每轮执行 run 反查审查 run，再取审查意见
-       *   正文"。把关者现在是普通 run、且**就在 `step.runIds` 里** ⇒ 上面那段
-       *   "步骤输出"的循环已经把它一起取了（`outputs[rid]`）。这里不需要第二次。
+      /**
+       * 每个 run 的状态 + 产出：**按 run 取**，判据在 `lib/workflow-cards.ts#needsFetch`。
+       *
+       * 使用者 2026-11 定的模型："Agent 已启动在卡片中显示出来，一直接受文字消息
+       * 并显示，直到最后结束。不要 Agent 之间有依赖关系。" 落到实处就是这三条：
+       *
+       *   · **取所有 runId**（不是只有最后一个）——loop 的 `[执行1, 把关1, 执行2, …]`
+       *     每一步都要有数，否则前面几轮的卡片永远是空的；
+       *   · **非终态就继续刷**——文字是一直长出来的，取一次就停等于把实时显示变成快照；
+       *   · **终态且已有产出就不再拉**（跑完的产出不会变），只在"终态但还没有产出"时补一次。
+       *
+       * ⚠️ 两条取数**必须一起做**：只看产出判"要不要取数"是老 bug 的一半
+       *   （产出缓存住之后状态就再也不加载，把关者那一行永远等不到 `completed`）。
        */
+      const seen = new Set<string>()
+      for (const st of run.steps) {
+        for (const rid of st.runIds) {
+          if (seen.has(rid)) continue
+          seen.add(rid)
+          if (!needsFetch(execStatuses[rid], outputs[rid] !== undefined)) continue
+          void (async () => {
+            try {
+              // ⚠️ GET /api/runs/<id> 返回 run 对象**本身**（不是 { run } 包装）
+              const d = await api<{ status: string; agentId?: string }>(`/api/runs/${rid}`)
+              execStatuses = { ...execStatuses, [rid]: d.status }
+              if (typeof d.agentId === 'string') {
+                runAgentIds = { ...runAgentIds, [rid]: d.agentId }
+              }
+              // ★ 用 messages 的最后一条 text——与任务详情页同一条规矩（run 对象的
+              //   result 永远 null：executor 的 #finish 只把 result 发 SSE，不落库）
+              const m = await api<{ messages: Array<{ type: string; content: string }> }>(
+                `/api/runs/${rid}/messages`,
+              )
+              const texts = (m.messages ?? []).filter(
+                (x) => x.type === 'text' && x.content.trim() !== '',
+              )
+              const last = texts.length > 0 ? texts[texts.length - 1]!.content : ''
+              if (last) outputs = { ...outputs, [rid]: last }
+            } catch {
+              // 单条 run 取数失败不阻塞整体刷新（下一拍会重试——非终态仍在 needsFetch 里）
+            }
+          })()
+        }
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
     }
@@ -374,45 +416,31 @@
                   <div class="wf-out-body">
                     <p class="wf-out-gate">"{st.gateText}"</p>
                   </div>
-                {:else if st.kind === 'loop'}
-                  <!-- ★ 2026-11 每个 Agent 一个显示：loop 按轮拆成「写作员产出」
-                       与「审查员意见」两块——每个 Agent 的输出独立成框（默认限高，
-                       太长内部滚动），不再压成一个「评审返工」卡 -->
+                {:else}
+                  <!--
+                    ══ 每个 run 一张卡片（2026-11 使用者定稿）══
+                    "Agent 已启动在卡片中显示出来，一直接受文字消息并显示，直到最后结束。
+                     不要 Agent 之间有依赖关系，这样就不存在相互影响。"
+
+                    所以这里**不再有跨 run 的条件**（原来 loop 的把关者行要等"执行 run
+                    已 completed"，那是 Agent 之间的依赖，也正是审核 agent 一直显示不出来
+                    的那一半原因）：
+
+                      · 画哪些行 —— `agentRows(st)`：loop 按轮拆（执行 / 把关），并行与汇总
+                        每个子 run 一行，其它步骤就它自己那一条；
+                      · 每行画什么 —— `runBody(runId, role)`：**只看这条 run 自己**的
+                        状态与产出（有文字画文字；非终态还没吐字画「（正在跑…）」；
+                        终态且确实没有才画「（还没有产出）」）；
+                      · 名字 —— 这条 run 真正的 agent 名字，取不到按角色退回通用说法。
+                  -->
                   <ol class="wf-loop-rounds">
-                    {#each loopRounds(st) as round (round.exec)}
+                    {#each agentRows(st) as row (row.runId)}
                       <li class="wf-round">
-                        <div class="wf-round-tag">
-                          {agentNameOfRun(round.exec) ?? $t('workflows.loopExecLabel')}
-                        </div>
-                        <div class="wf-round-box">
-                          {outputs[round.exec] ?? $t('workflows.stepWorking')}
-                        </div>
-                        {#if round.guard !== null && execStatuses[round.exec] === 'completed'}
-                          <!--
-                            ★ 2026-11（统一模型 + S5）：只有 agent 把关（带审核者）才有
-                            把关者行；gate 把关（人在 loop 卡内确认）没有——显示"（审查中…）"
-                            是误导。执行者还没跑完时也**不显示**（否则会出现"执行中、
-                            审核员已审查中"的提前出现，使用者实测）。
-                          -->
-                          <div class="wf-round-tag">
-                            {agentNameOfRun(round.guard) ?? $t('workflows.loopGuardLabel')}
-                          </div>
-                          <div class="wf-round-box">
-                            {outputs[round.guard] ?? $t('workflows.loopReviewing')}
-                          </div>
-                        {/if}
+                        <div class="wf-round-tag">{runTitle(row.runId, row.role)}</div>
+                        <div class="wf-round-box">{runBody(row.runId, row.role)}</div>
                       </li>
                     {/each}
                   </ol>
-                {:else}
-                  <div class="wf-out-body">
-                    <p class="wf-out-text">
-                      {stepOutput(st) ??
-                        (st.status === 'running' || st.status === 'pending'
-                          ? (st.kind === 'parallel' ? $t('workflows.parallelRunning') : $t('workflows.stepWorking'))
-                          : $t('workflows.noOutput'))}
-                    </p>
-                  </div>
                 {/if}
 
                 {#if isExpanded(st) && lastRunId(st)}
