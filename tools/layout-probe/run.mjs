@@ -1129,6 +1129,41 @@ const CHECKS = [
       'S4/D127 角色退场；+ 配套技能 meeting-notes-format + 「未经验证」提示）',
     ok: (v) => v === true,
   },
+  // ── 编排生成者（D135）：与上面那一族同构，产物换成编排 ──
+  {
+    view: '聊天',
+    key: 'chat.workflowMakerButtonShows',
+    label:
+      '★ 2026-11（D135）：`workflow-draft/workflow-draft.md` 写好之后栏头出现「确认采纳编排」'
+      + '（条件出现、不置灰——没草稿就没有按钮），左栏同时有那条对话',
+    ok: (v) => v === true,
+  },
+  {
+    view: '聊天',
+    key: 'chat.workflowMakerPanel',
+    label:
+      '★★ 采纳面板是**可改的**：编排名与说明填好了、代码在**编辑器**里（行号 + 原语着色），'
+      + '且草稿里那层 ```js 围栏已经剥掉（剥不掉 ⇒ 采纳时必报语法错）',
+    ok: (v) =>
+      !!v &&
+      v.编排名填好 === true &&
+      v.说明填好 === true &&
+      v.围栏已剥掉 === true &&
+      v.代码在 === true &&
+      v.行号 >= 1 &&
+      v.原语着色 >= 1 &&
+      v.行高一致 === true,
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '聊天',
+    key: 'chat.workflowMakerAdopt',
+    label:
+      '★★★ 点「采纳」真的落库：面板关掉，编排列表里多出这一条且 `source: ai`'
+      + '（这条铁律没变——生成者只起草，落库是人按的那一下）',
+    ok: (v) => !!v && v.关掉面板 === true && v.落库 === true && v.来源ai === true,
+    show: (v) => JSON.stringify(v),
+  },
   {
     view: '任务',
     key: 'tasks.deleteButtonPerRow',
@@ -1727,15 +1762,43 @@ const CHECKS = [
   {
     view: '编排',
     key: 'workflows.pageActions',
+    /**
+     * ⚠️ 2026-11（D135）：这一排从两颗变成**三颗**——中间多了一颗「AI 生成…」（ghost）。
+     *   它必须在顶栏、必须是 ghost（主操作只有一颗 primary，两颗 primary 就没有主次）；
+     *   顺序（新建 → AI 生成 → 刷新）也是判据：动作按"先做新东西、再做工具"排。
+     */
     label:
-      '★★ 页面动作在**顶栏**、主操作是 primary（新建 / 刷新）——与任务 / 智能体 / 沉淀 / 定时任务'
-      + '同一格同一款；这一页原来把「新建」摆在左栏栏头里',
+      '★★ 页面动作在**顶栏**：主操作 primary（新建）→「AI 生成…」(ghost) → 刷新，'
+      + '与任务 / 智能体 / 沉淀 / 定时任务同一格同一款；这一页原来把「新建」摆在左栏栏头里',
     ok: (v) =>
       Array.isArray(v) &&
-      v.length === 2 &&
+      v.length === 3 &&
       v[0].label === '新建' &&
       v[0].primary === true &&
-      v[1].label === '刷新',
+      v[1].label === 'AI 生成…' &&
+      v[1].primary === false &&
+      v[2].label === '刷新',
+    show: (v) => JSON.stringify(v),
+  },
+  {
+    view: '编排',
+    key: 'workflows.aiGenerateJump',
+    /**
+     * ★★ 2026-11（D135）：点「AI 生成…」⇒ 落到聊天页的**起草态**，且执行者已经选中
+     *   「编排生成者（内置）」。
+     *
+     * ⚠️ 探到过真缺陷：第一版只把意图写进 store、由 `startDrafting()` 去读，于是
+     *   **有历史对话的机器**上点它只会落在旧对话上（界面上什么都不报，就是没反应）。
+     *   所以判据不只量"跳过去了"，还要量"真的在起草、真的选中了那条内置岗位"。
+     */
+    label:
+      '★★★ 点「AI 生成…」⇒ 聊天页**起草态** + 执行者已选中「编排生成者（内置）」'
+      + '（第一版只写意图不切起草态 ⇒ 有历史对话的机器上点了没反应）',
+    ok: (v) =>
+      !!v &&
+      v['落到聊天页'] === true &&
+      v['起草态'] === true &&
+      v['选中生成者'] === true,
     show: (v) => JSON.stringify(v),
   },
   {
@@ -5523,6 +5586,15 @@ function writeFakeGenericCli() {
       'PROBE_MAKER_EOF',
       `    printf '{"type":"text","text":"岗位卡已写入 agent-draft.md。"}\\n'`,
       '    exit 0 ;;',
+      // ★ 2026-11（D135 编排生成者）：带编排记号 ⇒ 把编排草稿写进 `$PWD/workflow-draft/`。
+      //   与上面那条同一个道理（heredoc 引号带 EOF ⇒ `$` 不展开）。
+      `  *${PROBE_WORKFLOW_MARKER}*)`,
+      `    mkdir -p "$PWD/workflow-draft"`,
+      `    cat > "$PWD/workflow-draft/workflow-draft.md" <<'PROBE_WFLOW_EOF'`,
+      PROBE_WORKFLOW_DRAFT_MD,
+      'PROBE_WFLOW_EOF',
+      `    printf '{"type":"text","text":"编排草稿已写入 workflow-draft.md。"}\\n'`,
+      '    exit 0 ;;',
       '  *) echo "agent-cli: 探针假 CLI 只服务起草那一屏（其余 run 保持"跑不起来"的原样）" >&2; exit 127 ;;',
       'esac',
       '',
@@ -5582,6 +5654,31 @@ const PROBE_MAKER_SKILL_MD = [
   '1. decisions 每行一条',
   '2. owners 每行一条',
   '3. deadlines 每行一条',
+  '',
+].join('\n')
+
+/**
+ * ★ 2026-11（编排生成者，D135）：假 CLI 的**编排草稿**分支。
+ *
+ * 与上面生成者那条同构：prompt 里带记号 ⇒ 在 `$PWD` 下写
+ * `workflow-draft/workflow-draft.md`（frontmatter `name`/`summary` + 正文代码），
+ * 正文**故意包在 ```js 围栏里**——那是模型最常见的写法，顺带把"解析时剥围栏"
+ * 这条也量上（剥不掉的话采纳时会报语法错，而看着像校验坏了）。
+ *
+ * ⚠️ 代码里引用的智能体名字必须是探针 daemon 上**真实存在**的那条
+ *    （`探针用的执行者`，run.mjs 里造的夹具）——否则采纳会 400 `unknown_agent`，
+ *    而探针量的是"人改完能不能采纳"，不是"校验有没有拦"。
+ */
+const PROBE_WORKFLOW_MARKER = 'PROBE-WORKFLOW-DRAFT'
+const PROBE_WORKFLOW_DRAFT_MD = [
+  '---',
+  'name: 探针两段流水线',
+  'summary: 先记账再复核（探针夹具）',
+  '---',
+  '',
+  '```js',
+  "await flow([agent('探针用的执行者')], '{{task}}')",
+  '```',
   '',
 ].join('\n')
 

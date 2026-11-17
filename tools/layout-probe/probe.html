@@ -3806,6 +3806,52 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
          *   "编排的运行在任务页里看得见"这件事，由任务页那几条（分组 + 行）继续守着。
          */
 
+        // ⑪ ★★ 2026-11（D135）：「AI 生成…」这条入口**真的能走到**起草态
+        //
+        // 量三件事，缺一条这条入口就等于不存在：
+        //   ① 落到聊天页（`#/chat`）；
+        //   ② 落在**起草态**（右栏栏头是「新建对话」、`#chat-agent` 在下拉里）——
+        //      第一版只在 `startDrafting()` 里读意图，有历史对话的机器上点它只会
+        //      打开旧对话：页面上什么都不报，就是没反应；
+        //   ③ 执行者已经选中「编排生成者（内置）」（`#chat-agent` 的值 = 那条内置岗位）。
+        facts['workflows.aiGenerateJump'] = await (async () => {
+          const btn = [...d().querySelectorAll('.topbar .page-actions button')].find(
+            (b) => (text(b) ?? '').trim() === 'AI 生成…',
+          )
+          if (!btn) {
+            errors.push('编排页顶栏找不到「AI 生成…」')
+            return null
+          }
+          const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const maker = agents.find((a) => a.builtinKind === 'workflow-maker')
+          if (!maker) {
+            errors.push('启动对账没建出编排生成者（workflow-maker）')
+            return null
+          }
+          click(btn)
+          const jumped = await until(
+            () => f.contentWindow.location.hash.includes('/chat'),
+            60,
+          )
+          if (!jumped) errors.push('点了「AI 生成…」没有跳到聊天页')
+          // 起草态：右栏栏头是「新建对话」，且执行者下拉在
+          const drafting = await until(
+            () => (text(d().querySelector('.detail-pane .pane-head h2')) ?? '').includes('新建对话'),
+            60,
+          )
+          if (!drafting) errors.push('点了「AI 生成…」落在聊天页，但**不在起草态**（旧对话被打开了）')
+          const sel = d().querySelector('#chat-agent')
+          const picked = sel === null ? null : sel.value
+          if (picked !== `agent:${maker.id}`) {
+            errors.push(`起草态的执行者不是编排生成者（现在是 ${picked ?? '没有下拉'}）`)
+          }
+          return {
+            落到聊天页: jumped,
+            起草态: drafting,
+            选中生成者: picked === `agent:${maker.id}`,
+          }
+        })()
+
         // ── 关于（2026-11 立项）：版本 · 环境 · 边界 ──
         f.contentWindow.location.hash = '#/about'
         await until(() => text(d().querySelector('.page-name')) === '关于')
@@ -10007,6 +10053,142 @@ facts['entry.技能'] = { from: f.contentWindow.location.hash, to: '#/skills', w
           if (close) click(close)
           await wait(300)
           return pass
+        })()
+
+        // ══════════════ 编排生成者（D135）：按钮 + 采纳面板 ══════════════
+        /**
+         * ★ 2026-11（D135）：与上面岗位卡那一节**同构**，判据换成编排三件事：
+         *   ① 草稿写到 `workflow-draft/workflow-draft.md` 之后，栏头出现「确认采纳编排」
+         *      （条件出现、不置灰——没草稿就没有按钮）；
+         *   ② 点开是**可改**的面板：编排名 / 一句话说明 / **代码编辑器**（行号 + 着色）；
+         *   ③ 点「采纳」真的落库：面板关掉，`/api/workflows` 里多出这一条（`source: ai`）。
+         *
+         * ⚠️ 假 CLI 那条分支会在正文里**故意**包一层 ```js 围栏（模型最常见的写法），
+         *   所以 ② 能过就说明"解析时剥围栏"这条真的在后面起作用。
+         */
+        const wfMakerButtons = () =>
+          [...d().querySelectorAll('.pane-actions button')].filter((b) =>
+            (text(b) ?? '').includes('确认采纳编排'),
+          )
+
+        facts['chat.workflowMakerButtonShows'] = await (async () => {
+          const agents = (await f.contentWindow.fetch('/api/agents').then((r) => r.json())).agents ?? []
+          const maker = agents.find((a) => a.builtinKind === 'workflow-maker')
+          if (!maker) {
+            errors.push('找不到内置编排生成者（workflow-maker）')
+            return false
+          }
+          // 与智能体生成者同一条：它内置的 runtimeKey 是 'default'（这台探针 daemon 上是
+          // 真 claude）。要让它真跑一轮、把草稿写进工作目录，得先改挂 generic（= 假 agent-cli）。
+          const patched = await f.contentWindow.fetch(
+            `/api/agents/${encodeURIComponent(maker.id)}`,
+            {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ runtimeKey: 'generic' }),
+            },
+          )
+          if (!patched.ok) {
+            errors.push(`把编排生成者改挂 generic 失败（HTTP ${patched.status}）——这条会空过`)
+            return false
+          }
+          const newBtn = [...d().querySelectorAll('.topbar .page-actions button')].find((b) =>
+            (text(b) ?? '').includes('新建对话'),
+          )
+          if (!newBtn) {
+            errors.push('聊天页顶栏没有「新对话」——走不了编排生成者那条真实路径')
+            return false
+          }
+          click(newBtn)
+          await wait(300)
+          const sel = d().querySelector('#chat-agent')
+          if (!sel) {
+            errors.push('点了「新对话」没有出现执行者下拉')
+            return false
+          }
+          const opt = [...sel.querySelectorAll('option')].find(
+            (o) => o.getAttribute('value') === `agent:${maker.id}`,
+          )
+          if (!opt) {
+            errors.push('编排生成者不在新对话下拉里（它应该和智能体生成者一样能聊天）')
+            return false
+          }
+          sel.value = opt.getAttribute('value')
+          sel.dispatchEvent(new Event('change', { bubbles: true }))
+          await wait(250)
+          const input = d().querySelector('.detail-pane [data-composer] .composer-input')
+          const send = d().querySelector('.detail-pane [data-composer-send]')
+          if (!input || !send) {
+            errors.push('选了编排生成者之后没有输入条（ChatComposer 没渲染）')
+            return false
+          }
+          input.value = '探针：编排生成\nPROBE-WORKFLOW-DRAFT 帮我写个流水线'
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          await wait(60)
+          send.click()
+          const deadline = Date.now() + 12000
+          for (;;) {
+            if (wfMakerButtons().length > 0) break
+            if (Date.now() > deadline) {
+              errors.push('编排生成者跑完也没等到「确认采纳编排」按钮（run 没到终态？）')
+              return false
+            }
+            await wait(100)
+          }
+          const row = [...d().querySelectorAll('.list-pane .list-row-main')].find((b) =>
+            (text(b) ?? '').includes('探针：编排生成'),
+          )
+          if (!row) errors.push('左栏没有编排生成者那条对话（列表没刷新？）')
+          return true
+        })()
+
+        facts['chat.workflowMakerPanel'] = await (async () => {
+          const btn = wfMakerButtons()[0]
+          if (!btn) {
+            errors.push('没有「确认采纳编排」按钮可点')
+            return null
+          }
+          click(btn)
+          const opened = await until(() => !!d().querySelector('.modal .editor'), 60)
+          if (!opened) {
+            errors.push('点了「确认采纳编排」没有弹出采纳面板（或面板里没有代码编辑器）')
+            return null
+          }
+          const modal = d().querySelector('.modal')
+          const inputs = [...modal.querySelectorAll('input')].map((i) => i.value)
+          const ed = modal.querySelector('.editor')
+          const hl = ed.querySelector('.hl')
+          const ta = ed.querySelector('textarea')
+          return {
+            编排名填好: inputs.includes('探针两段流水线'),
+            说明填好: inputs.includes('先记账再复核（探针夹具）'),
+            围栏已剥掉: !(ta.value ?? '').includes('```'),
+            代码在: (ta.value ?? '').includes('flow('),
+            行号: ed.querySelectorAll('.gutter span').length,
+            原语着色: ed.querySelectorAll('.hl .tok-primitive').length,
+            行高一致: hl && ta ? getComputedStyle(hl).lineHeight === getComputedStyle(ta).lineHeight : false,
+          }
+        })()
+
+        facts['chat.workflowMakerAdopt'] = await (async () => {
+          const modal = d().querySelector('.modal')
+          if (!modal) return null
+          const adopt = [...modal.querySelectorAll('button')].find(
+            (b) => (text(b) ?? '').trim() === '确认采纳编排' && !b.disabled,
+          )
+          if (!adopt) {
+            errors.push('采纳面板里没有可点的「确认采纳编排」主按钮')
+            return null
+          }
+          click(adopt)
+          const closed = await until(() => !d().querySelector('.modal .editor'), 80)
+          const list = (await f.contentWindow.fetch('/api/workflows').then((r) => r.json())).items ?? []
+          const created = list.find((w) => w.name === '探针两段流水线')
+          if (!created) errors.push('采纳之后编排列表里没有这一条（写动作没落库？）')
+          else if (created.source !== 'ai') {
+            errors.push(`采纳出来的编排 source 应该是 ai，实际是 ${created.source}`)
+          }
+          return { 关掉面板: closed, 落库: !!created, 来源ai: created?.source === 'ai' }
         })()
 
         // ★ 发布一次当前事实（跑不完时 dump 里也能看到跑到哪一段了）

@@ -406,6 +406,22 @@
   $: activeOrDrafting = drafting || activeConversation !== null
 
   onMount(() => {
+    /*
+     * ★ 2026-11（D135）：带着"跟某个内置生成者聊"的意图进来的（编排页「AI 生成…」）
+     *   ⇒ **直接进起草态**，别再打开上一轮那个对话。
+     *
+     * ⚠️ 第一版只在 `startDrafting()` 里读这个意图，于是"有历史对话的机器"上点了
+     *   「AI 生成…」只会落在**旧对话**上——意图一直挂着，直到使用者自己手点
+     *   「新对话」才生效。那正是"入口在、但没有代码路径让它发生"这一类缺陷：
+     *   页面上什么都不报错，只是没反应。
+     */
+    if (get(pickChatAgentIntent) !== null) {
+      void (async () => {
+        if ($conversations.length === 0) await loadConversations()
+        startDrafting()
+      })()
+      return
+    }
     void (async () => {
       if ($conversations.length === 0) await loadConversations()
       const current = $activeConversationId

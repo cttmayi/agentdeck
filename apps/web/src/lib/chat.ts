@@ -87,16 +87,30 @@ export type DraftPick = {
  * 时，优先它，否则取列表里第一个（那条规则在这里，不在界面里）。
  *
  * ⚠️ 判据是**内置岗位**（2026-11，S4/D127 之前是角色）：用户建的 agent 一律能聊天；
- *    内置的那几个只放行 `agent-maker`（它的全部工作就是聊天：问五字段、规则由它描述、
- *    产出岗位卡）。起草者 / 记忆整理 / 沉淀审核者不放行——它们按素材写文件或整理东西，
- *    聊天对它们没有意义。
+ *    内置的那几个只放行**聊天型岗位**（`CHAT_CAPABLE_BUILTIN_KINDS`：智能体生成者、
+ *    编排生成者——它们的全部工作就是"在聊天里问清楚、产出草稿"）。起草者 / 记忆整理 /
+ *    沉淀审核者不放行——它们按素材写文件或整理东西，聊天对它们没有意义。
  *
- *    判据写**等值**（`kind === null || kind === 'agent-maker'`），不写 `kind !== …`
- *    ——后者会把将来新增的内置岗位悄悄漏进来。那些岗位身上挂的 skill 因此也不算"有主"。
+ *    判据写**等值集合**（`kind === null || CHAT_CAPABLE_BUILTIN_KINDS.includes(kind)`），
+ *    不写 `kind !== …`——后者会把将来新增的内置岗位悄悄漏进来。那些岗位身上挂的
+ *    skill 因此也不算"有主"。
+ *
+ * ⚠️ 2026-11（D135）：漏掉「编排生成者」是一个真缺陷——反例：探针从编排页点
+ *   「AI 生成…」进到起草态，`draftChoice` 指向它，而它不在选项里 ⇒ 下拉**显示为空**、
+ *   发出去的那一轮用的是别人。判据与 daemon 的 `CHAT_CAPABLE_BUILTINS` 必须同步。
  *
  * ⚠️ 一个能聊的 agent 都没有时**不给 skill 选项**：那些选项最后都要落到某个人身上，
  *    而没有人的时候选了就是个空头承诺（界面这时候该说的是"先去建一个执行者"）。
  */
+/**
+ * 能聊天的**内置岗位**（2026-11，D127 / D135）。
+ *
+ * ⚠️ 与 daemon 的 `CHAT_CAPABLE_BUILTINS`（`apps/daemon/src/server.ts`）是同一份口径，
+ *    必须一起改：那边放行、这边不给选项 ⇒ 界面上"它明明能聊却选不到"；反过来
+ *    ⇒ 选得到、发出去被 400 打回。两处都写**等值集合**，不写"不是起草者"这种排除式。
+ */
+export const CHAT_CAPABLE_BUILTIN_KINDS = ['agent-maker', 'workflow-maker'] as const
+
 export function executorChoices(
   agents: readonly Agent[],
   skills: readonly Skill[],
@@ -113,11 +127,13 @@ export function executorChoices(
   canCarrySkills: boolean,
 ): ExecutorChoice[] {
   /*
-   * 能聊天的是：所有**用户建的** agent，加上内置的「智能体生成者」。
-   * 写等值（`kind === null || kind === 'agent-maker'`），不写 `kind !== 'drafter'`。
+   * 能聊天的是：所有**用户建的** agent，加上内置的**聊天型岗位**
+   * （`CHAT_CAPABLE_BUILTIN_KINDS`）。写等值集合，不写 `kind !== 'drafter'`。
    */
   const executors = agents.filter(
-    (agent) => agent.builtinKind === undefined || agent.builtinKind === 'agent-maker',
+    (agent) =>
+      agent.builtinKind === undefined ||
+      (CHAT_CAPABLE_BUILTIN_KINDS as readonly string[]).includes(agent.builtinKind),
   )
   const choices: ExecutorChoice[] = executors.map((agent) => ({
     value: `agent:${agent.id}`,

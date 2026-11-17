@@ -121,6 +121,24 @@ describe('新对话的下拉：skill 是执行者的另一条入口', () => {
     assert.equal(out2.some((c) => c.value === 'agent:t1'), false, '记忆整理者不能出现在下拉里')
   })
 
+  test('★★ 2026-11（D135）：编排生成者（workflow-maker）也要在下拉里——漏了它是真缺陷', () => {
+    /*
+     * 反例是探针量到的：从编排页点「AI 生成…」进起草态时 `draftChoice` 指向编排生成者，
+     * 而它不在选项里 ⇒ 下拉**显示为空**（`select.value` 变成空串），人看到的是一格
+     * "谁都不像"的空下拉。它与智能体生成者是同一类岗位（工作就是聊天、产出草稿），
+     * 所以判据也走同一份等值集合。
+     */
+    const withWf = [...executors, agent('w1', '编排生成者（内置）', [], 'workflow-maker')]
+    const out = executorChoices(withWf, skills, null, true)
+    assert.equal(out.some((c) => c.value === 'agent:w1'), true, '编排生成者要在下拉里')
+    // 起草者仍然进不来（集合是**只能**往里加的那一份，不是"所有内置")
+    const withDrafter2 = [...executors, agent('d1', '起草者（内置）', [], 'drafter')]
+    assert.equal(
+      executorChoices(withDrafter2, skills, null, true).some((c) => c.value === 'agent:d1'),
+      false,
+    )
+  })
+
   test('多个执行者挂了同一个 skill：优先平台默认执行者，否则取列表里第一个', () => {
     const both = [agent('a1', '助手', ['s1']), agent('a2', '算法艺术', ['s1'])]
     const val = (preferred: string | null) =>
