@@ -112,6 +112,10 @@ export const workflowsText = {
   /** loop 卡每行名字后面那一小句：第几轮、是执行还是把关。 */
   'workflows.loopExecMeta': { zh: '第 {n} 轮 · 执行', en: 'round {n} · run' },
   'workflows.loopGuardMeta': { zh: '第 {n} 轮 · 把关', en: 'round {n} · guard' },
+  /** 轮次容器的标题（卡片嵌套：步骤卡 → 轮次卡 → Agent 卡）。 */
+  'workflows.loopRound': { zh: '第 {n} 轮', en: 'Round {n}' },
+  /** 流水线 / 并行里每一级的序号（`2/3`）。 */
+  'workflows.stageMeta': { zh: '第 {i}/{n} 步', en: 'step {i}/{n}' },
   /**
    * 每张 Agent 卡片右上角那颗「日志」按钮（2026-11 使用者定稿）：
    * "卡片内部右上角有一个按钮来决定是否要展开日志……这样并行多个 Agent 的时候，

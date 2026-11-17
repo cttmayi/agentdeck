@@ -227,3 +227,206 @@ export function stepExpanded(
   if (isStepTerminal(status)) return false
   return status === 'running' || status === 'waiting-human'
 }
+
+/* ══════════════════════════════════════════════════════════════════
+ * 卡片树：把「一条编排 run 的一个步骤」拼成**可嵌套的卡片**
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * 使用者 2026-11："你先考虑卡片模块化的问题……因为有流程嵌套，也要支持卡片嵌套。"
+ *
+ * 所以界面不再由主流程挑"画几行"，而是先由这里把数据**拼成一棵树**，
+ * 再由 `components/workflow/CardNode.svelte` 递归渲染。一件事一个出口：
+ *   · 这张卡是什么类型、里面有哪些子卡 —— `buildCards`（纯函数、有单测）；
+ *   · 卡片展不展开、日志开不开 —— **卡片自己**（组件局部状态，见 RunCard / ContainerCard）。
+ *
+ * ⚠️ 数据现状：引擎产出的步骤是**扁平**的（嵌套原语把 `owner` 往下传，步骤不再分层），
+ *    所以"嵌套"要从**步骤原型 + run 的顺序**推导：
+ *      · `loop` 的 `runIds` 两两成对 ⇒ 每个"执行 + 把关"是一轮（RoundCard）；
+ *      · 轮的把关若是 `gate`（人确认）⇒ 那一位没有 run ⇒ 挂一张 GateCard；
+ *      · 其它原型（flow / parallel / route / 单 agent）⇒ 每条 run 一张 RunCard。
+ *    引擎哪天显式记录嵌套了，只改这个函数：界面（CardNode）不用动。
+ */
+
+/** 卡片树里的一个节点（四种卡，见 `CardNode.svelte`）。 */
+export type CardNode =
+  | {
+      kind: 'step'
+      key: string
+      title: string
+      /** 步骤原型（`flow` / `loop` / …）——卡头上那个灰框小标签 */
+      stepKind: string
+      /** `WorkflowStep.status`（pending / running / done / failed / waiting-human / skipped） */
+      status: string
+      /** 卡头右侧那个短 runId（流水线最后一级那条）。 */
+      runId: string | null
+      /** 收起时那块多行预览（`stepPreview` 的结果）。 */
+      preview: string
+      children: CardNode[]
+    }
+  | {
+      kind: 'round'
+      key: string
+      /** 「第 N 轮」 */
+      title: string
+      status: string
+      children: CardNode[]
+    }
+  | {
+      kind: 'run'
+      key: string
+      runId: string
+      /** 这个 agent 的名字（取不到时由调用方给通用说法） */
+      name: string
+      /** 例如「第 1 轮 · 执行」「流水线 2/3」 */
+      meta: string
+      /** `Run.status`（queued / running / completed / failed / cancelled …） */
+      status: string
+      /** 正文：最新一段文字；空串 = 还没有 */
+      text: string
+      /** 非终态 ⇒ 正文末尾画一个"还在收"的光标 */
+      streaming: boolean
+    }
+  | {
+      kind: 'gate'
+      key: string
+      /** 等人确认的那句文案 */
+      text: string
+    }
+
+/** 构建卡片树要用到的查表（都由视图从轮询结果里拼好传进来）。 */
+export interface CardLookups {
+  /** 这条 run 的状态（`undefined` = 还没取到） */
+  statusOf: (runId: string) => string | undefined
+  /** 这条 run 的最新一段文字 */
+  outputOf: (runId: string) => string | undefined
+  /** 这条 run 的 agent 名字 */
+  nameOf: (runId: string) => string | null
+  /** 文案（i18n 从调用方传，纯函数不碰 `$t`） */
+  text: {
+    stepWorking: string
+    noOutput: string
+    loopReviewing: string
+    roundTitle: (n: number) => string
+    execMeta: (n: number) => string
+    guardMeta: (n: number) => string
+    stageMeta: (i: number, total: number) => string
+    execLabel: string
+    guardLabel: string
+  }
+}
+
+/** 一条 run 卡片（正文/状态/名字都按**这一条 run 自己**算，不看兄弟） */
+function runNode(
+  runId: string,
+  role: 'exec' | 'guard' | 'sub',
+  meta: string,
+  look: CardLookups,
+): CardNode {
+  const status = look.statusOf(runId)
+  const output = look.outputOf(runId)
+  const body = runCardBody(status, output)
+  const text =
+    body === 'text'
+      ? output!
+      : body === 'running'
+        ? role === 'guard'
+          ? look.text.loopReviewing
+          : look.text.stepWorking
+        : look.text.noOutput
+  const name = look.nameOf(runId) ?? (role === 'guard' ? look.text.guardLabel : role === 'exec' ? look.text.execLabel : runId.slice(-8))
+  return {
+    kind: 'run',
+    key: `run:${runId}`,
+    runId,
+    name,
+    meta,
+    status: status ?? 'queued',
+    text,
+    streaming: !isRunTerminal(status),
+  }
+}
+
+/**
+ * 一条步骤 → 一棵卡片树。
+ *
+ * @param step 引擎记录的步骤（`seq` 稳定 ⇒ 卡片 key 稳定 ⇒ 展开状态在 2s 轮询里留得住）
+ */
+export function buildCards(
+  step: {
+    seq: number
+    kind: string
+    label: string
+    status: string
+    gateText: string | null
+    runIds: readonly string[]
+  },
+  look: CardLookups,
+): CardNode {
+  const children: CardNode[] = []
+
+  if (step.kind === 'loop') {
+    const rounds = loopRounds(step.runIds)
+    rounds.forEach((r, i) => {
+      const roundChildren: CardNode[] = [
+        runNode(r.exec, 'exec', look.text.execMeta(i + 1), look),
+      ]
+      if (r.guard !== null) {
+        roundChildren.push(runNode(r.guard, 'guard', look.text.guardMeta(i + 1), look))
+      }
+      const isLast = i === rounds.length - 1
+      // 轮的把关是 gate（人确认）⇒ 这一位没有 run：挂一张 GateCard 在**这一轮**里
+      if (isLast && r.guard === null && step.gateText !== null && step.gateText !== '') {
+        roundChildren.push({ kind: 'gate', key: `gate:${step.seq}`, text: step.gateText })
+      }
+      children.push({
+        kind: 'round',
+        key: `round:${step.seq}:${i}`,
+        title: look.text.roundTitle(i + 1),
+        // 这一轮的状态：轮到它（最后一行且步骤还没完）就跟随步骤，否则已完成
+        status: isLast ? step.status : 'done',
+        children: roundChildren,
+      })
+    })
+    // 一步都没跑、但已经在等人确认（比如 gate 直接挂在 loop 外）——兜底也挂一张
+    if (rounds.length === 0 && step.gateText !== null && step.gateText !== '') {
+      children.push({ kind: 'gate', key: `gate:${step.seq}`, text: step.gateText })
+    }
+  } else if (step.kind === 'gate') {
+    children.push({ kind: 'gate', key: `gate:${step.seq}`, text: step.gateText ?? '' })
+  } else {
+    // flow / parallel / route / 单 agent：每条 run 一张卡
+    const total = step.runIds.length
+    step.runIds.forEach((rid, i) => {
+      const meta =
+        step.kind === 'flow'
+          ? look.text.stageMeta(i + 1, total)
+          : step.kind === 'parallel'
+            ? look.text.stageMeta(i + 1, total)
+            : ''
+      children.push(runNode(rid, 'sub', meta, look))
+    })
+  }
+
+  const summaryId = stepSummaryRunId(step)
+  const out = summaryId === null ? undefined : look.outputOf(summaryId)
+  const perRun = summaryId === null ? undefined : look.statusOf(summaryId)
+  const preview =
+    step.kind === 'gate'
+      ? `"${step.gateText ?? ''}"`
+      : out !== undefined && out.trim() !== ''
+        ? stepPreview(out).text
+        : isRunTerminal(perRun)
+          ? look.text.noOutput
+          : look.text.stepWorking
+
+  return {
+    kind: 'step',
+    key: `step:${step.seq}`,
+    title: step.label,
+    stepKind: step.kind,
+    status: step.status,
+    runId: summaryId,
+    preview,
+    children,
+  }
+}

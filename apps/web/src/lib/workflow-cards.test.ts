@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   TERMINAL_RUN_STATUSES,
+  buildCards,
   isRunTerminal,
   logExpanded,
   loopRounds,
@@ -162,5 +163,63 @@ describe('编排运行画面：每个 run 一张卡片', () => {
     // 人点过：一律听人的（展开一个**不许**影响别的步骤）
     assert.equal(stepExpanded(true, 'done'), true)
     assert.equal(stepExpanded(false, 'waiting-human'), false)
+  })
+
+  test('★★ 卡片树：loop 的两轮 → 两个 RoundCard，各含执行/把关；gate 把关挂 GateCard', () => {
+    const st = (id: string) => ({ e1: 'completed', g1: 'completed', e2: 'running' })[id]
+    const look = {
+      statusOf: st as (id: string) => string | undefined,
+      outputOf: (id: string) => `out-${id}`,
+      nameOf: (id: string) => `agent-${id}`,
+      text: {
+        stepWorking: '跑着', noOutput: '没产出', loopReviewing: '把关中',
+        roundTitle: (n: number) => `第${n}轮`,
+        execMeta: (n: number) => `E${n}`, guardMeta: (n: number) => `G${n}`,
+        stageMeta: (i: number, t: number) => `${i}/${t}`,
+        execLabel: '执行者', guardLabel: '把关者',
+      },
+    }
+    // 三个 run：[执行1, 把关1, 执行2] ⇒ 两轮；第二轮把关还没提交
+    const loop = buildCards(
+      { seq: 0, kind: 'loop', label: '把关循环', status: 'running', gateText: null, runIds: ['e1', 'g1', 'e2'] },
+      look,
+    )
+    assert.equal(loop.kind, 'step')
+    // ⚠️ `CardNode` 是联合类型：断言成容器再取 children（类型层面也不许瞎取）
+    const step = loop as Extract<typeof loop, { children: unknown[] }>
+    assert.equal((loop as any).children.length, 2, '两个轮次卡')
+    const r1: any = (step as any).children[0]
+    assert.equal(r1.kind, 'round')
+    assert.deepEqual(r1.children.map((c: any) => c.kind), ['run', 'run'])
+    assert.equal(r1.children[0].meta, 'E1')
+    assert.equal(r1.children[1].meta, 'G1')
+    const r2: any = (step as any).children[1]
+    assert.equal(r2.status, 'running', '最后一轮跟随步骤状态')
+    assert.equal(r2.children.length, 1, '第二轮的把关还没提交 ⇒ 只有执行')
+
+    // gate 把关（人不产生 run）：[exec] + gateText ⇒ 一轮 + 一张 GateCard
+    const withGate = buildCards(
+      { seq: 1, kind: 'loop', label: '把关循环', status: 'waiting-human', gateText: '可以发了吗', runIds: ['e1'] },
+      look,
+    )
+    const round: any = ((withGate as any).children ?? [])[0]
+    assert.deepEqual(round.children.map((c: any) => c.kind), ['run', 'gate'])
+    assert.equal(round.children[1].text, '可以发了吗')
+
+    // flow：每条 run 一张卡（流水线的每一级）
+    const flow = buildCards(
+      { seq: 2, kind: 'flow', label: '流水线', status: 'done', gateText: null, runIds: ['a', 'b', 'c'] },
+      look,
+    )
+    const flowKids: any[] = (flow as any).children ?? []
+    assert.equal(flowKids.length, 3)
+    assert.equal(flowKids[1].meta, '2/3')
+
+    // gate 步骤：只有一张 GateCard
+    const gate = buildCards(
+      { seq: 3, kind: 'gate', label: '确认', status: 'waiting-human', gateText: '好了吗', runIds: [] },
+      look,
+    )
+    assert.deepEqual(((gate as any).children ?? []).map((c: any) => c.kind), ['gate'])
   })
 })
