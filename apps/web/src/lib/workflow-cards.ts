@@ -161,16 +161,16 @@ export function logExpanded(
  *
  * 所以这里返回的是**多行**文本（不是第一行 + 省略号），由界面用 `white-space: pre-wrap`
  * 换行显示。两个上限各管一件事：
- *   · `maxLines`（默认 3）：一屏里可能有好几步，预览太长会把列表撑散；
- *   · `maxChars`（默认 180）：Markdown 里一句话可以很长，光按行数限不住高度。
+ *   · `maxLines`（默认 12）：**滚动条**是给人"多看几行"用的，所以这里多留一些；
+ *   · `maxChars`（默认 1200）：Markdown 里一句话可以很长，光按行数限不住体量。
  *
  * 截断时在末尾补 `…`（并如实标 `truncated: true`）——**不静默截**：
  * 收起的卡头只是入口，完整内容在展开后的正文里。
  */
 export function stepPreview(
   output: string | undefined,
-  maxLines = 3,
-  maxChars = 180,
+  maxLines = 12,
+  maxChars = 1200,
 ): { text: string; truncated: boolean } {
   if (output === undefined) return { text: '', truncated: false }
   const all = output.replace(/\r\n/g, '\n').split('\n')

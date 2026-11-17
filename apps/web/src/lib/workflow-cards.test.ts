@@ -126,20 +126,25 @@ describe('编排运行画面：每个 run 一张卡片', () => {
       '## 风险',
       '1. 编排页规范重排与 run 视图改动同一天合并可能互相踩。',
     ].join('\n')
-    const p = stepPreview(out)
+    const p = stepPreview(out, 3)
     // 前 3 行（含空行——Markdown 靠它分段），且没有"只取第一行"
     assert.equal(p.text.split('\n')[0], '# 周报（第 2 版）')
     // 第三行也在（多行预览），末尾补一个省略号表示"后面还有"
     assert.ok(p.text.split('\n')[2]!.startsWith('本周完成：编排页按规范重排'))
     assert.equal(p.truncated, true, '还有后面的行 ⇒ 如实标"截了"')
     assert.ok(p.text.endsWith('…'))
+    // 默认给得多（靠滚动条看）——十几行都留着，只截超出部分
+    const many = Array.from({ length: 20 }, (_, i) => `第 ${i + 1} 行`).join('\n')
+    const bulk = stepPreview(many)
+    assert.equal(bulk.text.split('\n').length, 12, '默认留 12 行（其余靠滚动条看更多）')
+    assert.equal(bulk.truncated, true)
     // 短输出：原样、不截
     assert.deepEqual(stepPreview('短'), { text: '短', truncated: false })
-    // 单行超长：按字数截（按行数限不住高度）
-    const long = 'x'.repeat(500)
+    // 单行超长：按字数截（按行数限不住体量）
+    const long = 'x'.repeat(2000)
     const cut = stepPreview(long)
     assert.equal(cut.truncated, true)
-    assert.equal(cut.text.length, 181, '180 字 + 一个省略号')
+    assert.equal(cut.text.length, 1201, '1200 字 + 一个省略号')
     // 没有产出 / 只有空白
     assert.deepEqual(stepPreview(undefined), { text: '', truncated: false })
     assert.deepEqual(stepPreview('\n\n  \n'), { text: '', truncated: false })

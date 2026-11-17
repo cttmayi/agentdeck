@@ -411,30 +411,36 @@
             {#each [...run.steps].sort((a, b) => a.seq - b.seq) as st (st.seq)}
               <li class="wf-out {st.status === 'running' ? 'on' : ''}">
                 <button type="button" class="wf-out-head" onclick={() => toggleStep(st.seq)}>
-                  <span class="wf-out-main">
-                    <span class="wf-out-line">
-                      <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
-                      <!--
-                        ★ 2026-11 使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"。
-                        卡头原来只有**状态**（完成 / 进行中），看不出这一步是哪种原语。
-                        加一个**类型**小标签：与状态徽标刻意长得不一样（状态彩色带圆点、
-                        类型灰框无圆点），否则会被读成"把关循环是一种状态"。
-                      -->
-                      <span class="wf-out-kind">{$t(workflowStepKindKey(st.kind))}</span>
-                      <span class="wf-out-label">{st.label}</span>
-                    </span>
+                  <span class="wf-out-line">
+                    <span class="badge {workflowStepStatusClass(st.status)}">{$t(workflowStepStatusKey(st.status))}</span>
                     <!--
-                      ★ 2026-11 使用者："需求多放几行，也建议换行显示"——
-                      这里是**多行、可换行**的产出预览（`white-space: pre-wrap`），
-                      不是"一行 + 省略号"。收起时卡头就是这张卡的全部内容。
+                      ★ 2026-11 使用者："比如执行 LOOP，当前的卡片就看不出来是 LOOP"。
+                      卡头原来只有**状态**（完成 / 进行中），看不出这一步是哪种原语。
+                      加一个**类型**小标签：与状态徽标刻意长得不一样（状态彩色带圆点、
+                      类型灰框无圆点），否则会被读成"把关循环是一种状态"。
                     -->
-                    <span class="wf-out-result">{resultSummary(st)}</span>
-                  </span>
-                  <span class="wf-out-run mono faint">{lastRunId(st) ? lastRunId(st)!.slice(-8) : ''}</span>
-                  <span class="wf-out-toggle">
-                    {isExpanded(st) ? '▾ ' + $t('workflows.collapse') : '▸ ' + $t('workflows.expand')}
+                    <span class="wf-out-kind">{$t(workflowStepKindKey(st.kind))}</span>
+                    <span class="wf-out-label">{st.label}</span>
+                    <span class="wf-out-run mono faint">{lastRunId(st) ? lastRunId(st)!.slice(-8) : ''}</span>
+                    <span class="wf-out-toggle">
+                      {isExpanded(st) ? '▾ ' + $t('workflows.collapse') : '▸ ' + $t('workflows.expand')}
+                    </span>
                   </span>
                 </button>
+                {#if !isExpanded(st)}
+                  <!--
+                    ★ 收起态：这块就是"往下交的那份产出"的**多行预览**——
+                      使用者 2026-11："需求多放几行，也建议换行显示"、"还是用滚动条，
+                      可以多看几行"、"点『展开过程』就需要隐藏这几行"。
+                    所以：
+                      · 换行（`pre-wrap`）、超长也能断（`anywhere`）；
+                      · **自己滚**（`overflow-y: auto`，高度约 6 行），行给得多（12 行 /
+                        1200 字），超出的靠滚 —— 而不是截成一行；
+                      · 展开后**整块不画**：正文里已经是同一份内容，画两遍是噪音。
+                    ⚠️ 预览放在按钮**外面**：滚动区套在 `<button>` 里，滚轮和点击会互相打架。
+                  -->
+                  <div class="wf-out-preview">{resultSummary(st)}</div>
+                {/if}
 
                 {#if st.status === 'waiting-human' && st.gateText}
                   <!-- ★ 2026-11（统一模型）确认面板：gate 卡与 loop 把关 gate
@@ -635,19 +641,13 @@
   .wf-out-head:hover {
     background: var(--surface-hover);
   }
-  /* 卡头左半边：第一行是「状态 + 类型 + 步骤名」，下面是**多行预览** */
-  .wf-out-main {
+  /* 卡头那一行：状态 + 类型 + 步骤名，右侧是 runId 与展开开关 */
+  .wf-out-line {
     flex: 1;
     min-width: 0;
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .wf-out-line {
-    display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 0;
   }
   .wf-out-label {
     min-width: 0;
@@ -657,18 +657,22 @@
     font-weight: 600;
   }
   /*
-   * ★ 预览：**多行、可换行**（使用者 2026-11："需求多放几行。也建议换行显示"）。
+   * ★ 收起态的产出预览：**多行 + 换行 + 自己滚**（使用者 2026-11）。
    *   `pre-wrap` 保住换行，`overflow-wrap: anywhere` 让超长的中文/URL 也断得开
    *   ——只写 `break-word` 时，一整串没有空格的串仍会撑出界。
+   *   高度约 6 行、超出**滚动**：给的行数（12 行 / 1200 字）比显示的多，就是为了
+   *   "多看几行"这件事由滚动条承担，而不是截断成一行。
    */
-  .wf-out-result {
+  .wf-out-preview {
+    margin: 0 12px 10px;
+    padding: 2px 8px;
+    border-left: 2px solid var(--line-strong);
     color: var(--text-faint);
-    font-weight: 400;
     font-size: var(--fs-sm);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    max-height: calc(1.5em * 4);
-    overflow: hidden;
+    max-height: calc(1.5em * 6);
+    overflow-y: auto;
   }
 
   .wf-out-run {
